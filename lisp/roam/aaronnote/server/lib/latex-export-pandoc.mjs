@@ -124,6 +124,7 @@ function validateLatexMark(command, lineText, context = {}) {
 }
 
 function transformInlineCommands(line, options, context = {}) {
+  line = stripPrivateCommandsFromLinkLabels(line);
   const protectedRanges = protectedInlineRanges(line);
   const commands = scanInlineCommands(line)
     .filter((command) => !protectedRanges.some((range) => command.fullFrom >= range.from && command.fullFrom < range.to))
@@ -136,7 +137,7 @@ function transformInlineCommands(line, options, context = {}) {
     out += line.slice(cursor, command.fullFrom);
     if (command.name === "scomment") out += rawLatexInline(`\\sidecomment{${convertInline(command.context, options)}}`);
     else if (command.name === "revision") out += rawLatexInline(revisionLatex(command, options));
-    else if (isDisplayCommentCommand(command)) out += rawLatexInline(`\\aaroncomment{${convertInline(command.context, options)}}`);
+    else if (command.name === "comment") out += rawLatexInline(`\\aaroncomment{${convertInline(command.context, options)}}`);
     else if (command.name === "cite") {
       const citation = citeLatex(command, options);
       if (!citation) {
@@ -157,6 +158,19 @@ function transformInlineCommands(line, options, context = {}) {
     cursor = command.fullTo;
   }
   return out + line.slice(cursor);
+}
+
+function stripPrivateCommandsFromLinkLabels(line) {
+  return String(line || "").replace(/(!?\[)([^\n]*)\]\(/g, (whole, open, label) => {
+    const commands = scanInlineCommands(label)
+      .filter((command) => PRIVATE_INLINE.has(command.name) && !isDisplayCommentCommand(command));
+    let result = String(label);
+    for (let index = commands.length - 1; index >= 0; index -= 1) {
+      const command = commands[index];
+      result = result.slice(0, command.fullFrom) + result.slice(command.fullTo);
+    }
+    return `${open}${result} ](`.replace(" ](", "](");
+  });
 }
 
 function protectedInlineRanges(line) {

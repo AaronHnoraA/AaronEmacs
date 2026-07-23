@@ -1517,6 +1517,21 @@ y^2
     cleanup();
   });
 
+  test("newline edits patch line-owned block extras without a document rescan", () => {
+    const md = "before\n\n---tail\n\nafter";
+    const { editor, cleanup } = mountCM6(md);
+    const splitAt = md.indexOf("---") + 3;
+
+    editor.view.dispatch({ changes: { from: splitAt, insert: "\n" } });
+    editor.setMarkdownSelection(editor.getMarkdown().length);
+    expect(document.querySelector(".cm-horizontal-rule")).toBeTruthy();
+
+    editor.view.dispatch({ changes: { from: splitAt, to: splitAt + 1 } });
+    editor.setMarkdownSelection(editor.getMarkdown().length);
+    expect(document.querySelector(".cm-horizontal-rule")).toBeNull();
+    cleanup();
+  });
+
   test("renders CM6 toc from document headings and jumps on click", () => {
     const md = "# Title\n\n[toc]\n\n## Child\n\nBody";
     const { editor, cleanup } = mountCM6(md);

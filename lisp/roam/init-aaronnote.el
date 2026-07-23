@@ -208,6 +208,8 @@ the backend.  The backend is chosen here, not per export."
   "Running Aaronnote web-host child process, or nil.")
 (defvar my/aaronnote--port nil
   "HTTP port of the running Aaronnote web-host.")
+(defvar my/aaronnote--last-port nil
+  "Last ready web-host port, retained so a crashed core can reclaim its URL.")
 (defvar my/aaronnote--ready nil
   "Non-nil once the web-host has announced its port.")
 (defvar my/aaronnote--ready-callbacks nil
@@ -406,8 +408,10 @@ failure is diagnosable without hunting for it."
       (setq my/aaronnote--ready-watchdog
             (run-at-time 10 nil #'my/aaronnote--watchdog-fire)))))
 
-(defun my/aaronnote--start-server ()
-  "Spawn the vendored Aaronnote web-host."
+(defun my/aaronnote--start-server (&optional reconnect-port)
+  "Spawn the vendored Aaronnote web-host.
+When RECONNECT-PORT is non-nil, reclaim that port so live browser pages can
+reconnect without a reload and without losing their in-memory editor state."
   (unless (executable-find "node")
     (user-error "Aaronnote: `node' not found in exec-path; install Node.js"))
   (unless (file-directory-p my/aaronnote--web-dir)
@@ -482,7 +486,8 @@ failure is diagnosable without hunting for it."
                        (stringp my/aaronnote-latex-export-model)
                        (not (string-empty-p my/aaronnote-latex-export-model)))
               (format "AARONNOTE_LATEX_EXPORT_MODEL=%s" my/aaronnote-latex-export-model))
-            (format "AARONNOTE_WEB_PORT=%d" my/aaronnote-web-port)
+            (format "AARONNOTE_WEB_PORT=%d"
+                    (or reconnect-port my/aaronnote-web-port 0))
             ;; Emacs-started AaronNote should share Emacs' existing Copilot LS
             ;; through this bridge, not spawn its own memory-heavy second copy.
             "AARONNOTE_COPILOT_DISABLE_LOCAL=1"
@@ -561,6 +566,7 @@ failure is diagnosable without hunting for it."
       (let ((port (string-to-number (substring line (length ready-prefix)))))
         (when (> port 0)
           (setq my/aaronnote--port port
+                my/aaronnote--last-port port
                 my/aaronnote--ready t)
           (my/aaronnote--flush-ready-callbacks))))
      ((string-prefix-p goto-prefix line)
@@ -1278,12 +1284,66 @@ graph tab was closed via the Appine toolbar."
 (defvar my/aaronnote--last-activity-active :unknown
   "Last active-state scheduled by `my/aaronnote--update-activity'.")
 
+(defconst my/aaronnote--core-ready-script
+  "(() => {
+  const connection = window.aaronnoteApi && window.aaronnoteApi.connection;
+  if (!connection || typeof connection.reconnect !== 'function') return false;
+  connection.reconnect('host-ready');
+  return true;
+})()"
+  "JavaScript used to reconnect a retained xwidget page after core restarts.")
+
 (defun my/aaronnote--app-buffer-visible-p ()
   "Return non-nil when the Aaronnote buffer is visible in a focused frame."
   (when (buffer-live-p my/aaronnote--app-buffer)
     (let ((win (get-buffer-window my/aaronnote--app-buffer 'visible)))
       (and win
            (frame-focus-state (window-frame win))))))
+
+(defun my/aaronnote--notify-xwidgets-core-ready ()
+  "Reconnect retained Aaronnote xwidgets after an active core restart."
+  (when (and (fboundp 'xwidget-webkit-current-session)
+             (fboundp 'xwidget-webkit-execute-script))
+    (dolist (buffer (buffer-list))
+      (when (and (buffer-live-p buffer)
+                 (my/aaronnote--xwidget-buffer-p buffer))
+        (with-current-buffer buffer
+          (when-let* ((session (ignore-errors
+                                 (xwidget-webkit-current-session))))
+            (ignore-errors
+              (xwidget-webkit-execute-script
+               session my/aaronnote--core-ready-script))))))))
+
+(defun my/aaronnote--maybe-reconnect-core-on-activity ()
+  "Restart a disconnected core only while an Aaronnote browser is active.
+This is intentionally called from focus/window activity, never from an idle
+timer or retry loop. The old port is reclaimed so the browser page and its
+unsaved CodeMirror state remain intact."
+  (when (and (buffer-live-p my/aaronnote--app-buffer)
+             (my/aaronnote--app-buffer-visible-p)
+             (not my/aaronnote--ready)
+             (not (and (processp my/aaronnote--process)
+                       (process-live-p my/aaronnote--process)))
+             (integerp my/aaronnote--last-port)
+             (> my/aaronnote--last-port 0))
+    (unless (memq #'my/aaronnote--notify-xwidgets-core-ready
+                  my/aaronnote--ready-callbacks)
+      (push #'my/aaronnote--notify-xwidgets-core-ready
+            my/aaronnote--ready-callbacks))
+    (condition-case err
+        (progn
+          (my/aaronnote--start-server my/aaronnote--last-port)
+          ;; Diagnostic deadline only; it never performs another reconnect.
+          (when my/aaronnote--ready-watchdog
+            (cancel-timer my/aaronnote--ready-watchdog))
+          (setq my/aaronnote--ready-watchdog
+                (run-at-time 10 nil #'my/aaronnote--watchdog-fire)))
+      (error
+       (setq my/aaronnote--ready-callbacks
+             (delq #'my/aaronnote--notify-xwidgets-core-ready
+                   my/aaronnote--ready-callbacks))
+       (message "Aaronnote: active core reconnect failed: %s"
+                (error-message-string err))))))
 
 (defun my/aaronnote--apply-activity (active)
   "Send pause or resume to the browser when the active state changes."
@@ -1322,6 +1382,7 @@ routes to the right session when multiple files are open."
   (let ((cur (current-buffer)))
     (when (my/aaronnote--xwidget-buffer-p cur)
       (setq my/aaronnote--app-buffer cur)))
+  (my/aaronnote--maybe-reconnect-core-on-activity)
   (let ((active (my/aaronnote--app-buffer-visible-p)))
     (unless (eq active my/aaronnote--last-activity-active)
       (setq my/aaronnote--last-activity-active active)

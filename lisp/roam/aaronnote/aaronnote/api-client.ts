@@ -1,4 +1,5 @@
 import type { CursorPosition, GraphPayload, Inbound, SnippetSummary, UnusedAsset } from "./types.ts";
+import type { CoreConnectionStatus, CoreReconnectReason } from "./active-core-reconnect.ts";
 
 type OpenMsg = Extract<Inbound, { type: "open" }>;
 type SavedMsg = Extract<Inbound, { type: "saved" }>;
@@ -407,6 +408,10 @@ export type AgendaMsg = {
   stats?: { open?: number; doing?: number; done?: number; cancelled?: number; blocked?: number; overdue?: number };
 };
 type NativeApi = {
+  connection?: {
+    status?: () => CoreConnectionStatus;
+    reconnect?: (reason?: string) => Promise<boolean>;
+  };
   notes?: {
     bootstrap?: (file?: string) => Promise<unknown>;
     open?: (file: string) => Promise<unknown>;
@@ -635,6 +640,20 @@ async function callHttpApi<T>(channel: string, args: unknown[] = [], fallback = 
 }
 
 export const api = {
+  connection: {
+    supported(): boolean {
+      const connection = window.aaronnoteApi?.connection;
+      return typeof connection?.status === "function" && typeof connection?.reconnect === "function";
+    },
+    status(): CoreConnectionStatus {
+      return window.aaronnoteApi?.connection?.status?.() ?? "connected";
+    },
+    async reconnect(reason: CoreReconnectReason): Promise<boolean> {
+      const call = window.aaronnoteApi?.connection?.reconnect;
+      if (!call) return false;
+      return (await call(reason)) === true;
+    },
+  },
   notes: {
     async bootstrap(file?: string): Promise<OpenMsg> {
       const call = requireMethod(nativeApi().notes?.bootstrap, "Open");

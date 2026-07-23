@@ -480,7 +480,7 @@ describe("LaTeX export", () => {
     expect(result.body).not.toContain("lean4");
   });
 
-  test("omits inline @@comment annotations from exported body", () => {
+  test("exports inline @@comment annotations without leaking command syntax", () => {
     const result = aaronnoteMarkdownToLatex([
       "# Main",
       "",
@@ -493,10 +493,10 @@ describe("LaTeX export", () => {
 
     expect(result.body).toContain("Visible text.");
     expect(result.body).toContain("More text.");
-    expect(result.body).not.toContain("comment");
-    expect(result.body).not.toContain("private annotation");
-    expect(result.body).not.toContain("hidden aside");
+    expect(result.body).not.toContain("a private annotation line");
     expect(result.body).not.toContain("also private");
+    expect(result.body).toContain(String.raw`\aaroncomment{hidden aside}`);
+    expect(result.body).not.toContain("@@comment");
   });
 
   test("exports @@comment(true) as a prominent COMMENT annotation", () => {

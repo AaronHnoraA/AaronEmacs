@@ -7,6 +7,8 @@ import {
   insertExpandedSnippetIntoContentEditable,
   matchingSnippetsForPrefix,
   SnippetSession,
+  SnippetUsageStore,
+  snippetBrowserCompatibility,
   snippetPopupKeyAction,
 } from "../aaronnote/snippets.ts";
 
@@ -118,6 +120,41 @@ describe("aaronnote snippets", () => {
     expect(field2 && expanded.text.slice(field2.from, field2.to)).toBe("thick");
   });
 
+  test("supports portable YAS choices and selected-text wrapping", () => {
+    const choice = expandSnippetBody({
+      key: "style",
+      mode: "tex-mode",
+      body: "${1:$$(yas-choose-value '(\"alpha\" \"beta\"))}$0",
+    });
+    expect(choice.text).toBe("alpha");
+    expect(choice.tabstops.find((stop) => stop.index === 1)?.choices).toEqual(["alpha", "beta"]);
+
+    const wrapped = expandSnippetBody({
+      key: "hat",
+      mode: "tex-mode",
+      body: "\\hat{${1:`(or yas-selected-text \"x\")`}}$0",
+    }, { selectedText: "v" });
+    expect(wrapped.text).toBe("\\hat{v}");
+    expect(snippetBrowserCompatibility("`(message \"unsafe\")`").compatible).toBe(false);
+  });
+
+  test("local usage affects only equal match tiers and can be cleared", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => { values.set(key, value); },
+      removeItem: (key: string) => { values.delete(key); },
+    };
+    const usage = new SnippetUsageStore(storage);
+    const alpha = { id: "a", key: "alpha", mode: "tex-mode", body: "a" };
+    const alpine = { id: "b", key: "alpine", mode: "tex-mode", body: "b" };
+    usage.record(alpine, 1_000);
+    expect(matchingSnippetsForPrefix([alpha, alpine], "al", { usage, now: 1_000 })[0]).toBe(alpine);
+    expect(matchingSnippetsForPrefix([alpha, alpine], "alpha", { usage, now: 1_000 })[0]).toBe(alpha);
+    usage.clear();
+    expect(usage.get(alpine)).toBeUndefined();
+  });
+
   test("expands the emacs-migrated `set` snippet body with a plain tabstop between braces", () => {
     // ~/.config/emacs/snippets/tex-mode/set — body is exactly `\{ $1 \}$2`.
     const expanded = expandSnippetBody({ key: "set", name: "Set", mode: "tex-mode", body: "\\{ $1 \\}$2" });
@@ -165,6 +202,91 @@ describe("aaronnote snippets", () => {
     expect(editor.textBetween(editor.selection.from, editor.selection.to)).toBe("[thick]");
     expect(session.next()).toBe(true);
     expect(editor.textBetween(editor.selection.from, editor.selection.to)).toBe("thick");
+  });
+
+  test("CM6 maps active fields through external edits before the snippet", () => {
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const editor = createEditor(mount, { initialContent: "prefix " });
+    try {
+      editor.setSelection(editor.getMarkdownLength());
+      const session = new SnippetSession(editor);
+      expect(session.insert({ key: "frac", mode: "tex-mode", body: "\\frac{${1:a}}{${2:b}}$0" })).toBe(true);
+      editor.view.dispatch({ changes: { from: 0, insert: "long " } });
+      expect(session.active()).toBe(true);
+      expect(session.next()).toBe(true);
+      const selection = editor.getSelection();
+      expect(editor.textBetween(selection.from, selection.to)).toBe("b");
+    } finally {
+      editor.destroy();
+      mount.remove();
+    }
+  });
+
+  test("CM6 immediately invalidates a session when selection leaves the active field", () => {
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const editor = createEditor(mount);
+    try {
+      const session = new SnippetSession(editor);
+      session.insert({ key: "frac", mode: "tex-mode", body: "\\frac{${1:a}}{${2:b}}$0" });
+      editor.setSelection(editor.getMarkdownLength());
+      expect(session.active()).toBe(false);
+      expect(session.next()).toBe(false);
+    } finally {
+      editor.destroy();
+      mount.remove();
+    }
+  });
+
+  test("field tracking survives the whole-state reset used when opening a note", () => {
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const editor = createEditor(mount);
+    try {
+      // Aaronnote creates the long-lived session before the first note open.
+      const session = new SnippetSession(editor);
+      editor.setMarkdown("\\(frac\\)", { history: "reset" });
+      editor.setSelection("\\(frac".length);
+      session.insert({ key: "frac", mode: "tex-mode", body: "\\frac{${1:a}}{${2:b}}$0" }, 4);
+
+      // Reproduce normal typing: replace the selected default, then append one
+      // character per transaction before invoking Cmd+].
+      let field = editor.getSelection();
+      editor.view.dispatch({ changes: { from: field.from, to: field.to, insert: "a" }, selection: { anchor: field.from + 1 } });
+      for (const char of "sda") {
+        field = editor.getSelection();
+        editor.view.dispatch({ changes: { from: field.from, insert: char }, selection: { anchor: field.from + 1 } });
+      }
+      expect(editor.getMarkdown()).toBe("\\(\\frac{asda}{b}\\)");
+      expect(session.active()).toBe(true);
+      expect(session.next()).toBe(true);
+      field = editor.getSelection();
+      expect(editor.textBetween(field.from, field.to)).toBe("b");
+    } finally {
+      editor.destroy();
+      mount.remove();
+    }
+  });
+
+  test("snippet boundaries are handled without wrapping or falling through", () => {
+    const mount = document.createElement("div");
+    document.body.appendChild(mount);
+    const editor = createEditor(mount);
+    try {
+      const session = new SnippetSession(editor);
+      session.insert({ key: "pair", mode: "tex-mode", body: "${1:a}${2:b}$0" });
+      const first = editor.getSelection();
+      expect(session.previous()).toBe(true);
+      expect(editor.getSelection()).toEqual(first);
+      expect(session.next()).toBe(true);
+      expect(session.next()).toBe(true);
+      expect(session.next()).toBe(true);
+      expect(session.active()).toBe(false);
+    } finally {
+      editor.destroy();
+      mount.remove();
+    }
   });
 
   test("replacing an outer nested placeholder skips stale inner fields", () => {

@@ -1227,14 +1227,8 @@ function canMapBlockExtraRanges(doc: Text, changes: ChangeSet, ranges: BlockExtr
 function canPatchBlockExtraRangesNearChanges(doc: Text, changes: ChangeSet, ranges: BlockExtraRanges): boolean {
   if (changesMightAffectFencedCodeRanges(doc, changes)) return false;
   let canPatch = true;
-  changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+  changes.iterChanges((fromA, toA, _fromB, _toB, _inserted) => {
     if (!canPatch) return;
-    const removed = doc.sliceString(fromA, toA);
-    const added = inserted.toString();
-    if (removed.includes("\n") || added.includes("\n")) {
-      canPatch = false;
-      return;
-    }
     const changedLine = doc.lineAt(Math.min(fromA, doc.length));
     if (changedLine.number <= 2) {
       canPatch = false;
@@ -1276,6 +1270,11 @@ function patchBlockExtraRangesNearChanges(
     toB = Math.max(toB, nextTo);
   });
   if (!Number.isFinite(fromB)) return mapBlockExtraRanges(ranges, changes);
+  // A newline can only split/join the changed source line for these line-owned
+  // ranges (TOC, semantic headings, @@cell commands, and horizontal rules).
+  // Rescanning one neighbouring line on each side covers that structural
+  // reach without turning every Enter press into an O(document) pass. Changes
+  // near front matter are rejected above and still use the full safe scan.
   const startLine = Math.max(1, doc.lineAt(Math.min(fromB, doc.length)).number - 1);
   const endLine = Math.min(doc.lines, doc.lineAt(Math.min(toB, doc.length)).number + 1);
   const affectedFrom = doc.line(startLine).from;
@@ -3971,6 +3970,47 @@ function canMapBlockExtraDecos(state: EditorState, changes: ChangeSet): boolean 
   return true;
 }
 
+function canPatchBlockExtraDecosNearChanges(state: EditorState, changes: ChangeSet): boolean {
+  const ranges = state.field(blockExtraRangesField, false)
+    ?? scanBlockExtraRanges(state.doc, blockExtraExcludedRanges(state));
+  const blocks = state.field(orgEnvBlocksField, false) ?? orgEnvBlocksFromState(state);
+  if (!canPatchBlockExtraRangesNearChanges(state.doc, changes, ranges)) return false;
+  // A boundary edit can alter nesting beyond the local line window.
+  if (!canMapOrgEnvBlocks(state.doc, blocks, changes)) return false;
+  // Whole-block widgets own their body source. Rebuild them only when touched;
+  // ordinary prose and line-owned commands can stay on the bounded path.
+  return !blocks.some((block) => (
+    (block.kind === "meta" || block.kind === "comment" || block.kind === "fold" || block.kind === "html" || block.kind === "tikz")
+    && changesTouchRange(changes, block.from, block.to)
+  ));
+}
+
+function patchBlockExtraDecosNearChanges(
+  state: EditorState,
+  mapped: DecorationSet,
+  changes: ChangeSet,
+): DecorationSet {
+  let fromB = Number.POSITIVE_INFINITY;
+  let toB = 0;
+  changes.iterChanges((_fromA, _toA, nextFrom, nextTo) => {
+    fromB = Math.min(fromB, nextFrom);
+    toB = Math.max(toB, nextTo);
+  });
+  if (!Number.isFinite(fromB)) return mapped;
+  const startLine = Math.max(1, state.doc.lineAt(Math.min(fromB, state.doc.length)).number - 1);
+  const endLine = Math.min(state.doc.lines, state.doc.lineAt(Math.min(toB, state.doc.length)).number + 1);
+  const affectedFrom = state.doc.line(startLine).from;
+  const affectedTo = state.doc.line(endLine).to;
+  const add = buildBlockExtraDecoRanges(state, affectedFrom, affectedTo)
+    // A normal org environment can span the local window while its boundary
+    // decorations live far outside it. Keep those already-mapped decorations
+    // instead of adding duplicates beyond the filtered patch range.
+    .filter((range) => range.from >= affectedFrom && range.to <= affectedTo);
+  return mapped
+    .update({ filterFrom: affectedFrom, filterTo: affectedTo, filter: () => false })
+    .update({ add, sort: true });
+}
+
 function patchBlockExtraDecosForOrgEnvTitleChange(
   state: EditorState,
   mapped: DecorationSet,
@@ -4051,6 +4091,13 @@ const blockExtrasDecorations = StateField.define<DecorationSet>({
           && tocContentSignature(tr.startState) !== tocContentSignature(tr.state)
           ? patchTocWidgetDecos(tr.state, mapped)
           : mapped;
+      }
+      if (canPatchBlockExtraDecosNearChanges(tr.startState, tr.changes)) {
+        const patched = patchBlockExtraDecosNearChanges(tr.state, value.map(tr.changes), tr.changes);
+        return (tr.state.field(blockExtraRangesField, false)?.toc.length ?? 0) > 0
+          && tocContentSignature(tr.startState) !== tocContentSignature(tr.state)
+          ? patchTocWidgetDecos(tr.state, patched)
+          : patched;
       }
       const blocks = tr.startState.field(orgEnvBlocksField, false) ?? orgEnvBlocksFromState(tr.startState);
       const titlePatch = patchOrgEnvBlocksForTitleChange(tr.startState.doc, tr.state.doc, blocks, tr.changes);

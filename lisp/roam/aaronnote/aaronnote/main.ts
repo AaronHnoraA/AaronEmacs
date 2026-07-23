@@ -14,6 +14,7 @@ import { continueMarkdownBlock, exitEmptyMarkdownBlock, indentMarkdownBlock, ind
 import { markdownHrefAt } from "../src/cm6/editor-cm6.ts";
 import { nextGraphemePosition, previousGraphemePosition } from "../src/cm6/text-boundaries.ts";
 import { getBlockMathRanges, rangeAtPosition, rangeOverlapsAny } from "../src/cm6/math-ranges.ts";
+import { jumpStructuralDelimiter } from "../src/cm6/structural-jump.ts";
 import { equationTagsFromText, getEquationTagHits } from "../src/equation-tags.ts";
 import { INLINE_MATH_RE } from "../src/inline-math.ts";
 import { formatMathRenderError, renderMathHTML } from "../src/math-render.ts";
@@ -78,7 +79,15 @@ import {
   roamHrefForNote,
   roamNoteSearchValue,
 } from "./roam-idlink.ts";
-import { matchingSnippetsForPrefix, SnippetSession, snippetDetail, snippetLabel, snippetPopupKeyAction } from "./snippets.ts";
+import {
+  matchingSnippetsForPrefix,
+  SnippetSession,
+  SnippetUsageStore,
+  snippetDetail,
+  snippetLabel,
+  snippetPopupKeyAction,
+} from "./snippets.ts";
+import { MathSnippetIndex } from "./math-snippet-index.ts";
 import {
   citeKeyCompletionContext,
   citeKeyRenderPrefix,
@@ -113,6 +122,7 @@ import {
   createWritingStatsController,
   type WritingStatsController,
 } from "./features/writing-stats/controller.ts";
+import { installActiveCoreReconnect } from "./active-core-reconnect.ts";
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Missing #app");
@@ -698,6 +708,7 @@ let snippetSuppressedPrefix = "";
 let snippetCompletionArmed = false;
 let snippetRenderKey = "";
 let snippetPopupMatchKey = "";
+const snippetUsage = new SnippetUsageStore();
 
 const BUILTIN_SNIPPET_SOURCE = "aaronnote:builtin";
 const LATEX_MARK_SNIPPETS: SnippetSummary[] = latexMarkSnippetDefinitions().map((snippet) => ({
@@ -819,6 +830,7 @@ type ApplyOpenedNoteOptions = {
   resetVim?: boolean;
   reloadNotes?: boolean;
   restoreScroll?: EditorScrollSnapshot | null;
+  preserveSelection?: CursorPosition | null;
 };
 
 async function uploadPasteBlobAsset(
@@ -904,6 +916,29 @@ function setStatus(message: string): void {
     sendImportantStatus(message, severity || "info");
   }
 }
+
+let coreWasDisconnected = api.connection.status() === "disconnected";
+const coreReconnectController = api.connection.supported()
+  ? installActiveCoreReconnect({
+      connection: api.connection,
+      onStatus(status) {
+        if (status === "disconnected") {
+          coreWasDisconnected = true;
+          // Do not mirror this message through the unavailable core.
+          statusLabel.textContent = "Core disconnected — focus, click, or type to reconnect";
+          return;
+        }
+        if (status === "connecting") {
+          if (coreWasDisconnected) statusLabel.textContent = "Reconnecting to core…";
+          return;
+        }
+        if (coreWasDisconnected) {
+          coreWasDisconnected = false;
+          setStatus("Core reconnected");
+        }
+      },
+    })
+  : null;
 
 function setOwnedProseStatus(requestId: number, message: string): void {
   setStatus(message);
@@ -1579,6 +1614,7 @@ document.addEventListener("keydown", (event) => {
   }
 }, { capture: true });
 const snippetSession = new SnippetSession(editor);
+const mathSnippetIndex = new MathSnippetIndex(editor);
 host.addEventListener("aaronnote-assist-update", () => scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true }));
 
 // IME switching for Vim mode (macOS) — fire-and-forget, never blocks keystrokes.
@@ -3139,8 +3175,10 @@ function applyOpenedNote(
   sourceButton.classList.toggle("is-active", editor.isSourceMode());
   slideDeck?.sync(currentKind);
   renderModeToggleLabel(vim.mode());
-  const from = Number(opened.selection?.from ?? remembered?.from);
-  const to = Number(opened.selection?.to ?? remembered?.to ?? from);
+  // During reload, the server selection belongs to the original open/jump
+  // request and must not replace the cursor of this already-open editor.
+  const from = Number(options.preserveSelection?.from ?? opened.selection?.from ?? remembered?.from);
+  const to = Number(options.preserveSelection?.to ?? opened.selection?.to ?? remembered?.to ?? from);
   let shouldRevealCursor = false;
   if (Number.isFinite(from)) {
     const length = editor.getMarkdownLength();
@@ -3247,8 +3285,9 @@ async function reloadCurrentFilePreservingCursor(options: {
             resetVim: false,
             reloadNotes: false,
             restoreScroll: scroll,
+            preserveSelection: position,
           }
-        : { restoreScroll: scroll },
+        : { restoreScroll: scroll, preserveSelection: position },
     );
     if (pendingExternalSave?.file === currentFile) pendingExternalSave = null;
     if (!options.silent) setStatus(currentReadOnly ? "Read-only refreshed" : "Refreshed");
@@ -3318,8 +3357,8 @@ setupCopilot({
   },
   jumpSnippetNext: jumpSnippetTabstop,
   jumpSnippetPrevious: jumpSnippetTabstopBack,
-  forwardDelimiter: () => false,
-  backwardDelimiter: () => false,
+  forwardDelimiter: () => jumpStructuralDelimiter(editor.view, 1),
+  backwardDelimiter: () => jumpStructuralDelimiter(editor.view, -1),
 });
 
 function toggleSourceMode(): void {
@@ -3841,6 +3880,10 @@ function cleanHref(href: string): string {
   return String(href || "").trim();
 }
 
+function isMarginNoteProtocol(protocol: string | null): boolean {
+  return Boolean(protocol && /^marginnote(?:\d+)?(?:app)?$/i.test(protocol));
+}
+
 function hrefPath(href: string): string {
   const raw = cleanHref(href);
   if (!raw) return "";
@@ -4098,6 +4141,12 @@ function openExternalUrl(href: string, options: { newWindow?: boolean } = {}): v
     void api.emacs.systemOpen(raw)
       .then(() => setStatus("Opened Zotero link"))
       .catch((err) => setStatus(err instanceof Error ? err.message : "Failed to open Zotero link"));
+    return;
+  }
+  // MarginNote schemes are Emacs-owned routes; never hand them to the browser.
+  if (isMarginNoteProtocol(protocol)) {
+    void api.emacs.systemOpen(raw, currentFile)
+      .catch((err) => setStatus(err instanceof Error ? err.message : "Failed to open Maginnote link"));
     return;
   }
   if (options.newWindow) {
@@ -6169,6 +6218,16 @@ function toolActions(): ToolAction[] {
     { id: "zotero-import-bibtex", title: "Import Zotero BibTeX", detail: "Use the Zotero picker and append to a local .bib file", run: () => void zoteroImportBibtexTool() },
     { id: "languagetool", title: "LanguageTool", detail: languageToolActionDetail(), run: () => void languageToolSettingsTool() },
     { id: "reload-snippets", title: "Reload snippets", detail: "Refresh Emacs md/tex snippets", run: () => void reloadSnippets() },
+    {
+      id: "reset-snippet-ranking",
+      title: "Reset snippet ranking",
+      detail: "Clear local snippet frequency and recency history",
+      run: () => {
+        snippetUsage.clear();
+        hideToolsPanel();
+        setStatus("Snippet ranking reset");
+      },
+    },
   ];
   return [
     ...common,
@@ -6380,10 +6439,25 @@ function matchingSnippets(
 ): SnippetSummary[] {
   const inMeta = cursorInsideMetaSnippetContext(ctx);
   const inProse = proseSnippetContext(ctx, mode);
-  return matchingSnippetsForPrefix(snippets, prefix, { kind: currentSnippetKind(), mode, limit: 10 })
+  const mathContext = mode === "tex-mode";
+  const commandChannel = mathContext && prefix.startsWith("\\");
+  const atChannel = mathContext && prefix.startsWith("@");
+  const candidates = mathContext
+    ? [...snippets, ...mathSnippetIndex.candidates()]
+    : snippets;
+  return matchingSnippetsForPrefix(candidates, prefix, {
+    kind: currentSnippetKind(),
+    mode,
+    limit: 10,
+    allowFuzzy: commandChannel || atChannel,
+    context: mathContext ? "math" : undefined,
+    usage: snippetUsage,
+    documentFrequency: mathSnippetIndex.frequencies(),
+  })
     .filter((snippet) => {
       if (snippet.context === "org-meta") return inMeta;
       if (snippet.context === "prose") return inProse;
+      if (snippet.context?.startsWith("math")) return mathContext;
       return !inMeta || snippet.context !== "markdown";
     });
 }
@@ -6413,6 +6487,7 @@ function snippetWithSmartBlockBoundaries(snippet: SnippetSummary, deleteBefore: 
 function insertSnippet(snippet: SnippetSummary, deleteBefore = 0): boolean {
   const resolvedSnippet = snippetWithSmartBlockBoundaries(snippet, deleteBefore);
   if (!snippetSession.insert(resolvedSnippet, deleteBefore)) return false;
+  snippetUsage.record(snippet);
   setStatus(`Inserted ${snippet.key || snippet.name || "snippet"}`);
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
   return true;
@@ -7000,7 +7075,37 @@ function mathAtCursor(ctx: ReturnType<typeof editor.cursorContext>): {
 }
 
 function snippetContextMode(ctx: ReturnType<typeof editor.cursorContext>): string {
-  return mathAtCursor(ctx) ? "tex-mode" : "markdown-mode";
+  if (mathAtCursor(ctx)) return "tex-mode";
+  const state = editor.view.state;
+  const cursor = state.selection.main.from;
+  const block = editor.getBlockContext();
+  const blockType = block.type.toLowerCase();
+  if (blockType.includes("code") || blockType.includes("html")) return "markdown-mode";
+
+  // Recovery for an unfinished inline delimiter. Work is bounded to the
+  // current line, so typing never creates a document-wide recognition pass.
+  const line = state.doc.lineAt(cursor);
+  const before = line.text.slice(0, cursor - line.from);
+  let inlineOpen = -1;
+  for (let pos = 0; pos < before.length - 1; pos++) {
+    if (before[pos] !== "\\" || markdownEscapedAt(before, pos)) continue;
+    if (before[pos + 1] === "(") {
+      inlineOpen = pos;
+      pos += 1;
+    } else if (before[pos + 1] === ")" && inlineOpen >= 0) {
+      inlineOpen = -1;
+      pos += 1;
+    }
+  }
+  if (inlineOpen >= 0) return "tex-mode";
+
+  // Unfinished display math is searched only in a 16 KiB window and stops at
+  // the nearest delimiter line.
+  const windowFrom = Math.max(block.from, cursor - 16 * 1024);
+  const source = state.doc.sliceString(windowFrom, cursor);
+  const open = source.lastIndexOf("\\[");
+  const close = source.lastIndexOf("\\]");
+  return open > close ? "tex-mode" : "markdown-mode";
 }
 
 function clearCompletionCache(): void {
@@ -7055,6 +7160,22 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
   if (!editorOwnsActiveSurface()) {
     hideSnippetPopup();
     clearCompletionCache();
+    return;
+  }
+
+  const activeChoices = snippetSession.activeChoices();
+  if (activeChoices.length > 0) {
+    clearCompletionCache();
+    showSnippetPopup("choice", activeChoices.slice(0, 10).map((choice, index) => ({
+      id: `choice:${index}:${choice}`,
+      key: choice,
+      name: "Snippet choice",
+      description: "Replace the active snippet field",
+      mode: "tex-mode",
+      provider: "choice",
+      body: choice,
+      browserCompatible: true,
+    })), 0, ctx.rect);
     return;
   }
 
@@ -7246,6 +7367,15 @@ function updateSnippetPopup(ctx: ReturnType<typeof editor.cursorContext>): void 
 function chooseSnippetPopupItem(): void {
   const snippet = snippetPopupItems[snippetPopupIndex];
   if (!snippet) return;
+  if (snippet.provider === "choice") {
+    const choice = snippet.key || "";
+    hideSnippetPopup();
+    if (snippetSession.choose(choice)) {
+      setStatus(`Snippet choice: ${choice}`);
+      scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+    }
+    return;
+  }
   const deleteBefore = snippetDeleteBefore;
   hideSnippetPopup();
   snippetSuppressedPrefix = "";
@@ -7621,6 +7751,7 @@ async function reloadSnippets(): Promise<void> {
       const message = (msg as { message?: string }).message || "Snippet reload failed";
       throw new Error(message);
     }
+    snippetSession.clear();
     snippets = withBuiltinSnippets(msg.snippets);
     hideSnippetPopup();
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
@@ -7670,6 +7801,7 @@ function runHostKey(body: Record<string, unknown>): boolean {
     shiftKey: Boolean(body.shiftKey) || shiftTabAlias,
   };
   focusEditorPreservingScroll();
+  if (key === "Escape" || key === "Esc") snippetSession.clear();
   if (handleSnippetPopupHostKey(hostKey)) {
     scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
     return true;
@@ -7688,6 +7820,13 @@ function runHostKey(body: Record<string, unknown>): boolean {
   if (key === "Tab") {
     if (vim.mode() !== "insert") return false;
     editor.focus();
+    if (snippetSession.active()) {
+      const handled = hostKey.shiftKey ? jumpSnippetTabstopBack() : jumpSnippetTabstop();
+      if (handled) {
+        scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true });
+        return true;
+      }
+    }
     if (hostKey.shiftKey) {
       const tableHandled = tableNavigateCell(editor.view, -1);
       if (tableHandled) { scheduleAssistUpdate({ cursor: true }); return true; }
@@ -8056,6 +8195,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   snippetSuppressedPrefix = event.key === "Escape" ? snippetSuppressedPrefix : "";
+  if (plainEscapeKey(event)) snippetSession.clear();
   if (handleSnippetPopupKey(event)) {
     event.stopPropagation();
     return;
@@ -8368,6 +8508,7 @@ window.addEventListener("pagehide", () => {
   notifyClientClosedKeepalive();
 });
 window.addEventListener("beforeunload", () => {
+  coreReconnectController?.destroy();
   vim.destroy();
   imeCoalesceTimer.cancel();
   zoomController.destroy();

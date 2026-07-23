@@ -4825,7 +4825,7 @@ async function snippetRoots() {
   return roots;
 }
 
-function parseSnippetBody(content) {
+export function parseSnippetBody(content) {
   const lines = content.split(/\r?\n/);
   const headers = new Map();
   let bodyStart = 0;
@@ -4839,10 +4839,60 @@ function parseSnippetBody(content) {
     const header = lines[i].match(/^#\s*([^:\n]+):\s*(.*)$/);
     if (header) headers.set(header[1].trim().toLowerCase(), header[2].trim());
   }
-  return {
-    headers,
-    body: lines.slice(bodyStart).join("\n").replace(/\s+$/, ""),
-  };
+  const bodyLines = lines.slice(bodyStart);
+  // Files conventionally end in one newline. Drop only that transport newline;
+  // trailing spaces and intentional blank lines are snippet content.
+  if (bodyLines.at(-1) === "") bodyLines.pop();
+  return { headers, body: bodyLines.join("\n") };
+}
+
+function snippetHeaderList(value) {
+  const source = String(value || "").trim();
+  if (!source) return [];
+  if (source.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(source);
+      if (Array.isArray(parsed)) return parsed.map(String).map((item) => item.trim()).filter(Boolean);
+    } catch {}
+  }
+  return source.split(/\s*,\s*|\s+/).map((item) => item.trim()).filter(Boolean);
+}
+
+function snippetContributorMetadata(headers) {
+  const source = String(headers.get("contributor") || "");
+  const match = /^Aaronnote\s+(.+)$/.exec(source);
+  if (!match) return {};
+  try {
+    return Object.fromEntries(new URLSearchParams(match[1]));
+  } catch {
+    return {};
+  }
+}
+
+function snippetBrowserCompatibility(body) {
+  const safeSelected = /`\(or\s+yas-selected-text\s+(?:"[^"]*"|'[^']*'|nil)\)`/g;
+  const safeChoice = /\$\{\d+:\$\$\(yas-choose-value\s+'\([^)]*\)\)\}/g;
+  const stripped = String(body || "").replace(safeSelected, "").replace(safeChoice, "");
+  if (/`[^`]*`/.test(stripped) || /\$\$?\([^)]*\)/.test(stripped)) {
+    return { browserCompatible: false, diagnostic: "dynamic Emacs Lisp is not executed in Aaronnote" };
+  }
+  if (/\$\{(?:TM_[A-Z_]+|[A-Z][A-Z0-9_]+)(?::[^}]*)?\}/.test(stripped)) {
+    return { browserCompatible: false, diagnostic: "unsupported TextMate variable" };
+  }
+  return { browserCompatible: true };
+}
+
+function snippetProvider(headers, metadata, file, rootIndex) {
+  const declared = String(headers.get("provider") || metadata.provider || "").trim().toLowerCase();
+  if (declared) return declared;
+  const normalized = file.split(sep).join("/");
+  if (normalized.includes("/generated/latex-workshop/")) return "latex-workshop";
+  if (normalized.includes("/generated/overleaf/")) return "overleaf";
+  return rootIndex === 0 ? "personal" : "aaronnote";
+}
+
+function snippetDefaultPriority(provider) {
+  return ({ personal: 500, document: 440, katex: 400, aaronnote: 300, "latex-workshop": 180, overleaf: 160 })[provider] || 240;
 }
 
 export async function scanSnippets(options = {}) {
@@ -4852,9 +4902,9 @@ export async function scanSnippets(options = {}) {
   if (!options.force && snippetCache.key === key && now - snippetCache.scannedAt < 10_000) {
     return snippetCache.snippets;
   }
-  const snippets = [];
-  const seenSnippets = new Set();
-  for (const root of roots) {
+  const byIdentity = new Map();
+  for (let rootIndex = 0; rootIndex < roots.length; rootIndex++) {
+    const root = roots[rootIndex];
     const files = (await walkFiles(root.dir, (_file, name) => !name.startsWith(".") && !name.endsWith(".el")))
       .sort((a, b) => relative(root.dir, a).localeCompare(relative(root.dir, b)));
     const parsed = await mapLimit(files, scanConcurrency, async (file) => {
@@ -4866,14 +4916,28 @@ export async function scanSnippets(options = {}) {
         const parts = rel.split(sep);
         const mode = parts[0] || "";
         const key = headers.get("key") || parts.at(-1) || "snippet";
+        const metadata = snippetContributorMetadata(headers);
+        const provider = snippetProvider(headers, metadata, file, rootIndex);
+        const priorityHeader = Number(headers.get("priority") ?? metadata.priority);
+        const weightHeader = Number(headers.get("weight") ?? metadata.weight);
+        const context = String(headers.get("context") || metadata.context || "").trim().toLowerCase();
+        const compatibility = snippetBrowserCompatibility(body);
         return {
+          id: headers.get("id") || headers.get("uuid") || `${provider}:${root.kind}:${mode}:${key}`,
           key,
+          aliases: snippetHeaderList(headers.get("aliases") || headers.get("prefixes") || metadata.aliases),
           name: headers.get("name") || key,
+          description: headers.get("description") || metadata.description || "",
           mode,
           group: headers.get("group") || "",
           kind: root.kind,
           body,
           source: file,
+          provider,
+          priority: Number.isFinite(priorityHeader) ? priorityHeader : snippetDefaultPriority(provider),
+          weight: Number.isFinite(weightHeader) ? weightHeader : 0,
+          context: ["prose", "org-meta", "markdown", "math", "math-command", "math-at"].includes(context) ? context : undefined,
+          ...compatibility,
         };
       } catch {
         return null;
@@ -4882,11 +4946,24 @@ export async function scanSnippets(options = {}) {
     for (const snippet of parsed) {
       if (!snippet) continue;
       const id = `${snippet.kind}\0${snippet.mode}\0${snippet.key}`;
-      if (seenSnippets.has(id)) continue;
-      seenSnippets.add(id);
-      snippets.push(snippet);
+      const previous = byIdentity.get(id);
+      if (!previous) {
+        byIdentity.set(id, snippet);
+        continue;
+      }
+      const snippetWins = snippet.priority > previous.priority
+        || (snippet.priority === previous.priority && snippet.source.localeCompare(previous.source) < 0);
+      const winner = snippetWins ? snippet : previous;
+      const other = snippetWins ? previous : snippet;
+      byIdentity.set(id, {
+        ...winner,
+        aliases: [...new Set([...(winner.aliases || []), ...(other.aliases || [])])],
+        // Upstream frequency is useful even when a personal expansion wins.
+        weight: Math.max(Number(winner.weight) || 0, Number(other.weight) || 0),
+      });
     }
   }
+  const snippets = [...byIdentity.values()];
   snippetCache = {
     key,
     scannedAt: now,

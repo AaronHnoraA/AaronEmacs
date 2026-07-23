@@ -562,6 +562,70 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest my/aaronnote-active-focus-restarts-core-on-the-same-port ()
+  "An active retained page restarts core without killing or refreshing it."
+  (let* ((buffer (generate-new-buffer "*aaronnote-active-reconnect*"))
+         (my/aaronnote--app-buffer buffer)
+         (my/aaronnote--process nil)
+         (my/aaronnote--ready nil)
+         (my/aaronnote--last-port 50815)
+         (my/aaronnote--ready-callbacks nil)
+         (my/aaronnote--ready-watchdog nil)
+         started-port
+         killed-browser)
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/aaronnote--app-buffer-visible-p)
+                   (lambda () t))
+                  ((symbol-function 'my/aaronnote--start-server)
+                   (lambda (&optional port) (setq started-port port)))
+                  ((symbol-function 'my/appine-kill-all)
+                   (lambda () (setq killed-browser t)))
+                  ((symbol-function 'run-at-time)
+                   (lambda (&rest _args) 'reconnect-watchdog)))
+          (my/aaronnote--maybe-reconnect-core-on-activity)
+          (should (= started-port 50815))
+          (should-not killed-browser)
+          (should (memq #'my/aaronnote--notify-xwidgets-core-ready
+                        my/aaronnote--ready-callbacks))
+          (should (eq my/aaronnote--ready-watchdog 'reconnect-watchdog)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest my/aaronnote-inactive-page-does-not-restart-core ()
+  "A dead core remains dormant until the Aaronnote page is actively focused."
+  (let* ((buffer (generate-new-buffer "*aaronnote-inactive-reconnect*"))
+         (my/aaronnote--app-buffer buffer)
+         (my/aaronnote--process nil)
+         (my/aaronnote--ready nil)
+         (my/aaronnote--last-port 50815)
+         (my/aaronnote--ready-callbacks nil)
+         started)
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/aaronnote--app-buffer-visible-p)
+                   (lambda () nil))
+                  ((symbol-function 'my/aaronnote--start-server)
+                   (lambda (&optional _port) (setq started t))))
+          (my/aaronnote--maybe-reconnect-core-on-activity)
+          (should-not started)
+          (should-not my/aaronnote--ready-callbacks))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest my/aaronnote-core-ready-reconnects-retained-xwidget-in-place ()
+  (let* ((buffer (generate-new-buffer "*aaronnote-retained-xwidget*"))
+         (my/aaronnote--app-buffer buffer)
+         executed-script)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq-local major-mode 'xwidget-webkit-mode))
+          (cl-letf (((symbol-function 'xwidget-webkit-current-session)
+                     (lambda () 'mock-session))
+                    ((symbol-function 'xwidget-webkit-execute-script)
+                     (lambda (_session script &optional _callback)
+                       (setq executed-script script))))
+            (my/aaronnote--notify-xwidgets-core-ready)
+            (should (equal executed-script my/aaronnote--core-ready-script))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
 (ert-deftest my/aaronnote-runtime-status-renders-debug-payload ()
   (let ((my/aaronnote--ready t)
         channel args displayed)

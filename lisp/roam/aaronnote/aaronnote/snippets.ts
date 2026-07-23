@@ -1,4 +1,5 @@
 import type { Editor } from "../src/lib.ts";
+import type { ViewUpdate } from "@codemirror/view";
 import type { SnippetSummary } from "./types.ts";
 
 export type SnippetTabstop = {
@@ -7,6 +8,7 @@ export type SnippetTabstop = {
   to: number;
   primary: boolean;
   text?: string;
+  choices?: string[];
 };
 
 export type ParsedSnippet = {
@@ -20,6 +22,47 @@ type SnippetFrame = {
   cursor: number;
   activeIndex: number | null;
 };
+
+export type SnippetExpansionOptions = {
+  selectedText?: string;
+};
+
+const SAFE_SELECTED_TEXT_RE = /`\(or\s+yas-selected-text\s+(?:"([^"]*)"|'([^']*)|nil)\)`/g;
+const SAFE_CHOICE_RE = /\$\{(\d+):\$\$\(yas-choose-value\s+'\(([^)]*)\)\)\}/g;
+
+function decodeYasQuotedList(source: string): string[] {
+  const values: string[] = [];
+  const re = /"((?:\\.|[^"\\])*)"|'((?:\\.|[^'\\])*)'/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(source))) {
+    values.push((match[1] ?? match[2] ?? "").replace(/\\([\\"'])/g, "$1"));
+  }
+  return values;
+}
+
+function portableSnippetBody(body: string, selectedText: string): string {
+  return body
+    .replace(SAFE_SELECTED_TEXT_RE, (_whole, doubleFallback: string, singleFallback: string) => (
+      selectedText || doubleFallback || singleFallback || ""
+    ))
+    .replace(SAFE_CHOICE_RE, (_whole, index: string, raw: string) => {
+      const choices = decodeYasQuotedList(raw);
+      return choices.length > 0 ? `\${${index}|${choices.join(",")}|}` : `\${${index}}`;
+    });
+}
+
+export function snippetBrowserCompatibility(body: string): { compatible: boolean; diagnostic?: string } {
+  const stripped = String(body || "")
+    .replace(SAFE_SELECTED_TEXT_RE, "")
+    .replace(SAFE_CHOICE_RE, "");
+  if (/`[^`]*`/.test(stripped) || /\$\$?\([^)]*\)/.test(stripped)) {
+    return { compatible: false, diagnostic: "dynamic Emacs Lisp is not executed in Aaronnote" };
+  }
+  if (/\$\{(?:TM_[A-Z_]+|[A-Z][A-Z0-9_]+)(?::[^}]*)?\}/.test(stripped)) {
+    return { compatible: false, diagnostic: "unsupported TextMate variable" };
+  }
+  return { compatible: true };
+}
 
 function normalizeSnippetBody(body: string): string {
   return body.replace(/(^|\n)([ \t]*\\\[[\s\S]*?\n[ \t]*\\\])\n(\$0)$/, "$1$2$3");
@@ -53,8 +96,8 @@ function mapSelectionThroughReplacement(
   };
 }
 
-export function expandSnippetBody(snippet: SnippetSummary): ParsedSnippet {
-  const body = normalizeSnippetBody(snippet.body ?? "");
+export function expandSnippetBody(snippet: SnippetSummary, options: SnippetExpansionOptions = {}): ParsedSnippet {
+  const body = normalizeSnippetBody(portableSnippetBody(snippet.body ?? "", options.selectedText ?? ""));
   const values = new Map<number, string>();
   const tabstops: SnippetTabstop[] = [];
   let text = "";
@@ -64,14 +107,28 @@ export function expandSnippetBody(snippet: SnippetSummary): ParsedSnippet {
     return values.get(index) ?? "";
   }
 
-  function pushTabstop(index: number, value: string): void {
+  function pushTabstop(index: number, value: string, choices?: string[]): void {
     const from = text.length;
     text += value;
-    tabstops.push({ index, from, to: text.length, primary: false, text: value });
+    tabstops.push({ index, from, to: text.length, primary: false, text: value, choices });
   }
 
   function parseChoiceOptions(raw: string): string[] {
-    return raw.split(",").map((x) => x.trim()).filter(Boolean);
+    const options: string[] = [];
+    let value = "";
+    for (let pos = 0; pos < raw.length; pos++) {
+      const ch = raw[pos]!;
+      if (ch === "\\" && pos + 1 < raw.length && /[,|\\]/.test(raw[pos + 1]!)) {
+        value += raw[++pos];
+      } else if (ch === ",") {
+        options.push(value);
+        value = "";
+      } else {
+        value += ch;
+      }
+    }
+    options.push(value);
+    return options.map((x) => x.trim()).filter(Boolean);
   }
 
   function findChoiceEnd(source: string, start: number): number {
@@ -124,6 +181,11 @@ export function expandSnippetBody(snippet: SnippetSummary): ParsedSnippet {
       if (endChar && source[i] === endChar) return i + 1;
 
       if (source[i] !== "$") {
+        if (source[i] === "\\" && source[i + 1] === "$") {
+          text += "$";
+          i += 2;
+          continue;
+        }
         text += source[i];
         i++;
         continue;
@@ -153,7 +215,7 @@ export function expandSnippetBody(snippet: SnippetSummary): ParsedSnippet {
           const end = findChoiceEnd(source, pos + 1);
           if (end >= 0) {
             const options = parseChoiceOptions(source.slice(pos + 1, end));
-            pushTabstop(index, valueFor(index, options[0] ?? ""));
+            pushTabstop(index, valueFor(index, options[0] ?? ""), options);
             i = end + 2;
             continue;
           }
@@ -294,9 +356,16 @@ export function insertExpandedSnippetIntoContentEditable(
 export class SnippetSession {
   private frames: SnippetFrame[] = [];
   private readonly editor: Editor;
+  private observesTransactions = false;
+  private internalUpdateDepth = 0;
 
   constructor(editor: Editor) {
     this.editor = editor;
+    if (typeof this.editor.onViewUpdate === "function") {
+      this.observesTransactions = true;
+      this.editor.onViewUpdate((update) => this.observeUpdate(update));
+      this.editor.onDocumentReset?.(() => this.clear());
+    }
   }
 
   clear(): void {
@@ -304,19 +373,51 @@ export class SnippetSession {
   }
 
   active(): boolean {
-    return this.frames.length > 0;
+    return this.validateActiveSelection();
+  }
+
+  activeChoices(): readonly string[] {
+    if (!this.validateActiveSelection()) return [];
+    const frame = this.topFrame();
+    const active = frame?.activeIndex;
+    if (active == null) return [];
+    return frame?.stops.find((stop) => stop.index === active && stop.primary)?.choices ?? [];
+  }
+
+  choose(value: string): boolean {
+    const choices = this.activeChoices();
+    if (!choices.includes(value)) return false;
+    const frame = this.topFrame()!;
+    const primary = frame.stops.find((stop) => stop.index === frame.activeIndex && stop.primary);
+    if (!primary) return false;
+    const oldFrom = primary.from;
+    const oldTo = primary.to;
+    const inserted = this.withInternalUpdate(() => this.editor.replaceRange(oldFrom, oldTo, value, "all"));
+    if (!this.observesTransactions) this.mapReplacement(oldFrom, oldTo, value.length, primary);
+    primary.from = inserted.from;
+    primary.to = inserted.to;
+    primary.text = value;
+    primary.choices = undefined;
+    return true;
   }
 
   insert(snippet: SnippetSummary, deleteBefore = 0): boolean {
-    const { text, tabstops } = expandSnippetBody(snippet);
+    const compatibility = snippetBrowserCompatibility(snippet.body ?? "");
+    if (snippet.browserCompatible === false || !compatibility.compatible) return false;
+    if (!this.validateActiveSelection()) this.clear();
+    const selectionBefore = this.editor.getSelection();
+    const selectedText = selectionBefore.from === selectionBefore.to
+      ? ""
+      : this.editor.textBetween(selectionBefore.from, selectionBefore.to);
+    const { text, tabstops } = expandSnippetBody(snippet, { selectedText });
     if (!text) return false;
     const parent = this.topFrame();
-    if (parent) this.syncActive(parent, false);
+    if (parent && !this.syncActive(parent)) return false;
     const selection = this.editor.getSelection();
     const replaceFrom = Math.max(0, selection.from - deleteBefore);
     const replaceTo = selection.to;
-    const inserted = this.editor.insertText(text, deleteBefore);
-    this.mapReplacement(replaceFrom, replaceTo, inserted.to - inserted.from);
+    const inserted = this.withInternalUpdate(() => this.editor.insertText(text, deleteBefore));
+    if (!this.observesTransactions) this.mapReplacement(replaceFrom, replaceTo, inserted.to - inserted.from);
     const stops = this.mapInsertedStops(tabstops, inserted.from);
     if (stops.length === 0) return true;
     const frame: SnippetFrame = {
@@ -333,15 +434,14 @@ export class SnippetSession {
   }
 
   next(): boolean {
-    let childCompleted = false;
+    const hadSession = this.frames.length > 0;
+    if (!this.validateActiveSelection()) return false;
     while (this.frames.length > 0) {
       const frame = this.topFrame()!;
-      this.syncActive(frame, childCompleted);
-      childCompleted = false;
+      if (!this.syncActive(frame)) return false;
       frame.cursor += 1;
       if (frame.cursor >= frame.order.length) {
         this.frames.pop();
-        childCompleted = true;
         continue;
       }
       const index = frame.order[frame.cursor]!;
@@ -352,18 +452,19 @@ export class SnippetSession {
       this.selectStop(target);
       return true;
     }
-    return false;
+    return hadSession;
   }
 
   previous(): boolean {
+    const hadSession = this.frames.length > 0;
+    if (!this.validateActiveSelection()) return false;
     while (this.frames.length > 0) {
       const frame = this.topFrame()!;
-      this.syncActive(frame, false);
+      if (!this.syncActive(frame)) return false;
       frame.cursor -= 1;
       if (frame.cursor < 0) {
-        frame.cursor = -1;
-        frame.activeIndex = null;
-        return false;
+        frame.cursor = 0;
+        return hadSession;
       }
       const index = frame.order[frame.cursor]!;
       const target = frame.stops.find((stop) => stop.index === index && stop.primary)
@@ -373,27 +474,27 @@ export class SnippetSession {
       this.selectStop(target);
       return true;
     }
-    return false;
+    return hadSession;
   }
 
   private topFrame(): SnippetFrame | null {
     return this.frames[this.frames.length - 1] ?? null;
   }
 
-  private syncActive(frame: SnippetFrame, preferStoredEnd: boolean): void {
-    if (frame.activeIndex == null) return;
+  private syncActive(frame: SnippetFrame): boolean {
+    if (frame.activeIndex == null) return true;
     const primary = frame.stops.find((stop) => stop.index === frame.activeIndex && stop.primary);
-    if (!primary) return;
+    if (!primary) return true;
 
     const selection = this.editor.getSelection();
+    if (this.observesTransactions && !this.selectionInsideStop(selection, primary)) {
+      this.clear();
+      return false;
+    }
     let restoreSelection = selection;
-    const selectionEnd = Math.max(selection.from, selection.to);
-    const selectionInsidePrimary = selection.from >= primary.from && selectionEnd <= primary.to;
-    const replacementEnd = preferStoredEnd
+    const replacementEnd = this.observesTransactions
       ? primary.to
-      : selectionInsidePrimary
-        ? selectionEnd
-        : Math.max(primary.to, selectionEnd);
+      : Math.max(primary.to, selection.from, selection.to);
     const value = this.editor.textBetween(primary.from, replacementEnd);
     const oldTo = primary.to;
     const oldText = primary.text;
@@ -413,17 +514,20 @@ export class SnippetSession {
       const mirrorOldSize = mirror.to - mirror.from;
       const oldMirrorFrom = mirror.from;
       const oldMirrorTo = mirror.to;
-      const inserted = this.editor.replaceRange(mirror.from, mirror.to, value, "end");
+      const inserted = this.withInternalUpdate(() => this.editor.replaceRange(mirror.from, mirror.to, value, "end"));
       const mirrorDelta = value.length - mirrorOldSize;
-      mirror.from = inserted.from;
-      mirror.to = inserted.to;
+      if (!this.observesTransactions) {
+        mirror.from = inserted.from;
+        mirror.to = inserted.to;
+      }
       mirror.text = value;
       if (mirrorDelta !== 0) {
         restoreSelection = mapSelectionThroughReplacement(restoreSelection, oldMirrorFrom, oldMirrorTo, value.length);
-        this.mapReplacement(oldMirrorFrom, oldMirrorTo, value.length, mirror);
+        if (!this.observesTransactions) this.mapReplacement(oldMirrorFrom, oldMirrorTo, value.length, mirror);
       }
     }
-    this.editor.setSelection(restoreSelection.from, restoreSelection.to);
+    this.withInternalUpdate(() => this.editor.setSelection(restoreSelection.from, restoreSelection.to));
+    return true;
   }
 
   private dropStopsInside(frame: SnippetFrame, primary: SnippetTabstop, oldTo: number): void {
@@ -468,6 +572,58 @@ export class SnippetSession {
     this.editor.setSelection(stop.from, stop.to);
   }
 
+  private withInternalUpdate<T>(run: () => T): T {
+    this.internalUpdateDepth += 1;
+    try {
+      return run();
+    } finally {
+      this.internalUpdateDepth -= 1;
+    }
+  }
+
+  private observeUpdate(update: ViewUpdate): void {
+    if (this.frames.length === 0) return;
+    for (const transaction of update.transactions) {
+      if (!transaction.docChanged) continue;
+      for (const frame of this.frames) {
+        for (const stop of frame.stops) {
+          stop.from = transaction.changes.mapPos(stop.from, -1);
+          stop.to = transaction.changes.mapPos(stop.to, 1);
+        }
+      }
+    }
+    if (this.internalUpdateDepth === 0 && update.docChanged) {
+      const frame = this.topFrame();
+      const primary = frame?.stops.find((stop) => stop.index === frame.activeIndex && stop.primary);
+      if (primary) primary.choices = undefined;
+    }
+    if (this.internalUpdateDepth === 0 && (update.selectionSet || update.docChanged)) {
+      this.validateActiveSelection();
+    }
+  }
+
+  private selectionInsideStop(selection: { from: number; to: number }, stop: SnippetTabstop): boolean {
+    const from = Math.min(selection.from, selection.to);
+    const to = Math.max(selection.from, selection.to);
+    return from >= stop.from && to <= stop.to;
+  }
+
+  private validateActiveSelection(): boolean {
+    const frame = this.topFrame();
+    if (!frame) return false;
+    // Minimal editor doubles used by non-CM integrations cannot expose
+    // transactions. Production Aaronnote always takes the strict CM6 path.
+    if (!this.observesTransactions) return true;
+    if (frame.activeIndex == null) return true;
+    const primary = frame.stops.find((stop) => stop.index === frame.activeIndex && stop.primary)
+      ?? frame.stops.find((stop) => stop.index === frame.activeIndex);
+    if (!primary || !this.selectionInsideStop(this.editor.getSelection(), primary)) {
+      this.clear();
+      return false;
+    }
+    return true;
+  }
+
   private mapInsertedStops(
     tabstops: SnippetTabstop[],
     insertedFrom: number,
@@ -488,7 +644,9 @@ export function snippetLabel(snippet: SnippetSummary): string {
 
 export function snippetDetail(snippet: SnippetSummary): string {
   const kind = snippet.kind ? `kind:${snippet.kind}` : "";
-  return [snippet.name, snippet.mode, kind, snippet.group].filter(Boolean).join(" / ");
+  return [snippet.description || snippet.name, snippet.mode, kind, snippet.group, snippet.provider]
+    .filter(Boolean)
+    .join(" / ");
 }
 
 function snippetKey(snippet: SnippetSummary): string {
@@ -506,39 +664,162 @@ function fuzzyPrefixMatch(candidate: string, query: string): boolean {
   return true;
 }
 
-export function snippetScore(snippet: SnippetSummary, query: string): number {
-  const key = snippetKey(snippet).toLowerCase();
-  if (!key || !query) return Number.POSITIVE_INFINITY;
-  if (key === query) return 0;
-  if (key.startsWith(query)) return 1;
-  if (key.includes(query)) return 2;
-  if (fuzzyPrefixMatch(key, query)) return 3;
+export function snippetScore(snippet: SnippetSummary, query: string, allowFuzzy = true): number {
+  const key = snippetKey(snippet);
+  const commandAlias = snippet.mode === "tex-mode" && key && !key.startsWith("\\")
+    && String(snippet.body || "").trimStart().startsWith(`\\${key}`)
+    ? `\\${key}`
+    : "";
+  const candidates = [key, commandAlias, ...(snippet.aliases ?? [])]
+    .map((value) => value.toLowerCase())
+    .filter(Boolean);
+  if (candidates.length === 0 || !query) return Number.POSITIVE_INFINITY;
+  if (candidates.some((candidate) => candidate === query)) return 0;
+  if (candidates.some((candidate) => candidate.startsWith(query))) return 1;
+  if (!allowFuzzy) return Number.POSITIVE_INFINITY;
+  if (candidates.some((candidate) => candidate.includes(query))) return 2;
+  if (candidates.some((candidate) => fuzzyPrefixMatch(candidate, query))) return 3;
   return Number.POSITIVE_INFINITY;
 }
+
+export type SnippetUsage = { count: number; lastUsed: number };
+
+export function snippetStableId(snippet: SnippetSummary): string {
+  return snippet.id || [snippet.provider, snippet.kind, snippet.mode, snippet.key].filter(Boolean).join(":");
+}
+
+export class SnippetUsageStore {
+  private static readonly storageKey = "aaronnote.snippet-ranking.v1";
+  private readonly entries = new Map<string, SnippetUsage>();
+  private readonly storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null;
+  private saveTimer = 0;
+
+  constructor(storage: Pick<Storage, "getItem" | "setItem" | "removeItem"> | null = null) {
+    this.storage = storage ?? (typeof localStorage === "undefined" ? null : localStorage);
+    try {
+      const parsed = JSON.parse(this.storage?.getItem(SnippetUsageStore.storageKey) || "{}");
+      for (const [id, value] of Object.entries(parsed)) {
+        const usage = value as Partial<SnippetUsage>;
+        if (Number.isFinite(usage.count) && Number.isFinite(usage.lastUsed)) {
+          this.entries.set(id, { count: Math.max(0, Number(usage.count)), lastUsed: Number(usage.lastUsed) });
+        }
+      }
+    } catch {}
+  }
+
+  get(snippet: SnippetSummary): SnippetUsage | undefined {
+    return this.entries.get(snippetStableId(snippet));
+  }
+
+  record(snippet: SnippetSummary, now = Date.now()): void {
+    const id = snippetStableId(snippet);
+    if (!id) return;
+    const previous = this.entries.get(id);
+    this.entries.set(id, { count: (previous?.count ?? 0) + 1, lastUsed: now });
+    if (this.entries.size > 512) {
+      const oldest = [...this.entries.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+      for (const [drop] of oldest.slice(0, this.entries.size - 512)) this.entries.delete(drop);
+    }
+    this.scheduleSave();
+  }
+
+  clear(): void {
+    this.entries.clear();
+    if (this.saveTimer) globalThis.clearTimeout(this.saveTimer);
+    this.saveTimer = 0;
+    try { this.storage?.removeItem(SnippetUsageStore.storageKey); } catch {}
+  }
+
+  private scheduleSave(): void {
+    if (!this.storage) return;
+    if (this.saveTimer) globalThis.clearTimeout(this.saveTimer);
+    this.saveTimer = globalThis.setTimeout(() => {
+      this.saveTimer = 0;
+      try { this.storage?.setItem(SnippetUsageStore.storageKey, JSON.stringify(Object.fromEntries(this.entries))); } catch {}
+    }, 1_000) as unknown as number;
+  }
+}
+
+function providerPriority(snippet: SnippetSummary): number {
+  if (Number.isFinite(snippet.priority)) return Number(snippet.priority);
+  switch (snippet.provider) {
+    case "personal": return 500;
+    case "document": return 440;
+    case "katex": return 400;
+    case "aaronnote": return 300;
+    case "latex-workshop": return 180;
+    case "overleaf": return 160;
+    default: return snippet.source?.includes("aaronnote:builtin") ? 300 : 240;
+  }
+}
+
+export type SnippetMatchOptions = {
+  mode?: string;
+  kind?: string;
+  limit?: number;
+  allowFuzzy?: boolean;
+  context?: SnippetSummary["context"];
+  usage?: SnippetUsageStore;
+  documentFrequency?: ReadonlyMap<string, number>;
+  now?: number;
+};
 
 export function matchingSnippetsForPrefix(
   snippets: readonly SnippetSummary[],
   prefix: string,
-  options: { mode?: string; kind?: string; limit?: number } = {},
+  options: SnippetMatchOptions = {},
 ): SnippetSummary[] {
   const query = prefix.toLowerCase();
   const mode = options.mode || "";
   const activeKind = (options.kind || "").toLowerCase();
   const limit = Math.max(1, options.limit ?? 10);
-  return snippets
-    .filter((snippet) => !mode || snippet.mode === mode)
-    .filter((snippet) => {
-      const snippetKind = (snippet.kind || "").toLowerCase();
-      return !snippetKind || snippetKind === activeKind;
-    })
-    .map((snippet) => ({ snippet, score: snippetScore(snippet, query) }))
-    .filter((item) => Number.isFinite(item.score))
-    .sort((a, b) => {
-      if (a.score !== b.score) return a.score - b.score;
-      return snippetLabel(a.snippet).localeCompare(snippetLabel(b.snippet));
-    })
-    .slice(0, limit)
-    .map((item) => item.snippet);
+  const now = options.now ?? Date.now();
+  type RankedSnippet = { snippet: SnippetSummary; match: number; secondary: number };
+  const compare = (a: RankedSnippet, b: RankedSnippet): number => {
+    if (a.match !== b.match) return a.match - b.match;
+    if (a.secondary !== b.secondary) return b.secondary - a.secondary;
+    return snippetLabel(a.snippet).localeCompare(snippetLabel(b.snippet));
+  };
+  const best: RankedSnippet[] = [];
+  for (const snippet of snippets) {
+    if (snippet.browserCompatible === false || (mode && snippet.mode !== mode)) continue;
+    const snippetKind = (snippet.kind || "").toLowerCase();
+    if (snippetKind && snippetKind !== activeKind) continue;
+    if (options.context && snippet.context) {
+      const inContext = options.context === "math"
+        ? snippet.context.startsWith("math") || snippet.context === "markdown"
+        : snippet.context === options.context;
+      if (!inContext) continue;
+    }
+    const match = snippetScore(snippet, query, options.allowFuzzy !== false);
+    if (!Number.isFinite(match)) continue;
+    const frequency = options.documentFrequency?.get(snippetKey(snippet)) ?? 0;
+    const usage = options.usage?.get(snippet);
+    const recentDays = usage ? Math.max(0, (now - usage.lastUsed) / 86_400_000) : Number.POSITIVE_INFINITY;
+    const adaptive = (usage?.count ?? 0) * 8 + (Number.isFinite(recentDays) ? Math.max(0, 24 - recentDays) : 0);
+    const item = {
+      snippet,
+      match,
+      secondary: providerPriority(snippet) * 100
+        + Math.log2(1 + Math.max(0, frequency)) * 80
+        + Math.max(0, Number(snippet.weight) || 0)
+        + adaptive,
+    };
+
+    // The popup consumes only a small fixed number of results. Maintain that
+    // ordered top-k directly instead of allocating and sorting every match.
+    let low = 0;
+    let high = best.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (compare(item, best[middle]!) < 0) high = middle;
+      else low = middle + 1;
+    }
+    if (low >= limit) continue;
+    best.splice(low, 0, item);
+    if (best.length > limit) best.pop();
+  }
+  return best.map((item) => item.snippet);
 }
 
 export type SnippetPopupKeyAction =

@@ -71,15 +71,24 @@ export type FileSummary = {
 };
 
 export type SnippetSummary = {
+  /** Stable identity used by ranking history and deterministic de-duplication. */
+  id?: string;
   key?: string;
+  aliases?: string[];
   name?: string;
+  description?: string;
   mode?: string;
   group?: string;
   kind?: string;
   body?: string;
   source?: string;
-  /** Built-in authoring context. User/server snippets may omit it. */
-  context?: "prose" | "org-meta" | "markdown";
+  provider?: "personal" | "aaronnote" | "latex-workshop" | "overleaf" | "document" | "katex" | string;
+  priority?: number;
+  weight?: number;
+  /** Browser-safe declarative context. User/server snippets may omit it. */
+  context?: "prose" | "org-meta" | "markdown" | "math" | "math-command" | "math-at";
+  browserCompatible?: boolean;
+  diagnostic?: string;
 };
 
 export type TemplateSummary = {

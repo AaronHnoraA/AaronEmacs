@@ -1,4 +1,4 @@
-import type { EditorView } from "@codemirror/view";
+import type { EditorView, ViewUpdate } from "@codemirror/view";
 
 import { createEditorCM6 } from "./cm6/editor-cm6.ts";
 import type {
@@ -511,6 +511,10 @@ export interface Editor {
   focus(): void;
   /** Tear down the editor and remove its DOM. */
   destroy(): void;
+  /** Subscribe to CM6 transactions across whole-state document resets. */
+  onViewUpdate(listener: (update: ViewUpdate) => void): () => void;
+  /** Subscribe to whole-document state replacement (opening another note). */
+  onDocumentReset(listener: () => void): () => void;
   /** Escape hatch: the live CM6 EditorView. Advanced; no API stability promised on this access. */
   readonly view: EditorView;
 }

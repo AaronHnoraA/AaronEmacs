@@ -1003,21 +1003,92 @@ function adapterScript(origin) {
     var key = String(name || "").toLowerCase();
     return originalSetAttribute.call(this, name, key === "src" || key === "href" ? proxiedUrl(value) : value);
   };
-  var eventSource = new EventSource(BASE + "/events");
-  eventSource.addEventListener("command", function(event) {
+  var eventSource = null;
+  var eventConnectionState = "disconnected";
+  var eventConnectionStartedAt = 0;
+  var eventConnectionPromise = null;
+  var eventConnectionResolve = null;
+  function dispatchConnectionStatus(status, reason) {
+    eventConnectionState = status;
+    try {
+      window.dispatchEvent(new CustomEvent("aaronnote:connection", {
+        detail: {status: status, reason: String(reason || "")}
+      }));
+    } catch (_) {}
+  }
+  function currentConnectionStatus() {
+    // Some WebKit builds can leave EventSource in CONNECTING forever after a
+    // process suspension. Treat it as disconnected lazily when the next user
+    // action asks; no timer or background probe is needed.
+    if (eventConnectionState === "connecting"
+        && Date.now() - eventConnectionStartedAt >= 5000) {
+      return "disconnected";
+    }
+    return eventConnectionState;
+  }
+  function finishConnectionAttempt(connected) {
+    var resolveAttempt = eventConnectionResolve;
+    eventConnectionResolve = null;
+    eventConnectionPromise = null;
+    if (resolveAttempt) resolveAttempt(connected === true);
+  }
+  function handleCommandEvent(event) {
     try {
       window.dispatchEvent(new CustomEvent("aaronnote:command", {detail: JSON.parse(event.data)}));
     } catch (err) {
       console.error("[aaronnote-host] command event failed", err);
     }
-  });
-  eventSource.addEventListener("open-file", function(event) {
+  }
+  function handleOpenFileEvent(event) {
     try {
       window.dispatchEvent(new CustomEvent("aaronnote:open-file", {detail: JSON.parse(event.data)}));
     } catch (err) {
       console.error("[aaronnote-host] open-file event failed", err);
     }
-  });
+  }
+  function connectEventStream(reason, force) {
+    var status = currentConnectionStatus();
+    if (status === "connected") return Promise.resolve(true);
+    if (!force && status === "connecting" && eventConnectionPromise) {
+      return eventConnectionPromise;
+    }
+    if (eventSource) {
+      try { eventSource.close(); } catch (_) {}
+      eventSource = null;
+    }
+    finishConnectionAttempt(false);
+    eventConnectionStartedAt = Date.now();
+    dispatchConnectionStatus("connecting", reason);
+    var source;
+    try {
+      source = new EventSource(BASE + "/events");
+    } catch (_) {
+      dispatchConnectionStatus("disconnected", reason);
+      return Promise.resolve(false);
+    }
+    eventSource = source;
+    source.addEventListener("command", handleCommandEvent);
+    source.addEventListener("open-file", handleOpenFileEvent);
+    eventConnectionPromise = new Promise(function(resolve) {
+      eventConnectionResolve = resolve;
+    });
+    source.addEventListener("open", function() {
+      if (eventSource !== source) return;
+      dispatchConnectionStatus("connected", reason);
+      finishConnectionAttempt(true);
+    });
+    source.addEventListener("error", function() {
+      if (eventSource !== source) return;
+      // close() disables EventSource's implicit idle retry. Aaronnote retries
+      // only when focus, pointer, or keyboard activity calls reconnect().
+      try { source.close(); } catch (_) {}
+      eventSource = null;
+      dispatchConnectionStatus("disconnected", reason);
+      finishConnectionAttempt(false);
+    });
+    return eventConnectionPromise;
+  }
+  void connectEventStream("initial", false);
   var assetResolver = function(source) {
     var raw = String(source || "").trim();
     if (!raw || /^(?:data:|https?:|blob:|#)/i.test(raw)) return raw;
@@ -1065,6 +1136,12 @@ function adapterScript(origin) {
     }
   };
   window.aaronnoteApi = {
+    connection: {
+      status: function() { return currentConnectionStatus(); },
+      reconnect: function(reason) {
+        return connectEventStream(String(reason || "activity"), true);
+      }
+    },
     notes: {
       bootstrap: function(file) { return call("aaronnote:api:notes:bootstrap", [String(file || "")]); },
       open: function(file) { return call("aaronnote:api:notes:open", [String(file || "")]); },

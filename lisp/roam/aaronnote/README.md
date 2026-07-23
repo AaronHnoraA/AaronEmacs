@@ -162,6 +162,8 @@ Legend: :white\_check\_mark: stable · :yellow\_circle: partial (note explains w
 | ------------------------------------ | :----------------: | ----- |
 | cursor-aware delimiter hinting       | :white_check_mark: | |
 | auto-pair brackets                   | :white_check_mark: | VSCode-style pairing, overtyping, selection wrapping, and paired deletion |
+| math snippets and field navigation   | :white_check_mark: | Shared YAS catalog, local math completion, and bounded Cmd+[ / ]; see [usage](docs/snippets-and-jumps.md) and [catalog maintenance](docs/emacs-snippet-migration.md) |
+| core reconnect                       | :white_check_mark: | Focus, click, typing, or input reconnects a broken event stream; an active retained xwidget can restart core on the same port. No idle retry loop or page refresh. |
 | ordered-list auto-renumber           | :white_check_mark: | move/paste/delete renumbers in same transaction (single undo); `.`/`)` marker preserved |
 | heading fold (`zc`/`zo`/`za`/`zM`/`zR`) | :white_check_mark: | foldService + hover-only chevron; state in CM6 foldState |
 | lossless `parse → serialize → parse` | :white_check_mark: | |

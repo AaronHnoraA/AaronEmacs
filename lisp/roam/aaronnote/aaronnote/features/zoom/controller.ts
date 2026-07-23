@@ -190,7 +190,9 @@ export function createZoomController(options: ZoomControllerOptions): ZoomContro
   }
 
   function handleVisualZoomWheel(event: WheelEvent): void {
-    if (!(event.ctrlKey || event.metaKey) || !shouldHandleVisualZoomTarget(event.target)) return;
+    // Meta+wheel is ordinary navigation on macOS and is too easy to trigger
+    // accidentally. Trackpad pinch is handled by gesture events (or Ctrl+wheel).
+    if (!event.ctrlKey || event.metaKey || !shouldHandleVisualZoomTarget(event.target)) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     if (!visualWheelIdleTimer) visualWheelRawZoom = visualZoom;

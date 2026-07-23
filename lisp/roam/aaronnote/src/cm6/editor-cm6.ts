@@ -423,6 +423,8 @@ function openAttachmentContextMenuFromEvent(view: EditorView, event: MouseEvent)
 
 export function createEditorCM6(host: HTMLElement, options: EditorOptions): Editor {
   const qiRegistry = createQuickInsertRegistry();
+  const externalUpdateListeners = new Set<(update: import("@codemirror/view").ViewUpdate) => void>();
+  const documentResetListeners = new Set<() => void>();
   // Preserve the stable outer DOM shape so themes and layout CSS work
   // without coupling to the editor implementation.
   const wrap = document.createElement("div");
@@ -441,6 +443,7 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
       visual,
       rememberHeadingFolds,
       "standalone",
+      (update) => externalUpdateListeners.forEach((listener) => listener(update)),
     ),
   });
 
@@ -670,6 +673,7 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
         const visual = isVisualMode(view);
         view.dispatch({ effects: beforeChangeDocumentEffect.of(undefined) });
         view.setState(createState(md, visual));
+        documentResetListeners.forEach((listener) => listener());
         restoreHeadingFolds();
         scheduleViewportDecorationRefresh(view);
         return;
@@ -880,12 +884,24 @@ export function createEditorCM6(host: HTMLElement, options: EditorOptions): Edit
     },
 
     destroy(): void {
+      externalUpdateListeners.clear();
+      documentResetListeners.clear();
       view.contentDOM.removeEventListener("mousedown", onSourceWidgetMouseDown, { capture: true });
       view.destroy();
       wrap.remove();
       disposeHighlightWorker();
       void import("../diagram-render.ts").then(({ disposeDiagramRuntime }) => disposeDiagramRuntime());
       disposeMathRuntime();
+    },
+
+    onViewUpdate(listener): () => void {
+      externalUpdateListeners.add(listener);
+      return () => externalUpdateListeners.delete(listener);
+    },
+
+    onDocumentReset(listener): () => void {
+      documentResetListeners.add(listener);
+      return () => documentResetListeners.delete(listener);
     },
 
     // Expose the CM6 EditorView as an escape hatch.
@@ -1020,6 +1036,7 @@ function buildExtensions(
   initialVisualMode: boolean,
   onFoldStateChanged: () => void,
   mode: AaronnoteMarkdownExtensionMode,
+  notifyExternalUpdate?: (update: import("@codemirror/view").ViewUpdate) => void,
 ): Extension[] {
   const standalone = mode === "standalone";
   return [
@@ -1053,6 +1070,7 @@ function buildExtensions(
     highlightActiveLine(),
     EditorView.lineWrapping,
     EditorView.updateListener.of((update) => {
+      notifyExternalUpdate?.(update);
       if (update.docChanged && options.onChange) {
         if (options.onChange.length === 0) {
           (options.onChange as () => void)();

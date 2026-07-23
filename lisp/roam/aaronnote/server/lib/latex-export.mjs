@@ -72,14 +72,14 @@ function inlineTokenAt(source, pos, options = {}) {
 
   match = rest.match(/^!\[([^\]\n]*)\]\(([^)\n]+)\)/);
   if (match) {
-    const label = convertInline(match[1] || "image", options);
+    const label = convertInline(match[1] || "image", { ...options, exportComments: false });
     return { length: match[0].length, latex: `\\href{${escapeLatexUrl(match[2])}}{${label}}` };
   }
 
   match = rest.match(/^\[([^\]\n]+)\]\(([^)\n]+)\)/);
   if (match) return {
     length: match[0].length,
-    latex: `\\href{${escapeLatexUrl(match[2])}}{${convertInline(match[1], options)}}`,
+    latex: `\\href{${escapeLatexUrl(match[2])}}{${convertInline(match[1], { ...options, exportComments: false })}}`,
   };
 
   match = rest.match(/^\*\*([^*\n]+)\*\*/);
@@ -166,7 +166,10 @@ export function convertInline(text, options = {}) {
         latex += `\\sidecomment{${convertInline(annotation.context, options)}}`;
       } else if (annotation.name === "revision") {
         latex += revisionLatex(annotation, options);
-      } else if (isDisplayCommentCommand(annotation)) {
+      } else if (annotation.name === "comment" && options.exportComments !== false) {
+        // Keep inline review context in exported LaTeX instead of silently
+        // dropping it. `comment(true)` still controls the editor's prominent
+        // presentation, while both forms use the same export macro.
         latex += `\\aaroncomment{${convertInline(annotation.context, options)}}`;
       } else if (annotation.name === "cite") {
         latex += citeLatex(annotation, options);

@@ -212,11 +212,18 @@
 
 .cm-editor a.aaronnote-roam-link,
 .aaronnote-roam-link {
-  color: var(--aaron-accent-sand, #e7d6a5);
-  border-bottom-color: color-mix(in srgb, var(--aaron-accent-sand, #e7d6a5), transparent 42%);
-  background: color-mix(in srgb, var(--aaron-accent-sand, #e7d6a5), transparent 88%);
-  border-radius: 3px;
-  padding: 0 0.16em;
+  color: var(--aaron-link, #7ee7ff);
+  border-bottom-color: color-mix(in srgb, var(--aaron-link, #7ee7ff), transparent 38%);
+  background: color-mix(in srgb, var(--aaron-link, #7ee7ff), transparent 91%);
+  border-radius: 0.28em;
+  padding: 0 0.12em;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+.cm-editor a.aaronnote-roam-link:hover,
+.aaronnote-roam-link:hover {
+  color: var(--aaron-ink, #f5f7fa);
+  background: color-mix(in srgb, var(--aaron-link, #7ee7ff), transparent 78%);
+  border-bottom-color: var(--aaron-link, #7ee7ff);
 }
 
 /* ─── inline code / pre ──────────────────────────────────────────── */
@@ -989,11 +996,17 @@
 }
 
 .cm-editor .cm-roam-link-text {
-  color: var(--aaron-accent-sand, #e7d6a5);
-  border-bottom-color: color-mix(in srgb, var(--aaron-accent-sand, #e7d6a5), transparent 42%);
-  background: color-mix(in srgb, var(--aaron-accent-sand, #e7d6a5), transparent 88%);
-  border-radius: 3px;
-  padding: 0 0.16em;
+  color: var(--aaron-link, #7ee7ff);
+  border-bottom-color: color-mix(in srgb, var(--aaron-link, #7ee7ff), transparent 38%);
+  background: color-mix(in srgb, var(--aaron-link, #7ee7ff), transparent 91%);
+  border-radius: 0.28em;
+  padding: 0 0.12em;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+.cm-editor .cm-roam-link-text:hover {
+  color: var(--aaron-ink, #f5f7fa);
+  background: color-mix(in srgb, var(--aaron-link, #7ee7ff), transparent 78%);
+  border-bottom-color: var(--aaron-link, #7ee7ff);
 }
 
 /* Blockquote line refinements */
