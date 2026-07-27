@@ -518,8 +518,16 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
         ("es" my/debug-evaluate-symbol)
         ("q" nil "quit" :color blue)))))
 
+(add-to-list
+ 'load-path
+ (expand-file-name
+  "../site-lisp/dape-toolbar"
+  (file-name-directory
+   (or load-file-name
+       (locate-library "init-debug")
+       default-directory))))
+
 (use-package dape-toolbar
-  :load-path "~/.emacs.d/site-lisp/dape-toolbar"
   :after dape
   :config
   (dape-toolbar-mode 1))

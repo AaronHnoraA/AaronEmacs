@@ -9,9 +9,15 @@
 
 (require 'aaron-ui)
 (require 'cl-lib)
+(require 'seq)
 
 (declare-function my/terminal-normalize-directory "init-funcs" (directory))
 (declare-function my/vterm-send-command "init-shell" (buffer command &optional retries))
+(declare-function my/vterm-workspace-id "init-shell" (&optional directory))
+(declare-function remote-terminal-p "remote-terminal" (object))
+(declare-function remote-terminal-put-metadata "remote-terminal"
+                  (terminal property value))
+(declare-function remote-terminal-workspace-id "remote-terminal" (terminal))
 (declare-function vterm "vterm" (&optional buffer-name))
 (declare-function vterm-send-string "vterm" (string))
 (declare-function vterm-send-return "vterm" ())
@@ -19,6 +25,7 @@
 (declare-function my/project-current-root "init-project")
 
 (defvar vterm-kill-buffer-on-exit)
+(defvar remote-terminal-instance)
 
 (defgroup my/vterm-popup nil
   "Popup vterm pool helpers."
@@ -44,6 +51,9 @@
 (defvar my/vterm-popup-last-height nil
   "Last popup vterm height ratio recorded from a visible window.")
 
+(defvar my/vterm-popup--displaying nil
+  "Dynamically non-nil while a popup window is being shown and selected.")
+
 (defvar-local my/vterm-popup-fixed nil
   "Whether this popup vterm buffer should stay visible after focus changes.")
 
@@ -55,6 +65,9 @@
 
 (defvar-local my/vterm-popup-title nil
   "Optional title shown in the popup header for the current buffer.")
+
+(defvar-local my/vterm-popup-workspace-id nil
+  "Stable remote workspace ID which owns the current popup buffer.")
 
 (defface my/vterm-popup-tab-current
   `((t (:inherit mode-line-buffer-id
@@ -160,7 +173,9 @@ CURRENT is the currently displayed popup buffer."
 
 (defun my/vterm-popup--tab-line ()
   "Return the popup vterm tab strip for the header line."
-  (let* ((buffers (my/vterm-popup--live-buffers))
+  (let* ((buffers
+          (my/vterm-popup--live-buffers
+           my/vterm-popup-workspace-id))
          (current (current-buffer))
          (tabs (cl-loop for buffer in buffers
                         for index from 1
@@ -190,20 +205,46 @@ CURRENT is the currently displayed popup buffer."
   (and (buffer-live-p buffer)
        (buffer-local-value 'my/vterm-popup-instance-p buffer)))
 
-(defun my/vterm-popup--live-buffers ()
-  "Return live popup vterm buffers, pruning dead entries."
+(defun my/vterm-popup--live-buffers (&optional workspace-id)
+  "Return live popup vterm buffers, pruning dead entries.
+When WORKSPACE-ID is non-nil, return only buffers owned by that workspace."
   (setq my/vterm-popup-buffers
-        (cl-remove-if-not #'my/vterm-popup--buffer-p my/vterm-popup-buffers)))
+        (cl-remove-if-not #'my/vterm-popup--buffer-p my/vterm-popup-buffers))
+  (if workspace-id
+      (seq-filter
+       (lambda (buffer)
+         (equal
+          (buffer-local-value 'my/vterm-popup-workspace-id buffer)
+          workspace-id))
+       my/vterm-popup-buffers)
+    my/vterm-popup-buffers))
 
-(defun my/vterm-popup--current-buffer (&optional create)
+(defun my/vterm-popup--requested-workspace-id (&optional directory)
+  "Return the popup workspace ID implied by DIRECTORY or current buffer."
+  (or (and (null directory)
+           (bound-and-true-p my/vterm-popup-instance-p)
+           my/vterm-popup-workspace-id)
+      (my/vterm-workspace-id (or directory default-directory))))
+
+(defun my/vterm-popup--current-buffer (&optional create directory)
   "Return the current popup vterm buffer.
-When CREATE is non-nil, create one if the pool is empty."
-  (let ((buffers (my/vterm-popup--live-buffers)))
-    (unless (my/vterm-popup--buffer-p my/vterm-popup-current-buffer)
+When CREATE is non-nil, create one if the current workspace's pool is empty.
+DIRECTORY selects the logical workspace and defaults to `default-directory'."
+  (let* ((workspace-id
+          (my/vterm-popup--requested-workspace-id directory))
+         (buffers (my/vterm-popup--live-buffers workspace-id)))
+    (unless (and
+             (my/vterm-popup--buffer-p my/vterm-popup-current-buffer)
+             (equal
+              (buffer-local-value
+               'my/vterm-popup-workspace-id
+               my/vterm-popup-current-buffer)
+              workspace-id))
       (setq my/vterm-popup-current-buffer (car buffers)))
     (or my/vterm-popup-current-buffer
         (when create
-          (my/vterm-popup--create-buffer default-directory)))))
+          (my/vterm-popup--create-buffer
+           (or directory default-directory))))))
 
 (defun my/vterm-popup--buffer-name (index)
   "Return the default popup vterm buffer name for INDEX."
@@ -252,21 +293,26 @@ When BUFFER is non-nil, return the window displaying BUFFER."
 
 (defun my/vterm-popup--show-buffer (buffer)
   "Show popup vterm BUFFER in the shared side window."
-  (setq my/vterm-popup-current-buffer buffer)
-  (let ((window (or (my/vterm-popup--window)
-                    (display-buffer-in-side-window
-                     buffer
-                     `((side . top)
-                       (slot . 1)
-                       (window-height . ,(my/vterm-popup--effective-window-height)))))))
-    (set-window-buffer window buffer)
-    (set-window-parameter window 'my-vterm-popup t)
-    (set-window-parameter
-     window 'my-vterm-fixed
-     (buffer-local-value 'my/vterm-popup-fixed buffer))
-    (set-window-parameter window 'no-delete-other-windows t)
-    (window-preserve-size window nil t)
-    window))
+  (let ((my/vterm-popup--displaying t))
+    (setq my/vterm-popup-current-buffer buffer)
+    (let ((window (or (my/vterm-popup--window)
+                      (display-buffer-in-side-window
+                       buffer
+                       `((side . top)
+                         (slot . 1)
+                         (window-height . ,(my/vterm-popup--effective-window-height)))))))
+      (set-window-buffer window buffer)
+      (set-window-parameter window 'my-vterm-popup t)
+      (set-window-parameter
+       window 'my-vterm-fixed
+       (buffer-local-value 'my/vterm-popup-fixed buffer))
+      (set-window-parameter window 'no-delete-other-windows t)
+      (window-preserve-size window nil t)
+      ;; Selecting inside the protected phase prevents
+      ;; `buffer-list-update-hook' from observing a newly created popup as an
+      ;; already-unfocused temporary window.
+      (select-window window)
+      window)))
 
 (defun my/vterm-popup-display-buffer (buffer)
   "Display BUFFER using the shared popup vterm window logic."
@@ -274,8 +320,15 @@ When BUFFER is non-nil, return the window displaying BUFFER."
     (user-error "Dead buffer: %s" buffer))
   (with-current-buffer buffer
     (setq-local my/vterm-popup-instance-p t)
+    (unless my/vterm-popup-workspace-id
+      (setq-local my/vterm-popup-workspace-id
+                  (my/vterm-workspace-id default-directory)))
     (unless (boundp 'my/vterm-popup-fixed)
       (setq-local my/vterm-popup-fixed nil))
+    (when (and (boundp 'remote-terminal-instance)
+               (remote-terminal-p remote-terminal-instance))
+      (remote-terminal-put-metadata
+       remote-terminal-instance :popup t))
     (my/vterm-popup-apply-ui buffer)
     (add-hook 'kill-buffer-hook #'my/vterm-popup--on-kill nil t))
   (unless (memq buffer (my/vterm-popup--live-buffers))
@@ -287,7 +340,8 @@ When BUFFER is non-nil, return the window displaying BUFFER."
 (defun my/vterm-popup--on-kill ()
   "Clean up popup vterm state when the current buffer is killed."
   (let* ((buffer (current-buffer))
-         (buffers (my/vterm-popup--live-buffers))
+         (workspace-id my/vterm-popup-workspace-id)
+         (buffers (my/vterm-popup--live-buffers workspace-id))
          (tail (member buffer buffers))
          (next (or (cadr tail) (car buffers)))
          (window (my/vterm-popup--window buffer)))
@@ -316,6 +370,16 @@ Use BUFFER-NAME when non-nil."
                            (vterm target-name))
       (setq-local my/vterm-popup-instance-p t)
       (setq-local my/vterm-popup-fixed nil)
+      (setq-local
+       my/vterm-popup-workspace-id
+       (if (and (boundp 'remote-terminal-instance)
+                remote-terminal-instance)
+           (remote-terminal-workspace-id remote-terminal-instance)
+         (my/vterm-workspace-id default-directory)))
+      (when (and (boundp 'remote-terminal-instance)
+                 (remote-terminal-p remote-terminal-instance))
+        (remote-terminal-put-metadata
+         remote-terminal-instance :popup t))
       (my/vterm-popup-apply-ui (current-buffer))
       (add-hook 'kill-buffer-hook #'my/vterm-popup--on-kill nil t)
       (setq my/vterm-popup-buffers
@@ -366,7 +430,8 @@ Signal a user error when outside a project."
 
 (defun my/vterm-popup--next-buffer ()
   "Return the next popup vterm buffer in creation order."
-  (let* ((buffers (my/vterm-popup--live-buffers))
+  (let* ((workspace-id (my/vterm-popup--requested-workspace-id))
+         (buffers (my/vterm-popup--live-buffers workspace-id))
          (current (my/vterm-popup--current-buffer)))
     (cond
      ((null buffers)
@@ -379,7 +444,8 @@ Signal a user error when outside a project."
 
 (defun my/vterm-popup--read-buffer (prompt)
   "Read a popup vterm buffer with PROMPT."
-  (let* ((buffers (my/vterm-popup--live-buffers))
+  (let* ((workspace-id (my/vterm-popup--requested-workspace-id))
+         (buffers (my/vterm-popup--live-buffers workspace-id))
          (current (my/vterm-popup--current-buffer))
          (default (and current (buffer-name current))))
     (unless buffers
@@ -454,14 +520,15 @@ With prefix ARG, create a new popup vterm and switch to it."
 
 (defun my/vterm-popup--auto-hide (&rest _)
   "Hide the popup vterm window when a temporary instance loses focus."
-  (when-let* (((or my/vterm-popup-current-buffer
+  (unless my/vterm-popup--displaying
+    (when-let* (((or my/vterm-popup-current-buffer
                    my/vterm-popup-buffers))
-              (window (my/vterm-popup--window)))
-    (let ((buffer (window-buffer window)))
-      (unless (or (active-minibuffer-window)
-                  (eq (selected-window) window)
-                  (buffer-local-value 'my/vterm-popup-fixed buffer))
-        (my/vterm-hide-popup)))))
+                (window (my/vterm-popup--window)))
+      (let ((buffer (window-buffer window)))
+        (unless (or (active-minibuffer-window)
+                    (eq (selected-window) window)
+                    (buffer-local-value 'my/vterm-popup-fixed buffer))
+          (my/vterm-hide-popup))))))
 
 (defun vterm-toggle ()
   "Toggle the current popup vterm buffer."

@@ -28,8 +28,38 @@
 (declare-function evil-set-initial-state "evil-core")
 (declare-function vterm-copy-mode "vterm" (&optional arg))
 (declare-function vterm-copy-mode-done "vterm" (&optional arg))
+(declare-function project-current "project" (&optional maybe-prompt directory))
+(declare-function project-root "project" (project))
+(declare-function my/vterm-popup-display-buffer "init-vterm-popup" (buffer))
+(declare-function remote-canonicalize-file-name "remote-fs"
+                  (file-name &optional directory))
+(declare-function remote-environment-apply "remote-environment"
+                  (environment &optional buffer))
+(declare-function remote-context "remote-fs" (&optional path))
+(declare-function remote-context-workspace-id "remote-core" (context))
+(declare-function remote-context-target-id "remote-core" (context))
+(declare-function remote-get-target "remote-core" (target-id))
+(declare-function remote-target-shell "remote-core" (target))
+(declare-function remote-terminal-adopt "remote-terminal"
+                  (workspace buffer &rest keys))
+(declare-function remote-terminal-command "remote-terminal"
+                  (&optional workspace profile probe))
+(declare-function remote-terminal-metadata "remote-terminal" (terminal))
+(declare-function remote-terminal-name "remote-terminal" (terminal))
+(declare-function remote-terminal-workspace-id "remote-terminal" (terminal))
+(declare-function remote-workspace-context-id "remote-workspace"
+                  (&optional context))
+(declare-function remote-workspace-environment "remote-workspace" (workspace))
+(declare-function remote-workspace-open "remote-workspace"
+                  (&optional context &rest keys))
 (defvar vterm-mode-map)
 (defvar vterm-copy-mode-map)
+(defvar vterm-shell)
+(defvar remote-terminal-instance)
+(defvar remote-environment-inhibit)
+
+(defvar my/vterm-routed-shell-command nil
+  "Dynamically selected shell command for a routed VTerm launch.")
 
 (config-defvar my/vterm-startup-send-delay nil
   "Delay between retries when sending startup commands to a fresh VTerm."
@@ -47,7 +77,10 @@
   :group 'term)
 
 (defvar my/terminal-startup-cd-inhibited nil
-  "When non-nil, start terminal buffers directly in the target directory.")
+  "When non-nil, preserve a caller-supplied terminal command.
+The routed VTerm launcher still uses the logical target directory and
+workspace lifecycle; this flag only prevents replacing `vterm-shell' with the
+workspace's interactive shell profile.")
 
 (defvar-local my/vterm-target-directory nil
   "Target directory a VTerm buffer should represent after startup sync.")
@@ -439,16 +472,149 @@ If popup is focused, kill it."
     (my/vterm--set-target-directory buffer directory)
     (my/vterm-send-command buffer command)))
 
-(defun my/vterm--start-in-home-and-cd (orig-fn &rest args)
-  "Create VTerm buffers from home, then `cd' into the original directory."
-  (if-let* ((directories (my/terminal--resolve-launch-directories default-directory))
-            (startup-directory (car directories))
-            (target-directory (cdr directories)))
-      (let ((default-directory startup-directory))
-        (let ((buffer (apply orig-fn args)))
-          (my/vterm--send-cd buffer target-directory)
-          buffer))
+(defun my/vterm-workspace-context (&optional directory)
+  "Return the routed workspace context for DIRECTORY.
+Configured remote workspaces win.  Otherwise use the current project root
+when available, falling back to DIRECTORY itself."
+  (let* ((directory
+          (remote-canonicalize-file-name
+           (or (my/terminal-normalize-directory directory)
+               default-directory)))
+         (context (remote-context directory)))
+    (if (or (remote-context-workspace-id context)
+            (not
+             (equal
+              (remote-context-target-id context)
+              "local")))
+        context
+      (let ((default-directory directory))
+        (if-let* ((project
+                   (ignore-errors
+                     (project-current nil directory)))
+                  (root (project-root project)))
+            (remote-context
+             (remote-canonicalize-file-name root directory))
+          context)))))
+
+(defun my/vterm-workspace-id (&optional directory)
+  "Return the stable routed workspace ID for DIRECTORY without opening it."
+  (remote-workspace-context-id
+   (my/vterm-workspace-context directory)))
+
+(defun my/vterm--profile-shell-command (workspace context)
+  "Return WORKSPACE's terminal profile as a shell command string.
+For a remote CONTEXT, perform the lightweight cached host-facts probe so the
+actual login shell (for example bash or zsh) replaces the bootstrap `/bin/sh'.
+This does not load the full Nix/direnv environment capsule."
+  (mapconcat
+   #'shell-quote-argument
+   (remote-terminal-command
+    workspace "default"
+    (not (equal (remote-context-target-id context) "local")))
+   " "))
+
+(defun my/vterm--get-shell-routed-a (orig-fn &rest args)
+  "Use the routed shell command while calling VTerm's ORIG-FN with ARGS.
+VTerm otherwise performs its own TRAMP shell lookup for `/fs:' directories and
+can replace a correctly probed bash or zsh with `/bin/sh'."
+  (if my/vterm-routed-shell-command
+      my/vterm-routed-shell-command
     (apply orig-fn args)))
+
+(defun my/vterm--routed-launch-a (orig-fn &rest args)
+  "Launch VTerm through the logical target and adopt its native frontend.
+ORIG-FN and ARGS are the original `vterm' invocation.  VTerm retains its
+module, filter, sentinel, and UI; only process routing and workspace lifetime
+are supplied here."
+  (let* ((target-directory
+          (remote-canonicalize-file-name
+           (or (my/terminal-normalize-directory default-directory)
+               default-directory)))
+         (context (my/vterm-workspace-context target-directory))
+         (workspace
+          (remote-workspace-open
+           context
+           :connect nil
+           :load-environment
+           (equal (remote-context-target-id context) "local")))
+         (workspace-id (remote-workspace-context-id context))
+         (shell-command
+          (unless my/terminal-startup-cd-inhibited
+            (my/vterm--profile-shell-command workspace context)))
+         (default-directory target-directory)
+         (vterm-shell (or shell-command vterm-shell))
+         (my/vterm-routed-shell-command
+          (if my/terminal-startup-cd-inhibited
+              vterm-shell
+            shell-command))
+         ;; The shell-only host probe above is cached and deliberately smaller
+         ;; than a full environment capsule, which can include Nix and direnv.
+         ;; Keep the full capsule out of cold `C-c e'; the detected login shell
+         ;; initializes its target environment.
+         (remote-environment-inhibit
+          (and
+           (not (equal (remote-context-target-id context) "local"))
+           (not (remote-workspace-environment workspace))))
+         (buffer (apply orig-fn args))
+         (process (and (buffer-live-p buffer)
+                       (get-buffer-process buffer))))
+    (unless (and (buffer-live-p buffer)
+                 (processp process)
+                 (process-live-p process))
+      (error "VTerm did not create a live terminal process"))
+    (when-let* ((existing
+                 (buffer-local-value 'remote-terminal-instance buffer))
+                ((not
+                  (equal
+                   (remote-terminal-workspace-id existing)
+                   workspace-id))))
+      (error "VTerm %s belongs to %s, not %s"
+             (buffer-name buffer)
+             (remote-terminal-workspace-id existing)
+             workspace-id))
+    (remote-terminal-adopt
+     workspace buffer
+     :process process
+     :name (buffer-name buffer)
+     :profile (unless my/terminal-startup-cd-inhibited "default")
+     :metadata
+     (list
+      :frontend 'vterm
+      :directory target-directory
+      :restart-function #'my/vterm--restart-terminal
+      :shell-command
+      (and my/terminal-startup-cd-inhibited vterm-shell)))
+    ;; Project the already-resolved capsule only after `vterm-mode' has left
+    ;; its dynamic `process-environment' binding.  The child received the same
+    ;; capsule at spawn time; this keeps later buffer-local subprocesses in
+    ;; agreement without triggering Emacs' locally-let-bound warning.
+    (when-let* ((environment
+                 (remote-workspace-environment workspace)))
+      (remote-environment-apply environment buffer))
+    (my/vterm--set-target-directory buffer target-directory)
+    buffer))
+
+(defun my/vterm--restart-terminal (terminal _workspace)
+  "Recreate native VTerm TERMINAL after an explicit remote restart."
+  (let* ((metadata (remote-terminal-metadata terminal))
+         (directory (plist-get metadata :directory))
+         (shell-command (plist-get metadata :shell-command))
+         (popup (plist-get metadata :popup))
+         (default-directory directory)
+         (my/terminal-startup-cd-inhibited (and shell-command t))
+         (vterm-shell (or shell-command vterm-shell))
+         (buffer
+          (save-window-excursion
+            (vterm (remote-terminal-name terminal)))))
+    (when (and popup
+               (fboundp 'my/vterm-popup-display-buffer))
+      (my/vterm-popup-display-buffer buffer))
+    buffer))
+
+(define-obsolete-function-alias
+  'my/vterm--start-in-home-and-cd
+  #'my/vterm--routed-launch-a
+  "2026-07")
 
 (defun my/vterm--ssh-target-directory (host)
   "Return the preferred TRAMP directory for SSH HOST."
@@ -663,8 +829,13 @@ If popup is focused, kill it."
   (vterm-shell "zsh")
   (vterm-always-compile-module nil)
   :config
+  (advice-remove 'vterm--get-shell #'my/vterm--get-shell-routed-a)
+  (advice-add 'vterm--get-shell :around #'my/vterm--get-shell-routed-a)
   (my/vterm-copy-mode-setup-keys)
-  (advice-add 'vterm :around #'my/vterm--start-in-home-and-cd))
+  ;; Remove the former home-then-cd wrapper when reloading this module in a
+  ;; running Emacs.  Routed process startup can enter the target cwd directly.
+  (advice-remove 'vterm #'my/vterm--start-in-home-and-cd)
+  (advice-add 'vterm :around #'my/vterm--routed-launch-a))
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'eshell-mode 'emacs))

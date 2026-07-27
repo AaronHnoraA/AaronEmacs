@@ -75,6 +75,7 @@ a chance to affect the rest of the module graph."
 
 (setq gc-cons-threshold most-positive-fixnum
       gc-cons-percentage 0.6
+      garbage-collection-messages nil
       frame-inhibit-implied-resize t
       file-name-handler-alist nil)
 
@@ -197,16 +198,28 @@ undecorated frames poorly.")
 Use nil for a normal window, `maximized' for a maximized window, or
 `fullboth' for a fullscreen window.")
 
-;; Emacs 启动完成后恢复正常 GC 和 file-name-handler 设置
-(add-hook 'emacs-startup-hook
-          (lambda ()
-            (setq file-name-handler-alist my/original-file-name-handler-alist)
-            ;; Once `gcmh' starts, let it own GC policy. Otherwise, restore to
-            ;; a saner interactive threshold than Emacs' tiny default.
-            (unless (bound-and-true-p gcmh-mode)
-              (setq gc-cons-threshold (max my/original-gc-cons-threshold
-                                           (* 16 1024 1024))
-                    gc-cons-percentage my/original-gc-cons-percentage))))
+;; Restore normal GC and file-name dispatch as soon as init has finished.
+;;
+;; `emacs-startup-hook' is not a reliable restoration boundary for daemon
+;; startup: a daemon can begin serving buffers before that hook runs.  Restoring
+;; by assignment is also unsafe because packages may have registered additional
+;; handlers while init was loading.  Merge the saved entries instead, preserving
+;; both the original TRAMP dispatcher and handlers installed during init.
+(defun my/restore-startup-runtime-settings ()
+  "Restore file-name handlers and the normal post-init GC policy.
+This function is idempotent so `after-init-hook' and the startup fallback may
+both call it."
+  (dolist (handler my/original-file-name-handler-alist)
+    (add-to-list 'file-name-handler-alist handler t))
+  ;; Once `gcmh' starts, let it own GC policy. Otherwise, restore to a saner
+  ;; interactive threshold than Emacs' tiny default.
+  (unless (bound-and-true-p gcmh-mode)
+    (setq gc-cons-threshold (max my/original-gc-cons-threshold
+                                 (* 16 1024 1024))
+          gc-cons-percentage my/original-gc-cons-percentage)))
+
+(add-hook 'after-init-hook #'my/restore-startup-runtime-settings)
+(add-hook 'emacs-startup-hook #'my/restore-startup-runtime-settings)
 
 
 (let ((frame-params

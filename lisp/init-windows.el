@@ -674,6 +674,27 @@ available to explicit buffer-switching commands."
     (setq dirvish-attributes
           '(nerd-icons vc-state git-msg file-size subtree-state collapse file-time)))
 
+  ;; Dirvish normally starts a second Emacs to collect attributes.  In a
+  ;; remote Dired buffer that child inherits the remote default-directory and
+  ;; tries to execute the local `dirvish-emacs-bin' on the target.  Skip that
+  ;; optional fast path for every remote namespace; Dired/TRAMP already
+  ;; supplied the listing and Dirvish can initialize from it directly.
+  (defun my/dirvish-dir-data-async-remote-a
+      (function directory buffer &optional inhibit-setup)
+    "Avoid spawning Dirvish's local metadata helper on remote DIRECTORY."
+    (if (file-remote-p directory)
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (dirvish-prop :vc-backend 0)
+            (dirvish-data-for-dir directory buffer inhibit-setup)))
+      (funcall function directory buffer inhibit-setup)))
+
+  (advice-remove
+   'dirvish--dir-data-async #'my/dirvish-dir-data-async-remote-a)
+  (advice-add
+   'dirvish--dir-data-async
+   :around #'my/dirvish-dir-data-async-remote-a)
+
   ;; 4) 如果你希望 P 键在没有 peek 函数时也不报错，做一个安全绑定
   (unless (fboundp 'dirvish-peek-mode)
     (define-key dirvish-mode-map (kbd "P") #'ignore)))

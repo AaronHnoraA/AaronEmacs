@@ -10,12 +10,14 @@ BOOTSTRAP_EXPORT = BOOTSTRAP_MODE=export $(BOOTSTRAP)
 BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
 TEXPRESSO_DIR ?= $(CURDIR)/var/texpresso
 TEXPRESSO_REPOSITORY ?= https://github.com/let-def/texpresso.git
+REMOTE_TEST_BATCH = $(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t)' -L lisp -L lisp/remote -L lisp/remote/backend
 
 .PHONY: default help up setup setup-full bootstrap-health install remote-ikernel-install lock audit-lock doctor build build-force \
         aaronnote-build texpresso-install texpresso-build texpresso-test \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native \
+        remote-test remote-e2e \
         publish publish-force publish-build publish-deploy publish-clean
 
 default: up
@@ -54,6 +56,8 @@ help:
 	  '  make health-startup       Run startup smoke check' \
 	  '  make health-byte          Run byte-compile smoke check' \
 	  '  make health-native        Run native-compile smoke check' \
+	  '  make remote-test          Run isolated remote framework ERT suites' \
+	  '  make remote-e2e           Run opt-in real SSH E2E (REMOTE_E2E_TARGET optional)' \
 	  '' \
 	  '  make publish              Build site + deploy (git push + optional NAS rsync)' \
 	  '  make publish-force        Force full rebuild + deploy (skip incremental state check)' \
@@ -167,6 +171,13 @@ health-byte:
 
 health-native:
 	$(BATCH) --eval '(prin1 (my/health-native-compile-check))'
+
+remote-test:
+	$(REMOTE_TEST_BATCH) -l test/remote-tests.el -f ert-run-tests-batch-and-exit
+	$(REMOTE_TEST_BATCH) -l test/remote-framework-tests.el -f ert-run-tests-batch-and-exit
+
+remote-e2e:
+	REMOTE_E2E=1 $(REMOTE_TEST_BATCH) -l test/remote-e2e-tests.el -f ert-run-tests-batch-and-exit
 
 # ── Publish ────────────────────────────────────────────────────────────────
 publish:

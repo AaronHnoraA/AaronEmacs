@@ -315,14 +315,21 @@ emacs --debug-init -q -l ./bootstrap.el
 
 文件：
 
+- [lisp/remote/](../lisp/remote/)
+- [etc/remote.json](../etc/remote.json)
 - [lisp/init-shell.el](../lisp/init-shell.el)
-- [lisp/init-base.el](../lisp/init-base.el)
 
 重点：
 
+- `remote-board`
+- `remote-register-link-plugin` / `remote-register-adapter`
+- `remote-make-process` / `remote-exec`
+- `remote-environment-ensure` / `remote-environment-derive`
 - `my/vterm-ssh`
-- `my/ssh-config-hosts`
-- TRAMP 相关 `setq`
+
+target、link、TRAMP/tramp-rpc 后端、逻辑 `/fs` 路径和 PATH 环境层的完整设计见
+[remote-framework.md](remote-framework.md)。`lisp/remote/` 只放框架；具体插件接入
+留在所属模块。
 
 ## 12. 我要改项目管理行为
 
@@ -525,7 +532,12 @@ M-x aaron-neopyter-detect-jupyter-root
 
 **合并策略**：按 mode key（`nil` / `python-ts-mode` 等）合并，每个 mode 内按变量名合并，模板值覆盖旧值，新 mode 追加到末尾。
 
-**env 刷新**：`SPC p e r` 在 dir-locals 重载后会调用 `my/direnv-update-environment-maybe`，使 PATH、编译器路径等 shell 层变量在 Emacs 里同步更新，不需要重启。
+**env 刷新**：`SPC p e r` 在 dir-locals 重载后会调用
+`my/direnv-update-environment-maybe`。仓库内置的
+[lisp/direnv.el](../lisp/direnv.el) 把 direnv 注册为 Remote 框架的 workspace
+environment maintainer；本地与远端都生成隔离的 `target@workspace` 环境实例，
+远端执行优先 tramp-rpc、回退 TRAMP。PATH、编译器路径等变量只投影到所属 buffer
+和它启动的进程，不需要重启，也不会污染别的 target。
 
 **`eval` 说明**：`silence` 命令跳过 `eval` 条目（涉及安全确认）。如需 silence `eval` 形式，手动将其加入 `safe-local-eval-forms`。
 

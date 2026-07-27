@@ -13,6 +13,12 @@ reconstructing the system from scattered Elisp:
   compile helpers, bootstrap, and recovery.
 - `docs/dev-guide.md` covers completion, LSP, projects, TRAMP, terminals,
   browser/Appine, and AI integrations.
+- `docs/remote-framework.md` is authoritative for logical `/fs` paths,
+  target/pipeline/backend/session routing, routed processes and channels, and
+  environment/PATH capsules.
+- `docs/remote-parity.md` defines what “VS Code Remote-level” completion means;
+  a registered capability without local, remote, and resilience tests is not
+  complete.
 - `docs/lsp-workflow.org` covers the LSP route model, Hub, Doctor, and how to
   add new routes or Eglot server mappings.
 - `docs/jupyter-workflow.org` covers Org Babel, existing-kernel workflows,
@@ -45,8 +51,9 @@ When adding a module:
 - End it with `(provide 'init-foo)`.
 - Add it to `lisp/init-modules.el` in dependency order.
 - Use `declare-function` for cross-module calls when byte compilation needs it.
-- Keep local names under the existing `my/` convention; hook helpers usually
-  use a `*-h` suffix.
+- Keep application-local names under the existing `my/` convention; hook
+  helpers usually use a `*-h` suffix.  The public remote framework is the
+  deliberate exception and uses the `remote-*` namespace without `my/`.
 
 ## Do Not Reinvent Existing Surfaces
 
@@ -180,6 +187,17 @@ LSP:
 - `lsp-mode` is opt-in per major mode through
   `my/register-lsp-mode-preference`.
 - Custom Eglot mappings go through `my/register-eglot-server-program`.
+- Eglot and lsp-mode startup must use the shared `language-server` remote
+  adapter.  Server placement defaults to the active target/workspace; resolve
+  executables from its environment and never embed `/ssh:` or `/rpc:` paths in
+  contacts.  Mark only genuine client-side UI helpers as client placement.
+- Remote language integrations must preserve local feature parity.  For
+  multi-process tools such as Lean, Node, Lake, workers, and helper ports must
+  share the target environment; target-side HTTP/TCP helpers reach the client
+  through `remote-channel` forwarding.
+- Give each language-helper process instance its own owned discovery/port file;
+  never let concurrent reconnects overwrite a project-global endpoint file.
+  Validate local owners and clean up only files owned by the exiting process.
 - Keep the three-layer split: `init-lsp.el` for routing/core setup,
   `init-lsp-ops.el` for backend-agnostic commands, and `init-lsp-tools.el` for
   Hub/Doctor/dispatch/session knobs.
@@ -218,10 +236,31 @@ Projects/remote/terminal:
 - Project workflow is Projectile + Perspective + Transient + Treemacs/show-imenu.
 - Project behavior belongs mostly in `lisp/init-project.el`; project shortcuts
   live in `lisp/init-evil.el`.
-- Remote editing uses TRAMP directly; interactive remote terminals should
-  prefer `my/vterm-ssh`, which reads `~/.ssh/config`.
-- SSH/TRAMP is configured for power use; do not silently strip features for
-  remote buffers.
+- Treat local files as target `local` and keep buffer/project identity in
+  canonical `/fs:TARGET:/path` form.  `/ssh:` and `/rpc:` are compatibility
+  inputs, not identities for new code.
+- New custom file, process, executable, LSP, and environment integrations must
+  use the APIs in `docs/remote-framework.md`.  Do not infer policy by parsing
+  TRAMP method strings and do not expose physical backend paths outside a
+  backend or explicit OS boundary.
+- Treat SSH, FRP, Tailscale, jump hosts, and forwarding as ordered pipeline
+  stages; treat native, TRAMP, and tramp-rpc as execution backends.  Do not
+  collapse these two layers back into a single method string.
+- Network operations without a file-name argument must use the explicit
+  `remote-channel` APIs.  An unsupported remote channel must fail rather than
+  silently opening a socket on the client machine.
+- Keep `lisp/remote/` framework-only.  Consumers such as direnv, Eglot, Lean,
+  Aaronote, terminals, and project tools stay in their owning modules and
+  register adapters or environment maintainers.
+- PATH must remain target/workspace isolated and ID-addressable.  Model changes
+  as inherited maintainer/decorator layers; do not mutate global `exec-path` or
+  reuse one remote target's environment for another.
+- Prefer `remote-make-process`, `remote-process-file`, `remote-exec`, and
+  `remote-executable-find` for custom processes.  Let ordinary Emacs file APIs
+  flow through the `/fs` handler.
+- SSH/TRAMP remains the compatibility foundation and fallback.  Do not silently
+  strip features from remote buffers; route faster adapters such as tramp-rpc
+  only when their capability and trust checks pass.
 
 ## Documentation Rules
 

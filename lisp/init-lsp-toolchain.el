@@ -40,11 +40,17 @@ optional `:apply' and `:after-select' callbacks.")
 (defvar-local my/language-server-toolchain--saved-workspace-local-p nil)
 (defvar-local my/language-server-toolchain--saved-server-programs nil)
 (defvar-local my/language-server-toolchain--saved-server-programs-local-p nil)
+(defvar-local my/language-server-toolchain--saved-remote-environment nil)
+(defvar-local my/language-server-toolchain--saved-lsp-variables nil
+  "Variables made buffer-local by the active toolchain.
+Each entry is `(SYMBOL LOCAL-P VALUE)'.")
 
 (declare-function eglot-current-server "eglot")
 (declare-function eglot-managed-p "eglot")
 (declare-function eglot-shutdown "eglot" (server))
-(declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
+(declare-function lsp-disconnect "lsp-mode" ())
+(declare-function my/direnv-update-environment-maybe
+                  "init-direnv" (&optional path callback))
 (declare-function my/language-server--merge-values "init-lsp" (base override))
 (declare-function my/language-server-apply-eglot-local-settings "init-lsp")
 (declare-function my/language-server-apply-process-environment "init-lsp")
@@ -254,6 +260,9 @@ DISCOVER returns profile plists for a project root.  PROPERTIES accepts
     (setq-local process-environment
                 (copy-sequence my/language-server-toolchain--saved-process-environment))
     (setq-local exec-path (copy-sequence my/language-server-toolchain--saved-exec-path))
+    (when (boundp 'remote-buffer-environment)
+      (setq-local remote-buffer-environment
+                  my/language-server-toolchain--saved-remote-environment))
     (if my/language-server-toolchain--saved-workspace-local-p
         (setq-local eglot-workspace-configuration
                     (copy-tree my/language-server-toolchain--saved-workspace))
@@ -262,13 +271,31 @@ DISCOVER returns profile plists for a project root.  PROPERTIES accepts
         (setq-local eglot-server-programs
                     (copy-tree my/language-server-toolchain--saved-server-programs))
       (kill-local-variable 'eglot-server-programs))
+    (dolist (entry my/language-server-toolchain--saved-lsp-variables)
+      (pcase-let ((`(,variable ,local-p ,value) entry))
+        (if local-p
+            (set (make-local-variable variable) value)
+          (kill-local-variable variable))))
     (setq my/language-server-toolchain--applied-profile nil
           my/language-server-toolchain--saved-process-environment nil
           my/language-server-toolchain--saved-exec-path nil
           my/language-server-toolchain--saved-workspace nil
           my/language-server-toolchain--saved-workspace-local-p nil
           my/language-server-toolchain--saved-server-programs nil
-          my/language-server-toolchain--saved-server-programs-local-p nil)))
+          my/language-server-toolchain--saved-server-programs-local-p nil
+          my/language-server-toolchain--saved-remote-environment nil
+          my/language-server-toolchain--saved-lsp-variables nil)))
+
+(defun my/language-server-toolchain-set-local-variable (variable value)
+  "Set VARIABLE buffer-locally to VALUE and make it restorable.
+Providers use this for client-specific lsp-mode settings without leaking one
+project's SDK, server cache, or workspace directory into another buffer."
+  (unless (assq variable my/language-server-toolchain--saved-lsp-variables)
+    (push (list variable
+                (local-variable-p variable)
+                (and (boundp variable) (symbol-value variable)))
+          my/language-server-toolchain--saved-lsp-variables))
+  (set (make-local-variable variable) value))
 
 (defun my/language-server-toolchain--prepend-path (directories)
   "Prepend existing DIRECTORIES to buffer-local PATH and `exec-path'."
@@ -290,6 +317,19 @@ DISCOVER returns profile plists for a project root.  PROPERTIES accepts
                            (seq-remove (lambda (item) (member item directories)) current))))
         (setenv "PATH" (mapconcat #'identity path path-separator))))))
 
+(defun my/language-server-toolchain--target-paths (directories root)
+  "Return existing target-native DIRECTORIES relative to ROOT."
+  (delq nil
+        (mapcar
+         (lambda (directory)
+           (when (stringp directory)
+             (let ((path (expand-file-name directory root)))
+               (when (file-directory-p path)
+                 (if (fboundp 'remote-file-local-name)
+                     (remote-file-local-name path)
+                   path)))))
+         directories)))
+
 (defun my/language-server-toolchain-apply-environment ()
   "Apply the effective toolchain environment to the current buffer."
   (my/language-server-toolchain-restore-buffer)
@@ -306,19 +346,44 @@ DISCOVER returns profile plists for a project root.  PROPERTIES accepts
           my/language-server-toolchain--saved-server-programs-local-p
           (local-variable-p 'eglot-server-programs)
           my/language-server-toolchain--saved-server-programs
-          (and (boundp 'eglot-server-programs) (copy-tree eglot-server-programs)))
+          (and (boundp 'eglot-server-programs) (copy-tree eglot-server-programs))
+          my/language-server-toolchain--saved-remote-environment
+          (and (boundp 'remote-buffer-environment)
+               remote-buffer-environment))
     (setq-local process-environment (copy-sequence process-environment))
-    (let ((environment
-           (my/language-server-toolchain--resolve-value
-            (plist-get profile :env) root)))
-      (dolist (entry environment)
-        (when (consp entry)
-          (setenv (format "%s" (car entry))
-                  (when (cdr entry) (format "%s" (cdr entry)))))))
-    (let ((paths (my/language-server-toolchain--resolve-value
-                  (plist-get profile :path-prepend) root)))
-      (my/language-server-toolchain--prepend-path
-       (if (listp paths) paths (and paths (list paths)))))
+    (let* ((environment
+            (my/language-server-toolchain--resolve-value
+             (plist-get profile :env) root))
+           (paths
+            (my/language-server-toolchain--resolve-value
+             (plist-get profile :path-prepend) root))
+           (paths (if (listp paths) paths (and paths (list paths)))))
+      (if (and (boundp 'remote-buffer-environment)
+               remote-buffer-environment
+               (fboundp 'remote-environment-derive)
+               (fboundp 'remote-environment-apply))
+          (let* ((profile-id (format "%s" (plist-get profile :id)))
+                 (id
+                  (or (and (fboundp 'remote-normalize-id)
+                           (remote-normalize-id profile-id t))
+                      (format "toolchain-%s"
+                              (substring
+                               (secure-hash 'sha1 profile-id) 0 10))))
+                 (derived
+                  (remote-environment-derive
+                   remote-buffer-environment id
+                   :scope 'toolchain
+                   :vars environment
+                   :path-prepend
+                   (my/language-server-toolchain--target-paths
+                    paths root)
+                   :source (list 'toolchain id))))
+            (remote-environment-apply derived))
+        (dolist (entry environment)
+          (when (consp entry)
+            (setenv (format "%s" (car entry))
+                    (when (cdr entry) (format "%s" (cdr entry))))))
+        (my/language-server-toolchain--prepend-path paths)))
     (when-let* ((program
                  (my/language-server-toolchain--resolve-value
                   (plist-get profile :server-program) root)))
@@ -354,20 +419,32 @@ DISCOVER returns profile plists for a project root.  PROPERTIES accepts
    (buffer-list)))
 
 (defun my/language-server-toolchain--reapply (root family)
-  "Reapply the selected ROOT/FAMILY toolchain and restart active Eglot servers."
+  "Reapply ROOT/FAMILY and restart active Eglot or lsp-mode clients."
   (let* ((buffers (my/language-server-toolchain--affected-buffers root family))
-         (managed (seq-filter
-                   (lambda (buffer)
-                     (with-current-buffer buffer
-                       (and (fboundp 'eglot-managed-p) (eglot-managed-p))))
-                   buffers))
+         (eglot-managed
+          (seq-filter
+           (lambda (buffer)
+             (with-current-buffer buffer
+               (and (fboundp 'eglot-managed-p) (eglot-managed-p))))
+           buffers))
+         (lsp-managed
+          (seq-filter
+           (lambda (buffer)
+             (with-current-buffer buffer
+               (bound-and-true-p lsp-managed-mode)))
+           buffers))
+         (managed (delete-dups (append eglot-managed lsp-managed)))
          servers)
-    (dolist (buffer managed)
+    (dolist (buffer eglot-managed)
       (with-current-buffer buffer
         (when-let* ((server (ignore-errors (eglot-current-server))))
           (cl-pushnew server servers))))
     (dolist (server servers)
       (ignore-errors (eglot-shutdown server)))
+    (dolist (buffer lsp-managed)
+      (with-current-buffer buffer
+        (when (fboundp 'lsp-disconnect)
+          (ignore-errors (lsp-disconnect)))))
     (dolist (buffer buffers)
       (with-current-buffer buffer
         (my/language-server-toolchain-restore-buffer)
@@ -375,8 +452,15 @@ DISCOVER returns profile plists for a project root.  PROPERTIES accepts
           (my/direnv-update-environment-maybe root))
         (when (fboundp 'my/language-server-apply-process-environment)
           (my/language-server-apply-process-environment))
-        (when (fboundp 'my/language-server-apply-eglot-local-settings)
-          (my/language-server-apply-eglot-local-settings))))
+        (pcase
+            (and (fboundp 'my/language-server-preferred-backend)
+                 (my/language-server-preferred-backend))
+          ('lsp-mode
+           (when (fboundp 'my/language-server-apply-lsp-local-settings)
+             (my/language-server-apply-lsp-local-settings)))
+          (_
+           (when (fboundp 'my/language-server-apply-eglot-local-settings)
+             (my/language-server-apply-eglot-local-settings))))))
     (dolist (buffer managed)
       (when (buffer-live-p buffer)
         (with-current-buffer buffer

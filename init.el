@@ -128,6 +128,7 @@
 (setq debug-on-error init-file-debug)
 
 (let* ((dir (locate-user-emacs-file "lisp"))
+       (remote-dir (expand-file-name "remote" dir))
        (org-dir (expand-file-name "org" dir))
        (git-dir (expand-file-name "git" dir))
        (roam-dir (expand-file-name "roam" dir))
@@ -138,6 +139,7 @@
        (aaron-ui-dir (locate-user-emacs-file "site-lisp/aaron-ui"))
        (config-dir (locate-user-emacs-file "site-lisp/config")))
   (add-to-list 'load-path (file-name-as-directory dir))
+  (add-to-list 'load-path (file-name-as-directory remote-dir))
   (add-to-list 'load-path (file-name-as-directory config-dir))
   (add-to-list 'load-path (file-name-as-directory org-dir))
   (add-to-list 'load-path (file-name-as-directory git-dir))

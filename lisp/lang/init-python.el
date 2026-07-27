@@ -15,6 +15,9 @@
 (declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
 (declare-function my/register-language-server-toolchain-provider "init-lsp-toolchain"
                   (family modes discover &rest properties))
+(declare-function remote-file-local-name "remote-fs" (file-name))
+(declare-function remote-file-name-target "remote-fs" (file-name))
+(declare-function remote-make-file-name "remote-fs" (target-id localname))
 (declare-function eglot-alternatives "eglot" (alternatives))
 (defvar imenu-create-index-function)
 (defvar-local my/python-imenu-backend nil
@@ -31,7 +34,9 @@ language-server executable itself remains independently managed."
 
 (defun my/python-toolchain--command-json (program &rest arguments)
   "Run PROGRAM with ARGUMENTS and return the last JSON object it prints."
-  (when (and program (file-executable-p program))
+  (when (and program
+             (file-executable-p
+              (my/python-toolchain--logical-executable program)))
     (with-temp-buffer
       (when (zerop (apply #'process-file program nil t nil arguments))
         (goto-char (point-max))
@@ -41,10 +46,30 @@ language-server executable itself remains independently managed."
                                  :null-object nil :false-object nil)
             (error nil)))))))
 
+(defun my/python-toolchain--logical-executable (path)
+  "Project target-native executable PATH into the current logical target."
+  (if (and (stringp path)
+           (file-name-absolute-p path)
+           (file-remote-p default-directory)
+           (not (file-remote-p path))
+           (fboundp 'remote-file-name-target)
+           (fboundp 'remote-make-file-name))
+      (remote-make-file-name
+       (remote-file-name-target default-directory) path)
+    path))
+
 (defun my/python-toolchain--canonical-executable (path)
   "Return a canonical executable PATH, or nil when it cannot be run."
-  (when (and (stringp path) (file-executable-p path))
-    (or (ignore-errors (file-truename path)) (expand-file-name path))))
+  (when-let* ((logical (and (stringp path)
+                            (my/python-toolchain--logical-executable path)))
+              ((file-executable-p logical))
+              (canonical
+               (or (ignore-errors (file-truename logical))
+                   (expand-file-name logical))))
+    (if (and (file-remote-p canonical)
+             (fboundp 'remote-file-local-name))
+        (remote-file-local-name canonical)
+      canonical)))
 
 (defun my/python-toolchain--workspace (executable &optional extra-paths)
   "Build Eglot workspace settings for EXECUTABLE and EXTRA-PATHS."
@@ -91,7 +116,7 @@ language-server executable itself remains independently managed."
 
 (defun my/python-toolchain--conda-profiles ()
   "Return profiles reported by the active Conda installation."
-  (when-let* ((conda (executable-find "conda"))
+  (when-let* ((conda (my/language-server-executable-find "conda"))
               (data (my/python-toolchain--command-json conda "env" "list" "--json"))
               (environments (alist-get "envs" data nil nil #'string=)))
     (let* ((info (my/python-toolchain--command-json conda "info" "--json"))
@@ -114,7 +139,7 @@ language-server executable itself remains independently managed."
 
 (defun my/python-toolchain--sage-profile (root)
   "Return a dynamically resolved Sage profile for ROOT."
-  (when-let* ((sage (executable-find "sage"))
+  (when-let* ((sage (my/language-server-executable-find "sage"))
               (code (concat
                      "import json, site, sys\n"
                      "try:\n import sage.version as sv; version = sv.version\n"
@@ -156,7 +181,8 @@ language-server executable itself remains independently managed."
   "Return Python executables visible on PATH."
   (let (profiles)
     (dolist (program '("python3" "python") (nreverse profiles))
-      (when-let* ((executable (executable-find program))
+      (when-let* ((executable
+                   (my/language-server-executable-find program))
                   (profile
                    (my/python-toolchain--profile
                     (format "python:%s" executable)

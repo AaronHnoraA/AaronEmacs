@@ -2103,8 +2103,11 @@ interrupt the current window layout.")
 
 (config-register-file 'remote
   :group 'remote
-  :doc "Remote connection board hosts (JSON)."
-  :path (expand-file-name "etc/remote.json" user-emacs-directory))
+  :doc "Logical remote targets, links, imports, and route preferences (JSON)."
+  :path (expand-file-name "etc/remote.json" user-emacs-directory)
+  :loader (lambda ()
+            (when (fboundp 'remote-config-reload)
+              (remote-config-reload))))
 
 (config-register-file 'custom
   :group 'startup

@@ -110,6 +110,20 @@ terminal `ssh', which makes remote failures harder to reason about."
   :type 'integer
   :group 'tramp)
 
+(config-defvar remote-connection-open-timeout 8
+  "Framework deadline for establishing a target/pipeline/backend session.
+SSH backends also project this value into route-local SSH connect options."
+  :type '(choice (const :tag "No framework deadline" nil)
+                 (number :tag "Seconds"))
+  :group 'remote)
+
+(config-defvar tramp-rpc-ssh-options nil
+  "Additional SSH options used by the tramp-rpc backend.
+Keep a bounded ConnectTimeout so an offline pipeline is cooled promptly
+instead of leaving selection and idle timers visibly retrying."
+  :type '(repeat string)
+  :group 'tramp-rpc)
+
 (config-defvar tramp-session-timeout nil
   "TRAMP session timeout in seconds."
   :type 'integer

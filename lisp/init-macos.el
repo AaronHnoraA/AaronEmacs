@@ -197,8 +197,24 @@ Use nil for a regular window, `maximized' for a maximized window, or
 (defun my/macos-open--normalize-target (target)
   "Return TARGET in a form suitable for the macOS open command."
   (let* ((target (string-trim (substring-no-properties target)))
+         (target
+          (if (and (string-prefix-p "fs://" target)
+                   (fboundp 'remote-uri-to-file-name))
+              (remote-uri-to-file-name target)
+            target))
          (expanded (and (not (string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" target))
-                        (expand-file-name target))))
+                        (expand-file-name target)))
+         (expanded
+          (if (and expanded
+                   (fboundp 'remote-fs-file-name-p)
+                   (remote-fs-file-name-p expanded))
+              (progn
+                (unless (equal (remote-file-name-target expanded) "local")
+                  (user-error
+                   "macOS open cannot directly access target %s"
+                   (remote-file-name-target expanded)))
+                (remote-file-local-name expanded))
+            expanded)))
     (cond
      ((string-empty-p target) nil)
      ((string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" target) target)

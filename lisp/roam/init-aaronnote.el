@@ -40,6 +40,12 @@
 (declare-function my/copilot-aaronnote-bridge-url "init-copilot" ())
 (declare-function my/zotero-open-reference "init-latex" (payload))
 (declare-function my/zotero-import-bibtex "init-latex" (payload))
+(declare-function remote-expand-file-name
+                  "remote-fs" (file-name &optional directory target))
+(declare-function remote-fs-file-name-p "remote-fs" (file-name))
+(declare-function remote-canonicalize-file-name
+                  "remote-fs" (file-name &optional directory))
+(defvar remote-mode nil)
 (defvar my/appine-tab-list)
 (defvar my/xwidget--session-id)
 
@@ -310,7 +316,41 @@ the backend.  The backend is chosen here, not per export."
   "Return canonical absolute FILE for Aaronnote bookkeeping, or nil."
   (and (stringp file)
        (not (string-empty-p file))
-       (expand-file-name file)))
+       (cond
+        ((and (bound-and-true-p remote-mode)
+              (fboundp 'remote-expand-file-name))
+         ;; Aaronnote's web host runs locally.  Raw host paths (including
+         ;; `~/...') therefore belong to the local target; an already logical
+         ;; or TRAMP path retains its encoded target and is rejected later by
+         ;; `my/aaronnote--host-file' when the local host cannot serve it.
+         (remote-expand-file-name
+          file nil
+          (unless
+              (or (and (fboundp 'remote-fs-file-name-p)
+                       (remote-fs-file-name-p file))
+                  (string-match-p "\\`fs://" file)
+                  (file-remote-p file))
+            "local")))
+        ((and (bound-and-true-p remote-mode)
+              (fboundp 'remote-canonicalize-file-name))
+         (remote-canonicalize-file-name file))
+        (t
+         (expand-file-name file)))))
+
+(defun my/aaronnote--host-file (file)
+  "Return the local host path represented by logical FILE.
+The Aaronnote web host is local; a non-local target requires a future
+server-side adapter instead of leaking TRAMP or `/fs:' syntax to Node."
+  (when-let* ((file (my/aaronnote--canonical-file file)))
+    (if (and (bound-and-true-p remote-mode)
+             (fboundp 'remote-file-name-target)
+             (fboundp 'remote-file-local-name))
+        (progn
+          (unless (equal (remote-file-name-target file) "local")
+            (user-error "Aaronnote cannot open target %s with its local web host"
+                        (remote-file-name-target file)))
+          (remote-file-local-name file))
+      (expand-file-name file))))
 
 (defun my/aaronnote--xwidget-session-id (&optional file)
   "Return the stable xwidget session/client id for FILE."
@@ -328,7 +368,7 @@ the backend.  The backend is chosen here, not per export."
   (let ((base (my/aaronnote--server-url "/"))
         params)
     (when-let* ((file (my/aaronnote--canonical-file file)))
-      (push (cons "file" file) params))
+      (push (cons "file" (my/aaronnote--host-file file)) params))
     (when (and (stringp client) (not (string-empty-p client)))
       (push (cons "client" client) params))
     (dolist (param extra-params)
@@ -501,17 +541,23 @@ reconnect without a reload and without losing their in-memory editor state."
               (format "AARONNOTE_COPILOT_MAX_HEAP_MB=%d"
                       my/copilot-server-max-heap-mb)))))
            process-environment))
-         (proc (make-process
-                :name "aaronnote-web-host"
-                :buffer log-buf
-                :command (append (list "node")
-                                  (when my/aaronnote-web-host-max-heap-mb
-                                    (list (format "--max-old-space-size=%d"
-                                                  my/aaronnote-web-host-max-heap-mb)))
-                                  (list my/aaronnote--web-host-script))
-                :noquery t
-                :sentinel #'my/aaronnote--sentinel
-                :filter #'my/aaronnote--process-filter)))
+         (proc
+          (let ((default-directory user-emacs-directory))
+            (make-process
+             :name "aaronnote-web-host"
+             :buffer log-buf
+             :command
+             (append
+              (list "node")
+              (when my/aaronnote-web-host-max-heap-mb
+                (list
+                 (format "--max-old-space-size=%d"
+                         my/aaronnote-web-host-max-heap-mb)))
+              (list (my/aaronnote--host-file
+                     my/aaronnote--web-host-script)))
+             :noquery t
+             :sentinel #'my/aaronnote--sentinel
+             :filter #'my/aaronnote--process-filter))))
     (with-current-buffer log-buf (erase-buffer))
     (setq my/aaronnote--process proc)
     proc))
@@ -788,7 +834,7 @@ When BUFFER is nil, inspect the current buffer."
          `((type . "client-close")
            (client . ,client)
            ,@(when (and (stringp file) (not (string-empty-p file)))
-               `((file . ,file)))))
+               `((file . ,(my/aaronnote--host-file file))))))
       (error nil))))
 
 (defun my/aaronnote--cleanup-buffer ()
@@ -869,7 +915,12 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
         (my/aaronnote-keys-mode 1)
         (when file
           (setq-local default-directory
-                      (file-name-as-directory (file-name-directory file))))
+                      (file-name-as-directory (file-name-directory file)))
+          ;; Xwidget buffers acquire their project directory after their
+          ;; major-mode hooks have run.  Notify the environment integration at
+          ;; the point where the directory actually becomes authoritative.
+          (when (fboundp 'my/direnv-schedule-current-buffer)
+            (my/direnv-schedule-current-buffer)))
         (add-hook 'kill-buffer-hook #'my/aaronnote--cleanup-buffer nil t)
         (when (and rename
                    (eq major-mode 'xwidget-webkit-mode)
@@ -1067,7 +1118,8 @@ reusing a remembered one."
 (defun my/aaronnote--open-file-in-web (file)
   "Ask the already open Aaronnote page to open FILE."
   (my/aaronnote--sync-app-buffer-file file)
-  (my/aaronnote--post `((type . "open") (file . ,(expand-file-name file)))))
+  (my/aaronnote--post
+   `((type . "open") (file . ,(my/aaronnote--host-file file)))))
 
 (defun my/aaronnote--send-command (command &optional detail)
   "Dispatch Aaronnote COMMAND with optional DETAIL."
@@ -1086,7 +1138,10 @@ reusing a remembered one."
 When FILE is nil, use the current buffer."
   (let* ((abs (and (stringp file)
                    (not (string-empty-p file))
-                   (ignore-errors (file-truename (expand-file-name file)))))
+                   (ignore-errors
+                     (my/aaronnote--canonical-file
+                      (file-truename
+                       (my/aaronnote--canonical-file file))))))
          (key (list abs (truncate (or line 1)) (truncate (or col 0)))))
     (let ((same-location (equal key my/aaronnote--goto-last))
           (buffer (if abs
@@ -1116,7 +1171,7 @@ When FILE is nil, use the current buffer."
   (interactive "fMarkdown file: ")
   (unless (my/aaronnote--markdown-file-p file)
     (user-error "Aaronnote opens Markdown files, not %s" file))
-  (let ((file (expand-file-name file))
+  (let ((file (my/aaronnote--canonical-file file))
         (target-window (selected-window)))
     (my/aaronnote--ensure-server
      (lambda ()
@@ -1162,7 +1217,7 @@ normal file/session reuse map owned by the canonical pane."
   (let ((file (my/aaronnote--current-note-file)))
     (unless (and file (my/aaronnote--markdown-file-p file))
       (user-error "No current Markdown note for Aaronnote"))
-    (let ((file (expand-file-name file))
+    (let ((file (my/aaronnote--canonical-file file))
           (source-window (selected-window)))
       (my/aaronnote--ensure-server
        (lambda ()
@@ -1203,7 +1258,9 @@ normal file/session reuse map owned by the canonical pane."
                (rename-buffer my/aaronnote--xwidget-forced-name t)
                (when file
                  (setq-local default-directory
-                             (file-name-as-directory (file-name-directory file))))
+                             (file-name-as-directory (file-name-directory file)))
+                 (when (fboundp 'my/direnv-schedule-current-buffer)
+                   (my/direnv-schedule-current-buffer)))
                (my/aaronnote-keys-mode 1)))
            (my/aaronnote--refresh-visible-ibuffers)
            (when (window-live-p target-window)

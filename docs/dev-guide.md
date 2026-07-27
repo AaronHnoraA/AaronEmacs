@@ -164,7 +164,9 @@ Lean 4 走自定义 `lean-mode`（eglot 作为 LSP 客户端），不再使用 `
 
 **补全**：lean buffer 使用全局 capf + corfu + nerd-icons 补全，不启用 company-mode。
 
-TRAMP 远程 buffer：xwidget infoview 不可用（xwidget 需要本地 bridge）。
+远程 `/fs:` buffer 仍在本机显示 xwidget；target 上的 Lean bridge 端口通过
+`remote-port-forward` 暴露到本机。若 target、Node/Lake 或 forward 不可用，
+`C-c C-i` 会保留逻辑 project identity 并在 Lean dev log 中报告失败。
 
 ## 3. 调试
 
@@ -297,7 +299,7 @@ TRAMP 远程 buffer：xwidget infoview 不可用（xwidget 需要本地 bridge�
 - `M-\``
   `vterm-toggle`
 - `C-c e`
-  弹出/收起当前 popup `vterm`
+  弹出/收起当前 workspace 的 popup `vterm`；远端 buffer 会打开远端终端
 - `C-c C-e`
   智能弹出或收回当前 popup `vterm`
 - `C-c E`
@@ -342,24 +344,42 @@ TRAMP 远程 buffer：xwidget infoview 不可用（xwidget 需要本地 bridge�
 - 密码优先走 `auth-source` / `pass`
 - 不默认接管 `.sql` 文件，避免打断现有 SQL 编辑流；需要时手动 `M-x clutch-mode`
 
-## 6. 远程与 TRAMP
+## 6. Remote 框架、TRAMP 与 tramp-rpc
 
 ### 设计目标
 
-- 强功能优先
-- SSH / TRAMP 不主动减配
-- PATH、ControlMaster、session timeout 都已经配好
+- buffer 使用与 transport/backend 无关的 `/fs:TARGET:/path` 逻辑身份
+- target、有序 transport pipeline、执行 backend、复用 session 和调用者偏好分别注册
+- 普通 Emacs 文件 API 保留 TRAMP 的完整兼容性
+- Eglot、direnv、环境探测与自定义进程可以优先 tramp-rpc，失败时回退 TRAMP
+- socket/stream/port-forward 走显式 channel API，远端不支持时不会静默落到本机
+- PATH 按 target/workspace ID 隔离，并由 host probe、direnv、toolchain 等分层维护
 
 ### 你应该怎么用
 
-- 编辑远程文件：直接 `find-file` 打开 `/ssh:host:/path`
-- 开交互式远程终端：优先 `M-x my/vterm-ssh`
+- `M-x remote-board`：查看/打开 logical target、当前 route 与健康状态
+- 编辑远程文件：使用 `fs://target/path` 或 `/fs:target:/path`
+- 旧的 `/ssh:host:/path` 仍可打开，进入 buffer 后会 canonicalize 为 `/fs`
+- 在当前本地/远端 workspace 打开终端：`C-c e`（`vterm-toggle`）
+- 按主机名直接开终端：`M-x my/vterm-ssh`
+
+`C-c e` 是推荐入口。它读取当前 buffer 的 `/fs:TARGET:/path` 上下文，通过
+remote process adapter 启动 vterm，并把 terminal 生命周期登记给 workspace；
+本地与远端走同一条路径。popup 只在同一 workspace 内复用和循环，不会把本地
+terminal 带到 WSL/SSH buffer，也不会跨两个远端 target 串线。
 
 `my/vterm-ssh` 会优先读：
 
 - `~/.ssh/config`
 
 所以最好把常用机器写成 Host 别名。
+
+本地文件同样属于 `local` target。自定义进程不要自行拼 `/ssh:` 或 `/rpc:`：
+使用 `remote-make-process`、`remote-process-file`、`remote-exec` 和
+`remote-executable-find`。没有 file-name 参数的网络操作使用
+`remote-make-network-process`、`remote-open-network-stream` 与
+`remote-port-forward`。完整对象模型、能力矩阵、配置 schema、当前缺口与接入清单
+见 [remote-framework.md](remote-framework.md)。
 
 ## 7. 浏览器
 

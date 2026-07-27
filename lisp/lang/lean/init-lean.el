@@ -37,6 +37,8 @@
 (declare-function quail-show-key "quail")
 (declare-function my/package-ensure-vc "init-package-vc")
 (declare-function my/register-eglot-server-program "init-lsp")
+(declare-function my/eglot-start-now "init-lsp" (&optional interactive))
+(declare-function my/language-server-executable-find "init-lsp" (program))
 (declare-function my/project-current-root "init-project")
 (declare-function my/symbols-make-file-line-candidate "init-symbols")
 (declare-function my/symbols-read-file-line-candidates "init-symbols")
@@ -49,7 +51,7 @@
                                                      &optional interactive))
 (declare-function eglot-code-actions "eglot" ())
 (declare-function eglot-inlay-hints-mode "eglot" (&optional arg))
-(declare-function eglot-reconnect "eglot")
+(declare-function eglot-reconnect "eglot" (server &optional interactive))
 (declare-function eglot-ensure "eglot")
 (declare-function eglot-managed-p "eglot")
 (declare-function eglot-semantic-tokens-mode "eglot" (&optional arg))
@@ -66,10 +68,24 @@
 (declare-function lean-iv-toggle "init-lean-infoview")
 (declare-function lean-iv-restart "init-lean-infoview")
 (declare-function lean-iv-node-p "init-lean-infoview")
-(defvar lean--iv--script-dir)
+(defvar lean--iv--script-dir
+  (expand-file-name
+   "lean4-infoview-bridge"
+   (file-name-directory
+    (or load-file-name
+        buffer-file-name
+        (locate-library "init-lean")
+        user-emacs-directory)))
+  "Directory containing the Lean Node proxy and infoview bundle.")
 (declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
 (declare-function my/flymake-diagnostic-at-point-mode "init-lsp" (&optional arg))
 (declare-function my/problems-buffer "init-problems" ())
+(declare-function my/direnv-update-environment-maybe
+                  "init-direnv" (&optional path callback))
+(declare-function remote-file-local-name "remote-fs" (file-name))
+(declare-function remote-file-name-target "remote-fs" (file-name))
+(declare-function remote-get-target "remote-core" (id))
+(declare-function remote-target-trusted "remote-core" (target))
 
 ;; Forward defvar declarations for variables defined in sibling modules
 (defvar eldoc-box-hover-at-point-mode)
@@ -168,11 +184,15 @@ language server without user action."
 
 (defun lean-project-root ()
   "Return the Lean project root for the current buffer."
-  (or (when-let* ((f (or buffer-file-name default-directory)))
-        (locate-dominating-file f #'lean-root-dir-p))
-      (and (fboundp 'my/project-current-root)
-           (my/project-current-root))
-      default-directory))
+  (let ((root
+         (or (when-let* ((f (or buffer-file-name default-directory)))
+               (locate-dominating-file f #'lean-root-dir-p))
+             (and (fboundp 'my/project-current-root)
+                  (my/project-current-root))
+             default-directory)))
+    (if (fboundp 'remote-canonicalize-file-name)
+        (remote-canonicalize-file-name root)
+      root)))
 
 (defun lean--project-try-eglot (dir)
   "Return a Lean project for DIR while Eglot is looking for an LSP root."
@@ -212,25 +232,165 @@ Set to nil for a direct, no-proxy lake serve connection."
   :type 'boolean
   :group 'lean)
 
+(config-defvar lean-infoview-remote-proxy-auto-deploy t
+  "Deploy the bundled Node proxy to trusted remote targets when needed.
+The deployment is content-versioned below the target's user cache and contains
+only `lean-proxy.mjs' plus the built `dist/' assets.  Node and Lake themselves
+always come from the active target/workspace environment."
+  :type 'boolean
+  :group 'lean)
+
+(defvar lean--proxy-port-files (make-hash-table :test #'equal)
+  "Current Eglot proxy port-file for each canonical Lean project root.")
+
+(defvar lean--proxy-port-sequence 0
+  "Monotonic suffix used to isolate concurrent Lean proxy instances.")
+
 (defun lean--proxy-script ()
   "Return the absolute path to lean-proxy.mjs, or nil if not found."
   (let ((script (expand-file-name "lean-proxy.mjs" lean--iv--script-dir)))
     (when (file-exists-p script) script)))
 
+(defun lean--proxy-bundle-files ()
+  "Return the local files needed by the Lean Node proxy."
+  (let ((script (lean--proxy-script))
+        (dist (expand-file-name "dist" lean--iv--script-dir)))
+    (when (and script (file-directory-p dist))
+      (cons script
+            (sort (directory-files-recursively dist ".")
+                  #'string<)))))
+
+(defun lean--proxy-bundle-fingerprint ()
+  "Return a stable fingerprint for the bundled Lean proxy files."
+  (when-let* ((files (lean--proxy-bundle-files)))
+    (secure-hash
+     'sha256
+     (mapconcat
+      (lambda (file)
+        (let ((attributes (file-attributes file 'string)))
+          (format "%s:%s:%s"
+                  (file-relative-name file lean--iv--script-dir)
+                  (file-attribute-size attributes)
+                  (file-attribute-modification-time attributes))))
+      files "\n"))))
+
+(defun lean--remote-proxy-directory (root)
+  "Return the content-versioned target cache directory for ROOT."
+  (when-let* ((fingerprint (lean--proxy-bundle-fingerprint)))
+    (file-name-as-directory
+     (expand-file-name
+      (format "~/.cache/emacs/lean-infoview/%s/"
+              (substring fingerprint 0 16))
+      root))))
+
+(defun lean--remote-proxy-trusted-p (root)
+  "Return non-nil when ROOT belongs to a trusted remote target."
+  (when-let* ((target-id (remote-file-name-target root))
+              (target (remote-get-target target-id)))
+    (remote-target-trusted target)))
+
+(defun lean--copy-proxy-bundle-to-target (root)
+  "Ensure the Lean proxy bundle is staged on ROOT's target.
+Return the logical remote script name, or nil when provisioning is disabled."
+  (when (and lean-infoview-remote-proxy-auto-deploy
+             (lean--remote-proxy-trusted-p root))
+    (let* ((destination (lean--remote-proxy-directory root))
+           (marker (and destination
+                        (expand-file-name ".complete" destination)))
+           (fingerprint (lean--proxy-bundle-fingerprint))
+           (remote-script
+            (and destination
+                 (expand-file-name "lean-proxy.mjs" destination))))
+      (unless
+          (and marker
+               (file-readable-p marker)
+               (equal
+                (string-trim
+                 (with-temp-buffer
+                   (insert-file-contents marker)
+                   (buffer-string)))
+                fingerprint))
+        (make-directory (expand-file-name "dist" destination) t)
+        (dolist (source (lean--proxy-bundle-files))
+          (let* ((relative
+                  (file-relative-name source lean--iv--script-dir))
+                 (target (expand-file-name relative destination)))
+            (make-directory (file-name-directory target) t)
+            (copy-file source target t t nil)))
+        (with-temp-file marker
+          (insert fingerprint "\n")))
+      remote-script)))
+
+(defun lean--proxy-script-for-root (root)
+  "Return the runnable proxy script for local or remote ROOT."
+  (if (file-remote-p root)
+      (condition-case error
+          (lean--copy-proxy-bundle-to-target root)
+        (error
+         (lean-dev-log "remote proxy deployment failed: %s"
+                       (error-message-string error))
+         nil))
+    (lean--proxy-script)))
+
 (defun lean--proxy-available-p ()
   "Return non-nil if the infoview proxy can be used for the current buffer."
   (and lean-infoview-proxy-enabled
-       (executable-find "node")
-       (lean--proxy-script)
-       (lean-iv-node-p)           ; dist/index.html must be built
-       (not (file-remote-p default-directory))))
+       (lean--proxy-bundle-files)
+       (if (file-remote-p default-directory)
+         (and lean-infoview-remote-proxy-auto-deploy
+                (lean--remote-proxy-trusted-p default-directory)
+                (my/language-server-executable-find "node"))
+         (executable-find "node"))))
+
+(defun lean--proxy-root-key (root)
+  "Return the canonical hash key for Lean project ROOT."
+  (file-name-as-directory (expand-file-name root)))
+
+(defun lean--proxy-port-directory (root)
+  "Return the directory containing proxy port files for ROOT."
+  (if (file-remote-p root)
+      (lean--remote-proxy-directory root)
+    (expand-file-name
+     "lean"
+     (or (bound-and-true-p no-littering-var-directory)
+         (expand-file-name "var" user-emacs-directory)))))
+
+(defun lean--proxy-port-file-name (root instance)
+  "Return ROOT's proxy port-file name for INSTANCE."
+  (let ((directory (lean--proxy-port-directory root))
+        (hash (substring (md5 (lean--proxy-root-key root)) 0 12)))
+    (expand-file-name
+     (format "infoview-%s-%s.json" hash instance)
+     directory)))
 
 (defun lean--proxy-port-file (root)
-  "Return the port-file path for ROOT's proxy instance."
-  (let* ((hash (md5 (expand-file-name root)))
-         (dir  (expand-file-name "lean" (or (bound-and-true-p no-littering-var-directory)
-                                             (expand-file-name "var" user-emacs-directory)))))
-    (expand-file-name (format "infoview-%s.json" (substring hash 0 12)) dir)))
+  "Return the current proxy port-file path for ROOT.
+When no Eglot proxy contact has been allocated in this Emacs process, return a
+nonexistent pending path.  This deliberately avoids consuming a legacy shared
+port file that may have been overwritten by a dead concurrent proxy."
+  (let ((key (lean--proxy-root-key root)))
+    (or (gethash key lean--proxy-port-files)
+        (lean--proxy-port-file-name root
+                                    (format "%x-pending" (emacs-pid))))))
+
+(defun lean--proxy-port-file-allocated-p (root)
+  "Return non-nil when Eglot allocated a proxy port file for ROOT."
+  (and (gethash (lean--proxy-root-key root) lean--proxy-port-files) t))
+
+(defun lean--proxy-allocate-port-file (root)
+  "Allocate and remember an isolated proxy port file for ROOT."
+  (let* ((key (lean--proxy-root-key root))
+         (instance
+          (format "%x-%x"
+                  (emacs-pid)
+                  (cl-incf lean--proxy-port-sequence)))
+         (file (lean--proxy-port-file-name root instance)))
+    (puthash key file lean--proxy-port-files)
+    file))
+
+(defun lean--proxy-forget-port-file (root)
+  "Forget ROOT's current proxy port-file mapping."
+  (remhash (lean--proxy-root-key root) lean--proxy-port-files))
 
 (defun lean--server-contact (&optional _interactive _project)
   "Return the Lean LSP server command for the current buffer.
@@ -244,16 +404,16 @@ lake serve / lean --server connection otherwise."
                    (or buffer-file-name default-directory ".") #'lean-root-dir-p))
          (direct  (if in-lake
                       '("lake" "serve")
-                    (list (or (executable-find "lean") "lean") "--server"))))
-    (if (lean--proxy-available-p)
-        (let ((script    (lean--proxy-script))
-              (port-file (lean--proxy-port-file root))
+                    '("lean" "--server"))))
+    (if-let* (((lean--proxy-available-p))
+              (script (lean--proxy-script-for-root root)))
+        (let ((port-file (lean--proxy-allocate-port-file root))
               (downstream direct))
           (lean-dev-log "server-contact: proxy root=%s port-file=%s downstream=%S"
                         root port-file downstream)
-          `("node" ,script
-            "--root"      ,root
-            "--port-file" ,port-file
+          `("node" ,(remote-file-local-name script)
+            "--root"      ,(remote-file-local-name root)
+            "--port-file" ,(remote-file-local-name port-file)
             "--"          ,@downstream))
       (lean-dev-log "server-contact: direct contact=%S" direct)
       direct)))
@@ -321,6 +481,9 @@ lake serve / lean --server connection otherwise."
 
 (defvar-local lean--eglot-start-timer nil
   "Timer used to start Eglot for the current Lean buffer.")
+
+(defvar-local lean--eglot-waiting-for-environment nil
+  "Non-nil while Lean Eglot startup waits for direnv.")
 
 (config-defvar lean-eglot-deferred-ui-delays nil
   "Idle delays before enabling expensive Lean Eglot UI features."
@@ -445,7 +608,9 @@ Completion uses the global corfu+capf surface — no company-mode override."
 
 (defun lean--project-symbol-candidates ()
   "Return file-line candidates for Lean declarations in the current project."
-  (when-let* ((rg   (executable-find "rg"))
+  (when-let* ((rg   (if (fboundp 'my/language-server-executable-find)
+                        (my/language-server-executable-find "rg")
+                      (executable-find "rg")))
               (root (file-name-as-directory (expand-file-name (lean-project-root)))))
     (cl-loop for hit in
              (let ((default-directory root))
@@ -502,10 +667,10 @@ Completion uses the global corfu+capf surface — no company-mode override."
   "Install Lean-specific Eglot settings in the current buffer."
   (when (boundp 'eglot-connect-timeout)
     (setq-local eglot-connect-timeout lean-eglot-connect-timeout))
-  (lean-dev-log "lean-mode setup: file=%s root=%s contact=%S eglot-connect-timeout=%S"
+  (lean-dev-log "lean-mode setup: file=%s root=%s proxy-enabled=%S eglot-connect-timeout=%S"
                 (or buffer-file-name "<no file>")
                 (file-name-as-directory (expand-file-name (lean-project-root)))
-                (lean--server-contact)
+                lean-infoview-proxy-enabled
                 (and (boundp 'eglot-connect-timeout) eglot-connect-timeout)))
 
 ;;; ── Post-command hook: infoview cursor sync ──────────────────────────────────
@@ -617,22 +782,44 @@ while using eglot (not lsp-mode) as the language server backend."
                    (lean--ensure-eglot)))))
            buf))))
 
+(defun lean--eglot-direnv-ready (_environment error)
+  "Resume Lean Eglot after direnv, or log ERROR."
+  (setq lean--eglot-waiting-for-environment nil)
+  (if error
+      (lean-dev-log "eglot deferred: direnv failed: %s"
+                    (error-message-string error))
+    (lean--ensure-eglot)))
+
 (defun lean--ensure-eglot ()
   "Start eglot for the current lean-mode buffer if not already managed."
+  ;; A manual infoview open owns startup once it reaches this boundary.  Do not
+  ;; let the mode hook's delayed automatic start allocate a second proxy
+  ;; instance while the first Eglot connection is still being established.
+  (lean--cancel-eglot-start-timer)
   (cond
    ((not buffer-file-name)
     (lean-dev-log "eglot skipped: buffer has no file"))
-   ((file-remote-p default-directory)
-    (lean-dev-log "eglot skipped for remote buffer: %s" default-directory))
    ((not (fboundp 'eglot))
     (lean-dev-log "eglot skipped: `eglot' is not available"))
    ((and (fboundp 'eglot-managed-p) (eglot-managed-p))
     (lean-dev-log "eglot already managing buffer: %s" (buffer-name)))
+   (lean--eglot-waiting-for-environment
+    (lean-dev-log "eglot waiting for target environment: %s"
+                  (buffer-name)))
+   ((and
+     (fboundp 'my/direnv-update-environment-maybe)
+     (eq
+      (my/direnv-update-environment-maybe
+       nil #'lean--eglot-direnv-ready)
+      'pending))
+    (setq lean--eglot-waiting-for-environment t)
+    (lean-dev-log "eglot deferred until direnv is ready: %s"
+                  (buffer-name)))
    (t
-    (lean-dev-log "eglot starting: buffer-dir=%s lsp-root=%s command=%S timeout=%S project-finders=%S"
+    (lean-dev-log "eglot starting: buffer-dir=%s lsp-root=%s proxy-enabled=%S timeout=%S project-finders=%S"
                   default-directory
                   (or (lean--eglot-project-root-candidate) "<none>")
-                  (lean--server-contact)
+                  lean-infoview-proxy-enabled
                   (and (boundp 'eglot-connect-timeout) eglot-connect-timeout)
                   project-find-functions)
     (when (and (boundp 'eglot-connect-timeout)
@@ -651,7 +838,9 @@ while using eglot (not lsp-mode) as the language server backend."
                   "eglot not connected after %s seconds; check Eglot stderr and Messages buffers"
                   timeout))))))))
     (condition-case err
-        (call-interactively #'eglot)
+        (if (fboundp 'my/eglot-start-now)
+            (my/eglot-start-now t)
+          (call-interactively #'eglot))
       (error
        (lean-dev-log "eglot start error: %s" (error-message-string err))
        (signal (car err) (cdr err)))))))
@@ -706,10 +895,11 @@ while using eglot (not lsp-mode) as the language server backend."
     (my/register-eglot-server-program
      '(lean-mode :language-id "lean4")
      #'lean--server-contact
-     :executables '("lean" "lake")
+     :executables '("lean" "lake" "node")
+     :placement 'target
      :label "Lean Language Server"
      :source "lean4-mode (sub-files only)"
-     :note "Uses lake serve when a lakefile is found, else lean --server")))
+     :note "Runs target Node proxy plus lake serve, or lean --server outside Lake projects")))
 
 ;;; ── Orphan worker sweep ──────────────────────────────────────────────────────
 

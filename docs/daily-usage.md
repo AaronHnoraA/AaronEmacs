@@ -37,7 +37,8 @@
 - `M-\``
   `vterm-toggle`
 - `C-c e`
-  切换当前 popup `vterm`
+  切换当前 workspace 的 popup `vterm`；在 `/fs:` 远端 buffer 中直接打开同一
+  target/workspace 的远端终端
 - `C-c C-e`
   智能弹出或收回当前 popup `vterm`
 - `C-c E`

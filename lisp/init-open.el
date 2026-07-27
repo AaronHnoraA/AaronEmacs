@@ -98,6 +98,11 @@ If the selected backend is `menu', prompt with `my/open-read-backend'."
 (defun my/open-normalize-target (target)
   "Return TARGET in a form suitable for a system opener."
   (let* ((target (string-trim (substring-no-properties target)))
+         (target
+          (if (and (string-prefix-p "fs://" target)
+                   (fboundp 'remote-uri-to-file-name))
+              (remote-uri-to-file-name target)
+            target))
          (expanded (and (not (string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" target))
                         (expand-file-name target))))
     (cond
@@ -185,23 +190,33 @@ browser opens do not leave empty splits behind."
   "Open TARGET with the operating system."
   (interactive "sSystem open: ")
   (if-let* ((target (my/open-normalize-target target)))
-      (cond
-       ((fboundp 'my/macos-open-target)
-        (my/macos-open-target target))
-       ((and (eq system-type 'darwin) (executable-find "open"))
-        (start-process "system-open" nil "open" target)
-        (message "open: %s" target))
-       ((and (eq system-type 'gnu/linux) (executable-find "xdg-open"))
-        (start-process "system-open" nil "xdg-open" target)
-        (message "xdg-open: %s" target))
-       ((eq system-type 'windows-nt)
-        (w32-shell-execute "open" target))
-       ((string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" target)
-        (browse-url-default-browser target))
-       ((file-exists-p target)
-        (browse-url-of-file target))
-       (t
-        (user-error "No system opener for %s" target)))
+      (let ((target
+             (if (and (fboundp 'remote-fs-file-name-p)
+                      (remote-fs-file-name-p target))
+                 (progn
+                   (unless (equal (remote-file-name-target target) "local")
+                     (user-error
+                      "System opener cannot directly access target %s"
+                      (remote-file-name-target target)))
+                 (remote-file-local-name target))
+               target)))
+        (cond
+         ((fboundp 'my/macos-open-target)
+          (my/macos-open-target target))
+         ((and (eq system-type 'darwin) (executable-find "open"))
+          (start-process "system-open" nil "open" target)
+          (message "open: %s" target))
+         ((and (eq system-type 'gnu/linux) (executable-find "xdg-open"))
+          (start-process "system-open" nil "xdg-open" target)
+          (message "xdg-open: %s" target))
+         ((eq system-type 'windows-nt)
+          (w32-shell-execute "open" target))
+         ((string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" target)
+          (browse-url-default-browser target))
+         ((file-exists-p target)
+          (browse-url-of-file target))
+         (t
+          (user-error "No system opener for %s" target))))
     (user-error "No target to open")))
 
 (defun my/open-url-with-backend (url backend &optional reuse-selected)

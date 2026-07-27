@@ -12,6 +12,8 @@
 
 (require 'cl-lib)
 (require 'init-lsp-toolchain)
+(require 'remote-process)
+(require 'remote-environment)
 (require 'subr-x)
 
 (eval-when-compile
@@ -35,6 +37,9 @@
 Each entry is a plist with at least `:mode', `:feature', `:source', and
 optional `:note' keys.")
 
+(defvar my/language-server-lsp-local-settings-hook nil
+  "Hook run after environment resolution and before lsp-mode starts.")
+
 (defvar my/language-server-disabled-modes nil
   "Major modes that should never auto-start a language server.")
 
@@ -42,7 +47,7 @@ optional `:note' keys.")
   "Metadata for locally registered `eglot-server-programs' entries.
 
 Each entry is a plist with keys such as `:modes', `:program',
-`:executables', `:label', `:source', and `:note'.")
+`:executables', `:placement', `:label', `:source', and `:note'.")
 
 (config-defvar my/language-server-performance-read-process-output-max nil
   "Minimum `read-process-output-max' while any language server is active."
@@ -81,6 +86,13 @@ Each entry is a plist with keys such as `:modes', `:program',
 (defvar lsp-file-watch-threshold)
 (defvar read-process-output-max)
 
+(dolist (adapter '("language-server" "eglot" "lsp-mode"))
+  (remote-register-adapter
+   adapter
+   :capabilities '(process-sync process-async lsp environment)
+   :preferences '((default . ("tramp-rpc" "tramp" "native")))
+   :placement 'target))
+
 (defvar my/language-server--managed-buffer-count 0
   "Number of buffers currently counted for LSP performance tuning.")
 
@@ -92,6 +104,12 @@ Each entry is a plist with keys such as `:modes', `:program',
 
 (defvar-local my/language-server--performance-buffer-p nil
   "Whether the current buffer is counted for LSP performance tuning.")
+
+(defvar-local my/eglot--waiting-for-direnv nil
+  "Non-nil while Eglot startup waits for an asynchronous direnv export.")
+
+(defvar-local my/lsp-mode--waiting-for-direnv nil
+  "Non-nil while lsp-mode startup waits for an asynchronous direnv export.")
 
 (defvar-local my/flymake-diagnostic-at-point-timer nil
   "Idle timer used by `my/flymake-diagnostic-at-point-mode'.")
@@ -128,7 +146,8 @@ Each entry is a plist with keys such as `:modes', `:program',
 (declare-function hydra-set-transient-map "hydra" (keymap &optional keep-pred on-exit message timeout))
 (declare-function hydra-show-hint "hydra" (&rest args))
 (declare-function lsp--on-request@my/handle-inlay-hint-refresh nil (workspace request))
-(declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
+(declare-function my/direnv-update-environment-maybe
+                  "init-direnv" (&optional path callback))
 (declare-function my/project-local-apply-env "init-project-local" (env &optional base))
 (declare-function my/project-local-env "init-project-local" (kind &optional root))
 (declare-function my/project-local-value "init-project-local" (key &optional root))
@@ -150,7 +169,7 @@ Each entry is a plist with keys such as `:modes', `:program',
 
 (defun my/language-server-executable-find (program)
   "Return PROGRAM path for the current local or remote buffer."
-  (executable-find program t))
+  (remote-executable-find program))
 
 (defun my/language-server-executable-available-p (program)
   "Return non-nil when PROGRAM is available locally or on the remote host."
@@ -347,8 +366,17 @@ byte-compile backend does not emit noisy warnings on startup."
 
 (defun my/language-server-apply-process-environment ()
   "Install the language-server process environment in the current buffer."
-  (setq-local process-environment
-              (my/language-server-process-environment))
+  (remote-environment-ensure)
+  (let ((environment (my/language-server-project-environment)))
+    (if (and environment remote-buffer-environment)
+        (remote-environment-apply
+         (remote-environment-derive
+          remote-buffer-environment "project-lsp"
+          :scope 'workspace
+          :vars environment
+          :source 'project-local))
+      (setq-local process-environment
+                  (my/language-server-process-environment))))
   (when (fboundp 'my/language-server-toolchain-apply-environment)
     (my/language-server-toolchain-apply-environment)))
 
@@ -377,7 +405,8 @@ byte-compile backend does not emit noisy warnings on startup."
   (when (and my/language-server-disable-file-watchers-on-remote
              (file-remote-p default-directory))
     (setq-local lsp-enable-file-watchers nil
-                lsp-file-watch-threshold 0)))
+                lsp-file-watch-threshold 0))
+  (run-hooks 'my/language-server-lsp-local-settings-hook))
 
 (defun my/eglot-contact-available-p ()
   "Return non-nil when Eglot has a server mapping for this buffer."
@@ -481,12 +510,16 @@ SOURCE and NOTE are recorded for maintenance tooling."
 (defun my/register-eglot-server-program (modes program &rest props)
   "Register PROGRAM for MODES and record metadata for maintenance tools.
 
-PROPS accepts `:executables', `:label', `:source', and `:note'."
+PROPS accepts `:executables', `:placement', `:label', `:source', and `:note'.
+PLACEMENT defaults to `target': the command is resolved from the active
+target/workspace environment and launched through the official process API.
+Use `client' only for an explicitly client-side UI helper."
   (add-to-list 'eglot-server-programs (cons modes program))
   (setq my/eglot-custom-server-program-metadata
         (cons (list :modes modes
                     :program program
                     :executables (plist-get props :executables)
+                    :placement (or (plist-get props :placement) 'target)
                     :label (plist-get props :label)
                     :source (my/language-server--resolve-source
                              (plist-get props :source))
@@ -534,36 +567,111 @@ PROPS accepts `:executables', `:label', `:source', and `:note'."
       (ignore-errors
         (eglot-shutdown server)))))
 
+(defun my/lsp-mode-start-now ()
+  "Start lsp-mode after the target environment is ready."
+  (if (my/lsp-mode-supported-p)
+      (progn
+        (my/language-server-apply-process-environment)
+        (my/language-server-apply-lsp-local-settings)
+        (lsp-deferred))
+    (let ((feature (my/lsp-mode-required-feature)))
+      (message "Skip lsp-mode in %s: missing `%s'" major-mode feature))))
+
+(defun my/lsp-mode--direnv-ready (_environment error)
+  "Resume deferred lsp-mode startup, or report direnv ERROR."
+  (setq my/lsp-mode--waiting-for-direnv nil)
+  (if error
+      (message "lsp-mode deferred: direnv failed: %s"
+               (error-message-string error))
+    (my/lsp-mode-start-now)))
+
 (defun my/lsp-mode-ensure ()
   "Start `lsp-mode' for explicitly registered major modes."
   (interactive)
   (when (eq (my/language-server-preferred-backend) 'lsp-mode)
-    (unless (bound-and-true-p lsp-managed-mode)
+    (unless (or my/lsp-mode--waiting-for-direnv
+                (bound-and-true-p lsp-managed-mode))
       (my/language-server-stop-eglot)
-      (if (my/lsp-mode-supported-p)
-          (progn
-            (when (fboundp 'my/direnv-update-environment-maybe)
-              (my/direnv-update-environment-maybe))
-            (my/language-server-apply-process-environment)
-            (my/language-server-apply-lsp-local-settings)
-            (lsp-deferred))
-        (let ((feature (my/lsp-mode-required-feature)))
-          (message "Skip lsp-mode in %s: missing `%s'" major-mode feature))))))
+      (let ((state
+             (and
+              (fboundp 'my/direnv-update-environment-maybe)
+              (my/direnv-update-environment-maybe
+               nil #'my/lsp-mode--direnv-ready))))
+        (if (eq state 'pending)
+            (setq my/lsp-mode--waiting-for-direnv t)
+          (my/lsp-mode-start-now))))))
+
+(defun my/eglot-start-now (&optional interactive)
+  "Start Eglot after the target environment is ready.
+With INTERACTIVE, invoke `eglot' interactively so a language-specific project
+finder can participate exactly as it does for `M-x eglot'."
+  (my/language-server-prepare-remote-eglot-environment)
+  (my/language-server-apply-process-environment)
+  (my/language-server-apply-eglot-local-settings)
+  (when (my/eglot-contact-available-p)
+    (if interactive
+        (call-interactively #'eglot)
+      (eglot-ensure))))
+
+(defalias 'my/eglot--start-now #'my/eglot-start-now)
+
+(defun my/eglot--direnv-ready (_environment error)
+  "Resume deferred Eglot startup, or report direnv ERROR."
+  (setq my/eglot--waiting-for-direnv nil)
+  (if error
+      (message "Eglot deferred: direnv failed: %s"
+               (error-message-string error))
+    (my/eglot-ensure-unless-lsp-mode)))
 
 (defun my/eglot-ensure-unless-lsp-mode ()
-  "Start `eglot' in the current buffer unless `lsp-mode' is preferred."
+  "Start `eglot' unless another backend is active.
+A slow direnv/Nix export runs asynchronously; Eglot resumes only after the
+target/workspace environment has been applied to this buffer."
   (interactive)
   (when (eq (my/language-server-preferred-backend) 'eglot)
-    (unless (or (bound-and-true-p lsp-managed-mode)
+    (unless (or my/eglot--waiting-for-direnv
+                (bound-and-true-p lsp-managed-mode)
                 (and (fboundp 'eglot-managed-p)
                      (eglot-managed-p)))
-      (when (fboundp 'my/direnv-update-environment-maybe)
-        (my/direnv-update-environment-maybe))
-      (my/language-server-prepare-remote-eglot-environment)
-      (my/language-server-apply-process-environment)
-      (my/language-server-apply-eglot-local-settings)
-      (when (my/eglot-contact-available-p)
-        (eglot-ensure)))))
+      (let ((state
+             (and
+              (fboundp 'my/direnv-update-environment-maybe)
+              (my/direnv-update-environment-maybe
+               nil #'my/eglot--direnv-ready))))
+        (if (eq state 'pending)
+            (setq my/eglot--waiting-for-direnv t)
+          (my/eglot-start-now))))))
+
+(defun my/eglot--connect-via-remote-a (fn &rest args)
+  "Route Eglot connection startup through the language-server adapter."
+  (let ((remote-current-adapter-id "language-server"))
+    (remote-environment-ensure)
+    (apply fn args)))
+
+(defun my/lsp-mode--connect-via-remote-a (fn &rest args)
+  "Route lsp-mode startup through the language-server adapter."
+  (let ((remote-current-adapter-id "language-server"))
+    (remote-environment-ensure)
+    (apply fn args)))
+
+(defun my/eglot--uri-to-logical-a (fn uri)
+  "Canonicalize file paths returned by Eglot's URI converter."
+  (let* ((path (funcall fn uri))
+         (target
+          (and (stringp default-directory)
+               (ignore-errors
+                 (remote-file-name-target default-directory)))))
+    (if (and (stringp path)
+             (or (file-name-absolute-p path)
+                 (remote-fs-file-name-p path)))
+        (if (and target
+                 (not (equal target "local"))
+                 (file-name-absolute-p path)
+                 (not (file-remote-p path))
+                 (not (remote-fs-file-name-p path)))
+            (remote-expand-file-name path nil target)
+          (remote-canonicalize-file-name path))
+      path)))
 
 (defun my/eglot-ensure ()
   "Start `eglot' in programming buffers that do not opt into `lsp-mode'."
@@ -822,6 +930,10 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
   (define-key lsp-mode-map (kbd "C-h i") #'lsp-find-implementation)
   (define-key lsp-mode-map (kbd "C-h t") #'lsp-find-type-definition))
 
+(with-eval-after-load 'lsp-mode
+  (unless (advice-member-p #'my/lsp-mode--connect-via-remote-a 'lsp)
+    (advice-add 'lsp :around #'my/lsp-mode--connect-via-remote-a)))
+
 
 ;; -------------------------
 ;; 5. Eglot (LSP Client)
@@ -843,6 +955,14 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
   (read-process-output-max (* 1024 1024)))
 
 (with-eval-after-load 'eglot
+  (unless (advice-member-p #'my/eglot--connect-via-remote-a
+                           'eglot--connect)
+    (advice-add 'eglot--connect :around
+                #'my/eglot--connect-via-remote-a))
+  (unless (advice-member-p #'my/eglot--uri-to-logical-a
+                           'eglot-uri-to-path)
+    (advice-add 'eglot-uri-to-path :around
+                #'my/eglot--uri-to-logical-a))
   (define-key eglot-mode-map (kbd "C-c f") #'eglot-format-buffer)
   (define-key eglot-mode-map (kbd "C-c d") #'eldoc-doc-buffer)
   (define-key eglot-mode-map (kbd "C-c a") #'eglot-code-actions)
@@ -952,8 +1072,16 @@ leaves those workers orphaned and running."
 ;;; ── CodeLens ──────────────────────────────────────────────────────────────
 ;; Off by default. Toggle with SPC c L.
 ;; When enabled, automatically re-initialises after eglot reconnects.
+(add-to-list
+ 'load-path
+ (expand-file-name
+  "../site-lisp/codelens"
+  (file-name-directory
+   (or load-file-name
+       (locate-library "init-lsp")
+       default-directory))))
+
 (use-package eglot-codelens
-  :load-path "~/.emacs.d/site-lisp/codelens"
   :after eglot
   :commands eglot-codelens-mode
   :custom

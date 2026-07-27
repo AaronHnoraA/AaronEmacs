@@ -95,8 +95,16 @@ height in pixels."
   :group 'faces)
 
 ;; Use Iosvkem in terminals
+(add-to-list
+ 'load-path
+ (expand-file-name
+  "../site-lisp/aaron-ui"
+  (file-name-directory
+   (or load-file-name
+       (locate-library "init-ui")
+       default-directory))))
+
 (use-package aaron-ui
-  :load-path "~/.emacs.d/site-lisp/aaron-ui"
   :demand t
   :config
   (aaron-ui-load-theme 'wave))

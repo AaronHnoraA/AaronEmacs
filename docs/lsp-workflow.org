@@ -35,8 +35,14 @@
 这样做的好处是：
 
 - 日常 buffer 保持 Eglot / Flymake 这套更轻的主路径
-- Java、Lean 这类更适合 =lsp-mode= 的语言仍然可以显式 opt-in
+- Java、Beancount 这类需要专用 lsp-mode client 的语言仍然可以显式 opt-in；
+  Lean 明确走 Eglot
 - Hub 能直接反查“这个 mode 的路由是在哪个文件里声明的”
+
+Eglot 与 lsp-mode 的进程启动统一绑定到 Remote 框架的
+=language-server= adapter。默认 placement 是 target：本地 buffer 使用
+=local= target，远程 buffer 使用自己的 target/workspace PATH、direnv 和工具链，
+不会把客户端机器上的 server 路径泄漏给远端。
 
 * Current Command Surface
 
@@ -181,20 +187,37 @@ Eglot server program 通过 =my/register-eglot-server-program= 注册：
 - Lake 项目（有 lakefile.lean/toml）：=lake serve=
 - 单文件：=lean --server=
 
-信息面板（infoview）只走 xwidget-webkit + Node.js bridge：
+信息面板（infoview）走 xwidget-webkit + Node.js bridge：
 
-- =C-c C-i= 启动 =lisp/lang/lean/lean4-infoview-bridge/server.mjs=，server 内运行 =lake serve=
-  并桥接给 React 版官方 =@leanprover/infoview=；Emacs 打开 xwidget side window。
+- =C-c C-i= 确保 Eglot 已通过
+  =lisp/lang/lean/lean4-infoview-bridge/lean-proxy.mjs= 启动；proxy 内运行
+  =lake serve= 并桥接给 React 版官方 =@leanprover/infoview=，Emacs 打开
+  xwidget side window。
 - Emacs → infoview：=post-command-hook= 注入 =window.updateCursor=；文本变化通
   过 HTTP POST =/cursor= 同步到 bridge。
 - Infoview → Emacs（反向通道）：infoview 动作 POST 到 bridge 的 =/editor/<cmd>=
-  路由；bridge 将 =EMACS_CMD={...}= 写到 stdout；进程 filter 分发：
+  路由；bridge 再通过标准 LSP request/notification 交给 Eglot：
   - =show-document= 跳转到 goal 中点击的源码位置
   - =insert-text= 应用 "Try this" 建议
   - =apply-edit= 应用 code action 文本编辑
   - =restart-file= 触发 =lean-refresh-file-dependencies=
+- 每个 Eglot proxy 实例拥有独立的端口文件；本地端口文件还会校验 owner PID，
+  proxy 正常退出时只删除自己拥有的文件。并发重连或测试进程不会覆盖当前
+  Infoview 的端口并留下白屏。
 
-TRAMP 远程 buffer：xwidget infoview 不可用。=eglot-ensure= 跳过远程 buffer（不做自动 connect）。
+远程 Lean buffer 同样使用完整链路：
+
+- 可信 target 首次使用时，把版本化的 =lean-proxy.mjs + dist/= 部署到远端用户
+  cache；
+- =node=、=lake serve= / =lean --server= 都从 target/workspace 环境解析并在
+  target 上运行；
+- proxy 的远端 loopback HTTP 端口通过 =remote-port-forward= 映射到本机，
+  xwidget 仍是本地 UI；
+- Eglot 文档 URI 进入 Emacs 后 canonicalize 为 =/fs:TARGET:/path=，不会保存
+  =/rpc:= 或 =/ssh:= 物理链路身份。
+
+远端自动部署由 =lean-infoview-remote-proxy-auto-deploy= 控制，只允许可信 target。
+关闭它时，远程 Lean 仍可直接运行 =lake serve=，只是没有 Node proxy infoview。
 
 * Add A Custom Eglot Mapping
 
@@ -212,6 +235,7 @@ TRAMP 远程 buffer：xwidget infoview 不可用。=eglot-ensure= 跳过远程 b
  '("some-language-server" "--stdio")
  :label "some-language-server"
  :executables '("some-language-server")
+ :placement 'target
  :note "Short maintenance note.")
 #+end_src
 
@@ -220,6 +244,7 @@ TRAMP 远程 buffer：xwidget infoview 不可用。=eglot-ensure= 跳过远程 b
 - Hub 能看到 modes -> server 的映射
 - Doctor 能检查 executable
 - 可以直接跳回配置定义文件
+- =:placement= 默认就是 =target=；只有明确的本地 UI helper 才写 =client=
 
 * Pattern For Other Modules
 

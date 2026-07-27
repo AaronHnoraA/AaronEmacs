@@ -67,8 +67,13 @@ exceeded."
 (defvar my/maintenance-var-cleanup--timer nil)
 
 (defun my/maintenance-config-root ()
-  "Return the root of the current Emacs config."
-  (file-name-as-directory (expand-file-name user-emacs-directory)))
+  "Return the local root of the current Emacs config.
+Idle timers inherit the selected buffer's `default-directory'.  Resolve this
+editor-owned path from a known local directory so a remote buffer cannot turn
+`~/.config/emacs' into a target-side path."
+  (let ((default-directory temporary-file-directory))
+    (file-name-as-directory
+     (expand-file-name user-emacs-directory default-directory))))
 
 (defun my/maintenance-var-root ()
   "Return the root of managed Emacs runtime state."
@@ -247,14 +252,15 @@ With prefix argument DRY-RUN, report what would be deleted without deleting."
 
 (defun my/maintenance-var-cleanup-maybe (&optional force)
   "Run automatic `var/' cleanup if enough time has elapsed or FORCE is non-nil."
-  (when my/maintenance-var-cleanup-enable
-    (let* ((state (my/maintenance-var-cleanup--read-state))
-           (last-run (plist-get state :last-run))
-           (elapsed (and last-run (- (float-time) last-run))))
-      (when (or force
-                (not elapsed)
-                (> elapsed my/maintenance-var-cleanup-interval))
-        (my/maintenance-var-cleanup)))))
+  (let ((default-directory temporary-file-directory))
+    (when my/maintenance-var-cleanup-enable
+      (let* ((state (my/maintenance-var-cleanup--read-state))
+             (last-run (plist-get state :last-run))
+             (elapsed (and last-run (- (float-time) last-run))))
+        (when (or force
+                  (not elapsed)
+                  (> elapsed my/maintenance-var-cleanup-interval))
+          (my/maintenance-var-cleanup))))))
 
 (defun my/maintenance-var-cleanup-start-timer ()
   "Start the idle timer for automatic `var/' cleanup."

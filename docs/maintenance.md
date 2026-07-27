@@ -271,8 +271,11 @@ leader 入口：
 - `whitespace-mode` 默认只检查本地的代码/配置文件，跳过文本、大文件、远程文件和 `so-long` buffer。
 - auto-revert 优先使用文件通知，普通 buffer 不做高频轮询；PDF buffer 单独保留较快刷新。
 - `amx` 不保留重复 idle 更新 timer；命令索引在交互入口按需刷新。
-- `direnv` 不挂 `post-command-hook`；只在打开文件、切换 buffer/window、启动编译前，并且目录树里有
-  `.envrc` 时同步环境。
+- `direnv` 不挂 `post-command-hook`；打开文件、切换 buffer/window、加载 dir-locals
+  时异步刷新，避免远程 Nix 环境阻塞文件访问；只有 compile/task/LSP 等即将启动
+  target 进程的显式边界才等待环境就绪。同一 envrc root 的自动触发合并为一次
+  enter 报告；选中 buffer 离开 envrc 树时恢复该 buffer 的基础环境并报告 leave。
+  环境仍然是 buffer-local capsule，不会因为切换窗口而破坏其他项目 buffer。
 - tab line 的 buffer-list 高频缓存失效走短 idle 合并。
 - Treemacs 文件/符号跟随只在 Treemacs 窗口可见时安装按键级 hook；隐藏后自动卸载并取消等待中的
   idle timer。

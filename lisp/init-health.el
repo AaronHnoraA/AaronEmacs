@@ -148,12 +148,7 @@
   (setq my/health-startup-time
         (float-time (time-subtract after-init-time before-init-time))
         my/health-startup-gcs gcs-done
-        my/health-startup-package-count (length package-alist))
-  (unless noninteractive
-    (message "Emacs ready in %.2fs with %d GCs (%d packages)"
-             my/health-startup-time
-             my/health-startup-gcs
-             my/health-startup-package-count)))
+        my/health-startup-package-count (length package-alist)))
 
 (add-hook 'emacs-startup-hook #'my/health--record-startup-metrics-h 90)
 

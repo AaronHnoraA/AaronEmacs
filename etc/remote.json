@@ -1,23 +1,39 @@
 {
-  "_example": {
-    "name": "gpu-rpc",
-    "host": "gpu-box",
-    "method": "rpc",
-    "path": "~/work",
-    "group": "lab",
-    "description": "fast rpc target"
+  "version": 2,
+  "settings": {
+    "defaultPath": "/",
+    "defaultAction": "open"
   },
-  "ssh": {
-    "enabled": true,
-    "include": [],
-    "exclude": []
-  },
-  "rpc": {
-    "enabled": true,
-    "include": [
-      "Aaron-*"
-    ],
-    "exclude": []
-  },
-  "entries": []
+  "targets": [],
+  "imports": [
+    {
+      "id": "ssh-config",
+      "type": "ssh-config",
+      "files": [
+        "~/.ssh/config",
+        "~/.config/ssh/config"
+      ],
+      "include": [],
+      "exclude": [],
+      "pipelines": [
+        {
+          "id": "ssh",
+          "backend": "tramp",
+          "priority": 50,
+          "config": {
+            "method": "ssh"
+          }
+        },
+        {
+          "id": "ssh",
+          "backend": "tramp-rpc",
+          "priority": 50,
+          "include": [
+            "Aaron-*"
+          ],
+          "trusted": true
+        }
+      ]
+    }
+  ]
 }

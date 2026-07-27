@@ -18,6 +18,10 @@
 (declare-function my/language-server-executable-available-p "init-lsp" (program))
 (declare-function my/eglot-set-workspace-configuration "init-lsp" (configuration))
 (declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
+(declare-function remote-environment-apply "remote-environment" (environment &optional buffer))
+(declare-function remote-environment-derive "remote-environment" (environment id &rest keys))
+(declare-function remote-environment-ensure "remote-environment" (&optional context force callback))
+(declare-function remote-file-local-name "remote-fs" (file-name))
 
 (defun my/js-ts-mode-available-p ()
   "Return non-nil when `js-ts-mode' can be used safely."
@@ -46,15 +50,30 @@
 (defun my/js-setup-local-node-bin ()
   "Make project-local Node executables visible to JS/TS tooling."
   (when-let* ((bin-dir (my/js-local-node-bin-directory)))
-    (setq-local exec-path (cons bin-dir (remove bin-dir exec-path)))
-    (let* ((path-separator (if (eq system-type 'windows-nt) ";" ":"))
-           (path (or (getenv "PATH") ""))
-           (process-environment (copy-sequence process-environment)))
-      (unless (member bin-dir (split-string path path-separator t))
-        (setenv "PATH" (if (string-empty-p path)
-                           bin-dir
-                         (concat bin-dir path-separator path)))
-        (setq-local process-environment process-environment)))))
+    (if (and (file-remote-p default-directory)
+             (fboundp 'remote-environment-ensure)
+             (fboundp 'remote-environment-derive)
+             (fboundp 'remote-environment-apply))
+        (when-let* ((environment (remote-environment-ensure))
+                    (target-bin
+                     (if (fboundp 'remote-file-local-name)
+                         (remote-file-local-name bin-dir)
+                       bin-dir)))
+          (remote-environment-apply
+           (remote-environment-derive
+            environment "node-project-bin"
+            :scope 'toolchain
+            :path-prepend (list target-bin)
+            :source 'node-modules)))
+      (setq-local exec-path (cons bin-dir (remove bin-dir exec-path)))
+      (let* ((path-separator (if (eq system-type 'windows-nt) ";" ":"))
+             (path (or (getenv "PATH") ""))
+             (process-environment (copy-sequence process-environment)))
+        (unless (member bin-dir (split-string path path-separator t))
+          (setenv "PATH" (if (string-empty-p path)
+                             bin-dir
+                           (concat bin-dir path-separator path)))
+          (setq-local process-environment process-environment))))))
 
 (defun my/js-ts-eglot-available-p ()
   "Return non-nil when the TypeScript language server is available."

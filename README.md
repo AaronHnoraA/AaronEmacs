@@ -1,6 +1,6 @@
 # Aaron's Emacs Config
 
-A macOS-first Emacs workstation for local software work, SSH/TRAMP remote editing, Org-based knowledge work, and a tightly integrated terminal/browser/AI toolchain.
+A macOS-first Emacs workstation for local software work, target-oriented remote editing, Org-based knowledge work, and a tightly integrated terminal/browser/AI toolchain.
 
 This is not a minimal starter kit, and it is not trying to be a zero-assumption cross-platform distribution. It is a long-lived personal system built around one idea: coding, project navigation, remote work, research, and publishing should share the same operating surface.
 
@@ -22,7 +22,7 @@ This configuration is designed to solve a concrete set of problems:
 - Org and research writing
   Agenda, capture, TeXpresso live preview, AUCTeX, Jupyter, citations, and PDF Tools workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals
-  TRAMP and `my/vterm-ssh` are first-class. The goal is not merely to “support remote files”, but to make remote work part of the default workflow.
+  Logical `/fs` targets keep file identity stable while capability routing selects native, TRAMP, or tramp-rpc links. PATH/environment state is isolated per target and workspace; `my/vterm-ssh` remains the interactive terminal entry point.
 - Browser and system integration
   `eww`, `xwidget-webkit`, Appine, and macOS `open` have explicit roles, with manual routing between them when needed.
 - AI integration
@@ -65,6 +65,7 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
 - Project workflow: [docs/project-guide.md](docs/project-guide.md)
 - Org inside Emacs: [docs/org-guide.md](docs/org-guide.md)
 - Programming, LSP, remote work, terminals, AI: [docs/dev-guide.md](docs/dev-guide.md)
+- Remote target, routing, and environment architecture: [docs/remote-framework.md](docs/remote-framework.md)
 - Configuration cookbook: [docs/settings-cookbook.md](docs/settings-cookbook.md)
 - Maintenance, locks, state recovery: [docs/maintenance.md](docs/maintenance.md)
 - Migration notes: [docs/migration.md](docs/migration.md)
@@ -98,4 +99,4 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
 
 ## Current Bias
 
-The configuration is deliberately optimized around three main lines of work: local coding, SSH/TRAMP remote work, and Org-based research/writing. It does not aim to be minimal, and it does not try to erase every historical choice. The priority is long-term usefulness, recoverability, and a small number of stable entry points.
+The configuration is deliberately optimized around three main lines of work: local coding, target-oriented remote work, and Org-based research/writing. It does not aim to be minimal, and it does not try to erase every historical choice. The priority is long-term usefulness, recoverability, and a small number of stable entry points.

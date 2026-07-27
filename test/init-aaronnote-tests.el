@@ -6,6 +6,22 @@
   (defalias 'general-define-key #'ignore))
 (require 'init-aaronnote)
 
+(ert-deftest my/aaronnote-canonical-file-uses-target-aware-home-expansion ()
+  (let ((remote-mode t)
+        call)
+    (cl-letf
+        (((symbol-function 'remote-expand-file-name)
+          (lambda (file &optional directory target)
+            (setq call (list file directory target))
+            "/fs:local:/Users/me/Documents/AaronNote/")))
+      (should
+       (equal
+        (my/aaronnote--canonical-file "~/Documents/AaronNote/")
+        "/fs:local:/Users/me/Documents/AaronNote/"))
+      (should
+       (equal call
+              '("~/Documents/AaronNote/" nil "local"))))))
+
 (ert-deftest my/aaronnote-jupyter-defaults-read-project-config-without-eval ()
   (let ((root (make-temp-file "aaronnote-project" t)))
     (unwind-protect

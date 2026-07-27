@@ -16,6 +16,8 @@ This directory contains the operational docs for the Emacs configuration. The do
 - [project-guide.md](project-guide.md) Project switching, project workbench flow, and how Treemacs / Perspective fit together.
 - [typst-math-macros.md](typst-math-macros.md) Shared Typst math macros and matching snippets for TCS, quantum computing, algebra, computing, and physics notes.
 - [dev-guide.md](dev-guide.md) Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
+- [remote-framework.md](remote-framework.md) `/fs` identity plus target/pipeline/backend/session routing, process and channel APIs, compatibility boundaries, and current implementation gaps.
+- [remote-parity.md](remote-parity.md) VS Code Remote-level acceptance matrix, current coverage, completion criteria, and staged roadmap.
 - [research-notes-workflow.md](research-notes-workflow.md) Division of labor between notes, Jupytext notebooks, Jupyter, and reusable source code.
 - [lsp-workflow.org](lsp-workflow.org) Language-server routing, Hub/Doctor tooling, and the maintenance model.
 - [neopyter-protocol-notes.md](neopyter-protocol-notes.md) Neopyter JupyterLab bridge: wire protocol, RPC method registry, architecture, and Emacs client design.

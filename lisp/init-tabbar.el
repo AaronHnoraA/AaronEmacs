@@ -239,11 +239,19 @@ Scrolling in the opposite direction is allowed immediately."
 
 (defun my/tab-bar-format-buffer ()
   "Render the left-side current buffer label."
+  ;; A tab-bar format function may return a raw string, but Emacs 31's
+  ;; `tab-bar-auto-width' accepts menu-item entries only.  Returning the
+  ;; documented menu-item form keeps the custom label compatible with
+  ;; automatic tab sizing and prevents redisplay errors from recursively
+  ;; reporting themselves.
   (list
-   (concat
-    (propertize " " 'face 'tab-bar)
-    (my/tab-bar--buffer-title)
-    (propertize " " 'face 'tab-bar))))
+   (list
+    'buffer-label 'menu-item
+    (concat
+     (propertize " " 'face 'tab-bar)
+     (my/tab-bar--buffer-title)
+     (propertize " " 'face 'tab-bar))
+    #'ignore)))
 
 (defun my/tab-bar-tab-name-format (tab _index)
   "Format TAB as a restrained workspace pill."

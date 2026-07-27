@@ -11,7 +11,7 @@
 
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, extname, resolve } from 'node:path'
@@ -38,6 +38,14 @@ const PORT_FILE     = args.portFile
 const DOWNSTREAM    = args.downstream.length ? args.downstream : ['lake', 'serve']
 
 const log = (...p) => process.stderr.write(`[lean-proxy] ${p.join(' ')}\n`)
+
+function clearOwnedPortFile() {
+  if (!PORT_FILE || !existsSync(PORT_FILE)) return
+  try {
+    const owner = JSON.parse(readFileSync(PORT_FILE, 'utf8'))
+    if (owner?.pid === process.pid) unlinkSync(PORT_FILE)
+  } catch {}
+}
 
 // ── LSP framing ───────────────────────────────────────────────────────────────
 
@@ -620,6 +628,6 @@ httpServer.listen(0, '127.0.0.1', async () => {
   startLake()
 })
 
-process.on('SIGTERM', () => { killDownstream(); process.exit(0) })
-process.on('SIGINT',  () => { killDownstream(); process.exit(0) })
-process.on('exit', () => { killDownstream('SIGKILL') })
+process.on('SIGTERM', () => { killDownstream(); clearOwnedPortFile(); process.exit(0) })
+process.on('SIGINT',  () => { killDownstream(); clearOwnedPortFile(); process.exit(0) })
+process.on('exit', () => { killDownstream('SIGKILL'); clearOwnedPortFile() })
