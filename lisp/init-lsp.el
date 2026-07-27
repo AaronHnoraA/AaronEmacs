@@ -697,24 +697,121 @@ base ID.  Trying the generated alias preserves those extension APIs."
         (intern (format "%s-tramp" server-id))
         file-name))))
 
+(defun my/language-server--canonical-root (root)
+  "Return ROOT as a canonical logical directory, or nil."
+  (when (stringp root)
+    (ignore-errors
+      (file-name-as-directory
+       (remote-canonicalize-file-name root)))))
+
+(defun my/language-server--path-on-root (path root)
+  "Return server PATH in the logical namespace selected by ROOT.
+Local and remote targets use the same projection.  Physical backend names are
+canonicalized directly; a target-native absolute path is attached to ROOT's
+target identity."
+  (if (and (stringp path)
+           (or (file-name-absolute-p path)
+               (remote-fs-file-name-p path)))
+      (cond
+       ((or (remote-fs-file-name-p path)
+            (file-remote-p path))
+        (remote-canonicalize-file-name path))
+       ((my/language-server--canonical-root root)
+        (remote-expand-file-name
+         path nil (remote-file-name-target root)))
+       (t
+        (remote-canonicalize-file-name path)))
+    path))
+
+(defun my/eglot--logical-root ()
+  "Return the logical project root belonging to Eglot's active server."
+  (or
+   (when-let* ((server
+                (and (fboundp 'eglot-current-server)
+                     (ignore-errors (eglot-current-server))))
+               ((fboundp 'eglot--project))
+               (project (ignore-errors (eglot--project server)))
+               (root (ignore-errors (project-root project))))
+     (my/language-server--canonical-root root))
+   (my/language-server--canonical-root default-directory)))
+
 (defun my/eglot--uri-to-logical-a (fn uri)
-  "Canonicalize file paths returned by Eglot's URI converter."
-  (let* ((path (funcall fn uri))
-         (target
-          (and (stringp default-directory)
-               (ignore-errors
-                 (remote-file-name-target default-directory)))))
-    (if (and (stringp path)
-             (or (file-name-absolute-p path)
-                 (remote-fs-file-name-p path)))
-        (if (and target
-                 (not (equal target "local"))
-                 (file-name-absolute-p path)
-                 (not (file-remote-p path))
-                 (not (remote-fs-file-name-p path)))
-            (remote-expand-file-name path nil target)
-          (remote-canonicalize-file-name path))
-      path)))
+  "Canonicalize Eglot URI using its server's project target."
+  (my/language-server--path-on-root
+   (funcall fn uri)
+   (my/eglot--logical-root)))
+
+(defun my/lsp-mode--path-to-target-uri-a (fn path)
+  "Pass target-native PATH to lsp-mode's ordinary URI converter.
+Logical `/fs:' identity stays in Emacs; servers receive the native path they
+understand.  This also handles `/fs:local:', which is intentionally not
+classified as remote by `file-remote-p'."
+  (funcall
+   fn
+   (if (and (stringp path)
+            (remote-fs-file-name-p path))
+       (remote-file-local-name path)
+     path)))
+
+(defun my/lsp-mode--logical-workspace-roots ()
+  "Return logical roots associated with the active lsp-mode operation.
+The dynamically bound current workspace comes first.  Remaining workspace
+roots are retained for callbacks which are not run in a source buffer."
+  (let* ((current
+          (and (boundp 'lsp--cur-workspace)
+               lsp--cur-workspace))
+         (workspaces
+          (delete-dups
+           (delq
+            nil
+            (append
+             (and current (list current))
+             (and (fboundp 'lsp-workspaces)
+                  (ignore-errors (lsp-workspaces)))))))
+         roots)
+    (when (fboundp 'lsp--workspace-root)
+      (dolist (workspace workspaces)
+        (when-let* ((root
+                     (ignore-errors
+                       (lsp--workspace-root workspace)))
+                    (canonical
+                     (my/language-server--canonical-root root)))
+          (push canonical roots))))
+    (nreverse (delete-dups roots))))
+
+(defun my/lsp-mode--logical-root-for-path (path)
+  "Return the lsp-mode workspace root which owns target-native PATH."
+  (let ((roots (my/lsp-mode--logical-workspace-roots)))
+    (or
+     ;; The first root belongs to dynamically bound `lsp--cur-workspace'.
+     ;; It is authoritative even when two targets expose the same localname.
+     (and (boundp 'lsp--cur-workspace)
+          lsp--cur-workspace
+          (car roots))
+     (car
+      (sort
+       (seq-filter
+        (lambda (root)
+          (and
+           (stringp path)
+           (let ((native-root
+                  (file-name-as-directory
+                   (remote-file-local-name root))))
+             (or (equal path (directory-file-name native-root))
+                 (string-prefix-p native-root path)))))
+        roots)
+       (lambda (left right)
+         (> (length (remote-file-local-name left))
+            (length (remote-file-local-name right))))))
+     (car roots)
+     (my/language-server--canonical-root default-directory))))
+
+(defun my/lsp-mode--uri-to-logical-a (fn uri)
+  "Restore lsp-mode URI to its workspace's logical target namespace."
+  (let ((path (funcall fn uri)))
+    (my/language-server--path-on-root
+     path
+     (my/lsp-mode--logical-root-for-path path))))
 
 (defun my/eglot-ensure ()
   "Start `eglot' in programming buffers that do not opt into `lsp-mode'."
@@ -876,10 +973,39 @@ base ID.  Trying the generated alias preserves those extension APIs."
           (error nil))
       (apply fn command arg args))))
 
+(defconst my/company-tooltip-frontends
+  '(company-pseudo-tooltip-frontend
+    company-pseudo-tooltip-unless-just-one-frontend
+    company-pseudo-tooltip-unless-just-one-frontend-with-delay
+    company-childframe-frontend
+    company-childframe-unless-just-one-frontend
+    company-box-frontend)
+  "Company frontends that each own the completion candidate popup.")
+
+(defun my/company-box-normalize-frontends ()
+  "Keep Company-box as the only candidate-popup frontend in this buffer.
+Company 1.1 added its own child-frame frontend.  Older Company-box releases
+remove only Company's pseudo-tooltip frontends, leaving both child frames to
+render the same CAPF/Eglot candidates on top of each other."
+  (when (bound-and-true-p company-box-mode)
+    (setq-local
+     company-frontends
+     (cons
+      'company-box-frontend
+      (seq-remove
+       (lambda (frontend)
+         (memq frontend my/company-tooltip-frontends))
+       company-frontends)))
+    ;; A completion may already have made Company's built-in child frame
+    ;; visible before Company-box finished enabling.
+    (when (fboundp 'company-childframe-hide)
+      (company-childframe-hide))))
+
 (use-package company-box
   :ensure t
   :if window-system
-  :hook (company-mode . company-box-mode)
+  :hook ((company-mode . company-box-mode)
+         (company-box-mode . my/company-box-normalize-frontends))
   :custom
   (company-box-doc-delay 0.45)
   (company-box-scrollbar nil)
@@ -893,7 +1019,12 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
                    (number-or-marker-p new-start)
                    (ignore-errors (frame-live-p (company-box--get-frame))))
           (funcall fn win new-start))
-      (error nil))))
+      (error nil)))
+  ;; Also repair buffers that survived a configuration reload.
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when (bound-and-true-p company-box-mode)
+        (my/company-box-normalize-frontends)))))
 
 (use-package company-prescient
   :ensure t
@@ -987,7 +1118,19 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
            'lsp-find-workspace)
     (advice-add
      'lsp-find-workspace
-     :around #'my/lsp-mode--find-logical-workspace-a)))
+     :around #'my/lsp-mode--find-logical-workspace-a))
+  (unless (advice-member-p
+           #'my/lsp-mode--path-to-target-uri-a
+           'lsp--path-to-uri)
+    (advice-add
+     'lsp--path-to-uri
+     :around #'my/lsp-mode--path-to-target-uri-a))
+  (unless (advice-member-p
+           #'my/lsp-mode--uri-to-logical-a
+           'lsp--uri-to-path)
+    (advice-add
+     'lsp--uri-to-path
+     :around #'my/lsp-mode--uri-to-logical-a)))
 
 
 ;; -------------------------

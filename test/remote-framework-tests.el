@@ -49,19 +49,31 @@
              remote-pipeline-stages
              remote-register-backend
              remote-backend-prepare-execution
+             remote-backend-prepare-process
+             remote-backend-stdio-bridge-command
              remote-register-file-operation
              remote-session-acquire
              remote-session-invalidate
              remote-make-network-process
              remote-open-network-stream
              remote-port-forward
+             remote-reverse-port-forward
              remote-channel-of
+             remote-channel-live-p
+             remote-channel-endpoint
+             remote-channel-list
+             remote-channel-clear
+             remote-channel-recover
+             remote-get-file-operation
+             remote-file-operation-list
+             remote-unregister-file-operation
              remote-environment-resolve
              remote-workspace-open
              remote-workspace-reconnect
              remote-workspace-register-recoverable-resource
              remote-register-service
              remote-service-ensure
+             remote-service-restart
              remote-terminal-open
              remote-terminal-adopt
              remote-terminal-command
@@ -199,6 +211,84 @@
                :adapter-id "emacs-file")))
         (should-error (remote-pipeline-open route nil))
         (should (equal closed '(managed)))))))
+
+(ert-deftest remote-pipeline-reentrant-acquire-keeps-one-runtime ()
+  (remote-framework-test-with-registry
+    (let (route context nested-error)
+      (remote-register-transport
+       "reentrant-stage"
+       :connect
+       (lambda (_stage endpoint _runtime)
+         (condition-case error
+             (remote-pipeline-acquire route context)
+           (error (setq nested-error error)))
+         (remote-transport-result-create
+          :endpoint endpoint :handle 'stage)))
+      (remote-register-target "lab" :trusted t)
+      (let* ((pipeline
+              (remote-register-pipeline
+               "lab" "reentrant" "tramp"
+               :stages '("reentrant-stage")
+               :config '(:host "lab")))
+             (resolved
+              (remote-route-create
+               :target-id "lab"
+               :pipeline-id (remote-pipeline-id pipeline)
+               :backend-id "tramp"
+               :capability 'file-read
+               :adapter-id "emacs-file")))
+        (setq
+         route resolved
+         context
+         (remote-context-create
+          :target-id "lab" :localname "/work/"
+          :workspace-root "/fs:lab:/work/"))
+        (let ((runtime (remote-pipeline-acquire route context)))
+          (should (eq (car nested-error) 'remote-pipeline-busy))
+          (should (= (hash-table-count remote-pipeline-runtime-pool) 1))
+          (should (= (remote-pipeline-runtime-use-count runtime) 1))
+          (remote-pipeline-release runtime)
+          (should
+           (zerop (hash-table-count
+                   remote-pipeline-runtime-pool))))))))
+
+(ert-deftest remote-pipeline-cancelled-open-rolls-back-late-handle ()
+  (remote-framework-test-with-registry
+    (let (closed)
+      (remote-register-transport
+       "cancel-stage"
+       :connect
+       (lambda (_stage endpoint _runtime)
+         (remote-pipeline-runtime-clear 'test-cancel)
+         (remote-transport-result-create
+          :endpoint endpoint :handle 'late-handle))
+       :disconnect
+       (lambda (stage _runtime)
+         (push (remote-stage-runtime-handle stage) closed)))
+      (remote-register-target "lab" :trusted t)
+      (let* ((pipeline
+              (remote-register-pipeline
+               "lab" "cancelled" "tramp"
+               :stages '("cancel-stage")
+               :config '(:host "lab")))
+             (route
+              (remote-route-create
+               :target-id "lab"
+               :pipeline-id (remote-pipeline-id pipeline)
+               :backend-id "tramp"
+               :capability 'file-read
+               :adapter-id "emacs-file"))
+             (context
+              (remote-context-create
+               :target-id "lab" :localname "/work/"
+               :workspace-root "/fs:lab:/work/")))
+        (should-error
+         (remote-pipeline-acquire route context)
+         :type 'remote-pipeline-cancelled)
+        (should (equal closed '(late-handle)))
+        (should
+         (zerop (hash-table-count
+                 remote-pipeline-runtime-pool)))))))
 
 (ert-deftest remote-config-accepts-new-pipeline-vocabulary ()
   (remote-framework-test-with-registry
@@ -343,7 +433,39 @@
      (eq
       (remote-file-operation-spec-result-kind
        (gethash 'framework-test-operation remote-file-operations))
-      'path))))
+      'path))
+    (should
+     (eq (remote-get-file-operation 'framework-test-operation)
+         (car
+          (seq-filter
+           (lambda (spec)
+             (eq
+              (remote-file-operation-spec-operation spec)
+              'framework-test-operation))
+           (remote-file-operation-list)))))
+    (should
+     (remote-unregister-file-operation 'framework-test-operation))
+    (should-not
+     (remote-get-file-operation 'framework-test-operation))
+    ;; Emacs 32 can dispatch this primitive directly while recursively
+    ;; creating parent directories.
+    (should
+     (remote-get-file-operation 'make-directory-internal))))
+
+(ert-deftest remote-file-file-equal-internal-spelling-uses-public-primitive ()
+  (let (called)
+    (cl-letf (((symbol-function 'remote-fs--call-routed)
+               (lambda (operation arguments)
+                 (setq called (cons operation arguments))
+                 t)))
+      (should
+       (remote-fs-file-name-handler
+        'file-file-equal-p
+        "/fs:local:/tmp/a" "/fs:local:/tmp/b")))
+    (should
+     (equal called
+            '(file-equal-p
+              "/fs:local:/tmp/a" "/fs:local:/tmp/b")))))
 
 (ert-deftest remote-file-operation-unknown-fallback-is-conservative ()
   (let ((remote-file-operations (make-hash-table :test #'eq))
@@ -498,8 +620,145 @@
             (should (processp server))
             (should (remote-channel-p channel))
             (should (eq (remote-channel-kind channel) 'listener))
-            (should (eq (remote-channel-handle channel) server)))
+            (should (eq (remote-channel-handle channel) server))
+            (should
+             (equal
+              (remote-channel-endpoint server 'remote)
+              (list :host (process-contact server :host)
+                    :port (process-contact server :service)))))
         (remote-close-channel server)))))
+
+(ert-deftest remote-native-reverse-forward-relays-and-cleans-lifecycle ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local"
+             :localname "/tmp/"
+             :workspace-root "/fs:local:/tmp/"))
+           (destination
+            (make-network-process
+             :name "remote-forward-echo"
+             :server t :host "127.0.0.1" :service t
+             :noquery t :coding 'binary
+             :log
+             (lambda (_server client _message)
+               (set-process-filter
+                client
+                (lambda (process string)
+                  (process-send-string process string))))))
+           forward client buffer)
+      (unwind-protect
+          (progn
+            (setq forward
+                  (remote-reverse-port-forward
+                   (list
+                    :host "127.0.0.1"
+                    :port (process-contact destination :service))
+                   :context context :register nil))
+            (let* ((endpoint
+                    (remote-channel-endpoint forward 'remote))
+                   (channel (remote-channel-of forward)))
+              (should (remote-channel-p channel))
+              (should (remote-channel-live-p forward))
+              (should (equal (plist-get endpoint :host)
+                             "127.0.0.1"))
+              (should (integerp (plist-get endpoint :port)))
+              (should (= (length (remote-channel-list "local")) 1))
+              (setq buffer (generate-new-buffer
+                            " *remote-forward-client*"))
+              (setq client
+                    (make-network-process
+                     :name "remote-forward-client"
+                     :buffer buffer
+                     :host (plist-get endpoint :host)
+                     :service (plist-get endpoint :port)
+                     :coding 'binary :noquery t))
+              (process-send-string client "roundtrip")
+              (let ((deadline (+ (float-time) 2)))
+                (while
+                    (and
+                     (buffer-live-p buffer)
+                     (with-current-buffer buffer
+                       (not (string-match-p
+                             "roundtrip" (buffer-string))))
+                     (< (float-time) deadline))
+                  (accept-process-output nil 0.02)))
+              (should
+               (with-current-buffer buffer
+                 (string-match-p "roundtrip" (buffer-string))))
+              (remote-close-channel forward)
+              (should (eq (remote-forward-state forward) 'closed))
+              (should (eq (remote-channel-state channel) 'closed))
+              (should-not (remote-channel-list "local"))
+              (let ((replacement (remote-channel-recover channel)))
+                (should (remote-channel-live-p replacement))
+                (should (= (length (remote-channel-list "local")) 1))
+                (remote-close-channel replacement)
+                (should-not (remote-channel-list "local")))))
+        (when (and (processp client) (process-live-p client))
+          (delete-process client))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))
+        (when (and (remote-forward-p forward)
+                   (not (eq (remote-forward-state forward) 'closed)))
+          (remote-close-channel forward))
+        (when (process-live-p destination)
+          (delete-process destination))))))
+
+(ert-deftest remote-routed-listener-process-contact-exposes-target-port ()
+  (let* ((server
+          (make-network-process
+           :name "remote-listener-contact"
+           :server t :host "127.0.0.1" :service t :noquery t))
+         (physical-port (process-contact server :service))
+         (logical-port (1+ physical-port))
+         (was-installed
+          remote-channel--process-contact-advice-installed))
+    (unwind-protect
+        (progn
+          (process-put
+           server 'remote-listen-endpoint
+           (list :host "127.0.0.1" :port logical-port))
+          (remote-channel-install-compatibility)
+          (should (= (process-contact server :service) logical-port))
+          (should
+           (equal
+            (process-contact server)
+            (list "127.0.0.1" logical-port))))
+      (delete-process server)
+      (unless was-installed
+        (remote-channel-uninstall-compatibility)))))
+
+(ert-deftest remote-forward-unexpected-exit-reports-transport-failure ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local"
+             :localname "/tmp/"
+             :workspace-root "/fs:local:/tmp/"))
+           (forward
+            (remote-port-forward
+             '(:host "127.0.0.1" :port 9)
+             :context context :register nil))
+           (channel (remote-channel-of forward))
+           reported)
+      (unwind-protect
+          (cl-letf
+              (((symbol-function 'remote-report-route-failure)
+                (lambda (route error)
+                  (setq reported (list route error))
+                  'transport)))
+            (delete-process (remote-forward-handle forward))
+            (accept-process-output nil 0.01)
+            (should (eq (remote-forward-state forward) 'failed))
+            (should (eq (remote-channel-state channel) 'failed))
+            (should (eq (car reported)
+                        (remote-channel-route channel)))
+            (should
+             (eq (car (cadr reported))
+                 'remote-transport-error))
+            (should-not (remote-channel-list "local")))
+        (remote-close-channel forward)))))
 
 (ert-deftest remote-doctor-reports-local-routing-boundaries ()
   (remote-framework-test-with-registry
@@ -555,9 +814,93 @@
         (should (remote-service-instance-live-p instance))
         (should (equal
                  (remote-service-instance-version instance)
-                 "1")))
+                 "1"))
+        (should
+         (eq instance
+             (remote-workspace-ensure-service
+              workspace "agent" :provision t)))
+        (should (= (remote-service-instance-use-count instance) 1))
+        (should (= (length (remote-workspace-resources workspace)) 1)))
       (remote-workspace-close workspace)
       (should-not (remote-service-list)))))
+
+(ert-deftest remote-target-service-restarts-in-place-for-every-workspace ()
+  "A target-scoped restart must not leave another workspace with a stale object."
+  (remote-framework-test-with-registry
+    (remote-register-target "lab" :trusted t)
+    (let* ((left-context
+            (remote-context-create
+             :target-id "lab"
+             :localname "/work/left/a.el"
+             :workspace-id "left"
+             :workspace-root "/fs:lab:/work/left/"))
+           (right-context
+            (remote-context-create
+             :target-id "lab"
+             :localname "/work/right/a.el"
+             :workspace-id "right"
+             :workspace-root "/fs:lab:/work/right/"))
+           (left
+            (remote-workspace-open left-context :connect nil))
+           (right
+            (remote-workspace-open right-context :connect nil))
+           (starts 0)
+           (stops 0))
+      (remote-register-service
+       "shared-agent"
+       :scope 'target
+       :capabilities '(processes channels)
+       :start
+       (lambda (_context _probe)
+         (list :handle (format "handle-%d" (cl-incf starts))))
+       :stop
+       (lambda (_instance _reason)
+         (cl-incf stops)))
+      (let* ((instance
+              (remote-workspace-ensure-service left "shared-agent"))
+             (right-instance
+              (remote-workspace-ensure-service right "shared-agent")))
+        (should (eq instance right-instance))
+        (should (= (remote-service-instance-use-count instance) 2))
+        (should
+         (eq instance
+             (remote-workspace-ensure-service
+              left "shared-agent" :force t)))
+        (should (eq instance
+                    (car (remote-workspace-services right))))
+        (should (equal (remote-service-instance-handle instance)
+                       "handle-2"))
+        (should (= (remote-service-instance-use-count instance) 2))
+        (should (= starts 2))
+        (should (= stops 1))
+        ;; Exercise the transport-recovery path, which first releases the
+        ;; left workspace's reference and then reacquires with FORCE.
+        (let ((resource
+               (seq-find
+                (lambda (candidate)
+                  (eq
+                   (remote-workspace-resource-kind candidate)
+                   'service))
+                (remote-workspace-resources left))))
+          (should
+           (eq instance
+               (remote-workspace-recover-resource left resource)))
+          (should
+           (eq instance
+               (remote-workspace-resource-value resource))))
+        (should (eq instance
+                    (car (remote-workspace-services right))))
+        (should (equal (remote-service-instance-handle instance)
+                       "handle-3"))
+        (should (= (remote-service-instance-use-count instance) 2))
+        (should (= starts 3))
+        (should (= stops 2))
+        (remote-workspace-close left)
+        (should (remote-service-instance-live-p instance))
+        (should (= (remote-service-instance-use-count instance) 1))
+        (remote-workspace-close right)
+        (should-not (remote-service-list))
+        (should (= stops 3))))))
 
 (ert-deftest remote-terminal-runs-through-routed-pty-boundary ()
   (remote-framework-test-with-registry
@@ -880,6 +1223,47 @@
             :program-form)
            'search)))))
 
+(ert-deftest remote-stdio-bridge-dispatches-through-the-selected-backend ()
+  "The public process layer must not special-case local, SSH, or backend IDs."
+  (remote-framework-test-with-registry
+    (let (seen)
+      (remote-register-backend
+       "test-bridge"
+       :capabilities '(process-async)
+       :project
+       (lambda (_file-name _pipeline _route)
+         temporary-file-directory)
+       :stdio-bridge
+       (lambda (execution)
+         (setq seen execution)
+         (list
+          "/test/bridge"
+          (remote-route-target-id
+           (remote-backend-execution-route execution))
+          (car (remote-backend-execution-command execution)))))
+      (remote-register-target "lab" :trusted t)
+      (remote-register-pipeline
+       "lab" "bridge" "test-bridge"
+       :config '(:transport "direct"))
+      (let* ((context
+              (remote-context-create
+               :target-id "lab"
+               :localname "/work/a.el"
+               :workspace-root "/fs:lab:/work/"))
+             (command
+              (remote-local-bridge-command
+               "language-server"
+               :context context
+               :link "lab/bridge")))
+        (should
+         (equal command
+                '("/test/bridge" "lab" "language-server")))
+        (should (remote-backend-execution-p seen))
+        (should
+         (equal
+          (remote-backend-execution-logical-directory seen)
+          "/fs:lab:/work/"))))))
+
 (ert-deftest remote-rpc-backend-declares-absolute-spawn-contract ()
   (remote-framework-test-with-registry
     (remote-register-target "lab" :trusted t)
@@ -911,6 +1295,112 @@
        (plist-get
         (remote-backend-execution-metadata execution)
         :require-absolute-program)))))
+
+(ert-deftest remote-tramp-stream-keeps-target-host-above-the-relay ()
+  "TLS/SNI sees the target host while only the socket connect sees loopback."
+  (remote-framework-test-with-registry
+    (let* ((route
+            (remote-route-create
+             :target-id "lab"
+             :pipeline-id "lab/ssh"
+             :backend-id "tramp"
+             :capability 'network-client
+             :adapter-id "network"))
+           (context
+            (remote-context-create
+             :target-id "lab"
+             :localname "/work/"
+             :workspace-root "/fs:lab:/work/"))
+           (process
+            (make-pipe-process
+             :name "remote-stream-return-list" :noquery t))
+           (forward
+            (remote-forward-create
+             :backend-id "tramp"
+             :route route :context context
+             :local-endpoint
+             '(:host "127.0.0.1" :port 49152)
+             :remote-endpoint
+             '(:host "db.internal" :port 443)
+             :state 'open))
+           high-level
+           low-level)
+      (unwind-protect
+          (cl-letf
+              (((symbol-function 'gnutls-available-p)
+                (lambda () t))
+               ((symbol-function 'remote-backend-tramp-forward)
+                (lambda (&rest _arguments) forward))
+               ((symbol-function 'make-network-process)
+                (lambda (&rest arguments)
+                  (setq low-level arguments)
+                  process))
+               ((symbol-function 'open-network-stream)
+                (lambda (name buffer host service &rest parameters)
+                  (setq high-level
+                        (list name buffer host service parameters))
+                  (list
+                   (make-network-process
+                    :name name :buffer buffer
+                    :host host :service service)
+                   :greeting "hello"
+                   :type 'tls))))
+            (let ((result
+                   (remote-backend-tramp-stream
+                    route context "db" nil "db.internal" 443
+                    '(:type tls :return-list t))))
+              (should (eq (car result) process))
+              (should (equal (nth 2 high-level) "db.internal"))
+              (should (= (nth 3 high-level) 443))
+              (should (eq (plist-get (nth 4 high-level) :type) 'tls))
+              (should
+               (equal (plist-get low-level :host) "127.0.0.1"))
+              (should (= (plist-get low-level :service) 49152))
+              (should (eq (process-get process 'remote-forward)
+                          forward))))
+        (when (process-live-p process)
+          (delete-process process))))))
+
+(ert-deftest remote-open-network-stream-preserves-native-return-list ()
+  (remote-framework-test-with-registry
+    (let ((process
+           (make-pipe-process
+            :name "remote-stream-list-contract" :noquery t)))
+      (unwind-protect
+          (progn
+            (remote-register-backend
+             "stream-list"
+             :capabilities '(network-client)
+             :open-network-stream
+             (lambda (_route _context _name _buffer _host _service parameters)
+               (should (plist-get parameters :return-list))
+               (list process :greeting "ready" :type 'plain)))
+            (remote-register-target "lab" :trusted t)
+            (remote-register-pipeline
+             "lab" "stream" "stream-list"
+             :config '(:transport "direct"))
+            (let* ((context
+                    (remote-context-create
+                     :target-id "lab"
+                     :localname "/work/"
+                     :workspace-root "/fs:lab:/work/"))
+                   (result
+                    (remote-open-network-stream
+                     "stream" nil "service.internal" 8080
+                     :return-list t
+                     :remote-context context
+                     :remote-pipeline "lab/stream")))
+              (should
+               (equal (cdr result)
+                      '(:greeting "ready" :type plain)))
+              (should (eq (car result) process))
+              (should (remote-channel-of process))
+              (should
+               (equal
+                (remote-channel-endpoint process 'remote)
+                '(:host "service.internal" :port 8080)))))
+        (when (process-live-p process)
+          (remote-close-channel process))))))
 
 (ert-deftest remote-channel-never-falls-back-to-the-client-machine ()
   (remote-framework-test-with-registry
@@ -965,6 +1455,42 @@
             "-o" "ServerAliveCountMax=3"
             "-J" "ops@edge:2222"
             "-L" "127.0.0.1:49152:127.0.0.1:3000"
+            "dev@lab")))))))
+
+(ert-deftest remote-ssh-reverse-forward-command-respects-pipeline-hops ()
+  (remote-framework-test-with-registry
+    (remote-register-target "lab" :trusted t)
+    (let* ((pipeline
+            (remote-register-pipeline
+             "lab" "jumped" "tramp"
+             :stages
+             '((:id "jump" :transport "ssh"
+                :config (:host "edge" :user "ops" :port 2222))
+               (:id "target" :transport "ssh"
+                :config (:host "lab" :user "dev")))
+             :config '(:host "lab")))
+           (route
+            (remote-route-create
+             :target-id "lab"
+             :pipeline-id (remote-pipeline-id pipeline)
+             :backend-id "tramp"
+             :capability 'reverse-forward
+             :adapter-id "network")))
+      (cl-letf (((symbol-function 'executable-find)
+                 (lambda (_program &optional _remote)
+                   "/usr/bin/ssh")))
+        (should
+         (equal
+          (remote-backend-tramp--ssh-forward-command
+           route "127.0.0.1" 3000 "127.0.0.1" 49152
+           'reverse)
+          '("/usr/bin/ssh" "-N" "-T"
+            "-o" "ExitOnForwardFailure=yes"
+            "-o" "ServerAliveInterval=30"
+            "-o" "ServerAliveCountMax=3"
+            "-v"
+            "-J" "ops@edge:2222"
+            "-R" "127.0.0.1:49152:127.0.0.1:3000"
             "dev@lab")))))))
 
 (provide 'remote-framework-tests)

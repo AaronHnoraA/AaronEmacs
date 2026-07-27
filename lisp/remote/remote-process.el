@@ -18,12 +18,13 @@
 (declare-function remote-environment-vars "remote-environment" (environment))
 (declare-function remote-environment-resolve "remote-environment"
                   (&optional context force))
-(declare-function remote-backend-tramp-direct-async-command
-                  "remote-backend-tramp"
-                  (route command environment directory))
 
 (defvar remote-environment-inhibit nil)
 (defvar remote-buffer-environment nil)
+(defvar remote--buffer-base-process-environment nil
+  "Client environment captured before a logical target environment is applied.")
+(defvar remote--buffer-base-exec-path nil
+  "Client executable search path captured before target activation.")
 
 (define-error 'remote-exec-error "Remote command failed")
 
@@ -133,6 +134,33 @@ When the process did not emit its frame, retain all received data as stdout."
                result))
         (when value
           (push (concat prefix (format "%s" value)) result))))
+    result))
+
+(defun remote--merge-environment-overrides (base overrides)
+  "Overlay environment OVERRIDES on BASE as a normalized alist.
+Later entries win by variable name.  A small explicit override therefore
+augments the resolved target capsule instead of replacing it wholesale."
+  (let ((base
+         (if (and (fboundp 'remote-environment-p)
+                  (remote-environment-p base))
+             (remote-environment-vars base)
+           base))
+        (overrides
+         (if (and (fboundp 'remote-environment-p)
+                  (remote-environment-p overrides))
+             (remote-environment-vars overrides)
+           overrides))
+        result)
+    (dolist (entry (append base overrides))
+      (let ((name (format "%s" (car entry))))
+        (setq result
+              (cl-delete-if
+               (lambda (known)
+                 (string-equal-ignore-case
+                  name (format "%s" (car known))))
+               result))
+        (setq result
+              (append result (list (cons name (cdr entry)))))))
     result))
 
 (defun remote--exec-path-for-environment (environment fallback)
@@ -301,6 +329,38 @@ overrides.  Failover is limited to transport errors."
           (signal (car last-error) (cdr last-error))
         (error "No usable %s route" capability)))))
 
+(defun remote--project-process-file-path (path route)
+  "Project logical process-file PATH through ROUTE when applicable.
+Same-target files use the selected backend.  A different target may still
+expose a directly client-accessible path (for example the `local' target);
+otherwise retain the logical spelling so a capable remote file handler can
+stage it."
+  (if (and
+       (stringp path)
+       (or (remote-fs-file-name-p path)
+           (file-remote-p path)))
+      (let* ((logical (remote-canonicalize-file-name path))
+             (target (remote-file-name-target logical)))
+        (cond
+         ((equal target (remote-route-target-id route))
+          (remote-project-file-name logical route))
+         ((ignore-errors
+            (remote-client-file-name logical)))
+         (t logical)))
+    path))
+
+(defun remote--project-process-file-destination (destination route)
+  "Project the stderr file in process-file DESTINATION through ROUTE.
+The stdout half remains a buffer designator and is never interpreted as a
+file name."
+  (if (and (consp destination)
+           (stringp (cadr destination)))
+      (list
+       (car destination)
+       (remote--project-process-file-path
+        (cadr destination) route))
+    destination))
+
 (defun remote--process-file-raw
     (program infile destination display args adapter context constraints
              &optional environment)
@@ -309,7 +369,9 @@ overrides.  Failover is limited to transport errors."
     (remote--call-with-process-route
      adapter 'process-sync context constraints
      (lambda (route physical-directory resolved-environment)
-       (let* ((overrides (or environment resolved-environment))
+       (let* ((overrides
+               (remote--merge-environment-overrides
+                resolved-environment environment))
               (execution
                (remote--prepare-backend-execution
                 route context (cons program args) overrides
@@ -322,7 +384,12 @@ overrides.  Failover is limited to transport errors."
               (exec-path
                (remote--exec-path-for-environment overrides exec-path))
               (remote-current-route route)
-              (remote-current-adapter-id adapter))
+              (remote-current-adapter-id adapter)
+              (infile
+               (remote--project-process-file-path infile route))
+              (destination
+               (remote--project-process-file-destination
+                destination route)))
          (apply #'process-file
                 (car command) infile destination display
                 (cdr command)))))))
@@ -349,7 +416,12 @@ adapter."
               (exec-path
                (remote--exec-path-for-environment environment exec-path))
               (remote-current-route route)
-              (remote-current-adapter-id adapter))
+              (remote-current-adapter-id adapter)
+              (infile
+               (remote--project-process-file-path infile route))
+              (destination
+               (remote--project-process-file-destination
+                destination route)))
          (apply #'process-file
                 (car command) infile destination display
                 (cdr command)))))))
@@ -378,7 +450,9 @@ caller's logical `default-directory' independently of its workspace root."
      adapter 'process-async context (and link (list :link link))
      (lambda (route physical-directory resolved-environment)
        (let* ((context-value (remote--context-value context))
-              (overrides (or explicit-environment resolved-environment))
+              (overrides
+               (remote--merge-environment-overrides
+                resolved-environment explicit-environment))
               (command (plist-get arguments :command))
               (execution
                (remote--prepare-backend-execution
@@ -407,43 +481,27 @@ caller's logical `default-directory' independently of its workspace root."
               ;; executable makes the contract uniform.
               (arguments
                (if resolved-program
-                   (plist-put
-                    arguments :command
-                    (cons
-                     (remote-file-local-name resolved-program)
-                     (cdr command)))
+                   (let ((resolved-command
+                          (cons
+                           (remote-file-local-name resolved-program)
+                           (cdr command))))
+                     (setf
+                      (remote-backend-execution-command execution)
+                      resolved-command)
+                     (plist-put arguments :command resolved-command))
                  arguments))
-              ;; For pipe-based standard TRAMP processes, use the pipeline's
-              ;; direct SSH stdio channel.  SSH already exposes independent
-              ;; local stdout/stderr descriptors, so no remote FIFO or helper
-              ;; TRAMP connection is needed.
-              (direct-ssh
-               (and
-                (equal (remote-route-backend-id route) "tramp")
-                (eq (or (plist-get arguments :connection-type) 'pipe)
-                    'pipe)
-                (fboundp 'remote-backend-tramp-direct-async-command)))
+              ;; Backend placement is represented as data.  The common API
+              ;; does not inspect target IDs, TRAMP methods, or backend names.
+              (plan
+               (remote-backend-prepare-process
+                route execution arguments overrides))
               (arguments
-               (if direct-ssh
-                   (plist-put
-                    arguments :command
-                    (remote-backend-tramp-direct-async-command
-                     route
-                     (plist-get arguments :command)
-                     overrides
-                     (if-let* ((directory
-                                (remote-backend-execution-logical-directory
-                                 execution)))
-                         (remote-file-local-name directory)
-                       (remote-context-localname context-value))))
-                 arguments))
-              ;; A separate remote `:stderr' makes standard TRAMP create a
-              ;; FIFO and an auxiliary SSH connection.  Multiplex both streams
-              ;; over the primary process, then split them in our sentinel.
+               (remote-backend-process-plan-arguments plan))
               (framed-stderr
                (and stderr-token
-                    (not direct-ssh)
-                    (equal (remote-route-backend-id route) "tramp")))
+                    (eq
+                     (remote-backend-process-plan-stderr-mode plan)
+                     'framed)))
               (arguments
                (if framed-stderr
                    (let* ((without-stderr
@@ -455,28 +513,73 @@ caller's logical `default-directory' independently of its workspace root."
                       (remote--tramp-stderr-command
                        spawn-command stderr-token)))
                  arguments))
-              (arguments
-               (if direct-ssh
-                   (plist-put arguments :file-handler nil)
-                 (if (plist-member arguments :file-handler)
-                     arguments
-                   (plist-put arguments :file-handler t))))
               (process
                (let ((default-directory
-                      (if direct-ssh
-                          temporary-file-directory
-                        default-directory)))
+                      (or
+                       (remote-backend-process-plan-default-directory plan)
+                       default-directory)))
                  (apply #'make-process arguments))))
          (process-put process 'remote-route route)
          (process-put process 'remote-context context-value)
          (when framed-stderr
            (process-put process 'remote-stderr-token stderr-token))
-         (when direct-ssh
-           (process-put process 'remote-direct-ssh t))
+         (dolist
+             (property
+              (remote-backend-process-plan-process-properties plan))
+           (process-put process (car property) (cdr property)))
          (setf (remote-backend-execution-command execution)
                (plist-get arguments :command))
          (process-put process 'remote-backend-execution execution)
          process)))))
+
+(defun remote-make-client-process (&rest plist)
+  "Create a native client process from a logical target buffer.
+
+PLIST accepts the official `make-process' keys plus
+`:remote-client-directory', `:remote-client-environment', and
+`:remote-client-exec-path'.  The three extension keys select native client
+state and are removed before calling `make-process'.  By default this uses the
+buffer's environment snapshot from before a target capsule was installed and
+starts in `temporary-file-directory'.
+
+This is the explicit placement boundary for a local UI or protocol proxy whose
+stdio peer may be reached through `remote-local-bridge-command'.  It never
+routes through a `/fs:' file-name handler."
+  (let* ((arguments (copy-sequence plist))
+         (directory
+          (or (plist-get arguments :remote-client-directory)
+              temporary-file-directory))
+         (environment
+          (or (plist-get arguments :remote-client-environment)
+              remote--buffer-base-process-environment
+              (default-value 'process-environment)))
+         (client-exec-path
+          (or (plist-get arguments :remote-client-exec-path)
+              remote--buffer-base-exec-path
+              (default-value 'exec-path))))
+    (dolist (key '(:remote-client-directory
+                   :remote-client-environment
+                   :remote-client-exec-path))
+      (setq arguments (remote--plist-delete arguments key)))
+    (when (or (remote-fs-file-name-p directory)
+              (file-remote-p directory))
+      (signal 'wrong-type-argument
+              (list 'native-client-directory-p directory)))
+    (setq directory
+          (file-name-as-directory
+           (expand-file-name directory temporary-file-directory)))
+    (let ((default-directory directory)
+          (process-environment (copy-sequence environment))
+          (exec-path (copy-sequence client-exec-path))
+          ;; We are deliberately crossing out of the logical target.  Prevent
+          ;; an outer `/fs:' dispatch from being inherited by the native spawn.
+          (inhibit-file-name-operation 'make-process)
+          (inhibit-file-name-handlers
+           (cons #'remote-file-name-handler
+                 (cons #'tramp-file-name-handler
+                       inhibit-file-name-handlers))))
+      (apply #'make-process
+             (plist-put arguments :file-handler nil)))))
 
 (defun remote-executable-find (program &optional context)
   "Find PROGRAM on CONTEXT's logical target.
@@ -492,6 +595,33 @@ The return value is a target-native path, never a physical TRAMP link name."
              (remote--exec-path-for-environment environment exec-path))
             (found (executable-find program t)))
        (and found (remote-file-local-name found))))))
+
+(cl-defun remote-local-bridge-command
+    (program &key args context (adapter "exec") link environment directory)
+  "Return local argv which bridges stdio to target PROGRAM.
+ARGS are target-native arguments.  CONTEXT, ADAPTER, LINK, and ENVIRONMENT use
+the same routing contract as `remote-exec'.  DIRECTORY is the logical target
+working directory and defaults to the context workspace.
+
+The selected backend decides how to implement the bridge; callers never branch
+on whether the target is local or remote.  This API is for local protocol
+proxies which own UI/network state while their language server, debugger, or
+other stdio peer remains on the selected target."
+  (let ((context (remote--context-value context)))
+    (remote--call-with-process-route
+     adapter 'process-async context (and link (list :link link))
+     (lambda (route physical-directory resolved-environment)
+       (let* ((overrides
+               (remote--merge-environment-overrides
+                resolved-environment environment))
+              (logical-directory
+               (or directory
+                   (remote-context-workspace-root context)))
+              (execution
+               (remote--prepare-backend-execution
+                route context (cons program args) overrides
+                physical-directory logical-directory)))
+         (remote-backend-stdio-bridge-command execution))))))
 
 (cl-defun remote-exec
     (program &key args context (adapter "exec") link environment check trim)
@@ -511,13 +641,8 @@ trim surrounding whitespace from stdout and stderr."
                (and link (list :link link))
                (lambda (route physical-directory resolved-environment)
                  (let* ((overrides
-                         (append
-                          resolved-environment
-                          (if (and
-                               (fboundp 'remote-environment-p)
-                               (remote-environment-p environment))
-                              (remote-environment-vars environment)
-                            environment)))
+                         (remote--merge-environment-overrides
+                          resolved-environment environment))
                         (execution
                          (remote--prepare-backend-execution
                           route context (cons program args) overrides
@@ -593,111 +718,116 @@ OPTIONS are forwarded to `remote-exec'."
   "Execute PROGRAM asynchronously through the routed `make-process' boundary.
 CALLBACK receives one `remote-exec-result' after the process exits.  CONTEXT,
 ADAPTER, LINK, ENVIRONMENT, and ARGS have the same meaning as in
-`remote-exec'.  The returned process retains its `remote-route' property."
+  `remote-exec'.  The returned process retains its `remote-route' property."
   (let* ((context (remote--context-value context))
          (origin-buffer (current-buffer))
-         (stdout-buffer
-          (generate-new-buffer " *remote-exec-async-stdout*"))
-         (stderr-buffer
-          (generate-new-buffer " *remote-exec-async-stderr*"))
-         ;; Supplying a buffer as `make-process' :stderr makes Emacs allocate
-         ;; an auxiliary process with `internal-default-process-sentinel'.
-         ;; That sentinel appends "Process ... stderr finished" to the buffer,
-         ;; corrupting the command's stderr.  Own the pipe explicitly so its
-         ;; sentinel is quiet and its lifetime is bounded with this request.
-         (stderr-process
-          (make-pipe-process
-           :name
-           (generate-new-buffer-name
-            (format "remote-%s-stderr"
-                    (file-name-nondirectory program)))
-           :buffer stderr-buffer
-           :noquery t
-           :sentinel #'ignore))
          (stderr-token (remote--stderr-frame-token))
          (command (cons program args))
+         stdout-buffer
+         stderr-buffer
+         stderr-process
          process)
     (condition-case err
-        (setq process
-              (remote-make-process
-               :name (or name
-                         (format "remote-%s"
-                                 (file-name-nondirectory program)))
-               :buffer stdout-buffer
-               :stderr stderr-process
-               :command command
-               :coding coding
-               :connection-type 'pipe
-               :noquery t
-               :remote-adapter adapter
-               :remote-context context
-               :remote-link link
-               :remote-environment environment
-               :remote-stderr-token stderr-token
-               :sentinel
-               (lambda (finished _event)
-                 (when (and
-                        (memq (process-status finished)
-                              '(exit signal failed closed))
-                        (not (process-get finished
-                                          'remote-exec-callback-done)))
-                   (process-put finished 'remote-exec-callback-done t)
-                   (let* ((combined
-                           (if (buffer-live-p stdout-buffer)
-                               (with-current-buffer stdout-buffer
-                                 (buffer-substring-no-properties
-                                  (point-min) (point-max)))
-                             ""))
-                          (framed-token
-                           (process-get finished 'remote-stderr-token))
-                          (streams
-                           (and framed-token
-                                (remote--split-stderr-frame
-                                 combined framed-token)))
-                          (stdout (if streams (car streams) combined))
-                          (stderr
-                           (if streams
-                               (cdr streams)
-                             (if (buffer-live-p stderr-buffer)
-                                 (with-current-buffer stderr-buffer
+        (progn
+          ;; Allocate every owned resource inside the protected region.
+          ;; `make-pipe-process' can fail before the command process exists;
+          ;; buffers created just before it must still be reclaimed.
+          (setq stdout-buffer
+                (generate-new-buffer " *remote-exec-async-stdout*")
+                stderr-buffer
+                (generate-new-buffer " *remote-exec-async-stderr*"))
+          ;; Supplying a buffer as `make-process' :stderr makes Emacs allocate
+          ;; an auxiliary process with `internal-default-process-sentinel'.
+          ;; That sentinel appends "Process ... stderr finished" to the buffer,
+          ;; corrupting the command's stderr.  Own the pipe explicitly so its
+          ;; sentinel is quiet and its lifetime is bounded with this request.
+          (setq stderr-process
+                (make-pipe-process
+                 :name
+                 (generate-new-buffer-name
+                  (format "remote-%s-stderr"
+                          (file-name-nondirectory program)))
+                 :buffer stderr-buffer
+                 :noquery t
+                 :sentinel #'ignore))
+          (setq process
+                (remote-make-process
+                 :name (or name
+                           (format "remote-%s"
+                                   (file-name-nondirectory program)))
+                 :buffer stdout-buffer
+                 :stderr stderr-process
+                 :command command
+                 :coding coding
+                 :connection-type 'pipe
+                 :noquery t
+                 :remote-adapter adapter
+                 :remote-context context
+                 :remote-link link
+                 :remote-environment environment
+                 :remote-stderr-token stderr-token
+                 :sentinel
+                 (lambda (finished _event)
+                   (when (and
+                          (memq (process-status finished)
+                                '(exit signal failed closed))
+                          (not (process-get finished
+                                            'remote-exec-callback-done)))
+                     (process-put finished 'remote-exec-callback-done t)
+                     (let* ((combined
+                             (if (buffer-live-p stdout-buffer)
+                                 (with-current-buffer stdout-buffer
                                    (buffer-substring-no-properties
                                     (point-min) (point-max)))
-                               "")))
-                          (result
-                           (remote-exec-result-create
-                            :status
-                            (if (memq (process-status finished)
-                                      '(exit signal))
-                                (process-exit-status finished)
-                              1)
-                            :stdout stdout
-                            :stderr stderr
-                            :route (process-get finished 'remote-route)
-                            :context context
-                            :command command)))
-                     (unwind-protect
-                         (when callback
-                           (condition-case callback-error
-                               (if (buffer-live-p origin-buffer)
-                                   (with-current-buffer origin-buffer
-                                     (funcall callback result))
-                                 (funcall callback result))
-                             (error
-                              (remote-log
-                               'process-callback-error
-                               :process (process-name finished)
-                               :target
-                               (remote-context-target-id context)
-                               :error
-                               (error-message-string callback-error)))))
-                       (remote--schedule-async-capture-cleanup
-                        finished stderr-process
-                        stdout-buffer stderr-buffer)))))))
+                               ""))
+                            (framed-token
+                             (process-get finished 'remote-stderr-token))
+                            (streams
+                             (and framed-token
+                                  (remote--split-stderr-frame
+                                   combined framed-token)))
+                            (stdout (if streams (car streams) combined))
+                            (stderr
+                             (if streams
+                                 (cdr streams)
+                               (if (buffer-live-p stderr-buffer)
+                                   (with-current-buffer stderr-buffer
+                                     (buffer-substring-no-properties
+                                      (point-min) (point-max)))
+                                 "")))
+                            (result
+                             (remote-exec-result-create
+                              :status
+                              (if (memq (process-status finished)
+                                        '(exit signal))
+                                  (process-exit-status finished)
+                                1)
+                              :stdout stdout
+                              :stderr stderr
+                              :route (process-get finished 'remote-route)
+                              :context context
+                              :command command)))
+                       (unwind-protect
+                           (when callback
+                             (condition-case callback-error
+                                 (if (buffer-live-p origin-buffer)
+                                     (with-current-buffer origin-buffer
+                                       (funcall callback result))
+                                   (funcall callback result))
+                               (error
+                                (remote-log
+                                 'process-callback-error
+                                 :process (process-name finished)
+                                 :target
+                                 (remote-context-target-id context)
+                                 :error
+                                 (error-message-string callback-error)))))
+                         (remote--schedule-async-capture-cleanup
+                          finished stderr-process
+                          stdout-buffer stderr-buffer))))))))
       (error
-       (when (process-live-p stderr-process)
-         (delete-process stderr-process))
-       (remote--kill-internal-process-buffer stdout-buffer)
-       (remote--kill-internal-process-buffer stderr-buffer)
+       (remote--dispose-async-capture-resources
+        stderr-process stdout-buffer stderr-buffer)
        (signal (car err) (cdr err))))
     process))
 

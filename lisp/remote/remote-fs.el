@@ -107,6 +107,17 @@ file interception remains controlled by `remote-fs-install'."
             (error "Remote localname is not absolute: %S" localname))))
     (format "/fs:%s:%s" target-id localname)))
 
+(defun remote-fs--make-lexical-file-name (target-id localname)
+  "Build an fs name without normalizing absolute LOCALNAME.
+This is for lexical Emacs APIs such as `directory-file-name', whose contract
+preserves `.' and `..'.  Identity-producing APIs must continue to use
+`remote-make-file-name' or `remote-expand-file-name'."
+  (unless (and (stringp localname)
+               (file-name-absolute-p localname)
+               (not (string-prefix-p "~" localname)))
+    (error "Remote lexical localname is not absolute: %S" localname))
+  (format "/fs:%s:%s" (remote-normalize-id target-id) localname))
+
 (defun remote-fs--target-id-value (target)
   "Return the normalized target ID represented by TARGET."
   (cond
@@ -423,6 +434,20 @@ Configured home-relative paths are expanded by TARGET's selected backend."
          (canonical (remote-canonicalize-file-name path)))
     (remote-fs--context canonical)))
 
+(defun remote-client-file-name (file-name &optional adapter)
+  "Return FILE-NAME as a path directly accessible to a client-side tool.
+Return nil when the selected target backend does not share its filesystem with
+the client.  ADAPTER defaults to the ordinary file adapter.  This query is
+pure: it resolves placement but does not acquire a connection."
+  (let* ((canonical (remote-canonicalize-file-name file-name))
+         (context (remote-fs--context canonical))
+         (route
+          (remote-resolve
+           (or adapter
+               (remote-fs--adapter-for-capability 'metadata))
+           'metadata context nil)))
+    (remote-backend-client-file-name route canonical)))
+
 (defun remote-fs-register-link-plugins ()
   "Register the built-in backend modules.
 This compatibility dispatcher keeps callers independent of backend layout."
@@ -612,6 +637,27 @@ for an extension whose signature is not known.  RESULT-KIND is one of `pass',
     (puthash operation spec remote-file-operations)
     spec))
 
+(defun remote-get-file-operation (operation)
+  "Return the registered routing contract for file OPERATION, or nil."
+  (gethash operation remote-file-operations))
+
+(defun remote-file-operation-list ()
+  "Return registered file operation contracts in stable name order."
+  (sort
+   (hash-table-values remote-file-operations)
+   (lambda (left right)
+     (string-lessp
+      (symbol-name
+       (remote-file-operation-spec-operation left))
+      (symbol-name
+       (remote-file-operation-spec-operation right))))))
+
+(defun remote-unregister-file-operation (operation)
+  "Remove and return file OPERATION's routing contract."
+  (when-let* ((spec (gethash operation remote-file-operations)))
+    (remhash operation remote-file-operations)
+    spec))
+
 (defun remote-fs--register-operation-group
     (operations capability path-arguments result-kind retry-safe)
   "Register OPERATIONS with the shared routing contract."
@@ -661,12 +707,14 @@ for an extension whose signature is not known.  RESULT-KIND is one of `pass',
    'directory '(1) 'pass t)
   ;; Two-name read-only comparisons.
   (remote-fs--register-operation-group
-   '(file-equal-p file-in-directory-p file-newer-than-file-p)
+   '(file-equal-p file-file-equal-p
+     file-in-directory-p file-newer-than-file-p)
    'metadata '(0 1) 'pass t)
   ;; Mutations are deliberately never replayed after an ambiguous failure.
   (remote-fs--register-operation-group
    '(delete-directory delete-file lock-file
-     make-directory set-file-acl set-file-modes set-file-selinux-context
+     make-directory make-directory-internal
+     set-file-acl set-file-modes set-file-selinux-context
      set-file-times unlock-file)
    'file-write '(0) 'pass nil)
   (remote-register-file-operation
@@ -954,6 +1002,34 @@ the request to TRAMP or tramp-rpc."
     (remote-make-file-name target-id physical))
    (t physical)))
 
+(defun remote-fs--directory-entry-name (physical)
+  "Return PHYSICAL directory entry's final target-native component.
+Unlike `remote-fs--rewrap-physical', this deliberately preserves the lexical
+names `.' and `..'.  `directory-files' exposes those names as part of its
+public contract, and consumers such as Treemacs use them to filter the two
+synthetic entries."
+  (when (stringp physical)
+    (let ((localname
+           (cond
+            ((remote-fs-file-name-p physical)
+             (remote-fs-localname physical))
+            ((file-remote-p physical)
+             (file-remote-p physical 'localname))
+            (t physical)))
+          (inhibit-file-name-handlers
+           (cons #'tramp-file-name-handler inhibit-file-name-handlers))
+          (inhibit-file-name-operation 'file-name-nondirectory))
+      (file-name-nondirectory localname))))
+
+(defun remote-fs--rewrap-directory-entry (directory physical)
+  "Place PHYSICAL direct child back under logical DIRECTORY.
+Reconstructing from the entry name both preserves `.' / `..' and avoids
+assuming that a backend's physical path has the same prefix as its
+target-native namespace."
+  (if-let* ((name (remote-fs--directory-entry-name physical)))
+      (concat (file-name-as-directory directory) name)
+    physical))
+
 (defun remote-fs--call-routed (operation args)
   "Route OPERATION with ARGS through the selected link."
   (remote-fs--validate-cross-target-operation operation args)
@@ -1052,7 +1128,7 @@ the request to TRAMP or tramp-rpc."
                      (inhibit-file-name-operation 'file-name-directory))
                  (file-name-directory
                   (remote-fs-localname file-name)))))
-    (remote-make-file-name
+    (remote-fs--make-lexical-file-name
      (remote-fs-target-id file-name) directory)))
 
 (defun remote-fs-handle-file-name-nondirectory (file-name)
@@ -1064,13 +1140,13 @@ the request to TRAMP or tramp-rpc."
 
 (defun remote-fs-handle-file-name-as-directory (file-name)
   "Implement `file-name-as-directory' for logical FILE-NAME."
-  (remote-make-file-name
+  (remote-fs--make-lexical-file-name
    (remote-fs-target-id file-name)
    (file-name-as-directory (remote-fs-localname file-name))))
 
 (defun remote-fs-handle-directory-file-name (file-name)
   "Implement `directory-file-name' for logical FILE-NAME."
-  (remote-make-file-name
+  (remote-fs--make-lexical-file-name
    (remote-fs-target-id file-name)
    (directory-file-name (remote-fs-localname file-name))))
 
@@ -1086,7 +1162,7 @@ the request to TRAMP or tramp-rpc."
 
 (defun remote-fs-handle-substitute-in-file-name (file-name)
   "Substitute environment variables in logical FILE-NAME."
-  (remote-make-file-name
+  (remote-fs--make-lexical-file-name
    (remote-fs-target-id file-name)
    (let ((inhibit-file-name-handlers
           (cons #'tramp-file-name-handler inhibit-file-name-handlers))
@@ -1164,28 +1240,27 @@ and remote buffers follow the user's normal Emacs auto-save policy."
 (defun remote-fs-handle-directory-files
     (directory &optional full match nosort count)
   "Return entries in logical DIRECTORY."
-  (let* ((target (remote-fs-target-id directory))
-         (result
+  (let ((result
           (remote-fs--call-routed
            'directory-files (list directory full match nosort count))))
     (if full
         (mapcar (lambda (path)
-                  (remote-fs--rewrap-physical path target))
+                  (remote-fs--rewrap-directory-entry directory path))
                 result)
       result)))
 
 (defun remote-fs-handle-directory-files-and-attributes
     (directory &optional full match nosort id-format count)
   "Return logical DIRECTORY entries and attributes."
-  (let* ((target (remote-fs-target-id directory))
-         (result
+  (let ((result
           (remote-fs--call-routed
            'directory-files-and-attributes
            (list directory full match nosort id-format count))))
     (if full
         (mapcar
          (lambda (entry)
-           (cons (remote-fs--rewrap-physical (car entry) target)
+           (cons (remote-fs--rewrap-directory-entry
+                  directory (car entry))
                  (cdr entry)))
          result)
       result)))
@@ -1195,6 +1270,15 @@ and remote buffers follow the user's normal Emacs auto-save policy."
   ;; Emacs specifies that this is the target string stored in the link.  It is
   ;; not a file identity and must not be rewritten to `/fs:'.
   (remote-fs--call-routed 'file-symlink-p (list file-name)))
+
+(defun remote-fs-handle-unhandled-file-name-directory (file-name)
+  "Return a native process directory for local logical FILE-NAME.
+The `local' target is directly reachable by client processes.  Genuine remote
+targets return nil so an unhandled native API can never execute on the client
+as an accidental fallback."
+  (when (and (remote-fs-file-name-p file-name)
+             (equal (remote-fs-target-id file-name) "local"))
+    (file-name-as-directory (remote-fs-localname file-name))))
 
 (defun remote-fs-handle-file-notify-add-watch
     (file flags callback)
@@ -1248,13 +1332,19 @@ and remote buffers follow the user's normal Emacs auto-save policy."
      (apply #'remote-fs-handle-directory-files-and-attributes args))
     ('file-symlink-p
      (apply #'remote-fs-handle-file-symlink-p args))
+    ;; Some Emacs/TRAMP combinations use this internal spelling even when no
+    ;; Lisp function is bound under that name.  Preserve its two-path contract
+    ;; through the public primitive instead of calling an unbound symbol.
+    ('file-file-equal-p
+     (remote-fs--call-routed 'file-equal-p args))
     ('file-notify-add-watch
      (apply #'remote-fs-handle-file-notify-add-watch args))
     ('make-process
      (apply #'remote-fs-handle-make-process args))
     ('start-file-process
      (apply #'remote-fs-handle-start-file-process args))
-    ('unhandled-file-name-directory nil)
+    ('unhandled-file-name-directory
+     (remote-fs-handle-unhandled-file-name-directory (car args)))
     ((guard
       (eq (alist-get operation
                      tramp-file-name-for-operation-external)

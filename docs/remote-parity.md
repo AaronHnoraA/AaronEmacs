@@ -47,7 +47,7 @@
 | debug | API | Dape adapter 在 target 启动；launch/attach/forward 可组合 |
 | TCP/TLS client | local | SSH forward 上继续使用 Emacs 原生 network stream |
 | port forwarding | local | SSH `-L`、jump host、关闭清理；真机验证和 UI |
-| remote listener/reverse forward | 未实现 | SSH `-R`、动态端口、访问策略和生命周期 |
+| remote listener/reverse forward | remote | native 回环与 SSH `-R` 真机动态端口已验证；补访问策略和断线恢复故障注入 |
 | tunnel | 模型 | 外部 Tailscale/FRP endpoint 可用；尚无托管 tunnel service |
 | Dev Container lifecycle | 未实现 | 读取 devcontainer、build/create/start/attach/rebuild |
 | 工具/“扩展”部署 | API | service manifest、版本锁、离线包、更新与回滚 |
@@ -64,14 +64,22 @@
   transport/config 冲突会直接报错；
 - file handler 使用可扩展的 Emacs 31/32 操作契约；未知写操作不重试；
 - channel 保持原生 process/forward 返回值，同时附加统一生命周期描述；
+- client/target 混合进程有显式边界：本地 UI proxy 由
+  `remote-make-client-process` 启动，target stdio peer 由
+  `remote-local-bridge-command` 接入，不依赖宽泛的原生 API advice；
 - workspace 在 transport failure 后按 1/2/4 秒恢复 environment、service、
   forward、watch、LSP 等可恢复资源；terminal 必须显式重启；
 - `remote-doctor` 已能逐层检查并在 `Aaron-Pi` 上完成 Linux probe；
-- `make remote-e2e` 已在真实 SSH target 上验证临时文件往返、远端 cwd 和 session
-  复用。
+- `make remote-e2e` 已在真实 SSH target 上验证临时文件往返、远端 cwd、session
+  复用和动态 SSH `-R` listener 数据往返。
+- WSL 上的 Lean 实链验证了本地 Node/HTTP proxy、远端 direnv/Nix capsule、
+  远端 `lake serve`/Lean worker、Eglot 文档 URI 与本地 Infoview status 端点。
 
-WSL/container/devcontainer、Dape/tasks 编排、reverse/dynamic forward、remote
-listener 和 managed tunnel 保持为后续范围，不用 capability symbol 代替真机完成。
+WSL/container/devcontainer、Dape/tasks 编排、dynamic SOCKS forward 和 managed
+tunnel 保持为后续范围，不用 capability symbol 代替真机完成。reverse forward 与
+remote listener 已有 API、native 数据面回环、SSH 命令/lifecycle 测试和真实
+SSH target 动态端口回归，因此达到 remote；完成断线恢复故障注入前仍不算
+resilient。
 
 ## 3. Emacs 与 VS Code 的对应关系
 

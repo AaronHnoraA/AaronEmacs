@@ -36,6 +36,98 @@
                            port-file))))
       (delete-directory directory t))))
 
+(ert-deftest lean-infoview-remote-cache-keeps-logical-target-identity ()
+  "Target HOME expansion must not turn a remote cache into a client path."
+  (let (seen)
+    (cl-letf (((symbol-function 'lean--proxy-bundle-fingerprint)
+               (lambda () "0123456789abcdefdeadbeef"))
+              ((symbol-function 'remote-file-name-target)
+               (lambda (root)
+                 (should (equal root "/fs:box:/work/project/"))
+                 "box"))
+              ((symbol-function 'remote-expand-file-name)
+               (lambda (name directory target)
+                 (setq seen (list name directory target))
+                 "/fs:box:/home/me/.cache/emacs/lean-infoview/0123456789abcdef/")))
+      (should
+       (equal
+        (lean--remote-proxy-directory "/fs:box:/work/project/")
+        "/fs:box:/home/me/.cache/emacs/lean-infoview/0123456789abcdef/"))
+      (should
+       (equal seen
+              '("~/.cache/emacs/lean-infoview/0123456789abcdef/"
+                nil "box"))))))
+
+(ert-deftest lean-infoview-node-always-resolves-on-the-client ()
+  (let ((remote--buffer-base-process-environment '("PATH=/client/bin"))
+        (remote--buffer-base-exec-path '("/client/bin"))
+        seen-environment
+        seen-exec-path)
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (program &optional _remote)
+                 (should (equal program "node"))
+                 (setq seen-environment process-environment
+                       seen-exec-path exec-path)
+                 "/client/bin/node")))
+      (should
+       (equal (lean--proxy-node-command "/fs:box:/work/")
+              '("/client/bin/node")))
+      (should (equal seen-environment '("PATH=/client/bin")))
+      (should (equal seen-exec-path '("/client/bin"))))))
+
+(ert-deftest lean-infoview-remote-contact-is-local-proxy-over-stdio-bridge ()
+  (let ((remote-targets (copy-hash-table remote-targets))
+        bridge-arguments)
+    (remote-register-target "box" :trusted t)
+    (remote-register-link "box" "native" "native")
+    (cl-letf (((symbol-function 'lean-project-root)
+               (lambda () "/fs:box:/work/"))
+              ((symbol-function 'lean-root-dir-p)
+               (lambda (_directory) t))
+              ((symbol-function 'locate-dominating-file)
+               (lambda (_file _predicate) "/fs:box:/work/"))
+              ((symbol-function 'lean--proxy-available-p) (lambda () t))
+              ((symbol-function 'lean--proxy-script-for-root)
+               (lambda (_root) "/client/lean-proxy.mjs"))
+              ((symbol-function 'lean--proxy-node-command)
+               (lambda (_root) '("/client/node")))
+              ((symbol-function 'lean--proxy-allocate-port-file)
+               (lambda (_root) "/client/infoview.json"))
+              ((symbol-function 'remote-file-name-target)
+               (lambda (_root) "box"))
+              ((symbol-function 'remote-client-file-name)
+               (lambda (_root &optional _adapter) nil))
+              ((symbol-function 'remote-local-bridge-command)
+               (lambda (program &rest keys)
+                 (setq bridge-arguments (cons program keys))
+                 '("/usr/bin/ssh" "-T" "box" "remote-lake-command"))))
+      (let ((default-directory "/fs:box:/work/"))
+        (let* ((contact (lean--server-contact))
+               (factory (plist-get (cdr contact) :process))
+               process-arguments)
+          (should (eq (car contact) 'eglot-lsp-server))
+          (should (functionp factory))
+          (cl-letf (((symbol-function 'remote-make-client-process)
+                     (lambda (&rest plist)
+                       (setq process-arguments plist)
+                       'local-proxy-process)))
+            (should (eq (funcall factory) 'local-proxy-process)))
+          (should
+           (equal
+            (plist-get process-arguments :command)
+            (list
+             "/client/node" "/client/lean-proxy.mjs"
+             "--root" temporary-file-directory
+             "--port-file" "/client/infoview.json"
+             "--" "/usr/bin/ssh" "-T" "box" "remote-lake-command")))
+          (should
+           (equal (plist-get process-arguments :connection-type) 'pipe)))
+        (should
+         (equal
+          bridge-arguments
+          '("lake" :args ("serve") :context "/fs:box:/work/"
+            :adapter "language-server" :directory "/fs:box:/work/")))))))
+
 (ert-deftest lean-infoview-manual-start-cancels-automatic-timer ()
   (with-temp-buffer
     (let ((buffer-file-name
@@ -58,6 +150,23 @@
             (should (= starts 1))
             (should-not lean--eglot-start-timer))
         (lean--cancel-eglot-start-timer)))))
+
+(ert-deftest lean-eglot-recovers-a-stale-direnv-wait-latch ()
+  (with-temp-buffer
+    (let ((buffer-file-name
+           (expand-file-name "Main.lean" temporary-file-directory))
+          (default-directory temporary-file-directory)
+          (direnv--active-root "/fs:box:/work/")
+          (lean--eglot-waiting-for-environment t)
+          (starts 0))
+      (cl-letf (((symbol-function 'eglot-managed-p) (lambda () nil))
+                ((symbol-function 'my/direnv-update-environment-maybe)
+                 (lambda (&optional _path _callback) 'ready))
+                ((symbol-function 'my/eglot-start-now)
+                 (lambda (&optional _interactive) (cl-incf starts))))
+        (lean--ensure-eglot)
+        (should-not lean--eglot-waiting-for-environment)
+        (should (= starts 1))))))
 
 (ert-deftest lean-infoview-rejects-a-dead-local-port-owner ()
   (let ((port-file
@@ -85,6 +194,26 @@
       (when (file-exists-p port-file)
         (delete-file port-file)))))
 
+(ert-deftest lean-infoview-checks-local-owner-outside-remote-process-namespace ()
+  (let ((default-directory "/fs:box:/work/")
+        seen-directory)
+    (cl-letf (((symbol-function 'process-attributes)
+               (lambda (pid)
+                 (should (= pid 43123))
+                 (setq seen-directory default-directory)
+                 '((comm . "node")))))
+      (should
+       (lean--iv-port-owner-live-p
+        "/client/infoview.json" '(:pid 43123)))
+      (should
+       (equal seen-directory
+              (file-name-as-directory temporary-file-directory))))))
+
+(ert-deftest lean-infoview-xwidget-requires-a-graphical-frame ()
+  (cl-letf (((symbol-function 'display-graphic-p)
+             (lambda (&optional _frame) nil)))
+    (should-not (lean-iv-xwidget-p))))
+
 (ert-deftest lean-infoview-port-wait-follows-a-new-eglot-instance ()
   (let* ((pending (make-temp-name
                    (expand-file-name "lean-infoview-pending-" temporary-file-directory)))
@@ -107,9 +236,29 @@
             (while (and (not result)
                         (< (float-time) deadline))
               (accept-process-output nil 0.05)))
-          (should (= result 43124)))
+          (should (= result 43124))
+          (should-not lean--iv--port-wait-timer))
       (when (file-exists-p active)
         (delete-file active)))))
+
+(ert-deftest lean-infoview-repeated-open-replaces-the-port-wait ()
+  (with-temp-buffer
+    (let ((lean-iv-port-wait-timeout 60)
+          first second)
+      (unwind-protect
+          (cl-letf (((symbol-function 'lean--proxy-port-file)
+                     (lambda (_root) "/nonexistent/infoview.json"))
+                    ((symbol-function 'lean--iv-read-port)
+                     (lambda (_file) nil)))
+            (lean--iv-wait-for-port user-emacs-directory #'ignore)
+            (setq first lean--iv--port-wait-timer)
+            (should (timerp first))
+            (lean--iv-wait-for-port user-emacs-directory #'ignore)
+            (setq second lean--iv--port-wait-timer)
+            (should (timerp second))
+            (should-not (eq first second))
+            (should-not (memq first timer-list)))
+        (lean--iv-cancel-port-wait)))))
 
 (ert-deftest lean-infoview-reconnect-uses-eglots-interactive-server-lookup ()
   (let (seen)

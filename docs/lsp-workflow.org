@@ -190,9 +190,9 @@ Eglot server program 通过 =my/register-eglot-server-program= 注册：
 信息面板（infoview）走 xwidget-webkit + Node.js bridge：
 
 - =C-c C-i= 确保 Eglot 已通过
-  =lisp/lang/lean/lean4-infoview-bridge/lean-proxy.mjs= 启动；proxy 内运行
-  =lake serve= 并桥接给 React 版官方 =@leanprover/infoview=，Emacs 打开
-  xwidget side window。
+  =lisp/lang/lean/lean4-infoview-bridge/lean-proxy.mjs= 启动；proxy 在 Emacs
+  客户端运行，通过 stdio bridge 连接 workspace target 上的 =lake serve=，
+  并把 React 版官方 =@leanprover/infoview= 提供给本地 xwidget side window。
 - Emacs → infoview：=post-command-hook= 注入 =window.updateCursor=；文本变化通
   过 HTTP POST =/cursor= 同步到 bridge。
 - Infoview → Emacs（反向通道）：infoview 动作 POST 到 bridge 的 =/editor/<cmd>=
@@ -207,17 +207,16 @@ Eglot server program 通过 =my/register-eglot-server-program= 注册：
 
 远程 Lean buffer 同样使用完整链路：
 
-- 可信 target 首次使用时，把版本化的 =lean-proxy.mjs + dist/= 部署到远端用户
-  cache；
-- =node=、=lake serve= / =lean --server= 都从 target/workspace 环境解析并在
-  target 上运行；
-- proxy 的远端 loopback HTTP 端口通过 =remote-port-forward= 映射到本机，
-  xwidget 仍是本地 UI；
+- =node=、=lean-proxy.mjs=、=dist/=、HTTP/SSE 和端口文件始终留在 Emacs
+  客户端，不要求 target 安装 Node，也不部署 UI bundle；
+- =lake serve= / =lean --server= 从 target/workspace 环境解析并在 target
+  上运行；远端 direnv/Nix capsule 的 cwd、PATH 与变量被封装在 stdio bridge；
+- proxy 使用本机 loopback 端口，xwidget 直接连接，无需端口转发；
 - Eglot 文档 URI 进入 Emacs 后 canonicalize 为 =/fs:TARGET:/path=，不会保存
   =/rpc:= 或 =/ssh:= 物理链路身份。
 
-远端自动部署由 =lean-infoview-remote-proxy-auto-deploy= 控制，只允许可信 target。
-关闭它时，远程 Lean 仍可直接运行 =lake serve=，只是没有 Node proxy infoview。
+=lean-infoview-remote-proxy-auto-deploy= 仅保留为旧配置兼容项，当前链路不再读取它。
+关闭 Infoview proxy 时，远程 Lean 仍直接通过目标上的 =lake serve= 工作。
 
 * Add A Custom Eglot Mapping
 

@@ -82,10 +82,20 @@
 (declare-function my/problems-buffer "init-problems" ())
 (declare-function my/direnv-update-environment-maybe
                   "init-direnv" (&optional path callback))
+(declare-function remote-expand-file-name
+                  "remote-fs" (file-name &optional directory target))
 (declare-function remote-file-local-name "remote-fs" (file-name))
 (declare-function remote-file-name-target "remote-fs" (file-name))
+(declare-function remote-client-file-name "remote-fs"
+                  (file-name &optional adapter))
+(declare-function remote-local-bridge-command
+                  "remote-process" (program &rest keys))
+(declare-function remote-make-client-process
+                  "remote-process" (&rest plist))
 (declare-function remote-get-target "remote-core" (id))
 (declare-function remote-target-trusted "remote-core" (target))
+(defvar remote--buffer-base-process-environment)
+(defvar remote--buffer-base-exec-path)
 
 ;; Forward defvar declarations for variables defined in sibling modules
 (defvar eldoc-box-hover-at-point-mode)
@@ -99,6 +109,7 @@
 (defvar flymake-fringe-indicator-position)
 (defvar flymake-mode)
 (defvar project-find-functions)
+(defvar direnv--active-root)
 ;; From lean4-syntax (loaded above; defvar silences byte-compile for callers)
 (defvar lean4-syntax-table)
 (defvar lean4-font-lock-defaults)
@@ -233,10 +244,9 @@ Set to nil for a direct, no-proxy lake serve connection."
   :group 'lean)
 
 (config-defvar lean-infoview-remote-proxy-auto-deploy t
-  "Deploy the bundled Node proxy to trusted remote targets when needed.
-The deployment is content-versioned below the target's user cache and contains
-only `lean-proxy.mjs' plus the built `dist/' assets.  Node and Lake themselves
-always come from the active target/workspace environment."
+  "Compatibility switch for the retired remote proxy deployment path.
+The active integration always runs the Node/HTTP infoview proxy on the Emacs
+client.  Only its stdio LSP peer runs on the selected target."
   :type 'boolean
   :group 'lean)
 
@@ -278,10 +288,16 @@ always come from the active target/workspace environment."
   "Return the content-versioned target cache directory for ROOT."
   (when-let* ((fingerprint (lean--proxy-bundle-fingerprint)))
     (file-name-as-directory
-     (expand-file-name
+     ;; `expand-file-name' expands a leading tilde before consulting the file
+     ;; name handler.  In a `/fs:' buffer that substitutes the target's HOME
+     ;; (for example `/home/hc') but drops the logical target identity, after
+     ;; which `make-directory' tries to create that path on the client.  Home
+     ;; expansion is a routed metadata operation and must remain in `/fs:'.
+     (remote-expand-file-name
       (format "~/.cache/emacs/lean-infoview/%s/"
               (substring fingerprint 0 16))
-      root))))
+      nil
+      (remote-file-name-target root)))))
 
 (defun lean--remote-proxy-trusted-p (root)
   "Return non-nil when ROOT belongs to a trusted remote target."
@@ -322,25 +338,29 @@ Return the logical remote script name, or nil when provisioning is disabled."
       remote-script)))
 
 (defun lean--proxy-script-for-root (root)
-  "Return the runnable proxy script for local or remote ROOT."
-  (if (file-remote-p root)
-      (condition-case error
-          (lean--copy-proxy-bundle-to-target root)
-        (error
-         (lean-dev-log "remote proxy deployment failed: %s"
-                       (error-message-string error))
-         nil))
-    (lean--proxy-script)))
+  "Return the client-local proxy script for project ROOT."
+  (ignore root)
+  (lean--proxy-script))
 
 (defun lean--proxy-available-p ()
   "Return non-nil if the infoview proxy can be used for the current buffer."
   (and lean-infoview-proxy-enabled
        (lean--proxy-bundle-files)
-       (if (file-remote-p default-directory)
-         (and lean-infoview-remote-proxy-auto-deploy
-                (lean--remote-proxy-trusted-p default-directory)
-                (my/language-server-executable-find "node"))
-         (executable-find "node"))))
+       (lean--proxy-node-command default-directory)))
+
+(defun lean--proxy-node-command (root)
+  "Return a client-local Node command prefix for Lean project ROOT."
+  (ignore root)
+  (let ((process-environment
+         (copy-sequence
+          (or remote--buffer-base-process-environment
+              (default-value 'process-environment))))
+        (exec-path
+         (copy-sequence
+          (or remote--buffer-base-exec-path
+              (default-value 'exec-path)))))
+    (when-let* ((node (executable-find "node")))
+      (list node))))
 
 (defun lean--proxy-root-key (root)
   "Return the canonical hash key for Lean project ROOT."
@@ -348,8 +368,10 @@ Return the logical remote script name, or nil when provisioning is disabled."
 
 (defun lean--proxy-port-directory (root)
   "Return the directory containing proxy port files for ROOT."
-  (if (file-remote-p root)
-      (lean--remote-proxy-directory root)
+  (ignore root)
+  (let ((default-directory temporary-file-directory)
+        (process-environment
+         (copy-sequence (default-value 'process-environment))))
     (expand-file-name
      "lean"
      (or (bound-and-true-p no-littering-var-directory)
@@ -393,30 +415,68 @@ port file that may have been overwritten by a dead concurrent proxy."
   (remhash (lean--proxy-root-key root) lean--proxy-port-files))
 
 (defun lean--server-contact (&optional _interactive _project)
-  "Return the Lean LSP server command for the current buffer.
+  "Return the Lean Eglot contact for the current buffer.
 When `lean-infoview-proxy-enabled' is non-nil and the proxy script and
-dist/ bundle are present, routes Eglot through lean-proxy.mjs so the
-infoview shares the single Lean LSP session.  Falls back to a direct
-lake serve / lean --server connection otherwise."
-  (let* ((root    (file-name-as-directory
-                   (expand-file-name (lean-project-root))))
+dist/ bundle are present, create the Node proxy as an explicit client process.
+Its downstream argv bridges stdio to `lake serve' on the target, so Eglot does
+not reinterpret the local Node command merely because the project root is
+remote.  Falls back to a direct lake serve / lean --server contact otherwise."
+  (let* ((root    (file-name-as-directory (lean-project-root)))
          (in-lake (locate-dominating-file
                    (or buffer-file-name default-directory ".") #'lean-root-dir-p))
          (direct  (if in-lake
                       '("lake" "serve")
                     '("lean" "--server"))))
     (if-let* (((lean--proxy-available-p))
-              (script (lean--proxy-script-for-root root)))
+              (script (lean--proxy-script-for-root root))
+              (node-command (lean--proxy-node-command root)))
         (let ((port-file (lean--proxy-allocate-port-file root))
-              (downstream direct))
+              (downstream
+               (remote-local-bridge-command
+                (car direct)
+                :args (cdr direct)
+                :context root
+                :adapter "language-server"
+                :directory root))
+              (proxy-root
+               (or
+                (remote-client-file-name root)
+                temporary-file-directory)))
           (lean-dev-log "server-contact: proxy root=%s port-file=%s downstream=%S"
                         root port-file downstream)
-          `("node" ,(remote-file-local-name script)
-            "--root"      ,(remote-file-local-name root)
-            "--port-file" ,(remote-file-local-name port-file)
-            "--"          ,@downstream))
+          (let ((command
+                 (append
+                  node-command
+                  (list (remote-file-local-name script)
+                        "--root" proxy-root
+                        "--port-file" port-file
+                        "--")
+                  downstream))
+                (name
+                 (format "Lean proxy (%s)"
+                         (file-name-nondirectory
+                          (directory-file-name root)))))
+            (list
+             'eglot-lsp-server
+             :process
+             (lambda ()
+               (remote-make-client-process
+                :name name
+                :command command
+                :connection-type 'pipe
+                :coding 'utf-8-emacs-unix
+                :noquery t
+                :stderr
+                (get-buffer-create
+                 (format "*%s stderr*" name)))))))
       (lean-dev-log "server-contact: direct contact=%S" direct)
       direct)))
+
+;; Older revisions intercepted every `make-process' call and tried to recognize
+;; this command after Eglot had already wrapped it in a remote shell.  Remove
+;; that hot-reload residue; the explicit process factory above is deterministic.
+(when (fboundp 'lean--make-local-proxy-process-a)
+  (advice-remove 'make-process #'lean--make-local-proxy-process-a))
 
 ;;; ── Mode-line progress ───────────────────────────────────────────────────────
 
@@ -786,8 +846,11 @@ while using eglot (not lsp-mode) as the language server backend."
   "Resume Lean Eglot after direnv, or log ERROR."
   (setq lean--eglot-waiting-for-environment nil)
   (if error
-      (lean-dev-log "eglot deferred: direnv failed: %s"
-                    (error-message-string error))
+      (progn
+        (lean-dev-log "eglot deferred: direnv failed: %s"
+                      (error-message-string error))
+        (message "Lean Eglot: remote direnv failed: %s"
+                 (error-message-string error)))
     (lean--ensure-eglot)))
 
 (defun lean--ensure-eglot ()
@@ -803,6 +866,15 @@ while using eglot (not lsp-mode) as the language server backend."
     (lean-dev-log "eglot skipped: `eglot' is not available"))
    ((and (fboundp 'eglot-managed-p) (eglot-managed-p))
     (lean-dev-log "eglot already managing buffer: %s" (buffer-name)))
+   ((and lean--eglot-waiting-for-environment
+         (bound-and-true-p direnv--active-root))
+    ;; A pre-fix busy retry could apply the environment but lose the callback
+    ;; promised to this buffer.  The active direnv layer is authoritative:
+    ;; clear the stale latch and continue instead of waiting forever.
+    (setq lean--eglot-waiting-for-environment nil)
+    (lean-dev-log "eglot recovered a completed direnv wait: %s"
+                  direnv--active-root)
+    (lean--ensure-eglot))
    (lean--eglot-waiting-for-environment
     (lean-dev-log "eglot waiting for target environment: %s"
                   (buffer-name)))
@@ -896,10 +968,10 @@ while using eglot (not lsp-mode) as the language server backend."
      '(lean-mode :language-id "lean4")
      #'lean--server-contact
      :executables '("lean" "lake" "node")
-     :placement 'target
+     :placement 'hybrid
      :label "Lean Language Server"
      :source "lean4-mode (sub-files only)"
-     :note "Runs target Node proxy plus lake serve, or lean --server outside Lake projects")))
+     :note "Runs the Node/HTTP proxy on the client and bridges stdio to target lake serve")))
 
 ;;; ── Orphan worker sweep ──────────────────────────────────────────────────────
 

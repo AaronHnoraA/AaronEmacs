@@ -30,6 +30,7 @@
 (declare-function lean--proxy-port-file-allocated-p "init-lean" (root))
 (declare-function lean--proxy-forget-port-file "init-lean" (root))
 (declare-function lean--proxy-available-p "init-lean")
+(declare-function lean--proxy-node-command "init-lean" (root))
 (declare-function xwidget-webkit-browse-url "xwidget" (url &optional new-session))
 (declare-function xwidget-webkit-current-session "xwidget" ())
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script))
@@ -71,6 +72,9 @@
 
 (defvar-local lean--iv--cursor-timer nil
   "Debounce timer for syncing cursor position to the infoview.")
+
+(defvar-local lean--iv--port-wait-timer nil
+  "Current timer waiting for this buffer's Eglot proxy endpoint.")
 
 (defvar-local lean--iv--last-cursor nil
   "Last cursor signature sent to the infoview.")
@@ -169,12 +173,14 @@
   "Return non-nil if the proxy bundle and required Node runtime are present."
   (and (file-exists-p
         (expand-file-name "dist/index.html" lean--iv--script-dir))
-       (or (file-remote-p default-directory)
-           (executable-find "node"))))
+       (lean--proxy-node-command default-directory)))
 
 (defun lean-iv-xwidget-p ()
-  "Return non-nil if xwidget-webkit is available in this build."
-  (fboundp 'xwidget-webkit-browse-url))
+  "Return non-nil if this frame can display a native xwidget-webkit."
+  (and (display-graphic-p)
+       (require 'xwidget nil t)
+       (featurep 'xwidget-internal)
+       (fboundp 'xwidget-webkit-browse-url)))
 
 (defun lean-iv-available-p ()
   "Return non-nil if the xwidget infoview can run in the current buffer."
@@ -215,31 +221,25 @@
          (process-live-p process))))
 
 (defun lean--iv-access-port (root remote-port)
-  "Return a client-accessible port for ROOT's REMOTE-PORT."
-  (if (not (file-remote-p root))
-      remote-port
-    (let ((forward (gethash root lean--iv--remote-forwards)))
-      (unless (lean--iv-remote-forward-live-p forward remote-port)
-        (lean--iv-close-remote-forward root)
-        (setq forward
-              (remote-port-forward
-               (list :host "127.0.0.1" :port remote-port)
-               :context root
-               :adapter "network"
-               :local-endpoint '(:host "127.0.0.1" :port 0)
-               :metadata '(:owner lean-infoview)))
-        (puthash root forward lean--iv--remote-forwards))
-      (plist-get (remote-forward-local-endpoint forward) :port))))
+  "Return the client-local proxy port for ROOT."
+  (ignore root)
+  remote-port)
 
 (defun lean--iv-port-owner-live-p (port-file data)
   "Return non-nil when PORT-FILE's DATA still names a live proxy owner.
-Remote PIDs belong to the target and are not compared with local processes;
-their per-instance port files prevent collisions between proxy generations."
+The active proxy and its PID are client-local even when the source buffer uses
+a remote `/fs:' directory.  Bind a native directory so `process-attributes'
+is not dispatched to the source target's process namespace."
   (let ((pid (plist-get data :pid)))
     (and (integerp pid)
          (> pid 0)
-         (or (file-remote-p port-file)
-             (process-attributes pid)))))
+         (let ((default-directory temporary-file-directory)
+               (inhibit-file-name-operation 'process-attributes)
+               (inhibit-file-name-handlers
+                (cons #'remote-file-name-handler
+                      (cons #'tramp-file-name-handler
+                            inhibit-file-name-handlers))))
+           (process-attributes pid)))))
 
 (defun lean--iv-read-port (port-file)
   "Return the live proxy port from PORT-FILE JSON, or nil."
@@ -257,18 +257,39 @@ their per-instance port files prevent collisions between proxy generations."
             port)))
     (error nil)))
 
+(defun lean--iv-cancel-port-wait ()
+  "Cancel the current buffer's pending Infoview endpoint wait."
+  (when (timerp lean--iv--port-wait-timer)
+    (cancel-timer lean--iv--port-wait-timer))
+  (setq lean--iv--port-wait-timer nil))
+
+(defun lean--iv-wait-status ()
+  "Return a short user-facing status for Infoview proxy startup."
+  (cond
+   ((bound-and-true-p lean--eglot-waiting-for-environment)
+    "waiting for remote direnv")
+   ((and (fboundp 'eglot-managed-p) (eglot-managed-p))
+    "Eglot ready; waiting for local Node proxy")
+   (t "starting target Lean LSP")))
+
 (defun lean--iv-wait-for-port (root callback)
   "Poll the proxy port-file for ROOT and call CALLBACK with the port.
 Polls every 0.5 s, giving up after `lean-iv-port-wait-timeout' seconds."
+  (lean--iv-cancel-port-wait)
   (let ((deadline (+ (float-time) lean-iv-port-wait-timeout))
         (source-buf (current-buffer))
+        (poll-count 0)
         timer)
     (cl-labels
         ((finish ()
            (when (timerp timer)
              (cancel-timer timer)
-             (setq timer nil)))
+             (setq timer nil))
+           (when (buffer-live-p source-buf)
+             (with-current-buffer source-buf
+               (setq lean--iv--port-wait-timer nil))))
          (poll ()
+           (cl-incf poll-count)
            ;; The active Eglot contact can change while direnv is still
            ;; preparing the target.  Resolve the instance file on every poll;
            ;; capturing the initial "pending" path would miss the real proxy.
@@ -291,15 +312,26 @@ Polls every 0.5 s, giving up after `lean-iv-port-wait-timeout' seconds."
                t)
               ((> (float-time) deadline)
                (finish)
-               (lean--iv-log "timed out waiting for current port-file: %s"
-                             port-file)
+               (lean--iv-log
+                "timed out waiting for current port-file: %s; status=%s exists=%S"
+                port-file
+                (with-current-buffer source-buf (lean--iv-wait-status))
+                (file-exists-p port-file))
                (message
-                "Lean infoview: timed out waiting for Eglot proxy (see *Lean Dev Log*)")
+                "Lean infoview: timed out (%s); see *Lean Dev Log* and Eglot stderr"
+                (with-current-buffer source-buf (lean--iv-wait-status)))
                t)
-              (t nil)))))
+              (t
+               (when (or (= poll-count 1)
+                         (zerop (% poll-count 10)))
+                 (with-current-buffer source-buf
+                   (message "Lean infoview: %s…"
+                            (lean--iv-wait-status))))
+               nil)))))
       (unless (poll)
         (lean--iv-log "waiting for current proxy port-file (root=%s)" root)
-        (setq timer (run-at-time 0.5 0.5 #'poll))))))
+        (setq timer (run-at-time 0.5 0.5 #'poll))
+        (setq lean--iv--port-wait-timer timer)))))
 
 ;; ── Xwidget buffer management ─────────────────────────────────────────────────
 
@@ -500,12 +532,18 @@ Uses a fast xwidget-webkit-execute-script path and an HTTP debounce fallback."
 (defun lean-iv-toggle ()
   "Open or close the Lean xwidget infoview for the current buffer."
   (interactive)
+  ;; This command may need direnv, Eglot and Lean initialization.  Make the
+  ;; key binding observably responsive before any of those asynchronous
+  ;; boundaries run.
+  (message "Lean infoview: checking local proxy and target LSP…")
+  (redisplay)
   (unless (derived-mode-p 'lean-mode)
     (user-error "Must be called from a Lean source buffer"))
   (unless (lean-iv-node-p)
     (user-error "lean4-infoview-bridge/dist/ not built — run `npm run build` there"))
   (unless (lean-iv-xwidget-p)
-    (user-error "Emacs was built without xwidget-webkit support"))
+    (user-error
+     "Lean infoview needs a graphical frame with xwidget-webkit support"))
   (unless (lean--proxy-available-p)
     (user-error "Lean infoview proxy not available (check lean-infoview-proxy-enabled)"))
   (let* ((root (lean--iv-project-root))
@@ -519,8 +557,11 @@ Uses a fast xwidget-webkit-execute-script path and an HTTP debounce fallback."
      ((and visible proxy-port)
       (lean--iv-log "closing visible infoview: buffer=%s" (buffer-name xbuf))
       (delete-windows-on xbuf)
-      (message "Lean infoview hidden"))
+     (message "Lean infoview hidden"))
      (t
+      ;; A second key press replaces the old wait instead of leaving another
+      ;; timer which may later create a duplicate xwidget.
+      (lean--iv-cancel-port-wait)
       ;; A visible page with no live owner is a failed/stale xwidget.  Do not
       ;; preserve it and make the next toggle merely reveal the same white page.
       (when visible
@@ -553,6 +594,7 @@ the infoview xwidget page."
     (user-error "Must be called from a Lean source buffer"))
   (let* ((root (lean--iv-project-root))
          (xbuf (lean--iv-project-xwidget-buf root)))
+    (lean--iv-cancel-port-wait)
     (lean--iv-log "restart requested: root=%s" root)
     (when (buffer-live-p xbuf)
       (delete-windows-on xbuf)
@@ -580,6 +622,7 @@ the infoview xwidget page."
 (defun lean-iv-teardown-h ()
   "Cancel timers and close the infoview when a lean-mode buffer is killed."
   (lean--iv-cancel-cursor-timer)
+  (lean--iv-cancel-port-wait)
   (when (derived-mode-p 'lean-mode)
     (when-let* ((xbuf (and (boundp 'lean--iv--xwidget-buf)
                            lean--iv--xwidget-buf))

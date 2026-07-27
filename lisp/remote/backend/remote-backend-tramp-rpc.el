@@ -230,6 +230,8 @@ VECTOR, METHOD, and PARAMS are tramp-rpc's ordinary request arguments."
    :connect #'remote-backend-tramp-connect
    :live #'remote-backend-tramp-live-p
    :disconnect #'remote-backend-tramp-disconnect
+   :prepare-process #'remote-backend-tramp-handler-process-plan
+   :stdio-bridge #'remote-backend-tramp-stdio-bridge
    :make-network-process #'remote-backend-tramp-network
    :open-network-stream #'remote-backend-tramp-stream
    :port-forward #'remote-backend-tramp-forward

@@ -149,7 +149,48 @@
                     "async-stdout"))
             (should
              (equal (remote-exec-result-stderr async-result)
-                    "async-stderr"))))
+                    "async-stderr")))
+          ;; A routed listener remains an ordinary Emacs server process while
+          ;; its advertised contact is the target-side dynamic SSH -R port.
+          (when-let* ((python
+                       (remote-executable-find
+                        "python3" logical-directory)))
+            (let (received listener)
+              (unwind-protect
+                  (progn
+                    (setq listener
+                          (remote-make-network-process
+                           :name "remote-e2e-listener"
+                           :server t
+                           :host "127.0.0.1" :service t
+                           :coding 'binary :noquery t
+                           :filter
+                           (lambda (_process string)
+                             (setq received
+                                   (concat received string)))
+                           :remote-context
+                           (remote-context logical-directory)))
+                    (let ((port (process-contact listener :service)))
+                      (should (integerp port))
+                      (remote-exec
+                       python
+                       :args
+                       (list
+                        "-c"
+                        (concat
+                         "import socket;"
+                         "s=socket.create_connection(('127.0.0.1',"
+                         (number-to-string port)
+                         "));s.sendall(b'reverse-ok');s.close()"))
+                       :context logical-directory
+                       :adapter "exec" :check t))
+                    (let ((deadline (+ (float-time) 3)))
+                      (while (and (not (equal received "reverse-ok"))
+                                  (< (float-time) deadline))
+                        (accept-process-output nil 0.05)))
+                    (should (equal received "reverse-ok")))
+                (when listener
+                  (remote-close-channel listener))))))
       (when (and remote-directory
                  (string-match-p
                   "\\`/tmp/emacs-remote-e2e\\.[[:alnum:]]+\\'"

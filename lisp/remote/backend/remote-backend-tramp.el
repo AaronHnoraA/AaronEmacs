@@ -17,7 +17,7 @@
 (defconst remote-backend-tramp-capabilities
   '(file-read file-write directory metadata
     process-sync process-async pty watch lsp environment
-    network-client port-forward)
+    network-client network-server port-forward reverse-forward)
   "Capabilities implemented through standard TRAMP.")
 
 (defcustom remote-backend-ssh-forward-timeout 5
@@ -246,6 +246,15 @@ default TCP connect timeout."
         (format "%s@%s" user host)
       host)))
 
+(defun remote-backend-tramp--ssh-forward-host (host)
+  "Return HOST escaped for an OpenSSH forwarding specification."
+  (let ((host (format "%s" host)))
+    (if (and (string-match-p ":" host)
+             (not (and (string-prefix-p "[" host)
+                       (string-suffix-p "]" host))))
+        (format "[%s]" host)
+      host)))
+
 (defun remote-backend-tramp--pipeline-ssh-parts (route)
   "Return `(DESTINATION JUMPS CONFIG)' for ROUTE's SSH pipeline."
   (let* ((pipeline (remote-route-pipeline route))
@@ -342,6 +351,66 @@ stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation."
             (list (remote-backend-tramp--ssh-destination destination)
                   remote-shell))))
 
+(defun remote-backend-tramp-stdio-bridge (execution)
+  "Return client SSH argv exposing target EXECUTION over stdio."
+  (let* ((context (remote-backend-execution-context execution))
+         (logical-directory
+          (remote-backend-execution-logical-directory execution))
+         (directory
+          (if logical-directory
+              (remote-file-local-name logical-directory)
+            (remote-context-localname context))))
+    (remote-backend-tramp-direct-async-command
+     (remote-backend-execution-route execution)
+     (remote-backend-execution-command execution)
+     (remote-backend-execution-environment execution)
+     directory)))
+
+(defun remote-backend-tramp-prepare-process
+    (execution arguments environment)
+  "Return an async process plan for standard TRAMP EXECUTION.
+Pipe processes use a client SSH stdio bridge.  PTY and other process forms
+remain on Emacs' ordinary file-handler path."
+  (if (eq (or (plist-get arguments :connection-type) 'pipe)
+          'pipe)
+      (remote-backend-process-plan-create
+       :arguments
+       (plist-put
+        (plist-put
+         (copy-sequence arguments)
+         :command
+         (remote-backend-tramp-direct-async-command
+          (remote-backend-execution-route execution)
+          (remote-backend-execution-command execution)
+          environment
+          (if-let* ((directory
+                     (remote-backend-execution-logical-directory
+                      execution)))
+              (remote-file-local-name directory)
+            (remote-context-localname
+             (remote-backend-execution-context execution)))))
+        :file-handler nil)
+       :default-directory temporary-file-directory
+       :stderr-mode 'native
+       :process-properties '((remote-direct-ssh . t))
+       :metadata '(:placement client :stdio ssh))
+    (remote-backend-tramp-handler-process-plan
+     execution arguments environment)))
+
+(defun remote-backend-tramp-handler-process-plan
+    (execution arguments _environment)
+  "Return a projected file-handler process plan for EXECUTION.
+This is shared by standard TRAMP's non-pipe path and tramp-rpc."
+  (remote-backend-process-plan-create
+   :arguments
+   (if (plist-member arguments :file-handler)
+       (copy-sequence arguments)
+     (plist-put (copy-sequence arguments) :file-handler t))
+   :default-directory
+   (remote-backend-execution-physical-directory execution)
+   :stderr-mode 'framed
+   :metadata '(:placement target :stdio file-handler)))
+
 (defun remote-backend-tramp-direct-copy-file
     (route local-file target-file)
   "Copy LOCAL-FILE to target-native TARGET-FILE over ROUTE's SCP channel.
@@ -382,8 +451,11 @@ the file-name handler."
                  target-file)))))))
 
 (defun remote-backend-tramp--ssh-forward-command
-    (route local-host local-port remote-host remote-port)
-  "Build an SSH forward command for ROUTE and the supplied endpoints."
+    (route local-host local-port remote-host remote-port
+           &optional direction)
+  "Build an SSH forward command for ROUTE and the supplied endpoints.
+DIRECTION defaults to `local'.  `reverse' creates an SSH `-R' listener at
+REMOTE-HOST and REMOTE-PORT which connects to LOCAL-HOST and LOCAL-PORT."
   (let* ((pipeline (remote-route-pipeline route))
          (config (remote-pipeline-effective-config pipeline))
          (hops (or (plist-get config :hops)
@@ -413,6 +485,11 @@ the file-name handler."
            "-o" "ExitOnForwardFailure=yes"
            "-o" "ServerAliveInterval=30"
            "-o" "ServerAliveCountMax=3")))
+    (when (eq direction 'reverse)
+      ;; OpenSSH reports reverse-forward allocation and confirmation at the
+      ;; debug1 level.  The bounded diagnostic buffer is also used to discover
+      ;; the target port selected for `-R ...:0:...'.
+      (setq command (append command (list "-v"))))
     (when unsupported
       (signal
        'remote-backend-unsupported
@@ -440,9 +517,18 @@ the file-name handler."
     (append
      command
      (list
-      "-L"
-      (format "%s:%s:%s:%s"
-              local-host local-port remote-host remote-port)
+      (if (eq direction 'reverse) "-R" "-L")
+      (if (eq direction 'reverse)
+          (format "%s:%s:%s:%s"
+                  (remote-backend-tramp--ssh-forward-host remote-host)
+                  remote-port
+                  (remote-backend-tramp--ssh-forward-host local-host)
+                  local-port)
+        (format "%s:%s:%s:%s"
+                (remote-backend-tramp--ssh-forward-host local-host)
+                local-port
+                (remote-backend-tramp--ssh-forward-host remote-host)
+                remote-port))
       (remote-backend-tramp--ssh-destination destination)))))
 
 (defun remote-backend-tramp--reserve-local-port (host)
@@ -473,6 +559,25 @@ the file-name handler."
         t)
     (file-error nil)))
 
+(defun remote-backend-tramp--reverse-forward-port
+    (buffer requested-port)
+  "Return confirmed reverse-forward port parsed from BUFFER.
+REQUESTED-PORT is returned after OpenSSH confirms a fixed listener.  For a
+dynamic listener, parse the allocated target port from OpenSSH diagnostics."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-min))
+        (cond
+         ((re-search-forward
+           "Allocated port \\([0-9]+\\) for remote forward" nil t)
+          (string-to-number (match-string 1)))
+         ((and (integerp requested-port)
+               (> requested-port 0)
+               (re-search-forward
+                "remote forward success for: listen " nil t))
+          requested-port))))))
+
 (defun remote-backend-tramp--close-forward (forward)
   "Close SSH FORWARD and its diagnostic buffer."
   (when-let* ((process (remote-forward-handle forward)))
@@ -487,29 +592,43 @@ the file-name handler."
 
 (defun remote-backend-tramp-forward
     (route context local-endpoint remote-endpoint metadata)
-  "Open an SSH local forward for ROUTE."
-  (let* ((local-host
+  "Open an SSH local or reverse forward for ROUTE."
+  (let* ((direction (or (plist-get metadata :direction) 'local))
+         (reverse (eq direction 'reverse))
+         (local-host
           (remote-backend-tramp--channel-endpoint-value
            local-endpoint :host "127.0.0.1"))
          (local-port
           (remote-backend-tramp--channel-endpoint-value
            local-endpoint :port))
          (local-port
-          (if (and (integerp local-port) (> local-port 0))
-              local-port
-            (remote-backend-tramp--reserve-local-port local-host)))
+          (if reverse
+              (or local-port
+                  (error "Reverse-forward local endpoint has no port: %S"
+                         local-endpoint))
+            (if (and (integerp local-port) (> local-port 0))
+                local-port
+              (remote-backend-tramp--reserve-local-port local-host))))
          (remote-host
           (remote-backend-tramp--channel-endpoint-value
            remote-endpoint :host "127.0.0.1"))
          (remote-port
           (remote-backend-tramp--channel-endpoint-value
            remote-endpoint :port))
+         (remote-port
+          (if (and reverse
+                   (or (eq remote-port t)
+                       (null remote-port)))
+              0
+            remote-port))
          (_
-          (unless remote-port
+          (unless (and (or (integerp remote-port)
+                           (stringp remote-port))
+                       (not (equal remote-port "")))
             (error "Remote endpoint has no port: %S" remote-endpoint)))
          (command
           (remote-backend-tramp--ssh-forward-command
-           route local-host local-port remote-host remote-port))
+           route local-host local-port remote-host remote-port direction))
          (buffer
           (generate-new-buffer
            (format " *remote-forward-%s*"
@@ -546,6 +665,7 @@ the file-name handler."
                  (append
                   metadata
                   (list
+                   :direction direction
                    :command command
                    :diagnostic-buffer buffer))))
           (set-process-sentinel
@@ -571,27 +691,36 @@ the file-name handler."
                    (remote--kill-internal-buffer buffer))))))
           (let ((deadline
                  (+ (float-time)
-                    remote-backend-ssh-forward-timeout)))
+                    remote-backend-ssh-forward-timeout))
+                confirmed-port)
             (while
                 (and
                  (process-live-p process)
                  (not
-                  (remote-backend-tramp--local-port-open-p
-                   local-host local-port))
+                  (setq
+                   confirmed-port
+                   (if reverse
+                       (remote-backend-tramp--reverse-forward-port
+                        buffer remote-port)
+                     (and
+                      (remote-backend-tramp--local-port-open-p
+                       local-host local-port)
+                      local-port))))
                  (< (float-time) deadline))
-              (accept-process-output process 0.05)))
-          (unless
-              (and
-               (process-live-p process)
-               (remote-backend-tramp--local-port-open-p
-                local-host local-port))
-            (let ((diagnostic
-                   (when (buffer-live-p buffer)
-                     (with-current-buffer buffer
-                       (string-trim (buffer-string))))))
-              (remote-backend-tramp--close-forward forward)
-              (error "SSH forward failed: %s"
-                     (or diagnostic "listener did not start"))))
+              (accept-process-output process 0.05))
+            (when (and reverse confirmed-port)
+              (setq remote-port confirmed-port)
+              (setf
+               (remote-forward-remote-endpoint forward)
+               (list :host remote-host :port confirmed-port)))
+            (unless (and (process-live-p process) confirmed-port)
+              (let ((diagnostic
+                     (when (buffer-live-p buffer)
+                       (with-current-buffer buffer
+                         (string-trim (buffer-string))))))
+                (remote-backend-tramp--close-forward forward)
+                (error "SSH forward failed: %s"
+                       (or diagnostic "listener did not start")))))
           (setf (remote-forward-state forward) 'open)
           forward)
       (error
@@ -619,55 +748,138 @@ the file-name handler."
   process)
 
 (defun remote-backend-tramp-network (route context arguments)
-  "Create a client network process through an SSH forward."
-  (when (plist-get arguments :server)
+  "Create a network process through an SSH local or reverse forward."
+  (when (memq (plist-get arguments :type) '(datagram seqpacket))
     (signal
      'remote-backend-unsupported
-     (list "Remote listeners require reverse-forward support")))
-  (let* ((host (plist-get arguments :host))
-         (service (plist-get arguments :service))
-         (forward
-          (remote-backend-tramp-forward
-           route context nil
-           (list :host host :port service)
-           '(:owner network-process)))
-         (local (remote-forward-local-endpoint forward))
-         (arguments
-          (plist-put
-           (plist-put
-            (copy-sequence arguments)
-            :host (plist-get local :host))
-           :service (plist-get local :port)))
-         process)
-    (condition-case error
-        (let ((default-directory temporary-file-directory))
-          (setq process (apply #'make-network-process arguments))
-          (remote-backend-tramp--attach-forward process forward))
-      (error
-       (remote-backend-tramp--close-forward forward)
-       (setf (remote-forward-state forward) 'closed)
-       (signal (car error) (cdr error))))))
+     (list "SSH routed network processes support TCP streams only")))
+  (when (memq (plist-get arguments :family) '(local local-socket))
+    (signal
+     'remote-backend-unsupported
+     (list "SSH routed network processes do not expose local sockets")))
+  (if (plist-get arguments :server)
+      (let* ((remote-host (or (plist-get arguments :host) "127.0.0.1"))
+             (remote-port (plist-get arguments :service))
+             (remote-port
+              (if (eq remote-port t) 0 remote-port))
+             (_
+              (unless (integerp remote-port)
+                (error
+                 "Remote SSH listeners require a numeric service: %S"
+                 (plist-get arguments :service))))
+             (local-arguments (copy-sequence arguments))
+             (local-arguments
+              (plist-put local-arguments :host "127.0.0.1"))
+             (local-arguments
+              (plist-put local-arguments :service 0))
+             server forward)
+        (condition-case error
+            (let ((default-directory temporary-file-directory))
+              (setq server
+                    (apply #'make-network-process local-arguments))
+              (setq forward
+                    (remote-backend-tramp-forward
+                     route context
+                     (list
+                      :host "127.0.0.1"
+                      :port (process-contact server :service))
+                     (list :host remote-host :port remote-port)
+                     '(:owner network-server :direction reverse)))
+              (process-put
+               server 'remote-listen-endpoint
+               (remote-forward-remote-endpoint forward))
+              (remote-backend-tramp--attach-forward server forward))
+          (error
+           (when (and (processp server) (process-live-p server))
+             (delete-process server))
+           (when (remote-forward-p forward)
+             (remote-backend-tramp--close-forward forward)
+             (setf (remote-forward-state forward) 'closed))
+           (signal (car error) (cdr error)))))
+    (let* ((host (plist-get arguments :host))
+           (service (plist-get arguments :service))
+           (forward
+            (remote-backend-tramp-forward
+             route context nil
+             (list :host host :port service)
+             '(:owner network-process)))
+           (local (remote-forward-local-endpoint forward))
+           (arguments
+            (plist-put
+             (plist-put
+              (copy-sequence arguments)
+              :host (plist-get local :host))
+             :service (plist-get local :port)))
+           process)
+      (condition-case error
+          (let ((default-directory temporary-file-directory))
+            (setq process (apply #'make-network-process arguments))
+            (remote-backend-tramp--attach-forward process forward))
+        (error
+         (remote-backend-tramp--close-forward forward)
+         (setf (remote-forward-state forward) 'closed)
+         (signal (car error) (cdr error)))))))
 
 (defun remote-backend-tramp-stream
     (route context name buffer host service parameters)
-  "Open a network stream through an SSH forward."
+  "Open a network stream through an SSH forward.
+The protocol layer retains HOST and SERVICE so TLS SNI, certificate
+verification, auth-source, greetings, and returned properties keep their
+native meaning.  Only the lowest `make-network-process' connection endpoint is
+rewritten to the client-side relay."
+  (when
+      (and
+       (not (gnutls-available-p))
+       (or
+        (memq (plist-get parameters :type) '(tls ssl starttls))
+        (and (memq (plist-get parameters :type) '(nil network))
+             (plist-get parameters :success)
+             (plist-get parameters :capability-command))))
+    ;; External TLS helpers open their own socket and would bypass the local
+    ;; relay.  Failing explicitly is safer than silently connecting from the
+    ;; client or validating the relay host.
+    (signal
+     'remote-backend-unsupported
+     '("Routed TLS/STARTTLS requires Emacs built-in GnuTLS")))
   (let* ((forward
           (remote-backend-tramp-forward
            route context nil
            (list :host host :port service)
            '(:owner network-stream)))
          (local (remote-forward-local-endpoint forward))
-         process)
+         (local-host (plist-get local :host))
+         (local-service (plist-get local :port))
+         result)
     (condition-case error
         (let ((default-directory temporary-file-directory))
-          (setq process
-                (apply
-                 #'open-network-stream
-                 name buffer
-                 (plist-get local :host)
-                 (plist-get local :port)
-                 parameters))
-          (remote-backend-tramp--attach-forward process forward))
+          (let ((native-make-network-process
+                 (symbol-function 'make-network-process)))
+            (cl-letf
+                (((symbol-function 'make-network-process)
+                  (lambda (&rest arguments)
+                    (setq arguments
+                          (plist-put arguments :host local-host)
+                          arguments
+                          (plist-put
+                           arguments :service local-service))
+                    (apply native-make-network-process arguments))))
+              (setq result
+                    (apply
+                     #'open-network-stream
+                     name buffer host service parameters))))
+          (if-let* ((process
+                     (cond
+                      ((processp result) result)
+                      ((and (consp result)
+                            (processp (car result)))
+                       (car result)))))
+              (remote-backend-tramp--attach-forward process forward)
+            ;; Some native stream modes report negotiation failure in a
+            ;; return-list instead of signaling.  Preserve that result while
+            ;; releasing the no-longer-useful relay.
+            (remote-backend-tramp--close-forward forward)
+            (setf (remote-forward-state forward) 'closed))
+          result)
       (error
        (remote-backend-tramp--close-forward forward)
        (setf (remote-forward-state forward) 'closed)
@@ -683,6 +895,8 @@ the file-name handler."
    :connect #'remote-backend-tramp-connect
    :live #'remote-backend-tramp-live-p
    :disconnect #'remote-backend-tramp-disconnect
+   :prepare-process #'remote-backend-tramp-prepare-process
+   :stdio-bridge #'remote-backend-tramp-stdio-bridge
    :make-network-process #'remote-backend-tramp-network
    :open-network-stream #'remote-backend-tramp-stream
    :port-forward #'remote-backend-tramp-forward

@@ -16,6 +16,7 @@
 (require 'remote-backend)
 (require 'remote-session)
 (require 'remote-fs)
+(require 'remote-channel)
 (require 'remote-workspace)
 
 (declare-function remote-process-file "remote-process"
@@ -153,6 +154,20 @@
                       '(disconnected failed degraded))
             "Run remote-workspace-reconnect and inspect resource errors"))
          checks)))
+    (dolist (channel (remote-channel-list target-id))
+      (push
+       (remote-doctor--check
+        (intern (format "channel:%s" (plist-get channel :id)))
+        (if (eq (plist-get channel :state) 'open) 'ok 'warning)
+        (format "%s via %s/%s local=%S remote=%S"
+                (plist-get channel :kind)
+                (plist-get channel :pipeline)
+                (plist-get channel :backend)
+                (plist-get channel :local-endpoint)
+                (plist-get channel :remote-endpoint))
+        (unless (eq (plist-get channel :state) 'open)
+          "Close or recreate the failed channel"))
+       checks))
     (nreverse checks)))
 
 (defun remote-doctor--probe (target)
@@ -204,7 +219,20 @@ When PROBE is non-nil, establish a session and execute `uname -s'."
                "configuration not loaded"))
             (remote-doctor--check
              'logical-root 'ok
-             (remote-make-file-name (remote-target-id target) "/")))
+             (remote-make-file-name (remote-target-id target) "/"))
+            (remote-doctor--check
+             'file-operation-contract
+             (if (zerop
+                  (hash-table-count remote-fs--unknown-operations))
+                 'ok
+               'warning)
+             (format "%d registered, %d unknown observed"
+                     (length (remote-file-operation-list))
+                     (hash-table-count remote-fs--unknown-operations))
+             (unless
+                 (zerop
+                  (hash-table-count remote-fs--unknown-operations))
+               "Register explicit contracts for operations in the route log")))
            (remote-doctor--pipeline-checks target)
            (mapcar
             (lambda (request)

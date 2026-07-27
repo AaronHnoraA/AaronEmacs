@@ -27,11 +27,14 @@
   id capabilities
   available-function
   project-function
+  client-file-function
   expand-function
   prepare-function
   connect-function
   live-function
   disconnect-function
+  prepare-process-function
+  stdio-bridge-function
   network-function
   stream-function
   forward-function
@@ -44,6 +47,10 @@
   backend-id route context
   logical-directory physical-directory
   command environment metadata)
+
+(cl-defstruct (remote-backend-process-plan
+               (:constructor remote-backend-process-plan-create))
+  arguments default-directory stderr-mode process-properties metadata)
 
 (cl-defstruct (remote-forward
                (:constructor remote-forward-create))
@@ -99,19 +106,30 @@
     (funcall function connection route)))
 
 (cl-defun remote-register-backend
-    (id &key capabilities available project expand-localname prepare
+    (id &key capabilities available project client-file-name
+        expand-localname prepare
         connect live disconnect
+        prepare-process stdio-bridge
         make-network-process open-network-stream port-forward
         classify-error describe (program-form 'search))
   "Register transport backend ID and return it.
 
 CAPABILITIES are route capabilities implemented by the backend.  PROJECT maps
 a logical file and selected link to a physical Emacs file name.
+CLIENT-FILE-NAME maps a logical file to an ordinary path directly accessible
+to client-side tools, or returns nil when the target filesystem is not shared.
 EXPAND-LOCALNAME resolves target-relative names such as `~/src' and must
 return a target-native absolute localname; this keeps target HOME lookup out
 of the logical identity layer.  PREPARE can normalize a
 `remote-backend-execution' before a process is started.  CONNECT, LIVE, and
 DISCONNECT own the backend session lifecycle.
+
+PREPARE-PROCESS receives an execution record, an official `make-process'
+argument plist, and target environment overrides.  It returns a
+`remote-backend-process-plan' describing placement and stderr behavior.
+STDIO-BRIDGE receives an execution record and returns client-local argv whose
+stdio is connected to that target execution.  These operations keep
+backend-specific spawn decisions out of the common process API.
 
 MAKE-NETWORK-PROCESS, OPEN-NETWORK-STREAM, and PORT-FORWARD are optional
 channel operations.  PROGRAM-FORM is `search' when the backend accepts a bare
@@ -127,11 +145,14 @@ target-native executable."
             :capabilities (copy-sequence capabilities)
             :available-function available
             :project-function project
+            :client-file-function client-file-name
             :expand-function expand-localname
             :prepare-function prepare
             :connect-function connect
             :live-function live
             :disconnect-function disconnect
+            :prepare-process-function prepare-process
+            :stdio-bridge-function stdio-bridge
             :network-function make-network-process
             :stream-function open-network-stream
             :forward-function port-forward
@@ -199,6 +220,14 @@ support target HOME expansion."
     (remote-backend--legacy-project
      backend file-name (remote-route-link route) route)))
 
+(defun remote-backend-client-file-name (route file-name)
+  "Return FILE-NAME as a directly client-accessible path on ROUTE.
+Nil means that client-side programs cannot access the target file namespace.
+This is a placement capability, not a local-versus-remote target test."
+  (when-let* ((backend (remote-route-backend route))
+              (function (remote-backend-client-file-function backend)))
+    (funcall function file-name route)))
+
 (cl-defun remote-backend-prepare-execution
     (route context command environment
            &key logical-directory metadata)
@@ -234,6 +263,66 @@ logical and physical working directories."
     (if-let* ((function (remote-backend-prepare-function backend)))
         (or (funcall function execution) execution)
       execution)))
+
+(defun remote-backend--default-process-plan (execution arguments)
+  "Return the native Emacs process plan for EXECUTION and ARGUMENTS."
+  (remote-backend-process-plan-create
+   :arguments
+   (if (plist-member arguments :file-handler)
+       (copy-sequence arguments)
+     (plist-put (copy-sequence arguments) :file-handler t))
+   :default-directory
+   (remote-backend-execution-physical-directory execution)
+   :stderr-mode 'native))
+
+(defun remote-backend-prepare-process
+    (route execution arguments environment)
+  "Return a backend-neutral async process plan for ROUTE.
+EXECUTION is a `remote-backend-execution', ARGUMENTS is the official
+`make-process' plist, and ENVIRONMENT is the resolved target override alist.
+Legacy link plugins receive the default projected Emacs plan."
+  (let* ((backend (remote-route-backend route))
+         (function
+          (and backend
+               (remote-backend-prepare-process-function backend)))
+         (plan
+          (if function
+              (funcall function execution arguments environment)
+            (remote-backend--default-process-plan execution arguments))))
+    (unless (remote-backend-process-plan-p plan)
+      (error "Backend %s returned an invalid process plan: %S"
+             (and backend (remote-backend-id backend)) plan))
+    (unless (plist-get
+             (remote-backend-process-plan-arguments plan)
+             :command)
+      (error "Backend process plan has no command: %S" plan))
+    plan))
+
+(defun remote-backend-stdio-bridge-command (execution)
+  "Return client-local stdio bridge argv for EXECUTION.
+The selected backend owns every placement distinction.  Callers must not
+branch on target IDs or physical path syntax."
+  (unless (remote-backend-execution-p execution)
+    (error "Not a backend execution: %S" execution))
+  (let* ((route (remote-backend-execution-route execution))
+         (backend (remote-route-backend route))
+         (function
+          (and backend
+               (remote-backend-stdio-bridge-function backend))))
+    (unless function
+      (signal
+       'remote-backend-unsupported
+       (list
+        (format "Backend %s has no client stdio bridge"
+                (if backend
+                    (remote-backend-id backend)
+                  (remote-route-link-plugin-id route))))))
+    (let ((command (funcall function execution)))
+      (unless (and (listp command)
+                   (stringp (car command)))
+        (error "Backend %s returned invalid stdio bridge argv: %S"
+               (remote-backend-id backend) command))
+      command)))
 
 (defun remote-backend-default-classify-error (error &optional phase)
   "Return a transport-neutral classification for ERROR during PHASE."

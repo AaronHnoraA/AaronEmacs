@@ -27,13 +27,13 @@
 (defconst remote-capabilities
   '(file-read file-write directory metadata
     process-sync process-async pty watch lsp environment
-    network-client network-server port-forward)
+    network-client network-server port-forward reverse-forward)
   "Capabilities understood by the built-in route resolver.")
 
 (defconst remote-native-capabilities
   '(file-read file-write directory metadata
     process-sync process-async pty watch lsp environment
-    network-client network-server)
+    network-client network-server port-forward reverse-forward)
   "Capabilities which Emacs can provide directly on the local target.")
 
 (cl-defstruct (remote-target

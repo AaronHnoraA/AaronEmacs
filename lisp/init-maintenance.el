@@ -66,14 +66,30 @@ exceeded."
 
 (defvar my/maintenance-var-cleanup--timer nil)
 
+(defvar my/maintenance--local-config-root
+  (let ((default-directory "/")
+        ;; This value belongs to the editor process, not to the selected file
+        ;; target.  Capture it before direnv can install a target HOME in a
+        ;; buffer and without asking a logical file-name handler to expand it.
+        (file-name-handler-alist nil))
+    (file-name-as-directory
+     (expand-file-name user-emacs-directory)))
+  "Native client directory which owns Emacs maintenance state.")
+
+(defvar my/maintenance--local-process-environment
+  (copy-sequence process-environment)
+  "Client process environment captured before buffer-local target capsules.")
+
+(defvar my/maintenance--local-exec-path
+  (copy-sequence exec-path)
+  "Client executable search path used by editor-owned maintenance.")
+
 (defun my/maintenance-config-root ()
   "Return the local root of the current Emacs config.
 Idle timers inherit the selected buffer's `default-directory'.  Resolve this
 editor-owned path from a known local directory so a remote buffer cannot turn
 `~/.config/emacs' into a target-side path."
-  (let ((default-directory temporary-file-directory))
-    (file-name-as-directory
-     (expand-file-name user-emacs-directory default-directory))))
+  my/maintenance--local-config-root)
 
 (defun my/maintenance-var-root ()
   "Return the root of managed Emacs runtime state."
@@ -252,7 +268,13 @@ With prefix argument DRY-RUN, report what would be deleted without deleting."
 
 (defun my/maintenance-var-cleanup-maybe (&optional force)
   "Run automatic `var/' cleanup if enough time has elapsed or FORCE is non-nil."
-  (let ((default-directory temporary-file-directory))
+  (let ((default-directory (my/maintenance-config-root))
+        ;; A remote direnv capsule is buffer-local and may contain target
+        ;; HOME/TMPDIR values.  Editor-owned maintenance must never inherit
+        ;; those values merely because an idle timer fired in that buffer.
+        (process-environment
+         (copy-sequence my/maintenance--local-process-environment))
+        (exec-path (copy-sequence my/maintenance--local-exec-path)))
     (when my/maintenance-var-cleanup-enable
       (let* ((state (my/maintenance-var-cleanup--read-state))
              (last-run (plist-get state :last-run))

@@ -131,10 +131,156 @@ and `:metadata'."
            (error nil))
        t))))
 
+(cl-defun remote-service--ready-probe
+    (service workspace &key provision)
+  "Return an available probe result for SERVICE in WORKSPACE.
+PROVISION has the same trust-gated meaning as in `remote-service-ensure'."
+  (let ((probe (remote-service--probe service workspace)))
+    (unless (plist-get probe :available)
+      (when (or provision remote-service-auto-provision)
+        (unless (remote-service--trusted-p workspace)
+          (signal
+           'remote-service-untrusted
+           (list (remote-service-id service)
+                 (remote-workspace-target-id workspace))))
+        (if-let* ((installer
+                   (remote-service-provision-function service)))
+            (funcall installer
+                     (remote-workspace-context workspace)
+                     probe)
+          (error "Service %s has no provision function"
+                 (remote-service-id service)))
+        (setq probe (remote-service--probe service workspace))))
+    (unless (plist-get probe :available)
+      (signal
+       'remote-service-error
+       (list
+        (format "Service %s is unavailable"
+                (remote-service-id service)))))
+    (when (and (remote-service-trusted-only service)
+               (not (remote-service--trusted-p workspace)))
+      (signal
+       'remote-service-untrusted
+       (list (remote-service-id service)
+             (remote-workspace-target-id workspace))))
+    probe))
+
+(defun remote-service--start-data (service workspace probe)
+  "Start SERVICE in WORKSPACE and return normalized instance data."
+  (let* ((starter (remote-service-start-function service))
+         (started
+          (and starter
+               (funcall starter
+                        (remote-workspace-context workspace)
+                        probe)))
+         (started-plist
+          (and (listp started)
+               (keywordp (car started))
+               started)))
+    (list
+     :capabilities
+     (or (plist-get started-plist :capabilities)
+         (plist-get probe :capabilities)
+         (copy-sequence
+          (remote-service-capabilities service)))
+     :version
+     (or (plist-get started-plist :version)
+         (plist-get probe :version))
+     :handle
+     (if started-plist
+         (plist-get started-plist :handle)
+       started)
+     :metadata
+     (append
+      (plist-get probe :metadata)
+      (plist-get started-plist :metadata)))))
+
+(defun remote-service--apply-start-data (instance data)
+  "Update INSTANCE in place from normalized start DATA."
+  (let ((now (current-time)))
+    (setf
+     (remote-service-instance-capabilities instance)
+     (plist-get data :capabilities)
+     (remote-service-instance-version instance)
+     (plist-get data :version)
+     (remote-service-instance-handle instance)
+     (plist-get data :handle)
+     (remote-service-instance-metadata instance)
+     (plist-get data :metadata)
+     (remote-service-instance-state instance) 'running
+     (remote-service-instance-started-at instance) now
+     (remote-service-instance-last-used-at instance) now
+     (remote-service-instance-error instance) nil)
+    instance))
+
+(defun remote-service--stop-handle (service instance reason)
+  "Ask SERVICE to stop INSTANCE's current handle for REASON.
+Registry ownership and reference counts are deliberately left unchanged."
+  (when (and service
+             (remote-service-stop-function service))
+    (condition-case error
+        (funcall
+         (remote-service-stop-function service)
+         instance reason)
+      (error
+       (setf (remote-service-instance-error instance) error)
+       (remote-log
+        'service-stop-error
+        :service (remote-service-instance-service-id instance)
+        :error (error-message-string error))))))
+
+(cl-defun remote-service-restart
+    (instance workspace &key provision (reason 'restart))
+  "Restart INSTANCE for WORKSPACE without changing its object identity.
+Target-scoped services can be referenced by several workspaces.  Mutating the
+shared instance in place ensures every owner observes the replacement handle
+and keeps the existing reference count."
+  (unless (remote-service-instance-p instance)
+    (error "Not a remote service instance: %S" instance))
+  (let* ((service
+          (or
+           (remote-get-service
+            (remote-service-instance-service-id instance))
+           (error "Unknown remote service: %S"
+                  (remote-service-instance-service-id instance))))
+         ;; Probe and provision before stopping a still-usable handle.  A
+         ;; failed precondition must not take a shared service away from its
+         ;; other owners.
+         (probe
+          (remote-service--ready-probe
+           service workspace :provision provision)))
+    (setf (remote-service-instance-state instance) 'restarting)
+    (remote-service--stop-handle service instance reason)
+    (condition-case error
+        (progn
+          (remote-service--apply-start-data
+           instance
+           (remote-service--start-data service workspace probe))
+          (puthash
+           (remote-service-instance-key instance)
+           instance remote-service-instances)
+          (remote-log
+           'service-restart
+           :service (remote-service-id service)
+           :target (remote-service-instance-target-id instance)
+           :workspace (remote-workspace-id workspace)
+           :uses (remote-service-instance-use-count instance))
+          instance)
+      (error
+       (setf (remote-service-instance-state instance) 'failed
+             (remote-service-instance-error instance) error)
+       (remote-log
+        'service-restart-error
+        :service (remote-service-id service)
+        :target (remote-service-instance-target-id instance)
+        :error (error-message-string error))
+       (signal (car error) (cdr error))))))
+
 (cl-defun remote-service-ensure (service workspace &key provision force)
   "Return a live SERVICE instance for WORKSPACE.
 SERVICE is an ID or service object.  With PROVISION, install a missing service
-when its target is trusted.  FORCE ignores an existing live instance."
+when its target is trusted.  FORCE restarts an existing shared instance in
+place before acquiring the caller's reference."
   (let* ((service
           (if (remote-service-p service)
               service
@@ -142,81 +288,36 @@ when its target is trusted.  FORCE ignores an existing live instance."
                 (error "Unknown remote service: %S" service))))
          (key (remote-service--instance-key service workspace))
          (existing (gethash key remote-service-instances)))
-    (if (and (not force)
-             (remote-service-instance-live-p existing))
+    (if existing
         (progn
+          (when (or force
+                    (not
+                     (remote-service-instance-live-p existing)))
+            (remote-service-restart
+             existing workspace
+             :provision provision
+             :reason
+             (if force 'forced-restart 'stale-restart)))
           (setf (remote-service-instance-last-used-at existing)
                 (current-time)
                 (remote-service-instance-use-count existing)
                 (1+ (remote-service-instance-use-count existing)))
           existing)
-      (when existing
-        (remote-service-stop existing 'restart))
-      (let ((probe (remote-service--probe service workspace)))
-        (unless (plist-get probe :available)
-          (when (or provision remote-service-auto-provision)
-            (unless (remote-service--trusted-p workspace)
-              (signal
-               'remote-service-untrusted
-               (list (remote-service-id service)
-                     (remote-workspace-target-id workspace))))
-            (if-let* ((installer
-                       (remote-service-provision-function service)))
-                (funcall installer
-                         (remote-workspace-context workspace)
-                         probe)
-              (error "Service %s has no provision function"
-                     (remote-service-id service)))
-            (setq probe (remote-service--probe service workspace))))
-        (unless (plist-get probe :available)
-          (signal
-           'remote-service-error
-           (list
-            (format "Service %s is unavailable"
-                    (remote-service-id service)))))
-        (when (and (remote-service-trusted-only service)
-                   (not (remote-service--trusted-p workspace)))
-          (signal
-           'remote-service-untrusted
-           (list (remote-service-id service)
-                 (remote-workspace-target-id workspace))))
-        (let* ((starter (remote-service-start-function service))
-               (started
-                (and starter
-                     (funcall starter
-                              (remote-workspace-context workspace)
-                              probe)))
-               (started-plist
-                (and (listp started)
-                     (keywordp (car started))
-                     started))
-               (now (current-time))
-               (instance
-                (remote-service-instance-create
-                 :key key
-                 :service-id (remote-service-id service)
-                 :workspace-id (remote-workspace-id workspace)
-                 :target-id (remote-workspace-target-id workspace)
-                 :capabilities
-                 (or (plist-get started-plist :capabilities)
-                     (plist-get probe :capabilities)
-                     (copy-sequence
-                      (remote-service-capabilities service)))
-                 :version
-                 (or (plist-get started-plist :version)
-                     (plist-get probe :version))
-                 :handle
-                 (if started-plist
-                     (plist-get started-plist :handle)
-                   started)
-                 :state 'running
-                 :started-at now
-                 :last-used-at now
-                 :use-count 1
-                 :metadata
-                 (append
-                  (plist-get probe :metadata)
-                  (plist-get started-plist :metadata)))))
+      (let* ((probe
+              (remote-service--ready-probe
+               service workspace :provision provision))
+             (instance
+              (remote-service-instance-create
+               :key key
+               :service-id (remote-service-id service)
+               :workspace-id (remote-workspace-id workspace)
+               :target-id (remote-workspace-target-id workspace)
+               :use-count 1)))
+        (condition-case error
+            (progn
+              (remote-service--apply-start-data
+               instance
+               (remote-service--start-data service workspace probe))
           (puthash key instance remote-service-instances)
           (remote-log
            'service-start
@@ -224,7 +325,11 @@ when its target is trusted.  FORCE ignores an existing live instance."
            :target (remote-workspace-target-id workspace)
            :workspace (remote-workspace-id workspace)
            :version (remote-service-instance-version instance))
-          instance)))))
+              instance)
+          (error
+           (setf (remote-service-instance-state instance) 'failed
+                 (remote-service-instance-error instance) error)
+           (signal (car error) (cdr error))))))))
 
 (defun remote-service-stop (instance &optional reason)
   "Stop service INSTANCE and record REASON."
@@ -232,22 +337,18 @@ when its target is trusted.  FORCE ignores an existing live instance."
     (let ((service
            (remote-get-service
             (remote-service-instance-service-id instance))))
-      (remhash
-       (remote-service-instance-key instance)
-       remote-service-instances)
-      (when (and service
-                 (remote-service-stop-function service))
-        (condition-case error
-            (funcall
-             (remote-service-stop-function service)
-             instance reason)
-          (error
-           (setf (remote-service-instance-error instance) error)
-           (remote-log
-            'service-stop-error
-            :service (remote-service-instance-service-id instance)
-            :error (error-message-string error)))))
-      (setf (remote-service-instance-state instance) 'stopped)
+      (when
+          (eq
+           (gethash
+            (remote-service-instance-key instance)
+            remote-service-instances)
+           instance)
+        (remhash
+         (remote-service-instance-key instance)
+         remote-service-instances))
+      (remote-service--stop-handle service instance reason)
+      (setf (remote-service-instance-state instance) 'stopped
+            (remote-service-instance-handle instance) nil)
       instance)))
 
 (defun remote-service-release (instance &optional force reason)

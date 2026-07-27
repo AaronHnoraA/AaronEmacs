@@ -19,6 +19,10 @@
 (define-error 'remote-transport-unsupported
               "Remote transport stage is unsupported"
               'remote-transport-error)
+(define-error 'remote-pipeline-busy
+              "Remote transport pipeline is already opening")
+(define-error 'remote-pipeline-cancelled
+              "Remote transport pipeline opening was cancelled")
 
 (cl-defstruct (remote-endpoint
                (:constructor remote-endpoint-create))
@@ -218,22 +222,26 @@ allocated."
           :error (error-message-string error)))))
     (setf (remote-stage-runtime-state stage-runtime) 'closed)))
 
-(defun remote-pipeline-open (route context)
+(defun remote-pipeline-open (route context &optional runtime)
   "Open a new transport runtime for ROUTE and CONTEXT.
+RUNTIME, when non-nil, is an `opening' placeholder already installed by the
+pool to guard against event-loop reentrancy.
 Use `remote-pipeline-acquire' when the runtime should participate in pooling."
   (let* ((pipeline
           (or (remote-route-pipeline route)
               (error "Route has no pipeline: %S" route)))
          (runtime
-          (remote-pipeline-runtime-create
-           :key (remote-pipeline-route-key route)
-           :pipeline-id (remote-pipeline-id pipeline)
-           :route route
-           :context context
-           :state 'opening
-           :opened-at (current-time)
-           :last-used-at (current-time)
-           :use-count 0))
+          (or
+           runtime
+           (remote-pipeline-runtime-create
+            :key (remote-pipeline-route-key route)
+            :pipeline-id (remote-pipeline-id pipeline)
+            :route route
+            :context context
+            :state 'opening
+            :opened-at (current-time)
+            :last-used-at (current-time)
+            :use-count 0)))
          (endpoint
           (remote-transport--endpoint-from-config
            (remote-route-target-id route)
@@ -281,7 +289,23 @@ Use `remote-pipeline-acquire' when the runtime should participate in pooling."
               (setf (remote-pipeline-runtime-stages runtime)
                     (append
                      (remote-pipeline-runtime-stages runtime)
-                     (list stage-runtime)))))
+                     (list stage-runtime)))
+              ;; `remote-pipeline-close' may run while CONNECT yields to the
+              ;; event loop.  Do not resurrect that cancelled runtime after
+              ;; the stage returns with a newly allocated handle.
+              (unless (eq (remote-pipeline-runtime-state runtime) 'opening)
+                (signal
+                 'remote-pipeline-cancelled
+                 (list
+                  (format "Pipeline %s was cancelled while opening stage %s"
+                          (remote-pipeline-id pipeline)
+                          (remote-pipeline-stage-id stage)))))))
+          (unless (eq (remote-pipeline-runtime-state runtime) 'opening)
+            (signal
+             'remote-pipeline-cancelled
+             (list
+              (format "Pipeline %s was cancelled while opening"
+                      (remote-pipeline-id pipeline)))))
           (setf (remote-pipeline-runtime-endpoint runtime) endpoint
                 (remote-pipeline-runtime-state runtime) 'open)
           (remote-log
@@ -338,9 +362,15 @@ Use `remote-pipeline-acquire' when the runtime should participate in pooling."
         (remote-transport--disconnect-stage stage-runtime runtime))
       (setf (remote-pipeline-runtime-state runtime) 'closed
             (remote-pipeline-runtime-error runtime) reason)
-      (remhash
-       (remote-pipeline-runtime-key runtime)
-       remote-pipeline-runtime-pool)
+      (when
+          (eq
+           (gethash
+            (remote-pipeline-runtime-key runtime)
+            remote-pipeline-runtime-pool)
+           runtime)
+        (remhash
+         (remote-pipeline-runtime-key runtime)
+         remote-pipeline-runtime-pool))
       (remote-log
        'pipeline-close
        :pipeline (remote-pipeline-runtime-pipeline-id runtime)
@@ -356,11 +386,56 @@ Use `remote-pipeline-acquire' when the runtime should participate in pooling."
   "Acquire a shared live transport runtime for ROUTE and CONTEXT."
   (let* ((key (remote-pipeline-route-key route))
          (runtime (gethash key remote-pipeline-runtime-pool)))
+    (when (and runtime
+               (eq (remote-pipeline-runtime-state runtime) 'opening))
+      (remote-log
+       'pipeline-busy
+       :target (remote-route-target-id route)
+       :pipeline (remote-route-link-id route))
+      (signal
+       'remote-pipeline-busy
+       (list
+        (format "Pipeline %s for %s is already opening"
+                (remote-route-link-id route)
+                (remote-route-target-id route)))))
     (unless (remote-pipeline-runtime-live-p runtime)
       (when runtime
         (remote-pipeline-close runtime 'stale))
-      (setq runtime (remote-pipeline-open route context))
-      (puthash key runtime remote-pipeline-runtime-pool))
+      (let* ((pipeline
+              (or (remote-route-pipeline route)
+                  (error "Route has no pipeline: %S" route)))
+             (placeholder
+              (remote-pipeline-runtime-create
+               :key key
+               :pipeline-id (remote-pipeline-id pipeline)
+               :route route
+               :context context
+               :state 'opening
+               :opened-at (current-time)
+               :last-used-at (current-time)
+               :use-count 0)))
+        ;; Pipeline transport stages may yield to timers or invoke hooks.  The
+        ;; placeholder makes a nested acquire fail instead of opening a second
+        ;; runtime that would later be overwritten and leaked.
+        (setq runtime placeholder)
+        (puthash key runtime remote-pipeline-runtime-pool)
+        (condition-case err
+            (progn
+              (remote-pipeline-open route context runtime)
+              (unless
+                  (and
+                   (eq (gethash key remote-pipeline-runtime-pool) runtime)
+                   (eq (remote-pipeline-runtime-state runtime) 'open))
+                (remote-pipeline-close runtime 'opening-cancelled)
+                (signal
+                 'remote-pipeline-cancelled
+                 (list
+                  (format "Pipeline %s was replaced while opening"
+                          (remote-pipeline-id pipeline))))))
+          (error
+           (when (eq (gethash key remote-pipeline-runtime-pool) runtime)
+             (remhash key remote-pipeline-runtime-pool))
+           (signal (car err) (cdr err))))))
     (setf (remote-pipeline-runtime-use-count runtime)
           (1+ (remote-pipeline-runtime-use-count runtime))
           (remote-pipeline-runtime-last-used-at runtime)

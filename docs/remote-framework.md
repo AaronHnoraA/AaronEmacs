@@ -83,12 +83,18 @@ jump host 和端口映射属于 pipeline stage；TRAMP 与 tramp-rpc 属于 back
 (remote-uri-to-file-name "fs://aaron-wsl2/home/hc/a.el")
 (remote-file-name-target "/fs:aaron-wsl2:/home/hc/a.el")
 (remote-file-local-name "/fs:aaron-wsl2:/home/hc/a.el")
+(remote-client-file-name "/fs:local:/tmp/a.el")
+;; => "/tmp/a.el"
+(remote-client-file-name "/fs:aaron-wsl2:/home/hc/a.el")
+;; => nil，除非所选 backend 明确声明客户端可直接访问
 (remote-expand-file-name "~/src" nil "aaron-wsl2")
 (remote-file-equal-p left right)
 ```
 
 `remote-file-local-name` 返回 target-native path，不表示该路径能由客户端 OS
-直接访问。`remote-make-file-name` 只接受已经绝对化的 target-native path；
+直接访问。需要给 client-side tool 传文件时使用纯 placement 查询
+`remote-client-file-name`，不要用 target ID 判断 local/remote。
+`remote-make-file-name` 只接受已经绝对化的 target-native path；
 `~/src` 必须先经 `remote-expand-file-name`，由所选 backend 在 target 上解析
 HOME。配置里的 workspace path 也走这条边界并缓存绝对结果，不能使用客户端
 HOME 猜测远端身份。
@@ -121,10 +127,18 @@ buffer 身份意外降级成裸路径。确实只用于 UI 展示时，可显式
 `start-file-process`。`remote-fs` 在 `/fs:` 上下文内路由，再把结果中的物理路径
 重新包装为逻辑路径；buffer 的 visited-file 状态不因 backend 切换而改变。
 
+原生消费者的兼容修饰保持在最窄边界。例如 Emacs 32 的 Git backend 在状态输出
+超过 `vc-dir-process-output-limit` 时假定调用者是 VC-Dir；Diff-HL 的 Dired
+临时 buffer 不满足这个假设。配置只在 `diff-hl-dired-status-files` 调用期间取消
+该限制，使 Diff-HL 得到完整状态，同时不改变全局 VC 设置、Dired 的 `/fs:`
+身份或其他 Git/VC 调用。
+
 官方 `make-process` / `start-file-process` 的 cwd 是调用时的逻辑
 `default-directory`，不是 workspace root。workspace 只提供资源与环境作用域，
 不能改变原生进程 API 的目录语义。自定义调用可以用
 `remote-make-process` 的 `:remote-directory` 显式表达同一边界。
+`remote-process-file` 也投影原生位置参数中的 `INFILE` 与 stderr 文件名；
+stdout 的 buffer/string 目的地仍严格保留 Emacs 的 buffer 语义。
 
 文件 handler 的契约不是封闭常量。扩展可以登记路径参数、能力、返回值映射和
 重试安全性：
@@ -171,9 +185,11 @@ route log，并保守地按不可重试的 `file-write` 只执行一次。跨 ta
 backend 负责这些边界：
 
 - 逻辑文件名到 physical file name 的投影；
+- 逻辑文件是否能由 client-side tool 直接访问的 placement 查询；
 - target-native `~` / `~user` path 到绝对 localname 的展开；
 - session 的 connect、liveness 与 disconnect；
 - 命令、工作目录、环境和 executable 形式的执行准备；
+- async `make-process` plan 与 client-local stdio bridge；
 - 可选的 network process、network stream 与 port forward；
 - backend/transport/operation 错误分类。
 
@@ -182,8 +198,11 @@ backend 负责这些边界：
  "example"
  :capabilities '(file-read process-sync)
  :project project-function
+ :client-file-name optional-client-path-function
  :expand-localname expand-target-path-function
  :prepare prepare-execution-function
+ :prepare-process prepare-async-process-plan-function
+ :stdio-bridge client-stdio-bridge-function
  :connect connect-function
  :live live-function
  :disconnect disconnect-function
@@ -197,7 +216,11 @@ backend 负责这些边界：
 `tramp-rpc` 声明 `program-form = absolute`；裸命令查找与目标 PATH 解析应在这一
 backend 契约下完成，而不是由 direnv、Eglot 等消费者各自猜测。
 
-同步、异步和官方 `make-process` 边界都消费这个 execution record。`/fs:` handler
+同步、异步和官方 `make-process` 边界都消费这个 execution record。异步 placement
+由 `remote-backend-process-plan` 表达，公共 process 层不检查 `"local"`、
+`"tramp"` 或物理 TRAMP method。`remote-local-bridge-command` 同样只分派
+backend 的 `:stdio-bridge`，因此 WSL/container 等新 backend 不需要修改公共 API。
+`/fs:` handler
 转交到 `/rpc:` 或 `/ssh:` 后会重新允许物理 backend 的 TRAMP handler 接管；
 tramp-rpc 的本地 relay 则固定在客户端临时目录运行，不能继承 target 的 cwd。
 因此 Eglot、compile 和普通第三方插件看到标准 Emacs API，远端进程最终只收到
@@ -210,6 +233,8 @@ registry，所以旧调用者可以渐进迁移；pipeline 与 session 本身已
 
 session 按 `(target pipeline backend)` 缓存，不按 adapter 或 capability 重复建连。
 TRAMP/tramp-rpc 仍拥有底层 process；框架拥有身份、复用、健康状态和失效策略。
+pipeline runtime 引用采用 take-before-release 所有权；即使 transport connect
+让出事件循环期间发生配置重载或取消，也只能由 opener/invalidation 其中一方释放。
 首次 backend 建连有框架 deadline；SSH pipeline 还会把 `ConnectTimeout` 与
 `ConnectionAttempts` 注入该 route 的官方 TRAMP `login-args` 和 tramp-rpc raw
 SSH args，避免一个离线 target 长时间阻塞界面。pipeline config 可以用
@@ -238,6 +263,15 @@ SSH args，避免一个离线 target 长时间阻塞界面。pipeline config 可
  :name "worker"
  :command '("worker" "--stdio")
  :remote-context context)
+(remote-make-client-process
+ :name "ui-proxy"
+ :command
+ (append '("/usr/local/bin/node" "/client/proxy.mjs" "--")
+         (remote-local-bridge-command
+          "language-server"
+          :args '("--stdio")
+          :context context
+          :directory workspace-root)))
 (remote-executable-find "lake" context)
 
 (remote-exec "uname"
@@ -254,11 +288,22 @@ direnv、Nix、语言工具链等通过 maintainer 或派生 layer 修改环境�
 
 语言服务器默认是 target placement。Eglot 和 lsp-mode 在启动前等待同一份
 workspace 环境，随后通过官方 `make-process` / `start-file-process` 边界路由；
-clangd、pylsp、typescript-language-server、rust-analyzer、texlab、bash-language-
-server、Lean 的 Node/Lake 等都从 target PATH 或 workspace toolchain 查找。
-客户端 UI helper 只有显式标记为 client placement 时才允许在本机运行。
-Lean Infoview 的 proxy 端口文件按 Eglot 实例隔离；远端 HTTP 端口经
-`remote-port-forward` 暴露给本地 xwidget，不能用项目级共享端口文件覆盖活动实例。
+clangd、pylsp、typescript-language-server、rust-analyzer、texlab 和 bash-language-
+server 等都从 target PATH 或 workspace toolchain 查找。
+
+client placement 必须显式进入 `remote-make-client-process`。该 API 即使从远端
+buffer 调用，也会恢复应用 direnv 之前的客户端环境、使用本机 cwd，并禁止 `/fs:`
+handler 接管。需要把协议 peer 留在 target 时，使用
+`remote-local-bridge-command` 生成本机可执行的 stdio bridge argv；它把 target
+cwd、workspace 环境和 pipeline 封装在所选 backend 边界内。`local` target
+同样调用 native backend 的 bridge，不存在 consumer 侧的 local/remote 分支。
+
+Lean 使用这一 hybrid 模式：Node/HTTP Infoview proxy 固定运行在 Emacs 客户端，
+`lake serve` / `lean --server` 运行在 target 并继承远端 direnv/Nix capsule。
+Eglot 得到显式 process factory，因此不会因为 project root 是远端路径而用
+`sh -c "stty raw; …"` 再包装本地 Node。proxy 的端口文件按 Eglot 实例隔离并保存在
+客户端；xwidget 直接访问本机 loopback，不需要远端 Node、远端部署或 port forward。
+在远端 buffer 内校验 proxy PID 时也强制使用客户端 process namespace。
 
 tramp-rpc backend 还包含当前 `msgpack.el` 的 large-map 兼容修饰：旧 encoder 在
 环境 map 超过 15 项时会把二进制长度误传给 `unibyte-string`。direnv/Nix 环境很
@@ -278,21 +323,46 @@ Emacs 的 `make-network-process` 与 `open-network-stream` 没有 file-name hand
  "client" buffer "127.0.0.1" 9000
  :remote-context context)
 
+(remote-open-network-stream
+ "tls-client" buffer "service.internal" 443
+ :type 'tls :return-list t
+ :remote-context context)
+
 (remote-port-forward
  '(:host "127.0.0.1" :port 9000)
  :context context
  :local-endpoint '(:host "127.0.0.1" :port 0))
 
+(remote-reverse-port-forward
+ '(:host "127.0.0.1" :port 3000)
+ :context context
+ :remote-endpoint '(:host "127.0.0.1" :port 0))
+
 (remote-channel-of native-process-or-forward)
+(remote-channel-live-p native-process-or-forward)
+(remote-channel-endpoint native-process-or-forward 'remote)
+(remote-channel-list)
+(remote-channel-recover channel)
 (remote-close-channel channel)
+(remote-channel-clear)
 ```
 
 网络 API 继续返回 Emacs 原生 process 或既有 forward 对象，第三方软件无需认识
 新的包装类型；框架把统一的 `remote-channel` 描述附在返回值上。native backend
-实现 network client/server。TRAMP 与 tramp-rpc 可以通过所选
-SSH pipeline 建立本地 forward，再实现 target 侧 network client/stream 与显式
-`remote-port-forward`。远端 listener/reverse-forward 仍未实现，会明确失败；
-绝不会错误地把 target 的 `127.0.0.1` 当成客户端的 loopback。
+完整保留 `open-network-stream :return-list t` 的 `(PROCESS . PROPERTIES)` 形式，
+channel 描述附在其中的 PROCESS 上。SSH relay 只在最低层 socket connect 时替换
+host/port；TLS/STARTTLS 协议层继续看到原始 target host/service，因此 SNI、
+证书验证和 auth-source 不会误用 `127.0.0.1`。没有内建 GnuTLS 时 routed TLS
+明确报 unsupported，避免外部 TLS helper 绕过 relay。
+native backend
+实现 network client/server 和双向 TCP proxy。TRAMP 与 tramp-rpc 可以通过所选
+SSH pipeline 建立 `-L`/`-R` forward，再实现 target 侧 network client/stream、
+远端 listener 与显式双向 port forward。远端 listener 仍返回原生 Emacs server
+process；其物理 socket 是本机 relay，但 `process-contact` 的 host/service 与
+`remote-channel-endpoint` 暴露 target listener 身份，避免把 relay 端口泄漏给
+原生消费者。动态 `-R` 端口从 OpenSSH 确认信息中取得；建立超时、失败诊断和关闭
+清理均由 channel/backend 边界负责。native proxy 在 outbound peer 配对完成前
+缓存已经到达的数据，避免连接刚建立时静默丢失首包。
 
 ## 7. Workspace、service 与 terminal
 
@@ -322,6 +392,8 @@ channel，并在关闭时按生命周期释放资源：
 service 是可选的 target-side tool 生命周期契约，支持 probe、trust-gated
 provision、start/live/stop；它不是强制常驻的 VS Code Server。Eglot、direnv
 等普通消费者仍优先直接使用 process/environment API。
+target-scoped service 在强制恢复时原位替换 handle 并保留 instance identity 与
+引用计数；多个 workspace 不会各自留下一个已停止的旧 instance。
 
 `remote-terminal-open` 提供内建 comint frontend；`remote-terminal-adopt` 让
 vterm 等 native frontend 保留自己的 module、filter、sentinel 与 UI，同时把
@@ -341,9 +413,11 @@ transport 断线时不会重放 shell 历史；vterm 保留为 disconnected buff
 执行 `remote-terminal-restart` 会按原目录和 frontend 新建一个 vterm。
 
 transport failure 会把相关 workspace 标记为 disconnected，并按 1、2、4 秒进行
-自动恢复。environment、service、forward、watch 和 LSP 等登记了 recovery
-function 的资源会在 session 恢复后重建。PTY shell 不安全重放，因此 terminal
-只标记为 disconnected，并要求显式 `remote-terminal-restart`。
+自动恢复。任何显式登记了 recovery function 的资源都会在 session 恢复后重建；
+框架目前自动登记 service 与 workspace-owned forward。watch 和 LSP consumer
+仍需接入 workspace resource owner，不能仅凭 capability symbol 宣称已恢复。
+PTY shell 不安全重放，因此 terminal 只标记为 disconnected，并要求显式
+`remote-terminal-restart`。
 
 `M-x remote-doctor` 从 target → pipeline stage → backend → route → session →
 workspace/resource 输出诊断；加前缀参数会实际连接并运行 `uname -s`。
@@ -378,6 +452,10 @@ workspace/resource 输出诊断；加前缀参数会实际连接并运行 `uname
 }
 ```
 
+配置重载先在隔离 registry 中完成解析、合并和冲突校验，再一次性提交。失败的
+JSON、schema 或 pipeline 注册不会清空当前 target/session；成功提交只关闭发生
+变化或被移除 pipeline 的 session/runtime。
+
 ## 9. 模块边界
 
 ```text
@@ -409,16 +487,19 @@ Aaronnote 等消费者留在框架外，只调用公共 API。
 make remote-test
 make remote-e2e
 REMOTE_E2E_TARGET=Aaron-Pi make remote-e2e
+emacs --batch --init-directory=. -q -l early-init.el -l init.el \
+  -l test/init-git-core-tests.el -f ert-run-tests-batch-and-exit
 ```
 
 SSH E2E 是显式 opt-in，自动选择 SSH config 导入的 `Aaron-*` target，也可以通过
 `REMOTE_E2E_TARGET` 指定。它只在本地和 target 的 `/tmp` 创建随机目录，并在结束
-时清理；覆盖文件复制/读取/枚举、target cwd 进程和 session 复用。
+时清理；覆盖文件复制/读取/枚举、target cwd 进程、session 复用，以及动态 SSH
+`-R` listener 从 target 到原生 Emacs server process 的数据往返。
 
 当前 v1 稳定目标是 native + SSH：逻辑文件、同步/异步进程、PTY、环境、SSH
-forward、workspace/service 生命周期和原生开发工具兼容。WSL/container/
-devcontainer、Dape/tasks 编排、reverse/dynamic forward、remote listener 与
-托管 tunnel 不在这个版本承诺范围内。
+双向 forward、workspace/service 生命周期和原生开发工具兼容。WSL/container/
+devcontainer、Dape/tasks 编排、动态 SOCKS forward 与托管 tunnel 不在这个版本
+承诺范围内。
 
 ## 11. 当前完成度
 
@@ -428,19 +509,18 @@ devcontainer、Dape/tasks 编排、reverse/dynamic forward、remote listener 与
 | 原生文件 API 的 `/fs:` scoped handler | 已建立可扩展操作契约与未知操作保守策略 |
 | target/pipeline/backend/route 分层 | 已建立；pipeline 为真实类型，旧 link API 保留兼容 |
 | session 池、健康与失效 | 已建立 |
-| backend 执行准备契约 | 已建立；sync/async/官方进程边界均已接入 |
+| backend 执行准备契约 | 已建立；sync/async/process plan/stdio bridge 均由 backend 分派 |
 | native socket client/server | 已建立 |
-| TRAMP/RPC network client 与 SSH port forward | 已建立；remote listener 尚缺 |
+| TRAMP/RPC network client、remote listener 与 SSH 双向 port forward | 已通过 native 回环、命令测试和 SSH `-R` 真机数据往返；断线恢复故障注入待补 |
 | pipeline stage 的实际逐段建连 | executor/runtime 已建立；内建 overlay/hop 主要负责 endpoint 变换 |
-| workspace/service/channel/terminal 生命周期 | 已建立；自动资源恢复，terminal 手动重启 |
+| workspace/service/channel/terminal 生命周期 | 基础已建立；service/forward 自动恢复，watch/LSP consumer 尚未全部登记，terminal 手动重启 |
 | Remote Doctor | 已建立结构化报告与可选 target probe |
 | SSH 真机回归 | `make remote-e2e`，只使用随机临时目录 |
 | WSL2 direnv + C clangd + Python pylsp | 已真实验证走远程环境与 tramp-rpc |
 | Eglot/lsp-mode 统一 target placement | 已建立 `language-server` adapter |
-| Lean Node proxy + Lake | 已接入可信 target 部署、远端 Node/Lake 与本地端口转发；待目标恢复在线后完成真机回归 |
+| Lean Node proxy + Lake | client Node proxy 与 target Lake 通过 backend stdio bridge 组合；待目标恢复在线后完成真机回归 |
 | watch、multi-hop、断线恢复等长期回归 | 尚需继续补齐 |
 
 当前已经可用于文件、环境、进程、LSP、terminal 和部分 channel 工作流。下一阶段
-优先完善 managed FRP/tunnel stage、reverse-forward/remote listener、watch
-一致性和断线重连；消费者继续只做环境或工具逻辑，不承担物理路径、spawn 形式和
-连接生命周期。
+优先完善 managed FRP/tunnel stage、SSH `-R` 长期真机回归、watch 一致性和断线
+重连；消费者继续只做环境或工具逻辑，不承担物理路径、spawn 形式和连接生命周期。

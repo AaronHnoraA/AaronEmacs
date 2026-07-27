@@ -314,7 +314,16 @@ from resuming."
 BUFFER receives the resulting environment.  CALLBACK, when non-nil, receives
 two arguments: the environment and an error."
   (direnv--queue-export-waiter root buffer callback)
-  (unless (direnv--export-active-p root)
+  (if-let* ((recent-error
+             (direnv--recent-export-failure root fingerprint)))
+      (progn
+        ;; Keep the retry guard at the process-creation boundary as well as in
+        ;; `direnv-environment-ensure-async'.  Automatic buffer refreshes call
+        ;; this function directly, and must not bypass the same backoff.
+        (setq direnv--last-error recent-error)
+        (direnv--finish-export-waiters root context recent-error)
+        nil)
+    (unless (direnv--export-active-p root)
     (let ((remote-environment-inhibit t)
           process)
       ;; Claim ROOT before process creation.  TRAMP startup can run timers and
@@ -388,7 +397,7 @@ two arguments: the environment and an error."
          (direnv--record-export-failure
           root fingerprint startup-error)
          (direnv--finish-export-waiters root context startup-error)
-         (signal (car startup-error) (cdr startup-error)))))))
+         (signal (car startup-error) (cdr startup-error))))))))
 
 (defun direnv-environment-ensure-async
     (&optional path callback)
@@ -404,7 +413,22 @@ only for a pending request, in the requesting buffer."
        (lambda (target target-path done)
          (when (buffer-live-p target)
            (with-current-buffer target
-             (direnv-environment-ensure-async target-path done))))
+             (let ((state
+                    (direnv-environment-ensure-async target-path done)))
+               ;; The outer request already returned `pending'.  A retry can
+               ;; find that another refresh populated the cache and return
+               ;; `ready' without scheduling its own callback.  Complete the
+               ;; original promise here or callers such as Lean remain stuck
+               ;; forever in their "waiting for direnv" state.
+               (when (and done (eq state 'ready))
+                 (condition-case callback-error
+                     (funcall done remote-buffer-environment nil)
+                   (error
+                    (remote-log
+                     'direnv-callback-error
+                     :path target-path
+                     :error
+                     (error-message-string callback-error)))))))))
        buffer path callback)
       'pending)
      (t

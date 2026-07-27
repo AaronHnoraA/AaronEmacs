@@ -61,6 +61,7 @@
              remote-uri-to-file-name
              remote-file-name-target
              remote-file-local-name
+             remote-client-file-name
              remote-project-file-name
              remote-file-equal-p
              remote-register-link-plugin
@@ -80,10 +81,12 @@
              remote-context
              remote-resolve
              remote-make-process
+             remote-make-client-process
              remote-process-file
              remote-exec
              remote-exec-async
              remote-executable-find
+             remote-local-bridge-command
              remote-environment-ensure
              remote-environment-derive
              remote-register-environment-maintainer
@@ -97,6 +100,112 @@
              remote-port-forward))
     (should (fboundp function)))
   (should (macrop 'remote-with-route)))
+
+(ert-deftest remote-local-target-exposes-native-unhandled-directory ()
+  (let* ((native (file-name-as-directory temporary-file-directory))
+         (logical (remote-make-file-name "local" native)))
+    (should
+     (equal (unhandled-file-name-directory logical) native))
+    (with-temp-buffer
+      (let ((default-directory logical))
+        (should (zerop (call-process "pwd" nil t nil)))
+        (should
+         (equal
+          (file-name-as-directory (string-trim (buffer-string)))
+          native))))))
+
+(ert-deftest remote-client-file-name-is-a-backend-placement-query ()
+  (remote-test-with-registry
+    (remote-register-adapter
+     "emacs-file" :capabilities '(metadata)
+     :preferences '((default . ("native" "isolated-files"))))
+    (let* ((native (file-name-as-directory temporary-file-directory))
+           (logical (remote-make-file-name "local" native)))
+      (should (equal (remote-client-file-name logical) native)))
+    (remote-register-backend
+     "isolated-files"
+     :capabilities '(metadata)
+     :project (lambda (_file _pipeline _route) "/isolated/"))
+    (remote-register-target "isolated" :trusted t)
+    (remote-register-pipeline
+     "isolated" "only" "isolated-files"
+     :config '(:transport "direct"))
+    (should-not
+     (remote-client-file-name "/fs:isolated:/work/a.el"))))
+
+(ert-deftest remote-environment-overrides-augment-resolved-capsule ()
+  (should
+   (equal
+    (remote--merge-environment-overrides
+     '(("BASE" . "yes") ("PATH" . "/resolved/bin"))
+     '(("PATH" . "/explicit/bin") ("EXTRA" . "ok")))
+    '(("BASE" . "yes")
+      ("PATH" . "/explicit/bin")
+      ("EXTRA" . "ok")))))
+
+(ert-deftest remote-local-bridge-command-keeps-local-as-a-target ()
+  (remote-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local"
+             :localname temporary-file-directory
+             :workspace-root
+             (remote-make-file-name
+              "local" temporary-file-directory)))
+           (command
+            (remote-local-bridge-command
+             "sh" :args '("-c" "printf ok")
+             :context context
+             :environment '(("BRIDGE_TEST" . "yes")))))
+      (should (equal (seq-take command 2) '("/bin/sh" "-c")))
+      (should
+       (string-match-p
+        (regexp-quote
+         (concat "cd -- "
+                 (shell-quote-argument temporary-file-directory)))
+        (nth 2 command)))
+      (should
+       (string-match-p
+        (regexp-quote (shell-quote-argument "BRIDGE_TEST=yes"))
+        (nth 2 command)))
+      (should (string-match-p "sh -c" (nth 2 command)))
+      (should
+       (string-match-p
+        (regexp-quote (shell-quote-argument "printf ok"))
+        (nth 2 command))))))
+
+(ert-deftest remote-make-client-process-escapes-a-logical-target-buffer ()
+  (let* ((buffer (generate-new-buffer " *remote-client-process*"))
+         (default-directory
+          (remote-make-file-name "local" temporary-file-directory))
+         (remote--buffer-base-process-environment
+          (cons "REMOTE_CLIENT_TEST=client"
+                (default-value 'process-environment)))
+         (remote--buffer-base-exec-path (default-value 'exec-path))
+         process)
+    (unwind-protect
+        (progn
+          (setq process
+                (remote-make-client-process
+                 :name "remote-client-process"
+                 :buffer buffer
+                 :command
+                 '("/bin/sh" "-c"
+                   "printf '%s|%s' \"$REMOTE_CLIENT_TEST\" \"$PWD\"")
+                 :noquery t))
+          (while (process-live-p process)
+            (accept-process-output process 0.1))
+          (should (= (process-exit-status process) 0))
+          (should
+           (string-prefix-p
+            (concat "client|"
+                    (directory-file-name temporary-file-directory))
+            (with-current-buffer buffer (buffer-string))))
+          (should-not (process-get process 'remote-route)))
+      (when (and (processp process) (process-live-p process))
+        (delete-process process))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
 
 (ert-deftest remote-emacs-file-adapter-supports-environment-operations ()
   "File-name handlers may receive `exec-path' while visiting a file.
@@ -164,6 +273,131 @@ the default file adapter must route it without aborting later hooks."
         (should (= opens 1))
         (should (= (remote-connection-use-count second) 2))
         (should (= (length (remote-connection-pool-status)) 1))))))
+
+(ert-deftest remote-connection-reentrant-open-keeps-one-session-reference ()
+  (remote-test-with-registry
+    (let (context route nested-error reentered)
+      (let ((attempts 0)
+            (disconnects 0))
+        (remote-register-link-plugin
+         "reentrant"
+         :capabilities '(process-sync)
+         :project-file-name (lambda (_file _link _route) "/reentrant/")
+         :connect
+         (lambda (_route _context)
+           (cl-incf attempts)
+           (unless reentered
+             (setq reentered t)
+             (condition-case error
+                 (remote-connection-ensure route context)
+               (error (setq nested-error error))))
+           'handle)
+         :connection-live-p
+         (lambda (_connection _route _context) t)
+         :disconnect
+         (lambda (_connection _route)
+           (cl-incf disconnects)))
+        (remote-register-target "lab" :trusted t)
+        (remote-register-link "lab" "ssh" "reentrant")
+        (remote-register-adapter
+         "test" :capabilities '(process-sync)
+         :preferences '((default . ("reentrant"))))
+        (setq
+         context
+         (remote-context-create
+          :target-id "lab" :localname "/work/a"
+          :workspace-root "/fs:lab:/work/")
+         route (remote-resolve "test" 'process-sync context))
+        (let* ((session (remote-connection-ensure route context))
+               (runtime
+                (remote-connection-pipeline-runtime session)))
+          (should (= attempts 1))
+          (should (eq (car nested-error) 'remote-connection-busy))
+          (should (= (hash-table-count remote-connection-pool) 1))
+          (should (= (remote-pipeline-runtime-use-count runtime) 1))
+          (remote-connection-pool-clear t)
+          (should (= disconnects 1))
+          (should (zerop (hash-table-count remote-connection-pool)))
+          (should
+           (zerop (hash-table-count remote-pipeline-runtime-pool))))))))
+
+(ert-deftest remote-connection-cancelled-during-open-does-not-resurrect ()
+  (remote-test-with-registry
+    (let (context route disconnected-handles)
+      (remote-register-link-plugin
+       "cancelled"
+       :capabilities '(process-sync)
+       :project-file-name (lambda (_file _link _route) "/cancelled/")
+       :connect
+       (lambda (_route _context)
+         (remote-connection-invalidate route t 'test-cancel)
+         'opened-handle)
+       :disconnect
+       (lambda (connection _route)
+         (push (remote-connection-handle connection)
+               disconnected-handles)))
+      (remote-register-target "lab" :trusted t)
+      (remote-register-link "lab" "ssh" "cancelled")
+      (remote-register-adapter
+       "test" :capabilities '(process-sync)
+       :preferences '((default . ("cancelled"))))
+      (setq
+       context
+       (remote-context-create
+        :target-id "lab" :localname "/work/a"
+        :workspace-root "/fs:lab:/work/")
+       route (remote-resolve "test" 'process-sync context))
+      (should-error
+       (remote-connection-ensure route context)
+       :type 'remote-connection-cancelled)
+      (should (equal disconnected-handles '(opened-handle)))
+      (should (zerop (hash-table-count remote-connection-pool)))
+      (should (zerop (hash-table-count remote-pipeline-runtime-pool))))))
+
+(ert-deftest remote-connection-cancelled-during-transport-open-releases-runtime ()
+  "Cancellation before backend startup must release the acquired pipeline.
+The session cannot publish its runtime until a yielding transport CONNECT
+returns, so this covers a different ownership window from backend cancellation."
+  (remote-test-with-registry
+    (let (context route backend-opened)
+      (remote-register-transport
+       "cancel-session-transport"
+       :connect
+       (lambda (_stage _endpoint _runtime)
+         (remote-connection-invalidate route t 'transport-cancel)
+         'transport-handle)
+       :disconnect (lambda (_stage-runtime _runtime) nil))
+      (remote-register-link-plugin
+       "transport-cancelled"
+       :capabilities '(process-sync)
+       :project-file-name
+       (lambda (_file _link _route) "/transport-cancelled/")
+       :connect
+       (lambda (_route _context)
+         (setq backend-opened t)
+         'backend-handle))
+      (remote-register-target "lab" :trusted t)
+      (remote-register-pipeline
+       "lab" "cancelled" "transport-cancelled"
+       :stages
+       '((:id "yielding"
+          :transport "cancel-session-transport"
+          :config (:host "lab"))))
+      (remote-register-adapter
+       "test" :capabilities '(process-sync)
+       :preferences '((default . ("transport-cancelled"))))
+      (setq
+       context
+       (remote-context-create
+        :target-id "lab" :localname "/work/a"
+        :workspace-root "/fs:lab:/work/")
+       route (remote-resolve "test" 'process-sync context))
+      (should-error
+       (remote-connection-ensure route context)
+       :type 'remote-connection-cancelled)
+      (should-not backend-opened)
+      (should (zerop (hash-table-count remote-connection-pool)))
+      (should (zerop (hash-table-count remote-pipeline-runtime-pool))))))
 
 (ert-deftest remote-connection-open-has-framework-deadline ()
   (remote-test-with-registry
@@ -393,6 +627,50 @@ the default file adapter must route it without aborting later hooks."
           (should (equal scheduled
                          (list (current-buffer)
                                direnv-transport-busy-retry-delay))))))))
+
+(ert-deftest remote-direnv-busy-retry-completes-a-pending-ready-request ()
+  "A busy retry which hits the cache must fulfill the original callback."
+  (with-temp-buffer
+    (let ((busy t)
+          scheduled
+          delivered
+          (environment 'cached-environment)
+          (context
+           (remote-context-create
+            :target-id "local"
+            :localname "/tmp/project/"
+            :workspace-root "/fs:local:/tmp/project/")))
+      (cl-letf
+          (((symbol-function 'direnv--transport-busy-p)
+            (lambda () busy))
+           ((symbol-function 'run-with-idle-timer)
+            (lambda (_delay _repeat function &rest arguments)
+              (setq scheduled
+                    (lambda () (apply function arguments)))
+              'mock-timer))
+           ((symbol-function 'direnv--envrc-root)
+            (lambda (&optional _path) "/fs:local:/tmp/project/"))
+           ((symbol-function 'remote-context)
+            (lambda (&optional _path) context))
+           ((symbol-function 'direnv--fingerprint)
+            (lambda (_context) '(fingerprint)))
+           ((symbol-function 'direnv--cached-export)
+            (lambda (_root _fingerprint) 'cached))
+           ((symbol-function 'remote-environment-ensure)
+            (lambda (&optional _context _force)
+              (setq remote-buffer-environment environment)
+              environment)))
+        (should
+         (eq
+          (direnv-environment-ensure-async
+           nil
+           (lambda (result error)
+             (setq delivered (list result error))))
+          'pending))
+        (should scheduled)
+        (setq busy nil)
+        (funcall scheduled)
+        (should (equal delivered (list environment nil)))))))
 
 (ert-deftest remote-direnv-contains-discovery-errors-inside-timer ()
   (remote-test-with-registry
@@ -705,6 +983,53 @@ the default file adapter must route it without aborting later hooks."
         (when (file-exists-p native) (delete-file native))
         (when (file-directory-p root) (delete-directory root))))))
 
+(ert-deftest remote-directory-enumeration-preserves-dot-entry-contract ()
+  "FULL directory results must retain literal `.' and `..' entries.
+Normalizing those suffixes turns them into visible parent/current directory
+names in tree consumers such as Treemacs."
+  (remote-test-with-registry
+    (let* ((root (make-temp-file "remote-directory-" t))
+           (child (expand-file-name "child" root))
+           (logical
+            (file-name-as-directory
+             (remote-canonicalize-file-name root)))
+           (logical-dot (concat logical "."))
+           (logical-dot-dot (concat logical "..")))
+      (unwind-protect
+          (progn
+            (make-directory child)
+            (let ((entries (directory-files logical t nil t)))
+              (should (member logical-dot entries))
+              (should (member logical-dot-dot entries))
+              (should (equal (directory-file-name logical-dot)
+                             logical-dot))
+              (should (equal (directory-file-name logical-dot-dot)
+                             logical-dot-dot))
+              (should (equal (file-name-nondirectory logical-dot) "."))
+              (should (equal (file-name-nondirectory logical-dot-dot) ".."))
+              (should
+               (equal
+                (sort (mapcar #'file-name-nondirectory entries)
+                      #'string-lessp)
+                '("." ".." "child"))))
+            (let ((entries
+                   (directory-files-and-attributes logical t nil t)))
+              (should (assoc logical-dot entries))
+              (should (assoc logical-dot-dot entries))
+              (should
+               (equal
+                (sort
+                 (mapcar
+                  (lambda (entry)
+                    (file-name-nondirectory (car entry)))
+                  entries)
+                 #'string-lessp)
+                '("." ".." "child")))))
+        (when (file-directory-p child)
+          (delete-directory child))
+        (when (file-directory-p root)
+          (delete-directory root))))))
+
 (ert-deftest remote-fs-install-restores-the-outer-tramp-dispatcher ()
   (remote-test-with-registry
     ;; Reproduce daemon/reload startup with TRAMP already loaded but its
@@ -729,6 +1054,43 @@ the default file adapter must route it without aborting later hooks."
         (should (equal (buffer-string) "routed")))
       (should (file-name-absolute-p
                (remote-executable-find "sh"))))))
+
+(ert-deftest remote-process-file-projects-logical-file-arguments ()
+  "INFILE and stderr paths follow the route just like default-directory."
+  (remote-test-with-registry
+    (remote-register-adapter
+     "emacs-file"
+     :capabilities '(metadata)
+     :preferences '((default . ("native"))))
+    (let* ((input (make-temp-file "remote-process-input-"))
+           (stderr (make-temp-file "remote-process-stderr-"))
+           (logical-input (remote-canonicalize-file-name input))
+           (logical-stderr (remote-canonicalize-file-name stderr))
+           (default-directory
+            (remote-canonicalize-file-name temporary-file-directory)))
+      (unwind-protect
+          (progn
+            (with-temp-file input (insert "logical-input"))
+            (with-temp-buffer
+              (should
+               (zerop
+                (remote-process-file
+                 "cat" logical-input t nil)))
+              (should (equal (buffer-string) "logical-input")))
+            (should
+             (zerop
+              (remote-process-file
+               "sh" nil (list nil logical-stderr) nil
+               "-c" "printf logical-stderr >&2")))
+            (should
+             (equal
+              (with-temp-buffer
+                (insert-file-contents stderr)
+                (buffer-string))
+              "logical-stderr")))
+        (dolist (file (list input stderr))
+          (when (file-exists-p file)
+            (delete-file file)))))))
 
 (ert-deftest remote-exec-returns-structured-route-result ()
   (remote-test-with-registry
@@ -808,6 +1170,9 @@ the default file adapter must route it without aborting later hooks."
              (lambda (_route _context command _environment directory
                               &optional _logical-directory)
                 (remote-backend-execution-create
+                 :route route
+                 :context context
+                 :logical-directory "/fs:box:/tmp/"
                  :physical-directory directory
                  :command command)))
              ((symbol-function
@@ -837,6 +1202,62 @@ the default file adapter must route it without aborting later hooks."
         (kill-buffer stdout))
       (when (buffer-live-p stderr)
         (kill-buffer stderr)))))
+
+(ert-deftest remote-tramp-rpc-process-frames-a-process-stderr-destination ()
+  "tramp-rpc must not silently merge native `:stderr PROCESS' into stdout."
+  (let* ((route
+          (remote-route-create
+           :target-id "box"
+           :pipeline-id "box/ssh"
+           :backend-id "tramp-rpc"
+           :capability 'process-async
+           :adapter-id "exec"))
+         (context
+          (remote-context-create
+           :target-id "box"
+           :localname "/tmp/"
+           :workspace-root "/fs:box:/tmp/"))
+         (process
+          (make-pipe-process
+           :name "remote-test-rpc-stderr" :noquery t))
+         (stderr-process
+          (make-pipe-process
+           :name "remote-test-rpc-stderr-destination" :noquery t))
+         captured)
+    (unwind-protect
+        (cl-letf
+            (((symbol-function 'remote--call-with-process-route)
+              (lambda (_adapter _capability _context _constraints function)
+                (funcall function route temporary-file-directory nil)))
+             ((symbol-function 'remote--prepare-backend-execution)
+              (lambda (_route _context command _environment directory
+                               &optional logical-directory)
+                (remote-backend-execution-create
+                 :logical-directory logical-directory
+                 :physical-directory directory
+                 :command command)))
+             ((symbol-function 'executable-find)
+              (lambda (_program &optional _remote) "/bin/direnv"))
+             ((symbol-function 'make-process)
+              (lambda (&rest arguments)
+                (setq captured arguments)
+                process)))
+          (remote-make-process
+           :name "remote-test-rpc-stderr"
+           :stderr stderr-process
+           :command '("direnv" "export" "json")
+           :remote-context context
+           :remote-stderr-token "rpc-token")
+          (should-not (plist-member captured :stderr))
+          (should
+           (equal (seq-take (plist-get captured :command) 2)
+                  '("/bin/sh" "-c")))
+          (should (equal (process-get process 'remote-stderr-token)
+                         "rpc-token"))
+          (should-not (process-get process 'remote-direct-ssh)))
+      (dolist (candidate (list process stderr-process))
+        (when (process-live-p candidate)
+          (delete-process candidate))))))
 
 (ert-deftest remote-direnv-starting-sentinel-coalesces-nested-refresh ()
   (let ((direnv--export-processes (make-hash-table :test #'equal))
@@ -890,6 +1311,38 @@ the default file adapter must route it without aborting later hooks."
         (should (equal direnv--last-error failure))
         (should (zerop starts))))))
 
+(ert-deftest remote-direnv-direct-refresh-honors-export-failure-backoff ()
+  "Automatic buffer refreshes must not bypass the export retry guard."
+  (let* ((direnv--export-failures (make-hash-table :test #'equal))
+         (direnv--export-processes (make-hash-table :test #'equal))
+         (direnv--export-waiters (make-hash-table :test #'equal))
+         (direnv-export-failure-retry-delay 60)
+         (root "/fs:local:/tmp/project/")
+         (fingerprint '(fingerprint))
+         (failure '(error "broken export"))
+         (context
+          (remote-context-create
+           :target-id "local"
+           :localname "/tmp/project/"
+           :workspace-root root))
+         (starts 0)
+         delivered)
+    (direnv--record-export-failure root fingerprint failure)
+    (cl-letf (((symbol-function 'remote-exec-async)
+               (lambda (&rest _arguments)
+                 (cl-incf starts)))
+              ((symbol-function 'direnv--finish-export-waiters)
+               (lambda (finished-root finished-context &optional error)
+                 (setq delivered
+                       (list finished-root finished-context error)))))
+      (with-temp-buffer
+        (should-not
+         (direnv--start-export
+          context root fingerprint (current-buffer)))
+        (should (zerop starts))
+        (should (equal delivered (list root context failure)))
+        (should (equal direnv--last-error failure))))))
+
 (ert-deftest remote-direnv-detects-locked-tramp-connection ()
   (let ((process
          (make-pipe-process
@@ -923,6 +1376,35 @@ the default file adapter must route it without aborting later hooks."
       (should (zerop (remote-exec-result-status result)))
       (should (equal (remote-exec-result-stdout result) "output"))
       (should (equal (remote-exec-result-stderr result) "error")))))
+
+(ert-deftest remote-exec-async-cleans-captures-when-stderr-pipe-startup-fails ()
+  (remote-test-with-registry
+    (let ((before
+           (seq-filter
+            (lambda (buffer)
+              (string-match-p
+               "\\` \\*remote-exec-async-\\(?:stdout\\|stderr\\)\\*"
+               (buffer-name buffer)))
+            (buffer-list))))
+      (cl-letf (((symbol-function 'make-pipe-process)
+                 (lambda (&rest _arguments)
+                   (error "pipe startup failed"))))
+        (should-error
+         (remote-exec-async
+          "sh"
+          :args '("-c" "true")
+          :context
+          (remote-context
+           (remote-canonicalize-file-name temporary-file-directory)))))
+      (should
+       (equal
+        before
+        (seq-filter
+         (lambda (buffer)
+           (string-match-p
+            "\\` \\*remote-exec-async-\\(?:stdout\\|stderr\\)\\*"
+            (buffer-name buffer)))
+         (buffer-list)))))))
 
 (ert-deftest remote-exec-async-contains-callback-errors-and-cleans-buffers ()
   (remote-test-with-registry

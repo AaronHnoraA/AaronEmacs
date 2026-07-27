@@ -19,6 +19,10 @@
 (define-error 'remote-connection-timeout
               "Remote connection establishment timed out"
               'remote-transport-error)
+(define-error 'remote-connection-busy
+              "Remote connection establishment is already in progress")
+(define-error 'remote-connection-cancelled
+              "Remote connection establishment was cancelled")
 
 (defcustom remote-connection-open-timeout 8
   "Maximum seconds allowed to establish a pooled backend connection.
@@ -116,6 +120,16 @@ session is acquired."
        (gethash (remote-connection-route-key route)
                 remote-connection-pool)))
 
+(defun remote-connection--take-pipeline-runtime (connection)
+  "Detach and return CONNECTION's owned pipeline runtime.
+Taking ownership before releasing the runtime makes cancellation idempotent:
+an opener and an invalidator may both resume after the same event-loop yield,
+but only one of them can observe a non-nil owned reference."
+  (when (remote-connection-p connection)
+    (prog1
+        (remote-connection-pipeline-runtime connection)
+      (setf (remote-connection-pipeline-runtime connection) nil))))
+
 (defun remote-connection--live-p (connection route context)
   "Return whether CONNECTION remains usable for ROUTE and CONTEXT."
   (and
@@ -170,19 +184,38 @@ requests only validate and reuse the retained session."
            (t (remote-context))))
          (key (remote-connection-route-key route))
          (existing (gethash key remote-connection-pool)))
-    (if (and existing
-             (remote-connection--live-p existing route context))
-        (progn
-          (setf (remote-session-last-used-at existing) (current-time)
-                (remote-session-use-count existing)
-                (1+ (remote-session-use-count existing)))
-          (remote-log
-           'connection-reuse
-           :target (remote-route-target-id route)
-           :link (remote-route-link-id route)
-           :plugin (remote-route-link-plugin-id route)
-           :uses (remote-connection-use-count existing))
-          existing)
+    (cond
+     ((and existing
+           (eq (remote-connection-state existing) 'opening))
+      ;; Backend connection functions may run timers and package hooks.
+      ;; Returning the half-built session lets a nested operation use a nil
+      ;; handle; opening a replacement leaks the first handle and one shared
+      ;; pipeline reference.  Fail explicitly so the caller can defer.
+      (remote-log
+       'connection-busy
+       :target (remote-route-target-id route)
+       :link (remote-route-link-id route)
+       :plugin (remote-route-link-plugin-id route))
+      (signal
+       'remote-connection-busy
+       (list
+        (format "Connection to %s via %s/%s is already opening"
+                (remote-route-target-id route)
+                (remote-route-link-id route)
+                (remote-route-link-plugin-id route)))))
+     ((and existing
+           (remote-connection--live-p existing route context))
+      (setf (remote-session-last-used-at existing) (current-time)
+            (remote-session-use-count existing)
+            (1+ (remote-session-use-count existing)))
+      (remote-log
+       'connection-reuse
+       :target (remote-route-target-id route)
+       :link (remote-route-link-id route)
+       :plugin (remote-route-link-plugin-id route)
+       :uses (remote-connection-use-count existing))
+      existing)
+     (t
       (when existing
         (remhash key remote-connection-pool)
         (let* ((plugin (remote-route-plugin route))
@@ -195,45 +228,125 @@ requests only validate and reuse the retained session."
         (remote-pipeline-release
          (remote-connection-pipeline-runtime existing)
          nil 'stale))
-      (let* ((pipeline-runtime
-              (remote-pipeline-acquire route context))
-             (plugin (remote-route-plugin route))
-             (opener (and plugin
-                          (remote-link-plugin-connect plugin)))
-             (opened-at (current-time))
-             (handle
-              (condition-case err
-                  (remote-connection--open-backend
-                   opener route context pipeline-runtime)
-                (error
-                 (remote-pipeline-release
-                  pipeline-runtime nil err)
-                 (remote-log
-                  'connection-error
-                  :target (remote-route-target-id route)
-                  :link (remote-route-link-id route)
-                  :plugin (remote-route-link-plugin-id route)
-                  :error (error-message-string err))
-                 (signal (car err) (cdr err)))))
+      (let* ((opened-at (current-time))
              (connection
-              (remote-connection-create
+             (remote-connection-create
                :key key
                :target-id (remote-route-target-id route)
                :link-id (remote-route-link-id route)
                :plugin-id (remote-route-link-plugin-id route)
-               :pipeline-runtime pipeline-runtime
-               :handle handle
-               :state 'open
+               :state 'opening
                :opened-at opened-at
                :last-used-at opened-at
-               :use-count 1)))
+               :use-count 0))
+             pipeline-runtime
+             plugin
+             closer
+             handle
+             backend-opened
+             pending-runtime)
+        ;; Claim the key before either transport or backend startup.  Both
+        ;; boundaries can yield to Emacs and re-enter this function.
         (puthash key connection remote-connection-pool)
-        (remote-log
-         'connection-open
-         :target (remote-route-target-id route)
-         :link (remote-route-link-id route)
-         :plugin (remote-route-link-plugin-id route))
-        connection))))
+        (condition-case err
+            (progn
+              ;; The acquire result belongs to this stack frame until it is
+              ;; installed on the session.  Invalidation can run while a
+              ;; transport stage is opening, before the session has any
+              ;; runtime to release.
+              (setq pending-runtime
+                    (remote-pipeline-acquire route context))
+              (unless
+                  (and
+                   (eq (gethash key remote-connection-pool) connection)
+                   (eq (remote-connection-state connection) 'opening))
+                (remote-pipeline-release
+                 pending-runtime nil 'connection-opening-cancelled)
+                (setq pending-runtime nil)
+                (signal
+                 'remote-connection-cancelled
+                 (list
+                  (format "Connection to %s via %s/%s was cancelled"
+                          (remote-route-target-id route)
+                          (remote-route-link-id route)
+                          (remote-route-link-plugin-id route)))))
+              (setf
+               (remote-connection-pipeline-runtime connection)
+               pending-runtime)
+              ;; Ownership has moved to CONNECTION.  Every later cleanup path
+              ;; takes the field before releasing it.
+              (setq pipeline-runtime pending-runtime
+                    pending-runtime nil)
+              (setq plugin (remote-route-plugin route)
+                    closer
+                    (and plugin
+                         (remote-link-plugin-disconnect plugin))
+                    handle
+                    (remote-connection--open-backend
+                     (and plugin
+                          (remote-link-plugin-connect plugin))
+                     route context pipeline-runtime)
+                    backend-opened t)
+              (setf (remote-connection-handle connection) handle)
+              ;; Pool clear, config reload, or explicit invalidation can run
+              ;; while the opener yields.  A cancelled placeholder must never
+              ;; be resurrected as an unpooled live session.
+              (unless
+                  (and
+                   (eq (gethash key remote-connection-pool) connection)
+                   (eq (remote-connection-state connection) 'opening))
+                (when closer
+                  (ignore-errors
+                    (funcall closer connection route)))
+                (setq backend-opened nil)
+                ;; Invalidation takes this field before releasing it.  If a
+                ;; caller merely replaced the pool entry, the opener still
+                ;; takes and releases the reference here.
+                (when-let* ((owned
+                             (remote-connection--take-pipeline-runtime
+                              connection)))
+                  (remote-pipeline-release
+                   owned nil 'connection-opening-cancelled))
+                (setq pipeline-runtime nil)
+                (signal
+                 'remote-connection-cancelled
+                 (list
+                  (format "Connection to %s via %s/%s was cancelled"
+                          (remote-route-target-id route)
+                          (remote-route-link-id route)
+                          (remote-route-link-plugin-id route)))))
+              (setf
+               (remote-connection-state connection) 'open
+               (remote-connection-last-used-at connection) (current-time)
+               (remote-connection-use-count connection) 1)
+              (remote-log
+               'connection-open
+               :target (remote-route-target-id route)
+               :link (remote-route-link-id route)
+               :plugin (remote-route-link-plugin-id route))
+              connection)
+          (error
+           (when (eq (gethash key remote-connection-pool) connection)
+             (remhash key remote-connection-pool))
+           (when (and backend-opened closer)
+             (ignore-errors
+               (funcall closer connection route)))
+           (setf (remote-connection-state connection) 'failed
+                 (remote-connection-error connection) err)
+           (when pending-runtime
+             (remote-pipeline-release pending-runtime nil err)
+             (setq pending-runtime nil))
+           (when-let* ((owned
+                        (remote-connection--take-pipeline-runtime
+                         connection)))
+             (remote-pipeline-release owned nil err))
+           (remote-log
+            'connection-error
+            :target (remote-route-target-id route)
+            :link (remote-route-link-id route)
+            :plugin (remote-route-link-plugin-id route)
+            :error (error-message-string err))
+           (signal (car err) (cdr err)))))))))
 
 (defalias 'remote-connection-acquire #'remote-connection-ensure)
 
@@ -247,17 +360,23 @@ REASON is recorded for observability."
            (connection (gethash key remote-connection-pool))
            (plugin (remote-route-plugin route))
            (closer (and plugin
-                        (remote-link-plugin-disconnect plugin))))
+                        (remote-link-plugin-disconnect plugin)))
+           (opening
+            (and connection
+                 (eq (remote-connection-state connection) 'opening))))
       (when connection
         (remhash key remote-connection-pool)
-        (setf (remote-session-state connection) 'closed
-              (remote-session-error connection) reason)
-        (when (and disconnect closer)
-          (ignore-errors
-            (funcall closer connection route)))
-        (remote-pipeline-release
-         (remote-connection-pipeline-runtime connection)
-         nil reason)
+        (let ((pipeline-runtime
+               (remote-connection--take-pipeline-runtime connection)))
+          (setf (remote-session-state connection) 'closed
+                (remote-session-error connection) reason)
+        ;; An opener which is currently yielding still owns any handle it
+        ;; returns.  It observes the cancelled placeholder and closes that
+        ;; handle itself; calling a backend closer now would receive nil.
+          (when (and disconnect closer (not opening))
+            (ignore-errors
+              (funcall closer connection route)))
+          (remote-pipeline-release pipeline-runtime nil reason))
         (remote-log
          'connection-close
          :target (remote-route-target-id route)

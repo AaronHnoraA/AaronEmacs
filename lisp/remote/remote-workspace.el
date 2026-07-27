@@ -362,17 +362,62 @@ contract."
   (let* ((workspace
           (or (remote-get-workspace workspace)
               (error "Unknown remote workspace: %S" workspace)))
+         (service-id
+          (if (remote-service-p service)
+              (remote-service-id service)
+            (remote-normalize-id service t)))
+         (owned
+          (seq-find
+           (lambda (known)
+             (and
+              (equal
+               (remote-service-instance-service-id known)
+               service-id)
+              (remote-service-instance-live-p known)))
+           (remote-workspace-services workspace)))
          (instance
-          (remote-service-ensure
-           service workspace
-           :provision provision
-           :force force)))
-    (unless
-        (seq-find
-         (lambda (known)
-           (eq known instance))
-         (remote-workspace-services workspace))
-      (push instance (remote-workspace-services workspace))
+          (cond
+           ;; This workspace already owns its one reference.  FORCE changes
+           ;; the shared handle in place instead of acquiring a duplicate
+           ;; reference or replacing an object held by another workspace.
+           ((and owned force)
+            (remote-service-restart
+             owned workspace
+             :provision provision
+             :reason 'workspace-force))
+           (owned owned)
+           (t
+            (remote-service-ensure
+             service workspace :provision provision :force force))))
+         (resource
+          (seq-find
+           (lambda (known)
+             (and
+              (eq (remote-workspace-resource-kind known) 'service)
+              (when-let* ((value
+                           (remote-workspace-resource-value known)))
+                (and
+                 (remote-service-instance-p value)
+                 (equal
+                  (remote-service-instance-service-id value)
+                  service-id)))))
+           (remote-workspace-resources workspace))))
+    ;; One workspace owns exactly one reference per service ID.  Repeated
+    ;; ensure calls are idempotent; FORCE replaces the resource value instead
+    ;; of leaving a stale resource and an unreleasable extra reference.
+    (setf (remote-workspace-services workspace)
+          (cons
+           instance
+           (seq-remove
+            (lambda (known)
+              (equal
+               (remote-service-instance-service-id known)
+               service-id))
+            (remote-workspace-services workspace))))
+    (if resource
+        (setf (remote-workspace-resource-value resource) instance
+              (remote-workspace-resource-state resource) 'open
+              (remote-workspace-resource-error resource) nil)
       (remote-workspace-register-resource
        workspace 'service instance
        (lambda (value reason)
@@ -382,8 +427,7 @@ contract."
         :recover
         (lambda (_resource owner)
           (remote-service-ensure
-           (remote-service-instance-service-id instance)
-           owner :provision provision :force t)))))
+           service-id owner :provision provision :force t)))))
     instance))
 
 (defun remote-workspace-refresh-environment (workspace &optional force)
