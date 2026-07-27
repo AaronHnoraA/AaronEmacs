@@ -7,7 +7,9 @@
 
 (require 'config)
 
+(require 'cl-lib)
 (require 'init-treemacs-bridge)
+(require 'remote-fs)
 (require 'subr-x)
 
 (eval-when-compile
@@ -29,6 +31,7 @@
 (defvar breadcrumb--ipath-plain-cache)
 (defvar breadcrumb--last-update-tick)
 (defvar breadcrumb-local-mode)
+(defvar bc--ipath-plain-cache)
 (defvar imenu-auto-rescan)
 
 (declare-function project--ensure-read-project-list "project")
@@ -53,6 +56,13 @@
 (defgroup my/project nil
   "Project workflow helpers."
   :group 'convenience)
+
+(remote-register-adapter
+ "treemacs"
+ :capabilities '(file-read directory metadata watch process-sync)
+ :preferences '((default . ("native" "tramp" "tramp-rpc")))
+ :placement 'target
+ :process-class 'background)
 
 (config-defvar my/project-search-paths nil
   "Project discovery roots for Projectile.
@@ -90,12 +100,98 @@ directory string or a cons cell of the form (DIRECTORY . DEPTH)."
 (defun my/project-canonical-path (path)
   "Return PATH in a stable canonical form."
   (when (stringp path)
-    (let* ((expanded (expand-file-name path))
-           (canonical (if (file-remote-p expanded)
-                          expanded
-                        (or (ignore-errors (file-truename expanded))
-                            expanded))))
+    (let* ((logical (remote-canonicalize-file-name path))
+           (client (ignore-errors (remote-client-file-name logical)))
+           (canonical
+            (if client
+                (remote-canonicalize-file-name
+                 (or (ignore-errors (file-truename client)) client))
+              logical)))
       (directory-file-name canonical))))
+
+(defun my/treemacs-project-path (path)
+  "Return PATH in the filesystem namespace Treemacs can consume.
+Treemacs launches native Python/Git helpers for paths it classifies as local,
+so a logical `/fs:local:' spelling must never enter its project model.  A
+client-accessible target uses its client path; otherwise the `treemacs'
+adapter projects the logical path to a standard file-handler path such as
+TRAMP.  The source buffer itself keeps its ordinary logical identity."
+  (when (stringp path)
+    (let* ((logical (remote-canonicalize-file-name path))
+           (client (ignore-errors (remote-client-file-name logical)))
+           (physical
+            (or
+             client
+             (remote-project-file-name
+              logical nil 'directory "treemacs"))))
+      (directory-file-name physical))))
+
+(defun my/treemacs-visit-path (path)
+  "Return the buffer-facing path for a Treemacs model PATH.
+Client-accessible targets retain native Emacs paths.  Target-only physical
+paths are restored to `/fs:' so opening a Treemacs node cannot leak a TRAMP
+pipeline identity into buffer state."
+  (if (not (stringp path))
+      path
+    (let* ((logical (remote-canonicalize-file-name path))
+           (client (ignore-errors (remote-client-file-name logical))))
+      (or client logical))))
+
+(defun my/treemacs-visit-logical-path-a (fn &rest args)
+  "Run Treemacs visit FN with its model paths restored for buffers."
+  (let ((original-find-file (symbol-function 'find-file))
+        (original-find-file-noselect (symbol-function 'find-file-noselect))
+        (original-dired (symbol-function 'dired))
+        (original-get-file-buffer (symbol-function 'get-file-buffer)))
+    (cl-letf
+        (((symbol-function 'find-file)
+          (lambda (file &rest arguments)
+            (apply original-find-file
+                   (my/treemacs-visit-path file) arguments)))
+         ((symbol-function 'find-file-noselect)
+          (lambda (file &rest arguments)
+            (apply original-find-file-noselect
+                   (my/treemacs-visit-path file) arguments)))
+         ((symbol-function 'dired)
+          (lambda (directory &rest arguments)
+            (apply original-dired
+                   (my/treemacs-visit-path directory) arguments)))
+         ((symbol-function 'get-file-buffer)
+          (lambda (file)
+            (funcall original-get-file-buffer
+                     (my/treemacs-visit-path file)))))
+      (apply fn args))))
+
+(defun my/treemacs-normalize-persist-lines-a (lines)
+  "Project persisted Treemacs path LINES before workspace restoration.
+Older revisions persisted logical `/fs:' identities.  Treemacs deliberately
+disables file-name handlers for paths it classifies as local, so
+`/fs:local:' would otherwise be passed literally to native Python/Git
+helpers.  Target-only paths are projected to ordinary TRAMP names, which
+Treemacs already understands as remote.
+
+This advice transforms only Treemacs' in-memory parse input.  Its normal
+persistence pass writes the migrated model atomically through Treemacs'
+existing state owner."
+  (mapcar
+   (lambda (line)
+     (if (and
+          (stringp line)
+          (string-match
+           "\\`\\([[:space:]]*- path ::[[:space:]]*\\)\\(.+\\)\\'"
+           line))
+         (let ((prefix (match-string 1 line))
+               (path (match-string 2 line)))
+           (condition-case err
+               (concat prefix (my/treemacs-project-path path))
+             (error
+              (remote-log
+               'treemacs-persist-path-migration-failed
+               :path path
+               :error (error-message-string err))
+              line)))
+       line))
+   lines))
 
 (defun my/project-root-equal-p (left right)
   "Return non-nil when LEFT and RIGHT refer to the same project root."
@@ -458,7 +554,7 @@ This matches canonically, so symlinked roots are cleaned as well."
     (require 'treemacs-persistence nil t)
     (let* ((project-root (my/project-normalize-root project-root))
            (workspace (treemacs-current-workspace))
-           (path (my/project-canonical-path project-root)))
+           (path (my/treemacs-project-path project-root)))
       (if (seq-some
            (lambda (project)
              (my/project-root-equal-p (treemacs-project->path project) path))
@@ -695,7 +791,12 @@ with generated overviews noisy and can leave stale duplicate tag paths."
 
 (defun my/treemacs-get-imenu-index-a (orig-fn file)
   "Post-process Treemacs imenu index from ORIG-FN for FILE."
-  (let ((index (funcall orig-fn file)))
+  ;; FILE belongs to Treemacs' backend-consumable model and may therefore use
+  ;; `/ssh:'.  Imenu, markers, and source buffers belong to Emacs' logical
+  ;; buffer namespace.  Fetching tags through the model path would create a
+  ;; second buffer for the same file and Treemacs may then kill that temporary
+  ;; buffer after indexing.
+  (let ((index (funcall orig-fn (my/treemacs-visit-path file))))
     (if (my/treemacs-org-imenu-index-p index)
         (my/treemacs-prune-org-imenu-index index)
       index)))
@@ -724,8 +825,28 @@ must not call `cadr' before the Org case has been handled."
          (consp (cdr item))
          (eq 'pdf-outline-imenu-activate-link (cadr item)))
     (with-no-warnings
-      (cons (find-buffer-visiting file)
+      (cons (find-buffer-visiting (my/treemacs-visit-path file))
             (lambda () (apply #'pdf-outline-imenu-activate-link item)))))))
+
+(defun my/breadcrumb-header-line-safely-a (fn &rest args)
+  "Render breadcrumb FN without allowing a stale empty crumb to break redisplay.
+Remote buffer identity changes can invalidate breadcrumb's cached imenu path
+between two redisplay passes.  The package shortens each crumb with
+`substring'; an empty stale crumb otherwise raises `args-out-of-range' from
+the header-line evaluator."
+  (condition-case error
+      (apply fn args)
+    ((args-out-of-range wrong-type-argument)
+     (when (boundp 'breadcrumb--ipath-plain-cache)
+       (setq-local breadcrumb--ipath-plain-cache nil))
+     (when (boundp 'bc--ipath-plain-cache)
+       (setq-local bc--ipath-plain-cache nil))
+     (remote-log
+      'breadcrumb-redisplay-recovered
+      :buffer (buffer-name)
+      :file buffer-file-name
+      :error (error-message-string error))
+     "")))
 
 (defun my/treemacs-flatten-and-sort-imenu-index ()
   "Flatten the current buffer's imenu index and sort it for Treemacs.
@@ -843,9 +964,10 @@ When BUFFER is nil, use the current buffer in the selected window."
            (my/treemacs-source-buffer-p)))))
 
 (defun my/treemacs-find-current-user-project-a (orig-fn &rest args)
-  "Only let source buffers drive Treemacs project following."
+  "Return the current source project in Treemacs' physical namespace."
   (when (my/treemacs-source-buffer-p)
-    (apply orig-fn args)))
+    (when-let* ((root (apply orig-fn args)))
+      (my/treemacs-project-path root))))
 
 (defun my/treemacs-source-file ()
   "Return the real or Aaronnote virtual file for the current buffer."
@@ -859,9 +981,48 @@ When BUFFER is nil, use the current buffer in the selected window."
   "Return the current buffer path Treemacs should follow."
   (cond
    ((my/treemacs-source-file)
-    (my/project-canonical-path (my/treemacs-source-file)))
+    (my/treemacs-project-path (my/treemacs-source-file)))
    ((derived-mode-p 'dired-mode)
-    (my/project-canonical-path default-directory))))
+    (my/treemacs-project-path default-directory))))
+
+(defun my/treemacs-normalize-workspace-paths ()
+  "Migrate every Treemacs project to its backend-consumable path.
+Return the number of changed projects.  This repairs persisted `/fs:local:'
+entries created by older revisions before Treemacs starts native helpers."
+  (when (and (require 'treemacs-workspaces nil t)
+             (require 'treemacs-persistence nil t))
+    ;; Force lazy persistence loading before traversing the registries.
+    (treemacs-current-workspace)
+    (let ((changed 0))
+      (dolist (workspace
+               (append (treemacs-workspaces)
+                       (treemacs-disabled-workspaces)))
+        (dolist (project (treemacs-workspace->projects workspace))
+          (let* ((old (treemacs-project->path project))
+                 (new
+                  (condition-case err
+                      (my/treemacs-project-path old)
+                    (error
+                     (remote-log
+                      'treemacs-path-migration-failed
+                      :path old
+                      :error (error-message-string err))
+                     old))))
+            (unless (equal old new)
+              (let ((type 'treemacs-project))
+                (aset
+                 project
+                 (cl-struct-slot-offset type 'path)
+                 new)
+                (aset
+                 project
+                 (cl-struct-slot-offset type 'path-status)
+                 (treemacs--get-path-status new)))
+              (setq changed (1+ changed))))))
+      (when (> changed 0)
+        (treemacs--invalidate-buffer-project-cache)
+        (treemacs--persist))
+      changed)))
 
 (defun my/treemacs-safe-imenu-index ()
   "Return the current buffer's Treemacs imenu index, or nil on failure."
@@ -1316,7 +1477,19 @@ Returns the number of killed buffers."
                    #'my/treemacs-extract-position)
     (advice-add 'treemacs--extract-position
                 :override
-                #'my/treemacs-extract-position))
+                #'my/treemacs-extract-position)
+    (unless (advice-member-p
+             #'my/treemacs-visit-logical-path-a
+             'treemacs--call-imenu-and-goto-tag)
+      (advice-add
+       'treemacs--call-imenu-and-goto-tag
+       :around #'my/treemacs-visit-logical-path-a)))
+  (with-eval-after-load 'treemacs-mouse-interface
+    (dolist (command
+             '(treemacs--imenu-tag-noselect
+               treemacs-node-buffer-and-position))
+      (unless (advice-member-p #'my/treemacs-visit-logical-path-a command)
+        (advice-add command :around #'my/treemacs-visit-logical-path-a))))
   (with-eval-after-load 'treemacs-filewatch-mode
     (advice-remove 'treemacs--process-file-events
                    #'my/treemacs-process-file-events-safely-a)
@@ -1406,6 +1579,34 @@ Returns the number of killed buffers."
   (advice-add 'treemacs--find-current-user-project :around
               #'my/treemacs-find-current-user-project-a))
 
+(with-eval-after-load 'treemacs-persistence
+  (unless (advice-member-p
+           #'my/treemacs-normalize-persist-lines-a
+           'treemacs--read-persist-lines)
+    (advice-add
+     'treemacs--read-persist-lines
+     :filter-return #'my/treemacs-normalize-persist-lines-a)))
+
+(with-eval-after-load 'treemacs-interface
+  (dolist (command
+           '(treemacs-visit-node-vertical-split
+             treemacs-visit-node-horizontal-split
+             treemacs-visit-node-no-split
+             treemacs-visit-node-ace
+             treemacs-visit-node-in-most-recently-used-window
+             treemacs-visit-node-ace-horizontal-split
+             treemacs-visit-node-ace-vertical-split))
+    (unless (advice-member-p #'my/treemacs-visit-logical-path-a command)
+      (advice-add command :around #'my/treemacs-visit-logical-path-a))))
+
+(with-eval-after-load 'breadcrumb
+  (dolist (renderer '(breadcrumb--header-line bc--header-line))
+    (when (and
+           (fboundp renderer)
+           (not
+            (advice-member-p
+             #'my/breadcrumb-header-line-safely-a renderer)))
+      (advice-add renderer :around #'my/breadcrumb-header-line-safely-a))))
 
 
 

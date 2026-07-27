@@ -70,15 +70,15 @@ Each entry is a plist with keys such as `:modes', `:program',
 (config-defvar my/language-server-file-watch-policy 'auto
   "Policy for language-server dynamic file-watch registrations.
 
-`auto' preserves Eglot's native watcher behavior when the project has a path
-directly accessible to the Emacs client.  For a target-only filesystem it
-declines dynamic `workspace/didChangeWatchedFiles' registration: Eglot
-advertises that capability as unsupported for remote roots, and accepting it
-would otherwise create one SSH-backed watcher per project directory.
+`auto' preserves Eglot and lsp-mode's native watcher behavior when the project
+has a path directly accessible to the Emacs client.  For a target-only
+filesystem it declines dynamic `workspace/didChangeWatchedFiles'
+registration.  Accepting it would otherwise create one SSH-backed watcher per
+project directory and can starve or kill the language-server transport.
 
-`native' always accepts Eglot's registration, and is intended only for
-backends whose watcher implementation is known to scale.  `disabled' declines
-all dynamic file-watch registrations."
+`native' always accepts the registration, and is intended only for backends
+whose watcher implementation is known to scale.  `disabled' declines all
+dynamic file-watch registrations."
   :type '(choice
           (const :tag "Automatic placement-aware policy" auto)
           (const :tag "Always use Eglot watchers" native)
@@ -114,6 +114,7 @@ all dynamic file-watch registrations."
 (defvar company-files-exclusions)
 (defvar lsp-managed-mode)
 (defvar lsp--cur-workspace)
+(defvar lsp-enable-file-watchers)
 (defvar lsp-completion-provider)
 (defvar lsp-diagnostics-provider)
 (defvar lsp-restart)
@@ -164,8 +165,17 @@ all dynamic file-watch registrations."
 (declare-function lsp--update-inlay-hints "lsp-mode" ())
 (declare-function lsp--workspace-buffers "lsp-mode" (workspace))
 (declare-function lsp--workspace-client "lsp-mode" (workspace))
+(declare-function lsp--workspace-cmd-proc "lsp-mode" (workspace))
+(declare-function lsp--workspace-proc "lsp-mode" (workspace))
 (declare-function lsp--workspace-root "lsp-mode" (workspace))
+(declare-function lsp--workspace-status "lsp-mode" (workspace))
+(declare-function lsp--workspace-shutdown-action "lsp-mode" (workspace))
 (declare-function lsp--client-server-id "lsp-mode" (client))
+(declare-function lsp--session-workspaces "lsp-mode" (session))
+(declare-function lsp-get "lsp-protocol" (hash-table key))
+(declare-function lsp-process-kill "lsp-mode" (process))
+(declare-function lsp-session "lsp-mode" ())
+(declare-function lsp-workspace-shutdown "lsp-mode" (workspace))
 (declare-function lsp-workspace-restart "lsp-mode" (workspace))
 (declare-function eglot-current-server "eglot")
 (declare-function eglot--project "eglot" (server))
@@ -178,7 +188,45 @@ all dynamic file-watch registrations."
 (declare-function eglot--lookup-mode "eglot" (mode))
 (declare-function eglot--managed-buffers "eglot" (server))
 (declare-function eglot--managed-mode@my/defer-eglot-shutdown nil (&optional server))
-(declare-function eglot-shutdown "eglot" (server))
+(declare-function eglot-shutdown
+                  "eglot" (server &optional interactive timeout preserve-buffers))
+
+(defcustom my/lsp-mode-startup-timeout 60
+  "Seconds an lsp-mode workspace may remain in `starting' state.
+After the deadline the workspace is stopped through the bounded shutdown
+path.  Nil or a non-positive value disables the watchdog."
+  :type '(choice (const :tag "Disabled" nil)
+                 (number :tag "Seconds"))
+  :group 'my/language-server)
+
+(defcustom my/lsp-mode-shutdown-timeout 1
+  "Maximum seconds allowed for one graceful lsp-mode workspace shutdown.
+The process is force-stopped after this deadline so quitting Emacs never
+depends on a responsive language server."
+  :type 'number
+  :group 'my/language-server)
+
+(defcustom my/lsp-mode-restart-limit 1
+  "Maximum automatic lsp-mode restarts within the restart window."
+  :type 'integer
+  :group 'my/language-server)
+
+(defcustom my/lsp-mode-restart-window 60
+  "Seconds used by the lsp-mode crash-loop circuit breaker."
+  :type 'number
+  :group 'my/language-server)
+
+(defvar my/lsp-mode--startup-timers (make-hash-table :test #'eq)
+  "Startup watchdog timers keyed by lsp-mode workspace.")
+
+(defvar my/lsp-mode--restart-history (make-hash-table :test #'equal)
+  "Recent automatic restart timestamps keyed by server and logical root.")
+
+(defun my/language-server--set-struct-slot (object type slot value)
+  "Set OBJECT's cl-struct TYPE SLOT to VALUE.
+Keeping TYPE and SLOT as runtime arguments avoids requiring private lsp-mode
+struct definitions while this configuration file is compiled."
+  (aset object (cl-struct-slot-offset type slot) value))
 (declare-function eldoc-box-quit-frame "eldoc-box" ())
 (declare-function gcmh-set-high-threshold "gcmh" ())
 (declare-function hydra--call-interactively-remap-maybe "hydra" (cmd &optional keys))
@@ -444,6 +492,13 @@ byte-compile backend does not emit noisy warnings on startup."
 
 (defun my/language-server-apply-lsp-local-settings ()
   "Apply project-local `lsp-mode' settings before startup."
+  ;; Advertise watcher support only when the selected placement can implement
+  ;; it without turning each directory into a remote process/connection.
+  (setq-local
+   lsp-enable-file-watchers
+   (not
+    (my/language-server--skip-file-watch-p
+     (my/language-server--project-root-for-buffer))))
   (run-hooks 'my/language-server-lsp-local-settings-hook))
 
 (defun my/eglot-contact-available-p ()
@@ -530,9 +585,10 @@ original argv without a client shell wrapper."
 When FEATURE is non-nil, require it before starting `lsp-mode'.
 SOURCE and NOTE are recorded for maintenance tooling."
   (add-to-list 'my/lsp-mode-preferred-modes mode)
-  (when feature
-    (setf (alist-get mode my/lsp-mode-required-features nil nil #'eq)
-          feature))
+  ;; REMOVE non-nil also clears a feature left by an earlier registration
+  ;; when a reloaded configuration now passes nil.
+  (setf (alist-get mode my/lsp-mode-required-features nil t #'eq)
+        feature)
   (setq my/lsp-mode-preference-metadata
         (cons (list :mode mode
                     :feature feature
@@ -686,7 +742,9 @@ target/workspace environment has been applied to this buffer."
   "Return the current buffer's logical project root."
   (my/language-server--canonical-root
    (or
-    (when-let* ((project (project-current nil default-directory)))
+    (when-let* ((project
+                 (ignore-errors
+                   (project-current nil default-directory))))
       (project-root project))
     default-directory)))
 
@@ -946,8 +1004,8 @@ roots are retained for callbacks which are not run in a source buffer."
               (root (ignore-errors (project-root project))))
     (my/language-server--canonical-root root)))
 
-(defun my/language-server--eglot-skip-file-watch-p (root)
-  "Return non-nil when Eglot must decline dynamic watches for ROOT.
+(defun my/language-server--skip-file-watch-p (root)
+  "Return non-nil when an LSP client must decline dynamic watches for ROOT.
 The decision is based on client filesystem placement, not on a local/remote
 target branch.  A mounted or otherwise client-accessible target therefore
 keeps exactly the same watcher path as an ordinary local project."
@@ -963,6 +1021,9 @@ keeps exactly the same watcher path as an ordinary local project."
       "Invalid `my/language-server-file-watch-policy': %S"
       my/language-server-file-watch-policy))))
 
+(defalias 'my/language-server--eglot-skip-file-watch-p
+  #'my/language-server--skip-file-watch-p)
+
 (defun my/eglot-register-capability-via-remote-a
     (fn server method id &rest params)
   "Run Eglot capability registration in SERVER's Remote workspace.
@@ -977,7 +1038,7 @@ Eglot recursively install one process-backed watch per directory."
          (remote-current-workspace workspace))
     (if (and
          (eq method 'workspace/didChangeWatchedFiles)
-         (my/language-server--eglot-skip-file-watch-p root))
+         (my/language-server--skip-file-watch-p root))
         (progn
           (remote-log
            'lsp-watch-registration-declined
@@ -989,6 +1050,29 @@ Eglot recursively install one process-backed watch per directory."
            :policy my/language-server-file-watch-policy)
           nil)
       (apply fn server method id params))))
+
+(defun my/lsp-mode--register-capability-via-remote-a
+    (fn registration)
+  "Register lsp-mode REGISTRATION under the shared watcher policy.
+The registration is still retained by lsp-mode, but its recursive client-side
+watch creation is disabled for target-only filesystems."
+  (let* ((method (lsp-get registration :method))
+         (root
+          (and lsp--cur-workspace
+               (my/language-server--lsp-workspace-root lsp--cur-workspace)))
+         (skip
+          (and
+           (equal method "workspace/didChangeWatchedFiles")
+           (my/language-server--skip-file-watch-p root)))
+         (lsp-enable-file-watchers
+          (and lsp-enable-file-watchers (not skip))))
+    (when skip
+      (remote-log
+       'lsp-watch-registration-declined
+       :backend 'lsp-mode
+       :root root
+       :policy my/language-server-file-watch-policy))
+    (funcall fn registration)))
 
 (defun my/language-server-register-eglot-resource (server)
   "Register initialized Eglot SERVER with its Remote workspace owner."
@@ -1040,6 +1124,175 @@ Eglot recursively install one process-backed watch per directory."
       (lsp--workspace-client workspace)))
    'unknown))
 
+(defun my/lsp-mode--workspace-key (workspace)
+  "Return a stable crash-accounting key for WORKSPACE."
+  (list
+   (my/language-server--lsp-workspace-id workspace)
+   (my/language-server--lsp-workspace-root workspace)))
+
+(defun my/lsp-mode--cancel-startup-watchdog (workspace)
+  "Cancel WORKSPACE's startup watchdog, if any."
+  (when-let* ((timer (gethash workspace my/lsp-mode--startup-timers)))
+    (cancel-timer timer)
+    (remhash workspace my/lsp-mode--startup-timers)))
+
+(defun my/lsp-mode-shutdown-workspace (workspace &optional reason)
+  "Stop lsp-mode WORKSPACE without allowing shutdown to block indefinitely.
+REASON is recorded for diagnostics.  The shutdown action is marked before any
+RPC is sent, closing the race in which a dying process could auto-restart
+while an explicit shutdown was still waiting for its response.  Repeated calls
+only enforce process termination; they never send a second shutdown RPC."
+  (when workspace
+    (my/lsp-mode--cancel-startup-watchdog workspace)
+    (let ((already-stopping
+           (eq
+            (ignore-errors (lsp--workspace-shutdown-action workspace))
+            'shutdown)))
+      (ignore-errors
+        (my/language-server--set-struct-slot
+         workspace 'lsp--workspace 'shutdown-action 'shutdown))
+      (unless already-stopping
+        (condition-case error
+            (if (and (numberp my/lsp-mode-shutdown-timeout)
+                     (> my/lsp-mode-shutdown-timeout 0))
+                (with-timeout
+                    (my/lsp-mode-shutdown-timeout
+                     (signal
+                      'timeout
+                      (list "lsp-mode workspace shutdown timed out")))
+                  (lsp-workspace-shutdown workspace))
+              (lsp-workspace-shutdown workspace))
+          (error
+           (remote-log
+            'lsp-shutdown-error
+            :backend 'lsp-mode
+            :root (my/language-server--lsp-workspace-root workspace)
+            :reason reason
+            :error (error-message-string error))))))
+    ;; Graceful shutdown normally kills CMD-PROC.  Force both handles as a
+    ;; final idempotent boundary for dead transports and half-started servers.
+    (dolist (process
+             (delete-dups
+              (delq
+               nil
+               (list
+                (ignore-errors (lsp--workspace-proc workspace))
+                (ignore-errors (lsp--workspace-cmd-proc workspace))))))
+      (ignore-errors (lsp-process-kill process)))
+    t))
+
+(defun my/lsp-mode-shutdown-all ()
+  "Boundedly stop every active lsp-mode workspace."
+  (dolist (workspace
+           (delete-dups
+            (delq
+             nil
+             (ignore-errors
+               (lsp--session-workspaces (lsp-session))))))
+    (my/lsp-mode-shutdown-workspace workspace 'emacs-exit)))
+
+(defun my/lsp-mode--arm-startup-watchdog ()
+  "Arm a bounded startup watchdog for `lsp--cur-workspace'."
+  (when (and
+         lsp--cur-workspace
+         (numberp my/lsp-mode-startup-timeout)
+         (> my/lsp-mode-startup-timeout 0))
+    (my/lsp-mode--cancel-startup-watchdog lsp--cur-workspace)
+    (let ((workspace lsp--cur-workspace))
+      (puthash
+       workspace
+       (run-at-time
+        my/lsp-mode-startup-timeout nil
+        (lambda (value)
+          (remhash value my/lsp-mode--startup-timers)
+          (when
+              (eq
+               (ignore-errors (lsp--workspace-status value))
+               'starting)
+            (remote-log
+             'lsp-startup-timeout
+             :backend 'lsp-mode
+             :server (my/language-server--lsp-workspace-id value)
+             :root (my/language-server--lsp-workspace-root value)
+             :timeout my/lsp-mode-startup-timeout)
+            (message
+             "LSP startup timed out after %.1fs: %s"
+             my/lsp-mode-startup-timeout
+             (or (my/language-server--lsp-workspace-root value)
+                 "unknown workspace"))
+            (my/lsp-mode-shutdown-workspace value 'startup-timeout)))
+        workspace)
+       my/lsp-mode--startup-timers))))
+
+(defun my/lsp-mode--workspace-initialized-h ()
+  "Clear startup and crash-loop state for the initialized workspace."
+  (when lsp--cur-workspace
+    (my/lsp-mode--cancel-startup-watchdog lsp--cur-workspace)))
+
+(defun my/lsp-mode--workspace-uninitialized-h (workspace)
+  "Clear the startup watchdog belonging to uninitialized WORKSPACE."
+  (my/lsp-mode--cancel-startup-watchdog workspace))
+
+(defun my/lsp-mode--restart-with-circuit-breaker-a (fn workspace)
+  "Call lsp-mode restart FN for WORKSPACE unless it is crash-looping."
+  (let* ((key (my/lsp-mode--workspace-key workspace))
+         (now (float-time))
+         (history
+          (seq-filter
+           (lambda (timestamp)
+             (< (- now timestamp) my/lsp-mode-restart-window))
+           (gethash key my/lsp-mode--restart-history))))
+    (if (>= (length history) (max 0 my/lsp-mode-restart-limit))
+        (progn
+          (ignore-errors
+            (my/language-server--set-struct-slot
+             workspace 'lsp--workspace 'shutdown-action 'shutdown))
+          (remote-log
+           'lsp-restart-circuit-open
+           :backend 'lsp-mode
+           :server (car key)
+           :root (cadr key)
+           :attempts (length history)
+           :window my/lsp-mode-restart-window)
+          (message
+           "LSP restart stopped after %d failure(s) in %.0fs: %s"
+           (length history)
+           my/lsp-mode-restart-window
+           (or (cadr key) (car key))))
+      (puthash key (cons now history) my/lsp-mode--restart-history)
+      (funcall fn workspace))))
+
+(defun my/lsp-mode--read-state-safely-a (fn file)
+  "Read lsp-mode state FILE with FN, treating truncated state as empty."
+  (condition-case error
+      (funcall fn file)
+    ((end-of-file invalid-read-syntax)
+     (remote-log
+      'lsp-session-read-failed
+      :file file
+      :error (error-message-string error))
+     nil)))
+
+(defun my/lsp-mode--persist-atomically-a (_fn file object)
+  "Persist lsp-mode OBJECT to FILE with an atomic same-directory rename."
+  (let* ((directory (file-name-directory file))
+         (print-length nil)
+         (print-level nil)
+         temporary)
+    (make-directory directory t)
+    (setq temporary
+          (make-temp-file
+           (expand-file-name ".lsp-session-" directory)))
+    (unwind-protect
+        (let ((coding-system-for-write 'utf-8-unix)
+              (inhibit-message t))
+          (write-region
+           (prin1-to-string object) nil temporary nil 'silent)
+          (rename-file temporary file t)
+          (setq temporary nil))
+      (when (and temporary (file-exists-p temporary))
+        (delete-file temporary)))))
+
 (defun my/language-server-register-lsp-resource ()
   "Register the dynamically active lsp-mode workspace for recovery."
   (when-let* ((lsp-workspace lsp--cur-workspace)
@@ -1055,8 +1308,7 @@ Eglot recursively install one process-backed watch per directory."
      :close
      (lambda (value reason)
        (unless (eq reason 'transport-recovery)
-         (ignore-errors
-           (lsp-workspace-shutdown value))))
+         (my/lsp-mode-shutdown-workspace value reason)))
      :recover
      (lambda (resource _owner)
        (let ((value (remote-workspace-resource-value resource))
@@ -1075,6 +1327,7 @@ Eglot recursively install one process-backed watch per directory."
 
 (defun my/language-server-unregister-lsp-resource (workspace)
   "Forget an lsp-mode WORKSPACE after lsp-mode has already closed it."
+  (my/lsp-mode--workspace-uninitialized-h workspace)
   (unless my/language-server--recovering-resource-p
     (my/language-server--forget-resource-value workspace)))
 
@@ -1379,6 +1632,12 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
   (define-key lsp-mode-map (kbd "C-h t") #'lsp-find-type-definition))
 
 (with-eval-after-load 'lsp-mode
+  (add-hook
+   'lsp-before-initialize-hook
+   #'my/lsp-mode--arm-startup-watchdog)
+  (add-hook
+   'lsp-after-initialize-hook
+   #'my/lsp-mode--workspace-initialized-h)
   (unless (advice-member-p #'my/lsp-mode--connect-via-remote-a 'lsp)
     (advice-add 'lsp :around #'my/lsp-mode--connect-via-remote-a))
   (unless (advice-member-p
@@ -1404,7 +1663,37 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
            'lsp--uri-to-path)
     (advice-add
      'lsp--uri-to-path
-     :around #'my/lsp-mode--uri-to-logical-a)))
+     :around #'my/lsp-mode--uri-to-logical-a))
+  (unless (advice-member-p
+           #'my/lsp-mode--register-capability-via-remote-a
+           'lsp--server-register-capability)
+    (advice-add
+     'lsp--server-register-capability
+     :around #'my/lsp-mode--register-capability-via-remote-a))
+  (unless (advice-member-p
+           #'my/lsp-mode--restart-with-circuit-breaker-a
+           'lsp--restart-if-needed)
+    (advice-add
+     'lsp--restart-if-needed
+     :around #'my/lsp-mode--restart-with-circuit-breaker-a))
+  (unless (advice-member-p
+           #'my/lsp-mode--read-state-safely-a
+           'lsp--read-from-file)
+    (advice-add
+     'lsp--read-from-file
+     :around #'my/lsp-mode--read-state-safely-a))
+  (unless (advice-member-p
+           #'my/lsp-mode--persist-atomically-a
+           'lsp--persist)
+    (advice-add
+     'lsp--persist
+     :around #'my/lsp-mode--persist-atomically-a))
+  (unless (advice-member-p
+           #'my/lsp-mode-shutdown-all
+           'lsp--global-teardown)
+    (advice-add
+     'lsp--global-teardown
+     :override #'my/lsp-mode-shutdown-all)))
 
 
 ;; -------------------------

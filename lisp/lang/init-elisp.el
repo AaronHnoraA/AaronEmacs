@@ -84,9 +84,9 @@
 (when (fboundp 'my/register-lsp-mode-preference)
   (my/register-lsp-mode-preference
    'emacs-lisp-mode
-   'elsa-lsp
    nil
-   "Emacs Lisp buffers prefer Elsa through lsp-mode when Elsa is installed."))
+   nil
+   "Emacs Lisp buffers prefer the separately registered Elsa lsp-mode client."))
 
 (defun my/elisp-elsa-lsp-command ()
   "Return a direct Elsa LSP command using the current Emacs binary.
@@ -107,9 +107,23 @@ the already-installed ELPA package."
              "  (let ((warning-minimum-level :emergency)"
              "        (message-log-max nil)"
              "        (inhibit-message t))"
-             "    (cl-letf (((symbol-function 'message) (lambda (&rest _args) nil))"
-             "              ((symbol-function 'display-warning) (lambda (&rest _args) nil)))"
-             "      (require 'elsa-lsp)))"
+             "    (cl-letf"
+             "        (((symbol-function 'message) (lambda (&rest _args) nil))"
+             "         ((symbol-function 'display-warning) (lambda (&rest _args) nil)))"
+             "      (require 'elsa-lsp)"
+             "      ;; Elsa 20250717 redundantly lists elsa-type together with"
+             "      ;; its child elsa-type-symbol.  Its byte-compiled defclass"
+             "      ;; bypasses function rebinding, so repair the class after"
+             "      ;; loading and before the server starts handling requests."
+             "      (when (memq 'elsa-type"
+             "                  (mapcar #'eieio-class-name"
+             "                          (eieio-class-parents"
+             "                           'elsa-type-bool)))"
+             "        (eval"
+             "         '(defclass elsa-type-bool (elsa-type-symbol)"
+             "            ((predicates"
+             "              :initarg :predicates"
+             "              :documentation \"Type narrowing predicates.\")))))))"
              "  (elsa-lsp-stdin-loop))")
            "\n"))))
 

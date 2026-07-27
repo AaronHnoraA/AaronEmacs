@@ -21,17 +21,25 @@
 (declare-function lsp-find-workspace "lsp-mode" (server-id &optional buffer-or-file))
 (declare-function lsp-send-execute-command "lsp-mode" (command &optional args))
 (declare-function lsp--workspace-buffers "lsp-mode" (workspace))
+(declare-function lsp--client-multi-root "lsp-mode" (client))
+(declare-function lsp--persist-session "lsp-mode" (session))
+(declare-function lsp-session "lsp-mode" ())
+(declare-function lsp-session-server-id->folders "lsp-mode" (session))
 (declare-function lsp-java--get-root "lsp-java" ())
 (declare-function my/debug-register-adapter-spec "init-debug" (name &rest plist))
 (declare-function my/register-lsp-mode-preference "init-lsp" (mode &optional feature source note))
 (declare-function my/lsp-mode-ensure "init-lsp" ())
+(declare-function my/language-server--set-struct-slot
+                  "init-lsp" (object type slot value))
 (declare-function my/language-server-toolchain-set-local-variable
                   "init-lsp-toolchain" (variable value))
 (defvar dape-configs)
 (defvar lsp-managed-mode)
 (defvar lsp--cur-workspace)
+(defvar lsp-clients)
 (defvar lsp-java-bundles)
 (defvar lsp-java-server-config-dir)
+(defvar lsp-enabled-clients)
 (defvar my/debug-after-register-common-configs-hook)
 (defvar my/java-debug--forwards (make-hash-table :test #'equal)
   "Active Java debug forwards keyed by logical project root.")
@@ -296,6 +304,34 @@ or transport kind."
        argument))
    (apply function arguments)))
 
+(defun my/lsp-java--enforce-single-root ()
+  "Give every Java project one JDTLS workspace and data directory.
+Upstream lsp-java marks JDTLS as multi-root and persists all previously opened
+Java roots under one server ID.  That couples unrelated Gradle projects,
+shares progress/failure state, and defeats the Remote workspace owner model.
+Composite builds remain supported because JDTLS discovers their subprojects
+inside the one selected root."
+  (when (derived-mode-p 'java-mode 'java-ts-mode)
+    ;; Java has one explicit workspace owner.  In particular, lsp-mode's
+    ;; semgrep client declares itself an add-on for Java and can otherwise be
+    ;; started beside JDTLS even when `semgrep' is unavailable on the target.
+    ;; Its exit/restart cleanup then races the healthy JDTLS buffer.
+    (setq-local lsp-enabled-clients '(jdtls jdtls-tramp))
+    (require 'lsp-java)
+    (dolist (server-id '(jdtls jdtls-tramp))
+      (when-let* ((client (gethash server-id lsp-clients)))
+        (my/language-server--set-struct-slot
+         client 'lsp--client 'multi-root nil)))
+    (let* ((session (lsp-session))
+           (folders (lsp-session-server-id->folders session))
+           changed)
+      (dolist (server-id '(jdtls jdtls-tramp))
+        (when (gethash server-id folders)
+          (remhash server-id folders)
+          (setq changed t)))
+      (when changed
+        (lsp--persist-session session)))))
+
 (defun my/lsp-java--apply-toolchain (profile root)
   "Apply Java PROFILE for ROOT to lsp-java."
   (let* ((context (my/lsp-java--context root))
@@ -367,10 +403,18 @@ or transport kind."
  :source (or load-file-name buffer-file-name))
 
 (with-eval-after-load 'lsp-java
+  (dolist (server-id '(jdtls jdtls-tramp))
+    (when-let* ((client (gethash server-id lsp-clients)))
+      (my/language-server--set-struct-slot
+       client 'lsp--client 'multi-root nil)))
   (unless (advice-member-p
            #'my/lsp-java--target-command-a 'lsp-java--ls-command)
     (advice-add
      'lsp-java--ls-command :around #'my/lsp-java--target-command-a)))
+
+(add-hook
+ 'my/language-server-lsp-local-settings-hook
+ #'my/lsp-java--enforce-single-root)
 
 (when (fboundp 'my/register-lsp-mode-preference)
   (my/register-lsp-mode-preference 'java-mode 'lsp-java)

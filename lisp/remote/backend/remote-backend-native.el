@@ -7,6 +7,20 @@
 (require 'remote-backend-core)
 (require 'remote-fs)
 
+(defun remote-backend-native-available-p (link context)
+  "Return non-nil when LINK and CONTEXT describe the client target.
+The native backend is a placement implementation, not a fallback transport
+for an arbitrary target.  Rejecting an accidental non-local pipeline here
+keeps route resolution from selecting a backend which can only fail later
+during path projection."
+  (equal
+   (or
+    (and (remote-context-p context)
+         (remote-context-target-id context))
+    (and (remote-link-p link)
+         (remote-link-target-id link)))
+   "local"))
+
 (defun remote-backend-native-project (file-name _link _route)
   "Project logical FILE-NAME onto the native file system."
   (let ((target (remote-fs-target-id file-name)))
@@ -299,6 +313,7 @@ direction."
   (remote-register-backend
    "native"
    :capabilities remote-native-capabilities
+   :available #'remote-backend-native-available-p
    :project #'remote-backend-native-project
    :client-file-name #'remote-backend-native-client-file-name
    :expand-localname #'remote-backend-native-expand-localname

@@ -16,10 +16,12 @@
 (declare-function eglot-show-workspace-configuration "eglot")
 (declare-function eglot-shutdown "eglot" (server))
 (declare-function lsp-describe-session "lsp-mode")
-(declare-function lsp-disconnect "lsp-mode")
 (declare-function lsp-organize-imports "lsp-mode")
 (declare-function lsp-restart-workspace "lsp-mode")
+(declare-function lsp-workspaces "lsp-mode")
 (declare-function lsp-workspace-show-log "lsp-mode")
+(declare-function my/lsp-mode-shutdown-workspace
+                  "init-lsp" (workspace &optional reason))
 
 (defun my/language-server--backend ()
   "Return the active language-server backend or signal an error."
@@ -52,7 +54,12 @@
     ('eglot
      (eglot-shutdown (eglot-current-server)))
     ('lsp-mode
-     (call-interactively #'lsp-disconnect))))
+     ;; `lsp-disconnect' only detaches the current buffer and intentionally
+     ;; keeps the workspace process alive.  The command is named "Shutdown",
+     ;; so stop every workspace associated with this buffer through the
+     ;; bounded lifecycle owner.
+     (dolist (workspace (lsp-workspaces))
+       (my/lsp-mode-shutdown-workspace workspace 'user-shutdown)))))
 
 (defun my/language-server-open-log ()
   "Open the current language server log buffer."

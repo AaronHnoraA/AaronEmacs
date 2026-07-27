@@ -9,6 +9,7 @@
 
 (declare-function my/treemacs-cursor-follow-mode "init-project" (&optional arg))
 (declare-function my/treemacs-reset-follow-state "init-project")
+(declare-function my/treemacs-normalize-workspace-paths "init-project")
 
 (eval-and-compile
   (defmacro my/treemacs-bridge-declarations ()
@@ -47,6 +48,7 @@
        (declare-function treemacs-disabled-workspaces "treemacs-workspaces")
        (declare-function treemacs-project->name "treemacs-workspaces" (project))
        (declare-function treemacs-project->path "treemacs-workspaces" (project))
+       (declare-function treemacs-project->path-status "treemacs-workspaces" (project))
        (declare-function treemacs--compare-markdown-tag-paths "treemacs-tags" (a b))
        (declare-function treemacs--compare-tag-paths "treemacs-tags" (a b))
        (declare-function treemacs--do-follow-tag "treemacs-tag-follow-mode" (index window path project))
@@ -59,6 +61,8 @@
        (declare-function treemacs--persist "treemacs-persistence")
        (declare-function treemacs--rerender-after-workspace-change "treemacs-rendering")
        (declare-function (setf treemacs-workspace->projects) "treemacs-workspaces" (value workspace))
+       (declare-function (setf treemacs-project->path) "treemacs-workspaces" (value project))
+       (declare-function (setf treemacs-project->path-status) "treemacs-workspaces" (value project))
        (defvar evil-treemacs-state-map)
        (defvar my/treemacs-cursor-follow-mode)
        (defvar treemacs--imenu-cache)
@@ -82,6 +86,8 @@
   (let ((follow (bound-and-true-p treemacs-follow-mode))
         (project-follow (bound-and-true-p treemacs-project-follow-mode))
         (cursor-follow (bound-and-true-p my/treemacs-cursor-follow-mode)))
+    (when (fboundp 'my/treemacs-normalize-workspace-paths)
+      (my/treemacs-normalize-workspace-paths))
     (when (fboundp 'my/treemacs-reset-follow-state)
       (my/treemacs-reset-follow-state))
     (when (fboundp 'treemacs-refresh)

@@ -21,6 +21,16 @@
 (require 'remote-framework)
 (require 'direnv)
 
+(defvar tramp-rpc-ssh-args)
+(defvar tramp-rpc-ssh-options)
+(defvar tramp-rpc-use-controlmaster)
+
+;; Emacs 32 may native-compile a trampoline whenever `cl-letf' temporarily
+;; replaces a C subr.  These isolated unit tests deliberately replace file
+;; primitives and must not depend on an external assembler being installed.
+(when (boundp 'comp-enable-subr-trampolines)
+  (setq comp-enable-subr-trampolines nil))
+
 (remote-fs-install)
 
 (defmacro remote-test-with-registry (&rest body)

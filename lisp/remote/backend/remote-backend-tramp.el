@@ -226,7 +226,15 @@ default TCP connect timeout."
          ;; inheriting those here makes client state such as ~/.ssh resolve on
          ;; the wrong machine (for example /home/hc on a macOS client).
          (process-environment (remote-client-process-environment))
-         (exec-path (remote-client-exec-path)))
+         (exec-path (remote-client-exec-path))
+         ;; Connecting TRAMP runs process filters, timers, and package hooks.
+         ;; If their incidental file operations inherit the caller's `/fs:'
+         ;; directory they re-enter the same opening framework session and
+         ;; correctly hit its single-opener guard.  TRAMP itself is a
+         ;; client-side transport boundary, so keep that incidental context
+         ;; on a client-local directory while the physical remote path below
+         ;; remains the connection target.
+         (default-directory temporary-file-directory))
     (unless (file-remote-p physical nil 'connected)
       (file-attributes physical))
     physical))

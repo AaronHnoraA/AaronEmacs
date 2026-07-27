@@ -10,6 +10,14 @@
 (require 'eglot)
 (require 'lsp-mode)
 
+(defun my/lsp-test-registration (method)
+  "Return an lsp-mode registration object for METHOD."
+  (if lsp-use-plists
+      (list :method method)
+    (let ((registration (make-hash-table :test #'equal)))
+      (puthash "method" method registration)
+      registration)))
+
 (ert-deftest lsp-mode-local-logical-path-does-not-leak-fs-syntax ()
   (let ((default-directory "/fs:local:/tmp/"))
     (should
@@ -249,6 +257,41 @@
         (should (= (my/java-debug--access-port root 5005) 41000))))
     (should (= (length calls) 2))))
 
+(ert-deftest java-buffers-select-only-one-jdtls-workspace-owner ()
+  (require 'lsp-java)
+  (let* ((clients (make-hash-table :test #'eq))
+         (folders (make-hash-table :test #'eq))
+         (session
+          (make-lsp-session
+           :folders nil
+           :folders-blocklist nil
+           :server-id->folders folders))
+         (local-client
+          (copy-lsp--client (gethash 'jdtls lsp-clients)))
+         (remote-client
+          (copy-lsp--client (gethash 'jdtls-tramp lsp-clients)))
+         (lsp-clients clients)
+         persisted)
+    (puthash 'jdtls local-client clients)
+    (puthash 'jdtls-tramp remote-client clients)
+    (puthash 'jdtls '("/old/local/root") folders)
+    (puthash 'jdtls-tramp '("/old/remote/root") folders)
+    (with-temp-buffer
+      (setq major-mode 'java-mode)
+      (let ((lsp-enabled-clients nil))
+        (cl-letf
+            (((symbol-function 'lsp-session) (lambda () session))
+             ((symbol-function 'lsp--persist-session)
+              (lambda (_session) (setq persisted t))))
+          (my/lsp-java--enforce-single-root))
+        (should
+         (equal lsp-enabled-clients '(jdtls jdtls-tramp)))))
+    (should-not (lsp--client-multi-root local-client))
+    (should-not (lsp--client-multi-root remote-client))
+    (should-not (gethash 'jdtls folders))
+    (should-not (gethash 'jdtls-tramp folders))
+    (should persisted)))
+
 (ert-deftest lsp-workspace-is-one-recoverable-remote-workspace-resource ()
   (let ((remote-workspaces (make-hash-table :test #'equal))
         (remote-workspace--resource-counter 0)
@@ -358,6 +401,79 @@
         '(server workspace/didChangeWatchedFiles "watch-1"
                  (:watchers [(:globPattern "**/*.lean")])
                  "language-server" workspace))))))
+
+(ert-deftest lsp-mode-target-only-root-retains-registration-without-watchers ()
+  "Target-only roots must not create recursive client-side file watches."
+  (let ((my/language-server-file-watch-policy 'auto)
+        (lsp-enable-file-watchers t)
+        (lsp--cur-workspace
+         (make-lsp--workspace :root "/fs:box:/work/project/"))
+        watcher-value
+        called)
+    (cl-letf
+        (((symbol-function 'remote-client-file-name)
+          (lambda (&rest _) nil)))
+      (should
+       (eq
+        (my/lsp-mode--register-capability-via-remote-a
+         (lambda (_registration)
+           (setq called t
+                 watcher-value lsp-enable-file-watchers)
+           'registered)
+         (my/lsp-test-registration
+          "workspace/didChangeWatchedFiles"))
+        'registered)))
+    (should called)
+    (should-not watcher-value)))
+
+(ert-deftest lsp-mode-client-accessible-root-keeps-native-watchers ()
+  (let ((my/language-server-file-watch-policy 'auto)
+        (lsp-enable-file-watchers t)
+        (lsp--cur-workspace
+         (make-lsp--workspace :root "/fs:local:/tmp/project/"))
+        watcher-value)
+    (cl-letf
+        (((symbol-function 'remote-client-file-name)
+          (lambda (&rest _) "/tmp/project/")))
+      (my/lsp-mode--register-capability-via-remote-a
+       (lambda (_registration)
+         (setq watcher-value lsp-enable-file-watchers))
+       (my/lsp-test-registration
+        "workspace/didChangeWatchedFiles")))
+    (should watcher-value)))
+
+(ert-deftest lsp-mode-bounded-shutdown-is-idempotent-and-keeps-source-buffer ()
+  "Stopping a language server must never kill a user source buffer."
+  (let* ((source (generate-new-buffer " *remote-java-source*"))
+         (workspace
+          (make-lsp--workspace
+           :root "/fs:box:/work/project/"
+           :buffers (list source)
+           :shutdown-action nil))
+         (shutdown-count 0)
+         (killed-processes nil))
+    (unwind-protect
+        (cl-letf
+            (((symbol-function 'lsp-workspace-shutdown)
+              (lambda (_workspace)
+                (cl-incf shutdown-count)
+                ;; This is the strongest source-side operation performed by
+                ;; upstream shutdown: remove managed-mode state in-place.
+                (with-current-buffer source
+                  (setq-local lsp-managed-mode nil))))
+             ((symbol-function 'lsp-process-kill)
+              (lambda (process)
+                (push process killed-processes))))
+          (should
+           (my/lsp-mode-shutdown-workspace workspace 'test-shutdown))
+          (should (buffer-live-p source))
+          (should
+           (my/lsp-mode-shutdown-workspace workspace 'repeated-shutdown))
+          (should (buffer-live-p source))
+          (should (= shutdown-count 1))
+          (should-not killed-processes))
+      (when (buffer-live-p source)
+        (kill-buffer source)))))
 
 (ert-deftest eglot-non-watch-callback-inherits-language-server-owner ()
   (let (captured)
