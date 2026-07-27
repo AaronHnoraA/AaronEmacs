@@ -251,12 +251,74 @@
         (config . ((host . "lab-b")))))
      :type 'error)))
 
+(ert-deftest remote-config-load-is-transactional-on-registration-error ()
+  (remote-framework-test-with-registry
+    (remote-register-target "stable" :trusted t)
+    (remote-register-pipeline
+     "stable" "ssh" "tramp" :config '(:host "stable"))
+    (let ((file (make-temp-file "remote-config-invalid-" nil ".json"))
+          (generation remote-config-generation))
+      (unwind-protect
+          (progn
+            (with-temp-file file
+              (insert
+               "{\n"
+               "  \"version\": 2,\n"
+               "  \"targets\": [{\n"
+               "    \"id\": \"broken\",\n"
+               "    \"pipelines\": [\n"
+               "      {\"id\":\"ssh\",\"backend\":\"tramp\","
+               "\"config\":{\"host\":\"one\"}},\n"
+               "      {\"id\":\"ssh\",\"backend\":\"tramp-rpc\","
+               "\"config\":{\"host\":\"two\"}}\n"
+               "    ]\n"
+               "  }],\n"
+               "  \"imports\": []\n"
+               "}\n"))
+            (should-error (remote-config-load file))
+            (should (= remote-config-generation generation))
+            (should (remote-get-target "stable"))
+            (should (remote-get-pipeline "ssh" "stable"))
+            (should-not (remote-get-target "broken")))
+        (delete-file file)))))
+
 (ert-deftest remote-config-validates-schema-version ()
   (should (= (remote-config--schema-version '((version . 1))) 1))
   (should (= (remote-config--schema-version '((version . 2))) 2))
   (should-error
    (remote-config--schema-version '((version . 3)))
    :type 'error))
+
+(ert-deftest remote-route-v2-constraints-are-hard-boundaries ()
+  (remote-framework-test-with-registry
+    (remote-register-target "lab" :trusted t)
+    (remote-register-pipeline
+     "lab" "primary" '("tramp-rpc" "tramp")
+     :priority 100 :config '(:host "lab"))
+    (remote-register-pipeline
+     "lab" "secondary" "tramp"
+     :priority 1 :config '(:host "lab-backup"))
+    (let* ((context
+            (remote-context-create
+             :target-id "lab" :localname "/work/"
+             :workspace-root "/fs:lab:/work/"))
+           (route
+            (remote-resolve
+             "emacs-file" 'file-read context
+             '(:pipeline "secondary" :backend "tramp"))))
+      (should (equal (remote-route-pipeline-id route) "lab/secondary"))
+      (should (equal (remote-route-backend-id route) "tramp"))
+      (should-error
+       (remote-resolve
+        "emacs-file" 'file-read context
+        '(:pipeline "secondary" :backend "tramp-rpc")))
+      (should
+       (equal
+        (remote-route-pipeline-id
+         (remote-resolve
+          "emacs-file" 'file-read context
+          '(:exclude-pipelines ("primary"))))
+        "lab/secondary")))))
 
 (ert-deftest remote-file-operation-contract-is-explicit-and-extensible ()
   (let ((remote-file-operations (make-hash-table :test #'eq)))

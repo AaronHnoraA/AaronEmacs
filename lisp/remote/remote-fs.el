@@ -33,6 +33,23 @@
 (defvar remote-fs-path-expansion-cache (make-hash-table :test #'equal)
   "Resolved target-relative configured paths keyed by target and spelling.")
 
+(defun remote-fs--adapter-for-capability
+    (capability &optional fallback)
+  "Return the active caller adapter when it supports CAPABILITY.
+High-level callers such as a language server bind
+`remote-current-adapter-id' for their process boundary, but may invoke
+ordinary Emacs file APIs while preparing that process.  Those nested file
+operations retain the standard `emacs-file' contract instead of making every
+process adapter falsely advertise all filesystem capabilities."
+  (let* ((fallback (or fallback "emacs-file"))
+         (adapter-id (or remote-current-adapter-id fallback))
+         (adapter (remote-get-adapter adapter-id)))
+    (if (and adapter
+             (memq capability
+                   (remote-adapter-capabilities adapter)))
+        adapter-id
+      fallback)))
+
 (defun remote-fs-register-method ()
   "Teach TRAMP to parse `/fs:' syntax without enabling its handler.
 Logical identity helpers must work whenever this library is loaded; actual
@@ -212,7 +229,7 @@ expansion only: it deliberately does not chase symbolic links."
                 (let* ((context (remote-fs--context base))
                        (route
                         (remote-resolve
-                         (or remote-current-adapter-id "emacs-file")
+                         (remote-fs--adapter-for-capability 'metadata)
                          'metadata context nil))
                        (remote-current-connection
                         (remote-connection-ensure route context)))
@@ -865,7 +882,8 @@ the request to TRAMP or tramp-rpc."
           (if (equal value-target (remote-route-target-id route))
               route
             (remote-resolve
-             (or remote-current-adapter-id "emacs-file")
+             (remote-fs--adapter-for-capability
+              (remote-file-operation-spec-capability spec))
              (remote-file-operation-spec-capability spec)
              (remote-fs--context-for-file value)
              nil)))))
@@ -945,7 +963,7 @@ the request to TRAMP or tramp-rpc."
          (context (remote-fs--context-for-file logical))
          (capability (remote-file-operation-spec-capability spec))
          (routes (remote-routes
-                  (or remote-current-adapter-id "emacs-file")
+                  (remote-fs--adapter-for-capability capability)
                   capability context))
          (retry-safe
           (remote-file-operation-spec-retry-safe spec))

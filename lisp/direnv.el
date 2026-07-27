@@ -39,6 +39,14 @@ interrupted an active TRAMP transaction."
   :type 'number
   :group 'direnv)
 
+(defcustom direnv-export-failure-retry-delay 2
+  "Seconds before automatically retrying an unchanged failed export.
+Selection and buffer-list hooks can run many times per second.  A malformed
+or temporarily failing `direnv export' must not turn those hooks into an
+unbounded subprocess loop."
+  :type 'number
+  :group 'direnv)
+
 (defvar direnv--hooks
   '(before-hack-local-variables-hook)
   "Hooks used while `direnv-mode' is enabled.")
@@ -47,6 +55,8 @@ interrupted an active TRAMP transaction."
 (defvar direnv--refresh-timers (make-hash-table :test #'eq :weakness 'key))
 (defvar direnv--export-cache (make-hash-table :test #'equal))
 (defvar direnv--export-processes (make-hash-table :test #'equal))
+(defvar direnv--export-failures (make-hash-table :test #'equal)
+  "Map envrc roots to their most recent fingerprinted export failure.")
 (defvar direnv--export-waiters (make-hash-table :test #'equal)
   "Map an envrc root to `(BUFFER . CALLBACKS)' export waiters.")
 (defvar direnv--reported-selection nil
@@ -59,6 +69,21 @@ coalesces user-facing enter/switch/leave reports.")
 
 (declare-function tramp-get-connection-property
                   "tramp-cache" (key property &optional default))
+
+(defmacro direnv--with-base-process-environment (&rest body)
+  "Evaluate BODY from the buffer's pre-direnv process environment.
+An already applied `DIRENV_DIFF' makes `direnv export json' emit no output,
+because direnv correctly sees no delta.  Providers must always rebuild from
+the saved base capsule rather than recursively inheriting their own result."
+  (declare (indent 0) (debug t))
+  `(let ((process-environment
+          (copy-sequence
+           (or remote--buffer-base-process-environment
+               process-environment)))
+         (exec-path
+          (copy-sequence
+           (or remote--buffer-base-exec-path exec-path))))
+     ,@body))
 
 (defun direnv--transport-busy-p ()
   "Return non-nil when a TRAMP file operation is in progress.
@@ -153,6 +178,7 @@ trigger project or `.envrc' discovery while a connection is being established."
 
 (defun direnv--cache-export (root fingerprint result)
   "Cache RESULT for ROOT and FINGERPRINT."
+  (remhash root direnv--export-failures)
   (puthash
    root
    (list :fingerprint fingerprint
@@ -160,6 +186,27 @@ trigger project or `.envrc' discovery while a connection is being established."
          :result result)
    direnv--export-cache)
   result)
+
+(defun direnv--record-export-failure (root fingerprint error)
+  "Record ERROR for ROOT and FINGERPRINT and return ERROR."
+  (puthash
+   root
+   (list :fingerprint fingerprint
+         :failed-at (float-time)
+         :error error)
+   direnv--export-failures)
+  error)
+
+(defun direnv--recent-export-failure (root fingerprint)
+  "Return ROOT's recent ERROR for FINGERPRINT, or nil when retry is due."
+  (when-let* ((entry (gethash root direnv--export-failures)))
+    (if (and
+         (equal fingerprint (plist-get entry :fingerprint))
+         (< (- (float-time) (plist-get entry :failed-at))
+            direnv-export-failure-retry-delay))
+        (plist-get entry :error)
+      (remhash root direnv--export-failures)
+      nil)))
 
 (defun direnv--export (context)
   "Load direnv environment for CONTEXT."
@@ -171,8 +218,8 @@ trigger project or `.envrc' discovery while a connection is being established."
            (cached (direnv--cached-export root fingerprint))
            (remote-current-adapter-id "direnv"))
       (or
-       cached
-       (progn
+      cached
+       (direnv--with-base-process-environment
          (unless (let ((remote-environment-inhibit t))
                    (remote-executable-find "direnv" context))
            (error "direnv is not installed on target %s"
@@ -277,15 +324,16 @@ two arguments: the environment and an error."
           (progn
             (setq
              process
-             (remote-exec-async
-              "direnv"
-              :args '("export" "json")
-              :adapter "direnv"
-              :context context
-              :name (format "direnv-%s"
-			    (remote-context-target-id context))
-              :callback
-              (lambda (result)
+             (direnv--with-base-process-environment
+               (remote-exec-async
+                "direnv"
+                :args '("export" "json")
+                :adapter "direnv"
+                :context context
+                :name (format "direnv-%s"
+                              (remote-context-target-id context))
+                :callback
+                (lambda (result)
 		(remhash root direnv--export-processes)
 		(if (zerop (remote-exec-result-status result))
 		    (condition-case err
@@ -307,6 +355,8 @@ two arguments: the environment and an error."
 			   (remote-context-target-id context))
 			  (direnv--finish-export-waiters root context))
                       (error
+                       (direnv--record-export-failure
+                        root fingerprint err)
                        (setq direnv--last-error err)
                        (direnv--finish-export-waiters root context err)
                        (remote-log
@@ -320,11 +370,13 @@ two arguments: the environment and an error."
 				  (remote-exec-result-status result)
 				  (remote-exec-result-stderr result)))))
 		    (setq direnv--last-error err)
+                    (direnv--record-export-failure
+                     root fingerprint err)
 		    (direnv--finish-export-waiters root context err)
 		    (remote-log
 		     'direnv-error
 		     :target (remote-context-target-id context)
-		     :error (cadr err)))))))
+		     :error (cadr err))))))))
             ;; Do not resurrect an entry if a very short-lived process has
             ;; already completed and its callback removed the sentinel.
             (when (eq (gethash root direnv--export-processes) 'starting)
@@ -333,6 +385,8 @@ two arguments: the environment and an error."
         (error
          (when (eq (gethash root direnv--export-processes) 'starting)
            (remhash root direnv--export-processes))
+         (direnv--record-export-failure
+          root fingerprint startup-error)
          (direnv--finish-export-waiters root context startup-error)
          (signal (car startup-error) (cdr startup-error)))))))
 
@@ -357,15 +411,29 @@ only for a pending request, in the requesting buffer."
       (condition-case err
           (if-let* ((root (direnv--envrc-root path)))
               (let* ((context (remote-context root))
-                     (fingerprint (direnv--fingerprint context)))
-                (if (direnv--cached-export root fingerprint)
-                    (progn
-                      (remote-environment-ensure context)
-                      (setq direnv--last-error nil)
-                      'ready)
+                     (fingerprint (direnv--fingerprint context))
+                     (recent-error
+                      (direnv--recent-export-failure root fingerprint)))
+                (cond
+                 ((direnv--cached-export root fingerprint)
+                  (remote-environment-ensure context)
+                  (setq direnv--last-error nil)
+                  'ready)
+                 (recent-error
+                  (setq direnv--last-error recent-error)
+                  (when callback
+                    (run-with-idle-timer
+                     0 nil
+                     (lambda (target done failure)
+                       (when (buffer-live-p target)
+                         (with-current-buffer target
+                           (funcall done nil failure))))
+                     buffer callback recent-error))
+                  'pending)
+                 (t
                   (direnv--start-export
                    context root fingerprint buffer callback)
-                  'pending))
+                  'pending)))
             (direnv-clear-environment)
             'ready)
         (error

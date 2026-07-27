@@ -402,6 +402,13 @@ byte-compile backend does not emit noisy warnings on startup."
 
 (defun my/language-server-apply-lsp-local-settings ()
   "Apply local `lsp-mode' settings before startup."
+  (when (file-remote-p default-directory)
+    ;; `lsp-resolve-final-command' wraps remote commands with
+    ;; `shell-file-name'.  Never leak the client machine's /bin/zsh path onto
+    ;; a Linux target.
+    (setq-local shell-file-name "sh"
+                explicit-shell-file-name "sh"
+                shell-command-switch "-c"))
   (when (and my/language-server-disable-file-watchers-on-remote
              (file-remote-p default-directory))
     (setq-local lsp-enable-file-watchers nil
@@ -653,6 +660,42 @@ target/workspace environment has been applied to this buffer."
   (let ((remote-current-adapter-id "language-server"))
     (remote-environment-ensure)
     (apply fn args)))
+
+(defun my/lsp-mode--resolve-logical-command-a (fn command &optional test)
+  "Make lsp-mode's logical-target stdio wrapper safe without losing context.
+Command functions must run while the logical `default-directory' is active:
+language integrations use it to translate client-side paths to target-native
+paths.  lsp-mode then adds `stty raw' for TRAMP.  Direct SSH pipes have no
+tty, so retain the shell boundary but silence and tolerate that probe."
+  (let ((resolved (funcall fn command test)))
+    (if (and (remote-fs-file-name-p default-directory)
+             (not test)
+             (equal (car-safe resolved) shell-file-name)
+             (equal (nth 1 resolved) "-c")
+             (stringp (nth 2 resolved)))
+        (list
+         (car resolved)
+         (nth 1 resolved)
+         (replace-regexp-in-string
+          "\\`stty raw > /dev/null;"
+          "stty raw >/dev/null 2>&1 || :;"
+          (nth 2 resolved)
+          t t))
+      resolved)))
+
+(defun my/lsp-mode--find-logical-workspace-a
+    (fn server-id &optional file-name)
+  "Resolve lsp-mode's generated SERVER-ID-tramp alias when necessary.
+`lsp-auto-register-remote-clients' deliberately renames remote clients, while
+language extensions commonly continue to call `lsp-find-workspace' with the
+base ID.  Trying the generated alias preserves those extension APIs."
+  (or (funcall fn server-id file-name)
+      (and
+       (not (string-suffix-p "-tramp" (symbol-name server-id)))
+       (funcall
+        fn
+        (intern (format "%s-tramp" server-id))
+        file-name))))
 
 (defun my/eglot--uri-to-logical-a (fn uri)
   "Canonicalize file paths returned by Eglot's URI converter."
@@ -932,7 +975,19 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
 
 (with-eval-after-load 'lsp-mode
   (unless (advice-member-p #'my/lsp-mode--connect-via-remote-a 'lsp)
-    (advice-add 'lsp :around #'my/lsp-mode--connect-via-remote-a)))
+    (advice-add 'lsp :around #'my/lsp-mode--connect-via-remote-a))
+  (unless (advice-member-p
+           #'my/lsp-mode--resolve-logical-command-a
+           'lsp-resolve-final-command)
+    (advice-add
+     'lsp-resolve-final-command
+     :around #'my/lsp-mode--resolve-logical-command-a))
+  (unless (advice-member-p
+           #'my/lsp-mode--find-logical-workspace-a
+           'lsp-find-workspace)
+    (advice-add
+     'lsp-find-workspace
+     :around #'my/lsp-mode--find-logical-workspace-a)))
 
 
 ;; -------------------------

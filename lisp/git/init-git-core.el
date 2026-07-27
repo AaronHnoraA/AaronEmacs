@@ -16,6 +16,8 @@
 (declare-function diff-hl-revert-hunk "diff-hl" ())
 (declare-function diff-hl-show-hunk "diff-hl-show-hunk" ())
 (declare-function diff-hl-stage-current-hunk "diff-hl" ())
+(declare-function diff-hl-dired-status-files "diff-hl-dired"
+                  (backend dir files update-function))
 (declare-function magit-blame-addition "magit-blame" ())
 (declare-function magit-blame-quit "magit-blame" ())
 (declare-function magit-dispatch "magit" ())
@@ -35,6 +37,7 @@
 (declare-function my/smerge-dispatch "init-smerge" ())
 
 (defvar magit-blame-mode)
+(defvar vc-dir-process-output-limit)
 
 (defvar-local my/git-tool-origin-window-configuration nil
   "Window configuration captured before opening the current Git tool buffer.")
@@ -94,6 +97,22 @@
   (if (fboundp 'git-commit-setup-flyspell)
       (git-commit-setup-flyspell)
     (git-commit-turn-on-flyspell)))
+
+(defun my/diff-hl-dired-status-files-with-full-output-a
+    (fn backend dir files update-function)
+  "Call Diff-HL status FN without the VC-Dir output limit.
+
+Emacs 32's Git backend assumes that a limited status command belongs to a
+VC-Dir process buffer and tries to update its `vc-parent-buffer'.  Diff-HL
+uses the same backend from its own temporary buffer, where that variable is
+nil.  Large repositories would consequently fail from the process sentinel
+with `wrong-type-argument stringp nil'.
+
+Diff-HL needs the complete status result to paint Dired accurately, so make
+the limit nil only for this consumer.  Keep the user's global VC-Dir limit
+unchanged."
+  (let ((vc-dir-process-output-limit nil))
+    (funcall fn backend dir files update-function)))
 
 (defun my/git--current-file-context ()
   "Return current file Git context as (REPO-ROOT RELATIVE-PATH).
@@ -211,6 +230,10 @@ a Git repository."
   :custom
   (diff-hl-side 'left)
   (diff-hl-update-async t))
+
+(with-eval-after-load 'diff-hl-dired
+  (advice-add 'diff-hl-dired-status-files
+              :around #'my/diff-hl-dired-status-files-with-full-output-a))
 
 (defvar my/git-ui--face-theme-signature nil
   "Last theme signature applied by `my/git-apply-ui'.")

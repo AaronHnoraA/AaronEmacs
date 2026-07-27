@@ -297,7 +297,7 @@ default TCP connect timeout."
 ENVIRONMENT is an alist of target overrides.  DIRECTORY is a target-native
 absolute working directory.  The resulting local process exposes SSH's real
 stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation."
-  (pcase-let* ((`(,destination ,jumps ,config)
+  (pcase-let* ((`(,destination ,jumps ,_config)
                  (remote-backend-tramp--pipeline-ssh-parts route))
                 (ssh
                  (or (executable-find "ssh")
@@ -341,6 +341,45 @@ stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation."
     (append arguments
             (list (remote-backend-tramp--ssh-destination destination)
                   remote-shell))))
+
+(defun remote-backend-tramp-direct-copy-file
+    (route local-file target-file)
+  "Copy LOCAL-FILE to target-native TARGET-FILE over ROUTE's SCP channel.
+Return the local scp exit status.  This is intended for tool provisioning and
+other bulk pipeline transfers; ordinary editor file operations remain owned by
+the file-name handler."
+  (pcase-let* ((`(,destination ,jumps ,_config)
+                 (remote-backend-tramp--pipeline-ssh-parts route))
+                (scp
+                 (or (executable-find "scp")
+                     (signal
+                      'remote-backend-unsupported
+                      '("Local scp executable is unavailable"))))
+                (options
+                 (remote-backend-tramp--ssh-options
+                  (remote-route-pipeline route)))
+                (arguments nil))
+    (dolist (option options)
+      (setq arguments (append arguments (list "-o" option))))
+    (when jumps
+      (setq arguments
+            (append
+             arguments
+             (list "-J"
+                   (remote-backend-tramp--ssh-jump-argument jumps)))))
+    (when-let* ((port (remote-endpoint-port destination)))
+      (setq arguments
+            (append arguments (list "-P" (format "%s" port)))))
+    (let ((default-directory temporary-file-directory))
+      (apply
+       #'call-process scp nil nil nil
+       (append
+        arguments
+        (list
+         local-file
+         (format "%s:%s"
+                 (remote-backend-tramp--ssh-destination destination)
+                 target-file)))))))
 
 (defun remote-backend-tramp--ssh-forward-command
     (route local-host local-port remote-host remote-port)
@@ -444,7 +483,7 @@ stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation."
                 (remote-forward-metadata forward)
                 :diagnostic-buffer)))
     (when (buffer-live-p buffer)
-      (kill-buffer buffer))))
+      (remote--kill-internal-buffer buffer))))
 
 (defun remote-backend-tramp-forward
     (route context local-endpoint remote-endpoint metadata)
@@ -529,7 +568,7 @@ stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation."
                      :diagnostic
                      (with-current-buffer buffer
                        (buffer-string))))
-                   (kill-buffer buffer))))))
+                   (remote--kill-internal-buffer buffer))))))
           (let ((deadline
                  (+ (float-time)
                     remote-backend-ssh-forward-timeout)))
@@ -560,7 +599,7 @@ stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation."
          (when (process-live-p process)
            (delete-process process)))
        (when (buffer-live-p buffer)
-         (kill-buffer buffer))
+         (remote--kill-internal-buffer buffer))
        (signal (car error) (cdr error))))))
 
 (defun remote-backend-tramp--attach-forward (process forward)

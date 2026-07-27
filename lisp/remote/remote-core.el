@@ -161,6 +161,21 @@
 (defvar remote-current-route nil
   "Dynamically bound `remote-route' for the active operation.")
 
+(defun remote--kill-internal-buffer (buffer)
+  "Detach processes and kill framework-owned BUFFER without user hooks.
+Framework diagnostic and capture buffers are implementation details rather
+than file or UI buffers.  Running global `kill-buffer-hook' integrations from
+a process sentinel is both surprising and unsafe: many such integrations
+legitimately assume that a user buffer has a string `buffer-file-name'."
+  (when (buffer-live-p buffer)
+    (when-let* ((process (get-buffer-process buffer)))
+      (set-process-sentinel process #'ignore)
+      (set-process-buffer process nil))
+    (with-current-buffer buffer
+      (let ((kill-buffer-hook nil)
+            (kill-buffer-query-functions nil))
+        (kill-buffer buffer)))))
+
 (defun remote-normalize-id (id &optional noerror)
   "Return ID as a normalized string.
 Signal an error for invalid persisted identifiers unless NOERROR is non-nil."
@@ -413,6 +428,30 @@ PREFERENCES is an alist keyed by capability, adapter ID, or `default'."
                 (remote-adapter-id adapter)
                 capability))))))
 
+(defun remote--constraint-values (constraints modern legacy)
+  "Return normalized values from CONSTRAINTS under MODERN or LEGACY key."
+  (let ((value
+         (or (plist-get constraints modern)
+             (plist-get constraints legacy))))
+    (mapcar
+     (lambda (item) (format "%s" item))
+     (cond
+      ((null value) nil)
+      ((listp value) value)
+      (t (list value))))))
+
+(defun remote--pipeline-matches-p (pipeline values)
+  "Return non-nil when PIPELINE matches one of VALUES, or VALUES is nil."
+  (or
+   (null values)
+   (seq-some
+    (lambda (value)
+      (member value
+              (list
+               (remote-pipeline-id pipeline)
+               (remote-pipeline-short-id pipeline))))
+    values)))
+
 (defun remote--health-key (link capability)
   "Return health key for LINK and CAPABILITY."
   (list (remote-link-id link) capability))
@@ -586,19 +625,39 @@ cools the shared physical link."
          (target-id (and context (remote-context-target-id context)))
          (target (or (and target-id (remote-get-target target-id))
                      (error "No remote target for context: %S" context)))
+         (_adapter-check
+          (unless adapter
+            (error "Unknown remote adapter: %s" adapter-id)))
+         (_capability-check
+          (unless (memq capability (remote-adapter-capabilities adapter))
+            (error "Adapter %s does not support capability %s"
+                   adapter-id capability)))
          (preferences
           (remote--route-preferences
            target adapter capability context constraints))
-         (excluded
-          (mapcar (lambda (id) (format "%s" id))
-                  (or (plist-get constraints :exclude-links) nil)))
+         (required-pipelines
+          (remote--constraint-values constraints :pipeline :link))
+         (required-backends
+          (remote--constraint-values constraints :backend :plugin))
+         (excluded-pipelines
+          (append
+           (remote--constraint-values
+            constraints :exclude-pipelines :exclude-links)
+           nil))
          routes)
     (dolist (link (remote-links-for-target target-id))
       (when (and (remote-link-enabled link)
                  (memq capability (remote-link-capabilities link))
-                 (not (member (remote-link-id link) excluded)))
+                 (remote--pipeline-matches-p link required-pipelines)
+                 (or
+                  (null excluded-pipelines)
+                  (not
+                   (remote--pipeline-matches-p
+                    link excluded-pipelines))))
         (dolist (plugin-id (remote-link-plugin-ids link))
-          (when-let* ((plugin (remote-get-link-plugin plugin-id))
+          (when-let* (((or (null required-backends)
+                           (member plugin-id required-backends)))
+                      (plugin (remote-get-link-plugin plugin-id))
                       ((memq capability
                              (remote-link-plugin-capabilities plugin)))
                       ((remote--plugin-available-p plugin link context)))
@@ -750,7 +809,7 @@ or a target-local link ID.  When nil, resolve CAPABILITY for ADAPTER-ID."
   (remote-register-adapter
    "emacs-file"
    :capabilities '(file-read file-write directory metadata
-                   process-sync process-async watch)
+                   process-sync process-async watch environment)
    :preferences '((default . ("native" "tramp" "tramp-rpc")))))
 
 (remote-reset-registries)

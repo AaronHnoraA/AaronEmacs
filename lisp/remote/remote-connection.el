@@ -289,21 +289,28 @@ REASON is recorded for observability."
     (length routes)))
 
 (defun remote-connection-prune ()
-  "Remove pool entries whose configured link or backend disappeared."
-  (let (keys)
+  "Close pool entries whose configured pipeline or backend disappeared."
+  (let (routes)
     (maphash
-     (lambda (key connection)
+     (lambda (_key connection)
        (let ((link (remote-get-link
                     (remote-connection-link-id connection))))
          (unless
              (and link
                   (member (remote-connection-plugin-id connection)
                           (remote-link-plugin-ids link)))
-           (push key keys))))
+           (push
+            (remote-route-create
+             :target-id (remote-connection-target-id connection)
+             :pipeline-id (remote-connection-link-id connection)
+             :backend-id (remote-connection-plugin-id connection))
+            routes))))
      remote-connection-pool)
-    (dolist (key keys)
-      (remhash key remote-connection-pool))
-    (length keys)))
+    (dolist (route routes)
+      ;; `remote-connection-invalidate' still releases the shared pipeline
+      ;; runtime when the removed backend is no longer registered.
+      (remote-connection-invalidate route t 'configuration-removed))
+    (length routes)))
 
 (defun remote-connection-pool-clear (&optional disconnect)
   "Clear every pooled session, optionally asking backends to DISCONNECT."

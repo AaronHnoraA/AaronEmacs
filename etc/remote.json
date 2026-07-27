@@ -4,7 +4,19 @@
     "defaultPath": "/",
     "defaultAction": "open"
   },
-  "targets": [],
+  "targets": [
+    {
+      "id": "login.cse.unsw.edu.au",
+      "label": "login.cse.unsw.edu.au",
+      "trusted": true,
+      "workspaces": [
+        {
+          "id": "comp2511-lab03",
+          "path": "/import/reed/7/z5586493/Desktop/2511/lab03/lab03/"
+        }
+      ]
+    }
+  ],
   "imports": [
     {
       "id": "ssh-config",

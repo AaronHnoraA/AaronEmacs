@@ -35,7 +35,7 @@ This function is idempotent and is useful after
   (remote-register-adapter
    "emacs-file"
    :capabilities '(file-read file-write directory metadata
-                   process-sync process-async watch)
+                   process-sync process-async watch environment)
    :preferences '((default . ("native" "tramp" "tramp-rpc"))))
   (remote-register-adapter
    "process"
@@ -43,7 +43,7 @@ This function is idempotent and is useful after
    :preferences '((default . ("native" "tramp-rpc" "tramp"))))
   (remote-register-adapter
    "exec"
-   :capabilities '(process-sync environment)
+   :capabilities '(process-sync process-async environment)
    :preferences '((default . ("tramp-rpc" "tramp" "native"))))
   (remote-register-adapter
    "environment"

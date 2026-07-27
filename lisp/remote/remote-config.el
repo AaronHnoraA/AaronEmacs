@@ -32,6 +32,80 @@
 (defvar remote-config-generation 0)
 (defvar remote-config-after-load-hook nil)
 
+(defun remote-config--copy-target-registry ()
+  "Return a detached copy of `remote-targets' for transactional loading."
+  (let ((result (make-hash-table :test (hash-table-test remote-targets))))
+    (maphash
+     (lambda (id target)
+       (let ((copy (copy-remote-target target)))
+         (setf
+          (remote-target-links copy)
+          (copy-sequence (remote-target-links target))
+          (remote-target-workspaces copy)
+          (copy-tree (remote-target-workspaces target))
+          (remote-target-environment copy)
+          (copy-tree (remote-target-environment target))
+          (remote-target-preferences copy)
+          (copy-tree (remote-target-preferences target)))
+         (puthash id copy result)))
+     remote-targets)
+    result))
+
+(defun remote-config--copy-pipeline-registry ()
+  "Return a detached copy of `remote-pipelines' for transactional loading."
+  (let ((result (make-hash-table :test (hash-table-test remote-pipelines))))
+    (maphash
+     (lambda (id pipeline)
+       (let ((copy (copy-remote-pipeline pipeline)))
+         (setf
+          (remote-pipeline-backend-ids copy)
+          (copy-sequence (remote-pipeline-backend-ids pipeline))
+          (remote-pipeline-config copy)
+          (copy-tree (remote-pipeline-config pipeline))
+          (remote-pipeline-capabilities copy)
+          (copy-sequence (remote-pipeline-capabilities pipeline)))
+         (puthash id copy result)))
+     remote-pipelines)
+    result))
+
+(defun remote-config--changed-pipelines (old new)
+  "Return non-local pipeline IDs changed between OLD and NEW registries."
+  (let (ids changed)
+    (maphash (lambda (id _pipeline) (push id ids)) old)
+    (maphash (lambda (id _pipeline) (push id ids)) new)
+    (dolist (id (delete-dups ids))
+      (let ((before (gethash id old))
+            (after (gethash id new)))
+        (when (and
+               (not
+                (equal
+                 (and before (remote-pipeline-target-id before))
+                 "local"))
+               (not (equal before after)))
+          (push id changed))))
+    changed))
+
+(defun remote-config--invalidate-pipelines (pipeline-ids)
+  "Close sessions and orphan runtimes belonging to PIPELINE-IDS."
+  (dolist (pipeline-id pipeline-ids)
+    (when (fboundp 'remote-connection-invalidate-link)
+      (remote-connection-invalidate-link
+       pipeline-id t 'config-reload))
+    ;; A runtime normally belongs to a session.  Also close any runtime left
+    ;; behind by an interrupted backend startup.
+    (when (boundp 'remote-pipeline-runtime-pool)
+      (let (runtimes)
+        (maphash
+         (lambda (_key runtime)
+           (when
+               (equal
+                (remote-pipeline-runtime-pipeline-id runtime)
+                pipeline-id)
+             (push runtime runtimes)))
+         remote-pipeline-runtime-pool)
+        (dolist (runtime runtimes)
+          (remote-pipeline-close runtime 'config-reload))))))
+
 (defun remote-config--string-list (value)
   "Return VALUE as a list of strings."
   (cond
@@ -246,16 +320,22 @@ Both v2 backend keys and v1 plugin keys are accepted."
   (let ((file (or file remote-config-file)))
     (unless (file-readable-p file)
       (error "Remote config is not readable: %s" file))
-    (let ((json-object-type 'alist)
-          (json-array-type 'list)
-          (json-key-type 'symbol)
-          (json-false nil))
-      (let ((root (json-read-file file)))
-        (setq remote-config-version
-              (remote-config--schema-version root))
+    (let* ((json-object-type 'alist)
+           (json-array-type 'list)
+           (json-key-type 'symbol)
+           (json-false nil)
+           (root (json-read-file file))
+           (version (remote-config--schema-version root))
+           (settings (alist-get 'settings root))
+           (old-pipelines remote-pipelines)
+           (staged-targets (remote-config--copy-target-registry))
+           (staged-pipelines (remote-config--copy-pipeline-registry)))
+      ;; All validation and registration happens against detached registries.
+      ;; A malformed import or conflicting pipeline therefore leaves the live
+      ;; targets, sessions, and generation untouched.
+      (let ((remote-targets staged-targets)
+            (remote-pipelines staged-pipelines))
         (remote-config--clear-loaded-objects)
-        (setq remote-config-settings
-              (alist-get 'settings root))
         (dolist (target (alist-get 'targets root))
           (remote-config--register-target-object target))
         (dolist (import (alist-get 'imports root))
@@ -264,15 +344,23 @@ Both v2 backend keys and v1 plugin keys are accepted."
             (type
              (remote-log
               'config-warning
-              :message (format "Unknown remote import type: %S" type)))))
-        (cl-incf remote-config-generation)
-        (run-hooks 'remote-config-after-load-hook)
-        (remote-log
-         'config
-         :file file
-         :version remote-config-version
-         :generation remote-config-generation)
-        t))))
+              :message (format "Unknown remote import type: %S" type))))))
+      (let ((changed
+             (remote-config--changed-pipelines
+              old-pipelines staged-pipelines)))
+        (setq remote-targets staged-targets
+              remote-pipelines staged-pipelines
+              remote-config-version version
+              remote-config-settings settings)
+        (remote-config--invalidate-pipelines changed))
+      (cl-incf remote-config-generation)
+      (run-hooks 'remote-config-after-load-hook)
+      (remote-log
+       'config
+       :file file
+       :version remote-config-version
+       :generation remote-config-generation)
+      t)))
 
 (defalias 'remote-config-reload #'remote-config-load)
 

@@ -184,7 +184,7 @@
            (remote-doctor--check
             'probe 'error (error-message-string error)
             "Inspect transport, authentication, and remote executable PATH")))
-      (kill-buffer buffer))))
+      (remote--kill-internal-buffer buffer))))
 
 (defun remote-doctor-report (&optional target probe)
   "Return a structured diagnostic report for TARGET.

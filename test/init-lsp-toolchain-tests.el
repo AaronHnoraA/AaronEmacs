@@ -98,5 +98,24 @@
       (should (eq (plist-get (my/language-server-current-toolchain-profile) :id)
                   'local)))))
 
+(ert-deftest my/toolchain-restores-provider-specific-lsp-variables ()
+  (my/toolchain-test-with-project nil
+    (my/register-language-server-toolchain-provider
+     'test '(my/toolchain-test-mode)
+     (lambda (_root)
+       '((:id selected :label "Selected" :default t)))
+     :apply
+     (lambda (_profile _root)
+       (my/language-server-toolchain-set-local-variable
+        'my/toolchain-test-client-option 'target-value)))
+    (with-temp-buffer
+      (my/toolchain-test-mode)
+      (setq-local my/toolchain-test-client-option 'original)
+      (my/language-server-toolchain-apply-environment)
+      (should (eq my/toolchain-test-client-option 'target-value))
+      (my/language-server-toolchain-restore-buffer)
+      (should (local-variable-p 'my/toolchain-test-client-option))
+      (should (eq my/toolchain-test-client-option 'original)))))
+
 (provide 'init-lsp-toolchain-tests)
 ;;; init-lsp-toolchain-tests.el ends here

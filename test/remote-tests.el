@@ -45,7 +45,7 @@
       :preferences '((default . ("native" "tramp-rpc" "tramp"))))
      (remote-register-adapter
       "exec"
-      :capabilities '(process-sync environment)
+      :capabilities '(process-sync process-async environment)
       :preferences '((default . ("tramp-rpc" "tramp" "native"))))
      (remote-register-adapter
       "environment"
@@ -97,6 +97,32 @@
              remote-port-forward))
     (should (fboundp function)))
   (should (macrop 'remote-with-route)))
+
+(ert-deftest remote-emacs-file-adapter-supports-environment-operations ()
+  "File-name handlers may receive `exec-path' while visiting a file.
+Citre and similar packages use this operation from `find-file-hook', so
+the default file adapter must route it without aborting later hooks."
+  (remote-test-with-registry
+    (should
+     (memq 'environment
+           (remote-adapter-capabilities
+            (remote-get-adapter "emacs-file"))))))
+
+(ert-deftest remote-file-operations-do-not-inherit-process-only-adapters ()
+  "Nested native file APIs keep the standard file caller contract."
+  (remote-test-with-registry
+    (remote-register-adapter
+     "language-server"
+     :capabilities '(process-sync process-async lsp environment))
+    (let ((remote-current-adapter-id "language-server"))
+      (should
+       (equal
+        (remote-fs--adapter-for-capability 'metadata)
+        "emacs-file"))
+      (should
+       (equal
+        (remote-fs--adapter-for-capability 'environment)
+        "language-server")))))
 
 (ert-deftest remote-canonicalize-tilde-default-does-not-reenter-target-inference ()
   (remote-test-with-registry
@@ -834,6 +860,36 @@
       (should (eq (gethash root direnv--export-processes)
                   'mock-process)))))
 
+(ert-deftest remote-direnv-backs-off-unchanged-export-failures ()
+  (let* ((direnv--export-failures (make-hash-table :test #'equal))
+         (direnv-export-failure-retry-delay 60)
+         (root "/fs:local:/tmp/project/")
+         (fingerprint '(fingerprint))
+         (failure '(error "broken export"))
+         (context
+          (remote-context-create
+           :target-id "local"
+           :localname "/tmp/project/"
+           :workspace-root root))
+         (starts 0))
+    (direnv--record-export-failure root fingerprint failure)
+    (cl-letf (((symbol-function 'direnv--transport-busy-p) (lambda () nil))
+              ((symbol-function 'direnv--envrc-root)
+               (lambda (&optional _path) root))
+              ((symbol-function 'remote-context)
+               (lambda (&optional _path) context))
+              ((symbol-function 'direnv--fingerprint)
+               (lambda (_context) fingerprint))
+              ((symbol-function 'direnv--cached-export)
+               (lambda (_root _fingerprint) nil))
+              ((symbol-function 'direnv--start-export)
+               (lambda (&rest _arguments) (cl-incf starts))))
+      (with-temp-buffer
+        (should
+         (eq (direnv-environment-ensure-async root) 'pending))
+        (should (equal direnv--last-error failure))
+        (should (zerop starts))))))
+
 (ert-deftest remote-direnv-detects-locked-tramp-connection ()
   (let ((process
          (make-pipe-process
@@ -848,6 +904,52 @@
             (should (direnv--transport-busy-p))))
       (when (process-live-p process)
         (delete-process process)))))
+
+(ert-deftest remote-exec-async-keeps-framework-sentinel-text-out-of-stderr ()
+  (remote-test-with-registry
+    (let (result)
+      (let ((process
+             (remote-exec-async
+              "sh"
+              :args '("-c" "printf output; printf error >&2")
+              :context
+              (remote-context
+               (remote-canonicalize-file-name temporary-file-directory))
+              :callback (lambda (value) (setq result value)))))
+        (while (process-live-p process)
+          (accept-process-output process 0.1))
+        (while (null result)
+          (accept-process-output nil 0.05)))
+      (should (zerop (remote-exec-result-status result)))
+      (should (equal (remote-exec-result-stdout result) "output"))
+      (should (equal (remote-exec-result-stderr result) "error")))))
+
+(ert-deftest remote-exec-async-contains-callback-errors-and-cleans-buffers ()
+  (remote-test-with-registry
+    (let ((process
+           (remote-exec-async
+            "sh"
+            :args '("-c" "printf output")
+            :context
+            (remote-context
+             (remote-canonicalize-file-name temporary-file-directory))
+            :callback (lambda (_result) (error "consumer failed")))))
+      (while (process-live-p process)
+        (accept-process-output process 0.1))
+      (while (not (process-get process 'remote-exec-callback-done))
+        (accept-process-output nil 0.05))
+      (while (buffer-live-p (process-buffer process))
+        (accept-process-output nil 0.05))
+      (should-not (buffer-live-p (process-buffer process)))
+      (should
+       (seq-some
+        (lambda (entry)
+          (and
+           (eq (plist-get entry :kind) 'process-callback-error)
+           (string-match-p
+            "consumer failed"
+            (plist-get entry :error))))
+        remote-route-log)))))
 
 (ert-deftest remote-internal-process-buffer-skips-user-kill-hooks ()
   (let ((buffer

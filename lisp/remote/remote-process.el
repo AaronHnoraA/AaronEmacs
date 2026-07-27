@@ -145,21 +145,57 @@ When the process did not emit its frame, retain all received data as stdout."
               (and (boundp 'exec-directory) (list exec-directory)))
     fallback))
 
-(defun remote--kill-internal-process-buffer (buffer)
-  "Detach and kill an internal process BUFFER without running user hooks.
-Routed execution owns its stdout and stderr buffers.  Global buffer cleanup
-hooks commonly assume `buffer-file-name' is a string; letting them run from a
-process sentinel turns an otherwise successful command into a misleading
-`wrong-type-argument stringp nil' sentinel error.  Internal buffers have no
-user-visible lifecycle, so detach their process and suppress query/kill hooks."
-  (when (buffer-live-p buffer)
-    (when-let* ((process (get-buffer-process buffer)))
-      (set-process-sentinel process #'ignore)
-      (set-process-buffer process nil))
-    (with-current-buffer buffer
-      (let ((kill-buffer-hook nil)
-            (kill-buffer-query-functions nil))
-        (kill-buffer buffer)))))
+;; `remote-process.el' is also a practical hot-reload boundary while debugging
+;; a live connection.  Define the core cleanup primitive when that Emacs
+;; instance predates it, so reloading this file repairs already-running
+;; configurations without resetting registries by reloading `remote-core.el'.
+(unless (fboundp 'remote--kill-internal-buffer)
+  (defun remote--kill-internal-buffer (buffer)
+    "Detach processes and kill framework-owned BUFFER without user hooks."
+    (when (buffer-live-p buffer)
+      (when-let* ((process (get-buffer-process buffer)))
+        (set-process-sentinel process #'ignore)
+        (set-process-buffer process nil))
+      (with-current-buffer buffer
+        (let ((kill-buffer-hook nil)
+              (kill-buffer-query-functions nil))
+          (kill-buffer buffer))))))
+
+(defalias 'remote--kill-internal-process-buffer
+  #'remote--kill-internal-buffer)
+
+(defun remote--dispose-async-capture-resources
+    (stderr-process stdout-buffer stderr-buffer)
+  "Dispose one async request's STDERR-PROCESS and capture buffers.
+This function runs after the owning process sentinel has returned.  Detaching
+or killing a process's own buffer from inside its sentinel can re-enter Emacs'
+process/file-handler cleanup and fail before either capture buffer is freed."
+  (when (and (processp stderr-process)
+             (process-live-p stderr-process))
+    (delete-process stderr-process))
+  (dolist (buffer (list stdout-buffer stderr-buffer))
+    (condition-case cleanup-error
+        (remote--kill-internal-process-buffer buffer)
+      (error
+       (remote-log
+        'process-cleanup-error
+        :buffer (and (buffer-live-p buffer) (buffer-name buffer))
+        :error (error-message-string cleanup-error))))))
+
+(defun remote--schedule-async-capture-cleanup
+    (owner-process stderr-process stdout-buffer stderr-buffer)
+  "Detach and later clean one async request's capture resources.
+OWNER-PROCESS is already terminal when called from its sentinel.  Detaching
+its buffer synchronously makes completion observable immediately without
+killing a buffer from inside that sentinel; actual buffer/process disposal is
+deferred until the event loop has unwound."
+  (when (processp owner-process)
+    (set-process-buffer owner-process nil))
+  (when (processp stderr-process)
+    (set-process-buffer stderr-process nil))
+  (run-at-time
+   0 nil #'remote--dispose-async-capture-resources
+   stderr-process stdout-buffer stderr-buffer))
 
 (defun remote--logical-process-directory (context &optional directory)
   "Return the canonical logical working directory for CONTEXT.
@@ -564,6 +600,20 @@ ADAPTER, LINK, ENVIRONMENT, and ARGS have the same meaning as in
           (generate-new-buffer " *remote-exec-async-stdout*"))
          (stderr-buffer
           (generate-new-buffer " *remote-exec-async-stderr*"))
+         ;; Supplying a buffer as `make-process' :stderr makes Emacs allocate
+         ;; an auxiliary process with `internal-default-process-sentinel'.
+         ;; That sentinel appends "Process ... stderr finished" to the buffer,
+         ;; corrupting the command's stderr.  Own the pipe explicitly so its
+         ;; sentinel is quiet and its lifetime is bounded with this request.
+         (stderr-process
+          (make-pipe-process
+           :name
+           (generate-new-buffer-name
+            (format "remote-%s-stderr"
+                    (file-name-nondirectory program)))
+           :buffer stderr-buffer
+           :noquery t
+           :sentinel #'ignore))
          (stderr-token (remote--stderr-frame-token))
          (command (cons program args))
          process)
@@ -574,7 +624,7 @@ ADAPTER, LINK, ENVIRONMENT, and ARGS have the same meaning as in
                          (format "remote-%s"
                                  (file-name-nondirectory program)))
                :buffer stdout-buffer
-               :stderr stderr-buffer
+               :stderr stderr-process
                :command command
                :coding coding
                :connection-type 'pipe
@@ -587,7 +637,8 @@ ADAPTER, LINK, ENVIRONMENT, and ARGS have the same meaning as in
                :sentinel
                (lambda (finished _event)
                  (when (and
-                        (memq (process-status finished) '(exit signal))
+                        (memq (process-status finished)
+                              '(exit signal failed closed))
                         (not (process-get finished
                                           'remote-exec-callback-done)))
                    (process-put finished 'remote-exec-callback-done t)
@@ -614,7 +665,11 @@ ADAPTER, LINK, ENVIRONMENT, and ARGS have the same meaning as in
                                "")))
                           (result
                            (remote-exec-result-create
-                            :status (process-exit-status finished)
+                            :status
+                            (if (memq (process-status finished)
+                                      '(exit signal))
+                                (process-exit-status finished)
+                              1)
                             :stdout stdout
                             :stderr stderr
                             :route (process-get finished 'remote-route)
@@ -622,14 +677,25 @@ ADAPTER, LINK, ENVIRONMENT, and ARGS have the same meaning as in
                             :command command)))
                      (unwind-protect
                          (when callback
-                           (if (buffer-live-p origin-buffer)
-                               (with-current-buffer origin-buffer
+                           (condition-case callback-error
+                               (if (buffer-live-p origin-buffer)
+                                   (with-current-buffer origin-buffer
+                                     (funcall callback result))
                                  (funcall callback result))
-                             (funcall callback result)))
-                       (remote--kill-internal-process-buffer stdout-buffer)
-                       (remote--kill-internal-process-buffer
-                        stderr-buffer)))))))
+                             (error
+                              (remote-log
+                               'process-callback-error
+                               :process (process-name finished)
+                               :target
+                               (remote-context-target-id context)
+                               :error
+                               (error-message-string callback-error)))))
+                       (remote--schedule-async-capture-cleanup
+                        finished stderr-process
+                        stdout-buffer stderr-buffer)))))))
       (error
+       (when (process-live-p stderr-process)
+         (delete-process stderr-process))
        (remote--kill-internal-process-buffer stdout-buffer)
        (remote--kill-internal-process-buffer stderr-buffer)
        (signal (car err) (cdr err))))
@@ -642,7 +708,7 @@ ADAPTER, LINK, ENVIRONMENT, and ARGS have the same meaning as in
 
 (remote-register-adapter
  "exec"
- :capabilities '(process-sync environment)
+ :capabilities '(process-sync process-async environment)
  :preferences '((default . ("tramp-rpc" "tramp" "native"))))
 
 (provide 'remote-process)
