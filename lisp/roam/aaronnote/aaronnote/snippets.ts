@@ -29,6 +29,16 @@ export type SnippetExpansionOptions = {
 
 const SAFE_SELECTED_TEXT_RE = /`\(or\s+yas-selected-text\s+(?:"([^"]*)"|'([^']*)|nil)\)`/g;
 const SAFE_CHOICE_RE = /\$\{(\d+):\$\$\(yas-choose-value\s+'\(([^)]*)\)\)\}/g;
+const YAS_TABSTOP_RE = /\$(?:\d+|\{\d+(?::[^}]*)?\})/;
+
+function hasDynamicBacktickExpression(body: string): boolean {
+  for (const match of body.matchAll(/`([^`]*)`/g)) {
+    // A backtick span containing a field is Markdown snippet output (for
+    // example, `$1`), not a YAS backquoted Emacs Lisp expression.
+    if (!YAS_TABSTOP_RE.test(match[1] ?? "")) return true;
+  }
+  return false;
+}
 
 function decodeYasQuotedList(source: string): string[] {
   const values: string[] = [];
@@ -55,7 +65,7 @@ export function snippetBrowserCompatibility(body: string): { compatible: boolean
   const stripped = String(body || "")
     .replace(SAFE_SELECTED_TEXT_RE, "")
     .replace(SAFE_CHOICE_RE, "");
-  if (/`[^`]*`/.test(stripped) || /\$\$?\([^)]*\)/.test(stripped)) {
+  if (hasDynamicBacktickExpression(stripped) || /\$\$?\([^)]*\)/.test(stripped)) {
     return { compatible: false, diagnostic: "dynamic Emacs Lisp is not executed in Aaronnote" };
   }
   if (/\$\{(?:TM_[A-Z_]+|[A-Z][A-Z0-9_]+)(?::[^}]*)?\}/.test(stripped)) {

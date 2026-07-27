@@ -30,7 +30,7 @@ describe("server snippet catalog", () => {
     expect(parsed.body).toBe("body  \n");
   });
 
-  test("uses explicit priority, merges upstream weight, and marks dynamic Lisp unsafe", async () => {
+  test("uses explicit priority, merges upstream weight, and classifies backtick snippets", async () => {
     const root = await mkdtemp(join(tmpdir(), "aaronnote-snippets-"));
     const personal = join(root, "personal", "tex-mode");
     const upstream = join(root, "upstream", "tex-mode");
@@ -39,6 +39,7 @@ describe("server snippet catalog", () => {
     await writeFile(join(personal, "alpha"), "# key: alpha\n# provider: personal\n# priority: 500\n# --\n\\alpha$0\n");
     await writeFile(join(upstream, "alpha"), "# key: alpha\n# provider: overleaf\n# priority: 160\n# weight: 7.5\n# --\n\\alpha$0\n");
     await writeFile(join(personal, "unsafe"), "# key: unsafe\n# --\n`(message \\\"x\\\")`\n");
+    await writeFile(join(personal, "inline-code"), "# key: icode\n# --\n`$1` $0\n");
     process.env.AARONNOTE_SNIPPETS = [join(root, "personal"), join(root, "upstream")].join(delimiter);
 
     const snippets = await scanSnippets({ force: true });
@@ -46,6 +47,7 @@ describe("server snippet catalog", () => {
     expect(alpha?.provider).toBe("personal");
     expect(alpha?.weight).toBe(7.5);
     expect(snippets.find((snippet: ScannedSnippet) => snippet.key === "unsafe")?.browserCompatible).toBe(false);
+    expect(snippets.find((snippet: ScannedSnippet) => snippet.key === "icode")?.browserCompatible).toBe(true);
   });
 
   test("decodes generated metadata from YAS-native headers", async () => {

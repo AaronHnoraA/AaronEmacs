@@ -4873,7 +4873,9 @@ function snippetBrowserCompatibility(body) {
   const safeSelected = /`\(or\s+yas-selected-text\s+(?:"[^"]*"|'[^']*'|nil)\)`/g;
   const safeChoice = /\$\{\d+:\$\$\(yas-choose-value\s+'\([^)]*\)\)\}/g;
   const stripped = String(body || "").replace(safeSelected, "").replace(safeChoice, "");
-  if (/`[^`]*`/.test(stripped) || /\$\$?\([^)]*\)/.test(stripped)) {
+  const dynamicBacktick = [...stripped.matchAll(/`([^`]*)`/g)]
+    .some((match) => !/\$(?:\d+|\{\d+(?::[^}]*)?\})/.test(match[1] || ""));
+  if (dynamicBacktick || /\$\$?\([^)]*\)/.test(stripped)) {
     return { browserCompatible: false, diagnostic: "dynamic Emacs Lisp is not executed in Aaronnote" };
   }
   if (/\$\{(?:TM_[A-Z_]+|[A-Z][A-Z0-9_]+)(?::[^}]*)?\}/.test(stripped)) {

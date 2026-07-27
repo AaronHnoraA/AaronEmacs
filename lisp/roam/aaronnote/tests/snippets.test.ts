@@ -136,6 +136,7 @@ describe("aaronnote snippets", () => {
     }, { selectedText: "v" });
     expect(wrapped.text).toBe("\\hat{v}");
     expect(snippetBrowserCompatibility("`(message \"unsafe\")`").compatible).toBe(false);
+    expect(snippetBrowserCompatibility("`$1` $0").compatible).toBe(true);
   });
 
   test("local usage affects only equal match tiers and can be cleared", () => {
