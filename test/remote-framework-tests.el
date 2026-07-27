@@ -70,7 +70,11 @@
              remote-environment-resolve
              remote-workspace-open
              remote-workspace-reconnect
+             remote-workspace-track-route
+             remote-workspace-find-resource
              remote-workspace-register-recoverable-resource
+             remote-workspace-ensure-recoverable-resource
+             remote-workspace-add-file-watch
              remote-register-service
              remote-service-ensure
              remote-service-restart
@@ -104,6 +108,70 @@
       (should
        (equal (mapcar #'remote-pipeline-stage-transport stages)
               '("tailscale" "ssh" "frp"))))))
+
+(ert-deftest remote-builtin-ssh-pipeline-owns-one-lazy-control-path ()
+  (remote-framework-test-with-registry
+    (remote-register-target "lab" :trusted t)
+    (let* ((pipeline
+            (remote-register-pipeline
+             "lab" "managed" "tramp"
+             :stages
+             '((:id "target" :transport "ssh"
+                :config (:host "lab" :user "dev")))
+             :config '(:host "lab")))
+           (context
+            (remote-context-create
+             :target-id "lab"
+             :localname "/work/"
+             :workspace-root "/fs:lab:/work/"))
+           (route
+            (remote-route-create
+             :target-id "lab"
+             :pipeline-id (remote-pipeline-id pipeline)
+             :backend-id "tramp"
+             :capability 'process-async
+             :adapter-id "process"))
+           first second control)
+      (unwind-protect
+          (progn
+            (setq first (remote-pipeline-acquire route context)
+                  second (remote-pipeline-acquire route context)
+                  control
+                  (remote-stage-runtime-handle
+                   (car (remote-pipeline-runtime-stages first))))
+            (should (eq first second))
+            (should (remote-ssh-control-p control))
+            (should
+             (equal
+              (remote-ssh-control-destination control)
+              "dev@lab"))
+            (should-not
+             (file-exists-p
+              (remote-ssh-control-path control)))
+            (let ((remote-current-pipeline-runtime first))
+              (should
+               (equal
+                (remote-transport-ssh-control-options)
+                (list
+                 "ControlMaster=auto"
+                 (format
+                  "ControlPersist=%d"
+                  remote-transport-ssh-control-persist)
+                 (format
+                  "ControlPath=%s"
+                  (remote-ssh-control-path control))))))
+            (remote-pipeline-release first)
+            (should
+             (eq (remote-pipeline-runtime-state first) 'open))
+            (remote-pipeline-release second)
+            (should
+             (eq (remote-pipeline-runtime-state first) 'closed))
+            (should
+             (eq (remote-ssh-control-state control) 'closed)))
+        (when (and first
+                   (not
+                    (eq (remote-pipeline-runtime-state first) 'closed)))
+          (remote-pipeline-release first t 'test-cleanup))))))
 
 (ert-deftest remote-pipeline-compiles-multi-hop-tramp-path ()
   (remote-framework-test-with-registry
@@ -520,6 +588,73 @@
       (should (equal closed '(handle test-complete)))
       (should (eq (remote-workspace-state first) 'closed))
       (should-not (remote-get-workspace "local@project")))))
+
+(ert-deftest remote-workspace-recoverable-resource-is-keyed-and-idempotent ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local"
+             :localname "/tmp/project/a.el"
+             :workspace-id "keyed"
+             :workspace-root "/fs:local:/tmp/project/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (first
+            (remote-workspace-ensure-recoverable-resource
+             workspace 'lsp '(eglot root) 'server-1
+             :recover (lambda (&rest _arguments) 'server-2)))
+           (second
+            (remote-workspace-ensure-recoverable-resource
+             workspace 'lsp '(eglot root) 'server-current
+             :recover (lambda (&rest _arguments) 'server-recovered))))
+      (should (eq first second))
+      (should (= (length (remote-workspace-resources workspace)) 1))
+      (should
+       (eq (remote-workspace-resource-value first) 'server-current))
+      (remote-workspace-recover-resource workspace first)
+      (should
+       (eq (remote-workspace-resource-value first) 'server-recovered))
+      (should
+       (eq
+        (remote-workspace-find-resource workspace 'lsp '(eglot root))
+        first))
+      (remote-workspace-forget-resource workspace first)
+      (should-not (remote-workspace-resources workspace)))))
+
+(ert-deftest remote-workspace-file-watch-uses-one-target-neutral-lifecycle ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local"
+             :localname "/tmp/project/a.el"
+             :workspace-id "watch"
+             :workspace-root "/fs:local:/tmp/project/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (opened nil)
+           (closed nil)
+           (next 0))
+      (cl-letf
+          (((symbol-function 'file-notify-add-watch)
+            (lambda (file flags callback)
+              (push (list file flags callback) opened)
+              (list 'descriptor (cl-incf next))))
+           ((symbol-function 'file-notify-rm-watch)
+            (lambda (descriptor)
+              (push descriptor closed))))
+        (let ((resource
+               (remote-workspace-add-file-watch
+                workspace "src/" '(change attribute-change) #'ignore
+                :key 'sources)))
+          (should
+           (equal
+            (caar opened)
+            "/fs:local:/tmp/project/src/"))
+          (remote-workspace-recover-resource workspace resource)
+          (should (= (length opened) 2))
+          (should (equal closed '((descriptor 1))))
+          (should
+           (equal
+            (remote-workspace-resource-value resource)
+            '(descriptor 2))))))))
 
 (ert-deftest remote-workspace-reconnect-retries-transport-and-recovers-resources ()
   (remote-framework-test-with-registry
@@ -1453,6 +1588,8 @@
             "-o" "ExitOnForwardFailure=yes"
             "-o" "ServerAliveInterval=30"
             "-o" "ServerAliveCountMax=3"
+            "-o" "ConnectTimeout=8"
+            "-o" "ConnectionAttempts=1"
             "-J" "ops@edge:2222"
             "-L" "127.0.0.1:49152:127.0.0.1:3000"
             "dev@lab")))))))
@@ -1489,6 +1626,8 @@
             "-o" "ServerAliveInterval=30"
             "-o" "ServerAliveCountMax=3"
             "-v"
+            "-o" "ConnectTimeout=8"
+            "-o" "ConnectionAttempts=1"
             "-J" "ops@edge:2222"
             "-R" "127.0.0.1:49152:127.0.0.1:3000"
             "dev@lab")))))))

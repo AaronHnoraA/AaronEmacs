@@ -16,6 +16,14 @@ Treemacs 不再直接挂在项目工作台里，而是交给 `show-imenu` 和手
 
 这几层现在已经接起来了。
 
+### 项目身份与 target
+
+项目/workspace 一旦进入开发框架，就以 `/fs:TARGET:/root` 作为稳定身份；本机项目的
+target 是 `local`，远程项目只是另一个 target。项目搜索、终端、LSP、环境、watch、
+SCM 与后续 debug/task 集成都应从这个同一 identity 派生，不能各自用
+`file-remote-p` 再判断一次。本地普通 buffer 在框架外仍保留原生文件名，因此不会
+牺牲 Emacs package 兼容性。
+
 ## 2. 最常用入口
 
 - `SPC p .`

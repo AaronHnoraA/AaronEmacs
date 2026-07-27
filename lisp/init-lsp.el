@@ -12,8 +12,11 @@
 
 (require 'cl-lib)
 (require 'init-lsp-toolchain)
+(require 'project)
+(require 'remote-channel)
 (require 'remote-process)
 (require 'remote-environment)
+(require 'remote-workspace)
 (require 'subr-x)
 
 (eval-when-compile
@@ -64,11 +67,41 @@ Each entry is a plist with keys such as `:modes', `:program',
   :type '(choice (const :tag "Disabled" nil) (integer :tag "Seconds"))
   :group 'my/language-server)
 
-(config-defvar my/language-server-disable-file-watchers-on-remote nil
-  "Disable `lsp-mode' file watchers in remote buffers."
-  :type 'boolean
+(config-defvar my/language-server-file-watch-policy 'auto
+  "Policy for language-server dynamic file-watch registrations.
+
+`auto' preserves Eglot's native watcher behavior when the project has a path
+directly accessible to the Emacs client.  For a target-only filesystem it
+declines dynamic `workspace/didChangeWatchedFiles' registration: Eglot
+advertises that capability as unsupported for remote roots, and accepting it
+would otherwise create one SSH-backed watcher per project directory.
+
+`native' always accepts Eglot's registration, and is intended only for
+backends whose watcher implementation is known to scale.  `disabled' declines
+all dynamic file-watch registrations."
+  :type '(choice
+          (const :tag "Automatic placement-aware policy" auto)
+          (const :tag "Always use Eglot watchers" native)
+          (const :tag "Disable dynamic watchers" disabled))
   :group 'my/language-server)
 
+(config-register
+ 'eglot-autoreconnect
+ :type '(choice (const :tag "Disabled" nil)
+                (const :tag "Immediate" t)
+                integer)
+ :group 'my/language-server
+ :doc "Eglot crash-loop guard before automatic reconnect is allowed.")
+
+(config-register
+ 'lsp-restart
+ :type '(choice (const interactive)
+                (const auto-restart)
+                (const ignore))
+ :group 'my/language-server
+ :doc "lsp-mode policy after a language-server process exits.")
+
+(defvar eglot--cached-server)
 (defvar eglot-events-buffer-config)
 (defvar eglot-stay-out-of)
 (defvar eglot-server-programs)
@@ -80,18 +113,20 @@ Each entry is a plist with keys such as `:modes', `:program',
 (defvar company-dabbrev-code-everywhere)
 (defvar company-files-exclusions)
 (defvar lsp-managed-mode)
+(defvar lsp--cur-workspace)
 (defvar lsp-completion-provider)
 (defvar lsp-diagnostics-provider)
-(defvar lsp-enable-file-watchers)
-(defvar lsp-file-watch-threshold)
+(defvar lsp-restart)
 (defvar read-process-output-max)
 
 (dolist (adapter '("language-server" "eglot" "lsp-mode"))
   (remote-register-adapter
    adapter
-   :capabilities '(process-sync process-async lsp environment)
+   :capabilities '(process-sync process-async watch lsp environment
+                   network-client)
    :preferences '((default . ("tramp-rpc" "tramp" "native")))
-   :placement 'target))
+   :placement 'target
+   :process-class 'interactive))
 
 (defvar my/language-server--managed-buffer-count 0
   "Number of buffers currently counted for LSP performance tuning.")
@@ -128,7 +163,13 @@ Each entry is a plist with keys such as `:modes', `:program',
 (declare-function lsp-feature? "lsp-mode" (method))
 (declare-function lsp--update-inlay-hints "lsp-mode" ())
 (declare-function lsp--workspace-buffers "lsp-mode" (workspace))
+(declare-function lsp--workspace-client "lsp-mode" (workspace))
+(declare-function lsp--workspace-root "lsp-mode" (workspace))
+(declare-function lsp--client-server-id "lsp-mode" (client))
+(declare-function lsp-workspace-restart "lsp-mode" (workspace))
 (declare-function eglot-current-server "eglot")
+(declare-function eglot--project "eglot" (server))
+(declare-function eglot-reconnect "eglot" (server &optional interactive))
 (declare-function eglot-code-actions "eglot" ())
 (declare-function eglot-find-implementation "eglot" ())
 (declare-function eglot-find-typeDefinition "eglot" ())
@@ -168,8 +209,9 @@ Each entry is a plist with keys such as `:modes', `:program',
     (expand-file-name path)))
 
 (defun my/language-server-executable-find (program)
-  "Return PROGRAM path for the current local or remote buffer."
-  (remote-executable-find program))
+  "Return PROGRAM path in the current language-server target."
+  (let ((remote-current-adapter-id "language-server"))
+    (remote-executable-find program)))
 
 (defun my/language-server-executable-available-p (program)
   "Return non-nil when PROGRAM is available locally or on the remote host."
@@ -401,18 +443,7 @@ byte-compile backend does not emit noisy warnings on startup."
     (my/language-server-toolchain-apply-eglot-settings)))
 
 (defun my/language-server-apply-lsp-local-settings ()
-  "Apply local `lsp-mode' settings before startup."
-  (when (file-remote-p default-directory)
-    ;; `lsp-resolve-final-command' wraps remote commands with
-    ;; `shell-file-name'.  Never leak the client machine's /bin/zsh path onto
-    ;; a Linux target.
-    (setq-local shell-file-name "sh"
-                explicit-shell-file-name "sh"
-                shell-command-switch "-c"))
-  (when (and my/language-server-disable-file-watchers-on-remote
-             (file-remote-p default-directory))
-    (setq-local lsp-enable-file-watchers nil
-                lsp-file-watch-threshold 0))
+  "Apply project-local `lsp-mode' settings before startup."
   (run-hooks 'my/language-server-lsp-local-settings-hook))
 
 (defun my/eglot-contact-available-p ()
@@ -429,13 +460,11 @@ byte-compile backend does not emit noisy warnings on startup."
   "Return locally registered Eglot server-program entries."
   (nreverse (copy-sequence my/eglot-custom-server-program-metadata)))
 
-(defun my/language-server-prepare-remote-eglot-environment ()
-  "Prepare shell settings for remote `eglot' buffers."
-  (when (file-remote-p default-directory)
-    (let ((remote-shell "sh"))
-      (setq-local shell-file-name remote-shell)
-      (setq-local explicit-shell-file-name remote-shell)
-      (setq-local shell-command-switch "-c"))))
+(defun my/language-server-prepare-eglot-execution-environment ()
+  "Prepare the shared Eglot target execution boundary.
+Shell selection is backend-owned; stdio language servers receive their
+original argv without a client shell wrapper."
+  nil)
 
 (defun my/language-server-managed-p ()
   "Return non-nil when the current buffer is managed by Eglot or lsp-mode."
@@ -585,11 +614,13 @@ Use `client' only for an explicitly client-side UI helper."
       (message "Skip lsp-mode in %s: missing `%s'" major-mode feature))))
 
 (defun my/lsp-mode--direnv-ready (_environment error)
-  "Resume deferred lsp-mode startup, or report direnv ERROR."
+  "Resume deferred lsp-mode startup, falling back after direnv ERROR."
   (setq my/lsp-mode--waiting-for-direnv nil)
-  (if error
-      (message "lsp-mode deferred: direnv failed: %s"
-               (error-message-string error))
+  (when error
+    (message
+     "lsp-mode: direnv failed (%s); continuing with the target base environment"
+     (error-message-string error)))
+  (when (eq (my/language-server-preferred-backend) 'lsp-mode)
     (my/lsp-mode-start-now)))
 
 (defun my/lsp-mode-ensure ()
@@ -612,7 +643,7 @@ Use `client' only for an explicitly client-side UI helper."
   "Start Eglot after the target environment is ready.
 With INTERACTIVE, invoke `eglot' interactively so a language-specific project
 finder can participate exactly as it does for `M-x eglot'."
-  (my/language-server-prepare-remote-eglot-environment)
+  (my/language-server-prepare-eglot-execution-environment)
   (my/language-server-apply-process-environment)
   (my/language-server-apply-eglot-local-settings)
   (when (my/eglot-contact-available-p)
@@ -623,12 +654,14 @@ finder can participate exactly as it does for `M-x eglot'."
 (defalias 'my/eglot--start-now #'my/eglot-start-now)
 
 (defun my/eglot--direnv-ready (_environment error)
-  "Resume deferred Eglot startup, or report direnv ERROR."
+  "Resume deferred Eglot startup, falling back after direnv ERROR."
   (setq my/eglot--waiting-for-direnv nil)
-  (if error
-      (message "Eglot deferred: direnv failed: %s"
-               (error-message-string error))
-    (my/eglot-ensure-unless-lsp-mode)))
+  (when error
+    (message
+     "Eglot: direnv failed (%s); continuing with the target base environment"
+     (error-message-string error)))
+  (when (eq (my/language-server-preferred-backend) 'eglot)
+    (my/eglot-start-now)))
 
 (defun my/eglot-ensure-unless-lsp-mode ()
   "Start `eglot' unless another backend is active.
@@ -649,39 +682,104 @@ target/workspace environment has been applied to this buffer."
             (setq my/eglot--waiting-for-direnv t)
           (my/eglot-start-now))))))
 
+(defun my/language-server--project-root-for-buffer ()
+  "Return the current buffer's logical project root."
+  (my/language-server--canonical-root
+   (or
+    (when-let* ((project (project-current nil default-directory)))
+      (project-root project))
+    default-directory)))
+
+(defun my/language-server--connect-workspace (root)
+  "Open and track the language-server workspace for ROOT."
+  (when root
+    (my/language-server--resource-owner root)))
+
 (defun my/eglot--connect-via-remote-a (fn &rest args)
-  "Route Eglot connection startup through the language-server adapter."
-  (let ((remote-current-adapter-id "language-server"))
-    (remote-environment-ensure)
+  "Route Eglot connection startup through one owning Remote workspace."
+  (let* ((project (nth 1 args))
+         (root
+          (my/language-server--canonical-root
+           (and project (ignore-errors (project-root project)))))
+         (workspace
+          (my/language-server--connect-workspace root))
+         (remote-current-adapter-id "language-server")
+         (remote-current-workspace workspace))
+    (remote-environment-ensure
+     (and workspace (remote-workspace-context workspace)))
     (apply fn args)))
 
 (defun my/lsp-mode--connect-via-remote-a (fn &rest args)
-  "Route lsp-mode startup through the language-server adapter."
-  (let ((remote-current-adapter-id "language-server"))
-    (remote-environment-ensure)
+  "Route lsp-mode startup through one owning Remote workspace."
+  (let* ((root (my/language-server--project-root-for-buffer))
+         (workspace
+          (my/language-server--connect-workspace root))
+         (remote-current-adapter-id "language-server")
+         (remote-current-workspace workspace))
+    (remote-environment-ensure
+     (and workspace (remote-workspace-context workspace)))
     (apply fn args)))
 
 (defun my/lsp-mode--resolve-logical-command-a (fn command &optional test)
-  "Make lsp-mode's logical-target stdio wrapper safe without losing context.
-Command functions must run while the logical `default-directory' is active:
-language integrations use it to translate client-side paths to target-native
-paths.  lsp-mode then adds `stty raw' for TRAMP.  Direct SSH pipes have no
-tty, so retain the shell boundary but silence and tolerate that probe."
-  (let ((resolved (funcall fn command test)))
-    (if (and (remote-fs-file-name-p default-directory)
-             (not test)
-             (equal (car-safe resolved) shell-file-name)
-             (equal (nth 1 resolved) "-c")
-             (stringp (nth 2 resolved)))
-        (list
-         (car resolved)
-         (nth 1 resolved)
-         (replace-regexp-in-string
-          "\\`stty raw > /dev/null;"
-          "stty raw >/dev/null 2>&1 || :;"
-          (nth 2 resolved)
-          t t))
-      resolved)))
+  "Resolve lsp-mode COMMAND without its TRAMP tty shell wrapper.
+The `/fs:' process boundary already selects a pipe and projects the command
+through the chosen backend.  Calling FN in test mode performs the same command
+normalization while deliberately skipping `stty raw' and `shell-file-name'."
+  (funcall
+   fn command
+   (or test (remote-fs-file-name-p default-directory))))
+
+(defun my/eglot--target-command-a (fn contact)
+  "Keep Eglot CONTACT as argv inside the logical `/fs:' boundary."
+  (if (remote-fs-file-name-p default-directory)
+      contact
+    (funcall fn contact)))
+
+(defun my/language-server--route-native-network-p ()
+  "Return non-nil when a native network call belongs to LSP placement."
+  (and
+   (not remote-channel-native-api-inhibit)
+   (equal remote-current-adapter-id "language-server")))
+
+(defun my/language-server--open-network-stream-a
+    (fn name buffer host service &rest parameters)
+  "Route an LSP `open-network-stream' call through Remote channels."
+  (if (my/language-server--route-native-network-p)
+      (apply
+       #'remote-open-network-stream
+       name buffer host service
+       (plist-put
+        (plist-put
+         (copy-sequence parameters)
+         :remote-context (remote-context default-directory))
+        :remote-adapter "language-server"))
+    (apply fn name buffer host service parameters)))
+
+(defun my/language-server--make-network-process-a (fn &rest plist)
+  "Route an LSP `make-network-process' call through Remote channels."
+  (if (my/language-server--route-native-network-p)
+      (apply
+       #'remote-make-network-process
+       (plist-put
+        (plist-put
+         (copy-sequence plist)
+         :remote-context (remote-context default-directory))
+        :remote-adapter "language-server"))
+    (apply fn plist)))
+
+(unless (advice-member-p
+         #'my/language-server--open-network-stream-a
+         'open-network-stream)
+  (advice-add
+   'open-network-stream :around
+   #'my/language-server--open-network-stream-a))
+
+(unless (advice-member-p
+         #'my/language-server--make-network-process-a
+         'make-network-process)
+  (advice-add
+   'make-network-process :around
+   #'my/language-server--make-network-process-a))
 
 (defun my/lsp-mode--find-logical-workspace-a
     (fn server-id &optional file-name)
@@ -727,8 +825,11 @@ target identity."
   "Return the logical project root belonging to Eglot's active server."
   (or
    (when-let* ((server
-                (and (fboundp 'eglot-current-server)
-                     (ignore-errors (eglot-current-server))))
+                (or
+                 (and (boundp 'eglot--cached-server)
+                      eglot--cached-server)
+                 (and (fboundp 'eglot-current-server)
+                      (ignore-errors (eglot-current-server)))))
                ((fboundp 'eglot--project))
                (project (ignore-errors (eglot--project server)))
                (root (ignore-errors (project-root project))))
@@ -813,14 +914,178 @@ roots are retained for callbacks which are not run in a source buffer."
      path
      (my/lsp-mode--logical-root-for-path path))))
 
+(defvar my/language-server--recovering-resource-p nil
+  "Non-nil while workspace recovery deliberately restarts an LSP handle.")
+
+(defun my/language-server--resource-owner (root)
+  "Return the Remote workspace which owns logical ROOT."
+  (when-let* ((root (my/language-server--canonical-root root))
+              (workspace
+               (remote-workspace-open root :connect nil)))
+    ;; The LSP process already acquired this route.  Tracking it here gives
+    ;; transport failure matching and reconnect a stable workspace boundary
+    ;; without claiming another session reference.
+    (remote-workspace-track-route
+     workspace "language-server" 'process-async)
+    workspace))
+
+(defun my/language-server--forget-resource-value (value)
+  "Forget every LSP resource whose current handle is VALUE."
+  (dolist (workspace (hash-table-values remote-workspaces))
+    (dolist (resource
+             (copy-sequence
+              (remote-workspace-resources workspace)))
+      (when (and
+             (eq (remote-workspace-resource-kind resource) 'lsp)
+             (eq (remote-workspace-resource-value resource) value))
+        (remote-workspace-forget-resource workspace resource)))))
+
+(defun my/language-server--eglot-root (server)
+  "Return SERVER's canonical logical project root."
+  (when-let* ((project (ignore-errors (eglot--project server)))
+              (root (ignore-errors (project-root project))))
+    (my/language-server--canonical-root root)))
+
+(defun my/language-server--eglot-skip-file-watch-p (root)
+  "Return non-nil when Eglot must decline dynamic watches for ROOT.
+The decision is based on client filesystem placement, not on a local/remote
+target branch.  A mounted or otherwise client-accessible target therefore
+keeps exactly the same watcher path as an ordinary local project."
+  (pcase my/language-server-file-watch-policy
+    ('disabled t)
+    ('native nil)
+    ('auto
+     (and
+      root
+      (not (ignore-errors (remote-client-file-name root)))))
+    (_
+     (error
+      "Invalid `my/language-server-file-watch-policy': %S"
+      my/language-server-file-watch-policy))))
+
+(defun my/eglot-register-capability-via-remote-a
+    (fn server method id &rest params)
+  "Run Eglot capability registration in SERVER's Remote workspace.
+For target-only roots, acknowledge but decline dynamic file-watch
+registrations.  Eglot advertises those registrations as unsupported on remote
+projects; accepting a server which ignores that advertisement makes upstream
+Eglot recursively install one process-backed watch per directory."
+  (let* ((root (my/language-server--eglot-root server))
+         (workspace
+          (and root (my/language-server--resource-owner root)))
+         (remote-current-adapter-id "language-server")
+         (remote-current-workspace workspace))
+    (if (and
+         (eq method 'workspace/didChangeWatchedFiles)
+         (my/language-server--eglot-skip-file-watch-p root))
+        (progn
+          (remote-log
+           'lsp-watch-registration-declined
+           :backend 'eglot
+           :root root
+           :registration-id id
+           :watcher-count
+           (length (or (plist-get params :watchers) []))
+           :policy my/language-server-file-watch-policy)
+          nil)
+      (apply fn server method id params))))
+
+(defun my/language-server-register-eglot-resource (server)
+  "Register initialized Eglot SERVER with its Remote workspace owner."
+  (when-let* ((root (my/language-server--eglot-root server))
+              (workspace (my/language-server--resource-owner root)))
+    (let ((buffer
+           (seq-find
+            #'buffer-live-p
+            (ignore-errors (eglot--managed-buffers server)))))
+      (remote-workspace-ensure-recoverable-resource
+       workspace 'lsp (list 'eglot root) server
+       :close
+       (lambda (value reason)
+         (unless (eq reason 'transport-recovery)
+           (ignore-errors
+             (eglot-shutdown value nil 1 t))))
+       :recover
+       (lambda (resource _owner)
+         (let* ((old (remote-workspace-resource-value resource))
+                (metadata
+                 (remote-workspace-resource-metadata resource))
+                (owner-buffer (plist-get metadata :buffer))
+                (my/language-server--recovering-resource-p t))
+           (eglot-reconnect old)
+           (or
+            (and
+             (buffer-live-p owner-buffer)
+             (with-current-buffer owner-buffer
+               (ignore-errors (eglot-current-server))))
+            old)))
+       :metadata
+       (list :backend 'eglot :root root :buffer buffer)))))
+
+(defun my/language-server-eglot-shutdown-resource-a (server)
+  "Forget the workspace resource for an Eglot SERVER which already stopped."
+  (unless my/language-server--recovering-resource-p
+    (my/language-server--forget-resource-value server)))
+
+(defun my/language-server--lsp-workspace-root (workspace)
+  "Return lsp-mode WORKSPACE's canonical logical root."
+  (my/language-server--canonical-root
+   (ignore-errors (lsp--workspace-root workspace))))
+
+(defun my/language-server--lsp-workspace-id (workspace)
+  "Return a stable server ID for lsp-mode WORKSPACE."
+  (or
+   (ignore-errors
+     (lsp--client-server-id
+      (lsp--workspace-client workspace)))
+   'unknown))
+
+(defun my/language-server-register-lsp-resource ()
+  "Register the dynamically active lsp-mode workspace for recovery."
+  (when-let* ((lsp-workspace lsp--cur-workspace)
+              (root
+               (my/language-server--lsp-workspace-root lsp-workspace))
+              (workspace (my/language-server--resource-owner root)))
+    (remote-workspace-ensure-recoverable-resource
+     workspace 'lsp
+     (list 'lsp-mode
+           (my/language-server--lsp-workspace-id lsp-workspace)
+           root)
+     lsp-workspace
+     :close
+     (lambda (value reason)
+       (unless (eq reason 'transport-recovery)
+         (ignore-errors
+           (lsp-workspace-shutdown value))))
+     :recover
+     (lambda (resource _owner)
+       (let ((value (remote-workspace-resource-value resource))
+             (my/language-server--recovering-resource-p t))
+         (lsp-workspace-restart value)
+         value))
+     :metadata
+     (list
+      :backend 'lsp-mode
+      :root root
+      :buffer
+      (seq-find
+       #'buffer-live-p
+       (ignore-errors
+         (lsp--workspace-buffers lsp-workspace)))))))
+
+(defun my/language-server-unregister-lsp-resource (workspace)
+  "Forget an lsp-mode WORKSPACE after lsp-mode has already closed it."
+  (unless my/language-server--recovering-resource-p
+    (my/language-server--forget-resource-value workspace)))
+
 (defun my/eglot-ensure ()
   "Start `eglot' in programming buffers that do not opt into `lsp-mode'."
   (interactive)
   (when (derived-mode-p 'prog-mode)
     (my/eglot-ensure-unless-lsp-mode)))
 
-(defun my/eglot-ensure-deferred ()
-  "Start `eglot' after the current buffer has finished opening."
+(defun my/language-server-ensure-deferred ()
+  "Start the selected language-server client after the buffer opens."
   (unless (derived-mode-p 'lean-mode)
     (let ((buffer (current-buffer)))
       (run-at-time
@@ -828,8 +1093,11 @@ roots are retained for callbacks which are not run in a source buffer."
        (lambda (buf)
          (when (buffer-live-p buf)
            (with-current-buffer buf
-             (my/eglot-ensure))))
+             (my/language-server-ensure))))
        buffer))))
+
+(defalias 'my/eglot-ensure-deferred
+  #'my/language-server-ensure-deferred)
 
 (defun my/language-server-ensure ()
   "Start the preferred language server backend for the current buffer."
@@ -1089,6 +1357,12 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
         lsp-inlay-hint-enable t
         lsp-log-io nil)
   :config
+  (add-hook
+   'lsp-after-initialize-hook
+   #'my/language-server-register-lsp-resource)
+  (add-hook
+   'lsp-after-uninitialized-functions
+   #'my/language-server-unregister-lsp-resource)
   (define-advice lsp--on-request (:around (fn workspace request) my/handle-inlay-hint-refresh)
     "Handle standard refresh requests that this `lsp-mode' release lacks."
     (let ((method (plist-get request :method)))
@@ -1138,7 +1412,7 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
 ;; -------------------------
 (use-package eglot
   :ensure nil ; Built-in since Emacs 29
-  :hook ((prog-mode . my/eglot-ensure-deferred)
+  :hook ((prog-mode . my/language-server-ensure-deferred)
          (eglot-managed-mode . (lambda ()
                                  (when (fboundp 'eglot-inlay-hints-mode)
                                    (eglot-inlay-hints-mode 1)))))
@@ -1153,14 +1427,34 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
   (read-process-output-max (* 1024 1024)))
 
 (with-eval-after-load 'eglot
+  (add-hook
+   'eglot-connect-hook
+   #'my/language-server-register-eglot-resource)
   (unless (advice-member-p #'my/eglot--connect-via-remote-a
                            'eglot--connect)
     (advice-add 'eglot--connect :around
                 #'my/eglot--connect-via-remote-a))
+  (unless (advice-member-p #'my/eglot--target-command-a
+                           'eglot--cmd)
+    (advice-add 'eglot--cmd :around
+                #'my/eglot--target-command-a))
   (unless (advice-member-p #'my/eglot--uri-to-logical-a
                            'eglot-uri-to-path)
     (advice-add 'eglot-uri-to-path :around
                 #'my/eglot--uri-to-logical-a))
+  (unless (advice-member-p
+           #'my/eglot-register-capability-via-remote-a
+           'eglot-register-capability)
+    (advice-add
+     'eglot-register-capability
+     :around
+     #'my/eglot-register-capability-via-remote-a))
+  (unless (advice-member-p
+           #'my/language-server-eglot-shutdown-resource-a
+           'eglot--on-shutdown)
+    (advice-add
+     'eglot--on-shutdown :after
+     #'my/language-server-eglot-shutdown-resource-a))
   (define-key eglot-mode-map (kbd "C-c f") #'eglot-format-buffer)
   (define-key eglot-mode-map (kbd "C-c d") #'eldoc-doc-buffer)
   (define-key eglot-mode-map (kbd "C-c a") #'eglot-code-actions)
@@ -1263,9 +1557,6 @@ leaves those workers orphaned and running."
 (require 'init-html)
 (require 'init-js2)
 (require 'init-latex)
-
-;; eglot：永不自动重连（需要你手动 M-x eglot 重新连）
-(setq-default eglot-autoreconnect nil)
 
 ;;; ── CodeLens ──────────────────────────────────────────────────────────────
 ;; Off by default. Toggle with SPC c L.

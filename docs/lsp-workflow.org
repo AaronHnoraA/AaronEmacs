@@ -44,6 +44,38 @@ Eglot 与 lsp-mode 的进程启动统一绑定到 Remote 框架的
 =local= target，远程 buffer 使用自己的 target/workspace PATH、direnv 和工具链，
 不会把客户端机器上的 server 路径泄漏给远端。
 
+* Remote-First Invariants
+
+Remote 框架是 LSP 的核心执行层，不是只在远程 buffer 上启用的兼容补丁。本地
+=local= target 与 SSH/WSL/container target 必须经过同一套注册、route、environment、
+process、URI 和 resource-lifecycle 流程。
+
+每次 LSP 设计或修改都必须满足：
+
+1. 一个 server/workspace 只有一个 owning logical root。文档身份始终是
+   =/fs:TARGET:/path=（对外为 =fs://=），物理 =/ssh:=、=/rpc:= 和 target-native
+   path 只在 backend 或协议边界短暂存在。
+2. server cwd、executable、PATH/toolchain、workspace settings、watcher、helper
+   service 与 network channel 都从同一个 root 的 target context 派生。
+3. URI 回调必须查询 Eglot server 或 lsp-mode workspace 所拥有的 root；不能用回调
+   发生时的当前 buffer / =default-directory= 猜 target。否则两个 target 上相同的
+   =/home/me/project= 会串成同一项目。
+4. server placement 默认是 =target=。只有必须访问 Emacs UI、本机 xwidget 或浏览器
+   的 helper 才显式使用 =client=；它与 target peer 的 stdio/TCP 仍由 Remote
+   backend bridge/channel 建立。
+5. language consumer 不得用 =file-remote-p=、target 字符串、TRAMP method 或
+   backend ID 选择另一套 server、PATH、参数和功能。真实平台差异应表达为 target
+   capability/toolchain preference；Eglot/lsp-mode 自身的 TRAMP 兼容修饰集中留在
+   共享 adapter 边界。
+6. watcher、helper service、forward/channel 等长生命周期资源要登记给
+   =remote-workspace=。没有断线故障注入与重建测试时，不能宣称 LSP 已自动恢复。
+7. 新增接入至少同时测试 =local= 与一个真实 remote target 的 root、URI、cwd、
+   executable 和 environment；需要网络/helper 的接入还要覆盖取消、清理与重连。
+
+如果现有语言模块仍按 local/remote 分别选择 contact 或修改 PATH，应把它视为迁移
+债务，不能作为新语言的模板。框架缺少表达能力时，先补通用 =remote-*= API 及
+native/remote backend，再接语言业务。
+
 * Current Command Surface
 
 最常用入口：
@@ -150,7 +182,9 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 现在语言服务器相关逻辑分成三层：
 
 1. =lisp/init-lsp.el=
-   路由核心、通用 backend wrapper、全局 LSP/Flymake/company 配置。
+   路由核心、统一 Remote/LSP adapter、URI/workspace identity、全局
+   LSP/Flymake/company 配置。这里只允许出现 Eglot/lsp-mode 的兼容边界，不在这里
+   建第二套本地/远程产品策略。
 2. =lisp/init-lsp-ops.el=
    backend-agnostic 操作命令，例如 restart / shutdown / organize imports。
 3. =lisp/init-lsp-tools.el=
@@ -244,6 +278,14 @@ Eglot server program 通过 =my/register-eglot-server-program= 注册：
 - Doctor 能检查 executable
 - 可以直接跳回配置定义文件
 - =:placement= 默认就是 =target=；只有明确的本地 UI helper 才写 =client=
+
+新增映射完成前再检查：
+
+- contact 中没有物理 =/ssh:= / =/rpc:= path，也没有 local/remote 两套命令；
+- executable 通过 target workspace environment 查找；
+- URI round-trip 绑定 server/workspace root，而不是当前 buffer；
+- 需要 watcher/service/channel 时已经登记 workspace owner 和清理策略；
+- =local= 与 remote target 都经过同一注册，并有对应测试。
 
 * Pattern For Other Modules
 

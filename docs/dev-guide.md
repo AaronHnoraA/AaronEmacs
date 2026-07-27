@@ -8,6 +8,26 @@
 - 终端与远程
 - 浏览器与外部集成
 
+## 0. 核心开发约束：Remote-first
+
+Remote 框架不是“远程功能模块”，而是这套配置中文件与开发工具的核心执行模型。
+任何涉及 filesystem、project/workspace、进程、可执行文件、环境、watch、terminal、
+service、socket 或 port 的新设计，即使第一版只在本机使用，也必须先用
+`target + pipeline + backend + workspace` 表达。本机是 target `local`，不是一条
+由 consumer 自己维护的快捷分支。
+
+开发时遵守以下边界：
+
+- consumer 只表达“在哪个 target/workspace 做什么”，不判断 `"local"`、
+  `file-remote-p`、TRAMP method 或 backend ID 来选择功能；
+- 物理路径、spawn 形式、连接与转发差异留在 backend/transport/client boundary；
+- 普通本地 buffer 继续享受 Emacs 原生文件名和 package 兼容性；进入
+  project/workspace/LSP 框架边界后，本地与远程身份统一为 `/fs:TARGET:/path`；
+- 框架 API 不够时，先补通用 `remote-*` 契约及 native/remote 实现，不在语言或
+  package 模块里补一段一次性的远程代码；
+- local、remote 和断线/取消/恢复测试共同决定能力是否完成，验收见
+  [remote-parity.md](remote-parity.md)。
+
 ## 1. 补全栈
 
 当前是双栈并存：
@@ -33,6 +53,28 @@
 - `M-o` 在 minibuffer 里走 `embark-act`
 
 ## 2. LSP 与补全
+
+### Remote-first 强制不变量
+
+LSP 对路径和进程身份最敏感，因此比普通 consumer 更严格：
+
+- 一个 Eglot server 或 lsp-mode workspace 只能有一个 owning logical root；
+  文档 URI、server cwd、executable、PATH/toolchain、watcher、helper service 和
+  channel 都从这个 root 的 target context 推导；
+- URI 回调必须使用拥有该 server/workspace 的 root，不能因为回调恰好运行在另一个
+  buffer，就从当前 `default-directory` 猜 target；
+- server 默认 placement 是 `target`。只有 xwidget、浏览器、前端 proxy 等确实必须
+  接触本机 UI 的 helper 才能显式标为 `client`，它连接 target peer 时仍使用
+  backend 提供的 stdio/channel bridge；
+- 语言模块不能用 `file-remote-p` 选择另一套 server、PATH、参数或功能降级。
+  Eglot/lsp-mode 自身要求的 TRAMP 兼容修饰只能集中在共享
+  `language-server` adapter 边界；
+- `local` target 必须走同一注册、路由、环境和 URI 投影流程。新增 LSP 接入至少要
+  有 local/remote root 与 URI 测试；宣称可重连前，还要覆盖 watcher/helper/channel
+  的故障恢复。
+
+完整维护契约见 [lsp-workflow.org](lsp-workflow.org)。现有语言模块中残留的
+local/remote 特判属于待迁移债务，不是新增接入可复制的模式。
 
 ### 默认组件
 
@@ -348,6 +390,8 @@ Lean 4 走自定义 `lean-mode`（eglot 作为 LSP 客户端），不再使用 `
 
 ### 设计目标
 
+- Remote 是所有可能涉及远端的开发能力的核心抽象，而不是 SSH 专用旁路
+- `local` target 与其他 target 走相同的 consumer API、资源所有权和验收流程
 - buffer 使用与 transport/backend 无关的 `/fs:TARGET:/path` 逻辑身份
 - target、有序 transport pipeline、执行 backend、复用 session 和调用者偏好分别注册
 - 普通 Emacs 文件 API 保留 TRAMP 的完整兼容性
@@ -380,6 +424,11 @@ terminal 带到 WSL/SSH buffer，也不会跨两个远端 target 串线。
 `remote-make-network-process`、`remote-open-network-stream` 与
 `remote-port-forward`。完整对象模型、能力矩阵、配置 schema、当前缺口与接入清单
 见 [remote-framework.md](remote-framework.md)。
+
+开发新的 project/LSP/search/SCM/debug/task 集成时，所属模块可以保留业务策略，
+但 path projection、process placement、environment、session、watch、service 和
+channel lifecycle 必须委托给 Remote 框架。若必须写 local/remote 条件分支，先把它
+视为框架缺少能力的信号，而不是正常的 consumer 实现方式。
 
 ## 7. 浏览器
 

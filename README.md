@@ -36,6 +36,8 @@ This configuration is designed to solve a concrete set of problems:
   The configuration stays on `package.el` + `use-package`; it does not layer a second package manager on top.
 - Clear module ownership
   Core behavior lives in the owning `lisp/` modules, language-specific behavior in `lisp/lang/`, and workflow documentation in `docs/`.
+- Remote-first execution model
+  Files, projects, processes, LSP, environments, services, and channels share the target-oriented Remote framework. The client is target `local`, so local and remote consumers keep one API and lifecycle while ordinary local buffers retain native Emacs compatibility.
 - Runtime state stays contained
   Runtime and cache data belong under `var/`; local private configuration and secrets belong under `etc/`.
 - README is product-facing, docs are operational

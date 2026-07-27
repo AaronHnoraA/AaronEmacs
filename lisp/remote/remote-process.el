@@ -21,16 +21,62 @@
 
 (defvar remote-environment-inhibit nil)
 (defvar remote-buffer-environment nil)
-(defvar remote--buffer-base-process-environment nil
-  "Client environment captured before a logical target environment is applied.")
-(defvar remote--buffer-base-exec-path nil
-  "Client executable search path captured before target activation.")
+
+(defvar process-adaptive-read-buffering)
+
+(defcustom remote-process-class-settings
+  '((interactive
+     :priority 100
+     :adaptive-read-buffering nil)
+    (normal
+     :priority 0
+     :adaptive-read-buffering t)
+    (background
+     :priority -100
+     :adaptive-read-buffering no-reset))
+  "Receive-buffering policy for routed asynchronous process classes.
+
+`:priority' is descriptive metadata for diagnostics and future backends; Emacs
+does not expose strict per-process event-loop preemption.  Setting
+`:adaptive-read-buffering' to nil favors first-byte latency, t favors
+throughput, and any other non-nil value enables buffering without resetting
+the delay after each write."
+  :type 'sexp
+  :group 'remote)
 
 (define-error 'remote-exec-error "Remote command failed")
 
 (cl-defstruct (remote-exec-result
                (:constructor remote-exec-result-create))
   status stdout stderr route context command)
+
+(defun remote-process-class-profile (process-class)
+  "Return a fresh profile plist for PROCESS-CLASS."
+  (unless (memq process-class remote-process-classes)
+    (error "Invalid remote process class: %S" process-class))
+  (copy-sequence
+   (cdr (assq process-class remote-process-class-settings))))
+
+(defun remote-process-adapter-class (adapter &optional explicit)
+  "Return the process class for ADAPTER, overridden by EXPLICIT."
+  (let ((process-class
+         (or explicit
+             (when-let* ((registered (remote-get-adapter adapter)))
+               (remote-adapter-process-class registered))
+             'normal)))
+    (unless (memq process-class remote-process-classes)
+      (error "Invalid process class for adapter %s: %S"
+             adapter process-class))
+    process-class))
+
+(defun remote-process-description (process)
+  "Return routed scheduling metadata attached to PROCESS."
+  (when (processp process)
+    (list
+     :class (or (process-get process 'remote-process-class) 'normal)
+     :priority (or (process-get process 'remote-process-priority) 0)
+     :adaptive-read-buffering
+     (process-get process 'remote-process-adaptive-read-buffering))))
 
 (defconst remote--tramp-stderr-wrapper
   (concat
@@ -430,12 +476,19 @@ adapter."
   "Create an asynchronous process in the selected logical target.
 PLIST accepts all `make-process' keys plus `:remote-adapter',
 `:remote-context', `:remote-link', `:remote-environment', and
-`:remote-directory'.  The latter preserves an official `make-process'
-caller's logical `default-directory' independently of its workspace root."
+`:remote-directory'.  `:remote-process-class' can explicitly override the
+adapter's receive-buffering class.  `:remote-directory' preserves an official
+`make-process' caller's logical `default-directory' independently of its
+workspace root."
   (let* ((adapter
           (or (plist-get plist :remote-adapter)
               remote-current-adapter-id
               "process"))
+         (process-class
+          (remote-process-adapter-class
+           adapter (plist-get plist :remote-process-class)))
+         (process-profile
+          (remote-process-class-profile process-class))
          (context (plist-get plist :remote-context))
          (link (plist-get plist :remote-link))
          (explicit-environment (plist-get plist :remote-environment))
@@ -444,7 +497,7 @@ caller's logical `default-directory' independently of its workspace root."
          (arguments (copy-sequence plist)))
     (dolist (key '(:remote-adapter :remote-context :remote-link
                    :remote-environment :remote-directory
-                   :remote-stderr-token))
+                   :remote-stderr-token :remote-process-class))
       (setq arguments (remote--plist-delete arguments key)))
     (remote--call-with-process-route
      adapter 'process-async context (and link (list :link link))
@@ -458,6 +511,17 @@ caller's logical `default-directory' independently of its workspace root."
                (remote--prepare-backend-execution
                 route context-value command overrides physical-directory
                 logical-directory))
+              (_execution-profile
+               (setf
+                (remote-backend-execution-metadata execution)
+                (let ((metadata
+                       (remote-backend-execution-metadata execution)))
+                  (setq metadata
+                        (plist-put metadata
+                                   :process-class process-class))
+                  (plist-put
+                   metadata :process-priority
+                   (or (plist-get process-profile :priority) 0)))))
               (default-directory
                (or (remote-backend-execution-physical-directory execution)
                    physical-directory))
@@ -517,10 +581,22 @@ caller's logical `default-directory' independently of its workspace root."
                (let ((default-directory
                       (or
                        (remote-backend-process-plan-default-directory plan)
-                       default-directory)))
+                       default-directory))
+                     (process-adaptive-read-buffering
+                      (if (plist-member
+                           process-profile :adaptive-read-buffering)
+                          (plist-get
+                           process-profile :adaptive-read-buffering)
+                        process-adaptive-read-buffering)))
                  (apply #'make-process arguments))))
          (process-put process 'remote-route route)
          (process-put process 'remote-context context-value)
+         (process-put process 'remote-process-class process-class)
+         (process-put process 'remote-process-priority
+                      (or (plist-get process-profile :priority) 0))
+         (process-put process 'remote-process-adaptive-read-buffering
+                      (plist-get
+                       process-profile :adaptive-read-buffering))
          (when framed-stderr
            (process-put process 'remote-stderr-token stderr-token))
          (dolist
@@ -537,29 +613,39 @@ caller's logical `default-directory' independently of its workspace root."
 
 PLIST accepts the official `make-process' keys plus
 `:remote-client-directory', `:remote-client-environment', and
-`:remote-client-exec-path'.  The three extension keys select native client
-state and are removed before calling `make-process'.  By default this uses the
-buffer's environment snapshot from before a target capsule was installed and
-starts in `temporary-file-directory'.
+`:remote-client-exec-path'.  `:remote-adapter' and
+`:remote-process-class' select the same buffering policy used by routed target
+processes.  The extension keys are removed before calling `make-process'.  By
+default this uses the buffer's environment snapshot from before a target
+capsule was installed and starts in `temporary-file-directory'.
 
 This is the explicit placement boundary for a local UI or protocol proxy whose
 stdio peer may be reached through `remote-local-bridge-command'.  It never
 routes through a `/fs:' file-name handler."
   (let* ((arguments (copy-sequence plist))
+         (adapter
+          (or (plist-get arguments :remote-adapter)
+              remote-current-adapter-id
+              "process"))
+         (process-class
+          (remote-process-adapter-class
+           adapter (plist-get arguments :remote-process-class)))
+         (process-profile
+          (remote-process-class-profile process-class))
          (directory
           (or (plist-get arguments :remote-client-directory)
               temporary-file-directory))
          (environment
           (or (plist-get arguments :remote-client-environment)
-              remote--buffer-base-process-environment
-              (default-value 'process-environment)))
+              (remote-client-process-environment)))
          (client-exec-path
           (or (plist-get arguments :remote-client-exec-path)
-              remote--buffer-base-exec-path
-              (default-value 'exec-path))))
+              (remote-client-exec-path))))
     (dolist (key '(:remote-client-directory
                    :remote-client-environment
-                   :remote-client-exec-path))
+                   :remote-client-exec-path
+                   :remote-adapter
+                   :remote-process-class))
       (setq arguments (remote--plist-delete arguments key)))
     (when (or (remote-fs-file-name-p directory)
               (file-remote-p directory))
@@ -577,9 +663,21 @@ routes through a `/fs:' file-name handler."
           (inhibit-file-name-handlers
            (cons #'remote-file-name-handler
                  (cons #'tramp-file-name-handler
-                       inhibit-file-name-handlers))))
-      (apply #'make-process
-             (plist-put arguments :file-handler nil)))))
+                       inhibit-file-name-handlers)))
+          (process-adaptive-read-buffering
+           (if (plist-member process-profile :adaptive-read-buffering)
+               (plist-get process-profile :adaptive-read-buffering)
+             process-adaptive-read-buffering)))
+      (let ((process
+             (apply #'make-process
+                    (plist-put arguments :file-handler nil))))
+        (process-put process 'remote-process-class process-class)
+        (process-put process 'remote-process-priority
+                     (or (plist-get process-profile :priority) 0))
+        (process-put process 'remote-process-adaptive-read-buffering
+                     (plist-get
+                      process-profile :adaptive-read-buffering))
+        process))))
 
 (defun remote-executable-find (program &optional context)
   "Find PROGRAM on CONTEXT's logical target.

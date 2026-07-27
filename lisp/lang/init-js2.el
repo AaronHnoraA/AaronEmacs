@@ -38,7 +38,7 @@
       (js-ts-mode)
     (js2-mode)))
 
-(defun my/js-local-node-bin-directory ()
+(defun my/js-project-node-bin-directory ()
   "Return the nearest project-local node_modules/.bin directory, if present."
   (when-let* ((root (locate-dominating-file
                     default-directory
@@ -47,33 +47,17 @@
     (when (file-directory-p bin-dir)
       bin-dir)))
 
-(defun my/js-setup-local-node-bin ()
-  "Make project-local Node executables visible to JS/TS tooling."
-  (when-let* ((bin-dir (my/js-local-node-bin-directory)))
-    (if (and (file-remote-p default-directory)
-             (fboundp 'remote-environment-ensure)
-             (fboundp 'remote-environment-derive)
-             (fboundp 'remote-environment-apply))
-        (when-let* ((environment (remote-environment-ensure))
-                    (target-bin
-                     (if (fboundp 'remote-file-local-name)
-                         (remote-file-local-name bin-dir)
-                       bin-dir)))
-          (remote-environment-apply
-           (remote-environment-derive
-            environment "node-project-bin"
-            :scope 'toolchain
-            :path-prepend (list target-bin)
-            :source 'node-modules)))
-      (setq-local exec-path (cons bin-dir (remove bin-dir exec-path)))
-      (let* ((path-separator (if (eq system-type 'windows-nt) ";" ":"))
-             (path (or (getenv "PATH") ""))
-             (process-environment (copy-sequence process-environment)))
-        (unless (member bin-dir (split-string path path-separator t))
-          (setenv "PATH" (if (string-empty-p path)
-                             bin-dir
-                           (concat bin-dir path-separator path)))
-          (setq-local process-environment process-environment))))))
+(defun my/js-setup-project-node-bin ()
+  "Add the target project's Node executables through its environment capsule."
+  (when-let* ((bin-dir (my/js-project-node-bin-directory)))
+    (when-let* ((environment (remote-environment-ensure))
+                (target-bin (remote-file-local-name bin-dir)))
+      (remote-environment-apply
+       (remote-environment-derive
+        environment "node-project-bin"
+        :scope 'toolchain
+        :path-prepend (list target-bin)
+        :source 'node-modules)))))
 
 (defun my/js-ts-eglot-available-p ()
   "Return non-nil when the TypeScript language server is available."
@@ -98,7 +82,7 @@
 
 (defun my/js-ts-eglot-ensure ()
   "Start Eglot for JS/TS buffers when the server is available."
-  (my/js-setup-local-node-bin)
+  (my/js-setup-project-node-bin)
   (when (my/js-ts-eglot-available-p)
     (my/eglot-set-workspace-configuration
      (my/js-ts-eglot-workspace-configuration))

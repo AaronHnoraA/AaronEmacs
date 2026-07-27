@@ -64,6 +64,8 @@ Persisted targets are intentionally not reloaded; configuration ownership
   (interactive)
   (when (fboundp 'remote-workspace-clear)
     (remote-workspace-clear 'framework-reset))
+  (when (fboundp 'remote-file-watch-clear)
+    (remote-file-watch-clear 'framework-reset))
   (when (fboundp 'remote-service-clear)
     (remote-service-clear 'framework-reset))
   (when (fboundp 'remote-channel-clear)

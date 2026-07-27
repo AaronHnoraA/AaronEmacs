@@ -304,8 +304,12 @@ from resuming."
                   root callbacks nil err))))))))))
 
 (defun direnv--finish-export-waiters (root context &optional error)
-  "Apply ROOT's export waiters later, outside the backend receive loop."
-  (run-with-idle-timer
+  "Apply ROOT's export waiters later, outside the backend receive loop.
+This is a process-boundary promise, so it uses a wall-clock timer.  An idle
+timer can starve indefinitely while TRAMP or another process keeps Emacs busy,
+leaving Eglot and other subprocess consumers permanently latched in a
+\"waiting for direnv\" state even though the export already completed."
+  (run-at-time
    0.01 nil #'direnv--apply-export-waiters root context error))
 
 (defun direnv--start-export
@@ -408,7 +412,7 @@ only for a pending request, in the requesting buffer."
   (let ((buffer (current-buffer)))
     (cond
      ((direnv--transport-busy-p)
-      (run-with-idle-timer
+      (run-at-time
        direnv-transport-busy-retry-delay nil
        (lambda (target target-path done)
          (when (buffer-live-p target)
@@ -446,7 +450,7 @@ only for a pending request, in the requesting buffer."
                  (recent-error
                   (setq direnv--last-error recent-error)
                   (when callback
-                    (run-with-idle-timer
+                    (run-at-time
                      0 nil
                      (lambda (target done failure)
                        (when (buffer-live-p target)
@@ -463,7 +467,7 @@ only for a pending request, in the requesting buffer."
         (error
          (setq direnv--last-error err)
          (when callback
-           (run-with-idle-timer
+           (run-at-time
             0 nil
             (lambda (target done failure)
               (when (buffer-live-p target)

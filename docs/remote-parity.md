@@ -4,6 +4,11 @@
 结果：本地 UI、远端 workspace 计算、稳定文件身份、可恢复连接，以及本地与远端
 边界清晰的扩展 API。
 
+这也是仓库级开发门槛：Remote 框架是核心基础设施，本机作为 target `local` 参与
+同一套 API 和验收。任何可能涉及 filesystem、project/workspace、process、LSP、
+watch、service 或 channel 的能力，都不能先做一套 local consumer，再把 remote
+支持留给未来补丁。
+
 对照基线：
 
 - [VS Code Remote Development](https://code.visualstudio.com/docs/remote/remote-overview)
@@ -25,6 +30,25 @@
 
 只有达到 `resilient` 才算完成。单独存在 struct、配置字段或 UI 按钮不算完成。
 
+### 1.1 本地/远程同构门槛
+
+每个共享能力还必须同时满足：
+
+- consumer 对 `local` 和其他 target 调用同一公共函数、使用同一对象模型和清理
+  路径；测试可以换 target fixture，但不能复制两套实现；
+- consumer 不读取 `"local"`、`file-remote-p`、TRAMP method 或 backend ID 来决定
+  placement、PATH、功能开关或降级；
+- 普通本地 buffer 在框架外继续使用原生路径；进入 project/workspace/LSP 边界后，
+  target `local` 与其他 target 都使用稳定 `/fs:` identity；
+- backend capability 缺失要明确失败或由 route 选择另一 backend，不能悄悄落到
+  client filesystem、进程或 localhost；
+- 新增框架 API 同时有 native/local contract test、remote E2E 和生命周期清理测试。
+
+LSP 额外要求 root、URI、server process、executable/environment、watcher、helper
+service 与 channel 来自同一 owning workspace target。异步 callback 在别的 buffer
+执行也不能改变 target；没有 watcher/helper/channel 的断线恢复测试，就不能达到
+`resilient`。
+
 ## 2. 当前矩阵
 
 | 能力 | 当前 | 完成标准 |
@@ -41,7 +65,7 @@
 | workspace-side service | local | 探测、可信部署、版本协商、启动、健康、停止 |
 | 环境与 remote settings | remote | user → target → workspace → tool → invocation 分层 |
 | 文件 watch | API | 长期监听、断线重订阅、事件路径重写和去重 |
-| LSP/IntelliSense | remote | Eglot server 在 target 启动，URI 始终为 `/fs`/`fs://` |
+| LSP/IntelliSense | remote | root/URI/server/cwd/env/watch/helper/channel 同属一个 workspace target；local/remote 同路由，断线可恢复 |
 | 搜索与 SCM | API | rg/git/Magit 在 target 执行，无本地路径泄漏 |
 | tasks/tests | API | task registry、并发、取消、后台任务和结果模型 |
 | debug | API | Dape adapter 在 target 启动；launch/attach/forward 可组合 |
@@ -67,8 +91,9 @@
 - client/target 混合进程有显式边界：本地 UI proxy 由
   `remote-make-client-process` 启动，target stdio peer 由
   `remote-local-bridge-command` 接入，不依赖宽泛的原生 API advice；
-- workspace 在 transport failure 后按 1/2/4 秒恢复 environment、service、
-  forward、watch、LSP 等可恢复资源；terminal 必须显式重启；
+- workspace 在 transport failure 后按 1/2/4 秒恢复；目前自动登记 environment、
+  service 与 workspace-owned forward。watch/LSP consumer 尚未全部接入 resource
+  owner，terminal 必须显式重启；
 - `remote-doctor` 已能逐层检查并在 `Aaron-Pi` 上完成 Linux probe；
 - `make remote-e2e` 已在真实 SSH target 上验证临时文件往返、远端 cwd、session
   复用和动态 SSH `-R` listener 数据往返。
@@ -150,3 +175,8 @@ remote service。这保留了 Emacs 生态兼容性，也避免要求所有 pack
 - service provisioning 必须有 trust gate、版本与清理。
 - local 测试不能替代 SSH/WSL/container 真机测试。
 - consumer 不能承担 backend 的 cwd、PATH、executable、连接或转发逻辑。
+- consumer 不能用 `file-remote-p`、target/backend 字符串维护 local/remote 两套
+  server、toolchain、watcher 或 feature policy。
+- LSP URI 不能从 callback 当时的 current buffer 推断 target，必须绑定 owning
+  server/workspace root。
+- 没有登记到 workspace owner 的 watch/service/channel 不能宣称自动重连。

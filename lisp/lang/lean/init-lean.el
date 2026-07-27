@@ -843,15 +843,21 @@ while using eglot (not lsp-mode) as the language server backend."
            buf))))
 
 (defun lean--eglot-direnv-ready (_environment error)
-  "Resume Lean Eglot after direnv, or log ERROR."
+  "Resume Lean Eglot after direnv, falling back after ERROR."
   (setq lean--eglot-waiting-for-environment nil)
-  (if error
-      (progn
-        (lean-dev-log "eglot deferred: direnv failed: %s"
-                      (error-message-string error))
-        (message "Lean Eglot: remote direnv failed: %s"
-                 (error-message-string error)))
-    (lean--ensure-eglot)))
+  (when error
+    (lean-dev-log "eglot direnv failed; using target base environment: %s"
+                  (error-message-string error))
+    (message
+     "Lean Eglot: direnv failed (%s); continuing with target base environment"
+     (error-message-string error)))
+  ;; The asynchronous contract has already applied a successful capsule to
+  ;; this buffer.  Start directly instead of re-entering discovery and risking
+  ;; another pending latch.  On failure this follows the shared Eglot policy:
+  ;; availability is more important than an optional environment layer.
+  (if (fboundp 'my/eglot-start-now)
+      (my/eglot-start-now t)
+    (call-interactively #'eglot)))
 
 (defun lean--ensure-eglot ()
   "Start eglot for the current lean-mode buffer if not already managed."

@@ -13,6 +13,25 @@
 注册表与注册语法见 [config-management.md](config-management.md)。下面各节是「该改哪个
 文件」的底层说明；当某项尚未注册时按下面的指引改源码，并顺手把它注册进 `config`。
 
+## 0.1 涉及开发路径、进程或连接时先看 Remote 框架
+
+Remote 是核心开发模型，不是只有 SSH 场景才需要看的附加模块。任何设置或功能如果
+涉及文件身份、project/workspace root、进程、可执行文件、PATH/toolchain、watch、
+terminal、service、socket 或端口，都先读
+[remote-framework.md](remote-framework.md)，再决定修改位置。
+
+- 通用 target/pipeline/backend、路径投影、process/channel 与生命周期能力：
+  改 [lisp/remote/](../lisp/remote/) 并同时补 native 与 remote 测试。
+- 某个语言或 package 的业务规则：留在所属模块，但只调用 `remote-*` API，不自己
+  解析 TRAMP、拼 SSH 命令或按 `"local"`/`file-remote-p` 分叉。
+- target、pipeline 与 backend 配置：改 [etc/remote.json](../etc/remote.json)。
+- 本地也是 target `local`。consumer 应走与远程相同的 API；普通本地 buffer 只在
+  框架外保留原生文件名，以继续兼容 Emacs package。
+
+LSP 尤其严格：workspace root、URI、server、环境、watcher、helper 和 channel 必须
+来自同一个 target context。若一个语言接入需要分别写“local contact”和“remote
+contact”，优先补齐 Remote/LSP adapter，而不是把分支写进语言模块。
+
 ## 1. 我要改主题
 
 文件：
@@ -308,6 +327,11 @@ emacs --debug-init -q -l ./bootstrap.el
 
 - `lsp-mode` 例外路由，优先用 `my/register-lsp-mode-preference`
 - 自定义 Eglot server，优先用 `my/register-eglot-server-program`
+- server 默认放在 workspace target；不要用 `file-remote-p` 注册另一套 contact
+- executable、环境和 URI 必须从 server 所属 logical root 推导，不能依赖当前
+  buffer 恰好位于本地还是远端
+- client-side UI helper 必须显式声明 client placement，并通过 Remote bridge/channel
+  连接 target peer
 
 不要再到处散落手写 `add-to-list 'eglot-server-programs`。
 
@@ -322,14 +346,15 @@ emacs --debug-init -q -l ./bootstrap.el
 重点：
 
 - `remote-board`
-- `remote-register-link-plugin` / `remote-register-adapter`
+- `remote-register-target` / `remote-register-pipeline` / `remote-register-backend`
 - `remote-make-process` / `remote-exec`
+- `remote-make-network-process` / `remote-open-network-stream` / `remote-port-forward`
 - `remote-environment-ensure` / `remote-environment-derive`
 - `my/vterm-ssh`
 
-target、link、TRAMP/tramp-rpc 后端、逻辑 `/fs` 路径和 PATH 环境层的完整设计见
-[remote-framework.md](remote-framework.md)。`lisp/remote/` 只放框架；具体插件接入
-留在所属模块。
+target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境层的完整
+设计见 [remote-framework.md](remote-framework.md)。`lisp/remote/` 只放通用框架；
+具体插件接入留在所属模块，但不得重新拥有物理路径、spawn、连接、转发或恢复逻辑。
 
 ## 12. 我要改项目管理行为
 

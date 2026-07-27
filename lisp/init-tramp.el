@@ -207,8 +207,13 @@ non-login shell startup."
   ;; This is the single biggest speedup for remote file access.
   (setq tramp-use-ssh-controlmaster-options my/tramp-use-ssh-controlmaster)
 
-  ;; Mirror local backup policy on the remote.
-  (setq tramp-backup-directory-alist backup-directory-alist)
+  ;; Keep backups in the Emacs client's normal backup directory.  A non-nil
+  ;; `tramp-backup-directory-alist' deliberately prepends the remote prefix to
+  ;; every native absolute directory, which would turn /Users/... into
+  ;; /ssh:HOST:/Users/... and ask the target to create a client-only path.
+  ;; With this nil, TRAMP falls back to `backup-directory-alist' as a local
+  ;; cache policy.
+  (setq tramp-backup-directory-alist nil)
 
   ;; Keep remote shell startup non-interactive and quiet where possible.
   (dolist (env '("BASH_ENV=''" "ENV=''" "HISTFILE=/dev/null" "PROMPT_COMMAND="))

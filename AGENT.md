@@ -55,6 +55,39 @@ When adding a module:
   helpers usually use a `*-h` suffix.  The public remote framework is the
   deliberate exception and uses the `remote-*` namespace without `my/`.
 
+## Remote-First Core Architecture
+
+The Remote framework is core infrastructure for this repository, not an
+optional feature used only by SSH buffers.  Any design involving file or
+workspace identity, project roots, processes, executable/tool placement,
+environment, file watching, services, terminals, sockets, streams, or port
+forwarding — including a design that is likely to need remote support later —
+must start from the contracts in `docs/remote-framework.md`.
+
+Keep these rules:
+
+- Model the client machine as target `local`.  Local and remote are two inputs
+  to the same public API, lifecycle, and consumer code path; they are not two
+  implementations for consumers to maintain.
+- Consumer modules must not select behavior with `(equal target "local")`,
+  `file-remote-p`, a TRAMP method, or a backend ID.  Differences in physical
+  placement and capability belong in target, pipeline, backend, or explicit
+  client-boundary implementations.  `file-remote-p` is acceptable only at an
+  Emacs/TRAMP compatibility boundary, not as product policy.
+- Preserve native Emacs compatibility.  Ordinary local buffers may keep native
+  file names, while project/workspace/LSP framework boundaries canonicalize
+  identity to `/fs:local:`.  Keep file interception scoped to `/fs:` and prefer
+  decorating native APIs over globally advising or replacing them.
+- If a consumer cannot express a required operation, extend the generic
+  `remote-*` contract and implement native plus remote backends.  Do not hide a
+  missing framework API behind a language- or package-specific remote branch.
+- Connection, pipeline, session, service, watch, and channel ownership belongs
+  to the framework.  Consumers register intent and recoverable resources; they
+  do not own ad-hoc SSH processes, relay ports, or reconnect loops.
+- A feature is not complete merely because the local path works or a capability
+  symbol exists.  Apply the local/remote/resilience criteria in
+  `docs/remote-parity.md`, and add parity tests for every new shared contract.
+
 ## Do Not Reinvent Existing Surfaces
 
 This config already has maintenance and workflow entry points. Reuse them:
@@ -187,14 +220,31 @@ LSP:
 - `lsp-mode` is opt-in per major mode through
   `my/register-lsp-mode-preference`.
 - Custom Eglot mappings go through `my/register-eglot-server-program`.
+- LSP is the strictest consumer of the Remote-first rule.  One logical
+  workspace root and target context must determine document URIs, server
+  process placement, executable lookup, environment/toolchain, file watchers,
+  helper services, and network channels.  Never derive any of these from an
+  unrelated current buffer or client-side `default-directory`.
 - Eglot and lsp-mode startup must use the shared `language-server` remote
   adapter.  Server placement defaults to the active target/workspace; resolve
   executables from its environment and never embed `/ssh:` or `/rpc:` paths in
   contacts.  Mark only genuine client-side UI helpers as client placement.
+- Language modules must not maintain separate local and remote server choices
+  or PATH setup.  Express tool availability as target capabilities or
+  toolchain preferences and let the selected backend project them.  Any
+  unavoidable Eglot/lsp-mode TRAMP workaround stays in the shared adapter
+  boundary and must also be tested with target `local`.
+- URI conversion must be anchored to the workspace owned by the Eglot server
+  or lsp-mode workspace.  A callback running in another buffer must not change
+  the target identity of a document.
 - Remote language integrations must preserve local feature parity.  For
   multi-process tools such as Lean, Node, Lake, workers, and helper ports must
   share the target environment; target-side HTTP/TCP helpers reach the client
   through `remote-channel` forwarding.
+- Long-lived LSP watchers, helper services, and channels must be registered
+  with their `remote-workspace` owner so reconnect can restore or explicitly
+  report them.  Do not claim reconnect support until failure-injection tests
+  cover it.
 - Give each language-helper process instance its own owned discovery/port file;
   never let concurrent reconnects overwrite a project-global endpoint file.
   Validate local owners and clean up only files owned by the exiting process.
@@ -236,8 +286,9 @@ Projects/remote/terminal:
 - Project workflow is Projectile + Perspective + Transient + Treemacs/show-imenu.
 - Project behavior belongs mostly in `lisp/init-project.el`; project shortcuts
   live in `lisp/init-evil.el`.
-- Treat local files as target `local` and keep buffer/project identity in
-  canonical `/fs:TARGET:/path` form.  `/ssh:` and `/rpc:` are compatibility
+- Treat local files as target `local` and keep framework-owned project/workspace
+  identity in canonical `/fs:TARGET:/path` form.  Ordinary local buffers remain
+  native until they cross that boundary.  `/ssh:` and `/rpc:` are compatibility
   inputs, not identities for new code.
 - New custom file, process, executable, LSP, and environment integrations must
   use the APIs in `docs/remote-framework.md`.  Do not infer policy by parsing

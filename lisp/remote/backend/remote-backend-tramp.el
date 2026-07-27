@@ -13,6 +13,7 @@
 (defvar tramp-methods)
 (defvar tramp-rpc-ssh-args)
 (defvar tramp-rpc-ssh-options)
+(defvar tramp-rpc-use-controlmaster)
 
 (defconst remote-backend-tramp-capabilities
   '(file-read file-write directory metadata
@@ -31,7 +32,23 @@ Pipeline config may set `:ssh-options', `:connect-timeout', and
 `:connection-attempts'.  The framework connection deadline supplies the
 default TCP connect timeout."
   (let* ((config (remote-pipeline-effective-config link))
-         (configured (plist-get config :ssh-options))
+         (managed (remote-transport-ssh-control-options))
+         (configured
+          (let ((value (plist-get config :ssh-options)))
+            (cond
+             ((null value) nil)
+             ((stringp value) (list value))
+             ((listp value)
+              (mapcar (lambda (option) (format "%s" option)) value)))))
+         (configured
+          (if managed
+              (seq-remove
+               (lambda (option)
+                 (string-match-p
+                  "\\`Control\\(?:Master\\|Path\\|Persist\\)="
+                  option))
+               configured)
+            configured))
          (timeout
           (or (plist-get config :connect-timeout)
               (and (boundp 'remote-connection-open-timeout)
@@ -39,11 +56,7 @@ default TCP connect timeout."
          (attempts (or (plist-get config :connection-attempts) 1)))
     (delete-dups
      (append
-      (cond
-       ((null configured) nil)
-       ((stringp configured) (list configured))
-       ((listp configured)
-        (mapcar (lambda (option) (format "%s" option)) configured)))
+      managed configured
       (when (and (numberp timeout) (> timeout 0))
         (list (format "ConnectTimeout=%d" (ceiling timeout))))
       (when (and (numberp attempts) (> attempts 0))
@@ -165,6 +178,8 @@ default TCP connect timeout."
           (if (equal (remote-route-link-plugin-id route) "tramp-rpc")
               "rpc"
             (or (plist-get config :method) "ssh")))
+         (managed-control-options
+          (remote-transport-ssh-control-options))
          (options (remote-backend-tramp--ssh-options link))
          (raw-options (remote-backend-tramp--ssh-raw-args options))
          (physical
@@ -190,14 +205,28 @@ default TCP connect timeout."
          (tramp-rpc-ssh-args
           ;; Do not deduplicate this flat argv: every option has its own `-o'
           ;; token, and deleting repeated `-o' changes argument boundaries.
-          (append raw-options
+          (append (unless managed-control-options raw-options)
                   (and (boundp 'tramp-rpc-ssh-args)
                        tramp-rpc-ssh-args)))
          (tramp-rpc-ssh-options
           (delete-dups
            (append options
                    (and (boundp 'tramp-rpc-ssh-options)
-                        tramp-rpc-ssh-options)))))
+                        tramp-rpc-ssh-options))))
+         ;; A managed SSH stage owns the one ControlPath used by TRAMP,
+         ;; tramp-rpc, direct stdio processes, and forwards.  In that case
+         ;; tramp-rpc must not allocate its second private ControlMaster.
+         (tramp-rpc-use-controlmaster
+          (if (and (equal method "rpc") managed-control-options)
+              nil
+            (and (boundp 'tramp-rpc-use-controlmaster)
+                 tramp-rpc-use-controlmaster)))
+         ;; TRAMP and tramp-rpc bootstrap SSH on the Emacs client.  A target
+         ;; environment intentionally contains target-native HOME/PATH values;
+         ;; inheriting those here makes client state such as ~/.ssh resolve on
+         ;; the wrong machine (for example /home/hc on a macOS client).
+         (process-environment (remote-client-process-environment))
+         (exec-path (remote-client-exec-path)))
     (unless (file-remote-p physical nil 'connected)
       (file-attributes physical))
     physical))
@@ -309,7 +338,7 @@ stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation."
   (pcase-let* ((`(,destination ,jumps ,_config)
                  (remote-backend-tramp--pipeline-ssh-parts route))
                 (ssh
-                 (or (executable-find "ssh")
+                 (or (remote-client-executable-find "ssh")
                      (signal
                       'remote-backend-unsupported
                       '("Local ssh executable is unavailable"))))
@@ -420,7 +449,7 @@ the file-name handler."
   (pcase-let* ((`(,destination ,jumps ,_config)
                  (remote-backend-tramp--pipeline-ssh-parts route))
                 (scp
-                 (or (executable-find "scp")
+                 (or (remote-client-executable-find "scp")
                      (signal
                       'remote-backend-unsupported
                       '("Local scp executable is unavailable"))))
@@ -476,9 +505,11 @@ REMOTE-HOST and REMOTE-PORT which connects to LOCAL-HOST and LOCAL-PORT."
            hops))
          (destination (car (last hops)))
          (jumps (butlast hops))
-         (ssh (or (executable-find "ssh")
+         (ssh (or (remote-client-executable-find "ssh")
                   (signal 'remote-backend-unsupported
                           (list "Local ssh executable is unavailable"))))
+         (options
+          (remote-backend-tramp--ssh-options pipeline))
          (command
           (list
            ssh "-N" "-T"
@@ -497,6 +528,9 @@ REMOTE-HOST and REMOTE-PORT which connects to LOCAL-HOST and LOCAL-PORT."
         (format
          "SSH forwarding cannot cross final %s stage"
          (remote-endpoint-method unsupported)))))
+    (dolist (option options)
+      (setq command
+            (append command (list "-o" option))))
     (when jumps
       (setq command
             (append

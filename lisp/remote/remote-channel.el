@@ -27,6 +27,13 @@
 (defvar remote-channels (make-hash-table :test #'equal)
   "Routed channel descriptors keyed by generated channel ID.")
 
+(defvar remote-channel-native-api-inhibit nil
+  "Non-nil while a backend is invoking Emacs' native network API.
+
+Compatibility decorators for third-party packages must honor this guard so a
+routed `open-network-stream' or `make-network-process' call cannot route
+itself recursively.")
+
 (defvar remote-channel--counter 0)
 
 (defvar remote-channel--process-contact-advice-installed nil)
@@ -299,6 +306,7 @@ Accept all `make-network-process' keys plus `:remote-context',
        'remote-backend-unsupported
        (list (remote-route-link-plugin-id route) capability)))
     (let ((remote-current-connection session)
+          (remote-channel-native-api-inhibit t)
           (process (funcall function route context arguments)))
       (when (processp process)
         (process-put process 'remote-route route)
@@ -352,6 +360,7 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
        'remote-backend-unsupported
        (list (remote-route-link-plugin-id route) 'network-client)))
     (let* ((remote-current-connection session)
+           (remote-channel-native-api-inhibit t)
            (result
             (funcall function route context
                      name buffer host service arguments))

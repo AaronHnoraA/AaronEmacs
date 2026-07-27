@@ -112,8 +112,36 @@ VALUE may be a workspace object, workspace ID, context, or logical path."
            (gethash (nth 1 identity) remote-workspaces))
        (error nil))))
    ((remote-context-p value)
-    (let ((identity (remote-workspace--identity value)))
+   (let ((identity (remote-workspace--identity value)))
       (gethash (nth 1 identity) remote-workspaces)))))
+
+(defun remote-workspace-for-path (path)
+  "Return the most specific open workspace containing logical PATH.
+
+Unlike `remote-get-workspace', this is a containment query rather than an
+exact identity lookup.  It lets native Emacs consumers such as file watchers
+created in a project subdirectory inherit the owning workspace lifecycle."
+  (let* ((canonical (remote-canonicalize-file-name path))
+         (target-id (remote-file-name-target canonical))
+         candidates)
+    (maphash
+     (lambda (_key workspace)
+       (let ((root
+              (file-name-as-directory
+               (remote-workspace-root workspace))))
+         (when (and
+                (equal target-id
+                       (remote-workspace-target-id workspace))
+                (or
+                 (equal canonical (directory-file-name root))
+                 (string-prefix-p root canonical)))
+           (push workspace candidates))))
+     remote-workspaces)
+    (car
+     (sort candidates
+           (lambda (left right)
+             (> (length (remote-workspace-root left))
+                (length (remote-workspace-root right))))))))
 
 (defun remote-workspace-live-p (workspace)
   "Return non-nil when WORKSPACE is open."
@@ -197,9 +225,29 @@ workspace object and closes resources owned by the old one."
 
 (defalias 'remote-workspace-ensure #'remote-workspace-open)
 
-(defun remote-workspace-route
+(defun remote-workspace--remember-route (workspace route)
+  "Remember ROUTE as part of WORKSPACE's recovery boundary."
+  (setf (remote-workspace-routes workspace)
+        (cons
+         route
+         (seq-remove
+          (lambda (known)
+            (equal
+             (remote-connection-route-key known)
+             (remote-connection-route-key route)))
+          (remote-workspace-routes workspace)))
+        (remote-workspace-primary-route workspace)
+        (or (remote-workspace-primary-route workspace) route)
+        (remote-workspace-last-used-at workspace)
+        (current-time))
+  route)
+
+(defun remote-workspace-track-route
     (workspace adapter capability &optional constraints)
-  "Resolve and remember a route for WORKSPACE."
+  "Resolve and remember a WORKSPACE route without acquiring another session.
+Use this when a consumer already opened its process through the same adapter
+and the workspace only needs the route identity for failure matching and
+recovery."
   (let* ((workspace
           (or (remote-get-workspace workspace)
               (error "Unknown remote workspace: %S" workspace)))
@@ -208,19 +256,19 @@ workspace object and closes resources owned by the old one."
            adapter capability
            (remote-workspace-context workspace)
            constraints)))
+    (remote-workspace--remember-route workspace route)))
+
+(defun remote-workspace-route
+    (workspace adapter capability &optional constraints)
+  "Resolve, acquire, and remember a route for WORKSPACE."
+  (let* ((workspace
+          (or (remote-get-workspace workspace)
+              (error "Unknown remote workspace: %S" workspace)))
+         (route
+          (remote-workspace-track-route
+           workspace adapter capability constraints)))
     (remote-session-acquire
      route (remote-workspace-context workspace))
-    (setf (remote-workspace-routes workspace)
-          (cons
-           route
-           (seq-remove
-            (lambda (known)
-              (equal
-               (remote-connection-route-key known)
-               (remote-connection-route-key route)))
-            (remote-workspace-routes workspace)))
-          (remote-workspace-last-used-at workspace)
-          (current-time))
     route))
 
 (defun remote-workspace-register-resource
@@ -249,6 +297,26 @@ workspace object and closes resources owned by the old one."
                 (remote-workspace-resources workspace)))
     resource))
 
+(defun remote-workspace-find-resource (workspace kind &optional key)
+  "Return WORKSPACE's resource of KIND identified by KEY.
+When KEY is nil, return the first resource of KIND.  Stable keys let
+long-lived consumers register one logical resource even when several buffers
+observe it."
+  (let ((workspace
+         (or (remote-get-workspace workspace)
+             (error "Unknown remote workspace: %S" workspace))))
+    (seq-find
+     (lambda (resource)
+       (and
+        (eq (remote-workspace-resource-kind resource) kind)
+        (or
+         (null key)
+         (equal
+          (plist-get
+           (remote-workspace-resource-metadata resource) :key)
+          key))))
+     (remote-workspace-resources workspace))))
+
 (cl-defun remote-workspace-register-recoverable-resource
     (workspace kind value &key close recover metadata
                (recovery 'auto))
@@ -261,6 +329,104 @@ contract."
    (append
     (list :recover recover :recovery recovery)
     metadata)))
+
+(cl-defun remote-workspace-ensure-recoverable-resource
+    (workspace kind key value &key close recover metadata
+               (recovery 'auto))
+  "Create or update one recoverable WORKSPACE resource.
+KIND and KEY form the stable consumer identity.  Re-registering the same
+logical resource updates its handle and lifecycle functions in place instead
+of accumulating one resource per observing buffer."
+  (let* ((workspace
+          (or (remote-get-workspace workspace)
+              (error "Unknown remote workspace: %S" workspace)))
+         (metadata
+          (append
+           (list :key key :recover recover :recovery recovery)
+           metadata))
+         (resource
+          (remote-workspace-find-resource workspace kind key)))
+    (if resource
+        (progn
+          (setf
+           (remote-workspace-resource-value resource) value
+           (remote-workspace-resource-close-function resource) close
+           (remote-workspace-resource-recovery-function resource) recover
+           (remote-workspace-resource-recovery-policy resource) recovery
+           (remote-workspace-resource-state resource) 'open
+           (remote-workspace-resource-error resource) nil
+           (remote-workspace-resource-metadata resource) metadata)
+          resource)
+      (remote-workspace-register-recoverable-resource
+       workspace kind value
+       :close close :recover recover :metadata metadata
+       :recovery recovery))))
+
+(defun remote-workspace-forget-resource (workspace resource)
+  "Forget RESOURCE without closing it and return RESOURCE.
+This is for lifecycle notifications received after the external owner already
+closed the handle.  Ordinary callers should use
+`remote-workspace-close-resource' instead."
+  (let* ((workspace
+          (or (remote-get-workspace workspace)
+              (error "Unknown remote workspace: %S" workspace)))
+         (resource
+          (if (remote-workspace-resource-p resource)
+              resource
+            (seq-find
+             (lambda (candidate)
+               (equal
+                (remote-workspace-resource-id candidate)
+                (format "%s" resource)))
+             (remote-workspace-resources workspace)))))
+    (when resource
+      (setf (remote-workspace-resources workspace)
+            (delq resource
+                  (remote-workspace-resources workspace))))
+    resource))
+
+(cl-defun remote-workspace-add-file-watch
+    (workspace file flags callback &key key metadata)
+  "Add one recoverable file watch owned by WORKSPACE.
+FILE is canonicalized in the workspace target namespace.  Local and remote
+targets use the same native `file-notify-add-watch' contract through the
+scoped `/fs:' handler."
+  (let* ((workspace
+          (or (remote-get-workspace workspace)
+              (error "Unknown remote workspace: %S" workspace)))
+         (context (remote-workspace-context workspace))
+         (file
+          (remote-expand-file-name
+           file (remote-workspace-root workspace) context))
+         (key (or key (list file flags callback)))
+         (open
+          (lambda ()
+            (let ((remote-file-watch-workspace workspace)
+                  (remote-file-watch-key key)
+                  (remote-file-watch-metadata metadata))
+              (file-notify-add-watch file flags callback))))
+         (descriptor (funcall open))
+         (logical-watch
+          (and (fboundp 'remote-get-file-watch)
+               (remote-get-file-watch descriptor))))
+    ;; The `/fs:' handler returns a stable descriptor and has already
+    ;; registered its replacement-aware resource.  Retain a conservative
+    ;; fallback for configurations which only loaded workspace.el without
+    ;; enabling the logical handler.
+    (or
+     (and logical-watch
+          (remote-file-watch-resource logical-watch))
+     (remote-workspace-ensure-recoverable-resource
+      workspace 'watch key descriptor
+      :close
+      (lambda (value _reason)
+        (when value
+          (ignore-errors (file-notify-rm-watch value))))
+      :recover
+      (lambda (_resource _owner)
+        (funcall open))
+      :metadata
+      (append (list :file file :flags flags) metadata)))))
 
 (defun remote-workspace--mark-terminals-disconnected (workspace reason)
   "Mark terminal resources in WORKSPACE disconnected because of REASON."

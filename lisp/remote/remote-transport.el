@@ -48,6 +48,10 @@
   key pipeline-id route context stages endpoint
   state opened-at last-used-at use-count error metadata)
 
+(cl-defstruct (remote-ssh-control
+               (:constructor remote-ssh-control-create))
+  path destination state)
+
 (defvar remote-transports (make-hash-table :test #'equal)
   "Registered transport stage implementations.")
 
@@ -56,6 +60,11 @@
 
 (defvar remote-current-pipeline-runtime nil
   "Dynamically active `remote-pipeline-runtime'.")
+
+(defcustom remote-transport-ssh-control-persist 600
+  "Seconds an OpenSSH master may remain idle while its pipeline is open."
+  :type 'integer
+  :group 'remote)
 
 (defun remote-transport--object-value (object key)
   "Return KEY from plist or alist OBJECT."
@@ -165,6 +174,137 @@ and DISCONNECT own resources allocated by CONNECT."
              :attributes
              (copy-tree (remote-endpoint-attributes configured))))))
     configured))
+
+(defun remote-transport--ssh-control-directory ()
+  "Return the private short directory used for this Emacs SSH control sockets."
+  (let ((directory
+         (expand-file-name
+          (format ".emacs-remote-ssh-%s-%s/"
+                  (if (fboundp 'user-uid) (user-uid) "user")
+                  (emacs-pid))
+          (if (file-directory-p "/tmp")
+              "/tmp/"
+            temporary-file-directory))))
+    (unless (file-directory-p directory)
+      (make-directory directory t)
+      (set-file-modes directory #o700))
+    directory))
+
+(defun remote-transport--ssh-destination (endpoint)
+  "Return OpenSSH's destination spelling for ENDPOINT."
+  (let ((host (remote-endpoint-host endpoint))
+        (user (remote-endpoint-user endpoint)))
+    (unless (and (stringp host) (not (string-empty-p host)))
+      (signal
+       'remote-transport-error
+       (list "Managed SSH stage has no destination host")))
+    (if (and (stringp user) (not (string-empty-p user)))
+        (format "%s@%s" user host)
+      host)))
+
+(defun remote-transport--ssh-control-command (control operation)
+  "Return an OpenSSH control COMMAND for CONTROL and OPERATION."
+  (when-let* ((ssh (remote-client-executable-find "ssh")))
+    (list
+     ssh "-S" (remote-ssh-control-path control)
+     "-O" operation
+     (remote-ssh-control-destination control))))
+
+(defun remote-transport--ssh-control-check (control)
+  "Return non-nil when CONTROL's OpenSSH master answers."
+  (when-let* ((command
+               (remote-transport--ssh-control-command control "check")))
+    (let ((default-directory temporary-file-directory))
+      (zerop (apply #'call-process
+                    (car command) nil nil nil (cdr command))))))
+
+(defun remote-transport--ssh-connect (stage endpoint runtime)
+  "Allocate a lazy managed OpenSSH control handle for STAGE.
+The first backend SSH operation creates the actual master with
+`ControlMaster=auto'.  The pipeline owns its ControlPath, health check, and
+eventual `-O exit'."
+  (let* ((identity
+          (format "%S"
+                  (list
+                   (remote-pipeline-runtime-key runtime)
+                   (remote-pipeline-stage-id stage)
+                   (remote-endpoint-host endpoint)
+                   (remote-endpoint-port endpoint)
+                   (remote-endpoint-user endpoint)
+                   (mapcar
+                    #'remote-endpoint-host
+                    (remote-endpoint-hops endpoint)))))
+         (path
+          (expand-file-name
+           (concat "c-" (substring (secure-hash 'sha256 identity) 0 24))
+           (remote-transport--ssh-control-directory)))
+         (control
+          (remote-ssh-control-create
+           :path path
+           :destination
+           (remote-transport--ssh-destination endpoint)
+           :state 'lazy)))
+    ;; A previous abnormal exit in this Emacs process may have left a socket.
+    ;; Keep a live master, but remove a stale path before OpenSSH sees it.
+    (when (and (file-exists-p path)
+               (not (remote-transport--ssh-control-check control)))
+      (ignore-errors (delete-file path)))
+    (remote-transport-result-create
+     :endpoint endpoint
+     :handle control
+     :metadata (list :ssh-control-path path :managed t :lazy t))))
+
+(defun remote-transport--ssh-live-p (stage-runtime _runtime)
+  "Return non-nil when STAGE-RUNTIME's lazy or active SSH control is usable."
+  (let ((control (remote-stage-runtime-handle stage-runtime)))
+    (and
+     (remote-ssh-control-p control)
+     (not (eq (remote-ssh-control-state control) 'closed))
+     (or
+      (not (file-exists-p (remote-ssh-control-path control)))
+      (let ((live (remote-transport--ssh-control-check control)))
+        (setf (remote-ssh-control-state control)
+              (if live 'open 'failed))
+        live)))))
+
+(defun remote-transport--ssh-disconnect (stage-runtime _runtime)
+  "Close STAGE-RUNTIME's OpenSSH master and remove its ControlPath."
+  (when-let* ((control (remote-stage-runtime-handle stage-runtime))
+              ((remote-ssh-control-p control)))
+    (when (file-exists-p (remote-ssh-control-path control))
+      (when-let* ((command
+                   (remote-transport--ssh-control-command control "exit")))
+        (let ((default-directory temporary-file-directory))
+          (ignore-errors
+            (apply #'call-process
+                   (car command) nil nil nil (cdr command)))))
+      (when (file-exists-p (remote-ssh-control-path control))
+        (ignore-errors
+          (delete-file (remote-ssh-control-path control)))))
+    (setf (remote-ssh-control-state control) 'closed)))
+
+(defun remote-transport-ssh-control-options (&optional runtime)
+  "Return OpenSSH options for RUNTIME's final managed SSH stage."
+  (let* ((runtime
+          (or runtime (remote-pipeline-active-runtime)))
+         (control
+          (and
+           runtime
+           (seq-some
+            (lambda (stage-runtime)
+              (let ((handle
+                     (remote-stage-runtime-handle stage-runtime)))
+                (and (remote-ssh-control-p handle) handle)))
+            (reverse
+             (copy-sequence
+              (remote-pipeline-runtime-stages runtime)))))))
+    (when control
+      (list
+       "ControlMaster=auto"
+       (format "ControlPersist=%d"
+               (max 0 remote-transport-ssh-control-persist))
+       (format "ControlPath=%s"
+               (remote-ssh-control-path control))))))
 
 (defun remote-transport--normalize-result (value endpoint)
   "Normalize transport result VALUE using ENDPOINT as the default."
@@ -579,9 +719,26 @@ When FORCE is non-nil, close it regardless of remaining references."
        (lambda (stage endpoint runtime)
          (remote-transport--hop-prepare
           method stage endpoint runtime))
+       :connect
+       (and
+        (member method '("ssh" "sshx" "scp"))
+        #'remote-transport--ssh-connect)
+       :live
+       (and
+        (member method '("ssh" "sshx" "scp"))
+        #'remote-transport--ssh-live-p)
+       :disconnect
+       (and
+        (member method '("ssh" "sshx" "scp"))
+        #'remote-transport--ssh-disconnect)
        :describe
        (lambda ()
-         (list :kind 'tramp-hop :method method :managed 'backend))))))
+         (list
+          :kind 'tramp-hop :method method
+          :managed
+          (if (member method '("ssh" "sshx" "scp"))
+              'pipeline
+            'backend)))))))
 
 (remote-transport-register-builtins)
 

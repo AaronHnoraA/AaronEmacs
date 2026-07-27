@@ -12,6 +12,25 @@ buffer/file-name 哲学，以 `/fs:TARGET:/path` 表示稳定的逻辑文件身�
 
 `init-remote.el` 只负责配置集成、UI 和启用 `remote-mode`。
 
+## 0. 仓库级核心地位
+
+Remote 是整个开发环境的基础能力层，不是“打开 SSH 文件时才用”的可选功能。
+filesystem、project/workspace、process、executable/tool placement、environment、
+watch、service、terminal、stream、socket 和 forwarding 的新设计，只要现在或以后
+可能需要跨机器，就必须基于本框架。所属模块保留业务逻辑，但不得再建一套独立的
+remote implementation。
+
+本机统一建模为 target `local`。这意味着 local 与 remote 使用相同的 consumer
+API、route 选择、资源所有权和验收标准；差异只在 pipeline/backend/capability 或
+显式 client boundary。consumer 不得用 `"local"`、`file-remote-p`、TRAMP method
+或 backend ID 决定产品行为。若公共 API 不能表达需求，应扩展框架并同时实现 native
+与 remote backend，而不是在 consumer 内绕过。
+
+这一核心地位不改变 Emacs 的 buffer/filesystem 哲学：普通本地 buffer 继续使用
+原生路径和原生 API；只有进入 framework-owned project/workspace/LSP 边界时才规范
+为 `/fs:local:`。框架通过 scoped file-name handler 和窄适配层扩展原生能力，尽量
+享受 Emacs 与第三方 package 的后续改进。
+
 ## 1. 不变量
 
 框架实现与后续扩展必须保持以下约束：
@@ -29,6 +48,12 @@ buffer/file-name 哲学，以 `/fs:TARGET:/path` 表示稳定的逻辑文件身�
    远端能力缺失时必须报错，绝不静默在客户端机器执行。
 6. target-native path、逻辑 `/fs:` path 与 backend physical path 是三种不同值，
    不允许跨层混用。
+7. consumer 不按 local/remote、TRAMP method 或 backend ID 分叉；物理差异由
+   pipeline/backend/capability 投影。
+8. connection、session、service、watch、channel 与恢复由 framework owner 管理；
+   consumer 只登记资源意图和业务回调。
+9. LSP 的 root、URI、server、environment、watcher、helper 与 channel 必须绑定
+   同一个 owning workspace target，不能从偶然的当前 buffer 猜测。
 
 逻辑语法的注册与 handler 启用彼此独立。因此只加载库即可解析和比较 `/fs:`
 身份；只有 `remote-mode` 才安装实际文件拦截。
@@ -289,7 +314,10 @@ direnv、Nix、语言工具链等通过 maintainer 或派生 layer 修改环境�
 语言服务器默认是 target placement。Eglot 和 lsp-mode 在启动前等待同一份
 workspace 环境，随后通过官方 `make-process` / `start-file-process` 边界路由；
 clangd、pylsp、typescript-language-server、rust-analyzer、texlab 和 bash-language-
-server 等都从 target PATH 或 workspace toolchain 查找。
+server/workspace 所拥有的 logical root 也是 URI 反投影的唯一 target 来源；异步
+callback 即使发生在其他 buffer，也不能读取环境中的 `default-directory` 来改写
+文档身份。语言模块不能按 `file-remote-p` 选择另一套 contact、PATH 或 feature
+降级；当前残留的此类分支都是迁移债务。
 
 client placement 必须显式进入 `remote-make-client-process`。该 API 即使从远端
 buffer 调用，也会恢复应用 direnv 之前的客户端环境、使用本机 cwd，并禁止 `/fs:`
@@ -523,4 +551,5 @@ devcontainer、Dape/tasks 编排、动态 SOCKS forward 与托管 tunnel 不在�
 
 当前已经可用于文件、环境、进程、LSP、terminal 和部分 channel 工作流。下一阶段
 优先完善 managed FRP/tunnel stage、SSH `-R` 长期真机回归、watch 一致性和断线
-重连；消费者继续只做环境或工具逻辑，不承担物理路径、spawn 形式和连接生命周期。
+重连，并迁移语言模块中遗留的 local/remote contact、PATH 与 watcher 分支；
+消费者继续只做环境或工具逻辑，不承担物理路径、spawn 形式和连接生命周期。

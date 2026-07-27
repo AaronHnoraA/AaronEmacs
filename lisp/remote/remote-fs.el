@@ -19,6 +19,18 @@
 (require 'remote-pipeline)
 
 (declare-function remote-make-process "remote-process" (&rest plist))
+(declare-function file-notify--rm-descriptor "filenotify" (descriptor))
+(declare-function remote-workspace-close-resource
+                  "remote-workspace" (workspace resource &optional reason))
+(declare-function remote-workspace-for-path
+                  "remote-workspace" (path))
+(declare-function remote-workspace-id
+                  "remote-workspace" (workspace))
+(declare-function remote-workspace-register-recoverable-resource
+                  "remote-workspace" (workspace kind value &rest keys))
+(declare-function remote-workspace-ensure-recoverable-resource
+                  "remote-workspace"
+                  (workspace kind key value &rest keys))
 (defvar remote-config-settings)
 
 (defconst remote-fs-method "fs")
@@ -32,6 +44,25 @@
 
 (defvar remote-fs-path-expansion-cache (make-hash-table :test #'equal)
   "Resolved target-relative configured paths keyed by target and spelling.")
+
+(cl-defstruct (remote-file-watch
+               (:constructor remote-file-watch-create))
+  id descriptor physical-descriptor file flags callback target-id adapter-id
+  state workspace resource generation suppress-events)
+
+(defvar remote-file-watches (make-hash-table :test #'equal)
+  "Stable logical file watches keyed by framework watch ID.")
+
+(defvar remote-file-watch--counter 0)
+
+(defvar remote-file-watch-workspace nil
+  "Dynamically selected workspace owner for a new logical watch.")
+
+(defvar remote-file-watch-key nil
+  "Dynamically selected stable resource key for a new logical watch.")
+
+(defvar remote-file-watch-metadata nil
+  "Dynamically supplied resource metadata for a new logical watch.")
 
 (defun remote-fs--adapter-for-capability
     (capability &optional fallback)
@@ -611,8 +642,10 @@ This compatibility dispatcher keeps callers independent of backend layout."
   "Register the routing contract for file-name OPERATION.
 PATH-ARGUMENTS contains zero-based positions of file-name arguments, or `all'
 for an extension whose signature is not known.  RESULT-KIND is one of `pass',
-`path', `path-list', `path-alist', `visit', `symlink-target', or
-`local-copy'.  RETRY-SAFE controls route failover independently of capability."
+`path', `path-list', `path-alist', `placement-path-alist', `visit',
+`symlink-target', or `local-copy'.  A `placement-path-alist' preserves native
+absolute client paths while rewrapping file-handler-qualified target paths.
+RETRY-SAFE controls route failover independently of capability."
   (unless (memq capability remote-capabilities)
     (error "Unknown capability for file operation %s: %S"
            operation capability))
@@ -622,7 +655,7 @@ for an extension whose signature is not known.  RESULT-KIND is one of `pass',
     (error "Invalid path arguments for file operation %s: %S"
            operation path-arguments))
   (unless (memq result-kind
-                '(pass path path-list path-alist visit
+                '(pass path path-list path-alist placement-path-alist visit
                        symlink-target local-copy))
     (error "Invalid result kind for file operation %s: %S"
            operation result-kind))
@@ -732,7 +765,7 @@ for an extension whose signature is not known.  RESULT-KIND is one of `pass',
    'file-write '(0) 'path nil)
   (remote-fs--register-operation-group
    '(find-backup-file-name)
-   'metadata '(0) 'path-alist t)
+   'metadata '(0) 'placement-path-alist t)
   ;; Watches and process operations derive placement from a file or the
   ;; current default-directory, but their return values are opaque handles.
   (remote-register-file-operation
@@ -984,6 +1017,30 @@ the request to TRAMP or tramp-rpc."
           (if (and (consp entry) (stringp (car entry)))
               (cons
                (remote-fs--rewrap-physical (car entry) target-id)
+               (cdr entry))
+            entry))
+        result))
+      (t result)))
+    ('placement-path-alist
+     ;; Backup and cache policies may intentionally return a path owned by the
+     ;; Emacs client.  Only a file-handler-qualified result proves that the
+     ;; backend placed it on the target; a native absolute path must not be
+     ;; projected into /fs:TARGET:.
+     (cond
+      ((and (consp result) (stringp (car result)))
+       (cons
+        (if (file-remote-p (car result))
+            (remote-fs--rewrap-physical (car result) target-id)
+          (car result))
+        (cdr result)))
+      ((listp result)
+       (mapcar
+        (lambda (entry)
+          (if (and (consp entry) (stringp (car entry)))
+              (cons
+               (if (file-remote-p (car entry))
+                   (remote-fs--rewrap-physical (car entry) target-id)
+                 (car entry))
                (cdr entry))
             entry))
         result))
@@ -1280,25 +1337,234 @@ as an accidental fallback."
              (equal (remote-fs-target-id file-name) "local"))
     (file-name-as-directory (remote-fs-localname file-name))))
 
-(defun remote-fs-handle-file-notify-add-watch
-    (file flags callback)
-  "Watch logical FILE and keep event paths in its target namespace."
-  (let ((target (remote-fs-target-id file)))
+(defun remote-file-watch-descriptor-p (descriptor)
+  "Return non-nil when DESCRIPTOR is a stable logical watch handle."
+  (and (consp descriptor)
+       (eq (car descriptor) 'remote-file-watch)
+       (stringp (cdr descriptor))))
+
+(defun remote-get-file-watch (descriptor)
+  "Return the logical watch represented by DESCRIPTOR, or nil."
+  (when (remote-file-watch-descriptor-p descriptor)
+    (gethash (cdr descriptor) remote-file-watches)))
+
+(defun remote-file-watch-list ()
+  "Return stable summaries of live logical file watches."
+  (mapcar
+   (lambda (watch)
+     (list
+      :id (remote-file-watch-id watch)
+      :descriptor (remote-file-watch-descriptor watch)
+      :file (remote-file-watch-file watch)
+      :target (remote-file-watch-target-id watch)
+      :adapter (remote-file-watch-adapter-id watch)
+      :state (remote-file-watch-state watch)
+      :workspace
+      (when-let* ((workspace (remote-file-watch-workspace watch)))
+        (remote-workspace-id workspace))))
+   (sort
+    (hash-table-values remote-file-watches)
+    (lambda (left right)
+      (string-lessp
+       (remote-file-watch-id left)
+       (remote-file-watch-id right))))))
+
+(defun remote-file-watch-clear (&optional reason)
+  "Close every logical file watch and return the number removed."
+  (let ((watches (hash-table-values remote-file-watches)))
+    (dolist (watch watches)
+      (remote-fs--watch-close
+       watch (or reason 'clear) t))
+    (length watches)))
+
+(defun remote-fs--watch-deliver (watch event)
+  "Deliver physical EVENT through stable logical WATCH."
+  (let ((event (copy-sequence event)))
+    (setf (car event) (remote-file-watch-descriptor watch))
+    (when (stringp (nth 2 event))
+      (setf (nth 2 event)
+            (remote-fs--rewrap-physical
+             (nth 2 event)
+             (remote-file-watch-target-id watch))))
+    (when (stringp (nth 3 event))
+      (setf (nth 3 event)
+            (remote-fs--rewrap-physical
+             (nth 3 event)
+             (remote-file-watch-target-id watch))))
+    (when (eq (nth 1 event) 'stopped)
+      (setf (remote-file-watch-state watch) 'stopped))
+    (unless (remote-file-watch-suppress-events watch)
+      (funcall (remote-file-watch-callback watch) event))))
+
+(defun remote-fs--watch-add-physical (watch)
+  "Create and return the backend descriptor for logical WATCH."
+  (let ((remote-current-adapter-id
+         (remote-file-watch-adapter-id watch))
+        (generation
+         (1+ (or (remote-file-watch-generation watch) 0))))
+    (setf (remote-file-watch-generation watch) generation)
     (remote-fs--call-routed
      'file-notify-add-watch
      (list
-      file flags
+      (remote-file-watch-file watch)
+      (remote-file-watch-flags watch)
       (lambda (event)
-        (let ((event (copy-sequence event)))
-          (when (stringp (nth 2 event))
-            (setf (nth 2 event)
-                  (remote-fs--rewrap-physical
-                   (nth 2 event) target)))
-          (when (stringp (nth 3 event))
-            (setf (nth 3 event)
-                  (remote-fs--rewrap-physical
-                   (nth 3 event) target)))
-          (funcall callback event)))))))
+        (when (= generation
+                 (remote-file-watch-generation watch))
+          (remote-fs--watch-deliver watch event)))))))
+
+(defun remote-fs--watch-remove-physical (watch)
+  "Remove WATCH's current backend descriptor without stopping its identity."
+  (when-let* ((physical
+               (remote-file-watch-physical-descriptor watch)))
+    ;; Backends may enqueue their final `stopped' callback.  Invalidate the
+    ;; callback generation before removal so it cannot stop a replacement
+    ;; descriptor installed during workspace recovery.
+    (cl-incf (remote-file-watch-generation watch))
+    (setf (remote-file-watch-suppress-events watch) t)
+    (unwind-protect
+        (ignore-errors
+          (file-notify-rm-watch physical))
+      (setf (remote-file-watch-physical-descriptor watch) nil
+            (remote-file-watch-suppress-events watch) nil))))
+
+(defun remote-file-watch-recover (watch)
+  "Recreate WATCH's backend descriptor and preserve its public handle."
+  (unless (remote-file-watch-p watch)
+    (error "Not a remote file watch: %S" watch))
+  (remote-fs--watch-remove-physical watch)
+  (condition-case error
+      (progn
+        (setf
+         (remote-file-watch-physical-descriptor watch)
+         (remote-fs--watch-add-physical watch)
+         (remote-file-watch-state watch) 'open)
+        watch)
+    (error
+     (setf (remote-file-watch-state watch) 'failed)
+     (signal (car error) (cdr error)))))
+
+(defun remote-fs--watch-close
+    (watch reason &optional from-workspace)
+  "Close logical WATCH because of REASON.
+When FROM-WORKSPACE is non-nil, resource ownership is already being released."
+  (when (remote-file-watch-p watch)
+    (remote-fs--watch-remove-physical watch)
+    (if (eq reason 'transport-recovery)
+        (setf (remote-file-watch-state watch) 'disconnected)
+      (setf (remote-file-watch-state watch) 'closed)
+      (remhash (remote-file-watch-id watch) remote-file-watches)
+      (when (fboundp 'file-notify--rm-descriptor)
+        (file-notify--rm-descriptor
+         (remote-file-watch-descriptor watch)))
+      (unless from-workspace
+        (when-let* ((workspace
+                     (remote-file-watch-workspace watch))
+                    (resource
+                     (remote-file-watch-resource watch)))
+          (setf (remote-file-watch-resource watch) nil)
+          (remote-workspace-close-resource
+           workspace resource 'watch-removed)))))
+  watch)
+
+(defun remote-fs--watch-register-workspace (watch)
+  "Register WATCH with the most specific open workspace, when any."
+  (when (and
+         (fboundp 'remote-workspace-for-path)
+         (or
+          (fboundp 'remote-workspace-ensure-recoverable-resource)
+          (fboundp 'remote-workspace-register-recoverable-resource)))
+    (when-let* ((workspace
+                 (or
+                  remote-file-watch-workspace
+                  (remote-workspace-for-path
+                   (remote-file-watch-file watch))))
+                (resource
+                 (let ((close
+                        (lambda (value reason)
+                          (remote-fs--watch-close value reason t)))
+                       (recover
+                        (lambda (_resource _owner)
+                          (remote-file-watch-recover watch)))
+                       (metadata
+                        (append
+                         (list
+                          :file (remote-file-watch-file watch)
+                          :adapter
+                          (remote-file-watch-adapter-id watch)
+                          :descriptor
+                          (remote-file-watch-descriptor watch))
+                         remote-file-watch-metadata)))
+                   (if
+                       (fboundp
+                        'remote-workspace-ensure-recoverable-resource)
+                       (remote-workspace-ensure-recoverable-resource
+                        workspace 'watch
+                        (or
+                         remote-file-watch-key
+                         (list
+                          'file-watch
+                          (remote-file-watch-id watch)))
+                        watch
+                        :close close :recover recover
+                        :metadata metadata)
+                     (remote-workspace-register-recoverable-resource
+                      workspace 'watch watch
+                      :close close :recover recover
+                      :metadata metadata)))))
+      (setf (remote-file-watch-workspace watch) workspace
+            (remote-file-watch-resource watch) resource)))
+  watch)
+
+(defun remote-fs-handle-file-notify-add-watch
+    (file flags callback)
+  "Watch logical FILE through a stable workspace-owned descriptor."
+  (let* ((id
+          (format "watch-%d"
+                  (cl-incf remote-file-watch--counter)))
+         (descriptor (cons 'remote-file-watch id))
+         (watch
+          (remote-file-watch-create
+           :id id
+           :descriptor descriptor
+           :file file
+           :flags (copy-sequence flags)
+           :callback callback
+           :target-id (remote-fs-target-id file)
+           :adapter-id
+           (remote-fs--adapter-for-capability 'watch)
+           :state 'opening)))
+    (puthash id watch remote-file-watches)
+    (condition-case error
+        (progn
+          (setf
+           (remote-file-watch-physical-descriptor watch)
+           (remote-fs--watch-add-physical watch)
+           (remote-file-watch-state watch) 'open)
+          (remote-fs--watch-register-workspace watch)
+          descriptor)
+      (error
+       (remhash id remote-file-watches)
+       (setf (remote-file-watch-state watch) 'failed)
+       (signal (car error) (cdr error))))))
+
+(defun remote-fs-handle-file-notify-rm-watch (descriptor)
+  "Remove logical watch DESCRIPTOR while preserving native semantics."
+  (if-let* ((watch (remote-get-file-watch descriptor)))
+      (remote-fs--watch-close watch 'watch-removed)
+    (remote-fs--call-routed
+     'file-notify-rm-watch (list descriptor))))
+
+(defun remote-fs-handle-file-notify-valid-p (descriptor)
+  "Return whether logical watch DESCRIPTOR has a valid backend handle."
+  (if-let* ((watch (remote-get-file-watch descriptor)))
+      (and
+       (eq (remote-file-watch-state watch) 'open)
+       (when-let* ((physical
+                    (remote-file-watch-physical-descriptor watch)))
+         (file-notify-valid-p physical)))
+    (remote-fs--call-routed
+     'file-notify-valid-p (list descriptor))))
 
 (defun remote-fs-file-name-handler (operation &rest args)
   "Handle file-name OPERATION for logical fs ARGS."
@@ -1339,6 +1605,10 @@ as an accidental fallback."
      (remote-fs--call-routed 'file-equal-p args))
     ('file-notify-add-watch
      (apply #'remote-fs-handle-file-notify-add-watch args))
+    ('file-notify-rm-watch
+     (remote-fs-handle-file-notify-rm-watch (car args)))
+    ('file-notify-valid-p
+     (remote-fs-handle-file-notify-valid-p (car args)))
     ('make-process
      (apply #'remote-fs-handle-make-process args))
     ('start-file-process

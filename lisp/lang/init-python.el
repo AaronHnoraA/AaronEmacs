@@ -15,22 +15,14 @@
 (declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
 (declare-function my/register-language-server-toolchain-provider "init-lsp-toolchain"
                   (family modes discover &rest properties))
+(declare-function remote-context "remote-fs" (&optional path))
+(declare-function remote-expand-file-name "remote-fs"
+                  (file-name &optional directory target))
 (declare-function remote-file-local-name "remote-fs" (file-name))
-(declare-function remote-file-name-target "remote-fs" (file-name))
-(declare-function remote-make-file-name "remote-fs" (target-id localname))
 (declare-function eglot-alternatives "eglot" (alternatives))
 (defvar imenu-create-index-function)
 (defvar-local my/python-imenu-backend nil
   "Original Python imenu backend for the current buffer.")
-
-(defun my/python--pyright-contact (program)
-  "Return an Eglot contact for local Pyright PROGRAM.
-
-The active toolchain supplies the interpreter and import environment; the
-language-server executable itself remains independently managed."
-  (when-let* ((executable (ignore-errors
-                            (my/language-server-executable-find program))))
-    (list executable "--stdio")))
 
 (defun my/python-toolchain--command-json (program &rest arguments)
   "Run PROGRAM with ARGUMENTS and return the last JSON object it prints."
@@ -49,13 +41,8 @@ language-server executable itself remains independently managed."
 (defun my/python-toolchain--logical-executable (path)
   "Project target-native executable PATH into the current logical target."
   (if (and (stringp path)
-           (file-name-absolute-p path)
-           (file-remote-p default-directory)
-           (not (file-remote-p path))
-           (fboundp 'remote-file-name-target)
-           (fboundp 'remote-make-file-name))
-      (remote-make-file-name
-       (remote-file-name-target default-directory) path)
+           (file-name-absolute-p path))
+      (remote-expand-file-name path nil (remote-context))
     path))
 
 (defun my/python-toolchain--canonical-executable (path)
@@ -66,10 +53,7 @@ language-server executable itself remains independently managed."
               (canonical
                (or (ignore-errors (file-truename logical))
                    (expand-file-name logical))))
-    (if (and (file-remote-p canonical)
-             (fboundp 'remote-file-local-name))
-        (remote-file-local-name canonical)
-      canonical)))
+    (remote-file-local-name canonical)))
 
 (defun my/python-toolchain--workspace (executable &optional extra-paths)
   "Build Eglot workspace settings for EXECUTABLE and EXTRA-PATHS."
@@ -225,20 +209,27 @@ language-server executable itself remains independently managed."
         (delete-process process)))))
 
 (defun my/python-eglot-contact (&optional interactive project)
-  "Return the preferred Python Eglot contact for the current buffer."
-  (if (file-remote-p default-directory)
-      (list (or (ignore-errors (my/language-server-executable-find "pylsp"))
-                "pylsp"))
-    (or (my/python--pyright-contact "pyright-langserver")
-        (my/python--pyright-contact "basedpyright-langserver")
-        (progn
-          (require 'eglot)
-          (funcall
-           (eglot-alternatives
-            '(("pylsp")
-              ("jedi-language-server")))
-           interactive
-           project)))))
+  "Return the first available Python Eglot contact on the active target."
+  (let ((contacts
+         '(("pyright-langserver" "--stdio")
+           ("basedpyright-langserver" "--stdio")
+           ("pylsp")
+           ("jedi-language-server"))))
+    (or
+     (seq-some
+      (lambda (contact)
+        (when-let* ((executable
+                     (ignore-errors
+                       (my/language-server-executable-find
+                        (car contact)))))
+          (cons executable (cdr contact))))
+      contacts)
+     (progn
+       (require 'eglot)
+       (funcall
+        (eglot-alternatives contacts)
+        interactive
+        project)))))
 
 (defun my/python-eglot-workspace-configuration ()
   "Return Python workspace configuration for the active server."
@@ -269,12 +260,12 @@ language-server executable itself remains independently managed."
     (my/register-eglot-server-program
      '(python-mode python-ts-mode)
      #'my/python-eglot-contact
-     :label "local: pyright, remote: pylsp/jedi"
+     :label "Target Python language server"
      :executables '("pyright-langserver"
                     "basedpyright-langserver"
                     "pylsp"
                     "jedi-language-server")
-     :note "Python buffers prefer pyright locally, but prefer pylsp/jedi over TRAMP.")))
+     :note "Select the first available server from the workspace target environment.")))
 
 (my/register-language-server-toolchain-provider
  'python

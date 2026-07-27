@@ -5,51 +5,64 @@
  '((lean-iv-font-size . 16) (lean-iv-port-wait-timeout . 60)
    (lean-iv-cursor-sync-delay . 0.035)
    (lean-sideline-prefixes (error . "E") (warning . "W") (note . "N")
-                           (processing . "~") (blocked . "!"))
-   (lean-notification-debounce-delay . 0.1) (lean-declaration-fringe-enabled . t)
-   (lean-progress-fringe-enabled . t) (lean-sideline-minimum-severity . warning)
+			   (processing . "~") (blocked . "!"))
+   (lean-notification-debounce-delay . 0.1)
+   (lean-declaration-fringe-enabled . t)
+   (lean-progress-fringe-enabled . t)
+   (lean-sideline-minimum-severity . warning)
    (lean-sideline-max-message-length . 96) (lean-sideline-delay . 0.06)
    (lean-sideline-enabled) (lean-jump-syntactic-fallback . t)
    (lean-jump-request-timeout . 1.5) (lean-jump-include-term-goal)
    (lean-eglot-deferred-ui-delays (company . 0.15) (eldoc-box . 0.25)
-                                  (inlay-hints . 0.45) (semantic-tokens . 0.8))
-   (lean-infoview-proxy-enabled . t) (lean-dev-log-buffer-name . "*Lean Dev Log*")
-   (lean-dev-log-enabled) (lean-info-window-width . 84)
-   (lean-eglot-start-delay . 0.35) (lean-eglot-connect-timeout . 180)
-   (my/pdf-sync-parent-search-depth . 3) (my/pdf-view-auto-refresh-interval . 1.2)
+				  (inlay-hints . 0.45)
+				  (semantic-tokens . 0.8))
+   (lean-infoview-proxy-enabled . t)
+   (lean-dev-log-buffer-name . "*Lean Dev Log*") (lean-dev-log-enabled)
+   (lean-info-window-width . 84) (lean-eglot-start-delay . 0.35)
+   (lean-eglot-connect-timeout . 180)
+   (my/pdf-sync-parent-search-depth . 3)
+   (my/pdf-view-auto-refresh-interval . 1.2)
    (my/flymake-diagnostic-at-point-delay . 0.45)
-   (my/language-server-disable-file-watchers-on-remote . t)
    (my/language-server-defer-shutdown . 3)
    (my/language-server-performance-gcmh-factor . 2)
    (my/language-server-performance-read-process-output-max . 1048576)
+   (eglot-autoreconnect . 3)
+   (lsp-restart . auto-restart)
    (my/aaronnote-close-emacs-markdown-buffer . t)
-   (my/aaronnote-icon-file . "/Users/hc/.emacs.d/assets/icons/Aaronnote.svg")
+   (my/aaronnote-icon-file
+    . "/Users/hc/.emacs.d/assets/icons/Aaronnote.svg")
    (my/dir-locals-template-root . "/Users/hc/.emacs.d/templates/emacs")
-   (my/health-executables "rg" "git" "python3" "node" "cargo" "go" "just" "make"
-                          "latexmk" "gdb" "lldb-dap" "dlv")
+   (my/health-executables "rg" "git" "python3" "node" "cargo" "go"
+			  "just" "make" "latexmk" "gdb" "lldb-dap" "dlv")
    (my/maintenance-state-paths "package-lock.el" "etc" "var/amx-save.el"
-                               "var/dape" "var/org" "var/prescient-save.el"
-                               "var/project" "var/project-list.el"
-                               "var/projectile" "var/recentf-save.el"
-                               "var/save-place.el" "var/savehist.el" "var/session"
-                               "var/transient" "var/tramp/persistency.el"
-                               "var/treemacs")
-   (my/maintenance-state-backup-dir . "/Users/hc/.emacs.d/var/backup-snapshots")
+			       "var/dape" "var/org"
+			       "var/prescient-save.el" "var/project"
+			       "var/project-list.el" "var/projectile"
+			       "var/recentf-save.el" "var/save-place.el"
+			       "var/savehist.el" "var/session"
+			       "var/transient"
+			       "var/tramp/persistency.el" "var/treemacs")
+   (my/maintenance-state-backup-dir
+    . "/Users/hc/.emacs.d/var/backup-snapshots")
    (my/enable-direnv . t) (my/tramp-memoize-cache-limit . 128)
    (my/find-file-feedback-threshold . 0.4)
-   (my/tramp-lsp-pipe-mode-servers "lean4") (my/tramp-use-ssh-controlmaster)
-   (my/tramp-shell-methods "ssh" "scp" "sshx") (my/tramp-use-login-shell)
-   (my/compile-auto-native-on-save) (my/native-comp-warning-on-missing-source)
-   (my/native-comp-speed . 2) (my/native-comp-verbose . 0)
-   (my/native-comp-async-report-policy . silent) (my/native-comp-pop-log)
-   (my/native-comp-enable-deferred . t) (my/native-comp-enable-jit . t)
+   (my/tramp-lsp-pipe-mode-servers "lean4")
+   (my/tramp-use-ssh-controlmaster)
+   (my/tramp-shell-methods "ssh" "scp" "sshx")
+   (my/tramp-use-login-shell) (my/compile-auto-native-on-save)
+   (my/native-comp-warning-on-missing-source) (my/native-comp-speed . 2)
+   (my/native-comp-verbose . 0)
+   (my/native-comp-async-report-policy . silent)
+   (my/native-comp-pop-log) (my/native-comp-enable-deferred . t)
+   (my/native-comp-enable-jit . t)
    (my/package-enable-native-compile . t)
    (my/compile-third-party-directories "site-lisp")
    (my/compile-target-directories "lisp" "site-lisp/config")
    (my/compile-target-files "early-init.el" "init.el" "bootstrap.el")
    (my/aaronnote-roam-runtime-cli
     . "/Users/hc/.emacs.d/lisp/roam/aaronnote/roam-cli.mjs")
-   (my/aaronnote-roam-runtime-root . "/Users/hc/.emacs.d/lisp/roam/aaronnote")
+   (my/aaronnote-roam-runtime-root
+    . "/Users/hc/.emacs.d/lisp/roam/aaronnote")
    (my/aaronnote-roam-select-window-height . 0.32)
    (my/aaronnote-roam-recent-limit . 24)
    (my/aaronnote-roam-root . "/Users/hc/.emacs.d/.roam")
@@ -57,58 +70,68 @@
    (my/aaronnote-publish-nas-target . "Aaron-nas:/volume1/web/public/")
    (my/aaronnote-publish-cv-dir
     . "/Users/hc/.emacs.d/lisp/roam/aaronnote/publish/CV")
-   (my/aaronnote-publish-state-dir . "/Users/hc/.emacs.d/var/aaronnote/publish")
+   (my/aaronnote-publish-state-dir
+    . "/Users/hc/.emacs.d/var/aaronnote/publish")
    (my/aaronnote-publish-assets-dir
     . "/Users/hc/.emacs.d/lisp/roam/aaronnote/publish/assets")
    (my/aaronnote-publish-engine
     . "/Users/hc/.emacs.d/lisp/roam/aaronnote/publish/publish-site")
    (my/aaronnote-publish-root . "/Users/hc/.emacs.d/publish")
    (my/session-auto-save) (my/aaronnote-web-port . 50815)
-   (my/aaronnote-backend . xwidget) (my/aaronnote-latex-export-engine . "codex")
+   (my/aaronnote-backend . xwidget)
+   (my/aaronnote-latex-export-engine . "codex")
    (my/aaronnote-latex-export-agent . "codex")
-   (my/aaronnote-latex-export-max-attempts . 3) (my/aaronnote-codex-model . "")
+   (my/aaronnote-latex-export-max-attempts . 3)
+   (my/aaronnote-codex-model . "")
    (my/aaronnote-latex-export-model . "")
-   (my/aaronnote-opencode-executable . "opencode") (my/project-local-overrides)
+   (my/aaronnote-opencode-executable . "opencode")
+   (my/project-local-overrides)
    (my/note-code-root . "/Users/hc/Documents/AaronNote/")
    (my/debug-common-adapter-specs
     (python :title "Python" :configs
-            (debugpy debugpy-module python-file python-module) :commands
-            ("python" "python3") :install "python -m pip install debugpy")
+	    (debugpy debugpy-module python-file python-module) :commands
+	    ("python" "python3") :install
+	    "python -m pip install debugpy")
     (javascript :title "JavaScript / TypeScript / Chrome" :configs
-                (js-debug-node js-debug-ts-node js-debug-tsx js-debug-node-attach
-                               js-debug-chrome node-file node-attach chrome
-                               ts-node tsx-file)
-                :commands ("node") :install
-                "Install vscode-js-debug into dape-adapter-dir/js-debug.")
+		(js-debug-node js-debug-ts-node js-debug-tsx
+			       js-debug-node-attach js-debug-chrome
+			       node-file node-attach chrome ts-node
+			       tsx-file)
+		:commands ("node") :install
+		"Install vscode-js-debug into dape-adapter-dir/js-debug.")
     (c-cpp-rust :title "C / C++ / Rust" :configs
-                (lldb-dap lldb-vscode gdb cpptools rust-lldb c-cpp-lldb c-cpp-gdb)
-                :commands ("lldb-dap" "lldb-vscode" "gdb") :install
-                "Install lldb-dap/lldb-vscode or gdb >= 14.1; cpptools needs the cpptools adapter.")
-    (go :title "Go" :configs (dlv gdb-go gdb-go-test go-dlv go-test) :commands
-        ("dlv" "gdb") :install
-        "go install github.com/go-delve/delve/cmd/dlv@latest")
+		(lldb-dap lldb-vscode gdb cpptools rust-lldb c-cpp-lldb
+			  c-cpp-gdb)
+		:commands ("lldb-dap" "lldb-vscode" "gdb") :install
+		"Install lldb-dap/lldb-vscode or gdb >= 14.1; cpptools needs the cpptools adapter.")
+    (go :title "Go" :configs (dlv gdb-go gdb-go-test go-dlv go-test)
+	:commands ("dlv" "gdb") :install
+	"go install github.com/go-delve/delve/cmd/dlv@latest")
     (shell :title "Shell" :configs (bash-debug bash-script) :commands
-           ("bash" "node") :install
-           "Install bash-debug into dape-adapter-dir/bash-debug.")
+	   ("bash" "node") :install
+	   "Install bash-debug into dape-adapter-dir/bash-debug.")
     (dotnet :title ".NET / C#" :configs (netcoredbg dotnet) :commands
-            ("netcoredbg") :install "Install netcoredbg.")
-    (php :title "PHP" :configs (xdebug php-xdebug) :commands ("node") :install
-         "Install php-debug into dape-adapter-dir/php-debug and enable Xdebug.")
-    (ruby :title "Ruby" :configs (rdbg ruby-rdbg) :commands ("rdbg") :install
-          "gem install debug")
-    (ocaml :title "OCaml" :configs (ocamlearlybird ocaml-earlybird) :commands
-           ("ocamlearlybird") :install "opam install earlybird"))
+	    ("netcoredbg") :install "Install netcoredbg.")
+    (php :title "PHP" :configs (xdebug php-xdebug) :commands ("node")
+	 :install
+	 "Install php-debug into dape-adapter-dir/php-debug and enable Xdebug.")
+    (ruby :title "Ruby" :configs (rdbg ruby-rdbg) :commands ("rdbg")
+	  :install "gem install debug")
+    (ocaml :title "OCaml" :configs (ocamlearlybird ocaml-earlybird)
+	   :commands ("ocamlearlybird") :install
+	   "opam install earlybird"))
    (my/tab-line-wheel-throttle . 0.5) (my/tab-line-min-label-width . 8)
    (my/tab-line-max-label-width . 18)
    (my/jupyter-config-file-candidates "jupyter_server_config.py"
-                                      "jupyter_lab_config.py"
-                                      "jupyter_notebook_config.py"
-                                      "jupyter_server_config.json"
-                                      "jupyter_lab_config.json")
+				      "jupyter_lab_config.py"
+				      "jupyter_notebook_config.py"
+				      "jupyter_server_config.json"
+				      "jupyter_lab_config.json")
    (my/jupyter-remote-ikernel-command
     . "/opt/homebrew/anaconda3/bin/remote_ikernel")
    (my/jupyter-board-jupyter-command . "/opt/homebrew/bin/jupyter")
-   (my/jupyter-board-python-command . "/opt/homebrew/anaconda3/bin/python")
+   (my/jupyter-board-python-command
+    . "/opt/homebrew/anaconda3/bin/python")
    (my/jupyter-remote-ikernel-source-directory
     . "/Users/hc/.config/emacs/site-lisp/remote_ikernel")
    (my/jupyter-remote-ikernel-install-script
@@ -123,39 +146,47 @@
    (my/template-auto-insert-enabled . t)
    (my/template-auto-insert-enabled-kinds c cc sh python nix)
    (my/template-current (org . "default.org") (c . "default.c")
-                        (cc . "default.cc") (js . "default.js")
-                        (ts . "default.ts") (sh . "default.sh")
-                        (tex . "article.tex") (python . "default.py")
-                        (nix . "default.nix") (makefile . "default.mk")
-                        (cmake . "default.cmake"))
+			(cc . "default.cc") (js . "default.js")
+			(ts . "default.ts") (sh . "default.sh")
+			(tex . "article.tex") (python . "default.py")
+			(nix . "default.nix") (makefile . "default.mk")
+			(cmake . "default.cmake"))
    (my/template-root . "/Users/hc/.emacs.d/templates")
    (my/large-buffer-size . 1048576)
-   (my/treemacs-tag-follow-excluded-modes makefile-mode makefile-gmake-mode
-                                          makefile-bsdmake-mode
-                                          makefile-automake-mode)
-   (my/treemacs-cursor-follow-delay . 0.35) (my/project-import-project-el-entries)
-   (my/project-search-paths) (my/scratch-initial-major-mode . t)
+   (my/treemacs-tag-follow-excluded-modes makefile-mode
+					  makefile-gmake-mode
+					  makefile-bsdmake-mode
+					  makefile-automake-mode)
+   (my/treemacs-cursor-follow-delay . 0.35)
+   (my/project-import-project-el-entries) (my/project-search-paths)
+   (my/scratch-initial-major-mode . t)
    (my/scratch-directory . "/Users/hc/.emacs.d/var/scratch")
    (my/telescope-grep-preview-key :debounce 0.35 any)
    (my/telescope-file-preview-key :debounce 0.15 any)
    (my/telescope-preview-key :debounce 0.2 any)
-   (my/filetypes-sqlite-extensions "db" "db3" "sqlite" "sqlite3" "sqlite2" "sdb")
+   (my/filetypes-sqlite-extensions "db" "db3" "sqlite" "sqlite3"
+				   "sqlite2" "sdb")
    (my/performance-watch-hooks post-command-hook pre-command-hook
-                               after-change-functions before-change-functions
-                               before-save-hook after-save-hook
-                               window-scroll-functions
-                               window-size-change-functions jit-lock-functions
-                               org-mode-hook org-cycle-hook
-                               org-babel-after-execute-hook kill-buffer-hook
-                               change-major-mode-hook)
-   (my/performance-record-directory . "/Users/hc/.emacs.d/var/performance/")
-   (my/performance-refresh-interval . 2.0) (my/vterm-wheel-scroll-lines . 5)
-   (my/vterm-startup-send-retries . 20) (my/vterm-startup-send-delay . 0.05)
-   (my/jupytext-sanitized-environment-variables "PYTHONPATH" "PYTHONHOME"
-                                                "__PYVENV_LAUNCHER__")
+			       after-change-functions
+			       before-change-functions before-save-hook
+			       after-save-hook window-scroll-functions
+			       window-size-change-functions
+			       jit-lock-functions org-mode-hook
+			       org-cycle-hook
+			       org-babel-after-execute-hook
+			       kill-buffer-hook change-major-mode-hook)
+   (my/performance-record-directory
+    . "/Users/hc/.emacs.d/var/performance/")
+   (my/performance-refresh-interval . 2.0)
+   (my/vterm-wheel-scroll-lines . 5)
+   (my/vterm-startup-send-retries . 20)
+   (my/vterm-startup-send-delay . 0.05)
+   (my/jupytext-sanitized-environment-variables "PYTHONPATH"
+						"PYTHONHOME"
+						"__PYVENV_LAUNCHER__")
    (my/jupytext-log-buffer-name . "*jupytext*")
    (my/jupytext-format-alist ("py" . "py:percent") ("r" . "R:percent")
-                             ("sage" . "sage:percent"))
+			     ("sage" . "sage:percent"))
    (my/jupytext-auto-mode-file-regexp . "\\.ju\\.[^.]+\\'")
    (my/jupytext-default-notebook-extension . ".ipynb")
    (my/jupytext-command . "jupytext")
@@ -165,46 +196,56 @@
    (my/jupyter-known-languages "python" "sage" "sagemath" "maple")
    (my/open-browser-window-size . 0.38)
    (my/open-routes
-    (url :default menu :menu-default xwidget :backends (xwidget appine eww system))
+    (url :default menu :menu-default xwidget :backends
+	 (xwidget appine eww system))
     (search :default xwidget :menu-default xwidget :backends
-            (xwidget appine eww system))
-    (file :default emacs :menu-default emacs :backends (emacs appine system))
-    (pdf :match ("\\.pdf\\'") :default system :menu-default system :backends
-         (emacs appine system)))
+	    (xwidget appine eww system))
+    (file :default emacs :menu-default emacs :backends
+	  (emacs appine system))
+    (pdf :match ("\\.pdf\\'") :default system :menu-default system
+	 :backends (emacs appine system)))
    (my/xwidget-auto-focus-on-load . t)
    (my/clutch-config-file . "/Users/hc/.emacs.d/etc/clutch-config.el")
    (my/fold-restore-idle-delay . 0.5) (my/fold-deferred-modes lean-mode)
-   (my/fold-diagnostics-idle-delay . 0.12) (my/fold-diagnostics-enabled . t)
-   (my/fold-prog-startup . fold-all)
+   (my/fold-diagnostics-idle-delay . 0.12)
+   (my/fold-diagnostics-enabled . t) (my/fold-prog-startup . fold-all)
    (my/fold-state-file . "/Users/hc/.emacs.d/var/fold-state.el")
-   (my/display-rules-roam-size . 0.36) (my/display-rules-side-size . 0.33)
+   (my/display-rules-roam-size . 0.36)
+   (my/display-rules-side-size . 0.33)
    (my/display-rules-bottom-size . 0.32)
    (my/symbols-preview-key :debounce 0.15 any)
-   (my/project-popup-vterm-apps ("lazygit" . "lazygit") ("btop" . "btop")
-                                ("yazi" . "yazi") ("tmux" . "tmux"))
-   (my/vterm-popup-window-height . 0.2) (my/copilot-deferred-idle-delay . 1.5)
-   (my/copilot-deferred-modes lean-mode) (my/copilot-disable-on-remote . t)
-   (my/copilot-large-buffer-threshold . 524288) (my/copilot-idle-delay . 0.85)
-   (my/copilot-server-max-heap-mb . 1024)
-   (my/aaronnote-web-host-max-heap-mb . 512) (my/aaronnote-echo-severity . error)
-   (my/macos-gc-after-minibuffer) (my/macos-idle-gc-delay . 8.0)
-   (my/macos-scroll-profile . line) (inhibit-startup-screen . t)
-   (inhibit-startup-message . t) (use-file-dialog) (use-dialog-box)
-   (use-short-answers . t) (confirm-kill-emacs)
-   (user-full-name . "Chang He (Aaron)") (user-mail-address . "mail")
-   (display-line-numbers-type . absolute)
+   (my/project-popup-vterm-apps ("lazygit" . "lazygit")
+				("btop" . "btop") ("yazi" . "yazi")
+				("tmux" . "tmux"))
+   (my/vterm-popup-window-height . 0.2)
+   (my/copilot-deferred-idle-delay . 1.5)
+   (my/copilot-deferred-modes lean-mode)
+   (my/copilot-disable-on-remote . t)
+   (my/copilot-large-buffer-threshold . 524288)
+   (my/copilot-idle-delay . 0.85) (my/copilot-server-max-heap-mb . 1024)
+   (my/aaronnote-web-host-max-heap-mb . 512)
+   (my/aaronnote-echo-severity . error) (my/macos-gc-after-minibuffer)
+   (my/macos-idle-gc-delay . 8.0) (my/macos-scroll-profile . line)
+   (inhibit-startup-screen . t) (inhibit-startup-message . t)
+   (use-file-dialog) (use-dialog-box) (use-short-answers . t)
+   (confirm-kill-emacs) (user-full-name . "Chang He (Aaron)")
+   (user-mail-address . "mail") (display-line-numbers-type . absolute)
    (my/display-line-numbers-auto-modes prog-mode conf-mode)
-   (my/display-line-numbers-large-buffer-threshold . 524288) (fill-column . 80)
-   (ring-bell-function . ignore) (blink-cursor-mode) (treesit-font-lock-level . 3)
-   (scroll-step . 2) (scroll-margin . 1) (hscroll-step . 1) (hscroll-margin . 5)
-   (scroll-conservatively . 2305843009213693951) (scroll-preserve-screen-position)
-   (auto-hscroll-mode . current-line) (fast-but-imprecise-scrolling . t)
-   (indent-tabs-mode) (tab-width . 4) (c-basic-offset . 4)
-   (sentence-end-double-space) (word-wrap-by-category . t) (kill-whole-line . t)
-   (kill-do-not-save-duplicates . t) (save-interprogram-paste-before-kill . t)
-   (make-backup-files . t) (backup-by-copying . t) (delete-old-versions . t)
-   (kept-new-versions . 10) (kept-old-versions . 3) (auto-save-default . t)
-   (auto-save-timeout . 20) (auto-save-interval . 200) (create-lockfiles . t)
+   (my/display-line-numbers-large-buffer-threshold . 524288)
+   (fill-column . 80) (ring-bell-function . ignore) (blink-cursor-mode)
+   (treesit-font-lock-level . 3) (scroll-step . 2) (scroll-margin . 1)
+   (hscroll-step . 1) (hscroll-margin . 5)
+   (scroll-conservatively . 2305843009213693951)
+   (scroll-preserve-screen-position) (auto-hscroll-mode . current-line)
+   (fast-but-imprecise-scrolling . t) (indent-tabs-mode) (tab-width . 4)
+   (c-basic-offset . 4) (sentence-end-double-space)
+   (word-wrap-by-category . t) (kill-whole-line . t)
+   (kill-do-not-save-duplicates . t)
+   (save-interprogram-paste-before-kill . t) (make-backup-files . t)
+   (backup-by-copying . t) (delete-old-versions . t)
+   (kept-new-versions . 10) (kept-old-versions . 3)
+   (auto-save-default . t) (auto-save-timeout . 20)
+   (auto-save-interval . 200) (create-lockfiles . t)
    (delete-by-moving-to-trash . t) (recentf-max-saved-items . 200)
    (undo-tree-auto-save-history . t) (gc-cons-threshold . 100663296)
    (gc-cons-percentage . 0.3) (inhibit-compacting-font-caches . t)
@@ -217,25 +258,29 @@
    (show-paren-when-point-in-periphery . t) (so-long-threshold . 10000)
    (so-long-action . so-long-minor-mode) (ibuffer-expert . t)
    (ibuffer-show-empty-filter-groups) (compilation-scroll-output . t)
-   (amx-history-length . 20) (my/font-body . "Merriweather") (my/h-body . 228)
-   (my/font-body-width . normal) (my/font-code . "Fira Code") (my/h-code . 172)
+   (amx-history-length . 20) (my/font-body . "Merriweather")
+   (my/h-body . 228) (my/font-body-width . normal)
+   (my/font-code . "Fira Code") (my/h-code . 172)
    (my/font-title . "Excalifont") (my/h-title . 236)
    (my/font-cn . "FZLiuGongQuanKaiShuJF")
    (my/font-math-symbols "Libertinus Math" "Garamond-Math" "STIXGeneral"
-                         "DejaVu Sans")
+			 "DejaVu Sans")
    (my/font-unicode-symbols "Apple Symbols" "Noto Sans Symbols 2"
-                            "Noto Sans Symbols" "Symbola" "DejaVu Sans")
-   (my/font-emoji "Apple Color Emoji" "Noto Color Emoji" "Segoe UI Emoji")
+			    "Noto Sans Symbols" "Symbola" "DejaVu Sans")
+   (my/font-emoji "Apple Color Emoji" "Noto Color Emoji"
+		  "Segoe UI Emoji")
    (my/font-nerd-symbols "Symbols Nerd Font Mono" "Symbols Nerd Font"
-                         "JetBrainsMono Nerd Font Mono" "FiraCode Nerd Font Mono"
-                         "Hack Nerd Font Mono")
+			 "JetBrainsMono Nerd Font Mono"
+			 "FiraCode Nerd Font Mono" "Hack Nerd Font Mono")
    (my/scale-cn . 1.3) (my/font-code-weight . regular)
    (my/font-ui-weight . regular) (my/font-body-weight . regular)
    (my/font-title-weight . medium) (my/font-strong-weight . medium)
    (my/font-popout-weight . semibold) (my/prose-line-spacing . 0.24)
    (debug-on-quit) (eval-expression-debug-on-error . t)
-   (garbage-collection-messages) (my/warning-popup-minimum-level . :error)
-   (my/warning-suppress-elpa-noise . t) (my/gcmh-high-cons-threshold . 134217728)
+   (garbage-collection-messages)
+   (my/warning-popup-minimum-level . :error)
+   (my/warning-suppress-elpa-noise . t)
+   (my/gcmh-high-cons-threshold . 134217728)
    (my/gcmh-auto-idle-delay-factor . 20) (my/gcmh-idle-delay . auto)
    (magent-session-directory
     . "/Users/hc/.emacs.d/var/ai-workbench/magent/sessions/")

@@ -27,21 +27,18 @@
 (declare-function my/lsp-mode-ensure "init-lsp" ())
 (declare-function my/language-server-toolchain-set-local-variable
                   "init-lsp-toolchain" (variable value))
-(declare-function remote-backend-tramp-direct-copy-file
-                  "remote-backend-tramp" (route local-file target-file))
-
 (defvar dape-configs)
 (defvar lsp-managed-mode)
 (defvar lsp--cur-workspace)
 (defvar lsp-java-bundles)
 (defvar lsp-java-server-config-dir)
 (defvar my/debug-after-register-common-configs-hook)
-(defvar my/java-debug--remote-forwards (make-hash-table :test #'equal)
+(defvar my/java-debug--forwards (make-hash-table :test #'equal)
   "Active Java debug forwards keyed by logical project root.")
 
 (defcustom my/lsp-java-target-cache-root
   "~/.cache/emacs-remote/lsp-java/"
-  "Target-native cache root for remotely provisioned lsp-java assets."
+  "Target-native cache root for provisioned lsp-java assets."
   :type 'string
   :group 'my/language-server)
 
@@ -53,7 +50,7 @@
   :group 'my/language-server)
 
 (defcustom my/lsp-java-auto-provision-target t
-  "Whether Java buffers may provision JDTLS on trusted remote targets."
+  "Whether Java buffers may provision JDTLS on trusted targets."
   :type 'boolean
   :group 'my/language-server)
 
@@ -74,17 +71,9 @@
                     (expand-file-name my/lsp-java-local-bundle-directory))
        0 12))))
 
-(defun my/lsp-java--remote-context (&optional root)
-  "Return the Java remote context for ROOT."
+(defun my/lsp-java--context (&optional root)
+  "Return the Java target context for ROOT."
   (remote-context (or root default-directory)))
-
-(defun my/lsp-java--remote-p (&optional context)
-  "Return non-nil when CONTEXT belongs to a non-local target."
-  (not
-   (equal
-    (remote-context-target-id
-     (or context (my/lsp-java--remote-context)))
-    "local")))
 
 (defun my/lsp-java--cache-path (context relative)
   "Return logical target cache path RELATIVE for CONTEXT."
@@ -99,6 +88,28 @@
   (file-name-as-directory
    (my/lsp-java--cache-path
     context (format "servers/%s/" (my/lsp-java--bundle-version)))))
+
+(defun my/lsp-java--client-bundle-on-target (context)
+  "Return the client JDTLS bundle when CONTEXT shares that filesystem.
+Backend placement decides this; the Java consumer does not inspect the target
+or transport kind."
+  (let ((candidate
+         (remote-expand-file-name
+          my/lsp-java-local-bundle-directory nil context)))
+    (when (and
+           (remote-client-file-name candidate)
+           (file-directory-p candidate))
+      (file-name-as-directory candidate))))
+
+(defun my/lsp-java--server-directory (context)
+  "Return an available logical JDTLS directory for CONTEXT."
+  (or
+   (my/lsp-java--client-bundle-on-target context)
+   (let ((directory
+          (my/lsp-java--target-install-directory context)))
+     (unless (my/lsp-java--target-install-ready-p directory)
+       (my/lsp-java--provision-target context directory))
+     directory)))
 
 (defun my/lsp-java--target-workspace-directory (context root)
   "Return a target-side JDTLS data directory for ROOT."
@@ -168,20 +179,11 @@
           (remote-exec
            "mkdir" :args (list "-p" native-parent)
            :context context :adapter "language-server" :check t)
-          (let ((route
-                 (car
-                  (remote-routes
-                   "language-server" 'process-sync context))))
-            (if (and route
-                     (equal (remote-route-backend-id route) "tramp")
-                     (fboundp 'remote-backend-tramp-direct-copy-file))
-                (unless
-                    (zerop
-                     (remote-backend-tramp-direct-copy-file
-                      route archive native-archive))
-                  (error "Direct SCP provisioning upload failed"))
-              (let ((large-file-warning-threshold nil))
-                (copy-file archive remote-archive t))))
+          ;; Cross-target copy remains an ordinary Emacs file operation.  The
+          ;; `/fs:' handler selects native/TRAMP/RPC mechanics without exposing
+          ;; a backend ID to this language consumer.
+          (let ((large-file-warning-threshold nil))
+            (copy-file archive remote-archive t))
           (remote-exec
            "sh"
            :args
@@ -213,7 +215,7 @@
 
 (defun my/lsp-java--java-profile (root)
   "Discover the target Java toolchain for ROOT."
-  (let* ((context (my/lsp-java--remote-context root))
+  (let* ((context (my/lsp-java--context root))
          (java
           (let ((remote-current-adapter-id "language-server"))
             (remote-executable-find "java" context))))
@@ -286,24 +288,21 @@
       (if arm-p "config_linux_arm" "config_linux")))))
 
 (defun my/lsp-java--target-command-a (function &rest arguments)
-  "Make lsp-java's server COMMAND target-native in remote buffers."
-  (let ((command (apply function arguments)))
-    (if (my/lsp-java--remote-p)
-        (mapcar
-         (lambda (argument)
-           (if (and (stringp argument)
-                    (or (remote-fs-file-name-p argument)
-                        (file-remote-p argument)))
-               (remote-file-local-name argument)
-             argument))
-         command)
-      command)))
+  "Project lsp-java's server COMMAND into its target-native namespace."
+  (mapcar
+   (lambda (argument)
+     (if (stringp argument)
+         (remote-file-local-name argument)
+       argument))
+   (apply function arguments)))
 
 (defun my/lsp-java--apply-toolchain (profile root)
   "Apply Java PROFILE for ROOT to lsp-java."
-  (let* ((context (my/lsp-java--remote-context root))
+  (let* ((context (my/lsp-java--context root))
          (java (plist-get profile :executable))
-         (java-home (plist-get profile :java-home)))
+         (java-home (plist-get profile :java-home))
+         (install-directory
+          (my/lsp-java--server-directory context)))
     (my/language-server-toolchain-set-local-variable
      'lsp-java-java-path java)
     (my/language-server-toolchain-set-local-variable
@@ -316,57 +315,49 @@
      'lsp-java-project-import-on-first-time-startup "automatic")
     (my/language-server-toolchain-set-local-variable
      'lsp-java-format-comments-enabled nil)
-    (when (my/lsp-java--remote-p context)
-      (let ((install-directory
-             (my/lsp-java--target-install-directory context)))
-        ;; lsp-java's Maven-installed wrapper is not necessarily executable
-        ;; in the client-side bundle because local startup normally uses
-        ;; `java -jar'.  Native target startup requires the wrapper bit.
-        (let ((jdtls (expand-file-name "bin/jdtls" install-directory)))
-          (when (and (file-exists-p jdtls)
-                     (not (file-executable-p jdtls)))
-            (remote-exec
-             "chmod"
-             :args (list "u+x" (remote-file-local-name jdtls))
-             :context context :adapter "language-server" :check t)))
-        (unless (my/lsp-java--target-install-ready-p install-directory)
-          (my/lsp-java--provision-target context install-directory))
-        (my/language-server-toolchain-set-local-variable
-         'lsp-java-server-install-dir install-directory)
-        ;; lsp-java normally selects this from the client Emacs'
-        ;; `system-type'.  A macOS client controlling Linux must instead use
-        ;; the configuration belonging to the execution target.
-        (my/language-server-toolchain-set-local-variable
-         'lsp-java-server-config-dir
-         (expand-file-name
-          (my/lsp-java--target-config-name profile)
-          install-directory))
-        ;; `lsp-java--bundles' localizes the directory before testing it.
-        ;; That is correct for JDTLS, but not for Emacs' client-side
-        ;; `directory-files'.  Enumerate through the logical filesystem here,
-        ;; then send target-native bundle paths to the server.
-        (my/language-server-toolchain-set-local-variable
-         'lsp-java-bundles
-         (mapcar
-          #'remote-file-local-name
-          (seq-remove
-           (lambda (file)
-             (string-match-p
-              "com\\.microsoft\\.java\\.test\\.runner\\.jar\\'"
-              file))
-           (directory-files
-            (expand-file-name "bundles/" install-directory)
-            t "\\.jar\\'"))))
-        (my/language-server-toolchain-set-local-variable
-         'lsp-java-jdt-ls-prefer-native-command t)
-        (my/language-server-toolchain-set-local-variable
-         'lsp-java-workspace-dir
-         (my/lsp-java--target-workspace-directory context root))
-        (my/language-server-toolchain-set-local-variable
-         'lsp-java-workspace-cache-dir
-         (expand-file-name
-          ".cache/"
-          (my/lsp-java--target-workspace-directory context root)))))))
+    ;; The same native JDTLS launcher contract is used for every target.  A
+    ;; backend placement query may expose the existing client bundle to target
+    ;; `local'; other targets receive the same bundle through provisioning.
+    (let ((jdtls (expand-file-name "bin/jdtls" install-directory)))
+      (when (and (file-exists-p jdtls)
+                 (not (file-executable-p jdtls)))
+        (remote-exec
+         "chmod"
+         :args (list "u+x" (remote-file-local-name jdtls))
+         :context context :adapter "language-server" :check t)))
+    (unless (my/lsp-java--target-install-ready-p install-directory)
+      (error "JDTLS launcher is unavailable in %s" install-directory))
+    (my/language-server-toolchain-set-local-variable
+     'lsp-java-server-install-dir install-directory)
+    ;; Configuration is selected from facts probed on the execution target,
+    ;; never from the client Emacs' `system-type'.
+    (my/language-server-toolchain-set-local-variable
+     'lsp-java-server-config-dir
+     (expand-file-name
+      (my/lsp-java--target-config-name profile)
+      install-directory))
+    (my/language-server-toolchain-set-local-variable
+     'lsp-java-bundles
+     (mapcar
+      #'remote-file-local-name
+      (seq-remove
+       (lambda (file)
+         (string-match-p
+          "com\\.microsoft\\.java\\.test\\.runner\\.jar\\'"
+          file))
+       (directory-files
+        (expand-file-name "bundles/" install-directory)
+        t "\\.jar\\'"))))
+    (my/language-server-toolchain-set-local-variable
+     'lsp-java-jdt-ls-prefer-native-command t)
+    (my/language-server-toolchain-set-local-variable
+     'lsp-java-workspace-dir
+     (my/lsp-java--target-workspace-directory context root))
+    (my/language-server-toolchain-set-local-variable
+     'lsp-java-workspace-cache-dir
+     (expand-file-name
+      ".cache/"
+      (my/lsp-java--target-workspace-directory context root)))))
 
 (my/register-language-server-toolchain-provider
  'java '(java-mode java-ts-mode)
@@ -488,22 +479,20 @@
      (process-live-p process))))
 
 (defun my/java-debug--access-port (root remote-port)
-  "Return a client-accessible debug port for ROOT's REMOTE-PORT."
-  (if (not (file-remote-p root))
-      remote-port
-    (let ((forward (gethash root my/java-debug--remote-forwards)))
-      (unless (my/java-debug--forward-live-p forward remote-port)
-        (when forward
-          (ignore-errors (remote-close-channel forward)))
-        (setq forward
-              (remote-port-forward
-               (list :host "127.0.0.1" :port remote-port)
-               :context root
-               :adapter "network"
-               :local-endpoint '(:host "127.0.0.1" :port 0)
-               :metadata '(:owner lsp-java-debug)))
-        (puthash root forward my/java-debug--remote-forwards))
-      (plist-get (remote-forward-local-endpoint forward) :port))))
+  "Return a routed client-accessible port for ROOT's target REMOTE-PORT."
+  (let ((forward (gethash root my/java-debug--forwards)))
+    (unless (my/java-debug--forward-live-p forward remote-port)
+      (when forward
+        (ignore-errors (remote-close-channel forward)))
+      (setq forward
+            (remote-port-forward
+             (list :host "127.0.0.1" :port remote-port)
+             :context root
+             :adapter "network"
+             :local-endpoint '(:host "127.0.0.1" :port 0)
+             :metadata '(:owner lsp-java-debug)))
+      (puthash root forward my/java-debug--forwards))
+    (plist-get (remote-forward-local-endpoint forward) :port)))
 
 (defun my/java-debug--config (config)
   "Populate a Dape Java CONFIG using `lsp-java'."
@@ -542,9 +531,7 @@
     (setq config (plist-put config :classPaths class-paths))
     (setq config
           (plist-put config :cwd
-                     (if (file-remote-p root)
-                         (remote-file-local-name root)
-                       root)))
+                     (remote-file-local-name root)))
     (plist-put config :name (format "Java: %s (%s)" main-class project-name))))
 
 (defun my/java-debug--ensure (config)

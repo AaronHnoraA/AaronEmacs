@@ -36,6 +36,12 @@
     network-client network-server port-forward reverse-forward)
   "Capabilities which Emacs can provide directly on the local target.")
 
+(defconst remote-process-classes '(interactive normal background)
+  "Traffic classes accepted by remote process adapters.
+
+These classes describe latency and buffering intent.  They are not route
+priority and do not claim operating-system or Emacs event-loop preemption.")
+
 (cl-defstruct (remote-target
                (:constructor remote-target-create))
   id label links workspaces environment preferences
@@ -96,7 +102,7 @@
 
 (cl-defstruct (remote-adapter
                (:constructor remote-adapter-create))
-  id capabilities preferences placement)
+  id capabilities preferences placement process-class)
 
 (cl-defstruct (remote-context
                (:constructor remote-context-create))
@@ -160,6 +166,35 @@
 
 (defvar remote-current-route nil
   "Dynamically bound `remote-route' for the active operation.")
+
+(defvar-local remote--buffer-base-process-environment nil
+  "Client environment captured before a target environment is applied.")
+
+(defvar-local remote--buffer-base-exec-path nil
+  "Client executable path captured before a target environment is applied.")
+
+(defun remote-client-process-environment ()
+  "Return a fresh process environment for explicit client placement.
+
+Target buffers intentionally project target-native HOME, PATH, and other
+variables.  Client helpers such as SSH, local protocol proxies, and UI
+processes must use this boundary instead of inheriting those target values."
+  (copy-sequence
+   (or remote--buffer-base-process-environment
+       (default-value 'process-environment))))
+
+(defun remote-client-exec-path ()
+  "Return a fresh executable search path for explicit client placement."
+  (copy-sequence
+   (or remote--buffer-base-exec-path
+       (default-value 'exec-path))))
+
+(defun remote-client-executable-find (program)
+  "Find client-local PROGRAM without consulting a target environment."
+  (let ((process-environment (remote-client-process-environment))
+        (exec-path (remote-client-exec-path))
+        (default-directory temporary-file-directory))
+    (executable-find program)))
 
 (defun remote--kill-internal-buffer (buffer)
   "Detach processes and kill framework-owned BUFFER without user hooks.
@@ -363,15 +398,24 @@ physical reachability path."
     link))
 
 (cl-defun remote-register-adapter
-    (id &key capabilities preferences (placement 'workspace))
-  "Register caller adapter ID and return it."
+    (id &key capabilities preferences (placement 'workspace)
+        (process-class 'normal))
+  "Register caller adapter ID and return it.
+
+PROCESS-CLASS is one of `remote-process-classes'.  The process layer uses it
+to select receive-buffering behavior for asynchronous processes created by
+this adapter."
+  (unless (memq process-class remote-process-classes)
+    (error "Invalid process class for adapter %s: %S"
+           id process-class))
   (let ((id (remote-normalize-id id)))
     (let ((adapter
            (remote-adapter-create
             :id id
             :capabilities (copy-sequence capabilities)
             :preferences (copy-tree preferences)
-            :placement placement)))
+            :placement placement
+            :process-class process-class)))
       (puthash id adapter remote-adapters)
       adapter)))
 

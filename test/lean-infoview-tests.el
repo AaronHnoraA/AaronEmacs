@@ -168,6 +168,19 @@
         (should-not lean--eglot-waiting-for-environment)
         (should (= starts 1))))))
 
+(ert-deftest lean-eglot-direnv-failure-falls-back-to-target-base-environment ()
+  (with-temp-buffer
+    (let ((lean--eglot-waiting-for-environment t)
+          seen)
+      (cl-letf (((symbol-function 'my/eglot-start-now)
+                 (lambda (&optional interactive)
+                   (setq seen interactive)))
+                ((symbol-function 'message) #'ignore))
+        (lean--eglot-direnv-ready
+         nil '(remote-file-error "direnv unavailable"))
+        (should-not lean--eglot-waiting-for-environment)
+        (should seen)))))
+
 (ert-deftest lean-infoview-rejects-a-dead-local-port-owner ()
   (let ((port-file
          (make-temp-file "lean-infoview-dead-owner-" nil ".json")))

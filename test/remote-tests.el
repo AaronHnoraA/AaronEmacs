@@ -82,6 +82,10 @@
              remote-resolve
              remote-make-process
              remote-make-client-process
+             remote-client-process-environment
+             remote-client-exec-path
+             remote-client-executable-find
+             remote-process-description
              remote-process-file
              remote-exec
              remote-exec-async
@@ -97,7 +101,10 @@
              remote-path-probe
              remote-make-network-process
              remote-open-network-stream
-             remote-port-forward))
+             remote-port-forward
+             remote-file-watch-list
+             remote-get-file-watch
+             remote-file-watch-recover))
     (should (fboundp function)))
   (should (macrop 'remote-with-route)))
 
@@ -207,6 +214,112 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(ert-deftest remote-interactive-process-class-applies-latency-policy ()
+  (remote-test-with-registry
+    (remote-register-adapter
+     "language-server"
+     :capabilities '(process-async)
+     :preferences '((default . ("native")))
+     :process-class 'interactive)
+    (let* ((default-directory
+            (remote-canonicalize-file-name temporary-file-directory))
+           (buffer (generate-new-buffer " *remote-interactive-process*"))
+           (process
+            (remote-make-process
+             :name "remote-interactive-process"
+             :buffer buffer
+             :command '("sh" "-c" "printf ready")
+             :remote-adapter "language-server"
+             :noquery t)))
+      (unwind-protect
+          (progn
+            (while (process-live-p process)
+              (accept-process-output process 0.1))
+            (should
+             (equal
+              (remote-process-description process)
+              '(:class interactive
+                :priority 100
+                :adaptive-read-buffering nil)))
+            (should
+             (equal
+              (plist-get
+               (remote-backend-execution-metadata
+                (process-get process 'remote-backend-execution))
+               :process-class)
+              'interactive)))
+        (when (process-live-p process)
+          (delete-process process))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))))))
+
+(ert-deftest remote-tramp-rpc-connect-keeps-client-home-and-one-control-owner ()
+  (remote-test-with-registry
+    (remote-register-target "box" :trusted t)
+    (remote-register-link
+     "box" "ssh" "tramp-rpc" :config '(:host "box"))
+    (let* ((route
+            (remote-route-create
+             :target-id "box"
+             :pipeline-id "box/ssh"
+             :backend-id "tramp-rpc"
+             :capability 'process-sync
+             :adapter-id "language-server"))
+           (context
+            (remote-context-create
+             :target-id "box"
+             :localname "/work/a.c"
+             :workspace-root "/fs:box:/work/"))
+           (remote--buffer-base-process-environment
+            '("HOME=/Users/client" "PATH=/client/bin"))
+           (remote--buffer-base-exec-path '("/client/bin"))
+           (process-environment
+            '("HOME=/home/target" "PATH=/home/target/bin"))
+           (exec-path '("/home/target/bin"))
+           (tramp-rpc-use-controlmaster t)
+           (tramp-rpc-ssh-args nil)
+           (tramp-rpc-ssh-options nil)
+           observed)
+      (cl-letf
+          (((symbol-function 'remote-transport-ssh-control-options)
+            (lambda (&optional _runtime)
+              '("ControlMaster=auto"
+                "ControlPersist=600"
+                "ControlPath=/tmp/framework-control")))
+           ((symbol-function 'remote-backend-project-file-name)
+            (lambda (_route _file) "/rpc:box:/"))
+           ((symbol-function 'remote-backend-tramp--method-login-args)
+            (lambda (&rest _arguments) nil))
+           ((symbol-function 'file-remote-p)
+            (lambda (_file &optional _identification connected)
+              (unless connected "/rpc:box:")))
+           ((symbol-function 'file-attributes)
+            (lambda (_file &optional _id-format)
+              (setq observed
+                    (list
+                     (getenv "HOME")
+                     (copy-sequence exec-path)
+                     tramp-rpc-use-controlmaster
+                     (copy-sequence tramp-rpc-ssh-args)
+                     (copy-sequence tramp-rpc-ssh-options)))
+              '(directory))))
+        (should
+         (equal
+          (remote-backend-tramp-connect route context)
+          "/rpc:box:/")))
+      (should
+       (equal
+        observed
+        '("/Users/client"
+          ("/client/bin")
+          nil
+          nil
+          ("ControlMaster=auto"
+           "ControlPersist=600"
+           "ControlPath=/tmp/framework-control"
+           "ConnectTimeout=8"
+           "ConnectionAttempts=1")))))))
+
 (ert-deftest remote-emacs-file-adapter-supports-environment-operations ()
   "File-name handlers may receive `exec-path' while visiting a file.
 Citre and similar packages use this operation from `find-file-hook', so
@@ -216,6 +329,23 @@ the default file adapter must route it without aborting later hooks."
      (memq 'environment
            (remote-adapter-capabilities
             (remote-get-adapter "emacs-file"))))))
+
+(ert-deftest remote-backup-results-preserve-client-placement ()
+  "A local backup cache path must not be projected into the target namespace."
+  (let ((spec (remote-get-file-operation 'find-backup-file-name)))
+    (should
+     (eq (remote-file-operation-spec-result-kind spec)
+         'placement-path-alist))
+    (should
+     (equal
+      (remote-fs--transform-result
+       spec '("/Users/client/.emacs-backups/a.c~") "box")
+      '("/Users/client/.emacs-backups/a.c~")))
+    (should
+     (equal
+      (remote-fs--transform-result
+       spec '("/ssh:box:/var/backups/a.c~") "box")
+      '("/fs:box:/var/backups/a.c~")))))
 
 (ert-deftest remote-file-operations-do-not-inherit-process-only-adapters ()
   "Nested native file APIs keep the standard file caller contract."
@@ -643,7 +773,7 @@ returns, so this covers a different ownership window from backend cancellation."
       (cl-letf
           (((symbol-function 'direnv--transport-busy-p)
             (lambda () busy))
-           ((symbol-function 'run-with-idle-timer)
+           ((symbol-function 'run-at-time)
             (lambda (_delay _repeat function &rest arguments)
               (setq scheduled
                     (lambda () (apply function arguments)))
@@ -1753,6 +1883,28 @@ names in tree consumers such as Treemacs."
           (should-not (gethash root direnv--export-waiters)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
+
+(ert-deftest remote-direnv-process-boundary-completion-does-not-wait-for-idle ()
+  "A completed export must resume LSP even while process traffic stays active."
+  (let (scheduled)
+    (cl-letf (((symbol-function 'run-at-time)
+               (lambda (time repeat function &rest arguments)
+                 (setq scheduled
+                       (list time repeat function arguments))
+                 'wall-clock-timer))
+              ((symbol-function 'run-with-idle-timer)
+               (lambda (&rest _arguments)
+                 (ert-fail "process-boundary completion used an idle timer"))))
+      (should
+       (eq
+        (direnv--finish-export-waiters
+         "/fs:box:/work/" 'context)
+        'wall-clock-timer)))
+    (should
+     (equal
+      scheduled
+      '(0.01 nil direnv--apply-export-waiters
+             ("/fs:box:/work/" context nil))))))
 
 (ert-deftest remote-direnv-lifecycle-coalesces-enter-and-reports-leave ()
   (let ((direnv--reported-selection nil)

@@ -2,6 +2,17 @@
 
 This directory contains the operational docs for the Emacs configuration. The documents themselves are written in Chinese; this README stays in English so README files remain consistent across repos.
 
+## Core Architecture
+
+The [Remote framework](remote-framework.md) is the repository's core execution
+model, not an SSH-only feature. Filesystem-, project-, process-, environment-,
+LSP-, service-, and socket-aware development must use it from the start, with
+the client represented as target `local` rather than a parallel local
+implementation. [Remote parity](remote-parity.md) defines completion, and
+[the LSP workflow](lsp-workflow.org) applies the rule most strictly to
+workspace roots, URIs, server placement, environments, watchers, helpers, and
+channels.
+
 ## Start Here
 
 - [quick-start.md](quick-start.md) First-time setup, system dependencies, fonts, path conventions, and bootstrap.
@@ -16,7 +27,7 @@ This directory contains the operational docs for the Emacs configuration. The do
 - [project-guide.md](project-guide.md) Project switching, project workbench flow, and how Treemacs / Perspective fit together.
 - [typst-math-macros.md](typst-math-macros.md) Shared Typst math macros and matching snippets for TCS, quantum computing, algebra, computing, and physics notes.
 - [dev-guide.md](dev-guide.md) Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
-- [remote-framework.md](remote-framework.md) `/fs` identity plus target/pipeline/backend/session routing, process and channel APIs, compatibility boundaries, and current implementation gaps.
+- [remote-framework.md](remote-framework.md) Core `/fs` identity plus target/pipeline/backend/session routing, process and channel APIs, compatibility boundaries, and current implementation gaps.
 - [remote-parity.md](remote-parity.md) VS Code Remote-level acceptance matrix, current coverage, completion criteria, and staged roadmap.
 - [research-notes-workflow.md](research-notes-workflow.md) Division of labor between notes, Jupytext notebooks, Jupyter, and reusable source code.
 - [lsp-workflow.org](lsp-workflow.org) Language-server routing, Hub/Doctor tooling, and the maintenance model.
