@@ -16,7 +16,6 @@
   :group 'environment)
 
 (defvar my/direnv-subprocess-sync-inhibited nil)
-(defvar my/direnv--selection-sync-timer nil)
 (defvar my/direnv--compile-advice-installed nil)
 
 (defun my/direnv-update-environment-maybe (&optional path callback)
@@ -42,32 +41,6 @@ contract required by commands which are about to start a subprocess."
   (when my/enable-direnv
     (direnv--maybe-update-environment)))
 
-(defun my/direnv--arm-selected-buffer-sync (&optional delay)
-  "Schedule selected-buffer synchronization after DELAY seconds."
-  (when (and my/enable-direnv
-             (not (timerp my/direnv--selection-sync-timer)))
-    (setq my/direnv--selection-sync-timer
-          (run-with-idle-timer
-           (or delay 0.1) nil #'my/direnv--sync-selected-buffer))))
-
-(defun my/direnv--sync-selected-buffer ()
-  "Refresh direnv for the selected window's buffer."
-  (setq my/direnv--selection-sync-timer nil)
-  (if (direnv--transport-busy-p)
-      (my/direnv--arm-selected-buffer-sync
-       direnv-transport-busy-retry-delay)
-    (when-let* ((window (selected-window))
-                ((window-live-p window))
-                (buffer (window-buffer window))
-                ((buffer-live-p buffer)))
-      (with-current-buffer buffer
-        (when my/enable-direnv
-          (direnv--maybe-update-environment))))))
-
-(defun my/direnv-schedule-selected-buffer-sync (&rest _)
-  "Coalesce direnv refresh after buffer or window selection changes."
-  (my/direnv--arm-selected-buffer-sync))
-
 (defun my/direnv--sync-before-subprocess (orig-fn &rest args)
   "Refresh the routed environment before calling ORIG-FN with ARGS."
   (unless my/direnv-subprocess-sync-inhibited
@@ -91,11 +64,8 @@ before process startup use `my/direnv-update-environment-maybe' explicitly."
   (add-hook 'find-file-hook #'my/direnv-schedule-current-buffer)
   ;; Dired buffers have no `buffer-file-name', so `find-file-hook' never
   ;; observes them.  Refresh from their established `default-directory'
-  ;; instead of relying on a later window-selection event.
+  ;; when Dired initializes the buffer.
   (add-hook 'dired-mode-hook #'my/direnv-schedule-current-buffer)
-  (add-hook 'buffer-list-update-hook #'my/direnv-schedule-selected-buffer-sync)
-  (add-hook 'window-selection-change-functions
-            #'my/direnv-schedule-selected-buffer-sync)
   (add-hook 'hack-local-variables-hook
             #'my/direnv--settle-env-after-dir-locals)
   (unless my/direnv--compile-advice-installed
