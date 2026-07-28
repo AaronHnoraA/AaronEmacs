@@ -38,7 +38,7 @@
 (declare-function my/workspace-switch-buffer "init-workspaces")
 (declare-function my/workspace-switch-left "init-workspaces")
 (declare-function my/workspace-switch-right "init-workspaces")
-(declare-function avy-goto-char-in-line "avy" (&optional arg))
+(declare-function avy-goto-char-in-line "avy" (char))
 (declare-function avy-goto-char-timer "avy" (&optional arg))
 (declare-function evil-emacs-state "evil")
 (declare-function evil-force-normal-state "evil")
@@ -164,12 +164,12 @@ Emacs state keep their local behavior."
     (with-current-buffer buffer
       (my/evil-sync-shift-width))))
 
-(defun my/evil-avy-goto-char-in-line (&optional arg)
+(defun my/evil-avy-goto-char-in-line (char)
   "Jump to a character on the current line using `avy'."
-  (interactive "P")
+  (interactive (list (read-char "char: " t)))
   (unless (require 'avy nil t)
     (user-error "Avy is unavailable"))
-  (avy-goto-char-in-line arg))
+  (avy-goto-char-in-line char))
 
 (defun my/evil-avy-goto-char-timer (&optional arg)
   "Jump using timed `avy' input."

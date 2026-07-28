@@ -1127,14 +1127,17 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
   "Ignore Treemacs' harmless stale file-event race.
 
 A file notification can schedule a refresh just before its tree node or buffer
-is torn down.  Some refresh paths then try to use nil as a vector and the timer
-reports `(wrong-type-argument arrayp nil)'.  The next file event or an explicit
-refresh will rebuild the affected node, so only suppress that exact race and
-preserve every other error for debugging."
+is torn down.  Some refresh paths then try to use nil as a vector; others try
+to enumerate a directory after a build tool has removed it.  The next file
+event or an explicit refresh will rebuild the affected node, so only suppress
+those exact races and preserve every other error for debugging."
   (condition-case err
       (apply orig-fn args)
     (wrong-type-argument
      (unless (equal err '(wrong-type-argument arrayp nil))
+       (signal (car err) (cdr err))))
+    (file-missing
+     (unless (equal (cadr err) "Opening directory")
        (signal (car err) (cdr err))))))
 
 (define-minor-mode my/treemacs-cursor-follow-mode

@@ -89,5 +89,24 @@
       (when (buffer-live-p source)
         (kill-buffer source)))))
 
+(ert-deftest treemacs-file-events-ignore-a-directory-deletion-race ()
+  (should-not
+   (my/treemacs-process-file-events-safely-a
+    (lambda ()
+      (signal
+       'file-missing
+       '("Opening directory" "No such file or directory"
+         "/fs:local:/tmp/project/build/classes"))))))
+
+(ert-deftest treemacs-file-events-preserve-other-missing-file-errors ()
+  (should-error
+   (my/treemacs-process-file-events-safely-a
+    (lambda ()
+      (signal
+       'file-missing
+       '("Opening input file" "No such file or directory"
+         "/fs:local:/tmp/project/MISSING"))))
+   :type 'file-missing))
+
 (provide 'init-project-remote-tests)
 ;;; init-project-remote-tests.el ends here

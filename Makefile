@@ -177,6 +177,7 @@ remote-test:
 	$(REMOTE_TEST_BATCH) -l test/remote-framework-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-remote-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-project-remote-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-evil-tests.el -f ert-run-tests-batch-and-exit
 
 remote-e2e:
 	REMOTE_E2E=1 $(REMOTE_TEST_BATCH) -l test/remote-e2e-tests.el -f ert-run-tests-batch-and-exit
