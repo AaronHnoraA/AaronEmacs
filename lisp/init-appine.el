@@ -58,10 +58,10 @@
 (declare-function appine-open-file-by-file-chooser "appine")
 (declare-function appine-native-action "appine" (name))
 (declare-function appine-native-open-rss-in-rect "appine" (path x y w h))
-(declare-function my/aaronnote-command "init-aaronnote" (command &optional detail))
-(declare-function my/aaronnote-save "init-aaronnote" ())
+(declare-function my/noema-command "init-aaronnote" (command &optional detail))
+(declare-function my/noema-save "init-aaronnote" ())
 (declare-function my/macos-open-target "init-macos" (target))
-(defvar my/aaronnote--port)
+(defvar my/noema--port)
 
 (defun my/appine-current-file ()
   "Return the current Appine local file path, or nil for non-file tabs."
@@ -477,51 +477,51 @@ With DIRED-P, the main path button opens via `dired'."
 
 ;;; ── Noema bridge ───────────────────────────────────────────────────
 
-(defun my/appine-aaronnote-url-p (&optional url)
+(defun my/appine-noema-url-p (&optional url)
   "Return non-nil when URL is the current local Noema page."
   (let ((url (or url my/appine-last-url)))
     (and (stringp url)
-         (boundp 'my/aaronnote--port)
-         (integerp my/aaronnote--port)
+         (boundp 'my/noema--port)
+         (integerp my/noema--port)
          (string-prefix-p
-          (format "http://127.0.0.1:%d/" my/aaronnote--port)
+          (format "http://127.0.0.1:%d/" my/noema--port)
           url))))
 
-(defun my/appine-aaronnote-command (command &optional detail)
+(defun my/appine-noema-command (command &optional detail)
   "Send COMMAND and optional DETAIL when the active Appine tab is Noema."
-  (when (and (my/appine-aaronnote-url-p)
-             (fboundp 'my/aaronnote-command))
-    (my/aaronnote-command command detail)
+  (when (and (my/appine-noema-url-p)
+             (fboundp 'my/noema-command))
+    (my/noema-command command detail)
     (when (fboundp 'appine-focus)
       (run-at-time 0.02 nil #'appine-focus))
     t))
 
-(defun my/appine-aaronnote-escape ()
+(defun my/appine-noema-escape ()
   "Route Escape to Noema when Appine is showing Noema."
   (interactive)
-  (unless (my/appine-aaronnote-command "escape")
+  (unless (my/appine-noema-command "escape")
     (keyboard-escape-quit)))
 
-(defun my/appine-aaronnote-save-or-native ()
+(defun my/appine-noema-save-or-native ()
   "Save Noema from Appine, otherwise ask Appine's native view to save."
   (interactive)
-  (unless (my/appine-aaronnote-command "save")
+  (unless (my/appine-noema-command "save")
     (appine-native-action "save")))
 
-(defun my/appine-aaronnote-meta-digit (digit)
+(defun my/appine-noema-meta-digit (digit)
   "Route Emacs M-DIGIT to Noema as an Appine host key."
   (interactive "cDigit: ")
   (let ((key (char-to-string digit)))
-    (unless (my/appine-aaronnote-command
+    (unless (my/appine-noema-command
              "key"
              `((key . ,key)
                (altKey . t)))
       (message "M-%s is only routed for Noema Appine tabs" key))))
 
-(defun my/appine-aaronnote-shift-tab ()
+(defun my/appine-noema-shift-tab ()
   "Route Shift-Tab to Noema when Appine is showing Noema."
   (interactive)
-  (unless (my/appine-aaronnote-command
+  (unless (my/appine-noema-command
            "key"
            '((key . "Tab")
              (shiftKey . t)))
@@ -1312,17 +1312,17 @@ buffer/window selection changes."
   (add-hook 'window-selection-change-functions #'my/appine--schedule-refresh-visible)
   (when (boundp 'appine-active-map)
     (my/appine-keep-emacs-prefix-keys appine-active-map)
-    (define-key appine-active-map [?\s-s]     #'my/appine-aaronnote-save-or-native)
-    (define-key appine-active-map (kbd "<backtab>") #'my/appine-aaronnote-shift-tab)
-    (define-key appine-active-map (kbd "<iso-lefttab>") #'my/appine-aaronnote-shift-tab)
-    (define-key appine-active-map (kbd "S-TAB") #'my/appine-aaronnote-shift-tab)
-    (define-key appine-active-map (kbd "S-<tab>") #'my/appine-aaronnote-shift-tab)
+    (define-key appine-active-map [?\s-s]     #'my/appine-noema-save-or-native)
+    (define-key appine-active-map (kbd "<backtab>") #'my/appine-noema-shift-tab)
+    (define-key appine-active-map (kbd "<iso-lefttab>") #'my/appine-noema-shift-tab)
+    (define-key appine-active-map (kbd "S-TAB") #'my/appine-noema-shift-tab)
+    (define-key appine-active-map (kbd "S-<tab>") #'my/appine-noema-shift-tab)
     (dotimes (i 10)
       (let ((digit (number-to-string i)))
         (define-key appine-active-map (kbd (format "M-%s" digit))
                     (lambda ()
                       (interactive)
-                      (my/appine-aaronnote-meta-digit (string-to-char digit))))))))
+                      (my/appine-noema-meta-digit (string-to-char digit))))))))
 
 (provide 'init-appine)
 ;;; init-appine.el ends here

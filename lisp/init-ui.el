@@ -23,16 +23,17 @@
 (defvar my/dashboard-items-content-width 100
   "Maximum display width for the centered dashboard item block.")
 
-(config-defvar my/aaronnote-icon-file nil
+(config-defvar my/noema-icon-file nil
   "SVG icon used for Markdown files."
   :type 'file
   :group 'appearance)
 
-(declare-function all-the-icons-fileicon "all-the-icons" (icon-name &rest args))
+(declare-function material-icon-create-icon-image "material-icon-utils" (icon-path))
+(declare-function material-icon-get-icon-for-file "material-icon-utils" (filename &optional dir-p))
 (declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
 (declare-function config-board "config-tools" ())
-(declare-function my/aaronnote-roam-dashboard-insert-heatmap "init-md-roam" (&optional days))
-(declare-function my/aaronnote-roam-management "init-md-roam" ())
+(declare-function my/noema-roam-dashboard-insert-heatmap "init-md-roam" (&optional days))
+(declare-function my/noema-roam-management "init-md-roam" ())
 (declare-function my/performance-watch "init-performance" ())
 (defvar dashboard-mode-map)
 
@@ -52,18 +53,27 @@ height in pixels."
             result)))
     (pcase extension
       ("lean"
-       (when (require 'all-the-icons nil t)
-         (apply #'all-the-icons-fileicon "lean" font-args)))
+       (ignore font-args)
+       (when (and (display-graphic-p)
+                  (image-type-available-p 'svg)
+                  (require 'material-icon-utils nil t))
+         (let ((material-icon-size image-height))
+           (when-let* ((image
+                        (condition-case nil
+                            (material-icon-create-icon-image
+                             (material-icon-get-icon-for-file file))
+                          (error nil))))
+             (propertize " " 'display image)))))
       ("md"
        (when (and (display-graphic-p)
                   (image-type-available-p 'svg)
-                  (file-readable-p my/aaronnote-icon-file))
+                  (file-readable-p my/noema-icon-file))
          (propertize
           " "
           'display
           (or (gethash image-height my/file-icon-image-cache)
               (puthash image-height
-                       (create-image my/aaronnote-icon-file 'svg nil
+                       (create-image my/noema-icon-file 'svg nil
                                      :height image-height :ascent 'center)
                        my/file-icon-image-cache)))))
       (_ nil))))
@@ -224,9 +234,9 @@ height in pixels."
 (defun my/dashboard-open-roam (&rest _)
   "Open the Roam management board from the dashboard button."
   (interactive)
-  (unless (fboundp 'my/aaronnote-roam-management)
+  (unless (fboundp 'my/noema-roam-management)
     (require 'init-md-roam))
-  (my/aaronnote-roam-management))
+  (my/noema-roam-management))
 
 (defun my/dashboard-open-monitor (&rest _)
   "Open the runtime performance monitor from the dashboard button."
@@ -247,8 +257,8 @@ height in pixels."
   "Insert the optional Markdown roam activity heatmap on the dashboard."
   (when (or (featurep 'init-md-roam)
             (require 'init-md-roam nil t))
-    (when (fboundp 'my/aaronnote-roam-dashboard-insert-heatmap)
-      (my/aaronnote-roam-dashboard-insert-heatmap))))
+    (when (fboundp 'my/noema-roam-dashboard-insert-heatmap)
+      (my/noema-roam-dashboard-insert-heatmap))))
 
 (defun my/dashboard--item-block-width ()
   "Return the content width used to center dashboard item sections."
@@ -459,7 +469,10 @@ height in pixels."
 
 ;;; Tab Line:
 
-(my/package-ensure-vc 'all-the-icons "https://github.com/domtronn/all-the-icons.el.git")
+(my/package-ensure-vc
+ 'material-icon
+ "https://github.com/zHaOdANiuu/material-icon.el.git"
+ "67e99128467075fa0087b7b49f1ae043344c903d")
 
 ;;; Text Area:
 
@@ -497,19 +510,41 @@ height in pixels."
   "Apply non-color UI polish on top of the active theme."
   (interactive)
   (when (display-graphic-p)
+    (set-frame-parameter nil 'internal-border-width my/gui-internal-border-width)
     (setq-default mode-line-format mode-line-format)
     (setq-default tab-bar-separator "  ")
     (setopt tab-bar-auto-width t)
     (setopt tab-bar-close-button-show nil)
     (setopt tab-bar-new-button-show nil)
     (setopt tab-bar-tab-hints nil)
-    (setopt window-divider-default-right-width 10)
+    ;; Keep a forgiving native drag target while the faces below expose only
+    ;; the final pixel as the visible divider.
+    (setopt window-divider-default-right-width 7)
     (setopt window-divider-default-bottom-width 1)
     (window-divider-mode 1)))
+
+(defun my/ui-apply-elegant-divider-faces ()
+  "Keep window dividers easy to grab without changing the active palette."
+  (interactive)
+  (when (display-graphic-p)
+    (let ((surface (face-background 'default nil t))
+          (line (or (face-foreground 'vertical-border nil t)
+                    (aaron-ui-color 'border-subtle))))
+      ;; The first six pixels visually merge into the current theme.  Only the
+      ;; last pixel uses the theme's own separator color.
+      (set-face-attribute 'window-divider nil
+                          :foreground surface :background surface)
+      (set-face-attribute 'window-divider-first-pixel nil
+                          :foreground surface :background surface)
+      (set-face-attribute 'window-divider-last-pixel nil
+                          :foreground line :background surface))))
 
 (add-hook 'after-init-hook #'my/ui-apply-polish)
 (add-hook 'server-after-make-frame-hook #'my/ui-apply-polish)
 (add-hook 'after-load-theme-hook #'my/ui-apply-polish)
+(add-hook 'after-init-hook #'my/ui-apply-elegant-divider-faces)
+(add-hook 'server-after-make-frame-hook #'my/ui-apply-elegant-divider-faces)
+(add-hook 'after-load-theme-hook #'my/ui-apply-elegant-divider-faces)
 
 (defun my/dashboard-apply-ui ()
   "Apply local UI styling to the dashboard."
@@ -576,7 +611,7 @@ height in pixels."
         mouse-avoidance-nudge-dist 2)
 ;;; Cursor:
 
-(setopt cursor-type 'box
+(setopt cursor-type '(bar . 2)
         ;; Avoid a second, misleading cursor in inactive windows.
         cursor-in-non-selected-windows nil
         ;; don't highlight region/line in inactive windows either

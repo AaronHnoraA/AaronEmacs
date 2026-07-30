@@ -11,13 +11,13 @@
 
 (require 'subr-x)
 
-(declare-function my/aaronnote-roam-root "init-md-roam" ())
-(defvar my/aaronnote--notes-root)
-(defvar my/aaronnote-roam-root)
+(declare-function my/noema-roam-root "init-md-roam" ())
+(defvar my/noema--notes-root)
+(defvar my/noema-roam-root)
 
 (defgroup my/note-code nil
   "Tagged source regions embedded in Typst notes."
-  :group 'my/aaronnote-roam)
+  :group 'my/noema-roam)
 
 (config-defvar my/note-code-root nil
   "Root containing notes and source files."
@@ -44,14 +44,14 @@
   (file-name-as-directory
    (expand-file-name
     (cond
-     ((fboundp 'my/aaronnote-roam-root)
-      (my/aaronnote-roam-root))
-     ((and (boundp 'my/aaronnote--notes-root)
-           (stringp my/aaronnote--notes-root))
-      my/aaronnote--notes-root)
-     ((and (boundp 'my/aaronnote-roam-root)
-           (stringp my/aaronnote-roam-root))
-      my/aaronnote-roam-root)
+     ((fboundp 'my/noema-roam-root)
+      (my/noema-roam-root))
+     ((and (boundp 'my/noema--notes-root)
+           (stringp my/noema--notes-root))
+      my/noema--notes-root)
+     ((and (boundp 'my/noema-roam-root)
+           (stringp my/noema-roam-root))
+      my/noema-roam-root)
      (t my/note-code-root)))))
 
 (defun my/note-code--arg (name args)

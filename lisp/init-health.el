@@ -275,12 +275,12 @@
          ;; OK unless the Noema LaTeX export engine wants an AI backend but
          ;; that backend's binary is missing (export still works via mechanical
          ;; fallback).
-         (or (equal (bound-and-true-p my/aaronnote-latex-export-engine) "mechanical")
-             (let ((backend (or (bound-and-true-p my/aaronnote-latex-export-agent) "codex")))
+         (or (equal (bound-and-true-p my/noema-latex-export-engine) "mechanical")
+             (let ((backend (or (bound-and-true-p my/noema-latex-export-agent) "codex")))
                (cond
                 ((equal backend "claude") (and (my/health--claude-cli-path) t))
                 ((equal backend "opencode")
-                 (and (executable-find (or (bound-and-true-p my/aaronnote-opencode-executable) "opencode")) t))
+                 (and (executable-find (or (bound-and-true-p my/noema-opencode-executable) "opencode")) t))
                 (t (and (my/health--codex-executable) t))))))
    (cons 'theme-loaded
          (ignore-errors
@@ -497,10 +497,10 @@
 
            ;; --- Noema ---
            (aaron-ui-board-insert-section "Noema")
-           (let ((running (and (boundp 'my/aaronnote--process)
-                               (processp my/aaronnote--process)
-                               (process-live-p my/aaronnote--process)))
-                 (ready (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)))
+           (let ((running (and (boundp 'my/noema--process)
+                               (processp my/noema--process)
+                               (process-live-p my/noema--process)))
+                 (ready (and (boundp 'my/noema--ready) my/noema--ready)))
              (aaron-ui-board-insert-field
               "process" (if running "running" "stopped")
               (if running 'aaron-ui-board-good 'aaron-ui-board-meta))
@@ -508,20 +508,20 @@
               "ready"
               (if ready
                   (format "yes (port %s)"
-                          (if (boundp 'my/aaronnote--port)
-                              (number-to-string my/aaronnote--port) "?"))
+                          (if (boundp 'my/noema--port)
+                              (number-to-string my/noema--port) "?"))
                 "no")
               (if ready 'aaron-ui-board-good 'aaron-ui-board-meta)))
            (aaron-ui-board-insert-field
             "runtime"
-            (if (and (fboundp 'my/aaronnote-roam--runtime-available-p)
-                     (my/aaronnote-roam--runtime-available-p))
+            (if (and (fboundp 'my/noema-roam--runtime-available-p)
+                     (my/noema-roam--runtime-available-p))
                 "available" "missing"))
            (aaron-ui-board-insert-field
             "last-sync"
-            (if (and (boundp 'my/aaronnote--last-sync-stats)
-                     my/aaronnote--last-sync-stats)
-                my/aaronnote--last-sync-stats
+            (if (and (boundp 'my/noema--last-sync-stats)
+                     my/noema--last-sync-stats)
+                my/noema--last-sync-stats
               "never"))
            (insert "\n")
            (aaron-ui-board-insert-key-hints "Keys: g refresh  q quit"))))

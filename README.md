@@ -70,6 +70,7 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
 - Remote target, routing, and environment architecture: [docs/remote-framework.md](docs/remote-framework.md)
 - Configuration cookbook: [docs/settings-cookbook.md](docs/settings-cookbook.md)
 - Maintenance, locks, state recovery: [docs/maintenance.md](docs/maintenance.md)
+- Aaron UI and Noema visual system: [docs/elegant-ui.md](docs/elegant-ui.md)
 - Migration notes: [docs/migration.md](docs/migration.md)
 - Deep-dive workflow docs: [docs/lsp-workflow.org](docs/lsp-workflow.org), [docs/jupyter-workflow.org](docs/jupyter-workflow.org), [docs/research-notes-workflow.md](docs/research-notes-workflow.md)
 

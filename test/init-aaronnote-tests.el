@@ -6,7 +6,35 @@
   (defalias 'general-define-key #'ignore))
 (require 'init-aaronnote)
 
-(ert-deftest my/aaronnote-canonical-file-uses-target-aware-home-expansion ()
+(ert-deftest my/noema-retire-legacy-commands-cleans-obarray-and-amx-state ()
+  (let ((legacy (intern "my/aaronnote-test-command"))
+        (history-symbols
+         '(extended-command-history vertico-repeat-history
+           amx-history amx-data amx-cache)))
+    (fset legacy (lambda () (interactive)))
+    (unwind-protect
+        (cl-progv
+            history-symbols
+            (list
+             '("my/aaronnote-test-command" "my/noema-roam-agenda")
+             '((amx "aaronnote" "my/aaronnote-test-command")
+               (amx "noema" "my/noema-roam-agenda"))
+             '(my/aaronnote-test-command my/noema-roam-agenda)
+             '((my/aaronnote-test-command . 2)
+               (my/noema-roam-agenda . 1))
+             '((my/aaronnote-test-command . 2)
+               (my/noema-roam-agenda . 1)))
+          (my/noema-retire-legacy-commands)
+          (should-not (fboundp legacy))
+          (dolist (variable history-symbols)
+            (should-not
+             (seq-some
+              #'my/noema--legacy-command-history-entry-p
+              (symbol-value variable)))))
+      (when (fboundp legacy)
+        (fmakunbound legacy)))))
+
+(ert-deftest my/noema-canonical-file-uses-target-aware-home-expansion ()
   (let ((remote-mode t)
         call)
     (cl-letf
@@ -16,16 +44,16 @@
             "/fs:local:/Users/me/Documents/Noema/")))
       (should
        (equal
-        (my/aaronnote--canonical-file "~/Documents/Noema/")
+        (my/noema--canonical-file "~/Documents/Noema/")
         "/fs:local:/Users/me/Documents/Noema/"))
       (should
        (equal call
               '("~/Documents/Noema/" nil "local"))))))
 
-(ert-deftest my/aaronnote-host-file-preserves-remote-logical-identity ()
+(ert-deftest my/noema-host-file-preserves-remote-logical-identity ()
   (let ((remote-mode t))
     (cl-letf
-        (((symbol-function 'my/aaronnote--canonical-file) #'identity)
+        (((symbol-function 'my/noema--canonical-file) #'identity)
          ((symbol-function 'remote-file-name-target)
           (lambda (file)
             (if (string-prefix-p "/fs:local:" file)
@@ -36,14 +64,14 @@
             (string-remove-prefix "/fs:local:" file))))
       (should
        (equal
-        (my/aaronnote--host-file "/fs:remote:/srv/note.md")
+        (my/noema--host-file "/fs:remote:/srv/note.md")
         "/fs:remote:/srv/note.md"))
       (should
        (equal
-        (my/aaronnote--host-file "/fs:local:/tmp/note.md")
+        (my/noema--host-file "/fs:local:/tmp/note.md")
         "/tmp/note.md")))))
 
-(ert-deftest my/aaronnote-external-provider-reads-and-writes-through-logical-file-api ()
+(ert-deftest my/noema-external-provider-reads-and-writes-through-logical-file-api ()
   (let* ((native (make-temp-file "aaronnote-remote-provider-" nil ".md"))
          (logical (remote-expand-file-name native nil "local")))
     (unwind-protect
@@ -51,13 +79,13 @@
           (with-temp-file native
             (insert "# Initial\n"))
           (let* ((opened
-                  (my/aaronnote--external-file-read
+                  (my/noema--external-file-read
                    `((file . ,logical)) nil))
                  (mtime (alist-get 'mtimeMs opened)))
             (should (equal (alist-get 'file opened) logical))
             (should (equal (alist-get 'content opened) "# Initial\n"))
             (let ((conflict
-                   (my/aaronnote--external-file-write
+                   (my/noema--external-file-write
                     `((file . ,logical)
                       (content . "# Conflict\n")
                       (baseMtimeMs . ,(- mtime 10000)))
@@ -70,7 +98,7 @@
                   (buffer-string))
                 "# Initial\n")))
             (let ((saved
-                   (my/aaronnote--external-file-write
+                   (my/noema--external-file-write
                     `((file . ,logical)
                       (content . "# Saved\n")
                       (baseMtimeMs . ,mtime))
@@ -86,13 +114,13 @@
       (when (file-exists-p native)
         (delete-file native)))))
 
-(ert-deftest my/aaronnote-external-watch-is-workspace-owned-and-bounded ()
+(ert-deftest my/noema-external-watch-is-workspace-owned-and-bounded ()
   (let ((remote-mode t)
-        (my/aaronnote--external-file-watches
+        (my/noema--external-file-watches
          (make-hash-table :test #'equal))
-        (my/aaronnote--external-file-watch-timers
+        (my/noema--external-file-watch-timers
          (make-hash-table :test #'equal))
-        (my/aaronnote--external-file-watch-suppressed
+        (my/noema--external-file-watch-suppressed
          (make-hash-table :test #'equal))
         opened closed)
     (cl-letf
@@ -109,9 +137,9 @@
          ((symbol-function 'remote-workspace-close-resource)
           (lambda (workspace resource &optional reason)
             (setq closed (list workspace resource reason)))))
-      (my/aaronnote--ensure-external-file-watch
+      (my/noema--ensure-external-file-watch
        "/fs:remote:/srv/note.md")
-      (my/aaronnote--ensure-external-file-watch
+      (my/noema--ensure-external-file-watch
        "/fs:remote:/srv/note.md")
       (should
        (equal opened
@@ -119,16 +147,16 @@
                 "/fs:remote:/srv/note.md"
                 (change attribute-change))))
       (should
-       (= (hash-table-count my/aaronnote--external-file-watches) 1))
-      (my/aaronnote--clear-external-file-watches)
+       (= (hash-table-count my/noema--external-file-watches) 1))
+      (my/noema--clear-external-file-watches)
       (should
        (equal closed
               '(mock-workspace mock-resource aaronnote-stop)))
       (should
        (zerop
-        (hash-table-count my/aaronnote--external-file-watches))))))
+        (hash-table-count my/noema--external-file-watches))))))
 
-(ert-deftest my/aaronnote-jupyter-defaults-read-project-config-without-eval ()
+(ert-deftest my/noema-jupyter-defaults-read-project-config-without-eval ()
   (let ((root (make-temp-file "aaronnote-project" t)))
     (unwind-protect
         (progn
@@ -136,46 +164,46 @@
             (insert "((nil . ((my/project-local-settings . "
                     "(:toolchain ((python . sage)) "
                     ":aaronnote-jupyter (:language sage :kernel sagemath :session research))))))\n"))
-          (let ((my/aaronnote--notes-root root))
+          (let ((my/noema--notes-root root))
             (should
-             (equal (my/aaronnote--jupyter-defaults)
+             (equal (my/noema--jupyter-defaults)
                     '(:language "sage" :kernel "sagemath" :session "research")))
             (should
-             (equal (my/aaronnote--jupyter-default-environment)
+             (equal (my/noema--jupyter-default-environment)
                     '("AARONNOTE_JUPYTER_DEFAULT_LANGUAGE=sage"
                       "AARONNOTE_JUPYTER_DEFAULT_KERNEL=sagemath"
                       "AARONNOTE_JUPYTER_DEFAULT_SESSION=research")))))
       (delete-directory root t))))
 
-(ert-deftest my/aaronnote-prose-check-is-an-editor-command ()
-  (should (commandp #'my/aaronnote-prose-check))
+(ert-deftest my/noema-prose-check-is-an-editor-command ()
+  (should (commandp #'my/noema-prose-check))
   (let (sent)
-    (cl-letf (((symbol-function 'my/aaronnote-command)
+    (cl-letf (((symbol-function 'my/noema-command)
                (lambda (command &optional detail)
                  (setq sent (list command detail)))))
-      (my/aaronnote-prose-check)
+      (my/noema-prose-check)
       (should (equal sent '("prose-check" nil))))))
 
-(ert-deftest my/aaronnote-refresh-does-not-send-extra-focus ()
-  (let ((my/aaronnote--ready t)
-        (my/aaronnote--app-buffer (current-buffer))
+(ert-deftest my/noema-refresh-does-not-send-extra-focus ()
+  (let ((my/noema--ready t)
+        (my/noema--app-buffer (current-buffer))
         calls)
-    (cl-letf (((symbol-function 'my/aaronnote-command)
+    (cl-letf (((symbol-function 'my/noema-command)
                (lambda (command &optional _detail)
                  (push command calls))))
-      (my/aaronnote-refresh)
+      (my/noema-refresh)
       (should (equal (nreverse calls) '("refresh"))))))
 
-(ert-deftest my/aaronnote-keys-mode-binds-history-chords ()
-  (should (eq (lookup-key my/aaronnote-keys-mode-map (kbd "M-z"))
-              #'my/aaronnote-undo))
-  (should (eq (lookup-key my/aaronnote-keys-mode-map (kbd "M-Z"))
-              #'my/aaronnote-redo))
-  (should (eq (lookup-key my/aaronnote-keys-mode-map (kbd "M-S-z"))
-              #'my/aaronnote-redo)))
+(ert-deftest my/noema-keys-mode-binds-history-chords ()
+  (should (eq (lookup-key my/noema-keys-mode-map (kbd "M-z"))
+              #'my/noema-undo))
+  (should (eq (lookup-key my/noema-keys-mode-map (kbd "M-Z"))
+              #'my/noema-redo))
+  (should (eq (lookup-key my/noema-keys-mode-map (kbd "M-S-z"))
+              #'my/noema-redo)))
 
-(ert-deftest my/aaronnote-jupyter-cell-point-move-does-not-sync ()
-  (let ((buffer (generate-new-buffer "*aaronnote-jcell-test*"))
+(ert-deftest my/noema-jupyter-cell-point-move-does-not-sync ()
+  (let ((buffer (generate-new-buffer "*Noema-jcell-test*"))
         calls)
     (unwind-protect
         (with-current-buffer buffer
@@ -189,64 +217,64 @@
                   "# %% aaronnote-cell id=two\n"
                   "print(2)\n"
                   "# %% end-aaronnote-cell id=two\n")
-          (setq-local my/aaronnote-jupyter-cell-source-file "/tmp/note.md")
-          (setq-local my/aaronnote-jupyter-cell-kernel "python3")
-          (setq-local my/aaronnote-jupyter-cell-session "default")
-          (setq-local my/aaronnote-jupyter-cell-storage "script")
-          (my/aaronnote-jupyter-cell-mode 1)
+          (setq-local my/noema-jupyter-cell-source-file "/tmp/note.md")
+          (setq-local my/noema-jupyter-cell-kernel "python3")
+          (setq-local my/noema-jupyter-cell-session "default")
+          (setq-local my/noema-jupyter-cell-storage "script")
+          (my/noema-jupyter-cell-mode 1)
           (goto-char (point-min))
           (search-forward "print(2)")
-          (cl-letf (((symbol-function 'my/aaronnote-command)
+          (cl-letf (((symbol-function 'my/noema-command)
                      (lambda (command &optional detail)
                        (push (cons command detail) calls))))
-            (my/aaronnote-jupyter-cell--post-command-h)
-            (should (equal my/aaronnote-jupyter-cell-current-id "two"))
+            (my/noema-jupyter-cell--post-command-h)
+            (should (equal my/noema-jupyter-cell-current-id "two"))
             (should-not calls)
-            (my/aaronnote-jupyter-cell-sync-cursor)
+            (my/noema-jupyter-cell-sync-cursor)
             (should (= (length calls) 1))
             (should (equal (caar calls) "jupyter-select-cell"))
             (should (equal (alist-get 'cellId (cdar calls)) "two"))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-xwidget-redo-routes-only-aaronnote-buffer ()
-  (let ((buffer (generate-new-buffer "*aaronnote-test*"))
-        (my/aaronnote--app-buffer nil)
+(ert-deftest my/noema-xwidget-redo-routes-only-aaronnote-buffer ()
+  (let ((buffer (generate-new-buffer "*Noema-test*"))
+        (my/noema--app-buffer nil)
         sent passed)
     (unwind-protect
         (progn
           (with-current-buffer buffer
             (setq-local major-mode 'xwidget-webkit-mode))
-          (cl-letf (((symbol-function 'my/aaronnote-command)
+          (cl-letf (((symbol-function 'my/noema-command)
                      (lambda (command &optional detail)
                        (setq sent (list command detail))))
                     ((symbol-function 'xwidget-webkit-pass-command-event)
                      (lambda (event)
                        (setq passed event))))
             (with-current-buffer buffer
-              (setq my/aaronnote--app-buffer buffer)
-              (my/aaronnote-xwidget-redo 'aaronnote-event))
+              (setq my/noema--app-buffer buffer)
+              (my/noema-xwidget-redo 'aaronnote-event))
             (should (equal sent '("redo" nil)))
             (should-not passed)
             (setq sent nil)
             (with-current-buffer buffer
-              (setq my/aaronnote--app-buffer nil)
-              (my/aaronnote-xwidget-redo 'other-event))
+              (setq my/noema--app-buffer nil)
+              (my/noema-xwidget-redo 'other-event))
             (should-not sent)
             (should (eq passed 'other-event))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-xwidget-undo-routes-jupyter-buffer-to-generic-xwidget ()
-  (let ((buffer (generate-new-buffer "*aaronnote-jupyter-test*"))
-        (my/aaronnote--app-buffer nil)
+(ert-deftest my/noema-xwidget-undo-routes-jupyter-buffer-to-generic-xwidget ()
+  (let ((buffer (generate-new-buffer "*Noema-jupyter-test*"))
+        (my/noema--app-buffer nil)
         sent passed undo-called)
     (unwind-protect
         (progn
           (with-current-buffer buffer
             (setq-local major-mode 'xwidget-webkit-mode)
             (setq-local my/xwidget--session-id "aaronnote-jupyter"))
-          (cl-letf (((symbol-function 'my/aaronnote-command)
+          (cl-letf (((symbol-function 'my/noema-command)
                      (lambda (command &optional detail)
                        (setq sent (list command detail))))
                     ((symbol-function 'xwidget-webkit-pass-command-event)
@@ -256,29 +284,29 @@
                      (lambda ()
                        (setq undo-called t))))
             (with-current-buffer buffer
-              (my/aaronnote-xwidget-undo 'jupyter-event))
+              (my/noema-xwidget-undo 'jupyter-event))
             (should undo-called)
             (should-not sent)
             (should-not passed)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-editable-split-opens-fresh-client-xwidget ()
+(ert-deftest my/noema-editable-split-opens-fresh-client-xwidget ()
   (let* ((file (make-temp-file "aaronnote-split" nil ".md"))
-         (source (generate-new-buffer "*aaronnote-split-source*"))
-         (xwidget-buffer (generate-new-buffer "*aaronnote-split-xwidget*"))
-         (my/aaronnote--port 4242)
-         (my/aaronnote--file-buffers (make-hash-table :test #'equal))
-         (my/aaronnote--client-buffers (make-hash-table :test #'equal))
+         (source (generate-new-buffer "*Noema-split-source*"))
+         (xwidget-buffer (generate-new-buffer "*Noema-split-xwidget*"))
+         (my/noema--port 4242)
+         (my/noema--file-buffers (make-hash-table :test #'equal))
+         (my/noema--client-buffers (make-hash-table :test #'equal))
          opened-url opened-id opened-display opened-force-new opened-reuse)
     (unwind-protect
         (progn
           (with-current-buffer source
             (setq-local buffer-file-name file))
           (switch-to-buffer source)
-          (cl-letf (((symbol-function 'my/aaronnote--ensure-server)
+          (cl-letf (((symbol-function 'my/noema--ensure-server)
                      (lambda (callback) (funcall callback)))
-                    ((symbol-function 'my/aaronnote--split-window)
+                    ((symbol-function 'my/noema--split-window)
                      (lambda () (selected-window)))
                     ((symbol-function 'my/xwidget-open-url)
                      (lambda (url &rest args)
@@ -288,54 +316,54 @@
                              opened-force-new (plist-get args :force-new)
                              opened-reuse (plist-get args :reuse-selected))
                        xwidget-buffer)))
-            (my/aaronnote-open-current-note-split))
+            (my/noema-open-current-note-split))
           (should-not (string-match-p "readonly=1" opened-url))
           (should (string-match-p "client=aaronnote-split%3A" opened-url))
           (should (string-prefix-p "aaronnote-split:" opened-id))
           (should (eq opened-display 'current))
           (should opened-force-new)
           (should opened-reuse)
-          (should-not (gethash (expand-file-name file) my/aaronnote--file-buffers))
-          (should (eq (gethash opened-id my/aaronnote--client-buffers) xwidget-buffer))
+          (should-not (gethash (expand-file-name file) my/noema--file-buffers))
+          (should (eq (gethash opened-id my/noema--client-buffers) xwidget-buffer))
           (with-current-buffer xwidget-buffer
             (should
-             (equal my/aaronnote-buffer-file-name
-                    (my/aaronnote--canonical-file file)))
-            (should (equal my/aaronnote--client-id opened-id))
-            (should-not my/aaronnote--registered-file)))
+             (equal my/noema-buffer-file-name
+                    (my/noema--canonical-file file)))
+            (should (equal my/noema--client-id opened-id))
+            (should-not my/noema--registered-file)))
       (when (buffer-live-p source) (kill-buffer source))
       (when (buffer-live-p xwidget-buffer) (kill-buffer xwidget-buffer))
       (when (file-exists-p file) (delete-file file)))))
 
-(ert-deftest my/aaronnote-split-registration-does-not-steal-canonical-file-buffer ()
+(ert-deftest my/noema-split-registration-does-not-steal-canonical-file-buffer ()
   (let* ((file (make-temp-file "aaronnote-split-register" nil ".md"))
-         (canonical (generate-new-buffer "*aaronnote-canonical*"))
-         (split (generate-new-buffer "*aaronnote-split*"))
+         (canonical (generate-new-buffer "*Noema-canonical*"))
+         (split (generate-new-buffer "*Noema-split*"))
          (client "aaronnote-split:/tmp/note.md:7")
-         (my/aaronnote--file-buffers (make-hash-table :test #'equal))
-         (my/aaronnote--client-buffers (make-hash-table :test #'equal)))
+         (my/noema--file-buffers (make-hash-table :test #'equal))
+         (my/noema--client-buffers (make-hash-table :test #'equal)))
     (unwind-protect
         (progn
-          (my/aaronnote--register-buffer
-           canonical file (my/aaronnote--xwidget-session-id file) nil)
-          (my/aaronnote--register-buffer split file client nil)
-          (should (eq (gethash (my/aaronnote--canonical-file file)
-                               my/aaronnote--file-buffers)
+          (my/noema--register-buffer
+           canonical file (my/noema--xwidget-session-id file) nil)
+          (my/noema--register-buffer split file client nil)
+          (should (eq (gethash (my/noema--canonical-file file)
+                               my/noema--file-buffers)
                       canonical))
-          (should (eq (gethash client my/aaronnote--client-buffers) split))
-          (should (eq (my/aaronnote--buffer-for-file file) canonical))
+          (should (eq (gethash client my/noema--client-buffers) split))
+          (should (eq (my/noema--buffer-for-file file) canonical))
           (with-current-buffer split
-            (should (equal my/aaronnote--xwidget-forced-name
-                           (format "*aaronnote split 7: %s*"
+            (should (equal my/noema--xwidget-forced-name
+                           (format "*Noema split 7: %s*"
                                    (file-name-nondirectory file))))))
       (when (buffer-live-p canonical) (kill-buffer canonical))
       (when (buffer-live-p split) (kill-buffer split))
       (when (file-exists-p file) (delete-file file)))))
 
-(ert-deftest my/aaronnote-run-emacs-key-queues-m-x ()
-  (let ((buffer (generate-new-buffer "*aaronnote-test*"))
+(ert-deftest my/noema-run-emacs-key-queues-m-x ()
+  (let ((buffer (generate-new-buffer "*Noema-test*"))
         (unread-command-events nil)
-        (my/aaronnote--app-buffer nil)
+        (my/noema--app-buffer nil)
         focused-frame
         edit-mode-arg
         scheduled-fn
@@ -344,7 +372,7 @@
         (progn
           (switch-to-buffer buffer)
           (setq-local major-mode 'xwidget-webkit-mode)
-          (setq my/aaronnote--app-buffer buffer)
+          (setq my/noema--app-buffer buffer)
           (cl-letf (((symbol-function 'select-frame-set-input-focus)
                      (lambda (frame) (setq focused-frame frame)))
                     ((symbol-function 'xwidget-webkit-edit-mode)
@@ -354,21 +382,21 @@
                        (setq scheduled-fn function)
                        (setq scheduled-args args)
                        'mock-timer)))
-            (my/aaronnote--run-emacs-key "M-x"))
+            (my/noema--run-emacs-key "M-x"))
           (should (equal unread-command-events
                          (listify-key-sequence (kbd "M-x"))))
           (should (eq (selected-window) (get-buffer-window buffer 'visible)))
           (should (eq focused-frame (selected-frame)))
           (should (equal edit-mode-arg -1))
-          (should (eq scheduled-fn #'my/aaronnote--focus-forwarded-key-target))
+          (should (eq scheduled-fn #'my/noema--focus-forwarded-key-target))
           (should (equal scheduled-args
                          (list (get-buffer-window buffer 'visible)))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-run-emacs-key-queues-prefix-sequence ()
+(ert-deftest my/noema-run-emacs-key-queues-prefix-sequence ()
   (let ((unread-command-events nil)
-        (my/aaronnote--app-buffer nil)
+        (my/noema--app-buffer nil)
         scheduled-fn
         scheduled-args)
     (cl-letf (((symbol-function 'select-frame-set-input-focus)
@@ -378,67 +406,67 @@
                  (setq scheduled-fn function)
                  (setq scheduled-args args)
                  'mock-timer)))
-      (my/aaronnote--run-emacs-key "C-x C-f"))
+      (my/noema--run-emacs-key "C-x C-f"))
     (should (equal unread-command-events
                    (listify-key-sequence (kbd "C-x C-f"))))
-    (should (eq scheduled-fn #'my/aaronnote--focus-forwarded-key-target))
+    (should (eq scheduled-fn #'my/noema--focus-forwarded-key-target))
     (should (equal scheduled-args (list (selected-window))))))
 
-(ert-deftest my/aaronnote-focus-forwarded-key-target-focuses-window-left-from-aaronnote ()
-  (let ((source (generate-new-buffer "*aaronnote-source*"))
-        (target (generate-new-buffer "*aaronnote-target*"))
-        (my/aaronnote--app-buffer nil)
+(ert-deftest my/noema-focus-forwarded-key-target-focuses-window-left-from-aaronnote ()
+  (let ((source (generate-new-buffer "*Noema-source*"))
+        (target (generate-new-buffer "*Noema-target*"))
+        (my/noema--app-buffer nil)
         focused-frame)
     (unwind-protect
         (save-window-excursion
           (delete-other-windows)
           (switch-to-buffer source)
           (setq-local major-mode 'xwidget-webkit-mode)
-          (setq my/aaronnote--app-buffer source)
+          (setq my/noema--app-buffer source)
           (let ((source-window (selected-window))
                 (target-window (split-window-right)))
             (set-window-buffer target-window target)
             (select-window target-window)
             (cl-letf (((symbol-function 'select-frame-set-input-focus)
                        (lambda (frame) (setq focused-frame frame))))
-              (my/aaronnote--focus-forwarded-key-target source-window))
+              (my/noema--focus-forwarded-key-target source-window))
             (should (eq (selected-window) target-window))
             (should (eq focused-frame (selected-frame)))))
       (when (buffer-live-p source) (kill-buffer source))
       (when (buffer-live-p target) (kill-buffer target)))))
 
-(ert-deftest my/aaronnote-buffer-for-client-finds-unregistered-split ()
-  (let ((buffer (generate-new-buffer "*aaronnote-split*"))
-        (my/aaronnote--client-buffers (make-hash-table :test #'equal)))
+(ert-deftest my/noema-buffer-for-client-finds-unregistered-split ()
+  (let ((buffer (generate-new-buffer "*Noema-split*"))
+        (my/noema--client-buffers (make-hash-table :test #'equal)))
     (unwind-protect
         (progn
           (with-current-buffer buffer
             (setq-local major-mode 'xwidget-webkit-mode)
-            (setq-local my/aaronnote--client-id "aaronnote-split:/tmp/note.md:1"))
+            (setq-local my/noema--client-id "aaronnote-split:/tmp/note.md:1"))
           (should-not (gethash "aaronnote-split:/tmp/note.md:1"
-                               my/aaronnote--client-buffers))
-          (should (eq (my/aaronnote--buffer-for-client
+                               my/noema--client-buffers))
+          (should (eq (my/noema--buffer-for-client
                        "aaronnote-split:/tmp/note.md:1")
                       buffer)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-xwidget-buffer-p-accepts-local-aaronnote-client ()
-  (let ((buffer (generate-new-buffer "*aaronnote-split*"))
-        (my/aaronnote--app-buffer nil)
-        (my/aaronnote--port nil))
+(ert-deftest my/noema-xwidget-buffer-p-accepts-local-aaronnote-client ()
+  (let ((buffer (generate-new-buffer "*Noema-split*"))
+        (my/noema--app-buffer nil)
+        (my/noema--port nil))
     (unwind-protect
         (progn
           (with-current-buffer buffer
             (setq-local major-mode 'xwidget-webkit-mode)
-            (setq-local my/aaronnote--client-id "aaronnote-split:/tmp/note.md:1"))
-          (should (my/aaronnote--xwidget-buffer-p buffer)))
+            (setq-local my/noema--client-id "aaronnote-split:/tmp/note.md:1"))
+          (should (my/noema--xwidget-buffer-p buffer)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-run-emacs-key-uses-client-source-window ()
-  (let ((main (generate-new-buffer "*aaronnote-main*"))
-        (split (generate-new-buffer "*aaronnote-split*"))
-        (my/aaronnote--app-buffer nil)
-        (my/aaronnote--client-buffers (make-hash-table :test #'equal))
+(ert-deftest my/noema-run-emacs-key-uses-client-source-window ()
+  (let ((main (generate-new-buffer "*Noema-main*"))
+        (split (generate-new-buffer "*Noema-split*"))
+        (my/noema--app-buffer nil)
+        (my/noema--client-buffers (make-hash-table :test #'equal))
         (unread-command-events nil)
         released-buffer
         scheduled-fn
@@ -449,14 +477,14 @@
           (switch-to-buffer main)
           (with-current-buffer main
             (setq-local major-mode 'xwidget-webkit-mode)
-            (setq-local my/aaronnote--client-id "main-client"))
-          (setq my/aaronnote--app-buffer main)
+            (setq-local my/noema--client-id "main-client"))
+          (setq my/noema--app-buffer main)
           (let ((main-window (selected-window))
                 (split-window (split-window-right)))
             (set-window-buffer split-window split)
             (with-current-buffer split
               (setq-local major-mode 'xwidget-webkit-mode)
-              (setq-local my/aaronnote--client-id "split-client"))
+              (setq-local my/noema--client-id "split-client"))
             (select-window main-window)
             (cl-letf (((symbol-function 'select-frame-set-input-focus)
                        (lambda (_frame) nil))
@@ -469,30 +497,50 @@
                          (setq scheduled-fn function)
                          (setq scheduled-args args)
                          'mock-timer)))
-              (my/aaronnote--run-emacs-key "M-x" "split-client"))
+              (my/noema--run-emacs-key "M-x" "split-client"))
             (should (eq (selected-window) split-window))
             (should (eq released-buffer split))
             (should (equal unread-command-events
                            (listify-key-sequence (kbd "M-x"))))
-            (should (eq scheduled-fn #'my/aaronnote--focus-forwarded-key-target))
+            (should (eq scheduled-fn #'my/noema--focus-forwarded-key-target))
             (should (equal scheduled-args (list split-window)))))
       (when (buffer-live-p main) (kill-buffer main))
       (when (buffer-live-p split) (kill-buffer split)))))
 
-(ert-deftest my/aaronnote-key-event-passes-client-to-run-emacs-key ()
+(ert-deftest my/noema-key-event-passes-client-to-run-emacs-key ()
   (let (seen)
-    (cl-letf (((symbol-function 'my/aaronnote--run-emacs-key)
+    (cl-letf (((symbol-function 'json-serialize)
+               (lambda (&rest _args)
+                 (ert-fail "structured key events must not be reserialized")))
+              ((symbol-function 'my/noema--run-emacs-key)
                (lambda (key &optional client)
                  (setq seen (list key client)))))
-      (my/aaronnote--gateway-event
+      (my/noema--gateway-event
        '((type . "key")
          (payload . ((key . "M-<right>")
                      (client . "split-client"))))
        nil))
     (should (equal seen '("M-<right>" "split-client")))))
 
-(ert-deftest my/aaronnote-ui-state-gateway-does-not-reserialize-status ()
-  (let ((my/aaronnote-echo-severity 'error)
+(ert-deftest my/noema-key-event-ignores-non-string-key-data ()
+  (let (seen)
+    (cl-letf (((symbol-function 'json-serialize)
+               (lambda (&rest _args)
+                 (ert-fail "structured key events must not be reserialized")))
+              ((symbol-function 'my/noema--run-emacs-key)
+               (lambda (&rest args) (setq seen args))))
+      (should
+       (equal
+        (my/noema--gateway-event
+         '((type . "key")
+           (payload . ((key . [1 nil 74])
+                       (client . "split-client"))))
+         nil)
+        '((ok . t)))))
+    (should-not seen)))
+
+(ert-deftest my/noema-ui-state-gateway-does-not-reserialize-status ()
+  (let ((my/noema-echo-severity 'error)
         (binary-status (unibyte-string 1 255 123))
         seen)
     (cl-letf (((symbol-function 'json-serialize)
@@ -501,7 +549,7 @@
               ((symbol-function 'message)
                (lambda (format-string &rest args)
                  (setq seen (apply #'format format-string args)))))
-      (my/aaronnote--gateway-event
+      (my/noema--gateway-event
        `((type . "ui-state")
          (payload . ((status . ,binary-status)
                      (severity . "error"))))
@@ -509,14 +557,14 @@
     (should (string-prefix-p "Noema error: " seen))
     (should-not (string-match-p "parse failed" seen))))
 
-(ert-deftest my/aaronnote-ui-state-ignores-malformed-status-fields ()
-  (let ((my/aaronnote-echo-severity 'error)
+(ert-deftest my/noema-ui-state-ignores-malformed-status-fields ()
+  (let ((my/noema-echo-severity 'error)
         seen)
     (cl-letf (((symbol-function 'message)
                (lambda (&rest args) (push args seen))))
       (should
        (equal
-        (my/aaronnote--gateway-event
+        (my/noema--gateway-event
          '((type . "ui-state")
            (payload . ((status . [1 nil 123])
                        (severity . ["error"]))))
@@ -524,20 +572,20 @@
         '((ok . t)))))
     (should-not seen)))
 
-(ert-deftest my/aaronnote-zotero-events-dispatch-structured-payloads ()
+(ert-deftest my/noema-zotero-events-dispatch-structured-payloads ()
   (let (seen)
     (cl-letf (((symbol-function 'run-at-time)
                (lambda (_time _repeat function &rest args)
                  (apply function args)))
-              ((symbol-function 'my/aaronnote--run-zotero-event)
+              ((symbol-function 'my/noema--run-zotero-event)
                (lambda (payload import-p)
                  (push (list payload import-p) seen))))
-      (my/aaronnote--gateway-event
+      (my/noema--gateway-event
        '((type . "zotero")
          (payload . ((key . "Str87")
                      (doi . "10.1515/example"))))
        nil)
-      (my/aaronnote--gateway-event
+      (my/noema--gateway-event
        '((type . "zotero-import")
          (payload . ((currentFile . "/tmp/note.md")
                      (targetFile . "/tmp/bib/test.bib"))))
@@ -589,10 +637,10 @@
       (when (file-exists-p file)
         (delete-file file)))))
 
-(ert-deftest my/aaronnote-windmove-focus-advice-focuses-aaronnote-target ()
-  (let ((source (generate-new-buffer "*aaronnote-source*"))
-        (target (generate-new-buffer "*aaronnote-target*"))
-        (my/aaronnote--app-buffer nil)
+(ert-deftest my/noema-windmove-focus-advice-focuses-aaronnote-target ()
+  (let ((source (generate-new-buffer "*Noema-source*"))
+        (target (generate-new-buffer "*Noema-target*"))
+        (my/noema--app-buffer nil)
         focused-buffer)
     (unwind-protect
         (save-window-excursion
@@ -602,11 +650,11 @@
             (set-window-buffer target-window target)
             (with-current-buffer target
               (setq-local major-mode 'xwidget-webkit-mode))
-            (setq my/aaronnote--app-buffer target)
+            (setq my/noema--app-buffer target)
             (cl-letf (((symbol-function 'my/xwidget-focus)
                        (lambda (&optional buffer)
                          (setq focused-buffer buffer))))
-              (should (eq (my/aaronnote--windmove-focus-advice
+              (should (eq (my/noema--windmove-focus-advice
                            (lambda ()
                              (select-window target-window)
                              'moved))
@@ -616,9 +664,9 @@
       (when (buffer-live-p source) (kill-buffer source))
       (when (buffer-live-p target) (kill-buffer target)))))
 
-(ert-deftest my/aaronnote-focus-move-between-aaronnote-windows-releases-source-and-focuses-target ()
-  (let ((source (generate-new-buffer "*aaronnote-source*"))
-        (target (generate-new-buffer "*aaronnote-split*"))
+(ert-deftest my/noema-focus-move-between-aaronnote-windows-releases-source-and-focuses-target ()
+  (let ((source (generate-new-buffer "*Noema-source*"))
+        (target (generate-new-buffer "*Noema-split*"))
         (released-buffer nil)
         (focused-buffer nil))
     (unwind-protect
@@ -633,7 +681,7 @@
             (with-current-buffer target
               (setq-local major-mode 'xwidget-webkit-mode))
             (select-window target-window)
-            (cl-letf (((symbol-function 'my/aaronnote--xwidget-buffer-p)
+            (cl-letf (((symbol-function 'my/noema--xwidget-buffer-p)
                        (lambda (&optional buffer)
                          (memq (or buffer (current-buffer)) (list source target))))
                       ((symbol-function 'xwidget-webkit-edit-mode)
@@ -643,111 +691,111 @@
                       ((symbol-function 'my/xwidget-focus)
                        (lambda (&optional buffer)
                          (setq focused-buffer buffer))))
-              (my/aaronnote--focus-selected-window-after-move source-window))
+              (my/noema--focus-selected-window-after-move source-window))
             (should (eq released-buffer source))
             (should (eq focused-buffer target))
-            (should (eq my/aaronnote--app-buffer target))))
+            (should (eq my/noema--app-buffer target))))
       (when (buffer-live-p source) (kill-buffer source))
       (when (buffer-live-p target) (kill-buffer target)))))
 
-(ert-deftest my/aaronnote-gateway-event-handles-ready ()
-  (let* ((my/aaronnote--port nil)
-         (my/aaronnote--ready nil)
+(ert-deftest my/noema-gateway-event-handles-ready ()
+  (let* ((my/noema--port nil)
+         (my/noema--ready nil)
          (flush-count 0))
-    (cl-letf (((symbol-function 'my/aaronnote--flush-ready-callbacks)
+    (cl-letf (((symbol-function 'my/noema--flush-ready-callbacks)
                (lambda () (cl-incf flush-count))))
-      (my/aaronnote--gateway-event
+      (my/noema--gateway-event
        '((type . "ready") (payload . ((port . 50815)))) nil)
-      (should my/aaronnote--ready)
-      (should (= my/aaronnote--port 50815))
+      (should my/noema--ready)
+      (should (= my/noema--port 50815))
       (should (= flush-count 1)))))
 
-(ert-deftest my/aaronnote-gateway-event-ignores-invalid-ready-port ()
-  (let* ((my/aaronnote--port nil)
-         (my/aaronnote--ready nil)
+(ert-deftest my/noema-gateway-event-ignores-invalid-ready-port ()
+  (let* ((my/noema--port nil)
+         (my/noema--ready nil)
          (flush-count 0))
-    (cl-letf (((symbol-function 'my/aaronnote--flush-ready-callbacks)
+    (cl-letf (((symbol-function 'my/noema--flush-ready-callbacks)
                (lambda () (cl-incf flush-count))))
-      (my/aaronnote--gateway-event
+      (my/noema--gateway-event
        '((type . "ready") (payload . ((port . "not-a-port")))) nil)
-      (should-not my/aaronnote--ready)
-      (should-not my/aaronnote--port)
+      (should-not my/noema--ready)
+      (should-not my/noema--port)
       (should (= flush-count 0)))))
 
-(ert-deftest my/aaronnote-sentinel-resets-dead-current-process ()
-  (let* ((buffer (generate-new-buffer " *aaronnote-sentinel-test*"))
+(ert-deftest my/noema-sentinel-resets-dead-current-process ()
+  (let* ((buffer (generate-new-buffer " *Noema-sentinel-test*"))
          (proc (make-process
                 :name "aaronnote-sentinel-test"
                 :buffer buffer
                 :command (list "cat")))
-         (my/aaronnote--process proc)
-         (my/aaronnote--port 50815)
-         (my/aaronnote--ready t)
-         (my/aaronnote--ready-callbacks (list #'ignore))
-         (my/aaronnote--ready-watchdog nil))
+         (my/noema--process proc)
+         (my/noema--port 50815)
+         (my/noema--ready t)
+         (my/noema--ready-callbacks (list #'ignore))
+         (my/noema--ready-watchdog nil))
     (unwind-protect
         (progn
           (delete-process proc)
-          (my/aaronnote--sentinel proc "exited abnormally with code 1\n")
-          (should-not my/aaronnote--process)
-          (should-not my/aaronnote--port)
-          (should-not my/aaronnote--ready)
-          (should-not my/aaronnote--ready-callbacks))
+          (my/noema--sentinel proc "exited abnormally with code 1\n")
+          (should-not my/noema--process)
+          (should-not my/noema--port)
+          (should-not my/noema--ready)
+          (should-not my/noema--ready-callbacks))
       (when (process-live-p proc)
         (delete-process proc))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-active-focus-restarts-core-on-the-same-port ()
+(ert-deftest my/noema-active-focus-restarts-core-on-the-same-port ()
   "An active retained page restarts core without killing or refreshing it."
-  (let* ((buffer (generate-new-buffer "*aaronnote-active-reconnect*"))
-         (my/aaronnote--app-buffer buffer)
-         (my/aaronnote--process nil)
-         (my/aaronnote--ready nil)
-         (my/aaronnote--last-port 50815)
-         (my/aaronnote--ready-callbacks nil)
-         (my/aaronnote--ready-watchdog nil)
+  (let* ((buffer (generate-new-buffer "*Noema-active-reconnect*"))
+         (my/noema--app-buffer buffer)
+         (my/noema--process nil)
+         (my/noema--ready nil)
+         (my/noema--last-port 50815)
+         (my/noema--ready-callbacks nil)
+         (my/noema--ready-watchdog nil)
          started-port
          killed-browser)
     (unwind-protect
-        (cl-letf (((symbol-function 'my/aaronnote--app-buffer-visible-p)
+        (cl-letf (((symbol-function 'my/noema--app-buffer-visible-p)
                    (lambda () t))
-                  ((symbol-function 'my/aaronnote--start-server)
+                  ((symbol-function 'my/noema--start-server)
                    (lambda (&optional port) (setq started-port port)))
                   ((symbol-function 'my/appine-kill-all)
                    (lambda () (setq killed-browser t)))
                   ((symbol-function 'run-at-time)
                    (lambda (&rest _args) 'reconnect-watchdog)))
-          (my/aaronnote--maybe-reconnect-core-on-activity)
+          (my/noema--maybe-reconnect-core-on-activity)
           (should (= started-port 50815))
           (should-not killed-browser)
-          (should (memq #'my/aaronnote--notify-xwidgets-core-ready
-                        my/aaronnote--ready-callbacks))
-          (should (eq my/aaronnote--ready-watchdog 'reconnect-watchdog)))
+          (should (memq #'my/noema--notify-xwidgets-core-ready
+                        my/noema--ready-callbacks))
+          (should (eq my/noema--ready-watchdog 'reconnect-watchdog)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-inactive-page-does-not-restart-core ()
+(ert-deftest my/noema-inactive-page-does-not-restart-core ()
   "A dead core remains dormant until the Aaronnote page is actively focused."
-  (let* ((buffer (generate-new-buffer "*aaronnote-inactive-reconnect*"))
-         (my/aaronnote--app-buffer buffer)
-         (my/aaronnote--process nil)
-         (my/aaronnote--ready nil)
-         (my/aaronnote--last-port 50815)
-         (my/aaronnote--ready-callbacks nil)
+  (let* ((buffer (generate-new-buffer "*Noema-inactive-reconnect*"))
+         (my/noema--app-buffer buffer)
+         (my/noema--process nil)
+         (my/noema--ready nil)
+         (my/noema--last-port 50815)
+         (my/noema--ready-callbacks nil)
          started)
     (unwind-protect
-        (cl-letf (((symbol-function 'my/aaronnote--app-buffer-visible-p)
+        (cl-letf (((symbol-function 'my/noema--app-buffer-visible-p)
                    (lambda () nil))
-                  ((symbol-function 'my/aaronnote--start-server)
+                  ((symbol-function 'my/noema--start-server)
                    (lambda (&optional _port) (setq started t))))
-          (my/aaronnote--maybe-reconnect-core-on-activity)
+          (my/noema--maybe-reconnect-core-on-activity)
           (should-not started)
-          (should-not my/aaronnote--ready-callbacks))
+          (should-not my/noema--ready-callbacks))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-core-ready-reconnects-retained-xwidget-in-place ()
-  (let* ((buffer (generate-new-buffer "*aaronnote-retained-xwidget*"))
-         (my/aaronnote--app-buffer buffer)
+(ert-deftest my/noema-core-ready-reconnects-retained-xwidget-in-place ()
+  (let* ((buffer (generate-new-buffer "*Noema-retained-xwidget*"))
+         (my/noema--app-buffer buffer)
          executed-script)
     (unwind-protect
         (progn
@@ -758,15 +806,15 @@
                     ((symbol-function 'xwidget-webkit-execute-script)
                      (lambda (_session script &optional _callback)
                        (setq executed-script script))))
-            (my/aaronnote--notify-xwidgets-core-ready)
-            (should (equal executed-script my/aaronnote--core-ready-script))))
+            (my/noema--notify-xwidgets-core-ready)
+            (should (equal executed-script my/noema--core-ready-script))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-runtime-status-renders-debug-payload ()
-  (let ((my/aaronnote--ready t)
+(ert-deftest my/noema-runtime-status-renders-debug-payload ()
+  (let ((my/noema--ready t)
         channel args displayed)
     (unwind-protect
-        (cl-letf (((symbol-function 'my/aaronnote--api-call-sync)
+        (cl-letf (((symbol-function 'my/noema--api-call-sync)
                    (lambda (c a)
                      (setq channel c
                            args a)
@@ -780,19 +828,19 @@
                    (lambda (buffer &rest _args)
                      (setq displayed buffer)
                      buffer)))
-          (my/aaronnote-runtime-status)
+          (my/noema-runtime-status)
           (should (equal channel "aaronnote:api:runtime:debug"))
           (should (equal args []))
-          (should (eq displayed (get-buffer "*aaronnote-runtime-status*")))
-          (with-current-buffer "*aaronnote-runtime-status*"
+          (should (eq displayed (get-buffer "*Noema runtime status*")))
+          (with-current-buffer "*Noema runtime status*"
             (should (derived-mode-p 'special-mode))
             (should (string-match-p "\"runtime-debug\"" (buffer-string)))
             (should (string-match-p "\"emacsActivity\"" (buffer-string)))))
-      (when-let* ((buffer (get-buffer "*aaronnote-runtime-status*")))
+      (when-let* ((buffer (get-buffer "*Noema runtime status*")))
         (kill-buffer buffer)))))
 
-(ert-deftest my/aaronnote-api-call-uses-nonblocking-gateway-request ()
-  (let ((my/aaronnote--ready t)
+(ert-deftest my/noema-api-call-uses-nonblocking-gateway-request ()
+  (let ((my/noema--ready t)
         request
         callback-result)
     (cl-letf (((symbol-function 'remote-gateway-find-client)
@@ -805,7 +853,7 @@
                  (setq request (list client method params timeout))
                  (funcall callback '((ok . t)) nil)
                  '(done))))
-      (my/aaronnote--api-call
+      (my/noema--api-call
        "aaronnote:api:test" [1 2]
        (lambda (result) (setq callback-result result)))
       (should
@@ -816,61 +864,61 @@
                             10)))
       (should (equal callback-result '((ok . t)))))))
 
-(ert-deftest my/aaronnote-stop-releases-gateway-binding ()
-  (let ((my/aaronnote--gateway-binding '(:binding-id "binding-test"))
-        (my/aaronnote--process nil)
+(ert-deftest my/noema-stop-releases-gateway-binding ()
+  (let ((my/noema--gateway-binding '(:binding-id "binding-test"))
+        (my/noema--process nil)
         released)
     (cl-letf (((symbol-function 'remote-gateway-release-binding)
                (lambda (binding &optional disconnect)
                  (setq released (list binding disconnect))))
-              ((symbol-function 'my/aaronnote--remove-activity-hooks)
+              ((symbol-function 'my/noema--remove-activity-hooks)
                #'ignore))
-      (my/aaronnote-stop)
+      (my/noema-stop)
       (should
        (equal released
               '((:binding-id "binding-test") t)))
-      (should-not my/aaronnote--gateway-binding))))
+      (should-not my/noema--gateway-binding))))
 
-(ert-deftest my/aaronnote-watchdog-clears-stale-ready-callbacks ()
-  (let ((my/aaronnote--ready nil)
-        (my/aaronnote--ready-watchdog 'mock-timer)
-        (my/aaronnote--ready-callbacks (list #'ignore)))
-    (my/aaronnote--watchdog-fire)
-    (should-not my/aaronnote--ready-watchdog)
-    (should-not my/aaronnote--ready-callbacks)))
+(ert-deftest my/noema-watchdog-clears-stale-ready-callbacks ()
+  (let ((my/noema--ready nil)
+        (my/noema--ready-watchdog 'mock-timer)
+        (my/noema--ready-callbacks (list #'ignore)))
+    (my/noema--watchdog-fire)
+    (should-not my/noema--ready-watchdog)
+    (should-not my/noema--ready-callbacks)))
 
-(ert-deftest my/aaronnote-activity-hooks-install-idempotently ()
+(ert-deftest my/noema-activity-hooks-install-idempotently ()
   (let ((after-focus-change-function nil)
         (window-buffer-change-functions nil)
         (window-selection-change-functions nil)
-        (my/aaronnote--activity-hooks-installed nil)
-        (my/aaronnote--activity-timer nil)
-        (my/aaronnote--paused t)
-        (my/aaronnote--manual-paused t))
-    (my/aaronnote--install-activity-hooks)
-    (my/aaronnote--install-activity-hooks)
-    (should my/aaronnote--activity-hooks-installed)
+        (my/noema--activity-hooks-installed nil)
+        (my/noema--activity-timer nil)
+        (my/noema--paused t)
+        (my/noema--manual-paused t))
+    (my/noema--install-activity-hooks)
+    (my/noema--install-activity-hooks)
+    (should my/noema--activity-hooks-installed)
     (should (equal window-buffer-change-functions
-                   (list #'my/aaronnote--update-activity)))
+                   (list #'my/noema--update-activity)))
     (should (equal window-selection-change-functions
-                   (list #'my/aaronnote--update-activity)))
-    (my/aaronnote--remove-activity-hooks)
-    (should-not my/aaronnote--activity-hooks-installed)
+                   (list #'my/noema--update-activity)))
+    (my/noema--remove-activity-hooks)
+    (should-not my/noema--activity-hooks-installed)
     (should-not window-buffer-change-functions)
     (should-not window-selection-change-functions)
-    (should-not my/aaronnote--paused)
-    (should-not my/aaronnote--manual-paused)))
+    (should-not my/noema--paused)
+    (should-not my/noema--manual-paused)))
 
-(ert-deftest my/aaronnote-activity-update-debounces-by-visibility-state ()
-  (let ((my/aaronnote--activity-timer nil)
-        (my/aaronnote--last-activity-active :unknown)
-        (my/aaronnote--app-buffer nil)
+(ert-deftest my/noema-activity-update-debounces-by-visibility-state ()
+  (let ((my/noema--activity-timer nil)
+        (my/noema--last-activity-active :unknown)
+        (my/noema--app-buffer nil)
         (run-at-count 0)
         (idle-count 0)
         visible)
-    (cl-letf (((symbol-function 'my/aaronnote--app-buffer-visible-p)
+    (cl-letf (((symbol-function 'my/noema--app-buffer-visible-p)
                (lambda () visible))
-              ((symbol-function 'my/aaronnote--xwidget-buffer-p)
+              ((symbol-function 'my/noema--xwidget-buffer-p)
                (lambda (_buffer) nil))
               ((symbol-function 'run-at-time)
                (lambda (&rest _args)
@@ -883,57 +931,57 @@
               ((symbol-function 'cancel-timer)
                (lambda (_timer) nil)))
       (setq visible nil)
-      (my/aaronnote--update-activity)
-      (my/aaronnote--update-activity)
+      (my/noema--update-activity)
+      (my/noema--update-activity)
       (should (= run-at-count 1))
       (should (= idle-count 0))
-      (should (eq my/aaronnote--activity-timer 'normal-timer))
+      (should (eq my/noema--activity-timer 'normal-timer))
       (setq visible t)
-      (my/aaronnote--update-activity)
+      (my/noema--update-activity)
       (should (= run-at-count 1))
       (should (= idle-count 1))
-      (should (eq my/aaronnote--activity-timer 'idle-timer)))))
+      (should (eq my/noema--activity-timer 'idle-timer)))))
 
-(ert-deftest my/aaronnote-manual-pause-blocks-auto-resume ()
-  (let ((my/aaronnote--paused nil)
-        (my/aaronnote--manual-paused nil)
+(ert-deftest my/noema-manual-pause-blocks-auto-resume ()
+  (let ((my/noema--paused nil)
+        (my/noema--manual-paused nil)
         commands)
-    (cl-letf (((symbol-function 'my/aaronnote--send-command)
+    (cl-letf (((symbol-function 'my/noema--send-command)
                (lambda (command) (push command commands)))
-              ((symbol-function 'my/aaronnote--app-buffer-visible-p)
+              ((symbol-function 'my/noema--app-buffer-visible-p)
                (lambda () t)))
-      (my/aaronnote-pause)
-      (should my/aaronnote--paused)
-      (should my/aaronnote--manual-paused)
+      (my/noema-pause)
+      (should my/noema--paused)
+      (should my/noema--manual-paused)
       (should (equal (nreverse commands) '("pause")))
       (setq commands nil)
-      (my/aaronnote--apply-activity t)
-      (should my/aaronnote--paused)
+      (my/noema--apply-activity t)
+      (should my/noema--paused)
       (should-not commands)
-      (my/aaronnote-resume)
-      (should-not my/aaronnote--paused)
-      (should-not my/aaronnote--manual-paused)
+      (my/noema-resume)
+      (should-not my/noema--paused)
+      (should-not my/noema--manual-paused)
       (should (equal (nreverse commands) '("resume"))))))
 
-(ert-deftest my/aaronnote-toggle-pause-sends-one-transition ()
-  (let ((my/aaronnote--paused nil)
-        (my/aaronnote--manual-paused nil)
+(ert-deftest my/noema-toggle-pause-sends-one-transition ()
+  (let ((my/noema--paused nil)
+        (my/noema--manual-paused nil)
         commands)
-    (cl-letf (((symbol-function 'my/aaronnote--send-command)
+    (cl-letf (((symbol-function 'my/noema--send-command)
                (lambda (command) (push command commands)))
-              ((symbol-function 'my/aaronnote--app-buffer-visible-p)
+              ((symbol-function 'my/noema--app-buffer-visible-p)
                (lambda () t)))
-      (my/aaronnote-toggle-pause)
-      (should my/aaronnote--manual-paused)
-      (should my/aaronnote--paused)
-      (my/aaronnote-toggle-pause)
-      (should-not my/aaronnote--manual-paused)
-      (should-not my/aaronnote--paused)
+      (my/noema-toggle-pause)
+      (should my/noema--manual-paused)
+      (should my/noema--paused)
+      (my/noema-toggle-pause)
+      (should-not my/noema--manual-paused)
+      (should-not my/noema--paused)
       (should (equal (nreverse commands) '("pause" "resume"))))))
 
-(ert-deftest my/aaronnote-process-filter-ignores-stale-proc-ready-line ()
+(ert-deftest my/noema-process-filter-ignores-stale-proc-ready-line ()
   "A dying old process emitting a ready: line must not clobber the new port."
-  (let* ((buffer (generate-new-buffer " *aaronnote-stale-proc-test*"))
+  (let* ((buffer (generate-new-buffer " *Noema-stale-proc-test*"))
          (stale-proc (make-process
                       :name "aaronnote-stale-test"
                       :buffer buffer
@@ -943,31 +991,31 @@
                     :name "aaronnote-new-test"
                     :buffer buffer
                     :command (list "cat")))
-         (my/aaronnote--process new-proc)
-         (my/aaronnote--port 60000)
-         (my/aaronnote--ready t)
+         (my/noema--process new-proc)
+         (my/noema--port 60000)
+         (my/noema--ready t)
          (flush-count 0))
     (unwind-protect
-        (cl-letf (((symbol-function 'my/aaronnote--flush-ready-callbacks)
+        (cl-letf (((symbol-function 'my/noema--flush-ready-callbacks)
                    (lambda () (cl-incf flush-count))))
           ;; stale-proc (not current) emits a ready: line with a different port.
-          (my/aaronnote--process-filter stale-proc "aaronote-web-host:ready:99999\n")
+          (my/noema--process-filter stale-proc "aaronote-web-host:ready:99999\n")
           ;; Port and ready state must be unchanged.
-          (should (= my/aaronnote--port 60000))
-          (should my/aaronnote--ready)
+          (should (= my/noema--port 60000))
+          (should my/noema--ready)
           (should (= flush-count 0)))
       (dolist (p (list stale-proc new-proc))
         (when (process-live-p p) (delete-process p)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(defmacro my/aaronnote-test--with-xwidget-mocks (&rest body)
+(defmacro my/noema-test--with-xwidget-mocks (&rest body)
   "Run BODY with mocked xwidget opener state."
   (declare (indent 0))
-  `(let ((my/aaronnote--file-buffers (make-hash-table :test #'equal))
-         (my/aaronnote--client-buffers (make-hash-table :test #'equal))
-         (my/aaronnote--app-buffer nil)
-         (my/aaronnote--port 50815)
+  `(let ((my/noema--file-buffers (make-hash-table :test #'equal))
+         (my/noema--client-buffers (make-hash-table :test #'equal))
+         (my/noema--app-buffer nil)
+         (my/noema--port 50815)
          opened-urls
          buffers)
      (cl-letf (((symbol-function 'my/xwidget-open-url)
@@ -985,7 +1033,7 @@
                 (lambda (&optional _buffer) nil))
                ((symbol-function 'run-at-time)
                 (lambda (&rest _args) 'mock-timer))
-               ((symbol-function 'my/aaronnote--refresh-visible-ibuffers)
+               ((symbol-function 'my/noema--refresh-visible-ibuffers)
                 (lambda () nil)))
        (unwind-protect
            (progn ,@body)
@@ -993,83 +1041,116 @@
            (when (buffer-live-p buffer)
              (kill-buffer buffer)))))))
 
-(ert-deftest my/aaronnote-open-xwidget-reuses-file-buffer ()
-  (my/aaronnote-test--with-xwidget-mocks
+(ert-deftest my/noema-open-xwidget-reuses-file-buffer ()
+  (my/noema-test--with-xwidget-mocks
     (let* ((file (expand-file-name "note.md" temporary-file-directory))
-           (buf1 (my/aaronnote--open-xwidget "ignored" file))
-           (buf2 (my/aaronnote--open-xwidget "ignored-again" file)))
+           (buf1 (my/noema--open-xwidget "ignored" file))
+           (buf2 (my/noema--open-xwidget "ignored-again" file)))
       (should (eq buf1 buf2))
       (should (= (length opened-urls) 1))
       (should
-       (equal (my/aaronnote-buffer-file buf1)
-              (my/aaronnote--canonical-file file)))
-      (should (string-match-p "\\*aaronnote: note\\.md\\*" (buffer-name buf1)))
+       (equal (my/noema-buffer-file buf1)
+              (my/noema--canonical-file file)))
+      (should (string-match-p "\\*Noema: note\\.md\\*" (buffer-name buf1)))
       (should (string-match-p "client=" (car opened-urls))))))
 
-(ert-deftest my/aaronnote-open-xwidget-keeps-files-distinct ()
-  (my/aaronnote-test--with-xwidget-mocks
+(ert-deftest my/noema-open-xwidget-keeps-files-distinct ()
+  (my/noema-test--with-xwidget-mocks
     (let* ((file1 (expand-file-name "one.md" temporary-file-directory))
            (file2 (expand-file-name "two.md" temporary-file-directory))
-           (buf1 (my/aaronnote--open-xwidget "ignored" file1))
-           (buf2 (my/aaronnote--open-xwidget "ignored" file2)))
+           (buf1 (my/noema--open-xwidget "ignored" file1))
+           (buf2 (my/noema--open-xwidget "ignored" file2)))
       (should-not (eq buf1 buf2))
       (should (= (length opened-urls) 2))
       (should
-       (eq (gethash (my/aaronnote--canonical-file file1)
-                    my/aaronnote--file-buffers)
+       (eq (gethash (my/noema--canonical-file file1)
+                    my/noema--file-buffers)
            buf1))
       (should
-       (eq (gethash (my/aaronnote--canonical-file file2)
-                    my/aaronnote--file-buffers)
+       (eq (gethash (my/noema--canonical-file file2)
+                    my/noema--file-buffers)
            buf2)))))
 
-(ert-deftest my/aaronnote-kill-buffer-cleans-registries ()
-  (my/aaronnote-test--with-xwidget-mocks
+(ert-deftest my/noema-kill-buffer-cleans-registries ()
+  (my/noema-test--with-xwidget-mocks
     (let* ((file (expand-file-name "cleanup.md" temporary-file-directory))
-           (client (my/aaronnote--xwidget-session-id file))
-           (buffer (my/aaronnote--open-xwidget "ignored" file))
-           (canonical-file (my/aaronnote--canonical-file file))
+           (client (my/noema--xwidget-session-id file))
+           (buffer (my/noema--open-xwidget "ignored" file))
+           (canonical-file (my/noema--canonical-file file))
            posted)
       (should
-       (eq (gethash canonical-file my/aaronnote--file-buffers) buffer))
-      (should (eq (gethash client my/aaronnote--client-buffers) buffer))
-      (cl-letf (((symbol-function 'my/aaronnote--post)
+       (eq (gethash canonical-file my/noema--file-buffers) buffer))
+      (should (eq (gethash client my/noema--client-buffers) buffer))
+      (cl-letf (((symbol-function 'my/noema--post)
                  (lambda (payload) (push payload posted))))
         (kill-buffer buffer))
-      (should-not (gethash canonical-file my/aaronnote--file-buffers))
-      (should-not (gethash client my/aaronnote--client-buffers))
+      (should-not (gethash canonical-file my/noema--file-buffers))
+      (should-not (gethash client my/noema--client-buffers))
       (should (equal (alist-get 'type (car posted)) "client-close"))
       (should (equal (alist-get 'client (car posted)) client))
       (should (equal (alist-get 'file (car posted)) file)))))
 
-(ert-deftest my/aaronnote-current-file-client-targets-buffer ()
-  (my/aaronnote-test--with-xwidget-mocks
+(ert-deftest my/noema-current-file-client-targets-buffer ()
+  (my/noema-test--with-xwidget-mocks
     (let* ((file1 (expand-file-name "first.md" temporary-file-directory))
            (file2 (expand-file-name "second.md" temporary-file-directory))
-           (buf1 (my/aaronnote--open-xwidget "ignored" file1))
-           (buf2 (my/aaronnote--open-xwidget "ignored" nil)))
-      (my/aaronnote--track-app-buffer buf2 nil "client-two")
-      (setq my/aaronnote--app-buffer buf1)
-      (my/aaronnote--sync-app-buffer-file file2 "client-two")
-      (should (eq my/aaronnote--app-buffer buf2))
+           (buf1 (my/noema--open-xwidget "ignored" file1))
+           (buf2 (my/noema--open-xwidget "ignored" nil)))
+      (my/noema--track-app-buffer buf2 nil "client-two")
+      (setq my/noema--app-buffer buf1)
+      (my/noema--sync-app-buffer-file file2 "client-two")
+      (should (eq my/noema--app-buffer buf2))
       (should
-       (equal (my/aaronnote-buffer-file buf2)
-              (my/aaronnote--canonical-file file2)))
+       (equal (my/noema-buffer-file buf2)
+              (my/noema--canonical-file file2)))
       (should
-       (eq (gethash (my/aaronnote--canonical-file file2)
-                    my/aaronnote--file-buffers)
+       (eq (gethash (my/noema--canonical-file file2)
+                    my/noema--file-buffers)
            buf2)))))
 
-(ert-deftest my/aaronnote-canonical-buffer-prefers-registered-buffer ()
-  (my/aaronnote-test--with-xwidget-mocks
+(ert-deftest my/noema-canonical-buffer-prefers-registered-buffer ()
+  (my/noema-test--with-xwidget-mocks
     (let* ((file (expand-file-name "duplicate.md" temporary-file-directory))
-           (canonical (my/aaronnote--open-xwidget "ignored" file))
-           (duplicate (generate-new-buffer "*aaronnote: duplicate.md*")))
+           (canonical (my/noema--open-xwidget "ignored" file))
+           (duplicate (generate-new-buffer "*Noema: duplicate.md*")))
       (push duplicate buffers)
       (with-current-buffer duplicate
         (setq-local major-mode 'xwidget-webkit-mode)
-        (setq-local my/aaronnote-buffer-file-name file))
-      (should (eq (my/aaronnote-canonical-buffer duplicate) canonical)))))
+        (setq-local my/noema-buffer-file-name file))
+      (should (eq (my/noema-canonical-buffer duplicate) canonical)))))
+
+(ert-deftest my/noema-jupyter-sidecars-are-logical-and-confined ()
+  (should
+   (equal
+    (my/noema-jupyter--file
+     '((file . "/fs:local:/tmp/notes/.cell/note.python.default.py")))
+    "/fs:local:/tmp/notes/.cell/note.python.default.py"))
+  (should-error
+   (my/noema-jupyter--file
+    '((file . "/fs:local:/tmp/notes/note.md")))
+   :type 'error)
+  (should-error
+   (my/noema-jupyter--file
+    '((file . "/fs:local:/tmp/notes/.cell/nested/note.py")))
+   :type 'error))
+
+(ert-deftest my/noema-jupyter-registers-remote-broker-methods ()
+  (dolist (method
+           '("aaronnote.jupyter.kernels"
+             "aaronnote.jupyter.launch"
+             "aaronnote.jupyter.status"
+             "aaronnote.jupyter.interrupt"
+             "aaronnote.jupyter.restart"
+             "aaronnote.jupyter.shutdown"
+             "aaronnote.jupyter.read-nbextension"
+             "aaronnote.jupyter.file.read"
+             "aaronnote.jupyter.file.write"
+             "aaronnote.jupyter.file.delete"
+             "aaronnote.jupyter.file.stat"))
+    (should (functionp (gethash method remote-gateway--methods))))
+  (should
+   (memq #'my/noema-jupyter--doctor
+         remote-doctor-check-functions)))
 
 (provide 'init-aaronnote-tests)
 ;;; init-aaronnote-tests.el ends here

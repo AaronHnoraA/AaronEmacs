@@ -7,9 +7,9 @@ server (`web-host.mjs`) ↔ CodeMirror 6 app (`aaronnote/main.ts`, `src/cm6/`).
 
 ```
 Emacs Lisp
-  my/aaronnote--post()          POST /emacs/command  → Node web-host
-  my/aaronnote--api-call()      POST /api            → Node web-host
-  my/aaronnote--process-filter  ← stdout events      ← Node web-host
+  my/noema--post()          POST /emacs/command  → Node web-host
+  my/noema--api-call()      POST /api            → Node web-host
+  my/noema--process-filter  ← stdout events      ← Node web-host
   xwidget-webkit-callback advice  (load-changed, document-title-changed)
 
 Node web-host (web-host.mjs)
@@ -60,8 +60,8 @@ buffer if the server never replies.
 **Issue:** `advice-add` ran unconditionally inside `with-eval-after-load 'xwidget`
 with no idempotency guard. File reload accumulated advice chain entries.
 
-**Fix:** `my/aaronnote--xwidget-advice-installed` flag ensures the advice is added
-exactly once, mirroring the `my/aaronnote--activity-hooks-installed` pattern.
+**Fix:** `my/noema--xwidget-advice-installed` flag ensures the advice is added
+exactly once, mirroring the `my/noema--activity-hooks-installed` pattern.
 
 ### P1c — xwidget session hash retains dead buffer pointers ← **Fixed**
 
@@ -100,7 +100,7 @@ All three items are minor optimizations on an already viewport-aware pipeline:
 
 - The `url-retrieve` callbacks already had `unwind-protect` buffer cleanup on the
   success/error path — only the hang/no-reply path was unguarded.
-- `xwidget-webkit-callback` advice is NOT removed on `my/aaronnote-stop` because
+- `xwidget-webkit-callback` advice is NOT removed on `my/noema-stop` because
   xwidget-webkit may still be in use for non-aaronnote pages; the callback
   function is a no-op for non-aaronnote buffers.
 - No architectural changes to the bridge protocol, build system, or server routing.
@@ -128,7 +128,7 @@ End-to-end manual checks:
 1. Open a note containing `<script>alert(1)</script>` and `<img src=x onerror=alert(1)>` —
    no alert should fire; cursor outside tag renders benign tags.
 2. Switch to another Emacs buffer mid-insert-mode and back — editor should be in normal mode.
-3. `my/aaronnote-stop` then re-open — no duplicate advice, session hash clean.
+3. `my/noema-stop` then re-open — no duplicate advice, session hash clean.
 
 ---
 
@@ -138,19 +138,19 @@ End-to-end manual checks:
 
 | # | Priority | File | Change |
 |---|---|---|---|
-| 1 | P1 | `init-aaronnote.el:373` | Process filter generation guard — `my/aaronnote--handle-process-line` now fires only when `(eq proc my/aaronnote--process)`; a dying old process can no longer clobber port/ready state |
+| 1 | P1 | `init-aaronnote.el:373` | Process filter generation guard — `my/noema--handle-process-line` now fires only when `(eq proc my/noema--process)`; a dying old process can no longer clobber port/ready state |
 | 2 | P1 | `aaronnote/main.ts:317` | Save file-identity guard — `savingFile = currentFile` captured before `await api.notes.save()`; metadata update returns early if note switched during flight |
 | 3 | P2 | `server/lib/runtime.mjs:3823` | Copilot SIGKILL fallback — `stop()` now arms a 2 s `.unref()` timer to `SIGKILL` if child ignores SIGTERM; mirrors the existing Emacs-side escalation |
-| 4 | P2 | `init-aaronnote.el:998` | Pending-file POST buffer guard — deferred `my/aaronnote--open-file-in-web` lambda captures buffer; wraps call in `(when (buffer-live-p pending-buf) ...)` |
+| 4 | P2 | `init-aaronnote.el:998` | Pending-file POST buffer guard — deferred `my/noema--open-file-in-web` lambda captures buffer; wraps call in `(when (buffer-live-p pending-buf) ...)` |
 | 5 | P3 | `src/diagram-render.ts:348,361,370` | `isConnected` guard — each post-await key check now also tests `!element.isConnected`, matching the pattern in `math-render.ts` |
 | 6 | P3 | `init-aaronnote.el:379` | Accumulator cap — `aaronnote-pending` is reset if it exceeds 256 KB without a newline, preventing unbounded memory growth from pathological output |
 
-New ERT test: `my/aaronnote-process-filter-ignores-stale-proc-ready-line` — asserts that a non-current proc emitting a `ready:` line does not mutate `my/aaronnote--port`.
+New ERT test: `my/noema-process-filter-ignores-stale-proc-ready-line` — asserts that a non-current proc emitting a `ready:` line does not mutate `my/noema--port`.
 
 ### Verified false alarms (excluded)
 
 - **Roam sync is not debounce-scheduled** — `queueRoamDbSync` is the accumulator by design; `syncRoamDb` is normally triggered on demand via the `aaronnote:api:notes:roam-sync` channel, with a calibrated one-in-50,000 editor-save sample as a low-rate fallback.
-- **Activity hooks duplicate on restart** — already guarded by `my/aaronnote--activity-hooks-installed` (Pass 1).
+- **Activity hooks duplicate on restart** — already guarded by `my/noema--activity-hooks-installed` (Pass 1).
 
 ### Out of scope (verified safe)
 

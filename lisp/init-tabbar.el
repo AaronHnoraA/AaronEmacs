@@ -18,7 +18,6 @@
 (defvar tab-line-tab-map)
 (defvar my/vterm-popup-instance-p)
 
-(declare-function centaur-tabs-mode "centaur-tabs" (&optional arg))
 (declare-function global-tab-line-mode "tab-line" (&optional arg))
 (declare-function get-current-persp "perspective" ())
 (declare-function my/file-icon-for-file "init-ui" (file &rest args))
@@ -207,15 +206,15 @@ Scrolling in the opposite direction is allowed immediately."
   "Return the buffer shown in the selected window."
   (window-buffer (minibuffer-selected-window)))
 
-(defvar-local my/aaronnote-buffer-file-name)
+(defvar-local my/noema-buffer-file-name)
 
 (defun my/tab-bar--buffer-file-name ()
   "Return the current buffer's real file or Noema virtual file."
   (or buffer-file-name
-      (and (boundp 'my/aaronnote-buffer-file-name)
-           (stringp my/aaronnote-buffer-file-name)
-           (not (string-empty-p my/aaronnote-buffer-file-name))
-           my/aaronnote-buffer-file-name)))
+      (and (boundp 'my/noema-buffer-file-name)
+           (stringp my/noema-buffer-file-name)
+           (not (string-empty-p my/noema-buffer-file-name))
+           my/noema-buffer-file-name)))
 
 (defun my/tab-bar--buffer-title ()
   "Return the current buffer title for the custom top tab bar."
@@ -823,8 +822,6 @@ not allocate a fresh compound key during every redisplay."
   (tab-line-close-button-show nil)
   (tab-line-new-button-show nil)
   :config
-  (when (fboundp 'centaur-tabs-mode)
-    (ignore-errors (centaur-tabs-mode -1)))
   (advice-add 'tab-line-format :override #'my/tab-line-format)
   (global-set-key (kbd "C-<tab>") #'my/tab-line-next-buffer)
   (global-set-key (kbd "C-S-<tab>") #'my/tab-line-previous-buffer)

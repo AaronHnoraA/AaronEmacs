@@ -210,13 +210,13 @@ to evil insert state if evil is active in the buffer."
     (when label
       (format "*xwidget: %s*" label))))
 
-(defun my/xwidget--aaronnote-owned-p (&optional buffer)
+(defun my/xwidget--noema-owned-p (&optional buffer)
   "Return non-nil when BUFFER has Noema-specific naming."
   (let ((buffer (or buffer (current-buffer))))
     (and (buffer-live-p buffer)
          (with-current-buffer buffer
-           (and (boundp 'my/aaronnote--xwidget-forced-name)
-                my/aaronnote--xwidget-forced-name)))))
+           (and (boundp 'my/noema--xwidget-forced-name)
+                my/noema--xwidget-forced-name)))))
 
 (defun my/xwidget-update-buffer-name (&optional buffer)
   "Rename BUFFER from its page title or URL when it is safe to do so."
@@ -224,9 +224,9 @@ to evil insert state if evil is active in the buffer."
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
         (cond
-         ((my/xwidget--aaronnote-owned-p buffer)
-          (unless (equal (buffer-name) my/aaronnote--xwidget-forced-name)
-            (rename-buffer my/aaronnote--xwidget-forced-name t)))
+         ((my/xwidget--noema-owned-p buffer)
+          (unless (equal (buffer-name) my/noema--xwidget-forced-name)
+            (rename-buffer my/noema--xwidget-forced-name t)))
          ((and (eq major-mode 'xwidget-webkit-mode)
                (not (minibufferp)))
           (when-let* ((name (my/xwidget--preferred-buffer-name buffer)))

@@ -76,25 +76,25 @@ in standalone runs."
   :type 'number
   :group 'my/copilot)
 
-(defvar my/copilot-aaronnote-bridge--documents (make-hash-table :test #'equal)
+(defvar my/copilot-noema-bridge--documents (make-hash-table :test #'equal)
   "Synthetic Noema document state known to the shared Copilot LS.")
 
-(defvar my/copilot-aaronnote-bridge--clients (make-hash-table :test #'equal)
+(defvar my/copilot-noema-bridge--clients (make-hash-table :test #'equal)
   "Noema Copilot client state keyed by pane/client id.")
 
-(defvar my/copilot-aaronnote-bridge--focused-uri nil
+(defvar my/copilot-noema-bridge--focused-uri nil
   "Synthetic Noema document URI last focused in the shared Copilot LS.")
 
-(defvar my/copilot-aaronnote-bridge--focused-client nil
+(defvar my/copilot-noema-bridge--focused-client nil
   "Noema pane/client id that most recently held Copilot focus.")
 
-(defvar my/copilot-aaronnote-bridge--notified-focused-uri nil
+(defvar my/copilot-noema-bridge--notified-focused-uri nil
   "Synthetic Noema document URI whose focus was last notified to Copilot.")
 
-(defvar my/copilot-aaronnote-bridge--log nil
+(defvar my/copilot-noema-bridge--log nil
   "Bounded recent log entries for Noema Copilot bridge diagnostics.")
 
-(defvar my/copilot-aaronnote-bridge--log-recording nil
+(defvar my/copilot-noema-bridge--log-recording nil
   "Non-nil when the Noema Copilot bridge records detailed events.")
 
 (defvar-local my/copilot--auto-enable-timer nil
@@ -171,27 +171,27 @@ language-server binary always runs beside Emacs."
         make-fn
         :events-buffer-scrollback-size copilot-log-max)))))
 
-(defun my/copilot-aaronnote-bridge--log (event &optional detail)
+(defun my/copilot-noema-bridge--log (event &optional detail)
   "Record Noema bridge EVENT with DETAIL when bridge logging is enabled."
-  (when my/copilot-aaronnote-bridge--log-recording
+  (when my/copilot-noema-bridge--log-recording
     (push `((at . ,(format-time-string "%FT%T%z"))
             (event . ,event)
             ,@(when detail `((detail . ,detail))))
-          my/copilot-aaronnote-bridge--log)
-    (when (> (length my/copilot-aaronnote-bridge--log) 200)
-      (setcdr (nthcdr 199 my/copilot-aaronnote-bridge--log) nil))))
+          my/copilot-noema-bridge--log)
+    (when (> (length my/copilot-noema-bridge--log) 200)
+      (setcdr (nthcdr 199 my/copilot-noema-bridge--log) nil))))
 
-(defun my/copilot-aaronnote-bridge--server-live-p ()
+(defun my/copilot-noema-bridge--server-live-p ()
   "Return non-nil when the shared Emacs gateway is live."
   (remote-gateway-live-p))
 
-(defun my/copilot-aaronnote-bridge--empty-object ()
+(defun my/copilot-noema-bridge--empty-object ()
   "Return a JSON object that serializes as `{}`."
   (make-hash-table :test #'equal))
 
-(defun my/copilot-aaronnote-bridge--server-bootstrap-buffer ()
+(defun my/copilot-noema-bridge--server-bootstrap-buffer ()
   "Return a buffer whose file context gives Copilot a stable workspace root."
-  (let ((buffer (get-buffer-create " *aaronnote-copilot-bridge*")))
+  (let ((buffer (get-buffer-create " *Noema copilot bridge*")))
     (with-current-buffer buffer
       (setq-local buffer-file-name
                   (expand-file-name "var/aaronnote/copilot-bridge/bridge.md"
@@ -200,40 +200,40 @@ language-server binary always runs beside Emacs."
                   (file-name-as-directory user-emacs-directory)))
     buffer))
 
-(defun my/copilot-aaronnote-bridge--ensure-copilot ()
+(defun my/copilot-noema-bridge--ensure-copilot ()
   "Ensure `copilot.el' is loaded and the shared LS connection is alive."
   (unless (require 'copilot nil t)
     (error "copilot.el is unavailable"))
   (unless (copilot--connection-alivep)
-    (clrhash my/copilot-aaronnote-bridge--documents)
-    (clrhash my/copilot-aaronnote-bridge--clients)
-    (setq my/copilot-aaronnote-bridge--focused-uri nil
-          my/copilot-aaronnote-bridge--focused-client nil
-          my/copilot-aaronnote-bridge--notified-focused-uri nil)
-    (with-current-buffer (my/copilot-aaronnote-bridge--server-bootstrap-buffer)
+    (clrhash my/copilot-noema-bridge--documents)
+    (clrhash my/copilot-noema-bridge--clients)
+    (setq my/copilot-noema-bridge--focused-uri nil
+          my/copilot-noema-bridge--focused-client nil
+          my/copilot-noema-bridge--notified-focused-uri nil)
+    (with-current-buffer (my/copilot-noema-bridge--server-bootstrap-buffer)
       (copilot--start-server))))
 
-(defun my/copilot-aaronnote-bridge--request (method &optional params &rest args)
+(defun my/copilot-noema-bridge--request (method &optional params &rest args)
   "Send METHOD with PARAMS to the shared Copilot LS and return its result."
-  (my/copilot-aaronnote-bridge--ensure-copilot)
+  (my/copilot-noema-bridge--ensure-copilot)
   (apply #'jsonrpc-request
          copilot--connection
          method
-         (or params (my/copilot-aaronnote-bridge--empty-object))
+         (or params (my/copilot-noema-bridge--empty-object))
          args))
 
-(defun my/copilot-aaronnote-bridge--superseded-error-p (err)
+(defun my/copilot-noema-bridge--superseded-error-p (err)
   "Return non-nil when ERR is Copilot's stale inline request cancellation."
   (let ((text (format "%S" err)))
     (or (string-match-p "jsonrpc-error-code[[:space:]\n]*\\.[[:space:]\n]*-32802" text)
         (string-match-p "Request was superseded by a new request" text))))
 
-(defun my/copilot-aaronnote-bridge--notify (method params)
+(defun my/copilot-noema-bridge--notify (method params)
   "Send METHOD notification with PARAMS to the shared Copilot LS."
-  (my/copilot-aaronnote-bridge--ensure-copilot)
+  (my/copilot-noema-bridge--ensure-copilot)
   (jsonrpc-notify copilot--connection method params))
 
-(defun my/copilot-aaronnote-bridge--language-id (file)
+(defun my/copilot-noema-bridge--language-id (file)
   "Return a Copilot language id for FILE."
   (pcase (downcase (or (file-name-extension (or file "") t) ""))
     ((or ".md" ".markdown") "markdown")
@@ -245,7 +245,7 @@ language-server binary always runs beside Emacs."
     (".lean" "lean")
     (_ "plaintext")))
 
-(defun my/copilot-aaronnote-bridge--uri-for-file (file)
+(defun my/copilot-noema-bridge--uri-for-file (file)
   "Return a synthetic Noema Copilot URI for FILE.
 The URI intentionally does not equal the real file URI, so Noema document
 sync never collides with a normal Emacs buffer already opened in `copilot.el'."
@@ -265,111 +265,111 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
                      user-emacs-directory)))
     (copilot--path-to-uri synthetic)))
 
-(defun my/copilot-aaronnote-bridge--client-id (body)
+(defun my/copilot-noema-bridge--client-id (body)
   "Return Noema client id from BODY, or an empty string."
   (let ((value (or (plist-get body :clientId)
                    (plist-get body :client)
                    "")))
     (if (stringp value) (string-trim value) "")))
 
-(defun my/copilot-aaronnote-bridge--body-active-p (body)
+(defun my/copilot-noema-bridge--body-active-p (body)
   "Return non-nil when BODY represents an active/focused pane."
   (and (not (eq (plist-get body :active) :json-false))
        (not (eq (plist-get body :focused) :json-false))))
 
-(defun my/copilot-aaronnote-bridge--copilot-live-p ()
+(defun my/copilot-noema-bridge--copilot-live-p ()
   "Return non-nil when the shared Copilot LS connection is alive."
   (and (require 'copilot nil t)
        (copilot--connection-alivep)))
 
-(defun my/copilot-aaronnote-bridge--notify-if-live (method params)
+(defun my/copilot-noema-bridge--notify-if-live (method params)
   "Send METHOD notification with PARAMS without starting Copilot."
-  (when (my/copilot-aaronnote-bridge--copilot-live-p)
+  (when (my/copilot-noema-bridge--copilot-live-p)
     (jsonrpc-notify copilot--connection method params)))
 
-(defun my/copilot-aaronnote-bridge--document-client-count (uri)
+(defun my/copilot-noema-bridge--document-client-count (uri)
   "Return number of Noema clients still attached to URI."
   (let ((count 0))
     (maphash
      (lambda (_client state)
        (when (equal (plist-get state :uri) uri)
          (setq count (1+ count))))
-     my/copilot-aaronnote-bridge--clients)
+     my/copilot-noema-bridge--clients)
     count))
 
-(defun my/copilot-aaronnote-bridge--close-document (uri &optional reason)
+(defun my/copilot-noema-bridge--close-document (uri &optional reason)
   "Close URI in Copilot when Noema has no remaining clients."
-  (when (gethash uri my/copilot-aaronnote-bridge--documents)
-    (remhash uri my/copilot-aaronnote-bridge--documents)
-    (when (equal my/copilot-aaronnote-bridge--focused-uri uri)
-      (setq my/copilot-aaronnote-bridge--focused-uri nil))
-    (when (equal my/copilot-aaronnote-bridge--notified-focused-uri uri)
-      (setq my/copilot-aaronnote-bridge--notified-focused-uri nil))
-    (my/copilot-aaronnote-bridge--notify-if-live
+  (when (gethash uri my/copilot-noema-bridge--documents)
+    (remhash uri my/copilot-noema-bridge--documents)
+    (when (equal my/copilot-noema-bridge--focused-uri uri)
+      (setq my/copilot-noema-bridge--focused-uri nil))
+    (when (equal my/copilot-noema-bridge--notified-focused-uri uri)
+      (setq my/copilot-noema-bridge--notified-focused-uri nil))
+    (my/copilot-noema-bridge--notify-if-live
      'textDocument/didClose
      (list :textDocument (list :uri uri)))
-    (my/copilot-aaronnote-bridge--log
+    (my/copilot-noema-bridge--log
      "document-close"
      `((uri . ,uri) (reason . ,(or reason ""))))))
 
-(defun my/copilot-aaronnote-bridge--detach-client (client-id &optional reason)
+(defun my/copilot-noema-bridge--detach-client (client-id &optional reason)
   "Detach CLIENT-ID from its Noema Copilot document."
   (unless (string-empty-p client-id)
-    (let* ((state (gethash client-id my/copilot-aaronnote-bridge--clients))
+    (let* ((state (gethash client-id my/copilot-noema-bridge--clients))
            (uri (plist-get state :uri)))
       (when state
-        (remhash client-id my/copilot-aaronnote-bridge--clients)
-        (when (equal my/copilot-aaronnote-bridge--focused-client client-id)
-          (setq my/copilot-aaronnote-bridge--focused-client nil)
-          (when (equal my/copilot-aaronnote-bridge--focused-uri uri)
-            (setq my/copilot-aaronnote-bridge--focused-uri nil)))
+        (remhash client-id my/copilot-noema-bridge--clients)
+        (when (equal my/copilot-noema-bridge--focused-client client-id)
+          (setq my/copilot-noema-bridge--focused-client nil)
+          (when (equal my/copilot-noema-bridge--focused-uri uri)
+            (setq my/copilot-noema-bridge--focused-uri nil)))
         (when (and uri
-                   (= (my/copilot-aaronnote-bridge--document-client-count uri) 0)
-                   (not (equal my/copilot-aaronnote-bridge--focused-uri uri)))
-          (my/copilot-aaronnote-bridge--close-document uri reason)))
+                   (= (my/copilot-noema-bridge--document-client-count uri) 0)
+                   (not (equal my/copilot-noema-bridge--focused-uri uri)))
+          (my/copilot-noema-bridge--close-document uri reason)))
       state)))
 
-(defun my/copilot-aaronnote-bridge--attach-client (client-id uri file state)
+(defun my/copilot-noema-bridge--attach-client (client-id uri file state)
   "Attach CLIENT-ID to URI/FILE with lifecycle STATE."
   (unless (or (string-empty-p client-id)
               (string-empty-p uri))
-    (let ((previous (gethash client-id my/copilot-aaronnote-bridge--clients)))
+    (let ((previous (gethash client-id my/copilot-noema-bridge--clients)))
       (when (and previous
                  (not (equal (plist-get previous :uri) uri)))
-        (my/copilot-aaronnote-bridge--detach-client client-id "switch-file")))
+        (my/copilot-noema-bridge--detach-client client-id "switch-file")))
     (puthash client-id
              (list :uri uri
                    :file file
                    :state state
                    :updated-at (float-time))
-             my/copilot-aaronnote-bridge--clients)))
+             my/copilot-noema-bridge--clients)))
 
-(defun my/copilot-aaronnote-bridge--focus-document (uri client-id file notify)
+(defun my/copilot-noema-bridge--focus-document (uri client-id file notify)
   "Mark URI as focused by CLIENT-ID and optionally notify Copilot."
   (unless (string-empty-p client-id)
-    (my/copilot-aaronnote-bridge--attach-client client-id uri file "focused"))
-  (setq my/copilot-aaronnote-bridge--focused-uri uri
-        my/copilot-aaronnote-bridge--focused-client
+    (my/copilot-noema-bridge--attach-client client-id uri file "focused"))
+  (setq my/copilot-noema-bridge--focused-uri uri
+        my/copilot-noema-bridge--focused-client
         (unless (string-empty-p client-id) client-id))
   (when (and notify
-             (gethash uri my/copilot-aaronnote-bridge--documents)
-             (not (equal my/copilot-aaronnote-bridge--notified-focused-uri uri)))
-    (my/copilot-aaronnote-bridge--notify
+             (gethash uri my/copilot-noema-bridge--documents)
+             (not (equal my/copilot-noema-bridge--notified-focused-uri uri)))
+    (my/copilot-noema-bridge--notify
      'textDocument/didFocus
      (list :textDocument (list :uri uri)))
-    (setq my/copilot-aaronnote-bridge--notified-focused-uri uri)
-    (my/copilot-aaronnote-bridge--log
+    (setq my/copilot-noema-bridge--notified-focused-uri uri)
+    (my/copilot-noema-bridge--log
      "document-focus"
      `((uri . ,uri) (file . ,file) (clientId . ,client-id)))))
 
-(defun my/copilot-aaronnote-bridge--client-may-request-p (body uri)
+(defun my/copilot-noema-bridge--client-may-request-p (body uri)
   "Return non-nil when BODY's client may request inline completion for URI."
-  (let* ((client-id (my/copilot-aaronnote-bridge--client-id body))
+  (let* ((client-id (my/copilot-noema-bridge--client-id body))
          (state (and (not (string-empty-p client-id))
-                     (gethash client-id my/copilot-aaronnote-bridge--clients)))
-         (focused-client my/copilot-aaronnote-bridge--focused-client)
-         (focused-uri my/copilot-aaronnote-bridge--focused-uri))
-    (and (my/copilot-aaronnote-bridge--body-active-p body)
+                     (gethash client-id my/copilot-noema-bridge--clients)))
+         (focused-client my/copilot-noema-bridge--focused-client)
+         (focused-uri my/copilot-noema-bridge--focused-uri))
+    (and (my/copilot-noema-bridge--body-active-p body)
          (or (string-empty-p client-id)
              (not (and (stringp focused-client)
                        (not (string-empty-p focused-client))))
@@ -380,43 +380,43 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
              (equal focused-uri uri)
              (equal (plist-get state :state) "focused")))))
 
-(defun my/copilot-aaronnote-bridge--utf16-units (char)
+(defun my/copilot-noema-bridge--utf16-units (char)
   "Return the UTF-16 code-unit width of CHAR."
   (if (> char #xffff) 2 1))
 
-(defun my/copilot-aaronnote-bridge--utf16-length (text)
+(defun my/copilot-noema-bridge--utf16-length (text)
   "Return the UTF-16 code-unit length of TEXT."
   (let ((units 0))
     (dotimes (i (length text) units)
       (setq units (+ units
-                     (my/copilot-aaronnote-bridge--utf16-units
+                     (my/copilot-noema-bridge--utf16-units
                       (aref text i)))))))
 
-(defun my/copilot-aaronnote-bridge--json-value (value)
+(defun my/copilot-noema-bridge--json-value (value)
   "Return VALUE with nested JSON arrays represented as vectors."
   (cond
    ((vectorp value)
-    (vconcat (mapcar #'my/copilot-aaronnote-bridge--json-value
+    (vconcat (mapcar #'my/copilot-noema-bridge--json-value
                      (append value nil))))
    ((and (listp value) (keywordp (car value)))
     (cl-loop for (key item) on value by #'cddr
              append (list key
-                          (my/copilot-aaronnote-bridge--json-value item))))
+                          (my/copilot-noema-bridge--json-value item))))
    ((consp value)
-    (vconcat (mapcar #'my/copilot-aaronnote-bridge--json-value value)))
+    (vconcat (mapcar #'my/copilot-noema-bridge--json-value value)))
    (t value)))
 
-(defun my/copilot-aaronnote-bridge--json-array (value)
+(defun my/copilot-noema-bridge--json-array (value)
   "Return VALUE normalized as a JSON array."
   (cond
    ((null value) [])
    ((vectorp value)
-    (my/copilot-aaronnote-bridge--json-value value))
+    (my/copilot-noema-bridge--json-value value))
    ((listp value)
-    (vconcat (mapcar #'my/copilot-aaronnote-bridge--json-value value)))
-   (t (vector (my/copilot-aaronnote-bridge--json-value value)))))
+    (vconcat (mapcar #'my/copilot-noema-bridge--json-value value)))
+   (t (vector (my/copilot-noema-bridge--json-value value)))))
 
-(defun my/copilot-aaronnote-bridge--position-for-offset (text offset)
+(defun my/copilot-noema-bridge--position-for-offset (text offset)
   "Return LSP position in TEXT for JavaScript UTF-16 OFFSET."
   (let ((limit (max 0 (or offset 0)))
         (units 0)
@@ -426,7 +426,7 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
         (len (length text)))
     (while (and (< i len) (< units limit))
       (let* ((char (aref text i))
-             (width (my/copilot-aaronnote-bridge--utf16-units char)))
+             (width (my/copilot-noema-bridge--utf16-units char)))
         (if (= char ?\n)
             (setq line (1+ line)
                   character 0)
@@ -435,7 +435,7 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
               i (1+ i))))
     (list :line line :character character)))
 
-(defun my/copilot-aaronnote-bridge--offset-for-position (text position)
+(defun my/copilot-noema-bridge--offset-for-position (text position)
   "Return JavaScript UTF-16 offset in TEXT for LSP POSITION."
   (let ((target-line (max 0 (or (plist-get position :line) 0)))
         (target-char (max 0 (or (plist-get position :character) 0)))
@@ -447,7 +447,7 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
     (catch 'done
       (while (< i len)
         (let* ((char (aref text i))
-               (width (my/copilot-aaronnote-bridge--utf16-units char)))
+               (width (my/copilot-noema-bridge--utf16-units char)))
           (cond
            ((= line target-line)
             (when (= char ?\n)
@@ -464,13 +464,13 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
         (setq i (1+ i)))
       offset)))
 
-(defun my/copilot-aaronnote-bridge--full-range-end (text)
+(defun my/copilot-noema-bridge--full-range-end (text)
   "Return LSP position at the end of TEXT."
-  (my/copilot-aaronnote-bridge--position-for-offset
+  (my/copilot-noema-bridge--position-for-offset
    text
-   (my/copilot-aaronnote-bridge--utf16-length text)))
+   (my/copilot-noema-bridge--utf16-length text)))
 
-(defun my/copilot-aaronnote-bridge--status ()
+(defun my/copilot-noema-bridge--status ()
   "Return a JSON-serializable status plist for Noema."
   (or copilot--status
       (list :message (if (and (require 'copilot nil t)
@@ -483,22 +483,22 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
                     "Inactive")
             :busy :json-false)))
 
-(defun my/copilot-aaronnote-bridge--sync-document (uri file content &optional client-id)
+(defun my/copilot-noema-bridge--sync-document (uri file content &optional client-id)
   "Synchronize Noema CONTENT for URI/FILE into the shared Copilot LS."
   (unless (and (require 'copilot nil t)
                (copilot--connection-alivep))
-    (clrhash my/copilot-aaronnote-bridge--documents)
-    (setq my/copilot-aaronnote-bridge--notified-focused-uri nil))
-  (let* ((language-id (my/copilot-aaronnote-bridge--language-id file))
-         (current (gethash uri my/copilot-aaronnote-bridge--documents))
+    (clrhash my/copilot-noema-bridge--documents)
+    (setq my/copilot-noema-bridge--notified-focused-uri nil))
+  (let* ((language-id (my/copilot-noema-bridge--language-id file))
+         (current (gethash uri my/copilot-noema-bridge--documents))
          (old-content (plist-get current :content)))
     (unless (or (null client-id) (string-empty-p client-id))
-      (my/copilot-aaronnote-bridge--attach-client client-id uri file "focused"))
+      (my/copilot-noema-bridge--attach-client client-id uri file "focused"))
     (cond
      ((null current)
       (puthash uri (list :version 1 :content content :language-id language-id)
-               my/copilot-aaronnote-bridge--documents)
-      (my/copilot-aaronnote-bridge--notify
+               my/copilot-noema-bridge--documents)
+      (my/copilot-noema-bridge--notify
        'textDocument/didOpen
        (list :textDocument (list :uri uri
                                  :languageId language-id
@@ -508,16 +508,16 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
      ((not (string-equal old-content content))
       (let ((version (1+ (or (plist-get current :version) 1))))
         (puthash uri (list :version version :content content :language-id language-id)
-                 my/copilot-aaronnote-bridge--documents)
-        (my/copilot-aaronnote-bridge--notify
+                 my/copilot-noema-bridge--documents)
+        (my/copilot-noema-bridge--notify
          'textDocument/didChange
          (list :textDocument (list :uri uri :version version)
                :contentChanges
                (vector
                 (list :range (list :start (list :line 0 :character 0)
-                                   :end (my/copilot-aaronnote-bridge--full-range-end
+                                   :end (my/copilot-noema-bridge--full-range-end
                                          old-content))
-                      :rangeLength (my/copilot-aaronnote-bridge--utf16-length
+                      :rangeLength (my/copilot-noema-bridge--utf16-length
                                     old-content)
                       :text content))))
         (list :version version :language-id language-id)))
@@ -525,43 +525,43 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
       (list :version (plist-get current :version)
             :language-id (or (plist-get current :language-id) language-id))))))
 
-(defun my/copilot-aaronnote-bridge--inline (body)
+(defun my/copilot-noema-bridge--inline (body)
   "Handle Noema Copilot inline completion BODY."
   (let* ((content (or (plist-get body :content) ""))
          (file (or (plist-get body :file) ""))
-         (client-id (my/copilot-aaronnote-bridge--client-id body))
+         (client-id (my/copilot-noema-bridge--client-id body))
          (offset (min (max 0 (or (plist-get body :offset) 0))
-                      (my/copilot-aaronnote-bridge--utf16-length content)))
-         (uri (my/copilot-aaronnote-bridge--uri-for-file file))
-         (doc (when (my/copilot-aaronnote-bridge--client-may-request-p body uri)
-                (my/copilot-aaronnote-bridge--sync-document
+                      (my/copilot-noema-bridge--utf16-length content)))
+         (uri (my/copilot-noema-bridge--uri-for-file file))
+         (doc (when (my/copilot-noema-bridge--client-may-request-p body uri)
+                (my/copilot-noema-bridge--sync-document
                  uri file content client-id)))
          (version (plist-get doc :version))
          (result nil))
     (if (not doc)
         (progn
-          (my/copilot-aaronnote-bridge--log
+          (my/copilot-noema-bridge--log
            "inline-skipped"
            `((file . ,file) (uri . ,uri) (clientId . ,client-id)
              (reason . "inactive-client")))
           (list :type "copilot-inline"
                 :items []
-                :status (my/copilot-aaronnote-bridge--status)))
-      (my/copilot-aaronnote-bridge--focus-document uri client-id file t)
+                :status (my/copilot-noema-bridge--status)))
+      (my/copilot-noema-bridge--focus-document uri client-id file t)
       (setq result
             (condition-case err
-                (my/copilot-aaronnote-bridge--request
+                (my/copilot-noema-bridge--request
                  'textDocument/inlineCompletion
                  (list :textDocument (list :uri uri :version version)
-                       :position (my/copilot-aaronnote-bridge--position-for-offset
+                       :position (my/copilot-noema-bridge--position-for-offset
                                   content offset)
                        :context (list :triggerKind 2)
                        :formattingOptions (list :tabSize 2 :insertSpaces t))
                  :timeout 30)
               (error
-               (if (my/copilot-aaronnote-bridge--superseded-error-p err)
+               (if (my/copilot-noema-bridge--superseded-error-p err)
                    (progn
-                     (my/copilot-aaronnote-bridge--log
+                     (my/copilot-noema-bridge--log
                       "inline-superseded"
                       `((file . ,file) (uri . ,uri) (clientId . ,client-id)))
                      (list :items []))
@@ -570,7 +570,7 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
              (item (cl-find-if (lambda (candidate)
                                  (stringp (plist-get candidate :insertText)))
                                (append (or items []) nil))))
-        (my/copilot-aaronnote-bridge--log
+        (my/copilot-noema-bridge--log
          "inline"
          `((file . ,file)
            (offset . ,offset)
@@ -578,35 +578,35 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
         (if (not item)
             (list :type "copilot-inline"
                   :items []
-                  :status (my/copilot-aaronnote-bridge--status))
+                  :status (my/copilot-noema-bridge--status))
           (let* ((range (plist-get item :range))
                  (start (plist-get range :start))
                  (end (plist-get range :end))
                  (from (if start
-                           (my/copilot-aaronnote-bridge--offset-for-position
+                           (my/copilot-noema-bridge--offset-for-position
                             content start)
                          offset))
                  (to (if end
-                         (my/copilot-aaronnote-bridge--offset-for-position
+                         (my/copilot-noema-bridge--offset-for-position
                           content end)
                        offset)))
             (list :type "copilot-inline"
                   :items (vector
                           (list :insertText (plist-get item :insertText)
                                 :range (list :from from :to to)
-                                :item (my/copilot-aaronnote-bridge--json-value
+                                :item (my/copilot-noema-bridge--json-value
                                        item)))
-                  :status (my/copilot-aaronnote-bridge--status))))))))
+                  :status (my/copilot-noema-bridge--status))))))))
 
-(defun my/copilot-aaronnote-bridge--shown (body)
+(defun my/copilot-noema-bridge--shown (body)
   "Notify Copilot that Noema showed a completion from BODY."
   (when-let* ((item (plist-get body :item)))
-    (my/copilot-aaronnote-bridge--notify
+    (my/copilot-noema-bridge--notify
      'textDocument/didShowCompletion
      (list :item item)))
   (list :ok t))
 
-(defun my/copilot-aaronnote-bridge--accept (body)
+(defun my/copilot-noema-bridge--accept (body)
   "Notify Copilot that Noema accepted a completion from BODY."
   (let* ((item (plist-get body :item))
          (accepted-length (plist-get body :acceptedLength)))
@@ -617,97 +617,97 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
            (>= accepted-length 0)
            (< accepted-length
               (length (or (plist-get item :insertText) ""))))
-      (my/copilot-aaronnote-bridge--notify
+      (my/copilot-noema-bridge--notify
        'textDocument/didPartiallyAcceptCompletion
        (list :item item :acceptedLength accepted-length))
       (list :ok t :partial t))
      (t
       (when-let* ((command (plist-get item :command))
                   (command-name (plist-get command :command)))
-        (my/copilot-aaronnote-bridge--request
+        (my/copilot-noema-bridge--request
          'workspace/executeCommand
          (list :command command-name
-               :arguments (my/copilot-aaronnote-bridge--json-array
+               :arguments (my/copilot-noema-bridge--json-array
                            (or (plist-get command :arguments) nil)))
          :timeout 30))
 	      (list :ok t)))))
 
-(defun my/copilot-aaronnote-bridge--focus (body)
+(defun my/copilot-noema-bridge--focus (body)
   "Record Noema Copilot focus from BODY without starting Copilot."
   (let* ((file (or (plist-get body :file) ""))
-         (uri (my/copilot-aaronnote-bridge--uri-for-file file))
-         (client-id (my/copilot-aaronnote-bridge--client-id body)))
-    (my/copilot-aaronnote-bridge--focus-document uri client-id file nil)
-    (my/copilot-aaronnote-bridge--log
+         (uri (my/copilot-noema-bridge--uri-for-file file))
+         (client-id (my/copilot-noema-bridge--client-id body)))
+    (my/copilot-noema-bridge--focus-document uri client-id file nil)
+    (my/copilot-noema-bridge--log
      "client-focus"
      `((file . ,file) (uri . ,uri) (clientId . ,client-id)))
     (list :ok t :focused client-id :uri uri)))
 
-(defun my/copilot-aaronnote-bridge--blur (body)
+(defun my/copilot-noema-bridge--blur (body)
   "Record Noema Copilot blur from BODY."
-  (let* ((client-id (my/copilot-aaronnote-bridge--client-id body))
+  (let* ((client-id (my/copilot-noema-bridge--client-id body))
          (state (and (not (string-empty-p client-id))
-                     (gethash client-id my/copilot-aaronnote-bridge--clients)))
+                     (gethash client-id my/copilot-noema-bridge--clients)))
          (uri (plist-get state :uri)))
     (when state
       (puthash client-id
                (plist-put (copy-sequence state) :state "blurred")
-               my/copilot-aaronnote-bridge--clients))
-    (when (equal my/copilot-aaronnote-bridge--focused-client client-id)
-      (setq my/copilot-aaronnote-bridge--focused-client nil)
-      (when (equal my/copilot-aaronnote-bridge--focused-uri uri)
-        (setq my/copilot-aaronnote-bridge--focused-uri nil)))
-    (my/copilot-aaronnote-bridge--log
+               my/copilot-noema-bridge--clients))
+    (when (equal my/copilot-noema-bridge--focused-client client-id)
+      (setq my/copilot-noema-bridge--focused-client nil)
+      (when (equal my/copilot-noema-bridge--focused-uri uri)
+        (setq my/copilot-noema-bridge--focused-uri nil)))
+    (my/copilot-noema-bridge--log
      "client-blur"
      `((file . ,(or (plist-get body :file) (plist-get state :file) ""))
        (uri . ,(or uri ""))
        (clientId . ,client-id)))
-    (list :ok t :focused (or my/copilot-aaronnote-bridge--focused-client ""))))
+    (list :ok t :focused (or my/copilot-noema-bridge--focused-client ""))))
 
-(defun my/copilot-aaronnote-bridge--close (body)
+(defun my/copilot-noema-bridge--close (body)
   "Detach an Noema Copilot client from BODY."
-  (let* ((client-id (my/copilot-aaronnote-bridge--client-id body))
-         (state (my/copilot-aaronnote-bridge--detach-client client-id "client-close")))
-    (my/copilot-aaronnote-bridge--log
+  (let* ((client-id (my/copilot-noema-bridge--client-id body))
+         (state (my/copilot-noema-bridge--detach-client client-id "client-close")))
+    (my/copilot-noema-bridge--log
      "client-close"
      `((file . ,(or (plist-get body :file) (plist-get state :file) ""))
        (uri . ,(or (plist-get state :uri) ""))
        (clientId . ,client-id)
-       (clients . ,(hash-table-count my/copilot-aaronnote-bridge--clients))))
+       (clients . ,(hash-table-count my/copilot-noema-bridge--clients))))
     (list :ok t
           :closed (if state t :json-false)
-          :clients (hash-table-count my/copilot-aaronnote-bridge--clients))))
+          :clients (hash-table-count my/copilot-noema-bridge--clients))))
 
-(defun my/copilot-aaronnote-bridge--find-string-by-key (value keys)
+(defun my/copilot-noema-bridge--find-string-by-key (value keys)
   "Return first string found in VALUE under one of KEYS."
   (cond
    ((not value) nil)
    ((vectorp value)
     (cl-loop for item across value
-             thereis (my/copilot-aaronnote-bridge--find-string-by-key
+             thereis (my/copilot-noema-bridge--find-string-by-key
                       item keys)))
    ((and (listp value) (keywordp (car value)))
     (cl-loop for (key item) on value by #'cddr
              thereis (if (and (memq key keys) (stringp item)
                               (not (string-empty-p item)))
                          item
-                       (my/copilot-aaronnote-bridge--find-string-by-key
+                       (my/copilot-noema-bridge--find-string-by-key
                         item keys))))
    (t nil)))
 
-(defun my/copilot-aaronnote-bridge--sign-in ()
+(defun my/copilot-noema-bridge--sign-in ()
   "Start a Copilot sign-in flow for Noema."
   (let* ((result (condition-case _err
-                     (my/copilot-aaronnote-bridge--request 'signIn nil :timeout 30)
+                     (my/copilot-noema-bridge--request 'signIn nil :timeout 30)
                    (error
-                    (my/copilot-aaronnote-bridge--request
+                    (my/copilot-noema-bridge--request
                      'signInInitiate nil :timeout 30))))
-         (uri (or (my/copilot-aaronnote-bridge--find-string-by-key
+         (uri (or (my/copilot-noema-bridge--find-string-by-key
                    result '(:verificationUri :verification_uri
                              :verificationUriComplete
                              :verification_uri_complete :uri :url))
                   ""))
-         (code (or (my/copilot-aaronnote-bridge--find-string-by-key
+         (code (or (my/copilot-noema-bridge--find-string-by-key
                     result '(:userCode :user_code :code))
                    "")))
     (when (and (stringp uri)
@@ -719,10 +719,10 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
                   :message (cond
                             ((string-empty-p code) "Copilot login started")
                             (t (format "Opened GitHub login; code %s" code)))
-                  :status (my/copilot-aaronnote-bridge--status))
+                  :status (my/copilot-noema-bridge--status))
             (and (listp result) result))))
 
-(defun my/copilot-aaronnote-bridge--diagnostics ()
+(defun my/copilot-noema-bridge--diagnostics ()
   "Return bridge diagnostics for Noema."
   (list :type "copilot-log"
         :bridge "emacs"
@@ -730,69 +730,69 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
                    (remote-gateway-connection-info)
                    :port)
                   0)
-        :serverLive (if (my/copilot-aaronnote-bridge--server-live-p) t :json-false)
+        :serverLive (if (my/copilot-noema-bridge--server-live-p) t :json-false)
         :copilotLive (if (and (require 'copilot nil t)
                               (copilot--connection-alivep))
                          t :json-false)
-        :status (my/copilot-aaronnote-bridge--status)
-        :documents (hash-table-count my/copilot-aaronnote-bridge--documents)
-        :clients (hash-table-count my/copilot-aaronnote-bridge--clients)
-        :focusedUri (or my/copilot-aaronnote-bridge--focused-uri "")
-        :focusedClient (or my/copilot-aaronnote-bridge--focused-client "")
-        :notifiedFocusedUri (or my/copilot-aaronnote-bridge--notified-focused-uri "")
-        :logRecording (if my/copilot-aaronnote-bridge--log-recording t :json-false)
-        :log (vconcat (reverse my/copilot-aaronnote-bridge--log))))
+        :status (my/copilot-noema-bridge--status)
+        :documents (hash-table-count my/copilot-noema-bridge--documents)
+        :clients (hash-table-count my/copilot-noema-bridge--clients)
+        :focusedUri (or my/copilot-noema-bridge--focused-uri "")
+        :focusedClient (or my/copilot-noema-bridge--focused-client "")
+        :notifiedFocusedUri (or my/copilot-noema-bridge--notified-focused-uri "")
+        :logRecording (if my/copilot-noema-bridge--log-recording t :json-false)
+        :log (vconcat (reverse my/copilot-noema-bridge--log))))
 
-(defun my/copilot-aaronnote-bridge--dispatch (action body)
+(defun my/copilot-noema-bridge--dispatch (action body)
   "Dispatch Noema Copilot ACTION with BODY."
   (pcase action
-    ("inline" (my/copilot-aaronnote-bridge--inline body))
-    ("shown" (my/copilot-aaronnote-bridge--shown body))
-    ("accept" (my/copilot-aaronnote-bridge--accept body))
-    ("focus" (my/copilot-aaronnote-bridge--focus body))
-    ("blur" (my/copilot-aaronnote-bridge--blur body))
-    ("close" (my/copilot-aaronnote-bridge--close body))
-    ("sign-in" (my/copilot-aaronnote-bridge--sign-in))
+    ("inline" (my/copilot-noema-bridge--inline body))
+    ("shown" (my/copilot-noema-bridge--shown body))
+    ("accept" (my/copilot-noema-bridge--accept body))
+    ("focus" (my/copilot-noema-bridge--focus body))
+    ("blur" (my/copilot-noema-bridge--blur body))
+    ("close" (my/copilot-noema-bridge--close body))
+    ("sign-in" (my/copilot-noema-bridge--sign-in))
     ("sign-out"
-     (my/copilot-aaronnote-bridge--request 'signOut nil :timeout 30)
-     (list :ok t :status (my/copilot-aaronnote-bridge--status)))
+     (my/copilot-noema-bridge--request 'signOut nil :timeout 30)
+     (list :ok t :status (my/copilot-noema-bridge--status)))
     ("quota"
      (list :type "copilot-quota"
            :result (condition-case err
-                       (my/copilot-aaronnote-bridge--request
+                       (my/copilot-noema-bridge--request
                         'checkQuota nil :timeout 30)
                      (error (list :error (error-message-string err))))))
     ("status"
      (list :type "copilot-status"
            :result (condition-case _err
-                       (my/copilot-aaronnote-bridge--request
+                       (my/copilot-noema-bridge--request
                         'checkStatus nil :timeout 30)
                      (error nil))
-           :status (my/copilot-aaronnote-bridge--status)))
+           :status (my/copilot-noema-bridge--status)))
     ("log"
      (cond
       ((eq (plist-get body :record) t)
        (when (not (eq (plist-get body :clear) :json-false))
-         (setq my/copilot-aaronnote-bridge--log nil))
-       (setq my/copilot-aaronnote-bridge--log-recording t)
-       (my/copilot-aaronnote-bridge--log "recording-started")
-       (append (my/copilot-aaronnote-bridge--diagnostics)
+         (setq my/copilot-noema-bridge--log nil))
+       (setq my/copilot-noema-bridge--log-recording t)
+       (my/copilot-noema-bridge--log "recording-started")
+       (append (my/copilot-noema-bridge--diagnostics)
                (list :message "Copilot bridge log recording started")))
       ((eq (plist-get body :record) :json-false)
-       (my/copilot-aaronnote-bridge--log "recording-stopped")
-       (setq my/copilot-aaronnote-bridge--log-recording nil)
-       (append (my/copilot-aaronnote-bridge--diagnostics)
+       (my/copilot-noema-bridge--log "recording-stopped")
+       (setq my/copilot-noema-bridge--log-recording nil)
+       (append (my/copilot-noema-bridge--diagnostics)
                (list :message "Copilot bridge logs recorded")))
-      (t (my/copilot-aaronnote-bridge--diagnostics))))
+      (t (my/copilot-noema-bridge--diagnostics))))
     (_ (list :ok :json-false
              :message (format "Unknown Copilot bridge action: %s" action)))))
 
-(defun my/copilot-aaronnote-bridge--gateway-plist (value)
+(defun my/copilot-noema-bridge--gateway-plist (value)
   "Convert decoded gateway VALUE into the plist shape used by this bridge."
   (cond
    ((vectorp value)
     (vconcat
-     (mapcar #'my/copilot-aaronnote-bridge--gateway-plist value)))
+     (mapcar #'my/copilot-noema-bridge--gateway-plist value)))
    ((and (listp value)
          (cl-every
           (lambda (item)
@@ -804,21 +804,21 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
      for (key . item) in value
      append
      (list (intern (concat ":" (format "%s" key)))
-           (my/copilot-aaronnote-bridge--gateway-plist item))))
+           (my/copilot-noema-bridge--gateway-plist item))))
    ((listp value)
-    (mapcar #'my/copilot-aaronnote-bridge--gateway-plist value))
+    (mapcar #'my/copilot-noema-bridge--gateway-plist value))
    (t value)))
 
-(defun my/copilot-aaronnote-bridge--gateway-request (params _client)
+(defun my/copilot-noema-bridge--gateway-request (params _client)
   "Handle Copilot gateway PARAMS from Noema."
   (let ((action (alist-get "action" params "" nil #'string=))
         (body (alist-get "body" params nil nil #'string=)))
-    (my/copilot-aaronnote-bridge--dispatch
+    (my/copilot-noema-bridge--dispatch
      action
-     (my/copilot-aaronnote-bridge--gateway-plist body))))
+     (my/copilot-noema-bridge--gateway-plist body))))
 
 (remote-gateway-register-method
- "copilot.request" #'my/copilot-aaronnote-bridge--gateway-request)
+ "copilot.request" #'my/copilot-noema-bridge--gateway-request)
 
 (defun my/copilot-buffer-eligible-p ()
   "Return non-nil when the current buffer is cheap enough for Copilot."

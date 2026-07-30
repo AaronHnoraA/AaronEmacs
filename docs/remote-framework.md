@@ -379,6 +379,13 @@ Emacs 的 `make-network-process` 与 `open-network-stream` 没有 file-name hand
 (remote-channel-endpoint native-process-or-forward 'remote)
 (remote-channel-list)
 (remote-channel-recover channel)
+(remote-channel-group-open
+ '((shell . (:host "127.0.0.1" :port 9001))
+   (iopub . (:host "127.0.0.1" :port 9002)))
+ :context context :workspace workspace :key 'protocol-session)
+(remote-channel-group-endpoints group 'local)
+(remote-channel-group-recover group)
+(remote-channel-group-close group)
 (remote-close-channel channel)
 (remote-channel-clear)
 ```
@@ -399,6 +406,11 @@ process；其物理 socket 是本机 relay，但 `process-contact` 的 host/serv
 原生消费者。动态 `-R` 端口从 OpenSSH 确认信息中取得；建立超时、失败诊断和关闭
 清理均由 channel/backend 边界负责。native proxy 在 outbound peer 配对完成前
 缓存已经到达的数据，避免连接刚建立时静默丢失首包。
+
+多端口协议使用 `remote-channel-group-*`，不让 consumer 循环创建和恢复
+forward。成员有稳定名称并共享 context/workspace；建立中任一成员失败会回滚
+全部成员。workspace 恢复优先复用客户端 listener，无法复用时生成新 endpoint
+generation，并通过恢复 callback 通知协议 owner 更新连接信息。
 
 ## 7. Workspace、service 与 terminal
 

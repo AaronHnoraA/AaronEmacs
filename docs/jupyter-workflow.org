@@ -7,6 +7,22 @@ kernels are provided by the vendored =remote_ikernel= source under
 =site-lisp/remote_ikernel=. No remote Jupyter Server is required: the launcher
 starts the remote kernel over SSH or a scheduler and forwards its ZMQ ports.
 
+* Noema 与 Remote workspace
+
+Emacs 托管的 Noema 不再由客户端 Node 直接启动当前笔记的 kernel。打开
+=/fs:TARGET:/path/note.md= 时，Remote broker 在同一 Target/workspace 中发现
+kernelspec、以 workspace root 为 cwd 启动 kernel，并原子暴露 Jupyter 的五个
+ZMQ channel。=.cell/= script 和 output mirror 保留在远端 note 同目录。
+
+传输断开只释放 channel；重连后先探测目标 kernel。进程仍存活时重建 forwarding
+并保留内存状态；进程已经死亡时下一次执行重建 kernel，并以 =stateLost= 报告
+状态丢失。不会自动安装依赖或回退到客户端 kernel；使用 Remote Doctor 的 probe
+检查目标 =python3=、=jupyter= 和 kernelspec。
+
+=attach:= 与 =remote_ikernel= 继续用于显式 existing-kernel/Jupyter Board 工作流，
+attached kernel 不归 Noema broker 杀死或自动重启。独立 desktop host mode 继续
+使用 Node 本地 launcher。
+
 The vendored baseline is upstream tag =0.4.6= at commit
 =1c437edb9df017141a6357a90de751bb200bd9fb=. Local changes are documented in
 =site-lisp/remote_ikernel/UPSTREAM.md=.

@@ -43,6 +43,24 @@ loopback，在同一个动态端口上提供：
 (remote-gateway-notify "example-helper" "example.changed"
                        '((path . "/tmp/a")))
 
+;; WebSocket 入站 handler 也可延后响应。
+(remote-gateway-register-method
+ "example.slow"
+ (lambda (params _client)
+   (let ((deferred (remote-gateway-defer 30)))
+     (run-at-time
+      0 nil (lambda () (remote-gateway-resolve deferred params)))
+     deferred)))
+
+;; WebSocket 入站 handler 也可延后响应。
+(remote-gateway-register-method
+ "example.slow"
+ (lambda (params _client)
+   (let ((deferred (remote-gateway-defer 30)))
+     (run-at-time
+      0 nil (lambda () (remote-gateway-resolve deferred params)))
+     deferred)))
+
 ;; helper 永久停止时撤销 binding，并可同时断开现有 peer。
 (remote-gateway-release-binding binding t)
 ```
@@ -110,6 +128,11 @@ binding。同一逻辑 client 重启时旧 binding 会被替换回收；仍在�
 现有 binding。所有 pending request 都有超时，peer 断线或网关停止时会立即结算，
 不会留到 Emacs 退出。
 
+入站 WebSocket handler 返回 `remote-gateway-defer` descriptor 时，使用
+`remote-gateway-resolve` 或 `remote-gateway-reject` exactly-once 结算。超时、
+peer 断开和 gateway stop 会清理 descriptor 与 timer。HTTP `/rpc` 不持有长连接，
+因此 deferred handler 返回明确错误；同步 handler ABI 不变。
+
 ## 当前接入
 
 - Lean：LSP 继续走 stdio；infoview endpoint 注册、cursor 通知走网关。
@@ -133,6 +156,16 @@ Noema 或额外常驻服务。打开 `/fs:TARGET:/path/note.md` 时：
    transport；
 4. 文件监听作为 recoverable resource 归 Remote workspace 所有，Noema
    停止时一并释放。
+
+Noema Jupyter 使用同一控制面，但 Node 只保留 raw ZMQ 和前端渲染：目标
+kernelspec、kernel 进程、connection file、五通道 group、`.cell` sidecar 和
+自定义 nbextension 均由笔记所属 Remote workspace 提供。本地 target 也经过同一
+broker；desktop host mode 继续使用独立 Node launcher。
+
+Noema Jupyter 使用同一控制面，但 Node 只保留 raw ZMQ 和前端渲染：目标
+kernelspec、kernel 进程、connection file、五通道 group、`.cell` sidecar 和
+自定义 nbextension 均由笔记所属 Remote workspace 提供。本地 target 也经过同一
+broker；desktop host mode 继续使用独立 Node launcher。
 
 保存使用同目录临时文件再重命名，并保留原权限。请求携带读取时的 mtime，文件在
 远端被其他程序修改后会返回冲突，而不是静默覆盖；也会拒绝把非空文件意外保存成

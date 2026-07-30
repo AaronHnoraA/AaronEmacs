@@ -676,6 +676,9 @@ glyph keeps its shape while point moves through composed text.")
     (setq-local line-spacing my/prose-line-spacing))
   (my/font--bind-chinese-to-fontset))
 
+(dolist (hook '(org-mode-hook markdown-mode-hook gfm-mode-hook))
+  (add-hook hook #'my/typography-setup-prose-buffer))
+
 (with-eval-after-load 'doom-modeline
   (when (member "JetBrainsMono Nerd Font Mono" (font-family-list))
     (set-face-attribute 'doom-modeline nil
@@ -1015,42 +1018,42 @@ Else, call `comment-or-uncomment-region' on the current line."
 ;; `sR': switch to saved filter groups
 (require 'ibuf-ext)
 
-(defun my/ibuffer-aaronnote-buffer-p (buffer)
+(defun my/ibuffer-noema-buffer-p (buffer)
   "Return non-nil when BUFFER hosts an Noema app."
   (and (buffer-live-p buffer)
        (with-current-buffer buffer
-         (or (my/ibuffer-aaronnote-file-name buffer)
-             (and (boundp 'my/aaronnote--xwidget-forced-name)
-                  my/aaronnote--xwidget-forced-name)
-             (string-match-p "\\`\\*aaronnote" (buffer-name buffer))))))
+         (or (my/ibuffer-noema-file-name buffer)
+             (and (boundp 'my/noema--xwidget-forced-name)
+                  my/noema--xwidget-forced-name)
+             (string-match-p "\\`\\*Noema" (buffer-name buffer))))))
 
-(defun my/ibuffer-aaronnote-file-name (buffer)
+(defun my/ibuffer-noema-file-name (buffer)
   "Return BUFFER's Noema note file for ibuffer display, or nil."
   (and (buffer-live-p buffer)
        (with-current-buffer buffer
-         (and (boundp 'my/aaronnote-buffer-file-name)
-              (stringp my/aaronnote-buffer-file-name)
-              (not (string-empty-p my/aaronnote-buffer-file-name))
-              my/aaronnote-buffer-file-name))))
+         (and (boundp 'my/noema-buffer-file-name)
+              (stringp my/noema-buffer-file-name)
+              (not (string-empty-p my/noema-buffer-file-name))
+              my/noema-buffer-file-name))))
 
-(defun my/ibuffer-aaronnote-canonical-buffer (buffer)
+(defun my/ibuffer-noema-canonical-buffer (buffer)
   "Return canonical Noema BUFFER when the bridge can resolve one."
   (or (and (buffer-live-p buffer)
            (with-current-buffer buffer
-             (and (boundp 'my/aaronnote--client-id)
-                  (fboundp 'my/aaronnote--readonly-client-p)
-                  (my/aaronnote--readonly-client-p my/aaronnote--client-id)))
+             (and (boundp 'my/noema--client-id)
+                  (fboundp 'my/noema--readonly-client-p)
+                  (my/noema--readonly-client-p my/noema--client-id)))
            buffer)
-      (and (fboundp 'my/aaronnote-canonical-buffer)
-           (my/aaronnote-canonical-buffer buffer))
+      (and (fboundp 'my/noema-canonical-buffer)
+           (my/noema-canonical-buffer buffer))
       buffer))
 
-(defun my/ibuffer-visit-aaronnote-canonical (orig &rest args)
+(defun my/ibuffer-visit-noema-canonical (orig &rest args)
   "Visit the canonical Noema buffer instead of stale duplicates."
   (let* ((buffer (and (fboundp 'ibuffer-current-buffer)
                       (ignore-errors (ibuffer-current-buffer))))
          (canonical (and buffer
-                         (my/ibuffer-aaronnote-canonical-buffer buffer))))
+                         (my/ibuffer-noema-canonical-buffer buffer))))
     (if (and (buffer-live-p buffer)
              (buffer-live-p canonical)
              (not (eq buffer canonical)))
@@ -1059,12 +1062,12 @@ Else, call `comment-or-uncomment-region' on the current line."
           (switch-to-buffer canonical))
       (apply orig args))))
 
-(defun my/ibuffer-visit-aaronnote-canonical-other-window (orig &rest args)
+(defun my/ibuffer-visit-noema-canonical-other-window (orig &rest args)
   "Visit the canonical Noema buffer in another window."
   (let* ((buffer (and (fboundp 'ibuffer-current-buffer)
                       (ignore-errors (ibuffer-current-buffer))))
          (canonical (and buffer
-                         (my/ibuffer-aaronnote-canonical-buffer buffer))))
+                         (my/ibuffer-noema-canonical-buffer buffer))))
     (if (and (buffer-live-p buffer)
              (buffer-live-p canonical)
              (not (eq buffer canonical)))
@@ -1088,10 +1091,10 @@ Else, call `comment-or-uncomment-region' on the current line."
                    (name . "\\*Packages\\*")
                    (name . "\\*Messages\\*")
                    (name . "\\*Customize\\*")))
-      ("Noema" (aaronnote . t))
+      ("Noema" (noema . t))
       ("Browser" (and (or (mode . eww-mode)
                           (mode . xwidget-webkit-mode))
-                      (not (aaronnote . t))))
+                      (not (noema . t))))
       ("Help" (or (name . "\\*Help\\*")
                   (name . "\\*Apropos\\*")
                   (name . "\\*info\\*")
@@ -1126,16 +1129,16 @@ Else, call `comment-or-uncomment-region' on the current line."
       ("IRC" (or (mode . rcirc-mode)
                  (mode . erc-mode))))))
   :config
-  (define-ibuffer-filter aaronnote
+  (define-ibuffer-filter noema
       "Toggle current view to buffers hosting Noema."
     (:description "Noema")
-    (my/ibuffer-aaronnote-buffer-p buf))
+    (my/ibuffer-noema-buffer-p buf))
   (keymap-set ibuffer-mode-map "M-<return>" #'ibuffer-visit-buffer-other-window)
   (keymap-set ibuffer-mode-map "M-RET" #'ibuffer-visit-buffer-other-window)
   (advice-add 'ibuffer-visit-buffer :around
-              #'my/ibuffer-visit-aaronnote-canonical)
+              #'my/ibuffer-visit-noema-canonical)
   (advice-add 'ibuffer-visit-buffer-other-window :around
-              #'my/ibuffer-visit-aaronnote-canonical-other-window))
+              #'my/ibuffer-visit-noema-canonical-other-window))
 
 (defvar my/ibuffer-ui--theme-signature nil
   "Last theme signature applied by `my/ibuffer-apply-ui'.")
@@ -1275,11 +1278,73 @@ escape from the process sentinel."
   (advice-remove 'async-when-done #'my/async-when-done-handle-empty-result-a)
   (advice-add 'async-when-done :around #'my/async-when-done-handle-empty-result-a))
 
+(defun my/noema--legacy-command-symbol-p (symbol)
+  "Return non-nil when SYMBOL belongs to the retired Aaronnote command API."
+  (let ((name (symbol-name symbol)))
+    (or (string-match-p "\\`my/.*aaronnote" name)
+        (string-prefix-p "ibuffer-filter-by-aaronnote" name))))
+
+(defun my/noema--legacy-command-history-entry-p (entry)
+  "Return non-nil when history ENTRY refers to a retired Aaronnote command."
+  (cond
+   ((symbolp entry)
+    (my/noema--legacy-command-symbol-p entry))
+   ((stringp entry)
+    (string-match-p
+     "\\(?:my/.*aaronnote\\|ibuffer-filter-by-aaronnote\\)"
+     (substring-no-properties entry)))
+   ((vectorp entry)
+    (seq-some #'my/noema--legacy-command-history-entry-p
+              (append entry nil)))
+   ((consp entry)
+    (or (my/noema--legacy-command-history-entry-p (car entry))
+        (my/noema--legacy-command-history-entry-p (cdr entry))))
+   (t nil)))
+
+(defun my/noema-retire-legacy-commands ()
+  "Remove retired Aaronnote commands from Emacs and completion histories."
+  (mapatoms
+   (lambda (symbol)
+     (when (my/noema--legacy-command-symbol-p symbol)
+       (when (fboundp symbol)
+         (fmakunbound symbol))
+       (put symbol 'function-documentation nil))))
+  (when (boundp 'extended-command-history)
+    (setq extended-command-history
+          (cl-remove-if #'my/noema--legacy-command-history-entry-p
+                        extended-command-history)))
+  (when (boundp 'vertico-repeat-history)
+    (setq vertico-repeat-history
+          (cl-remove-if #'my/noema--legacy-command-history-entry-p
+                        vertico-repeat-history)))
+  (when (boundp 'amx-history)
+    (setq amx-history
+          (cl-remove-if #'my/noema--legacy-command-history-entry-p
+                        amx-history)))
+  (when (boundp 'amx-data)
+    (setq amx-data
+          (cl-remove-if #'my/noema--legacy-command-history-entry-p
+                        amx-data)))
+  (when (boundp 'amx-cache)
+    (setq amx-cache
+          (cl-remove-if #'my/noema--legacy-command-history-entry-p
+                        amx-cache))))
+
+(add-hook 'after-init-hook #'my/noema-retire-legacy-commands 90)
+(add-hook 'savehist-save-hook #'my/noema-retire-legacy-commands 90)
+
 (use-package amx
   :ensure t
   :defer 2
   :config
   (amx-mode 1)
+  (add-to-list 'amx-ignored-command-matchers
+               "\\`\\(?:my/.*aaronnote\\|ibuffer-filter-by-aaronnote\\)")
+  (my/noema-retire-legacy-commands)
+  (amx-rebuild-cache)
+  (advice-remove 'amx-save-to-file #'my/noema-retire-legacy-commands)
+  (advice-add 'amx-save-to-file
+              :before #'my/noema-retire-legacy-commands)
   ;; amx installs a 1-second repeating idle timer to re-check commands.
   ;; Let interactive `M-x' update on demand instead of waking Emacs forever.
   (when (timerp amx-short-idle-update-timer)

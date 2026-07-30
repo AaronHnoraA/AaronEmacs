@@ -49,6 +49,10 @@
                (:constructor remote-gateway-pending-create))
   id client state callback timer)
 
+(cl-defstruct (remote-gateway-deferred
+               (:constructor remote-gateway-deferred-create))
+  id method process client state timer created-at)
+
 (defvar remote-gateway--server nil)
 (defvar remote-gateway--listener-channel nil)
 (defvar remote-gateway--instance-id nil)
@@ -58,10 +62,15 @@
 (defvar remote-gateway--bindings (make-hash-table :test #'equal))
 (defvar remote-gateway--binding-keys (make-hash-table :test #'equal))
 (defvar remote-gateway--pending (make-hash-table :test #'equal))
+(defvar remote-gateway--inbound-pending (make-hash-table :test #'equal))
 (defvar remote-gateway--forwards (make-hash-table :test #'equal))
 (defvar remote-gateway--request-sequence 0)
 (defvar remote-gateway--current-process nil
   "WebSocket process currently dispatching an inbound message.")
+(defvar remote-gateway--current-request-id nil
+  "JSON-RPC ID currently dispatched from a WebSocket peer.")
+(defvar remote-gateway--current-request-method nil
+  "JSON-RPC method currently dispatched from a WebSocket peer.")
 
 (define-error 'remote-gateway-rpc-error "Gateway JSON-RPC error")
 
@@ -192,6 +201,102 @@ FUNCTION receives PARAMS and the connected client, which is nil for HTTP."
      (("code" . ,code) ("message" . ,message)
       ,@(when data `(("data" . ,data)))))))
 
+(defun remote-gateway--deferred-key (deferred)
+  "Return the registry key for DEFERRED."
+  (cons
+   (remote-gateway-deferred-process deferred)
+   (remote-gateway-deferred-id deferred)))
+
+(defun remote-gateway--finish-deferred (deferred response &optional send)
+  "Finish DEFERRED exactly once with RESPONSE.
+When SEND is non-nil, send RESPONSE to the originating WebSocket."
+  (when (and (remote-gateway-deferred-p deferred)
+             (eq (remote-gateway-deferred-state deferred) 'pending))
+    (let ((timer (remote-gateway-deferred-timer deferred))
+          (process (remote-gateway-deferred-process deferred)))
+      (when (timerp timer)
+        (cancel-timer timer))
+      (setf (remote-gateway-deferred-timer deferred) nil
+            (remote-gateway-deferred-state deferred) 'done)
+      (remhash (remote-gateway--deferred-key deferred)
+               remote-gateway--inbound-pending)
+      (when (and send (process-live-p process))
+        (remote-gateway--send-websocket process response))
+      t)))
+
+(defun remote-gateway-defer (&optional timeout)
+  "Defer the current inbound WebSocket request.
+Return a descriptor for `remote-gateway-resolve' or
+`remote-gateway-reject'.  Deferred HTTP requests and JSON-RPC notifications
+are rejected explicitly.  TIMEOUT defaults to
+`remote-gateway-request-timeout'."
+  (unless (and remote-gateway--current-process
+               remote-gateway--current-request-id)
+    (remote-gateway--rpc-error
+     -32001 "Deferred responses require an identified WebSocket request"))
+  (let* ((deferred
+          (remote-gateway-deferred-create
+           :id remote-gateway--current-request-id
+           :method remote-gateway--current-request-method
+           :process remote-gateway--current-process
+           :client
+           (gethash remote-gateway--current-process
+                    remote-gateway--process-clients)
+           :state 'pending :created-at (current-time)))
+         (key (remote-gateway--deferred-key deferred)))
+    (when (gethash key remote-gateway--inbound-pending)
+      (remote-gateway--rpc-error
+       -32600 "Duplicate deferred request identifier"))
+    (puthash key deferred remote-gateway--inbound-pending)
+    (setf
+     (remote-gateway-deferred-timer deferred)
+     (run-at-time
+      (or timeout remote-gateway-request-timeout) nil
+      (lambda ()
+        (remote-gateway--finish-deferred
+         deferred
+         (remote-gateway--failure
+          (remote-gateway-deferred-id deferred)
+          -32000
+          (format "Gateway inbound request timed out: %s"
+                  (remote-gateway-deferred-method deferred)))
+         t))))
+    deferred))
+
+(defun remote-gateway-resolve (deferred result)
+  "Resolve DEFERRED with RESULT.
+Return non-nil only for the first settlement."
+  (remote-gateway--finish-deferred
+   deferred
+   (remote-gateway--success
+    (remote-gateway-deferred-id deferred) result)
+   t))
+
+(defun remote-gateway-reject (deferred code message &optional data)
+  "Reject DEFERRED with JSON-RPC CODE, MESSAGE and optional DATA.
+Return non-nil only for the first settlement."
+  (remote-gateway--finish-deferred
+   deferred
+   (remote-gateway--failure
+    (remote-gateway-deferred-id deferred) code message data)
+   t))
+
+(defun remote-gateway--fail-deferred-for-process (process message)
+  "Cancel inbound deferred requests owned by PROCESS with MESSAGE."
+  (let (pending)
+    (maphash
+     (lambda (_key deferred)
+       (when (eq process (remote-gateway-deferred-process deferred))
+         (push deferred pending)))
+     remote-gateway--inbound-pending)
+    (dolist (deferred pending)
+      ;; The peer has gone away, so only settle and release local resources.
+      (remote-gateway--finish-deferred
+       deferred
+       (remote-gateway--failure
+        (remote-gateway-deferred-id deferred) -32000 message)
+       nil))))
+
 (defun remote-gateway--dispatch-request (message client)
   "Dispatch decoded JSON-RPC request MESSAGE from CLIENT."
   (let* ((version (remote-gateway--get "jsonrpc" message))
@@ -210,12 +315,17 @@ FUNCTION receives PARAMS and the connected client, which is nil for HTTP."
       (and id-present
            (remote-gateway--failure id -32601 "Method not found" method)))
      (t
-      (condition-case error
-          (let ((result
-                 (funcall
-                  (gethash method remote-gateway--methods)
-                  params client)))
-            (and id-present (remote-gateway--success id result)))
+     (condition-case error
+          (let* ((remote-gateway--current-request-id
+                  (and id-present id))
+                 (remote-gateway--current-request-method method)
+                 (result
+                  (funcall
+                   (gethash method remote-gateway--methods)
+                   params client)))
+            (cond
+             ((remote-gateway-deferred-p result) nil)
+             (id-present (remote-gateway--success id result))))
         (remote-gateway-rpc-error
          (and id-present
               (remote-gateway--failure
@@ -404,6 +514,8 @@ FUNCTION receives PARAMS and the connected client, which is nil for HTTP."
 
 (defun remote-gateway--client-disconnected (process _event)
   "Forget the gateway client owned by PROCESS."
+  (remote-gateway--fail-deferred-for-process
+   process "Gateway client disconnected")
   (when-let* ((client (gethash process remote-gateway--process-clients)))
     (remhash process remote-gateway--process-clients)
     (remote-gateway--fail-pending-for-client
@@ -545,6 +657,17 @@ FUNCTION receives PARAMS and the connected client, which is nil for HTTP."
        (remote-gateway--failure
         (remote-gateway-pending-id request)
         -32000 "Emacs gateway stopped"))))
+  (let (inbound)
+    (maphash
+     (lambda (_key deferred) (push deferred inbound))
+     remote-gateway--inbound-pending)
+    (dolist (deferred inbound)
+      (remote-gateway--finish-deferred
+       deferred
+       (remote-gateway--failure
+        (remote-gateway-deferred-id deferred)
+        -32000 "Emacs gateway stopped")
+       t)))
   (when remote-gateway--server
     (ws-stop remote-gateway--server))
   (maphash
@@ -561,6 +684,7 @@ FUNCTION receives PARAMS and the connected client, which is nil for HTTP."
   (clrhash remote-gateway--bindings)
   (clrhash remote-gateway--binding-keys)
   (clrhash remote-gateway--pending)
+  (clrhash remote-gateway--inbound-pending)
   (clrhash remote-gateway--forwards))
 
 (defun remote-gateway--listener-endpoint ()

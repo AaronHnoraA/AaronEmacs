@@ -538,7 +538,7 @@ Noema 与 Emacs 共用：
 ### stdout 事件协议
 
 web-host 向 Emacs 进程 stdout 发送换行分隔的文本事件，由
-`my/aaronnote--handle-process-line` 解析：
+`my/noema--handle-process-line` 解析：
 
 | 前缀 | 格式 | 用途 |
 |------|------|------|
@@ -549,19 +549,19 @@ web-host 向 Emacs 进程 stdout 发送换行分隔的文本事件，由
 | `aaronote-event:saved:` | JSON `{file}` | 笔记保存成功后触发 roam index 刷新 |
 
 `saved` 事件是 Emacs roam 缓存自动更新的驱动源。收到后 Emacs 调用
-`my/aaronnote-roam--runtime-sync`，sentinel 清空 in-process 缓存。这保证补全/
+`my/noema-roam--runtime-sync`，sentinel 清空 in-process 缓存。这保证补全/
 反向链接/xref 在每次 web 保存后自动更新，无需手动 sync。vault 外部改动
 （Emacs 保存、dired、git pull）由 Node 侧 `fs.watch` 检测，经 SSE
 `notes-index-changed` 事件驱动 web 端增量刷新，无需 Emacs 轮询。
 
-手动 "y sync DB"（`my/aaronnote-roam-sync`）走 `/api` 路径，成功回调同样清空
+手动 "y sync DB"（`my/noema-roam-sync`）走 `/api` 路径，成功回调同样清空
 in-process 缓存，与自动刷新保持一致。
 
 ### 诊断
 
 - 服务日志：buffer ` *aaronnote-web-host*`
-- 手动停止：`M-x my/aaronnote-stop`
-- 重新打开当前 note：`M-x my/aaronnote-refresh`（localleader `r`）
+- 手动停止：`M-x my/noema-stop`
+- 重新打开当前 note：`M-x my/noema-refresh`（localleader `r`）
 - 健康状态：`M-x my/health-report` → Noema 栏（process、ready、runtime、last-sync）
 
 ## 9. AI

@@ -21,108 +21,108 @@
 
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
 (declare-function evil-set-initial-state "evil-core" (mode state))
-(declare-function my/aaronnote-open-file "init-aaronnote" (file))
-(declare-function my/aaronnote--ensure-server "init-aaronnote" (&optional callback))
-(declare-function my/aaronnote--server-url "init-aaronnote" (&optional path))
-(declare-function my/aaronnote--open-url "init-aaronnote" (url &optional file force-new))
-(declare-function my/aaronnote--api-call "init-aaronnote" (channel args callback))
+(declare-function my/noema-open-file "init-aaronnote" (file))
+(declare-function my/noema--ensure-server "init-aaronnote" (&optional callback))
+(declare-function my/noema--server-url "init-aaronnote" (&optional path))
+(declare-function my/noema--open-url "init-aaronnote" (url &optional file force-new))
+(declare-function my/noema--api-call "init-aaronnote" (channel args callback))
 (declare-function my/navigation--push-jump "init-navigation")
 (declare-function my/navigation-find-definition "init-navigation")
 
-(defvar my/aaronnote--ready nil
+(defvar my/noema--ready nil
   "Non-nil when the Noema web host is available.")
 
-(defgroup my/aaronnote-roam nil
+(defgroup my/noema-roam nil
   "Roam-style navigation for Noema Markdown notes."
-  :group 'my/aaronnote)
+  :group 'my/noema)
 
-(defconst my/aaronnote-roam--module-directory
+(defconst my/noema-roam--module-directory
   (file-name-directory (or load-file-name buffer-file-name))
   "Directory containing the Markdown roam Emacs bridge.")
 
-(config-defvar my/aaronnote-roam-root nil
+(config-defvar my/noema-roam-root nil
   "Root directory of the Markdown roam note vault."
   :type 'directory
-  :group 'my/aaronnote-roam)
+  :group 'my/noema-roam)
 
-(config-defvar my/aaronnote-roam-recent-limit nil
+(config-defvar my/noema-roam-recent-limit nil
   "Maximum number of recent Markdown roam notes kept in memory."
   :type 'integer
-  :group 'my/aaronnote-roam)
+  :group 'my/noema-roam)
 
-(config-defvar my/aaronnote-roam-select-window-height nil
+(config-defvar my/noema-roam-select-window-height nil
   "Height for the bottom Markdown roam selector window."
   :type '(choice (number :tag "Fraction or rows") (function :tag "Window height function"))
-  :group 'my/aaronnote-roam)
+  :group 'my/noema-roam)
 
-(config-defvar my/aaronnote-roam-runtime-root nil
+(config-defvar my/noema-roam-runtime-root nil
   "Root of the vendored Noema runtime used by Markdown roam tooling."
   :type 'directory
-  :group 'my/aaronnote-roam)
+  :group 'my/noema-roam)
 
-(config-defvar my/aaronnote-roam-runtime-cli nil
+(config-defvar my/noema-roam-runtime-cli nil
   "Node bridge used to call the vendored Noema roam runtime from Emacs."
   :type 'file
-  :group 'my/aaronnote-roam)
+  :group 'my/noema-roam)
 
-(defun my/aaronnote-roam--state-root ()
+(defun my/noema-roam--state-root ()
   "Return the Noema var/state directory shared with the web host."
   (expand-file-name
-   (if (boundp 'my/aaronnote--state-root)
-       my/aaronnote--state-root
+   (if (boundp 'my/noema--state-root)
+       my/noema--state-root
      "var/aaronnote")
    user-emacs-directory))
 
-(defun my/aaronnote-roam--tmp-root ()
+(defun my/noema-roam--tmp-root ()
   "Return the Noema runtime tmp directory shared with the web host."
   (expand-file-name
-   (if (boundp 'my/aaronnote--tmp-root)
-       my/aaronnote--tmp-root
+   (if (boundp 'my/noema--tmp-root)
+       my/noema--tmp-root
      "tmp")
-   (my/aaronnote-roam--state-root)))
+   (my/noema-roam--state-root)))
 
-(defvar my/aaronnote-roam--recent nil
+(defvar my/noema-roam--recent nil
   "Recently opened Markdown roam note ids, newest first.")
 
-(defvar my/aaronnote-roam--runtime-index-cache nil)
-(defvar my/aaronnote-roam--runtime-index-cache-key nil)
-(defvar my/aaronnote-roam--sync-timer nil)
-(defvar my/aaronnote-roam--sync-changed-files nil)
-(defvar my/aaronnote-roam--sync-process nil
+(defvar my/noema-roam--runtime-index-cache nil)
+(defvar my/noema-roam--runtime-index-cache-key nil)
+(defvar my/noema-roam--sync-timer nil)
+(defvar my/noema-roam--sync-changed-files nil)
+(defvar my/noema-roam--sync-process nil
   "In-flight CLI offline sync process, or nil.")
-(defvar my/aaronnote-roam--all-files-cache nil
-  "Cached result of `my/aaronnote-roam--all-files'.")
-(defvar my/aaronnote-roam--all-note-summaries-cache nil
-  "Cached result of `my/aaronnote-roam--all-note-summaries'.")
+(defvar my/noema-roam--all-files-cache nil
+  "Cached result of `my/noema-roam--all-files'.")
+(defvar my/noema-roam--all-note-summaries-cache nil
+  "Cached result of `my/noema-roam--all-note-summaries'.")
 
-(defun my/aaronnote-roam-root ()
+(defun my/noema-roam-root ()
   "Return the Markdown roam notes root."
   (or (when buffer-file-name
         (when-let* ((dir (locate-dominating-file buffer-file-name "roam.db")))
           (file-truename dir)))
-      (when (boundp 'my/aaronnote--notes-root)
-        (file-name-as-directory (expand-file-name my/aaronnote--notes-root)))
-      (file-name-as-directory (expand-file-name my/aaronnote-roam-root))))
+      (when (boundp 'my/noema--notes-root)
+        (file-name-as-directory (expand-file-name my/noema--notes-root)))
+      (file-name-as-directory (expand-file-name my/noema-roam-root))))
 
-(defun my/aaronnote-roam--clear-runtime-cache ()
+(defun my/noema-roam--clear-runtime-cache ()
   "Clear cached Noema runtime payloads."
-  (setq my/aaronnote-roam--runtime-index-cache nil
-        my/aaronnote-roam--runtime-index-cache-key nil
-        my/aaronnote-roam--scan-cache nil
-        my/aaronnote-roam--db-cache nil
-        my/aaronnote-roam--db-path-cache nil
-        my/aaronnote-roam--db-mtime nil
-        my/aaronnote-roam--all-files-cache nil
-        my/aaronnote-roam--all-note-summaries-cache nil))
+  (setq my/noema-roam--runtime-index-cache nil
+        my/noema-roam--runtime-index-cache-key nil
+        my/noema-roam--scan-cache nil
+        my/noema-roam--db-cache nil
+        my/noema-roam--db-path-cache nil
+        my/noema-roam--db-mtime nil
+        my/noema-roam--all-files-cache nil
+        my/noema-roam--all-note-summaries-cache nil))
 
-(defun my/aaronnote-roam--runtime-available-p ()
+(defun my/noema-roam--runtime-available-p ()
   "Return non-nil when the Noema runtime bridge is available."
-  (and (file-exists-p my/aaronnote-roam-runtime-cli)
+  (and (file-exists-p my/noema-roam-runtime-cli)
        (file-exists-p
         (expand-file-name "server/lib/index.mjs"
-                          my/aaronnote-roam-runtime-root))))
+                          my/noema-roam-runtime-root))))
 
-(defun my/aaronnote-roam--action-to-channel (action)
+(defun my/noema-roam--action-to-channel (action)
   "Map roam-cli ACTION keyword to web-host /api channel string, or nil."
   (cdr (assoc action
               '(("index"     . "aaronnote:api:notes:roam-index")
@@ -138,11 +138,11 @@
                 ("delete-node" . "aaronnote:api:notes:delete-node")
                 ("sync"      . "aaronnote:api:notes:roam-sync")))))
 
-(defun my/aaronnote-roam--runtime-call-via-api (action args)
+(defun my/noema-roam--runtime-call-via-api (action args)
   "Delegate ACTION with roam-cli ARGS to the running web-host /api.
 Maps the action to its /api channel, converts positional ARGS to
 the expected body, and returns parsed JSON or nil."
-  (let ((channel (my/aaronnote-roam--action-to-channel action)))
+  (let ((channel (my/noema-roam--action-to-channel action)))
     (when channel
       (let ((api-args
              (pcase action
@@ -175,45 +175,45 @@ the expected body, and returns parsed JSON or nil."
                (_
                 []))))
         (when api-args
-          (my/aaronnote--api-call-sync channel api-args))))))
+          (my/noema--api-call-sync channel api-args))))))
 
-(defun my/aaronnote-roam--runtime-call (action &rest args)
+(defun my/noema-roam--runtime-call (action &rest args)
   "Call Noema roam runtime ACTION synchronously with ARGS.
 When the web-host is running, delegates to its /api so all callers share the
 same in-memory index.  Falls back to spawning roam-cli.mjs when the web-host
 is down (offline / not yet started)."
   (or
    ;; Prefer the running web-host's in-memory index.
-   (and (boundp 'my/aaronnote--ready)
-        my/aaronnote--ready
-        (my/aaronnote-roam--runtime-call-via-api action args))
+   (and (boundp 'my/noema--ready)
+        my/noema--ready
+        (my/noema-roam--runtime-call-via-api action args))
    ;; Fallback: spawn roam-cli.mjs directly.
-   (when (my/aaronnote-roam--runtime-available-p)
+   (when (my/noema-roam--runtime-available-p)
     (with-temp-buffer
-      (let* ((root (my/aaronnote-roam-root))
-             (default-directory my/aaronnote-roam--module-directory)
+      (let* ((root (my/noema-roam-root))
+             (default-directory my/noema-roam--module-directory)
              (process-environment
               (append (list (format "AARONNOTE_ROOT=%s" root)
                             (format "AARONNOTE_RUNTIME_ROOT=%s"
                                     (expand-file-name
-                                     my/aaronnote-roam-runtime-root))
+                                     my/noema-roam-runtime-root))
                             (format "AARONNOTE_WORKSPACE_ROOT=%s"
                                     user-emacs-directory)
                             (format "AARONNOTE_STATE_DIR=%s"
-                                    (my/aaronnote-roam--state-root))
+                                    (my/noema-roam--state-root))
                             (format "AARONNOTE_TMP_DIR=%s"
-                                    (my/aaronnote-roam--tmp-root)))
+                                    (my/noema-roam--tmp-root)))
                       process-environment))
              (stderr-file (make-temp-file "aaronnote-runtime-"))
              (status (apply #'process-file
                             "node" nil (list (current-buffer) stderr-file) nil
-                            my/aaronnote-roam-runtime-cli
+                            my/noema-roam-runtime-cli
                             action
                             "--root" root
-                            "--runtime" my/aaronnote-roam-runtime-root
+                            "--runtime" my/noema-roam-runtime-root
                             "--workspace" user-emacs-directory
-                            "--state" (my/aaronnote-roam--state-root)
-                            "--tmp" (my/aaronnote-roam--tmp-root)
+                            "--state" (my/noema-roam--state-root)
+                            "--tmp" (my/noema-roam--tmp-root)
                             args)))
         (unwind-protect
             (if (zerop status)
@@ -241,52 +241,52 @@ is down (offline / not yet started)."
                 nil))
           (ignore-errors (delete-file stderr-file))))))))
 
-(defun my/aaronnote-roam--runtime-index ()
+(defun my/noema-roam--runtime-index ()
   "Return cached Noema runtime index payload, or nil."
-  (let ((key (list (file-truename (my/aaronnote-roam-root))
+  (let ((key (list (file-truename (my/noema-roam-root))
                    (file-truename
-                    (expand-file-name my/aaronnote-roam-runtime-root)))))
-    (if (and my/aaronnote-roam--runtime-index-cache
-             (equal key my/aaronnote-roam--runtime-index-cache-key))
-        my/aaronnote-roam--runtime-index-cache
-      (setq my/aaronnote-roam--runtime-index-cache
-            (my/aaronnote-roam--runtime-call "index")
-            my/aaronnote-roam--runtime-index-cache-key key)
-      my/aaronnote-roam--runtime-index-cache)))
+                    (expand-file-name my/noema-roam-runtime-root)))))
+    (if (and my/noema-roam--runtime-index-cache
+             (equal key my/noema-roam--runtime-index-cache-key))
+        my/noema-roam--runtime-index-cache
+      (setq my/noema-roam--runtime-index-cache
+            (my/noema-roam--runtime-call "index")
+            my/noema-roam--runtime-index-cache-key key)
+      my/noema-roam--runtime-index-cache)))
 
-(defun my/aaronnote-roam--runtime-sync (&optional full changed-files)
+(defun my/noema-roam--runtime-sync (&optional full changed-files)
   "Run Noema roam-db sync via CLI subprocess — offline fallback only.
 The web-host is the authoritative roam.db writer during normal operation.
 Only call this when the web-host is not running.
 When FULL is non-nil, force a full rebuild.  CHANGED-FILES are passed as
 incremental hints."
-  (if (not (my/aaronnote-roam--runtime-available-p))
+  (if (not (my/noema-roam--runtime-available-p))
       (message "Noema roam runtime not found; cache refreshed only")
-    (if (and my/aaronnote-roam--sync-process
-             (process-live-p my/aaronnote-roam--sync-process))
+    (if (and my/noema-roam--sync-process
+             (process-live-p my/noema-roam--sync-process))
         (message "Noema roam: CLI sync already in flight, skipping")
-      (let* ((root (my/aaronnote-roam-root))
-             (buf (generate-new-buffer " *aaronnote-roam-sync*"))
+      (let* ((root (my/noema-roam-root))
+             (buf (generate-new-buffer " *Noema roam sync*"))
              (args (append
-                    (list my/aaronnote-roam-runtime-cli
+                    (list my/noema-roam-runtime-cli
                           "sync"
                           "--root" root
-                          "--runtime" my/aaronnote-roam-runtime-root
+                          "--runtime" my/noema-roam-runtime-root
                           "--workspace" user-emacs-directory
-                          "--state" (my/aaronnote-roam--state-root)
-                          "--tmp" (my/aaronnote-roam--tmp-root))
+                          "--state" (my/noema-roam--state-root)
+                          "--tmp" (my/noema-roam--tmp-root))
                     (when full (list "--full"))
                     (mapcan (lambda (file) (list "--changed" file))
                             (delete-dups (seq-filter #'identity changed-files)))))
              (process-environment
               (append (list (format "AARONNOTE_ROOT=%s" root)
                             (format "AARONNOTE_RUNTIME_ROOT=%s"
-                                    (expand-file-name my/aaronnote-roam-runtime-root))
+                                    (expand-file-name my/noema-roam-runtime-root))
                             (format "AARONNOTE_WORKSPACE_ROOT=%s" user-emacs-directory)
                             (format "AARONNOTE_STATE_DIR=%s"
-                                    (my/aaronnote-roam--state-root))
+                                    (my/noema-roam--state-root))
                             (format "AARONNOTE_TMP_DIR=%s"
-                                    (my/aaronnote-roam--tmp-root)))
+                                    (my/noema-roam--tmp-root)))
                       process-environment))
              (proc (make-process
                     :name "aaronnote-roam-sync"
@@ -296,15 +296,15 @@ incremental hints."
                     :sentinel
                     (lambda (p event)
                       (when (memq (process-status p) '(exit signal))
-                        (when (eq p my/aaronnote-roam--sync-process)
-                          (setq my/aaronnote-roam--sync-process nil))
-                        (my/aaronnote-roam--clear-runtime-cache)
+                        (when (eq p my/noema-roam--sync-process)
+                          (setq my/noema-roam--sync-process nil))
+                        (my/noema-roam--clear-runtime-cache)
                         (message "Noema roam sync: %s" (string-trim event))
                         (when (buffer-live-p buf)
                           (kill-buffer buf)))))))
-        (setq my/aaronnote-roam--sync-process proc)))))
+        (setq my/noema-roam--sync-process proc)))))
 
-(defun my/aaronnote-roam--target-at-point ()
+(defun my/noema-roam--target-at-point ()
   "Return the raw Markdown roam link target at or near point, or nil."
   (save-excursion
     (let* ((line-start (line-beginning-position))
@@ -336,7 +336,7 @@ incremental hints."
           (while (string-match "\\[\\[\\([^]\n]+\\)\\]\\]" line pos)
             (record (match-beginning 0) (match-end 0)
                     (concat "roam://"
-                            (my/aaronnote-roam--encode-ref
+                            (my/noema-roam--encode-ref
                              (string-trim (match-string 1 line)))))
             (setq pos (1+ (match-beginning 0)))))
         (let ((pos 0))
@@ -352,17 +352,17 @@ incremental hints."
             (setq pos (1+ (match-beginning 0))))))
       result)))
 
-(defun my/aaronnote-roam--decode-ref (ref)
+(defun my/noema-roam--decode-ref (ref)
   "Percent-decode note REF, returning REF unchanged on malformed input."
   (condition-case nil
       (url-unhex-string (or ref ""))
     (error (or ref ""))))
 
-(defun my/aaronnote-roam--encode-ref (ref)
+(defun my/noema-roam--encode-ref (ref)
   "Percent-encode REF for use in Noema roam URLs."
   (url-hexify-string (or ref "")))
 
-(defun my/aaronnote-roam--split-target (target)
+(defun my/noema-roam--split-target (target)
   "Split Noema TARGET into note ref plus optional tag or DOM target.
 Canonical targets look like `roam://note-id', `roam://note-id#tag', and
 `roam://note-id@dom-target'.  `@@parent@child' addresses a hierarchical DOM
@@ -378,13 +378,13 @@ resolved using the same note lookup path."
       (cond
        (local
         (setq ref ""
-              dom (my/aaronnote-roam--decode-ref (substring body 2))))
+              dom (my/noema-roam--decode-ref (substring body 2))))
        ((string-match "\\`\\(.*?\\)#\\([^#]*\\)\\'" body)
         (setq ref (match-string 1 body)
-              tag (my/aaronnote-roam--decode-ref (match-string 2 body))))
+              tag (my/noema-roam--decode-ref (match-string 2 body))))
        ((string-match "\\`\\(.*?\\)@\\([^#]*\\)\\'" body)
         (setq ref (match-string 1 body)
-              dom (my/aaronnote-roam--decode-ref (match-string 2 body))))
+              dom (my/noema-roam--decode-ref (match-string 2 body))))
        (t
         (setq ref body)))
       (list :raw raw
@@ -392,22 +392,22 @@ resolved using the same note lookup path."
             :ref (string-trim
                   (replace-regexp-in-string
                    "\\`/+" ""
-                   (my/aaronnote-roam--decode-ref (or ref ""))))
+                   (my/noema-roam--decode-ref (or ref ""))))
             :tag (and tag (not (string-empty-p tag)) tag)
             :dom (and dom (not (string-empty-p dom)) dom)))))
 
-(defun my/aaronnote-roam--parse-target (target &optional base-dir)
+(defun my/noema-roam--parse-target (target &optional base-dir)
   "Parse note-link TARGET into Noema-compatible target metadata.
-BASE-DIR is forwarded to `my/aaronnote-roam--ref-to-file-fallback' for
+BASE-DIR is forwarded to `my/noema-roam--ref-to-file-fallback' for
 plain-relative refs (./x, ../x); defaults to the current buffer's directory."
-  (when-let* ((parts (my/aaronnote-roam--split-target target)))
+  (when-let* ((parts (my/noema-roam--split-target target)))
     (let* ((ref (plist-get parts :ref))
            (local (plist-get parts :local))
-           (resolved (my/aaronnote-roam--resolve-note ref))
+           (resolved (my/noema-roam--resolve-note ref))
            (id (or (plist-get resolved :id) ref))
            (file (or (plist-get resolved :file)
                      (and local buffer-file-name)
-                     (my/aaronnote-roam--ref-to-file-fallback ref base-dir))))
+                     (my/noema-roam--ref-to-file-fallback ref base-dir))))
       (append parts
               (list :slug id
                     :note-id id
@@ -416,51 +416,51 @@ plain-relative refs (./x, ../x); defaults to the current buffer's directory."
                     :key (plist-get resolved :key)
                     :note (plist-get resolved :note))))))
 
-(defun my/aaronnote-roam--slug-at-point ()
+(defun my/noema-roam--slug-at-point ()
   "Return the note-link slug at or near point, or nil."
-  (plist-get (my/aaronnote-roam--parse-target (my/aaronnote-roam--target-at-point))
+  (plist-get (my/noema-roam--parse-target (my/noema-roam--target-at-point))
              :slug))
 
-(defun my/aaronnote-roam--all-files ()
+(defun my/noema-roam--all-files ()
   "Return all Markdown roam note files, excluding generated/private dirs."
-  (or my/aaronnote-roam--all-files-cache
-      (setq my/aaronnote-roam--all-files-cache
+  (or my/noema-roam--all-files-cache
+      (setq my/noema-roam--all-files-cache
             (seq-filter
              (lambda (file)
-               (let ((rel (file-relative-name file (my/aaronnote-roam-root))))
+               (let ((rel (file-relative-name file (my/noema-roam-root))))
                  (not (string-match-p
                        "\\`\\(?:\\.git/\\|\\.lake/\\|_typst/\\|node_modules/\\)"
                        rel))))
              (directory-files-recursively
-              (my/aaronnote-roam-root) "\\.\\(?:md\\|markdown\\)$")))))
+              (my/noema-roam-root) "\\.\\(?:md\\|markdown\\)$")))))
 
-(defun my/aaronnote-roam--file-to-slug (file)
+(defun my/noema-roam--file-to-slug (file)
   "Convert FILE path to a roam slug, relative to root and without extension."
-  (my/aaronnote-roam--path-without-note-extension
-   (file-relative-name file (my/aaronnote-roam-root))))
+  (my/noema-roam--path-without-note-extension
+   (file-relative-name file (my/noema-roam-root))))
 
-(defun my/aaronnote-roam--file-to-note-id (file)
+(defun my/noema-roam--file-to-note-id (file)
   "Return the canonical note id for FILE, falling back to its path slug."
-  (let* ((slug (my/aaronnote-roam--file-to-slug file))
-         (resolved (my/aaronnote-roam--resolve-note slug)))
+  (let* ((slug (my/noema-roam--file-to-slug file))
+         (resolved (my/noema-roam--resolve-note slug)))
     (or (plist-get resolved :id) slug)))
 
-(defun my/aaronnote-roam--ref-has-extension-p (ref)
+(defun my/noema-roam--ref-has-extension-p (ref)
   "Return non-nil when REF already names a note file extension."
   (string-match-p "\\.\\(?:typ\\|md\\|markdown\\)\\'" (or ref "")))
 
-(defun my/aaronnote-roam--path-without-note-extension (path)
+(defun my/noema-roam--path-without-note-extension (path)
   "Remove a note file extension from PATH."
   (replace-regexp-in-string "\\.\\(?:typ\\|md\\|markdown\\)\\'" "" (or path "")))
 
-(defun my/aaronnote-roam--strip-vault-prefix (ref)
+(defun my/noema-roam--strip-vault-prefix (ref)
   "Remove Noema's exported `roam/' prefix from path REF."
   (let ((clean (replace-regexp-in-string "\\`/+" "" (or ref ""))))
     (if (string-prefix-p "roam/" clean)
         (substring clean 5)
       clean)))
 
-(defun my/aaronnote-roam--ref-to-file-fallback (ref &optional base-dir)
+(defun my/noema-roam--ref-to-file-fallback (ref &optional base-dir)
   "Return the best filesystem fallback for unresolved note REF.
 BASE-DIR is used for refs starting with ./ or ../ (plain-relative paths);
 defaults to the current buffer's directory."
@@ -474,16 +474,16 @@ defaults to the current buffer's directory."
                (path (expand-file-name raw base)))
           (cond
            ((file-exists-p path) path)
-           ((and (not (my/aaronnote-roam--ref-has-extension-p raw))
+           ((and (not (my/noema-roam--ref-has-extension-p raw))
                  (file-exists-p (concat path ".md")))
             (concat path ".md"))
-           ((and (not (my/aaronnote-roam--ref-has-extension-p raw))
+           ((and (not (my/noema-roam--ref-has-extension-p raw))
                  (file-exists-p (concat path ".markdown")))
             (concat path ".markdown"))
            (t path)))
       ;; Non-relative: resolve against the roam vault root.
-      (let* ((clean (my/aaronnote-roam--strip-vault-prefix raw))
-             (root (my/aaronnote-roam-root))
+      (let* ((clean (my/noema-roam--strip-vault-prefix raw))
+             (root (my/noema-roam-root))
              (path (if (file-name-absolute-p clean)
                        clean
                      (expand-file-name clean root))))
@@ -492,24 +492,24 @@ defaults to the current buffer's directory."
                (file-exists-p path))
           path)
          ((and (not (string-empty-p clean))
-               (not (my/aaronnote-roam--ref-has-extension-p clean))
+               (not (my/noema-roam--ref-has-extension-p clean))
                (file-exists-p (concat path ".md")))
           (concat path ".md"))
          ((and (not (string-empty-p clean))
-               (not (my/aaronnote-roam--ref-has-extension-p clean))
+               (not (my/noema-roam--ref-has-extension-p clean))
                (file-exists-p (concat path ".markdown")))
           (concat path ".markdown"))
-         ((my/aaronnote-roam--ref-has-extension-p clean)
+         ((my/noema-roam--ref-has-extension-p clean)
           path)
          (t
           (concat path ".md")))))))
 
-(defun my/aaronnote-roam--slug-to-file (slug)
+(defun my/noema-roam--slug-to-file (slug)
   "Convert SLUG, id, or path-like ref to an absolute note path."
-  (or (plist-get (my/aaronnote-roam--resolve-note slug) :file)
-      (my/aaronnote-roam--ref-to-file-fallback slug)))
+  (or (plist-get (my/noema-roam--resolve-note slug) :file)
+      (my/noema-roam--ref-to-file-fallback slug)))
 
-(defun my/aaronnote-roam--slugify-title (title)
+(defun my/noema-roam--slugify-title (title)
   "Return an Noema-style slug for TITLE."
   (let ((slug (downcase
                (replace-regexp-in-string
@@ -521,59 +521,59 @@ defaults to the current buffer's directory."
                   (string-trim title)))))))
     (if (string-empty-p slug) "untitled" slug)))
 
-(defun my/aaronnote-roam--timestamp-id ()
+(defun my/noema-roam--timestamp-id ()
   "Return an Noema-style timestamp id."
   (format-time-string "%Y%m%dT%H%M%S"))
 
-(defun my/aaronnote-roam--open-slug (slug &optional no-recent)
+(defun my/noema-roam--open-slug (slug &optional no-recent)
   "Open roam note SLUG/id/path and record it in recent notes unless NO-RECENT."
-  (let* ((resolved (my/aaronnote-roam--resolve-note slug))
+  (let* ((resolved (my/noema-roam--resolve-note slug))
          (note-id (or (plist-get resolved :id) slug))
          (file (or (plist-get resolved :file)
-                   (my/aaronnote-roam--ref-to-file-fallback slug))))
+                   (my/noema-roam--ref-to-file-fallback slug))))
     (unless (file-exists-p file)
       (user-error "Note not found: %s" slug))
     (unless no-recent
-      (my/aaronnote-roam--touch-recent note-id))
+      (my/noema-roam--touch-recent note-id))
     (find-file file)))
 
-(defun my/aaronnote-roam--touch-recent (slug)
+(defun my/noema-roam--touch-recent (slug)
   "Move SLUG to the front of the recent list."
   (when (and (stringp slug) (not (string-empty-p slug)))
-    (setq my/aaronnote-roam--recent
-          (seq-take (cons slug (delete slug my/aaronnote-roam--recent))
-                    my/aaronnote-roam-recent-limit))))
+    (setq my/noema-roam--recent
+          (seq-take (cons slug (delete slug my/noema-roam--recent))
+                    my/noema-roam-recent-limit))))
 
-(defun my/aaronnote-roam--note-title (slug)
+(defun my/noema-roam--note-title (slug)
   "Return display title for SLUG."
-  (or (when-let* ((note (my/aaronnote-roam--db-note slug)))
+  (or (when-let* ((note (my/noema-roam--db-note slug)))
         (gethash "title" note))
-      (plist-get (my/aaronnote-roam--resolve-note slug) :title)
+      (plist-get (my/noema-roam--resolve-note slug) :title)
       (file-name-nondirectory slug)))
 
-(defun my/aaronnote-roam--note-tags (slug)
+(defun my/noema-roam--note-tags (slug)
   "Return tags for SLUG."
-  (when-let* ((note (my/aaronnote-roam--db-note slug)))
-    (my/aaronnote-roam--note-list-field note "tags")))
+  (when-let* ((note (my/noema-roam--db-note slug)))
+    (my/noema-roam--note-list-field note "tags")))
 
-(defun my/aaronnote-roam--note-links (slug)
+(defun my/noema-roam--note-links (slug)
   "Return normalized outgoing link slugs for SLUG."
-  (when-let* ((note (my/aaronnote-roam--db-note slug)))
+  (when-let* ((note (my/noema-roam--db-note slug)))
     (delete-dups
      (seq-filter #'identity
-                 (mapcar #'my/aaronnote-roam--target-slug
-                         (or (my/aaronnote-roam--note-list-field note "links")
-                             (my/aaronnote-roam--note-list-field note "refs")))))))
+                 (mapcar #'my/noema-roam--target-slug
+                         (or (my/noema-roam--note-list-field note "links")
+                             (my/noema-roam--note-list-field note "refs")))))))
 
-(defun my/aaronnote-roam--note-summary (slug)
+(defun my/noema-roam--note-summary (slug)
   "Return a compact text summary for SLUG."
-  (or (when-let* ((note (my/aaronnote-roam--db-note slug)))
-        (my/aaronnote-roam--note-field note "summary"))
-      (let ((file (my/aaronnote-roam--slug-to-file slug)))
+  (or (when-let* ((note (my/noema-roam--db-note slug)))
+        (my/noema-roam--note-field note "summary"))
+      (let ((file (my/noema-roam--slug-to-file slug)))
         (when (file-exists-p file)
           (with-temp-buffer
             (insert-file-contents file nil 0 20000)
-            (or (my/aaronnote-roam--extract-summary-block)
+            (or (my/noema-roam--extract-summary-block)
                 (let (parts in-meta)
                   (goto-char (point-min))
                   (while (and (not (eobp))
@@ -606,52 +606,52 @@ defaults to the current buffer's directory."
                    (string-join (nreverse parts) " ") 220 nil nil
                    "..."))))))))
 
-(defun my/aaronnote-roam--backlinks-map (records)
+(defun my/noema-roam--backlinks-map (records)
   "Return a hash-table mapping note id → list of backlink ids from RECORDS.
 Builds the reverse-link index in one pass to avoid O(n²) per-note lookups."
   (let ((map (make-hash-table :test 'equal)))
     (dolist (record records)
       (let* ((note   (plist-get record :note))
              (source (plist-get record :id))
-             (links  (or (my/aaronnote-roam--note-list-field note "links")
-                         (my/aaronnote-roam--note-list-field note "refs"))))
+             (links  (or (my/noema-roam--note-list-field note "links")
+                         (my/noema-roam--note-list-field note "refs"))))
         (dolist (link links)
-          (let ((target (my/aaronnote-roam--target-slug link)))
+          (let ((target (my/noema-roam--target-slug link)))
             (when target
               (puthash target
                        (cons source (gethash target map))
                        map))))))
     map))
 
-(defun my/aaronnote-roam--all-note-summaries ()
+(defun my/noema-roam--all-note-summaries ()
   "Return note summary plists for all notes, memoised between syncs."
-  (or my/aaronnote-roam--all-note-summaries-cache
-      (setq my/aaronnote-roam--all-note-summaries-cache
-            (let* ((records (sort (my/aaronnote-roam--note-records)
+  (or my/noema-roam--all-note-summaries-cache
+      (setq my/noema-roam--all-note-summaries-cache
+            (let* ((records (sort (my/noema-roam--note-records)
                                   (lambda (a b)
                                     (string< (plist-get a :id) (plist-get b :id)))))
                    ;; Build backlink map in one pass; fall back to DB field when present.
-                   (bl-map (my/aaronnote-roam--backlinks-map records)))
+                   (bl-map (my/noema-roam--backlinks-map records)))
               (mapcar (lambda (record)
                         (let* ((id   (plist-get record :id))
                                (note (plist-get record :note))
                                ;; Prefer the DB-provided backlinks field when available.
-                               (bl   (or (my/aaronnote-roam--note-list-field note "backlinks")
+                               (bl   (or (my/noema-roam--note-list-field note "backlinks")
                                          (delete-dups
                                           (nreverse (gethash id bl-map))))))
                           (list :slug      id
                                 :title     (or (plist-get record :title)
-                                               (my/aaronnote-roam--note-title id))
-                                :path      (or (my/aaronnote-roam--note-field note "path")
-                                               (my/aaronnote-roam--note-field note "link"))
-                                :aliases   (my/aaronnote-roam--note-list-field note "aliases")
-                                :tags      (my/aaronnote-roam--note-tags id)
-                                :links     (my/aaronnote-roam--note-links id)
+                                               (my/noema-roam--note-title id))
+                                :path      (or (my/noema-roam--note-field note "path")
+                                               (my/noema-roam--note-field note "link"))
+                                :aliases   (my/noema-roam--note-list-field note "aliases")
+                                :tags      (my/noema-roam--note-tags id)
+                                :links     (my/noema-roam--note-links id)
                                 :backlinks bl
-                                :summary   (my/aaronnote-roam--note-summary id))))
+                                :summary   (my/noema-roam--note-summary id))))
                       records)))))
 
-(defun my/aaronnote-roam--candidate-haystack (entry)
+(defun my/noema-roam--candidate-haystack (entry)
   "Return searchable text for note summary ENTRY."
   (string-join
    (delq nil
@@ -663,9 +663,9 @@ Builds the reverse-link index in one pass to avoid O(n²) per-note lookups."
                (string-join (seq-filter #'stringp (or (plist-get entry :tags) nil)) " ")))
    " "))
 
-(defun my/aaronnote-roam--read-note (prompt &optional entries)
+(defun my/noema-roam--read-note (prompt &optional entries)
   "Read a note slug with PROMPT from ENTRIES or all summaries."
-  (let* ((items (or entries (my/aaronnote-roam--all-note-summaries)))
+  (let* ((items (or entries (my/noema-roam--all-note-summaries)))
          (table (mapcar (lambda (entry)
                           (cons (plist-get entry :slug) entry))
                         items))
@@ -690,9 +690,9 @@ Builds the reverse-link index in one pass to avoid O(n²) per-note lookups."
                 nil t)))
     slug))
 
-(defun my/aaronnote-roam--read-note-id (prompt)
+(defun my/noema-roam--read-note-id (prompt)
   "Read an Noema note id with PROMPT."
-  (let* ((records (my/aaronnote-roam--note-records))
+  (let* ((records (my/noema-roam--note-records))
          (candidates (mapcar (lambda (record)
                                (plist-get record :id))
                              records))
@@ -711,27 +711,27 @@ Builds the reverse-link index in one pass to avoid O(n²) per-note lookups."
                        (concat
                         "  "
                         (or (plist-get record :title) "")
-                        (when-let* ((path (or (my/aaronnote-roam--note-field note "path")
-                                              (my/aaronnote-roam--note-field note "link"))))
+                        (when-let* ((path (or (my/noema-roam--note-field note "path")
+                                              (my/noema-roam--note-field note "link"))))
                           (concat "  " path))
                         (when-let* ((tags (seq-filter #'stringp
-                                                      (my/aaronnote-roam--note-list-field note "tags"))))
+                                                      (my/noema-roam--note-list-field note "tags"))))
                           (concat "  #" (string-join tags " #")))))))))
          (complete-with-action action candidates string pred)))
      nil t)))
 
-(defun my/aaronnote-roam--roam-href (note-id &optional kind target)
+(defun my/noema-roam--roam-href (note-id &optional kind target)
   "Return canonical Noema roam href for NOTE-ID and optional TARGET."
   (concat "roam://"
-          (my/aaronnote-roam--encode-ref note-id)
+          (my/noema-roam--encode-ref note-id)
           (pcase kind
-            ('tag (concat "#" (my/aaronnote-roam--encode-ref target)))
-            ('dom (concat "@" (mapconcat #'my/aaronnote-roam--encode-ref
-                                          (my/aaronnote-roam--dom-target-segments target)
+            ('tag (concat "#" (my/noema-roam--encode-ref target)))
+            ('dom (concat "@" (mapconcat #'my/noema-roam--encode-ref
+                                          (my/noema-roam--dom-target-segments target)
                                           "@")))
             (_ ""))))
 
-(defun my/aaronnote-roam--heading-labels (&optional file)
+(defun my/noema-roam--heading-labels (&optional file)
   "Return Markdown heading ids/labels in FILE or the current buffer.
 Each entry is a plist with :id, :text, and :pos."
   (let ((text (if (and file (file-exists-p file))
@@ -765,7 +765,7 @@ Each entry is a plist with :id, :text, and :pos."
             (push (list :id id :text id :pos (match-beginning 0)) labels)))))
     (nreverse labels)))
 
-(defun my/aaronnote-roam--goto-tag-id (id)
+(defun my/noema-roam--goto-tag-id (id)
   "Jump to Markdown heading/tag ID in the current buffer."
   (goto-char (point-min))
   (cond
@@ -780,14 +780,14 @@ Each entry is a plist with :id, :text, and :pos."
        (format "<%s>" (regexp-quote id))
        nil t))
     (goto-char (match-beginning 0)))
-   ((when-let* ((target (my/aaronnote-roam--find-dom-target id)))
-      (my/aaronnote-roam--goto-pos (plist-get target :pos))
+   ((when-let* ((target (my/noema-roam--find-dom-target id)))
+      (my/noema-roam--goto-pos (plist-get target :pos))
       t))
    (t
     (user-error "Tag id not found: %s" id)))
   (recenter-top-bottom))
 
-(defun my/aaronnote-roam--heading-items (&optional file)
+(defun my/noema-roam--heading-items (&optional file)
   "Return heading plists for FILE or the current buffer."
   (let ((text (if (and file (file-exists-p file))
                   (with-temp-buffer
@@ -813,48 +813,48 @@ Each entry is a plist with :id, :text, and :pos."
               items)))
     (nreverse items)))
 
-(defun my/aaronnote-roam--goto-pos (pos)
+(defun my/noema-roam--goto-pos (pos)
   "Move to POS, treating nil or synthetic zero positions as file start."
   (goto-char (if (and (integerp pos) (>= pos (point-min)))
                  pos
                (point-min))))
 
-(defun my/aaronnote-roam--normalize-dom-target (value)
+(defun my/noema-roam--normalize-dom-target (value)
   "Normalize Noema DOM target VALUE for matching."
   (string-trim
    (replace-regexp-in-string
     "\\s-+" " "
     (replace-regexp-in-string
      "[][\r\n]" " "
-     (string-remove-prefix "@" (my/aaronnote-roam--decode-ref (or value "")))))))
+     (string-remove-prefix "@" (my/noema-roam--decode-ref (or value "")))))))
 
-(defun my/aaronnote-roam--slug-dom-target (value)
+(defun my/noema-roam--slug-dom-target (value)
   "Return Noema's DOM target slug for VALUE."
   (let ((clean (downcase
                 (replace-regexp-in-string
                  "[`*_~()[\\]{}#+.!<>:;,'\"@]" " "
-                 (my/aaronnote-roam--normalize-dom-target value)))))
+                 (my/noema-roam--normalize-dom-target value)))))
     (replace-regexp-in-string
      "\\s-+" "-"
      (string-trim clean))))
 
-(defun my/aaronnote-roam--dom-target-segments (value)
+(defun my/noema-roam--dom-target-segments (value)
   "Return normalized DOM target path segments from VALUE."
   (seq-filter
    (lambda (segment) (not (string-empty-p segment)))
-   (mapcar #'my/aaronnote-roam--slug-dom-target
+   (mapcar #'my/noema-roam--slug-dom-target
            (split-string (string-remove-prefix "@" (or value "")) "@"))))
 
-(defun my/aaronnote-roam--dom-targets (&optional file note-id)
+(defun my/noema-roam--dom-targets (&optional file note-id)
   "Return Noema-style DOM/TOC targets for FILE or current buffer."
-  (let ((items (my/aaronnote-roam--heading-items file))
+  (let ((items (my/noema-roam--heading-items file))
         (stack nil)
         (label-stack nil)
         targets)
     (when-let* ((note-id)
-                (title (plist-get (my/aaronnote-roam--resolve-note note-id) :title)))
-      (let ((label (my/aaronnote-roam--normalize-dom-target title))
-            (slug (my/aaronnote-roam--slug-dom-target title)))
+                (title (plist-get (my/noema-roam--resolve-note note-id) :title)))
+      (let ((label (my/noema-roam--normalize-dom-target title))
+            (slug (my/noema-roam--slug-dom-target title)))
         (when (and (not (string-empty-p label))
                    (not (string-empty-p slug)))
           (push (list :slug slug
@@ -868,9 +868,9 @@ Each entry is a plist with :id, :text, and :pos."
                 targets))))
     (dolist (item items)
       (let* ((level (max 1 (plist-get item :level)))
-             (label (my/aaronnote-roam--normalize-dom-target
+             (label (my/noema-roam--normalize-dom-target
                      (plist-get item :text)))
-             (slug (my/aaronnote-roam--slug-dom-target label)))
+             (slug (my/noema-roam--slug-dom-target label)))
         (when (and (not (string-empty-p label))
                    (not (string-empty-p slug)))
           (setq stack (seq-take stack (1- level))
@@ -887,14 +887,14 @@ Each entry is a plist with :id, :text, and :pos."
                 targets))))
     (nreverse targets)))
 
-(defun my/aaronnote-roam--dom-target-path-label (target)
+(defun my/noema-roam--dom-target-path-label (target)
   "Return a readable label path for TARGET."
   (string-join (plist-get target :label-path) " / "))
 
-(defun my/aaronnote-roam--target-path-matches-p (actual wanted &optional allow-suffix)
+(defun my/noema-roam--target-path-matches-p (actual wanted &optional allow-suffix)
   "Return non-nil when ACTUAL target path matches WANTED."
-  (let ((actual (mapcar #'my/aaronnote-roam--slug-dom-target actual))
-        (wanted (mapcar #'my/aaronnote-roam--slug-dom-target wanted)))
+  (let ((actual (mapcar #'my/noema-roam--slug-dom-target actual))
+        (wanted (mapcar #'my/noema-roam--slug-dom-target wanted)))
     (cond
      ((or (null actual) (null wanted)) nil)
      ((equal actual wanted) t)
@@ -902,24 +902,24 @@ Each entry is a plist with :id, :text, and :pos."
            (>= (length actual) (length wanted)))
       (equal (last actual (length wanted)) wanted)))))
 
-(defun my/aaronnote-roam--find-dom-target (dom &optional file note-id)
+(defun my/noema-roam--find-dom-target (dom &optional file note-id)
   "Find DOM target DOM in FILE or current buffer."
-  (let* ((wanted (my/aaronnote-roam--dom-target-segments dom))
-         (targets (my/aaronnote-roam--dom-targets file note-id)))
+  (let* ((wanted (my/noema-roam--dom-target-segments dom))
+         (targets (my/noema-roam--dom-targets file note-id)))
     (cond
      ((null wanted) nil)
      ((> (length wanted) 1)
       (or (seq-find (lambda (target)
-                      (my/aaronnote-roam--target-path-matches-p
+                      (my/noema-roam--target-path-matches-p
                        (plist-get target :path) wanted))
                     targets)
           (seq-find (lambda (target)
-                      (my/aaronnote-roam--target-path-matches-p
+                      (my/noema-roam--target-path-matches-p
                        (plist-get target :path) wanted t))
                     targets)))
      (t
       (let* ((wanted-segment (car wanted))
-             (wanted-label (my/aaronnote-roam--normalize-dom-target dom)))
+             (wanted-label (my/noema-roam--normalize-dom-target dom)))
         (seq-find
          (lambda (target)
            (or (equal (plist-get target :slug) wanted-segment)
@@ -927,20 +927,20 @@ Each entry is a plist with :id, :text, and :pos."
                       (downcase wanted-label))))
          targets))))))
 
-(defun my/aaronnote-roam--goto-dom-target (dom)
+(defun my/noema-roam--goto-dom-target (dom)
   "Jump to Noema DOM/TOC target DOM in the current buffer."
-  (let* ((target (my/aaronnote-roam--find-dom-target dom))
+  (let* ((target (my/noema-roam--find-dom-target dom))
          (pos (and target (plist-get target :pos))))
     (unless pos
       (user-error "DOM target not found: %s" dom))
-    (my/aaronnote-roam--goto-pos pos)
+    (my/noema-roam--goto-pos pos)
     (recenter-top-bottom)))
 
-(defun my/aaronnote-roam--read-dom-target (note-id)
+(defun my/noema-roam--read-dom-target (note-id)
   "Read an Noema DOM/TOC target for NOTE-ID."
-  (let* ((record (my/aaronnote-roam--resolve-note note-id))
+  (let* ((record (my/noema-roam--resolve-note note-id))
          (file (plist-get record :file))
-         (targets (my/aaronnote-roam--dom-targets file note-id))
+         (targets (my/noema-roam--dom-targets file note-id))
          (table (mapcar (lambda (target)
                           (cons (string-join (plist-get target :path) "@")
                                 target))
@@ -954,71 +954,71 @@ Each entry is a plist with :id, :text, and :pos."
                            . (lambda (candidate)
                                (when-let* ((target (cdr (assoc candidate table))))
                                  (concat "  "
-                                         (my/aaronnote-roam--dom-target-path-label
+                                         (my/noema-roam--dom-target-path-label
                                           target))))))
                       (complete-with-action action table string pred)))
                   nil t)))
     (cdr (assoc choice table))))
 
-(defun my/aaronnote-roam--ui-actions (&optional leading)
+(defun my/noema-roam--ui-actions (&optional leading)
   "Return standard native roam view actions after optional LEADING actions."
   (append
    leading
    '((:label "g Refresh"
-      :command my/aaronnote-roam-ui-refresh
+      :command my/noema-roam-ui-refresh
       :help "Refresh this Noema roam view"
       :primary t)
      (:label "q Close"
       :command quit-window
       :help "Close this Noema roam view"))))
 
-(defun my/aaronnote-roam--prepare-ui-buffer
+(defun my/noema-roam--prepare-ui-buffer
     (name title icon refresh-function &optional status)
   "Prepare native roam buffer NAME with TITLE, ICON, REFRESH-FUNCTION, and STATUS."
   (let ((buffer (get-buffer-create name)))
     (with-current-buffer buffer
-      (unless (derived-mode-p 'my/aaronnote-roam-ui-mode)
-        (my/aaronnote-roam-ui-mode))
-      (setq-local my/aaronnote-roam-ui-refresh-function refresh-function)
-      (my/aaronnote-roam-ui-set-header title icon status))
+      (unless (derived-mode-p 'my/noema-roam-ui-mode)
+        (my/noema-roam-ui-mode))
+      (setq-local my/noema-roam-ui-refresh-function refresh-function)
+      (my/noema-roam-ui-set-header title icon status))
     buffer))
 
-(defun my/aaronnote-roam--show-toc (&optional file title)
+(defun my/noema-roam--show-toc (&optional file title)
   "Show a heading TOC for FILE or the current buffer."
   (let* ((source-buffer (current-buffer))
          (target-file (or file buffer-file-name))
          (items (if file
-                    (my/aaronnote-roam--heading-items file)
+                    (my/noema-roam--heading-items file)
                   (with-current-buffer source-buffer
-                    (my/aaronnote-roam--heading-items))))
+                    (my/noema-roam--heading-items))))
          (display-title (or title file (buffer-name source-buffer)))
          (refresh
           (let ((source source-buffer) (f file) (label title))
             (lambda ()
               (if (buffer-live-p source)
                   (with-current-buffer source
-                    (my/aaronnote-roam--show-toc f label))
-                (my/aaronnote-roam--show-toc f label)))))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
+                    (my/noema-roam--show-toc f label))
+                (my/noema-roam--show-toc f label)))))
+         (buf (my/noema-roam--prepare-ui-buffer
                "*roam-toc*" "Roam TOC" 'toc refresh
                (format "%d headings" (length items)))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Table of contents"
           :icon 'toc
           :subtitle (format "%s" display-title)
           :stats (list (cons (format "%d headings" (length items)) 'info))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "Headings" (length items))
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Headings" (length items))
          (if (null items)
-             (my/aaronnote-roam-ui-insert-empty "No headings in this note.")
+             (my/noema-roam-ui-insert-empty "No headings in this note.")
            (dolist (item items)
              (let ((pos (plist-get item :pos))
                    (level (plist-get item :level))
                    (text (plist-get item :text)))
-               (my/aaronnote-roam-ui-insert-row
+               (my/noema-roam-ui-insert-row
                 :id pos
                 :icon 'toc
                 :title text
@@ -1033,13 +1033,13 @@ Each entry is a plist with :id, :text, and :pos."
                      (target (find-file target))
                      ((buffer-live-p source) (pop-to-buffer source))
                      (t (user-error "TOC source buffer is no longer available")))
-                    (my/aaronnote-roam--goto-pos position)
+                    (my/noema-roam--goto-pos position)
                     (recenter-top-bottom))))))))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam--open-file-smart (file parsed)
+(defun my/noema-roam--open-file-smart (file parsed)
   "Open FILE using smart routing based on its type.
-PARSED is the plist from `my/aaronnote-roam--parse-target'; it carries the
+PARSED is the plist from `my/noema-roam--parse-target'; it carries the
 optional #tag / @dom target for Markdown notes."
   (cond
    ;; Directory → dired.
@@ -1047,19 +1047,19 @@ optional #tag / @dom target for Markdown notes."
     (dired file))
    ;; Markdown note → Emacs + optional in-note navigation.
    ((string-match-p "\\.\\(?:md\\|markdown\\)\\'" file)
-    (my/aaronnote-roam--touch-recent (plist-get parsed :slug))
+    (my/noema-roam--touch-recent (plist-get parsed :slug))
     (find-file file)
     (cond
      ((plist-get parsed :id)
-      (my/aaronnote-roam--goto-tag-id (plist-get parsed :id)))
+      (my/noema-roam--goto-tag-id (plist-get parsed :id)))
      ((plist-get parsed :dom)
-      (my/aaronnote-roam--goto-dom-target (plist-get parsed :dom)))))
+      (my/noema-roam--goto-dom-target (plist-get parsed :dom)))))
    ;; Everything else (PDF, image, Lean source, etc.) → central open route.
    (t
     (require 'init-open)
     (my/open-file file))))
 
-(defun my/aaronnote-roam-follow-link ()
+(defun my/noema-roam-follow-link ()
   "Jump to the note or source region referenced at point.
 Targets may use Noema roam syntax:
   roam://note-id
@@ -1074,30 +1074,30 @@ directory; /x is resolved against the roam vault root."
       (my/note-code-open-at-point)
     (let* ((base-dir (and buffer-file-name
                           (file-name-directory buffer-file-name)))
-           (target (my/aaronnote-roam--target-at-point))
-           (parsed (and target (my/aaronnote-roam--parse-target target base-dir)))
+           (target (my/noema-roam--target-at-point))
+           (parsed (and target (my/noema-roam--parse-target target base-dir)))
            (file (and parsed (plist-get parsed :file)))
            (ref (and parsed (plist-get parsed :ref))))
       (if (and file (file-exists-p file))
-          (my/aaronnote-roam--open-file-smart file parsed)
+          (my/noema-roam--open-file-smart file parsed)
         (if ref
             (when (yes-or-no-p (format "Note '%s' not found. Create it? " ref))
-              (my/aaronnote-roam-new-note ref))
+              (my/noema-roam-new-note ref))
           (user-error "No Markdown roam link found at point"))))))
 
-(defun my/aaronnote-roam-find-note ()
+(defun my/noema-roam-find-note ()
   "Find a roam note by Noema id/path/title with completion."
   (interactive)
-  (my/aaronnote-roam--open-slug
-   (my/aaronnote-roam--read-note-id "Roam note: ")))
+  (my/noema-roam--open-slug
+   (my/noema-roam--read-note-id "Roam note: ")))
 
-(defun my/aaronnote-roam-delete-node (note-id)
+(defun my/noema-roam-delete-node (note-id)
   "Move NOTE-ID's Markdown node to trash through the Noema runtime."
-  (interactive (list (my/aaronnote-roam--read-note-id "Delete roam node: ")))
+  (interactive (list (my/noema-roam--read-note-id "Delete roam node: ")))
   (let* ((record (seq-find
                   (lambda (candidate)
                     (equal (plist-get candidate :id) note-id))
-                  (my/aaronnote-roam--note-records)))
+                  (my/noema-roam--note-records)))
          (file (plist-get record :file))
          (title (plist-get record :title)))
     (unless (and record file (file-exists-p file))
@@ -1109,57 +1109,57 @@ directory; /x is resolved against the roam vault root."
       (let ((delete-current-buffer
              (and buffer-file-name
                   (file-equal-p buffer-file-name file))))
-        (my/aaronnote-roam--runtime-call "delete-node" "--file" file)
-        (my/aaronnote-roam--clear-runtime-cache)
+        (my/noema-roam--runtime-call "delete-node" "--file" file)
+        (my/noema-roam--clear-runtime-cache)
         (when delete-current-buffer
           (kill-buffer (current-buffer)))
         (message "Noema node moved to trash: %s"
                  (abbreviate-file-name file))))))
 
-(defun my/aaronnote-roam-insert-link ()
+(defun my/noema-roam-insert-link ()
   "Open the interactive selector and insert a Markdown roam link."
   (interactive)
-  (my/aaronnote-roam-select-link))
+  (my/noema-roam-select-link))
 
-(defvar-local my/aaronnote-roam-new--draft nil
+(defvar-local my/noema-roam-new--draft nil
   "Draft plist edited by the current Roam New buffer.")
 
-(defvar-local my/aaronnote-roam-new--templates nil
+(defvar-local my/noema-roam-new--templates nil
   "Template records available to the current Roam New buffer.")
 
-(defvar-local my/aaronnote-roam-new--base-directory ""
+(defvar-local my/noema-roam-new--base-directory ""
   "Relative default directory used by the current Roam New buffer.")
 
-(defvar-local my/aaronnote-roam-new--widgets nil
+(defvar-local my/noema-roam-new--widgets nil
   "Editable widgets in the current Roam New buffer.")
 
-(defvar my/aaronnote-roam-new-mode-map
+(defvar my/noema-roam-new-mode-map
   (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map my/aaronnote-roam-ui-mode-map)
-    (define-key map (kbd "c") #'my/aaronnote-roam-new-create)
-    (define-key map (kbd "R") #'my/aaronnote-roam-new-reset)
-    (define-key map (kbd "t") #'my/aaronnote-roam-new-edit-type)
-    (define-key map (kbd "T") #'my/aaronnote-roam-new-edit-template)
-    (define-key map (kbd "a") #'my/aaronnote-roam-new-edit-tags)
-    (define-key map (kbd "p") #'my/aaronnote-roam-new-edit-path)
+    (set-keymap-parent map my/noema-roam-ui-mode-map)
+    (define-key map (kbd "c") #'my/noema-roam-new-create)
+    (define-key map (kbd "R") #'my/noema-roam-new-reset)
+    (define-key map (kbd "t") #'my/noema-roam-new-edit-type)
+    (define-key map (kbd "T") #'my/noema-roam-new-edit-template)
+    (define-key map (kbd "a") #'my/noema-roam-new-edit-tags)
+    (define-key map (kbd "p") #'my/noema-roam-new-edit-path)
     map)
-  "Keymap for `my/aaronnote-roam-new-mode'.")
+  "Keymap for `my/noema-roam-new-mode'.")
 
-(define-derived-mode my/aaronnote-roam-new-mode my/aaronnote-roam-ui-mode "Roam-New"
+(define-derived-mode my/noema-roam-new-mode my/noema-roam-ui-mode "Roam-New"
   "Native workbench for creating Noema Markdown notes."
   ;; This view is a form.  Keep it writable so Emacs widget fields accept direct
   ;; typing instead of forcing every edit through the minibuffer.
   (setq-local buffer-read-only nil)
-  (setq-local my/aaronnote-roam-ui-refresh-function
-              #'my/aaronnote-roam-new-refresh)
-  (setq-local widget-button-face 'my/aaronnote-roam-ui-action)
-  (setq-local widget-field-face 'my/aaronnote-roam-ui-row-title)
-  (my/aaronnote-roam-ui-set-header "Roam New" 'new "draft"))
+  (setq-local my/noema-roam-ui-refresh-function
+              #'my/noema-roam-new-refresh)
+  (setq-local widget-button-face 'my/noema-roam-ui-action)
+  (setq-local widget-field-face 'my/noema-roam-ui-row-title)
+  (my/noema-roam-ui-set-header "Roam New" 'new "draft"))
 
 (with-eval-after-load 'evil
-  (evil-set-initial-state 'my/aaronnote-roam-new-mode 'emacs))
+  (evil-set-initial-state 'my/noema-roam-new-mode 'emacs))
 
-(defun my/aaronnote-roam-new--normalize-directory (directory)
+(defun my/noema-roam-new--normalize-directory (directory)
   "Return DIRECTORY as a clean vault-relative directory."
   (let ((directory
          (replace-regexp-in-string
@@ -1169,32 +1169,32 @@ directory; /x is resolved against the roam vault root."
            (string-trim (or directory ""))))))
     (if (member directory '("" "." "Root")) "" directory)))
 
-(defun my/aaronnote-roam-new--default-path (title &optional directory)
+(defun my/noema-roam-new--default-path (title &optional directory)
   "Return the default Markdown path for TITLE in DIRECTORY."
-  (let ((directory (my/aaronnote-roam-new--normalize-directory directory))
-        (name (concat (my/aaronnote-roam--slugify-title title) ".md")))
+  (let ((directory (my/noema-roam-new--normalize-directory directory))
+        (name (concat (my/noema-roam--slugify-title title) ".md")))
     (if (string-empty-p directory)
         name
       (concat directory "/" name))))
 
-(defun my/aaronnote-roam-new--path-directory (path)
+(defun my/noema-roam-new--path-directory (path)
   "Return PATH's vault-relative directory."
-  (my/aaronnote-roam-new--normalize-directory
+  (my/noema-roam-new--normalize-directory
    (or (file-name-directory (or path "")) "")))
 
-(defun my/aaronnote-roam-new--path-basename (path title)
+(defun my/noema-roam-new--path-basename (path title)
   "Return PATH's filename, falling back to TITLE's default Markdown filename."
   (let ((name (file-name-nondirectory (or path ""))))
     (if (string-empty-p name)
         (file-name-nondirectory
-         (my/aaronnote-roam-new--default-path title))
+         (my/noema-roam-new--default-path title))
       name)))
 
-(defun my/aaronnote-roam-new--path-file (path)
+(defun my/noema-roam-new--path-file (path)
   "Return absolute file for vault-relative PATH."
-  (expand-file-name path (file-name-as-directory (my/aaronnote-roam-root))))
+  (expand-file-name path (file-name-as-directory (my/noema-roam-root))))
 
-(defun my/aaronnote-roam-new--unique-path (path)
+(defun my/noema-roam-new--unique-path (path)
   "Return PATH, or a numbered variant, that does not already exist."
   (let* ((path (string-trim (or path "")))
          (dir (or (file-name-directory path) ""))
@@ -1204,12 +1204,12 @@ directory; /x is resolved against the roam vault root."
          (n 2))
     (while (and (not (string-empty-p candidate))
                 (file-exists-p
-                 (my/aaronnote-roam-new--path-file candidate)))
+                 (my/noema-roam-new--path-file candidate)))
       (setq candidate (concat dir base "-" (number-to-string n) ext)
             n (1+ n)))
     candidate))
 
-(defun my/aaronnote-roam-new--normalize-tags (tags)
+(defun my/noema-roam-new--normalize-tags (tags)
   "Return TAGS as a clean string list."
   (delete-dups
    (seq-filter
@@ -1219,17 +1219,17 @@ directory; /x is resolved against the roam vault root."
                 tags
               (split-string (or tags "") "," t))))))
 
-(defun my/aaronnote-roam-new--default-draft (&optional directory)
+(defun my/noema-roam-new--default-draft (&optional directory)
   "Return a default Roam New draft rooted in DIRECTORY."
   (list :node-type "roam"
         :title "Untitled"
-        :path (my/aaronnote-roam-new--unique-path
-               (my/aaronnote-roam-new--default-path "Untitled" directory))
+        :path (my/noema-roam-new--unique-path
+               (my/noema-roam-new--default-path "Untitled" directory))
         :kind "note"
         :template-key "roam"
         :tags nil))
 
-(defun my/aaronnote-roam-new--draft-for-create (draft &optional directory)
+(defun my/noema-roam-new--draft-for-create (draft &optional directory)
   "Return DRAFT normalized like Noema New before creation.
 Empty title, path, and kind fields receive the same defaults as Noema's
 New Note form.  DIRECTORY defaults to the current Roam New base directory."
@@ -1241,16 +1241,16 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
          (title (string-trim (or (plist-get draft :title) "")))
          (title (if (string-empty-p title) "Untitled" title))
          (base-directory
-          (or directory my/aaronnote-roam-new--base-directory))
+          (or directory my/noema-roam-new--base-directory))
          (raw-path (string-trim (or (plist-get draft :path) "")))
          (untitled-path
-          (my/aaronnote-roam-new--default-path "Untitled" base-directory))
+          (my/noema-roam-new--default-path "Untitled" base-directory))
          (path (if (or (string-empty-p raw-path)
                        (and (not (string= title "Untitled"))
                             (equal raw-path untitled-path)))
-                   (my/aaronnote-roam-new--default-path title base-directory)
+                   (my/noema-roam-new--default-path title base-directory)
                  raw-path))
-         (path (my/aaronnote-roam-new--unique-path path))
+         (path (my/noema-roam-new--unique-path path))
          (kind (string-trim (or (plist-get draft :kind) "")))
          (kind (if (string-empty-p kind)
                    (if (string= node-type "roam") "note" "default")
@@ -1261,19 +1261,19 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
           normalized (plist-put normalized :path path)
           normalized (plist-put normalized :kind kind)
           normalized (plist-put normalized :tags
-                                (my/aaronnote-roam-new--normalize-tags
+                                (my/noema-roam-new--normalize-tags
                                  (plist-get draft :tags))))
     normalized))
 
-(defun my/aaronnote-roam-new--template-field (template field)
+(defun my/noema-roam-new--template-field (template field)
   "Return FIELD from TEMPLATE, which may be a hash table or plist."
   (if (hash-table-p template)
       (gethash (substring (symbol-name field) 1) template)
     (plist-get template field)))
 
-(defun my/aaronnote-roam-new--load-templates ()
+(defun my/noema-roam-new--load-templates ()
   "Return templates reported by the Noema runtime."
-  (let ((response (my/aaronnote-roam--runtime-call "templates" "--force")))
+  (let ((response (my/noema-roam--runtime-call "templates" "--force")))
     (or (and response (gethash "templates" response))
         '((:key "basic" :name "Basic Markdown note")
           (:key "daily" :name "Daily note")
@@ -1286,38 +1286,38 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
           (:key "weekly-review" :name "Weekly review")
           (:key "zettel" :name "Zettel")))))
 
-(defun my/aaronnote-roam-new--template-label (key)
+(defun my/noema-roam-new--template-label (key)
   "Return a display label for template KEY."
   (if (string-empty-p (or key ""))
       "None"
     (let ((template
            (seq-find
             (lambda (candidate)
-              (equal (my/aaronnote-roam-new--template-field candidate :key)
+              (equal (my/noema-roam-new--template-field candidate :key)
                      key))
-            my/aaronnote-roam-new--templates)))
+            my/noema-roam-new--templates)))
       (or (and template
-               (my/aaronnote-roam-new--template-field template :name))
+               (my/noema-roam-new--template-field template :name))
           key))))
 
-(defun my/aaronnote-roam-new--template-candidates ()
+(defun my/noema-roam-new--template-candidates ()
   "Return display-name and key pairs for available templates."
-  (let* ((active-kind (plist-get my/aaronnote-roam-new--draft :kind))
+  (let* ((active-kind (plist-get my/noema-roam-new--draft :kind))
          (templates
           (seq-filter
            (lambda (template)
              (let ((kind
-                    (my/aaronnote-roam-new--template-field template :kind)))
+                    (my/noema-roam-new--template-field template :kind)))
                (or (string-empty-p (or kind ""))
                    (equal kind active-kind))))
-           my/aaronnote-roam-new--templates)))
+           my/noema-roam-new--templates)))
     (cons
      '("None" . "")
      (mapcar
       (lambda (template)
-        (let ((key (my/aaronnote-roam-new--template-field template :key))
-              (name (my/aaronnote-roam-new--template-field template :name))
-              (kind (my/aaronnote-roam-new--template-field template :kind)))
+        (let ((key (my/noema-roam-new--template-field template :key))
+              (name (my/noema-roam-new--template-field template :name))
+              (kind (my/noema-roam-new--template-field template :kind)))
           (cons (format "%s%s"
                         (or name key "Template")
                         (if (string-empty-p (or kind ""))
@@ -1326,11 +1326,11 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
                 key)))
       templates))))
 
-(defun my/aaronnote-roam-new--path-suggestions ()
+(defun my/noema-roam-new--path-suggestions ()
   "Return vault-relative directory suggestions for Roam New."
-  (let ((root (file-name-as-directory (my/aaronnote-roam-root)))
+  (let ((root (file-name-as-directory (my/noema-roam-root)))
         (directories '("")))
-    (dolist (record (my/aaronnote-roam--note-records))
+    (dolist (record (my/noema-roam--note-records))
       (when-let* ((file (plist-get record :file))
                   ((file-name-absolute-p file))
                   (relative (file-relative-name file root))
@@ -1338,19 +1338,19 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
         (push directory directories)))
     (sort (delete-dups directories) #'string<)))
 
-(defun my/aaronnote-roam-new--tag-suggestions ()
+(defun my/noema-roam-new--tag-suggestions ()
   "Return known roam tags for Roam New."
   (sort
    (delete-dups
     (apply #'append
            (mapcar
             (lambda (record)
-              (my/aaronnote-roam--note-list-field
+              (my/noema-roam--note-list-field
                (plist-get record :note) "tags"))
-            (my/aaronnote-roam--note-records))))
+            (my/noema-roam--note-records))))
    #'string<))
 
-(defun my/aaronnote-roam-new--kind-suggestions ()
+(defun my/noema-roam-new--kind-suggestions ()
   "Return known note kinds for Roam New."
   (sort
    (delete-dups
@@ -1359,133 +1359,133 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
                 (delq nil
                       (mapcar
                        (lambda (record)
-                         (my/aaronnote-roam--note-field
+                         (my/noema-roam--note-field
                           (plist-get record :note) "kind"))
-                       (my/aaronnote-roam--note-records))))))
+                       (my/noema-roam--note-records))))))
    #'string<))
 
-(defun my/aaronnote-roam-new--set (key value)
+(defun my/noema-roam-new--set (key value)
   "Set draft KEY to VALUE and rerender the Roam New buffer."
-  (my/aaronnote-roam-new--sync-draft-from-widgets)
-  (setq-local my/aaronnote-roam-new--draft
-              (plist-put my/aaronnote-roam-new--draft key value))
-  (my/aaronnote-roam-new-render t))
+  (my/noema-roam-new--sync-draft-from-widgets)
+  (setq-local my/noema-roam-new--draft
+              (plist-put my/noema-roam-new--draft key value))
+  (my/noema-roam-new-render t))
 
-(defun my/aaronnote-roam-new--plain-widget-value (key)
+(defun my/noema-roam-new--plain-widget-value (key)
   "Return editable widget KEY's plain string value, or nil."
-  (when-let* ((widget (alist-get key my/aaronnote-roam-new--widgets)))
+  (when-let* ((widget (alist-get key my/noema-roam-new--widgets)))
     (substring-no-properties (format "%s" (widget-value widget)))))
 
-(defun my/aaronnote-roam-new--sync-draft-from-widgets ()
+(defun my/noema-roam-new--sync-draft-from-widgets ()
   "Copy editable field widget values into the current Roam New draft."
-  (when (and my/aaronnote-roam-new--widgets my/aaronnote-roam-new--draft)
-    (let ((draft my/aaronnote-roam-new--draft))
+  (when (and my/noema-roam-new--widgets my/noema-roam-new--draft)
+    (let ((draft my/noema-roam-new--draft))
       (dolist (entry '((:title . title)
                        (:path . path)
                        (:kind . kind)))
-        (when-let* ((value (my/aaronnote-roam-new--plain-widget-value
+        (when-let* ((value (my/noema-roam-new--plain-widget-value
                             (cdr entry))))
           (setq draft (plist-put draft (car entry) value))))
-      (when-let* ((tags (my/aaronnote-roam-new--plain-widget-value 'tags)))
+      (when-let* ((tags (my/noema-roam-new--plain-widget-value 'tags)))
         (setq draft
               (plist-put draft :tags
-                         (my/aaronnote-roam-new--normalize-tags tags))))
-      (setq-local my/aaronnote-roam-new--draft draft))))
+                         (my/noema-roam-new--normalize-tags tags))))
+      (setq-local my/noema-roam-new--draft draft))))
 
-(defun my/aaronnote-roam-new-edit-type ()
+(defun my/noema-roam-new-edit-type ()
   "Edit the note type in the current Roam New draft."
   (interactive)
-  (my/aaronnote-roam-new--sync-draft-from-widgets)
-  (let* ((old (plist-get my/aaronnote-roam-new--draft :node-type))
+  (my/noema-roam-new--sync-draft-from-widgets)
+  (let* ((old (plist-get my/noema-roam-new--draft :node-type))
          (next (completing-read "Note type: " '("roam" "regular")
                                 nil t nil nil old))
-         (template (plist-get my/aaronnote-roam-new--draft :template-key))
-         (kind (plist-get my/aaronnote-roam-new--draft :kind)))
-    (setq-local my/aaronnote-roam-new--draft
-                (plist-put my/aaronnote-roam-new--draft :node-type next))
+         (template (plist-get my/noema-roam-new--draft :template-key))
+         (kind (plist-get my/noema-roam-new--draft :kind)))
+    (setq-local my/noema-roam-new--draft
+                (plist-put my/noema-roam-new--draft :node-type next))
     (when (member template '("roam" "basic"))
-      (setq-local my/aaronnote-roam-new--draft
-                  (plist-put my/aaronnote-roam-new--draft :template-key
+      (setq-local my/noema-roam-new--draft
+                  (plist-put my/noema-roam-new--draft :template-key
                              (if (string= next "roam") "roam" "basic"))))
     (when (member kind '("note" "default"))
-      (setq-local my/aaronnote-roam-new--draft
-                  (plist-put my/aaronnote-roam-new--draft :kind
+      (setq-local my/noema-roam-new--draft
+                  (plist-put my/noema-roam-new--draft :kind
                              (if (string= next "roam") "note" "default"))))
-    (my/aaronnote-roam-new-render t)))
+    (my/noema-roam-new-render t)))
 
-(defun my/aaronnote-roam-new-edit-title ()
+(defun my/noema-roam-new-edit-title ()
   "Edit the title in the current Roam New draft."
   (interactive)
-  (my/aaronnote-roam-new--sync-draft-from-widgets)
-  (let* ((old-title (plist-get my/aaronnote-roam-new--draft :title))
+  (my/noema-roam-new--sync-draft-from-widgets)
+  (let* ((old-title (plist-get my/noema-roam-new--draft :title))
          (old-default
-          (my/aaronnote-roam-new--default-path
-           old-title my/aaronnote-roam-new--base-directory))
+          (my/noema-roam-new--default-path
+           old-title my/noema-roam-new--base-directory))
          (title (read-string "Title: " old-title)))
-    (setq-local my/aaronnote-roam-new--draft
-                (plist-put my/aaronnote-roam-new--draft :title title))
-    (when (equal (plist-get my/aaronnote-roam-new--draft :path) old-default)
-      (setq-local my/aaronnote-roam-new--draft
+    (setq-local my/noema-roam-new--draft
+                (plist-put my/noema-roam-new--draft :title title))
+    (when (equal (plist-get my/noema-roam-new--draft :path) old-default)
+      (setq-local my/noema-roam-new--draft
                   (plist-put
-                   my/aaronnote-roam-new--draft :path
-                   (my/aaronnote-roam-new--default-path
-                    title my/aaronnote-roam-new--base-directory))))
-    (my/aaronnote-roam-new-render t)))
+                   my/noema-roam-new--draft :path
+                   (my/noema-roam-new--default-path
+                    title my/noema-roam-new--base-directory))))
+    (my/noema-roam-new-render t)))
 
-(defun my/aaronnote-roam-new-edit-path ()
+(defun my/noema-roam-new-edit-path ()
   "Edit the save directory in the current Roam New draft."
   (interactive)
-  (my/aaronnote-roam-new--sync-draft-from-widgets)
-  (let* ((root (file-name-as-directory (expand-file-name (my/aaronnote-roam-root))))
-         (current (plist-get my/aaronnote-roam-new--draft :path))
-         (title (plist-get my/aaronnote-roam-new--draft :title))
-         (current-dir (my/aaronnote-roam-new--path-directory current))
-         (filename (my/aaronnote-roam-new--path-basename current title))
+  (my/noema-roam-new--sync-draft-from-widgets)
+  (let* ((root (file-name-as-directory (expand-file-name (my/noema-roam-root))))
+         (current (plist-get my/noema-roam-new--draft :path))
+         (title (plist-get my/noema-roam-new--draft :title))
+         (current-dir (my/noema-roam-new--path-directory current))
+         (filename (my/noema-roam-new--path-basename current title))
          (initial-dir (expand-file-name current-dir root))
          (raw-dir (read-directory-name "Save directory: "
                                        initial-dir initial-dir nil))
          (selected-dir (file-name-as-directory (expand-file-name raw-dir root))))
     (unless (file-in-directory-p selected-dir root)
       (user-error "Save directory must be inside the Noema vault"))
-    (my/aaronnote-roam-new--set
+    (my/noema-roam-new--set
      :path
-     (my/aaronnote-roam-new--unique-path
+     (my/noema-roam-new--unique-path
       (concat
        (let ((relative-dir
-              (my/aaronnote-roam-new--normalize-directory
+              (my/noema-roam-new--normalize-directory
                (file-relative-name selected-dir root))))
          (if (string-empty-p relative-dir)
              ""
            (concat relative-dir "/")))
        filename)))))
 
-(defun my/aaronnote-roam-new-edit-kind ()
+(defun my/noema-roam-new-edit-kind ()
   "Edit the note kind in the current Roam New draft."
   (interactive)
-  (my/aaronnote-roam-new--set
+  (my/noema-roam-new--set
    :kind
-   (completing-read "Kind: " (my/aaronnote-roam-new--kind-suggestions)
+   (completing-read "Kind: " (my/noema-roam-new--kind-suggestions)
                     nil nil nil nil
-                    (plist-get my/aaronnote-roam-new--draft :kind))))
+                    (plist-get my/noema-roam-new--draft :kind))))
 
-(defun my/aaronnote-roam-new-edit-template ()
+(defun my/noema-roam-new-edit-template ()
   "Edit the template in the current Roam New draft."
   (interactive)
-  (my/aaronnote-roam-new--sync-draft-from-widgets)
-  (let* ((candidates (my/aaronnote-roam-new--template-candidates))
-         (current (my/aaronnote-roam-new--template-label
-                   (plist-get my/aaronnote-roam-new--draft :template-key)))
+  (my/noema-roam-new--sync-draft-from-widgets)
+  (let* ((candidates (my/noema-roam-new--template-candidates))
+         (current (my/noema-roam-new--template-label
+                   (plist-get my/noema-roam-new--draft :template-key)))
          (choice (completing-read "Template: " candidates nil t nil nil current)))
-    (my/aaronnote-roam-new--set :template-key
+    (my/noema-roam-new--set :template-key
                                 (or (cdr (assoc choice candidates)) ""))))
 
-(defun my/aaronnote-roam-new-edit-tags ()
+(defun my/noema-roam-new-edit-tags ()
   "Edit tags in the current Roam New draft, adding one at a time."
   (interactive)
-  (my/aaronnote-roam-new--sync-draft-from-widgets)
-  (let* ((suggestions (my/aaronnote-roam-new--tag-suggestions))
+  (my/noema-roam-new--sync-draft-from-widgets)
+  (let* ((suggestions (my/noema-roam-new--tag-suggestions))
          (tags (copy-sequence
-                (or (plist-get my/aaronnote-roam-new--draft :tags) nil))))
+                (or (plist-get my/noema-roam-new--draft :tags) nil))))
     (catch 'done
       (while t
         (let* ((status (if tags
@@ -1499,13 +1499,13 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
               (throw 'done nil)
             (unless (member input tags)
               (setq tags (append tags (list input))))))))
-    (my/aaronnote-roam-new--set
-     :tags (my/aaronnote-roam-new--normalize-tags tags))))
+    (my/noema-roam-new--set
+     :tags (my/noema-roam-new--normalize-tags tags))))
 
-(defun my/aaronnote-roam-new--insert-field
+(defun my/noema-roam-new--insert-field
     (id icon label value detail action &optional tone)
   "Insert one selectable Roam New field."
-  (my/aaronnote-roam-ui-insert-row
+  (my/noema-roam-ui-insert-row
    :id id
    :icon icon
    :badge label
@@ -1517,38 +1517,38 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
    :action (lambda (_ignored) (call-interactively action))
    :help (format "RET/mouse-1: edit %s" (downcase label))))
 
-(defun my/aaronnote-roam-new--editable-width ()
+(defun my/noema-roam-new--editable-width ()
   "Return a reasonable width for Roam New editable fields."
   (max 24 (min 72 (- (window-width) 32))))
 
-(defun my/aaronnote-roam-new--insert-editable-field
+(defun my/noema-roam-new--insert-editable-field
     (id icon label value detail key &optional placeholder action)
   "Insert directly editable Roam New field KEY.
 ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
   (let ((start (point))
         (value (or value "")))
     (insert "   "
-            (propertize (my/aaronnote-roam-ui-icon icon)
-                        'face 'my/aaronnote-roam-ui-icon)
+            (propertize (my/noema-roam-ui-icon icon)
+                        'face 'my/noema-roam-ui-icon)
             "  ")
-    (my/aaronnote-roam-ui-insert-badge label 'muted)
+    (my/noema-roam-ui-insert-badge label 'muted)
     (insert "  ")
     (let* ((label-end (point))
            (widget
             (widget-create
              'editable-field
-             :size (my/aaronnote-roam-new--editable-width)
+             :size (my/noema-roam-new--editable-width)
              :format "%v"
              :help-echo (format "Edit %s directly" (downcase label))
              :notify
              (lambda (_widget &rest _ignored)
-               (my/aaronnote-roam-new--sync-draft-from-widgets))
+               (my/noema-roam-new--sync-draft-from-widgets))
              (if (string-empty-p value) (or placeholder "") value))))
-      (push (cons key widget) my/aaronnote-roam-new--widgets)
+      (push (cons key widget) my/noema-roam-new--widgets)
       (insert "\n")
       (when (and detail (not (string-empty-p detail)))
         (insert "      "
-                (propertize detail 'face 'my/aaronnote-roam-ui-detail)
+                (propertize detail 'face 'my/noema-roam-ui-detail)
                 "\n"))
       (let ((end (point))
             (row-action
@@ -1571,33 +1571,33 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
          start label-end
          `(aaron-ui-board--row-action ,row-action
            mouse-face aaron-ui-board-row-highlight
-           keymap ,my/aaronnote-roam-ui-row-map))))))
+           keymap ,my/noema-roam-ui-row-map))))))
 
-(defun my/aaronnote-roam-new-render (&optional skip-sync)
+(defun my/noema-roam-new-render (&optional skip-sync)
   "Render the current Roam New draft."
   (interactive)
   (unless skip-sync
-    (my/aaronnote-roam-new--sync-draft-from-widgets))
+    (my/noema-roam-new--sync-draft-from-widgets))
   ;; Delete stale widget registrations before erasing; otherwise widget-setup
   ;; sees both old and new fields and raises "Overlapping fields".
-  (dolist (entry my/aaronnote-roam-new--widgets)
+  (dolist (entry my/noema-roam-new--widgets)
     (condition-case nil (widget-delete (cdr entry)) (error nil)))
-  (setq-local my/aaronnote-roam-new--widgets nil)
-  (let* ((draft my/aaronnote-roam-new--draft)
+  (setq-local my/noema-roam-new--widgets nil)
+  (let* ((draft my/noema-roam-new--draft)
          (node-type (plist-get draft :node-type))
          (title (plist-get draft :title))
          (path (plist-get draft :path))
          (kind (plist-get draft :kind))
          (template-key (plist-get draft :template-key))
-         (template-label (my/aaronnote-roam-new--template-label template-key))
+         (template-label (my/noema-roam-new--template-label template-key))
          (tags (plist-get draft :tags))
          (id (plist-get draft :id)))
-    (my/aaronnote-roam-ui-set-header
+    (my/noema-roam-ui-set-header
      "Roam New" 'new (format "%s draft" node-type))
-    (my/aaronnote-roam-ui-render
+    (my/noema-roam-ui-render
      (lambda ()
-       (setq-local my/aaronnote-roam-new--widgets nil)
-       (my/aaronnote-roam-ui-insert-page-header
+       (setq-local my/noema-roam-new--widgets nil)
+       (my/noema-roam-ui-insert-page-header
         "New note"
         :icon 'new
         :subtitle "Type in fields; p for path; a to add tags one by one; c to create"
@@ -1606,113 +1606,113 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
                      (cons template-label 'muted))
         :actions
         '((:label "c Create"
-           :command my/aaronnote-roam-new-create
+           :command my/noema-roam-new-create
            :help "Create this note through the Noema runtime"
            :primary t)
           (:label "t Type"
-           :command my/aaronnote-roam-new-edit-type
+           :command my/noema-roam-new-edit-type
            :help "Switch between roam and regular Markdown notes")
           (:label "T Template"
-           :command my/aaronnote-roam-new-edit-template
+           :command my/noema-roam-new-edit-template
            :help "Choose a Markdown template")
           (:label "p Path"
-           :command my/aaronnote-roam-new-edit-path
+           :command my/noema-roam-new-edit-path
            :help "Choose save path with file completion")
           (:label "a Tags"
-           :command my/aaronnote-roam-new-edit-tags
+           :command my/noema-roam-new-edit-tags
            :help "Add tags one by one with vault completion")
           (:label "R Reset"
-           :command my/aaronnote-roam-new-reset
+           :command my/noema-roam-new-reset
            :help "Reset this draft")
           (:label "q Close"
            :command quit-window
            :help "Close without creating")))
-       (my/aaronnote-roam-ui-insert-section "Draft" 6)
-       (my/aaronnote-roam-new--insert-field
+       (my/noema-roam-ui-insert-section "Draft" 6)
+       (my/noema-roam-new--insert-field
         'type 'status "TYPE" node-type
         "Press RET or t to switch roam / regular."
-        #'my/aaronnote-roam-new-edit-type
+        #'my/noema-roam-new-edit-type
         (if (string= node-type "roam") 'info 'muted))
-       (my/aaronnote-roam-new--insert-editable-field
+       (my/noema-roam-new--insert-editable-field
         'title 'note "TITLE" title
         "Used for the heading, metadata, and default save path."
         'title "Untitled")
-       (my/aaronnote-roam-new--insert-editable-field
+       (my/noema-roam-new--insert-editable-field
         'path 'path "SAVE PATH" path
         "Vault-relative .md or .markdown path; p chooses a folder."
-        'path "untitled.md" #'my/aaronnote-roam-new-edit-path)
-       (my/aaronnote-roam-new--insert-editable-field
+        'path "untitled.md" #'my/noema-roam-new-edit-path)
+       (my/noema-roam-new--insert-editable-field
         'kind 'status "KIND" kind
         "Controls Noema note-kind behavior."
         'kind (if (string= node-type "roam") "note" "default"))
-       (my/aaronnote-roam-new--insert-field
+       (my/noema-roam-new--insert-field
         'template 'template "TEMPLATE" template-label
         "Press RET or T to choose a template."
-        #'my/aaronnote-roam-new-edit-template)
-       (my/aaronnote-roam-new--insert-editable-field
+        #'my/noema-roam-new-edit-template)
+       (my/noema-roam-new--insert-editable-field
         'tags 'tag "TAGS"
         (if tags (string-join tags ", ") nil)
         "Comma-separated graph tags; a adds with completion."
-        'tags "" #'my/aaronnote-roam-new-edit-tags)
+        'tags "" #'my/noema-roam-new-edit-tags)
        (insert "\n")
-       (my/aaronnote-roam-ui-insert-section "Result")
-       (my/aaronnote-roam-ui-insert-field
+       (my/noema-roam-ui-insert-section "Result")
+       (my/noema-roam-ui-insert-field
         "Node ID" (or id (if (string= node-type "roam")
                              "timestamped on create"
                            "none")))
-       (my/aaronnote-roam-ui-insert-field
+       (my/noema-roam-ui-insert-field
         "Absolute path"
         (abbreviate-file-name
-         (expand-file-name path (my/aaronnote-roam-root)))
-        'my/aaronnote-roam-ui-path)
-       (my/aaronnote-roam-ui-insert-field
-        "Create engine" "Noema runtime" 'my/aaronnote-roam-ui-meta)
+         (expand-file-name path (my/noema-roam-root)))
+        'my/noema-roam-ui-path)
+       (my/noema-roam-ui-insert-field
+        "Create engine" "Noema runtime" 'my/noema-roam-ui-meta)
        (widget-setup)))
     (unless (get-text-property (point) 'aaron-ui-board--item-id)
-      (my/aaronnote-roam-ui-goto-first-item))))
+      (my/noema-roam-ui-goto-first-item))))
 
-(defun my/aaronnote-roam-new-refresh ()
+(defun my/noema-roam-new-refresh ()
   "Reload templates and rerender the current Roam New draft."
   (interactive)
-  (setq-local my/aaronnote-roam-new--templates
-              (my/aaronnote-roam-new--load-templates))
-  (my/aaronnote-roam-new-render))
+  (setq-local my/noema-roam-new--templates
+              (my/noema-roam-new--load-templates))
+  (my/noema-roam-new-render))
 
-(defun my/aaronnote-roam-new-reset ()
+(defun my/noema-roam-new-reset ()
   "Reset the current Roam New draft."
   (interactive)
-  (setq-local my/aaronnote-roam-new--draft
-              (my/aaronnote-roam-new--default-draft
-               my/aaronnote-roam-new--base-directory))
-  (my/aaronnote-roam-new-render))
+  (setq-local my/noema-roam-new--draft
+              (my/noema-roam-new--default-draft
+               my/noema-roam-new--base-directory))
+  (my/noema-roam-new-render))
 
-(defun my/aaronnote-roam-new (&optional base-directory draft)
+(defun my/noema-roam-new (&optional base-directory draft)
   "Open the native Roam New workbench.
 BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
   (interactive)
   (let* ((base-directory
-          (my/aaronnote-roam-new--normalize-directory
+          (my/noema-roam-new--normalize-directory
            (or base-directory
                (when-let* ((file buffer-file-name)
                            ((file-in-directory-p file
-                                                 (my/aaronnote-roam-root))))
+                                                 (my/noema-roam-root))))
                  (file-relative-name
                   (file-name-directory file)
-                  (my/aaronnote-roam-root)))
+                  (my/noema-roam-root)))
                "")))
          (buffer (get-buffer-create "*roam-new*")))
     (with-current-buffer buffer
-      (my/aaronnote-roam-new-mode)
-      (setq-local my/aaronnote-roam-new--base-directory base-directory
-                  my/aaronnote-roam-new--templates
-                  (my/aaronnote-roam-new--load-templates)
-                  my/aaronnote-roam-new--draft
+      (my/noema-roam-new-mode)
+      (setq-local my/noema-roam-new--base-directory base-directory
+                  my/noema-roam-new--templates
+                  (my/noema-roam-new--load-templates)
+                  my/noema-roam-new--draft
                   (or draft
-                      (my/aaronnote-roam-new--default-draft base-directory)))
-      (my/aaronnote-roam-new-render))
+                      (my/noema-roam-new--default-draft base-directory)))
+      (my/noema-roam-new-render))
     (pop-to-buffer buffer)))
 
-(defun my/aaronnote-roam-new--payload (draft)
+(defun my/noema-roam-new--payload (draft)
   "Return Noema runtime JSON payload for DRAFT."
   (delq nil
         `((nodeType . ,(plist-get draft :node-type))
@@ -1724,41 +1724,41 @@ BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
           ,(when-let* ((id (plist-get draft :id)))
              `(id . ,id)))))
 
-(defun my/aaronnote-roam-new--create-draft (draft)
+(defun my/noema-roam-new--create-draft (draft)
   "Create and open DRAFT through the Noema runtime."
-  (let* ((draft (my/aaronnote-roam-new--draft-for-create draft))
-         (payload (my/aaronnote-roam-new--payload draft))
+  (let* ((draft (my/noema-roam-new--draft-for-create draft))
+         (payload (my/noema-roam-new--payload draft))
          (json (json-encode payload))
-         (response (my/aaronnote-roam--runtime-call "create" "--json" json))
+         (response (my/noema-roam--runtime-call "create" "--json" json))
          (file (and response (gethash "file" response))))
     (unless response
       (user-error "Noema runtime failed — see *Messages* for details"))
     (unless (and file (file-exists-p file))
       (user-error "Noema runtime did not create the note (path: %s)"
                   (or file "nil")))
-    (my/aaronnote-roam--clear-runtime-cache)
-    (when (derived-mode-p 'my/aaronnote-roam-new-mode)
+    (my/noema-roam--clear-runtime-cache)
+    (when (derived-mode-p 'my/noema-roam-new-mode)
       (kill-buffer (current-buffer)))
-    (if (fboundp 'my/aaronnote-open-file)
-        (my/aaronnote-open-file file)
+    (if (fboundp 'my/noema-open-file)
+        (my/noema-open-file file)
       (find-file file))
     file))
 
-(defun my/aaronnote-roam-new-create ()
+(defun my/noema-roam-new-create ()
   "Create the current Roam New draft."
   (interactive)
-  (my/aaronnote-roam-new--sync-draft-from-widgets)
-  (my/aaronnote-roam-new--create-draft my/aaronnote-roam-new--draft))
+  (my/noema-roam-new--sync-draft-from-widgets)
+  (my/noema-roam-new--create-draft my/noema-roam-new--draft))
 
-(defun my/aaronnote-roam-new-note (&optional slug title tags)
+(defun my/noema-roam-new-note (&optional slug title tags)
   "Create a roam note, or open Roam New when called interactively.
 Non-interactive SLUG, TITLE, and TAGS calls preserve compatibility with link
 creation commands while using the Noema runtime."
   (interactive)
   (if (called-interactively-p 'interactive)
-      (my/aaronnote-roam-new)
-    (let* ((slug (my/aaronnote-roam--strip-vault-prefix (or slug "")))
-           (path (if (my/aaronnote-roam--ref-has-extension-p slug)
+      (my/noema-roam-new)
+    (let* ((slug (my/noema-roam--strip-vault-prefix (or slug "")))
+           (path (if (my/noema-roam--ref-has-extension-p slug)
                      slug
                    (concat slug ".md")))
            (id (file-name-sans-extension slug))
@@ -1767,29 +1767,29 @@ creation commands while using the Noema runtime."
                 (capitalize
                  (replace-regexp-in-string
                   "[-_/]" " " (file-name-nondirectory id))))))
-      (my/aaronnote-roam-new--create-draft
+      (my/noema-roam-new--create-draft
        (list :node-type "roam"
              :id id
              :title title
              :path path
              :kind "note"
              :template-key "roam"
-             :tags (my/aaronnote-roam-new--normalize-tags tags))))))
+             :tags (my/noema-roam-new--normalize-tags tags))))))
 
-(defun my/aaronnote-roam-new-node (&optional title directory)
+(defun my/noema-roam-new-node (&optional title directory)
   "Open Roam New, or create a timestamped node from TITLE in DIRECTORY."
   (interactive)
   (if (called-interactively-p 'interactive)
-      (my/aaronnote-roam-new directory)
+      (my/noema-roam-new directory)
     (let* ((title (or title "Untitled"))
-           (directory (my/aaronnote-roam-new--normalize-directory directory))
+           (directory (my/noema-roam-new--normalize-directory directory))
            (id (format "%s-%s"
-                       (my/aaronnote-roam--timestamp-id)
-                       (my/aaronnote-roam--slugify-title title)))
+                       (my/noema-roam--timestamp-id)
+                       (my/noema-roam--slugify-title title)))
            (path (if (string-empty-p directory)
                      (concat id ".md")
                    (concat directory "/" id ".md"))))
-      (my/aaronnote-roam-new--create-draft
+      (my/noema-roam-new--create-draft
        (list :node-type "roam"
              :id id
              :title title
@@ -1800,14 +1800,14 @@ creation commands while using the Noema runtime."
 
 ;; ── Roam DB ──────────────────────────────────────────────────────────────────
 
-(defvar my/aaronnote-roam--db-cache nil)
-(defvar my/aaronnote-roam--db-path-cache nil)
-(defvar my/aaronnote-roam--db-mtime nil)
-(defvar my/aaronnote-roam--scan-cache nil)
+(defvar my/noema-roam--db-cache nil)
+(defvar my/noema-roam--db-path-cache nil)
+(defvar my/noema-roam--db-mtime nil)
+(defvar my/noema-roam--scan-cache nil)
 
-(defun my/aaronnote-roam--db-path ()
+(defun my/noema-roam--db-path ()
   "Return path to an optional Markdown roam-db.json for the current vault."
-  (let* ((root (my/aaronnote-roam-root))
+  (let* ((root (my/noema-roam-root))
          (candidates (mapcar
                       (lambda (rel) (expand-file-name rel root))
                       '("roam-db.json"
@@ -1819,35 +1819,35 @@ creation commands while using the Noema runtime."
     (or (seq-find #'file-exists-p candidates)
         (car candidates))))
 
-(defun my/aaronnote-roam--db ()
+(defun my/noema-roam--db ()
   "Return the parsed roam-db.json, refreshing cache when the file changes."
-  (let ((path (my/aaronnote-roam--db-path)))
+  (let ((path (my/noema-roam--db-path)))
     (when (file-exists-p path)
       (let ((mtime (file-attribute-modification-time (file-attributes path))))
-        (when (or (not my/aaronnote-roam--db-cache)
-                  (not (equal path my/aaronnote-roam--db-path-cache))
-                  (time-less-p my/aaronnote-roam--db-mtime mtime))
-          (setq my/aaronnote-roam--db-cache
+        (when (or (not my/noema-roam--db-cache)
+                  (not (equal path my/noema-roam--db-path-cache))
+                  (time-less-p my/noema-roam--db-mtime mtime))
+          (setq my/noema-roam--db-cache
                 (with-temp-buffer
                   (insert-file-contents path)
                   (json-parse-buffer :object-type 'hash-table :array-type 'list))
-                my/aaronnote-roam--db-path-cache path
-                my/aaronnote-roam--db-mtime mtime))))
-    my/aaronnote-roam--db-cache))
+                my/noema-roam--db-path-cache path
+                my/noema-roam--db-mtime mtime))))
+    my/noema-roam--db-cache))
 
-(defun my/aaronnote-roam--db-notes ()
+(defun my/noema-roam--db-notes ()
   "Return the DB notes hash table, or nil."
-  (when-let* ((db (my/aaronnote-roam--db)))
+  (when-let* ((db (my/noema-roam--db)))
     (gethash "notes" db)))
 
-(defun my/aaronnote-roam--note-field (note key)
+(defun my/noema-roam--note-field (note key)
   "Return string field KEY from NOTE."
   (when (hash-table-p note)
     (let ((value (gethash key note)))
       (when (and (stringp value) (not (string-empty-p value)))
         value))))
 
-(defun my/aaronnote-roam--note-list-field (note key)
+(defun my/noema-roam--note-list-field (note key)
   "Return list field KEY from NOTE."
   (let ((value (and (hash-table-p note) (gethash key note))))
     (cond
@@ -1855,7 +1855,7 @@ creation commands while using the Noema runtime."
      ((vectorp value) (append value nil))
      ((and (stringp value) (not (string-empty-p value))) (list value)))))
 
-(defun my/aaronnote-roam--split-list-value (value)
+(defun my/noema-roam--split-list-value (value)
   "Split comma/space separated Markdown meta VALUE into a clean string list."
   (cond
    ((null value) nil)
@@ -1873,31 +1873,31 @@ creation commands while using the Noema runtime."
                  (string-trim clean)))
              (split-string value "[,\n]" t))))))
 
-(defun my/aaronnote-roam--put-note-field (note key value)
+(defun my/noema-roam--put-note-field (note key value)
   "Set NOTE KEY to VALUE when VALUE is present."
   (when (and value
              (not (and (stringp value) (string-empty-p (string-trim value)))))
     (puthash key value note)))
 
-(defun my/aaronnote-roam--parse-meta-line (note line)
+(defun my/noema-roam--parse-meta-line (note line)
   "Parse one KEY: VALUE metadata LINE into NOTE."
   (when (string-match "\\`\\([^:]+\\):\\s-*\\(.*\\)\\'" line)
     (let* ((key (downcase (string-trim (match-string 1 line))))
            (value (string-trim (match-string 2 line))))
       (pcase key
         ((or "tags" "aliases" "refs" "links" "backlinks" "inlinetags")
-         (my/aaronnote-roam--put-note-field
-          note key (my/aaronnote-roam--split-list-value value)))
+         (my/noema-roam--put-note-field
+          note key (my/noema-roam--split-list-value value)))
         (_
-         (my/aaronnote-roam--put-note-field note key value))))))
+         (my/noema-roam--put-note-field note key value))))))
 
-(defun my/aaronnote-roam--read-org-meta-block (note)
+(defun my/noema-roam--read-org-meta-block (note)
   "Read an Noema `#+begin meta' block at point into NOTE."
   (when (looking-at-p "\\s-*#\\+begin meta\\b")
     (forward-line 1)
     (while (and (not (eobp))
                 (not (looking-at-p "\\s-*#\\+end meta\\b")))
-      (my/aaronnote-roam--parse-meta-line
+      (my/noema-roam--parse-meta-line
        note
        (string-trim (buffer-substring-no-properties
                      (line-beginning-position)
@@ -1905,13 +1905,13 @@ creation commands while using the Noema runtime."
       (forward-line 1))
     t))
 
-(defun my/aaronnote-roam--read-yaml-frontmatter (note)
+(defun my/noema-roam--read-yaml-frontmatter (note)
   "Read simple YAML frontmatter at point into NOTE."
   (when (looking-at-p "\\s-*---\\s-*$")
     (forward-line 1)
     (while (and (not (eobp))
                 (not (looking-at-p "\\s-*---\\s-*$")))
-      (my/aaronnote-roam--parse-meta-line
+      (my/noema-roam--parse-meta-line
        note
        (string-trim (buffer-substring-no-properties
                      (line-beginning-position)
@@ -1919,7 +1919,7 @@ creation commands while using the Noema runtime."
       (forward-line 1))
     t))
 
-(defun my/aaronnote-roam--extract-summary-block ()
+(defun my/noema-roam--extract-summary-block ()
   "Return the first `#+begin summary' block text in the current buffer."
   (save-excursion
     (goto-char (point-min))
@@ -1930,7 +1930,7 @@ creation commands while using the Noema runtime."
           (string-trim
            (buffer-substring-no-properties start (match-beginning 0))))))))
 
-(defun my/aaronnote-roam--internal-target-p (target)
+(defun my/noema-roam--internal-target-p (target)
   "Return non-nil when Markdown link TARGET is a roam note reference."
   (let ((clean (string-trim (or target ""))))
     (or (string-match-p "\\`roam://" clean)
@@ -1942,28 +1942,28 @@ creation commands while using the Noema runtime."
                    "\\.\\(?:png\\|jpe?g\\|gif\\|svg\\|webp\\|pdf\\)\\(?:[#?].*\\)?\\'"
                    clean))))))
 
-(defun my/aaronnote-roam--extract-links-from-buffer ()
+(defun my/noema-roam--extract-links-from-buffer ()
   "Return Markdown roam references from the current buffer."
   (let (links)
     (save-excursion
       (goto-char (point-min))
       (while (re-search-forward "\\[\\[\\([^]\n]+\\)\\]\\]" nil t)
         (push (concat "roam://"
-                      (my/aaronnote-roam--encode-ref
+                      (my/noema-roam--encode-ref
                        (string-trim (match-string 1))))
               links))
       (goto-char (point-min))
       (while (re-search-forward "\\(!?\\)\\[[^]\n]*\\](\\([^)\n]+\\))" nil t)
         (unless (equal (match-string 1) "!")
           (let ((href (string-trim (match-string 2))))
-            (when (my/aaronnote-roam--internal-target-p href)
+            (when (my/noema-roam--internal-target-p href)
               (push href links)))))
       (goto-char (point-min))
       (while (re-search-forward "\\_<roam://[^][<>()[:space:]]+" nil t)
         (push (match-string 0) links)))
     (delete-dups (nreverse links))))
 
-(defun my/aaronnote-roam--first-markdown-heading ()
+(defun my/noema-roam--first-markdown-heading ()
   "Return the first Markdown heading text in the current buffer."
   (save-excursion
     (goto-char (point-min))
@@ -1973,9 +1973,9 @@ creation commands while using the Noema runtime."
         "[ \t]+{#[[:alnum:]_:-]+}[ \t]*\\'" ""
         (match-string 1))))))
 
-(defun my/aaronnote-roam--scan-note-file (file)
+(defun my/noema-roam--scan-note-file (file)
   "Return a note hash table by scanning Markdown FILE."
-  (let* ((root (my/aaronnote-roam-root))
+  (let* ((root (my/noema-roam-root))
          (rel (file-relative-name file root))
          (note (make-hash-table :test 'equal)))
     (puthash "file" file note)
@@ -1987,160 +1987,160 @@ creation commands while using the Noema runtime."
       (goto-char (point-min))
       (cond
        ((looking-at-p "\\s-*#\\+begin meta\\b")
-        (my/aaronnote-roam--read-org-meta-block note))
+        (my/noema-roam--read-org-meta-block note))
        ((looking-at-p "\\s-*---\\s-*$")
-        (my/aaronnote-roam--read-yaml-frontmatter note)))
-      (my/aaronnote-roam--put-note-field
+        (my/noema-roam--read-yaml-frontmatter note)))
+      (my/noema-roam--put-note-field
        note "title"
-       (or (my/aaronnote-roam--note-field note "title")
-           (my/aaronnote-roam--first-markdown-heading)
+       (or (my/noema-roam--note-field note "title")
+           (my/noema-roam--first-markdown-heading)
            (file-name-base file)))
-      (my/aaronnote-roam--put-note-field
+      (my/noema-roam--put-note-field
        note "id"
-       (or (my/aaronnote-roam--note-field note "id")
-           (my/aaronnote-roam--path-without-note-extension rel)))
-      (my/aaronnote-roam--put-note-field
+       (or (my/noema-roam--note-field note "id")
+           (my/noema-roam--path-without-note-extension rel)))
+      (my/noema-roam--put-note-field
        note "summary"
-       (my/aaronnote-roam--extract-summary-block))
-      (my/aaronnote-roam--put-note-field
+       (my/noema-roam--extract-summary-block))
+      (my/noema-roam--put-note-field
        note "links"
-       (append (my/aaronnote-roam--note-list-field note "refs")
-               (my/aaronnote-roam--extract-links-from-buffer))))
+       (append (my/noema-roam--note-list-field note "refs")
+               (my/noema-roam--extract-links-from-buffer))))
     note))
 
-(defun my/aaronnote-roam--canonical-note-id (key note)
+(defun my/noema-roam--canonical-note-id (key note)
   "Return Noema's canonical note id for NOTE with DB KEY."
-  (or (my/aaronnote-roam--note-field note "id")
-      (my/aaronnote-roam--note-field note "key")
-      (my/aaronnote-roam--note-field note "source")
-      (my/aaronnote-roam--note-field note "path")
-      (my/aaronnote-roam--note-field note "link")
-      (my/aaronnote-roam--note-field note "file")
+  (or (my/noema-roam--note-field note "id")
+      (my/noema-roam--note-field note "key")
+      (my/noema-roam--note-field note "source")
+      (my/noema-roam--note-field note "path")
+      (my/noema-roam--note-field note "link")
+      (my/noema-roam--note-field note "file")
       key))
 
-(defun my/aaronnote-roam--note-file-from-fields (key note)
+(defun my/noema-roam--note-file-from-fields (key note)
   "Return the best note file path for DB KEY and NOTE."
-  (let* ((root (my/aaronnote-roam-root))
-         (raw-value (or (my/aaronnote-roam--note-field note "file")
-                        (my/aaronnote-roam--note-field note "path")
-                        (my/aaronnote-roam--note-field note "link")
-                        (my/aaronnote-roam--note-field note "source")
+  (let* ((root (my/noema-roam-root))
+         (raw-value (or (my/noema-roam--note-field note "file")
+                        (my/noema-roam--note-field note "path")
+                        (my/noema-roam--note-field note "link")
+                        (my/noema-roam--note-field note "source")
                         key))
          (raw (if (and raw-value (file-name-absolute-p raw-value))
                   raw-value
-                (my/aaronnote-roam--strip-vault-prefix raw-value)))
+                (my/noema-roam--strip-vault-prefix raw-value)))
          (path (and raw
                     (if (file-name-absolute-p raw)
                         raw
                       (expand-file-name raw root)))))
     (cond
      ((and path (file-exists-p path)) path)
-     ((and path raw (not (my/aaronnote-roam--ref-has-extension-p raw))
+     ((and path raw (not (my/noema-roam--ref-has-extension-p raw))
            (file-exists-p (concat path ".md")))
       (concat path ".md"))
-     ((and path raw (not (my/aaronnote-roam--ref-has-extension-p raw))
+     ((and path raw (not (my/noema-roam--ref-has-extension-p raw))
            (file-exists-p (concat path ".markdown")))
       (concat path ".markdown"))
      (path path))))
 
-(defun my/aaronnote-roam--note-search-values (key note)
+(defun my/noema-roam--note-search-values (key note)
   "Return Noema-style searchable values for NOTE with DB KEY."
-  (let* ((file (my/aaronnote-roam--note-field note "file"))
+  (let* ((file (my/noema-roam--note-field note "file"))
          (rel-file (and file
                         (file-name-absolute-p file)
-                        (file-relative-name file (my/aaronnote-roam-root))))
+                        (file-relative-name file (my/noema-roam-root))))
          (values (append
                   (list key
-                        (my/aaronnote-roam--canonical-note-id key note)
-                        (my/aaronnote-roam--note-field note "id")
-                        (my/aaronnote-roam--note-field note "key")
-                        (my/aaronnote-roam--note-field note "title")
-                        (my/aaronnote-roam--note-field note "path")
-                        (my/aaronnote-roam--note-field note "link")
-                        (my/aaronnote-roam--note-field note "source")
+                        (my/noema-roam--canonical-note-id key note)
+                        (my/noema-roam--note-field note "id")
+                        (my/noema-roam--note-field note "key")
+                        (my/noema-roam--note-field note "title")
+                        (my/noema-roam--note-field note "path")
+                        (my/noema-roam--note-field note "link")
+                        (my/noema-roam--note-field note "source")
                         file
                         rel-file
                         (and rel-file
-                             (my/aaronnote-roam--path-without-note-extension rel-file))
+                             (my/noema-roam--path-without-note-extension rel-file))
                         (and rel-file (concat "roam/" rel-file))
                         (and rel-file
                              (concat "roam/"
-                                     (my/aaronnote-roam--path-without-note-extension
+                                     (my/noema-roam--path-without-note-extension
                                       rel-file))))
-                  (my/aaronnote-roam--note-list-field note "aliases")
-                  (my/aaronnote-roam--note-list-field note "tags"))))
+                  (my/noema-roam--note-list-field note "aliases")
+                  (my/noema-roam--note-list-field note "tags"))))
     (delete-dups
      (seq-filter (lambda (value)
                    (and (stringp value) (not (string-empty-p value))))
                  values))))
 
-(defun my/aaronnote-roam--scanned-note-records ()
+(defun my/noema-roam--scanned-note-records ()
   "Return cached note records by scanning Markdown files."
-  (or my/aaronnote-roam--scan-cache
-      (setq my/aaronnote-roam--scan-cache
+  (or my/noema-roam--scan-cache
+      (setq my/noema-roam--scan-cache
             (mapcar (lambda (file)
-                      (let* ((note (my/aaronnote-roam--scan-note-file file))
-                             (key (my/aaronnote-roam--file-to-slug file))
-                             (id (my/aaronnote-roam--canonical-note-id key note)))
+                      (let* ((note (my/noema-roam--scan-note-file file))
+                             (key (my/noema-roam--file-to-slug file))
+                             (id (my/noema-roam--canonical-note-id key note)))
                         (list :key key
                               :id id
                               :note note
                               :file file
-                              :title (or (my/aaronnote-roam--note-field note "title")
+                              :title (or (my/noema-roam--note-field note "title")
                                          id)
-                              :values (my/aaronnote-roam--note-search-values
+                              :values (my/noema-roam--note-search-values
                                        key note))))
-                    (my/aaronnote-roam--all-files)))))
+                    (my/noema-roam--all-files)))))
 
-(defun my/aaronnote-roam--runtime-note-records ()
+(defun my/noema-roam--runtime-note-records ()
   "Return note records from the vendored Noema runtime."
-  (when-let* ((payload (my/aaronnote-roam--runtime-index))
+  (when-let* ((payload (my/noema-roam--runtime-index))
               (notes (gethash "notes" payload)))
     (mapcar (lambda (note)
-              (let* ((key (or (my/aaronnote-roam--note-field note "key")
-                              (my/aaronnote-roam--note-field note "id")
-                              (my/aaronnote-roam--note-field note "path")
-                              (my/aaronnote-roam--note-field note "link")))
-                     (id (my/aaronnote-roam--canonical-note-id key note)))
+              (let* ((key (or (my/noema-roam--note-field note "key")
+                              (my/noema-roam--note-field note "id")
+                              (my/noema-roam--note-field note "path")
+                              (my/noema-roam--note-field note "link")))
+                     (id (my/noema-roam--canonical-note-id key note)))
                 (list :key key
                       :id id
                       :note note
-                      :file (my/aaronnote-roam--note-file-from-fields key note)
-                      :title (or (my/aaronnote-roam--note-field note "title") id)
-                      :values (my/aaronnote-roam--note-search-values key note))))
+                      :file (my/noema-roam--note-file-from-fields key note)
+                      :title (or (my/noema-roam--note-field note "title") id)
+                      :values (my/noema-roam--note-search-values key note))))
             notes)))
 
-(defun my/aaronnote-roam--note-records ()
+(defun my/noema-roam--note-records ()
   "Return note records with :key, :id, :note, :file, :title, and :values."
-  (or (my/aaronnote-roam--runtime-note-records)
-      (if-let* ((notes (my/aaronnote-roam--db-notes)))
+  (or (my/noema-roam--runtime-note-records)
+      (if-let* ((notes (my/noema-roam--db-notes)))
           (let (records)
             (maphash
              (lambda (key note)
-               (let ((id (my/aaronnote-roam--canonical-note-id key note)))
+               (let ((id (my/noema-roam--canonical-note-id key note)))
                  (push (list :key key
                              :id id
                              :note note
-                             :file (my/aaronnote-roam--note-file-from-fields key note)
-                             :title (or (my/aaronnote-roam--note-field note "title") id)
-                             :values (my/aaronnote-roam--note-search-values key note))
+                             :file (my/noema-roam--note-file-from-fields key note)
+                             :title (or (my/noema-roam--note-field note "title") id)
+                             :values (my/noema-roam--note-search-values key note))
                        records)))
              notes)
             (nreverse records))
-        (my/aaronnote-roam--scanned-note-records))))
+        (my/noema-roam--scanned-note-records))))
 
-(defun my/aaronnote-roam--target-note-ref (target)
+(defun my/noema-roam--target-note-ref (target)
   "Return the note ref portion of TARGET."
-  (plist-get (my/aaronnote-roam--split-target target) :ref))
+  (plist-get (my/noema-roam--split-target target) :ref))
 
-(defun my/aaronnote-roam--resolve-note (ref)
+(defun my/noema-roam--resolve-note (ref)
   "Resolve REF to an Noema note record plist.
 Exact id/key/path/title/alias/tag matches win first; substring matches are
 accepted as a fallback, matching Noema search behavior."
-  (let* ((clean (or (my/aaronnote-roam--target-note-ref ref) ref))
+  (let* ((clean (or (my/noema-roam--target-note-ref ref) ref))
          (clean (string-trim (or clean "")))
          (query (downcase clean))
-         (records (my/aaronnote-roam--note-records)))
+         (records (my/noema-roam--note-records)))
     (or
      (seq-find
       (lambda (record)
@@ -2156,39 +2156,39 @@ accepted as a fallback, matching Noema search behavior."
               (plist-get record :values)))
            records)))))
 
-(defun my/aaronnote-roam--db-note (slug)
+(defun my/noema-roam--db-note (slug)
   "Return the DB hash-table for SLUG/id/path, or nil."
-  (plist-get (my/aaronnote-roam--resolve-note slug) :note))
+  (plist-get (my/noema-roam--resolve-note slug) :note))
 
-(defun my/aaronnote-roam--target-slug (target)
+(defun my/noema-roam--target-slug (target)
   "Return normalized canonical note id from a note-link TARGET."
-  (plist-get (my/aaronnote-roam--parse-target target) :slug))
+  (plist-get (my/noema-roam--parse-target target) :slug))
 
-(defun my/aaronnote-roam--db-backlinks-to (slug)
+(defun my/noema-roam--db-backlinks-to (slug)
   "Return DB backlinks to SLUG/id, normalizing Noema targets."
-  (when-let* ((target-id (or (plist-get (my/aaronnote-roam--resolve-note slug) :id)
+  (when-let* ((target-id (or (plist-get (my/noema-roam--resolve-note slug) :id)
                              slug)))
-    (or (when-let* ((note (my/aaronnote-roam--db-note target-id)))
-          (my/aaronnote-roam--note-list-field note "backlinks"))
+    (or (when-let* ((note (my/noema-roam--db-note target-id)))
+          (my/noema-roam--note-list-field note "backlinks"))
         (let (backlinks)
-          (dolist (record (my/aaronnote-roam--note-records))
+          (dolist (record (my/noema-roam--note-records))
             (let* ((note (plist-get record :note))
                    (source (plist-get record :key))
-                   (links (or (my/aaronnote-roam--note-list-field note "links")
-                              (my/aaronnote-roam--note-list-field note "refs"))))
+                   (links (or (my/noema-roam--note-list-field note "links")
+                              (my/noema-roam--note-list-field note "refs"))))
               (when (member target-id
-                            (mapcar #'my/aaronnote-roam--target-slug links))
-                (push (my/aaronnote-roam--canonical-note-id source note) backlinks))))
+                            (mapcar #'my/noema-roam--target-slug links))
+                (push (my/noema-roam--canonical-note-id source note) backlinks))))
           (delete-dups (nreverse backlinks))))))
 
-(defun my/aaronnote-roam--current-slug ()
+(defun my/noema-roam--current-slug ()
   "Return the canonical roam id for the current buffer, or nil."
   (when buffer-file-name
-    (my/aaronnote-roam--file-to-note-id buffer-file-name)))
+    (my/noema-roam--file-to-note-id buffer-file-name)))
 
 ;; ── Tag ids and TOC ───────────────────────────────────────────────────────────
 
-(defun my/aaronnote-roam--slugify-tag-id (text)
+(defun my/noema-roam--slugify-tag-id (text)
   "Return a stable Markdown heading id for TEXT."
   (let* ((plain (string-trim
                  (replace-regexp-in-string
@@ -2204,7 +2204,7 @@ accepted as a fallback, matching Noema search behavior."
         (substring (secure-hash 'sha1 text) 0 10)
       slug)))
 
-(defun my/aaronnote-roam--tag-id-exists-p (id)
+(defun my/noema-roam--tag-id-exists-p (id)
   "Return non-nil when ID already exists in the current buffer."
   (save-excursion
     (goto-char (point-min))
@@ -2213,16 +2213,16 @@ accepted as a fallback, matching Noema search behavior."
           (goto-char (point-min))
           (re-search-forward (format "<%s>" (regexp-quote id)) nil t)))))
 
-(defun my/aaronnote-roam--unique-tag-id (base)
+(defun my/noema-roam--unique-tag-id (base)
   "Return BASE or BASE-N so it is unique in the current buffer."
   (let ((candidate base)
         (n 2))
-    (while (my/aaronnote-roam--tag-id-exists-p candidate)
+    (while (my/noema-roam--tag-id-exists-p candidate)
       (setq candidate (format "%s-%d" base n)
             n (1+ n)))
     candidate))
 
-(defun my/aaronnote-roam-generate-tag-id (&optional text)
+(defun my/noema-roam-generate-tag-id (&optional text)
   "Generate a unique Markdown heading id from TEXT or context."
   (interactive)
   (let* ((source (or text
@@ -2238,20 +2238,20 @@ accepted as a fallback, matching Noema search behavior."
                             (match-string 1))
                          (thing-at-point 'line t)))
                      "tag"))
-         (id (my/aaronnote-roam--unique-tag-id
-              (my/aaronnote-roam--slugify-tag-id source))))
+         (id (my/noema-roam--unique-tag-id
+              (my/noema-roam--slugify-tag-id source))))
     (when (called-interactively-p 'interactive)
       (kill-new id)
       (message "Tag id copied: %s" id))
     id))
 
-(defun my/aaronnote-roam-insert-tag-id (&optional id)
+(defun my/noema-roam-insert-tag-id (&optional id)
   "Insert or append Markdown heading ID at point.
 On a heading line, append `{#id}` unless an id already exists."
   (interactive)
   (let ((id (or id
                 (read-string "Tag id: "
-                             (my/aaronnote-roam-generate-tag-id)))))
+                             (my/noema-roam-generate-tag-id)))))
     (save-excursion
       (beginning-of-line)
       (if (looking-at
@@ -2262,90 +2262,90 @@ On a heading line, append `{#id}` unless an id already exists."
             (insert (format " {#%s}" id)))
         (insert (format "{#%s}" id))))))
 
-(defun my/aaronnote-roam-insert-toc-link ()
+(defun my/noema-roam-insert-toc-link ()
   "Open the interactive selector and insert a DOM/TOC note-link."
   (interactive)
-  (my/aaronnote-roam-select-link 'toc))
+  (my/noema-roam-select-link 'toc))
 
-(defun my/aaronnote-roam-insert-tag-id-link ()
+(defun my/noema-roam-insert-tag-id-link ()
   "Open the interactive selector and insert a tag-id note-link."
   (interactive)
-  (my/aaronnote-roam-select-link 'tag))
+  (my/noema-roam-select-link 'tag))
 
 ;; ── DB commands ───────────────────────────────────────────────────────────────
 
-(defun my/aaronnote-roam-update-db (&optional full)
+(defun my/noema-roam-update-db (&optional full)
   "Refresh Markdown roam cache and sync roam.db via Noema runtime.
 With prefix argument FULL, force a full roam DB rebuild.
 When the web-host is running, delegates to its /api (async, non-blocking).
 Falls back to a CLI subprocess when the web-host is offline."
   (interactive "P")
-  (my/aaronnote-roam--clear-runtime-cache)
+  (my/noema-roam--clear-runtime-cache)
   (cond
    ;; Online: delegate to web-host /api; it is the authoritative writer.
-   ((and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+   ((and (boundp 'my/noema--ready) my/noema--ready)
     (message "Noema: syncing roam DB...")
-    (my/aaronnote--api-call
+    (my/noema--api-call
      (if full "aaronnote:api:notes:roam-sync-full" "aaronnote:api:notes:roam-sync")
      (if full [] [t])
      (lambda (_result)
-       (my/aaronnote-roam--clear-runtime-cache)
+       (my/noema-roam--clear-runtime-cache)
        (message "Noema roam sync: done"))))
    ;; Offline fallback: CLI subprocess.
-   ((my/aaronnote-roam--runtime-available-p)
-    (my/aaronnote-roam--runtime-sync full nil))
+   ((my/noema-roam--runtime-available-p)
+    (my/noema-roam--runtime-sync full nil))
    (t
     (message "Markdown roam cache refreshed"))))
 
-(defun my/aaronnote-roam--summary-entry-for-slug (slug &optional summaries)
+(defun my/noema-roam--summary-entry-for-slug (slug &optional summaries)
   "Return a note summary entry for SLUG from optional SUMMARIES."
   (or (seq-find (lambda (entry)
                   (equal (plist-get entry :slug) slug))
-                (or summaries (my/aaronnote-roam--all-note-summaries)))
+                (or summaries (my/noema-roam--all-note-summaries)))
       (list :slug slug
-            :title (my/aaronnote-roam--note-title slug)
-            :tags (my/aaronnote-roam--note-tags slug)
-            :summary (my/aaronnote-roam--note-summary slug))))
+            :title (my/noema-roam--note-title slug)
+            :tags (my/noema-roam--note-tags slug)
+            :summary (my/noema-roam--note-summary slug))))
 
-(defun my/aaronnote-roam-backlinks (&optional target-slug)
+(defun my/noema-roam-backlinks (&optional target-slug)
   "Show backlinks for the current note in a dedicated buffer."
   (interactive)
-  (let* ((slug (or target-slug (my/aaronnote-roam--current-slug)))
-         (note (and slug (my/aaronnote-roam--db-note slug)))
-         (bls  (or (and slug (my/aaronnote-roam--db-backlinks-to slug))
+  (let* ((slug (or target-slug (my/noema-roam--current-slug)))
+         (note (and slug (my/noema-roam--db-note slug)))
+         (bls  (or (and slug (my/noema-roam--db-backlinks-to slug))
                    (and note (gethash "backlinks" note))))
-         (summaries (my/aaronnote-roam--all-note-summaries))
+         (summaries (my/noema-roam--all-note-summaries))
          (refresh (let ((target slug))
-                    (lambda () (my/aaronnote-roam-backlinks target))))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
+                    (lambda () (my/noema-roam-backlinks target))))
+         (buf (my/noema-roam--prepare-ui-buffer
                "*roam-backlinks*" "Roam Backlinks" 'backlink refresh
                (format "%d backlinks" (length bls)))))
     (unless slug (user-error "Not in a roam note"))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Backlinks"
           :icon 'backlink
           :subtitle (format "References to %s"
                             (or (and note (gethash "title" note)) slug))
           :stats (list (cons (format "%d backlinks" (length bls)) 'info))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "Referenced by" (length bls))
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Referenced by" (length bls))
          (if (null bls)
-             (my/aaronnote-roam-ui-insert-empty
+             (my/noema-roam-ui-insert-empty
               "No notes currently link to this note.")
            (dolist (bl bls)
-             (my/aaronnote-roam--insert-note-button
-              (my/aaronnote-roam--summary-entry-for-slug bl summaries)))))))
+             (my/noema-roam--insert-note-button
+              (my/noema-roam--summary-entry-for-slug bl summaries)))))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam-tags ()
+(defun my/noema-roam-tags ()
   "Browse notes by tag with completion."
   (interactive)
   (let ((tags-ht (make-hash-table :test 'equal)))
-    (dolist (record (my/aaronnote-roam--note-records))
-      (dolist (tag (my/aaronnote-roam--note-list-field
+    (dolist (record (my/noema-roam--note-records))
+      (dolist (tag (my/noema-roam--note-list-field
                     (plist-get record :note) "tags"))
         (puthash tag
                  (cons (plist-get record :id)
@@ -2356,12 +2356,12 @@ Falls back to a CLI subprocess when the web-host is offline."
            (slugs (sort (delete-dups (gethash tag tags-ht)) #'string<))
            (slug (completing-read (format "Notes tagged [%s]: " tag)
                                   slugs nil t)))
-      (my/aaronnote-roam--open-slug slug))))
+      (my/noema-roam--open-slug slug))))
 
-(defun my/aaronnote-roam--scan-todos ()
+(defun my/noema-roam--scan-todos ()
   "Return todo hash tables scanned from Markdown notes."
   (let (todos)
-    (dolist (record (my/aaronnote-roam--note-records))
+    (dolist (record (my/noema-roam--note-records))
       (let ((file (plist-get record :file)))
         (when (and file (file-exists-p file))
           (with-temp-buffer
@@ -2393,20 +2393,20 @@ Falls back to a CLI subprocess when the web-host is offline."
               (forward-line 1))))))
     (nreverse todos)))
 
-(defun my/aaronnote-roam--todos ()
+(defun my/noema-roam--todos ()
   "Return vault-wide todos from the Noema runtime, roam DB, or local scan.
 Fetches through the `agenda' view-model rather than the plain `todos' list so
 dependency resolution (`effectiveStatus'/`blockedBy', computed vault-wide) and
 the urgency sort are already applied server-side instead of being re-derived
 in Elisp."
-  (let* ((runtime (my/aaronnote-roam--runtime-call "agenda" "--json" "{}"))
+  (let* ((runtime (my/noema-roam--runtime-call "agenda" "--json" "{}"))
          (runtime-todos (and runtime (gethash "todos" runtime)))
-         (db (my/aaronnote-roam--db)))
+         (db (my/noema-roam--db)))
     (or runtime-todos
         (and db (gethash "todos" db))
-        (my/aaronnote-roam--scan-todos))))
+        (my/noema-roam--scan-todos))))
 
-(defun my/aaronnote-roam--todo-field (entry &rest keys)
+(defun my/noema-roam--todo-field (entry &rest keys)
   "Return the first non-nil field from todo ENTRY matching KEYS."
   (seq-some
    (lambda (key)
@@ -2419,15 +2419,15 @@ in Elisp."
       (t nil)))
    keys))
 
-(defun my/aaronnote-roam--todo-status (entry)
+(defun my/noema-roam--todo-status (entry)
   "Return normalized status string for todo ENTRY.
 Prefers the server-computed `effectiveStatus' (dependency-aware: a todo with
 an open `after' reference is reported as blocked without any local file
 being rewritten) over the raw `status' field when present."
   (let ((status (downcase
                  (string-trim
-                  (format "%s" (or (my/aaronnote-roam--todo-field entry "effectiveStatus")
-                                   (my/aaronnote-roam--todo-field entry "status")
+                  (format "%s" (or (my/noema-roam--todo-field entry "effectiveStatus")
+                                   (my/noema-roam--todo-field entry "status")
                                    "todo"))))))
     (cond
      ((member status '("" " " "open" "unchecked")) "todo")
@@ -2437,28 +2437,28 @@ being rewritten) over the raw `status' field when present."
      ((member status '("cancel" "canceled" "cancelled")) "cancelled")
      (t status))))
 
-(defun my/aaronnote-roam--todo-tone (entry)
+(defun my/noema-roam--todo-tone (entry)
   "Return display tone for todo ENTRY."
-  (pcase (my/aaronnote-roam--todo-status entry)
+  (pcase (my/noema-roam--todo-status entry)
     ((or "done" "complete" "completed") 'success)
     ((or "blocked" "cancelled" "canceled") 'danger)
     ((or "doing" "waiting" "in-progress") 'warning)
     (_ 'info)))
 
-(defun my/aaronnote-roam--visit-todo (entry)
+(defun my/noema-roam--visit-todo (entry)
   "Open the note and source line represented by todo ENTRY."
-  (let* ((file (my/aaronnote-roam--todo-field entry "file"))
-         (note-slug (my/aaronnote-roam--todo-field
+  (let* ((file (my/noema-roam--todo-field entry "file"))
+         (note-slug (my/noema-roam--todo-field
                      entry "note" "noteId" "noteKey" "path"))
-         (line (my/aaronnote-roam--todo-field entry "line"))
-         (column (my/aaronnote-roam--todo-field entry "column"))
-         (index (my/aaronnote-roam--todo-field entry "index"))
-         (source (my/aaronnote-roam--todo-field entry "source")))
+         (line (my/noema-roam--todo-field entry "line"))
+         (column (my/noema-roam--todo-field entry "column"))
+         (index (my/noema-roam--todo-field entry "index"))
+         (source (my/noema-roam--todo-field entry "source")))
     (cond
      ((and (stringp file) (not (string-empty-p file)) (file-exists-p file))
       (find-file file))
      (note-slug
-      (my/aaronnote-roam--open-slug note-slug))
+      (my/noema-roam--open-slug note-slug))
      (t
       (user-error "Todo has no source note")))
     (cond
@@ -2477,18 +2477,18 @@ being rewritten) over the raw `status' field when present."
                            (- (line-end-position) (point)))))))
     (recenter)))
 
-(defun my/aaronnote-roam--todo-at-point ()
+(defun my/noema-roam--todo-at-point ()
   "Return the todo entry on the current row."
-  (or (get-text-property (point) 'my/aaronnote-roam-todo)
-      (get-text-property (line-beginning-position) 'my/aaronnote-roam-todo)
+  (or (get-text-property (point) 'my/noema-roam-todo)
+      (get-text-property (line-beginning-position) 'my/noema-roam-todo)
       (get-text-property (max (point-min) (1- (point)))
-                         'my/aaronnote-roam-todo)))
+                         'my/noema-roam-todo)))
 
-(defun my/aaronnote-roam--todo-update-local (entry status)
+(defun my/noema-roam--todo-update-local (entry status)
   "Update todo ENTRY to STATUS by editing its source file locally."
-  (let* ((file (my/aaronnote-roam--todo-field entry "file"))
-         (index (my/aaronnote-roam--todo-field entry "index"))
-         (source (my/aaronnote-roam--todo-field entry "source"))
+  (let* ((file (my/noema-roam--todo-field entry "file"))
+         (index (my/noema-roam--todo-field entry "index"))
+         (source (my/noema-roam--todo-field entry "source"))
          (status (downcase (format "%s" status)))
          (prefix (if (string= status "todo")
                      "@@todo "
@@ -2512,19 +2512,19 @@ being rewritten) over the raw `status' field when present."
             (user-error "Todo source was not found"))
           (replace-match prefix t t nil 0)))
       (save-buffer)))
-  (my/aaronnote-roam--clear-runtime-cache))
+  (my/noema-roam--clear-runtime-cache))
 
-(defun my/aaronnote-roam--todo-patch (entry extra)
+(defun my/noema-roam--todo-patch (entry extra)
   "Send a patch-todo request for todo ENTRY merging EXTRA alist fields.
 EXTRA keys are canonical (ddl/sche/prio/repeat/warn/after/afterAdd) or their
 legacy aliases (priority/due/scheduled); `patchTodo' on the server accepts
 both and preserves whichever alias the `@@todo' line already uses.  Returns
 the parsed response hash-table, or nil when the runtime is unavailable."
-  (let* ((file (my/aaronnote-roam--todo-field entry "file"))
-         (index (my/aaronnote-roam--todo-field entry "index"))
-         (source (my/aaronnote-roam--todo-field entry "source"))
-         (id (my/aaronnote-roam--todo-field entry "id"))
-         (text (my/aaronnote-roam--todo-field entry "text"))
+  (let* ((file (my/noema-roam--todo-field entry "file"))
+         (index (my/noema-roam--todo-field entry "index"))
+         (source (my/noema-roam--todo-field entry "source"))
+         (id (my/noema-roam--todo-field entry "id"))
+         (text (my/noema-roam--todo-field entry "text"))
          (payload (append
                    (list (cons 'file (or file ""))
                          (cons 'id (or id ""))
@@ -2534,9 +2534,9 @@ the parsed response hash-table, or nil when the runtime is unavailable."
                    extra)))
     (unless (and file (not (string-empty-p file)))
       (user-error "Todo has no editable source file"))
-    (my/aaronnote-roam--runtime-call "patch-todo" "--json" (json-encode payload))))
+    (my/noema-roam--runtime-call "patch-todo" "--json" (json-encode payload))))
 
-(defun my/aaronnote-roam-update-todo-status (status &optional entry)
+(defun my/noema-roam-update-todo-status (status &optional entry)
   "Set current todo ENTRY to STATUS and refresh the current task view.
 Setting STATUS to \"done\" runs the repeater engine server-side: a todo with
 a `repeat' arg rolls its deadline/scheduled dates forward and resets to
@@ -2545,18 +2545,18 @@ a `repeat' arg rolls its deadline/scheduled dates forward and resets to
    (list (completing-read "Todo status: " '("todo" "doing" "blocked" "done" "cancelled")
                           nil t nil nil "done")
          nil))
-  (let* ((entry (or entry (my/aaronnote-roam--todo-at-point))))
+  (let* ((entry (or entry (my/noema-roam--todo-at-point))))
     (unless entry
       (user-error "No todo on this line"))
     (or (if (string= status "done")
-            (my/aaronnote-roam--todo-patch entry '((op . "complete")))
-          (my/aaronnote-roam--todo-patch entry `((status . ,status))))
-        (my/aaronnote-roam--todo-update-local entry status))
-    (my/aaronnote-roam--clear-runtime-cache)
+            (my/noema-roam--todo-patch entry '((op . "complete")))
+          (my/noema-roam--todo-patch entry `((status . ,status))))
+        (my/noema-roam--todo-update-local entry status))
+    (my/noema-roam--clear-runtime-cache)
     (message "Todo marked %s" status)
-    (my/aaronnote-roam-ui-refresh)))
+    (my/noema-roam-ui-refresh)))
 
-(defun my/aaronnote-roam-update-todo-metadata (field value &optional entry)
+(defun my/noema-roam-update-todo-metadata (field value &optional entry)
   "Set todo metadata FIELD to VALUE for ENTRY and refresh the current task view.
 FIELD is one of priority, due, scheduled, repeat, or warn.  Empty VALUE
 clears FIELD."
@@ -2569,160 +2569,160 @@ clears FIELD."
                           (if (member field '("due" "scheduled" "warn")) " (empty clears)" "")))
           (value (read-string prompt)))
      (list field value nil)))
-  (let* ((entry (or entry (my/aaronnote-roam--todo-at-point)))
+  (let* ((entry (or entry (my/noema-roam--todo-at-point)))
          (field (downcase (format "%s" field)))
          (value (string-trim (format "%s" value))))
     (unless entry
       (user-error "No todo on this line"))
     (unless (member field '("priority" "due" "scheduled" "repeat" "warn"))
       (user-error "Unsupported todo metadata field: %s" field))
-    (unless (my/aaronnote-roam--todo-patch entry (list (cons (intern field) value)))
+    (unless (my/noema-roam--todo-patch entry (list (cons (intern field) value)))
       (user-error "Noema runtime is required for todo metadata updates"))
-    (my/aaronnote-roam--clear-runtime-cache)
+    (my/noema-roam--clear-runtime-cache)
     (message "Todo %s %s" field (if (string-empty-p value) "cleared" value))
-    (my/aaronnote-roam-ui-refresh)))
+    (my/noema-roam-ui-refresh)))
 
-(defun my/aaronnote-roam-set-todo-priority (&optional priority entry)
+(defun my/noema-roam-set-todo-priority (&optional priority entry)
   "Set current todo PRIORITY and refresh the current task view."
   (interactive
    (list (completing-read "Priority (empty clears): "
                           '("A" "B" "C" "D" "E" "F" "") nil t)
          nil))
-  (my/aaronnote-roam-update-todo-metadata "priority" (or priority "") entry))
+  (my/noema-roam-update-todo-metadata "priority" (or priority "") entry))
 
-(defun my/aaronnote-roam-set-todo-due (&optional due entry)
+(defun my/noema-roam-set-todo-due (&optional due entry)
   "Set current todo due date and refresh the current task view."
   (interactive (list (read-string "Due (empty clears): ") nil))
-  (my/aaronnote-roam-update-todo-metadata "due" (or due "") entry))
+  (my/noema-roam-update-todo-metadata "due" (or due "") entry))
 
-(defun my/aaronnote-roam-set-todo-scheduled (&optional scheduled entry)
+(defun my/noema-roam-set-todo-scheduled (&optional scheduled entry)
   "Set current todo scheduled date and refresh the current task view."
   (interactive (list (read-string "Scheduled (empty clears): ") nil))
-  (my/aaronnote-roam-update-todo-metadata "scheduled" (or scheduled "") entry))
+  (my/noema-roam-update-todo-metadata "scheduled" (or scheduled "") entry))
 
-(defun my/aaronnote-roam-set-todo-repeat (&optional repeat entry)
+(defun my/noema-roam-set-todo-repeat (&optional repeat entry)
   "Set current todo repeat metadata and refresh the current task view."
   (interactive (list (read-string "Repeat (+1w / ++1w / .+3d; empty clears): ") nil))
-  (my/aaronnote-roam-update-todo-metadata "repeat" (or repeat "") entry))
+  (my/noema-roam-update-todo-metadata "repeat" (or repeat "") entry))
 
-(defun my/aaronnote-roam-set-todo-warn (&optional warn entry)
+(defun my/noema-roam-set-todo-warn (&optional warn entry)
   "Set current todo's deadline warning lead time and refresh the task view."
   (interactive (list (read-string "Warn lead (e.g. 3d; empty clears): ") nil))
-  (my/aaronnote-roam-update-todo-metadata "warn" (or warn "") entry))
+  (my/noema-roam-update-todo-metadata "warn" (or warn "") entry))
 
-(defun my/aaronnote-roam-add-todo-dependency (&optional entry)
+(defun my/noema-roam-add-todo-dependency (&optional entry)
   "Add a dependency (`after') reference from ENTRY to another todo.
 Prompts for the target todo by note and text, resolves it through the
 Noema runtime into a stable, shortest-unique text reference, and appends
 it to ENTRY's `after' arg — no ids are ever written to the source file, so
 the reference stays a plain, human-readable part of the Markdown."
   (interactive)
-  (let* ((entry (or entry (my/aaronnote-roam--todo-at-point))))
+  (let* ((entry (or entry (my/noema-roam--todo-at-point))))
     (unless entry
       (user-error "No todo on this line"))
-    (let* ((self-id (my/aaronnote-roam--todo-field entry "id"))
+    (let* ((self-id (my/noema-roam--todo-field entry "id"))
            (candidates
             (delq nil
                   (mapcar
                    (lambda (todo)
-                     (unless (equal (my/aaronnote-roam--todo-field todo "id") self-id)
+                     (unless (equal (my/noema-roam--todo-field todo "id") self-id)
                        (cons (format "[%s] %s"
-                                     (or (my/aaronnote-roam--todo-field todo "noteTitle" "title") "?")
-                                     (or (my/aaronnote-roam--todo-field todo "text") ""))
+                                     (or (my/noema-roam--todo-field todo "noteTitle" "title") "?")
+                                     (or (my/noema-roam--todo-field todo "text") ""))
                              todo)))
-                   (my/aaronnote-roam--todos))))
+                   (my/noema-roam--todos))))
            (choice (completing-read "Depends on: " candidates nil t))
            (target (cdr (assoc choice candidates)))
-           (target-id (and target (my/aaronnote-roam--todo-field target "id"))))
+           (target-id (and target (my/noema-roam--todo-field target "id"))))
       (unless target
         (user-error "No matching todo"))
       (let* ((ref-response
-              (my/aaronnote-roam--runtime-call
+              (my/noema-roam--runtime-call
                "todo-dep-ref" "--json"
                (json-encode `((targetId . ,target-id)
                               (sourceId . ,(or self-id ""))))))
              (ref (and ref-response (gethash "ref" ref-response))))
         (unless ref
           (user-error "Could not build a dependency reference"))
-        (unless (my/aaronnote-roam--todo-patch entry (list (cons 'afterAdd ref)))
+        (unless (my/noema-roam--todo-patch entry (list (cons 'afterAdd ref)))
           (user-error "Noema runtime is required for dependency updates"))
-        (my/aaronnote-roam--clear-runtime-cache)
+        (my/noema-roam--clear-runtime-cache)
         (message "Depends on: %s" ref)
-        (my/aaronnote-roam-ui-refresh)))))
+        (my/noema-roam-ui-refresh)))))
 
-(defun my/aaronnote-roam-todo-done ()
+(defun my/noema-roam-todo-done ()
   "Mark the current roam todo done."
   (interactive)
-  (my/aaronnote-roam-update-todo-status "done"))
+  (my/noema-roam-update-todo-status "done"))
 
-(defun my/aaronnote-roam--insert-todo-row (entry &optional deadline-tone)
+(defun my/noema-roam--insert-todo-row (entry &optional deadline-tone)
   "Insert a compact task row for ENTRY using optional DEADLINE-TONE."
-  (let* ((note-slug (my/aaronnote-roam--todo-field
+  (let* ((note-slug (my/noema-roam--todo-field
                      entry "note" "noteId" "noteKey" "path"))
-         (note-title (or (my/aaronnote-roam--todo-field
+         (note-title (or (my/noema-roam--todo-field
                           entry "title" "noteTitle")
                          note-slug
                          "Unknown note"))
-         (text (or (my/aaronnote-roam--todo-field
+         (text (or (my/noema-roam--todo-field
                     entry "text" "context" "source")
                    "(empty todo)"))
-         (line (my/aaronnote-roam--todo-field entry "line"))
-         (ddl (my/aaronnote-roam--todo-ddl entry))
-         (status (my/aaronnote-roam--todo-status entry))
-         (tags (my/aaronnote-roam--todo-tags entry))
+         (line (my/noema-roam--todo-field entry "line"))
+         (ddl (my/noema-roam--todo-ddl entry))
+         (status (my/noema-roam--todo-status entry))
+         (tags (my/noema-roam--todo-tags entry))
          (meta (string-join
                 (delq nil
                       (list (and ddl (format "DDL %s" ddl))
                             (and (integerp line) (format "line %d" line))))
                 "  ·  ")))
-    (my/aaronnote-roam-ui-insert-row
+    (my/noema-roam-ui-insert-row
      :id (list note-slug line text)
      :icon 'todo
      :badge (upcase status)
-     :badge-tone (or deadline-tone (my/aaronnote-roam--todo-tone entry))
+     :badge-tone (or deadline-tone (my/noema-roam--todo-tone entry))
      :title text
      :meta meta
      :detail note-title
      :tags tags
      :action (let ((todo entry))
                (lambda (_button)
-                 (my/aaronnote-roam--visit-todo todo)))
-     :properties `(my/aaronnote-roam-todo ,entry))))
+                 (my/noema-roam--visit-todo todo)))
+     :properties `(my/noema-roam-todo ,entry))))
 
-(defun my/aaronnote-roam-todos ()
+(defun my/noema-roam-todos ()
   "List all vault todos in a *roam-todos* buffer."
   (interactive)
-  (let* ((todos (my/aaronnote-roam--todos))
+  (let* ((todos (my/noema-roam--todos))
          (active (seq-count
                   (lambda (entry)
-                    (not (member (my/aaronnote-roam--todo-status entry)
+                    (not (member (my/noema-roam--todo-status entry)
                                  '("done" "complete" "completed"
                                    "cancelled" "canceled"))))
                   todos))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
+         (buf (my/noema-roam--prepare-ui-buffer
                "*roam-todos*" "Roam Tasks" 'todo
-               #'my/aaronnote-roam-todos
+               #'my/noema-roam-todos
                (format "%d tasks" (length todos)))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Tasks"
           :icon 'todo
           :subtitle "All indexed Noema Markdown tasks"
           :stats (list (cons (format "%d active" active) 'warning)
                        (cons (format "%d total" (length todos)) 'info))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "All tasks" (length todos))
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "All tasks" (length todos))
          (if (null todos)
-             (my/aaronnote-roam-ui-insert-empty "No indexed tasks.")
+             (my/noema-roam-ui-insert-empty "No indexed tasks.")
            (dolist (entry todos)
-             (my/aaronnote-roam--insert-todo-row entry))))))
+             (my/noema-roam--insert-todo-row entry))))))
     (display-buffer buf)))
 
 ;; ── Noema-style note tools ────────────────────────────────────────────────
 
-(defun my/aaronnote-roam--insert-note-button (entry &optional prefix)
+(defun my/noema-roam--insert-note-button (entry &optional prefix)
   "Insert a clickable note button for summary ENTRY with PREFIX."
   (let* ((slug (plist-get entry :slug))
          (title (or (plist-get entry :title) slug))
@@ -2730,7 +2730,7 @@ the reference stays a plain, human-readable part of the Markdown."
          (tags (plist-get entry :tags))
          (summary (plist-get entry :summary))
          (indent (/ (length (or prefix "")) 2)))
-    (my/aaronnote-roam-ui-insert-row
+    (my/noema-roam-ui-insert-row
      :id slug
      :icon 'note
      :title title
@@ -2740,9 +2740,9 @@ the reference stays a plain, human-readable part of the Markdown."
      :indent indent
      :action (let ((target slug))
                (lambda (_button)
-                 (my/aaronnote-roam--open-slug target))))))
+                 (my/noema-roam--open-slug target))))))
 
-(defun my/aaronnote-roam--show-note-list
+(defun my/noema-roam--show-note-list
     (title entries &optional empty-text refresh-function icon)
   "Show TITLE and note ENTRIES in a special buffer."
   (let* ((refresh
@@ -2752,42 +2752,42 @@ the reference stays a plain, human-readable part of the Markdown."
                     (page-empty empty-text)
                     (page-icon icon))
                 (lambda ()
-                  (my/aaronnote-roam--show-note-list
+                  (my/noema-roam--show-note-list
                    page-title page-entries page-empty nil page-icon)))))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
-               "*aaronnote-roam-notes*" title (or icon 'note) refresh
+         (buf (my/noema-roam--prepare-ui-buffer
+               "*Noema roam notes*" title (or icon 'note) refresh
                (format "%d notes" (length entries)))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           title
           :icon (or icon 'note)
           :subtitle "Noema Markdown roam notes"
           :stats (list (cons (format "%d notes" (length entries)) 'info))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "Notes" (length entries))
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Notes" (length entries))
          (if (null entries)
-             (my/aaronnote-roam-ui-insert-empty
+             (my/noema-roam-ui-insert-empty
               (or empty-text "No notes."))
            (dolist (entry entries)
-             (my/aaronnote-roam--insert-note-button entry))))))
+             (my/noema-roam--insert-note-button entry))))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam--show-search-results (query entries)
+(defun my/noema-roam--show-search-results (query entries)
   "Show note search QUERY and ENTRIES with a live refresh action."
-  (my/aaronnote-roam--show-note-list
+  (my/noema-roam--show-note-list
    (format "Markdown roam search: %s" query)
    entries
    "No matching notes."
    (let ((search-query query))
      (lambda ()
-       (my/aaronnote-roam--show-search-results
+       (my/noema-roam--show-search-results
         search-query
-        (my/aaronnote-roam-search-notes search-query))))
+        (my/noema-roam-search-notes search-query))))
    'search))
 
-(defun my/aaronnote-roam--search-parse-term (term)
+(defun my/noema-roam--search-parse-term (term)
   "Parse a search TERM into a plist with :scope and :value.
 Scopes: title, category (nested-tag prefix), linksto, plain."
   (cond
@@ -2799,7 +2799,7 @@ Scopes: title, category (nested-tag prefix), linksto, plain."
     (list :scope 'linksto :value (match-string 1 term)))
    (t (list :scope 'plain :value term))))
 
-(defun my/aaronnote-roam--search-match-p (entry parsed-term)
+(defun my/noema-roam--search-match-p (entry parsed-term)
   "Return non-nil when ENTRY matches PARSED-TERM."
   (let ((scope (plist-get parsed-term :scope))
         (value (plist-get parsed-term :value)))
@@ -2817,176 +2817,176 @@ Scopes: title, category (nested-tag prefix), linksto, plain."
                  (or (plist-get entry :links) nil)))
       (_
        (string-match-p (regexp-quote value)
-                       (downcase (my/aaronnote-roam--candidate-haystack entry)))))))
+                       (downcase (my/noema-roam--candidate-haystack entry)))))))
 
-(defun my/aaronnote-roam-search-notes (&optional query)
+(defun my/noema-roam-search-notes (&optional query)
   "Search notes with optional scoped operators.
 Operators: intitle:TEXT, incategory:TAG, tag:TAG, linksto:SLUG, plain text.
 Multiple terms are ANDed."
   (interactive)
   (let* ((query (or query (read-string "Search notes (intitle: incategory: linksto:): ")))
          (raw-parts (split-string (downcase (string-trim query)) "\\s-+" t))
-         (parsed (mapcar #'my/aaronnote-roam--search-parse-term raw-parts))
+         (parsed (mapcar #'my/noema-roam--search-parse-term raw-parts))
          (entries (seq-filter
                    (lambda (entry)
                      (seq-every-p
-                      (lambda (term) (my/aaronnote-roam--search-match-p entry term))
+                      (lambda (term) (my/noema-roam--search-match-p entry term))
                       parsed))
-                   (my/aaronnote-roam--all-note-summaries))))
+                   (my/noema-roam--all-note-summaries))))
     (if (called-interactively-p 'interactive)
         (if (= (length entries) 1)
-            (my/aaronnote-roam--open-slug (plist-get (car entries) :slug))
-          (my/aaronnote-roam--show-search-results query entries))
+            (my/noema-roam--open-slug (plist-get (car entries) :slug))
+          (my/noema-roam--show-search-results query entries))
       entries)))
 
-(defun my/aaronnote-roam-recent-notes ()
+(defun my/noema-roam-recent-notes ()
   "Show recently opened roam notes."
   (interactive)
-  (my/aaronnote-roam--show-note-list
+  (my/noema-roam--show-note-list
    "Recent Markdown roam notes"
    (seq-filter
     #'identity
     (mapcar (lambda (slug)
               (seq-find (lambda (entry)
                           (equal (plist-get entry :slug) slug))
-                        (my/aaronnote-roam--all-note-summaries)))
+                        (my/noema-roam--all-note-summaries)))
             (seq-filter (lambda (slug)
-                          (file-exists-p (my/aaronnote-roam--slug-to-file slug)))
-                        my/aaronnote-roam--recent)))
+                          (file-exists-p (my/noema-roam--slug-to-file slug)))
+                        my/noema-roam--recent)))
    "No recent notes."
-   #'my/aaronnote-roam-recent-notes
+   #'my/noema-roam-recent-notes
    'note))
 
-(defun my/aaronnote-roam-related-notes (&optional target-slug)
+(defun my/noema-roam-related-notes (&optional target-slug)
   "Show outgoing links and backlinks for the current note."
   (interactive)
-  (let* ((slug (or target-slug (my/aaronnote-roam--current-slug)))
-         (links (and slug (my/aaronnote-roam--note-links slug)))
-         (backlinks (and slug (my/aaronnote-roam--db-backlinks-to slug)))
-         (summaries (my/aaronnote-roam--all-note-summaries))
+  (let* ((slug (or target-slug (my/noema-roam--current-slug)))
+         (links (and slug (my/noema-roam--note-links slug)))
+         (backlinks (and slug (my/noema-roam--db-backlinks-to slug)))
+         (summaries (my/noema-roam--all-note-summaries))
          (by-slug (lambda (target)
                     (seq-find (lambda (entry)
                                 (equal (plist-get entry :slug) target))
                               summaries)))
          (refresh (let ((target slug))
-                    (lambda () (my/aaronnote-roam-related-notes target))))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
-               "*aaronnote-roam-related*" "Related Notes" 'related refresh
+                    (lambda () (my/noema-roam-related-notes target))))
+         (buf (my/noema-roam--prepare-ui-buffer
+               "*Noema roam related*" "Related Notes" 'related refresh
                (format "%d links · %d backlinks"
                        (length links) (length backlinks)))))
     (unless slug (user-error "Not in a roam note"))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Related notes"
           :icon 'related
-          :subtitle (my/aaronnote-roam--note-title slug)
+          :subtitle (my/noema-roam--note-title slug)
           :stats (list (cons (format "%d outgoing" (length links)) 'info)
                        (cons (format "%d backlinks" (length backlinks)) 'muted))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "Outgoing links" (length links))
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Outgoing links" (length links))
          (if links
              (dolist (target links)
                (when-let* ((entry (or (funcall by-slug target)
-                                      (my/aaronnote-roam--summary-entry-for-slug
+                                      (my/noema-roam--summary-entry-for-slug
                                        target summaries))))
-                 (my/aaronnote-roam--insert-note-button entry)))
-           (my/aaronnote-roam-ui-insert-empty "No outgoing note links."))
+                 (my/noema-roam--insert-note-button entry)))
+           (my/noema-roam-ui-insert-empty "No outgoing note links."))
          (insert "\n")
-         (my/aaronnote-roam-ui-insert-section "Backlinks" (length backlinks))
+         (my/noema-roam-ui-insert-section "Backlinks" (length backlinks))
          (if backlinks
              (dolist (target backlinks)
                (when-let* ((entry (or (funcall by-slug target)
-                                      (my/aaronnote-roam--summary-entry-for-slug
+                                      (my/noema-roam--summary-entry-for-slug
                                        target summaries))))
-                 (my/aaronnote-roam--insert-note-button entry)))
-           (my/aaronnote-roam-ui-insert-empty "No backlinks.")))))
+                 (my/noema-roam--insert-note-button entry)))
+           (my/noema-roam-ui-insert-empty "No backlinks.")))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam-management ()
+(defun my/noema-roam-management ()
   "Show roam management commands and index status."
   (interactive)
-  (let* ((entries (my/aaronnote-roam--all-note-summaries))
-         (db (my/aaronnote-roam--db))
+  (let* ((entries (my/noema-roam--all-note-summaries))
+         (db (my/noema-roam--db))
          (generated (and db (gethash "generated" db)))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
-               "*aaronnote-roam-management*" "Roam Management" 'management
-               #'my/aaronnote-roam-management
+         (buf (my/noema-roam--prepare-ui-buffer
+               "*Noema roam management*" "Roam Management" 'management
+               #'my/noema-roam-management
                (format "%d nodes" (length entries)))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Roam management"
           :icon 'management
           :subtitle "Index status and common Noema operations"
           :stats (list (cons (format "%d nodes" (length entries)) 'info)
                        (cons (if generated "DB ready" "DB unknown")
                              (if generated 'success 'warning)))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "Index")
-         (my/aaronnote-roam-ui-insert-field
-          "Root" (abbreviate-file-name (my/aaronnote-roam-root))
-          'my/aaronnote-roam-ui-path)
-         (my/aaronnote-roam-ui-insert-field "Nodes" (length entries))
-         (my/aaronnote-roam-ui-insert-field
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Index")
+         (my/noema-roam-ui-insert-field
+          "Root" (abbreviate-file-name (my/noema-roam-root))
+          'my/noema-roam-ui-path)
+         (my/noema-roam-ui-insert-field "Nodes" (length entries))
+         (my/noema-roam-ui-insert-field
           "DB generated" (or generated "unknown")
-          'my/aaronnote-roam-ui-meta)
+          'my/noema-roam-ui-meta)
          (insert "\n")
-         (my/aaronnote-roam-ui-insert-section "Actions")
+         (my/noema-roam-ui-insert-section "Actions")
          (insert "   ")
-         (my/aaronnote-roam-ui-insert-actions
+         (my/noema-roam-ui-insert-actions
           '((:label "Sync roam-db"
-             :command my/aaronnote-roam-update-db
+             :command my/noema-roam-update-db
              :help "Run incremental roam-db sync"
              :primary t)
             (:label "New note"
-             :command my/aaronnote-roam-new-note
+             :command my/noema-roam-new-note
              :help "Open the native Roam New workbench")
             (:label "Search notes"
-             :command my/aaronnote-roam-search-notes
+             :command my/noema-roam-search-notes
              :help "Search Noema roam notes")
             (:label "DB status"
-             :command my/aaronnote-roam-db-status
+             :command my/noema-roam-db-status
              :help "Open roam-db status"))))))
     (display-buffer buf)))
 
 ;; ── Roam agenda ─────────────────────────────────────────────────────────────
 
-(defconst my/aaronnote-roam--agenda-date-fields
+(defconst my/noema-roam--agenda-date-fields
   '("ddl" "deadline" "due" "scheduled" "start" "when" "date")
   "Todo fields considered date-like in the agenda.")
 
-(defun my/aaronnote-roam--todo-value (entry &rest keys)
+(defun my/noema-roam--todo-value (entry &rest keys)
   "Return the first non-empty todo ENTRY value for KEYS.
 This checks top-level todo fields first, then the nested args object."
   (or (seq-some
        (lambda (key)
-         (let ((value (my/aaronnote-roam--todo-field entry key)))
+         (let ((value (my/noema-roam--todo-field entry key)))
            (and value
                 (not (and (stringp value) (string-empty-p value)))
                 value)))
        keys)
-      (when-let* ((args (my/aaronnote-roam--todo-field entry "args")))
+      (when-let* ((args (my/noema-roam--todo-field entry "args")))
         (seq-some
          (lambda (key)
-           (let ((value (my/aaronnote-roam--todo-field args key)))
+           (let ((value (my/noema-roam--todo-field args key)))
              (and value
                   (not (and (stringp value) (string-empty-p value)))
                   value)))
          keys))))
 
-(defun my/aaronnote-roam--todo-string-value (entry &rest keys)
+(defun my/noema-roam--todo-string-value (entry &rest keys)
   "Return a trimmed string todo ENTRY value for KEYS, or nil."
-  (when-let* ((value (apply #'my/aaronnote-roam--todo-value entry keys))
+  (when-let* ((value (apply #'my/noema-roam--todo-value entry keys))
               (string (string-trim (format "%s" value))))
     (unless (string-empty-p string)
       string)))
 
-(defun my/aaronnote-roam--todo-list-value (entry &rest keys)
+(defun my/noema-roam--todo-list-value (entry &rest keys)
   "Return a string list todo ENTRY value for KEYS."
-  (let ((value (apply #'my/aaronnote-roam--todo-value entry keys)))
+  (let ((value (apply #'my/noema-roam--todo-value entry keys)))
     (cond
      ((null value) nil)
      ((vectorp value)
@@ -2999,36 +2999,36 @@ This checks top-level todo fields first, then the nested args object."
       (split-string value "[,[:space:]]+" t))
      (t (list (format "%s" value))))))
 
-(defun my/aaronnote-roam--todo-tags (entry)
+(defun my/noema-roam--todo-tags (entry)
   "Return file and inline tags inherited by todo ENTRY."
   (delete-dups
    (seq-filter
     (lambda (tag) (not (string-empty-p tag)))
-    (append (my/aaronnote-roam--todo-list-value entry "tags")
-            (my/aaronnote-roam--todo-list-value entry "inlineTags")))))
+    (append (my/noema-roam--todo-list-value entry "tags")
+            (my/noema-roam--todo-list-value entry "inlineTags")))))
 
-(defun my/aaronnote-roam--todo-canon (entry key)
+(defun my/noema-roam--todo-canon (entry key)
   "Return canonical arg KEY from todo ENTRY's `canon' object, or nil.
 `canon' is attached server-side (see `canonicalTodoArgs' in runtime.mjs) and
 already resolves every read alias (due/deadline -> ddl, priority -> prio,
 scheduled/start -> sche, ...), so callers no longer need to enumerate aliases
 themselves."
-  (when-let* ((canon (my/aaronnote-roam--todo-field entry "canon"))
-              (value (my/aaronnote-roam--todo-field canon key))
+  (when-let* ((canon (my/noema-roam--todo-field entry "canon"))
+              (value (my/noema-roam--todo-field canon key))
               (s (string-trim (format "%s" value))))
     (unless (string-empty-p s) s)))
 
-(defun my/aaronnote-roam--todo-ddl (entry)
+(defun my/noema-roam--todo-ddl (entry)
   "Return deadline string for todo ENTRY, or nil."
-  (or (my/aaronnote-roam--todo-canon entry "ddl")
-      (my/aaronnote-roam--todo-string-value entry "ddl" "deadline" "due")))
+  (or (my/noema-roam--todo-canon entry "ddl")
+      (my/noema-roam--todo-string-value entry "ddl" "deadline" "due")))
 
-(defun my/aaronnote-roam--todo-scheduled (entry)
+(defun my/noema-roam--todo-scheduled (entry)
   "Return scheduled date string for todo ENTRY, or nil."
-  (or (my/aaronnote-roam--todo-canon entry "sche")
-      (my/aaronnote-roam--todo-string-value entry "scheduled" "start" "when")))
+  (or (my/noema-roam--todo-canon entry "sche")
+      (my/noema-roam--todo-string-value entry "scheduled" "start" "when")))
 
-(defun my/aaronnote-roam--date-day-string (value)
+(defun my/noema-roam--date-day-string (value)
   "Return YYYY-MM-DD for date-like VALUE, or nil."
   (when-let* ((raw (and value (string-trim (format "%s" value)))))
     (unless (string-empty-p raw)
@@ -3055,25 +3055,25 @@ themselves."
                                   (encode-time (parse-time-string raw)))
             (error nil))))))))
 
-(defun my/aaronnote-roam--todo-agenda-date (entry)
+(defun my/noema-roam--todo-agenda-date (entry)
   "Return the main agenda date string for todo ENTRY, or nil."
-  (or (my/aaronnote-roam--date-day-string
-       (my/aaronnote-roam--todo-ddl entry))
-      (my/aaronnote-roam--date-day-string
-       (my/aaronnote-roam--todo-scheduled entry))
+  (or (my/noema-roam--date-day-string
+       (my/noema-roam--todo-ddl entry))
+      (my/noema-roam--date-day-string
+       (my/noema-roam--todo-scheduled entry))
       (seq-some
        (lambda (key)
-         (my/aaronnote-roam--date-day-string
-          (my/aaronnote-roam--todo-value entry key)))
-       my/aaronnote-roam--agenda-date-fields)))
+         (my/noema-roam--date-day-string
+          (my/noema-roam--todo-value entry key)))
+       my/noema-roam--agenda-date-fields)))
 
-(defun my/aaronnote-roam-agenda-search (&optional query)
+(defun my/noema-roam-agenda-search (&optional query)
   "Search the roam agenda with QUERY."
   (interactive (list (read-string
                       "Agenda search (status: tag: title: roamid: file: parent: date: from: to:): ")))
-  (my/aaronnote-roam-agenda 'search query))
+  (my/noema-roam-agenda 'search query))
 
-(defun my/aaronnote-roam--current-buffer-todos ()
+(defun my/noema-roam--current-buffer-todos ()
   "Return lightweight todo entries scanned from the current buffer."
   (let ((file (buffer-file-name))
         todos)
@@ -3097,7 +3097,7 @@ themselves."
               (let ((entry (list :file file
                                  :path (and file
                                             (file-relative-name
-                                             file (my/aaronnote-roam-root)))
+                                             file (my/noema-roam-root)))
                                  :line (line-number-at-pos line-start t)
                                  :column 1
                                  :index (1- line-start)
@@ -3113,7 +3113,7 @@ themselves."
           (forward-line 1))))
     (nreverse todos)))
 
-(defun my/aaronnote-roam--current-file-todos ()
+(defun my/noema-roam--current-file-todos ()
   "Return todo entries for the current file."
   (let* ((file (buffer-file-name))
          (truename (and file (file-truename file)))
@@ -3121,27 +3121,27 @@ themselves."
           (and truename
                (seq-filter
                 (lambda (entry)
-                  (let ((todo-file (my/aaronnote-roam--todo-field entry "file")))
+                  (let ((todo-file (my/noema-roam--todo-field entry "file")))
                     (and (stringp todo-file)
                          (file-exists-p todo-file)
                          (string= (file-truename todo-file) truename))))
-                (or (my/aaronnote-roam--todos) '())))))
+                (or (my/noema-roam--todos) '())))))
     (or indexed
-        (and file (my/aaronnote-roam--current-buffer-todos)))))
+        (and file (my/noema-roam--current-buffer-todos)))))
 
-(defun my/aaronnote-roam-jump-file-todo ()
+(defun my/noema-roam-jump-file-todo ()
   "Quickly jump to a todo in the current Markdown roam file."
   (interactive)
   (unless buffer-file-name
     (user-error "Current buffer is not visiting a file"))
-  (let* ((todos (my/aaronnote-roam--current-file-todos))
+  (let* ((todos (my/noema-roam--current-file-todos))
          (choices
           (mapcar
            (lambda (entry)
-             (let* ((line (or (my/aaronnote-roam--todo-field entry "line") 0))
-                    (status (upcase (my/aaronnote-roam--todo-status entry)))
-                    (date (my/aaronnote-roam--todo-agenda-date entry))
-                    (text (or (my/aaronnote-roam--todo-string-value
+             (let* ((line (or (my/noema-roam--todo-field entry "line") 0))
+                    (status (upcase (my/noema-roam--todo-status entry)))
+                    (date (my/noema-roam--todo-agenda-date entry))
+                    (text (or (my/noema-roam--todo-string-value
                                entry "text" "source" "context")
                               "(empty todo)"))
                     (label (format "%5s  L%-4s  %s%s"
@@ -3151,14 +3151,14 @@ themselves."
            todos)))
     (unless choices
       (user-error "No todos in current file"))
-    (my/aaronnote-roam--visit-todo
+    (my/noema-roam--visit-todo
      (cdr (assoc (completing-read "File todo: " choices nil t) choices)))))
 
-(defun my/aaronnote-roam--open-web-agenda (&optional view query)
+(defun my/noema-roam--open-web-agenda (&optional view query)
   "Open Noema Web agenda special page with VIEW and optional QUERY."
-  (unless (and (fboundp 'my/aaronnote--ensure-server)
-               (fboundp 'my/aaronnote--server-url)
-               (fboundp 'my/aaronnote--open-url))
+  (unless (and (fboundp 'my/noema--ensure-server)
+               (fboundp 'my/noema--server-url)
+               (fboundp 'my/noema--open-url))
     (require 'init-aaronnote))
   (let* ((view-name (pcase view
                       ((or 'calendar 'month) "calendar")
@@ -3170,12 +3170,12 @@ themselves."
                       (_ "agenda")))
          (query-string (and query (format "%s" query)))
          (target-window (selected-window)))
-    (my/aaronnote--ensure-server
+    (my/noema--ensure-server
      (lambda ()
        (when (window-live-p target-window)
          (select-window target-window))
-       (my/aaronnote--open-url
-        (concat (my/aaronnote--server-url "/agenda")
+       (my/noema--open-url
+        (concat (my/noema--server-url "/agenda")
                 "?view=" (url-hexify-string view-name)
                 (if (and query-string (not (string-empty-p query-string)))
                     (concat "&q=" (url-hexify-string query-string))
@@ -3183,12 +3183,12 @@ themselves."
         nil
         t)))))
 
-(defun my/aaronnote-roam-agenda (&optional mode query)
+(defun my/noema-roam-agenda (&optional mode query)
   "Open the Noema Web agenda special page.
 The native Emacs agenda renderer is no longer the default project-management
 surface; Noema Web owns agenda/project/Gantt management."
   (interactive)
-  (my/aaronnote-roam--open-web-agenda
+  (my/noema-roam--open-web-agenda
    (pcase mode
      ((or 'calendar 'month) 'calendar)
      ('log 'log)
@@ -3200,44 +3200,44 @@ surface; Noema Web owns agenda/project/Gantt management."
      (_ 'agenda))
    query))
 
-(defun my/aaronnote-roam-agenda-calendar ()
+(defun my/noema-roam-agenda-calendar ()
   "Show the agenda month calendar."
   (interactive)
-  (my/aaronnote-roam--open-web-agenda 'calendar))
+  (my/noema-roam--open-web-agenda 'calendar))
 
-(defun my/aaronnote-roam-agenda-log ()
+(defun my/noema-roam-agenda-log ()
   "Show the agenda completion log."
   (interactive)
-  (my/aaronnote-roam--open-web-agenda 'log))
+  (my/noema-roam--open-web-agenda 'log))
 
-(defun my/aaronnote-roam-agenda-gantt ()
+(defun my/noema-roam-agenda-gantt ()
   "Show the agenda Gantt view."
   (interactive)
-  (my/aaronnote-roam--open-web-agenda 'gantt))
+  (my/noema-roam--open-web-agenda 'gantt))
 
-(defun my/aaronnote-roam-agenda-projects ()
+(defun my/noema-roam-agenda-projects ()
   "Show the agenda project rollup view."
   (interactive)
-  (my/aaronnote-roam--open-web-agenda 'projects))
+  (my/noema-roam--open-web-agenda 'projects))
 
-(defun my/aaronnote-roam-agenda-clock ()
+(defun my/noema-roam-agenda-clock ()
   "Show the agenda clocktable view."
   (interactive)
-  (my/aaronnote-roam--open-web-agenda 'clocktable))
+  (my/noema-roam--open-web-agenda 'clocktable))
 
-(defun my/aaronnote-roam-agenda-lints ()
+(defun my/noema-roam-agenda-lints ()
   "Show agenda lints."
   (interactive)
-  (my/aaronnote-roam--open-web-agenda 'lints))
+  (my/noema-roam--open-web-agenda 'lints))
 
 ;; ── Roam activity heatmap ────────────────────────────────────────────────────
 
-(defconst my/aaronnote-roam--activity-heatmap-days 70
+(defconst my/noema-roam--activity-heatmap-days 70
   "Number of recent days shown in roam activity heatmaps.")
 
-(defun my/aaronnote-roam--activity-date-counts (&optional days)
+(defun my/noema-roam--activity-date-counts (&optional days)
   "Return an ordered alist of recent note activity counts for DAYS."
-  (let* ((days (or days my/aaronnote-roam--activity-heatmap-days))
+  (let* ((days (or days my/noema-roam--activity-heatmap-days))
          (start (time-subtract (current-time) (days-to-time (1- days))))
          (counts (make-hash-table :test 'equal))
          ordered)
@@ -3246,7 +3246,7 @@ surface; Noema Web owns agenda/project/Gantt management."
                   "%Y-%m-%d" (time-add start (days-to-time offset)))))
         (push (cons day 0) ordered)
         (puthash day 0 counts)))
-    (dolist (record (delete-dups (my/aaronnote-roam--note-records)))
+    (dolist (record (delete-dups (my/noema-roam--note-records)))
       (when-let* ((file (plist-get record :file))
                   ((file-exists-p file))
                   (attrs (file-attributes file 'integer))
@@ -3259,7 +3259,7 @@ surface; Noema Web owns agenda/project/Gantt management."
               (cons (car pair) (gethash (car pair) counts 0)))
             (nreverse ordered))))
 
-(defun my/aaronnote-roam--activity-heatmap-tone (count)
+(defun my/noema-roam--activity-heatmap-tone (count)
   "Return a display tone for activity COUNT."
   (cond
    ((>= count 5) 'success)
@@ -3267,7 +3267,7 @@ surface; Noema Web owns agenda/project/Gantt management."
    ((>= count 1) 'info)
    (t 'muted)))
 
-(defun my/aaronnote-roam--activity-heatmap-cell (count)
+(defun my/noema-roam--activity-heatmap-cell (count)
   "Return a fixed-width heatmap cell label for COUNT."
   (format " %2s "
           (cond
@@ -3275,7 +3275,7 @@ surface; Noema Web owns agenda/project/Gantt management."
            ((> count 99) "99")
            (t (format "%d" count)))))
 
-(defun my/aaronnote-roam--activity-heatmap-rows (counts)
+(defun my/noema-roam--activity-heatmap-rows (counts)
   "Return heatmap rows for activity COUNTS.
 Each row is a list of strings or (LABEL . TONE) cells."
   (let* ((weeks (ceiling (/ (float (length counts)) 7.0)))
@@ -3301,14 +3301,14 @@ Each row is a list of strings or (LABEL . TONE) cells."
                 for pair = (aref grid (+ (* week 7) dow))
                 for count = (or (cdr-safe pair) 0)
                 collect
-                (cons (my/aaronnote-roam--activity-heatmap-cell count)
-                      (my/aaronnote-roam--activity-heatmap-tone count))
+                (cons (my/noema-roam--activity-heatmap-cell count)
+                      (my/noema-roam--activity-heatmap-tone count))
                 unless (= week (1- weeks))
                 collect " "))
               rows))
     (nreverse rows)))
 
-(defun my/aaronnote-roam--activity-heatmap-row-width (row)
+(defun my/noema-roam--activity-heatmap-row-width (row)
   "Return display width for heatmap ROW."
   (apply #'+
          (mapcar
@@ -3316,11 +3316,11 @@ Each row is a list of strings or (LABEL . TONE) cells."
             (string-width (if (consp cell) (car cell) cell)))
           row)))
 
-(defun my/aaronnote-roam--pixel-width-to-columns (pixels)
+(defun my/noema-roam--pixel-width-to-columns (pixels)
   "Return the display-column width represented by PIXELS."
   (ceiling (/ (float pixels) (max 1 (frame-char-width)))))
 
-(defun my/aaronnote-roam--region-align-width (start end fallback-width)
+(defun my/noema-roam--region-align-width (start end fallback-width)
   "Return rendered width from START to END for `:align-to'.
 Use FALLBACK-WIDTH when pixel measurement is unavailable."
   (or (and (fboundp 'string-pixel-width)
@@ -3328,12 +3328,12 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
                   (string-pixel-width (buffer-substring start end)
                                       (current-buffer))))
              (and (> pixel-width 0)
-                  (my/aaronnote-roam--pixel-width-to-columns pixel-width))))
+                  (my/noema-roam--pixel-width-to-columns pixel-width))))
       fallback-width))
 
-(defun my/aaronnote-roam--center-inserted-region (start end width)
+(defun my/noema-roam--center-inserted-region (start end width)
   "Center text from START to END using display WIDTH."
-  (let* ((align-width (my/aaronnote-roam--region-align-width start end width))
+  (let* ((align-width (my/noema-roam--region-align-width start end width))
          (prefix (propertize
                   " "
                   'display
@@ -3341,10 +3341,10 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
     (add-text-properties start end
                          `(line-prefix ,prefix indent-prefix ,prefix))))
 
-(defun my/aaronnote-roam--insert-centered-heatmap-row (row &optional face-fn)
+(defun my/noema-roam--insert-centered-heatmap-row (row &optional face-fn)
   "Insert heatmap ROW centered.  FACE-FN maps a tone to a face."
   (let ((start (point))
-        (row-width (my/aaronnote-roam--activity-heatmap-row-width row)))
+        (row-width (my/noema-roam--activity-heatmap-row-width row)))
     (dolist (cell row)
       (if (consp cell)
           (insert (propertize (car cell)
@@ -3352,76 +3352,76 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
                                         (funcall face-fn (cdr cell))
                                       'default)))
         (insert cell)))
-    (my/aaronnote-roam--center-inserted-region start (point) row-width)
+    (my/noema-roam--center-inserted-region start (point) row-width)
     (insert "\n")))
 
-(defun my/aaronnote-roam--insert-centered-line (text &optional face)
+(defun my/noema-roam--insert-centered-line (text &optional face)
   "Insert TEXT centered in the selected window with optional FACE."
   (let ((start (point)))
     (insert (if face (propertize text 'face face) text))
-    (my/aaronnote-roam--center-inserted-region
+    (my/noema-roam--center-inserted-region
      start (point) (string-width text))
     (insert "\n")))
 
-(defun my/aaronnote-roam-ui-insert-activity-heatmap (&optional days)
+(defun my/noema-roam-ui-insert-activity-heatmap (&optional days)
   "Insert a board-style roam activity heatmap for recent DAYS."
-  (let* ((counts (my/aaronnote-roam--activity-date-counts days))
+  (let* ((counts (my/noema-roam--activity-date-counts days))
          (total (apply #'+ (mapcar #'cdr counts))))
-    (my/aaronnote-roam-ui-insert-section
+    (my/noema-roam-ui-insert-section
      (format "Roam activity · last %d days" (length counts))
      total
      (if (> total 0) 'success 'muted))
-    (dolist (row (my/aaronnote-roam--activity-heatmap-rows counts))
-      (my/aaronnote-roam--insert-centered-heatmap-row
+    (dolist (row (my/noema-roam--activity-heatmap-rows counts))
+      (my/noema-roam--insert-centered-heatmap-row
        row
-       #'my/aaronnote-roam-ui--tone-face))
+       #'my/noema-roam-ui--tone-face))
     (insert "\n")
-    (my/aaronnote-roam--insert-centered-line
+    (my/noema-roam--insert-centered-line
      "Each square is one day; value is modified note count."
-     'my/aaronnote-roam-ui-meta)
+     'my/noema-roam-ui-meta)
     (insert "\n")
-    (my/aaronnote-roam--insert-centered-heatmap-row
+    (my/noema-roam--insert-centered-heatmap-row
      '("Legend  " (" 0 " . muted) " " (" 1 " . info) " "
        (" 2+ " . warning) " " (" 5+ " . success))
-     #'my/aaronnote-roam-ui--tone-face)
+     #'my/noema-roam-ui--tone-face)
     (insert "\n")))
 
-(defun my/aaronnote-roam-dashboard-insert-heatmap (&optional days)
+(defun my/noema-roam-dashboard-insert-heatmap (&optional days)
   "Insert a compact roam activity heatmap into the main dashboard."
   (condition-case nil
-      (let* ((counts (my/aaronnote-roam--activity-date-counts
-                      (or days my/aaronnote-roam--activity-heatmap-days)))
+      (let* ((counts (my/noema-roam--activity-date-counts
+                      (or days my/noema-roam--activity-heatmap-days)))
              (total (apply #'+ (mapcar #'cdr counts))))
         (when counts
-          (my/aaronnote-roam--insert-centered-line
+          (my/noema-roam--insert-centered-line
            (format "Roam activity · last %d days · %d changes"
                    (length counts) total)
            (if (facep 'dashboard-heading)
                'dashboard-heading
              'bold))
           (insert "\n")
-          (dolist (row (my/aaronnote-roam--activity-heatmap-rows counts))
-            (my/aaronnote-roam--insert-centered-heatmap-row
+          (dolist (row (my/noema-roam--activity-heatmap-rows counts))
+            (my/noema-roam--insert-centered-heatmap-row
              row
-             #'my/aaronnote-roam-ui--tone-face))
+             #'my/noema-roam-ui--tone-face))
           (insert "\n\n")))
     (error nil)))
 
 ;; ── Roam DB utilities ─────────────────────────────────────────────────────────
 
-(defun my/aaronnote-roam-sync-full ()
+(defun my/noema-roam-sync-full ()
   "Force a full roam DB rebuild (clears incremental state)."
   (interactive)
   (message "Rebuilding roam DB from scratch…")
-  (when (my/aaronnote-roam--runtime-available-p)
-    (my/aaronnote-roam--runtime-sync t nil))
+  (when (my/noema-roam--runtime-available-p)
+    (my/noema-roam--runtime-sync t nil))
   (message "Roam DB full rebuild done."))
 
-(defun my/aaronnote-roam-db-status ()
+(defun my/noema-roam-db-status ()
   "Show roam DB sync state from Noema var."
   (interactive)
-  (let* ((root (my/aaronnote-roam-root))
-         (state-root (my/aaronnote-roam--state-root))
+  (let* ((root (my/noema-roam-root))
+         (state-root (my/noema-roam--state-root))
          (roam-db-file (expand-file-name "roam.db" root))
          (state-file (expand-file-name "sync/state.json"
                                        state-root))
@@ -3434,14 +3434,14 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
                    (buffer-string))
                  :object-type 'hash-table)
               (error nil))))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
+         (buf (my/noema-roam--prepare-ui-buffer
                "*roam-db-status*" "Roam DB Status" 'database
-               #'my/aaronnote-roam-db-status
+               #'my/noema-roam-db-status
                (if state "state ready" "state missing"))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Roam DB status"
           :icon 'database
           :subtitle "Noema incremental node index state"
@@ -3450,26 +3450,26 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
                        (cons (if (file-exists-p roam-db-file) "roam.db ready" "roam.db missing")
                              (if (file-exists-p roam-db-file) 'success 'warning)))
           :actions
-          (my/aaronnote-roam--ui-actions
+          (my/noema-roam--ui-actions
            '((:label "Incremental sync"
-              :command my/aaronnote-roam-update-db
+              :command my/noema-roam-update-db
               :help "Run incremental roam DB sync"
               :primary t)
              (:label "Full rebuild"
-              :command my/aaronnote-roam-sync-full
+              :command my/noema-roam-sync-full
               :help "Rebuild the roam DB index from scratch"))))
-         (my/aaronnote-roam-ui-insert-activity-heatmap)
-         (my/aaronnote-roam-ui-insert-section "Location")
-         (my/aaronnote-roam-ui-insert-field
-          "Root" (abbreviate-file-name root) 'my/aaronnote-roam-ui-path)
-         (my/aaronnote-roam-ui-insert-field
+         (my/noema-roam-ui-insert-activity-heatmap)
+         (my/noema-roam-ui-insert-section "Location")
+         (my/noema-roam-ui-insert-field
+          "Root" (abbreviate-file-name root) 'my/noema-roam-ui-path)
+         (my/noema-roam-ui-insert-field
           "roam.db" (abbreviate-file-name roam-db-file)
-          'my/aaronnote-roam-ui-path)
-         (my/aaronnote-roam-ui-insert-field
+          'my/noema-roam-ui-path)
+         (my/noema-roam-ui-insert-field
           "State file" (abbreviate-file-name state-file)
-          'my/aaronnote-roam-ui-path)
+          'my/noema-roam-ui-path)
          (insert "\n")
-         (my/aaronnote-roam-ui-insert-section "State")
+         (my/noema-roam-ui-insert-section "State")
          (cond
           (state
            (dolist (key (sort (seq-remove
@@ -3478,44 +3478,44 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
                                (hash-table-keys state))
                               #'string<))
              (let ((value (gethash key state)))
-               (my/aaronnote-roam-ui-insert-field
+               (my/noema-roam-ui-insert-field
                 key (if (eq value :null) "(null)" value)
-                'my/aaronnote-roam-ui-meta))))
+                'my/noema-roam-ui-meta))))
           ((file-exists-p state-file)
-           (my/aaronnote-roam-ui-insert-empty
+           (my/noema-roam-ui-insert-empty
             "The state file exists but could not be parsed."))
           (t
-           (my/aaronnote-roam-ui-insert-empty
+           (my/noema-roam-ui-insert-empty
             "No sync state yet. Run an incremental sync or full rebuild."))))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam-magit ()
+(defun my/noema-roam-magit ()
   "Open magit-status in the roam notes root."
   (interactive)
   (unless (require 'magit nil t)
     (user-error "magit is not available — install it first"))
-  (magit-status (my/aaronnote-roam-root)))
+  (magit-status (my/noema-roam-root)))
 
-(defun my/aaronnote-roam-dired ()
+(defun my/noema-roam-dired ()
   "Open dired at the roam notes root."
   (interactive)
-  (dired (my/aaronnote-roam-root)))
+  (dired (my/noema-roam-root)))
 
 ;; ── Roam completion-at-point (roam:// and ../ paths) ─────────────────────────
 
-(defun my/aaronnote-roam--todo-ref-completions (prefix)
+(defun my/noema-roam--todo-ref-completions (prefix)
   "Return dependency-ref completion strings for PREFIX via the runtime.
 Queries the same `todo-refs' service the web editor's completion popup
 uses (see `todoRefCompletions' in server/lib/runtime.mjs): same-file todos
 first, then open statuses before closed ones; a todo with a stable id
 completes to `#id', otherwise to the shortest unique text ref."
   (let* ((body (list :prefix prefix :file (or buffer-file-name "")))
-         (result (my/aaronnote-roam--runtime-call
+         (result (my/noema-roam--runtime-call
                   "todo-refs" "--json" (json-serialize body)))
          (items (and result (gethash "items" result))))
     (delq nil (mapcar (lambda (item) (gethash "ref" item)) items))))
 
-(defun my/aaronnote-roam-capf ()
+(defun my/noema-roam-capf ()
   "Completion-at-point for roam:// links and relative paths in Typst/md buffers."
   (let ((roam-prefix "roam://")
         (dotdot-re "\\.\\./"))
@@ -3529,7 +3529,7 @@ completes to `#id', otherwise to the shortest unique text ref."
       (let* ((start (match-beginning 1))
              (end (point))
              (prefix (match-string-no-properties 1))
-             (candidates (my/aaronnote-roam--todo-ref-completions prefix)))
+             (candidates (my/noema-roam--todo-ref-completions prefix)))
         (when candidates
           (list start end candidates :exclusive 'no))))
      ;; roam://... completion
@@ -3541,12 +3541,12 @@ completes to `#id', otherwise to the shortest unique text ref."
              (end   (match-end 0))
              (candidates
               (mapcar (lambda (slug) (concat roam-prefix slug))
-                      (my/aaronnote-roam--all-slugs-cached))))
+                      (my/noema-roam--all-slugs-cached))))
         (when candidates
           (list start end candidates :exclusive 'no))))
      ;; ../  relative path completion
      ((looking-back (concat dotdot-re "[^][\n\t ]*") (line-beginning-position) t)
-      (let* ((root (my/aaronnote-roam-root))
+      (let* ((root (my/noema-roam-root))
              (start (save-excursion
                       (re-search-backward (concat dotdot-re "\\([^][\n\t ]*\\)")
                                           (line-beginning-position) t)
@@ -3556,7 +3556,7 @@ completes to `#id', otherwise to the shortest unique text ref."
               (when (file-directory-p root)
                 (let ((rel (buffer-substring-no-properties start end))
                       result)
-                  (dolist (f (my/aaronnote-roam--all-files))
+                  (dolist (f (my/noema-roam--all-files))
                     (let ((r (file-relative-name f (file-name-directory
                                                     (or buffer-file-name root)))))
                       (when (string-prefix-p rel r)
@@ -3566,86 +3566,86 @@ completes to `#id', otherwise to the shortest unique text ref."
           (list start end candidates :exclusive 'no))))
      (t nil))))
 
-(defun my/aaronnote-roam--capf-setup ()
+(defun my/noema-roam--capf-setup ()
   "Register roam capf for this buffer."
-  (add-hook 'completion-at-point-functions #'my/aaronnote-roam-capf nil t))
+  (add-hook 'completion-at-point-functions #'my/noema-roam-capf nil t))
 
-(add-hook 'markdown-mode-hook #'my/aaronnote-roam--capf-setup)
+(add-hook 'markdown-mode-hook #'my/noema-roam--capf-setup)
 
 ;; ── Interactive Markdown roam link selector ──────────────────────────────────
 
-(defvar-local my/aaronnote-roam-select--origin-marker nil)
-(defvar-local my/aaronnote-roam-select--current-note-id nil)
-(defvar-local my/aaronnote-roam-select--preferred-kind nil)
-(defvar-local my/aaronnote-roam-select--view nil)
-(defvar-local my/aaronnote-roam-select--path "")
-(defvar-local my/aaronnote-roam-select--query nil)
-(defvar-local my/aaronnote-roam-select--target-record nil)
-(defvar-local my/aaronnote-roam-select--target-basis 'id)
-(defvar-local my/aaronnote-roam-select--toc-parent nil)
+(defvar-local my/noema-roam-select--origin-marker nil)
+(defvar-local my/noema-roam-select--current-note-id nil)
+(defvar-local my/noema-roam-select--preferred-kind nil)
+(defvar-local my/noema-roam-select--view nil)
+(defvar-local my/noema-roam-select--path "")
+(defvar-local my/noema-roam-select--query nil)
+(defvar-local my/noema-roam-select--target-record nil)
+(defvar-local my/noema-roam-select--target-basis 'id)
+(defvar-local my/noema-roam-select--toc-parent nil)
 
-(defvar my/aaronnote-roam-select-mode-map
+(defvar my/noema-roam-select-mode-map
   (let ((map (make-sparse-keymap)))
-    (set-keymap-parent map my/aaronnote-roam-ui-mode-map)
-    (define-key map (kbd "RET") #'my/aaronnote-roam-select-activate)
-    (define-key map (kbd "i") #'my/aaronnote-roam-select-insert-current)
-    (define-key map (kbd "/") #'my/aaronnote-roam-select-search)
-    (define-key map (kbd "s") #'my/aaronnote-roam-select-search)
-    (define-key map (kbd "g") #'my/aaronnote-roam-select-root)
-    (define-key map (kbd ".") #'my/aaronnote-roam-select-context)
-    (define-key map (kbd "u") #'my/aaronnote-roam-select-up)
-    (define-key map (kbd "^") #'my/aaronnote-roam-select-up)
-    (define-key map (kbd "r") #'my/aaronnote-roam-select-refresh)
+    (set-keymap-parent map my/noema-roam-ui-mode-map)
+    (define-key map (kbd "RET") #'my/noema-roam-select-activate)
+    (define-key map (kbd "i") #'my/noema-roam-select-insert-current)
+    (define-key map (kbd "/") #'my/noema-roam-select-search)
+    (define-key map (kbd "s") #'my/noema-roam-select-search)
+    (define-key map (kbd "g") #'my/noema-roam-select-root)
+    (define-key map (kbd ".") #'my/noema-roam-select-context)
+    (define-key map (kbd "u") #'my/noema-roam-select-up)
+    (define-key map (kbd "^") #'my/noema-roam-select-up)
+    (define-key map (kbd "r") #'my/noema-roam-select-refresh)
     (define-key map (kbd "q") #'quit-window)
     map)
-  "Keymap for `my/aaronnote-roam-select-mode'.")
+  "Keymap for `my/noema-roam-select-mode'.")
 
-(define-derived-mode my/aaronnote-roam-select-mode my/aaronnote-roam-ui-mode "Roam-Select"
+(define-derived-mode my/noema-roam-select-mode my/noema-roam-ui-mode "Roam-Select"
   "Interactive Markdown roam link selector."
   (setq-local truncate-lines t)
-  (setq-local my/aaronnote-roam-ui-refresh-function
-              #'my/aaronnote-roam-select-refresh)
-  (my/aaronnote-roam-ui-set-header "Roam Selector" 'search "search")
+  (setq-local my/noema-roam-ui-refresh-function
+              #'my/noema-roam-select-refresh)
+  (my/noema-roam-ui-set-header "Roam Selector" 'search "search")
   (add-hook 'kill-buffer-hook
             (lambda ()
-              (when (markerp my/aaronnote-roam-select--origin-marker)
-                (set-marker my/aaronnote-roam-select--origin-marker nil)))
+              (when (markerp my/noema-roam-select--origin-marker)
+                (set-marker my/noema-roam-select--origin-marker nil)))
             nil t))
 
 (with-eval-after-load 'evil
-  (evil-set-initial-state 'my/aaronnote-roam-select-mode 'emacs))
+  (evil-set-initial-state 'my/noema-roam-select-mode 'emacs))
 
-(defun my/aaronnote-roam--record-path-ref (record)
+(defun my/noema-roam--record-path-ref (record)
   "Return RECORD's path-like link ref."
   (let* ((note (plist-get record :note))
          (file (plist-get record :file))
          (rel-file (and file
                         (file-name-absolute-p file)
-                        (file-relative-name file (my/aaronnote-roam-root)))))
-    (or (my/aaronnote-roam--note-field note "path")
-        (my/aaronnote-roam--note-field note "link")
+                        (file-relative-name file (my/noema-roam-root)))))
+    (or (my/noema-roam--note-field note "path")
+        (my/noema-roam--note-field note "link")
         rel-file
         (plist-get record :key)
         (plist-get record :id))))
 
-(defun my/aaronnote-roam--target-suffix (kind target)
+(defun my/noema-roam--target-suffix (kind target)
   "Return Markdown roam link suffix for KIND and TARGET."
   (pcase kind
-    ('tag (concat "#" (my/aaronnote-roam--encode-ref target)))
-    ('dom (concat "@" (mapconcat #'my/aaronnote-roam--encode-ref
-                                  (my/aaronnote-roam--dom-target-segments target)
+    ('tag (concat "#" (my/noema-roam--encode-ref target)))
+    ('dom (concat "@" (mapconcat #'my/noema-roam--encode-ref
+                                  (my/noema-roam--dom-target-segments target)
                                   "@")))
     (_ "")))
 
-(defun my/aaronnote-roam--link-target-for-record (record basis &optional kind target)
+(defun my/noema-roam--link-target-for-record (record basis &optional kind target)
   "Return Markdown roam link target for RECORD using BASIS, KIND, and TARGET."
   (let ((basis (if (stringp basis) (intern basis) basis)))
     (if (eq basis 'path)
-        (concat (my/aaronnote-roam--record-path-ref record)
-                (my/aaronnote-roam--target-suffix kind target))
-      (my/aaronnote-roam--roam-href (plist-get record :id) kind target))))
+        (concat (my/noema-roam--record-path-ref record)
+                (my/noema-roam--target-suffix kind target))
+      (my/noema-roam--roam-href (plist-get record :id) kind target))))
 
-(defun my/aaronnote-roam--insert-note-link-target (target text &optional marker)
+(defun my/noema-roam--insert-note-link-target (target text &optional marker)
   "Insert Markdown link TARGET with TEXT at MARKER or point."
   (let ((link (format "[%s](%s)"
                       (replace-regexp-in-string "\\]" "\\\\]" (or text ""))
@@ -3658,12 +3658,12 @@ completes to `#id', otherwise to the shortest unique text ref."
       (insert link))
     link))
 
-(defun my/aaronnote-roam--tag-targets (record)
+(defun my/noema-roam--tag-targets (record)
   "Return tag target plists for RECORD."
   (let* ((file (plist-get record :file))
          (note (plist-get record :note))
-         (labels (and file (my/aaronnote-roam--heading-labels file)))
-         (inline-tags (my/aaronnote-roam--note-list-field note "inlineTags"))
+         (labels (and file (my/noema-roam--heading-labels file)))
+         (inline-tags (my/noema-roam--note-list-field note "inlineTags"))
          seen targets)
     (dolist (entry labels)
       (let ((id (plist-get entry :id)))
@@ -3680,7 +3680,7 @@ completes to `#id', otherwise to the shortest unique text ref."
           (lambda (a b)
             (string< (plist-get a :id) (plist-get b :id))))))
 
-(defun my/aaronnote-roam--tag-target-display (target)
+(defun my/noema-roam--tag-target-display (target)
   "Return completion display string for tag TARGET."
   (let ((id (plist-get target :id))
         (label (plist-get target :label)))
@@ -3688,11 +3688,11 @@ completes to `#id', otherwise to the shortest unique text ref."
         (format "%s  %s" id label)
       id)))
 
-(defun my/aaronnote-roam--read-tag-target (record)
+(defun my/noema-roam--read-tag-target (record)
   "Read a tag target for RECORD."
-  (let* ((targets (my/aaronnote-roam--tag-targets record))
+  (let* ((targets (my/noema-roam--tag-targets record))
          (table (mapcar (lambda (target)
-                          (cons (my/aaronnote-roam--tag-target-display target)
+                          (cons (my/noema-roam--tag-target-display target)
                                 target))
                         targets))
          (choice (if table
@@ -3700,13 +3700,13 @@ completes to `#id', otherwise to the shortest unique text ref."
                    (user-error "No tag ids in this note"))))
     (cdr (assoc choice table))))
 
-(defun my/aaronnote-roam-select--toc-targets (record)
+(defun my/noema-roam-select--toc-targets (record)
   "Return TOC targets for RECORD."
   (let* ((file (plist-get record :file))
          (note-id (plist-get record :id))
          (seen nil)
          targets)
-    (dolist (target (my/aaronnote-roam--dom-targets file note-id))
+    (dolist (target (my/noema-roam--dom-targets file note-id))
       (let ((key (string-join (plist-get target :path) "@")))
         (when (and (not (plist-get target :synthetic))
                    (not (string-empty-p key))
@@ -3715,18 +3715,18 @@ completes to `#id', otherwise to the shortest unique text ref."
           (push target targets))))
     (nreverse targets)))
 
-(defun my/aaronnote-roam-select--toc-dom (target)
+(defun my/noema-roam-select--toc-dom (target)
   "Return DOM target string for TOC TARGET."
   (string-join (plist-get target :path) "@"))
 
-(defun my/aaronnote-roam-select--read-basis ()
+(defun my/noema-roam-select--read-basis ()
   "Read target basis for the selected note."
   (intern
    (completing-read "Target ref: "
                     '("id" "path")
                     nil t nil nil "id")))
 
-(defun my/aaronnote-roam-select--read-kind ()
+(defun my/noema-roam-select--read-kind ()
   "Read exact target kind for the selected note."
   (pcase (completing-read "Target kind: "
                           '("note" "tag" "toc")
@@ -3735,60 +3735,60 @@ completes to `#id', otherwise to the shortest unique text ref."
     ("toc" 'toc)
     (_ 'note)))
 
-(defun my/aaronnote-roam-select--default-note-text (record)
+(defun my/noema-roam-select--default-note-text (record)
   "Return default display text for RECORD."
   (or (plist-get record :title)
       (plist-get record :id)))
 
-(defun my/aaronnote-roam-select--finish-target (record basis kind target default-text)
+(defun my/noema-roam-select--finish-target (record basis kind target default-text)
   "Insert final note-link for RECORD, BASIS, KIND, TARGET, and DEFAULT-TEXT."
-  (let* ((href (my/aaronnote-roam--link-target-for-record record basis kind target))
+  (let* ((href (my/noema-roam--link-target-for-record record basis kind target))
          (text (read-string (format "Display text [%s]: " default-text)
                             nil nil default-text)))
-    (my/aaronnote-roam--insert-note-link-target
-     href text my/aaronnote-roam-select--origin-marker)
-    (when-let* (((derived-mode-p 'my/aaronnote-roam-select-mode))
+    (my/noema-roam--insert-note-link-target
+     href text my/noema-roam-select--origin-marker)
+    (when-let* (((derived-mode-p 'my/noema-roam-select-mode))
                 (window (get-buffer-window (current-buffer))))
       (quit-window t window))))
 
-(defun my/aaronnote-roam-select--choose-record (record)
+(defun my/noema-roam-select--choose-record (record)
   "Choose exact target for note RECORD."
-  (let* ((basis (my/aaronnote-roam-select--read-basis))
-         (kind (or my/aaronnote-roam-select--preferred-kind
-                   (my/aaronnote-roam-select--read-kind))))
+  (let* ((basis (my/noema-roam-select--read-basis))
+         (kind (or my/noema-roam-select--preferred-kind
+                   (my/noema-roam-select--read-kind))))
     (pcase kind
       ('tag
-       (let* ((tag (my/aaronnote-roam--read-tag-target record))
+       (let* ((tag (my/noema-roam--read-tag-target record))
               (id (plist-get tag :id))
               (label (or (plist-get tag :label) id)))
-         (my/aaronnote-roam-select--finish-target
+         (my/noema-roam-select--finish-target
           record basis 'tag id label)))
       ('toc
-       (setq my/aaronnote-roam-select--target-record record
-             my/aaronnote-roam-select--target-basis basis
-             my/aaronnote-roam-select--toc-parent nil
-             my/aaronnote-roam-select--query nil)
-       (my/aaronnote-roam-select--render-toc))
+       (setq my/noema-roam-select--target-record record
+             my/noema-roam-select--target-basis basis
+             my/noema-roam-select--toc-parent nil
+             my/noema-roam-select--query nil)
+       (my/noema-roam-select--render-toc))
       (_
-       (my/aaronnote-roam-select--finish-target
+       (my/noema-roam-select--finish-target
         record basis nil nil
-        (my/aaronnote-roam-select--default-note-text record))))))
+        (my/noema-roam-select--default-note-text record))))))
 
-(defun my/aaronnote-roam-select--record-relative-file (record)
+(defun my/noema-roam-select--record-relative-file (record)
   "Return RECORD's relative file under the roam root, or nil."
   (when-let* ((file (plist-get record :file)))
-    (let ((rel (file-relative-name file (my/aaronnote-roam-root))))
+    (let ((rel (file-relative-name file (my/noema-roam-root))))
       (unless (or (string-prefix-p "../" rel)
                   (string-prefix-p "/.." rel)
                   (string-match-p "\\`_typst/" rel))
         rel))))
 
-(defun my/aaronnote-roam-select--directory-items (dir)
+(defun my/noema-roam-select--directory-items (dir)
   "Return directory and note items immediately inside DIR."
   (let ((dir (if (string-empty-p (or dir "")) "" dir))
         dirs notes seen-dirs)
-    (dolist (record (my/aaronnote-roam--note-records))
-      (when-let* ((rel (my/aaronnote-roam-select--record-relative-file record)))
+    (dolist (record (my/noema-roam--note-records))
+      (when-let* ((rel (my/noema-roam-select--record-relative-file record)))
         (when (string-prefix-p dir rel)
           (let ((rest (substring rel (length dir))))
             (unless (string-empty-p rest)
@@ -3810,31 +3810,31 @@ completes to `#id', otherwise to the shortest unique text ref."
                    (string< (or (plist-get (plist-get a :record) :title) "")
                             (or (plist-get (plist-get b :record) :title) "")))))))
 
-(defun my/aaronnote-roam-select--insert-row (label item &optional face)
+(defun my/noema-roam-select--insert-row (label item &optional face)
   "Insert a selectable row LABEL carrying ITEM."
   (let* ((type (plist-get item :type))
          (record (plist-get item :record))
          (target (plist-get item :target))
          (title (pcase type
                   ('dir (format "%s/" (plist-get item :name)))
-                  ('note (my/aaronnote-roam-select--default-note-text record))
-                  ('toc (my/aaronnote-roam--dom-target-path-label target))
+                  ('note (my/noema-roam-select--default-note-text record))
+                  ('toc (my/noema-roam--dom-target-path-label target))
                   (_ label)))
          (meta (pcase type
                  ('dir (plist-get item :path))
-                 ('note (my/aaronnote-roam--record-path-ref record))
+                 ('note (my/noema-roam--record-path-ref record))
                  ('toc (if (plist-get item :has-children) "branch" "heading"))
                  (_ nil)))
          (detail (and (eq type 'note) (plist-get record :id)))
          (tags (and (eq type 'note)
-                    (my/aaronnote-roam--note-list-field
+                    (my/noema-roam--note-list-field
                      (plist-get record :note) "tags")))
          (id (pcase type
                ('dir (plist-get item :path))
                ('note (plist-get record :id))
-               ('toc (my/aaronnote-roam-select--toc-dom target))
+               ('toc (my/noema-roam-select--toc-dom target))
                (_ label))))
-    (my/aaronnote-roam-ui-insert-row
+    (my/noema-roam-ui-insert-row
      :id id
      :icon (pcase type
              ('dir 'directory)
@@ -3846,144 +3846,144 @@ completes to `#id', otherwise to the shortest unique text ref."
               (_ nil))
      :badge-tone (if (eq type 'dir) 'warning 'info)
      :title title
-     :title-face (or face 'my/aaronnote-roam-ui-row-title)
+     :title-face (or face 'my/noema-roam-ui-row-title)
      :meta meta
      :detail detail
      :tags tags
      :action
      (lambda (_ignored)
-       (my/aaronnote-roam-select-activate))
+       (my/noema-roam-select-activate))
      :help "RET: open/select, i: insert/select"
-     :properties `(my/aaronnote-roam-select-item ,item))))
+     :properties `(my/noema-roam-select-item ,item))))
 
-(defun my/aaronnote-roam-select--note-label (record &optional prefix)
+(defun my/noema-roam-select--note-label (record &optional prefix)
   "Return display label for note RECORD with PREFIX."
-  (let* ((title (my/aaronnote-roam-select--default-note-text record))
-         (path (my/aaronnote-roam--record-path-ref record))
-         (tags (my/aaronnote-roam--note-list-field (plist-get record :note) "tags")))
+  (let* ((title (my/noema-roam-select--default-note-text record))
+         (path (my/noema-roam--record-path-ref record))
+         (tags (my/noema-roam--note-list-field (plist-get record :note) "tags")))
     (concat (or prefix "")
             (format "%-38s %s" title (plist-get record :id))
             (when path (concat "  " path))
             (when-let* ((strtags (seq-filter #'stringp tags)))
               (concat "  #" (string-join strtags " #"))))))
 
-(defun my/aaronnote-roam-select--render-header (title)
+(defun my/noema-roam-select--render-header (title)
   "Render selector TITLE and help."
-  (let ((icon (pcase my/aaronnote-roam-select--view
+  (let ((icon (pcase my/noema-roam-select--view
                 ('root 'directory)
                 ('context 'related)
                 ('toc 'toc)
                 (_ 'search))))
-    (my/aaronnote-roam-ui-set-header
+    (my/noema-roam-ui-set-header
      "Roam Selector" icon
-     (format "%s view" (or my/aaronnote-roam-select--view 'search)))
-    (my/aaronnote-roam-ui-insert-page-header
+     (format "%s view" (or my/noema-roam-select--view 'search)))
+    (my/noema-roam-ui-insert-page-header
      title
      :icon icon
      :subtitle "Choose a note, tag, or TOC target without leaving the keyboard"
      :stats (list (cons (format "%s view"
-                               (or my/aaronnote-roam-select--view 'search))
+                               (or my/noema-roam-select--view 'search))
                        'info))
      :actions
      '((:label "RET Select"
-        :command my/aaronnote-roam-select-activate
+        :command my/noema-roam-select-activate
         :help "Open or select the current item"
         :primary t)
        (:label "/ Search"
-        :command my/aaronnote-roam-select-search
+        :command my/noema-roam-select-search
         :help "Search notes or TOC headings")
        (:label "g Root"
-        :command my/aaronnote-roam-select-root
+        :command my/noema-roam-select-root
         :help "Show the roam root")
        (:label "r Refresh"
-        :command my/aaronnote-roam-select-refresh
+        :command my/noema-roam-select-refresh
         :help "Refresh the current selector view")
        (:label "q Close"
         :command quit-window
         :help "Close the selector")))))
 
-(defun my/aaronnote-roam-select--render-root (&optional dir)
+(defun my/noema-roam-select--render-root (&optional dir)
   "Render roam root tree at DIR."
-  (setq my/aaronnote-roam-select--view 'root
-        my/aaronnote-roam-select--path (or dir ""))
-  (my/aaronnote-roam-ui-render
+  (setq my/noema-roam-select--view 'root
+        my/noema-roam-select--path (or dir ""))
+  (my/noema-roam-ui-render
    (lambda ()
-     (my/aaronnote-roam-select--render-header
-      (format "Roam root: /%s" my/aaronnote-roam-select--path))
-     (let ((items (my/aaronnote-roam-select--directory-items
-                   my/aaronnote-roam-select--path)))
-       (my/aaronnote-roam-ui-insert-section "Contents" (length items))
+     (my/noema-roam-select--render-header
+      (format "Roam root: /%s" my/noema-roam-select--path))
+     (let ((items (my/noema-roam-select--directory-items
+                   my/noema-roam-select--path)))
+       (my/noema-roam-ui-insert-section "Contents" (length items))
        (if items
            (dolist (item items)
              (pcase (plist-get item :type)
                ('dir
-                (my/aaronnote-roam-select--insert-row
+                (my/noema-roam-select--insert-row
                  (format "%s/" (plist-get item :name))
-                 item 'my/aaronnote-roam-ui-row-title))
+                 item 'my/noema-roam-ui-row-title))
                ('note
-                (my/aaronnote-roam-select--insert-row
-                 (my/aaronnote-roam-select--note-label
+                (my/noema-roam-select--insert-row
+                 (my/noema-roam-select--note-label
                   (plist-get item :record))
                  item))))
-         (my/aaronnote-roam-ui-insert-empty "This directory is empty.")))))
-  (unless (my/aaronnote-roam-select--item-at-point)
-    (my/aaronnote-roam-ui-goto-first-item)))
+         (my/noema-roam-ui-insert-empty "This directory is empty.")))))
+  (unless (my/noema-roam-select--item-at-point)
+    (my/noema-roam-ui-goto-first-item)))
 
-(defun my/aaronnote-roam-select--render-context ()
+(defun my/noema-roam-select--render-context ()
   "Render current-note context."
-  (setq my/aaronnote-roam-select--view 'context)
-  (let ((record (and my/aaronnote-roam-select--current-note-id
-                     (my/aaronnote-roam--resolve-note
-                      my/aaronnote-roam-select--current-note-id)))
+  (setq my/noema-roam-select--view 'context)
+  (let ((record (and my/noema-roam-select--current-note-id
+                     (my/noema-roam--resolve-note
+                      my/noema-roam-select--current-note-id)))
         entries)
     (when record
       (push record entries)
-      (dolist (id (append (my/aaronnote-roam--note-links (plist-get record :id))
-                          (my/aaronnote-roam--db-backlinks-to
+      (dolist (id (append (my/noema-roam--note-links (plist-get record :id))
+                          (my/noema-roam--db-backlinks-to
                            (plist-get record :id))))
-        (when-let* ((related (my/aaronnote-roam--resolve-note id)))
+        (when-let* ((related (my/noema-roam--resolve-note id)))
           (push related entries))))
     (setq entries (delete-dups (nreverse entries)))
-    (my/aaronnote-roam-ui-render
+    (my/noema-roam-ui-render
      (lambda ()
-       (my/aaronnote-roam-select--render-header
+       (my/noema-roam-select--render-header
         (format "Current roam context: %s"
-                (or my/aaronnote-roam-select--current-note-id "(none)")))
-       (my/aaronnote-roam-ui-insert-section "Context" (length entries))
+                (or my/noema-roam-select--current-note-id "(none)")))
+       (my/noema-roam-ui-insert-section "Context" (length entries))
        (if entries
            (dolist (entry entries)
-             (my/aaronnote-roam-select--insert-row
-              (my/aaronnote-roam-select--note-label entry)
+             (my/noema-roam-select--insert-row
+              (my/noema-roam-select--note-label entry)
               (list :type 'note :record entry)))
-         (my/aaronnote-roam-ui-insert-empty
+         (my/noema-roam-ui-insert-empty
           "Not in a roam note. Press g to browse the root."))))
-    (unless (my/aaronnote-roam-select--item-at-point)
-      (my/aaronnote-roam-ui-goto-first-item))))
+    (unless (my/noema-roam-select--item-at-point)
+      (my/noema-roam-ui-goto-first-item))))
 
-(defun my/aaronnote-roam-select--render-search (query)
+(defun my/noema-roam-select--render-search (query)
   "Render global note search for QUERY."
-  (setq my/aaronnote-roam-select--view 'search
-        my/aaronnote-roam-select--query query)
-  (let ((entries (my/aaronnote-roam-search-notes query)))
-    (my/aaronnote-roam-ui-render
+  (setq my/noema-roam-select--view 'search
+        my/noema-roam-select--query query)
+  (let ((entries (my/noema-roam-search-notes query)))
+    (my/noema-roam-ui-render
      (lambda ()
-       (my/aaronnote-roam-select--render-header
+       (my/noema-roam-select--render-header
         (if (string-empty-p (or query ""))
             "Search all roam notes"
           (format "Roam search: %s" query)))
-       (my/aaronnote-roam-ui-insert-section "Matches" (length entries))
+       (my/noema-roam-ui-insert-section "Matches" (length entries))
        (if entries
            (dolist (entry entries)
-             (when-let* ((record (my/aaronnote-roam--resolve-note
+             (when-let* ((record (my/noema-roam--resolve-note
                                   (plist-get entry :slug))))
-               (my/aaronnote-roam-select--insert-row
-                (my/aaronnote-roam-select--note-label record)
+               (my/noema-roam-select--insert-row
+                (my/noema-roam-select--note-label record)
                 (list :type 'note :record record))))
-         (my/aaronnote-roam-ui-insert-empty "No matching notes."))))
-    (unless (my/aaronnote-roam-select--item-at-point)
-      (my/aaronnote-roam-ui-goto-first-item))))
+         (my/noema-roam-ui-insert-empty "No matching notes."))))
+    (unless (my/noema-roam-select--item-at-point)
+      (my/noema-roam-ui-goto-first-item))))
 
-(defun my/aaronnote-roam-select--toc-children (targets parent)
+(defun my/noema-roam-select--toc-children (targets parent)
   "Return direct TOC children from TARGETS under PARENT."
   (let ((parent (or parent nil))
         (len (length parent)))
@@ -3995,7 +3995,7 @@ completes to `#id', otherwise to the shortest unique text ref."
                   (equal (seq-take path len) parent)))))
      targets)))
 
-(defun my/aaronnote-roam-select--toc-has-children-p (targets target)
+(defun my/noema-roam-select--toc-has-children-p (targets target)
   "Return non-nil if TARGET has child targets in TARGETS."
   (let* ((path (plist-get target :path))
          (len (length path)))
@@ -4006,12 +4006,12 @@ completes to `#id', otherwise to the shortest unique text ref."
               (equal (seq-take candidate-path len) path))))
      targets)))
 
-(defun my/aaronnote-roam-select--render-toc ()
-  "Render TOC selector for `my/aaronnote-roam-select--target-record'."
-  (setq my/aaronnote-roam-select--view 'toc)
-  (let* ((record my/aaronnote-roam-select--target-record)
-         (targets (my/aaronnote-roam-select--toc-targets record))
-         (query my/aaronnote-roam-select--query)
+(defun my/noema-roam-select--render-toc ()
+  "Render TOC selector for `my/noema-roam-select--target-record'."
+  (setq my/noema-roam-select--view 'toc)
+  (let* ((record my/noema-roam-select--target-record)
+         (targets (my/noema-roam-select--toc-targets record))
+         (query my/noema-roam-select--query)
          (visible (if (and query (not (string-empty-p query)))
                       (seq-filter
                        (lambda (target)
@@ -4024,175 +4024,175 @@ completes to `#id', otherwise to the shortest unique text ref."
                             (regexp-quote (downcase query))
                             haystack)))
                        targets)
-                    (my/aaronnote-roam-select--toc-children
-                     targets my/aaronnote-roam-select--toc-parent))))
-    (my/aaronnote-roam-ui-render
+                    (my/noema-roam-select--toc-children
+                     targets my/noema-roam-select--toc-parent))))
+    (my/noema-roam-ui-render
      (lambda ()
-       (my/aaronnote-roam-select--render-header
+       (my/noema-roam-select--render-header
         (format "TOC: %s%s"
-                (my/aaronnote-roam-select--default-note-text record)
+                (my/noema-roam-select--default-note-text record)
                 (if query (format " / search: %s" query) "")))
-       (when my/aaronnote-roam-select--toc-parent
-         (my/aaronnote-roam-ui-insert-field
-          "Path" (string-join my/aaronnote-roam-select--toc-parent " / ")
-          'my/aaronnote-roam-ui-path)
+       (when my/noema-roam-select--toc-parent
+         (my/noema-roam-ui-insert-field
+          "Path" (string-join my/noema-roam-select--toc-parent " / ")
+          'my/noema-roam-ui-path)
          (insert "\n"))
-       (my/aaronnote-roam-ui-insert-section "Headings" (length visible))
+       (my/noema-roam-ui-insert-section "Headings" (length visible))
        (if visible
            (dolist (target visible)
              (let* ((has-children
                      (and (not query)
-                          (my/aaronnote-roam-select--toc-has-children-p
+                          (my/noema-roam-select--toc-has-children-p
                            targets target)))
-                    (label (my/aaronnote-roam--dom-target-path-label target)))
-               (my/aaronnote-roam-select--insert-row
+                    (label (my/noema-roam--dom-target-path-label target)))
+               (my/noema-roam-select--insert-row
                 label
                 (list :type 'toc
                       :target target
                       :has-children has-children
                       :search query))))
-         (my/aaronnote-roam-ui-insert-empty "No TOC targets."))))
-    (unless (my/aaronnote-roam-select--item-at-point)
-      (my/aaronnote-roam-ui-goto-first-item))))
+         (my/noema-roam-ui-insert-empty "No TOC targets."))))
+    (unless (my/noema-roam-select--item-at-point)
+      (my/noema-roam-ui-goto-first-item))))
 
-(defun my/aaronnote-roam-select--item-at-point ()
+(defun my/noema-roam-select--item-at-point ()
   "Return selector item at point."
-  (or (get-text-property (point) 'my/aaronnote-roam-select-item)
-      (get-text-property (line-beginning-position) 'my/aaronnote-roam-select-item)
+  (or (get-text-property (point) 'my/noema-roam-select-item)
+      (get-text-property (line-beginning-position) 'my/noema-roam-select-item)
       (get-text-property (max (point-min) (1- (point)))
-                         'my/aaronnote-roam-select-item)))
+                         'my/noema-roam-select-item)))
 
-(defun my/aaronnote-roam-select--finish-toc-target (target)
+(defun my/noema-roam-select--finish-toc-target (target)
   "Insert the selected TOC TARGET."
-  (let* ((record my/aaronnote-roam-select--target-record)
-         (dom (my/aaronnote-roam-select--toc-dom target))
-         (label (my/aaronnote-roam--dom-target-path-label target)))
-    (my/aaronnote-roam-select--finish-target
-     record my/aaronnote-roam-select--target-basis 'dom dom label)))
+  (let* ((record my/noema-roam-select--target-record)
+         (dom (my/noema-roam-select--toc-dom target))
+         (label (my/noema-roam--dom-target-path-label target)))
+    (my/noema-roam-select--finish-target
+     record my/noema-roam-select--target-basis 'dom dom label)))
 
-(defun my/aaronnote-roam-select-activate ()
+(defun my/noema-roam-select-activate ()
   "Activate the selector item at point."
   (interactive)
-  (pcase-let* ((item (my/aaronnote-roam-select--item-at-point))
+  (pcase-let* ((item (my/noema-roam-select--item-at-point))
                (type (plist-get item :type)))
     (pcase type
       ('dir
-       (my/aaronnote-roam-select--render-root (plist-get item :path)))
+       (my/noema-roam-select--render-root (plist-get item :path)))
       ('note
-       (my/aaronnote-roam-select--choose-record (plist-get item :record)))
+       (my/noema-roam-select--choose-record (plist-get item :record)))
       ('toc
        (if (and (plist-get item :has-children)
                 (not (plist-get item :search)))
            (progn
-             (setq my/aaronnote-roam-select--toc-parent
+             (setq my/noema-roam-select--toc-parent
                    (plist-get (plist-get item :target) :path)
-                   my/aaronnote-roam-select--query nil)
-             (my/aaronnote-roam-select--render-toc))
-         (my/aaronnote-roam-select--finish-toc-target
+                   my/noema-roam-select--query nil)
+             (my/noema-roam-select--render-toc))
+         (my/noema-roam-select--finish-toc-target
           (plist-get item :target))))
       (_
        (user-error "No selectable roam item at point")))))
 
-(defun my/aaronnote-roam-select-insert-current ()
+(defun my/noema-roam-select-insert-current ()
   "Insert/select the current selector item without descending."
   (interactive)
-  (let ((item (my/aaronnote-roam-select--item-at-point)))
+  (let ((item (my/noema-roam-select--item-at-point)))
     (pcase (plist-get item :type)
       ('toc
-       (my/aaronnote-roam-select--finish-toc-target
+       (my/noema-roam-select--finish-toc-target
         (plist-get item :target)))
       (_
-       (my/aaronnote-roam-select-activate)))))
+       (my/noema-roam-select-activate)))))
 
-(defun my/aaronnote-roam-select-search ()
+(defun my/noema-roam-select-search ()
   "Search notes globally, or TOC headings inside a TOC view."
   (interactive)
   (let ((query (read-string "Search: ")))
-    (if (eq my/aaronnote-roam-select--view 'toc)
+    (if (eq my/noema-roam-select--view 'toc)
         (progn
-          (setq my/aaronnote-roam-select--query query
-                my/aaronnote-roam-select--toc-parent nil)
-          (my/aaronnote-roam-select--render-toc))
-      (my/aaronnote-roam-select--render-search query))))
+          (setq my/noema-roam-select--query query
+                my/noema-roam-select--toc-parent nil)
+          (my/noema-roam-select--render-toc))
+      (my/noema-roam-select--render-search query))))
 
-(defun my/aaronnote-roam-select-root ()
+(defun my/noema-roam-select-root ()
   "Render the roam root tree."
   (interactive)
-  (my/aaronnote-roam-select--render-root ""))
+  (my/noema-roam-select--render-root ""))
 
-(defun my/aaronnote-roam-select-context ()
+(defun my/noema-roam-select-context ()
   "Render current-note context."
   (interactive)
-  (if my/aaronnote-roam-select--current-note-id
-      (my/aaronnote-roam-select--render-context)
-    (my/aaronnote-roam-select--render-root "")))
+  (if my/noema-roam-select--current-note-id
+      (my/noema-roam-select--render-context)
+    (my/noema-roam-select--render-root "")))
 
-(defun my/aaronnote-roam-select-up ()
+(defun my/noema-roam-select-up ()
   "Move one selector level up."
   (interactive)
-  (pcase my/aaronnote-roam-select--view
+  (pcase my/noema-roam-select--view
     ('root
-     (let* ((path (string-remove-suffix "/" my/aaronnote-roam-select--path))
+     (let* ((path (string-remove-suffix "/" my/noema-roam-select--path))
             (parent (if (string-match "\\`\\(.*?/\\)?[^/]+\\'" path)
                         (or (match-string 1 path) "")
                       "")))
-       (my/aaronnote-roam-select--render-root parent)))
+       (my/noema-roam-select--render-root parent)))
     ('toc
-     (setq my/aaronnote-roam-select--query nil
-           my/aaronnote-roam-select--toc-parent
-           (butlast my/aaronnote-roam-select--toc-parent))
-     (my/aaronnote-roam-select--render-toc))
+     (setq my/noema-roam-select--query nil
+           my/noema-roam-select--toc-parent
+           (butlast my/noema-roam-select--toc-parent))
+     (my/noema-roam-select--render-toc))
     (_
-     (my/aaronnote-roam-select-context))))
+     (my/noema-roam-select-context))))
 
-(defun my/aaronnote-roam-select-refresh ()
+(defun my/noema-roam-select-refresh ()
   "Refresh the current selector view."
   (interactive)
-  (pcase my/aaronnote-roam-select--view
-    ('root (my/aaronnote-roam-select--render-root my/aaronnote-roam-select--path))
-    ('search (my/aaronnote-roam-select--render-search my/aaronnote-roam-select--query))
-    ('toc (my/aaronnote-roam-select--render-toc))
-    (_ (my/aaronnote-roam-select-context))))
+  (pcase my/noema-roam-select--view
+    ('root (my/noema-roam-select--render-root my/noema-roam-select--path))
+    ('search (my/noema-roam-select--render-search my/noema-roam-select--query))
+    ('toc (my/noema-roam-select--render-toc))
+    (_ (my/noema-roam-select-context))))
 
-(defun my/aaronnote-roam-select--display-buffer (buffer)
+(defun my/noema-roam-select--display-buffer (buffer)
   "Display selector BUFFER in a focused bottom side window."
   (let* ((alist `((side . bottom)
                   (slot . 1)
-                  (window-height . ,my/aaronnote-roam-select-window-height)))
+                  (window-height . ,my/noema-roam-select-window-height)))
          (window (or (get-buffer-window buffer)
                      (display-buffer-in-side-window buffer alist))))
     (set-window-buffer window buffer)
     (select-window window)
     window))
 
-(defun my/aaronnote-roam-select-link (&optional preferred-kind)
+(defun my/noema-roam-select-link (&optional preferred-kind)
   "Open an interactive note-link selector.
 PREFERRED-KIND may be `tag' or `toc' to skip the target-kind prompt."
   (interactive)
   (let ((origin (copy-marker (point) t))
-        (current-note-id (my/aaronnote-roam--current-slug))
-        (buf (get-buffer-create "*aaronnote-roam-select*")))
+        (current-note-id (my/noema-roam--current-slug))
+        (buf (get-buffer-create "*Noema roam select*")))
     (with-current-buffer buf
-      (my/aaronnote-roam-select-mode)
-      (setq-local my/aaronnote-roam-select--origin-marker origin
-                  my/aaronnote-roam-select--current-note-id current-note-id
-                  my/aaronnote-roam-select--preferred-kind preferred-kind
-                  my/aaronnote-roam-select--target-record nil
-                  my/aaronnote-roam-select--target-basis 'id
-                  my/aaronnote-roam-select--toc-parent nil
-                  my/aaronnote-roam-select--query nil)
-      (my/aaronnote-roam-select--render-search ""))
-    (my/aaronnote-roam-select--display-buffer buf)))
+      (my/noema-roam-select-mode)
+      (setq-local my/noema-roam-select--origin-marker origin
+                  my/noema-roam-select--current-note-id current-note-id
+                  my/noema-roam-select--preferred-kind preferred-kind
+                  my/noema-roam-select--target-record nil
+                  my/noema-roam-select--target-basis 'id
+                  my/noema-roam-select--toc-parent nil
+                  my/noema-roam-select--query nil)
+      (my/noema-roam-select--render-search ""))
+    (my/noema-roam-select--display-buffer buf)))
 
-(defun my/aaronnote-roam-copy-link-to-here ()
+(defun my/noema-roam-copy-link-to-here ()
   "Copy a Markdown roam link to the current note or current heading.
 When point is on a heading, ensure a Markdown `{#tag-id}' exists and copy a
 canonical `roam://note-id#tag' target."
   (interactive)
   (unless buffer-file-name
     (user-error "Current buffer has no file"))
-  (let* ((note-id (my/aaronnote-roam--current-slug))
-         (title (my/aaronnote-roam--note-title note-id))
+  (let* ((note-id (my/noema-roam--current-slug))
+         (title (my/noema-roam--note-title note-id))
          target text)
     (unless note-id
       (user-error "Not in a roam note"))
@@ -4206,12 +4206,12 @@ canonical `roam://note-id#tag' target."
                    (replace-regexp-in-string
                     "[ \t]+{#[[:alnum:]_:-]+}[ \t]*\\'" "" heading)))
             (unless id
-              (setq id (my/aaronnote-roam-generate-tag-id heading))
+              (setq id (my/noema-roam-generate-tag-id heading))
               (end-of-line)
               (insert (format " {#%s}" id)))
-            (setq target (my/aaronnote-roam--roam-href note-id 'tag id)
+            (setq target (my/noema-roam--roam-href note-id 'tag id)
                   text heading))
-        (setq target (my/aaronnote-roam--roam-href note-id)
+        (setq target (my/noema-roam--roam-href note-id)
               text title)))
     (let ((link (format "[%s](%s)"
                         (replace-regexp-in-string "\\]" "\\\\]" (or text ""))
@@ -4220,12 +4220,12 @@ canonical `roam://note-id#tag' target."
       (message "Copied %s" link))))
 
 ;; Enhanced find-note with DB annotation
-(defun my/aaronnote-roam--note-annotator (slug)
+(defun my/noema-roam--note-annotator (slug)
   "Return annotation for SLUG in completing-read."
-  (when-let* ((record (my/aaronnote-roam--resolve-note slug))
+  (when-let* ((record (my/noema-roam--resolve-note slug))
               (note (plist-get record :note)))
-    (let ((tags (my/aaronnote-roam--note-list-field note "tags"))
-          (bls  (length (or (my/aaronnote-roam--db-backlinks-to
+    (let ((tags (my/noema-roam--note-list-field note "tags"))
+          (bls  (length (or (my/noema-roam--db-backlinks-to
                              (plist-get record :id))
                             (gethash "backlinks" note)))))
       (concat "  "
@@ -4234,75 +4234,75 @@ canonical `roam://note-id#tag' target."
 
 ;; ── Keymaps & menus ───────────────────────────────────────────────────────────
 
-(defvar my/aaronnote-roam-map
+(defvar my/noema-roam-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "f") #'my/aaronnote-roam-find-note)
-    (define-key map (kbd "o") #'my/aaronnote-roam-follow-link)
-    (define-key map (kbd "i") #'my/aaronnote-roam-insert-link)
-    (define-key map (kbd "RET") #'my/aaronnote-roam-select-link)
-    (define-key map (kbd "I") #'my/aaronnote-roam-insert-tag-id-link)
-    (define-key map (kbd "c") #'my/aaronnote-roam-insert-toc-link)
-    (define-key map (kbd "y") #'my/aaronnote-roam-copy-link-to-here)
-    (define-key map (kbd "n") #'my/aaronnote-roam-new-note)
-    (define-key map (kbd "N") #'my/aaronnote-roam-new-node)
-    (define-key map (kbd "#") #'my/aaronnote-roam-insert-tag-id)
-    (define-key map (kbd "g") #'my/aaronnote-roam-generate-tag-id)
-    (define-key map (kbd "s") #'my/aaronnote-roam-search-notes)
-    (define-key map (kbd "r") #'my/aaronnote-roam-recent-notes)
-    (define-key map (kbd "R") #'my/aaronnote-roam-related-notes)
-    (define-key map (kbd "G") #'my/aaronnote-roam-graph)
-    (define-key map (kbd "M") #'my/aaronnote-roam-management)
-    (define-key map (kbd "b") #'my/aaronnote-roam-backlinks)
-    (define-key map (kbd "t") #'my/aaronnote-roam-tags)
-    (define-key map (kbd "T") #'my/aaronnote-roam-todos)
-    (define-key map (kbd "F") #'my/aaronnote-roam-jump-file-todo)
-    (define-key map (kbd "A") #'my/aaronnote-roam-agenda)
-    (define-key map (kbd "u") #'my/aaronnote-roam-update-db)
-    (define-key map (kbd "U") #'my/aaronnote-roam-sync-full)
-    (define-key map (kbd "S") #'my/aaronnote-roam-db-status)
-    (define-key map (kbd "V") #'my/aaronnote-roam-magit)
-    (define-key map (kbd "D") #'my/aaronnote-roam-dired)
-    (define-key map (kbd "Q") #'my/aaronnote-stop)
-    (define-key map (kbd "m") #'my/aaronnote-roam-dispatch)
+    (define-key map (kbd "f") #'my/noema-roam-find-note)
+    (define-key map (kbd "o") #'my/noema-roam-follow-link)
+    (define-key map (kbd "i") #'my/noema-roam-insert-link)
+    (define-key map (kbd "RET") #'my/noema-roam-select-link)
+    (define-key map (kbd "I") #'my/noema-roam-insert-tag-id-link)
+    (define-key map (kbd "c") #'my/noema-roam-insert-toc-link)
+    (define-key map (kbd "y") #'my/noema-roam-copy-link-to-here)
+    (define-key map (kbd "n") #'my/noema-roam-new-note)
+    (define-key map (kbd "N") #'my/noema-roam-new-node)
+    (define-key map (kbd "#") #'my/noema-roam-insert-tag-id)
+    (define-key map (kbd "g") #'my/noema-roam-generate-tag-id)
+    (define-key map (kbd "s") #'my/noema-roam-search-notes)
+    (define-key map (kbd "r") #'my/noema-roam-recent-notes)
+    (define-key map (kbd "R") #'my/noema-roam-related-notes)
+    (define-key map (kbd "G") #'my/noema-roam-graph)
+    (define-key map (kbd "M") #'my/noema-roam-management)
+    (define-key map (kbd "b") #'my/noema-roam-backlinks)
+    (define-key map (kbd "t") #'my/noema-roam-tags)
+    (define-key map (kbd "T") #'my/noema-roam-todos)
+    (define-key map (kbd "F") #'my/noema-roam-jump-file-todo)
+    (define-key map (kbd "A") #'my/noema-roam-agenda)
+    (define-key map (kbd "u") #'my/noema-roam-update-db)
+    (define-key map (kbd "U") #'my/noema-roam-sync-full)
+    (define-key map (kbd "S") #'my/noema-roam-db-status)
+    (define-key map (kbd "V") #'my/noema-roam-magit)
+    (define-key map (kbd "D") #'my/noema-roam-dired)
+    (define-key map (kbd "Q") #'my/noema-stop)
+    (define-key map (kbd "m") #'my/noema-roam-dispatch)
     map)
   "Roam keymap for Markdown buffers. Bound to C-c r.")
 
 (my/leader!
-  "r m" '(:def my/aaronnote-roam-dispatch :which-key "md roam")
-  "r t" '(:def my/aaronnote-roam-dispatch :which-key "md roam")
-  "r a" '(:def my/aaronnote-roam-agenda   :which-key "roam agenda")
-  "r d" '(:def my/aaronnote-roam-dired    :which-key "roam dired")
-  "r v" '(:def my/aaronnote-roam-magit    :which-key "roam magit")
-  "r S" '(:def my/aaronnote-roam-db-status :which-key "roam db status")
-  "r e" '(:def my/aaronnote-open-markdown-raw :which-key "edit raw md"))
+  "r m" '(:def my/noema-roam-dispatch :which-key "md roam")
+  "r t" '(:def my/noema-roam-dispatch :which-key "md roam")
+  "r a" '(:def my/noema-roam-agenda   :which-key "roam agenda")
+  "r d" '(:def my/noema-roam-dired    :which-key "roam dired")
+  "r v" '(:def my/noema-roam-magit    :which-key "roam magit")
+  "r S" '(:def my/noema-roam-db-status :which-key "roam db status")
+  "r e" '(:def my/noema-open-markdown-raw :which-key "edit raw md"))
 
 ;; ── xref backend: gd / M-. for note-link ─────────────────────────────────
 
-(defun my/aaronnote-roam--all-slugs-cached ()
+(defun my/noema-roam--all-slugs-cached ()
   "Return all canonical roam note ids."
   (mapcar (lambda (record) (plist-get record :id))
-          (my/aaronnote-roam--note-records)))
+          (my/noema-roam--note-records)))
 
-(defun my/aaronnote-roam-xref-backend ()
+(defun my/noema-roam-xref-backend ()
   "Use aaronnote-roam as xref backend when point is on a Markdown roam link."
-  (when (my/aaronnote-roam--target-at-point) 'aaronnote-roam))
+  (when (my/noema-roam--target-at-point) 'aaronnote-roam))
 
 (cl-defmethod xref-backend-identifier-at-point ((_backend (eql aaronnote-roam)))
-  (my/aaronnote-roam--target-at-point))
+  (my/noema-roam--target-at-point))
 
-(defun my/aaronnote-roam-goto-definition ()
+(defun my/noema-roam-goto-definition ()
   "Jump to the note-link target at point, falling back to normal gd."
   (interactive)
-  (if (my/aaronnote-roam--target-at-point)
+  (if (my/noema-roam--target-at-point)
       (progn
         (when (fboundp 'my/navigation--push-jump)
           (my/navigation--push-jump))
-        (my/aaronnote-roam-follow-link))
+        (my/noema-roam-follow-link))
     (if (fboundp 'my/navigation-find-definition)
         (call-interactively #'my/navigation-find-definition)
       (call-interactively #'xref-find-definitions))))
 
-(defun my/aaronnote-roam--xref-location (file parsed)
+(defun my/noema-roam--xref-location (file parsed)
   "Return an xref location in FILE for PARSED target."
   (with-temp-buffer
     (insert-file-contents file)
@@ -4323,45 +4323,45 @@ canonical `roam://note-id#tag' target."
                          (match-beginning 0)))))
                 ((plist-get parsed :dom)
                  (plist-get
-                  (my/aaronnote-roam--find-dom-target
+                  (my/noema-roam--find-dom-target
                    (plist-get parsed :dom) file (plist-get parsed :slug))
                   :pos)))))
       (if pos
           (progn
-            (my/aaronnote-roam--goto-pos pos)
+            (my/noema-roam--goto-pos pos)
             (xref-make-file-location file
                                      (line-number-at-pos)
                                      (current-column)))
         (xref-make-file-location file 1 0)))))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql aaronnote-roam)) target)
-  (when-let* ((parsed (my/aaronnote-roam--parse-target target))
+  (when-let* ((parsed (my/noema-roam--parse-target target))
               (file (plist-get parsed :file))
               ((file-exists-p file)))
     (list (xref-make (concat "note: " target)
-                     (my/aaronnote-roam--xref-location file parsed)))))
+                     (my/noema-roam--xref-location file parsed)))))
 
 (cl-defmethod xref-backend-identifier-completion-table ((_backend (eql aaronnote-roam)))
-  (mapcar #'my/aaronnote-roam--roam-href
-          (my/aaronnote-roam--all-slugs-cached)))
+  (mapcar #'my/noema-roam--roam-href
+          (my/noema-roam--all-slugs-cached)))
 
-(defun my/aaronnote-roam--xref-setup ()
+(defun my/noema-roam--xref-setup ()
   "Register aaronnote-roam xref backend for this buffer (highest priority)."
-  (add-hook 'xref-backend-functions #'my/aaronnote-roam-xref-backend -90 t))
+  (add-hook 'xref-backend-functions #'my/noema-roam-xref-backend -90 t))
 
 ;; ── Preview click → note-link intercept ──────────────────────────────────
 
 ;; ── Daily note ────────────────────────────────────────────────────────────
 
-(defun my/aaronnote-roam-daily-note ()
+(defun my/noema-roam-daily-note ()
   "Open or create today's daily note at daily/YYYY-MM-DD."
   (interactive)
   (let* ((date (format-time-string "%Y-%m-%d"))
          (slug (concat "daily/" date))
-         (file (my/aaronnote-roam--slug-to-file slug)))
+         (file (my/noema-roam--slug-to-file slug)))
     (if (file-exists-p file)
-        (my/aaronnote-roam--open-slug slug)
-      (my/aaronnote-roam-new--create-draft
+        (my/noema-roam--open-slug slug)
+      (my/noema-roam-new--create-draft
        (list :node-type "roam"
              :id slug
              :title (format "%s Daily" date)
@@ -4372,75 +4372,75 @@ canonical `roam://note-id#tag' target."
 
 ;; ── Wire everything up ────────────────────────────────────────────────────
 
-(define-key my/aaronnote-roam-map (kbd "d") #'my/aaronnote-roam-daily-note)
+(define-key my/noema-roam-map (kbd "d") #'my/noema-roam-daily-note)
 
-(defun my/aaronnote-roam-setup-keys ()
+(defun my/noema-roam-setup-keys ()
   "Set up Noema roam keys and xref for the current Markdown buffer.
-Binds `C-c r' to `my/aaronnote-roam-map' and registers the roam xref
+Binds `C-c r' to `my/noema-roam-map' and registers the roam xref
 backend.  Does not install completion-at-point functions (those are
-added separately by `my/aaronnote-roam--capf-setup')."
-  (local-set-key (kbd "C-c r") my/aaronnote-roam-map)
-  (my/aaronnote-roam--xref-setup))
+added separately by `my/noema-roam--capf-setup')."
+  (local-set-key (kbd "C-c r") my/noema-roam-map)
+  (my/noema-roam--xref-setup))
 
-(add-hook 'markdown-mode-hook #'my/aaronnote-roam-setup-keys)
+(add-hook 'markdown-mode-hook #'my/noema-roam-setup-keys)
 
 ;; Update transient with daily + gd hint
-(transient-define-prefix my/aaronnote-roam-dispatch ()
+(transient-define-prefix my/noema-roam-dispatch ()
   "Markdown roam command menu."
   [["Notes"
-    ("RET" "select link"         my/aaronnote-roam-select-link)
-    ("o" "open link   C-c C-o" my/aaronnote-roam-follow-link)
-    ("f" "find note"            my/aaronnote-roam-find-note)
-    ("i" "insert link"          my/aaronnote-roam-insert-link)
-    ("I" "insert tag link"      my/aaronnote-roam-insert-tag-id-link)
-    ("c" "insert toc link"      my/aaronnote-roam-insert-toc-link)
-    ("y" "copy link here"       my/aaronnote-roam-copy-link-to-here)
-    ("n" "new note UI"          my/aaronnote-roam-new-note)
-    ("N" "new node UI"          my/aaronnote-roam-new-node)
-    ("d" "daily note"           my/aaronnote-roam-daily-note)
-    ("m" "move note"            my/aaronnote-roam-move-note)]
+    ("RET" "select link"         my/noema-roam-select-link)
+    ("o" "open link   C-c C-o" my/noema-roam-follow-link)
+    ("f" "find note"            my/noema-roam-find-note)
+    ("i" "insert link"          my/noema-roam-insert-link)
+    ("I" "insert tag link"      my/noema-roam-insert-tag-id-link)
+    ("c" "insert toc link"      my/noema-roam-insert-toc-link)
+    ("y" "copy link here"       my/noema-roam-copy-link-to-here)
+    ("n" "new note UI"          my/noema-roam-new-note)
+    ("N" "new node UI"          my/noema-roam-new-node)
+    ("d" "daily note"           my/noema-roam-daily-note)
+    ("m" "move note"            my/noema-roam-move-note)]
    ["Tag ids"
-    ("#" "insert tag id"        my/aaronnote-roam-insert-tag-id)
-    ("g" "generate tag id"      my/aaronnote-roam-generate-tag-id)]
+    ("#" "insert tag id"        my/noema-roam-insert-tag-id)
+    ("g" "generate tag id"      my/noema-roam-generate-tag-id)]
    ["Explore"
-    ("s" "search/filter"        my/aaronnote-roam-search-notes)
-    ("r" "recent"               my/aaronnote-roam-recent-notes)
-    ("R" "related"              my/aaronnote-roam-related-notes)
-    ("G" "graph"                my/aaronnote-roam-graph)
-    ("C" "categories"           my/aaronnote-roam-categories)
-    ("M" "management/dashboard" my/aaronnote-roam-management)]
+    ("s" "search/filter"        my/noema-roam-search-notes)
+    ("r" "recent"               my/noema-roam-recent-notes)
+    ("R" "related"              my/noema-roam-related-notes)
+    ("G" "graph"                my/noema-roam-graph)
+    ("C" "categories"           my/noema-roam-categories)
+    ("M" "management/dashboard" my/noema-roam-management)]
    ["Special pages (wiki)"
-    ("!" "reports hub"          my/aaronnote-roam-reports)
-    ("!w" "wanted pages"        my/aaronnote-roam-report-wanted)
-    ("!o" "orphaned"            my/aaronnote-roam-report-orphaned)
-    ("!d" "dead-end"            my/aaronnote-roam-report-dead-end)
-    ("!u" "uncategorized"       my/aaronnote-roam-report-uncategorized)
-    ("!h" "most-linked (hubs)"  my/aaronnote-roam-report-most-linked)]
+    ("!" "reports hub"          my/noema-roam-reports)
+    ("!w" "wanted pages"        my/noema-roam-report-wanted)
+    ("!o" "orphaned"            my/noema-roam-report-orphaned)
+    ("!d" "dead-end"            my/noema-roam-report-dead-end)
+    ("!u" "uncategorized"       my/noema-roam-report-uncategorized)
+    ("!h" "most-linked (hubs)"  my/noema-roam-report-most-linked)]
    ["DB & Agenda"
-    ("b" "backlinks"            my/aaronnote-roam-backlinks)
-    ("t" "tags"                 my/aaronnote-roam-tags)
-    ("T" "todos"                my/aaronnote-roam-todos)
-    ("F" "file todos"           my/aaronnote-roam-jump-file-todo)
-    ("A" "agenda"               my/aaronnote-roam-agenda)
-    ("u" "sync (incremental)"   my/aaronnote-roam-update-db)
-    ("U" "sync (full rebuild)"  my/aaronnote-roam-sync-full)
-    ("S" "db status"            my/aaronnote-roam-db-status)]
+    ("b" "backlinks"            my/noema-roam-backlinks)
+    ("t" "tags"                 my/noema-roam-tags)
+    ("T" "todos"                my/noema-roam-todos)
+    ("F" "file todos"           my/noema-roam-jump-file-todo)
+    ("A" "agenda"               my/noema-roam-agenda)
+    ("u" "sync (incremental)"   my/noema-roam-update-db)
+    ("U" "sync (full rebuild)"  my/noema-roam-sync-full)
+    ("S" "db status"            my/noema-roam-db-status)]
    ["Files"
-    ("V" "version (magit)"      my/aaronnote-roam-magit)
-    ("D" "dired (file browser)" my/aaronnote-roam-dired)
-    ("Q" "stop web-host"        my/aaronnote-stop)]
+    ("V" "version (magit)"      my/noema-roam-magit)
+    ("D" "dired (file browser)" my/noema-roam-dired)
+    ("Q" "stop web-host"        my/noema-stop)]
    ["Nav (gd = xref)"
     ("." "xref definition"      xref-find-definitions)
     ("x" "xref references"      xref-find-references)]])
 
 ;;; Wiki knowledge-health reports (MediaWiki Special: pages analog).
 
-(defconst my/aaronnote-roam--report-limit 200
+(defconst my/noema-roam--report-limit 200
   "Maximum rows shown in a single wiki report.")
 
-(defun my/aaronnote-roam--wiki-stats ()
+(defun my/noema-roam--wiki-stats ()
   "Return a plist of vault-wide wiki statistics from the cached index."
-  (let* ((entries (my/aaronnote-roam--all-note-summaries))
+  (let* ((entries (my/noema-roam--all-note-summaries))
          (total (length entries))
          (orphaned (seq-count
                     (lambda (e)
@@ -4465,7 +4465,7 @@ added separately by `my/aaronnote-roam--capf-setup')."
           :uncategorized uncategorized :link-count link-count
           :wanted wanted-count)))
 
-(defun my/aaronnote-roam-report-orphaned ()
+(defun my/noema-roam-report-orphaned ()
   "Show notes with no backlinks (MediaWiki Special:LonelyPages analog)."
   (interactive)
   (let* ((entries (seq-filter
@@ -4473,141 +4473,141 @@ added separately by `my/aaronnote-roam--capf-setup')."
                      (and (null (plist-get e :backlinks))
                           (not (string-prefix-p "daily/"
                                                 (or (plist-get e :slug) "")))))
-                   (my/aaronnote-roam--all-note-summaries)))
-         (entries (seq-take entries my/aaronnote-roam--report-limit))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
+                   (my/noema-roam--all-note-summaries)))
+         (entries (seq-take entries my/noema-roam--report-limit))
+         (buf (my/noema-roam--prepare-ui-buffer
                "*roam-orphaned*" "Orphaned Pages" 'orphan
-               #'my/aaronnote-roam-report-orphaned
+               #'my/noema-roam-report-orphaned
                (format "%d notes" (length entries)))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Orphaned pages"
           :icon 'orphan
           :subtitle "Notes no other note links to"
           :stats (list (cons (format "%d notes" (length entries)) 'warning))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "Orphaned" (length entries))
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Orphaned" (length entries))
          (if (null entries)
-             (my/aaronnote-roam-ui-insert-empty "No orphaned notes.")
+             (my/noema-roam-ui-insert-empty "No orphaned notes.")
            (dolist (entry entries)
-             (my/aaronnote-roam--insert-note-button entry))))))
+             (my/noema-roam--insert-note-button entry))))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam-report-dead-end ()
+(defun my/noema-roam-report-dead-end ()
   "Show notes that link to no other note (MediaWiki Special:DeadendPages)."
   (interactive)
   (let* ((entries (seq-filter
                    (lambda (e) (null (plist-get e :links)))
-                   (my/aaronnote-roam--all-note-summaries)))
-         (entries (seq-take entries my/aaronnote-roam--report-limit))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
+                   (my/noema-roam--all-note-summaries)))
+         (entries (seq-take entries my/noema-roam--report-limit))
+         (buf (my/noema-roam--prepare-ui-buffer
                "*roam-dead-end*" "Dead-end Pages" 'dead-end
-               #'my/aaronnote-roam-report-dead-end
+               #'my/noema-roam-report-dead-end
                (format "%d notes" (length entries)))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Dead-end pages"
           :icon 'dead-end
           :subtitle "Notes with no outgoing links"
           :stats (list (cons (format "%d notes" (length entries)) 'warning))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "Dead-end" (length entries))
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Dead-end" (length entries))
          (if (null entries)
-             (my/aaronnote-roam-ui-insert-empty "No dead-end notes.")
+             (my/noema-roam-ui-insert-empty "No dead-end notes.")
            (dolist (entry entries)
-             (my/aaronnote-roam--insert-note-button entry))))))
+             (my/noema-roam--insert-note-button entry))))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam-report-uncategorized ()
+(defun my/noema-roam-report-uncategorized ()
   "Show notes with no tags (MediaWiki Special:UncategorizedPages analog)."
   (interactive)
   (let* ((entries (seq-filter
                    (lambda (e) (null (plist-get e :tags)))
-                   (my/aaronnote-roam--all-note-summaries)))
-         (entries (seq-take entries my/aaronnote-roam--report-limit))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
+                   (my/noema-roam--all-note-summaries)))
+         (entries (seq-take entries my/noema-roam--report-limit))
+         (buf (my/noema-roam--prepare-ui-buffer
                "*roam-uncategorized*" "Uncategorized Pages" 'uncategorized
-               #'my/aaronnote-roam-report-uncategorized
+               #'my/noema-roam-report-uncategorized
                (format "%d notes" (length entries)))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Uncategorized pages"
           :icon 'uncategorized
           :subtitle "Notes with no tags"
           :stats (list (cons (format "%d notes" (length entries)) 'muted))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "Uncategorized" (length entries))
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Uncategorized" (length entries))
          (if (null entries)
-             (my/aaronnote-roam-ui-insert-empty "All notes have tags.")
+             (my/noema-roam-ui-insert-empty "All notes have tags.")
            (dolist (entry entries)
-             (my/aaronnote-roam--insert-note-button entry))))))
+             (my/noema-roam--insert-note-button entry))))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam-report-most-linked ()
+(defun my/noema-roam-report-most-linked ()
   "Show the most-linked notes (MediaWiki Special:MostLinkedPages analog)."
   (interactive)
-  (let* ((entries (my/aaronnote-roam--all-note-summaries))
+  (let* ((entries (my/noema-roam--all-note-summaries))
          (sorted (sort (copy-sequence entries)
                        (lambda (a b)
                          (> (length (plist-get a :backlinks))
                             (length (plist-get b :backlinks))))))
-         (top (seq-take sorted my/aaronnote-roam--report-limit))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
+         (top (seq-take sorted my/noema-roam--report-limit))
+         (buf (my/noema-roam--prepare-ui-buffer
                "*roam-most-linked*" "Most-linked Pages" 'hub
-               #'my/aaronnote-roam-report-most-linked
+               #'my/noema-roam-report-most-linked
                (format "top %d" (length top)))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Most-linked pages"
           :icon 'hub
           :subtitle "Hub notes sorted by incoming links"
           :stats (list (cons (format "%d notes" (length top)) 'info))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "Hubs" (length top))
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Hubs" (length top))
          (if (null top)
-             (my/aaronnote-roam-ui-insert-empty "No linked notes.")
+             (my/noema-roam-ui-insert-empty "No linked notes.")
            (dolist (entry top)
              (let ((bls (length (plist-get entry :backlinks))))
-               (my/aaronnote-roam-ui-insert-row
+               (my/noema-roam-ui-insert-row
                 :id (plist-get entry :slug)
                 :icon 'note
                 :title (or (plist-get entry :title) (plist-get entry :slug))
                 :meta (format "%d backlinks" bls)
                 :tags (plist-get entry :tags)
                 :action (let ((slug (plist-get entry :slug)))
-                          (lambda (_b) (my/aaronnote-roam--open-slug slug))))))))))
+                          (lambda (_b) (my/noema-roam--open-slug slug))))))))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam--render-wanted-buffer (items)
+(defun my/noema-roam--render-wanted-buffer (items)
   "Render wanted-pages ITEMS (a list of alists) into a roam report buffer."
-  (let* ((items (seq-take items my/aaronnote-roam--report-limit))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
+  (let* ((items (seq-take items my/noema-roam--report-limit))
+         (buf (my/noema-roam--prepare-ui-buffer
                "*roam-wanted*" "Wanted Pages" 'wanted
-               #'my/aaronnote-roam-report-wanted
+               #'my/noema-roam-report-wanted
                (format "%d targets" (length items)))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Wanted pages"
           :icon 'wanted
           :subtitle "Link targets that have no matching note"
           :stats (list (cons (format "%d targets" (length items)) 'danger))
-          :actions (my/aaronnote-roam--ui-actions
+          :actions (my/noema-roam--ui-actions
                     (list (list :label "Create all wanted"
-                                :command #'my/aaronnote-roam-report-wanted
+                                :command #'my/noema-roam-report-wanted
                                 :help "Refresh after creating notes"))))
-         (my/aaronnote-roam-ui-insert-section "Wanted" (length items))
+         (my/noema-roam-ui-insert-section "Wanted" (length items))
          (if (null items)
-             (my/aaronnote-roam-ui-insert-empty "No wanted pages. All links resolve!")
+             (my/noema-roam-ui-insert-empty "No wanted pages. All links resolve!")
            (dolist (item items)
              (let* ((target (alist-get 'target item))
                     (by (alist-get 'by item))
@@ -4615,7 +4615,7 @@ added separately by `my/aaronnote-roam--capf-setup')."
                               ((listp by) by)
                               (t nil)))
                     (by-count (length by)))
-               (my/aaronnote-roam-ui-insert-row
+               (my/noema-roam-ui-insert-row
                 :id target
                 :icon 'wanted
                 :title (format "%s" target)
@@ -4623,69 +4623,69 @@ added separately by `my/aaronnote-roam--capf-setup')."
                               (if (= by-count 1) "" "s"))
                 :action (let ((ref target))
                           (lambda (_b)
-                            (my/aaronnote-roam-new-note ref nil nil))))))))))
+                            (my/noema-roam-new-note ref nil nil))))))))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam-report-wanted ()
+(defun my/noema-roam-report-wanted ()
   "Show link targets that have no corresponding note (MediaWiki Special:WantedPages)."
   (interactive)
-  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+  (unless (and (boundp 'my/noema--ready) my/noema--ready)
     (user-error "Noema web-host is not running; start it with H-o o first"))
   (message "Noema: fetching wanted pages...")
-  (my/aaronnote--api-call
+  (my/noema--api-call
    "aaronnote:api:notes:wanted" []
    (lambda (result)
      (let ((items (alist-get 'items result)))
-       (my/aaronnote-roam--render-wanted-buffer
+       (my/noema-roam--render-wanted-buffer
         (if (vectorp items) (append items nil)
           (or items nil)))))))
 
-(defun my/aaronnote-roam--asset-items (items)
+(defun my/noema-roam--asset-items (items)
   "Normalize JSON asset ITEMS into a list."
   (cond
    ((vectorp items) (append items nil))
    ((listp items) items)
    (t nil)))
 
-(defun my/aaronnote-roam--asset-field (asset field)
+(defun my/noema-roam--asset-field (asset field)
   "Return ASSET FIELD from an alist or hash table."
   (cond
    ((hash-table-p asset) (gethash (symbol-name field) asset))
    ((listp asset) (alist-get field asset))
    (t nil)))
 
-(defun my/aaronnote-roam--asset-file (asset)
+(defun my/noema-roam--asset-file (asset)
   "Return ASSET absolute file path."
-  (format "%s" (or (my/aaronnote-roam--asset-field asset 'file) "")))
+  (format "%s" (or (my/noema-roam--asset-field asset 'file) "")))
 
-(defun my/aaronnote-roam--format-asset-size (asset)
+(defun my/noema-roam--format-asset-size (asset)
   "Return a human-readable size label for ASSET."
-  (let ((size (my/aaronnote-roam--asset-field asset 'size)))
+  (let ((size (my/noema-roam--asset-field asset 'size)))
     (if (numberp size)
         (file-size-human-readable size)
       "unknown size")))
 
-(defun my/aaronnote-roam--format-asset-mtime (asset)
+(defun my/noema-roam--format-asset-mtime (asset)
   "Return a human-readable modified-time label for ASSET."
-  (let ((mtime-ms (my/aaronnote-roam--asset-field asset 'mtimeMs)))
+  (let ((mtime-ms (my/noema-roam--asset-field asset 'mtimeMs)))
     (if (numberp mtime-ms)
         (format-time-string "%Y-%m-%d %H:%M"
                             (seconds-to-time (/ mtime-ms 1000.0)))
       "unknown mtime")))
 
-(defun my/aaronnote-roam--open-asset (asset)
+(defun my/noema-roam--open-asset (asset)
   "Open ASSET's file in Emacs."
-  (let ((file (my/aaronnote-roam--asset-file asset)))
+  (let ((file (my/noema-roam--asset-file asset)))
     (if (and (not (string-empty-p file)) (file-exists-p file))
         (find-file file)
       (user-error "Asset file does not exist: %s" file))))
 
-(defun my/aaronnote-roam--trash-orphaned-assets (assets)
+(defun my/noema-roam--trash-orphaned-assets (assets)
   "Move orphaned ASSETS to Trash through the Noema runtime."
-  (let* ((assets (my/aaronnote-roam--asset-items assets))
+  (let* ((assets (my/noema-roam--asset-items assets))
          (files (delq nil
                       (mapcar (lambda (asset)
-                                (let ((file (my/aaronnote-roam--asset-file asset)))
+                                (let ((file (my/noema-roam--asset-file asset)))
                                   (unless (string-empty-p file) file)))
                               assets))))
     (unless files
@@ -4694,14 +4694,14 @@ added separately by `my/aaronnote-roam--capf-setup')."
                                (length files)
                                (if (= (length files) 1) "" "s")))
       (message "Noema: moving orphaned attachments to Trash...")
-      (my/aaronnote--api-call
+      (my/noema--api-call
        "aaronnote:api:assets:trash-orphans" (vector files)
        (lambda (result)
-         (let ((next-assets (my/aaronnote-roam--asset-items
+         (let ((next-assets (my/noema-roam--asset-items
                              (alist-get 'assets result)))
-               (trashed (my/aaronnote-roam--asset-items
+               (trashed (my/noema-roam--asset-items
                          (alist-get 'trashed result)))
-               (skipped (my/aaronnote-roam--asset-items
+               (skipped (my/noema-roam--asset-items
                          (alist-get 'skipped result))))
            (message "Noema: trashed %d orphaned attachment%s%s"
                     (length trashed)
@@ -4709,85 +4709,85 @@ added separately by `my/aaronnote-roam--capf-setup')."
                     (if skipped
                         (format ", skipped %d" (length skipped))
                       ""))
-           (my/aaronnote-roam--render-orphaned-assets-buffer next-assets)))))))
+           (my/noema-roam--render-orphaned-assets-buffer next-assets)))))))
 
-(defun my/aaronnote-roam--render-orphaned-assets-buffer (assets)
+(defun my/noema-roam--render-orphaned-assets-buffer (assets)
   "Render orphaned attachment ASSETS into a roam report buffer."
-  (let* ((items (seq-take (my/aaronnote-roam--asset-items assets)
-                          my/aaronnote-roam--report-limit))
+  (let* ((items (seq-take (my/noema-roam--asset-items assets)
+                          my/noema-roam--report-limit))
          (count (length items))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
+         (buf (my/noema-roam--prepare-ui-buffer
                "*roam-orphaned-assets*" "Orphaned Attachments" 'attachment
-               #'my/aaronnote-roam-report-orphaned-assets
+               #'my/noema-roam-report-orphaned-assets
                (format "%d assets" count))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Orphaned attachments"
           :icon 'attachment
           :subtitle "Files in asset folders that no note currently references"
           :stats (list (cons (format "%d assets" count)
                              (if (> count 0) 'warning 'success)))
-          :actions (my/aaronnote-roam--ui-actions
+          :actions (my/noema-roam--ui-actions
                     (when items
                       `((:label "Trash listed"
                          :command ,(let ((orphans items))
                                      (lambda ()
-                                       (my/aaronnote-roam--trash-orphaned-assets
+                                       (my/noema-roam--trash-orphaned-assets
                                         orphans)))
                          :help "Move the listed orphaned attachments to Trash"
                          :primary t)))))
-         (my/aaronnote-roam-ui-insert-section "Attachments" count)
+         (my/noema-roam-ui-insert-section "Attachments" count)
          (if (null items)
-             (my/aaronnote-roam-ui-insert-empty
+             (my/noema-roam-ui-insert-empty
               "No orphaned attachments. All scanned assets are referenced.")
            (dolist (asset items)
-             (let* ((path (format "%s" (or (my/aaronnote-roam--asset-field asset 'path)
-                                           (my/aaronnote-roam--asset-file asset))))
-                    (type (format "%s" (or (my/aaronnote-roam--asset-field asset 'type)
+             (let* ((path (format "%s" (or (my/noema-roam--asset-field asset 'path)
+                                           (my/noema-roam--asset-file asset))))
+                    (type (format "%s" (or (my/noema-roam--asset-field asset 'type)
                                            "asset"))))
-               (my/aaronnote-roam-ui-insert-row
-                :id (my/aaronnote-roam--asset-file asset)
-                :icon (if (my/aaronnote-roam--asset-field asset 'isImage)
+               (my/noema-roam-ui-insert-row
+                :id (my/noema-roam--asset-file asset)
+                :icon (if (my/noema-roam--asset-field asset 'isImage)
                           'image
                         'attachment)
                 :badge type
                 :badge-tone 'muted
                 :title path
-                :meta (my/aaronnote-roam--format-asset-size asset)
-                :detail (my/aaronnote-roam--format-asset-mtime asset)
+                :meta (my/noema-roam--format-asset-size asset)
+                :detail (my/noema-roam--format-asset-mtime asset)
                 :action (let ((item asset))
                           (lambda (_b)
-                            (my/aaronnote-roam--open-asset item))))))))))
+                            (my/noema-roam--open-asset item))))))))))
     (display-buffer buf)))
 
-(defun my/aaronnote-roam-report-orphaned-assets ()
+(defun my/noema-roam-report-orphaned-assets ()
   "Show unreferenced Noema attachments and generated media assets."
   (interactive)
-  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+  (unless (and (boundp 'my/noema--ready) my/noema--ready)
     (user-error "Noema web-host is not running; start it with H-o o first"))
   (message "Noema: scanning orphaned attachments...")
-  (my/aaronnote--api-call
+  (my/noema--api-call
    "aaronnote:api:assets:scan-orphans" []
    (lambda (result)
-     (my/aaronnote-roam--render-orphaned-assets-buffer
+     (my/noema-roam--render-orphaned-assets-buffer
       (alist-get 'assets result)))))
 
 (with-eval-after-load 'transient
-  (transient-define-prefix my/aaronnote-roam-reports ()
+  (transient-define-prefix my/noema-roam-reports ()
     "Wiki knowledge-health reports."
     [["Special pages"
-      ("w" "wanted pages"       my/aaronnote-roam-report-wanted)
-      ("o" "orphaned pages"     my/aaronnote-roam-report-orphaned)
-      ("a" "orphaned attachments" my/aaronnote-roam-report-orphaned-assets)
-      ("d" "dead-end pages"     my/aaronnote-roam-report-dead-end)
-      ("u" "uncategorized"      my/aaronnote-roam-report-uncategorized)
-      ("h" "most-linked (hubs)" my/aaronnote-roam-report-most-linked)]]))
+      ("w" "wanted pages"       my/noema-roam-report-wanted)
+      ("o" "orphaned pages"     my/noema-roam-report-orphaned)
+      ("a" "orphaned attachments" my/noema-roam-report-orphaned-assets)
+      ("d" "dead-end pages"     my/noema-roam-report-dead-end)
+      ("u" "uncategorized"      my/noema-roam-report-uncategorized)
+      ("h" "most-linked (hubs)" my/noema-roam-report-most-linked)]]))
 
 ;;; Wiki category browser (MediaWiki Category: system analog).
 
-(defun my/aaronnote-roam--category-tree (entries)
+(defun my/noema-roam--category-tree (entries)
   "Build a category hierarchy from tag lists in ENTRIES.
 Returns a sorted list of (CATEGORY-PATH . MEMBER-SLUGS) conses where
 CATEGORY-PATH is a slash-joined string of segments."
@@ -4808,12 +4808,12 @@ CATEGORY-PATH is a slash-joined string of segments."
                ht)
       (sort result (lambda (a b) (string< (car a) (car b)))))))
 
-(defun my/aaronnote-roam-categories ()
+(defun my/noema-roam-categories ()
   "Browse notes hierarchically by category (nested tags, MediaWiki Category: analog).
 Select a top-level category to drill down; select a note to open it."
   (interactive)
-  (let* ((entries (my/aaronnote-roam--all-note-summaries))
-         (tree (my/aaronnote-roam--category-tree entries))
+  (let* ((entries (my/noema-roam--all-note-summaries))
+         (tree (my/noema-roam--category-tree entries))
          ;; Navigation state: current prefix path being browsed
          (prefix ""))
     (cl-labels
@@ -4871,41 +4871,41 @@ Select a top-level category to drill down; select a note to open it."
                   ((member val (mapcar #'cdr child-labels))
                    (browse val))
                   ((stringp val)
-                   (my/aaronnote-roam--open-slug val))))))))
+                   (my/noema-roam--open-slug val))))))))
       (browse prefix))))
 
 ;;; Wiki move-page with automatic link rewrite (MediaWiki "Move page").
 
-(defun my/aaronnote-roam-move-note ()
+(defun my/noema-roam-move-note ()
   "Rename/move a roam note and rewrite all referencing links.
 Prompts for the note to move and a new file name, then calls the
 backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
   (interactive)
-  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+  (unless (and (boundp 'my/noema--ready) my/noema--ready)
     (user-error "Noema web-host is not running; start it with H-o o first"))
-  (let* ((slug (my/aaronnote-roam--read-note-id "Move note: "))
-         (file (my/aaronnote-roam--slug-to-file slug))
+  (let* ((slug (my/noema-roam--read-note-id "Move note: "))
+         (file (my/noema-roam--slug-to-file slug))
          (old-name (file-name-nondirectory file))
          (new-name (read-string (format "New file name for '%s': " old-name)
                                 old-name))
-         (old-rel (file-relative-name file (my/aaronnote-roam-root)))
+         (old-rel (file-relative-name file (my/noema-roam-root)))
          (new-rel (concat (file-name-directory old-rel) new-name)))
     (unless (file-exists-p file)
       (user-error "File not found: %s" file))
     (when (string= old-name new-name)
       (user-error "New name is the same as old name"))
     (message "Moving '%s' → '%s' and rewriting links..." old-rel new-rel)
-    (my/aaronnote--api-call
+    (my/noema--api-call
      "aaronnote:api:fs:rename"
      (vector (list (cons "file" file) (cons "targetName" new-name)))
      (lambda (result)
        (if (not (alist-get 'ok result))
            (message "Noema move failed: %s" (alist-get 'message result))
-         (my/aaronnote--api-call
+         (my/noema--api-call
           "aaronnote:api:roam-tools:rewrite-path-refs"
           (vector (list (cons "oldPath" old-rel) (cons "newPath" new-rel)))
           (lambda (rewrite-result)
-            (my/aaronnote-roam--clear-runtime-cache)
+            (my/noema-roam--clear-runtime-cache)
             (let ((changed (length (or (alist-get 'changed rewrite-result) []))))
               (message "Moved '%s' → '%s'; rewrote links in %d file%s."
                        old-rel new-rel changed
@@ -4913,10 +4913,10 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
 
 ;;; Tag management wrappers for the management dashboard.
 
-(defun my/aaronnote-roam-rename-tag ()
+(defun my/noema-roam-rename-tag ()
   "Rename a tag across all vault notes via the Noema runtime."
   (interactive)
-  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+  (unless (and (boundp 'my/noema--ready) my/noema--ready)
     (user-error "Noema web-host is not running"))
   (let* ((old-tag (read-string "Old tag name: "))
          (new-tag (read-string (format "Rename '%s' to: " old-tag) old-tag)))
@@ -4925,41 +4925,41 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
     (when (string= old-tag new-tag)
       (user-error "New tag is the same as old tag"))
     (message "Renaming tag '%s' → '%s'..." old-tag new-tag)
-    (my/aaronnote--api-call
+    (my/noema--api-call
      "aaronnote:api:roam-tools:rename-tag"
      (vector (list (cons "oldTag" old-tag) (cons "newTag" new-tag)))
      (lambda (result)
-       (my/aaronnote-roam--clear-runtime-cache)
+       (my/noema-roam--clear-runtime-cache)
        (let ((changed (or (alist-get 'changed result) 0)))
          (message "Renamed tag '%s' → '%s' in %d file%s."
                   old-tag new-tag changed (if (= changed 1) "" "s")))))))
 
-(defun my/aaronnote-roam-delete-tag ()
+(defun my/noema-roam-delete-tag ()
   "Delete a tag from all vault notes via the Noema runtime."
   (interactive)
-  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+  (unless (and (boundp 'my/noema--ready) my/noema--ready)
     (user-error "Noema web-host is not running"))
   (let ((tag (read-string "Delete tag: ")))
     (when (string-empty-p tag)
       (user-error "Tag name cannot be empty"))
     (when (yes-or-no-p (format "Delete tag '%s' from all notes? " tag))
       (message "Deleting tag '%s'..." tag)
-      (my/aaronnote--api-call
+      (my/noema--api-call
        "aaronnote:api:roam-tools:delete-tag"
        (vector (list (cons "tag" tag)))
        (lambda (result)
-         (my/aaronnote-roam--clear-runtime-cache)
+         (my/noema-roam--clear-runtime-cache)
          (let ((changed (or (alist-get 'changed result) 0)))
            (message "Deleted tag '%s' from %d file%s."
                     tag changed (if (= changed 1) "" "s"))))))))
 
-(defun my/aaronnote-roam-tag-overlap ()
+(defun my/noema-roam-tag-overlap ()
   "Show overlapping/redundant tags report via the Noema runtime."
   (interactive)
-  (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
+  (unless (and (boundp 'my/noema--ready) my/noema--ready)
     (user-error "Noema web-host is not running"))
   (message "Analyzing tag overlap...")
-  (my/aaronnote--api-call
+  (my/noema--api-call
    "aaronnote:api:roam-tools:tag-overlap"
    []
    (lambda (result)
@@ -4983,7 +4983,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
 
 ;;; Upgrade management dashboard with wiki statistics.
 
-(defconst my/aaronnote-roam--dashboard-tools
+(defconst my/noema-roam--dashboard-tools
   '((:id find-note
      :icon search
      :badge "FIND"
@@ -4991,7 +4991,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Find note"
      :meta "findnode"
      :detail "Jump by Noema id, path, or title."
-     :command my/aaronnote-roam-find-note
+     :command my/noema-roam-find-note
      :help "Find and open a roam note")
     (:id create-note
      :icon new
@@ -5000,7 +5000,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Create note"
      :meta "Roam New"
      :detail "Open the native note creation workbench."
-     :command my/aaronnote-roam-new-note
+     :command my/noema-roam-new-note
      :help "Create a new roam note")
     (:id create-node
      :icon new
@@ -5009,7 +5009,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Create node"
      :meta "timestamped"
      :detail "Start a timestamped node in the selected directory."
-     :command my/aaronnote-roam-new-node
+     :command my/noema-roam-new-node
      :help "Create a new timestamped node")
     (:id search-notes
      :icon search
@@ -5017,7 +5017,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Search notes"
      :meta "title/tag/linksto"
      :detail "Filter notes with scoped search operators."
-     :command my/aaronnote-roam-search-notes
+     :command my/noema-roam-search-notes
      :help "Search Noema roam notes")
     (:id daily-note
      :icon note
@@ -5026,7 +5026,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Daily note"
      :meta "daily/YYYY-MM-DD"
      :detail "Open or create today's daily note."
-     :command my/aaronnote-roam-daily-note
+     :command my/noema-roam-daily-note
      :help "Open today's daily note")
     (:id agenda
      :icon agenda
@@ -5034,7 +5034,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Agenda"
      :meta "open tasks"
      :detail "Review open todos grouped by due date and status."
-     :command my/aaronnote-roam-agenda
+     :command my/noema-roam-agenda
      :help "Open the roam agenda")
     (:id todos
      :icon todo
@@ -5042,7 +5042,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Task list"
      :meta "all todos"
      :detail "List every indexed task across the vault."
-     :command my/aaronnote-roam-todos
+     :command my/noema-roam-todos
      :help "List all roam tasks")
     (:id categories
      :icon tag
@@ -5050,7 +5050,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Categories"
      :meta "nested tags"
      :detail "Browse wiki-style categories from nested tags."
-     :command my/aaronnote-roam-categories
+     :command my/noema-roam-categories
      :help "Browse nested tag categories")
     (:id tags
      :icon tag
@@ -5058,7 +5058,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Flat tags"
      :meta "tag picker"
      :detail "Pick a tag, then open one of its notes."
-     :command my/aaronnote-roam-tags
+     :command my/noema-roam-tags
      :help "Browse notes by tag")
     (:id recent-notes
      :icon clock
@@ -5067,23 +5067,23 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Recent notes"
      :meta "history"
      :detail "Return to recently opened roam notes."
-     :command my/aaronnote-roam-recent-notes
+     :command my/noema-roam-recent-notes
      :help "Show recently opened roam notes"))
   "Command rows shown in the Roam management dashboard quick tools section.")
 
-(defun my/aaronnote-roam--dashboard-tool-action (command)
+(defun my/noema-roam--dashboard-tool-action (command)
   "Return a board row action that invokes COMMAND interactively."
   (lambda (_button)
     (if (commandp command)
         (call-interactively command)
       (funcall command))))
 
-(defun my/aaronnote-roam--dashboard-insert-tools ()
+(defun my/noema-roam--dashboard-insert-tools ()
   "Insert common command shortcuts into the Roam management dashboard."
-  (my/aaronnote-roam-ui-insert-section
-   "Quick tools" (length my/aaronnote-roam--dashboard-tools) 'info)
-  (dolist (tool my/aaronnote-roam--dashboard-tools)
-    (my/aaronnote-roam-ui-insert-row
+  (my/noema-roam-ui-insert-section
+   "Quick tools" (length my/noema-roam--dashboard-tools) 'info)
+  (dolist (tool my/noema-roam--dashboard-tools)
+    (my/noema-roam-ui-insert-row
      :id (list 'dashboard-tool (plist-get tool :id))
      :icon (plist-get tool :icon)
      :badge (plist-get tool :badge)
@@ -5091,147 +5091,147 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title (plist-get tool :title)
      :meta (plist-get tool :meta)
      :detail (plist-get tool :detail)
-     :action (my/aaronnote-roam--dashboard-tool-action
+     :action (my/noema-roam--dashboard-tool-action
               (plist-get tool :command))
      :help (plist-get tool :help)))
   (insert "\n"))
 
-(defun my/aaronnote-roam-management ()
+(defun my/noema-roam-management ()
   "Show wiki maintenance dashboard: vault stats and all roam operations."
   (interactive)
-  (let* ((entries (my/aaronnote-roam--all-note-summaries))
-         (stats (my/aaronnote-roam--wiki-stats))
-         (db (my/aaronnote-roam--db))
+  (let* ((entries (my/noema-roam--all-note-summaries))
+         (stats (my/noema-roam--wiki-stats))
+         (db (my/noema-roam--db))
          (generated (and db (gethash "generated" db)))
-         (buf (my/aaronnote-roam--prepare-ui-buffer
-               "*aaronnote-roam-management*" "Roam Management" 'management
-               #'my/aaronnote-roam-management
+         (buf (my/noema-roam--prepare-ui-buffer
+               "*Noema roam management*" "Roam Management" 'management
+               #'my/noema-roam-management
                (format "%d notes" (plist-get stats :total)))))
     (with-current-buffer buf
-      (my/aaronnote-roam-ui-render
+      (my/noema-roam-ui-render
        (lambda ()
-         (my/aaronnote-roam-ui-insert-page-header
+         (my/noema-roam-ui-insert-page-header
           "Wiki maintenance dashboard"
           :icon 'management
           :subtitle "Special:Statistics — vault health and operations"
           :stats (list (cons (format "%d notes" (plist-get stats :total)) 'info)
                        (cons (if generated "DB ready" "DB unknown")
                              (if generated 'success 'warning)))
-          :actions (my/aaronnote-roam--ui-actions))
-         (my/aaronnote-roam-ui-insert-section "Vault statistics")
-         (my/aaronnote-roam-ui-insert-field
-          "Root" (abbreviate-file-name (my/aaronnote-roam-root))
-          'my/aaronnote-roam-ui-path)
-         (my/aaronnote-roam-ui-insert-field "Total notes"    (plist-get stats :total))
-         (my/aaronnote-roam-ui-insert-field "Total links"    (plist-get stats :link-count))
-         (my/aaronnote-roam-ui-insert-field "Wanted pages"
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Vault statistics")
+         (my/noema-roam-ui-insert-field
+          "Root" (abbreviate-file-name (my/noema-roam-root))
+          'my/noema-roam-ui-path)
+         (my/noema-roam-ui-insert-field "Total notes"    (plist-get stats :total))
+         (my/noema-roam-ui-insert-field "Total links"    (plist-get stats :link-count))
+         (my/noema-roam-ui-insert-field "Wanted pages"
                                             (let ((n (plist-get stats :wanted)))
                                               (if (> n 0) (format "%d ⚠" n) "0"))
-                                            'my/aaronnote-roam-ui-meta)
-         (my/aaronnote-roam-ui-insert-field "Orphaned"
+                                            'my/noema-roam-ui-meta)
+         (my/noema-roam-ui-insert-field "Orphaned"
                                             (let ((n (plist-get stats :orphaned)))
                                               (if (> n 0) (format "%d ⚠" n) "0"))
-                                            'my/aaronnote-roam-ui-meta)
-         (my/aaronnote-roam-ui-insert-field "Dead-end"
+                                            'my/noema-roam-ui-meta)
+         (my/noema-roam-ui-insert-field "Dead-end"
                                             (let ((n (plist-get stats :dead-end)))
                                               (if (> n 0) (format "%d" n) "0"))
-                                            'my/aaronnote-roam-ui-meta)
-         (my/aaronnote-roam-ui-insert-field "Uncategorized"
+                                            'my/noema-roam-ui-meta)
+         (my/noema-roam-ui-insert-field "Uncategorized"
                                             (let ((n (plist-get stats :uncategorized)))
                                               (if (> n 0) (format "%d" n) "0"))
-                                            'my/aaronnote-roam-ui-meta)
-         (my/aaronnote-roam-ui-insert-field
+                                            'my/noema-roam-ui-meta)
+         (my/noema-roam-ui-insert-field
          "DB generated" (or generated "unknown")
-         'my/aaronnote-roam-ui-meta)
+         'my/noema-roam-ui-meta)
          (insert "\n")
-         (my/aaronnote-roam--dashboard-insert-tools)
-         (my/aaronnote-roam-ui-insert-activity-heatmap)
-         (my/aaronnote-roam-ui-insert-section "Special pages")
+         (my/noema-roam--dashboard-insert-tools)
+         (my/noema-roam-ui-insert-activity-heatmap)
+         (my/noema-roam-ui-insert-section "Special pages")
          (insert "   ")
-         (my/aaronnote-roam-ui-insert-actions
+         (my/noema-roam-ui-insert-actions
           '((:label "Wanted pages"
-             :command my/aaronnote-roam-report-wanted
+             :command my/noema-roam-report-wanted
              :help "Links to notes that don't exist"
              :primary t)
             (:label "Orphaned"
-             :command my/aaronnote-roam-report-orphaned
+             :command my/noema-roam-report-orphaned
              :help "Notes with no incoming links")
             (:label "Orphaned attachments"
-             :command my/aaronnote-roam-report-orphaned-assets
+             :command my/noema-roam-report-orphaned-assets
              :help "Files in asset folders that no note references")
             (:label "Dead-end"
-             :command my/aaronnote-roam-report-dead-end
+             :command my/noema-roam-report-dead-end
              :help "Notes with no outgoing links")
             (:label "Uncategorized"
-             :command my/aaronnote-roam-report-uncategorized
+             :command my/noema-roam-report-uncategorized
              :help "Notes with no tags")
             (:label "Most-linked"
-             :command my/aaronnote-roam-report-most-linked
+             :command my/noema-roam-report-most-linked
              :help "Hub notes by backlink count")))
          (insert "\n")
-         (my/aaronnote-roam-ui-insert-section "Tag tools")
+         (my/noema-roam-ui-insert-section "Tag tools")
          (insert "   ")
-         (my/aaronnote-roam-ui-insert-actions
+         (my/noema-roam-ui-insert-actions
           '((:label "Browse categories"
-             :command my/aaronnote-roam-categories
+             :command my/noema-roam-categories
              :help "Drill down through nested tags"
              :primary t)
             (:label "Browse flat tags"
-             :command my/aaronnote-roam-tags
+             :command my/noema-roam-tags
              :help "All tags in the vault")
             (:label "Rename tag"
-             :command my/aaronnote-roam-rename-tag
+             :command my/noema-roam-rename-tag
              :help "Rename a tag across all notes")
             (:label "Tag overlap"
-             :command my/aaronnote-roam-tag-overlap
+             :command my/noema-roam-tag-overlap
              :help "Find redundant/overlapping tags")))
          (insert "\n")
-         (my/aaronnote-roam-ui-insert-section "DB & files")
+         (my/noema-roam-ui-insert-section "DB & files")
          (insert "   ")
-         (my/aaronnote-roam-ui-insert-actions
+         (my/noema-roam-ui-insert-actions
           '((:label "Sync roam-db"
-             :command my/aaronnote-roam-update-db
+             :command my/noema-roam-update-db
              :help "Run incremental roam-db sync"
              :primary t)
             (:label "Move note"
-             :command my/aaronnote-roam-move-note
+             :command my/noema-roam-move-note
              :help "Rename note + rewrite backlinks")
             (:label "Recent changes"
-             :command my/aaronnote-roam-recent-notes
+             :command my/noema-roam-recent-notes
              :help "Recently opened notes")
             (:label "DB status"
-             :command my/aaronnote-roam-db-status
+             :command my/noema-roam-db-status
              :help "DB sync state file"))))))
     (display-buffer buf)))
 
 ;;; Public lifecycle API (called from init-aaronnote.el).
 
-(defun my/aaronnote-roam--cancel-sync-timer ()
+(defun my/noema-roam--cancel-sync-timer ()
   "Cancel pending debounced roam sync, clear the changed-files list, and
 kill any in-flight CLI offline sync process."
-  (when (timerp my/aaronnote-roam--sync-timer)
-    (cancel-timer my/aaronnote-roam--sync-timer))
-  (setq my/aaronnote-roam--sync-timer nil
-        my/aaronnote-roam--sync-changed-files nil)
-  (when (and my/aaronnote-roam--sync-process
-             (process-live-p my/aaronnote-roam--sync-process))
-    (delete-process my/aaronnote-roam--sync-process))
-  (setq my/aaronnote-roam--sync-process nil))
+  (when (timerp my/noema-roam--sync-timer)
+    (cancel-timer my/noema-roam--sync-timer))
+  (setq my/noema-roam--sync-timer nil
+        my/noema-roam--sync-changed-files nil)
+  (when (and my/noema-roam--sync-process
+             (process-live-p my/noema-roam--sync-process))
+    (delete-process my/noema-roam--sync-process))
+  (setq my/noema-roam--sync-process nil))
 
-(defun my/aaronnote-roam--note-in-vault-p (file)
+(defun my/noema-roam--note-in-vault-p (file)
   "Return non-nil when FILE is a Markdown note inside the vault root."
-  (let ((root (file-name-as-directory (expand-file-name (my/aaronnote-roam-root)))))
+  (let ((root (file-name-as-directory (expand-file-name (my/noema-roam-root)))))
     (and (string-prefix-p root file)
          (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file))))
 
-(defun my/aaronnote-roam-note-changed (file)
+(defun my/noema-roam-note-changed (file)
   "Invalidate Emacs-side caches when the web-host reports FILE was saved.
 The web-host is the authoritative roam.db writer and handles its own sync
 via queueRoamDbSync; Emacs must not trigger a redundant sync from this event."
   (when (and (stringp file)
              (not (string-empty-p file))
-             (my/aaronnote-roam--note-in-vault-p (expand-file-name file)))
-    (my/aaronnote-roam--clear-runtime-cache)))
+             (my/noema-roam--note-in-vault-p (expand-file-name file)))
+    (my/noema-roam--clear-runtime-cache)))
 
 (provide 'init-md-roam)
 ;;; init-md-roam.el ends here

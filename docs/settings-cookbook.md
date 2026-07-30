@@ -128,14 +128,14 @@ TeXpresso 的本地 checkout、Emacs mode 和构建产物统一放在 `var/texpr
 
 ### Noema LaTeX 导出（CMD+P）
 
-变量（`config-defvar`，组 `my/aaronnote`，落盘 `etc/config-store.el`）：
+变量（`config-defvar`，组 `my/noema`，落盘 `etc/config-store.el`）：
 
-- `my/aaronnote-latex-export-engine`      — `"codex"`（先验证 Pandoc 稿，再做至多一次 gated polish；编译失败时才允许多轮 repair）或 `"mechanical"`（从不启动 agent）
-- `my/aaronnote-latex-export-agent`       — polish/repair 后端 `"codex"`（默认）/ `"claude"` / `"opencode"`；配置里选定
-- `my/aaronnote-latex-export-max-attempts` — 有具体编译反馈时的 repair 上限（默认 3；保真 gate 失败会立即回退，不消耗重复尝试）
-- `my/aaronnote-latex-export-model`        — 传给当前后端的模型 id（空 = 默认）
-- `my/aaronnote-codex-model`               — 仅 codex 的模型 id（空 = 默认）
-- CLI 路径复用：codex → `codex-cli-executable`，claude → `claude-code-ide-cli-path`，opencode → `my/aaronnote-opencode-executable`
+- `my/noema-latex-export-engine`      — `"codex"`（先验证 Pandoc 稿，再做至多一次 gated polish；编译失败时才允许多轮 repair）或 `"mechanical"`（从不启动 agent）
+- `my/noema-latex-export-agent`       — polish/repair 后端 `"codex"`（默认）/ `"claude"` / `"opencode"`；配置里选定
+- `my/noema-latex-export-max-attempts` — 有具体编译反馈时的 repair 上限（默认 3；保真 gate 失败会立即回退，不消耗重复尝试）
+- `my/noema-latex-export-model`        — 传给当前后端的模型 id（空 = 默认）
+- `my/noema-codex-model`               — 仅 codex 的模型 id（空 = 默认）
+- CLI 路径复用：codex → `codex-cli-executable`，claude → `claude-code-ide-cli-path`，opencode → `my/noema-opencode-executable`
 
 模板：`templates/latex/*.tex`（`aaronnote-article` / `aaronnote-report` /
 `aaronnote-assignment`），每个文件首行 `% aaronnote-template: {json}` 可声明显示名、

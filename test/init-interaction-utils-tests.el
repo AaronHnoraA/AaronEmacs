@@ -81,7 +81,7 @@
     (unwind-protect
         (cl-letf (((symbol-function 'find-file)
                    (lambda (_file)
-                     (setq redirect-inhibited my/aaronnote--inhibit-redirect
+                     (setq redirect-inhibited my/noema--inhibit-redirect
                            buffer (generate-new-buffer " *keybinding-guide-test*"))
                      buffer)))
           (should (eq (my/open-keybinding-guide) buffer))

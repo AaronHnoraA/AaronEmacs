@@ -24,6 +24,17 @@ make lock
 make audit-lock
 ```
 
+Aaron UI / Noema 设计 token 另有一条不依赖 Noema 构建的审计链：
+
+```sh
+make ui-tokens
+make ui-test
+make audit-ui-tokens
+```
+
+修改 `site-lisp/aaron-ui/aaron-ui.el` 中的 token 后运行 `make ui-tokens`，
+把确定性 CSS 导出物一并提交。Noema 运行时只读取该 CSS，不依赖 Emacs。
+
 ### 什么时候该更新锁文件
 
 - 你新增了 package
@@ -555,9 +566,9 @@ registry(`etc/config-store.el`，改值用 `config-set` 或直接编辑该文件
 |---|---|---|---|
 | `my/gcmh-high-cons-threshold` | `lisp/init-tools.el` (gcmh) | 128 MB | Emacs 空闲 GC 前允许堆积的垃圾上限；LSP 活跃时会被 `lisp/init-lsp.el` 的 `my/language-server-performance-gcmh-factor`(默认 2) 临时翻倍。之前是 512 MB(LSP 活跃时 1 GB),下调后 GC 更勤但单次更短,交互延迟影响很小。 |
 | `my/copilot-server-max-heap-mb` | `lisp/init-copilot.el` | 1024 | Emacs 自己 spawn 的 Copilot language server 的 V8 堆上限,通过 `NODE_OPTIONS` 注入(该 LS 不是走命令行参数,`copilot-server-args` 只能传给二进制本身,包不去掉支持自定义 env,所以用 `copilot--make-connection` 的 advice)。同一个键的值会通过 `AARONNOTE_COPILOT_MAX_HEAP_MB` 环境变量传给 Noema 侧自己 spawn 的第二份 Copilot LSP 实例(`server/lib/runtime.mjs` 的 `CopilotLspClient`),两边共享一个上限。**实测 384/512 MB 都会让该 LS 在启动几秒内以 `SIGABRT`(V8 `Ineffective mark-compacts near heap limit` OOM)崩溃退出——它自身(sharp 原生模块 + tf-idf/diff worker 的宿主进程)启动期就需要 ~700 MB old-space,768 MB 是实测最低可用值;1024 MB 留出安全余量,仍比不设上限时的 4 GB 默认值收紧很多。改这个键前先用 `node --max-old-space-size=<N> dist/language-server.js --stdio` 走一遍 initialize 握手再空闲等 20s 确认不 OOM,不要凭感觉调小。** |
-| `my/aaronnote-web-host-max-heap-mb` | `lisp/roam/init-aaronnote.el` | 512 | Noema `web-host.mjs` 自身的 V8 堆上限,**必须用 `--max-old-space-size` 命令行 flag 而不是 `NODE_OPTIONS` 环境变量**——web-host 的 `process.env` 会原样传给它 shell 出去的 codex/claude/opencode CLI(LaTeX export 用),用环境变量会把堆上限错误地传染给这些 node 程序。 |
-| `my/aaronnote-latex-export-agent-idle-timeout` | `lisp/roam/init-aaronnote.el` | 180 | LaTeX export agent 无输出多久后做一次存活检查；活着就继续等，不会 kill。 |
-| `my/aaronnote-latex-export-agent-hard-timeout` | `lisp/roam/init-aaronnote.el` | 900 | 单次 agent attempt 的绝对上限；先 SIGTERM，默认留十秒收尾后才 SIGKILL。 |
+| `my/noema-web-host-max-heap-mb` | `lisp/roam/init-aaronnote.el` | 512 | Noema `web-host.mjs` 自身的 V8 堆上限,**必须用 `--max-old-space-size` 命令行 flag 而不是 `NODE_OPTIONS` 环境变量**——web-host 的 `process.env` 会原样传给它 shell 出去的 codex/claude/opencode CLI(LaTeX export 用),用环境变量会把堆上限错误地传染给这些 node 程序。 |
+| `my/noema-latex-export-agent-idle-timeout` | `lisp/roam/init-aaronnote.el` | 180 | LaTeX export agent 无输出多久后做一次存活检查；活着就继续等，不会 kill。 |
+| `my/noema-latex-export-agent-hard-timeout` | `lisp/roam/init-aaronnote.el` | 900 | 单次 agent attempt 的绝对上限；先 SIGTERM，默认留十秒收尾后才 SIGKILL。 |
 
 Noema 侧的 Copilot LSP 实例(`CopilotLspClient`)另外做了**空闲 TTL 自动
 停止**:`AARONNOTE_COPILOT_IDLE_TTL_MS`(默认 15 分钟,0 关闭)内如果没有

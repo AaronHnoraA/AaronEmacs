@@ -14,6 +14,8 @@
 (declare-function link-hint-copy-link "link-hint" ())
 (declare-function link-hint-open-link "link-hint" ())
 (declare-function undo-tree-save-history "undo-tree" (&optional filename overwrite))
+(declare-function material-icon-ibuffer-icons-mode "material-icon-ibuffer" (&optional arg))
+(defvar material-icon-ibuffer-formats)
 
 (defvar vertico-map)
 
@@ -352,6 +354,39 @@
   :after (ibuffer projectile)
   :commands ibuffer-projectile-set-filter-groups)
 
+(defconst my/ibuffer-base-formats
+  '((mark modified read-only locked
+          " " (name 30 30 :left :elide)
+          " " (size 9 -1 :right)
+          " " (mode 18 18 :left :elide)
+          " " (vc-status 10 10 :left)
+          " " my-filename-and-process)
+    (mark " " (name 30 -1) " " filename))
+  "Aaron's compact Ibuffer columns without graphical icons.")
+
+(defconst my/ibuffer-icon-formats
+  '((mark modified read-only locked
+          " " (icon 2 2)
+          (name 28 28 :left :elide)
+          " " (size 9 -1 :right)
+          " " (mode 18 18 :left :elide)
+          " " (vc-status 10 10 :left)
+          " " my-filename-and-process)
+    (mark " " (icon 2 2) (name 28 -1) " " filename))
+  "Aaron's Ibuffer columns with Material SVG file icons.")
+
+(defun my/ibuffer-material-icons-setup ()
+  "Use Material SVG icons without replacing Aaron's custom columns."
+  (if (and (display-graphic-p)
+           (image-type-available-p 'svg)
+           (require 'material-icon-ibuffer nil t))
+      (progn
+        (setq material-icon-ibuffer-formats my/ibuffer-icon-formats)
+        (material-icon-ibuffer-icons-mode 1))
+    (setq-local ibuffer-formats my/ibuffer-base-formats)))
+
+(add-hook 'ibuffer-mode-hook #'my/ibuffer-material-icons-setup)
+
 (with-eval-after-load 'ibuffer
   (define-ibuffer-column vc-status
     (:name "VC" :inline t)
@@ -363,23 +398,16 @@
   (define-ibuffer-column my-filename-and-process
     (:name "Filename/Process" :inline t)
     (cond
-     ((and (fboundp 'my/ibuffer-aaronnote-file-name)
-           (my/ibuffer-aaronnote-file-name buffer))
-      (abbreviate-file-name (my/ibuffer-aaronnote-file-name buffer)))
+     ((and (fboundp 'my/ibuffer-noema-file-name)
+           (my/ibuffer-noema-file-name buffer))
+      (abbreviate-file-name (my/ibuffer-noema-file-name buffer)))
      ((buffer-local-value 'buffer-file-name buffer)
       (abbreviate-file-name (buffer-local-value 'buffer-file-name buffer)))
      ((get-buffer-process buffer)
       (format "(%s)" (process-name (get-buffer-process buffer))))
      (t "")))
 
-  (setq ibuffer-formats
-        '((mark modified read-only locked
-                " " (name 30 30 :left :elide)
-                " " (size 9 -1 :right)
-                " " (mode 18 18 :left :elide)
-                " " (vc-status 10 10 :left)
-                " " my-filename-and-process)
-          (mark " " (name 30 -1) " " filename)))
+  (setq ibuffer-formats my/ibuffer-base-formats)
 
   (define-key ibuffer-mode-map (kbd "V") #'ibuffer-vc-set-filter-groups-by-vc-root)
   (define-key ibuffer-mode-map (kbd "P") #'ibuffer-projectile-set-filter-groups))

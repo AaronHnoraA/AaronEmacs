@@ -112,14 +112,14 @@
         (kill-buffer buffer)))))
 
 (ert-deftest my/xwidget-update-buffer-name-skips-aaronnote-owned-buffer ()
-  (let ((buffer (generate-new-buffer "*aaronnote: note.md*")))
+  (let ((buffer (generate-new-buffer "*Noema: note.md*")))
     (unwind-protect
         (with-current-buffer buffer
           (setq-local major-mode 'xwidget-webkit-mode)
-          (setq-local my/aaronnote--xwidget-forced-name "*aaronnote: note.md*")
+          (setq-local my/noema--xwidget-forced-name "*Noema: note.md*")
           (setq-local my/xwidget-session-title "Browser Title")
           (my/xwidget-update-buffer-name buffer)
-          (should (equal (buffer-name buffer) "*aaronnote: note.md*")))
+          (should (equal (buffer-name buffer) "*Noema: note.md*")))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 

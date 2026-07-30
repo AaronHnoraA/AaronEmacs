@@ -50,7 +50,7 @@ macOS `open', Linux `xdg-open', Windows shell open, or `browse-url' fallback."
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
 
 (defvar eww-browse-url-new-window-is-tab)
-(defvar my/aaronnote--inhibit-redirect)
+(defvar my/noema--inhibit-redirect)
 
 ;;;###autoload
 (defun my/open-keybinding-guide ()
@@ -59,7 +59,7 @@ macOS `open', Linux `xdg-open', Windows shell open, or `browse-url' fallback."
   (let ((file (locate-user-emacs-file "docs/daily-usage.md")))
     (unless (file-readable-p file)
       (user-error "Keybinding guide is missing: %s" file))
-    (let* ((my/aaronnote--inhibit-redirect t)
+    (let* ((my/noema--inhibit-redirect t)
            (buffer (find-file file)))
       (with-current-buffer buffer
         (goto-char (point-min))

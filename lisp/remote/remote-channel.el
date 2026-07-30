@@ -18,14 +18,26 @@
 (declare-function remote-workspace-register-recoverable-resource
                   "remote-workspace"
                   (workspace kind value &rest keys))
+(declare-function remote-workspace-ensure-recoverable-resource
+                  "remote-workspace"
+                  (workspace kind key value &rest keys))
+(declare-function remote-workspace-resource-value
+                  "remote-workspace" (resource))
 
 (cl-defstruct (remote-channel
                (:constructor remote-channel-create))
   id kind route context handle state opened-at
   recovery-function close-function metadata)
 
+(cl-defstruct (remote-channel-group
+               (:constructor remote-channel-group-create))
+  id key context workspace channels state generation opened-at metadata)
+
 (defvar remote-channels (make-hash-table :test #'equal)
   "Routed channel descriptors keyed by generated channel ID.")
+
+(defvar remote-channel-groups (make-hash-table :test #'equal)
+  "Atomic named channel groups keyed by generated group ID.")
 
 (defvar remote-channel-native-api-inhibit nil
   "Non-nil while a backend is invoking Emacs' native network API.
@@ -35,6 +47,8 @@ routed `open-network-stream' or `make-network-process' call cannot route
 itself recursively.")
 
 (defvar remote-channel--counter 0)
+
+(defvar remote-channel-group--counter 0)
 
 (defvar remote-channel--process-contact-advice-installed nil)
 
@@ -209,6 +223,61 @@ client-side relay port as the target listener's logical endpoint."
       ('remote remote)
       ('nil (list :local local :remote remote))
       (_ (error "Unknown remote channel endpoint side: %S" side)))))
+
+(defun remote-channel-group-endpoints (group &optional side)
+  "Return named endpoint information for GROUP.
+SIDE is `local' or `remote'.  When SIDE is nil, every value contains both
+endpoint sides.  The result is an alist preserving the order supplied to
+`remote-channel-group-open'."
+  (unless (remote-channel-group-p group)
+    (error "Not a remote channel group: %S" group))
+  (mapcar
+   (lambda (entry)
+     (cons (car entry)
+           (remote-channel-endpoint (cdr entry) side)))
+   (remote-channel-group-channels group)))
+
+(defun remote-channel-group-live-p (group)
+  "Return non-nil when every named channel in GROUP remains usable."
+  (and (remote-channel-group-p group)
+       (eq (remote-channel-group-state group) 'open)
+       (remote-channel-group-channels group)
+       (cl-every
+        (lambda (entry)
+          (remote-channel-live-p (cdr entry)))
+        (remote-channel-group-channels group))))
+
+(defun remote-channel-group-list (&optional target)
+  "Return stable summaries of channel groups, optionally for TARGET."
+  (let ((target (and target (remote-normalize-id target)))
+        result)
+    (maphash
+     (lambda (_id group)
+       (when (or
+              (null target)
+              (equal
+               target
+               (remote-context-target-id
+                (remote-channel-group-context group))))
+         (push
+          (list
+           :id (remote-channel-group-id group)
+           :key (remote-channel-group-key group)
+           :target
+           (remote-context-target-id
+            (remote-channel-group-context group))
+           :state (remote-channel-group-state group)
+           :generation (remote-channel-group-generation group)
+           :endpoints (remote-channel-group-endpoints group)
+           :metadata (remote-channel-group-metadata group)
+           :opened-at (remote-channel-group-opened-at group))
+          result)))
+     remote-channel-groups)
+    (sort result
+          (lambda (left right)
+            (string-lessp
+             (plist-get left :id)
+             (plist-get right :id))))))
 
 (defun remote-channel-list (&optional target)
   "Return stable summaries of live routed channels.
@@ -517,6 +586,129 @@ port.  Use `remote-channel-endpoint' to obtain the allocated target port."
    :metadata metadata :workspace workspace :register register
    :stable-endpoint stable-endpoint))
 
+(cl-defun remote-channel-group-open
+    (endpoints &key local-endpoints context (adapter "network") pipeline
+               metadata workspace key (register t) generation)
+  "Atomically expose named remote ENDPOINTS to the client.
+ENDPOINTS is an alist of (NAME . REMOTE-ENDPOINT).  LOCAL-ENDPOINTS may
+provide stable client listener endpoints under the same names.  All members
+share CONTEXT and route intent.  If any member cannot be opened, every member
+opened by this call is closed before the original error is re-signaled.
+
+When WORKSPACE is available, the group is registered as one keyed recoverable
+resource.  Recovery prefers the listener endpoints allocated by the previous
+generation and returns a replacement group."
+  (unless (and (consp endpoints)
+               (cl-every
+                (lambda (entry)
+                  (and (consp entry) (car entry) (listp (cdr entry))))
+                endpoints))
+    (error "Channel group endpoints must be a non-empty alist: %S" endpoints))
+  (let* ((context (remote-channel--context context))
+         (workspace
+          (or (and workspace (remote-get-workspace workspace))
+              (and (boundp 'remote-current-workspace)
+                   remote-current-workspace)
+              (and (fboundp 'remote-get-workspace)
+                   (remote-get-workspace context))))
+         (key (or key (mapcar #'car endpoints)))
+         (id
+          (format "%s/group-%d"
+                  (remote-context-target-id context)
+                  (cl-incf remote-channel-group--counter)))
+         opened)
+    (condition-case error
+        (progn
+          (dolist (entry endpoints)
+            (let* ((name (car entry))
+                   (remote-endpoint (cdr entry))
+                   (local-endpoint (alist-get name local-endpoints nil nil
+                                               #'equal))
+                   (member-metadata
+                    (append
+                     (list :group id :name name)
+                     metadata))
+                   (forward
+                    (remote-port-forward
+                     remote-endpoint
+                     :local-endpoint local-endpoint
+                     :context context :adapter adapter :pipeline pipeline
+                     :metadata member-metadata :register nil)))
+              (push (cons name forward) opened)))
+          (setq opened (nreverse opened))
+          (let ((group
+                 (remote-channel-group-create
+                  :id id :key key :context context :workspace workspace
+                  :channels opened :state 'open
+                  :generation (or generation 1)
+                  :opened-at (current-time) :metadata metadata)))
+            (puthash id group remote-channel-groups)
+            (when (and register workspace
+                       (fboundp
+                        'remote-workspace-ensure-recoverable-resource))
+              (remote-workspace-ensure-recoverable-resource
+               workspace 'channel-group key group
+               :close
+               (lambda (value _reason)
+                 (remote-channel-group-close value))
+               :recover
+               (lambda (resource owner)
+                 (let* ((old
+                         (remote-workspace-resource-value resource))
+                        (stable
+                         (remote-channel-group-endpoints old 'local))
+                        (replacement
+                         (remote-channel-group-open
+                          endpoints
+                          :local-endpoints stable
+                          :context context :adapter adapter :pipeline pipeline
+                          :metadata metadata :workspace owner :key key
+                          :register nil
+                          :generation
+                          (1+ (remote-channel-group-generation old)))))
+                   (when-let* ((callback
+                                (plist-get metadata :on-recovered)))
+                     (funcall callback old replacement))
+                   replacement))
+               :metadata
+               (append
+                (list :key key :names (mapcar #'car endpoints))
+                metadata)))
+            group))
+      (error
+       (dolist (entry opened)
+         (ignore-errors (remote-close-channel (cdr entry))))
+       (signal (car error) (cdr error))))))
+
+(defun remote-channel-group-close (group)
+  "Idempotently close every member of GROUP."
+  (unless (remote-channel-group-p group)
+    (error "Not a remote channel group: %S" group))
+  (unless (eq (remote-channel-group-state group) 'closed)
+    (setf (remote-channel-group-state group) 'closed)
+    (remhash (remote-channel-group-id group) remote-channel-groups)
+    (dolist (entry (remote-channel-group-channels group))
+      (ignore-errors (remote-close-channel (cdr entry)))))
+  group)
+
+(defun remote-channel-group-recover (group)
+  "Close and recreate GROUP, returning its next generation."
+  (unless (remote-channel-group-p group)
+    (error "Not a remote channel group: %S" group))
+  (let ((endpoints
+         (remote-channel-group-endpoints group 'remote))
+        (locals
+         (remote-channel-group-endpoints group 'local)))
+    (remote-channel-group-close group)
+    (remote-channel-group-open
+     endpoints :local-endpoints locals
+     :context (remote-channel-group-context group)
+     :metadata (remote-channel-group-metadata group)
+     :workspace (remote-channel-group-workspace group)
+     :key (remote-channel-group-key group)
+     :register nil
+     :generation (1+ (remote-channel-group-generation group)))))
+
 (defun remote-close-channel (channel)
   "Close routed process or forward CHANNEL."
   (when-let* ((descriptor (remote-channel-of channel)))
@@ -544,7 +736,19 @@ port.  Use `remote-channel-endpoint' to obtain the allocated target port."
 (defun remote-channel-clear (&optional target)
   "Close every routed channel, optionally only those belonging to TARGET."
   (let ((target (and target (remote-normalize-id target)))
-        channels)
+        channels groups)
+    (maphash
+     (lambda (_id group)
+       (when (or
+              (null target)
+              (equal
+               target
+               (remote-context-target-id
+                (remote-channel-group-context group))))
+         (push group groups)))
+     remote-channel-groups)
+    (dolist (group groups)
+      (remote-channel-group-close group))
     (maphash
      (lambda (_id channel)
        (when (or
@@ -557,7 +761,7 @@ port.  Use `remote-channel-endpoint' to obtain the allocated target port."
      remote-channels)
     (dolist (channel channels)
       (remote-close-channel channel))
-    (length channels)))
+    (+ (length channels) (length groups))))
 
 (defun remote-channel-recover (value)
   "Close and recreate recoverable routed channel VALUE.

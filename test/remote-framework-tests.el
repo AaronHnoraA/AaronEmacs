@@ -31,8 +31,11 @@
          (remote-service-instances (make-hash-table :test #'equal))
          (remote-terminals (make-hash-table :test #'equal))
          (remote-channels (make-hash-table :test #'equal))
+         (remote-channel-groups (make-hash-table :test #'equal))
          (remote-workspace--resource-counter 0)
          (remote-channel--counter 0)
+         (remote-channel-group--counter 0)
+         (remote-doctor-check-functions nil)
          (remote-route-log nil))
      (remote-framework-reset)
      ,@body))
@@ -65,6 +68,11 @@
              remote-channel-list
              remote-channel-clear
              remote-channel-recover
+             remote-channel-group-open
+             remote-channel-group-endpoints
+             remote-channel-group-live-p
+             remote-channel-group-recover
+             remote-channel-group-close
              remote-get-file-operation
              remote-file-operation-list
              remote-unregister-file-operation
@@ -84,6 +92,8 @@
              remote-terminal-command
              remote-terminal-put-metadata
              remote-terminal-restart
+             remote-doctor-register-check
+             remote-doctor-unregister-check
              remote-doctor-report
              remote-workspace-context-id))
     (should (fboundp function))))
@@ -796,6 +806,84 @@
               "test")))
         (remote-close-channel server)))))
 
+(ert-deftest remote-channel-group-is-atomic-recoverable-and-named ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local"
+             :localname "/tmp/project/a.el"
+             :workspace-id "channel-group"
+             :workspace-root "/fs:local:/tmp/project/"))
+           (workspace (remote-workspace-open context :connect nil))
+           destinations group replacement)
+      (unwind-protect
+          (progn
+            (dotimes (index 2)
+              (push
+               (make-network-process
+                :name (format "remote-group-destination-%d" index)
+                :server t :host "127.0.0.1" :service t :noquery t)
+               destinations))
+            (setq group
+                  (remote-channel-group-open
+                   `((shell . (:host "127.0.0.1"
+                              :port ,(process-contact
+                                      (nth 0 destinations) :service)))
+                     (iopub . (:host "127.0.0.1"
+                              :port ,(process-contact
+                                      (nth 1 destinations) :service))))
+                   :context context :workspace workspace
+                   :key 'jupyter-test))
+            (should (remote-channel-group-live-p group))
+            (should (equal (mapcar #'car
+                                   (remote-channel-group-endpoints
+                                    group 'local))
+                           '(shell iopub)))
+            (should
+             (remote-workspace-find-resource
+              workspace 'channel-group 'jupyter-test))
+            (setq replacement (remote-channel-group-recover group))
+            (should-not (remote-channel-group-live-p group))
+            (should (remote-channel-group-live-p replacement))
+            (should
+             (= (remote-channel-group-generation replacement) 2))
+            (remote-channel-group-close replacement)
+            (should-not (remote-channel-group-live-p replacement))
+            ;; Closing twice is deliberately harmless.
+            (remote-channel-group-close replacement))
+        (when (remote-channel-group-p group)
+          (ignore-errors (remote-channel-group-close group)))
+        (when (remote-channel-group-p replacement)
+          (ignore-errors (remote-channel-group-close replacement)))
+        (dolist (process destinations)
+          (when (process-live-p process)
+            (delete-process process)))))))
+
+(ert-deftest remote-channel-group-rolls-back-partial-open ()
+  (remote-framework-test-with-registry
+    (let ((calls 0)
+          closed)
+      (cl-letf
+          (((symbol-function 'remote-port-forward)
+            (lambda (&rest _arguments)
+              (cl-incf calls)
+              (if (= calls 2)
+                  (error "second endpoint failed")
+                'first-forward)))
+           ((symbol-function 'remote-close-channel)
+            (lambda (value) (push value closed))))
+        (should-error
+         (remote-channel-group-open
+          '((first . (:host "127.0.0.1" :port 1))
+            (second . (:host "127.0.0.1" :port 2)))
+          :context
+          (remote-context-create
+           :target-id "local" :localname "/tmp/"
+           :workspace-root "/fs:local:/tmp/"))
+         :type 'error)
+        (should (equal closed '(first-forward)))
+        (should (zerop (hash-table-count remote-channel-groups)))))))
+
 (ert-deftest remote-native-reverse-forward-relays-and-cleans-lifecycle ()
   (remote-framework-test-with-registry
     (let* ((context
@@ -949,6 +1037,29 @@
             (plist-get report :checks))
            :status)
           'ok))))))
+
+(ert-deftest remote-doctor-includes-and-isolates-consumer-checks ()
+  (remote-framework-test-with-registry
+    (let ((check
+           (lambda (target probe)
+             (list
+              :name 'consumer-test :status 'ok
+              :detail
+              (format "%s/%s" (remote-target-id target) (if probe 1 0))))))
+      (remote-doctor-register-check check)
+      (remote-doctor-register-check check)
+      (let ((checks (plist-get (remote-doctor-report "local") :checks)))
+        (should
+         (eq
+          (plist-get
+           (seq-find
+            (lambda (entry)
+              (eq (plist-get entry :name) 'consumer-test))
+            checks)
+           :status)
+          'ok)))
+      (remote-doctor-unregister-check check)
+      (should-not remote-doctor-check-functions))))
 
 (ert-deftest remote-service-provisioning-is-trust-gated ()
   (remote-framework-test-with-registry

@@ -175,6 +175,71 @@
         (remote-gateway-release-binding second)))
     (should (= (hash-table-count remote-gateway--bindings) before))))
 
+(ert-deftest remote-gateway-websocket-supports-deferred-inbound-responses ()
+  (let* ((binding
+          (remote-gateway-prepare-client
+           "gateway-deferred-test" (remote-context)))
+         response socket)
+    (remote-gateway-register-method
+     "test.deferred"
+     (lambda (params _client)
+       (let ((deferred (remote-gateway-defer 2)))
+         (run-at-time
+          0.01 nil
+          (lambda ()
+            (remote-gateway-resolve deferred params)))
+         deferred)))
+    (unwind-protect
+        (progn
+          (setq
+           socket
+           (websocket-open
+            (plist-get binding :websocket-url)
+            :on-open
+            (lambda (websocket)
+              (websocket-send-text
+               websocket
+               (json-serialize
+                `((jsonrpc . "2.0")
+                  (id . "deferred")
+                  (method . "test.deferred")
+                  (params . ((answer . 42)))))))
+            :on-message
+            (lambda (_websocket frame)
+              (let ((message
+                     (json-parse-string
+                      (websocket-frame-text frame)
+                      :object-type 'alist)))
+                (when (equal (alist-get 'id message) "deferred")
+                  (setq response message))))))
+          (should
+           (remote-gateway-test--wait (lambda () response)))
+          (should (= (alist-get 'answer (alist-get 'result response)) 42))
+          (should
+           (zerop (hash-table-count remote-gateway--inbound-pending))))
+      (remote-gateway-unregister-method "test.deferred")
+      (when socket
+        (ignore-errors (websocket-close socket)))
+      (remote-gateway-release-binding binding))))
+
+(ert-deftest remote-gateway-deferred-http-request-fails-explicitly ()
+  (remote-gateway-register-method
+   "test.http-deferred"
+   (lambda (_params _client)
+     (remote-gateway-defer)))
+  (unwind-protect
+      (let* ((response
+              (remote-gateway--dispatch-request
+               '(("jsonrpc" . "2.0")
+                 ("id" . "http")
+                 ("method" . "test.http-deferred"))
+               nil))
+             (error-object
+              (alist-get "error" response nil nil #'string=)))
+        (should (= (alist-get "code" error-object nil nil #'string=)
+                   -32001)))
+    (remote-gateway-unregister-method "test.http-deferred")))
+
 (ert-deftest remote-gateway-writes-and-cleans-its-discovery-record ()
   (remote-gateway-start)
   (let ((file (remote-gateway--discovery-file)))

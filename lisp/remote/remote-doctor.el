@@ -22,6 +22,23 @@
 (declare-function remote-process-file "remote-process"
                   (program &optional infile destination display &rest args))
 
+(defvar remote-doctor-check-functions nil
+  "Registered consumer diagnostic functions.
+Each function receives TARGET and PROBE and returns a check or list of checks
+using the same plist format as `remote-doctor--check'.")
+
+(defun remote-doctor-register-check (function)
+  "Register consumer diagnostic FUNCTION idempotently."
+  (unless (functionp function)
+    (error "Remote Doctor check is not callable: %S" function))
+  (cl-pushnew function remote-doctor-check-functions :test #'equal)
+  function)
+
+(defun remote-doctor-unregister-check (function)
+  "Unregister consumer diagnostic FUNCTION."
+  (setq remote-doctor-check-functions
+        (delete function remote-doctor-check-functions)))
+
 (defun remote-doctor--target (target)
   "Resolve TARGET to a registered target object."
   (cond
@@ -168,7 +185,40 @@
         (unless (eq (plist-get channel :state) 'open)
           "Close or recreate the failed channel"))
        checks))
+    (dolist (group (remote-channel-group-list target-id))
+      (push
+       (remote-doctor--check
+        (intern (format "channel-group:%s" (plist-get group :id)))
+        (if (eq (plist-get group :state) 'open) 'ok 'warning)
+        (format "generation=%s endpoints=%S"
+                (plist-get group :generation)
+                (plist-get group :endpoints))
+        (unless (eq (plist-get group :state) 'open)
+          "Recover or close the failed channel group"))
+       checks))
     (nreverse checks)))
+
+(defun remote-doctor--consumer-checks (target probe)
+  "Return checks contributed by consumers for TARGET and PROBE."
+  (let (checks)
+    (dolist (function remote-doctor-check-functions)
+      (condition-case error
+          (let ((value (funcall function target probe)))
+            (setq checks
+                  (append
+                   checks
+                   (cond
+                    ((null value) nil)
+                    ((keywordp (car-safe value)) (list value))
+                    (t value)))))
+        (error
+         (push
+          (remote-doctor--check
+           (intern (format "consumer:%s" function))
+           'error (error-message-string error)
+           "Inspect or unregister the failing consumer Doctor check")
+          checks))))
+    checks))
 
 (defun remote-doctor--probe (target)
   "Run a small routed process probe for TARGET."
@@ -241,7 +291,8 @@ When PROBE is non-nil, establish a session and execute `uname -s'."
               ("process" process-sync)
               ("network" network-client)))
            (remote-doctor--runtime-checks target)
-           (and probe (list (remote-doctor--probe target))))))
+           (and probe (list (remote-doctor--probe target)))
+           (remote-doctor--consumer-checks target probe))))
     (list
      :target (remote-target-id target)
      :label (remote-target-label target)

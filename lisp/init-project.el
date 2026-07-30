@@ -27,7 +27,7 @@
 (defvar winner-pending-undo-ring)
 (defvar winner-ring-alist)
 (defvar winner-undo-frame)
-(defvar-local my/aaronnote-buffer-file-name)
+(defvar-local my/noema-buffer-file-name)
 (defvar breadcrumb--ipath-plain-cache)
 (defvar breadcrumb--last-update-tick)
 (defvar breadcrumb-local-mode)
@@ -972,10 +972,10 @@ When BUFFER is nil, use the current buffer in the selected window."
 (defun my/treemacs-source-file ()
   "Return the real or Noema virtual file for the current buffer."
   (or buffer-file-name
-      (and (boundp 'my/aaronnote-buffer-file-name)
-           (stringp my/aaronnote-buffer-file-name)
-           (not (string-empty-p my/aaronnote-buffer-file-name))
-           my/aaronnote-buffer-file-name)))
+      (and (boundp 'my/noema-buffer-file-name)
+           (stringp my/noema-buffer-file-name)
+           (not (string-empty-p my/noema-buffer-file-name))
+           my/noema-buffer-file-name)))
 
 (defun my/treemacs-follow-path ()
   "Return the current buffer path Treemacs should follow."
@@ -1377,7 +1377,8 @@ Returns the number of killed buffers."
   :ensure t
   :defer t
   :hook (treemacs-mode . (lambda ()
-                           (display-line-numbers-mode -1)))
+                           (display-line-numbers-mode -1)
+                           (my/treemacs-apply-elegant-ui)))
   :init
   (with-eval-after-load 'winum
     (define-key winum-keymap (kbd "M-0") #'treemacs-select-window))
@@ -1396,10 +1397,11 @@ Returns the number of killed buffers."
     :config
     (let ((lean-icon (my/file-icon-for-file
                       "file.lean" :height 1.0 :v-adjust -0.05)))
-      (treemacs-create-icon
-       :icon lean-icon
-       :extensions ("lean")
-       :fallback "L ")
+      (when lean-icon
+        (treemacs-create-icon
+         :icon lean-icon
+         :extensions ("lean")
+         :fallback "L "))
       (treemacs-create-icon
        :file "Noema.svg"
        :extensions ("md")
@@ -1519,6 +1521,13 @@ Returns the number of killed buffers."
   (treemacs-hide-gitignored-files-mode -1)
   (treemacs-project-follow-mode t)
   (my/treemacs-cursor-follow-mode t))
+
+(defun my/treemacs-apply-elegant-ui ()
+  "Apply Elegant spacing without replacing Treemacs theme colors."
+  (when (derived-mode-p 'treemacs-mode)
+    (setq-local line-spacing 0.08)))
+
+(add-hook 'after-load-theme-hook #'my/treemacs-apply-elegant-ui)
 
 (use-package treemacs-projectile
   :ensure t

@@ -8,6 +8,11 @@
 (require 'aaron-ui)
 
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
+(declare-function material-icon-dired-icons-mode "material-icon-dired" (&optional arg))
+(declare-function material-icon-create-icon-image "material-icon-utils" (icon-path))
+(declare-function material-icon-get-icon-for-dir "material-icon-utils" (dirname))
+(declare-function material-icon-get-icon-for-file "material-icon-utils" (filename &optional dir-p))
+(declare-function material-icon-set-icon-size "material-icon-utils" (size))
 
 (defun my/dired-open-dwim ()
   "Open the Dired entry at point."
@@ -61,6 +66,57 @@
 (use-package diredfl
   :ensure t
   :hook (dired-mode . diredfl-mode))
+
+(defun my/dired-material-icons-setup ()
+  "Enable Material SVG icons when the selected frame can render them."
+  (when (and (display-graphic-p)
+             (image-type-available-p 'svg)
+             (require 'material-icon-dired nil t))
+    (material-icon-set-icon-size (max 16 (frame-char-height)))
+    (material-icon-dired-icons-mode 1)))
+
+(defun my/dired-material-icons-add-icons ()
+  "Apply Material SVG icons to every visible Dired/Dirvish entry.
+Unlike the package default, directory entries named `.' and `..' receive
+the normal folder icon as well.  Repainting the whole buffer also covers
+lines inserted later by `dirvish-subtree'."
+  (let ((inhibit-read-only t))
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (when (dired-move-to-filename nil)
+          (when-let* ((file (dired-get-filename 'relative 'noerror)))
+            (let* ((absolute (dired-get-filename nil 'noerror))
+                   (dir-p (or (member file '("." ".."))
+                              (and absolute (file-directory-p absolute))
+                              (string-suffix-p "/" file)))
+                   (icon-path
+                    (if dir-p
+                        (material-icon-get-icon-for-dir file)
+                      (material-icon-get-icon-for-file file)))
+                   (icon (material-icon-create-icon-image icon-path)))
+              (when icon
+                (put-text-property (1- (point)) (point) 'display icon)))))
+        (forward-line 1)))))
+
+(defun my/dired-material-icons-after-subtree (&rest _)
+  "Refresh Material icons after Dirvish inserts a subtree."
+  (when (bound-and-true-p material-icon-dired-icons-mode)
+    (my/dired-material-icons-add-icons)))
+
+(add-hook 'dired-mode-hook #'my/dired-material-icons-setup)
+
+(with-eval-after-load 'material-icon-dired
+  (advice-remove 'material-icon-dired-add-icons
+                 #'my/dired-material-icons-add-icons)
+  (advice-add 'material-icon-dired-add-icons
+              :override #'my/dired-material-icons-add-icons))
+
+(with-eval-after-load 'dirvish-subtree
+  (advice-remove 'dirvish-subtree--insert
+                 #'my/dired-material-icons-after-subtree)
+  (advice-add 'dirvish-subtree--insert
+              :after #'my/dired-material-icons-after-subtree))
 
 (defun my/dired-apply-ui ()
   "Apply local UI styling to Dired."

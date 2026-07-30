@@ -180,21 +180,21 @@ mechanism as tag/roam/path completion), backed by `completions:todo-refs`.
 
 Emacs does not render agenda UI natively — it opens the Web page:
 
-- `M-x my/aaronnote-roam-agenda` — agenda (dispatch key `A`).
-- `M-x my/aaronnote-roam-agenda-calendar` — month calendar view.
-- `M-x my/aaronnote-roam-agenda-log` — completion log view.
-- `M-x my/aaronnote-roam-agenda-gantt` — Gantt view.
-- `M-x my/aaronnote-roam-agenda-projects` — project rollup view.
-- `M-x my/aaronnote-roam-agenda-clock` — clocktable view.
-- `M-x my/aaronnote-roam-agenda-lints` — lint view.
-- `M-x my/aaronnote-roam-agenda-search` — agenda with a search query.
-- `M-x my/aaronnote-roam-jump-file-todo` — jump to a todo in the current file
+- `M-x my/noema-roam-agenda` — agenda (dispatch key `A`).
+- `M-x my/noema-roam-agenda-calendar` — month calendar view.
+- `M-x my/noema-roam-agenda-log` — completion log view.
+- `M-x my/noema-roam-agenda-gantt` — Gantt view.
+- `M-x my/noema-roam-agenda-projects` — project rollup view.
+- `M-x my/noema-roam-agenda-clock` — clocktable view.
+- `M-x my/noema-roam-agenda-lints` — lint view.
+- `M-x my/noema-roam-agenda-search` — agenda with a search query.
+- `M-x my/noema-roam-jump-file-todo` — jump to a todo in the current file
   (dispatch key `F`); this one stays local to Emacs (a `completing-read` over
   the current buffer's todos), not a web redirect.
 - Full Roam DB rebuild is dispatch key `Z`; `F` is reserved for current-file
   todos across the roam dispatchers.
 
 `after:`/`blocks:`/`task:` values also complete locally, via
-`my/aaronnote-roam-capf` (a `completion-at-point-functions` entry, so it
+`my/noema-roam-capf` (a `completion-at-point-functions` entry, so it
 works through `company`/the built-in completion UI) calling the same
 `todo-refs` backend service the Web editor uses.

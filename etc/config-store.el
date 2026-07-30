@@ -28,8 +28,8 @@
    (my/language-server-performance-read-process-output-max . 1048576)
    (eglot-autoreconnect . 3)
    (lsp-restart . auto-restart)
-   (my/aaronnote-close-emacs-markdown-buffer . t)
-   (my/aaronnote-icon-file
+   (my/noema-close-emacs-markdown-buffer . t)
+   (my/noema-icon-file
     . "/Users/hc/.emacs.d/assets/icons/Noema.svg")
    (my/dir-locals-template-root . "/Users/hc/.emacs.d/templates/emacs")
    (my/health-executables "rg" "git" "python3" "node" "cargo" "go"
@@ -59,32 +59,32 @@
    (my/compile-third-party-directories "site-lisp")
    (my/compile-target-directories "lisp" "site-lisp/config")
    (my/compile-target-files "early-init.el" "init.el" "bootstrap.el")
-   (my/aaronnote-roam-runtime-cli
+   (my/noema-roam-runtime-cli
     . "/Users/hc/.emacs.d/lisp/roam/Noema/roam-cli.mjs")
-   (my/aaronnote-roam-runtime-root
+   (my/noema-roam-runtime-root
     . "/Users/hc/.emacs.d/lisp/roam/Noema")
-   (my/aaronnote-roam-select-window-height . 0.32)
-   (my/aaronnote-roam-recent-limit . 24)
-   (my/aaronnote-roam-root . "/Users/hc/.emacs.d/.roam")
-   (my/aaronnote-publish-nas-enable . t)
-   (my/aaronnote-publish-nas-target . "Aaron-nas:/volume1/web/public/")
-   (my/aaronnote-publish-cv-dir
+   (my/noema-roam-select-window-height . 0.32)
+   (my/noema-roam-recent-limit . 24)
+   (my/noema-roam-root . "/Users/hc/.emacs.d/.roam")
+   (my/noema-publish-nas-enable . t)
+   (my/noema-publish-nas-target . "Aaron-nas:/volume1/web/public/")
+   (my/noema-publish-cv-dir
     . "/Users/hc/.emacs.d/lisp/roam/Noema/publish/CV")
-   (my/aaronnote-publish-state-dir
+   (my/noema-publish-state-dir
     . "/Users/hc/.emacs.d/var/aaronnote/publish")
-   (my/aaronnote-publish-assets-dir
+   (my/noema-publish-assets-dir
     . "/Users/hc/.emacs.d/lisp/roam/Noema/publish/assets")
-   (my/aaronnote-publish-engine
+   (my/noema-publish-engine
     . "/Users/hc/.emacs.d/lisp/roam/Noema/publish/publish-site")
-   (my/aaronnote-publish-root . "/Users/hc/.emacs.d/publish")
-   (my/session-auto-save) (my/aaronnote-web-port . 50815)
-   (my/aaronnote-backend . xwidget)
-   (my/aaronnote-latex-export-engine . "codex")
-   (my/aaronnote-latex-export-agent . "codex")
-   (my/aaronnote-latex-export-max-attempts . 3)
-   (my/aaronnote-codex-model . "")
-   (my/aaronnote-latex-export-model . "")
-   (my/aaronnote-opencode-executable . "opencode")
+   (my/noema-publish-root . "/Users/hc/.emacs.d/publish")
+   (my/session-auto-save) (my/noema-web-port . 50815)
+   (my/noema-backend . xwidget)
+   (my/noema-latex-export-engine . "codex")
+   (my/noema-latex-export-agent . "codex")
+   (my/noema-latex-export-max-attempts . 3)
+   (my/noema-codex-model . "")
+   (my/noema-latex-export-model . "")
+   (my/noema-opencode-executable . "opencode")
    (my/project-local-overrides)
    (my/note-code-root . "/Users/hc/Documents/Noema/")
    (my/debug-common-adapter-specs
@@ -223,8 +223,8 @@
    (my/copilot-disable-on-remote)
    (my/copilot-large-buffer-threshold . 524288)
    (my/copilot-idle-delay . 0.85) (my/copilot-server-max-heap-mb . 1024)
-   (my/aaronnote-web-host-max-heap-mb . 512)
-   (my/aaronnote-echo-severity . error) (my/macos-gc-after-minibuffer)
+   (my/noema-web-host-max-heap-mb . 512)
+   (my/noema-echo-severity . error) (my/macos-gc-after-minibuffer)
    (my/macos-idle-gc-delay . 8.0) (my/macos-scroll-profile . line)
    (inhibit-startup-screen . t) (inhibit-startup-message . t)
    (use-file-dialog) (use-dialog-box) (use-short-answers . t)

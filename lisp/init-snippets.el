@@ -67,26 +67,26 @@ not intentional content.  Templates with user fields are left untouched."
 (advice-add 'yas-expand-snippet :filter-args
             #'my/yas--trim-fieldless-trailing-newline)
 
-(defconst my/yas-aaronnote-generated-tex-directory
+(defconst my/yas-noema-generated-tex-directory
   (expand-file-name "snippets/tex-mode/generated" user-emacs-directory)
   "Generated LaTeX Workshop/Overleaf snippets shared with Noema.")
 
-(defun my/yas-load-aaronnote-generated-tex-snippets (&rest _)
+(defun my/yas-load-noema-generated-tex-snippets (&rest _)
   "Load provider subdirectories into the existing `tex-mode' YAS table.
 YAS normally recurses below a mode directory, but an existing
 `.yas-compiled-snippets.el' short-circuits that recursion. Loading this small,
 pinned generated subtree after `yas-reload-all' keeps Emacs and Noema on
 the same catalog without putting filesystem work on the expansion hot path."
-  (when (and (file-directory-p my/yas-aaronnote-generated-tex-directory)
+  (when (and (file-directory-p my/yas-noema-generated-tex-directory)
              (fboundp 'yas--load-directory-2))
     (dolist (provider-dir
-             (directory-files my/yas-aaronnote-generated-tex-directory
+             (directory-files my/yas-noema-generated-tex-directory
                               t directory-files-no-dot-files-regexp))
       (when (file-directory-p provider-dir)
         (yas--load-directory-2 provider-dir 'tex-mode)))))
 
 (advice-add 'yas-reload-all :after
-            #'my/yas-load-aaronnote-generated-tex-snippets)
+            #'my/yas-load-noema-generated-tex-snippets)
 
 (defun my/yas-org-cleanup-trailing-newline ()
   "Silently delete a trailing newline left by a snippet at point.

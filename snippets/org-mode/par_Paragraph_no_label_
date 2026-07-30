@@ -1,6 +1,6 @@
 # -*- mode: snippet -*-
 # name: Paragraph (no label)
-# key: par
+# key: paragraph
 # -- Paragraph without label
 # --
 \paragraph{$1}

@@ -49,6 +49,8 @@
   切换当前 popup `vterm` 的固定状态
 - `C-\``
   `popper-toggle`
+- `C-x w d` / `C-u C-x w d`
+  切换当前窗口的软 / 强 dedicated 状态；Doom modeline 显示 `d` / `D`
 - `F1` / `F2` / `F3` / `F4`
   `help-command` / `telescope` / 项目工作台 / 项目 `ripgrep`
 - `F5` / `F6` / `F7` / `F8`
@@ -138,7 +140,7 @@ agenda/project/clock 引擎全在 `server/lib/runtime.mjs`，priority、deadline
 scheduled、repeat、dependency（`after`/`blocks`）、done/log、clock-in/out 都写回
 原始 `@@todo`/`@@clock` 行。Noema Web 的 `/agenda` 页是唯一的 agenda 界面
 （week/list/month/log/gantt/projects/clocktable/lints tabs，Gantt 支持拖拽改期）；
-Emacs 里 `M-x my/aaronnote-roam-agenda` 或 dispatch `A` 直接跳转打开这个页面，
+Emacs 里 `M-x my/noema-roam-agenda` 或 dispatch `A` 直接跳转打开这个页面，
 不再有原生 Emacs agenda buffer。完整语法和 view-model 见
 [`agenda.md`](agenda.md)。
 
@@ -151,7 +153,7 @@ Page、Agenda、Graph、Tools、Source、Save，点击后仍调用原 Web 面板
 Vim mode、只读和全文/选区/本节字数显示在 Web 编辑区右上角的小浮窗，
 Emacs mode-line 保持原样。Opening/Saved/Edited 等日常状态静默；LaTeX 进度、明确操作
 结果和错误等关键反馈经过去重与短间隔合并后进入 Emacs echo，error 立即显示；
-`my/aaronnote-echo-severity` 可配置为仅 error、warning + error 或完全关闭。这个布局只应用于
+`my/noema-echo-severity` 可配置为仅 error、warning + error 或完全关闭。这个布局只应用于
 Noema 自己的 xwidget buffer，不改变普通网页的 xwidget 控制栏。
 
 Noema 的 Emacs 原生 roam buffer（Agenda、Tasks、TOC、Backlinks、Related、
@@ -264,12 +266,12 @@ metadata 同时支持 Noema meta block 与 YAML front matter；BibTeX value 支�
 带行列位置的诊断。quoted `bib:` 路径可包含逗号，链接 URL 中的 `@@cite` 保持字面量，而可见链接
 label 中的 citation 正常解析。
 
-后端可用 `my/aaronnote-latex-export-agent` 选择：`codex`（默认）/ `claude` / `opencode`，都以
-非交互、免确认方式运行，且在配置里选定、不会每次询问。引擎开关 `my/aaronnote-latex-export-engine`
+后端可用 `my/noema-latex-export-agent` 选择：`codex`（默认）/ `claude` / `opencode`，都以
+非交互、免确认方式运行，且在配置里选定、不会每次询问。引擎开关 `my/noema-latex-export-engine`
 （`codex` = verified-first + 单次 gated polish / 必要时 repair；`mechanical` = 从不启动 agent）。中间校验用 draft
 模式加速，最终产物仍做完整两遍编译。见 Noema 的 `docs/latex-export-style.md`。
-空闲存活检查和硬上限分别由 `my/aaronnote-latex-export-agent-idle-timeout`（默认 180 秒）与
-`my/aaronnote-latex-export-agent-hard-timeout`（默认 900 秒）控制。
+空闲存活检查和硬上限分别由 `my/noema-latex-export-agent-idle-timeout`（默认 180 秒）与
+`my/noema-latex-export-agent-hard-timeout`（默认 900 秒）控制。
 
 标题、章节名和 theorem/proof 标签中的 `\(...\)` 会保留为 LaTeX 数学，而不是被转义成
 `\textbackslash`。输出路径按 note 记忆，写入是原子的，并强制使用 `.tex` 后缀。未闭合的

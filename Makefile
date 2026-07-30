@@ -11,12 +11,14 @@ BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
 TEXPRESSO_DIR ?= $(CURDIR)/var/texpresso
 TEXPRESSO_REPOSITORY ?= https://github.com/let-def/texpresso.git
 REMOTE_TEST_BATCH = $(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t)' -L lisp -L lisp/remote -L lisp/remote/backend
+UI_TOKEN_FILE = lisp/roam/Noema/src/styles/aaron-ui-tokens.css
+UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui/aaron-ui.el
 
 .PHONY: default help up setup setup-full bootstrap-health install remote-ikernel-install lock audit-lock doctor build build-force \
         aaronnote-build texpresso-install texpresso-build texpresso-test \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
-        health health-startup health-byte health-native \
+        health health-startup health-byte health-native ui-test ui-tokens audit-ui-tokens \
         remote-test remote-e2e \
         publish publish-force publish-build publish-deploy publish-clean
 
@@ -36,6 +38,9 @@ help:
 	  '  make texpresso-test       Run TeXpresso headlessly against its sample document' \
 	  '  make lock                 Export the current package set back into package-lock.el' \
 	  '  make audit-lock           Compare installed packages against package-lock.el' \
+	  '  make ui-tokens            Regenerate Noema CSS tokens from aaron-ui' \
+	  '  make audit-ui-tokens      Verify committed Noema CSS tokens are current' \
+	  '  make ui-test              Run Aaron UI semantic-token ERT tests' \
 	  '  make doctor               Open/check the config health doctor report in batch' \
 	  '  make state-backup         Snapshot migration-worthy local state into var/backup-snapshots' \
 	  '  make state-restore SNAPSHOT=/path/to/archive.tar.gz  Restore a saved state snapshot' \
@@ -109,6 +114,15 @@ lock:
 audit-lock:
 	$(BOOTSTRAP_AUDIT)
 
+ui-tokens:
+	$(UI_TOKEN_BATCH) --eval '(aaron-ui-export-css-tokens "$(CURDIR)/$(UI_TOKEN_FILE)" '"'"'wave)'
+
+audit-ui-tokens:
+	$(UI_TOKEN_BATCH) --eval '(let ((expected (aaron-ui-css-tokens '"'"'wave)) (file "$(CURDIR)/$(UI_TOKEN_FILE)")) (unless (and (file-readable-p file) (with-temp-buffer (insert-file-contents file) (equal (buffer-string) expected))) (error "Aaron UI CSS tokens are stale; run make ui-tokens")))'
+
+ui-test:
+	$(UI_TOKEN_BATCH) --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)"))' -l test/aaron-ui-tests.el -f ert-run-tests-batch-and-exit
+
 doctor:
 	$(BATCH) --eval '(prin1 (my/health-critical-check))'
 
@@ -161,7 +175,7 @@ clean-eln:
 clean-state:
 	rm -rf ./var
 
-health: health-startup health-byte health-native
+health: health-startup health-byte health-native ui-test audit-ui-tokens
 
 health-startup:
 	$(BATCH) --eval '(prin1 (my/health-startup-check))'
@@ -185,16 +199,16 @@ remote-e2e:
 
 # ── Publish ────────────────────────────────────────────────────────────────
 publish:
-	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-batch)'
+	$(PUBLISH_BATCH) --eval '(my/noema-publish-batch)'
 
 publish-force:
-	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-force-batch)'
+	$(PUBLISH_BATCH) --eval '(my/noema-publish-force-batch)'
 
 publish-build:
-	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-build-batch)'
+	$(PUBLISH_BATCH) --eval '(my/noema-publish-build-batch)'
 
 publish-deploy:
-	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-deploy-batch)'
+	$(PUBLISH_BATCH) --eval '(my/noema-publish-deploy-batch)'
 
 publish-clean:
-	$(PUBLISH_BATCH) --eval '(my/aaronnote-publish-clean-batch)'
+	$(PUBLISH_BATCH) --eval '(my/noema-publish-clean-batch)'

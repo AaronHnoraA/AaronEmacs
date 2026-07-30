@@ -55,7 +55,9 @@
 (defun remote-workspace--resource-policy (kind metadata)
   "Return recovery policy for resource KIND and METADATA."
   (or (plist-get metadata :recovery)
-      (if (memq kind '(environment service forward watch lsp channel))
+      (if (memq kind
+                '(environment service forward watch lsp channel
+                  channel-group))
           'auto
         'manual)))
 

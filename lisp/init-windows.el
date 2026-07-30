@@ -463,9 +463,9 @@ If OTHER-WINDOW is non-nil, jump in another window on final selection."
   :config
   (setq ibuffer-saved-filter-groups
         '(("default"
-           ("Noema" (aaronnote . t))
+           ("Noema" (noema . t))
            ("xwidget" (and (mode . xwidget-webkit-mode)
-                           (not (aaronnote . t))))
+                           (not (noema . t))))
            ("Code"  (or (mode . c-mode) (mode . c-ts-mode)
                         (mode . c++-mode) (mode . c++-ts-mode)
                         (mode . python-mode) (mode . python-ts-mode)
@@ -663,7 +663,7 @@ available to explicit buffer-switching commands."
     (evil-define-key* 'normal dirvish-mode-map (kbd "<return>") #'dired-find-file))
   ;; 1) 先给一个“基础属性集合”（绝对不会触发 dirvish-vc）
   (setq dirvish-attributes
-        '(nerd-icons file-size subtree-state collapse file-time))
+        '(file-size subtree-state collapse file-time))
 
   ;; 2) Peek / Side-follow：有就开（没有就跳过，不报错）
   (when (fboundp 'dirvish-side-follow-mode)
@@ -672,7 +672,7 @@ available to explicit buffer-switching commands."
   ;; 3) VC/Git：尝试静默加载 dirvish-vc，成功才追加属性
   (when (require 'dirvish-vc nil t)
     (setq dirvish-attributes
-          '(nerd-icons vc-state git-msg file-size subtree-state collapse file-time)))
+          '(vc-state git-msg file-size subtree-state collapse file-time)))
 
   ;; Dirvish normally starts a second Emacs to collect attributes.  In a
   ;; remote Dired buffer that child inherits the remote default-directory and
