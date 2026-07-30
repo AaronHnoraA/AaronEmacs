@@ -514,8 +514,8 @@ roam-tools JS 都在其中；运行时不依赖 `~/HC/Org`。
 Noema 与 Emacs 共用：
 
 - 状态与缓存：`var/aaronnote/`
-- snippets：`snippets/`（Markdown、Lean、TeX 使用 Noema 版本，其它语言保留 Emacs 原有版本）
-- Markdown templates：`templates/aaronnote/markdown-mode/`
+- snippets：`snippets/`（只有 `markdown-mode/`、`tex-mode/` 链接到 Noema，其它语言由 Emacs 仓库维护）
+- templates：`templates/`（只有 `noema/`、`latex/`、`tex/` 链接到 Noema，其它模板由 Emacs 仓库维护）
 
 ### 关键文件
 

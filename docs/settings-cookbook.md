@@ -437,7 +437,8 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 - 模板存放在 `templates/<kind>/`；模板里的占位符支持 `{{date}}` / `{{title}}` / `{{file}}` / `{{author}}` / `{{cursor}}` 等
 
 Noema / Roam New 的 Markdown 模板集中在
-[templates/aaronnote/markdown-mode/](../templates/aaronnote/markdown-mode/)。它们使用 Noema 的
+[templates/noema/](../templates/noema/)。该目录与 `templates/latex/`、`templates/tex/`
+链接到 Noema 仓库；其它模板目录由 Emacs 仓库维护。它们使用 Noema 的
 snippet-style header、`{{title}}` / `{{date}}` / `{{tags}}` 等变量和 `$0` tabstop，
 由 Noema runtime 展开，不进入普通 `auto-insert` allowlist。
 

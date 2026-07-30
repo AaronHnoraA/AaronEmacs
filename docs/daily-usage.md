@@ -167,7 +167,7 @@ Noema New Note 一致：Type、Title、Save path、Kind、Template、Tags；Titl
 path、Kind 和 Tags 可在面板里直接输入，`c` 创建，`t` / `RET` 切换 roam / regular，
 `T` 选模板，`R` 重置。创建实际走
 Noema runtime，所以默认值、路径校验、meta、模板变量和 tabstop 展开逻辑保持一致。
-Markdown 模板统一存放在 `templates/aaronnote/markdown-mode/`，供 Emacs 启动的 Noema 与
+Markdown 模板统一存放在 `templates/noema/`，供 Emacs 启动的 Noema 与
 Roam New 共用。所有新建 note 的 meta 都会带一个空的嵌套 `summary` block，可直接在 Abstract
 或 Properties 中编辑；模板自带 meta 时也会自动补齐，不需要每个模板重复声明。
 
