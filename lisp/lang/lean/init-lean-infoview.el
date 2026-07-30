@@ -26,9 +26,10 @@
 (declare-function lean-dev-log "init-lean" (format-string &rest args))
 (declare-function lean-project-root "init-lean" ())
 (declare-function lean--ensure-eglot "init-lean")
-(declare-function lean--proxy-port-file "init-lean" (root))
-(declare-function lean--proxy-port-file-allocated-p "init-lean" (root))
-(declare-function lean--proxy-forget-port-file "init-lean" (root))
+(declare-function lean--proxy-gateway-binding "init-lean" (root))
+(declare-function lean--proxy-gateway-client "init-lean" (root))
+(declare-function lean--proxy-endpoint "init-lean" (root))
+(declare-function lean--proxy-forget-gateway-binding "init-lean" (root))
 (declare-function lean--proxy-available-p "init-lean")
 (declare-function lean--proxy-node-command "init-lean" (root))
 (declare-function xwidget-webkit-browse-url "xwidget" (url &optional new-session))
@@ -85,7 +86,7 @@
   :group 'lean)
 
 (config-defvar lean-iv-port-wait-timeout nil
-  "Seconds to wait for the proxy port-file to appear after Eglot connects."
+  "Seconds to wait for the proxy to register with the Emacs gateway."
   :type 'integer
   :group 'lean)
 
@@ -202,7 +203,7 @@
         (eglot-path-to-uri (expand-file-name buffer-file-name))
       (concat "file://" (expand-file-name buffer-file-name)))))
 
-;; ── Port-file reading ─────────────────────────────────────────────────────────
+;; ── Gateway endpoint discovery ───────────────────────────────────────────────
 
 (defun lean--iv-close-remote-forward (root)
   "Close and forget ROOT's remote infoview forward."
@@ -220,42 +221,16 @@
        (when-let* ((process (remote-forward-handle forward)))
          (process-live-p process))))
 
-(defun lean--iv-access-port (root remote-port)
-  "Return the client-local proxy port for ROOT."
-  (ignore root)
-  remote-port)
-
-(defun lean--iv-port-owner-live-p (port-file data)
-  "Return non-nil when PORT-FILE's DATA still names a live proxy owner.
-The active proxy and its PID are client-local even when the source buffer uses
-a remote `/fs:' directory.  Bind a native directory so `process-attributes'
-is not dispatched to the source target's process namespace."
-  (let ((pid (plist-get data :pid)))
-    (and (integerp pid)
-         (> pid 0)
-         (let ((default-directory temporary-file-directory)
-               (inhibit-file-name-operation 'process-attributes)
-               (inhibit-file-name-handlers
-                (cons #'remote-file-name-handler
-                      (cons #'tramp-file-name-handler
-                            inhibit-file-name-handlers))))
-           (process-attributes pid)))))
-
-(defun lean--iv-read-port (port-file)
-  "Return the live proxy port from PORT-FILE JSON, or nil."
-  (condition-case nil
-      (when (file-exists-p port-file)
-        (let* ((data (json-parse-string
-                      (with-temp-buffer
-                        (insert-file-contents port-file)
-                        (buffer-string))
-                      :object-type 'plist))
-             (port (plist-get data :port)))
-          (when (and (integerp port)
-                     (> port 0)
-                     (lean--iv-port-owner-live-p port-file data))
-            port)))
-    (error nil)))
+(defun lean--iv-proxy-port (root)
+  "Return ROOT's live client-local infoview HTTP port."
+  (when-let* ((endpoint (lean--proxy-endpoint root))
+              (port
+               (if (hash-table-p endpoint)
+                   (gethash "port" endpoint)
+                 (alist-get "port" endpoint nil nil #'string=)))
+              ((integerp port))
+              ((> port 0)))
+    port))
 
 (defun lean--iv-cancel-port-wait ()
   "Cancel the current buffer's pending Infoview endpoint wait."
@@ -273,8 +248,7 @@ is not dispatched to the source target's process namespace."
    (t "starting target Lean LSP")))
 
 (defun lean--iv-wait-for-port (root callback)
-  "Poll the proxy port-file for ROOT and call CALLBACK with the port.
-Polls every 0.5 s, giving up after `lean-iv-port-wait-timeout' seconds."
+  "Wait for ROOT's gateway peer and call CALLBACK with its HTTP port."
   (lean--iv-cancel-port-wait)
   (let ((deadline (+ (float-time) lean-iv-port-wait-timeout))
         (source-buf (current-buffer))
@@ -290,11 +264,7 @@ Polls every 0.5 s, giving up after `lean-iv-port-wait-timeout' seconds."
                (setq lean--iv--port-wait-timer nil))))
          (poll ()
            (cl-incf poll-count)
-           ;; The active Eglot contact can change while direnv is still
-           ;; preparing the target.  Resolve the instance file on every poll;
-           ;; capturing the initial "pending" path would miss the real proxy.
-           (let* ((port-file (lean--proxy-port-file root))
-                  (port (lean--iv-read-port port-file)))
+           (let ((port (lean--iv-proxy-port root)))
              (cond
               ((not (buffer-live-p source-buf))
                (finish)
@@ -303,7 +273,7 @@ Polls every 0.5 s, giving up after `lean-iv-port-wait-timeout' seconds."
                (finish)
                (with-current-buffer source-buf
                  (condition-case error
-                     (funcall callback (lean--iv-access-port root port))
+                     (funcall callback port)
                    (error
                     (lean--iv-log "proxy endpoint setup failed: %s"
                                   (error-message-string error))
@@ -313,10 +283,8 @@ Polls every 0.5 s, giving up after `lean-iv-port-wait-timeout' seconds."
               ((> (float-time) deadline)
                (finish)
                (lean--iv-log
-                "timed out waiting for current port-file: %s; status=%s exists=%S"
-                port-file
-                (with-current-buffer source-buf (lean--iv-wait-status))
-                (file-exists-p port-file))
+                "timed out waiting for gateway peer: root=%s status=%s"
+                root (with-current-buffer source-buf (lean--iv-wait-status)))
                (message
                 "Lean infoview: timed out (%s); see *Lean Dev Log* and Eglot stderr"
                 (with-current-buffer source-buf (lean--iv-wait-status)))
@@ -329,7 +297,7 @@ Polls every 0.5 s, giving up after `lean-iv-port-wait-timeout' seconds."
                             (lean--iv-wait-status))))
                nil)))))
       (unless (poll)
-        (lean--iv-log "waiting for current proxy port-file (root=%s)" root)
+        (lean--iv-log "waiting for Lean gateway peer (root=%s)" root)
         (setq timer (run-at-time 0.5 0.5 #'poll))
         (setq lean--iv--port-wait-timer timer)))))
 
@@ -436,24 +404,21 @@ Polls every 0.5 s, giving up after `lean-iv-port-wait-timeout' seconds."
     (cancel-timer lean--iv--cursor-timer))
   (setq lean--iv--cursor-timer nil))
 
-(defun lean--iv-post-cursor (port uri line character)
-  "POST cursor position to proxy at PORT for URI at LINE:CHARACTER."
-  (let ((url-request-method "POST")
-        (url-request-extra-headers '(("Content-Type" . "application/json")))
-        (url-request-data
-         (encode-coding-string
-          (json-encode `(:uri ,uri :line ,line :character ,character))
-          'utf-8)))
-    (url-retrieve (format "http://127.0.0.1:%d/cursor" port)
-                  (lambda (status)
-                    (when-let* ((err (plist-get status :error)))
-                      (lean--iv-log "cursor POST error: %S" err))
-                    (when (buffer-live-p (current-buffer))
-                      (kill-buffer (current-buffer))))
-                  nil t t)))
+(defun lean--iv-send-cursor (root uri line character)
+  "Send ROOT's cursor position through the shared gateway."
+  (when-let* ((client (lean--proxy-gateway-client root)))
+    (condition-case error
+        (remote-gateway-notify
+         client "lean.cursor"
+         `(("uri" . ,uri)
+           ("line" . ,line)
+           ("character" . ,character)))
+      (error
+       (lean--iv-log "gateway cursor error: %s"
+                     (error-message-string error))))))
 
-(defun lean--iv-schedule-cursor-post (port uri line character)
-  "Debounce a cursor POST to PORT for URI at LINE and CHARACTER."
+(defun lean--iv-schedule-cursor-post (root uri line character)
+  "Debounce a gateway cursor notification for ROOT."
   (lean--iv-cancel-cursor-timer)
   (let ((buf (current-buffer)))
     (setq lean--iv--cursor-timer
@@ -464,7 +429,7 @@ Polls every 0.5 s, giving up after `lean-iv-port-wait-timeout' seconds."
                (with-current-buffer buf
                  (setq lean--iv--cursor-timer nil)
                  (when (lean--iv-active-p)
-                   (lean--iv-post-cursor port uri line character)))))))))
+                   (lean--iv-send-cursor root uri line character)))))))))
 
 (defun lean-iv-sync-cursor-h ()
   "Push cursor position to the infoview xwidget (post-command hook).
@@ -487,12 +452,11 @@ Uses a fast xwidget-webkit-execute-script path and an HTTP debounce fallback."
                          (json-encode uri) (car lc) (cdr lc)))
               (error
                (lean--iv-log "cursor sync script error: %S" err))))
-          ;; HTTP fallback (debounced)
+          ;; Gateway fallback (debounced).
           (when-let* ((root (lean--iv-project-root))
-                      (port-file (lean--proxy-port-file root))
-                      (remote-port (lean--iv-read-port port-file))
-                      (port (lean--iv-access-port root remote-port)))
-            (lean--iv-schedule-cursor-post port uri (car lc) (cdr lc))))))))
+                      ((lean--proxy-gateway-client root)))
+            (lean--iv-schedule-cursor-post
+             root uri (car lc) (cdr lc))))))))
 
 ;; ── Open infoview ─────────────────────────────────────────────────────────────
 
@@ -547,8 +511,7 @@ Uses a fast xwidget-webkit-execute-script path and an HTTP debounce fallback."
   (unless (lean--proxy-available-p)
     (user-error "Lean infoview proxy not available (check lean-infoview-proxy-enabled)"))
   (let* ((root (lean--iv-project-root))
-         (port-file (lean--proxy-port-file root))
-         (proxy-port (lean--iv-read-port port-file))
+         (proxy-port (lean--iv-proxy-port root))
          (xbuf (and (boundp 'lean--iv--xwidget-buf)
                     lean--iv--xwidget-buf))
          (visible (and (buffer-live-p xbuf)
@@ -572,13 +535,12 @@ Uses a fast xwidget-webkit-execute-script path and an HTTP debounce fallback."
         (lean--iv-close-remote-forward root))
       (if (and (fboundp 'eglot-managed-p)
                (eglot-managed-p)
-               (or (not (lean--proxy-port-file-allocated-p root))
+               (or (not (lean--proxy-gateway-binding root))
                    (not proxy-port)))
           (progn
             (lean--iv-log "managed Eglot has no live proxy endpoint; reconnecting")
             (message "Lean infoview: reconnecting Eglot proxy…")
-            (ignore-errors (delete-file port-file))
-            (lean--proxy-forget-port-file root)
+            (lean--proxy-forget-gateway-binding root)
             (lean--iv-reconnect-eglot))
         ;; Ensure Eglot is running; its contact allocates and starts the proxy.
         (when (fboundp 'lean--ensure-eglot)
@@ -602,10 +564,7 @@ the infoview xwidget page."
     (setq lean--iv--xwidget-buf nil)
     (remhash root lean--iv--xwidget-buffers)
     (lean--iv-close-remote-forward root)
-    ;; Delete old port-file so the wait loop polls for the new one
-    (ignore-errors
-      (delete-file (lean--proxy-port-file root)))
-    (lean--proxy-forget-port-file root)
+    (lean--proxy-forget-gateway-binding root)
     (setq lean--iv--last-cursor nil)
     (when (fboundp 'eglot-reconnect)
       (lean--iv-reconnect-eglot))

@@ -22,6 +22,112 @@
        (equal call
               '("~/Documents/AaronNote/" nil "local"))))))
 
+(ert-deftest my/aaronnote-host-file-preserves-remote-logical-identity ()
+  (let ((remote-mode t))
+    (cl-letf
+        (((symbol-function 'my/aaronnote--canonical-file) #'identity)
+         ((symbol-function 'remote-file-name-target)
+          (lambda (file)
+            (if (string-prefix-p "/fs:local:" file)
+                "local"
+              "remote")))
+         ((symbol-function 'remote-file-local-name)
+          (lambda (file)
+            (string-remove-prefix "/fs:local:" file))))
+      (should
+       (equal
+        (my/aaronnote--host-file "/fs:remote:/srv/note.md")
+        "/fs:remote:/srv/note.md"))
+      (should
+       (equal
+        (my/aaronnote--host-file "/fs:local:/tmp/note.md")
+        "/tmp/note.md")))))
+
+(ert-deftest my/aaronnote-external-provider-reads-and-writes-through-logical-file-api ()
+  (let* ((native (make-temp-file "aaronnote-remote-provider-" nil ".md"))
+         (logical (remote-expand-file-name native nil "local")))
+    (unwind-protect
+        (progn
+          (with-temp-file native
+            (insert "# Initial\n"))
+          (let* ((opened
+                  (my/aaronnote--external-file-read
+                   `((file . ,logical)) nil))
+                 (mtime (alist-get 'mtimeMs opened)))
+            (should (equal (alist-get 'file opened) logical))
+            (should (equal (alist-get 'content opened) "# Initial\n"))
+            (let ((conflict
+                   (my/aaronnote--external-file-write
+                    `((file . ,logical)
+                      (content . "# Conflict\n")
+                      (baseMtimeMs . ,(- mtime 10000)))
+                    nil)))
+              (should (eq (alist-get 'conflict conflict) t))
+              (should
+               (equal
+                (with-temp-buffer
+                  (insert-file-contents native)
+                  (buffer-string))
+                "# Initial\n")))
+            (let ((saved
+                   (my/aaronnote--external-file-write
+                    `((file . ,logical)
+                      (content . "# Saved\n")
+                      (baseMtimeMs . ,mtime))
+                    nil)))
+              (should (eq (alist-get 'ok saved) t))
+              (should (equal (alist-get 'file saved) logical))
+              (should
+               (equal
+                (with-temp-buffer
+                  (insert-file-contents native)
+                  (buffer-string))
+                "# Saved\n")))))
+      (when (file-exists-p native)
+        (delete-file native)))))
+
+(ert-deftest my/aaronnote-external-watch-is-workspace-owned-and-bounded ()
+  (let ((remote-mode t)
+        (my/aaronnote--external-file-watches
+         (make-hash-table :test #'equal))
+        (my/aaronnote--external-file-watch-timers
+         (make-hash-table :test #'equal))
+        (my/aaronnote--external-file-watch-suppressed
+         (make-hash-table :test #'equal))
+        opened closed)
+    (cl-letf
+        (((symbol-function 'remote-file-name-target)
+          (lambda (_file) "remote"))
+         ((symbol-function 'remote-context)
+          (lambda (_file) 'mock-context))
+         ((symbol-function 'remote-workspace-open)
+          (lambda (_context &rest _args) 'mock-workspace))
+         ((symbol-function 'remote-workspace-add-file-watch)
+          (lambda (workspace file flags _callback &rest _args)
+            (setq opened (list workspace file flags))
+            'mock-resource))
+         ((symbol-function 'remote-workspace-close-resource)
+          (lambda (workspace resource &optional reason)
+            (setq closed (list workspace resource reason)))))
+      (my/aaronnote--ensure-external-file-watch
+       "/fs:remote:/srv/note.md")
+      (my/aaronnote--ensure-external-file-watch
+       "/fs:remote:/srv/note.md")
+      (should
+       (equal opened
+              '(mock-workspace
+                "/fs:remote:/srv/note.md"
+                (change attribute-change))))
+      (should
+       (= (hash-table-count my/aaronnote--external-file-watches) 1))
+      (my/aaronnote--clear-external-file-watches)
+      (should
+       (equal closed
+              '(mock-workspace mock-resource aaronnote-stop)))
+      (should
+       (zerop
+        (hash-table-count my/aaronnote--external-file-watches))))))
+
 (ert-deftest my/aaronnote-jupyter-defaults-read-project-config-without-eval ()
   (let ((root (make-temp-file "aaronnote-project" t)))
     (unwind-protect
@@ -192,7 +298,9 @@
           (should-not (gethash (expand-file-name file) my/aaronnote--file-buffers))
           (should (eq (gethash opened-id my/aaronnote--client-buffers) xwidget-buffer))
           (with-current-buffer xwidget-buffer
-            (should (equal my/aaronnote-buffer-file-name (expand-file-name file)))
+            (should
+             (equal my/aaronnote-buffer-file-name
+                    (my/aaronnote--canonical-file file)))
             (should (equal my/aaronnote--client-id opened-id))
             (should-not my/aaronnote--registered-file)))
       (when (buffer-live-p source) (kill-buffer source))
@@ -211,7 +319,8 @@
           (my/aaronnote--register-buffer
            canonical file (my/aaronnote--xwidget-session-id file) nil)
           (my/aaronnote--register-buffer split file client nil)
-          (should (eq (gethash (expand-file-name file) my/aaronnote--file-buffers)
+          (should (eq (gethash (my/aaronnote--canonical-file file)
+                               my/aaronnote--file-buffers)
                       canonical))
           (should (eq (gethash client my/aaronnote--client-buffers) split))
           (should (eq (my/aaronnote--buffer-for-file file) canonical))
@@ -375,11 +484,45 @@
     (cl-letf (((symbol-function 'my/aaronnote--run-emacs-key)
                (lambda (key &optional client)
                  (setq seen (list key client)))))
-      (my/aaronnote--handle-process-line
-       (concat "aaronote-event:key:"
-               (json-encode '((key . "M-<right>")
-                              (client . "split-client"))))))
+      (my/aaronnote--gateway-event
+       '((type . "key")
+         (payload . ((key . "M-<right>")
+                     (client . "split-client"))))
+       nil))
     (should (equal seen '("M-<right>" "split-client")))))
+
+(ert-deftest my/aaronnote-ui-state-gateway-does-not-reserialize-status ()
+  (let ((my/aaronnote-echo-severity 'error)
+        (binary-status (unibyte-string 1 255 123))
+        seen)
+    (cl-letf (((symbol-function 'json-serialize)
+               (lambda (&rest _args)
+                 (ert-fail "structured UI-state must not be reserialized")))
+              ((symbol-function 'message)
+               (lambda (format-string &rest args)
+                 (setq seen (apply #'format format-string args)))))
+      (my/aaronnote--gateway-event
+       `((type . "ui-state")
+         (payload . ((status . ,binary-status)
+                     (severity . "error"))))
+       nil))
+    (should (string-prefix-p "AaronNote error: " seen))
+    (should-not (string-match-p "parse failed" seen))))
+
+(ert-deftest my/aaronnote-ui-state-ignores-malformed-status-fields ()
+  (let ((my/aaronnote-echo-severity 'error)
+        seen)
+    (cl-letf (((symbol-function 'message)
+               (lambda (&rest args) (push args seen))))
+      (should
+       (equal
+        (my/aaronnote--gateway-event
+         '((type . "ui-state")
+           (payload . ((status . [1 nil 123])
+                       (severity . ["error"]))))
+         nil)
+        '((ok . t)))))
+    (should-not seen)))
 
 (ert-deftest my/aaronnote-zotero-events-dispatch-structured-payloads ()
   (let (seen)
@@ -389,14 +532,16 @@
               ((symbol-function 'my/aaronnote--run-zotero-event)
                (lambda (payload import-p)
                  (push (list payload import-p) seen))))
-      (my/aaronnote--handle-process-line
-       (concat "aaronote-event:zotero:"
-               (json-encode '((key . "Str87")
-                              (doi . "10.1515/example")))))
-      (my/aaronnote--handle-process-line
-       (concat "aaronote-event:zotero-import:"
-               (json-encode '((currentFile . "/tmp/note.md")
-                              (targetFile . "/tmp/bib/test.bib"))))))
+      (my/aaronnote--gateway-event
+       '((type . "zotero")
+         (payload . ((key . "Str87")
+                     (doi . "10.1515/example"))))
+       nil)
+      (my/aaronnote--gateway-event
+       '((type . "zotero-import")
+         (payload . ((currentFile . "/tmp/note.md")
+                     (targetFile . "/tmp/bib/test.bib"))))
+       nil))
     (should (equal (cadar seen) t))
     (should (equal (alist-get 'targetFile (caar seen))
                    "/tmp/bib/test.bib"))
@@ -505,54 +650,29 @@
       (when (buffer-live-p source) (kill-buffer source))
       (when (buffer-live-p target) (kill-buffer target)))))
 
-(ert-deftest my/aaronnote-process-filter-handles-split-ready-line ()
-  (let* ((buffer (generate-new-buffer " *aaronnote-test-process*"))
-         (proc (make-process
-                :name "aaronnote-test-process"
-                :buffer buffer
-                :command (list "cat")))
-         (my/aaronnote--process proc)
-         (my/aaronnote--port nil)
+(ert-deftest my/aaronnote-gateway-event-handles-ready ()
+  (let* ((my/aaronnote--port nil)
          (my/aaronnote--ready nil)
          (flush-count 0))
-    (unwind-protect
-        (cl-letf (((symbol-function 'my/aaronnote--flush-ready-callbacks)
-                   (lambda () (cl-incf flush-count))))
-          (my/aaronnote--process-filter proc "aaronote-web-host:ready:")
-          (should-not my/aaronnote--ready)
-          (should (equal (process-get proc 'aaronnote-pending)
-                         "aaronote-web-host:ready:"))
-          (my/aaronnote--process-filter proc "50815\n")
-          (should my/aaronnote--ready)
-          (should (= my/aaronnote--port 50815))
-          (should (= flush-count 1))
-          (should (equal (process-get proc 'aaronnote-pending) "")))
-      (when (process-live-p proc)
-        (delete-process proc))
-      (when (buffer-live-p buffer)
-        (kill-buffer buffer)))))
+    (cl-letf (((symbol-function 'my/aaronnote--flush-ready-callbacks)
+               (lambda () (cl-incf flush-count))))
+      (my/aaronnote--gateway-event
+       '((type . "ready") (payload . ((port . 50815)))) nil)
+      (should my/aaronnote--ready)
+      (should (= my/aaronnote--port 50815))
+      (should (= flush-count 1)))))
 
-(ert-deftest my/aaronnote-process-filter-ignores-invalid-ready-port ()
-  (let* ((buffer (generate-new-buffer " *aaronnote-invalid-ready-test*"))
-         (proc (make-process
-                :name "aaronnote-invalid-ready-test"
-                :buffer buffer
-                :command (list "cat")))
-         (my/aaronnote--process proc)
-         (my/aaronnote--port nil)
+(ert-deftest my/aaronnote-gateway-event-ignores-invalid-ready-port ()
+  (let* ((my/aaronnote--port nil)
          (my/aaronnote--ready nil)
          (flush-count 0))
-    (unwind-protect
-        (cl-letf (((symbol-function 'my/aaronnote--flush-ready-callbacks)
-                   (lambda () (cl-incf flush-count))))
-          (my/aaronnote--process-filter proc "aaronote-web-host:ready:not-a-port\n")
-          (should-not my/aaronnote--ready)
-          (should-not my/aaronnote--port)
-          (should (= flush-count 0)))
-      (when (process-live-p proc)
-        (delete-process proc))
-      (when (buffer-live-p buffer)
-        (kill-buffer buffer)))))
+    (cl-letf (((symbol-function 'my/aaronnote--flush-ready-callbacks)
+               (lambda () (cl-incf flush-count))))
+      (my/aaronnote--gateway-event
+       '((type . "ready") (payload . ((port . "not-a-port")))) nil)
+      (should-not my/aaronnote--ready)
+      (should-not my/aaronnote--port)
+      (should (= flush-count 0)))))
 
 (ert-deftest my/aaronnote-sentinel-resets-dead-current-process ()
   (let* ((buffer (generate-new-buffer " *aaronnote-sentinel-test*"))
@@ -670,6 +790,46 @@
             (should (string-match-p "\"emacsActivity\"" (buffer-string)))))
       (when-let* ((buffer (get-buffer "*aaronnote-runtime-status*")))
         (kill-buffer buffer)))))
+
+(ert-deftest my/aaronnote-api-call-uses-nonblocking-gateway-request ()
+  (let ((my/aaronnote--ready t)
+        request
+        callback-result)
+    (cl-letf (((symbol-function 'remote-gateway-find-client)
+               (lambda (_client-id) 'mock-client))
+              ((symbol-function 'remote-gateway-request-sync)
+               (lambda (&rest _args)
+                 (ert-fail "async AaronNote API must not wait synchronously")))
+              ((symbol-function 'remote-gateway-request-async)
+               (lambda (client method params callback timeout)
+                 (setq request (list client method params timeout))
+                 (funcall callback '((ok . t)) nil)
+                 '(done))))
+      (my/aaronnote--api-call
+       "aaronnote:api:test" [1 2]
+       (lambda (result) (setq callback-result result)))
+      (should
+       (equal request
+              '(mock-client "aaronnote.api"
+                            ((channel . "aaronnote:api:test")
+                             (args . [1 2]))
+                            10)))
+      (should (equal callback-result '((ok . t)))))))
+
+(ert-deftest my/aaronnote-stop-releases-gateway-binding ()
+  (let ((my/aaronnote--gateway-binding '(:binding-id "binding-test"))
+        (my/aaronnote--process nil)
+        released)
+    (cl-letf (((symbol-function 'remote-gateway-release-binding)
+               (lambda (binding &optional disconnect)
+                 (setq released (list binding disconnect))))
+              ((symbol-function 'my/aaronnote--remove-activity-hooks)
+               #'ignore))
+      (my/aaronnote-stop)
+      (should
+       (equal released
+              '((:binding-id "binding-test") t)))
+      (should-not my/aaronnote--gateway-binding))))
 
 (ert-deftest my/aaronnote-watchdog-clears-stale-ready-callbacks ()
   (let ((my/aaronnote--ready nil)
@@ -840,7 +1000,9 @@
            (buf2 (my/aaronnote--open-xwidget "ignored-again" file)))
       (should (eq buf1 buf2))
       (should (= (length opened-urls) 1))
-      (should (equal (my/aaronnote-buffer-file buf1) file))
+      (should
+       (equal (my/aaronnote-buffer-file buf1)
+              (my/aaronnote--canonical-file file)))
       (should (string-match-p "\\*aaronnote: note\\.md\\*" (buffer-name buf1)))
       (should (string-match-p "client=" (car opened-urls))))))
 
@@ -852,21 +1014,29 @@
            (buf2 (my/aaronnote--open-xwidget "ignored" file2)))
       (should-not (eq buf1 buf2))
       (should (= (length opened-urls) 2))
-      (should (eq (gethash file1 my/aaronnote--file-buffers) buf1))
-      (should (eq (gethash file2 my/aaronnote--file-buffers) buf2)))))
+      (should
+       (eq (gethash (my/aaronnote--canonical-file file1)
+                    my/aaronnote--file-buffers)
+           buf1))
+      (should
+       (eq (gethash (my/aaronnote--canonical-file file2)
+                    my/aaronnote--file-buffers)
+           buf2)))))
 
 (ert-deftest my/aaronnote-kill-buffer-cleans-registries ()
   (my/aaronnote-test--with-xwidget-mocks
     (let* ((file (expand-file-name "cleanup.md" temporary-file-directory))
            (client (my/aaronnote--xwidget-session-id file))
            (buffer (my/aaronnote--open-xwidget "ignored" file))
+           (canonical-file (my/aaronnote--canonical-file file))
            posted)
-      (should (eq (gethash file my/aaronnote--file-buffers) buffer))
+      (should
+       (eq (gethash canonical-file my/aaronnote--file-buffers) buffer))
       (should (eq (gethash client my/aaronnote--client-buffers) buffer))
       (cl-letf (((symbol-function 'my/aaronnote--post)
                  (lambda (payload) (push payload posted))))
         (kill-buffer buffer))
-      (should-not (gethash file my/aaronnote--file-buffers))
+      (should-not (gethash canonical-file my/aaronnote--file-buffers))
       (should-not (gethash client my/aaronnote--client-buffers))
       (should (equal (alist-get 'type (car posted)) "client-close"))
       (should (equal (alist-get 'client (car posted)) client))
@@ -882,8 +1052,13 @@
       (setq my/aaronnote--app-buffer buf1)
       (my/aaronnote--sync-app-buffer-file file2 "client-two")
       (should (eq my/aaronnote--app-buffer buf2))
-      (should (equal (my/aaronnote-buffer-file buf2) file2))
-      (should (eq (gethash file2 my/aaronnote--file-buffers) buf2)))))
+      (should
+       (equal (my/aaronnote-buffer-file buf2)
+              (my/aaronnote--canonical-file file2)))
+      (should
+       (eq (gethash (my/aaronnote--canonical-file file2)
+                    my/aaronnote--file-buffers)
+           buf2)))))
 
 (ert-deftest my/aaronnote-canonical-buffer-prefers-registered-buffer ()
   (my/aaronnote-test--with-xwidget-mocks

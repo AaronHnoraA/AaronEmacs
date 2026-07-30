@@ -147,6 +147,7 @@ let notesRelationshipCache = null;
 let notesSnapshotDirty = true;
 let notesSnapshotFullDirty = true;
 let dirtyNoteFiles = new Set();
+let externalFileProvider = null;
 let snippetCache = { key: "", scannedAt: 0, snippets: [] };
 let templateCache = { key: "", scannedAt: 0, templates: [] };
 let copilotClient = null;
@@ -6073,7 +6074,7 @@ function copilotDiagnostics() {
     resourcesPath: process.resourcesPath || "",
     logRecording: copilotLogRecording,
     env: {
-      AARONNOTE_COPILOT_BRIDGE_URL: COPILOT_BRIDGE_URL,
+      AARONNOTE_EMACS_GATEWAY: COPILOT_BRIDGE_REQUEST ? "connected" : "",
       AARONNOTE_COPILOT_DISABLE_LOCAL: process.env.AARONNOTE_COPILOT_DISABLE_LOCAL || "",
       AARONNOTE_COPILOT_LANGUAGE_SERVER: process.env.AARONNOTE_COPILOT_LANGUAGE_SERVER || "",
       AARONNOTE_NODE: process.env.AARONNOTE_NODE || "",
@@ -6180,56 +6181,38 @@ const COPILOT_IDLE_CHECK_MS = 30_000;
 // When AaronNote is launched from Emacs, Copilot requests should use Emacs'
 // existing copilot.el JSON-RPC connection instead of starting a second
 // @github/copilot-language-server process in web-host.
-const COPILOT_BRIDGE_URL = String(process.env.AARONNOTE_COPILOT_BRIDGE_URL || "").trim();
 const COPILOT_DISABLE_LOCAL = process.env.AARONNOTE_COPILOT_DISABLE_LOCAL === "1";
-// Used only by the local fallback LSP. Emacs-launched AaronNote normally
-// forwards Copilot requests to copilot.el through COPILOT_BRIDGE_URL.
+let COPILOT_BRIDGE_REQUEST = null;
+
+export function configureCopilotBridgeRequest(request) {
+  COPILOT_BRIDGE_REQUEST = typeof request === "function" ? request : null;
+}
+
+// Used only by the local fallback LSP. Emacs-launched AaronNote forwards
+// Copilot requests to copilot.el through the shared gateway.
 const COPILOT_MAX_HEAP_MB = Math.max(0, Number(process.env.AARONNOTE_COPILOT_MAX_HEAP_MB) || 0);
 
 class EmacsCopilotBridgeClient {
-  constructor(url) {
+  constructor(request) {
     this.kind = "emacs-bridge";
-    this.url = url;
+    this.url = "emacs-gateway";
+    this.request = request;
     this.status = { message: "Using Emacs Copilot bridge", kind: "Normal", busy: false };
     this.pending = new Set();
   }
 
   async post(action, body = {}) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
     const pending = { action };
     this.pending.add(pending);
     try {
-      const res = await fetch(this.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, body }),
-        signal: controller.signal,
-      });
-      const text = await res.text();
-      let value = {};
-      try {
-        value = text ? JSON.parse(text) : {};
-      } catch {
-        value = { ok: false, message: text || "Invalid Emacs Copilot bridge response" };
-      }
-      if (!res.ok) {
-        return {
-          ok: false,
-          message: value?.message || `Emacs Copilot bridge returned HTTP ${res.status}`,
-          status: { message: value?.message || "Bridge HTTP error", kind: "Error", busy: false },
-        };
-      }
+      const value = await this.request("copilot.request", { action, body });
       if (value?.status) this.status = value.status;
       return value;
     } catch (err) {
-      const message = err?.name === "AbortError"
-        ? "Emacs Copilot bridge timed out"
-        : err instanceof Error ? err.message : String(err);
+      const message = err instanceof Error ? err.message : String(err);
       this.status = { message, kind: "Error", busy: false };
       return { ok: false, message, status: this.status };
     } finally {
-      clearTimeout(timeout);
       this.pending.delete(pending);
     }
   }
@@ -6817,8 +6800,8 @@ function windowSetTimeout(fn, ms) {
 
 function getCopilotClient() {
   if (!copilotClient) {
-    copilotClient = COPILOT_BRIDGE_URL
-      ? new EmacsCopilotBridgeClient(COPILOT_BRIDGE_URL)
+    copilotClient = COPILOT_BRIDGE_REQUEST
+      ? new EmacsCopilotBridgeClient(COPILOT_BRIDGE_REQUEST)
       : new CopilotLspClient();
   }
   return copilotClient;
@@ -6833,7 +6816,7 @@ export async function shutdownCopilot() {
 
 export async function handleCopilotRequest(action, body = {}) {
   if (action === "log") {
-    if (COPILOT_BRIDGE_URL) return getCopilotClient().log(body || {});
+    if (COPILOT_BRIDGE_REQUEST) return getCopilotClient().log(body || {});
     if (body?.record === true) {
       setCopilotLogRecording(true, { clear: body?.clear !== false });
       return { ...copilotDiagnostics(), message: "Copilot log recording started" };
@@ -6863,6 +6846,28 @@ export async function handleCopilotRequest(action, body = {}) {
 }
 
 export async function readNote(file, options = {}) {
+  if (externalFileProvider?.owns?.(file)) {
+    const opened = await externalFileProvider.read(String(file));
+    const content = String(opened?.content ?? "");
+    const payload = {
+      type: "open",
+      file: String(opened?.file || file),
+      title: titleFromContent(String(file), content),
+      mode: modeForFile(String(file)),
+      content,
+      kind: kindFromContent(content),
+      mtimeMs: Number(opened?.mtimeMs) || 0,
+      size: Number(opened?.size) || Buffer.byteLength(content, "utf8"),
+      standalone: true,
+      remote: true,
+    };
+    if (options.includeIndex === true) {
+      Object.assign(payload, await notesIndexPayload());
+      payload.snippets = await scanSnippets();
+      payload.templates = await scanTemplates();
+    }
+    return payload;
+  }
   const safe = safeOpenFile(file);
   if (leanSourceFile(safe)) {
     const err = new Error("Lean files are edited manually");
@@ -8071,7 +8076,56 @@ export function configure(options = {}) {
   markNotesDirty();
 }
 
+export function configureExternalFileProvider(provider = null) {
+  externalFileProvider = provider && typeof provider === "object"
+    ? provider
+    : null;
+}
+
 export async function saveNote(body) {
+  if (externalFileProvider?.owns?.(body?.file)) {
+    const file = String(body.file);
+    const content = String(body.content ?? "");
+    if (!acceptSaveRequest(file, body)) {
+      return {
+        type: "saved", ok: true, file, stale: true,
+        message: "Skipped stale save",
+      };
+    }
+    const wrote = await enqueueSaveWrite(
+      file,
+      () => externalFileProvider.write({
+        file,
+        content,
+        force: body.force === true,
+        baseMtimeMs: Number(body.baseMtimeMs) || 0,
+      }),
+    );
+    if (wrote?.conflict || wrote?.ok === false) {
+      return {
+        type: "saved",
+        ok: false,
+        file,
+        conflict: wrote?.conflict === true,
+        message: String(wrote?.message || "Remote save failed"),
+        mtimeMs: Number(wrote?.mtimeMs) || 0,
+        size: Number(wrote?.size) || 0,
+        standalone: true,
+      };
+    }
+    return {
+      type: "saved",
+      ok: true,
+      file: String(wrote?.file || file),
+      kind: kindFromContent(content),
+      message: "Saved",
+      notesRefresh: "deferred",
+      standalone: true,
+      remote: true,
+      mtimeMs: Number(wrote?.mtimeMs) || 0,
+      size: Number(wrote?.size) || Buffer.byteLength(content, "utf8"),
+    };
+  }
   const file = safeOpenFile(body.file);
   const content = String(body.content ?? "");
   const previousContent = await readFile(file, "utf8").catch(() => "");

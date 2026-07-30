@@ -238,7 +238,10 @@ height in pixels."
 (defun my/dashboard-initialize-full-frame-a (orig-fn &rest args)
   "Run dashboard initialization in the frame's only ordinary window."
   (delete-other-windows)
-  (apply orig-fn args))
+  (unwind-protect
+      (apply orig-fn args)
+    (when (fboundp 'my/reveal-startup-frames)
+      (my/reveal-startup-frames))))
 
 (defun my/dashboard-insert-roam-heatmap ()
   "Insert the optional Markdown roam activity heatmap on the dashboard."

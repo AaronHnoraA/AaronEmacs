@@ -9,6 +9,9 @@
 (require 'config)
 
 (require 'json)
+(require 'remote-gateway)
+(require 'remote-process)
+(require 'remote-workspace)
 (require 'subr-x)
 (require 'cl-lib)
 (require 'url)
@@ -37,7 +40,6 @@
 (declare-function xwidget-webkit-edit-mode "xwidget" (&optional arg))
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
 (declare-function xwidget-webkit-pass-command-event "xwidget" (event))
-(declare-function my/copilot-aaronnote-bridge-url "init-copilot" ())
 (declare-function my/zotero-open-reference "init-latex" (payload))
 (declare-function my/zotero-import-bibtex "init-latex" (payload))
 (declare-function remote-expand-file-name
@@ -45,6 +47,8 @@
 (declare-function remote-fs-file-name-p "remote-fs" (file-name))
 (declare-function remote-canonicalize-file-name
                   "remote-fs" (file-name &optional directory))
+(declare-function remote-file-name-target "remote-fs" (file-name))
+(declare-function remote-file-local-name "remote-fs" (file-name))
 (defvar remote-mode nil)
 (defvar my/appine-tab-list)
 (defvar my/xwidget--session-id)
@@ -212,6 +216,16 @@ the backend.  The backend is chosen here, not per export."
 
 (defvar my/aaronnote--process nil
   "Running Aaronnote web-host child process, or nil.")
+(defvar my/aaronnote--gateway-binding nil
+  "Registration data for the current AaronNote web-host process.")
+(defvar my/aaronnote--external-file-watches (make-hash-table :test #'equal)
+  "Remote-backed file watches owned by the AaronNote runtime session.")
+(defvar my/aaronnote--external-file-watch-timers
+  (make-hash-table :test #'equal)
+  "Debounce timers for remote AaronNote file changes.")
+(defvar my/aaronnote--external-file-watch-suppressed
+  (make-hash-table :test #'equal)
+  "Times before which self-write watch events should be ignored.")
 (defvar my/aaronnote--port nil
   "HTTP port of the running Aaronnote web-host.")
 (defvar my/aaronnote--last-port nil
@@ -338,18 +352,16 @@ the backend.  The backend is chosen here, not per export."
          (expand-file-name file)))))
 
 (defun my/aaronnote--host-file (file)
-  "Return the local host path represented by logical FILE.
-The Aaronnote web host is local; a non-local target requires a future
-server-side adapter instead of leaking TRAMP or `/fs:' syntax to Node."
+  "Return the path AaronNote should use for logical FILE.
+Local files are projected to native host paths.  Remote files retain their
+`/fs:' identity and are served through the Remote-backed gateway provider."
   (when-let* ((file (my/aaronnote--canonical-file file)))
     (if (and (bound-and-true-p remote-mode)
              (fboundp 'remote-file-name-target)
              (fboundp 'remote-file-local-name))
-        (progn
-          (unless (equal (remote-file-name-target file) "local")
-            (user-error "Aaronnote cannot open target %s with its local web host"
-                        (remote-file-name-target file)))
-          (remote-file-local-name file))
+        (if (equal (remote-file-name-target file) "local")
+            (remote-file-local-name file)
+          file)
       (expand-file-name file))))
 
 (defun my/aaronnote--xwidget-session-id (&optional file)
@@ -468,11 +480,15 @@ reconnect without a reload and without losing their in-memory editor state."
         my/aaronnote--port nil
         my/aaronnote--ready nil)
   (let* ((log-buf (get-buffer-create " *aaronnote-web-host*"))
-         (copilot-bridge-url
-          (when (require 'init-copilot nil t)
-            (ignore-errors (my/copilot-aaronnote-bridge-url))))
+         (_copilot-gateway-method
+          (require 'init-copilot nil t))
+         (gateway
+          (remote-gateway-prepare-client
+           "aaronnote" (remote-context my/aaronnote--notes-root)
+           :placement 'client
+           :provides '("aaronnote.command" "aaronnote.api")))
          (copilot-server
-          (when (and (not copilot-bridge-url)
+          (when (and (not _copilot-gateway-method)
                      (require 'copilot nil t))
             (ignore-errors (copilot-server-executable))))
          (process-environment
@@ -529,21 +545,24 @@ reconnect without a reload and without losing their in-memory editor state."
             (format "AARONNOTE_WEB_PORT=%d"
                     (or reconnect-port my/aaronnote-web-port 0))
             ;; Emacs-started AaronNote should share Emacs' existing Copilot LS
-            ;; through this bridge, not spawn its own memory-heavy second copy.
+            ;; through the gateway, not spawn a second memory-heavy copy.
             "AARONNOTE_COPILOT_DISABLE_LOCAL=1"
-            (when copilot-bridge-url
-              (format "AARONNOTE_COPILOT_BRIDGE_URL=%s" copilot-bridge-url))
+            (format "AARONNOTE_EMACS_GATEWAY_URL=%s"
+                    (plist-get gateway :websocket-url))
+            (format "AARONNOTE_EMACS_GATEWAY_BINDING=%s"
+                    (plist-get gateway :binding-id))
+            (format "AARONNOTE_EMACS_GATEWAY_CLIENT_ID=%s"
+                    (plist-get gateway :client-id))
             (when copilot-server
               (format "AARONNOTE_COPILOT_LANGUAGE_SERVER=%s"
                       (expand-file-name copilot-server)))
-            (when (and (not copilot-bridge-url)
+            (when (and (not _copilot-gateway-method)
                        (bound-and-true-p my/copilot-server-max-heap-mb))
               (format "AARONNOTE_COPILOT_MAX_HEAP_MB=%d"
                       my/copilot-server-max-heap-mb)))))
            process-environment))
          (proc
-          (let ((default-directory user-emacs-directory))
-            (make-process
+          (remote-make-client-process
              :name "aaronnote-web-host"
              :buffer log-buf
              :command
@@ -557,9 +576,12 @@ reconnect without a reload and without losing their in-memory editor state."
                      my/aaronnote--web-host-script)))
              :noquery t
              :sentinel #'my/aaronnote--sentinel
-             :filter #'my/aaronnote--process-filter))))
+             :filter #'my/aaronnote--process-filter
+             :remote-client-directory user-emacs-directory
+             :remote-client-environment process-environment)))
     (with-current-buffer log-buf (erase-buffer))
-    (setq my/aaronnote--process proc)
+    (setq my/aaronnote--process proc
+          my/aaronnote--gateway-binding gateway)
     proc))
 
 (defun my/aaronnote--flush-ready-callbacks ()
@@ -595,8 +617,29 @@ reconnect without a reload and without losing their in-memory editor state."
                 (if import-p "import" "open")
                 (error-message-string err))))))
 
+(defun my/aaronnote--handle-ui-state-payload (payload)
+  "Echo a structured AaronNote UI-state PAYLOAD when policy permits.
+Gateway payloads are handled directly so status strings are never serialized
+to JSON a second time."
+  (let* ((status (alist-get 'status payload))
+         (severity-name (alist-get 'severity payload))
+         (severity
+          (and (stringp severity-name)
+               (intern-soft severity-name)))
+         (echo-p
+          (or
+           (eq severity 'info)
+           (pcase my/aaronnote-echo-severity
+             ('warning (memq severity '(warning error)))
+             ('error (eq severity 'error))
+             (_ nil)))))
+    (when (and echo-p
+               (stringp status)
+               (not (string-empty-p status)))
+      (message "AaronNote %s: %s" severity status))))
+
 (defun my/aaronnote--handle-process-line (line)
-  "Handle one web-host stdout LINE."
+  "Handle one legacy AaronNote event encoded as LINE."
   (let ((ready-prefix "aaronote-web-host:ready:")
         (goto-prefix "aaronote-event:goto:")
 	(open-prefix "aaronote-event:open:")
@@ -710,18 +753,10 @@ reconnect without a reload and without losing their in-memory editor state."
                   (error-message-string err)))))
      ((string-prefix-p ui-state-prefix line)
       (condition-case err
-          (let* ((payload (json-parse-string
-                           (substring line (length ui-state-prefix))
-                           :object-type 'alist))
-                 (status (alist-get 'status payload))
-                 (severity (intern-soft (or (alist-get 'severity payload) "")))
-                 (echo-p (or (eq severity 'info)
-                             (pcase my/aaronnote-echo-severity
-                               ('warning (memq severity '(warning error)))
-                               ('error (eq severity 'error))
-                               (_ nil)))))
-            (when (and echo-p (stringp status) (not (string-empty-p status)))
-              (message "AaronNote %s: %s" severity status)))
+          (my/aaronnote--handle-ui-state-payload
+           (json-parse-string
+            (substring line (length ui-state-prefix))
+            :object-type 'alist))
         (error
          (message "Aaronnote UI-state parse failed: %s"
                   (error-message-string err)))))
@@ -750,8 +785,212 @@ reconnect without a reload and without losing their in-memory editor state."
          (message "Aaronnote key-event parse failed: %s"
                   (error-message-string err))))))))
 
+(defun my/aaronnote--external-file (file)
+  "Return a canonical Markdown FILE accepted by the gateway provider."
+  (let ((file (my/aaronnote--canonical-file file)))
+    (unless (and file (my/aaronnote--markdown-file-p file))
+      (error "AaronNote external provider requires a Markdown file: %s"
+             file))
+    file))
+
+(defun my/aaronnote--external-file-metadata (file)
+  "Return JSON-ready metadata for FILE, or signal when it is unavailable."
+  (let ((attributes (file-attributes file 'string)))
+    (unless (and attributes (file-regular-p file))
+      (error "Remote Markdown file is unavailable: %s" file))
+    `((mtimeMs
+       . ,(* 1000.0
+             (float-time
+              (file-attribute-modification-time attributes))))
+      (size . ,(or (file-attribute-size attributes) 0)))))
+
+(defun my/aaronnote--external-file-notify-change (file)
+  "Notify the AaronNote peer that logical FILE changed externally."
+  (remhash file my/aaronnote--external-file-watch-timers)
+  (when-let* ((client (remote-gateway-find-client "aaronnote")))
+    (let* ((metadata
+            (condition-case nil
+                (my/aaronnote--external-file-metadata file)
+              (error '((mtimeMs . 0) (size . 0)))))
+           (mtime (alist-get 'mtimeMs metadata)))
+      (remote-gateway-notify
+       client "aaronnote.command"
+       `((type . "command")
+         (command . "note-saved")
+         (file . ,file)
+         (mtimeMs . ,mtime)
+         (clientId . "remote-external"))))))
+
+(defun my/aaronnote--external-file-watch-event (file event)
+  "Debounce Remote file watch EVENT for logical FILE."
+  (unless (or (eq (nth 1 event) 'stopped)
+              (< (float-time)
+                 (or
+                  (gethash
+                   file my/aaronnote--external-file-watch-suppressed)
+                  0)))
+    (when-let* ((timer
+                 (gethash
+                  file my/aaronnote--external-file-watch-timers)))
+      (cancel-timer timer))
+    (puthash
+     file
+     (run-at-time
+      0.25 nil #'my/aaronnote--external-file-notify-change file)
+     my/aaronnote--external-file-watch-timers)))
+
+(defun my/aaronnote--ensure-external-file-watch (file)
+  "Ensure one recoverable Remote watch exists for logical FILE."
+  (when (and (bound-and-true-p remote-mode)
+             (not (equal (remote-file-name-target file) "local"))
+             (not (gethash file my/aaronnote--external-file-watches)))
+    (condition-case error
+        (let* ((context (remote-context (file-name-directory file)))
+               (workspace (remote-workspace-open context :connect nil))
+               (resource
+                (remote-workspace-add-file-watch
+                 workspace file '(change attribute-change)
+                 (lambda (event)
+                   (my/aaronnote--external-file-watch-event file event))
+                 :key (list 'aaronnote-external-file file)
+                 :metadata
+                 (list :application "aaronnote" :file file))))
+          (puthash
+           file (cons workspace resource)
+           my/aaronnote--external-file-watches))
+      (error
+       ;; Editing still works on backends without watch capability; refresh is
+       ;; then explicit and saves continue to use mtime conflict detection.
+       (message "AaronNote remote watch unavailable for %s: %s"
+                file (error-message-string error))))))
+
+(defun my/aaronnote--clear-external-file-watches ()
+  "Close AaronNote's Remote watches and debounce timers."
+  (maphash
+   (lambda (_file timer)
+     (when (timerp timer)
+       (cancel-timer timer)))
+   my/aaronnote--external-file-watch-timers)
+  (maphash
+   (lambda (_file owner)
+     (ignore-errors
+       (remote-workspace-close-resource
+        (car owner) (cdr owner) 'aaronnote-stop)))
+   my/aaronnote--external-file-watches)
+  (clrhash my/aaronnote--external-file-watch-timers)
+  (clrhash my/aaronnote--external-file-watches)
+  (clrhash my/aaronnote--external-file-watch-suppressed))
+
+(defun my/aaronnote--external-file-read (params _client)
+  "Read the logical Markdown file named by gateway PARAMS through Remote."
+  (let* ((file
+          (my/aaronnote--external-file
+           (alist-get 'file params)))
+         (content
+          (with-temp-buffer
+            (insert-file-contents file)
+            (buffer-substring-no-properties
+             (point-min) (point-max)))))
+    (my/aaronnote--ensure-external-file-watch file)
+    (append
+     `((file . ,file) (content . ,content))
+     (my/aaronnote--external-file-metadata file))))
+
+(defun my/aaronnote--external-file-write (params _client)
+  "Atomically write a logical Markdown file described by gateway PARAMS."
+  (let* ((file
+          (my/aaronnote--external-file
+           (alist-get 'file params)))
+         (content (format "%s" (or (alist-get 'content params) "")))
+         (force (eq (alist-get 'force params) t))
+         (base-mtime (alist-get 'baseMtimeMs params))
+         (metadata (my/aaronnote--external-file-metadata file))
+         (mtime (alist-get 'mtimeMs metadata))
+         (size (alist-get 'size metadata)))
+    (cond
+     ((and (not force)
+           (numberp base-mtime)
+           (> base-mtime 0)
+           (> (abs (- mtime base-mtime)) 1))
+      `((ok . :json-false) (conflict . t)
+        (file . ,file)
+        (message . "File changed on the remote target. Review before overwriting.")
+        (mtimeMs . ,mtime) (size . ,size)))
+     ((and
+       (not force)
+       (string-empty-p (string-trim content))
+       (with-temp-buffer
+         (insert-file-contents file)
+         (not
+          (string-empty-p
+           (string-trim
+            (buffer-substring-no-properties
+             (point-min) (point-max)))))))
+      `((ok . :json-false) (conflict . :json-false)
+        (file . ,file)
+        (message
+         . "Refusing to save empty content over a non-empty remote file.")
+        (mtimeMs . ,mtime) (size . ,size)))
+     (t
+      (let* ((default-directory
+              (file-name-as-directory (file-name-directory file)))
+             (modes (ignore-errors (file-modes file)))
+             (temporary (make-nearby-temp-file ".aaronnote-save-")))
+        (puthash
+         file (+ (float-time) 30)
+         my/aaronnote--external-file-watch-suppressed)
+        (unwind-protect
+            (let ((coding-system-for-write 'utf-8-unix))
+              (write-region content nil temporary nil 'silent)
+              (rename-file temporary file t)
+              (when modes
+                (set-file-modes file modes)))
+          (when (file-exists-p temporary)
+            (ignore-errors (delete-file temporary))))
+        (puthash
+         file (+ (float-time) 2)
+         my/aaronnote--external-file-watch-suppressed)
+        (let ((written
+               (my/aaronnote--external-file-metadata file)))
+          `((ok . t) (conflict . :json-false)
+            (file . ,file)
+            (mtimeMs . ,(alist-get 'mtimeMs written))
+            (size . ,(alist-get 'size written)))))))))
+
+(defun my/aaronnote--gateway-event (params _client)
+  "Dispatch AaronNote event PARAMS received through the shared gateway."
+  (let* ((type (format "%s" (or (alist-get 'type params) "")))
+         (payload (or (alist-get 'payload params) '()))
+         (line
+          (pcase type
+            ("ui-state"
+             (my/aaronnote--handle-ui-state-payload payload)
+             nil)
+            ("ready"
+             (format "aaronote-web-host:ready:%s"
+                     (or (alist-get 'port payload) 0)))
+            ("goto"
+             (format "aaronote-event:goto:%s:%s"
+                     (or (alist-get 'line payload) 0)
+                     (or (alist-get 'col payload) 0)))
+            ((or "open" "system-open" "zotero" "zotero-import"
+                 "current-file" "saved" "key")
+             (format "aaronote-event:%s:%s"
+                     type (json-serialize payload)))
+            (_ nil))))
+    (when line
+      (my/aaronnote--handle-process-line line))
+    '((ok . t))))
+
+(remote-gateway-register-method
+ "aaronnote.event" #'my/aaronnote--gateway-event)
+(remote-gateway-register-method
+ "aaronnote.file.read" #'my/aaronnote--external-file-read)
+(remote-gateway-register-method
+ "aaronnote.file.write" #'my/aaronnote--external-file-write)
+
 (defun my/aaronnote--process-filter (proc output)
-  "Process web-host OUTPUT from PROC."
+  "Append diagnostic web-host OUTPUT from PROC to its bounded log."
   (when (buffer-live-p (process-buffer proc))
     (with-current-buffer (process-buffer proc)
       (goto-char (point-max))
@@ -763,20 +1002,7 @@ reconnect without a reload and without losing their in-memory editor state."
         (goto-char (- (point-max) 102400))
         (forward-line 1)
         (delete-region (point-min) (point)))))
-  (let ((pending (or (process-get proc 'aaronnote-pending) "")))
-    (setq pending (concat pending output))
-    ;; Safety cap: a pathological unterminated line must not grow without bound.
-    (when (> (length pending) 262144)
-      (setq pending ""))
-    (let (newline)
-      (while (setq newline (string-match "\n" pending))
-        ;; Only mutate shared bridge state for the current process; a dying old
-        ;; process emitting a trailing ready: line must not clobber the new port.
-        (when (eq proc my/aaronnote--process)
-          (my/aaronnote--handle-process-line
-           (string-trim-right (substring pending 0 newline) "\r")))
-        (setq pending (substring pending (1+ newline)))))
-    (process-put proc 'aaronnote-pending pending)))
+  nil)
 
 (defun my/aaronnote--sentinel (proc event)
   "Handle web-host PROC state change EVENT."
@@ -1101,19 +1327,10 @@ reusing a remembered one."
 
 (defun my/aaronnote--post (payload)
   "Send small control PAYLOAD to the Aaronnote web-host."
-  (when my/aaronnote--ready
-    (let* ((url-request-method "POST")
-           (url-request-extra-headers '(("Content-Type" . "application/json")))
-           (url-request-data (encode-coding-string (json-encode payload) 'utf-8))
-           (buf (url-retrieve (my/aaronnote--server-url "/emacs/command")
-                              (lambda (_status)
-                                (unwind-protect nil
-                                  (when (buffer-live-p (current-buffer))
-                                    (kill-buffer (current-buffer)))))
-                              nil t t)))
-      ;; Fallback: kill response buffer if server never replies within 5 s.
-      (when (buffer-live-p buf)
-        (run-at-time 5 nil (lambda () (when (buffer-live-p buf) (kill-buffer buf))))))))
+  (when-let* ((client
+               (and my/aaronnote--ready
+                    (remote-gateway-find-client "aaronnote"))))
+    (remote-gateway-notify client "aaronnote.command" payload)))
 
 (defun my/aaronnote--open-file-in-web (file)
   "Ask the already open Aaronnote page to open FILE."
@@ -1500,6 +1717,11 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
     (cancel-timer my/aaronnote--goto-timer)
     (setq my/aaronnote--goto-timer nil
           my/aaronnote--goto-last nil))
+  (my/aaronnote--clear-external-file-watches)
+  (when my/aaronnote--gateway-binding
+    (remote-gateway-release-binding
+     my/aaronnote--gateway-binding t)
+    (setq my/aaronnote--gateway-binding nil))
   (let ((proc my/aaronnote--process))
     (setq my/aaronnote--process nil
           my/aaronnote--port nil
@@ -1581,68 +1803,62 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 
 (add-hook 'kill-emacs-hook #'my/aaronnote-stop)
 
-;;; API call — POST to /api and parse JSON response.
+;;; API call — request the web-host over the shared gateway.
+
+(defun my/aaronnote--gateway-hash-value (value)
+  "Convert decoded gateway VALUE into hash-table object representation."
+  (cond
+   ((and (listp value)
+         value
+         (cl-every
+          (lambda (item)
+            (and (consp item) (symbolp (car item))))
+          value))
+    (let ((table (make-hash-table :test #'equal)))
+      (dolist (item value table)
+        (puthash
+         (symbol-name (car item))
+         (my/aaronnote--gateway-hash-value (cdr item))
+         table))))
+   ((listp value)
+    (mapcar #'my/aaronnote--gateway-hash-value value))
+   ((vectorp value)
+    (vconcat
+     (mapcar #'my/aaronnote--gateway-hash-value value)))
+   (t value)))
 
 (defun my/aaronnote--api-call-sync (channel args)
-  "POST CHANNEL with ARGS to /api synchronously; return parsed JSON or nil.
+  "Call CHANNEL with ARGS synchronously; return parsed JSON or nil.
 Only usable when the web-host is running (`my/aaronnote--ready' is non-nil).
 Blocks the caller until the response arrives (or 8 s timeout)."
-  (when my/aaronnote--ready
-    (let* ((url-request-method "POST")
-           (url-request-extra-headers '(("Content-Type" . "application/json")))
-           (url-request-data
-            (encode-coding-string
-             (json-encode `((channel . ,channel) (args . ,args)))
-             'utf-8))
-           (buf (url-retrieve-synchronously
-                 (my/aaronnote--server-url "/api")
-                 t nil 8)))
-      (when (buffer-live-p buf)
-        (unwind-protect
-            (with-current-buffer buf
-              (goto-char (point-min))
-              (when (re-search-forward "^\r?\n" nil t)
-                (condition-case err
-                    (json-parse-string
-                     (buffer-substring (point) (point-max))
-                     :object-type 'hash-table
-                     :array-type 'list)
-                  (error
-                   (message "Aaronnote API parse error: %s"
-                            (error-message-string err))
-                   nil))))
-          (kill-buffer buf))))))
+  (when-let* ((client
+               (and my/aaronnote--ready
+                    (remote-gateway-find-client "aaronnote")))
+              (result
+               (remote-gateway-request-sync
+                client "aaronnote.api"
+                `((channel . ,channel) (args . ,args))
+                8)))
+    (my/aaronnote--gateway-hash-value result)))
 
 (defun my/aaronnote--api-call (channel args callback)
-  "POST CHANNEL with ARGS to /api; parse JSON response and call CALLBACK."
-  (when my/aaronnote--ready
-    (let* ((url-request-method "POST")
-           (url-request-extra-headers '(("Content-Type" . "application/json")))
-           (url-request-data
-            (encode-coding-string
-             (json-encode `((channel . ,channel) (args . ,args)))
-             'utf-8))
-           (buf (url-retrieve
-                 (my/aaronnote--server-url "/api")
-                 (lambda (status)
-                   (unwind-protect
-                       (unless (plist-get status :error)
-                         (goto-char (point-min))
-                         (when (re-search-forward "^\r?\n" nil t)
-                           (condition-case err
-                               (funcall callback
-                                        (json-parse-string
-                                         (buffer-substring (point) (point-max))
-                                         :object-type 'alist))
-                             (error
-                              (message "Aaronnote API parse error: %s"
-                                       (error-message-string err))))))
-                     (when (buffer-live-p (current-buffer))
-                       (kill-buffer (current-buffer)))))
-                 nil t t)))
-      ;; Fallback: kill response buffer if server never replies within 10 s.
-      (when (buffer-live-p buf)
-        (run-at-time 10 nil (lambda () (when (buffer-live-p buf) (kill-buffer buf))))))))
+  "Call CHANNEL with ARGS and asynchronously invoke CALLBACK."
+  (when-let* ((client
+               (and my/aaronnote--ready
+                    (remote-gateway-find-client "aaronnote"))))
+    (remote-gateway-request-async
+     client "aaronnote.api"
+     `((channel . ,channel) (args . ,args))
+     (lambda (result error-object)
+       (if error-object
+           (message
+            "Aaronnote API error %s: %s"
+            (or (alist-get "code" error-object nil nil #'string=)
+                "unknown")
+            (or (alist-get "message" error-object nil nil #'string=)
+                "request failed"))
+         (funcall callback result)))
+     10)))
 
 (defun my/aaronnote-runtime-status ()
   "Display the Aaronnote runtime debug snapshot."

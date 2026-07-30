@@ -15,6 +15,7 @@ import { promisify } from "node:util";
 import { basename, dirname, extname, isAbsolute, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
+import WebSocket from "ws";
 
 import {
   bootstrapNote,
@@ -60,6 +61,7 @@ import {
   bibliographyVersion,
   clearBibliographyCache,
   configure,
+  configureExternalFileProvider,
   markNotesDirty,
   notesIndexVersionValue,
   noteSelfWriteRecently,
@@ -92,7 +94,11 @@ import {
   readCursorPositions,
   touchCursorPosition,
 } from "./server/lib/session.mjs";
-import { handleCopilotRequest, shutdownCopilot } from "./server/lib/copilot.mjs";
+import {
+  configureCopilotBridgeRequest,
+  handleCopilotRequest,
+  shutdownCopilot,
+} from "./server/lib/copilot.mjs";
 import {
   acceptProseWord,
   cancelExternalProseCheck,
@@ -141,6 +147,9 @@ const templatesRoot = resolve(process.env.AARONNOTE_TEMPLATES_ROOT || join(works
 const katexMacrosDir = resolve(process.env.AARONNOTE_KATEX_MACROS_DIR || join(workspaceRoot, "etc", "katex-macros"));
 const bindHost = process.env.AARONNOTE_WEB_HOST || "127.0.0.1";
 const bindPort = Number(process.env.AARONNOTE_WEB_PORT || 0);
+const gatewayUrl = String(process.env.AARONNOTE_EMACS_GATEWAY_URL || "").trim();
+const gatewayBinding = String(process.env.AARONNOTE_EMACS_GATEWAY_BINDING || "").trim();
+const gatewayClientId = String(process.env.AARONNOTE_EMACS_GATEWAY_CLIENT_ID || "aaronnote").trim();
 const jupyterDefaults = jupyterDefaultsFromEnv(process.env);
 const liuGongQuanFontCandidates = [
   process.env.AARONNOTE_LIUGONGQUAN_FONT,
@@ -167,6 +176,62 @@ const jupyterCell = createJupyterCellService({
   zmq,
 });
 let jupyterKernelWs = null;
+let gatewaySocket = null;
+let gatewayRetryTimer = null;
+let gatewayRequestId = 0;
+let gatewayEndpointPort = 0;
+const gatewayPending = new Map();
+
+function gatewaySend(message) {
+  if (gatewaySocket?.readyState === WebSocket.OPEN) {
+    gatewaySocket.send(JSON.stringify(message));
+    return true;
+  }
+  return false;
+}
+
+function gatewayNotify(method, params = {}) {
+  return gatewaySend({ jsonrpc: "2.0", method, params });
+}
+
+function gatewayRequest(method, params = {}, timeoutMs = 30_000) {
+  if (gatewaySocket?.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error("Emacs gateway is not connected"));
+  }
+  const id = `aaronnote-${++gatewayRequestId}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      gatewayPending.delete(id);
+      reject(new Error(`Emacs gateway request timed out: ${method}`));
+    }, timeoutMs);
+    gatewayPending.set(id, { resolve, reject, timer });
+    gatewaySend({ jsonrpc: "2.0", id, method, params });
+  });
+}
+
+configureExternalFileProvider({
+  owns(file) {
+    const value = String(file || "");
+    return value.startsWith("/fs:") || value.startsWith("fs://");
+  },
+  read(file) {
+    return gatewayRequest(
+      "aaronnote.file.read",
+      { file: String(file) },
+      30_000,
+    );
+  },
+  write(body) {
+    return gatewayRequest(
+      "aaronnote.file.write",
+      body && typeof body === "object" ? body : {},
+      30_000,
+    );
+  },
+});
+
+configureCopilotBridgeRequest((method, params) =>
+  gatewayRequest(method, params, 30_000));
 
 // One-shot orphan sweep: remove staging/clipboard/db temp files older than 24h.
 void sweepRuntimeTmp().then(({ removed }) => {
@@ -610,7 +675,7 @@ async function apiOpenInEmacs(file, line = 1, col = 0, tag = "") {
   const target = resolveShellPath(file);
   const payload = { file: target, line, col };
   if (tag) payload.tag = String(tag);
-  process.stdout.write(`aaronote-event:open:${JSON.stringify(payload)}\n`);
+  gatewayNotify("aaronnote.event", { type: "open", payload });
   return { ok: true, ...payload };
 }
 
@@ -621,13 +686,13 @@ async function apiCurrentFile(body) {
   const payload = { file: target };
   if (client) payload.client = client;
   if (client) noteEditorClient(target, client, { source: "current-file" });
-  process.stdout.write(`aaronote-event:current-file:${JSON.stringify(payload)}\n`);
+  gatewayNotify("aaronnote.event", { type: "current-file", payload });
   return { ok: true, ...payload };
 }
 
 async function apiEmacsUiState(body) {
   const payload = body && typeof body === "object" ? body : {};
-  process.stdout.write(`aaronote-event:ui-state:${JSON.stringify(payload)}\n`);
+  gatewayNotify("aaronnote.event", { type: "ui-state", payload });
   return { ok: true };
 }
 
@@ -637,7 +702,7 @@ async function apiEmacsKey(body) {
   if (!k || k.length > 32) return { ok: false, message: "Invalid key" };
   const payload = { key: k };
   if (client) payload.client = client;
-  process.stdout.write(`aaronote-event:key:${JSON.stringify(payload)}\n`);
+  gatewayNotify("aaronnote.event", { type: "key", payload });
   return { ok: true };
 }
 
@@ -650,7 +715,10 @@ async function apiSystemOpen(body) {
     throw err;
   }
   const resolved = resolveSystemOpenTarget(value, base);
-  process.stdout.write(`aaronote-event:system-open:${JSON.stringify({ target: resolved })}\n`);
+  gatewayNotify("aaronnote.event", {
+    type: "system-open",
+    payload: { target: resolved },
+  });
   return { ok: true, target: resolved };
 }
 
@@ -661,7 +729,7 @@ async function apiEmacsZotero(body, eventName = "zotero") {
     const value = String(source[key] || "").trim();
     if (value) payload[key] = value.slice(0, key === "title" || key === "query" ? 2000 : 8192);
   }
-  process.stdout.write(`aaronote-event:${eventName}:${JSON.stringify(payload)}\n`);
+  gatewayNotify("aaronnote.event", { type: eventName, payload });
   return { ok: true, queued: true };
 }
 
@@ -672,7 +740,10 @@ const apiRouter = new ApiRouter().register({
   "aaronnote:api:notes:save": async (body) => {
     const result = await saveNote(body || {});
     if (result?.ok && !result?.conflict && !result?.stale && result?.file) {
-      process.stdout.write(`aaronote-event:saved:${JSON.stringify({ file: String(result.file) })}\n`);
+      gatewayNotify("aaronnote.event", {
+        type: "saved",
+        payload: { file: String(result.file) },
+      });
       broadcast("command", {
         command: "note-saved",
         file: String(result.file),
@@ -934,6 +1005,136 @@ async function readSystemClipboard(body) {
 
 async function callApi(channel, args = []) {
   return await apiRouter.call(channel, args);
+}
+
+async function handleEmacsCommand(body = {}) {
+  if (body.type === "command" || body.command) {
+    const detail = {
+      ...(body.detail && typeof body.detail === "object" ? body.detail : {}),
+      command: String(body.command || ""),
+    };
+    if (body.client) detail.client = String(body.client);
+    broadcast("command", detail);
+    return { ok: true };
+  }
+  if (body.type === "client-close") {
+    cancelExternalProseChecksForClient(body.clientId || body.client);
+    return closeEditorClient(body);
+  }
+  if (body.type === "open" || body.file) {
+    const file = resolveShellPath(body.file);
+    broadcast("open-file", { file });
+    return { ok: true, file };
+  }
+  throw Object.assign(new Error("Unknown command type"), { code: -32602 });
+}
+
+async function handleGatewayRequest(message) {
+  const hasId = Object.prototype.hasOwnProperty.call(message || {}, "id");
+  try {
+    let result;
+    if (message.method === "aaronnote.command") {
+      result = await handleEmacsCommand(message.params || {});
+    } else if (message.method === "aaronnote.api") {
+      result = await callApi(
+        String(message.params?.channel || ""),
+        message.params?.args || [],
+      );
+    } else {
+      throw Object.assign(new Error("Method not found"), { code: -32601 });
+    }
+    if (hasId) gatewaySend({ jsonrpc: "2.0", id: message.id, result: result ?? null });
+  } catch (error) {
+    if (hasId) {
+      gatewaySend({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: {
+          code: Number(error?.code) || -32603,
+          message: error instanceof Error ? error.message : String(error),
+        },
+      });
+    }
+  }
+}
+
+function handleGatewayMessage(raw) {
+  let message;
+  try {
+    message = JSON.parse(String(raw));
+  } catch {
+    return;
+  }
+  if (message?.method) {
+    void handleGatewayRequest(message);
+    return;
+  }
+  if (message?.id === "register") {
+    if (message.error) {
+      process.stderr.write(
+        `[aaronnote-web] gateway registration failed: ${message.error.message}\n`,
+      );
+    } else {
+      gatewayNotify("aaronnote.event", {
+        type: "ready",
+        payload: { port: gatewayEndpointPort },
+      });
+    }
+    return;
+  }
+  const pending = gatewayPending.get(message?.id);
+  if (!pending) return;
+  gatewayPending.delete(message.id);
+  clearTimeout(pending.timer);
+  if (message.error) {
+    pending.reject(new Error(
+      `Emacs gateway error ${message.error.code}: ${message.error.message}`,
+    ));
+  } else {
+    pending.resolve(message.result);
+  }
+}
+
+function connectGateway(port) {
+  if (!gatewayUrl || !gatewayBinding) {
+    process.stderr.write("[aaronnote-web] Emacs gateway configuration missing\n");
+    return;
+  }
+  clearTimeout(gatewayRetryTimer);
+  gatewayEndpointPort = port;
+  gatewaySocket = new WebSocket(gatewayUrl);
+  gatewaySocket.on("open", () => {
+    gatewaySend({
+      jsonrpc: "2.0",
+      id: "register",
+      method: "gateway.register",
+      params: {
+        bindingId: gatewayBinding,
+        clientId: gatewayClientId,
+        instanceId: `aaronnote-${process.pid}`,
+        provides: ["aaronnote.command", "aaronnote.api"],
+        endpoint: {
+          host: bindHost,
+          port,
+          url: `http://${bindHost}:${port}`,
+        },
+      },
+    });
+  });
+  gatewaySocket.on("message", handleGatewayMessage);
+  gatewaySocket.on("error", (error) => {
+    process.stderr.write(`[aaronnote-web] gateway error: ${error.message}\n`);
+  });
+  gatewaySocket.on("close", () => {
+    gatewaySocket = null;
+    for (const { reject, timer } of gatewayPending.values()) {
+      clearTimeout(timer);
+      reject(new Error("Emacs gateway disconnected"));
+    }
+    gatewayPending.clear();
+    gatewayRetryTimer = setTimeout(() => connectGateway(port), 1000);
+    gatewayRetryTimer.unref?.();
+  });
 }
 
 function adapterScript(origin) {
@@ -1597,30 +1798,6 @@ const server = createServer(async (req, res) => {
       return;
     }
 
-    if (url.pathname === "/emacs/command" && req.method === "POST") {
-      const body = await readJson(req, 16 * 1024 * 1024);
-      if (body.type === "command" || body.command) {
-        const detail = { ...(body.detail && typeof body.detail === "object" ? body.detail : {}), command: String(body.command || "") };
-        if (body.client) detail.client = String(body.client);
-        broadcast("command", detail);
-        sendJson(res, 200, { ok: true });
-        return;
-      }
-      if (body.type === "client-close") {
-        cancelExternalProseChecksForClient(body.clientId || body.client);
-        sendJson(res, 200, closeEditorClient(body));
-        return;
-      }
-      if (body.type === "open" || body.file) {
-        const file = resolveShellPath(body.file);
-        broadcast("open-file", { file });
-        sendJson(res, 200, { ok: true, file });
-        return;
-      }
-      sendJson(res, 400, { ok: false, message: "Unknown command type" });
-      return;
-    }
-
     if (url.pathname === "/emacs/event" && req.method === "POST") {
       const body = await readJson(req, 1024 * 1024);
       if (body.type === "open" || body.type === "goto") {
@@ -1781,6 +1958,6 @@ server.on("error", (err) => {
 });
 server.listen(bindPort, bindHost, () => {
   const port = server.address().port;
-  process.stdout.write(`aaronote-web-host:ready:${port}\n`);
   process.stderr.write(`[aaronnote-web] http://${bindHost}:${port}\n`);
+  connectGateway(port);
 });

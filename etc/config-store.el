@@ -220,7 +220,7 @@
    (my/vterm-popup-window-height . 0.2)
    (my/copilot-deferred-idle-delay . 1.5)
    (my/copilot-deferred-modes lean-mode)
-   (my/copilot-disable-on-remote . t)
+   (my/copilot-disable-on-remote)
    (my/copilot-large-buffer-threshold . 524288)
    (my/copilot-idle-delay . 0.85) (my/copilot-server-max-heap-mb . 1024)
    (my/aaronnote-web-host-max-heap-mb . 512)

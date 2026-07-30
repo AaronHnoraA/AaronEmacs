@@ -86,7 +86,9 @@ When FORWARD is non-nil, preserve its failed/closed state as well."
 (defun remote-channel--adopt
     (kind route context handle &optional recover close metadata)
   "Create and attach a channel descriptor for HANDLE."
-  (let* ((id
+  (or
+   (remote-channel-of handle)
+   (let* ((id
           (format "%s/channel-%d"
                   (remote-context-target-id context)
                   (cl-incf remote-channel--counter)))
@@ -108,7 +110,48 @@ When FORWARD is non-nil, preserve its failed/closed state as well."
       (when-let* ((process (remote-forward-handle handle))
                   ((processp process)))
         (remote-channel--watch-process process channel handle))))
-    channel))
+     channel)))
+
+(cl-defun remote-channel-adopt
+    (handle &key (kind 'network) context route
+            (adapter "network") capability pipeline
+            recover close metadata workspace (register t))
+  "Adopt third-party network HANDLE into the Remote lifecycle.
+
+HANDLE may be a process or `remote-forward'.  CONTEXT, ROUTE and the
+adapter/capability keys identify the logical target just as the routed
+constructors do.  Repeated adoption of the same HANDLE is idempotent.
+When WORKSPACE resolves to an open workspace, register the channel as an
+owned recoverable resource as well."
+  (or
+   (remote-channel-of handle)
+   (let* ((context (remote-channel--context context))
+          (capability
+           (or capability
+               (if (eq kind 'listener)
+                   'network-server
+                 'network-client)))
+          (route
+           (or route
+               (remote-channel--route
+                adapter capability context pipeline)))
+          (channel
+           (remote-channel--adopt
+            kind route context handle recover close metadata)))
+     (when (and register
+                workspace
+                (fboundp 'remote-workspace-register-recoverable-resource))
+       (when-let* ((owner (remote-get-workspace workspace)))
+         (remote-workspace-register-recoverable-resource
+          owner 'channel handle
+          :close (lambda (value _reason)
+                   (remote-close-channel value))
+          :recover
+          (and recover
+               (lambda (_resource _owner)
+                 (funcall recover)))
+          :metadata metadata)))
+     channel)))
 
 (defun remote-channel-of (value)
   "Return the `remote-channel' descriptor associated with VALUE."
@@ -195,6 +238,7 @@ When TARGET is non-nil, include only that normalized target ID."
            (remote-channel-endpoint channel 'local)
            :remote-endpoint
            (remote-channel-endpoint channel 'remote)
+           :metadata (remote-channel-metadata channel)
            :opened-at (remote-channel-opened-at channel))
           result)))
      remote-channels)
@@ -381,7 +425,7 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
 (cl-defun remote-channel--port-forward
     (capability direction remote-endpoint local-endpoint
                 &key context (adapter "network") pipeline metadata
-                workspace (register t))
+                workspace (register t) stable-endpoint)
   "Open a routed DIRECTION forward implementing CAPABILITY."
   (let* ((context (remote-channel--context context))
          (route
@@ -396,7 +440,7 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
          (metadata
           (plist-put
            (copy-sequence metadata) :direction direction))
-         forward)
+         forward descriptor recovery-remote-endpoint)
     (unless function
       (signal
        'remote-backend-unsupported
@@ -407,14 +451,23 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
                          local-endpoint remote-endpoint metadata))
               (error "Backend %s returned no forward"
                      (remote-backend-id backend))))
-    (remote-channel--adopt
-     'forward route context forward
+    (setq recovery-remote-endpoint
+          (if (and stable-endpoint (eq direction 'reverse))
+              (or (remote-forward-remote-endpoint forward)
+                  remote-endpoint)
+            remote-endpoint))
+    (setq descriptor
+          (remote-channel--adopt
+           'forward route context forward nil
+           #'remote-close-channel metadata))
+    (setf
+     (remote-channel-recovery-function descriptor)
      (lambda ()
        (remote-channel--port-forward
-        capability direction remote-endpoint local-endpoint
+        capability direction recovery-remote-endpoint local-endpoint
         :context context :adapter adapter :pipeline pipeline
-        :metadata metadata :register nil))
-     #'remote-close-channel metadata)
+        :metadata metadata :register nil
+        :stable-endpoint stable-endpoint)))
     (when (and register
                (fboundp 'remote-workspace-register-recoverable-resource))
       (when-let* ((owner
@@ -432,9 +485,10 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
          :recover
          (lambda (_resource _owner)
            (remote-channel--port-forward
-            capability direction remote-endpoint local-endpoint
+            capability direction recovery-remote-endpoint local-endpoint
             :context context :adapter adapter :pipeline pipeline
-            :metadata metadata :register nil))
+            :metadata metadata :register nil
+            :stable-endpoint stable-endpoint))
          :metadata metadata)))
     forward))
 
@@ -451,7 +505,7 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
 (cl-defun remote-reverse-port-forward
     (local-endpoint &key remote-endpoint context
                     (adapter "network") pipeline metadata
-                    workspace (register t))
+                    workspace (register t) stable-endpoint)
   "Listen on target REMOTE-ENDPOINT and forward to LOCAL-ENDPOINT.
 An omitted REMOTE-ENDPOINT binds target loopback on a dynamically allocated
 port.  Use `remote-channel-endpoint' to obtain the allocated target port."
@@ -460,7 +514,8 @@ port.  Use `remote-channel-endpoint' to obtain the allocated target port."
    (or remote-endpoint '(:host "127.0.0.1" :port 0))
    local-endpoint
    :context context :adapter adapter :pipeline pipeline
-   :metadata metadata :workspace workspace :register register))
+   :metadata metadata :workspace workspace :register register
+   :stable-endpoint stable-endpoint))
 
 (defun remote-close-channel (channel)
   "Close routed process or forward CHANNEL."

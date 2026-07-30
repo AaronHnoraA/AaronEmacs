@@ -1,4 +1,5 @@
 export {
+  configureCopilotBridgeRequest,
   handleCopilotRequest,
   offsetToPosition,
   positionToOffset,

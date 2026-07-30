@@ -13,6 +13,7 @@
 
 (require 'cl-lib)
 (require 'project)
+(require 'remote-gateway)
 (require 'seq)
 (require 'subr-x)
 
@@ -250,11 +251,8 @@ client.  Only its stdio LSP peer runs on the selected target."
   :type 'boolean
   :group 'lean)
 
-(defvar lean--proxy-port-files (make-hash-table :test #'equal)
-  "Current Eglot proxy port-file for each canonical Lean project root.")
-
-(defvar lean--proxy-port-sequence 0
-  "Monotonic suffix used to isolate concurrent Lean proxy instances.")
+(defvar lean--proxy-gateway-bindings (make-hash-table :test #'equal)
+  "Current gateway registration data for each canonical Lean project root.")
 
 (defun lean--proxy-script ()
   "Return the absolute path to lean-proxy.mjs, or nil if not found."
@@ -366,53 +364,44 @@ Return the logical remote script name, or nil when provisioning is disabled."
   "Return the canonical hash key for Lean project ROOT."
   (file-name-as-directory (expand-file-name root)))
 
-(defun lean--proxy-port-directory (root)
-  "Return the directory containing proxy port files for ROOT."
-  (ignore root)
-  (let ((default-directory temporary-file-directory)
-        (process-environment
-         (copy-sequence (default-value 'process-environment))))
-    (expand-file-name
-     "lean"
-     (or (bound-and-true-p no-littering-var-directory)
-         (expand-file-name "var" user-emacs-directory)))))
+(defun lean--proxy-client-id (root)
+  "Return the stable gateway client ID for Lean project ROOT."
+  (format "lean-infoview-%s"
+          (substring (secure-hash 'sha1 (lean--proxy-root-key root)) 0 12)))
 
-(defun lean--proxy-port-file-name (root instance)
-  "Return ROOT's proxy port-file name for INSTANCE."
-  (let ((directory (lean--proxy-port-directory root))
-        (hash (substring (md5 (lean--proxy-root-key root)) 0 12)))
-    (expand-file-name
-     (format "infoview-%s-%s.json" hash instance)
-     directory)))
-
-(defun lean--proxy-port-file (root)
-  "Return the current proxy port-file path for ROOT.
-When no Eglot proxy contact has been allocated in this Emacs process, return a
-nonexistent pending path.  This deliberately avoids consuming a legacy shared
-port file that may have been overwritten by a dead concurrent proxy."
-  (let ((key (lean--proxy-root-key root)))
-    (or (gethash key lean--proxy-port-files)
-        (lean--proxy-port-file-name root
-                                    (format "%x-pending" (emacs-pid))))))
-
-(defun lean--proxy-port-file-allocated-p (root)
-  "Return non-nil when Eglot allocated a proxy port file for ROOT."
-  (and (gethash (lean--proxy-root-key root) lean--proxy-port-files) t))
-
-(defun lean--proxy-allocate-port-file (root)
-  "Allocate and remember an isolated proxy port file for ROOT."
+(defun lean--proxy-allocate-gateway-binding (root)
+  "Allocate and remember a gateway registration for ROOT."
   (let* ((key (lean--proxy-root-key root))
-         (instance
-          (format "%x-%x"
-                  (emacs-pid)
-                  (cl-incf lean--proxy-port-sequence)))
-         (file (lean--proxy-port-file-name root instance)))
-    (puthash key file lean--proxy-port-files)
-    file))
+         (binding
+          (remote-gateway-prepare-client
+           (lean--proxy-client-id root) (remote-context root)
+           :placement 'client
+           :provides '("lean.cursor"))))
+    (puthash key binding lean--proxy-gateway-bindings)
+    binding))
 
-(defun lean--proxy-forget-port-file (root)
-  "Forget ROOT's current proxy port-file mapping."
-  (remhash (lean--proxy-root-key root) lean--proxy-port-files))
+(defun lean--proxy-gateway-binding (root)
+  "Return ROOT's current gateway registration data."
+  (gethash (lean--proxy-root-key root) lean--proxy-gateway-bindings))
+
+(defun lean--proxy-gateway-client (root)
+  "Return ROOT's connected Lean gateway peer, or nil."
+  (when-let* ((binding (lean--proxy-gateway-binding root)))
+    (remote-gateway-find-client
+     (plist-get binding :client-id)
+     (remote-context root))))
+
+(defun lean--proxy-endpoint (root)
+  "Return ROOT's live infoview HTTP endpoint object, or nil."
+  (when-let* ((client (lean--proxy-gateway-client root)))
+    (remote-gateway-client-endpoint client)))
+
+(defun lean--proxy-forget-gateway-binding (root)
+  "Forget ROOT's current gateway registration."
+  (let ((key (lean--proxy-root-key root)))
+    (when-let* ((binding (gethash key lean--proxy-gateway-bindings)))
+      (remote-gateway-release-binding binding t))
+    (remhash key lean--proxy-gateway-bindings)))
 
 (defun lean--server-contact (&optional _interactive _project)
   "Return the Lean Eglot contact for the current buffer.
@@ -430,7 +419,7 @@ remote.  Falls back to a direct lake serve / lean --server contact otherwise."
     (if-let* (((lean--proxy-available-p))
               (script (lean--proxy-script-for-root root))
               (node-command (lean--proxy-node-command root)))
-        (let ((port-file (lean--proxy-allocate-port-file root))
+        (let ((gateway (lean--proxy-allocate-gateway-binding root))
               (downstream
                (remote-local-bridge-command
                 (car direct)
@@ -442,14 +431,16 @@ remote.  Falls back to a direct lake serve / lean --server contact otherwise."
                (or
                 (remote-client-file-name root)
                 temporary-file-directory)))
-          (lean-dev-log "server-contact: proxy root=%s port-file=%s downstream=%S"
-                        root port-file downstream)
+          (lean-dev-log "server-contact: proxy root=%s gateway=%s downstream=%S"
+                        root (plist-get gateway :websocket-url) downstream)
           (let ((command
                  (append
                   node-command
                   (list (remote-file-local-name script)
                         "--root" proxy-root
-                        "--port-file" port-file
+                        "--gateway-url" (plist-get gateway :websocket-url)
+                        "--gateway-binding" (plist-get gateway :binding-id)
+                        "--gateway-client-id" (plist-get gateway :client-id)
                         "--")
                   downstream))
                 (name

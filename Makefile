@@ -175,6 +175,7 @@ health-native:
 remote-test:
 	$(REMOTE_TEST_BATCH) -l test/remote-tests.el -f ert-run-tests-batch-and-exit
 	$(REMOTE_TEST_BATCH) -l test/remote-framework-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/remote-gateway-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-remote-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-project-remote-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-evil-tests.el -f ert-run-tests-batch-and-exit

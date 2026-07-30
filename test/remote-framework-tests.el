@@ -58,6 +58,7 @@
              remote-open-network-stream
              remote-port-forward
              remote-reverse-port-forward
+             remote-channel-adopt
              remote-channel-of
              remote-channel-live-p
              remote-channel-endpoint
@@ -763,6 +764,38 @@
                     :port (process-contact server :service)))))
         (remote-close-channel server)))))
 
+(ert-deftest remote-channel-adopts-third-party-listener-idempotently ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local"
+             :localname "/tmp/"
+             :workspace-root "/fs:local:/tmp/"))
+           (server
+            (make-network-process
+             :name "remote-adopt-test"
+             :server t :host "127.0.0.1" :service t
+             :noquery t))
+           (first
+            (remote-channel-adopt
+             server :kind 'listener :context context
+             :metadata '(:application "test")))
+           (second
+            (remote-channel-adopt
+             server :kind 'listener :context context)))
+      (unwind-protect
+          (progn
+            (should (eq first second))
+            (should (eq (remote-channel-of server) first))
+            (should
+             (equal
+              (plist-get
+               (plist-get (car (remote-channel-list "local"))
+                          :metadata)
+               :application)
+              "test")))
+        (remote-close-channel server)))))
+
 (ert-deftest remote-native-reverse-forward-relays-and-cleans-lifecycle ()
   (remote-framework-test-with-registry
     (let* ((context
@@ -789,7 +822,8 @@
                    (list
                     :host "127.0.0.1"
                     :port (process-contact destination :service))
-                   :context context :register nil))
+                   :context context :register nil
+                   :stable-endpoint t))
             (let* ((endpoint
                     (remote-channel-endpoint forward 'remote))
                    (channel (remote-channel-of forward)))
@@ -827,6 +861,10 @@
               (should-not (remote-channel-list "local"))
               (let ((replacement (remote-channel-recover channel)))
                 (should (remote-channel-live-p replacement))
+                (should
+                 (equal
+                  (remote-channel-endpoint replacement 'remote)
+                  endpoint))
                 (should (= (length (remote-channel-list "local")) 1))
                 (remote-close-channel replacement)
                 (should-not (remote-channel-list "local")))))

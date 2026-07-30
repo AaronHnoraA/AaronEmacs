@@ -465,6 +465,36 @@
               "missing-paths" (format "%S" (plist-get state-report :missing-paths)))
              (insert "\n"))
 
+           ;; --- External gateway ---
+           (aaron-ui-board-insert-section "Emacs Gateway")
+           (let* ((live (and (fboundp 'remote-gateway-live-p)
+                             (remote-gateway-live-p)))
+                  (info (and live
+                             (remote-gateway-connection-info)))
+                  (clients (and live
+                                (remote-gateway-client-list))))
+             (aaron-ui-board-insert-field
+              "listener"
+              (if live
+                  (format "%s:%s"
+                          (plist-get info :host)
+                          (plist-get info :port))
+                "stopped")
+              (if live 'aaron-ui-board-good 'aaron-ui-board-bad))
+             (aaron-ui-board-insert-field
+              "rpc" (or (plist-get info :http-url) "unavailable"))
+             (aaron-ui-board-insert-field
+              "websocket" (or (plist-get info :websocket-url) "unavailable"))
+             (aaron-ui-board-insert-field
+              "clients" (format "%d" (length clients)))
+             (aaron-ui-board-insert-field
+              "discovery"
+              (if (and live
+                       (fboundp 'remote-gateway--discovery-file))
+                  (remote-gateway--discovery-file)
+                "unavailable")))
+           (insert "\n")
+
            ;; --- Aaronnote ---
            (aaron-ui-board-insert-section "Aaronnote")
            (let ((running (and (boundp 'my/aaronnote--process)

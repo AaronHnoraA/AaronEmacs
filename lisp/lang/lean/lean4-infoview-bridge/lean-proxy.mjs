@@ -4,15 +4,15 @@
 // and forwards all LSP traffic in both directions.  The same Lean session is
 // tapped to drive the official @leanprover/infoview over HTTP+SSE.
 //
-// Usage: node lean-proxy.mjs --root ROOT --port-file PF [-- lake serve]
+// Usage: node lean-proxy.mjs --root ROOT --gateway-url URL
+//        --gateway-binding ID [-- lake serve]
 //
 // Stdout carries only LSP frames for Eglot.  All logging goes to stderr.
-// On HTTP listen the port is written to PF as JSON {port, pid}.
+// Control-plane readiness and cursor messages use Emacs' shared gateway.
 
 import { createServer } from 'node:http'
 import { spawn } from 'node:child_process'
-import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs'
-import { mkdir } from 'node:fs/promises'
+import { readFileSync, existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, extname, resolve } from 'node:path'
 
@@ -21,11 +21,19 @@ const __dir = dirname(fileURLToPath(import.meta.url))
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
-  const r = { root: process.cwd(), portFile: null, downstream: [] }
+  const r = {
+    root: process.cwd(),
+    gatewayUrl: null,
+    gatewayBinding: null,
+    gatewayClientId: 'lean-infoview',
+    downstream: [],
+  }
   let i = 0
   while (i < argv.length) {
     if (argv[i] === '--root')      { r.root = argv[++i]; i++; continue }
-    if (argv[i] === '--port-file') { r.portFile = argv[++i]; i++; continue }
+    if (argv[i] === '--gateway-url') { r.gatewayUrl = argv[++i]; i++; continue }
+    if (argv[i] === '--gateway-binding') { r.gatewayBinding = argv[++i]; i++; continue }
+    if (argv[i] === '--gateway-client-id') { r.gatewayClientId = argv[++i]; i++; continue }
     if (argv[i] === '--')          { r.downstream = argv.slice(i + 1); break }
     i++
   }
@@ -34,17 +42,77 @@ function parseArgs(argv) {
 
 const args = parseArgs(process.argv.slice(2))
 const ROOT          = resolve(args.root)
-const PORT_FILE     = args.portFile
 const DOWNSTREAM    = args.downstream.length ? args.downstream : ['lake', 'serve']
 
 const log = (...p) => process.stderr.write(`[lean-proxy] ${p.join(' ')}\n`)
 
-function clearOwnedPortFile() {
-  if (!PORT_FILE || !existsSync(PORT_FILE)) return
-  try {
-    const owner = JSON.parse(readFileSync(PORT_FILE, 'utf8'))
-    if (owner?.pid === process.pid) unlinkSync(PORT_FILE)
-  } catch {}
+let gatewaySocket = null
+let gatewayRetry = null
+
+function gatewaySend(message) {
+  if (gatewaySocket?.readyState === WebSocket.OPEN)
+    gatewaySocket.send(JSON.stringify(message))
+}
+
+function handleGatewayMessage(raw) {
+  let message
+  try { message = JSON.parse(String(raw)) } catch { return }
+  if (!message?.method) return
+  const respond = (result) => {
+    if (Object.prototype.hasOwnProperty.call(message, 'id'))
+      gatewaySend({ jsonrpc: '2.0', id: message.id, result })
+  }
+  if (message.method === 'lean.cursor') {
+    const { uri, line, character } = message.params ?? {}
+    if (uri && Number.isFinite(line) && Number.isFinite(character)) {
+      lastCursor = { uri, line, character }
+      sseEmit('emacs:cursor', lastCursor)
+    }
+    respond({ ok: true })
+  } else if (Object.prototype.hasOwnProperty.call(message, 'id')) {
+    gatewaySend({
+      jsonrpc: '2.0',
+      id: message.id,
+      error: { code: -32601, message: 'Method not found' },
+    })
+  }
+}
+
+function connectGateway(port) {
+  if (!args.gatewayUrl || !args.gatewayBinding) {
+    log('gateway arguments missing')
+    return
+  }
+  clearTimeout(gatewayRetry)
+  gatewaySocket = new WebSocket(args.gatewayUrl)
+  gatewaySocket.addEventListener('open', () => {
+    gatewaySend({
+      jsonrpc: '2.0',
+      id: 'register',
+      method: 'gateway.register',
+      params: {
+        bindingId: args.gatewayBinding,
+        clientId: args.gatewayClientId,
+        instanceId: `lean-${process.pid}`,
+        provides: ['lean.cursor'],
+        endpoint: {
+          host: '127.0.0.1',
+          port,
+          url: `http://127.0.0.1:${port}`,
+        },
+      },
+    })
+    log('registered with Emacs gateway')
+  })
+  gatewaySocket.addEventListener(
+    'message', event => handleGatewayMessage(event.data))
+  gatewaySocket.addEventListener(
+    'error', event =>
+      log(`gateway error: ${event?.message ?? 'connection failed'}`))
+  gatewaySocket.addEventListener('close', () => {
+    gatewaySocket = null
+    gatewayRetry = setTimeout(() => connectGateway(port), 1000)
+  })
 }
 
 // ── LSP framing ───────────────────────────────────────────────────────────────
@@ -615,19 +683,10 @@ const httpServer = createServer(async (req, res) => {
 httpServer.listen(0, '127.0.0.1', async () => {
   const port = httpServer.address().port
   log(`HTTP listening on 127.0.0.1:${port}`)
-  if (PORT_FILE) {
-    try {
-      const dir = PORT_FILE.replace(/\/[^/]+$/, '')
-      await mkdir(dir, { recursive: true })
-      writeFileSync(PORT_FILE, JSON.stringify({ port, pid: process.pid }))
-      log(`port-file written: ${PORT_FILE}`)
-    } catch(e) {
-      log(`port-file write error: ${e.message}`)
-    }
-  }
+  connectGateway(port)
   startLake()
 })
 
-process.on('SIGTERM', () => { killDownstream(); clearOwnedPortFile(); process.exit(0) })
-process.on('SIGINT',  () => { killDownstream(); clearOwnedPortFile(); process.exit(0) })
-process.on('exit', () => { killDownstream('SIGKILL'); clearOwnedPortFile() })
+process.on('SIGTERM', () => { killDownstream(); gatewaySocket?.close(); process.exit(0) })
+process.on('SIGINT',  () => { killDownstream(); gatewaySocket?.close(); process.exit(0) })
+process.on('exit', () => { killDownstream('SIGKILL') })

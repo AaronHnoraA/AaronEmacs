@@ -34,6 +34,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (when (eq system-type 'darwin)
   (my/require-module-safely 'init-macos))
 (require 'init-remote)
+(require 'init-emacs-gateway)
 (require 'init-ui)
 (require 'init-tabbar)
 (require 'init-display-rules)

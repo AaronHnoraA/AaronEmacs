@@ -12,6 +12,10 @@ buffer/file-name 哲学，以 `/fs:TARGET:/path` 表示稳定的逻辑文件身�
 
 `init-remote.el` 只负责配置集成、UI 和启用 `remote-mode`。
 
+外部 helper 与 Emacs 的统一控制面是 `remote-gateway`。它复用本框架的 channel、
+workspace ownership 与 reverse forwarding，使本地和 TRAMP/SSH target 使用同一套
+JSON-RPC API；协议和注册方式见 [Emacs 通讯网关](emacs-gateway.md)。
+
 ## 0. 仓库级核心地位
 
 Remote 是整个开发环境的基础能力层，不是“打开 SSH 文件时才用”的可选功能。
@@ -333,6 +337,10 @@ Eglot 得到显式 process factory，因此不会因为 project root 是远端�
 客户端；xwidget 直接访问本机 loopback，不需要远端 Node、远端部署或 port forward。
 在远端 buffer 内校验 proxy PID 时也强制使用客户端 process namespace。
 
+Copilot 是纯 client-placement consumer：Remote buffer 的文档内容仍由
+`copilot.el` 同步给 language server，但 binary、PATH、环境、进程 namespace
+全部来自 Emacs 客户端。target 不安装 Copilot，也不会继承 target 的 Node/PATH。
+
 tramp-rpc backend 还包含当前 `msgpack.el` 的 large-map 兼容修饰：旧 encoder 在
 环境 map 超过 15 项时会把二进制长度误传给 `unibyte-string`。direnv/Nix 环境很
 容易超过该阈值，因此兼容逻辑由 backend 集中维护，消费者不截断环境。
@@ -444,6 +452,8 @@ transport failure 会把相关 workspace 标记为 disconnected，并按 1、2�
 自动恢复。任何显式登记了 recovery function 的资源都会在 session 恢复后重建；
 框架目前自动登记 service 与 workspace-owned forward。watch 和 LSP consumer
 仍需接入 workspace resource owner，不能仅凭 capability symbol 宣称已恢复。
+AaronNote 的远程 Markdown watch 已使用这一边界：文件仍以 `/fs:` 标识，watch
+随 workspace 恢复，并在 AaronNote 停止时显式释放。
 PTY shell 不安全重放，因此 terminal 只标记为 disconnected，并要求显式
 `remote-terminal-restart`。
 
@@ -524,7 +534,7 @@ SSH E2E 是显式 opt-in，自动选择 SSH config 导入的 `Aaron-*` target，
 时清理；覆盖文件复制/读取/枚举、target cwd 进程、session 复用，以及动态 SSH
 `-R` listener 从 target 到原生 Emacs server process 的数据往返。
 
-当前 v1 稳定目标是 native + SSH：逻辑文件、同步/异步进程、PTY、环境、SSH
+当前稳定目标是 native + SSH：逻辑文件、同步/异步进程、PTY、环境、SSH
 双向 forward、workspace/service 生命周期和原生开发工具兼容。WSL/container/
 devcontainer、Dape/tasks 编排、动态 SOCKS forward 与托管 tunnel 不在这个版本
 承诺范围内。

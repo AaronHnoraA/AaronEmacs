@@ -123,6 +123,7 @@ import {
   type WritingStatsController,
 } from "./features/writing-stats/controller.ts";
 import { installActiveCoreReconnect } from "./active-core-reconnect.ts";
+import { noteAutoSaveEnabled } from "./save-policy.ts";
 
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) throw new Error("Missing #app");
@@ -647,6 +648,7 @@ let currentFile = "";
 let currentClient = "";
 let currentKind = "";
 let currentStandalone = false;
+let currentRemote = false;
 let currentReadOnly = initialReadOnly;
 let currentMtimeMs = 0;
 let revision = 0;
@@ -2976,6 +2978,10 @@ function scheduleSave(): void {
   saveIdleHandle = 0;
   if (currentReadOnly) return;
   if (!currentFile || applyingContent || revision === savedRevision) return;
+  if (!noteAutoSaveEnabled(currentRemote)) {
+    setStatus("Edited — save manually");
+    return;
+  }
   setStatus("Edited");
   saveTimer = window.setTimeout(() => {
     saveTimer = 0;
@@ -3156,6 +3162,7 @@ function applyOpenedNote(
   currentFile = String(opened.file || fallbackFile || "");
   currentKind = String(opened.kind || "");
   currentStandalone = Boolean(opened.standalone);
+  currentRemote = Boolean(opened.remote);
   currentReadOnly = initialReadOnly;
   applyReadOnlyUi();
   applyIndexPayload(opened);
@@ -3211,7 +3218,15 @@ function applyOpenedNote(
   if (resetVim) vim.setMode("insert");
   updateTitle();
   void api.emacs.currentFile(currentFile, currentClient);
-  if (updateStatus) setStatus(currentReadOnly ? "Read-only" : currentFile ? "Ready" : "Scratch");
+  if (updateStatus) {
+    setStatus(
+      currentReadOnly
+        ? "Read-only"
+        : currentFile
+          ? currentRemote ? "Ready — manual save" : "Ready"
+          : "Scratch",
+    );
+  }
   if (focusEditor) editor.focus();
   scheduleAssistUpdate({ snippets: true, mathPreview: true, cursor: true, toc: true });
   scheduleBibliographyRefresh(true);
@@ -3244,6 +3259,10 @@ async function openFile(file?: string, bootstrap = false): Promise<void> {
   try {
     if (currentFile) await flushCursorPosition();
     if (currentFile && revision !== savedRevision) {
+      if (!noteAutoSaveEnabled(currentRemote)) {
+        setStatus("Remote note has unsaved changes; save before switching");
+        return;
+      }
       await save();
       if (revision !== savedRevision) return;
     }
@@ -3267,6 +3286,10 @@ async function reloadCurrentFilePreservingCursor(options: {
   const scroll = options.preserveScroll ? captureEditorScroll() : null;
   if (position) rememberCursorPosition(position);
   if (!currentReadOnly && revision !== savedRevision) {
+    if (!noteAutoSaveEnabled(currentRemote)) {
+      setStatus("Remote note has unsaved changes; save before refreshing");
+      return;
+    }
     await save();
     if (revision !== savedRevision) return;
   }
@@ -6170,6 +6193,10 @@ async function openStandaloneSlideView(): Promise<void> {
   window.open(url.toString(), "_blank", "noopener,noreferrer");
   setStatus("Opening Slide view");
   if (!currentReadOnly && revision !== savedRevision) {
+    if (!noteAutoSaveEnabled(currentRemote)) {
+      setStatus("Slide view opened with the last saved version");
+      return;
+    }
     await save();
     if (revision !== savedRevision) {
       setStatus("Slide view opened with the last saved version");
@@ -8504,7 +8531,11 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pagehide", () => {
   proseLifecycle.invalidate("page-hidden");
   void flushCursorPosition();
-  if (currentFile && revision !== savedRevision) api.notes.saveKeepalive(saveBody());
+  if (currentFile
+      && revision !== savedRevision
+      && noteAutoSaveEnabled(currentRemote)) {
+    api.notes.saveKeepalive(saveBody());
+  }
   notifyClientClosedKeepalive();
 });
 window.addEventListener("beforeunload", () => {

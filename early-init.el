@@ -241,6 +241,33 @@ both call it."
 ;; 对第一个 frame 也应用同样设置（有些版本对 initial-frame-alist 特判）
 (setq initial-frame-alist default-frame-alist)
 
+;; The initial GUI frame otherwise exposes *scratch* and partially initialized
+;; tab/modelines while Dashboard is still being built.
+(defvar my/gui-hide-initial-frame-during-startup t
+  "Whether to reveal the first GUI frame only after startup content is ready.")
+
+(defun my/reveal-startup-frames ()
+  "Reveal GUI frames hidden by the early startup boundary.
+This is idempotent and deliberately ignores daemon/emacsclient frames."
+  (dolist (frame (frame-list))
+    (when (frame-parameter frame 'my-startup-hidden)
+      (set-frame-parameter frame 'my-startup-hidden nil)
+      (make-frame-visible frame)
+      (redraw-frame frame))))
+
+(when (and my/gui-hide-initial-frame-during-startup
+           (not (daemonp))
+           (display-graphic-p))
+  (setq initial-frame-alist
+        (cons '(visibility . nil)
+              (cons '(my-startup-hidden . t)
+                    (assq-delete-all
+                     'visibility
+                     (assq-delete-all
+                      'my-startup-hidden initial-frame-alist))))))
+
+(add-hook 'emacs-startup-hook #'my/reveal-startup-frames 100)
+
 ;;; 额外的 UI 模式关闭（确保 TTY/GUI 都统一）
 (menu-bar-mode -1)
 (tool-bar-mode -1)

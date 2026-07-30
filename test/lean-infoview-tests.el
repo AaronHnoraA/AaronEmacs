@@ -7,33 +7,39 @@
 (require 'init-lean)
 (require 'init-lean-infoview)
 
-(ert-deftest lean-infoview-proxy-port-files-are-instance-isolated ()
-  (let ((lean--proxy-port-files (make-hash-table :test #'equal))
-        (lean--proxy-port-sequence 0)
+(ert-deftest lean-infoview-gateway-bindings-are-instance-isolated ()
+  (let ((lean--proxy-gateway-bindings (make-hash-table :test #'equal))
+        (sequence 0)
         (root (file-name-as-directory user-emacs-directory)))
-    (let ((first (lean--proxy-allocate-port-file root))
-          (second (lean--proxy-allocate-port-file root)))
-      (should-not (equal first second))
-      (should (equal (lean--proxy-port-file root) second)))))
+    (cl-letf (((symbol-function 'remote-gateway-prepare-client)
+               (lambda (&rest _arguments)
+                 (list :binding-id (cl-incf sequence)))))
+      (let ((first (lean--proxy-allocate-gateway-binding root))
+            (second (lean--proxy-allocate-gateway-binding root)))
+        (should-not (equal first second))
+        (should (equal (lean--proxy-gateway-binding root) second))))))
 
 (ert-deftest lean-infoview-project-root-shares-eglot-proxy-identity ()
   (let* ((directory (make-temp-file "lean-infoview-root-" t))
          (default-directory (file-name-as-directory directory))
          (buffer-file-name (expand-file-name "Main.lean" directory))
          (toolchain (expand-file-name "lean-toolchain" directory))
-         (lean--proxy-port-files (make-hash-table :test #'equal))
-         (lean--proxy-port-sequence 0))
+         (lean--proxy-gateway-bindings (make-hash-table :test #'equal)))
     (unwind-protect
         (progn
           (with-temp-file toolchain
             (insert "leanprover/lean4:stable\n"))
-          (let* ((eglot-root (lean-project-root))
-                 (port-file (lean--proxy-allocate-port-file eglot-root))
-                 (infoview-root (lean--iv-project-root)))
-            (should (equal infoview-root eglot-root))
-            (should (lean--proxy-port-file-allocated-p infoview-root))
-            (should (equal (lean--proxy-port-file infoview-root)
-                           port-file))))
+          (cl-letf (((symbol-function 'remote-gateway-prepare-client)
+                     (lambda (&rest _arguments)
+                       '(:binding-id "lean-binding"))))
+            (let* ((eglot-root (lean-project-root))
+                   (binding
+                    (lean--proxy-allocate-gateway-binding eglot-root))
+                   (infoview-root (lean--iv-project-root)))
+              (should (equal infoview-root eglot-root))
+              (should
+               (equal (lean--proxy-gateway-binding infoview-root)
+                      binding)))))
       (delete-directory directory t))))
 
 (ert-deftest lean-infoview-remote-cache-keeps-logical-target-identity ()
@@ -91,8 +97,11 @@
                (lambda (_root) "/client/lean-proxy.mjs"))
               ((symbol-function 'lean--proxy-node-command)
                (lambda (_root) '("/client/node")))
-              ((symbol-function 'lean--proxy-allocate-port-file)
-               (lambda (_root) "/client/infoview.json"))
+              ((symbol-function 'lean--proxy-allocate-gateway-binding)
+               (lambda (_root)
+                 '(:websocket-url "ws://127.0.0.1:4242/ws"
+                   :binding-id "lean-binding"
+                   :client-id "lean-client")))
               ((symbol-function 'remote-file-name-target)
                (lambda (_root) "box"))
               ((symbol-function 'remote-client-file-name)
@@ -118,7 +127,9 @@
             (list
              "/client/node" "/client/lean-proxy.mjs"
              "--root" temporary-file-directory
-             "--port-file" "/client/infoview.json"
+             "--gateway-url" "ws://127.0.0.1:4242/ws"
+             "--gateway-binding" "lean-binding"
+             "--gateway-client-id" "lean-client"
              "--" "/usr/bin/ssh" "-T" "box" "remote-lake-command")))
           (should
            (equal (plist-get process-arguments :connection-type) 'pipe)))
@@ -181,88 +192,46 @@
         (should-not lean--eglot-waiting-for-environment)
         (should seen)))))
 
-(ert-deftest lean-infoview-rejects-a-dead-local-port-owner ()
-  (let ((port-file
-         (make-temp-file "lean-infoview-dead-owner-" nil ".json")))
-    (unwind-protect
-        (progn
-          (with-temp-file port-file
-            (insert
-             (json-encode
-              '(:port 65511 :pid 2147483000))))
-          (should-not (lean--iv-read-port port-file)))
-      (when (file-exists-p port-file)
-        (delete-file port-file)))))
+(ert-deftest lean-infoview-reads-port-from-live-gateway-endpoint ()
+  (cl-letf (((symbol-function 'lean--proxy-endpoint)
+             (lambda (_root)
+               '((host . "127.0.0.1") (port . 43123)))))
+    (should (= (lean--iv-proxy-port user-emacs-directory) 43123))))
 
-(ert-deftest lean-infoview-accepts-a-live-local-port-owner ()
-  (let ((port-file
-         (make-temp-file "lean-infoview-live-owner-" nil ".json")))
-    (unwind-protect
-        (progn
-          (with-temp-file port-file
-            (insert
-             (json-encode
-              `(:port 43123 :pid ,(emacs-pid)))))
-          (should (= (lean--iv-read-port port-file) 43123)))
-      (when (file-exists-p port-file)
-        (delete-file port-file)))))
-
-(ert-deftest lean-infoview-checks-local-owner-outside-remote-process-namespace ()
-  (let ((default-directory "/fs:box:/work/")
-        seen-directory)
-    (cl-letf (((symbol-function 'process-attributes)
-               (lambda (pid)
-                 (should (= pid 43123))
-                 (setq seen-directory default-directory)
-                 '((comm . "node")))))
-      (should
-       (lean--iv-port-owner-live-p
-        "/client/infoview.json" '(:pid 43123)))
-      (should
-       (equal seen-directory
-              (file-name-as-directory temporary-file-directory))))))
+(ert-deftest lean-infoview-rejects-invalid-gateway-endpoint ()
+  (cl-letf (((symbol-function 'lean--proxy-endpoint)
+             (lambda (_root) '((port . 0)))))
+    (should-not (lean--iv-proxy-port user-emacs-directory))))
 
 (ert-deftest lean-infoview-xwidget-requires-a-graphical-frame ()
   (cl-letf (((symbol-function 'display-graphic-p)
              (lambda (&optional _frame) nil)))
     (should-not (lean-iv-xwidget-p))))
 
-(ert-deftest lean-infoview-port-wait-follows-a-new-eglot-instance ()
-  (let* ((pending (make-temp-name
-                   (expand-file-name "lean-infoview-pending-" temporary-file-directory)))
-         (active (make-temp-file "lean-infoview-active-" nil ".json"))
-         (current pending)
+(ert-deftest lean-infoview-port-wait-follows-a-new-gateway-peer ()
+  (let* ((current nil)
          (lean-iv-port-wait-timeout 2)
          result)
-    (unwind-protect
-        (cl-letf (((symbol-function 'lean--proxy-port-file)
-                   (lambda (_root) current)))
-          (lean--iv-wait-for-port
-           user-emacs-directory
-           (lambda (port) (setq result port)))
-          (with-temp-file active
-            (insert
-             (json-encode
-              `(:port 43124 :pid ,(emacs-pid)))))
-          (setq current active)
-          (let ((deadline (+ (float-time) 1.5)))
-            (while (and (not result)
-                        (< (float-time) deadline))
-              (accept-process-output nil 0.05)))
-          (should (= result 43124))
-          (should-not lean--iv--port-wait-timer))
-      (when (file-exists-p active)
-        (delete-file active)))))
+    (cl-letf (((symbol-function 'lean--iv-proxy-port)
+               (lambda (_root) current)))
+      (lean--iv-wait-for-port
+       user-emacs-directory
+       (lambda (port) (setq result port)))
+      (setq current 43124)
+      (let ((deadline (+ (float-time) 1.5)))
+        (while (and (not result)
+                    (< (float-time) deadline))
+          (accept-process-output nil 0.05)))
+      (should (= result 43124))
+      (should-not lean--iv--port-wait-timer))))
 
 (ert-deftest lean-infoview-repeated-open-replaces-the-port-wait ()
   (with-temp-buffer
     (let ((lean-iv-port-wait-timeout 60)
           first second)
       (unwind-protect
-          (cl-letf (((symbol-function 'lean--proxy-port-file)
-                     (lambda (_root) "/nonexistent/infoview.json"))
-                    ((symbol-function 'lean--iv-read-port)
-                     (lambda (_file) nil)))
+          (cl-letf (((symbol-function 'lean--iv-proxy-port)
+                     (lambda (_root) nil)))
             (lean--iv-wait-for-port user-emacs-directory #'ignore)
             (setq first lean--iv--port-wait-timer)
             (should (timerp first))

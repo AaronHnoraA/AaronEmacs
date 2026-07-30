@@ -1,5 +1,6 @@
 export {
   configure,
+  configureExternalFileProvider,
   markNotesDirty,
   notesIndexVersionValue,
   noteSelfWriteRecently,

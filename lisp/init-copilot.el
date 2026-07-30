@@ -8,10 +8,15 @@
 (require 'config)
 (require 'cl-lib)
 (require 'json)
+(require 'remote-gateway)
+(require 'remote-process)
 (require 'subr-x)
 
 ;;; ── GitHub Copilot ────────────────────────────────────────────────────────
 (declare-function copilot-server-executable "copilot" ())
+(declare-function copilot--command "copilot" ())
+(declare-function copilot--handle-notification "copilot" (connection method params))
+(declare-function copilot--handle-request "copilot" (connection method params))
 (declare-function copilot--connection-alivep "copilot" ())
 (declare-function copilot--path-to-uri "copilot" (path))
 (declare-function copilot--start-server "copilot" ())
@@ -21,12 +26,6 @@
 (declare-function copilot-accept-completion-to-char "copilot" (char &optional count))
 (declare-function jsonrpc-notify "jsonrpc" (connection method params))
 (declare-function jsonrpc-request "jsonrpc" (connection method params &rest args))
-(declare-function ws-body "web-server" (request))
-(declare-function ws-process "web-server" (server-or-request))
-(declare-function ws-response-header "web-server" (proc code &rest headers))
-(declare-function ws-send "web-server" (proc string))
-(declare-function ws-start "web-server" (handlers port &optional log-buffer &rest network-args))
-(declare-function ws-stop "web-server" (server))
 (declare-function my/snippet-active-p "init-funcs" ())
 (declare-function my/snippet-next-field-dwim "init-funcs" ())
 (declare-function my/forward-delimiter-dwim "init-funcs" ())
@@ -35,6 +34,7 @@
 (defvar copilot--connection nil)
 (defvar copilot--quota nil)
 (defvar copilot--status nil)
+(defvar copilot-log-max)
 
 (defgroup my/copilot nil
   "Copilot integration defaults."
@@ -60,9 +60,9 @@ Large generated files can make inline completion unnecessarily expensive."
   "V8 heap cap (MB) for the Copilot language server, or nil for no cap.
 Applied via `NODE_OPTIONS=--max-old-space-size' on the process this Emacs
 spawns.  Emacs-launched AaronNote now uses
-`my/copilot-aaronnote-bridge-url' to share that process instead of starting a
-second language server; this cap is only mirrored to AaronNote's local fallback
-LSP in standalone/non-bridge runs."
+the shared Emacs gateway to reuse that process instead of starting a second
+language server; this cap is only mirrored to AaronNote's local fallback LSP
+in standalone runs."
   :type '(choice (integer :tag "Heap cap in MB") (const :tag "No cap" nil))
   :group 'my/copilot)
 
@@ -75,12 +75,6 @@ LSP in standalone/non-bridge runs."
   "Idle seconds before automatically enabling Copilot in deferred modes."
   :type 'number
   :group 'my/copilot)
-
-(defvar my/copilot-aaronnote-bridge--server nil
-  "Local web-server instance used by AaronNote to share this Copilot LS.")
-
-(defvar my/copilot-aaronnote-bridge--port nil
-  "Local port of `my/copilot-aaronnote-bridge--server'.")
 
 (defvar my/copilot-aaronnote-bridge--documents (make-hash-table :test #'equal)
   "Synthetic AaronNote document state known to the shared Copilot LS.")
@@ -106,6 +100,77 @@ LSP in standalone/non-bridge runs."
 (defvar-local my/copilot--auto-enable-timer nil
   "Idle timer used to defer automatic Copilot startup.")
 
+(defun my/copilot--client-process-environment ()
+  "Return the client environment used by the local Copilot binary."
+  (let ((process-environment (remote-client-process-environment)))
+    (if my/copilot-server-max-heap-mb
+        (let* ((flag
+                (format
+                 "--max-old-space-size=%d"
+                 my/copilot-server-max-heap-mb))
+               (existing (getenv "NODE_OPTIONS")))
+          (cons
+           (format
+            "NODE_OPTIONS=%s"
+            (if (and existing (not (string-empty-p existing)))
+                (concat existing " " flag)
+              flag))
+           process-environment))
+      process-environment)))
+
+(defun my/copilot--client-server-executable-a (fn &rest args)
+  "Resolve the Copilot server through the Remote client boundary.
+FN and ARGS name the original `copilot-server-executable' invocation."
+  (let ((default-directory temporary-file-directory)
+        (process-environment (remote-client-process-environment))
+        (exec-path (remote-client-exec-path))
+        (inhibit-file-name-operation 'file-exists-p)
+        (inhibit-file-name-handlers
+         (cons #'remote-file-name-handler
+               (cons #'tramp-file-name-handler
+                     inhibit-file-name-handlers))))
+    (apply fn args)))
+
+(defun my/copilot--make-client-process ()
+  "Create the Copilot language server at explicit client placement."
+  (let* ((client-environment (my/copilot--client-process-environment))
+         (client-exec-path (remote-client-exec-path))
+         (default-directory temporary-file-directory)
+         (process-environment client-environment)
+         (exec-path client-exec-path))
+    (remote-make-client-process
+     :name "copilot server"
+     :command (copilot--command)
+     :coding 'utf-8-emacs-unix
+     :connection-type 'pipe
+     :stderr (get-buffer-create "*copilot stderr*")
+     :noquery t
+     :remote-client-directory temporary-file-directory
+     :remote-client-environment client-environment
+     :remote-client-exec-path client-exec-path
+     :remote-adapter "process")))
+
+(defun my/copilot--make-client-connection-a (_fn)
+  "Create Copilot's JSON-RPC connection around ignored original _FN.
+Only the process placement differs from `copilot--make-connection': the
+language-server binary always runs beside Emacs."
+  (let ((make-fn
+         (apply-partially
+          #'make-instance
+          'jsonrpc-process-connection
+          :name "copilot"
+          :request-dispatcher #'copilot--handle-request
+          :notification-dispatcher #'copilot--handle-notification
+          :process (my/copilot--make-client-process))))
+    (condition-case nil
+        (funcall
+         make-fn
+         :events-buffer-config `(:size ,copilot-log-max))
+      (invalid-slot-name
+       (funcall
+        make-fn
+        :events-buffer-scrollback-size copilot-log-max)))))
+
 (defun my/copilot-aaronnote-bridge--log (event &optional detail)
   "Record AaronNote bridge EVENT with DETAIL when bridge logging is enabled."
   (when my/copilot-aaronnote-bridge--log-recording
@@ -117,9 +182,8 @@ LSP in standalone/non-bridge runs."
       (setcdr (nthcdr 199 my/copilot-aaronnote-bridge--log) nil))))
 
 (defun my/copilot-aaronnote-bridge--server-live-p ()
-  "Return non-nil when the AaronNote Copilot bridge HTTP server is live."
-  (and my/copilot-aaronnote-bridge--server
-       (process-live-p (ws-process my/copilot-aaronnote-bridge--server))))
+  "Return non-nil when the shared Emacs gateway is live."
+  (remote-gateway-live-p))
 
 (defun my/copilot-aaronnote-bridge--empty-object ()
   "Return a JSON object that serializes as `{}`."
@@ -662,7 +726,10 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
   "Return bridge diagnostics for AaronNote."
   (list :type "copilot-log"
         :bridge "emacs"
-        :port (or my/copilot-aaronnote-bridge--port 0)
+        :port (or (plist-get
+                   (remote-gateway-connection-info)
+                   :port)
+                  0)
         :serverLive (if (my/copilot-aaronnote-bridge--server-live-p) t :json-false)
         :copilotLive (if (and (require 'copilot nil t)
                               (copilot--connection-alivep))
@@ -720,74 +787,38 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
     (_ (list :ok :json-false
              :message (format "Unknown Copilot bridge action: %s" action)))))
 
-(defun my/copilot-aaronnote-bridge--send-json (request status payload)
-  "Send JSON PAYLOAD to web-server REQUEST with HTTP STATUS."
-  (let* ((proc (ws-process request))
-         (json (encode-coding-string (json-encode payload) 'utf-8)))
-    (ws-response-header proc status
-                        (cons "Content-Type" "application/json; charset=utf-8")
-                        (cons "Content-Length" (string-bytes json))
-                        (cons "Cache-Control" "no-store"))
-    (ws-send proc json)
-    (throw 'close-connection nil)))
+(defun my/copilot-aaronnote-bridge--gateway-plist (value)
+  "Convert decoded gateway VALUE into the plist shape used by this bridge."
+  (cond
+   ((vectorp value)
+    (vconcat
+     (mapcar #'my/copilot-aaronnote-bridge--gateway-plist value)))
+   ((and (listp value)
+         (cl-every
+          (lambda (item)
+            (and (consp item)
+                 (or (stringp (car item))
+                     (symbolp (car item)))))
+          value))
+    (cl-loop
+     for (key . item) in value
+     append
+     (list (intern (concat ":" (format "%s" key)))
+           (my/copilot-aaronnote-bridge--gateway-plist item))))
+   ((listp value)
+    (mapcar #'my/copilot-aaronnote-bridge--gateway-plist value))
+   (t value)))
 
-(defun my/copilot-aaronnote-bridge--handle-post (request)
-  "Handle one AaronNote Copilot bridge HTTP REQUEST."
-  (condition-case err
-      (let* ((payload (json-parse-string (or (ws-body request) "")
-                                         :object-type 'plist
-                                         :array-type 'array
-                                         :null-object nil
-                                         :false-object :json-false))
-             (action (or (plist-get payload :action) ""))
-             (body (or (plist-get payload :body) '())))
-        (my/copilot-aaronnote-bridge--send-json
-         request 200
-         (my/copilot-aaronnote-bridge--dispatch action body)))
-    (json-parse-error
-     (my/copilot-aaronnote-bridge--send-json
-      request 400
-      (list :ok :json-false :message "Invalid Copilot bridge JSON")))
-    (error
-     (let ((trace (with-output-to-string (backtrace))))
-       (my/copilot-aaronnote-bridge--log
-        "error"
-        `((message . ,(error-message-string err))
-          (backtrace . ,trace)))
-       (my/copilot-aaronnote-bridge--send-json
-        request 200
-        (list :ok :json-false
-              :message (error-message-string err)
-              :backtrace trace
-              :status (list :message (error-message-string err)
-                            :kind "Error"
-                            :busy :json-false)))))))
+(defun my/copilot-aaronnote-bridge--gateway-request (params _client)
+  "Handle Copilot gateway PARAMS from AaronNote."
+  (let ((action (alist-get "action" params "" nil #'string=))
+        (body (alist-get "body" params nil nil #'string=)))
+    (my/copilot-aaronnote-bridge--dispatch
+     action
+     (my/copilot-aaronnote-bridge--gateway-plist body))))
 
-(defun my/copilot-aaronnote-bridge-start ()
-  "Start the localhost AaronNote -> Emacs Copilot bridge and return its URL."
-  (interactive)
-  (unless (my/copilot-aaronnote-bridge--server-live-p)
-    (unless (require 'web-server nil t)
-      (user-error "AaronNote Copilot bridge requires the web-server package"))
-    (setq my/copilot-aaronnote-bridge--server
-          (ws-start
-           `(((:POST . "^/copilot$") . ,#'my/copilot-aaronnote-bridge--handle-post))
-           0 nil :host "127.0.0.1"))
-    (setq my/copilot-aaronnote-bridge--port
-          (process-contact (ws-process my/copilot-aaronnote-bridge--server)
-                           :service)))
-  (format "http://127.0.0.1:%d/copilot" my/copilot-aaronnote-bridge--port))
-
-(defun my/copilot-aaronnote-bridge-stop ()
-  "Stop the localhost AaronNote -> Emacs Copilot bridge."
-  (interactive)
-  (when (my/copilot-aaronnote-bridge--server-live-p)
-    (ws-stop my/copilot-aaronnote-bridge--server))
-  (setq my/copilot-aaronnote-bridge--server nil
-        my/copilot-aaronnote-bridge--port nil))
-
-(defalias 'my/copilot-aaronnote-bridge-url
-  #'my/copilot-aaronnote-bridge-start)
+(remote-gateway-register-method
+ "copilot.request" #'my/copilot-aaronnote-bridge--gateway-request)
 
 (defun my/copilot-buffer-eligible-p ()
   "Return non-nil when the current buffer is cheap enough for Copilot."
@@ -950,22 +981,30 @@ method maps the bracket key to full-width punctuation.")
   :config
   (my/copilot-setup-dwim-keys copilot-mode-map)
   (my/copilot-setup-dwim-keys copilot-completion-map)
-  (define-advice copilot--make-connection (:around (fn) my/copilot-cap-server-heap)
-    "Cap the Copilot language server's V8 heap via NODE_OPTIONS.
-The server binary is a node script launched through `make-process'; there is
-no `copilot-server-args' hook for interpreter flags, so the cap has to be
-injected through the process environment instead."
-    (if my/copilot-server-max-heap-mb
-        (let* ((flag (format "--max-old-space-size=%d" my/copilot-server-max-heap-mb))
-               (existing (getenv "NODE_OPTIONS"))
-               (process-environment
-                (cons (format "NODE_OPTIONS=%s"
-                              (if (and existing (not (string-empty-p existing)))
-                                  (concat existing " " flag)
-                                flag))
-                      process-environment)))
-          (funcall fn))
-      (funcall fn)))
+  (when
+      (and
+       (fboundp
+        'copilot--make-connection@my/copilot-cap-server-heap)
+       (advice-member-p
+        'copilot--make-connection@my/copilot-cap-server-heap
+        'copilot--make-connection))
+    (advice-remove
+     'copilot--make-connection
+     'copilot--make-connection@my/copilot-cap-server-heap))
+  (unless
+      (advice-member-p
+       #'my/copilot--client-server-executable-a
+       'copilot-server-executable)
+    (advice-add
+     'copilot-server-executable :around
+     #'my/copilot--client-server-executable-a))
+  (unless
+      (advice-member-p
+       #'my/copilot--make-client-connection-a
+       'copilot--make-connection)
+    (advice-add
+     'copilot--make-connection :around
+     #'my/copilot--make-client-connection-a))
   (defun my/copilot-check-status ()
     "Report current `copilot.el' authentication status.
 
