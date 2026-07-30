@@ -13,14 +13,14 @@
         (((symbol-function 'remote-expand-file-name)
           (lambda (file &optional directory target)
             (setq call (list file directory target))
-            "/fs:local:/Users/me/Documents/AaronNote/")))
+            "/fs:local:/Users/me/Documents/Noema/")))
       (should
        (equal
-        (my/aaronnote--canonical-file "~/Documents/AaronNote/")
-        "/fs:local:/Users/me/Documents/AaronNote/"))
+        (my/aaronnote--canonical-file "~/Documents/Noema/")
+        "/fs:local:/Users/me/Documents/Noema/"))
       (should
        (equal call
-              '("~/Documents/AaronNote/" nil "local"))))))
+              '("~/Documents/Noema/" nil "local"))))))
 
 (ert-deftest my/aaronnote-host-file-preserves-remote-logical-identity ()
   (let ((remote-mode t))
@@ -506,7 +506,7 @@
          (payload . ((status . ,binary-status)
                      (severity . "error"))))
        nil))
-    (should (string-prefix-p "AaronNote error: " seen))
+    (should (string-prefix-p "Noema error: " seen))
     (should-not (string-match-p "parse failed" seen))))
 
 (ert-deftest my/aaronnote-ui-state-ignores-malformed-status-fields ()
@@ -799,7 +799,7 @@
                (lambda (_client-id) 'mock-client))
               ((symbol-function 'remote-gateway-request-sync)
                (lambda (&rest _args)
-                 (ert-fail "async AaronNote API must not wait synchronously")))
+                 (ert-fail "async Noema API must not wait synchronously")))
               ((symbol-function 'remote-gateway-request-async)
                (lambda (client method params callback timeout)
                  (setq request (list client method params timeout))

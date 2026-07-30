@@ -17,8 +17,8 @@ channels.
 
 - [quick-start.md](quick-start.md) First-time setup, system dependencies, fonts, path conventions, and bootstrap.
 - [daily-usage.md](daily-usage.md) Daily entry points, high-frequency keybindings, and leader-group layout.
-- [agenda.md](agenda.md) Aaronnote `@@todo`/`@@project`/`@@clock` syntax, server agenda/project/clock view-model, repeaters, dependencies, and Web/Emacs entry points.
-- [slides-demo.md](../lisp/roam/aaronnote/docs/slides-demo.md) Ready-to-open `kind: slides` Aaronnote deck with math and HTML examples.
+- [agenda.md](agenda.md) Noema `@@todo`/`@@project`/`@@clock` syntax, server agenda/project/clock view-model, repeaters, dependencies, and Web/Emacs entry points.
+- [slides-demo.md](../lisp/roam/Noema/docs/slides-demo.md) Ready-to-open `kind: slides` Noema deck with math and HTML examples.
 - [settings-cookbook.md](settings-cookbook.md) “I want to change X” guidance that tells you where each kind of change belongs.
 - [config-management.md](config-management.md) Unified `config` registry: one front door (`config-get`/`config-set`, `M-x my/config-board`) to view, edit, live-apply, and persist every registered setting.
 
@@ -43,7 +43,7 @@ channels.
 
 - Want to install it: [quick-start.md](quick-start.md)
 - Want keybindings: [daily-usage.md](daily-usage.md)
-- Want Aaronnote tasks/agenda: [agenda.md](agenda.md)
+- Want Noema tasks/agenda: [agenda.md](agenda.md)
 - Want to change behavior: [settings-cookbook.md](settings-cookbook.md)
 - Want the project workflow: [project-guide.md](project-guide.md)
 - Want programming / LSP / remote details: [dev-guide.md](dev-guide.md)

@@ -1,4 +1,4 @@
-;;; init-md-roam-ui.el --- Aaronnote roam UI (shim onto aaron-ui-board) -*- lexical-binding: t -*-
+;;; init-md-roam-ui.el --- Noema roam UI (shim onto aaron-ui-board) -*- lexical-binding: t -*-
 
 ;;; Commentary:
 ;; Backward-compatibility shim.  All public symbols delegate to `aaron-ui-board'.
@@ -58,7 +58,7 @@
 ;;; --- compatibility mode ---
 
 (define-derived-mode my/aaronnote-roam-ui-mode aaron-ui-board-mode "Roam-UI"
-  "Backward-compatible mode name for Aaronnote roam board buffers.")
+  "Backward-compatible mode name for Noema roam board buffers.")
 
 (define-key my/aaronnote-roam-ui-mode-map (kbd "d") #'my/aaronnote-roam-todo-done)
 (define-key my/aaronnote-roam-ui-mode-map (kbd "s") #'my/aaronnote-roam-update-todo-status)

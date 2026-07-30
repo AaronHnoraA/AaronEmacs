@@ -1,8 +1,0 @@
-# -*- mode: snippet -*-
-# name: Aaronnote planning block todo
-# key: apblock
-# group: Aaronnote planning DSL
-# --
-@@todo(${1:doing}) [${2:Task}] {
-}
-$0

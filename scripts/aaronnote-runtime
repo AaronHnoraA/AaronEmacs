@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EMACS_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-RUNTIME_ROOT="${EMACS_ROOT}/lisp/roam/aaronnote"
+RUNTIME_ROOT="${EMACS_ROOT}/lisp/roam/Noema"
 JUPYTER_ROOT="${RUNTIME_ROOT}/jupyter"
 STATE_ROOT="${EMACS_ROOT}/var/aaronnote"
 RUNTIME_STATE="${STATE_ROOT}/runtime"
@@ -213,7 +213,7 @@ db_vacuum() {
 }
 
 runtime_clean() {
-  local expected="${EMACS_ROOT}/lisp/roam/aaronnote/jupyter"
+  local expected="${EMACS_ROOT}/lisp/roam/Noema/jupyter"
   [[ "$JUPYTER_ROOT" == "$expected" ]] || die "refusing cleanup for unexpected root: $JUPYTER_ROOT"
   rm -rf "${JUPYTER_ROOT}/.venv"
   find "${JUPYTER_ROOT}/.jupyter/data/kernels" -mindepth 1 -maxdepth 1 -type d -name 'sagemath-*' -exec rm -rf -- {} + 2>/dev/null || true

@@ -56,7 +56,7 @@ Supported plist keys:
             value))))
 
 (defun my/project-local--simple-jupyter-defaults-p (value)
-  "Return non-nil when VALUE contains safe Aaronnote Jupyter defaults."
+  "Return non-nil when VALUE contains safe Noema Jupyter defaults."
   (and (listp value)
        (let ((rest value)
              (allowed '(:language :kernel :session))

@@ -1,8 +1,8 @@
-;;; init-md.el --- Open Markdown files in Aaronnote -*- lexical-binding: t -*-
+;;; init-md.el --- Open Markdown files in Noema -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Markdown editing is owned by Aaronnote.  Emacs redirects opened Markdown
-;; files into the local Aaronnote Web/Appine bridge for interactive opens, and
+;; Markdown editing is owned by Noema.  Emacs redirects opened Markdown
+;; files into the local Noema Web/Appine bridge for interactive opens, and
 ;; falls back to a raw text buffer for programmatic callers (magit, grep, xref).
 
 ;;; Code:
@@ -13,23 +13,23 @@
 (require 'init-aaronnote)
 
 (defgroup my/markdown nil
-  "Markdown file handoff to Aaronnote."
+  "Markdown file handoff to Noema."
   :group 'my/aaronnote)
 
 (config-defvar my/aaronnote-close-emacs-markdown-buffer nil
-  "When non-nil, close the temporary Emacs buffer after opening Markdown in Aaronnote."
+  "When non-nil, close the temporary Emacs buffer after opening Markdown in Noema."
   :type 'boolean
   :group 'my/markdown)
 
 (defconst my/aaronnote-markdown-auto-mode-patterns
   '("README\\(?:\\.md\\)?\\'" "\\.markdown\\'" "\\.md\\'")
-  "File patterns redirected from Emacs buffers into Aaronnote.")
+  "File patterns redirected from Emacs buffers into Noema.")
 
 (defvar-local my/aaronnote--markdown-redirected nil
-  "Non-nil when this buffer has already been handed to Aaronnote.")
+  "Non-nil when this buffer has already been handed to Noema.")
 
 (defvar my/aaronnote--inhibit-redirect nil
-  "Non-nil inhibits the markdown-to-Aaronnote redirect.
+  "Non-nil inhibits the markdown-to-Noema redirect.
 Bind this to t around programmatic find-file calls (e.g. in magit hooks,
 test helpers) where you want a raw Emacs buffer instead of the web editor.")
 
@@ -37,10 +37,10 @@ test helpers) where you want a raw Emacs buffer instead of the web editor.")
   '(find-file find-file-other-window find-file-other-frame
     find-file-literally find-alternate-file
     dired-find-file dired-find-file-other-window dired-view-file)
-  "Interactive commands from which Markdown opens should redirect to Aaronnote.")
+  "Interactive commands from which Markdown opens should redirect to Noema.")
 
 (defun my/aaronnote--should-redirect-p ()
-  "Return non-nil when the current open warrants an Aaronnote redirect."
+  "Return non-nil when the current open warrants an Noema redirect."
   (and (not noninteractive)
        (not my/aaronnote--inhibit-redirect)
        ;; Block known programmatic callers that are not user-facing file opens.
@@ -62,7 +62,7 @@ test helpers) where you want a raw Emacs buffer instead of the web editor.")
                    pattern))))))
 
 (defun my/aaronnote--pin-markdown-redirect-mode ()
-  "Keep Markdown file patterns routed to Aaronnote ahead of other modes."
+  "Keep Markdown file patterns routed to Noema ahead of other modes."
   (setq auto-mode-alist
         (append
          (mapcar (lambda (pattern)
@@ -72,7 +72,7 @@ test helpers) where you want a raw Emacs buffer instead of the web editor.")
                        auto-mode-alist))))
 
 (defun my/aaronnote--ensure-markdown-file (file)
-  "Ensure Markdown FILE exists before Aaronnote opens it."
+  "Ensure Markdown FILE exists before Noema opens it."
   (let ((file (expand-file-name file)))
     (unless (file-exists-p file)
       (make-directory (file-name-directory file) t)
@@ -89,7 +89,7 @@ test helpers) where you want a raw Emacs buffer instead of the web editor.")
         (kill-buffer buffer)))))
 
 (defun my/aaronnote--redirect-current-markdown-buffer ()
-  "Open the current Markdown buffer in Aaronnote and optionally close it."
+  "Open the current Markdown buffer in Noema and optionally close it."
   (let ((file buffer-file-name)
         (buffer (current-buffer)))
     (unless (and file (my/aaronnote--markdown-file-p file))
@@ -114,7 +114,7 @@ test helpers) where you want a raw Emacs buffer instead of the web editor.")
 
 ;;;###autoload
 (defun my/aaronnote-markdown-redirect-mode ()
-  "Major-mode replacement that opens the current Markdown file in Aaronnote.
+  "Major-mode replacement that opens the current Markdown file in Noema.
 For programmatic opens (magit, grep, org-link), falls back to a raw text mode."
   (interactive)
   (if (my/aaronnote--should-redirect-p)
@@ -127,7 +127,7 @@ For programmatic opens (magit, grep, org-link), falls back to a raw text mode."
 ;;;###autoload
 (defun my/aaronnote-open-markdown-raw (&optional file)
   "Open FILE (or the current note) as a raw Markdown buffer in Emacs.
-Bypasses the Aaronnote redirect.  Useful for diffing, fixing broken notes,
+Bypasses the Noema redirect.  Useful for diffing, fixing broken notes,
 or editing when the web editor is unavailable."
   (interactive
    (list (read-file-name "Raw Markdown: " nil
@@ -148,7 +148,7 @@ or editing when the web editor is unavailable."
 (my/aaronnote--pin-markdown-redirect-mode)
 
 ;; `treesit-auto' adds its own Markdown entries during configuration.  Re-pin
-;; the Aaronnote handoff after that package loads so no grammar prompt runs.
+;; the Noema handoff after that package loads so no grammar prompt runs.
 (with-eval-after-load 'treesit-auto
   (my/aaronnote--pin-markdown-redirect-mode))
 

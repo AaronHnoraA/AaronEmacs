@@ -1,7 +1,7 @@
-;;; init-aaronnote.el --- Aaronnote Web/Appine bridge -*- lexical-binding: t; -*-
+;;; init-aaronnote.el --- Noema Web/Appine bridge -*- lexical-binding: t; -*-
 ;;
-;; Emacs starts the local Aaronnote web host and opens it in Appine/xwidget.
-;; The editable document state lives in Aaronnote's CodeMirror app; Emacs does
+;; Emacs starts the local Noema web host and opens it in Appine/xwidget.
+;; The editable document state lives in Noema's CodeMirror app; Emacs does
 ;; not mirror buffer edits into the browser.
 
 ;;; Code:
@@ -60,43 +60,47 @@
 (autoload 'my/aaronnote-publish-clean        "init-aaronnote-publish" nil t)
 
 (defgroup my/aaronnote nil
-  "Aaronnote Markdown web editor integration."
+  "Noema Markdown web editor integration."
   :group 'applications)
 
 (defvar my/aaronnote--web-host-script
-  (expand-file-name "lisp/roam/aaronnote/web-host.mjs" user-emacs-directory)
-  "Path to the Aaronnote web host script.")
+  (expand-file-name "lisp/roam/Noema/web-host.mjs" user-emacs-directory)
+  "Path to the Noema web host script.")
 
 (defvar my/aaronnote--web-dir
-  (expand-file-name "lisp/roam/aaronnote/dist/aaronnote" user-emacs-directory)
-  "Path to the built Aaronnote web app.")
+  (expand-file-name "lisp/roam/Noema/dist/aaronnote" user-emacs-directory)
+  "Path to the built Noema web app.")
 
 (defvar my/aaronnote--runtime-root
-  (expand-file-name "lisp/roam/aaronnote" user-emacs-directory)
-  "Path to the vendored Aaronnote runtime.")
+  (expand-file-name "lisp/roam/Noema" user-emacs-directory)
+  "Path to the vendored Noema runtime.")
 
 (defvar my/aaronnote--state-root
   (expand-file-name "var/aaronnote" user-emacs-directory)
-  "Path to Aaronnote state files under the Emacs config.")
+  "Path to Noema state files under the Emacs config.")
 
 (defvar my/aaronnote--tmp-root
   (expand-file-name "tmp" my/aaronnote--state-root)
-  "Path to Aaronnote runtime temporary files under the Emacs config.")
+  "Path to Noema runtime temporary files under the Emacs config.")
 
 (defvar my/aaronnote--snippets-root
   (expand-file-name "snippets" user-emacs-directory)
-  "Path to Aaronnote snippets shared with Emacs.")
+  "Path to Noema snippets shared with Emacs.")
 
 (defvar my/aaronnote--templates-root
-  (expand-file-name "templates/aaronnote" user-emacs-directory)
-  "Path to Markdown templates shared by Emacs and Aaronnote.")
+  (expand-file-name "templates/noema" user-emacs-directory)
+  "Path to Markdown templates shared by Emacs and Noema.")
+
+(defvar my/aaronnote--latex-templates-root
+  (expand-file-name "templates" user-emacs-directory)
+  "Path to LaTeX templates shared by Emacs and Noema.")
 
 (defvar my/aaronnote--notes-root
   (expand-file-name ".roam" user-emacs-directory)
   "Path to the Markdown notes directory.")
 
 (defun my/aaronnote--project-settings ()
-  "Read Aaronnote's project settings from the note root without evaluation."
+  "Read Noema's project settings from the note root without evaluation."
   (let ((file (expand-file-name ".dir-locals.el" my/aaronnote--notes-root)))
     (when (file-readable-p file)
       (condition-case nil
@@ -110,7 +114,7 @@
         (error nil)))))
 
 (defun my/aaronnote--jupyter-defaults ()
-  "Return project-configured Jupyter defaults for new Aaronnote cells."
+  "Return project-configured Jupyter defaults for new Noema cells."
   (let* ((settings (my/aaronnote--project-settings))
          (configured (plist-get settings :aaronnote-jupyter)))
     (list :language (format "%s" (or (plist-get configured :language) "python"))
@@ -130,18 +134,18 @@
   "Folder of .tex files defining the global KaTeX macro environment.")
 
 (config-defvar my/aaronnote-backend nil
-  "Backend used to display Aaronnote."
+  "Backend used to display Noema."
   :type '(choice (const :tag "xwidget-webkit" xwidget) (const :tag "Appine" appine))
   :group 'my/aaronnote)
 
 (config-defvar my/aaronnote-web-port nil
-  "Fixed port for the Aaronnote web host.
+  "Fixed port for the Noema web host.
 Set to 0 to let the OS pick a random port."
   :type 'integer
   :group 'my/aaronnote)
 
 (config-defvar my/aaronnote-web-host-max-heap-mb nil
-  "V8 heap cap (MB) for the Aaronnote web-host node process, or nil for no cap.
+  "V8 heap cap (MB) for the Noema web-host node process, or nil for no cap.
 Passed as a `--max-old-space-size' command-line flag rather than
 `NODE_OPTIONS' in the environment, because web-host's `process.env' is also
 handed to the codex/claude/opencode CLIs it shells out to for LaTeX export —
@@ -150,7 +154,7 @@ an env-based cap would leak onto those unrelated node processes too."
   :group 'my/aaronnote)
 
 (config-defvar my/aaronnote-echo-severity 'error
-  "Warning/error policy for Aaronnote messages copied to the Emacs echo area.
+  "Warning/error policy for Noema messages copied to the Emacs echo area.
 Important command responses are always echoed after browser-side deduplication
 and rate limiting.  `error' additionally echoes errors, `warning' echoes
 warnings and errors, and nil suppresses both severity classes."
@@ -160,12 +164,12 @@ warnings and errors, and nil suppresses both severity classes."
   :group 'my/aaronnote)
 
 (config-defvar my/aaronnote-latex-export-engine "codex"
-  "Engine for the Aaronnote CMD+P LaTeX export.
+  "Engine for the Noema CMD+P LaTeX export.
 \"codex\" compile-verifies a deterministic mechanical draft first, then allows
 one fidelity-gated polish attempt.  A verified draft is never retried after an
 agent timeout or gate rejection; multiple repairs require a concrete mechanical
 compile failure.  \"mechanical\" never invokes an agent.  See
-`docs/latex-export-style.md' in the Aaronnote app."
+`docs/latex-export-style.md' in the Noema app."
   :type '(choice (const "codex") (const "mechanical"))
   :group 'my/aaronnote)
 
@@ -176,19 +180,19 @@ A fidelity/review rejection falls back immediately instead of retrying."
   :group 'my/aaronnote)
 
 (config-defvar my/aaronnote-latex-export-agent-idle-timeout 180
-  "Seconds without agent output before Aaronnote performs a liveness check.
+  "Seconds without agent output before Noema performs a liveness check.
 A live process is kept running; this is not a kill timeout."
   :type 'integer
   :group 'my/aaronnote)
 
 (config-defvar my/aaronnote-latex-export-agent-hard-timeout 900
   "Absolute seconds allowed for one LaTeX export agent attempt.
-At this limit Aaronnote requests graceful termination before using a hard kill."
+At this limit Noema requests graceful termination before using a hard kill."
   :type 'integer
   :group 'my/aaronnote)
 
 (config-defvar my/aaronnote-latex-export-agent "codex"
-  "AI backend for the Aaronnote LaTeX export repair step.
+  "AI backend for the Noema LaTeX export repair step.
 One of \"codex\", \"claude\", or \"opencode\".  All run non-interactively in the
 single-export staging directory with external-directory writes blocked and
 network access available.  Clean mechanically verified exports do not launch
@@ -215,19 +219,19 @@ the backend.  The backend is chosen here, not per export."
   "String summary from the last successful Roam DB sync, or nil.")
 
 (defvar my/aaronnote--process nil
-  "Running Aaronnote web-host child process, or nil.")
+  "Running Noema web-host child process, or nil.")
 (defvar my/aaronnote--gateway-binding nil
-  "Registration data for the current AaronNote web-host process.")
+  "Registration data for the current Noema web-host process.")
 (defvar my/aaronnote--external-file-watches (make-hash-table :test #'equal)
-  "Remote-backed file watches owned by the AaronNote runtime session.")
+  "Remote-backed file watches owned by the Noema runtime session.")
 (defvar my/aaronnote--external-file-watch-timers
   (make-hash-table :test #'equal)
-  "Debounce timers for remote AaronNote file changes.")
+  "Debounce timers for remote Noema file changes.")
 (defvar my/aaronnote--external-file-watch-suppressed
   (make-hash-table :test #'equal)
   "Times before which self-write watch events should be ignored.")
 (defvar my/aaronnote--port nil
-  "HTTP port of the running Aaronnote web-host.")
+  "HTTP port of the running Noema web-host.")
 (defvar my/aaronnote--last-port nil
   "Last ready web-host port, retained so a crashed core can reclaim its URL.")
 (defvar my/aaronnote--ready nil
@@ -235,7 +239,7 @@ the backend.  The backend is chosen here, not per export."
 (defvar my/aaronnote--ready-callbacks nil
   "Callbacks waiting for the web-host to become ready.")
 (defvar my/aaronnote--app-buffer nil
-  "Buffer hosting the Appine/xwidget Aaronnote page.")
+  "Buffer hosting the Appine/xwidget Noema page.")
 (defvar my/aaronnote--ready-watchdog nil
   "Watchdog timer cancelled when the web-host becomes ready.")
 (defvar my/aaronnote--goto-timer nil
@@ -243,45 +247,45 @@ the backend.  The backend is chosen here, not per export."
 (defvar my/aaronnote--goto-last nil
   "Last applied goto key (truename-file line col), for dedup.")
 (defvar my/aaronnote--file-buffers (make-hash-table :test #'equal)
-  "Canonical Aaronnote file path to browser buffer map.")
+  "Canonical Noema file path to browser buffer map.")
 (defvar my/aaronnote--client-buffers (make-hash-table :test #'equal)
-  "Aaronnote browser client id to browser buffer map.")
+  "Noema browser client id to browser buffer map.")
 
 (defvar my/aaronnote--build-process nil
-  "Current Aaronnote web build process, or nil.")
+  "Current Noema web build process, or nil.")
 
 (defvar my/aaronnote--split-counter 0
-  "Counter for fresh Aaronnote xwidget split sessions.")
+  "Counter for fresh Noema xwidget split sessions.")
 
 (defvar-local my/aaronnote-buffer-file-name nil
-  "Current note file represented by an Aaronnote Appine/xwidget buffer.")
+  "Current note file represented by an Noema Appine/xwidget buffer.")
 
 (put 'my/aaronnote-buffer-file-name 'permanent-local t)
 
 (defvar-local my/aaronnote--client-id nil
-  "Client id for this Aaronnote browser buffer.")
+  "Client id for this Noema browser buffer.")
 
 (put 'my/aaronnote--client-id 'permanent-local t)
 
 (defvar-local my/aaronnote--registered-file nil
-  "File path currently registered for this Aaronnote browser buffer.")
+  "File path currently registered for this Noema browser buffer.")
 
 (put 'my/aaronnote--registered-file 'permanent-local t)
 
 (defvar-local my/aaronnote--xwidget-forced-name nil
-  "Non-nil display name marker for Aaronnote xwidget buffers.")
+  "Non-nil display name marker for Noema xwidget buffers.")
 
 (put 'my/aaronnote--xwidget-forced-name 'permanent-local t)
 
 (defvar-local my/aaronnote--xwidget-pending-file nil
-  "File to POST to Aaronnote once the page has finished loading, or nil.")
+  "File to POST to Noema once the page has finished loading, or nil.")
 
 (put 'my/aaronnote--xwidget-pending-file 'permanent-local t)
 
 ;; Keep the Markdown/xwidget input bridge in a dedicated module.  Its command
 ;; names and wire protocol remain unchanged for browser and Emacs callers.
 (add-to-list 'load-path
-             (expand-file-name "lisp/roam/aaronnote/emacs" user-emacs-directory))
+             (expand-file-name "lisp/roam/Noema/emacs" user-emacs-directory))
 (require 'aaronnote-xwidget-keys)
 
 (defvar-keymap my/aaronnote-keys-mode-map
@@ -291,7 +295,7 @@ the backend.  The backend is chosen here, not per export."
   "M-C" #'my/aaronnote-prose-check)
 
 (define-minor-mode my/aaronnote-keys-mode
-  "Buffer-local keys for an Aaronnote browser surface."
+  "Buffer-local keys for an Noema browser surface."
   :init-value nil
   :lighter nil
   :keymap my/aaronnote-keys-mode-map)
@@ -320,20 +324,20 @@ the backend.  The backend is chosen here, not per export."
   setTimeout(focusEditor, 50);
   return true;
 })()"
-  "JavaScript used to move focus into the Aaronnote editor inside xwidget.")
+  "JavaScript used to move focus into the Noema editor inside xwidget.")
 
 (defun my/aaronnote--server-url (&optional path)
-  "Return the local Aaronnote URL for PATH."
+  "Return the local Noema URL for PATH."
   (format "http://127.0.0.1:%d%s" my/aaronnote--port (or path "/")))
 
 (defun my/aaronnote--canonical-file (file)
-  "Return canonical absolute FILE for Aaronnote bookkeeping, or nil."
+  "Return canonical absolute FILE for Noema bookkeeping, or nil."
   (and (stringp file)
        (not (string-empty-p file))
        (cond
         ((and (bound-and-true-p remote-mode)
               (fboundp 'remote-expand-file-name))
-         ;; Aaronnote's web host runs locally.  Raw host paths (including
+         ;; Noema's web host runs locally.  Raw host paths (including
          ;; `~/...') therefore belong to the local target; an already logical
          ;; or TRAMP path retains its encoded target and is rejected later by
          ;; `my/aaronnote--host-file' when the local host cannot serve it.
@@ -352,7 +356,7 @@ the backend.  The backend is chosen here, not per export."
          (expand-file-name file)))))
 
 (defun my/aaronnote--host-file (file)
-  "Return the path AaronNote should use for logical FILE.
+  "Return the path Noema should use for logical FILE.
 Local files are projected to native host paths.  Remote files retain their
 `/fs:' identity and are served through the Remote-backed gateway provider."
   (when-let* ((file (my/aaronnote--canonical-file file)))
@@ -376,7 +380,7 @@ Local files are projected to native host paths.  Remote files retain their
        (string-prefix-p "aaronnote-split:" client)))
 
 (defun my/aaronnote--app-url (&optional file client extra-params)
-  "Return the Aaronnote app URL, optionally opening FILE for CLIENT."
+  "Return the Noema app URL, optionally opening FILE for CLIENT."
   (let ((base (my/aaronnote--server-url "/"))
         params)
     (when-let* ((file (my/aaronnote--canonical-file file)))
@@ -404,7 +408,7 @@ Local files are projected to native host paths.  Remote files retain their
            (string-equal (file-name-nondirectory file) "README"))))
 
 (defun my/aaronnote--web-host-log-tail (&optional lines)
-  "Return the last LINES (default 12) lines of the Aaronnote web-host log
+  "Return the last LINES (default 12) lines of the Noema web-host log
 buffer, or nil when the buffer does not exist or has no output yet."
   (when-let* ((buf (get-buffer " *aaronnote-web-host*")))
     (with-current-buffer buf
@@ -435,7 +439,7 @@ failure is diagnosable without hunting for it."
       (when log-buf (display-buffer log-buf))
       (message "%s"
                (concat
-                (format "Aaronnote: web-host not ready after 10s (%d pending action%s dropped)."
+                (format "Noema: web-host not ready after 10s (%d pending action%s dropped)."
                         dropped (if (= dropped 1) "" "s"))
                 (if alive "" " Process exited — check node/port.")
                 (if tail (format " Last log: %s" tail) " No log output yet — see *aaronnote-web-host*."))))))
@@ -461,13 +465,13 @@ failure is diagnosable without hunting for it."
             (run-at-time 10 nil #'my/aaronnote--watchdog-fire)))))
 
 (defun my/aaronnote--start-server (&optional reconnect-port)
-  "Spawn the vendored Aaronnote web-host.
+  "Spawn the vendored Noema web-host.
 When RECONNECT-PORT is non-nil, reclaim that port so live browser pages can
 reconnect without a reload and without losing their in-memory editor state."
   (unless (executable-find "node")
-    (user-error "Aaronnote: `node' not found in exec-path; install Node.js"))
+    (user-error "Noema: `node' not found in exec-path; install Node.js"))
   (unless (file-directory-p my/aaronnote--web-dir)
-    (user-error "Aaronnote: built web app not found at %s; run `npm run build' in %s"
+    (user-error "Noema: built web app not found at %s; run `npm run build' in %s"
                 my/aaronnote--web-dir my/aaronnote--runtime-root))
   (let ((old-proc my/aaronnote--process))
     (when (and old-proc (process-live-p old-proc))
@@ -514,6 +518,8 @@ reconnect without a reload and without losing their in-memory editor state."
             (format "AARONNOTE_TMP_DIR=%s" (expand-file-name my/aaronnote--tmp-root))
             (format "AARONNOTE_SNIPPETS_ROOT=%s" (expand-file-name my/aaronnote--snippets-root))
             (format "AARONNOTE_TEMPLATES_ROOT=%s" (expand-file-name my/aaronnote--templates-root))
+            (format "AARONNOTE_LATEX_TEMPLATES_ROOT=%s"
+                    (expand-file-name my/aaronnote--latex-templates-root))
             (format "AARONNOTE_KATEX_MACROS_DIR=%s" (expand-file-name my/aaronnote--katex-macros-dir)))
             (my/aaronnote--jupyter-default-environment)
             (list
@@ -544,7 +550,7 @@ reconnect without a reload and without losing their in-memory editor state."
               (format "AARONNOTE_LATEX_EXPORT_MODEL=%s" my/aaronnote-latex-export-model))
             (format "AARONNOTE_WEB_PORT=%d"
                     (or reconnect-port my/aaronnote-web-port 0))
-            ;; Emacs-started AaronNote should share Emacs' existing Copilot LS
+            ;; Emacs-started Noema should share Emacs' existing Copilot LS
             ;; through the gateway, not spawn a second memory-heavy copy.
             "AARONNOTE_COPILOT_DISABLE_LOCAL=1"
             (format "AARONNOTE_EMACS_GATEWAY_URL=%s"
@@ -613,12 +619,12 @@ reconnect without a reload and without losing their in-memory editor state."
               (my/zotero-import-bibtex payload)
             (my/zotero-open-reference payload)))
       (error
-       (message "Aaronnote Zotero %s failed: %s"
+       (message "Noema Zotero %s failed: %s"
                 (if import-p "import" "open")
                 (error-message-string err))))))
 
 (defun my/aaronnote--handle-ui-state-payload (payload)
-  "Echo a structured AaronNote UI-state PAYLOAD when policy permits.
+  "Echo a structured Noema UI-state PAYLOAD when policy permits.
 Gateway payloads are handled directly so status strings are never serialized
 to JSON a second time."
   (let* ((status (alist-get 'status payload))
@@ -636,10 +642,10 @@ to JSON a second time."
     (when (and echo-p
                (stringp status)
                (not (string-empty-p status)))
-      (message "AaronNote %s: %s" severity status))))
+      (message "Noema %s: %s" severity status))))
 
 (defun my/aaronnote--handle-process-line (line)
-  "Handle one legacy AaronNote event encoded as LINE."
+  "Handle one legacy Noema event encoded as LINE."
   (let ((ready-prefix "aaronote-web-host:ready:")
         (goto-prefix "aaronote-event:goto:")
 	(open-prefix "aaronote-event:open:")
@@ -687,7 +693,7 @@ to JSON a second time."
                  (tag (alist-get 'tag payload)))
             (if (and (my/aaronnote--markdown-file-p file)
                      (or (null tag) (string-empty-p (or tag ""))))
-                ;; Markdown note (e.g. graph double-click): open in Aaronnote.
+                ;; Markdown note (e.g. graph double-click): open in Noema.
                 (my/aaronnote-open-file file)
               ;; Source region (lean, etc.) or explicit tag: open in Emacs.
               (my/aaronnote--goto-location file line-number column)
@@ -701,7 +707,7 @@ to JSON a second time."
                 (when (require 'init-note-code nil t)
                   (ignore-errors (my/note-code--goto-tag tag))))))
 	        (error
-	         (message "Aaronnote event parse failed: %s" (error-message-string err)))))
+	         (message "Noema event parse failed: %s" (error-message-string err)))))
      ((string-prefix-p zotero-import-prefix line)
       (condition-case err
           (let ((payload (json-parse-string
@@ -709,7 +715,7 @@ to JSON a second time."
                           :object-type 'alist)))
             (run-at-time 0 nil #'my/aaronnote--run-zotero-event payload t))
         (error
-         (message "Aaronnote Zotero import event failed: %s"
+         (message "Noema Zotero import event failed: %s"
                   (error-message-string err)))))
      ((string-prefix-p zotero-prefix line)
       (condition-case err
@@ -718,7 +724,7 @@ to JSON a second time."
                           :object-type 'alist)))
             (run-at-time 0 nil #'my/aaronnote--run-zotero-event payload nil))
         (error
-         (message "Aaronnote Zotero event failed: %s"
+         (message "Noema Zotero event failed: %s"
                   (error-message-string err)))))
      ((string-prefix-p system-open-prefix line)
       (condition-case err
@@ -738,7 +744,7 @@ to JSON a second time."
                 (require 'init-open)
                 (my/open-system-target target)))))
         (error
-         (message "Aaronnote system-open event failed: %s"
+         (message "Noema system-open event failed: %s"
                   (error-message-string err)))))
      ((string-prefix-p current-file-prefix line)
       (condition-case err
@@ -749,7 +755,7 @@ to JSON a second time."
                  (client (alist-get 'client payload)))
             (my/aaronnote--sync-app-buffer-file file client))
         (error
-         (message "Aaronnote current-file parse failed: %s"
+         (message "Noema current-file parse failed: %s"
                   (error-message-string err)))))
      ((string-prefix-p ui-state-prefix line)
       (condition-case err
@@ -758,7 +764,7 @@ to JSON a second time."
             (substring line (length ui-state-prefix))
             :object-type 'alist))
         (error
-         (message "Aaronnote UI-state parse failed: %s"
+         (message "Noema UI-state parse failed: %s"
                   (error-message-string err)))))
      ((string-prefix-p saved-prefix line)
       (condition-case err
@@ -770,7 +776,7 @@ to JSON a second time."
               (when (fboundp 'my/aaronnote-roam-note-changed)
                 (my/aaronnote-roam-note-changed file))))
         (error
-         (message "Aaronnote saved-event parse failed: %s"
+         (message "Noema saved-event parse failed: %s"
                   (error-message-string err)))))
      ((string-prefix-p key-prefix line)
       (condition-case err
@@ -782,14 +788,14 @@ to JSON a second time."
             (when (stringp key)
               (my/aaronnote--run-emacs-key key client)))
         (error
-         (message "Aaronnote key-event parse failed: %s"
+         (message "Noema key-event parse failed: %s"
                   (error-message-string err))))))))
 
 (defun my/aaronnote--external-file (file)
   "Return a canonical Markdown FILE accepted by the gateway provider."
   (let ((file (my/aaronnote--canonical-file file)))
     (unless (and file (my/aaronnote--markdown-file-p file))
-      (error "AaronNote external provider requires a Markdown file: %s"
+      (error "Noema external provider requires a Markdown file: %s"
              file))
     file))
 
@@ -805,7 +811,7 @@ to JSON a second time."
       (size . ,(or (file-attribute-size attributes) 0)))))
 
 (defun my/aaronnote--external-file-notify-change (file)
-  "Notify the AaronNote peer that logical FILE changed externally."
+  "Notify the Noema peer that logical FILE changed externally."
   (remhash file my/aaronnote--external-file-watch-timers)
   (when-let* ((client (remote-gateway-find-client "aaronnote")))
     (let* ((metadata
@@ -861,11 +867,11 @@ to JSON a second time."
       (error
        ;; Editing still works on backends without watch capability; refresh is
        ;; then explicit and saves continue to use mtime conflict detection.
-       (message "AaronNote remote watch unavailable for %s: %s"
+       (message "Noema remote watch unavailable for %s: %s"
                 file (error-message-string error))))))
 
 (defun my/aaronnote--clear-external-file-watches ()
-  "Close AaronNote's Remote watches and debounce timers."
+  "Close Noema's Remote watches and debounce timers."
   (maphash
    (lambda (_file timer)
      (when (timerp timer)
@@ -958,7 +964,7 @@ to JSON a second time."
             (size . ,(alist-get 'size written)))))))))
 
 (defun my/aaronnote--gateway-event (params _client)
-  "Dispatch AaronNote event PARAMS received through the shared gateway."
+  "Dispatch Noema event PARAMS received through the shared gateway."
   (let* ((type (format "%s" (or (alist-get 'type params) "")))
          (payload (or (alist-get 'payload params) '()))
          (line
@@ -1020,10 +1026,10 @@ to JSON a second time."
           my/aaronnote--ready nil
           my/aaronnote--ready-callbacks nil)
     (unless (string-match-p "^finished" event)
-      (message "Aaronnote web-host: %s" (string-trim event)))))
+      (message "Noema web-host: %s" (string-trim event)))))
 
 (defun my/aaronnote-buffer-file (&optional buffer)
-  "Return the Aaronnote note file represented by BUFFER.
+  "Return the Noema note file represented by BUFFER.
 When BUFFER is nil, inspect the current buffer."
   (when (buffer-live-p (or buffer (current-buffer)))
     (with-current-buffer (or buffer (current-buffer))
@@ -1032,7 +1038,7 @@ When BUFFER is nil, inspect the current buffer."
            my/aaronnote-buffer-file-name))))
 
 (defun my/aaronnote--buffer-display-name (&optional file)
-  "Return the preferred Aaronnote buffer display name for FILE."
+  "Return the preferred Noema buffer display name for FILE."
   (if-let* ((file (my/aaronnote--canonical-file file)))
       (format "*aaronnote: %s*" (file-name-nondirectory file))
     "*aaronnote*"))
@@ -1043,7 +1049,7 @@ When BUFFER is nil, inspect the current buffer."
           ordinal
           (if-let* ((file (my/aaronnote--canonical-file file)))
               (file-name-nondirectory file)
-            "Aaronnote")))
+            "Noema")))
 
 (defun my/aaronnote--split-client-ordinal (client)
   "Return split ordinal encoded in CLIENT, or nil."
@@ -1053,7 +1059,7 @@ When BUFFER is nil, inspect the current buffer."
         (string-to-number value)))))
 
 (defun my/aaronnote--notify-client-closed (&optional client file)
-  "Notify the Aaronnote core that CLIENT no longer has a live view."
+  "Notify the Noema core that CLIENT no longer has a live view."
   (when (and (stringp client) (not (string-empty-p client)))
     (condition-case nil
         (my/aaronnote--post
@@ -1064,7 +1070,7 @@ When BUFFER is nil, inspect the current buffer."
       (error nil))))
 
 (defun my/aaronnote--cleanup-buffer ()
-  "Remove the current buffer from Aaronnote identity registries."
+  "Remove the current buffer from Noema identity registries."
   (my/aaronnote--notify-client-closed
    my/aaronnote--client-id
    my/aaronnote-buffer-file-name)
@@ -1080,7 +1086,7 @@ When BUFFER is nil, inspect the current buffer."
     (setq my/aaronnote--app-buffer nil)))
 
 (defun my/aaronnote--refresh-visible-ibuffers ()
-  "Refresh visible ibuffer buffers after Aaronnote identity changes."
+  "Refresh visible ibuffer buffers after Noema identity changes."
   (when (fboundp 'ibuffer-update)
     (dolist (buffer (buffer-list))
       (when (get-buffer-window buffer 'visible)
@@ -1090,7 +1096,7 @@ When BUFFER is nil, inspect the current buffer."
               (revert-buffer nil t))))))))
 
 (defun my/aaronnote--buffer-for-client (client)
-  "Return the live Aaronnote buffer for CLIENT, or nil."
+  "Return the live Noema buffer for CLIENT, or nil."
   (when (and (stringp client) (not (string-empty-p client)))
     (let ((buffer (gethash client my/aaronnote--client-buffers)))
       (unless (or (null buffer) (buffer-live-p buffer))
@@ -1107,7 +1113,7 @@ When BUFFER is nil, inspect the current buffer."
            (buffer-list))))))
 
 (defun my/aaronnote--register-buffer (buffer file &optional client rename)
-  "Register BUFFER as the Aaronnote browser for FILE and CLIENT.
+  "Register BUFFER as the Noema browser for FILE and CLIENT.
 When RENAME is non-nil, rename xwidget buffers to a note-specific name."
   (when (buffer-live-p buffer)
     (let* ((file (my/aaronnote--canonical-file file))
@@ -1169,7 +1175,7 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
       buffer)))
 
 (defun my/aaronnote--sync-app-buffer-file (file &optional client)
-  "Record FILE as the current note in the matching Aaronnote buffer.
+  "Record FILE as the current note in the matching Noema buffer.
 CLIENT, when present, identifies the exact xwidget page that reported the
 file switch."
   (let* ((file (my/aaronnote--canonical-file file))
@@ -1182,14 +1188,14 @@ file switch."
         (setq my/aaronnote--app-buffer target)))))
 
 (defun my/aaronnote--track-app-buffer (buffer &optional file client)
-  "Record BUFFER as the active Aaronnote browser buffer.
+  "Record BUFFER as the active Noema browser buffer.
 When FILE is non-nil, set buffer-local file tracking directly."
   (setq my/aaronnote--app-buffer buffer)
   (when (buffer-live-p buffer)
     (my/aaronnote--register-buffer buffer file client t)))
 
 (defun my/aaronnote--buffer-for-file (file)
-  "Return a live Aaronnote buffer tracking FILE, or nil."
+  "Return a live Noema buffer tracking FILE, or nil."
   (when-let* ((abs (my/aaronnote--canonical-file file)))
     (let ((registered (gethash abs my/aaronnote--file-buffers)))
       (cond
@@ -1214,7 +1220,7 @@ When FILE is non-nil, set buffer-local file tracking directly."
           found))))))
 
 (defun my/aaronnote-canonical-buffer (&optional buffer)
-  "Return the canonical Aaronnote buffer for BUFFER's file, or BUFFER."
+  "Return the canonical Noema buffer for BUFFER's file, or BUFFER."
   (let ((buffer (or buffer (current-buffer))))
     (when (buffer-live-p buffer)
       (or (when-let* ((file (my/aaronnote-buffer-file buffer)))
@@ -1222,7 +1228,7 @@ When FILE is non-nil, set buffer-local file tracking directly."
           buffer))))
 
 (defun my/aaronnote--open-xwidget (url &optional file)
-  "Open Aaronnote in a per-file xwidget session.
+  "Open Noema in a per-file xwidget session.
 Each Markdown FILE gets its own dedicated xwidget session and buffer.
 Switching to an already-open file reuses the existing buffer without
 reloading.  Non-file opens (roam graph, etc.) share the singleton
@@ -1261,7 +1267,7 @@ reloading.  Non-file opens (roam graph, etc.) share the singleton
         buffer))))
 
 (defun my/aaronnote--open-appine (url &optional file force-new)
-  "Open Aaronnote URL in Appine, one Appine tab per md file.
+  "Open Noema URL in Appine, one Appine tab per md file.
 If a tab with URL already exists, switch to it; otherwise open a new tab.
 
 With FORCE-NEW non-nil, always open a fresh native tab.  Singleton pages
@@ -1301,45 +1307,45 @@ tab registry stale), so trusting a remembered index would silently no-op."
                          (ignore-errors (appine-focus)))))))))
 
 (defun my/aaronnote--appine-available-p ()
-  "Return non-nil when Aaronnote can dispatch opens through Appine."
+  "Return non-nil when Noema can dispatch opens through Appine."
   (condition-case err
       (progn
         (unless (fboundp 'my/appine-open-url)
           (require 'init-appine))
         (fboundp 'my/appine-open-url))
     (error
-     (message "Aaronnote: Appine unavailable (%s)"
+     (message "Noema: Appine unavailable (%s)"
               (error-message-string err))
      nil)))
 
 (defun my/aaronnote--open-url (url &optional file force-new)
-  "Open Aaronnote URL using `my/aaronnote-backend'.
+  "Open Noema URL using `my/aaronnote-backend'.
 FORCE-NEW, when non-nil, asks the Appine backend for a fresh tab instead of
 reusing a remembered one."
   (pcase my/aaronnote-backend
     ('appine
      (if (my/aaronnote--appine-available-p)
          (my/aaronnote--open-appine url file force-new)
-       (message "Aaronnote: using xwidget because Appine is unavailable")
+       (message "Noema: using xwidget because Appine is unavailable")
        (my/aaronnote--open-xwidget url file)))
     ('xwidget (my/aaronnote--open-xwidget url file))
-    (_ (user-error "Unsupported Aaronnote backend: %S" my/aaronnote-backend))))
+    (_ (user-error "Unsupported Noema backend: %S" my/aaronnote-backend))))
 
 (defun my/aaronnote--post (payload)
-  "Send small control PAYLOAD to the Aaronnote web-host."
+  "Send small control PAYLOAD to the Noema web-host."
   (when-let* ((client
                (and my/aaronnote--ready
                     (remote-gateway-find-client "aaronnote"))))
     (remote-gateway-notify client "aaronnote.command" payload)))
 
 (defun my/aaronnote--open-file-in-web (file)
-  "Ask the already open Aaronnote page to open FILE."
+  "Ask the already open Noema page to open FILE."
   (my/aaronnote--sync-app-buffer-file file)
   (my/aaronnote--post
    `((type . "open") (file . ,(my/aaronnote--host-file file)))))
 
 (defun my/aaronnote--send-command (command &optional detail)
-  "Dispatch Aaronnote COMMAND with optional DETAIL."
+  "Dispatch Noema COMMAND with optional DETAIL."
   (let ((client (and (boundp 'my/aaronnote--client-id)
                      (stringp my/aaronnote--client-id)
                      (not (string-empty-p my/aaronnote--client-id))
@@ -1384,10 +1390,10 @@ When FILE is nil, use the current buffer."
 
 ;;;###autoload
 (defun my/aaronnote-open-file (file)
-  "Open Markdown FILE in Aaronnote Web/Appine."
+  "Open Markdown FILE in Noema Web/Appine."
   (interactive "fMarkdown file: ")
   (unless (my/aaronnote--markdown-file-p file)
-    (user-error "Aaronnote opens Markdown files, not %s" file))
+    (user-error "Noema opens Markdown files, not %s" file))
   (let ((file (my/aaronnote--canonical-file file))
         (target-window (selected-window)))
     (my/aaronnote--ensure-server
@@ -1401,7 +1407,7 @@ When FILE is nil, use the current buffer."
 
 ;;;###autoload
 (defun my/aaronnote-open-current-note ()
-  "Open the current Markdown note in Aaronnote Web/Appine."
+  "Open the current Markdown note in Noema Web/Appine."
   (interactive)
   (unless buffer-file-name
     (user-error "Current buffer is not visiting a file"))
@@ -1415,7 +1421,7 @@ When FILE is nil, use the current buffer."
            buffer-file-name)))
 
 (defun my/aaronnote--split-window ()
-  "Create and select the window for an Aaronnote split."
+  "Create and select the window for an Noema split."
   (let ((window (if (>= (window-total-width) 120)
                     (split-window-right)
                   (split-window-below))))
@@ -1424,16 +1430,16 @@ When FILE is nil, use the current buffer."
 
 ;;;###autoload
 (defun my/aaronnote-open-current-note-split ()
-  "Open the current Markdown note in a fresh editable Aaronnote xwidget split.
+  "Open the current Markdown note in a fresh editable Noema xwidget split.
 
-This intentionally does not reuse the canonical Aaronnote xwidget for the
+This intentionally does not reuse the canonical Noema xwidget for the
 file.  Multiple xwidget windows for the same live session have rendering
 issues, so this command creates an isolated editable client while keeping the
 normal file/session reuse map owned by the canonical pane."
   (interactive)
   (let ((file (my/aaronnote--current-note-file)))
     (unless (and file (my/aaronnote--markdown-file-p file))
-      (user-error "No current Markdown note for Aaronnote"))
+      (user-error "No current Markdown note for Noema"))
     (let ((file (my/aaronnote--canonical-file file))
           (source-window (selected-window)))
       (my/aaronnote--ensure-server
@@ -1471,7 +1477,7 @@ normal file/session reuse map owned by the canonical pane."
                ;; finished switching to `xwidget-webkit-mode'.  Naming does
                ;; not depend on the major mode, and delaying it leaves the
                ;; buffer permanently named *xwidget* because the title
-               ;; callback correctly avoids overriding Aaronnote-owned names.
+               ;; callback correctly avoids overriding Noema-owned names.
                (rename-buffer my/aaronnote--xwidget-forced-name t)
                (when file
                  (setq-local default-directory
@@ -1485,20 +1491,20 @@ normal file/session reuse map owned by the canonical pane."
 
 ;;;###autoload
 (defun my/aaronnote-preview ()
-  "Compatibility alias: open the current note in Aaronnote."
+  "Compatibility alias: open the current note in Noema."
   (interactive)
   (my/aaronnote-open-current-note))
 
 ;;;###autoload
 (defun my/aaronnote-sync-cursor ()
-  "Open the current note in Aaronnote.
+  "Open the current note in Noema.
 Cursor-level sync is intentionally no longer a per-keystroke preview channel."
   (interactive)
   (my/aaronnote-open-current-note))
 
 ;;;###autoload
 (defun my/aaronnote-refresh ()
-  "Refresh the current Aaronnote note while preserving page cursor state."
+  "Refresh the current Noema note while preserving page cursor state."
   (interactive)
   (if (and my/aaronnote--ready
            (or (and (boundp 'my/aaronnote--client-id)
@@ -1511,7 +1517,7 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
 
 ;;;###autoload
 (defun my/aaronnote-command (command &optional detail)
-  "Send COMMAND with optional DETAIL to the open Aaronnote page."
+  "Send COMMAND with optional DETAIL to the open Noema page."
   (interactive "sAaronnote command: ")
   (my/aaronnote--ensure-server
    (lambda ()
@@ -1519,25 +1525,25 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
 
 ;;;###autoload
 (defun my/aaronnote-escape ()
-  "Tell Aaronnote to handle Escape."
+  "Tell Noema to handle Escape."
   (interactive)
   (my/aaronnote-command "escape"))
 
 ;;;###autoload
 (defun my/aaronnote-save ()
-  "Tell Aaronnote to save the current note."
+  "Tell Noema to save the current note."
   (interactive)
   (my/aaronnote-command "save"))
 
 ;;;###autoload
 (defun my/aaronnote-focus ()
-  "Tell Aaronnote to focus its editor."
+  "Tell Noema to focus its editor."
   (interactive)
   (my/aaronnote-command "focus"))
 
 ;;;###autoload
 (defun my/aaronnote-roam-graph ()
-  "Open the standalone roam graph view in Aaronnote.
+  "Open the standalone roam graph view in Noema.
 Always opens a fresh tab so it reliably reappears even after the previous
 graph tab was closed via the Appine toolbar."
   (interactive)
@@ -1545,16 +1551,16 @@ graph tab was closed via the Appine toolbar."
    (lambda ()
      (my/aaronnote--open-url (my/aaronnote--server-url "/graph") nil t))))
 
-;;; Pause/resume — freeze WebKit animations when Aaronnote is not visible.
+;;; Pause/resume — freeze WebKit animations when Noema is not visible.
 
 (defvar my/aaronnote--paused nil
   "Non-nil when the browser page has been sent a pause command.")
 (defvar my/aaronnote--manual-paused nil
-  "Non-nil when Aaronnote was paused explicitly by the user.")
+  "Non-nil when Noema was paused explicitly by the user.")
 (defvar my/aaronnote--activity-timer nil
   "Debounce timer for `my/aaronnote--update-activity'.")
 (defvar my/aaronnote--activity-hooks-installed nil
-  "Non-nil when Aaronnote pause/resume activity hooks are installed.")
+  "Non-nil when Noema pause/resume activity hooks are installed.")
 (defvar my/aaronnote--last-activity-active :unknown
   "Last active-state scheduled by `my/aaronnote--update-activity'.")
 
@@ -1568,14 +1574,14 @@ graph tab was closed via the Appine toolbar."
   "JavaScript used to reconnect a retained xwidget page after core restarts.")
 
 (defun my/aaronnote--app-buffer-visible-p ()
-  "Return non-nil when the Aaronnote buffer is visible in a focused frame."
+  "Return non-nil when the Noema buffer is visible in a focused frame."
   (when (buffer-live-p my/aaronnote--app-buffer)
     (let ((win (get-buffer-window my/aaronnote--app-buffer 'visible)))
       (and win
            (frame-focus-state (window-frame win))))))
 
 (defun my/aaronnote--notify-xwidgets-core-ready ()
-  "Reconnect retained Aaronnote xwidgets after an active core restart."
+  "Reconnect retained Noema xwidgets after an active core restart."
   (when (and (fboundp 'xwidget-webkit-current-session)
              (fboundp 'xwidget-webkit-execute-script))
     (dolist (buffer (buffer-list))
@@ -1589,7 +1595,7 @@ graph tab was closed via the Appine toolbar."
                session my/aaronnote--core-ready-script))))))))
 
 (defun my/aaronnote--maybe-reconnect-core-on-activity ()
-  "Restart a disconnected core only while an Aaronnote browser is active.
+  "Restart a disconnected core only while an Noema browser is active.
 This is intentionally called from focus/window activity, never from an idle
 timer or retry loop. The old port is reclaimed so the browser page and its
 unsaved CodeMirror state remain intact."
@@ -1616,7 +1622,7 @@ unsaved CodeMirror state remain intact."
        (setq my/aaronnote--ready-callbacks
              (delq #'my/aaronnote--notify-xwidgets-core-ready
                    my/aaronnote--ready-callbacks))
-       (message "Aaronnote: active core reconnect failed: %s"
+       (message "Noema: active core reconnect failed: %s"
                 (error-message-string err))))))
 
 (defun my/aaronnote--apply-activity (active)
@@ -1628,21 +1634,21 @@ unsaved CodeMirror state remain intact."
 
 ;;;###autoload
 (defun my/aaronnote-pause ()
-  "Pause Aaronnote assist rendering until explicitly resumed."
+  "Pause Noema assist rendering until explicitly resumed."
   (interactive)
   (setq my/aaronnote--manual-paused t)
   (my/aaronnote--apply-activity nil))
 
 ;;;###autoload
 (defun my/aaronnote-resume ()
-  "Resume Aaronnote assist rendering when the app buffer is visible."
+  "Resume Noema assist rendering when the app buffer is visible."
   (interactive)
   (setq my/aaronnote--manual-paused nil)
   (my/aaronnote--apply-activity (my/aaronnote--app-buffer-visible-p)))
 
 ;;;###autoload
 (defun my/aaronnote-toggle-pause ()
-  "Toggle manual pause for Aaronnote assist rendering."
+  "Toggle manual pause for Noema assist rendering."
   (interactive)
   (if my/aaronnote--manual-paused
       (my/aaronnote-resume)
@@ -1650,7 +1656,7 @@ unsaved CodeMirror state remain intact."
 
 (defun my/aaronnote--update-activity (&rest _)
   "Debounced check: pause or resume the browser based on buffer visibility.
-Also tracks which Aaronnote buffer is currently focused so key forwarding
+Also tracks which Noema buffer is currently focused so key forwarding
 routes to the right session when multiple files are open."
   ;; Update the active buffer pointer immediately on window-selection changes.
   (let ((cur (current-buffer)))
@@ -1703,7 +1709,7 @@ routes to the right session when multiple files are open."
 
 ;;;###autoload
 (defun my/aaronnote-stop ()
-  "Kill the Aaronnote web-host process and reset Appine tab state.
+  "Kill the Noema web-host process and reset Appine tab state.
 The web-host (Node) is the backend; once it is gone, any Appine tabs showing
 its pages are dead, so the Emacs-side tab registry is cleared too."
   (interactive)
@@ -1735,10 +1741,10 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
             (delete-process proc))))))
   (when (fboundp 'my/appine--tab-reset)
     (my/appine--tab-reset))
-  (message "Aaronnote web-host stopped."))
+  (message "Noema web-host stopped."))
 
 (defun my/aaronnote--kill-browser-buffers ()
-  "Kill Emacs buffers that host Aaronnote browser pages."
+  "Kill Emacs buffers that host Noema browser pages."
   (mapc
    (lambda (buffer)
      (when (buffer-live-p buffer)
@@ -1755,7 +1761,7 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 
 ;;;###autoload
 (defun my/aaronnote-close ()
-  "Completely close Aaronnote browser surfaces and stop the web-host."
+  "Completely close Noema browser surfaces and stop the web-host."
   (interactive)
   (when (fboundp 'my/appine-kill-all)
     (ignore-errors (my/appine-kill-all)))
@@ -1764,18 +1770,18 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 
 ;;;###autoload
 (defun my/aaronnote-build-and-reopen ()
-  "Build Aaronnote web assets, restart the runtime, and reopen the current note."
+  "Build Noema web assets, restart the runtime, and reopen the current note."
   (interactive)
   (when (and my/aaronnote--build-process
              (process-live-p my/aaronnote--build-process))
-    (user-error "Aaronnote build is already running"))
+    (user-error "Noema build is already running"))
   (let* ((file (my/aaronnote--current-note-file))
          (buffer (get-buffer-create "*aaronnote-build*"))
          (default-directory user-emacs-directory))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)))
-    (message "Aaronnote: building web assets...")
+    (message "Noema: building web assets...")
     (setq my/aaronnote--build-process
           (make-process
            :name "aaronnote-build"
@@ -1790,7 +1796,7 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
                  (if ok
                      (progn
                        (my/aaronnote-close)
-                       (message "Aaronnote: build finished; reopening...")
+                       (message "Noema: build finished; reopening...")
                        (if (and file (my/aaronnote--markdown-file-p file))
                            (my/aaronnote-open-file file)
                          (my/aaronnote--ensure-server
@@ -1798,7 +1804,7 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
                             (my/aaronnote--open-url
                              (my/aaronnote--app-url nil "aaronnote") nil t)))))
                    (display-buffer buffer)
-                   (message "Aaronnote: build failed; see %s" (buffer-name buffer))))))))
+                   (message "Noema: build failed; see %s" (buffer-name buffer))))))))
     (display-buffer buffer)))
 
 (add-hook 'kill-emacs-hook #'my/aaronnote-stop)
@@ -1852,7 +1858,7 @@ Blocks the caller until the response arrives (or 8 s timeout)."
      (lambda (result error-object)
        (if error-object
            (message
-            "Aaronnote API error %s: %s"
+            "Noema API error %s: %s"
             (or (alist-get "code" error-object nil nil #'string=)
                 "unknown")
             (or (alist-get "message" error-object nil nil #'string=)
@@ -1861,14 +1867,14 @@ Blocks the caller until the response arrives (or 8 s timeout)."
      10)))
 
 (defun my/aaronnote-runtime-status ()
-  "Display the Aaronnote runtime debug snapshot."
+  "Display the Noema runtime debug snapshot."
   (interactive)
   (unless my/aaronnote--ready
-    (user-error "Aaronnote web-host is not ready"))
+    (user-error "Noema web-host is not ready"))
   (let ((payload (my/aaronnote--api-call-sync
                   "aaronnote:api:runtime:debug" [])))
     (unless payload
-      (user-error "Aaronnote runtime status unavailable"))
+      (user-error "Noema runtime status unavailable"))
     (puthash "emacsActivity"
              (let ((activity (make-hash-table :test 'equal)))
                (puthash "paused" (if my/aaronnote--paused t :false) activity)
@@ -1891,8 +1897,8 @@ Blocks the caller until the response arrives (or 8 s timeout)."
   "Sync the Roam DB and show statistics in the minibuffer."
   (interactive)
   (unless my/aaronnote--ready
-    (user-error "Aaronnote: server not running"))
-  (message "Aaronnote: syncing Roam DB...")
+    (user-error "Noema: server not running"))
+  (message "Noema: syncing Roam DB...")
   (my/aaronnote--api-call
    "aaronnote:api:notes:roam-sync" [t]
    (lambda (result)
@@ -1908,15 +1914,15 @@ Blocks the caller until the response arrives (or 8 s timeout)."
          (my/aaronnote-roam--clear-runtime-cache))
        (message "Roam synced: %s" my/aaronnote--last-sync-stats)))))
 
-;;; Header-line for the Aaronnote app buffer.
+;;; Header-line for the Noema app buffer.
 
 (defun my/aaronnote-editor-menu (event)
-  "Open Aaronnote editor actions from the native pencil button at EVENT."
+  "Open Noema editor actions from the native pencil button at EVENT."
   (interactive "e")
   (my/xwidget--select-event-window event)
   (popup-menu
    (easy-menu-create-menu
-    "AaronNote"
+    "Noema"
     (list
      ["Focus editor" my/aaronnote-focus t]
      ["Task manager" my/xwidget-open-task-manager t]
@@ -1940,7 +1946,7 @@ Blocks the caller until the response arrives (or 8 s timeout)."
     (fset fn (lambda () (interactive) (my/aaronnote-command command)))))
 
 (defun my/aaronnote--header-browser-buttons ()
-  "Return native xwidget controls with Aaronnote actions under the pencil."
+  "Return native xwidget controls with Noema actions under the pencil."
   (list
    (my/xwidget--nav-button
     (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_left" "back")
@@ -1953,33 +1959,33 @@ Blocks the caller until the response arrives (or 8 s timeout)."
     #'my/xwidget-reload "Reload [g]" 'header-line)
    (my/xwidget--nav-button
     (my/xwidget--mode-line-icon 'codicon "nf-cod-edit" "edit")
-    #'my/aaronnote-editor-menu "AaronNote actions" 'header-line)
+    #'my/aaronnote-editor-menu "Noema actions" 'header-line)
    (my/xwidget--nav-button
     (my/xwidget--mode-line-icon 'codicon "nf-cod-layout" "win")
     #'my/xwidget-window-menu "Window menu" 'header-line)))
 
 (defun my/aaronnote--header-line ()
-  "Return native browser and editor controls for an Aaronnote buffer."
+  "Return native browser and editor controls for an Noema buffer."
   (let* ((file (my/aaronnote-buffer-file (current-buffer)))
-         (name (if file (file-name-nondirectory file) "Aaronnote")))
+         (name (if file (file-name-nondirectory file) "Noema")))
     (append
      (list " ")
      (my/aaronnote--header-browser-buttons)
      (list "  " (propertize name 'face 'mode-line-buffer-id)))))
 
 (defun my/aaronnote--setup-native-chrome ()
-  "Install Aaronnote-only Emacs chrome in the current xwidget buffer."
+  "Install Noema-only Emacs chrome in the current xwidget buffer."
   (setq-local header-line-format '(:eval (my/aaronnote--header-line)))
   (kill-local-variable 'mode-line-format)
   (force-mode-line-update t))
 
 (defun my/aaronnote--restore-native-chrome-h ()
-  "Restore Aaronnote chrome after generic xwidget mode initialization."
+  "Restore Noema chrome after generic xwidget mode initialization."
   (when (my/aaronnote--xwidget-buffer-p)
     (my/aaronnote--setup-native-chrome)))
 
 (defun my/aaronnote--restore-native-chrome-later-h ()
-  "Restore Aaronnote chrome after all xwidget mode hooks have settled."
+  "Restore Noema chrome after all xwidget mode hooks have settled."
   (let ((buffer (current-buffer)))
     (run-at-time
      0 nil
@@ -1997,25 +2003,25 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 
 ;;;###autoload
 (defun my/aaronnote-pop ()
-  "Open the Aaronnote command pop."
+  "Open the Noema command pop."
   (interactive)
   (require 'transient)
   (call-interactively #'my/aaronnote-dispatch))
 
 (defun my/aaronnote--xwidget-menu-section ()
-  "Return Aaronnote actions for the xwidget top-bar popup."
+  "Return Noema actions for the xwidget top-bar popup."
   (when (or my/aaronnote-buffer-file-name
             my/aaronnote--client-id)
     (list
      "---"
-     ["Aaronnote: Refresh current pane" my/aaronnote-refresh t]
-     ["Aaronnote: Open editable split" my/aaronnote-open-current-note-split t]
-     ["Aaronnote: Focus editor" my/aaronnote-focus t]
-     ["Aaronnote: Pop" my/aaronnote-pop t]
+     ["Noema: Refresh current pane" my/aaronnote-refresh t]
+     ["Noema: Open editable split" my/aaronnote-open-current-note-split t]
+     ["Noema: Focus editor" my/aaronnote-focus t]
+     ["Noema: Pop" my/aaronnote-pop t]
      (list
-      "Aaronnote lifecycle"
+      "Noema lifecycle"
       ["Build + reopen" my/aaronnote-build-and-reopen t]
-      ["Close all Aaronnote" my/aaronnote-close t]))))
+      ["Close all Noema" my/aaronnote-close t]))))
 
 (with-eval-after-load 'init-browser
   (add-to-list 'my/xwidget-window-menu-extra-sections
@@ -2029,14 +2035,14 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (defmacro my/aaronnote--def-editor-cmd (suffix command &optional doc)
   "Define `my/aaronnote-SUFFIX' that sends editor COMMAND to the web page."
   `(defun ,(intern (format "my/aaronnote-%s" suffix)) ()
-     ,(or doc (format "Send the Aaronnote `%s' editor command." command))
+     ,(or doc (format "Send the Noema `%s' editor command." command))
      (interactive)
      (my/aaronnote-command ,command)))
 
 (my/aaronnote--def-editor-cmd "toggle-source"   "toggle-source"   "Toggle source / rendered view.")
-(my/aaronnote--def-editor-cmd "undo"            "undo"            "Undo last edit in Aaronnote.")
-(my/aaronnote--def-editor-cmd "redo"            "redo"            "Redo last undone edit in Aaronnote.")
-(my/aaronnote--def-editor-cmd "paste"           "paste"           "Paste through Aaronnote's editor pipeline.")
+(my/aaronnote--def-editor-cmd "undo"            "undo"            "Undo last edit in Noema.")
+(my/aaronnote--def-editor-cmd "redo"            "redo"            "Redo last undone edit in Noema.")
+(my/aaronnote--def-editor-cmd "paste"           "paste"           "Paste through Noema's editor pipeline.")
 (my/aaronnote--def-editor-cmd "bold"            "bold"            "Toggle bold at point.")
 (my/aaronnote--def-editor-cmd "italic"          "italic"          "Toggle italic at point.")
 (my/aaronnote--def-editor-cmd "code-inline"     "code"            "Toggle inline code at point.")
@@ -2045,7 +2051,7 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (my/aaronnote--def-editor-cmd "superscript"     "superscript"     "Wrap the selection as Markdown superscript.")
 (my/aaronnote--def-editor-cmd "subscript"       "subscript"       "Wrap the selection as Markdown subscript.")
 (my/aaronnote--def-editor-cmd "insert-footnote" "insert-footnote" "Insert a numbered Markdown footnote.")
-(my/aaronnote--def-editor-cmd "insert-revision" "insert-revision" "Insert an Aaronnote revision suggestion.")
+(my/aaronnote--def-editor-cmd "insert-revision" "insert-revision" "Insert an Noema revision suggestion.")
 (my/aaronnote--def-editor-cmd "edit-properties" "edit-properties" "Open the native org-meta properties panel.")
 (my/aaronnote--def-editor-cmd "move-block-up"   "move-block-up"   "Move the current Markdown block upward.")
 (my/aaronnote--def-editor-cmd "move-block-down" "move-block-down" "Move the current Markdown block downward.")
@@ -2058,23 +2064,23 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (my/aaronnote--def-editor-cmd "insert-table"    "insert-table"    "Insert a Markdown table.")
 (my/aaronnote--def-editor-cmd "insert-math"     "insert-math-block" "Insert a math block.")
 (my/aaronnote--def-editor-cmd "insert-toc"      "insert-toc"      "Insert a table of contents.")
-(my/aaronnote--def-editor-cmd "prose-check"     "prose-check"     "Run a bounded LanguageTool check in Aaronnote.")
+(my/aaronnote--def-editor-cmd "prose-check"     "prose-check"     "Run a bounded LanguageTool check in Noema.")
 
 ;;; Dispatch transient.
 
 (defun my/aaronnote--dispatch-header ()
-  "Header string for the Aaronnote dispatch transient."
+  "Header string for the Noema dispatch transient."
   (let ((status (cond
                  ((not my/aaronnote--ready)
                   (propertize "offline" 'face 'error))
                  (t (propertize (format "port %d" my/aaronnote--port)
                                 'face 'success))))
         (sync (or my/aaronnote--last-sync-stats "not synced")))
-    (format "Aaronnote  [%s]  %s" status sync)))
+    (format "Noema  [%s]  %s" status sync)))
 
 (with-eval-after-load 'transient
   (transient-define-prefix my/aaronnote-dispatch ()
-    "Aaronnote note-editor and roam hub.  H-o from anywhere."
+    "Noema note-editor and roam hub.  H-o from anywhere."
     [:description my/aaronnote--dispatch-header
      ;; Row 1 ─────────────────────────────────────────────────────────────────
      ["Note (web)"
@@ -2167,12 +2173,12 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 
 ;;; Keybindings.
 
-;; Global: H-o opens the Aaronnote dispatch panel.
+;; Global: H-o opens the Noema dispatch panel.
 (general-define-key "H-o" #'my/aaronnote-dispatch)
 (general-define-key "C-H-o" #'my/aaronnote-dispatch)
 
 ;; Appine buffer direct keys — override global H- bindings that are irrelevant
-;; when focused in the Aaronnote pane.
+;; when focused in the Noema pane.
 (with-eval-after-load 'appine
   (when (boundp 'appine-active-map)
     (define-key appine-active-map (kbd "H-o") #'my/aaronnote-dispatch)

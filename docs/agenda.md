@@ -1,13 +1,13 @@
-# Aaronnote Agenda
+# Noema Agenda
 
-Aaronnote agenda is a server-backed task/project/time-tracking system for
+Noema agenda is a server-backed task/project/time-tracking system for
 Markdown notes. The Markdown line is the single source of truth: every edit
 writes back to the original `@@todo`/`@@project`/`@@milestone`/`@@clock`
 command, and the Web agenda page is the only agenda UI — Emacs just opens it.
 
 For the full DSL grammar (canonical keys/aliases, date/repeater/duration
 syntax, diagnostics) and view-model shapes, see
-[`lisp/roam/aaronnote/docs/agenda.md`](../lisp/roam/aaronnote/docs/agenda.md).
+[`lisp/roam/Noema/docs/agenda.md`](../lisp/roam/Noema/docs/agenda.md).
 This page is the config-level summary.
 
 ## Syntax

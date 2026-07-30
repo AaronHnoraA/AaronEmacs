@@ -385,7 +385,7 @@ their RSS in KB.  Returns nil when `ps' is unavailable."
 (defun my/performance--insert-toolchain-memory ()
   "Insert a recursive RSS rollup of the whole Emacs descendant process tree.
 Unlike the raw `ps' block above (direct children only), this walks the full
-tree — e.g. AaronNote's web-host node process and anything *it* spawns, like
+tree — e.g. Noema's web-host node process and anything *it* spawns, like
 a Copilot LSP instance or a Jupyter kernel — so the real toolchain memory
 footprint (Lean workers, language servers, node backends) is visible in one
 place instead of requiring a manual audit."

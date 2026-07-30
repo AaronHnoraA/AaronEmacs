@@ -1,6 +1,0 @@
-# -*- mode: snippet -*-
-# name: Inline Comment block
-# key: icomment
-# group: Aaronnote blocks
-# --
-@@comment [$1] $0

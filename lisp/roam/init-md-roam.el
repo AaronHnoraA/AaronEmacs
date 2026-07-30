@@ -1,7 +1,7 @@
 ;;; init-md-roam.el --- Markdown roam note navigation -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Roam-style helpers for Aaronnote Markdown notes.
+;; Roam-style helpers for Noema Markdown notes.
 
 ;;; Code:
 
@@ -30,10 +30,10 @@
 (declare-function my/navigation-find-definition "init-navigation")
 
 (defvar my/aaronnote--ready nil
-  "Non-nil when the Aaronnote web host is available.")
+  "Non-nil when the Noema web host is available.")
 
 (defgroup my/aaronnote-roam nil
-  "Roam-style navigation for Aaronnote Markdown notes."
+  "Roam-style navigation for Noema Markdown notes."
   :group 'my/aaronnote)
 
 (defconst my/aaronnote-roam--module-directory
@@ -56,17 +56,17 @@
   :group 'my/aaronnote-roam)
 
 (config-defvar my/aaronnote-roam-runtime-root nil
-  "Root of the vendored Aaronnote runtime used by Markdown roam tooling."
+  "Root of the vendored Noema runtime used by Markdown roam tooling."
   :type 'directory
   :group 'my/aaronnote-roam)
 
 (config-defvar my/aaronnote-roam-runtime-cli nil
-  "Node bridge used to call the vendored Aaronnote roam runtime from Emacs."
+  "Node bridge used to call the vendored Noema roam runtime from Emacs."
   :type 'file
   :group 'my/aaronnote-roam)
 
 (defun my/aaronnote-roam--state-root ()
-  "Return the Aaronnote var/state directory shared with the web host."
+  "Return the Noema var/state directory shared with the web host."
   (expand-file-name
    (if (boundp 'my/aaronnote--state-root)
        my/aaronnote--state-root
@@ -74,7 +74,7 @@
    user-emacs-directory))
 
 (defun my/aaronnote-roam--tmp-root ()
-  "Return the Aaronnote runtime tmp directory shared with the web host."
+  "Return the Noema runtime tmp directory shared with the web host."
   (expand-file-name
    (if (boundp 'my/aaronnote--tmp-root)
        my/aaronnote--tmp-root
@@ -105,7 +105,7 @@
       (file-name-as-directory (expand-file-name my/aaronnote-roam-root))))
 
 (defun my/aaronnote-roam--clear-runtime-cache ()
-  "Clear cached Aaronnote runtime payloads."
+  "Clear cached Noema runtime payloads."
   (setq my/aaronnote-roam--runtime-index-cache nil
         my/aaronnote-roam--runtime-index-cache-key nil
         my/aaronnote-roam--scan-cache nil
@@ -116,7 +116,7 @@
         my/aaronnote-roam--all-note-summaries-cache nil))
 
 (defun my/aaronnote-roam--runtime-available-p ()
-  "Return non-nil when the Aaronnote runtime bridge is available."
+  "Return non-nil when the Noema runtime bridge is available."
   (and (file-exists-p my/aaronnote-roam-runtime-cli)
        (file-exists-p
         (expand-file-name "server/lib/index.mjs"
@@ -178,7 +178,7 @@ the expected body, and returns parsed JSON or nil."
           (my/aaronnote--api-call-sync channel api-args))))))
 
 (defun my/aaronnote-roam--runtime-call (action &rest args)
-  "Call Aaronnote roam runtime ACTION synchronously with ARGS.
+  "Call Noema roam runtime ACTION synchronously with ARGS.
 When the web-host is running, delegates to its /api so all callers share the
 same in-memory index.  Falls back to spawning roam-cli.mjs when the web-host
 is down (offline / not yet started)."
@@ -226,14 +226,14 @@ is down (offline / not yet started)."
                    (let ((stderr (with-temp-buffer
                                    (ignore-errors (insert-file-contents stderr-file))
                                    (string-trim (buffer-string)))))
-                     (message "Aaronnote roam runtime: JSON parse failed: %s%s"
+                     (message "Noema roam runtime: JSON parse failed: %s%s"
                               err
                               (if (string-empty-p stderr) "" (concat "\n" stderr))))
                    nil))
               (let ((stderr (with-temp-buffer
                                (ignore-errors (insert-file-contents stderr-file))
                                (string-trim (buffer-string)))))
-                (message "Aaronnote roam runtime failed (%s): %s"
+                (message "Noema roam runtime failed (%s): %s"
                          action
                          (if (string-empty-p stderr)
                              (string-trim (buffer-string))
@@ -242,7 +242,7 @@ is down (offline / not yet started)."
           (ignore-errors (delete-file stderr-file))))))))
 
 (defun my/aaronnote-roam--runtime-index ()
-  "Return cached Aaronnote runtime index payload, or nil."
+  "Return cached Noema runtime index payload, or nil."
   (let ((key (list (file-truename (my/aaronnote-roam-root))
                    (file-truename
                     (expand-file-name my/aaronnote-roam-runtime-root)))))
@@ -255,16 +255,16 @@ is down (offline / not yet started)."
       my/aaronnote-roam--runtime-index-cache)))
 
 (defun my/aaronnote-roam--runtime-sync (&optional full changed-files)
-  "Run Aaronnote roam-db sync via CLI subprocess — offline fallback only.
+  "Run Noema roam-db sync via CLI subprocess — offline fallback only.
 The web-host is the authoritative roam.db writer during normal operation.
 Only call this when the web-host is not running.
 When FULL is non-nil, force a full rebuild.  CHANGED-FILES are passed as
 incremental hints."
   (if (not (my/aaronnote-roam--runtime-available-p))
-      (message "Aaronnote roam runtime not found; cache refreshed only")
+      (message "Noema roam runtime not found; cache refreshed only")
     (if (and my/aaronnote-roam--sync-process
              (process-live-p my/aaronnote-roam--sync-process))
-        (message "Aaronnote roam: CLI sync already in flight, skipping")
+        (message "Noema roam: CLI sync already in flight, skipping")
       (let* ((root (my/aaronnote-roam-root))
              (buf (generate-new-buffer " *aaronnote-roam-sync*"))
              (args (append
@@ -299,7 +299,7 @@ incremental hints."
                         (when (eq p my/aaronnote-roam--sync-process)
                           (setq my/aaronnote-roam--sync-process nil))
                         (my/aaronnote-roam--clear-runtime-cache)
-                        (message "Aaronnote roam sync: %s" (string-trim event))
+                        (message "Noema roam sync: %s" (string-trim event))
                         (when (buffer-live-p buf)
                           (kill-buffer buf)))))))
         (setq my/aaronnote-roam--sync-process proc)))))
@@ -359,11 +359,11 @@ incremental hints."
     (error (or ref ""))))
 
 (defun my/aaronnote-roam--encode-ref (ref)
-  "Percent-encode REF for use in Aaronnote roam URLs."
+  "Percent-encode REF for use in Noema roam URLs."
   (url-hexify-string (or ref "")))
 
 (defun my/aaronnote-roam--split-target (target)
-  "Split Aaronnote TARGET into note ref plus optional tag or DOM target.
+  "Split Noema TARGET into note ref plus optional tag or DOM target.
 Canonical targets look like `roam://note-id', `roam://note-id#tag', and
 `roam://note-id@dom-target'.  `@@parent@child' addresses a hierarchical DOM
 target in the current note.  Path-like refs are accepted as input and later
@@ -397,7 +397,7 @@ resolved using the same note lookup path."
             :dom (and dom (not (string-empty-p dom)) dom)))))
 
 (defun my/aaronnote-roam--parse-target (target &optional base-dir)
-  "Parse note-link TARGET into Aaronnote-compatible target metadata.
+  "Parse note-link TARGET into Noema-compatible target metadata.
 BASE-DIR is forwarded to `my/aaronnote-roam--ref-to-file-fallback' for
 plain-relative refs (./x, ../x); defaults to the current buffer's directory."
   (when-let* ((parts (my/aaronnote-roam--split-target target)))
@@ -454,7 +454,7 @@ plain-relative refs (./x, ../x); defaults to the current buffer's directory."
   (replace-regexp-in-string "\\.\\(?:typ\\|md\\|markdown\\)\\'" "" (or path "")))
 
 (defun my/aaronnote-roam--strip-vault-prefix (ref)
-  "Remove Aaronnote's exported `roam/' prefix from path REF."
+  "Remove Noema's exported `roam/' prefix from path REF."
   (let ((clean (replace-regexp-in-string "\\`/+" "" (or ref ""))))
     (if (string-prefix-p "roam/" clean)
         (substring clean 5)
@@ -510,7 +510,7 @@ defaults to the current buffer's directory."
       (my/aaronnote-roam--ref-to-file-fallback slug)))
 
 (defun my/aaronnote-roam--slugify-title (title)
-  "Return an Aaronnote-style slug for TITLE."
+  "Return an Noema-style slug for TITLE."
   (let ((slug (downcase
                (replace-regexp-in-string
                 "-+" "-"
@@ -522,7 +522,7 @@ defaults to the current buffer's directory."
     (if (string-empty-p slug) "untitled" slug)))
 
 (defun my/aaronnote-roam--timestamp-id ()
-  "Return an Aaronnote-style timestamp id."
+  "Return an Noema-style timestamp id."
   (format-time-string "%Y%m%dT%H%M%S"))
 
 (defun my/aaronnote-roam--open-slug (slug &optional no-recent)
@@ -691,7 +691,7 @@ Builds the reverse-link index in one pass to avoid O(n²) per-note lookups."
     slug))
 
 (defun my/aaronnote-roam--read-note-id (prompt)
-  "Read an Aaronnote note id with PROMPT."
+  "Read an Noema note id with PROMPT."
   (let* ((records (my/aaronnote-roam--note-records))
          (candidates (mapcar (lambda (record)
                                (plist-get record :id))
@@ -721,7 +721,7 @@ Builds the reverse-link index in one pass to avoid O(n²) per-note lookups."
      nil t)))
 
 (defun my/aaronnote-roam--roam-href (note-id &optional kind target)
-  "Return canonical Aaronnote roam href for NOTE-ID and optional TARGET."
+  "Return canonical Noema roam href for NOTE-ID and optional TARGET."
   (concat "roam://"
           (my/aaronnote-roam--encode-ref note-id)
           (pcase kind
@@ -820,7 +820,7 @@ Each entry is a plist with :id, :text, and :pos."
                (point-min))))
 
 (defun my/aaronnote-roam--normalize-dom-target (value)
-  "Normalize Aaronnote DOM target VALUE for matching."
+  "Normalize Noema DOM target VALUE for matching."
   (string-trim
    (replace-regexp-in-string
     "\\s-+" " "
@@ -829,7 +829,7 @@ Each entry is a plist with :id, :text, and :pos."
      (string-remove-prefix "@" (my/aaronnote-roam--decode-ref (or value "")))))))
 
 (defun my/aaronnote-roam--slug-dom-target (value)
-  "Return Aaronnote's DOM target slug for VALUE."
+  "Return Noema's DOM target slug for VALUE."
   (let ((clean (downcase
                 (replace-regexp-in-string
                  "[`*_~()[\\]{}#+.!<>:;,'\"@]" " "
@@ -846,7 +846,7 @@ Each entry is a plist with :id, :text, and :pos."
            (split-string (string-remove-prefix "@" (or value "")) "@"))))
 
 (defun my/aaronnote-roam--dom-targets (&optional file note-id)
-  "Return Aaronnote-style DOM/TOC targets for FILE or current buffer."
+  "Return Noema-style DOM/TOC targets for FILE or current buffer."
   (let ((items (my/aaronnote-roam--heading-items file))
         (stack nil)
         (label-stack nil)
@@ -928,7 +928,7 @@ Each entry is a plist with :id, :text, and :pos."
          targets))))))
 
 (defun my/aaronnote-roam--goto-dom-target (dom)
-  "Jump to Aaronnote DOM/TOC target DOM in the current buffer."
+  "Jump to Noema DOM/TOC target DOM in the current buffer."
   (let* ((target (my/aaronnote-roam--find-dom-target dom))
          (pos (and target (plist-get target :pos))))
     (unless pos
@@ -937,7 +937,7 @@ Each entry is a plist with :id, :text, and :pos."
     (recenter-top-bottom)))
 
 (defun my/aaronnote-roam--read-dom-target (note-id)
-  "Read an Aaronnote DOM/TOC target for NOTE-ID."
+  "Read an Noema DOM/TOC target for NOTE-ID."
   (let* ((record (my/aaronnote-roam--resolve-note note-id))
          (file (plist-get record :file))
          (targets (my/aaronnote-roam--dom-targets file note-id))
@@ -966,11 +966,11 @@ Each entry is a plist with :id, :text, and :pos."
    leading
    '((:label "g Refresh"
       :command my/aaronnote-roam-ui-refresh
-      :help "Refresh this Aaronnote roam view"
+      :help "Refresh this Noema roam view"
       :primary t)
      (:label "q Close"
       :command quit-window
-      :help "Close this Aaronnote roam view"))))
+      :help "Close this Noema roam view"))))
 
 (defun my/aaronnote-roam--prepare-ui-buffer
     (name title icon refresh-function &optional status)
@@ -1061,7 +1061,7 @@ optional #tag / @dom target for Markdown notes."
 
 (defun my/aaronnote-roam-follow-link ()
   "Jump to the note or source region referenced at point.
-Targets may use Aaronnote roam syntax:
+Targets may use Noema roam syntax:
   roam://note-id
   roam://note-id#tag
   roam://note-id@dom-target
@@ -1086,13 +1086,13 @@ directory; /x is resolved against the roam vault root."
           (user-error "No Markdown roam link found at point"))))))
 
 (defun my/aaronnote-roam-find-note ()
-  "Find a roam note by Aaronnote id/path/title with completion."
+  "Find a roam note by Noema id/path/title with completion."
   (interactive)
   (my/aaronnote-roam--open-slug
    (my/aaronnote-roam--read-note-id "Roam note: ")))
 
 (defun my/aaronnote-roam-delete-node (note-id)
-  "Move NOTE-ID's Markdown node to trash through the Aaronnote runtime."
+  "Move NOTE-ID's Markdown node to trash through the Noema runtime."
   (interactive (list (my/aaronnote-roam--read-note-id "Delete roam node: ")))
   (let* ((record (seq-find
                   (lambda (candidate)
@@ -1113,7 +1113,7 @@ directory; /x is resolved against the roam vault root."
         (my/aaronnote-roam--clear-runtime-cache)
         (when delete-current-buffer
           (kill-buffer (current-buffer)))
-        (message "Aaronnote node moved to trash: %s"
+        (message "Noema node moved to trash: %s"
                  (abbreviate-file-name file))))))
 
 (defun my/aaronnote-roam-insert-link ()
@@ -1146,7 +1146,7 @@ directory; /x is resolved against the roam vault root."
   "Keymap for `my/aaronnote-roam-new-mode'.")
 
 (define-derived-mode my/aaronnote-roam-new-mode my/aaronnote-roam-ui-mode "Roam-New"
-  "Native workbench for creating Aaronnote Markdown notes."
+  "Native workbench for creating Noema Markdown notes."
   ;; This view is a form.  Keep it writable so Emacs widget fields accept direct
   ;; typing instead of forcing every edit through the minibuffer.
   (setq-local buffer-read-only nil)
@@ -1230,8 +1230,8 @@ directory; /x is resolved against the roam vault root."
         :tags nil))
 
 (defun my/aaronnote-roam-new--draft-for-create (draft &optional directory)
-  "Return DRAFT normalized like Aaronnote New before creation.
-Empty title, path, and kind fields receive the same defaults as Aaronnote's
+  "Return DRAFT normalized like Noema New before creation.
+Empty title, path, and kind fields receive the same defaults as Noema's
 New Note form.  DIRECTORY defaults to the current Roam New base directory."
   (let* ((node-type
           (if (string= (downcase (format "%s" (plist-get draft :node-type)))
@@ -1272,7 +1272,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
     (plist-get template field)))
 
 (defun my/aaronnote-roam-new--load-templates ()
-  "Return templates reported by the Aaronnote runtime."
+  "Return templates reported by the Noema runtime."
   (let ((response (my/aaronnote-roam--runtime-call "templates" "--force")))
     (or (and response (gethash "templates" response))
         '((:key "basic" :name "Basic Markdown note")
@@ -1446,7 +1446,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
                                        initial-dir initial-dir nil))
          (selected-dir (file-name-as-directory (expand-file-name raw-dir root))))
     (unless (file-in-directory-p selected-dir root)
-      (user-error "Save directory must be inside the Aaronnote vault"))
+      (user-error "Save directory must be inside the Noema vault"))
     (my/aaronnote-roam-new--set
      :path
      (my/aaronnote-roam-new--unique-path
@@ -1607,7 +1607,7 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
         :actions
         '((:label "c Create"
            :command my/aaronnote-roam-new-create
-           :help "Create this note through the Aaronnote runtime"
+           :help "Create this note through the Noema runtime"
            :primary t)
           (:label "t Type"
            :command my/aaronnote-roam-new-edit-type
@@ -1643,7 +1643,7 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
         'path "untitled.md" #'my/aaronnote-roam-new-edit-path)
        (my/aaronnote-roam-new--insert-editable-field
         'kind 'status "KIND" kind
-        "Controls Aaronnote note-kind behavior."
+        "Controls Noema note-kind behavior."
         'kind (if (string= node-type "roam") "note" "default"))
        (my/aaronnote-roam-new--insert-field
         'template 'template "TEMPLATE" template-label
@@ -1666,7 +1666,7 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
          (expand-file-name path (my/aaronnote-roam-root)))
         'my/aaronnote-roam-ui-path)
        (my/aaronnote-roam-ui-insert-field
-        "Create engine" "Aaronnote runtime" 'my/aaronnote-roam-ui-meta)
+        "Create engine" "Noema runtime" 'my/aaronnote-roam-ui-meta)
        (widget-setup)))
     (unless (get-text-property (point) 'aaron-ui-board--item-id)
       (my/aaronnote-roam-ui-goto-first-item))))
@@ -1713,7 +1713,7 @@ BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
     (pop-to-buffer buffer)))
 
 (defun my/aaronnote-roam-new--payload (draft)
-  "Return Aaronnote runtime JSON payload for DRAFT."
+  "Return Noema runtime JSON payload for DRAFT."
   (delq nil
         `((nodeType . ,(plist-get draft :node-type))
           (title . ,(plist-get draft :title))
@@ -1725,16 +1725,16 @@ BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
              `(id . ,id)))))
 
 (defun my/aaronnote-roam-new--create-draft (draft)
-  "Create and open DRAFT through the Aaronnote runtime."
+  "Create and open DRAFT through the Noema runtime."
   (let* ((draft (my/aaronnote-roam-new--draft-for-create draft))
          (payload (my/aaronnote-roam-new--payload draft))
          (json (json-encode payload))
          (response (my/aaronnote-roam--runtime-call "create" "--json" json))
          (file (and response (gethash "file" response))))
     (unless response
-      (user-error "Aaronnote runtime failed — see *Messages* for details"))
+      (user-error "Noema runtime failed — see *Messages* for details"))
     (unless (and file (file-exists-p file))
-      (user-error "Aaronnote runtime did not create the note (path: %s)"
+      (user-error "Noema runtime did not create the note (path: %s)"
                   (or file "nil")))
     (my/aaronnote-roam--clear-runtime-cache)
     (when (derived-mode-p 'my/aaronnote-roam-new-mode)
@@ -1753,7 +1753,7 @@ BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
 (defun my/aaronnote-roam-new-note (&optional slug title tags)
   "Create a roam note, or open Roam New when called interactively.
 Non-interactive SLUG, TITLE, and TAGS calls preserve compatibility with link
-creation commands while using the Aaronnote runtime."
+creation commands while using the Noema runtime."
   (interactive)
   (if (called-interactively-p 'interactive)
       (my/aaronnote-roam-new)
@@ -1892,7 +1892,7 @@ creation commands while using the Aaronnote runtime."
          (my/aaronnote-roam--put-note-field note key value))))))
 
 (defun my/aaronnote-roam--read-org-meta-block (note)
-  "Read an Aaronnote `#+begin meta' block at point into NOTE."
+  "Read an Noema `#+begin meta' block at point into NOTE."
   (when (looking-at-p "\\s-*#\\+begin meta\\b")
     (forward-line 1)
     (while (and (not (eobp))
@@ -2009,7 +2009,7 @@ creation commands while using the Aaronnote runtime."
     note))
 
 (defun my/aaronnote-roam--canonical-note-id (key note)
-  "Return Aaronnote's canonical note id for NOTE with DB KEY."
+  "Return Noema's canonical note id for NOTE with DB KEY."
   (or (my/aaronnote-roam--note-field note "id")
       (my/aaronnote-roam--note-field note "key")
       (my/aaronnote-roam--note-field note "source")
@@ -2044,7 +2044,7 @@ creation commands while using the Aaronnote runtime."
      (path path))))
 
 (defun my/aaronnote-roam--note-search-values (key note)
-  "Return Aaronnote-style searchable values for NOTE with DB KEY."
+  "Return Noema-style searchable values for NOTE with DB KEY."
   (let* ((file (my/aaronnote-roam--note-field note "file"))
          (rel-file (and file
                         (file-name-absolute-p file)
@@ -2093,7 +2093,7 @@ creation commands while using the Aaronnote runtime."
                     (my/aaronnote-roam--all-files)))))
 
 (defun my/aaronnote-roam--runtime-note-records ()
-  "Return note records from the vendored Aaronnote runtime."
+  "Return note records from the vendored Noema runtime."
   (when-let* ((payload (my/aaronnote-roam--runtime-index))
               (notes (gethash "notes" payload)))
     (mapcar (lambda (note)
@@ -2134,9 +2134,9 @@ creation commands while using the Aaronnote runtime."
   (plist-get (my/aaronnote-roam--split-target target) :ref))
 
 (defun my/aaronnote-roam--resolve-note (ref)
-  "Resolve REF to an Aaronnote note record plist.
+  "Resolve REF to an Noema note record plist.
 Exact id/key/path/title/alias/tag matches win first; substring matches are
-accepted as a fallback, matching Aaronnote search behavior."
+accepted as a fallback, matching Noema search behavior."
   (let* ((clean (or (my/aaronnote-roam--target-note-ref ref) ref))
          (clean (string-trim (or clean "")))
          (query (downcase clean))
@@ -2165,7 +2165,7 @@ accepted as a fallback, matching Aaronnote search behavior."
   (plist-get (my/aaronnote-roam--parse-target target) :slug))
 
 (defun my/aaronnote-roam--db-backlinks-to (slug)
-  "Return DB backlinks to SLUG/id, normalizing Aaronnote targets."
+  "Return DB backlinks to SLUG/id, normalizing Noema targets."
   (when-let* ((target-id (or (plist-get (my/aaronnote-roam--resolve-note slug) :id)
                              slug)))
     (or (when-let* ((note (my/aaronnote-roam--db-note target-id)))
@@ -2275,7 +2275,7 @@ On a heading line, append `{#id}` unless an id already exists."
 ;; ── DB commands ───────────────────────────────────────────────────────────────
 
 (defun my/aaronnote-roam-update-db (&optional full)
-  "Refresh Markdown roam cache and sync roam.db via Aaronnote runtime.
+  "Refresh Markdown roam cache and sync roam.db via Noema runtime.
 With prefix argument FULL, force a full roam DB rebuild.
 When the web-host is running, delegates to its /api (async, non-blocking).
 Falls back to a CLI subprocess when the web-host is offline."
@@ -2284,13 +2284,13 @@ Falls back to a CLI subprocess when the web-host is offline."
   (cond
    ;; Online: delegate to web-host /api; it is the authoritative writer.
    ((and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
-    (message "Aaronnote: syncing roam DB...")
+    (message "Noema: syncing roam DB...")
     (my/aaronnote--api-call
      (if full "aaronnote:api:notes:roam-sync-full" "aaronnote:api:notes:roam-sync")
      (if full [] [t])
      (lambda (_result)
        (my/aaronnote-roam--clear-runtime-cache)
-       (message "Aaronnote roam sync: done"))))
+       (message "Noema roam sync: done"))))
    ;; Offline fallback: CLI subprocess.
    ((my/aaronnote-roam--runtime-available-p)
     (my/aaronnote-roam--runtime-sync full nil))
@@ -2394,7 +2394,7 @@ Falls back to a CLI subprocess when the web-host is offline."
     (nreverse todos)))
 
 (defun my/aaronnote-roam--todos ()
-  "Return vault-wide todos from the Aaronnote runtime, roam DB, or local scan.
+  "Return vault-wide todos from the Noema runtime, roam DB, or local scan.
 Fetches through the `agenda' view-model rather than the plain `todos' list so
 dependency resolution (`effectiveStatus'/`blockedBy', computed vault-wide) and
 the urgency sort are already applied server-side instead of being re-derived
@@ -2577,7 +2577,7 @@ clears FIELD."
     (unless (member field '("priority" "due" "scheduled" "repeat" "warn"))
       (user-error "Unsupported todo metadata field: %s" field))
     (unless (my/aaronnote-roam--todo-patch entry (list (cons (intern field) value)))
-      (user-error "Aaronnote runtime is required for todo metadata updates"))
+      (user-error "Noema runtime is required for todo metadata updates"))
     (my/aaronnote-roam--clear-runtime-cache)
     (message "Todo %s %s" field (if (string-empty-p value) "cleared" value))
     (my/aaronnote-roam-ui-refresh)))
@@ -2613,7 +2613,7 @@ clears FIELD."
 (defun my/aaronnote-roam-add-todo-dependency (&optional entry)
   "Add a dependency (`after') reference from ENTRY to another todo.
 Prompts for the target todo by note and text, resolves it through the
-Aaronnote runtime into a stable, shortest-unique text reference, and appends
+Noema runtime into a stable, shortest-unique text reference, and appends
 it to ENTRY's `after' arg — no ids are ever written to the source file, so
 the reference stays a plain, human-readable part of the Markdown."
   (interactive)
@@ -2645,7 +2645,7 @@ the reference stays a plain, human-readable part of the Markdown."
         (unless ref
           (user-error "Could not build a dependency reference"))
         (unless (my/aaronnote-roam--todo-patch entry (list (cons 'afterAdd ref)))
-          (user-error "Aaronnote runtime is required for dependency updates"))
+          (user-error "Noema runtime is required for dependency updates"))
         (my/aaronnote-roam--clear-runtime-cache)
         (message "Depends on: %s" ref)
         (my/aaronnote-roam-ui-refresh)))))
@@ -2709,7 +2709,7 @@ the reference stays a plain, human-readable part of the Markdown."
          (my/aaronnote-roam-ui-insert-page-header
           "Tasks"
           :icon 'todo
-          :subtitle "All indexed Aaronnote Markdown tasks"
+          :subtitle "All indexed Noema Markdown tasks"
           :stats (list (cons (format "%d active" active) 'warning)
                        (cons (format "%d total" (length todos)) 'info))
           :actions (my/aaronnote-roam--ui-actions))
@@ -2720,7 +2720,7 @@ the reference stays a plain, human-readable part of the Markdown."
              (my/aaronnote-roam--insert-todo-row entry))))))
     (display-buffer buf)))
 
-;; ── Aaronnote-style note tools ────────────────────────────────────────────────
+;; ── Noema-style note tools ────────────────────────────────────────────────
 
 (defun my/aaronnote-roam--insert-note-button (entry &optional prefix)
   "Insert a clickable note button for summary ENTRY with PREFIX."
@@ -2763,7 +2763,7 @@ the reference stays a plain, human-readable part of the Markdown."
          (my/aaronnote-roam-ui-insert-page-header
           title
           :icon (or icon 'note)
-          :subtitle "Aaronnote Markdown roam notes"
+          :subtitle "Noema Markdown roam notes"
           :stats (list (cons (format "%d notes" (length entries)) 'info))
           :actions (my/aaronnote-roam--ui-actions))
          (my/aaronnote-roam-ui-insert-section "Notes" (length entries))
@@ -2920,7 +2920,7 @@ Multiple terms are ANDed."
          (my/aaronnote-roam-ui-insert-page-header
           "Roam management"
           :icon 'management
-          :subtitle "Index status and common Aaronnote operations"
+          :subtitle "Index status and common Noema operations"
           :stats (list (cons (format "%d nodes" (length entries)) 'info)
                        (cons (if generated "DB ready" "DB unknown")
                              (if generated 'success 'warning)))
@@ -2946,7 +2946,7 @@ Multiple terms are ANDed."
              :help "Open the native Roam New workbench")
             (:label "Search notes"
              :command my/aaronnote-roam-search-notes
-             :help "Search Aaronnote roam notes")
+             :help "Search Noema roam notes")
             (:label "DB status"
              :command my/aaronnote-roam-db-status
              :help "Open roam-db status"))))))
@@ -3155,7 +3155,7 @@ themselves."
      (cdr (assoc (completing-read "File todo: " choices nil t) choices)))))
 
 (defun my/aaronnote-roam--open-web-agenda (&optional view query)
-  "Open Aaronnote Web agenda special page with VIEW and optional QUERY."
+  "Open Noema Web agenda special page with VIEW and optional QUERY."
   (unless (and (fboundp 'my/aaronnote--ensure-server)
                (fboundp 'my/aaronnote--server-url)
                (fboundp 'my/aaronnote--open-url))
@@ -3184,9 +3184,9 @@ themselves."
         t)))))
 
 (defun my/aaronnote-roam-agenda (&optional mode query)
-  "Open the Aaronnote Web agenda special page.
+  "Open the Noema Web agenda special page.
 The native Emacs agenda renderer is no longer the default project-management
-surface; Aaronnote Web owns agenda/project/Gantt management."
+surface; Noema Web owns agenda/project/Gantt management."
   (interactive)
   (my/aaronnote-roam--open-web-agenda
    (pcase mode
@@ -3418,7 +3418,7 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
   (message "Roam DB full rebuild done."))
 
 (defun my/aaronnote-roam-db-status ()
-  "Show roam DB sync state from Aaronnote var."
+  "Show roam DB sync state from Noema var."
   (interactive)
   (let* ((root (my/aaronnote-roam-root))
          (state-root (my/aaronnote-roam--state-root))
@@ -3444,7 +3444,7 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
          (my/aaronnote-roam-ui-insert-page-header
           "Roam DB status"
           :icon 'database
-          :subtitle "Aaronnote incremental node index state"
+          :subtitle "Noema incremental node index state"
           :stats (list (cons (if state "State ready" "State missing")
                              (if state 'success 'warning))
                        (cons (if (file-exists-p roam-db-file) "roam.db ready" "roam.db missing")
@@ -4375,7 +4375,7 @@ canonical `roam://note-id#tag' target."
 (define-key my/aaronnote-roam-map (kbd "d") #'my/aaronnote-roam-daily-note)
 
 (defun my/aaronnote-roam-setup-keys ()
-  "Set up Aaronnote roam keys and xref for the current Markdown buffer.
+  "Set up Noema roam keys and xref for the current Markdown buffer.
 Binds `C-c r' to `my/aaronnote-roam-map' and registers the roam xref
 backend.  Does not install completion-at-point functions (those are
 added separately by `my/aaronnote-roam--capf-setup')."
@@ -4630,8 +4630,8 @@ added separately by `my/aaronnote-roam--capf-setup')."
   "Show link targets that have no corresponding note (MediaWiki Special:WantedPages)."
   (interactive)
   (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
-    (user-error "Aaronnote web-host is not running; start it with H-o o first"))
-  (message "Aaronnote: fetching wanted pages...")
+    (user-error "Noema web-host is not running; start it with H-o o first"))
+  (message "Noema: fetching wanted pages...")
   (my/aaronnote--api-call
    "aaronnote:api:notes:wanted" []
    (lambda (result)
@@ -4681,7 +4681,7 @@ added separately by `my/aaronnote-roam--capf-setup')."
       (user-error "Asset file does not exist: %s" file))))
 
 (defun my/aaronnote-roam--trash-orphaned-assets (assets)
-  "Move orphaned ASSETS to Trash through the Aaronnote runtime."
+  "Move orphaned ASSETS to Trash through the Noema runtime."
   (let* ((assets (my/aaronnote-roam--asset-items assets))
          (files (delq nil
                       (mapcar (lambda (asset)
@@ -4693,7 +4693,7 @@ added separately by `my/aaronnote-roam--capf-setup')."
     (when (yes-or-no-p (format "Move %d orphaned attachment%s to Trash? "
                                (length files)
                                (if (= (length files) 1) "" "s")))
-      (message "Aaronnote: moving orphaned attachments to Trash...")
+      (message "Noema: moving orphaned attachments to Trash...")
       (my/aaronnote--api-call
        "aaronnote:api:assets:trash-orphans" (vector files)
        (lambda (result)
@@ -4703,7 +4703,7 @@ added separately by `my/aaronnote-roam--capf-setup')."
                          (alist-get 'trashed result)))
                (skipped (my/aaronnote-roam--asset-items
                          (alist-get 'skipped result))))
-           (message "Aaronnote: trashed %d orphaned attachment%s%s"
+           (message "Noema: trashed %d orphaned attachment%s%s"
                     (length trashed)
                     (if (= (length trashed) 1) "" "s")
                     (if skipped
@@ -4763,11 +4763,11 @@ added separately by `my/aaronnote-roam--capf-setup')."
     (display-buffer buf)))
 
 (defun my/aaronnote-roam-report-orphaned-assets ()
-  "Show unreferenced Aaronnote attachments and generated media assets."
+  "Show unreferenced Noema attachments and generated media assets."
   (interactive)
   (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
-    (user-error "Aaronnote web-host is not running; start it with H-o o first"))
-  (message "Aaronnote: scanning orphaned attachments...")
+    (user-error "Noema web-host is not running; start it with H-o o first"))
+  (message "Noema: scanning orphaned attachments...")
   (my/aaronnote--api-call
    "aaronnote:api:assets:scan-orphans" []
    (lambda (result)
@@ -4882,7 +4882,7 @@ Prompts for the note to move and a new file name, then calls the
 backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
   (interactive)
   (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
-    (user-error "Aaronnote web-host is not running; start it with H-o o first"))
+    (user-error "Noema web-host is not running; start it with H-o o first"))
   (let* ((slug (my/aaronnote-roam--read-note-id "Move note: "))
          (file (my/aaronnote-roam--slug-to-file slug))
          (old-name (file-name-nondirectory file))
@@ -4900,7 +4900,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      (vector (list (cons "file" file) (cons "targetName" new-name)))
      (lambda (result)
        (if (not (alist-get 'ok result))
-           (message "Aaronnote move failed: %s" (alist-get 'message result))
+           (message "Noema move failed: %s" (alist-get 'message result))
          (my/aaronnote--api-call
           "aaronnote:api:roam-tools:rewrite-path-refs"
           (vector (list (cons "oldPath" old-rel) (cons "newPath" new-rel)))
@@ -4914,10 +4914,10 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
 ;;; Tag management wrappers for the management dashboard.
 
 (defun my/aaronnote-roam-rename-tag ()
-  "Rename a tag across all vault notes via the Aaronnote runtime."
+  "Rename a tag across all vault notes via the Noema runtime."
   (interactive)
   (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
-    (user-error "Aaronnote web-host is not running"))
+    (user-error "Noema web-host is not running"))
   (let* ((old-tag (read-string "Old tag name: "))
          (new-tag (read-string (format "Rename '%s' to: " old-tag) old-tag)))
     (when (string-empty-p old-tag)
@@ -4935,10 +4935,10 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
                   old-tag new-tag changed (if (= changed 1) "" "s")))))))
 
 (defun my/aaronnote-roam-delete-tag ()
-  "Delete a tag from all vault notes via the Aaronnote runtime."
+  "Delete a tag from all vault notes via the Noema runtime."
   (interactive)
   (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
-    (user-error "Aaronnote web-host is not running"))
+    (user-error "Noema web-host is not running"))
   (let ((tag (read-string "Delete tag: ")))
     (when (string-empty-p tag)
       (user-error "Tag name cannot be empty"))
@@ -4954,10 +4954,10 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
                     tag changed (if (= changed 1) "" "s"))))))))
 
 (defun my/aaronnote-roam-tag-overlap ()
-  "Show overlapping/redundant tags report via the Aaronnote runtime."
+  "Show overlapping/redundant tags report via the Noema runtime."
   (interactive)
   (unless (and (boundp 'my/aaronnote--ready) my/aaronnote--ready)
-    (user-error "Aaronnote web-host is not running"))
+    (user-error "Noema web-host is not running"))
   (message "Analyzing tag overlap...")
   (my/aaronnote--api-call
    "aaronnote:api:roam-tools:tag-overlap"
@@ -4990,7 +4990,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :badge-tone info
      :title "Find note"
      :meta "findnode"
-     :detail "Jump by Aaronnote id, path, or title."
+     :detail "Jump by Noema id, path, or title."
      :command my/aaronnote-roam-find-note
      :help "Find and open a roam note")
     (:id create-note
@@ -5018,7 +5018,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :meta "title/tag/linksto"
      :detail "Filter notes with scoped search operators."
      :command my/aaronnote-roam-search-notes
-     :help "Search Aaronnote roam notes")
+     :help "Search Noema roam notes")
     (:id daily-note
      :icon note
      :badge "TODAY"

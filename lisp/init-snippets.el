@@ -69,13 +69,13 @@ not intentional content.  Templates with user fields are left untouched."
 
 (defconst my/yas-aaronnote-generated-tex-directory
   (expand-file-name "snippets/tex-mode/generated" user-emacs-directory)
-  "Generated LaTeX Workshop/Overleaf snippets shared with Aaronnote.")
+  "Generated LaTeX Workshop/Overleaf snippets shared with Noema.")
 
 (defun my/yas-load-aaronnote-generated-tex-snippets (&rest _)
   "Load provider subdirectories into the existing `tex-mode' YAS table.
 YAS normally recurses below a mode directory, but an existing
 `.yas-compiled-snippets.el' short-circuits that recursion. Loading this small,
-pinned generated subtree after `yas-reload-all' keeps Emacs and Aaronnote on
+pinned generated subtree after `yas-reload-all' keeps Emacs and Noema on
 the same catalog without putting filesystem work on the expansion hot path."
   (when (and (file-directory-p my/yas-aaronnote-generated-tex-directory)
              (fboundp 'yas--load-directory-2))

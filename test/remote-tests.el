@@ -612,7 +612,7 @@ returns, so this covers a different ownership window from backend cancellation."
 
 (ert-deftest remote-expand-local-home-is-target-aware ()
   (remote-test-with-registry
-    (let* ((spelling "~/Documents/AaronNote/")
+    (let* ((spelling "~/Documents/Noema/")
            (expected
             (file-name-as-directory
              (expand-file-name spelling))))

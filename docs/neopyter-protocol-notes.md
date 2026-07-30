@@ -102,13 +102,13 @@ produces a doubled path and an `ENOENT` error.
 
 ```elisp
 ;; In lisp/init-neopyter.el (or etc/local.el for machine-specific roots):
-(setq aaron-neopyter-jupyter-root "/Users/hc/Documents/AaronNote")
+(setq aaron-neopyter-jupyter-root "/Users/hc/Documents/Noema")
 ```
 
 `aaron-neopyter-sync--rpc-path` strips this prefix from the absolute `.ipynb` path
 before every RPC call, e.g.:
 ```
-/Users/hc/Documents/AaronNote/project/lab/foo.ipynb
+/Users/hc/Documents/Noema/project/lab/foo.ipynb
   → project/lab/foo.ipynb
 ```
 

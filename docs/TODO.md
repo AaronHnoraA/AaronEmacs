@@ -11,7 +11,7 @@
 
 ---
 
-##  Aaronnote && Roam
+##  Noema && Roam
 
 ### Features
 - iicoment 纳入latex export吧

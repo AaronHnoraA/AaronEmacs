@@ -1,6 +1,0 @@
-# -*- mode: snippet -*-
-# name: Aaronnote planning milestone
-# key: apmile
-# group: Aaronnote planning DSL
-# --
-@@milestone ${1:Milestone} {}$0

@@ -2,7 +2,7 @@
 
 * Architecture
 
-The local Jupyter and AaronNote workflows use ordinary kernelspecs. Remote
+The local Jupyter and Noema workflows use ordinary kernelspecs. Remote
 kernels are provided by the vendored =remote_ikernel= source under
 =site-lisp/remote_ikernel=. No remote Jupyter Server is required: the launcher
 starts the remote kernel over SSH or a scheduler and forwards its ZMQ ports.

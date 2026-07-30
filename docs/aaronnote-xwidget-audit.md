@@ -1,4 +1,4 @@
-# Aaronnote × xwidget Integration Audit
+# Noema × xwidget Integration Audit
 
 Audit of the full chain: Emacs (`init-aaronnote.el`) ↔ xwidget-webkit ↔ Node HTTP
 server (`web-host.mjs`) ↔ CodeMirror 6 app (`aaronnote/main.ts`, `src/cm6/`).
@@ -109,7 +109,7 @@ All three items are minor optimizations on an already viewport-aware pipeline:
 
 ```sh
 # TypeScript unit tests
-cd lisp/roam/aaronnote
+cd lisp/roam/Noema
 npm test -- tests/sanitize-html.test.ts tests/cm6/commands.test.ts tests/paste-html.test.ts
 
 # Build
@@ -172,12 +172,12 @@ Bounded LRU caches (math/code/diagram/note-code/save-dedup), SSE client teardown
 
 ### Benchmark
 
-Benchmark file used: `/Users/hc/HC/Org/Aaronnote/tests/synthetic_qc_note_5mb.md` (5,254,496 bytes). The requested singular path `~/HC/Org/Aaronnote/test/5mb.md` was not present.
+Benchmark file used: `/Users/hc/HC/Org/Noema/tests/synthetic_qc_note_5mb.md` (5,254,496 bytes). The requested singular path `~/HC/Org/Noema/test/5mb.md` was not present.
 
 Command used while the temporary benchmark test existed (the test file was removed after the run):
 
 ```sh
-AARONNOTE_BENCH_FILE=/Users/hc/HC/Org/Aaronnote/tests/synthetic_qc_note_5mb.md npm test -- tests/perf-cursor-bench.test.ts --reporter verbose
+AARONNOTE_BENCH_FILE=/Users/hc/HC/Org/Noema/tests/synthetic_qc_note_5mb.md npm test -- tests/perf-cursor-bench.test.ts --reporter verbose
 ```
 
 Result from the temporary explicit benchmark:

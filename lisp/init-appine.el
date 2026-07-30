@@ -475,10 +475,10 @@ With DIRED-P, the main path button opens via `dired'."
   (interactive)
   (appine-native-action "scrollPageUp"))
 
-;;; ── Aaronnote bridge ───────────────────────────────────────────────────
+;;; ── Noema bridge ───────────────────────────────────────────────────
 
 (defun my/appine-aaronnote-url-p (&optional url)
-  "Return non-nil when URL is the current local Aaronnote page."
+  "Return non-nil when URL is the current local Noema page."
   (let ((url (or url my/appine-last-url)))
     (and (stringp url)
          (boundp 'my/aaronnote--port)
@@ -488,7 +488,7 @@ With DIRED-P, the main path button opens via `dired'."
           url))))
 
 (defun my/appine-aaronnote-command (command &optional detail)
-  "Send COMMAND and optional DETAIL when the active Appine tab is Aaronnote."
+  "Send COMMAND and optional DETAIL when the active Appine tab is Noema."
   (when (and (my/appine-aaronnote-url-p)
              (fboundp 'my/aaronnote-command))
     (my/aaronnote-command command detail)
@@ -497,35 +497,35 @@ With DIRED-P, the main path button opens via `dired'."
     t))
 
 (defun my/appine-aaronnote-escape ()
-  "Route Escape to Aaronnote when Appine is showing Aaronnote."
+  "Route Escape to Noema when Appine is showing Noema."
   (interactive)
   (unless (my/appine-aaronnote-command "escape")
     (keyboard-escape-quit)))
 
 (defun my/appine-aaronnote-save-or-native ()
-  "Save Aaronnote from Appine, otherwise ask Appine's native view to save."
+  "Save Noema from Appine, otherwise ask Appine's native view to save."
   (interactive)
   (unless (my/appine-aaronnote-command "save")
     (appine-native-action "save")))
 
 (defun my/appine-aaronnote-meta-digit (digit)
-  "Route Emacs M-DIGIT to Aaronnote as an Appine host key."
+  "Route Emacs M-DIGIT to Noema as an Appine host key."
   (interactive "cDigit: ")
   (let ((key (char-to-string digit)))
     (unless (my/appine-aaronnote-command
              "key"
              `((key . ,key)
                (altKey . t)))
-      (message "M-%s is only routed for Aaronnote Appine tabs" key))))
+      (message "M-%s is only routed for Noema Appine tabs" key))))
 
 (defun my/appine-aaronnote-shift-tab ()
-  "Route Shift-Tab to Aaronnote when Appine is showing Aaronnote."
+  "Route Shift-Tab to Noema when Appine is showing Noema."
   (interactive)
   (unless (my/appine-aaronnote-command
            "key"
            '((key . "Tab")
              (shiftKey . t)))
-    (message "Shift-Tab is only routed for Aaronnote Appine tabs")))
+    (message "Shift-Tab is only routed for Noema Appine tabs")))
 
 (defun my/appine-keep-emacs-prefix-keys (map)
   "Remove Appine bindings that should remain normal Emacs prefixes in MAP."

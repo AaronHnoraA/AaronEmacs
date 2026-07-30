@@ -1,6 +1,0 @@
-# -*- mode: snippet -*-
-# name: Aaronnote planning clock
-# key: apclock
-# group: Aaronnote planning DSL
-# --
-@@clock ${1:Task} {}$0

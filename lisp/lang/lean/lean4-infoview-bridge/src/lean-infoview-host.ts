@@ -1,5 +1,5 @@
 // lean-infoview-host.ts — official @leanprover/infoview host backed by
-// lean-proxy.mjs HTTP/SSE.  Adapted from Aaronnote aaronnote/lean-infoview-host.ts.
+// lean-proxy.mjs HTTP/SSE.  Adapted from Noema aaronnote/lean-infoview-host.ts.
 import { loadRenderInfoview } from "@leanprover/infoview/loader";
 import {
   defaultInfoviewConfig,

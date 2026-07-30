@@ -211,7 +211,7 @@ to evil insert state if evil is active in the buffer."
       (format "*xwidget: %s*" label))))
 
 (defun my/xwidget--aaronnote-owned-p (&optional buffer)
-  "Return non-nil when BUFFER has Aaronnote-specific naming."
+  "Return non-nil when BUFFER has Noema-specific naming."
   (let ((buffer (or buffer (current-buffer))))
     (and (buffer-live-p buffer)
          (with-current-buffer buffer
@@ -343,7 +343,7 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
     (user-error "No xwidget URL available")))
 
 (defun my/xwidget-open-task-manager ()
-  "Open the current Aaronnote page's Core task manager without polling."
+  "Open the current Noema page's Core task manager without polling."
   (interactive)
   (my/xwidget--execute-script
    "(() => { if (typeof window.aaronnoteOpenTaskManager === 'function') { window.aaronnoteOpenTaskManager(); return true; } return false; })()"))

@@ -79,7 +79,7 @@
 - `H-0` / `H-1` / `H-2` / `H-3`
   关当前窗口 / 单窗口切换 / 上下分屏 / 左右分屏
 - `H-o` / `H-O` / `H-k` / `H-K`
-  Aaronnote 全功能 hub (见下) / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域
+  Noema 全功能 hub (见下) / 上方开新行 / 向下复制当前行或区域 / 向上复制当前行或区域
 - `H-<up>` / `H-<down>` / `H--` / `H-=`
   上移 / 下移当前行或区域 / 收缩选择 / 扩大选择
 - `H-;` / `H-'` / `H-[` / `H-]` / `H-/`
@@ -98,10 +98,10 @@
 `m/s/n/J/R/P`。
 
 打开 `.md`、`.markdown` 或 `README.md` 时，Emacs 会直接把文件交给
-Aaronnote Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保存、
-文件树和 graph 都在 Aaronnote 内完成；Emacs 只保留粗粒度 bridge 命令。
+Noema Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保存、
+文件树和 graph 都在 Noema 内完成；Emacs 只保留粗粒度 bridge 命令。
 
-`H-o` 打开 Aaronnote 全功能 hub（单页 Transient）：
+`H-o` 打开 Noema 全功能 hub（单页 Transient）：
 
 | 分组 | 常用键 |
 |------|--------|
@@ -132,11 +132,11 @@ Lean 4 buffer 里 `C-c C-i` 打开右侧官方 xwidget infoview。
 目标、hypotheses、诊断、trace、Try this、code actions 等交互都走
 `lisp/lang/lean/lean4-infoview-bridge/` 里的官方 React infoview bridge。
 
-Aaronnote 任务使用 `@@todo(state) [text] {key: value}`，例如
+Noema 任务使用 `@@todo(state) [text] {key: value}`，例如
 `@@todo(doing) [Write proof] {prio: A, ddl: 2026-05-20, repeat: +1w}`。
 agenda/project/clock 引擎全在 `server/lib/runtime.mjs`，priority、deadline/
 scheduled、repeat、dependency（`after`/`blocks`）、done/log、clock-in/out 都写回
-原始 `@@todo`/`@@clock` 行。Aaronnote Web 的 `/agenda` 页是唯一的 agenda 界面
+原始 `@@todo`/`@@clock` 行。Noema Web 的 `/agenda` 页是唯一的 agenda 界面
 （week/list/month/log/gantt/projects/clocktable/lints tabs，Gantt 支持拖拽改期）；
 Emacs 里 `M-x my/aaronnote-roam-agenda` 或 dispatch `A` 直接跳转打开这个页面，
 不再有原生 Emacs agenda buffer。完整语法和 view-model 见
@@ -146,46 +146,46 @@ Graph 搜索框支持全文词和
 `tag:` / `alias:` / `path:` / `title:` 过滤，并会提示 tag / alias / path 等候选。
 本地 graph xwidget buffer 里 `M-w` 会 kill graph buffer 并关掉 graph websocket。
 
-Aaronnote 编辑器的 xwidget window 使用 Emacs 原生 chrome：顶部铅笔按钮集中提供
+Noema 编辑器的 xwidget window 使用 Emacs 原生 chrome：顶部铅笔按钮集中提供
 Page、Agenda、Graph、Tools、Source、Save，点击后仍调用原 Web 面板和保存逻辑；
 Vim mode、只读和全文/选区/本节字数显示在 Web 编辑区右上角的小浮窗，
 Emacs mode-line 保持原样。Opening/Saved/Edited 等日常状态静默；LaTeX 进度、明确操作
 结果和错误等关键反馈经过去重与短间隔合并后进入 Emacs echo，error 立即显示；
 `my/aaronnote-echo-severity` 可配置为仅 error、warning + error 或完全关闭。这个布局只应用于
-Aaronnote 自己的 xwidget buffer，不改变普通网页的 xwidget 控制栏。
+Noema 自己的 xwidget buffer，不改变普通网页的 xwidget 控制栏。
 
-Aaronnote 的 Emacs 原生 roam buffer（Agenda、Tasks、TOC、Backlinks、Related、
+Noema 的 Emacs 原生 roam buffer（Agenda、Tasks、TOC、Backlinks、Related、
 Management、DB Status、note list 和 Roam Selector）使用统一的紧凑 workbench UI：
 header-line 显示当前视图状态，正文使用工具栏、分组、状态徽章和可点击行。通用按键为
 `g` 刷新、`q` 关闭、`RET` 打开当前行、`j` / `k` 或 `n` / `p` 上下移动，
 `TAB` / `S-TAB` 在工具栏按钮间移动。Roam Selector 另外保留 `/` / `s` 搜索、
 `g` 回根目录、`.` 回当前 note context、`u` / `^` 上一级、`r` 刷新和 `i`
-直接插入当前目标。这些是 Emacs buffer 的界面和按键，不影响 Aaronnote Web UI。
+直接插入当前目标。这些是 Emacs buffer 的界面和按键，不影响 Noema Web UI。
 
 `C-c r n` / Roam 菜单里的 `new note` 打开 `*roam-new*` 原生新建面板。字段与
-Aaronnote New Note 一致：Type、Title、Save path、Kind、Template、Tags；Title、Save
+Noema New Note 一致：Type、Title、Save path、Kind、Template、Tags；Title、Save
 path、Kind 和 Tags 可在面板里直接输入，`c` 创建，`t` / `RET` 切换 roam / regular，
 `T` 选模板，`R` 重置。创建实际走
-Aaronnote runtime，所以默认值、路径校验、meta、模板变量和 tabstop 展开逻辑保持一致。
-Markdown 模板统一存放在 `templates/aaronnote/markdown-mode/`，供 Emacs 启动的 Aaronnote 与
+Noema runtime，所以默认值、路径校验、meta、模板变量和 tabstop 展开逻辑保持一致。
+Markdown 模板统一存放在 `templates/aaronnote/markdown-mode/`，供 Emacs 启动的 Noema 与
 Roam New 共用。所有新建 note 的 meta 都会带一个空的嵌套 `summary` block，可直接在 Abstract
 或 Properties 中编辑；模板自带 meta 时也会自动补齐，不需要每个模板重复声明。
 
-### Aaronnote Slides
+### Noema Slides
 
-在 meta 中设置 `kind: slides` 后，Aaronnote 默认进入 **Reveal** 展示视图。每个一级标题
+在 meta 中设置 `kind: slides` 后，Noema 默认进入 **Reveal** 展示视图。每个一级标题
 （`# Title`）开始一张新 slide；二级标题及以下、公式、图片、org-env 和手写 HTML 都留在当前页，
 代码围栏里的 `#` 不会分页。meta 与第一个一级标题前的内容不显示为 slide。Reveal 负责 16:9
-画布、缩放、动画、fragment 和翻页；Aaronnote 负责把每一页 Markdown 先渲染成 HTML，因此
+画布、缩放、动画、fragment 和翻页；Noema 负责把每一页 Markdown 先渲染成 HTML，因此
 两边不会有第二套 Markdown 解释器。
 
 一级标题 `#` 默认向右分页；其下的二级标题 `##` 自动成为纵向页。← / → 在一级标题之间移动，
 ↑ / ↓ 在同一一级标题的 stack 内移动。一级、二级标题都直接在 slide 内容中渲染；展示页不再
 额外绘制左侧目录、顶部标题栏或底部进度线。旧的 `@@slides(vertical) []` 标记仍兼容，但新笔记不再需要它。
 若二级标题带现有的 `<!-- omit in toc -->` 标记，它不会建立纵向页，而会作为当前 slide 的普通
-二级标题继续由 Aaronnote renderer 渲染。
+二级标题继续由 Noema renderer 渲染。
 
-`M-/` / `Cmd-/` 在 slides note 中切换 **Reveal 展示** 与完整、连续的 **Aaronnote 普通笔记页**；
+`M-/` / `Cmd-/` 在 slides note 中切换 **Reveal 展示** 与完整、连续的 **Noema 普通笔记页**；
 两个视图各自保存位置，不做鼠标、光标或选区同步。铅笔 Tools 中的
 **Slides theme** 可即时切换并记住亮色/暗色展示，**Source view** 仍能进入真正的 Markdown 源码。
 演示时左下角胶囊改为整块亮暗主题开关，右侧写作统计隐藏；回到编辑后该胶囊恢复为
@@ -204,9 +204,9 @@ HTML：顶层 `<section data-background-color="…">…</section>` 会被直接�
 打开 JS mirror。它在 Reveal 初始化后以 ES module 运行，默认导出函数接收 `{ Reveal, root, file }`。
 可从 Roam New 的 Slides 模板创建，或参考 `templates/aaronnote/slides/markdown-mode/demo`。
 
-### Aaronnote LaTeX 导出
+### Noema LaTeX 导出
 
-在 Aaronnote 的 Tools 中选择 `Export LaTeX`，或在页面内按 `⌘P`。导出先打开专用范围
+在 Noema 的 Tools 中选择 `Export LaTeX`，或在页面内按 `⌘P`。导出先打开专用范围
 选择器，不会再用一个模糊的空白 TOC 输入框：
 
 - `Whole note` 导出全文；有文本选区时会额外提供 `Text selection`。
@@ -217,7 +217,7 @@ HTML：顶层 `<section data-background-color="…">…</section>` 会被直接�
 选完范围后会再让你**选择模板**（`Article` 默认、`Report`、`Assignment`），模板若声明了
 额外字段（如 Assignment 的课程代码 / 学期 / 学号）会弹出表单，默认值按 note 记忆。
 
-导出先由 Aaronnote 预处理私有语法，再用 **Pandoc** 完整解析标准 Markdown。服务端先在隔离的
+导出先由 Noema 预处理私有语法，再用 **Pandoc** 完整解析标准 Markdown。服务端先在隔离的
 staging 目录验证机械稿；`codex` 模式随后保留一次受严格 gate 保护的 AI 润色机会。已编译稿无论
 agent 超时、review 失败或改动 citation/code/resource 等不应触碰的 payload，都立即停止，**绝不 retry 2/3，也不会把未润色的 Pandoc
 稿伪装成成功结果**；上一次可用 `.tex` / PDF 保持不变。非致命 overfull 等版式诊断会作为精确反馈
@@ -259,7 +259,7 @@ BibTeX 或部分解析成功的多引用都会在写文件前阻断并给出明�
 占位或丢掉其中一项。代码、数学、HTML comment 和私有 block 中的字面 `@@cite` 不参与引用编号。
 meta 内只有嵌套 Summary/Abstract 的正文参与引用解析；其中的 citation、Markdown link、编号和
 打开/右键交互与外层正文一致，其他 metadata 字段仍保持私有。
-metadata 同时支持 Aaronnote meta block 与 YAML front matter；BibTeX value 支持 `@string` 前向引用、
+metadata 同时支持 Noema meta block 与 YAML front matter；BibTeX value 支持 `@string` 前向引用、
 `#` 拼接、标准月份宏与 TeX accent。未知/循环宏、畸形 field、未闭合 citation key/args 都会报告
 带行列位置的诊断。quoted `bib:` 路径可包含逗号，链接 URL 中的 `@@cite` 保持字面量，而可见链接
 label 中的 citation 正常解析。
@@ -267,7 +267,7 @@ label 中的 citation 正常解析。
 后端可用 `my/aaronnote-latex-export-agent` 选择：`codex`（默认）/ `claude` / `opencode`，都以
 非交互、免确认方式运行，且在配置里选定、不会每次询问。引擎开关 `my/aaronnote-latex-export-engine`
 （`codex` = verified-first + 单次 gated polish / 必要时 repair；`mechanical` = 从不启动 agent）。中间校验用 draft
-模式加速，最终产物仍做完整两遍编译。见 Aaronnote 的 `docs/latex-export-style.md`。
+模式加速，最终产物仍做完整两遍编译。见 Noema 的 `docs/latex-export-style.md`。
 空闲存活检查和硬上限分别由 `my/aaronnote-latex-export-agent-idle-timeout`（默认 180 秒）与
 `my/aaronnote-latex-export-agent-hard-timeout`（默认 900 秒）控制。
 

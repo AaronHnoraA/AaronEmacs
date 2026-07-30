@@ -126,7 +126,7 @@ TeXpresso 的本地 checkout、Emacs mode 和构建产物统一放在 `var/texpr
 
 键位前缀 `C-c c`；参见文件顶部注释。
 
-### Aaronnote LaTeX 导出（CMD+P）
+### Noema LaTeX 导出（CMD+P）
 
 变量（`config-defvar`，组 `my/aaronnote`，落盘 `etc/config-store.el`）：
 
@@ -436,10 +436,10 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 - `org` 默认不在 allowlist 里（避免干扰 `org-capture` 和 note 模板）
 - 模板存放在 `templates/<kind>/`；模板里的占位符支持 `{{date}}` / `{{title}}` / `{{file}}` / `{{author}}` / `{{cursor}}` 等
 
-Aaronnote / Roam New 的 Markdown 模板集中在
-[templates/aaronnote/markdown-mode/](../templates/aaronnote/markdown-mode/)。它们使用 Aaronnote 的
+Noema / Roam New 的 Markdown 模板集中在
+[templates/aaronnote/markdown-mode/](../templates/aaronnote/markdown-mode/)。它们使用 Noema 的
 snippet-style header、`{{title}}` / `{{date}}` / `{{tags}}` 等变量和 `$0` tabstop，
-由 Aaronnote runtime 展开，不进入普通 `auto-insert` allowlist。
+由 Noema runtime 展开，不进入普通 `auto-insert` allowlist。
 
 Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignment 模板会
 导入项目根目录下的 `/_typst/assignment.typ`；插入模板时 Emacs 会自动创建这些
@@ -474,7 +474,7 @@ JupyterLab 的内容 API 使用相对路径（相对于 `jupyter lab` 的启动�
 在 `lisp/init-neopyter.el` 或 `etc/local.el` 里设置：
 
 ```elisp
-(setq aaron-neopyter-jupyter-root "~/Documents/AaronNote")
+(setq aaron-neopyter-jupyter-root "~/Documents/Noema")
 ```
 
 如果不确定根目录，先在 JupyterLab 打开任意一个 notebook，然后在 Emacs 里运行：

@@ -1,7 +1,7 @@
 ;;; init-aaronnote-jupyter-cell.el --- Hidden Jupyter cell script buffers -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Aaronnote writes same-kernel Jupyter cells into a hidden source file beside
+;; Noema writes same-kernel Jupyter cells into a hidden source file beside
 ;; the note.  This minor mode detects those files and handles save events.
 
 ;;; Code:
@@ -37,7 +37,7 @@
 
 (defface my/aaronnote-jupyter-cell-marker-face
   '((t :background "#1f6f43" :foreground "#eafff1" :weight bold))
-  "Face for active Aaronnote Jupyter cell boundary markers."
+  "Face for active Noema Jupyter cell boundary markers."
   :group 'my/aaronnote)
 
 (defvar-keymap my/aaronnote-jupyter-cell-mode-map
@@ -54,19 +54,19 @@
 
 (defconst my/aaronnote-jupyter-cell--source-re
   (concat "^[ \t]*" my/aaronnote-jupyter-cell--comment-prefix
-          "[ \t]*Aaronnote cell source:[ \t]*\\(.+\\)$"))
+          "[ \t]*\\(?:Noema\\|Aaronnote\\) cell source:[ \t]*\\(.+\\)$"))
 
 (defconst my/aaronnote-jupyter-cell--kernel-re
   (concat "^[ \t]*" my/aaronnote-jupyter-cell--comment-prefix
-          "[ \t]*Aaronnote cell kernel:[ \t]*\\(.+\\)$"))
+          "[ \t]*\\(?:Noema\\|Aaronnote\\) cell kernel:[ \t]*\\(.+\\)$"))
 
 (defconst my/aaronnote-jupyter-cell--session-re
   (concat "^[ \t]*" my/aaronnote-jupyter-cell--comment-prefix
-          "[ \t]*Aaronnote cell session:[ \t]*\\(.+\\)$"))
+          "[ \t]*\\(?:Noema\\|Aaronnote\\) cell session:[ \t]*\\(.+\\)$"))
 
 (defconst my/aaronnote-jupyter-cell--storage-re
   (concat "^[ \t]*" my/aaronnote-jupyter-cell--comment-prefix
-          "[ \t]*Aaronnote cell storage:[ \t]*\\(.+\\)$"))
+          "[ \t]*\\(?:Noema\\|Aaronnote\\) cell storage:[ \t]*\\(.+\\)$"))
 
 (defconst my/aaronnote-jupyter-cell--start-re
   (concat "^[ \t]*" my/aaronnote-jupyter-cell--comment-prefix
@@ -142,12 +142,12 @@
     (my/aaronnote-jupyter-cell--hide-overlays)))
 
 (defun my/aaronnote-jupyter-cell--command-detail (&optional cell-id)
-  "Return Aaronnote command detail for CELL-ID or the cell at point."
+  "Return Noema command detail for CELL-ID or the cell at point."
   (let ((cell-id (or cell-id
                      my/aaronnote-jupyter-cell-current-id
                      (plist-get (my/aaronnote-jupyter-cell--bounds-at-point) :id))))
     (unless (and cell-id (not (string-empty-p cell-id)))
-      (user-error "Point is not inside an Aaronnote Jupyter cell"))
+      (user-error "Point is not inside an Noema Jupyter cell"))
     `((file . ,my/aaronnote-jupyter-cell-source-file)
       (cellId . ,cell-id)
       (kernel . ,(or my/aaronnote-jupyter-cell-kernel ""))
@@ -157,12 +157,12 @@
 (defun my/aaronnote-jupyter-cell--post-command-h ()
   "Track current cell for local highlighting.
 Cursor moves in the Emacs source buffer are intentionally local; use
-`my/aaronnote-jupyter-cell-sync-cursor' (`M-RET') to sync Aaronnote."
+`my/aaronnote-jupyter-cell-sync-cursor' (`M-RET') to sync Noema."
   (when my/aaronnote-jupyter-cell-mode
     (my/aaronnote-jupyter-cell--update-highlight)))
 
 (defun my/aaronnote-jupyter-cell-sync-cursor ()
-  "Sync the current Emacs Jupyter cell cursor back to Aaronnote."
+  "Sync the current Emacs Jupyter cell cursor back to Noema."
   (interactive)
   (my/aaronnote-jupyter-cell--update-highlight)
   (my/aaronnote-command
@@ -170,7 +170,7 @@ Cursor moves in the Emacs source buffer are intentionally local; use
    (my/aaronnote-jupyter-cell--command-detail)))
 
 (defun my/aaronnote-jupyter-cell-run-current ()
-  "Run the current Aaronnote Jupyter cell from this generated script buffer."
+  "Run the current Noema Jupyter cell from this generated script buffer."
   (interactive)
   (when (buffer-modified-p)
     (save-buffer))
@@ -178,10 +178,10 @@ Cursor moves in the Emacs source buffer are intentionally local; use
   (let* ((detail (my/aaronnote-jupyter-cell--command-detail))
          (cell-id (alist-get 'cellId detail)))
     (my/aaronnote-command "jupyter-run-script-cell" detail)
-    (message "Aaronnote Jupyter: run cell %s via web" cell-id)))
+    (message "Noema Jupyter: run cell %s via web" cell-id)))
 
 (defun my/aaronnote-jupyter-cell-restart-run-all ()
-  "Restart this script buffer's kernel and run all cells in Aaronnote."
+  "Restart this script buffer's kernel and run all cells in Noema."
   (interactive)
   (when (buffer-modified-p)
     (save-buffer))
@@ -190,7 +190,7 @@ Cursor moves in the Emacs source buffer are intentionally local; use
    (my/aaronnote-jupyter-cell--command-detail)))
 
 (defun my/aaronnote-jupyter-cell-interrupt ()
-  "Interrupt this script buffer's Aaronnote Jupyter kernel."
+  "Interrupt this script buffer's Noema Jupyter kernel."
   (interactive)
   (my/aaronnote-command
    "jupyter-interrupt"
@@ -223,11 +223,11 @@ Cursor moves in the Emacs source buffer are intentionally local; use
                          "markdown")))))
 
 (defun my/aaronnote-jupyter-cell-sync-buffer ()
-  "Notify Aaronnote that the generated Jupyter cell script was saved."
+  "Notify Noema that the generated Jupyter cell script was saved."
   (interactive)
   (unless (and my/aaronnote-jupyter-cell-source-file
                (not (string-empty-p my/aaronnote-jupyter-cell-source-file)))
-    (user-error "This buffer is not linked to an Aaronnote Jupyter cell source"))
+    (user-error "This buffer is not linked to an Noema Jupyter cell source"))
   (my/aaronnote-command
    "jupyter-cell-script-saved"
    `((file . ,my/aaronnote-jupyter-cell-source-file)
@@ -242,11 +242,11 @@ Cursor moves in the Emacs source buffer are intentionally local; use
     (condition-case err
         (my/aaronnote-jupyter-cell-sync-buffer)
       (error
-       (message "Aaronnote Jupyter cell sync failed: %s" (error-message-string err))))))
+       (message "Noema Jupyter cell sync failed: %s" (error-message-string err))))))
 
 ;;;###autoload
 (define-minor-mode my/aaronnote-jupyter-cell-mode
-  "Minor mode for generated Aaronnote Jupyter cell script files."
+  "Minor mode for generated Noema Jupyter cell script files."
   :lighter " JCell"
   (if my/aaronnote-jupyter-cell-mode
       (progn
@@ -266,9 +266,9 @@ round-trip it implies) only runs for files under a `.cell' store directory."
 
 ;;;###autoload
 (defun my/aaronnote-jupyter-cell-activate-buffer ()
-  "Enable `my/aaronnote-jupyter-cell-mode' in an Aaronnote-opened cell script.
+  "Enable `my/aaronnote-jupyter-cell-mode' in an Noema-opened cell script.
 This is intentionally explicit: ordinary `find-file' visits to `.cell' files
-must not enable the mode unless Aaronnote opened the script via Edit."
+must not enable the mode unless Noema opened the script via Edit."
   (interactive)
   (when-let* (((my/aaronnote-jupyter-cell--candidate-file-p))
               (meta (my/aaronnote-jupyter-cell--read-header))

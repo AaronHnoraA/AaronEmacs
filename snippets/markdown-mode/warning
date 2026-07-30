@@ -1,9 +1,0 @@
-# -*- mode: snippet -*-
-# name: Warning block
-# key: warn
-# group: Aaronnote blocks
-# --
-#+begin warning ${1:title}
-${2:Warning.}
-#+end warning
-$0

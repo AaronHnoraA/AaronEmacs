@@ -3,7 +3,7 @@
 ;;; Commentary:
 ;;
 ;; One loopback listener is the control-plane boundary between Emacs and
-;; helpers such as Lean and AaronNote.  HTTP and WebSocket carry the same
+;; helpers such as Lean and Noema.  HTTP and WebSocket carry the same
 ;; JSON-RPC 2.0 messages.  Remote targets reach the listener only through a
 ;; workspace-owned Remote reverse forward.
 

@@ -1,6 +1,6 @@
 # Emacs 通讯网关
 
-`remote-gateway` 是 Emacs 对 Lean、AaronNote 等外部进程的统一控制面。它只监听
+`remote-gateway` 是 Emacs 对 Lean、Noema 等外部进程的统一控制面。它只监听
 loopback，在同一个动态端口上提供：
 
 - `POST /rpc`：一次性 JSON-RPC 2.0 请求；
@@ -113,25 +113,25 @@ binding。同一逻辑 client 重启时旧 binding 会被替换回收；仍在�
 ## 当前接入
 
 - Lean：LSP 继续走 stdio；infoview endpoint 注册、cursor 通知走网关。
-- AaronNote：命令、事件与 `/api` 控制调用走网关；页面、静态资源、SSE 等数据面
-  保留在 AaronNote HTTP server。远程 Markdown 的逻辑 `/fs:` 路径不投影成
-  AaronNote 所在机器的路径，而是通过 `aaronnote.file.read` 和
+- Noema：命令、事件与 `/api` 控制调用走网关；页面、静态资源、SSE 等数据面
+  保留在 Noema HTTP server。远程 Markdown 的逻辑 `/fs:` 路径不投影成
+  Noema 所在机器的路径，而是通过 `aaronnote.file.read` 和
   `aaronnote.file.write` 回调 Emacs，由 Remote/TRAMP 完成读写。
-- Copilot：AaronNote 通过网关调用 Emacs 的 `copilot.request`，不再维护独立
+- Copilot：Noema 通过网关调用 Emacs 的 `copilot.request`，不再维护独立
   bridge server。普通 Remote buffer 也复用 Emacs 客户端的同一个 Copilot
   language-server binary；进程通过 `remote-make-client-process` 固定为 client
   placement，不会在 target 上查找或安装 Copilot。
 
-### AaronNote 远程 Markdown
+### Noema 远程 Markdown
 
-AaronNote web-host 始终运行在 Emacs 客户端，不要求 Remote target 安装 Node、
-AaronNote 或额外常驻服务。打开 `/fs:TARGET:/path/note.md` 时：
+Noema web-host 始终运行在 Emacs 客户端，不要求 Remote target 安装 Node、
+Noema 或额外常驻服务。打开 `/fs:TARGET:/path/note.md` 时：
 
 1. 浏览器与 Node 全程保留 `/fs:` 文件身份；
 2. Node 通过双向网关请求 Emacs 读取或保存；
 3. Emacs 使用普通文件 API，由 Remote 的 route/backend 转换为 TRAMP 或其他
    transport；
-4. 文件监听作为 recoverable resource 归 Remote workspace 所有，AaronNote
+4. 文件监听作为 recoverable resource 归 Remote workspace 所有，Noema
    停止时一并释放。
 
 保存使用同目录临时文件再重命名，并保留原权限。请求携带读取时的 mtime，文件在
@@ -140,6 +140,6 @@ AaronNote 或额外常驻服务。打开 `/fs:TARGET:/path/note.md` 时：
 mtime 冲突检查继续生效。
 
 当前远程文件以 standalone note 打开：Markdown 编辑、预览、显式保存、外部修改
-刷新可用；整个远程目录不会被隐式并入本地 AaronNote vault 索引。远程文件关闭
+刷新可用；整个远程目录不会被隐式并入本地 Noema vault 索引。远程文件关闭
 自动保存，编辑器会显示 `manual save` 状态；有未保存内容时切换文件或刷新会被
-阻止。本地 AaronNote 笔记继续自动保存。
+阻止。本地 Noema 笔记继续自动保存。

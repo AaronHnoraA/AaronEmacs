@@ -234,7 +234,7 @@ leader 入口：
 
 - `ps` 里的 Emacs CPU、内存、RSS、子进程（原始 `ps` 行，只到直接子进程）。
 - **Toolchain Memory**：Emacs 整个后代进程树（递归，不止直接子进程）的 RSS
-  汇总——包含 AaronNote web-host 自己再 spawn 出来的 Copilot LSP、Jupyter
+  汇总——包含 Noema web-host 自己再 spawn 出来的 Copilot LSP、Jupyter
   kernel 这类"孙进程"，用缩进树 + 合计展示，不用再手动拼 `ps`/`pgrep` 审计
   工具链内存。结构化数据对应 `(my/performance-snapshot)` 里的
   `:children-rss-kb`/`:children-count`（只加进结构化 sample，没有写入 TSV
@@ -509,7 +509,7 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
 1. `gls` 是否存在
 2. macOS 上 coreutils 是否装好
 
-### Lean / AaronNote 孤儿进程占内存
+### Lean / Noema 孤儿进程占内存
 
 Lean 4 LSP 是 watchdog 架构：eglot 管理的是 `lean --server`/`lake serve`
 (或经 `lean-proxy.mjs` 包装的版本)，它为每个打开的 `.cell/*.lean` 文件 fork
@@ -528,7 +528,7 @@ Lean 4 LSP 是 watchdog 架构：eglot 管理的是 `lean --server`/`lake serve`
 - 排查：`pgrep -fl 'lean --worker'` 看 ppid 是不是 1；`ps -p <pid> -o rss`
   看占了多少内存。
 
-AaronNote 的 Jupyter kernel 同理：`server/jupyter/kernel-process.mjs` 用
+Noema 的 Jupyter kernel 同理：`server/jupyter/kernel-process.mjs` 用
 `detached: true` 启动 kernel，一旦孵化它的 node 进程（web-host 或某个临时
 诊断 harness）整体退出而没有干净调用 `shutdown()`，kernel 会被 reparent 到
 PID 1。`server/jupyter/kernel-registry.mjs` 的 `sweepOrphanKernels` 只能靠
@@ -554,12 +554,12 @@ registry(`etc/config-store.el`，改值用 `config-set` 或直接编辑该文件
 | 键 | 位置 | 默认 | 作用 |
 |---|---|---|---|
 | `my/gcmh-high-cons-threshold` | `lisp/init-tools.el` (gcmh) | 128 MB | Emacs 空闲 GC 前允许堆积的垃圾上限；LSP 活跃时会被 `lisp/init-lsp.el` 的 `my/language-server-performance-gcmh-factor`(默认 2) 临时翻倍。之前是 512 MB(LSP 活跃时 1 GB),下调后 GC 更勤但单次更短,交互延迟影响很小。 |
-| `my/copilot-server-max-heap-mb` | `lisp/init-copilot.el` | 1024 | Emacs 自己 spawn 的 Copilot language server 的 V8 堆上限,通过 `NODE_OPTIONS` 注入(该 LS 不是走命令行参数,`copilot-server-args` 只能传给二进制本身,包不去掉支持自定义 env,所以用 `copilot--make-connection` 的 advice)。同一个键的值会通过 `AARONNOTE_COPILOT_MAX_HEAP_MB` 环境变量传给 AaronNote 侧自己 spawn 的第二份 Copilot LSP 实例(`server/lib/runtime.mjs` 的 `CopilotLspClient`),两边共享一个上限。**实测 384/512 MB 都会让该 LS 在启动几秒内以 `SIGABRT`(V8 `Ineffective mark-compacts near heap limit` OOM)崩溃退出——它自身(sharp 原生模块 + tf-idf/diff worker 的宿主进程)启动期就需要 ~700 MB old-space,768 MB 是实测最低可用值;1024 MB 留出安全余量,仍比不设上限时的 4 GB 默认值收紧很多。改这个键前先用 `node --max-old-space-size=<N> dist/language-server.js --stdio` 走一遍 initialize 握手再空闲等 20s 确认不 OOM,不要凭感觉调小。** |
-| `my/aaronnote-web-host-max-heap-mb` | `lisp/roam/init-aaronnote.el` | 512 | AaronNote `web-host.mjs` 自身的 V8 堆上限,**必须用 `--max-old-space-size` 命令行 flag 而不是 `NODE_OPTIONS` 环境变量**——web-host 的 `process.env` 会原样传给它 shell 出去的 codex/claude/opencode CLI(LaTeX export 用),用环境变量会把堆上限错误地传染给这些 node 程序。 |
+| `my/copilot-server-max-heap-mb` | `lisp/init-copilot.el` | 1024 | Emacs 自己 spawn 的 Copilot language server 的 V8 堆上限,通过 `NODE_OPTIONS` 注入(该 LS 不是走命令行参数,`copilot-server-args` 只能传给二进制本身,包不去掉支持自定义 env,所以用 `copilot--make-connection` 的 advice)。同一个键的值会通过 `AARONNOTE_COPILOT_MAX_HEAP_MB` 环境变量传给 Noema 侧自己 spawn 的第二份 Copilot LSP 实例(`server/lib/runtime.mjs` 的 `CopilotLspClient`),两边共享一个上限。**实测 384/512 MB 都会让该 LS 在启动几秒内以 `SIGABRT`(V8 `Ineffective mark-compacts near heap limit` OOM)崩溃退出——它自身(sharp 原生模块 + tf-idf/diff worker 的宿主进程)启动期就需要 ~700 MB old-space,768 MB 是实测最低可用值;1024 MB 留出安全余量,仍比不设上限时的 4 GB 默认值收紧很多。改这个键前先用 `node --max-old-space-size=<N> dist/language-server.js --stdio` 走一遍 initialize 握手再空闲等 20s 确认不 OOM,不要凭感觉调小。** |
+| `my/aaronnote-web-host-max-heap-mb` | `lisp/roam/init-aaronnote.el` | 512 | Noema `web-host.mjs` 自身的 V8 堆上限,**必须用 `--max-old-space-size` 命令行 flag 而不是 `NODE_OPTIONS` 环境变量**——web-host 的 `process.env` 会原样传给它 shell 出去的 codex/claude/opencode CLI(LaTeX export 用),用环境变量会把堆上限错误地传染给这些 node 程序。 |
 | `my/aaronnote-latex-export-agent-idle-timeout` | `lisp/roam/init-aaronnote.el` | 180 | LaTeX export agent 无输出多久后做一次存活检查；活着就继续等，不会 kill。 |
 | `my/aaronnote-latex-export-agent-hard-timeout` | `lisp/roam/init-aaronnote.el` | 900 | 单次 agent attempt 的绝对上限；先 SIGTERM，默认留十秒收尾后才 SIGKILL。 |
 
-AaronNote 侧的 Copilot LSP 实例(`CopilotLspClient`)另外做了**空闲 TTL 自动
+Noema 侧的 Copilot LSP 实例(`CopilotLspClient`)另外做了**空闲 TTL 自动
 停止**:`AARONNOTE_COPILOT_IDLE_TTL_MS`(默认 15 分钟,0 关闭)内如果没有
 真实的补全请求(inline/shown/accept,不含单纯的 status 轮询)、且没有
 pending 请求,就会自动 `stop()`;下次任何请求经 `ensureReady()` 自动重启。

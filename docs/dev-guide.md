@@ -484,22 +484,22 @@ browser pipeline 额外提供：
 
 **xwidget 焦点**：页面加载完成（`load-finished`）时自动开启 `xwidget-webkit-edit-mode`、
 注入一次 `<right>` 唤醒 native WebKit first-responder、并运行 buffer-local `my/xwidget-focus-script`
-（如 Aaronnote 的 CodeMirror 聚焦 JS）。打开后无需手动先按键即可直接输入。
+（如 Noema 的 CodeMirror 聚焦 JS）。打开后无需手动先按键即可直接输入。
 相关开关：`my/xwidget-auto-focus-on-load`、`my/xwidget-prime-native-focus`、`my/xwidget-prime-key`。
 手动恢复焦点：`M-x my/xwidget-focus`（xwidget buffer 内绑定到 `i`）。
 
-## 8. Aaronnote Markdown Web/Appine
+## 8. Noema Markdown Web/Appine
 
 ### 架构
 
-Markdown 笔记现在由 Aaronnote Web 自己编辑和渲染，Emacs 只负责启动、
+Markdown 笔记现在由 Noema Web 自己编辑和渲染，Emacs 只负责启动、
 打开、粗粒度命令和文件定位：
 
 ```
 Emacs (init-aaronnote.el)
-  └─ spawn node lisp/roam/aaronnote/web-host.mjs
-       ├─ 静态服务 lisp/roam/aaronnote/dist/aaronnote/
-       ├─ 运行时 lisp/roam/aaronnote/server/ + shared/
+  └─ spawn node lisp/roam/Noema/web-host.mjs
+       ├─ 静态服务 lisp/roam/Noema/dist/aaronnote/
+       ├─ 运行时 lisp/roam/Noema/server/ + shared/
        ├─ 注入 window.aaronnoteApi 适配器（替代 Electron preload）
        ├─ POST /api            ← Web app 调 runtime 保存/索引/文件操作
        ├─ GET  /events         ← Emacs 控制事件推送到页面
@@ -507,14 +507,14 @@ Emacs (init-aaronnote.el)
   └─ 当前 window 直接切到 Appine/xwidget，加载 http://127.0.0.1:<port>/?file=<md>
 ```
 
-笔记仓库通过 `.roam` 符号链接挂载（机器本地，不入 git）。Aaronnote 是
-`lisp/roam/aaronnote/` 下的完整项目，源码、build、runtime、plugins 和
+笔记仓库通过 `.roam` 符号链接挂载（机器本地，不入 git）。Noema 是
+`lisp/roam/Noema/` 下的完整项目，源码、build、runtime、plugins 和
 roam-tools JS 都在其中；运行时不依赖 `~/HC/Org`。
 
-Aaronnote 与 Emacs 共用：
+Noema 与 Emacs 共用：
 
 - 状态与缓存：`var/aaronnote/`
-- snippets：`snippets/`（Markdown、Lean、TeX 使用 Aaronnote 版本，其它语言保留 Emacs 原有版本）
+- snippets：`snippets/`（Markdown、Lean、TeX 使用 Noema 版本，其它语言保留 Emacs 原有版本）
 - Markdown templates：`templates/aaronnote/markdown-mode/`
 
 ### 关键文件
@@ -522,15 +522,15 @@ Aaronnote 与 Emacs 共用：
 | 文件 | 用途 |
 |------|------|
 | `lisp/roam/init-aaronnote.el` | Emacs 入口：进程管理、Appine/xwidget 打开、控制命令 |
-| `lisp/roam/aaronnote/` | 完整 Aaronnote 项目 |
-| `lisp/roam/aaronnote/web-host.mjs` | Node HTTP+SSE 桥接服务器和 preload adapter |
-| `lisp/roam/aaronnote/dist/aaronnote/` | Aaronnote static build |
+| `lisp/roam/Noema/` | 完整 Noema 项目（链接到 `~/HC/SOURCE/Noema`） |
+| `lisp/roam/Noema/web-host.mjs` | Node HTTP+SSE 桥接服务器和 preload adapter |
+| `lisp/roam/Noema/dist/aaronnote/` | Noema static build |
 | `.roam` | → Markdown 笔记目录（`AARONNOTE_ROOT`） |
 
 ### 边界
 
-- Aaronnote Web 拥有 CodeMirror 文档状态、输入手感、保存、文件树、graph。
-- Emacs 打开 `.md` / `.markdown` / `README.md` 时直接交给 Aaronnote，并关闭临时 Markdown buffer。
+- Noema Web 拥有 CodeMirror 文档状态、输入手感、保存、文件树、graph。
+- Emacs 打开 `.md` / `.markdown` / `README.md` 时直接交给 Noema，并关闭临时 Markdown buffer。
 - Emacs 不再通过 `after-change-functions` 推送 buffer 全文，也不做 per-keystroke preview。
 - Emacs 侧命令只做打开当前 note、打开 graph、发送小型 command，以及接收 Web 端 “open in Emacs” 事件。
 - 后续融合优先通过 Appine/webhook/pipeline 做文件管理、外部动作和索引刷新，而不是恢复 Emacs→browser 实时全文同步。
@@ -562,7 +562,7 @@ in-process 缓存，与自动刷新保持一致。
 - 服务日志：buffer ` *aaronnote-web-host*`
 - 手动停止：`M-x my/aaronnote-stop`
 - 重新打开当前 note：`M-x my/aaronnote-refresh`（localleader `r`）
-- 健康状态：`M-x my/health-report` → Aaronnote 栏（process、ready、runtime、last-sync）
+- 健康状态：`M-x my/health-report` → Noema 栏（process、ready、runtime、last-sync）
 
 ## 9. AI
 
@@ -652,7 +652,7 @@ label-badge 字段行、hl-line 行高亮、styled header-line。
 
 **已迁移的 dashboards**
 
-- Aaronnote Roam views（`init-md-roam-ui.el` → shim）
+- Noema Roam views（`init-md-roam-ui.el` → shim）
 - Config Health（`init-health.el`）
 - Language Server Hub + Doctor（`init-lsp-tools.el`）
 - Performance Watch（`init-performance.el`）

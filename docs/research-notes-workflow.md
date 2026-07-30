@@ -241,7 +241,7 @@ org <-> jupytext <-> ipynb
 
 ## 11. Wiki 知识健康维护（MediaWiki Special: 类比）
 
-Aaronnote 的 Markdown vault 现在具备 MediaWiki 级别的 wiki 维护能力，所有操作通过 `H-o` 进入，完全 Emacs-native，不需要打开 Web 界面：
+Noema 的 Markdown vault 现在具备 MediaWiki 级别的 wiki 维护能力，所有操作通过 `H-o` 进入，完全 Emacs-native，不需要打开 Web 界面：
 
 | 功能 | 入口 | 说明 |
 |------|------|------|
@@ -305,9 +305,9 @@ Use `C-c C-n` to insert a source reference. `C-c C-o` opens either a
 
 Typst preview defaults to Tinymist SVG for low-latency editing and
 source-position synchronization. Use the Typst transient menu's preview
-backend toggle to switch to semantic HTML. In AaronNote-style projects, HTML
+backend toggle to switch to semantic HTML. In Noema-style projects, HTML
 output follows the source path below `public/`, so `daily/example.typ` writes
-`public/daily/example.html`; the generated page embeds Aaronnote's paper theme
+`public/daily/example.html`; the generated page embeds Noema's paper theme
 and can be reused for publishing.
 
 The paged Typst theme is the canonical rendering design. Tinymist and PDF use

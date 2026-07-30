@@ -970,7 +970,7 @@ When BUFFER is nil, use the current buffer in the selected window."
       (my/treemacs-project-path root))))
 
 (defun my/treemacs-source-file ()
-  "Return the real or Aaronnote virtual file for the current buffer."
+  "Return the real or Noema virtual file for the current buffer."
   (or buffer-file-name
       (and (boundp 'my/aaronnote-buffer-file-name)
            (stringp my/aaronnote-buffer-file-name)
@@ -1401,7 +1401,7 @@ Returns the number of killed buffers."
        :extensions ("lean")
        :fallback "L ")
       (treemacs-create-icon
-       :file "Aaronnote.svg"
+       :file "Noema.svg"
        :extensions ("md")
        :fallback "✎ ")))
   (setq treemacs-buffer-name-function #'treemacs-default-buffer-name

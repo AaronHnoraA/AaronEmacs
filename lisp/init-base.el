@@ -1016,7 +1016,7 @@ Else, call `comment-or-uncomment-region' on the current line."
 (require 'ibuf-ext)
 
 (defun my/ibuffer-aaronnote-buffer-p (buffer)
-  "Return non-nil when BUFFER hosts an Aaronnote app."
+  "Return non-nil when BUFFER hosts an Noema app."
   (and (buffer-live-p buffer)
        (with-current-buffer buffer
          (or (my/ibuffer-aaronnote-file-name buffer)
@@ -1025,7 +1025,7 @@ Else, call `comment-or-uncomment-region' on the current line."
              (string-match-p "\\`\\*aaronnote" (buffer-name buffer))))))
 
 (defun my/ibuffer-aaronnote-file-name (buffer)
-  "Return BUFFER's Aaronnote note file for ibuffer display, or nil."
+  "Return BUFFER's Noema note file for ibuffer display, or nil."
   (and (buffer-live-p buffer)
        (with-current-buffer buffer
          (and (boundp 'my/aaronnote-buffer-file-name)
@@ -1034,7 +1034,7 @@ Else, call `comment-or-uncomment-region' on the current line."
               my/aaronnote-buffer-file-name))))
 
 (defun my/ibuffer-aaronnote-canonical-buffer (buffer)
-  "Return canonical Aaronnote BUFFER when the bridge can resolve one."
+  "Return canonical Noema BUFFER when the bridge can resolve one."
   (or (and (buffer-live-p buffer)
            (with-current-buffer buffer
              (and (boundp 'my/aaronnote--client-id)
@@ -1046,7 +1046,7 @@ Else, call `comment-or-uncomment-region' on the current line."
       buffer))
 
 (defun my/ibuffer-visit-aaronnote-canonical (orig &rest args)
-  "Visit the canonical Aaronnote buffer instead of stale duplicates."
+  "Visit the canonical Noema buffer instead of stale duplicates."
   (let* ((buffer (and (fboundp 'ibuffer-current-buffer)
                       (ignore-errors (ibuffer-current-buffer))))
          (canonical (and buffer
@@ -1060,7 +1060,7 @@ Else, call `comment-or-uncomment-region' on the current line."
       (apply orig args))))
 
 (defun my/ibuffer-visit-aaronnote-canonical-other-window (orig &rest args)
-  "Visit the canonical Aaronnote buffer in another window."
+  "Visit the canonical Noema buffer in another window."
   (let* ((buffer (and (fboundp 'ibuffer-current-buffer)
                       (ignore-errors (ibuffer-current-buffer))))
          (canonical (and buffer
@@ -1088,7 +1088,7 @@ Else, call `comment-or-uncomment-region' on the current line."
                    (name . "\\*Packages\\*")
                    (name . "\\*Messages\\*")
                    (name . "\\*Customize\\*")))
-      ("Aaronnote" (aaronnote . t))
+      ("Noema" (aaronnote . t))
       ("Browser" (and (or (mode . eww-mode)
                           (mode . xwidget-webkit-mode))
                       (not (aaronnote . t))))
@@ -1127,8 +1127,8 @@ Else, call `comment-or-uncomment-region' on the current line."
                  (mode . erc-mode))))))
   :config
   (define-ibuffer-filter aaronnote
-      "Toggle current view to buffers hosting Aaronnote."
-    (:description "Aaronnote")
+      "Toggle current view to buffers hosting Noema."
+    (:description "Noema")
     (my/ibuffer-aaronnote-buffer-p buf))
   (keymap-set ibuffer-mode-map "M-<return>" #'ibuffer-visit-buffer-other-window)
   (keymap-set ibuffer-mode-map "M-RET" #'ibuffer-visit-buffer-other-window)

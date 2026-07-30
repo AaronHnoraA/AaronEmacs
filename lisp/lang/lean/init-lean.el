@@ -528,7 +528,7 @@ remote.  Falls back to a direct lake serve / lean --server contact otherwise."
       (lean-progress-mode-line-refresh)
     (setq lean--progress-mode-line-string nil)))
 
-;;; ── AaronNote LSP UI integration ────────────────────────────────────────────
+;;; ── Noema LSP UI integration ────────────────────────────────────────────
 
 (defvar-local lean--eglot-start-timer nil
   "Timer used to start Eglot for the current Lean buffer.")
@@ -605,7 +605,7 @@ remote.  Falls back to a direct lake serve / lean --server contact otherwise."
     (apply fn args)))
 
 (defun lean--setup-diagnostics-ui ()
-  "Enable AaronNote diagnostics UI pieces for the current Lean buffer."
+  "Enable Noema diagnostics UI pieces for the current Lean buffer."
   (when (boundp 'flymake-fringe-indicator-position)
     (setq-local flymake-fringe-indicator-position 'right-fringe))
   (when (fboundp 'flymake-mode)
@@ -795,7 +795,7 @@ while using eglot (not lsp-mode) as the language server backend."
     (lean-setup-flymake-backend))
   ;; Mode-line progress indicator
   (lean-progress-mode-line-mode 1)
-  ;; AaronNote Flymake diagnostics UI; managed-mode hook completes the rest.
+  ;; Noema Flymake diagnostics UI; managed-mode hook completes the rest.
   (lean--setup-diagnostics-ui)
   ;; `prog-mode' hooks may have enabled Flymake before the Lean backend was
   ;; installed.  Start it once here so the backend receives its report function.

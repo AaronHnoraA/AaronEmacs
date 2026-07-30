@@ -1,5 +1,5 @@
 EMACS ?= emacs
-AARONNOTE_DIR = lisp/roam/aaronnote
+AARONNOTE_DIR = lisp/roam/Noema
 EMACS_BATCH_BASE = $(EMACS) --batch --no-site-file --no-site-lisp --no-splash --init-directory=$(CURDIR) -q
 PUBLISH_BATCH = $(EMACS_BATCH_BASE) -L site-lisp/config -L lisp -L lisp/roam -l ./lisp/roam/init-aaronnote-publish.el
 # Load early-init first so native-comp never writes into top-level eln-cache.
@@ -39,9 +39,9 @@ help:
 	  '  make doctor               Open/check the config health doctor report in batch' \
 	  '  make state-backup         Snapshot migration-worthy local state into var/backup-snapshots' \
 	  '  make state-restore SNAPSHOT=/path/to/archive.tar.gz  Restore a saved state snapshot' \
-	  '  make build                Full Elisp compile plus Aaronnote static build' \
+	  '  make build                Full Elisp compile plus Noema static build' \
 	  '  make build-force          Same as build, but reset ELN cache first' \
-	  '  make aaronnote-build      Build Aaronnote static assets' \
+	  '  make aaronnote-build      Build Noema static assets' \
 	  '  make compile              btye and native compile'\
 	  '  make compile-force        Force btye and native compile'\
 	  '  make compile-byte         SByte-compile the local Emacs config' \

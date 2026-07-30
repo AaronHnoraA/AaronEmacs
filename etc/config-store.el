@@ -30,7 +30,7 @@
    (lsp-restart . auto-restart)
    (my/aaronnote-close-emacs-markdown-buffer . t)
    (my/aaronnote-icon-file
-    . "/Users/hc/.emacs.d/assets/icons/Aaronnote.svg")
+    . "/Users/hc/.emacs.d/assets/icons/Noema.svg")
    (my/dir-locals-template-root . "/Users/hc/.emacs.d/templates/emacs")
    (my/health-executables "rg" "git" "python3" "node" "cargo" "go"
 			  "just" "make" "latexmk" "gdb" "lldb-dap" "dlv")
@@ -60,22 +60,22 @@
    (my/compile-target-directories "lisp" "site-lisp/config")
    (my/compile-target-files "early-init.el" "init.el" "bootstrap.el")
    (my/aaronnote-roam-runtime-cli
-    . "/Users/hc/.emacs.d/lisp/roam/aaronnote/roam-cli.mjs")
+    . "/Users/hc/.emacs.d/lisp/roam/Noema/roam-cli.mjs")
    (my/aaronnote-roam-runtime-root
-    . "/Users/hc/.emacs.d/lisp/roam/aaronnote")
+    . "/Users/hc/.emacs.d/lisp/roam/Noema")
    (my/aaronnote-roam-select-window-height . 0.32)
    (my/aaronnote-roam-recent-limit . 24)
    (my/aaronnote-roam-root . "/Users/hc/.emacs.d/.roam")
    (my/aaronnote-publish-nas-enable . t)
    (my/aaronnote-publish-nas-target . "Aaron-nas:/volume1/web/public/")
    (my/aaronnote-publish-cv-dir
-    . "/Users/hc/.emacs.d/lisp/roam/aaronnote/publish/CV")
+    . "/Users/hc/.emacs.d/lisp/roam/Noema/publish/CV")
    (my/aaronnote-publish-state-dir
     . "/Users/hc/.emacs.d/var/aaronnote/publish")
    (my/aaronnote-publish-assets-dir
-    . "/Users/hc/.emacs.d/lisp/roam/aaronnote/publish/assets")
+    . "/Users/hc/.emacs.d/lisp/roam/Noema/publish/assets")
    (my/aaronnote-publish-engine
-    . "/Users/hc/.emacs.d/lisp/roam/aaronnote/publish/publish-site")
+    . "/Users/hc/.emacs.d/lisp/roam/Noema/publish/publish-site")
    (my/aaronnote-publish-root . "/Users/hc/.emacs.d/publish")
    (my/session-auto-save) (my/aaronnote-web-port . 50815)
    (my/aaronnote-backend . xwidget)
@@ -86,7 +86,7 @@
    (my/aaronnote-latex-export-model . "")
    (my/aaronnote-opencode-executable . "opencode")
    (my/project-local-overrides)
-   (my/note-code-root . "/Users/hc/Documents/AaronNote/")
+   (my/note-code-root . "/Users/hc/Documents/Noema/")
    (my/debug-common-adapter-specs
     (python :title "Python" :configs
 	    (debugpy debugpy-module python-file python-module) :commands

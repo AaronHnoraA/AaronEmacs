@@ -210,7 +210,7 @@ Scrolling in the opposite direction is allowed immediately."
 (defvar-local my/aaronnote-buffer-file-name)
 
 (defun my/tab-bar--buffer-file-name ()
-  "Return the current buffer's real file or Aaronnote virtual file."
+  "Return the current buffer's real file or Noema virtual file."
   (or buffer-file-name
       (and (boundp 'my/aaronnote-buffer-file-name)
            (stringp my/aaronnote-buffer-file-name)

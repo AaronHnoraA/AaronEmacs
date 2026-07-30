@@ -1,4 +1,4 @@
-;;; init-aaronnote-publish.el --- Aaronnote site publish commands -*- lexical-binding: t; -*-
+;;; init-aaronnote-publish.el --- Noema site publish commands -*- lexical-binding: t; -*-
 ;;
 ;; Lazy-loaded: not required at startup.  Loaded on first publish command.
 ;; Both interactive commands and batch (make publish-*) entry points live here.
@@ -19,7 +19,7 @@
   "Emacs config root, derived from load-file-name for batch-mode correctness.")
 
 (defgroup my/aaronnote-publish nil
-  "Aaronnote static-site build and deployment."
+  "Noema static-site build and deployment."
   :group 'applications)
 
 (config-defvar my/aaronnote-publish-root nil
@@ -57,7 +57,7 @@
   :type 'boolean
   :group 'my/aaronnote-publish)
 
-(defconst my/aaronnote-publish--log-buffer "*Aaronnote Publish*"
+(defconst my/aaronnote-publish--log-buffer "*Noema Publish*"
   "Name of the publish log buffer.")
 
 (defvar my/aaronnote-publish--process nil
@@ -66,8 +66,8 @@
 ;;; Internal helpers
 
 (defun my/aaronnote-publish--runtime-root ()
-  "Return the Aaronnote runtime root path."
-  (expand-file-name "lisp/roam/aaronnote" my/aaronnote-publish--config-root))
+  "Return the Noema runtime root path."
+  (expand-file-name "lisp/roam/Noema" my/aaronnote-publish--config-root))
 
 (defun my/aaronnote-publish--roam-root ()
   "Return the notes vault root."
@@ -110,7 +110,7 @@ LABEL is shown in progress messages.  SENTINEL is called when the process exits.
     (goto-char (point-max))
     (insert (format "\n[%s] %s\n" (format-time-string "%H:%M:%S") label)))
   (my/aaronnote-publish--show-log)
-  (message "Aaronnote publish: %s…" label)
+  (message "Noema publish: %s…" label)
   (let ((process-environment (my/aaronnote-publish--env))
         (default-directory my/aaronnote-publish-root))
     (setq my/aaronnote-publish--process
@@ -123,8 +123,8 @@ LABEL is shown in progress messages.  SENTINEL is called when the process exits.
              (let ((ok (string-match-p "finished" event))
                    (exit-code (process-exit-status proc)))
                (if ok
-                   (message "Aaronnote publish: %s done." label)
-                 (message "Aaronnote publish: %s FAILED (exit %s). See %s"
+                   (message "Noema publish: %s done." label)
+                 (message "Noema publish: %s FAILED (exit %s). See %s"
                           label exit-code my/aaronnote-publish--log-buffer))
                (setq my/aaronnote-publish--process nil)
                (when sentinel (funcall sentinel ok exit-code))))))))
@@ -146,7 +146,7 @@ EXTRA-ENV is an alist of additional env vars.  Signals error on non-zero exit."
               (princ output)))
           (if (zerop exit-code)
               (princ (format "[publish] %s done.\n" label))
-            (error "Aaronnote publish: %s failed (exit %d)" label exit-code)))
+            (error "Noema publish: %s failed (exit %d)" label exit-code)))
       (kill-buffer out-buf))))
 
 (defun my/aaronnote-publish--prepare-git-commit (out-buf)
@@ -240,7 +240,7 @@ Signal an error when staging, inspection, or committing fails."
     (my/aaronnote-publish--log
      (format "\n[%s] deploy: git add + commit + push\n" (format-time-string "%H:%M:%S")))
     (my/aaronnote-publish--show-log)
-    (message "Aaronnote publish: committing…")
+    (message "Noema publish: committing…")
     (my/aaronnote-publish--prepare-git-commit
      (get-buffer-create my/aaronnote-publish--log-buffer))
     (my/aaronnote-publish--run
@@ -289,7 +289,7 @@ Signal an error when staging, inspection, or committing fails."
         (delete-file path))))
   (when (buffer-live-p (get-buffer my/aaronnote-publish--log-buffer))
     (kill-buffer my/aaronnote-publish--log-buffer))
-  (message "Aaronnote publish: cleaned state/cache."))
+  (message "Noema publish: cleaned state/cache."))
 
 ;;; Batch entry points (used by make publish-*)
 
@@ -302,7 +302,7 @@ Signal an error when staging, inspection, or committing fails."
          "build" (list "python3" my/aaronnote-publish-engine))
         (my/aaronnote-publish--deploy-sync))
     (error
-     (princ (format "Aaronnote publish FAILED: %s\n" (error-message-string err)))
+     (princ (format "Noema publish FAILED: %s\n" (error-message-string err)))
      (kill-emacs 1))))
 
 (defun my/aaronnote-publish-force-batch ()
@@ -315,7 +315,7 @@ Signal an error when staging, inspection, or committing fails."
          (list (cons "PUBLISH_FORCE" "1")))
         (my/aaronnote-publish--deploy-sync))
     (error
-     (princ (format "Aaronnote publish-force FAILED: %s\n" (error-message-string err)))
+     (princ (format "Noema publish-force FAILED: %s\n" (error-message-string err)))
      (kill-emacs 1))))
 
 (defun my/aaronnote-publish-build-batch ()
@@ -326,7 +326,7 @@ Signal an error when staging, inspection, or committing fails."
         (my/aaronnote-publish--run-sync
          "build" (list "python3" my/aaronnote-publish-engine)))
     (error
-     (princ (format "Aaronnote publish-build FAILED: %s\n" (error-message-string err)))
+     (princ (format "Noema publish-build FAILED: %s\n" (error-message-string err)))
      (kill-emacs 1))))
 
 (defun my/aaronnote-publish-deploy-batch ()
@@ -334,7 +334,7 @@ Signal an error when staging, inspection, or committing fails."
   (condition-case err
       (my/aaronnote-publish--deploy-sync)
     (error
-     (princ (format "Aaronnote publish-deploy FAILED: %s\n" (error-message-string err)))
+     (princ (format "Noema publish-deploy FAILED: %s\n" (error-message-string err)))
      (kill-emacs 1))))
 
 (defun my/aaronnote-publish-clean-batch ()

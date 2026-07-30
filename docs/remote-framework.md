@@ -452,8 +452,8 @@ transport failure 会把相关 workspace 标记为 disconnected，并按 1、2�
 自动恢复。任何显式登记了 recovery function 的资源都会在 session 恢复后重建；
 框架目前自动登记 service 与 workspace-owned forward。watch 和 LSP consumer
 仍需接入 workspace resource owner，不能仅凭 capability symbol 宣称已恢复。
-AaronNote 的远程 Markdown watch 已使用这一边界：文件仍以 `/fs:` 标识，watch
-随 workspace 恢复，并在 AaronNote 停止时显式释放。
+Noema 的远程 Markdown watch 已使用这一边界：文件仍以 `/fs:` 标识，watch
+随 workspace 恢复，并在 Noema 停止时显式释放。
 PTY shell 不安全重放，因此 terminal 只标记为 disconnected，并要求显式
 `remote-terminal-restart`。
 
@@ -517,7 +517,7 @@ remote-framework.el       public library entry
 ```
 
 `remote-config.el` 与 `remote-board.el` 是可选集成层。direnv、Eglot、Lean、
-Aaronnote 等消费者留在框架外，只调用公共 API。
+Noema 等消费者留在框架外，只调用公共 API。
 
 ## 10. 测试与支持范围
 

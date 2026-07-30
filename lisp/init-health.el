@@ -272,7 +272,7 @@
            (require 'codex-cli)
            (fboundp 'codex-cli-toggle)))
    (cons 'aaronnote-latex-agent
-         ;; OK unless the Aaronnote LaTeX export engine wants an AI backend but
+         ;; OK unless the Noema LaTeX export engine wants an AI backend but
          ;; that backend's binary is missing (export still works via mechanical
          ;; fallback).
          (or (equal (bound-and-true-p my/aaronnote-latex-export-engine) "mechanical")
@@ -495,8 +495,8 @@
                 "unavailable")))
            (insert "\n")
 
-           ;; --- Aaronnote ---
-           (aaron-ui-board-insert-section "Aaronnote")
+           ;; --- Noema ---
+           (aaron-ui-board-insert-section "Noema")
            (let ((running (and (boundp 'my/aaronnote--process)
                                (processp my/aaronnote--process)
                                (process-live-p my/aaronnote--process)))

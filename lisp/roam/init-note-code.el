@@ -37,7 +37,7 @@
       "@" (or "aaronnote" "note-code") (+ space)
       (group (+ (not space)))
       (* space) line-end)
-  "Regexp matching Aaronnote and generic source-region markers.")
+  "Regexp matching Noema and generic source-region markers.")
 
 (defun my/note-code--root ()
   "Return the normalized note root."
@@ -239,7 +239,7 @@ Signals an error if the buffer is not visiting a file."
                      (file-name-as-directory
                       (expand-file-name (project-root p)))))))
     (cond
-     ;; A leading slash means "from the active content root" to Aaronnote:
+     ;; A leading slash means "from the active content root" to Noema:
      ;; noteRoot for roam files, project root for standalone project files.
      ((and roam (file-in-directory-p file roam))
       (concat "/" (file-relative-name file roam)))
@@ -274,7 +274,7 @@ copy its reference.  Otherwise prompt for a tag, insert the marker
 before the current line, and copy the reference.
 
 PATH uses a leading slash for files inside the roam vault or current project,
-so AaronNote resolves it from the relevant root rather than the note directory."
+so Noema resolves it from the relevant root rather than the note directory."
   (interactive)
   (require 'project nil t)
   (let ((path (my/note-code--ref-path)))
