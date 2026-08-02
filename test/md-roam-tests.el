@@ -421,27 +421,17 @@ source: roam/demo/analysis.md
                       :path "demo/topology.md"
                       :tags ("math" "topology")
                       :summary "A sample note"))
-           (db (make-hash-table :test 'equal))
            (buffers '("*roam-todos*"
-                      "*roam-agenda*"
-                      "*Noema roam notes*"
-                      "*Noema roam management*"
-                      "*roam-db-status*")))
-      (puthash "generated" "2026-06-06T00:00:00Z" db)
+                      "*Noema roam notes*")))
       (unwind-protect
           (cl-letf (((symbol-function 'my/noema-roam--todos)
                      (lambda () (list todo)))
                     ((symbol-function 'my/noema-roam--all-note-summaries)
                      (lambda () (list summary)))
-                    ((symbol-function 'my/noema-roam--db)
-                     (lambda () db))
                     ((symbol-function 'display-buffer)
                      (lambda (buffer &rest _args) buffer)))
             (my/noema-roam-todos)
-            (my/noema-roam-agenda)
             (my/noema-roam--show-note-list "Notes" (list summary))
-            (my/noema-roam-management)
-            (my/noema-roam-db-status)
             (dolist (name buffers)
               (with-current-buffer name
                 (should (derived-mode-p 'my/noema-roam-ui-mode))
@@ -522,251 +512,30 @@ source: roam/demo/analysis.md
         (when-let* ((buffer (get-buffer "*roam-orphaned-assets*")))
           (kill-buffer buffer))))))
 
-	(ert-deftest my/noema-roam-agenda-keeps-today-out-of-overdue ()
-	  (my/noema-roam-test-with-vault
-	    (let ((todo '(:id "todo-today"
-	                  :note "20260605T120000-topology"
-	                  :title "Topology Note"
-	                  :text "Review compact workbench"
-	                  :status "todo"
-	                  :ddl "2026-06-06")))
-	      (unwind-protect
-	          (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
-	                     (my/noema-roam-test--agenda-runtime (list todo)))
-	                    ((symbol-function 'my/noema-roam--todo-overdue-p)
-	                     (lambda (_ddl) t))
-	                    ((symbol-function 'format-time-string)
-	                     (lambda (&rest _args) "2026-06-06"))
-	                    ((symbol-function 'display-buffer)
-	                     (lambda (buffer &rest _args) buffer)))
-	            (my/noema-roam-agenda)
-	            (with-current-buffer "*roam-agenda*"
-	              (should (string-match-p "2026-06-06  Today" (buffer-string)))
-	              (should (string-match-p "Review compact workbench" (buffer-string)))))
-	        (when-let* ((buffer (get-buffer "*roam-agenda*")))
-	          (kill-buffer buffer))))))
+	
+(ert-deftest my/noema-roam-agenda-routes-modes-to-web-host ()
+  (let (calls)
+    (cl-letf (((symbol-function 'my/noema-roam--open-web-agenda)
+               (lambda (&optional view query)
+                 (push (list view query) calls))))
+      (my/noema-roam-agenda)
+      (my/noema-roam-agenda 'calendar "today")
+      (my/noema-roam-agenda 'clock nil))
+    (should (equal (nreverse calls)
+                   '((agenda nil) (calendar "today") (clocktable nil))))))
 
-(ert-deftest my/noema-roam-agenda-default-hides-closed-tasks ()
-  (my/noema-roam-test-with-vault
-	    (let ((todos '((:id "open"
-	                    :note "open-note"
-	                    :title "Open Note"
-	                    :text "Open task"
-	                    :status "todo"
-	                    :ddl "2026-06-07")
-	                   (:id "done"
-	                    :note "done-note"
-	                    :title "Done Note"
-	                    :text "Finished task"
-	                    :status "done"
-	                    :ddl "2026-06-07")
-	                   (:id "cancel"
-	                    :note "cancel-note"
-	                    :title "Cancel Note"
-	                    :text "Dropped task"
-	                    :status "cancelled"
-	                    :ddl "2026-06-07"))))
-	      (unwind-protect
-	          (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
-	                     (my/noema-roam-test--agenda-runtime todos))
-	                    ((symbol-function 'format-time-string)
-	                     (lambda (&rest _args) "2026-06-06"))
-	                    ((symbol-function 'display-buffer)
-	                     (lambda (buffer &rest _args) buffer)))
-            (my/noema-roam-agenda)
-            (with-current-buffer "*roam-agenda*"
-              (should (string-match-p "Open task" (buffer-string)))
-              (should-not (string-match-p "Finished task" (buffer-string)))
-              (should-not (string-match-p "Dropped task" (buffer-string))))
-            (my/noema-roam-agenda 'all nil)
-            (with-current-buffer "*roam-agenda*"
-              (should (string-match-p "Finished task" (buffer-string)))
-              (should (string-match-p "Dropped task" (buffer-string))))
-            (my/noema-roam-agenda 'done nil)
-            (with-current-buffer "*roam-agenda*"
-              (should (string-match-p "Finished task" (buffer-string)))
-              (should-not (string-match-p "Dropped task" (buffer-string))))
-            (my/noema-roam-agenda 'cancelled nil)
-            (with-current-buffer "*roam-agenda*"
-              (should (string-match-p "Dropped task" (buffer-string)))
-              (should-not (string-match-p "Finished task" (buffer-string)))))
-        (when-let* ((buffer (get-buffer "*roam-agenda*")))
-          (kill-buffer buffer))))))
-
-(ert-deftest my/noema-roam-agenda-search-filters-metadata ()
-  (my/noema-roam-test-with-vault
-    (let* ((first '(:note "20260605T120000-topology"
-                    :roamId "20260605T120000-topology"
-                    :title "Topology Note"
-                    :text "Review compact workbench"
-                    :status "todo"
-                    :ddl "2026-06-07"
-                    :tags ("math" "topology")
-                    :inlineTags ("local-anchor")
-                    :path "demo/topology.md"
-                    :groupKey "Research/Math"))
-           (second '(:note "20260605T120000-analysis"
-                     :roamId "20260605T120000-analysis"
-                     :title "Analysis Note"
-                     :text "Write estimate"
-                     :status "todo"
-                     :ddl "2026-07-01"
-                     :tags ("analysis")
-                     :path "demo/analysis.md"
-                     :groupKey "Research/Analysis"))
-           (todos (list first second)))
-      (should (equal (my/noema-roam--agenda-filter-todos
-                      todos 'search
-                      "tag:math title:topology roamid:topology file:topology parent:math date:2026-06-07")
-                     (list first)))
-      (should (equal (my/noema-roam--agenda-filter-todos
-                      todos 'search "from:2026-06-01 to:2026-06-30")
-                     (list first)))
-      (should (equal (my/noema-roam--agenda-filter-todos
-                      todos 'search "estimate")
-                     (list second))))))
-
-(ert-deftest my/noema-roam-agenda-searches-and-sorts-todo-metadata ()
-  (my/noema-roam-test-with-vault
-    (let* ((low '(:note "low"
-                  :title "Low Note"
-                  :text "Low priority"
-                  :status "todo"
-                  :due "2026-06-07"
-                  :priority "C"
-                  :scheduled "2026-06-06"
-                  :repeat "+1w"))
-           (high '(:note "high"
-                   :title "High Note"
-                   :text "High priority"
-                   :status "todo"
-                   :due "2026-06-08"
-                   :priority "A"))
-           (todos (list low high)))
-      (should (equal (my/noema-roam--agenda-filter-todos
-                      todos 'search "priority:C scheduled:2026-06-06 repeat:+1w")
-                     (list low)))
-      (should (equal (my/noema-roam--agenda-filter-todos
-                      todos 'search "due:2026-06-08")
-                     (list high)))
-      (should (equal (mapcar (lambda (entry)
-                               (my/noema-roam--todo-string-value entry "text"))
-                             (my/noema-roam--agenda-sort-todos todos))
-                     '("High priority" "Low priority"))))))
-
-	(ert-deftest my/noema-roam-agenda-renders-todo-metadata ()
-	  (my/noema-roam-test-with-vault
-	    (let ((todo '(:id "todo-meta"
-	                  :note "20260605T120000-topology"
-	                  :title "Topology Note"
-	                  :text "Review compact workbench"
-	                  :status "todo"
-	                  :due "2026-06-07"
-	                  :priority "A"
-	                  :scheduled "2026-06-06"
-	                  :repeat "+1w")))
-	      (unwind-protect
-	          (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
-	                     (my/noema-roam-test--agenda-runtime (list todo)))
-	                    ((symbol-function 'format-time-string)
-	                     (lambda (&rest _args) "2026-06-06"))
-	                    ((symbol-function 'display-buffer)
-	                     (lambda (buffer &rest _args) buffer)))
-	            (my/noema-roam-agenda)
-	            (with-current-buffer "*roam-agenda*"
-	              (let ((text (buffer-string)))
-	                (should (derived-mode-p 'my/noema-agenda-mode))
-	                (should (string-match-p "Review compact workbench" text))
-	                (should (string-match-p "\\[#A\\]" text))
-	                (should (string-match-p "DDL 2026-06-07" text))
-	                (should (string-match-p "SCHED 2026-06-06" text))
-	                (should (string-match-p "REP [+]1w" text)))))
-	        (when-let* ((buffer (get-buffer "*roam-agenda*")))
-	          (kill-buffer buffer))))))
-
-	(ert-deftest my/noema-roam-agenda-renders-empty-todo-metadata-columns ()
-	  (my/noema-roam-test-with-vault
-	    (let ((todo '(:id "todo-empty-meta"
-	                  :note "20260605T120000-topology"
-	                  :title "Topology Note"
-	                  :text "Review compact workbench"
-	                  :status "todo")))
-	      (unwind-protect
-	          (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
-	                     (my/noema-roam-test--agenda-runtime (list todo)))
-	                    ((symbol-function 'format-time-string)
-	                     (lambda (&rest _args) "2026-06-06"))
-	                    ((symbol-function 'display-buffer)
-	                     (lambda (buffer &rest _args) buffer)))
-	            (my/noema-roam-agenda 'all nil)
-	            (with-current-buffer "*roam-agenda*"
-	              (let ((text (buffer-string)))
-	                (should (derived-mode-p 'my/noema-agenda-mode))
-	                (should (string-match-p "List view, all filter" text))
-	                (should (string-match-p "Review compact workbench" text))
-	                (should (string-match-p "Topology Note" text)))))
-	        (when-let* ((buffer (get-buffer "*roam-agenda*")))
-	          (kill-buffer buffer))))))
-
-(ert-deftest my/noema-roam-agenda-week-shows-open-backlog-without-day-entries ()
-  (my/noema-roam-test-with-vault
-    (let ((todos '((:id "todo-backlog"
-                    :note "20260605T120000-topology"
-                    :title "Topology Note"
-                    :text "Loose todo"
-                    :status "todo")
-                   (:id "doing-backlog"
-                    :note "20260605T120000-analysis"
-                    :title "Analysis Note"
-                    :text "Active loose todo"
-                    :status "doing"))))
-      (unwind-protect
-          (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
-                     (my/noema-roam-test--agenda-runtime todos))
-                    ((symbol-function 'format-time-string)
-                     (lambda (&rest _args) "2026-06-06"))
-                    ((symbol-function 'display-buffer)
-                     (lambda (buffer &rest _args) buffer)))
-            (my/noema-roam-agenda)
-            (with-current-buffer "*roam-agenda*"
-              (let ((text (buffer-string)))
-                (should (derived-mode-p 'my/noema-agenda-mode))
-                (should (string-match-p "Backlog" text))
-                (should (string-match-p "Loose todo" text))
-                (should (string-match-p "Active loose todo" text))
-                (should (string-match-p "DOING" text))
-                (should-not (string-match-p "No agenda entries" text)))))
-        (when-let* ((buffer (get-buffer "*roam-agenda*")))
-          (kill-buffer buffer))))))
-
-	(ert-deftest my/noema-roam-agenda-row-buttons-update-status ()
-	  (my/noema-roam-test-with-vault
-	    (let ((todo '(:id "todo-status"
-	                  :note "20260605T120000-topology"
-	                  :title "Topology Note"
-	                  :text "Review compact workbench"
-	                  :status "todo"
-	                  :ddl "2026-06-07"))
-	          updated)
-	      (unwind-protect
-	          (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
-	                     (my/noema-roam-test--agenda-runtime (list todo)))
-	                    ((symbol-function 'my/noema-roam-update-todo-status)
-	                     (lambda (status &optional entry)
-	                       (setq updated (list status entry))))
-                    ((symbol-function 'format-time-string)
-                     (lambda (&rest _args) "2026-06-06"))
-                    ((symbol-function 'display-buffer)
-                     (lambda (buffer &rest _args) buffer)))
-            (my/noema-roam-agenda)
-	            (with-current-buffer "*roam-agenda*"
-	              (goto-char (point-min))
-	              (search-forward "Review compact")
-	              (my/noema-agenda-set-status "done"))
-	            (should (equal (car updated) "done"))
-	            (should (eq (cadr updated) todo)))
-	        (when-let* ((buffer (get-buffer "*roam-agenda*")))
-	          (kill-buffer buffer))))))
+(ert-deftest my/noema-roam-agenda-special-pages-use-web-host ()
+  (let (views)
+    (cl-letf (((symbol-function 'my/noema-roam--open-web-agenda)
+               (lambda (&optional view _query) (push view views))))
+      (my/noema-roam-agenda-calendar)
+      (my/noema-roam-agenda-log)
+      (my/noema-roam-agenda-gantt)
+      (my/noema-roam-agenda-projects)
+      (my/noema-roam-agenda-clock)
+      (my/noema-roam-agenda-lints))
+    (should (equal (nreverse views)
+                   '(calendar log gantt projects clocktable lints)))))
 
 (ert-deftest my/noema-roam-todo-metadata-update-sends-runtime-patch ()
   (my/noema-roam-test-with-vault
@@ -802,8 +571,6 @@ source: roam/demo/analysis.md
                    (let ((payload (make-hash-table :test 'equal)))
                      (puthash "todos" nil payload)
                      payload)))
-                ((symbol-function 'my/noema-roam--db)
-                 (lambda () nil))
                 ((symbol-function 'my/noema-roam--scan-todos)
                  (lambda () nil)))
 	        (my/noema-roam--todos))
@@ -811,32 +578,7 @@ source: roam/demo/analysis.md
 	      (should (member "--json" captured))
 	      (should-not (member "--activate-sync" captured)))))
 
-(ert-deftest my/noema-roam-agenda-calendar-uses-square-cells ()
-  (my/noema-roam-test-with-vault
-    (let* ((decoded (decode-time (current-time)))
-           (month (nth 4 decoded))
-           (year (nth 5 decoded))
-           (date (format "%04d-%02d-15" year month))
-	           (todo `(:id "calendar-task"
-	                   :note "20260605T120000-topology"
-	                   :title "Topology Note"
-	                   :text "Calendar task"
-	                   :status "todo"
-	                   :ddl ,date)))
-	      (unwind-protect
-	          (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
-	                     (my/noema-roam-test--agenda-runtime (list todo)))
-	                    ((symbol-function 'display-buffer)
-	                     (lambda (buffer &rest _args) buffer)))
-            (my/noema-roam-agenda-calendar)
-            (with-current-buffer "*roam-agenda-calendar*"
-              (should (string-match-p "SUN      MON      TUE" (buffer-string)))
-              (should (string-match-p
-                       (regexp-quote
-                        (my/noema-roam--agenda-calendar-cell-label 15 1))
-                       (buffer-string)))))
-        (when-let* ((buffer (get-buffer "*roam-agenda-calendar*")))
-          (kill-buffer buffer))))))
+
 
 (ert-deftest my/noema-roam-current-file-todos-scan-current-buffer ()
   (my/noema-roam-test-with-vault
@@ -856,53 +598,19 @@ source: roam/demo/analysis.md
                                "2026-06-07")))))
         (kill-buffer buffer)))))
 
-(ert-deftest my/noema-roam-db-status-includes-activity-heatmap ()
-  (my/noema-roam-test-with-vault
-    (unwind-protect
-        (cl-letf (((symbol-function 'display-buffer)
-                   (lambda (buffer &rest _args) buffer)))
-          (my/noema-roam-db-status)
-          (with-current-buffer "*roam-db-status*"
-            (should (string-match-p "Roam activity" (buffer-string)))
-            (should-not (string-match-p "todo.db" (buffer-string)))
-            (should (string-match-p "roam.db" (buffer-string)))
-            (should (string-match-p "W1" (buffer-string)))
-            (should (string-match-p "Sun" (buffer-string)))))
-      (when-let* ((buffer (get-buffer "*roam-db-status*")))
-        (kill-buffer buffer)))))
+(ert-deftest my/noema-roam-db-status-delegates-to-canonical-wiki-status ()
+  (let (called)
+    (cl-letf (((symbol-function 'my/noema-wiki-index-status)
+               (lambda () (setq called t))))
+      (my/noema-roam-db-status))
+    (should called)))
 
-(ert-deftest my/noema-roam-management-includes-activity-heatmap ()
-  (my/noema-roam-test-with-vault
-    (unwind-protect
-        (cl-letf (((symbol-function 'display-buffer)
-                   (lambda (buffer &rest _args) buffer)))
-          (my/noema-roam-management)
-          (with-current-buffer "*Noema roam management*"
-            (should (string-match-p "Roam activity" (buffer-string)))
-            (should (string-match-p "W1" (buffer-string)))
-            (should (string-match-p "Sun" (buffer-string)))))
-      (when-let* ((buffer (get-buffer "*Noema roam management*")))
-        (kill-buffer buffer)))))
-
-(ert-deftest my/noema-roam-management-includes-quick-tools ()
-  (my/noema-roam-test-with-vault
-    (unwind-protect
-        (cl-letf (((symbol-function 'display-buffer)
-                   (lambda (buffer &rest _args) buffer)))
-          (my/noema-roam-management)
-          (with-current-buffer "*Noema roam management*"
-            (should (string-match-p "Quick tools" (buffer-string)))
-            (dolist (label '("Find note" "Create note" "Create node"
-                             "Search notes" "Agenda" "Task list"))
-              (should (string-match-p label (buffer-string))))
-            (goto-char (point-min))
-            (search-forward "Find note")
-            (should (functionp
-                     (get-text-property
-                      (match-beginning 0)
-                      'my/noema-roam-ui-row-action)))))
-      (when-let* ((buffer (get-buffer "*Noema roam management*")))
-        (kill-buffer buffer)))))
+(ert-deftest my/noema-roam-management-delegates-to-canonical-wiki-ui ()
+  (let (called)
+    (cl-letf (((symbol-function 'my/noema-wiki-repositories)
+               (lambda () (setq called t))))
+      (my/noema-roam-management))
+    (should called)))
 
 (ert-deftest my/noema-roam-search-view-refreshes-results ()
   (my/noema-roam-test-with-vault

@@ -70,8 +70,10 @@
   (expand-file-name "lisp/roam/Noema" my/noema-publish--config-root))
 
 (defun my/noema-publish--roam-root ()
-  "Return the notes vault root."
-  (expand-file-name ".roam" my/noema-publish--config-root))
+  "Return the canonical Noema workspace root."
+  (if (fboundp 'my/noema-workspace-root)
+      (my/noema-workspace-root)
+    (expand-file-name "~/Documents/Noema")))
 
 (defun my/noema-publish--env (&optional extra-env)
   "Return process-environment list for the publish engine subprocess.

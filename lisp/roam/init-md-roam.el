@@ -28,6 +28,7 @@
 (declare-function my/noema--api-call "init-aaronnote" (channel args callback))
 (declare-function my/navigation--push-jump "init-navigation")
 (declare-function my/navigation-find-definition "init-navigation")
+(defvar my/noema--notes-root nil)
 
 (defvar my/noema--ready nil
   "Non-nil when the Noema web host is available.")
@@ -86,32 +87,26 @@
 
 (defvar my/noema-roam--runtime-index-cache nil)
 (defvar my/noema-roam--runtime-index-cache-key nil)
-(defvar my/noema-roam--sync-timer nil)
-(defvar my/noema-roam--sync-changed-files nil)
-(defvar my/noema-roam--sync-process nil
-  "In-flight CLI offline sync process, or nil.")
 (defvar my/noema-roam--all-files-cache nil
   "Cached result of `my/noema-roam--all-files'.")
 (defvar my/noema-roam--all-note-summaries-cache nil
   "Cached result of `my/noema-roam--all-note-summaries'.")
 
 (defun my/noema-roam-root ()
-  "Return the Markdown roam notes root."
-  (or (when buffer-file-name
-        (when-let* ((dir (locate-dominating-file buffer-file-name "roam.db")))
-          (file-truename dir)))
-      (when (boundp 'my/noema--notes-root)
+  "Return the canonical Noema workspace root."
+  (or (when (and (boundp 'my/noema--notes-root)
+                 (stringp my/noema--notes-root)
+                 (not (string-empty-p my/noema--notes-root)))
         (file-name-as-directory (expand-file-name my/noema--notes-root)))
-      (file-name-as-directory (expand-file-name my/noema-roam-root))))
+      (when (fboundp 'my/noema-workspace-root)
+        (my/noema-workspace-root))
+      (file-name-as-directory (expand-file-name "~/Documents/Noema"))))
 
 (defun my/noema-roam--clear-runtime-cache ()
   "Clear cached Noema runtime payloads."
   (setq my/noema-roam--runtime-index-cache nil
         my/noema-roam--runtime-index-cache-key nil
         my/noema-roam--scan-cache nil
-        my/noema-roam--db-cache nil
-        my/noema-roam--db-path-cache nil
-        my/noema-roam--db-mtime nil
         my/noema-roam--all-files-cache nil
         my/noema-roam--all-note-summaries-cache nil))
 
@@ -135,8 +130,7 @@
                 ("todo-dep-ref" . "aaronnote:api:notes:todo-dep-ref")
                 ("todo-refs"  . "aaronnote:api:completions:todo-refs")
                 ("create"    . "aaronnote:api:notes:create-node")
-                ("delete-node" . "aaronnote:api:notes:delete-node")
-                ("sync"      . "aaronnote:api:notes:roam-sync")))))
+                ("delete-node" . "aaronnote:api:notes:delete-node")))))
 
 (defun my/noema-roam--runtime-call-via-api (action args)
   "Delegate ACTION with roam-cli ARGS to the running web-host /api.
@@ -253,56 +247,6 @@ is down (offline / not yet started)."
             (my/noema-roam--runtime-call "index")
             my/noema-roam--runtime-index-cache-key key)
       my/noema-roam--runtime-index-cache)))
-
-(defun my/noema-roam--runtime-sync (&optional full changed-files)
-  "Run Noema roam-db sync via CLI subprocess — offline fallback only.
-The web-host is the authoritative roam.db writer during normal operation.
-Only call this when the web-host is not running.
-When FULL is non-nil, force a full rebuild.  CHANGED-FILES are passed as
-incremental hints."
-  (if (not (my/noema-roam--runtime-available-p))
-      (message "Noema roam runtime not found; cache refreshed only")
-    (if (and my/noema-roam--sync-process
-             (process-live-p my/noema-roam--sync-process))
-        (message "Noema roam: CLI sync already in flight, skipping")
-      (let* ((root (my/noema-roam-root))
-             (buf (generate-new-buffer " *Noema roam sync*"))
-             (args (append
-                    (list my/noema-roam-runtime-cli
-                          "sync"
-                          "--root" root
-                          "--runtime" my/noema-roam-runtime-root
-                          "--workspace" user-emacs-directory
-                          "--state" (my/noema-roam--state-root)
-                          "--tmp" (my/noema-roam--tmp-root))
-                    (when full (list "--full"))
-                    (mapcan (lambda (file) (list "--changed" file))
-                            (delete-dups (seq-filter #'identity changed-files)))))
-             (process-environment
-              (append (list (format "AARONNOTE_ROOT=%s" root)
-                            (format "AARONNOTE_RUNTIME_ROOT=%s"
-                                    (expand-file-name my/noema-roam-runtime-root))
-                            (format "AARONNOTE_WORKSPACE_ROOT=%s" user-emacs-directory)
-                            (format "AARONNOTE_STATE_DIR=%s"
-                                    (my/noema-roam--state-root))
-                            (format "AARONNOTE_TMP_DIR=%s"
-                                    (my/noema-roam--tmp-root)))
-                      process-environment))
-             (proc (make-process
-                    :name "aaronnote-roam-sync"
-                    :buffer buf
-                    :command (cons "node" args)
-                    :noquery t
-                    :sentinel
-                    (lambda (p event)
-                      (when (memq (process-status p) '(exit signal))
-                        (when (eq p my/noema-roam--sync-process)
-                          (setq my/noema-roam--sync-process nil))
-                        (my/noema-roam--clear-runtime-cache)
-                        (message "Noema roam sync: %s" (string-trim event))
-                        (when (buffer-live-p buf)
-                          (kill-buffer buf)))))))
-        (setq my/noema-roam--sync-process proc)))))
 
 (defun my/noema-roam--target-at-point ()
   "Return the raw Markdown roam link target at or near point, or nil."
@@ -1798,47 +1742,9 @@ creation commands while using the Noema runtime."
              :template-key "roam"
              :tags nil)))))
 
-;; ── Roam DB ──────────────────────────────────────────────────────────────────
+;; ── Canonical Wiki records ───────────────────────────────────────────────────
 
-(defvar my/noema-roam--db-cache nil)
-(defvar my/noema-roam--db-path-cache nil)
-(defvar my/noema-roam--db-mtime nil)
 (defvar my/noema-roam--scan-cache nil)
-
-(defun my/noema-roam--db-path ()
-  "Return path to an optional Markdown roam-db.json for the current vault."
-  (let* ((root (my/noema-roam-root))
-         (candidates (mapcar
-                      (lambda (rel) (expand-file-name rel root))
-                      '("roam-db.json"
-                        ".aaronnote/roam-db.json"
-                        ".aaronnote/index.json"
-                        ".roam/roam-db.json"
-                        "_roam/roam-db.json"
-                        "_typst/roam-db.json"))))
-    (or (seq-find #'file-exists-p candidates)
-        (car candidates))))
-
-(defun my/noema-roam--db ()
-  "Return the parsed roam-db.json, refreshing cache when the file changes."
-  (let ((path (my/noema-roam--db-path)))
-    (when (file-exists-p path)
-      (let ((mtime (file-attribute-modification-time (file-attributes path))))
-        (when (or (not my/noema-roam--db-cache)
-                  (not (equal path my/noema-roam--db-path-cache))
-                  (time-less-p my/noema-roam--db-mtime mtime))
-          (setq my/noema-roam--db-cache
-                (with-temp-buffer
-                  (insert-file-contents path)
-                  (json-parse-buffer :object-type 'hash-table :array-type 'list))
-                my/noema-roam--db-path-cache path
-                my/noema-roam--db-mtime mtime))))
-    my/noema-roam--db-cache))
-
-(defun my/noema-roam--db-notes ()
-  "Return the DB notes hash table, or nil."
-  (when-let* ((db (my/noema-roam--db)))
-    (gethash "notes" db)))
 
 (defun my/noema-roam--note-field (note key)
   "Return string field KEY from NOTE."
@@ -2113,21 +2019,7 @@ creation commands while using the Noema runtime."
 (defun my/noema-roam--note-records ()
   "Return note records with :key, :id, :note, :file, :title, and :values."
   (or (my/noema-roam--runtime-note-records)
-      (if-let* ((notes (my/noema-roam--db-notes)))
-          (let (records)
-            (maphash
-             (lambda (key note)
-               (let ((id (my/noema-roam--canonical-note-id key note)))
-                 (push (list :key key
-                             :id id
-                             :note note
-                             :file (my/noema-roam--note-file-from-fields key note)
-                             :title (or (my/noema-roam--note-field note "title") id)
-                             :values (my/noema-roam--note-search-values key note))
-                       records)))
-             notes)
-            (nreverse records))
-        (my/noema-roam--scanned-note-records))))
+      (my/noema-roam--scanned-note-records)))
 
 (defun my/noema-roam--target-note-ref (target)
   "Return the note ref portion of TARGET."
@@ -2157,7 +2049,7 @@ accepted as a fallback, matching Noema search behavior."
            records)))))
 
 (defun my/noema-roam--db-note (slug)
-  "Return the DB hash-table for SLUG/id/path, or nil."
+  "Return the canonical runtime note for SLUG/id/path, or nil."
   (plist-get (my/noema-roam--resolve-note slug) :note))
 
 (defun my/noema-roam--target-slug (target)
@@ -2165,7 +2057,7 @@ accepted as a fallback, matching Noema search behavior."
   (plist-get (my/noema-roam--parse-target target) :slug))
 
 (defun my/noema-roam--db-backlinks-to (slug)
-  "Return DB backlinks to SLUG/id, normalizing Noema targets."
+  "Return canonical Wiki backlinks to SLUG/id."
   (when-let* ((target-id (or (plist-get (my/noema-roam--resolve-note slug) :id)
                              slug)))
     (or (when-let* ((note (my/noema-roam--db-note target-id)))
@@ -2272,30 +2164,15 @@ On a heading line, append `{#id}` unless an id already exists."
   (interactive)
   (my/noema-roam-select-link 'tag))
 
-;; ── DB commands ───────────────────────────────────────────────────────────────
+;; ── Wiki index commands ──────────────────────────────────────────────────────
 
 (defun my/noema-roam-update-db (&optional full)
-  "Refresh Markdown roam cache and sync roam.db via Noema runtime.
-With prefix argument FULL, force a full roam DB rebuild.
-When the web-host is running, delegates to its /api (async, non-blocking).
-Falls back to a CLI subprocess when the web-host is offline."
+  "Refresh canonical wiki.db; with FULL, rebuild it atomically."
   (interactive "P")
   (my/noema-roam--clear-runtime-cache)
-  (cond
-   ;; Online: delegate to web-host /api; it is the authoritative writer.
-   ((and (boundp 'my/noema--ready) my/noema--ready)
-    (message "Noema: syncing roam DB...")
-    (my/noema--api-call
-     (if full "aaronnote:api:notes:roam-sync-full" "aaronnote:api:notes:roam-sync")
-     (if full [] [t])
-     (lambda (_result)
-       (my/noema-roam--clear-runtime-cache)
-       (message "Noema roam sync: done"))))
-   ;; Offline fallback: CLI subprocess.
-   ((my/noema-roam--runtime-available-p)
-    (my/noema-roam--runtime-sync full nil))
-   (t
-    (message "Markdown roam cache refreshed"))))
+  (unless (fboundp 'my/noema-wiki-refresh)
+    (require 'init-aaronnote))
+  (my/noema-wiki-refresh full))
 
 (defun my/noema-roam--summary-entry-for-slug (slug &optional summaries)
   "Return a note summary entry for SLUG from optional SUMMARIES."
@@ -2394,16 +2271,14 @@ Falls back to a CLI subprocess when the web-host is offline."
     (nreverse todos)))
 
 (defun my/noema-roam--todos ()
-  "Return vault-wide todos from the Noema runtime, roam DB, or local scan.
+  "Return vault-wide todos from the Noema runtime or local scan.
 Fetches through the `agenda' view-model rather than the plain `todos' list so
 dependency resolution (`effectiveStatus'/`blockedBy', computed vault-wide) and
 the urgency sort are already applied server-side instead of being re-derived
 in Elisp."
   (let* ((runtime (my/noema-roam--runtime-call "agenda" "--json" "{}"))
-         (runtime-todos (and runtime (gethash "todos" runtime)))
-         (db (my/noema-roam--db)))
+         (runtime-todos (and runtime (gethash "todos" runtime))))
     (or runtime-todos
-        (and db (gethash "todos" db))
         (my/noema-roam--scan-todos))))
 
 (defun my/noema-roam--todo-field (entry &rest keys)
@@ -2720,6 +2595,12 @@ the reference stays a plain, human-readable part of the Markdown."
              (my/noema-roam--insert-todo-row entry))))))
     (display-buffer buf)))
 
+;; These historical entry points are kept only for existing keymaps.  Their
+;; native duplicate dashboards are retired in favor of the canonical Wiki UI.
+
+
+
+
 ;; ── Noema-style note tools ────────────────────────────────────────────────
 
 (defun my/noema-roam--insert-note-button (entry &optional prefix)
@@ -2904,53 +2785,7 @@ Multiple terms are ANDed."
            (my/noema-roam-ui-insert-empty "No backlinks.")))))
     (display-buffer buf)))
 
-(defun my/noema-roam-management ()
-  "Show roam management commands and index status."
-  (interactive)
-  (let* ((entries (my/noema-roam--all-note-summaries))
-         (db (my/noema-roam--db))
-         (generated (and db (gethash "generated" db)))
-         (buf (my/noema-roam--prepare-ui-buffer
-               "*Noema roam management*" "Roam Management" 'management
-               #'my/noema-roam-management
-               (format "%d nodes" (length entries)))))
-    (with-current-buffer buf
-      (my/noema-roam-ui-render
-       (lambda ()
-         (my/noema-roam-ui-insert-page-header
-          "Roam management"
-          :icon 'management
-          :subtitle "Index status and common Noema operations"
-          :stats (list (cons (format "%d nodes" (length entries)) 'info)
-                       (cons (if generated "DB ready" "DB unknown")
-                             (if generated 'success 'warning)))
-          :actions (my/noema-roam--ui-actions))
-         (my/noema-roam-ui-insert-section "Index")
-         (my/noema-roam-ui-insert-field
-          "Root" (abbreviate-file-name (my/noema-roam-root))
-          'my/noema-roam-ui-path)
-         (my/noema-roam-ui-insert-field "Nodes" (length entries))
-         (my/noema-roam-ui-insert-field
-          "DB generated" (or generated "unknown")
-          'my/noema-roam-ui-meta)
-         (insert "\n")
-         (my/noema-roam-ui-insert-section "Actions")
-         (insert "   ")
-         (my/noema-roam-ui-insert-actions
-          '((:label "Sync roam-db"
-             :command my/noema-roam-update-db
-             :help "Run incremental roam-db sync"
-             :primary t)
-            (:label "New note"
-             :command my/noema-roam-new-note
-             :help "Open the native Roam New workbench")
-            (:label "Search notes"
-             :command my/noema-roam-search-notes
-             :help "Search Noema roam notes")
-            (:label "DB status"
-             :command my/noema-roam-db-status
-             :help "Open roam-db status"))))))
-    (display-buffer buf)))
+
 
 ;; ── Roam agenda ─────────────────────────────────────────────────────────────
 
@@ -3407,87 +3242,19 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
           (insert "\n\n")))
     (error nil)))
 
-;; ── Roam DB utilities ─────────────────────────────────────────────────────────
+;; ── Canonical Wiki index compatibility ───────────────────────────────────────
 
 (defun my/noema-roam-sync-full ()
-  "Force a full roam DB rebuild (clears incremental state)."
+  "Compatibility command for an atomic wiki.db rebuild."
   (interactive)
-  (message "Rebuilding roam DB from scratch…")
-  (when (my/noema-roam--runtime-available-p)
-    (my/noema-roam--runtime-sync t nil))
-  (message "Roam DB full rebuild done."))
+  (unless (fboundp 'my/noema-wiki-rebuild) (require 'init-aaronnote))
+  (my/noema-wiki-rebuild))
 
 (defun my/noema-roam-db-status ()
-  "Show roam DB sync state from Noema var."
+  "Compatibility command for canonical Wiki index status."
   (interactive)
-  (let* ((root (my/noema-roam-root))
-         (state-root (my/noema-roam--state-root))
-         (roam-db-file (expand-file-name "roam.db" root))
-         (state-file (expand-file-name "sync/state.json"
-                                       state-root))
-         (state
-          (when (file-exists-p state-file)
-            (condition-case nil
-                (json-parse-string
-                 (with-temp-buffer
-                   (insert-file-contents state-file)
-                   (buffer-string))
-                 :object-type 'hash-table)
-              (error nil))))
-         (buf (my/noema-roam--prepare-ui-buffer
-               "*roam-db-status*" "Roam DB Status" 'database
-               #'my/noema-roam-db-status
-               (if state "state ready" "state missing"))))
-    (with-current-buffer buf
-      (my/noema-roam-ui-render
-       (lambda ()
-         (my/noema-roam-ui-insert-page-header
-          "Roam DB status"
-          :icon 'database
-          :subtitle "Noema incremental node index state"
-          :stats (list (cons (if state "State ready" "State missing")
-                             (if state 'success 'warning))
-                       (cons (if (file-exists-p roam-db-file) "roam.db ready" "roam.db missing")
-                             (if (file-exists-p roam-db-file) 'success 'warning)))
-          :actions
-          (my/noema-roam--ui-actions
-           '((:label "Incremental sync"
-              :command my/noema-roam-update-db
-              :help "Run incremental roam DB sync"
-              :primary t)
-             (:label "Full rebuild"
-              :command my/noema-roam-sync-full
-              :help "Rebuild the roam DB index from scratch"))))
-         (my/noema-roam-ui-insert-activity-heatmap)
-         (my/noema-roam-ui-insert-section "Location")
-         (my/noema-roam-ui-insert-field
-          "Root" (abbreviate-file-name root) 'my/noema-roam-ui-path)
-         (my/noema-roam-ui-insert-field
-          "roam.db" (abbreviate-file-name roam-db-file)
-          'my/noema-roam-ui-path)
-         (my/noema-roam-ui-insert-field
-          "State file" (abbreviate-file-name state-file)
-          'my/noema-roam-ui-path)
-         (insert "\n")
-         (my/noema-roam-ui-insert-section "State")
-         (cond
-          (state
-           (dolist (key (sort (seq-remove
-                               (lambda (key)
-                                 (string-prefix-p "todoDb" key))
-                               (hash-table-keys state))
-                              #'string<))
-             (let ((value (gethash key state)))
-               (my/noema-roam-ui-insert-field
-                key (if (eq value :null) "(null)" value)
-                'my/noema-roam-ui-meta))))
-          ((file-exists-p state-file)
-           (my/noema-roam-ui-insert-empty
-            "The state file exists but could not be parsed."))
-          (t
-           (my/noema-roam-ui-insert-empty
-            "No sync state yet. Run an incremental sync or full rebuild."))))))
-    (display-buffer buf)))
+  (unless (fboundp 'my/noema-wiki-index-status) (require 'init-aaronnote))
+  (my/noema-wiki-index-status))
 
 (defun my/noema-roam-magit ()
   "Open magit-status in the roam notes root."
@@ -4251,15 +4018,15 @@ canonical `roam://note-id#tag' target."
     (define-key map (kbd "r") #'my/noema-roam-recent-notes)
     (define-key map (kbd "R") #'my/noema-roam-related-notes)
     (define-key map (kbd "G") #'my/noema-roam-graph)
-    (define-key map (kbd "M") #'my/noema-roam-management)
+    (define-key map (kbd "M") #'my/noema-wiki-repositories)
     (define-key map (kbd "b") #'my/noema-roam-backlinks)
-    (define-key map (kbd "t") #'my/noema-roam-tags)
+    (define-key map (kbd "t") #'my/noema-wiki-tags)
     (define-key map (kbd "T") #'my/noema-roam-todos)
     (define-key map (kbd "F") #'my/noema-roam-jump-file-todo)
     (define-key map (kbd "A") #'my/noema-roam-agenda)
-    (define-key map (kbd "u") #'my/noema-roam-update-db)
-    (define-key map (kbd "U") #'my/noema-roam-sync-full)
-    (define-key map (kbd "S") #'my/noema-roam-db-status)
+    (define-key map (kbd "u") #'my/noema-wiki-refresh)
+    (define-key map (kbd "U") #'my/noema-wiki-rebuild)
+    (define-key map (kbd "S") #'my/noema-wiki-index-status)
     (define-key map (kbd "V") #'my/noema-roam-magit)
     (define-key map (kbd "D") #'my/noema-roam-dired)
     (define-key map (kbd "Q") #'my/noema-stop)
@@ -4273,7 +4040,7 @@ canonical `roam://note-id#tag' target."
   "r a" '(:def my/noema-roam-agenda   :which-key "roam agenda")
   "r d" '(:def my/noema-roam-dired    :which-key "roam dired")
   "r v" '(:def my/noema-roam-magit    :which-key "roam magit")
-  "r S" '(:def my/noema-roam-db-status :which-key "roam db status")
+  "r S" '(:def my/noema-wiki-index-status :which-key "Wiki index status")
   "r e" '(:def my/noema-open-markdown-raw :which-key "edit raw md"))
 
 ;; ── xref backend: gd / M-. for note-link ─────────────────────────────────
@@ -4385,55 +4152,13 @@ added separately by `my/noema-roam--capf-setup')."
 (add-hook 'markdown-mode-hook #'my/noema-roam-setup-keys)
 
 ;; Update transient with daily + gd hint
-(transient-define-prefix my/noema-roam-dispatch ()
-  "Markdown roam command menu."
-  [["Notes"
-    ("RET" "select link"         my/noema-roam-select-link)
-    ("o" "open link   C-c C-o" my/noema-roam-follow-link)
-    ("f" "find note"            my/noema-roam-find-note)
-    ("i" "insert link"          my/noema-roam-insert-link)
-    ("I" "insert tag link"      my/noema-roam-insert-tag-id-link)
-    ("c" "insert toc link"      my/noema-roam-insert-toc-link)
-    ("y" "copy link here"       my/noema-roam-copy-link-to-here)
-    ("n" "new note UI"          my/noema-roam-new-note)
-    ("N" "new node UI"          my/noema-roam-new-node)
-    ("d" "daily note"           my/noema-roam-daily-note)
-    ("m" "move note"            my/noema-roam-move-note)]
-   ["Tag ids"
-    ("#" "insert tag id"        my/noema-roam-insert-tag-id)
-    ("g" "generate tag id"      my/noema-roam-generate-tag-id)]
-   ["Explore"
-    ("s" "search/filter"        my/noema-roam-search-notes)
-    ("r" "recent"               my/noema-roam-recent-notes)
-    ("R" "related"              my/noema-roam-related-notes)
-    ("G" "graph"                my/noema-roam-graph)
-    ("C" "categories"           my/noema-roam-categories)
-    ("M" "management/dashboard" my/noema-roam-management)]
-   ["Special pages (wiki)"
-    ("!" "reports hub"          my/noema-roam-reports)
-    ("!w" "wanted pages"        my/noema-roam-report-wanted)
-    ("!o" "orphaned"            my/noema-roam-report-orphaned)
-    ("!d" "dead-end"            my/noema-roam-report-dead-end)
-    ("!u" "uncategorized"       my/noema-roam-report-uncategorized)
-    ("!h" "most-linked (hubs)"  my/noema-roam-report-most-linked)]
-   ["DB & Agenda"
-    ("b" "backlinks"            my/noema-roam-backlinks)
-    ("t" "tags"                 my/noema-roam-tags)
-    ("T" "todos"                my/noema-roam-todos)
-    ("F" "file todos"           my/noema-roam-jump-file-todo)
-    ("A" "agenda"               my/noema-roam-agenda)
-    ("u" "sync (incremental)"   my/noema-roam-update-db)
-    ("U" "sync (full rebuild)"  my/noema-roam-sync-full)
-    ("S" "db status"            my/noema-roam-db-status)]
-   ["Files"
-    ("V" "version (magit)"      my/noema-roam-magit)
-    ("D" "dired (file browser)" my/noema-roam-dired)
-    ("Q" "stop web-host"        my/noema-stop)]
-   ["Nav (gd = xref)"
-    ("." "xref definition"      xref-find-definitions)
-    ("x" "xref references"      xref-find-references)]])
+(defun my/noema-roam-dispatch ()
+  "Open Noema canonical Wiki dispatch."
+  (interactive)
+  (unless (fboundp 'my/noema-wiki-dispatch) (require 'init-aaronnote))
+  (my/noema-wiki-dispatch))
 
-;;; Wiki knowledge-health reports (MediaWiki Special: pages analog).
+;;; Legacy native report helpers (canonical UI lives in /wiki?view=reports).
 
 (defconst my/noema-roam--report-limit 200
   "Maximum rows shown in a single wiki report.")
@@ -5096,127 +4821,13 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :help (plist-get tool :help)))
   (insert "\n"))
 
-(defun my/noema-roam-management ()
-  "Show wiki maintenance dashboard: vault stats and all roam operations."
-  (interactive)
-  (let* ((entries (my/noema-roam--all-note-summaries))
-         (stats (my/noema-roam--wiki-stats))
-         (db (my/noema-roam--db))
-         (generated (and db (gethash "generated" db)))
-         (buf (my/noema-roam--prepare-ui-buffer
-               "*Noema roam management*" "Roam Management" 'management
-               #'my/noema-roam-management
-               (format "%d notes" (plist-get stats :total)))))
-    (with-current-buffer buf
-      (my/noema-roam-ui-render
-       (lambda ()
-         (my/noema-roam-ui-insert-page-header
-          "Wiki maintenance dashboard"
-          :icon 'management
-          :subtitle "Special:Statistics — vault health and operations"
-          :stats (list (cons (format "%d notes" (plist-get stats :total)) 'info)
-                       (cons (if generated "DB ready" "DB unknown")
-                             (if generated 'success 'warning)))
-          :actions (my/noema-roam--ui-actions))
-         (my/noema-roam-ui-insert-section "Vault statistics")
-         (my/noema-roam-ui-insert-field
-          "Root" (abbreviate-file-name (my/noema-roam-root))
-          'my/noema-roam-ui-path)
-         (my/noema-roam-ui-insert-field "Total notes"    (plist-get stats :total))
-         (my/noema-roam-ui-insert-field "Total links"    (plist-get stats :link-count))
-         (my/noema-roam-ui-insert-field "Wanted pages"
-                                            (let ((n (plist-get stats :wanted)))
-                                              (if (> n 0) (format "%d ⚠" n) "0"))
-                                            'my/noema-roam-ui-meta)
-         (my/noema-roam-ui-insert-field "Orphaned"
-                                            (let ((n (plist-get stats :orphaned)))
-                                              (if (> n 0) (format "%d ⚠" n) "0"))
-                                            'my/noema-roam-ui-meta)
-         (my/noema-roam-ui-insert-field "Dead-end"
-                                            (let ((n (plist-get stats :dead-end)))
-                                              (if (> n 0) (format "%d" n) "0"))
-                                            'my/noema-roam-ui-meta)
-         (my/noema-roam-ui-insert-field "Uncategorized"
-                                            (let ((n (plist-get stats :uncategorized)))
-                                              (if (> n 0) (format "%d" n) "0"))
-                                            'my/noema-roam-ui-meta)
-         (my/noema-roam-ui-insert-field
-         "DB generated" (or generated "unknown")
-         'my/noema-roam-ui-meta)
-         (insert "\n")
-         (my/noema-roam--dashboard-insert-tools)
-         (my/noema-roam-ui-insert-activity-heatmap)
-         (my/noema-roam-ui-insert-section "Special pages")
-         (insert "   ")
-         (my/noema-roam-ui-insert-actions
-          '((:label "Wanted pages"
-             :command my/noema-roam-report-wanted
-             :help "Links to notes that don't exist"
-             :primary t)
-            (:label "Orphaned"
-             :command my/noema-roam-report-orphaned
-             :help "Notes with no incoming links")
-            (:label "Orphaned attachments"
-             :command my/noema-roam-report-orphaned-assets
-             :help "Files in asset folders that no note references")
-            (:label "Dead-end"
-             :command my/noema-roam-report-dead-end
-             :help "Notes with no outgoing links")
-            (:label "Uncategorized"
-             :command my/noema-roam-report-uncategorized
-             :help "Notes with no tags")
-            (:label "Most-linked"
-             :command my/noema-roam-report-most-linked
-             :help "Hub notes by backlink count")))
-         (insert "\n")
-         (my/noema-roam-ui-insert-section "Tag tools")
-         (insert "   ")
-         (my/noema-roam-ui-insert-actions
-          '((:label "Browse categories"
-             :command my/noema-roam-categories
-             :help "Drill down through nested tags"
-             :primary t)
-            (:label "Browse flat tags"
-             :command my/noema-roam-tags
-             :help "All tags in the vault")
-            (:label "Rename tag"
-             :command my/noema-roam-rename-tag
-             :help "Rename a tag across all notes")
-            (:label "Tag overlap"
-             :command my/noema-roam-tag-overlap
-             :help "Find redundant/overlapping tags")))
-         (insert "\n")
-         (my/noema-roam-ui-insert-section "DB & files")
-         (insert "   ")
-         (my/noema-roam-ui-insert-actions
-          '((:label "Sync roam-db"
-             :command my/noema-roam-update-db
-             :help "Run incremental roam-db sync"
-             :primary t)
-            (:label "Move note"
-             :command my/noema-roam-move-note
-             :help "Rename note + rewrite backlinks")
-            (:label "Recent changes"
-             :command my/noema-roam-recent-notes
-             :help "Recently opened notes")
-            (:label "DB status"
-             :command my/noema-roam-db-status
-             :help "DB sync state file"))))))
-    (display-buffer buf)))
+
 
 ;;; Public lifecycle API (called from init-aaronnote.el).
 
 (defun my/noema-roam--cancel-sync-timer ()
-  "Cancel pending debounced roam sync, clear the changed-files list, and
-kill any in-flight CLI offline sync process."
-  (when (timerp my/noema-roam--sync-timer)
-    (cancel-timer my/noema-roam--sync-timer))
-  (setq my/noema-roam--sync-timer nil
-        my/noema-roam--sync-changed-files nil)
-  (when (and my/noema-roam--sync-process
-             (process-live-p my/noema-roam--sync-process))
-    (delete-process my/noema-roam--sync-process))
-  (setq my/noema-roam--sync-process nil))
+  "Compatibility no-op; Wiki index maintenance is owned by the web host."
+  nil)
 
 (defun my/noema-roam--note-in-vault-p (file)
   "Return non-nil when FILE is a Markdown note inside the vault root."
@@ -5226,12 +4837,25 @@ kill any in-flight CLI offline sync process."
 
 (defun my/noema-roam-note-changed (file)
   "Invalidate Emacs-side caches when the web-host reports FILE was saved.
-The web-host is the authoritative roam.db writer and handles its own sync
-via queueRoamDbSync; Emacs must not trigger a redundant sync from this event."
+The web-host owns wiki.db maintenance; Emacs must not start another indexer."
   (when (and (stringp file)
              (not (string-empty-p file))
              (my/noema-roam--note-in-vault-p (expand-file-name file)))
     (my/noema-roam--clear-runtime-cache)))
+
+;; Keep the historical command names used by existing keymaps, while making
+;; the web-host Wiki UI the only maintenance/report implementation.
+(defun my/noema-roam-management ()
+  "Open canonical Wiki repository management."
+  (interactive)
+  (unless (fboundp 'my/noema-wiki-repositories) (require 'init-aaronnote))
+  (my/noema-wiki-repositories))
+
+(defun my/noema-roam-reports ()
+  "Open canonical Wiki reports."
+  (interactive)
+  (unless (fboundp 'my/noema-wiki-reports) (require 'init-aaronnote))
+  (my/noema-wiki-reports))
 
 (provide 'init-md-roam)
 ;;; init-md-roam.el ends here

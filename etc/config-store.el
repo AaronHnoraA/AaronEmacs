@@ -65,7 +65,6 @@
     . "/Users/hc/.emacs.d/lisp/roam/Noema")
    (my/noema-roam-select-window-height . 0.32)
    (my/noema-roam-recent-limit . 24)
-   (my/noema-roam-root . "/Users/hc/.emacs.d/.roam")
    (my/noema-publish-nas-enable . t)
    (my/noema-publish-nas-target . "Aaron-nas:/volume1/web/public/")
    (my/noema-publish-cv-dir

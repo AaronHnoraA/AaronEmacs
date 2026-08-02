@@ -96,9 +96,47 @@
   (expand-file-name "templates" user-emacs-directory)
   "Path to LaTeX templates shared by Emacs and Noema.")
 
-(defvar my/noema--notes-root
-  (expand-file-name ".roam" user-emacs-directory)
-  "Path to the Markdown notes directory.")
+(defun my/noema--app-config-file ()
+  "Return the canonical Noema application configuration file."
+  (expand-file-name
+   "config.json"
+   (or (getenv "NOEMA_CONFIG_DIR")
+       (expand-file-name "~/.config/noema"))))
+
+(defun my/noema--workspace-config ()
+  "Return Noema's configured workspace object, or nil."
+  (let ((file (my/noema--app-config-file)))
+    (when (file-readable-p file)
+      (condition-case err
+          (gethash "workspace"
+                   (json-parse-string
+                    (with-temp-buffer
+                      (insert-file-contents file)
+                      (buffer-string))
+                    :object-type 'hash-table))
+        (error
+         (message "Noema: ignoring invalid app config %s: %s" file err)
+         nil)))))
+
+(defun my/noema-workspace-root ()
+  "Return the canonical Noema workspace root shared by both hosts."
+  (let* ((workspace (my/noema--workspace-config))
+         (configured (and workspace (gethash "root" workspace)))
+         (root (or (getenv "NOEMA_ROOT")
+                   (getenv "AARONNOTE_ROOT")
+                   (and (stringp configured) (not (string-empty-p configured)) configured)
+                   "~/Documents/Noema")))
+    (file-name-as-directory (expand-file-name root))))
+
+(defun my/noema-workspace-layout ()
+  "Return the canonical Noema workspace layout name."
+  (let* ((workspace (my/noema--workspace-config))
+         (configured (and workspace (gethash "layout" workspace)))
+         (layout (or (getenv "NOEMA_WORKSPACE_LAYOUT") configured "legacy")))
+    (if (equal (downcase (format "%s" layout)) "wiki") "wiki" "legacy")))
+
+(defvar my/noema--notes-root (my/noema-workspace-root)
+  "Path to the canonical Noema workspace.")
 
 (defun my/noema--project-settings ()
   "Read Noema's project settings from the note root without evaluation."
@@ -217,7 +255,7 @@ the backend.  The backend is chosen here, not per export."
   :group 'my/noema)
 
 (defvar my/noema--last-sync-stats nil
-  "String summary from the last successful Roam DB sync, or nil.")
+  "String summary from the last successful Wiki index refresh, or nil.")
 
 (defvar my/noema--process nil
   "Running Noema web-host child process, or nil.")
@@ -257,6 +295,9 @@ the backend.  The backend is chosen here, not per export."
 
 (defvar my/noema--split-counter 0
   "Counter for fresh Noema xwidget split sessions.")
+
+(defvar my/noema--split-direction nil
+  "Preferred direction for the next explicit Noema split.")
 
 (defvar-local my/noema-buffer-file-name nil
   "Current note file represented by an Noema Appine/xwidget buffer.")
@@ -469,6 +510,8 @@ failure is diagnosable without hunting for it."
   "Spawn the vendored Noema web-host.
 When RECONNECT-PORT is non-nil, reclaim that port so live browser pages can
 reconnect without a reload and without losing their in-memory editor state."
+  (setq my/noema--notes-root (my/noema-workspace-root))
+  (make-directory my/noema--notes-root t)
   (unless (executable-find "node")
     (user-error "Noema: `node' not found in exec-path; install Node.js"))
   (unless (file-directory-p my/noema--web-dir)
@@ -501,10 +544,12 @@ reconnect without a reload and without losing their in-memory editor state."
            (delq nil
             (append
              (list
+            (format "NOEMA_ROOT=%s" (expand-file-name my/noema--notes-root))
             (format "AARONNOTE_ROOT=%s" (expand-file-name my/noema--notes-root))
+            (format "NOEMA_WORKSPACE_LAYOUT=%s" (my/noema-workspace-layout))
             (format "AARONNOTE_WEB_DIR=%s" (expand-file-name my/noema--web-dir))
             (format "AARONNOTE_RUNTIME_ROOT=%s" (expand-file-name my/noema--runtime-root))
-            (format "AARONNOTE_WORKSPACE_ROOT=%s" (expand-file-name user-emacs-directory))
+            (format "AARONNOTE_WORKSPACE_ROOT=%s" (expand-file-name my/noema--notes-root))
             (format "AARONNOTE_LANGUAGETOOL_LANGUAGE=%s"
                     (or (bound-and-true-p my/languagetool-language) "en-US"))
             (format "AARONNOTE_LANGUAGETOOL_URL=%s"
@@ -1434,7 +1479,7 @@ When FILE is nil, use the current buffer."
       (my/noema--open-url
        (my/noema--app-url file (my/noema--xwidget-session-id file))
        file
-       t)))))
+       nil)))))
 
 ;;;###autoload
 (defun my/noema-open-current-note ()
@@ -1451,11 +1496,13 @@ When FILE is nil, use the current buffer."
            (my/noema--markdown-file-p buffer-file-name)
            buffer-file-name)))
 
-(defun my/noema--split-window ()
+(defun my/noema--split-window (&optional direction)
   "Create and select the window for an Noema split."
-  (let ((window (if (>= (window-total-width) 120)
-                    (split-window-right)
-                  (split-window-below))))
+  (let* ((direction (or direction my/noema--split-direction
+                        (if (>= (window-total-width) 120) 'right 'below)))
+         (window (if (eq direction 'below)
+                     (split-window-below)
+                   (split-window-right))))
     (select-window window)
     window))
 
@@ -1521,6 +1568,20 @@ normal file/session reuse map owned by the canonical pane."
              (select-window target-window))))))))
 
 ;;;###autoload
+(defun my/noema-open-current-note-split-right ()
+  "Open the current note in a fresh Noema pane to the right."
+  (interactive)
+  (let ((my/noema--split-direction 'right))
+    (my/noema-open-current-note-split)))
+
+;;;###autoload
+(defun my/noema-open-current-note-split-below ()
+  "Open the current note in a fresh Noema pane below."
+  (interactive)
+  (let ((my/noema--split-direction 'below))
+    (my/noema-open-current-note-split)))
+
+;;;###autoload
 (defun my/noema-preview ()
   "Compatibility alias: open the current note in Noema."
   (interactive)
@@ -1572,15 +1633,54 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
   (interactive)
   (my/noema-command "focus"))
 
-;;;###autoload
-(defun my/noema-roam-graph ()
-  "Open the standalone roam graph view in Noema.
-Always opens a fresh tab so it reliably reappears even after the previous
-graph tab was closed via the Appine toolbar."
-  (interactive)
+(defun my/noema-open-wiki-view (&optional view query)
+  "Open canonical Wiki VIEW with optional additional QUERY parameters."
   (my/noema--ensure-server
    (lambda ()
-     (my/noema--open-url (my/noema--server-url "/graph") nil t))))
+     (let ((path (concat "/wiki"
+                         (when (or view query)
+                           (concat "?"
+                                   (mapconcat
+                                    #'identity
+                                    (delq nil
+                                          (list (and view (format "view=%s" view))
+                                                query))
+                                    "&"))))))
+       (my/noema--open-url (my/noema--server-url path) nil nil)))))
+
+(defmacro my/noema--def-wiki-view (name view doc)
+  "Define NAME to open canonical Wiki VIEW with DOC."
+  `(defun ,name ()
+     ,doc
+     (interactive)
+     (my/noema-open-wiki-view ,view)))
+
+(my/noema--def-wiki-view my/noema-wiki-home nil "Open the Noema Wiki home.")
+(my/noema--def-wiki-view my/noema-wiki-pages "pages" "Open the canonical Wiki page browser.")
+(my/noema--def-wiki-view my/noema-wiki-recent "recent" "Open recently changed Wiki pages.")
+(my/noema--def-wiki-view my/noema-wiki-tags "tags" "Open canonical Wiki tag management.")
+(my/noema--def-wiki-view my/noema-wiki-namespaces "namespaces" "Open canonical Wiki namespaces.")
+(my/noema--def-wiki-view my/noema-wiki-repositories "repositories" "Open canonical Wiki repository management.")
+(my/noema--def-wiki-view my/noema-wiki-sync "sync" "Open canonical Wiki synchronization.")
+(my/noema--def-wiki-view my/noema-wiki-reports "reports" "Open canonical Wiki reports.")
+(my/noema--def-wiki-view my/noema-wiki-wanted "wanted" "Open canonical Wiki wanted-pages report.")
+
+(defun my/noema-wiki-new-page ()
+  "Open Noema's canonical new-page flow."
+  (interactive)
+  (my/noema-open-wiki-view nil "new=1"))
+
+;;;###autoload
+(defun my/noema-workspace-graph ()
+  "Open the shared interactive workspace graph."
+  (interactive)
+  (my/noema-open-wiki-view "graph"))
+
+;;;###autoload
+(defun my/noema-roam-graph ()
+  "Open Noema's canonical workspace graph."
+  (interactive)
+  (my/noema-workspace-graph))
 
 ;;; Pause/resume — freeze WebKit animations when Noema is not visible.
 
@@ -1923,27 +2023,59 @@ Blocks the caller until the response arrives (or 8 s timeout)."
         (special-mode))
       (display-buffer (current-buffer)))))
 
-;;;###autoload
-(defun my/noema-roam-sync ()
-  "Sync the Roam DB and show statistics in the minibuffer."
+(defun my/noema-wiki-refresh (&optional full)
+  "Refresh wiki.db incrementally, or perform a FULL atomic rebuild."
   (interactive)
   (unless my/noema--ready
     (user-error "Noema: server not running"))
-  (message "Noema: syncing Roam DB...")
-  (my/noema--api-call
-   "aaronnote:api:notes:roam-sync" [t]
-   (lambda (result)
-     (let* ((stats (alist-get 'stats result))
-            (notes (or (alist-get 'noteCount stats) 0))
-            (links (or (alist-get 'linkCount stats) 0))
-            (tags  (or (alist-get 'tagCount stats) 0))
-            (dirs  (or (alist-get 'dirCount stats) 0)))
-       (setq my/noema--last-sync-stats
-             (format "%d notes · %d links · %d tags · %d dirs"
-                     notes links tags dirs))
-       (when (fboundp 'my/noema-roam--clear-runtime-cache)
-         (my/noema-roam--clear-runtime-cache))
-       (message "Roam synced: %s" my/noema--last-sync-stats)))))
+  (let ((mode (if full "full" "incremental")))
+    (message "Noema: %s Wiki index..." (if full "rebuilding" "refreshing"))
+    (my/noema--api-call
+     "aaronnote:api:wiki:refresh"
+     (vector (list (cons 'mode mode)))
+     (lambda (result)
+       (let* ((maintenance (alist-get 'maintenance result))
+              (actual-mode (or (alist-get 'mode maintenance) mode))
+              (notes (length (or (alist-get 'notes result) nil)))
+              (generation (or (alist-get 'generation result) "")))
+         (setq my/noema--last-sync-stats
+               (format "wiki %s · %d pages · %s"
+                       actual-mode notes
+                       (if (> (length generation) 8) (substring generation 0 8) generation)))
+         (when (fboundp 'my/noema-roam--clear-runtime-cache)
+           (my/noema-roam--clear-runtime-cache))
+         (message "Noema Wiki index: %s" my/noema--last-sync-stats))))))
+
+(defun my/noema-wiki-rebuild ()
+  "Atomically rebuild the canonical wiki.db from all repositories."
+  (interactive)
+  (my/noema-wiki-refresh t))
+
+(defun my/noema-wiki-index-status ()
+  "Display canonical wiki.db maintenance status."
+  (interactive)
+  (unless my/noema--ready
+    (user-error "Noema: server not running"))
+  (let ((payload (my/noema--api-call-sync
+                  "aaronnote:api:wiki:index-status" [])))
+    (unless payload (user-error "Noema Wiki index status unavailable"))
+    (setq my/noema--last-sync-stats
+          (format "wiki %s · %s"
+                  (or (gethash "lastMode" payload) "not built")
+                  (let ((generation (or (gethash "generation" payload) "")))
+                    (if (> (length generation) 8) (substring generation 0 8) generation))))
+    (with-current-buffer (get-buffer-create "*Noema Wiki index status*")
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (json-encode payload))
+        (json-pretty-print-buffer)
+        (goto-char (point-min))
+        (special-mode))
+      (display-buffer (current-buffer)))))
+
+;; The old command symbol remains for external keymaps; it no longer has any
+;; Roam database implementation behind it.
+(defalias 'my/noema-roam-sync #'my/noema-wiki-refresh)
 
 ;;; Header-line for the Noema app buffer.
 
@@ -1961,10 +2093,16 @@ Blocks the caller until the response arrives (or 8 s timeout)."
      ["Page outline" my/noema-toggle-page t]
      ["Agenda" my/noema-toggle-agenda t]
      ["Local graph" my/noema-toggle-graph t]
+     ["Workspace graph" my/noema-workspace-graph t]
+     ["Wiki home" my/noema-wiki-home t]
      ["Tools" my/noema-toggle-tools t]
      ["Jupyter cells" my/noema-toggle-jupyter t]
      "---"
      ["Toggle source" my/noema-toggle-source t]
+     ["Run prose check" my/noema-prose-check t]
+     ["Export LaTeX…" my/noema-export-latex t]
+     ["Settings…" my/noema-settings t]
+     ["Move document to Trash" my/noema-trash-current-note t]
      ["Save" my/noema-save t]))
    event))
 
@@ -2047,6 +2185,10 @@ Blocks the caller until the response arrives (or 8 s timeout)."
      "---"
      ["Noema: Refresh current pane" my/noema-refresh t]
      ["Noema: Open editable split" my/noema-open-current-note-split t]
+     ["Noema: Split right" my/noema-open-current-note-split-right t]
+     ["Noema: Split below" my/noema-open-current-note-split-below t]
+     ["Noema: Wiki home" my/noema-wiki-home t]
+     ["Noema: Workspace graph" my/noema-workspace-graph t]
      ["Noema: Focus editor" my/noema-focus t]
      ["Noema: Pop" my/noema-pop t]
      (list
@@ -2096,6 +2238,10 @@ Blocks the caller until the response arrives (or 8 s timeout)."
 (my/noema--def-editor-cmd "insert-math"     "insert-math-block" "Insert a math block.")
 (my/noema--def-editor-cmd "insert-toc"      "insert-toc"      "Insert a table of contents.")
 (my/noema--def-editor-cmd "prose-check"     "prose-check"     "Run a bounded LanguageTool check in Noema.")
+(my/noema--def-editor-cmd "knowledge-search" "knowledge-search" "Search notes through Noema's unified knowledge index.")
+(my/noema--def-editor-cmd "export-latex"    "export-latex"    "Export the current scope to LaTeX.")
+(my/noema--def-editor-cmd "settings"        "settings"        "Open Noema settings.")
+(my/noema--def-editor-cmd "trash-current-note" "trash-current-note" "Move the current document to recoverable Trash.")
 
 ;;; Dispatch transient.
 
@@ -2106,12 +2252,12 @@ Blocks the caller until the response arrives (or 8 s timeout)."
                   (propertize "offline" 'face 'error))
                  (t (propertize (format "port %d" my/noema--port)
                                 'face 'success))))
-        (sync (or my/noema--last-sync-stats "not synced")))
+        (sync (or my/noema--last-sync-stats "index status unknown")))
     (format "Noema  [%s]  %s" status sync)))
 
 (with-eval-after-load 'transient
   (transient-define-prefix my/noema-dispatch ()
-    "Noema note-editor and roam hub.  H-o from anywhere."
+    "Noema editor and canonical Wiki hub.  H-o from anywhere."
     [:description my/noema--dispatch-header
      ;; Row 1 ─────────────────────────────────────────────────────────────────
      ["Note (web)"
@@ -2128,8 +2274,8 @@ Blocks the caller until the response arrives (or 8 s timeout)."
       ("R" "raw edit in Emacs" my/noema-open-markdown-raw)]
      ["Find / Browse"
       ("j" "find note"        my/noema-roam-find-note)
-      ("/" "search…"          my/noema-roam-search-notes)
-      ("l" "recent notes"     my/noema-roam-recent-notes)
+      ("/" "knowledge search" my/noema-knowledge-search)
+      ("l" "recent pages"     my/noema-wiki-recent)
       ("." "follow link"      my/noema-roam-follow-link)
       ("b" "backlinks"        my/noema-roam-backlinks)
       ("x" "related notes"    my/noema-roam-related-notes)
@@ -2143,39 +2289,32 @@ Blocks the caller until the response arrives (or 8 s timeout)."
       ("c" "note-code"        my/note-code-insert)]
      ;; Row 2 ─────────────────────────────────────────────────────────────────
      ["Knowledge"
-      ("n" "new note"         my/noema-roam-new-node)
+      ("h" "Wiki home"        my/noema-wiki-home)
+      ("n" "new page"         my/noema-wiki-new-page)
       ("d" "daily note"       my/noema-roam-daily-note)
-      ("a" "browse tags"      my/noema-roam-tags)
-      ("C" "categories"       my/noema-roam-categories)
-      ("g" "roam graph"       my/noema-roam-graph)
+      ("a" "tags"             my/noema-wiki-tags)
+      ("C" "namespaces"       my/noema-wiki-namespaces)
+      ("g" "workspace graph"  my/noema-workspace-graph)
       ("k" "tasks"            my/noema-roam-todos)
       ("A" "agenda"           my/noema-roam-agenda)
       ("L" "agenda log"       my/noema-roam-agenda-log)
       ("F" "file todos"       my/noema-roam-jump-file-todo)
-      ("M" "management"       my/noema-roam-management)]
-     ["Special pages (wiki)"
-      ("!" "reports hub"      my/noema-roam-reports)
-      ("!w" "wanted pages"    my/noema-roam-report-wanted)
-      ("!o" "orphaned"        my/noema-roam-report-orphaned)
-      ("!d" "dead-end"        my/noema-roam-report-dead-end)
-      ("!u" "uncategorized"   my/noema-roam-report-uncategorized)
-      ("!h" "most-linked"     my/noema-roam-report-most-linked)]
-     ["Index / Files"
-      ("y" "sync DB"          my/noema-roam-sync)
-      ("u" "update index"     my/noema-roam-update-db)
-      ("Z" "full rebuild"     my/noema-roam-sync-full)
-      ("S" "DB status"        my/noema-roam-db-status)
+      ("M" "repositories"     my/noema-wiki-repositories)]
+     ["Wiki pages"
+      ("!" "reports"          my/noema-wiki-reports)
+      ("!w" "wanted pages"    my/noema-wiki-wanted)
+      ("!p" "all pages"       my/noema-wiki-pages)
+      ("!s" "sync"            my/noema-wiki-sync)]
+     ["Index / Host"
+      ("y" "incremental refresh" my/noema-wiki-refresh)
+      ("Z" "atomic full rebuild" my/noema-wiki-rebuild)
+      ("S" "Wiki index status" my/noema-wiki-index-status)
       ("P" "pause/resume"     my/noema-toggle-pause)
       ("R" "runtime status"   my/noema-runtime-status)
       ("D" "dired"            my/noema-roam-dired)
       ("m" "move note"        my/noema-roam-move-note)
       ("V" "magit"            my/noema-roam-magit)
       ("q" "stop server"      my/noema-stop)]
-     ["Publish"
-      ("X"  "build + deploy"  my/noema-publish)
-      ("xb" "build only"      my/noema-publish-build)
-      ("xd" "deploy only"     my/noema-publish-deploy)
-      ("xc" "clean cache"     my/noema-publish-clean)]
      ["Format (web)"
       ("1" "bold"             my/noema-bold)
       ("2" "italic"           my/noema-italic)
@@ -2202,6 +2341,27 @@ Blocks the caller until the response arrives (or 8 s timeout)."
       ("Y" "redo"             my/noema-redo)
       ("V" "paste"            my/noema-paste)]]))
 
+(with-eval-after-load 'transient
+  (transient-define-prefix my/noema-wiki-dispatch ()
+    "Canonical Wiki navigation and index maintenance."
+    [:description my/noema--dispatch-header
+     ["Browse"
+      ("h" "home" my/noema-wiki-home)
+      ("p" "pages" my/noema-wiki-pages)
+      ("r" "recent" my/noema-wiki-recent)
+      ("n" "new page" my/noema-wiki-new-page)
+      ("g" "graph" my/noema-workspace-graph)]
+     ["Organize"
+      ("t" "tags" my/noema-wiki-tags)
+      ("N" "namespaces" my/noema-wiki-namespaces)
+      ("R" "repositories" my/noema-wiki-repositories)
+      ("s" "sync" my/noema-wiki-sync)
+      ("!" "reports" my/noema-wiki-reports)]
+     ["Index"
+      ("i" "incremental refresh" my/noema-wiki-refresh)
+      ("F" "atomic full rebuild" my/noema-wiki-rebuild)
+      ("S" "status" my/noema-wiki-index-status)]]))
+
 ;;; Keybindings.
 
 ;; Global: H-o opens the Noema dispatch panel.
@@ -2221,7 +2381,7 @@ Blocks the caller until the response arrives (or 8 s timeout)."
     (define-key appine-active-map (kbd "H-r") #'my/noema-refresh)
     (define-key appine-active-map (kbd "H-B") #'my/noema-build-and-reopen)
     (define-key appine-active-map (kbd "H-q") #'my/noema-close)
-    (define-key appine-active-map (kbd "H-y") #'my/noema-roam-sync)
+    (define-key appine-active-map (kbd "H-y") #'my/noema-wiki-refresh)
     (define-key appine-active-map (kbd "H-g") #'my/noema-roam-graph)))
 
 (my/noema--rename-live-buffers)

@@ -514,11 +514,12 @@
               (if ready 'aaron-ui-board-good 'aaron-ui-board-meta)))
            (aaron-ui-board-insert-field
             "runtime"
-            (if (and (fboundp 'my/noema-roam--runtime-available-p)
-                     (my/noema-roam--runtime-available-p))
+            (if (and (boundp 'my/noema--runtime-root)
+                     (file-exists-p
+                      (expand-file-name "web-host.mjs" my/noema--runtime-root)))
                 "available" "missing"))
            (aaron-ui-board-insert-field
-            "last-sync"
+            "last-index"
             (if (and (boundp 'my/noema--last-sync-stats)
                      my/noema--last-sync-stats)
                 my/noema--last-sync-stats

@@ -33,7 +33,7 @@
 (declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
 (declare-function config-board "config-tools" ())
 (declare-function my/noema-roam-dashboard-insert-heatmap "init-md-roam" (&optional days))
-(declare-function my/noema-roam-management "init-md-roam" ())
+(declare-function my/noema-wiki-home "init-aaronnote" ())
 (declare-function my/performance-watch "init-performance" ())
 (defvar dashboard-mode-map)
 
@@ -232,11 +232,11 @@ height in pixels."
   (config-board))
 
 (defun my/dashboard-open-roam (&rest _)
-  "Open the Roam management board from the dashboard button."
+  "Open the canonical Noema Wiki from the dashboard button."
   (interactive)
-  (unless (fboundp 'my/noema-roam-management)
-    (require 'init-md-roam))
-  (my/noema-roam-management))
+  (unless (fboundp 'my/noema-wiki-home)
+    (require 'init-aaronnote))
+  (my/noema-wiki-home))
 
 (defun my/dashboard-open-monitor (&rest _)
   "Open the runtime performance monitor from the dashboard button."
@@ -369,7 +369,7 @@ height in pixels."
             "config" "Open native config Customize group"
             ,#'my/dashboard-open-config-board)
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-repo") "R")
-            "roam" "Open Roam management"
+            "roam" "Open Noema Wiki"
             ,#'my/dashboard-open-roam)
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-pulse") "M")
             "monitor" "Open runtime performance monitor"
