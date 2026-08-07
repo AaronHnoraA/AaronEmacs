@@ -33,6 +33,12 @@
                   (workspace kind key value &rest keys))
 (defvar remote-config-settings)
 
+;; Added by newer TRAMP releases for file operations registered by external
+;; packages.  Older Emacs 31 snapshots do not define it, but this compatibility
+;; boundary still needs an empty operation table rather than a void variable.
+(defvar tramp-file-name-for-operation-external nil
+  "External TRAMP file operations and their argument types.")
+
 (defconst remote-fs-method "fs")
 (defconst remote-fs-uri-regexp
   "\\`fs://\\([a-z0-9][a-z0-9._-]*\\)\\(/.*\\)\\'")

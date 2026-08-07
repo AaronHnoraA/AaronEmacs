@@ -23,6 +23,11 @@ ZMQ channel。=.cell/= script 和 output mirror 保留在远端 note 同目录�
 attached kernel 不归 Noema broker 杀死或自动重启。独立 desktop host mode 继续
 使用 Node 本地 launcher。
 
+当前配置不启用 Jupyter 包可选的 =/jpy:= 和 =/jpys:= TRAMP 文件名处理器。该
+处理器在 Emacs 31 的 TRAMP foreign-predicate 调用约定下与当前 Jupyter 包版本
+不兼容；Jupyter 的普通执行、=remote_ikernel=、Jupyter Board 和 Noema broker
+不依赖它。
+
 The vendored baseline is upstream tag =0.4.6= at commit
 =1c437edb9df017141a6357a90de751bb200bd9fb=. Local changes are documented in
 =site-lisp/remote_ikernel/UPSTREAM.md=.

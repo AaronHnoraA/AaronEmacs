@@ -3160,8 +3160,7 @@ Each row is a list of strings or (LABEL . TONE) cells."
 Use FALLBACK-WIDTH when pixel measurement is unavailable."
   (or (and (fboundp 'string-pixel-width)
            (let ((pixel-width
-                  (string-pixel-width (buffer-substring start end)
-                                      (current-buffer))))
+                  (string-pixel-width (buffer-substring start end))))
              (and (> pixel-width 0)
                   (my/noema-roam--pixel-width-to-columns pixel-width))))
       fallback-width))

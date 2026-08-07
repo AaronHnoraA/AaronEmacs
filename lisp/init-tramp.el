@@ -33,11 +33,20 @@
 (let ((tramp-rpc-dir
        (or (ignore-errors
              (when-let* ((library (locate-library "tramp-rpc")))
-               (file-name-directory library)))
-           (expand-file-name "tramp-rpc"
-                             (or (and (boundp 'package-user-dir) package-user-dir)
-                                 (expand-file-name "elpa" user-emacs-directory))))))
-  (when (file-directory-p tramp-rpc-dir)
+                (file-name-directory library)))
+            (expand-file-name "tramp-rpc"
+                              (or (and (boundp 'package-user-dir) package-user-dir)
+                                  (expand-file-name "elpa" user-emacs-directory))))))
+  (when (and (file-directory-p tramp-rpc-dir)
+             (require 'tramp)
+             (not (my/patch-tramp-rpc-available-p)))
+    (display-warning
+     'init-tramp
+     (format "Skipping tramp-rpc: Tramp %s is older than required 2.8.1.4"
+             tramp-version)
+     :warning))
+  (when (and (file-directory-p tramp-rpc-dir)
+             (my/patch-tramp-rpc-available-p))
     (add-to-list 'load-path tramp-rpc-dir)
     (require 'tramp-rpc)))
 

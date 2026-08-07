@@ -206,7 +206,6 @@ Scrolling in the opposite direction is allowed immediately."
   "Return the buffer shown in the selected window."
   (window-buffer (minibuffer-selected-window)))
 
-(defvar-local my/noema-buffer-file-name)
 
 (defun my/tab-bar--buffer-file-name ()
   "Return the current buffer's real file or Noema virtual file."

@@ -31,6 +31,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-utils)
 (require 'init-base)
 (require 'init-open)
+(require 'patches/init-patches)
 (when (eq system-type 'darwin)
   (my/require-module-safely 'init-macos))
 (require 'init-remote)

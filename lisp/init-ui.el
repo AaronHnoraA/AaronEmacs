@@ -293,7 +293,7 @@ height in pixels."
 (defun my/dashboard--string-align-width (string)
   "Return STRING width in units suitable for `space' `:align-to'."
   (or (and (fboundp 'string-pixel-width)
-           (let ((pixel-width (string-pixel-width string (current-buffer))))
+           (let ((pixel-width (string-pixel-width string)))
              (and (> pixel-width 0)
                   (my/dashboard--pixel-width-to-columns pixel-width))))
       (string-width string)))

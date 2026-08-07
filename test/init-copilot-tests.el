@@ -74,5 +74,36 @@
       (should (equal (cadr seen) '("PATH=/client/bin")))
       (should (equal (caddr seen) '("/client/bin"))))))
 
+(ert-deftest my/copilot-jump-labels-are-prefix-free ()
+  (let ((labels (my/copilot--jump-labels 80)))
+    (should (= (length labels) 80))
+    (dolist (left labels)
+      (dolist (right labels)
+        (unless (equal left right)
+          (should-not (string-prefix-p left right)))))))
+
+(ert-deftest my/copilot-jump-accepts-the-labelled-prefix ()
+  (let ((events (list ?s))
+        rendered
+        accepted)
+    (cl-letf (((symbol-function 'copilot-current-completion)
+               (lambda () "Alpha"))
+              ((symbol-function 'copilot--get-overlay)
+               (lambda () 'fake-overlay))
+              ((symbol-function 'copilot--set-overlay-text)
+               (lambda (_overlay text) (setq rendered text)))
+              ((symbol-function 'copilot--overlay-visible)
+               (lambda () t))
+              ((symbol-function 'read-event)
+               (lambda (&rest _args) (pop events)))
+              ((symbol-function 'copilot-accept-completion)
+               (lambda (transform)
+                 (setq accepted (funcall transform "Alpha"))
+                 t)))
+      (should (my/copilot-accept-completion-jump))
+      ;; Five targets receive a/s/d/f/g, so `s' selects through the second char.
+      (should (equal accepted "Al"))
+      (should (stringp rendered)))))
+
 (provide 'init-copilot-tests)
 ;;; init-copilot-tests.el ends here

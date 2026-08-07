@@ -27,7 +27,6 @@
 (defvar winner-pending-undo-ring)
 (defvar winner-ring-alist)
 (defvar winner-undo-frame)
-(defvar-local my/noema-buffer-file-name)
 (defvar breadcrumb--ipath-plain-cache)
 (defvar breadcrumb--last-update-tick)
 (defvar breadcrumb-local-mode)

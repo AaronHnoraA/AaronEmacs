@@ -21,6 +21,9 @@
 (declare-function copilot--path-to-uri "copilot" (path))
 (declare-function copilot--start-server "copilot" ())
 (declare-function copilot--overlay-visible "copilot" ())
+(declare-function copilot-current-completion "copilot" ())
+(declare-function copilot--get-overlay "copilot" ())
+(declare-function copilot--set-overlay-text "copilot" (overlay completion))
 (declare-function copilot-accept-completion "copilot" (&optional transform-fn))
 (declare-function copilot-accept-completion-by-word "copilot" (&optional n))
 (declare-function copilot-accept-completion-to-char "copilot" (char &optional count))
@@ -32,6 +35,7 @@
 (declare-function my/jump-forward-dwim "init-funcs" ())
 (declare-function my/backward-delimiter-or-snippet-dwim "init-funcs" ())
 (defvar copilot--connection nil)
+(defvar copilot--overlay nil)
 (defvar copilot--quota nil)
 (defvar copilot--status nil)
 (defvar copilot-log-max)
@@ -39,6 +43,11 @@
 (defgroup my/copilot nil
   "Copilot integration defaults."
   :group 'tools)
+
+(defface my/copilot-jump-label-face
+  '((t (:foreground "#111827" :background "#f7d774" :weight bold)))
+  "Face for temporary s-jump labels inside a Copilot ghost completion."
+  :group 'my/copilot)
 
 (config-defvar my/copilot-idle-delay nil
   "Idle seconds before Copilot asks for inline completions."
@@ -876,6 +885,119 @@ Modes in `my/copilot-deferred-modes' start only after editor idle time."
        (fboundp 'copilot--overlay-visible)
        (copilot--overlay-visible)))
 
+(defconst my/copilot-jump-alphabet "asdfghjklqweruiop"
+  "Prefix-free label alphabet shared with Noema's s-jump UI.")
+
+(defun my/copilot--jump-label-less-p (left right alphabet)
+  "Return non-nil when jump label LEFT sorts before RIGHT in ALPHABET."
+  (if (/= (length left) (length right))
+      (< (length left) (length right))
+    (let ((index 0)
+          (result nil)
+          (done nil))
+      (while (and (< index (length left)) (not done))
+        (let ((delta (- (cl-position (aref left index) alphabet)
+                        (cl-position (aref right index) alphabet))))
+          (unless (= delta 0)
+            (setq result (< delta 0)
+                  done t)))
+        (setq index (1+ index)))
+      result)))
+
+(defun my/copilot--jump-labels (count &optional alphabet)
+  "Build COUNT prefix-free, nearest-first s-jump labels from ALPHABET."
+  (let* ((alphabet (or alphabet my/copilot-jump-alphabet))
+         (keys (delete-dups (mapcar #'char-to-string (string-to-list alphabet))))
+         (target (max 0 count))
+         (leaves (copy-sequence keys)))
+    (when (and (= (length keys) 1) (> target 1))
+      (user-error "Copilot jump labels need at least two keys"))
+    (while (< (length leaves) target)
+      (let ((expand-at 0))
+        (cl-loop for label in leaves
+                 for index from 0
+                 when (<= (length label) (length (nth expand-at leaves)))
+                 do (setq expand-at index))
+        (let ((prefix (nth expand-at leaves)))
+          (setq leaves
+                (append (cl-subseq leaves 0 expand-at)
+                        (mapcar (lambda (key) (concat prefix key)) keys)
+                        (nthcdr (1+ expand-at) leaves))))))
+    (cl-subseq
+     (sort leaves (lambda (left right)
+                    (my/copilot--jump-label-less-p left right alphabet)))
+     0 (min target (length leaves)))))
+
+(defun my/copilot--jump-candidates (completion)
+  "Return bounded (LABEL . LENGTH) targets for COMPLETION's first line."
+  (let* ((line-end (or (string-match "\n" completion) (length completion)))
+         (count (min 256 line-end))
+         (lengths (number-sequence 1 count))
+         (labels (my/copilot--jump-labels count)))
+    (cl-mapcar #'cons labels lengths)))
+
+(defun my/copilot--jump-render (completion candidates prefix)
+  "Render COMPLETION with CANDIDATES narrowed by PREFIX."
+  (let ((from 0)
+        pieces)
+    (dolist (candidate candidates)
+      (let ((to (cdr candidate))
+            (label (car candidate)))
+        (when (string-prefix-p prefix label)
+          (push (propertize (substring label (length prefix))
+                            'face 'my/copilot-jump-label-face)
+                pieces))
+        (push (substring completion from to) pieces)
+        (setq from to)))
+    (push (substring completion from) pieces)
+    (apply #'concat (nreverse pieces))))
+
+(defun my/copilot-accept-completion-jump ()
+  "Use temporary s-jump labels to accept an exact Copilot prefix."
+  (interactive)
+  (let* ((completion (and (fboundp 'copilot-current-completion)
+                          (copilot-current-completion)))
+         (candidates (and completion (my/copilot--jump-candidates completion)))
+         (prefix "")
+         (finished nil)
+         (accepted nil))
+    (unless candidates
+      (user-error "No visible Copilot text to jump within"))
+    (unwind-protect
+        (while (not finished)
+          (copilot--set-overlay-text
+           (copilot--get-overlay)
+           (my/copilot--jump-render completion candidates prefix))
+          (let* ((event (read-event "Copilot jump: label (Esc cancels)"))
+                 (basic (event-basic-type event)))
+            (cond
+             ((memq basic '(escape 27 7))
+              (setq finished t))
+             ((characterp basic)
+              (let* ((key (char-to-string (downcase basic)))
+                     (next-prefix (concat prefix key))
+                     (matches (cl-remove-if-not
+                               (lambda (candidate)
+                                 (string-prefix-p next-prefix (car candidate)))
+                               candidates))
+                     (exact (assoc next-prefix matches)))
+                (if (null matches)
+                    (setq finished t)
+                  (setq prefix next-prefix)
+                  (when exact
+                    ;; Restore the real completion before invoking the package's
+                    ;; normal partial-accept path; the labelled text is UI only.
+                    (copilot--set-overlay-text (copilot--get-overlay) completion)
+                    (copilot-accept-completion
+                     (lambda (_ignored) (substring completion 0 (cdr exact))))
+                    (setq accepted t
+                          finished t))))))))
+      (when (and (not accepted)
+                 (fboundp 'copilot--overlay-visible)
+                 (copilot--overlay-visible))
+        (copilot--set-overlay-text (copilot--get-overlay) completion)))
+    accepted))
+
 (defun my/forward-delimiter-or-copilot-dwim ()
   "Prefer active snippet/Copilot actions, then language-specific or delimiter jump."
   (interactive)
@@ -904,17 +1026,13 @@ Modes in `my/copilot-deferred-modes' start only after editor idle time."
     (my/jump-forward-dwim))))
 
 (defun my/forward-delimiter-or-copilot-to-char-dwim ()
-  "Prefer snippet field advance, then Copilot accept-to-char, then language-specific or delimiter jump."
+  "S-jump within visible Copilot text, else advance a snippet or delimiter."
   (interactive)
   (cond
+   ((my/copilot-completion-visible-p)
+    (my/copilot-accept-completion-jump))
    ((my/snippet-active-p)
     (my/snippet-next-field-dwim))
-   ((and (fboundp 'copilot-accept-completion-to-char)
-         (my/copilot-completion-visible-p))
-    (call-interactively #'copilot-accept-completion-to-char))
-   ((and (fboundp 'copilot-accept-completion)
-         (my/copilot-completion-visible-p))
-    (copilot-accept-completion))
    (t
     (my/jump-forward-dwim))))
 
@@ -931,7 +1049,7 @@ method maps the bracket key to full-width punctuation.")
 
 (defconst my/copilot-to-char-keys
   '("M-}" "M-｝" "M-〗" "M-』")
-  "Keys that accept Copilot to a character or move forward by delimiter.")
+  "Keys that s-jump within Copilot text or move forward by delimiter.")
 
 (defun my/copilot-define-keys (keymap keys command)
   "Bind each key in KEYS to COMMAND in KEYMAP."

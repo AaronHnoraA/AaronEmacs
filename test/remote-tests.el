@@ -1091,6 +1091,20 @@ returns, so this covers a different ownership window from backend cancellation."
         (when (process-live-p process) (delete-process process))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
+(ert-deftest remote-fs-supports-tramp-without-external-operation-table ()
+  (should (boundp 'tramp-file-name-for-operation-external))
+  (let ((tramp-file-name-for-operation-external nil)
+        routed-operation)
+    (cl-letf (((symbol-function 'remote-fs--call-routed)
+               (lambda (operation _args)
+                 (setq routed-operation operation)
+                 'routed)))
+      (should
+       (eq (remote-fs-file-name-handler
+            'file-readable-p "/fs:local:/tmp/example")
+           'routed))
+      (should (eq routed-operation 'file-readable-p)))))
+
 (ert-deftest remote-mock-target-routes-file-operations ()
   (remote-test-with-registry
     (let* ((root (make-temp-file "remote-target-" t))

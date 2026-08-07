@@ -42,6 +42,14 @@ make audit-ui-tokens
 - 你把 VC 包 recipe 改了
 - 你在另一台机器上完成了一次安装整理，想同步回来
 
+### 第三方兼容补丁
+
+针对 Emacs/ELPA 版本错配的临时修复统一放在
+[`lisp/patches/init-patches.el`](../lisp/patches/init-patches.el)，并由
+`init-modules.el` 的早期加载阶段统一启用。不要把这类 workaround 散落到业务模块
+或 `init.el`。包更新后重新运行启动检查；如果上游已经修复，应删除对应补丁和注释，
+而不是继续保留无效兼容代码。
+
 ### 当前已经解决到什么程度
 
 就 Emacs 自身 package 依赖而言，现在已经可以：

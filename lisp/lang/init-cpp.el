@@ -117,18 +117,19 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (when (locate-library "llvm-mode")
-  (use-package llvm-mode
-    :ensure nil
-    :mode ("\\.ll\\'" . llvm-mode)))
+  ;; Some Emacs 31 snapshots no longer ship this optional mode.  Avoid a
+  ;; `use-package' compile-time require so byte compilation still works when
+  ;; the library is absent from that particular build.
+  (autoload 'llvm-mode "llvm-mode" nil t)
+  (add-to-list 'auto-mode-alist '("\\.ll\\'" . llvm-mode)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; TableGen
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (when (locate-library "tablegen-mode")
-  (use-package tablegen-mode
-    :ensure nil
-    :mode ("\\.td\\'" . tablegen-mode)))
+  (autoload 'tablegen-mode "tablegen-mode" nil t)
+  (add-to-list 'auto-mode-alist '("\\.td\\'" . tablegen-mode)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Snippets (tempo)
