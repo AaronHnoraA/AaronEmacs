@@ -33,6 +33,30 @@
 (defvar better-jumper-mode-buffers nil
   "Buffers managed by `better-jumper-mode'.")
 
+(defvar-local better-jumper-local-mode-set-explicitly nil
+  "Non-nil when `better-jumper-local-mode' was toggled explicitly.")
+
+(defvar-local better-jumper-local-mode--set-explicitly nil
+  "Newer spelling of the explicit `better-jumper-local-mode' toggle flag.")
+
+(defvar better-jumper-local-mode--suppress-set-explicitly nil
+  "Non-nil while the global Better Jumper mode toggles its local mode.")
+
+;; `diff-hl' is affected by the same `easy-mmode' ABI transition.  Its
+;; packaged bytecode and native cache can use different spellings while the
+;; global mode enables `diff-hl-mode' as a file (including Markdown) opens.
+(defvar global-diff-hl-mode-buffers nil
+  "Buffers managed by `global-diff-hl-mode'.")
+
+(defvar-local diff-hl-mode-set-explicitly nil
+  "Legacy spelling of the explicit `diff-hl-mode' toggle flag.")
+
+(defvar-local diff-hl-mode--set-explicitly nil
+  "Current spelling of the explicit `diff-hl-mode' toggle flag.")
+
+(defvar diff-hl-mode--suppress-set-explicitly nil
+  "Non-nil while global Diff-HL toggles its local mode.")
+
 ;; Jupyter's optional `/jpy:' handler uses the old TRAMP predicate contract.
 (defun my/patch-tramp-register-foreign-file-name-handler-a
     (orig-fn function handler &optional append)

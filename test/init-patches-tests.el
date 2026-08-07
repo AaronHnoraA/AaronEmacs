@@ -20,7 +20,14 @@
 
 (ert-deftest my/patch-globalized-mode-buffer-lists-are-bound ()
   (dolist (variable '(global-atomic-chrome-edit-mode-buffers
-                      better-jumper-mode-buffers))
+                      better-jumper-mode-buffers
+                      better-jumper-local-mode-set-explicitly
+                      better-jumper-local-mode--set-explicitly
+                      better-jumper-local-mode--suppress-set-explicitly
+                      global-diff-hl-mode-buffers
+                      diff-hl-mode-set-explicitly
+                      diff-hl-mode--set-explicitly
+                      diff-hl-mode--suppress-set-explicitly))
     (should (boundp variable))
     (should (listp (symbol-value variable)))))
 
