@@ -7,6 +7,8 @@
 
 (require 'config)
 
+(require 'init-package-utils)
+
 (require 'aaron-ui)
 
 (declare-function on-screen-mode "on-screen" (&optional arg))
@@ -19,6 +21,19 @@
   "Idle timer used to coalesce dashboard visibility checks.")
 (defvar my/file-icon-image-cache (make-hash-table :test #'equal)
   "Cached image descriptors for custom file icons.")
+
+(defconst my/image-slice-vc-revision
+  "5713b618e0fde3407081aef49b4932e9ae05942b"
+  "Tested image-slice revision used by this configuration.")
+
+(my/package-register-vc
+ 'image-slice
+ `(:url "https://github.com/LuciusChen/image-slice.git"
+   :rev ,my/image-slice-vc-revision))
+
+(use-package image-slice
+  :ensure nil
+  :defer t)
 
 (defvar my/dashboard-items-content-width 100
   "Maximum display width for the centered dashboard item block.")
