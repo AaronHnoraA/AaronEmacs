@@ -29,6 +29,14 @@
 ;; The guards below (my/tramp-rpc-path-p) are safe regardless of whether
 ;; tramp-rpc is installed — they are pure string checks on the file path.
 (my/package-ensure-vc 'tramp-rpc "https://github.com/ArthurHeymans/emacs-tramp-rpc")
+
+;; Loaded only through `remote-accelerator'.  Do not call `tramp-hlo-setup'
+;; globally: the framework selects it per logical route and operation after a
+;; target capability probe, leaving ordinary /ssh: paths untouched.
+(use-package tramp-hlo
+  :ensure t
+  :defer t)
+
 ;;;; tramp / tramp-rpc safe setup
 (let ((tramp-rpc-dir
        (or (ignore-errors

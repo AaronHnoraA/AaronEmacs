@@ -178,12 +178,28 @@ stdout 的 buffer/string 目的地仍严格保留 Emacs 的 buffer 语义。
  :capability 'file-read
  :path-arguments '(0)
  :result-kind 'path
+ :filesystem-effects 'none
  :retry-safe t)
 ```
 
-内建表覆盖 Emacs 31/32 的主要 file/directory/process/watch 操作。未知操作会写入
-route log，并保守地按不可重试的 `file-write` 只执行一次。跨 target 的
+内建表按公开 file handler 契约覆盖 file/directory/process/watch 操作，而不按
+Emacs 版本号分叉。未知操作会写入 route log，并保守地按不可重试的 `file-write`
+只执行一次；若陌生返回值里仍含 backend 物理路径，则抛出
+`remote-operation-contract-error`，不会把 `/ssh:` 或 `/rpc:` 身份泄漏给 consumer。
+跨 target 的
 `copy-file` / `copy-directory` 被允许；rename、硬链接和符号链接明确拒绝。
+
+TRAMP 的 foreign handler 在不同上游修订中可能收到 filename，也可能收到已经解析
+的 connection vector。`remote-compat-tramp-vector` 统一这两种入口；`/fs:` handler
+同时承接 vector 形式的 home/uid/gid/groups 查询，并在调用物理 backend 前把逻辑
+vector 投影成对应的 `/ssh:` 或 `/rpc:` vector。`file-local-name` 也作为正式 file
+operation 实现，不再依赖全局 advice。`remote-file-operation-coverage-report` 会把当前
+运行时 `tramp-file-name-handler` 的公开 operation surface 与本框架注册表对比；新增
+上游操作必须先有明确 placement、capability、重试和结果契约，不能混进未知写操作。
+
+`filesystem-effects` 取 `none`、`metadata`、`content` 或 `unknown`。只有调用者明确
+声明 `none` 时，process/file 边界才局部关闭 TRAMP 的保守文件属性 cache flush；
+未知进程和扩展操作继续刷新，不能用性能优化掩盖内容变化。
 
 ## 4. Pipeline 与 backend
 
@@ -232,6 +248,7 @@ backend 负责这些边界：
  :prepare prepare-execution-function
  :prepare-process prepare-async-process-plan-function
  :stdio-bridge client-stdio-bridge-function
+ :probe protocol-capability-function
  :connect connect-function
  :live live-function
  :disconnect disconnect-function
@@ -256,9 +273,71 @@ tramp-rpc 的本地 relay 则固定在客户端临时目录运行，不能继承
 target-native cwd，例如 `/home/hc/project/`。
 
 `remote-register-backend` 会把 backend 映射到旧 `remote-link-plugin` 兼容
-registry，所以旧调用者可以渐进迁移；pipeline 与 session 本身已经不再是别名。
+registry，所以旧调用者可以渐进迁移；只有这个桥接生成的 plugin 才参与 backend
+probe，同名旧 plugin 不会意外继承新协议。probe 在连接打开后协商实现版本、协议、
+watcher 与 capabilities；`incompatible` 和 `unsupported` 是结构化 condition，失败只
+冷却当前 backend，仍可在同一 pipeline 上回退到标准 TRAMP。
 
-## 5. Session 生命周期
+capability 不是标签，而是可检查的承接接口。`remote-capability-contract-list` 描述
+file/process/channel/composite 边界及其 callback 要求；backend 注册时若声明
+`metadata` 却没有 path projection、声明 listener 却没有 network callback，或声明
+LSP 却缺少 process/environment 基础能力，会立即得到
+`remote-operation-contract-error`。adapter 同样不能登记未知能力。连接后的动态 probe
+只能缩减静态 capabilities，不能凭空增加实现未声明的能力。
+
+## 5. 加速与升级防线
+
+`remote-compat.el` 是 Emacs/TRAMP 演进的唯一兼容边界。框架优先使用公开的 foreign
+handler、external operation 和 file-notify API；旧版本所需的窄 fallback 只存在于
+这个模块，其他模块不读取 TRAMP 的 operation 定位变量，也不直接删 file-notify
+内部 descriptor。
+
+防御按函数形状和行为做，不按 Emacs/TRAMP 版本号做。external operation 必须是与
+原函数公开 arglist 完全一致的命名函数；例如 `dir-locals--all-files` 新增可选参数后，
+旧 tramp-hlo 不承接该形状，框架只对这次调用回落到标准 TRAMP，而不是关闭整个加速
+能力。tramp-rpc 的少数私有 seam 仅存在于 backend adapter，安装 advice 前验证
+arity；形状改变时相应优化自动停用，文件、进程和 channel 主路径仍可继续工作。
+
+`remote-accelerator.el` 提供按 operation + route 选择的可选 provider。目前接入 GNU
+ELPA `tramp-hlo` 的三个高层操作，但不调用它的全局 `tramp-hlo-setup`：
+
+- 只加速 `/fs:` 投影到 shell TRAMP 的 route，RPC 继续使用自己的实现；
+- 每个 target/operation 探测所需命令；探测失败立即走原生 TRAMP；
+- `locate-dominating-stop-dir-regexp` 非空时不用上游快路径；
+- dir-locals 额外验证 GNU `stat -c` 和 `realpath` 的路径保持性，避免 macOS
+  `/var` → `/private/var` 改写；
+- provider 抛出 `remote-backend-unsupported` 时，在同一路由内回落到普通实现。
+
+升级验收入口：
+
+```sh
+make remote-contract-test  # operation/provider/probe/file-notify 契约
+make remote-conformance-test # /fs:local 与原生 API 的语义 oracle
+make remote-byte-check     # warnings-as-errors，产物仅写临时目录
+make remote-check          # 全套 Remote 与 consumer 回归
+```
+
+`remote-doctor` 同时报告当前 Emacs/TRAMP API、加速器可用性、已协商 backend
+contract，以及 tramp-rpc 是否处于干净的精确 release tag；非 release checkout
+不禁用 RPC，而是保持 upstream 的 source-keyed build 策略，避免 client/server
+二进制错配。
+
+当前实现持续对照的上游设计来源如下：
+
+- [GNU TRAMP](https://www.gnu.org/software/tramp/)：以运行时 operation inventory、
+  foreign handler 与 external operation 公共契约作为 Emacs 文件能力的真值；
+- [tramp-rpc](https://github.com/jdtsmith/tramp-rpc)：借鉴 filename/vector 归一化、
+  client/server 同版本部署和 cache invalidation 测试，不复制它已经覆盖的架构映射；
+- [Distant](https://distant.dev/)：借鉴 server/protocol/capability 分离及 typed
+  unsupported 思路，不引入另一套协议或 vendored server；
+- GNU ELPA `compat` 与 `tramp-hlo`：前者只承担窄 API 兼容，后者只作为可回退的
+  route-scoped 高层加速器。
+
+sshfs/rclone 可以解决部分 mount/file transfer，但不能承接 Emacs process、PTY、
+watch、LSP stdio 和 network/forward 接口，因此不作为 primary backend，也不据此
+把统一 capability 模型拆回文件专用分支。
+
+## 6. Session 生命周期
 
 session 按 `(target pipeline backend)` 缓存，不按 adapter 或 capability 重复建连。
 TRAMP/tramp-rpc 仍拥有底层 process；框架拥有身份、复用、健康状态和失效策略。
@@ -268,6 +347,17 @@ pipeline runtime 引用采用 take-before-release 所有权；即使 transport c
 `ConnectionAttempts` 注入该 route 的官方 TRAMP `login-args` 和 tramp-rpc raw
 SSH args，避免一个离线 target 长时间阻塞界面。pipeline config 可以用
 `:connect-timeout`、`:connection-attempts` 和 `:ssh-options` 覆盖默认值。
+
+每次连接尝试还获得单调递增的 generation。backend protocol contract、高层加速
+probe 都按 generation 缓存；session 关闭时统一失效该 target 的 HOME/path expansion、
+PATH facts 和 environment capsule。重连因此不会复用上一条连接观察到的 server
+version、watcher、realpath 或 shell 环境。
+
+timer 驱动的 PATH、environment 与 workspace reconnect 统一经过
+`remote-background-submit`。相同 logical key 的任务只运行一个；若 TRAMP 正忙则有界
+退避并加入 jitter；函数执行期间 target epoch 变化时，结果不会写进 cache，而是从
+新 epoch 重做。PATH/environment 的 cache commit 被刻意放在 generation 检查之后，
+workspace 关闭和 framework reset 会取消仍在等待的任务。
 
 ```elisp
 (remote-session-acquire route context)
@@ -284,7 +374,7 @@ SSH args，避免一个离线 target 长时间阻塞界面。pipeline config 可
 - `transport`：pipeline 已失效，可换另一条 pipeline；
 - `operation`：权限、退出码、参数等业务错误，不自动换路重试。
 
-## 6. 进程、环境与网络 channel
+## 7. 进程、环境与网络 channel
 
 ```elisp
 (remote-process-file "git" nil t nil "status" "--short")
@@ -412,7 +502,7 @@ forward。成员有稳定名称并共享 context/workspace；建立中任一成�
 全部成员。workspace 恢复优先复用客户端 listener，无法复用时生成新 endpoint
 generation，并通过恢复 callback 通知协议 owner 更新连接信息。
 
-## 7. Workspace、service 与 terminal
+## 8. Workspace、service 与 terminal
 
 workspace 是高于单次 buffer 的资源所有者，稳定身份来自
 `target + workspace root`。它复用 route、environment、service、terminal 和
@@ -466,13 +556,17 @@ transport failure 会把相关 workspace 标记为 disconnected，并按 1、2�
 仍需接入 workspace resource owner，不能仅凭 capability symbol 宣称已恢复。
 Noema 的远程 Markdown watch 已使用这一边界：文件仍以 `/fs:` 标识，watch
 随 workspace 恢复，并在 Noema 停止时显式释放。
+逻辑 watcher 还会对窄时间窗口内完全相同的 backend event 去重，并维护单调
+sequence。物理 watcher 意外发出 `stopped` 时，框架合并 resync 请求：先调用
+metadata 中可选的 `:resync` 内容扫描函数，再重建物理 descriptor。显式关闭通过
+callback generation 隔离，不会被误判成丢事件而重新打开。
 PTY shell 不安全重放，因此 terminal 只标记为 disconnected，并要求显式
 `remote-terminal-restart`。
 
 `M-x remote-doctor` 从 target → pipeline stage → backend → route → session →
 workspace/resource 输出诊断；加前缀参数会实际连接并运行 `uname -s`。
 
-## 8. 配置兼容
+## 9. 配置兼容
 
 配置继续接受 `links`、`plugin`、`plugins`；新配置可以使用
 `pipelines`、`backend`、`backends` 和 `stages`：
@@ -506,10 +600,11 @@ workspace/resource 输出诊断；加前缀参数会实际连接并运行 `uname
 JSON、schema 或 pipeline 注册不会清空当前 target/session；成功提交只关闭发生
 变化或被移除 pipeline 的 session/runtime。
 
-## 9. 模块边界
+## 10. 模块边界
 
 ```text
 remote-framework.el       public library entry
+├── remote-compat.el      public upstream API boundary and capability report
 ├── remote-core.el        target, adapter, capability, route
 ├── remote-pipeline.el    ordered reachability pipelines
 ├── remote-transport.el   pipeline stage executor/runtime
@@ -518,6 +613,8 @@ remote-framework.el       public library entry
 ├── remote-connection.el  real session pool + v1 compatibility API
 ├── remote-session.el     public session lifecycle facade
 ├── remote-fs.el          /fs identity and scoped file handler
+├── remote-accelerator.el route-scoped optional high-level providers
+├── remote-background.el timer reentrancy, retry and epoch-safe commits
 ├── remote-process.el     routed sync/async process APIs
 ├── remote-channel.el     socket, stream and forward boundary
 ├── remote-environment.el environment capsules and maintainers
@@ -531,10 +628,11 @@ remote-framework.el       public library entry
 `remote-config.el` 与 `remote-board.el` 是可选集成层。direnv、Eglot、Lean、
 Noema 等消费者留在框架外，只调用公共 API。
 
-## 10. 测试与支持范围
+## 11. 测试与支持范围
 
 ```sh
 make remote-test
+make remote-conformance-test
 make remote-e2e
 REMOTE_E2E_TARGET=Aaron-Pi make remote-e2e
 emacs --batch --init-directory=. -q -l early-init.el -l init.el \
@@ -551,7 +649,7 @@ SSH E2E 是显式 opt-in，自动选择 SSH config 导入的 `Aaron-*` target，
 devcontainer、Dape/tasks 编排、动态 SOCKS forward 与托管 tunnel 不在这个版本
 承诺范围内。
 
-## 11. 当前完成度
+## 12. 当前完成度
 
 | 范围 | 状态 |
 |---|---|

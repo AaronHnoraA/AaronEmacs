@@ -15,6 +15,8 @@
 (require 'remote-transport)
 
 (declare-function remote-context "remote-fs" (&optional path))
+(declare-function remote-backend-probe
+                  "remote-backend-core" (route context &optional handle refresh))
 
 (define-error 'remote-connection-timeout
               "Remote connection establishment timed out"
@@ -42,12 +44,13 @@ missing or ineffective.  Nil or a non-positive value disables the deadline."
 (cl-defstruct (remote-session
                (:constructor remote-session-create))
   key target-id pipeline-id backend-id pipeline-runtime handle state
-  opened-at last-used-at use-count error)
+  opened-at last-used-at use-count error generation)
 
 (defalias 'remote-connection-p #'remote-session-p)
 (cl-defun remote-connection-create
     (&key key target-id pipeline-id backend-id link-id plugin-id
-          pipeline-runtime handle state opened-at last-used-at use-count error)
+          pipeline-runtime handle state opened-at last-used-at use-count error
+          generation)
   "Create a session using v2 names or v1 connection keywords."
   (remote-session-create
    :key key
@@ -60,7 +63,8 @@ missing or ineffective.  Nil or a non-positive value disables the deadline."
    :opened-at opened-at
    :last-used-at last-used-at
    :use-count use-count
-   :error error))
+   :error error
+   :generation generation))
 (defalias 'remote-connection-key #'remote-session-key)
 (defalias 'remote-connection-target-id #'remote-session-target-id)
 (defalias 'remote-connection-link-id #'remote-session-pipeline-id)
@@ -73,6 +77,7 @@ missing or ineffective.  Nil or a non-positive value disables the deadline."
 (defalias 'remote-connection-last-used-at #'remote-session-last-used-at)
 (defalias 'remote-connection-use-count #'remote-session-use-count)
 (defalias 'remote-connection-error #'remote-session-error)
+(defalias 'remote-connection-generation #'remote-session-generation)
 (gv-define-setter remote-connection-key (value object)
   `(setf (remote-session-key ,object) ,value))
 (gv-define-setter remote-connection-target-id (value object)
@@ -95,6 +100,8 @@ missing or ineffective.  Nil or a non-positive value disables the deadline."
   `(setf (remote-session-use-count ,object) ,value))
 (gv-define-setter remote-connection-error (value object)
   `(setf (remote-session-error ,object) ,value))
+(gv-define-setter remote-connection-generation (value object)
+  `(setf (remote-session-generation ,object) ,value))
 
 (defvaralias 'remote-connection-pool 'remote-sessions)
 
@@ -105,6 +112,15 @@ missing or ineffective.  Nil or a non-positive value disables the deadline."
 
 (defvar remote-current-session nil
   "Dynamically bound pooled session for the current routed operation.")
+
+(defvar remote-connection--generation-counter 0
+  "Monotonic identity assigned to every connection attempt.")
+
+(defvar remote-connection-opened-hook nil
+  "Hook run with CONNECTION and ROUTE after a session becomes usable.")
+
+(defvar remote-connection-closed-hook nil
+  "Hook run with CONNECTION, ROUTE, and REASON after session invalidation.")
 
 (defun remote-connection-route-key (route)
   "Return the stable pool key for ROUTE."
@@ -119,6 +135,14 @@ session is acquired."
   (and (remote-route-p route)
        (gethash (remote-connection-route-key route)
                 remote-connection-pool)))
+
+(defun remote-connection-generation-for-route (route)
+  "Return the current session generation for ROUTE, or nil."
+  (when (remote-route-p route)
+    (when-let* ((connection
+                 (gethash (remote-connection-route-key route)
+                          remote-connection-pool)))
+      (remote-connection-generation connection))))
 
 (defun remote-connection--take-pipeline-runtime (connection)
   "Detach and return CONNECTION's owned pipeline runtime.
@@ -227,7 +251,9 @@ requests only validate and reuse the retained session."
               (funcall closer existing route))))
         (remote-pipeline-release
          (remote-connection-pipeline-runtime existing)
-         nil 'stale))
+         nil 'stale)
+        (run-hook-with-args
+         'remote-connection-closed-hook existing route 'stale))
       (let* ((opened-at (current-time))
              (connection
              (remote-connection-create
@@ -238,7 +264,9 @@ requests only validate and reuse the retained session."
                :state 'opening
                :opened-at opened-at
                :last-used-at opened-at
-               :use-count 0))
+               :use-count 0
+               :generation
+               (cl-incf remote-connection--generation-counter)))
              pipeline-runtime
              plugin
              closer
@@ -288,6 +316,17 @@ requests only validate and reuse the retained session."
                      route context pipeline-runtime)
                     backend-opened t)
               (setf (remote-connection-handle connection) handle)
+              ;; Negotiate implementation/protocol capabilities only after a
+              ;; backend has produced its live attachment.  A typed
+              ;; incompatibility follows the ordinary backend-local failover
+              ;; path and leaves the shared transport available to TRAMP.
+              (when (and (fboundp 'remote-backend-probe)
+                         ;; Only the v2 backend bridge owns protocol
+                         ;; negotiation.  A standalone v1 plugin may reuse a
+                         ;; familiar name without inheriting that backend's
+                         ;; contract or cached health state.
+                         (remote-link-plugin-backend-id plugin))
+                (remote-backend-probe route context handle))
               ;; Pool clear, config reload, or explicit invalidation can run
               ;; while the opener yields.  A cancelled placeholder must never
               ;; be resurrected as an unpooled live session.
@@ -324,6 +363,8 @@ requests only validate and reuse the retained session."
                :target (remote-route-target-id route)
                :link (remote-route-link-id route)
                :plugin (remote-route-link-plugin-id route))
+              (run-hook-with-args
+               'remote-connection-opened-hook connection route)
               connection)
           (error
            (when (eq (gethash key remote-connection-pool) connection)
@@ -346,6 +387,8 @@ requests only validate and reuse the retained session."
             :link (remote-route-link-id route)
             :plugin (remote-route-link-plugin-id route)
             :error (error-message-string err))
+           (run-hook-with-args
+            'remote-connection-closed-hook connection route err)
            (signal (car err) (cdr err)))))))))
 
 (defalias 'remote-connection-acquire #'remote-connection-ensure)
@@ -386,7 +429,9 @@ REASON is recorded for observability."
          (cond
           ((null reason) nil)
           ((symbolp reason) (symbol-name reason))
-          (t (error-message-string reason)))))
+          (t (error-message-string reason))))
+        (run-hook-with-args
+         'remote-connection-closed-hook connection route reason))
       connection)))
 
 (defun remote-connection-invalidate-link
@@ -486,6 +531,7 @@ ADAPTER defaults to `process'; CAPABILITY defaults to `process-sync'."
             #'remote-stage-runtime-transport-id
             (remote-pipeline-runtime-stages runtime)))
          :state (remote-connection-state connection)
+         :generation (remote-connection-generation connection)
          :uses (remote-connection-use-count connection)
          :opened-at (remote-connection-opened-at connection)
          :last-used-at (remote-connection-last-used-at connection))

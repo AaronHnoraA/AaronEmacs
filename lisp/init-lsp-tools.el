@@ -251,6 +251,8 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
                (feature (and lsp-entry (plist-get lsp-entry :feature)))
                (active (and (fboundp 'my/current-language-server-backend)
                             (my/current-language-server-backend)))
+               (runtime (and (boundp 'my/language-server-runtime-current)
+                             my/language-server-runtime-current))
                (project-root (my/language-server--project-root source))
                (workspace-set (local-variable-p 'eglot-workspace-configuration source))
                (workspace (and workspace-set eglot-workspace-configuration)))
@@ -281,6 +283,24 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
                 :toolchain-id
                 (and (fboundp 'my/language-server-current-toolchain-profile)
                      (plist-get (my/language-server-current-toolchain-profile source) :id))
+                :runtime-state
+                (if (boundp 'my/language-server-runtime-state)
+                    my/language-server-runtime-state
+                  'unavailable)
+                :runtime
+                (and (fboundp 'my/language-server-runtime-description)
+                     (my/language-server-runtime-description source))
+                :runtime-id
+                (and runtime (my/language-server-runtime-id runtime))
+                :runtime-provider
+                (and runtime (my/language-server-runtime-provider runtime))
+                :runtime-target
+                (and runtime
+                     (plist-get (my/language-server-runtime-metadata runtime)
+                                :target))
+                :runtime-fallback
+                (and (boundp 'my/language-server-runtime-error)
+                     my/language-server-runtime-error)
                 :workspace (and workspace
                                 (string-trim-right
                                  (pp-to-string workspace)))))))))
@@ -805,6 +825,18 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
                      (format "  [%s]" id)
                    "")))
         (aaron-ui-board-insert-field
+         "runtime context"
+         (format "%s  [state=%s%s%s]"
+                 (or (plist-get status :runtime) "project default")
+                 (plist-get status :runtime-state)
+                 (if-let* ((provider (plist-get status :runtime-provider)))
+                     (format ", provider=%s" provider) "")
+                 (if-let* ((target (plist-get status :runtime-target)))
+                     (format ", target=%s" target) "")))
+        (when-let* ((fallback (plist-get status :runtime-fallback)))
+          (aaron-ui-board-insert-field "runtime fallback" fallback
+                                       'aaron-ui-board-warn))
+        (aaron-ui-board-insert-field
          "lsp feature"
          (format "%s (%s)" (plist-get status :required-feature) (plist-get status :feature-status)))
         (aaron-ui-board-insert-field "eglot mapping" (plist-get status :eglot-match))
@@ -1006,6 +1038,18 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
         (aaron-ui-board-insert-field "project root" (plist-get status :project-root))
         (aaron-ui-board-insert-field "route policy" (plist-get status :policy))
         (aaron-ui-board-insert-field "active backend" (format "%s" (plist-get status :active-backend)))
+        (aaron-ui-board-insert-field
+         "runtime context"
+         (format "%s  [state=%s%s%s]"
+                 (or (plist-get status :runtime) "project default")
+                 (plist-get status :runtime-state)
+                 (if-let* ((provider (plist-get status :runtime-provider)))
+                     (format ", provider=%s" provider) "")
+                 (if-let* ((target (plist-get status :runtime-target)))
+                     (format ", target=%s" target) "")))
+        (when-let* ((fallback (plist-get status :runtime-fallback)))
+          (aaron-ui-board-insert-field "runtime fallback" fallback
+                                       'aaron-ui-board-warn))
         (aaron-ui-board-insert-field
          "lsp feature"
          (format "%s (%s)" (plist-get status :required-feature) (plist-get status :feature-status)))

@@ -18,6 +18,7 @@
 (require 'url-util)
 (require 'init-aaronnote-jupyter-cell)
 (require 'init-aaronnote-jupyter-runtime)
+(require 'init-aaronnote-jupyter-lsp)
 
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
 (declare-function my/xwidget-current-url "init-browser" (&optional buffer))
@@ -748,7 +749,7 @@ to JSON a second time."
                                          file)
                          (require 'init-aaronnote-jupyter-cell nil t))
                 (ignore-errors
-                  (my/noema-jupyter-cell-activate-buffer)))
+                  (my/noema-jupyter-cell-activate-buffer payload)))
               (when (and tag (not (string-empty-p (or tag ""))))
                 (when (require 'init-note-code nil t)
                   (ignore-errors (my/note-code--goto-tag tag))))))

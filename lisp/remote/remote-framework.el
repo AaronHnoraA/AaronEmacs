@@ -15,7 +15,9 @@
 (require 'remote-backend)
 (require 'remote-connection)
 (require 'remote-session)
+(require 'remote-background)
 (require 'remote-fs)
+(require 'remote-accelerator)
 
 (remote-backend-register-builtins)
 
@@ -51,11 +53,31 @@ This function is idempotent and is useful after
    :preferences '((default . ("tramp-rpc" "tramp" "native"))))
   (remote-channel-register-adapter))
 
+(defun remote-framework--connection-closed
+    (_connection route _reason)
+  "Invalidate observations which belonged to the closed session ROUTE."
+  (let ((target-id (remote-route-target-id route)))
+    (remote-background-invalidate-target target-id)
+    (when (fboundp 'remote-backend-contract-clear)
+      (remote-backend-contract-clear route))
+    (when (fboundp 'remote-accelerator-clear-route)
+      (remote-accelerator-clear-route route))
+    (when (fboundp 'remote-fs-clear-target-cache)
+      (remote-fs-clear-target-cache target-id))
+    (when (fboundp 'remote-path-invalidate)
+      (remote-path-invalidate target-id))
+    (when (fboundp 'remote-environment-invalidate)
+      (remote-environment-invalidate target-id))))
+
+(add-hook 'remote-connection-closed-hook
+          #'remote-framework--connection-closed)
+
 (defun remote-framework-bootstrap ()
   "Idempotently register built-in backends and adapters."
   (remote-transport-register-builtins)
   (remote-backend-register-builtins)
-  (remote-framework-register-adapters))
+  (remote-framework-register-adapters)
+  (remote-accelerator-register-builtins))
 
 (defun remote-framework-reset ()
   "Reset volatile framework state and restore built-in registrations.
@@ -64,6 +86,8 @@ Persisted targets are intentionally not reloaded; configuration ownership
   (interactive)
   (when (fboundp 'remote-workspace-clear)
     (remote-workspace-clear 'framework-reset))
+  (when (fboundp 'remote-background-clear)
+    (remote-background-clear 'framework-reset))
   (when (fboundp 'remote-file-watch-clear)
     (remote-file-watch-clear 'framework-reset))
   (when (fboundp 'remote-service-clear)
@@ -74,7 +98,11 @@ Persisted targets are intentionally not reloaded; configuration ownership
     (remote-connection-pool-clear t))
   (remote-pipeline-runtime-clear 'framework-reset)
   (when (boundp 'remote-fs-path-expansion-cache)
-    (clrhash remote-fs-path-expansion-cache))
+    (remote-fs-clear-target-cache))
+  (when (boundp 'remote-accelerator-probe-cache)
+    (clrhash remote-accelerator-probe-cache))
+  (when (fboundp 'remote-backend-contract-clear)
+    (remote-backend-contract-clear))
   (remote-reset-registries)
   (clrhash remote-transports)
   (clrhash remote-backends)

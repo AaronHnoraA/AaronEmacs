@@ -26,6 +26,9 @@
           (make-hash-table :test #'equal))
          (remote-transports (make-hash-table :test #'equal))
          (remote-backends (make-hash-table :test #'equal))
+         (remote-backend-contracts (make-hash-table :test #'equal))
+         (remote-operation-providers nil)
+         (remote-accelerator-probe-cache (make-hash-table :test #'equal))
          (remote-workspaces (make-hash-table :test #'equal))
          (remote-services (make-hash-table :test #'equal))
          (remote-service-instances (make-hash-table :test #'equal))
@@ -42,8 +45,9 @@
 
 (ert-deftest remote-framework-loads-public-layers ()
   (dolist (feature
-           '(remote-core remote-pipeline remote-backend remote-session
-             remote-fs remote-process remote-channel remote-environment
+           '(remote-core remote-compat remote-pipeline remote-backend
+             remote-session remote-fs remote-accelerator remote-process
+             remote-channel remote-environment
              remote-path remote-service remote-workspace remote-terminal
              remote-doctor))
     (should (featurep feature)))
@@ -53,8 +57,12 @@
              remote-register-backend
              remote-backend-prepare-execution
              remote-backend-prepare-process
+             remote-backend-probe
+             remote-backend-contract-list
              remote-backend-stdio-bridge-command
              remote-register-file-operation
+             remote-register-operation-provider
+             remote-operation-provider-list
              remote-session-acquire
              remote-session-invalidate
              remote-make-network-process

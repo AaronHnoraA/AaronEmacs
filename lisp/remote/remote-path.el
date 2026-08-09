@@ -15,6 +15,7 @@
 (require 'remote-fs)
 (require 'remote-process)
 (require 'remote-environment)
+(require 'remote-background)
 
 (cl-defstruct (remote-path-profile
                (:constructor remote-path-profile-create))
@@ -29,6 +30,14 @@
 
 (defvar remote-path-facts-cache (make-hash-table :test #'equal)
   "Actively probed host facts keyed by target ID.")
+
+(defvar remote-background-defer-commit nil)
+
+(defun remote-path-invalidate (&optional target-id)
+  "Invalidate probed path facts, optionally only for TARGET-ID."
+  (if target-id
+      (remhash (remote-normalize-id target-id) remote-path-facts-cache)
+    (clrhash remote-path-facts-cache)))
 
 (defconst remote-path--probe-marker
   "__EMACS_REMOTE_FACTS_V1__\0"
@@ -103,6 +112,7 @@ probe protocol."
              "\"${SHELL-}\" \"${HOME-}\" \"${PATH-}\""))
            :context context
            :adapter "environment"
+           :filesystem-effects 'none
            :check t))
          (fields
           (or (remote-path--parse-probe-output
@@ -122,6 +132,13 @@ probe protocol."
            :source (remote-route-link-plugin-id
                     (remote-exec-result-route result))
            :probed-at (current-time))))
+    (unless remote-background-defer-commit
+      (remote-path--commit-facts facts))
+    facts))
+
+(defun remote-path--commit-facts (facts)
+  "Commit generation-validated host FACTS to target and cache state."
+  (let ((target-id (remote-path-facts-target-id facts)))
     (when-let* ((target (remote-get-target target-id)))
       (unless (remote-target-system target)
         (setf (remote-target-system target)
@@ -150,18 +167,25 @@ and invoke CALLBACK with the facts without blocking the caller."
          (buffer (current-buffer)))
     (if callback
         (progn
-          (run-at-time
-           0 nil
+          (remote-background-submit
+           (list 'path-probe target-id)
            (lambda ()
-             (let ((facts
-                    (or cached
-                        (remote-path--probe-sync context))))
-               (when (buffer-live-p buffer)
-                 (with-current-buffer buffer
-                   (funcall callback facts))))))
+             (or cached (remote-path--probe-sync context)))
+           :target-id target-id
+           :owner-buffer buffer
+           :non-essential nil
+           :callback
+           (lambda (facts)
+             (remote-path--commit-facts facts)
+             (funcall callback facts))
+           :error-callback
+           (lambda (error)
+             (remote-log
+              'path-probe-error :target target-id
+              :error (error-message-string error))))
           nil)
       (when force
-        (remhash target-id remote-path-facts-cache)
+        (remote-path-invalidate target-id)
         (remote-environment-invalidate target-id))
       (or cached (remote-path--probe-sync context)))))
 

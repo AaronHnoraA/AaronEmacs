@@ -14,6 +14,7 @@
 (require 'remote-core)
 (require 'remote-fs)
 (require 'remote-process)
+(require 'remote-background)
 
 (cl-defstruct (remote-environment
                (:constructor remote-environment-create))
@@ -43,6 +44,8 @@
 
 (defvar remote-environment-inhibit nil
   "Dynamically non-nil while an environment provider is executing.")
+
+(defvar remote-background-defer-commit nil)
 
 (defvar-local remote-buffer-environment nil
   "Environment capsule currently projected into this buffer.")
@@ -461,9 +464,17 @@ Return (VARS SOURCES PROVIDER-IDS)."
                   :provider-ids provider-ids
                   :sources sources
                   :generated-at (current-time))))
-            (puthash key environment remote-environment-cache)
-            (puthash id environment remote-environments-by-id)
+            (unless remote-background-defer-commit
+              (remote-environment--commit environment))
             environment)))))
+
+(defun remote-environment--commit (environment)
+  "Commit generation-validated ENVIRONMENT to its public caches."
+  (puthash (remote-environment-key environment)
+           environment remote-environment-cache)
+  (puthash (remote-environment-id environment)
+           environment remote-environments-by-id)
+  environment)
 
 (cl-defun remote-environment-derive
     (environment id
@@ -550,15 +561,24 @@ immediately."
         (buffer (current-buffer)))
     (if callback
         (progn
-          (run-at-time
-           0 nil
-           (lambda ()
-             (when (buffer-live-p buffer)
-               (with-current-buffer buffer
-                 (let ((environment
-                        (remote-environment-resolve context force)))
-                   (remote-environment-apply environment)
-                   (funcall callback environment))))))
+          (remote-background-submit
+           (list 'environment
+                 (remote-environment-instance-id context))
+           (lambda () (remote-environment-resolve context force))
+           :target-id (remote-context-target-id context)
+           :owner-buffer buffer
+           :non-essential nil
+           :callback
+           (lambda (environment)
+             (remote-environment--commit environment)
+             (remote-environment-apply environment)
+             (funcall callback environment))
+           :error-callback
+           (lambda (error)
+             (remote-log
+              'environment-error
+              :target (remote-context-target-id context)
+              :error (error-message-string error))))
           nil)
       (remote-environment-apply
        (remote-environment-resolve context force)))))

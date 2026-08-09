@@ -24,6 +24,12 @@
 (defvar-local my/noema-jupyter-cell-storage nil
   "Storage mode for the current hidden cell script.")
 
+(defvar-local my/noema-jupyter-cell-kernel-spec nil
+  "Resolved kernelspec sent by the owning Noema runtime.")
+
+(defvar-local my/noema-jupyter-cell-kernel-spec-error nil
+  "Kernelspec discovery error sent by Noema, when any.")
+
 (defvar-local my/noema-jupyter-cell-current-id nil
   "Cell id at point in the current hidden Jupyter cell script.")
 
@@ -265,19 +271,50 @@ round-trip it implies) only runs for files under a `.cell' store directory."
     (string-match-p (concat "\\(?:\\`\\|/\\)\\.cell/[^/]+\\'") file)))
 
 ;;;###autoload
-(defun my/noema-jupyter-cell-activate-buffer ()
+(defun my/noema-jupyter-cell-activate-buffer (&optional payload)
   "Enable `my/noema-jupyter-cell-mode' in an Noema-opened cell script.
 This is intentionally explicit: ordinary `find-file' visits to `.cell' files
-must not enable the mode unless Noema opened the script via Edit."
-  (interactive)
-  (when-let* (((my/noema-jupyter-cell--candidate-file-p))
-              (meta (my/noema-jupyter-cell--read-header))
-              (source (plist-get meta :source)))
-    (setq-local my/noema-jupyter-cell-source-file source)
-    (setq-local my/noema-jupyter-cell-kernel (plist-get meta :kernel))
-    (setq-local my/noema-jupyter-cell-session (plist-get meta :session))
-    (setq-local my/noema-jupyter-cell-storage (plist-get meta :storage))
-    (my/noema-jupyter-cell-mode 1)))
+must not enable the mode unless Noema opened the script via Edit.
+PAYLOAD is the open event containing the owning runtime's kernelspec."
+  (interactive (list nil))
+  (let ((get (lambda (key) (or (alist-get key payload)
+                               (alist-get (symbol-name key) payload
+                                          nil nil #'string=)))))
+    ;; openScript may rewrite an already visited sidecar.  Keep unsaved user
+    ;; edits, but otherwise make the buffer and its runtime header atomic with
+    ;; the event before Eglot preparation runs.
+    (when (and payload buffer-file-name
+               (not (buffer-modified-p))
+               (not (verify-visited-file-modtime (current-buffer))))
+      (revert-buffer :ignore-auto :noconfirm)
+      (goto-char (point-min))
+      (forward-line (max 0 (1- (truncate (or (funcall get 'line) 1)))))
+      (move-to-column (max 0 (truncate (or (funcall get 'col) 0)))))
+    (when-let* (((my/noema-jupyter-cell--candidate-file-p))
+                (meta (my/noema-jupyter-cell--read-header))
+                (source (plist-get meta :source)))
+      (let* ((old (list my/noema-jupyter-cell-kernel
+                        my/noema-jupyter-cell-session
+                        my/noema-jupyter-cell-kernel-spec))
+             (kernel (or (funcall get 'kernel) (plist-get meta :kernel)))
+             (session (or (funcall get 'session) (plist-get meta :session)))
+             (kernel-spec (funcall get 'kernelSpec))
+             (changed (and my/noema-jupyter-cell-mode
+                           (not (equal old (list kernel session kernel-spec))))))
+        (when (and changed
+                   (fboundp 'my/noema-jupyter-cell-lsp-runtime-changing))
+          (my/noema-jupyter-cell-lsp-runtime-changing))
+        (setq-local my/noema-jupyter-cell-source-file source)
+        (setq-local my/noema-jupyter-cell-kernel kernel)
+        (setq-local my/noema-jupyter-cell-session session)
+        (setq-local my/noema-jupyter-cell-storage (plist-get meta :storage))
+        (setq-local my/noema-jupyter-cell-kernel-spec kernel-spec)
+        (setq-local my/noema-jupyter-cell-kernel-spec-error
+                    (funcall get 'kernelSpecError))
+        (my/noema-jupyter-cell-mode 1)
+        (when (and changed
+                   (fboundp 'my/language-server-ensure-deferred))
+          (my/language-server-ensure-deferred))))))
 
 (provide 'init-aaronnote-jupyter-cell)
 

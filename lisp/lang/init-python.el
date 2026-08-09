@@ -245,10 +245,9 @@
                        :rope_autoimport (:enabled t)))))
 
 (defun my/python-eglot-ensure ()
-  "Start Eglot for Python buffers."
+  "Install base Python workspace settings before generic Eglot startup."
   (my/eglot-set-workspace-configuration
-   (my/python-eglot-workspace-configuration))
-  (my/eglot-ensure-unless-lsp-mode))
+   (my/python-eglot-workspace-configuration)))
 
 (use-package eglot
   :ensure nil

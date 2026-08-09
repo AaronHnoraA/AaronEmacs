@@ -23,6 +23,20 @@ ZMQ channel。=.cell/= script 和 output mirror 保留在远端 note 同目录�
 attached kernel 不归 Noema broker 杀死或自动重启。独立 desktop host mode 继续
 使用 Node 本地 launcher。
 
+Noema 通过 Edit 打开的 Python/Sage =.cell= buffer 会把当前 kernelspec 一并交给
+Emacs。runtime provider 在 owning Target 上执行 kernelspec 的轻量 probe，读取
+=sys.executable=、=sys.prefix= 和 =sys.path=，再让 Eglot 的 Python analyzer 自动
+跟随 kernel；server binary 本身仍来自该 Target/workspace 的 tooling environment。
+同一 runtime 复用 Eglot，不同 kernel runtime 使用独立 Eglot project identity，
+最后一个 cell buffer 关闭后默认保温 10 分钟。
+
+普通 Python/ipykernel kernelspec 可自动推导。项目自带 Python/Sage wrapper 在
+=metadata.aaron.runtime.probe_argv= 声明 probe 入口。=attach:=、legacy
+=remote_ikernel= 和没有 probe metadata 的不透明 launcher 不会被猜测；它们回退到
+项目默认 toolchain，具体原因可在 Language Server Hub / Doctor 查看。笔记项目的
+=:aaronnote-jupyter= 默认 kernel 仍可设置，但不要再用项目级 =:toolchain= 把 Python
+固定到 Sage。
+
 当前配置不启用 Jupyter 包可选的 =/jpy:= 和 =/jpys:= TRAMP 文件名处理器。该
 处理器在 Emacs 31 的 TRAMP foreign-predicate 调用约定下与当前 Jupyter 包版本
 不兼容；Jupyter 的普通执行、=remote_ikernel=、Jupyter Board 和 Noema broker

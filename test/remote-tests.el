@@ -46,7 +46,8 @@
          (remote-pipeline-runtime-pool (make-hash-table :test #'equal))
          (remote-environment-cache (make-hash-table :test #'equal))
          (remote-environments-by-id (make-hash-table :test #'equal))
-         (remote-environment-providers nil))
+         (remote-environment-providers nil)
+         (remote-backend-contracts (make-hash-table :test #'equal)))
      (remote-reset-registries)
      (remote-fs-register-link-plugins)
      (remote-register-adapter
@@ -635,6 +636,18 @@ returns, so this covers a different ownership window from backend cancellation."
          (remote-get-target "local") spelling)
         (remote-make-file-name "local" expected))))))
 
+(ert-deftest remote-result-projection-expands-abbreviated-local-home ()
+  "Backend path results may use `~' but logical results must be absolute."
+  (remote-test-with-registry
+    (let* ((spec (remote-get-file-operation 'locate-dominating-file))
+           (spelling "~/Documents/Noema/")
+           (expected
+            (remote-make-file-name
+             "local" (file-name-as-directory (expand-file-name spelling)))))
+      (should
+       (equal (remote-fs--transform-result spec spelling "local")
+              expected)))))
+
 (ert-deftest remote-expand-home-is-owned-by-selected-backend ()
   (remote-test-with-registry
     (remote-register-backend
@@ -909,8 +922,9 @@ returns, so this covers a different ownership window from backend cancellation."
                (if (equal (remote-route-link-plugin-id route)
                           "tramp-rpc")
                    (signal
-                    'remote-file-error
-                    '("Unknown architecture armv7l-linux"))
+                    'remote-backend-incompatible
+                    '("Unknown architecture armv7l-linux"
+                      (:architecture "armv7l-linux")))
                  'fallback-ok))))
       (should (eq result 'fallback-ok))
       (should (equal (nreverse attempts) '("tramp-rpc" "tramp")))

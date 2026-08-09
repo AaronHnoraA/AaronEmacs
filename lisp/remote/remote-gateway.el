@@ -422,7 +422,8 @@ Return non-nil only for the first settlement."
 
 (defun remote-gateway--websocket-control-frame (opcode payload)
   "Return an unmasked control frame with OPCODE and PAYLOAD."
-  (let ((payload (string-make-unibyte (or payload ""))))
+  (let ((payload
+         (encode-coding-string (or payload "") 'binary)))
     (concat
      (unibyte-string
       (logior #x80 opcode)
@@ -434,7 +435,7 @@ Return non-nil only for the first settlement."
   (let ((buffer
          (concat
           (or (process-get process 'remote-gateway-ws-buffer) "")
-          (string-make-unibyte chunk)))
+          (encode-coding-string chunk 'binary)))
         (continue t))
     (while (and continue (>= (length buffer) 2))
       (let* ((frame buffer)
@@ -455,11 +456,15 @@ Return non-nil only for the first settlement."
           (let ((payload-length
                  (if (zerop length-bytes)
                      short-length
-                   (let ((value 0))
-                     (dotimes (index length-bytes value)
+                   (let ((value 0)
+                         (offset 2)
+                         (limit (+ 2 length-bytes)))
+                     (while (< offset limit)
                        (setq value
-                             (+ (lsh value 8)
-                                (aref frame (+ 2 index))))))))
+                             (+ (ash value 8)
+                                (aref frame offset))
+                             offset (1+ offset)))
+                     value)))
                 payload)
             (if (< (length frame) (+ header-length payload-length))
                 (setq continue nil)

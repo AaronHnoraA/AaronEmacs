@@ -11,6 +11,7 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'remote-core)
+(require 'remote-compat)
 (require 'remote-pipeline)
 (require 'remote-transport)
 (require 'remote-backend)
@@ -18,6 +19,8 @@
 (require 'remote-fs)
 (require 'remote-channel)
 (require 'remote-workspace)
+(require 'remote-accelerator)
+(require 'remote-background)
 
 (declare-function remote-process-file "remote-process"
                   (program &optional infile destination display &rest args))
@@ -148,9 +151,10 @@ using the same plist format as `remote-doctor--check'.")
          (remote-doctor--check
           'session
           (if (eq (plist-get session :state) 'open) 'ok 'warning)
-          (format "%s/%s state=%s uses=%s"
+          (format "%s/%s generation=%s state=%s uses=%s"
                   (plist-get session :link)
                   (plist-get session :plugin)
+                  (plist-get session :generation)
                   (plist-get session :state)
                   (plist-get session :uses)))
          checks)))
@@ -171,6 +175,32 @@ using the same plist format as `remote-doctor--check'.")
                       '(disconnected failed degraded))
             "Run remote-workspace-reconnect and inspect resource errors"))
          checks)))
+    (dolist (watch (remote-file-watch-list))
+      (when (equal (plist-get watch :target) target-id)
+        (push
+         (remote-doctor--check
+          (intern (format "watch:%s" (plist-get watch :id)))
+          (if (eq (plist-get watch :state) 'open) 'ok 'warning)
+          (format "state=%s sequence=%s file=%s"
+                  (plist-get watch :state)
+                  (plist-get watch :sequence)
+                  (plist-get watch :file))
+          (unless (eq (plist-get watch :state) 'open)
+            "Wait for resync or recreate the logical watch"))
+         checks)))
+    (dolist (job (remote-background-job-list target-id))
+      (push
+       (remote-doctor--check
+        (intern (format "background:%s" (plist-get job :id)))
+        (if (> (plist-get job :attempts) 0) 'warning 'ok)
+        (format "state=%s epoch=%s attempts=%s key=%S"
+                (plist-get job :state)
+                (plist-get job :epoch)
+                (plist-get job :attempts)
+                (plist-get job :key))
+        (when (> (plist-get job :attempts) 0)
+          "Tramp was busy or the target generation changed; retry is bounded"))
+       checks))
     (dolist (channel (remote-channel-list target-id))
       (push
        (remote-doctor--check
@@ -219,6 +249,128 @@ using the same plist format as `remote-doctor--check'.")
            "Inspect or unregister the failing consumer Doctor check")
           checks))))
     checks))
+
+(defun remote-doctor--compatibility-checks (target)
+  "Return upstream, backend-contract, and accelerator checks for TARGET."
+  (let* ((compat (remote-compat-report))
+         (target-id (remote-target-id target))
+         (contracts
+          (seq-filter
+           (lambda (entry) (equal (caar entry) target-id))
+           (remote-backend-contract-list)))
+         (providers (remote-operation-provider-list))
+         (operation-coverage (remote-file-operation-coverage-report))
+         (backend-coverage (remote-backend-coverage-report))
+         (adapter-coverage (remote-adapter-coverage-report))
+         checks)
+    (push
+     (remote-doctor--check
+      'upstream-contract
+      (if (plist-get compat :foreign-handler-registration) 'ok 'warning)
+      (format "Emacs=%s Tramp=%s external-operations=%s structured-errors=%s"
+              (plist-get compat :emacs-version)
+              (plist-get compat :tramp-version)
+              (plist-get compat :external-operations)
+              (plist-get compat :structured-errors))
+      (unless (plist-get compat :external-operations)
+        "Install a current GNU ELPA Tramp to enable high-level operations"))
+     checks)
+    (push
+     (remote-doctor--check
+      'upstream-operation-coverage
+      (if (plist-get operation-coverage :missing) 'error 'ok)
+      (format "%d upstream, %d registered, missing=%S"
+              (length (plist-get operation-coverage :upstream))
+              (length (plist-get operation-coverage :registered))
+              (plist-get operation-coverage :missing))
+      (when (plist-get operation-coverage :missing)
+        "Add explicit routing contracts for the new Tramp operations"))
+     checks)
+    (dolist (coverage backend-coverage)
+      (push
+       (remote-doctor--check
+        (intern (format "backend-surface:%s"
+                        (plist-get coverage :backend)))
+        (if (plist-get coverage :problems) 'error 'ok)
+        (format "capabilities=%S problems=%S"
+                (plist-get coverage :capabilities)
+                (plist-get coverage :problems))
+        (when (plist-get coverage :problems)
+          "Implement the missing backend callback or remove the capability"))
+       checks))
+    (dolist (coverage adapter-coverage)
+      (push
+       (remote-doctor--check
+        (intern (format "adapter-surface:%s"
+                        (plist-get coverage :adapter)))
+        (if (plist-get coverage :problems) 'error 'ok)
+        (format "capabilities=%S problems=%S"
+                (plist-get coverage :capabilities)
+                (plist-get coverage :problems))
+        (when (plist-get coverage :problems)
+          "Declare the prerequisite capabilities for this adapter"))
+       checks))
+    (push
+     (remote-doctor--check
+      'operation-providers
+      (if (seq-some (lambda (item) (plist-get item :available)) providers)
+          'ok 'warning)
+      (format "%S" providers)
+      (unless (seq-some (lambda (item) (plist-get item :available)) providers)
+        "Install tramp-hlo; ordinary Tramp remains the semantic fallback"))
+     checks)
+    (dolist (entry contracts)
+      (let ((contract (cdr entry)))
+        (push
+         (remote-doctor--check
+          (intern (format "backend-contract:%s"
+                          (plist-get contract :backend)))
+          (pcase (plist-get contract :status)
+            ('ok 'ok)
+            ('degraded 'warning)
+            (_ 'error))
+          (format "version=%s protocol=%s server=%s capabilities=%S"
+                  (or (plist-get contract :implementation-version) "unknown")
+                  (or (plist-get contract :protocol-version) "n/a")
+                  (or (plist-get contract :server-version) "n/a")
+                  (plist-get contract :capabilities))
+          (plist-get contract :detail))
+         checks)))
+    (when (fboundp 'remote-backend-tramp-rpc-release-contract)
+      (let ((release (remote-backend-tramp-rpc-release-contract)))
+        (push
+         (remote-doctor--check
+          'tramp-rpc-release
+          (if (plist-get release :release-checkout) 'ok 'warning)
+          (format "client=%s tag=%s revision=%s dirty=%s"
+                  (or (plist-get release :client-version) "unknown")
+                  (or (plist-get release :tag) "not-exact")
+                  (or (plist-get release :revision) "unknown")
+                  (plist-get release :dirty))
+          (unless (plist-get release :release-checkout)
+            (concat "The checkout is not an exact release; keep deploy policy "
+                    "at auto so a source-keyed server is used")))
+         checks)))
+    (when (and (locate-library "tramp-rpc")
+               (fboundp 'remote-backend-tramp-rpc-compat-report))
+      (require 'tramp-rpc nil t)
+      (require 'tramp-rpc-deploy nil t)
+      (let* ((report (remote-backend-tramp-rpc-compat-report))
+             (interfaces (plist-get report :private-interfaces))
+             (broken
+              (seq-remove
+               (lambda (entry) (plist-get entry :compatible))
+               interfaces)))
+        (push
+         (remote-doctor--check
+          'tramp-rpc-private-boundary
+          (if broken 'warning 'ok)
+          (format "%S" interfaces)
+          (when broken
+            (concat "Private tramp-rpc signatures changed; their optional "
+                    "accelerations are disabled until the adapter is updated")))
+         checks)))
+    (nreverse checks)))
 
 (defun remote-doctor--probe (target)
   "Run a small routed process probe for TARGET."
@@ -276,14 +428,21 @@ When PROBE is non-nil, establish a session and execute `uname -s'."
                   (hash-table-count remote-fs--unknown-operations))
                  'ok
                'warning)
-             (format "%d registered, %d unknown observed"
+             (format "%d registered, %d unknown observed, %d unknown effects"
                      (length (remote-file-operation-list))
-                     (hash-table-count remote-fs--unknown-operations))
+                     (hash-table-count remote-fs--unknown-operations)
+                     (seq-count
+                      (lambda (spec)
+                        (eq
+                         (remote-file-operation-spec-filesystem-effects spec)
+                         'unknown))
+                      (remote-file-operation-list)))
              (unless
                  (zerop
                   (hash-table-count remote-fs--unknown-operations))
                "Register explicit contracts for operations in the route log")))
            (remote-doctor--pipeline-checks target)
+           (remote-doctor--compatibility-checks target)
            (mapcar
             (lambda (request)
               (apply #'remote-doctor--route-check target request))

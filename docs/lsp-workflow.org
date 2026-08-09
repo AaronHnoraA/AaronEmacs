@@ -44,6 +44,30 @@ Eglot 与 lsp-mode 的进程启动统一绑定到 Remote 框架的
 =local= target，远程 buffer 使用自己的 target/workspace PATH、direnv 和工具链，
 不会把客户端机器上的 server 路径泄漏给远端。
 
+* Runtime Contexts
+
+=init-lsp-runtime.el= 在普通 project/toolchain 之上提供可复用的 runtime provider
+层。它用于“源码属于项目 A，但真实解释器由另一个运行时决定”的 buffer；Noema
+Jupyter cell 是第一个 consumer，后续 REPL/run/debug 可以复用同一份 runtime
+对象，但目前没有迁移这些子系统。
+
+运行时契约包含稳定 ID、owning Remote context、真实 workspace root、tooling
+environment、runtime environment、语言 toolchain profile、workspace configuration
+和 idle timeout。Eglot 只在自己的 project lookup 动态范围内看到
+=(my/language-server-runtime-project ROOT ID)=；普通 =project-current=、Projectile
+和文件导航仍看到真实项目。因此同一项目的两个 kernel 不会错误共用 server，
+相同 runtime 则会复用保温中的 server。
+
+工具与解释器是两层：pyright/pylsp 等 analyzer 仍从 target/workspace tooling
+environment 解析，kernel 只提供 =pythonPath=、=sys.path=、env 和 import 分析设置。
+这避免每个 kernel 环境都重复安装 language server，同时保留 VS Code/Jupyter
+式的解释器跟随手感。runtime buffer 不改全局 =eglot-autoshutdown=；最后一个
+buffer 离开后由 provider 的 timeout 单独保温（Noema 默认 600 秒），timer 会在
+server 被复用或已死亡时幂等取消。
+
+provider 可同步或异步解析。无法可靠推导的 runtime 必须返回明确 fallback reason，
+不能静默猜 PATH；Hub 和 Doctor 会显示 runtime state、provider、target 和原因。
+
 * Remote-First Invariants
 
 Remote 框架是 LSP 的核心执行层，不是只在远程 buffer 上启用的兼容补丁。本地
@@ -106,6 +130,7 @@ dispatch 里现在有四组内容：
 它展示：
 
 - 当前 buffer 的 major mode、项目根、当前活跃 backend、workspace config
+- 当前 runtime context、provider、target 与显式 fallback reason
 - 一组 session 级便捷调参入口
 - 显式 =lsp-mode= 路由表
 - 本地注册的 Eglot server 映射
@@ -155,7 +180,7 @@ Doctor 主要做静态和半静态排查：
 
 - 关键 library 是否能找到
 - 本地注册的 server executable 是否存在
-- 当前 buffer 的路由、active backend、workspace config
+- 当前 buffer 的路由、active backend、workspace config、runtime context/fallback
 - 显式 =lsp-mode= 路由和自定义 Eglot 映射摘要
 - 当前 runtime knobs
 

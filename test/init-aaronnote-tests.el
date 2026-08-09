@@ -1198,6 +1198,79 @@
     '((file . "/fs:local:/tmp/notes/.cell/nested/note.py")))
    :type 'error))
 
+(ert-deftest my/noema-jupyter-normalizes-target-kernelspecs ()
+  (let* ((payload
+          '((kernelspecs
+             (python3
+              (resource_dir . "/target/share/jupyter/kernels/python3")
+              (spec
+               (argv . ["/target/bin/python" "-m" "ipykernel_launcher"
+                        "-f" "{connection_file}"])
+               (language . "python"))))))
+         (entry (car (my/noema-jupyter--normalize-kernelspecs payload))))
+    (should (equal (my/noema-jupyter--get 'name entry) "python3"))
+    (should
+     (equal (my/noema-jupyter--get 'resourceDir entry)
+            "/target/share/jupyter/kernels/python3"))
+    (should
+     (equal
+      (append
+       (my/noema-jupyter--get
+        'argv (my/noema-jupyter--get 'spec entry))
+       nil)
+      '("/target/bin/python" "-m" "ipykernel_launcher"
+        "-f" "{connection_file}")))))
+
+(ert-deftest my/noema-jupyter-lsp-rediscovers-missing-event-kernelspec ()
+  (let* ((origin (generate-new-buffer " *noema-lsp-rediscovery*"))
+         (context
+          (remote-context-create
+           :target-id "remote-test" :localname "/work/note.md"
+           :workspace-root "/fs:remote-test:/work/"))
+         received commands)
+    (unwind-protect
+        (cl-letf
+            (((symbol-function 'my/noema-jupyter--project-kernelspecs)
+              (lambda (_file) nil))
+             ((symbol-function 'remote-exec-async)
+              (lambda (program &rest options)
+                (push program commands)
+                (let ((callback (plist-get options :callback)))
+                  (funcall
+                   callback
+                   (if (equal program "jupyter")
+                       (remote-exec-result-create
+                        :status 0 :stderr ""
+                        :stdout
+                        (concat
+                         "{\"kernelspecs\":{\"python3\":{"
+                         "\"resource_dir\":\"/target/kernels/python3\","
+                         "\"spec\":{\"argv\":[\"/target/bin/python\","
+                         "\"-m\",\"ipykernel_launcher\",\"-f\","
+                         "\"{connection_file}\"],\"language\":\"python\"}}}}"))
+                     (remote-exec-result-create
+                      :status 0 :stderr ""
+                      :stdout
+                      (concat
+                       "{\"executable\":\"/target/bin/python\","
+                       "\"prefix\":\"/target\",\"base_prefix\":\"/target\","
+                       "\"path\":[\"/target/lib/python\"],"
+                       "\"version\":\"3.14\"}"))))
+                program))))
+          (my/noema-jupyter-cell--lsp-discover-and-probe
+           origin "/fs:remote-test:/work/note.md" context
+           "/fs:remote-test:/work/" "python3" "default" nil
+           (lambda (runtime error) (setq received (list runtime error))))
+          (should (my/language-server-runtime-p (car received)))
+          (should-not (cadr received))
+          (should
+           (equal
+            (plist-get
+             (my/language-server-runtime-profile (car received)) :executable)
+            "/target/bin/python"))
+          (should (equal (nreverse commands) '("jupyter" "/target/bin/python"))))
+      (when (buffer-live-p origin) (kill-buffer origin)))))
+
 (ert-deftest my/noema-jupyter-registers-remote-broker-methods ()
   (dolist (method
            '("aaronnote.jupyter.kernels"

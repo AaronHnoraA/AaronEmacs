@@ -19,7 +19,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native ui-test ui-tokens audit-ui-tokens \
-        remote-test remote-e2e \
+        remote-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e \
         publish publish-force publish-build publish-deploy publish-clean
 
 default: up
@@ -62,6 +62,10 @@ help:
 	  '  make health-byte          Run byte-compile smoke check' \
 	  '  make health-native        Run native-compile smoke check' \
 	  '  make remote-test          Run isolated remote framework ERT suites' \
+	  '  make remote-contract-test Run remote upgrade/provider contract tests' \
+	  '  make remote-conformance-test Compare /fs:local semantics with native APIs' \
+	  '  make remote-byte-check    Strictly byte-compile remote code in a temp dir' \
+	  '  make remote-check         Run all remote tests and compatibility checks' \
 	  '  make remote-e2e           Run opt-in real SSH E2E (REMOTE_E2E_TARGET optional)' \
 	  '' \
 	  '  make publish              Build site + deploy (git push + optional NAS rsync)' \
@@ -186,7 +190,18 @@ health-byte:
 health-native:
 	$(BATCH) --eval '(prin1 (my/health-native-compile-check))'
 
-remote-test:
+remote-contract-test:
+	$(REMOTE_TEST_BATCH) -l test/remote-compat-tests.el -f ert-run-tests-batch-and-exit
+
+remote-conformance-test:
+	$(REMOTE_TEST_BATCH) -l test/remote-conformance-tests.el -f ert-run-tests-batch-and-exit
+
+remote-byte-check:
+	$(REMOTE_TEST_BATCH) -l test/remote-strict-compile.el --eval '(remote-strict-byte-compile)'
+
+remote-check: remote-byte-check remote-test
+
+remote-test: remote-contract-test remote-conformance-test
 	$(REMOTE_TEST_BATCH) -l test/remote-tests.el -f ert-run-tests-batch-and-exit
 	$(REMOTE_TEST_BATCH) -l test/remote-framework-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/remote-gateway-tests.el -f ert-run-tests-batch-and-exit

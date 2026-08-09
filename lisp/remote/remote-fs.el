@@ -12,14 +12,24 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'tramp)
+(require 'filenotify)
 (require 'url-util)
+(require 'remote-compat)
 (require 'remote-core)
 (require 'remote-connection)
 (require 'remote-backend)
 (require 'remote-pipeline)
+(require 'remote-background)
 
 (declare-function remote-make-process "remote-process" (&rest plist))
-(declare-function file-notify--rm-descriptor "filenotify" (descriptor))
+(declare-function remote-operation-provider-for
+                  "remote-accelerator"
+                  (operation route context args physical-default))
+(declare-function remote-operation-provider-call
+                  "remote-accelerator"
+                  (provider operation route context args physical-default))
+(declare-function remote-operation-provider-id
+                  "remote-accelerator" (provider))
 (declare-function remote-workspace-close-resource
                   "remote-workspace" (workspace resource &optional reason))
 (declare-function remote-workspace-for-path
@@ -32,12 +42,7 @@
                   "remote-workspace"
                   (workspace kind key value &rest keys))
 (defvar remote-config-settings)
-
-;; Added by newer TRAMP releases for file operations registered by external
-;; packages.  Older Emacs 31 snapshots do not define it, but this compatibility
-;; boundary still needs an empty operation table rather than a void variable.
-(defvar tramp-file-name-for-operation-external nil
-  "External TRAMP file operations and their argument types.")
+(defvar process-file-side-effects)
 
 (defconst remote-fs-method "fs")
 (defconst remote-fs-uri-regexp
@@ -46,15 +51,33 @@
 (defvar remote-fs--normalizing nil
   "Non-nil while visited-file names are being canonicalized.")
 
-(defvar remote-fs--advice-installed nil)
+(defvar remote-fs-file-name-handler-alist nil
+  "Operation inventory used by Tramp's public foreign-handler registrar.
+The logical dispatcher remains `remote-fs-file-name-handler'; this alist makes
+its supported operation contract visible to Tramp and extension packages.")
 
 (defvar remote-fs-path-expansion-cache (make-hash-table :test #'equal)
   "Resolved target-relative configured paths keyed by target and spelling.")
 
+(defun remote-fs-clear-target-cache (&optional target-id)
+  "Clear path expansion state, optionally only for TARGET-ID."
+  (if (null target-id)
+      (clrhash remote-fs-path-expansion-cache)
+    (let (keys)
+      (maphash
+       (lambda (key _value)
+         (when (equal (car-safe key) target-id)
+           (push key keys)))
+       remote-fs-path-expansion-cache)
+      (dolist (key keys)
+        (remhash key remote-fs-path-expansion-cache))
+      (length keys))))
+
 (cl-defstruct (remote-file-watch
                (:constructor remote-file-watch-create))
   id descriptor physical-descriptor file flags callback target-id adapter-id
-  state workspace resource generation suppress-events)
+  state workspace resource generation suppress-events metadata
+  sequence last-event-fingerprint last-event-at)
 
 (defvar remote-file-watches (make-hash-table :test #'equal)
   "Stable logical file watches keyed by framework watch ID.")
@@ -69,6 +92,14 @@
 
 (defvar remote-file-watch-metadata nil
   "Dynamically supplied resource metadata for a new logical watch.")
+
+(defvar remote-fs--watch-public-close nil
+  "Dynamic `(REASON FROM-WORKSPACE)' for public logical watch removal.")
+
+(defcustom remote-file-watch-deduplicate-window 0.05
+  "Seconds in which identical backend watch events are coalesced."
+  :type 'number
+  :group 'remote)
 
 (defun remote-fs--adapter-for-capability
     (capability &optional fallback)
@@ -632,9 +663,29 @@ This compatibility dispatcher keeps callers independent of backend layout."
   (remote-fs--context
    (remote-canonicalize-file-name file-name)))
 
+(defun remote-fs--logical-file-from-vector (value)
+  "Return the logical fs name represented by Tramp VALUE, or nil.
+VALUE may be either dispatcher shape accepted by
+`remote-compat-tramp-vector'."
+  (when-let* ((vec (remote-compat-tramp-vector value))
+              ((equal (tramp-file-name-method vec) remote-fs-method)))
+    (remote-make-file-name
+     (tramp-file-name-host vec)
+     (or (tramp-file-name-localname vec) "/"))))
+
+(defun remote-fs--project-vector (value route)
+  "Project logical Tramp vector VALUE through ROUTE.
+Return the physical backend vector, preserving vector-oriented Tramp
+operation contracts such as identity and ownership queries."
+  (when-let* ((logical (remote-fs--logical-file-from-vector value))
+              (physical (remote-project-file-name logical route))
+              (vec (remote-compat-tramp-vector physical)))
+    vec))
+
 (cl-defstruct (remote-file-operation-spec
                (:constructor remote-file-operation-spec-create))
-  operation capability mutating path-arguments result-kind retry-safe)
+  operation capability mutating path-arguments placement
+  result-kind result-projector retry-safe filesystem-effects)
 
 (defvar remote-file-operations (make-hash-table :test #'eq)
   "File-handler operation contract keyed by Emacs operation symbol.")
@@ -644,13 +695,19 @@ This compatibility dispatcher keeps callers independent of backend layout."
 
 (cl-defun remote-register-file-operation
     (operation &key (capability 'metadata) mutating
-               path-arguments (result-kind 'pass) (retry-safe t))
+               path-arguments (placement 'arguments)
+               (result-kind 'pass) result-projector (retry-safe t)
+               (filesystem-effects 'auto))
   "Register the routing contract for file-name OPERATION.
 PATH-ARGUMENTS contains zero-based positions of file-name arguments, or `all'
 for an extension whose signature is not known.  RESULT-KIND is one of `pass',
 `path', `path-list', `path-alist', `placement-path-alist', `visit',
 `symlink-target', or `local-copy'.  A `placement-path-alist' preserves native
 absolute client paths while rewrapping file-handler-qualified target paths.
+PLACEMENT is `arguments', `default-directory', `process-buffer', or
+`tramp-vector' and describes where routing identity comes from.  A callable
+RESULT-PROJECTOR receives RESULT, TARGET-ID, and this operation spec and takes
+precedence over RESULT-KIND.
 RETRY-SAFE controls route failover independently of capability."
   (unless (memq capability remote-capabilities)
     (error "Unknown capability for file operation %s: %S"
@@ -660,20 +717,43 @@ RETRY-SAFE controls route failover independently of capability."
                    (seq-every-p #'natnump path-arguments)))
     (error "Invalid path arguments for file operation %s: %S"
            operation path-arguments))
+  (unless (memq placement
+                '(arguments default-directory process-buffer tramp-vector))
+    (error "Invalid placement for file operation %s: %S"
+           operation placement))
   (unless (memq result-kind
                 '(pass path path-list path-alist placement-path-alist visit
                        symlink-target local-copy))
     (error "Invalid result kind for file operation %s: %S"
            operation result-kind))
+  (unless (or (null result-projector) (functionp result-projector))
+    (error "Invalid result projector for file operation %s: %S"
+           operation result-projector))
+  (when (eq filesystem-effects 'auto)
+    (setq filesystem-effects
+          (cond
+           ((eq capability 'file-write) 'content)
+           ((memq capability
+                  '(file-read directory metadata watch environment))
+            'none)
+           (t 'unknown))))
+  (unless (memq filesystem-effects '(none metadata content unknown))
+    (error "Invalid filesystem effects for file operation %s: %S"
+           operation filesystem-effects))
   (let ((spec
          (remote-file-operation-spec-create
           :operation operation
           :capability capability
           :mutating mutating
           :path-arguments path-arguments
+          :placement placement
           :result-kind result-kind
-          :retry-safe retry-safe)))
+          :result-projector result-projector
+          :retry-safe retry-safe
+          :filesystem-effects filesystem-effects)))
     (puthash operation spec remote-file-operations)
+    (setf (alist-get operation remote-fs-file-name-handler-alist)
+          #'remote-fs-file-name-handler)
     spec))
 
 (defun remote-get-file-operation (operation)
@@ -695,6 +775,9 @@ RETRY-SAFE controls route failover independently of capability."
   "Remove and return file OPERATION's routing contract."
   (when-let* ((spec (gethash operation remote-file-operations)))
     (remhash operation remote-file-operations)
+    (setf (alist-get operation remote-fs-file-name-handler-alist
+                     nil 'remove)
+          nil)
     spec))
 
 (defun remote-fs--register-operation-group
@@ -710,8 +793,9 @@ RETRY-SAFE controls route failover independently of capability."
      :retry-safe retry-safe)))
 
 (defun remote-fs-register-standard-operations ()
-  "Register the Emacs 31/32 primary file-handler operation contract."
+  "Register the public Emacs file-handler operation contract."
   (clrhash remote-file-operations)
+  (setq remote-fs-file-name-handler-alist nil)
   ;; One explicit file name, metadata result.
   (remote-fs--register-operation-group
    '(diff-latest-backup-file file-acl
@@ -721,6 +805,16 @@ RETRY-SAFE controls route failover independently of capability."
      file-regular-p file-selinux-context file-symlink-p file-system-info
      file-writable-p get-file-buffer vc-registered dired-uncache)
    'metadata '(0) 'pass t)
+  ;; Newer Tramp releases route connection-vector metadata through the same
+  ;; foreign handler contract.  Keep these public operations explicit rather
+  ;; than relying on an unknown-operation fallback with the wrong placement.
+  (dolist (operation '(tramp-get-home-directory
+                       tramp-get-remote-gid
+                       tramp-get-remote-groups
+                       tramp-get-remote-uid))
+    (remote-register-file-operation
+     operation :capability 'metadata :path-arguments nil
+     :placement 'tramp-vector :result-kind 'pass :retry-safe t))
   (remote-fs--register-operation-group
    '(byte-compiler-base-file-name file-name-sans-versions
      make-lock-file-name)
@@ -754,7 +848,7 @@ RETRY-SAFE controls route failover independently of capability."
    '(delete-directory delete-file lock-file
      make-directory make-directory-internal
      set-file-acl set-file-modes set-file-selinux-context
-     set-file-times unlock-file)
+     set-file-times tramp-set-file-uid-gid unlock-file)
    'file-write '(0) 'pass nil)
   (remote-register-file-operation
    'dired-compress-file :capability 'file-write :mutating t
@@ -787,6 +881,26 @@ RETRY-SAFE controls route failover independently of capability."
    '(list-system-processes memory-info process-attributes
      process-file shell-command)
    'process-sync nil 'pass t)
+  ;; Process packages may expose these public operations through Tramp's
+  ;; external-operation API.  Their placement follows the owning process
+  ;; buffer, never a file-name argument or the caller's current directory.
+  (dolist (operation '(process-status process-exit-status process-command
+                       process-tty-name))
+    (remote-register-file-operation
+     operation :capability 'process-async :path-arguments nil
+     :placement 'process-buffer :retry-safe t))
+  (dolist (operation '(process-send-string process-send-region
+                       process-send-eof signal-process))
+    (remote-register-file-operation
+     operation :capability 'process-async :mutating t :path-arguments nil
+     :placement 'process-buffer :retry-safe nil))
+  (dolist (operation '(make-process start-file-process
+                       list-system-processes memory-info process-attributes
+                       process-file shell-command exec-path
+                       temporary-file-directory file-group-gid file-user-uid))
+    (when-let* ((spec (remote-get-file-operation operation)))
+      (setf (remote-file-operation-spec-placement spec)
+            'default-directory)))
   (remote-register-file-operation
    'exec-path :capability 'environment :path-arguments nil
    :result-kind 'path-list :retry-safe t)
@@ -801,7 +915,8 @@ RETRY-SAFE controls route failover independently of capability."
   (remote-fs--register-operation-group
    '(abbreviate-file-name directory-file-name expand-file-name
      file-name-as-directory file-name-directory file-name-nondirectory
-     file-remote-p substitute-in-file-name unhandled-file-name-directory)
+     file-local-name file-remote-p substitute-in-file-name
+     unhandled-file-name-directory)
    'metadata '(0) 'pass t)
   (remote-fs--register-operation-group
    '(make-auto-save-file-name set-visited-file-modtime
@@ -810,6 +925,28 @@ RETRY-SAFE controls route failover independently of capability."
   remote-file-operations)
 
 (remote-fs-register-standard-operations)
+
+(defun remote-file-operation-coverage-report ()
+  "Compare this handler's operation surface with the active Tramp runtime."
+  (let* ((upstream
+          (delete-dups
+           (copy-sequence
+            (or (get #'tramp-file-name-handler 'operations) nil))))
+         (registered
+          (mapcar #'remote-file-operation-spec-operation
+                  (remote-file-operation-list)))
+         (sort-symbols
+          (lambda (values)
+            (sort values
+                  (lambda (left right)
+                    (string-lessp (symbol-name left)
+                                  (symbol-name right)))))))
+    (list :upstream (funcall sort-symbols upstream)
+          :registered (funcall sort-symbols registered)
+          :missing (funcall sort-symbols
+                            (seq-difference upstream registered #'eq))
+          :extra (funcall sort-symbols
+                          (seq-difference registered upstream #'eq)))))
 
 (defun remote-fs--operation-spec (operation)
   "Return OPERATION's registered contract or a conservative fallback."
@@ -827,8 +964,10 @@ RETRY-SAFE controls route failover independently of capability."
          :capability 'file-write
          :mutating t
          :path-arguments 'all
+         :placement 'arguments
          :result-kind 'pass
-         :retry-safe nil))))
+         :retry-safe nil
+         :filesystem-effects 'unknown))))
 
 (defun remote-fs--operation-capability (operation)
   "Return route capability for OPERATION."
@@ -845,19 +984,47 @@ RETRY-SAFE controls route failover independently of capability."
 (defun remote-fs--primary-file (operation args)
   "Return logical primary file for OPERATION and ARGS."
   (let ((spec (remote-fs--operation-spec operation)))
-    (or (cl-loop for value in args
-                 for index from 0
-                 when (and (remote-fs--path-argument-p spec index)
-                           (remote-fs-file-name-p value))
-                 return value)
-      (and (remote-fs-file-name-p default-directory)
-           default-directory)
-      (ignore-errors
-          (apply #'tramp-file-name-for-operation operation args)))))
+    (pcase (remote-file-operation-spec-placement spec)
+      ('process-buffer
+       (or
+        (when-let* ((value (car args))
+                    (process
+                     (cond
+                      ((processp value) value)
+                      ((bufferp value) (get-buffer-process value))
+                      ((stringp value) (or (get-process value)
+                                           (get-buffer-process value)))))
+                    (buffer (process-buffer process)))
+          (buffer-local-value 'default-directory buffer))
+        (and (remote-fs-file-name-p default-directory)
+             default-directory)))
+      ('tramp-vector
+       (remote-fs--logical-file-from-vector (car args)))
+      ('default-directory
+       (and (remote-fs-file-name-p default-directory)
+            default-directory))
+      (_
+       (or (cl-loop for value in args
+                    for index from 0
+                    when (or
+                          (and (remote-fs--path-argument-p spec index)
+                               (remote-fs-file-name-p value))
+                          (remote-fs--logical-file-from-vector value))
+                    return (or (remote-fs--logical-file-from-vector value)
+                               value))
+           (and (remote-fs-file-name-p default-directory)
+                default-directory))))))
 
 (defun remote-fs--call-underlying (operation args default)
   "Call OPERATION with ARGS and physical DEFAULT directory."
   (let ((default-directory default)
+        (process-file-side-effects
+         (if (eq
+              (remote-file-operation-spec-filesystem-effects
+               (remote-fs--operation-spec operation))
+              'none)
+             nil
+           process-file-side-effects))
         (inhibit-file-name-operation nil)
         (inhibit-file-name-handlers
          (delq #'tramp-file-name-handler
@@ -946,6 +1113,14 @@ the request to TRAMP or tramp-rpc."
      for index from 0
      collect
      (cond
+      ;; Tramp's connection-oriented public operations carry a parsed vector
+      ;; instead of a file-name argument.  Project it at the same boundary as
+      ;; strings so upstream may evolve between the two dispatcher shapes.
+      ((and (tramp-file-name-p value)
+            (remote-fs--logical-file-from-vector value))
+       (or (remote-fs--project-vector value route)
+           (signal 'remote-operation-contract-error
+                   (list operation "Cannot project logical Tramp vector"))))
       ((not (remote-fs--path-argument-p spec index)) value)
       ;; TARGET is link contents, not a transport path.  Keep relative and
       ;; native absolute spellings byte-for-byte.  A logical target on the
@@ -1005,7 +1180,10 @@ the request to TRAMP or tramp-rpc."
 
 (defun remote-fs--transform-result (spec result target-id)
   "Map physical RESULT according to SPEC back into TARGET-ID."
-  (pcase (remote-file-operation-spec-result-kind spec)
+  (if-let* ((projector
+             (remote-file-operation-spec-result-projector spec)))
+      (funcall projector result target-id spec)
+    (pcase (remote-file-operation-spec-result-kind spec)
     ('path
      (remote-fs--rewrap-physical result target-id))
     ('path-list
@@ -1051,7 +1229,29 @@ the request to TRAMP or tramp-rpc."
             entry))
         result))
       (t result)))
-    (_ result)))
+      (_ result))))
+
+(defun remote-fs--physical-path-in-result-p (value &optional depth)
+  "Return non-nil when VALUE contains a non-logical magic file name.
+DEPTH bounds defensive traversal of unfamiliar extension return values."
+  (let ((depth (or depth 0)))
+    (and
+     (< depth 32)
+     (cond
+      ((stringp value)
+       (and (not (remote-fs-file-name-p value))
+            (ignore-errors (file-remote-p value))))
+      ((consp value)
+       (or (remote-fs--physical-path-in-result-p (car value) (1+ depth))
+           (remote-fs--physical-path-in-result-p (cdr value) (1+ depth))))
+      ((vectorp value)
+       (or
+        (and (tramp-file-name-p value)
+             (not (equal (tramp-file-name-method value) remote-fs-method)))
+        (seq-some
+         (lambda (item)
+           (remote-fs--physical-path-in-result-p item (1+ depth)))
+         value)))))))
 
 (defun remote-fs--rewrap-physical (physical target-id)
   "Return PHYSICAL path in TARGET-ID's logical namespace."
@@ -1061,6 +1261,13 @@ the request to TRAMP or tramp-rpc."
    ((file-remote-p physical)
     (remote-make-file-name
      target-id (file-remote-p physical 'localname)))
+   ;; Native and remote backends may legally abbreviate a path below HOME
+   ;; (notably `locate-dominating-file' on macOS).  Resolve that spelling in
+   ;; the owning target namespace before constructing a logical file name;
+   ;; passing it directly to `remote-make-file-name' violates its deliberate
+   ;; absolute-localname contract.
+   ((string-prefix-p "~" physical)
+    (remote-expand-file-name physical nil target-id))
    ((file-name-absolute-p physical)
     (remote-make-file-name target-id physical))
    (t physical)))
@@ -1096,7 +1303,8 @@ target-native namespace."
 (defun remote-fs--call-routed (operation args)
   "Route OPERATION with ARGS through the selected link."
   (remote-fs--validate-cross-target-operation operation args)
-  (let* ((spec (remote-fs--operation-spec operation))
+  (let* ((known (gethash operation remote-file-operations))
+         (spec (or known (remote-fs--operation-spec operation)))
          (logical (or (remote-fs--primary-file operation args)
                       (error "No logical fs context for %s" operation)))
          (context (remote-fs--context-for-file logical))
@@ -1117,15 +1325,47 @@ target-native namespace."
                       (remote-project-file-name
                        default-directory route)))
                    (translated
-                    (remote-fs--translate-args operation args route)))
+                    (remote-fs--translate-args operation args route))
+                   (effective-default
+                    (or physical-default temporary-file-directory))
+                   (provider
+                    (and (fboundp 'remote-operation-provider-for)
+                         (remote-operation-provider-for
+                          operation route context translated
+                          effective-default)))
+                   (physical-result
+                    (if provider
+                        (condition-case _accelerator-error
+                            (prog1
+                                (remote-operation-provider-call
+                                 provider operation route context translated
+                                 effective-default)
+                              (remote-log
+                               'accelerator
+                               :provider
+                               (remote-operation-provider-id provider)
+                               :operation operation
+                               :target (remote-route-target-id route)))
+                          (remote-backend-unsupported
+                           (remote-fs--call-underlying
+                            operation translated effective-default)))
+                      (remote-fs--call-underlying
+                       operation translated effective-default))))
               (setq result
                     (remote-fs--transform-result
                      spec
-                     (remote-fs--call-underlying
-                      operation translated
-                      (or physical-default temporary-file-directory))
-                     (remote-context-target-id context))
-                    done t)
+                     physical-result
+                     (remote-context-target-id context)))
+              ;; Unknown extension operations retain the existing one-shot
+              ;; conservative execution path.  Never let an unfamiliar return
+              ;; shape leak a backend-specific identity into `/fs:'.
+              (when (and (null known)
+                         (remote-fs--physical-path-in-result-p result))
+                (signal
+                 'remote-operation-contract-error
+                 (list operation
+                       "Unknown operation returned a physical remote path")))
+              (setq done t)
               (remote-report-route-success route)
               (remote-log
                'route
@@ -1343,6 +1583,12 @@ as an accidental fallback."
              (equal (remote-fs-target-id file-name) "local"))
     (file-name-as-directory (remote-fs-localname file-name))))
 
+(defun remote-fs-handle-file-local-name (file-name)
+  "Return FILE-NAME's target-native name through the handler contract."
+  (if (remote-fs-file-name-p file-name)
+      (remote-fs-localname file-name)
+    file-name))
+
 (defun remote-file-watch-descriptor-p (descriptor)
   "Return non-nil when DESCRIPTOR is a stable logical watch handle."
   (and (consp descriptor)
@@ -1365,6 +1611,7 @@ as an accidental fallback."
       :target (remote-file-watch-target-id watch)
       :adapter (remote-file-watch-adapter-id watch)
       :state (remote-file-watch-state watch)
+      :sequence (or (remote-file-watch-sequence watch) 0)
       :workspace
       (when-let* ((workspace (remote-file-watch-workspace watch)))
         (remote-workspace-id workspace))))
@@ -1397,10 +1644,64 @@ as an accidental fallback."
             (remote-fs--rewrap-physical
              (nth 3 event)
              (remote-file-watch-target-id watch))))
-    (when (eq (nth 1 event) 'stopped)
-      (setf (remote-file-watch-state watch) 'stopped))
-    (unless (remote-file-watch-suppress-events watch)
-      (funcall (remote-file-watch-callback watch) event))))
+    (let* ((now (float-time))
+           (fingerprint (cdr event))
+           (duplicate
+            (and (equal fingerprint
+                        (remote-file-watch-last-event-fingerprint watch))
+                 (numberp (remote-file-watch-last-event-at watch))
+                 (<= (- now (remote-file-watch-last-event-at watch))
+                     remote-file-watch-deduplicate-window))))
+      (unless duplicate
+        (setf (remote-file-watch-last-event-fingerprint watch)
+              (copy-tree fingerprint)
+              (remote-file-watch-last-event-at watch) now
+              (remote-file-watch-sequence watch)
+              (1+ (or (remote-file-watch-sequence watch) 0)))
+        (when (eq (nth 1 event) 'stopped)
+          (setf (remote-file-watch-state watch) 'stopped))
+        (unless (remote-file-watch-suppress-events watch)
+          (funcall (remote-file-watch-callback watch) event))
+        (when (and (eq (nth 1 event) 'stopped)
+                   (gethash (remote-file-watch-id watch)
+                            remote-file-watches))
+          (remote-file-watch-resync watch 'backend-stopped))))))
+
+(defun remote-file-watch-resync (watch &optional reason)
+  "Rescan and recreate logical WATCH after event loss or REASON.
+The optional `:resync' function in WATCH metadata runs before the physical
+descriptor is recreated.  Calls are coalesced and generation-checked by the
+shared background scheduler."
+  (unless (remote-file-watch-p watch)
+    (error "Not a remote file watch: %S" watch))
+  (let ((key (list 'file-watch-resync (remote-file-watch-id watch))))
+    (remote-background-submit
+     key
+     (lambda ()
+       (unless (gethash (remote-file-watch-id watch) remote-file-watches)
+         (signal 'remote-connection-cancelled '("Watch was removed")))
+       (when-let* ((resync
+                    (plist-get (remote-file-watch-metadata watch)
+                               :resync)))
+         (funcall resync watch reason))
+       (remote-file-watch-recover watch))
+     :target-id (remote-file-watch-target-id watch)
+     :owner-buffer nil
+     :non-essential nil
+     :callback
+     (lambda (_watch)
+       (remote-log
+        'watch-resync :watch (remote-file-watch-id watch)
+        :target (remote-file-watch-target-id watch)
+        :sequence (remote-file-watch-sequence watch)
+        :reason reason))
+     :error-callback
+     (lambda (error)
+       (setf (remote-file-watch-state watch) 'failed)
+       (remote-log
+        'watch-resync-error :watch (remote-file-watch-id watch)
+        :target (remote-file-watch-target-id watch)
+        :error (error-message-string error))))))
 
 (defun remote-fs--watch-add-physical (watch)
   "Create and return the backend descriptor for logical WATCH."
@@ -1450,27 +1751,51 @@ as an accidental fallback."
      (setf (remote-file-watch-state watch) 'failed)
      (signal (car error) (cdr error)))))
 
+(defun remote-fs--watch-finalize-close
+    (watch reason &optional from-workspace)
+  "Finalize logical WATCH removal because of REASON.
+FROM-WORKSPACE means resource ownership is already being released."
+  (unless (memq (remote-file-watch-state watch) '(closing closed))
+    (setf (remote-file-watch-state watch) 'closing)
+    (remote-background-cancel
+     (list 'file-watch-resync (remote-file-watch-id watch))
+     (or reason 'watch-close))
+    (remote-fs--watch-remove-physical watch)
+    (setf (remote-file-watch-state watch) 'closed)
+    (remhash (remote-file-watch-id watch) remote-file-watches)
+    (unless from-workspace
+      (when-let* ((workspace (remote-file-watch-workspace watch))
+                  (resource (remote-file-watch-resource watch)))
+        (setf (remote-file-watch-resource watch) nil)
+        (remote-workspace-close-resource
+         workspace resource (or reason 'watch-removed)))))
+  watch)
+
 (defun remote-fs--watch-close
     (watch reason &optional from-workspace)
   "Close logical WATCH because of REASON.
-When FROM-WORKSPACE is non-nil, resource ownership is already being released."
+All terminal removal enters through public `file-notify-rm-watch', so Emacs
+owns descriptor-table cleanup and the final `stopped' event.  Transport
+recovery keeps the public identity and only removes its physical descriptor."
   (when (remote-file-watch-p watch)
-    (remote-fs--watch-remove-physical watch)
-    (if (eq reason 'transport-recovery)
-        (setf (remote-file-watch-state watch) 'disconnected)
-      (setf (remote-file-watch-state watch) 'closed)
-      (remhash (remote-file-watch-id watch) remote-file-watches)
-      (when (fboundp 'file-notify--rm-descriptor)
-        (file-notify--rm-descriptor
-         (remote-file-watch-descriptor watch)))
-      (unless from-workspace
-        (when-let* ((workspace
-                     (remote-file-watch-workspace watch))
-                    (resource
-                     (remote-file-watch-resource watch)))
-          (setf (remote-file-watch-resource watch) nil)
-          (remote-workspace-close-resource
-           workspace resource 'watch-removed)))))
+    (cond
+     ((eq reason 'transport-recovery)
+      (remote-fs--watch-remove-physical watch)
+      (setf (remote-file-watch-state watch) 'disconnected))
+     ((memq (remote-file-watch-state watch) '(closing closed)) watch)
+     (remote-fs--watch-public-close
+      (remote-fs--watch-finalize-close watch reason from-workspace))
+     (t
+      (let ((remote-fs--watch-public-close
+             (list reason from-workspace)))
+        (condition-case nil
+            (file-notify-rm-watch (remote-file-watch-descriptor watch))
+          (file-notify-error
+           ;; A descriptor can disappear concurrently with a workspace close.
+           ;; The public table no longer owns it in that case; finish local
+           ;; resource cleanup without calling a private table helper.
+           (remote-fs--watch-finalize-close
+            watch reason from-workspace)))))))
   watch)
 
 (defun remote-fs--watch-register-workspace (watch)
@@ -1539,6 +1864,8 @@ When FROM-WORKSPACE is non-nil, resource ownership is already being released."
            :target-id (remote-fs-target-id file)
            :adapter-id
            (remote-fs--adapter-for-capability 'watch)
+           :metadata (copy-tree remote-file-watch-metadata)
+           :sequence 0
            :state 'opening)))
     (puthash id watch remote-file-watches)
     (condition-case error
@@ -1557,7 +1884,11 @@ When FROM-WORKSPACE is non-nil, resource ownership is already being released."
 (defun remote-fs-handle-file-notify-rm-watch (descriptor)
   "Remove logical watch DESCRIPTOR while preserving native semantics."
   (if-let* ((watch (remote-get-file-watch descriptor)))
-      (remote-fs--watch-close watch 'watch-removed)
+      (pcase-let ((`(,reason ,from-workspace)
+                   (or remote-fs--watch-public-close
+                       '(watch-removed nil))))
+        (remote-fs--watch-finalize-close
+         watch reason from-workspace))
     (remote-fs--call-routed
      'file-notify-rm-watch (list descriptor))))
 
@@ -1579,6 +1910,7 @@ When FROM-WORKSPACE is non-nil, resource ownership is already being released."
     ('abbreviate-file-name
      (apply #'remote-fs-handle-abbreviate-file-name args))
     ('file-remote-p (apply #'remote-fs-handle-file-remote-p args))
+    ('file-local-name (apply #'remote-fs-handle-file-local-name args))
     ('file-name-directory
      (apply #'remote-fs-handle-file-name-directory args))
     ('file-name-nondirectory
@@ -1622,26 +1954,21 @@ When FROM-WORKSPACE is non-nil, resource ownership is already being released."
     ('unhandled-file-name-directory
      (remote-fs-handle-unhandled-file-name-directory (car args)))
     ((guard
-      (eq (alist-get operation
-                     tramp-file-name-for-operation-external)
-          'process))
+      (eq (remote-file-operation-spec-placement
+           (remote-fs--operation-spec operation))
+          'process-buffer))
      (remote-fs--call-process-operation operation args))
     (_ (remote-fs--call-routed operation args))))
 
-(defun remote-fs-foreign-p (vec)
-  "Return non-nil when TRAMP VEC uses the fs logical method."
+(defun remote-fs-foreign-p (value)
+  "Return non-nil when Tramp dispatcher VALUE uses the fs logical method."
   ;; Foreign predicates run for every TRAMP backend, including partially
   ;; initialized bootstrap vectors.  They must be total: an error here makes
   ;; TRAMP disable the predicate globally.
   (condition-case nil
-      (equal (tramp-file-name-method vec) remote-fs-method)
+      (when-let* ((vec (remote-compat-tramp-vector value)))
+        (equal (tramp-file-name-method vec) remote-fs-method))
     (error nil)))
-
-(defun remote-fs--file-local-name-a (fn file-name)
-  "Return target-native path for logical FILE-NAME, otherwise call FN."
-  (if (remote-fs-file-name-p file-name)
-      (remote-fs-localname file-name)
-    (funcall fn file-name)))
 
 (defun remote-fs-install ()
   "Install the fs method and foreign handler."
@@ -1651,25 +1978,15 @@ When FROM-WORKSPACE is non-nil, resource ownership is already being released."
   ;; even though TRAMP remains loaded.  Re-register the public dispatcher here
   ;; so enabling `remote-mode' is a complete, self-contained operation.
   (tramp-register-file-name-handlers)
-  (unless (assoc #'remote-fs-foreign-p
-                 tramp-foreign-file-name-handler-alist)
-    (add-to-list 'tramp-foreign-file-name-handler-alist
-                 (cons #'remote-fs-foreign-p
-                       #'remote-fs-file-name-handler)))
-  (remote-fs-register-link-plugins)
-  (unless (advice-member-p
-           #'remote-fs--file-local-name-a 'file-local-name)
-    (advice-add 'file-local-name
-                :around #'remote-fs--file-local-name-a))
-  (setq remote-fs--advice-installed t))
+  (remote-compat-tramp-register-foreign-handler
+   #'remote-fs-foreign-p
+   #'remote-fs-file-name-handler
+   (mapcar #'car remote-fs-file-name-handler-alist))
+  (remote-fs-register-link-plugins))
 
 (defun remote-fs-uninstall ()
-  "Remove fs compatibility advice.
-The handler remains registered while fs buffers exist."
-  (when remote-fs--advice-installed
-    (advice-remove 'file-local-name
-                   #'remote-fs--file-local-name-a)
-    (setq remote-fs--advice-installed nil)))
+  "Leave the fs handler registered while logical buffers may exist."
+  nil)
 
 (provide 'remote-fs)
 ;;; remote-fs.el ends here

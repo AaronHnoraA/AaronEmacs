@@ -12,6 +12,7 @@
 
 (require 'cl-lib)
 (require 'init-lsp-toolchain)
+(require 'init-lsp-runtime)
 (require 'project)
 (require 'remote-channel)
 (require 'remote-process)
@@ -147,6 +148,9 @@ dynamic file-watch registrations."
 (defvar-local my/lsp-mode--waiting-for-direnv nil
   "Non-nil while lsp-mode startup waits for an asynchronous direnv export.")
 
+(defvar-local my/language-server--waiting-for-runtime nil
+  "Non-nil while language-server startup waits for a runtime provider.")
+
 (defvar-local my/flymake-diagnostic-at-point-timer nil
   "Idle timer used by `my/flymake-diagnostic-at-point-mode'.")
 
@@ -190,6 +194,7 @@ dynamic file-watch registrations."
 (declare-function eglot--managed-mode@my/defer-eglot-shutdown nil (&optional server))
 (declare-function eglot-shutdown
                   "eglot" (server &optional interactive timeout preserve-buffers))
+(declare-function jsonrpc-running-p "jsonrpc" (connection))
 
 (defcustom my/lsp-mode-startup-timeout 60
   "Seconds an lsp-mode workspace may remain in `starting' state.
@@ -257,8 +262,19 @@ struct definitions while this configuration file is compiled."
     (expand-file-name path)))
 
 (defun my/language-server-executable-find (program)
-  "Return PROGRAM path in the current language-server target."
-  (let ((remote-current-adapter-id "language-server"))
+  "Return PROGRAM path in the current language-server tooling environment.
+Runtime contexts intentionally do not make an analyzer installed inside a
+kernel environment replace the stable target/workspace analyzer."
+  (let* ((runtime (and (boundp 'my/language-server-runtime-current)
+                       my/language-server-runtime-current))
+         (tool-environment
+          (and (my/language-server-runtime-p runtime)
+               (my/language-server-runtime-tool-environment runtime)))
+         (remote-buffer-environment
+          (or tool-environment
+              (and (boundp 'remote-buffer-environment)
+                   remote-buffer-environment)))
+         (remote-current-adapter-id "language-server"))
     (remote-executable-find program)))
 
 (defun my/language-server-executable-available-p (program)
@@ -702,8 +718,11 @@ finder can participate exactly as it does for `M-x eglot'."
   (my/language-server-prepare-eglot-execution-environment)
   (my/language-server-apply-process-environment)
   (my/language-server-apply-eglot-local-settings)
+  (my/language-server-runtime-register-eglot-configuration)
   (when (my/eglot-contact-available-p)
-    (if interactive
+    (if (or interactive
+            (my/language-server-runtime-p
+             my/language-server-runtime-current))
         (call-interactively #'eglot)
       (eglot-ensure))))
 
@@ -1076,14 +1095,19 @@ watch creation is disabled for target-only filesystems."
 
 (defun my/language-server-register-eglot-resource (server)
   "Register initialized Eglot SERVER with its Remote workspace owner."
-  (when-let* ((root (my/language-server--eglot-root server))
+  (when-let* ((project (ignore-errors (eglot--project server)))
+              (root (my/language-server--eglot-root server))
               (workspace (my/language-server--resource-owner root)))
-    (let ((buffer
+    (let ((runtime-id
+           (and (eq (car-safe project) 'my/language-server-runtime-project)
+                (nth 2 project)))
+          (buffer
            (seq-find
             #'buffer-live-p
             (ignore-errors (eglot--managed-buffers server)))))
       (remote-workspace-ensure-recoverable-resource
-       workspace 'lsp (list 'eglot root) server
+       workspace 'lsp (append (list 'eglot root)
+                              (and runtime-id (list runtime-id))) server
        :close
        (lambda (value reason)
          (unless (eq reason 'transport-recovery)
@@ -1104,7 +1128,8 @@ watch creation is disabled for target-only filesystems."
                (ignore-errors (eglot-current-server))))
             old)))
        :metadata
-       (list :backend 'eglot :root root :buffer buffer)))))
+       (list :backend 'eglot :root root :runtime-id runtime-id
+             :buffer buffer)))))
 
 (defun my/language-server-eglot-shutdown-resource-a (server)
   "Forget the workspace resource for an Eglot SERVER which already stopped."
@@ -1352,13 +1377,30 @@ only enforce process termination; they never send a second shutdown RPC."
 (defalias 'my/eglot-ensure-deferred
   #'my/language-server-ensure-deferred)
 
-(defun my/language-server-ensure ()
-  "Start the preferred language server backend for the current buffer."
+(defun my/language-server--ensure-after-runtime ()
+  "Start the preferred backend after runtime preparation has completed."
   (interactive)
   (pcase (my/language-server-preferred-backend)
     ('lsp-mode (my/lsp-mode-ensure))
     ('eglot (my/eglot-ensure))
     ('disabled (message "Language server disabled for this project"))))
+
+(defun my/language-server--runtime-ready (_runtime error)
+  "Resume startup after resolving a runtime, reporting fallback ERROR."
+  (setq my/language-server--waiting-for-runtime nil)
+  (when error
+    (message "Language-server runtime fallback: %s" error))
+  (my/language-server--ensure-after-runtime))
+
+(defun my/language-server-ensure ()
+  "Prepare the effective runtime, then start the preferred language server."
+  (interactive)
+  (unless my/language-server--waiting-for-runtime
+    (let ((state
+           (my/language-server-runtime-prepare
+            #'my/language-server--runtime-ready)))
+      (when (eq state 'pending)
+        (setq my/language-server--waiting-for-runtime t)))))
 
 (defun my/language-server-call (eglot-fn lsp-fn)
   "Call EGLOT-FN or LSP-FN for the active language server backend."
@@ -1768,9 +1810,14 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
                         3)
                       nil
                       (lambda (deferred-server)
-                        (unless (or (null deferred-server)
-                                    (eglot--managed-buffers deferred-server))
-                          (funcall orig-shutdown deferred-server)))
+                        (when (and deferred-server
+                                   (ignore-errors
+                                     (jsonrpc-running-p deferred-server))
+                                   (null (ignore-errors
+                                           (eglot--managed-buffers
+                                            deferred-server))))
+                          (ignore-errors
+                            (funcall orig-shutdown deferred-server))))
                       srv)))))
         (funcall fn server))))
 

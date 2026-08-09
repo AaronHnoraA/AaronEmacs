@@ -16,6 +16,7 @@
 (require 'remote-channel)
 (require 'remote-environment)
 (require 'remote-service)
+(require 'remote-background)
 
 (cl-defstruct (remote-workspace-resource
                (:constructor remote-workspace-resource-create))
@@ -685,35 +686,48 @@ Automatic resources are recreated.  Terminals remain disconnected until
     (or (and done workspace)
         (signal (car last-error) (cdr last-error)))))
 
-(defun remote-workspace--auto-reconnect-step (workspace delays)
-  "Attempt automatic reconnect of WORKSPACE using remaining DELAYS."
-  (when (and (remote-workspace-p workspace)
-             (memq (remote-workspace-state workspace)
-                   '(disconnected reconnecting)))
-    (setf (remote-workspace-state workspace) 'reconnecting
-          (remote-workspace-metadata workspace)
-          (plist-put
-           (remote-workspace-metadata workspace)
-           :reconnect-timer nil))
-    (condition-case error
-        (remote-workspace--reconnect-once workspace)
-      (error
-       (if (and delays
-                (remote-workspace--transport-error-p workspace error))
-           (let ((timer
-                  (run-at-time
-                   (car delays) nil
-                   #'remote-workspace--auto-reconnect-step
-                   workspace (cdr delays))))
-             (setf
-              (remote-workspace-state workspace) 'disconnected
-              (remote-workspace-error workspace) error
-              (remote-workspace-metadata workspace)
-              (plist-put
-               (remote-workspace-metadata workspace)
-               :reconnect-timer timer)))
-         (setf (remote-workspace-state workspace) 'failed
-               (remote-workspace-error workspace) error))))))
+(defun remote-workspace--reconnect-key (workspace)
+  "Return the coalescing key for WORKSPACE recovery."
+  (list 'workspace-reconnect (remote-workspace-key workspace)))
+
+(defun remote-workspace--schedule-reconnect (workspace)
+  "Schedule generation-safe recovery for WORKSPACE."
+  (let* ((key (remote-workspace--reconnect-key workspace))
+         (job
+          (remote-background-submit
+           key
+           (lambda ()
+             (unless (memq (remote-workspace-state workspace)
+                           '(disconnected reconnecting))
+               (signal 'remote-connection-cancelled
+                       '("Workspace no longer needs recovery")))
+             (setf (remote-workspace-state workspace) 'reconnecting)
+             (condition-case error
+                 (remote-workspace--reconnect-once workspace)
+               (error
+                (setf (remote-workspace-state workspace) 'disconnected
+                      (remote-workspace-error workspace) error)
+                (signal (car error) (cdr error)))))
+           :target-id (remote-workspace-target-id workspace)
+           :owner-buffer nil
+           :non-essential nil
+           :delays remote-workspace-reconnect-delays
+           :callback
+           (lambda (_value)
+             (setf (remote-workspace-metadata workspace)
+                   (plist-put (remote-workspace-metadata workspace)
+                              :reconnect-job nil)))
+           :error-callback
+           (lambda (error)
+             (setf (remote-workspace-state workspace) 'failed
+                   (remote-workspace-error workspace) error
+                   (remote-workspace-metadata workspace)
+                   (plist-put (remote-workspace-metadata workspace)
+                              :reconnect-job nil))))))
+    (setf (remote-workspace-metadata workspace)
+          (plist-put (remote-workspace-metadata workspace)
+                     :reconnect-job job))
+    job))
 
 (defun remote-workspace-handle-transport-failure (route error)
   "Mark workspaces using ROUTE disconnected and schedule recovery."
@@ -732,17 +746,8 @@ Automatic resources are recreated.  Terminals remain disconnected until
                   (not
                    (plist-get
                     (remote-workspace-metadata workspace)
-                    :reconnect-timer)))
-         (let ((timer
-                (run-at-time
-                 0 nil #'remote-workspace--auto-reconnect-step
-                 workspace
-                 (copy-sequence remote-workspace-reconnect-delays))))
-           (setf
-            (remote-workspace-metadata workspace)
-            (plist-put
-             (remote-workspace-metadata workspace)
-             :reconnect-timer timer))))))
+                    :reconnect-job)))
+         (remote-workspace--schedule-reconnect workspace))))
    remote-workspaces))
 
 (defun remote-workspace-close (workspace &optional reason)
@@ -752,11 +757,8 @@ Automatic resources are recreated.  Terminals remain disconnected until
     (when workspace
       (unless (eq (remote-workspace-state workspace) 'closed)
         (setf (remote-workspace-state workspace) 'closing)
-        (when-let* ((timer
-                     (plist-get
-                      (remote-workspace-metadata workspace)
-                      :reconnect-timer)))
-          (cancel-timer timer))
+        (remote-background-cancel
+         (remote-workspace--reconnect-key workspace) 'workspace-close)
         (let ((remote-current-workspace workspace))
           (run-hooks 'remote-workspace-close-hook))
         (dolist

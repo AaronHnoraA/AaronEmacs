@@ -15,6 +15,8 @@
 (declare-function remote-context "remote-fs" (&optional path))
 (declare-function remote-backend-classify-error
                   "remote-backend-core" (route error &optional phase))
+(declare-function remote-compat-error-has-type-p
+                  "remote-compat" (error type))
 
 (defgroup remote nil
   "Target-oriented local and remote execution."
@@ -35,6 +37,65 @@
     process-sync process-async pty watch lsp environment
     network-client network-server port-forward reverse-forward)
   "Capabilities which Emacs can provide directly on the local target.")
+
+(cl-defstruct (remote-capability-contract
+               (:constructor remote-capability-contract-create))
+  id boundary requires backend-all backend-any)
+
+(defvar remote-capability-contracts (make-hash-table :test #'eq)
+  "Structural contracts keyed by public remote capability.")
+
+(cl-defun remote-register-capability-contract
+    (id &key boundary requires backend-all backend-any)
+  "Register the reusable boundary contract for capability ID.
+REQUIRES lists other capabilities needed for a composite operation.
+BACKEND-ALL lists backend callback slots which must all be present;
+BACKEND-ANY lists alternatives of which at least one must be present."
+  (unless (memq id remote-capabilities)
+    (error "Unknown remote capability contract: %S" id))
+  (let ((unknown (seq-difference requires remote-capabilities)))
+    (when unknown
+      (error "Unknown requirements for capability %s: %S" id unknown)))
+  (let ((contract
+         (remote-capability-contract-create
+          :id id :boundary boundary :requires (copy-sequence requires)
+          :backend-all (copy-sequence backend-all)
+          :backend-any (copy-sequence backend-any))))
+    (puthash id contract remote-capability-contracts)
+    contract))
+
+(defun remote-capability-contract-list ()
+  "Return public capability contracts in stable name order."
+  (sort (hash-table-values remote-capability-contracts)
+        (lambda (left right)
+          (string-lessp
+           (symbol-name (remote-capability-contract-id left))
+           (symbol-name (remote-capability-contract-id right))))))
+
+(defun remote-register-standard-capability-contracts ()
+  "Install future-facing contracts for all built-in remote capabilities."
+  (clrhash remote-capability-contracts)
+  (dolist (capability '(file-read file-write directory metadata watch))
+    (remote-register-capability-contract
+     capability :boundary 'file :backend-all '(project-function)))
+  (dolist (capability '(process-sync process-async pty environment))
+    (remote-register-capability-contract
+     capability :boundary 'process :backend-all '(project-function)))
+  (remote-register-capability-contract
+   'lsp :boundary 'composite
+   :requires '(process-async environment)
+   :backend-all '(project-function))
+  (remote-register-capability-contract
+   'network-client :boundary 'channel
+   :backend-any '(stream-function network-function))
+  (remote-register-capability-contract
+   'network-server :boundary 'channel :backend-all '(network-function))
+  (dolist (capability '(port-forward reverse-forward))
+    (remote-register-capability-contract
+     capability :boundary 'channel :backend-all '(forward-function)))
+  remote-capability-contracts)
+
+(remote-register-standard-capability-contracts)
 
 (defconst remote-process-classes '(interactive normal background)
   "Traffic classes accepted by remote process adapters.
@@ -97,7 +158,7 @@ priority and do not claim operating-system or Emacs event-loop preemption.")
 
 (cl-defstruct (remote-link-plugin
                (:constructor remote-link-plugin-create))
-  name capabilities available-p project-file-name
+  name backend-id capabilities available-p project-file-name
   connect connection-live-p disconnect describe)
 
 (cl-defstruct (remote-adapter
@@ -246,6 +307,42 @@ When TARGET-ID is non-nil, ID may be the target-local short ID."
   "Return the adapter named ID, or nil."
   (gethash (remote-normalize-id id t) remote-adapters))
 
+(defun remote-adapter-capability-problems (adapter)
+  "Return composite capability coverage problems for ADAPTER."
+  (let ((capabilities (remote-adapter-capabilities adapter))
+        problems)
+    (dolist (capability capabilities)
+      (if-let* ((contract (gethash capability
+                                    remote-capability-contracts)))
+          (when-let* ((missing
+                       (seq-difference
+                        (remote-capability-contract-requires contract)
+                        capabilities)))
+            (push (list :capability capability
+                        :missing-capabilities missing)
+                  problems))
+        (push (list :capability capability :missing-contract t) problems)))
+    (nreverse problems)))
+
+(defun remote-adapter-coverage-report (&optional adapter)
+  "Return composite capability coverage for ADAPTER or all adapters."
+  (let ((adapters
+         (if adapter
+             (list (if (remote-adapter-p adapter)
+                       adapter
+                     (remote-get-adapter adapter)))
+           (hash-table-values remote-adapters))))
+    (mapcar
+     (lambda (item)
+       (list :adapter (remote-adapter-id item)
+             :capabilities (copy-sequence
+                            (remote-adapter-capabilities item))
+             :problems (remote-adapter-capability-problems item)))
+     (sort (delq nil adapters)
+           (lambda (left right)
+             (string-lessp (remote-adapter-id left)
+                           (remote-adapter-id right)))))))
+
 (defun remote-link-plugin-id (link)
   "Return LINK's first backend plugin ID.
 This compatibility accessor is suitable only for display or for links which
@@ -277,9 +374,12 @@ have exactly one backend.  Route selection must use
     target))
 
 (cl-defun remote-register-link-plugin
-    (id &key capabilities available-p project-file-name
+    (id &key backend-id capabilities available-p project-file-name
         connect connection-live-p disconnect describe)
-  "Register link implementation ID and return it."
+  "Register link implementation ID and return it.
+BACKEND-ID is non-nil only for plugins generated by the v2 backend bridge.
+It keeps connection-time protocol probing out of independent legacy plugins
+which happen to use the same public identifier."
   (let* ((id (remote-normalize-id id))
          (unknown (seq-difference capabilities remote-capabilities)))
     (when unknown
@@ -287,6 +387,7 @@ have exactly one backend.  Route selection must use
     (let ((plugin
            (remote-link-plugin-create
             :name id
+            :backend-id (and backend-id (remote-normalize-id backend-id))
             :capabilities (copy-sequence capabilities)
             :available-p available-p
             :project-file-name project-file-name
@@ -408,6 +509,9 @@ this adapter."
   (unless (memq process-class remote-process-classes)
     (error "Invalid process class for adapter %s: %S"
            id process-class))
+  (let ((unknown (seq-difference capabilities remote-capabilities)))
+    (when unknown
+      (error "Unknown capabilities for adapter %s: %S" id unknown)))
   (let ((id (remote-normalize-id id)))
     (let ((adapter
            (remote-adapter-create
@@ -416,6 +520,10 @@ this adapter."
             :preferences (copy-tree preferences)
             :placement placement
             :process-class process-class)))
+      (when-let* ((problems
+                   (remote-adapter-capability-problems adapter)))
+        (error "Adapter %s has incomplete capability declarations: %S"
+               id problems))
       (puthash id adapter remote-adapters)
       adapter)))
 
@@ -553,19 +661,11 @@ PREFERENCES is an alist keyed by capability, adapter ID, or `default'."
      (list :status 'healthy :succeeded-at (float-time))
      remote-route-health)))
 
-(defun remote--backend-incompatible-error-p (route error)
-  "Return non-nil when ERROR means ROUTE's backend cannot serve the link."
-  (let ((plugin-id (remote-route-link-plugin-id route))
-        (message (downcase (error-message-string error))))
-    (and
-     (equal plugin-id "tramp-rpc")
-     (string-match-p
-      (rx (or "unknown architecture"
-              "tramp-rpc-server"
-              "rpc response"
-              "method=system.info"
-              "rpc process"))
-      message))))
+(defun remote--backend-incompatible-error-p (_route error)
+  "Return non-nil when typed ERROR marks a backend incompatible."
+  (and (fboundp 'remote-compat-error-has-type-p)
+       (remote-compat-error-has-type-p
+        error 'remote-backend-incompatible)))
 
 (defun remote-report-route-failure (route error)
   "Mark ROUTE failed because of ERROR and return its failure scope.
@@ -594,10 +694,7 @@ cools the shared physical link."
              :status
              (or
               (plist-get classification :status)
-              (if (and (eq scope 'backend)
-                       (string-match-p
-                        "unknown architecture"
-                        (downcase (error-message-string error))))
+              (if (remote--backend-incompatible-error-p route error)
                   'incompatible
                 'failed))
              :failed-at (float-time)

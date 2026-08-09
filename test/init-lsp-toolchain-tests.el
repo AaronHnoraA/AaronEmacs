@@ -98,6 +98,23 @@
       (should (eq (plist-get (my/language-server-current-toolchain-profile) :id)
                   'local)))))
 
+(ert-deftest my/toolchain-runtime-profile-is-authoritative ()
+  (my/toolchain-test-with-project
+      '(:toolchain ((test . configured)))
+    (my/register-language-server-toolchain-provider
+     'test '(my/toolchain-test-mode)
+     (lambda (_root)
+       '((:id configured :label "Configured" :default t))))
+    (with-temp-buffer
+      (my/toolchain-test-mode)
+      (setq-local
+       my/language-server-runtime-current
+       (my/language-server-runtime-create
+        :id "kernel"
+        :profile '(:id runtime :label "Runtime" :family test)))
+      (should (eq (plist-get (my/language-server-current-toolchain-profile) :id)
+                  'runtime)))))
+
 (ert-deftest my/toolchain-restores-provider-specific-lsp-variables ()
   (my/toolchain-test-with-project nil
     (my/register-language-server-toolchain-provider

@@ -16,16 +16,24 @@
 (require 'cl-lib)
 (require 'seq)
 (require 'remote-core)
+(require 'remote-compat)
+
+(declare-function remote-connection-generation-for-route
+                  "remote-connection" (route))
 
 (define-error 'remote-backend-error "Remote backend error")
 (define-error 'remote-backend-unsupported
               "Remote backend operation is unsupported"
+              'remote-backend-error)
+(define-error 'remote-backend-incompatible
+              "Remote backend is incompatible"
               'remote-backend-error)
 
 (cl-defstruct (remote-backend
                (:constructor remote-backend-create))
   id capabilities
   available-function
+  probe-function
   project-function
   client-file-function
   expand-function
@@ -60,6 +68,9 @@
 (defvar remote-backends (make-hash-table :test #'equal)
   "Registered transport backends keyed by normalized backend ID.")
 
+(defvar remote-backend-contracts (make-hash-table :test #'equal)
+  "Negotiated backend contracts keyed by target, pipeline, and backend.")
+
 (defun remote-get-backend (id)
   "Return the backend named ID, or nil."
   (gethash (remote-normalize-id id t) remote-backends))
@@ -74,11 +85,183 @@
   (and (remote-backend-p backend)
        (memq capability (remote-backend-capabilities backend))))
 
+(defun remote-backend--slot-value (backend slot)
+  "Return BACKEND's callback value named by contract SLOT."
+  (let ((accessor (intern (format "remote-backend-%s" slot))))
+    (and (fboundp accessor) (funcall accessor backend))))
+
+(defun remote-backend-capability-problems (backend)
+  "Return structural capability problems declared by BACKEND."
+  (let ((capabilities (remote-backend-capabilities backend))
+        problems)
+    (dolist (capability capabilities)
+      (if-let* ((contract (gethash capability remote-capability-contracts)))
+          (let* ((missing-capabilities
+                  (seq-difference
+                   (remote-capability-contract-requires contract)
+                   capabilities))
+                 (missing-slots
+                  (seq-remove
+                   (lambda (slot)
+                     (remote-backend--slot-value backend slot))
+                   (remote-capability-contract-backend-all contract)))
+                 (alternatives
+                  (remote-capability-contract-backend-any contract))
+                 (missing-alternative
+                  (and alternatives
+                       (not (seq-some
+                             (lambda (slot)
+                               (remote-backend--slot-value backend slot))
+                             alternatives)))))
+            (when (or missing-capabilities missing-slots
+                      missing-alternative)
+              (push
+               (list :capability capability
+                     :missing-capabilities missing-capabilities
+                     :missing-callbacks missing-slots
+                     :requires-one-of
+                     (and missing-alternative alternatives))
+               problems)))
+        (push (list :capability capability :missing-contract t) problems)))
+    (nreverse problems)))
+
+(defun remote-backend-coverage-report (&optional backend)
+  "Return structural capability coverage for BACKEND or all backends."
+  (let ((backends
+         (if backend
+             (list (if (remote-backend-p backend)
+                       backend
+                     (remote-get-backend backend)))
+           (hash-table-values remote-backends))))
+    (mapcar
+     (lambda (item)
+       (list :backend (remote-backend-id item)
+             :capabilities (copy-sequence
+                            (remote-backend-capabilities item))
+             :problems (remote-backend-capability-problems item)))
+     (sort (delq nil backends)
+           (lambda (left right)
+             (string-lessp (remote-backend-id left)
+                           (remote-backend-id right)))))))
+
 (defun remote-backend--available-p (backend link context)
   "Return whether BACKEND is available for LINK and CONTEXT."
   (if-let* ((function (remote-backend-available-function backend)))
       (funcall function link context)
     t))
+
+(defun remote-backend-contract-key (route)
+  "Return the negotiated contract key for ROUTE."
+  (list (remote-route-target-id route)
+        (remote-route-link-id route)
+        (remote-route-link-plugin-id route)
+        (and (fboundp 'remote-connection-generation-for-route)
+             (remote-connection-generation-for-route route))))
+
+(defun remote-backend-probe (route context &optional handle refresh)
+  "Return the negotiated backend contract for ROUTE and CONTEXT.
+HANDLE is the newly opened backend attachment when probing requires a live
+protocol.  With REFRESH non-nil, discard a cached contract first.  A probe
+returns a plist with at least `:status' and `:capabilities'."
+  (let* ((backend (or (remote-route-backend route)
+                      (error "No backend registered for route %S" route)))
+         (key (remote-backend-contract-key route)))
+    (when refresh (remhash key remote-backend-contracts))
+    (let* ((contract
+            (or
+             (gethash key remote-backend-contracts)
+             (let* ((function (remote-backend-probe-function backend))
+                    (reported
+                     (or
+                      (and function (funcall function route context handle))
+                      (list :status 'ok)))
+                    (status (or (plist-get reported :status) 'ok))
+                    (capabilities
+                     (or
+                      (plist-get reported :capabilities)
+                      (copy-sequence
+                       (remote-backend-capabilities backend))))
+                    (negotiated
+                     (append
+                      (list :backend (remote-backend-id backend)
+                            :status status
+                            :capabilities capabilities
+                            :checked-at (current-time))
+                      reported)))
+               (unless (memq status '(ok degraded incompatible))
+                 (error "Backend %s returned invalid probe status: %S"
+                        (remote-backend-id backend) status))
+               (let ((unexpected
+                      (seq-difference
+                       capabilities
+                       (remote-backend-capabilities backend))))
+                 (when unexpected
+                   (signal
+                    'remote-operation-contract-error
+                    (list
+                     (format
+                      "Backend %s negotiated undeclared capabilities: %S"
+                      (remote-backend-id backend) unexpected)
+                     reported))))
+               (puthash key negotiated remote-backend-contracts)
+               negotiated)))
+           (status (or (plist-get contract :status) 'ok))
+           (capabilities (plist-get contract :capabilities)))
+      ;; Cached negative contracts remain negative.  This prevents clearing a
+      ;; route-health entry (or racing callers) from silently reopening a
+      ;; protocol version already proven incompatible.
+      (when (eq status 'incompatible)
+        (signal
+         'remote-backend-incompatible
+         (list (or (plist-get contract :detail)
+                   (format "Backend %s is incompatible"
+                           (remote-backend-id backend)))
+               contract)))
+      (unless (memq (remote-route-capability route) capabilities)
+        (signal
+         'remote-backend-unsupported
+         (list
+          (format "Backend %s did not negotiate capability %s"
+                  (remote-backend-id backend)
+                  (remote-route-capability route))
+          contract)))
+      contract)))
+
+(defun remote-backend-contract-list ()
+  "Return negotiated backend contracts in stable key order."
+  (let (contracts)
+    (maphash
+     (lambda (key contract)
+       (push (cons key (copy-tree contract)) contracts))
+     remote-backend-contracts)
+    (sort contracts
+          (lambda (left right)
+            (string-lessp (prin1-to-string (car left))
+                          (prin1-to-string (car right)))))))
+
+(defun remote-backend-contract-clear (&optional route)
+  "Clear the negotiated contract for ROUTE, or every contract."
+  (if route
+      (let ((prefix (seq-take (remote-backend-contract-key route) 3))
+            keys)
+        (maphash
+         (lambda (key _contract)
+           (when (equal (seq-take key 3) prefix)
+             (push key keys)))
+         remote-backend-contracts)
+        (dolist (key keys)
+          (remhash key remote-backend-contracts)))
+    (clrhash remote-backend-contracts)))
+
+(defun remote-backend-contract-clear-backend (backend-id)
+  "Clear negotiated contracts belonging to BACKEND-ID."
+  (let (keys)
+    (maphash
+     (lambda (key _contract)
+       (when (equal (nth 2 key) backend-id)
+         (push key keys)))
+     remote-backend-contracts)
+    (dolist (key keys) (remhash key remote-backend-contracts))))
 
 (defun remote-backend--legacy-project (backend file link route)
   "Project FILE through BACKEND for legacy LINK and ROUTE callers."
@@ -106,7 +289,7 @@
     (funcall function connection route)))
 
 (cl-defun remote-register-backend
-    (id &key capabilities available project client-file-name
+    (id &key capabilities available probe project client-file-name
         expand-localname prepare
         connect live disconnect
         prepare-process stdio-bridge
@@ -139,11 +322,13 @@ target-native executable."
          (unknown (seq-difference capabilities remote-capabilities)))
     (when unknown
       (error "Unknown capabilities for backend %s: %S" id unknown))
+    (remote-backend-contract-clear-backend id)
     (let ((backend
            (remote-backend-create
             :id id
             :capabilities (copy-sequence capabilities)
             :available-function available
+            :probe-function probe
             :project-function project
             :client-file-function client-file-name
             :expand-function expand-localname
@@ -159,10 +344,17 @@ target-native executable."
             :classify-error-function classify-error
             :describe-function describe
             :program-form program-form)))
+      (when-let* ((problems (remote-backend-capability-problems backend)))
+        (signal
+         'remote-operation-contract-error
+         (list
+          (format "Backend %s has impossible capability declarations" id)
+          problems)))
       (puthash id backend remote-backends)
       ;; Compatibility for the current route resolver and connection pool.
       (remote-register-link-plugin
        id
+       :backend-id id
        :capabilities capabilities
        :available-p
        (lambda (link context)
@@ -326,15 +518,18 @@ branch on target IDs or physical path syntax."
 
 (defun remote-backend-default-classify-error (error &optional phase)
   "Return a transport-neutral classification for ERROR during PHASE."
-  (let ((type (car-safe error))
-        (message (downcase (error-message-string error))))
+  (let ((message (downcase (error-message-string error))))
     (cond
-     ((eq type 'remote-backend-unsupported)
+     ((remote-compat-error-has-type-p error 'remote-backend-incompatible)
+      (list :scope 'backend :phase phase :retryable t
+            :status 'incompatible :error error))
+     ((remote-compat-error-has-type-p error 'remote-backend-unsupported)
       (list :scope 'backend :phase phase :retryable t :error error))
      ((or
-       (eq type 'remote-transport-error)
+       (remote-compat-error-has-type-p error 'remote-transport-error)
        (and
-       (memq type '(file-error remote-file-error))
+       (or (remote-compat-error-has-type-p error 'remote-file-error)
+           (remote-compat-error-has-type-p error 'file-error))
        (string-match-p
         (rx (or "connection"
                 "connect"

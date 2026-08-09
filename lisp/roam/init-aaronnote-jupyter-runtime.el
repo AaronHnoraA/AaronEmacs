@@ -115,14 +115,10 @@
    :object-type 'alist :array-type 'list
    :null-object nil :false-object :json-false))
 
-(defun my/noema-jupyter--kernelspecs (file)
-  "Return target kernelspec entries for logical FILE."
-  (let* ((context (my/noema-jupyter--context file))
-         (payload
-          (my/noema-jupyter--json-output
-           context "jupyter" "kernelspec" "list" "--json"))
-         (specs (my/noema-jupyter--get 'kernelspecs payload))
-         result)
+(defun my/noema-jupyter--normalize-kernelspecs (payload)
+  "Return normalized kernelspec entries decoded from Jupyter PAYLOAD."
+  (let ((specs (my/noema-jupyter--get 'kernelspecs payload))
+        result)
     (dolist (entry specs)
       (let* ((name (format "%s" (car entry)))
              (value (cdr entry))
@@ -130,15 +126,15 @@
         (push
          `((name . ,name)
            (spec . ,spec)
-           (resourceDir .
-                        ,(my/noema-jupyter--get 'resource_dir value)))
+           (resourceDir . ,(my/noema-jupyter--get 'resource_dir value)))
          result)))
-    ;; Project launchers are overlaid only when the selected backend explicitly
-    ;; says this target is client-accessible.  Remote targets never receive a
-    ;; client path by accident.
-    (when (and (remote-client-file-name file)
-               (file-directory-p
-                my/noema-jupyter-kernelspec-directory))
+    (nreverse result)))
+
+(defun my/noema-jupyter--project-kernelspecs (file)
+  "Return client-accessible project kernelspecs available for FILE."
+  (when (and (remote-client-file-name file)
+             (file-directory-p my/noema-jupyter-kernelspec-directory))
+    (let (result)
       (dolist
           (directory
            (directory-files
@@ -146,32 +142,52 @@
             directory-files-no-dot-files-regexp))
         (let ((kernel-json (expand-file-name "kernel.json" directory)))
           (when (file-readable-p kernel-json)
-            (let* ((name
-                    (file-name-nondirectory
-                     (directory-file-name directory)))
-                   (spec
-                    (json-parse-string
-                     (with-temp-buffer
-                       (insert-file-contents kernel-json)
-                       (buffer-string))
-                     :object-type 'alist :array-type 'list
-                     :null-object nil :false-object :json-false)))
-              (setq result
-                    (cons
-                     `((name . ,name)
-                       (spec . ,spec)
-                       (resourceDir . ,directory))
-                     (seq-remove
-                      (lambda (known)
-                        (equal
-                         name
-                         (my/noema-jupyter--get 'name known)))
-                      result))))))))
+            (let ((name
+                   (file-name-nondirectory
+                    (directory-file-name directory))))
+              (push
+               `((name . ,name)
+                 (spec .
+                       ,(json-parse-string
+                         (with-temp-buffer
+                           (insert-file-contents kernel-json)
+                           (buffer-string))
+                         :object-type 'alist :array-type 'list
+                         :null-object nil :false-object :json-false))
+                 (resourceDir . ,directory))
+               result)))))
+      (nreverse result))))
+
+(defun my/noema-jupyter--merge-kernelspecs (target project)
+  "Overlay PROJECT kernelspecs over TARGET kernelspecs by name."
+  (let ((result (copy-sequence target)))
+    (dolist (entry project)
+      (let ((name (my/noema-jupyter--get 'name entry)))
+        (setq result
+              (cons
+               entry
+               (seq-remove
+                (lambda (known)
+                  (equal name (my/noema-jupyter--get 'name known)))
+                result)))))
     (sort result
           (lambda (left right)
             (string-lessp
              (my/noema-jupyter--get 'name left)
              (my/noema-jupyter--get 'name right))))))
+
+(defun my/noema-jupyter--kernelspecs (file)
+  "Return target kernelspec entries for logical FILE."
+  (let* ((context (my/noema-jupyter--context file))
+         (payload
+          (my/noema-jupyter--json-output
+           context "jupyter" "kernelspec" "list" "--json"))
+         (result (my/noema-jupyter--normalize-kernelspecs payload)))
+    ;; Project launchers are overlaid only when the selected backend explicitly
+    ;; says this target is client-accessible.  Remote targets never receive a
+    ;; client path by accident.
+    (my/noema-jupyter--merge-kernelspecs
+     result (my/noema-jupyter--project-kernelspecs file))))
 
 (defun my/noema-jupyter--kernels (params _client)
   "List kernels available on the Target owning PARAMS file."

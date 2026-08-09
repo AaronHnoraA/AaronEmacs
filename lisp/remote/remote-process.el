@@ -23,6 +23,7 @@
 (defvar remote-buffer-environment nil)
 
 (defvar process-adaptive-read-buffering)
+(defvar process-file-side-effects)
 
 (defcustom remote-process-class-settings
   '((interactive
@@ -661,7 +662,7 @@ routes through a `/fs:' file-name handler."
           ;; an outer `/fs:' dispatch from being inherited by the native spawn.
           (inhibit-file-name-operation 'make-process)
           (inhibit-file-name-handlers
-           (cons #'remote-file-name-handler
+           (cons #'remote-fs-file-name-handler
                  (cons #'tramp-file-name-handler
                        inhibit-file-name-handlers)))
           (process-adaptive-read-buffering
@@ -722,12 +723,18 @@ other stdio peer remains on the selected target."
          (remote-backend-stdio-bridge-command execution))))))
 
 (cl-defun remote-exec
-    (program &key args context (adapter "exec") link environment check trim)
+    (program &key args context (adapter "exec") link environment check trim
+             (filesystem-effects 'unknown))
   "Execute PROGRAM on a logical target and return a `remote-exec-result'.
 ARGS is a list passed verbatim.  CONTEXT is a context or logical path.
 ADAPTER and LINK constrain routing.  ENVIRONMENT is an override alist.
 With CHECK, signal `remote-exec-error' for a nonzero status.  With TRIM,
-trim surrounding whitespace from stdout and stderr."
+trim surrounding whitespace from stdout and stderr.  FILESYSTEM-EFFECTS is
+`none', `metadata', `content', or `unknown'; only `none' suppresses Tramp's
+conservative file-attribute cache flush."
+  (unless (memq filesystem-effects '(none metadata content unknown))
+    (error "Invalid remote process filesystem effects: %S"
+           filesystem-effects))
   (let* ((context (remote--context-value context))
          (stdout-buffer (generate-new-buffer " *remote-exec-stdout*"))
          (stderr-file (make-temp-file "remote-exec-stderr-"))
@@ -761,6 +768,10 @@ trim surrounding whitespace from stdout and stderr."
                            ;; execution/output buffer, or process-file silently
                            ;; falls back to that buffer's local directory.
                            (let ((default-directory physical-directory)
+                                 (process-file-side-effects
+                                  (if (eq filesystem-effects 'none)
+                                      nil
+                                    process-file-side-effects))
                                  (process-environment
                                   (remote--apply-environment
                                    base-process-environment overrides))
@@ -812,11 +823,16 @@ OPTIONS are forwarded to `remote-exec'."
 
 (cl-defun remote-exec-async
     (program &key args context (adapter "exec") link environment
-             callback name coding)
+             callback name coding (filesystem-effects 'unknown))
   "Execute PROGRAM asynchronously through the routed `make-process' boundary.
 CALLBACK receives one `remote-exec-result' after the process exits.  CONTEXT,
 ADAPTER, LINK, ENVIRONMENT, and ARGS have the same meaning as in
-  `remote-exec'.  The returned process retains its `remote-route' property."
+  `remote-exec'.  FILESYSTEM-EFFECTS has the same conservative contract as
+the synchronous API.  The returned process retains its `remote-route'
+property."
+  (unless (memq filesystem-effects '(none metadata content unknown))
+    (error "Invalid remote process filesystem effects: %S"
+           filesystem-effects))
   (let* ((context (remote--context-value context))
          (origin-buffer (current-buffer))
          (stderr-token (remote--stderr-frame-token))
@@ -849,7 +865,11 @@ ADAPTER, LINK, ENVIRONMENT, and ARGS have the same meaning as in
                  :noquery t
                  :sentinel #'ignore))
           (setq process
-                (remote-make-process
+                (let ((process-file-side-effects
+                       (if (eq filesystem-effects 'none)
+                           nil
+                         process-file-side-effects)))
+                  (remote-make-process
                  :name (or name
                            (format "remote-%s"
                                    (file-name-nondirectory program)))
@@ -922,7 +942,7 @@ ADAPTER, LINK, ENVIRONMENT, and ARGS have the same meaning as in
                                  (error-message-string callback-error)))))
                          (remote--schedule-async-capture-cleanup
                           finished stderr-process
-                          stdout-buffer stderr-buffer))))))))
+                          stdout-buffer stderr-buffer)))))))))
       (error
        (remote--dispose-async-capture-resources
         stderr-process stdout-buffer stderr-buffer)

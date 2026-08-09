@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'init-lsp-runtime)
 (require 'project)
 (require 'seq)
 (require 'subr-x)
@@ -208,13 +209,17 @@ Each entry is `(SYMBOL LOCAL-P VALUE)'.")
 (defun my/language-server-current-toolchain-profile (&optional buffer)
   "Return the effective toolchain profile for BUFFER."
   (with-current-buffer (or buffer (current-buffer))
-    (let* ((root (my/language-server-toolchain--canonical-root))
+    (let* ((runtime-profile
+            (and (fboundp 'my/language-server-runtime-current-profile)
+                 (my/language-server-runtime-current-profile)))
+           (root (my/language-server-toolchain--canonical-root))
            (family (my/language-server-toolchain-family))
            (profiles (my/language-server-toolchain-candidates root family))
            (override (gethash (cons root family)
                               my/language-server-toolchain--overrides))
            (configured (my/language-server-toolchain--configured-id root family)))
-      (or (my/language-server-toolchain--profile-by-id override profiles)
+      (or runtime-profile
+          (my/language-server-toolchain--profile-by-id override profiles)
           (my/language-server-toolchain--profile-by-id configured profiles)
           (seq-find (lambda (profile) (plist-get profile :default)) profiles)))))
 
@@ -473,6 +478,10 @@ project's SDK, server cache, or workspace directory into another buffer."
 (defun my/language-server-select-toolchain ()
   "Select a toolchain for the current project and language family."
   (interactive)
+  (when (and (fboundp 'my/language-server-runtime-current-profile)
+             (my/language-server-runtime-current-profile))
+    (user-error "Toolchain is controlled by runtime context: %s"
+                (my/language-server-runtime-description)))
   (let* ((root (my/language-server-toolchain--canonical-root))
          (family (my/language-server-toolchain-family))
          (profiles (my/language-server-toolchain-candidates root family))
