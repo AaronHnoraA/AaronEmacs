@@ -909,7 +909,8 @@
                (set-process-filter
                 client
                 (lambda (process string)
-                  (process-send-string process string))))))
+                 (process-send-string process string))))))
+           (buffers-before (buffer-list))
            forward client buffer)
       (unwind-protect
           (progn
@@ -951,6 +952,14 @@
               (should
                (with-current-buffer buffer
                  (string-match-p "roundtrip" (buffer-string))))
+              (should-not
+               (cl-find-if
+                (lambda (candidate)
+                  (and
+                   (not (memq candidate buffers-before))
+                   (string-prefix-p
+                    "remote-native-forward-" (buffer-name candidate))))
+                (buffer-list)))
               (remote-close-channel forward)
               (should (eq (remote-forward-state forward) 'closed))
               (should (eq (remote-channel-state channel) 'closed))

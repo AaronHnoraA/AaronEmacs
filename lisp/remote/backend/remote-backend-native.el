@@ -184,18 +184,28 @@ during path projection."
 
 (defun remote-backend-native--proxy-accept (server client _message)
   "Connect accepted CLIENT on SERVER to the configured destination."
+  ;; Emacs allocates a fresh buffer for every connection accepted by a
+  ;; server process, even when the listener itself has no process buffer.
+  ;; The proxy relays bytes exclusively through process filters, so retaining
+  ;; that empty buffer only leaks one Fundamental-mode buffer per reconnect.
+  ;; Install the buffering filter before killing the buffer because buffer
+  ;; teardown can run hooks which re-enter the process event loop.
+  (set-process-filter
+   client #'remote-backend-native--proxy-buffer-filter)
+  (when-let* ((buffer (process-buffer client)))
+    (set-process-buffer client nil)
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer)))
   (let* ((destination
           (process-get server 'remote-forward-destination))
          (host (plist-get destination :host))
          (port (plist-get destination :port))
          outbound)
     ;; A client may send its first bytes while the outbound connection is
-    ;; still being created.  Install a buffering filter before doing anything
-    ;; that can re-enter the process event loop, then flush it after pairing.
+    ;; still being created.  The buffering filter installed above preserves
+    ;; them until both forwarding peers are ready.
     (set-process-query-on-exit-flag client nil)
     (process-put client 'remote-forward-server server)
-    (set-process-filter
-     client #'remote-backend-native--proxy-buffer-filter)
     (set-process-sentinel
      client #'remote-backend-native--proxy-close-pair)
     (process-put
