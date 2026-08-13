@@ -16,6 +16,24 @@
       (accept-process-output nil 0.02))
     (funcall predicate)))
 
+(ert-deftest remote-gateway-encodes-string-keyed-hash-payloads ()
+  (let ((draft (make-hash-table :test #'equal)))
+    (puthash "title" "Group" draft)
+    (puthash "tags" ["algebra" "qc"] draft)
+    (let* ((encoded
+            (remote-gateway--encode
+             `((channel . "aaronnote:api:notes:create-node")
+               (args . [,draft]))))
+           (decoded
+            (json-parse-string encoded
+                               :object-type 'hash-table
+                               :array-type 'list))
+           (body (car (gethash "args" decoded))))
+      (should (equal (gethash "channel" decoded)
+                     "aaronnote:api:notes:create-node"))
+      (should (equal (gethash "title" body) "Group"))
+      (should (equal (gethash "tags" body) '("algebra" "qc"))))))
+
 (ert-deftest remote-gateway-http-evaluates-multiple-elisp-forms ()
   (let* ((info (remote-gateway-connection-info))
          (url-request-method "POST")

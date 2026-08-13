@@ -703,6 +703,27 @@ source: roam/demo/analysis.md
       (my/noema-roam--runtime-call-via-api "index" nil))
     (should (equal called-channel "aaronnote:api:notes:roam-index"))))
 
+(ert-deftest my/noema-roam-runtime-create-api-uses-string-keyed-hash-payload ()
+  (let ((draft-json
+         (json-encode
+          '((nodeType . "roam")
+            (title . "Group")
+            (path . "public/Math/Algebra/group.md")
+            (tags . ["algebra" "qc"]))))
+        captured)
+    (cl-letf (((symbol-function 'my/noema--api-call-sync)
+               (lambda (channel args)
+                 (setq captured (list channel args))
+                 (let ((response (make-hash-table :test #'equal)))
+                   (puthash "file" "/tmp/group.md" response)
+                   response))))
+      (my/noema-roam--runtime-call-via-api
+       "create" (list "--json" draft-json)))
+    (should (equal (car captured)
+                   "aaronnote:api:notes:create-node"))
+    (let ((body (aref (cadr captured) 0)))
+      (should (equal (gethash "tags" body) ["algebra" "qc"])))))
+
 (ert-deftest my/noema-roam-new-editable-fields-sync-draft ()
   (with-temp-buffer
     (my/noema-roam-new-mode)

@@ -108,15 +108,18 @@
       value)
      ((symbolp value) (symbol-name value))
      ((hash-table-p value)
-      (let (items)
+      ;; `json-serialize' accepts string keys in hash tables, but not in
+      ;; alists.  Keep this branch as a hash table instead of accidentally
+      ;; turning decoded JSON such as {"tags": ...} into a string-keyed alist
+      ;; that later fails with `wrong-type-argument symbolp'.
+      (let ((object (make-hash-table :test #'equal)))
         (maphash
          (lambda (key item)
-           (push
-            (cons (format "%s" key)
-                  (remote-gateway--json-value item (1+ depth)))
-            items))
+           (puthash (format "%s" key)
+                    (remote-gateway--json-value item (1+ depth))
+                    object))
          value)
-        items))
+        object))
      ((vectorp value)
       (vconcat
        (mapcar
