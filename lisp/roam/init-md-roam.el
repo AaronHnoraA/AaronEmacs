@@ -1026,7 +1026,7 @@ directory; /x is resolved against the roam vault root."
           (my/noema-roam--open-file-smart file parsed)
         (if ref
             (when (yes-or-no-p (format "Note '%s' not found. Create it? " ref))
-              (my/noema-roam-new-note ref))
+              (my/noema-roam--create-linked-node ref))
           (user-error "No Markdown roam link found at point"))))))
 
 (defun my/noema-roam-find-note ()
@@ -1066,16 +1066,16 @@ directory; /x is resolved against the roam vault root."
   (my/noema-roam-select-link))
 
 (defvar-local my/noema-roam-new--draft nil
-  "Draft plist edited by the current Roam New buffer.")
+  "Draft plist edited by the current Roam Node buffer.")
 
 (defvar-local my/noema-roam-new--templates nil
-  "Template records available to the current Roam New buffer.")
+  "Template records available to the current Roam Node buffer.")
 
 (defvar-local my/noema-roam-new--base-directory ""
-  "Relative default directory used by the current Roam New buffer.")
+  "Relative default directory used by the current Roam Node buffer.")
 
 (defvar-local my/noema-roam-new--widgets nil
-  "Editable widgets in the current Roam New buffer.")
+  "Editable widgets in the current Roam Node buffer.")
 
 (defvar my/noema-roam-new-mode-map
   (let ((map (make-sparse-keymap)))
@@ -1089,8 +1089,8 @@ directory; /x is resolved against the roam vault root."
     map)
   "Keymap for `my/noema-roam-new-mode'.")
 
-(define-derived-mode my/noema-roam-new-mode my/noema-roam-ui-mode "Roam-New"
-  "Native workbench for creating Noema Markdown notes."
+(define-derived-mode my/noema-roam-new-mode my/noema-roam-ui-mode "Roam-Node"
+  "Native workbench for creating Noema Markdown nodes."
   ;; This view is a form.  Keep it writable so Emacs widget fields accept direct
   ;; typing instead of forcing every edit through the minibuffer.
   (setq-local buffer-read-only nil)
@@ -1098,7 +1098,7 @@ directory; /x is resolved against the roam vault root."
               #'my/noema-roam-new-refresh)
   (setq-local widget-button-face 'my/noema-roam-ui-action)
   (setq-local widget-field-face 'my/noema-roam-ui-row-title)
-  (my/noema-roam-ui-set-header "Roam New" 'new "draft"))
+  (my/noema-roam-ui-set-header "Roam Node" 'new "draft"))
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'my/noema-roam-new-mode 'emacs))
@@ -1154,17 +1154,35 @@ directory; /x is resolved against the roam vault root."
     candidate))
 
 (defun my/noema-roam-new--normalize-tags (tags)
-  "Return TAGS as a clean string list."
-  (delete-dups
-   (seq-filter
-    (lambda (tag) (not (string-empty-p tag)))
-    (mapcar #'string-trim
-            (if (listp tags)
-                tags
-              (split-string (or tags "") "," t))))))
+  "Return TAGS in the same canonical form as the Noema runtime.
+TAGS may be a string, list, or vector.  Commas and whitespace separate tags;
+an optional leading # is display syntax and is not part of the stored tag.
+Duplicates are removed case-insensitively and the result is sorted."
+  (let ((by-key (make-hash-table :test #'equal)))
+    (dolist (raw (cond
+                  ((null tags) nil)
+                  ((stringp tags) (split-string tags "[,[:space:]]+" t))
+                  ((sequencep tags) (append tags nil))
+                  (t (list tags))))
+      (let* ((clean (replace-regexp-in-string
+                     "\\`#+" "" (string-trim (format "%s" raw))))
+             (key (downcase clean))
+             (previous (gethash key by-key)))
+        (when (and (not (string-empty-p clean))
+                   (or (null previous) (string= clean key)))
+          (puthash key clean by-key))))
+    (sort (hash-table-values by-key)
+          (lambda (left right)
+            (string-lessp (downcase left) (downcase right))))))
+
+(defun my/noema-roam-new--tag-display (tags)
+  "Return TAGS as Roam-style #tag display text."
+  (mapconcat (lambda (tag) (concat "#" tag))
+             (my/noema-roam-new--normalize-tags tags)
+             " "))
 
 (defun my/noema-roam-new--default-draft (&optional directory)
-  "Return a default Roam New draft rooted in DIRECTORY."
+  "Return a default Roam Node draft rooted in DIRECTORY."
   (list :node-type "roam"
         :title "Untitled"
         :path (my/noema-roam-new--unique-path
@@ -1174,9 +1192,9 @@ directory; /x is resolved against the roam vault root."
         :tags nil))
 
 (defun my/noema-roam-new--draft-for-create (draft &optional directory)
-  "Return DRAFT normalized like Noema New before creation.
-Empty title, path, and kind fields receive the same defaults as Noema's
-New Note form.  DIRECTORY defaults to the current Roam New base directory."
+  "Return DRAFT normalized for Noema create-node.
+Empty title, path, and kind fields receive the same defaults as the Noema
+create-node API.  DIRECTORY defaults to the current Roam Node base directory."
   (let* ((node-type
           (if (string= (downcase (format "%s" (plist-get draft :node-type)))
                        "regular")
@@ -1271,7 +1289,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
       templates))))
 
 (defun my/noema-roam-new--path-suggestions ()
-  "Return vault-relative directory suggestions for Roam New."
+  "Return vault-relative directory suggestions for Roam Node."
   (let ((root (file-name-as-directory (my/noema-roam-root)))
         (directories '("")))
     (dolist (record (my/noema-roam--note-records))
@@ -1283,7 +1301,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
     (sort (delete-dups directories) #'string<)))
 
 (defun my/noema-roam-new--tag-suggestions ()
-  "Return known roam tags for Roam New."
+  "Return known roam tags for Roam Node."
   (sort
    (delete-dups
     (apply #'append
@@ -1295,7 +1313,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
    #'string<))
 
 (defun my/noema-roam-new--kind-suggestions ()
-  "Return known note kinds for Roam New."
+  "Return known note kinds for Roam Node."
   (sort
    (delete-dups
     (cons "note"
@@ -1309,7 +1327,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
    #'string<))
 
 (defun my/noema-roam-new--set (key value)
-  "Set draft KEY to VALUE and rerender the Roam New buffer."
+  "Set draft KEY to VALUE and rerender the Roam Node buffer."
   (my/noema-roam-new--sync-draft-from-widgets)
   (setq-local my/noema-roam-new--draft
               (plist-put my/noema-roam-new--draft key value))
@@ -1321,7 +1339,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
     (substring-no-properties (format "%s" (widget-value widget)))))
 
 (defun my/noema-roam-new--sync-draft-from-widgets ()
-  "Copy editable field widget values into the current Roam New draft."
+  "Copy editable field widget values into the current Roam Node draft."
   (when (and my/noema-roam-new--widgets my/noema-roam-new--draft)
     (let ((draft my/noema-roam-new--draft))
       (dolist (entry '((:title . title)
@@ -1337,7 +1355,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
       (setq-local my/noema-roam-new--draft draft))))
 
 (defun my/noema-roam-new-edit-type ()
-  "Edit the note type in the current Roam New draft."
+  "Edit the note type in the current Roam Node draft."
   (interactive)
   (my/noema-roam-new--sync-draft-from-widgets)
   (let* ((old (plist-get my/noema-roam-new--draft :node-type))
@@ -1358,7 +1376,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
     (my/noema-roam-new-render t)))
 
 (defun my/noema-roam-new-edit-title ()
-  "Edit the title in the current Roam New draft."
+  "Edit the title in the current Roam Node draft."
   (interactive)
   (my/noema-roam-new--sync-draft-from-widgets)
   (let* ((old-title (plist-get my/noema-roam-new--draft :title))
@@ -1377,7 +1395,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
     (my/noema-roam-new-render t)))
 
 (defun my/noema-roam-new-edit-path ()
-  "Edit the save directory in the current Roam New draft."
+  "Edit the save directory in the current Roam Node draft."
   (interactive)
   (my/noema-roam-new--sync-draft-from-widgets)
   (let* ((root (file-name-as-directory (expand-file-name (my/noema-roam-root))))
@@ -1404,7 +1422,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
        filename)))))
 
 (defun my/noema-roam-new-edit-kind ()
-  "Edit the note kind in the current Roam New draft."
+  "Edit the note kind in the current Roam Node draft."
   (interactive)
   (my/noema-roam-new--set
    :kind
@@ -1413,7 +1431,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
                     (plist-get my/noema-roam-new--draft :kind))))
 
 (defun my/noema-roam-new-edit-template ()
-  "Edit the template in the current Roam New draft."
+  "Edit the template in the current Roam Node draft."
   (interactive)
   (my/noema-roam-new--sync-draft-from-widgets)
   (let* ((candidates (my/noema-roam-new--template-candidates))
@@ -1424,7 +1442,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
                                 (or (cdr (assoc choice candidates)) ""))))
 
 (defun my/noema-roam-new-edit-tags ()
-  "Edit tags in the current Roam New draft, adding one at a time."
+  "Edit tags in the current Roam Node draft, adding one at a time."
   (interactive)
   (my/noema-roam-new--sync-draft-from-widgets)
   (let* ((suggestions (my/noema-roam-new--tag-suggestions))
@@ -1448,7 +1466,7 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
 
 (defun my/noema-roam-new--insert-field
     (id icon label value detail action &optional tone)
-  "Insert one selectable Roam New field."
+  "Insert one selectable Roam Node field."
   (my/noema-roam-ui-insert-row
    :id id
    :icon icon
@@ -1462,12 +1480,12 @@ New Note form.  DIRECTORY defaults to the current Roam New base directory."
    :help (format "RET/mouse-1: edit %s" (downcase label))))
 
 (defun my/noema-roam-new--editable-width ()
-  "Return a reasonable width for Roam New editable fields."
+  "Return a reasonable width for Roam Node editable fields."
   (max 24 (min 72 (- (window-width) 32))))
 
 (defun my/noema-roam-new--insert-editable-field
     (id icon label value detail key &optional placeholder action)
-  "Insert directly editable Roam New field KEY.
+  "Insert directly editable Roam Node field KEY.
 ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
   (let ((start (point))
         (value (or value "")))
@@ -1518,7 +1536,7 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
            keymap ,my/noema-roam-ui-row-map))))))
 
 (defun my/noema-roam-new-render (&optional skip-sync)
-  "Render the current Roam New draft."
+  "Render the current Roam Node draft."
   (interactive)
   (unless skip-sync
     (my/noema-roam-new--sync-draft-from-widgets))
@@ -1534,15 +1552,18 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
          (kind (plist-get draft :kind))
          (template-key (plist-get draft :template-key))
          (template-label (my/noema-roam-new--template-label template-key))
-         (tags (plist-get draft :tags))
+         (tags (my/noema-roam-new--normalize-tags
+                (plist-get draft :tags)))
          (id (plist-get draft :id)))
+    (setq-local my/noema-roam-new--draft
+                (plist-put draft :tags tags))
     (my/noema-roam-ui-set-header
-     "Roam New" 'new (format "%s draft" node-type))
+     "Roam Node" 'new (format "%s draft" node-type))
     (my/noema-roam-ui-render
      (lambda ()
        (setq-local my/noema-roam-new--widgets nil)
        (my/noema-roam-ui-insert-page-header
-        "New note"
+        "New node"
         :icon 'new
         :subtitle "Type in fields; p for path; a to add tags one by one; c to create"
         :stats (list (cons (upcase node-type)
@@ -1551,11 +1572,11 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
         :actions
         '((:label "c Create"
            :command my/noema-roam-new-create
-           :help "Create this note through the Noema runtime"
+           :help "Create this node through the Noema runtime"
            :primary t)
           (:label "t Type"
            :command my/noema-roam-new-edit-type
-           :help "Switch between roam and regular Markdown notes")
+           :help "Switch between a roam node and a regular Markdown document")
           (:label "T Template"
            :command my/noema-roam-new-edit-template
            :help "Choose a Markdown template")
@@ -1595,8 +1616,8 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
         #'my/noema-roam-new-edit-template)
        (my/noema-roam-new--insert-editable-field
         'tags 'tag "TAGS"
-        (if tags (string-join tags ", ") nil)
-        "Comma-separated graph tags; a adds with completion."
+        (my/noema-roam-new--tag-display tags)
+        "Roam #tags; commas or spaces also work, and a adds with completion."
         'tags "" #'my/noema-roam-new-edit-tags)
        (insert "\n")
        (my/noema-roam-ui-insert-section "Result")
@@ -1610,20 +1631,20 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
          (expand-file-name path (my/noema-roam-root)))
         'my/noema-roam-ui-path)
        (my/noema-roam-ui-insert-field
-        "Create engine" "Noema runtime" 'my/noema-roam-ui-meta)
+        "Create engine" "Noema create-node runtime" 'my/noema-roam-ui-meta)
        (widget-setup)))
     (unless (get-text-property (point) 'aaron-ui-board--item-id)
       (my/noema-roam-ui-goto-first-item))))
 
 (defun my/noema-roam-new-refresh ()
-  "Reload templates and rerender the current Roam New draft."
+  "Reload templates and rerender the current Roam Node draft."
   (interactive)
   (setq-local my/noema-roam-new--templates
               (my/noema-roam-new--load-templates))
   (my/noema-roam-new-render))
 
 (defun my/noema-roam-new-reset ()
-  "Reset the current Roam New draft."
+  "Reset the current Roam Node draft."
   (interactive)
   (setq-local my/noema-roam-new--draft
               (my/noema-roam-new--default-draft
@@ -1631,9 +1652,8 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
   (my/noema-roam-new-render))
 
 (defun my/noema-roam-new (&optional base-directory draft)
-  "Open the native Roam New workbench.
+  "Open the native Roam Node workbench.
 BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
-  (interactive)
   (let* ((base-directory
           (my/noema-roam-new--normalize-directory
            (or base-directory
@@ -1644,7 +1664,7 @@ BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
                   (file-name-directory file)
                   (my/noema-roam-root)))
                "")))
-         (buffer (get-buffer-create "*roam-new*")))
+         (buffer (get-buffer-create "*roam-new-node*")))
     (with-current-buffer buffer
       (my/noema-roam-new-mode)
       (setq-local my/noema-roam-new--base-directory base-directory
@@ -1674,11 +1694,11 @@ BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
          (payload (my/noema-roam-new--payload draft))
          (json (json-encode payload))
          (response (my/noema-roam--runtime-call "create" "--json" json))
-         (file (and response (gethash "file" response))))
+         (file (and (hash-table-p response) (gethash "file" response))))
     (unless response
       (user-error "Noema runtime failed — see *Messages* for details"))
     (unless (and file (file-exists-p file))
-      (user-error "Noema runtime did not create the note (path: %s)"
+      (user-error "Noema runtime did not create the node (path: %s)"
                   (or file "nil")))
     (my/noema-roam--clear-runtime-cache)
     (when (derived-mode-p 'my/noema-roam-new-mode)
@@ -1689,39 +1709,36 @@ BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
     file))
 
 (defun my/noema-roam-new-create ()
-  "Create the current Roam New draft."
+  "Create the current Roam Node draft."
   (interactive)
   (my/noema-roam-new--sync-draft-from-widgets)
   (my/noema-roam-new--create-draft my/noema-roam-new--draft))
 
-(defun my/noema-roam-new-note (&optional slug title tags)
-  "Create a roam note, or open Roam New when called interactively.
-Non-interactive SLUG, TITLE, and TAGS calls preserve compatibility with link
-creation commands while using the Noema runtime."
-  (interactive)
-  (if (called-interactively-p 'interactive)
-      (my/noema-roam-new)
-    (let* ((slug (my/noema-roam--strip-vault-prefix (or slug "")))
-           (path (if (my/noema-roam--ref-has-extension-p slug)
-                     slug
-                   (concat slug ".md")))
-           (id (file-name-sans-extension slug))
-           (title
-            (or title
-                (capitalize
-                 (replace-regexp-in-string
-                  "[-_/]" " " (file-name-nondirectory id))))))
-      (my/noema-roam-new--create-draft
-       (list :node-type "roam"
-             :id id
-             :title title
-             :path path
-             :kind "note"
-             :template-key "roam"
-             :tags (my/noema-roam-new--normalize-tags tags))))))
+(defun my/noema-roam--create-linked-node (slug &optional title tags)
+  "Create an internal missing-link node at fixed roam SLUG.
+TITLE defaults from SLUG.  TAGS use the canonical create-node tag rules."
+  (let* ((slug (my/noema-roam--strip-vault-prefix (or slug "")))
+         (path (if (my/noema-roam--ref-has-extension-p slug)
+                   slug
+                 (concat slug ".md")))
+         (id (file-name-sans-extension slug))
+         (title
+          (or title
+              (capitalize
+               (replace-regexp-in-string
+                "[-_/]" " " (file-name-nondirectory id))))))
+    (my/noema-roam-new--create-draft
+     (list :node-type "roam"
+           :id id
+           :title title
+           :path path
+           :kind "note"
+           :template-key "roam"
+           :tags (my/noema-roam-new--normalize-tags tags)))))
 
-(defun my/noema-roam-new-node (&optional title directory)
-  "Open Roam New, or create a timestamped node from TITLE in DIRECTORY."
+(defun my/noema-roam-new-node (&optional title directory tags)
+  "Open Roam Node, or create a timestamped node from TITLE in DIRECTORY.
+Optional TAGS are normalized with the same rules as the interactive form."
   (interactive)
   (if (called-interactively-p 'interactive)
       (my/noema-roam-new directory)
@@ -1740,7 +1757,7 @@ creation commands while using the Noema runtime."
              :path path
              :kind "note"
              :template-key "roam"
-             :tags nil)))))
+             :tags (my/noema-roam-new--normalize-tags tags))))))
 
 ;; ── Canonical Wiki records ───────────────────────────────────────────────────
 
@@ -4009,8 +4026,7 @@ canonical `roam://note-id#tag' target."
     (define-key map (kbd "I") #'my/noema-roam-insert-tag-id-link)
     (define-key map (kbd "c") #'my/noema-roam-insert-toc-link)
     (define-key map (kbd "y") #'my/noema-roam-copy-link-to-here)
-    (define-key map (kbd "n") #'my/noema-roam-new-note)
-    (define-key map (kbd "N") #'my/noema-roam-new-node)
+    (define-key map (kbd "n") #'my/noema-roam-new-node)
     (define-key map (kbd "#") #'my/noema-roam-insert-tag-id)
     (define-key map (kbd "g") #'my/noema-roam-generate-tag-id)
     (define-key map (kbd "s") #'my/noema-roam-search-notes)
@@ -4347,7 +4363,7 @@ added separately by `my/noema-roam--capf-setup')."
                               (if (= by-count 1) "" "s"))
                 :action (let ((ref target))
                           (lambda (_b)
-                            (my/noema-roam-new-note ref nil nil))))))))))
+                            (my/noema-roam--create-linked-node ref))))))))))
     (display-buffer buf)))
 
 (defun my/noema-roam-report-wanted ()
@@ -4717,24 +4733,15 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :detail "Jump by Noema id, path, or title."
      :command my/noema-roam-find-note
      :help "Find and open a roam note")
-    (:id create-note
+    (:id create-node
      :icon new
      :badge "CREATE"
      :badge-tone success
-     :title "Create note"
-     :meta "Roam New"
-     :detail "Open the native note creation workbench."
-     :command my/noema-roam-new-note
-     :help "Create a new roam note")
-    (:id create-node
-     :icon new
-     :badge "NODE"
-     :badge-tone success
      :title "Create node"
-     :meta "timestamped"
-     :detail "Start a timestamped node in the selected directory."
+     :meta "Roam Node"
+     :detail "Open the single native node creation workbench."
      :command my/noema-roam-new-node
-     :help "Create a new timestamped node")
+     :help "Create a new roam node")
     (:id search-notes
      :icon search
      :badge "QUERY"

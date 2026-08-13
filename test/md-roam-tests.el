@@ -652,9 +652,9 @@ source: roam/demo/analysis.md
           (my/noema-roam-ui-activate))
         (should (equal opened "demo/"))))))
 
-(ert-deftest my/noema-roam-new-opens-aaronnote-style-native-draft ()
+(ert-deftest my/noema-roam-new-opens-single-node-draft ()
   (my/noema-roam-test-with-vault
-    (when-let* ((buffer (get-buffer "*roam-new*")))
+    (when-let* ((buffer (get-buffer "*roam-new-node*")))
       (kill-buffer buffer))
     (let ((response (make-hash-table :test 'equal))
           (template (make-hash-table :test 'equal))
@@ -670,9 +670,10 @@ source: roam/demo/analysis.md
                        (setq displayed buffer)
                        buffer)))
             (my/noema-roam-new "demo")
-            (should (eq displayed (get-buffer "*roam-new*")))
-            (with-current-buffer "*roam-new*"
+            (should (eq displayed (get-buffer "*roam-new-node*")))
+            (with-current-buffer "*roam-new-node*"
               (should (derived-mode-p 'my/noema-roam-new-mode))
+              (should (string-match-p "New node" (buffer-string)))
               (should (equal (plist-get my/noema-roam-new--draft :path)
                              "demo/untitled.md"))
               (should (equal (plist-get
@@ -688,7 +689,7 @@ source: roam/demo/analysis.md
               (dolist (label '("TYPE" "TITLE" "SAVE PATH"
                                "KIND" "TEMPLATE" "TAGS"))
                 (should (string-match-p label (buffer-string))))))
-        (when-let* ((buffer (get-buffer "*roam-new*")))
+        (when-let* ((buffer (get-buffer "*roam-new-node*")))
           (kill-buffer buffer))))))
 
 (ert-deftest my/noema-roam-runtime-index-uses-roam-only-api ()
@@ -727,7 +728,7 @@ source: roam/demo/analysis.md
     (should (equal (plist-get my/noema-roam-new--draft :kind)
                    "theorem"))
     (should (equal (plist-get my/noema-roam-new--draft :tags)
-                   '("work" "math")))))
+                   '("math" "work")))))
 
 (ert-deftest my/noema-roam-new-title-updates-default-path ()
   (with-temp-buffer
@@ -780,10 +781,10 @@ source: roam/demo/analysis.md
                    (lambda (&rest _args) (pop answers))))
           (my/noema-roam-new-edit-tags)))
       (should (equal (plist-get my/noema-roam-new--draft :tags)
-                     '("math" "logic")))
+                     '("logic" "math")))
       (should (equal (widget-value
                       (alist-get 'tags my/noema-roam-new--widgets))
-                     "math, logic")))))
+                     "#logic #math")))))
 
 (ert-deftest my/noema-roam-new-path-and-tags-labels-run-actions ()
   (my/noema-roam-test-with-vault
@@ -821,7 +822,7 @@ source: roam/demo/analysis.md
                      '("math")))
       (should (equal (widget-value
                       (alist-get 'tags my/noema-roam-new--widgets))
-                     "math")))))
+                     "#math")))))
 
 (ert-deftest my/noema-roam-new-default-draft-avoids-existing-untitled ()
   (my/noema-roam-test-with-vault
@@ -899,7 +900,84 @@ source: roam/demo/analysis.md
         (should (equal (gethash "path" payload)
                        "projects/project-atlas.md"))
         (should (equal (gethash "templateKey" payload) "project"))
-        (should (equal (gethash "tags" payload) '("work" "planning")))))))
+        (should (equal (gethash "tags" payload) '("planning" "work")))))))
+
+(ert-deftest my/noema-roam-new-tags-use-runtime-canonical-form ()
+  (should
+   (equal (my/noema-roam-new--normalize-tags
+           ["#Work" "math" "work" "TCS" "tcs"])
+          '("math" "tcs" "work")))
+  (should
+   (equal (my/noema-roam-new--normalize-tags
+           "#Work, math  work #TCS")
+          '("math" "TCS" "work")))
+  (should
+   (equal (my/noema-roam-new--tag-display '("work" "math"))
+          "#math #work")))
+
+(ert-deftest my/noema-roam-exposes-one-node-creation-entry ()
+  (should (commandp #'my/noema-roam-new-node))
+  (should-not (commandp #'my/noema-roam-new))
+  (should-not (fboundp 'my/noema-roam-new-note))
+  (should (eq (lookup-key my/noema-roam-map (kbd "n"))
+              #'my/noema-roam-new-node))
+  (should-not (lookup-key my/noema-roam-map (kbd "N")))
+  (should (= (seq-count
+              (lambda (tool) (eq (plist-get tool :id) 'create-node))
+              my/noema-roam--dashboard-tools)
+             1))
+  (should-not
+   (seq-find (lambda (tool) (eq (plist-get tool :id) 'create-note))
+             my/noema-roam--dashboard-tools)))
+
+(ert-deftest my/noema-roam-new-create-button-syncs-roam-tags-to-runtime ()
+  (my/noema-roam-test-with-vault
+    (let* ((buffer (generate-new-buffer " *roam-node-click-test*"))
+           (created-file (expand-file-name "projects/direct-click.md" root))
+           captured
+           opened)
+      (unwind-protect
+          (progn
+            (with-current-buffer buffer
+              (my/noema-roam-new-mode)
+              (setq-local my/noema-roam-new--base-directory "projects"
+                          my/noema-roam-new--templates
+                          '((:key "roam" :name "Roam note"))
+                          my/noema-roam-new--draft
+                          (my/noema-roam-new--default-draft "projects"))
+              (my/noema-roam-new-render)
+              (widget-value-set (alist-get 'title my/noema-roam-new--widgets)
+                                "Direct Click")
+              (widget-value-set (alist-get 'path my/noema-roam-new--widgets)
+                                "projects/direct-click.md")
+              (widget-value-set (alist-get 'tags my/noema-roam-new--widgets)
+                                "#Work, math work")
+              (goto-char (point-min))
+              (search-forward "c Create")
+              (goto-char (match-beginning 0))
+              (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
+                         (lambda (action &rest args)
+                           (setq captured
+                                 (list action
+                                       (json-parse-string
+                                        (cadr args)
+                                        :object-type 'hash-table
+                                        :array-type 'list)))
+                           (my/noema-roam-test--write-file
+                            created-file "# Direct Click\n")
+                           (let ((response (make-hash-table :test 'equal)))
+                             (puthash "file" created-file response)
+                             response)))
+                        ((symbol-function 'my/noema-open-file)
+                         (lambda (file) (setq opened file))))
+                (push-button)))
+            (should-not (buffer-live-p buffer))
+            (should (equal opened created-file))
+            (should (equal (car captured) "create"))
+            (should (equal (gethash "tags" (cadr captured))
+                           '("math" "work"))))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))))))
 
 (provide 'md-roam-tests)
 ;;; md-roam-tests.el ends here

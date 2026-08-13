@@ -164,13 +164,16 @@ header-line 显示当前视图状态，正文使用工具栏、分组、状态�
 `g` 回根目录、`.` 回当前 note context、`u` / `^` 上一级、`r` 刷新和 `i`
 直接插入当前目标。这些是 Emacs buffer 的界面和按键，不影响 Noema Web UI。
 
-`C-c r n` / Roam 菜单里的 `new note` 打开 `*roam-new*` 原生新建面板。字段与
-Noema New Note 一致：Type、Title、Save path、Kind、Template、Tags；Title、Save
+`C-c r n` / Roam 菜单里的 `Create node` 打开唯一的 `*roam-new-node*` 原生新建面板；
+不再并列显示含义相同的 New note / Create node 两个入口。字段与 Noema create-node
+一致：Type、Title、Save path、Kind、Template、Tags；Title、Save
 path、Kind 和 Tags 可在面板里直接输入，`c` 创建，`t` / `RET` 切换 roam / regular，
 `T` 选模板，`R` 重置。创建实际走
 Noema runtime，所以默认值、路径校验、meta、模板变量和 tabstop 展开逻辑保持一致。
 Markdown 模板统一存放在 `templates/noema/`，供 Emacs 启动的 Noema 与
-Roam New 共用。所有新建 note 的 meta 都会带一个空的嵌套 `summary` block，可直接在 Abstract
+Roam Node 共用。Tags 在面板中显示为 `#tag`，创建前按 runtime 规则去掉显示用 `#`、
+大小写去重并排序，保证面板、payload 和最终 meta 一致。所有新建 node 的 meta 都会带
+一个空的嵌套 `summary` block，可直接在 Abstract
 或 Properties 中编辑；模板自带 meta 时也会自动补齐，不需要每个模板重复声明。
 
 ### Noema Slides
@@ -204,7 +207,7 @@ HTML：顶层 `<section data-background-color="…">…</section>` 会被直接�
 `data-auto-animate`、`fragment` 等 Reveal 指令。第一次打开 slides note 时会创建相邻的
 `.slides/<note>.js` 与 `.slides/<note>.css` mirror；铅笔 Tools 中的 **Reveal mirror** 会在 Emacs
 打开 JS mirror。它在 Reveal 初始化后以 ES module 运行，默认导出函数接收 `{ Reveal, root, file }`。
-可从 Roam New 的 Slides 模板创建，或参考 `templates/aaronnote/slides/markdown-mode/demo`。
+可从 Roam Node 的 Slides 模板创建，或参考 `templates/noema/slides/markdown-mode/demo`。
 
 ### Noema LaTeX 导出
 
