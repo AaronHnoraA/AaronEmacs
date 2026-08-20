@@ -18,6 +18,9 @@
 (require 'url-util)
 (require 'init-aaronnote-jupyter-cell)
 (require 'init-aaronnote-jupyter-runtime)
+(require 'init-aaronnote-jupyter-server)
+(require 'init-aaronnote-jupyter-manager)
+(require 'init-aaronnote-jupyter-engine)
 (require 'init-aaronnote-jupyter-lsp)
 
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
@@ -54,6 +57,7 @@
 (defvar remote-mode nil)
 (defvar my/appine-tab-list)
 (defvar my/xwidget--session-id)
+(defvar my/xwidget-suppress-auto-focus)
 
 ;; Publish module — lazy, loaded only when a publish command is first invoked.
 (autoload 'my/noema-publish              "init-aaronnote-publish" nil t)
@@ -84,6 +88,9 @@
 (defvar my/noema--tmp-root
   (expand-file-name "tmp" my/noema--state-root)
   "Path to Noema runtime temporary files under the Emacs config.")
+
+(defconst my/noema-jupyter-output-buffer-name "*Noema Jupyter*")
+(defconst my/noema-jupyter-output-client-id "aaronnote-jupyter")
 
 (defvar my/noema--snippets-root
   (expand-file-name "snippets" user-emacs-directory)
@@ -444,6 +451,96 @@ Local files are projected to native host paths.  Remote files retain their
                  "&"))
       base)))
 
+(defun my/noema-jupyter--output-url (payload)
+  "Return the singleton Jupyter output page URL for PAYLOAD."
+  (let ((base (my/noema--server-url "/jupyter.html")) params)
+    (dolist (entry payload)
+      (when (and (cdr entry) (not (string-empty-p (format "%s" (cdr entry)))))
+        (push (cons (format "%s" (car entry)) (format "%s" (cdr entry))) params)))
+    (push (cons "client" my/noema-jupyter-output-client-id) params)
+    (concat base "?"
+            (mapconcat
+             (lambda (entry)
+               (format "%s=%s"
+                       (url-hexify-string (car entry))
+                       (url-hexify-string (cdr entry))))
+             (nreverse params) "&"))))
+
+(defun my/noema-jupyter--output-dispatch (buffer payload)
+  "Ask an existing Jupyter output BUFFER to open PAYLOAD as a tab."
+  (when (and (buffer-live-p buffer)
+             (fboundp 'xwidget-webkit-current-session)
+             (fboundp 'xwidget-webkit-execute-script))
+    (with-current-buffer buffer
+      (when-let* ((session (xwidget-webkit-current-session)))
+        (xwidget-webkit-execute-script
+         session
+         (format
+          "(() => { const p = %s; if (typeof window.noemaJupyterOpenDocument === 'function') { window.noemaJupyterOpenDocument(p); if (p.view && typeof window.noemaJupyterOpenView === 'function') window.noemaJupyterOpenView(p.view); return true; } return false; })()"
+          (json-serialize payload :null-object nil :false-object :json-false)))))))
+
+;;;###autoload
+(defun my/noema-jupyter-output-open (&optional cell-id focus view)
+  "Open the singleton Noema Jupyter output page for CELL-ID.
+The page is displayed below the current script buffer.  With FOCUS non-nil,
+move keyboard focus to the page; otherwise preserve source-buffer focus."
+  (interactive (list nil t))
+  (unless (and buffer-file-name
+               (bound-and-true-p my/noema-jupyter-cell-mode))
+    (user-error "Current buffer is not a Noema Jupyter Cell script"))
+  (my/noema-jupyter-cell--update-highlight)
+  (let* ((source-buffer (current-buffer))
+         (source-window (selected-window))
+         (payload
+          `((scriptFile . ,(my/noema--host-file buffer-file-name))
+            (sourceFile . ,(my/noema--host-file
+                            my/noema-jupyter-cell-source-file))
+            (cellId . ,(or cell-id my/noema-jupyter-cell-current-id ""))
+            (language . ,(or my/noema-jupyter-cell-language "python"))
+            (kernel . ,(or my/noema-jupyter-cell-kernel "python3"))
+            (session . ,(or my/noema-jupyter-cell-session "default"))
+            ,@(when view `((view . ,view)))))
+         (url (my/noema-jupyter--output-url payload)))
+    (my/noema--ensure-server
+     (lambda ()
+       (when (and (buffer-live-p source-buffer)
+                  (window-live-p source-window))
+         (with-selected-window source-window
+           (let* ((existing
+                   (and (fboundp 'my/xwidget-session-buffer)
+                        (my/xwidget-session-buffer
+                         my/noema-jupyter-output-client-id)))
+                  (target-window
+                   (or (and existing (get-buffer-window existing 'visible))
+                       (split-window source-window nil 'below)))
+                  buffer)
+             (if (buffer-live-p existing)
+                 (progn
+                   (setq buffer existing)
+                   (set-window-buffer target-window buffer)
+                   (my/noema-jupyter--output-dispatch buffer payload))
+               (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
+               (with-selected-window target-window
+                 (setq buffer
+                       (my/xwidget-open-url
+                        url :id my/noema-jupyter-output-client-id
+                        :display 'current :reuse-selected t))))
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (setq-local my/xwidget-suppress-auto-focus (not focus))
+                 (setq-local my/noema--client-id
+                             my/noema-jupyter-output-client-id)
+                 (setq-local my/noema--xwidget-forced-name
+                             my/noema-jupyter-output-buffer-name)
+                 (unless (equal (buffer-name) my/noema-jupyter-output-buffer-name)
+                   (rename-buffer my/noema-jupyter-output-buffer-name t))))
+             (if focus
+                 (progn
+                   (select-window target-window)
+                   (run-at-time 0.2 nil #'my/xwidget-focus buffer))
+               (select-window source-window)))))))
+    (get-buffer my/noema-jupyter-output-buffer-name)))
+
 (defun my/noema--markdown-file-p (file)
   "Return non-nil when FILE is a Markdown file."
   (and file
@@ -745,7 +842,7 @@ to JSON a second time."
               ;; Source region (lean, etc.) or explicit tag: open in Emacs.
               (my/noema--goto-location file line-number column)
               (when (and (stringp file)
-                         (string-match-p (concat "\\(?:\\`\\|/\\)\\.cell/[^/]+\\'")
+                         (string-match-p (concat "\\(?:\\`\\|/\\)\\.cell/[^/]+\\.ipynb\\'")
                                          file)
                          (require 'init-aaronnote-jupyter-cell nil t))
                 (ignore-errors
@@ -1965,10 +2062,13 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
      (mapcar #'my/noema--gateway-hash-value value)))
    (t value)))
 
-(defun my/noema--api-call-sync (channel args)
+(defun my/noema--api-call-sync (channel args &optional timeout)
   "Call CHANNEL with ARGS synchronously; return parsed JSON or nil.
 Only usable when the web-host is running (`my/noema--ready' is non-nil).
-Blocks the caller until the response arrives (or 8 s timeout)."
+Blocks the caller until the response arrives or TIMEOUT seconds elapse
+\(8 by default).  Interactive callers that run on a keystroke — completion
+at point, for instance — should pass a much shorter TIMEOUT so a busy
+kernel cannot freeze the editor."
   (when-let* ((client
                (and my/noema--ready
                     (remote-gateway-find-client "aaronnote")))
@@ -1976,27 +2076,39 @@ Blocks the caller until the response arrives (or 8 s timeout)."
                (remote-gateway-request-sync
                 client "aaronnote.api"
                 `((channel . ,channel) (args . ,args))
-                8)))
+                (or timeout 8))))
     (my/noema--gateway-hash-value result)))
 
+(defun my/noema-api-call (channel args callback)
+  "Call CHANNEL with ARGS and invoke CALLBACK with (RESULT ERROR).
+Unlike the compatibility wrapper `my/noema--api-call', CALLBACK is also
+invoked when Noema is offline or the gateway request fails."
+  (if-let* ((client
+             (and my/noema--ready
+                  (remote-gateway-find-client "aaronnote"))))
+      (remote-gateway-request-async
+       client "aaronnote.api"
+       `((channel . ,channel) (args . ,args))
+       (lambda (result error-object)
+         (if error-object
+             (funcall callback nil error-object)
+           (funcall callback result nil)))
+       10)
+    (run-at-time
+     0 nil callback nil
+     '((code . "offline") (message . "Noema web-host is not ready")))))
+
 (defun my/noema--api-call (channel args callback)
-  "Call CHANNEL with ARGS and asynchronously invoke CALLBACK."
-  (when-let* ((client
-               (and my/noema--ready
-                    (remote-gateway-find-client "aaronnote"))))
-    (remote-gateway-request-async
-     client "aaronnote.api"
-     `((channel . ,channel) (args . ,args))
-     (lambda (result error-object)
-       (if error-object
-           (message
-            "Noema API error %s: %s"
-            (or (alist-get "code" error-object nil nil #'string=)
-                "unknown")
-            (or (alist-get "message" error-object nil nil #'string=)
-                "request failed"))
-         (funcall callback result)))
-     10)))
+  "Compatibility wrapper that invokes CALLBACK only after a successful call."
+  (my/noema-api-call
+   channel args
+   (lambda (result error-object)
+     (if error-object
+         (message
+          "Noema API error %s: %s"
+          (or (my/noema-jupyter--get 'code error-object) "unknown")
+          (or (my/noema-jupyter--get 'message error-object) "request failed"))
+       (funcall callback result)))))
 
 (defun my/noema-runtime-status ()
   "Display the Noema runtime debug snapshot."

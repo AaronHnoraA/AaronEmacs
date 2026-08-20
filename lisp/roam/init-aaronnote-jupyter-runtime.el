@@ -22,7 +22,7 @@
 
 (cl-defstruct (my/noema-jupyter-runtime
                (:constructor my/noema-jupyter-runtime-create))
-  id key context workspace source-file kernel spec pid connection-file
+  id manager-id context workspace placement-file kernel spec pid connection-file
   target-connection client-connection channel-group generation state
   state-lost log-file resource-directory)
 
@@ -70,8 +70,8 @@
                     (remote-canonicalize-file-name raw))))
     (unless (and file
                  (remote-fs-file-name-p file)
-                 (string-match-p "/\\.cell/[^/]+\\'" file))
-      (error "Jupyter sidecar must be a logical file directly under .cell/: %s"
+                 (string-match-p "/\\.cell/[^/]+\\.ipynb\\'" file))
+      (error "Jupyter notebook must be an ipynb directly under .cell/: %s"
              raw))
     file))
 
@@ -269,18 +269,23 @@
 
 (defun my/noema-jupyter--launch-runtime (params)
   "Launch and return a target-owned runtime described by PARAMS."
-  (let* ((key (format "%s" (my/noema-jupyter--get 'key params)))
-         (source
+  (let* ((manager-id
+          (format "%s"
+                  (or (my/noema-jupyter--get 'kernelId params)
+                      (my/noema-jupyter--get 'key params)
+                      (format "kernel-%s" (float-time)))))
+         (placement-file
           (format
            "%s"
            (or
             (my/noema-jupyter--get 'sourceFile params)
-            (car (split-string key "\0" t)))))
+            (my/noema-jupyter--get 'file params)
+            (error "Missing Jupyter target placement file"))))
          (kernel
           (format "%s"
                   (or (my/noema-jupyter--get 'kernelName params)
                       "python3")))
-         (context (my/noema-jupyter--context source))
+         (context (my/noema-jupyter--context placement-file))
          (workspace
           (remote-workspace-open context :load-environment t))
          (spec-entry
@@ -288,7 +293,7 @@
            (lambda (entry)
              (equal kernel
                     (my/noema-jupyter--get 'name entry)))
-           (my/noema-jupyter--kernelspecs source)))
+           (my/noema-jupyter--kernelspecs placement-file)))
          (spec (and spec-entry
                     (my/noema-jupyter--get 'spec spec-entry))))
     (unless spec
@@ -299,7 +304,7 @@
                     (substring
                      (secure-hash
                       'sha256
-                      (format "%s:%s:%s" key (float-time) (random)))
+                      (format "%s:%s:%s" manager-id (float-time) (random)))
                      0 24)))
            (directory
             (my/noema-jupyter--runtime-directory workspace))
@@ -350,8 +355,12 @@
               (error "Target launcher returned an invalid kernel PID"))
 	    (setq runtime
 		  (my/noema-jupyter-runtime-create
-		   :id runtime-id :key key :context context :workspace workspace
-		   :source-file source :kernel kernel :spec spec :pid pid
+		   :id runtime-id :manager-id manager-id
+		   :context context :workspace workspace
+		   ;; Placement is only a Remote target/workspace anchor.  It is not
+		   ;; runtime identity and is never exposed as kernel ownership.
+		   :placement-file placement-file
+		   :kernel kernel :spec spec :pid pid
 		   :resource-directory
 		   (my/noema-jupyter--get 'resourceDir spec-entry)
 		   :connection-file connection-file
@@ -447,6 +456,72 @@
      my/noema-jupyter-runtimes))
   runtime)
 
+(defun my/noema-jupyter-runtime-snapshot (&optional target-id)
+  "Return a passive normalized snapshot of brokered Jupyter runtimes.
+When TARGET-ID is non-nil, include only runtimes owned by that Remote target."
+  (cl-loop
+   for runtime being the hash-values of my/noema-jupyter-runtimes
+   for context = (my/noema-jupyter-runtime-context runtime)
+   for owner = (remote-context-target-id context)
+   when (or (null target-id) (equal target-id owner))
+   collect
+   (list :id (format "runtime:noema-broker:%s"
+                     (my/noema-jupyter-runtime-id runtime))
+         :kind 'runtime :provider 'noema-broker
+         :runtime-id (my/noema-jupyter-runtime-id runtime)
+         :host-runtime-id (my/noema-jupyter-runtime-id runtime)
+         :manager-kernel-id (my/noema-jupyter-runtime-manager-id runtime)
+         :target-id owner
+         :kernel (my/noema-jupyter-runtime-kernel runtime)
+         ;; Snapshotting is intentionally passive: liveness probes belong to
+         ;; Remote Doctor and must not block or start work when the Board opens.
+         :status (or (my/noema-jupyter-runtime-state runtime) 'unknown)
+         :pid (my/noema-jupyter-runtime-pid runtime)
+         :generation (my/noema-jupyter-runtime-generation runtime)
+         :state-lost (my/noema-jupyter-runtime-state-lost runtime)
+         :connection-file (my/noema-jupyter-runtime-connection-file runtime)
+         :log-file (my/noema-jupyter-runtime-log-file runtime)
+         :resource-directory
+         (my/noema-jupyter-runtime-resource-directory runtime))))
+
+(defun my/noema-jupyter--restart-runtime (runtime)
+  "Restart brokered RUNTIME and return its replacement.
+The placement file is a target/workspace anchor only; the opaque manager ID
+remains the kernel identity across provider replacement."
+  (let ((launch-params
+         `((kernelId . ,(my/noema-jupyter-runtime-manager-id runtime))
+           (sourceFile . ,(my/noema-jupyter-runtime-placement-file runtime))
+           (kernelName . ,(my/noema-jupyter-runtime-kernel runtime)))))
+    (my/noema-jupyter--shutdown-runtime runtime)
+    (let ((replacement (my/noema-jupyter--launch-runtime launch-params)))
+      (setf
+       (my/noema-jupyter-runtime-generation replacement)
+       (1+ (my/noema-jupyter-runtime-generation runtime))
+       (my/noema-jupyter-runtime-state-lost replacement) t)
+      replacement)))
+
+(defun my/noema-jupyter-runtime-control (runtime-id action callback)
+  "Apply ACTION to broker RUNTIME-ID and invoke CALLBACK with (RESULT ERROR).
+The operation is deferred so callers never run routed process work from a UI
+button's redisplay stack."
+  (run-at-time
+   0 nil
+   (lambda ()
+     (condition-case error
+         (let ((runtime (or (gethash runtime-id my/noema-jupyter-runtimes)
+                            (error "Unknown Noema Jupyter runtime: %s" runtime-id))))
+           (pcase action
+             ('interrupt (my/noema-jupyter--signal runtime "INT"))
+             ('restart (setq runtime (my/noema-jupyter--restart-runtime runtime)))
+             ('shutdown (my/noema-jupyter--shutdown-runtime runtime))
+             (_ (error "Unsupported Noema Jupyter action: %s" action)))
+           (funcall callback
+                    (if (eq action 'shutdown)
+                        '(:ok t)
+                      (my/noema-jupyter--runtime-result runtime))
+                    nil))
+       (error (funcall callback nil (error-message-string error)))))))
+
 (defun my/noema-jupyter--defer (function)
   "Run FUNCTION after dispatch and settle a deferred gateway request."
   (let ((deferred (remote-gateway-defer 60)))
@@ -490,21 +565,9 @@
   "Restart PARAMS runtime with the same target, key and kernelspec."
   (my/noema-jupyter--defer
    (lambda ()
-     (let* ((runtime (my/noema-jupyter--runtime params))
-            (launch-params
-             `((key . ,(my/noema-jupyter-runtime-key runtime))
-               (sourceFile .
-                           ,(my/noema-jupyter-runtime-source-file runtime))
-               (kernelName .
-                           ,(my/noema-jupyter-runtime-kernel runtime)))))
-       (my/noema-jupyter--shutdown-runtime runtime)
-       (let ((replacement
-              (my/noema-jupyter--launch-runtime launch-params)))
-         (setf
-          (my/noema-jupyter-runtime-generation replacement)
-          (1+ (my/noema-jupyter-runtime-generation runtime))
-          (my/noema-jupyter-runtime-state-lost replacement) t)
-         (my/noema-jupyter--runtime-result replacement))))))
+     (my/noema-jupyter--runtime-result
+      (my/noema-jupyter--restart-runtime
+       (my/noema-jupyter--runtime params))))))
 
 (defun my/noema-jupyter--shutdown (params _client)
   "Shutdown PARAMS runtime."

@@ -121,11 +121,7 @@
 	   "opam install earlybird"))
    (my/tab-line-wheel-throttle . 0.5) (my/tab-line-min-label-width . 8)
    (my/tab-line-max-label-width . 18)
-   (my/jupyter-config-file-candidates "jupyter_server_config.py"
-				      "jupyter_lab_config.py"
-				      "jupyter_notebook_config.py"
-				      "jupyter_server_config.json"
-				      "jupyter_lab_config.json")
+   (my/noema-jupyter-servers)
    (my/jupyter-remote-ikernel-command
     . "/opt/homebrew/anaconda3/bin/remote_ikernel")
    (my/jupyter-board-jupyter-command . "/opt/homebrew/bin/jupyter")
@@ -136,11 +132,6 @@
    (my/jupyter-remote-ikernel-install-script
     . "/Users/hc/.config/emacs/bin/install-remote-ikernel")
    (my/expand-region-history-limit . 64)
-   (my/jupyter-lab-jupyter-path . "/Users/hc/.emacs.d/jupyter")
-   (my/jupyter-lab-log-buffer-name . "*jupyter-lab*")
-   (my/jupyter-lab-default-directory) (my/jupyter-lab-port . 8888)
-   (my/jupyter-lab-host . "127.0.0.1")
-   (my/jupyter-lab-command . "/opt/homebrew/bin/jupyter-lab")
    (my/project-run-profile-alist) (my/harpoon-slot-count . 4)
    (my/template-auto-insert-enabled . t)
    (my/template-auto-insert-enabled-kinds c cc sh python nix)
@@ -180,19 +171,6 @@
    (my/vterm-wheel-scroll-lines . 5)
    (my/vterm-startup-send-retries . 20)
    (my/vterm-startup-send-delay . 0.05)
-   (my/jupytext-sanitized-environment-variables "PYTHONPATH"
-						"PYTHONHOME"
-						"__PYVENV_LAUNCHER__")
-   (my/jupytext-log-buffer-name . "*jupytext*")
-   (my/jupytext-format-alist ("py" . "py:percent") ("r" . "R:percent")
-			     ("sage" . "sage:percent"))
-   (my/jupytext-auto-mode-file-regexp . "\\.ju\\.[^.]+\\'")
-   (my/jupytext-default-notebook-extension . ".ipynb")
-   (my/jupytext-command . "jupytext")
-   (my/jupyter-connection-file-history-limit . 40)
-   (my/jupyter-kernelspec-log-buffer-name . "*jupyter-kernelspec*")
-   (my/jupyter-language-default-kernels)
-   (my/jupyter-known-languages "python" "sage" "sagemath" "maple")
    (my/open-browser-window-size . 0.38)
    (my/open-routes
     (url :default menu :menu-default xwidget :backends

@@ -204,15 +204,21 @@ org <-> jupytext <-> ipynb
 这套配置已经把两条路径都配好了：
 
 - `org` 源块可以直接用 Jupyter 后端执行
-- `jupytext-mode` 负责脚本和 notebook 配对同步
+- Noema 笔记里的 `@@cell(language, session)` 块用同一套 Emacs Jupyter manager；
+  源码和输出保存在笔记旁 `.cell/` 的标准 ipynb sidecar 中，并在 Emacs 的源码投影里编辑
+  （见 [jupyter-workflow.org](jupyter-workflow.org)）
 
 所以你的选择不应该是“二选一”，而应该是：
 
-- 笔记层用 `org`
-- 实验层用 `jupytext`
+- 笔记层用 `org` 或 Noema 笔记
+- 实验层用 notebook / 脚本
 - 两边都用 Jupyter 当执行后端
 
 这正好避免了重复造转换链。
+
+注意：本文里提到的 `jupytext` 指的是那个命令行工具本身。这套配置**不再**内置
+`jupytext-mode` 配对同步（`my/jupytext-*` 那一层已经移除）；要配对就直接用
+`jupytext` CLI。
 
 ## 8. 一个简单判断法
 

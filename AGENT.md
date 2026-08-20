@@ -42,8 +42,8 @@ early-init.el -> init.el -> lisp/init-modules.el
 ```
 
 `lisp/init-modules.el` is the authoritative module order. Most local modules
-live under `lisp/`; language-specific modules live under `lisp/lang/`; Org and
-Jupyter internals may live under `lisp/org/`.
+live under `lisp/`; language-specific modules live under `lisp/lang/`; the
+Noema/Jupyter bridge lives under `lisp/roam/`.
 
 When adding a module:
 
@@ -95,8 +95,13 @@ This config already has maintenance and workflow entry points. Reuse them:
 - LSP: `my/register-lsp-mode-preference`,
   `my/register-eglot-server-program`, `my/language-server-manager`, and
   `my/language-server-doctor`.
-- Jupyter: `my/org-babel-jupyter-native-backends`, remembered
-  `kernel-*.json` connection files, Jupyter Hub/Doctor, and Jupytext helpers.
+- Jupyter: the Noema bridge under `lisp/roam/init-aaronnote-jupyter-*.el` —
+  `runtime` (kernelspec discovery, target process, connection file, the
+  five-channel forward group), `server` (remote Jupyter servers over HTTP(S),
+  `my/noema-jupyter-servers`), `cell` (the `.cell/` script mode, kernel
+  completion and inspection), and `lsp` (kernel-following Eglot); plus
+  `my/jupyter-board` for kernelspec management and Remote Doctor for
+  diagnostics.
 - Projects: `my/project-dispatch`, `my/project-switch`,
   `my/project-open-workbench`, `my/project-search-paths`, Projectile,
   Perspective, Transient, and `show-imenu`.
@@ -264,6 +269,15 @@ Org/Jupyter/research:
   template collisions.
 - Only route a language through Jupyter when it has a working Jupyter kernel or
   a valid existing-kernel connection workflow.
+- A kernel comes from one of three connectors, named by the cell's kernel
+  string: a kernelspec launched by the Remote broker, `attach:<file>` for a
+  running kernel reached through its connection file, or `server:<id>:...` for
+  one on a Jupyter server/JupyterHub/gateway over HTTP(S).  Consumers must not
+  branch on which; lifecycle differences belong in `kernel-registry.mjs`.
+- A Jupyter server owned by a non-`local` target must be reached through
+  `remote-channel` forwarding.  A target that cannot provide a channel is an
+  error — never a client-side connection, which may silently reach a different
+  server listening on that port here.
 - Keep `org`, Jupytext/notebooks, and reusable `src/` code as separate sources
   of truth as described in `docs/research-notes-workflow.md`.
 

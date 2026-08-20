@@ -271,20 +271,14 @@
         calls)
     (unwind-protect
         (with-current-buffer buffer
-          (insert "# Aaronnote cell source: /tmp/note.md\n"
-                  "# Aaronnote cell kernel: python3\n"
-                  "# Aaronnote cell session: default\n"
-                  "# Aaronnote cell storage: script\n"
-                  "# %% aaronnote-cell id=one\n"
+          (insert "# %% id=one\n"
                   "print(1)\n"
-                  "# %% end-aaronnote-cell id=one\n\n"
-                  "# %% aaronnote-cell id=two\n"
-                  "print(2)\n"
-                  "# %% end-aaronnote-cell id=two\n")
+                  "\n# %% id=two\n"
+                  "print(2)\n")
           (setq-local my/noema-jupyter-cell-source-file "/tmp/note.md")
           (setq-local my/noema-jupyter-cell-kernel "python3")
           (setq-local my/noema-jupyter-cell-session "default")
-          (setq-local my/noema-jupyter-cell-storage "script")
+          (setq-local my/noema-jupyter-cell-storage "ipynb")
           (my/noema-jupyter-cell-mode 1)
           (goto-char (point-min))
           (search-forward "print(2)")
@@ -1187,15 +1181,15 @@
   (should
    (equal
     (my/noema-jupyter--file
-     '((file . "/fs:local:/tmp/notes/.cell/note.python.default.py")))
-    "/fs:local:/tmp/notes/.cell/note.python.default.py"))
+     '((file . "/fs:local:/tmp/notes/.cell/note.python.default.ipynb")))
+    "/fs:local:/tmp/notes/.cell/note.python.default.ipynb"))
   (should-error
    (my/noema-jupyter--file
     '((file . "/fs:local:/tmp/notes/note.md")))
    :type 'error)
   (should-error
    (my/noema-jupyter--file
-    '((file . "/fs:local:/tmp/notes/.cell/nested/note.py")))
+    '((file . "/fs:local:/tmp/notes/.cell/nested/note.ipynb")))
    :type 'error))
 
 (ert-deftest my/noema-jupyter-normalizes-target-kernelspecs ()
@@ -1289,5 +1283,399 @@
    (memq #'my/noema-jupyter--doctor
          remote-doctor-check-functions)))
 
+(ert-deftest my/noema-jupyter-registers-emacs-document-engine-methods ()
+  (dolist (method
+           '("aaronnote.jupyter.document.snapshot"
+             "aaronnote.jupyter.manager.snapshot"
+             "aaronnote.jupyter.script.snapshot"
+             "aaronnote.jupyter.script.action"
+             "aaronnote.jupyter.session.select"
+             "aaronnote.jupyter.kernel.control"
+             "aaronnote.jupyter.document.execute"
+             "aaronnote.jupyter.document.mutate"
+             "aaronnote.jupyter.output.clear"
+             "aaronnote.jupyter.output.clear-all"
+             "aaronnote.jupyter.variables"
+             "aaronnote.jupyter.kernel.interrupt"
+             "aaronnote.jupyter.kernel.restart"
+             "aaronnote.jupyter.kernel.shutdown"
+             "aaronnote.jupyter.kernel.channel"
+             "aaronnote.jupyter.board.open"))
+    (should (functionp (gethash method remote-gateway--methods)))))
+
+(ert-deftest my/noema-public-api-callback-reports-offline ()
+  (let ((my/noema--ready nil) received)
+    (cl-letf (((symbol-function 'run-at-time)
+               (lambda (_time _repeat function &rest args)
+                 (apply function args))))
+      (my/noema-api-call
+       "aaronnote:api:jupyter-cell:tasks" []
+       (lambda (result error) (setq received (list result error)))))
+    (should-not (car received))
+    (should (equal (alist-get 'code (cadr received)) "offline"))))
+
+(ert-deftest my/noema-public-api-callback-reports-success ()
+  (let ((my/noema--ready t) received)
+    (cl-letf (((symbol-function 'remote-gateway-find-client)
+               (lambda (_name) 'client))
+              ((symbol-function 'remote-gateway-request-async)
+               (lambda (_client _method _params callback _timeout)
+                 (funcall callback '((ok . t) (kernels . nil)) nil))))
+      (my/noema-api-call
+       "aaronnote:api:jupyter-cell:tasks" []
+       (lambda (result error) (setq received (list result error)))))
+    (should-not (cadr received))
+    (should (eq t (alist-get 'ok (car received))))))
+
+(ert-deftest my/noema-jupyter-runtime-snapshot-is-target-filtered ()
+  (let* ((my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (context (remote-context (remote-target-file-name "local" "/tmp/")))
+         (runtime
+          (my/noema-jupyter-runtime-create
+           :id "runtime-1" :manager-id "kernel-1"
+           :context context :kernel "python3"
+           :placement-file "/tmp/note.md"
+           :pid 123 :generation 2 :state 'idle)))
+    (puthash "runtime-1" runtime my/noema-jupyter-runtimes)
+    (let ((snapshot (my/noema-jupyter-runtime-snapshot "local")))
+      (should (= (length snapshot) 1))
+      (should (equal (plist-get (car snapshot) :runtime-id) "runtime-1"))
+      (should (equal (plist-get (car snapshot) :manager-kernel-id) "kernel-1"))
+      (should-not (plist-member (car snapshot) :source-file))
+      (should (= (plist-get (car snapshot) :generation) 2)))
+    (should-not (my/noema-jupyter-runtime-snapshot "missing"))))
+
+(ert-deftest my/noema-jupyter-direct-cell-file-activates-complete-mode ()
+  (let* ((root (make-temp-file "noema-jupyter-direct-" t))
+         (store (expand-file-name ".cell" root))
+         (source (expand-file-name "note.md" root))
+         (script (expand-file-name "note.python.default.ipynb" store))
+         buffer)
+    (unwind-protect
+        (progn
+          (make-directory store t)
+          (with-temp-file source (insert "# Note\n"))
+          (with-temp-file script
+            (insert (json-serialize
+                     `((cells . [((cell_type . "code") (id . "cell-a")
+                                  (metadata . ()) (execution_count . nil)
+                                  (outputs . []) (source . "value = 1\n"))])
+                       (metadata . ((kernelspec . ((name . "python3")
+                                                  (display_name . "Python 3")
+                                                  (language . "python")))
+                                    (language_info . ((name . "python")))
+                                    (noema . ((source_file . ,source)
+                                              (session . "default")))))
+                       (nbformat . 4) (nbformat_minor . 5)))
+                    "\n"))
+          (setq buffer (find-file-noselect script))
+          (with-current-buffer buffer
+            (should my/noema-jupyter-cell-mode)
+            (should (equal my/noema-jupyter-cell-source-file source))
+            (should (equal my/noema-jupyter-cell-kernel "python3"))
+            (should (equal my/noema-jupyter-cell-language "python"))
+            (goto-char (point-min))
+            (search-forward "value = 1")
+            (my/noema-jupyter-cell--update-highlight)
+            (should (equal my/noema-jupyter-cell-current-id "cell-a"))
+            (should (eq (key-binding (kbd "C-c C-c"))
+                        #'my/noema-jupyter-cell-run-current))
+            (should (eq (key-binding (kbd "C-c i ?"))
+                        #'my/noema-jupyter-cell-command-menu))
+            (should (equal header-line-format
+                           '(:eval (my/noema-jupyter-cell--header-line))))
+            (goto-char (point-max))
+            (my/noema-jupyter-cell--update-highlight)
+            (should (my/noema-jupyter-cell--engine-params nil nil))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (delete-directory root t))))
+
+(ert-deftest my/noema-jupyter-engine-snapshot-and-move-preserve-note-prose ()
+  (let* ((root (make-temp-file "noema-jupyter-document-" t))
+         (store (expand-file-name ".cell" root))
+         (source (expand-file-name "note.md" root))
+         (script (expand-file-name "note.python.default.ipynb" store))
+         (params `((scriptFile . ,script) (sourceFile . ,source)
+                   (kernel . "python3") (session . "default")
+                   (language . "python")))
+         buffers)
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/noema-command) #'ignore))
+          (make-directory store t)
+          (with-temp-file source
+            (insert "# Note\n"
+                    "@@cell(python, default) [cell-a]\n"
+                    "Between the Cell markers.\n"
+                    "@@cell(python, default) [cell-b]\n"))
+          (with-temp-file script
+            (insert (json-serialize
+                     `((cells . [((cell_type . "code") (id . "cell-a")
+                                  (metadata . ()) (execution_count . nil)
+                                  (outputs . []) (source . "a = 1\n"))
+                                 ((cell_type . "code") (id . "cell-b")
+                                  (metadata . ()) (execution_count . nil)
+                                  (outputs . []) (source . "b = 2\n"))])
+                       (metadata . ((kernelspec . ((name . "python3")
+                                                  (display_name . "Python 3")
+                                                  (language . "python")))
+                                    (language_info . ((name . "python")))
+                                    (noema . ((source_file . ,source)
+                                              (session . "default")))))
+                       (nbformat . 4) (nbformat_minor . 5)))
+                    "\n"))
+          (let* ((snapshot (my/noema-jupyter-engine-document-snapshot params))
+                 (cells (alist-get 'cells snapshot)))
+            (should (stringp (json-serialize snapshot
+                                             :null-object nil
+                                             :false-object :json-false)))
+            (should (equal (mapcar (lambda (cell) (alist-get 'id cell)) cells)
+                           '("cell-a" "cell-b")))
+            (should (equal (alist-get 'sourceFile (alist-get 'document snapshot))
+                           source))
+            (should (equal (alist-get 'code (aref cells 0)) "a = 1\n")))
+          (my/noema-jupyter-engine-document-mutate
+           (append params '((cellId . "cell-a") (op . "moveDown"))))
+          (let* ((snapshot (my/noema-jupyter-engine-document-snapshot params))
+                 (ids (mapcar (lambda (cell) (alist-get 'id cell))
+                              (alist-get 'cells snapshot))))
+            (should (equal ids '("cell-b" "cell-a"))))
+          (with-temp-buffer
+            (insert-file-contents source)
+            (should (string-match-p
+                     "\\[cell-b\\]\nBetween the Cell markers\\.\n@@cell.*\\[cell-a\\]"
+                     (buffer-string))))
+          (when-let* ((buffer (find-buffer-visiting script)))
+            (push buffer buffers)))
+      (dolist (buffer buffers)
+        (when (buffer-live-p buffer) (kill-buffer buffer)))
+      (delete-directory root t))))
+
+(ert-deftest my/noema-jupyter-engine-run-modes-have-jupyterlab-semantics ()
+  (let ((cells '((:id "a") (:id "b") (:id "c"))))
+    (should (equal (mapcar (lambda (cell) (plist-get cell :id))
+                           (my/noema-jupyter-engine--execution-plan
+                            '((cellId . "b") (mode . "current")) cells))
+                   '("b")))
+    (should (equal (mapcar (lambda (cell) (plist-get cell :id))
+                           (my/noema-jupyter-engine--execution-plan
+                            '((cellId . "b") (mode . "above")) cells))
+                   '("a" "b")))
+    (should (equal (mapcar (lambda (cell) (plist-get cell :id))
+                           (my/noema-jupyter-engine--execution-plan
+                            '((cellId . "b") (mode . "below")) cells))
+                   '("b" "c")))
+    (should (equal (mapcar (lambda (cell) (plist-get cell :id))
+                           (my/noema-jupyter-engine--execution-plan
+                            '((cellId . "b") (mode . "selected")
+                              (cellIds . ["a" "c"])) cells))
+                   '("a" "c")))))
+
+(ert-deftest my/noema-jupyter-manager-shares-kernels-only-by-explicit-attach ()
+  (let ((my/noema-jupyter-manager-kernels (make-hash-table :test #'equal))
+        (my/noema-jupyter-manager-sessions (make-hash-table :test #'equal))
+        (my/noema-jupyter-manager-sessions-by-id (make-hash-table :test #'equal))
+        (my/noema-jupyter-manager-tasks (make-hash-table :test #'equal)))
+    (cl-letf (((symbol-function 'my/noema-jupyter-manager--connect-client)
+               (lambda (session _kernel)
+                 (setf (my/noema-jupyter-session-client session) 'connected)))
+              ((symbol-function 'jupyter-connected-p) (lambda (_client) t)))
+      (let* ((metadata '(:language "python" :kernel "python3" :session "one"))
+             (one (my/noema-jupyter-manager-session "/tmp/a.python.one.py" nil metadata))
+             (two (my/noema-jupyter-manager-session "/tmp/b.python.two.py" nil metadata))
+             (first (my/noema-jupyter-kernel-create
+                     :id "kernel-a" :kernelspec "python3" :language "python"
+                     :session-ids nil :status 'idle :owned t))
+             (second (my/noema-jupyter-kernel-create
+                      :id "kernel-b" :kernelspec "python3" :language "python"
+                      :session-ids nil :status 'idle :owned t)))
+        (puthash "kernel-a" first my/noema-jupyter-manager-kernels)
+        (puthash "kernel-b" second my/noema-jupyter-manager-kernels)
+        (my/noema-jupyter-manager-select one '(:kind connect :kernel-id "kernel-a") t)
+        (should-not (my/noema-jupyter-session-kernel-id two))
+        (my/noema-jupyter-manager-select two '(:kind connect :kernel-id "kernel-a") t)
+        (should (= (length (my/noema-jupyter-kernel-session-ids first)) 2))
+        ;; Switching ONE detaches it, but the shared old kernel survives for TWO.
+        (my/noema-jupyter-manager-select one '(:kind connect :kernel-id "kernel-b") t)
+        (should (gethash "kernel-a" my/noema-jupyter-manager-kernels))
+        (should (equal (my/noema-jupyter-session-kernel-id two) "kernel-a"))
+        (should (equal (my/noema-jupyter-session-kernel-id one) "kernel-b"))
+        (let ((wrong (my/noema-jupyter-kernel-create
+                      :id "kernel-r" :kernelspec "ir" :language "r"
+                      :session-ids nil :status 'idle :owned t)))
+          (puthash "kernel-r" wrong my/noema-jupyter-manager-kernels)
+          (should-error
+           (my/noema-jupyter-manager-select
+            one '(:kind connect :kernel-id "kernel-r") t)))
+        ;; Closing the final controller does not stop or detach its kernel.
+        (my/noema-jupyter-manager-register-controller
+         "/tmp/a.python.one.py" (current-buffer) metadata)
+        (my/noema-jupyter-manager-release-controller
+         "/tmp/a.python.one.py" (current-buffer))
+        (should (equal (my/noema-jupyter-session-kernel-id one) "kernel-b"))))))
+
+(ert-deftest my/noema-jupyter-manager-start-selection-works-from-source ()
+  (let ((session (my/noema-jupyter-session-create
+                  :id "session-a" :script-file "/tmp/note.bash.default.ipynb"
+                  :language "bash" :kernelspec "bash"))
+        called)
+    (cl-letf (((symbol-function 'my/noema-jupyter-manager-start-kernel)
+               (lambda (selected-session kernelspec)
+                 (setq called (list selected-session kernelspec))
+                 'started-kernel)))
+      (should
+       (eq (my/noema-jupyter-manager-select
+            session '(:kind start :kernelspec "bash") t)
+           'started-kernel))
+      (should (equal called (list session "bash"))))))
+
+(ert-deftest my/noema-jupyter-manager-connects-a-headless-client ()
+  (let* ((session (my/noema-jupyter-session-create
+                   :id "session-a" :script-file "/tmp/note.python.default.ipynb"))
+         (kernel (my/noema-jupyter-kernel-create
+                  :id "kernel-a" :connection-file "/tmp/kernel-a.json"))
+         kernel-arguments connected-kernel)
+    (cl-letf (((symbol-function 'jupyter-kernel)
+               (lambda (&rest arguments)
+                 (setq kernel-arguments arguments)
+                 'headless-kernel))
+              ((symbol-function 'jupyter-client)
+               (lambda (jupyter-kernel &optional _client-class)
+                 (setq connected-kernel jupyter-kernel)
+                 'headless-client))
+              ((symbol-function 'jupyter-connect-repl)
+               (lambda (&rest _)
+                 (ert-fail "Document sessions must not create a REPL"))))
+      (should (eq (my/noema-jupyter-manager--connect-client session kernel)
+                  'headless-client))
+      (should (equal kernel-arguments
+                     '(:conn-info "/tmp/kernel-a.json" :connect-p t)))
+      (should (eq connected-kernel 'headless-kernel))
+      (should (eq (my/noema-jupyter-session-client session)
+                  'headless-client)))))
+
+(ert-deftest my/noema-jupyter-source-marker-has-no-kernel-authority ()
+  (should
+   (equal (my/noema-jupyter-engine--source-marker
+           '(:language "python" :kernel "sagemath" :session "analysis") "cell-a")
+          "@@cell(python, analysis) [cell-a]")))
+
 (provide 'init-aaronnote-tests)
 ;;; init-aaronnote-tests.el ends here
+
+;;; Remote Jupyter servers.
+;;
+;; The rule these guard is the Remote-first one: a server that lives on a
+;; Target must be reached through a routed channel, and a Target that cannot
+;; provide one must produce an error — never a silent client-side connection,
+;; which would either fail confusingly or reach a different server that happens
+;; to answer on that port here.
+
+(defmacro my/noema-jupyter-server-tests--with (servers &rest body)
+  "Evaluate BODY with SERVERS configured and no forwards held open."
+  (declare (indent 1))
+  `(let ((my/noema-jupyter-servers ,servers)
+         (my/noema-jupyter-server--forwards (make-hash-table :test #'equal)))
+     ,@body))
+
+(ert-deftest my/noema-jupyter-server-local-target-is-used-verbatim ()
+  (my/noema-jupyter-server-tests--with
+      '((:id "lab" :url "http://127.0.0.1:8888/" :target "local" :auth none))
+    (cl-letf (((symbol-function 'my/noema-jupyter-server--forward)
+               (lambda (&rest _) (error "must not open a channel for target local"))))
+      (let ((resolved
+             (my/noema-jupyter-server--resolve-entry
+              (my/noema-jupyter-server--entry "lab"))))
+        (should (equal (alist-get 'url resolved) "http://127.0.0.1:8888/"))
+        (should (equal (alist-get 'target resolved) "local"))
+        (should (equal (alist-get 'kind resolved) "server"))
+        (should-not (alist-get 'serverName resolved))))))
+
+(ert-deftest my/noema-jupyter-server-remote-target-routes-through-a-channel ()
+  (my/noema-jupyter-server-tests--with
+      '((:id "hpc" :url "https://login.example.org:9999/" :target "cluster" :auth none))
+    (cl-letf (((symbol-function 'my/noema-jupyter-server--forward)
+               (lambda (&rest _) 'fake-forward))
+              ((symbol-function 'remote-channel-endpoint)
+               (lambda (forward side)
+                 (should (eq forward 'fake-forward))
+                 (should (eq side 'local))
+                 '(:host "127.0.0.1" :port 45123))))
+      (let ((resolved
+             (my/noema-jupyter-server--resolve-entry
+              (my/noema-jupyter-server--entry "hpc"))))
+        ;; Noema is handed the client end of the forward...
+        (should (equal (alist-get 'url resolved) "https://127.0.0.1:45123/"))
+        ;; ...plus the real name, or TLS verification and any virtual-host
+        ;; routing on the server would fail against a 127.0.0.1 URL.
+        (should (equal (alist-get 'serverName resolved) "login.example.org"))))))
+
+(ert-deftest my/noema-jupyter-server-without-a-channel-fails-instead-of-falling-back ()
+  (my/noema-jupyter-server-tests--with
+      '((:id "hpc" :url "http://127.0.0.1:8888/" :target "cluster" :auth none))
+    (cl-letf (((symbol-function 'my/noema-jupyter-server--forward)
+               (lambda (&rest _) (error "no channel capability for target"))))
+      ;; The URL is loopback and would "work" if we simply passed it through —
+      ;; which is exactly the silent-wrong-server failure this must not do.
+      (should-error
+       (my/noema-jupyter-server--resolve-entry
+        (my/noema-jupyter-server--entry "hpc"))
+       :type 'error))))
+
+(ert-deftest my/noema-jupyter-server-channel-without-a-port-is-an-error ()
+  (my/noema-jupyter-server-tests--with
+      '((:id "hpc" :url "http://svc:8888/" :target "cluster" :auth none))
+    (cl-letf (((symbol-function 'my/noema-jupyter-server--forward)
+               (lambda (&rest _) 'fake-forward))
+              ((symbol-function 'remote-channel-endpoint)
+               (lambda (&rest _) '(:host "127.0.0.1"))))
+      (should-error
+       (my/noema-jupyter-server--resolve-entry
+        (my/noema-jupyter-server--entry "hpc"))
+       :type 'error))))
+
+(ert-deftest my/noema-jupyter-server-endpoint-applies-default-ports ()
+  (should (equal (my/noema-jupyter-server--endpoint '(:id "a" :url "https://x.test/"))
+                 '("x.test" . 443)))
+  (should (equal (my/noema-jupyter-server--endpoint '(:id "a" :url "http://x.test/"))
+                 '("x.test" . 80)))
+  (should (equal (my/noema-jupyter-server--endpoint '(:id "a" :url "http://x.test:8888/lab"))
+                 '("x.test" . 8888))))
+
+(ert-deftest my/noema-jupyter-server-secrets-come-from-auth-source ()
+  (my/noema-jupyter-server-tests--with
+      '((:id "lab" :url "https://lab.example.org/" :target "local" :auth token))
+    (cl-letf (((symbol-function 'auth-source-search)
+               (lambda (&rest args)
+                 (should (equal (plist-get args :host) "lab.example.org"))
+                 (list (list :secret (lambda () "s3cret"))))))
+      (let ((resolved
+             (my/noema-jupyter-server--resolve-entry
+              (my/noema-jupyter-server--entry "lab"))))
+        (should (equal (alist-get 'token resolved) "s3cret"))
+        (should-not (alist-get 'password resolved))))))
+
+(ert-deftest my/noema-jupyter-server-password-auth-requires-a-secret ()
+  (my/noema-jupyter-server-tests--with
+      '((:id "lab" :url "https://lab.example.org/" :target "local" :auth password))
+    (cl-letf (((symbol-function 'auth-source-search) (lambda (&rest _) nil)))
+      (should-error
+       (my/noema-jupyter-server--resolve-entry
+        (my/noema-jupyter-server--entry "lab"))
+       :type 'error))))
+
+(ert-deftest my/noema-jupyter-server-listing-never-exposes-secrets ()
+  (my/noema-jupyter-server-tests--with
+      '((:id "lab" :name "Lab" :url "https://lab.example.org/" :target "cluster"
+         :auth token :kind gateway))
+    (cl-letf (((symbol-function 'auth-source-search)
+               (lambda (&rest _) (list (list :secret (lambda () "s3cret")))))
+              ((symbol-function 'my/noema-jupyter--defer) (lambda (fn) (funcall fn))))
+      (let* ((payload (my/noema-jupyter-server--list nil nil))
+             (entry (car (alist-get 'servers payload))))
+        (should (equal (alist-get 'id entry) "lab"))
+        (should (equal (alist-get 'displayName entry) "Lab"))
+        (should (equal (alist-get 'kind entry) "gateway"))
+        (should (equal (alist-get 'target entry) "cluster"))
+        ;; The listing is for a kernel picker; it must carry no credential.
+        (should-not (alist-get 'token entry))
+        (should-not (alist-get 'password entry))))))

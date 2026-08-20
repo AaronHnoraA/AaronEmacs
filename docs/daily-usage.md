@@ -896,36 +896,55 @@ GUI frame 的两侧 fringe 分工如下：
 
 HTTP 后端在 `etc/ai-workbench/backends.json` 里配置（OpenAI、Anthropic、Ollama 等），CLI 引擎（Codex、OpenCode）通过 `ai-workbench-adapter-*.el` 的 `defcustom` 配置可执行路径。
 
-## 9. Neopyter — JupyterLab 实时同步
+## 9. Jupyter cell —— Noema 与 kernel
 
-对 `*.ju.py` / `*.ju.r` 文件，`aaron-neopyter-mode` 会自动激活（取代原来的 `jupytext-mode`，
-后者作为 sub-mode 保留，负责保存到磁盘）。打开文件后 Emacs 会自动启动 WebSocket 服务并尝试连接
-JupyterLab 扩展。
+笔记里的 `@@cell(language, session) [id]` 块由 Noema 渲染，**源码、cell 结构和
+运行逻辑在 Emacs 里管理**：在 cell 上点 Edit，Noema 会打开笔记旁 `.cell/` 下的
+标准 `NOTE.LANGUAGE.SESSION.ipynb`。磁盘上始终是 nbformat 4.5；Emacs 显示可编辑的
+percent-style 源码投影并启用 `my/noema-jupyter-cell-mode`。
 
-**前置条件：**
-```bash
-pip install neopyter
-# JupyterLab → Settings → Neopyter → Mode: direct, IP: 127.0.0.1, Port: 9001
-```
+Kernel 是全局资源，不属于 note 或单个 buffer。每个 notebook session 显式选择
+“启动 kernelspec / 连接已有 kernel / No Kernel”；关闭 buffer 不会停 kernel，切换时
+只有无人共享的旧 owned kernel 才会关闭。kernelspec 写在 ipynb metadata，运行中的
+`kernelId` 不写入文件。
 
-**常用操作：**
+（旧的 Neopyter / `*.ju.py` JupyterLab 实时同步已经移除，`aaron-neopyter-*` 命令
+不再存在。）
+
+**notebook 源码投影里的键：**
 
 | 键 | 命令 | 说明 |
 |----|------|------|
-| `C-c C-o` | `aaron-neopyter-open-notebook` | 在 JupyterLab 里打开/创建配对的 `.ipynb` |
-| `C-c C-s` | `aaron-neopyter-sync-current` | 立即强制同步当前 buffer |
-| `C-c C-c` | `aaron-neopyter-run-cell` | 运行当前 cell |
-| `C-c C-a` | `aaron-neopyter-run-all-above` | 运行光标以上所有 cell |
-| `C-c C-b` | `aaron-neopyter-run-all-below` | 运行光标以下所有 cell（含当前） |
-| `C-c C-r` | `aaron-neopyter-restart-kernel` | 重启 kernel |
-| `C-c C-l` | `aaron-neopyter-toggle-follow-point` | 开关 JupyterLab 随光标滚动 |
-| `M-x aaron-neopyter-connect` | — | 手动启动 WS 服务（通常自动） |
-| `M-x aaron-neopyter-health-check` | — | 检查连接状态 + 版本 |
-| `M-x aaron-neopyter-detect-jupyter-root` | — | 从当前打开的 notebook 自动推断 Lab 根目录 |
+| `C-c C-c` | `my/noema-jupyter-cell-run-current` | 运行光标所在 cell |
+| `C-c C-r` | `my/noema-jupyter-cell-restart-run-all` | 重启 kernel 并跑全部 cell |
+| `C-c C-k` | `my/noema-jupyter-cell-interrupt` | 中断 kernel |
+| `C-c C-s` | `my/noema-jupyter-cell-sync-buffer` | 把整个 buffer 同步回 Noema |
+| `C-c C-o` / `M-RET` / `Cmd-RET` | `my/noema-jupyter-cell-jump-output` | 跳到统一页面中当前 cell 的 output |
+| `C-c C-i` / `S-TAB` | `my/noema-jupyter-cell-inspect` | 查看符号文档（前缀参数看源码） |
+| `C-c i K` | `my/noema-jupyter-cell-select-kernel` | 启动 spec、连接 running kernel 或设为 No Kernel |
+| `C-c i p` | `my/noema-jupyter-output-page` | 在当前 buffer 下方打开单例 Jupyter workspace |
+| `C-c i v` / `C-c i t` | Variables / Manage | 跳到统一 workspace 的变量或全局管理面板 |
 
-**文件映射：** `foo.ju.py` → `foo.ipynb`（去掉 `.ju.` infix）；路径以 `aaron-neopyter-jupyter-root`
-为基准转换成 JupyterLab 能识别的相对路径。
+buffer 顶部还有一行可点击控制：kernel/status、Run、All、Stop、Restart、Cell、
+Outputs、Vars、Manage。即使 point 不在代码 cell 内，kernel 与文档级按钮仍可用。
 
-**调试：** `M-x aaron-neopyter-show-log` 查看 RPC 日志；`(setq aaron-neopyter-debug t)` 启用详细输出。
+统一 workspace 只展示 output，不重复代码：左侧管理 Server/Running Kernels/Specs，
+中间按 notebook tab 展示 output cell，右侧是 Cell Inspector/Variables/Sessions，底部是
+全局 Tasks。页面里的 Run 等按钮只是同一 Emacs controller 的前端入口。
 
-协议细节见 `docs/neopyter-protocol-notes.md`；配置选项见 `docs/settings-cookbook.md` 第 16 节。
+**补全**：`completion-at-point` 会先问 kernel（`complete_request`），
+所以前面 cell 定义的变量、DataFrame 列名、IPython magic、Sage 的 builtin 都能补出来 ——
+这些是 Pyright 结构上看不见的。kernel 没在跑或没有结果时自动透传给 Eglot，
+不会因为打字就顺带启动一个 kernel。
+
+**`input()` 可用**：cell 里调用 `input()` / `getpass()` 时，Noema 会在 cell 下方
+弹出输入框；按 Esc 或 Cancel 相当于 EOF，cell 以 `EOFError` 结束，不会把 kernel 卡住。
+
+**输出是实时的**：长任务的 stdout 边跑边显示，不用等 cell 结束。
+
+**连远程 Jupyter server**：集群上的 lab、JupyterHub 或 kernel gateway 通过
+`my/noema-jupyter-servers` 配置（config board 或 `etc/config-store.el`），
+token/密码从 `auth-source` 读取，不写进仓库。配好之后 kernel 选择器里会多出
+`server:<id>:<kernelspec>` 和已经在跑的 `server:<id>:kernel:<id>`。
+服务器属于某个 Remote target 时，Emacs 会先开通道再把本地 URL 交给 Noema。
+详见 `docs/jupyter-workflow.org`。

@@ -465,59 +465,60 @@ Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignmen
 - `my/template-current-override` 只接受”文件名”（不能带路径分隔符），指向 `templates/<kind>/` 下的模板文件
 - 新建文件模板只保留这一套内置 `auto-insert`（已移除 Doom 那套 Yasnippet file-templates 的遗留实现，避免重复/分叉维护）
 
-## 16. 我要配置 Neopyter JupyterLab 同步
+## 16. 我要配置 Jupyter
 
-### 必填：JupyterLab 根目录
+### 远程 Jupyter server（HTTP/HTTPS）
 
-JupyterLab 的内容 API 使用相对路径（相对于 `jupyter lab` 的启动目录）。
-必须告诉 Emacs 这个目录，否则路径会被拼成 `/root/Users/...` 的双重结构。
-
-在 `lisp/init-neopyter.el` 或 `etc/local.el` 里设置：
+服务器清单是注册过的 config 项 `my/noema-jupyter-servers`，值放在
+`etc/config-store.el`（或 config board 里改），**不要用 `setq`**：
 
 ```elisp
-(setq aaron-neopyter-jupyter-root "~/Documents/Noema")
+(my/noema-jupyter-servers
+ ((:id "hpc" :name "Cluster Lab"
+   :url "http://127.0.0.1:8888/"   ; 也可以整条粘贴 jupyter 打印的 ?token=... URL
+   :kind server                    ; server（默认）或 gateway
+   :auth token                     ; token / password / hub / none
+   :target "cluster")))            ; 拥有它的 Remote target，默认 "local"
 ```
 
-如果不确定根目录，先在 JupyterLab 打开任意一个 notebook，然后在 Emacs 里运行：
+密钥不写在这里。`:auth token` / `:auth password` 通过 `auth-source-search`
+按 URL 的 host（以及 `:user`）查找，所以放在 authinfo/GPG 里：
 
 ```
-M-x aaron-neopyter-detect-jupyter-root
+machine lab.example.org login aaron password <token>
 ```
 
-会自动查询 `getCurrentNotebook`，推断根目录并设置 `aaron-neopyter-jupyter-root`，
-同时打印结果供复制到配置文件。
+`:target` 不是 `local` 时，Emacs 先在那个 target 上开 `remote-port-forward`，
+把 `127.0.0.1:<本地端口>` 的 URL 交给 Noema，并附带真实主机名供 TLS 校验。
+**target 开不出通道时会直接报错**，不会退回到本机直连 —— 远端 server 通常绑在
+loopback，本机同端口很可能是另一个进程。
 
-### 其他常用选项
+自签名证书用 `:insecure t`（只对这一台生效）。
+
+### 默认 kernel / 语言 / session
+
+按项目设置，写在项目的 `.dir-locals.el` 里：
 
 ```elisp
-;; 监听地址（与 JupyterLab 侧面板保持一致）
-(setq aaron-neopyter-remote-address "127.0.0.1:9001")
-
-;; 同步防抖延迟（秒）
-(setq aaron-neopyter-sync-debounce 0.35)
-
-;; 光标跟随延迟
-(setq aaron-neopyter-cursor-debounce 0.08)
-
-;; 关闭 JupyterLab 滚动跟随（仍同步活动 cell）
-(setq aaron-neopyter-scroll-enable nil)
-
-;; 启用详细 RPC 日志（调试用）
-(setq aaron-neopyter-debug t)
+((nil . ((eval . (setq-local my/project-local-settings
+                             '(:aaronnote-jupyter (:language sage
+                                                   :kernel sagemath
+                                                   :session research))))))))
 ```
 
-### 禁用自动连接或自动 attach
+### 超时和输出上限
 
-```elisp
-;; 不自动启动 WS 服务（需手动 M-x aaron-neopyter-connect）
-(setq aaron-neopyter-auto-connect nil)
+Noema 侧用环境变量，默认值和含义见
+`lisp/roam/Noema/jupyter/README.md` 的 Environment variables 表
+（执行超时、stdin 等待上限、stream 字节上限、实时输出合并窗口等）。
 
-;; 连接后不自动打开/同步 notebook
-(setq aaron-neopyter-auto-attach nil)
-```
+### 诊断
 
-**相关文档：** `docs/neopyter-protocol-notes.md` 有完整 RPC 方法表和路径规约；
-日常快捷键见 `docs/daily-usage.md` §9。
+`M-x remote-doctor`（带 probe）会检查目标上的 `python3`/`jupyter`，
+并对每台配置的 server 解析连接、请求 `/api/status`，所以坏掉的 forward
+会作为 server 故障直接报出来，而不是过一会儿变成莫名其妙的 kernel 失败。
+
+kernelspec 本身用 `M-x my/jupyter-board`（Hyper `j`）管理。
 
 ## 17. 我要配置项目本地 `.dir-locals.el`
 

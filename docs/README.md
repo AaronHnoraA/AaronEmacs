@@ -32,7 +32,8 @@ channels.
 - [remote-parity.md](remote-parity.md) VS Code Remote-level acceptance matrix, current coverage, completion criteria, and staged roadmap.
 - [research-notes-workflow.md](research-notes-workflow.md) Division of labor between notes, Jupytext notebooks, Jupyter, and reusable source code.
 - [lsp-workflow.org](lsp-workflow.org) Language-server routing, Hub/Doctor tooling, and the maintenance model.
-- [neopyter-protocol-notes.md](neopyter-protocol-notes.md) Neopyter JupyterLab bridge: wire protocol, RPC method registry, architecture, and Emacs client design.
+- [jupyter-workflow.org](jupyter-workflow.org) Kernel sources (kernelspec, `attach:`, remote Jupyter servers over HTTP(S)), protocol coverage, Remote routing rules, and the Jupyter Board.
+- [neopyter-protocol-notes.md](neopyter-protocol-notes.md) Historical: the Neopyter JupyterLab wire protocol. The client was removed; kept as reference only.
 
 ## Maintenance
 
