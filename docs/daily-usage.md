@@ -899,9 +899,13 @@ HTTP 后端在 `etc/ai-workbench/backends.json` 里配置（OpenAI、Anthropic�
 ## 9. Jupyter cell —— Noema 与 kernel
 
 笔记里的 `@@cell(language, session) [id]` 块由 Noema 渲染，**源码、cell 结构和
-运行逻辑在 Emacs 里管理**：在 cell 上点 Edit，Noema 会打开笔记旁 `.cell/` 下的
-标准 `NOTE.LANGUAGE.SESSION.ipynb`。磁盘上始终是 nbformat 4.5；Emacs 显示可编辑的
-percent-style 源码投影并启用 `my/noema-jupyter-cell-mode`。
+运行逻辑由 Noema 管理**：在 cell 上点 Edit，Noema 会打开笔记旁 `.cell/` 下的
+标准 `NOTE.LANGUAGE.SESSION.ipynb`；普通 ipynb 也走同一套 UI。磁盘上始终是
+nbformat 4.5；Emacs 只提供可编辑的 percent-style 源码投影和
+`my/noema-jupyter-cell-mode` 控件，通过 Noema API 操作 notebook。
+
+`LANGUAGE` 是语言而不是 kernel 名：SageMath kernel 归在 Python 语言下，文件名为
+`NOTE.python.SESSION.ipynb`，而 `sagemath` 保存在 notebook kernelspec 中。
 
 Kernel 是全局资源，不属于 note 或单个 buffer。每个 notebook session 显式选择
 “启动 kernelspec / 连接已有 kernel / No Kernel”；关闭 buffer 不会停 kernel，切换时
@@ -922,7 +926,7 @@ Kernel 是全局资源，不属于 note 或单个 buffer。每个 notebook sessi
 | `C-c C-o` / `M-RET` / `Cmd-RET` | `my/noema-jupyter-cell-jump-output` | 跳到统一页面中当前 cell 的 output |
 | `C-c C-i` / `S-TAB` | `my/noema-jupyter-cell-inspect` | 查看符号文档（前缀参数看源码） |
 | `C-c i K` | `my/noema-jupyter-cell-select-kernel` | 启动 spec、连接 running kernel 或设为 No Kernel |
-| `C-c i p` | `my/noema-jupyter-output-page` | 在当前 buffer 下方打开单例 Jupyter workspace |
+| `C-c C-p` | `my/noema-jupyter-output-page` | 在当前 buffer 下方打开单例 Jupyter workspace |
 | `C-c i v` / `C-c i t` | Variables / Manage | 跳到统一 workspace 的变量或全局管理面板 |
 
 buffer 顶部还有一行可点击控制：kernel/status、Run、All、Stop、Restart、Cell、
@@ -930,7 +934,14 @@ Outputs、Vars、Manage。即使 point 不在代码 cell 内，kernel 与文档�
 
 统一 workspace 只展示 output，不重复代码：左侧管理 Server/Running Kernels/Specs，
 中间按 notebook tab 展示 output cell，右侧是 Cell Inspector/Variables/Sessions，底部是
-全局 Tasks。页面里的 Run 等按钮只是同一 Emacs controller 的前端入口。
+全局 Tasks。页面里的 Run 等按钮和 Emacs controls 都调用同一个 Noema controller。
+
+**Emacs snippet 动作**：在 ipynb 源码投影里输入触发词后按 `C-c y y`。这层不是
+Yasnippet 模板，而是复用 snippet 展开入口调用 Noema API；普通 snippet 仍回退到
+Yasnippet。`jcode` / `jmd` 在下方新建 code / Markdown cell，ID 由 Noema 自动生成；
+另有 `jabove`、`jdup`、`jsplit`、`jmerge`、`jrun`、`jrunnext`、`jall`、
+`jrunabove`、`jrunbelow`、`jclear`、`jclearall`、`jout`、`jvars`、`jmanage`、
+`jkernel`。`C-c y j` 可以不输入触发词直接选动作。
 
 **补全**：`completion-at-point` 会先问 kernel（`complete_request`），
 所以前面 cell 定义的变量、DataFrame 列名、IPython magic、Sage 的 builtin 都能补出来 ——

@@ -2,10 +2,11 @@
 
 ;;; Commentary:
 ;;
-;; Noema keeps the mature raw-ZMQ client on the Emacs machine.  This module
-;; owns everything whose placement follows the note: kernelspec discovery,
-;; target process lifetime, connection files, and the five forwarded Jupyter
-;; channels.  The same broker is used for target `local'.
+;; Noema's Node service is the sole raw-ZMQ client and kernel registry.  This
+;; module is only its Remote/process broker: it discovers kernelspecs, places a
+;; target process, prepares connection files, and forwards five opaque ports.
+;; It never decodes or sends a Jupyter message.  The same broker is available
+;; for target `local'.
 
 ;;; Code:
 
@@ -64,15 +65,14 @@
            (alist-get (intern key) alist))))
 
 (defun my/noema-jupyter--file (params)
-  "Return the canonical logical Jupyter sidecar file from PARAMS."
+  "Return the canonical logical ipynb file from PARAMS."
   (let* ((raw (format "%s" (or (my/noema-jupyter--get 'file params) "")))
          (file (and (not (string-empty-p raw))
                     (remote-canonicalize-file-name raw))))
     (unless (and file
                  (remote-fs-file-name-p file)
-                 (string-match-p "/\\.cell/[^/]+\\.ipynb\\'" file))
-      (error "Jupyter notebook must be an ipynb directly under .cell/: %s"
-             raw))
+                 (string-match-p "\\.ipynb\\'" file))
+      (error "Jupyter document must be an ipynb: %s" raw))
     file))
 
 (defun my/noema-jupyter--context (file)
@@ -236,20 +236,46 @@
              :port)))
     result))
 
+(defun my/noema-jupyter--exit-status (context program &rest args)
+  "Run PROGRAM with ARGS in CONTEXT and return its exit status.
+Unlike `my/noema-jupyter--output' a non-zero status is a value, not an
+error, so callers can tell a target-side answer apart from a transport
+failure.  Only a failure to carry out the routed call signals."
+  (let* ((default-directory
+          (or (remote-context-workspace-root context)
+              (remote-make-file-name
+               (remote-context-target-id context) "/")))
+         (buffer (generate-new-buffer " *noema-jupyter-probe*")))
+    (unwind-protect
+        (let ((remote-current-adapter-id "process"))
+          (apply #'remote-process-file program nil buffer nil args))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
 (defun my/noema-jupyter--alive-p (runtime)
-  "Return non-nil when RUNTIME's target process group exists."
-  (condition-case nil
-      (progn
-        (my/noema-jupyter--output
-         (my/noema-jupyter-runtime-context runtime)
-         "kill" "-0" "--"
-         (format "-%s" (my/noema-jupyter-runtime-pid runtime)))
-        t)
-    (error nil)))
+  "Return the liveness of RUNTIME's target process group.
+The value is t when the group exists, nil when the target answered that it
+does not, and `unknown' when the probe itself could not be carried out.
+Keeping the third state is the point: a dropped connection must never be
+reported as a dead kernel, because callers respond to death by discarding
+the kernel\='s in-memory state."
+  (let ((pid (my/noema-jupyter-runtime-pid runtime)))
+    (if (not (and (integerp pid) (> pid 0)))
+        nil
+      (condition-case nil
+          (let ((status
+                 (my/noema-jupyter--exit-status
+                  (my/noema-jupyter-runtime-context runtime)
+                  "kill" "-0" "--" (format "-%s" pid))))
+            (and (integerp status) (zerop status)))
+        (error 'unknown)))))
 
 (defun my/noema-jupyter--signal (runtime signal)
-  "Send SIGNAL to RUNTIME's target process group."
-  (when (my/noema-jupyter--alive-p runtime)
+  "Send SIGNAL to RUNTIME's target process group.
+The signal is skipped only when the target confirmed the group is gone.
+An unreachable target still gets the attempt, so a transient probe failure
+cannot silently leave a live kernel running on it."
+  (unless (null (my/noema-jupyter--alive-p runtime))
     (my/noema-jupyter--output
      (my/noema-jupyter-runtime-context runtime)
      "kill" (format "-%s" signal) "--"
@@ -334,12 +360,15 @@
            group runtime pid)
       (condition-case error
           (progn
-	    (make-directory directory t)
-	    (let ((coding-system-for-write 'utf-8-unix))
-              (write-region
-               (concat (json-serialize target-connection) "\n")
-               nil connection-file nil 'silent))
+	    (with-file-modes #o700 (make-directory directory t))
 	    (set-file-modes directory #o700)
+	    ;; The connection file carries the HMAC signing key, so it must never
+	    ;; exist readable — not even between the write and a later chmod.
+	    (with-file-modes #o600
+              (let ((coding-system-for-write 'utf-8-unix))
+                (write-region
+                 (concat (json-serialize target-connection) "\n")
+                 nil connection-file nil 'silent)))
 	    (set-file-modes connection-file #o600)
 	    (setq pid
 		  (string-to-number
@@ -398,20 +427,30 @@
                  (my/noema-jupyter--shutdown-runtime value)))
              :recover
              (lambda (_resource _owner)
-               (if (my/noema-jupyter--alive-p runtime)
-                   runtime
+               ;; Only a confirmed death discards in-memory kernel state.  A
+               ;; probe that could not be carried out leaves the runtime as it
+               ;; was, so the next request retries instead of losing the
+               ;; session to a transport hiccup.
+               (when (null (my/noema-jupyter--alive-p runtime))
                  (setf
                   (my/noema-jupyter-runtime-state runtime) 'dead
-                  (my/noema-jupyter-runtime-state-lost runtime) t)
-                 runtime))
+                  (my/noema-jupyter-runtime-state-lost runtime) t))
+               runtime)
              :recovery 'auto
              :metadata (list :application "noema-jupyter"
                              :runtime runtime-id))
             runtime)
         (error
+         ;; Roll back everything this call created.  The registry entry and the
+         ;; channel group are both installed before the last step that can
+         ;; signal, so neither can be left behind for a runtime that no caller
+         ;; will ever hold a reference to.
+         (remhash runtime-id my/noema-jupyter-runtimes)
          (when runtime
            (ignore-errors
              (my/noema-jupyter--signal runtime "TERM")))
+         (when group
+           (ignore-errors (remote-channel-group-close group)))
          (ignore-errors (delete-file connection-file))
          (ignore-errors (delete-file log-file))
          (signal (car error) (cdr error)))))))
@@ -542,16 +581,28 @@ button's redisplay stack."
      (my/noema-jupyter--runtime-result
       (my/noema-jupyter--launch-runtime params)))))
 
+(defun my/noema-jupyter--runtime-status-payload (runtime)
+  "Return RUNTIME's liveness payload for Noema.
+Signals when the target could not be probed at all.  Noema reads
+`alive: false\=' as permission to shut the kernel down and drop its state, so
+an unanswerable probe must fail the request rather than pose as an answer."
+  (let ((alive (my/noema-jupyter--alive-p runtime)))
+    (when (eq alive 'unknown)
+      (error "Cannot reach target %s to probe kernel %s"
+             (remote-context-target-id
+              (my/noema-jupyter-runtime-context runtime))
+             (my/noema-jupyter-runtime-id runtime)))
+    (append
+     `((alive . ,(if alive t :json-false))
+       (message . ,(if alive "" "Target kernel process is not alive")))
+     (my/noema-jupyter--runtime-result runtime))))
+
 (defun my/noema-jupyter--status (params _client)
   "Return live status for PARAMS runtime."
   (my/noema-jupyter--defer
    (lambda ()
-     (let* ((runtime (my/noema-jupyter--runtime params))
-            (alive (my/noema-jupyter--alive-p runtime)))
-       (append
-        `((alive . ,(if alive t :json-false))
-          (message . ,(if alive "" "Target kernel process is not alive")))
-        (my/noema-jupyter--runtime-result runtime))))))
+     (my/noema-jupyter--runtime-status-payload
+      (my/noema-jupyter--runtime params)))))
 
 (defun my/noema-jupyter--interrupt (params _client)
   "Interrupt PARAMS runtime."
@@ -632,7 +683,7 @@ button's redisplay stack."
                          (buffer-string))))))))))
 
 (defun my/noema-jupyter--file-read (params _client)
-  "Read a validated Jupyter sidecar from PARAMS."
+  "Read a validated Jupyter notebook from PARAMS."
   (my/noema-jupyter--defer
    (lambda ()
      (let ((file (my/noema-jupyter--file params)))
@@ -651,7 +702,7 @@ button's redisplay stack."
                            (file-attribute-modification-time attributes)))))))))))
 
 (defun my/noema-jupyter--file-write (params _client)
-  "Atomically write a validated Jupyter sidecar from PARAMS."
+  "Atomically write a validated Jupyter notebook from PARAMS."
   (my/noema-jupyter--defer
    (lambda ()
      (let* ((file (my/noema-jupyter--file params))
@@ -661,7 +712,7 @@ button's redisplay stack."
             (directory (file-name-directory file))
             temporary)
        (make-directory directory t)
-       (setq temporary (make-nearby-temp-file ".noema-cell-"))
+       (setq temporary (make-nearby-temp-file ".noema-notebook-"))
        (unwind-protect
            (let ((coding-system-for-write 'utf-8-unix))
              (write-region content nil temporary nil 'silent)
@@ -677,7 +728,7 @@ button's redisplay stack."
                          (file-attribute-modification-time attributes))))))))))
 
 (defun my/noema-jupyter--file-delete (params _client)
-  "Delete a validated Jupyter sidecar from PARAMS."
+  "Delete a validated Jupyter notebook from PARAMS."
   (my/noema-jupyter--defer
    (lambda ()
      (let ((file (my/noema-jupyter--file params)))
@@ -686,7 +737,7 @@ button's redisplay stack."
        `((ok . t) (file . ,file))))))
 
 (defun my/noema-jupyter--file-rename (params _client)
-  "Rename one validated Jupyter sidecar described by PARAMS."
+  "Rename one validated Jupyter notebook described by PARAMS."
   (my/noema-jupyter--defer
    (lambda ()
      (let* ((to (my/noema-jupyter--file params))
@@ -698,7 +749,7 @@ button's redisplay stack."
        `((ok . t) (file . ,to))))))
 
 (defun my/noema-jupyter--file-stat (params _client)
-  "Stat a validated Jupyter sidecar from PARAMS."
+  "Stat a validated Jupyter notebook from PARAMS."
   (my/noema-jupyter--defer
    (lambda ()
      (let ((file (my/noema-jupyter--file params)))
@@ -751,6 +802,27 @@ With PROBE, check target executables through the routed process boundary."
                 program))))
            checks))))
     (nreverse checks)))
+
+(defun my/noema-jupyter-shutdown-all ()
+  "Shut down every brokered Jupyter runtime this Emacs placed on a target.
+Brokered kernels are started detached (`start_new_session=True\='), so
+without this they outlive Emacs, reparent to PID 1, and are invisible to
+Noema\='s orphan sweep — which only recognises the connection files it names
+itself.  Attached and server kernels are not brokered and are untouched."
+  (dolist (runtime (hash-table-values my/noema-jupyter-runtimes))
+    (condition-case error
+        (my/noema-jupyter--shutdown-runtime runtime)
+      (error
+       (message "Noema Jupyter: could not shut down runtime %s: %s"
+                (my/noema-jupyter-runtime-id runtime)
+                (error-message-string error)))))
+  (clrhash my/noema-jupyter-runtimes))
+
+(defun my/noema-jupyter-shutdown-all-on-exit-h ()
+  "Release brokered Jupyter runtimes while Emacs is still able to reach them."
+  (ignore-errors (my/noema-jupyter-shutdown-all)))
+
+(add-hook 'kill-emacs-hook #'my/noema-jupyter-shutdown-all-on-exit-h)
 
 (dolist (entry
          `(("aaronnote.jupyter.kernels" . ,#'my/noema-jupyter--kernels)

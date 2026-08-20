@@ -72,7 +72,7 @@ service 与 channel 来自同一 owning workspace target。异步 callback 在�
 | TCP/TLS client | local | SSH forward 上继续使用 Emacs 原生 network stream |
 | port forwarding | local | SSH `-L`、jump host、关闭清理；真机验证和 UI |
 | remote listener/reverse forward | remote | native 回环与 SSH `-R` 真机动态端口已验证；补访问策略和断线恢复故障注入 |
-| Noema Jupyter cells | remote | kernel/cwd/env、`.cell`、五通道与 widget asset 跟随 owning Target；单一路径和恢复单测已建立，真实 SSH kernel E2E 仍需目标依赖 |
+| Noema Jupyter cells | remote | kernel/cwd/env、`.cell`、五通道与 widget asset 跟随 owning Target；`hb` 心跳覆盖三种 connector 的死亡检测，liveness 探测区分确认死亡与 `unknown`，Emacs 退出时回收 broker kernel；真实 SSH kernel E2E 与传输断线故障注入仍缺，因此未到 resilient |
 | tunnel | 模型 | 外部 Tailscale/FRP endpoint 可用；尚无托管 tunnel service |
 | Dev Container lifecycle | 未实现 | 读取 devcontainer、build/create/start/attach/rebuild |
 | 工具/“扩展”部署 | API | service manifest、版本锁、离线包、更新与回滚 |

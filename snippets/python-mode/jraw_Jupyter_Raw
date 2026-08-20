@@ -2,5 +2,5 @@
 # name: Jupytext raw cell
 # key: jraw
 # --
-# %% [raw]
+# %% [raw] id=`(my/snippet-jupyter-cell-id)`
 $0

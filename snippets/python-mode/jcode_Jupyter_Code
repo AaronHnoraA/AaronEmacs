@@ -2,5 +2,5 @@
 # name: Jupytext code cell
 # key: jcode
 # --
-# %%
+# %% id=`(my/snippet-jupyter-cell-id)`
 $0

@@ -21,6 +21,26 @@
   id label provider family context root tool-environment environment profile
   workspace-configuration idle-timeout metadata)
 
+(cl-defstruct (my/language-server-runtime-fallback
+               (:constructor my/language-server-runtime-fallback-create))
+  reason expected)
+
+(defun my/language-server-runtime-fallback-text (fallback)
+  "Return the user-facing reason stored in FALLBACK.
+Plain strings remain valid for providers whose fallback is unexpected."
+  (if (my/language-server-runtime-fallback-p fallback)
+      (my/language-server-runtime-fallback-reason fallback)
+    fallback))
+
+(defun my/language-server-runtime-report-fallback (fallback)
+  "Report FALLBACK unless it is an expected provider limitation.
+Expected fallbacks remain available to diagnostics through
+`my/language-server-runtime-error'."
+  (unless (and (my/language-server-runtime-fallback-p fallback)
+               (my/language-server-runtime-fallback-expected fallback))
+    (message "Language-server runtime fallback: %s"
+             (my/language-server-runtime-fallback-text fallback))))
+
 (defvar my/language-server-runtime-providers nil
   "Registered buffer runtime providers, ordered by descending priority.")
 
@@ -99,6 +119,9 @@ PROPERTIES accepts `:priority', `:modes', `:source', and `:cleanup-function'."
           my/language-server-runtime-state
           (or state
               (cond (runtime 'ready)
+                ((and (my/language-server-runtime-fallback-p error)
+                      (my/language-server-runtime-fallback-expected error))
+                 'unsupported)
                 (error 'error)
                 (t 'unsupported))))
     (let ((callbacks (nreverse my/language-server-runtime--callbacks)))
@@ -191,7 +214,7 @@ current result first."
   (my/language-server-runtime-prepare
    (lambda (_runtime error)
      (if error
-         (message "Language-server runtime fallback: %s" error)
+         (my/language-server-runtime-report-fallback error)
        (message "Language-server runtime refreshed")))
    t))
 
@@ -211,7 +234,9 @@ current result first."
           (my/language-server-runtime-id my/language-server-runtime-current)))
      ((eq my/language-server-runtime-state 'pending) "preparing")
      (my/language-server-runtime-error
-      (format "fallback — %s" my/language-server-runtime-error))
+      (format "fallback — %s"
+              (my/language-server-runtime-fallback-text
+               my/language-server-runtime-error)))
      (t "project default"))))
 
 (defun my/language-server-runtime-project-object (&optional runtime)

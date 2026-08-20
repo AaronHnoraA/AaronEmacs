@@ -266,7 +266,7 @@
   (should (eq (lookup-key my/noema-keys-mode-map (kbd "M-S-z"))
               #'my/noema-redo)))
 
-(ert-deftest my/noema-jupyter-cell-point-move-does-not-sync ()
+(ert-deftest my/noema-jupyter-cell-point-move-stays-local ()
   (let ((buffer (generate-new-buffer "*Noema-jcell-test*"))
         calls)
     (unwind-protect
@@ -279,21 +279,78 @@
           (setq-local my/noema-jupyter-cell-kernel "python3")
           (setq-local my/noema-jupyter-cell-session "default")
           (setq-local my/noema-jupyter-cell-storage "ipynb")
-          (my/noema-jupyter-cell-mode 1)
-          (goto-char (point-min))
-          (search-forward "print(2)")
-          (cl-letf (((symbol-function 'my/noema-command)
-                     (lambda (command &optional detail)
-                       (push (cons command detail) calls))))
+          (setq-local my/noema-jupyter-cell--host-ready-requested t)
+          (cl-letf (((symbol-function 'my/noema-jupyter--output-select-cell)
+                     (lambda (script-file cell-id)
+                       (push (list script-file cell-id) calls))))
+            (my/noema-jupyter-cell-mode 1)
+            (goto-char (point-min))
+            (search-forward "print(2)")
             (my/noema-jupyter-cell--post-command-h)
             (should (equal my/noema-jupyter-cell-current-id "two"))
             (should-not calls)
-            (my/noema-jupyter-cell-sync-cursor)
-            (should (= (length calls) 1))
-            (should (equal (caar calls) "jupyter-select-cell"))
-            (should (equal (alist-get 'cellId (cdar calls)) "two"))))
+            (my/noema-jupyter-cell--post-command-h)
+            (should-not calls)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
+
+(ert-deftest my/noema-jupyter-refresh-uses-authoritative-script-snapshot ()
+  (let ((buffer (generate-new-buffer "*Noema-jupyter-snapshot-test*"))
+        (my/noema--ready t)
+        call)
+    (unwind-protect
+        (with-current-buffer buffer
+          (setq-local buffer-file-name "/tmp/notebook.ipynb")
+          (setq-local my/noema-jupyter-cell-mode t)
+          (setq-local my/noema-jupyter-cell-kernel "old-kernel")
+          (setq-local my/noema-jupyter-cell-language "python")
+          (cl-letf (((symbol-function 'my/noema-api-call)
+                     (lambda (channel args callback)
+                       (setq call (list channel args))
+                       (funcall callback
+                                '((document . ((scriptFile . "/tmp/notebook.ipynb")
+                                               (sourceFile . "/tmp/note.md")
+                                               (kernel . "sagemath")
+                                               (language . "python")
+                                               (session . "default")))
+                                  (kernelStatus . "idle"))
+                                nil)))
+                    ((symbol-function 'my/noema-jupyter-cell-lsp-runtime-changing)
+                     #'ignore)
+                    ((symbol-function 'my/language-server-ensure-deferred)
+                     #'ignore))
+            (my/noema-jupyter-cell-refresh-status))
+          (should (equal (car call)
+                         "aaronnote:api:jupyter:script-snapshot"))
+          (should (equal (aref (cadr call) 0)
+                         '((scriptFile . "/tmp/notebook.ipynb"))))
+          (should (equal my/noema-jupyter-cell-kernel "sagemath"))
+          (should (equal my/noema-jupyter-cell--kernel-status "idle"))
+          (should-not my/noema-jupyter-cell--session-refresh-pending))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest my/noema-jupyter-gateway-routes-session-snapshot-directly ()
+  (let (seen)
+    (cl-letf (((symbol-function 'my/noema-jupyter-cell-handle-session-event)
+               (lambda (payload) (setq seen payload))))
+      (my/noema--gateway-event
+       '((type . "jupyter-session")
+         (payload . ((document . ((scriptFile . "/tmp/notebook.ipynb")))
+                     (kernelStatus . "idle"))))
+       nil))
+    (should (equal (alist-get 'kernelStatus seen) "idle"))))
+
+(ert-deftest my/noema-jupyter-gateway-ignores-web-cell-selection ()
+  (let (seen)
+    (cl-letf (((symbol-function 'my/noema-jupyter-cell-handle-selection-event)
+               (lambda (payload) (setq seen payload))))
+      (my/noema--gateway-event
+       '((type . "jupyter-cell-select")
+         (payload . ((scriptFile . "/tmp/notebook.ipynb")
+                     (cellId . "cell-two"))))
+       nil))
+    (should-not seen)))
 
 (ert-deftest my/noema-xwidget-redo-routes-only-aaronnote-buffer ()
   (let ((buffer (generate-new-buffer "*Noema-test*"))
@@ -1177,7 +1234,7 @@
         (setq-local my/noema-buffer-file-name file))
       (should (eq (my/noema-canonical-buffer duplicate) canonical)))))
 
-(ert-deftest my/noema-jupyter-sidecars-are-logical-and-confined ()
+(ert-deftest my/noema-jupyter-notebooks-are-logical-ipynb-files ()
   (should
    (equal
     (my/noema-jupyter--file
@@ -1187,10 +1244,11 @@
    (my/noema-jupyter--file
     '((file . "/fs:local:/tmp/notes/note.md")))
    :type 'error)
-  (should-error
+  (should
+   (equal
    (my/noema-jupyter--file
-    '((file . "/fs:local:/tmp/notes/.cell/nested/note.ipynb")))
-   :type 'error))
+    '((file . "/fs:local:/tmp/notes/experiments/note.ipynb")))
+   "/fs:local:/tmp/notes/experiments/note.ipynb")))
 
 (ert-deftest my/noema-jupyter-normalizes-target-kernelspecs ()
   (let* ((payload
@@ -1214,6 +1272,23 @@
        nil)
       '("/target/bin/python" "-m" "ipykernel_launcher"
         "-f" "{connection_file}")))))
+
+(ert-deftest my/noema-jupyter-lsp-treats-legacy-remote-kernel-as-expected-fallback ()
+  (let* ((entry
+          '((name . "rik_ssh_example_python")
+            (spec
+             (argv . ["python" "-m" "remote_ikernel"
+                      "-f" "{connection_file}"])
+             (language . "python"))))
+         (fallback
+          (my/noema-jupyter-cell--lsp-probe-command
+           "rik_ssh_example_python" entry)))
+    (should (my/language-server-runtime-fallback-p fallback))
+    (should (my/language-server-runtime-fallback-expected fallback))
+    (should
+     (equal
+      (my/language-server-runtime-fallback-reason fallback)
+      "legacy remote_ikernel kernelspecs cannot reveal the kernel interpreter"))))
 
 (ert-deftest my/noema-jupyter-lsp-rediscovers-missing-event-kernelspec ()
   (let* ((origin (generate-new-buffer " *noema-lsp-rediscovery*"))
@@ -1259,6 +1334,11 @@
           (should-not (cadr received))
           (should
            (equal
+            (remote-normalize-id
+             (my/language-server-runtime-id (car received)))
+            (my/language-server-runtime-id (car received))))
+          (should
+           (equal
             (plist-get
              (my/language-server-runtime-profile (car received)) :executable)
             "/target/bin/python"))
@@ -1283,7 +1363,7 @@
    (memq #'my/noema-jupyter--doctor
          remote-doctor-check-functions)))
 
-(ert-deftest my/noema-jupyter-registers-emacs-document-engine-methods ()
+(ert-deftest my/noema-jupyter-does-not-register-an-emacs-protocol-engine ()
   (dolist (method
            '("aaronnote.jupyter.document.snapshot"
              "aaronnote.jupyter.manager.snapshot"
@@ -1301,7 +1381,7 @@
              "aaronnote.jupyter.kernel.shutdown"
              "aaronnote.jupyter.kernel.channel"
              "aaronnote.jupyter.board.open"))
-    (should (functionp (gethash method remote-gateway--methods)))))
+    (should-not (functionp (gethash method remote-gateway--methods)))))
 
 (ert-deftest my/noema-public-api-callback-reports-offline ()
   (let ((my/noema--ready nil) received)
@@ -1345,7 +1425,7 @@
       (should (= (plist-get (car snapshot) :generation) 2)))
     (should-not (my/noema-jupyter-runtime-snapshot "missing"))))
 
-(ert-deftest my/noema-jupyter-direct-cell-file-activates-complete-mode ()
+(ert-deftest my/noema-jupyter-cell-file-auto-installs-noema-ui ()
   (let* ((root (make-temp-file "noema-jupyter-direct-" t))
          (store (expand-file-name ".cell" root))
          (source (expand-file-name "note.md" root))
@@ -1371,7 +1451,7 @@
           (setq buffer (find-file-noselect script))
           (with-current-buffer buffer
             (should my/noema-jupyter-cell-mode)
-            (should (equal my/noema-jupyter-cell-source-file source))
+            (should (file-equal-p my/noema-jupyter-cell-source-file source))
             (should (equal my/noema-jupyter-cell-kernel "python3"))
             (should (equal my/noema-jupyter-cell-language "python"))
             (goto-char (point-min))
@@ -1380,184 +1460,99 @@
             (should (equal my/noema-jupyter-cell-current-id "cell-a"))
             (should (eq (key-binding (kbd "C-c C-c"))
                         #'my/noema-jupyter-cell-run-current))
-            (should (eq (key-binding (kbd "C-c i ?"))
-                        #'my/noema-jupyter-cell-command-menu))
+            (should (eq (key-binding (kbd "C-c C-i"))
+                        #'my/noema-jupyter-cell-run-current))
+            (should (eq (key-binding (kbd "M-RET"))
+                        #'my/noema-jupyter-cell-jump-output))
+            (should (eq (key-binding (kbd "s-RET"))
+                        #'my/noema-jupyter-cell-jump-output))
+            (should (eq (key-binding (kbd "C-c C-p"))
+                        #'my/noema-jupyter-output-page))
             (should (equal header-line-format
                            '(:eval (my/noema-jupyter-cell--header-line))))
             (goto-char (point-max))
             (my/noema-jupyter-cell--update-highlight)
-            (should (my/noema-jupyter-cell--engine-params nil nil))))
+            (should (file-equal-p
+                     (alist-get 'scriptFile
+                                (my/noema-jupyter-cell--command-detail))
+                     script))))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-directory root t))))
 
-(ert-deftest my/noema-jupyter-engine-snapshot-and-move-preserve-note-prose ()
-  (let* ((root (make-temp-file "noema-jupyter-document-" t))
-         (store (expand-file-name ".cell" root))
-         (source (expand-file-name "note.md" root))
-         (script (expand-file-name "note.python.default.ipynb" store))
-         (params `((scriptFile . ,script) (sourceFile . ,source)
-                   (kernel . "python3") (session . "default")
-                   (language . "python")))
-         buffers)
+(ert-deftest my/noema-jupyter-cell-starts-web-host-once-per-pending-buffer ()
+  (with-temp-buffer
+    (let ((my/noema--ready nil)
+          callback
+          (starts 0)
+          (refreshes 0))
+      (cl-letf (((symbol-function 'my/noema--ensure-server)
+                 (lambda (&optional ready-callback)
+                   (setq starts (1+ starts)
+                         callback ready-callback)))
+                ((symbol-function 'my/noema-jupyter-cell-refresh-status)
+                 (lambda () (setq refreshes (1+ refreshes)))))
+        (my/noema-jupyter-cell--ensure-noema-host)
+        (my/noema-jupyter-cell--ensure-noema-host)
+        (should (= starts 1))
+        (should my/noema-jupyter-cell--host-ready-requested)
+        (setq my/noema--ready t)
+        (funcall callback)
+        (should-not my/noema-jupyter-cell--host-ready-requested)
+        (should (= refreshes 1))
+        (my/noema-jupyter-cell--ensure-noema-host)
+        (should (= starts 1))
+        (should (= refreshes 2))))))
+
+(ert-deftest my/noema-jupyter-cell-ordinary-ipynb-auto-installs-noema-ui ()
+  (let* ((file (make-temp-file "ordinary-noema-ui-" nil ".ipynb"))
+         (my/noema--ready t)
+         buffer)
     (unwind-protect
-        (cl-letf (((symbol-function 'my/noema-command) #'ignore))
-          (make-directory store t)
-          (with-temp-file source
-            (insert "# Note\n"
-                    "@@cell(python, default) [cell-a]\n"
-                    "Between the Cell markers.\n"
-                    "@@cell(python, default) [cell-b]\n"))
-          (with-temp-file script
-            (insert (json-serialize
-                     `((cells . [((cell_type . "code") (id . "cell-a")
-                                  (metadata . ()) (execution_count . nil)
-                                  (outputs . []) (source . "a = 1\n"))
-                                 ((cell_type . "code") (id . "cell-b")
-                                  (metadata . ()) (execution_count . nil)
-                                  (outputs . []) (source . "b = 2\n"))])
-                       (metadata . ((kernelspec . ((name . "python3")
-                                                  (display_name . "Python 3")
-                                                  (language . "python")))
-                                    (language_info . ((name . "python")))
-                                    (noema . ((source_file . ,source)
-                                              (session . "default")))))
-                       (nbformat . 4) (nbformat_minor . 5)))
-                    "\n"))
-          (let* ((snapshot (my/noema-jupyter-engine-document-snapshot params))
-                 (cells (alist-get 'cells snapshot)))
-            (should (stringp (json-serialize snapshot
-                                             :null-object nil
-                                             :false-object :json-false)))
-            (should (equal (mapcar (lambda (cell) (alist-get 'id cell)) cells)
-                           '("cell-a" "cell-b")))
-            (should (equal (alist-get 'sourceFile (alist-get 'document snapshot))
-                           source))
-            (should (equal (alist-get 'code (aref cells 0)) "a = 1\n")))
-          (my/noema-jupyter-engine-document-mutate
-           (append params '((cellId . "cell-a") (op . "moveDown"))))
-          (let* ((snapshot (my/noema-jupyter-engine-document-snapshot params))
-                 (ids (mapcar (lambda (cell) (alist-get 'id cell))
-                              (alist-get 'cells snapshot))))
-            (should (equal ids '("cell-b" "cell-a"))))
-          (with-temp-buffer
-            (insert-file-contents source)
-            (should (string-match-p
-                     "\\[cell-b\\]\nBetween the Cell markers\\.\n@@cell.*\\[cell-a\\]"
-                     (buffer-string))))
-          (when-let* ((buffer (find-buffer-visiting script)))
-            (push buffer buffers)))
-      (dolist (buffer buffers)
-        (when (buffer-live-p buffer) (kill-buffer buffer)))
-      (delete-directory root t))))
+        (progn
+          (with-temp-file file
+            (insert
+             (json-serialize
+              '((cells . [((cell_type . "code") (id . "cell-a")
+                           (metadata . ()) (execution_count . nil)
+                           (outputs . []) (source . "value = 1\n"))])
+                (metadata . ((kernelspec . ((name . "python3")
+                                            (display_name . "Python 3")
+                                            (language . "python")))
+                             (language_info . ((name . "python")))))
+                (nbformat . 4) (nbformat_minor . 5)))
+             "\n"))
+          (setq buffer (find-file-noselect file))
+          (with-current-buffer buffer
+            (should my/noema-jupyter-cell-mode)
+            (should (file-equal-p my/noema-jupyter-cell-source-file file))
+            (should (equal my/noema-jupyter-cell-kernel "python3"))
+            (should (eq (key-binding (kbd "C-c C-p"))
+                        #'my/noema-jupyter-output-page))
+            ;; Noema persists outputs by rewriting the ipynb.  Auto-revert
+            ;; must restore the language projection *and* its NCell controls.
+            (revert-buffer :ignore-auto :noconfirm)
+            (should my/noema-jupyter-cell-mode)
+            (should (equal header-line-format
+                           '(:eval (my/noema-jupyter-cell--header-line))))))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (ignore-errors (delete-file file)))))
 
-(ert-deftest my/noema-jupyter-engine-run-modes-have-jupyterlab-semantics ()
-  (let ((cells '((:id "a") (:id "b") (:id "c"))))
-    (should (equal (mapcar (lambda (cell) (plist-get cell :id))
-                           (my/noema-jupyter-engine--execution-plan
-                            '((cellId . "b") (mode . "current")) cells))
-                   '("b")))
-    (should (equal (mapcar (lambda (cell) (plist-get cell :id))
-                           (my/noema-jupyter-engine--execution-plan
-                            '((cellId . "b") (mode . "above")) cells))
-                   '("a" "b")))
-    (should (equal (mapcar (lambda (cell) (plist-get cell :id))
-                           (my/noema-jupyter-engine--execution-plan
-                            '((cellId . "b") (mode . "below")) cells))
-                   '("b" "c")))
-    (should (equal (mapcar (lambda (cell) (plist-get cell :id))
-                           (my/noema-jupyter-engine--execution-plan
-                            '((cellId . "b") (mode . "selected")
-                              (cellIds . ["a" "c"])) cells))
-                   '("a" "c")))))
-
-(ert-deftest my/noema-jupyter-manager-shares-kernels-only-by-explicit-attach ()
-  (let ((my/noema-jupyter-manager-kernels (make-hash-table :test #'equal))
-        (my/noema-jupyter-manager-sessions (make-hash-table :test #'equal))
-        (my/noema-jupyter-manager-sessions-by-id (make-hash-table :test #'equal))
-        (my/noema-jupyter-manager-tasks (make-hash-table :test #'equal)))
-    (cl-letf (((symbol-function 'my/noema-jupyter-manager--connect-client)
-               (lambda (session _kernel)
-                 (setf (my/noema-jupyter-session-client session) 'connected)))
-              ((symbol-function 'jupyter-connected-p) (lambda (_client) t)))
-      (let* ((metadata '(:language "python" :kernel "python3" :session "one"))
-             (one (my/noema-jupyter-manager-session "/tmp/a.python.one.py" nil metadata))
-             (two (my/noema-jupyter-manager-session "/tmp/b.python.two.py" nil metadata))
-             (first (my/noema-jupyter-kernel-create
-                     :id "kernel-a" :kernelspec "python3" :language "python"
-                     :session-ids nil :status 'idle :owned t))
-             (second (my/noema-jupyter-kernel-create
-                      :id "kernel-b" :kernelspec "python3" :language "python"
-                      :session-ids nil :status 'idle :owned t)))
-        (puthash "kernel-a" first my/noema-jupyter-manager-kernels)
-        (puthash "kernel-b" second my/noema-jupyter-manager-kernels)
-        (my/noema-jupyter-manager-select one '(:kind connect :kernel-id "kernel-a") t)
-        (should-not (my/noema-jupyter-session-kernel-id two))
-        (my/noema-jupyter-manager-select two '(:kind connect :kernel-id "kernel-a") t)
-        (should (= (length (my/noema-jupyter-kernel-session-ids first)) 2))
-        ;; Switching ONE detaches it, but the shared old kernel survives for TWO.
-        (my/noema-jupyter-manager-select one '(:kind connect :kernel-id "kernel-b") t)
-        (should (gethash "kernel-a" my/noema-jupyter-manager-kernels))
-        (should (equal (my/noema-jupyter-session-kernel-id two) "kernel-a"))
-        (should (equal (my/noema-jupyter-session-kernel-id one) "kernel-b"))
-        (let ((wrong (my/noema-jupyter-kernel-create
-                      :id "kernel-r" :kernelspec "ir" :language "r"
-                      :session-ids nil :status 'idle :owned t)))
-          (puthash "kernel-r" wrong my/noema-jupyter-manager-kernels)
-          (should-error
-           (my/noema-jupyter-manager-select
-            one '(:kind connect :kernel-id "kernel-r") t)))
-        ;; Closing the final controller does not stop or detach its kernel.
-        (my/noema-jupyter-manager-register-controller
-         "/tmp/a.python.one.py" (current-buffer) metadata)
-        (my/noema-jupyter-manager-release-controller
-         "/tmp/a.python.one.py" (current-buffer))
-        (should (equal (my/noema-jupyter-session-kernel-id one) "kernel-b"))))))
-
-(ert-deftest my/noema-jupyter-manager-start-selection-works-from-source ()
-  (let ((session (my/noema-jupyter-session-create
-                  :id "session-a" :script-file "/tmp/note.bash.default.ipynb"
-                  :language "bash" :kernelspec "bash"))
-        called)
-    (cl-letf (((symbol-function 'my/noema-jupyter-manager-start-kernel)
-               (lambda (selected-session kernelspec)
-                 (setq called (list selected-session kernelspec))
-                 'started-kernel)))
-      (should
-       (eq (my/noema-jupyter-manager-select
-            session '(:kind start :kernelspec "bash") t)
-           'started-kernel))
-      (should (equal called (list session "bash"))))))
-
-(ert-deftest my/noema-jupyter-manager-connects-a-headless-client ()
-  (let* ((session (my/noema-jupyter-session-create
-                   :id "session-a" :script-file "/tmp/note.python.default.ipynb"))
-         (kernel (my/noema-jupyter-kernel-create
-                  :id "kernel-a" :connection-file "/tmp/kernel-a.json"))
-         kernel-arguments connected-kernel)
-    (cl-letf (((symbol-function 'jupyter-kernel)
-               (lambda (&rest arguments)
-                 (setq kernel-arguments arguments)
-                 'headless-kernel))
-              ((symbol-function 'jupyter-client)
-               (lambda (jupyter-kernel &optional _client-class)
-                 (setq connected-kernel jupyter-kernel)
-                 'headless-client))
-              ((symbol-function 'jupyter-connect-repl)
-               (lambda (&rest _)
-                 (ert-fail "Document sessions must not create a REPL"))))
-      (should (eq (my/noema-jupyter-manager--connect-client session kernel)
-                  'headless-client))
-      (should (equal kernel-arguments
-                     '(:conn-info "/tmp/kernel-a.json" :connect-p t)))
-      (should (eq connected-kernel 'headless-kernel))
-      (should (eq (my/noema-jupyter-session-client session)
-                  'headless-client)))))
-
-(ert-deftest my/noema-jupyter-source-marker-has-no-kernel-authority ()
-  (should
-   (equal (my/noema-jupyter-engine--source-marker
-           '(:language "python" :kernel "sagemath" :session "analysis") "cell-a")
-          "@@cell(python, analysis) [cell-a]")))
+(ert-deftest my/noema-jupyter-cell-emacs-snippet-action-uses-noema-id-owner ()
+  (with-temp-buffer
+    (insert "# %% id=cell-a\njmd")
+    (goto-char (point-max))
+    (setq-local my/noema-jupyter-cell-mode t)
+    (let (mutation)
+      (cl-letf (((symbol-function 'save-buffer) #'ignore)
+                ((symbol-function 'my/noema-jupyter-cell--mutate)
+                 (lambda (operation &optional extra)
+                   (setq mutation (list operation extra)))))
+        (should (my/noema-jupyter-cell-expand-snippet-action)))
+      (should (equal mutation
+                     '("insertBelow" ((cellType . "markdown")))))
+      (should-not (string-match-p "jmd" (buffer-string)))
+      ;; The Emacs action deliberately supplies no id; Noema generates it.
+      (should-not (assq 'cellId (cadr mutation))))))
 
 (provide 'init-aaronnote-tests)
 ;;; init-aaronnote-tests.el ends here
@@ -1679,3 +1674,101 @@
         ;; The listing is for a kernel picker; it must carry no credential.
         (should-not (alist-get 'token entry))
         (should-not (alist-get 'password entry))))))
+
+;;; Broker kernel liveness and teardown.
+;;
+;; These cover the difference between "the target says the kernel is gone" and
+;; "we could not ask the target", because every caller treats the first as
+;; permission to discard the kernel's in-memory state.
+
+(defun my/noema-jupyter-test--runtime (&optional pid)
+  "Return a brokered runtime struct for liveness tests, owning PID."
+  (my/noema-jupyter-runtime-create
+   :id "runtime-liveness" :manager-id "kernel-liveness"
+   :context (remote-context (remote-target-file-name "local" "/tmp/"))
+   :kernel "python3" :placement-file "/tmp/note.md"
+   :pid (or pid 4321) :generation 1 :state 'idle))
+
+(ert-deftest my/noema-jupyter-alive-p-reports-a-confirmed-death ()
+  (let ((runtime (my/noema-jupyter-test--runtime)))
+    (cl-letf (((symbol-function 'my/noema-jupyter--exit-status)
+               (lambda (&rest _) 1)))
+      (should (eq nil (my/noema-jupyter--alive-p runtime))))))
+
+(ert-deftest my/noema-jupyter-alive-p-reports-a-live-process-group ()
+  (let ((runtime (my/noema-jupyter-test--runtime)))
+    (cl-letf (((symbol-function 'my/noema-jupyter--exit-status)
+               (lambda (&rest _) 0)))
+      (should (eq t (my/noema-jupyter--alive-p runtime))))))
+
+(ert-deftest my/noema-jupyter-alive-p-does-not-call-a-lost-target-dead ()
+  "An unreachable target must be `unknown', never a dead kernel."
+  (let ((runtime (my/noema-jupyter-test--runtime)))
+    (cl-letf (((symbol-function 'my/noema-jupyter--exit-status)
+               (lambda (&rest _) (error "Connection closed by remote host"))))
+      (should (eq 'unknown (my/noema-jupyter--alive-p runtime))))))
+
+(ert-deftest my/noema-jupyter-signal-still-tries-when-liveness-is-unknown ()
+  "A probe failure must not silently leave a live kernel on the target."
+  (let ((runtime (my/noema-jupyter-test--runtime))
+        (sent nil))
+    (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+               (lambda (&rest _) 'unknown))
+              ((symbol-function 'my/noema-jupyter--output)
+               (lambda (_context program &rest args)
+                 (setq sent (cons program args))
+                 "")))
+      (my/noema-jupyter--signal runtime "TERM")
+      (should (equal (car sent) "kill"))
+      (should (member "-TERM" sent)))))
+
+(ert-deftest my/noema-jupyter-signal-is-skipped-only-for-a-confirmed-death ()
+  (let ((runtime (my/noema-jupyter-test--runtime))
+        (sent nil))
+    (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+               (lambda (&rest _) nil))
+              ((symbol-function 'my/noema-jupyter--output)
+               (lambda (&rest _) (setq sent t) "")))
+      (my/noema-jupyter--signal runtime "TERM")
+      (should-not sent))))
+
+(ert-deftest my/noema-jupyter-status-refuses-to-guess-for-an-unreachable-target ()
+  "Noema shuts a kernel down on `alive: false', so an unanswerable probe errors."
+  (let* ((my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (runtime (my/noema-jupyter-test--runtime)))
+    (puthash "runtime-liveness" runtime my/noema-jupyter-runtimes)
+    (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+               (lambda (&rest _) 'unknown)))
+      (should-error
+       (my/noema-jupyter--runtime-status-payload
+        (my/noema-jupyter--runtime '((runtimeId . "runtime-liveness"))))))))
+
+(ert-deftest my/noema-jupyter-shutdown-all-releases-every-brokered-runtime ()
+  "Brokered kernels are detached, so Emacs must close them before it exits."
+  (let* ((my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (closed '()))
+    (puthash "a" (my/noema-jupyter-test--runtime 11) my/noema-jupyter-runtimes)
+    (puthash "b" (my/noema-jupyter-test--runtime 22) my/noema-jupyter-runtimes)
+    (cl-letf (((symbol-function 'my/noema-jupyter--shutdown-runtime)
+               (lambda (runtime)
+                 (push (my/noema-jupyter-runtime-pid runtime) closed)
+                 runtime)))
+      (my/noema-jupyter-shutdown-all))
+    (should (equal (sort closed #'<) '(11 22)))
+    (should (zerop (hash-table-count my/noema-jupyter-runtimes)))))
+
+(ert-deftest my/noema-jupyter-shutdown-all-survives-one-failing-runtime ()
+  "One unreachable target must not strand the rest of the kernels."
+  (let* ((my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (closed '()))
+    (puthash "a" (my/noema-jupyter-test--runtime 11) my/noema-jupyter-runtimes)
+    (puthash "b" (my/noema-jupyter-test--runtime 22) my/noema-jupyter-runtimes)
+    (cl-letf (((symbol-function 'my/noema-jupyter--shutdown-runtime)
+               (lambda (runtime)
+                 (when (= (my/noema-jupyter-runtime-pid runtime) 11)
+                   (error "Target is unreachable"))
+                 (push (my/noema-jupyter-runtime-pid runtime) closed)
+                 runtime)))
+      (my/noema-jupyter-shutdown-all))
+    (should (equal closed '(22)))
+    (should (zerop (hash-table-count my/noema-jupyter-runtimes)))))

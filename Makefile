@@ -20,6 +20,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native ui-test ui-tokens audit-ui-tokens \
         remote-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e \
+        jupyter-test \
         publish publish-force publish-build publish-deploy publish-clean
 
 default: up
@@ -66,6 +67,7 @@ help:
 	  '  make remote-conformance-test Compare /fs:local semantics with native APIs' \
 	  '  make remote-byte-check    Strictly byte-compile remote code in a temp dir' \
 	  '  make remote-check         Run all remote tests and compatibility checks' \
+	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make remote-e2e           Run opt-in real SSH E2E (REMOTE_E2E_TARGET optional)' \
 	  '' \
 	  '  make publish              Build site + deploy (git push + optional NAS rsync)' \
@@ -208,6 +210,12 @@ remote-test: remote-contract-test remote-conformance-test
 	$(BATCH) -l test/init-lsp-remote-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-project-remote-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-evil-tests.el -f ert-run-tests-batch-and-exit
+
+jupyter-test:
+	$(BATCH) -l test/init-aaronnote-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-aaronnote-jupyter-notebook-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-lsp-runtime-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-jupyter-board-tests.el -f ert-run-tests-batch-and-exit
 
 remote-e2e:
 	REMOTE_E2E=1 $(REMOTE_TEST_BATCH) -l test/remote-e2e-tests.el -f ert-run-tests-batch-and-exit

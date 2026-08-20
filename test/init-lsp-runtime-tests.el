@@ -44,6 +44,45 @@
           (should (eq my/language-server-runtime-state 'ready))
           (should (eq (car received) runtime)))))))
 
+(ert-deftest my/runtime-expected-fallback-is-silent-but-diagnostic ()
+  (let ((fallback
+         (my/language-server-runtime-fallback-create
+          :reason "kernel launcher is intentionally opaque" :expected t))
+        messages)
+    (cl-letf (((symbol-function 'message)
+               (lambda (&rest args) (push args messages))))
+      (my/language-server-runtime-report-fallback fallback))
+    (should-not messages)
+    (with-temp-buffer
+      (setq-local my/language-server-runtime-state 'unsupported)
+      (setq-local my/language-server-runtime-error fallback)
+      (should
+       (equal (my/language-server-runtime-description)
+              "fallback — kernel launcher is intentionally opaque")))
+    (my/runtime-test-with-registry
+      (let (finish)
+        (my/register-language-server-runtime-provider
+         'expected
+         (lambda (_buffer callback)
+           (setq finish callback)
+           'pending)
+         :modes '(my/runtime-test-mode))
+        (with-temp-buffer
+          (my/runtime-test-mode)
+          (should (eq (my/language-server-runtime-prepare) 'pending))
+          (funcall finish nil fallback)
+          (should (eq my/language-server-runtime-state 'unsupported))
+          (should (eq my/language-server-runtime-error fallback)))))))
+
+(ert-deftest my/runtime-unexpected-fallback-is-reported ()
+  (let (messages)
+    (cl-letf (((symbol-function 'message)
+               (lambda (&rest args) (push args messages))))
+      (my/language-server-runtime-report-fallback "probe failed"))
+    (should
+     (equal (car messages)
+            '("Language-server runtime fallback: %s" "probe failed")))))
+
 (ert-deftest my/runtime-project-identity-separates-equal-roots ()
   (my/runtime-test-with-registry
     (with-temp-buffer

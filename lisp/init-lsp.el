@@ -1389,7 +1389,7 @@ only enforce process termination; they never send a second shutdown RPC."
   "Resume startup after resolving a runtime, reporting fallback ERROR."
   (setq my/language-server--waiting-for-runtime nil)
   (when error
-    (message "Language-server runtime fallback: %s" error))
+    (my/language-server-runtime-report-fallback error))
   (my/language-server--ensure-after-runtime))
 
 (defun my/language-server-ensure ()

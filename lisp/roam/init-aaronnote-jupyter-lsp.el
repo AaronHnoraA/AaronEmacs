@@ -75,10 +75,13 @@
 
 (defun my/noema-jupyter-cell--lsp-probe-command (kernel entry)
   "Return the Python probe argv for KERNEL and kernelspec ENTRY.
-A returned string is an explicit unsupported/fallback reason."
+A returned fallback object is an expected unsupported reason; a returned
+string is an unexpected resolution error."
   (cond
    ((string-prefix-p "attach:" (or kernel ""))
-    "attached kernels do not expose a reproducible launch environment")
+    (my/language-server-runtime-fallback-create
+     :reason "attached kernels do not expose a reproducible launch environment"
+     :expected t))
    ((not entry)
     (or (and (stringp my/noema-jupyter-cell-kernel-spec-error)
              (not (string-empty-p my/noema-jupyter-cell-kernel-spec-error))
@@ -97,7 +100,10 @@ A returned string is an explicit unsupported/fallback reason."
            (module (and module-pos (nth (1+ module-pos) argv))))
       (cond
        ((and module (string-match-p "remote_ikernel" module))
-        "legacy remote_ikernel kernelspecs cannot reveal the kernel interpreter")
+        (my/language-server-runtime-fallback-create
+         :reason
+         "legacy remote_ikernel kernelspecs cannot reveal the kernel interpreter"
+         :expected t))
        ((and declared (stringp (car declared)))
         (append declared
                 (list "-c" my/noema-jupyter-cell--python-runtime-probe)))
@@ -112,8 +118,11 @@ A returned string is an explicit unsupported/fallback reason."
                              (file-name-nondirectory (car argv))))
         (list (car argv) "-c" my/noema-jupyter-cell--python-runtime-probe))
        (t
-        (format "kernelspec `%s' uses an opaque launcher; add metadata.aaron.runtime.probe_argv"
-                kernel)))))))
+        (my/language-server-runtime-fallback-create
+         :reason
+         (format "kernelspec `%s' uses an opaque launcher; add metadata.aaron.runtime.probe_argv"
+                 kernel)
+         :expected t)))))))
 
 (defun my/noema-jupyter-cell--lsp-runtime-from-probe
     (context root kernel session entry base-environment payload)
@@ -142,7 +151,9 @@ A returned string is an explicit unsupported/fallback reason."
            (prin1-to-string
             (list (remote-context-target-id context) root kernel executable
                   prefix vars paths))))
-         (id (format "jupyter:%s" (substring fingerprint 0 16)))
+         ;; Runtime ids also become remote-environment ids; `remote-id-regexp'
+         ;; deliberately excludes colons.
+         (id (format "jupyter-%s" (substring fingerprint 0 16)))
          (workspace (my/noema-jupyter-cell--lsp-workspace executable paths))
          (profile
           (list :id id :label (format "Jupyter %s (%s)" kernel executable)
@@ -189,7 +200,8 @@ A returned string is an explicit unsupported/fallback reason."
   "Probe ENTRY and call CALLBACK with its runtime for ORIGIN.
 CONTEXT, ROOT, KERNEL, SESSION and BASE-ENVIRONMENT describe the owning target."
   (let ((probe (my/noema-jupyter-cell--lsp-probe-command kernel entry)))
-    (if (stringp probe)
+    (if (or (stringp probe)
+            (my/language-server-runtime-fallback-p probe))
         (my/noema-jupyter-cell--lsp-callback-later callback nil probe)
       (let* ((spec (my/noema-jupyter-cell--lsp-get 'spec entry))
              (vars (my/noema-jupyter-cell--lsp-kernel-environment spec))
@@ -327,7 +339,10 @@ own kernelspec registry instead of the Emacs host's registry."
            (base-environment (remote-environment-resolve context)))
       (if (string-prefix-p "attach:" (or kernel ""))
           (list :unsupported
-                "attached kernels do not expose a reproducible launch environment")
+                (my/language-server-runtime-fallback-create
+                 :reason
+                 "attached kernels do not expose a reproducible launch environment"
+                 :expected t))
         (if (and entry
                  (equal kernel
                         (my/noema-jupyter-cell--lsp-get 'name entry)))

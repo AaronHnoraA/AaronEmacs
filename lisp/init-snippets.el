@@ -23,6 +23,31 @@
 (declare-function yas-prev-field "yasnippet" (&optional arg))
 (declare-function my/copilot-setup-dwim-keys "init-copilot" (keymap))
 
+(defvar my/snippet-action-functions nil
+  "Functions that can handle a snippet-like editor action at point.
+Each function is called without arguments and returns non-nil after handling
+the trigger.  This keeps structural commands in the existing snippet workflow
+without representing them as Yasnippet text templates.")
+
+(defun my/snippet-jupyter-cell-id ()
+  "Return a fresh nbformat-compatible id for a Jupyter cell snippet."
+  (if (fboundp 'my/noema-jupyter-notebook--new-id)
+      (my/noema-jupyter-notebook--new-id)
+    (format "cell-%s"
+            (substring
+             (secure-hash 'sha256
+                          (format "%s:%s:%s"
+                                  (float-time) (random) (emacs-pid)))
+             0 12))))
+
+(defun my/snippet-expand ()
+  "Expand a structural editor action or fall back to Yasnippet.
+Buffer-local action providers get the first chance to consume a trigger such
+as a Noema Jupyter `jcode' command."
+  (interactive)
+  (unless (run-hook-with-args-until-success 'my/snippet-action-functions)
+    (call-interactively #'yas-expand)))
+
 (defconst my/yas-treesit-extra-modes
   '((bash-ts-mode sh-mode)
     (c-ts-mode c-mode)
@@ -146,7 +171,7 @@ previously inlined in every org-mode snippet file."
 ;; 全局 snippet 前缀，避免覆盖 `rg' 默认的 `C-c s' 搜索入口。
 (define-prefix-command 'my/snippet-map)
 (global-set-key (kbd "C-c y") #'my/snippet-map)
-(keymap-set my/snippet-map "y" #'yas-expand)
+(keymap-set my/snippet-map "y" #'my/snippet-expand)
 (keymap-set my/snippet-map "i" #'yas-insert-snippet)
 (keymap-set my/snippet-map "n" #'yas-new-snippet)
 (keymap-set my/snippet-map "v" #'yas-visit-snippet-file)

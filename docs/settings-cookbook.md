@@ -501,10 +501,12 @@ loopback，本机同端口很可能是另一个进程。
 
 ```elisp
 ((nil . ((eval . (setq-local my/project-local-settings
-                             '(:aaronnote-jupyter (:language sage
+                             '(:aaronnote-jupyter (:language python
                                                    :kernel sagemath
                                                    :session research))))))))
 ```
+
+这里的 `python` 是 notebook language；`sagemath` 才是 kernelspec 名。
 
 ### 超时和输出上限
 

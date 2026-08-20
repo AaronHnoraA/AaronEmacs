@@ -300,7 +300,8 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
                                 :target))
                 :runtime-fallback
                 (and (boundp 'my/language-server-runtime-error)
-                     my/language-server-runtime-error)
+                     (my/language-server-runtime-fallback-text
+                      my/language-server-runtime-error))
                 :workspace (and workspace
                                 (string-trim-right
                                  (pp-to-string workspace)))))))))

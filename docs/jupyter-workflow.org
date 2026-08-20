@@ -2,19 +2,23 @@
 
 * Architecture
 
-Emacs is the sole live-state authority.  The ownership boundary follows the
-Jupyter Server model:
+Noema's Node Jupyter service is the sole live-state and protocol authority.
+The ownership boundary follows the Jupyter Server model:
 
 - a =Kernel= is a global running resource identified by an opaque =kernelId=;
 - a =Session= is one notebook path explicitly attached to zero or one kernel;
 - a =Task= belongs to a session/cell and is reported by the global manager;
-- Noema only projects notebook source/output and sends script intents to the
-  Emacs controller buffer.  Its Run/Restart/Interrupt buttons do not own a
-  second runtime implementation.
+- Noema owns the kernel registry, Jupyter protocol/ZMQ traffic, execution,
+  completion, outputs, variables, widgets, and lifecycle operations;
+- Emacs projects ipynb as editable source and presents controls that call the
+  Noema API.  It has no Jupyter client or second kernel manager;
+- for a Remote target, Emacs may place the process and forward five opaque
+  ports, but Noema remains the endpoint that speaks the Jupyter protocol.
 
-Sidecars are standard nbformat 4.5 files under =.cell/=, named
-=NOTE.LANGUAGE.SESSION.ipynb=.  Emacs visits them as an editable percent-style
-source projection; the file on disk remains valid ipynb JSON.  Language and
+Noema note sidecars are standard nbformat 4.5 files under =.cell/=, named
+=NOTE.LANGUAGE.SESSION.ipynb=.  Ordinary ipynb files use the same path without
+requiring Noema note metadata.  Emacs visits both as editable percent-style
+source projections; the file on disk remains valid ipynb JSON.  Language and
 session come from the path, configured kernelspec lives in notebook metadata,
 stable identity/source/output use standard =cell.id=, =source=,
 =execution_count= and =outputs= fields; Noema-only state stays under
@@ -22,25 +26,49 @@ stable identity/source/output use standard =cell.id=, =source=,
 invoke Jupytext.  A live =kernelId= is never persisted.  A note marker therefore has only
 =@@cell(language, session) [cell-id]= authority.
 
-Closing a source buffer releases only that controller.  It does not stop the
-kernel.  Kernel sharing is explicit through “Connect to Running Kernel”.  On a
-session switch, an unshared owned old kernel is shut down; a shared old kernel
-is only detached.
+这里的 =LANGUAGE= 是 notebook 语言，不是 kernelspec 名。例如 SageMath 是
+Python-family kernel，因此使用 =NOTE.python.SESSION.ipynb= 和
+=@@cell(python, session)=；=sagemath= 只写在 =metadata.kernelspec= 与 Noema
+session 状态。旧的 =*.sage.*.ipynb= 在首次打开时迁移到 =*.python.*.ipynb=。
 
-The singleton xwidget workspace opens below the source buffer with =C-c i p=.
-It reuses one page for every notebook via tabs and provides the JupyterLab-like
+Opening any =*.ipynb= automatically composes the language major mode (for
+example =sh-mode=) with the =NCell= minor mode and Noema Jupyter header.  Old
+Noema-owned notebooks with missing or duplicate cell ids are upgraded in place
+to unique nbformat 4.5 ids.  An ordinary external notebook is less invasive:
+missing ids and its existing =nbformat_minor= stay unchanged on disk.  Emacs
+and Noema use a transient in-memory id only for UI addressing.  If its metadata
+does not identify a language, the source projection defaults to Python.
+Closing that Emacs source buffer does not stop the Noema kernel.
+
+The singleton Noema Jupyter workspace reuses one page for every notebook via
+tabs and provides the JupyterLab-like
 layout: Server/Running Kernels/Kernel Specs on the left, output Cells in the
 center, Cell Inspector/Variables/Sessions on the right, and Tasks at the
-bottom.  =C-c i K= opens the same Start / Connect / No Kernel choice from
-Emacs.  The buffer header line also exposes Run, Run All, Interrupt, Restart,
-Cell operations, Outputs, Variables, and Manage.
+bottom.  The Emacs header exposes kernel selection, Run, Run All, Interrupt,
+Restart, Outputs, Variables, and Manage as Noema API/UI operations.  Its
+=Editor/LSP:= control switches only the Emacs major mode (including a Text/LSP-off
+choice), then restores the ipynb projection and NCell UI; it never changes the
+notebook language, kernelspec, or Noema session.  The same command is bound to
+=C-c i l=.  The distinct =Kernel:= control (=C-c i K=) uses exactly the catalog
+shown by the Web workspace.
 
-The local Jupyter and Noema workflows use ordinary kernelspecs. Remote
-kernels are provided by the vendored =remote_ikernel= source under
-=site-lisp/remote_ikernel=. No remote Jupyter Server is *required*: the
-launcher starts the remote kernel over SSH or a scheduler and forwards its ZMQ
-ports, and that stays the default. Connecting to a Jupyter server that already
-exists is a separate, opt-in path — see "Remote Jupyter servers" below.
+Kernel selection in Emacs and the Web workspace consumes the same flattened
+Noema catalog (local/Remote kernelspecs, attach targets, and configured server
+targets).  Emacs does not hide entries merely because their declared language
+differs from the current editor mode.  Connecting to a running private kernel
+is offered only for the notebook that already owns it.
+
+Noema broadcasts one authoritative session snapshot after either UI changes a
+kernel.  Emacs also reads that snapshot by =scriptFile= instead of querying a
+possibly stale local kernel name.  Current-cell selection is mirrored in both
+directions between the source projection and the singleton Web workspace; it
+does not reload the document, focus another window, or start a kernel.
+
+Noema uses ordinary kernelspecs.  Its Node launcher starts local kernels.  For
+a Remote target, the Emacs Remote broker starts the process over the target
+transport and forwards five opaque ports back to the Noema Node service.  A
+remote Jupyter Server is not required.  Connecting to an existing server is a
+separate opt-in path; see "Remote Jupyter servers" below.
 
 A kernel therefore comes from exactly one of three configured sources selected
 for a session:
@@ -48,7 +76,7 @@ for a session:
 | Kernel name                        | Source                                       |
 |------------------------------------+----------------------------------------------|
 | =python3=, =sagemath=, ...         | a kernelspec, launched by the Remote broker  |
-| =attach:<connection-file>=         | a kernel already running, via its ZMQ ports  |
+| =attach:<connection-file>=         | an explicitly attached existing kernel      |
 | =server:<id>:<kernelspec>=         | a new kernel on a remote Jupyter server      |
 | =server:<id>:kernel:<kernel-id>=   | a kernel already running on that server      |
 
@@ -59,23 +87,51 @@ started, interrupted, restarted, and shut down over REST.
 
 * Noema 与 Remote workspace
 
-Emacs 托管的 Noema 不再由客户端 Node 直接启动当前笔记的 kernel。打开
-=/fs:TARGET:/path/note.md= 时，Remote broker 在同一 Target/workspace 中发现
-kernelspec、以 workspace root 为 cwd 启动 kernel，并原子暴露 Jupyter 的五个
-ZMQ channel。远端 note 同目录只保留同一份 =.cell/*.ipynb=，不再拆分 script 和
-output mirror。
+Noema 的 Node Jupyter service 是唯一的协议与管理 authority：kernel registry、
+ZMQ 消息、执行、completion、output 和 widget channel 都由 Noema 负责。Emacs 不
+加载 =jupyter-client=，也不建立 kernel ZMQ client；它只在需要 Remote target 时
+帮助放置进程和转发五个端口。打开 =/fs:TARGET:/path/note.md= 时，broker 在同一
+Target/workspace 中发现 kernelspec、以 workspace root 为 cwd 启动进程，再把连接
+信息交回 Noema。远端 note 同目录只保留同一份 =.cell/*.ipynb=，不再拆分 script
+和 output mirror。
 
 传输断开只释放 channel；重连后先探测目标 kernel。进程仍存活时重建 forwarding
 并保留内存状态；进程已经死亡时下一次执行重建 kernel，并以 =stateLost= 报告
 状态丢失。不会自动安装依赖或回退到客户端 kernel；使用 Remote Doctor 的 probe
 检查目标 =python3=、=jupyter= 和 kernelspec。
 
+探测有三种结果，不是两种。=kill -0= 说进程组还在就是存活，说它不在就是确认死亡，
+而**探测本身做不成**（连接断了、target 不可达）是第三种 =unknown=。=unknown=
+既不标 =stateLost= 也不跳过 =TERM=，并且会让 =aaronnote.jupyter.status= 直接报错
+而不是回一个 =alive: false= —— Noema 收到 =alive: false= 会关掉 kernel 并丢弃
+内存状态，把一次网络抖动答成 =false= 等于让用户白白丢一个 session。
+
+kernel 是否还活着由 Noema 侧的 =hb= 心跳判定。五端口里的 =hb= 一直被分配、也一直
+被 broker 转发，但过去没有任何代码连它：唯一的死亡信号是 OS 进程退出，而那只对
+Noema 自己 spawn 的 kernel 有效。broker 放置的（Remote target 的主路径）和
+=attach:= 的 kernel 因此没有任何死亡信号，记录会永远停在 =idle=，对它的一次执行
+永不结束，并且因为同一个 kernel 的执行是串行排队的，**该 notebook 后续所有 cell
+都会被一起卡住**。现在三种 connector 都跑心跳，连续丢失若干次回声即判定死亡、
+dispose 连接，等待中的执行随即失败返回。
+
+执行本身没有 wall-clock 超时（=AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS= 默认 0），
+这是有意的：它是**空闲**超时，会被消息重置，而 =time.sleep(3600)= 这类静默长任务
+不发消息，给它非零默认值会杀掉合法计算。存活性归心跳管，不归超时管。
+
+对应地，Emacs 侧发起执行的 gateway 请求也不能用普通请求的截止时间：Noema 要等
+run-all 里每个 cell 都跑完才应答，用 10 秒的默认值会把一次正常运行报成失败。
+执行与 kernel 控制走 =my/noema-jupyter-cell-execute-timeout=（默认 24 小时），
+它是"一个 notebook 最长允许算多久"的上界，不是健康检查。
+
 =attach:= 与 =remote_ikernel= 继续用于显式 existing-kernel/Jupyter Board 工作流，
 attached kernel 不归 Noema broker 杀死或自动重启。独立 desktop host mode 继续
 使用 Node 本地 launcher。
 
-Noema 通过 Edit 打开的 Python/Sage =.cell= buffer 会把当前 kernelspec 一并交给
-Emacs。runtime provider 在 owning Target 上执行 kernelspec 的轻量 probe，读取
+所有 =*.ipynb= 在 Emacs 中打开时都会自动进入语言 major mode 与 =NCell= minor
+mode，并从 notebook metadata 读取当前 kernelspec；普通 notebook 没有
+=source_file= 时以自身作为独立 document。Emacs 顶栏只是
+Noema manager 的 UI client；Run、Restart、Manage 等操作
+全部调用 Noema API。runtime provider 在 owning Target 上执行 kernelspec 的轻量 probe，读取
 =sys.executable=、=sys.prefix= 和 =sys.path=，再让 Eglot 的 Python analyzer 自动
 跟随 kernel；server binary 本身仍来自该 Target/workspace 的 tooling environment。
 同一 runtime 复用 Eglot，不同 kernel runtime 使用独立 Eglot project identity，
@@ -84,7 +140,8 @@ Emacs。runtime provider 在 owning Target 上执行 kernelspec 的轻量 probe�
 普通 Python/ipykernel kernelspec 可自动推导。项目自带 Python/Sage wrapper 在
 =metadata.aaron.runtime.probe_argv= 声明 probe 入口。=attach:=、legacy
 =remote_ikernel= 和没有 probe metadata 的不透明 launcher 不会被猜测；它们回退到
-项目默认 toolchain，具体原因可在 Language Server Hub / Doctor 查看。笔记项目的
+项目默认 toolchain。这类预期回退不再反复写入 minibuffer，具体原因仍可在
+Language Server Hub / Doctor 查看。笔记项目的
 =:aaronnote-jupyter= 默认 kernel 仍可设置，但不要再用项目级 =:toolchain= 把 Python
 固定到 Sage。
 
@@ -181,7 +238,7 @@ server 上的文件。这是刻意保持狭小的接口，不是第二套通用�
 
 ** Emacs 里的补全与文档
 
-=.cell/= notebook 源码投影（=my/noema-jupyter-cell-mode=）上挂了
+所有 ipynb 源码投影（=my/noema-jupyter-cell-mode=）上挂了
 =my/noema-jupyter-cell-capf=，直接问 kernel。它看得见静态分析看不见的东西：
 前面 cell 定义的名字、DataFrame 列名、IPython magic、Sage 注入的 builtin。
 它声明 =:exclusive no=,所以 kernel 空闲、不可达或没有结果时会透传给 Eglot。
@@ -190,6 +247,16 @@ server 上的文件。这是刻意保持狭小的接口，不是第二套通用�
 
 打字不会顺带启动 kernel：没有正在运行的 kernel 时这些请求直接返回
 =supported: false=。
+
+Emacs 的 snippet 入口也能调结构动作，但这些不是 Yasnippet 模板。在 ipynb
+buffer 中输入 =jcode= 或 =jmd= 后按 =C-c y y=，会通过 Noema API 在下方创建
+code/Markdown cell；新 =cell.id= 只由 Noema 生成。=jrun=、=jrunnext=、=jall=、
+=jsplit=、=jmerge=、=jclear=、=jout= 等同理。=C-c y j= 可直接选择完整动作表。
+若直接调用 Yasnippet 而绕过这组结构动作，=jcode=、=jmd=、=jraw= 和 =jcell=
+模板也会生成合法 id，因此新建 cell 不会退化成裸 =# %%=。
+对于旧会话或手工输入留下的裸 =# %%=，Noema-owned notebook 在保存/运行前会
+先把它提升为带稳定 id 的真实 cell，避免 marker 被吞进上一 cell 的 source 后再报
+=Unknown Jupyter cell=。普通外部 ipynb 仍保留其无 id 形式。
 
 ** 实时输出
 

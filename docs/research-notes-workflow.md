@@ -204,8 +204,9 @@ org <-> jupytext <-> ipynb
 这套配置已经把两条路径都配好了：
 
 - `org` 源块可以直接用 Jupyter 后端执行
-- Noema 笔记里的 `@@cell(language, session)` 块用同一套 Emacs Jupyter manager；
-  源码和输出保存在笔记旁 `.cell/` 的标准 ipynb sidecar 中，并在 Emacs 的源码投影里编辑
+- Noema 笔记里的 `@@cell(language, session)` 块由 Noema 自己的 Jupyter manager 执行；
+  源码和输出保存在笔记旁 `.cell/` 的标准 ipynb sidecar 中，并在 Emacs 的源码投影里编辑。
+  Emacs 的 notebook controls 只是 Noema API 的 UI client，不连接 kernel ZMQ
   （见 [jupyter-workflow.org](jupyter-workflow.org)）
 
 所以你的选择不应该是“二选一”，而应该是：

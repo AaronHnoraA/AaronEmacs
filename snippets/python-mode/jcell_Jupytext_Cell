@@ -2,5 +2,5 @@
 # name: Jupytext cell split
 # key: jcell
 # --
-# %%
+# %% id=`(my/snippet-jupyter-cell-id)`
 $0

@@ -2,5 +2,5 @@
 # name: Jupytext markdown cell
 # key: jmd
 # --
-# %% [markdown]
+# %% [markdown] id=`(my/snippet-jupyter-cell-id)`
 $0

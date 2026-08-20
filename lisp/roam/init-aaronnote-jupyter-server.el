@@ -8,9 +8,10 @@
 ;; is spoken to over HTTP(S): a lab server on a cluster login node, a
 ;; JupyterHub, or a kernel gateway.
 ;;
-;; Emacs owns the registry rather than Noema because two things belong on this
-;; side.  Secrets come from `auth-source', so no token is ever written into the
-;; repository.  And reachability is a Remote question: a server bound to a
+;; Emacs exposes a configured endpoint/credential catalogue to Noema; Noema
+;; still owns the Jupyter server sessions and kernel registry.  Secrets come
+;; from `auth-source', so no token is ever written into the repository.  And
+;; reachability is a Remote question: a server bound to a
 ;; login node's loopback interface does not exist from the client machine, so
 ;; `.resolve' opens a `remote-port-forward' inside the owning Target's
 ;; workspace and hands Noema a client-side URL.  A Target that cannot provide a
@@ -120,6 +121,13 @@ group is rather than leaving Noema pointed at a dead local port."
          (existing (gethash id my/noema-jupyter-server--forwards)))
     (if (and existing (remote-channel-live-p existing))
         existing
+      ;; A dead forward still owns a client-side listener and a workspace
+      ;; resource entry.  `remote-workspace-ensure-recoverable-resource'
+      ;; replaces the handle in place below, so releasing it here is the only
+      ;; chance its :close ever runs.
+      (when existing
+        (remhash id my/noema-jupyter-server--forwards)
+        (ignore-errors (remote-close-channel existing)))
       (let* ((target (my/noema-jupyter-server--target entry))
              (context (remote-context (remote-make-file-name target "/")))
              (workspace (remote-workspace-open context))

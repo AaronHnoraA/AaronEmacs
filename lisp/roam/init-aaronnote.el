@@ -19,8 +19,6 @@
 (require 'init-aaronnote-jupyter-cell)
 (require 'init-aaronnote-jupyter-runtime)
 (require 'init-aaronnote-jupyter-server)
-(require 'init-aaronnote-jupyter-manager)
-(require 'init-aaronnote-jupyter-engine)
 (require 'init-aaronnote-jupyter-lsp)
 
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
@@ -807,7 +805,12 @@ to JSON a second time."
           (setq my/noema--port port
                 my/noema--last-port port
                 my/noema--ready t)
-          (my/noema--flush-ready-callbacks))))
+          (my/noema--flush-ready-callbacks)
+          ;; Gateway registration/re-registration is the reconnect event for
+          ;; Emacs.  Reconcile open notebooks once here; notebook buffers do
+          ;; not run polling timers.
+          (when (fboundp 'my/noema-jupyter-cell-refresh-open-buffers)
+            (my/noema-jupyter-cell-refresh-open-buffers)))))
      ((string-prefix-p goto-prefix line)
       (let* ((payload (substring line (length goto-prefix)))
              (parts (split-string payload ":" nil))
@@ -842,8 +845,7 @@ to JSON a second time."
               ;; Source region (lean, etc.) or explicit tag: open in Emacs.
               (my/noema--goto-location file line-number column)
               (when (and (stringp file)
-                         (string-match-p (concat "\\(?:\\`\\|/\\)\\.cell/[^/]+\\.ipynb\\'")
-                                         file)
+                         (string-match-p "\\.ipynb\\'" file)
                          (require 'init-aaronnote-jupyter-cell nil t))
                 (ignore-errors
                   (my/noema-jupyter-cell-activate-buffer payload)))
@@ -1132,6 +1134,9 @@ to JSON a second time."
                    (client (alist-get 'client payload)))
                (when (stringp key)
                  (my/noema--run-emacs-key key client)))
+             nil)
+            ("jupyter-session"
+             (my/noema-jupyter-cell-handle-session-event payload)
              nil)
             ((or "open" "system-open" "zotero" "zotero-import"
                  "current-file" "saved")
@@ -2079,10 +2084,20 @@ kernel cannot freeze the editor."
                 (or timeout 8))))
     (my/noema--gateway-hash-value result)))
 
-(defun my/noema-api-call (channel args callback)
+(defcustom my/noema-api-call-timeout 10
+  "Seconds to wait for an ordinary asynchronous Noema API reply."
+  :type 'number
+  :group 'my/noema)
+
+(defun my/noema-api-call (channel args callback &optional timeout)
   "Call CHANNEL with ARGS and invoke CALLBACK with (RESULT ERROR).
 Unlike the compatibility wrapper `my/noema--api-call', CALLBACK is also
-invoked when Noema is offline or the gateway request fails."
+invoked when Noema is offline or the gateway request fails.
+
+TIMEOUT overrides `my/noema-api-call-timeout'.  Callers whose channel runs
+user code — Noema executes a whole run-all before it answers — must pass one,
+because the default deadline would report a perfectly healthy run as a
+failure while it is still going."
   (if-let* ((client
              (and my/noema--ready
                   (remote-gateway-find-client "aaronnote"))))
@@ -2093,7 +2108,7 @@ invoked when Noema is offline or the gateway request fails."
          (if error-object
              (funcall callback nil error-object)
            (funcall callback result nil)))
-       10)
+       (or timeout my/noema-api-call-timeout))
     (run-at-time
      0 nil callback nil
      '((code . "offline") (message . "Noema web-host is not ready")))))

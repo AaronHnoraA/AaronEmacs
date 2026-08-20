@@ -559,6 +559,19 @@ per-runtimeDir 的 `aaronnote-owned.json` sidecar 回收**同一个 runtimeDir �
 runtimeDir 一律清理（这个命名模式只有本模块会用到，正常存活的 kernel
 ppid 是它的 node 宿主进程，不会命中）。
 
+Emacs broker 放置的 kernel 走的是**另一条**路径，上面那个 sweep 覆盖不到它：
+它的连接文件叫 `noema-<hex>.json`，而 `sweepGlobalOrphanKernels` 匹配的是
+`aaronnote-kernel-*.json`；而且那个 sweep 在 Noema 宿主机上跑 `ps`，远端 target
+上的 kernel 它根本看不见。**不要试图靠放宽那个正则来"修好"它** —— broker kernel
+是 `start_new_session=True` 启动的，即使 Emacs 还活着它的 ppid 也是 1，放宽正则
+会让 web-host 启动时把用户正在用的 kernel 杀掉。
+
+正确的归属是：谁放置谁回收。`my/noema-jupyter-shutdown-all-on-exit-h`
+（`lisp/roam/init-aaronnote-jupyter-runtime.el`，挂在 `kill-emacs-hook`）在 Emacs
+退出时逐个关闭 `my/noema-jupyter-runtimes` 里的 runtime，并且对单个 target 不可达
+的情况只报错继续，不会因为一个连不上就漏掉其余的。残留风险只剩 Emacs 被 `kill -9`
+的情况，排查方式与 Lean worker 相同：`pgrep -fl ipykernel_launcher` 看 ppid。
+
 **写临时诊断脚本时的规则**：不要给 `createJupyterCellService`/
 `createKernelRegistry` 传一次性 `mkdtemp` 出来的 runtimeDir 然后直接退出；
 要么复用稳定的 vault runtimeDir，要么显式 `await service.shutdown()`
