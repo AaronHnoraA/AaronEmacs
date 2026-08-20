@@ -188,8 +188,10 @@
          (make-hash-table :test #'equal))
         opened closed)
     (cl-letf
-        (((symbol-function 'remote-file-name-target)
-          (lambda (_file) "remote"))
+        ;; nil means "no client-side tool can open this path", which is what
+        ;; makes a framework-owned watch necessary.
+        (((symbol-function 'remote-client-file-name)
+          (lambda (_file &optional _adapter) nil))
          ((symbol-function 'remote-context)
           (lambda (_file) 'mock-context))
          ((symbol-function 'remote-workspace-open)
@@ -267,8 +269,7 @@
               #'my/noema-redo)))
 
 (ert-deftest my/noema-jupyter-cell-point-move-stays-local ()
-  (let ((buffer (generate-new-buffer "*Noema-jcell-test*"))
-        calls)
+  (let ((buffer (generate-new-buffer "*Noema-jcell-test*")))
     (unwind-protect
         (with-current-buffer buffer
           (insert "# %% id=one\n"
@@ -280,19 +281,27 @@
           (setq-local my/noema-jupyter-cell-session "default")
           (setq-local my/noema-jupyter-cell-storage "ipynb")
           (setq-local my/noema-jupyter-cell--host-ready-requested t)
-          (cl-letf (((symbol-function 'my/noema-jupyter--output-select-cell)
-                     (lambda (script-file cell-id)
-                       (push (list script-file cell-id) calls))))
-            (my/noema-jupyter-cell-mode 1)
-            (goto-char (point-min))
-            (search-forward "print(2)")
-            (my/noema-jupyter-cell--post-command-h)
-            (should (equal my/noema-jupyter-cell-current-id "two"))
-            (should-not calls)
-            (my/noema-jupyter-cell--post-command-h)
-            (should-not calls)))
+          (my/noema-jupyter-cell-mode 1)
+          (goto-char (point-min))
+          (search-forward "print(2)")
+          (my/noema-jupyter-cell--post-command-h)
+          (should (equal my/noema-jupyter-cell-current-id "two")))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
+
+(ert-deftest my/noema-jupyter-cell-run-does-not-jump-to-web-output ()
+  (let (api-call output-opened)
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'buffer-modified-p) (lambda (&optional _buffer) nil))
+                ((symbol-function 'my/noema-jupyter-cell--action-body)
+                 (lambda (&rest _args) '((action . "run-current") (cellId . "one"))))
+                ((symbol-function 'my/noema-jupyter-cell--api-async)
+                 (lambda (&rest args) (setq api-call args)))
+                ((symbol-function 'my/noema-jupyter-output-open)
+                 (lambda (&rest _args) (setq output-opened t))))
+        (my/noema-jupyter-cell--execute "current")))
+    (should (equal (car api-call) "aaronnote:api:jupyter:script-action"))
+    (should-not output-opened)))
 
 (ert-deftest my/noema-jupyter-refresh-uses-authoritative-script-snapshot ()
   (let ((buffer (generate-new-buffer "*Noema-jupyter-snapshot-test*"))

@@ -198,8 +198,12 @@
      (lambda (a b) (string-lessp (plist-get a :name) (plist-get b :name))))))
 
 (defun my/jupyter-management-project-specs (target)
-  "Return Noema project-owned kernelspecs visible to local TARGET."
-  (when (my/jupyter-management-local-target-p target)
+  "Return Noema project-owned kernelspecs TARGET can actually reach.
+The kernelspec directory ships with this config, so it exists on the client.
+Whether a target can use it is a filesystem-sharing question -- the same one
+`my/noema-jupyter--project-kernelspecs\=' asks -- not a question about the
+target\='s name."
+  (when (remote-client-file-name (remote-target-file-name target "/"))
     (let ((directory
            (or (and (boundp 'my/noema-jupyter-kernelspec-directory)
                     my/noema-jupyter-kernelspec-directory)
@@ -301,28 +305,32 @@ CALLBACK receives (ENTRIES ERROR)."
            #'string-lessp))))
 
 (defun my/jupyter-management-discover-connections (target callback)
-  "Discover local connection files for TARGET and invoke CALLBACK.
-Non-local targets return an empty successful result by policy."
-  (if (not (my/jupyter-management-local-target-p target))
-      (funcall callback nil nil)
-    (condition-case error
-        (remote-exec-async
-         (my/jupyter-management-command target 'jupyter)
-         :args '("--runtime-dir")
-         :context (my/jupyter-management-context target)
-         :filesystem-effects 'none
-         :name "jupyter-runtime-dir"
-         :callback
-         (lambda (result)
-           (if (zerop (remote-exec-result-status result))
-               (condition-case scan-error
-                   (funcall callback
-                            (my/jupyter-management-scan-connections
-                             (string-trim (remote-exec-result-stdout result)))
-                            nil)
-                 (error (funcall callback nil (error-message-string scan-error))))
-             (funcall callback nil (string-trim (remote-exec-result-stderr result))))))
-      (error (funcall callback nil (error-message-string error)) nil))))
+  "Discover TARGET's Jupyter connection files and invoke CALLBACK.
+The runtime directory is read from TARGET's own `jupyter --runtime-dir\=' and
+then scanned through ordinary file APIs, which reach it via the `/fs\=' handler.
+Returning nothing for a non-local target used to make `attach:\=' unusable
+anywhere but the client machine, even though every step here is already
+routed."
+  (condition-case error
+      (remote-exec-async
+       (my/jupyter-management-command target 'jupyter)
+       :args '("--runtime-dir")
+       :context (my/jupyter-management-context target)
+       :filesystem-effects 'none
+       :name "jupyter-runtime-dir"
+       :callback
+       (lambda (result)
+         (if (zerop (remote-exec-result-status result))
+             (condition-case scan-error
+                 (funcall callback
+                          (my/jupyter-management-scan-connections
+                           (my/jupyter-management-logical-path
+                            target
+                            (string-trim (remote-exec-result-stdout result))))
+                          nil)
+               (error (funcall callback nil (error-message-string scan-error))))
+           (funcall callback nil (string-trim (remote-exec-result-stderr result))))))
+    (error (funcall callback nil (error-message-string error)) nil)))
 
 (defun my/jupyter-management-object-slot (object slot)
   "Return OBJECT's SLOT, or nil when it is absent or unbound."

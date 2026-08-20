@@ -123,6 +123,24 @@ run-all 里每个 cell 都跑完才应答，用 10 秒的默认值会把一次�
 执行与 kernel 控制走 =my/noema-jupyter-cell-execute-timeout=（默认 24 小时），
 它是"一个 notebook 最长允许算多久"的上界，不是健康检查。
 
+补全（capf）走的是同步桥，所以它包在 =while-no-input= 里：你继续打字就立刻放弃
+这次请求，不会为了等一个忙碌的 kernel 冻住编辑器。kernel 连续答不上来时，
+=my/noema-jupyter-cell-introspect-backoff=（默认 20 秒）内不再隐式打扰它；
+它一旦重新应答就立即清除。**显式** =C-c C-i= 不受 backoff 影响。
+
+LSP 的 kernel runtime probe 有 =my/noema-jupyter-cell-lsp-probe-timeout=
+（默认 30 秒）。=remote-exec-async= 自身没有截止时间，过去 target 连不上会让
+buffer 永远停在 "preparing" 且无从得知原因；probe 也会在 notebook buffer 被
+kill 时随之取消。
+
+=attach:= 的 connection file 现在在**任意 target 上**都能发现：runtime 目录取自
+该 target 自己的 =jupyter --runtime-dir=，再经 =/fs= handler 扫描；此前非 local
+target 直接返回空，等于 =attach:= 只能在客户机上用。
+
+=attach:= 和 =server:= 都没有可探测的 target 侧解释器，因此对 LSP 是**预期**
+回退（不刷 minibuffer，但 Doctor 里可见）。此前 =server:= 没被处理，会报
+"kernelspec `server:id:python3' was not found on target `local'"。
+
 =attach:= 与 =remote_ikernel= 继续用于显式 existing-kernel/Jupyter Board 工作流，
 attached kernel 不归 Noema broker 杀死或自动重启。独立 desktop host mode 继续
 使用 Node 本地 launcher。

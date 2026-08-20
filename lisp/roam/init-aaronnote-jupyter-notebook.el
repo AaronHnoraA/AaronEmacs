@@ -599,15 +599,31 @@ buffer whose visible source intentionally differs from its JSON on disk."
 Noema-owned notebooks also install the lightweight Emacs management UI; that
 UI talks only to Noema and never opens a Jupyter protocol connection."
   (interactive)
-  (let* ((raw (json-parse-string
+  (let* ((raw
+          ;; This runs from `auto-mode-alist', so an unhandled parse error
+          ;; aborts `find-file' itself and strands the buffer in an unrelated
+          ;; mode showing raw JSON.  A file that is not a notebook should just
+          ;; be edited as text.
+          (condition-case err
+              (json-parse-string
                (buffer-string) :object-type 'hash-table :array-type 'array
-               :null-object nil :false-object :json-false))
-         (managed (my/noema-jupyter-notebook--noema-standard-p raw))
+               :null-object nil :false-object :json-false)
+            (error
+             (message "Noema Jupyter: %s is not a readable notebook (%s); editing as text"
+                      (if buffer-file-name
+                          (file-name-nondirectory buffer-file-name)
+                        (buffer-name))
+                      (error-message-string err))
+             nil)))
+         (managed (and raw (my/noema-jupyter-notebook--noema-standard-p raw)))
          (upgrade-ids (and managed
                            (my/noema-jupyter-notebook--cell-ids-need-upgrade-p
                             raw)))
-         (document (my/noema-jupyter-notebook--normalize raw)))
-    (my/noema-jupyter-notebook--install-projection document)
+         (document (and raw (my/noema-jupyter-notebook--normalize raw))))
+    (unless document
+      (fundamental-mode))
+    (when document
+      (my/noema-jupyter-notebook--install-projection document))
     (when (and upgrade-ids buffer-file-name)
       (condition-case err
           (progn
@@ -620,7 +636,8 @@ UI talks only to Noema and never opens a Jupyter protocol connection."
          (set-buffer-modified-p t)
          (message "Noema Jupyter: cell ids need saving: %s"
                   (error-message-string err))))))
-  (when (fboundp 'my/noema-jupyter-cell-activate-buffer)
+  (when (and my/noema-jupyter-notebook--projection-p
+             (fboundp 'my/noema-jupyter-cell-activate-buffer))
     (my/noema-jupyter-cell-activate-buffer)))
 
 (defun my/noema-jupyter-notebook-read (file)

@@ -51,6 +51,7 @@
 (declare-function remote-canonicalize-file-name
                   "remote-fs" (file-name &optional directory))
 (declare-function remote-file-name-target "remote-fs" (file-name))
+(declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
 (declare-function remote-file-local-name "remote-fs" (file-name))
 (defvar remote-mode nil)
 (defvar my/appine-tab-list)
@@ -994,7 +995,11 @@ to JSON a second time."
 (defun my/noema--ensure-external-file-watch (file)
   "Ensure one recoverable Remote watch exists for logical FILE."
   (when (and (bound-and-true-p remote-mode)
-             (not (equal (remote-file-name-target file) "local"))
+             ;; The web-host runs on the client, so it already sees any file
+             ;; the client can open natively and watches it itself.  A routed
+             ;; watch is needed exactly when it cannot -- which is a backend
+             ;; capability, not a target name.
+             (not (remote-client-file-name file))
              (not (gethash file my/noema--external-file-watches)))
     (condition-case error
         (let* ((context (remote-context (file-name-directory file)))
@@ -1179,13 +1184,26 @@ to JSON a second time."
     (when my/noema--goto-timer
       (cancel-timer my/noema--goto-timer)
       (setq my/noema--goto-timer nil))
-    (setq my/noema--goto-last nil
-          my/noema--process nil
-          my/noema--port nil
-          my/noema--ready nil
-          my/noema--ready-callbacks nil)
-    (unless (string-match-p "^finished" event)
-      (message "Noema web-host: %s" (string-trim event)))))
+    (let ((dropped (length my/noema--ready-callbacks)))
+      (setq my/noema--goto-last nil
+            my/noema--process nil
+            my/noema--port nil
+            my/noema--ready nil
+            my/noema--ready-callbacks nil)
+      ;; Anything queued behind `my/noema--ensure-server' -- a run, an
+      ;; interrupt, a kernel restart -- dies with the host.  Dropping those
+      ;; silently is what makes the UI look like it simply ignored the key.
+      (unless (zerop dropped)
+        (message "Noema web-host stopped with %d pending request%s; they were dropped"
+                 dropped (if (= dropped 1) "" "s")))
+      ;; Its gateway binding outlives the process otherwise, so a restart
+      ;; cannot reclaim it.
+      (when my/noema--gateway-binding
+        (ignore-errors
+          (remote-gateway-release-binding my/noema--gateway-binding t))
+        (setq my/noema--gateway-binding nil))
+      (unless (string-match-p "^finished" event)
+        (message "Noema web-host: %s" (string-trim event))))))
 
 (defun my/noema-buffer-file (&optional buffer)
   "Return the Noema note file represented by BUFFER.

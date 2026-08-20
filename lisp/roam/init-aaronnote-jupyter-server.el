@@ -274,8 +274,22 @@ surfacing later as an unexplained kernel failure."
   "Fetch `/api/status' for RESOLVED at URL; return a summary string or nil."
   (require 'url)
   (let* ((token (alist-get 'token resolved))
+         (password (alist-get 'password resolved))
          (url-request-extra-headers
-          (when token (list (cons "Authorization" (format "token %s" token)))))
+          (cond
+           (token (list (cons "Authorization" (format "token %s" token))))
+           ;; A password-authenticated server still answers /api/status for a
+           ;; valid token-style credential; sending nothing made every such
+           ;; server look unreachable.
+           (password (list (cons "Authorization" (format "token %s" password))))))
+         ;; A forwarded server is addressed as 127.0.0.1, so its certificate
+         ;; never matches the URL.  Doctor was reporting perfectly healthy
+         ;; remote servers as broken purely because of that.
+         (gnutls-verify-error
+          (if (or (alist-get 'allowUnauthorized resolved)
+                  (alist-get 'serverName resolved))
+              nil
+            (bound-and-true-p gnutls-verify-error)))
          (endpoint (concat (string-remove-suffix "/" url) "/api/status"))
          (buffer (ignore-errors (url-retrieve-synchronously endpoint t t 10))))
     (when buffer

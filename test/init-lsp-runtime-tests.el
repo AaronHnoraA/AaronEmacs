@@ -162,3 +162,31 @@
 
 (provide 'init-lsp-runtime-tests)
 ;;; init-lsp-runtime-tests.el ends here
+
+(ert-deftest my/noema-jupyter-server-kernels-are-an-expected-lsp-fallback ()
+  "A `server:' kernel has no target process to probe.
+
+Before this it fell through to kernelspec lookup and reported
+\"kernelspec `server:hub:python3' was not found on target `local'\", which
+described neither the kernel nor the reason, and counted as an unexpected
+fallback so it kept re-reporting itself."
+  (require 'init-aaronnote-jupyter-lsp)
+  (let ((fallback
+         (my/noema-jupyter-cell--lsp-unprobeable-connector "server:hub:python3")))
+    (should (my/language-server-runtime-fallback-p fallback))
+    (should (my/language-server-runtime-fallback-expected fallback))
+    (should (string-match-p
+             "Jupyter server"
+             (my/language-server-runtime-fallback-reason fallback)))))
+
+(ert-deftest my/noema-jupyter-attached-kernels-are-an-expected-lsp-fallback ()
+  (require 'init-aaronnote-jupyter-lsp)
+  (let ((fallback
+         (my/noema-jupyter-cell--lsp-unprobeable-connector "attach:/tmp/k.json")))
+    (should (my/language-server-runtime-fallback-p fallback))
+    (should (my/language-server-runtime-fallback-expected fallback))))
+
+(ert-deftest my/noema-jupyter-launchable-kernels-are-not-fallbacks ()
+  "An ordinary kernelspec must still be probed, not shortcut to a fallback."
+  (require 'init-aaronnote-jupyter-lsp)
+  (should-not (my/noema-jupyter-cell--lsp-unprobeable-connector "python3")))

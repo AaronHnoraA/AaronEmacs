@@ -207,6 +207,25 @@
             (secure-hash 'sha256 (remote-workspace-id workspace)) 0 16))
    nil (remote-workspace-context workspace)))
 
+(defun my/noema-jupyter--signing-key ()
+  "Return a fresh HMAC signing key for a kernel connection file.
+Anyone holding this key can send the kernel arbitrary code, so it is drawn
+from the OS CSPRNG.  Emacs\=' own `random\=' is not a cryptographic source, and
+mixing in a timestamp does not make it one -- both inputs are guessable by
+anyone who knows roughly when the kernel started."
+  (with-temp-buffer
+    (set-buffer-multibyte nil)
+    (condition-case nil
+        (progn
+          (insert-file-contents-literally "/dev/urandom" nil 0 32)
+          (mapconcat (lambda (byte) (format "%02x" byte))
+                     (string-to-list (buffer-string)) ""))
+      (error
+       ;; No /dev/urandom (an unusual host, or it is unreadable): fall back
+       ;; rather than refuse to start a kernel, and say so.
+       (message "Noema Jupyter: /dev/urandom unavailable; using a weaker signing key")
+       (secure-hash 'sha256 (format "%s:%s:%s" (emacs-pid) (float-time) (random)))))))
+
 (defun my/noema-jupyter--connection
     (kernel ports key)
   "Build a Jupyter connection object for KERNEL, PORTS and HMAC KEY."
@@ -342,10 +361,7 @@ cannot silently leave a live kernel running on it."
             (my/noema-jupyter--json-output
              context "python3" "-c"
              my/noema-jupyter--port-helper))
-           (hmac-key
-            (secure-hash
-             'sha256
-             (format "%s:%s:%s" runtime-id (float-time) (random))))
+           (hmac-key (my/noema-jupyter--signing-key))
            (target-connection
             (my/noema-jupyter--connection kernel ports hmac-key))
            (argv

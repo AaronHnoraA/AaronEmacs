@@ -330,9 +330,15 @@
          ((symbol-function 'remote-workspace-track-route)
           (lambda (workspace &rest _arguments) workspace))
          ((symbol-function 'eglot--managed-buffers)
-          (lambda (_server) (list (current-buffer)))))
+          (lambda (_server) (list (current-buffer))))
+         ;; Registration reads the server's project to key the resource by
+         ;; runtime; without this stub it bails before creating a workspace
+         ;; and the assertions below have nothing to look at.
+         ((symbol-function 'eglot--project)
+          (lambda (_server) 'test-project)))
       (my/language-server-register-eglot-resource 'server-1)
       (my/language-server-register-eglot-resource 'server-2)
+      (should (= (hash-table-count remote-workspaces) 1))
       (let* ((owner (car (hash-table-values remote-workspaces)))
              (resource
               (remote-workspace-find-resource

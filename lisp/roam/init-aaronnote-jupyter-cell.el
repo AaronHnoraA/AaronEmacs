@@ -535,12 +535,8 @@ When REQUIRE-CELL is non-nil, require the cell at point.  Append EXTRA fields."
 (defun my/noema-jupyter-cell--execute (mode &optional after)
   "Ask Noema to execute MODE and invoke AFTER immediately after dispatch."
   (when (buffer-modified-p) (save-buffer))
-  (let* ((action (format "run-%s" mode))
-         (needs-cell (not (equal mode "all")))
-         (cell-id (and needs-cell
-                       (plist-get (my/noema-jupyter-cell--bounds-at-point) :id))))
-    (when needs-cell
-      (my/noema-jupyter-output-open cell-id nil "outputs"))
+  (let ((action (format "run-%s" mode))
+        (needs-cell (not (equal mode "all"))))
     (my/noema-jupyter-cell--api-async
      "aaronnote:api:jupyter:script-action"
      (my/noema-jupyter-cell--action-body action needs-cell)
@@ -930,6 +926,32 @@ interactive bridge must allow enough time for that bounded reply."
   :type 'number
   :group 'my/noema)
 
+(defcustom my/noema-jupyter-cell-introspect-backoff 20
+  "Seconds to stop asking a kernel for completions after it misses the deadline.
+A kernel busy in a long cell cannot answer `complete_request\=', and asking it
+again on every keystroke only adds latency to typing."
+  :type 'number
+  :group 'my/noema)
+
+(defvar-local my/noema-jupyter-cell--introspect-backoff-until nil
+  "Time before which implicit introspection is skipped in this buffer.")
+
+(defun my/noema-jupyter-cell--introspect-backoff-p ()
+  "Return non-nil while this buffer's kernel is being left alone."
+  (and my/noema-jupyter-cell--introspect-backoff-until
+       (time-less-p (current-time)
+                    my/noema-jupyter-cell--introspect-backoff-until)))
+
+(defun my/noema-jupyter-cell--introspect-failed ()
+  "Back off implicit introspection after a failed or timed-out request."
+  (setq-local my/noema-jupyter-cell--introspect-backoff-until
+              (time-add (current-time)
+                        my/noema-jupyter-cell-introspect-backoff)))
+
+(defun my/noema-jupyter-cell--introspect-succeeded ()
+  "Clear any introspection backoff after the kernel answers again."
+  (setq-local my/noema-jupyter-cell--introspect-backoff-until nil))
+
 (defun my/noema-jupyter-cell--json-true-p (object key)
   "Return non-nil when OBJECT's JSON KEY is true."
   (let ((value (my/noema-jupyter-notebook--get key object)))
@@ -1072,14 +1094,33 @@ surface transport errors and use the explicit-inspection timeout."
               (timeout (if explicit
                            my/noema-jupyter-cell-inspect-timeout
                          my/noema-jupyter-cell-introspect-timeout))
+              ((or explicit
+                   (not (my/noema-jupyter-cell--introspect-backoff-p))))
               (call
                (lambda (body)
                  (condition-case err
-                     (my/noema-jupyter-cell--api-sync channel body timeout)
+                     (if explicit
+                         (my/noema-jupyter-cell--api-sync channel body timeout)
+                       ;; Implicit introspection runs on a keystroke, and the
+                       ;; bridge is synchronous: without this, a busy kernel
+                       ;; freezes the editor for the whole timeout on every
+                       ;; character.  `while-no-input' abandons the request the
+                       ;; moment the user types again, and a kernel that keeps
+                       ;; missing the deadline is left alone for a while
+                       ;; instead of being asked once per keystroke.
+                       (let ((reply
+                              (while-no-input
+                                (my/noema-jupyter-cell--api-sync
+                                 channel body timeout))))
+                         (if (eq reply t)
+                             nil
+                           (my/noema-jupyter-cell--introspect-succeeded)
+                           reply)))
                    (error
                     (if explicit
                         (user-error "Noema Jupyter %s failed: %s"
                                     kind (error-message-string err))
+                      (my/noema-jupyter-cell--introspect-failed)
                       nil)))))
               (reply (funcall call request)))
     reply))

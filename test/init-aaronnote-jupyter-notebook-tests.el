@@ -497,3 +497,52 @@ Recording the header line again would store this mode's own :eval form as the
                      "original"))
       (my/noema-jupyter-cell-mode -1)
       (should (equal header-line-format "original")))))
+
+(ert-deftest my/noema-jupyter-notebook-edits-a-malformed-file-as-text ()
+  "A parse error here would abort `find-file' itself.
+
+The mode is reached from `auto-mode-alist', so an unhandled `json-parse-error'
+leaves the buffer in an unrelated mode showing raw JSON with no explanation."
+  (let ((file (make-temp-file "noema-jupyter-malformed" nil ".ipynb")))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "{ not a notebook"))
+          (with-current-buffer (find-file-noselect file)
+            (unwind-protect
+                (progn
+                  (should-not my/noema-jupyter-notebook--projection-p)
+                  (should-not (bound-and-true-p my/noema-jupyter-cell-mode))
+                  ;; The text is left exactly as it is on disk.
+                  (should (equal (buffer-string) "{ not a notebook")))
+              (set-buffer-modified-p nil)
+              (kill-buffer))))
+      (delete-file file))))
+
+(ert-deftest my/noema-jupyter-cell-implicit-introspection-backs-off ()
+  "A kernel that misses the deadline must not be asked again per keystroke."
+  (with-temp-buffer
+    (setq-local buffer-file-name "/tmp/notebook.ipynb")
+    (should-not (my/noema-jupyter-cell--introspect-backoff-p))
+    (my/noema-jupyter-cell--introspect-failed)
+    (should (my/noema-jupyter-cell--introspect-backoff-p))
+    ;; Answering again clears it immediately; the backoff is not a fixed
+    ;; penalty window the user has to wait out.
+    (my/noema-jupyter-cell--introspect-succeeded)
+    (should-not (my/noema-jupyter-cell--introspect-backoff-p))))
+
+(ert-deftest my/noema-jupyter-cell-explicit-inspect-ignores-backoff ()
+  "Backoff throttles typing-triggered completion, never an explicit request."
+  (with-temp-buffer
+    (insert "# %% id=cell-a\nanswer\n")
+    (goto-char (point-max))
+    (setq-local buffer-file-name "/tmp/notebook.ipynb")
+    (setq-local my/noema-jupyter-cell-mode t)
+    (my/noema-jupyter-cell--introspect-failed)
+    (let ((asked nil))
+      (cl-letf (((symbol-function 'my/noema--api-call-sync)
+                 (lambda (&rest _) (setq asked t) nil))
+                ((symbol-function 'my/noema-jupyter-cell--api-sync)
+                 (lambda (&rest _) (setq asked t) '((found . t)))))
+        (let ((my/noema--ready t))
+          (my/noema-jupyter-cell--introspect "inspect" nil t))
+        (should asked)))))
