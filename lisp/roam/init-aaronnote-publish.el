@@ -57,17 +57,32 @@
   '("index.html"
     "assets/css/site.css"
     "assets/js/site.js"
-    "assets/js/hero-circuit.js"
+    "assets/js/world/index.js"
+    "assets/js/world/curve.js"
+    "assets/js/world/circuit.js"
+    "assets/js/world/flight.js"
+    "assets/js/world/rig.js"
+    "assets/js/world/panels.js"
+    "assets/js/world/states.js"
+    "assets/js/world/css3d.js"
+    "assets/js/world/math.js"
+    ;; three.module.min.js imports three.core.min.js, and the page imports the
+    ;; CSS3DRenderer addon: a missing one of these is a blank page, not a
+    ;; degraded one.
     "vendor/three/three.module.min.js"
     "vendor/three/three.core.min.js"
+    "vendor/three/CSS3DRenderer.js"
     "vendor/anime/anime.esm.min.js"
+    "vendor/katex/katex.mjs"
+    "vendor/katex/katex.min.css"
+    "vendor/katex/fonts/KaTeX_Main-Regular.woff2"
     "LICENSE")
   "Files that must exist in the publish repo before it is worth deploying.
 The vendored licences are listed deliberately: shipping the libraries without
 them would be a licence violation, so a missing one is a hard failure.")
 
 (defconst my/noema-publish--required-licences
-  '("vendor/three/LICENSE" "vendor/anime/LICENSE.md")
+  '("vendor/three/LICENSE" "vendor/anime/LICENSE.md" "vendor/katex/LICENSE")
   "Third-party licence files that must ship alongside the vendored code.")
 
 (defvar my/noema-publish--process nil
