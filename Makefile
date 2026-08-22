@@ -21,7 +21,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         health health-startup health-byte health-native ui-test ui-tokens audit-ui-tokens \
         remote-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e \
         jupyter-test \
-        publish publish-force publish-build publish-deploy publish-clean
+        publish publish-build publish-deploy publish-clean
 
 default: up
 
@@ -70,11 +70,10 @@ help:
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make remote-e2e           Run opt-in real SSH E2E (REMOTE_E2E_TARGET optional)' \
 	  '' \
-	  '  make publish              Build site + deploy (git push + optional NAS rsync)' \
-	  '  make publish-force        Force full rebuild + deploy (skip incremental state check)' \
-	  '  make publish-build        Build static site only (render notes, compile CV)' \
+	  '  make publish              Compile CV + deploy site (git push + optional NAS rsync)' \
+	  '  make publish-build        Compile CV and verify the site is complete' \
 	  '  make publish-deploy       Deploy only (git push, optional NAS rsync)' \
-	  '  make publish-clean        Remove publish state/cache/CV intermediates'
+	  '  make publish-clean        Remove CV build intermediates'
 
 up:
 	@if [ -n "$(SNAPSHOT)" ]; then \
@@ -223,9 +222,6 @@ remote-e2e:
 # ── Publish ────────────────────────────────────────────────────────────────
 publish:
 	$(PUBLISH_BATCH) --eval '(my/noema-publish-batch)'
-
-publish-force:
-	$(PUBLISH_BATCH) --eval '(my/noema-publish-force-batch)'
 
 publish-build:
 	$(PUBLISH_BATCH) --eval '(my/noema-publish-build-batch)'

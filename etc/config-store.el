@@ -71,10 +71,6 @@
     . "/Users/hc/.emacs.d/lisp/roam/Noema/publish/CV")
    (my/noema-publish-state-dir
     . "/Users/hc/.emacs.d/var/aaronnote/publish")
-   (my/noema-publish-assets-dir
-    . "/Users/hc/.emacs.d/lisp/roam/Noema/publish/assets")
-   (my/noema-publish-engine
-    . "/Users/hc/.emacs.d/lisp/roam/Noema/publish/publish-site")
    (my/noema-publish-root . "/Users/hc/.emacs.d/publish")
    (my/session-auto-save) (my/noema-web-port . 50815)
    (my/noema-backend . xwidget)

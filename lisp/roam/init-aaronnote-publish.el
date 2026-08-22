@@ -1,13 +1,16 @@
-;;; init-aaronnote-publish.el --- Noema site publish commands -*- lexical-binding: t; -*-
+;;; init-aaronnote-publish.el --- Personal site build and deploy -*- lexical-binding: t; -*-
 ;;
 ;; Lazy-loaded: not required at startup.  Loaded on first publish command.
 ;; Both interactive commands and batch (make publish-*) entry points live here.
+;;
+;; The website itself is hand-written and lives in the publish repository; see
+;; `docs/publish-workflow.md'.  Nothing here renders it.  This module compiles
+;; the LaTeX CV into that repository and then ships the repository: git commit
+;; and push, plus an optional rsync to the NAS that serves it.
 
 ;;; Code:
 
 (require 'config)
-
-(require 'cl-lib)
 
 ;; Derive config root from this file's path so batch mode (-Q) gets the right
 ;; user-emacs-directory instead of the default ~/.emacs.d/.
@@ -19,26 +22,16 @@
   "Emacs config root, derived from load-file-name for batch-mode correctness.")
 
 (defgroup my/noema-publish nil
-  "Noema static-site build and deployment."
+  "Personal site build and deployment."
   :group 'applications)
 
 (config-defvar my/noema-publish-root nil
-  "Path to the publish git repo root (output lands here directly)."
-  :type 'directory
-  :group 'my/noema-publish)
-
-(config-defvar my/noema-publish-engine nil
-  "Path to the Python publish engine."
-  :type 'file
-  :group 'my/noema-publish)
-
-(config-defvar my/noema-publish-assets-dir nil
-  "Path to publish source assets (css/, kinds/, homepage.html, etc.)."
+  "Path to the publish git repo root.  The website lives here."
   :type 'directory
   :group 'my/noema-publish)
 
 (config-defvar my/noema-publish-state-dir nil
-  "Path to publish cache/state directory (deps/, state.json, book/, cv/)."
+  "Path to publish build state.  Holds CV compilation intermediates."
   :type 'directory
   :group 'my/noema-publish)
 
@@ -60,34 +53,38 @@
 (defconst my/noema-publish--log-buffer "*Noema Publish*"
   "Name of the publish log buffer.")
 
+(defconst my/noema-publish--required-files
+  '("index.html"
+    "assets/css/site.css"
+    "assets/js/site.js"
+    "assets/js/hero-circuit.js"
+    "vendor/three/three.module.min.js"
+    "vendor/three/three.core.min.js"
+    "vendor/anime/anime.esm.min.js"
+    "LICENSE")
+  "Files that must exist in the publish repo before it is worth deploying.
+The vendored licences are listed deliberately: shipping the libraries without
+them would be a licence violation, so a missing one is a hard failure.")
+
+(defconst my/noema-publish--required-licences
+  '("vendor/three/LICENSE" "vendor/anime/LICENSE.md")
+  "Third-party licence files that must ship alongside the vendored code.")
+
 (defvar my/noema-publish--process nil
   "Current publish subprocess, or nil.")
 
 ;;; Internal helpers
 
-(defun my/noema-publish--runtime-root ()
-  "Return the Noema runtime root path."
-  (expand-file-name "lisp/roam/Noema" my/noema-publish--config-root))
-
-(defun my/noema-publish--roam-root ()
-  "Return the canonical Noema workspace root."
-  (if (fboundp 'my/noema-workspace-root)
-      (my/noema-workspace-root)
-    (expand-file-name "~/Documents/Noema")))
-
-(defun my/noema-publish--env (&optional extra-env)
-  "Return process-environment list for the publish engine subprocess.
-EXTRA-ENV is an optional alist of (VAR . VALUE) pairs prepended as strings.
-Uses string \"VAR=VALUE\" format so both call-process and make-process work."
-  (let ((runtime (my/noema-publish--runtime-root)))
-    (append
-     (mapcar (lambda (pair) (format "%s=%s" (car pair) (cdr pair))) extra-env)
-     (list (format "AARONNOTE_PUBLISH_OUTPUT=%s"    my/noema-publish-root)
-           (format "AARONNOTE_RUNTIME_ROOT=%s"      runtime)
-           (format "AARONNOTE_PUBLISH_ASSETS=%s"    my/noema-publish-assets-dir)
-           (format "AARONNOTE_PUBLISH_STATE_DIR=%s" my/noema-publish-state-dir)
-           (format "AARONNOTE_ROAM_ROOT=%s"         (my/noema-publish--roam-root)))
-     process-environment)))
+(defun my/noema-publish--check-site ()
+  "Signal an error unless the publish repo holds a complete site."
+  (let (missing)
+    (dolist (rel (append my/noema-publish--required-files
+                         my/noema-publish--required-licences))
+      (unless (file-exists-p (expand-file-name rel my/noema-publish-root))
+        (push rel missing)))
+    (when missing
+      (error "Publish repo is incomplete, refusing to deploy; missing: %s"
+             (string-join (nreverse missing) ", ")))))
 
 (defun my/noema-publish--log (msg)
   "Append MSG to the publish log buffer."
@@ -102,19 +99,17 @@ Uses string \"VAR=VALUE\" format so both call-process and make-process work."
       (display-buffer buf '(display-buffer-at-bottom . ((window-height . 0.25)))))))
 
 (defun my/noema-publish--run (label args &optional sentinel)
-  "Run ENGINE with ARGS in the publish repo, logging to the log buffer.
+  "Run ARGS in the publish repo, logging to the log buffer.
 LABEL is shown in progress messages.  SENTINEL is called when the process exits."
   (when (and my/noema-publish--process
              (process-live-p my/noema-publish--process))
     (user-error "A publish process is already running; wait for it to finish"))
-  (make-directory my/noema-publish-state-dir t)
   (with-current-buffer (get-buffer-create my/noema-publish--log-buffer)
     (goto-char (point-max))
     (insert (format "\n[%s] %s\n" (format-time-string "%H:%M:%S") label)))
   (my/noema-publish--show-log)
   (message "Noema publish: %s…" label)
-  (let ((process-environment (my/noema-publish--env))
-        (default-directory my/noema-publish-root))
+  (let ((default-directory my/noema-publish-root))
     (setq my/noema-publish--process
           (make-process
            :name "aaronnote-publish"
@@ -130,26 +125,6 @@ LABEL is shown in progress messages.  SENTINEL is called when the process exits.
                           label exit-code my/noema-publish--log-buffer))
                (setq my/noema-publish--process nil)
                (when sentinel (funcall sentinel ok exit-code))))))))
-
-(defun my/noema-publish--run-sync (label args &optional extra-env)
-  "Run ARGS synchronously (for batch/make use), printing output to stdout.
-EXTRA-ENV is an alist of additional env vars.  Signals error on non-zero exit."
-  (make-directory my/noema-publish-state-dir t)
-  (princ (format "[publish] %s...\n" label))
-  (let* ((process-environment (my/noema-publish--env extra-env))
-         (default-directory my/noema-publish-root)
-         (out-buf (generate-new-buffer " *Noema publish output*"))
-         exit-code)
-    (unwind-protect
-        (progn
-          (setq exit-code (apply #'call-process (car args) nil out-buf nil (cdr args)))
-          (let ((output (with-current-buffer out-buf (buffer-string))))
-            (unless (string-empty-p output)
-              (princ output)))
-          (if (zerop exit-code)
-              (princ (format "[publish] %s done.\n" label))
-            (error "Noema publish: %s failed (exit %d)" label exit-code)))
-      (kill-buffer out-buf))))
 
 (defun my/noema-publish--prepare-git-commit (out-buf)
   "Stage publish output and commit it when it changed, logging to OUT-BUF.
@@ -168,8 +143,19 @@ Signal an error when staging, inspection, or committing fails."
       (status
        (error "git diff --cached failed (exit %d)" status)))))
 
+(defun my/noema-publish--rsync-args ()
+  "Return the rsync argument list for a NAS deployment."
+  (list "-avh" "--delete"
+        "--exclude" ".git/"
+        "--exclude" ".github/"
+        "--exclude" ".DS_Store"
+        "--progress" "-e" "ssh"
+        (file-name-as-directory my/noema-publish-root)
+        my/noema-publish-nas-target))
+
 (defun my/noema-publish--deploy-sync ()
   "Run git add+commit+push and optional NAS rsync, printing output to stdout."
+  (my/noema-publish--check-site)
   (let ((default-directory my/noema-publish-root)
         (out-buf (generate-new-buffer " *Noema deploy output*")))
     (unwind-protect
@@ -187,21 +173,15 @@ Signal an error when staging, inspection, or committing fails."
           (when my/noema-publish-nas-enable
             (with-current-buffer out-buf (erase-buffer))
             (princ (format "[publish] rsync → %s...\n" my/noema-publish-nas-target))
-            (let ((exit (call-process "rsync" nil out-buf nil
-                                      "-avh" "--delete"
-                                      "--exclude" ".deps/"
-                                      "--exclude" "state.json"
-                                      "--exclude" ".DS_Store"
-                                      "--progress" "-e" "ssh"
-                                      (file-name-as-directory my/noema-publish-root)
-                                      my/noema-publish-nas-target)))
+            (let ((exit (apply #'call-process "rsync" nil out-buf nil
+                               (my/noema-publish--rsync-args))))
               (princ (with-current-buffer out-buf (buffer-string)))
               (unless (zerop exit)
                 (error "rsync NAS failed (exit %d)" exit)))))
       (kill-buffer out-buf))))
 
 (defun my/noema-publish--cv-build-sync ()
-  "Compile the LaTeX CV synchronously; copy PDF to publish root."
+  "Compile the LaTeX CV synchronously; copy PDF into the publish repo."
   (let* ((cv-state (expand-file-name "cv" my/noema-publish-state-dir))
          (jobname "Aaron_He_CV")
          (pdf-in (expand-file-name (concat jobname ".pdf") cv-state))
@@ -227,17 +207,18 @@ Signal an error when staging, inspection, or committing fails."
 
 ;;;###autoload
 (defun my/noema-publish-build ()
-  "Build the static site (render notes + copy assets + compile CV)."
+  "Build what the site needs generating: the CV PDF.
+The pages themselves are hand-written and need no build step."
   (interactive)
   (my/noema-publish--cv-build-sync)
-  (my/noema-publish--run
-   "build"
-   (list "python3" my/noema-publish-engine)))
+  (my/noema-publish--check-site)
+  (message "Noema publish: build done."))
 
 ;;;###autoload
 (defun my/noema-publish-deploy ()
   "Deploy: git commit+push in publish repo, optionally rsync to NAS."
   (interactive)
+  (my/noema-publish--check-site)
   (let ((default-directory my/noema-publish-root))
     (my/noema-publish--log
      (format "\n[%s] deploy: git add + commit + push\n" (format-time-string "%H:%M:%S")))
@@ -251,96 +232,63 @@ Signal an error when staging, inspection, or committing fails."
      (when my/noema-publish-nas-enable
        (lambda (ok _code)
          (when ok
-           (my/noema-publish--run
-            "rsync NAS"
-            (list "rsync" "-avh" "--delete"
-                  "--exclude" ".deps/"
-                  "--exclude" "state.json"
-                  "--exclude" ".DS_Store"
-                  "--progress" "-e" "ssh"
-                  (file-name-as-directory my/noema-publish-root)
-                  my/noema-publish-nas-target))))))))
+           (my/noema-publish--run "rsync NAS"
+                                  (cons "rsync" (my/noema-publish--rsync-args)))))))))
 
 ;;;###autoload
 (defun my/noema-publish ()
-  "Build and deploy the static site."
+  "Build the CV and deploy the site."
   (interactive)
   (my/noema-publish--cv-build-sync)
-  (my/noema-publish--run
-   "build"
-   (list "python3" my/noema-publish-engine)
-   (lambda (ok _code)
-     (when ok
-       (my/noema-publish-deploy)))))
+  (my/noema-publish-deploy))
 
 ;;;###autoload
 (defun my/noema-publish-clean ()
-  "Remove publish state/cache and generated CV intermediates."
+  "Remove publish build state (CV intermediates)."
   (interactive)
   (when my/noema-publish--process
     (when (process-live-p my/noema-publish--process)
       (kill-process my/noema-publish--process))
     (setq my/noema-publish--process nil))
-  (dolist (name '("deps" "tmp" "book" "cv"))
-    (let ((path (expand-file-name name my/noema-publish-state-dir)))
-      (when (file-directory-p path)
-        (delete-directory path t))))
-  (dolist (name '("state.json" ".publish-state.json"))
-    (let ((path (expand-file-name name my/noema-publish-state-dir)))
-      (when (file-exists-p path)
-        (delete-file path))))
+  (let ((cv-state (expand-file-name "cv" my/noema-publish-state-dir)))
+    (when (file-directory-p cv-state)
+      (delete-directory cv-state t)))
   (when (buffer-live-p (get-buffer my/noema-publish--log-buffer))
     (kill-buffer my/noema-publish--log-buffer))
-  (message "Noema publish: cleaned state/cache."))
+  (message "Noema publish: cleaned build state."))
 
 ;;; Batch entry points (used by make publish-*)
 
-(defun my/noema-publish-batch ()
-  "Batch entry: build + deploy.  Calls `kill-emacs' with non-zero on error."
-  (condition-case err
-      (progn
-        (my/noema-publish--cv-build-sync)
-        (my/noema-publish--run-sync
-         "build" (list "python3" my/noema-publish-engine))
-        (my/noema-publish--deploy-sync))
-    (error
-     (princ (format "Noema publish FAILED: %s\n" (error-message-string err)))
-     (kill-emacs 1))))
+(defmacro my/noema-publish--batch (label &rest body)
+  "Run BODY as a batch entry point, exiting non-zero when it signals.
+LABEL names the operation in the failure message."
+  (declare (indent 1))
+  `(condition-case err
+       (progn ,@body)
+     (error
+      (princ (format "Noema %s FAILED: %s\n" ,label (error-message-string err)))
+      (kill-emacs 1))))
 
-(defun my/noema-publish-force-batch ()
-  "Batch entry: force build + deploy, skipping incremental state check."
-  (condition-case err
-      (progn
-        (my/noema-publish--cv-build-sync)
-        (my/noema-publish--run-sync
-         "build (forced)" (list "python3" my/noema-publish-engine)
-         (list (cons "PUBLISH_FORCE" "1")))
-        (my/noema-publish--deploy-sync))
-    (error
-     (princ (format "Noema publish-force FAILED: %s\n" (error-message-string err)))
-     (kill-emacs 1))))
+(defun my/noema-publish-batch ()
+  "Batch entry: build the CV and deploy."
+  (my/noema-publish--batch "publish"
+    (my/noema-publish--cv-build-sync)
+    (my/noema-publish--deploy-sync)))
 
 (defun my/noema-publish-build-batch ()
   "Batch entry: build only (no deploy)."
-  (condition-case err
-      (progn
-        (my/noema-publish--cv-build-sync)
-        (my/noema-publish--run-sync
-         "build" (list "python3" my/noema-publish-engine)))
-    (error
-     (princ (format "Noema publish-build FAILED: %s\n" (error-message-string err)))
-     (kill-emacs 1))))
+  (my/noema-publish--batch "publish-build"
+    (my/noema-publish--cv-build-sync)
+    (my/noema-publish--check-site)
+    (princ "[publish] site complete.\n")))
 
 (defun my/noema-publish-deploy-batch ()
   "Batch entry: deploy only (git push + optional NAS rsync)."
-  (condition-case err
-      (my/noema-publish--deploy-sync)
-    (error
-     (princ (format "Noema publish-deploy FAILED: %s\n" (error-message-string err)))
-     (kill-emacs 1))))
+  (my/noema-publish--batch "publish-deploy"
+    (my/noema-publish--deploy-sync)))
 
 (defun my/noema-publish-clean-batch ()
-  "Batch entry: clean publish state."
+  "Batch entry: clean build state."
   (my/noema-publish-clean))
 
 (provide 'init-aaronnote-publish)
