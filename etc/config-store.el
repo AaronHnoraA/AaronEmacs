@@ -29,6 +29,8 @@
    (eglot-autoreconnect . 3)
    (lsp-restart . auto-restart)
    (my/noema-close-emacs-markdown-buffer . t)
+   (my/noema-markdown-default-surface . emacs)
+   (my/noema-roam-help-key . "?")
    (my/noema-icon-file
     . "/Users/hc/.emacs.d/assets/icons/Noema.svg")
    (my/dir-locals-template-root . "/Users/hc/.emacs.d/templates/emacs")

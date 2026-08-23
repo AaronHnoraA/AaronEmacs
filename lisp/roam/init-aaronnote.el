@@ -2417,7 +2417,8 @@ failure while it is still going."
       ("W" "editable split"   my/noema-open-current-note-split)
       ("B" "build + reopen"   my/noema-build-and-reopen)
       ("Q" "close all"        my/noema-close)
-      ("R" "raw edit in Emacs" my/noema-open-markdown-raw)]
+      ("R" "raw edit in Emacs" my/noema-open-markdown-raw)
+      ("J" "toggle open surface" my/noema-toggle-markdown-surface)]
      ["Find / Browse"
       ("j" "find note"        my/noema-roam-find-note)
       ("/" "knowledge search" my/noema-knowledge-search)
@@ -2447,7 +2448,7 @@ failure while it is still going."
       ("F" "file todos"       my/noema-roam-jump-file-todo)
       ("M" "repositories"     my/noema-wiki-repositories)]
      ["Wiki pages"
-      ("!" "reports"          my/noema-wiki-reports)
+      ("!r" "reports"         my/noema-wiki-reports)
       ("!w" "wanted pages"    my/noema-wiki-wanted)
       ("!p" "all pages"       my/noema-wiki-pages)
       ("!s" "sync"            my/noema-wiki-sync)]
@@ -2456,10 +2457,10 @@ failure while it is still going."
       ("Z" "atomic full rebuild" my/noema-wiki-rebuild)
       ("S" "Wiki index status" my/noema-wiki-index-status)
       ("P" "pause/resume"     my/noema-toggle-pause)
-      ("R" "runtime status"   my/noema-runtime-status)
+      ("H" "runtime status"   my/noema-runtime-status)
       ("D" "dired"            my/noema-roam-dired)
       ("m" "move note"        my/noema-roam-move-note)
-      ("V" "magit"            my/noema-roam-magit)
+      ("X" "magit"            my/noema-roam-magit)
       ("q" "stop server"      my/noema-stop)]
      ["Format (web)"
       ("1" "bold"             my/noema-bold)
@@ -2482,7 +2483,7 @@ failure while it is still going."
       ("p" "heading menu"     my/noema-paragraph-menu)
       ("z" "insert table"     my/noema-insert-table)
       ("E" "math block"       my/noema-insert-math)
-      ("C" "insert TOC"       my/noema-insert-toc)
+      ("u" "insert TOC"       my/noema-insert-toc)
       ("U" "undo"             my/noema-undo)
       ("Y" "redo"             my/noema-redo)
       ("V" "paste"            my/noema-paste)]]))

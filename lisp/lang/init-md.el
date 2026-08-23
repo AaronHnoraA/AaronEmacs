@@ -26,6 +26,20 @@
   :type 'boolean
   :group 'my/markdown)
 
+(config-defvar my/noema-markdown-default-surface nil
+  "Which surface an interactive Markdown open lands in.
+
+`emacs' opens the file in `gfm-mode', where the roam keymap on `C-c r',
+the `SPC r' leader, the `aaronnote-roam' xref backend and ordinary
+`markdown-mode' fontification all work.  `app' hands the file to the Noema
+web editor and leaves a read-only stub buffer behind.
+
+Either way `my/noema-open-markdown-raw' forces Emacs and
+`my/noema-open-in-app' forces Noema, so this only sets the default."
+  :type '(choice (const :tag "Edit in Emacs" emacs)
+                 (const :tag "Open in Noema" app))
+  :group 'my/markdown)
+
 (defconst my/noema-markdown-auto-mode-patterns
   '("README\\(?:\\.md\\)?\\'" "\\.markdown\\'" "\\.md\\'")
   "File patterns redirected from Emacs buffers into Noema.")
@@ -48,6 +62,7 @@ test helpers) where you want a raw Emacs buffer instead of the web editor.")
   "Return non-nil when the current open warrants an Noema redirect."
   (and (not noninteractive)
        (not my/noema--inhibit-redirect)
+       (eq my/noema-markdown-default-surface 'app)
        ;; Block known programmatic callers that are not user-facing file opens.
        (not (memq this-command
                   '(magit-find-file magit-find-file-other-window
@@ -149,6 +164,16 @@ or editing when the web editor is unavailable."
     (unless (my/noema--markdown-file-p target)
       (user-error "Not a Markdown file: %s" target))
     (find-file target)))
+
+
+;;;###autoload
+(defun my/noema-toggle-markdown-surface ()
+  "Toggle where an interactive Markdown open lands, and report the new value."
+  (interactive)
+  (let ((next (if (eq my/noema-markdown-default-surface 'app) 'emacs 'app)))
+    (config-set 'my/noema-markdown-default-surface next)
+    (message "Markdown opens in %s"
+             (if (eq next 'app) "Noema" "Emacs"))))
 
 (my/noema--pin-markdown-redirect-mode)
 

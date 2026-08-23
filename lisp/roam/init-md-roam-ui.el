@@ -43,7 +43,7 @@
 
 (defvaralias 'my/noema-roam-ui--theme-signature  'aaron-ui-board--theme-signature)
 (defvaralias 'my/noema-roam-ui--icons            'aaron-ui-board--icons)
-(defvaralias 'my/noema-roam-ui-mode-map          'aaron-ui-board-mode-map)
+
 (defvaralias 'my/noema-roam-ui-row-map           'aaron-ui-board-row-map)
 
 ;;; --- buffer-local variable aliases ---
@@ -60,12 +60,24 @@
 (define-derived-mode my/noema-roam-ui-mode aaron-ui-board-mode "Roam-UI"
   "Backward-compatible mode name for Noema roam board buffers.")
 
+;; These todo keys belong to roam boards only.  `my/noema-roam-ui-mode-map'
+;; used to be a `defvaralias' onto `aaron-ui-board-mode-map', which made
+;; `define-derived-mode' a no-op for the map and installed them into the
+;; keymap shared by every board in the config — compile, git, jupyter,
+;; health, diagnostics, performance, lsp.  `p' even shadowed `previous-line'
+;; there.  The derived mode now owns a real child map.
 (define-key my/noema-roam-ui-mode-map (kbd "d") #'my/noema-roam-todo-done)
 (define-key my/noema-roam-ui-mode-map (kbd "s") #'my/noema-roam-update-todo-status)
 (define-key my/noema-roam-ui-mode-map (kbd "p") #'my/noema-roam-set-todo-priority)
 (define-key my/noema-roam-ui-mode-map (kbd "D") #'my/noema-roam-set-todo-due)
 (define-key my/noema-roam-ui-mode-map (kbd "S") #'my/noema-roam-set-todo-scheduled)
 (define-key my/noema-roam-ui-mode-map (kbd "r") #'my/noema-roam-set-todo-repeat)
+
+;; Matches the convention every other board in this config follows: jupyter
+;; (`init-jupyter-board.el'), compile, lsp-tools and diagnostics all answer
+;; `?' with their own help/dispatch surface.
+(declare-function my/noema-roam-help "init-md-roam" ())
+(define-key my/noema-roam-ui-mode-map (kbd "?") #'my/noema-roam-help)
 
 ;;; --- function aliases ---
 

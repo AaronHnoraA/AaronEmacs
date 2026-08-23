@@ -12,6 +12,7 @@
 (require 'calendar)
 (require 'cl-lib)
 (require 'json)
+(require 'map)
 (require 'seq)
 (require 'subr-x)
 (require 'transient)
@@ -20,12 +21,15 @@
 (require 'xref)
 
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
+(declare-function evil-local-set-key "evil-core" (state key def))
 (declare-function evil-set-initial-state "evil-core" (mode state))
 (declare-function my/noema-open-file "init-aaronnote" (file))
 (declare-function my/noema--ensure-server "init-aaronnote" (&optional callback))
 (declare-function my/noema--server-url "init-aaronnote" (&optional path))
 (declare-function my/noema--open-url "init-aaronnote" (url &optional file force-new))
 (declare-function my/noema--api-call "init-aaronnote" (channel args callback))
+(declare-function my/noema--api-call-sync "init-aaronnote" (channel args &optional timeout))
+(declare-function my/noema-workspace-layout "init-aaronnote" ())
 (declare-function my/navigation--push-jump "init-navigation")
 (declare-function my/navigation-find-definition "init-navigation")
 (defvar my/noema--notes-root nil)
@@ -110,6 +114,14 @@
         my/noema-roam--all-files-cache nil
         my/noema-roam--all-note-summaries-cache nil))
 
+(defun my/noema-roam--workspace-layout ()
+  "Return the Noema workspace layout name, defaulting to \"legacy\"."
+  (if (fboundp 'my/noema-workspace-layout)
+      (my/noema-workspace-layout)
+    (if (equal (downcase (or (getenv "NOEMA_WORKSPACE_LAYOUT") "")) "wiki")
+        "wiki"
+      "legacy")))
+
 (defun my/noema-roam--runtime-available-p ()
   "Return non-nil when the Noema runtime bridge is available."
   (and (file-exists-p my/noema-roam-runtime-cli)
@@ -132,10 +144,11 @@
                 ("create"    . "aaronnote:api:notes:create-node")
                 ("delete-node" . "aaronnote:api:notes:delete-node")))))
 
-(defun my/noema-roam--runtime-call-via-api (action args)
+(defun my/noema-roam--runtime-call-via-api (action args &optional timeout)
   "Delegate ACTION with roam-cli ARGS to the running web-host /api.
 Maps the action to its /api channel, converts positional ARGS to
-the expected body, and returns parsed JSON or nil."
+the expected body, and returns parsed JSON or nil.
+TIMEOUT bounds the blocking wait; see `my/noema--api-call-sync'."
   (let ((channel (my/noema-roam--action-to-channel action)))
     (when channel
       (let ((api-args
@@ -169,7 +182,24 @@ the expected body, and returns parsed JSON or nil."
                (_
                 []))))
         (when api-args
-          (my/noema--api-call-sync channel api-args))))))
+          (my/noema--api-call-sync channel api-args timeout))))))
+
+(defconst my/noema-roam--interactive-timeout 0.3
+  "Seconds an on-keystroke backend query may block the editor.")
+
+(defun my/noema-roam--runtime-call-interactive (action &rest args)
+  "Like `my/noema-roam--runtime-call', but safe to run on a keystroke.
+
+Blocks for at most `my/noema-roam--interactive-timeout' seconds and never
+falls back to spawning roam-cli.mjs.  The general call is built for commands:
+it waits up to eight seconds and then, if the web-host did not answer, starts
+a Node process.  Running that from a `completion-at-point' function meant
+every keypress could freeze Emacs for eight seconds plus a cold start.
+Returns nil when the host cannot answer in time, and the caller then simply
+offers no candidates."
+  (when (and (boundp 'my/noema--ready) my/noema--ready)
+    (my/noema-roam--runtime-call-via-api
+     action args my/noema-roam--interactive-timeout)))
 
 (defun my/noema-roam--runtime-call (action &rest args)
   "Call Noema roam runtime ACTION synchronously with ARGS.
@@ -196,7 +226,13 @@ is down (offline / not yet started)."
                             (format "AARONNOTE_STATE_DIR=%s"
                                     (my/noema-roam--state-root))
                             (format "AARONNOTE_TMP_DIR=%s"
-                                    (my/noema-roam--tmp-root)))
+                                    (my/noema-roam--tmp-root))
+                            ;; Without this the CLI configures the runtime as
+                            ;; "legacy" and drops every note under `public/',
+                            ;; so the offline fallback would disagree with the
+                            ;; running web-host about what the vault contains.
+                            (format "NOEMA_WORKSPACE_LAYOUT=%s"
+                                    (my/noema-roam--workspace-layout)))
                       process-environment))
              (stderr-file (make-temp-file "aaronnote-runtime-"))
              (status (apply #'process-file
@@ -208,6 +244,7 @@ is down (offline / not yet started)."
                             "--workspace" user-emacs-directory
                             "--state" (my/noema-roam--state-root)
                             "--tmp" (my/noema-roam--tmp-root)
+                            "--layout" (my/noema-roam--workspace-layout)
                             args)))
         (unwind-protect
             (if (zerop status)
@@ -277,11 +314,9 @@ is down (offline / not yet started)."
                       (match-string 2 line)))
             (setq pos (1+ (match-beginning 0)))))
         (let ((pos 0))
-          (while (string-match "\\[\\[\\([^]\n]+\\)\\]\\]" line pos)
+          (while (string-match my/noema-roam--wiki-link-regexp line pos)
             (record (match-beginning 0) (match-end 0)
-                    (concat "roam://"
-                            (my/noema-roam--encode-ref
-                             (string-trim (match-string 1 line)))))
+                    (my/noema-roam--wiki-link-href (match-string 1 line)))
             (setq pos (1+ (match-beginning 0)))))
         (let ((pos 0))
           (while (string-match "\\_<roam://[^][<>()[:space:]]+" line pos)
@@ -306,6 +341,37 @@ is down (offline / not yet started)."
   "Percent-encode REF for use in Noema roam URLs."
   (url-hexify-string (or ref "")))
 
+(defconst my/noema-roam--wiki-link-regexp
+  "\\[\\[\\([^]\n|]+?\\)\\(?:|\\([^]\n]+?\\)\\)?\\]\\]"
+  "Regexp matching a `[[target]]' or `[[target|label]]' wiki link.
+Mirrors `WIKI_LINK_RE' in Noema's `shared/wiki-link.mjs' so Emacs and the
+web editor agree on where a wiki link starts and ends.")
+
+(defun my/noema-roam--wiki-link-href (target)
+  "Return the canonical roam href for wiki-link TARGET, or nil.
+
+TARGET is the part before any `|label'.  Two shapes reach us:
+
+- the stable form the web editor inserts, `roam://<id>#<fragment>', which is
+  already canonical and must be passed through untouched; and
+- a plain page title, which becomes `roam://wiki/<title>' to match
+  `wikiHrefForTarget' in `shared/wiki-link.mjs'.
+
+Percent-encoding the stable form was the old bug: `[[roam://id#f|Label]]'
+turned into `roam://roam%3A%2F%2Fid%23f%7CLabel', which resolved to nothing."
+  (let ((value (string-trim (or target ""))))
+    (cond
+     ((string-empty-p value) nil)
+     ((string-match-p "\\`roam://" value) value)
+     (t (concat "roam://wiki/" (my/noema-roam--encode-ref value))))))
+
+(defun my/noema-roam--wiki-link-at (line pos)
+  "Return (BEG END HREF) for the wiki link matched in LINE from POS, or nil."
+  (when (string-match my/noema-roam--wiki-link-regexp line pos)
+    (list (match-beginning 0)
+          (match-end 0)
+          (my/noema-roam--wiki-link-href (match-string 1 line)))))
+
 (defun my/noema-roam--split-target (target)
   "Split Noema TARGET into note ref plus optional tag or DOM target.
 Canonical targets look like `roam://note-id', `roam://note-id#tag', and
@@ -316,6 +382,9 @@ resolved using the same note lookup path."
     (let* ((raw (string-trim target))
            (body (replace-regexp-in-string "\\`roam://" "" raw t t))
            (body (replace-regexp-in-string "\\`file://" "" body t t))
+           ;; `wikiHrefForTarget' emits roam://wiki/<title>; the trailing part
+           ;; is an ordinary page ref once the namespace marker is removed.
+           (body (replace-regexp-in-string "\\`wiki/" "" body t t))
            (body (or (car (split-string body "[?&]" t)) ""))
            (local (string-prefix-p "@@" body))
            ref tag dom)
@@ -365,18 +434,35 @@ plain-relative refs (./x, ../x); defaults to the current buffer's directory."
   (plist-get (my/noema-roam--parse-target (my/noema-roam--target-at-point))
              :slug))
 
+(defconst my/noema-roam--excluded-directories
+  '("_typst" "var" ".git" ".lake" ".noema" ".direnv" ".venv"
+    "node_modules" "__pycache__" ".ipynb_checkpoints" ".jupyter"
+    ".pytest_cache" ".mypy_cache" ".ruff_cache" ".virtual_documents")
+  "Directory names never descended into when scanning for notes.
+Mirrors `excludedDirs' in Noema's `server/lib/runtime.mjs' so the Emacs
+fallback scanner and the backend agree on what the vault contains.  Unlike
+the backend set this also lists `.noema', whose worktrees hold copies of
+real notes carrying the same `id:' as their originals.
+
+`public' is deliberately absent: under the wiki layout it is a real note
+partition, and the backend now makes the same distinction via its
+`isExcludedDir' helper.")
+
+(defun my/noema-roam--descend-directory-p (dir)
+  "Return non-nil when the scanner should descend into DIR."
+  (not (member (file-name-nondirectory (directory-file-name dir))
+               my/noema-roam--excluded-directories)))
+
 (defun my/noema-roam--all-files ()
-  "Return all Markdown roam note files, excluding generated/private dirs."
+  "Return all Markdown roam note files, excluding generated/private dirs.
+Pruning happens during the walk rather than afterwards: the vault root also
+holds `.lake' and `.noema' trees with tens of thousands of files, and
+filtering a completed walk meant paying for all of them on every scan."
   (or my/noema-roam--all-files-cache
       (setq my/noema-roam--all-files-cache
-            (seq-filter
-             (lambda (file)
-               (let ((rel (file-relative-name file (my/noema-roam-root))))
-                 (not (string-match-p
-                       "\\`\\(?:\\.git/\\|\\.lake/\\|_typst/\\|node_modules/\\)"
-                       rel))))
-             (directory-files-recursively
-              (my/noema-roam-root) "\\.\\(?:md\\|markdown\\)$")))))
+            (directory-files-recursively
+             (my/noema-roam-root) "\\.\\(?:md\\|markdown\\)\\'"
+             nil #'my/noema-roam--descend-directory-p))))
 
 (defun my/noema-roam--file-to-slug (file)
   "Convert FILE path to a roam slug, relative to root and without extension."
@@ -1815,17 +1901,30 @@ Optional TAGS are normalized with the same rules as the interactive form."
          (my/noema-roam--put-note-field note key value))))))
 
 (defun my/noema-roam--read-org-meta-block (note)
-  "Read an Noema `#+begin meta' block at point into NOTE."
+  "Read an Noema `#+begin meta' block at point into NOTE.
+
+A `#+begin summary' block may be nested inside the meta block.  Its body is
+prose, not metadata, so it is skipped: a sentence like \"Note: something\"
+matches the `key: value' grammar, and a prose line starting \"tags:\" would
+otherwise replace the note's real tag list.  Mirrors `maskMetaSummaryContent'
+in Noema's `shared/meta-summary.mjs'."
   (when (looking-at-p "\\s-*#\\+begin meta\\b")
     (forward-line 1)
-    (while (and (not (eobp))
-                (not (looking-at-p "\\s-*#\\+end meta\\b")))
-      (my/noema-roam--parse-meta-line
-       note
-       (string-trim (buffer-substring-no-properties
-                     (line-beginning-position)
-                     (line-end-position))))
-      (forward-line 1))
+    (let ((summary-depth 0))
+      (while (and (not (eobp))
+                  (not (looking-at-p "\\s-*#\\+end meta\\b")))
+        (cond
+         ((looking-at-p "\\s-*#\\+begin summary\\b")
+          (setq summary-depth (1+ summary-depth)))
+         ((looking-at-p "\\s-*#\\+end summary\\b")
+          (setq summary-depth (max 0 (1- summary-depth))))
+         ((zerop summary-depth)
+          (my/noema-roam--parse-meta-line
+           note
+           (string-trim (buffer-substring-no-properties
+                         (line-beginning-position)
+                         (line-end-position))))))
+        (forward-line 1)))
     t))
 
 (defun my/noema-roam--read-yaml-frontmatter (note)
@@ -1870,11 +1969,9 @@ Optional TAGS are normalized with the same rules as the interactive form."
   (let (links)
     (save-excursion
       (goto-char (point-min))
-      (while (re-search-forward "\\[\\[\\([^]\n]+\\)\\]\\]" nil t)
-        (push (concat "roam://"
-                      (my/noema-roam--encode-ref
-                       (string-trim (match-string 1))))
-              links))
+      (while (re-search-forward my/noema-roam--wiki-link-regexp nil t)
+        (when-let* ((href (my/noema-roam--wiki-link-href (match-string 1))))
+          (push href links)))
       (goto-char (point-min))
       (while (re-search-forward "\\(!?\\)\\[[^]\n]*\\](\\([^)\n]+\\))" nil t)
         (unless (equal (match-string 1) "!")
@@ -1997,23 +2094,23 @@ Optional TAGS are normalized with the same rules as the interactive form."
                    (and (stringp value) (not (string-empty-p value))))
                  values))))
 
+(defun my/noema-roam--scan-record (file)
+  "Return the note record for FILE by reading it from disk."
+  (let* ((note (my/noema-roam--scan-note-file file))
+         (key (my/noema-roam--file-to-slug file))
+         (id (my/noema-roam--canonical-note-id key note)))
+    (list :key key
+          :id id
+          :note note
+          :file file
+          :title (or (my/noema-roam--note-field note "title") id)
+          :values (my/noema-roam--note-search-values key note))))
+
 (defun my/noema-roam--scanned-note-records ()
   "Return cached note records by scanning Markdown files."
   (or my/noema-roam--scan-cache
       (setq my/noema-roam--scan-cache
-            (mapcar (lambda (file)
-                      (let* ((note (my/noema-roam--scan-note-file file))
-                             (key (my/noema-roam--file-to-slug file))
-                             (id (my/noema-roam--canonical-note-id key note)))
-                        (list :key key
-                              :id id
-                              :note note
-                              :file file
-                              :title (or (my/noema-roam--note-field note "title")
-                                         id)
-                              :values (my/noema-roam--note-search-values
-                                       key note))))
-                    (my/noema-roam--all-files)))))
+            (mapcar #'my/noema-roam--scan-record (my/noema-roam--all-files)))))
 
 (defun my/noema-roam--runtime-note-records ()
   "Return note records from the vendored Noema runtime."
@@ -2043,27 +2140,26 @@ Optional TAGS are normalized with the same rules as the interactive form."
   (plist-get (my/noema-roam--split-target target) :ref))
 
 (defun my/noema-roam--resolve-note (ref)
-  "Resolve REF to an Noema note record plist.
-Exact id/key/path/title/alias/tag matches win first; substring matches are
-accepted as a fallback, matching Noema search behavior."
+  "Resolve REF to an Noema note record plist, or nil.
+Only exact matches against a note's searchable values (id, key, path, link,
+title, aliases, tags) resolve.
+
+There used to be an unanchored substring fallback here.  Link resolution has
+to be deterministic — it backs `follow-link', the xref backend and
+`--file-to-note-id' — and a substring pass makes it depend on scan order:
+a ref like \"index\" matched the first note whose *path* merely contained
+that word, silently opening the wrong note instead of reporting a broken
+link.  Callers already treat nil as \"no such note\" and offer to create it,
+which is the honest answer for a dangling ref."
   (let* ((clean (or (my/noema-roam--target-note-ref ref) ref))
          (clean (string-trim (or clean "")))
-         (query (downcase clean))
-         (records (my/noema-roam--note-records)))
-    (or
-     (seq-find
-      (lambda (record)
-        (member query
-                (mapcar #'downcase (plist-get record :values))))
-      records)
-     (and (not (string-empty-p query))
-          (seq-find
-           (lambda (record)
-             (seq-some
-              (lambda (value)
-                (string-match-p (regexp-quote query) (downcase value)))
-              (plist-get record :values)))
-           records)))))
+         (query (downcase clean)))
+    (unless (string-empty-p query)
+      (seq-find
+       (lambda (record)
+         (member query
+                 (mapcar #'downcase (plist-get record :values))))
+       (my/noema-roam--note-records)))))
 
 (defun my/noema-roam--db-note (slug)
   "Return the canonical runtime note for SLUG/id/path, or nil."
@@ -3293,7 +3389,7 @@ uses (see `todoRefCompletions' in server/lib/runtime.mjs): same-file todos
 first, then open statuses before closed ones; a todo with a stable id
 completes to `#id', otherwise to the shortest unique text ref."
   (let* ((body (list :prefix prefix :file (or buffer-file-name "")))
-         (result (my/noema-roam--runtime-call
+         (result (my/noema-roam--runtime-call-interactive
                   "todo-refs" "--json" (json-serialize body)))
          (items (and result (gethash "items" result))))
     (delq nil (mapcar (lambda (item) (gethash "ref" item)) items))))
@@ -4051,12 +4147,12 @@ canonical `roam://note-id#tag' target."
 
 (my/leader!
   "r m" '(:def my/noema-roam-dispatch :which-key "md roam")
-  "r t" '(:def my/noema-roam-dispatch :which-key "md roam")
   "r a" '(:def my/noema-roam-agenda   :which-key "roam agenda")
   "r d" '(:def my/noema-roam-dired    :which-key "roam dired")
   "r v" '(:def my/noema-roam-magit    :which-key "roam magit")
   "r S" '(:def my/noema-wiki-index-status :which-key "Wiki index status")
-  "r e" '(:def my/noema-open-markdown-raw :which-key "edit raw md"))
+  "r e" '(:def my/noema-open-markdown-raw :which-key "edit raw md")
+  "r o" '(:def my/noema-open-current-note :which-key "open in Noema"))
 
 ;; ── xref backend: gd / M-. for note-link ─────────────────────────────────
 
@@ -4156,12 +4252,136 @@ canonical `roam://note-id#tag' target."
 
 (define-key my/noema-roam-map (kbd "d") #'my/noema-roam-daily-note)
 
+(defconst my/noema-roam--help-groups
+  '(("Navigate"  my/noema-roam-find-note my/noema-roam-follow-link
+                 my/noema-roam-select-link my/noema-roam-recent-notes
+                 my/noema-roam-related-notes my/noema-roam-daily-note
+                 my/noema-roam-jump-file-todo)
+    ("Link"      my/noema-roam-insert-link my/noema-roam-insert-tag-id-link
+                 my/noema-roam-insert-toc-link my/noema-roam-copy-link-to-here
+                 my/noema-roam-insert-tag-id my/noema-roam-generate-tag-id)
+    ("Create"    my/noema-roam-new-node)
+    ("Search"    my/noema-roam-search-notes my/noema-roam-backlinks
+                 my/noema-wiki-tags my/noema-roam-graph)
+    ("Tasks"     my/noema-roam-todos my/noema-roam-agenda)
+    ("Maintain"  my/noema-wiki-refresh my/noema-wiki-rebuild
+                 my/noema-wiki-index-status my/noema-wiki-repositories
+                 my/noema-roam-magit my/noema-roam-dired my/noema-stop
+                 my/noema-roam-dispatch my/noema-roam-help))
+  "Grouping of `my/noema-roam-map' commands for the help board.
+Only the grouping lives here; the keys themselves are read back out of the
+keymap so this page cannot drift away from the bindings it documents.")
+
+(defun my/noema-roam--help-rows ()
+  "Return (GROUP . ((KEY . COMMAND) ...)) rows describing `my/noema-roam-map'.
+Commands present in the keymap but absent from `my/noema-roam--help-groups'
+are collected under \"Other\" so nothing is silently undocumented."
+  (let ((by-command (make-hash-table :test 'eq))
+        (grouped '())
+        (seen (make-hash-table :test 'eq)))
+    (map-keymap
+     (lambda (event definition)
+       (when (commandp definition)
+         (push (key-description (vector event))
+               (gethash definition by-command))))
+     my/noema-roam-map)
+    (dolist (group my/noema-roam--help-groups)
+      (let (rows)
+        (dolist (command (cdr group))
+          (dolist (key (sort (gethash command by-command) #'string<))
+            (puthash command t seen)
+            (push (cons key command) rows)))
+        (when rows (push (cons (car group) (nreverse rows)) grouped))))
+    (let (rest)
+      (maphash (lambda (command keys)
+                 (unless (gethash command seen)
+                   (dolist (key (sort keys #'string<))
+                     (push (cons key command) rest))))
+               by-command)
+      (when rest (push (cons "Other" (nreverse rest)) grouped)))
+    (nreverse grouped)))
+
+(defun my/noema-roam--help-render ()
+  "Render the roam keybinding help board."
+  (aaron-ui-board-render
+   (lambda ()
+     (aaron-ui-board-insert-page-header
+      "Roam keys"
+      :icon 'note
+      :subtitle (format "%s in a note buffer, or C-c r <key>"
+                        (if my/noema-roam-help-key
+                            (format "%s / C-c r ?" my/noema-roam-help-key)
+                          "C-c r ?")))
+     (insert "\n")
+     (dolist (group (my/noema-roam--help-rows))
+       (aaron-ui-board-insert-section (car group) (length (cdr group)))
+       (dolist (row (cdr group))
+         (aaron-ui-board-insert-field
+          (format "C-c r %s" (car row))
+          (or (car (split-string
+                    (or (documentation (cdr row)) (symbol-name (cdr row)))
+                    "\n"))
+              (symbol-name (cdr row)))))
+       (insert "\n"))
+     (aaron-ui-board-insert-section "Leader" 7)
+     (dolist (row '(("SPC r m" . "roam / Wiki dispatch")
+                    ("SPC r a" . "agenda")
+                    ("SPC r d" . "dired in the vault")
+                    ("SPC r v" . "magit in the vault")
+                    ("SPC r S" . "Wiki index status")
+                    ("SPC r e" . "edit this note raw in Emacs")
+                    ("SPC r o" . "open this note in Noema")))
+       (aaron-ui-board-insert-field (car row) (cdr row)))
+     (insert "\n")
+     (aaron-ui-board-insert-section "Also" 3)
+     (aaron-ui-board-insert-field "gd / M-." "follow the note link at point (xref)")
+     (aaron-ui-board-insert-field "H-o" "global Noema dispatch")
+     (aaron-ui-board-insert-field "M-x reports"
+                                  "orphans, dead ends, hubs, wanted pages")
+     (insert "\n")
+     (aaron-ui-board-insert-key-hints "g refresh  ·  q close"))))
+
+;;;###autoload
+(defun my/noema-roam-help ()
+  "Show the Noema roam keybinding help board.
+The page is generated from `my/noema-roam-map', so it always matches the
+bindings that are actually installed."
+  (interactive)
+  (let ((buffer (my/noema-roam--prepare-ui-buffer
+                 "*roam-help*" "Roam keys" 'note
+                 #'my/noema-roam--help-render)))
+    (with-current-buffer buffer
+      (my/noema-roam--help-render))
+    (pop-to-buffer buffer)))
+
+(define-key my/noema-roam-map (kbd "?") #'my/noema-roam-help)
+
+(config-defvar my/noema-roam-help-key nil
+  "Evil normal-state key that opens the roam help board in note buffers.
+
+Defaults to `?'.  That key is `evil-search-backward' elsewhere, so it is only
+rebound inside vault notes, and only in normal state; set this to nil to keep
+`?' as backward search everywhere.  The help board is always reachable through
+`C-c r ?' regardless of this setting."
+  :type '(choice (const :tag "Disabled" nil) (string :tag "Key"))
+  :group 'my/noema-roam)
+
+(defun my/noema-roam--setup-help-key ()
+  "Bind `my/noema-roam-help-key' in this note buffer's evil normal state."
+  (when (and my/noema-roam-help-key
+             (fboundp 'evil-local-set-key)
+             (my/noema-roam--note-in-vault-p
+              (expand-file-name (or buffer-file-name ""))))
+    (evil-local-set-key 'normal (kbd my/noema-roam-help-key)
+                        #'my/noema-roam-help)))
+
 (defun my/noema-roam-setup-keys ()
   "Set up Noema roam keys and xref for the current Markdown buffer.
 Binds `C-c r' to `my/noema-roam-map' and registers the roam xref
 backend.  Does not install completion-at-point functions (those are
 added separately by `my/noema-roam--capf-setup')."
   (local-set-key (kbd "C-c r") my/noema-roam-map)
+  (my/noema-roam--setup-help-key)
   (my/noema-roam--xref-setup))
 
 (add-hook 'markdown-mode-hook #'my/noema-roam-setup-keys)
@@ -4515,8 +4735,13 @@ added separately by `my/noema-roam--capf-setup')."
       (alist-get 'assets result)))))
 
 (with-eval-after-load 'transient
-  (transient-define-prefix my/noema-roam-reports ()
-    "Wiki knowledge-health reports."
+  ;; Named apart from `my/noema-roam-reports', which opens the web Wiki
+  ;; reports view.  Both used to be called `my/noema-roam-reports': because
+  ;; `transient' is required at the top of this file the `with-eval-after-load'
+  ;; body ran immediately, so the plain `defun' 340 lines below always won and
+  ;; these six native reports were reachable only through `M-x'.
+  (transient-define-prefix my/noema-roam-reports-native ()
+    "Native knowledge-health reports rendered in Emacs board buffers."
     [["Special pages"
       ("w" "wanted pages"       my/noema-roam-report-wanted)
       ("o" "orphaned pages"     my/noema-roam-report-orphaned)
@@ -4835,19 +5060,82 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
   "Compatibility no-op; Wiki index maintenance is owned by the web host."
   nil)
 
+(defun my/noema-roam--vault-file (file)
+  "Return FILE as an absolute vault path in scanner form, or nil.
+
+Resolves symlinks on both sides before comparing.  `find-file' stores a
+truename in `buffer-file-name', while the scanner builds its paths from the
+configured root, so a vault reached through a symlink — or anything under
+macOS's /var -> /private/var link — compared unequal and every save looked
+like it had happened outside the vault.  The returned path uses the root as
+configured so it matches the cached records."
+  (when (and (stringp file) (not (string-empty-p file)))
+    (let* ((root (file-name-as-directory
+                  (expand-file-name (my/noema-roam-root))))
+           (file-abs (expand-file-name file)))
+      (if (string-prefix-p root file-abs)
+          file-abs
+        (let ((root-true (file-name-as-directory (file-truename root)))
+              (file-true (file-truename file-abs)))
+          (when (string-prefix-p root-true file-true)
+            (expand-file-name (file-relative-name file-true root-true) root)))))))
+
 (defun my/noema-roam--note-in-vault-p (file)
   "Return non-nil when FILE is a Markdown note inside the vault root."
-  (let ((root (file-name-as-directory (expand-file-name (my/noema-roam-root)))))
-    (and (string-prefix-p root file)
-         (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file))))
+  (and (my/noema-roam--vault-file file)
+       (string-match-p "\\.\\(?:md\\|markdown\\)\\'" file)))
+
+(defun my/noema-roam--invalidate-note (file)
+  "Invalidate cached Emacs-side state after FILE changed on disk.
+
+Cheaper than `my/noema-roam--clear-runtime-cache': a save of a note that
+already exists keeps the directory listing and re-reads only that one file.
+Backlinks are computed across every record, so the summary cache still has to
+go; the runtime payload is owned by the web-host and is stale after any write."
+  (setq my/noema-roam--runtime-index-cache nil
+        my/noema-roam--runtime-index-cache-key nil
+        my/noema-roam--all-note-summaries-cache nil)
+  (let ((file (or (my/noema-roam--vault-file file) (expand-file-name file))))
+    (if (and my/noema-roam--all-files-cache
+             (member file my/noema-roam--all-files-cache)
+             (file-exists-p file))
+        (when my/noema-roam--scan-cache
+          (setq my/noema-roam--scan-cache
+                (mapcar (lambda (record)
+                          (if (equal (plist-get record :file) file)
+                              (my/noema-roam--scan-record file)
+                            record))
+                        my/noema-roam--scan-cache)))
+      ;; Created or deleted: the directory listing itself is out of date.
+      (setq my/noema-roam--all-files-cache nil
+            my/noema-roam--scan-cache nil))))
 
 (defun my/noema-roam-note-changed (file)
-  "Invalidate Emacs-side caches when the web-host reports FILE was saved.
+  "Invalidate Emacs-side caches when FILE was saved.
 The web-host owns wiki.db maintenance; Emacs must not start another indexer."
   (when (and (stringp file)
              (not (string-empty-p file))
              (my/noema-roam--note-in-vault-p (expand-file-name file)))
-    (my/noema-roam--clear-runtime-cache)))
+    (my/noema-roam--invalidate-note file)))
+
+(defun my/noema-roam--after-save-h ()
+  "Invalidate note caches after saving a vault note from Emacs.
+
+The web-host emits its `saved' event only for writes made in the web editor,
+so an Emacs-side save used to leave every cache stale: backlinks, search and
+`find-note' kept answering from the pre-save index until something else
+happened to clear them.  The backend picks the write up through its own file
+watcher, so this only has to repair the Emacs side."
+  (when (and buffer-file-name
+             (my/noema-roam--note-in-vault-p
+              (expand-file-name buffer-file-name)))
+    (my/noema-roam--invalidate-note buffer-file-name)))
+
+(defun my/noema-roam--setup-save-hook ()
+  "Track saves of the current Markdown buffer when it is a vault note."
+  (add-hook 'after-save-hook #'my/noema-roam--after-save-h nil t))
+
+(add-hook 'markdown-mode-hook #'my/noema-roam--setup-save-hook)
 
 ;; Keep the historical command names used by existing keymaps, while making
 ;; the web-host Wiki UI the only maintenance/report implementation.
