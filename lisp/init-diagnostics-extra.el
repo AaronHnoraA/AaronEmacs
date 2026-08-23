@@ -12,6 +12,7 @@
 (declare-function flymake-diagnostics "flymake" (&optional beg end))
 (declare-function my/problems-buffer "init-problems" ())
 (declare-function my/problems-project "init-problems" ())
+(declare-function my/problems-project-full "init-problems" ())
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui")
 (declare-function my/diagnostics-mode "init-diagnostics-ui")
 (declare-function my/diagnostics-open "init-diagnostics-ui" (scope &optional filter title))
@@ -204,7 +205,8 @@
   "Diagnostics workflow."
   [["Jump"
     ("!" "buffer picker" my/problems-buffer)
-    ("?" "project picker" my/problems-project)]
+    ("?" "project picker" my/problems-project)
+    ("F" "project full (incl. unopened)" my/problems-project-full)]
    ["Panel"
     ("b" "buffer panel" my/diagnostics-buffer-ui)
     ("e" "buffer errors" my/diagnostics-buffer-errors)

@@ -31,6 +31,7 @@
 (declare-function my/lsp-mode-ensure "init-lsp" ())
 (declare-function my/language-server--set-struct-slot
                   "init-lsp" (object type slot value))
+(declare-function my/language-server--project-root-for-buffer "init-lsp" ())
 (declare-function my/language-server-toolchain-set-local-variable
                   "init-lsp-toolchain" (variable value))
 (defvar dape-configs)
@@ -39,6 +40,8 @@
 (defvar lsp-clients)
 (defvar lsp-java-bundles)
 (defvar lsp-java-server-config-dir)
+(defvar lsp-java-workspace-dir)
+(defvar lsp-java-jdt-ls-prefer-native-command)
 (defvar lsp-enabled-clients)
 (defvar my/debug-after-register-common-configs-hook)
 (defvar my/java-debug--forwards (make-hash-table :test #'equal)
@@ -144,6 +147,16 @@ or transport kind."
 (defun my/lsp-java--target-install-ready-p (directory)
   "Return non-nil when logical JDTLS DIRECTORY is complete."
   (file-executable-p (expand-file-name "bin/jdtls" directory)))
+
+(defun my/lsp-java--ensure-target-python (context)
+  "Signal a clear error unless CONTEXT's target has a `python3'.
+`bin/jdtls' is `#!/usr/bin/env python3': native-launcher mode silently
+fails to start when the target lacks it, and the resulting error surfaces
+far from its cause.  Fail here instead, at toolchain-apply time."
+  (let ((remote-current-adapter-id "language-server"))
+    (unless (remote-executable-find "python3" context)
+      (error "JDTLS native launcher requires python3 on target %s"
+             (remote-context-target-id context)))))
 
 (defun my/lsp-java--archive-local-bundle ()
   "Create and return a temporary archive of the local lsp-java bundle."
@@ -296,13 +309,45 @@ or transport kind."
       (if arm-p "config_linux_arm" "config_linux")))))
 
 (defun my/lsp-java--target-command-a (function &rest arguments)
-  "Project lsp-java's server COMMAND into its target-native namespace."
-  (mapcar
-   (lambda (argument)
-     (if (stringp argument)
-         (remote-file-local-name argument)
-       argument))
-   (apply function arguments)))
+  "Project lsp-java's server COMMAND into its target-native namespace.
+In native-launcher mode, `lsp-java--ls-command' only emits the JDTLS
+binary plus `--jvm-arg' flags: it never passes `-data' or
+`-configuration'.  `bin/jdtls' then derives its own workspace directory
+from `sha1(basename(cwd))', so two Java projects that merely share a
+directory basename collide on one JDTLS workspace and silently reuse a
+half-imported one.  Appending the toolchain's own per-root
+`lsp-java-workspace-dir'/`lsp-java-server-config-dir'
+\(`my/lsp-java--apply-toolchain' already computes and sets these
+buffer-locally, but native mode ignores them\) restores the workspace
+identity the jar launcher would have used."
+  (let ((command
+         (mapcar
+          (lambda (argument)
+            (if (stringp argument)
+                (remote-file-local-name argument)
+              argument))
+          (apply function arguments))))
+    (if (and (bound-and-true-p lsp-java-jdt-ls-prefer-native-command)
+             (bound-and-true-p lsp-java-workspace-dir))
+        (append
+         command
+         (list "-data" (remote-file-local-name lsp-java-workspace-dir))
+         (and (bound-and-true-p lsp-java-server-config-dir)
+              (list "-configuration"
+                    (remote-file-local-name lsp-java-server-config-dir))))
+      command)))
+
+(defvar my/lsp-java--single-root-enforced nil
+  "Canonical root last handled by `my/lsp-java--enforce-single-root', or nil.
+lsp-mode re-populates `lsp-session-server-id->folders' as JDTLS attaches
+each newly visited buffer to an already-live workspace, so this function
+previously ran its folder-removal and `lsp--persist-session' on every
+single Java buffer visit, not just once per project: it kept racing that
+live bookkeeping and re-writing the session file for no reason.  Tracking
+only the current root (rather than every root ever seen) keeps the
+\"enforce ONE root\" semantics correct when switching between projects:
+returning to an earlier root after visiting a different one must still
+re-run the wipe, since the folder table now belongs to that other root.")
 
 (defun my/lsp-java--enforce-single-root ()
   "Give every Java project one JDTLS workspace and data directory.
@@ -315,22 +360,26 @@ inside the one selected root."
     ;; Java has one explicit workspace owner.  In particular, lsp-mode's
     ;; semgrep client declares itself an add-on for Java and can otherwise be
     ;; started beside JDTLS even when `semgrep' is unavailable on the target.
-    ;; Its exit/restart cleanup then races the healthy JDTLS buffer.
+    ;; Its exit/restart cleanup then races the healthy JDTLS buffer.  This
+    ;; buffer-local assignment is cheap and must still run for every buffer.
     (setq-local lsp-enabled-clients '(jdtls jdtls-tramp))
     (require 'lsp-java)
-    (dolist (server-id '(jdtls jdtls-tramp))
-      (when-let* ((client (gethash server-id lsp-clients)))
-        (my/language-server--set-struct-slot
-         client 'lsp--client 'multi-root nil)))
-    (let* ((session (lsp-session))
-           (folders (lsp-session-server-id->folders session))
-           changed)
-      (dolist (server-id '(jdtls jdtls-tramp))
-        (when (gethash server-id folders)
-          (remhash server-id folders)
-          (setq changed t)))
-      (when changed
-        (lsp--persist-session session)))))
+    (let ((root (my/language-server--project-root-for-buffer)))
+      (unless (and root (equal root my/lsp-java--single-root-enforced))
+        (setq my/lsp-java--single-root-enforced root)
+        (dolist (server-id '(jdtls jdtls-tramp))
+          (when-let* ((client (gethash server-id lsp-clients)))
+            (my/language-server--set-struct-slot
+             client 'lsp--client 'multi-root nil)))
+        (let* ((session (lsp-session))
+               (folders (lsp-session-server-id->folders session))
+               changed)
+          (dolist (server-id '(jdtls jdtls-tramp))
+            (when (gethash server-id folders)
+              (remhash server-id folders)
+              (setq changed t)))
+          (when changed
+            (lsp--persist-session session)))))))
 
 (defun my/lsp-java--apply-toolchain (profile root)
   "Apply Java PROFILE for ROOT to lsp-java."
@@ -363,6 +412,7 @@ inside the one selected root."
          :context context :adapter "language-server" :check t)))
     (unless (my/lsp-java--target-install-ready-p install-directory)
       (error "JDTLS launcher is unavailable in %s" install-directory))
+    (my/lsp-java--ensure-target-python context)
     (my/language-server-toolchain-set-local-variable
      'lsp-java-server-install-dir install-directory)
     ;; Configuration is selected from facts probed on the execution target,
@@ -374,16 +424,21 @@ inside the one selected root."
       install-directory))
     (my/language-server-toolchain-set-local-variable
      'lsp-java-bundles
-     (mapcar
-      #'remote-file-local-name
-      (seq-remove
-       (lambda (file)
-         (string-match-p
-          "com\\.microsoft\\.java\\.test\\.runner\\.jar\\'"
-          file))
-       (directory-files
-        (expand-file-name "bundles/" install-directory)
-        t "\\.jar\\'"))))
+     (let ((bundles-directory
+            (expand-file-name "bundles/" install-directory)))
+       ;; Not every JDTLS distribution ships debug/test-runner bundles;
+       ;; a missing directory here must not abort the whole toolchain
+       ;; apply and leave the buffer with no language server at all.
+       (if (file-directory-p bundles-directory)
+           (mapcar
+            #'remote-file-local-name
+            (seq-remove
+             (lambda (file)
+               (string-match-p
+                "com\\.microsoft\\.java\\.test\\.runner\\.jar\\'"
+                file))
+             (directory-files bundles-directory t "\\.jar\\'")))
+         nil)))
     (my/language-server-toolchain-set-local-variable
      'lsp-java-jdt-ls-prefer-native-command t)
     (my/language-server-toolchain-set-local-variable
@@ -420,8 +475,16 @@ inside the one selected root."
   (my/register-lsp-mode-preference 'java-mode 'lsp-java)
   (my/register-lsp-mode-preference 'java-ts-mode 'lsp-java))
 
-(add-hook 'java-mode-hook #'my/lsp-mode-ensure)
-(add-hook 'java-ts-mode-hook #'my/lsp-mode-ensure)
+;; `my/lsp-mode-ensure' previously ran a second time here, directly on
+;; `java-mode-hook'/`java-ts-mode-hook', ahead of the shared
+;; `prog-mode-hook' -> `my/language-server-ensure-deferred' path that
+;; every other lsp-mode/eglot language already goes through.  It ran
+;; synchronously during mode setup and bypassed the runtime-provider
+;; layer (`my/language-server-runtime-prepare') entirely, since it never
+;; passed through `my/language-server-ensure'.  The shared path already
+;; routes `java-mode'/`java-ts-mode' buffers to lsp-mode via
+;; `my/register-lsp-mode-preference' above, so no separate hook is
+;; needed.
 
 (use-package lsp-java
   :ensure t

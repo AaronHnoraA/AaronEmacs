@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'cl-lib)
 (require 'init-funcs)
 (require 'seq)
 
@@ -18,6 +19,12 @@
 (declare-function flymake--project-diagnostics "flymake" (&optional project))
 (declare-function flymake-diagnostic-type "flymake" (diag))
 (declare-function flymake-diagnostics "flymake" (&optional beg end))
+(declare-function flymake-make-diagnostic "flymake" (locus beg end type info &optional data overlay-properties))
+(declare-function flymake-show-project-diagnostics "flymake" ())
+(declare-function lsp-diagnostics "lsp-mode" (&optional current-workspace?))
+(declare-function eglot--flymake-diag-type "eglot" (severity))
+(declare-function remote-canonicalize-file-name "remote-fs" (file-name &optional directory))
+(declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
 
 (defconst my/problems--narrow
   '((?e . "Error")
@@ -67,6 +74,83 @@
      (unless (bound-and-true-p flymake-mode)
        (user-error "Flymake is not active in the current buffer"))
      (flymake-diagnostics))))
+
+(defvar my/problems--lsp-list-only-owned nil
+  "Alist of (ROOT . LOCI) previously written into
+`flymake-list-only-diagnostics' by
+`my/problems--sync-lsp-list-only-diagnostics'.  Tracking what this
+function itself wrote lets it retract entries whose lsp-mode
+diagnostics have since cleared, instead of leaking them forever in a
+global variable.")
+
+(defun my/problems--lsp-diagnostic-to-flymake (locus diag)
+  "Convert raw LSP protocol DIAG into a file-locus Flymake diagnostic.
+LOCUS is the file name the diagnostic is attached to.  Mirrors the
+`(LINE . COL)' file-locus convention `eglot--flymake-handle-push' uses
+for diagnostics on files with no live buffer, so lsp-mode's entries
+render the same way as Eglot's in `flymake-show-project-diagnostics'."
+  (let* ((range (plist-get diag :range))
+         (start (plist-get range :start))
+         (line (1+ (or (plist-get start :line) 0)))
+         (char (1+ (or (plist-get start :character) 0))))
+    (flymake-make-diagnostic
+     locus (cons line char) nil
+     (eglot--flymake-diag-type (plist-get diag :severity))
+     (list (plist-get diag :source) (plist-get diag :code)
+           (plist-get diag :message)))))
+
+(defun my/problems--sync-lsp-list-only-diagnostics (root)
+  "Bridge lsp-mode's workspace diagnostics under ROOT into Flymake.
+lsp-mode only reports diagnostics through its Flymake backend for the
+current buffer (`lsp-diagnostics--flymake-update-diagnostics' keys off
+`buffer-file-name'), so `flymake--project-diagnostics' never learns
+about JDTLS/lsp-mode errors in files that are not visited.  This
+populates the same public `flymake-list-only-diagnostics' extension
+point Eglot already uses for its own diagnostics on unopened files, for
+whichever files have no live buffer."
+  (when (fboundp 'lsp-diagnostics)
+    (let* ((canonical-root (ignore-errors (remote-canonicalize-file-name root)))
+           (previously (and canonical-root
+                            (cdr (assoc canonical-root
+                                       my/problems--lsp-list-only-owned))))
+           (fresh nil))
+      (when canonical-root
+        (maphash
+         (lambda (file diags)
+           (when (and diags
+                      (stringp file)
+                      (not (get-file-buffer file))
+                      (string-prefix-p
+                       canonical-root
+                       (or (ignore-errors (remote-canonicalize-file-name file))
+                           file)))
+             (let ((locus (or (ignore-errors (remote-client-file-name file))
+                              file)))
+               (push locus fresh)
+               (setf (alist-get locus flymake-list-only-diagnostics nil nil #'equal)
+                     (mapcar (lambda (diag)
+                               (my/problems--lsp-diagnostic-to-flymake locus diag))
+                             diags)))))
+         (lsp-diagnostics t))
+        (dolist (stale (seq-difference previously fresh))
+          (setf (alist-get stale flymake-list-only-diagnostics nil 'remove #'equal)
+                nil))
+        (setf (alist-get canonical-root my/problems--lsp-list-only-owned nil nil #'equal)
+              fresh)))))
+
+(defun my/problems-project-full ()
+  "Show all project diagnostics, including files that are not open.
+`my/problems-project' uses the buffer-centric `consult-flymake' picker,
+which silently drops any diagnostic whose locus is not a live buffer
+\(see `consult-flymake--candidates''s `buffer-live-p' check\), so it can
+never show a cross-file error in a file nobody has visited yet.  This
+instead renders Emacs's native `flymake-project-diagnostics-mode'
+listing, which understands file-locus diagnostics directly, after
+bridging in whatever lsp-mode currently knows for this project."
+  (interactive)
+  (when-let* ((project (project-current nil default-directory)))
+    (my/problems--sync-lsp-list-only-diagnostics (project-root project)))
+  (flymake-show-project-diagnostics))
 
 (defun my/problems--read (scope &optional severity)
   "Read a diagnostic from SCOPE, optionally filtered by SEVERITY."

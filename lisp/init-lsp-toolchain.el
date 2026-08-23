@@ -52,6 +52,7 @@ Each entry is `(SYMBOL LOCAL-P VALUE)'.")
 (declare-function lsp-disconnect "lsp-mode" ())
 (declare-function my/direnv-update-environment-maybe
                   "init-direnv" (&optional path callback))
+(declare-function my/language-server--canonical-root "init-lsp" (root))
 (declare-function my/language-server--merge-values "init-lsp" (base override))
 (declare-function my/language-server-apply-eglot-local-settings "init-lsp")
 (declare-function my/language-server-apply-lsp-local-settings "init-lsp")
@@ -62,18 +63,20 @@ Each entry is `(SYMBOL LOCAL-P VALUE)'.")
 (declare-function my/project-local-value "init-project-local" (key &optional root))
 
 (defun my/language-server-toolchain--canonical-root (&optional buffer)
-  "Return a stable project root for BUFFER."
+  "Return a stable project root for BUFFER.
+Shares `my/language-server--canonical-root' with the rest of the LSP
+stack so toolchain selection and the server's own workspace root always
+agree on target identity.  The previous `file-remote-p' branch here
+misclassified `/fs:' names (which `file-remote-p' does not recognize as
+remote), so a target-only root could be truenamed as if it were local."
   (with-current-buffer (or buffer (current-buffer))
-    (let* ((root (or (and (fboundp 'my/project-local-root)
-                          (my/project-local-root))
-                     (when-let* ((project (project-current nil default-directory)))
-                       (project-root project))
-                     default-directory))
-           (expanded (file-name-as-directory (expand-file-name root))))
-      (if (file-remote-p expanded)
-          expanded
-        (file-name-as-directory
-         (or (ignore-errors (file-truename expanded)) expanded))))))
+    (or (my/language-server--canonical-root
+         (or (and (fboundp 'my/project-local-root)
+                  (my/project-local-root))
+             (when-let* ((project (project-current nil default-directory)))
+               (project-root project))
+             default-directory))
+        (file-name-as-directory default-directory))))
 
 (defun my/language-server-toolchain--mode-match-p (modes)
   "Return non-nil when current buffer derives from one of MODES."

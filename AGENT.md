@@ -253,9 +253,23 @@ LSP:
 - Give each language-helper process instance its own owned discovery/port file;
   never let concurrent reconnects overwrite a project-global endpoint file.
   Validate local owners and clean up only files owned by the exiting process.
-- Keep the three-layer split: `init-lsp.el` for routing/core setup,
-  `init-lsp-ops.el` for backend-agnostic commands, and `init-lsp-tools.el` for
-  Hub/Doctor/dispatch/session knobs.
+- Keep the layer split: `init-lsp.el` for routing/core setup,
+  `init-lsp-ops.el` for backend-agnostic commands, `init-lsp-tools.el` for
+  Hub/Doctor/dispatch/session knobs, `init-lsp-runtime.el` for the runtime
+  provider layer (kernel-following Eglot etc.), and `init-lsp-toolchain.el`
+  for project-level toolchain profiles shared by Eglot and lsp-mode.
+- LSP document/protocol identity (workspace root, URI, server placement,
+  diagnostic keys) is always canonicalized to `/fs:TARGET:/path`. Ordinary
+  buffer identity is not: ordinary local buffers keep their native
+  `buffer-file-name`, and the two are bridged by Emacs's own buffer-alias
+  mechanism (`find-buffer-visiting`'s `get-file-buffer` step, which `/fs:`
+  registers as a handler operation), not by rewriting `buffer-file-name`.
+  Where a client (lsp-mode's raw diagnostics `gethash`, Eglot's
+  `eglot--find-buffer-visiting`) bypasses that alias and compares
+  `buffer-file-name` by `equal`, add a narrow advice that closes the gap
+  instead of normalizing buffer identity into `/fs:` globally — see
+  `my/lsp-mode--fix-path-casing-a` and `my/eglot--find-buffer-visiting-a`
+  in `init-lsp.el`.
 - When LSP behaves strangely, use `my/language-server-doctor` before changing
   code.
 

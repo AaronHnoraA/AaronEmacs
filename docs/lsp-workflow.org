@@ -14,10 +14,14 @@
 
 相关入口文件：
 
-- =lisp/init-lsp.el=
-- =lisp/init-lsp-ops.el=
-- =lisp/init-lsp-tools.el=
-- =lisp/lang/=
+- =lisp/init-lsp.el=：路由核心、Remote adapter 绑定、URI/workspace 身份、
+  flymake/company/eglot/lsp-mode 装配
+- =lisp/init-lsp-ops.el=：backend 无关的通用命令（restart/shutdown/log/session）
+- =lisp/init-lsp-tools.el=：Hub、Doctor、dispatch、session 调参
+- =lisp/init-lsp-runtime.el=：runtime provider 层，见下方 *Runtime Contexts*
+- =lisp/init-lsp-toolchain.el=：project 级 toolchain profile，供 Eglot/lsp-mode
+  共用（buffer-local 环境变量/PATH 应用与复原）
+- =lisp/lang/=：逐语言路由声明与 server 特有配置
 
 * Design
 
@@ -76,9 +80,24 @@ process、URI 和 resource-lifecycle 流程。
 
 每次 LSP 设计或修改都必须满足：
 
-1. 一个 server/workspace 只有一个 owning logical root。文档身份始终是
+1. 一个 server/workspace 只有一个 owning logical root。**协议/框架身份**
+   （workspace root、URI、server placement、诊断 key）始终统一到
    =/fs:TARGET:/path=（对外为 =fs://=），物理 =/ssh:=、=/rpc:= 和 target-native
-   path 只在 backend 或协议边界短暂存在。
+   path 只在 backend 或协议边界短暂存在。**buffer 身份**不受此约束：普通本地
+   buffer 按 AGENT.md 的规定继续用原生路径（=find-file= 打开的
+   =/Users/...= 不会被强改成 =/fs:local:...=）。两者的桥接由 Emacs 自身的
+   buffer 别名机制承担——=find-buffer-visiting= 的 =get-file-buffer= 层已经是
+   file-name-handler 派发的，=/fs:= 已注册它，所以 =/fs:local:/path= 与其原生
+   拼写互相解析，不需要改写任何 buffer 的 =buffer-file-name=。
+   lsp-mode 与 Eglot 各有一处诊断投递刻意绕开了这层别名（`lsp-diagnostics.el`
+   直接用裸 =buffer-file-name= 做 =gethash=；Eglot 的
+   =eglot--find-buffer-visiting= 为避免 bug#70036 的 =file-truename= 代价而只做
+   =equal= 比较），因此本仓库在 =lsp--fix-path-casing=
+   （=my/lsp-mode--fix-path-casing-a=）与 =eglot--find-buffer-visiting=
+   （=my/eglot--find-buffer-visiting-a=）上各加了一层收口 advice，把诊断
+   store/lookup 两侧的 key 域统一、并在原生比较 miss 时退回
+   =get-file-buffer= 兜底。`M-x remote-doctor` 会报告这两个 advice 是否仍然
+   装载着，作为这条契约的存活探针。
 2. server cwd、executable、PATH/toolchain、workspace settings、watcher、helper
    service 与 network channel 都从同一个 root 的 target context 派生。
 3. URI 回调必须查询 Eglot server 或 lsp-mode workspace 所拥有的 root；不能用回调
@@ -204,7 +223,7 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 
 * Maintenance Model
 
-现在语言服务器相关逻辑分成三层：
+现在语言服务器相关逻辑分成五层：
 
 1. =lisp/init-lsp.el=
    路由核心、统一 Remote/LSP adapter、URI/workspace identity、全局
@@ -214,6 +233,13 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
    backend-agnostic 操作命令，例如 restart / shutdown / organize imports。
 3. =lisp/init-lsp-tools.el=
    Hub、Doctor、dispatch、runtime knobs、可视化维护入口。
+4. =lisp/init-lsp-runtime.el=
+   Runtime provider 层，供“源码属于项目 A，真实解释器由另一个运行时决定”的
+   buffer 使用（目前的唯一 consumer 是 Noema Jupyter cell）。
+5. =lisp/init-lsp-toolchain.el=
+   Project 级 toolchain profile：语言中立的 discover/apply/restore 契约，
+   供 Eglot/lsp-mode 共用，避免每个语言重复实现 buffer-local
+   环境变量/PATH/workspace-configuration 的应用与复原。
 
 语言专项继续放在 =lisp/lang/= 下。
 

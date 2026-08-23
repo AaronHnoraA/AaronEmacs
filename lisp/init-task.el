@@ -12,6 +12,7 @@
 
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
 (declare-function my/project-current-root "init-project")
+(declare-function remote-executable-find "remote-process" (program &optional context))
 
 (defvar my/direnv-subprocess-sync-inhibited)
 (defvar transient--original-buffer)
@@ -69,11 +70,14 @@
   (not (string-match-p "[;&|<>`$()\n]" command)))
 
 (defun my/task--resolve-command-executable (command)
-  "Resolve COMMAND's executable to an absolute path when possible."
+  "Resolve COMMAND's executable to an absolute path when possible.
+Callers bind `default-directory' to the task's target root before calling
+this, so `remote-executable-find' resolves on that target rather than the
+client machine and returns a target-native path safe to embed in COMMAND."
   (if (not (my/task--command-simple-p command))
       command
     (pcase-let* ((`(,program . ,_) (split-string-and-unquote command))
-                 (executable (and program (executable-find program))))
+                 (executable (and program (remote-executable-find program))))
       (if executable
           (replace-regexp-in-string
            (format "\\`%s" (regexp-quote program))

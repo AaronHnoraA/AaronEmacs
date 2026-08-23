@@ -257,6 +257,38 @@
         (should (= (my/java-debug--access-port root 5005) 41000))))
     (should (= (length calls) 2))))
 
+(ert-deftest java-native-command-adds-per-root-workspace-and-config ()
+  "In native-launcher mode, `-data'/`-configuration' must be appended.
+`bin/jdtls' derives its own workspace directory from
+`sha1(basename(cwd))' when `-data' is absent, so two Java projects that
+merely share a directory basename would otherwise collide on one shared,
+possibly half-imported JDTLS workspace."
+  (require 'lsp-java)
+  (let ((lsp-java-jdt-ls-prefer-native-command t)
+        (lsp-java-workspace-dir "/fs:box:/work/.cache/jdtls-workspace/")
+        (lsp-java-server-config-dir "/fs:box:/opt/jdtls/config_linux/"))
+    (should
+     (equal
+      (my/lsp-java--target-command-a
+       (lambda ()
+         '("/fs:box:/opt/jdtls/bin/jdtls" "--jvm-arg=-Dlog.level=ALL")))
+      '("/opt/jdtls/bin/jdtls" "--jvm-arg=-Dlog.level=ALL"
+        "-data" "/work/.cache/jdtls-workspace/"
+        "-configuration" "/opt/jdtls/config_linux/")))))
+
+(ert-deftest java-non-native-command-does-not-add-data-flags ()
+  "Jar-mode commands already carry their own `-data'/`-configuration';
+this advice must not duplicate them when native mode is off."
+  (require 'lsp-java)
+  (let ((lsp-java-jdt-ls-prefer-native-command nil)
+        (lsp-java-workspace-dir "/fs:box:/work/.cache/jdtls-workspace/"))
+    (should
+     (equal
+      (my/lsp-java--target-command-a
+       (lambda ()
+         '("/fs:box:/opt/jdtls/bin/jdtls" "-data" "/fs:box:/work/.cache/")))
+      '("/opt/jdtls/bin/jdtls" "-data" "/work/.cache/")))))
+
 (ert-deftest java-buffers-select-only-one-jdtls-workspace-owner ()
   (require 'lsp-java)
   (let* ((clients (make-hash-table :test #'eq))

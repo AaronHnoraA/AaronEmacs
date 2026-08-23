@@ -15,6 +15,7 @@
 (require 'init-lsp-runtime)
 (require 'project)
 (require 'remote-channel)
+(require 'remote-doctor)
 (require 'remote-process)
 (require 'remote-environment)
 (require 'remote-workspace)
@@ -199,9 +200,20 @@ dynamic file-watch registrations."
 (defcustom my/lsp-mode-startup-timeout 60
   "Seconds an lsp-mode workspace may remain in `starting' state.
 After the deadline the workspace is stopped through the bounded shutdown
-path.  Nil or a non-positive value disables the watchdog."
+path.  Nil or a non-positive value disables the watchdog.  See
+`my/lsp-mode-startup-timeout-overrides' for slower servers."
   :type '(choice (const :tag "Disabled" nil)
                  (number :tag "Seconds"))
+  :group 'my/language-server)
+
+(defcustom my/lsp-mode-startup-timeout-overrides
+  '((jdtls . 180) (jdtls-tramp . 180))
+  "Per-server-id overrides for `my/lsp-mode-startup-timeout'.
+JDTLS routinely exceeds the shared default on a first Gradle/Maven
+import combined with target provisioning; raising the default itself
+would blunt the crash-loop watchdog for every other, normally
+fast-starting lsp-mode server."
+  :type '(alist :key-type symbol :value-type number)
   :group 'my/language-server)
 
 (defcustom my/lsp-mode-shutdown-timeout 1
@@ -212,8 +224,18 @@ depends on a responsive language server."
   :group 'my/language-server)
 
 (defcustom my/lsp-mode-restart-limit 1
-  "Maximum automatic lsp-mode restarts within the restart window."
+  "Maximum automatic lsp-mode restarts within the restart window.
+See `my/lsp-mode-restart-limit-overrides' for slower servers."
   :type 'integer
+  :group 'my/language-server)
+
+(defcustom my/lsp-mode-restart-limit-overrides
+  '((jdtls . 3) (jdtls-tramp . 3))
+  "Per-server-id overrides for `my/lsp-mode-restart-limit'.
+JDTLS's first-import failure modes (a still-provisioning target, a
+half-imported Gradle workspace) can legitimately need more than one
+automatic retry; other servers keep the shared, stricter default."
+  :type '(alist :key-type symbol :value-type integer)
   :group 'my/language-server)
 
 (defcustom my/lsp-mode-restart-window 60
@@ -898,6 +920,78 @@ target identity."
         (remote-canonicalize-file-name path)))
     path))
 
+
+(defun my/lsp-mode--fix-path-casing-a (fn path)
+  "Canonicalize PATH into the shared `/fs:' diagnostic-key namespace.
+`lsp--fix-path-casing' is the single choke point every lsp-mode
+diagnostics store and lookup passes through (`lsp-mode.el' and
+`lsp-diagnostics.el').  The stored key already carries a logical `/fs:'
+identity via the advised `lsp--uri-to-path'; the lookup side calls this
+function with the buffer's native `buffer-file-name'.  Without
+normalizing both sides here they never match, and Flymake silently
+reports zero diagnostics for locally opened buffers."
+  (let ((path (funcall fn path)))
+    (if (stringp path)
+        (or (ignore-errors (remote-canonicalize-file-name path)) path)
+      path)))
+
+(defun my/eglot--find-buffer-visiting-a (fn server abspath)
+  "Fall back across Eglot's buffer-identity spellings for ABSPATH.
+`eglot--find-buffer-visiting' deliberately performs a strict `equal'
+against `buffer-file-name' to avoid `file-truename' (bug#70036), so it
+misses whenever ABSPATH and a managed buffer's `buffer-file-name' differ
+only in `/fs:' vs. native spelling.  `get-file-buffer' is
+handler-dispatched and `/fs:' already implements it, so it resolves the
+alias without paying for `file-truename'."
+  (or (funcall fn server abspath)
+      (when-let* ((buffer (ignore-errors (get-file-buffer abspath))))
+        (and (memq buffer (eglot--managed-buffers server)) buffer))
+      (when-let* ((buffer (ignore-errors (find-buffer-visiting abspath))))
+        (and (memq buffer (eglot--managed-buffers server)) buffer))))
+
+(defun my/language-server--doctor-check (_target _probe)
+  "Return Remote Doctor diagnostics for the diagnostic-key identity fix.
+lsp-mode and Eglot diagnostics reach a buffer only if that buffer's
+`buffer-file-name' resolves to the same key the server's diagnostics
+were stored under; `my/lsp-mode--fix-path-casing-a' and
+`my/eglot--find-buffer-visiting-a' are what bridge the `/fs:' logical
+identity and the buffer's native spelling.  If either advice is not
+installed \(for example after an lsp-mode/Eglot update renames the
+function it targets\), Flymake silently stops showing diagnostics for
+normal local buffers with no other symptom, which is exactly the defect
+this pair of checks exists to catch early."
+  (list
+   (list :name 'language-server-lsp-mode-diagnostic-key-advice
+         :status
+         (cond
+          ((not (fboundp 'lsp--fix-path-casing)) 'ok)
+          ((advice-member-p #'my/lsp-mode--fix-path-casing-a
+                            'lsp--fix-path-casing)
+           'ok)
+          (t 'warning))
+         :detail
+         (if (fboundp 'lsp--fix-path-casing)
+             "lsp-mode diagnostics key normalization to /fs:"
+           "lsp-mode not loaded yet")
+         :remedy
+         "Re-check my/lsp-mode--fix-path-casing-a against lsp--fix-path-casing")
+   (list :name 'language-server-eglot-diagnostic-buffer-fallback
+         :status
+         (cond
+          ((not (fboundp 'eglot--find-buffer-visiting)) 'ok)
+          ((advice-member-p #'my/eglot--find-buffer-visiting-a
+                            'eglot--find-buffer-visiting)
+           'ok)
+          (t 'warning))
+         :detail
+         (if (fboundp 'eglot--find-buffer-visiting)
+             "eglot buffer-identity fallback across /fs: and native spellings"
+           "eglot not loaded yet")
+         :remedy
+         "Re-check my/eglot--find-buffer-visiting-a against eglot--find-buffer-visiting")))
+
+(remote-doctor-register-check #'my/language-server--doctor-check)
+
 (defun my/eglot--logical-root ()
   "Return the logical project root belonging to Eglot's active server."
   (or
@@ -1216,38 +1310,43 @@ only enforce process termination; they never send a second shutdown RPC."
                (lsp--session-workspaces (lsp-session))))))
     (my/lsp-mode-shutdown-workspace workspace 'emacs-exit)))
 
+(defun my/lsp-mode--effective-startup-timeout (workspace)
+  "Return the startup timeout to apply to WORKSPACE."
+  (or (alist-get (my/language-server--lsp-workspace-id workspace)
+                 my/lsp-mode-startup-timeout-overrides)
+      my/lsp-mode-startup-timeout))
+
 (defun my/lsp-mode--arm-startup-watchdog ()
   "Arm a bounded startup watchdog for `lsp--cur-workspace'."
-  (when (and
-         lsp--cur-workspace
-         (numberp my/lsp-mode-startup-timeout)
-         (> my/lsp-mode-startup-timeout 0))
+  (when lsp--cur-workspace
     (my/lsp-mode--cancel-startup-watchdog lsp--cur-workspace)
-    (let ((workspace lsp--cur-workspace))
-      (puthash
-       workspace
-       (run-at-time
-        my/lsp-mode-startup-timeout nil
-        (lambda (value)
-          (remhash value my/lsp-mode--startup-timers)
-          (when
-              (eq
-               (ignore-errors (lsp--workspace-status value))
-               'starting)
-            (remote-log
-             'lsp-startup-timeout
-             :backend 'lsp-mode
-             :server (my/language-server--lsp-workspace-id value)
-             :root (my/language-server--lsp-workspace-root value)
-             :timeout my/lsp-mode-startup-timeout)
-            (message
-             "LSP startup timed out after %.1fs: %s"
-             my/lsp-mode-startup-timeout
-             (or (my/language-server--lsp-workspace-root value)
-                 "unknown workspace"))
-            (my/lsp-mode-shutdown-workspace value 'startup-timeout)))
-        workspace)
-       my/lsp-mode--startup-timers))))
+    (let* ((workspace lsp--cur-workspace)
+           (timeout (my/lsp-mode--effective-startup-timeout workspace)))
+      (when (and (numberp timeout) (> timeout 0))
+        (puthash
+         workspace
+         (run-at-time
+          timeout nil
+          (lambda (value)
+            (remhash value my/lsp-mode--startup-timers)
+            (when
+                (eq
+                 (ignore-errors (lsp--workspace-status value))
+                 'starting)
+              (remote-log
+               'lsp-startup-timeout
+               :backend 'lsp-mode
+               :server (my/language-server--lsp-workspace-id value)
+               :root (my/language-server--lsp-workspace-root value)
+               :timeout timeout)
+              (message
+               "LSP startup timed out after %.1fs: %s"
+               timeout
+               (or (my/language-server--lsp-workspace-root value)
+                   "unknown workspace"))
+              (my/lsp-mode-shutdown-workspace value 'startup-timeout)))
+          workspace)
+         my/lsp-mode--startup-timers)))))
 
 (defun my/lsp-mode--workspace-initialized-h ()
   "Clear startup and crash-loop state for the initialized workspace."
@@ -1261,13 +1360,16 @@ only enforce process termination; they never send a second shutdown RPC."
 (defun my/lsp-mode--restart-with-circuit-breaker-a (fn workspace)
   "Call lsp-mode restart FN for WORKSPACE unless it is crash-looping."
   (let* ((key (my/lsp-mode--workspace-key workspace))
+         (limit
+          (or (alist-get (car key) my/lsp-mode-restart-limit-overrides)
+              my/lsp-mode-restart-limit))
          (now (float-time))
          (history
           (seq-filter
            (lambda (timestamp)
              (< (- now timestamp) my/lsp-mode-restart-window))
            (gethash key my/lsp-mode--restart-history))))
-    (if (>= (length history) (max 0 my/lsp-mode-restart-limit))
+    (if (>= (length history) (max 0 limit))
         (progn
           (ignore-errors
             (my/language-server--set-struct-slot
@@ -1707,6 +1809,12 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
      'lsp--uri-to-path
      :around #'my/lsp-mode--uri-to-logical-a))
   (unless (advice-member-p
+           #'my/lsp-mode--fix-path-casing-a
+           'lsp--fix-path-casing)
+    (advice-add
+     'lsp--fix-path-casing
+     :around #'my/lsp-mode--fix-path-casing-a))
+  (unless (advice-member-p
            #'my/lsp-mode--register-capability-via-remote-a
            'lsp--server-register-capability)
     (advice-add
@@ -1773,6 +1881,10 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
                            'eglot-uri-to-path)
     (advice-add 'eglot-uri-to-path :around
                 #'my/eglot--uri-to-logical-a))
+  (unless (advice-member-p #'my/eglot--find-buffer-visiting-a
+                           'eglot--find-buffer-visiting)
+    (advice-add 'eglot--find-buffer-visiting :around
+                #'my/eglot--find-buffer-visiting-a))
   (unless (advice-member-p
            #'my/eglot-register-capability-via-remote-a
            'eglot-register-capability)

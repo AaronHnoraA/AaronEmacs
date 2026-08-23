@@ -2418,7 +2418,8 @@ failure while it is still going."
       ("B" "build + reopen"   my/noema-build-and-reopen)
       ("Q" "close all"        my/noema-close)
       ("R" "raw edit in Emacs" my/noema-open-markdown-raw)
-      ("J" "toggle open surface" my/noema-toggle-markdown-surface)]
+      ("J" "toggle open surface" my/noema-toggle-markdown-surface)
+      ("?" "roam key reference" my/noema-roam-help)]
      ["Find / Browse"
       ("j" "find note"        my/noema-roam-find-note)
       ("/" "knowledge search" my/noema-knowledge-search)

@@ -29,7 +29,7 @@
    (eglot-autoreconnect . 3)
    (lsp-restart . auto-restart)
    (my/noema-close-emacs-markdown-buffer . t)
-   (my/noema-markdown-default-surface . emacs)
+   (my/noema-markdown-default-surface . app)
    (my/noema-roam-help-key . "?")
    (my/noema-icon-file
     . "/Users/hc/.emacs.d/assets/icons/Noema.svg")

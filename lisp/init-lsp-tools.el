@@ -63,6 +63,7 @@
 (declare-function my/language-server-code-actions "init-lsp")
 (declare-function my/language-server-eglot-program-entries "init-lsp")
 (declare-function my/language-server-ensure "init-lsp")
+(declare-function my/language-server-executable-find "init-lsp" (program))
 (declare-function my/language-server-format-buffer "init-lsp")
 (declare-function my/language-server-lsp-mode-preference-entries "init-lsp")
 (declare-function my/language-server-project-backend-override "init-lsp")
@@ -502,9 +503,17 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   (interactive)
   (find-file my/language-server-doc-file))
 
+(defun my/language-server--executable-lookup (name)
+  "Resolve NAME in the associated source buffer's tooling environment.
+Doctor and Hub views run in a dedicated buffer, so this must switch to
+`my/language-server--source-buffer' before resolving: the server it is
+reporting on runs on that buffer's target, not on the client machine."
+  (with-current-buffer (my/language-server--source-buffer)
+    (my/language-server-executable-find name)))
+
 (defun my/language-server--executable-report (name)
-  "Return a plist describing executable NAME."
-  (let ((path (executable-find name)))
+  "Return a plist describing executable NAME on the source buffer's target."
+  (let ((path (my/language-server--executable-lookup name)))
     (list :name name
           :path path
           :ok (and path t))))
@@ -517,7 +526,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
         (lambda (name)
           (format "%s=%s"
                   name
-                  (if (executable-find name) "ok" "missing")))
+                  (if (my/language-server--executable-lookup name) "ok" "missing")))
         names)
        ", ")
     "-"))

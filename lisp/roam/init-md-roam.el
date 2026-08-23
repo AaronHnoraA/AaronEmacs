@@ -4308,10 +4308,11 @@ are collected under \"Other\" so nothing is silently undocumented."
      (aaron-ui-board-insert-page-header
       "Roam keys"
       :icon 'note
-      :subtitle (format "%s in a note buffer, or C-c r <key>"
-                        (if my/noema-roam-help-key
-                            (format "%s / C-c r ?" my/noema-roam-help-key)
-                          "C-c r ?")))
+      :subtitle (concat "These apply in an Emacs note buffer"
+                        (if (eq (bound-and-true-p my/noema-markdown-default-surface) 'app)
+                            " — reach one with SPC r e"
+                          "")
+                        ".  In Noema, use H-o."))
      (insert "\n")
      (dolist (group (my/noema-roam--help-rows))
        (aaron-ui-board-insert-section (car group) (length (cdr group)))
