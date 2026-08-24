@@ -40,7 +40,6 @@
 (defvar TeX-engine)
 (defvar TeX-style-path)
 (defvar completion-preview-mode)
-(defvar eglot-mode-map)
 (defvar lsp-mode-map)
 (defvar texpresso--process)
 (defvar texpresso--state)
@@ -649,12 +648,6 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
               #'my/latex-sync-forward-mouse)
   (define-key TeX-source-correlate-map [M-mouse-1]
               #'my/latex-sync-forward-mouse)
-
-  (with-eval-after-load 'eglot
-    (define-key eglot-mode-map [M-down-mouse-1]
-                #'my/latex-sync-forward-mouse-or-code-actions)
-    (define-key eglot-mode-map [M-mouse-1]
-                #'my/latex-sync-forward-mouse-or-code-actions))
 
   (with-eval-after-load 'lsp-mode
     (define-key lsp-mode-map [M-down-mouse-1]

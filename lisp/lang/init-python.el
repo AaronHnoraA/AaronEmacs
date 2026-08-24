@@ -9,18 +9,18 @@
 (require 'seq)
 (require 'subr-x)
 
-(declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
 (declare-function my/language-server-executable-find "init-lsp" (program))
-(declare-function my/eglot-set-workspace-configuration "init-lsp" (configuration))
-(declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
+(declare-function my/language-server-set-workspace-configuration
+                  "init-lsp" (configuration))
+(declare-function my/register-language-server "init-lsp")
 (declare-function my/register-language-server-toolchain-provider "init-lsp-toolchain"
                   (family modes discover &rest properties))
 (declare-function remote-context "remote-fs" (&optional path))
 (declare-function remote-expand-file-name "remote-fs"
                   (file-name &optional directory target))
 (declare-function remote-file-local-name "remote-fs" (file-name))
-(declare-function eglot-alternatives "eglot" (alternatives))
 (defvar imenu-create-index-function)
+(defvar lsp-enabled-clients)
 (defvar-local my/python-imenu-backend nil
   "Original Python imenu backend for the current buffer.")
 
@@ -56,7 +56,7 @@
     (remote-file-local-name canonical)))
 
 (defun my/python-toolchain--workspace (executable &optional extra-paths)
-  "Build Eglot workspace settings for EXECUTABLE and EXTRA-PATHS."
+  "Build workspace settings for EXECUTABLE and EXTRA-PATHS."
   (let ((paths (vconcat (delq nil extra-paths))))
     `(:python (:pythonPath ,executable
                :analysis (:autoSearchPaths t
@@ -208,30 +208,33 @@
       (when-let* ((process (python-shell-get-process)))
         (delete-process process)))))
 
-(defun my/python-eglot-contact (&optional interactive project)
-  "Return the first available Python Eglot contact on the active target."
-  (let ((contacts
-         '(("pyright-langserver" "--stdio")
-           ("basedpyright-langserver" "--stdio")
-           ("pylsp")
-           ("jedi-language-server"))))
-    (or
-     (seq-some
-      (lambda (contact)
-        (when-let* ((executable
-                     (ignore-errors
-                       (my/language-server-executable-find
-                        (car contact)))))
-          (cons executable (cdr contact))))
-      contacts)
-     (progn
-       (require 'eglot)
-       (funcall
-        (eglot-alternatives contacts)
-        interactive
-        project)))))
+(defconst my/python-language-server-contacts
+  '(("pyright-langserver" "--stdio")
+    ("basedpyright-langserver" "--stdio")
+    ("pylsp")
+    ("jedi-language-server"))
+  "Python language servers in preference order.
+Each entry is the executable name followed by its arguments.")
 
-(defun my/python-eglot-workspace-configuration ()
+(defun my/python-language-server-command ()
+  "Return the first available Python language-server command on the target.
+
+Every candidate is probed with `my/language-server-executable-find', so the
+choice reflects the workspace target's environment (venv, conda, Sage, or
+target PATH) rather than whatever happens to be installed on the client."
+  (or
+   (seq-some
+    (lambda (contact)
+      (when-let* ((executable
+                   (ignore-errors
+                     (my/language-server-executable-find (car contact)))))
+        (cons executable (cdr contact))))
+    my/python-language-server-contacts)
+   ;; Nothing found: hand back the highest-preference name so lsp-mode
+   ;; reports a missing binary against the server we actually want.
+   (car my/python-language-server-contacts)))
+
+(defun my/python-language-server-workspace-configuration ()
   "Return Python workspace configuration for the active server."
   '(:python (:analysis (:autoSearchPaths t
                         :useLibraryCodeForTypes t))
@@ -244,21 +247,27 @@
                        :jedi_hover (:enabled t)
                        :rope_autoimport (:enabled t)))))
 
-(defun my/python-eglot-ensure ()
-  "Install base Python workspace settings before generic Eglot startup."
-  (my/eglot-set-workspace-configuration
-   (my/python-eglot-workspace-configuration)))
+(defun my/python-language-server-setup-h ()
+  "Install base Python workspace settings before the server starts."
+  ;; Keep one target-aware Python route authoritative.  lsp-mode eagerly
+  ;; requires every installed client package at first startup, so an installed
+  ;; lsp-pyright would otherwise outrank `my-python' and bypass the shared
+  ;; Remote command, environment and workspace-configuration contracts.
+  (setq-local lsp-enabled-clients '(my-python))
+  (when (fboundp 'my/language-server-set-workspace-configuration)
+    (my/language-server-set-workspace-configuration
+     (my/python-language-server-workspace-configuration))))
 
-(use-package eglot
-  :ensure nil
-  :hook ((python-mode . my/python-eglot-ensure)
-         (python-ts-mode . my/python-eglot-ensure)))
+(add-hook 'python-mode-hook #'my/python-language-server-setup-h)
+(add-hook 'python-ts-mode-hook #'my/python-language-server-setup-h)
 
-(with-eval-after-load 'eglot
-  (when (fboundp 'my/register-eglot-server-program)
-    (my/register-eglot-server-program
+(with-eval-after-load 'lsp-mode
+  (when (fboundp 'my/register-language-server)
+    (my/register-language-server
      '(python-mode python-ts-mode)
-     #'my/python-eglot-contact
+     #'my/python-language-server-command
+     :server-id 'my-python
+     :priority 1
      :label "Target Python language server"
      :executables '("pyright-langserver"
                     "basedpyright-langserver"

@@ -307,7 +307,7 @@ from resuming."
   "Apply ROOT's export waiters later, outside the backend receive loop.
 This is a process-boundary promise, so it uses a wall-clock timer.  An idle
 timer can starve indefinitely while TRAMP or another process keeps Emacs busy,
-leaving Eglot and other subprocess consumers permanently latched in a
+leaving the language server and other subprocess consumers permanently latched in a
 \"waiting for direnv\" state even though the export already completed."
   (run-at-time
    0.01 nil #'direnv--apply-export-waiters root context error))

@@ -34,11 +34,9 @@
 
 (require 'cl-lib)
 
-(declare-function eglot-current-server "eglot" ())
-(declare-function eglot-managed-p "eglot" ())
-(declare-function eglot--TextDocumentPositionParams "eglot" ())
-(declare-function eglot--pos-to-lsp-position "eglot" (&optional pos))
-(declare-function jsonrpc-request "jsonrpc" (connection method params &rest args))
+(declare-function lsp-workspaces "lsp-mode" ())
+(declare-function lsp-request "lsp-mode" (method params &rest args))
+(declare-function lsp--text-document-position-params "lsp-mode" (&optional identifier position))
 (declare-function my/register-jump-handler "init-funcs")
 
 ;;; ── Customization ────────────────────────────────────────────────────────────
@@ -116,24 +114,22 @@ Both valid and nil results are cached for the current modification tick."
     (if (not (eq cached lean-jump--uncached))
         cached  ; already computed (may be nil)
       (let ((result
-             (when-let* ((server (ignore-errors (eglot-current-server))))
+             (when (ignore-errors (lsp-workspaces))
                (save-excursion
                  (goto-char pos)
                  (condition-case nil
-                     (let* ((params (eglot--TextDocumentPositionParams))
+                     (let* ((params (lsp--text-document-position-params))
                             (goal
                              (ignore-errors
-                               (jsonrpc-request server
-                                                :$/lean/plainGoal
-                                                params
-                                                :timeout lean-jump-request-timeout)))
+                               (lsp-request "$/lean/plainGoal"
+                                            params
+                                            :timeout lean-jump-request-timeout)))
                             (rendered (plist-get goal :rendered)))
                        (if lean-jump-include-term-goal
                            (let* ((tg (ignore-errors
-                                        (jsonrpc-request server
-                                                         :$/lean/plainTermGoal
-                                                         params
-                                                         :timeout lean-jump-request-timeout)))
+                                        (lsp-request "$/lean/plainTermGoal"
+                                                     params
+                                                     :timeout lean-jump-request-timeout)))
                                   (tgtext (plist-get tg :goal)))
                              (when (or rendered tgtext)
                                (concat (or rendered "") "\0" (or tgtext ""))))
@@ -321,7 +317,7 @@ If already at a token start, returns the previous token's start."
   "Jump to the next position where the Lean goal changes.
 Falls back to syntactic argument stepping when goal info is unavailable."
   (interactive)
-  (unless (eglot-managed-p)
+  (unless (bound-and-true-p lsp-managed-mode)
     (user-error "No Lean LSP server connected"))
   (let* ((pos    (point))
          (end    (point-max))
@@ -342,7 +338,7 @@ Falls back to syntactic argument stepping when goal info is unavailable."
   "Jump to the start of the previous Lean goal region.
 Falls back to syntactic argument stepping when goal info is unavailable."
   (interactive)
-  (unless (eglot-managed-p)
+  (unless (bound-and-true-p lsp-managed-mode)
     (user-error "No Lean LSP server connected"))
   (let* ((pos  (point))
          (beg  (point-min))

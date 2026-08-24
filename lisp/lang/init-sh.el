@@ -5,14 +5,9 @@
 
 ;;; Code:
 
-(declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
 (declare-function my/language-server-executable-available-p "init-lsp" (program))
-(declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
-
-(defun my/sh-eglot-ensure ()
-  "Start Eglot for shell buffers when bash-language-server is available."
-  (when (my/language-server-executable-available-p "bash-language-server")
-    (my/eglot-ensure-unless-lsp-mode)))
+(declare-function my/language-server-executable-find "init-lsp" (program))
+(declare-function my/register-language-server "init-lsp")
 
 ;; Edit shell scripts
 ;;
@@ -22,9 +17,7 @@
   :mode (("\\.sh\\'"     . sh-mode)
          ("/PKGBUILD\\'" . sh-mode))
   :hook ((sh-mode . sh-mode-setup)
-         (sh-mode . my/sh-eglot-ensure)
-         (bash-ts-mode . sh-mode-setup)
-         (bash-ts-mode . my/sh-eglot-ensure))
+         (bash-ts-mode . sh-mode-setup))
   :config
   (defun sh-mode-setup ()
     (add-hook 'after-save-hook #'executable-make-buffer-file-executable-if-script-p nil t)
@@ -52,18 +45,25 @@
                          "Insert shebang"
                          'sh-tempo-tags))
 
-(use-package eglot
-  :ensure nil
-  :defer t)
-
-(with-eval-after-load 'eglot
-  (when (fboundp 'my/register-eglot-server-program)
-    (my/register-eglot-server-program
+(with-eval-after-load 'lsp-mode
+  (when (fboundp 'my/register-language-server)
+    (my/register-language-server
      '(sh-mode bash-ts-mode)
-     '("bash-language-server" "start")
+     (lambda ()
+       (list (or (my/language-server-executable-find "bash-language-server")
+                 "bash-language-server")
+             "start"))
+     :server-id 'my-bash
+     :priority 1
      :label "bash-language-server"
+     ;; Shell buffers are everywhere; only claim one when the server is
+     ;; actually installed on the workspace target.
+     :activation-fn
+     (lambda (&rest _)
+       (and (derived-mode-p 'sh-mode 'bash-ts-mode)
+            (my/language-server-executable-available-p "bash-language-server")))
      :executables '("bash-language-server")
-     :note "Shell buffers use bash-language-server through Eglot.")))
+     :note "Shell buffers use bash-language-server through lsp-mode.")))
 
 (provide 'init-sh)
 ;;; init-sh.el ends here

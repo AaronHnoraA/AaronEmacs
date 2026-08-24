@@ -1,7 +1,7 @@
-;;; init-lsp-toolchain.el --- Project toolchains for Eglot -*- lexical-binding: t; -*-
+;;; init-lsp-toolchain.el --- Project toolchains for language servers -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; A language-neutral toolchain selector for Eglot.  Providers discover
+;; A language-neutral toolchain selector.  Providers discover
 ;; language-specific runtimes, while project-local profiles can describe any
 ;; server/runtime without adding language-specific code to this module.
 
@@ -29,8 +29,7 @@ optional `:apply' and `:after-select' callbacks.")
 (defvar my/language-server-toolchain--candidate-cache (make-hash-table :test #'equal)
   "Provider candidate cache keyed by project root and language family.")
 
-(defvar eglot-server-programs)
-(defvar eglot-workspace-configuration)
+(defvar my/language-server--workspace-configuration)
 
 (defvar-local my/language-server-toolchain--applied-profile nil
   "Toolchain profile currently applied to this buffer.")
@@ -39,22 +38,23 @@ optional `:apply' and `:after-select' callbacks.")
 (defvar-local my/language-server-toolchain--saved-exec-path nil)
 (defvar-local my/language-server-toolchain--saved-workspace nil)
 (defvar-local my/language-server-toolchain--saved-workspace-local-p nil)
-(defvar-local my/language-server-toolchain--saved-server-programs nil)
-(defvar-local my/language-server-toolchain--saved-server-programs-local-p nil)
+(defvar-local my/language-server-toolchain-server-program nil
+  "Server command selected by the active toolchain profile, if any.
+A registered client resolves its command through `lsp-resolve-value', so a
+profile overrides the binary by setting this restorable buffer-local
+variable rather than by rewriting a global client list.")
 (defvar-local my/language-server-toolchain--saved-remote-environment nil)
 (defvar-local my/language-server-toolchain--saved-lsp-variables nil
   "Variables made buffer-local by the active toolchain.
 Each entry is `(SYMBOL LOCAL-P VALUE)'.")
 
-(declare-function eglot-current-server "eglot")
-(declare-function eglot-managed-p "eglot")
-(declare-function eglot-shutdown "eglot" (server))
 (declare-function lsp-disconnect "lsp-mode" ())
 (declare-function my/direnv-update-environment-maybe
                   "init-direnv" (&optional path callback))
 (declare-function my/language-server--canonical-root "init-lsp" (root))
 (declare-function my/language-server--merge-values "init-lsp" (base override))
-(declare-function my/language-server-apply-eglot-local-settings "init-lsp")
+(declare-function my/language-server-set-workspace-configuration
+                  "init-lsp" (configuration))
 (declare-function my/language-server-apply-lsp-local-settings "init-lsp")
 (declare-function my/language-server-apply-process-environment "init-lsp")
 (declare-function my/language-server-ensure "init-lsp")
@@ -274,13 +274,9 @@ DISCOVER returns profile plists for a project root.  PROPERTIES accepts
       (setq-local remote-buffer-environment
                   my/language-server-toolchain--saved-remote-environment))
     (if my/language-server-toolchain--saved-workspace-local-p
-        (setq-local eglot-workspace-configuration
+        (setq-local my/language-server--workspace-configuration
                     (copy-tree my/language-server-toolchain--saved-workspace))
-      (kill-local-variable 'eglot-workspace-configuration))
-    (if my/language-server-toolchain--saved-server-programs-local-p
-        (setq-local eglot-server-programs
-                    (copy-tree my/language-server-toolchain--saved-server-programs))
-      (kill-local-variable 'eglot-server-programs))
+      (kill-local-variable 'my/language-server--workspace-configuration))
     (dolist (entry my/language-server-toolchain--saved-lsp-variables)
       (pcase-let ((`(,variable ,local-p ,value) entry))
         (if local-p
@@ -291,8 +287,6 @@ DISCOVER returns profile plists for a project root.  PROPERTIES accepts
           my/language-server-toolchain--saved-exec-path nil
           my/language-server-toolchain--saved-workspace nil
           my/language-server-toolchain--saved-workspace-local-p nil
-          my/language-server-toolchain--saved-server-programs nil
-          my/language-server-toolchain--saved-server-programs-local-p nil
           my/language-server-toolchain--saved-remote-environment nil
           my/language-server-toolchain--saved-lsp-variables nil)))
 
@@ -349,14 +343,10 @@ project's SDK, server cache, or workspace directory into another buffer."
           (copy-sequence process-environment)
           my/language-server-toolchain--saved-exec-path (copy-sequence exec-path)
           my/language-server-toolchain--saved-workspace-local-p
-          (local-variable-p 'eglot-workspace-configuration)
+          (local-variable-p 'my/language-server--workspace-configuration)
           my/language-server-toolchain--saved-workspace
-          (and (boundp 'eglot-workspace-configuration)
-               (copy-tree eglot-workspace-configuration))
-          my/language-server-toolchain--saved-server-programs-local-p
-          (local-variable-p 'eglot-server-programs)
-          my/language-server-toolchain--saved-server-programs
-          (and (boundp 'eglot-server-programs) (copy-tree eglot-server-programs))
+          (and (boundp 'my/language-server--workspace-configuration)
+               (copy-tree my/language-server--workspace-configuration))
           my/language-server-toolchain--saved-remote-environment
           (and (boundp 'remote-buffer-environment)
                remote-buffer-environment))
@@ -397,25 +387,27 @@ project's SDK, server cache, or workspace directory into another buffer."
     (when-let* ((program
                  (my/language-server-toolchain--resolve-value
                   (plist-get profile :server-program) root)))
-      (setq-local eglot-server-programs
-                  (cons (cons (or (plist-get profile :modes) major-mode) program)
-                        (copy-tree eglot-server-programs))))
+      ;; lsp-mode resolves a client's command through `lsp-resolve-value', so a
+      ;; profile-selected binary is expressed as a restorable buffer-local
+      ;; variable rather than by rewriting a global client list.
+      (my/language-server-toolchain-set-local-variable
+       'my/language-server-toolchain-server-program program))
     (when-let* ((provider (my/language-server-toolchain-provider))
                 (apply-function (plist-get provider :apply)))
       (funcall apply-function profile root))
     (setq my/language-server-toolchain--applied-profile profile)))
 
-(defun my/language-server-toolchain-apply-eglot-settings ()
+(defun my/language-server-toolchain-apply-lsp-settings ()
   "Merge the effective toolchain workspace settings into this buffer."
   (when-let* ((profile my/language-server-toolchain--applied-profile)
               (root (my/language-server-toolchain--canonical-root))
               (workspace
                (my/language-server-toolchain--resolve-value
                 (plist-get profile :workspace) root)))
-    (setq-local eglot-workspace-configuration
+    (setq-local my/language-server--workspace-configuration
                 (my/language-server-toolchain--merge-workspace
-                 (and (boundp 'eglot-workspace-configuration)
-                      eglot-workspace-configuration)
+                 (and (boundp 'my/language-server--workspace-configuration)
+                      my/language-server--workspace-configuration)
                  workspace))))
 
 (defun my/language-server-toolchain--affected-buffers (root family)
@@ -429,29 +421,15 @@ project's SDK, server cache, or workspace directory into another buffer."
    (buffer-list)))
 
 (defun my/language-server-toolchain--reapply (root family)
-  "Reapply ROOT/FAMILY and restart active Eglot or lsp-mode clients."
+  "Reapply ROOT/FAMILY and restart the active language servers."
   (let* ((buffers (my/language-server-toolchain--affected-buffers root family))
-         (eglot-managed
-          (seq-filter
-           (lambda (buffer)
-             (with-current-buffer buffer
-               (and (fboundp 'eglot-managed-p) (eglot-managed-p))))
-           buffers))
-         (lsp-managed
+         (managed
           (seq-filter
            (lambda (buffer)
              (with-current-buffer buffer
                (bound-and-true-p lsp-managed-mode)))
-           buffers))
-         (managed (delete-dups (append eglot-managed lsp-managed)))
-         servers)
-    (dolist (buffer eglot-managed)
-      (with-current-buffer buffer
-        (when-let* ((server (ignore-errors (eglot-current-server))))
-          (cl-pushnew server servers))))
-    (dolist (server servers)
-      (ignore-errors (eglot-shutdown server)))
-    (dolist (buffer lsp-managed)
+           buffers)))
+    (dolist (buffer managed)
       (with-current-buffer buffer
         (when (fboundp 'lsp-disconnect)
           (ignore-errors (lsp-disconnect)))))
@@ -462,15 +440,10 @@ project's SDK, server cache, or workspace directory into another buffer."
           (my/direnv-update-environment-maybe root))
         (when (fboundp 'my/language-server-apply-process-environment)
           (my/language-server-apply-process-environment))
-        (pcase
-            (and (fboundp 'my/language-server-preferred-backend)
-                 (my/language-server-preferred-backend))
-          ('lsp-mode
-           (when (fboundp 'my/language-server-apply-lsp-local-settings)
-             (my/language-server-apply-lsp-local-settings)))
-          (_
-           (when (fboundp 'my/language-server-apply-eglot-local-settings)
-             (my/language-server-apply-eglot-local-settings))))))
+        (when (and (fboundp 'my/language-server-preferred-backend)
+                   (eq (my/language-server-preferred-backend) 'lsp-mode)
+                   (fboundp 'my/language-server-apply-lsp-local-settings))
+          (my/language-server-apply-lsp-local-settings))))
     (dolist (buffer managed)
       (when (buffer-live-p buffer)
         (with-current-buffer buffer

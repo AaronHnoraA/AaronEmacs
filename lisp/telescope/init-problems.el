@@ -22,7 +22,6 @@
 (declare-function flymake-make-diagnostic "flymake" (locus beg end type info &optional data overlay-properties))
 (declare-function flymake-show-project-diagnostics "flymake" ())
 (declare-function lsp-diagnostics "lsp-mode" (&optional current-workspace?))
-(declare-function eglot--flymake-diag-type "eglot" (severity))
 (declare-function remote-canonicalize-file-name "remote-fs" (file-name &optional directory))
 (declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
 
@@ -83,19 +82,28 @@ function itself wrote lets it retract entries whose lsp-mode
 diagnostics have since cleared, instead of leaking them forever in a
 global variable.")
 
+(defun my/problems--lsp-severity-to-flymake (severity)
+  "Return the Flymake diagnostic type for LSP protocol SEVERITY.
+An absent severity means `Error\=' per the LSP specification."
+  (pcase severity
+    (1 :error)
+    (2 :warning)
+    ((or 3 4) :note)
+    (_ :error)))
+
 (defun my/problems--lsp-diagnostic-to-flymake (locus diag)
   "Convert raw LSP protocol DIAG into a file-locus Flymake diagnostic.
-LOCUS is the file name the diagnostic is attached to.  Mirrors the
-`(LINE . COL)' file-locus convention `eglot--flymake-handle-push' uses
-for diagnostics on files with no live buffer, so lsp-mode's entries
-render the same way as Eglot's in `flymake-show-project-diagnostics'."
+LOCUS is the file name the diagnostic is attached to.  Uses the
+`(LINE . COL)\=' file-locus convention Flymake expects for diagnostics on
+files with no live buffer, so lsp-mode's entries render correctly in
+`flymake-show-project-diagnostics\='."
   (let* ((range (plist-get diag :range))
          (start (plist-get range :start))
          (line (1+ (or (plist-get start :line) 0)))
          (char (1+ (or (plist-get start :character) 0))))
     (flymake-make-diagnostic
      locus (cons line char) nil
-     (eglot--flymake-diag-type (plist-get diag :severity))
+     (my/problems--lsp-severity-to-flymake (plist-get diag :severity))
      (list (plist-get diag :source) (plist-get diag :code)
            (plist-get diag :message)))))
 
@@ -106,7 +114,7 @@ current buffer (`lsp-diagnostics--flymake-update-diagnostics' keys off
 `buffer-file-name'), so `flymake--project-diagnostics' never learns
 about JDTLS/lsp-mode errors in files that are not visited.  This
 populates the same public `flymake-list-only-diagnostics' extension
-point Eglot already uses for its own diagnostics on unopened files, for
+point Flymake itself uses for diagnostics on unopened files, for
 whichever files have no live buffer."
   (when (fboundp 'lsp-diagnostics)
     (let* ((canonical-root (ignore-errors (remote-canonicalize-file-name root)))

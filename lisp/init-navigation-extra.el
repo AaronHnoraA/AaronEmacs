@@ -12,7 +12,6 @@
 
 (autoload 'citre-peek-restore "citre-ui-peek" nil t)
 
-(declare-function eglot-find-declaration "eglot")
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
 (declare-function lsp-find-declaration "lsp-mode" (&key display-action))
 (declare-function lsp-treemacs-call-hierarchy "lsp-treemacs")
@@ -123,18 +122,11 @@ use the active region or filename at point, prompting only when neither exists."
   (interactive)
   (my/navigation--push-jump)
   (condition-case nil
-      (pcase (and (fboundp 'my/current-language-server-backend)
-                  (my/current-language-server-backend))
-        ('eglot
-         (if (fboundp 'eglot-find-declaration)
-             (call-interactively #'eglot-find-declaration)
-           (call-interactively #'my/navigation-find-definition)))
-        ('lsp-mode
-         (if (fboundp 'lsp-find-declaration)
-             (call-interactively #'lsp-find-declaration)
-           (call-interactively #'my/navigation-find-definition)))
-        (_
-         (call-interactively #'my/navigation-find-definition)))
+      (if (and (fboundp 'my/current-language-server-backend)
+               (my/current-language-server-backend)
+               (fboundp 'lsp-find-declaration))
+          (call-interactively #'lsp-find-declaration)
+        (call-interactively #'my/navigation-find-definition))
     ((user-error error)
      (call-interactively #'my/navigation-find-definition))))
 

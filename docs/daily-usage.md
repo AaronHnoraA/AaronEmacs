@@ -464,13 +464,17 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC c R`
   restart language server
 - `SPC c L`
-  语言服务器菜单
-  可以进 Hub / Doctor / 调参 / log / session / config
+  切换当前 buffer 的 CodeLens；默认开启。CodeLens、inlay hint、文档颜色/链接和
+  semantic-token 预取只覆盖可见区上下的小段缓冲，服务器缓存仍保留完整状态
+- `SPC c s`
+  语言服务器菜单，可以进 Hub / Doctor / 调参 / log / session / config
 - `SPC c i`
   `show-imenu`
-  左侧 smart-toggle `treemacs`，并跟随当前文件和光标所在 symbol
+  左侧 smart-toggle `treemacs`，并跟随当前文件和光标所在 symbol。展开文件后
+  Outline 从固定浅层开始，以 `OUTLINE · 文件名` 标明归属，并按类、结构体、接口、
+  方法、字段、变量等显示不同 VS Code 风格图标。
 - `SPC c I`
-  `eldoc-box-help-at-point`
+  `lsp-ui-doc-glance`
 - `SPC c j`
   调试菜单：启动 Dape、profile、步进、断点、REPL、locals/watch、adapter doctor
 - `SPC c t`
@@ -945,7 +949,7 @@ Yasnippet。`jcode` / `jmd` 在下方新建 code / Markdown cell，ID 由 Noema 
 
 **补全**：`completion-at-point` 会先问 kernel（`complete_request`），
 所以前面 cell 定义的变量、DataFrame 列名、IPython magic、Sage 的 builtin 都能补出来 ——
-这些是 Pyright 结构上看不见的。kernel 没在跑或没有结果时自动透传给 Eglot，
+这些是 Pyright 结构上看不见的。kernel 没在跑或没有结果时自动透传给 lsp-mode，
 不会因为打字就顺带启动一个 kernel。
 
 **`input()` 可用**：cell 里调用 `input()` / `getpass()` 时，Noema 会在 cell 下方

@@ -68,21 +68,20 @@
       (my/toolchain-test-mode)
       (setq-local process-environment (copy-sequence process-environment))
       (setenv "TOOLCHAIN_TEST" "original")
-      (setq-local eglot-server-programs '((my/toolchain-test-mode . ("old-server"))))
-      (setq-local eglot-workspace-configuration '(:base (:enabled t)))
+      (setq-local my/language-server-toolchain-server-program '("old-server"))
+      (setq-local my/language-server--workspace-configuration '(:base (:enabled t)))
       (my/language-server-toolchain-apply-environment)
-      (my/language-server-toolchain-apply-eglot-settings)
+      (my/language-server-toolchain-apply-lsp-settings)
       (should (equal (getenv "TOOLCHAIN_TEST") "active"))
-      (should (equal (cdr (car eglot-server-programs))
+      (should (equal my/language-server-toolchain-server-program
                      '("test-language-server" "--stdio")))
-      (should (equal (plist-get (plist-get eglot-workspace-configuration :test)
+      (should (equal (plist-get (plist-get my/language-server--workspace-configuration :test)
                                 :enabled)
                      t))
       (my/language-server-toolchain-restore-buffer)
       (should (equal (getenv "TOOLCHAIN_TEST") "original"))
-      (should (equal eglot-server-programs
-                     '((my/toolchain-test-mode . ("old-server")))))
-      (should (equal eglot-workspace-configuration '(:base (:enabled t)))))))
+      (should (equal my/language-server-toolchain-server-program '("old-server")))
+      (should (equal my/language-server--workspace-configuration '(:base (:enabled t)))))))
 
 (ert-deftest my/toolchain-custom-profile-supplies-family-without-provider ()
   (my/toolchain-test-with-project

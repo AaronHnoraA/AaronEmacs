@@ -46,10 +46,10 @@
 
 (defvar company-mode)
 (defvar breadcrumb-local-mode)
-(defvar eglot-autoreconnect)
-(defvar eglot-autoshutdown)
-(defvar eglot-events-buffer-size)
-(defvar eglot-workspace-configuration)
+(defvar lsp-keep-workspace-alive)
+(defvar lsp-log-max)
+(defvar lsp-restart)
+(defvar my/language-server--workspace-configuration)
 (defvar flymake-mode)
 (defvar flymake-no-changes-timeout)
 (defvar lsp-inlay-hint-enable)
@@ -61,11 +61,10 @@
 (declare-function project-root "project" (project))
 (declare-function my/current-language-server-backend "init-lsp")
 (declare-function my/language-server-code-actions "init-lsp")
-(declare-function my/language-server-eglot-program-entries "init-lsp")
+(declare-function my/language-server-program-entries "init-lsp")
 (declare-function my/language-server-ensure "init-lsp")
 (declare-function my/language-server-executable-find "init-lsp" (program))
 (declare-function my/language-server-format-buffer "init-lsp")
-(declare-function my/language-server-lsp-mode-preference-entries "init-lsp")
 (declare-function my/language-server-project-backend-override "init-lsp")
 (declare-function my/language-server-rename "init-lsp")
 (declare-function my/language-server-organize-imports "init-lsp-ops")
@@ -84,7 +83,6 @@
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui")
 (declare-function my/diagnostics-project-ui "init-diagnostics-ui")
 (declare-function my/diagnostics-dispatch "init-diagnostics-extra")
-(declare-function eglot-inlay-hints-mode "eglot" (&optional arg))
 (declare-function lsp-inlay-hints-mode "lsp-mode" (&optional arg))
 
 (define-derived-mode my/language-server-manager-mode aaron-ui-board-mode "Lang-Server-Hub"
@@ -191,26 +189,18 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
     (when-let* ((project (project-current nil default-directory)))
       (expand-file-name (project-root project)))))
 
-(defun my/language-server--current-lsp-preference-entry (&optional buffer)
-  "Return the explicit `lsp-mode' route matching BUFFER, if any."
-  (with-current-buffer (or buffer (current-buffer))
-    (cl-find-if
-     (lambda (entry)
-       (derived-mode-p (plist-get entry :mode)))
-     (my/language-server-lsp-mode-preference-entries))))
-
-(defun my/language-server--eglot-entry-matches-buffer-p (entry &optional buffer)
+(defun my/language-server--entry-matches-buffer-p (entry &optional buffer)
   "Return non-nil when ENTRY matches BUFFER."
   (with-current-buffer (or buffer (current-buffer))
     (let ((modes (my/language-server--mode-list (plist-get entry :modes))))
       (and modes
            (apply #'derived-mode-p modes)))))
 
-(defun my/language-server--current-eglot-entry (&optional buffer)
-  "Return the custom Eglot mapping matching BUFFER, if any."
+(defun my/language-server--current-entry (&optional buffer)
+  "Return the registered language server matching BUFFER, if any."
   (with-current-buffer (or buffer (current-buffer))
-    (cl-find-if #'my/language-server--eglot-entry-matches-buffer-p
-                (my/language-server-eglot-program-entries))))
+    (cl-find-if #'my/language-server--entry-matches-buffer-p
+                (my/language-server-program-entries))))
 
 (defun my/language-server--current-policy (&optional buffer)
   "Return a short description of the expected backend policy for BUFFER."
@@ -226,20 +216,12 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
         (if (eq active 'lsp-mode)
             "lsp-mode (active project-local override)"
           "lsp-mode (project-local override)"))
-       ((eq override 'eglot)
-        (if (eq active 'eglot)
-            "eglot (active project-local override)"
-          "eglot (project-local override)"))
-       ((my/language-server--current-lsp-preference-entry)
+       ((my/language-server--current-entry)
         (if (eq active 'lsp-mode)
-            "lsp-mode (active explicit route)"
-          "lsp-mode (explicit route)"))
-       ((my/language-server--current-eglot-entry)
-        (if (eq active 'eglot)
-            "eglot (active custom route)"
-          "eglot (custom route)"))
-       ((eq active 'eglot) "eglot (active)")
-       ((derived-mode-p 'prog-mode) "eglot (prog-mode default)")
+            "lsp-mode (active registered route)"
+          "lsp-mode (registered route)"))
+       ((eq active 'lsp-mode) "lsp-mode (active)")
+       ((derived-mode-p 'prog-mode) "lsp-mode (prog-mode default)")
        (t "manual / unknown")))))
 
 (defun my/language-server--source-status (&optional source)
@@ -247,16 +229,17 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
   (let ((source (or source (my/language-server--source-buffer))))
     (when (buffer-live-p source)
       (with-current-buffer source
-        (let* ((lsp-entry (my/language-server--current-lsp-preference-entry source))
-               (eglot-entry (my/language-server--current-eglot-entry source))
-               (feature (and lsp-entry (plist-get lsp-entry :feature)))
+        (let* ((entry (my/language-server--current-entry source))
+               (feature (and entry (plist-get entry :feature)))
                (active (and (fboundp 'my/current-language-server-backend)
                             (my/current-language-server-backend)))
                (runtime (and (boundp 'my/language-server-runtime-current)
                              my/language-server-runtime-current))
                (project-root (my/language-server--project-root source))
-               (workspace-set (local-variable-p 'eglot-workspace-configuration source))
-               (workspace (and workspace-set eglot-workspace-configuration)))
+               (workspace-set
+                (local-variable-p 'my/language-server--workspace-configuration source))
+               (workspace (and workspace-set
+                               my/language-server--workspace-configuration)))
           (list :buffer (buffer-name source)
                 :file (or (and buffer-file-name
                                (abbreviate-file-name buffer-file-name))
@@ -270,10 +253,10 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
                 :active-backend (or active "-")
                 :required-feature (or feature "-")
                 :feature-status (my/language-server--feature-status feature)
-                :eglot-match (if eglot-entry
-                                  (or (plist-get eglot-entry :label)
+                :server-match (if entry
+                                  (or (plist-get entry :label)
                                       (my/language-server--format-mode-list
-                                       (plist-get eglot-entry :modes)))
+                                       (plist-get entry :modes)))
                                 "-")
                 :flymake (if (bound-and-true-p flymake-mode) "on" "off")
                 :company (if (bound-and-true-p company-mode) "on" "off")
@@ -563,12 +546,10 @@ reporting on runs on that buffer's target, not on the client machine."
   "Return important runtime knob/value pairs."
   `(("read-process-output-max" . ,(my/language-server--value-or-unset
                                    'read-process-output-max))
-    ("eglot-autoshutdown" . ,(my/language-server--value-or-unset
-                              'eglot-autoshutdown))
-    ("eglot-autoreconnect" . ,(my/language-server--value-or-unset
-                               'eglot-autoreconnect))
-    ("eglot-events-buffer-size" . ,(my/language-server--value-or-unset
-                                    'eglot-events-buffer-size))
+    ("lsp-keep-workspace-alive" . ,(my/language-server--value-or-unset
+                                    'lsp-keep-workspace-alive))
+    ("lsp-restart" . ,(my/language-server--value-or-unset 'lsp-restart))
+    ("lsp-log-max" . ,(my/language-server--value-or-unset 'lsp-log-max))
     ("lsp-log-io" . ,(my/language-server--value-or-unset 'lsp-log-io))
     ("lsp-inlay-hint-enable" . ,(my/language-server--value-or-unset
                                  'lsp-inlay-hint-enable))
@@ -588,33 +569,32 @@ reporting on runs on that buffer's target, not on the client machine."
   (let ((source (my/language-server--source-buffer)))
     (when (buffer-live-p source)
       (with-current-buffer source
-        (pcase (and (fboundp 'my/current-language-server-backend)
-                    (my/current-language-server-backend))
-          ('eglot
-           (when (fboundp 'eglot-inlay-hints-mode)
-             (eglot-inlay-hints-mode
-              (if (my/language-server--enabled-value 'lsp-inlay-hint-enable)
-                  1
-                -1))))
-          ('lsp-mode
-           (when (fboundp 'lsp-inlay-hints-mode)
-             (lsp-inlay-hints-mode
-              (if (my/language-server--enabled-value 'lsp-inlay-hint-enable)
-                  1
-                -1)))))))))
+        (when (and (fboundp 'my/current-language-server-backend)
+                   (my/current-language-server-backend)
+                   (fboundp 'lsp-inlay-hints-mode))
+          (lsp-inlay-hints-mode
+           (if (my/language-server--enabled-value 'lsp-inlay-hint-enable)
+               1
+             -1)))))))
 
-(defun my/language-server-toggle-eglot-autoreconnect ()
-  "Toggle `eglot-autoreconnect' for the current Emacs session."
+(defun my/language-server-cycle-restart-policy ()
+  "Cycle `lsp-restart' between its three supported policies."
   (interactive)
-  (message "eglot-autoreconnect: %s"
-           (my/language-server--toggle-default 'eglot-autoreconnect))
+  (setq-default lsp-restart
+                (pcase (default-value 'lsp-restart)
+                  ('interactive 'auto-restart)
+                  ('auto-restart 'ignore)
+                  (_ 'interactive)))
+  (when (fboundp 'config-set)
+    (ignore-errors (config-set 'lsp-restart (default-value 'lsp-restart))))
+  (message "lsp-restart: %s" (default-value 'lsp-restart))
   (my/language-server--maybe-refresh-current-view))
 
-(defun my/language-server-toggle-eglot-autoshutdown ()
-  "Toggle `eglot-autoshutdown' for the current Emacs session."
+(defun my/language-server-toggle-keep-workspace-alive ()
+  "Toggle `lsp-keep-workspace-alive' for the current Emacs session."
   (interactive)
-  (message "eglot-autoshutdown: %s"
-           (my/language-server--toggle-default 'eglot-autoshutdown))
+  (message "lsp-keep-workspace-alive: %s"
+           (my/language-server--toggle-default 'lsp-keep-workspace-alive))
   (my/language-server--maybe-refresh-current-view))
 
 (defun my/language-server-toggle-lsp-log-io ()
@@ -645,17 +625,17 @@ reporting on runs on that buffer's target, not on the client machine."
   (message "read-process-output-max: %s" read-process-output-max)
   (my/language-server--maybe-refresh-current-view))
 
-(defun my/language-server-set-eglot-events-buffer-size (value)
-  "Set `eglot-events-buffer-size' to VALUE for the current session."
+(defun my/language-server-set-log-max (value)
+  "Set `lsp-log-max' to VALUE for the current session."
   (interactive
    (list
     (my/language-server--read-number-choice
-     "eglot-events-buffer-size"
-     'eglot-events-buffer-size
-     '("0" "20000" "100000" "200000" "1000000")
-     "200000")))
-  (setq-default eglot-events-buffer-size value)
-  (message "eglot-events-buffer-size: %s" eglot-events-buffer-size)
+     "lsp-log-max"
+     'lsp-log-max
+     '("0" "2000" "10000" "50000" "200000")
+     "10000")))
+  (setq-default lsp-log-max value)
+  (message "lsp-log-max: %s" lsp-log-max)
   (my/language-server--maybe-refresh-current-view))
 
 (defun my/language-server-manager-ensure ()
@@ -757,11 +737,8 @@ reporting on runs on that buffer's target, not on the client machine."
   (my/language-server-manager--assert-view-buffer)
   (aaron-ui-board-insert-section "Maintenance")
   (aaron-ui-board-insert-field
-   "lsp-mode routes"
-   (number-to-string (length (my/language-server-lsp-mode-preference-entries))))
-  (aaron-ui-board-insert-field
-   "eglot mappings"
-   (number-to-string (length (my/language-server-eglot-program-entries))))
+   "registered servers"
+   (number-to-string (length (my/language-server-program-entries))))
   (when (boundp 'my/language-server-toolchain-providers)
     (aaron-ui-board-insert-field
      "toolchain providers"
@@ -779,11 +756,11 @@ reporting on runs on that buffer's target, not on the client machine."
   (my/language-server-manager--assert-view-buffer)
   (aaron-ui-board-insert-section "Quick Settings")
   (aaron-ui-board-insert-field
-   "eglot-autoreconnect"
-   (format "%s" (my/language-server--value-or-unset 'eglot-autoreconnect)))
+   "lsp-restart"
+   (format "%s" (my/language-server--value-or-unset 'lsp-restart)))
   (aaron-ui-board-insert-field
-   "eglot-autoshutdown"
-   (format "%s" (my/language-server--value-or-unset 'eglot-autoshutdown)))
+   "lsp-keep-workspace-alive"
+   (format "%s" (my/language-server--value-or-unset 'lsp-keep-workspace-alive)))
   (aaron-ui-board-insert-field
    "lsp-log-io"
    (format "%s" (my/language-server--value-or-unset 'lsp-log-io)))
@@ -794,14 +771,14 @@ reporting on runs on that buffer's target, not on the client machine."
    "read-process-output-max"
    (format "%s" (my/language-server--value-or-unset 'read-process-output-max)))
   (aaron-ui-board-insert-field
-   "eglot-events-buffer"
-   (format "%s" (my/language-server--value-or-unset 'eglot-events-buffer-size)))
+   "lsp-log-max"
+   (format "%s" (my/language-server--value-or-unset 'lsp-log-max)))
   (insert "   ")
   (aaron-ui-board-insert-actions
-   '((:label "Autoreconnect" :command my/language-server-toggle-eglot-autoreconnect
-              :help "Toggle eglot autoreconnect")
-     (:label "Autoshutdown"  :command my/language-server-toggle-eglot-autoshutdown
-              :help "Toggle eglot autoshutdown")
+   '((:label "Restart Policy" :command my/language-server-cycle-restart-policy
+              :help "Cycle lsp-restart policy")
+     (:label "Keep Alive"    :command my/language-server-toggle-keep-workspace-alive
+              :help "Toggle lsp-keep-workspace-alive")
      (:label "Log IO"        :command my/language-server-toggle-lsp-log-io
               :help "Toggle lsp-mode wire logging")
      (:label "Inlay Hints"   :command my/language-server-toggle-inlay-hints
@@ -811,7 +788,7 @@ reporting on runs on that buffer's target, not on the client machine."
    "Output Max" #'my/language-server-set-read-process-output-max "Set read-process-output-max")
   (insert " ")
   (aaron-ui-board-insert-action
-   "Events Buf" #'my/language-server-set-eglot-events-buffer-size "Set eglot-events-buffer-size")
+   "Log Max" #'my/language-server-set-log-max "Set lsp-log-max")
   (insert "\n\n"))
 
 (defun my/language-server-manager--insert-current-buffer-section ()
@@ -849,7 +826,7 @@ reporting on runs on that buffer's target, not on the client machine."
         (aaron-ui-board-insert-field
          "lsp feature"
          (format "%s (%s)" (plist-get status :required-feature) (plist-get status :feature-status)))
-        (aaron-ui-board-insert-field "eglot mapping" (plist-get status :eglot-match))
+        (aaron-ui-board-insert-field "server" (plist-get status :server-match))
         (aaron-ui-board-insert-field
          "flymake/company"
          (format "%s / %s / %s"
@@ -884,57 +861,21 @@ reporting on runs on that buffer's target, not on the client machine."
     (aaron-ui-board-insert-empty "No source buffer.")))
 
 (defun my/language-server-manager--insert-routing-section ()
-  "Insert explicit `lsp-mode' routing overrides."
+  "Insert the language servers registered by `my/register-language-server'."
   (my/language-server-manager--assert-view-buffer)
-  (let ((entries (my/language-server-lsp-mode-preference-entries)))
-    (aaron-ui-board-insert-section "Explicit lsp-mode Routes" (length entries))
-    (if entries
-        (dolist (entry entries)
-          (let* ((mode (plist-get entry :mode))
-                 (feature (plist-get entry :feature))
-                 (source (plist-get entry :source))
-                 (note (plist-get entry :note))
-                 (status (my/language-server--feature-status feature))
-                 (current (with-current-buffer (my/language-server--source-buffer)
-                            (derived-mode-p mode)))
-                 (start (point)))
-            (aaron-ui-board-insert-field
-             (symbol-name mode)
-             (format "lsp-mode  feature=%s  %s%s"
-                     (or feature "-") status
-                     (if current "  ●current" ""))
-             (if current 'aaron-ui-board-badge-info nil))
-            (when source
-              (insert "   " (propertize "source  " 'face 'aaron-ui-board-meta))
-              (my/language-server--insert-openable-path source)
-              (insert "\n"))
-            (when note
-              (insert "   " (propertize note 'face 'aaron-ui-board-detail) "\n"))
-            (when source
-              (insert "   ")
-              (aaron-ui-board-insert-action
-               "Open source" (lambda () (find-file source)) "Open the file defining this route")
-              (insert "\n"))
-            (insert "\n")
-            (my/language-server-manager--set-entry-properties
-             start (point)
-             (list :kind 'route :source source :mode mode))))
-      (aaron-ui-board-insert-empty "No explicit lsp-mode overrides are registered."))))
-
-(defun my/language-server-manager--insert-eglot-section ()
-  "Insert locally registered Eglot server mappings."
-  (my/language-server-manager--assert-view-buffer)
-  (let ((entries (my/language-server-eglot-program-entries)))
-    (aaron-ui-board-insert-section "Custom Eglot Server Mappings" (length entries))
+  (let ((entries (my/language-server-program-entries)))
+    (aaron-ui-board-insert-section "Registered Language Servers" (length entries))
     (if entries
         (dolist (entry entries)
           (let* ((modes (plist-get entry :modes))
                  (label (or (plist-get entry :label)
-                            (format "%s" (plist-get entry :program))))
+                            (format "%s" (plist-get entry :server-id))))
+                 (feature (plist-get entry :feature))
                  (executables (plist-get entry :executables))
+                 (placement (plist-get entry :placement))
                  (source (plist-get entry :source))
                  (note (plist-get entry :note))
-                 (current (my/language-server--eglot-entry-matches-buffer-p
+                 (current (my/language-server--entry-matches-buffer-p
                            entry
                            (my/language-server--source-buffer)))
                  (start (point)))
@@ -942,6 +883,13 @@ reporting on runs on that buffer's target, not on the client machine."
              (my/language-server--format-mode-list modes)
              (concat label (if current "  ●current" ""))
              (if current 'aaron-ui-board-badge-info nil))
+            (aaron-ui-board-insert-field
+             "placement" (format "%s" (or placement 'target)))
+            (when feature
+              (aaron-ui-board-insert-field
+               "feature"
+               (format "%s  %s" feature
+                       (my/language-server--feature-status feature))))
             (aaron-ui-board-insert-field
              "executables"
              (my/language-server--executable-summary executables))
@@ -954,13 +902,14 @@ reporting on runs on that buffer's target, not on the client machine."
             (when source
               (insert "   ")
               (aaron-ui-board-insert-action
-               "Open source" (lambda () (find-file source)) "Open the file defining this mapping")
+               "Open source" (lambda () (find-file source))
+               "Open the file registering this server")
               (insert "\n"))
             (insert "\n")
             (my/language-server-manager--set-entry-properties
              start (point)
-             (list :kind 'eglot :source source :modes modes))))
-      (aaron-ui-board-insert-empty "No custom Eglot mappings are registered."))))
+             (list :kind 'server :source source :modes modes))))
+      (aaron-ui-board-insert-empty "No language servers are registered."))))
 
 (defun my/language-server-manager--insert-runtime-knobs ()
   "Insert the runtime knobs section."
@@ -988,7 +937,6 @@ reporting on runs on that buffer's target, not on the client machine."
        (my/language-server-manager--insert-current-buffer-section)
        (my/language-server-manager--insert-settings-section)
        (my/language-server-manager--insert-routing-section)
-       (my/language-server-manager--insert-eglot-section)
        (my/language-server-manager--insert-runtime-knobs)
        (aaron-ui-board-insert-key-hints
         "Keys: g refresh  i toolchain  x reset-toolchain  v rescan-toolchains  e ensure  r restart  k shutdown  l log  s session  c config  o imports  a actions  f format  R rename  p problems  D doctor  q quit")))))
@@ -997,9 +945,10 @@ reporting on runs on that buffer's target, not on the client machine."
   "Insert the library availability section."
   (my/language-server-doctor--assert-view-buffer)
   (aaron-ui-board-insert-section "Libraries")
-  (dolist (library '("eglot" "lsp-mode" "company" "company-box"
+  (dolist (library '("lsp-mode" "lsp-ui" "company" "company-box"
                      "company-prescient" "flymake-diagnostic-at-point"
-                     "eldoc-box" "breadcrumb" "dape"))
+                     "sideline" "sideline-lsp"
+                     "breadcrumb" "dape"))
     (let ((path (my/language-server--library-path library)))
       (if path
           (progn
@@ -1019,7 +968,7 @@ reporting on runs on that buffer's target, not on the client machine."
                              (mapcar (lambda (entry)
                                        (copy-sequence
                                         (plist-get entry :executables)))
-                                     (my/language-server-eglot-program-entries)))))))
+                                     (my/language-server-program-entries)))))))
     (aaron-ui-board-insert-section "Executables" (length names))
     (if names
         (dolist (name names)
@@ -1063,7 +1012,7 @@ reporting on runs on that buffer's target, not on the client machine."
         (aaron-ui-board-insert-field
          "lsp feature"
          (format "%s (%s)" (plist-get status :required-feature) (plist-get status :feature-status)))
-        (aaron-ui-board-insert-field "eglot mapping"   (plist-get status :eglot-match))
+        (aaron-ui-board-insert-field "server"          (plist-get status :server-match))
         (aaron-ui-board-insert-field
          "flymake/company"
          (format "%s / %s / %s"
@@ -1081,29 +1030,20 @@ reporting on runs on that buffer's target, not on the client machine."
   (insert "\n"))
 
 (defun my/language-server--doctor-insert-routing ()
-  "Insert routing and mapping summaries."
+  "Insert the registered language-server summary."
   (my/language-server-doctor--assert-view-buffer)
-  (let ((lsp-entries (my/language-server-lsp-mode-preference-entries))
-        (eglot-entries (my/language-server-eglot-program-entries)))
-    (aaron-ui-board-insert-section
-     "Routing Summary"
-     (+ (length lsp-entries) (length eglot-entries)))
-    (aaron-ui-board-insert-field "lsp-mode routes"  (number-to-string (length lsp-entries)))
-    (dolist (entry lsp-entries)
-      (insert "   "
-              (propertize (format "  %-18s " (plist-get entry :mode)) 'face 'aaron-ui-board-detail)
-              (propertize (format "feature=%-12s status=%s"
-                                  (or (plist-get entry :feature) "-")
-                                  (my/language-server--feature-status (plist-get entry :feature)))
-                          'face 'aaron-ui-board-meta)
-              "\n"))
-    (aaron-ui-board-insert-field "eglot mappings" (number-to-string (length eglot-entries)))
-    (dolist (entry eglot-entries)
+  (let ((entries (my/language-server-program-entries)))
+    (aaron-ui-board-insert-section "Routing Summary" (length entries))
+    (aaron-ui-board-insert-field
+     "registered servers" (number-to-string (length entries)))
+    (dolist (entry entries)
       (insert "   "
               (propertize (format "  %-36s " (my/language-server--format-mode-list
                                               (plist-get entry :modes)))
                           'face 'aaron-ui-board-detail)
-              (propertize (format "executables=%s"
+              (propertize (format "placement=%-8s feature=%-12s executables=%s"
+                                  (or (plist-get entry :placement) 'target)
+                                  (or (plist-get entry :feature) "-")
                                   (my/language-server--executable-summary
                                    (plist-get entry :executables)))
                           'face 'aaron-ui-board-meta)
@@ -1161,12 +1101,12 @@ reporting on runs on that buffer's target, not on the client machine."
         (local-set-key (kbd "s") #'my/language-server-manager-describe-session)
         (local-set-key (kbd "c") #'my/language-server-manager-show-workspace-configuration)
         (local-set-key (kbd "D") #'my/language-server-doctor)
-        (local-set-key (kbd "A") #'my/language-server-toggle-eglot-autoreconnect)
-        (local-set-key (kbd "S") #'my/language-server-toggle-eglot-autoshutdown)
+        (local-set-key (kbd "A") #'my/language-server-cycle-restart-policy)
+        (local-set-key (kbd "S") #'my/language-server-toggle-keep-workspace-alive)
         (local-set-key (kbd "L") #'my/language-server-toggle-lsp-log-io)
         (local-set-key (kbd "I") #'my/language-server-toggle-inlay-hints)
         (local-set-key (kbd "M") #'my/language-server-set-read-process-output-max)
-        (local-set-key (kbd "E") #'my/language-server-set-eglot-events-buffer-size)
+        (local-set-key (kbd "E") #'my/language-server-set-log-max)
         (local-set-key (kbd "O") #'my/language-server-manager-open-docs)
         (local-set-key (kbd "?") #'my/language-server-dispatch)
         (local-set-key [mouse-3] #'my/language-server-manager-popup-menu)
@@ -1195,12 +1135,12 @@ reporting on runs on that buffer's target, not on the client machine."
   (local-set-key (kbd "T") #'my/language-server-manager-diagnostics-project-ui)
   (local-set-key (kbd "m") #'my/language-server-manager-diagnostics-menu)
   (local-set-key (kbd "D") #'my/language-server-doctor)
-  (local-set-key (kbd "A") #'my/language-server-toggle-eglot-autoreconnect)
-  (local-set-key (kbd "S") #'my/language-server-toggle-eglot-autoshutdown)
+  (local-set-key (kbd "A") #'my/language-server-cycle-restart-policy)
+  (local-set-key (kbd "S") #'my/language-server-toggle-keep-workspace-alive)
   (local-set-key (kbd "L") #'my/language-server-toggle-lsp-log-io)
   (local-set-key (kbd "I") #'my/language-server-toggle-inlay-hints)
   (local-set-key (kbd "M") #'my/language-server-set-read-process-output-max)
-  (local-set-key (kbd "E") #'my/language-server-set-eglot-events-buffer-size)
+  (local-set-key (kbd "E") #'my/language-server-set-log-max)
   (local-set-key (kbd "O") #'my/language-server-manager-open-docs)
   (local-set-key (kbd "?") #'my/language-server-dispatch)
   (local-set-key (kbd "RET") #'my/language-server-manager-context-action)
@@ -1247,12 +1187,12 @@ reporting on runs on that buffer's target, not on the client machine."
     ("f" "format" my/language-server-manager-format-buffer)
     ("R" "rename" my/language-server-manager-rename)]
    ["Tuning"
-    ("A" "toggle autoreconnect" my/language-server-toggle-eglot-autoreconnect)
-    ("S" "toggle autoshutdown" my/language-server-toggle-eglot-autoshutdown)
+    ("A" "cycle restart policy" my/language-server-cycle-restart-policy)
+    ("S" "toggle keep-alive" my/language-server-toggle-keep-workspace-alive)
     ("L" "toggle log-io" my/language-server-toggle-lsp-log-io)
     ("I" "toggle inlay hints" my/language-server-toggle-inlay-hints)
     ("M" "set output max" my/language-server-set-read-process-output-max)
-    ("E" "set events buffer" my/language-server-set-eglot-events-buffer-size)]
+    ("E" "set log max" my/language-server-set-log-max)]
    ["Diagnostics"
     ("p" "buffer problems" my/language-server-manager-problems-buffer)
     ("P" "project problems" my/language-server-manager-problems-project)
@@ -1263,7 +1203,7 @@ reporting on runs on that buffer's target, not on the client machine."
 (defalias 'my/language-server-ops-dispatch #'my/language-server-dispatch)
 
 (my/leader!
-  "c L" '(:def my/language-server-dispatch :which-key "language server"))
+  "c s" '(:def my/language-server-dispatch :which-key "language server"))
 
 (provide 'init-lsp-tools)
 ;;; init-lsp-tools.el ends here

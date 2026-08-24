@@ -3,14 +3,14 @@
 ;;; Commentary:
 ;; Displays the official @leanprover/infoview React component in a RIGHT-SIDE
 ;; side window using xwidget-webkit.  The infoview runs inside lean-proxy.mjs,
-;; which is Eglot's server contact — a transparent JSON-RPC passthrough to
+;; which is the language server's transport — a transparent JSON-RPC passthrough to
 ;; `lake serve' that also serves the infoview over HTTP+SSE.  Emacs only sends
-;; cursor position; document sync is handled entirely by Eglot through the proxy.
+;; cursor position; document sync is handled entirely by lsp-mode through the proxy.
 ;;
 ;; Reverse channel (infoview → Emacs) uses standard LSP:
-;;   window/showDocument   → handled natively by Eglot
-;;   workspace/applyEdit   → handled natively by Eglot
-;;   lean/restartFile      → custom notification handled in init-lean-eglot.el
+;;   window/showDocument   → handled natively by lsp-mode
+;;   workspace/applyEdit   → handled natively by lsp-mode
+;;   lean/restartFile      → custom notification handled in init-lean-lsp.el
 
 ;;; Code:
 
@@ -25,7 +25,7 @@
 
 (declare-function lean-dev-log "init-lean" (format-string &rest args))
 (declare-function lean-project-root "init-lean" ())
-(declare-function lean--ensure-eglot "init-lean")
+(declare-function lean--ensure-lsp "init-lean")
 (declare-function lean--proxy-gateway-binding "init-lean" (root))
 (declare-function lean--proxy-gateway-client "init-lean" (root))
 (declare-function lean--proxy-endpoint "init-lean" (root))
@@ -39,11 +39,11 @@
 (declare-function xwidget-at "xwidget" (pos))
 (declare-function xwidget-buffer "xwidget" (xwidget))
 (defvar xwidget-list)
-(declare-function eglot-managed-p "eglot" ())
-(declare-function eglot-path-to-uri "eglot" (path))
-(declare-function eglot-uri-to-path "eglot" (uri))
-(declare-function eglot--pos-to-lsp-position "eglot" (&optional pos))
-(declare-function eglot-reconnect "eglot" (server &optional interactive))
+(declare-function lsp--path-to-uri "lsp-mode" (path))
+(declare-function lsp--uri-to-path "lsp-mode" (uri))
+(declare-function lsp--cur-position "lsp-mode" ())
+(declare-function lsp-workspace-restart "lsp-mode" (workspace))
+(declare-function lsp-workspaces "lsp-mode" ())
 (declare-function remote-close-channel "remote-channel" (channel))
 (declare-function remote-port-forward "remote-channel" (remote-endpoint &rest keys))
 (declare-function remote-forward-handle "remote-backend-core" (forward))
@@ -75,7 +75,7 @@
   "Debounce timer for syncing cursor position to the infoview.")
 
 (defvar-local lean--iv--port-wait-timer nil
-  "Current timer waiting for this buffer's Eglot proxy endpoint.")
+  "Current timer waiting for this buffer's language-server proxy endpoint.")
 
 (defvar-local lean--iv--last-cursor nil
   "Last cursor signature sent to the infoview.")
@@ -190,7 +190,7 @@
 
 (defun lean--iv-project-root ()
   "Return the current Lean infoview project root."
-  ;; Eglot's contact and the infoview must key proxy state by exactly the same
+  ;; The server transport and the infoview must key proxy state by the same
   ;; logical identity.  Recomputing the root here used to turn a local
   ;; `/fs:local:' root back into a native path, so the proxy wrote one
   ;; instance port file while `C-c C-i' waited on another pending file.
@@ -199,8 +199,8 @@
 (defun lean--iv-source-uri ()
   "Return the file URI for the current source buffer."
   (when buffer-file-name
-    (if (fboundp 'eglot-path-to-uri)
-        (eglot-path-to-uri (expand-file-name buffer-file-name))
+    (if (fboundp 'lsp--path-to-uri)
+        (lsp--path-to-uri (expand-file-name buffer-file-name))
       (concat "file://" (expand-file-name buffer-file-name)))))
 
 ;; ── Gateway endpoint discovery ───────────────────────────────────────────────
@@ -241,10 +241,10 @@
 (defun lean--iv-wait-status ()
   "Return a short user-facing status for Infoview proxy startup."
   (cond
-   ((bound-and-true-p lean--eglot-waiting-for-environment)
+   ((bound-and-true-p lean--lsp-waiting-for-environment)
     "waiting for remote direnv")
-   ((and (fboundp 'eglot-managed-p) (eglot-managed-p))
-    "Eglot ready; waiting for local Node proxy")
+   ((bound-and-true-p lsp-managed-mode)
+    "language server ready; waiting for local Node proxy")
    (t "starting target Lean LSP")))
 
 (defun lean--iv-wait-for-port (root callback)
@@ -286,7 +286,7 @@
                 "timed out waiting for gateway peer: root=%s status=%s"
                 root (with-current-buffer source-buf (lean--iv-wait-status)))
                (message
-                "Lean infoview: timed out (%s); see *Lean Dev Log* and Eglot stderr"
+                "Lean infoview: timed out (%s); see *Lean Dev Log* and the server stderr"
                 (with-current-buffer source-buf (lean--iv-wait-status)))
                t)
               (t
@@ -392,9 +392,9 @@
 
 (defun lean--iv-current-lsp-position ()
   "Return (line . char) at point as LSP 0-based integers, or nil."
-  (or (when (fboundp 'eglot--pos-to-lsp-position)
+  (or (when (fboundp 'lsp--cur-position)
         (ignore-errors
-          (when-let* ((pos (eglot--pos-to-lsp-position)))
+          (when-let* ((pos (lsp--cur-position)))
             (cons (plist-get pos :line) (plist-get pos :character)))))
       (cons (1- (line-number-at-pos)) (current-column))))
 
@@ -489,14 +489,15 @@ Uses a fast xwidget-webkit-execute-script path and an HTTP debounce fallback."
 
 ;; ── Toggle / restart ──────────────────────────────────────────────────────────
 
-(defun lean--iv-reconnect-eglot ()
-  "Reconnect the current Eglot server using its interactive server lookup."
-  (call-interactively #'eglot-reconnect))
+(defun lean--iv-reconnect-server ()
+  "Restart the language server owning this buffer, and with it the proxy."
+  (dolist (workspace (or (ignore-errors (lsp-workspaces)) nil))
+    (ignore-errors (lsp-workspace-restart workspace))))
 
 (defun lean-iv-toggle ()
   "Open or close the Lean xwidget infoview for the current buffer."
   (interactive)
-  ;; This command may need direnv, Eglot and Lean initialization.  Make the
+  ;; This command may need direnv, LSP and Lean initialization.  Make the
   ;; key binding observably responsive before any of those asynchronous
   ;; boundaries run.
   (message "Lean infoview: checking local proxy and target LSP…")
@@ -533,23 +534,22 @@ Uses a fast xwidget-webkit-execute-script path and an HTTP debounce fallback."
         (setq lean--iv--xwidget-buf nil)
         (remhash root lean--iv--xwidget-buffers)
         (lean--iv-close-remote-forward root))
-      (if (and (fboundp 'eglot-managed-p)
-               (eglot-managed-p)
+      (if (and (bound-and-true-p lsp-managed-mode)
                (or (not (lean--proxy-gateway-binding root))
                    (not proxy-port)))
           (progn
-            (lean--iv-log "managed Eglot has no live proxy endpoint; reconnecting")
-            (message "Lean infoview: reconnecting Eglot proxy…")
+            (lean--iv-log "managed buffer has no live proxy endpoint; reconnecting")
+            (message "Lean infoview: reconnecting the LSP proxy…")
             (lean--proxy-forget-gateway-binding root)
-            (lean--iv-reconnect-eglot))
-        ;; Ensure Eglot is running; its contact allocates and starts the proxy.
-        (when (fboundp 'lean--ensure-eglot)
-          (lean--ensure-eglot)))
+            (lean--iv-reconnect-server))
+        ;; Ensure the server is running; its transport starts the proxy.
+        (when (fboundp 'lean--ensure-lsp)
+          (lean--ensure-lsp)))
       (lean--iv-open-current-buffer)))))
 
 (defun lean-iv-restart ()
   "Restart the Lean infoview for the current buffer's project.
-Reconnects Eglot (which restarts the proxy and lake serve) and reopens
+Restarts the language server (and with it the proxy and lake serve), then reopens
 the infoview xwidget page."
   (interactive)
   (unless (derived-mode-p 'lean-mode)
@@ -566,14 +566,13 @@ the infoview xwidget page."
     (lean--iv-close-remote-forward root)
     (lean--proxy-forget-gateway-binding root)
     (setq lean--iv--last-cursor nil)
-    (when (fboundp 'eglot-reconnect)
-      (lean--iv-reconnect-eglot))
+    (lean--iv-reconnect-server)
     (lean--iv-open-current-buffer)))
 
-;; ── Buffer sync hook (no-op — Eglot owns doc sync through proxy) ──────────────
+;; ── Buffer sync hook (no-op — lsp-mode owns doc sync through proxy) ──────────
 
 (defun lean-iv-setup-buffer-sync ()
-  "No-op: document sync is handled by Eglot through the proxy."
+  "No-op: document sync is handled by lsp-mode through the proxy."
   nil)
 
 ;; ── Teardown ──────────────────────────────────────────────────────────────────

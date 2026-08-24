@@ -1,4 +1,4 @@
-;;; init-lsp-remote-tests.el --- Logical LSP URI tests -*- lexical-binding: t; -*-
+;;; init-lsp-remote-tests.el --- Logical LSP URI and remote-parity tests -*- lexical-binding: t; -*-
 
 ;;; Code:
 
@@ -7,7 +7,6 @@
 (require 'init-python)
 (require 'init-js2)
 (require 'init-java)
-(require 'eglot)
 (require 'lsp-mode)
 
 (defun my/lsp-test-registration (method)
@@ -17,6 +16,13 @@
     (let ((registration (make-hash-table :test #'equal)))
       (puthash "method" method registration)
       registration)))
+
+(defun my/lsp-test-object (&rest pairs)
+  "Return an LSP hash object initialized from keyword/value PAIRS."
+  (let ((object (make-hash-table :test #'equal)))
+    (while pairs
+      (puthash (substring (symbol-name (pop pairs)) 1) (pop pairs) object))
+    object))
 
 (ert-deftest lsp-mode-local-logical-path-does-not-leak-fs-syntax ()
   (let ((default-directory "/fs:local:/tmp/"))
@@ -61,43 +67,6 @@
        "file:///tmp/project/Main.java")
       "/fs:local:/tmp/project/Main.java"))))
 
-(ert-deftest eglot-uri-prefers-server-project-over-current-buffer ()
-  (let ((default-directory "/fs:local:/tmp/"))
-    (cl-letf (((symbol-function 'eglot-current-server)
-               (lambda () 'server))
-              ((symbol-function 'eglot--project)
-               (lambda (_server) 'project))
-              ((symbol-function 'project-root)
-               (lambda (_project) "/fs:box:/work/")))
-      (should
-       (equal
-        (my/eglot--uri-to-logical-a
-         (lambda (_uri) "/work/src/Main.java")
-         "file:///work/src/Main.java")
-        "/fs:box:/work/src/Main.java")))))
-
-(ert-deftest eglot-uri-prefers-dynamically-cached-server ()
-  (let ((default-directory "/fs:local:/tmp/")
-        (eglot--cached-server 'owning-server))
-    (cl-letf (((symbol-function 'eglot-current-server)
-               (lambda () 'unrelated-server))
-              ((symbol-function 'eglot--project)
-               (lambda (server)
-                 (pcase server
-                   ('owning-server 'owning-project)
-                   (_ 'unrelated-project))))
-              ((symbol-function 'project-root)
-               (lambda (project)
-                 (pcase project
-                   ('owning-project "/fs:box:/work/")
-                   (_ "/fs:local:/other/")))))
-      (should
-       (equal
-        (my/eglot--uri-to-logical-a
-         (lambda (_uri) "/work/src/Main.java")
-         "file:///work/src/Main.java")
-        "/fs:box:/work/src/Main.java")))))
-
 (ert-deftest language-server-executable-lookup-uses-shared-adapter ()
   (let (adapter)
     (cl-letf (((symbol-function 'remote-executable-find)
@@ -114,37 +83,28 @@
   (dolist (directory
            '("/fs:local:/tmp/project/"
              "/fs:box:/work/project/"))
-    (dolist (backend '(eglot lsp-mode))
-      (let ((default-directory directory)
-            selected)
-        (cl-letf
-            (((symbol-function 'my/language-server-preferred-backend)
-              (lambda () backend))
-             ((symbol-function 'my/eglot-ensure)
-              (lambda () (setq selected 'eglot)))
-             ((symbol-function 'my/lsp-mode-ensure)
-              (lambda () (setq selected 'lsp-mode))))
-          (my/language-server-ensure))
-        (should (eq selected backend))))))
+    (let ((default-directory directory)
+          selected)
+      (cl-letf
+          (((symbol-function 'my/language-server-preferred-backend)
+            (lambda () 'lsp-mode))
+           ((symbol-function 'my/lsp-mode-ensure)
+            (lambda () (setq selected 'lsp-mode))))
+        (my/language-server--ensure-after-runtime))
+      (should (eq selected 'lsp-mode)))))
 
 (ert-deftest language-server-direnv-failure-does-not-disable-client ()
-  (dolist (case
-           '((eglot my/eglot--waiting-for-direnv
-                    my/eglot--direnv-ready my/eglot-start-now)
-             (lsp-mode my/lsp-mode--waiting-for-direnv
-                       my/lsp-mode--direnv-ready my/lsp-mode-start-now)))
-    (pcase-let ((`(,backend ,waiting ,callback ,starter) case))
-      (let ((started nil))
-        (set waiting t)
-        (cl-letf
-            (((symbol-function 'my/language-server-preferred-backend)
-              (lambda () backend))
-             ((symbol-function starter)
-              (lambda () (setq started t)))
-             ((symbol-function 'message) #'ignore))
-          (funcall callback nil '(error "broken envrc")))
-        (should-not (symbol-value waiting))
-        (should started)))))
+  (let ((started nil))
+    (setq my/lsp-mode--waiting-for-direnv t)
+    (cl-letf
+        (((symbol-function 'my/language-server-preferred-backend)
+          (lambda () 'lsp-mode))
+         ((symbol-function 'my/lsp-mode-start-now)
+          (lambda () (setq started t)))
+         ((symbol-function 'message) #'ignore))
+      (my/lsp-mode--direnv-ready nil '(error "broken envrc")))
+    (should-not my/lsp-mode--waiting-for-direnv)
+    (should started)))
 
 (ert-deftest language-server-network-contact-routes-on-local-and-remote ()
   (dolist (directory
@@ -176,23 +136,30 @@
         "language-server")))))
 
 (ert-deftest language-server-shell-boundary-is-target-neutral ()
-  (dolist (directory
-           '("/fs:local:/tmp/project/"
-             "/fs:box:/work/project/"))
-    (with-temp-buffer
-      (let ((default-directory directory)
-            (shell-file-name "/client/bin/zsh")
-            (explicit-shell-file-name "/client/bin/zsh")
-            (shell-command-switch "-c")
-            (my/language-server-lsp-local-settings-hook nil))
-        (my/language-server-apply-lsp-local-settings)
-        ;; Shell placement belongs to the selected process backend.  Neither a
-        ;; local nor a remote logical root may mutate client shell globals.
-        (should (equal shell-file-name "/client/bin/zsh"))
-        (should (equal explicit-shell-file-name "/client/bin/zsh"))
-        (should (equal shell-command-switch "-c"))))))
+  ;; `my/language-server-apply-lsp-local-settings' also resolves any
+  ;; project-local `:lsp-workspace' override; stub that lookup rather than
+  ;; exercising real project/file-truename plumbing for a target this test
+  ;; never links a route for.
+  (cl-letf (((symbol-function 'my/language-server-project-workspace-configuration)
+             (lambda () nil)))
+    (dolist (directory
+             '("/fs:local:/tmp/project/"
+               "/fs:box:/work/project/"))
+      (with-temp-buffer
+        (let ((default-directory directory)
+              (shell-file-name "/client/bin/zsh")
+              (explicit-shell-file-name "/client/bin/zsh")
+              (shell-command-switch "-c")
+              (my/language-server-lsp-local-settings-hook nil))
+          (my/language-server-apply-lsp-local-settings)
+          ;; Shell placement belongs to the selected process backend.  Neither
+          ;; a local nor a remote logical root may mutate client shell
+          ;; globals.
+          (should (equal shell-file-name "/client/bin/zsh"))
+          (should (equal explicit-shell-file-name "/client/bin/zsh"))
+          (should (equal shell-command-switch "-c")))))))
 
-(ert-deftest python-eglot-contact-is-selected-by-target-capability-only ()
+(ert-deftest python-language-server-command-is-selected-by-target-capability-only ()
   (cl-letf
       (((symbol-function 'my/language-server-executable-find)
         (lambda (program)
@@ -203,7 +170,7 @@
       (let ((default-directory directory))
         (should
          (equal
-          (my/python-eglot-contact)
+          (my/python-language-server-command)
           '("/target/bin/pylsp")))))))
 
 (ert-deftest js-project-bin-uses-the-environment-capsule-for-every-target ()
@@ -290,6 +257,9 @@ this advice must not duplicate them when native mode is off."
       '("/opt/jdtls/bin/jdtls" "-data" "/work/.cache/")))))
 
 (ert-deftest java-buffers-select-only-one-jdtls-workspace-owner ()
+  "One JDTLS client id serves every target now that
+`lsp-auto-register-remote-clients' is nil, so a single root/folder wipe
+must cover it without a `-tramp' counterpart."
   (require 'lsp-java)
   (let* ((clients (make-hash-table :test #'eq))
          (folders (make-hash-table :test #'eq))
@@ -298,16 +268,11 @@ this advice must not duplicate them when native mode is off."
            :folders nil
            :folders-blocklist nil
            :server-id->folders folders))
-         (local-client
-          (copy-lsp--client (gethash 'jdtls lsp-clients)))
-         (remote-client
-          (copy-lsp--client (gethash 'jdtls-tramp lsp-clients)))
+         (client (copy-lsp--client (gethash 'jdtls lsp-clients)))
          (lsp-clients clients)
          persisted)
-    (puthash 'jdtls local-client clients)
-    (puthash 'jdtls-tramp remote-client clients)
-    (puthash 'jdtls '("/old/local/root") folders)
-    (puthash 'jdtls-tramp '("/old/remote/root") folders)
+    (puthash 'jdtls client clients)
+    (puthash 'jdtls '("/old/root") folders)
     (with-temp-buffer
       (setq major-mode 'java-mode)
       (let ((lsp-enabled-clients nil))
@@ -316,12 +281,9 @@ this advice must not duplicate them when native mode is off."
              ((symbol-function 'lsp--persist-session)
               (lambda (_session) (setq persisted t))))
           (my/lsp-java--enforce-single-root))
-        (should
-         (equal lsp-enabled-clients '(jdtls jdtls-tramp)))))
-    (should-not (lsp--client-multi-root local-client))
-    (should-not (lsp--client-multi-root remote-client))
+        (should (equal lsp-enabled-clients '(jdtls)))))
+    (should-not (lsp--client-multi-root client))
     (should-not (gethash 'jdtls folders))
-    (should-not (gethash 'jdtls-tramp folders))
     (should persisted)))
 
 (ert-deftest lsp-workspace-is-one-recoverable-remote-workspace-resource ()
@@ -352,93 +314,6 @@ this advice must not duplicate them when native mode is off."
         (should
          (eq (remote-workspace-resource-value resource)
              lsp-workspace))))))
-
-(ert-deftest eglot-servers-replace-one-keyed-workspace-resource ()
-  (let ((remote-workspaces (make-hash-table :test #'equal))
-        (remote-workspace--resource-counter 0))
-    (cl-letf
-        (((symbol-function 'my/language-server--eglot-root)
-          (lambda (_server) "/fs:local:/tmp/project/"))
-         ((symbol-function 'remote-workspace-track-route)
-          (lambda (workspace &rest _arguments) workspace))
-         ((symbol-function 'eglot--managed-buffers)
-          (lambda (_server) (list (current-buffer))))
-         ;; Registration reads the server's project to key the resource by
-         ;; runtime; without this stub it bails before creating a workspace
-         ;; and the assertions below have nothing to look at.
-         ((symbol-function 'eglot--project)
-          (lambda (_server) 'test-project)))
-      (my/language-server-register-eglot-resource 'server-1)
-      (my/language-server-register-eglot-resource 'server-2)
-      (should (= (hash-table-count remote-workspaces) 1))
-      (let* ((owner (car (hash-table-values remote-workspaces)))
-             (resource
-              (remote-workspace-find-resource
-               owner 'lsp
-               '(eglot "/fs:local:/tmp/project/"))))
-        (should resource)
-        (should (= (length (remote-workspace-resources owner)) 1))
-        (should
-         (eq (remote-workspace-resource-value resource)
-             'server-2))))))
-
-(ert-deftest eglot-target-only-root-declines-directory-watch-explosion ()
-  (let ((my/language-server-file-watch-policy 'auto)
-        (remote-route-log nil)
-        called)
-    (cl-letf
-        (((symbol-function 'my/language-server--eglot-root)
-          (lambda (_server) "/fs:box:/work/project/"))
-         ((symbol-function 'my/language-server--resource-owner)
-          (lambda (_root) 'workspace))
-         ((symbol-function 'remote-client-file-name)
-          (lambda (&rest _) nil)))
-      (should-not
-       (my/eglot-register-capability-via-remote-a
-        (lambda (&rest _)
-          (setq called t))
-        'server 'workspace/didChangeWatchedFiles "watch-1"
-        :watchers [(:globPattern "**/*.lean")]))
-      (should-not called)
-      (let ((event (car remote-route-log)))
-        (should
-         (eq (plist-get event :kind)
-             'lsp-watch-registration-declined))
-        (should
-         (equal (plist-get event :root)
-                "/fs:box:/work/project/"))
-        (should (= (plist-get event :watcher-count) 1))))))
-
-(ert-deftest eglot-client-accessible-root-keeps-native-watch-behavior ()
-  (let ((my/language-server-file-watch-policy 'auto)
-        captured)
-    (cl-letf
-        (((symbol-function 'my/language-server--eglot-root)
-          (lambda (_server) "/fs:mounted:/work/project/"))
-         ((symbol-function 'my/language-server--resource-owner)
-          (lambda (_root) 'workspace))
-         ((symbol-function 'remote-client-file-name)
-          (lambda (_root &optional _adapter)
-            "/Volumes/work/project/")))
-      (should
-       (eq
-        (my/eglot-register-capability-via-remote-a
-         (lambda (server method id &rest params)
-           (setq captured
-                 (list
-                  server method id params
-                  remote-current-adapter-id
-                  remote-current-workspace))
-           'registered)
-         'server 'workspace/didChangeWatchedFiles "watch-1"
-         :watchers [(:globPattern "**/*.lean")])
-        'registered))
-      (should
-       (equal
-        captured
-        '(server workspace/didChangeWatchedFiles "watch-1"
-                 (:watchers [(:globPattern "**/*.lean")])
-                 "language-server" workspace))))))
 
 (ert-deftest lsp-mode-target-only-root-retains-registration-without-watchers ()
   "Target-only roots must not create recursive client-side file watches."
@@ -513,26 +388,237 @@ this advice must not duplicate them when native mode is off."
       (when (buffer-live-p source)
         (kill-buffer source)))))
 
-(ert-deftest eglot-non-watch-callback-inherits-language-server-owner ()
-  (let (captured)
+;;; ── New in the single-backend migration ─────────────────────────────────────
+
+(ert-deftest language-server-booster-wraps-resolved-command-per-target ()
+  "The booster path must resolve on the same target that runs the server,
+never the client, and must fail loudly rather than silently skip when
+required and missing."
+  (dolist (case '(("/fs:local:/tmp/project/" . "/local/bin/emacs-lsp-booster")
+                  ("/fs:box:/work/project/" . "/box/bin/emacs-lsp-booster")))
+    (let ((default-directory (car case))
+          (my/language-server-booster-required t)
+          seen-context)
+      (cl-letf
+          (((symbol-function 'lsp-resolve-final-command)
+            (lambda (command _test) command))
+           ((symbol-function 'remote-fs-file-name-p) (lambda (_path) t))
+           ((symbol-function 'my/language-server-executable-find)
+            (lambda (program)
+              (setq seen-context default-directory)
+              (and (equal program "emacs-lsp-booster") (cdr case)))))
+        (should
+         (equal
+          (my/lsp-mode--resolve-logical-command-a
+           #'lsp-resolve-final-command
+           '("clangd" "--foo"))
+          (list (cdr case) "--json-false-value" ":json-false" "--"
+                "clangd" "--foo"))))
+      (should (equal seen-context default-directory)))))
+
+(ert-deftest language-server-booster-errors-when-required-and-missing ()
+  (let ((my/language-server-booster-required t))
     (cl-letf
-        (((symbol-function 'my/language-server--eglot-root)
-          (lambda (_server) "/fs:box:/work/project/"))
-         ((symbol-function 'my/language-server--resource-owner)
-          (lambda (_root) 'workspace)))
+        (((symbol-function 'lsp-resolve-final-command)
+          (lambda (command _test) command))
+         ((symbol-function 'my/language-server-executable-find)
+          (lambda (_program) nil)))
+      (should-error
+       (my/lsp-mode--resolve-logical-command-a
+        #'lsp-resolve-final-command '("clangd"))))))
+
+(ert-deftest language-server-booster-optional-falls-back-silently ()
+  (let ((my/language-server-booster-required nil))
+    (cl-letf
+        (((symbol-function 'lsp-resolve-final-command)
+          (lambda (command _test) command))
+         ((symbol-function 'my/language-server-executable-find)
+          (lambda (_program) nil)))
       (should
-       (eq
-        (my/eglot-register-capability-via-remote-a
-         (lambda (&rest _)
-           (setq captured
-                 (list
-                  remote-current-adapter-id
-                  remote-current-workspace))
-           'registered)
-         'server 'workspace/symbol "symbol-1")
-        'registered))
+       (equal
+        (my/lsp-mode--resolve-logical-command-a
+         #'lsp-resolve-final-command '("clangd"))
+        '("clangd"))))))
+
+(ert-deftest language-server-executable-find-advice-is-scoped-to-adapter ()
+  "Stock `lsp-clients-*' definitions call bare `executable-find'.  Inside
+the language-server adapter's dynamic extent that must resolve through the
+target; outside it, ordinary client-side lookups must be untouched."
+  (cl-letf
+      (((symbol-function 'remote-executable-find)
+        (lambda (program &optional _context)
+          (and (equal program "clangd") "/target/bin/clangd"))))
+    (let ((remote-current-adapter-id "language-server"))
       (should
-       (equal captured '("language-server" workspace))))))
+       (equal
+        (my/language-server--executable-find-a
+         (lambda (_program &optional _remote) nil)
+         "clangd" nil)
+        "/target/bin/clangd")))
+    (let ((remote-current-adapter-id "exec"))
+      (should-not
+       (my/language-server--executable-find-a
+        (lambda (_program &optional _remote) nil)
+        "clangd" nil)))))
+
+(ert-deftest language-server-executable-find-guard-prevents-remote-recursion ()
+  "A local Remote provider may itself use `executable-find'."
+  (let ((remote-current-adapter-id "language-server")
+        (native-calls 0))
+    (cl-labels ((native-find (_command &optional _remote)
+                  (cl-incf native-calls)
+                  "/native/bin/clangd"))
+      (cl-letf (((symbol-function 'remote-executable-find)
+                 (lambda (command &optional _context)
+                   (my/language-server--executable-find-a
+                    #'native-find command))))
+        (should
+         (equal
+          (my/language-server--executable-find-a
+           #'native-find "clangd")
+          "/native/bin/clangd"))))
+    (should (= native-calls 1))))
+
+(ert-deftest language-server-deep-configuration-merge-preserves-explicit-false ()
+  (let* ((analysis
+          (my/lsp-test-object
+           :autoSearchPaths t
+           :diagnosticMode "workspace"
+           :nested (my/lsp-test-object :enabled t :level "strict")))
+         (base (my/lsp-test-object :analysis analysis))
+         (override
+          '(:analysis
+            (:diagnosticMode nil
+             :nested (:enabled :json-false))))
+         (merged (my/language-server--merge-values base override))
+         (merged-analysis
+          (my/language-server--mapping-ref merged :analysis 'missing))
+         (nested
+          (my/language-server--mapping-ref merged-analysis :nested 'missing)))
+    (should (eq (my/language-server--mapping-ref
+                 merged-analysis :autoSearchPaths 'missing)
+                t))
+    (should-not (my/language-server--mapping-ref
+                 merged-analysis :diagnosticMode 'missing))
+    (should (eq (my/language-server--mapping-ref nested :enabled 'missing)
+                :json-false))
+    (should (equal (my/language-server--mapping-ref nested :level 'missing)
+                   "strict"))))
+
+(ert-deftest language-server-workspace-configuration-is-section-and-owner-scoped ()
+  (let* ((params
+          (my/lsp-test-object
+           :items
+           (vector
+            (my/lsp-test-object :section "python.analysis")
+            (my/lsp-test-object :section "pylsp.plugins"))))
+         (first
+          (my/lsp-test-object
+           :autoSearchPaths t :diagnosticMode "workspace"))
+         (second '(:jedi (:enabled t :fuzzy nil)))
+         (response (vector first second))
+         (override
+          '(:python (:analysis (:diagnosticMode nil))
+            :pylsp (:plugins (:jedi (:enabled :json-false))))))
+    (let ((lsp--cur-workspace 'owning-workspace))
+      (cl-letf
+          (((symbol-function
+             'my/language-server--workspace-configuration-override)
+            (lambda (workspace)
+              (should (eq workspace 'owning-workspace))
+              override)))
+        (let* ((merged
+                (my/language-server--workspace-configuration-response-a
+                 (lambda (_params) response) params))
+               (analysis (aref merged 0))
+               (plugins (aref merged 1))
+               (jedi (my/language-server--mapping-ref
+                      plugins :jedi 'missing)))
+          (should (eq (my/language-server--mapping-ref
+                       analysis :autoSearchPaths 'missing)
+                      t))
+          (should-not (my/language-server--mapping-ref
+                       analysis :diagnosticMode 'missing))
+          (should (eq (my/language-server--mapping-ref
+                       jedi :enabled 'missing)
+                      :json-false))
+          (should-not (my/language-server--mapping-ref
+                       jedi :fuzzy 'missing)))))))
+
+(ert-deftest language-server-custom-activation-cannot-leak-across-modes ()
+  (let (client)
+    (cl-letf (((symbol-function 'lsp-stdio-connection) #'identity)
+              ((symbol-function 'make-lsp-client) (lambda (&rest args) args))
+              ((symbol-function 'lsp-register-client)
+               (lambda (value) (setq client value))))
+      (my/register-language-server
+       '(latex-mode) '("texlab")
+       :server-id 'test-latex
+       :activation-fn (lambda (&rest _) t)))
+    (let ((activation (plist-get client :activation-fn)))
+      (with-temp-buffer
+        (setq major-mode 'c-mode)
+        (should-not (funcall activation "file.c" 'c-mode)))
+      (with-temp-buffer
+        (setq major-mode 'latex-mode)
+        (should (funcall activation "file.tex" 'latex-mode))))))
+
+(ert-deftest language-server-logical-support-check-restores-client-slot ()
+  (require 'lsp-java)
+  (dolist (server-id '(my-clangd my-python jdtls))
+    (let* ((client (gethash server-id lsp-clients))
+           (original (lsp--client-remote? client)))
+      (should client)
+      (with-temp-buffer
+        (setq buffer-file-name "/fs:box:/work/project/source")
+        (should
+         (my/lsp-mode--supports-logical-buffer-a
+          (lambda (candidate)
+            (lsp--client-remote? candidate))
+          client)))
+      (should (eq (lsp--client-remote? client) original)))))
+
+(ert-deftest language-server-core-languages-select-one-authoritative-client ()
+  (with-temp-buffer
+    (setq major-mode 'c-mode)
+    (my/cpp-language-server-setup-h)
+    (should (equal lsp-enabled-clients '(my-clangd))))
+  (with-temp-buffer
+    (setq major-mode 'python-mode)
+    (cl-letf (((symbol-function
+                'my/language-server-set-workspace-configuration)
+               #'ignore))
+      (my/python-language-server-setup-h))
+    (should (equal lsp-enabled-clients '(my-python))))
+  (should-not lsp-auto-register-remote-clients)
+  (should (memq #'my/language-server-ensure-deferred prog-mode-hook)))
+
+(ert-deftest language-server-missing-binary-is-quiet-only-for-auto-start ()
+  (with-temp-buffer
+    (setq major-mode 'python-mode)
+    (let (messages started)
+      (cl-letf (((symbol-function 'my/lsp-mode-supported-p) (lambda () t))
+                ((symbol-function 'my/language-server-apply-process-environment)
+                 #'ignore)
+                ((symbol-function 'my/language-server-apply-lsp-local-settings)
+                 #'ignore)
+                ((symbol-function
+                  'my/language-server-runtime-register-lsp-configuration)
+                 #'ignore)
+                ((symbol-function 'my/language-server-contact-available-p)
+                 (lambda () nil))
+                ((symbol-function 'lsp-deferred)
+                 (lambda () (setq started t)))
+                ((symbol-function 'message)
+                 (lambda (format-string &rest arguments)
+                   (push (apply #'format format-string arguments) messages))))
+        (setq my/language-server--manual-start nil)
+        (my/lsp-mode-start-now)
+        (should-not messages)
+        (setq my/language-server--manual-start t)
+        (my/lsp-mode-start-now)
+        (should (= (length messages) 1))
+        (should-not started)))))
 
 (provide 'init-lsp-remote-tests)
 ;;; init-lsp-remote-tests.el ends here

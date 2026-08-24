@@ -1068,7 +1068,7 @@ from the visiting buffer rather than from an explicit file-name argument."
 
 (defun remote-fs-handle-make-process (&rest plist)
   "Route official `make-process' PLIST through the remote process API.
-This is the compatibility boundary used by Eglot and third-party packages.
+This is the compatibility boundary used by third-party packages.
 The routed API resolves a relative executable on the target before handing
 the request to TRAMP or tramp-rpc."
   ;; Emacs enters a file-name handler with `make-process' and

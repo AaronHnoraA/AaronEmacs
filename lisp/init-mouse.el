@@ -25,8 +25,8 @@
 (declare-function diff-hl-revert-hunk "diff-hl" ())
 (declare-function diff-hl-show-hunk "diff-hl-show-hunk" ())
 (declare-function diff-hl-stage-current-hunk "diff-hl" ())
-(declare-function eldoc-doc-buffer "eldoc" ())
-(declare-function eldoc-box-help-at-point "eldoc-box" ())
+(declare-function lsp-ui-doc-glance "lsp-ui-doc" ())
+(declare-function lsp-describe-thing-at-point "lsp-mode" ())
 (declare-function magit-dispatch "magit" ())
 (declare-function magit-file-dispatch "magit" ())
 (declare-function magit-status "magit" (&optional directory))
@@ -298,12 +298,12 @@ This is only used while building click menus."
   (interactive "e")
   (my/mouse--set-point-from-event event)
   (cond
-   ((fboundp 'eldoc-box-help-at-point)
-    (call-interactively #'eldoc-box-help-at-point))
-   ((fboundp 'eldoc-doc-buffer)
-    (call-interactively #'eldoc-doc-buffer))
+   ((fboundp 'lsp-ui-doc-glance)
+    (call-interactively #'lsp-ui-doc-glance))
+   ((fboundp 'lsp-describe-thing-at-point)
+    (call-interactively #'lsp-describe-thing-at-point))
    (t
-    (user-error "No Eldoc command is available"))))
+    (user-error "No documentation command is available"))))
 
 (defun my/mouse--source-menu-items ()
   "Return source-buffer popup menu items.
@@ -457,12 +457,6 @@ Dedicated status segments handle their own actions."
 (keymap-set prog-mode-map "M-<mouse-1>" #'my/mouse-code-actions)
 (keymap-set prog-mode-map "S-<mouse-1>" #'my/mouse-doc-at-point)
 (keymap-set prog-mode-map "<mouse-3>" #'my/mouse-source-menu)
-
-(with-eval-after-load 'eglot
-  (keymap-set eglot-mode-map "C-<mouse-1>" #'my/mouse-find-definition)
-  (keymap-set eglot-mode-map "M-<mouse-1>" #'my/mouse-code-actions)
-  (keymap-set eglot-mode-map "S-<mouse-1>" #'my/mouse-doc-at-point)
-  (keymap-set eglot-mode-map "<mouse-3>" #'my/mouse-source-menu))
 
 (with-eval-after-load 'lsp-mode
   (keymap-set lsp-mode-map "C-<mouse-1>" #'my/mouse-find-definition)

@@ -1,11 +1,14 @@
-;;; init-lean.el --- Lean 4 on eglot -*- lexical-binding: t -*-
+;;; init-lean.el --- Lean 4 on lsp-mode -*- lexical-binding: t -*-
 
 ;;; Commentary:
 ;; Defines lean-mode derived from prog-mode.  Reuses lean4-mode's proven
-;; syntax/indent/unicode-input building blocks without pulling in lean4-mode.el's
-;; lsp-mode client registration.  LSP driven by eglot.  Custom Lean notifications
-;; ($/lean/fileProgress) live in init-lean-eglot.el.
-;; xwidget infoview in init-lean-infoview.el.
+;; syntax/indent/unicode-input building blocks without pulling in
+;; lean4-mode.el itself, whose own client registration would compete with the
+;; one declared here.  LSP is driven by lsp-mode through
+;; `my/register-language-server\='; the Lean-specific notifications
+;; ($/lean/fileProgress, incremental publishDiagnostics, lean/restartFile)
+;; live in init-lean-lsp.el.  The xwidget infoview is in
+;; init-lean-infoview.el.
 
 ;;; Code:
 
@@ -37,32 +40,32 @@
 (declare-function lean4-eri-indent-reverse "lean4-eri")
 (declare-function quail-show-key "quail")
 (declare-function my/package-ensure-vc "init-package-vc")
-(declare-function my/register-eglot-server-program "init-lsp")
-(declare-function my/eglot-start-now "init-lsp" (&optional interactive))
+(declare-function my/register-language-server "init-lsp")
+(declare-function my/lsp-mode-start-now "init-lsp")
 (declare-function my/language-server-executable-find "init-lsp" (program))
 (declare-function my/project-current-root "init-project")
 (declare-function my/symbols-make-file-line-candidate "init-symbols")
 (declare-function my/symbols-read-file-line-candidates "init-symbols")
 (declare-function my/symbols-register-project-fallback "init-symbols")
 (declare-function company-mode "company" (&optional arg))
-(declare-function eldoc-box-hover-at-point-mode "eldoc-box" (&optional arg))
+(declare-function lsp-ui-doc-mode "lsp-ui-doc" (&optional arg))
 (declare-function eldoc-doc-buffer "eldoc" ())
 (declare-function eldoc-mode "eldoc" (&optional arg))
-(declare-function eglot "eglot" (managed-major-modes project class contact language-ids
-                                                     &optional interactive))
-(declare-function eglot-code-actions "eglot" ())
-(declare-function eglot-inlay-hints-mode "eglot" (&optional arg))
-(declare-function eglot-reconnect "eglot" (server &optional interactive))
-(declare-function eglot-ensure "eglot")
-(declare-function eglot-managed-p "eglot")
-(declare-function eglot-semantic-tokens-mode "eglot" (&optional arg))
+(declare-function lsp "lsp-mode" (&optional arg))
+(declare-function lsp-execute-code-action "lsp-mode" (action))
+(declare-function lsp-inlay-hints-mode "lsp-mode" (&optional arg))
+(declare-function lsp-semantic-tokens-mode "lsp-mode" (&optional arg))
+(declare-function lsp-workspace-restart "lsp-mode" (workspace))
+(declare-function lsp-workspaces "lsp-mode" ())
+(declare-function lsp-stdio-connection "lsp-mode" (command &optional test-command))
 (declare-function flymake-mode "flymake" (&optional arg))
 (declare-function flymake-start "flymake" (&optional deferred force))
-(declare-function lean-setup-flymake-backend "init-lean-eglot" ())
-(declare-function lean-setup-sideline "init-lean-eglot" ())
-(declare-function lean-notification-cleanup "init-lean-eglot" ())
-(declare-function lean-refresh-file-dependencies "init-lean-eglot")
-(declare-function lean--clear-fringe-overlays "init-lean-eglot")
+(declare-function lean-setup-flymake-backend "init-lean-lsp" ())
+(declare-function lean-setup-sideline "init-lean-lsp" ())
+(declare-function lean-notification-cleanup "init-lean-lsp" ())
+(declare-function lean-refresh-file-dependencies "init-lean-lsp")
+(declare-function lean--clear-fringe-overlays "init-lean-lsp")
+(defvar lean-lsp-notification-handlers)
 (declare-function lean-iv-sync-cursor-h "init-lean-infoview")
 (declare-function lean-iv-setup-buffer-sync "init-lean-infoview")
 (declare-function lean-iv-teardown-h "init-lean-infoview")
@@ -99,14 +102,13 @@
 (defvar remote--buffer-base-exec-path)
 
 ;; Forward defvar declarations for variables defined in sibling modules
-(defvar eldoc-box-hover-at-point-mode)
+(defvar lsp-ui-doc-mode)
 (defvar eldoc-mode)
 (defvar lean--file-progress)
 (defvar lean--flymake-counts)
 (defvar lean--fringe-overlays)
-(defvar eglot-connect-timeout)
-(defvar eglot-lsp-context)
-(defvar eglot-stay-out-of)
+(defvar lean--resolving-lsp-root nil
+  "Non-nil while the Lean project finder should claim the LSP root.")
 (defvar flymake-fringe-indicator-position)
 (defvar flymake-mode)
 (defvar project-find-functions)
@@ -121,15 +123,15 @@
   "Lean 4 editing support."
   :group 'languages)
 
-(config-defvar lean-eglot-connect-timeout nil
-  "Seconds before timing out Lean Eglot initialization.
-Mathlib projects can legitimately take longer than Eglot's default 30 seconds
+(config-defvar lean-lsp-connect-timeout nil
+  "Seconds before timing out Lean language-server initialization.
+Mathlib projects can legitimately take far longer than the shared default
 while Lake warms the environment.  Set this to nil to never time out."
   :type '(choice (const :tag "Never time out" nil) (integer :tag "Seconds"))
   :group 'lean)
 
-(config-defvar lean-eglot-start-delay nil
-  "Seconds to wait before automatically starting Lean Eglot.
+(config-defvar lean-lsp-start-delay nil
+  "Seconds to wait before automatically starting the Lean language server.
 This keeps freshly opened Mathlib buffers responsive while still starting the
 language server without user action."
   :type 'number
@@ -206,37 +208,39 @@ language server without user action."
         (remote-canonicalize-file-name root)
       root)))
 
-(defun lean--project-try-eglot (dir)
-  "Return a Lean project for DIR while Eglot is looking for an LSP root."
-  (when (and (bound-and-true-p eglot-lsp-context)
+(defun lean--project-try-lsp (dir)
+  "Return a Lean project for DIR while the language server needs an LSP root.
+Scoped to `lean--resolving-lsp-root\=' so `project-current\=', Projectile and
+ordinary navigation keep seeing the real project."
+  (when (and lean--resolving-lsp-root
              (derived-mode-p 'lean-mode))
     (when-let* ((root (locate-dominating-file dir #'lean-root-dir-p)))
-      (cons 'lean-eglot-project
+      (cons 'lean-lsp-project
             (file-name-as-directory (expand-file-name root))))))
 
-(cl-defmethod project-root ((project (head lean-eglot-project)))
-  "Return the root directory for a Lean Eglot PROJECT."
+(cl-defmethod project-root ((project (head lean-lsp-project)))
+  "Return the root directory for a Lean LSP PROJECT."
   (cdr project))
 
 (defun lean--install-project-finder ()
-  "Install Lean's Eglot project finder before broader project backends."
+  "Install Lean's LSP project finder before broader project backends."
   (setq project-find-functions
-        (cons #'lean--project-try-eglot
-              (remove #'lean--project-try-eglot project-find-functions))))
+        (cons #'lean--project-try-lsp
+              (remove #'lean--project-try-lsp project-find-functions))))
 
 (with-eval-after-load 'project
   (lean--install-project-finder))
 
-(defun lean--eglot-project-root-candidate ()
-  "Return the project root Eglot should use for the current Lean buffer."
-  (let ((eglot-lsp-context t))
+(defun lean--lsp-project-root-candidate ()
+  "Return the project root the language server should use for this buffer."
+  (let ((lean--resolving-lsp-root t))
     (when-let* ((project (project-current nil)))
       (project-root project))))
 
-;;; ── Eglot server contact ─────────────────────────────────────────────────────
+;;; ── Language server contact ─────────────────────────────────────────────────────
 
 (config-defvar lean-infoview-proxy-enabled nil
-  "When non-nil, route Eglot through lean-proxy.mjs for infoview support.
+  "When non-nil, route the language server through lean-proxy.mjs.
 The proxy is a transparent JSON-RPC passthrough to lake serve; it also
 serves the official @leanprover/infoview over HTTP+SSE so a single Lean
 LSP session drives both editing and the xwidget infoview.
@@ -403,19 +407,22 @@ Return the logical remote script name, or nil when provisioning is disabled."
       (remote-gateway-release-binding binding t))
     (remhash key lean--proxy-gateway-bindings)))
 
-(defun lean--server-contact (&optional _interactive _project)
-  "Return the Lean Eglot contact for the current buffer.
-When `lean-infoview-proxy-enabled' is non-nil and the proxy script and
-dist/ bundle are present, create the Node proxy as an explicit client process.
-Its downstream argv bridges stdio to `lake serve' on the target, so Eglot does
-not reinterpret the local Node command merely because the project root is
-remote.  Falls back to a direct lake serve / lean --server contact otherwise."
+(defun lean--direct-server-command ()
+  "Return the plain Lean server argv for the current buffer."
+  (if (locate-dominating-file
+       (or buffer-file-name default-directory ".") #'lean-root-dir-p)
+      '("lake" "serve")
+    '("lean" "--server")))
+
+(defun lean--proxy-process-command ()
+  "Return the client-side Node proxy argv, or nil when the proxy is unusable.
+
+The proxy is a transparent JSON-RPC passthrough that additionally serves the
+infoview.  It runs on the *client* (it talks to an xwidget here), while its
+downstream argv bridges stdio to `lake serve\=' on the target, so the two
+halves keep their correct placement."
   (let* ((root    (file-name-as-directory (lean-project-root)))
-         (in-lake (locate-dominating-file
-                   (or buffer-file-name default-directory ".") #'lean-root-dir-p))
-         (direct  (if in-lake
-                      '("lake" "serve")
-                    '("lean" "--server"))))
+         (direct  (lean--direct-server-command)))
     (if-let* (((lean--proxy-available-p))
               (script (lean--proxy-script-for-root root))
               (node-command (lean--proxy-node-command root)))
@@ -447,24 +454,55 @@ remote.  Falls back to a direct lake serve / lean --server contact otherwise."
                  (format "Lean proxy (%s)"
                          (file-name-nondirectory
                           (directory-file-name root)))))
-            (list
-             'eglot-lsp-server
-             :process
-             (lambda ()
-               (remote-make-client-process
-                :name name
-                :command command
-                :connection-type 'pipe
-                :coding 'utf-8-emacs-unix
-                :noquery t
-                :stderr
-                (get-buffer-create
-                 (format "*%s stderr*" name)))))))
+            (cons name command)))
       (lean-dev-log "server-contact: direct contact=%S" direct)
-      direct)))
+      nil)))
+
+(defun lean--lsp-connection ()
+  "Return the lsp-mode connection plist for Lean.
+
+When the infoview proxy is usable the transport is an explicit *client*
+process created with `remote-make-client-process\=', because the Node proxy
+renders into an xwidget on this machine.  Otherwise the plain `lake serve\='
+argv is handed to `lsp-stdio-connection\=', which projects it onto the
+workspace target through the `/fs:\=' process boundary like every other
+server."
+  (list
+   :connect
+   (lambda (filter sentinel name environment-fn workspace)
+     (if-let* ((proxy (lean--proxy-process-command)))
+         (let* ((process-name (generate-new-buffer-name (car proxy)))
+                (stderr (get-buffer-create
+                         (format "*%s::stderr*" process-name)))
+                (proc (remote-make-client-process
+                       :name process-name
+                       :command (cdr proxy)
+                       :connection-type 'pipe
+                       :coding 'no-conversion
+                       :buffer (format "*%s*" process-name)
+                       :filter filter
+                       :sentinel sentinel
+                       :stderr stderr
+                       :noquery t)))
+           (set-process-query-on-exit-flag proc nil)
+           (when-let* ((stderr-proc (get-buffer-process stderr)))
+             (set-process-query-on-exit-flag stderr-proc nil))
+           (lean-dev-log "lsp connect: proxy process=%s" process-name)
+           (cons proc proc))
+       (lean-dev-log "lsp connect: direct")
+       (funcall
+        (plist-get (lsp-stdio-connection #'lean--direct-server-command)
+                   :connect)
+        filter sentinel name environment-fn workspace)))
+   :test?
+   (lambda ()
+     (or (lean--proxy-available-p)
+         (and (fboundp 'my/language-server-executable-find)
+              (my/language-server-executable-find
+               (car (lean--direct-server-command))))))))
 
 ;; Older revisions intercepted every `make-process' call and tried to recognize
-;; this command after Eglot had already wrapped it in a remote shell.  Remove
+;; this command after the client had already wrapped it in a remote shell.  Remove
 ;; that hot-reload residue; the explicit process factory above is deterministic.
 (when (fboundp 'lean--make-local-proxy-process-a)
   (advice-remove 'make-process #'lean--make-local-proxy-process-a))
@@ -530,78 +568,82 @@ remote.  Falls back to a direct lake serve / lean --server contact otherwise."
 
 ;;; ── Noema LSP UI integration ────────────────────────────────────────────
 
-(defvar-local lean--eglot-start-timer nil
-  "Timer used to start Eglot for the current Lean buffer.")
+(defvar-local lean--lsp-start-timer nil
+  "Timer used to start the language server for the current Lean buffer.")
 
-(defvar-local lean--eglot-waiting-for-environment nil
-  "Non-nil while Lean Eglot startup waits for direnv.")
+(defvar-local lean--lsp-waiting-for-environment nil
+  "Non-nil while Lean language-server startup waits for direnv.")
 
-(config-defvar lean-eglot-deferred-ui-delays nil
-  "Idle delays before enabling expensive Lean Eglot UI features."
+(config-defvar lean-lsp-deferred-ui-delays nil
+  "Idle delays before enabling expensive Lean LSP UI features."
   :type '(alist :key-type symbol :value-type number)
   :group 'lean)
 
-(defvar-local lean--eglot-ui-timers nil
-  "Idle timers used to stage Lean Eglot UI activation.")
+(defvar-local lean--lsp-ui-timers nil
+  "Idle timers used to stage Lean LSP UI activation.")
 
-(defun lean--cancel-eglot-start-timer ()
-  "Cancel a pending Lean Eglot startup timer."
-  (when (timerp lean--eglot-start-timer)
-    (cancel-timer lean--eglot-start-timer))
-  (setq lean--eglot-start-timer nil))
+(defun lean--cancel-lsp-start-timer ()
+  "Cancel a pending Lean language-server startup timer."
+  (when (timerp lean--lsp-start-timer)
+    (cancel-timer lean--lsp-start-timer))
+  (setq lean--lsp-start-timer nil))
 
-(defun lean--cancel-eglot-ui-timers ()
-  "Cancel pending deferred Lean Eglot UI activation."
+(defun lean--cancel-lsp-ui-timers ()
+  "Cancel pending deferred Lean LSP UI activation."
   (mapc (lambda (timer)
           (when (timerp timer)
             (cancel-timer timer)))
-        lean--eglot-ui-timers)
-  (setq lean--eglot-ui-timers nil))
+        lean--lsp-ui-timers)
+  (setq lean--lsp-ui-timers nil))
 
-(defun lean--enable-eglot-ui-feature (buffer feature)
-  "Enable deferred Eglot UI FEATURE in Lean BUFFER."
+(defun lean--enable-lsp-ui-feature (buffer feature)
+  "Enable deferred LSP UI FEATURE in Lean BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (when (and (derived-mode-p 'lean-mode)
-                 (fboundp 'eglot-managed-p)
-                 (eglot-managed-p))
+                 (bound-and-true-p lsp-managed-mode))
         (pcase feature
           ('company
            (when (fboundp 'company-mode)
              (company-mode 1)))
-          ('eldoc-box
-           (when (fboundp 'eldoc-box-hover-at-point-mode)
-             (eldoc-box-hover-at-point-mode 1)))
+          ('doc
+           (when (fboundp 'lsp-ui-doc-mode)
+             (lsp-ui-doc-mode 1)))
           ('inlay-hints
-           (when (fboundp 'eglot-inlay-hints-mode)
-             (eglot-inlay-hints-mode 1)))
+           (when (fboundp 'lsp-inlay-hints-mode)
+             (lsp-inlay-hints-mode 1)))
           ('semantic-tokens
-           (when (fboundp 'eglot-semantic-tokens-mode)
-             (eglot-semantic-tokens-mode 1))))))))
+           (when (fboundp 'lsp-semantic-tokens-mode)
+             (lsp-semantic-tokens-mode 1))))))))
 
-(defun lean--schedule-eglot-ui ()
-  "Enable expensive Lean Eglot UI features in separate idle slices."
-  (lean--cancel-eglot-ui-timers)
-  (dolist (entry lean-eglot-deferred-ui-delays)
+(defun lean--schedule-lsp-ui ()
+  "Enable expensive Lean LSP UI features in separate idle slices."
+  (lean--cancel-lsp-ui-timers)
+  (dolist (entry lean-lsp-deferred-ui-delays)
     (push (run-with-idle-timer
            (max 0 (cdr entry)) nil
-           #'lean--enable-eglot-ui-feature (current-buffer) (car entry))
-          lean--eglot-ui-timers)))
+           #'lean--enable-lsp-ui-feature (current-buffer) (car entry))
+          lean--lsp-ui-timers)))
 
-(defun lean--eglot-maybe-activate-editing-mode-a (fn &rest args)
-  "Activate Lean Eglot protocol support before its expensive UI features."
+(defun lean--lsp-managed-mode-a (fn &rest args)
+  "Activate Lean LSP protocol support before its expensive UI features.
+
+A Lean file elaborates for seconds after the server attaches; bringing up
+completion, hover frames, inlay hints and semantic tokens in the same
+command makes that wait feel like a freeze.  They are suppressed here and
+re-enabled on separate idle slices by `lean--schedule-lsp-ui\='."
   (if (and (derived-mode-p 'lean-mode)
-           (not (bound-and-true-p eglot--managed-mode)))
+           (not (bound-and-true-p lsp-managed-mode)))
       (cl-letf (((symbol-function 'company-mode) (lambda (&optional _arg) nil))
-                ((symbol-function 'eldoc-box-hover-at-point-mode)
+                ((symbol-function 'lsp-ui-doc-mode)
                  (lambda (&optional _arg) nil))
-                ((symbol-function 'eglot-inlay-hints-mode)
+                ((symbol-function 'lsp-inlay-hints-mode)
                  (lambda (&optional _arg) nil))
-                ((symbol-function 'eglot-semantic-tokens-mode)
+                ((symbol-function 'lsp-semantic-tokens-mode)
                  (lambda (&optional _arg) nil)))
         (prog1 (apply fn args)
-          (when (and (fboundp 'eglot-managed-p) (eglot-managed-p))
-            (lean--schedule-eglot-ui))))
+          (when (bound-and-true-p lsp-managed-mode)
+            (lean--schedule-lsp-ui))))
     (apply fn args)))
 
 (defun lean--setup-diagnostics-ui ()
@@ -614,14 +656,14 @@ remote.  Falls back to a direct lake serve / lean --server contact otherwise."
     (my/flymake-diagnostic-at-point-mode -1)))
 
 (defun lean--setup-managed-ui ()
-  "Enable Lean-specific UI after Eglot starts managing this buffer.
+  "Enable Lean-specific UI after lsp-mode starts managing this buffer.
 Completion uses the global corfu+capf surface — no company-mode override."
   (when (fboundp 'lean-setup-sideline)
     (lean-setup-sideline))
-  (lean-dev-log "eglot UI active: flymake=%S eldoc=%S eldoc-box=%S fringe=%S"
+  (lean-dev-log "lsp UI active: flymake=%S eldoc=%S doc-frame=%S fringe=%S"
                 (bound-and-true-p flymake-mode)
                 (bound-and-true-p eldoc-mode)
-                (bound-and-true-p eldoc-box-hover-at-point-mode)
+                (bound-and-true-p lsp-ui-doc-mode)
                 (and (boundp 'flymake-fringe-indicator-position)
                      flymake-fringe-indicator-position)))
 
@@ -695,10 +737,10 @@ Completion uses the global corfu+capf surface — no company-mode override."
   (local-set-key (kbd "C-c C-i") #'lean-iv-toggle)
   (local-set-key (kbd "C-c i r") #'lean-iv-restart)
   ;; LSP management
-  (local-set-key (kbd "C-c C-r") #'eglot-reconnect)
+  (local-set-key (kbd "C-c C-r") #'my/language-server-restart)
   (local-set-key (kbd "C-c C-d") #'lean-refresh-file-dependencies)
-  (local-set-key (kbd "C-c C-a") #'eglot-code-actions)
-  (local-set-key (kbd "C-c C-e") #'eldoc-doc-buffer)
+  (local-set-key (kbd "C-c C-a") #'my/language-server-code-actions)
+  (local-set-key (kbd "C-c C-e") #'lsp-ui-doc-glance)
   (local-set-key (kbd "C-c C-l") #'lean-dev-log-open)
   (local-set-key (kbd "C-c !")   #'my/problems-buffer)
   (local-set-key (kbd "C-c ?")   #'my/diagnostics-dispatch)
@@ -714,15 +756,17 @@ Completion uses the global corfu+capf surface — no company-mode override."
   "Apply Lean editing tweaks for TRAMP buffers."
   nil)
 
-(defun lean--apply-eglot-settings ()
-  "Install Lean-specific Eglot settings in the current buffer."
-  (when (boundp 'eglot-connect-timeout)
-    (setq-local eglot-connect-timeout lean-eglot-connect-timeout))
-  (lean-dev-log "lean-mode setup: file=%s root=%s proxy-enabled=%S eglot-connect-timeout=%S"
+(defun lean--apply-lsp-settings ()
+  "Install Lean-specific language-server settings in the current buffer."
+  ;; Lake can take minutes to warm Mathlib; the shared startup watchdog would
+  ;; otherwise stop the workspace before it ever initializes.
+  (when lean-lsp-connect-timeout
+    (setq-local my/lsp-mode-startup-timeout lean-lsp-connect-timeout))
+  (lean-dev-log "lean-mode setup: file=%s root=%s proxy-enabled=%S connect-timeout=%S"
                 (or buffer-file-name "<no file>")
                 (file-name-as-directory (expand-file-name (lean-project-root)))
                 lean-infoview-proxy-enabled
-                (and (boundp 'eglot-connect-timeout) eglot-connect-timeout)))
+                lean-lsp-connect-timeout))
 
 ;;; ── Post-command hook: infoview cursor sync ──────────────────────────────────
 
@@ -739,8 +783,9 @@ Completion uses the global corfu+capf surface — no company-mode override."
   "Major mode for Lean 4 source files.
 
 Reuses lean4-mode's syntax table, font-lock keywords, indentation
-engine (lean4-eri), and the \\='Lean\\=' Quail unicode-input method,
-while using eglot (not lsp-mode) as the language server backend."
+engine (lean4-eri), and the \\='Lean\\=' Quail unicode-input method.
+lean4-mode.el itself is never loaded: its own client registration would
+compete with the one this module declares."
   :group 'lean
   ;; Ensure lean4 sub-files are loaded (idempotent — already loaded if elpa is ready)
   (require 'lean4-syntax nil t)
@@ -775,22 +820,21 @@ while using eglot (not lsp-mode) as the language server backend."
 
 (defun lean--mode-hook ()
   "Full lean-mode setup installed via lean-mode-hook."
-  ;; Sibling modules — loaded here so they are ready before eglot connects.
-  (require 'init-lean-eglot    nil t)
+  ;; Sibling modules — loaded here so they are ready before the server connects.
+  (require 'init-lean-lsp      nil t)
   (require 'init-lean-infoview nil t)
   (require 'init-lean-jump     nil t)
   ;; Projectile may install its project backend after init-lean loads.  Re-pin
-  ;; the Lean finder before Eglot asks project.el for an LSP root.
+  ;; the Lean finder before lsp-mode asks project.el for an LSP root.
   (lean--install-project-finder)
   ;; Keys
   (lean--setup-keys)
-  ;; Eglot startup policy
-  (lean--apply-eglot-settings)
-  ;; Lean owns diagnostics so it can preserve Lean-specific tags and coalesce
-  ;; the large initial publishDiagnostics burst.
-  (when (boundp 'eglot-stay-out-of)
-    (setq-local eglot-stay-out-of
-                (cons 'flymake (remove 'flymake eglot-stay-out-of))))
+  ;; Language-server startup policy
+  (lean--apply-lsp-settings)
+  ;; Lean owns diagnostics so it can preserve Lean-specific tags
+  ;; (`fullRange', `isSilent') and coalesce the large initial
+  ;; publishDiagnostics burst, so lsp-mode's own diagnostics stay out.
+  (setq-local lsp-diagnostics-provider :none)
   (when (fboundp 'lean-setup-flymake-backend)
     (lean-setup-flymake-backend))
   ;; Mode-line progress indicator
@@ -811,115 +855,116 @@ while using eglot (not lsp-mode) as the language server backend."
   (add-hook 'post-command-hook #'lean--post-command-h nil t)
   ;; Buffer teardown
   (add-hook 'kill-buffer-hook  #'lean--buffer-teardown-h nil t)
-  ;; Start Eglot shortly after the mode hook returns.  This keeps the initial
-  ;; file visit responsive but still starts `lake serve' automatically.
-  (lean--schedule-eglot-start))
+  ;; Start the language server shortly after the mode hook returns.  This
+  ;; keeps the initial file visit responsive but still starts `lake serve'
+  ;; automatically.
+  (lean--schedule-lsp-start))
 
-(defun lean--schedule-eglot-start ()
-  "Schedule automatic Eglot startup for the current Lean buffer."
-  (lean--cancel-eglot-start-timer)
+(defun lean--schedule-lsp-start ()
+  "Schedule automatic language-server startup for the current Lean buffer."
+  (lean--cancel-lsp-start-timer)
   (let ((buf (current-buffer))
-        (delay (max 0 (or lean-eglot-start-delay 0))))
-    (lean-dev-log "eglot scheduled: delay=%s buffer=%s"
+        (delay (max 0 (or lean-lsp-start-delay 0))))
+    (lean-dev-log "lsp scheduled: delay=%s buffer=%s"
                   delay (buffer-name buf))
-    (setq lean--eglot-start-timer
+    (setq lean--lsp-start-timer
           (run-at-time
            delay nil
            (lambda (buffer)
              (when (buffer-live-p buffer)
                (with-current-buffer buffer
-                 (setq lean--eglot-start-timer nil)
+                 (setq lean--lsp-start-timer nil)
                  (when (derived-mode-p 'lean-mode)
-                   (lean--ensure-eglot)))))
+                   (lean--ensure-lsp)))))
            buf))))
 
-(defun lean--eglot-direnv-ready (_environment error)
-  "Resume Lean Eglot after direnv, falling back after ERROR."
-  (setq lean--eglot-waiting-for-environment nil)
+(defun lean--lsp-direnv-ready (_environment error)
+  "Resume Lean language-server startup after direnv, falling back after ERROR."
+  (setq lean--lsp-waiting-for-environment nil)
   (when error
-    (lean-dev-log "eglot direnv failed; using target base environment: %s"
+    (lean-dev-log "lsp direnv failed; using target base environment: %s"
                   (error-message-string error))
     (message
-     "Lean Eglot: direnv failed (%s); continuing with target base environment"
+     "Lean LSP: direnv failed (%s); continuing with target base environment"
      (error-message-string error)))
   ;; The asynchronous contract has already applied a successful capsule to
   ;; this buffer.  Start directly instead of re-entering discovery and risking
-  ;; another pending latch.  On failure this follows the shared Eglot policy:
+  ;; another pending latch.  On failure this follows the shared policy:
   ;; availability is more important than an optional environment layer.
-  (if (fboundp 'my/eglot-start-now)
-      (my/eglot-start-now t)
-    (call-interactively #'eglot)))
+  (lean--start-lsp-now))
 
-(defun lean--ensure-eglot ()
-  "Start eglot for the current lean-mode buffer if not already managed."
+(defun lean--start-lsp-now ()
+  "Start the language server for this Lean buffer through the shared path."
+  (if (fboundp 'my/lsp-mode-start-now)
+      (my/lsp-mode-start-now)
+    (call-interactively #'lsp)))
+
+(defun lean--ensure-lsp ()
+  "Start the language server for this lean-mode buffer if not already managed."
   ;; A manual infoview open owns startup once it reaches this boundary.  Do not
   ;; let the mode hook's delayed automatic start allocate a second proxy
-  ;; instance while the first Eglot connection is still being established.
-  (lean--cancel-eglot-start-timer)
+  ;; instance while the first connection is still being established.
+  (lean--cancel-lsp-start-timer)
   (cond
    ((not buffer-file-name)
-    (lean-dev-log "eglot skipped: buffer has no file"))
-   ((not (fboundp 'eglot))
-    (lean-dev-log "eglot skipped: `eglot' is not available"))
-   ((and (fboundp 'eglot-managed-p) (eglot-managed-p))
-    (lean-dev-log "eglot already managing buffer: %s" (buffer-name)))
-   ((and lean--eglot-waiting-for-environment
+    (lean-dev-log "lsp skipped: buffer has no file"))
+   ((not (fboundp 'lsp))
+    (lean-dev-log "lsp skipped: `lsp-mode' is not available"))
+   ((bound-and-true-p lsp-managed-mode)
+    (lean-dev-log "lsp already managing buffer: %s" (buffer-name)))
+   ((and lean--lsp-waiting-for-environment
          (bound-and-true-p direnv--active-root))
     ;; A pre-fix busy retry could apply the environment but lose the callback
     ;; promised to this buffer.  The active direnv layer is authoritative:
     ;; clear the stale latch and continue instead of waiting forever.
-    (setq lean--eglot-waiting-for-environment nil)
-    (lean-dev-log "eglot recovered a completed direnv wait: %s"
+    (setq lean--lsp-waiting-for-environment nil)
+    (lean-dev-log "lsp recovered a completed direnv wait: %s"
                   direnv--active-root)
-    (lean--ensure-eglot))
-   (lean--eglot-waiting-for-environment
-    (lean-dev-log "eglot waiting for target environment: %s"
+    (lean--ensure-lsp))
+   (lean--lsp-waiting-for-environment
+    (lean-dev-log "lsp waiting for target environment: %s"
                   (buffer-name)))
    ((and
      (fboundp 'my/direnv-update-environment-maybe)
      (eq
       (my/direnv-update-environment-maybe
-       nil #'lean--eglot-direnv-ready)
+       nil #'lean--lsp-direnv-ready)
       'pending))
-    (setq lean--eglot-waiting-for-environment t)
-    (lean-dev-log "eglot deferred until direnv is ready: %s"
+    (setq lean--lsp-waiting-for-environment t)
+    (lean-dev-log "lsp deferred until direnv is ready: %s"
                   (buffer-name)))
    (t
-    (lean-dev-log "eglot starting: buffer-dir=%s lsp-root=%s proxy-enabled=%S timeout=%S project-finders=%S"
+    (lean-dev-log "lsp starting: buffer-dir=%s lsp-root=%s proxy-enabled=%S timeout=%S project-finders=%S"
                   default-directory
-                  (or (lean--eglot-project-root-candidate) "<none>")
+                  (or (lean--lsp-project-root-candidate) "<none>")
                   lean-infoview-proxy-enabled
-                  (and (boundp 'eglot-connect-timeout) eglot-connect-timeout)
+                  lean-lsp-connect-timeout
                   project-find-functions)
-    (when (and (boundp 'eglot-connect-timeout)
-               (numberp eglot-connect-timeout))
+    (when (numberp lean-lsp-connect-timeout)
       (let ((buf (current-buffer))
-            (timeout eglot-connect-timeout))
+            (timeout lean-lsp-connect-timeout))
         (run-at-time
          (1+ timeout) nil
          (lambda ()
            (when (buffer-live-p buf)
              (with-current-buffer buf
                (when (and (derived-mode-p 'lean-mode)
-                          (not (and (fboundp 'eglot-managed-p)
-                                    (eglot-managed-p))))
+                          (not (bound-and-true-p lsp-managed-mode)))
                  (lean-dev-log
-                  "eglot not connected after %s seconds; check Eglot stderr and Messages buffers"
+                  "lsp not connected after %s seconds; check the server stderr and Messages buffers"
                   timeout))))))))
     (condition-case err
-        (if (fboundp 'my/eglot-start-now)
-            (my/eglot-start-now t)
-          (call-interactively #'eglot))
+        (lean--start-lsp-now)
       (error
-       (lean-dev-log "eglot start error: %s" (error-message-string err))
+       (lean-dev-log "lsp start error: %s" (error-message-string err))
        (signal (car err) (cdr err)))))))
 
 (add-hook 'lean-mode-hook #'lean--mode-hook)
 
 (defun lean--buffer-teardown-h ()
   "Cancel timers, clear overlays, and close the infoview on buffer kill."
-  (lean--cancel-eglot-start-timer)
-  (lean--cancel-eglot-ui-timers)
+  (lean--cancel-lsp-start-timer)
+  (lean--cancel-lsp-ui-timers)
   (when (fboundp 'lean-notification-cleanup)
     (lean-notification-cleanup))
   (when (fboundp 'lean--clear-fringe-overlays)
@@ -927,43 +972,40 @@ while using eglot (not lsp-mode) as the language server backend."
   (when (fboundp 'lean-iv-teardown-h)
     (lean-iv-teardown-h)))
 
-;;; ── Eglot server registration ────────────────────────────────────────────────
+;;; ── Language server registration ─────────────────────────────────────────────
 
-(defun lean--eglot-connect-log-h (_server)
-  "Log successful Lean Eglot connections."
+(defun lean--lsp-managed-mode-log-h ()
+  "Log and finish setup when lsp-mode activates support in a Lean buffer."
   (when (derived-mode-p 'lean-mode)
-    (lean-dev-log "eglot connected: buffer=%s root=%s"
-                  (buffer-name)
-                  (file-name-as-directory (expand-file-name (lean-project-root))))))
-
-(defun lean--eglot-managed-mode-log-h ()
-  "Log when Eglot activates editing support in a Lean buffer."
-  (when (derived-mode-p 'lean-mode)
-    (if (and (fboundp 'eglot-managed-p) (eglot-managed-p))
+    (if (bound-and-true-p lsp-managed-mode)
         (progn
           (lean--setup-managed-ui)
-          (lean-dev-log "eglot managed mode active: buffer=%s lsp-root=%s flymake=%S eldoc=%S capf=%S"
+          (lean-dev-log "lsp managed mode active: buffer=%s lsp-root=%s flymake=%S eldoc=%S capf=%S"
                         (buffer-name)
-                        (or (lean--eglot-project-root-candidate) "<none>")
+                        (or (lean--lsp-project-root-candidate) "<none>")
                         (bound-and-true-p flymake-mode)
                         (bound-and-true-p eldoc-mode)
                         completion-at-point-functions))
       (when (fboundp 'lean-notification-cleanup)
         (lean-notification-cleanup))
-      (lean--cancel-eglot-ui-timers)
-      (lean-dev-log "eglot managed mode inactive: buffer=%s" (buffer-name)))))
+      (lean--cancel-lsp-ui-timers)
+      (lean-dev-log "lsp managed mode inactive: buffer=%s" (buffer-name)))))
 
-(with-eval-after-load 'eglot
-  (unless (advice-member-p #'lean--eglot-maybe-activate-editing-mode-a
-                           'eglot--maybe-activate-editing-mode)
-    (advice-add 'eglot--maybe-activate-editing-mode
-                :around #'lean--eglot-maybe-activate-editing-mode-a))
-  (add-hook 'eglot-connect-hook #'lean--eglot-connect-log-h)
-  (add-hook 'eglot-managed-mode-hook #'lean--eglot-managed-mode-log-h)
-  (when (fboundp 'my/register-eglot-server-program)
-    (my/register-eglot-server-program
-     '(lean-mode :language-id "lean4")
-     #'lean--server-contact
+(with-eval-after-load 'lsp-mode
+  ;; The client declares Lean's notification handlers, so they must exist
+  ;; before it is registered — not only once a Lean buffer opens.
+  (require 'init-lean-lsp nil t)
+  (unless (advice-member-p #'lean--lsp-managed-mode-a 'lsp-managed-mode)
+    (advice-add 'lsp-managed-mode :around #'lean--lsp-managed-mode-a))
+  (add-hook 'lsp-managed-mode-hook #'lean--lsp-managed-mode-log-h)
+  (add-to-list 'lsp-language-id-configuration '(lean-mode . "lean4"))
+  (when (fboundp 'my/register-language-server)
+    (my/register-language-server
+     'lean-mode
+     (lean--lsp-connection)
+     :server-id 'lean4
+     :priority 1
+     :notification-handlers (bound-and-true-p lean-lsp-notification-handlers)
      :executables '("lean" "lake" "node")
      :placement 'hybrid
      :label "Lean Language Server"

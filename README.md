@@ -18,7 +18,7 @@ This configuration is designed to solve a concrete set of problems:
 - Project-first workflow
   `projectile`, `perspective`, `transient`, Treemacs, `show-imenu`, and popup `vterm` are composed into a workspace-oriented project surface.
 - Programming and debugging
-  The default route is `eglot`, with `lsp-mode` used selectively where needed. Completion, diagnostics, build/test, debugging, tree-sitter, snippets, code navigation, and an on-demand SQL/database client are already wired together.
+  `lsp-mode` is the single language-server client, with target-aware automatic startup and first-class C/C++, Python, and Java/JDTLS routes. Completion, visible-region diagnostics/CodeLens/inlay hints, semantic Treemacs outlines, build/test, debugging, tree-sitter, snippets, code navigation, and an on-demand SQL/database client are already wired together.
 - Org and research writing
   Agenda, capture, TeXpresso live preview, AUCTeX, Jupyter, citations, and PDF Tools workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals

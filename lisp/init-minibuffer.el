@@ -88,7 +88,7 @@
           (file (styles . (basic partial-completion orderless)))
           (imenu (styles . (orderless substring)))
           (my-workspace-symbol (styles . (orderless flex basic)))
-          (eglot-capf (styles . (orderless basic partial-completion)))
+          (lsp-capf (styles . (orderless basic partial-completion)))
           (kill-ring (styles . (orderless substring))))))
 
 (use-package embark

@@ -6,47 +6,48 @@
 
 覆盖内容：
 
-- =eglot= / =lsp-mode= 的路由模型
+- 单一 =lsp-mode= 客户端与自动启动模型
 - =Language Server Hub= 和 =Language Server Doctor=
 - 常用运维命令和 session 级调参入口
-- 如何为新语言补路由、补 Eglot server 映射
+- 如何注册新的 target-aware client
 - 如何把这种 Hub/Doctor 模式继续扩到别的模块
 
 相关入口文件：
 
 - =lisp/init-lsp.el=：路由核心、Remote adapter 绑定、URI/workspace 身份、
-  flymake/company/eglot/lsp-mode 装配
+  flymake/company/lsp-mode 装配，以及可见区域渲染边界
 - =lisp/init-lsp-ops.el=：backend 无关的通用命令（restart/shutdown/log/session）
 - =lisp/init-lsp-tools.el=：Hub、Doctor、dispatch、session 调参
 - =lisp/init-lsp-runtime.el=：runtime provider 层，见下方 *Runtime Contexts*
-- =lisp/init-lsp-toolchain.el=：project 级 toolchain profile，供 Eglot/lsp-mode
-  共用（buffer-local 环境变量/PATH 应用与复原）
+- =lisp/init-lsp-toolchain.el=：project 级 toolchain profile（buffer-local
+  环境变量/PATH 应用与复原）
 - =lisp/lang/=：逐语言路由声明与 server 特有配置
 
 * Design
 
-当前策略不是“全局只用一个 LSP 客户端”，而是：
+当前只有一个受支持的客户端：=lsp-mode=。Eglot 作为 Emacs 内置库不能卸载，但
+命令会从 =M-x= 隐藏，防止误启动第二套不受 Remote workspace 管理的客户端。
 
-- 默认编程缓冲区走 =eglot=
-- 少数明确声明的 major mode 走 =lsp-mode=
+所有 file-backed =prog-mode= buffer 都会延迟尝试启动；只有同时满足以下条件才
+真正连接：
 
-也就是：
+- 当前 mode 有可用 client；
+- client 所需 feature 可加载；
+- language server executable 在当前 workspace target 的环境中存在。
 
-- 默认路由：=prog-mode= -> =eglot=
-- 显式例外：通过 =my/register-lsp-mode-preference= 把某些 mode 切到 =lsp-mode=
-- 本地自定义 Eglot server 映射：通过 =my/register-eglot-server-program= 注册
+自动启动找不到 server 时保持安静；手动执行 =my/language-server-ensure= 才显示
+缺失提示。自定义 client 用 =my/register-language-server=，=lsp-java= 这类由包
+自身注册的 client 用 =my/register-language-server-feature= 声明给 Hub/Doctor。
 
-这样做的好处是：
+进程启动统一绑定到 Remote 框架的 =language-server= adapter。默认 placement 是
+target：本地 buffer 使用 =local= target，远程 buffer 使用自己的 target/workspace
+PATH、direnv 和工具链，不会把客户端机器上的 server 路径泄漏给远端。
 
-- 日常 buffer 保持 Eglot / Flymake 这套更轻的主路径
-- Java、Beancount 这类需要专用 lsp-mode client 的语言仍然可以显式 opt-in；
-  Lean 明确走 Eglot
-- Hub 能直接反查“这个 mode 的路由是在哪个文件里声明的”
-
-Eglot 与 lsp-mode 的进程启动统一绑定到 Remote 框架的
-=language-server= adapter。默认 placement 是 target：本地 buffer 使用
-=local= target，远程 buffer 使用自己的 target/workspace PATH、direnv 和工具链，
-不会把客户端机器上的 server 路径泄漏给远端。
+CodeLens 默认开启，=SPC c L= 切换。CodeLens、inlay hints、文档颜色、文档链接和
+semantic-token 预取统一限制在当前可见窗口加
+=my/language-server-visible-render-margin= 行缓冲内；服务器响应、诊断状态与协议缓存
+仍按整个 workspace 保存。Flymake 的行尾短诊断由 redisplay 覆盖可见诊断行，不需要
+buffer-global sideline overlays。统一 idle 为 350ms。
 
 * Runtime Contexts
 
@@ -57,7 +58,7 @@ Jupyter cell 是第一个 consumer，后续 REPL/run/debug 可以复用同一份
 
 运行时契约包含稳定 ID、owning Remote context、真实 workspace root、tooling
 environment、runtime environment、语言 toolchain profile、workspace configuration
-和 idle timeout。Eglot 只在自己的 project lookup 动态范围内看到
+和 idle timeout。lsp-mode 只在对应 runtime workspace 动态范围内看到
 =(my/language-server-runtime-project ROOT ID)=；普通 =project-current=、Projectile
 和文件导航仍看到真实项目。因此同一项目的两个 kernel 不会错误共用 server，
 相同 runtime 则会复用保温中的 server。
@@ -65,8 +66,8 @@ environment、runtime environment、语言 toolchain profile、workspace configu
 工具与解释器是两层：pyright/pylsp 等 analyzer 仍从 target/workspace tooling
 environment 解析，kernel 只提供 =pythonPath=、=sys.path=、env 和 import 分析设置。
 这避免每个 kernel 环境都重复安装 language server，同时保留 VS Code/Jupyter
-式的解释器跟随手感。runtime buffer 不改全局 =eglot-autoshutdown=；最后一个
-buffer 离开后由 provider 的 timeout 单独保温（Noema 默认 600 秒），timer 会在
+式的解释器跟随手感。最后一个 runtime buffer 离开后由 provider 的 timeout 单独
+保温（Noema 默认 600 秒），timer 会在
 server 被复用或已死亡时幂等取消。
 
 provider 可同步或异步解析。无法可靠推导的 runtime 必须返回明确 fallback reason，
@@ -89,18 +90,11 @@ process、URI 和 resource-lifecycle 流程。
    buffer 别名机制承担——=find-buffer-visiting= 的 =get-file-buffer= 层已经是
    file-name-handler 派发的，=/fs:= 已注册它，所以 =/fs:local:/path= 与其原生
    拼写互相解析，不需要改写任何 buffer 的 =buffer-file-name=。
-   lsp-mode 与 Eglot 各有一处诊断投递刻意绕开了这层别名（`lsp-diagnostics.el`
-   直接用裸 =buffer-file-name= 做 =gethash=；Eglot 的
-   =eglot--find-buffer-visiting= 为避免 bug#70036 的 =file-truename= 代价而只做
-   =equal= 比较），因此本仓库在 =lsp--fix-path-casing=
-   （=my/lsp-mode--fix-path-casing-a=）与 =eglot--find-buffer-visiting=
-   （=my/eglot--find-buffer-visiting-a=）上各加了一层收口 advice，把诊断
-   store/lookup 两侧的 key 域统一、并在原生比较 miss 时退回
-   =get-file-buffer= 兜底。`M-x remote-doctor` 会报告这两个 advice 是否仍然
-   装载着，作为这条契约的存活探针。
+   lsp-mode 的 raw diagnostics lookup 有一处绕开了这层别名，因此本仓库在
+   =lsp--fix-path-casing= 上用 =my/lsp-mode--fix-path-casing-a= 收口 key 域。
 2. server cwd、executable、PATH/toolchain、workspace settings、watcher、helper
    service 与 network channel 都从同一个 root 的 target context 派生。
-3. URI 回调必须查询 Eglot server 或 lsp-mode workspace 所拥有的 root；不能用回调
+3. URI 回调必须查询 lsp-mode workspace 所拥有的 root；不能用回调
    发生时的当前 buffer / =default-directory= 猜 target。否则两个 target 上相同的
    =/home/me/project= 会串成同一项目。
 4. server placement 默认是 =target=。只有必须访问 Emacs UI、本机 xwidget 或浏览器
@@ -108,7 +102,7 @@ process、URI 和 resource-lifecycle 流程。
    backend bridge/channel 建立。
 5. language consumer 不得用 =file-remote-p=、target 字符串、TRAMP method 或
    backend ID 选择另一套 server、PATH、参数和功能。真实平台差异应表达为 target
-   capability/toolchain preference；Eglot/lsp-mode 自身的 TRAMP 兼容修饰集中留在
+   capability/toolchain preference；lsp-mode 自身的兼容修饰集中留在
    共享 adapter 边界。
 6. watcher、helper service、forward/channel 等长生命周期资源要登记给
    =remote-workspace=。没有断线故障注入与重建测试时，不能宣称 LSP 已自动恢复。
@@ -123,7 +117,8 @@ native/remote backend，再接语言业务。
 
 最常用入口：
 
-- =SPC c L=: 打开语言服务器 dispatch
+- =SPC c L=: 切换当前 buffer 的 CodeLens（默认开启）
+- =SPC c s=: 打开语言服务器 dispatch
 - =M-x my/language-server-manager=: 打开 =*Language Server Hub*=
 - =M-x my/language-server-doctor=: 打开 =*Language Server Doctor*=
 - =SPC c o=: organize imports
@@ -137,22 +132,21 @@ dispatch 里现在有四组内容：
 - Views: hub / doctor / docs
 - Lifecycle: ensure / restart / shutdown / log / session / config
 - Edits: code actions / organize imports / format / rename
-- Tuning: autoreconnect / autoshutdown / log-io / inlay hints / output max / events buffer
+- Tuning: restart policy / keep-alive / log-io / inlay hints / output max / log max
 
 * Language Server Hub
 
 命令：
 
 - =M-x my/language-server-manager=
-- 或 =SPC c L= 然后按 =h=
+- 或 =SPC c s= 然后按 =h=
 
 它展示：
 
 - 当前 buffer 的 major mode、项目根、当前活跃 backend、workspace config
 - 当前 runtime context、provider、target 与显式 fallback reason
 - 一组 session 级便捷调参入口
-- 显式 =lsp-mode= 路由表
-- 本地注册的 Eglot server 映射
+- 注册的 lsp-mode client/feature 路由表
 - 当前 runtime knobs
 
 Hub 里的重点不是“列个状态页面”，而是：
@@ -178,12 +172,12 @@ Hub 里的重点不是“列个状态页面”，而是：
 - =P=: project problems
 - =d=: buffer diagnostics UI
 - =m=: diagnostics menu
-- =A=: toggle =eglot-autoreconnect=
-- =S=: toggle =eglot-autoshutdown=
+- =A=: cycle lsp-mode restart policy
+- =S=: toggle workspace keep-alive
 - =L=: toggle =lsp-log-io=
 - =I=: toggle inlay hints
 - =M=: 设置 =read-process-output-max=
-- =E=: 设置 =eglot-events-buffer-size=
+- =E=: 设置 language-server log size
 - =D=: doctor
 - =O=: 打开本文档
 - =RET=: 对路由/映射条目跳回定义文件
@@ -200,7 +194,7 @@ Doctor 主要做静态和半静态排查：
 - 关键 library 是否能找到
 - 本地注册的 server executable 是否存在
 - 当前 buffer 的路由、active backend、workspace config、runtime context/fallback
-- 显式 =lsp-mode= 路由和自定义 Eglot 映射摘要
+- 注册的 lsp-mode 路由摘要
 - 当前 runtime knobs
 
 如果 LSP 状态怪异，先开 doctor，而不是先猜。
@@ -214,7 +208,7 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 - 临时打开 =lsp-log-io=
 - 临时放大 =read-process-output-max=
 - 临时关闭/开启 inlay hints
-- 临时调大 =eglot-events-buffer-size= 看日志
+- 临时调大 language-server log size
 
 如果某个值验证有效，再把它真正改回：
 
@@ -227,7 +221,7 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 
 1. =lisp/init-lsp.el=
    路由核心、统一 Remote/LSP adapter、URI/workspace identity、全局
-   LSP/Flymake/company 配置。这里只允许出现 Eglot/lsp-mode 的兼容边界，不在这里
+   LSP/Flymake/company 配置。这里只允许出现 lsp-mode 的兼容边界，不在这里
    建第二套本地/远程产品策略。
 2. =lisp/init-lsp-ops.el=
    backend-agnostic 操作命令，例如 restart / shutdown / organize imports。
@@ -238,105 +232,58 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
    buffer 使用（目前的唯一 consumer 是 Noema Jupyter cell）。
 5. =lisp/init-lsp-toolchain.el=
    Project 级 toolchain profile：语言中立的 discover/apply/restore 契约，
-   供 Eglot/lsp-mode 共用，避免每个语言重复实现 buffer-local
+   供所有 lsp-mode client 共用，避免每个语言重复实现 buffer-local
    环境变量/PATH/workspace-configuration 的应用与复原。
 
 语言专项继续放在 =lisp/lang/= 下。
 
 * Add A New Route
 
-如果某个语言要显式走 =lsp-mode=，用：
+自定义 stdio client 用：
 
 #+begin_src elisp
-(my/register-lsp-mode-preference 'some-mode 'some-lsp-feature)
-#+end_src
-
-说明：
-
-- 第一个参数是 major mode
-- 第二个参数是这个 mode 依赖的额外 feature；没有就省略
-- Hub 会自动记录这个声明来自哪个文件
-
-例如当前已有：
-
-- =java-mode= / =java-ts-mode= -> =lsp-java=
-- =lean-mode= -> Eglot（=lean4-infoview-bridge= + xwidget）
-
-** Lean eglot route + xwidget infoview
-
-Lean 4 使用自定义 =lean-mode=（=lisp/lang/lean/=），以 Eglot 作为 LSP 客户端。
-不再依赖 =lean4-mode.el= 主文件（避免触发其 =lsp-mode= 注册），只加载其语法/缩进
-子文件（=lean4-syntax=、=lean4-eri=、=lean4-input=）。
-
-Eglot server program 通过 =my/register-eglot-server-program= 注册：
-- Lake 项目（有 lakefile.lean/toml）：=lake serve=
-- 单文件：=lean --server=
-
-信息面板（infoview）走 xwidget-webkit + Node.js bridge：
-
-- =C-c C-i= 确保 Eglot 已通过
-  =lisp/lang/lean/lean4-infoview-bridge/lean-proxy.mjs= 启动；proxy 在 Emacs
-  客户端运行，通过 stdio bridge 连接 workspace target 上的 =lake serve=，
-  并把 React 版官方 =@leanprover/infoview= 提供给本地 xwidget side window。
-- Emacs → infoview：=post-command-hook= 注入 =window.updateCursor=；文本变化通
-  过 HTTP POST =/cursor= 同步到 bridge。
-- Infoview → Emacs（反向通道）：infoview 动作 POST 到 bridge 的 =/editor/<cmd>=
-  路由；bridge 再通过标准 LSP request/notification 交给 Eglot：
-  - =show-document= 跳转到 goal 中点击的源码位置
-  - =insert-text= 应用 "Try this" 建议
-  - =apply-edit= 应用 code action 文本编辑
-  - =restart-file= 触发 =lean-refresh-file-dependencies=
-- 每个 Eglot proxy 实例拥有独立的端口文件；本地端口文件还会校验 owner PID，
-  proxy 正常退出时只删除自己拥有的文件。并发重连或测试进程不会覆盖当前
-  Infoview 的端口并留下白屏。
-
-远程 Lean buffer 同样使用完整链路：
-
-- =node=、=lean-proxy.mjs=、=dist/=、HTTP/SSE 和端口文件始终留在 Emacs
-  客户端，不要求 target 安装 Node，也不部署 UI bundle；
-- =lake serve= / =lean --server= 从 target/workspace 环境解析并在 target
-  上运行；远端 direnv/Nix capsule 的 cwd、PATH 与变量被封装在 stdio bridge；
-- proxy 使用本机 loopback 端口，xwidget 直接连接，无需端口转发；
-- Eglot 文档 URI 进入 Emacs 后 canonicalize 为 =/fs:TARGET:/path=，不会保存
-  =/rpc:= 或 =/ssh:= 物理链路身份。
-
-=lean-infoview-remote-proxy-auto-deploy= 仅保留为旧配置兼容项，当前链路不再读取它。
-关闭 Infoview proxy 时，远程 Lean 仍直接通过目标上的 =lake serve= 工作。
-
-* Add A Custom Eglot Mapping
-
-不要再直接散落：
-
-#+begin_src elisp
-(add-to-list 'eglot-server-programs ...)
-#+end_src
-
-现在统一用：
-
-#+begin_src elisp
-(my/register-eglot-server-program
+(my/register-language-server
  '(some-mode another-mode)
  '("some-language-server" "--stdio")
- :label "some-language-server"
+ :server-id 'my-some-language-server
  :executables '("some-language-server")
  :placement 'target
- :note "Short maintenance note.")
+ :label "Some language server")
 #+end_src
 
-这样做的价值：
+如果 package 自己调用 =lsp-register-client=，只声明 feature 与维护 metadata：
 
-- Hub 能看到 modes -> server 的映射
-- Doctor 能检查 executable
-- 可以直接跳回配置定义文件
-- =:placement= 默认就是 =target=；只有明确的本地 UI helper 才写 =client=
+#+begin_src elisp
+(my/register-language-server-feature
+ '(some-mode) 'lsp-some-language
+ :executables '("some-language-server")
+ :placement 'target
+ :label "Some language server")
+#+end_src
 
-新增映射完成前再检查：
+不要为 remote target 注册第二个 =*-tramp= client。=/fs:= handler 与
+=remote-make-process= 已经负责路径、placement 和进程边界；一个 server id 服务本地
+与远端。语言专项 setup 可以像 C/Python/Java 一样 buffer-local 设置
+=lsp-enabled-clients=，避免 stock/add-on client 抢占唯一 owner。
 
-- contact 中没有物理 =/ssh:= / =/rpc:= path，也没有 local/remote 两套命令；
+当前优先保证的三条 route：
+
+- C/C++：唯一 =my-clangd= client；
+- Python：唯一 =my-python= client，按 target 环境依次选择
+  =pyright-langserver=、=basedpyright-langserver=、=pylsp=、
+  =jedi-language-server=；
+- Java：唯一 =jdtls= owner，每个 project 独立 =-data= 与 configuration，remote
+  target 通过 toolchain provisioning 获得同一 JDTLS bundle。
+
+新增 route 完成前检查：
+
+- contact 中没有物理 =/ssh:= / =/rpc:= path，也没有 local/remote 两套 client；
 - executable 通过 target workspace environment 查找；
 - URI round-trip 绑定 server/workspace root，而不是当前 buffer；
+- workspace configuration 能深合并 plist/alist/hash-table，并保留显式 nil/
+  =:json-false=；
 - 需要 watcher/service/channel 时已经登记 workspace owner 和清理策略；
-- =local= 与 remote target 都经过同一注册，并有对应测试。
+- =make lsp-test= 通过；本机安装相应 server 时 =make lsp-live-smoke= 真正初始化成功。
 
 * Pattern For Other Modules
 
@@ -360,10 +307,10 @@ Eglot server program 通过 =my/register-eglot-server-program= 注册：
 
 1. 打开 =Language Server Doctor=
 2. 看当前 buffer 的 =route policy= 和 =active backend=
-3. 看是否命中了显式 =lsp-mode= 路由
+3. 看当前 mode 是否有已注册且可执行的 lsp-mode client
 4. 看对应 feature / executable 是否缺失
-5. 看当前 buffer 是否有本地 =eglot-workspace-configuration=
-6. 需要时临时打开 =lsp-log-io= 或调大 =eglot-events-buffer-size=
+5. 看当前 buffer 的 =my/language-server--workspace-configuration=
+6. 需要时临时打开 =lsp-log-io= 或调大 language-server log size
 7. 再去开 log / session / problems / diagnostics UI
 
 别一上来就改代码或重装 package。

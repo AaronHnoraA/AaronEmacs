@@ -27,7 +27,7 @@
 (declare-function lsp-session-server-id->folders "lsp-mode" (session))
 (declare-function lsp-java--get-root "lsp-java" ())
 (declare-function my/debug-register-adapter-spec "init-debug" (name &rest plist))
-(declare-function my/register-lsp-mode-preference "init-lsp" (mode &optional feature source note))
+(declare-function my/register-language-server-feature "init-lsp")
 (declare-function my/lsp-mode-ensure "init-lsp" ())
 (declare-function my/language-server--set-struct-slot
                   "init-lsp" (object type slot value))
@@ -362,23 +362,21 @@ inside the one selected root."
     ;; started beside JDTLS even when `semgrep' is unavailable on the target.
     ;; Its exit/restart cleanup then races the healthy JDTLS buffer.  This
     ;; buffer-local assignment is cheap and must still run for every buffer.
-    (setq-local lsp-enabled-clients '(jdtls jdtls-tramp))
+    ;; `lsp-auto-register-remote-clients' is nil (init-lsp.el), so JDTLS never
+    ;; gets cloned into a `jdtls-tramp' alias -- one client id serves every
+    ;; target.
+    (setq-local lsp-enabled-clients '(jdtls))
     (require 'lsp-java)
     (let ((root (my/language-server--project-root-for-buffer)))
       (unless (and root (equal root my/lsp-java--single-root-enforced))
         (setq my/lsp-java--single-root-enforced root)
-        (dolist (server-id '(jdtls jdtls-tramp))
-          (when-let* ((client (gethash server-id lsp-clients)))
-            (my/language-server--set-struct-slot
-             client 'lsp--client 'multi-root nil)))
+        (when-let* ((client (gethash 'jdtls lsp-clients)))
+          (my/language-server--set-struct-slot
+           client 'lsp--client 'multi-root nil))
         (let* ((session (lsp-session))
-               (folders (lsp-session-server-id->folders session))
-               changed)
-          (dolist (server-id '(jdtls jdtls-tramp))
-            (when (gethash server-id folders)
-              (remhash server-id folders)
-              (setq changed t)))
-          (when changed
+               (folders (lsp-session-server-id->folders session)))
+          (when (gethash 'jdtls folders)
+            (remhash 'jdtls folders)
             (lsp--persist-session session)))))))
 
 (defun my/lsp-java--apply-toolchain (profile root)
@@ -471,20 +469,24 @@ inside the one selected root."
  'my/language-server-lsp-local-settings-hook
  #'my/lsp-java--enforce-single-root)
 
-(when (fboundp 'my/register-lsp-mode-preference)
-  (my/register-lsp-mode-preference 'java-mode 'lsp-java)
-  (my/register-lsp-mode-preference 'java-ts-mode 'lsp-java))
+;; `lsp-java' registers the JDTLS clients itself, so this records the route
+;; for the Hub/Doctor and declares the feature that must be loadable before
+;; a Java buffer may start a server.
+(when (fboundp 'my/register-language-server-feature)
+  (my/register-language-server-feature
+   '(java-mode java-ts-mode) 'lsp-java
+   :label "Eclipse JDT LS (lsp-java)"
+   :executables '("java")
+   :note "JDTLS is provisioned onto the workspace target when it is trusted."))
 
 ;; `my/lsp-mode-ensure' previously ran a second time here, directly on
 ;; `java-mode-hook'/`java-ts-mode-hook', ahead of the shared
 ;; `prog-mode-hook' -> `my/language-server-ensure-deferred' path that
-;; every other lsp-mode/eglot language already goes through.  It ran
-;; synchronously during mode setup and bypassed the runtime-provider
-;; layer (`my/language-server-runtime-prepare') entirely, since it never
-;; passed through `my/language-server-ensure'.  The shared path already
-;; routes `java-mode'/`java-ts-mode' buffers to lsp-mode via
-;; `my/register-lsp-mode-preference' above, so no separate hook is
-;; needed.
+;; every other language already goes through.  It ran synchronously during
+;; mode setup and bypassed the runtime-provider layer
+;; (`my/language-server-runtime-prepare') entirely, since it never passed
+;; through `my/language-server-ensure'.  The shared path already routes
+;; every `prog-mode' buffer to lsp-mode, so no separate hook is needed.
 
 (use-package lsp-java
   :ensure t

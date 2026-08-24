@@ -1,4 +1,4 @@
-;;; init-lsp-runtime-tests.el --- Runtime-aware Eglot tests -*- lexical-binding: t; -*-
+;;; init-lsp-runtime-tests.el --- Runtime-aware lsp-mode tests -*- lexical-binding: t; -*-
 
 ;; Run with:
 ;;   emacs --batch -Q -L lisp -l test/init-lsp-runtime-tests.el \
@@ -16,9 +16,9 @@
   `(let ((my/language-server-runtime-providers nil)
          (my/language-server-runtime--project-contexts
           (make-hash-table :test #'equal))
-         (my/language-server-runtime--eglot-configurations
+         (my/language-server-runtime--configurations
           (make-hash-table :test #'equal))
-         (my/language-server-runtime--eglot-idle-timers
+         (my/language-server-runtime--idle-timers
           (make-hash-table :test #'eq)))
      ,@body))
 
@@ -97,7 +97,7 @@
         (should (eq (my/language-server-runtime-project-context one) first))
         (should (eq (my/language-server-runtime-project-context two) second))))))
 
-(ert-deftest my/runtime-eglot-project-wins-over-later-project-finders ()
+(ert-deftest my/runtime-project-wins-over-later-project-finders ()
   (my/runtime-test-with-registry
     (with-temp-buffer
       (my/runtime-test-mode)
@@ -107,58 +107,40 @@
         :id "kernel" :root "/fs:local:/work/project/"))
       (should
        (equal
-        (my/language-server-runtime--eglot-current-project-a
-         (lambda () '(projectile . "/work/project/")))
-        '(my/language-server-runtime-project
-          "/fs:local:/work/project/" "kernel"))))))
+        (my/language-server-runtime--calculate-root-a
+         (lambda (_session _file-name) "/work/project/")
+         'session "/work/project/file.py")
+        "/fs:local:/work/project/")))))
 
 (ert-deftest my/runtime-workspace-configuration-is-keyed-by-project ()
   (my/runtime-test-with-registry
-    (let* ((project '(my/language-server-runtime-project "/tmp/project/" "one"))
-           (server 'server))
-      (puthash project '(:python (:pythonPath "/kernel/python"))
-               my/language-server-runtime--eglot-configurations)
-      (cl-letf (((symbol-function 'eglot--project) (lambda (_server) project))
-                ((symbol-function 'my/language-server--merge-values)
-                 (lambda (base override) (append base override))))
+    (with-temp-buffer
+      (my/runtime-test-mode)
+      (let* ((runtime
+              (my/language-server-runtime-create
+               :id "one" :root "/tmp/project/"))
+             (project
+              (progn (setq-local my/language-server-runtime-current runtime)
+                     (my/language-server-runtime-project-object))))
+        (setq-local my/language-server--workspace-configuration
+                    '(:python (:pythonPath "/kernel/python")))
+        (my/language-server-runtime-register-lsp-configuration)
         (should
          (equal
-          (my/language-server-runtime--eglot-configuration-a
-           (lambda (_server _path) '(:base t)) server nil)
-          '(:base t :python (:pythonPath "/kernel/python"))))))))
+          (my/language-server-runtime-configuration project)
+          '(:python (:pythonPath "/kernel/python"))))))))
 
 (ert-deftest my/runtime-idle-shutdown-is-live-and-idempotent ()
   (my/runtime-test-with-registry
     (let ((shutdowns 0))
-      (cl-letf (((symbol-function 'jsonrpc-running-p) (lambda (_server) t))
-                ((symbol-function 'eglot--managed-buffers) (lambda (_server) nil))
-                ((symbol-function 'eglot-shutdown)
+      (cl-letf (((symbol-function 'lsp--workspace-buffers) (lambda (_workspace) nil))
+                ((symbol-function 'my/lsp-mode-shutdown-workspace)
                  (lambda (&rest _) (cl-incf shutdowns))))
-        (puthash 'server 'timer my/language-server-runtime--eglot-idle-timers)
-        (my/language-server-runtime--shutdown-if-idle 'server)
+        (puthash 'workspace 'timer my/language-server-runtime--idle-timers)
+        (my/language-server-runtime--shutdown-if-idle 'workspace)
         (should (= shutdowns 1))
-        (should-not (gethash 'server
-                             my/language-server-runtime--eglot-idle-timers))))))
-
-(ert-deftest my/runtime-drops-queued-eglot-message-after-process-exit ()
-  (let ((called nil))
-    (cl-letf (((symbol-function 'eglot--project)
-               (lambda (_connection) '(projectile . "/work/")))
-              ((symbol-function 'jsonrpc-running-p) (lambda (_connection) nil)))
-      (should-not
-       (my/language-server-runtime--jsonrpc-receive-live-a
-        (lambda (&rest _) (setq called t)) 'server '(:method "request")))
-      (should-not called))))
-
-(ert-deftest my/runtime-drops-queued-eglot-reply-after-process-exit ()
-  (let ((called nil))
-    (cl-letf (((symbol-function 'eglot--project)
-               (lambda (_connection) '(projectile . "/work/")))
-              ((symbol-function 'jsonrpc-running-p) (lambda (_connection) nil)))
-      (should-not
-       (my/language-server-runtime--jsonrpc-send-live-a
-        (lambda (&rest _) (setq called t)) 'server :id 1 :result nil))
-      (should-not called))))
+        (should-not (gethash 'workspace
+                             my/language-server-runtime--idle-timers))))))
 
 (provide 'init-lsp-runtime-tests)
 ;;; init-lsp-runtime-tests.el ends here

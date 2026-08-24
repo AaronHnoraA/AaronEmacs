@@ -1,8 +1,8 @@
-;;; init-cpp.el --- C/C++ config (eglot + clangd) -*- lexical-binding: t -*-
+;;; init-cpp.el --- C/C++ config (lsp-mode + clangd) -*- lexical-binding: t -*-
 
 ;;; Commentary:
 ;; C/C++ development environment
-;; - clangd + eglot
+;; - clangd through lsp-mode
 ;; - tree-sitter support
 ;; - cmake support
 ;; - snippets
@@ -11,8 +11,9 @@
 
 (require 'init-funcs)
 
-(declare-function my/eglot-ensure "init-lsp")
-(declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
+(declare-function my/register-language-server "init-lsp")
+(declare-function my/language-server-executable-find "init-lsp" (program))
+(defvar lsp-enabled-clients)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Find sibling files
@@ -68,29 +69,41 @@
 (add-hook 'c++-ts-mode-hook #'my/c-ts-indent-4)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; Eglot + clangd
+;; clangd
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(use-package eglot
-  :ensure t
-  :hook ((c-mode . my/eglot-ensure)
-         (c++-mode . my/eglot-ensure)
-         (c-ts-mode . my/eglot-ensure)
-         (c++-ts-mode . my/eglot-ensure)))
+(defun my/cpp-clangd-command ()
+  "Return the clangd command for the active target.
+Resolving through `my/language-server-executable-find' keeps the binary on
+the same target that will run it; a bare \"clangd\" would be looked up on
+the client."
+  (list (or (my/language-server-executable-find "clangd") "clangd")
+        "-j=2"
+        "--background-index"
+        "--clang-tidy"
+        "--completion-style=bundled"
+        "--header-insertion-decorators"))
 
-(with-eval-after-load 'eglot
-  (when (fboundp 'my/register-eglot-server-program)
-    (my/register-eglot-server-program
-     '(c-mode c++-mode c-ts-mode c++-ts-mode)
-     '("clangd"
-       "-j=2"
-       "--background-index"
-       "--clang-tidy"
-       "--completion-style=bundled"
-       "--header-insertion-decorators")
+(defun my/cpp-language-server-setup-h ()
+  "Keep the target-aware clangd client authoritative in C-family buffers."
+  (setq-local lsp-enabled-clients '(my-clangd)))
+
+(add-hook 'c-mode-common-hook #'my/cpp-language-server-setup-h)
+(add-hook 'c-ts-mode-hook #'my/cpp-language-server-setup-h)
+(add-hook 'c++-ts-mode-hook #'my/cpp-language-server-setup-h)
+
+(with-eval-after-load 'lsp-mode
+  (when (fboundp 'my/register-language-server)
+    ;; A higher priority than lsp-mode's stock clangd client so these
+    ;; arguments stay authoritative.
+    (my/register-language-server
+     '(c-mode c++-mode c-ts-mode c++-ts-mode objc-mode)
+     #'my/cpp-clangd-command
+     :server-id 'my-clangd
+     :priority 1
      :label "clangd"
      :executables '("clangd")
-     :note "C/C++ buffers use clangd through Eglot.")))
+     :note "C/C++ buffers use clangd through lsp-mode.")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Compiler explorer

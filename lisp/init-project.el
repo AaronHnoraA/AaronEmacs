@@ -32,6 +32,8 @@
 (defvar breadcrumb-local-mode)
 (defvar bc--ipath-plain-cache)
 (defvar imenu-auto-rescan)
+(defvar treemacs-indentation)
+(defvar treemacs-indentation-string)
 
 (declare-function project--ensure-read-project-list "project")
 (declare-function project--write-project-list "project")
@@ -40,6 +42,7 @@
 (declare-function imenu--make-index-alist "imenu" (&optional noerror))
 (declare-function imenu--subalist-p "imenu" (item))
 (declare-function my/file-icon-for-file "init-ui" (file &rest args))
+(declare-function nerd-icons-codicon "nerd-icons" (icon-name &rest args))
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
 (declare-function get-current-persp "perspective")
 (declare-function persp-parameter "perspective" (parameter &optional persp))
@@ -73,6 +76,13 @@ directory string or a cons cell of the form (DIRECTORY . DEPTH)."
 (config-defvar my/project-import-project-el-entries nil
   "Whether `project.el' entries may flow back into the manual project list."
   :type 'boolean
+  :group 'my/project)
+
+(config-defvar my/treemacs-imenu-indent-width 2
+  "Columns used for each semantic level in an expanded Treemacs outline.
+The outline begins at this shallow fixed indentation instead of inheriting the
+source file's filesystem depth."
+  :type 'integer
   :group 'my/project)
 
 (defconst my/project-state-dir
@@ -788,6 +798,194 @@ with generated overviews noisy and can leave stale duplicate tag paths."
                 (cdr index)))))
     (nreverse result)))
 
+(defconst my/treemacs-imenu-category-kinds
+  '(("Files" . 1)
+    ("Modules" . 2)
+    ("Namespaces" . 3)
+    ("Packages" . 4)
+    ("Classes" . 5)
+    ("Methods" . 6)
+    ("Properties" . 7)
+    ("Fields" . 8)
+    ("Constructors" . 9)
+    ("Enums" . 10)
+    ("Interfaces" . 11)
+    ("Functions" . 12)
+    ("Variables" . 13)
+    ("Constants" . 14)
+    ("Strings" . 15)
+    ("Numbers" . 16)
+    ("Booleans" . 17)
+    ("Arrays" . 18)
+    ("Objects" . 19)
+    ("Keys" . 20)
+    ("Nulls" . 21)
+    ("Enum Members" . 22)
+    ("Structs" . 23)
+    ("Events" . 24)
+    ("Operators" . 25)
+    ("Type Parameters" . 26)
+    ;; Common non-LSP Imenu headings.
+    ("Types" . 23)
+    ("Records" . 23))
+  "Map Imenu category labels to Language Server Protocol SymbolKinds.")
+
+(defconst my/treemacs-symbol-icon-specs
+  '((1 "nf-cod-symbol_file" font-lock-doc-face)
+    (2 "nf-cod-symbol_namespace" font-lock-constant-face)
+    (3 "nf-cod-symbol_namespace" font-lock-constant-face)
+    (4 "nf-cod-symbol_namespace" font-lock-constant-face)
+    (5 "nf-cod-symbol_class" font-lock-type-face)
+    (6 "nf-cod-symbol_method" font-lock-function-name-face)
+    (7 "nf-cod-symbol_property" font-lock-variable-name-face)
+    (8 "nf-cod-symbol_field" font-lock-variable-name-face)
+    (9 "nf-cod-symbol_method" font-lock-function-name-face)
+    (10 "nf-cod-symbol_enum" font-lock-type-face)
+    (11 "nf-cod-symbol_interface" font-lock-type-face)
+    (12 "nf-cod-symbol_method" font-lock-function-name-face)
+    (13 "nf-cod-symbol_variable" font-lock-variable-name-face)
+    (14 "nf-cod-symbol_constant" font-lock-constant-face)
+    (15 "nf-cod-symbol_string" font-lock-string-face)
+    (16 "nf-cod-symbol_numeric" font-lock-constant-face)
+    (17 "nf-cod-symbol_boolean" font-lock-constant-face)
+    (18 "nf-cod-symbol_array" font-lock-type-face)
+    (19 "nf-cod-symbol_misc" font-lock-type-face)
+    (20 "nf-cod-symbol_key" font-lock-keyword-face)
+    (21 "nf-cod-symbol_misc" font-lock-constant-face)
+    (22 "nf-cod-symbol_enum_member" font-lock-constant-face)
+    (23 "nf-cod-symbol_structure" font-lock-type-face)
+    (24 "nf-cod-symbol_event" font-lock-warning-face)
+    (25 "nf-cod-symbol_operator" font-lock-builtin-face)
+    (26 "nf-cod-symbol_parameter" font-lock-variable-name-face)
+    (0 "nf-cod-symbol_misc" shadow))
+  "VS Code Codicons and faces used for typed Treemacs Imenu nodes.")
+
+(defun my/treemacs-imenu-category-kind (label)
+  "Return the LSP SymbolKind represented by Imenu category LABEL."
+  (cdr (assoc-string
+        (string-trim (substring-no-properties label))
+        my/treemacs-imenu-category-kinds
+        t)))
+
+(defun my/treemacs-imenu-inferred-kind (item parent-kind parent-label)
+  "Infer ITEM's SymbolKind when LSP metadata is not yet available.
+PARENT-KIND and PARENT-LABEL describe its semantic parent."
+  (let* ((case-fold-search nil)
+         (label (car item))
+         (plain (string-trim (substring-no-properties label)))
+         (exact (and (> (length label) 0)
+                     (get-text-property 0 'my/lsp-symbol-kind label)))
+         (category (my/treemacs-imenu-category-kind label))
+         (node-p (imenu--subalist-p item)))
+    (or exact
+        category
+        (and (string-match-p "\\`struct\\b" (downcase plain)) 23)
+        (and (string-match-p "\\`interface\\b" (downcase plain)) 11)
+        (and (string-match-p "\\`enum\\b" (downcase plain)) 10)
+        (and node-p (string-match-p "\\`[[:upper:]]" plain) 5)
+        (and (string-match-p "\\`[[:upper:]_][[:upper:][:digit:]_]*\\'" plain)
+             14)
+        (and (string-match-p "(" plain)
+             (if (and (memq parent-kind '(5 11 23))
+                      parent-label
+                      (string= (car (split-string plain "(")) parent-label))
+                 9
+               (if (memq parent-kind '(5 11 23)) 6 12)))
+        (and (string-match-p "\\`[[:word:]_$]+\\(?:\\.[[:word:]_$]+\\)+\\'" plain)
+             3)
+        ;; Category inheritance is useful for native Imenu indexes, but a
+        ;; semantic class/struct is not a category for all its children.
+        (and (not (memq parent-kind '(5 10 11 23))) parent-kind)
+        (and node-p 19)
+        13)))
+
+(defun my/treemacs-symbol-icon (kind)
+  "Return a VS Code-style semantic icon for LSP SymbolKind KIND."
+  (let* ((spec (or (assq kind my/treemacs-symbol-icon-specs)
+                   (assq 0 my/treemacs-symbol-icon-specs)))
+         (name (nth 1 spec))
+         (face (nth 2 spec)))
+    (if (require 'nerd-icons nil t)
+        (nerd-icons-codicon name :face face :v-adjust -0.05)
+      (propertize "•" 'face face))))
+
+(defun my/treemacs-decorate-imenu-index
+    (index &optional parent-kind parent-label)
+  "Add semantic icons to Imenu INDEX without changing its target positions.
+PARENT-KIND and PARENT-LABEL support native Imenu fallbacks before LSP has
+returned DocumentSymbols."
+  (mapcar
+   (lambda (item)
+     (if (not (and (consp item) (stringp (car item))))
+         item
+       (let* ((label (car item))
+              (kind (my/treemacs-imenu-inferred-kind
+                     item parent-kind parent-label))
+              (plain (substring-no-properties label))
+              (decorated
+               (if (and (> (length label) 0)
+                        (get-text-property 0 'my/treemacs-symbol-decorated label))
+                   label
+                 (let ((value (concat (my/treemacs-symbol-icon kind) " " label)))
+                   (add-text-properties
+                    0 (length value)
+                    (list 'my/treemacs-symbol-decorated t
+                          'my/lsp-symbol-kind kind)
+                    value)
+                   value)))
+              (category-kind (my/treemacs-imenu-category-kind label))
+              (child-kind (or category-kind kind))
+              (child-parent (and (not category-kind) plain)))
+         (if (imenu--subalist-p item)
+             (cons decorated
+                   (my/treemacs-decorate-imenu-index
+                    (cdr item) child-kind child-parent))
+           (cons decorated (cdr item))))))
+   index))
+
+(defun my/treemacs-imenu-header (file)
+  "Return a typed outline header entry for FILE, or nil without a buffer."
+  (when-let* ((logical (my/treemacs-visit-path file))
+              (buffer (or (get-file-buffer logical)
+                          (get-file-buffer file)
+                          (find-buffer-visiting logical)
+                          (find-buffer-visiting file))))
+    (with-current-buffer buffer
+      (let ((label
+             (propertize
+              (format "OUTLINE · %s" (file-name-nondirectory logical))
+              'my/lsp-symbol-kind 1
+              'my/treemacs-outline-header t)))
+        (cons label (copy-marker (point-min)))))))
+
+(defun my/treemacs-imenu-indentation-pattern (source-depth)
+  "Return indentation components that visually erase SOURCE-DEPTH.
+Treemacs keeps the original semantic button depths for DOM operations; only
+the strings rendered before outline buttons are made shallow."
+  (let* ((width (max 0 my/treemacs-imenu-indent-width))
+         (unit (make-string width ?\s)))
+    (append (make-list (max 0 source-depth) "")
+            ;; More than enough for real source-symbol nesting.  `treemacs'
+            ;; cycles list indentation, so keep this tail deliberately wide.
+            (make-list 128 unit))))
+
+(defun my/treemacs-expand-file-outline-shallow-a (fn button &rest arguments)
+  "Render BUTTON's outline shallowly while calling FN with ARGUMENTS."
+  (let* ((source-depth (or (treemacs-button-get button :depth) 0))
+         (treemacs-indentation-string
+          (my/treemacs-imenu-indentation-pattern source-depth)))
+    (apply fn button arguments)))
+
+(defun my/treemacs-expand-tag-outline-shallow-a (fn button &rest arguments)
+  "Keep nested tag expansion shallow while calling FN for BUTTON."
+  (let* ((path (treemacs-button-get button :path))
+         (tag-depth (if (listp path) (max 1 (1- (length path))) 1))
+         (button-depth (or (treemacs-button-get button :depth) tag-depth))
+         (source-depth (max 0 (- button-depth tag-depth)))
+         (treemacs-indentation-string
+          (my/treemacs-imenu-indentation-pattern source-depth)))
+    (apply fn button arguments)))
+
 (defun my/treemacs-get-imenu-index-a (orig-fn file)
   "Post-process Treemacs imenu index from ORIG-FN for FILE."
   ;; FILE belongs to Treemacs' backend-consumable model and may therefore use
@@ -795,10 +993,14 @@ with generated overviews noisy and can leave stale duplicate tag paths."
   ;; buffer namespace.  Fetching tags through the model path would create a
   ;; second buffer for the same file and Treemacs may then kill that temporary
   ;; buffer after indexing.
-  (let ((index (funcall orig-fn (my/treemacs-visit-path file))))
-    (if (my/treemacs-org-imenu-index-p index)
-        (my/treemacs-prune-org-imenu-index index)
-      index)))
+  (let* ((index (funcall orig-fn (my/treemacs-visit-path file)))
+         (index (if (my/treemacs-org-imenu-index-p index)
+                    (my/treemacs-prune-org-imenu-index index)
+                  index))
+         (header (and index (my/treemacs-imenu-header file))))
+    (when header
+      (setq index (cons header index)))
+    (my/treemacs-decorate-imenu-index index)))
 
 (defun my/treemacs-extract-position (item file)
   "Return buffer and position for Treemacs imenu ITEM in FILE.
@@ -1404,7 +1606,13 @@ Returns the number of killed buffers."
       (treemacs-create-icon
        :file "Noema.svg"
        :extensions ("md")
-       :fallback "✎ ")))
+       :fallback "✎ ")
+      ;; Semantic Codicons live in the Imenu labels.  Keep the disclosure
+      ;; column blank for leaves instead of showing a second generic red dot.
+      (treemacs-create-icon
+       :icon "  "
+       :extensions (tag-leaf)
+       :fallback 'same-as-icon)))
   (setq treemacs-buffer-name-function #'treemacs-default-buffer-name
         treemacs-buffer-name-prefix " *Treemacs-Buffer-"
         treemacs-collapse-dirs (if treemacs-python-executable 3 0)
@@ -1472,6 +1680,18 @@ Returns the number of killed buffers."
                 :override
                 #'my/treemacs-flatten-and-sort-imenu-index))
   (with-eval-after-load 'treemacs-tags
+    (unless (advice-member-p
+             #'my/treemacs-expand-file-outline-shallow-a
+             'treemacs--expand-file-node)
+      (advice-add
+       'treemacs--expand-file-node
+       :around #'my/treemacs-expand-file-outline-shallow-a))
+    (unless (advice-member-p
+             #'my/treemacs-expand-tag-outline-shallow-a
+             'treemacs--expand-tag-node)
+      (advice-add
+       'treemacs--expand-tag-node
+       :around #'my/treemacs-expand-tag-outline-shallow-a))
     (advice-remove 'treemacs--get-imenu-index
                    #'my/treemacs-get-imenu-index-a)
     (advice-add 'treemacs--get-imenu-index

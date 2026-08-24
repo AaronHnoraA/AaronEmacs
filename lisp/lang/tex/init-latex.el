@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 ;; Prefer `texlab' when installed, otherwise fall back to `digestif'.
-;; This keeps LaTeX/BibTeX buffers on the same Eglot-based workflow as the
+;; This keeps LaTeX/BibTeX buffers on the same lsp-mode workflow as the
 ;; rest of the configuration while preserving the existing latexmk/XeLaTeX
 ;; build setup from AUCTeX.
 
@@ -17,10 +17,9 @@
 
 (declare-function aaron-ui-color "aaron-ui" (token &optional fallback variant))
 (declare-function my/executable-or-name "init-utils")
-(declare-function my/eglot-ensure-unless-lsp-mode "init-lsp")
 (declare-function my/language-server-executable-find "init-lsp" (program))
 (declare-function yas-minor-mode "yasnippet" (&optional arg))
-(declare-function my/register-eglot-server-program "init-lsp" (modes program &rest props))
+(declare-function my/register-language-server "init-lsp")
 
 (defcustom my/zotero-better-bibtex-rpc-url
   "http://127.0.0.1:23119/better-bibtex/json-rpc"
@@ -369,12 +368,12 @@
 (add-to-list 'load-path
              (expand-file-name "site-lisp/ratex.el/lisp" user-emacs-directory))
 
-(defun my/latex-eglot-available-p ()
+(defun my/latex-language-server-available-p ()
   "Return non-nil when a LaTeX language server is available."
   (or (my/language-server-executable-find "texlab")
       (my/language-server-executable-find "digestif")))
 
-(defun my/latex-eglot-workspace-configuration ()
+(defun my/latex-language-server-workspace-configuration ()
   "Return workspace settings for LaTeX language servers."
   `(:texlab
     (:build (:executable ,(my/executable-or-name "latexmk")
@@ -390,37 +389,45 @@
               :onEdit nil)
      :diagnosticsDelay 300)))
 
-(defun my/latex-eglot-ensure ()
-  "Start Eglot for LaTeX-related buffers when a server is available."
-  (when (my/latex-eglot-available-p)
-    (setq-local eglot-workspace-configuration
-                (my/latex-eglot-workspace-configuration))
-    (my/eglot-ensure-unless-lsp-mode)))
+(defconst my/latex-language-server-modes
+  '(latex-mode LaTeX-mode
+    tex-mode TeX-mode
+    plain-tex-mode plain-TeX-mode
+    docTeX-mode
+    bibtex-mode)
+  "Major modes served by the LaTeX language server.")
 
-(use-package eglot
-  :ensure nil
-  :defer t
-  :hook ((latex-mode . my/latex-eglot-ensure)
-         (LaTeX-mode . my/latex-eglot-ensure)
-         (tex-mode . my/latex-eglot-ensure)
-         (TeX-mode . my/latex-eglot-ensure)
-         (plain-tex-mode . my/latex-eglot-ensure)
-         (plain-TeX-mode . my/latex-eglot-ensure)
-         (docTeX-mode . my/latex-eglot-ensure)
-         (bibtex-mode . my/latex-eglot-ensure)))
+(defun my/latex-language-server-setup-h ()
+  "Install LaTeX workspace settings before the language server starts."
+  (when (and (my/latex-language-server-available-p)
+             (fboundp 'my/language-server-set-workspace-configuration))
+    (my/language-server-set-workspace-configuration
+     (my/latex-language-server-workspace-configuration))))
 
-(with-eval-after-load 'eglot
-  (when (fboundp 'my/register-eglot-server-program)
-    (my/register-eglot-server-program
-     '(latex-mode LaTeX-mode
-       tex-mode TeX-mode
-       plain-tex-mode plain-TeX-mode
-       docTeX-mode
-       bibtex-mode)
-     (eglot-alternatives
-      '(("texlab")
-        ("digestif")))
+(defun my/latex-language-server-command ()
+  "Return the preferred LaTeX language server command for this target.
+texlab is preferred; digestif is the fallback."
+  (cond
+   ((my/language-server-executable-find "texlab")
+    (list (my/language-server-executable-find "texlab")))
+   ((my/language-server-executable-find "digestif")
+    (list (my/language-server-executable-find "digestif")))
+   (t (list "texlab"))))
+
+(dolist (mode my/latex-language-server-modes)
+  (add-hook (intern (format "%s-hook" mode))
+            #'my/latex-language-server-setup-h))
+
+(with-eval-after-load 'lsp-mode
+  (when (fboundp 'my/register-language-server)
+    (my/register-language-server
+     my/latex-language-server-modes
+     #'my/latex-language-server-command
+     :server-id 'my-latex
+     :priority 1
      :label "texlab/digestif"
+     :activation-fn
+     (lambda (&rest _) (my/latex-language-server-available-p))
      :executables '("texlab" "digestif")
      :note "LaTeX and BibTeX buffers prefer texlab, then fall back to digestif.")))
 

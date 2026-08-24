@@ -1,10 +1,12 @@
 ;;; init-lsp.el --- The completion engine and lsp client -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Restore the original Eglot + Flymake workflow, while keeping a small
-;; compatibility layer so explicitly registered modes can still opt into
-;; `lsp-mode' when needed.  The maintenance/dashboard layer lives in
-;; `init-lsp-tools.el'.
+;; `lsp-mode' is the only language-server client.  Every remote concern —
+;; `/fs:' identity, URI anchoring, command projection, capability
+;; registration, workspace resource ownership and reconnect — is expressed
+;; once here against the public `remote-*' API, with target `local' as an
+;; ordinary target rather than a second code path.  Diagnostics go to
+;; Flymake; the maintenance/dashboard layer lives in `init-lsp-tools.el'.
 
 ;;; Code:
 
@@ -30,17 +32,8 @@
   :group 'tools
   :prefix "my/language-server-")
 
-(defvar my/lsp-mode-preferred-modes nil
-  "Major modes that should use `lsp-mode' instead of `eglot'.")
-
 (defvar my/lsp-mode-required-features nil
   "Alist mapping major modes to extra `lsp-mode' support features.")
-
-(defvar my/lsp-mode-preference-metadata nil
-  "Metadata for explicit `lsp-mode' routing entries.
-
-Each entry is a plist with at least `:mode', `:feature', `:source', and
-optional `:note' keys.")
 
 (defvar my/language-server-lsp-local-settings-hook nil
   "Hook run after environment resolution and before lsp-mode starts.")
@@ -48,11 +41,16 @@ optional `:note' keys.")
 (defvar my/language-server-disabled-modes nil
   "Major modes that should never auto-start a language server.")
 
-(defvar my/eglot-custom-server-program-metadata nil
-  "Metadata for locally registered `eglot-server-programs' entries.
+(defvar my/language-server-program-metadata nil
+  "Metadata for language servers registered by `my/register-language-server'.
 
-Each entry is a plist with keys such as `:modes', `:program',
-`:executables', `:placement', `:label', `:source', and `:note'.")
+Each entry is a plist with keys such as `:modes', `:program', `:server-id',
+`:feature', `:executables', `:placement', `:label', `:source', and `:note'.
+The Hub and Doctor read it to list routes and jump back to the declaring
+file; it is the only registry of locally declared servers.")
+
+(defvar my/language-server--resolving-executable-p nil
+  "Non-nil inside the Remote executable lookup implementation.")
 
 (config-defvar my/language-server-performance-read-process-output-max nil
   "Minimum `read-process-output-max' while any language server is active."
@@ -65,14 +63,14 @@ Each entry is a plist with keys such as `:modes', `:program',
   :group 'my/language-server)
 
 (config-defvar my/language-server-defer-shutdown nil
-  "Seconds to defer Eglot shutdown after the last managed buffer closes."
+  "Seconds to keep a language-server workspace alive after its last buffer."
   :type '(choice (const :tag "Disabled" nil) (integer :tag "Seconds"))
   :group 'my/language-server)
 
 (config-defvar my/language-server-file-watch-policy 'auto
   "Policy for language-server dynamic file-watch registrations.
 
-`auto' preserves Eglot and lsp-mode's native watcher behavior when the project
+`auto' preserves lsp-mode's native watcher behavior when the project
 has a path directly accessible to the Emacs client.  For a target-only
 filesystem it declines dynamic `workspace/didChangeWatchedFiles'
 registration.  Accepting it would otherwise create one SSH-backed watcher per
@@ -83,17 +81,26 @@ whose watcher implementation is known to scale.  `disabled' declines all
 dynamic file-watch registrations."
   :type '(choice
           (const :tag "Automatic placement-aware policy" auto)
-          (const :tag "Always use Eglot watchers" native)
+          (const :tag "Always use native watchers" native)
           (const :tag "Disable dynamic watchers" disabled))
   :group 'my/language-server)
 
-(config-register
- 'eglot-autoreconnect
- :type '(choice (const :tag "Disabled" nil)
-                (const :tag "Immediate" t)
-                integer)
- :group 'my/language-server
- :doc "Eglot crash-loop guard before automatic reconnect is allowed.")
+(config-defvar my/language-server-booster-required nil
+  "Whether `emacs-lsp-booster' is mandatory for every language server.
+
+The booster pre-parses server JSON into Emacs bytecode and is resolved per
+target through `remote-executable-find', so a remote server never runs the
+client's copy.  The default is nil: missing booster support falls back to the
+ordinary server command and Doctor reports the lost optimisation."
+  :type 'boolean
+  :group 'my/language-server)
+
+(config-defvar my/language-server-visible-render-margin 8
+  "Extra lines rendered above and below each visible LSP window.
+CodeLens and inlay hints keep this small warm margin so scrolling remains
+smooth without creating overlays throughout the buffer."
+  :type 'integer
+  :group 'my/language-server)
 
 (config-register
  'lsp-restart
@@ -103,11 +110,6 @@ dynamic file-watch registrations."
  :group 'my/language-server
  :doc "lsp-mode policy after a language-server process exits.")
 
-(defvar eglot--cached-server)
-(defvar eglot-events-buffer-config)
-(defvar eglot-stay-out-of)
-(defvar eglot-server-programs)
-(defvar eglot-workspace-configuration)
 (defvar gcmh-high-cons-threshold)
 (defvar company-dabbrev-ignore-case)
 (defvar company-dabbrev-downcase)
@@ -120,9 +122,12 @@ dynamic file-watch registrations."
 (defvar lsp-completion-provider)
 (defvar lsp-diagnostics-provider)
 (defvar lsp-restart)
+(defvar lsp-imenu-detailed-outline)
+(defvar lsp-imenu-sort-methods)
+(defvar lsp--line-col-to-point-hash-table)
 (defvar read-process-output-max)
 
-(dolist (adapter '("language-server" "eglot" "lsp-mode"))
+(dolist (adapter '("language-server" "lsp-mode"))
   (remote-register-adapter
    adapter
    :capabilities '(process-sync process-async watch lsp environment
@@ -143,14 +148,24 @@ dynamic file-watch registrations."
 (defvar-local my/language-server--performance-buffer-p nil
   "Whether the current buffer is counted for LSP performance tuning.")
 
-(defvar-local my/eglot--waiting-for-direnv nil
-  "Non-nil while Eglot startup waits for an asynchronous direnv export.")
-
 (defvar-local my/lsp-mode--waiting-for-direnv nil
   "Non-nil while lsp-mode startup waits for an asynchronous direnv export.")
 
 (defvar-local my/language-server--waiting-for-runtime nil
   "Non-nil while language-server startup waits for a runtime provider.")
+
+(defvar-local my/language-server--manual-start nil
+  "Non-nil when the pending language-server start was explicitly requested.")
+
+(defvar-local my/language-server--workspace-configuration nil
+  "Buffer-local workspace-configuration override for the language server.
+
+Merged from the project-local `:lsp-workspace' value and the active
+toolchain profile.  It layers above `lsp-mode''s global
+`lsp-client-settings' rather than replacing it.")
+
+(defvar-local my/lsp-document-color-last-visible-region nil
+  "Last visible region requested from `textDocument/documentColor'.")
 
 (defvar-local my/flymake-diagnostic-at-point-timer nil
   "Idle timer used by `my/flymake-diagnostic-at-point-mode'.")
@@ -167,6 +182,10 @@ dynamic file-watch registrations."
   :group 'my/language-server)
 
 (declare-function lsp-feature? "lsp-mode" (method))
+(declare-function lsp--document-color "lsp-mode" ())
+(declare-function lsp--range-to-region "lsp-mode" (range))
+(declare-function lsp--semantic-tokens-request "lsp-semantic-tokens"
+                  (region fontify-immediately))
 (declare-function lsp--update-inlay-hints "lsp-mode" ())
 (declare-function lsp--workspace-buffers "lsp-mode" (workspace))
 (declare-function lsp--workspace-client "lsp-mode" (workspace))
@@ -176,26 +195,35 @@ dynamic file-watch registrations."
 (declare-function lsp--workspace-status "lsp-mode" (workspace))
 (declare-function lsp--workspace-shutdown-action "lsp-mode" (workspace))
 (declare-function lsp--client-server-id "lsp-mode" (client))
+(declare-function lsp--client-remote? "lsp-mode" (client))
 (declare-function lsp--session-workspaces "lsp-mode" (session))
 (declare-function lsp-get "lsp-protocol" (hash-table key))
 (declare-function lsp-process-kill "lsp-mode" (process))
 (declare-function lsp-session "lsp-mode" ())
 (declare-function lsp-workspace-shutdown "lsp-mode" (workspace))
 (declare-function lsp-workspace-restart "lsp-mode" (workspace))
-(declare-function eglot-current-server "eglot")
-(declare-function eglot--project "eglot" (server))
-(declare-function eglot-reconnect "eglot" (server &optional interactive))
-(declare-function eglot-code-actions "eglot" ())
-(declare-function eglot-find-implementation "eglot" ())
-(declare-function eglot-find-typeDefinition "eglot" ())
-(declare-function eglot-format-buffer "eglot" ())
-(declare-function eglot-rename "eglot" ())
-(declare-function eglot--lookup-mode "eglot" (mode))
-(declare-function eglot--managed-buffers "eglot" (server))
-(declare-function eglot--managed-mode@my/defer-eglot-shutdown nil (&optional server))
-(declare-function eglot-shutdown
-                  "eglot" (server &optional interactive timeout preserve-buffers))
 (declare-function jsonrpc-running-p "jsonrpc" (connection))
+(declare-function lsp-register-client "lsp-mode" (client))
+(declare-function make-lsp-client "lsp-mode" (&rest args))
+(declare-function lsp-stdio-connection "lsp-mode" (command &optional test-command))
+(declare-function lsp--filter-clients "lsp-mode" (pred))
+(declare-function lsp--supports-buffer? "lsp-mode" (client))
+(declare-function lsp--server-binary-present? "lsp-mode" (client))
+(declare-function lsp--set-configuration "lsp-mode" (settings))
+(declare-function lsp--position-to-point "lsp-mode" (position))
+(declare-function lsp--collect-lines-and-cols "lsp-mode" (symbols))
+(declare-function lsp--convert-line-col-to-points-batch "lsp-mode" (line-col-list))
+(declare-function lsp--get-line-and-col "lsp-mode" (symbol))
+(declare-function lsp--imenu-filter-symbols "lsp-mode" (symbols))
+(declare-function lsp--imenu-hierarchical-p "lsp-mode" (symbols))
+(declare-function lsp--imenu-symbol-lessp "lsp-mode" (left right))
+(declare-function lsp-document-symbol? "lsp-protocol" (value))
+(declare-function lsp-imenu-create-categorized-index "lsp-mode" (symbols))
+(declare-function lsp-render-symbol "lsp-mode" (symbol detailed-p))
+(declare-function lsp-ui-doc-glance "lsp-ui-doc" ())
+(declare-function lsp-ui-doc-show "lsp-ui-doc" ())
+(declare-function lsp-ui-doc-hide "lsp-ui-doc" ())
+(declare-function breadcrumb-local-mode "breadcrumb" (&optional arg))
 
 (defcustom my/lsp-mode-startup-timeout 60
   "Seconds an lsp-mode workspace may remain in `starting' state.
@@ -254,7 +282,6 @@ automatic retry; other servers keep the shared, stricter default."
 Keeping TYPE and SLOT as runtime arguments avoids requiring private lsp-mode
 struct definitions while this configuration file is compiled."
   (aset object (cl-struct-slot-offset type slot) value))
-(declare-function eldoc-box-quit-frame "eldoc-box" ())
 (declare-function gcmh-set-high-threshold "gcmh" ())
 (declare-function hydra--call-interactively-remap-maybe "hydra" (cmd &optional keys))
 (declare-function hydra-default-pre "hydra" ())
@@ -297,7 +324,8 @@ kernel environment replace the stable target/workspace analyzer."
               (and (boundp 'remote-buffer-environment)
                    remote-buffer-environment)))
          (remote-current-adapter-id "language-server"))
-    (remote-executable-find program)))
+    (let ((my/language-server--resolving-executable-p t))
+      (remote-executable-find program))))
 
 (defun my/language-server-executable-available-p (program)
   "Return non-nil when PROGRAM is available locally or on the remote host."
@@ -319,7 +347,18 @@ byte-compile backend does not emit noisy warnings on startup."
              (fboundp 'lsp-feature?)
              (fboundp 'lsp-inlay-hints-mode)
              (ignore-errors (lsp-feature? "textDocument/inlayHint")))
-    (lsp-inlay-hints-mode 1)))
+    (lsp-inlay-hints-mode 1))
+  ;; Document colors are requested on edits upstream.  Track viewport changes
+  ;; on the existing LSP idle cycle as well, without issuing another request
+  ;; merely because point moved within the same window.
+  (if (and (bound-and-true-p lsp-managed-mode)
+           (bound-and-true-p lsp-enable-text-document-color)
+           (ignore-errors (lsp-feature? "textDocument/documentColor")))
+      (add-hook 'lsp-on-idle-hook
+                #'my/lsp-document-color-refresh-visible nil t)
+    (remove-hook 'lsp-on-idle-hook
+                 #'my/lsp-document-color-refresh-visible t)
+    (setq my/lsp-document-color-last-visible-region nil)))
 
 (defun my/flymake-diagnostic-at-point-text ()
   "Return the first Flymake diagnostic text covering point."
@@ -429,43 +468,164 @@ byte-compile backend does not emit noisy warnings on startup."
        (or (null value)
            (consp (car value)))))
 
-(defun my/language-server--merge-values (base override)
-  "Deep-merge OVERRIDE into BASE for keyed plist/alist structures."
+(defun my/language-server--mapping-p (value)
+  "Return non-nil when VALUE is a non-nil keyed configuration mapping."
+  (or (hash-table-p value)
+      (and (consp value)
+           (or (my/language-server--plist-like-p value)
+               (my/language-server--alist-like-p value)))))
+
+(defun my/language-server--copy-value (value)
+  "Return a recursive copy of configuration VALUE."
   (cond
-   ((null override) (copy-tree base))
-   ((null base) (copy-tree override))
-   ((and (my/language-server--plist-like-p base)
-         (my/language-server--plist-like-p override))
-    (let ((result (copy-tree base))
-          (plist (copy-tree override)))
-      (while plist
-        (let* ((key (pop plist))
-               (value (pop plist))
-               (current (plist-get result key)))
+   ((hash-table-p value)
+    (let ((copy (copy-hash-table value)))
+      (maphash
+       (lambda (key item)
+         (puthash key (my/language-server--copy-value item) copy))
+       value)
+      copy))
+   ((vectorp value)
+    (vconcat (mapcar #'my/language-server--copy-value value)))
+   ((consp value) (copy-tree value))
+   (t value)))
+
+(defun my/language-server--key-candidates (key)
+  "Return equivalent plist, alist and JSON spellings for KEY."
+  (delete-dups
+   (delq
+    nil
+    (cond
+     ((keywordp key)
+      (let ((name (substring (symbol-name key) 1)))
+        (list key name (intern name))))
+     ((stringp key)
+      (list key (intern key) (intern (concat ":" key))))
+     ((symbolp key)
+      (let ((name (symbol-name key)))
+        (list key name
+              (and (not (string-prefix-p ":" name))
+                   (intern (concat ":" name))))))
+     (t (list key))))))
+
+(defun my/language-server--mapping-ref (mapping key missing)
+  "Return MAPPING's KEY value, or MISSING when the key is absent."
+  (catch 'found
+    (dolist (candidate (my/language-server--key-candidates key))
+      (cond
+       ((hash-table-p mapping)
+        (let ((value (gethash candidate mapping missing)))
+          (unless (eq value missing)
+            (throw 'found value))))
+       ((my/language-server--plist-like-p mapping)
+        (when-let* ((tail (plist-member mapping candidate)))
+          (throw 'found (cadr tail))))
+       ((my/language-server--alist-like-p mapping)
+        (when-let* ((entry (assoc candidate mapping)))
+          (throw 'found (cdr entry))))))
+    missing))
+
+(defun my/language-server--mapping-key (mapping key)
+  "Return MAPPING's existing spelling for KEY, or its preferred new spelling."
+  (or
+   (catch 'found
+     (dolist (candidate (my/language-server--key-candidates key))
+       (when
+           (cond
+            ((hash-table-p mapping)
+             (not (eq (gethash candidate mapping 'my/missing) 'my/missing)))
+            ((my/language-server--plist-like-p mapping)
+             (plist-member mapping candidate))
+            ((my/language-server--alist-like-p mapping)
+             (assoc candidate mapping)))
+         (throw 'found candidate))))
+   (cond
+    ((hash-table-p mapping)
+     (if-let* ((sample (car (hash-table-keys mapping))))
+         (cond
+          ((stringp sample) (format "%s" (if (keywordp key)
+                                                (substring (symbol-name key) 1)
+                                              key)))
+          ((keywordp sample)
+           (intern (concat ":" (string-remove-prefix ":" (format "%s" key)))))
+          (t key))
+       (if (keywordp key) (substring (symbol-name key) 1) key)))
+    ((my/language-server--plist-like-p mapping)
+     (if (keywordp key)
+         key
+       (intern (concat ":" (string-remove-prefix ":" (format "%s" key))))))
+    (t key))))
+
+(defun my/language-server--mapping-put (mapping key value)
+  "Return MAPPING with KEY set to VALUE, preserving its container kind."
+  (let ((key (my/language-server--mapping-key mapping key)))
+    (cond
+     ((hash-table-p mapping)
+      (puthash key value mapping)
+      mapping)
+     ((my/language-server--plist-like-p mapping)
+      (plist-put mapping key value))
+     (t
+      (append (assoc-delete-all key mapping) (list (cons key value)))))))
+
+(defun my/language-server--mapping-entries (mapping)
+  "Return MAPPING as a list of key/value cons cells."
+  (cond
+   ((hash-table-p mapping)
+    (let (entries)
+      (maphash (lambda (key value) (push (cons key value) entries)) mapping)
+      (nreverse entries)))
+   ((my/language-server--plist-like-p mapping)
+    (let ((rest mapping)
+          entries)
+      (while rest
+        (push (cons (pop rest) (pop rest)) entries))
+      (nreverse entries)))
+   (t mapping)))
+
+(defun my/language-server--merge-values (base override)
+  "Deep-merge configuration OVERRIDE into BASE.
+Plists, alists and hash tables may be mixed.  An explicitly present nil or
+`:json-false' in OVERRIDE replaces BASE rather than being treated as absent."
+  (cond
+   ((and (my/language-server--mapping-p base)
+         (my/language-server--mapping-p override))
+    (let ((result (my/language-server--copy-value base))
+          (missing (make-symbol "missing")))
+      (dolist (entry (my/language-server--mapping-entries override) result)
+        (let* ((key (car entry))
+               (replacement (cdr entry))
+               (current (my/language-server--mapping-ref result key missing)))
           (setq result
-                (plist-put result key
-                           (my/language-server--merge-values current value)))))
-      result))
-   ((and (my/language-server--alist-like-p base)
-         (my/language-server--alist-like-p override))
-   (let ((result (copy-tree base)))
-      (dolist (entry (copy-tree override) result)
-        (when (consp entry)
-          (let* ((key (car entry))
-                 (current (assoc key result))
-                 (value (if current
-                            (my/language-server--merge-values (cdr current) (cdr entry))
-                          (copy-tree (cdr entry)))))
-            (setq result (assq-delete-all key result))
-            (setq result (append result (list (cons key value)))))))))
-   (t (copy-tree override))))
+                (my/language-server--mapping-put
+                 result key
+                 (if (eq current missing)
+                     (my/language-server--copy-value replacement)
+                   (my/language-server--merge-values current replacement))))))))
+   (t (my/language-server--copy-value override))))
+
+(defun my/language-server--configuration-section (configuration section)
+  "Return (PRESENT . VALUE) for dotted SECTION in CONFIGURATION."
+  (let ((value configuration)
+        (missing (make-symbol "missing"))
+        (present t))
+    (dolist (key (split-string section "\\." t))
+      (let ((next (and present
+                       (my/language-server--mapping-ref value key missing))))
+        (if (eq next missing)
+            (setq present nil)
+          (setq value next))))
+    (cons present value)))
 
 (defun my/language-server-project-backend-override ()
-  "Return the project-local backend override for the current buffer."
+  "Return the project-local backend override for the current buffer.
+
+`lsp-mode' is the only client, so the sole meaningful override is
+`disabled'.  The historical `lsp' / `lsp-mode' spellings stay accepted so
+existing project configuration keeps loading without a warning."
   (when (fboundp 'my/project-local-value)
     (pcase (my/project-local-value :language-server)
       ((or 'lsp 'lsp-mode) 'lsp-mode)
-      ('eglot 'eglot)
       ('disabled 'disabled)
       (_ nil))))
 
@@ -475,10 +635,7 @@ byte-compile backend does not emit noisy warnings on startup."
            (apply #'derived-mode-p my/language-server-disabled-modes))
       'disabled
     (or (my/language-server-project-backend-override)
-        (if (and my/lsp-mode-preferred-modes
-                 (apply #'derived-mode-p my/lsp-mode-preferred-modes))
-            'lsp-mode
-          'eglot))))
+        'lsp-mode)))
 
 (defun my/language-server-project-environment ()
   "Return the merged project-local environment for language servers."
@@ -509,27 +666,48 @@ byte-compile backend does not emit noisy warnings on startup."
     (my/language-server-toolchain-apply-environment)))
 
 (defun my/language-server-project-workspace-configuration ()
-  "Return project-local Eglot workspace configuration overrides."
+  "Return project-local workspace configuration overrides."
   (when (fboundp 'my/project-local-value)
-    (my/project-local-value :eglot-workspace)))
+    (my/project-local-value :lsp-workspace)))
 
-(defun my/eglot-set-workspace-configuration (configuration)
-  "Merge CONFIGURATION into the current buffer's Eglot workspace settings."
-  (setq-local eglot-workspace-configuration
+(defun my/language-server-set-workspace-configuration (configuration)
+  "Merge CONFIGURATION into this buffer's language-server workspace settings.
+
+The merged plist is stored buffer-locally and pushed to the server by
+`my/language-server--push-workspace-configuration-h', so a project-local
+override and a toolchain profile compose instead of overwriting one
+another.  `lsp-mode' keeps its own registered settings in the global
+`lsp-client-settings'; this is the per-buffer layer above it."
+  (setq-local my/language-server--workspace-configuration
               (my/language-server--merge-values
-               (and (boundp 'eglot-workspace-configuration)
-                    eglot-workspace-configuration)
+               my/language-server--workspace-configuration
                configuration)))
 
-(defun my/language-server-apply-eglot-local-settings ()
-  "Apply project-local Eglot settings before startup."
-  (when-let* ((configuration (my/language-server-project-workspace-configuration)))
-    (my/eglot-set-workspace-configuration configuration))
-  (when (fboundp 'my/language-server-toolchain-apply-eglot-settings)
-    (my/language-server-toolchain-apply-eglot-settings)))
+(defun my/language-server--push-workspace-configuration-h ()
+  "Send this buffer's workspace-configuration override to its server."
+  (when-let* ((configuration my/language-server--workspace-configuration))
+    (when (fboundp 'lsp--set-configuration)
+      (lsp--set-configuration configuration))))
+
+(defun my/language-server--workspace-configuration-override (workspace)
+  "Return the workspace-configuration override owned by WORKSPACE.
+The value is read from a live buffer that WORKSPACE manages, never from
+whichever buffer happens to be current when the server asks."
+  (when (fboundp 'lsp--workspace-buffers)
+    (catch 'found
+      (dolist (buffer (lsp--workspace-buffers workspace))
+        (when (buffer-live-p buffer)
+          (when-let* ((configuration
+                       (buffer-local-value
+                        'my/language-server--workspace-configuration buffer)))
+            (throw 'found configuration)))))))
 
 (defun my/language-server-apply-lsp-local-settings ()
   "Apply project-local `lsp-mode' settings before startup."
+  (when-let* ((configuration (my/language-server-project-workspace-configuration)))
+    (my/language-server-set-workspace-configuration configuration))
+  (when (fboundp 'my/language-server-toolchain-apply-lsp-settings)
+    (my/language-server-toolchain-apply-lsp-settings))
   ;; Advertise watcher support only when the selected placement can implement
   ;; it without turning each directory into a remote process/connection.
   (setq-local
@@ -539,31 +717,32 @@ byte-compile backend does not emit noisy warnings on startup."
      (my/language-server--project-root-for-buffer))))
   (run-hooks 'my/language-server-lsp-local-settings-hook))
 
-(defun my/eglot-contact-available-p ()
-  "Return non-nil when Eglot has a server mapping for this buffer."
-  (and (require 'eglot nil t)
-       (fboundp 'eglot--lookup-mode)
-       (ignore-errors (eglot--lookup-mode major-mode))))
+(defun my/language-server-contact-available-p ()
+  "Return non-nil when this buffer has a usable lsp-mode client.
+The executable probe runs inside the same Remote workspace/adapter extent as
+the eventual process start, so a target binary is never confused with a
+client-side installation."
+  (and (require 'lsp-mode nil t)
+       (fboundp 'lsp--filter-clients)
+       (let* ((root (my/language-server--project-root-for-buffer))
+              (workspace (my/language-server--connect-workspace root))
+              (remote-current-adapter-id "language-server")
+              (remote-current-workspace workspace))
+         (remote-environment-ensure
+          (and workspace (remote-workspace-context workspace)))
+         (ignore-errors
+           (lsp--filter-clients
+            (lambda (client)
+              (and (lsp--supports-buffer? client)
+                   (lsp--server-binary-present? client))))))))
 
-(defun my/language-server-lsp-mode-preference-entries ()
-  "Return explicit `lsp-mode' routing entries in registration order."
-  (nreverse (copy-sequence my/lsp-mode-preference-metadata)))
-
-(defun my/language-server-eglot-program-entries ()
-  "Return locally registered Eglot server-program entries."
-  (nreverse (copy-sequence my/eglot-custom-server-program-metadata)))
-
-(defun my/language-server-prepare-eglot-execution-environment ()
-  "Prepare the shared Eglot target execution boundary.
-Shell selection is backend-owned; stdio language servers receive their
-original argv without a client shell wrapper."
-  nil)
+(defun my/language-server-program-entries ()
+  "Return locally registered language servers in registration order."
+  (nreverse (copy-sequence my/language-server-program-metadata)))
 
 (defun my/language-server-managed-p ()
-  "Return non-nil when the current buffer is managed by Eglot or lsp-mode."
-  (or (bound-and-true-p lsp-managed-mode)
-      (bound-and-true-p eglot-managed-mode)
-      (bound-and-true-p eglot--managed-mode)))
+  "Return non-nil when the current buffer is managed by a language server."
+  (bound-and-true-p lsp-managed-mode))
 
 (defun my/language-server-performance--enable ()
   "Apply Doom-style IPC and GC tuning while language servers are active."
@@ -613,55 +792,112 @@ original argv without a client shell wrapper."
         (my/language-server-performance--enable))
     (my/language-server-performance--leave-buffer)))
 
-(add-hook 'eglot-managed-mode-hook #'my/language-server-performance-sync-h)
 (add-hook 'lsp-managed-mode-hook #'my/language-server-performance-sync-h)
 (add-hook 'kill-buffer-hook #'my/language-server-performance--leave-buffer)
 (add-hook 'change-major-mode-hook #'my/language-server-performance--leave-buffer)
 
-(defun my/register-lsp-mode-preference (mode &optional feature source note)
-  "Prefer `lsp-mode' over `eglot' for MODE.
-When FEATURE is non-nil, require it before starting `lsp-mode'.
-SOURCE and NOTE are recorded for maintenance tooling."
-  (add-to-list 'my/lsp-mode-preferred-modes mode)
-  ;; REMOVE non-nil also clears a feature left by an earlier registration
-  ;; when a reloaded configuration now passes nil.
-  (setf (alist-get mode my/lsp-mode-required-features nil t #'eq)
-        feature)
-  (setq my/lsp-mode-preference-metadata
-        (cons (list :mode mode
-                    :feature feature
-                    :source (my/language-server--resolve-source source)
-                    :note note)
-              (cl-remove-if
-               (lambda (entry)
-                 (eq (plist-get entry :mode) mode))
-               my/lsp-mode-preference-metadata))))
+(cl-defun my/register-language-server
+    (modes program &key server-id feature executables placement label source
+           note priority multi-root activation-fn initialization-options
+           notification-handlers request-handlers server-id-suffix)
+  "Register a language server for MODES and record maintenance metadata.
 
-(defun my/register-eglot-server-program (modes program &rest props)
-  "Register PROGRAM for MODES and record metadata for maintenance tools.
+MODES is a major mode or list of major modes.  PROGRAM is the server
+argv, a function returning one, or an `lsp-mode' connection object.
 
-PROPS accepts `:executables', `:placement', `:label', `:source', and `:note'.
-PLACEMENT defaults to `target': the command is resolved from the active
-target/workspace environment and launched through the official process API.
-Use `client' only for an explicitly client-side UI helper."
-  (add-to-list 'eglot-server-programs (cons modes program))
-  (setq my/eglot-custom-server-program-metadata
-        (cons (list :modes modes
-                    :program program
-                    :executables (plist-get props :executables)
-                    :placement (or (plist-get props :placement) 'target)
-                    :label (plist-get props :label)
-                    :source (my/language-server--resolve-source
-                             (plist-get props :source))
-                    :note (plist-get props :note))
-              (cl-remove-if
-               (lambda (entry)
-                 (equal (plist-get entry :modes) modes))
-               my/eglot-custom-server-program-metadata))))
+PLACEMENT defaults to `target\=': the command is resolved from the active
+target/workspace environment and launched through the official process
+API.  Use `client\=' only for an explicitly client-side UI helper.
 
-(defun my/lsp-mode-preferred-p ()
-  "Return non-nil when current buffer should use `lsp-mode'."
-  (eq (my/language-server-preferred-backend) 'lsp-mode))
+FEATURE, when non-nil, must be loadable before the server may start.
+EXECUTABLES, LABEL, SOURCE, and NOTE feed the Hub and Doctor.  The
+remaining keys are passed through to `make-lsp-client\='.
+
+This is the only supported way to declare a server; never call
+`lsp-register-client\=' or push onto client lists directly."
+  (let* ((modes (if (listp modes) modes (list modes)))
+         (server-id (or server-id
+                        (intern (format "my-%s" (car modes)))))
+         (activation-fn
+          (and activation-fn
+               (lambda (&rest arguments)
+                 ;; In lsp-mode an activation function replaces the ordinary
+                 ;; major-mode check.  Keep the declared MODES authoritative
+                 ;; so availability predicates cannot activate this client in
+                 ;; every programming buffer.
+                 (and (apply #'derived-mode-p modes)
+                      (apply activation-fn arguments)))))
+         (connection
+          (cond
+           ((functionp program) (lsp-stdio-connection program))
+           ((and (listp program) (stringp (car program)))
+            (lsp-stdio-connection program))
+           (t program))))
+    (dolist (mode modes)
+      (when feature
+        (setf (alist-get mode my/lsp-mode-required-features nil t #'eq)
+              feature)))
+    (apply
+     #'lsp-register-client
+     (list
+      (apply
+       #'make-lsp-client
+       (append
+        (list :new-connection connection
+              :major-modes modes
+              :server-id server-id
+              :priority (or priority 0))
+        (when multi-root (list :multi-root multi-root))
+        (when activation-fn (list :activation-fn activation-fn))
+        (when initialization-options
+          (list :initialization-options initialization-options))
+        (when notification-handlers
+          (list :notification-handlers notification-handlers))
+        (when request-handlers (list :request-handlers request-handlers))))))
+    (ignore server-id-suffix)
+    (setq my/language-server-program-metadata
+          (cons (list :modes modes
+                      :program program
+                      :server-id server-id
+                      :feature feature
+                      :executables executables
+                      :placement (or placement 'target)
+                      :label label
+                      :source (my/language-server--resolve-source source)
+                      :note note)
+                (cl-remove-if
+                 (lambda (entry)
+                   (eq (plist-get entry :server-id) server-id))
+                 my/language-server-program-metadata)))
+    server-id))
+
+(cl-defun my/register-language-server-feature
+    (modes feature &key executables placement label source note)
+  "Record a language server that an external package registers for MODES.
+
+Some servers are registered by their own package (`lsp-java', `lean4-mode')
+rather than by `my/register-language-server'.  This declares the same
+maintenance metadata for them and, more importantly, records FEATURE as a
+hard prerequisite so `my/lsp-mode-supported-p' refuses to start a server
+whose support library is missing instead of failing inside lsp-mode."
+  (let ((modes (if (listp modes) modes (list modes))))
+    (dolist (mode modes)
+      (setf (alist-get mode my/lsp-mode-required-features nil t #'eq) feature))
+    (setq my/language-server-program-metadata
+          (cons (list :modes modes
+                      :program feature
+                      :server-id feature
+                      :feature feature
+                      :executables executables
+                      :placement (or placement 'target)
+                      :label (or label (format "%s" feature))
+                      :source (my/language-server--resolve-source source)
+                      :note note)
+                (cl-remove-if
+                 (lambda (entry)
+                   (eq (plist-get entry :server-id) feature))
+                 my/language-server-program-metadata)))
+    feature))
 
 (defun my/lsp-mode-required-feature ()
   "Return the extra `lsp-mode' feature required for the current buffer."
@@ -680,32 +916,29 @@ Use `client' only for an explicitly client-side UI helper."
       t)))
 
 (defun my/current-language-server-backend ()
-  "Return the active language server backend for the current buffer."
-  (cond
-   ((and (fboundp 'eglot-managed-p)
-         (eglot-managed-p))
-    'eglot)
-   ((bound-and-true-p lsp-managed-mode)
-    'lsp-mode)
-   (t nil)))
-
-(defun my/language-server-stop-eglot ()
-  "Shut down the current `eglot' session in this buffer, if any."
-  (when (and (fboundp 'eglot-managed-p)
-             (eglot-managed-p))
-    (when-let* ((server (eglot-current-server)))
-      (ignore-errors
-        (eglot-shutdown server)))))
+  "Return the active language server backend for the current buffer.
+`lsp-mode' is the only client; the value stays a symbol so consumer
+modules can keep dispatching on it."
+  (and (bound-and-true-p lsp-managed-mode) 'lsp-mode))
 
 (defun my/lsp-mode-start-now ()
   "Start lsp-mode after the target environment is ready."
-  (if (my/lsp-mode-supported-p)
-      (progn
-        (my/language-server-apply-process-environment)
-        (my/language-server-apply-lsp-local-settings)
-        (lsp-deferred))
-    (let ((feature (my/lsp-mode-required-feature)))
-      (message "Skip lsp-mode in %s: missing `%s'" major-mode feature))))
+  (let ((report-missing my/language-server--manual-start))
+    (setq my/language-server--manual-start nil)
+    (if (my/lsp-mode-supported-p)
+        (progn
+          (my/language-server-apply-process-environment)
+          (my/language-server-apply-lsp-local-settings)
+          (my/language-server-runtime-register-lsp-configuration)
+          (if (my/language-server-contact-available-p)
+              (lsp-deferred)
+            (when report-missing
+              (message
+               "No installed language server supports %s on this target; run %s"
+               major-mode "M-x my/language-server-doctor"))))
+      (let ((feature (my/lsp-mode-required-feature)))
+        (when report-missing
+          (message "Skip lsp-mode in %s: missing `%s'" major-mode feature))))))
 
 (defun my/lsp-mode--direnv-ready (_environment error)
   "Resume deferred lsp-mode startup, falling back after direnv ERROR."
@@ -723,7 +956,6 @@ Use `client' only for an explicitly client-side UI helper."
   (when (eq (my/language-server-preferred-backend) 'lsp-mode)
     (unless (or my/lsp-mode--waiting-for-direnv
                 (bound-and-true-p lsp-managed-mode))
-      (my/language-server-stop-eglot)
       (let ((state
              (and
               (fboundp 'my/direnv-update-environment-maybe)
@@ -732,52 +964,6 @@ Use `client' only for an explicitly client-side UI helper."
         (if (eq state 'pending)
             (setq my/lsp-mode--waiting-for-direnv t)
           (my/lsp-mode-start-now))))))
-
-(defun my/eglot-start-now (&optional interactive)
-  "Start Eglot after the target environment is ready.
-With INTERACTIVE, invoke `eglot' interactively so a language-specific project
-finder can participate exactly as it does for `M-x eglot'."
-  (my/language-server-prepare-eglot-execution-environment)
-  (my/language-server-apply-process-environment)
-  (my/language-server-apply-eglot-local-settings)
-  (my/language-server-runtime-register-eglot-configuration)
-  (when (my/eglot-contact-available-p)
-    (if (or interactive
-            (my/language-server-runtime-p
-             my/language-server-runtime-current))
-        (call-interactively #'eglot)
-      (eglot-ensure))))
-
-(defalias 'my/eglot--start-now #'my/eglot-start-now)
-
-(defun my/eglot--direnv-ready (_environment error)
-  "Resume deferred Eglot startup, falling back after direnv ERROR."
-  (setq my/eglot--waiting-for-direnv nil)
-  (when error
-    (message
-     "Eglot: direnv failed (%s); continuing with the target base environment"
-     (error-message-string error)))
-  (when (eq (my/language-server-preferred-backend) 'eglot)
-    (my/eglot-start-now)))
-
-(defun my/eglot-ensure-unless-lsp-mode ()
-  "Start `eglot' unless another backend is active.
-A slow direnv/Nix export runs asynchronously; Eglot resumes only after the
-target/workspace environment has been applied to this buffer."
-  (interactive)
-  (when (eq (my/language-server-preferred-backend) 'eglot)
-    (unless (or my/eglot--waiting-for-direnv
-                (bound-and-true-p lsp-managed-mode)
-                (and (fboundp 'eglot-managed-p)
-                     (eglot-managed-p)))
-      (let ((state
-             (and
-              (fboundp 'my/direnv-update-environment-maybe)
-              (my/direnv-update-environment-maybe
-               nil #'my/eglot--direnv-ready))))
-        (if (eq state 'pending)
-            (setq my/eglot--waiting-for-direnv t)
-          (my/eglot-start-now))))))
 
 (defun my/language-server--project-root-for-buffer ()
   "Return the current buffer's logical project root."
@@ -794,20 +980,6 @@ target/workspace environment has been applied to this buffer."
   (when root
     (my/language-server--resource-owner root)))
 
-(defun my/eglot--connect-via-remote-a (fn &rest args)
-  "Route Eglot connection startup through one owning Remote workspace."
-  (let* ((project (nth 1 args))
-         (root
-          (my/language-server--canonical-root
-           (and project (ignore-errors (project-root project)))))
-         (workspace
-          (my/language-server--connect-workspace root))
-         (remote-current-adapter-id "language-server")
-         (remote-current-workspace workspace))
-    (remote-environment-ensure
-     (and workspace (remote-workspace-context workspace)))
-    (apply fn args)))
-
 (defun my/lsp-mode--connect-via-remote-a (fn &rest args)
   "Route lsp-mode startup through one owning Remote workspace."
   (let* ((root (my/language-server--project-root-for-buffer))
@@ -819,20 +991,150 @@ target/workspace environment has been applied to this buffer."
      (and workspace (remote-workspace-context workspace)))
     (apply fn args)))
 
+(defun my/language-server--booster-command (command)
+  "Return COMMAND wrapped in `emacs-lsp-booster' for the active target.
+
+The booster is looked up with `my/language-server-executable-find', so the
+path returned is target-native and a remote server can never end up running
+the client's copy.  A target without the binary fails loudly while
+`my/language-server-booster-required' is non-nil rather than silently
+dropping the optimisation on that one machine."
+  (let ((booster (my/language-server-executable-find "emacs-lsp-booster")))
+    (cond
+     (booster
+      (append (list booster "--json-false-value" ":json-false" "--") command))
+     (my/language-server-booster-required
+      (error
+       "emacs-lsp-booster not found on target %s; install it there or set %s"
+       (or (ignore-errors (remote-context)) "local")
+       "my/language-server-booster-required to nil"))
+     (t command))))
+
 (defun my/lsp-mode--resolve-logical-command-a (fn command &optional test)
   "Resolve lsp-mode COMMAND without its TRAMP tty shell wrapper.
 The `/fs:' process boundary already selects a pipe and projects the command
 through the chosen backend.  Calling FN in test mode performs the same command
-normalization while deliberately skipping `stty raw' and `shell-file-name'."
-  (funcall
-   fn command
-   (or test (remote-fs-file-name-p default-directory))))
+normalization while deliberately skipping `stty raw' and `shell-file-name'.
+The resolved argv is then wrapped in `emacs-lsp-booster' on the same target
+that will run the server."
+  (let ((resolved
+         (funcall
+          fn command
+          (or test (remote-fs-file-name-p default-directory)))))
+    (if (and (listp resolved) (stringp (car-safe resolved)))
+        (my/language-server--booster-command resolved)
+      resolved)))
 
-(defun my/eglot--target-command-a (fn contact)
-  "Keep Eglot CONTACT as argv inside the logical `/fs:' boundary."
-  (if (remote-fs-file-name-p default-directory)
-      contact
-    (funcall fn contact)))
+(defun my/lsp-mode--supports-logical-buffer-a (fn client)
+  "Let one CLIENT definition support native and logical `/fs:' buffers.
+lsp-mode normally requires a separate `-tramp' clone whose `remote?' slot is
+true.  The Remote framework already owns placement, command resolution and
+process launch, so for a logical buffer this compatibility boundary only
+temporarily reflects the buffer's remote truth value while FN checks support."
+  (let* ((path (or (buffer-file-name) default-directory))
+         (logical (and (stringp path) (remote-fs-file-name-p path)))
+         (original (lsp--client-remote? client)))
+    (if (not logical)
+        (funcall fn client)
+      (unwind-protect
+          (progn
+            (my/language-server--set-struct-slot
+             client 'lsp--client 'remote? (and (file-remote-p path) t))
+            (funcall fn client))
+        (my/language-server--set-struct-slot
+         client 'lsp--client 'remote? original)))))
+
+(defun my/language-server--booster-json-parse-a (fn &rest args)
+  "Read an `emacs-lsp-booster' bytecode payload in place of JSON.
+The booster emits pre-parsed Emacs bytecode; everything else keeps taking
+FN's ordinary JSON path with ARGS."
+  (or
+   (when (equal (following-char) ?#)
+     (let ((bytecode (read (current-buffer))))
+       (when (byte-code-function-p bytecode)
+         (funcall bytecode))))
+   (apply fn args)))
+
+(defun my/language-server--executable-find-a (fn command &optional remote)
+  "Resolve COMMAND on the language server's target rather than the client.
+
+Most stock `lsp-clients-*' definitions probe for their binary with a bare
+`executable-find', which answers for the machine running Emacs.  While a
+language-server route is being resolved, delegate to the target-aware
+lookup so those ~100 built-in clients become remote-correct without each
+having to be re-registered.  Outside that dynamic extent FN keeps its
+ordinary meaning."
+  (if (and (not my/language-server--resolving-executable-p)
+           (equal remote-current-adapter-id "language-server")
+           (stringp command))
+      (let ((my/language-server--resolving-executable-p t))
+        (ignore-errors (remote-executable-find command)))
+    (funcall fn command remote)))
+
+(defun my/language-server--install-server-a (fn client &rest args)
+  "Refuse a client-side server install for a target-placed CLIENT.
+
+`lsp-download-install' unpacks into `lsp-server-install-dir' on the machine
+running Emacs.  For a workspace whose filesystem the client cannot reach,
+that installs the server on the wrong side and the resulting path is
+meaningless to the target.  Provisioning for those targets goes through the
+workspace service instead, so fail loudly rather than silently installing
+here.  ARGS are passed through untouched when the install is legitimate."
+  (let ((root (my/language-server--project-root-for-buffer)))
+    (if (and root (not (ignore-errors (remote-client-file-name root))))
+        (user-error
+         "Refusing to install a language server on the client for %s; %s"
+         root "provision it on the target instead")
+      (apply fn client args))))
+
+(defun my/language-server--tcp-connection-a (fn &rest args)
+  "Route an lsp-mode TCP connection through the Remote channel layer.
+Binding the adapter activates the `open-network-stream' and
+`make-network-process' advices below, so a target-owned server is reached
+through a workspace-owned forward instead of a socket opened on this
+machine.  A target that cannot provide a channel raises rather than
+silently connecting to whatever listens on that port here."
+  (let ((remote-current-adapter-id "language-server"))
+    (apply fn args)))
+
+(defun my/language-server--workspace-configuration-response-a (fn params)
+  "Answer a `workspace/configuration' request from the owning workspace.
+The per-buffer override is read from a buffer that `lsp--cur-workspace'
+actually manages, so a callback running in an unrelated buffer cannot
+change which target's configuration the server receives."
+  (let ((response (funcall fn params)))
+    (if-let* ((workspace lsp--cur-workspace)
+              (override
+               (my/language-server--workspace-configuration-override workspace)))
+        (let* ((items (append (lsp-get params :items) nil))
+               (merged (copy-sequence response))
+               (limit (min (length items) (length merged))))
+          (dotimes (index limit merged)
+            (let* ((section (lsp-get (nth index items) :section))
+                   (selection
+                    (if (and (stringp section) (not (string-empty-p section)))
+                        (my/language-server--configuration-section
+                         override section)
+                      (cons t override))))
+              (when (car selection)
+                (aset merged index
+                      (my/language-server--merge-values
+                       (aref response index) (cdr selection)))))))
+      response)))
+
+(defun my/language-server--hide-eglot-commands ()
+  "Keep every Eglot command out of `M-x'.
+Eglot ships with Emacs and cannot be uninstalled, but it is no longer a
+supported route here; surfacing its commands only invites starting a second
+client that the Remote contract does not manage."
+  (mapatoms
+   (lambda (symbol)
+     (when (and (commandp symbol)
+                (string-prefix-p "eglot" (symbol-name symbol)))
+       (put symbol 'completion-predicate #'ignore)))))
+
+(my/language-server--hide-eglot-commands)
+(with-eval-after-load 'eglot (my/language-server--hide-eglot-commands))
 
 (defun my/language-server--route-native-network-p ()
   "Return non-nil when a native network call belongs to LSP placement."
@@ -880,20 +1182,6 @@ normalization while deliberately skipping `stty raw' and `shell-file-name'."
    'make-network-process :around
    #'my/language-server--make-network-process-a))
 
-(defun my/lsp-mode--find-logical-workspace-a
-    (fn server-id &optional file-name)
-  "Resolve lsp-mode's generated SERVER-ID-tramp alias when necessary.
-`lsp-auto-register-remote-clients' deliberately renames remote clients, while
-language extensions commonly continue to call `lsp-find-workspace' with the
-base ID.  Trying the generated alias preserves those extension APIs."
-  (or (funcall fn server-id file-name)
-      (and
-       (not (string-suffix-p "-tramp" (symbol-name server-id)))
-       (funcall
-        fn
-        (intern (format "%s-tramp" server-id))
-        file-name))))
-
 (defun my/language-server--canonical-root (root)
   "Return ROOT as a canonical logical directory, or nil."
   (when (stringp root)
@@ -935,31 +1223,19 @@ reports zero diagnostics for locally opened buffers."
         (or (ignore-errors (remote-canonicalize-file-name path)) path)
       path)))
 
-(defun my/eglot--find-buffer-visiting-a (fn server abspath)
-  "Fall back across Eglot's buffer-identity spellings for ABSPATH.
-`eglot--find-buffer-visiting' deliberately performs a strict `equal'
-against `buffer-file-name' to avoid `file-truename' (bug#70036), so it
-misses whenever ABSPATH and a managed buffer's `buffer-file-name' differ
-only in `/fs:' vs. native spelling.  `get-file-buffer' is
-handler-dispatched and `/fs:' already implements it, so it resolves the
-alias without paying for `file-truename'."
-  (or (funcall fn server abspath)
-      (when-let* ((buffer (ignore-errors (get-file-buffer abspath))))
-        (and (memq buffer (eglot--managed-buffers server)) buffer))
-      (when-let* ((buffer (ignore-errors (find-buffer-visiting abspath))))
-        (and (memq buffer (eglot--managed-buffers server)) buffer))))
-
 (defun my/language-server--doctor-check (_target _probe)
-  "Return Remote Doctor diagnostics for the diagnostic-key identity fix.
-lsp-mode and Eglot diagnostics reach a buffer only if that buffer's
-`buffer-file-name' resolves to the same key the server's diagnostics
-were stored under; `my/lsp-mode--fix-path-casing-a' and
-`my/eglot--find-buffer-visiting-a' are what bridge the `/fs:' logical
-identity and the buffer's native spelling.  If either advice is not
-installed \(for example after an lsp-mode/Eglot update renames the
-function it targets\), Flymake silently stops showing diagnostics for
-normal local buffers with no other symptom, which is exactly the defect
-this pair of checks exists to catch early."
+  "Return Remote Doctor diagnostics for the language-server identity fixes.
+lsp-mode diagnostics reach a buffer only if that buffer's
+`buffer-file-name' resolves to the same key the server's diagnostics were
+stored under; `my/lsp-mode--fix-path-casing-a' is what bridges the `/fs:'
+logical identity and the buffer's native spelling.  If it is not installed
+\(for example after an lsp-mode update renames the function it targets\),
+Flymake silently stops showing diagnostics for normal local buffers with no
+other symptom, which is exactly the defect this check exists to catch early.
+
+The booster check is here for the same reason: a target missing
+`emacs-lsp-booster' is a startup failure that is far cheaper to see in
+Doctor than in a server log."
   (list
    (list :name 'language-server-lsp-mode-diagnostic-key-advice
          :status
@@ -975,43 +1251,17 @@ this pair of checks exists to catch early."
            "lsp-mode not loaded yet")
          :remedy
          "Re-check my/lsp-mode--fix-path-casing-a against lsp--fix-path-casing")
-   (list :name 'language-server-eglot-diagnostic-buffer-fallback
+   (list :name 'language-server-booster
          :status
          (cond
-          ((not (fboundp 'eglot--find-buffer-visiting)) 'ok)
-          ((advice-member-p #'my/eglot--find-buffer-visiting-a
-                            'eglot--find-buffer-visiting)
-           'ok)
+          ((my/language-server-executable-find "emacs-lsp-booster") 'ok)
+          (my/language-server-booster-required 'error)
           (t 'warning))
-         :detail
-         (if (fboundp 'eglot--find-buffer-visiting)
-             "eglot buffer-identity fallback across /fs: and native spellings"
-           "eglot not loaded yet")
+         :detail "emacs-lsp-booster on the language-server target"
          :remedy
-         "Re-check my/eglot--find-buffer-visiting-a against eglot--find-buffer-visiting")))
+         "Install emacs-lsp-booster on this target, or unset my/language-server-booster-required")))
 
 (remote-doctor-register-check #'my/language-server--doctor-check)
-
-(defun my/eglot--logical-root ()
-  "Return the logical project root belonging to Eglot's active server."
-  (or
-   (when-let* ((server
-                (or
-                 (and (boundp 'eglot--cached-server)
-                      eglot--cached-server)
-                 (and (fboundp 'eglot-current-server)
-                      (ignore-errors (eglot-current-server)))))
-               ((fboundp 'eglot--project))
-               (project (ignore-errors (eglot--project server)))
-               (root (ignore-errors (project-root project))))
-     (my/language-server--canonical-root root))
-   (my/language-server--canonical-root default-directory)))
-
-(defun my/eglot--uri-to-logical-a (fn uri)
-  "Canonicalize Eglot URI using its server's project target."
-  (my/language-server--path-on-root
-   (funcall fn uri)
-   (my/eglot--logical-root)))
 
 (defun my/lsp-mode--path-to-target-uri-a (fn path)
   "Pass target-native PATH to lsp-mode's ordinary URI converter.
@@ -1111,12 +1361,6 @@ roots are retained for callbacks which are not run in a source buffer."
              (eq (remote-workspace-resource-value resource) value))
         (remote-workspace-forget-resource workspace resource)))))
 
-(defun my/language-server--eglot-root (server)
-  "Return SERVER's canonical logical project root."
-  (when-let* ((project (ignore-errors (eglot--project server)))
-              (root (ignore-errors (project-root project))))
-    (my/language-server--canonical-root root)))
-
 (defun my/language-server--skip-file-watch-p (root)
   "Return non-nil when an LSP client must decline dynamic watches for ROOT.
 The decision is based on client filesystem placement, not on a local/remote
@@ -1133,36 +1377,6 @@ keeps exactly the same watcher path as an ordinary local project."
      (error
       "Invalid `my/language-server-file-watch-policy': %S"
       my/language-server-file-watch-policy))))
-
-(defalias 'my/language-server--eglot-skip-file-watch-p
-  #'my/language-server--skip-file-watch-p)
-
-(defun my/eglot-register-capability-via-remote-a
-    (fn server method id &rest params)
-  "Run Eglot capability registration in SERVER's Remote workspace.
-For target-only roots, acknowledge but decline dynamic file-watch
-registrations.  Eglot advertises those registrations as unsupported on remote
-projects; accepting a server which ignores that advertisement makes upstream
-Eglot recursively install one process-backed watch per directory."
-  (let* ((root (my/language-server--eglot-root server))
-         (workspace
-          (and root (my/language-server--resource-owner root)))
-         (remote-current-adapter-id "language-server")
-         (remote-current-workspace workspace))
-    (if (and
-         (eq method 'workspace/didChangeWatchedFiles)
-         (my/language-server--skip-file-watch-p root))
-        (progn
-          (remote-log
-           'lsp-watch-registration-declined
-           :backend 'eglot
-           :root root
-           :registration-id id
-           :watcher-count
-           (length (or (plist-get params :watchers) []))
-           :policy my/language-server-file-watch-policy)
-          nil)
-      (apply fn server method id params))))
 
 (defun my/lsp-mode--register-capability-via-remote-a
     (fn registration)
@@ -1186,49 +1400,6 @@ watch creation is disabled for target-only filesystems."
        :root root
        :policy my/language-server-file-watch-policy))
     (funcall fn registration)))
-
-(defun my/language-server-register-eglot-resource (server)
-  "Register initialized Eglot SERVER with its Remote workspace owner."
-  (when-let* ((project (ignore-errors (eglot--project server)))
-              (root (my/language-server--eglot-root server))
-              (workspace (my/language-server--resource-owner root)))
-    (let ((runtime-id
-           (and (eq (car-safe project) 'my/language-server-runtime-project)
-                (nth 2 project)))
-          (buffer
-           (seq-find
-            #'buffer-live-p
-            (ignore-errors (eglot--managed-buffers server)))))
-      (remote-workspace-ensure-recoverable-resource
-       workspace 'lsp (append (list 'eglot root)
-                              (and runtime-id (list runtime-id))) server
-       :close
-       (lambda (value reason)
-         (unless (eq reason 'transport-recovery)
-           (ignore-errors
-             (eglot-shutdown value nil 1 t))))
-       :recover
-       (lambda (resource _owner)
-         (let* ((old (remote-workspace-resource-value resource))
-                (metadata
-                 (remote-workspace-resource-metadata resource))
-                (owner-buffer (plist-get metadata :buffer))
-                (my/language-server--recovering-resource-p t))
-           (eglot-reconnect old)
-           (or
-            (and
-             (buffer-live-p owner-buffer)
-             (with-current-buffer owner-buffer
-               (ignore-errors (eglot-current-server))))
-            old)))
-       :metadata
-       (list :backend 'eglot :root root :runtime-id runtime-id
-             :buffer buffer)))))
-
-(defun my/language-server-eglot-shutdown-resource-a (server)
-  "Forget the workspace resource for an Eglot SERVER which already stopped."
-  (unless my/language-server--recovering-resource-p
-    (my/language-server--forget-resource-value server)))
 
 (defun my/language-server--lsp-workspace-root (workspace)
   "Return lsp-mode WORKSPACE's canonical logical root."
@@ -1458,15 +1629,11 @@ only enforce process termination; they never send a second shutdown RPC."
   (unless my/language-server--recovering-resource-p
     (my/language-server--forget-resource-value workspace)))
 
-(defun my/eglot-ensure ()
-  "Start `eglot' in programming buffers that do not opt into `lsp-mode'."
-  (interactive)
-  (when (derived-mode-p 'prog-mode)
-    (my/eglot-ensure-unless-lsp-mode)))
-
 (defun my/language-server-ensure-deferred ()
   "Start the selected language-server client after the buffer opens."
-  (unless (derived-mode-p 'lean-mode)
+  (when (and buffer-file-name
+             (not (derived-mode-p 'lean-mode)))
+    (setq-local my/language-server--manual-start nil)
     (let ((buffer (current-buffer)))
       (run-at-time
        0 nil
@@ -1476,15 +1643,13 @@ only enforce process termination; they never send a second shutdown RPC."
              (my/language-server-ensure))))
        buffer))))
 
-(defalias 'my/eglot-ensure-deferred
-  #'my/language-server-ensure-deferred)
+(add-hook 'prog-mode-hook #'my/language-server-ensure-deferred)
 
 (defun my/language-server--ensure-after-runtime ()
   "Start the preferred backend after runtime preparation has completed."
   (interactive)
   (pcase (my/language-server-preferred-backend)
     ('lsp-mode (my/lsp-mode-ensure))
-    ('eglot (my/eglot-ensure))
     ('disabled (message "Language server disabled for this project"))))
 
 (defun my/language-server--runtime-ready (_runtime error)
@@ -1497,6 +1662,8 @@ only enforce process termination; they never send a second shutdown RPC."
 (defun my/language-server-ensure ()
   "Prepare the effective runtime, then start the preferred language server."
   (interactive)
+  (when (called-interactively-p 'interactive)
+    (setq my/language-server--manual-start t))
   (unless my/language-server--waiting-for-runtime
     (let ((state
            (my/language-server-runtime-prepare
@@ -1504,40 +1671,38 @@ only enforce process termination; they never send a second shutdown RPC."
       (when (eq state 'pending)
         (setq my/language-server--waiting-for-runtime t)))))
 
-(defun my/language-server-call (eglot-fn lsp-fn)
-  "Call EGLOT-FN or LSP-FN for the active language server backend."
-  (pcase (my/current-language-server-backend)
-    ('eglot
-     (call-interactively eglot-fn))
-    ('lsp-mode
-     (call-interactively lsp-fn))
-    (_
-     (user-error "No active language server in current buffer"))))
+(defun my/language-server-call (command)
+  "Call COMMAND when a language server manages the current buffer.
+The indirection is kept so every consumer keeps one stable entry point and
+one uniform error when nothing is running."
+  (if (my/current-language-server-backend)
+      (call-interactively command)
+    (user-error "No active language server in current buffer")))
 
 (defun my/language-server-code-actions ()
-  "Run a code action using the active language server backend."
+  "Run a code action using the active language server."
   (interactive)
-  (my/language-server-call #'eglot-code-actions #'lsp-execute-code-action))
+  (my/language-server-call #'lsp-execute-code-action))
 
 (defun my/language-server-format-buffer ()
-  "Format the current buffer using the active language server backend."
+  "Format the current buffer using the active language server."
   (interactive)
-  (my/language-server-call #'eglot-format-buffer #'lsp-format-buffer))
+  (my/language-server-call #'lsp-format-buffer))
 
 (defun my/language-server-rename ()
-  "Rename the symbol at point using the active language server backend."
+  "Rename the symbol at point using the active language server."
   (interactive)
-  (my/language-server-call #'eglot-rename #'lsp-rename))
+  (my/language-server-call #'lsp-rename))
 
 (defun my/language-server-find-implementation ()
-  "Find implementation using the active language server backend."
+  "Find implementation using the active language server."
   (interactive)
-  (my/language-server-call #'eglot-find-implementation #'lsp-find-implementation))
+  (my/language-server-call #'lsp-find-implementation))
 
 (defun my/language-server-find-type-definition ()
-  "Find type definition using the active language server backend."
+  "Find type definition using the active language server."
   (interactive)
-  (my/language-server-call #'eglot-find-typeDefinition #'lsp-find-type-definition))
+  (my/language-server-call #'lsp-find-type-definition))
 
 ;; -------------------------
 ;; 1. Company Mode (Completion)
@@ -1587,8 +1752,7 @@ only enforce process termination; they never send a second shutdown RPC."
 (use-package company
   :ensure t
   :demand t
-  :hook ((eglot-managed-mode . company-mode)
-         (lsp-managed-mode . company-mode)
+  :hook ((lsp-managed-mode . company-mode)
          ;; org-mode derives from text-mode, so text-mode-hook already covers it.
          (text-mode . company-mode)
          (text-mode . my/company-setup-text-backends))
@@ -1625,9 +1789,6 @@ only enforce process termination; they never send a second shutdown RPC."
 (with-eval-after-load 'esh-mode
   (add-hook 'eshell-mode-hook #'my/company-setup-shell-backends))
 
-(with-eval-after-load 'eglot
-  (add-to-list 'eglot-stay-out-of 'company-backends))
-
 (with-eval-after-load 'company-yasnippet
   (define-advice company-yasnippet (:around (fn command &optional arg &rest args)
                                             my/guard-doc-buffer)
@@ -1651,7 +1812,7 @@ only enforce process termination; they never send a second shutdown RPC."
   "Keep Company-box as the only candidate-popup frontend in this buffer.
 Company 1.1 added its own child-frame frontend.  Older Company-box releases
 remove only Company's pseudo-tooltip frontends, leaving both child frames to
-render the same CAPF/Eglot candidates on top of each other."
+render the same CAPF/lsp-mode candidates on top of each other."
   (when (bound-and-true-p company-box-mode)
     (setq-local
      company-frontends
@@ -1714,10 +1875,14 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
 ;; -------------------------
 ;; 3. Flymake (Diagnostics)
 ;; -------------------------
-;; Eglot / lsp-mode 均统一走 Flymake 诊断
+;; lsp-mode 诊断统一走 Flymake（`lsp-diagnostics-provider' :flymake）
 (use-package flymake
   :ensure nil ; Emacs built-in
   :hook (prog-mode . my/prog-flymake-setup)
+  :custom
+  ;; Emacs renders these summaries for every diagnostic line in the visible
+  ;; window.  Unlike the old sideline backend, display is not tied to point.
+  (flymake-show-diagnostics-at-end-of-line 'short)
   :bind (:map flymake-mode-map
          ("M-n" . flymake-goto-next-error)
          ("M-p" . flymake-goto-prev-error)
@@ -1735,6 +1900,44 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
 ;; -------------------------
 ;; 4. lsp-mode (for explicit opt-in languages)
 ;; -------------------------
+(defun my/lsp-imenu--symbol-label (symbol)
+  "Return SYMBOL's Imenu label while retaining its LSP SymbolKind."
+  (let* ((kind (lsp-get symbol :kind))
+         (label (copy-sequence
+                 (lsp-render-symbol symbol lsp-imenu-detailed-outline))))
+    (when (> (length label) 0)
+      (add-text-properties
+       0 (length label)
+       (list 'my/lsp-symbol-kind kind)
+       label))
+    label))
+
+(defun my/lsp-imenu--document-symbol-entry (symbol)
+  "Convert one LSP document SYMBOL to a typed hierarchical Imenu entry."
+  (let* ((children
+          (lsp--imenu-filter-symbols (or (lsp-get symbol :children) nil)))
+         (children (seq-sort #'lsp--imenu-symbol-lessp children))
+         (label (my/lsp-imenu--symbol-label symbol)))
+    (if children
+        (cons label
+              (mapcar #'my/lsp-imenu--document-symbol-entry children))
+      (cons label
+            (gethash (lsp--get-line-and-col symbol)
+                     lsp--line-col-to-point-hash-table)))))
+
+(defun my/lsp-imenu-create-vscode-index (symbols)
+  "Build a VS Code-style typed and hierarchically sorted Imenu index.
+DocumentSymbol servers retain their exact SymbolKind as a text property for
+Treemacs and other visual consumers.  Older flat SymbolInformation servers use
+lsp-mode's categorized index, whose category names provide the same fallback."
+  (if (and symbols (lsp--imenu-hierarchical-p symbols))
+      (let* ((symbols (seq-sort #'lsp--imenu-symbol-lessp symbols))
+             (lsp--line-col-to-point-hash-table
+              (lsp--convert-line-col-to-points-batch
+               (lsp--collect-lines-and-cols symbols))))
+        (mapcar #'my/lsp-imenu--document-symbol-entry symbols))
+    (lsp-imenu-create-categorized-index symbols)))
+
 (use-package lsp-mode
   :ensure t
   :defer t
@@ -1750,13 +1953,42 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
   :init
   (setq lsp-completion-provider :capf
         lsp-diagnostics-provider :flymake
-        lsp-headerline-breadcrumb-enable nil
+        lsp-headerline-breadcrumb-enable t
+        lsp-headerline-breadcrumb-segments '(project file symbols)
         lsp-inlay-hint-enable t
-        lsp-log-io nil)
+        ;; The normal idle hook refreshes the visible range after 350ms.  Do
+        ;; not also send an immediate request for every intermediate scroll.
+        lsp-update-inlay-hints-on-scroll nil
+        ;; lsp-mode owns CodeLens directly.  It is enabled by default and can
+        ;; be toggled without opening the maintenance dispatch via SPC c L.
+        lsp-lens-enable t
+        lsp-idle-delay 0.35
+        lsp-lens-debounce-interval 0.35
+        lsp-lens-place-position 'end-of-line
+        ;; Match VS Code Outline's type-first view, but keep members of the
+        ;; same kind in source order so the tree remains predictable while
+        ;; editing.  `my/lsp-imenu-create-vscode-index' retains SymbolKind for
+        ;; semantic icons in Treemacs.
+        lsp-imenu-sort-methods '(kind position name)
+        lsp-imenu-index-function #'my/lsp-imenu-create-vscode-index
+        lsp-log-io nil
+        lsp-keep-workspace-alive nil
+        lsp-modeline-code-actions-enable nil
+        lsp-modeline-diagnostics-enable nil
+        lsp-signature-render-documentation nil
+        lsp-eldoc-enable-hover nil
+        lsp-enable-suggest-server-download nil
+        ;; The `/fs:' handler plus `remote-make-process' is the only process
+        ;; path.  lsp-mode's own `-tramp' client clones would add a second,
+        ;; parallel remote implementation whose command, environment and
+        ;; workspace identity are outside the Remote contract.
+        lsp-auto-register-remote-clients nil)
   :config
   (add-hook
    'lsp-after-initialize-hook
    #'my/language-server-register-lsp-resource)
+  (add-hook 'lsp-configure-hook
+            #'my/language-server--push-workspace-configuration-h)
   (add-hook
    'lsp-after-uninitialized-functions
    #'my/language-server-unregister-lsp-resource)
@@ -1767,7 +1999,7 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
           (my/lsp-handle-inlay-hint-refresh workspace)
         (funcall fn workspace request))))
   (define-key lsp-mode-map (kbd "C-c f") #'lsp-format-buffer)
-  (define-key lsp-mode-map (kbd "C-c d") #'eldoc-doc-buffer)
+  (define-key lsp-mode-map (kbd "C-c d") #'lsp-ui-doc-glance)
   (define-key lsp-mode-map (kbd "C-c a") #'lsp-execute-code-action)
   (define-key lsp-mode-map (kbd "C-c r") #'lsp-rename)
   (define-key lsp-mode-map (kbd "C-h e") #'xref-find-definitions)
@@ -1785,17 +2017,17 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
   (unless (advice-member-p #'my/lsp-mode--connect-via-remote-a 'lsp)
     (advice-add 'lsp :around #'my/lsp-mode--connect-via-remote-a))
   (unless (advice-member-p
+           #'my/lsp-mode--supports-logical-buffer-a
+           'lsp--supports-buffer?)
+    (advice-add
+     'lsp--supports-buffer?
+     :around #'my/lsp-mode--supports-logical-buffer-a))
+  (unless (advice-member-p
            #'my/lsp-mode--resolve-logical-command-a
            'lsp-resolve-final-command)
     (advice-add
      'lsp-resolve-final-command
      :around #'my/lsp-mode--resolve-logical-command-a))
-  (unless (advice-member-p
-           #'my/lsp-mode--find-logical-workspace-a
-           'lsp-find-workspace)
-    (advice-add
-     'lsp-find-workspace
-     :around #'my/lsp-mode--find-logical-workspace-a))
   (unless (advice-member-p
            #'my/lsp-mode--path-to-target-uri-a
            'lsp--path-to-uri)
@@ -1843,140 +2075,230 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
            'lsp--global-teardown)
     (advice-add
      'lsp--global-teardown
-     :override #'my/lsp-mode-shutdown-all)))
-
-
-;; -------------------------
-;; 5. Eglot (LSP Client)
-;; -------------------------
-(use-package eglot
-  :ensure nil ; Built-in since Emacs 29
-  :hook ((prog-mode . my/language-server-ensure-deferred)
-         (eglot-managed-mode . (lambda ()
-                                 (when (fboundp 'eglot-inlay-hints-mode)
-                                   (eglot-inlay-hints-mode 1)))))
-  :custom
-  (eglot-sync-connect 0)
-  (eglot-autoshutdown t)
-  (eglot-auto-display-help-buffer nil)
-  (eglot-code-action-indications nil)
-  (eglot-send-changes-idle-time 0.5)
-  (eglot-extend-to-xref t)
-  (eglot-events-buffer-size 0)
-  (read-process-output-max (* 1024 1024)))
-
-(with-eval-after-load 'eglot
-  (add-hook
-   'eglot-connect-hook
-   #'my/language-server-register-eglot-resource)
-  (unless (advice-member-p #'my/eglot--connect-via-remote-a
-                           'eglot--connect)
-    (advice-add 'eglot--connect :around
-                #'my/eglot--connect-via-remote-a))
-  (unless (advice-member-p #'my/eglot--target-command-a
-                           'eglot--cmd)
-    (advice-add 'eglot--cmd :around
-                #'my/eglot--target-command-a))
-  (unless (advice-member-p #'my/eglot--uri-to-logical-a
-                           'eglot-uri-to-path)
-    (advice-add 'eglot-uri-to-path :around
-                #'my/eglot--uri-to-logical-a))
-  (unless (advice-member-p #'my/eglot--find-buffer-visiting-a
-                           'eglot--find-buffer-visiting)
-    (advice-add 'eglot--find-buffer-visiting :around
-                #'my/eglot--find-buffer-visiting-a))
+     :override #'my/lsp-mode-shutdown-all))
   (unless (advice-member-p
-           #'my/eglot-register-capability-via-remote-a
-           'eglot-register-capability)
+           #'my/language-server--executable-find-a
+           'executable-find)
     (advice-add
-     'eglot-register-capability
-     :around
-     #'my/eglot-register-capability-via-remote-a))
+     'executable-find
+     :around #'my/language-server--executable-find-a))
+  (when (fboundp 'lsp--install-server-internal)
+    (unless (advice-member-p
+             #'my/language-server--install-server-a
+             'lsp--install-server-internal)
+      (advice-add
+       'lsp--install-server-internal
+       :around #'my/language-server--install-server-a)))
+  (dolist (connector '(lsp-tcp-connection lsp-tcp-server-connection))
+    (when (and (fboundp connector)
+               (not (advice-member-p
+                     #'my/language-server--tcp-connection-a connector)))
+      (advice-add connector :around #'my/language-server--tcp-connection-a)))
   (unless (advice-member-p
-           #'my/language-server-eglot-shutdown-resource-a
-           'eglot--on-shutdown)
+           #'my/language-server--workspace-configuration-response-a
+           'lsp--build-workspace-configuration-response)
     (advice-add
-     'eglot--on-shutdown :after
-     #'my/language-server-eglot-shutdown-resource-a))
-  (define-key eglot-mode-map (kbd "C-c f") #'eglot-format-buffer)
-  (define-key eglot-mode-map (kbd "C-c d") #'eldoc-doc-buffer)
-  (define-key eglot-mode-map (kbd "C-c a") #'eglot-code-actions)
-  (define-key eglot-mode-map (kbd "C-c r") #'eglot-rename)
-  (define-key eglot-mode-map (kbd "C-h e") #'xref-find-definitions)
-  (define-key eglot-mode-map (kbd "C-h r") #'xref-find-references)
-  (define-key eglot-mode-map (kbd "C-h i") #'eglot-find-implementation)
-  (define-key eglot-mode-map (kbd "C-h t") #'eglot-find-typeDefinition)
-  (when (boundp 'eglot-events-buffer-config)
-    (cl-callf plist-put eglot-events-buffer-config :size 0))
-  (define-advice eglot--managed-mode (:around (fn &optional server) my/defer-eglot-shutdown)
-    "Defer Eglot shutdown briefly to avoid restart churn while switching files."
-    (let ((orig-shutdown (symbol-function 'eglot-shutdown)))
-      (cl-letf (((symbol-function 'eglot-shutdown)
-                 (lambda (srv)
-                   (if (or (null my/language-server-defer-shutdown)
-                           (eq my/language-server-defer-shutdown 0))
-                       (funcall orig-shutdown srv)
-                     (run-at-time
-                      (if (numberp my/language-server-defer-shutdown)
-                          my/language-server-defer-shutdown
-                        3)
-                      nil
-                      (lambda (deferred-server)
-                        (when (and deferred-server
-                                   (ignore-errors
-                                     (jsonrpc-running-p deferred-server))
-                                   (null (ignore-errors
-                                           (eglot--managed-buffers
-                                            deferred-server))))
-                          (ignore-errors
-                            (funcall orig-shutdown deferred-server))))
-                      srv)))))
-        (funcall fn server))))
-
-  (defun my/eglot-shutdown-all-on-exit-h ()
-    "Cleanly shut down all Eglot servers before Emacs exits.
-Lean's LSP watchdog (and similar servers) fork worker subprocesses that
-only get reaped on a clean LSP shutdown/exit; killing Emacs without this
-leaves those workers orphaned and running."
-    (when (fboundp 'eglot-shutdown-all)
-      (with-demoted-errors "eglot-shutdown-all-on-exit: %S"
-        (eglot-shutdown-all))))
-  (add-hook 'kill-emacs-hook #'my/eglot-shutdown-all-on-exit-h))
+     'lsp--build-workspace-configuration-response
+     :around #'my/language-server--workspace-configuration-response-a))
+  ;; emacs-lsp-booster answers with pre-parsed bytecode instead of JSON.
+  (let ((reader (if (fboundp 'json-parse-buffer) 'json-parse-buffer 'json-read)))
+    (unless (advice-member-p #'my/language-server--booster-json-parse-a reader)
+      (advice-add reader :around #'my/language-server--booster-json-parse-a))))
 
 
 ;; -------------------------
 ;; 6. UI Emulation (Doc Box & Breadcrumb)
 ;; -------------------------
 
-;; 替代 lsp-ui-doc：提供光标处悬浮文档框
-(use-package eldoc-box
+;; lsp-ui：悬浮文档框、sideline code action、peek 跳转
+(use-package lsp-ui
   :ensure t
-  :hook ((eglot-managed-mode . eldoc-box-hover-at-point-mode)
-         (lsp-managed-mode . eldoc-box-hover-at-point-mode)
-         (emacs-lisp-mode . eldoc-box-hover-at-point-mode)
-         (lisp-interaction-mode . eldoc-box-hover-at-point-mode))
+  :after lsp-mode
+  :hook (lsp-mode . lsp-ui-mode)
   :custom
-  (eldoc-box-max-pixel-width 600)
-  (eldoc-box-max-pixel-height 400)
-  (eldoc-box-clear-with-C-g t)
+  ;; `lsp-ui-doc-show-with-cursor' reproduces the old
+  ;; hover-at-point feel: the box follows point instead of
+  ;; waiting for an explicit command.
+  (lsp-ui-doc-enable t)
+  (lsp-ui-doc-show-with-cursor t)
+  (lsp-ui-doc-show-with-mouse nil)
+  (lsp-ui-doc-position 'at-point)
+  (lsp-ui-doc-delay 0.4)
+  (lsp-ui-doc-max-width 80)
+  (lsp-ui-doc-max-height 20)
+  (lsp-ui-doc-use-childframe t)
+  ;; `lsp-ui-sideline' reads diagnostics only from flycheck
+  ;; (`lsp-ui-sideline--diagnostics' is guarded on `flycheck-mode'), and this
+  ;; configuration is Flymake-based.  The `sideline' package below owns that
+  ;; column instead, so lsp-ui contributes doc, peek and imenu only.
+  (lsp-ui-sideline-enable nil)
+  (lsp-ui-peek-enable t)
+  (lsp-ui-peek-always-show t)
+  (lsp-ui-imenu-auto-refresh 'after-save)
   :config
-  (with-eval-after-load 'eglot
-    (define-key eglot-mode-map (kbd "C-h d") #'eldoc-box-help-at-point)
-    (define-key eglot-mode-map (kbd "C-h c") #'eldoc-box-quit-frame))
-  (with-eval-after-load 'elisp-mode
-    (define-key emacs-lisp-mode-map (kbd "C-h d") #'eldoc-box-help-at-point)
-    (define-key emacs-lisp-mode-map (kbd "C-h c") #'eldoc-box-quit-frame)
-    (define-key lisp-interaction-mode-map (kbd "C-h d") #'eldoc-box-help-at-point)
-    (define-key lisp-interaction-mode-map (kbd "C-h c") #'eldoc-box-quit-frame))
-  (with-eval-after-load 'lsp-mode
-    (define-key lsp-mode-map (kbd "C-h d") #'eldoc-box-help-at-point)
-    (define-key lsp-mode-map (kbd "C-h c") #'eldoc-box-quit-frame)))
+  (define-key lsp-ui-mode-map (kbd "C-h d") #'lsp-ui-doc-show)
+  (define-key lsp-ui-mode-map (kbd "C-h c") #'lsp-ui-doc-hide))
 
-;; 替代 lsp-headerline-breadcrumb：Eglot 作者出品的面包屑
+;; Code actions stay contextual to the current line.  Flymake itself owns
+;; persistent end-of-line diagnostics for every visible diagnostic line.
+(use-package sideline
+  :ensure t
+  :hook (lsp-managed-mode . sideline-mode)
+  :custom
+  (sideline-backends-right '((sideline-lsp . up)))
+  (sideline-backends-left nil)
+  (sideline-delay 0.35)
+  (sideline-order-right 'up)
+  (sideline-priority 100)
+  (sideline-display-backend-name nil))
+
+(use-package sideline-lsp
+  :ensure t
+  :after (sideline lsp-mode)
+  :custom
+  (sideline-lsp-update-mode 'line)
+  (sideline-lsp-ignore-duplicate t)
+  (sideline-lsp-code-actions-prefix "⚑ "))
+
+;; lsp-mode 自带面包屑；`breadcrumb' 继续覆盖非 LSP 缓冲区，两者不叠加。
 (use-package breadcrumb
   :ensure t
   :hook ((prog-mode . breadcrumb-local-mode)
          (org-src-mode . breadcrumb-local-mode)))
+
+(defun my/language-server--disable-breadcrumb-h ()
+  "Yield the header line to `lsp-headerline-breadcrumb-mode'."
+  (when (bound-and-true-p breadcrumb-local-mode)
+    (breadcrumb-local-mode -1)))
+
+(add-hook 'lsp-managed-mode-hook #'my/language-server--disable-breadcrumb-h)
+
+(defun my/language-server--visible-region (&optional window)
+  "Return WINDOW's visible buffer region plus the configured line margin."
+  (when-let* ((window (or window (get-buffer-window (current-buffer) t))))
+    (let ((margin (max 0 my/language-server-visible-render-margin))
+          start end)
+      (save-excursion
+        (goto-char (window-start window))
+        (forward-line (- margin))
+        (setq start (point))
+        (goto-char (window-end window t))
+        (forward-line margin)
+        (setq end (point)))
+      (cons start end))))
+
+(defun my/language-server--point-visible-with-margin-p (point)
+  "Return non-nil when POINT is near a visible window for this buffer."
+  (seq-some
+   (lambda (window)
+     (when-let* ((region (my/language-server--visible-region window)))
+       (and (<= (car region) point) (<= point (cdr region)))))
+   (get-buffer-window-list (current-buffer) nil t)))
+
+(defun my/language-server--range-visible-with-margin-p (range)
+  "Return non-nil when LSP RANGE overlaps a visible warm region.
+The server response may remain buffer-global as protocol/cache state; only
+the decoration objects that reach lsp-mode's renderer are filtered here."
+  (when-let* ((region (ignore-errors (lsp--range-to-region range))))
+    (let ((beg (car region))
+          (end (cdr region)))
+      (seq-some
+       (lambda (window)
+         (when-let* ((visible (my/language-server--visible-region window)))
+           (and (<= beg (cdr visible))
+                (<= (car visible) end))))
+       (get-buffer-window-list (current-buffer) nil t)))))
+
+(defconst my/lsp-visible-ranged-decoration-methods
+  '("textDocument/documentColor" "textDocument/documentLink")
+  "LSP responses whose overlay rendering is bounded to visible windows.")
+
+(defun my/lsp-request-async-visible-decorations-a
+    (fn method params callback &rest keys)
+  "Filter ranged decoration responses before calling CALLBACK.
+METHOD requests and their cache/protocol lifetime are unchanged.  Color and
+link overlays are the only part restricted to the visible region plus the
+configured warm margin."
+  (if (member method my/lsp-visible-ranged-decoration-methods)
+      (let ((source-buffer (current-buffer)))
+        (apply
+         fn method params
+         (lambda (result)
+           (when (buffer-live-p source-buffer)
+             (with-current-buffer source-buffer
+               (funcall
+                callback
+                (seq-filter
+                 (lambda (item)
+                   (when-let* ((range (lsp-get item :range)))
+                     (my/language-server--range-visible-with-margin-p range)))
+                 result)))))
+         keys))
+    (apply fn method params callback keys)))
+
+(defun my/lsp-document-color-refresh-visible ()
+  "Refresh document-color overlays after the visible region changes."
+  (when-let* ((region (my/language-server--visible-region)))
+    (unless (equal region my/lsp-document-color-last-visible-region)
+      (setq my/lsp-document-color-last-visible-region region)
+      (lsp--document-color))))
+
+(defun my/lsp-lens--display-visible-a (fn lenses)
+  "Render only LENSES whose start position is visible in this window.
+lsp-lens already notices page changes from its idle hook.  Filtering at the
+display boundary keeps overlays bounded to the visible region while retaining
+the upstream cache and its 350ms scroll/typing debounce."
+  (if (get-buffer-window (current-buffer) t)
+      (funcall
+       fn
+       (seq-filter
+        (lambda (lens)
+          (when-let* ((range (lsp-get lens :range))
+                      (position (lsp-get range :start))
+                      (point (ignore-errors
+                               (lsp--position-to-point position))))
+            (my/language-server--point-visible-with-margin-p point)))
+        lenses))
+    (funcall fn nil)))
+
+(defun my/lsp-update-inlay-hints-visible-a (fn _start _end)
+  "Request inlay hints only for the visible region plus its warm margin."
+  (when-let* ((region (my/language-server--visible-region)))
+    (funcall fn (car region) (cdr region))))
+
+(defun my/lsp-semantic-tokens-request-visible-a (_fn)
+  "Request semantic tokens for the same bounded warm region as other UI.
+Servers without range support may still return a full token cache; Emacs'
+jit-lock renderer continues to materialize faces only around visible text."
+  (when (lsp-feature? "textDocument/semanticTokensFull")
+    (when-let* ((region (my/language-server--visible-region)))
+      (lsp--semantic-tokens-request region t))))
+
+(with-eval-after-load 'lsp-lens
+  (unless (advice-member-p
+           #'my/lsp-lens--display-visible-a 'lsp-lens--display)
+    (advice-add
+     'lsp-lens--display :around #'my/lsp-lens--display-visible-a)))
+
+(with-eval-after-load 'lsp-mode
+  (unless (advice-member-p
+           #'my/lsp-request-async-visible-decorations-a 'lsp-request-async)
+    (advice-add
+     'lsp-request-async
+     :around #'my/lsp-request-async-visible-decorations-a))
+  (unless (advice-member-p
+           #'my/lsp-update-inlay-hints-visible-a 'lsp-update-inlay-hints)
+    (advice-add
+     'lsp-update-inlay-hints
+     :around #'my/lsp-update-inlay-hints-visible-a)))
+
+(with-eval-after-load 'lsp-semantic-tokens
+  (unless (advice-member-p
+           #'my/lsp-semantic-tokens-request-visible-a
+           'lsp-semantic-tokens--request-update)
+    (advice-add
+     'lsp-semantic-tokens--request-update
+     :around #'my/lsp-semantic-tokens-request-visible-a)))
 
 ;; -------------------------
 ;; 7. Misc & Language Init
@@ -2005,37 +2327,6 @@ leaves those workers orphaned and running."
 (require 'init-html)
 (require 'init-js2)
 (require 'init-latex)
-
-;;; ── CodeLens ──────────────────────────────────────────────────────────────
-;; Off by default. Toggle with SPC c L.
-;; When enabled, automatically re-initialises after eglot reconnects.
-(add-to-list
- 'load-path
- (expand-file-name
-  "../site-lisp/codelens"
-  (file-name-directory
-   (or load-file-name
-       (locate-library "init-lsp")
-       default-directory))))
-
-(use-package eglot-codelens
-  :after eglot
-  :commands eglot-codelens-mode
-  :custom
-  (eglot-codelens-update-delay 0.5)
-  (eglot-codelens-visible-refresh-delay 0.5)
-  :config
-  (defun my/eglot-codelens-managed-mode-h ()
-    "Sync CodeLens with eglot lifecycle — re-fetch on connect, clean up on disconnect."
-    (when eglot-codelens-mode
-      (if (and (eglot-managed-p)
-               (eglot-current-server)
-               (eglot-server-capable :codeLensProvider))
-          (progn
-            (eglot-codelens--setup-buffer)
-            (eglot-codelens--fetch-codelens))
-        (eglot-codelens--cleanup-buffer))))
-  (add-hook 'eglot-managed-mode-hook #'my/eglot-codelens-managed-mode-h))
 
 (provide 'init-lsp)
 ;;; init-lsp.el ends here

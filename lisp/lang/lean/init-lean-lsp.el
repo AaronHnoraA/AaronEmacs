@@ -1,27 +1,34 @@
-;;; init-lean-eglot.el --- Lean 4 custom eglot notifications -*- lexical-binding: t -*-
+;;; init-lean-lsp.el --- Lean 4 custom lsp-mode notifications -*- lexical-binding: t -*-
+
+;;; Commentary:
+;; Lean speaks several notifications no generic client understands
+;; (`$/lean/fileProgress\=', incremental `publishDiagnostics\=' carrying
+;; `fullRange\=' and `isSilent\=', and `lean/restartFile\=' from the infoview
+;; proxy).  They are delivered through the client's `:notification-handlers\=',
+;; and rendered as Flymake diagnostics, fringe overlays and the sideline.
 
 ;;; Code:
 
 (require 'config)
 
 (require 'cl-lib)
-(require 'eglot)
-(require 'jsonrpc)
 (require 'seq)
 (require 'subr-x)
 
 (declare-function lean-progress-mode-line-refresh "init-lean")
 (declare-function lean-dev-log "init-lean" (format-string &rest args))
-(declare-function eglot--flymake-diag-type "eglot" (severity))
-(declare-function eglot--lsp-position-to-point "eglot" (pos-plist &optional marker))
-(declare-function eglot-uri-to-path "eglot" (uri))
+(declare-function lsp--position-to-point "lsp-mode" (params))
+(declare-function lsp--uri-to-path "lsp-mode" (uri))
+(declare-function lsp--text-document-identifier "lsp-mode" ())
+(declare-function lsp--text-document-item "lsp-mode" ())
+(declare-function lsp-notify "lsp-mode" (method params))
+(declare-function lsp-workspaces "lsp-mode" ())
 (declare-function flymake-make-diagnostic "flymake"
                   (locus beg end type text &optional data overlay-properties))
 (declare-function flymake-diagnostic-beg "flymake" (diag))
 (declare-function flymake-diagnostic-text "flymake" (diag))
 (declare-function flymake-diagnostic-type "flymake" (diag))
 
-(defvar eglot--docver)
 (defvar flymake-error-bitmap)
 (defvar flymake-warning-bitmap)
 (defvar flymake-note-bitmap)
@@ -197,8 +204,8 @@ Use `note' to show all Lean informational output, including `#check' results."
      ((memq category '(flymake-error :error error)) 'error)
      ((memq category '(flymake-warning :warning warning)) 'warning)
      ((memq category '(flymake-note :note note)) 'note)
-     ((memq type '(eglot-error :error error)) 'error)
-     ((memq type '(eglot-warning :warning warning)) 'warning)
+     ((memq type '(:error error)) 'error)
+     ((memq type '(:warning warning)) 'warning)
      (t 'note))))
 
 (defun lean--sideline-face (kind)
@@ -360,8 +367,8 @@ Use `note' to show all Lean informational output, including `#check' results."
 
 ;; ── publishDiagnostics → Flymake compatibility ───────────────────────────────
 ;;
-;; Lean's publishDiagnostics notifications can carry version 0 even when Eglot's
-;; local document version has already advanced.  Stock Eglot treats mismatched
+;; Lean's publishDiagnostics notifications can carry version 0 even when the
+;; local document version has already advanced.  A stock client treats mismatched
 ;; versions as stale and drops them before Flymake sees them, which removes
 ;; underlines, fringe indicators, mode-line counts, and diagnostics panels.
 
@@ -374,7 +381,7 @@ Use `note' to show all Lean informational output, including `#check' results."
 
 (defun lean--diagnostics-buffer-for-uri (uri)
   "Return the visited buffer for diagnostics URI, if any."
-  (when-let* ((path (ignore-errors (eglot-uri-to-path uri))))
+  (when-let* ((path (ignore-errors (lsp--uri-to-path uri))))
     (find-buffer-visiting path)))
 
 (defun lean--diagnostics-list (diagnostics)
@@ -391,8 +398,8 @@ Use `note' to show all Lean informational output, including `#check' results."
               (start (plist-get range :start))
               (end-pos (plist-get range :end)))
     (save-excursion
-      (let ((beg (eglot--lsp-position-to-point start))
-            (end (eglot--lsp-position-to-point end-pos)))
+      (let ((beg (lsp--position-to-point start))
+            (end (lsp--position-to-point end-pos)))
         (when (= beg end)
           (setq end (min (point-max) (1+ beg))))
         (cons beg end)))))
@@ -431,6 +438,15 @@ Use `note' to show all Lean informational output, including `#check' results."
   "Return raw Lean diagnostics that should be visible through Flymake."
   (seq-remove #'lean--diagnostic-silent-p lean--raw-diagnostics))
 
+(defun lean--flymake-diag-type (severity)
+  "Return the Flymake diagnostic type for LSP SEVERITY.
+An absent severity means `Error\=' per the LSP specification."
+  (pcase severity
+    (1 :error)
+    (2 :warning)
+    ((or 3 4) :note)
+    (_ :error)))
+
 (defun lean--diagnostic-to-flymake (diagnostic version)
   "Convert Lean LSP DIAGNOSTIC at VERSION to a Flymake diagnostic."
   (when-let* ((region (lean--diagnostic-region diagnostic)))
@@ -438,10 +454,10 @@ Use `note' to show all Lean informational output, including `#check' results."
      (current-buffer)
      (car region)
      (cdr region)
-     (eglot--flymake-diag-type (plist-get diagnostic :severity))
+     (lean--flymake-diag-type (plist-get diagnostic :severity))
      (lean--diagnostic-message diagnostic)
-     `((eglot-lsp-diag . ,diagnostic)
-       (eglot--doc-version . ,version)))))
+     `((lean-lsp-diag . ,diagnostic)
+       (lean-doc-version . ,version)))))
 
 (defun lean--publish-flymake-diagnostics (diagnostics version)
   "Publish visible Lean LSP DIAGNOSTICS at VERSION through Flymake."
@@ -467,7 +483,7 @@ Use `note' to show all Lean informational output, including `#check' results."
     (setq-local flymake-diagnostic-functions
                 (cons #'lean-flymake-backend
                       (remove #'lean-flymake-backend
-                              (remove #'eglot-flymake-backend
+                              (remove #'lsp-diagnostics--flymake-backend
                                       flymake-diagnostic-functions)))))
   (setq-local flymake-error-bitmap
               '(lean-fringe-blocked-bitmap lean-fringe-error-face)
@@ -510,25 +526,29 @@ Use `note' to show all Lean informational output, including `#check' results."
           (if incremental
               (nconc lean--raw-diagnostics incoming)
             incoming)
-          lean--diagnostics-version
-          (or (and (boundp 'eglot--docver) eglot--docver) version)))
+          lean--diagnostics-version version))
   (lean--schedule-notification-flush))
 
-(cl-defmethod eglot-handle-notification :around
-  (_server (_method (eql textDocument/publishDiagnostics))
-          &key uri diagnostics version isIncremental &allow-other-keys)
-  "Handle Lean diagnostics with batching, otherwise use Eglot's normal path."
-  (let ((buf (lean--diagnostics-buffer-for-uri uri)))
-    (if (and (buffer-live-p buf)
-             (with-current-buffer buf (derived-mode-p 'lean-mode)))
-        (with-current-buffer buf
-          (lean--record-diagnostics diagnostics version (eq isIncremental t))
-          (when (fboundp 'lean-dev-log)
-            (lean-dev-log
-             "publishDiagnostics queued: file=%s diagnostics=%d incremental=%S"
-             (file-name-nondirectory (or buffer-file-name (buffer-name)))
-             (lean--diagnostics-count diagnostics) isIncremental)))
-      (cl-call-next-method))))
+(defun lean-handle-publish-diagnostics (_workspace params)
+  "Handle a Lean `textDocument/publishDiagnostics\=' PARAMS notification.
+
+Lean streams diagnostics incrementally and marks some of them silent, so
+they are batched here and rendered by `lean--publish-flymake-diagnostics\='
+rather than by lsp-mode's generic diagnostics store."
+  (let* ((uri (plist-get params :uri))
+         (diagnostics (plist-get params :diagnostics))
+         (version (plist-get params :version))
+         (incremental (eq (plist-get params :isIncremental) t))
+         (buf (lean--diagnostics-buffer-for-uri uri)))
+    (when (and (buffer-live-p buf)
+               (with-current-buffer buf (derived-mode-p 'lean-mode)))
+      (with-current-buffer buf
+        (lean--record-diagnostics diagnostics version incremental)
+        (when (fboundp 'lean-dev-log)
+          (lean-dev-log
+           "publishDiagnostics queued: file=%s diagnostics=%d incremental=%S"
+           (file-name-nondirectory (or buffer-file-name (buffer-name)))
+           (lean--diagnostics-count diagnostics) incremental))))))
 
 ;; ── fileProgress notification ─────────────────────────────────────────────────
 ;; Lean sends: {"textDocument": {"uri": "..."}, "processing": [{...}]}
@@ -540,15 +560,13 @@ Use `note' to show all Lean informational output, including `#check' results."
    ((listp processing) processing)
    (t nil)))
 
-(cl-defmethod eglot-handle-notification
-  (_server (_method (eql \$/lean/fileProgress))
-   &key textDocument processing &allow-other-keys)
-  "Handle $/lean/fileProgress from Lean LSP server."
-  (when-let* ((uri  (plist-get textDocument :uri))
-              (path (ignore-errors (eglot-uri-to-path uri)))
+(defun lean-handle-file-progress (_workspace params)
+  "Handle a `$/lean/fileProgress\=' PARAMS notification from the Lean server."
+  (when-let* ((uri  (plist-get (plist-get params :textDocument) :uri))
+              (path (ignore-errors (lsp--uri-to-path uri)))
               (buf  (find-buffer-visiting path)))
     (with-current-buffer buf
-      (let ((items (lean--file-progress-list processing)))
+      (let ((items (lean--file-progress-list (plist-get params :processing))))
         (unless (equal items lean--file-progress)
           (setq-local lean--file-progress items)
           (lean--schedule-notification-flush)
@@ -775,8 +793,8 @@ SIDE defaults to `right-fringe'."
   (when-let* ((range (plist-get item :range))
               (start (plist-get range :start))
               (end (plist-get range :end)))
-    (cons (eglot--lsp-position-to-point start)
-          (eglot--lsp-position-to-point end))))
+    (cons (lsp--position-to-point start)
+          (lsp--position-to-point end))))
 
 (defun lean--progress-fringe-cancel ()
   "Cancel a pending progress fringe refresh."
@@ -863,34 +881,35 @@ SIDE defaults to `right-fringe'."
 (defun lean-refresh-file-dependencies ()
   "Force Lean to re-process all imports by bouncing the file in the LSP."
   (interactive)
-  (when-let* ((server (ignore-errors (eglot-current-server))))
+  (when (ignore-errors (lsp-workspaces))
     (when (fboundp 'lean-dev-log)
       (lean-dev-log "refresh dependencies: buffer=%s" (buffer-name)))
-    (let ((id   (eglot--TextDocumentIdentifier))
-          (item (eglot--TextDocumentItem)))
-      ;; Send outside eglot's tracking: tell the server to forget + reopen.
-      ;; This is the same trick lean4-mode uses; harmless because eglot will
-      ;; resync on the next edit via its own after-change hooks.
-      (jsonrpc-notify server 'textDocument/didClose `(:textDocument ,id))
+    (let ((id   (lsp--text-document-identifier))
+          (item (lsp--text-document-item)))
+      ;; Send outside lsp-mode's own tracking: tell the server to forget the
+      ;; document and reopen it.  This is the same trick lean4-mode uses;
+      ;; harmless because lsp-mode resyncs on the next edit through its own
+      ;; after-change hooks.
+      (lsp-notify "textDocument/didClose" `(:textDocument ,id))
       (run-at-time 0.15 nil
                    (let ((b (current-buffer)))
                      (lambda ()
                        (when (buffer-live-p b)
                          (with-current-buffer b
-                           (when-let* ((srv (ignore-errors (eglot-current-server))))
-                             (jsonrpc-notify srv 'textDocument/didOpen
-                                             `(:textDocument ,item)))))))))))
+                           (when (ignore-errors (lsp-workspaces))
+                             (lsp-notify "textDocument/didOpen"
+                                         `(:textDocument ,item)))))))))))
 
 ;; ── lean/restartFile custom notification (from infoview proxy) ────────────────
-;; The lean-proxy.mjs sends a lean/restartFile notification to Eglot when the
-;; infoview's "restart file" button is clicked.  Eglot receives it as a
+;; The lean-proxy.mjs sends a lean/restartFile notification upstream when the
+;; infoview's "restart file" button is clicked.  lsp-mode receives it as a
 ;; server→client notification and dispatches it here.
 
-(cl-defmethod eglot-handle-notification
-  (_server (_method (eql lean/restartFile)) &key uri)
-  "Handle a lean/restartFile notification from the infoview proxy.
-Finds the buffer for URI and calls `lean-refresh-file-dependencies'."
-  (when-let* ((path (ignore-errors (eglot-uri-to-path uri)))
+(defun lean-handle-restart-file (_workspace params)
+  "Handle a `lean/restartFile\=' PARAMS notification from the infoview proxy.
+Finds the buffer for the URI and calls `lean-refresh-file-dependencies\='."
+  (when-let* ((uri  (plist-get params :uri))
+              (path (ignore-errors (lsp--uri-to-path uri)))
               (buf  (find-buffer-visiting path)))
     (with-current-buffer buf
       (when (fboundp 'lean-refresh-file-dependencies)
@@ -898,5 +917,14 @@ Finds the buffer for URI and calls `lean-refresh-file-dependencies'."
       (when (fboundp 'lean-dev-log)
         (lean-dev-log "lean/restartFile notification: uri=%s" uri)))))
 
-(provide 'init-lean-eglot)
-;;; init-lean-eglot.el ends here
+(defconst lean-lsp-notification-handlers
+  (let ((table (make-hash-table :test #'equal)))
+    (puthash "textDocument/publishDiagnostics"
+             #'lean-handle-publish-diagnostics table)
+    (puthash "$/lean/fileProgress" #'lean-handle-file-progress table)
+    (puthash "lean/restartFile" #'lean-handle-restart-file table)
+    table)
+  "Lean-specific notification handlers for the lsp-mode client.")
+
+(provide 'init-lean-lsp)
+;;; init-lean-lsp.el ends here

@@ -19,8 +19,8 @@ reconstructing the system from scattered Elisp:
 - `docs/remote-parity.md` defines what “VS Code Remote-level” completion means;
   a registered capability without local, remote, and resilience tests is not
   complete.
-- `docs/lsp-workflow.org` covers the LSP route model, Hub, Doctor, and how to
-  add new routes or Eglot server mappings.
+- `docs/lsp-workflow.org` covers the lsp-mode route model, Hub, Doctor, and how
+  to register target-aware language servers.
 - `docs/jupyter-workflow.org` covers Org Babel, existing-kernel workflows,
   Jupytext, kernelspecs, and remote kernels.
 - `docs/org-guide.md`, `docs/project-guide.md`, and
@@ -92,14 +92,14 @@ Keep these rules:
 
 This config already has maintenance and workflow entry points. Reuse them:
 
-- LSP: `my/register-lsp-mode-preference`,
-  `my/register-eglot-server-program`, `my/language-server-manager`, and
+- LSP: `my/register-language-server`,
+  `my/register-language-server-feature`, `my/language-server-manager`, and
   `my/language-server-doctor`.
 - Jupyter: the Noema bridge under `lisp/roam/init-aaronnote-jupyter-*.el` —
   `runtime` (kernelspec discovery, target process, connection file, the
   five-channel forward group), `server` (remote Jupyter servers over HTTP(S),
   `my/noema-jupyter-servers`), `cell` (the `.cell/` script mode, kernel
-  completion and inspection), and `lsp` (kernel-following Eglot); plus
+  completion and inspection), and `lsp` (kernel-following lsp-mode); plus
   `my/jupyter-board` for kernelspec management and Remote Doctor for
   diagnostics.
 - Projects: `my/project-dispatch`, `my/project-switch`,
@@ -221,26 +221,31 @@ Prefer bounded, explicit lifetimes for features that allocate Emacs resources:
 
 LSP:
 
-- Default route is Eglot.
-- `lsp-mode` is opt-in per major mode through
-  `my/register-lsp-mode-preference`.
-- Custom Eglot mappings go through `my/register-eglot-server-program`.
+- `lsp-mode` is the only supported language-server client.  Eglot is built in
+  but its commands are intentionally hidden so a second unmanaged client is
+  not started accidentally.
+- File-backed programming buffers auto-start only when a registered client and
+  target-side executable are available.  Manual ensure reports missing tools;
+  automatic startup stays quiet.
+- Custom clients go through `my/register-language-server`; package-owned
+  clients such as JDTLS are declared through
+  `my/register-language-server-feature`.
 - LSP is the strictest consumer of the Remote-first rule.  One logical
   workspace root and target context must determine document URIs, server
   process placement, executable lookup, environment/toolchain, file watchers,
   helper services, and network channels.  Never derive any of these from an
   unrelated current buffer or client-side `default-directory`.
-- Eglot and lsp-mode startup must use the shared `language-server` remote
+- lsp-mode startup must use the shared `language-server` remote
   adapter.  Server placement defaults to the active target/workspace; resolve
   executables from its environment and never embed `/ssh:` or `/rpc:` paths in
   contacts.  Mark only genuine client-side UI helpers as client placement.
 - Language modules must not maintain separate local and remote server choices
   or PATH setup.  Express tool availability as target capabilities or
   toolchain preferences and let the selected backend project them.  Any
-  unavoidable Eglot/lsp-mode TRAMP workaround stays in the shared adapter
+  unavoidable lsp-mode compatibility workaround stays in the shared adapter
   boundary and must also be tested with target `local`.
-- URI conversion must be anchored to the workspace owned by the Eglot server
-  or lsp-mode workspace.  A callback running in another buffer must not change
+- URI conversion must be anchored to the owning lsp-mode workspace.  A
+  callback running in another buffer must not change
   the target identity of a document.
 - Remote language integrations must preserve local feature parity.  For
   multi-process tools such as Lean, Node, Lake, workers, and helper ports must
@@ -256,20 +261,22 @@ LSP:
 - Keep the layer split: `init-lsp.el` for routing/core setup,
   `init-lsp-ops.el` for backend-agnostic commands, `init-lsp-tools.el` for
   Hub/Doctor/dispatch/session knobs, `init-lsp-runtime.el` for the runtime
-  provider layer (kernel-following Eglot etc.), and `init-lsp-toolchain.el`
-  for project-level toolchain profiles shared by Eglot and lsp-mode.
+  provider layer (kernel-following analyzers etc.), and
+  `init-lsp-toolchain.el` for project-level toolchain profiles.
 - LSP document/protocol identity (workspace root, URI, server placement,
   diagnostic keys) is always canonicalized to `/fs:TARGET:/path`. Ordinary
   buffer identity is not: ordinary local buffers keep their native
   `buffer-file-name`, and the two are bridged by Emacs's own buffer-alias
   mechanism (`find-buffer-visiting`'s `get-file-buffer` step, which `/fs:`
   registers as a handler operation), not by rewriting `buffer-file-name`.
-  Where a client (lsp-mode's raw diagnostics `gethash`, Eglot's
-  `eglot--find-buffer-visiting`) bypasses that alias and compares
-  `buffer-file-name` by `equal`, add a narrow advice that closes the gap
-  instead of normalizing buffer identity into `/fs:` globally — see
-  `my/lsp-mode--fix-path-casing-a` and `my/eglot--find-buffer-visiting-a`
-  in `init-lsp.el`.
+  Where lsp-mode's raw diagnostics lookup bypasses that alias, add a narrow
+  advice that closes the gap instead of normalizing buffer identity into
+  `/fs:` globally — see `my/lsp-mode--fix-path-casing-a` in `init-lsp.el`.
+- Keep display work bounded: CodeLens, inlay hints, document colors, document
+  links, and ranged semantic-token prefetch use visible windows plus
+  `my/language-server-visible-render-margin`; protocol state and server caches
+  may remain workspace-wide.  Do not turn a server refresh notification into
+  buffer-global decoration creation.
 - When LSP behaves strangely, use `my/language-server-doctor` before changing
   code.
 
@@ -312,6 +319,9 @@ Browser/Appine:
 Projects/remote/terminal:
 
 - Project workflow is Projectile + Perspective + Transient + Treemacs/show-imenu.
+- Treemacs outlines keep semantic button depth but render from a shallow fixed
+  visual depth, include an `OUTLINE · FILE` owner row, and use LSP SymbolKind
+  icons.  Preserve this separation from filesystem indentation.
 - Project behavior belongs mostly in `lisp/init-project.el`; project shortcuts
   live in `lisp/init-evil.el`.
 - Treat local files as target `local` and keep framework-owned project/workspace
@@ -328,7 +338,7 @@ Projects/remote/terminal:
 - Network operations without a file-name argument must use the explicit
   `remote-channel` APIs.  An unsupported remote channel must fail rather than
   silently opening a socket on the client machine.
-- Keep `lisp/remote/` framework-only.  Consumers such as direnv, Eglot, Lean,
+- Keep `lisp/remote/` framework-only.  Consumers such as direnv, lsp-mode, Lean,
   Aaronote, terminals, and project tools stay in their owning modules and
   register adapters or environment maintainers.
 - PATH must remain target/workspace isolated and ID-addressable.  Model changes

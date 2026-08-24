@@ -519,7 +519,7 @@ projection remained open in Emacs."
   "Switch the projected notebook to major MODE without changing its kernel.
 The source projection, save/revert integration, and Noema UI are restored
 after MODE resets buffer-local state.  This is the Emacs-side LSP switch: mode
-hooks decide whether Eglot or another language client is enabled."
+hooks decide whether a language client is enabled."
   (interactive
    (list (intern (completing-read "Notebook editor mode: "
                                   (mapcar

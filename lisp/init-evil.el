@@ -474,10 +474,10 @@ Emacs state keep their local behavior."
     "cC" 'recompile
     "cf" 'my/language-server-format-buffer
     "ci" 'show-imenu
-    "cI" 'eldoc-box-help-at-point
+    "cI" 'lsp-ui-doc-glance
     "ck" 'kill-compilation
     "cl" '+switch-to-compilation
-    "cL" 'eglot-codelens-mode
+    "cL" 'lsp-lens-mode
     "cj" 'my/debug-dispatch
     "cr" 'my/language-server-rename
     "cw" 'delete-trailing-whitespace

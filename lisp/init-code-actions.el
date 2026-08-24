@@ -24,16 +24,12 @@
 (defun my/language-server-organize-imports ()
   "Organize imports using the active language server when supported."
   (interactive)
-  (pcase (and (fboundp 'my/current-language-server-backend)
-              (my/current-language-server-backend))
-    ('lsp-mode
-     (if (fboundp 'lsp-organize-imports)
-         (lsp-organize-imports)
-       (my/language-server-code-actions)))
-    ('eglot
-     (my/language-server-code-actions))
-    (_
-     (user-error "No active language server in current buffer"))))
+  (unless (and (fboundp 'my/current-language-server-backend)
+               (my/current-language-server-backend))
+    (user-error "No active language server in current buffer"))
+  (if (fboundp 'lsp-organize-imports)
+      (lsp-organize-imports)
+    (my/language-server-code-actions)))
 
 (use-package transient
   :ensure nil

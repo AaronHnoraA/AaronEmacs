@@ -58,7 +58,7 @@ service、socket 或 port 的新设计，即使第一版只在本机使用，也
 
 LSP 对路径和进程身份最敏感，因此比普通 consumer 更严格：
 
-- 一个 Eglot server 或 lsp-mode workspace 只能有一个 owning logical root；
+- 一个 lsp-mode workspace 只能有一个 owning logical root；
   文档 URI、server cwd、executable、PATH/toolchain、watcher、helper service 和
   channel 都从这个 root 的 target context 推导；
 - URI 回调必须使用拥有该 server/workspace 的 root，不能因为回调恰好运行在另一个
@@ -67,7 +67,7 @@ LSP 对路径和进程身份最敏感，因此比普通 consumer 更严格：
   接触本机 UI 的 helper 才能显式标为 `client`，它连接 target peer 时仍使用
   backend 提供的 stdio/channel bridge；
 - 语言模块不能用 `file-remote-p` 选择另一套 server、PATH、参数或功能降级。
-  Eglot/lsp-mode 自身要求的 TRAMP 兼容修饰只能集中在共享
+  lsp-mode 自身要求的兼容修饰只能集中在共享
   `language-server` adapter 边界；
 - `local` target 必须走同一注册、路由、环境和 URI 投影流程。新增 LSP 接入至少要
   有 local/remote root 与 URI 测试；宣称可重连前，还要覆盖 watcher/helper/channel
@@ -81,10 +81,10 @@ local/remote 特判属于待迁移债务，不是新增接入可复制的模式�
 - `company`
 - `company-prescient`
 - `company-box`
-- `eglot`
+- `lsp-mode`
 - `flymake`
 - `flymake-diagnostic-at-point`
-- `eldoc-box`
+- `lsp-ui`
 - `breadcrumb`
 - `Treemacs`
 
@@ -100,7 +100,8 @@ local/remote 特判属于待迁移债务，不是新增接入可复制的模式�
   rename
 - `SPC c i`
   打开 `show-imenu`
-  左侧 `Treemacs` smart toggle，并跟随当前文件和光标所在 symbol
+  左侧 `Treemacs` smart toggle，并跟随当前文件和光标所在 symbol；Outline
+  使用浅层缩进、文件归属标题和 SymbolKind 图标
 - `SPC c I`
   文档浮窗
 - `SPC c t`
@@ -114,8 +115,9 @@ local/remote 特判属于待迁移债务，不是新增接入可复制的模式�
 - `SPC c T`
   重跑上次测试
 - `SPC c L`
-  语言服务器菜单
-  Hub / Doctor / 调参 / log / session / config
+  切换 CodeLens（默认开启，只渲染可见区域及上下缓冲）
+- `SPC c s`
+  语言服务器菜单：Hub / Doctor / 调参 / log / session / config
 - `SPC c o`
   organize imports
 - `SPC c R`
@@ -153,8 +155,7 @@ local/remote 特判属于待迁移债务，不是新增接入可复制的模式�
 Hub 里可以直接看：
 
 - 当前 buffer 的 route policy / active backend / workspace config
-- 显式 `lsp-mode` 路由
-- 自定义 Eglot server 映射
+- 注册的 lsp-mode client/feature 路由
 - 一组 session 级调参入口
 
 Doctor 更适合快速排查：
@@ -165,15 +166,14 @@ Doctor 更适合快速排查：
 
 详细模型看 [lsp-workflow.org](lsp-workflow.org)。
 
-### Lean (eglot + xwidget infoview)
+### Lean (lsp-mode + xwidget infoview)
 
-Lean 4 走自定义 `lean-mode`（eglot 作为 LSP 客户端），不再使用 `lean4-mode` +
-`lsp-mode`。模块分层如下：
+Lean 4 走自定义 `lean-mode`，并统一使用 lsp-mode。模块分层如下：
 
 | 模块 | 职责 |
 |------|------|
-| `lisp/lang/lean/init-lean.el` | 主 mode、eglot 注册、project 定位、ripgrep 符号搜索、UI 总入口 |
-| `lisp/lang/lean/init-lean-eglot.el` | `$/lean/fileProgress` 通知、fringe/sideline 进度与 Flymake 兼容层 |
+| `lisp/lang/lean/init-lean.el` | 主 mode、lsp-mode client 注册、project 定位、ripgrep 符号搜索、UI 总入口 |
+| `lisp/lang/lean/init-lean-lsp.el` | `$/lean/fileProgress` 通知、fringe/sideline 进度与 Flymake 兼容层 |
 | `lisp/lang/lean/init-lean-infoview.el` | 官方 xwidget infoview 桥接（`C-c C-i`）|
 | `lisp/lang/lean/lean4-infoview-bridge/` | Node.js HTTP bridge：转发 LSP、服务官方 React infoview |
 
@@ -182,9 +182,9 @@ Lean 4 走自定义 `lean-mode`（eglot 作为 LSP 客户端），不再使用 `
 | 键 | 命令 |
 |----|------|
 | `C-c C-i` | 切换官方 xwidget infoview |
-| `C-c C-r` | 重连 eglot |
+| `C-c C-r` | 重启 lsp-mode workspace |
 | `C-c C-d` | 重刷文件依赖 |
-| `C-c C-a` | eglot code actions |
+| `C-c C-a` | lsp-mode code actions |
 | `C-c C-l` | 打开 Lean dev log |
 | `C-c C-k` | 查 unicode 输入法键位 |
 
@@ -395,7 +395,7 @@ Lean 4 走自定义 `lean-mode`（eglot 作为 LSP 客户端），不再使用 `
 - buffer 使用与 transport/backend 无关的 `/fs:TARGET:/path` 逻辑身份
 - target、有序 transport pipeline、执行 backend、复用 session 和调用者偏好分别注册
 - 普通 Emacs 文件 API 保留 TRAMP 的完整兼容性
-- Eglot、direnv、环境探测与自定义进程可以优先 tramp-rpc，失败时回退 TRAMP
+- lsp-mode、direnv、环境探测与自定义进程可以优先 tramp-rpc，失败时回退 TRAMP
 - socket/stream/port-forward 走显式 channel API，远端不支持时不会静默落到本机
 - PATH 按 target/workspace ID 隔离，并由 host probe、direnv、toolchain 等分层维护
 
@@ -610,7 +610,7 @@ in-process 缓存，与自动刷新保持一致。
 1. 先开 `M-x my/language-server-doctor`
 2. 看当前 buffer 的 route policy / active backend / executable
 3. 远端 PATH 里是否真的有这些 server
-4. `eglot` 或 `lsp-mode` 是否已经 attach
+4. `lsp-mode` 是否已经 attach
 5. TRAMP 主机是否能正常登录
 
 更详细的维护和排查见 [lsp-workflow.org](lsp-workflow.org) 和 [maintenance.md](maintenance.md)。

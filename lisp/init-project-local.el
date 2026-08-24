@@ -32,8 +32,8 @@ Supported plist keys:
 - `:test' as an alist like ((nearest . \"...\") (project . \"...\"))
 - `:task', `:run', and `:debug' as alists of (LABEL . SPEC)
 - `:debug-default' as a debug SPEC or profile label
-- `:language-server' as one of `eglot', `lsp-mode', or `disabled'
-- `:eglot-workspace' as extra workspace configuration merged before startup
+- `:language-server' as one of `lsp-mode' or `disabled'
+- `:lsp-workspace' as extra workspace configuration merged before startup
 - `:toolchain' as a language-family to profile-id alist
 - `:toolchain-profiles' as named language-server toolchain profiles
 - `:aaronnote-jupyter' as project Jupyter cell defaults."

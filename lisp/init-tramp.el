@@ -9,7 +9,7 @@
 ;;   /ssh:host:/path  — standard SSH, managed here (ControlMaster, pipe-mode LSP)
 ;;   /rpc:host:/path  — tramp-rpc MessagePack-RPC backend, ~38x faster file ops
 ;;
-;; Several subsystems (VC, memoization, Eglot direct-async) are intentionally
+;; Several subsystems (VC, memoization) are intentionally
 ;; skipped for /rpc: paths because tramp-rpc provides its own superior
 ;; implementations of those concerns.
 ;;
@@ -363,19 +363,6 @@ servers use the shared ControlMaster path."
              (my/tramp-lsp--controlmaster-connect
               connect-fn filter sentinel name environment-fn workspace))))
       plist)))
-
-;;; ── Eglot: disable direct-async for SSH paths ───────────────────────────────
-;; /rpc: connections are handled entirely by tramp-rpc-process.el (its own
-;; cat-relay, no tramp-sh make-process path), so tramp-direct-async-process-p
-;; is irrelevant for them.  Only suppress it for SSH sessions.
-
-(with-eval-after-load 'eglot
-  (define-advice eglot--connect (:around (fn &rest args) my/tramp-eglot-no-direct-async)
-    "Disable TRAMP direct-async for Eglot SSH stdio sessions."
-    (if (my/tramp-rpc-path-p)
-        (apply fn args)
-      (cl-letf (((symbol-function 'tramp-direct-async-process-p) #'ignore))
-        (apply fn args)))))
 
 ;;; ── Magit & compile integration ─────────────────────────────────────────────
 

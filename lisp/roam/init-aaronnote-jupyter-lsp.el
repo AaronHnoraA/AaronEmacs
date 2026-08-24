@@ -1,4 +1,4 @@
-;;; init-aaronnote-jupyter-lsp.el --- Kernel-aware Eglot runtimes -*- lexical-binding: t; -*-
+;;; init-aaronnote-jupyter-lsp.el --- Kernel-aware LSP runtimes -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;; Resolve a Noema cell's selected kernelspec through the same Remote target
@@ -19,7 +19,7 @@
 (require 'subr-x)
 
 (config-defvar my/noema-jupyter-cell-lsp-idle-timeout 600
-  "Seconds to keep an unused kernel-specific Eglot server warm."
+  "Seconds to keep an unused kernel-specific language server warm."
   :type 'integer
   :group 'my/noema)
 
@@ -48,7 +48,7 @@ its status stuck on \"preparing\" and no way to find out why."
    "'version':sys.version.split()[0]}))")
   "Python expression used to identify a kernel's effective runtime.")
 
-(declare-function eglot--managed-mode "eglot" (&optional arg server))
+(declare-function lsp-managed-mode "lsp-mode" (&optional arg))
 (declare-function my/language-server-ensure-deferred "init-lsp" ())
 
 (defun my/noema-jupyter-cell--lsp-get (key alist)
@@ -412,11 +412,13 @@ own kernelspec registry instead of the Emacs host's registry."
 
 (defun my/noema-jupyter-cell-lsp-runtime-changing ()
   "Detach from the old kernel runtime before cell metadata changes."
-  (when (fboundp 'my/language-server-runtime--eglot-buffer-leaving-h)
-    (my/language-server-runtime--eglot-buffer-leaving-h))
-  (when (bound-and-true-p eglot--managed-mode)
-    (let ((eglot-autoshutdown nil))
-      (eglot--managed-mode -1)))
+  (when (fboundp 'my/language-server-runtime--buffer-leaving-h)
+    (my/language-server-runtime--buffer-leaving-h))
+  ;; Detach this buffer from the old kernel's workspace without tearing the
+  ;; server down: the warm timer armed above owns that decision.
+  (when (bound-and-true-p lsp-managed-mode)
+    (let ((lsp-keep-workspace-alive t))
+      (lsp-managed-mode -1)))
   (my/language-server-runtime-invalidate))
 
 (my/register-language-server-runtime-provider

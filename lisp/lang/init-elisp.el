@@ -11,7 +11,6 @@
 (require 'subr-x)
 
 (declare-function my/lsp-mode-ensure "init-lsp")
-(declare-function my/language-server-stop-eglot "init-lsp")
 (declare-function my/register-lsp-mode-preference "init-lsp" (mode &optional feature source note))
 (declare-function flymake-start "flymake" (&optional report-fn))
 (declare-function elisp-flymake-byte-compile "elisp-mode" (report-fn &rest args))
@@ -152,8 +151,6 @@ the already-installed ELPA package."
     (setq-local lsp-inlay-hint-enable nil)
     (setq-local lsp-auto-guess-root t)
     (setq-local lsp-guess-root-without-session t)
-    (when (fboundp 'my/language-server-stop-eglot)
-      (my/language-server-stop-eglot))
     (lsp-deferred)))
 
 (defun my/elisp-lsp-ensure-deferred ()

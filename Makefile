@@ -20,6 +20,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native ui-test ui-tokens audit-ui-tokens \
         remote-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e \
+        lsp-test lsp-live-smoke \
         jupyter-test \
         publish publish-build publish-deploy publish-clean
 
@@ -67,6 +68,8 @@ help:
 	  '  make remote-conformance-test Compare /fs:local semantics with native APIs' \
 	  '  make remote-byte-check    Strictly byte-compile remote code in a temp dir' \
 	  '  make remote-check         Run all remote tests and compatibility checks' \
+	  '  make lsp-test            Run isolated LSP routing, toolchain, runtime, and UI tests' \
+	  '  make lsp-live-smoke      Start real clangd, Python LS, and JDTLS projects' \
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make remote-e2e           Run opt-in real SSH E2E (REMOTE_E2E_TARGET optional)' \
 	  '' \
@@ -207,8 +210,19 @@ remote-test: remote-contract-test remote-conformance-test
 	$(REMOTE_TEST_BATCH) -l test/remote-framework-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/remote-gateway-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-remote-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-lsp-toolchain-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-lsp-ui-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-project-remote-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-evil-tests.el -f ert-run-tests-batch-and-exit
+
+lsp-test:
+	$(BATCH) -l test/init-lsp-remote-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-lsp-toolchain-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-lsp-runtime-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-lsp-ui-tests.el -f ert-run-tests-batch-and-exit
+
+lsp-live-smoke:
+	$(BATCH) -l test/lsp-live-smoke.el -f my/lsp-live-smoke-batch
 
 jupyter-test:
 	$(BATCH) -l test/init-aaronnote-tests.el -f ert-run-tests-batch-and-exit
