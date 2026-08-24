@@ -74,7 +74,8 @@ target 优先运行路由后的 =inotifywait= 并直接重写事件路径，其�
 header-line。文件刚进入 =prog-mode= 时，breadcrumb.el 直接出现在这个位置；LSP
 ready 后只把 provider 原位替换成 lsp-headerline，不发生纵向跳动。中央 buffer tabs
 始终按整条 tab-line 的宽度布局，不再为 breadcrumb 左右对称留空；两者相交时 tab
-覆盖 breadcrumb。上游 breadcrumb 的跳转 keymap、link 与 tab 行为全部移除，只重新
+只覆盖自身列，breadcrumb 会从 tab group 的右侧对应位置继续显示。上游 breadcrumb
+的跳转 keymap、link 与 tab 行为全部移除，只重新
 挂一个受控的 mouse-1 动作：打开 Treemacs、定位光标所在的 Imenu node、把焦点移到该
 node 并 pulse；mouse-2/3、滚轮仍只属于真正的 buffer tab。path、project 与 symbol
 face 使用 =aaron-ui= 的高对比 semantic tokens，并在换主题/新 frame 后重应用。

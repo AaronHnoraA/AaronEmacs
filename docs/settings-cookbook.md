@@ -325,7 +325,8 @@ emacs --debug-init -q -l ./bootstrap.el
 
 通用 breadcrumb 与 LSP breadcrumb 都显示在 buffer tab line 左侧；LSP ready 时只
 原位替换 provider。它是非 tab 的展示型 underlay，不占用 tab 的布局宽度：中央 tabs 使用整条
-tab line，相交处由 tab 覆盖 breadcrumb。breadcrumb 不继承 tab 的切换/关闭行为；
+tab line，相交处由 tab 覆盖 breadcrumb，但长路径会在 tab group 右侧继续显示。
+breadcrumb 不继承 tab 的切换/关闭行为；
 其唯一 mouse-1 动作会 ensure-open Treemacs，定位当前 Imenu node 并 pulse。Jupyter
 或语言模块不需要单独改 `header-line-format`。
 

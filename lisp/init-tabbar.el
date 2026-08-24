@@ -802,10 +802,14 @@ The tab segment wins both visually and for hit testing where the two meet."
            (left (if centered-p
                      (max 0 (/ (- window-width content-width) 2))
                    1))
-           ;; The contextual string is an underlay: a tab masks anything at
-           ;; or beyond its left edge instead of forcing the tab to move.
-           (prefix (truncate-string-to-width leading left nil ?\s)))
-      (append (list prefix) content)))))
+           (right (+ left content-width))
+           ;; The contextual string is an underlay: tabs mask exactly their
+           ;; own columns.  Keep both sides so a long breadcrumb visibly
+           ;; continues after the centered tab group.
+           (prefix (truncate-string-to-width leading left nil ?\s))
+           (suffix (truncate-string-to-width leading window-width right)))
+      (append (list prefix) content (when (not (string-empty-p suffix))
+                                      (list suffix)))))))
 
 (defun my/tab-line-format ()
   "Render centered tabs over optional contextual text."

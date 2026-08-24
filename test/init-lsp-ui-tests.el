@@ -57,12 +57,19 @@
                 ((symbol-function 'my/tab-line-hidden-p) (lambda () nil))
                 ((symbol-function 'my/tab-line-content) (lambda () (list tab))))
         (let* ((rendered (my/tab-line-format))
-               (leading (car rendered)))
-          (should (= (string-width leading) 36))
-          (should (equal (cdr rendered) (list tab)))
-          (should-not (get-text-property 0 'local-map leading))
-          (should-not (get-text-property 0 'mouse-face leading))
-          (should (eq (get-text-property 0 'face leading)
+               (leading-left (car rendered))
+               (leading-right (car (last rendered))))
+          (should (= (string-width leading-left) 36))
+          (should (equal (nth 1 rendered) tab))
+          (should (= (string-width leading-right) 37))
+          (should (= (my/tab-line-segments-width rendered) 80))
+          (should-not (get-text-property 0 'local-map leading-left))
+          (should-not (get-text-property 0 'mouse-face leading-left))
+          (should-not (get-text-property 0 'local-map leading-right))
+          (should-not (get-text-property 0 'mouse-face leading-right))
+          (should (eq (get-text-property 0 'face leading-left)
+                      'font-lock-keyword-face))
+          (should (eq (get-text-property 0 'face leading-right)
                       'font-lock-keyword-face))
           (should (eq (get-text-property 0 'local-map tab)
                       my/tab-line-click-map)))))))
@@ -119,7 +126,7 @@
   "Breadcrumb clicks must not inherit any buffer-tab behavior."
   (let* ((upstream-map (make-sparse-keymap))
          (breadcrumb
-          (propertize "project > symbol"
+          (propertize (concat "project > symbol > " (make-string 60 ?x))
                       'local-map upstream-map
                       'mouse-face 'header-line-highlight)))
     (setq-local my/tab-line-leading-segment-functions
@@ -135,7 +142,18 @@
       (should-not (lookup-key map [tab-line mouse-2]))
       (should-not (lookup-key map [tab-line mouse-3]))
       (should-not (lookup-key map [tab-line wheel-up]))
-      (should-not (eq map upstream-map)))))
+      (should-not (eq map upstream-map))
+      (let* ((tab (propertize "TAB" 'local-map my/tab-line-click-map))
+             (overlaid
+              (my/tab-line-overlay-leading-content
+               rendered (list "alignment" tab) 40))
+             (right (car (last overlaid)))
+             (right-map (get-text-property 0 'local-map right)))
+        (should (equal (nth 1 overlaid) tab))
+        (should
+         (eq (lookup-key right-map [tab-line mouse-1])
+             #'my/show-imenu-from-breadcrumb))
+        (should-not (lookup-key right-map [tab-line mouse-2]))))))
 
 (ert-deftest my/treemacs-follow-keeps-a-successful-imenu-node-selected ()
   "A nil upstream return after tag movement must not fall back to the file."

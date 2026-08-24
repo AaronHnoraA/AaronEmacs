@@ -159,7 +159,8 @@ Noema manager 的 UI client；Run、Restart、Manage 等操作
 
 UI 使用通用的上下两层规则：所有 LSP buffer 的 breadcrumb 都作为上层 tab line
 左侧的展示型 underlay；仓库原有 buffer tabs 按整行宽度居中，和 breadcrumb 相交时
-由 tab 覆盖文字。真实 tab 保留切换/关闭行为；breadcrumb 的 mouse-1 则只打开
+由 tab 覆盖自身列，长 breadcrumb 会在 tab group 右侧继续显示。真实 tab 保留
+切换/关闭行为；breadcrumb 的 mouse-1 则只打开
 Treemacs、定位当前 Imenu node 并 pulse。Noema 的 kernel / Run / output 顶栏仍留在
 紧邻正文的 header line，因此 Jupyter 控件不会被 LSP 接管。
 
