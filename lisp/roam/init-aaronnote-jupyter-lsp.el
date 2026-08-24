@@ -48,8 +48,12 @@ its status stuck on \"preparing\" and no way to find out why."
    "'version':sys.version.split()[0]}))")
   "Python expression used to identify a kernel's effective runtime.")
 
-(declare-function lsp-managed-mode "lsp-mode" (&optional arg))
+(declare-function lsp-disconnect "lsp-mode" ())
+(declare-function lsp-workspaces "lsp-mode" ())
 (declare-function my/language-server-ensure-deferred "init-lsp" ())
+(defvar lsp-completion-mode)
+(defvar lsp-managed-mode)
+(defvar lsp-mode)
 
 (defun my/noema-jupyter-cell--lsp-get (key alist)
   "Return KEY from decoded ALIST, accepting symbol and string keys."
@@ -415,11 +419,46 @@ own kernelspec registry instead of the Emacs host's registry."
   (when (fboundp 'my/language-server-runtime--buffer-leaving-h)
     (my/language-server-runtime--buffer-leaving-h))
   ;; Detach this buffer from the old kernel's workspace without tearing the
-  ;; server down: the warm timer armed above owns that decision.
-  (when (bound-and-true-p lsp-managed-mode)
-    (let ((lsp-keep-workspace-alive t))
-      (lsp-managed-mode -1)))
+  ;; server down: `lsp-disconnect' sends didClose, removes the buffer from the
+  ;; workspace and clears lsp-mode's buffer state.  Its didClose call explicitly
+  ;; keeps the workspace alive, leaving the warm timer above in charge.
+  (when (or (bound-and-true-p lsp-managed-mode)
+            (bound-and-true-p lsp-mode)
+            (ignore-errors (lsp-workspaces)))
+    (lsp-disconnect))
+  (setq my/language-server-runtime--workspace nil)
   (my/language-server-runtime-invalidate))
+
+(defun my/noema-jupyter-cell--lsp-capf-priority-h ()
+  "Keep live-kernel completion ahead of static LSP completion.
+This restores Eglot-era hook-depth semantics.  lsp-mode inserts its CAPF with
+`add-to-list', which otherwise jumps ahead of the Noema CAPF regardless of the
+-10 hook depth used by `my/noema-jupyter-cell-mode'.  The kernel CAPF is
+non-exclusive, so Pyright still supplies ordinary static candidates whenever
+the live kernel has no answer or is in introspection backoff."
+  (when (bound-and-true-p my/noema-jupyter-cell-mode)
+    (setq-local
+     completion-at-point-functions
+     (cons #'my/noema-jupyter-cell-capf
+           (delq #'my/noema-jupyter-cell-capf
+                 completion-at-point-functions)))))
+
+(defun my/noema-jupyter-cell--lsp-ui-h ()
+  "Keep Noema's controls in its header below the shared tab-line."
+  (when (bound-and-true-p my/noema-jupyter-cell-mode)
+    (setq-local header-line-format
+                '(:eval (my/noema-jupyter-cell--header-line)))
+    (my/noema-jupyter-cell--lsp-capf-priority-h)
+    (force-mode-line-update t)))
+
+(with-eval-after-load 'lsp-mode
+  (add-hook 'lsp-managed-mode-hook #'my/noema-jupyter-cell--lsp-ui-h))
+
+(with-eval-after-load 'lsp-completion
+  (add-hook 'lsp-completion-mode-hook
+            #'my/noema-jupyter-cell--lsp-capf-priority-h))
+
+(add-hook 'my/noema-jupyter-cell-mode-hook #'my/noema-jupyter-cell--lsp-ui-h)
 
 (my/register-language-server-runtime-provider
  'noema-jupyter #'my/noema-jupyter-cell--lsp-runtime-provider

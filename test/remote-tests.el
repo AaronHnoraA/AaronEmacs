@@ -101,6 +101,8 @@
              remote-exec
              remote-exec-async
              remote-executable-find
+             remote-copy-file-to-target
+             remote-service-provision-directory
              remote-local-bridge-command
              remote-environment-ensure
              remote-environment-derive
@@ -1222,6 +1224,15 @@ names in tree consumers such as Treemacs."
         (should (equal (buffer-string) "routed")))
       (should (file-name-absolute-p
                (remote-executable-find "sh"))))))
+
+(ert-deftest remote-executable-find-accepts-target-native-absolute-path ()
+  "An argv resolved on the target remains valid during lsp-mode's recheck."
+  (remote-test-with-registry
+    (let* ((default-directory
+            (remote-canonicalize-file-name temporary-file-directory))
+           (shell (remote-executable-find "sh")))
+      (should (file-name-absolute-p shell))
+      (should (equal (remote-executable-find shell) shell)))))
 
 (ert-deftest remote-process-file-projects-logical-file-arguments ()
   "INFILE and stderr paths follow the route just like default-directory."

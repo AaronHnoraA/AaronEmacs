@@ -20,6 +20,7 @@
 
 (declare-function remote-connection-generation-for-route
                   "remote-connection" (route))
+(declare-function remote-make-file-name "remote-fs" (target-id localname))
 
 (define-error 'remote-backend-error "Remote backend error")
 (define-error 'remote-backend-unsupported
@@ -43,6 +44,7 @@
   disconnect-function
   prepare-process-function
   stdio-bridge-function
+  copy-file-to-target-function
   network-function
   stream-function
   forward-function
@@ -292,7 +294,7 @@ returns a plist with at least `:status' and `:capabilities'."
     (id &key capabilities available probe project client-file-name
         expand-localname prepare
         connect live disconnect
-        prepare-process stdio-bridge
+        prepare-process stdio-bridge copy-file-to-target
         make-network-process open-network-stream port-forward
         classify-error describe (program-form 'search))
   "Register transport backend ID and return it.
@@ -313,6 +315,10 @@ argument plist, and target environment overrides.  It returns a
 STDIO-BRIDGE receives an execution record and returns client-local argv whose
 stdio is connected to that target execution.  These operations keep
 backend-specific spawn decisions out of the common process API.
+
+COPY-FILE-TO-TARGET receives ROUTE, a client-local source, a target-native
+destination and an overwrite flag.  It is the bulk provisioning path; normal
+editing continues to use Emacs file handlers.
 
 MAKE-NETWORK-PROCESS, OPEN-NETWORK-STREAM, and PORT-FORWARD are optional
 channel operations.  PROGRAM-FORM is `search' when the backend accepts a bare
@@ -338,6 +344,7 @@ target-native executable."
             :disconnect-function disconnect
             :prepare-process-function prepare-process
             :stdio-bridge-function stdio-bridge
+            :copy-file-to-target-function copy-file-to-target
             :network-function make-network-process
             :stream-function open-network-stream
             :forward-function port-forward
@@ -374,6 +381,23 @@ target-native executable."
          (remote-backend--legacy-disconnect backend connection route))
        :describe describe)
       backend)))
+
+(defun remote-backend-copy-file-to-target
+    (route local-file target-file &optional overwrite)
+  "Copy client-local LOCAL-FILE to target-native TARGET-FILE on ROUTE."
+  (let* ((backend (or (remote-route-backend route)
+                      (error "No backend registered for route %S" route)))
+         (function
+          (remote-backend-copy-file-to-target-function backend)))
+    (if function
+        (funcall function route local-file target-file overwrite)
+      (copy-file
+       local-file
+       (remote-backend-project-file-name
+        route
+        (remote-make-file-name
+         (remote-route-target-id route) target-file))
+       overwrite))))
 
 (defun remote-backend-expand-localname
     (route name &optional directory)

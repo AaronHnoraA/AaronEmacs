@@ -14,6 +14,10 @@
   例：`C-c A ?` / `H-?` → `:c 如何配置 LSP？`
 - `SPC`
   Evil leader，总入口。
+- `<Esc>`
+  编辑 buffer 中一次完成 Evil normal-state 恢复和搜索高亮清理；在未启用 Evil 的
+  buffer 中走统一取消逻辑。Minibuffer、isearch、VTerm 和浏览器仍保留各自的局部
+  Escape 行为，不会把未处理的按键漏给 macOS 全屏。
 - `SPC h K`
   在 Emacs 内打开本快捷键索引。
 - `SPC SPC`

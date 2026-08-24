@@ -93,6 +93,7 @@
              remote-workspace-ensure-recoverable-resource
              remote-workspace-add-file-watch
              remote-register-service
+             remote-service-provision-directory
              remote-service-ensure
              remote-service-restart
              remote-terminal-open
@@ -1124,6 +1125,105 @@
         (should (= (length (remote-workspace-resources workspace)) 1)))
       (remote-workspace-close workspace)
       (should-not (remote-service-list)))))
+
+(ert-deftest remote-service-directory-provisioning-is-trust-gated ()
+  (remote-framework-test-with-registry
+    (remote-register-target "lab" :trusted nil)
+    (let ((source (make-temp-file "remote-service-source-" t))
+          (context
+           (remote-context-create
+            :target-id "lab"
+            :localname "/work/"
+            :workspace-id "main"
+            :workspace-root "/fs:lab:/work/")))
+      (unwind-protect
+          (should-error
+           (remote-service-provision-directory
+            "test-tool" source "/fs:lab:/cache/test-tool/v1/"
+            :context context
+            :ready-file "bin/tool"
+            :ready-kind 'executable)
+           :type 'remote-service-untrusted)
+        (delete-directory source t)))))
+
+(ert-deftest remote-service-directory-provisioning-publishes-and-repairs ()
+  (remote-framework-test-with-registry
+    (let* ((source (make-temp-file "remote-service-source-" t))
+           (target-root (make-temp-file "remote-service-target-" t))
+           (native-install
+            (expand-file-name "cache/test-tool/v1/" target-root))
+           (logical-root
+            (remote-make-file-name
+             "local" (file-name-as-directory target-root)))
+           (install
+            (remote-make-file-name
+             "local" (file-name-as-directory native-install)))
+           (context
+            (remote-context-create
+             :target-id "local"
+             :localname target-root
+             :workspace-id "test"
+             :workspace-root logical-root))
+           (prepare-count 0)
+           (prepare
+            (lambda (_context staging)
+              (setq prepare-count (1+ prepare-count))
+              (let* ((native-staging (remote-file-local-name staging))
+                     (launcher
+                      (expand-file-name "bin/tool" native-staging)))
+                (make-directory (file-name-directory launcher) t)
+                (with-temp-file launcher
+                  (insert "#!/bin/sh\nexit 0\n"))
+                (set-file-modes launcher #o700)))))
+      (unwind-protect
+          (progn
+            (with-temp-file (expand-file-name "payload.txt" source)
+              (insert "payload"))
+            (should
+             (equal
+              (remote-service-provision-directory
+               "test-tool" source install
+               :context context
+               :adapter "exec"
+               :payload-directory "lib"
+               :ready-file "bin/tool"
+               :ready-kind 'executable
+               :prepare prepare)
+              (file-name-as-directory install)))
+            (should (= prepare-count 1))
+            (should
+             (equal
+              (with-temp-buffer
+                (insert-file-contents
+                 (expand-file-name "lib/payload.txt" native-install))
+                (buffer-string))
+              "payload"))
+            ;; A ready version is a cache hit and is not repackaged.
+            (remote-service-provision-directory
+             "test-tool" source install
+             :context context :adapter "exec"
+             :payload-directory "lib"
+             :ready-file "bin/tool" :ready-kind 'executable
+             :prepare prepare)
+            (should (= prepare-count 1))
+            ;; An interrupted/incomplete versioned leaf is replaced in place.
+            (delete-file (expand-file-name "bin/tool" native-install))
+            (with-temp-file (expand-file-name "stale" native-install)
+              (insert "incomplete"))
+            (remote-service-provision-directory
+             "test-tool" source install
+             :context context :adapter "exec"
+             :payload-directory "lib"
+             :ready-file "bin/tool" :ready-kind 'executable
+             :prepare prepare)
+            (should (= prepare-count 2))
+            (should
+             (file-executable-p
+              (expand-file-name "bin/tool" native-install)))
+            (should-not
+             (file-exists-p (expand-file-name "stale" native-install))))
+        (delete-directory source t)
+        (delete-directory target-root t)))))
 
 (ert-deftest remote-target-service-restarts-in-place-for-every-workspace ()
   "A target-scoped restart must not leave another workspace with a stale object."

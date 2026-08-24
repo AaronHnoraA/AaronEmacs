@@ -73,6 +73,12 @@ Expected fallbacks remain available to diagnostics through
 (defvar-local my/language-server-runtime--workspace nil
   "The lsp-mode workspace this runtime buffer is attached to.")
 
+(defvar lsp--cur-workspace)
+
+(defconst my/language-server-runtime--workspace-metadata-key
+  'my/language-server-runtime-id
+  "lsp-mode workspace metadata key containing the owning runtime ID.")
+
 (defvar my/language-server-runtime--resolving-root nil
   "Non-nil while lsp-mode is calculating a workspace root.
 It scopes the runtime project finder to root resolution so `project-current',
@@ -80,7 +86,12 @@ Projectile and ordinary file navigation keep seeing the real project.")
 
 (declare-function remote-context-workspace-root "remote-core" (context))
 (declare-function lsp--workspace-buffers "lsp-mode" (workspace))
+(declare-function lsp--workspace-client "lsp-mode" (workspace))
+(declare-function lsp--workspace-metadata "lsp-mode" (workspace))
 (declare-function lsp--workspace-root "lsp-mode" (workspace))
+(declare-function lsp--client-server-id "lsp-mode" (client))
+(declare-function lsp-session-folder->servers "lsp-mode" (session))
+(declare-function lsp--open-in-workspace "lsp-mode" (workspace))
 (declare-function lsp-workspaces "lsp-mode" ())
 (declare-function my/lsp-mode-shutdown-workspace "init-lsp" (workspace &optional reason))
 (declare-function my/language-server-set-workspace-configuration
@@ -263,6 +274,93 @@ current result first."
   "Return the runtime context registered for PROJECT."
   (gethash project my/language-server-runtime--project-contexts))
 
+(defun my/language-server-runtime-current-id (&optional runtime)
+  "Return RUNTIME's stable ID, or that of the current buffer runtime."
+  (when-let* ((runtime (or runtime my/language-server-runtime-current))
+              ((my/language-server-runtime-p runtime)))
+    (my/language-server-runtime-id runtime)))
+
+(defun my/language-server-runtime-workspace-id (workspace)
+  "Return the runtime ID recorded on lsp-mode WORKSPACE, or nil.
+Nil deliberately denotes an ordinary project workspace.  This distinction
+prevents a non-Jupyter Python buffer from attaching to a warm kernel-specific
+server merely because both use the same root and client ID."
+  (when-let* ((metadata (ignore-errors
+                          (lsp--workspace-metadata workspace))))
+    (gethash my/language-server-runtime--workspace-metadata-key metadata)))
+
+(defun my/language-server-runtime--tag-current-workspace-h ()
+  "Record the current buffer's runtime identity on `lsp--cur-workspace'.
+The metadata is client-side only: the real logical root sent to the server,
+its URI projection, Remote owner, process placement and environment remain
+unchanged."
+  (when-let* ((workspace (and (boundp 'lsp--cur-workspace)
+                              lsp--cur-workspace))
+              (metadata (ignore-errors
+                          (lsp--workspace-metadata workspace))))
+    (if-let* ((runtime-id (my/language-server-runtime-current-id)))
+        (puthash my/language-server-runtime--workspace-metadata-key
+                 runtime-id metadata)
+      (remhash my/language-server-runtime--workspace-metadata-key metadata))))
+
+(defun my/language-server-runtime--same-root-p (left right)
+  "Return non-nil when logical directory names LEFT and RIGHT are equal."
+  (and (stringp left)
+       (stringp right)
+       (equal (file-name-as-directory left)
+              (file-name-as-directory right))))
+
+(defun my/language-server-runtime--find-workspace-a
+    (fn session client project-root)
+  "Find only the lsp-mode workspace for this buffer's runtime around FN.
+
+Upstream keys workspaces by PROJECT-ROOT and CLIENT.  Runtime-controlled
+buffers need the Eglot-era third identity component as well: the stable kernel
+runtime ID.  Multiple matching workspaces may therefore remain registered
+under the same real logical root, while only the one with the current runtime
+ID is opened.  Ordinary project buffers match only untagged workspaces."
+  (if (not (and (fboundp 'lsp-session-folder->servers)
+                (fboundp 'lsp--workspace-client)
+                (fboundp 'lsp--client-server-id)
+                (fboundp 'lsp--open-in-workspace)))
+      (funcall fn session client project-root)
+    (let* ((runtime-id (my/language-server-runtime-current-id))
+           (server-id (lsp--client-server-id client))
+           (workspaces
+            (gethash project-root
+                     (lsp-session-folder->servers session)))
+           (workspace
+            (seq-find
+             (lambda (candidate)
+               (and
+                (eq (lsp--client-server-id
+                     (lsp--workspace-client candidate))
+                    server-id)
+                (equal
+                 (my/language-server-runtime-workspace-id candidate)
+                 runtime-id)))
+             workspaces)))
+      (when workspace
+        (lsp--open-in-workspace workspace)
+        workspace))))
+
+(defun my/language-server-runtime-configuration-for-workspace (workspace)
+  "Return the registered runtime configuration owned by WORKSPACE."
+  (when-let* ((runtime-id
+               (my/language-server-runtime-workspace-id workspace))
+              (root (ignore-errors (lsp--workspace-root workspace))))
+    (catch 'configuration
+      (maphash
+       (lambda (project configuration)
+         (when (and (eq (car-safe project)
+                        'my/language-server-runtime-project)
+                    (equal (nth 2 project) runtime-id)
+                    (my/language-server-runtime--same-root-p
+                     (nth 1 project) root))
+           (throw 'configuration configuration)))
+       my/language-server-runtime--configurations)
+      nil)))
+
 (defun my/language-server-runtime-register-lsp-configuration ()
   "Remember this buffer's effective settings for its exact runtime project.
 
@@ -319,6 +417,12 @@ settings without changing ordinary dir-local behavior."
   (when (my/language-server-runtime-p my/language-server-runtime-current)
     (if (bound-and-true-p lsp-managed-mode)
         (when-let* ((workspace (car (ignore-errors (lsp-workspaces)))))
+          ;; Reassert the tag when attaching to a warm workspace.  New
+          ;; workspaces receive it earlier from `lsp-before-initialize-hook',
+          ;; before any asynchronous initialization callback can race another
+          ;; runtime buffer at the same root.
+          (let ((lsp--cur-workspace workspace))
+            (my/language-server-runtime--tag-current-workspace-h))
           (setq-local my/language-server-runtime--workspace workspace)
           ;; Runtime servers are explicitly warmed below; do not let lsp-mode's
           ;; last-buffer teardown race the warm timer.
@@ -332,10 +436,16 @@ settings without changing ordinary dir-local behavior."
 (defun my/language-server-runtime-uninitialized-h (workspace)
   "Clear runtime state associated with stopped lsp-mode WORKSPACE."
   (my/language-server-runtime--cancel-idle-timer workspace)
-  (when-let* ((root (ignore-errors (lsp--workspace-root workspace))))
+  (when-let* ((runtime-id
+               (my/language-server-runtime-workspace-id workspace))
+              (root (ignore-errors (lsp--workspace-root workspace))))
     (maphash
      (lambda (project _runtime)
-       (when (equal (nth 1 project) root)
+       (when (and (eq (car-safe project)
+                      'my/language-server-runtime-project)
+                  (equal (nth 2 project) runtime-id)
+                  (my/language-server-runtime--same-root-p
+                   (nth 1 project) root))
          (remhash project my/language-server-runtime--configurations)
          (remhash project my/language-server-runtime--project-contexts)))
      (copy-hash-table my/language-server-runtime--project-contexts))))
@@ -370,6 +480,8 @@ and FILE-NAME are lsp-mode's own arguments."
   (my/language-server-runtime-install-project-finder))
 
 (with-eval-after-load 'lsp-mode
+  (add-hook 'lsp-before-initialize-hook
+            #'my/language-server-runtime--tag-current-workspace-h)
   (add-hook 'lsp-managed-mode-hook
             #'my/language-server-runtime-managed-h)
   (add-hook 'lsp-after-uninitialized-functions
@@ -378,7 +490,12 @@ and FILE-NAME are lsp-mode's own arguments."
            #'my/language-server-runtime--calculate-root-a
            'lsp--calculate-root)
     (advice-add 'lsp--calculate-root :around
-                #'my/language-server-runtime--calculate-root-a)))
+                #'my/language-server-runtime--calculate-root-a))
+  (unless (advice-member-p
+           #'my/language-server-runtime--find-workspace-a
+           'lsp--find-workspace)
+    (advice-add 'lsp--find-workspace :around
+                #'my/language-server-runtime--find-workspace-a)))
 
 (add-hook 'kill-buffer-hook #'my/language-server-runtime-invalidate)
 

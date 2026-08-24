@@ -137,13 +137,6 @@ or transport kind."
                (remote-file-local-name root)))
       0 16)))))
 
-(defun my/lsp-java--target-trusted-p (context)
-  "Return non-nil when CONTEXT permits target-side provisioning."
-  (when-let* ((target
-               (remote-get-target
-                (remote-context-target-id context))))
-    (remote-target-trusted target)))
-
 (defun my/lsp-java--target-install-ready-p (directory)
   "Return non-nil when logical JDTLS DIRECTORY is complete."
   (file-executable-p (expand-file-name "bin/jdtls" directory)))
@@ -158,79 +151,25 @@ far from its cause.  Fail here instead, at toolchain-apply time."
       (error "JDTLS native launcher requires python3 on target %s"
              (remote-context-target-id context)))))
 
-(defun my/lsp-java--archive-local-bundle ()
-  "Create and return a temporary archive of the local lsp-java bundle."
-  (unless (file-directory-p my/lsp-java-local-bundle-directory)
-    (error "Local lsp-java bundle is missing: %s"
-           my/lsp-java-local-bundle-directory))
-  (let ((archive (make-temp-file "emacs-lsp-java-" nil ".tar.gz")))
-    (unless
-        (zerop
-         (call-process
-          "tar" nil nil nil "-czf" archive
-          "-C" my/lsp-java-local-bundle-directory "."))
-      (delete-file archive)
-      (error "Could not package local lsp-java bundle"))
-    archive))
-
 (defun my/lsp-java--provision-target (context install-directory)
   "Provision the complete JDTLS bundle for CONTEXT at INSTALL-DIRECTORY."
   (unless my/lsp-java-auto-provision-target
     (error "JDTLS is missing on target and automatic provisioning is disabled"))
-  (unless (my/lsp-java--target-trusted-p context)
-    (signal
-     'remote-service-untrusted
-     (list "lsp-java" (remote-context-target-id context))))
-  (let* ((parent (file-name-directory
-                  (directory-file-name install-directory)))
-         (archive (my/lsp-java--archive-local-bundle))
-         (remote-archive
-          (expand-file-name
-           (format ".lsp-java-%s.tar.gz" (my/lsp-java--bundle-version))
-           parent))
-         (native-archive (remote-file-local-name remote-archive))
-         (native-install
-          (remote-file-local-name
-           (directory-file-name install-directory)))
-         (native-parent
-          (remote-file-local-name
-           (directory-file-name parent))))
-    (unwind-protect
-        (progn
-          (remote-exec
-           "mkdir" :args (list "-p" native-parent)
-           :context context :adapter "language-server" :check t)
-          ;; Cross-target copy remains an ordinary Emacs file operation.  The
-          ;; `/fs:' handler selects native/TRAMP/RPC mechanics without exposing
-          ;; a backend ID to this language consumer.
-          (let ((large-file-warning-threshold nil))
-            (copy-file archive remote-archive t))
-          (remote-exec
-           "sh"
-           :args
-           (list
-            "-c"
-            (concat
-             "set -eu\n"
-             "archive=$1\n"
-             "install=$2\n"
-             "staging=${install}.tmp.$$\n"
-             "if test -x \"$install/bin/jdtls\"; then exit 0; fi\n"
-             "rm -rf \"$staging\"\n"
-             "mkdir -p \"$staging\"\n"
-             "tar -xzf \"$archive\" -C \"$staging\"\n"
-             "chmod u+x \"$staging/bin/jdtls\"\n"
-             "if test -e \"$install\"; then\n"
-             "  rm -rf \"$staging\"\n"
-             "else\n"
-             "  mv \"$staging\" \"$install\"\n"
-             "fi\n")
-            "lsp-java-provision" native-archive native-install)
-           :context context :adapter "language-server" :check t))
-      (when (file-exists-p archive)
-        (delete-file archive))
-      (when (file-exists-p remote-archive)
-        (delete-file remote-archive))))
+  (remote-service-provision-directory
+   "lsp-java" my/lsp-java-local-bundle-directory install-directory
+   :context context
+   :adapter "language-server"
+   :ready-file "bin/jdtls"
+   :ready-kind 'executable
+   :prepare
+   (lambda (provision-context staging)
+     (remote-exec
+      "chmod"
+      :args
+      (list "u+x"
+            (remote-file-local-name
+             (expand-file-name "bin/jdtls" staging)))
+      :context provision-context :adapter "language-server" :check t)))
   (unless (my/lsp-java--target-install-ready-p install-directory)
     (error "Target JDTLS provisioning did not produce bin/jdtls")))
 

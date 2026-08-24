@@ -150,10 +150,18 @@ mode，并从 notebook metadata 读取当前 kernelspec；普通 notebook 没有
 =source_file= 时以自身作为独立 document。Emacs 顶栏只是
 Noema manager 的 UI client；Run、Restart、Manage 等操作
 全部调用 Noema API。runtime provider 在 owning Target 上执行 kernelspec 的轻量 probe，读取
-=sys.executable=、=sys.prefix= 和 =sys.path=，再让 Eglot 的 Python analyzer 自动
+=sys.executable=、=sys.prefix= 和 =sys.path=，再让 lsp-mode 的 Python analyzer 自动
 跟随 kernel；server binary 本身仍来自该 Target/workspace 的 tooling environment。
-同一 runtime 复用 Eglot，不同 kernel runtime 使用独立 Eglot project identity，
-最后一个 cell buffer 关闭后默认保温 10 分钟。
+同一 runtime 复用保温中的 lsp-mode workspace，不同 kernel runtime 在同一真实逻辑根
+下使用独立的 client-side workspace identity；最后一个 cell buffer 关闭后默认保温
+10 分钟。切换 kernel 会先发送 =textDocument/didClose= 并完整 detach 旧 workspace，
+不会只关掉 managed-mode 后把旧 buffer/workspace 状态残留下来。
+
+UI 使用通用的上下两层规则：所有 LSP buffer 的 breadcrumb 都作为上层 tab line
+左侧的展示型 underlay；仓库原有 buffer tabs 按整行宽度居中，和 breadcrumb 相交时
+由 tab 覆盖文字。真实 tab 保留切换/关闭行为；breadcrumb 的 mouse-1 则只打开
+Treemacs、定位当前 Imenu node 并 pulse。Noema 的 kernel / Run / output 顶栏仍留在
+紧邻正文的 header line，因此 Jupyter 控件不会被 LSP 接管。
 
 普通 Python/ipykernel kernelspec 可自动推导。项目自带 Python/Sage wrapper 在
 =metadata.aaron.runtime.probe_argv= 声明 probe 入口。=attach:=、legacy
@@ -259,7 +267,8 @@ server 上的文件。这是刻意保持狭小的接口，不是第二套通用�
 所有 ipynb 源码投影（=my/noema-jupyter-cell-mode=）上挂了
 =my/noema-jupyter-cell-capf=，直接问 kernel。它看得见静态分析看不见的东西：
 前面 cell 定义的名字、DataFrame 列名、IPython magic、Sage 注入的 builtin。
-它声明 =:exclusive no=,所以 kernel 空闲、不可达或没有结果时会透传给 Eglot。
+它声明 =:exclusive no=，并固定排在 =lsp-completion-at-point= 前面；所以优先保留
+live kernel 的手感，而 kernel 空闲、不可达或没有结果时仍会透传给 lsp-mode。
 =C-c C-i= 或 =S-TAB= 是 =my/noema-jupyter-cell-inspect=（Jupyter 的
 =inspect_request=，前缀参数取源码，相当于 =??obj=）。
 

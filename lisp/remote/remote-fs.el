@@ -22,6 +22,8 @@
 (require 'remote-background)
 
 (declare-function remote-make-process "remote-process" (&rest plist))
+(declare-function remote-executable-find "remote-process"
+                  (program &optional context))
 (declare-function remote-operation-provider-for
                   "remote-accelerator"
                   (operation route context args physical-default))
@@ -1667,6 +1669,137 @@ as an accidental fallback."
                             remote-file-watches))
           (remote-file-watch-resync watch 'backend-stopped))))))
 
+(defun remote-fs--inotify-action (names)
+  "Return one file-notify action for comma-separated inotify NAMES."
+  (let ((names (split-string (upcase names) "," t)))
+    (cond
+     ((seq-some
+       (lambda (name) (member name '("IGNORED" "UNMOUNT")))
+       names)
+      'stopped)
+     ((seq-some
+       (lambda (name)
+         (member name '("DELETE" "DELETE_SELF" "MOVED_FROM" "MOVE_SELF")))
+       names)
+      'deleted)
+     ((seq-some
+       (lambda (name) (member name '("CREATE" "MOVED_TO")))
+       names)
+      'created)
+     ((member "ATTRIB" names) 'attribute-changed)
+     ((seq-some
+       (lambda (name) (member name '("MODIFY" "CLOSE_WRITE")))
+       names)
+      'changed))))
+
+(defun remote-fs--inotify-filter (watch generation process output)
+  "Deliver PROCESS inotify OUTPUT for WATCH at GENERATION."
+  (when (= generation (remote-file-watch-generation watch))
+    (let* ((pending
+            (concat (or (process-get process 'remote-file-watch-rest) "")
+                    output))
+           (complete (string-suffix-p "\n" pending))
+           (lines (split-string pending "\n"))
+           (rest (unless complete (car (last lines)))))
+      (unless complete
+        (setq lines (butlast lines)))
+      (process-put process 'remote-file-watch-rest rest)
+      (dolist (line lines)
+        (when (string-match "\\`\\([^\t]+\\)\t\\(.*\\)\\'" line)
+          (let* ((names (match-string 1 line))
+                 (path (match-string 2 line))
+                 (action (remote-fs--inotify-action names)))
+            (when action
+              (remote-fs--watch-deliver
+               watch
+               (list process action path)))))))))
+
+(defun remote-fs--inotify-sentinel (watch generation process _event)
+  "Recover WATCH when its direct PROCESS for GENERATION exits."
+  (when (and (= generation (remote-file-watch-generation watch))
+             (not (process-live-p process))
+             (gethash (remote-file-watch-id watch) remote-file-watches))
+    (remote-fs--watch-deliver
+     watch (list process 'stopped (remote-file-watch-file watch)))))
+
+(defun remote-fs--watch-add-direct-inotify (watch generation)
+  "Start a routed inotify process for WATCH, or return nil when unavailable."
+  (let* ((file (remote-file-watch-file watch))
+         (context (remote-context file))
+         (target-id (remote-context-target-id context)))
+    (when (and
+           (not (equal target-id "local"))
+           (fboundp 'remote-make-process)
+           (fboundp 'remote-executable-find))
+      (let* ((remote-current-adapter-id
+              (remote-file-watch-adapter-id watch))
+             (program
+              (ignore-errors
+                (remote-executable-find "inotifywait" context))))
+        (when program
+          (let* ((flags (remote-file-watch-flags watch))
+                 (events
+                  (cond
+                   ((and (memq 'change flags)
+                         (memq 'attribute-change flags))
+                    "create,modify,close_write,move,delete,attrib,ignored,unmount")
+                   ((memq 'change flags)
+                    "create,modify,close_write,move,delete,ignored,unmount")
+                   (t "attrib,ignored,unmount")))
+                 (buffer
+                  (generate-new-buffer
+                   (format " *remote-watch:%s*"
+                           (remote-file-watch-id watch))))
+                 process)
+            (condition-case error
+                (progn
+                  (setq process
+                        (remote-make-process
+                         :name
+                         (format "remote-watch:%s"
+                                 (remote-file-watch-id watch))
+                         :buffer buffer
+                         :command
+                         (list
+                          program "-mq" "--format" "%e\t%w%f"
+                          "-e" events
+                          (remote-file-local-name file))
+                         :connection-type 'pipe
+                         :coding 'utf-8-unix
+                         :noquery t
+                         :filter
+                         (lambda (proc output)
+                           (remote-fs--inotify-filter
+                            watch generation proc output))
+                         :sentinel
+                         (lambda (proc event)
+                           (remote-fs--inotify-sentinel
+                            watch generation proc event))
+                         :remote-adapter
+                         (remote-file-watch-adapter-id watch)
+                         :remote-context context
+                         :remote-directory file
+                         :remote-process-class 'background))
+                  (process-put process 'remote-file-watch-direct t)
+                  (process-put process 'remote-file-watch-buffer buffer)
+                  process)
+              (error
+               (when (buffer-live-p buffer)
+                 (kill-buffer buffer))
+               (remote-log
+                'watch-direct-fallback
+                :target target-id
+                :file file
+                :error (error-message-string error))
+               nil))))))))
+
+(defun remote-fs--watch-physical-valid-p (descriptor)
+  "Return non-nil when backend watch DESCRIPTOR remains usable."
+  (if (and (processp descriptor)
+           (process-get descriptor 'remote-file-watch-direct))
+      (process-live-p descriptor)
+    (file-notify-valid-p descriptor)))
+
 (defun remote-file-watch-resync (watch &optional reason)
   "Rescan and recreate logical WATCH after event loss or REASON.
 The optional `:resync' function in WATCH metadata runs before the physical
@@ -1710,15 +1843,17 @@ shared background scheduler."
         (generation
          (1+ (or (remote-file-watch-generation watch) 0))))
     (setf (remote-file-watch-generation watch) generation)
-    (remote-fs--call-routed
-     'file-notify-add-watch
-     (list
-      (remote-file-watch-file watch)
-      (remote-file-watch-flags watch)
-      (lambda (event)
-        (when (= generation
-                 (remote-file-watch-generation watch))
-          (remote-fs--watch-deliver watch event)))))))
+    (or
+     (remote-fs--watch-add-direct-inotify watch generation)
+     (remote-fs--call-routed
+      'file-notify-add-watch
+      (list
+       (remote-file-watch-file watch)
+       (remote-file-watch-flags watch)
+       (lambda (event)
+         (when (= generation
+                  (remote-file-watch-generation watch))
+           (remote-fs--watch-deliver watch event))))))))
 
 (defun remote-fs--watch-remove-physical (watch)
   "Remove WATCH's current backend descriptor without stopping its identity."
@@ -1731,7 +1866,14 @@ shared background scheduler."
     (setf (remote-file-watch-suppress-events watch) t)
     (unwind-protect
         (ignore-errors
-          (file-notify-rm-watch physical))
+          (if (and (processp physical)
+                   (process-get physical 'remote-file-watch-direct))
+              (let ((buffer
+                     (process-get physical 'remote-file-watch-buffer)))
+                (delete-process physical)
+                (when (buffer-live-p buffer)
+                  (kill-buffer buffer)))
+            (file-notify-rm-watch physical)))
       (setf (remote-file-watch-physical-descriptor watch) nil
             (remote-file-watch-suppress-events watch) nil))))
 
@@ -1899,9 +2041,25 @@ recovery keeps the public identity and only removes its physical descriptor."
        (eq (remote-file-watch-state watch) 'open)
        (when-let* ((physical
                     (remote-file-watch-physical-descriptor watch)))
-         (file-notify-valid-p physical)))
+         (remote-fs--watch-physical-valid-p physical)))
     (remote-fs--call-routed
      'file-notify-valid-p (list descriptor))))
+
+(defun remote-fs--logical-watch-public-api-a (function descriptor)
+  "Run public file-notify FUNCTION for logical DESCRIPTOR.
+`file-notify-add-watch' remembers the logical watched directory, but the
+public remove/valid APIs later pass only the opaque descriptor to a file-name
+handler.  TRAMP cannot rediscover the `/fs:' method from that descriptor and
+would otherwise dispatch it as an ordinary TRAMP process.  Temporarily put
+the logical handler first so the public API still owns descriptor-table and
+`stopped' event bookkeeping while Remote owns backend cleanup and validity."
+  (if (not (remote-file-watch-descriptor-p descriptor))
+      (funcall function descriptor)
+    (let ((file-name-handler-alist
+           (cons
+            (cons "\\`/fs:[^:]+:" #'remote-fs-file-name-handler)
+            file-name-handler-alist)))
+      (funcall function descriptor))))
 
 (defun remote-fs-file-name-handler (operation &rest args)
   "Handle file-name OPERATION for logical fs ARGS."
@@ -1982,6 +2140,14 @@ recovery keeps the public identity and only removes its physical descriptor."
    #'remote-fs-foreign-p
    #'remote-fs-file-name-handler
    (mapcar #'car remote-fs-file-name-handler-alist))
+  ;; The public API has no file-name argument after a watch is created; keep
+  ;; logical descriptor dispatch explicit without touching filenotify's
+  ;; private descriptor table.
+  (dolist (operation '(file-notify-rm-watch file-notify-valid-p))
+    (unless (advice-member-p
+             #'remote-fs--logical-watch-public-api-a operation)
+      (advice-add
+       operation :around #'remote-fs--logical-watch-public-api-a)))
   (remote-fs-register-link-plugins))
 
 (defun remote-fs-uninstall ()

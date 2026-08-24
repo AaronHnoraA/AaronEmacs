@@ -383,6 +383,7 @@ VECTOR, METHOD, and PARAMS are tramp-rpc's ordinary request arguments."
    :disconnect #'remote-backend-tramp-disconnect
    :prepare-process #'remote-backend-tramp-handler-process-plan
    :stdio-bridge #'remote-backend-tramp-stdio-bridge
+   :copy-file-to-target #'remote-backend-tramp-direct-copy-file
    :make-network-process #'remote-backend-tramp-network
    :open-network-stream #'remote-backend-tramp-stream
    :port-forward #'remote-backend-tramp-forward

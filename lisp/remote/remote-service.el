@@ -11,7 +11,9 @@
 
 (require 'cl-lib)
 (require 'seq)
+(require 'subr-x)
 (require 'remote-core)
+(require 'remote-fs)
 (require 'remote-process)
 
 (declare-function remote-workspace-id "remote-workspace" (workspace))
@@ -51,6 +53,216 @@
 Provisioning still requires a trusted target."
   :type 'boolean
   :group 'remote)
+
+(defun remote-service--safe-relative-path-p (path &optional allow-dot)
+  "Return non-nil when PATH is a safe relative archive path.
+When ALLOW-DOT is non-nil, the spelling `.' is accepted."
+  (and (stringp path)
+       (not (string-empty-p path))
+       (not (file-name-absolute-p path))
+       (or allow-dot (not (equal path ".")))
+       (not (member ".." (split-string path "/" t)))))
+
+(defun remote-service--safe-install-directory-p (directory)
+  "Return non-nil when target-native DIRECTORY is a safe install leaf."
+  (let ((directory (directory-file-name directory)))
+    (and (file-name-absolute-p directory)
+         (not
+          (member
+           directory
+           '("/" "/bin" "/boot" "/dev" "/etc" "/home" "/lib"
+             "/lib64" "/opt" "/proc" "/root" "/run" "/sbin"
+             "/srv" "/sys" "/tmp" "/usr" "/var" "/Users"))))))
+
+(defun remote-service--directory-ready-p
+    (directory ready-file ready-kind context adapter)
+  "Return whether DIRECTORY contains READY-FILE of READY-KIND.
+CONTEXT and ADAPTER keep this probe inside the public process boundary, so it
+does not depend on whether the logical `/fs:' file handler is installed."
+  (let* ((native-directory
+          (remote-file-local-name (directory-file-name directory)))
+         (path
+          (if (equal ready-file ".")
+              native-directory
+            (concat (file-name-as-directory native-directory) ready-file)))
+         (flag
+          (pcase ready-kind
+            ('executable "-x")
+            ('directory "-d")
+            ('file "-f")
+            (_ "-e"))))
+    (condition-case nil
+        (zerop
+         (remote-exec-result-status
+          (remote-exec
+           "test" :args (list flag path)
+           :context context :adapter adapter
+           :filesystem-effects 'none)))
+      (error nil))))
+
+(cl-defun remote-service-provision-directory
+    (service source install-directory
+     &key context (adapter "service") ready-file
+     (ready-kind 'exists) (payload-directory ".") prepare)
+  "Provision a client-local directory as a versioned target-side SERVICE.
+
+SOURCE is packed on the client, transferred through the Remote bulk-copy
+boundary, extracted into a target-side staging directory, and atomically
+published as INSTALL-DIRECTORY.  INSTALL-DIRECTORY may be native, logical
+`/fs:', or physical TRAMP syntax; it is normalized to the CONTEXT target.
+
+READY-FILE is a safe path below the installation and READY-KIND is one of
+`exists', `file', `directory', or `executable'.  PAYLOAD-DIRECTORY places the
+archive below that relative staging subdirectory.  PREPARE, when non-nil, is
+called with CONTEXT and the logical staging directory after extraction and
+before readiness validation.  It is the language/service-specific boundary
+for small steps such as creating a launcher or changing its mode.
+
+Provisioning is allowed only for trusted targets.  Return the canonical
+logical installation directory."
+  (unless (and (stringp source)
+               (file-name-absolute-p source)
+               (not (file-remote-p source))
+               (file-directory-p source))
+    (error "Provision source must be a client-local directory: %S" source))
+  (unless (remote-service--safe-relative-path-p ready-file t)
+    (error "Invalid provisioning readiness path: %S" ready-file))
+  (unless (memq ready-kind '(exists file directory executable))
+    (error "Invalid provisioning readiness kind: %S" ready-kind))
+  (unless (remote-service--safe-relative-path-p payload-directory t)
+    (error "Invalid provisioning payload directory: %S" payload-directory))
+  (unless (or (null prepare) (functionp prepare))
+    (error "Provision prepare hook is not callable: %S" prepare))
+  (let* ((context
+          (cond
+           ((remote-context-p context) context)
+           (context (remote-context context))
+           (t (remote-context install-directory))))
+         (target-id (remote-context-target-id context))
+         (target (remote-get-target target-id))
+         (install-directory
+          (file-name-as-directory
+           (remote-expand-file-name install-directory nil context)))
+         (native-install
+          (remote-file-local-name
+           (directory-file-name install-directory))))
+    (unless (and target (remote-target-trusted target))
+      (signal 'remote-service-untrusted (list service target-id)))
+    (unless (equal (remote-file-name-target install-directory) target-id)
+      (error "Provision destination %s does not belong to target %s"
+             install-directory target-id))
+    (unless (remote-service--safe-install-directory-p native-install)
+      (error "Refusing unsafe service installation directory: %s"
+             native-install))
+    (if (remote-service--directory-ready-p
+         install-directory ready-file ready-kind context adapter)
+        install-directory
+      (let* ((service-name
+              (replace-regexp-in-string
+               "[^[:alnum:]._-]+" "-" (remote-normalize-id service)))
+             (token
+              (substring
+               (secure-hash
+                'sha1
+                (format "%s:%s:%s:%s"
+                        service-name native-install (emacs-pid)
+                        (float-time)))
+               0 16))
+             (parent
+              (file-name-directory
+               (directory-file-name install-directory)))
+             (staging
+              (file-name-as-directory
+               (concat (directory-file-name install-directory)
+                       ".tmp." token)))
+             (archive
+              (make-temp-file
+               (format "emacs-remote-%s-" service-name) nil ".tar.gz"))
+             (target-archive
+              (expand-file-name
+               (format ".emacs-remote-%s-%s.tar.gz" service-name token)
+               parent))
+             (native-parent
+              (remote-file-local-name (directory-file-name parent)))
+             (native-staging
+              (remote-file-local-name (directory-file-name staging)))
+             (native-archive (remote-file-local-name target-archive)))
+        (unwind-protect
+            (progn
+              (unless
+                  (zerop
+                   (call-process
+                    "tar" nil nil nil "-czf" archive "-C" source "."))
+                (error "Could not package local %s service bundle" service))
+              (remote-exec
+               "mkdir" :args (list "-p" native-parent)
+               :context context :adapter adapter :check t)
+              (remote-copy-file-to-target
+               archive target-archive
+               :context context :adapter adapter :overwrite t)
+              (remote-exec
+               "sh"
+               :args
+               (list
+                "-c"
+                (concat
+                 "set -eu\n"
+                 "archive=$1\n"
+                 "staging=$2\n"
+                 "payload=$3\n"
+                 "rm -rf -- \"$staging\"\n"
+                 "mkdir -p -- \"$staging/$payload\"\n"
+                 "tar -xzf \"$archive\" -C \"$staging/$payload\"\n")
+                (format "%s-extract" service-name)
+                native-archive native-staging payload-directory)
+               :context context :adapter adapter :check t)
+              (when prepare
+                (funcall prepare context staging))
+              (unless
+                  (remote-service--directory-ready-p
+                   staging ready-file ready-kind context adapter)
+                (signal
+                 'remote-service-error
+                 (list
+                  (format
+                   "Staged %s bundle does not contain ready %s"
+                   service ready-file))))
+              ;; A versioned cache may survive an interrupted older install.
+              ;; Replace only this validated leaf, never its cache parent.
+              (remote-exec
+               "sh"
+               :args
+               (list
+                "-c"
+                (concat
+                 "set -eu\n"
+                 "staging=$1\n"
+                 "install=$2\n"
+                 "if test -e \"$install\"; then rm -rf -- \"$install\"; fi\n"
+                 "mv -- \"$staging\" \"$install\"\n")
+                (format "%s-publish" service-name)
+                native-staging native-install)
+               :context context :adapter adapter :check t)
+              (unless
+                  (remote-service--directory-ready-p
+                   install-directory ready-file ready-kind context adapter)
+                (signal
+                 'remote-service-error
+                 (list
+                  (format
+                   "Provisioned %s service is not ready at %s"
+                   service install-directory))))
+              install-directory)
+          (when (file-exists-p archive)
+            (delete-file archive))
+          (ignore-errors
+            (remote-exec
+             "rm" :args (list "-f" native-archive)
+             :context context :adapter adapter :check t))
+          (ignore-errors
+            (remote-exec
+             "rm" :args (list "-rf" native-staging)
+             :context context :adapter adapter :check t)))))))
 
 (defun remote-get-service (id)
   "Return registered service ID, or nil."

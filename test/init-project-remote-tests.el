@@ -64,20 +64,23 @@
       "/tmp/Main.java"))))
 
 (ert-deftest treemacs-imenu-reads-the-existing-logical-source-buffer ()
-  (let ((source (generate-new-buffer " *treemacs-logical-source*"))
+  (let* ((source (generate-new-buffer " *treemacs-logical-source*"))
+        (native-file (make-temp-file "treemacs-logical-" nil ".java"))
+        (logical-file (remote-make-file-name "local" native-file))
+        (physical-file (concat "/ssh:box:" native-file))
         captured)
     (unwind-protect
         (progn
           (with-current-buffer source
-            (setq buffer-file-name "/fs:box:/work/Main.java"))
+            (set-visited-file-name logical-file t))
           (cl-letf
               (((symbol-function 'my/treemacs-visit-path)
-                (lambda (_path) "/fs:box:/work/Main.java")))
+                (lambda (_path) logical-file)))
             (my/treemacs-get-imenu-index-a
              (lambda (file)
                (setq captured file)
                nil)
-             "/ssh:box:/work/Main.java")
+             physical-file)
             (should
              (eq
               (my/treemacs-visit-logical-path-a
@@ -85,9 +88,10 @@
                  (get-file-buffer "/ssh:box:/work/Main.java")))
               source)))
           (should
-           (equal captured "/fs:box:/work/Main.java")))
+           (equal captured logical-file)))
       (when (buffer-live-p source)
-        (kill-buffer source)))))
+        (kill-buffer source))
+      (delete-file native-file))))
 
 (ert-deftest treemacs-file-events-ignore-a-directory-deletion-race ()
   (should-not

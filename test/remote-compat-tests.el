@@ -249,6 +249,30 @@
       (should (eq (remote-file-watch-state watch) 'closed))
       (should-not (gethash "watch-test" remote-file-watches)))))
 
+(ert-deftest remote-logical-watch-public-api-selects-fs-handler ()
+  "Opaque logical descriptors must not fall back to TRAMP process handling."
+  (let ((descriptor '(remote-file-watch . "watch-test"))
+        seen-handler)
+    (should
+     (eq
+      (remote-fs--logical-watch-public-api-a
+       (lambda (_descriptor)
+         (setq seen-handler
+               (find-file-name-handler
+                "/fs:box:/work/" 'file-notify-valid-p))
+         'valid)
+       descriptor)
+      'valid))
+    (should (eq seen-handler #'remote-fs-file-name-handler))))
+
+(ert-deftest remote-inotify-events-map-to-public-file-notify-actions ()
+  (should (eq (remote-fs--inotify-action "CREATE,ISDIR") 'created))
+  (should (eq (remote-fs--inotify-action "MODIFY") 'changed))
+  (should (eq (remote-fs--inotify-action "ATTRIB") 'attribute-changed))
+  (should (eq (remote-fs--inotify-action "MOVED_FROM") 'deleted))
+  (should (eq (remote-fs--inotify-action "MOVED_TO") 'created))
+  (should (eq (remote-fs--inotify-action "IGNORED") 'stopped)))
+
 (ert-deftest remote-foreign-handler-normalizes-file-name-and-vector-inputs ()
   (let* ((file "/fs:lab:/srv/project")
          (vector (tramp-dissect-file-name file nil)))

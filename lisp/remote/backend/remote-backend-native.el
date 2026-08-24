@@ -330,6 +330,9 @@ direction."
    :connect #'remote-backend-native-connect
    :live #'remote-backend-native-live-p
    :stdio-bridge #'remote-backend-native-stdio-bridge
+   :copy-file-to-target
+   (lambda (_route local-file target-file overwrite)
+     (copy-file local-file target-file overwrite))
    :make-network-process #'remote-backend-native-network
    :open-network-stream #'remote-backend-native-stream
    :port-forward #'remote-backend-native-forward

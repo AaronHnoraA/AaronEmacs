@@ -43,11 +43,42 @@
 target：本地 buffer 使用 =local= target，远程 buffer 使用自己的 target/workspace
 PATH、direnv 和工具链，不会把客户端机器上的 server 路径泄漏给远端。
 
+普通 =find-file= 打开的 =/ssh:= / =/rpc:= buffer 不要求用户改成 =/fs:= 才能启用
+LSP。client 匹配时会临时反映物理 TRAMP 身份，真正解析 executable、cwd、environment
+和启动 stdio 时则进入 owning =/fs:= workspace；这沿用了旧 Eglot 适配里“contact
+只负责协议、Remote workspace 负责 placement”的边界，但现在只保留一套 lsp-mode
+client，不注册 =*-tramp= 副本。
+
+目标端没有完整 analyzer 时，可信 target 可以按版本自动 provision：Python 优先使用
+目标 PATH 内的 Pyright/BasedPyright，否则部署客户端已有的 relocatable Pyright bundle，
+最后才回退到 pylsp/Jedi；Java 同样把完整 JDTLS bundle 缓存到目标端。大 bundle 通过
+=remote-copy-file-to-target= 交给 backend 的批量传输（SSH 为 SCP），不会让普通 TRAMP
+=copy-file= 阻塞编辑链路。打包、trusted-target 门禁、暂存解压、ready probe、不完整缓存
+修复、原子发布与清理统一由 =remote-service-provision-directory= 完成；语言文件只保留
+Pyright launcher/JDTLS 执行位等服务器特有准备。server 仍在 target 执行，不会退回
+客户端运行。
+
 CodeLens 默认开启，=SPC c L= 切换。CodeLens、inlay hints、文档颜色、文档链接和
 semantic-token 预取统一限制在当前可见窗口加
 =my/language-server-visible-render-margin= 行缓冲内；服务器响应、诊断状态与协议缓存
 仍按整个 workspace 保存。Flymake 的行尾短诊断由 redisplay 覆盖可见诊断行，不需要
 buffer-global sideline overlays。统一 idle 为 350ms。
+
+文件 watcher 不属于可见区域渲染，不能为了远程性能直接关闭。动态 registration 会把
+物理 TRAMP root 规范到 =/fs:=，由同一 Remote workspace 持有稳定 descriptor；Linux
+target 优先运行路由后的 =inotifywait= 并直接重写事件路径，其他 backend 回退到其
+公开 file-notify 实现。watcher 的停止、恢复、去重和 workspace 清理由 Remote 统一
+管理。
+
+所有 breadcrumb renderer 都使用通用 tab-line 左侧展示型 underlay，不占用
+header-line。文件刚进入 =prog-mode= 时，breadcrumb.el 直接出现在这个位置；LSP
+ready 后只把 provider 原位替换成 lsp-headerline，不发生纵向跳动。中央 buffer tabs
+始终按整条 tab-line 的宽度布局，不再为 breadcrumb 左右对称留空；两者相交时 tab
+覆盖 breadcrumb。上游 breadcrumb 的跳转 keymap、link 与 tab 行为全部移除，只重新
+挂一个受控的 mouse-1 动作：打开 Treemacs、定位光标所在的 Imenu node、把焦点移到该
+node 并 pulse；mouse-2/3、滚轮仍只属于真正的 buffer tab。path、project 与 symbol
+face 使用 =aaron-ui= 的高对比 semantic tokens，并在换主题/新 frame 后重应用。
+header-line 继续留给 Noema 这类 buffer-local 应用控件。
 
 * Runtime Contexts
 
@@ -58,10 +89,17 @@ Jupyter cell 是第一个 consumer，后续 REPL/run/debug 可以复用同一份
 
 运行时契约包含稳定 ID、owning Remote context、真实 workspace root、tooling
 environment、runtime environment、语言 toolchain profile、workspace configuration
-和 idle timeout。lsp-mode 只在对应 runtime workspace 动态范围内看到
-=(my/language-server-runtime-project ROOT ID)=；普通 =project-current=、Projectile
-和文件导航仍看到真实项目。因此同一项目的两个 kernel 不会错误共用 server，
-相同 runtime 则会复用保温中的 server。
+和 idle timeout。lsp-mode upstream 只按 =PROJECT-ROOT + CLIENT= 查找 workspace；
+本仓库在 workspace 的 client-side metadata 上补充稳定 runtime ID，并把查找键扩展为
+=PROJECT-ROOT + CLIENT + RUNTIME-ID=。普通 buffer 只能匹配没有 runtime tag 的
+workspace。因此同一项目的两个 kernel 不会错误共用 server，相同 runtime 则会复用
+保温中的 server，也不会让普通 Python buffer 误接到 kernel 专用 server。
+
+runtime ID 只参与 Emacs 侧 workspace 选择和 Remote resource handle。协议 root、URI、
+进程 placement、environment 与 watch 始终使用真实逻辑根（包括
+=/fs:TARGET:/path=）；同一逻辑根仍只有一个 Remote workspace owner。多个 kernel 的
+resource key 在这个 owner 下用 runtime ID 区分，不能通过伪造 root 或绕过 Remote
+来换取 server 隔离。
 
 工具与解释器是两层：pyright/pylsp 等 analyzer 仍从 target/workspace tooling
 environment 解析，kernel 只提供 =pythonPath=、=sys.path=、env 和 import 分析设置。
@@ -270,8 +308,8 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 
 - C/C++：唯一 =my-clangd= client；
 - Python：唯一 =my-python= client，按 target 环境依次选择
-  =pyright-langserver=、=basedpyright-langserver=、=pylsp=、
-  =jedi-language-server=；
+  =pyright-langserver=、=basedpyright-langserver=，必要时 provision Pyright，再回退到
+  =pylsp=、=jedi-language-server=；
 - Java：唯一 =jdtls= owner，每个 project 独立 =-data= 与 configuration，remote
   target 通过 toolchain provisioning 获得同一 JDTLS bundle。
 
@@ -284,6 +322,10 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
   =:json-false=；
 - 需要 watcher/service/channel 时已经登记 workspace owner 和清理策略；
 - =make lsp-test= 通过；本机安装相应 server 时 =make lsp-live-smoke= 真正初始化成功。
+- 真实 SSH target 还要执行
+  =REMOTE_LSP_E2E_TARGET=TARGET make lsp-remote-live-smoke=；它从普通物理 TRAMP
+  buffer 启动 C/Python/Java，硬性验证 Remote 进程归属、诊断、typed Imenu、completion、
+  hover/definition/references/rename/format/codeAction capabilities，以及真实 watcher 事件。
 
 * Pattern For Other Modules
 

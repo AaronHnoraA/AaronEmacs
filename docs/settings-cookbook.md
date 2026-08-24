@@ -323,6 +323,12 @@ emacs --debug-init -q -l ./bootstrap.el
 - `init-lsp-tools.el`
   Hub / Doctor / dispatch / runtime 调参
 
+通用 breadcrumb 与 LSP breadcrumb 都显示在 buffer tab line 左侧；LSP ready 时只
+原位替换 provider。它是非 tab 的展示型 underlay，不占用 tab 的布局宽度：中央 tabs 使用整条
+tab line，相交处由 tab 覆盖 breadcrumb。breadcrumb 不继承 tab 的切换/关闭行为；
+其唯一 mouse-1 动作会 ensure-open Treemacs，定位当前 Imenu node 并 pulse。Jupyter
+或语言模块不需要单独改 `header-line-format`。
+
 如果你是新增某个语言服务器映射：
 
 - `lsp-mode` 例外路由，优先用 `my/register-lsp-mode-preference`

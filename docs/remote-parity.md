@@ -64,7 +64,7 @@ service 与 channel 来自同一 owning workspace target。异步 callback 在�
 | workspace lifecycle | local | open/reconnect/close 管理服务、任务、terminal、forward |
 | workspace-side service | local | 探测、可信部署、版本协商、启动、健康、停止 |
 | 环境与 remote settings | remote | user → target → workspace → tool → invocation 分层 |
-| 文件 watch | API | 长期监听、断线重订阅、事件路径重写和去重 |
+| 文件 watch | remote | 真实 SSH inotify 事件、路径重写和 workspace owner 已验证；补长时间与传输断线真机故障注入 |
 | LSP/IntelliSense | remote | root/URI/server/cwd/env/watch/helper/channel 同属一个 workspace target；local/remote 同路由，断线可恢复 |
 | 搜索与 SCM | API | rg/git/Magit 在 target 执行，无本地路径泄漏 |
 | tasks/tests | API | task registry、并发、取消、后台任务和结果模型 |
@@ -93,11 +93,13 @@ service 与 channel 来自同一 owning workspace target。异步 callback 在�
   `remote-make-client-process` 启动，target stdio peer 由
   `remote-local-bridge-command` 接入，不依赖宽泛的原生 API advice；
 - workspace 在 transport failure 后按 1/2/4 秒恢复；目前自动登记 environment、
-  service 与 workspace-owned forward。watch/LSP consumer 尚未全部接入 resource
-  owner，terminal 必须显式重启；
+  service、workspace-owned forward、watch 与 LSP resource，terminal 必须显式重启；
 - `remote-doctor` 已能逐层检查并在 `Aaron-Pi` 上完成 Linux probe；
 - `make remote-e2e` 已在真实 SSH target 上验证临时文件往返、远端 cwd、session
   复用和动态 SSH `-R` listener 数据往返。
+- `make lsp-remote-live-smoke` 已从普通 `/ssh:` buffer 在真实 SSH target 上验证
+  clangd、Pyright/JDTLS 的目标端启动与版本缓存、诊断、补全、typed Imenu、核心
+  navigation/edit capabilities，以及 workspace-owned inotify 事件。
 - WSL 上的 Lean 实链验证了本地 Node/HTTP proxy、远端 direnv/Nix capsule、
   远端 `lake serve`/Lean worker、Eglot 文档 URI 与本地 Infoview status 端点。
 

@@ -692,8 +692,52 @@ The return value is a target-native path, never a physical TRAMP link name."
              (remote--apply-environment process-environment environment))
             (exec-path
              (remote--exec-path-for-environment environment exec-path))
-            (found (executable-find program t)))
+            ;; `executable-find' reliably searches a remote PATH for a bare
+            ;; command, but its REMOTE argument does not consistently accept
+            ;; a target-native absolute name.  lsp-mode always probes the
+            ;; resolved absolute argv once more before startup, so project
+            ;; that name through the selected route and test it directly.
+            (absolute
+             (and (stringp program)
+                  (file-name-absolute-p program)
+                  (if-let* ((prefix (file-remote-p physical-directory)))
+                      ;; An absolute second argument makes `expand-file-name'
+                      ;; discard a TRAMP prefix.  Preserve the route prefix
+                      ;; explicitly for a target-native absolute argv.
+                      (concat prefix program)
+                    (expand-file-name program physical-directory))))
+            (found
+             (if absolute
+                 (and (file-executable-p absolute) absolute)
+               (executable-find program t))))
        (and found (remote-file-local-name found))))))
+
+(cl-defun remote-copy-file-to-target
+    (local-file target-file &key context (adapter "exec") overwrite)
+  "Bulk-copy client LOCAL-FILE to logical TARGET-FILE.
+CONTEXT defaults to TARGET-FILE's Remote context.  ADAPTER selects the same
+route policy used by other process/provisioning operations.  Backends may use
+an efficient native transport such as SCP; the fallback remains the ordinary
+file handler.  Return the backend copy result."
+  (unless (and (stringp local-file) (file-name-absolute-p local-file))
+    (error "Bulk copy source must be a client-local absolute path: %S"
+           local-file))
+  (let* ((target-file (remote-canonicalize-file-name target-file))
+         (context (or context (remote-context target-file))))
+    (remote--call-with-process-route
+     adapter 'process-sync context nil
+     (lambda (route _physical-directory _environment)
+       (let ((result
+              (remote-backend-copy-file-to-target
+               route local-file (remote-file-local-name target-file)
+               overwrite)))
+         (when (and (numberp result) (not (zerop result)))
+           (signal
+            'remote-exec-error
+            (list
+             (format "Bulk copy to %s failed with status %s"
+                     target-file result))))
+         result)))))
 
 (cl-defun remote-local-bridge-command
     (program &key args context (adapter "exec") link environment directory)

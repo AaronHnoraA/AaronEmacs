@@ -6,6 +6,9 @@
 ;;; Code:
 
 (require 'json)
+(require 'remote-core)
+(require 'remote-process)
+(require 'remote-service)
 (require 'seq)
 (require 'subr-x)
 
@@ -19,10 +22,114 @@
 (declare-function remote-expand-file-name "remote-fs"
                   (file-name &optional directory target))
 (declare-function remote-file-local-name "remote-fs" (file-name))
+(declare-function remote-executable-find "remote-process"
+                  (program &optional context))
 (defvar imenu-create-index-function)
 (defvar lsp-enabled-clients)
 (defvar-local my/python-imenu-backend nil
   "Original Python imenu backend for the current buffer.")
+
+(defcustom my/lsp-python-target-cache-root
+  "~/.cache/emacs-remote/lsp-python/"
+  "Target-native cache root for provisioned Python language servers."
+  :type 'string
+  :group 'my/language-server)
+
+(defcustom my/lsp-python-auto-provision-target t
+  "Whether trusted targets may receive the client's Pyright bundle.
+Provisioning is used when the target PATH has no preferred Pyright-family
+server, before falling back to less complete analyzers such as pylsp.  The
+analyzer still executes on the target and therefore sees the same filesystem,
+interpreter and environment as the remote buffer."
+  :type 'boolean
+  :group 'my/language-server)
+
+(defun my/lsp-python--local-pyright-directory ()
+  "Return the client Pyright package directory, or nil when unavailable."
+  (when-let* ((launcher (remote-client-executable-find "pyright-langserver"))
+              (real (ignore-errors (file-truename launcher)))
+              (directory (file-name-directory real))
+              ((file-exists-p (expand-file-name "package.json" directory)))
+              ((file-exists-p
+                (expand-file-name "langserver.index.js" directory))))
+    (file-name-as-directory directory)))
+
+(defun my/lsp-python--pyright-version (directory)
+  "Return Pyright's package version from DIRECTORY."
+  (or
+   (condition-case nil
+       (let ((object
+              (json-parse-string
+               (with-temp-buffer
+                 (insert-file-contents
+                  (expand-file-name "package.json" directory))
+                 (buffer-string))
+               :object-type 'alist)))
+         (alist-get 'version object))
+     (error nil))
+   (substring (secure-hash 'sha1 directory) 0 12)))
+
+(defun my/lsp-python--target-install-directory (context source)
+  "Return Pyright's versioned target directory for CONTEXT and SOURCE."
+  (file-name-as-directory
+   (remote-expand-file-name
+    (format "%spyright/%s/"
+            (file-name-as-directory my/lsp-python-target-cache-root)
+            (my/lsp-python--pyright-version source))
+    nil context)))
+
+(defun my/lsp-python--target-launcher (directory)
+  "Return the target Pyright launcher below DIRECTORY."
+  (expand-file-name "bin/pyright-langserver" directory))
+
+(defun my/lsp-python--provision-pyright (context source directory)
+  "Provision Pyright SOURCE for CONTEXT into target DIRECTORY."
+  (unless my/lsp-python-auto-provision-target
+    (error "Python language server is missing and provisioning is disabled"))
+  (let ((remote-current-adapter-id "language-server"))
+    (unless (remote-executable-find "node" context)
+      (error "Provisioned Pyright requires node on target %s"
+             (remote-context-target-id context))))
+  (remote-service-provision-directory
+   "pyright" source directory
+   :context context
+   :adapter "language-server"
+   :payload-directory "lib"
+   :ready-file "bin/pyright-langserver"
+   :ready-kind 'executable
+   :prepare
+   (lambda (provision-context staging)
+     (remote-exec
+      "sh"
+      :args
+      (list
+       "-c"
+       (concat
+        "set -eu\n"
+        "staging=$1\n"
+        "mkdir -p -- \"$staging/bin\"\n"
+        "cat > \"$staging/bin/pyright-langserver\" <<'PYRIGHT_LAUNCHER'\n"
+        "#!/bin/sh\n"
+        "root=$(CDPATH= cd -- \"$(dirname -- \"$0\")/..\" && pwd)\n"
+        "exec node \"$root/lib/langserver.index.js\" \"$@\"\n"
+        "PYRIGHT_LAUNCHER\n"
+        "chmod u+x \"$staging/bin/pyright-langserver\"\n")
+       "pyright-prepare"
+       (remote-file-local-name (directory-file-name staging)))
+      :context provision-context :adapter "language-server" :check t)))
+  (unless (file-executable-p (my/lsp-python--target-launcher directory))
+    (error "Target Pyright provisioning did not produce a launcher")))
+
+(defun my/lsp-python--provisioned-command ()
+  "Return a target-provisioned Pyright command, or nil if unavailable."
+  (when-let* ((source (my/lsp-python--local-pyright-directory))
+              (context (remote-context default-directory))
+              (directory
+               (my/lsp-python--target-install-directory context source))
+              (launcher (my/lsp-python--target-launcher directory)))
+    (unless (file-executable-p launcher)
+      (my/lsp-python--provision-pyright context source directory))
+    (list (remote-file-local-name launcher) "--stdio")))
 
 (defun my/python-toolchain--command-json (program &rest arguments)
   "Run PROGRAM with ARGUMENTS and return the last JSON object it prints."
@@ -222,17 +329,25 @@ Each entry is the executable name followed by its arguments.")
 Every candidate is probed with `my/language-server-executable-find', so the
 choice reflects the workspace target's environment (venv, conda, Sage, or
 target PATH) rather than whatever happens to be installed on the client."
-  (or
-   (seq-some
-    (lambda (contact)
-      (when-let* ((executable
-                   (ignore-errors
-                     (my/language-server-executable-find (car contact)))))
-        (cons executable (cdr contact))))
-    my/python-language-server-contacts)
-   ;; Nothing found: hand back the highest-preference name so lsp-mode
-   ;; reports a missing binary against the server we actually want.
-   (car my/python-language-server-contacts)))
+  (let ((find-contact
+         (lambda (contacts)
+           (seq-some
+            (lambda (contact)
+              (when-let* ((executable
+                           (ignore-errors
+                             (my/language-server-executable-find
+                              (car contact)))))
+                (cons executable (cdr contact))))
+            contacts))))
+    (or
+     ;; Prefer the target's own Pyright/BasedPyright.  When neither exists,
+     ;; a trusted target may use the versioned relocatable Pyright bundle.
+     (funcall find-contact (seq-take my/python-language-server-contacts 2))
+     (ignore-errors (my/lsp-python--provisioned-command))
+     (funcall find-contact (seq-drop my/python-language-server-contacts 2))
+     ;; Nothing found: hand back the highest-preference name so lsp-mode
+     ;; reports a missing binary against the server we actually want.
+     (car my/python-language-server-contacts))))
 
 (defun my/python-language-server-workspace-configuration ()
   "Return Python workspace configuration for the active server."

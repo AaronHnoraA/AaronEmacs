@@ -114,6 +114,10 @@ Scrolling in the opposite direction is allowed immediately."
 (defvar-local my/tab-line--format-cache-vterm-popup nil
   "Vterm popup state used for `my/tab-line--format-cache'.")
 
+(defvar-local my/tab-line-leading-segment-functions nil
+  "Functions returning contextual strings for the tab line's left edge.
+Centered buffer tabs use the full line and paint over this contextual text.")
+
 (defvar my/tab-line-wheel-state (make-hash-table :test #'eq :weakness 'key)
   "Accepted wheel timestamps keyed by window for centered tab switching.")
 
@@ -675,6 +679,73 @@ Keep the current buffer visible and expand around it while space allows."
       (my/tab-line-fit-buffers buffers
                                (max 12 (- (window-body-width) 2))))))
 
+(defun my/tab-line--flatten-strings (value)
+  "Flatten string or nested list VALUE without dropping text properties."
+  (cond
+   ((stringp value) value)
+   ((listp value)
+    (apply #'concat (mapcar #'my/tab-line--flatten-strings value)))
+   (t "")))
+
+(defconst my/tab-line-view-only-properties
+  '(local-map keymap mouse-face help-echo follow-link pointer)
+  "Interaction properties removed from contextual tab-line text.")
+
+(defvar my/tab-line-context-action-maps (make-hash-table :test #'eq)
+  "Tab-line mouse maps keyed by explicit contextual action commands.")
+
+(defun my/tab-line-context-action-map (command)
+  "Return a tab-line mouse map which invokes contextual COMMAND."
+  (or (gethash command my/tab-line-context-action-maps)
+      (let ((map (make-sparse-keymap)))
+        (define-key map [tab-line down-mouse-1] #'ignore)
+        (define-key map [tab-line mouse-1] command)
+        (puthash command map my/tab-line-context-action-maps)
+        map)))
+
+(defun my/tab-line-restore-context-actions (text)
+  "Restore only repository-owned contextual actions in TEXT.
+Provider keymaps are stripped before this runs, so these regions cannot
+inherit buffer-tab switching, closing, wheel or popup behavior."
+  (let ((position 0)
+        (limit (length text)))
+    (while (< position limit)
+      (let* ((next (next-single-property-change
+                    position 'my/tab-line-context-action text limit))
+             (command
+              (get-text-property position 'my/tab-line-context-action text))
+             (help
+              (get-text-property position 'my/tab-line-context-help text)))
+        (when command
+          (let ((map (my/tab-line-context-action-map command)))
+            (add-text-properties
+             position next
+             `(local-map ,map
+                         keymap ,map
+                         mouse-face tab-line-highlight
+                         help-echo ,(or help "mouse-1: open context")
+                         pointer hand)
+             text)))
+        (setq position next)))
+    text))
+
+(defun my/tab-line-leading-content ()
+  "Return sanitized leading provider output with explicit actions restored."
+  (when my/tab-line-leading-segment-functions
+    (let ((text
+           (my/tab-line--flatten-strings
+            (delq nil
+                  (mapcar
+                   (lambda (function)
+                     (when (functionp function)
+                       (ignore-errors (funcall function))))
+                   my/tab-line-leading-segment-functions)))))
+      (unless (string-empty-p text)
+        (let ((copy (copy-sequence text)))
+          (remove-list-of-text-properties
+           0 (length copy) my/tab-line-view-only-properties copy)
+          (my/tab-line-restore-context-actions copy))))))
+
 (defun my/tab-line-format-cache-valid-p (window-width buffer-name)
   "Return non-nil when the centered tab-line cache is valid.
 WINDOW-WIDTH and BUFFER-NAME are passed in by the caller so the fast path does
@@ -717,14 +788,36 @@ not allocate a fresh compound key during every redisplay."
             (my/tab-line-passive-string " " 'tab-line)))
          content)))))
 
+(defun my/tab-line-overlay-leading-content (leading centered window-width)
+  "Place CENTERED tabs over contextual LEADING text in WINDOW-WIDTH.
+The tab segment wins both visually and for hit testing where the two meet."
+  (cond
+   ((null leading) centered)
+   ((null centered)
+    (list (truncate-string-to-width leading window-width)))
+   (t
+    (let* ((content (cdr centered))
+           (content-width (my/tab-line-segments-width content))
+           (centered-p (< content-width (max 1 (- window-width 4))))
+           (left (if centered-p
+                     (max 0 (/ (- window-width content-width) 2))
+                   1))
+           ;; The contextual string is an underlay: a tab masks anything at
+           ;; or beyond its left edge instead of forcing the tab to move.
+           (prefix (truncate-string-to-width leading left nil ?\s)))
+      (append (list prefix) content)))))
+
 (defun my/tab-line-format ()
-  "Render a centered, minimal buffer tab line."
-  (let ((window-width (window-body-width))
-        (buffer-name (buffer-name)))
-    (if (my/tab-line-format-cache-valid-p window-width buffer-name)
-        my/tab-line--format-cache
-      (my/tab-line-store-format-cache
-       window-width buffer-name (my/tab-line-format-uncached)))))
+  "Render centered tabs over optional contextual text."
+  (let* ((window-width (window-body-width))
+         (buffer-name (buffer-name))
+         (leading (my/tab-line-leading-content))
+         (centered
+          (if (my/tab-line-format-cache-valid-p window-width buffer-name)
+              my/tab-line--format-cache
+            (my/tab-line-store-format-cache
+             window-width buffer-name (my/tab-line-format-uncached)))))
+    (my/tab-line-overlay-leading-content leading centered window-width)))
 
 (defun my/tab-line-refresh (&rest _)
   "Refresh the centered buffer tab line."

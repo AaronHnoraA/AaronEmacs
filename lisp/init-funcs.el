@@ -413,9 +413,15 @@ If any function returns non-nil, later hooks are skipped.")
   :lighter nil
   :keymap my/global-quit-key-mode-map)
 
-(global-set-key [remap keyboard-quit] #'my/escape)
-
-(general-define-key "M-s M-s" #'save-buffer)
+;; A GUI Escape key is the distinct `<escape>' event, which is globally
+;; unbound in Emacs 31.  Remapping `keyboard-quit' alone therefore leaves
+;; Evil-disabled buffers able to leak Escape to macOS native fullscreen.
+;; Keep this in the global map so minibuffer, isearch, terminal, and browser
+;; maps can still provide their more specific local Escape behavior.
+(general-define-key
+ [remap keyboard-quit] #'my/escape
+ "<escape>" #'my/escape
+ "M-s M-s" #'save-buffer)
 
 (my/global-quit-key-mode 1)
 

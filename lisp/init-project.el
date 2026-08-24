@@ -32,6 +32,7 @@
 (defvar breadcrumb-local-mode)
 (defvar bc--ipath-plain-cache)
 (defvar imenu-auto-rescan)
+(defvar lsp-managed-mode)
 (defvar treemacs-indentation)
 (defvar treemacs-indentation-string)
 
@@ -39,6 +40,8 @@
 (declare-function project--write-project-list "project")
 (declare-function dashboard-projects-backend-load-projects "dashboard-widgets")
 (declare-function breadcrumb-local-mode "breadcrumb" (&optional arg))
+(declare-function lsp-headerline-check-breadcrumb "lsp-headerline" (&rest arguments))
+(declare-function my/breadcrumb-tab-line-sync-h "init-lsp" ())
 (declare-function imenu--make-index-alist "imenu" (&optional noerror))
 (declare-function imenu--subalist-p "imenu" (item))
 (declare-function my/file-icon-for-file "init-ui" (file &rest args))
@@ -167,8 +170,19 @@ pipeline identity into buffer state."
                    (my/treemacs-visit-path directory) arguments)))
          ((symbol-function 'get-file-buffer)
           (lambda (file)
-            (funcall original-get-file-buffer
-                     (my/treemacs-visit-path file)))))
+            ;; `get-file-buffer' is a C primitive, but while resolving file
+            ;; identity it may enter the public symbol again.  Restore the
+            ;; primitive for the duration of this call so our temporary path
+            ;; projector cannot recursively wrap itself.
+            (cl-letf
+                (((symbol-function 'get-file-buffer)
+                  original-get-file-buffer))
+              (let ((logical (my/treemacs-visit-path file)))
+                ;; Emacs' primitive lookup may decline custom logical
+                ;; handlers even when `buffer-file-truename' is identical;
+                ;; `find-buffer-visiting' performs the handler-aware fallback.
+                (or (funcall original-get-file-buffer logical)
+                    (find-buffer-visiting logical)))))))
       (apply fn args))))
 
 (defun my/treemacs-normalize-persist-lines-a (lines)
@@ -686,10 +700,6 @@ Emacs 31 `project--remember-dir' takes optional arguments (NO-WRITE STABLE)."
   (treemacs-project-follow-mode 1)
   (my/treemacs-cursor-follow-mode 1))
 
-(defconst my/show-imenu-breadcrumb-header-line
-  '(:eval (breadcrumb--header-line))
-  "Header-line form installed by `breadcrumb-local-mode'.")
-
 (defconst my/show-imenu-breadcrumb-refresh-delays '(0.05 0.35 1.0)
   "Retry delays used to refresh breadcrumbs after opening Treemacs.")
 
@@ -708,15 +718,16 @@ Emacs 31 `project--remember-dir' takes optional arguments (NO-WRITE STABLE)."
               (imenu-auto-rescan t))
           (ignore-errors
             (imenu--make-index-alist t)))
-        (when (and header-line-format
-                   (not (listp header-line-format)))
-          (setq-local header-line-format (list header-line-format)))
-        (breadcrumb-local-mode -1)
-        (breadcrumb-local-mode 1)
-        (unless (member my/show-imenu-breadcrumb-header-line
-                        header-line-format)
-          (add-to-list 'header-line-format
-                       my/show-imenu-breadcrumb-header-line))
+        (if (bound-and-true-p lsp-managed-mode)
+            ;; LSP owns the shared tab-line lane.  Re-enabling the generic
+            ;; provider here used to recreate the old header for each delayed
+            ;; Treemacs refresh after entering a file.
+            (when (fboundp 'lsp-headerline-check-breadcrumb)
+              (ignore-errors (lsp-headerline-check-breadcrumb)))
+          (breadcrumb-local-mode -1)
+          (breadcrumb-local-mode 1)
+          (when (fboundp 'my/breadcrumb-tab-line-sync-h)
+            (my/breadcrumb-tab-line-sync-h)))
         (force-mode-line-update)))
     (dolist (window (get-buffer-window-list buffer nil t))
       (force-window-update window))))
@@ -1236,6 +1247,10 @@ entries created by older revisions before Treemacs starts native helpers."
             (index index)))
       (error nil))))
 
+(defun my/treemacs-project-for-path (path)
+  "Return the active Treemacs project containing PATH."
+  (treemacs--find-project-for-buffer path))
+
 (defun my/treemacs-follow-source-silently (&optional prefer-tag)
   "Follow the current source buffer in Treemacs without transient failures.
 When PREFER-TAG is non-nil, prefer following the current tag when one exists."
@@ -1243,21 +1258,32 @@ When PREFER-TAG is non-nil, prefer following the current tag when one exists."
          (path (my/treemacs-follow-path)))
     (when (and treemacs-window path)
       (setq-local treemacs--project-of-buffer nil)
-      (let ((project (treemacs--find-project-for-buffer path)))
+      (let ((project (my/treemacs-project-for-path path)))
         (when project
           (let ((inhibit-message t)
                 (treemacs-pulse-on-failure nil)
                 (index (and prefer-tag (my/treemacs-safe-imenu-index)))
+                (tag-path nil)
                 (followed nil))
+            (setq tag-path
+                  (and index
+                       (ignore-errors
+                         (treemacs--find-index-pos (point) index))))
             (setq followed
                   (or (condition-case nil
-                          (and index
-                               (treemacs--do-follow-tag index treemacs-window path project)
-                               t)
+                          (when tag-path
+                            ;; `treemacs--do-follow-tag' performs the move but
+                            ;; returns nil when recentering is disabled.  The
+                            ;; precomputed tag path is the success predicate;
+                            ;; otherwise the old code immediately moved the
+                            ;; cursor back to the file node.
+                            (treemacs--do-follow-tag
+                             index treemacs-window path project)
+                            'tag)
                         (error nil))
                       (condition-case nil
                           (with-selected-window treemacs-window
-                            (and (treemacs-goto-file-node path project) t))
+                            (and (treemacs-goto-file-node path project) 'file))
                         (error nil))))
             (when followed
               (with-selected-window treemacs-window
@@ -1374,6 +1400,65 @@ those exact races and preserve every other error for debugging."
             (with-current-buffer source-buffer
               (my/treemacs-follow-source-silently t))
             (my/show-imenu-restore-breadcrumb source-buffer)))))))
+
+(defun my/treemacs-focus-and-pulse-current-node (window)
+  "Select Treemacs WINDOW and pulse its current file or Imenu node."
+  (when (window-live-p window)
+    (select-window window)
+    (set-window-point window (point))
+    (hl-line-highlight)
+    (treemacs-pulse-on-success)
+    window))
+
+(defun my/show-imenu-open-current-symbol ()
+  "Open Treemacs, follow the current source symbol, select it and pulse it.
+Unlike `show-imenu', this command is an ensure-open action and never closes an
+already visible Treemacs window."
+  (interactive)
+  (let* ((source-buffer (current-buffer))
+         (root (my/show-imenu-target-root))
+         (treemacs-window nil)
+         (opened nil)
+         (followed nil))
+    (my/project-ensure-treemacs)
+    (setq treemacs-window (treemacs-get-local-window))
+    (unless (window-live-p treemacs-window)
+      (setq opened t)
+      (my/show-imenu-enable-treemacs-modes)
+      (save-selected-window
+        (let ((default-directory root))
+          (treemacs-add-and-display-current-project-exclusively)))
+      (setq treemacs-window (treemacs-get-local-window)))
+    (unless (window-live-p treemacs-window)
+      (user-error "Treemacs did not open for %s" root))
+    (when (buffer-live-p source-buffer)
+      (with-current-buffer source-buffer
+        (setq followed (my/treemacs-follow-source-silently t)))
+      ;; A visible Treemacs may currently show another project exclusively.
+      ;; Repoint that same window once, instead of treating it as an open/close
+      ;; toggle or silently leaving the click without a target node.
+      (when (and (not followed) (not opened))
+        (save-selected-window
+          (let ((default-directory root))
+            (treemacs-add-and-display-current-project-exclusively)))
+        (setq opened t
+              treemacs-window (treemacs-get-local-window))
+        (when (window-live-p treemacs-window)
+          (with-current-buffer source-buffer
+            (setq followed (my/treemacs-follow-source-silently t)))))
+      (when opened
+        (my/show-imenu-restore-breadcrumb source-buffer)))
+    (when followed
+      (my/treemacs-focus-and-pulse-current-node treemacs-window))))
+
+(defun my/show-imenu-from-breadcrumb (event)
+  "Handle breadcrumb mouse EVENT and reveal the current symbol in Treemacs."
+  (interactive "e")
+  (when-let* ((position (event-start event))
+              (window (posn-window position))
+              ((window-live-p window)))
+    (select-window window))
+  (my/show-imenu-open-current-symbol))
 
 (defun my/project-remove-from-treemacs-workspaces (project-root)
   "Remove PROJECT-ROOT from every Treemacs workspace."

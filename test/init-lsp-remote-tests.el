@@ -163,7 +163,9 @@
   (cl-letf
       (((symbol-function 'my/language-server-executable-find)
         (lambda (program)
-          (and (equal program "pylsp") "/target/bin/pylsp"))))
+          (and (equal program "pylsp") "/target/bin/pylsp")))
+       ((symbol-function 'my/lsp-python--provisioned-command)
+        (lambda () nil)))
     (dolist (directory
              '("/fs:local:/tmp/project/"
                "/fs:box:/work/project/"))
@@ -315,8 +317,40 @@ must cover it without a `-tramp' counterpart."
          (eq (remote-workspace-resource-value resource)
              lsp-workspace))))))
 
-(ert-deftest lsp-mode-target-only-root-retains-registration-without-watchers ()
-  "Target-only roots must not create recursive client-side file watches."
+(ert-deftest lsp-runtime-workspaces-own-distinct-remote-resources ()
+  "Kernel identity separates handles without changing their Remote owner."
+  (let* ((remote-workspaces (make-hash-table :test #'equal))
+         (remote-workspace--resource-counter 0)
+         (root "/fs:local:/tmp/project/")
+         (first (make-lsp--workspace :root root))
+         (second (make-lsp--workspace :root root)))
+    (puthash my/language-server-runtime--workspace-metadata-key "kernel-one"
+             (lsp--workspace-metadata first))
+    (puthash my/language-server-runtime--workspace-metadata-key "kernel-two"
+             (lsp--workspace-metadata second))
+    (cl-letf
+        (((symbol-function 'remote-workspace-track-route)
+          (lambda (workspace &rest _arguments) workspace))
+         ((symbol-function 'my/language-server--lsp-workspace-id)
+          (lambda (_workspace) 'my-python)))
+      (let ((lsp--cur-workspace first))
+        (my/language-server-register-lsp-resource))
+      (let ((lsp--cur-workspace second))
+        (my/language-server-register-lsp-resource)))
+    (let ((owner (car (hash-table-values remote-workspaces))))
+      (should owner)
+      (should (= (length (remote-workspace-resources owner)) 2))
+      (should
+       (remote-workspace-find-resource
+        owner 'lsp
+        '(lsp-mode my-python "/fs:local:/tmp/project/" "kernel-one")))
+      (should
+       (remote-workspace-find-resource
+        owner 'lsp
+        '(lsp-mode my-python "/fs:local:/tmp/project/" "kernel-two"))))))
+
+(ert-deftest lsp-mode-target-only-root-uses-remote-watch-capability ()
+  "Target-only roots keep watcher parity when Remote can own the watches."
   (let ((my/language-server-file-watch-policy 'auto)
         (lsp-enable-file-watchers t)
         (lsp--cur-workspace
@@ -325,7 +359,10 @@ must cover it without a `-tramp' counterpart."
         called)
     (cl-letf
         (((symbol-function 'remote-client-file-name)
-          (lambda (&rest _) nil)))
+          (lambda (&rest _) nil))
+         ((symbol-function 'remote-routes)
+          (lambda (&rest _)
+            '(remote-watch-route))))
       (should
        (eq
         (my/lsp-mode--register-capability-via-remote-a
@@ -337,7 +374,18 @@ must cover it without a `-tramp' counterpart."
           "workspace/didChangeWatchedFiles"))
         'registered)))
     (should called)
-    (should-not watcher-value)))
+    (should watcher-value)))
+
+(ert-deftest lsp-mode-target-only-root-declines-watch-without-route ()
+  (let ((my/language-server-file-watch-policy 'auto))
+    (cl-letf
+        (((symbol-function 'remote-client-file-name)
+          (lambda (&rest _) nil))
+         ((symbol-function 'remote-routes)
+          (lambda (&rest _) nil)))
+      (should
+       (my/language-server--skip-file-watch-p
+        "/fs:box:/work/project/")))))
 
 (ert-deftest lsp-mode-client-accessible-root-keeps-native-watchers ()
   (let ((my/language-server-file-watch-policy 'auto)
@@ -354,6 +402,31 @@ must cover it without a `-tramp' counterpart."
        (my/lsp-test-registration
         "workspace/didChangeWatchedFiles")))
     (should watcher-value)))
+
+(ert-deftest lsp-mode-target-watch-root-is-logical-and-workspace-owned ()
+  (let (seen-directory seen-owner seen-adapter seen-metadata)
+    (cl-letf
+        (((symbol-function 'my/language-server--canonical-root)
+          (lambda (_directory) "/fs:box:/work/project/"))
+         ((symbol-function 'remote-file-name-target)
+          (lambda (_directory) "box"))
+         ((symbol-function 'my/language-server--connect-workspace)
+          (lambda (_root) 'owner)))
+      (should
+       (eq
+        (my/lsp-mode--watch-root-via-remote-a
+         (lambda (directory &rest _arguments)
+           (setq seen-directory directory
+                 seen-owner remote-file-watch-workspace
+                 seen-adapter remote-current-adapter-id
+                 seen-metadata remote-file-watch-metadata)
+           'watch)
+         "/ssh:box:/work/project/" #'ignore nil nil)
+        'watch)))
+    (should (equal seen-directory "/fs:box:/work/project/"))
+    (should (eq seen-owner 'owner))
+    (should (equal seen-adapter "language-server"))
+    (should (eq (plist-get seen-metadata :owner) 'lsp-mode))))
 
 (ert-deftest lsp-mode-bounded-shutdown-is-idempotent-and-keeps-source-buffer ()
   "Stopping a language server must never kill a user source buffer."
@@ -387,6 +460,18 @@ must cover it without a `-tramp' counterpart."
           (should-not killed-processes))
       (when (buffer-live-p source)
         (kill-buffer source)))))
+
+(ert-deftest lsp-mode-remote-shutdown-allows-route-latency ()
+  (let ((lsp--cur-workspace
+         (make-lsp--workspace :root "/fs:box:/work/project/"))
+        (lsp-response-timeout 0.5)
+        (my/lsp-mode-remote-shutdown-response-timeout 2)
+        seen)
+    (my/lsp-mode--remote-shutdown-timeout-a
+     (lambda (_method _params &rest _keys)
+       (setq seen lsp-response-timeout))
+     "shutdown" nil)
+    (should (= seen 2))))
 
 ;;; ── New in the single-backend migration ─────────────────────────────────────
 
@@ -576,7 +661,46 @@ target; outside it, ordinary client-side lookups must be untouched."
           (lambda (candidate)
             (lsp--client-remote? candidate))
           client)))
+      (with-temp-buffer
+        (setq buffer-file-name "/ssh:box:/work/project/source")
+        (should
+         (my/lsp-mode--supports-logical-buffer-a
+          (lambda (candidate)
+            (lsp--client-remote? candidate))
+          client)))
       (should (eq (lsp--client-remote? client) original)))))
+
+(ert-deftest language-server-stdio-connect-projects-tramp-root-through-remote ()
+  (let* ((workspace
+          (make-lsp--workspace :root "/ssh:box:/work/project/"))
+         (owner
+          (remote-workspace-create
+           :id "box/work" :target-id "box"
+           :root "/fs:box:/work/project/" :context 'remote-context))
+         (connection
+          (my/lsp-mode--stdio-connect-via-remote-a
+           (list
+            :connect
+            (lambda (_filter _sentinel _name _environment-fn _workspace)
+              (list
+               default-directory
+               lsp-use-workspace-root-for-server-default-directory
+               remote-current-adapter-id
+               remote-current-workspace)))))
+         applied-context)
+    (cl-letf (((symbol-function 'my/language-server--connect-workspace)
+               (lambda (root)
+                 (should (equal root "/fs:box:/work/project/"))
+                 owner))
+              ((symbol-function 'remote-environment-ensure)
+               (lambda (context &rest _)
+                 (setq applied-context context))))
+      (should
+       (equal
+        (funcall (plist-get connection :connect)
+                 #'ignore #'ignore "clangd" nil workspace)
+        (list "/fs:box:/work/project/" nil "language-server" owner))))
+    (should (eq applied-context 'remote-context))))
 
 (ert-deftest language-server-core-languages-select-one-authoritative-client ()
   (with-temp-buffer

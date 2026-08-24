@@ -7,6 +7,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'init-lsp-runtime)
+(require 'lsp-mode)
 
 (define-derived-mode my/runtime-test-mode prog-mode "Runtime-Test")
 
@@ -142,6 +143,100 @@
         (should-not (gethash 'workspace
                              my/language-server-runtime--idle-timers))))))
 
+(ert-deftest my/runtime-lsp-workspaces-are-separated-by-runtime-id ()
+  "Equal roots and client IDs must not merge distinct kernel runtimes."
+  (my/runtime-test-with-registry
+    (let* ((root "/fs:local:/work/project/")
+           (client (make-lsp--client :server-id 'my-python))
+           (ordinary (make-lsp--workspace :root root :client client))
+           (first (make-lsp--workspace :root root :client client))
+           (second (make-lsp--workspace :root root :client client))
+           (session (make-lsp-session))
+           opened)
+      (puthash my/language-server-runtime--workspace-metadata-key "one"
+               (lsp--workspace-metadata first))
+      (puthash my/language-server-runtime--workspace-metadata-key "two"
+               (lsp--workspace-metadata second))
+      (puthash root (list ordinary first second)
+               (lsp-session-folder->servers session))
+      (cl-letf (((symbol-function 'lsp--open-in-workspace)
+                 (lambda (workspace) (setq opened workspace))))
+        (with-temp-buffer
+          (setq-local my/language-server-runtime-current
+                      (my/language-server-runtime-create
+                       :id "one" :root root))
+          (should
+           (eq first
+               (my/language-server-runtime--find-workspace-a
+                #'ignore session client root)))
+          (should (eq opened first))
+          (setq opened nil)
+          (setq-local my/language-server-runtime-current
+                      (my/language-server-runtime-create
+                       :id "missing" :root root))
+          (should-not
+           (my/language-server-runtime--find-workspace-a
+            #'ignore session client root))
+          (should-not opened)
+          (setq-local my/language-server-runtime-current nil)
+          (should
+           (eq ordinary
+               (my/language-server-runtime--find-workspace-a
+                #'ignore session client root))))))))
+
+(ert-deftest my/runtime-tags-new-lsp-workspace-without-changing-root ()
+  (let* ((root "/fs:box:/work/project/")
+         (workspace (make-lsp--workspace :root root))
+         (runtime (my/language-server-runtime-create
+                   :id "kernel-a" :root root)))
+    (with-temp-buffer
+      (setq-local my/language-server-runtime-current runtime)
+      (let ((lsp--cur-workspace workspace))
+        (my/language-server-runtime--tag-current-workspace-h)))
+    (should (equal (lsp--workspace-root workspace) root))
+    (should
+     (equal (my/language-server-runtime-workspace-id workspace)
+            "kernel-a"))))
+
+(ert-deftest my/runtime-workspace-configuration-survives-warm-buffer-gap ()
+  (my/runtime-test-with-registry
+    (let* ((root "/fs:local:/work/project/")
+           (runtime (my/language-server-runtime-create
+                     :id "kernel-a" :root root))
+           (project (list 'my/language-server-runtime-project
+                          root "kernel-a"))
+           (configuration '(:python (:pythonPath "/kernel/bin/python")))
+           (workspace (make-lsp--workspace :root root)))
+      (puthash project runtime my/language-server-runtime--project-contexts)
+      (puthash project configuration
+               my/language-server-runtime--configurations)
+      (puthash my/language-server-runtime--workspace-metadata-key "kernel-a"
+               (lsp--workspace-metadata workspace))
+      (should
+       (equal
+        (my/language-server-runtime-configuration-for-workspace workspace)
+        configuration)))))
+
+(ert-deftest my/runtime-uninitializing-one-kernel-keeps-its-siblings ()
+  (my/runtime-test-with-registry
+    (let* ((root "/fs:local:/work/project/")
+           (one (list 'my/language-server-runtime-project root "one"))
+           (two (list 'my/language-server-runtime-project root "two"))
+           (workspace (make-lsp--workspace :root root)))
+      (puthash one 'runtime-one my/language-server-runtime--project-contexts)
+      (puthash two 'runtime-two my/language-server-runtime--project-contexts)
+      (puthash one 'config-one my/language-server-runtime--configurations)
+      (puthash two 'config-two my/language-server-runtime--configurations)
+      (puthash my/language-server-runtime--workspace-metadata-key "one"
+               (lsp--workspace-metadata workspace))
+      (my/language-server-runtime-uninitialized-h workspace)
+      (should-not (gethash one my/language-server-runtime--project-contexts))
+      (should-not (gethash one my/language-server-runtime--configurations))
+      (should (eq (gethash two my/language-server-runtime--project-contexts)
+                  'runtime-two))
+      (should (eq (gethash two my/language-server-runtime--configurations)
+                  'config-two)))))
+
 (provide 'init-lsp-runtime-tests)
 ;;; init-lsp-runtime-tests.el ends here
 
@@ -172,3 +267,72 @@ fallback so it kept re-reporting itself."
   "An ordinary kernelspec must still be probed, not shortcut to a fallback."
   (require 'init-aaronnote-jupyter-lsp)
   (should-not (my/noema-jupyter-cell--lsp-unprobeable-connector "python3")))
+
+(ert-deftest my/noema-jupyter-kernel-change-fully-disconnects-lsp-mode ()
+  "A kernel switch must also detach a still-starting lsp-mode workspace."
+  (require 'init-aaronnote-jupyter-lsp)
+  (with-temp-buffer
+    (setq-local lsp-managed-mode nil)
+    (setq-local lsp-mode t)
+    (setq-local my/language-server-runtime-current
+                (my/language-server-runtime-create
+                 :id "old-kernel" :root "/fs:local:/work/"))
+    (setq-local my/language-server-runtime--workspace 'old-workspace)
+    (let (events)
+      (cl-letf (((symbol-function
+                  'my/language-server-runtime--buffer-leaving-h)
+                 (lambda () (push 'warm events)))
+                ((symbol-function 'lsp-disconnect)
+                 (lambda () (push 'disconnect events)))
+                ((symbol-function 'my/language-server-runtime-invalidate)
+                 (lambda () (push 'invalidate events))))
+        (my/noema-jupyter-cell-lsp-runtime-changing))
+      (should (equal (nreverse events) '(warm disconnect invalidate)))
+      (should-not my/language-server-runtime--workspace))))
+
+(ert-deftest my/noema-jupyter-kernel-capf-precedes-lsp-capf ()
+  "Live kernel names retain the completion priority they had under Eglot."
+  (require 'init-aaronnote-jupyter-lsp)
+  (with-temp-buffer
+    (setq-local my/noema-jupyter-cell-mode t)
+    (setq-local completion-at-point-functions
+                '(lsp-completion-at-point
+                  my/noema-jupyter-cell-capf t))
+    (my/noema-jupyter-cell--lsp-capf-priority-h)
+    (should
+     (equal completion-at-point-functions
+            '(my/noema-jupyter-cell-capf
+              lsp-completion-at-point t)))))
+
+(ert-deftest my/noema-jupyter-keeps-lsp-in-tab-line-above-its-header ()
+  (require 'init-aaronnote-jupyter-lsp)
+  (with-temp-buffer
+    (setq-local my/noema-jupyter-cell-mode t)
+    (setq-local lsp-managed-mode t)
+    (setq-local header-line-format
+                '((t (:eval (window-parameter nil 'lsp-headerline--string)))
+                  (:eval (my/noema-jupyter-cell--header-line))))
+    (my/lsp-tab-line-sync-h)
+    (my/noema-jupyter-cell--lsp-ui-h)
+    (should
+     (equal header-line-format
+            '(:eval (my/noema-jupyter-cell--header-line))))
+    (should
+     (memq #'my/lsp-tab-line-breadcrumb
+           my/tab-line-leading-segment-functions))
+    (setq-local lsp-managed-mode nil)
+    (my/lsp-tab-line-sync-h)
+    (should-not
+     (memq #'my/lsp-tab-line-breadcrumb
+           my/tab-line-leading-segment-functions))))
+
+(ert-deftest my/noema-jupyter-lsp-breadcrumb-is-view-only-after-moving ()
+  (require 'init-aaronnote-jupyter-lsp)
+  (let* ((map (make-sparse-keymap))
+         (breadcrumb
+          (propertize "project > symbol"
+                      'local-map map
+                      'mouse-face 'highlight))
+         (rendered (my/breadcrumb-view-only-string breadcrumb)))
+    (should-not (get-text-property 0 'local-map rendered))
+    (should-not (get-text-property 0 'mouse-face rendered))))

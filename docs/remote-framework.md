@@ -235,6 +235,7 @@ backend 负责这些边界：
 - session 的 connect、liveness 与 disconnect；
 - 命令、工作目录、环境和 executable 形式的执行准备；
 - async `make-process` plan 与 client-local stdio bridge；
+- client → target 大文件的 backend-native 批量传输；
 - 可选的 network process、network stream 与 port forward；
 - backend/transport/operation 错误分类。
 
@@ -392,6 +393,15 @@ workspace 关闭和 framework reset 会取消仍在等待的任务。
           :context context
           :directory workspace-root)))
 (remote-executable-find "lake" context)
+(remote-copy-file-to-target
+ "/client/cache/server.tar.gz"
+ "/fs:lab:/home/me/.cache/server.tar.gz"
+ :context context :adapter "language-server" :overwrite t)
+(remote-service-provision-directory
+ "language-server" "/client/cache/server/"
+ "/fs:lab:/home/me/.cache/server/1.2.3/"
+ :context context :adapter "language-server"
+ :ready-file "bin/server" :ready-kind 'executable)
 
 (remote-exec "uname"
              :args '("-a")
@@ -405,13 +415,29 @@ workspace 关闭和 framework reset 会取消仍在等待的任务。
 direnv、Nix、语言工具链等通过 maintainer 或派生 layer 修改环境，不直接全局
 修改 `process-environment` 和 `exec-path`。
 
-语言服务器默认是 target placement。Eglot 和 lsp-mode 在启动前等待同一份
+语言服务器默认是 target placement。当前唯一客户端 lsp-mode 在启动前等待同一份
 workspace 环境，随后通过官方 `make-process` / `start-file-process` 边界路由；
 clangd、pylsp、typescript-language-server、rust-analyzer、texlab 和 bash-language-
 server/workspace 所拥有的 logical root 也是 URI 反投影的唯一 target 来源；异步
 callback 即使发生在其他 buffer，也不能读取环境中的 `default-directory` 来改写
 文档身份。语言模块不能按 `file-remote-p` 选择另一套 contact、PATH 或 feature
 降级；当前残留的此类分支都是迁移债务。
+
+`remote-copy-file-to-target` 是 provisioning 的批量传输边界。native backend 使用
+本地复制，TRAMP/tramp-rpc SSH backend 使用 SCP；consumer 只提交客户端绝对源文件、
+逻辑目标文件和 context，不能自行解析 host/method。普通编辑器文件读写仍走 `/fs:`
+handler，这个 API 只用于 JDTLS/Pyright 等版本化工具包。
+
+`remote-service-provision-directory` 在这个传输边界之上统一目录型工具的供给流程：
+trusted-target 门禁、客户端打包、版本缓存、目标暂存解压、ready probe、不完整缓存修复、
+原子发布和失败清理都属于 Remote。语言层只提供源目录、版本化安装目录、ready 文件，
+以及可选的轻量 `prepare`（例如生成 Pyright launcher 或给 JDTLS launcher 加执行位）；
+不再各自维护上传/安装脚本。
+
+逻辑 `file-notify-add-watch` 返回稳定 Remote descriptor。目标端有 `inotifywait` 时，
+watch 进程由 `remote-make-process` 启动并把 target-native 事件路径重写回 `/fs:`；否则
+回退到 backend 的公开 file-notify。descriptor 的 valid/remove、断线 resync、事件
+去重和 workspace resource 清理保持同一生命周期。
 
 client placement 必须显式进入 `remote-make-client-process`。该 API 即使从远端
 buffer 调用，也会恢复应用 direnv 之前的客户端环境、使用本机 cwd，并禁止 `/fs:`
@@ -528,7 +554,7 @@ channel，并在关闭时按生命周期释放资源：
 ```
 
 service 是可选的 target-side tool 生命周期契约，支持 probe、trust-gated
-provision、start/live/stop；它不是强制常驻的 VS Code Server。Eglot、direnv
+provision、目录型工具的统一版本化安装、start/live/stop；它不是强制常驻的 VS Code Server。Eglot、direnv
 等普通消费者仍优先直接使用 process/environment API。
 target-scoped service 在强制恢复时原位替换 handle 并保留 instance identity 与
 引用计数；多个 workspace 不会各自留下一个已停止的旧 instance。

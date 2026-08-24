@@ -54,10 +54,14 @@
     (evil-ex-nohighlight)
     t))
 
-(defun my/evil-force-normal-state-h ()
-  "Return to normal state before `my/escape' falls back to `keyboard-quit'."
-  (when (my/evil-normal-state-maybe)
-    t))
+(defun my/evil-escape-state-h ()
+  "Handle Evil state and search cleanup with a single Escape.
+Both actions must run before reporting success: `my/escape-hook' stops after
+the first non-nil result, so separate hooks could let an active search
+highlight swallow Escape before Evil returned to normal state."
+  (let ((state-changed (my/evil-normal-state-maybe))
+        (highlight-cleared (my/evil-clear-ex-highlights-h)))
+    (or state-changed highlight-cleared)))
 
 (defconst my/evil-emacs-state-modes
   '(ibuffer-mode
@@ -315,8 +319,11 @@ Emacs state keep their local behavior."
     (add-hook hook #'my/evil-disable-local-mode-h))
   ;; Silence line out of range error.
   (shut-up! #'evil-indent)
-  (add-hook 'my/escape-hook #'my/evil-force-normal-state-h)
-  (add-hook 'my/escape-hook #'my/evil-clear-ex-highlights-h)
+  ;; Remove the former split handlers as well, so reloading this module fixes
+  ;; an already-running Emacs instead of leaving their short-circuit order.
+  (remove-hook 'my/escape-hook #'my/evil-force-normal-state-h)
+  (remove-hook 'my/escape-hook #'my/evil-clear-ex-highlights-h)
+  (add-hook 'my/escape-hook #'my/evil-escape-state-h)
   (add-hook 'after-change-major-mode-hook #'my/evil-sync-shift-width)
   (add-hook 'hack-local-variables-hook #'my/evil-sync-shift-width)
   (my/evil-sync-shift-width-existing-buffers)

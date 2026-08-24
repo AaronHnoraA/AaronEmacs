@@ -12,6 +12,7 @@
 
 (require 'config)
 
+(require 'aaron-ui)
 (require 'cl-lib)
 (require 'init-lsp-toolchain)
 (require 'init-lsp-runtime)
@@ -22,6 +23,12 @@
 (require 'remote-environment)
 (require 'remote-workspace)
 (require 'subr-x)
+
+(declare-function my/tab-line-refresh "init-tabbar" (&rest arguments))
+(declare-function my/show-imenu-from-breadcrumb "init-project" (event))
+(declare-function breadcrumb--header-line "breadcrumb" ())
+(declare-function bc--header-line "breadcrumb" ())
+(defvar my/tab-line-leading-segment-functions)
 
 (eval-when-compile
   (ignore-errors
@@ -70,11 +77,11 @@ file; it is the only registry of locally declared servers.")
 (config-defvar my/language-server-file-watch-policy 'auto
   "Policy for language-server dynamic file-watch registrations.
 
-`auto' preserves lsp-mode's native watcher behavior when the project
-has a path directly accessible to the Emacs client.  For a target-only
-filesystem it declines dynamic `workspace/didChangeWatchedFiles'
-registration.  Accepting it would otherwise create one SSH-backed watcher per
-project directory and can starve or kill the language-server transport.
+`auto' preserves lsp-mode's native watcher behavior when the project has a
+path directly accessible to the Emacs client, and otherwise uses the Remote
+backend's `watch' capability.  Remote watches retain logical `/fs:' identity,
+workspace ownership and recovery instead of becoming an unrelated set of
+raw TRAMP descriptors.
 
 `native' always accepts the registration, and is intended only for backends
 whose watcher implementation is known to scale.  `disabled' declines all
@@ -122,10 +129,14 @@ smooth without creating overlays throughout the buffer."
 (defvar lsp-completion-provider)
 (defvar lsp-diagnostics-provider)
 (defvar lsp-restart)
+(defvar lsp-response-timeout)
 (defvar lsp-imenu-detailed-outline)
 (defvar lsp-imenu-sort-methods)
 (defvar lsp--line-col-to-point-hash-table)
+(defvar lsp-use-workspace-root-for-server-default-directory)
 (defvar read-process-output-max)
+(defvar remote-file-watch-workspace)
+(defvar remote-file-watch-metadata)
 
 (dolist (adapter '("language-server" "lsp-mode"))
   (remote-register-adapter
@@ -244,10 +255,18 @@ fast-starting lsp-mode server."
   :type '(alist :key-type symbol :value-type number)
   :group 'my/language-server)
 
-(defcustom my/lsp-mode-shutdown-timeout 1
+(defcustom my/lsp-mode-shutdown-timeout 3
   "Maximum seconds allowed for one graceful lsp-mode workspace shutdown.
 The process is force-stopped after this deadline so quitting Emacs never
 depends on a responsive language server."
+  :type 'number
+  :group 'my/language-server)
+
+(defcustom my/lsp-mode-remote-shutdown-response-timeout 2
+  "Seconds allowed for a remote server's `shutdown' response.
+lsp-mode normally hard-codes half a second during teardown, which is below a
+normal SSH round trip plus analyzer cleanup on many targets.  This bound stays
+below `my/lsp-mode-shutdown-timeout', after which the process is force-stopped."
   :type 'number
   :group 'my/language-server)
 
@@ -692,15 +711,20 @@ another.  `lsp-mode' keeps its own registered settings in the global
 (defun my/language-server--workspace-configuration-override (workspace)
   "Return the workspace-configuration override owned by WORKSPACE.
 The value is read from a live buffer that WORKSPACE manages, never from
-whichever buffer happens to be current when the server asks."
-  (when (fboundp 'lsp--workspace-buffers)
-    (catch 'found
-      (dolist (buffer (lsp--workspace-buffers workspace))
-        (when (buffer-live-p buffer)
-          (when-let* ((configuration
-                       (buffer-local-value
-                        'my/language-server--workspace-configuration buffer)))
-            (throw 'found configuration)))))))
+whichever buffer happens to be current when the server asks.  A warm runtime
+workspace may temporarily have no buffers, so its runtime-keyed registry is
+the authoritative fallback in that interval."
+  (or
+   (when (fboundp 'lsp--workspace-buffers)
+     (catch 'found
+       (dolist (buffer (lsp--workspace-buffers workspace))
+         (when (buffer-live-p buffer)
+           (when-let* ((configuration
+                        (buffer-local-value
+                         'my/language-server--workspace-configuration buffer)))
+             (throw 'found configuration))))))
+   (and (fboundp 'my/language-server-runtime-configuration-for-workspace)
+        (my/language-server-runtime-configuration-for-workspace workspace))))
 
 (defun my/language-server-apply-lsp-local-settings ()
   "Apply project-local `lsp-mode' settings before startup."
@@ -1026,15 +1050,19 @@ that will run the server."
       resolved)))
 
 (defun my/lsp-mode--supports-logical-buffer-a (fn client)
-  "Let one CLIENT definition support native and logical `/fs:' buffers.
+  "Let one CLIENT definition support native, TRAMP and logical buffers.
 lsp-mode normally requires a separate `-tramp' clone whose `remote?' slot is
 true.  The Remote framework already owns placement, command resolution and
-process launch, so for a logical buffer this compatibility boundary only
-temporarily reflects the buffer's remote truth value while FN checks support."
+process launch, so this compatibility boundary temporarily reflects either a
+physical TRAMP buffer or a logical `/fs:' buffer's remote truth value while FN
+checks support.  The original client slot is always restored."
   (let* ((path (or (buffer-file-name) default-directory))
-         (logical (and (stringp path) (remote-fs-file-name-p path)))
+         (routed
+          (and (stringp path)
+               (or (remote-fs-file-name-p path)
+                   (file-remote-p path))))
          (original (lsp--client-remote? client)))
-    (if (not logical)
+    (if (not routed)
         (funcall fn client)
       (unwind-protect
           (progn
@@ -1043,6 +1071,41 @@ temporarily reflects the buffer's remote truth value while FN checks support."
             (funcall fn client))
         (my/language-server--set-struct-slot
          client 'lsp--client 'remote? original)))))
+
+(defun my/lsp-mode--stdio-connect-via-remote-a (connection)
+  "Route lsp-mode stdio CONNECTION through its owning Remote workspace.
+This is the lsp-mode equivalent of the former Eglot Remote contact boundary.
+It deliberately handles ordinary `/ssh:' and `/rpc:' visiting buffers as well
+as logical `/fs:' buffers: lsp-mode may keep the ordinary visiting-file
+spelling, while process placement, cwd, environment and executable lookup use
+the canonical logical workspace root.
+
+The original lsp-mode connect function still owns JSON-RPC filters, sentinels,
+stderr buffers and process bookkeeping.  Binding its default directory to the
+logical root makes its official `make-process :file-handler t' call enter
+`remote-make-process', so no private lsp-mode process implementation is
+duplicated here."
+  (if-let* ((connect (plist-get connection :connect)))
+      (plist-put
+       connection :connect
+       (lambda (filter sentinel name environment-fn lsp-workspace)
+         (let* ((root
+                 (my/language-server--canonical-root
+                  (or (ignore-errors
+                        (lsp--workspace-root lsp-workspace))
+                      default-directory)))
+                (owner (my/language-server--connect-workspace root))
+                (remote-current-adapter-id "language-server")
+                (remote-current-workspace owner)
+                ;; lsp-mode otherwise replaces this logical directory with
+                ;; its physical TRAMP session-folder spelling immediately
+                ;; before make-process, bypassing the Remote file handler.
+                (lsp-use-workspace-root-for-server-default-directory nil)
+                (default-directory (or root default-directory)))
+           (remote-environment-ensure
+            (and owner (remote-workspace-context owner)))
+           (funcall connect filter sentinel name environment-fn lsp-workspace))))
+    connection))
 
 (defun my/language-server--booster-json-parse-a (fn &rest args)
   "Read an `emacs-lsp-booster' bytecode payload in place of JSON.
@@ -1363,20 +1426,46 @@ roots are retained for callbacks which are not run in a source buffer."
 
 (defun my/language-server--skip-file-watch-p (root)
   "Return non-nil when an LSP client must decline dynamic watches for ROOT.
-The decision is based on client filesystem placement, not on a local/remote
-target branch.  A mounted or otherwise client-accessible target therefore
-keeps exactly the same watcher path as an ordinary local project."
+An `auto' watcher is accepted when either the client can access ROOT directly
+or the selected Remote route advertises `watch'.  This keeps feature parity
+without bypassing the Remote workspace/resource lifecycle."
   (pcase my/language-server-file-watch-policy
     ('disabled t)
     ('native nil)
     ('auto
      (and
       root
-      (not (ignore-errors (remote-client-file-name root)))))
+      (not
+       (or
+        (ignore-errors (remote-client-file-name root))
+        (ignore-errors
+          (remote-routes
+           "language-server" 'watch (remote-context root) nil))))))
     (_
      (error
       "Invalid `my/language-server-file-watch-policy': %S"
       my/language-server-file-watch-policy))))
+
+(defun my/lsp-mode--watch-root-via-remote-a
+    (fn directory callback ignored-files ignored-directories
+        &optional watch warn-big-repo-p)
+  "Create lsp-mode watches for DIRECTORY through Remote when target-owned.
+The lsp-mode session may retain an ordinary `/ssh:' workspace spelling, while
+the watch itself uses canonical `/fs:' paths.  Its public descriptor is then
+owned by the same recoverable Remote workspace as the language server."
+  (let* ((logical (my/language-server--canonical-root directory))
+         (target (and logical (remote-file-name-target logical))))
+    (if (or (null logical) (equal target "local"))
+        (funcall fn directory callback ignored-files ignored-directories
+                 watch warn-big-repo-p)
+      (let* ((owner (my/language-server--connect-workspace logical))
+             (remote-current-adapter-id "language-server")
+             (remote-current-workspace owner)
+             (remote-file-watch-workspace owner)
+             (remote-file-watch-metadata
+              (list :owner 'lsp-mode :root logical)))
+        (funcall fn logical callback ignored-files ignored-directories
+                 watch warn-big-repo-p)))))
 
 (defun my/lsp-mode--register-capability-via-remote-a
     (fn registration)
@@ -1419,6 +1508,22 @@ watch creation is disabled for target-only filesystems."
   (list
    (my/language-server--lsp-workspace-id workspace)
    (my/language-server--lsp-workspace-root workspace)))
+
+(defun my/lsp-mode--remote-shutdown-timeout-a
+    (function method params &rest keys)
+  "Allow target-owned shutdown METHOD enough time across the Remote route."
+  (let* ((root
+          (and lsp--cur-workspace
+               (my/language-server--lsp-workspace-root lsp--cur-workspace)))
+         (target (and root (remote-file-name-target root))))
+    (if (and (equal method "shutdown")
+             target
+             (not (equal target "local")))
+        (let ((lsp-response-timeout
+               (max (or lsp-response-timeout 0)
+                    my/lsp-mode-remote-shutdown-response-timeout)))
+          (apply function method params keys))
+      (apply function method params keys))))
 
 (defun my/lsp-mode--cancel-startup-watchdog (workspace)
   "Cancel WORKSPACE's startup watchdog, if any."
@@ -1599,9 +1704,19 @@ only enforce process termination; they never send a second shutdown RPC."
               (workspace (my/language-server--resource-owner root)))
     (remote-workspace-ensure-recoverable-resource
      workspace 'lsp
-     (list 'lsp-mode
-           (my/language-server--lsp-workspace-id lsp-workspace)
-           root)
+     (append
+      (list 'lsp-mode
+            (my/language-server--lsp-workspace-id lsp-workspace)
+            root)
+      ;; Keep the legacy three-part identity for ordinary workspaces.  A
+      ;; runtime ID is the client-side fourth component which lets Remote own
+      ;; several kernel-specific server processes without changing the one
+      ;; real logical root shared by process placement and protocol URIs.
+      (when-let* ((runtime-id
+                   (and
+                    (fboundp 'my/language-server-runtime-workspace-id)
+                    (my/language-server-runtime-workspace-id lsp-workspace))))
+        (list runtime-id)))
      lsp-workspace
      :close
      (lambda (value reason)
@@ -1925,6 +2040,143 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
             (gethash (lsp--get-line-and-col symbol)
                      lsp--line-col-to-point-hash-table)))))
 
+(defconst my/lsp-tab-line-header-entry
+  '(t (:eval (window-parameter nil 'lsp-headerline--string)))
+  "lsp-mode breadcrumb renderer relocated from header-line to tab-line.")
+
+(defconst my/breadcrumb-header-line-entries
+  '((:eval (breadcrumb--header-line)) (:eval (bc--header-line)))
+  "Known breadcrumb package renderers relocated out of header-line.")
+
+(defun my/breadcrumb-view-only-string (breadcrumb)
+  "Return BREADCRUMB without mouse, link or keymap behavior."
+  (when (and (stringp breadcrumb) (not (string-empty-p breadcrumb)))
+    (let ((result (copy-sequence breadcrumb)))
+      (remove-list-of-text-properties
+       0 (length result)
+       '(local-map keymap mouse-face help-echo follow-link pointer)
+       result)
+      result)))
+
+(defun my/breadcrumb-tab-line-action-string (breadcrumb)
+  "Return sanitized BREADCRUMB with the one repository-owned click action."
+  (when-let* ((result (my/breadcrumb-view-only-string breadcrumb)))
+    (add-text-properties
+     0 (length result)
+     '(my/tab-line-context-action my/show-imenu-from-breadcrumb
+       my/tab-line-context-help
+       "mouse-1: show current symbol in Treemacs")
+     result)
+    result))
+
+(defun my/lsp-tab-line-breadcrumb ()
+  "Return the current window's sanitized lsp-mode breadcrumb action."
+  (my/breadcrumb-tab-line-action-string
+   (window-parameter nil 'lsp-headerline--string)))
+
+(defun my/breadcrumb-tab-line-content ()
+  "Return breadcrumb.el's sanitized project/imenu action for the tab line."
+  (when (bound-and-true-p breadcrumb-local-mode)
+    (my/breadcrumb-tab-line-action-string
+     (cond
+      ((fboundp 'breadcrumb--header-line)
+       (breadcrumb--header-line))
+      ((fboundp 'bc--header-line)
+       (bc--header-line))))))
+
+(defun my/breadcrumb-tab-line-sync-h ()
+  "Keep breadcrumb.el in the tab-line from its very first buffer frame."
+  (when (listp header-line-format)
+    (dolist (entry my/breadcrumb-header-line-entries)
+      (setq-local header-line-format (delete entry header-line-format))))
+  (if (bound-and-true-p breadcrumb-local-mode)
+      (add-hook 'my/tab-line-leading-segment-functions
+                #'my/breadcrumb-tab-line-content nil t)
+    (remove-hook 'my/tab-line-leading-segment-functions
+                 #'my/breadcrumb-tab-line-content t))
+  (if (fboundp 'my/tab-line-refresh)
+      (my/tab-line-refresh)
+    (force-mode-line-update t)))
+
+(defun my/breadcrumb-local-mode-a (fn &rest arguments)
+  "Route breadcrumb.el through tab-line before calling FN.
+The package's header mutation is confined to a throwaway dynamic binding, so
+opening a file can never expose one frame in the former location."
+  (let (result)
+    (let ((header-line-format
+           (cond
+            ((listp header-line-format)
+             (seq-remove
+              (lambda (entry)
+                (member entry my/breadcrumb-header-line-entries))
+              header-line-format))
+            ((null header-line-format) nil)
+            (t (list header-line-format)))))
+      (setq result (apply fn arguments)))
+    (my/breadcrumb-tab-line-sync-h)
+    result))
+
+(defun my/lsp-headerline-breadcrumb-mode-a (fn &rest arguments)
+  "Route lsp-headerline through the tab-line before calling FN.
+Upstream mutates `header-line-format' inside its breadcrumb minor mode.  Run
+that bookkeeping against a dynamic throwaway value, then synchronize the
+real tab-line provider before redisplay can expose the upstream location."
+  (let (result)
+    (let ((header-line-format
+           (if (listp header-line-format)
+               (remove my/lsp-tab-line-header-entry header-line-format)
+             header-line-format)))
+      (setq result (apply fn arguments)))
+    (my/lsp-tab-line-sync-h)
+    result))
+
+(defun my/lsp-tab-line-sync-h ()
+  "Give LSP the non-tab contextual underlay in managed buffers."
+  ;; This also cleans buffers configured before the relocation advice became
+  ;; active, and makes disable/unconfigure idempotent.
+  (when (listp header-line-format)
+    (setq-local header-line-format
+                (remove my/lsp-tab-line-header-entry header-line-format)))
+  (if (bound-and-true-p lsp-managed-mode)
+      ;; Keep lsp-headerline's mode and idle refresh alive; only its renderer
+      ;; moves and loses interaction properties.  Application headers
+      ;; (notably Noema's) remain the sole owners of their separate line.
+      (add-hook 'my/tab-line-leading-segment-functions
+                #'my/lsp-tab-line-breadcrumb nil t)
+    (remove-hook 'my/tab-line-leading-segment-functions
+                 #'my/lsp-tab-line-breadcrumb t))
+  (if (fboundp 'my/tab-line-refresh)
+      (my/tab-line-refresh)
+    (force-mode-line-update t)))
+
+(defun my/lsp-tab-line-apply-ui ()
+  "Apply high-contrast repository colors to lsp-mode breadcrumbs."
+  (aaron-ui-set-face 'lsp-headerline-breadcrumb-separator-face
+                     :inherit nil :foreground 'fg-muted :height 0.9)
+  (aaron-ui-set-face 'lsp-headerline-breadcrumb-project-prefix-face
+                     :inherit nil :foreground 'fg-soft :weight 'semibold)
+  (aaron-ui-set-face 'lsp-headerline-breadcrumb-unknown-project-prefix-face
+                     :inherit nil :foreground 'fg-muted :weight 'semibold)
+  (aaron-ui-set-face 'lsp-headerline-breadcrumb-path-face
+                     :inherit nil :foreground 'fg-dim)
+  (aaron-ui-set-face 'lsp-headerline-breadcrumb-symbols-face
+                     :inherit nil :foreground 'fg-soft :weight 'semibold))
+
+(defun my/breadcrumb-tab-line-apply-ui ()
+  "Apply the same readable palette to the pre-LSP breadcrumb provider."
+  (aaron-ui-set-face 'breadcrumb-face
+                     :inherit nil :foreground 'fg-muted)
+  (aaron-ui-set-face 'breadcrumb-project-crumbs-face
+                     :inherit nil :foreground 'fg-dim)
+  (aaron-ui-set-face 'breadcrumb-project-base-face
+                     :inherit nil :foreground 'fg-soft :weight 'semibold)
+  (aaron-ui-set-face 'breadcrumb-project-leaf-face
+                     :inherit nil :foreground 'fg-dim)
+  (aaron-ui-set-face 'breadcrumb-imenu-crumbs-face
+                     :inherit nil :foreground 'fg-dim)
+  (aaron-ui-set-face 'breadcrumb-imenu-leaf-face
+                     :inherit nil :foreground 'fg-soft :weight 'semibold))
+
 (defun my/lsp-imenu-create-vscode-index (symbols)
   "Build a VS Code-style typed and hierarchically sorted Imenu index.
 DocumentSymbol servers retain their exact SymbolKind as a text property for
@@ -2023,6 +2275,12 @@ lsp-mode's categorized index, whose category names provide the same fallback."
      'lsp--supports-buffer?
      :around #'my/lsp-mode--supports-logical-buffer-a))
   (unless (advice-member-p
+           #'my/lsp-mode--stdio-connect-via-remote-a
+           'lsp-stdio-connection)
+    (advice-add
+     'lsp-stdio-connection
+     :filter-return #'my/lsp-mode--stdio-connect-via-remote-a))
+  (unless (advice-member-p
            #'my/lsp-mode--resolve-logical-command-a
            'lsp-resolve-final-command)
     (advice-add
@@ -2053,11 +2311,22 @@ lsp-mode's categorized index, whose category names provide the same fallback."
      'lsp--server-register-capability
      :around #'my/lsp-mode--register-capability-via-remote-a))
   (unless (advice-member-p
+           #'my/lsp-mode--watch-root-via-remote-a
+           'lsp-watch-root-folder)
+    (advice-add
+     'lsp-watch-root-folder
+     :around #'my/lsp-mode--watch-root-via-remote-a))
+  (unless (advice-member-p
            #'my/lsp-mode--restart-with-circuit-breaker-a
            'lsp--restart-if-needed)
     (advice-add
      'lsp--restart-if-needed
      :around #'my/lsp-mode--restart-with-circuit-breaker-a))
+  (unless (advice-member-p
+           #'my/lsp-mode--remote-shutdown-timeout-a
+           'lsp-request)
+    (advice-add
+     'lsp-request :around #'my/lsp-mode--remote-shutdown-timeout-a))
   (unless (advice-member-p
            #'my/lsp-mode--read-state-safely-a
            'lsp--read-from-file)
@@ -2160,18 +2429,40 @@ lsp-mode's categorized index, whose category names provide the same fallback."
   (sideline-lsp-ignore-duplicate t)
   (sideline-lsp-code-actions-prefix "⚑ "))
 
-;; lsp-mode 自带面包屑；`breadcrumb' 继续覆盖非 LSP 缓冲区，两者不叠加。
+;; Both renderers use the same non-tab contextual underlay.  `breadcrumb'
+;; covers the period before LSP is ready and non-LSP buffers; managed buffers
+;; replace it with lsp-mode's richer symbol path without changing position.
 (use-package breadcrumb
   :ensure t
   :hook ((prog-mode . breadcrumb-local-mode)
          (org-src-mode . breadcrumb-local-mode)))
 
 (defun my/language-server--disable-breadcrumb-h ()
-  "Yield the header line to `lsp-headerline-breadcrumb-mode'."
+  "Yield the shared tab-line breadcrumb underlay to lsp-mode."
   (when (bound-and-true-p breadcrumb-local-mode)
     (breadcrumb-local-mode -1)))
 
 (add-hook 'lsp-managed-mode-hook #'my/language-server--disable-breadcrumb-h)
+(add-hook 'lsp-managed-mode-hook #'my/lsp-tab-line-sync-h)
+(add-hook 'lsp-configure-hook #'my/lsp-tab-line-sync-h t)
+
+(with-eval-after-load 'breadcrumb
+  (unless (advice-member-p #'my/breadcrumb-local-mode-a
+                           'breadcrumb-local-mode)
+    (advice-add 'breadcrumb-local-mode :around
+                #'my/breadcrumb-local-mode-a))
+  (add-hook 'after-load-theme-hook #'my/breadcrumb-tab-line-apply-ui)
+  (add-hook 'server-after-make-frame-hook #'my/breadcrumb-tab-line-apply-ui)
+  (my/breadcrumb-tab-line-apply-ui))
+
+(with-eval-after-load 'lsp-headerline
+  (unless (advice-member-p #'my/lsp-headerline-breadcrumb-mode-a
+                           'lsp-headerline-breadcrumb-mode)
+    (advice-add 'lsp-headerline-breadcrumb-mode :around
+                #'my/lsp-headerline-breadcrumb-mode-a))
+  (add-hook 'after-load-theme-hook #'my/lsp-tab-line-apply-ui)
+  (add-hook 'server-after-make-frame-hook #'my/lsp-tab-line-apply-ui)
+  (my/lsp-tab-line-apply-ui))
 
 (defun my/language-server--visible-region (&optional window)
   "Return WINDOW's visible buffer region plus the configured line margin."

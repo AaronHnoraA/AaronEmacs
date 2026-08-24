@@ -147,6 +147,10 @@ SCM 与后续 debug/task 集成都应从这个同一 identity 派生，不能各
 - `OUTLINE · 文件名` 行明确当前符号树归属；类、结构体、接口、方法、字段和变量
   使用不同的语义图标，并按类型后源码位置稳定排序
 
+点击顶部 tab line 左侧的 LSP/breadcrumb 文字会执行 ensure-open 版本：它不会关闭
+已经显示的 Treemacs，而是把 Treemacs 光标落到当前 Imenu node、切换焦点并闪烁该行。
+breadcrumb 不继承 buffer tab 的切换、关闭、菜单或滚轮行为。
+
 手动 Treemacs 仍然保留：
 
 - `C-c t`

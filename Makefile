@@ -20,7 +20,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native ui-test ui-tokens audit-ui-tokens \
         remote-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e \
-        lsp-test lsp-live-smoke \
+        lsp-test lsp-live-smoke lsp-remote-live-smoke \
         jupyter-test \
         publish publish-build publish-deploy publish-clean
 
@@ -70,6 +70,7 @@ help:
 	  '  make remote-check         Run all remote tests and compatibility checks' \
 	  '  make lsp-test            Run isolated LSP routing, toolchain, runtime, and UI tests' \
 	  '  make lsp-live-smoke      Start real clangd, Python LS, and JDTLS projects' \
+	  '  make lsp-remote-live-smoke  Start real C/Python/Java LSP through TRAMP + Remote' \
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make remote-e2e           Run opt-in real SSH E2E (REMOTE_E2E_TARGET optional)' \
 	  '' \
@@ -223,6 +224,9 @@ lsp-test:
 
 lsp-live-smoke:
 	$(BATCH) -l test/lsp-live-smoke.el -f my/lsp-live-smoke-batch
+
+lsp-remote-live-smoke:
+	REMOTE_LSP_E2E=1 $(BATCH) -l test/lsp-remote-live-smoke.el -f my/lsp-remote-live-smoke-batch
 
 jupyter-test:
 	$(BATCH) -l test/init-aaronnote-tests.el -f ert-run-tests-batch-and-exit

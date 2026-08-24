@@ -449,7 +449,7 @@ This is shared by standard TRAMP's non-pipe path and tramp-rpc."
    :metadata '(:placement target :stdio file-handler)))
 
 (defun remote-backend-tramp-direct-copy-file
-    (route local-file target-file)
+    (route local-file target-file &optional _overwrite)
   "Copy LOCAL-FILE to target-native TARGET-FILE over ROUTE's SCP channel.
 Return the local scp exit status.  This is intended for tool provisioning and
 other bulk pipeline transfers; ordinary editor file operations remain owned by
@@ -939,6 +939,7 @@ rewritten to the client-side relay."
    :disconnect #'remote-backend-tramp-disconnect
    :prepare-process #'remote-backend-tramp-prepare-process
    :stdio-bridge #'remote-backend-tramp-stdio-bridge
+   :copy-file-to-target #'remote-backend-tramp-direct-copy-file
    :make-network-process #'remote-backend-tramp-network
    :open-network-stream #'remote-backend-tramp-stream
    :port-forward #'remote-backend-tramp-forward

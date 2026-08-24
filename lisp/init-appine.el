@@ -58,6 +58,7 @@
 (declare-function appine-open-file-by-file-chooser "appine")
 (declare-function appine-native-action "appine" (name))
 (declare-function appine-native-open-rss-in-rect "appine" (path x y w h))
+(declare-function my/escape "init-funcs" (&optional interactive))
 (declare-function my/noema-command "init-aaronnote" (command &optional detail))
 (declare-function my/noema-save "init-aaronnote" ())
 (declare-function my/macos-open-target "init-macos" (target))
@@ -500,7 +501,7 @@ With DIRED-P, the main path button opens via `dired'."
   "Route Escape to Noema when Appine is showing Noema."
   (interactive)
   (unless (my/appine-noema-command "escape")
-    (keyboard-escape-quit)))
+    (my/escape 'interactive)))
 
 (defun my/appine-noema-save-or-native ()
   "Save Noema from Appine, otherwise ask Appine's native view to save."
@@ -535,7 +536,6 @@ With DIRED-P, the main path button opens via `dired'."
                  "C-c b"
                  "C-c C-f"
                  "C-c C-b"
-                 "<escape>"
                  "C-["
                  "C-s"
                  "H"
@@ -1312,6 +1312,7 @@ buffer/window selection changes."
   (add-hook 'window-selection-change-functions #'my/appine--schedule-refresh-visible)
   (when (boundp 'appine-active-map)
     (my/appine-keep-emacs-prefix-keys appine-active-map)
+    (define-key appine-active-map (kbd "<escape>") #'my/appine-noema-escape)
     (define-key appine-active-map [?\s-s]     #'my/appine-noema-save-or-native)
     (define-key appine-active-map (kbd "<backtab>") #'my/appine-noema-shift-tab)
     (define-key appine-active-map (kbd "<iso-lefttab>") #'my/appine-noema-shift-tab)
