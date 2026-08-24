@@ -479,6 +479,8 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   方法、字段、变量等显示不同 VS Code 风格图标。
 - `SPC c I`
   `lsp-ui-doc-glance`
+- `Esc`
+  关闭当前 LSP hover / signature / peek 弹层；没有 LSP 弹层时继续执行普通 Evil Escape
 - `SPC c j`
   调试菜单：启动 Dape、profile、步进、断点、REPL、locals/watch、adapter doctor
 - `SPC c t`

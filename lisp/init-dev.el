@@ -13,6 +13,11 @@
 (require 'subr-x)
 
 (declare-function consult-xref "consult" (fetcher &optional alist))
+(declare-function citre-register-backend
+                  "citre-backend-interface" (name backend))
+(declare-function citre-xref-backend-to-citre-backend
+                  "citre-xref-adapter" (backend usable-p &rest keys))
+(declare-function my/language-server-ensure "init-lsp" ())
 (declare-function org-at-heading-p "org" ())
 (declare-function org-back-to-heading "org" (&optional invisible-ok))
 (declare-function org-end-of-subtree "org" (&optional invisible-ok to-heading))
@@ -51,6 +56,7 @@
 (defvar hs-indicators-map)
 (defvar hs-minor-mode-map)
 (defvar flymake-mode)
+(defvar lsp-managed-mode)
 (defvar org-heading-regexp)
 (defvar org-mode-map)
 
@@ -202,6 +208,31 @@ commands still save their state."
   (xref-show-definitions-function #'consult-xref))
 
 ;; A fancy ctags frontend
+(defvar my/citre-lsp-backend nil
+  "Citre adapter for lsp-mode's `xref-lsp' backend.")
+
+(defun my/citre-lsp-usable-p ()
+  "Return non-nil when lsp-mode can answer Citre navigation requests."
+  (bound-and-true-p lsp-managed-mode))
+
+(defun my/citre-lsp-after-jump ()
+  "Attach lsp-mode after Citre visits a definition buffer.
+The post-command pass preserves Citre peek-through's old Eglot-era behavior:
+when startup is locally synchronous, the newly visited file is ready before a
+second chained lookup is attempted.  Remote/runtime preparation may continue
+asynchronously through the normal language-server lifecycle."
+  (when (fboundp 'my/language-server-ensure)
+    (my/language-server-ensure))
+  (run-hooks 'post-command-hook))
+
+(defun my/citre-register-lsp-backend ()
+  "Replace Citre's bundled Eglot adapter with the active lsp-mode xref route."
+  (setq my/citre-lsp-backend
+        (citre-xref-backend-to-citre-backend
+         'xref-lsp #'my/citre-lsp-usable-p
+         :after-jump-fn #'my/citre-lsp-after-jump))
+  (citre-register-backend 'lsp-mode my/citre-lsp-backend))
+
 (use-package citre
   :ensure t
   :init
@@ -215,7 +246,11 @@ commands still save their state."
          ("C-c c g" . citre-global-update-database))
   :custom
   (citre-enable-capf-integration nil)
-  (citre-auto-enable-citre-mode-modes '(prog-mode)))
+  (citre-auto-enable-citre-mode-modes '(prog-mode))
+  (citre-find-definition-backends '(lsp-mode tags global))
+  (citre-find-reference-backends '(lsp-mode global))
+  :config
+  (my/citre-register-lsp-backend))
 
 ;; Browse devdocs.io
 (use-package devdocs

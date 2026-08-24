@@ -1036,10 +1036,13 @@ Modes in `my/copilot-deferred-modes' start only after editor idle time."
    (t
     (my/jump-forward-dwim))))
 
-(defconst my/copilot-forward-delimiter-keys '("M-]" "M-】" "M-］" "M-」" "M-〕")
+(defconst my/copilot-forward-delimiter-keys
+  '("s-]" "s-】" "s-］" "s-」" "s-〕"
+    "M-]" "M-】" "M-］" "M-」" "M-〕")
   "Keys that accept Copilot or move forward by delimiter.
-The Chinese punctuation variants keep the binding usable when a Chinese input
-method maps the bracket key to full-width punctuation.")
+Super-] is the primary binding (Command-] on macOS).  The Meta aliases retain
+the same workflow when a Mac build maps Command to Meta instead.  Chinese
+punctuation variants keep the binding usable while an input method is active.")
 
 (defconst my/copilot-backward-delimiter-keys '("M-[" "M-【" "M-［" "M-「" "M-〔")
   "Keys that move backward by delimiter or snippet field.")
@@ -1057,7 +1060,10 @@ method maps the bracket key to full-width punctuation.")
     (define-key keymap (kbd key) command)))
 
 (defun my/copilot-setup-dwim-keys (keymap)
-  "Install shared DWIM navigation/accept keys into KEYMAP."
+  "Install shared DWIM navigation/accept keys into KEYMAP.
+Copilot must not own TAB: while Company is active TAB selects its candidate;
+otherwise it falls through to the editor's snippet/indent behavior, matching
+the completion routing used before the lsp-mode migration."
   (my/copilot-define-keys keymap
                           my/copilot-forward-delimiter-keys
                           #'my/forward-delimiter-or-copilot-dwim)
@@ -1070,6 +1076,8 @@ method maps the bracket key to full-width punctuation.")
   (my/copilot-define-keys keymap
                           my/copilot-to-char-keys
                           #'my/forward-delimiter-or-copilot-to-char-dwim)
+  (define-key keymap (kbd "TAB") nil)
+  (define-key keymap (kbd "<tab>") nil)
   (define-key keymap (kbd "M-(") nil)
   (define-key keymap (kbd "M-)") nil))
 

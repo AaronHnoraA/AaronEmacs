@@ -124,6 +124,8 @@ smooth without creating overlays throughout the buffer."
 (defvar company-dabbrev-code-everywhere)
 (defvar company-files-exclusions)
 (defvar lsp-managed-mode)
+(defvar lsp-enabled-clients)
+(defvar lsp--show-message)
 (defvar lsp--cur-workspace)
 (defvar lsp-enable-file-watchers)
 (defvar lsp-completion-provider)
@@ -234,6 +236,9 @@ toolchain profile.  It layers above `lsp-mode''s global
 (declare-function lsp-ui-doc-glance "lsp-ui-doc" ())
 (declare-function lsp-ui-doc-show "lsp-ui-doc" ())
 (declare-function lsp-ui-doc-hide "lsp-ui-doc" ())
+(declare-function lsp-ui-doc--visible-p "lsp-ui-doc" ())
+(declare-function lsp-signature-stop "lsp-mode" ())
+(declare-function lsp-ui-peek--abort "lsp-ui-peek" ())
 (declare-function breadcrumb-local-mode "breadcrumb" (&optional arg))
 
 (defcustom my/lsp-mode-startup-timeout 60
@@ -301,6 +306,19 @@ automatic retry; other servers keep the shared, stricter default."
 Keeping TYPE and SLOT as runtime arguments avoids requiring private lsp-mode
 struct definitions while this configuration file is compiled."
   (aset object (cl-struct-slot-offset type slot) value))
+
+(defun my/lsp-mode--quiet-client-whitelist-a (fn client)
+  "Run FN for CLIENT without logging expected whitelist rejections.
+Language modules deliberately set `lsp-enabled-clients' to one workspace owner.
+lsp-mode reports every other registered stock/add-on client at info level each
+time it filters candidates; that is expected policy, not a startup problem."
+  (let ((lsp--show-message
+         (if (and lsp-enabled-clients
+                  (not (memq (lsp--client-server-id client)
+                             lsp-enabled-clients)))
+             nil
+           lsp--show-message)))
+    (funcall fn client)))
 (declare-function gcmh-set-high-threshold "gcmh" ())
 (declare-function hydra--call-interactively-remap-maybe "hydra" (cmd &optional keys))
 (declare-function hydra-default-pre "hydra" ())
@@ -378,6 +396,22 @@ byte-compile backend does not emit noisy warnings on startup."
     (remove-hook 'lsp-on-idle-hook
                  #'my/lsp-document-color-refresh-visible t)
     (setq my/lsp-document-color-last-visible-region nil)))
+
+(defun my/lsp-dismiss-popup-h ()
+  "Dismiss the active lsp-mode transient UI from `my/escape'.
+This restores the single-Escape behavior of the former Eglot/eldoc-box UI for
+lsp-ui hover child frames, signature help, and lsp-ui peek overlays."
+  (cond
+   ((and (fboundp 'lsp-ui-doc--visible-p)
+         (lsp-ui-doc--visible-p))
+    (lsp-ui-doc-hide)
+    t)
+   ((bound-and-true-p lsp-signature-mode)
+    (lsp-signature-stop)
+    t)
+   ((bound-and-true-p lsp-ui-peek-mode)
+    (lsp-ui-peek--abort)
+    t)))
 
 (defun my/flymake-diagnostic-at-point-text ()
   "Return the first Flymake diagnostic text covering point."
@@ -2236,6 +2270,8 @@ lsp-mode's categorized index, whose category names provide the same fallback."
         ;; workspace identity are outside the Remote contract.
         lsp-auto-register-remote-clients nil)
   :config
+  (remove-hook 'my/escape-hook #'my/lsp-dismiss-popup-h)
+  (add-hook 'my/escape-hook #'my/lsp-dismiss-popup-h)
   (add-hook
    'lsp-after-initialize-hook
    #'my/language-server-register-lsp-resource)
@@ -2274,6 +2310,12 @@ lsp-mode's categorized index, whose category names provide the same fallback."
     (advice-add
      'lsp--supports-buffer?
      :around #'my/lsp-mode--supports-logical-buffer-a))
+  (unless (advice-member-p
+           #'my/lsp-mode--quiet-client-whitelist-a
+           'lsp--supports-buffer?)
+    (advice-add
+     'lsp--supports-buffer?
+     :around #'my/lsp-mode--quiet-client-whitelist-a))
   (unless (advice-member-p
            #'my/lsp-mode--stdio-connect-via-remote-a
            'lsp-stdio-connection)

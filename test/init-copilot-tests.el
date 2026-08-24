@@ -74,6 +74,18 @@
       (should (equal (cadr seen) '("PATH=/client/bin")))
       (should (equal (caddr seen) '("/client/bin"))))))
 
+(ert-deftest my/copilot-leaves-tab-to-company-and-indent ()
+  "Copilot's overlay must not outrank the editor's normal TAB routing."
+  (require 'copilot)
+  (should-not (lookup-key copilot-completion-map (kbd "TAB")))
+  (should-not (lookup-key copilot-completion-map (kbd "<tab>")))
+  (should
+   (eq (lookup-key copilot-completion-map (kbd "s-]"))
+       #'my/forward-delimiter-or-copilot-dwim))
+  (should
+   (eq (lookup-key global-map (kbd "s-]"))
+       #'my/forward-delimiter-or-copilot-dwim)))
+
 (ert-deftest my/copilot-jump-labels-are-prefix-free ()
   (let ((labels (my/copilot--jump-labels 80)))
     (should (= (length labels) 80))

@@ -599,9 +599,10 @@ in-process 缓存，与自动刷新保持一致。
 
 - 在 `prog-mode` 和 `org-mode` 默认启用
 - 接受补全：
-  - `M-]`
+  - `s-]`（macOS `⌘ ]`）整段接受；`M-]` 作为 modifier 兼容别名
   - `M-}`
   - 中文输入法下可用对应中文标点键，例如 `M-】` / `M-｝`
+- `TAB` 不接受 Copilot：Company 候选框开启时选中候选，否则继续走 snippet / 缩进
 
 ## 9. 如果 LSP 或远程不工作
 
@@ -614,6 +615,10 @@ in-process 缓存，与自动刷新保持一致。
 5. TRAMP 主机是否能正常登录
 
 更详细的维护和排查见 [lsp-workflow.org](lsp-workflow.org) 和 [maintenance.md](maintenance.md)。
+
+Citre 的 definition/reference fallback 也复用 `lsp-mode` 的 `xref-lsp`
+backend，然后才尝试 tags/global；它内置的 Eglot adapter 不在本配置的
+backend list 中。
 
 ## 10. Board UI 工具库 (`aaron-ui-board`)
 

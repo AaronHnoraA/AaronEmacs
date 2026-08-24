@@ -41,6 +41,53 @@
   (should (= my/language-server-visible-render-margin 8))
   (should (eq flymake-show-diagnostics-at-end-of-line 'short)))
 
+(ert-deftest my/company-tab-routing-matches-the-pre-lsp-mode-workflow ()
+  "Company selects its candidate; otherwise TAB remains ordinary indentation."
+  (should (eq (lookup-key company-active-map [tab])
+              #'company-complete-selection))
+  (should (eq tab-always-indent t)))
+
+(ert-deftest my/lsp-escape-dismisses-hover-before-editor-state ()
+  "A visible lsp-ui doc consumes one Escape and hides immediately."
+  (let (hidden)
+    (cl-letf (((symbol-function 'lsp-ui-doc--visible-p) (lambda () t))
+              ((symbol-function 'lsp-ui-doc-hide)
+               (lambda () (setq hidden t))))
+      (should (my/lsp-dismiss-popup-h))
+      (should hidden))))
+
+(ert-deftest my/lsp-escape-falls-through-without-transient-ui ()
+  "Escape remains available to Evil/editor state when no LSP popup is live."
+  (let ((lsp-signature-mode nil)
+        (lsp-ui-peek-mode nil))
+    (cl-letf (((symbol-function 'lsp-ui-doc--visible-p) (lambda () nil)))
+      (should-not (my/lsp-dismiss-popup-h)))))
+
+(ert-deftest my/citre-navigation-routes-through-lsp-mode-not-eglot ()
+  "Citre fallback and peek must use the sole supported LSP client."
+  (require 'citre)
+  (should (equal citre-find-definition-backends '(lsp-mode tags global)))
+  (should (equal citre-find-reference-backends '(lsp-mode global)))
+  (with-temp-buffer
+    (setq-local lsp-managed-mode t)
+    (should (citre-backend-usable-p 'lsp-mode))))
+
+(ert-deftest my/lsp-client-whitelist-rejections-are-quiet ()
+  "Expected add-on rejection must not masquerade as an LSP failure."
+  (let ((lsp-enabled-clients '(jdtls))
+        (lsp--show-message t)
+        seen)
+    (cl-letf (((symbol-function 'lsp--client-server-id)
+               (lambda (client) client)))
+      (my/lsp-mode--quiet-client-whitelist-a
+       (lambda (_client) (setq seen lsp--show-message))
+       'semgrep-ls)
+      (should-not seen)
+      (my/lsp-mode--quiet-client-whitelist-a
+       (lambda (_client) (setq seen lsp--show-message))
+       'jdtls)
+      (should seen))))
+
 (ert-deftest my/lsp-tab-line-tabs-overlay-the-view-only-breadcrumb ()
   "Breadcrumb text must not reduce the width available to buffer tabs."
   (with-temp-buffer
