@@ -114,6 +114,26 @@
        (equal call
               '("~/Documents/Noema/" nil "local"))))))
 
+(ert-deftest my/noema-canonical-file-collapses-local-directory-aliases ()
+  "One note spelling must produce one canonical xwidget client identity."
+  (let* ((root (make-temp-file "noema-canonical-root" t))
+         (alias (concat root "-alias"))
+         (note (expand-file-name "note.md" root)))
+    (unwind-protect
+        (progn
+          (with-temp-file note (insert "# note\n"))
+          (make-symbolic-link root alias)
+          (should
+           (equal (my/noema--canonical-file note)
+                  (my/noema--canonical-file
+                   (expand-file-name "note.md" alias))))
+          (should
+           (equal (my/noema--xwidget-session-id note)
+                  (my/noema--xwidget-session-id
+                   (expand-file-name "note.md" alias)))))
+      (when (file-symlink-p alias) (delete-file alias))
+      (when (file-directory-p root) (delete-directory root t)))))
+
 (ert-deftest my/noema-host-file-preserves-remote-logical-identity ()
   (let ((remote-mode t))
     (cl-letf
@@ -137,7 +157,8 @@
 
 (ert-deftest my/noema-external-provider-reads-and-writes-through-logical-file-api ()
   (let* ((native (make-temp-file "aaronnote-remote-provider-" nil ".md"))
-         (logical (remote-expand-file-name native nil "local")))
+         (logical (remote-expand-file-name native nil "local"))
+         (canonical (my/noema--canonical-file logical)))
     (unwind-protect
         (progn
           (with-temp-file native
@@ -146,7 +167,7 @@
                   (my/noema--external-file-read
                    `((file . ,logical)) nil))
                  (mtime (alist-get 'mtimeMs opened)))
-            (should (equal (alist-get 'file opened) logical))
+            (should (equal (alist-get 'file opened) canonical))
             (should (equal (alist-get 'content opened) "# Initial\n"))
             (let ((conflict
                    (my/noema--external-file-write
@@ -168,7 +189,7 @@
                       (baseMtimeMs . ,mtime))
                     nil)))
               (should (eq (alist-get 'ok saved) t))
-              (should (equal (alist-get 'file saved) logical))
+              (should (equal (alist-get 'file saved) canonical))
               (should
                (equal
                 (with-temp-buffer
@@ -373,8 +394,11 @@
                      (lambda (command &optional detail)
                        (setq sent (list command detail))))
                     ((symbol-function 'xwidget-webkit-pass-command-event)
-                     (lambda (event)
-                       (setq passed event))))
+                     ;; The real command takes no argument; it reads
+                     ;; `last-command-event'.  Accept either shape so the test
+                     ;; asserts the passthrough, not a particular arity.
+                     (lambda (&optional event)
+                       (setq passed (or event last-command-event)))))
             (with-current-buffer buffer
               (setq my/noema--app-buffer buffer)
               (my/noema-xwidget-redo 'aaronnote-event))
@@ -383,11 +407,62 @@
             (setq sent nil)
             (with-current-buffer buffer
               (setq my/noema--app-buffer nil)
-              (my/noema-xwidget-redo 'other-event))
+              ;; A real key invocation has both: the `interactive "e"' argument
+              ;; and `last-command-event', which is what the passthrough reads.
+              (let ((last-command-event 'other-event))
+                (my/noema-xwidget-redo 'other-event)))
             (should-not sent)
             (should (eq passed 'other-event))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
+
+(ert-deftest my/noema-xwidget-clipboard-keys-route-to-the-page ()
+  "Cmd-c / Cmd-v must reach Noema, not `xwidget-webkit-pass-command-event'.
+That command cannot replay a key into WebKit on the macOS xwidget port -- the
+Emacs binary has no nsxwidget_perform_lispy_event -- so a clipboard key Emacs
+owns is simply lost unless it is routed to the page."
+  (let ((buffer (generate-new-buffer "*Noema-clipboard-test*"))
+        (my/noema--app-buffer nil)
+        sent passed)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq-local major-mode 'xwidget-webkit-mode))
+          (cl-letf (((symbol-function 'my/noema-command)
+                     (lambda (command &optional detail)
+                       (push (list command detail) sent)))
+                    ((symbol-function 'xwidget-webkit-pass-command-event)
+                     (lambda (&optional event)
+                       (setq passed (or event last-command-event)))))
+            (with-current-buffer buffer
+              (setq my/noema--app-buffer buffer)
+              (my/noema-xwidget-copy 'copy-event)
+              (my/noema-xwidget-paste 'paste-event)
+              (my/noema-xwidget-cut 'cut-event))
+            (should (equal (nreverse sent)
+                           '(("copy" nil) ("paste" nil) ("cut" nil))))
+            (should-not passed)))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest my/noema-xwidget-clipboard-keys-win-the-shared-keymaps ()
+  "Noema's routing must survive the generic browser configuration.
+Both claim M-c / M-v on the same xwidget keymaps from `with-eval-after-load'
+blocks with no defined order, so Noema reinstalls from the mode hook."
+  (skip-unless (require 'xwidget nil t))
+  (let ((xwidget-webkit-mode-map (make-sparse-keymap))
+        (xwidget-webkit-edit-mode-map (make-sparse-keymap)))
+    (define-key xwidget-webkit-mode-map (kbd "M-c") #'ignore)
+    (define-key xwidget-webkit-edit-mode-map (kbd "M-v") #'ignore)
+    (my/noema--install-xwidget-keys)
+    (should (eq (lookup-key xwidget-webkit-mode-map (kbd "M-c"))
+                #'my/noema-xwidget-copy))
+    (should (eq (lookup-key xwidget-webkit-mode-map (kbd "M-v"))
+                #'my/noema-xwidget-paste))
+    (should (eq (lookup-key xwidget-webkit-edit-mode-map (kbd "M-c"))
+                #'my/noema-xwidget-copy))
+    (should (eq (lookup-key xwidget-webkit-edit-mode-map (kbd "M-v"))
+                #'my/noema-xwidget-paste))))
 
 (ert-deftest my/noema-xwidget-undo-routes-jupyter-buffer-to-generic-xwidget ()
   (let ((buffer (generate-new-buffer "*Noema-jupyter-test*"))
@@ -402,8 +477,11 @@
                      (lambda (command &optional detail)
                        (setq sent (list command detail))))
                     ((symbol-function 'xwidget-webkit-pass-command-event)
-                     (lambda (event)
-                       (setq passed event)))
+                     ;; The real command takes no argument; it reads
+                     ;; `last-command-event'.  Accept either shape so the test
+                     ;; asserts the passthrough, not a particular arity.
+                     (lambda (&optional event)
+                       (setq passed (or event last-command-event))))
                     ((symbol-function 'my/xwidget-undo)
                      (lambda ()
                        (setq undo-called t))))
@@ -663,6 +741,38 @@
         '((ok . t)))))
     (should-not seen)))
 
+(ert-deftest my/noema-input-focus-corrects-stale-pane-bookkeeping ()
+  (let* ((buffer (generate-new-buffer " *Noema stale focus*"))
+         (my/noema--app-buffer nil)
+         (my/noema--client-buffers (make-hash-table :test #'equal))
+         (my/noema--file-buffers (make-hash-table :test #'equal))
+         (my/noema--last-activity-signature 'stale)
+         selected
+         updates)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq-local my/noema--client-id "client-stale")
+            (setq-local my/noema--activity-paused t))
+          (puthash "client-stale" buffer my/noema--client-buffers)
+          (cl-letf (((symbol-function 'get-buffer-window)
+                     (lambda (candidate &optional _all-frames)
+                       (and (eq candidate buffer) (selected-window))))
+                    ((symbol-function 'my/noema--select-emacs-window)
+                     (lambda (&optional window) (setq selected window)))
+                    ((symbol-function 'my/noema--update-activity)
+                     (lambda (&rest _args) (setq updates (1+ (or updates 0))))))
+            (my/noema--handle-input-focus
+             '((client . "client-stale") (file . "/tmp/note.md"))))
+          (should (eq my/noema--app-buffer buffer))
+          (with-current-buffer buffer
+            (should (eq my/noema--activity-paused :unknown)))
+          ;; The visible owning window was already selected in this harness.
+          (should-not selected)
+          (should (eq my/noema--last-activity-signature :unknown))
+          (should (= updates 1)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
 (ert-deftest my/noema-ui-state-gateway-does-not-reserialize-status ()
   (let ((my/noema-echo-severity 'error)
         (binary-status (unibyte-string 1 255 123))
@@ -920,18 +1030,29 @@
 (ert-deftest my/noema-core-ready-reconnects-retained-xwidget-in-place ()
   (let* ((buffer (generate-new-buffer "*Noema-retained-xwidget*"))
          (my/noema--app-buffer buffer)
-         executed-script)
+         (my/noema--activity-hooks-installed t)
+         (my/noema--last-activity-signature 'stale)
+         executed-script
+         activity-updates)
     (unwind-protect
         (progn
           (with-current-buffer buffer
-            (setq-local major-mode 'xwidget-webkit-mode))
+            (setq-local major-mode 'xwidget-webkit-mode)
+            (setq-local my/noema--activity-paused t))
           (cl-letf (((symbol-function 'xwidget-webkit-current-session)
                      (lambda () 'mock-session))
                     ((symbol-function 'xwidget-webkit-execute-script)
                      (lambda (_session script &optional _callback)
-                       (setq executed-script script))))
+                       (setq executed-script script)))
+                    ((symbol-function 'my/noema--update-activity)
+                     (lambda (&rest _args)
+                       (setq activity-updates (1+ (or activity-updates 0))))))
             (my/noema--notify-xwidgets-core-ready)
-            (should (equal executed-script my/noema--core-ready-script))))
+            (should (equal executed-script my/noema--core-ready-script))
+            (with-current-buffer buffer
+              (should (eq my/noema--activity-paused :unknown)))
+            (should (eq my/noema--last-activity-signature :unknown))
+            (should (= activity-updates 1))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest my/noema-runtime-status-renders-debug-payload ()
@@ -1013,8 +1134,15 @@
 
 (ert-deftest my/noema-activity-hooks-install-idempotently ()
   (let ((after-focus-change-function nil)
+        (focus-in-hook nil)
+        (focus-out-hook nil)
         (window-buffer-change-functions nil)
         (window-selection-change-functions nil)
+        (window-state-change-functions nil)
+        (delete-frame-functions nil)
+        (my/noema--app-buffer nil)
+        (my/noema--client-buffers (make-hash-table :test #'equal))
+        (my/noema--file-buffers (make-hash-table :test #'equal))
         (my/noema--activity-hooks-installed nil)
         (my/noema--activity-timer nil)
         (my/noema--paused t)
@@ -1022,86 +1150,217 @@
     (my/noema--install-activity-hooks)
     (my/noema--install-activity-hooks)
     (should my/noema--activity-hooks-installed)
-    (should (equal window-buffer-change-functions
-                   (list #'my/noema--update-activity)))
-    (should (equal window-selection-change-functions
-                   (list #'my/noema--update-activity)))
+    (dolist (hook (list focus-in-hook focus-out-hook
+                        window-buffer-change-functions
+                        window-selection-change-functions
+                        window-state-change-functions
+                        delete-frame-functions))
+      (should (= (length hook) 1))
+      (should (eq (car hook) #'my/noema--update-activity)))
     (my/noema--remove-activity-hooks)
     (should-not my/noema--activity-hooks-installed)
+    (should-not after-focus-change-function)
+    (should-not focus-in-hook)
+    (should-not focus-out-hook)
     (should-not window-buffer-change-functions)
     (should-not window-selection-change-functions)
+    (should-not window-state-change-functions)
+    (should-not delete-frame-functions)
     (should-not my/noema--paused)
     (should-not my/noema--manual-paused)))
 
-(ert-deftest my/noema-activity-update-debounces-by-visibility-state ()
+(ert-deftest my/noema-activity-snapshot-follows-selected-focused-pane ()
+  (let* ((first (generate-new-buffer " *Noema activity A*"))
+         (second (generate-new-buffer " *Noema activity B*"))
+         (plain (generate-new-buffer " *Noema activity plain*"))
+         (configuration (current-window-configuration))
+         (my/noema--app-buffer first)
+         (my/noema--client-buffers (make-hash-table :test #'equal))
+         (my/noema--file-buffers (make-hash-table :test #'equal)))
+    (unwind-protect
+        (progn
+          (puthash "client-a" first my/noema--client-buffers)
+          (puthash "client-b" second my/noema--client-buffers)
+          (delete-other-windows)
+          (let* ((first-window (selected-window))
+                 (second-window (split-window-right)))
+            (set-window-buffer first-window first)
+            (set-window-buffer second-window second)
+            (select-window first-window)
+            (cl-letf (((symbol-function 'frame-visible-p) (lambda (_frame) t))
+                      ((symbol-function 'frame-focus-state) (lambda (_frame) t)))
+              (should (equal (my/noema--activity-snapshot)
+                             (list (cons first t) (cons second nil))))
+              (select-window second-window)
+              (should (equal (my/noema--activity-snapshot)
+                             (list (cons first nil) (cons second t))))
+              (set-window-buffer second-window plain)
+              (should (equal (my/noema--activity-snapshot)
+                             (list (cons first nil) (cons second nil))))
+              (cl-letf (((symbol-function 'frame-focus-state)
+                         (lambda (_frame) nil)))
+                (set-window-buffer second-window second)
+                (should (equal (my/noema--activity-snapshot)
+                               (list (cons first nil) (cons second nil)))))
+              (cl-letf (((symbol-function 'frame-visible-p)
+                         (lambda (_frame) nil)))
+                (should (equal (my/noema--activity-snapshot)
+                               (list (cons first nil) (cons second nil))))))))
+      (set-window-configuration configuration)
+      (dolist (buffer (list first second plain))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/noema-per-client-activity-transitions-target-the-shared-renderer ()
+  (let* ((first (generate-new-buffer " *Noema client A*"))
+         (second (generate-new-buffer " *Noema client B*"))
+         (my/noema--app-buffer first)
+         (my/noema--client-buffers (make-hash-table :test #'equal))
+         (my/noema--file-buffers (make-hash-table :test #'equal))
+         (my/noema--manual-paused nil)
+         (my/noema--paused nil)
+         commands)
+    (unwind-protect
+        (progn
+          (with-current-buffer first
+            (setq-local my/noema--client-id "client-a")
+            (setq-local my/noema--activity-paused :unknown))
+          (with-current-buffer second
+            (setq-local my/noema--client-id "client-b")
+            (setq-local my/noema--activity-paused :unknown))
+          (puthash "client-a" first my/noema--client-buffers)
+          (puthash "client-b" second my/noema--client-buffers)
+          (cl-letf (((symbol-function 'my/noema--send-command)
+                     (lambda (command &optional _detail)
+                       (push (list my/noema--client-id command) commands))))
+            (my/noema--apply-activity-snapshot
+             (list (cons first t) (cons second nil)))
+            (should (equal (nreverse commands)
+                           '(("client-a" "resume") ("client-b" "pause"))))
+            (should-not my/noema--paused)
+            (setq commands nil)
+            ;; Repeated focus/window events must not resend an unchanged state.
+            (my/noema--apply-activity-snapshot
+             (list (cons first t) (cons second nil)))
+            (should-not commands)
+            (my/noema--apply-activity-snapshot
+             (list (cons first nil) (cons second t)))
+            (should (equal (nreverse commands)
+                           '(("client-a" "pause") ("client-b" "resume"))))
+            (setq commands nil)
+            (my/noema--apply-activity-snapshot
+             (list (cons first nil) (cons second nil)))
+            (should (equal commands '(("client-b" "pause"))))
+            (should my/noema--paused)))
+      (dolist (buffer (list first second))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/noema-manual-pause-blocks-auto-resume-per-client ()
+  (let* ((first (generate-new-buffer " *Noema manual A*"))
+         (second (generate-new-buffer " *Noema manual B*"))
+         (snapshot (list (cons first t) (cons second nil)))
+         (my/noema--app-buffer first)
+         (my/noema--client-buffers (make-hash-table :test #'equal))
+         (my/noema--file-buffers (make-hash-table :test #'equal))
+         (my/noema--manual-paused nil)
+         (my/noema--paused nil)
+         commands)
+    (unwind-protect
+        (progn
+          (with-current-buffer first
+            (setq-local my/noema--client-id "client-a")
+            (setq-local my/noema--activity-paused :unknown))
+          (with-current-buffer second
+            (setq-local my/noema--client-id "client-b")
+            (setq-local my/noema--activity-paused :unknown))
+          (puthash "client-a" first my/noema--client-buffers)
+          (puthash "client-b" second my/noema--client-buffers)
+          (cl-letf (((symbol-function 'my/noema--activity-snapshot)
+                     (lambda () snapshot))
+                    ((symbol-function 'my/noema--send-command)
+                     (lambda (command &optional _detail)
+                       (push (list my/noema--client-id command) commands))))
+            (my/noema--apply-activity-snapshot snapshot)
+            (setq commands nil)
+            (my/noema-pause)
+            (should my/noema--manual-paused)
+            (should my/noema--paused)
+            (should (equal commands '(("client-a" "pause"))))
+            (setq commands nil)
+            (my/noema--apply-activity-snapshot snapshot)
+            (should-not commands)
+            (should my/noema--paused)
+            (my/noema-resume)
+            (should-not my/noema--manual-paused)
+            (should-not my/noema--paused)
+            (should (equal commands '(("client-a" "resume"))))))
+      (dolist (buffer (list first second))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/noema-activity-update-uses-one-shot-event-debounce ()
   (let ((my/noema--activity-timer nil)
-        (my/noema--last-activity-active :unknown)
+        (my/noema--last-activity-signature :unknown)
+        (my/noema--ready t)
         (my/noema--app-buffer nil)
-        (run-at-count 0)
-        (idle-count 0)
-        visible)
-    (cl-letf (((symbol-function 'my/noema--app-buffer-visible-p)
-               (lambda () visible))
-              ((symbol-function 'my/noema--xwidget-buffer-p)
-               (lambda (_buffer) nil))
+        (my/noema--client-buffers (make-hash-table :test #'equal))
+        (my/noema--file-buffers (make-hash-table :test #'equal))
+        (snapshot '((first . t) (second)))
+        (scheduled nil)
+        (cancelled nil)
+        (applied nil))
+    (cl-letf (((symbol-function 'my/noema--activity-snapshot)
+               (lambda () snapshot))
+              ((symbol-function 'my/noema--maybe-reconnect-core-on-activity)
+               #'ignore)
               ((symbol-function 'run-at-time)
-               (lambda (&rest _args)
-                 (setq run-at-count (1+ run-at-count))
-                 'normal-timer))
+               (lambda (delay repeat callback &rest args)
+                 (should-not repeat)
+                 (push (list delay callback args) scheduled)
+                 (list 'timer (length scheduled))))
               ((symbol-function 'run-with-idle-timer)
                (lambda (&rest _args)
-                 (setq idle-count (1+ idle-count))
-                 'idle-timer))
+                 (ert-fail "activity resume must not depend on Emacs idleness")))
               ((symbol-function 'cancel-timer)
-               (lambda (_timer) nil)))
-      (setq visible nil)
+               (lambda (timer) (push timer cancelled)))
+              ((symbol-function 'my/noema--apply-activity-snapshot)
+               (lambda (value) (setq applied value))))
       (my/noema--update-activity)
       (my/noema--update-activity)
-      (should (= run-at-count 1))
-      (should (= idle-count 0))
-      (should (eq my/noema--activity-timer 'normal-timer))
-      (setq visible t)
+      (should (= (length scheduled) 1))
+      (should (= (caar scheduled) 0.12))
+      (setq snapshot '((first) (second)))
       (my/noema--update-activity)
-      (should (= run-at-count 1))
-      (should (= idle-count 1))
-      (should (eq my/noema--activity-timer 'idle-timer)))))
+      (should (= (length scheduled) 2))
+      (should (= (caar scheduled) 0.03))
+      (should (= (length cancelled) 1))
+      (pcase-let ((`(,_delay ,callback ,args) (car scheduled)))
+        (apply callback args))
+      (should (equal applied snapshot))
+      (should-not my/noema--activity-timer))))
 
-(ert-deftest my/noema-manual-pause-blocks-auto-resume ()
-  (let ((my/noema--paused nil)
-        (my/noema--manual-paused nil)
-        commands)
-    (cl-letf (((symbol-function 'my/noema--send-command)
-               (lambda (command) (push command commands)))
-              ((symbol-function 'my/noema--app-buffer-visible-p)
-               (lambda () t)))
-      (my/noema-pause)
-      (should my/noema--paused)
-      (should my/noema--manual-paused)
-      (should (equal (nreverse commands) '("pause")))
-      (setq commands nil)
-      (my/noema--apply-activity t)
-      (should my/noema--paused)
-      (should-not commands)
-      (my/noema-resume)
-      (should-not my/noema--paused)
-      (should-not my/noema--manual-paused)
-      (should (equal (nreverse commands) '("resume"))))))
-
-(ert-deftest my/noema-toggle-pause-sends-one-transition ()
-  (let ((my/noema--paused nil)
-        (my/noema--manual-paused nil)
-        commands)
-    (cl-letf (((symbol-function 'my/noema--send-command)
-               (lambda (command) (push command commands)))
-              ((symbol-function 'my/noema--app-buffer-visible-p)
-               (lambda () t)))
-      (my/noema-toggle-pause)
-      (should my/noema--manual-paused)
-      (should my/noema--paused)
-      (my/noema-toggle-pause)
-      (should-not my/noema--manual-paused)
-      (should-not my/noema--paused)
-      (should (equal (nreverse commands) '("pause" "resume"))))))
+(ert-deftest my/noema-current-file-reconciles-initial-client-activity ()
+  (let* ((buffer (generate-new-buffer " *Noema current-file activity*"))
+         (my/noema--app-buffer buffer)
+         (my/noema--client-buffers (make-hash-table :test #'equal))
+         (my/noema--file-buffers (make-hash-table :test #'equal))
+         (my/noema--activity-hooks-installed t)
+         (my/noema--last-activity-signature 'stale)
+         updates)
+    (unwind-protect
+        (progn
+          (puthash "client-a" buffer my/noema--client-buffers)
+          (with-current-buffer buffer
+            (setq-local my/noema--client-id "client-a")
+            (setq-local my/noema--activity-paused t))
+          (cl-letf (((symbol-function 'my/noema--register-buffer)
+                     (lambda (&rest _args) buffer))
+                    ((symbol-function 'my/noema--update-activity)
+                     (lambda (&rest _args) (setq updates (1+ (or updates 0))))))
+            (my/noema--sync-app-buffer-file "/tmp/reconciled.md" "client-a"))
+          (with-current-buffer buffer
+            (should (eq my/noema--activity-paused :unknown)))
+          (should (eq my/noema--last-activity-signature :unknown))
+          (should (= updates 1)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest my/noema-process-filter-ignores-stale-proc-ready-line ()
   "A dying old process emitting a ready: line must not clobber the new port."
@@ -1212,7 +1471,9 @@
       (should-not (gethash client my/noema--client-buffers))
       (should (equal (alist-get 'type (car posted)) "client-close"))
       (should (equal (alist-get 'client (car posted)) client))
-      (should (equal (alist-get 'file (car posted)) file)))))
+      (should
+       (equal (alist-get 'file (car posted))
+              (my/noema--host-file canonical-file))))))
 
 (ert-deftest my/noema-current-file-client-targets-buffer ()
   (my/noema-test--with-xwidget-mocks
@@ -1563,8 +1824,6 @@
       ;; The Emacs action deliberately supplies no id; Noema generates it.
       (should-not (assq 'cellId (cadr mutation))))))
 
-(provide 'init-aaronnote-tests)
-;;; init-aaronnote-tests.el ends here
 
 ;;; Remote Jupyter servers.
 ;;
@@ -1781,3 +2040,84 @@
       (my/noema-jupyter-shutdown-all))
     (should (equal closed '(22)))
     (should (zerop (hash-table-count my/noema-jupyter-runtimes)))))
+
+(ert-deftest my/noema-input-focus-overrides-a-stale-background-belief ()
+  "A renderer that proves it owns input must not stay paused under the cursor.
+On the macOS xwidget port a click inside WebKit can leave Emacs' window
+selection untouched, so the pane keeps being reported as background."
+  (let* ((pane (generate-new-buffer " *Noema focused pane*"))
+         (my/noema--app-buffer nil)
+         (my/noema--client-buffers (make-hash-table :test #'equal))
+         (my/noema--file-buffers (make-hash-table :test #'equal))
+         (my/noema--activity-hooks-installed t)
+         (my/noema--last-activity-signature 'stale)
+         selected
+         updated)
+    (unwind-protect
+        (progn
+          (with-current-buffer pane
+            (setq-local my/noema--client-id "client-a")
+            (setq-local my/noema--activity-paused t))
+          (puthash "client-a" pane my/noema--client-buffers)
+          (cl-letf (((symbol-function 'get-buffer-window)
+                     (lambda (&rest _) 'pane-window))
+                    ((symbol-function 'my/noema--select-emacs-window)
+                     (lambda (&optional window) (setq selected window)))
+                    ((symbol-function 'my/noema--update-activity)
+                     (lambda (&rest _) (setq updated t))))
+            (my/noema--handle-input-focus '((client . "client-a")
+                                            (file . "/notes/a.md"))))
+          (should (eq my/noema--app-buffer pane))
+          (should (eq selected 'pane-window))
+          (should updated)
+          (should (eq my/noema--last-activity-signature :unknown))
+          ;; The renderer already dropped its own host pause. Leaving the
+          ;; local belief at t would deduplicate away both the explicit resume
+          ;; and the next genuine background transition, so the Node host keeps
+          ;; replaying a stale pause and a hidden page stays fully awake.
+          (should (eq (buffer-local-value 'my/noema--activity-paused pane)
+                      :unknown)))
+      (when (buffer-live-p pane) (kill-buffer pane)))))
+
+(ert-deftest my/noema-input-focus-ignores-an-unknown-client ()
+  (let ((my/noema--app-buffer nil)
+        (my/noema--client-buffers (make-hash-table :test #'equal))
+        (my/noema--file-buffers (make-hash-table :test #'equal))
+        (my/noema--activity-hooks-installed t)
+        updated)
+    (cl-letf (((symbol-function 'my/noema--update-activity)
+               (lambda (&rest _) (setq updated t))))
+      (my/noema--handle-input-focus '((client . "client-gone"))))
+    (should-not updated)
+    (should-not my/noema--app-buffer)))
+
+(ert-deftest my/noema-deferred-command-keeps-the-issuing-pane-address ()
+  "A command sent before the web host is ready must not become a broadcast.
+`my/noema--send-command' reads the current buffer's client, and a ready
+callback runs from a timer whose current buffer is arbitrary."
+  (let* ((pane (generate-new-buffer " *Noema issuing pane*"))
+         (elsewhere (generate-new-buffer " *unrelated*"))
+         pending
+         posted)
+    (unwind-protect
+        (progn
+          (with-current-buffer pane
+            (setq-local my/noema--client-id "client-a"))
+          (cl-letf (((symbol-function 'my/noema--ensure-server)
+                     (lambda (callback) (setq pending callback)))
+                    ((symbol-function 'my/noema--post)
+                     (lambda (payload) (push payload posted))))
+            (with-current-buffer pane
+              (my/noema-command "refresh"))
+            (should (functionp pending))
+            ;; Fire the deferred callback from an unrelated buffer, as the
+            ;; ready-callback timer does.
+            (with-current-buffer elsewhere
+              (funcall pending))
+            (should (equal (alist-get 'client (car posted)) "client-a"))
+            (should (equal (alist-get 'command (car posted)) "refresh"))))
+      (dolist (buffer (list pane elsewhere))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(provide 'init-aaronnote-tests)
+;;; init-aaronnote-tests.el ends here

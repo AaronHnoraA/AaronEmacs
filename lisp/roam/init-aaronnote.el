@@ -390,19 +390,34 @@ the backend.  The backend is chosen here, not per export."
          ;; `~/...') therefore belong to the local target; an already logical
          ;; or TRAMP path retains its encoded target and is rejected later by
          ;; `my/noema--host-file' when the local host cannot serve it.
-         (remote-expand-file-name
-          file nil
-          (unless
-              (or (and (fboundp 'remote-fs-file-name-p)
-                       (remote-fs-file-name-p file))
-                  (string-match-p "\\`fs://" file)
-                  (file-remote-p file))
-            "local")))
+         (let ((expanded
+                (remote-expand-file-name
+                 file nil
+                 (unless
+                     (or (and (fboundp 'remote-fs-file-name-p)
+                              (remote-fs-file-name-p file))
+                         (string-match-p "\\`fs://" file)
+                         (file-remote-p file))
+                   "local"))))
+           ;; Remote mode represents native paths as /fs:local:.  Preserve
+           ;; that logical identity while resolving native directory aliases.
+           (if (and (fboundp 'remote-file-name-target)
+                    (fboundp 'remote-file-local-name)
+                    (fboundp 'remote-canonicalize-file-name)
+                    (equal (remote-file-name-target expanded) "local"))
+               (remote-canonicalize-file-name
+                (file-truename (remote-file-local-name expanded)))
+             expanded)))
         ((and (bound-and-true-p remote-mode)
               (fboundp 'remote-canonicalize-file-name))
          (remote-canonicalize-file-name file))
         (t
-         (expand-file-name file)))))
+         ;; A client id is a protocol identity, not just a display path.  On
+         ;; macOS /tmp is an alias of /private/tmp; keeping only the expanded
+         ;; spelling creates two xwidget clients for the same note and lets a
+         ;; retained alias pane participate in lifecycle routing.  Resolve
+         ;; local directory symlinks before deriving registries or client ids.
+         (file-truename (expand-file-name file))))))
 
 (defun my/noema--host-file (file)
   "Return the path Noema should use for logical FILE.
@@ -641,6 +656,7 @@ reconnect without a reload and without losing their in-memory editor state."
            (delq nil
             (append
              (list
+            "AARONNOTE_HOST_MODE=emacs"
             (format "NOEMA_ROOT=%s" (expand-file-name my/noema--notes-root))
             (format "AARONNOTE_ROOT=%s" (expand-file-name my/noema--notes-root))
             (format "NOEMA_WORKSPACE_LAYOUT=%s" (my/noema-workspace-layout))
@@ -744,7 +760,7 @@ reconnect without a reload and without losing their in-memory editor state."
       (run-at-time 0 nil callback)))
   (my/noema--install-activity-hooks)
   ;; Do an initial activity check after the page has had time to load.
-  (run-with-idle-timer 2 nil #'my/noema--update-activity))
+  (run-at-time 0.2 nil #'my/noema--update-activity))
 
 (defun my/noema--run-zotero-event (payload import-p)
   "Handle Zotero PAYLOAD in Emacs; IMPORT-P starts the BibTeX picker."
@@ -765,6 +781,33 @@ reconnect without a reload and without losing their in-memory editor state."
        (message "Noema Zotero %s failed: %s"
                 (if import-p "import" "open")
                 (error-message-string err))))))
+
+(defun my/noema--handle-input-focus (payload)
+  "Record that the Noema renderer named by PAYLOAD owns keyboard input.
+
+This adapter derives each pane\'s foreground state from Emacs window and frame
+selection.  On the macOS xwidget port a click inside the WebKit view can make
+that view first responder without Emacs selecting the surrounding window, so
+the pane keeps being reported as background and re-paused under the user\'s
+cursor.  A renderer sends this only after a trusted input event it received
+while paused, so it is authoritative: select that pane\'s window and recompute
+the activity snapshot, which resumes it and pauses its siblings.
+
+The renderer has already dropped its own host pause by the time this arrives,
+but the Node host still retains the old pause for reconnect replay. Mark local
+state unknown so the recomputed snapshot sends an explicit resume and updates
+both sides of the protocol before later background transitions are deduped."
+  (let* ((client (alist-get 'client payload))
+         (buffer (my/noema--buffer-for-client client)))
+    (when (buffer-live-p buffer)
+      (setq my/noema--app-buffer buffer)
+      (with-current-buffer buffer
+        (setq-local my/noema--activity-paused :unknown))
+      (when-let* ((window (get-buffer-window buffer 'visible)))
+        (unless (eq window (selected-window))
+          (my/noema--select-emacs-window window)))
+      (setq my/noema--last-activity-signature :unknown)
+      (my/noema--update-activity))))
 
 (defun my/noema--handle-ui-state-payload (payload)
   "Echo a structured Noema UI-state PAYLOAD when policy permits.
@@ -1140,6 +1183,9 @@ to JSON a second time."
                (when (stringp key)
                  (my/noema--run-emacs-key key client)))
              nil)
+            ("input-focus"
+             (run-at-time 0 nil #'my/noema--handle-input-focus payload)
+             nil)
             ("jupyter-session"
              (my/noema-jupyter-cell-handle-session-event payload)
              nil)
@@ -1381,8 +1427,13 @@ file switch."
                      my/noema--app-buffer)))
     (when (buffer-live-p target)
       (my/noema--register-buffer target file client t)
+      (with-current-buffer target
+        (setq-local my/noema--activity-paused :unknown))
       (when file
-        (setq my/noema--app-buffer target)))))
+        (setq my/noema--app-buffer target))
+      (when my/noema--activity-hooks-installed
+        (setq my/noema--last-activity-signature :unknown)
+        (my/noema--update-activity)))))
 
 (defun my/noema--track-app-buffer (buffer &optional file client)
   "Record BUFFER as the active Noema browser buffer.
@@ -1732,9 +1783,18 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
 (defun my/noema-command (command &optional detail)
   "Send COMMAND with optional DETAIL to the open Noema page."
   (interactive "sAaronnote command: ")
-  (my/noema--ensure-server
-   (lambda ()
-     (my/noema--send-command command detail))))
+  ;; `my/noema--send-command' reads the client id of the current buffer.  When
+  ;; the web host is still starting, the send runs later from a ready callback
+  ;; timer whose current buffer is arbitrary, which drops the address and turns
+  ;; a per-pane command into a broadcast every renderer obeys.  Capture the
+  ;; issuing pane so a deferred send still reaches exactly that client.
+  (let ((origin (current-buffer)))
+    (my/noema--ensure-server
+     (lambda ()
+       (if (buffer-live-p origin)
+           (with-current-buffer origin
+             (my/noema--send-command command detail))
+         (my/noema--send-command command detail))))))
 
 ;;;###autoload
 (defun my/noema-escape ()
@@ -1803,7 +1863,7 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
   (interactive)
   (my/noema-workspace-graph))
 
-;;; Pause/resume — freeze WebKit animations when Noema is not visible.
+;;; Pause/resume — report host activity to the shared renderer gate.
 
 (defvar my/noema--paused nil
   "Non-nil when the browser page has been sent a pause command.")
@@ -1813,8 +1873,11 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
   "Debounce timer for `my/noema--update-activity'.")
 (defvar my/noema--activity-hooks-installed nil
   "Non-nil when Noema pause/resume activity hooks are installed.")
-(defvar my/noema--last-activity-active :unknown
-  "Last active-state scheduled by `my/noema--update-activity'.")
+(defvar my/noema--last-activity-signature :unknown
+  "Last per-client activity snapshot scheduled by Noema.")
+(defvar-local my/noema--activity-paused :unknown
+  "Last pause state sent to this Noema renderer client.")
+(put 'my/noema--activity-paused 'permanent-local t)
 
 (defconst my/noema--core-ready-script
   "(() => {
@@ -1825,26 +1888,67 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
 })()"
   "JavaScript used to reconnect a retained xwidget page after core restarts.")
 
+(defun my/noema--browser-buffers ()
+  "Return registered live Noema browser buffers without scanning all buffers."
+  (let (buffers)
+    (when (buffer-live-p my/noema--app-buffer)
+      (push my/noema--app-buffer buffers))
+    (maphash
+     (lambda (_client buffer)
+       (when (buffer-live-p buffer) (push buffer buffers)))
+     my/noema--client-buffers)
+    (maphash
+     (lambda (_file buffer)
+       (when (buffer-live-p buffer) (push buffer buffers)))
+     my/noema--file-buffers)
+    (delete-dups buffers)))
+
+(defun my/noema--buffer-active-p (buffer)
+  "Return non-nil when BUFFER owns the selected window of a focused frame.
+A visible but unselected Noema split remains painted and readable, but its
+shared renderer activity gate may sleep until that pane is selected again."
+  (when (buffer-live-p buffer)
+    (cl-some
+     (lambda (window)
+       (let ((frame (window-frame window)))
+         (and (eq (frame-visible-p frame) t)
+              (frame-focus-state frame)
+              (eq window (frame-selected-window frame)))))
+     (get-buffer-window-list buffer nil 'visible))))
+
 (defun my/noema--app-buffer-visible-p ()
-  "Return non-nil when the Noema buffer is visible in a focused frame."
-  (when (buffer-live-p my/noema--app-buffer)
-    (let ((win (get-buffer-window my/noema--app-buffer 'visible)))
-      (and win
-           (frame-focus-state (window-frame win))))))
+  "Return non-nil when the current Noema buffer is the active host pane."
+  (my/noema--buffer-active-p my/noema--app-buffer))
+
+(defun my/noema--activity-snapshot ()
+  "Return a stable list of each live renderer buffer and its host activity."
+  (sort
+   (mapcar (lambda (buffer)
+             (cons buffer (and (my/noema--buffer-active-p buffer) t)))
+           (my/noema--browser-buffers))
+   (lambda (left right)
+     (string-lessp (buffer-name (car left)) (buffer-name (car right))))))
 
 (defun my/noema--notify-xwidgets-core-ready ()
-  "Reconnect retained Noema xwidgets after an active core restart."
+  "Reconnect retained xwidgets and replay host lifecycle after core restart."
   (when (and (fboundp 'xwidget-webkit-current-session)
              (fboundp 'xwidget-webkit-execute-script))
     (dolist (buffer (buffer-list))
       (when (and (buffer-live-p buffer)
                  (my/noema--xwidget-buffer-p buffer))
         (with-current-buffer buffer
+          ;; The replacement Node host has no memory of commands accepted by
+          ;; its predecessor. Force the next complete activity snapshot to
+          ;; replay even when the Emacs-side foreground state did not change.
+          (setq-local my/noema--activity-paused :unknown)
           (when-let* ((session (ignore-errors
                                  (xwidget-webkit-current-session))))
             (ignore-errors
               (xwidget-webkit-execute-script
-               session my/noema--core-ready-script))))))))
+               session my/noema--core-ready-script))))))
+    (when my/noema--activity-hooks-installed
+      (setq my/noema--last-activity-signature :unknown)
+      (my/noema--update-activity))))
 
 (defun my/noema--maybe-reconnect-core-on-activity ()
   "Restart a disconnected core only while an Noema browser is active.
@@ -1877,86 +1981,122 @@ unsaved CodeMirror state remain intact."
        (message "Noema: active core reconnect failed: %s"
                 (error-message-string err))))))
 
+(defun my/noema--apply-activity-snapshot (snapshot)
+  "Apply per-client pause states from SNAPSHOT through shared host commands."
+  (let ((all-paused (and snapshot t)))
+    (dolist (entry snapshot)
+      (pcase-let ((`(,buffer . ,active) entry))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (let* ((effective-active
+                    (and active (not my/noema--manual-paused)))
+                   (next-paused (not effective-active)))
+              (unless (eq next-paused my/noema--activity-paused)
+                (setq-local my/noema--activity-paused next-paused)
+                ;; The renderer owns the shared pause state machine.  This
+                ;; adapter contributes only its host-window activity fact.
+                (my/noema--send-command
+                 (if effective-active "resume" "pause")))
+              (unless next-paused
+                (setq all-paused nil)))))))
+    (setq my/noema--paused all-paused)))
+
 (defun my/noema--apply-activity (active)
-  "Send pause or resume to the browser when the active state changes."
-  (let ((effective-active (and active (not my/noema--manual-paused))))
-    (unless (eq (not effective-active) my/noema--paused)
-      (setq my/noema--paused (not effective-active))
-      (my/noema--send-command (if effective-active "resume" "pause")))))
+  "Apply ACTIVE to the current Noema renderer client.
+This narrow wrapper is retained for interactive callers and tests; automatic
+activity always applies a complete per-client snapshot."
+  (let ((buffer (if (memq (current-buffer) (my/noema--browser-buffers))
+                    (current-buffer)
+                  my/noema--app-buffer)))
+    (when (buffer-live-p buffer)
+      (my/noema--apply-activity-snapshot (list (cons buffer active))))))
 
 ;;;###autoload
 (defun my/noema-pause ()
-  "Pause Noema assist rendering until explicitly resumed."
+  "Pause shared Noema renderer work until explicitly resumed."
   (interactive)
   (setq my/noema--manual-paused t)
-  (my/noema--apply-activity nil))
+  (my/noema--apply-activity-snapshot (my/noema--activity-snapshot)))
 
 ;;;###autoload
 (defun my/noema-resume ()
-  "Resume Noema assist rendering when the app buffer is visible."
+  "Resume only the Noema renderer client in the active host pane."
   (interactive)
   (setq my/noema--manual-paused nil)
-  (my/noema--apply-activity (my/noema--app-buffer-visible-p)))
+  (my/noema--apply-activity-snapshot (my/noema--activity-snapshot)))
 
 ;;;###autoload
 (defun my/noema-toggle-pause ()
-  "Toggle manual pause for Noema assist rendering."
+  "Toggle manual pause for Noema's shared renderer activity gate."
   (interactive)
   (if my/noema--manual-paused
       (my/noema-resume)
     (my/noema-pause)))
 
 (defun my/noema--update-activity (&rest _)
-  "Debounced check: pause or resume the browser based on buffer visibility.
-Also tracks which Noema buffer is currently focused so key forwarding
-routes to the right session when multiple files are open."
-  ;; Update the active buffer pointer immediately on window-selection changes.
-  (let ((cur (current-buffer)))
-    (when (my/noema--xwidget-buffer-p cur)
-      (setq my/noema--app-buffer cur)))
+  "Coalesce host focus/window changes into per-client pause commands.
+No polling timer is installed: Emacs reports only shell-level activity facts,
+and every renderer uses the same `runHostCommand' pause implementation."
+  (let ((selected (and (window-live-p (selected-window))
+                       (window-buffer (selected-window)))))
+    (when (memq selected (my/noema--browser-buffers))
+      (setq my/noema--app-buffer selected)))
   (my/noema--maybe-reconnect-core-on-activity)
-  (let ((active (my/noema--app-buffer-visible-p)))
-    (unless (eq active my/noema--last-activity-active)
-      (setq my/noema--last-activity-active active)
+  (let ((snapshot (my/noema--activity-snapshot)))
+    (unless (equal snapshot my/noema--last-activity-signature)
+      (setq my/noema--last-activity-signature snapshot)
       (when my/noema--activity-timer
         (cancel-timer my/noema--activity-timer))
+      ;; Pause quickly when a pane leaves the foreground; allow the focus
+      ;; hand-off to settle briefly before resuming WebKit work.
       (setq my/noema--activity-timer
-            (if active
-                (run-with-idle-timer
-                 0.3 nil
-                 (lambda ()
-                   (setq my/noema--activity-timer nil)
-                   (when my/noema--ready
-                     (my/noema--apply-activity
-                      (my/noema--app-buffer-visible-p)))))
-              (run-at-time
-               0.05 nil
-               (lambda ()
-                 (setq my/noema--activity-timer nil)
-                 (when my/noema--ready
-                   (my/noema--apply-activity
-                    (my/noema--app-buffer-visible-p))))))))))
+            (run-at-time
+             (if (seq-some #'cdr snapshot) 0.12 0.03) nil
+             (lambda ()
+               (setq my/noema--activity-timer nil)
+               (if my/noema--ready
+                   (let ((current (my/noema--activity-snapshot)))
+                     (setq my/noema--last-activity-signature current)
+                     (my/noema--apply-activity-snapshot current))
+                 ;; A ready transition must retry even if focus did not change.
+                 (setq my/noema--last-activity-signature :unknown))))))))
 
 (defun my/noema--install-activity-hooks ()
-  "Add hooks that trigger the pause/resume check."
+  "Install event-driven host activity hooks without a background poller."
   (unless my/noema--activity-hooks-installed
     (add-function :after after-focus-change-function
                   #'my/noema--update-activity)
+    (add-hook 'focus-in-hook #'my/noema--update-activity)
+    (add-hook 'focus-out-hook #'my/noema--update-activity)
     (add-hook 'window-buffer-change-functions #'my/noema--update-activity)
     (add-hook 'window-selection-change-functions #'my/noema--update-activity)
+    (when (boundp 'window-state-change-functions)
+      (add-hook 'window-state-change-functions #'my/noema--update-activity))
+    (when (boundp 'delete-frame-functions)
+      (add-hook 'delete-frame-functions #'my/noema--update-activity))
     (setq my/noema--activity-hooks-installed t)))
 
 (defun my/noema--remove-activity-hooks ()
-  "Remove pause/resume hooks and cancel any pending debounce timer."
+  "Remove activity hooks and cancel the one pending debounce transition."
   (remove-function after-focus-change-function #'my/noema--update-activity)
+  (remove-hook 'focus-in-hook #'my/noema--update-activity)
+  (remove-hook 'focus-out-hook #'my/noema--update-activity)
   (remove-hook 'window-buffer-change-functions #'my/noema--update-activity)
   (remove-hook 'window-selection-change-functions #'my/noema--update-activity)
+  (when (boundp 'window-state-change-functions)
+    (remove-hook 'window-state-change-functions #'my/noema--update-activity))
+  (when (boundp 'delete-frame-functions)
+    (remove-hook 'delete-frame-functions #'my/noema--update-activity))
   (when my/noema--activity-timer
     (cancel-timer my/noema--activity-timer)
     (setq my/noema--activity-timer nil))
+  (dolist (buffer (my/noema--browser-buffers))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq-local my/noema--activity-paused :unknown))))
   (setq my/noema--paused nil
         my/noema--manual-paused nil
-        my/noema--last-activity-active :unknown
+        my/noema--last-activity-signature :unknown
         my/noema--activity-hooks-installed nil))
 
 ;;;###autoload
@@ -2143,6 +2283,27 @@ failure while it is still going."
           (or (my/noema-jupyter--get 'message error-object) "request failed"))
        (funcall callback result)))))
 
+(defun my/noema--activity-client-status ()
+  "Return per-renderer host activity diagnostics for runtime status."
+  (vconcat
+   (mapcar
+    (lambda (entry)
+      (pcase-let ((`(,buffer . ,active) entry))
+        (with-current-buffer buffer
+          (let ((status (make-hash-table :test 'equal)))
+            (puthash "buffer" (buffer-name buffer) status)
+            (puthash "client" my/noema--client-id status)
+            (puthash "file" my/noema-buffer-file-name status)
+            (puthash "active" (if active t :false) status)
+            (puthash "rendererPaused"
+                     (cond
+                      ((eq my/noema--activity-paused :unknown) "unknown")
+                      (my/noema--activity-paused t)
+                      (t :false))
+                     status)
+            status))))
+    (my/noema--activity-snapshot))))
+
 (defun my/noema-runtime-status ()
   "Display the Noema runtime debug snapshot."
   (interactive)
@@ -2157,6 +2318,7 @@ failure while it is still going."
                (puthash "paused" (if my/noema--paused t :false) activity)
                (puthash "manualPaused" (if my/noema--manual-paused t :false) activity)
                (puthash "bufferVisible" (if (my/noema--app-buffer-visible-p) t :false) activity)
+               (puthash "clients" (my/noema--activity-client-status) activity)
                activity)
              payload)
     (with-current-buffer (get-buffer-create "*Noema runtime status*")
