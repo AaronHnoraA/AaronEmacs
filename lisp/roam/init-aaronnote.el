@@ -25,6 +25,9 @@
 (declare-function my/xwidget-current-url "init-browser" (&optional buffer))
 (declare-function my/xwidget-session-buffer "init-browser" (id))
 (declare-function my/xwidget-focus "init-browser" (&optional buffer))
+(declare-function my/noema--focus-xwidget-buffer "noema-xwidget-keys" (buffer))
+(declare-function my/noema--harden-xwidget-placeholder "noema-xwidget-keys" (&optional buffer))
+(declare-function my/noema--sync-xwidget-recovery-mode "noema-xwidget-keys" (&rest args))
 (declare-function my/xwidget-undo "init-browser" ())
 (declare-function my/xwidget-redo "init-browser" ())
 (declare-function my/xwidget-setup-control-line "init-browser" ())
@@ -266,6 +269,16 @@ the backend.  The backend is chosen here, not per export."
 
 (defvar my/noema--process nil
   "Running Noema web-host child process, or nil.")
+(defvar my/noema--last-interrupt-snapshot nil
+  "Emacs/xwidget state captured when C-g interrupts a Noema adapter action.")
+(defvar my/noema--process-log-queue nil
+  "Newest-first diagnostic output waiting to be written outside its filter.")
+(defvar my/noema--process-log-bytes 0
+  "Approximate byte size of `my/noema--process-log-queue'.")
+(defvar my/noema--process-log-timer nil
+  "One-shot timer flushing deferred web-host diagnostics.")
+(defconst my/noema--process-log-queue-limit (* 256 1024)
+  "Maximum diagnostic output retained between deferred log flushes.")
 (defvar my/noema--gateway-binding nil
   "Registration data for the current Noema web-host process.")
 (defvar my/noema--external-file-watches (make-hash-table :test #'equal)
@@ -296,6 +309,54 @@ the backend.  The backend is chosen here, not per export."
   "Canonical Noema file path to browser buffer map.")
 (defvar my/noema--client-buffers (make-hash-table :test #'equal)
   "Noema browser client id to browser buffer map.")
+
+(defun my/noema--record-interrupted-operation (operation)
+  "Record adapter OPERATION and xwidget state after it receives `quit'."
+  (let* ((buffer (current-buffer))
+         (window-buffer (and (window-live-p (selected-window))
+                             (window-buffer (selected-window))))
+         (xwidget-buffer
+          (and (buffer-live-p buffer)
+               (fboundp 'my/noema--xwidget-buffer-p)
+               (my/noema--xwidget-buffer-p buffer))))
+    (setq my/noema--last-interrupt-snapshot
+          `((time . ,(format-time-string "%FT%T%z"))
+            (operation . ,operation)
+            (buffer . ,(and (buffer-live-p buffer) (buffer-name buffer)))
+            (selectedWindowBuffer
+             . ,(and (buffer-live-p window-buffer)
+                     (buffer-name window-buffer)))
+            (majorMode . ,major-mode)
+            (xwidgetBuffer . ,(and xwidget-buffer t))
+            (xwidgetEditMode . ,(and (boundp 'xwidget-webkit-edit-mode)
+                                    xwidget-webkit-edit-mode t))
+            (recoveryMode . ,(and (boundp 'my/noema-xwidget-recovery-mode)
+                                  my/noema-xwidget-recovery-mode t))
+            (client . ,(and (boundp 'my/noema--client-id)
+                            my/noema--client-id))
+            (hostReady . ,(and my/noema--ready t))
+            (hostProcessLive . ,(and (processp my/noema--process)
+                                     (process-live-p my/noema--process) t))
+            (outboundQueue . ,(length my/noema--post-queue))
+            (inboundQueue . ,(length my/noema--host-event-queue))
+            (thisCommand . ,this-command)
+            (lastCommand . ,last-command)))
+    (message "Noema: C-g interrupted %s; state saved in M-x my/noema-interrupt-status"
+             operation)))
+
+(defun my/noema-interrupt-status ()
+  "Display the most recent C-g snapshot from the Noema Emacs adapter."
+  (interactive)
+  (if (null my/noema--last-interrupt-snapshot)
+      (message "Noema: no adapter operation has been interrupted by C-g")
+    (with-current-buffer (get-buffer-create "*Noema interrupted operation*")
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (dolist (entry my/noema--last-interrupt-snapshot)
+          (insert (format "%-22s %S\n" (car entry) (cdr entry))))
+        (goto-char (point-min))
+        (special-mode))
+      (display-buffer (current-buffer)))))
 
 (defvar my/noema--build-process nil
   "Current Noema web build process, or nil.")
@@ -622,6 +683,7 @@ failure is diagnosable without hunting for it."
   "Spawn the vendored Noema web-host.
 When RECONNECT-PORT is non-nil, reclaim that port so live browser pages can
 reconnect without a reload and without losing their in-memory editor state."
+  (my/noema--clear-process-log-queue)
   (setq my/noema--notes-root (my/noema-workspace-root))
   (make-directory my/noema--notes-root t)
   (unless (executable-find "node")
@@ -1157,14 +1219,50 @@ to JSON a second time."
             (mtimeMs . ,(alist-get 'mtimeMs written))
             (size . ,(alist-get 'size written)))))))))
 
+(defvar my/noema--host-event-queue nil
+  "FIFO of Noema events acknowledged but not yet applied by Emacs.")
+
+(defvar my/noema--host-event-timer nil
+  "One-shot timer draining `my/noema--host-event-queue'.")
+
+(defun my/noema--drain-host-events ()
+  "Apply a bounded FIFO slice after the gateway process filter has returned."
+  (setq my/noema--host-event-timer nil)
+  (let ((remaining 32))
+    (while (and my/noema--host-event-queue (> remaining 0))
+      (pcase-let ((`(,function . ,args) (pop my/noema--host-event-queue)))
+        (condition-case error
+            (apply function args)
+          (quit
+           (my/noema--record-interrupted-operation
+            (format "inbound event %S" function))
+           (setq remaining 1))
+          (error
+           (message "Noema deferred host event failed: %s"
+                    (error-message-string error)))))
+      (setq remaining (1- remaining))))
+  (when my/noema--host-event-queue
+    (setq my/noema--host-event-timer
+          (run-at-time 0 nil #'my/noema--drain-host-events))))
+
+(defun my/noema--defer-host-event (function &rest args)
+  "Queue host event FUNCTION with ARGS and acknowledge its gateway call now."
+  (setq my/noema--host-event-queue
+        (nconc my/noema--host-event-queue
+               (list (cons function (copy-tree args)))))
+  (unless (timerp my/noema--host-event-timer)
+    (setq my/noema--host-event-timer
+          (run-at-time 0 nil #'my/noema--drain-host-events))))
+
 (defun my/noema--gateway-event (params _client)
-  "Dispatch Noema event PARAMS received through the shared gateway."
+  "Acknowledge Noema event PARAMS and dispatch it outside the process filter."
   (let* ((type (format "%s" (or (alist-get 'type params) "")))
          (payload (or (alist-get 'payload params) '()))
          (line
           (pcase type
             ("ui-state"
-             (my/noema--handle-ui-state-payload payload)
+             (my/noema--defer-host-event
+              #'my/noema--handle-ui-state-payload payload)
              nil)
             ("ready"
              (format "aaronote-web-host:ready:%s"
@@ -1181,13 +1279,16 @@ to JSON a second time."
              (let ((key (alist-get 'key payload))
                    (client (alist-get 'client payload)))
                (when (stringp key)
-                 (my/noema--run-emacs-key key client)))
+                 (my/noema--defer-host-event
+                  #'my/noema--run-emacs-key key client)))
              nil)
             ("input-focus"
-             (run-at-time 0 nil #'my/noema--handle-input-focus payload)
+             (my/noema--defer-host-event
+              #'my/noema--handle-input-focus payload)
              nil)
             ("jupyter-session"
-             (my/noema-jupyter-cell-handle-session-event payload)
+             (my/noema--defer-host-event
+              #'my/noema-jupyter-cell-handle-session-event payload)
              nil)
             ((or "open" "system-open" "zotero" "zotero-import"
                  "current-file" "saved")
@@ -1195,7 +1296,7 @@ to JSON a second time."
                      type (json-serialize payload)))
             (_ nil))))
     (when line
-      (my/noema--handle-process-line line))
+      (my/noema--defer-host-event #'my/noema--handle-process-line line))
     '((ok . t))))
 
 (remote-gateway-register-method
@@ -1205,19 +1306,71 @@ to JSON a second time."
 (remote-gateway-register-method
  "aaronnote.file.write" #'my/noema--external-file-write)
 
+(defun my/noema--clear-process-log-queue ()
+  "Cancel and discard deferred web-host diagnostic output."
+  (when (timerp my/noema--process-log-timer)
+    (cancel-timer my/noema--process-log-timer))
+  (setq my/noema--process-log-timer nil
+        my/noema--process-log-queue nil
+        my/noema--process-log-bytes 0))
+
+(defun my/noema--flush-process-log ()
+  "Append queued diagnostics after the child-process filter has returned."
+  (setq my/noema--process-log-timer nil)
+  (let ((entries (nreverse my/noema--process-log-queue))
+        touched)
+    (setq my/noema--process-log-queue nil
+          my/noema--process-log-bytes 0)
+    (dolist (entry entries)
+      (let* ((proc (car entry))
+             (buffer (and (processp proc) (process-buffer proc))))
+        (when (buffer-live-p buffer)
+          (condition-case nil
+              (with-current-buffer buffer
+                (goto-char (point-max))
+                (insert (cdr entry)))
+            (quit
+             (my/noema--record-interrupted-operation
+              "deferred diagnostic log flush")))
+          (cl-pushnew buffer touched))))
+    (dolist (buffer touched)
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          ;; Keep only a recent diagnostic tail.  Trimming once per deferred
+          ;; batch avoids doing buffer edits and line scans in a process
+          ;; filter while the user is typing in an xwidget.
+          (when (> (point-max) 204800)
+            (goto-char (- (point-max) 102400))
+            (forward-line 1)
+            (delete-region (point-min) (point))))))))
+
 (defun my/noema--process-filter (proc output)
-  "Append diagnostic web-host OUTPUT from PROC to its bounded log."
-  (when (buffer-live-p (process-buffer proc))
-    (with-current-buffer (process-buffer proc)
-      (goto-char (point-max))
-      (insert output)
-      ;; Bound log growth: keep only the most recent ~200 KB, trimming at a
-      ;; complete line boundary so no partial lines are left behind.
-      ;; The parser accumulator lives in the process property, not this buffer.
-      (when (> (point-max) 204800)
-        (goto-char (- (point-max) 102400))
-        (forward-line 1)
-        (delete-region (point-min) (point)))))
+  "Queue diagnostic web-host OUTPUT without editing buffers in the filter."
+  (when (and (stringp output)
+             (> (length output) 0)
+             (buffer-live-p (process-buffer proc)))
+    (let ((bytes (string-bytes output)))
+      ;; Diagnostics must never form unbounded backpressure.  If the child
+      ;; produces more than one deferred batch can retain, discard the older
+      ;; diagnostic-only chunks and preserve a visible overflow marker plus
+      ;; the newest output.  Runtime messages travel over the gateway, not
+      ;; this log stream.
+      (when (> (+ my/noema--process-log-bytes bytes)
+               my/noema--process-log-queue-limit)
+        (setq my/noema--process-log-queue
+              (list (cons proc "\n[Noema diagnostic burst truncated]\n"))
+              my/noema--process-log-bytes 36))
+      (when (> bytes my/noema--process-log-queue-limit)
+        (setq output
+              (substring output
+                         (max 0 (- (length output)
+                                   (/ my/noema--process-log-queue-limit 2)))))
+        (setq bytes (string-bytes output)))
+      (push (cons proc output) my/noema--process-log-queue)
+      (cl-incf my/noema--process-log-bytes bytes))
+    (unless (timerp my/noema--process-log-timer)
+      (setq my/noema--process-log-timer
+            (run-at-time 0 nil #'my/noema--flush-process-log))))
   nil)
 
 (defun my/noema--sentinel (proc event)
@@ -1387,7 +1540,9 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
                          file
                          (or (my/noema--split-client-ordinal client) 0))
                       (my/noema--buffer-display-name file)))
+        (my/noema--harden-xwidget-placeholder)
         (my/noema-keys-mode 1)
+        (my/noema--sync-xwidget-recovery-mode)
         (when file
           (setq-local default-directory
                       (file-name-as-directory (file-name-directory file)))
@@ -1498,7 +1653,7 @@ reloading.  Non-file opens (roam graph, etc.) share the singleton
           (with-current-buffer existing
             (when (fboundp 'my/xwidget-setup-control-line)
               (my/xwidget-setup-control-line)))
-          (run-at-time 0.3 nil #'my/xwidget-focus existing)
+          (run-at-time 0.3 nil #'my/noema--focus-xwidget-buffer existing)
           (my/noema--track-app-buffer existing file id)
           existing)
       ;; New session: open directly at the target URL.
@@ -1508,7 +1663,6 @@ reloading.  Non-file opens (roam graph, etc.) share the singleton
                                          :reuse-selected t)))
         (when (buffer-live-p buffer)
           (with-current-buffer buffer
-            (setq-local my/xwidget-focus-script my/noema--xwidget-focus-script)
             (when (fboundp 'my/xwidget-setup-control-line)
               (my/xwidget-setup-control-line))))
         (my/noema--track-app-buffer buffer file id)
@@ -1579,12 +1733,109 @@ reusing a remembered one."
     ('xwidget (my/noema--open-xwidget url file))
     (_ (user-error "Unsupported Noema backend: %S" my/noema-backend))))
 
-(defun my/noema--post (payload)
-  "Send small control PAYLOAD to the Noema web-host."
+(defvar my/noema--post-queue nil
+  "FIFO of notification payloads waiting to leave the Emacs command loop.")
+
+(defvar my/noema--post-timer nil
+  "One-shot timer draining `my/noema--post-queue'.")
+
+(defvar my/noema--post-awaiting-ready nil
+  "Non-nil while the notification queue is waiting for web-host readiness.")
+
+(defconst my/noema--post-queue-limit 512
+  "Maximum pending Noema notifications retained while its host is unavailable.")
+
+(defun my/noema--post-now (payload)
+  "Write one small control PAYLOAD to an already-ready Noema web-host."
   (when-let* ((client
                (and my/noema--ready
                     (remote-gateway-find-client "aaronnote"))))
-    (remote-gateway-notify client "aaronnote.command" payload)))
+    (remote-gateway-notify client "aaronnote.command" payload)
+    t))
+
+(defun my/noema--schedule-post-drain ()
+  "Schedule one notification-queue drain without stacking timers."
+  (unless (timerp my/noema--post-timer)
+    (setq my/noema--post-timer
+          (run-at-time 0 nil #'my/noema--drain-post-queue))))
+
+(defun my/noema--clear-post-queue ()
+  "Cancel and forget every pending Noema notification or inbound event."
+  (when (timerp my/noema--post-timer)
+    (cancel-timer my/noema--post-timer))
+  (when (timerp my/noema--host-event-timer)
+    (cancel-timer my/noema--host-event-timer))
+  (setq my/noema--post-timer nil
+        my/noema--post-queue nil
+        my/noema--post-awaiting-ready nil
+        my/noema--host-event-timer nil
+        my/noema--host-event-queue nil))
+
+(defun my/noema--drain-post-queue ()
+  "Drain a bounded slice of queued Noema notifications."
+  (setq my/noema--post-timer nil)
+  (cond
+   ((null my/noema--post-queue)
+    (setq my/noema--post-awaiting-ready nil))
+   ((not (and my/noema--ready
+              (remote-gateway-find-client "aaronnote")))
+    (unless my/noema--post-awaiting-ready
+      (setq my/noema--post-awaiting-ready t)
+      (my/noema--ensure-server
+       (lambda ()
+         (setq my/noema--post-awaiting-ready nil)
+         (my/noema--schedule-post-drain)))))
+   (t
+    ;; Keep a burst of shell activity/focus notifications from monopolizing
+    ;; one Emacs command-loop turn. A local gateway write is notification-only;
+    ;; no response is registered or awaited.
+    (let ((remaining 32))
+      (while (and my/noema--post-queue (> remaining 0))
+        (let ((payload (pop my/noema--post-queue)))
+          (condition-case error
+              (my/noema--post-now payload)
+            (quit
+             (my/noema--record-interrupted-operation
+              (format "outbound notification %s"
+                      (or (alist-get 'command payload)
+                          (alist-get 'type payload)
+                          "unknown")))
+             (setq remaining 1))
+            (error
+             (message "Noema notification failed: %s"
+                      (error-message-string error)))))
+        (setq remaining (1- remaining))))
+    (when my/noema--post-queue
+      (my/noema--schedule-post-drain)))))
+
+(defun my/noema--post (payload)
+  "Queue control PAYLOAD without doing socket I/O in the caller's stack."
+  (let* ((command (alist-get 'command payload))
+         (client (or (alist-get 'client payload) ""))
+         (replaceable
+          (cond
+           ((member command '("pause" "resume")) (list client 'activity))
+           ((equal command "focus") (list client 'focus)))))
+    (when replaceable
+      (setq my/noema--post-queue
+            (cl-delete-if
+             (lambda (queued)
+               (let ((queued-command (alist-get 'command queued))
+                     (queued-client (or (alist-get 'client queued) "")))
+                 (equal replaceable
+                        (cond
+                         ((member queued-command '("pause" "resume"))
+                          (list queued-client 'activity))
+                         ((equal queued-command "focus")
+                          (list queued-client 'focus))))))
+             my/noema--post-queue))))
+  (setq my/noema--post-queue
+        (nconc my/noema--post-queue (list (copy-tree payload))))
+  (when (> (length my/noema--post-queue) my/noema--post-queue-limit)
+    (setq my/noema--post-queue
+          (last my/noema--post-queue my/noema--post-queue-limit)))
+  (my/noema--schedule-post-drain)
+  t)
 
 (defun my/noema--open-file-in-web (file)
   "Ask the already open Noema page to open FILE."
@@ -1718,7 +1969,6 @@ normal file/session reuse map owned by the canonical pane."
                (setq-local my/noema--xwidget-forced-name
                            (my/noema--split-buffer-display-name
                             file ordinal))
-               (setq-local my/xwidget-focus-script my/noema--xwidget-focus-script)
                (puthash client (current-buffer) my/noema--client-buffers)
                (add-hook 'kill-buffer-hook #'my/noema--cleanup-buffer nil t)
                (when (fboundp 'my/xwidget-setup-control-line)
@@ -1734,7 +1984,9 @@ normal file/session reuse map owned by the canonical pane."
                              (file-name-as-directory (file-name-directory file)))
                  (when (fboundp 'my/direnv-schedule-current-buffer)
                    (my/direnv-schedule-current-buffer)))
-               (my/noema-keys-mode 1)))
+               (my/noema--harden-xwidget-placeholder)
+               (my/noema-keys-mode 1)
+               (my/noema--sync-xwidget-recovery-mode)))
            (my/noema--refresh-visible-ibuffers)
            (when (window-live-p target-window)
              (select-window target-window))))))))
@@ -1781,20 +2033,13 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
 
 ;;;###autoload
 (defun my/noema-command (command &optional detail)
-  "Send COMMAND with optional DETAIL to the open Noema page."
+  "Queue COMMAND with optional DETAIL for the open Noema page.
+This function never starts the host, writes a socket, evaluates JavaScript or
+waits for a response in the invoking Emacs command."
   (interactive "sAaronnote command: ")
-  ;; `my/noema--send-command' reads the client id of the current buffer.  When
-  ;; the web host is still starting, the send runs later from a ready callback
-  ;; timer whose current buffer is arbitrary, which drops the address and turns
-  ;; a per-pane command into a broadcast every renderer obeys.  Capture the
-  ;; issuing pane so a deferred send still reaches exactly that client.
-  (let ((origin (current-buffer)))
-    (my/noema--ensure-server
-     (lambda ()
-       (if (buffer-live-p origin)
-           (with-current-buffer origin
-             (my/noema--send-command command detail))
-         (my/noema--send-command command detail))))))
+  ;; `my/noema--send-command' captures the current pane id into the queued
+  ;; payload now; the later timer therefore cannot turn it into a broadcast.
+  (my/noema--send-command command detail))
 
 ;;;###autoload
 (defun my/noema-escape ()
@@ -1943,9 +2188,13 @@ shared renderer activity gate may sleep until that pane is selected again."
           (setq-local my/noema--activity-paused :unknown)
           (when-let* ((session (ignore-errors
                                  (xwidget-webkit-current-session))))
-            (ignore-errors
-              (xwidget-webkit-execute-script
-               session my/noema--core-ready-script))))))
+            (condition-case nil
+                (xwidget-webkit-execute-script
+                 session my/noema--core-ready-script)
+              (quit
+               (my/noema--record-interrupted-operation
+                "retained xwidget core reconnect"))
+              (error nil))))))
     (when my/noema--activity-hooks-installed
       (setq my/noema--last-activity-signature :unknown)
       (my/noema--update-activity))))
@@ -2105,6 +2354,8 @@ and every renderer uses the same `runHostCommand' pause implementation."
 The web-host (Node) is the backend; once it is gone, any Appine tabs showing
 its pages are dead, so the Emacs-side tab registry is cleared too."
   (interactive)
+  (my/noema--clear-post-queue)
+  (my/noema--clear-process-log-queue)
   (my/noema--remove-activity-hooks)
   (when (fboundp 'my/noema-roam--cancel-sync-timer)
     (my/noema-roam--cancel-sync-timer))
@@ -2225,23 +2476,6 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
      (mapcar #'my/noema--gateway-hash-value value)))
    (t value)))
 
-(defun my/noema--api-call-sync (channel args &optional timeout)
-  "Call CHANNEL with ARGS synchronously; return parsed JSON or nil.
-Only usable when the web-host is running (`my/noema--ready' is non-nil).
-Blocks the caller until the response arrives or TIMEOUT seconds elapse
-\(8 by default).  Interactive callers that run on a keystroke — completion
-at point, for instance — should pass a much shorter TIMEOUT so a busy
-kernel cannot freeze the editor."
-  (when-let* ((client
-               (and my/noema--ready
-                    (remote-gateway-find-client "aaronnote")))
-              (result
-               (remote-gateway-request-sync
-                client "aaronnote.api"
-                `((channel . ,channel) (args . ,args))
-                (or timeout 8))))
-    (my/noema--gateway-hash-value result)))
-
 (defcustom my/noema-api-call-timeout 10
   "Seconds to wait for an ordinary asynchronous Noema API reply."
   :type 'number
@@ -2309,27 +2543,32 @@ failure while it is still going."
   (interactive)
   (unless my/noema--ready
     (user-error "Noema web-host is not ready"))
-  (let ((payload (my/noema--api-call-sync
-                  "aaronnote:api:runtime:debug" [])))
-    (unless payload
-      (user-error "Noema runtime status unavailable"))
-    (puthash "emacsActivity"
-             (let ((activity (make-hash-table :test 'equal)))
-               (puthash "paused" (if my/noema--paused t :false) activity)
-               (puthash "manualPaused" (if my/noema--manual-paused t :false) activity)
-               (puthash "bufferVisible" (if (my/noema--app-buffer-visible-p) t :false) activity)
-               (puthash "clients" (my/noema--activity-client-status) activity)
-               activity)
-             payload)
-    (with-current-buffer (get-buffer-create "*Noema runtime status*")
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (json-serialize payload
-                                :false-object :false
-                                :null-object nil))
-        (goto-char (point-min))
-        (special-mode))
-      (display-buffer (current-buffer)))))
+  (message "Noema: loading runtime status…")
+  (my/noema-api-call
+   "aaronnote:api:runtime:debug" []
+   (lambda (result error-object)
+     (if error-object
+         (message "Noema runtime status unavailable: %s"
+                  (or (my/noema-jupyter--get 'message error-object)
+                      "request failed"))
+       (let ((payload (my/noema--gateway-hash-value result)))
+         (puthash "emacsActivity"
+                  (let ((activity (make-hash-table :test 'equal)))
+                    (puthash "paused" (if my/noema--paused t :false) activity)
+                    (puthash "manualPaused" (if my/noema--manual-paused t :false) activity)
+                    (puthash "bufferVisible" (if (my/noema--app-buffer-visible-p) t :false) activity)
+                    (puthash "clients" (my/noema--activity-client-status) activity)
+                    activity)
+                  payload)
+         (with-current-buffer (get-buffer-create "*Noema runtime status*")
+           (let ((inhibit-read-only t))
+             (erase-buffer)
+             (insert (json-serialize payload
+                                     :false-object :false
+                                     :null-object nil))
+             (goto-char (point-min))
+             (special-mode))
+           (display-buffer (current-buffer))))))))
 
 (defun my/noema-wiki-refresh (&optional full)
   "Refresh wiki.db incrementally, or perform a FULL atomic rebuild."
@@ -2364,22 +2603,30 @@ failure while it is still going."
   (interactive)
   (unless my/noema--ready
     (user-error "Noema: server not running"))
-  (let ((payload (my/noema--api-call-sync
-                  "aaronnote:api:wiki:index-status" [])))
-    (unless payload (user-error "Noema Wiki index status unavailable"))
-    (setq my/noema--last-sync-stats
-          (format "wiki %s · %s"
-                  (or (gethash "lastMode" payload) "not built")
-                  (let ((generation (or (gethash "generation" payload) "")))
-                    (if (> (length generation) 8) (substring generation 0 8) generation))))
-    (with-current-buffer (get-buffer-create "*Noema Wiki index status*")
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert (json-encode payload))
-        (json-pretty-print-buffer)
-        (goto-char (point-min))
-        (special-mode))
-      (display-buffer (current-buffer)))))
+  (message "Noema: loading Wiki index status…")
+  (my/noema-api-call
+   "aaronnote:api:wiki:index-status" []
+   (lambda (result error-object)
+     (if error-object
+         (message "Noema Wiki index status unavailable: %s"
+                  (or (my/noema-jupyter--get 'message error-object)
+                      "request failed"))
+       (let ((payload (my/noema--gateway-hash-value result)))
+         (setq my/noema--last-sync-stats
+               (format "wiki %s · %s"
+                       (or (gethash "lastMode" payload) "not built")
+                       (let ((generation (or (gethash "generation" payload) "")))
+                         (if (> (length generation) 8)
+                             (substring generation 0 8)
+                           generation))))
+         (with-current-buffer (get-buffer-create "*Noema Wiki index status*")
+           (let ((inhibit-read-only t))
+             (erase-buffer)
+             (insert (json-encode payload))
+             (json-pretty-print-buffer)
+             (goto-char (point-min))
+             (special-mode))
+           (display-buffer (current-buffer))))))))
 
 ;; The old command symbol remains for external keymaps; it no longer has any
 ;; Roam database implementation behind it.
