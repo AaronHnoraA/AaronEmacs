@@ -158,6 +158,8 @@ function toLake(msg) {
 
 let initResult   = null          // cached from lake's initialize response
 let initEglotId  = null          // Eglot's initialize request id (to capture response)
+let clientShutdown = false       // client asked for LSP shutdown/exit — lake may go
+const PROXY_EXIT_DELAY_MS = 250  // grace period so the final SSE status frame lands
 let ivsrvSeq     = 0             // proxy→Eglot server→client request ids
 let ivSeq        = 0             // proxy→lake infoview request ids (string "iv:N")
 
@@ -338,12 +340,15 @@ function fromEglot(msg) {
     if (msg.method === 'initialize' && initResult === null) {
       initEglotId = msg.id
     }
+    // An orderly `shutdown' means lake's coming exit is expected, not a crash.
+    if (msg.method === 'shutdown') clientShutdown = true
     toLake(msg)
     return
   }
 
   if (hasMethod && !hasId) {
     // Notification from Eglot — tap, forward to lake
+    if (msg.method === 'exit') clientShutdown = true
     tapClientMsg(msg)
     toLake(msg)
     return
@@ -417,6 +422,25 @@ function killDownstream(signal = 'SIGTERM') {
   catch { try { lakeProc.kill(signal) } catch { /* already gone */ } }
 }
 
+// The client's transport is this proxy, not lake.  Surviving lake's death would
+// leave a live stdio pipe that keeps the client believing its workspace is
+// healthy while every request stalls forever.  The proxy caches no document
+// text, so it cannot re-sync a fresh lake behind the client's back either — the
+// honest recovery is to die with lake and let the client's own restart policy
+// start a new pair.  The delay lets the final SSE status frame reach any
+// connected infoview page.
+let proxyExiting = false
+
+function exitWithLake(reason) {
+  if (clientShutdown || proxyExiting) return
+  proxyExiting = true
+  log(`${reason}; exiting so the client can restart the server`)
+  setTimeout(() => {
+    gatewaySocket?.close()
+    process.exit(1)
+  }, PROXY_EXIT_DELAY_MS)
+}
+
 function startLake() {
   const [cmd, ...cmdArgs] = DOWNSTREAM
   log(`spawning: ${cmd} ${cmdArgs.join(' ')} cwd=${ROOT}`)
@@ -427,6 +451,9 @@ function startLake() {
   lakeProc.on('error', err => {
     log(`lake error: ${err.message}`)
     sseEmit('lean:status', { kind: 'Error', message: err.message })
+    // A failed spawn never reaches the `exit' handler below, so report it the
+    // same way instead of idling as a transport with nothing behind it.
+    exitWithLake(`lake could not be started (${err.message})`)
   })
   lakeProc.on('exit', (code, signal) => {
     log(`lake exited: code=${code} signal=${signal}`)
@@ -448,6 +475,7 @@ function startLake() {
       kind: 'Error',
       message: `Lean server exited (${signal ?? code ?? 'unknown'})`,
     })
+    exitWithLake(`lake is gone (${signal ?? code ?? 'unknown'})`)
   })
   // Eglot stdin feeds the proxy; proxy feeds lake
   const eglotFramer = new LspFramer(fromEglot)

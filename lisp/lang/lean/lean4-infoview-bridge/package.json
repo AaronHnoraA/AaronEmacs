@@ -4,8 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
-    "server": "node server.mjs"
+    "build": "vite build"
   },
   "dependencies": {
     "@leanprover/infoview": "~0.13.0",

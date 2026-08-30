@@ -173,15 +173,21 @@ Lean 4 走自定义 `lean-mode`，并统一使用 lsp-mode。模块分层如下�
 | 模块 | 职责 |
 |------|------|
 | `lisp/lang/lean/init-lean.el` | 主 mode、lsp-mode client 注册、project 定位、ripgrep 符号搜索、UI 总入口 |
-| `lisp/lang/lean/init-lean-lsp.el` | `$/lean/fileProgress` 通知、fringe/sideline 进度与 Flymake 兼容层 |
+| `lisp/lang/lean/init-lean-lsp.el` | `textDocument/publishDiagnostics`、`$/lean/fileProgress`、`lean/restartFile` 通知处理，fringe/sideline 进度与 Flymake 后端 |
+| `lisp/lang/lean/init-lean-jump.el` | 基于 `$/lean/plainGoal` 的 goal 变化跳转 |
 | `lisp/lang/lean/init-lean-infoview.el` | 官方 xwidget infoview 桥接（`C-c C-i`）|
-| `lisp/lang/lean/lean4-infoview-bridge/` | Node.js HTTP bridge：转发 LSP、服务官方 React infoview |
+| `lisp/lang/lean/lean4-infoview-bridge/` | `lean-proxy.mjs`：既是 lsp-mode 的 transport，也用 HTTP+SSE 服务官方 React infoview |
+
+Lean 的通知/请求 payload 一律用 `lsp-get` 读取：lsp-mode 只有在以
+`LSP_USE_PLISTS` 编译时才给 plist，本仓库的构建给的是 hash table，用
+`plist-get` 会静默取到 nil（诊断、进度、goal 跳转全部失效）。
 
 **键位（lean-mode buffer）**
 
 | 键 | 命令 |
 |----|------|
 | `C-c C-i` | 切换官方 xwidget infoview |
+| `C-c i r` | 重启 infoview（连带 proxy 与 `lake serve`）|
 | `C-c C-r` | 重启 lsp-mode workspace |
 | `C-c C-d` | 重刷文件依赖 |
 | `C-c C-a` | lsp-mode code actions |
@@ -190,19 +196,27 @@ Lean 4 走自定义 `lean-mode`，并统一使用 lsp-mode。模块分层如下�
 
 **Xwidget infoview 架构**
 
-1. `lean-iv-toggle` 启动 `lisp/lang/lean/lean4-infoview-bridge/server.mjs`（Node.js），参数为
-   `<port> <project-root>`；server 内部运行 `lake serve`（LSP）。
-2. Bridge 在 stdout 输出 `LEAN_INFOVIEW_PORT=<N>`，Emacs 进程 filter 捕获后开
-   启 xwidget-webkit 窗口（`http://127.0.0.1:<N>/`），加载官方 `@leanprover/infoview`。
-3. **Emacs→infoview**：`lean-iv-sync-cursor-h` 在每次 `post-command-hook` 调用
-   `window.updateCursor(uri, line, char)`；文本变化通过 HTTP POST `/cursor` 同步。
-4. **Infoview→Emacs 反向通道**：infoview 点击/触发动作时，前端 POST 到 bridge
-   的 `/editor/<cmd>` 路由；bridge 将 `EMACS_CMD={...}` 写到 stdout；Emacs 进程
-   filter 解析后分发：
-   - `show-document` → `pop-to-buffer` + 跳转行列（点击 goal 定位）
-   - `insert-text` → 在活跃 lean buffer 插入文字（"Try this" 建议）
-   - `apply-edit` → 应用文本编辑（code actions）
-   - `restart-file` → 调用 `lean-refresh-file-dependencies`
+1. lsp-mode 启动的"语言服务器"就是 `lean-proxy.mjs`（client placement，跑在本
+   机，因为它要渲染本机的 xwidget）。proxy 的 downstream 才是 workspace target
+   上的 `lake serve`，由 `remote-local-bridge-command` 投射过去。proxy 对 JSON-RPC
+   是透明转发，只是顺手 tap 下诊断/进度并缓存 `initialize` 结果。
+2. proxy 在本机随机端口上用 HTTP+SSE 服务官方 `@leanprover/infoview`，并把端口
+   注册到 Emacs gateway；`lean--iv-wait-for-port` 等到 peer 出现后打开
+   xwidget-webkit（`http://127.0.0.1:<N>/`）。远程 target 的端口经
+   `remote-port-forward` 暴露到本机。
+3. **Emacs→infoview**：只同步光标。`lean-iv-sync-cursor-h` 在 `post-command-hook`
+   里 POST `/cursor`；文档同步完全由 lsp-mode 经 proxy 完成。
+4. **Infoview→Emacs 反向通道**：走标准 LSP server→client 消息，由 proxy 注入：
+   - `window/showDocument` → lsp-mode 原生处理（点击 goal 定位）
+   - `workspace/applyEdit` → lsp-mode 原生处理（"Try this" 建议、code actions）
+   - `lean/restartFile` → 自定义通知，`lean-handle-restart-file` 调用
+     `lean-refresh-file-dependencies`
+5. **生命周期**：proxy 与 `lake serve` 同生共死——lake 意外退出时 proxy 也退出，
+   否则 stdio 还活着会让 lsp-mode 以为 workspace 健康，而每个请求都永远挂起。
+   `lsp-restart` 为 `auto-restart`，于是新的 proxy+lake 会被拉起（新端口），
+   `lean-iv-server-restarted-h` 把已打开的 infoview 重新指向新端口。页面加载时
+   若 proxy 报 `running:false`，infoview 直接显示服务器已退出，而不是一直停在
+   "Waiting for Lean server to start"。
 
 **补全**：lean buffer 使用全局 capf + corfu + nerd-icons 补全，不启用 company-mode。
 

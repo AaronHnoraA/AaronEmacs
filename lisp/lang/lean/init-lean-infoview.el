@@ -68,6 +68,11 @@
 (defvar lean--iv--remote-forwards (make-hash-table :test #'equal)
   "Hash table: remote project root → live proxy port forward.")
 
+(defvar lean--iv--xwidget-ports (make-hash-table :test #'equal)
+  "Hash table: project-root → proxy port currently loaded in its xwidget.
+Each language-server start allocates a fresh proxy on a fresh port, so this
+records which one a page is actually showing.")
+
 (defvar-local lean--iv--xwidget-buf nil
   "The xwidget buffer associated with this lean-mode source buffer.")
 
@@ -356,6 +361,7 @@
     (with-current-buffer source
       (setq lean--iv--xwidget-buf xbuf))
     (puthash root xbuf lean--iv--xwidget-buffers)
+    (puthash root port lean--iv--xwidget-ports)
     (when-let* ((xw (lean--iv-xwidget-of xbuf)))
       (ignore-errors
         (if existing
@@ -487,6 +493,25 @@ Uses a fast xwidget-webkit-execute-script path and an HTTP debounce fallback."
                       (lean--iv-log "sync cursor after open (delay %s)" d)
                       (ignore-errors (lean-iv-sync-cursor-h))))))))))))))
 
+;; ── Server restart ────────────────────────────────────────────────────────────
+
+(defun lean-iv-server-restarted-h ()
+  "Re-point a visible infoview at this project's current proxy.
+
+The proxy dies with its `lake serve\=', so `lsp-restart\=' brings up a new pair on
+a new port.  Without this the xwidget keeps showing the previous port, which
+nothing answers on any more."
+  (when (and (derived-mode-p 'lean-mode)
+             (lean--iv-active-p))
+    (let* ((root   (lean--iv-project-root))
+           (loaded (gethash root lean--iv--xwidget-ports))
+           (port   (lean--iv-proxy-port root)))
+      ;; Another buffer joining the same live proxy must not reload the page.
+      (unless (and port (equal port loaded))
+        (lean--iv-log "server restarted: re-pointing infoview (loaded port %s)"
+                      loaded)
+        (lean--iv-open-current-buffer)))))
+
 ;; ── Toggle / restart ──────────────────────────────────────────────────────────
 
 (defun lean--iv-reconnect-server ()
@@ -533,6 +558,7 @@ Uses a fast xwidget-webkit-execute-script path and an HTTP debounce fallback."
         (kill-buffer xbuf)
         (setq lean--iv--xwidget-buf nil)
         (remhash root lean--iv--xwidget-buffers)
+        (remhash root lean--iv--xwidget-ports)
         (lean--iv-close-remote-forward root))
       (if (and (bound-and-true-p lsp-managed-mode)
                (or (not (lean--proxy-gateway-binding root))
@@ -563,6 +589,7 @@ the infoview xwidget page."
       (kill-buffer xbuf))
     (setq lean--iv--xwidget-buf nil)
     (remhash root lean--iv--xwidget-buffers)
+    (remhash root lean--iv--xwidget-ports)
     (lean--iv-close-remote-forward root)
     (lean--proxy-forget-gateway-binding root)
     (setq lean--iv--last-cursor nil)
@@ -595,7 +622,8 @@ the infoview xwidget page."
                                         (equal (lean--iv-project-root) root)))))
                           (buffer-list))
           (when (eq (gethash root lean--iv--xwidget-buffers) xbuf)
-            (remhash root lean--iv--xwidget-buffers))
+            (remhash root lean--iv--xwidget-buffers)
+            (remhash root lean--iv--xwidget-ports))
           (lean--iv-close-remote-forward root)
           (kill-buffer xbuf))))))
 

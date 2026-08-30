@@ -58,6 +58,7 @@
 (declare-function lsp-workspace-restart "lsp-mode" (workspace))
 (declare-function lsp-workspaces "lsp-mode" ())
 (declare-function lsp-stdio-connection "lsp-mode" (command &optional test-command))
+(declare-function lsp-get "lsp-protocol" (from key))
 (declare-function flymake-mode "flymake" (&optional arg))
 (declare-function flymake-start "flymake" (&optional deferred force))
 (declare-function lean-setup-flymake-backend "init-lean-lsp" ())
@@ -69,6 +70,7 @@
 (declare-function lean-iv-sync-cursor-h "init-lean-infoview")
 (declare-function lean-iv-setup-buffer-sync "init-lean-infoview")
 (declare-function lean-iv-teardown-h "init-lean-infoview")
+(declare-function lean-iv-server-restarted-h "init-lean-infoview")
 (declare-function lean-iv-toggle "init-lean-infoview")
 (declare-function lean-iv-restart "init-lean-infoview")
 (declare-function lean-iv-node-p "init-lean-infoview")
@@ -512,8 +514,10 @@ server."
 (defvar-local lean--progress-mode-line-string nil)
 
 (defun lean-progress-kind (item)
-  "Return the :kind field from a fileProgress ITEM (plist)."
-  (or (plist-get item :kind) 1))
+  "Return the :kind field from a fileProgress ITEM.
+ITEM comes straight from the server, so it is read with `lsp-get\=': lsp-mode
+delivers payloads as hash tables unless it was built with LSP_USE_PLISTS."
+  (or (lsp-get item :kind) 1))
 
 (defun lean--flymake-count (kind)
   "Return cached Lean Flymake diagnostic count for KIND."
@@ -660,6 +664,10 @@ re-enabled on separate idle slices by `lean--schedule-lsp-ui\='."
 Completion uses the global corfu+capf surface — no company-mode override."
   (when (fboundp 'lean-setup-sideline)
     (lean-setup-sideline))
+  ;; A restart brings up a new proxy on a new port; an open infoview must
+  ;; follow it instead of showing the dead one.
+  (when (fboundp 'lean-iv-server-restarted-h)
+    (lean-iv-server-restarted-h))
   (lean-dev-log "lsp UI active: flymake=%S eldoc=%S doc-frame=%S fringe=%S"
                 (bound-and-true-p flymake-mode)
                 (bound-and-true-p eldoc-mode)

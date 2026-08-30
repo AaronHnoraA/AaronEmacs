@@ -307,9 +307,24 @@ export function createLeanOfficialInfoviewHost(
   void apiLean
     .status()
     .then((raw) => {
-      const data = raw as { running?: boolean; initializeResult?: unknown };
+      const data = raw as {
+        running?: boolean;
+        initializeResult?: unknown;
+        kind?: string;
+        message?: string;
+      };
       if (data?.running && data.initializeResult)
         restartInfoview(data.initializeResult);
+      else if (data?.running === false)
+        // The `lean:status' event announcing the exit fired before this page
+        // existed, so the live SSE path never sees it.  Without this the panel
+        // waits forever for a server that is already gone.
+        stopInfoview({
+          message: String(data.message ?? "Lean server is not running"),
+          reason: String(data.kind ?? "Inactive"),
+        });
+      // `running' with no initializeResult means lake is still handshaking:
+      // the infoview's own "Waiting for Lean server to start" is correct there.
     })
     .catch((err) =>
       console.warn("[lean-infoview] status query failed", err),

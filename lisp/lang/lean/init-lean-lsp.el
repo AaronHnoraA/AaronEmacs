@@ -17,6 +17,7 @@
 
 (declare-function lean-progress-mode-line-refresh "init-lean")
 (declare-function lean-dev-log "init-lean" (format-string &rest args))
+(declare-function lsp-get "lsp-protocol" (from key))
 (declare-function lsp--position-to-point "lsp-mode" (params))
 (declare-function lsp--uri-to-path "lsp-mode" (uri))
 (declare-function lsp--text-document-identifier "lsp-mode" ())
@@ -272,9 +273,9 @@ Use `note' to show all Lean informational output, including `#check' results."
 
 (defun lean--progress-position (item)
   "Return buffer position for Lean file-progress ITEM."
-  (when-let* ((range (plist-get item :range))
-              (start (plist-get range :start))
-              (line (plist-get start :line)))
+  (when-let* ((range (lsp-get item :range))
+              (start (lsp-get range :start))
+              (line (lsp-get start :line)))
     (save-excursion
       (goto-char (point-min))
       (forward-line line)
@@ -290,10 +291,10 @@ Use `note' to show all Lean informational output, including `#check' results."
                      (lean--position-visible-p pos ranges))
             (push (cons line
                         (list :pos pos
-                              :kind (if (eq (plist-get item :kind) 1)
+                              :kind (if (eq (lsp-get item :kind) 1)
                                         'processing
                                       'blocked)
-                              :text (if (eq (plist-get item :kind) 1)
+                              :text (if (eq (lsp-get item :kind) 1)
                                         "checking"
                                       "blocked or failed")
                               :extra 0))
@@ -393,10 +394,10 @@ Use `note' to show all Lean informational output, including `#check' results."
 
 (defun lean--diagnostic-region (diagnostic)
   "Return the buffer region for Lean LSP DIAGNOSTIC."
-  (when-let* ((range (or (plist-get diagnostic :range)
-                         (plist-get diagnostic :fullRange)))
-              (start (plist-get range :start))
-              (end-pos (plist-get range :end)))
+  (when-let* ((range (or (lsp-get diagnostic :range)
+                         (lsp-get diagnostic :fullRange)))
+              (start (lsp-get range :start))
+              (end-pos (lsp-get range :end)))
     (save-excursion
       (let ((beg (lsp--position-to-point start))
             (end (lsp--position-to-point end-pos)))
@@ -406,13 +407,13 @@ Use `note' to show all Lean informational output, including `#check' results."
 
 (defun lean--diagnostic-message (diagnostic)
   "Return a Flymake info payload for Lean LSP DIAGNOSTIC."
-  (list (or (plist-get diagnostic :source) "Lean 4")
-        (plist-get diagnostic :code)
-        (or (plist-get diagnostic :message) "")))
+  (list (or (lsp-get diagnostic :source) "Lean 4")
+        (lsp-get diagnostic :code)
+        (or (lsp-get diagnostic :message) "")))
 
 (defun lean--diagnostic-severity-key (diagnostic)
   "Return cached count key for Lean LSP DIAGNOSTIC severity."
-  (let ((severity (plist-get diagnostic :severity)))
+  (let ((severity (lsp-get diagnostic :severity)))
     (cond
      ((or (null severity) (<= severity 1)) :error)
      ((= severity 2) :warning)
@@ -432,7 +433,7 @@ Use `note' to show all Lean informational output, including `#check' results."
 
 (defun lean--diagnostic-silent-p (diagnostic)
   "Return non-nil when Lean DIAGNOSTIC should not enter Flymake."
-  (eq (plist-get diagnostic :isSilent) t))
+  (eq (lsp-get diagnostic :isSilent) t))
 
 (defun lean--visible-diagnostics ()
   "Return raw Lean diagnostics that should be visible through Flymake."
@@ -454,7 +455,7 @@ An absent severity means `Error\=' per the LSP specification."
      (current-buffer)
      (car region)
      (cdr region)
-     (lean--flymake-diag-type (plist-get diagnostic :severity))
+     (lean--flymake-diag-type (lsp-get diagnostic :severity))
      (lean--diagnostic-message diagnostic)
      `((lean-lsp-diag . ,diagnostic)
        (lean-doc-version . ,version)))))
@@ -535,10 +536,10 @@ An absent severity means `Error\=' per the LSP specification."
 Lean streams diagnostics incrementally and marks some of them silent, so
 they are batched here and rendered by `lean--publish-flymake-diagnostics\='
 rather than by lsp-mode's generic diagnostics store."
-  (let* ((uri (plist-get params :uri))
-         (diagnostics (plist-get params :diagnostics))
-         (version (plist-get params :version))
-         (incremental (eq (plist-get params :isIncremental) t))
+  (let* ((uri (lsp-get params :uri))
+         (diagnostics (lsp-get params :diagnostics))
+         (version (lsp-get params :version))
+         (incremental (eq (lsp-get params :isIncremental) t))
          (buf (lean--diagnostics-buffer-for-uri uri)))
     (when (and (buffer-live-p buf)
                (with-current-buffer buf (derived-mode-p 'lean-mode)))
@@ -562,11 +563,11 @@ rather than by lsp-mode's generic diagnostics store."
 
 (defun lean-handle-file-progress (_workspace params)
   "Handle a `$/lean/fileProgress\=' PARAMS notification from the Lean server."
-  (when-let* ((uri  (plist-get (plist-get params :textDocument) :uri))
+  (when-let* ((uri  (lsp-get (lsp-get params :textDocument) :uri))
               (path (ignore-errors (lsp--uri-to-path uri)))
               (buf  (find-buffer-visiting path)))
     (with-current-buffer buf
-      (let ((items (lean--file-progress-list (plist-get params :processing))))
+      (let ((items (lean--file-progress-list (lsp-get params :processing))))
         (unless (equal items lean--file-progress)
           (setq-local lean--file-progress items)
           (lean--schedule-notification-flush)
@@ -739,7 +740,7 @@ rather than by lsp-mode's generic diagnostics store."
 
 (defun lean--diagnostic-tags (diagnostic)
   "Return Lean tags from DIAGNOSTIC as a list."
-  (lean--diagnostics-list (plist-get diagnostic :leanTags)))
+  (lean--diagnostics-list (lsp-get diagnostic :leanTags)))
 
 (defun lean--add-fringe-overlay (pos bitmap face help property collection &optional side)
   "Add a fringe marker at POS and return updated COLLECTION.
@@ -780,19 +781,19 @@ SIDE defaults to `right-fringe'."
 
 (defun lean--progress-help (item)
   "Return tooltip text for Lean file-progress ITEM."
-  (let* ((kind (plist-get item :kind))
-         (range (plist-get item :range))
-         (start (plist-get range :start))
-         (line (plist-get start :line))
+  (let* ((kind (lsp-get item :kind))
+         (range (lsp-get item :range))
+         (start (lsp-get range :start))
+         (line (lsp-get start :line))
          (status (if (or (null kind) (eq kind 1))
                      "processing" "blocked/error")))
     (format "Lean %s at line %s" status (and line (1+ line)))))
 
 (defun lean--progress-region (item)
   "Return the buffer region covered by Lean file-progress ITEM."
-  (when-let* ((range (plist-get item :range))
-              (start (plist-get range :start))
-              (end (plist-get range :end)))
+  (when-let* ((range (lsp-get item :range))
+              (start (lsp-get range :start))
+              (end (lsp-get range :end)))
     (cons (lsp--position-to-point start)
           (lsp--position-to-point end))))
 
@@ -825,7 +826,7 @@ SIDE defaults to `right-fringe'."
   (let ((ranges (lean--visible-ranges)))
     (dolist (item items)
       (when-let* ((region (lean--progress-region item)))
-        (let* ((kind       (plist-get item :kind))
+        (let* ((kind       (lsp-get item :kind))
                (processing (or (null kind) (eq kind 1)))
                (face       (if processing 'lean-fringe-processing-face
                              'lean-fringe-error-face))
@@ -908,7 +909,7 @@ SIDE defaults to `right-fringe'."
 (defun lean-handle-restart-file (_workspace params)
   "Handle a `lean/restartFile\=' PARAMS notification from the infoview proxy.
 Finds the buffer for the URI and calls `lean-refresh-file-dependencies\='."
-  (when-let* ((uri  (plist-get params :uri))
+  (when-let* ((uri  (lsp-get params :uri))
               (path (ignore-errors (lsp--uri-to-path uri)))
               (buf  (find-buffer-visiting path)))
     (with-current-buffer buf

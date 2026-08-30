@@ -34,6 +34,7 @@
 
 (require 'cl-lib)
 
+(declare-function lsp-get "lsp-protocol" (from key))
 (declare-function lsp-workspaces "lsp-mode" ())
 (declare-function lsp-request "lsp-mode" (method params &rest args))
 (declare-function lsp--text-document-position-params "lsp-mode" (&optional identifier position))
@@ -124,13 +125,13 @@ Both valid and nil results are cached for the current modification tick."
                                (lsp-request "$/lean/plainGoal"
                                             params
                                             :timeout lean-jump-request-timeout)))
-                            (rendered (plist-get goal :rendered)))
+                            (rendered (lsp-get goal :rendered)))
                        (if lean-jump-include-term-goal
                            (let* ((tg (ignore-errors
                                         (lsp-request "$/lean/plainTermGoal"
                                                      params
                                                      :timeout lean-jump-request-timeout)))
-                                  (tgtext (plist-get tg :goal)))
+                                  (tgtext (lsp-get tg :goal)))
                              (when (or rendered tgtext)
                                (concat (or rendered "") "\0" (or tgtext ""))))
                          ;; goal-only mode: nil goal → nil result (no info)

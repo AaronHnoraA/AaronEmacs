@@ -137,6 +137,8 @@ Noema Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保存、
 Lean 4 buffer 里 `C-c C-i` 打开右侧官方 xwidget infoview。
 目标、hypotheses、诊断、trace、Try this、code actions 等交互都走
 `lisp/lang/lean/lean4-infoview-bridge/` 里的官方 React infoview bridge。
+Lean 服务器挂掉时 lsp-mode 会自动重启，infoview 也会自己指到新的 proxy；
+`C-c i r` 手动重启一整套（proxy + `lake serve` + 页面）。
 
 Noema 任务使用 `@@todo(state) [text] {key: value}`，例如
 `@@todo(doing) [Write proof] {prio: A, ddl: 2026-05-20, repeat: +1w}`。
