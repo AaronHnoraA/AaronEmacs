@@ -237,6 +237,10 @@ toolchain profile.  It layers above `lsp-mode''s global
 (declare-function lsp-ui-doc-show "lsp-ui-doc" ())
 (declare-function lsp-ui-doc-hide "lsp-ui-doc" ())
 (declare-function lsp-ui-doc--visible-p "lsp-ui-doc" ())
+(declare-function lsp-cancel-request-by-token "lsp-mode" (cancel-token))
+(defvar lsp-ui-doc--bounds)
+(defvar lsp-ui-doc--timer)
+(defvar lsp-ui-doc--hide-on-next-command)
 (declare-function lsp-signature-stop "lsp-mode" ())
 (declare-function lsp-ui-peek--abort "lsp-ui-peek" ())
 (declare-function breadcrumb-local-mode "breadcrumb" (&optional arg))
@@ -397,6 +401,63 @@ byte-compile backend does not emit noisy warnings on startup."
                  #'my/lsp-document-color-refresh-visible t)
     (setq my/lsp-document-color-last-visible-region nil)))
 
+(defun my/lsp-ui-doc-stay-dismissed ()
+  "Keep the hover frame down until point leaves the symbol it documents.
+
+`lsp-ui-doc--hide-frame' clears `lsp-ui-doc--bounds', so on the very next
+command `lsp-ui-doc--make-request' sees an undocumented symbol under a
+motionless point and schedules another hover — Escape is undone
+`lsp-ui-doc-delay' seconds later.  Re-seat the bounds instead of adding a
+suppression flag of our own: the package's own guard then reads point as
+already documented, and a real move to another symbol resumes hover normally.
+The pending timer and in-flight request are dropped for the same reason."
+  (when (bound-and-true-p lsp-ui-doc-show-with-cursor)
+    (when (timerp lsp-ui-doc--timer)
+      (cancel-timer lsp-ui-doc--timer))
+    (setq lsp-ui-doc--timer nil
+          lsp-ui-doc--hide-on-next-command nil)
+    (when (fboundp 'lsp-cancel-request-by-token)
+      (ignore-errors (lsp-cancel-request-by-token :lsp-ui-doc-hover)))
+    (setq lsp-ui-doc--bounds
+          (or (and (symbol-at-point) (bounds-of-thing-at-point 'symbol))
+              (and (looking-at "[[:graph:]]") (cons (point) (1+ (point))))))))
+
+(defun my/lsp-ui-doc-show-a (&rest _)
+  "Let an explicit hover request override a previous Escape dismissal."
+  (setq lsp-ui-doc--bounds nil))
+
+(defun my/lsp-ui-doc--point-screen-line (start-y)
+  "Return (TOP . BOTTOM) frame pixel rows of the screen line point is on.
+START-Y is the window body's top edge, as `lsp-ui-doc--move-frame' passes it."
+  (when-let* ((xy (posn-x-y (posn-at-point))))
+    (let ((top (+ start-y (cdr xy))))
+      (cons top (+ top (line-pixel-height))))))
+
+(defun my/lsp-ui-doc--clear-point-line-a (fn frame width height start-x start-y)
+  "Keep the hover child frame off the screen line point is on.
+
+`lsp-ui-doc--mv-at-point' anchors the frame to the start of the hover range the
+server returned, not to point.  A server that answers with a wide range — Lean
+reports whole declarations — anchors it lines away from the cursor, and a frame
+`lsp-ui-doc-max-height' tall then lands across the line being edited.  Re-seat
+it against point's own line in that case: above when the window body has room,
+below otherwise.  A placement that already clears the line is left alone, so
+this only ever runs when the frame would cover the cursor."
+  (let* ((pos (funcall fn frame width height start-x start-y))
+         (top (cdr pos))
+         (outer (+ height (* 2 (or (frame-parameter frame 'child-frame-border-width)
+                                   (frame-parameter frame 'internal-border-width)
+                                   0))))
+         (line (my/lsp-ui-doc--point-screen-line start-y)))
+    (if (or (null line)
+            (<= (+ top outer) (car line))
+            (>= top (cdr line)))
+        pos
+      (cons (car pos)
+            (if (>= (- (car line) start-y) outer)
+                (- (car line) outer)
+              (cdr line))))))
+
 (defun my/lsp-dismiss-popup-h ()
   "Dismiss the active lsp-mode transient UI from `my/escape'.
 This restores the single-Escape behavior of the former Eglot/eldoc-box UI for
@@ -405,6 +466,7 @@ lsp-ui hover child frames, signature help, and lsp-ui peek overlays."
    ((and (fboundp 'lsp-ui-doc--visible-p)
          (lsp-ui-doc--visible-p))
     (lsp-ui-doc-hide)
+    (my/lsp-ui-doc-stay-dismissed)
     t)
    ((bound-and-true-p lsp-signature-mode)
     (lsp-signature-stop)
@@ -2447,6 +2509,15 @@ lsp-mode's categorized index, whose category names provide the same fallback."
   (lsp-ui-peek-always-show t)
   (lsp-ui-imenu-auto-refresh 'after-save)
   :config
+  ;; An explicit request always wins over a previous Escape: clear the bounds
+  ;; `my/lsp-ui-doc-stay-dismissed' re-seated, or `lsp-ui-doc--make-request'
+  ;; would read the symbol as already documented and show nothing.
+  (unless (advice-member-p #'my/lsp-ui-doc-show-a 'lsp-ui-doc-show)
+    (advice-add 'lsp-ui-doc-show :before #'my/lsp-ui-doc-show-a))
+  (unless (advice-member-p #'my/lsp-ui-doc--clear-point-line-a
+                           'lsp-ui-doc--mv-at-point)
+    (advice-add 'lsp-ui-doc--mv-at-point :around
+                #'my/lsp-ui-doc--clear-point-line-a))
   (define-key lsp-ui-mode-map (kbd "C-h d") #'lsp-ui-doc-show)
   (define-key lsp-ui-mode-map (kbd "C-h c") #'lsp-ui-doc-hide))
 

@@ -482,7 +482,10 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC c I`
   `lsp-ui-doc-glance`
 - `Esc`
-  关闭当前 LSP hover / signature / peek 弹层；没有 LSP 弹层时继续执行普通 Evil Escape
+  关闭当前 LSP hover / signature / peek 弹层；没有 LSP 弹层时继续执行普通 Evil Escape。
+  关掉 hover 后光标不动它不会自己弹回来，移到别的符号或 `SPC c I` / `C-h d` 再显示。
+  hover 子窗口贴在光标所在行的上方或下方，不会盖住那一行；服务器返回跨多行的 hover
+  range 时（Lean 就是）也一样
 - `SPC c j`
   调试菜单：启动 Dape、profile、步进、断点、REPL、locals/watch、adapter doctor
 - `SPC c t`
