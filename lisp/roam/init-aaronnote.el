@@ -894,6 +894,12 @@ to JSON a second time."
 
 (defun my/noema--handle-process-line (line)
   "Handle one legacy Noema event encoded as LINE."
+  ;; `json-serialize' emits unibyte UTF-8.  Splicing it after a multibyte
+  ;; piece (an event type decoded from JSON-RPC, say) promotes those bytes to
+  ;; raw-byte characters, which `json-parse-string' then rejects as invalid
+  ;; UTF-8 on any non-ASCII note path.  Normalize back to bytes first.
+  (when (multibyte-string-p line)
+    (setq line (encode-coding-string line 'utf-8)))
   (let ((ready-prefix "aaronote-web-host:ready:")
         (goto-prefix "aaronote-event:goto:")
 	(open-prefix "aaronote-event:open:")
@@ -1254,6 +1260,17 @@ to JSON a second time."
     (setq my/noema--host-event-timer
           (run-at-time 0 nil #'my/noema--drain-host-events))))
 
+(defun my/noema--event-line (type payload)
+  "Return the unibyte `aaronote-event:' line for TYPE and PAYLOAD.
+`json-serialize' returns unibyte UTF-8 bytes.  Concatenating them with a
+multibyte TYPE (JSON-RPC decoding hands back multibyte strings) would turn
+each payload byte into a raw-byte character, so keep every piece unibyte."
+  (let ((json (json-serialize payload)))
+    (concat (encode-coding-string (format "aaronote-event:%s:" type) 'utf-8)
+            (if (multibyte-string-p json)
+                (encode-coding-string json 'utf-8)
+              json))))
+
 (defun my/noema--gateway-event (params _client)
   "Acknowledge Noema event PARAMS and dispatch it outside the process filter."
   (let* ((type (format "%s" (or (alist-get 'type params) "")))
@@ -1292,8 +1309,7 @@ to JSON a second time."
              nil)
             ((or "open" "system-open" "zotero" "zotero-import"
                  "current-file" "saved")
-             (format "aaronote-event:%s:%s"
-                     type (json-serialize payload)))
+             (my/noema--event-line type payload))
             (_ nil))))
     (when line
       (my/noema--defer-host-event #'my/noema--handle-process-line line))
