@@ -104,22 +104,48 @@ Elsa 的 `elsa-analyse-file-parallel` 按 `(num-processors)` 无上限地 fork w
 `M-x +mac-swap-option-and-command` 在 Neomacs 下切换重命名表而不是
 `mac-*-modifier`，交换 Option / Command 的角色。
 
+## 状态：2026-09-13 暂停迁移
+
+在 0.0.18 上评估后决定**不迁移**，Neomacs 已从本机删除，GNU Emacs 仍是唯一
+主力。本模块保留下来并且在 GNU Emacs 下完全空操作，等上游成熟后可以直接复用。
+
+停下来的直接原因是下面第一条：xwidget 在 Retina 上只渲染一半，而它无法在配置
+层修复。
+
 ## 仍然存在的上游差异
 
-这些不是配置能修的，迁移时要知道：
+这些不是配置能修的，将来重新评估时先验证这几条：
 
+- **xwidget 在 HiDPI 上只有一半尺寸（阻塞项）。** 2x Retina 上每个 xwidget —
+  内置浏览器、Noema 面板、Lean infoview — 都只占 window 的左上四分之一，右侧和
+  下方被裁掉。原因在
+  `crates/neomacs-webview/src/platform/macos/view.rs` 的 placement 路径：注释写着
+  "Frame geometry is expressed in root-surface device pixels"，于是把
+  `content_rect` / `visible_rect` 除以 `device_scale`；但 Emacs 侧的 frame 和
+  window 几何是逻辑点（`frame-native-width` 3008 对应 "UI looks like 3008x1692"，
+  而同一个 build 的 `display-monitor-attributes-list` 又报物理的 6016x3384），
+  于是又被除了一次。
+
+  实测确认无法从 Lisp 修复：给 `xwidget-resize` 和 `xwidget-insert` 加 advice 把
+  尺寸预乘 `scale-factor`（请求从 1784x1014 变成 3568x2028）之后，渲染结果完全
+  没有变化。placement 矩形来自渲染管线内部的 scene 几何，不是 Lisp 请求的尺寸。
+- `xwidget-webkit-set-cookie-storage-file` 不存在。Neomacs 照搬了 GNU 的
+  `xwidget.el`，其中 `xwidget-webkit--create-new-session-buffer` 在
+  `xwidget-webkit-cookie-file` 非空时无条件调用它，所以每次新建 webkit session 都
+  会 void-function 报错。本模块用一个 no-op 顶替（只在缺失时定义），代价是 cookie
+  不会写入配置的文件，与 Brave 共享登录态失效。
 - 没有 native compilation，纯解释/字节码执行。
 - `window-system` 是 `neo`，不是 `ns`；`(featurep 'ns)` 为 nil。`ns-*` frame
   参数（`ns-appearance` 等）被当作未知参数保留，但没有效果。
 - 输入桥会丢弃文件拖放事件，应用清单也没有声明文档类型，Finder 双击打开还不
   可靠。
-- xwidget 的键盘焦点、JavaScript 回调、多窗口支持仍不完整，影响 Noema、Lean
-  infoview、内置浏览器、Beancount。
+- xwidget 的键盘焦点、JavaScript 回调、多窗口支持仍不完整。
 - macOS 平台在上游仍标注为 experimental。
 
 ## 验证
 
 ```sh
+# Neomacs 当前未安装；重新装上后
 NEO=/Applications/neomacs.app/Contents/MacOS/neomacs
 make EMACS=$NEO health-startup doctor
 

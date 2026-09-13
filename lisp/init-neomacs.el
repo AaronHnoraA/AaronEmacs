@@ -222,6 +222,35 @@ may create that frame before the reveal runs, so re-assert it here."
   (setq my/neomacs--reveal-timer
         (run-at-time 1 nil #'my/neomacs-reveal-frames)))
 
+;;;; Missing xwidget-webkit primitives ---------------------------------------
+
+(defvar my/neomacs--xwidget-cookie-warned nil
+  "Non-nil once the missing cookie-storage primitive has been reported.")
+
+(defun my/neomacs--xwidget-webkit-set-cookie-storage-file (&rest _args)
+  "Stand in for the webkit cookie-storage primitive Neomacs does not provide.
+Neomacs ships GNU Emacs' `xwidget.el' verbatim, and
+`xwidget-webkit--create-new-session-buffer' calls this primitive
+unconditionally whenever `xwidget-webkit-cookie-file' is set.  The Rust
+webkit backend never defined it, so every new webkit session - the browser,
+Noema, the Lean infoview - died with a void-function error.
+
+There is no Lisp-level substitute: cookies simply are not persisted to the
+configured file on this build.  Report that once and let the session open."
+  (unless my/neomacs--xwidget-cookie-warned
+    (setq my/neomacs--xwidget-cookie-warned t)
+    (message "Neomacs: webkit cookie storage is unavailable; %s is ignored"
+             (or (bound-and-true-p xwidget-webkit-cookie-file) "the cookie file")))
+  nil)
+
+(defun my/neomacs-install-xwidget-stubs ()
+  "Define the webkit primitives Neomacs lacks but its `xwidget.el' calls.
+Each is defined only when absent, so a future Neomacs that implements one
+keeps its own."
+  (unless (fboundp 'xwidget-webkit-set-cookie-storage-file)
+    (defalias 'xwidget-webkit-set-cookie-storage-file
+      #'my/neomacs--xwidget-webkit-set-cookie-storage-file)))
+
 ;;;; Installation ------------------------------------------------------------
 
 (defun my/neomacs-repair-all-fringe-parameters ()
@@ -230,6 +259,7 @@ may create that frame before the reveal runs, so re-assert it here."
 
 (when my/neomacs-p
   (my/neomacs-apply-modifier-remap)
+  (my/neomacs-install-xwidget-stubs)
 
   (my/neomacs-repair-fringe-parameters)
   (add-hook 'after-make-frame-functions #'my/neomacs-repair-fringe-parameters)

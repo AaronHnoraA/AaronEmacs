@@ -90,8 +90,10 @@ Keep these rules:
 
 ## Runtime Builds (GNU Emacs and Neomacs)
 
-This configuration runs on GNU Emacs 31 and on Neomacs, which tracks the GNU
-Emacs 31.1 Lisp layer but not its C/Objective-C runtime.
+This configuration runs on GNU Emacs 31 and, in principle, on Neomacs, which
+tracks the GNU Emacs 31.1 Lisp layer but not its C/Objective-C runtime.  The
+Neomacs migration is paused at 0.0.18 and Neomacs is not installed; keep the
+rules below when touching the boundary so the work stays reusable.
 
 - `lisp/init-neomacs.el` is the only module allowed to know which build is
   running.  It exposes `my/neomacs-p` and is loaded right after
