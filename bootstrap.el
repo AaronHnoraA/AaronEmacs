@@ -1,6 +1,7 @@
 ;;; bootstrap.el --- Bootstrap packages from lock file -*- lexical-binding: t; -*-
 
-(when (fboundp 'startup-redirect-eln-cache)
+(when (and (fboundp 'startup-redirect-eln-cache)
+           (boundp 'native-comp-eln-load-path))
   (startup-redirect-eln-cache
    (expand-file-name "var/eln-cache/" user-emacs-directory)))
 

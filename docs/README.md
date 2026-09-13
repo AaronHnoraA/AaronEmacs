@@ -38,6 +38,7 @@ channels.
 
 ## Maintenance
 
+- [neomacs-compat.md](neomacs-compat.md) Running this configuration on Neomacs: the modifier-rename layer, fringe and startup-frame fixes, Elsa concurrency, and the upstream gaps that remain.
 - [maintenance.md](maintenance.md) Package management, lock workflow, state directories, cleanup, troubleshooting, and maintenance cadence.
 - [migration.md](migration.md) New-machine setup, restore workflow, and the migration lessons learned from this configuration.
 - [aaronnote-xwidget-audit.md](aaronnote-xwidget-audit.md) Full-chain stability, HCI, and security audit of the Emacs ↔ xwidget ↔ aaronnote bridge.
@@ -51,3 +52,4 @@ channels.
 - Want the project workflow: [project-guide.md](project-guide.md)
 - Want programming / LSP / remote details: [dev-guide.md](dev-guide.md)
 - Want maintenance and lock/state guidance: [maintenance.md](maintenance.md)
+- Running on Neomacs instead of GNU Emacs: [neomacs-compat.md](neomacs-compat.md)

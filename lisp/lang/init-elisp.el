@@ -6,6 +6,7 @@
 
 ;;; Code:
 
+(require 'config)
 (require 'init-funcs)
 (require 'init-package-utils)
 (require 'subr-x)
@@ -87,22 +88,54 @@
    nil
    "Emacs Lisp buffers prefer the separately registered Elsa lsp-mode client."))
 
+(defgroup my/elisp nil
+  "Emacs Lisp editing and analysis."
+  :group 'languages)
+
+(config-defvar my/elisp-elsa-worker-limit nil
+  "Maximum number of parallel analysis workers the Elsa LSP server may start.
+Elsa fans out over `num-processors' with no upper bound, and every worker is
+a fresh Emacs that loads Elsa from scratch.  On a natively compiled build the
+startup cost is small enough not to matter; on a build without native
+compilation - Neomacs today - twelve interpreted workers saturate the machine
+and stall the editor while a file is being analysed.  nil means automatic:
+leave Elsa alone when native compilation is available, otherwise cap at
+`my/elisp-elsa-worker-fallback-limit'.  An integer forces that limit."
+  :type '(choice (const :tag "Automatic" nil) integer)
+  :group 'my/elisp)
+
+(defconst my/elisp-elsa-worker-fallback-limit 4
+  "Worker cap applied by `my/elisp-elsa-worker-limit' in automatic mode.")
+
+(defun my/elisp-elsa-effective-worker-limit ()
+  "Return the worker cap for the Elsa LSP server, or nil for no cap."
+  (cond
+   ((integerp my/elisp-elsa-worker-limit)
+    (max 1 my/elisp-elsa-worker-limit))
+   (my/elisp-elsa-worker-limit nil)
+   ((native-comp-available-p) nil)
+   (t (min my/elisp-elsa-worker-fallback-limit (num-processors)))))
+
 (defun my/elisp-elsa-lsp-command ()
   "Return a direct Elsa LSP command using the current Emacs binary.
 
 This avoids the upstream Eask/Cask wrapper requirement and starts Elsa from
 the already-installed ELPA package."
-  (let ((emacs-bin (expand-file-name invocation-name invocation-directory)))
+  (let ((emacs-bin (expand-file-name invocation-name invocation-directory))
+        (worker-limit (my/elisp-elsa-effective-worker-limit)))
     (list emacs-bin
           "--batch"
           "-Q"
           "--eval"
           (mapconcat
            #'identity
-           '("(progn"
+           `("(progn"
              "  (require 'package)"
              "  (package-initialize)"
              "  (require 'cl-lib)"
+             ,@(when worker-limit
+                 (list (format "  (advice-add 'num-processors :override (lambda (&rest _) %d))"
+                               worker-limit)))
              "  (let ((warning-minimum-level :emergency)"
              "        (message-log-max nil)"
              "        (inhibit-message t))"

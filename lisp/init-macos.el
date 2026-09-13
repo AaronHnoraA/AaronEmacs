@@ -56,6 +56,9 @@
 (declare-function org-element-context "org-element" ())
 (declare-function org-element-property "org-element" (property element))
 (declare-function org-element-type "org-element" (element))
+(declare-function my/neomacs-apply-modifier-remap "init-neomacs" ())
+(defvar my/neomacs-modifier-remap)
+(defvar my/neomacs-default-modifier-remap)
 
 (defun my/parameter-adjust--number-bounds ()
   "Return bounds for the number at point or just before point."
@@ -450,10 +453,24 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
 
   ;; Useful when use an external keyboard
   (defun +mac-swap-option-and-command ()
-    "Swap `mac-option-modifier' and `mac-command-modifier'."
+    "Swap the roles of the physical Option and Command keys."
     (interactive)
-    (cl-rotatef mac-option-modifier mac-command-modifier)
-    (message "mac-option-modifier: %s, mac-command-modifier: %s" mac-option-modifier mac-command-modifier))
+    (require 'init-neomacs nil t)
+    (cond
+     ;; Neomacs has no `mac-*-modifier' variables; its input bridge hard-codes
+     ;; Option to Meta and Command to Super, and `init-neomacs.el' renames them
+     ;; back.  Swapping there means swapping that rename table.
+     ((bound-and-true-p my/neomacs-p)
+      (setq my/neomacs-modifier-remap
+            (if (equal my/neomacs-modifier-remap '((meta . meta) (super . hyper)))
+                my/neomacs-default-modifier-remap
+              '((meta . meta) (super . hyper))))
+      (my/neomacs-apply-modifier-remap)
+      (message "Option/Command layout: %S" my/neomacs-modifier-remap))
+     (t
+      (cl-rotatef mac-option-modifier mac-command-modifier)
+      (message "mac-option-modifier: %s, mac-command-modifier: %s"
+               mac-option-modifier mac-command-modifier))))
 
   ;; Emoji support
   (let ((fonts '("Apple Color Emoji")))

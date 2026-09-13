@@ -34,6 +34,9 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'patches/init-patches)
 (when (eq system-type 'darwin)
   (my/require-module-safely 'init-macos))
+;; Must follow `init-macos': it restores the Option/Command layout that the
+;; `H-' bindings above assume when the host build is Neomacs.
+(my/require-module-safely 'init-neomacs)
 (require 'init-remote)
 (require 'init-emacs-gateway)
 (require 'init-ui)

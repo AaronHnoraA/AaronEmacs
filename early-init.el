@@ -64,7 +64,8 @@ a chance to affect the rest of the module graph."
 (my/delete-local-bytecode-files)
 
 ;; Keep native compilation cache local to this config so cleanup stays simple.
-(when (fboundp 'startup-redirect-eln-cache)
+(when (and (fboundp 'startup-redirect-eln-cache)
+           (boundp 'native-comp-eln-load-path))
   (startup-redirect-eln-cache
    (expand-file-name "var/eln-cache/" user-emacs-directory)))
 
@@ -255,9 +256,22 @@ This is idempotent and deliberately ignores daemon/emacsclient frames."
       (make-frame-visible frame)
       (redraw-frame frame))))
 
+(defun my/gui-graphic-frame-exists-p ()
+  "Return non-nil when a graphic frame already exists."
+  (catch 'found
+    (dolist (frame (frame-list))
+      (when (display-graphic-p frame)
+        (throw 'found t)))))
+
+;; GNU Emacs has no graphic display during early init, so this pre-hide has
+;; always been inert there.  Neomacs already owns a live graphic frame at this
+;; point, where hiding through `initial-frame-alist' unmaps the real window and
+;; the reveal in `emacs-startup-hook' races the render thread, leaving a window
+;; that accepts no input.  Only pre-hide a frame that does not exist yet.
 (when (and my/gui-hide-initial-frame-during-startup
            (not (daemonp))
-           (display-graphic-p))
+           (display-graphic-p)
+           (not (my/gui-graphic-frame-exists-p)))
   (setq initial-frame-alist
         (cons '(visibility . nil)
               (cons '(my-startup-hidden . t)

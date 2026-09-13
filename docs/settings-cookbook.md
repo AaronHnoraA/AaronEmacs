@@ -579,6 +579,22 @@ environment maintainer；本地与远端都生成隔离的 `target@workspace` �
 
 ---
 
+## 我在 Neomacs 上跑，快捷键 / 鼠标 / 打开文件不对
+
+不要去改 `init-macos.el` 的绑定，也不要在各模块里加构建判断。所有 GNU Emacs 与
+Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
+
+- 修饰键错位（`H-` 层失效、`M-c` / `M-v` 剪贴板失效、`H-C-M-` 鼠标层失效）：
+  `my/neomacs-modifier-remap`。
+- 打开文件报 `number-or-marker-p nil`：fringe frame 参数修复，见同一个模块。
+- 启动后窗口没有反应：`early-init.el` 的预隐藏开关和 `my/neomacs-reveal-frames`。
+- 打开 `.el` 文件时机器被压满：`my/elisp-elsa-worker-limit`。
+
+两个可调项都在 `config` registry 里，用 `M-x config-board` 改。完整背景、原因和
+仍然存在的上游差异见 [neomacs-compat.md](neomacs-compat.md)。
+
+---
+
 ## 新建只读 dashboard / report / hub buffer
 
 需要新建只读面板（`special-mode` 风格）时，**请使用 `aaron-ui-board`**，不要手工构建 face 和 insert 样板：

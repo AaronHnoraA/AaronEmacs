@@ -72,6 +72,7 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
 - Maintenance, locks, state recovery: [docs/maintenance.md](docs/maintenance.md)
 - Aaron UI and Noema visual system: [docs/elegant-ui.md](docs/elegant-ui.md)
 - Migration notes: [docs/migration.md](docs/migration.md)
+- Running on Neomacs instead of GNU Emacs: [docs/neomacs-compat.md](docs/neomacs-compat.md)
 - Deep-dive workflow docs: [docs/lsp-workflow.org](docs/lsp-workflow.org), [docs/jupyter-workflow.org](docs/jupyter-workflow.org), [docs/research-notes-workflow.md](docs/research-notes-workflow.md)
 
 ## Repository Layout
@@ -96,6 +97,10 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
 ## Environment Assumptions
 
 - The primary target is macOS GUI Emacs, currently maintained around Emacs 31.
+- [Neomacs](docs/neomacs-compat.md) is supported as an alternative runtime. `lisp/init-neomacs.el` is the only
+  place that knows which build is running; it renames Neomacs' physical modifiers back to this
+  configuration's Option-as-Hyper / Command-as-Meta layout and repairs two runtime differences that
+  would otherwise break opening files and the first startup frame.
 - Some local paths and workflow conventions are intentionally opinionated, such as `~/HC/Org/`, `etc/mygpt.json`, and `~/.ssh/config`.
 - Some features depend on system tools, fonts, and local applications; the repository does not attempt to vendor those system dependencies.
 - Vendored code and lock files may belong in Git. Runtime caches, build artifacts, local state, and secrets do not.

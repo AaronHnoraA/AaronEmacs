@@ -88,6 +88,28 @@ Keep these rules:
   symbol exists.  Apply the local/remote/resilience criteria in
   `docs/remote-parity.md`, and add parity tests for every new shared contract.
 
+## Runtime Builds (GNU Emacs and Neomacs)
+
+This configuration runs on GNU Emacs 31 and on Neomacs, which tracks the GNU
+Emacs 31.1 Lisp layer but not its C/Objective-C runtime.
+
+- `lisp/init-neomacs.el` is the only module allowed to know which build is
+  running.  It exposes `my/neomacs-p` and is loaded right after
+  `init-macos`.  Consumers must not test `my/neomacs-p`, `window-system`,
+  `(featurep 'ns)`, or `native-comp-available-p` to pick behaviour; extend the
+  compatibility layer instead.  The one accepted exception is a genuinely
+  build-specific command such as `+mac-swap-option-and-command`.
+- Neomacs has no `mac-*-modifier` variables and no Hyper bit at all: its input
+  bridge hard-codes Option to Meta and Command to Super.  The `H-` layer is
+  restored by renaming modifiers in `key-translation-map`, not by rewriting
+  bindings.  Keep new keybindings written for the GNU layout (Option as Hyper,
+  Command as Meta).
+- Neomacs has no native compilation.  Anything that fans out over
+  `num-processors` needs a cap that is automatic on interpreted builds and
+  inert on natively compiled ones; `my/elisp-elsa-worker-limit` is the pattern.
+- Changes must stay a no-op on GNU Emacs.  Verify both builds before claiming
+  a fix, and record new differences in `docs/neomacs-compat.md`.
+
 ## Do Not Reinvent Existing Surfaces
 
 This config already has maintenance and workflow entry points. Reuse them:
