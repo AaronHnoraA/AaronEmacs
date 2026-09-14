@@ -16,6 +16,7 @@
 (require 'noema-research-inspector)
 (require 'noema-research-synthesis)
 (require 'noema-compose)
+(require 'noema-pi-router)
 
 (defmacro noema-research-test--with-directory (var &rest body)
   "Bind VAR to a temporary directory while running BODY."
@@ -130,6 +131,66 @@
       (should (equal (noema-research-cell-relation (noema-research-find-cell document "c-k")
                                                    "lineage" document)
                      (list (noema-research-test--work-id document "c-w")))))))
+
+(ert-deftest noema-research-new-sibling-copies-every-lineage-parent ()
+  (let* ((document (noema-research-test--document))
+         (q (noema-research-test--work-id document "c-q"))
+         (k (noema-research-test--work-id document "c-k")))
+    (noema-research-test--append-work-cell
+     document "c-multi" "work" "Multi-parent work" "Two ancestors." (list q k))
+    (noema-research-test--with-jutext document
+      (noema-research-goto-cell "c-multi")
+      (noema-research-new-sibling)
+      (let* ((entries (noema-research--scan))
+             (sibling-entry (car (last entries)))
+             (sibling-cell (noema-research-find-cell
+                            noema-research--document (plist-get sibling-entry :id))))
+        (should sibling-cell)
+        (should (equal (sort (copy-sequence
+                              (noema-research-cell-relation
+                               sibling-cell "lineage" noema-research--document))
+                             #'string<)
+                       (sort (list q k) #'string<)))))))
+
+(ert-deftest noema-research-rename-work-node-command-preserves-identity-and-edges ()
+  (noema-research-test--with-jutext (noema-research-test--document)
+    (noema-research-goto-cell "c-w")
+    (let ((work-id (noema-research-cell-work-node-id
+                    (noema-research-find-cell noema-research--document "c-w")))
+          (edges-before (copy-sequence (noema-research-dependencies noema-research--document))))
+      (cl-letf (((symbol-function 'read-string) (lambda (&rest _) "Renamed exploration")))
+        (noema-research-rename-work-node))
+      (should (equal (noema-research-cell-work-node-id
+                     (noema-research-find-cell noema-research--document "c-w"))
+                    work-id))
+      (should (equal (noema-research-dependencies noema-research--document) edges-before))
+      (should (string-match-p "^%% work Renamed exploration$" (buffer-string))))))
+
+(ert-deftest noema-research-add-and-remove-lineage-parent-are-atomic ()
+  (let* ((document (noema-research-test--document))
+         (q (noema-research-test--work-id document "c-q")))
+    (noema-research-test--append-work-cell
+     document "c-extra" "checkpoint" "Extra checkpoint" "Independent branch.")
+    (let ((extra-id (noema-research-test--work-id document "c-extra")))
+      (noema-research-test--with-jutext document
+        (noema-research-goto-cell "c-w")
+        (let ((cell (noema-research--require-cell)))
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (_prompt collection &rest _)
+                       (car (seq-find (lambda (c) (equal (noema-research-cell-work-node-id (cdr c))
+                                                         extra-id))
+                                     collection)))))
+            (noema-research-add-lineage-parent))
+          (should (member extra-id
+                          (noema-research-cell-relation cell "lineage" noema-research--document)))
+          (should (member q (noema-research-cell-relation cell "lineage" noema-research--document)))
+          (cl-letf (((symbol-function 'completing-read)
+                     (lambda (_prompt collection &rest _)
+                       (car (seq-find (lambda (c) (equal (cdr c) q)) collection)))))
+            (noema-research-remove-lineage-parent))
+          (should-not (member q (noema-research-cell-relation cell "lineage" noema-research--document)))
+          (should (member extra-id
+                          (noema-research-cell-relation cell "lineage" noema-research--document))))))))
 
 (ert-deftest noema-research-inspector-projects-run-artifacts-by-work-node ()
   (noema-research-test--with-directory root
@@ -919,6 +980,60 @@
       (kill-buffer source)
       (kill-buffer graph))))
 
+(ert-deftest noema-research-graph-continue-keeps-the-board-open ()
+  (let ((source (generate-new-buffer " *noema-dag-create-source*"))
+        (graph (generate-new-buffer " *noema-dag-create-graph*"))
+        closed)
+    (unwind-protect
+        (progn
+          (with-current-buffer source
+            (setq-local noema-research--document (noema-research-test--document))
+            (setq-local major-mode 'noema-research-mode)
+            (noema-research--render noema-research--document))
+          (with-current-buffer graph
+            (noema-research-graph-mode)
+            (setq-local noema-research-graph--source source
+                        noema-research-graph--selected
+                        (noema-research-test--work-id
+                         (buffer-local-value 'noema-research--document source) "c-w")))
+          (cl-letf (((symbol-function 'quit-window)
+                     (lambda (&rest args) (setq closed args)))
+                    ((symbol-function 'pop-to-buffer)
+                     (lambda (&rest _)
+                       (error "noema-research-graph-continue must not pop a window"))))
+            (with-current-buffer graph
+              (noema-research-graph-continue)))
+          (should-not closed)
+          (with-current-buffer source
+            (should (string-match-p "^%% work $" (buffer-string))))
+          (with-current-buffer graph
+            (should noema-research-graph--selected)
+            (should-not (equal noema-research-graph--selected
+                               (noema-research-test--work-id
+                                (buffer-local-value 'noema-research--document source) "c-w")))))
+      (kill-buffer source)
+      (kill-buffer graph))))
+
+(ert-deftest noema-research-graph-header-line-reports-zoom-focus-and-folds ()
+  (let ((source (generate-new-buffer " *noema-dag-header-source*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer source
+            (setq-local noema-research--document (noema-research-test--document)))
+          (with-temp-buffer
+            (noema-research-graph-mode)
+            (setq-local noema-research-graph--source source
+                        noema-research-graph--zoom "overview"
+                        noema-research-graph--focus
+                        (noema-research-test--work-id
+                         (buffer-local-value 'noema-research--document source) "c-w")
+                        noema-research-graph--folds (list "x" "y"))
+            (let ((status (noema-research-graph--header-line)))
+              (should (string-match-p "Overview" status))
+              (should (string-match-p "focus: Spectral exploration" status))
+              (should (string-match-p "2 folded" status)))))
+      (kill-buffer source))))
+
 (ert-deftest noema-research-graph-hjkl-and-arrows-use-layout-geometry ()
   (with-temp-buffer
     (noema-research-graph-mode)
@@ -1679,5 +1794,68 @@
       (should menu)
       (should rewrite)
       (should (equal context '(4))))))
+
+(ert-deftest noema-pi-router-registry-round-trips-the-native-session-id ()
+  (noema-research-test--with-directory root
+    (should-not (noema-pi-router--native-session-id root))
+    (noema-pi-router--write-registry
+     root (noema-research--table "nativeSessionId" "native-42" "updatedAt" "2026-09-14T00:00:00Z"))
+    (should (equal (noema-pi-router--native-session-id root) "native-42"))))
+
+(ert-deftest noema-pi-router-root-anchors-on-the-nearest-noema-toml ()
+  (noema-research-test--with-directory root
+    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" root) nil 'silent)
+    (let ((nested (expand-file-name "nested/deeper/" root)))
+      (make-directory nested t)
+      (should (equal (noema-pi-router--root nested) (file-name-as-directory root))))))
+
+(ert-deftest noema-pi-router-open-reuses-a-live-buffer-for-the-same-root ()
+  (noema-research-test--with-directory root
+    (let ((buffer (generate-new-buffer " *noema-pi-router-fake*"))
+          started popped)
+      (unwind-protect
+          (progn
+            (puthash (noema-pi-router--root root) buffer noema-pi-router--buffers)
+            (cl-letf (((symbol-function 'noema-agent-acp-start)
+                       (lambda (&rest _) (setq started t) buffer))
+                      ((symbol-function 'pop-to-buffer)
+                       (lambda (target &rest _) (setq popped target))))
+              (noema-pi-router-open root))
+            (should-not started)
+            (should (eq popped buffer)))
+        (kill-buffer buffer)))))
+
+(ert-deftest noema-pi-router-open-resumes-a-remembered-native-session ()
+  (noema-research-test--with-directory root
+    (noema-pi-router--write-registry
+     root (noema-research--table "nativeSessionId" "native-7"))
+    (let ((buffer (generate-new-buffer " *noema-pi-router-resume*"))
+          requested-session-id)
+      (unwind-protect
+          (cl-letf (((symbol-function 'noema-agent-acp-resolve-config) (lambda (&rest _) nil))
+                    ((symbol-function 'noema-agent-acp-start)
+                     (lambda (&rest args) (setq requested-session-id (plist-get args :session-id)) buffer))
+                    ((symbol-function 'noema-agent-acp-subscribe) #'ignore)
+                    ((symbol-function 'pop-to-buffer) #'ignore))
+            (noema-pi-router-open root)
+            (should (equal requested-session-id "native-7"))
+            (should (buffer-local-value 'tab-line-exclude buffer)))
+        (remhash (noema-pi-router--root root) noema-pi-router--buffers)
+        (kill-buffer buffer)))))
+
+(ert-deftest noema-pi-router-switch-lists-only-live-agent-buffers ()
+  (let ((agent-buffer (generate-new-buffer " *noema-pi-router-agent*"))
+        (plain-buffer (generate-new-buffer " *noema-pi-router-plain*"))
+        chosen)
+    (unwind-protect
+        (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p)
+                   (lambda (buffer) (eq buffer agent-buffer)))
+                  ((symbol-function 'completing-read)
+                   (lambda (_prompt collection &rest _) (car (car collection))))
+                  ((symbol-function 'pop-to-buffer) (lambda (target &rest _) (setq chosen target))))
+          (noema-pi-router-switch)
+          (should (eq chosen agent-buffer)))
+      (kill-buffer agent-buffer)
+      (kill-buffer plain-buffer))))
 
 ;;; noema-research-tests.el ends here
