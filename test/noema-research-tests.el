@@ -690,6 +690,37 @@
     (should (string-match-p "current path preserved"
                             (noema-research-graph--label fold-node)))))
 
+(ert-deftest noema-research-projection-drops-upward-edges-into-a-fold ()
+  (let* ((document (noema-research-test--document))
+         (work (noema-research-test--work-id document "c-w"))
+         (checkpoint (noema-research-test--work-id document "c-k"))
+         (current (noema-research-cell-work-node-id
+                   (noema-research-test--append-work-cell
+                    document "c-current" "work" "Current work" "Continue."
+                    (list checkpoint))))
+         (after (noema-research-cell-work-node-id
+                 (noema-research-test--append-work-cell
+                  document "c-after" "work" "Hidden follow-up" "Later."
+                  (list current) (list checkpoint))))
+         (projection (noema-research-projection
+                      document :folds (list work) :protect (list current)))
+         (ids (mapcar (lambda (node) (plist-get node :id))
+                      (plist-get projection :nodes)))
+         (edges (plist-get projection :edges)))
+    (should (member current ids))
+    (should-not (member after ids))
+    ;; Edges into the hidden follow-up must not be redirected upward to the
+    ;; fold owner, which would draw a false cycle.
+    (should-not (member (list current work "lineage") edges))
+    (should-not (member (list checkpoint work "depends") edges))
+    (should-not (seq-find (lambda (edge)
+                            (and (equal (nth 1 edge) work)
+                                 (member (nth 0 edge) (list checkpoint current))))
+                          edges))
+    ;; The legitimate downward path through the fold owner remains.
+    (should (member (list work checkpoint "lineage") edges))
+    (should (member (list checkpoint current "lineage") edges))))
+
 (ert-deftest noema-research-graph-dot-reserves-bold-multiline-label-space ()
   (let* ((projection
           (list :nodes

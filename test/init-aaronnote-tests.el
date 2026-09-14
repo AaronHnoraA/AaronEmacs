@@ -1136,7 +1136,8 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
       (should (= flush-count 0)))))
 
 (ert-deftest my/noema-gateway-event-opens-safe-hosted-surface-in-emacs ()
-  (let (deferred opened)
+  (let ((my/noema--port 50815)
+        deferred opened)
     (cl-letf (((symbol-function 'my/noema--defer-host-event)
                (lambda (function &rest args)
                  (setq deferred (cons function args))))
