@@ -32,7 +32,7 @@
 
 (defvar my/noema-jupyter-kernelspec-directory
   (expand-file-name
-   "lisp/roam/Noema/jupyter/.jupyter/data/kernels/"
+   "site-lisp/noema/jupyter/.jupyter/data/kernels/"
    user-emacs-directory)
   "Noema kernelspecs available to client-accessible targets.")
 

@@ -29,7 +29,7 @@
                       (expand-file-name "~/Documents/Noema-test"))))
       (should (equal (my/noema-workspace-layout) "wiki")))))
 
-(ert-deftest my/noema-open-wiki-view-uses-canonical-routes ()
+(ert-deftest my/noema-open-wiki-view-uses-emacs-hosted-routes ()
   (let (opened)
     (cl-letf (((symbol-function 'my/noema--ensure-server)
                (lambda (callback) (funcall callback)))
@@ -40,6 +40,23 @@
       (should (equal opened "/wiki?view=repositories"))
       (my/noema-open-wiki-view nil "new=1")
       (should (equal opened "/wiki?new=1")))))
+
+(ert-deftest my/noema-jupyter-output-builds-url-after-host-is-ready ()
+  (let ((my/noema--port nil)
+        observed-port)
+    (cl-letf (((symbol-function 'my/noema--ensure-server)
+               (lambda (callback)
+                 (setq my/noema--port 43210)
+                 (funcall callback)))
+              ((symbol-function 'my/noema-jupyter--output-url)
+               (lambda (_payload)
+                 (setq observed-port my/noema--port)
+                 (throw 'url-built nil))))
+      (catch 'url-built
+        (my/noema-jupyter-output-open-document
+         '((scriptFile . "/tmp/research.noema")
+           (cellId . "work-1")))))
+    (should (= observed-port 43210))))
 
 (ert-deftest my/noema-wiki-refresh-calls-canonical-index-api ()
   (let ((my/noema--ready t)
@@ -1117,6 +1134,28 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
       (should-not my/noema--ready)
       (should-not my/noema--port)
       (should (= flush-count 0)))))
+
+(ert-deftest my/noema-gateway-event-opens-safe-hosted-surface-in-emacs ()
+  (let (deferred opened)
+    (cl-letf (((symbol-function 'my/noema--defer-host-event)
+               (lambda (function &rest args)
+                 (setq deferred (cons function args))))
+              ((symbol-function 'my/noema--ensure-server)
+               (lambda (callback) (funcall callback)))
+              ((symbol-function 'my/noema--open-url)
+               (lambda (url &rest _args) (setq opened url))))
+      (my/noema--gateway-event
+       '((type . "surface") (payload . ((path . "/wiki?new=1")))) nil)
+      (apply (car deferred) (cdr deferred))
+      (should (equal opened "http://127.0.0.1:50815/wiki?new=1")))))
+
+(ert-deftest my/noema-hosted-surface-rejects-external-or-unknown-pages ()
+  (let (opened)
+    (cl-letf (((symbol-function 'my/noema--open-url)
+               (lambda (&rest args) (setq opened args))))
+      (my/noema--open-hosted-surface '((path . "https://example.org/config")))
+      (my/noema--open-hosted-surface '((path . "/admin")))
+      (should-not opened))))
 
 (ert-deftest my/noema-sentinel-resets-dead-current-process ()
   (let* ((buffer (generate-new-buffer " *Noema-sentinel-test*"))

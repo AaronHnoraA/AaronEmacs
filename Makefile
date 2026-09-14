@@ -1,5 +1,5 @@
 EMACS ?= emacs
-AARONNOTE_DIR = lisp/roam/Noema
+AARONNOTE_DIR = site-lisp/noema
 EMACS_BATCH_BASE = $(EMACS) --batch --no-site-file --no-site-lisp --no-splash --init-directory=$(CURDIR) -q
 PUBLISH_BATCH = $(EMACS_BATCH_BASE) -L site-lisp/config -L lisp -L lisp/roam -l ./lisp/roam/init-aaronnote-publish.el
 # Load early-init first so native-comp never writes into top-level eln-cache.
@@ -8,20 +8,18 @@ BOOTSTRAP = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./bootstrap.el
 BOOTSTRAP_INSTALL = BOOTSTRAP_MODE=install $(BOOTSTRAP)
 BOOTSTRAP_EXPORT = BOOTSTRAP_MODE=export $(BOOTSTRAP)
 BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
-TEXPRESSO_DIR ?= $(CURDIR)/var/texpresso
-TEXPRESSO_REPOSITORY ?= https://github.com/let-def/texpresso.git
 REMOTE_TEST_BATCH = $(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t)' -L lisp -L lisp/remote -L lisp/remote/backend
-UI_TOKEN_FILE = lisp/roam/Noema/src/styles/aaron-ui-tokens.css
+UI_TOKEN_FILE = site-lisp/noema/src/styles/aaron-ui-tokens.css
 UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui/aaron-ui.el
 
 .PHONY: default help up setup setup-full bootstrap-health install remote-ikernel-install lock audit-lock doctor build build-force \
-        aaronnote-build texpresso-install texpresso-build texpresso-test \
+        aaronnote-build \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native ui-test ui-tokens audit-ui-tokens \
         remote-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e \
         lsp-test lsp-live-smoke lsp-remote-live-smoke \
-        jupyter-test \
+        jupyter-test research-test \
         publish publish-build publish-deploy publish-clean
 
 default: up
@@ -35,9 +33,6 @@ help:
 	  '  make bootstrap-health     Restore + health + doctor + lock audit' \
 	  '  make install              Deterministically restore packages from package-lock.el' \
 	  '  make remote-ikernel-install  Install the vendored remote_ikernel into Anaconda' \
-	  '  make texpresso-install    Install/update and build TeXpresso under var/texpresso' \
-	  '  make texpresso-build      Rebuild the existing local TeXpresso checkout' \
-	  '  make texpresso-test       Run TeXpresso headlessly against its sample document' \
 	  '  make lock                 Export the current package set back into package-lock.el' \
 	  '  make audit-lock           Compare installed packages against package-lock.el' \
 	  '  make ui-tokens            Regenerate Noema CSS tokens from aaron-ui' \
@@ -72,6 +67,7 @@ help:
 	  '  make lsp-live-smoke      Start real clangd, Python LS, and JDTLS projects' \
 	  '  make lsp-remote-live-smoke  Start real C/Python/Java LSP through TRAMP + Remote' \
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
+	  '  make research-test        Run Noema research notebook (JuText/Graph Board) ERT suite' \
 	  '  make remote-e2e           Run opt-in real SSH E2E (REMOTE_E2E_TARGET optional)' \
 	  '' \
 	  '  make publish              Compile CV + deploy site (git push + optional NAS rsync)' \
@@ -96,26 +92,6 @@ install:
 
 remote-ikernel-install:
 	bin/install-remote-ikernel install
-
-texpresso-install:
-	@command -v brew >/dev/null || (echo "Homebrew is required" >&2; exit 2)
-	@brew list --versions mupdf >/dev/null 2>&1 || brew install mupdf
-	@brew list --versions sdl2 >/dev/null 2>&1 || brew install sdl2
-	@if [ -d "$(TEXPRESSO_DIR)/.git" ]; then \
-	  git -C "$(TEXPRESSO_DIR)" pull --ff-only; \
-	else \
-	  git clone --recurse-submodules "$(TEXPRESSO_REPOSITORY)" "$(TEXPRESSO_DIR)"; \
-	fi
-	@git -C "$(TEXPRESSO_DIR)" submodule update --init --recursive
-	$(MAKE) -C "$(TEXPRESSO_DIR)" all
-
-texpresso-build:
-	@test -d "$(TEXPRESSO_DIR)/.git" || (echo "Run make texpresso-install first" >&2; exit 2)
-	$(MAKE) -C "$(TEXPRESSO_DIR)" all
-
-texpresso-test:
-	@test -x "$(TEXPRESSO_DIR)/build/texpresso" || (echo "Run make texpresso-install first" >&2; exit 2)
-	$(MAKE) -C "$(TEXPRESSO_DIR)" test-texpresso-texlive
 
 lock:
 	$(BOOTSTRAP_EXPORT)
@@ -233,6 +209,12 @@ jupyter-test:
 	$(BATCH) -l test/init-aaronnote-jupyter-notebook-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-runtime-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-jupyter-board-tests.el -f ert-run-tests-batch-and-exit
+
+research-test:
+	$(BATCH) -L lisp/roam -l test/noema-research-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/test/elisp \
+	  -l noema-interaction-tests.el -l noema-interaction-magent-tests.el \
+	  -f ert-run-tests-batch-and-exit
 
 remote-e2e:
 	REMOTE_E2E=1 $(REMOTE_TEST_BATCH) -l test/remote-e2e-tests.el -f ert-run-tests-batch-and-exit

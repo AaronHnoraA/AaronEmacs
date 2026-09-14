@@ -19,7 +19,7 @@
 (ert-deftest aaron-ui-noema-css-export-is-current ()
   (let ((file
          (expand-file-name
-          "lisp/roam/Noema/src/styles/aaron-ui-tokens.css"
+          "site-lisp/noema/src/styles/aaron-ui-tokens.css"
           user-emacs-directory)))
     (should (file-readable-p file))
     (with-temp-buffer

@@ -208,7 +208,7 @@ target\='s name."
            (or (and (boundp 'my/noema-jupyter-kernelspec-directory)
                     my/noema-jupyter-kernelspec-directory)
                (expand-file-name
-                "lisp/roam/Noema/jupyter/.jupyter/data/kernels/"
+                "site-lisp/noema/jupyter/.jupyter/data/kernels/"
                 user-emacs-directory))))
       (when (file-directory-p directory)
         (cl-loop

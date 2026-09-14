@@ -91,3 +91,6 @@ __pycache__/
 
 # Machine-local symlinks
 /.roam
+
+# Noema is its own repository, installed beside this configuration.
+/site-lisp/noema/

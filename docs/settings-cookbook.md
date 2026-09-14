@@ -81,19 +81,19 @@ contact”，优先补齐 Remote/LSP adapter，而不是把分支写进语言模
 
 - `M-x my/font-reset-all`
 
-## 3. 我要改 LaTeX 实时预览
+## 3. 我要改 LaTeX 构建/预览
 
-文件：[lisp/lang/tex/init-auctex.el](../lisp/lang/tex/init-auctex.el)。
+文件：[lisp/lang/tex/init-auctex.el](../lisp/lang/tex/init-auctex.el)（AUCTeX、latexmk 命令、
+PDF Tools/SyncTeX 预览）、[lisp/lang/tex/init-latex.el](../lisp/lang/tex/init-latex.el)（texlab/
+digestif、BibTeX、Zotero）。
 
-TeXpresso 的本地 checkout、Emacs mode 和构建产物统一放在 `var/texpresso/`。常用维护入口：
-
-- `make texpresso-install`：用 Homebrew 补齐 `mupdf` / `sdl2`，clone 或更新源码并构建。
-- `make texpresso-build`：只重建已有 checkout。
-- `make texpresso-test`：用 TeX Live 和 dummy SDL driver 跑上游 sample smoke test。
-
-固定集成路径由 `my/texpresso-root`、`my/texpresso-elisp-directory` 和 `my/texpresso-binary`
-派生，不写入私人绝对路径。实时 viewer 使用 TeXpresso 自己的 SDL/MuPDF 窗口；PDF Tools 继续负责
-正式构建后 PDF 的阅读、搜索、批注和传统 SyncTeX。
+`latexmk` 可执行文件通过 `remote-executable-find`（AUCTeX 侧）/
+`my/language-server-executable-find`（texlab 侧）按当前 buffer 的 Remote target 解析，不写死
+本机路径；两个 latexmk 命令（`XeLaTeXMk`/`PdfLaTeXMk`）在 `my/auctex-setup-build-workflow` 里按
+buffer 注册，而不是启动时算好一份全局命令。远程 target 上的构建命令会被
+`my/auctex-guard-remote-master` 拒绝——AUCTeX 自己的 `TeX-run-command` 用 `start-process`，遇到远程
+`default-directory` 会静默回退到本机 `~` 编译，而不是报错，所以选择在框架层面显式拒绝。texlab 的
+诊断/补全走 lsp-mode 共享的 `language-server` remote adapter，本身已经是 target-aware 的。
 
 ## 4. 我要改 AI 助手配置
 
@@ -101,7 +101,9 @@ TeXpresso 的本地 checkout、Emacs mode 和构建产物统一放在 `var/texpr
 
 - [lisp/init-ai-ide.el](../lisp/init-ai-ide.el)
 
-当前 AI 相关源码由 `site-lisp/ai-workbench/vendor/` 提供。
+当前 AI 相关源码完整内化在 `site-lisp/noema/upstream/`；Noema 公共入口和领域适配位于
+`site-lisp/noema/lisp/`。不要重新添加 gptel、agent-shell、acp.el、shell-maker 或 Magent
+的外部 package 安装声明。
 
 ### Claude Code
 
@@ -518,7 +520,7 @@ loopback，本机同端口很可能是另一个进程。
 ### 超时和输出上限
 
 Noema 侧用环境变量，默认值和含义见
-`lisp/roam/Noema/jupyter/README.md` 的 Environment variables 表
+`site-lisp/noema/jupyter/README.md` 的 Environment variables 表
 （执行超时、stdin 等待上限、stream 字节上限、实时输出合并窗口等）。
 
 ### 诊断

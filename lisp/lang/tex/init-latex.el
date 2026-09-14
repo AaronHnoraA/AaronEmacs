@@ -16,7 +16,6 @@
 (require 'url-http)
 
 (declare-function aaron-ui-color "aaron-ui" (token &optional fallback variant))
-(declare-function my/executable-or-name "init-utils")
 (declare-function my/language-server-executable-find "init-lsp" (program))
 (declare-function yas-minor-mode "yasnippet" (&optional arg))
 (declare-function my/register-language-server "init-lsp")
@@ -376,7 +375,8 @@
 (defun my/latex-language-server-workspace-configuration ()
   "Return workspace settings for LaTeX language servers."
   `(:texlab
-    (:build (:executable ,(my/executable-or-name "latexmk")
+    (:build (:executable ,(or (my/language-server-executable-find "latexmk")
+                              "latexmk")
              :args ["-xelatex"
                     "-interaction=nonstopmode"
                     "-synctex=1"

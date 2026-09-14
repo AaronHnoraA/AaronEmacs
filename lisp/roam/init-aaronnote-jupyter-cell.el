@@ -19,6 +19,8 @@
 (declare-function my/noema-api-call "init-aaronnote" (channel args callback))
 (declare-function my/noema-jupyter-output-open "init-aaronnote"
                   (&optional cell-id focus view))
+(declare-function noema-research-accept-jupyter-runtime
+                  "noema-research-mode" (snapshot))
 (declare-function my/noema--host-file "init-aaronnote" (file))
 (declare-function my/noema-jupyter-cell-lsp-runtime-changing
                   "init-aaronnote-jupyter-lsp" ())
@@ -386,11 +388,15 @@ one long enough for the whole run, not the default request deadline."
     (when script-file
       (dolist (buffer (buffer-list))
         (with-current-buffer buffer
-          (when (and (bound-and-true-p my/noema-jupyter-cell-mode)
-                     buffer-file-name
+          (when (and buffer-file-name
                      (my/noema-jupyter-cell--same-script-p
                       buffer-file-name script-file))
-            (my/noema-jupyter-cell--apply-session-snapshot snapshot)))))))
+            (cond
+             ((bound-and-true-p my/noema-jupyter-cell-mode)
+              (my/noema-jupyter-cell--apply-session-snapshot snapshot))
+             ((and (derived-mode-p 'noema-research-mode)
+                   (fboundp 'noema-research-accept-jupyter-runtime))
+              (noema-research-accept-jupyter-runtime snapshot)))))))))
 
 (defun my/noema-jupyter-cell-refresh-status ()
   "Refresh kernel/session state from Noema without creating a kernel."
@@ -490,7 +496,7 @@ This is a one-shot reconnect reaction, never a timer or polling loop."
     (nreverse choices)))
 
 (defun my/noema-jupyter-cell-select-kernel ()
-  "Select from the same Noema-owned kernel catalog used by the Web UI."
+  "Select from Noema's kernel catalog in the Emacs source buffer."
   (interactive)
   (when (buffer-modified-p) (save-buffer))
   (let* ((catalog (my/noema-jupyter-cell--api-sync
@@ -710,6 +716,28 @@ This does not change the notebook language, kernelspec, or Noema session."
       (forward-line 1)
       (my/noema-jupyter-cell--update-highlight)
       t)))
+
+(defun my/noema-jupyter-cell-select-source (payload)
+  "Visit the source Cell identified by PAYLOAD from the Web output renderer.
+The renderer sends stable identity, never a projected line number.  Emacs then
+uses the active document mode to resolve that identity into an editable
+location."
+  (let ((file (alist-get 'scriptFile payload))
+        (cell-id (alist-get 'cellId payload)))
+    (unless (and (stringp file) (not (string-empty-p file))
+                 (stringp cell-id) (not (string-empty-p cell-id)))
+      (user-error "Noema output source selection needs a file and cell ID"))
+    (find-file file)
+    (cond
+     ((derived-mode-p 'noema-research-mode)
+      (unless (fboundp 'noema-research-goto-cell)
+        (user-error "Noema research navigation is unavailable"))
+      (noema-research-goto-cell cell-id))
+     ((bound-and-true-p my/noema-jupyter-cell-mode)
+      (unless (my/noema-jupyter-cell--goto-id cell-id)
+        (user-error "Jupyter cell %s is not present in %s" cell-id file)))
+     (t
+      (user-error "%s is not an editable Noema/Jupyter source buffer" file)))))
 
 (defun my/noema-jupyter-cell-next ()
   "Select the next cell in the source projection."

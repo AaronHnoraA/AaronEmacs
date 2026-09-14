@@ -7,7 +7,7 @@
 | 位置 | 角色 |
 |---|---|
 | `~/.emacs.d/publish`(→ `~/HC/Org`) | **站点本身**。手写的 HTML/CSS/JS,仓库根就是网站根 |
-| `lisp/roam/Noema/publish/CV/main.tex` | CV 的 LaTeX 源(在 Noema 仓库里) |
+| `site-lisp/noema/publish/CV/main.tex` | CV 的 LaTeX 源(在 Noema 仓库里) |
 | `lisp/roam/init-aaronnote-publish.el` | 编译 CV、检查完整性、部署 |
 
 站点没有构建步骤。页面是什么样,提交进去的就是什么样;唯一被生成的产物是 CV 的 PDF。

@@ -593,12 +593,46 @@ buffer whose visible source intentionally differs from its JSON on disk."
     (run-hooks 'after-revert-hook)
     t))
 
+(defun my/noema-jupyter-notebook--research-buffer-p ()
+  "Return non-nil when the visited buffer is a Noema research notebook.
+Research notebooks keep their semantics under `metadata.noema_research' and are
+edited through `noema-research-mode' instead of the sidecar projection."
+  (and (stringp buffer-file-name)
+       (or (string-match-p "\\.noema\\'" buffer-file-name)
+           (string-match-p "\\.noema\\.ipynb\\'" buffer-file-name))
+       (save-excursion
+         (goto-char (point-min))
+         (search-forward "\"noema_research\"" nil t))
+       (condition-case nil
+           (let* ((document (json-parse-string
+                             (buffer-string) :object-type 'hash-table
+                             :array-type 'array :null-object nil
+                             :false-object :json-false))
+                  (metadata (and (hash-table-p document)
+                                 (gethash "metadata" document)))
+                  (research (and (hash-table-p metadata)
+                                 (gethash "noema_research" metadata))))
+             (and (hash-table-p research)
+                  (member (gethash "schema" research)
+                          '("noema.work-document/2"
+                            "noema.research-notebook/1"))))
+         (error nil))
+       (require 'noema-research-mode nil t)))
+
 ;;;###autoload
 (defun my/noema-jupyter-notebook-open-mode ()
+  "Visit an ipynb as a research notebook or a native source projection.
+Research notebooks open in `noema-research-mode'; other notebooks use the
+sidecar source projection."
+  (interactive)
+  (if (my/noema-jupyter-notebook--research-buffer-p)
+      (noema-research-mode)
+    (my/noema-jupyter-notebook--open-projection)))
+
+(defun my/noema-jupyter-notebook--open-projection ()
   "Visit an ipynb as a native source projection.
 Noema-owned notebooks also install the lightweight Emacs management UI; that
 UI talks only to Noema and never opens a Jupyter protocol connection."
-  (interactive)
   (let* ((raw
           ;; This runs from `auto-mode-alist', so an unhandled parse error
           ;; aborts `find-file' itself and strands the buffer in an unrelated
@@ -757,22 +791,26 @@ UI talks only to Noema and never opens a Jupyter protocol connection."
 
 ;; This association intentionally takes precedence over code-cells/Jupytext.
 (setq auto-mode-alist
-      (cons '("\\.ipynb\\'" . my/noema-jupyter-notebook-open-mode)
-            (cl-remove-if (lambda (entry)
-                            (and (consp entry)
-                                 (stringp (car entry))
-                                 (string-match-p "ipynb" (car entry))))
-                          auto-mode-alist)))
+      (cons '("\\.noema\\'" . my/noema-jupyter-notebook-open-mode)
+            (cons '("\\.ipynb\\'" . my/noema-jupyter-notebook-open-mode)
+                  (cl-remove-if (lambda (entry)
+                                  (and (consp entry)
+                                       (stringp (car entry))
+                                       (or (string-match-p "ipynb" (car entry))
+                                           (string-match-p "noema" (car entry)))))
+                                auto-mode-alist))))
 
 (with-eval-after-load 'code-cells
   (setq auto-mode-alist
-        (cons '("\\.ipynb\\'" . my/noema-jupyter-notebook-open-mode)
-              (cl-remove-if
-               (lambda (entry)
-                 (and (consp entry)
-                      (stringp (car entry))
-                      (string-match-p "ipynb" (car entry))))
-               auto-mode-alist))))
+        (cons '("\\.noema\\'" . my/noema-jupyter-notebook-open-mode)
+              (cons '("\\.ipynb\\'" . my/noema-jupyter-notebook-open-mode)
+                    (cl-remove-if
+                     (lambda (entry)
+                       (and (consp entry)
+                            (stringp (car entry))
+                            (or (string-match-p "ipynb" (car entry))
+                                (string-match-p "noema" (car entry)))))
+                     auto-mode-alist)))))
 
 (provide 'init-aaronnote-jupyter-notebook)
 

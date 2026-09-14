@@ -286,20 +286,21 @@ label 中的 citation 正常解析。
 `\textbackslash`。输出路径按 note 记忆，写入是原子的，并强制使用 `.tex` 后缀。未闭合的
 display math、代码 fence 或 `#+begin` block 会在写文件前报出明确错误，避免留下半成品。
 
-### LaTeX 实时预览（TeXpresso）
+### LaTeX 预览（AUCTeX + PDF Tools）
 
-普通 `.tex` 文件仍用 AUCTeX 做编辑、补全、RefTeX、master-file 识别和正式构建；实时预览改用
-[TeXpresso](https://github.com/let-def/texpresso)。它直接打开自己的 SDL/MuPDF 窗口并增量更新，
-不需要保存文件或等待 `latexmk -pvc` 重建整份 PDF。
+`.tex` 文件用 AUCTeX 做编辑、补全、RefTeX、master-file 识别和正式构建（latexmk，
+`XeLaTeXMk`/`PdfLaTeXMk`），预览走 PDF Tools + SyncTeX。latexmk 的可执行路径按当前 buffer 的
+Remote target 解析：本地 target 用本机 PATH 上的 latexmk，远程 target 会去该 target 上找。
 
-- `C-c C-p`：为当前 AUCTeX master 启动 TeXpresso；已在预览同一文档时只同步当前位置。
-- `C-c C-g` / `M-RET`：把 TeXpresso 滚到当前源码位置；若没有 TeXpresso 会回退到现有 PDF Tools/SyncTeX 流程。
-- `M-x my/latex-preview-dispatch`：统一菜单，可启动/停止实时预览、查看错误或打开正式构建的 PDF。
-- `M-x my/texpresso-display-output`：在 Emacs 底部查看当前页的 TeX 错误和警告。
-- `M-x my/texpresso-stop`：停止 viewer 和同步进程。
+- `C-c C-p`：编译并查看（`TeX-command-run-all`）。
+- `C-c C-g` / `M-RET`：正向跳转到当前源码位置对应的 PDF 位置；PDF 不存在时会先编译。
+- `M-x my/latex-preview-dispatch`：统一菜单，可正向同步、打开已构建的 PDF、编译并查看、或走
+  AUCTeX 自带的 `TeX-view`。
 
-TeXpresso viewer 内可用方向键或 `hjkl` 平移，`Space` / `b` 翻页，`p` 适应整页，`w` 适应宽度，
-`i` 切换暗色，`t` 置顶，`q` 退出。普通落盘 PDF 的阅读、批注、搜索和 SyncTeX 仍由 PDF Tools 提供。
+远程 target 上的 buffer 目前会在执行构建命令时直接报错拒绝：AUCTeX 自身的进程启动用的是
+`start-process`，遇到远程 `default-directory` 时会静默改到本机 `~` 下编译，而不是报错，所以
+配置选择显式拒绝而不是让它悄悄编译错文件。texlab 提供的诊断/补全在远程 target 上仍然可用。
+PDF 的阅读、批注、搜索仍由 PDF Tools 提供。
 
 ## 2. Leader 键分组
 
@@ -893,25 +894,31 @@ GUI frame 的两侧 fringe 分工如下：
 - `C-c y` 现在是 snippet 前缀，不再直接展开
 - `C-c n` 是 Typst note 前缀，不再给 centaur-tabs
 
-## 8. AI Workbench
+## 8. Noema AI 与 agent
 
-统一入口，把 CLI 引擎（CC/Codex/OpenCode）和 HTTP 模型（ChatGPT、Claude-API 等）放到同一个 picker 里。`gptel` 是内部 HTTP 集成层，不在 picker 里显示。
+Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是直接复用的 compose/context/rewrite UI；agent-shell + ACP 是结构化 session/stream/permission 路径；Magent 提供本地 agent、queue、ledger 和 gptel adapter。
 
 | 键 | 功能 |
 |----|------|
-| `C-c A W` | 打开/选择引擎（首次弹 picker：Codex/CC/OpenCode/ChatGPT/Claude…） |
-| `C-c A .` | 带上下文发送 prompt 到当前引擎 |
-| `C-c A w` | writing prompt |
-| `C-c A k` | 关闭当前引擎 session 并重置选择 |
-| `C-c A H` | 打开管理 Hub（CLI Engines + Chat Models + Profiles） |
-| `C-c A ?` | docs-ask（默认 Codex；`:c ` 前缀用 CC；`:o ` 前缀用 OpenCode） |
-| `C-c A i r/b/f` | 发送选区 / 当前 buffer / 文件给当前引擎 |
-| `C-c g` | 直接打开 HTTP chat buffer（gptel）|
-| `C-c G` | 从 JSON 重新加载 HTTP chat 后端 |
+| `C-c A W` | 打开 Noema（默认 Magent agent-shell） |
+| `C-c A a` | 选择 Magent/Codex/Claude/OpenCode/Pi agent-shell |
+| `C-c A c` | 打开 gptel compose buffer |
+| `C-c A s` | 从当前 buffer 发送 gptel 请求 |
+| `C-c A m` | 打开 gptel transient 设置 |
+| `C-c A .` | 把 region/buffer/file 加入 gptel context |
+| `C-c A r` | gptel rewrite/diff 预览 |
+| `C-c A p` | 把当前 agent-shell session 纳入 research |
 
-HTTP 后端在 `etc/ai-workbench/backends.json` 里配置（OpenAI、Anthropic、Ollama 等），CLI 引擎（Codex、OpenCode）通过 `ai-workbench-adapter-*.el` 的 `defcustom` 配置可执行路径。
+可编辑 profile 与 prompt 资源位于 `etc/noema/`。一次性 CLI sampler 仅保留为
+gptel backend 的降级；不再有独立 interaction Hub/transcript/session UI，选区、buffer
+和文件上下文一律使用 gptel compose。完整上游源码位于
+`site-lisp/noema/upstream/`；当前代码不得回退到旧 workbench 命名或另一份外部 checkout。
 
-## 9. Jupyter cell —— Noema 与 kernel
+## 9. Jupyter cell —— 普通笔记与 kernel
+
+本节只描述普通 Markdown `@@cell` sidecar 与 `.ipynb`。D-023 `.noema` 是
+AI prompt/工作流程文档：按 `C-c C-c` 运行 work 块时走 ACP agent，回复进入右侧
+OutputArea 并保存到该块 outputs；它没有 kernel 选择、重启、Run All 或编程代码块。
 
 笔记里的 `@@cell(language, session) [id]` 块由 Noema 渲染，**源码、cell 结构和
 运行逻辑由 Noema 管理**：在 cell 上点 Edit，Noema 会打开笔记旁 `.cell/` 下的

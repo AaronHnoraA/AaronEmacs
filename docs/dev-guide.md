@@ -511,9 +511,9 @@ Markdown 笔记现在由 Noema Web 自己编辑和渲染，Emacs 只负责启动
 
 ```
 Emacs (init-aaronnote.el)
-  └─ spawn node lisp/roam/Noema/web-host.mjs
-       ├─ 静态服务 lisp/roam/Noema/dist/aaronnote/
-       ├─ 运行时 lisp/roam/Noema/server/ + shared/
+  └─ spawn node site-lisp/noema/web-host.mjs
+       ├─ 静态服务 site-lisp/noema/dist/aaronnote/
+       ├─ 运行时 site-lisp/noema/server/ + shared/
        ├─ 注入 window.aaronnoteApi 适配器（替代 Electron preload）
        ├─ POST /api            ← Web app 调 runtime 保存/索引/文件操作
        ├─ GET  /events         ← Emacs 控制事件推送到页面
@@ -522,13 +522,15 @@ Emacs (init-aaronnote.el)
 ```
 
 笔记仓库通过 `.roam` 符号链接挂载（机器本地，不入 git）。Noema 是
-`lisp/roam/Noema/` 下的完整项目，源码、build、runtime、plugins 和
-roam-tools JS 都在其中；运行时不依赖 `~/HC/Org`。
+`site-lisp/noema/` 下的完整项目，源码、build、runtime、plugins 和
+roam-tools JS 都在其中；运行时不依赖 `~/HC/Org`。该目录是**独立仓库**，由
+AaronEmacs 根仓库的 `.gitignore` 排除，不是 submodule；新机器应将 Noema remote
+clone 到该路径，再按 Noema 的 README 安装依赖。
 
 Noema 与 Emacs 共用：
 
 - 状态与缓存：`var/aaronnote/`
-- snippets：`snippets/`（只有 `markdown-mode/`、`tex-mode/` 链接到 Noema，其它语言由 Emacs 仓库维护）
+- snippets：`snippets/`（`markdown-mode/`、`tex-mode/` 已直接并入 AaronEmacs；Noema 资源路径指向这份唯一副本）
 - templates：`templates/`（只有 `noema/`、`latex/`、`tex/` 链接到 Noema，其它模板由 Emacs 仓库维护）
 
 ### 关键文件
@@ -536,9 +538,9 @@ Noema 与 Emacs 共用：
 | 文件 | 用途 |
 |------|------|
 | `lisp/roam/init-aaronnote.el` | Emacs 入口：进程管理、Appine/xwidget 打开、控制命令 |
-| `lisp/roam/Noema/` | 完整 Noema 项目（链接到 `~/HC/SOURCE/Noema`） |
-| `lisp/roam/Noema/web-host.mjs` | Node HTTP+SSE 桥接服务器和 preload adapter |
-| `lisp/roam/Noema/dist/aaronnote/` | Noema static build |
+| `site-lisp/noema/` | 完整 Noema 独立 git 项目；安装位置固定，但由根仓库忽略，不是 submodule 或符号链接 |
+| `site-lisp/noema/web-host.mjs` | Node HTTP+SSE 桥接服务器和 preload adapter |
+| `site-lisp/noema/dist/aaronnote/` | Noema static build |
 | `.roam` | → Markdown 笔记目录（`AARONNOTE_ROOT`） |
 
 ### 边界
@@ -578,36 +580,33 @@ in-process 缓存，与自动刷新保持一致。
 - 重新打开当前 note：`M-x my/noema-refresh`（localleader `r`）
 - 健康状态：`M-x my/health-report` → Noema 栏（process、ready、runtime、last-sync）
 
-## 9. AI
+## 9. Noema AI/agent
 
-### AI Workbench
+- `M-x noema` / `C-c A W` — Noema 主入口
+- `M-x noema-agent-start` / `C-c A a` — 启动内化 agent-shell 上的结构化 agent
+- `M-x noema-compose` / `C-c A c` — 直接复用内化 gptel 的 compose UI
+- `C-c A s/m/./r` — send、transient、context、rewrite/diff
+- `C-c A p` — 把当前 agent-shell session 纳入 research
+- `C-c A i r/b/f` — 迁移后的 Noema interaction region/buffer/file 入口
+- profile 与模板在 `etc/noema/`，运行状态在 `var/noema/`
 
-- `M-x ai-workbench` — 直接打开当前项目的交互 backend session
-- `M-x ai-workbench-compose-buffer` — 打开统一 compose buffer
-- `C-c M-a` — 在当前文件里打开引用式 AI 工具入口
-- `C-c A w` / `C-c A m` — workbench / compose 快捷入口
-- `C-c A i r` / `C-c A i b` / `C-c A i f` — 直接发送 region / buffer / file
-- 第一次打开会选择 backend，session 默认 profile 先记为 `default`，profile 文本从 `etc/ai-workbench/profiles/default.txt` 读取
-- 统一入口不再停在中转 frontend，而是直接弹出 Claude/Codex 交互 buffer
-- Codex 默认走交互 terminal session，不默认走 `exec --json`
-- session 创建时会自动在项目目录启动，并自动注入一次 workdir/profile 提示
-- 如果输出中包含 patch，会额外进入 diff buffer，走 `a`/`x` accept/reject
-- 引用式入口会写 `var/ai-workbench/` manifest，profile 启动期要求 AI 把所有修改文件写入清单，diff review 会读取它
-- 这层当前是主推荐入口，底层仍复用 Claude Code / Codex CLI
+源码边界：Noema 代码在 `site-lisp/noema/lisp/`；完整 gptel、agent-shell、acp.el、
+shell-maker、Magent、Claude/Codex 兼容源码在 `site-lisp/noema/upstream/`。这些不是
+package.el/VC 外部依赖，也不能用自研简化实现替代。
 
 ### Claude Code
 
 - `C-c C-'` / `C-c a` — claude-code-ide 菜单
 - `F12` / `H-l`       — 同上
 - 配置：`lisp/init-ai-ide.el`，变量 `claude-code-ide-cli-path`
-- 本地源码由 `site-lisp/ai-workbench/vendor/claude-code-ide/` 提供
+- 本地源码由 `site-lisp/noema/upstream/claude-code-ide/` 提供
 
 ### Codex CLI
 
 - `C-c c t` — 切换面板
 - `C-c c s` / `C-c c q` — 启动 / 停止
 - `C-c c p` / `C-c c r` / `C-c c f` — 发送 prompt / region / file
-- 本地源码由 `site-lisp/ai-workbench/vendor/codex-cli/` 提供
+- 本地源码由 `site-lisp/noema/upstream/codex-cli/` 提供
 
 ### Copilot
 

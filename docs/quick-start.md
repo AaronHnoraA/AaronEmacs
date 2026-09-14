@@ -206,33 +206,26 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 ### AI 助手
 
-[lisp/init-ai-ide.el](../lisp/init-ai-ide.el) 管理两套 AI 助手：
+[lisp/init-ai-ide.el](../lisp/init-ai-ide.el) 提供 Noema 的统一 AI/agent 入口。
+gptel、agent-shell、acp.el、shell-maker、Magent 及现有 CLI 兼容代码均完整内化在
+`site-lisp/noema/upstream/`，不再从 `package.el`、VC package 或旧 workbench 目录加载。
 
-当前本地源码来源已经切到 `site-lisp/ai-workbench/vendor/` 下的 vendored 包，
-不再依赖这里现场拉取 VC 包。
+**Noema AI/agent**
 
-**AI Workbench**（统一入口，实验中）
+- `M-x noema` / `C-c A W` — 打开 Noema（默认进入 Magent 的 agent-shell 会话）
+- `M-x noema-agent-start` / `C-c A a` — 选择并启动 Magent、Codex、Claude、OpenCode 或 Pi agent-shell 会话
+- `M-x noema-compose` / `C-c A c` — 使用完整 gptel UI 打开任意 buffer compose
+- `C-c A s` — 从当前 buffer 发送；`C-c A m` — gptel transient；`C-c A .` / `C-c M-a` — 添加上下文
+- `C-c A r` — 使用 gptel rewrite/diff 预览；`C-c A p` — 把当前 agent-shell 会话纳入 Noema research
+- CLI sampler 只作为 gptel backend 的降级，不再提供第二套 interaction Hub/transcript/session UI；region、buffer、file 一律从 gptel compose/context 发送。
+- profile 与 prompt 模板在 `etc/noema/`；Magent session/audit 状态在 `var/noema/`
 
-- `M-x ai-workbench` — 直接弹出当前后端的交互 buffer
-- `M-x ai-workbench-compose-buffer` — 打开 compose buffer
-- `C-c M-a` — 在当前文件里打开引用式 AI 工具入口
-- `C-c A w` — 打开 workbench
-- `C-c A m` — 打开 compose buffer
-- `C-c A i r` / `C-c A i b` / `C-c A i f` — 直接把 region / 当前 buffer / 文件发给当前 backend
-- 第一次打开会先选择 backend；profile 现在先固定为 `default`，文本在 `etc/ai-workbench/profiles/default.txt`
-- workbench 不再停在中转页面，统一入口会直接把 Claude/Codex 的交互 session 弹出来
-- 引用式工具入口生成的 prompt 会进入 popup compose buffer，并清掉上一次残留内容
-- 后端 session 创建时会自动在项目目录启动，并自动注入一次 workdir/profile 提示
-- compose buffer:
-  `C-c C-c` 发送，`C-c C-b` 切后端，`C-c C-r` 注入 region，
-  `C-c C-e` 注入当前 buffer，`C-c C-f` 注入文件
-- diff 候选仍然先进入 Emacs diff buffer，再由用户决定是否 apply；引用式入口会在 `var/ai-workbench/` 放修改清单 manifest，profile 启动期会说明维护规则
-- 当前先复用 Claude/Codex 的现有会话能力，同时保留旧快捷键
+Noema 不重写 gptel 或 agent-shell。gptel 提供 compose/context/rewrite UI，agent-shell + ACP
+持有结构化外部 agent 会话，Magent 提供本地 agent、queue、ledger 与 gptel adapter；Noema
+把这些能力连接到 Project、WorkNode、Run 和 Artifact。
 
-**Claude Code**（主力）
-
-- CLI 路径：`claude-code-ide-cli-path`（默认 `/Users/hc/.local/bin/claude`）
-- 入口：`C-c C-'` / `F12` / `H-l`
+Claude/Codex 的兼容源码仍在 Noema `upstream/`，但不再绑定全局快捷键；从
+`C-c A a` 的 agent-shell 入口选择它们。
 - 需要先在终端 `npm install -g @anthropic-ai/claude-code` 或 brew 安装 claude CLI
 
 **Codex CLI**（可选）

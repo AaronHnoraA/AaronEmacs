@@ -115,7 +115,6 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-avy)
 (require 'init-multiple-cursors)
 (dolist (command '(my/latex-preview-dispatch
-                   my/latex-preview-current-buffer
                    my/latex-preview-open-pdf
                    my/latex-sync-forward
                    my/latex-sync-forward-mouse
@@ -128,11 +127,7 @@ If one of FEATURES is already available, require MODULE immediately."
                    my/latex-preview-clear-buffer
                    my/latex-preview-clear-document
                    my/latex-preview-compile-and-view
-                   my/latex-preview-view-pdf
-                   my/texpresso-start
-                   my/texpresso-stop
-                   my/texpresso-toggle
-                   my/texpresso-display-output))
+                   my/latex-preview-view-pdf))
   (autoload command "init-auctex" nil t))
 (my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
 (my/require-module-safely 'init-browser)

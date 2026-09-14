@@ -109,7 +109,7 @@ All three items are minor optimizations on an already viewport-aware pipeline:
 
 ```sh
 # TypeScript unit tests
-cd lisp/roam/Noema
+cd site-lisp/noema
 npm test -- tests/sanitize-html.test.ts tests/cm6/commands.test.ts tests/paste-html.test.ts
 
 # Build

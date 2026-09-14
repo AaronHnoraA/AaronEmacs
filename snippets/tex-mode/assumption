@@ -1,0 +1,10 @@
+# -*- mode: snippet -*-
+# name: Assumption
+# key: assumption
+# group: Emacs migrated
+# source: /Users/hc/.config/emacs/snippets/tex-mode/assumption_Assumption
+# --
+\begin{assumption}
+	${1:a}
+\end{assumption}
+$0

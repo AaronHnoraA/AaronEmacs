@@ -15,7 +15,6 @@
 (declare-function my/compile-board "init-compile" ())
 (declare-function my/byte-compile-config "init-compile" (&optional force))
 (declare-function my/native-compile-config "init-compile" (&optional force))
-(declare-function claude-code-ide-emacs-tools-setup "claude-code-ide" ())
 (declare-function my/package-lock-audit "init-package-utils" ())
 (declare-function my/maintenance-state-report "init-maintenance" ())
 
@@ -55,9 +54,7 @@
     (vterm . "vterm")
     (vterm-module . "vterm-module")
     (pdf-tools . "pdf-tools")
-    (tramp-rpc . "tramp-rpc")
-    (claude-code-ide . "claude-code-ide")
-    (codex-cli . "codex-cli"))
+    (tramp-rpc . "tramp-rpc"))
   "Libraries that should be available after a healthy bootstrap.")
 
 (defvar my/health-startup-time nil
@@ -263,14 +260,6 @@
            (require 'tramp)
            (or (assoc "rpc" tramp-methods)
                (assoc 'rpc tramp-methods))))
-   (cons 'claude-code-ide-loaded
-         (ignore-errors
-           (require 'claude-code-ide)
-           (fboundp 'claude-code-ide-menu)))
-   (cons 'codex-cli-loaded
-         (ignore-errors
-           (require 'codex-cli)
-           (fboundp 'codex-cli-toggle)))
    (cons 'aaronnote-latex-agent
          ;; OK unless the Noema LaTeX export engine wants an AI backend but
          ;; that backend's binary is missing (export still works via mechanical

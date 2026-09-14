@@ -72,15 +72,15 @@
   :group 'applications)
 
 (defvar my/noema--web-host-script
-  (expand-file-name "lisp/roam/Noema/web-host.mjs" user-emacs-directory)
+  (expand-file-name "site-lisp/noema/web-host.mjs" user-emacs-directory)
   "Path to the Noema web host script.")
 
 (defvar my/noema--web-dir
-  (expand-file-name "lisp/roam/Noema/dist/aaronnote" user-emacs-directory)
+  (expand-file-name "site-lisp/noema/dist/aaronnote" user-emacs-directory)
   "Path to the built Noema web app.")
 
 (defvar my/noema--runtime-root
-  (expand-file-name "lisp/roam/Noema" user-emacs-directory)
+  (expand-file-name "site-lisp/noema" user-emacs-directory)
   "Path to the vendored Noema runtime.")
 
 (defvar my/noema--state-root
@@ -395,7 +395,7 @@ the backend.  The backend is chosen here, not per export."
 ;; Keep the Markdown/xwidget input bridge in a dedicated module.  Its command
 ;; names and wire protocol remain unchanged for browser and Emacs callers.
 (add-to-list 'load-path
-             (expand-file-name "lisp/roam/Noema/emacs" user-emacs-directory))
+             (expand-file-name "site-lisp/noema/lisp" user-emacs-directory))
 (require 'noema-xwidget-keys)
 
 (defvar-keymap my/noema-keys-mode-map
@@ -554,67 +554,81 @@ Local files are projected to native host paths.  Remote files retain their
           "(() => { const p = %s; if (typeof window.noemaJupyterOpenDocument === 'function') { window.noemaJupyterOpenDocument(p); if (p.view && typeof window.noemaJupyterOpenView === 'function') window.noemaJupyterOpenView(p.view); return true; } return false; })()"
           (json-serialize payload :null-object nil :false-object :json-false)))))))
 
+(defun my/noema-jupyter-output-open-document (payload &optional focus)
+  "Open Noema's singleton rich-output renderer for document PAYLOAD.
+PAYLOAD names the Emacs-owned work document and optional cell.  The renderer
+uses the existing JupyterLab rendermime stack, but it is only a right-side
+view: Emacs remains the document editor, workspace compositor, and control
+surface.  With FOCUS non-nil, move keyboard focus to the renderer."
+  (unless (and (alist-get 'scriptFile payload)
+               (not (string-empty-p (format "%s" (alist-get 'scriptFile payload)))))
+    (user-error "Missing Noema/Jupyter work document"))
+  (let ((source-buffer (current-buffer))
+        (source-window (selected-window)))
+    (my/noema--ensure-server
+     (lambda ()
+       ;; The port is assigned by `my/noema--ensure-server'.  Build the URL
+       ;; only after its ready callback runs so a cold Emacs session can open
+       ;; already-persisted `.noema' output before doing any other Noema work.
+       (let ((url (my/noema-jupyter--output-url payload)))
+         (when (and (buffer-live-p source-buffer)
+                    (window-live-p source-window))
+           (with-selected-window source-window
+             (let* ((existing
+                     (and (fboundp 'my/xwidget-session-buffer)
+                          (my/xwidget-session-buffer
+                           my/noema-jupyter-output-client-id)))
+                    (target-window
+                     (or (and existing (get-buffer-window existing 'visible))
+                         (split-window source-window nil 'right)))
+                    buffer)
+               (if (buffer-live-p existing)
+                   (progn
+                     (setq buffer existing)
+                     (set-window-buffer target-window buffer)
+                     (my/noema-jupyter--output-dispatch buffer payload))
+                 (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
+                 (with-selected-window target-window
+                   (setq buffer
+                         (my/xwidget-open-url
+                          url :id my/noema-jupyter-output-client-id
+                          :display 'current :reuse-selected t))))
+               (when (buffer-live-p buffer)
+                 (with-current-buffer buffer
+                   (setq-local my/xwidget-suppress-auto-focus (not focus))
+                   (setq-local my/noema--client-id
+                               my/noema-jupyter-output-client-id)
+                   (setq-local my/noema--xwidget-forced-name
+                               my/noema-jupyter-output-buffer-name)
+                   (unless (equal (buffer-name) my/noema-jupyter-output-buffer-name)
+                     (rename-buffer my/noema-jupyter-output-buffer-name t))))
+               (if focus
+                   (progn
+                     (select-window target-window)
+                     (run-at-time 0.2 nil #'my/xwidget-focus buffer))
+                 (select-window source-window))))))))
+    (get-buffer my/noema-jupyter-output-buffer-name)))
+
 ;;;###autoload
 (defun my/noema-jupyter-output-open (&optional cell-id focus view)
-  "Open the singleton Noema Jupyter output page for CELL-ID.
-The page is displayed below the current script buffer.  With FOCUS non-nil,
-move keyboard focus to the page; otherwise preserve source-buffer focus."
+  "Open the right-side Jupyter rich-output view for CELL-ID.
+This compatibility entry point serves native ipynb source projections.  A
+`.noema' work document calls `my/noema-jupyter-output-open-document' directly
+with its own canonical file and cell identity."
   (interactive (list nil t))
   (unless (and buffer-file-name
                (bound-and-true-p my/noema-jupyter-cell-mode))
     (user-error "Current buffer is not a Noema Jupyter Cell script"))
   (my/noema-jupyter-cell--update-highlight)
-  (let* ((source-buffer (current-buffer))
-         (source-window (selected-window))
-         (payload
-          `((scriptFile . ,(my/noema--host-file buffer-file-name))
-            (sourceFile . ,(my/noema--host-file
-                            my/noema-jupyter-cell-source-file))
-            (cellId . ,(or cell-id my/noema-jupyter-cell-current-id ""))
-            (language . ,(or my/noema-jupyter-cell-language "python"))
-            (kernel . ,(or my/noema-jupyter-cell-kernel "python3"))
-            (session . ,(or my/noema-jupyter-cell-session "default"))
-            ,@(when view `((view . ,view)))))
-         (url (my/noema-jupyter--output-url payload)))
-    (my/noema--ensure-server
-     (lambda ()
-       (when (and (buffer-live-p source-buffer)
-                  (window-live-p source-window))
-         (with-selected-window source-window
-           (let* ((existing
-                   (and (fboundp 'my/xwidget-session-buffer)
-                        (my/xwidget-session-buffer
-                         my/noema-jupyter-output-client-id)))
-                  (target-window
-                   (or (and existing (get-buffer-window existing 'visible))
-                       (split-window source-window nil 'below)))
-                  buffer)
-             (if (buffer-live-p existing)
-                 (progn
-                   (setq buffer existing)
-                   (set-window-buffer target-window buffer)
-                   (my/noema-jupyter--output-dispatch buffer payload))
-               (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
-               (with-selected-window target-window
-                 (setq buffer
-                       (my/xwidget-open-url
-                        url :id my/noema-jupyter-output-client-id
-                        :display 'current :reuse-selected t))))
-             (when (buffer-live-p buffer)
-               (with-current-buffer buffer
-                 (setq-local my/xwidget-suppress-auto-focus (not focus))
-                 (setq-local my/noema--client-id
-                             my/noema-jupyter-output-client-id)
-                 (setq-local my/noema--xwidget-forced-name
-                             my/noema-jupyter-output-buffer-name)
-                 (unless (equal (buffer-name) my/noema-jupyter-output-buffer-name)
-                   (rename-buffer my/noema-jupyter-output-buffer-name t))))
-             (if focus
-                 (progn
-                   (select-window target-window)
-                   (run-at-time 0.2 nil #'my/xwidget-focus buffer))
-               (select-window source-window)))))))
-    (get-buffer my/noema-jupyter-output-buffer-name)))
+  (my/noema-jupyter-output-open-document
+   `((scriptFile . ,(my/noema--host-file buffer-file-name))
+     (sourceFile . ,(my/noema--host-file my/noema-jupyter-cell-source-file))
+     (cellId . ,(or cell-id my/noema-jupyter-cell-current-id ""))
+     (language . ,(or my/noema-jupyter-cell-language "python"))
+     (kernel . ,(or my/noema-jupyter-cell-kernel "python3"))
+     (session . ,(or my/noema-jupyter-cell-session "default"))
+     ,@(when view `((view . ,view))))
+   focus))
 
 (defun my/noema--markdown-file-p (file)
   "Return non-nil when FILE is a Markdown file."
@@ -1307,6 +1321,23 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              (my/noema--defer-host-event
               #'my/noema-jupyter-cell-handle-session-event payload)
              nil)
+            ("jupyter-cell-select"
+             (when (fboundp 'my/noema-jupyter-cell-select-source)
+               (my/noema--defer-host-event
+                #'my/noema-jupyter-cell-select-source payload))
+             nil)
+            ("surface"
+             (my/noema--defer-host-event
+              #'my/noema--open-hosted-surface payload)
+             nil)
+            ("research-worker"
+             ;; The document-execution worker owns ACP processes in Emacs.
+             ;; Keep gateway dispatch non-blocking and optional so ordinary
+             ;; Noema use never depends on the research package being loaded.
+             (when (fboundp 'noema-agent-worker-apply-command)
+               (my/noema--defer-host-event
+                #'noema-agent-worker-apply-command payload))
+             nil)
             ((or "open" "system-open" "zotero" "zotero-import"
                  "current-file" "saved")
              (my/noema--event-line type payload))
@@ -1749,6 +1780,20 @@ reusing a remembered one."
     ('xwidget (my/noema--open-xwidget url file))
     (_ (user-error "Unsupported Noema backend: %S" my/noema-backend))))
 
+(defun my/noema--open-hosted-surface (payload)
+  "Open the safe Noema web surface named by PAYLOAD inside Emacs.
+The three surfaces share one stable host buffer, so repeated renderer clicks
+navigate that buffer instead of accumulating browser windows."
+  (let ((path (and (listp payload) (alist-get 'path payload))))
+    (if (not (and (stringp path)
+                  (string-match-p
+                   "\\`/\\(?:config\\|wiki\\|agenda\\)\\(?:\\?[^#\n\r]*\\)?\\'"
+                   path)))
+        (message "Noema ignored unsafe hosted surface: %S" path)
+      (my/noema--ensure-server
+       (lambda ()
+         (my/noema--open-url (my/noema--server-url path) nil nil))))))
+
 (defvar my/noema--post-queue nil
   "FIFO of notification payloads waiting to leave the Emacs command loop.")
 
@@ -2076,7 +2121,7 @@ waits for a response in the invoking Emacs command."
   (my/noema-command "focus"))
 
 (defun my/noema-open-wiki-view (&optional view query)
-  "Open canonical Wiki VIEW with optional additional QUERY parameters."
+  "Open the Emacs-hosted Wiki VIEW with optional QUERY parameters."
   (my/noema--ensure-server
    (lambda ()
      (let ((path (concat "/wiki"
@@ -2091,36 +2136,36 @@ waits for a response in the invoking Emacs command."
        (my/noema--open-url (my/noema--server-url path) nil nil)))))
 
 (defmacro my/noema--def-wiki-view (name view doc)
-  "Define NAME to open canonical Wiki VIEW with DOC."
+  "Define NAME to open the Emacs-hosted Wiki VIEW with DOC."
   `(defun ,name ()
      ,doc
      (interactive)
      (my/noema-open-wiki-view ,view)))
 
 (my/noema--def-wiki-view my/noema-wiki-home nil "Open the Noema Wiki home.")
-(my/noema--def-wiki-view my/noema-wiki-pages "pages" "Open the canonical Wiki page browser.")
+(my/noema--def-wiki-view my/noema-wiki-pages "pages" "Open the Wiki page browser.")
 (my/noema--def-wiki-view my/noema-wiki-recent "recent" "Open recently changed Wiki pages.")
-(my/noema--def-wiki-view my/noema-wiki-tags "tags" "Open canonical Wiki tag management.")
-(my/noema--def-wiki-view my/noema-wiki-namespaces "namespaces" "Open canonical Wiki namespaces.")
-(my/noema--def-wiki-view my/noema-wiki-repositories "repositories" "Open canonical Wiki repository management.")
-(my/noema--def-wiki-view my/noema-wiki-sync "sync" "Open canonical Wiki synchronization.")
-(my/noema--def-wiki-view my/noema-wiki-reports "reports" "Open canonical Wiki reports.")
-(my/noema--def-wiki-view my/noema-wiki-wanted "wanted" "Open canonical Wiki wanted-pages report.")
+(my/noema--def-wiki-view my/noema-wiki-tags "tags" "Open Wiki tag management.")
+(my/noema--def-wiki-view my/noema-wiki-namespaces "namespaces" "Open Wiki namespaces.")
+(my/noema--def-wiki-view my/noema-wiki-repositories "repositories" "Open Wiki repository management.")
+(my/noema--def-wiki-view my/noema-wiki-sync "sync" "Open Wiki synchronization.")
+(my/noema--def-wiki-view my/noema-wiki-reports "reports" "Open Wiki reports.")
+(my/noema--def-wiki-view my/noema-wiki-wanted "wanted" "Open Wiki wanted-pages report.")
 
 (defun my/noema-wiki-new-page ()
-  "Open Noema's canonical new-page flow."
+  "Open Noema's Wiki new-page flow inside Emacs."
   (interactive)
   (my/noema-open-wiki-view nil "new=1"))
 
 ;;;###autoload
 (defun my/noema-workspace-graph ()
-  "Open the shared interactive workspace graph."
+  "Open the Emacs-hosted interactive workspace graph."
   (interactive)
   (my/noema-open-wiki-view "graph"))
 
 ;;;###autoload
 (defun my/noema-roam-graph ()
-  "Open Noema's canonical workspace graph."
+  "Open Noema's Emacs-hosted workspace graph."
   (interactive)
   (my/noema-workspace-graph))
 
@@ -2828,7 +2873,7 @@ failure while it is still going."
 
 (with-eval-after-load 'transient
   (transient-define-prefix my/noema-dispatch ()
-    "Noema editor and canonical Wiki hub.  H-o from anywhere."
+    "Noema Emacs workspace and CM6 knowledge-component commands."
     [:description my/noema--dispatch-header
      ;; Row 1 ─────────────────────────────────────────────────────────────────
      ["Note (web)"
@@ -2916,7 +2961,7 @@ failure while it is still going."
 
 (with-eval-after-load 'transient
   (transient-define-prefix my/noema-wiki-dispatch ()
-    "Canonical Wiki navigation and index maintenance."
+    "Emacs-hosted Wiki navigation and index maintenance."
     [:description my/noema--dispatch-header
      ["Browse"
       ("h" "home" my/noema-wiki-home)

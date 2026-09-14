@@ -1,5 +1,12 @@
 #+title: Jupyter Kernel Workflow
 
+#+begin_quote
+Scope: this document covers ordinary =.ipynb= files and Markdown =@@cell=
+sidecars. D-023 =.noema= files are AI prompt/workflow documents: work blocks
+run through an ACP agent and save replies as outputs, without any Jupyter
+kernel or programming-language code block.
+#+end_quote
+
 * Architecture
 
 Noema's Node Jupyter service is the sole live-state and protocol authority.

@@ -13,7 +13,6 @@
 
 (declare-function my/typography-setup-prose-buffer "init-base")
 (declare-function my/refresh-environment-from-shell nil)
-(declare-function my/shell-command-executable "init-utils")
 (declare-function my/mouse-code-actions "init-mouse" (event))
 (declare-function evil-local-set-key "evil-core" (state key def))
 (declare-function TeX-command-run-all "tex" (arg))
@@ -25,57 +24,48 @@
 (declare-function completion-preview-mode "completion-preview" (&optional arg))
 (declare-function pdf-sync-backward-search-mouse "pdf-sync" (ev))
 (declare-function pdf-sync-locate-synctex-file "pdf-sync" (pdffile))
-(declare-function texpresso "texpresso" (&optional filename))
-(declare-function texpresso-display-output "texpresso" ())
-(declare-function texpresso-mode "texpresso" (&optional arg))
-(declare-function texpresso-move-to-cursor "texpresso" (&optional position))
+(declare-function remote-executable-find "remote-process" (program &optional context))
 
 ;; --- XeLaTeX 与 pdflatex 的编译命令，注入 -synctex=1 ---
 
 (defvar TeX-source-correlate-map)
 (defvar TeX-auto-local)
 (defvar TeX-auto-save-aggregate)
-(defvar TeX-current-process-region-p)
 (defvar TeX-default-extension)
 (defvar TeX-engine)
 (defvar TeX-style-path)
 (defvar completion-preview-mode)
 (defvar lsp-mode-map)
-(defvar texpresso--process)
-(defvar texpresso--state)
-(defvar texpresso-arguments)
-(defvar texpresso-binary)
-(defvar texpresso-distribution)
-(defvar texpresso-follow-cursor)
-(defvar texpresso-follow-edition)
-(defvar texpresso-mode)
 
-(defconst my/texpresso-root
-  (expand-file-name "var/texpresso/" user-emacs-directory)
-  "Local TeXpresso source and build root.")
+(defun my/auctex-latexmk-executable ()
+  "Return the `latexmk' executable for the current buffer's target.
+Resolved through the Remote framework so a document opened on a remote
+target invokes that target's `latexmk', never the client's."
+  (or (ignore-errors (remote-executable-find "latexmk")) "latexmk"))
 
-(defconst my/texpresso-elisp-directory
-  (expand-file-name "emacs/" my/texpresso-root)
-  "Directory containing the upstream TeXpresso Emacs mode.")
-
-(defconst my/texpresso-binary
-  (expand-file-name "build/texpresso" my/texpresso-root)
-  "Locally built TeXpresso executable.")
-
-(defconst my/auctex-xelatexmk-command
-  (concat (my/shell-command-executable "latexmk")
-          " -xelatex -synctex=1 %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
-  "latexmk command that explicitly builds with XeLaTeX.")
-
-(defconst my/auctex-pdflatexmk-command
-  (concat (my/shell-command-executable "latexmk")
-          " -pdf -synctex=1 %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t")
-  "latexmk command that explicitly builds with pdfLaTeX.")
+(defun my/auctex-latexmk-command (engine-flag)
+  "Return a latexmk invocation string using ENGINE-FLAG (e.g. \"-xelatex\")."
+  (concat (shell-quote-argument (my/auctex-latexmk-executable))
+          " " engine-flag
+          " -synctex=1 %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t"))
 
 (defun my/auctex-refresh-shell-environment (&rest _)
   "Refresh Emacs environment before starting TeX commands."
   (when (fboundp 'my/refresh-environment-from-shell)
     (my/refresh-environment-from-shell)))
+
+(defun my/auctex-guard-remote-master (&rest _)
+  "Refuse to run a TeX command when the master directory is a remote target.
+AUCTeX runs TeX commands with `start-process', which per its docstring runs
+in the local home directory instead of the remote one when `default-directory'
+is remote-handled -- it never errors, it just silently builds the wrong copy
+on the client.  Fail loudly instead."
+  (when-let* ((directory (ignore-errors (my/auctex--master-directory)))
+              (remote (file-remote-p directory)))
+    (user-error
+     "AUCTeX build commands do not support remote target %s yet (would \
+silently compile on the client instead); use texlab diagnostics for now"
+     remote)))
 
 (defun my/pdf-tools-activate ()
   "Enable PDF Tools without forcing an unnecessary rebuild.
@@ -104,11 +94,6 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
                pdf-info-epdfinfo-program)
        :warning)
       nil))))
-
-(defun my/auctex-register-command (entry)
-  "Register TeX command ENTRY without duplicating existing items."
-  (setq TeX-command-list
-        (cons entry (assoc-delete-all (car entry) TeX-command-list))))
 
 (config-defvar my/pdf-view-auto-refresh-interval nil
   "Polling fallback interval for PDF buffers when file notifications are absent."
@@ -175,6 +160,13 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
   "Return the current AUCTeX master PDF path, never `_region_.pdf'."
   (expand-file-name (TeX-master-output-file "pdf")))
 
+(defun my/auctex-register-command-local (entry)
+  "Register TeX command ENTRY in the buffer-local `TeX-command-list'.
+Buffer-local so each LaTeX buffer gets latexmk resolved against its own
+target rather than one path baked in at load time."
+  (setq-local TeX-command-list
+              (cons entry (assoc-delete-all (car entry) TeX-command-list))))
+
 (defun my/auctex-setup-build-workflow ()
   "Prefer latexmk-based builds in LaTeX buffers."
   (my/auctex-setup-auto-cache)
@@ -182,7 +174,17 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
     (setq-local TeX-engine 'xetex))
   (setq-local TeX-command-default
               (if (eq TeX-engine 'xetex) "XeLaTeXMk" "PdfLaTeXMk"))
-  (setq-local TeX-save-query nil))
+  (setq-local TeX-save-query nil)
+  (my/auctex-register-command-local
+   `("XeLaTeXMk"
+     ,(my/auctex-latexmk-command "-xelatex")
+     TeX-run-TeX nil (LaTeX-mode docTeX-mode)
+     :help "Run latexmk with XeLaTeX"))
+  (my/auctex-register-command-local
+   `("PdfLaTeXMk"
+     ,(my/auctex-latexmk-command "-pdf")
+     TeX-run-TeX nil (LaTeX-mode docTeX-mode)
+     :help "Run latexmk with pdfLaTeX")))
 
 (defun my/pdf-view-enable-auto-refresh ()
   "Auto-refresh PDF buffers when the underlying file changes."
@@ -431,87 +433,6 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
                    (derived-mode-p 'latex-mode 'tex-mode)))
     (user-error "Not in a file-backed LaTeX buffer")))
 
-(defun my/texpresso--ensure-available ()
-  "Load the locally built TeXpresso integration or report how to install it."
-  (unless (file-executable-p my/texpresso-binary)
-    (user-error "TeXpresso is not built; run `make texpresso-install' in %s"
-                user-emacs-directory))
-  (unless (featurep 'texpresso)
-    (unless (file-readable-p
-             (expand-file-name "texpresso.el" my/texpresso-elisp-directory))
-      (user-error "TeXpresso Emacs mode is missing; run `make texpresso-install'"))
-    (let ((load-path (cons my/texpresso-elisp-directory load-path)))
-      (unless (require 'texpresso nil t)
-        (user-error "Cannot load the TeXpresso Emacs mode from %s"
-                    my/texpresso-elisp-directory))))
-  (setq texpresso-binary my/texpresso-binary
-        texpresso-distribution 'texlive
-        texpresso-arguments nil
-        texpresso-follow-edition t
-        texpresso-follow-cursor nil))
-
-(defun my/texpresso-running-p ()
-  "Return non-nil when the TeXpresso viewer process is running."
-  (and (featurep 'texpresso)
-       (process-live-p texpresso--process)))
-
-(defun my/texpresso-running-for-current-document-p ()
-  "Return non-nil when TeXpresso is showing the current AUCTeX document."
-  (and (my/texpresso-running-p)
-       (equal (process-get texpresso--process 'my/texpresso-master-file)
-              (ignore-errors (my/latex-preview--master-tex-file)))))
-
-(defun my/texpresso-start ()
-  "Start TeXpresso for the current AUCTeX master and show the source position."
-  (interactive)
-  (my/latex-preview--ensure-tex-buffer)
-  (my/texpresso--ensure-available)
-  (when (fboundp 'my/refresh-environment-from-shell)
-    (my/refresh-environment-from-shell))
-  (if (my/texpresso-running-for-current-document-p)
-      (texpresso-move-to-cursor)
-    (when (buffer-modified-p)
-      (save-buffer))
-    (setq TeX-current-process-region-p nil)
-    (let* ((master-file (my/latex-preview--master-tex-file))
-           (default-directory (file-name-directory master-file)))
-      (texpresso master-file)
-      (unless (process-live-p texpresso--process)
-        (user-error "TeXpresso failed to start; inspect *texpresso-stderr*"))
-      (set-process-query-on-exit-flag texpresso--process nil)
-      (process-put texpresso--process 'my/texpresso-master-file master-file)
-      (texpresso-move-to-cursor)
-      (message "TeXpresso live preview: %s"
-               (abbreviate-file-name master-file)))))
-
-(defun my/texpresso-stop ()
-  "Stop TeXpresso and release its synchronization hooks and buffer state."
-  (interactive)
-  (when (featurep 'texpresso)
-    (dolist (buffer (buffer-list))
-      (with-current-buffer buffer
-        (when (bound-and-true-p texpresso-mode)
-          (texpresso-mode -1))
-        (when (local-variable-p 'texpresso--state)
-          (setq texpresso--state nil))))
-    (when (process-live-p texpresso--process)
-      (delete-process texpresso--process))
-    (setq texpresso--process nil))
-  (message "TeXpresso live preview stopped"))
-
-(defun my/texpresso-toggle ()
-  "Stop the active TeXpresso viewer, or start it for the current document."
-  (interactive)
-  (if (my/texpresso-running-p)
-      (my/texpresso-stop)
-    (my/texpresso-start)))
-
-(defun my/texpresso-display-output ()
-  "Display TeXpresso errors and warnings in Emacs."
-  (interactive)
-  (my/texpresso--ensure-available)
-  (texpresso-display-output))
-
 (defun my/latex-preview-open-pdf (&optional file)
   "Open FILE, or the current TeX master PDF, in a right-side PDF window."
   (interactive)
@@ -531,28 +452,21 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
       buffer)))
 
 (defun my/latex-sync-forward (&optional line column)
-  "Show the current source location in TeXpresso or the built PDF."
+  "Show the current source location in the built PDF via SyncTeX.
+Compiles first when no PDF exists yet."
   (interactive)
   (my/latex-preview--ensure-tex-buffer)
-  (if (my/texpresso-running-for-current-document-p)
-      (texpresso-move-to-cursor
-       (when line
-         (save-excursion
-           (goto-char (point-min))
-           (forward-line (1- line))
-           (move-to-column (or column 0))
-           (point))))
-    (require 'pdf-sync)
-    (let ((pdf (my/latex-preview--output-pdf-file)))
-      (cond
-       ((and pdf
-             (file-exists-p pdf)
-             (pdf-sync-locate-synctex-file pdf))
-        (my/pdf-sync-forward-search-with-pdf pdf line column))
-       ((and pdf (file-exists-p pdf))
-        (my/latex-preview-open-pdf pdf))
-       (t
-        (my/texpresso-start))))))
+  (require 'pdf-sync)
+  (let ((pdf (my/latex-preview--output-pdf-file)))
+    (cond
+     ((and pdf
+           (file-exists-p pdf)
+           (pdf-sync-locate-synctex-file pdf))
+      (my/pdf-sync-forward-search-with-pdf pdf line column))
+     ((and pdf (file-exists-p pdf))
+      (my/latex-preview-open-pdf pdf))
+     (t
+      (my/latex-preview-compile-and-view)))))
 
 (defun my/latex-sync-forward-mouse (event)
   "Show the LaTeX source position at mouse EVENT in the active preview."
@@ -575,11 +489,6 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
         (my/mouse-code-actions event)
       (user-error "No code action command is available"))))
 
-(defun my/latex-preview-current-buffer ()
-  "Open or synchronize TeXpresso live preview for the current AUCTeX master."
-  (interactive)
-  (my/texpresso-start))
-
 (defun my/latex-preview-compile-and-view (&optional arg)
   "Run AUCTeX's compile-and-view command."
   (interactive "P")
@@ -591,22 +500,19 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
   (TeX-view))
 
 (transient-define-prefix my/latex-preview-dispatch ()
-  "LaTeX live-preview and PDF workflow."
-  [["Workbench"
-    ("p" "TeXpresso preview" my/latex-preview-current-buffer :transient transient--do-exit)
-    ("g" "sync preview" my/latex-sync-forward :transient transient--do-exit)
-    ("e" "errors/warnings" my/texpresso-display-output :transient transient--do-exit)
-    ("l" "toggle TeXpresso" my/texpresso-toggle :transient transient--do-exit)
+  "LaTeX preview and PDF workflow."
+  [["Preview"
+    ("g" "sync to PDF" my/latex-sync-forward :transient transient--do-exit)
     ("v" "view built PDF" my/latex-preview-open-pdf :transient transient--do-exit)]
    ["Build"
     ("a" "compile/view" my/latex-preview-compile-and-view :transient transient--do-exit)
     ("V" "AUCTeX view" my/latex-preview-view-pdf :transient transient--do-exit)]])
 
 (defun my/auctex-setup-preview-workflow ()
-  "Expose TeXpresso and PDF fallback commands in LaTeX buffers."
+  "Expose PDF Tools/SyncTeX preview commands in LaTeX buffers."
   (when (bound-and-true-p completion-preview-mode)
     (completion-preview-mode -1))
-  (local-set-key (kbd "C-c C-p") #'my/latex-preview-current-buffer)
+  (local-set-key (kbd "C-c C-p") #'my/latex-preview-compile-and-view)
   (local-set-key (kbd "C-c C-g") #'my/latex-sync-forward)
   (local-set-key (kbd "M-RET") #'my/latex-sync-forward)
   (local-set-key (kbd "M-<return>") #'my/latex-sync-forward))
@@ -618,7 +524,7 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
                (keymapp (symbol-value map-symbol)))
       (define-key (symbol-value map-symbol)
                   (kbd "C-c C-p")
-                  #'my/latex-preview-current-buffer)
+                  #'my/latex-preview-compile-and-view)
       (define-key (symbol-value map-symbol)
                   (kbd "C-c C-g")
                   #'my/latex-sync-forward))))
@@ -660,21 +566,11 @@ Return non-nil when the PDF Tools server is usable.  Missing or broken
 
   (unless (advice-member-p #'my/auctex-refresh-shell-environment 'TeX-command)
     (advice-add 'TeX-command :before #'my/auctex-refresh-shell-environment))
+  (unless (advice-member-p #'my/auctex-guard-remote-master 'TeX-command)
+    (advice-add 'TeX-command :before #'my/auctex-guard-remote-master))
 
   (add-hook 'TeX-after-compilation-finished-functions
             #'TeX-revert-document-buffer)
-
-  (my/auctex-register-command
-   `("XeLaTeXMk"
-     ,my/auctex-xelatexmk-command
-     TeX-run-TeX nil (LaTeX-mode docTeX-mode)
-     :help "Run latexmk with XeLaTeX"))
-
-  (my/auctex-register-command
-   `("PdfLaTeXMk"
-     ,my/auctex-pdflatexmk-command
-     TeX-run-TeX nil (LaTeX-mode docTeX-mode)
-     :help "Run latexmk with pdfLaTeX"))
 
   ;; 默认走 PDF Tools，保留 SyncTeX 正反向同步。
   (setq TeX-view-program-selection

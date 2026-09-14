@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Anchor tag
+# key: anchor
+# group: Noema syntax
+# --
+{#`(my/noema-new-id "block")`}$0

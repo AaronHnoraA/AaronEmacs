@@ -175,9 +175,12 @@
                 "/usr/bin/printf" '("async-output")
                 (lambda (value) (setq output value)
                   (cl-incf calls)))))
-          (while (and (not output) (process-live-p process))
-            (accept-process-output process 0.1))
-          (accept-process-output process 0.1)
+          ;; Completion intentionally runs on the event-loop turn after the
+          ;; sentinel, so wait for the callback rather than only process life.
+          (let ((deadline (+ (float-time) 2.0)))
+            (while (and (not output) (< (float-time) deadline))
+              (accept-process-output process 0.05)
+              (sit-for 0.01)))
           (should (equal output "async-output"))
           (should (= calls 1)))
       (when-let* ((buffer (get-buffer my/jupyter-board-log-buffer-name)))

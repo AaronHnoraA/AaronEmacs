@@ -2708,8 +2708,9 @@ the reference stays a plain, human-readable part of the Markdown."
              (my/noema-roam--insert-todo-row entry))))))
     (display-buffer buf)))
 
-;; These historical entry points are kept only for existing keymaps.  Their
-;; native duplicate dashboards are retired in favor of the canonical Wiki UI.
+;; Emacs owns project-wide knowledge navigation.  Its hosted Wiki/Graph Web
+;; surfaces and ordinary file buffers are complementary views of the same
+;; vault; neither is an independent Noema application.
 
 
 
@@ -3103,7 +3104,7 @@ themselves."
      (cdr (assoc (completing-read "File todo: " choices nil t) choices)))))
 
 (defun my/noema-roam--open-web-agenda (&optional view query)
-  "Open Noema Web agenda special page with VIEW and optional QUERY."
+  "Open the Emacs-hosted Noema agenda surface with VIEW and QUERY."
   (unless (and (fboundp 'my/noema--ensure-server)
                (fboundp 'my/noema--server-url)
                (fboundp 'my/noema--open-url))
@@ -3132,9 +3133,7 @@ themselves."
         t)))))
 
 (defun my/noema-roam-agenda (&optional mode query)
-  "Open the Noema Web agenda special page.
-The native Emacs agenda renderer is no longer the default project-management
-surface; Noema Web owns agenda/project/Gantt management."
+  "Open the Noema agenda Web surface hosted inside Emacs."
   (interactive)
   (my/noema-roam--open-web-agenda
    (pcase mode
@@ -4389,12 +4388,12 @@ added separately by `my/noema-roam--capf-setup')."
 
 ;; Update transient with daily + gd hint
 (defun my/noema-roam-dispatch ()
-  "Open Noema canonical Wiki dispatch."
+  "Open Noema's Emacs-hosted Wiki knowledge dispatch."
   (interactive)
   (unless (fboundp 'my/noema-wiki-dispatch) (require 'init-aaronnote))
   (my/noema-wiki-dispatch))
 
-;;; Legacy native report helpers (canonical UI lives in /wiki?view=reports).
+;;; Native report helpers (the canonical overview is Emacs-hosted Wiki).
 
 (defconst my/noema-roam--report-limit 200
   "Maximum rows shown in a single wiki report.")
@@ -5138,16 +5137,14 @@ watcher, so this only has to repair the Emacs side."
 
 (add-hook 'markdown-mode-hook #'my/noema-roam--setup-save-hook)
 
-;; Keep the historical command names used by existing keymaps, while making
-;; the web-host Wiki UI the only maintenance/report implementation.
 (defun my/noema-roam-management ()
-  "Open canonical Wiki repository management."
+  "Open the Emacs-hosted Wiki repository management surface."
   (interactive)
   (unless (fboundp 'my/noema-wiki-repositories) (require 'init-aaronnote))
   (my/noema-wiki-repositories))
 
 (defun my/noema-roam-reports ()
-  "Open canonical Wiki reports."
+  "Open the Emacs-hosted Wiki reports surface."
   (interactive)
   (unless (fboundp 'my/noema-wiki-reports) (require 'init-aaronnote))
   (my/noema-wiki-reports))

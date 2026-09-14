@@ -818,7 +818,7 @@
   (unless (my/jupyter-management-local-target-p my/jupyter-board--target)
     (user-error "Noema project kernelspec repair is local-only"))
   (let ((script (expand-file-name
-                 "lisp/roam/Noema/jupyter/scripts/install-kernelspecs.sh"
+                 "site-lisp/noema/jupyter/scripts/install-kernelspecs.sh"
                  user-emacs-directory)))
     (unless (file-executable-p script)
       (user-error "Noema kernelspec installer is unavailable: %s" script))

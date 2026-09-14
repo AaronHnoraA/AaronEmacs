@@ -10,7 +10,7 @@ This configuration is designed to solve a concrete set of problems:
 
 - Turn editing, search, project switching, build/test, and Git into a stable daily workflow.
 - Keep local development, remote development, and knowledge work inside the same environment.
-- Treat Org, LaTeX with TeXpresso live preview, Jupyter, citations, and research notes as first-class workflows rather than side features.
+- Treat Org, LaTeX, Jupyter, citations, and research notes as first-class workflows rather than side features.
 - Keep bootstrap, package locks, runtime state, and private local configuration explicit and recoverable.
 
 ## Core Capabilities
@@ -20,7 +20,7 @@ This configuration is designed to solve a concrete set of problems:
 - Programming and debugging
   `lsp-mode` is the single language-server client, with target-aware automatic startup and first-class C/C++, Python, and Java/JDTLS routes. Completion, visible-region diagnostics/CodeLens/inlay hints, semantic Treemacs outlines, build/test, debugging, tree-sitter, snippets, code navigation, and an on-demand SQL/database client are already wired together.
 - Org and research writing
-  Agenda, capture, TeXpresso live preview, AUCTeX, Jupyter, citations, and PDF Tools workflows are treated as long-term maintained parts of the system.
+  Agenda, capture, AUCTeX, Jupyter, citations, and PDF Tools workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals
   Logical `/fs` targets keep file identity stable while capability routing selects native, TRAMP, or tramp-rpc links. PATH/environment state is isolated per target and workspace; `my/vterm-ssh` remains the interactive terminal entry point.
 - Browser and system integration

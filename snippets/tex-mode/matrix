@@ -1,0 +1,7 @@
+# -*- mode: snippet -*-
+# name: \begin{matrix}…\end{matirx}
+# key: matrix
+# --
+\begin{matrix}
+${1:a}
+\end{matrix}$0

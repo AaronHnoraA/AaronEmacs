@@ -17,7 +17,6 @@
 (declare-function my/test-dispatch "init-test" ())
 (declare-function my/debug-dispatch "init-debug" ())
 (declare-function vterm-toggle "init-vterm-popup" ())
-(declare-function claude-code-ide-menu "claude-code-ide" ())
 (autoload 'olivetti-mode "olivetti" nil t)
 
 (global-set-key (kbd "<f1>") #'help-command)
@@ -30,7 +29,6 @@
 (global-set-key (kbd "<f8>") #'olivetti-mode)
 (global-set-key (kbd "<f10>") #'vterm-toggle)
 ;; F11 intentionally left alone.
-(global-set-key (kbd "<f12>") #'claude-code-ide-menu)
 
 (provide 'init-function-keys)
 ;;; init-function-keys.el ends here

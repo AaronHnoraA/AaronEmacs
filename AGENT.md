@@ -45,6 +45,13 @@ early-init.el -> init.el -> lisp/init-modules.el
 live under `lisp/`; language-specific modules live under `lisp/lang/`; the
 Noema/Jupyter bridge lives under `lisp/roam/`.
 
+`.noema` files are D-023 AI prompt/workflow documents, not Jupyter notebooks.
+Their work blocks run through the ACP agent boundary and persist the latest
+reply in nbformat outputs; they have no kernelspec, programming code cells,
+Result cells, kernel controls, or Run All. The Jupyter bridge below applies to
+ordinary `.ipynb` and Markdown `@@cell` sidecars. Node also enforces this
+boundary if a generic Jupyter command is invoked from a `.noema` buffer.
+
 When adding a module:
 
 - Put it in the owning directory.

@@ -6,7 +6,7 @@
 - 还是用 `jupytext` / `ipynb`
 - 要不要让 `org` 再同步成 notebook
 
-这套配置里，执行层已经统一到 Jupyter。`org` 里的 `python` / `sage` / `maple` 源块本身就会走 Jupyter 后端，`jupytext` 则是另一条脚本优先的 notebook 工作流。
+这套配置里，编程语言的交互执行层统一到 Jupyter。`org` 里的 `python` / `sage` / `maple` 源块本身就会走 Jupyter 后端，`jupytext` 则是另一条脚本优先的 notebook 工作流。D-023 `.noema` 是另一类文件：它是 AI prompt 与工作流程文档，work 块走 agent，不启动 Jupyter kernel。
 
 所以这里不建议把它们再强行串成一条 `org -> jupytext -> ipynb` 的双向同步链。
 
@@ -97,6 +97,21 @@ notebook 强在：
 判断标准很简单：
 
 - 第二次复制粘贴时，就该考虑抽走了
+
+### 3.4 什么时候用 `.noema`
+
+当重点是组织 question / work / checkpoint、显式上下文和 Agent Run 时，用
+`.noema`。work 块开头可写 `@@agent`、`@@session`、`@@ctx`、`@@skill`，按
+`C-c C-c` 交给 agent；回复保存在同一块的 outputs。编程代码仍放在
+`experiments/` 或 `src/`，`.noema` 本身没有 kernel 或代码块。
+
+按 `C-c C-g` 打开语义化 Graph Board。图上直接显示 work 状态、outcome、最新
+Agent Run 状态、放弃原因，checkpoint 使用菱形；`TAB` 固定折叠，`f` 切换焦点，
+`z` 在 Overview / Branch / Detail 三档间切换。Overview 会确定性地自动折叠已结束
+分支但保留当前路径，焦点外分支不会消失而是收成摘要节点；Detail 还显示 Run 和
+ArtifactLink。JuText 光标与图选择双向同步。图上按 `e` 选择默认 / continue / fork /
+fresh Agent Run，`F` 直接 fork，`X` 分别处理“删 WorkNode”“解绑 Cell”“删 Cell”，
+不会混淆这两个身份。折叠、焦点与缩放只写入 `.agent/views/`。
 
 ## 4. 推荐目录模型
 
@@ -204,16 +219,18 @@ org <-> jupytext <-> ipynb
 这套配置已经把两条路径都配好了：
 
 - `org` 源块可以直接用 Jupyter 后端执行
-- Noema 笔记里的 `@@cell(language, session)` 块由 Noema 自己的 Jupyter manager 执行；
+- 普通 Markdown 笔记里的 `@@cell(language, session)` 块由 Noema 自己的 Jupyter manager 执行；
   源码和输出保存在笔记旁 `.cell/` 的标准 ipynb sidecar 中，并在 Emacs 的源码投影里编辑。
   Emacs 的 notebook controls 只是 Noema API 的 UI client，不连接 kernel ZMQ
   （见 [jupyter-workflow.org](jupyter-workflow.org)）
+- `.noema` work 块由 ACP agent 执行，输出写回 work outputs；不经过 Jupyter。
 
 所以你的选择不应该是“二选一”，而应该是：
 
-- 笔记层用 `org` 或 Noema 笔记
+- 笔记层用 `org` 或普通 Markdown 笔记
+- 工作结构与 agent prompt 用 `.noema`
 - 实验层用 notebook / 脚本
-- 两边都用 Jupyter 当执行后端
+- 只有编程实验路径使用 Jupyter；`.noema` 使用 agent
 
 这正好避免了重复造转换链。
 

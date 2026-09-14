@@ -34,7 +34,6 @@
     ("\\*task\\*"                :select t :align below :size ,my/display-rules-bottom-size :regexp t)
     ("\\*run\\*"                 :select t :align below :size ,my/display-rules-bottom-size :regexp t)
     ("\\*xref\\*"                :select t :align below :size ,my/display-rules-bottom-size :regexp t)
-    ("\\*claude-code-ide\\*"     :select t :align right :size ,my/display-rules-side-size :regexp t)
     ("\\*Diagnostics:.*\\*"      :select t :align below :size ,my/display-rules-bottom-size :regexp t)
     ;; Roam UI panels — right side, consistent width
     ("\\*roam-\\|\\*Noema roam " :select t :align right :size ,my/display-rules-roam-size :regexp t))
