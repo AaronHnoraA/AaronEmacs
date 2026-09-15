@@ -300,6 +300,11 @@ When FRAME is nil, use the selected frame."
        (with-current-buffer buffer
          (let ((name (buffer-name buffer)))
            (and (not (derived-mode-p 'dashboard-mode))
+                ;; Honor the standard tab-line opt-outs so packages that
+                ;; mark helper buffers (agent sessions, popups) stay hidden.
+                (not (bound-and-true-p tab-line-exclude))
+                (not (and (bound-and-true-p tab-line-exclude-modes)
+                          (apply #'derived-mode-p tab-line-exclude-modes)))
                 (not (bound-and-true-p my/vterm-popup-instance-p))
                 (not (and (stringp name)
                           (string-match-p "vterm-pop" name)))

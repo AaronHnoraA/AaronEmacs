@@ -89,6 +89,8 @@
     (when (buffer-live-p (or buffer (current-buffer)))
       (with-current-buffer (or buffer (current-buffer))
         (and buffer-file-name
+             ;; Buffers that opt out of auto-revert own their disk sync.
+             (not (bound-and-true-p global-auto-revert-ignore-buffer))
              (buffer-modified-p)
              (not buffer-read-only)
              (not (file-remote-p buffer-file-name))
@@ -100,6 +102,7 @@
     (when (buffer-live-p (or buffer (current-buffer)))
       (with-current-buffer (or buffer (current-buffer))
         (and buffer-file-name
+             (not (bound-and-true-p global-auto-revert-ignore-buffer))
              (not (buffer-modified-p))
              (not (file-remote-p buffer-file-name))
              (file-exists-p buffer-file-name)

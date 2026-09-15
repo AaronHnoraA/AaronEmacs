@@ -41,7 +41,9 @@
 (autoload 'noema-research-propose-with-magent "noema-research-synthesis" nil t)
 (autoload 'noema-project-enable "noema-research" nil t)
 (autoload 'noema-pi-router-open "noema-pi-router" nil t)
-(autoload 'noema-pi-router-switch "noema-pi-router" nil t)
+(autoload 'noema-pi-doctor "noema-pi-router" nil t)
+(autoload 'noema-sessions "noema-sessions" nil t)
+(autoload 'noema-sessions-switch "noema-sessions" nil t)
 
 ;; Standard compatibility infrastructure remains package-managed.  gptel,
 ;; acp.el, shell-maker, agent-shell and Magent themselves do not.
@@ -93,7 +95,9 @@
   "p" #'noema-agent-promote-current-session
   "I" #'noema-research-attention
   "P" #'noema-pi-router-open
-  "b" #'noema-pi-router-switch)
+  "D" #'noema-pi-doctor
+  "S" #'noema-sessions
+  "b" #'noema-sessions-switch)
 
 (global-set-key (kbd "C-c M-a") #'noema-compose-add-context)
 (global-set-key (kbd "C-c A") my/noema-prefix-map)
