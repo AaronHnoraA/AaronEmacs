@@ -583,16 +583,30 @@ in-process 缓存，与自动刷新保持一致。
 ## 9. Noema AI/agent
 
 - `M-x noema` / `C-c A W` — Noema 主入口
-- `M-x noema-agent-start` / `C-c A a` — 启动内化 agent-shell 上的结构化 agent
+- `M-x noema-agent-start` / `C-c A a` — 启动包管理的 agent-shell 上的结构化 agent
 - `M-x noema-compose` / `C-c A c` — 直接复用内化 gptel 的 compose UI
 - `C-c A s/m/./r` — send、transient、context、rewrite/diff
 - `C-c A p` — 把当前 agent-shell session 纳入 research
+- 每个 agent session 仍是真正可交互的 agent-shell buffer，但不进入全局
+  tab-line/tab-bar。同一项目的所有 agent/session 作为 tab 显示在右下角同一个
+  Agent 窗口的 tab-line 上，切换 tab 就是切换窗口里的真实 buffer，不复制
+  transcript。点击 tab，或 `C-c C-a` 选择、`C-c C-n`/`C-c C-p` 切换 session；
+  右键 tab 打开管理菜单（停止、重启、关闭、重命名、fork、归档等），`?` 查看全部
+  按键。Noema Run 结束后补回输入提示符，`C-c C-e` 或 `C-c A i` 聚焦输入。
+- 重跑 work 块从上游状态重建会话（独占会话沿用原名、换新一代，共用会话则分支），新对话
+  注入项目根、文档路径和 lineage 上游块。权限由 kernel 判定：项目内自动批准，项目外与
+  网络进入 Attention 弹窗，sudo/凭据/`git push`/改写历史始终拒绝。
+- 取消链路：准备中的 Run 被取消时 kernel 立即结束它、拒绝迟到的 attach/start，并把
+  cancelled 写回格子；运行中的 Run 由 worker 发 ACP `session/cancel`、撤回待批权限，
+  3 秒无响应再关停 agent 进程。JuText `C-c C-z` 按光标所在格子取消。
 - `C-c A i r/b/f` — 迁移后的 Noema interaction region/buffer/file 入口
 - profile 与模板在 `etc/noema/`，运行状态在 `var/noema/`
 
-源码边界：Noema 代码在 `site-lisp/noema/lisp/`；完整 gptel、agent-shell、acp.el、
-shell-maker、Magent、Claude/Codex 兼容源码在 `site-lisp/noema/upstream/`。这些不是
-package.el/VC 外部依赖，也不能用自研简化实现替代。
+源码边界：Noema 代码在 `site-lisp/noema/lisp/`；agent-shell、acp.el、shell-maker
+由 package-vc 管理，固定 revision 在 `init-ai-ide.el` / `package-lock.el`。
+`noema-agent-render.el` 保留隐藏输出性能策略，不修改上游包文件。
+gptel、Magent、Claude/Codex 兼容源码仍在 `site-lisp/noema/upstream/`。
+任何一层都不能用自研简化实现替代成熟工具链。
 
 ### Claude Code
 

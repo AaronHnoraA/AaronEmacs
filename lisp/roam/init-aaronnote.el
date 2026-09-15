@@ -748,6 +748,11 @@ reconnect without a reload and without losing their in-memory editor state."
              (list
             "AARONNOTE_HOST_MODE=emacs"
             (format "NOEMA_ROOT=%s" (expand-file-name my/noema--notes-root))
+            (format "NOEMA_GLOBAL_CAPABILITIES=%s"
+                    (or (getenv "NOEMA_GLOBAL_CAPABILITIES")
+                        (expand-file-name "etc/noema/capabilities.json" user-emacs-directory)))
+            (when (getenv "NOEMA_GLOBAL_SKILLS")
+              (format "NOEMA_GLOBAL_SKILLS=%s" (getenv "NOEMA_GLOBAL_SKILLS")))
             (format "AARONNOTE_ROOT=%s" (expand-file-name my/noema--notes-root))
             (format "NOEMA_WORKSPACE_LAYOUT=%s" (my/noema-workspace-layout))
             (format "AARONNOTE_WEB_DIR=%s" (expand-file-name my/noema--web-dir))
@@ -1339,6 +1344,11 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              (when (fboundp 'my/noema-jupyter-cell-select-source)
                (my/noema--defer-host-event
                 #'my/noema-jupyter-cell-select-source payload))
+             nil)
+            ("research-agent-buffer"
+             (when (fboundp 'noema-agent-worker-open-session)
+               (my/noema--defer-host-event
+                #'noema-agent-worker-open-session payload))
              nil)
             ("surface"
              (my/noema--defer-host-event

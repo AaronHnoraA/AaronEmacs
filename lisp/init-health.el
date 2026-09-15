@@ -45,7 +45,12 @@
     my/diagnostics-dispatch
     my/language-server-dispatch
     my/language-server-manager
-    my/language-server-doctor)
+    my/language-server-doctor
+    my/editing-dispatch
+    my/files-dispatch
+    my/calendar-year
+    my/github-topic-open
+    my/bazel-dispatch)
   "Interactive commands checked in `my/health-report'.")
 
 (defconst my/health-critical-libraries

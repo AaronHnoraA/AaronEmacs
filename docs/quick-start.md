@@ -162,6 +162,12 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 ### 编程相关
 
+- `gh`
+  GitHub issue、PR、contributor 和 patch 工作台；首次使用前运行 `gh auth login`
+- `bazelisk`
+  Bazel 工作台首选入口；目标机器只有 `bazel` 时会自动回退
+- `buildifier`
+  BUILD、MODULE 和 `.bzl` 文件保存时格式化
 - `clangd`
 - `rust-analyzer`
 - Python 语言服务器

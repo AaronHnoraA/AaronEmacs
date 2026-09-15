@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24">
+  <title>Noema work document</title>
+  <path d="M6 2.5h8l6 6V20a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 20V4.5a2 2 0 0 1 2-2Z"
+        fill="#a3b5e3" fill-opacity=".10" stroke="#a3b5e3" stroke-width="1.4" stroke-linejoin="round"/>
+  <path d="M14 2.5V7a1.5 1.5 0 0 0 1.5 1.5H20"
+        fill="none" stroke="#b9a3e3" stroke-width="1.4" stroke-linejoin="round"/>
+  <path d="M8 17v-6l8 6v-6" fill="none" stroke="#b9a3e3" stroke-width="1.5"
+        stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#8bd5ca">
+    <circle cx="8" cy="11" r="1.55"/>
+    <circle cx="16" cy="17" r="1.55"/>
+  </g>
+  <g fill="#b9a3e3">
+    <circle cx="8" cy="17" r="1.4"/>
+    <circle cx="16" cy="11" r="1.4"/>
+  </g>
+</svg>

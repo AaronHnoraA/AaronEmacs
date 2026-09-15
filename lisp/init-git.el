@@ -11,6 +11,14 @@
   (when (and git-dir (file-directory-p git-dir))
     (add-to-list 'load-path (file-name-as-directory git-dir))))
 
+(dolist (command '(my/github-topic-open
+                   my/github-topic-insert
+                   my/github-topic-open-by-author
+                   my/github-contributor-insert
+                   my/github-pr-patch-preview
+                   my/github-refresh))
+  (autoload command "init-github" nil t))
+
 (require 'init-git-core)
 (require 'init-git-board)
 (require 'init-git-diff)

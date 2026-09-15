@@ -105,6 +105,21 @@ notebook 强在：
 `C-c C-c` 交给 agent；回复保存在同一块的 outputs。编程代码仍放在
 `experiments/` 或 `src/`，`.noema` 本身没有 kernel 或代码块。
 
+不写 `@@session` 时由 DAG 决定会话：直线 lineage 的子块接续父块的命名会话
+（父会话忙时排队），真正的分支从父会话派生独立的命名会话，`depends` 不传递
+会话。文档当前的 lineage 优先于历史：块因已删除的 `@@session`、Pi 请求或早于
+父块运行而得到的旧会话不会粘住，只有仍属于父会话谱系的旧会话才继续使用。
+`@@session` 只有 `continue`、`fork`、`fresh` 三个关键字；`refresh`、`new`、
+`reset`、`resume` 这类近似写法会报错并提示正确关键字，不会悄悄变成会话名。
+
+重跑同一个 work 块不会把新尝试叠在旧尝试后面：会话只属于这个块时沿用原名、换新一代，
+按文档和上游块的状态重建；会话和其他块共用时从上游分出新的命名会话；块仍在运行时排队。
+想接着同一段对话追问，就在 Agent 窗口里直接输入。每个新对话都会注入项目根目录、文档
+路径和 work 标题，并附上 lineage 上游块（包括没运行过的 question）。
+
+权限默认：项目内的读、写、执行由 kernel 自动批准；读写项目外和网络请求会弹出
+Attention 让你决定；sudo、凭据、`git push` 和改写 git 历史始终拒绝。
+
 按 `C-c C-g` 打开语义化 Graph Board。图上直接显示 work 状态、outcome、最新
 Agent Run 状态、放弃原因，checkpoint 使用菱形；`TAB` 固定折叠，`f` 切换焦点，
 `z` 在 Overview / Branch / Detail 三档间切换。Overview 会确定性地自动折叠已结束

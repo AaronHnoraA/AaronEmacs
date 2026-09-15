@@ -11,6 +11,35 @@
 (require 'ert)
 (require 'init-windows)
 
+(ert-deftest my/window-quit-temporary-buffer-restores-xwidget ()
+  "The buffer-close shortcut must honor a popup's exact return target."
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *quit-source*"))
+          (output (generate-new-buffer " *quit-output*"))
+          (picker (generate-new-buffer "*quit-skill-picker*")))
+      (unwind-protect
+          (progn
+            (delete-other-windows)
+            (switch-to-buffer source)
+            (with-current-buffer output
+              (setq-local major-mode 'xwidget-webkit-mode))
+            (with-current-buffer picker (special-mode))
+            (let* ((left (selected-window))
+                   (right (split-window-right))
+                   (edges (window-edges right)))
+              (set-window-buffer right output)
+              (select-window right)
+              (pop-to-buffer picker '(display-buffer-same-window))
+              (should (or (eq (nth 3 (window-parameter right 'quit-restore)) picker)
+                          (eq (nth 3 (window-parameter right 'quit-restore-prev)) picker)))
+              (my/kill-buffer-dwim)
+              (should (window-live-p right))
+              (should (eq (window-buffer right) output))
+              (should (eq (window-buffer left) source))
+              (should (equal (window-edges right) edges))))
+        (dolist (buffer (list source output picker))
+          (when (buffer-live-p buffer) (kill-buffer buffer)))))))
+
 (ert-deftest my/window-fallback-skips-xwidget-after-kill ()
   (let ((normal (generate-new-buffer "normal-fallback-test"))
         (xwidget (generate-new-buffer "xwidget-fallback-test"))

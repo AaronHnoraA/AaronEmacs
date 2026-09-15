@@ -7,6 +7,14 @@
 (require 'init-tabbar)
 (require 'lsp-mode)
 
+(ert-deftest my/company-yasnippet-ignores-capf-documentation-requests ()
+  "Grouped backends must not generate empty snippet previews for directives."
+  (require 'company-yasnippet)
+  (cl-letf (((symbol-function 'company-doc-buffer)
+             (lambda (&rest _) (ert-fail "CAPF candidate generated a snippet preview"))))
+    (should-not (company-yasnippet 'doc-buffer "@@skill"))
+    (should-not (company-yasnippet 'doc-buffer ""))))
+
 (defun my/lsp-ui-test-object (&rest pairs)
   "Return an LSP hash object initialized from key/value PAIRS."
   (let ((object (make-hash-table :test #'equal)))

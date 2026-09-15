@@ -2003,11 +2003,13 @@ one uniform error when nothing is running."
 (with-eval-after-load 'company-yasnippet
   (define-advice company-yasnippet (:around (fn command &optional arg &rest args)
                                             my/guard-doc-buffer)
-    "Ignore snippet preview errors from asynchronous company doc timers."
+    "Only preview real snippets, and tolerate asynchronous preview errors."
     (if (eq command 'doc-buffer)
-        (condition-case-unless-debug nil
-            (apply fn command arg args)
-          (error nil))
+        (when (and (stringp arg) (> (length arg) 0)
+                   (get-text-property 0 'yas-template arg))
+          (condition-case-unless-debug nil
+              (apply fn command arg args)
+            (error nil)))
       (apply fn command arg args))))
 
 (defconst my/company-tooltip-frontends

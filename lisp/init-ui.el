@@ -43,6 +43,26 @@
   :type 'file
   :group 'appearance)
 
+(defconst my/noema-work-icon-file
+  (expand-file-name "assets/icons/NoemaWork.svg" user-emacs-directory)
+  "Blue-violet document and linked-node icon for .noema work files.")
+
+(declare-function nerd-icons-mdicon "nerd-icons" (icon-name &rest args))
+(defvar material-icon-file-icon-table)
+(defvar nerd-icons-extension-icon-alist)
+(defvar nerd-icons-mode-icon-alist)
+
+;; Use the providers' own extension tables and caches.  This covers Dired,
+;; Dirvish, Ibuffer and font-icon consumers without per-file advice or scans.
+(with-eval-after-load 'material-icon-utils
+  (puthash "noema" my/noema-work-icon-file material-icon-file-icon-table))
+
+(with-eval-after-load 'nerd-icons
+  (setf (alist-get "noema" nerd-icons-extension-icon-alist nil nil #'equal)
+        '(nerd-icons-mdicon "nf-md-graph_outline" :face nerd-icons-purple))
+  (setf (alist-get 'noema-research-mode nerd-icons-mode-icon-alist)
+        '(nerd-icons-mdicon "nf-md-graph_outline" :face nerd-icons-purple)))
+
 (declare-function material-icon-create-icon-image "material-icon-utils" (icon-path))
 (declare-function material-icon-get-icon-for-file "material-icon-utils" (filename &optional dir-p))
 (declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
@@ -67,6 +87,23 @@ height in pixels."
               (setq rest (cddr rest)))
             result)))
     (pcase extension
+      ("noema"
+       (or (when (and (display-graphic-p) (image-type-available-p 'svg))
+             (let ((key (cons 'noema image-height)))
+               (when-let* ((image
+                            (or (gethash key my/file-icon-image-cache)
+                                (and (file-readable-p my/noema-work-icon-file)
+                                     (condition-case nil
+                                         (puthash key
+                                                  (create-image my/noema-work-icon-file 'svg nil
+                                                                :height image-height :ascent 'center)
+                                                  my/file-icon-image-cache)
+                                       (error nil))))))
+                 (propertize " " 'display image))))
+           (if (and (display-graphic-p) (fboundp 'nerd-icons-mdicon))
+               (apply #'nerd-icons-mdicon "nf-md-graph_outline"
+                      (append font-args '(:face nerd-icons-purple)))
+             (propertize "◇" 'face 'font-lock-type-face))))
       ("lean"
        (ignore font-args)
        (when (and (display-graphic-p)

@@ -558,7 +558,14 @@ available to explicit buffer-switching commands."
   (if (or buffer-read-only
           (and (string-prefix-p "*" (buffer-name))
                (not (buffer-file-name))))
-      (bury-buffer)
+      (let ((restore (window-parameter nil 'quit-restore))
+            (previous (window-parameter nil 'quit-restore-prev)))
+        ;; A temporary display owns an exact return target (possibly an
+        ;; xwidget).  Burying alone loses that target to generic fallback.
+        (if (or (eq (nth 3 restore) (current-buffer))
+                (eq (nth 3 previous) (current-buffer)))
+            (quit-window)
+          (bury-buffer)))
     (kill-current-buffer)))
 
 (defun my/kill-other-buffers ()

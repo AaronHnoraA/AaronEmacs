@@ -313,7 +313,9 @@ The list includes directories that already look configured for CMake or Ninja."
       ("r" "rerun last" my/task-rerun)]
      ["Build"
       ("b" "choose build" my/task-build)
-      ("B" "rerun build" my/task-build-rerun)]]))
+      ("B" "rerun build" my/task-build-rerun)]
+     ["Bazel"
+      ("z" "target workbench" my/bazel-dispatch)]]))
 
 (my/leader!
   "r k" '(:def my/task-dispatch :which-key "tasks")

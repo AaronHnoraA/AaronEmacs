@@ -86,7 +86,7 @@ REV defaults to `:last-release'."
                 ;; If the library is already loadable, treat it as installed.
                 (locate-library (symbol-name package)))
       (require 'package-vc)
-      (package-vc-install (cons package spec)))))
+      (package-vc-install (cons package spec) (plist-get spec :rev)))))
 
 (defun my/package-read-lock-file ()
   "Load `my/package-lock-file' if it exists."

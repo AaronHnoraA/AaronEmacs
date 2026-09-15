@@ -272,6 +272,8 @@
   "n j" '(:def my/navigation-jump-list :which-key "jump list")
   "n p" '(:def my/navigation-peek-definition :which-key "peek definition")
   "n P" '(:def my/navigation-peek-references :which-key "peek references")
+  "n c" '(:def my/last-change-jump :which-key "last change")
+  "n n" '(:def my/narrow-or-widen-dwim :which-key "narrow / widen")
   "n a" '(:def my/navigation-beginning-of-defun :which-key "defun start")
   "n e" '(:def my/navigation-end-of-defun :which-key "defun end")
   "n [" '(:def my/navigation-previous-defun :which-key "previous defun")

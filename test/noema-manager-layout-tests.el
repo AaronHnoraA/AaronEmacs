@@ -1,0 +1,47 @@
+;;; noema-manager-layout-tests.el --- Graph entry points share a dock -*- lexical-binding: t; -*-
+(require 'ert)
+(require 'cl-lib)
+(require 'noema-research-graph)
+
+(ert-deftest noema-dag-shortcut-restores-initial-bottom-left-dock ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *dag-source-test*"))
+          (graph (generate-new-buffer " *dag-board-test*"))
+          (output (generate-new-buffer " *dag-output-test*")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'noema-research-graph--buffer-for) (lambda (_) graph))
+                    ((symbol-function 'noema-research-graph-buffer) (lambda (&rest _) graph))
+                    ((symbol-function 'noema-research-graph-refresh) #'ignore))
+            (delete-other-windows)
+            (switch-to-buffer source)
+            (with-current-buffer graph (setq-local noema-research-graph--source source))
+            (let* ((source-window (selected-window))
+                   (initial (noema-research-graph-dock source))
+                   (right (my/noema-jupyter--output-split source-window)))
+              (set-window-buffer right output)
+              (should (eq (window-in-direction 'below source-window) initial))
+              (delete-window initial)
+              ;; Even when another pane had focus, anchor to the JuText column.
+              (select-window source-window)
+              (noema-research-graph-open)
+              (let ((reopened (get-buffer-window graph)))
+                (should (eq (selected-window) reopened))
+                (should (eq (window-in-direction 'below source-window) reopened))
+                (should (eq (window-in-direction 'right reopened) right))
+                (should (eq (window-buffer right) output))
+                (select-window source-window)
+                (noema-research-graph-open)
+                (should (eq (get-buffer-window graph) reopened))
+                ;; Reproduce an old generic popup below the right output pane.
+                (delete-window reopened)
+                (let ((wrong (split-window right nil 'below)))
+                  (set-window-buffer wrong graph)
+                  (select-window source-window)
+                  (noema-research-graph-open)
+                  (should-not (window-live-p wrong))
+                  (should (eq (window-in-direction 'below source-window) (get-buffer-window graph)))
+                  (should (eq (window-buffer right) output))))))
+        (dolist (buffer (list source graph output))
+          (when (buffer-live-p buffer) (kill-buffer buffer)))))))
+
+;;; noema-manager-layout-tests.el ends here

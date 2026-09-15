@@ -25,7 +25,8 @@
    (my/noema-icon-file . "/Users/hc/.emacs.d/assets/icons/Noema.svg")
    (my/dir-locals-template-root . "/Users/hc/.emacs.d/templates/emacs")
    (my/health-executables "rg" "git" "python3" "node" "cargo" "go" "just" "make"
-                          "latexmk" "gdb" "lldb-dap" "dlv")
+                          "latexmk" "gdb" "lldb-dap" "dlv" "gh" "bazelisk"
+                          "buildifier")
    (my/maintenance-state-paths "package-lock.el" "etc" "var/amx-save.el"
                                "var/dape" "var/org" "var/prescient-save.el"
                                "var/project" "var/project-list.el"
@@ -98,6 +99,10 @@
     . "/Users/hc/.config/emacs/site-lisp/remote_ikernel")
    (my/jupyter-remote-ikernel-install-script
     . "/Users/hc/.config/emacs/bin/install-remote-ikernel")
+   (my/files-create-parent-directories . ask)
+   (my/github-cache-ttl . 300)
+   (my/bazel-command-candidates "bazelisk" "bazel")
+   (my/bazel-cache-ttl . 300)
    (my/expand-region-history-limit . 64) (my/project-run-profile-alist)
    (my/harpoon-slot-count . 4) (my/template-auto-insert-enabled . t)
    (my/template-auto-insert-enabled-kinds c cc sh python nix)

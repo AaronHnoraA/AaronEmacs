@@ -535,6 +535,13 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   直接打开新 `vterm`
 - `M-x my/project-popup-vterm-app`
   在当前项目根目录的新 popup `vterm` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
+
+顶部 `+term` 或标签上右键可打开启动菜单，`Applications` 列出上述已配置程序。
+`Agent` 子菜单（也可点击 `+Agent`）提供 Claude / Codex / OpenCode；它们使用
+原生 `agent-shell` / ACP buffer，不在 vterm 里运行 CLI，共用同一个顶部弹窗、
+标签池、自动收起和固定逻辑。`C-c C-e` 折叠/打开，`C-c E` 切换标签，
+`C-c M-e` 固定。Agent 原有的模型、会话模式和权限提示保留；仅点击启动时
+加载 Agent 依赖。当前只支持本地目录，ACP adapter 沿用现有 agent-shell 配置。
 - `SPC o V`
   命名 `vterm`
 - `SPC o S`
@@ -908,6 +915,31 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 | `C-c A .` | 把 region/buffer/file 加入 gptel context |
 | `C-c A r` | gptel rewrite/diff 预览 |
 | `C-c A p` | 把当前 agent-shell session 纳入 research |
+
+同一项目的 agent/session 以 tab 形式共用右下角一个 Agent 窗口；每个 tab 都是
+真正的 agent-shell buffer，可以直接输入、`C-c C-c` 中断。Noema Run 结束后会补回
+输入提示符，`C-c C-e`（任意位置 `C-c A i`）跳到输入处。这些 buffer 不进入全局
+tab-line/tab-bar。
+
+| Agent 窗口按键 | 作用 |
+|----|------|
+| 左键 / 右键 tab | 切换 session / 管理菜单（含关闭已退役 tab） |
+| `?`（输入区外）、`C-c ?` | 全部按键帮助 |
+| `C-c C-a` / `C-c C-n` / `C-c C-p` | 选择 / 下一个 / 上一个 session |
+| `C-c C-e` | 聚焦输入提示符 |
+| `C-c C-x` | 停止当前 Run 或回合 |
+| `C-c C-r` | 重启 session 并恢复原对话 |
+| `C-c C-k` / `C-c M-k` | 关闭当前 tab / 关闭其他 tab（名字与历史保留） |
+| `C-c C-w` / `C-c C-f` / `C-c C-d` | 重命名 / fork / 归档 session |
+| `C-c C-j` / `C-c C-l` / `C-c C-z` | 跳到最近的 work 块 / session 列表 / 管理菜单 |
+
+重跑同一个 work 块会按上游重新开始，不会叠在上一次尝试后面（独占的 session 沿用原名换新一代）。
+项目内的读写与执行自动批准；项目外和网络请求会弹出 Noema Attention 由你批准。
+
+取消：JuText 里 `C-c C-z` 只取消光标所在 work 块的执行，运行中、排队中、正在准备都有效；
+网页 Cancel Run 对还在准备的 Run 立即生效；Agent 窗口 `C-c C-x` 停止当前 Run，`C-c C-c`
+直接中断当前回合，不再询问。取消时待批准的权限一并撤回；agent 3 秒内不响应取消时会强制
+停掉它的进程，session 名和历史保留，下次使用时恢复。
 
 可编辑 profile 与 prompt 资源位于 `etc/noema/`。一次性 CLI sampler 仅保留为
 gptel backend 的降级；不再有独立 interaction Hub/transcript/session UI，选区、buffer

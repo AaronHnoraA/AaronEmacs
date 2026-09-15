@@ -8,9 +8,8 @@
 ;;   agent-shell/acp   structured external-agent sessions and permissions
 ;;   Magent            queue, ledger, tools and optional gptel-backed agent
 ;;
-;; All three complete implementations live under `site-lisp/noema/upstream'.
-;; They are loaded from this repository rather than installed as package
-;; dependencies.  C-c A is the Noema command prefix.
+;; agent-shell/acp/shell-maker are pristine package-vc dependencies, pinned as
+;; one audited group. gptel and Magent remain embedded. C-c A is the prefix.
 
 ;;; Code:
 
@@ -21,6 +20,57 @@
              (file-name-as-directory
               (locate-user-emacs-file "site-lisp/noema/lisp")))
 (require 'noema-upstream)
+
+;; Install missing dependencies only; normal startup does no network access.
+;; Migration does not upgrade versions or touch currently running sessions.
+(my/package-ensure-vc 'acp "https://github.com/xenodium/acp.el"
+                      "7d5c16ebcf2af86aa0f14ad9ae0ce45df4e8c8a5")
+(my/package-ensure-vc 'shell-maker "https://github.com/xenodium/shell-maker"
+                      "bb5e3aef17686c1c859c366eb83831b0046dc75a")
+(my/package-ensure-vc 'agent-shell "https://github.com/xenodium/agent-shell"
+                      "6a83589393fb67725f288d08d6f12d136564db0e")
+
+(declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
+
+(defun my/agent-shell-native-directory (directory)
+  "Project logical local DIRECTORY before native agent-shell uses it.
+This also covers plain `agent-shell', without a Noema Run or popup."
+  (if (not (string-prefix-p "/fs:" directory))
+      directory
+    (let ((client (and (fboundp 'remote-client-file-name)
+                       (remote-client-file-name directory))))
+      (unless (and client (not (string-prefix-p "/fs:" client))
+                   (not (file-remote-p client)))
+        (user-error "Agent directory is not accessible to a local process: %s" directory))
+      client)))
+
+(with-eval-after-load 'agent-shell
+  ;; CWD is used for both process creation and the asynchronous session/new
+  ;; request. Keep project discovery, but never serialize /fs:local: to ACP.
+  (advice-add 'agent-shell-cwd :filter-return #'my/agent-shell-native-directory))
+
+(defvar agent-shell-opencode-acp-command)
+
+(config-defvar my/agent-shell-opencode-executable
+  (locate-user-emacs-file "var/noema/tools/opencode/1.18.30-official/opencode")
+  "Validated official OpenCode executable used instead of the Homebrew build.
+An explicitly customized `agent-shell-opencode-acp-command' takes precedence.
+See docs/opencode-acp-recovery.md for provenance and the offline smoke test."
+  :type 'file
+  :group 'ai)
+
+(defun my/agent-shell-use-official-opencode ()
+  "Prefer the validated executable for the default OpenCode ACP command.
+Do not modify provider settings, authentication, PATH or a custom command."
+  (when (and (boundp 'agent-shell-opencode-acp-command)
+             (equal agent-shell-opencode-acp-command '("opencode" "acp"))
+             (stringp my/agent-shell-opencode-executable)
+             (file-executable-p my/agent-shell-opencode-executable))
+    (setq agent-shell-opencode-acp-command
+          (list (expand-file-name my/agent-shell-opencode-executable) "acp"))))
+
+(with-eval-after-load 'agent-shell-opencode
+  (my/agent-shell-use-official-opencode))
 
 (autoload 'noema "noema" nil t)
 (autoload 'noema-compose "noema-compose" nil t)
@@ -44,9 +94,11 @@
 (autoload 'noema-pi-doctor "noema-pi-router" nil t)
 (autoload 'noema-sessions "noema-sessions" nil t)
 (autoload 'noema-sessions-switch "noema-sessions" nil t)
+(autoload 'noema-capability-manager "noema-capability-ui" nil t)
+(autoload 'noema-skill-manager "noema-capability-ui" nil t)
+(autoload 'noema-mcp-manager "noema-capability-ui" nil t)
 
-;; Standard compatibility infrastructure remains package-managed.  gptel,
-;; acp.el, shell-maker, agent-shell and Magent themselves do not.
+;; Standard compatibility infrastructure is also package-managed.
 (use-package compat :ensure t :defer t)
 
 (config-defvar magent-session-directory
@@ -97,7 +149,8 @@
   "P" #'noema-pi-router-open
   "D" #'noema-pi-doctor
   "S" #'noema-sessions
-  "b" #'noema-sessions-switch)
+  "b" #'noema-sessions-switch
+  "i" #'noema-agent-acp-focus-input)
 
 (global-set-key (kbd "C-c M-a") #'noema-compose-add-context)
 (global-set-key (kbd "C-c A") my/noema-prefix-map)

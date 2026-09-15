@@ -107,6 +107,7 @@ audit-ui-tokens:
 
 ui-test:
 	$(UI_TOKEN_BATCH) --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)"))' -l test/aaron-ui-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/noema-icon-tests.el -f ert-run-tests-batch-and-exit
 
 doctor:
 	$(BATCH) --eval '(prin1 (my/health-critical-check))'
@@ -211,9 +212,12 @@ jupyter-test:
 	$(BATCH) -l test/init-jupyter-board-tests.el -f ert-run-tests-batch-and-exit
 
 research-test:
+	$(BATCH) -l test/noema-startup-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/test/elisp -l noema-agent-acp-tests.el -l noema-agent-render-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -L site-lisp/noema/test/elisp -l noema-capability-workspace-tests.el -l test/noema-manager-layout-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L lisp/roam -l test/noema-research-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/test/elisp \
-	  -l noema-interaction-tests.el -l noema-interaction-magent-tests.el \
+	  -l noema-interaction-tests.el -l noema-interaction-magent-tests.el -l noema-api-tests.el -l noema-completion-tests.el \
 	  -f ert-run-tests-batch-and-exit
 
 remote-e2e:

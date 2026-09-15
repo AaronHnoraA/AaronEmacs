@@ -1,0 +1,4 @@
+interface:
+  display_name: "Math Prose"
+  short_description: "Improve mathematical prose while preserving formulas"
+  default_prompt: "Use $math-prose to revise this equation-adjacent prose for precision, logical validity, and natural mathematical style."

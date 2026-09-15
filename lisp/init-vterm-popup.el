@@ -10,6 +10,7 @@
 (require 'aaron-ui)
 (require 'cl-lib)
 (require 'seq)
+(require 'easymenu)
 
 (declare-function my/terminal-normalize-directory "init-funcs" (directory))
 (declare-function my/vterm-send-command "init-shell" (buffer command &optional retries))
@@ -23,6 +24,11 @@
 (declare-function vterm-send-return "vterm" ())
 (declare-function project-root "project" (project))
 (declare-function my/project-current-root "init-project")
+(declare-function noema-agent-acp-config-for "noema-agent-acp" (agent))
+(declare-function noema-agent-acp-start "noema-agent-acp" (&rest args))
+(declare-function noema-agent-acp-tabs-mode "noema-agent-acp" (&optional arg))
+(defvar noema-agent-acp-display-buffer-function)
+(defvar shell-maker-prompt-before-killing-buffer)
 
 (defvar vterm-kill-buffer-on-exit)
 (defvar remote-terminal-instance)
@@ -111,6 +117,7 @@
     (pcase kind
       ('ai-claude "cc")
       ('ai-codex "codex")
+      ('ai-opencode "opencode")
       (_ "term"))))
 
 (defun my/vterm-popup--tab-title (buffer)
@@ -144,6 +151,10 @@ CURRENT is the currently displayed popup buffer."
      'mouse-face 'mode-line-highlight
      'help-echo (format "Switch to %s" (buffer-name buffer))
      'local-map (let ((map (make-sparse-keymap)))
+                  (define-key map [header-line mouse-3] #'my/vterm-popup-menu)
+                  (define-key map [tab-line mouse-3] #'my/vterm-popup-menu)
+                  (define-key map [tab-line mouse-1]
+                              (lambda () (interactive) (my/vterm-popup-select-buffer buffer)))
                   (define-key map [header-line mouse-1]
                               (lambda ()
                                 (interactive)
@@ -157,19 +168,102 @@ CURRENT is the currently displayed popup buffer."
    (my/vterm-popup--show-buffer
     (my/vterm-popup--create-buffer default-directory))))
 
+(defun my/vterm-popup--agent-menu-items ()
+  "Return agent commands without loading agent-shell or starting processes."
+  '(["Claude" my/vterm-popup-agent-claude t]
+    ["Codex" my/vterm-popup-agent-codex t]
+    ["OpenCode" my/vterm-popup-agent-opencode t]))
+
+(defun my/vterm-popup-menu (&optional event)
+  "Open the popup launcher menu at mouse EVENT, or at point."
+  (interactive (list last-nonmenu-event))
+  (when (mouse-event-p event) (mouse-set-point event))
+  (popup-menu
+   (easy-menu-create-menu
+    "New popup"
+    (append '(["Terminal" my/vterm-popup-new t])
+            (list (cons "Applications"
+                        (mapcar (lambda (app)
+                                  (vector (car app)
+                                          `(lambda () (interactive) (my/vterm-popup-app ,(car app))) t))
+                                my/project-popup-vterm-apps)))
+            (list (cons "Agent" (my/vterm-popup--agent-menu-items))))) event))
+
+(defun my/vterm-popup-agent-menu (&optional event)
+  "Choose an agent-shell session to open in the shared popup."
+  (interactive (list last-nonmenu-event))
+  (when (mouse-event-p event) (mouse-set-point event))
+  (popup-menu (easy-menu-create-menu "Agent" (my/vterm-popup--agent-menu-items)) event))
+
+(defun my/vterm-popup-agent (agent)
+  "Start AGENT through the Noema agent-shell boundary, never through vterm."
+  (interactive (list (intern (completing-read "Popup agent: " '("claude" "codex" "opencode") nil t))))
+  (when (file-remote-p default-directory)
+    (user-error "Popup agents currently require a local directory"))
+  (unless (memq agent '(claude codex opencode)) (user-error "Unsupported popup agent: %s" agent))
+  (require 'noema-agent-acp)
+  (let* ((directory default-directory)
+         (workspace (my/vterm-popup--requested-workspace-id directory))
+         (config (or (noema-agent-acp-config-for agent) (user-error "No agent-shell configuration for %s" agent)))
+         ;; Protect the existing temporary popup while ACP initializes.
+         (my/vterm-popup--displaying t)
+         (buffer (noema-agent-acp-start :config config :directory directory :focus nil)))
+    (with-current-buffer buffer
+      (setq-local my/vterm-popup-kind (intern (format "ai-%s" agent))
+                  my/vterm-popup-title (capitalize (symbol-name agent))
+                  my/vterm-popup-workspace-id workspace
+                  noema-agent-acp-display-buffer-function #'my/vterm-popup-display-buffer)
+      (noema-agent-acp-tabs-mode -1)
+      (my/vterm-popup-agent-keys-mode 1))
+    (my/vterm-popup-display-buffer buffer)))
+
+(defun my/vterm-popup-agent-claude ()
+  "Open Claude in the popup using agent-shell."
+  (interactive) (my/vterm-popup-agent 'claude))
+(defun my/vterm-popup-agent-codex ()
+  "Open Codex in the popup using agent-shell."
+  (interactive) (my/vterm-popup-agent 'codex))
+(defun my/vterm-popup-agent-opencode ()
+  "Open OpenCode in the popup using agent-shell."
+  (interactive) (my/vterm-popup-agent 'opencode))
+
+(defvar my/vterm-popup-agent-keys-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-c C-e") #'vterm-toggle)
+    (define-key map (kbd "C-c E") #'my/vterm-popup-cycle)
+    (define-key map (kbd "C-c M-e") #'my/vterm-toggle-fixed)
+    map))
+
+(define-minor-mode my/vterm-popup-agent-keys-mode
+  "Share popup folding, cycling and pinning keys in an agent-shell buffer."
+  :lighter nil :keymap my/vterm-popup-agent-keys-mode-map)
+
 (defun my/vterm-popup--new-tab-segment ()
   "Return a clickable segment that creates a new popup vterm."
   (propertize
    " +term "
    'face 'my/vterm-popup-tab
    'mouse-face 'mode-line-highlight
-   'help-echo "Create a new popup vterm"
+   'help-echo "Left click: terminal; right click: Applications / Agent menu"
    'local-map (let ((map (make-sparse-keymap)))
+                (define-key map [header-line mouse-3] #'my/vterm-popup-menu)
+                (define-key map [tab-line mouse-3] #'my/vterm-popup-menu)
+                (define-key map [tab-line mouse-1] #'my/vterm-popup-new)
                 (define-key map [header-line mouse-1]
                             (lambda ()
                               (interactive)
                               (my/vterm-popup-new)))
                 map)))
+
+(defun my/vterm-popup--agent-tab-segment ()
+  "Return the agent launcher; constructing it performs no IO."
+  (propertize " +Agent " 'face 'my/vterm-popup-tab 'mouse-face 'mode-line-highlight
+              'help-echo "Claude / Codex / OpenCode via agent-shell"
+              'local-map (let ((map (make-sparse-keymap)))
+                           (dolist (key '([header-line mouse-1] [header-line mouse-3]
+                                          [tab-line mouse-1] [tab-line mouse-3]))
+                             (define-key map key #'my/vterm-popup-agent-menu))
+                           map)))
 
 (defun my/vterm-popup--tab-line ()
   "Return the popup vterm tab strip for the header line."
@@ -186,6 +280,7 @@ CURRENT is the currently displayed popup buffer."
      tabs
      (list " "
            (my/vterm-popup--new-tab-segment)
+           (my/vterm-popup--agent-tab-segment)
            " "
            (propertize "C-c C-e toggle  C-c E next  C-c M-e pin"
                        'face 'shadow)))))
@@ -194,8 +289,16 @@ CURRENT is the currently displayed popup buffer."
   "Apply local popup terminal UI to BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (setq-local mode-line-format '((:eval (my/vterm-popup--separator-line))))
-      (setq-local header-line-format '(:eval (my/vterm-popup--tab-line)))
+      (if (derived-mode-p 'agent-shell-mode)
+          ;; Agent-shell retains its native model/status/permission header.
+          ;; It never rewrites tab-line-format, so no heartbeat advice is needed.
+          (setq-local tab-line-format '(:eval (my/vterm-popup--tab-line))
+                      tab-line-exclude t
+                      ;; Popup conversations need no extra transcript.txt
+                      ;; export on close. Keep all other kill protections.
+                      shell-maker-prompt-before-killing-buffer nil)
+        (setq-local mode-line-format '((:eval (my/vterm-popup--separator-line))))
+        (setq-local header-line-format '(:eval (my/vterm-popup--tab-line))))
       (setq-local fringes-outside-margins nil)
       (setq-local left-margin-width 0)
       (setq-local right-margin-width 0))))
@@ -404,15 +507,15 @@ Signal a user error when outside a project."
     (file-name-as-directory
      (expand-file-name project-root)))))
 
-(defun my/project-popup-vterm-app (app)
-  "Run APP in a fresh popup vterm rooted at the current project."
+(defun my/vterm-popup-app (app &optional directory)
+  "Run configured terminal APP in a fresh popup at DIRECTORY or here."
   (interactive
    (list
     (completing-read "Project terminal app: "
                      (mapcar #'car my/project-popup-vterm-apps)
                      nil t)))
   (let* ((project-root (file-name-as-directory
-                        (expand-file-name (my/vterm-popup--project-root))))
+                        (expand-file-name (or directory default-directory))))
          (command (or (cdr (assoc app my/project-popup-vterm-apps))
                       (user-error "Unknown project terminal app: %s" app)))
          (buffer-name (format "*vterm-popup:%s:%s*"
@@ -427,6 +530,12 @@ Signal a user error when outside a project."
         (vterm-send-return)))
     (select-window (my/vterm-popup--show-buffer buffer))
     buffer))
+
+(defun my/project-popup-vterm-app (app)
+  "Run APP in a fresh popup vterm rooted at the current project."
+  (interactive (list (completing-read "Project terminal app: "
+                                     (mapcar #'car my/project-popup-vterm-apps) nil t)))
+  (my/vterm-popup-app app (my/vterm-popup--project-root)))
 
 (defun my/vterm-popup--next-buffer ()
   "Return the next popup vterm buffer in creation order."
@@ -558,6 +667,11 @@ With prefix ARG, create a new popup vterm and switch to it."
 
 (add-hook 'window-selection-change-functions #'my/vterm-popup--auto-hide)
 (add-hook 'buffer-list-update-hook #'my/vterm-popup--auto-hide)
+
+;; Reloading this library also updates agents already in the popup pool.
+(dolist (buffer (my/vterm-popup--live-buffers))
+  (when (with-current-buffer buffer (derived-mode-p 'agent-shell-mode))
+    (my/vterm-popup-apply-ui buffer)))
 
 (provide 'init-vterm-popup)
 ;;; init-vterm-popup.el ends here

@@ -1692,6 +1692,10 @@ Returns the number of killed buffers."
        :file "Noema.svg"
        :extensions ("md")
        :fallback "✎ ")
+      (treemacs-create-icon
+       :file "NoemaWork.svg"
+       :extensions ("noema")
+       :fallback "◇ ")
       ;; Semantic Codicons live in the Imenu labels.  Keep the disclosure
       ;; column blank for leaves instead of showing a second generic red dot.
       (treemacs-create-icon

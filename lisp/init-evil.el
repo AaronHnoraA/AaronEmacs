@@ -393,6 +393,7 @@ Emacs state keep their local behavior."
     "fo" 'find-sibling-file
     "fj" 'dired-jump
     "fJ" 'dired-jump-other-window
+    "f." 'my/files-dispatch
 
     ;; buffer
     "b"  '(:ignore t :which-key "buffer")
@@ -433,6 +434,7 @@ Emacs state keep their local behavior."
     "ek" 'move-text-up
     "eb" 'my/pairs-cycle-delimiters
     "e1" 'toggle-one-window
+    "e." 'my/editing-dispatch
 
     ;; help
     "h"  '(:ignore t :which-key "help")
@@ -464,6 +466,9 @@ Emacs state keep their local behavior."
     "cx" 'quickrun
     "ce" 'my/byte-recompile-lisp-dir
     "cE" 'my/native-compile-lisp-dir
+
+    ;; specialized run workbenches
+    "rz" 'my/bazel-dispatch
 
     ;; window
     "w"  'evil-window-map
@@ -539,6 +544,8 @@ Emacs state keep their local behavior."
     "aps" 'my/browser-switch-to
     "apS" 'my/browser-open-search
     "ac" 'calendar
+    "ay" 'my/calendar-year
+    "am" 'my/macos-dispatch
     "ag" 'gnus
     "ai" 'rcirc
 
@@ -562,6 +569,7 @@ Emacs state keep their local behavior."
     "ox" 'my/xwidget-open-url
     "oB" 'my/browser-switch-to
     "os" 'shell-toggle
+    "op" 'proced
     "ol" 'my/beancount)
 
   (with-eval-after-load 'elisp-mode

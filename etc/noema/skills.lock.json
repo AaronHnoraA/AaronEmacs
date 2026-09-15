@@ -1,0 +1,12 @@
+{
+  "schema": "noema.skill-library-lock/1",
+  "installed_at": "2026-09-15",
+  "skills": [
+    { "id": "lean4", "repository": "cameronfreer/lean4-skills", "commit": "9bce01615c1dd43ab45addad13e3a91520a2a40d", "path": "plugins/lean4/skills/lean4", "license": "MIT", "skill_sha256": "6c8696bfc9afeecaeb11ad73f2106180ec4f4f3a77da56164fe84a0a5de69a7b", "helpers": "vendor/lean4-skills/plugins/lean4" },
+    { "id": "lean-proof", "repository": "leanprover/skills", "commit": "7d3da0282e7b724b07620e45cf212f2e05e19334", "path": "skills/lean-proof", "license": "Apache-2.0", "skill_sha256": "362c42ddae83b8d52ceaadd6efa32f707a15ebe83e25038fc08d75a329d60a41" },
+    { "id": "mathlib-build", "repository": "leanprover/skills", "commit": "7d3da0282e7b724b07620e45cf212f2e05e19334", "path": "skills/mathlib-build", "license": "Apache-2.0", "skill_sha256": "1fc8be5e72f07de5c8cc3d7daf6325ce6079eb353773f72889d765cb28f2f4f8" },
+    { "id": "mathlib-review", "repository": "leanprover/skills", "commit": "7d3da0282e7b724b07620e45cf212f2e05e19334", "path": "skills/mathlib-review", "license": "Apache-2.0", "skill_sha256": "14dc3080c19e9ec87bc9902a5e95227e017135b2b41a6d72e4b091b90f09dc75" },
+    { "id": "math-prose", "repository": "TianhuaGao/math-prose", "commit": "71ece05af05adfc28b9a281fd6734a7f6956b044", "path": ".", "license": "MIT", "skill_sha256": "c51614b0be2276eb0da0a418f9b386dca3827781d162c26ab7e01f26779b6cdd" },
+    { "id": "sympy", "repository": "K-Dense-AI/claude-scientific-skills", "commit": "330c8e764435a731eff571e3efdda70b363d0792", "path": "skills/sympy", "license": "MIT", "skill_sha256": "21be026a7a1400acc52a3ffab57caff7c2afc6be1da6075993f9c8f4ec90938b" }
+  ]
+}

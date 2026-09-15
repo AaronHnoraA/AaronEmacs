@@ -1,0 +1,4 @@
+# Optional portable helper checkout is reproducible from skills.lock.json.
+/vendor/
+__pycache__/
+*.pyc

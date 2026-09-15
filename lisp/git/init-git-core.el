@@ -186,7 +186,14 @@ a Git repository."
    ["Remote"
     ("y" "copy remote url" browse-at-remote-kill :transient transient--do-exit)
     ("Y" "browse remote url" browse-at-remote :transient transient--do-exit)
-    ("f" "file dispatch" magit-file-dispatch :transient transient--do-exit)]])
+    ("f" "file dispatch" magit-file-dispatch :transient transient--do-exit)]
+   ["GitHub"
+    ("i" "open issue / PR" my/github-topic-open :transient transient--do-exit)
+    ("I" "insert #reference" my/github-topic-insert :transient transient--do-exit)
+    ("a" "topics by author" my/github-topic-open-by-author :transient transient--do-exit)
+    ("@" "insert contributor" my/github-contributor-insert :transient transient--do-exit)
+    ("P" "preview PR patch" my/github-pr-patch-preview :transient transient--do-exit)
+    ("R" "refresh topics" my/github-refresh :transient transient--do-exit)]])
 
 ;; The awesome git client
 ;;

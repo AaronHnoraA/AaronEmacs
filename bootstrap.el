@@ -305,7 +305,7 @@ This lets deferred package declarations register their VC recipes.")
                  ((stringp spec)
                   (package-vc-install pkg spec))
                  ((listp spec)
-                  (package-vc-install (cons pkg spec)))
+                  (package-vc-install (cons pkg spec) (plist-get spec :rev)))
                  (t
                   (error "Unsupported VC package spec: %S" spec))))
             (error

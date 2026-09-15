@@ -619,14 +619,52 @@ edited through `noema-research-mode' instead of the sidecar projection."
          (error nil))
        (require 'noema-research-mode nil t)))
 
+(defun my/noema-jupyter-notebook--initialize-new-noema ()
+  "Initialize an empty visited `.noema' file and its local project.
+
+The file is made a valid work document immediately, before any OutputArea
+request can observe an empty or rootless notebook.  A nearest existing Noema
+project is reused; otherwise the file's directory becomes one."
+  (when (and buffer-file-name
+             (string-match-p "\\.noema\\'" buffer-file-name)
+             (string-empty-p (string-trim (buffer-string))))
+    (require 'noema-research-mode)
+    (unless (locate-dominating-file (file-name-directory buffer-file-name)
+                                    "noema.toml")
+      (noema-project-enable (file-name-directory buffer-file-name)))
+    (let* ((title (file-name-base buffer-file-name))
+           (document (noema-research-create-document title))
+           (serialized (noema-research-serialize document)))
+      ;; Fill the still-new visiting buffer before the atomic writer creates
+      ;; the file.  Doing this in the opposite order makes Emacs correctly
+      ;; detect a supersession and prompt while opening the new document.
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert serialized))
+      (noema-research-write-file buffer-file-name document)
+      (set-visited-file-modtime)
+      (set-buffer-modified-p nil))))
+
+(defun my/noema-jupyter-notebook--ensure-noema-project ()
+  "Ensure the current valid `.noema' file has a containing project root."
+  (when (and buffer-file-name
+             (string-match-p "\\.noema\\'" buffer-file-name)
+             (not (locate-dominating-file (file-name-directory buffer-file-name)
+                                          "noema.toml")))
+    (require 'noema-research)
+    (noema-project-enable (file-name-directory buffer-file-name))))
+
 ;;;###autoload
 (defun my/noema-jupyter-notebook-open-mode ()
   "Visit an ipynb as a research notebook or a native source projection.
 Research notebooks open in `noema-research-mode'; other notebooks use the
 sidecar source projection."
   (interactive)
+  (my/noema-jupyter-notebook--initialize-new-noema)
   (if (my/noema-jupyter-notebook--research-buffer-p)
-      (noema-research-mode)
+      (progn
+        (my/noema-jupyter-notebook--ensure-noema-project)
+        (noema-research-mode))
     (my/noema-jupyter-notebook--open-projection)))
 
 (defun my/noema-jupyter-notebook--open-projection ()
