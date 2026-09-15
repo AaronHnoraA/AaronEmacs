@@ -554,6 +554,20 @@ Local files are projected to native host paths.  Remote files retain their
           "(() => { const p = %s; if (typeof window.noemaJupyterOpenDocument === 'function') { window.noemaJupyterOpenDocument(p); if (p.view && typeof window.noemaJupyterOpenView === 'function') window.noemaJupyterOpenView(p.view); return true; } return false; })()"
           (json-serialize payload :null-object nil :false-object :json-false)))))))
 
+(defun my/noema-jupyter--output-split (source-window)
+  "Create the right-side output window for SOURCE-WINDOW.
+When SOURCE-WINDOW is stacked with the docked Noema DAG (JuText above, DAG
+below), split their whole column instead, so the output spans the column's
+height and the DAG stays in the bottom-left."
+  (let* ((parent (window-parent source-window))
+         (graph (get-buffer "*Noema DAG*"))
+         (graph-window (and graph (get-buffer-window graph))))
+    (if (and parent graph-window
+             (window-combined-p source-window)
+             (eq (window-parent graph-window) parent))
+        (split-window parent nil 'right)
+      (split-window source-window nil 'right))))
+
 (defun my/noema-jupyter-output-open-document (payload &optional focus)
   "Open Noema's singleton rich-output renderer for document PAYLOAD.
 PAYLOAD names the Emacs-owned work document and optional cell.  The renderer
@@ -580,7 +594,7 @@ surface.  With FOCUS non-nil, move keyboard focus to the renderer."
                            my/noema-jupyter-output-client-id)))
                     (target-window
                      (or (and existing (get-buffer-window existing 'visible))
-                         (split-window source-window nil 'right)))
+                         (my/noema-jupyter--output-split source-window)))
                     buffer)
                (if (buffer-live-p existing)
                    (progn
