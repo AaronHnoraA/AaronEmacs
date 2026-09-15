@@ -91,6 +91,37 @@
      (noema-research--render noema-research--document)
      ,@body))
 
+(defmacro noema-research-test--with-graph (document &rest body)
+  "Run BODY in a Graph Board over a JuText rendering of DOCUMENT.
+BODY may refer to the JuText buffer as `source'."
+  (declare (indent 1))
+  `(let ((source (generate-new-buffer " *noema-graph-test-source*"))
+         (graph (generate-new-buffer " *noema-graph-test-board*")))
+     (unwind-protect
+         (progn
+           (with-current-buffer source
+             (setq-local noema-research--document ,document)
+             (setq-local major-mode 'noema-research-mode)
+             (noema-research--render noema-research--document))
+           (with-current-buffer graph
+             (noema-research-graph-mode)
+             (setq-local noema-research-graph--source source)
+             ,@body))
+       (kill-buffer graph)
+       (kill-buffer source))))
+
+(defun noema-research-test--chain-document (length)
+  "Return the representative notebook extended by a LENGTH-step work chain."
+  (let* ((document (noema-research-test--document))
+         (parent (noema-research-test--work-id document "c-k")))
+    (dotimes (index length)
+      (setq parent (noema-research-cell-work-node-id
+                    (noema-research-test--append-work-cell
+                     document (format "c-chain-%d" index) "work"
+                     (format "Step %d of a long investigation" index)
+                     "Continue." (list parent)))))
+    document))
+
 (defun noema-research-test--ids (document)
   "Return the cell ids of DOCUMENT."
   (mapcar #'noema-research-cell-id (noema-research-cells document)))
@@ -1006,24 +1037,26 @@
     (should (equal navigated "cell-analysis"))))
 
 (ert-deftest noema-research-graph-buffer-renders-only-the-dag ()
-  (let ((source (generate-new-buffer " *noema-dag-source*")))
-    (unwind-protect
-        (progn
-          (with-current-buffer source
-            (setq-local noema-research--document (noema-research-test--document))
-            (noema-research--render noema-research--document))
-          (with-temp-buffer
-            (noema-research-graph-mode)
-            (setq-local noema-research-graph--source source)
-            (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t))
-                      ((symbol-function 'image-type-available-p) (lambda (&rest _) t))
-                      ((symbol-function 'noema-research-graph--insert-image)
-                       (lambda (_projection) (insert "<DAG>") t))
-                      ((symbol-function 'noema-research-graph--insert-outline)
-                       (lambda (&rest _) (ert-fail "text outline must not render"))))
-              (noema-research-graph-refresh))
-            (should (equal (buffer-string) "<DAG>"))))
-      (kill-buffer source))))
+  (skip-unless (executable-find noema-research-graph-dot-program))
+  (noema-research-test--with-graph (noema-research-test--document)
+    (cl-letf (((symbol-function 'display-images-p) (lambda (&rest _) t))
+              ((symbol-function 'image-type-available-p) (lambda (&rest _) t)))
+      (noema-research-graph-refresh))
+    ;; One window-sized image and no text outline.
+    (should (= (buffer-size) 1))
+    (let ((image (get-text-property (point-min) 'display)))
+      (should (eq (car-safe image) 'image))
+      ;; The image carries the real drawing, sized to the viewport.
+      (should (string-prefix-p "<svg" (plist-get (cdr image) :data)))
+      (should (string-match-p "width=\"800\"" (plist-get (cdr image) :data)))
+      (should (string-match-p "<g [^>]*id=\"noema-scene\"" (plist-get (cdr image) :data)))
+      (should (string-match-p "<g [^>]*transform=\"translate(" (plist-get (cdr image) :data))))
+    (let ((svg (plist-get noema-research-graph--scene :svg)))
+      (should (equal (dom-attr svg 'width) 800))
+      (should (equal (dom-attr svg 'height) 480))
+      (should (string-match-p
+               "\\`translate(.*) scale(.*)\\'"
+               (dom-attr (plist-get noema-research-graph--scene :group) 'transform))))))
 
 (ert-deftest noema-research-relation-editor-filters-combined-dag-cycles ()
   (dolist (editor '(noema-research-edit-lineage noema-research-edit-depends))
@@ -1411,7 +1444,7 @@
                     (:id "right" :x 100.0 :y 10.0)
                     (:id "down" :x 50.0 :y 80.0)))
           noema-research-graph--selected "root")
-    (cl-letf (((symbol-function 'noema-research-graph-refresh) #'ignore))
+    (cl-letf (((symbol-function 'noema-research-graph--redraw) #'ignore))
       (noema-research-graph-move-right)
       (should (equal noema-research-graph--selected "right"))
       (noema-research-graph-move-left)
@@ -1423,6 +1456,333 @@
     (should (eq (key-binding (kbd "h")) 'noema-research-graph-move-left))
     (should (eq (key-binding (kbd "<down>")) 'noema-research-graph-move-down))
     (should (eq (key-binding (kbd "?")) 'noema-research-graph-help))))
+
+(ert-deftest noema-research-graph-pointer-maps-through-the-view-transform ()
+  (with-temp-buffer
+    (noema-research-graph-mode)
+    (setq noema-research-graph--scene (list :width 2000 :height 3000)
+          noema-research-graph--layout-cache
+          '(:nodes ((:id "a" :x 100.0 :y 100.0 :width 80.0 :height 40.0)
+                    (:id "b" :x 400.0 :y 900.0 :width 80.0 :height 40.0)))
+          noema-research-graph--view (list :dx -30 :dy 40 :scale 1.5))
+    (let ((center (noema-research-graph--node-center noema-research-graph--view "a")))
+      (should (equal center (cons (+ -30 (* 1.5 108)) (+ 40 (* 1.5 108)))))
+      (should (equal (noema-research-graph--node-at (car center) (cdr center)) "a"))
+      (should-not (noema-research-graph--node-at (+ (car center) 70) (cdr center))))
+    ;; Zooming keeps the drawing point under the pointer fixed (edraw-zoom).
+    (let* ((view noema-research-graph--view)
+           (zoomed (noema-research-graph--zoomed-view view 2 300 200)))
+      (should (= (plist-get zoomed :scale) 3.0))
+      (should (< (abs (- (/ (- 300 (plist-get view :dx)) (plist-get view :scale))
+                         (/ (- 300 (plist-get zoomed :dx)) (plist-get zoomed :scale))))
+                 1e-9))
+      (should (< (abs (- (/ (- 200 (plist-get view :dy)) (plist-get view :scale))
+                         (/ (- 200 (plist-get zoomed :dy)) (plist-get zoomed :scale))))
+                 1e-9)))
+    (cl-letf (((symbol-function 'noema-research-graph--schedule-view-save) #'ignore))
+      ;; A precise trackpad delta pans by exactly that many pixels.
+      (noema-research-graph-wheel '(wheel-down (nil 1 (100 . 100) 0) 1 nil (0 . 30)))
+      (should (= (plist-get noema-research-graph--view :dy) 10))
+      ;; Shift turns a vertical wheel sideways.
+      (noema-research-graph-wheel '(S-wheel-down (nil 1 (100 . 100) 0) 1 nil nil))
+      (should (= (plist-get noema-research-graph--view :dx)
+                 (- -30 noema-research-graph-wheel-step)))
+      ;; Control zooms.
+      (noema-research-graph-wheel '(C-wheel-up (nil 1 (100 . 100) 0) 1 nil nil))
+      (should (> (plist-get noema-research-graph--view :scale) 1.5))
+      ;; A click selects the node under the pointer; a drag pans instead.
+      (setq noema-research-graph--view (list :dx 0 :dy 0 :scale 1.0))
+      (let ((events (list '(mouse-1 (nil 1 (108 . 108) 0))))
+            selected)
+        (cl-letf (((symbol-function 'read-event) (lambda (&rest _) (pop events)))
+                  ((symbol-function 'noema-research-graph-select)
+                   (lambda (id) (setq selected id))))
+          (noema-research-graph-mouse-down '(down-mouse-1 (nil 1 (108 . 108) 0)))
+          (should (equal selected "a"))
+          (setq selected nil
+                events (list '(mouse-movement (nil 1 (160 . 130) 0))
+                             '(drag-mouse-1 (nil 1 (160 . 130) 0))))
+          (noema-research-graph-mouse-down '(down-mouse-1 (nil 1 (110 . 110) 0)))
+          (should-not selected)
+          (should (= (plist-get noema-research-graph--view :dx) 50))
+          (should (= (plist-get noema-research-graph--view :dy) 20)))))))
+
+(ert-deftest noema-research-graph-long-dag-opens-readable-and-follows-selection ()
+  (skip-unless (executable-find noema-research-graph-dot-program))
+  (noema-research-test--with-graph (noema-research-test--chain-document 24)
+    (let* ((dot-calls 0)
+           (counter (lambda (&rest _) (setq dot-calls (1+ dot-calls))))
+           (document (buffer-local-value 'noema-research--document source))
+           (last (noema-research-test--work-id document "c-chain-23")))
+      (advice-add 'noema-research-graph--run-dot :before counter)
+      (unwind-protect
+          (progn
+            (noema-research-graph-refresh)
+            (should (= dot-calls 1))
+            ;; The long DAG is not shrunk to fit: it opens at 100%.
+            (should (> (plist-get noema-research-graph--scene :height) 1000))
+            (should (= (plist-get noema-research-graph--view :scale) 1.0))
+            ;; Selecting restyles and scrolls without running Graphviz.
+            (noema-research-graph-select last)
+            (should (= dot-calls 1))
+            (should (equal (dom-attr (car (gethash last (plist-get noema-research-graph--scene
+                                                                    :nodes)))
+                                     'stroke)
+                           (plist-get (noema-research-graph--palette) :selected)))
+            (should (<= 0 (cdr (noema-research-graph--node-center
+                                noema-research-graph--view last))
+                        480))
+            (should (string-match-p "100%" (noema-research-graph--header-line)))
+            (should (string-match-p "more .*↑" (noema-research-graph--header-line)))
+            (noema-research-graph-move-up)
+            (noema-research-graph--pan 0 -40)
+            (noema-research-graph-zoom-in)
+            (should (= (plist-get noema-research-graph--view :scale) 1.25))
+            (setq noema-research-graph--window-size '(900 . 600))
+            (noema-research-graph-fit)
+            (should (< (plist-get noema-research-graph--view :scale) 0.75))
+            (should (= dot-calls 1))
+            ;; Semantic zoom reuses the layout when the drawn labels are equal
+            ;; (these short titles fit every zoom level's width).
+            (noema-research-graph-cycle-zoom)
+            (should (= dot-calls 1))
+            ;; A layout setting changes the DOT source and lays out again.
+            (let ((noema-research-graph-rankdir "LR"))
+              (noema-research-graph--redraw))
+            (should (= dot-calls 2)))
+        (advice-remove 'noema-research-graph--run-dot counter)))))
+
+(ert-deftest noema-research-graph-data-callbacks-coalesce-into-one-redraw ()
+  (noema-research-test--with-graph (noema-research-test--document)
+    (let ((redraws 0))
+      (cl-letf (((symbol-function 'noema-research-graph--redraw)
+                 (lambda (&rest _) (setq redraws (1+ redraws)))))
+        (dotimes (_ 4) (noema-research-graph--schedule-redraw))
+        (let ((timer noema-research-graph--redraw-timer))
+          (should (timerp timer))
+          (cancel-timer timer)
+          (apply (timer--function timer) (timer--args timer)))
+        (should (= redraws 1))
+        (should-not noema-research-graph--redraw-timer)))))
+
+(ert-deftest noema-research-graph-expanding-a-smart-fold-keeps-it-open ()
+  (let* ((document (noema-research-test--document))
+         (question (noema-research-test--work-id document "c-q"))
+         (work (noema-research-test--work-id document "c-w"))
+         (checkpoint (noema-research-test--work-id document "c-k"))
+         (side (noema-research-cell-work-node-id
+                (noema-research-test--append-work-cell
+                 document "c-side" "work" "Side route" "Try." (list question)))))
+    (noema-research-test--append-work-cell
+     document "c-side2" "work" "Side detail" "More." (list side))
+    (noema-research-set-state document work "done")
+    (noema-research-test--with-graph document
+      (cl-letf (((symbol-function 'noema-research-graph--redraw) #'ignore))
+        (setq noema-research-graph--zoom "overview"
+              noema-research-graph--selected question)
+        (should (equal (noema-research-graph--automatic-folds document) (list work)))
+        ;; On the selected node TAB folds, and a second TAB expands and
+        ;; records the expansion against Smart Fold.
+        (setq noema-research-graph--selected work)
+        (noema-research-graph-toggle-fold)
+        (should (equal noema-research-graph--folds (list work)))
+        (noema-research-graph-toggle-fold)
+        (should-not noema-research-graph--folds)
+        (should (equal noema-research-graph--unfolds (list work)))
+        (setq noema-research-graph--selected question)
+        (should-not (noema-research-graph--automatic-folds document))
+        ;; A leaf has nothing to fold.
+        (setq noema-research-graph--selected checkpoint)
+        (should-error (noema-research-graph-toggle-fold) :type 'user-error)
+        (noema-research-graph-fold-finished)
+        (should (equal noema-research-graph--folds (list work)))
+        (should-not noema-research-graph--unfolds)
+        (noema-research-graph-unfold-all)
+        (should-not noema-research-graph--folds)
+        (should (equal noema-research-graph--unfolds (list work)))
+        (noema-research-graph-fold-to-level 1)
+        (should (equal noema-research-graph--folds (list question)))
+        (setq noema-research-graph--folds nil
+              noema-research-graph--selected checkpoint)
+        (noema-research-graph-fold-others)
+        (should (equal noema-research-graph--folds (list side)))))))
+
+(ert-deftest noema-research-graph-focus-lens-depth-history-and-related-summary ()
+  (let* ((document (noema-research-test--document))
+         (question (noema-research-test--work-id document "c-q"))
+         (work (noema-research-test--work-id document "c-w"))
+         (checkpoint (noema-research-test--work-id document "c-k"))
+         (repair (noema-research-cell-work-node-id
+                  (noema-research-test--append-work-cell
+                   document "c-r" "work" "Repair" "" (list checkpoint))))
+         (earlier (noema-research-cell-work-node-id
+                   (noema-research-test--append-work-cell
+                    document "c-s" "work" "Earlier modelling" "" (list question)))))
+    (noema-research-test--append-work-cell
+     document "c-s2" "checkpoint" "Archived result" "" (list earlier))
+    (noema-research-test--with-graph document
+      (cl-letf (((symbol-function 'noema-research-graph--redraw) #'ignore))
+        (setq noema-research-graph--selected repair)
+        (should-error (noema-research-graph-focus-deeper) :type 'user-error)
+        (noema-research-graph-toggle-focus)
+        (should (equal noema-research-graph--focus repair))
+        ;; The contraction of omitted branches is navigable: TAB on it moves
+        ;; the lens up to the summary's parent.
+        (setq noema-research-graph--projection-cache
+              (noema-research-graph--projection document))
+        (let ((summary (seq-find (lambda (node) (plist-get node :summary))
+                                 (plist-get noema-research-graph--projection-cache
+                                            :nodes))))
+          (should summary)
+          (setq noema-research-graph--selected (plist-get summary :id))
+          (noema-research-graph-toggle-fold)
+          (should (equal noema-research-graph--focus question)))
+        (noema-research-graph-focus-back)
+        (should (equal noema-research-graph--focus repair))
+        (noema-research-graph-focus-deeper)
+        (should (= noema-research-graph--focus-depth 3))
+        (should (string-match-p "focus: Repair ±3" (noema-research-graph--header-line))))
+      (let ((ids (mapcar (lambda (node) (plist-get node :id))
+                         (plist-get (noema-research-projection
+                                     document :focus work :depth 1 :siblings nil)
+                                    :nodes))))
+        (should (member checkpoint ids))
+        (should-not (member repair ids))
+        (should-not (member earlier ids))))))
+
+(ert-deftest noema-research-graph-drop-branch-is-one-undoable-edit-and-folds ()
+  (let* ((document (noema-research-test--document))
+         (question (noema-research-test--work-id document "c-q"))
+         (work (noema-research-test--work-id document "c-w"))
+         (child (noema-research-cell-work-node-id
+                 (noema-research-test--append-work-cell
+                  document "c-x" "work" "Ablation" "Run it." (list work))))
+         (before (noema-research-work-node-field
+                  (noema-research-find-work-node document work) "state")))
+    (noema-research-set-state document child "done")
+    ;; Dropping keeps finished work done; reopening reaches every work node.
+    (should (equal (noema-research-branch-state-targets document work "dropped")
+                   (list work)))
+    (should (equal (noema-research-branch-state-targets document work "open")
+                   (list work child)))
+    (noema-research-test--with-graph document
+      (cl-letf (((symbol-function 'noema-research-graph--redraw) #'ignore)
+                ((symbol-function 'read-string) (lambda (&rest _) "baseline stronger")))
+        (setq noema-research-graph--selected work)
+        (noema-research-graph-drop-branch)
+        (let* ((live (buffer-local-value 'noema-research--document source))
+               (node (noema-research-find-work-node live work)))
+          (should (equal (noema-research-work-node-field node "state") "dropped"))
+          (should (equal (noema-research-work-node-field node "dropped_reason")
+                         "baseline stronger"))
+          (should (equal (noema-research-work-node-field
+                          (noema-research-find-work-node live child) "state")
+                         "done")))
+        (should (equal noema-research-graph--folds (list work)))
+        (should (equal noema-research-graph--selected question))
+        (noema-research-graph-undo)
+        (should (equal (noema-research-work-node-field
+                        (noema-research-find-work-node
+                         (buffer-local-value 'noema-research--document source) work)
+                        "state")
+                       before))))))
+
+(ert-deftest noema-research-settings-resolve-document-over-global-over-default ()
+  (noema-research-test--with-directory directory
+    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+    (let ((file (expand-file-name "research.noema" directory))
+          (document (noema-research-test--document)))
+      (should (equal (noema-research-settings--standard 'noema-research-graph-rankdir) "TB"))
+      (let ((noema-research-graph-rankdir "LR"))
+        (should (equal (noema-research-setting 'noema-research-graph-rankdir) "LR"))
+        (should (string-match-p
+                 "rankdir=LR"
+                 (car (noema-research-graph--dot-source
+                       (noema-research-projection document))))))
+      (noema-research-settings-set-document
+       file document 'noema-research-graph-focus-depth 5)
+      (noema-research-settings-set-document
+       file document 'noema-research-graph-fold-on-drop nil)
+      ;; Writing the view afterwards keeps the overrides.
+      (noema-research-view-write file document "c-w" '("c-q") "detail")
+      (let ((overrides (noema-research-settings-document-overrides file document)))
+        (should (= (noema-research-setting 'noema-research-graph-focus-depth overrides) 5))
+        (should (assq 'noema-research-graph-fold-on-drop overrides))
+        (should-not (noema-research-setting 'noema-research-graph-fold-on-drop overrides))
+        (should (noema-research-setting 'noema-research-graph-fold-on-drop)))
+      (should-error (noema-research-settings-set-document
+                     file document 'noema-research-graph-theme 'dark)
+                    :type 'user-error)
+      (let ((jutext (generate-new-buffer " *noema-settings-source*")))
+        (unwind-protect
+            (progn
+              (with-current-buffer jutext
+                (setq-local noema-research--document document)
+                (setq buffer-file-name file))
+              (with-temp-buffer
+                (noema-research-settings-mode)
+                (setq noema-research-settings--source jutext)
+                (let ((row (cadr (assq 'noema-research-graph-focus-depth
+                                       (noema-research-settings--entries)))))
+                  (should (equal (aref row 2) "5"))
+                  (should (equal (aref row 3) "document")))))
+          (with-current-buffer jutext (setq buffer-file-name nil))
+          (kill-buffer jutext)))
+      (noema-research-settings-set-document
+       file document 'noema-research-graph-focus-depth nil t)
+      (should-not (assq 'noema-research-graph-focus-depth
+                        (noema-research-settings-document-overrides file document))))))
+
+(ert-deftest noema-research-views-keep-graph-state-and-unknown-keys ()
+  (noema-research-test--with-directory directory
+    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+    (let ((file (expand-file-name "research.noema" directory))
+          (document (noema-research-test--document)))
+      (noema-research-view-update
+       file document
+       (lambda (view)
+         (puthash "future" "kept" view)
+         (puthash "unfolds" ["c-w"] view)
+         (puthash "focus_depth" 3 view)
+         (puthash "viewport" (noema-research--table "dx" -40 "dy" 12 "scale" 1.25) view)))
+      (noema-research-view-write file document "c-q" nil "overview")
+      (should (equal (noema-research-view-read file document)
+                     '(:focus "c-q" :folds nil :zoom "overview" :unfolds ("c-w")
+                       :focus-depth 3 :viewport (:dx -40 :dy 12 :scale 1.25))))
+      (should (equal (noema-research--get
+                      (noema-research--view-object
+                       (noema-research-view-file file document))
+                      "future")
+                     "kept")))))
+
+(ert-deftest noema-research-graph-viewport-focus-and-branch-keys-are-bound ()
+  (with-temp-buffer
+    (noema-research-graph-mode)
+    (when (fboundp 'evil-normal-state)
+      (evil-normal-state))
+    (dolist (binding '(("+" . noema-research-graph-zoom-in)
+                       ("-" . noema-research-graph-zoom-out)
+                       ("0" . noema-research-graph-zoom-reset)
+                       ("=" . noema-research-graph-fit)
+                       ("." . noema-research-graph-center)
+                       ("SPC" . noema-research-graph-interactive-scroll)
+                       ("S-<left>" . noema-research-graph-pan-left)
+                       ("C-S-<down>" . noema-research-graph-pan-down)
+                       ("[" . noema-research-graph-focus-shallower)
+                       ("]" . noema-research-graph-focus-deeper)
+                       ("b" . noema-research-graph-focus-back)
+                       ("B" . noema-research-graph-branch-menu)
+                       ("v" . noema-research-graph-view-menu)
+                       ("<backtab>" . noema-research-graph-cycle-folds)
+                       ("," . noema-research-settings)
+                       ("<wheel-down>" . noema-research-graph-wheel)
+                       ("C-<wheel-up>" . noema-research-graph-wheel)
+                       ("<down-mouse-1>" . noema-research-graph-mouse-down)))
+      (should (eq (key-binding (kbd (car binding))) (cdr binding)))))
+  (should (eq (lookup-key noema-research-mode-map (kbd "C-c j B"))
+              'noema-research-branch-menu))
+  (should (eq (lookup-key noema-research-mode-map (kbd "C-c j ,"))
+              'noema-research-settings)))
 
 (ert-deftest noema-research-graph-can-delete-an-orphan-work-node ()
   (let ((source (generate-new-buffer " *noema-orphan-source*"))
