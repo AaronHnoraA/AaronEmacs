@@ -102,6 +102,79 @@
 (global-set-key (kbd "C-c M-a") #'noema-compose-add-context)
 (global-set-key (kbd "C-c A") my/noema-prefix-map)
 
+;;; ── Noema settings in the config registry (D-035) ─────────────────────────
+;;
+;; Noema keeps its tunables as ordinary defcustoms so its repository stays
+;; independent.  This glue registers them with `config' once their library
+;; loads, so they appear on the config board and persist to
+;; `etc/config-noema.el' like every other setting.  Noema's own settings
+;; center saves through `customize-save-variable', which `config-custom'
+;; routes into the same store.
+
+(defvar config--registry)
+(declare-function noema-pi-project-root "noema-pi-router" (&optional directory))
+(declare-function noema-pi-close-project "noema-pi-router" (&optional directory interrupt))
+(declare-function persp-current-buffers "perspective" ())
+
+(defconst my/noema-config-groups
+  '(noema-research noema-research-graph noema-agent-worker noema-pi-router)
+  "Custom groups whose options Noema exposes through `config'.")
+
+(defun my/noema-config--type-arguments (symbol)
+  "Return `config-register' type arguments for Custom option SYMBOL."
+  (pcase (get symbol 'custom-type)
+    ('boolean '(:type boolean))
+    ((or 'integer 'natnum) '(:type integer))
+    ('number '(:type number))
+    ((or 'string 'file 'directory) '(:type string))
+    (`(choice . ,options)
+     (if (seq-every-p (lambda (option) (eq (car-safe option) 'const)) options)
+         `(:type sexp :choices ,(mapcar (lambda (option) (car (last option))) options))
+       '(:type sexp)))
+    (_ '(:type sexp))))
+
+(defun my/noema-config-register-groups (&rest _)
+  "Register every loaded, not yet registered Noema option with `config'."
+  (dolist (group my/noema-config-groups)
+    (dolist (member (get group 'custom-group))
+      (pcase-let ((`(,symbol ,kind) member))
+        (when (and (eq kind 'custom-variable)
+                   (boundp symbol)
+                   (not (gethash symbol config--registry)))
+          (apply #'config-register symbol
+                 :group 'noema
+                 :store-file "etc/config-noema.el"
+                 :doc (car (split-string (or (documentation-property
+                                              symbol 'variable-documentation t)
+                                             "")
+                                         "\n"))
+                 (my/noema-config--type-arguments symbol)))))))
+
+(dolist (feature '(noema-research-mode noema-research-graph noema-research-settings
+                   noema-agent-worker noema-pi-router))
+  (eval-after-load feature #'my/noema-config-register-groups))
+
+(defun my/noema-close-projects-of-killed-perspective ()
+  "Close Noema projects whose documents live only in the dying perspective.
+`persp-killed-hook' runs inside that perspective, before its buffers go.  The
+project's Pi and idle agents stop; a running Run finishes first."
+  (when (and (featurep 'noema-pi-router) (fboundp 'persp-current-buffers))
+    (let* ((inside (seq-filter #'buffer-live-p (persp-current-buffers)))
+           (root-of (lambda (buffer)
+                      (with-current-buffer buffer
+                        (and buffer-file-name
+                             (derived-mode-p 'noema-research-mode)
+                             (noema-pi-project-root (file-name-directory buffer-file-name))))))
+           (roots (delete-dups (delq nil (mapcar root-of inside)))))
+      (dolist (root roots)
+        (unless (seq-some (lambda (buffer)
+                            (and (not (memq buffer inside))
+                                 (equal (funcall root-of buffer) root)))
+                          (buffer-list))
+          (noema-pi-close-project root))))))
+
+(add-hook 'persp-killed-hook #'my/noema-close-projects-of-killed-perspective)
+
 ;;; ── Claude Code ────────────────────────────────────────────────────────────
 
 (config-defvar claude-code-ide-cli-path nil

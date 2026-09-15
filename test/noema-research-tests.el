@@ -2627,42 +2627,237 @@ BODY may refer to the JuText buffer as `source'."
 
 ;;; D-031 ~ D-034: named sessions, Pi coordinator, agent buffers, disk sync
 
-(ert-deftest noema-pi-router-open-resumes-the-project-pi-session-with-coordinator-tools ()
+(defmacro noema-pi-test--with-agent-directory (root &rest body)
+  "Run BODY with the Pi manager deployed under ROOT, never in the real one."
+  (declare (indent 1))
+  `(let ((noema-pi-agent-directory (expand-file-name "pi-agent/" ,root))
+         (noema-pi-credentials-file (expand-file-name "no-credentials/auth.json" ,root))
+         (noema-pi-model "")
+         (noema-pi-thinking-level "off"))
+     ,@body))
+
+(ert-deftest noema-pi-router-open-resumes-the-project-pi-with-coordinator-tools-only ()
   (noema-research-test--with-directory root
-    (let ((buffer (generate-new-buffer " *noema-pi-fake*"))
-          started)
+    (noema-pi-test--with-agent-directory root
+      (let ((buffer (generate-new-buffer " *noema-pi-fake*"))
+            started client-environment)
+        (unwind-protect
+            (cl-letf (((symbol-function 'my/noema--ensure-server) (lambda (callback) (funcall callback)))
+                      ((symbol-function 'my/noema-api-call)
+                       (lambda (channel _args callback &optional _timeout)
+                         (pcase channel
+                           ("aaronnote:api:research:coordinator:endpoint"
+                            (funcall callback (noema-research--table
+                                               "mcpUrl" "http://127.0.0.1:9/mcp"
+                                               "coordinatorUrl" "http://127.0.0.1:9/mcp/coordinator")
+                                     nil))
+                           ("aaronnote:api:research:session:name:get"
+                            (funcall callback (noema-research--table
+                                               "name" (noema-research--table "name" "pi" "nativeSessionId" "native-pi"))
+                                     nil)))))
+                      ((symbol-function 'noema-agent-acp-config-for) (lambda (_) (list (cons :identifier 'pi))))
+                      ((symbol-function 'agent-shell-pi-make-client)
+                       (lambda (&rest _) (setq client-environment agent-shell-pi-environment) 'client))
+                      ((symbol-function 'noema-agent-acp-start) (lambda (&rest args) (setq started args) buffer))
+                      ((symbol-function 'noema-agent-acp-subscribe) #'ignore))
+              (noema-pi-router-open root)
+              (should (equal (plist-get started :session-id) "native-pi"))
+              (should (plist-get started :focus))
+              ;; D-035: the manager carries only the coordinator tools.
+              (should (equal (mapcar (lambda (server) (alist-get 'url server))
+                                     (alist-get :mcp-servers (plist-get started :config)))
+                             '("http://127.0.0.1:9/mcp/coordinator")))
+              (should (eq (funcall (alist-get :client-maker (plist-get started :config)) buffer) 'client))
+              (should (member (concat "PI_CODING_AGENT_DIR="
+                                      (directory-file-name (expand-file-name noema-pi-agent-directory)))
+                              client-environment))
+              (should (file-readable-p (expand-file-name "extensions/noema-manager/index.ts"
+                                                         noema-pi-agent-directory)))
+              (should (eq (noema-pi-router-buffer root) buffer))
+              (with-current-buffer buffer
+                (should tab-line-exclude)
+                (should (equal noema-agent-acp-session-name "pi"))))
+          (remhash (noema-pi-router--root root) noema-pi-router--buffers)
+          (kill-buffer buffer))))))
+
+(ert-deftest noema-pi-deploy-writes-a-manager-only-agent-directory ()
+  (noema-research-test--with-directory root
+    (noema-pi-test--with-agent-directory root
+      (let* ((credentials (expand-file-name "home-pi/auth.json" root))
+             (noema-pi-credentials-file credentials)
+             (noema-pi-model "anthropic/claude-haiku-4-5")
+             (settings-file (expand-file-name "settings.json" noema-pi-agent-directory)))
+        (make-directory (file-name-directory credentials) t)
+        (write-region "{\"anthropic\": {\"type\": \"api_key\"}}" nil credentials nil 'silent)
+        (make-directory noema-pi-agent-directory t)
+        (write-region "{\"theme\": \"dark\", \"defaultTools\": [\"bash\"]}" nil settings-file nil 'silent)
+        (let ((environment (noema-pi-deploy)))
+          (should (equal environment (noema-pi-deploy)))
+          (should (string-prefix-p "PI_CODING_AGENT_DIR=" (car environment))))
+        (let ((settings (noema-research-parse-json
+                         (with-temp-buffer (insert-file-contents settings-file) (buffer-string)))))
+          (should (equal (gethash "theme" settings) "dark"))
+          (should (equal (gethash "defaultTools" settings) []))
+          (should (equal (gethash "defaultThinkingLevel" settings) "off"))
+          (should (eq (gethash "enableSkillCommands" settings) :false))
+          (should (equal (gethash "defaultProvider" settings) "anthropic"))
+          (should (equal (gethash "defaultModel" settings) "claude-haiku-4-5")))
+        (should (string-match-p "session manager"
+                                (with-temp-buffer
+                                  (insert-file-contents (expand-file-name "SYSTEM.md" noema-pi-agent-directory))
+                                  (buffer-string))))
+        (should (string-match-p "mcp__noema-coordinator__"
+                                (with-temp-buffer
+                                  (insert-file-contents (expand-file-name "extensions/noema-manager/index.ts"
+                                                                          noema-pi-agent-directory))
+                                  (buffer-string))))
+        (let ((link (expand-file-name "auth.json" noema-pi-agent-directory)))
+          (should (file-symlink-p link))
+          (should (equal (file-truename link) (file-truename credentials))))))))
+
+(ert-deftest noema-pi-router-starts-one-pi-per-project-on-visit ()
+  (noema-research-test--with-directory root
+    (let* ((other-root (file-name-as-directory (expand-file-name "other" root)))
+           (first (generate-new-buffer " *noema-doc-a*"))
+           (second (generate-new-buffer " *noema-doc-b*"))
+           (elsewhere (generate-new-buffer " *noema-doc-c*"))
+           (roots `((,first . ,root) (,second . ,root) (,elsewhere . ,other-root)))
+           (launches 0)
+           (noninteractive nil))
       (unwind-protect
-          (cl-letf (((symbol-function 'my/noema--ensure-server) (lambda (callback) (funcall callback)))
-                    ((symbol-function 'my/noema-api-call)
-                     (lambda (channel _args callback &optional _timeout)
-                       (pcase channel
-                         ("aaronnote:api:research:coordinator:endpoint"
-                          (funcall callback (noema-research--table
-                                             "mcpUrl" "http://127.0.0.1:9/mcp"
-                                             "coordinatorUrl" "http://127.0.0.1:9/mcp/coordinator")
-                                   nil))
-                         ("aaronnote:api:research:session:name:get"
-                          (funcall callback (noema-research--table
-                                             "name" (noema-research--table "name" "pi" "nativeSessionId" "native-pi"))
-                                   nil)))))
-                    ((symbol-function 'noema-agent-acp-config-for) (lambda (_) (list (cons :identifier 'pi))))
-                    ((symbol-function 'noema-agent-acp-start) (lambda (&rest args) (setq started args) buffer))
-                    ((symbol-function 'noema-agent-acp-subscribe) #'ignore))
-            (noema-pi-router-open root)
-            (should (equal (plist-get started :session-id) "native-pi"))
-            (should (plist-get started :focus))
-            (should (member "http://127.0.0.1:9/mcp/coordinator"
-                            (mapcar (lambda (server) (alist-get 'url server))
-                                    (alist-get :mcp-servers (plist-get started :config)))))
-            (should (eq (noema-pi-router-buffer root) buffer))
-            (with-current-buffer buffer
-              (should tab-line-exclude)
-              (should (equal noema-agent-acp-session-name "pi"))))
-        (remhash (noema-pi-router--root root) noema-pi-router--buffers)
-        (kill-buffer buffer)))))
+          (cl-letf (((symbol-function 'noema-pi-router--document-root)
+                     (lambda (buffer) (alist-get buffer roots)))
+                    ((symbol-function 'my/noema--ensure-server)
+                     (lambda (_callback) (setq launches (1+ launches)))))
+            (let ((noema-pi-auto-start nil))
+              (noema-pi-router-note-visit first))
+            (should (= launches 0))
+            (let ((noema-pi-auto-start t))
+              (noema-pi-router-note-visit first)
+              (noema-pi-router-note-visit second)
+              (should (= launches 1))
+              (noema-pi-router-note-visit elsewhere)
+              (should (= launches 2))))
+        (dolist (key (list root other-root))
+          (remhash key noema-pi-router--starting)
+          (remhash key noema-pi-router--show))
+        (mapc #'kill-buffer (list first second elsewhere))))))
+
+(ert-deftest noema-pi-router-closes-a-project-after-its-last-document ()
+  (noema-research-test--with-directory root
+    (let* ((first (generate-new-buffer " *noema-doc-a*"))
+           (second (generate-new-buffer " *noema-doc-b*"))
+           (idle (generate-new-buffer " *noema-agent-idle*"))
+           (busy (generate-new-buffer " *noema-agent-busy*"))
+           (documents (list first second))
+           (noema-pi-auto-start nil)
+           stopped cancelled)
+      (unwind-protect
+          (cl-letf (((symbol-function 'noema-pi-router--document-root)
+                     (lambda (buffer) (and (memq buffer documents) (buffer-live-p buffer) root)))
+                    ((symbol-function 'noema-agent-acp-agent-buffer-p)
+                     (lambda (buffer) (and (memq buffer (list idle busy)) (buffer-live-p buffer))))
+                    ((symbol-function 'noema-agent-worker-buffer-busy-p) (lambda (buffer) (eq buffer busy)))
+                    ((symbol-function 'noema-agent-worker-stop-buffer)
+                     (lambda (buffer) (push buffer stopped) t))
+                    ((symbol-function 'noema-agent-worker-cancel-buffer)
+                     (lambda (buffer) (push buffer cancelled)))
+                    ((symbol-function 'run-at-time)
+                     (lambda (_time _repeat function &rest args)
+                       (if (eq function #'noema-pi-router--stop-if-unused) 'pending-stop (apply function args)))))
+            (dolist (buffer (list idle busy))
+              (with-current-buffer buffer (setq-local noema-agent-acp-session-root root)))
+            (mapc #'noema-pi-router-note-visit documents)
+            (kill-buffer first)
+            (should-not (gethash root noema-pi-router--stop-timers))
+            (with-current-buffer second (noema-pi-router-note-release))
+            (should (eq (gethash root noema-pi-router--stop-timers) 'pending-stop))
+            (setq documents nil)
+            (noema-pi-router--stop-if-unused root)
+            ;; Idle agents stop now; the one running a Run is left alone.
+            (should (equal stopped (list idle)))
+            (should-not cancelled)
+            (should (gethash root noema-pi-router--closing))
+            ;; When its Run ends, the leftover agent stops too.
+            (noema-pi-router--after-run (noema-agent-worker--create :buffer busy) 'completed)
+            (should (equal stopped (list busy idle))))
+        (remhash root noema-pi-router--closing)
+        (remhash root noema-pi-router--stop-timers)
+        (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
+              (list first second idle busy))))))
+
+(ert-deftest noema-agent-acp-mark-session-buffer-retires-an-older-holder ()
+  (let ((old (generate-new-buffer " *noema-agent-old*"))
+        (new (generate-new-buffer " *noema-agent-new*")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p)
+                   (lambda (buffer) (and (memq buffer (list old new)) (buffer-live-p buffer)))))
+          (noema-agent-acp-mark-session-buffer old "baseline" "codex" "/tmp/noema-project/")
+          (noema-agent-acp-mark-session-buffer new "baseline" "codex" "/tmp/noema-project/")
+          (should (eq (noema-agent-acp-session-buffer "baseline" "/tmp/noema-project/") new))
+          (should-not (buffer-local-value 'noema-agent-acp-session-name old))
+          (should (string-suffix-p " (retired)" (buffer-name old))))
+      (kill-buffer old)
+      (kill-buffer new))))
+
+(ert-deftest noema-agent-worker-carries-out-pi-session-control-requests ()
+  (let* ((running (generate-new-buffer " *noema-agent-running*"))
+         (idle (generate-new-buffer " *noema-agent-idle*"))
+         (worker (noema-agent-worker--create
+                  :run-id "run_pi_cancel" :buffer running
+                  :routing (noema-research--table
+                            "sessionName" (noema-research--table "name" "baseline"))))
+         cancelled stopped)
+    (unwind-protect
+        (cl-letf (((symbol-function 'noema-agent-worker--api)
+                   (lambda (_channel _body callback &optional _timeout)
+                     (funcall callback
+                              (noema-research--table
+                               "requests"
+                               (vector (noema-research--table
+                                        "kind" "session.cancel"
+                                        "payload" (noema-research--table "name" "baseline"))
+                                       (noema-research--table
+                                        "kind" "session.close"
+                                        "payload" (noema-research--table "name" "helper"))))
+                              nil)))
+                  ((symbol-function 'noema-agent-worker--cancel) (lambda (target) (push target cancelled)))
+                  ((symbol-function 'noema-agent-acp-session-buffer)
+                   (lambda (name _root) (and (equal name "helper") idle)))
+                  ((symbol-function 'noema-agent-worker-stop-buffer)
+                   (lambda (buffer) (push buffer stopped) t)))
+          (puthash "run_pi_cancel" worker noema-agent-worker--runs)
+          (noema-agent-worker-claim-coordinator-requests "/tmp/noema-project/")
+          (should (equal cancelled (list worker)))
+          (should (equal stopped (list idle))))
+      (remhash "run_pi_cancel" noema-agent-worker--runs)
+      (kill-buffer running)
+      (kill-buffer idle))))
+
+(ert-deftest noema-agent-worker-stop-buffer-spares-an-agent-in-use ()
+  (let* ((buffer (generate-new-buffer " *noema-agent-in-use*"))
+         (worker (noema-agent-worker--create :run-id "run_in_use" :buffer buffer))
+         shutdowns)
+    (unwind-protect
+        (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p) (lambda (target) (eq target buffer)))
+                  ((symbol-function 'noema-agent-acp-shutdown) (lambda (target) (push target shutdowns))))
+          (puthash "run_in_use" worker noema-agent-worker--runs)
+          (should (noema-agent-worker-buffer-busy-p buffer))
+          (should-not (noema-agent-worker-stop-buffer buffer))
+          (should (buffer-live-p buffer))
+          (setf (noema-agent-worker-terminal worker) t)
+          (should (noema-agent-worker-stop-buffer buffer))
+          (should (equal shutdowns (list buffer)))
+          (should-not (buffer-live-p buffer)))
+      (remhash "run_in_use" noema-agent-worker--runs)
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest noema-research-graph-opens-sessions-with-s ()
+  (should (eq (lookup-key noema-research-graph-mode-map (kbd "S")) #'noema-research-graph-sessions)))
 
 (ert-deftest noema-pi-router-migrates-the-d028-registry-into-the-pi-session-name ()
   (noema-research-test--with-directory root
+    (noema-pi-test--with-agent-directory root
     (let* ((state (expand-file-name noema-research-state-directory root))
            (legacy (expand-file-name "pi.json" state))
            (buffer (generate-new-buffer " *noema-pi-legacy*"))
@@ -2675,7 +2870,9 @@ BODY may refer to the JuText buffer as `source'."
                      (lambda (channel args callback &optional _timeout)
                        (pcase channel
                          ("aaronnote:api:research:coordinator:endpoint"
-                          (funcall callback (noema-research--table) nil))
+                          (funcall callback (noema-research--table
+                                             "coordinatorUrl" "http://127.0.0.1:9/mcp/coordinator")
+                                   nil))
                          ("aaronnote:api:research:session:name:get"
                           (funcall callback nil (noema-research--table "message" "not found")))
                          ("aaronnote:api:research:session:promote"
@@ -2696,17 +2893,33 @@ BODY may refer to the JuText buffer as `source'."
             (with-current-buffer buffer
               (should (equal noema-agent-promote--session-id "ses_pi"))))
         (remhash (noema-pi-router--root root) noema-pi-router--buffers)
-        (kill-buffer buffer)))))
+        (kill-buffer buffer))))))
 
 (ert-deftest noema-pi-doctor-checks-the-deployment-deterministically ()
-  (cl-letf (((symbol-function 'executable-find) (lambda (name &rest _) (concat "/bin/" name)))
-            ((symbol-function 'process-lines)
-             (lambda (program &rest _) (list (if (string-suffix-p "pi-acp" program) "0.8.0" "v26.7.0"))))
-            ((symbol-function 'noema-agent-acp-config-for) (lambda (_) '((:identifier . pi))))
-            ((symbol-function 'file-readable-p) (lambda (_) t)))
-    (let ((checks (noema-pi-router-checks)))
-      (should (seq-every-p #'car (seq-take checks 5)))
-      (should (equal (nth 1 (nth 1 checks)) "pi-acp >= 0.8.0"))))
+  (noema-research-test--with-directory root
+    (noema-pi-test--with-agent-directory root
+      (let ((noema-pi-credentials-file (expand-file-name "home-pi/auth.json" root))
+            (process-environment
+             (seq-remove (lambda (entry)
+                           (string-match-p "\\`\\(?:ANTHROPIC\\|OPENAI\\|GEMINI\\|XAI\\|OPENROUTER\\)_API_KEY=" entry))
+                         process-environment)))
+        (make-directory (file-name-directory noema-pi-credentials-file) t)
+        (write-region "{}" nil noema-pi-credentials-file nil 'silent)
+        (cl-letf (((symbol-function 'executable-find) (lambda (name &rest _) (concat "/bin/" name)))
+                  ((symbol-function 'process-lines)
+                   (lambda (program &rest _) (list (if (string-suffix-p "pi-acp" program) "0.8.0" "v26.7.0"))))
+                  ((symbol-function 'noema-agent-acp-config-for) (lambda (_) '((:identifier . pi)))))
+          (let ((checks (noema-pi-router-checks)))
+            (should (seq-every-p #'car (seq-take checks 3)))
+            (should (equal (nth 1 (nth 1 checks)) "pi-acp >= 0.8.0"))
+            ;; D-035: an empty credential store is not a login.
+            (should (equal (nth 1 (nth 3 checks)) "Pi credentials"))
+            (should-not (car (nth 3 checks))))
+          (write-region "{\"anthropic\": {\"type\": \"oauth\"}}" nil noema-pi-credentials-file nil 'silent)
+          (should (car (nth 3 (noema-pi-router-checks))))
+          (write-region "{}" nil noema-pi-credentials-file nil 'silent)
+          (let ((process-environment (cons "OPENROUTER_API_KEY=test" process-environment)))
+            (should (car (nth 3 (noema-pi-router-checks)))))))))
   (should-not (noema-pi-router--version-at-least-p "0.8.0" "0.7.9"))
   (should (noema-pi-router--version-at-least-p "22.19.0" "v26.7.0")))
 
