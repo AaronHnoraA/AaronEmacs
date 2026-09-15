@@ -17,6 +17,7 @@
 (require 'noema-research-synthesis)
 (require 'noema-compose)
 (require 'noema-pi-router)
+(require 'noema-sessions)
 
 (defmacro noema-research-test--with-directory (var &rest body)
   "Bind VAR to a temporary directory while running BODY."
@@ -2601,13 +2602,6 @@ BODY may refer to the JuText buffer as `source'."
       (should rewrite)
       (should (equal context '(4))))))
 
-(ert-deftest noema-pi-router-registry-round-trips-the-native-session-id ()
-  (noema-research-test--with-directory root
-    (should-not (noema-pi-router--native-session-id root))
-    (noema-pi-router--write-registry
-     root (noema-research--table "nativeSessionId" "native-42" "updatedAt" "2026-09-14T00:00:00Z"))
-    (should (equal (noema-pi-router--native-session-id root) "native-42"))))
-
 (ert-deftest noema-pi-router-root-anchors-on-the-nearest-noema-toml ()
   (noema-research-test--with-directory root
     (write-region "schema = 1\n" nil (expand-file-name "noema.toml" root) nil 'silent)
@@ -2631,37 +2625,293 @@ BODY may refer to the JuText buffer as `source'."
             (should (eq popped buffer)))
         (kill-buffer buffer)))))
 
-(ert-deftest noema-pi-router-open-resumes-a-remembered-native-session ()
+;;; D-031 ~ D-034: named sessions, Pi coordinator, agent buffers, disk sync
+
+(ert-deftest noema-pi-router-open-resumes-the-project-pi-session-with-coordinator-tools ()
   (noema-research-test--with-directory root
-    (noema-pi-router--write-registry
-     root (noema-research--table "nativeSessionId" "native-7"))
-    (let ((buffer (generate-new-buffer " *noema-pi-router-resume*"))
-          requested-session-id)
+    (let ((buffer (generate-new-buffer " *noema-pi-fake*"))
+          started)
       (unwind-protect
-          (cl-letf (((symbol-function 'noema-agent-acp-resolve-config) (lambda (&rest _) nil))
-                    ((symbol-function 'noema-agent-acp-start)
-                     (lambda (&rest args) (setq requested-session-id (plist-get args :session-id)) buffer))
-                    ((symbol-function 'noema-agent-acp-subscribe) #'ignore)
-                    ((symbol-function 'pop-to-buffer) #'ignore))
+          (cl-letf (((symbol-function 'my/noema--ensure-server) (lambda (callback) (funcall callback)))
+                    ((symbol-function 'my/noema-api-call)
+                     (lambda (channel _args callback &optional _timeout)
+                       (pcase channel
+                         ("aaronnote:api:research:coordinator:endpoint"
+                          (funcall callback (noema-research--table
+                                             "mcpUrl" "http://127.0.0.1:9/mcp"
+                                             "coordinatorUrl" "http://127.0.0.1:9/mcp/coordinator")
+                                   nil))
+                         ("aaronnote:api:research:session:name:get"
+                          (funcall callback (noema-research--table
+                                             "name" (noema-research--table "name" "pi" "nativeSessionId" "native-pi"))
+                                   nil)))))
+                    ((symbol-function 'noema-agent-acp-config-for) (lambda (_) (list (cons :identifier 'pi))))
+                    ((symbol-function 'noema-agent-acp-start) (lambda (&rest args) (setq started args) buffer))
+                    ((symbol-function 'noema-agent-acp-subscribe) #'ignore))
             (noema-pi-router-open root)
-            (should (equal requested-session-id "native-7"))
-            (should (buffer-local-value 'tab-line-exclude buffer)))
+            (should (equal (plist-get started :session-id) "native-pi"))
+            (should (plist-get started :focus))
+            (should (member "http://127.0.0.1:9/mcp/coordinator"
+                            (mapcar (lambda (server) (alist-get 'url server))
+                                    (alist-get :mcp-servers (plist-get started :config)))))
+            (should (eq (noema-pi-router-buffer root) buffer))
+            (with-current-buffer buffer
+              (should tab-line-exclude)
+              (should (equal noema-agent-acp-session-name "pi"))))
         (remhash (noema-pi-router--root root) noema-pi-router--buffers)
         (kill-buffer buffer)))))
 
-(ert-deftest noema-pi-router-switch-lists-only-live-agent-buffers ()
-  (let ((agent-buffer (generate-new-buffer " *noema-pi-router-agent*"))
-        (plain-buffer (generate-new-buffer " *noema-pi-router-plain*"))
-        chosen)
+(ert-deftest noema-pi-router-migrates-the-d028-registry-into-the-pi-session-name ()
+  (noema-research-test--with-directory root
+    (let* ((state (expand-file-name noema-research-state-directory root))
+           (legacy (expand-file-name "pi.json" state))
+           (buffer (generate-new-buffer " *noema-pi-legacy*"))
+           started bound)
+      (make-directory state t)
+      (write-region "{\"nativeSessionId\": \"native-7\"}" nil legacy nil 'silent)
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/noema--ensure-server) (lambda (callback) (funcall callback)))
+                    ((symbol-function 'my/noema-api-call)
+                     (lambda (channel args callback &optional _timeout)
+                       (pcase channel
+                         ("aaronnote:api:research:coordinator:endpoint"
+                          (funcall callback (noema-research--table) nil))
+                         ("aaronnote:api:research:session:name:get"
+                          (funcall callback nil (noema-research--table "message" "not found")))
+                         ("aaronnote:api:research:session:promote"
+                          (funcall callback (noema-research--table "id" "ses_pi") nil))
+                         ("aaronnote:api:research:session:name:bind"
+                          (setq bound (aref args 0))
+                          (funcall callback (noema-research--table) nil)))))
+                    ((symbol-function 'noema-agent-acp-config-for) (lambda (_) (list (cons :identifier 'pi))))
+                    ((symbol-function 'noema-agent-acp-start) (lambda (&rest args) (setq started args) buffer))
+                    ((symbol-function 'noema-agent-acp-subscribe) #'ignore)
+                    ((symbol-function 'noema-agent-promote--session-spec) (lambda (&rest _) `((cwd . ,root)))))
+            (noema-pi-router-open root)
+            (should (equal (plist-get started :session-id) "native-7"))
+            (noema-pi-router--adopt (noema-pi-router--root root) buffer)
+            (should (equal (alist-get 'sessionId bound) "ses_pi"))
+            (should (equal (alist-get 'name bound) "pi"))
+            (should-not (file-exists-p legacy))
+            (with-current-buffer buffer
+              (should (equal noema-agent-promote--session-id "ses_pi"))))
+        (remhash (noema-pi-router--root root) noema-pi-router--buffers)
+        (kill-buffer buffer)))))
+
+(ert-deftest noema-pi-doctor-checks-the-deployment-deterministically ()
+  (cl-letf (((symbol-function 'executable-find) (lambda (name &rest _) (concat "/bin/" name)))
+            ((symbol-function 'process-lines)
+             (lambda (program &rest _) (list (if (string-suffix-p "pi-acp" program) "0.8.0" "v26.7.0"))))
+            ((symbol-function 'noema-agent-acp-config-for) (lambda (_) '((:identifier . pi))))
+            ((symbol-function 'file-readable-p) (lambda (_) t)))
+    (let ((checks (noema-pi-router-checks)))
+      (should (seq-every-p #'car (seq-take checks 5)))
+      (should (equal (nth 1 (nth 1 checks)) "pi-acp >= 0.8.0"))))
+  (should-not (noema-pi-router--version-at-least-p "0.8.0" "0.7.9"))
+  (should (noema-pi-router--version-at-least-p "22.19.0" "v26.7.0")))
+
+(ert-deftest noema-agent-acp-start-never-displays-unless-asked ()
+  (let (calls)
+    (cl-letf (((symbol-function 'agent-shell--start)
+               (lambda (&rest args) (push (plist-get args :no-focus) calls) nil)))
+      (noema-agent-acp-start :config nil :directory "/tmp/")
+      (noema-agent-acp-start :config nil :directory "/tmp/" :focus t))
+    (should (equal calls '(nil t)))))
+
+(ert-deftest noema-agent-worker-keeps-one-hidden-named-buffer-per-session ()
+  (let* ((buffer (generate-new-buffer " *noema-agent-fake*"))
+         (worker (noema-agent-worker--create
+                  :target "/tmp/noema-project/" :agent "codex"
+                  :routing (noema-research--table
+                            "sessionName" (noema-research--table "name" "baseline"))))
+         args)
+    (unwind-protect
+        (cl-letf (((symbol-function 'noema-agent-worker--config) (lambda (_) nil))
+                  ((symbol-function 'noema-agent-acp-start) (lambda (&rest actual) (setq args actual) buffer))
+                  ((symbol-function 'noema-agent-acp-subscribe) #'ignore))
+          (noema-agent-worker--start-shell worker "")
+          (should-not (plist-get args :focus))
+          (with-current-buffer buffer
+            (should tab-line-exclude)
+            (should (equal noema-agent-acp-session-name "baseline"))
+            (should (string-prefix-p "⟪baseline⟫ codex @ noema-project" (buffer-name))))
+          (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p) (lambda (candidate) (eq candidate buffer))))
+            (should (eq (noema-agent-acp-session-buffer "baseline" "/tmp/noema-project/") buffer))
+            (should-not (noema-agent-acp-session-buffer "baseline" "/tmp/elsewhere/"))))
+      (kill-buffer buffer))))
+
+(ert-deftest noema-agent-worker-lighter-counts-runs-and-pending-decisions ()
+  (let ((noema-agent-worker--runs (make-hash-table :test #'equal))
+        (noema-agent-worker--attention-count 0))
+    (should-not (noema-agent-worker--attention-lighter))
+    (puthash "run_1" t noema-agent-worker--runs)
+    (should (equal (noema-agent-worker--attention-lighter) " Noema[▶1]"))
+    (setq noema-agent-worker--attention-count 2)
+    (should (equal (noema-agent-worker--attention-lighter) " Noema[▶1 !2]"))))
+
+(ert-deftest noema-agent-worker-waits-for-a-busy-named-session-instead-of-failing ()
+  (let* ((worker (noema-agent-worker--create
+                  :submission-id "noema-submission:busy" :queue-state 'preparing
+                  :target "/tmp/noema-project/" :root "/tmp/noema-project/"))
+         (noema-agent-worker--busy-waiting nil)
+         finished retried failed)
+    (puthash "noema-submission:busy" worker noema-agent-worker--submissions)
+    (unwind-protect
+        (cl-letf (((symbol-function 'magent-runtime-queue-arbiter-finish) (lambda (&rest _) (setq finished t)))
+                  ((symbol-function 'run-at-time) (lambda (&rest _) nil))
+                  ((symbol-function 'message) (lambda (&rest args) (setq failed args)))
+                  ((symbol-function 'noema-agent-worker--begin-preparation) (lambda (value) (setq retried value))))
+          (noema-agent-worker--accept-prepared
+           "/tmp/noema-project/" nil
+           (noema-research--table "code" "ERR_RESEARCH_SESSION_BUSY"
+                                  "message" "Session baseline is busy with another Run")
+           worker)
+          (should finished)
+          (should-not failed)
+          (should (eq (noema-agent-worker-queue-state worker) 'queued))
+          (should (memq worker noema-agent-worker--busy-waiting))
+          (should (gethash "noema-submission:busy" noema-agent-worker--submissions))
+          (noema-agent-worker--retry-waiting worker)
+          (should (eq retried worker))
+          (should-not (memq worker noema-agent-worker--busy-waiting)))
+      (remhash "noema-submission:busy" noema-agent-worker--submissions))))
+
+(ert-deftest noema-agent-worker-runs-claimed-coordinator-requests-as-ordinary-runs ()
+  (let (claimed runs)
+    (cl-letf (((symbol-function 'noema-agent-worker--api)
+               (lambda (channel body callback &optional _timeout)
+                 (should (equal channel "aaronnote:api:research:coordinator:claim"))
+                 (setq claimed body)
+                 (funcall callback
+                          (noema-research--table
+                           "requests"
+                           (vector (noema-research--table
+                                    "kind" "run.start"
+                                    "payload" (noema-research--table "file" "/tmp/p/work.noema"
+                                                                     "cellId" "c-w" "sessionName" "baseline"))
+                                   (noema-research--table "kind" "unknown")))
+                          nil)))
+              ((symbol-function 'noema-agent-worker-run-work-cell)
+               (lambda (&rest args) (push (cons default-directory args) runs))))
+      (noema-agent-worker-claim-coordinator-requests "/tmp/p/")
+      (should (equal (alist-get 'cwd claimed) "/tmp/p/"))
+      (should (equal runs '(("/tmp/p/" "/tmp/p/work.noema" "c-w" nil nil "baseline")))))))
+
+(ert-deftest noema-research-session-directive-grammar-matches-the-host ()
+  (dolist (value '("fresh" "continue" "baseline" "主线" "baseline:ablation" ":ablation" "pi:helper" "a/b@codex"))
+    (should (noema-research-session-directive-valid-p value)))
+  (dolist (value '("pi" "a:b:c" "has space" "baseline:" "fresh:x" "-x"))
+    (should-not (noema-research-session-directive-valid-p value)))
+  (let ((document (noema-research-test--document)))
+    (puthash "source" "@@session(bad name)\n\nGo." (noema-research-find-cell document "c-w"))
+    (should (noema-research--directive-errors document))
+    (puthash "source" "@@session(baseline:ablation)\n\nGo." (noema-research-find-cell document "c-w"))
+    (should-not (noema-research--directive-errors document))))
+
+(ert-deftest noema-research-pin-and-rename-touch-only-leading-session-directives ()
+  (let ((document (noema-research-test--document)))
+    (puthash "source" "@@agent(codex)\n\nInvestigate.\n@@session(baseline)"
+             (noema-research-find-cell document "c-w"))
+    (noema-research-test--with-jutext document
+      (noema-research-goto-cell "c-w")
+      (noema-research-pin-session "baseline")
+      (should (string-match-p "@@session(baseline)\n@@agent(codex)\n\nInvestigate.\n@@session(baseline)"
+                              (buffer-string)))
+      (noema-research-goto-cell "c-w")
+      (noema-research-pin-session "baseline:ablation")
+      (should (string-match-p "@@session(baseline:ablation)\n@@agent(codex)" (buffer-string)))
+      (should (= (noema-research-rename-session-directives "baseline" "main") 1))
+      (should (string-match-p "@@session(main:ablation)\n@@agent(codex)\n\nInvestigate.\n@@session(baseline)"
+                              (buffer-string)))
+      (noema-research-goto-cell "c-q")
+      (should-error (noema-research-pin-session "baseline") :type 'user-error))))
+
+(ert-deftest noema-research-work-block-shows-its-resolved-session ()
+  (noema-research-test--with-jutext (noema-research-test--document)
+    (setq noema-research--session-labels (make-hash-table :test #'equal))
+    (puthash "c-w" (noema-research--table "cellId" "c-w" "name" "baseline/spectral" "parentName" "baseline"
+                                          "agent" "codex" "reason" "branches from baseline")
+             noema-research--session-labels)
+    (noema-research-mode--refresh-decorations)
+    (should (seq-some (lambda (overlay)
+                        (string-match-p "⟨baseline/spectral ⇠ baseline · codex⟩"
+                                        (or (overlay-get overlay 'after-string) "")))
+                      (overlays-in (point-min) (point-max))))))
+
+(ert-deftest noema-research-disk-sync-merges-other-writers-without-prompts ()
+  (noema-research-test--with-directory root
+    (let ((file (expand-file-name "work.noema" root)))
+      (noema-research-write-file file (noema-research-test--document) nil)
+      (with-current-buffer (find-file-noselect file)
+        (unwind-protect
+            (progn
+              (unless (derived-mode-p 'noema-research-mode) (noema-research-mode))
+              (should global-auto-revert-ignore-buffer)
+              (let ((before noema-research--revision)
+                    (disk (noema-research-read-file file))
+                    messages)
+                (puthash "outputs"
+                         (vector (noema-research--table
+                                  "output_type" "display_data"
+                                  "data" (noema-research--table "text/plain" "done")
+                                  "metadata" (noema-research--table)))
+                         (noema-research-find-cell disk "c-w"))
+                (noema-research-write-file file disk before)
+                (cl-letf (((symbol-function 'message) (lambda (&rest args) (push args messages))))
+                  (noema-research--sync-from-disk (current-buffer)))
+                (should-not messages)
+                (should-not (equal noema-research--revision before))
+                (should (verify-visited-file-modtime (current-buffer)))
+                (should (> (length (noema-research--get
+                                    (noema-research-find-cell noema-research--document "c-w") "outputs"))
+                           0))
+                (let ((after noema-research--revision))
+                  (noema-research-merge-disk-outputs)
+                  (should (equal noema-research--revision after)))))
+          (noema-research--unwatch-file)
+          (set-buffer-modified-p nil)
+          (kill-buffer))))))
+
+(ert-deftest noema-sessions-status-and-file-scope-follow-runs-and-pins ()
+  (let ((names (list (noema-research--table "name" "baseline" "agent" "codex" "sessionId" "ses_1"
+                                            "sessionState" "warm" "state" "active" "aliases" [])
+                     (noema-research--table "name" "old" "agent" "codex" "state" "archived" "aliases" [])
+                     (noema-research--table "name" "draft" "agent" "codex" "state" "active" "aliases" [])
+                     (noema-research--table "name" "main" "agent" "codex" "sessionId" "ses_2"
+                                            "sessionState" "lost" "state" "active" "openRun" t
+                                            "aliases" ["pinned"]))))
+    (cl-letf (((symbol-function 'noema-sessions--live-buffer) #'ignore))
+      (should (equal (mapcar (lambda (entry) (noema-sessions--status entry "/tmp/")) names)
+                     '("resumable" "archived" "declared" "running"))))
+    (let ((document (noema-research-test--document)))
+      (puthash "notebook_id" "nb_test" (noema-research-notebook-meta document))
+      (puthash "source" "@@session(pinned)\n\nGo." (noema-research-find-cell document "c-w"))
+      (noema-research-test--with-jutext document
+        (should (equal (mapcar (lambda (entry) (noema-sessions--string entry "name"))
+                               (noema-sessions--in-file
+                                names
+                                (list (noema-research--table "notebookId" "nb_test" "sessionName" "baseline")
+                                      (noema-research--table "notebookId" "nb_other" "sessionName" "draft"))
+                                (current-buffer)))
+                       '("baseline" "main")))))))
+
+(ert-deftest noema-sessions-switch-offers-names-and-unnamed-agent-buffers ()
+  (let ((named (generate-new-buffer " *noema-named*"))
+        (orphan (generate-new-buffer " *noema-orphan*")))
     (unwind-protect
         (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p)
-                   (lambda (buffer) (eq buffer agent-buffer)))
-                  ((symbol-function 'completing-read)
-                   (lambda (_prompt collection &rest _) (car (car collection))))
-                  ((symbol-function 'pop-to-buffer) (lambda (target &rest _) (setq chosen target))))
-          (noema-pi-router-switch)
-          (should (eq chosen agent-buffer)))
-      (kill-buffer agent-buffer)
-      (kill-buffer plain-buffer))))
+                   (lambda (buffer) (memq buffer (list named orphan)))))
+          (with-current-buffer named
+            (setq-local noema-agent-acp-session-name "baseline"
+                        noema-agent-acp-session-root "/tmp/p/"))
+          (let ((choices (noema-sessions--switch-candidates
+                          (list (noema-research--table "name" "baseline" "agent" "codex"
+                                                       "state" "active" "aliases" []))
+                          "/tmp/p/")))
+            (should (= (length choices) 2))
+            (should (eq (noema-sessions--live-buffer (cadr (car choices)) "/tmp/p/") named))
+            (should (eq (cddr (cadr choices)) orphan))))
+      (kill-buffer named)
+      (kill-buffer orphan))))
 
 ;;; noema-research-tests.el ends here
