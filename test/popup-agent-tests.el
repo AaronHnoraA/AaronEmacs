@@ -6,29 +6,46 @@
 (require 'noema-agent-acp)
 (require 'init-ai-ide)
 
-(ert-deftest popup-agent-close-does-not-prompt-for-txt-or-disable-other-queries ()
-  (let ((buffer (generate-new-buffer " *popup-transcript-test*"))
-        (shell-maker-prompt-before-killing-buffer t)
-        (queries 0))
-    (unwind-protect
-        (with-current-buffer buffer
-          (setq major-mode 'agent-shell-mode)
-          (setq-local shell-maker--config 'test
-                      kill-buffer-query-functions
-                      (list #'shell-maker-kill-buffer-query
-                            (lambda () (cl-incf queries) t)))
-          (insert "Agent output and an unsent prompt")
-          (my/vterm-popup-apply-ui buffer)
-          (should (buffer-modified-p))
-          (should (local-variable-p 'shell-maker-prompt-before-killing-buffer))
-          (should-not shell-maker-prompt-before-killing-buffer)
-          (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) (ert-fail "Asked to save transcript")))
-                    ((symbol-function 'shell-maker-save-session-transcript) (lambda () (ert-fail "Exported transcript"))))
-            (should (kill-buffer buffer)))
-          (should (= queries 1)))
-      (when (buffer-live-p buffer)
-        (with-current-buffer buffer (set-buffer-modified-p nil))
-        (kill-buffer buffer)))))
+(ert-deftest agent-shell-close-does-not-prompt-for-txt-or-disable-other-queries ()
+  (dolist (popup '(nil t))
+    (let ((buffer (generate-new-buffer " *popup-transcript-test*"))
+          (shell-maker-prompt-before-killing-buffer t)
+          (queries 0))
+      (unwind-protect
+          (with-current-buffer buffer
+            (setq major-mode 'agent-shell-mode)
+            (setq-local shell-maker--config 'test
+                        kill-buffer-query-functions
+                        (list #'shell-maker-kill-buffer-query
+                              (lambda () (cl-incf queries) t)))
+            (insert "Agent output and an unsent prompt")
+            (run-hooks 'agent-shell-mode-hook)
+            (when popup (my/vterm-popup-apply-ui buffer))
+            (should (buffer-modified-p))
+            (should (local-variable-p 'shell-maker-prompt-before-killing-buffer))
+            (should-not shell-maker-prompt-before-killing-buffer)
+            (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) (ert-fail "Asked to save transcript")))
+                      ((symbol-function 'shell-maker-save-session-transcript) (lambda () (ert-fail "Exported transcript"))))
+              (should (kill-buffer buffer)))
+            (should (= queries 1)))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer))))))
+
+(ert-deftest agent-shell-transcripts-disabled-for-new-and-existing-sessions ()
+  (should-not (agent-shell--transcript-file-path))
+  (with-temp-buffer
+    (setq major-mode 'agent-shell-mode)
+    ;; Existing sessions retain their old path until the policy is applied.
+    (setq-local agent-shell--transcript-file "/unused/transcript.md")
+    (my/agent-shell-disable-transcripts)
+    (cl-letf (((symbol-function 'write-region)
+               (lambda (&rest _) (ert-fail "Wrote a transcript")))
+              ((symbol-function 'make-directory)
+               (lambda (&rest _) (ert-fail "Created a transcript directory"))))
+      (should-not (agent-shell--ensure-transcript-file))
+      (agent-shell--append-transcript :text "Agent output"
+                                      :file-path agent-shell--transcript-file))))
 
 (ert-deftest popup-agent-transcript-policy-does-not-affect-other-buffers ()
   (let ((shell-maker-prompt-before-killing-buffer t))

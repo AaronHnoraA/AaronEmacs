@@ -28,7 +28,6 @@
 (declare-function noema-agent-acp-start "noema-agent-acp" (&rest args))
 (declare-function noema-agent-acp-tabs-mode "noema-agent-acp" (&optional arg))
 (defvar noema-agent-acp-display-buffer-function)
-(defvar shell-maker-prompt-before-killing-buffer)
 
 (defvar vterm-kill-buffer-on-exit)
 (defvar remote-terminal-instance)
@@ -293,10 +292,7 @@ CURRENT is the currently displayed popup buffer."
           ;; Agent-shell retains its native model/status/permission header.
           ;; It never rewrites tab-line-format, so no heartbeat advice is needed.
           (setq-local tab-line-format '(:eval (my/vterm-popup--tab-line))
-                      tab-line-exclude t
-                      ;; Popup conversations need no extra transcript.txt
-                      ;; export on close. Keep all other kill protections.
-                      shell-maker-prompt-before-killing-buffer nil)
+                      tab-line-exclude t)
         (setq-local mode-line-format '((:eval (my/vterm-popup--separator-line))))
         (setq-local header-line-format '(:eval (my/vterm-popup--tab-line))))
       (setq-local fringes-outside-margins nil)

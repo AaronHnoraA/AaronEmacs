@@ -44,7 +44,23 @@ This also covers plain `agent-shell', without a Noema Run or popup."
         (user-error "Agent directory is not accessible to a local process: %s" directory))
       client)))
 
+(defvar agent-shell--transcript-file)
+(defvar shell-maker-prompt-before-killing-buffer)
+
+(defun my/agent-shell-disable-transcripts ()
+  "Disable automatic transcripts and save-on-close prompts for this agent."
+  ;; Clear the cached path too, so reloading also updates existing sessions.
+  (setq-local agent-shell--transcript-file nil
+              shell-maker-prompt-before-killing-buffer nil))
+
 (with-eval-after-load 'agent-shell
+  ;; Apply to every entry point, including plain M-x agent-shell.
+  (setq agent-shell-transcript-file-path-function nil)
+  (add-hook 'agent-shell-mode-hook #'my/agent-shell-disable-transcripts)
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when (derived-mode-p 'agent-shell-mode)
+        (my/agent-shell-disable-transcripts))))
   ;; CWD is used for both process creation and the asynchronous session/new
   ;; request. Keep project discovery, but never serialize /fs:local: to ACP.
   (advice-add 'agent-shell-cwd :filter-return #'my/agent-shell-native-directory))
