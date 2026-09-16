@@ -11,4 +11,7 @@ Local version `0.4.6+aaron.1` adds:
 - persistent `core` and `temporary` remote-kernel groups;
 - `manage --set-group KERNEL GROUP`;
 - namespaced management metadata in generated kernelspecs;
-- `StrictHostKeyChecking=accept-new` for SSH connections.
+- `StrictHostKeyChecking=accept-new` for SSH connections;
+- fail-closed, keepalive-backed five-port tunnels using `-N -T`,
+  `ExitOnForwardFailure=yes`, and `ProxyJump` instead of nested ten-minute
+  `sleep` commands.

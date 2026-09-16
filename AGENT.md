@@ -57,7 +57,10 @@ Visiting a `.noema` never creates one, because previews and programs visit
 files too.  Creating a `.noema` or running a work block goes through
 `noema-project-ensure`, which asks first and proposes the enclosing
 `project.el` workspace root.  Do not add silent `noema-project-enable` calls to
-visit paths.
+visit paths.  The same project boundary authorizes an ordinary native `.ipynb`
+outside the Noema notes root: Jupyter requests carry `projectRoot`, and only
+explicit commands (never visit, refresh, save, or completion) may call
+`noema-project-ensure` for such a notebook.
 
 When adding a module:
 

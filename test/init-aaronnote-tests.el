@@ -1778,6 +1778,29 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
       '("/target/bin/python" "-m" "ipykernel_launcher"
         "-f" "{connection_file}")))))
 
+(ert-deftest my/noema-jupyter-project-kernelspec-templates-are-resolved ()
+  (cl-letf (((symbol-function 'remote-client-file-name)
+             (lambda (&rest _) "/tmp/note.md")))
+    (let* ((specs
+            (my/noema-jupyter--project-kernelspecs
+             "/fs:local:/tmp/note.md"))
+           (python
+            (seq-find
+             (lambda (entry)
+               (equal (alist-get 'name entry) "python3"))
+             specs))
+           (spec (alist-get 'spec python))
+           (argv (alist-get 'argv spec))
+           (env (alist-get 'env spec)))
+      (should python)
+      (should (file-name-absolute-p (car argv)))
+      (should-not
+       (string-match-p "@AARONNOTE" (remote-gateway--encode spec)))
+      (should
+       (string-suffix-p
+        "/var/aaronnote/jupyter/runtime"
+        (alist-get 'JUPYTER_RUNTIME_DIR env))))))
+
 (ert-deftest my/noema-jupyter-lsp-treats-legacy-remote-kernel-as-expected-fallback ()
   (let* ((entry
           '((name . "rik_ssh_example_python")
@@ -1794,6 +1817,28 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
      (equal
       (my/language-server-runtime-fallback-reason fallback)
       "legacy remote_ikernel kernelspecs cannot reveal the kernel interpreter"))))
+
+(ert-deftest my/noema-jupyter-lsp-probes-remote-ikernel-kernel-command ()
+  "A managed SSH profile exposes its actual remote interpreter to LSP."
+  (let* ((entry
+          '((name . "rik_ssh_course")
+            (spec
+             (argv . ["/opt/homebrew/bin/python" "-m" "remote_ikernel"
+                      "--interface" "ssh" "--host" "Aaron-WSL2"])
+             (language . "python")
+             (metadata
+              (aaron
+               (remote_kernel
+                (config
+                 (interface . "ssh")
+                 (host . "Aaron-WSL2")
+                 (kernel_cmd . "/home/hc/Desktop/9444/.conda/bin/python -m ipykernel_launcher -f {connection_file}"))))))))
+         (probe
+          (my/noema-jupyter-cell--lsp-probe-command "rik_ssh_course" entry)))
+    (should (equal probe
+                   (list "/home/hc/Desktop/9444/.conda/bin/python"
+                         "-c"
+                         my/noema-jupyter-cell--python-runtime-probe)))))
 
 (ert-deftest my/noema-jupyter-lsp-rediscovers-missing-event-kernelspec ()
   (let* ((origin (generate-new-buffer " *noema-lsp-rediscovery*"))
@@ -1858,6 +1903,9 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
              "aaronnote.jupyter.interrupt"
              "aaronnote.jupyter.restart"
              "aaronnote.jupyter.shutdown"
+             "aaronnote.jupyter.attach"
+             "aaronnote.jupyter.attachment.status"
+             "aaronnote.jupyter.attachment.release"
              "aaronnote.jupyter.read-nbextension"
              "aaronnote.jupyter.file.read"
              "aaronnote.jupyter.file.write"
@@ -2072,7 +2120,8 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
   "Evaluate BODY with SERVERS configured and no forwards held open."
   (declare (indent 1))
   `(let ((my/noema-jupyter-servers ,servers)
-         (my/noema-jupyter-server--forwards (make-hash-table :test #'equal)))
+         (my/noema-jupyter-server--forwards (make-hash-table :test #'equal))
+         (my/noema-jupyter-server--workspaces (make-hash-table :test #'equal)))
      ,@body))
 
 (ert-deftest my/noema-jupyter-server-local-target-is-used-verbatim ()
@@ -2106,6 +2155,94 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
         ;; ...plus the real name, or TLS verification and any virtual-host
         ;; routing on the server would fail against a 127.0.0.1 URL.
         (should (equal (alist-get 'serverName resolved) "login.example.org"))))))
+
+(ert-deftest my/noema-jupyter-server-forward-has-one-owner-and-recovers-the-same-port ()
+  (my/noema-jupyter-server-tests--with
+      '((:id "hpc" :url "http://service:8888/" :target "cluster" :auth none))
+    (let ((entry (my/noema-jupyter-server--entry "hpc"))
+          (opened 0)
+          open-arguments recover
+          (resource (remote-workspace-resource-create :value 'old-forward)))
+      (cl-letf (((symbol-function 'remote-make-file-name)
+                 (lambda (&rest _) "/fs:cluster:/"))
+                ((symbol-function 'remote-context) (lambda (&rest _) 'context))
+                ((symbol-function 'remote-workspace-open) (lambda (&rest _) 'workspace))
+                ((symbol-function 'remote-channel-live-p) (lambda (&rest _) t))
+                ((symbol-function 'remote-port-forward)
+                 (lambda (endpoint &rest arguments)
+                   (setq opened (1+ opened))
+                   (push (cons endpoint arguments) open-arguments)
+                   (if (= opened 1) 'old-forward 'new-forward)))
+                ((symbol-function 'remote-workspace-ensure-recoverable-resource)
+                 (lambda (_workspace _kind _key _value &rest arguments)
+                   (setq recover (plist-get arguments :recover))
+                   'resource))
+                ((symbol-function 'remote-channel-endpoint)
+                 (lambda (forward side)
+                   (should (eq forward 'old-forward))
+                   (should (eq side 'local))
+                   '(:host "127.0.0.1" :port 45123))))
+        (should (eq (my/noema-jupyter-server--forward entry) 'old-forward))
+        ;; The generic `forward' resource is deliberately disabled; the keyed
+        ;; jupyter-server resource is the sole lifecycle owner.
+        (should (plist-member (cdar open-arguments) :register))
+        (should-not (plist-get (cdar open-arguments) :register))
+        (should (eq (funcall recover resource 'workspace) 'new-forward))
+        (should
+         (equal (plist-get (cdar open-arguments) :local-endpoint)
+                '(:host "127.0.0.1" :port 45123)))
+        (should (eq (gethash "hpc" my/noema-jupyter-server--forwards)
+                    'new-forward))))))
+
+(ert-deftest my/noema-jupyter-server-release-survives-config-removal ()
+  (my/noema-jupyter-server-tests--with nil
+    (let (closed)
+      (puthash "hpc" 'old-forward my/noema-jupyter-server--forwards)
+      (puthash "hpc" 'owning-workspace my/noema-jupyter-server--workspaces)
+      (cl-letf (((symbol-function 'my/noema-jupyter--defer)
+                 (lambda (fn) (funcall fn)))
+                ((symbol-function 'remote-workspace-find-resource)
+                 (lambda (workspace kind key)
+                   (should (eq workspace 'owning-workspace))
+                   (should (eq kind 'jupyter-server))
+                   (should (equal key "hpc"))
+                   'resource))
+                ((symbol-function 'remote-workspace-close-resource)
+                 (lambda (workspace resource reason)
+                   (setq closed (list workspace resource reason))
+                   ;; Exercise the registered close callback's observable
+                   ;; cleanup, which the real workspace performs here.
+                   (remhash "hpc" my/noema-jupyter-server--forwards)
+                   (remhash "hpc" my/noema-jupyter-server--workspaces)
+                   resource)))
+        (should
+         (equal (my/noema-jupyter-server--release
+                 '((serverId . "hpc")) nil)
+                '((ok . t))))
+        (should (equal closed
+                       '(owning-workspace resource consumer-release)))
+        (should-not (gethash "hpc" my/noema-jupyter-server--forwards))
+        (should-not (gethash "hpc" my/noema-jupyter-server--workspaces))))))
+
+(ert-deftest my/noema-jupyter-server-registration-failure-rolls-back-forward ()
+  (my/noema-jupyter-server-tests--with
+      '((:id "hpc" :url "http://service:8888/" :target "cluster" :auth none))
+    (let ((entry (my/noema-jupyter-server--entry "hpc"))
+          closed)
+      (cl-letf (((symbol-function 'remote-make-file-name)
+                 (lambda (&rest _) "/fs:cluster:/"))
+                ((symbol-function 'remote-context) (lambda (&rest _) 'context))
+                ((symbol-function 'remote-workspace-open) (lambda (&rest _) 'workspace))
+                ((symbol-function 'remote-port-forward)
+                 (lambda (&rest _) 'unowned-forward))
+                ((symbol-function 'remote-workspace-ensure-recoverable-resource)
+                 (lambda (&rest _) (error "registration failed")))
+                ((symbol-function 'remote-close-channel)
+                 (lambda (forward) (setq closed forward))))
+        (should-error (my/noema-jupyter-server--forward entry) :type 'error)
+        (should (eq closed 'unowned-forward))
+        (should-not (gethash "hpc" my/noema-jupyter-server--forwards))
+        (should-not (gethash "hpc" my/noema-jupyter-server--workspaces))))))
 
 (ert-deftest my/noema-jupyter-server-without-a-channel-fails-instead-of-falling-back ()
   (my/noema-jupyter-server-tests--with
@@ -2161,6 +2298,19 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
         (my/noema-jupyter-server--entry "lab"))
        :type 'error))))
 
+(ert-deftest my/noema-jupyter-server-auth-failure-opens-no-remote-forward ()
+  (my/noema-jupyter-server-tests--with
+      '((:id "lab" :url "https://lab.example.org/" :target "cluster"
+         :auth password))
+    (cl-letf (((symbol-function 'auth-source-search) (lambda (&rest _) nil))
+              ((symbol-function 'my/noema-jupyter-server--forward)
+               (lambda (&rest _)
+                 (error "forward must not open before credentials resolve"))))
+      (should-error
+       (my/noema-jupyter-server--resolve-entry
+        (my/noema-jupyter-server--entry "lab"))
+       :type 'error))))
+
 (ert-deftest my/noema-jupyter-server-listing-never-exposes-secrets ()
   (my/noema-jupyter-server-tests--with
       '((:id "lab" :name "Lab" :url "https://lab.example.org/" :target "cluster"
@@ -2177,6 +2327,206 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
         ;; The listing is for a kernel picker; it must carry no credential.
         (should-not (alist-get 'token entry))
         (should-not (alist-get 'password entry))))))
+
+(ert-deftest my/noema-jupyter-connection-validation-requires-all-five-ports ()
+  (let ((connection
+         '((transport . "tcp") (ip . "127.0.0.1")
+           (key . "secret") (signature_scheme . "hmac-sha256")
+           (hb_port . 41001) (control_port . 41002)
+           (shell_port . 41003) (stdin_port . 41004)
+           (iopub_port . 41005))))
+    (should (my/noema-jupyter--valid-connection-p connection))
+    (setf (alist-get 'stdin_port connection) nil)
+    (should-not (my/noema-jupyter--valid-connection-p connection))))
+
+(ert-deftest my/noema-jupyter-kernel-catalog-includes-target-attach-tokens ()
+  (cl-letf (((symbol-function 'my/noema-jupyter--defer)
+             (lambda (fn) (funcall fn)))
+            ((symbol-function 'remote-canonicalize-file-name) #'identity)
+            ((symbol-function 'my/noema-jupyter--kernelspecs)
+             (lambda (_file) '(((name . "python3") (spec . ((argv . ["python"])))))))
+            ((symbol-function 'my/noema-jupyter--attachable-connections)
+             (lambda (_file)
+               '(((token . "kernel-remote.json") (mtimeMs . 42.0))))))
+    (let ((payload
+           (my/noema-jupyter--kernels
+            '((file . "/fs:cluster:/work/note.md")) nil)))
+      (should (equal (alist-get 'connections payload)
+                     '(((token . "kernel-remote.json") (mtimeMs . 42.0))))))))
+
+(ert-deftest my/noema-jupyter-attachment-recovers-five-stable-client-ports ()
+  (let* ((my/noema-jupyter-attachments (make-hash-table :test #'equal))
+         (connection
+          '((transport . "tcp") (ip . "0.0.0.0")
+            (key . "secret") (signature_scheme . "hmac-sha256")
+            (hb_port . 41001) (control_port . 41002)
+            (shell_port . 41003) (stdin_port . 41004)
+            (iopub_port . 41005)))
+         (locals
+          '((hb . (:host "127.0.0.1" :port 42001))
+            (control . (:host "127.0.0.1" :port 42002))
+            (shell . (:host "127.0.0.1" :port 42003))
+            (stdin . (:host "127.0.0.1" :port 42004))
+            (iopub . (:host "127.0.0.1" :port 42005))))
+         (old-group (remote-channel-group-create :generation 1))
+         (new-group (remote-channel-group-create :generation 2))
+         (opens 0)
+         open-arguments opened-endpoints recover attachment)
+    (cl-letf (((symbol-function 'my/noema-jupyter--context)
+               (lambda (&rest _) 'context))
+              ((symbol-function 'remote-workspace-open)
+               (lambda (&rest _) 'workspace))
+              ((symbol-function 'my/noema-jupyter--target-runtime-directory)
+               (lambda (&rest _) "/fs:cluster:/runtime/"))
+              ((symbol-function 'my/noema-jupyter--read-connection-file)
+               (lambda (&rest _) connection))
+              ((symbol-function 'remote-channel-group-open)
+               (lambda (endpoints &rest arguments)
+                 (should (= (length endpoints) 5))
+                 (setq opens (1+ opens))
+                 (push endpoints opened-endpoints)
+                 (push arguments open-arguments)
+                 (if (= opens 1) old-group new-group)))
+              ((symbol-function 'remote-channel-group-endpoints)
+               (lambda (_group side)
+                 (should (eq side 'local))
+                 locals))
+              ((symbol-function 'remote-workspace-ensure-recoverable-resource)
+               (lambda (_workspace _kind _key _value &rest arguments)
+                 (setq recover (plist-get arguments :recover))
+                 'resource)))
+      (setq attachment
+            (my/noema-jupyter--attach-runtime
+             '((sourceFile . "/fs:cluster:/work/note.md")
+               (token . "kernel-remote.json"))))
+      (should (eq (my/noema-jupyter-attachment-channel-group attachment)
+                  old-group))
+      (should
+       (cl-every
+        (lambda (endpoint)
+          (equal (plist-get (cdr endpoint) :host) "127.0.0.1"))
+        (car (last opened-endpoints))))
+      (should
+       (equal (alist-get
+               'ip (my/noema-jupyter-attachment-client-connection attachment))
+              "127.0.0.1"))
+      (should-not (plist-get (car open-arguments) :register))
+      (let ((resource
+             (remote-workspace-resource-create :value attachment)))
+        (should (eq (funcall recover resource 'workspace) attachment)))
+      (should (eq (my/noema-jupyter-attachment-channel-group attachment)
+                  new-group))
+      (should (= (my/noema-jupyter-attachment-generation attachment) 2))
+      (should (equal (plist-get (car open-arguments) :local-endpoints)
+                     locals)))))
+
+(ert-deftest my/noema-jupyter-attachment-missing-file-is-not-process-death ()
+  (let* ((my/noema-jupyter-attachments (make-hash-table :test #'equal))
+         (attachment
+          (my/noema-jupyter-attachment-create
+           :id "attachment-a" :workspace 'workspace
+           :connection-file "/fs:cluster:/runtime/missing.json"
+           :channel-group 'group :generation 1 :state 'open
+           :client-connection '((hb_port . 42001)))))
+    (puthash "attachment-a" attachment my/noema-jupyter-attachments)
+    (cl-letf (((symbol-function 'my/noema-jupyter--defer)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'remote-channel-group-live-p)
+               (lambda (group) (should (eq group 'group)) t))
+              ((symbol-function 'file-exists-p) (lambda (_file) nil)))
+      (let ((status
+             (my/noema-jupyter--attachment-status
+              '((attachmentId . "attachment-a")) nil)))
+        ;; A connection file is discovery metadata, not a process handle. Its
+        ;; disappearance cannot authorize Noema to discard external state.
+        (should (equal (alist-get 'alive status) "unknown"))
+        (should (eq (alist-get 'connectionFilePresent status)
+                    :json-false))))))
+
+(ert-deftest my/noema-jupyter-attachment-adopts-rewritten-five-port-file ()
+  (let* ((my/noema-jupyter-attachments (make-hash-table :test #'equal))
+         (old-connection
+          '((transport . "tcp") (ip . "127.0.0.1") (key . "old")
+            (signature_scheme . "hmac-sha256")
+            (hb_port . 41001) (control_port . 41002)
+            (shell_port . 41003) (stdin_port . 41004)
+            (iopub_port . 41005)))
+         (new-connection
+          '((transport . "tcp") (ip . "0.0.0.0") (key . "new")
+            (signature_scheme . "hmac-sha256")
+            (hb_port . 51001) (control_port . 51002)
+            (shell_port . 51003) (stdin_port . 51004)
+            (iopub_port . 51005)))
+         (locals
+          '((hb . (:host "127.0.0.1" :port 42001))
+            (control . (:host "127.0.0.1" :port 42002))
+            (shell . (:host "127.0.0.1" :port 42003))
+            (stdin . (:host "127.0.0.1" :port 42004))
+            (iopub . (:host "127.0.0.1" :port 42005))))
+         (old-group (remote-channel-group-create :generation 1))
+         (new-group (remote-channel-group-create :generation 2))
+         (attachment
+          (my/noema-jupyter-attachment-create
+           :id "attachment-a" :context 'context :workspace 'workspace
+           :connection-file "/fs:cluster:/runtime/kernel-a.json"
+           :target-connection old-connection
+           :client-connection old-connection
+           :channel-group old-group :generation 1 :state 'open))
+         closed opened)
+    (puthash "attachment-a" attachment my/noema-jupyter-attachments)
+    (cl-letf (((symbol-function 'my/noema-jupyter--defer)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'file-exists-p) (lambda (_file) t))
+              ((symbol-function 'my/noema-jupyter--read-connection-file)
+               (lambda (_file) new-connection))
+              ((symbol-function 'remote-channel-group-endpoints)
+               (lambda (_group side) (should (eq side 'local)) locals))
+              ((symbol-function 'remote-channel-group-close)
+               (lambda (group) (setq closed group)))
+              ((symbol-function 'remote-channel-group-open)
+               (lambda (endpoints &rest arguments)
+                 (setq opened (list endpoints arguments))
+                 new-group))
+              ((symbol-function 'remote-channel-group-live-p)
+               (lambda (_group) t)))
+      (let* ((status
+              (my/noema-jupyter--attachment-status
+               '((attachmentId . "attachment-a")) nil))
+             (client (alist-get 'connectionInfo status)))
+        (should (eq closed old-group))
+        (should (equal (plist-get (cadr opened) :local-endpoints) locals))
+        (should
+         (equal (mapcar (lambda (entry) (plist-get (cdr entry) :port))
+                        (car opened))
+                '(51001 51002 51003 51004 51005)))
+        (should (equal (alist-get 'key client) "new"))
+        (should (equal (alist-get 'ip client) "127.0.0.1"))
+        (should (equal (alist-get 'hb_port client) 42001))
+        (should (= (alist-get 'generation status) 2))))))
+
+(ert-deftest my/noema-jupyter-attachment-release-is-idempotent ()
+  (let* ((my/noema-jupyter-attachments (make-hash-table :test #'equal))
+         (attachment
+          (my/noema-jupyter-attachment-create
+           :id "attachment-a" :workspace 'workspace
+           :channel-group 'group :generation 1 :state 'open))
+         (closes 0))
+    (puthash "attachment-a" attachment my/noema-jupyter-attachments)
+    (cl-letf (((symbol-function 'my/noema-jupyter--defer)
+               (lambda (fn) (funcall fn)))
+              ((symbol-function 'remote-workspace-find-resource)
+               (lambda (&rest _) nil))
+              ((symbol-function 'remote-channel-group-close)
+               (lambda (group)
+                 (should (eq group 'group))
+                 (setq closes (1+ closes)))))
+      (dotimes (_ 2)
+        (should
+         (equal (my/noema-jupyter--release-attachment
+                 '((attachmentId . "attachment-a")) nil)
+                '((ok . t)))))
+      (should (= closes 1))
+      (should-not (gethash "attachment-a" my/noema-jupyter-attachments)))))
 
 ;;; Broker kernel liveness and teardown.
 ;;

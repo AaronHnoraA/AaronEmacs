@@ -39,7 +39,11 @@ def kernel_json(tmp_path, name):
 def test_launcher_help_and_version(tmp_path):
     result = run_cli(tmp_path, check=False)
     assert result.returncode != 0
-    assert "usage: __main__.py" in run_cli(tmp_path, "--help").stdout
+    help_text = run_cli(tmp_path, "--help").stdout
+    # argparse uses either the module file name or `python -m package' as
+    # `prog' depending on Python version; both exercise the same CLI.
+    assert "usage:" in help_text
+    assert "remote_ikernel" in help_text
     version = run_cli(tmp_path, "-V")
     assert "0.4.6+aaron.1" in version.stdout + version.stderr
 

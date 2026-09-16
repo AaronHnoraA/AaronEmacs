@@ -54,6 +54,18 @@
     (puthash "nbformat_minor" 5 document)
     document))
 
+(ert-deftest my/noema-jupyter-notebook-kernel-language-wins-over-stale-info ()
+  "A kernel switch must not retain an old `language_info' value."
+  (let ((document (my/noema-jupyter-notebook-test--document)))
+    (puthash "language" "bash"
+             (gethash "kernelspec" (gethash "metadata" document)))
+    (puthash "name" "python"
+             (gethash "language_info" (gethash "metadata" document)))
+    (should (equal (my/noema-jupyter-notebook--language document) "bash"))
+    (should (equal (my/noema-jupyter-notebook--language-for-kernel
+                    "rik_ssh_aaron_wsl2_python313pytorchcuda")
+                   "python"))))
+
 (ert-deftest my/noema-jupyter-notebook-visits-source-and-preserves-results ()
   (let ((file (make-temp-file "noema-ipynb-" nil ".ipynb"))
         buffer)
@@ -577,6 +589,41 @@ leaves the buffer in an unrelated mode showing raw JSON with no explanation."
     ;; penalty window the user has to wait out.
     (my/noema-jupyter-cell--introspect-succeeded)
     (should-not (my/noema-jupyter-cell--introspect-backoff-p))))
+
+(ert-deftest my/noema-jupyter-cell-project-root-authorizes-outside-notebooks ()
+  "Outside the notes root, commands ask for a project; passive calls never do."
+  ;; Load before mocking so the lazy require cannot replace the mock.
+  (require 'noema-research)
+  (let* ((notes (make-temp-file "noema-notes-" t))
+         (outside (make-temp-file "noema-outside-" t))
+         (my/noema--notes-root notes)
+         (asked nil))
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local buffer-file-name (expand-file-name "a.ipynb" outside))
+          (cl-letf (((symbol-function 'noema-project-ensure)
+                     (lambda (_file) (setq asked t) outside)))
+            (should (equal (my/noema-jupyter-cell--with-project-root
+                            '((scriptFile . "x")))
+                           '((scriptFile . "x"))))
+            (should-not asked)
+            (should (equal (alist-get
+                            'projectRoot
+                            (my/noema-jupyter-cell--with-project-root
+                             '((scriptFile . "x")) t))
+                           outside))
+            (should asked))
+          (setq-local my/noema-jupyter-cell--project-root-cache nil
+                      buffer-file-name (expand-file-name "b.ipynb" notes))
+          (setq asked nil)
+          (cl-letf (((symbol-function 'noema-project-ensure)
+                     (lambda (_file) (setq asked t) notes)))
+            (should-not (assq 'projectRoot
+                              (my/noema-jupyter-cell--with-project-root
+                               '((scriptFile . "x")) t)))
+            (should-not asked)))
+      (delete-directory notes t)
+      (delete-directory outside t))))
 
 (ert-deftest my/noema-jupyter-cell-explicit-inspect-ignores-backoff ()
   "Backoff throttles typing-triggered completion, never an explicit request."

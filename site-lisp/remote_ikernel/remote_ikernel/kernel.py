@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import time
 import uuid
@@ -291,9 +292,11 @@ class RemoteIKernel(object):
             launch_args = ''
 
         if ':' in self.host:
-            host = self.host.replace(":", " -p ")
+            host_name, host_port = self.host.rsplit(':', 1)
+            host = '-p {0} {1}'.format(
+                shlex.quote(host_port), shlex.quote(host_name))
         else:
-            host = self.host
+            host = shlex.quote(self.host)
 
         login_cmd = 'ssh -o StrictHostKeyChecking=accept-new {args} {host}'.format(
             args=launch_args, host=host)
@@ -478,9 +481,11 @@ class RemoteIKernel(object):
         pre = self.tunnel_hosts_cmd or ''
 
         if ':' in self.host:
-            host = self.host.replace(':', ' -p ')
+            host_name, host_port = self.host.rsplit(':', 1)
+            host = '-p {0} {1}'.format(
+                shlex.quote(host_port), shlex.quote(host_name))
         else:
-            host = self.host
+            host = shlex.quote(self.host)
 
         pexpect.spawn('{pre} ssh -o StrictHostKeyChecking=accept-new '
                       '{host}'.format(pre=pre, host=host).strip(),
@@ -585,7 +590,11 @@ class RemoteIKernel(object):
 
         for host in self.tunnel_hosts:
             if ':' in host:
-                host = host.replace(':', ' -p ')
+                host_name, host_port = host.rsplit(':', 1)
+                host = '-p {0} {1}'.format(
+                    shlex.quote(host_port), shlex.quote(host_name))
+            else:
+                host = shlex.quote(host)
 
             cmd.extend([ssh, host])
 
@@ -602,29 +611,38 @@ class RemoteIKernel(object):
         ports_str = " ".join(["-L 127.0.0.1:{{{port}}}:127.0.0.1:{{{port}}}"
                               "".format(port=port) for port in PORT_NAMES])
 
-        ssh = 'ssh'
+        # One long-lived SSH process owns all five listeners.  `-N -T' makes
+        # forwarding its only job; ExitOnForwardFailure prevents the launcher
+        # from looking healthy when even one local bind failed.  Keepalives
+        # turn a half-open TCP session into an observable process exit so the
+        # existing `check_tunnels' loop can replace it.
+        ssh = (
+            'ssh -N -T '
+            '-o StrictHostKeyChecking=accept-new '
+            '-o ExitOnForwardFailure=yes '
+            '-o ServerAliveInterval=30 '
+            '-o ServerAliveCountMax=3 '
+            '-o ConnectTimeout=15'
+        )
 
-        # Add all the gateway machines as an ssh chain
-        pre_ssh = []
-        for pre_host in self.tunnel_hosts or []:
-            if ':' in pre_host:
-                pre_host = pre_host.replace(':', ' -p ')
-
-            pre_ssh.append(
-                "{ssh} {ports_str} {pre_host}".format(
-                    ssh=ssh, pre_host=pre_host, ports_str=ports_str))
+        # OpenSSH ProxyJump is one forwarding session end to end.  The old
+        # nested `ssh ... ssh ... sleep 600' chain could leave an outer
+        # process alive after an inner forward failed, and it expired every
+        # ten minutes even on a healthy kernel.
+        jump = ''
+        if self.tunnel_hosts:
+            jump = ' -J {0}'.format(
+                shlex.quote(','.join(self.tunnel_hosts)))
 
         if ':' in self.host:
-            host = self.host.replace(":", " -p ")
+            host_name, host_port = self.host.rsplit(':', 1)
+            host = '-p {0} {1}'.format(
+                shlex.quote(host_port), shlex.quote(host_name))
         else:
-            host = self.host
+            host = shlex.quote(self.host)
 
-        # Timeout is specified here, this should be longer than the checking
-        # interval
-        # .strip() to prevent leading spaces
-        tunnel_cmd = ((" ".join(pre_ssh) + " " +
-                       "{ssh} {ports_str} {host} sleep 600".format(
-                           ssh=ssh, host=host, ports_str=ports_str)).strip())
+        tunnel_cmd = ("{ssh}{jump} {ports_str} {host}".format(
+            ssh=ssh, jump=jump, host=host, ports_str=ports_str).strip())
 
         self.log.debug("Tunnel command: {0}".format(tunnel_cmd))
         return tunnel_cmd

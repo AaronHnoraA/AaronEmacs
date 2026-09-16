@@ -64,6 +64,29 @@ Set this through the config board or `etc/config-store.el', not with `setq'.")
 (defvar my/noema-jupyter-server--forwards (make-hash-table :test #'equal)
   "Open client forwards to target-side Jupyter servers, keyed by server id.")
 
+(defvar my/noema-jupyter-server--workspaces (make-hash-table :test #'equal)
+  "Owning workspaces for Jupyter server forwards, keyed by server id.
+This is retained independently of configuration so removing a server entry
+cannot orphan the already registered recoverable resource.")
+
+(defun my/noema-jupyter-server--workspace (entry)
+  "Return the Remote workspace which owns ENTRY's forward."
+  (let* ((target (my/noema-jupyter-server--target entry))
+         (context (remote-context (remote-make-file-name target "/"))))
+    (remote-workspace-open context)))
+
+(defun my/noema-jupyter-server--close-resource (entry id &optional reason)
+  "Close ENTRY's keyed forward resource ID, if one exists.
+REASON is passed to the workspace resource close contract."
+  (let* ((workspace
+          (or (gethash id my/noema-jupyter-server--workspaces)
+              (and entry (my/noema-jupyter-server--workspace entry))))
+         (resource
+          (and workspace
+               (remote-workspace-find-resource workspace 'jupyter-server id))))
+    (when resource
+      (remote-workspace-close-resource workspace resource reason))))
+
 (defun my/noema-jupyter-server--entry (id)
   "Return the configured server plist for ID, or nil."
   (seq-find
@@ -122,12 +145,14 @@ group is rather than leaving Noema pointed at a dead local port."
     (if (and existing (remote-channel-live-p existing))
         existing
       ;; A dead forward still owns a client-side listener and a workspace
-      ;; resource entry.  `remote-workspace-ensure-recoverable-resource'
-      ;; replaces the handle in place below, so releasing it here is the only
-      ;; chance its :close ever runs.
+      ;; resource entry.  Remove that keyed owner before making a replacement;
+      ;; otherwise a later workspace recovery can resurrect the old handle.
       (when existing
-        (remhash id my/noema-jupyter-server--forwards)
-        (ignore-errors (remote-close-channel existing)))
+        (unless (ignore-errors
+                  (my/noema-jupyter-server--close-resource
+                   entry id 'stale-forward))
+          (remhash id my/noema-jupyter-server--forwards)
+          (ignore-errors (remote-close-channel existing))))
       (let* ((target (my/noema-jupyter-server--target entry))
              (context (remote-context (remote-make-file-name target "/")))
              (workspace (remote-workspace-open context))
@@ -137,23 +162,52 @@ group is rather than leaving Noema pointed at a dead local port."
                (list :host (car endpoint) :port (cdr endpoint))
                :context context :workspace workspace
                :metadata (list :application "noema-jupyter-server"
-                               :server id))))
-        (puthash id forward my/noema-jupyter-server--forwards)
-        (remote-workspace-ensure-recoverable-resource
-         workspace 'jupyter-server id forward
-         :close
-         (lambda (value reason)
-           (unless (eq reason 'transport-recovery)
-             (remhash id my/noema-jupyter-server--forwards)
-             (ignore-errors (remote-close-channel value))))
-         :recover
-         (lambda (resource _owner)
-           (let ((replacement (remote-channel-recover resource)))
-             (puthash id replacement my/noema-jupyter-server--forwards)
-             replacement))
-         :recovery 'auto
-         :metadata (list :application "noema-jupyter-server" :server id))
-        forward))))
+                               :server id)
+               ;; The keyed `jupyter-server' resource below is the one owner.
+               ;; Registering the generic forward too creates two independent
+               ;; recovery loops for one listener.
+               :register nil)))
+        (condition-case error
+            (progn
+              (puthash id workspace my/noema-jupyter-server--workspaces)
+              (puthash id forward my/noema-jupyter-server--forwards)
+              (remote-workspace-ensure-recoverable-resource
+               workspace 'jupyter-server id forward
+               :close
+               (lambda (value reason)
+                 (ignore-errors (remote-close-channel value))
+                 (unless (eq reason 'transport-recovery)
+                   (remhash id my/noema-jupyter-server--forwards)
+                   (remhash id my/noema-jupyter-server--workspaces)))
+               :recover
+               (lambda (resource _owner)
+                 ;; Preserve the client endpoint.  Noema's cached HTTP and WebSocket
+                 ;; settings remain valid while the target-side route is replaced.
+                 ;; If rebinding this exact listener is impossible, recovery fails
+                 ;; atomically; the next resolve discards the failed resource and
+                 ;; negotiates a new endpoint instead of silently using a stale URL.
+                 (let* ((old (remote-workspace-resource-value resource))
+                        (local (remote-channel-endpoint old 'local))
+                        (replacement
+                         (remote-port-forward
+                          (list :host (car endpoint) :port (cdr endpoint))
+                          :local-endpoint local
+                          :context context :workspace workspace
+                          :metadata (list :application "noema-jupyter-server"
+                                          :server id)
+                          :register nil)))
+                   (puthash id replacement my/noema-jupyter-server--forwards)
+                   replacement))
+               :recovery 'auto
+               :metadata (list :application "noema-jupyter-server" :server id))
+              forward)
+          (error
+           ;; A forward without its keyed workspace resource has no recovery
+           ;; owner and must never escape from a partially completed open.
+           (remhash id my/noema-jupyter-server--forwards)
+           (remhash id my/noema-jupyter-server--workspaces)
+           (ignore-errors (remote-close-channel forward))
+           (signal (car error) (cdr error))))))))
 
 (defun my/noema-jupyter-server--resolve-entry (entry)
   "Return the Noema-facing connection descriptor for ENTRY."
@@ -164,6 +218,13 @@ group is rather than leaving Noema pointed at a dead local port."
          (url (format "%s" (plist-get entry :url)))
          (server-name (plist-get entry :server-name))
          secret)
+    ;; Resolve credentials before opening a routed listener.  A missing
+    ;; password is a configuration error and must not leave a forward behind
+    ;; that no Noema connection can ever own or release.
+    (when (memq auth '(token password hub))
+      (setq secret (my/noema-jupyter-server--secret entry))
+      (when (and (null secret) (memq auth '(password)))
+        (error "No auth-source secret found for Jupyter server %s" id)))
     (unless local-p
       ;; The server lives on a Target.  Reaching it means a routed channel;
       ;; there is deliberately no fallback that would open the socket here.
@@ -177,10 +238,6 @@ group is rather than leaving Noema pointed at a dead local port."
         ;; virtual-host routing need the real name carried alongside it.
         (setq server-name
               (or server-name (car (my/noema-jupyter-server--endpoint entry))))))
-    (when (memq auth '(token password hub))
-      (setq secret (my/noema-jupyter-server--secret entry))
-      (when (and (null secret) (memq auth '(password)))
-        (error "No auth-source secret found for Jupyter server %s" id)))
     (append
      `((id . ,id)
        (url . ,url)
@@ -225,10 +282,15 @@ group is rather than leaving Noema pointed at a dead local port."
   (my/noema-jupyter--defer
    (lambda ()
      (let* ((id (format "%s" (my/noema-jupyter--get 'serverId params)))
+            (entry (my/noema-jupyter-server--entry id))
             (forward (gethash id my/noema-jupyter-server--forwards)))
-       (when forward
+       (unless (ignore-errors
+                 (my/noema-jupyter-server--close-resource
+                  entry id 'consumer-release))
          (remhash id my/noema-jupyter-server--forwards)
-         (ignore-errors (remote-close-channel forward)))
+         (remhash id my/noema-jupyter-server--workspaces)
+         (when forward
+           (ignore-errors (remote-close-channel forward))))
        '((ok . t))))))
 
 (defun my/noema-jupyter-server--doctor (target probe)

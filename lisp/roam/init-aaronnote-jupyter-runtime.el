@@ -27,14 +27,49 @@
   target-connection client-connection channel-group generation state
   state-lost log-file resource-directory)
 
+(cl-defstruct (my/noema-jupyter-attachment
+               (:constructor my/noema-jupyter-attachment-create))
+  id token context workspace placement-file connection-file target-connection
+  client-connection channel-group generation state)
+
 (defvar my/noema-jupyter-runtimes (make-hash-table :test #'equal)
   "Noema Jupyter runtimes keyed by opaque runtime ID.")
 
+(defvar my/noema-jupyter-attachments (make-hash-table :test #'equal)
+  "Noema Jupyter attachment routes keyed by opaque attachment ID.")
+
 (defvar my/noema-jupyter-kernelspec-directory
   (expand-file-name
-   "site-lisp/noema/jupyter/.jupyter/data/kernels/"
+   "site-lisp/noema/jupyter/kernel-templates/"
    user-emacs-directory)
-  "Noema kernelspecs available to client-accessible targets.")
+  "Noema kernelspec templates available to client-accessible targets.")
+
+(defun my/noema-jupyter--substitute-template (value variables)
+  "Recursively replace @NAME@ placeholders in VALUE from VARIABLES."
+  (cond
+   ((stringp value)
+    (let ((result value))
+      (dolist (entry variables result)
+        (setq result
+              (string-replace
+               (format "@%s@" (car entry))
+               (format "%s" (cdr entry)) result)))))
+   ((vectorp value)
+    (apply #'vector
+           (mapcar
+            (lambda (item)
+              (my/noema-jupyter--substitute-template item variables))
+            value)))
+   ((consp value)
+    (mapcar
+     (lambda (item)
+       (if (consp item)
+           (cons (car item)
+                 (my/noema-jupyter--substitute-template
+                  (cdr item) variables))
+         (my/noema-jupyter--substitute-template item variables)))
+     value))
+   (t value)))
 
 (defconst my/noema-jupyter--port-helper
   (concat
@@ -148,12 +183,25 @@
               (push
                `((name . ,name)
                  (spec .
-                       ,(json-parse-string
-                         (with-temp-buffer
-                           (insert-file-contents kernel-json)
-                           (buffer-string))
-                         :object-type 'alist :array-type 'list
-                         :null-object nil :false-object :json-false))
+                       ,(my/noema-jupyter--substitute-template
+                         (json-parse-string
+                          (with-temp-buffer
+                            (insert-file-contents kernel-json)
+                            (buffer-string))
+                          :object-type 'alist :array-type 'list
+                          :null-object nil :false-object :json-false)
+                         `(("AARONNOTE_JUPYTER_ROOT" .
+                            ,(expand-file-name
+                              "site-lisp/noema/jupyter"
+                              user-emacs-directory))
+                           ("AARONNOTE_JUPYTER_STATE_ROOT" .
+                            ,(expand-file-name
+                              "var/aaronnote/jupyter"
+                              user-emacs-directory))
+                           ("NOEMA_USER_HOME" . ,(expand-file-name "~/"))
+                           ("SAGE_VERSION" .
+                            ,(or (getenv "AARONNOTE_SAGE_VERSION")
+                                 "current")))))
                  (resourceDir . ,directory))
                result)))))
       (nreverse result))))
@@ -189,6 +237,77 @@
     (my/noema-jupyter--merge-kernelspecs
      result (my/noema-jupyter--project-kernelspecs file))))
 
+(defconst my/noema-jupyter--connection-ports
+  '((hb . hb_port) (control . control_port) (shell . shell_port)
+    (stdin . stdin_port) (iopub . iopub_port))
+  "Channel names and connection-file port keys in forwarding order.")
+
+(defun my/noema-jupyter--valid-connection-p (connection)
+  "Return non-nil when CONNECTION is a safe TCP Jupyter connection object."
+  (and (listp connection)
+       (equal (my/noema-jupyter--get 'transport connection) "tcp")
+       (stringp (my/noema-jupyter--get 'ip connection))
+       (stringp (my/noema-jupyter--get 'key connection))
+       (stringp (my/noema-jupyter--get 'signature_scheme connection))
+       (cl-every
+        (lambda (mapping)
+          (let ((port (my/noema-jupyter--get (cdr mapping) connection)))
+            (and (integerp port) (> port 0) (< port 65536))))
+        my/noema-jupyter--connection-ports)))
+
+(defun my/noema-jupyter--read-connection-file (file)
+  "Read and validate Jupyter connection FILE in its owning target namespace."
+  (let ((connection
+         (json-parse-string
+          (with-temp-buffer
+            (insert-file-contents file)
+            (buffer-string))
+          :object-type 'alist :array-type 'list
+          :null-object nil :false-object :json-false)))
+    (unless (my/noema-jupyter--valid-connection-p connection)
+      (error "Invalid Jupyter TCP connection file: %s" file))
+    connection))
+
+(defun my/noema-jupyter--target-runtime-directory (file)
+  "Return the logical Jupyter runtime directory on FILE's owning target."
+  (let* ((context (my/noema-jupyter--context file))
+         (target-directory
+          (my/noema-jupyter--output context "jupyter" "--runtime-dir")))
+    (unless (and (stringp target-directory)
+                 (not (string-empty-p target-directory)))
+      (error "Target Jupyter returned no runtime directory"))
+    (file-name-as-directory
+     (remote-expand-file-name target-directory nil context))))
+
+(defun my/noema-jupyter--attachable-connections (file)
+  "Return validated connection-file choices on FILE's owning target."
+  (condition-case error
+      (let ((directory (my/noema-jupyter--target-runtime-directory file))
+            result)
+        (dolist (candidate
+                 (directory-files directory t "\\.json\\'" t))
+          (condition-case nil
+              (let* ((_connection
+                      (my/noema-jupyter--read-connection-file candidate))
+                     (attributes (file-attributes candidate))
+                     (mtime
+                      (file-attribute-modification-time attributes)))
+                (push
+                 `((token . ,(file-name-nondirectory candidate))
+                   (mtimeMs . ,(* 1000.0 (float-time mtime))))
+                 result))
+            (error nil)))
+        (sort result
+              (lambda (left right)
+                (> (or (my/noema-jupyter--get 'mtimeMs left) 0)
+                   (or (my/noema-jupyter--get 'mtimeMs right) 0)))))
+    (error
+     ;; Attaching is optional; a target with no Jupyter runtime directory must
+     ;; not hide its otherwise valid kernelspecs.
+     (message "Noema Jupyter: cannot list target connection files: %s"
+              (error-message-string error))
+     nil)))
+
 (defun my/noema-jupyter--kernels (params _client)
   "List kernels available on the Target owning PARAMS file."
   (my/noema-jupyter--defer
@@ -196,8 +315,10 @@
      (let* ((file
              (remote-canonicalize-file-name
               (format "%s" (my/noema-jupyter--get 'file params))))
-            (specs (my/noema-jupyter--kernelspecs file)))
-       `((ok . t) (default . "python3") (specs . ,specs))))))
+            (specs (my/noema-jupyter--kernelspecs file))
+            (connections (my/noema-jupyter--attachable-connections file)))
+       `((ok . t) (default . "python3") (specs . ,specs)
+         (connections . ,connections))))))
 
 (defun my/noema-jupyter--runtime-directory (workspace)
   "Return the target runtime directory for WORKSPACE."
@@ -242,18 +363,179 @@ anyone who knows roughly when the kernel started."
 
 (defun my/noema-jupyter--client-connection
     (target group)
-  "Rewrite TARGET connection ports using GROUP's client endpoints."
-  (let ((result (copy-tree target)))
-    (dolist (mapping
-             '((hb . hb_port) (control . control_port)
-               (shell . shell_port) (stdin . stdin_port)
-               (iopub . iopub_port)))
-      (setf (alist-get (cdr mapping) result)
-            (plist-get
-             (alist-get (car mapping)
-                        (remote-channel-group-endpoints group 'local))
-             :port)))
+  "Rewrite TARGET using GROUP's client-side host and five ports."
+  (let* ((result (copy-tree target))
+         (locals (remote-channel-group-endpoints group 'local))
+         (hosts
+          (delete-dups
+           (mapcar
+            (lambda (mapping)
+              (plist-get (alist-get (car mapping) locals) :host))
+            my/noema-jupyter--connection-ports))))
+    (unless (and (= (length hosts) 1) (stringp (car hosts))
+                 (not (string-empty-p (car hosts))))
+      (error "Jupyter channel group exposed inconsistent client hosts: %S"
+             hosts))
+    ;; The target may bind 0.0.0.0, ::, or a target-only hostname. Once the
+    ;; ports are forwarded, Node must connect to the client listener instead.
+    (setf (alist-get 'ip result) (car hosts))
+    (dolist (mapping my/noema-jupyter--connection-ports)
+      (let ((port
+             (plist-get (alist-get (car mapping) locals) :port)))
+        (unless (and (integerp port) (> port 0) (< port 65536))
+          (error "Jupyter channel %s exposed invalid client port: %S"
+                 (car mapping) port))
+        (setf (alist-get (cdr mapping) result) port)))
     result))
+
+(defun my/noema-jupyter--connection-endpoints (connection)
+  "Return channel endpoints described by validated CONNECTION."
+  (let* ((raw-host (my/noema-jupyter--get 'ip connection))
+         ;; Wildcard bind addresses are not connectable destinations.  The
+         ;; target-side kernel is nevertheless reachable through loopback.
+         (host (cond ((member raw-host '("" "*" "0.0.0.0")) "127.0.0.1")
+                     ((member raw-host '("::" "[::]")) "::1")
+                     (t raw-host))))
+    (mapcar
+     (lambda (mapping)
+       (cons (car mapping)
+             (list :host host
+                   :port (my/noema-jupyter--get (cdr mapping) connection))))
+     my/noema-jupyter--connection-ports)))
+
+(defun my/noema-jupyter--update-attachment-group
+    (attachment replacement &optional target-connection)
+  "Install recovered channel-group REPLACEMENT into ATTACHMENT.
+When TARGET-CONNECTION is non-nil, also adopt its current ports and HMAC key."
+  (when target-connection
+    (setf (my/noema-jupyter-attachment-target-connection attachment)
+          target-connection))
+  (setf
+   (my/noema-jupyter-attachment-channel-group attachment) replacement
+   (my/noema-jupyter-attachment-client-connection attachment)
+   (my/noema-jupyter--client-connection
+    (my/noema-jupyter-attachment-target-connection attachment)
+    replacement)
+   (my/noema-jupyter-attachment-generation attachment)
+   (1+ (my/noema-jupyter-attachment-generation attachment))
+   (my/noema-jupyter-attachment-state attachment) 'open)
+  (puthash (my/noema-jupyter-attachment-id attachment)
+           attachment my/noema-jupyter-attachments)
+  attachment)
+
+(defun my/noema-jupyter--open-attachment-group
+    (attachment &optional local-endpoints generation workspace)
+  "Open ATTACHMENT's five routes.
+LOCAL-ENDPOINTS and GENERATION preserve a previous client-side generation;
+WORKSPACE defaults to the attachment's owning workspace."
+  (let ((id (my/noema-jupyter-attachment-id attachment)))
+    (remote-channel-group-open
+     (my/noema-jupyter--connection-endpoints
+      (my/noema-jupyter-attachment-target-connection attachment))
+     :local-endpoints local-endpoints
+     :context (my/noema-jupyter-attachment-context attachment)
+     :workspace (or workspace
+                    (my/noema-jupyter-attachment-workspace attachment))
+     :key (list 'noema-jupyter-attach id)
+     :register nil
+     :generation generation
+     :metadata (list :application "noema-jupyter-attach"
+                     :attachment id))))
+
+(defun my/noema-jupyter--close-attachment (attachment &optional reason)
+  "Close ATTACHMENT's routes without stopping the external kernel.
+REASON `transport-recovery' keeps its logical registry entry in place."
+  (when (my/noema-jupyter-attachment-p attachment)
+    (when-let* ((group
+                 (my/noema-jupyter-attachment-channel-group attachment)))
+      (ignore-errors (remote-channel-group-close group)))
+    (unless (eq reason 'transport-recovery)
+      (setf (my/noema-jupyter-attachment-state attachment) 'closed)
+      (remhash (my/noema-jupyter-attachment-id attachment)
+               my/noema-jupyter-attachments)))
+  attachment)
+
+(defun my/noema-jupyter--attach-runtime (params)
+  "Open five routed channels to an existing target kernel from PARAMS."
+  (let* ((placement-file
+          (format "%s"
+                  (or (my/noema-jupyter--get 'sourceFile params)
+                      (my/noema-jupyter--get 'file params)
+                      (error "Missing Jupyter attachment placement file"))))
+         (token (format "%s" (or (my/noema-jupyter--get 'token params) "")))
+         (context (my/noema-jupyter--context placement-file))
+         (workspace (remote-workspace-open context :load-environment t))
+         (directory (my/noema-jupyter--target-runtime-directory placement-file)))
+    (when (or (string-empty-p token)
+              (not (equal token (file-name-nondirectory token))))
+      (error "Invalid Jupyter attachment token: %s" token))
+    (let* ((connection-file (expand-file-name token directory))
+           (target-connection
+            (my/noema-jupyter--read-connection-file connection-file))
+           (attachment-id
+            (format "noema-attach-%s"
+                    (substring
+                     (secure-hash
+                      'sha256
+                      (format "%s:%s:%s" placement-file token (float-time)))
+                     0 24)))
+           attachment group)
+      (condition-case error
+          (progn
+            (setq attachment
+                  (my/noema-jupyter-attachment-create
+                   :id attachment-id :token token :context context
+                   :workspace workspace :placement-file placement-file
+                   :connection-file connection-file
+                   :target-connection target-connection
+                   :generation 1 :state 'open))
+            (setq group (my/noema-jupyter--open-attachment-group attachment))
+            (setf
+             (my/noema-jupyter-attachment-channel-group attachment) group
+             (my/noema-jupyter-attachment-client-connection attachment)
+             (my/noema-jupyter--client-connection target-connection group))
+            (puthash attachment-id attachment my/noema-jupyter-attachments)
+            ;; This keyed resource is the sole owner of the group. Recovery
+            ;; preserves all five client listeners as one atomic generation.
+            (remote-workspace-ensure-recoverable-resource
+             workspace 'jupyter-attachment attachment-id attachment
+             :close #'my/noema-jupyter--close-attachment
+             :recover
+             (lambda (resource owner)
+               (let* ((old (remote-workspace-resource-value resource))
+                      (old-group
+                       (my/noema-jupyter-attachment-channel-group old))
+                      (stable
+                       (remote-channel-group-endpoints old-group 'local))
+                      (replacement
+                       (my/noema-jupyter--open-attachment-group
+                        old stable
+                        (1+ (remote-channel-group-generation old-group))
+                        owner)))
+                 (my/noema-jupyter--update-attachment-group old replacement)))
+             :recovery 'auto
+             :metadata (list :application "noema-jupyter-attach"
+                             :attachment attachment-id))
+            attachment)
+        (error
+         (remhash attachment-id my/noema-jupyter-attachments)
+         (when group (ignore-errors (remote-channel-group-close group)))
+         (signal (car error) (cdr error)))))))
+
+(defun my/noema-jupyter--attachment-result (attachment)
+  "Return JSON-safe connection information for ATTACHMENT."
+  `((attachmentId . ,(my/noema-jupyter-attachment-id attachment))
+    (generation . ,(my/noema-jupyter-attachment-generation attachment))
+    (connectionFile . ,(my/noema-jupyter-attachment-connection-file attachment))
+    (connectionInfo .
+                    ,(my/noema-jupyter-attachment-client-connection attachment))))
+
+(defun my/noema-jupyter--attachment (params)
+  "Resolve an attachment from PARAMS."
+  (let* ((id (format "%s"
+                     (or (my/noema-jupyter--get 'attachmentId params) "")))
+         (attachment (gethash id my/noema-jupyter-attachments)))
+    (or attachment (error "Unknown Noema Jupyter attachment: %s" id))))
 
 (defun my/noema-jupyter--exit-status (context program &rest args)
   "Run PROGRAM with ARGS in CONTEXT and return its exit status.
@@ -644,6 +926,88 @@ an unanswerable probe must fail the request rather than pose as an answer."
       (my/noema-jupyter--runtime params))
      '((ok . t)))))
 
+(defun my/noema-jupyter--attach (params _client)
+  "Attach to an existing target kernel described by PARAMS."
+  (my/noema-jupyter--defer
+   (lambda ()
+     (my/noema-jupyter--attachment-result
+      (my/noema-jupyter--attach-runtime params)))))
+
+(defun my/noema-jupyter--attachment-status (params _client)
+  "Return routed connection status for PARAMS attachment.
+This reports transport/file availability, while Noema's heartbeat remains the
+authority for whether the external kernel is servicing Jupyter messages."
+  (my/noema-jupyter--defer
+   (lambda ()
+     (let* ((attachment (my/noema-jupyter--attachment params))
+            (workspace (my/noema-jupyter-attachment-workspace attachment))
+            (connection-file
+             (my/noema-jupyter-attachment-connection-file attachment))
+            (group (my/noema-jupyter-attachment-channel-group attachment)))
+       ;; Repair the known route first. Connection-file I/O is a separate
+       ;; diagnostic path and must not prevent recovery of the five sockets.
+       (unless (remote-channel-group-live-p group)
+         (let ((resource
+                (remote-workspace-find-resource
+                 workspace 'jupyter-attachment
+                 (my/noema-jupyter-attachment-id attachment))))
+           (unless (and resource
+                        (remote-workspace-recover-resource workspace resource))
+             (error "Cannot recover Jupyter attachment route %s"
+                    (my/noema-jupyter-attachment-id attachment))))
+         (setq group
+               (my/noema-jupyter-attachment-channel-group attachment)))
+       (let ((exists (file-exists-p connection-file)))
+         ;; An external owner can restart a kernel and rewrite the same
+         ;; connection file with a new key and ports. Preserve our five client
+         ;; listeners, but route them to that new authoritative target tuple.
+         (when exists
+           (let ((current
+                  (my/noema-jupyter--read-connection-file connection-file)))
+             (unless (equal current
+                            (my/noema-jupyter-attachment-target-connection
+                             attachment))
+               (let* ((stable (remote-channel-group-endpoints group 'local))
+                      (generation
+                       (1+ (remote-channel-group-generation group))))
+                 (setf
+                  (my/noema-jupyter-attachment-target-connection attachment)
+                  current)
+                 (remote-channel-group-close group)
+                 (setq group
+                       (my/noema-jupyter--open-attachment-group
+                        attachment stable generation workspace))
+                 (my/noema-jupyter--update-attachment-group
+                  attachment group current)))))
+         (append
+          `((alive . "unknown")
+            (connectionFilePresent . ,(if exists t :json-false))
+            (message . ,(if exists ""
+                          "Target connection file no longer exists; kernel liveness is unknown")))
+          (my/noema-jupyter--attachment-result attachment)))))))
+
+(defun my/noema-jupyter--release-attachment (params _client)
+  "Release PARAMS attachment routes without stopping its external kernel."
+  (my/noema-jupyter--defer
+   (lambda ()
+     (let* ((id (format "%s"
+                        (or (my/noema-jupyter--get 'attachmentId params) "")))
+            (attachment (gethash id my/noema-jupyter-attachments)))
+       ;; A lost gateway response can retry this call. Cleanup succeeded even
+       ;; when the logical resource is already absent, so release is idempotent.
+       (when attachment
+         (let* ((workspace
+                 (my/noema-jupyter-attachment-workspace attachment))
+                (resource
+                 (remote-workspace-find-resource
+                  workspace 'jupyter-attachment id)))
+           (if resource
+               (remote-workspace-close-resource
+                workspace resource 'consumer-release)
+             (my/noema-jupyter--close-attachment
+              attachment 'consumer-release))))
+       '((ok . t))))))
+
 (defun my/noema-jupyter--read-nbextension (params _client)
   "Read a validated target nbextension asset for PARAMS runtime."
   (my/noema-jupyter--defer
@@ -834,9 +1198,29 @@ itself.  Attached and server kernels are not brokered and are untouched."
                 (error-message-string error)))))
   (clrhash my/noema-jupyter-runtimes))
 
+(defun my/noema-jupyter-release-all-attachments ()
+  "Release every brokered attachment route without stopping any kernel."
+  (dolist (attachment (hash-table-values my/noema-jupyter-attachments))
+    (condition-case error
+        (let* ((workspace
+                (my/noema-jupyter-attachment-workspace attachment))
+               (resource
+                (remote-workspace-find-resource
+                 workspace 'jupyter-attachment
+                 (my/noema-jupyter-attachment-id attachment))))
+          (if resource
+              (remote-workspace-close-resource workspace resource 'host-exit)
+            (my/noema-jupyter--close-attachment attachment 'host-exit)))
+      (error
+       (message "Noema Jupyter: could not release attachment %s: %s"
+                (my/noema-jupyter-attachment-id attachment)
+                (error-message-string error)))))
+  (clrhash my/noema-jupyter-attachments))
+
 (defun my/noema-jupyter-shutdown-all-on-exit-h ()
   "Release brokered Jupyter runtimes while Emacs is still able to reach them."
-  (ignore-errors (my/noema-jupyter-shutdown-all)))
+  (ignore-errors (my/noema-jupyter-shutdown-all))
+  (ignore-errors (my/noema-jupyter-release-all-attachments)))
 
 (add-hook 'kill-emacs-hook #'my/noema-jupyter-shutdown-all-on-exit-h)
 
@@ -847,6 +1231,11 @@ itself.  Attached and server kernels are not brokered and are untouched."
            ("aaronnote.jupyter.interrupt" . ,#'my/noema-jupyter--interrupt)
            ("aaronnote.jupyter.restart" . ,#'my/noema-jupyter--restart)
            ("aaronnote.jupyter.shutdown" . ,#'my/noema-jupyter--shutdown)
+           ("aaronnote.jupyter.attach" . ,#'my/noema-jupyter--attach)
+           ("aaronnote.jupyter.attachment.status" .
+            ,#'my/noema-jupyter--attachment-status)
+           ("aaronnote.jupyter.attachment.release" .
+            ,#'my/noema-jupyter--release-attachment)
            ("aaronnote.jupyter.read-nbextension" .
             ,#'my/noema-jupyter--read-nbextension)
            ("aaronnote.jupyter.file.read" . ,#'my/noema-jupyter--file-read)

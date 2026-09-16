@@ -56,6 +56,17 @@ and Noema use a transient in-memory id only for UI addressing.  If its metadata
 does not identify a language, the source projection defaults to Python.
 Closing that Emacs source buffer does not stop the Noema kernel.
 
+Noema's web-host only serves native notebooks inside its notes root
+(=my/noema--notes-root=) or inside a validated Noema project, i.e. an
+ancestor directory holding =noema.toml=.  Every Jupyter request from the
+source buffer carries =projectRoot= when such a project exists.  For a native
+notebook outside both (for example =~/Desktop/a.ipynb=), the first explicit
+command (kernel selection, Run, Restart, …) calls =noema-project-ensure=,
+which proposes the enclosing =project.el= root and writes nothing unless you
+accept.  Declining aborts that command.  Opening the file, session refresh,
+save notifications, and keystroke completion never ask.  Logical =/fs:= paths
+are not subject to this native-root check.
+
 The singleton Noema Jupyter workspace reuses one page for every notebook via
 tabs and provides the JupyterLab-like
 layout: Server/Running Kernels/Kernel Specs on the left, output Cells in the
@@ -73,6 +84,26 @@ Noema catalog (local/Remote kernelspecs, attach targets, and configured server
 targets).  Emacs does not hide entries merely because their declared language
 differs from the current editor mode.  Connecting to a running private kernel
 is offered only for the notebook that already owns it.
+
+** Kernel language and LSP placement
+
+The selected kernelspec is the source of truth for the notebook language;
+=metadata.language_info= is treated as a cache and is refreshed on selection.
+Python-family names such as =sage= are normalized to =python=, while shell,
+Julia, R, JavaScript, and Lean names select their corresponding source mode.
+Changing a kernel invalidates the old LSP runtime before a new one is
+prepared, so completion and diagnostics cannot remain attached to the old
+interpreter.
+
+For an ordinary kernelspec, the LSP runtime is probed through the owning
+Remote target and its interpreter/path are used for the workspace.  A
+=remote_ikernel= SSH profile is probeable from its recorded =kernel_cmd=, but
+only when the SSH host is also configured in the Remote library and is the
+same target as the notebook.  If a local notebook selects a remote kernel, the
+kernel still executes remotely, while LSP deliberately falls back to the
+local workspace server; open the notebook as =/fs:TARGET:/path/file.ipynb= to
+place both kernel and LSP remotely.  This avoids presenting a remote-only
+interpreter path to a local Pyright process.
 
 Noema broadcasts one authoritative session snapshot after either UI changes a
 kernel.  Emacs also reads that snapshot by =scriptFile= instead of querying a
@@ -122,13 +153,15 @@ Target/workspace 中发现 kernelspec、以 workspace root 为 cwd 启动进程�
 而不是回一个 =alive: false= —— Noema 收到 =alive: false= 会关掉 kernel 并丢弃
 内存状态，把一次网络抖动答成 =false= 等于让用户白白丢一个 session。
 
-kernel 是否还活着由 Noema 侧的 =hb= 心跳判定。五端口里的 =hb= 一直被分配、也一直
-被 broker 转发，但过去没有任何代码连它：唯一的死亡信号是 OS 进程退出，而那只对
-Noema 自己 spawn 的 kernel 有效。broker 放置的（Remote target 的主路径）和
-=attach:= 的 kernel 因此没有任何死亡信号，记录会永远停在 =idle=，对它的一次执行
-永不结束，并且因为同一个 kernel 的执行是串行排队的，**该 notebook 后续所有 cell
-都会被一起卡住**。现在三种 connector 都跑心跳，连续丢失若干次回声即判定死亡、
-dispose 连接，等待中的执行随即失败返回。
+kernel 是否在服务 Jupyter 消息由 Noema 侧的 =hb= 心跳观察。五端口里的 =hb= 一直
+被 broker 转发；local kernel 连续丢失回声可直接判死。Remote broker/attach 路径则
+不同：心跳还穿过 channel，丢回声只能证明当前 transport generation 不可用，不能
+证明目标进程死亡。Noema 此时先问 broker：只有 target 明确回答 =alive: false= 才
+dispose 并丢弃状态；探测失败记为 =disconnected= 并继续在稳定的 client endpoint 上
+重试；进程仍在且 channel generation 已变化时重绑五个 socket。一次 SSH/network
+抖动因此不会被误当成 kernel death。外部 attached kernel 没有归 broker 所有的 PID，
+所以其 liveness 明确报告为 =unknown=；connection file 消失只作为诊断信息，不能单凭
+这一点判死，最终仍由 =hb= 判断它是否还能服务消息。
 
 执行本身没有 wall-clock 超时（=AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS= 默认 0），
 这是有意的：它是**空闲**超时，会被消息重置，而 =time.sleep(3600)= 这类静默长任务
@@ -150,8 +183,19 @@ buffer 永远停在 "preparing" 且无从得知原因；probe 也会在 notebook
 kill 时随之取消。
 
 =attach:= 的 connection file 现在在**任意 target 上**都能发现：runtime 目录取自
-该 target 自己的 =jupyter --runtime-dir=，再经 =/fs= handler 扫描；此前非 local
-target 直接返回空，等于 =attach:= 只能在客户机上用。
+该 target 自己的 =jupyter --runtime-dir=，再经 =/fs= handler 扫描。选择后也由
+Emacs broker 在同一 target 读取并验证完整的 =hb/control/shell/stdin/iopub= 五端口，
+以一个原子 channel group 转发给 Node；Node 不会把 target connection-file path 当作
+本地文件打开。group 恢复保留五个 client listener，并递增 generation；释放 attach
+只关闭路由，绝不向外部 kernel 发送 shutdown/restart。此前非 local target 只在 Board
+里能看见文件，Noema 主路径仍用 Node =fs= 读取，实际无法 attach。若外部 owner 原地
+重启 kernel 并改写同名 connection file，broker 会重新验证 HMAC key 与完整五端口，
+保持 client listener 不变而替换 target tuple；通配 bind IP 也会改写为 target loopback，
+绝不会把 =0.0.0.0= 当成 Node 侧连接地址。
+
+kernel 启动握手默认允许 60 秒（=AARONNOTE_JUPYTER_KERNEL_LAUNCH_TIMEOUT_MS=），因为
+SSH 首连或 scheduler 排队通常超过本地进程原先的 15 秒上限；readiness 仍必须收到
+=kernel_info_reply=，仅仅 ZMQ socket 打开不算成功。
 
 =attach:= 和 =server:= 都没有可探测的 target 侧解释器，因此对 LSP 是**预期**
 回退（不刷 minibuffer，但 Doctor 里可见）。此前 =server:= 没被处理，会报
@@ -181,10 +225,10 @@ Treemacs、定位当前 Imenu node 并 pulse。Noema 的 kernel / Run / output �
 紧邻正文的 header line，因此 Jupyter 控件不会被 LSP 接管。
 
 普通 Python/ipykernel kernelspec 可自动推导。项目自带 Python/Sage wrapper 在
-=metadata.aaron.runtime.probe_argv= 声明 probe 入口。=attach:=、legacy
-=remote_ikernel= 和没有 probe metadata 的不透明 launcher 不会被猜测；它们回退到
-项目默认 toolchain。这类预期回退不再反复写入 minibuffer，具体原因仍可在
-Language Server Hub / Doctor 查看。笔记项目的
+=metadata.aaron.runtime.probe_argv= 声明 probe 入口。带 Aaron metadata 的 SSH
+=remote_ikernel= 会从 =kernel_cmd= 提取解释器并通过 Remote target 探测；旧版或
+非 SSH 的不透明 launcher、=attach:= 仍回退到项目默认 toolchain。这类预期回退不再
+反复写入 minibuffer，具体原因仍可在 Language Server Hub / Doctor 查看。笔记项目的
 =:aaronnote-jupyter= 默认 kernel 仍可设置，但不要再用项目级 =:toolchain= 把 Python
 固定到 Sage。
 
@@ -209,6 +253,11 @@ bin/install-remote-ikernel --check
 The check must report version =0.4.6+aaron.1= and a module path below this
 repository's =site-lisp/remote_ikernel= directory. Emacs startup only checks
 the tool; it never mutates the Python environment automatically.
+
+vendored =remote_ikernel= 的五端口 tunnel 使用单一 OpenSSH session：=-N -T=、
+=ExitOnForwardFailure=yes=、TCP keepalive 与 =ProxyJump=。因此任一 listener bind 失败
+会让 launcher 失败，半开连接会变成可恢复的进程退出，也不再靠远端 =sleep 600=
+每十分钟人为断线。
 
 * Remote Jupyter servers (HTTP/HTTPS)
 
@@ -243,7 +292,16 @@ credential 一样留在 authinfo/GPG 里。=jupyter lab= 启动时打印的
 =remote-port-forward=，再把改写成 =127.0.0.1:<本地端口>= 的 URL 交给 Noema，同时
 带上真实主机名（否则 TLS 证书校验和 virtual-host 路由会对着 127.0.0.1 失败）。
 forward 作为 recoverable resource 注册在 workspace 上，传输断开后与 kernel 的
-channel group 一样被修复。
+channel group 一样被修复。一个 server forward 只有一个 keyed resource owner（不会
+同时被 generic forward 和 Jupyter resource 各恢复一次），恢复时复用原 client
+listener，所以 Noema 已建立的 REST/WebSocket base URL 不变。若该端口确实无法复用，
+下一次 provider resolve 会得到新 URL；Node 的 server registry 会重新解析并重建
+connection，而不是永久缓存第一次收到的本地端口。
+
+每个 kernel record 还保留自己实际绑定的 provider signature，不能被 catalog/contents
+提前刷新 registry cache 掩盖。WebSocket 重绑或握手失败只记 =disconnected= 并继续连接
+同一个 server kernel id；只有 server 明确返回该 kernel 不存在才判死。配置清单成功
+刷新时，已经删除的 server provider 会立即注销，其 Remote forward 不会等进程退出才清理。
 
 Target 无法提供 channel 时会报错，不会退回到客户端直连。这条规则是有意的：
 远端 server 常常绑在 loopback 上，直接在本机连同一个端口要么失败得莫名其妙，
@@ -254,6 +312,14 @@ Target 无法提供 channel 时会报错，不会退回到客户端直连。这�
 没有 Emacs broker 时，同样的清单从环境变量 =AARONNOTE_JUPYTER_SERVERS= 读取
 （JSON 数组，字段名与上面一致）。这种模式下没有 Remote 框架，所有 server 必须
 本机可达。
+
+** Kernel ownership
+
+=server:<id>:<kernelspec>= 由 Noema 通过 Session API 新建，生命周期结束时会关闭
+对应 session；=:kind gateway= 则通过 Kernel API 新建并关闭裸 kernel。相反，从
+running 列表采用的 =server:<id>:kernel:<kernel-id>= 不归 Noema 所有：关闭文档或
+Noema 只断开客户端，绝不会顺带 shutdown 这个可能仍被其他 session 使用的 kernel。
+interrupt/restart 只有在用户显式执行对应操作时才发给 adopted kernel。
 
 ** Contents API
 
@@ -310,31 +376,82 @@ cell 运行期间 iopub 以补丁流（=set= / =append= / =clear= / =status=）�
 
 * Jupyter Board
 
-Open the board with =M-x my/jupyter-board= or Hyper dispatch =j=. The board
-shows:
+用 =M-x my/jupyter-board= 或 Hyper dispatch =j= 打开 Emacs 内的
+=Remote Kernel Manager=。默认页面只突出两类日常对象：远程 kernel profile 和正在运行
+的 session；本地 kernelspec、connection file、工具路径和诊断信息收在
+=Show technical= 中，不再与主要工作流混在一起。
 
-- Jupyter, Python, remote_ikernel, and editable-source health;
-- protected Core remote kernels;
-- disposable Temporary remote kernels;
-- all local and other kernelspecs visible to the configured Jupyter CLI.
+第一次使用普通 SSH/Python 服务器时：
+
+1. 一般保持 Target 为 =Local=。Target 表示 kernelspec profile 保存在哪一台机器，
+   不等于实际运行计算的 SSH host。
+2. 选择 =Quick Add SSH=，输入 =user@host=（非标准端口写
+   =user@host:2222=）、远端工作目录和 Python 命令。默认命令为
+   =python3 -m ipykernel_launcher -f {connection_file}=；占位符不可删除。
+3. 在 profile 下选择 =Open REPL=。这时才会启动远端 kernel、建立 Jupyter 五端口
+   tunnel，并打开 Emacs Jupyter REPL。
+4. Slurm/PBS/SGE、jump hosts 或自定义 launcher 使用 =Advanced Add=。
+
+** 9444 PyTorch CUDA preset
+
+Board 的 Remote Kernels 区域提供 =Add Course PyTorch=，用于这套课程环境：
+
+| Field | Value |
+|---+---|
+| Profile | =Python 3.13 PyTorch CUDA= |
+| Remote folder | =/home/hc/Desktop/9444= |
+| Interpreter | =/home/hc/Desktop/9444/.conda/bin/python= |
+| Kernel command | =/home/hc/Desktop/9444/.conda/bin/python -m ipykernel_launcher -f {connection_file}= |
+| Group | =SAVED/Core= |
+
+点击后只需要输入 SSH host，例如 =Aaron-WSL2= 或 =user@host:2222=；预设会创建
+kernelspec，之后直接点击该 profile 的 =Open REPL=。远端已有的 =python3= profile
+不会被删除。
+
+Agent 或后台任务不要模拟点击，也不要调用 transient，直接执行非交互 API：
+
+#+begin_src emacs-lisp
+(my/jupyter-board-add-course-pytorch
+ :host "Aaron-WSL2"
+ :callback (lambda (output _error)
+             (message "Course profile installed: %s" output)))
+#+end_src
+
+API 不读取 minibuffer、不询问确认；默认写入当前 Board target（通常为 =Local=），
+异步完成后刷新 Board，命令输出保留在 =*Jupyter Board Log*=。=host= 必须是 SSH
+config 别名或 =user@host[:port]=；如果服务器别名不是 =Aaron-WSL2=，替换该值即可。
+
+若从 Python 源码 buffer 打开 Board，=Open REPL= 会把该源码 buffer 与新 REPL 关联。
+返回源码后，=C-c C-c= 运行当前行/选区，=C-c C-b= 运行整个 buffer，
+=C-c C-z= 跳到 REPL。
+
+建议事先确认终端中的 =ssh user@host= 能以 SSH key 登录，并确认远端
+=python3 -c "import ipykernel"= 成功。页面的 =Usage Guide= 也包含这套说明。
 
 Main keys:
 
 | Key | Action |
 |-----+--------|
-| =a= | Add a remote kernel through the CLI transient |
-| =e= | Edit/recreate the remote kernel at point |
+| =a= | Guided SSH profile creation |
+| =A= | Advanced CLI-backed profile creation |
+| =e= | Guided edit of the remote kernel at point |
+| =E= | Advanced edit of the remote kernel at point |
 | =m= | Move a remote kernel between Core and Temporary |
 | =d= | Delete the current kernelspec |
 | =C= | Delete all Temporary remote kernels |
 | =RET= | Show the normalized fields and raw =kernel.json= |
+| =r= | Open/connect the profile or session REPL |
 | =o= | Open the kernelspec resource directory |
 | =g= | Refresh |
-| =?= | Open the full Jupyter dispatch |
+| =v= | Toggle technical resources |
+| =?= | Open the usage guide |
+| =M= | Open the full Jupyter dispatch |
 
-Core deletion requires a full confirmation. Temporary kernels can be deleted
-individually or in one batch. A legacy =rik_*= kernelspec without Aaron
-metadata is treated as Core so an upgrade cannot accidentally remove it.
+每个远程 profile 直接提供 =Open REPL=、=Edit=、=Keep profile/Make temporary=、
+=Details= 和 =Delete= 按钮；active session 也直接提供 interrupt/restart/shutdown，
+不再要求先记住快捷键。界面中的 =SAVED= 对应底层 Core group，需要完整确认才能删除；
+=TEMP= 可单独删除或批量清理。没有 Aaron metadata 的旧 =rik_*= kernelspec 仍按 Core
+处理，升级不会意外把它清掉。
 
 * Persistent group metadata
 
@@ -354,7 +471,8 @@ metadata:
 }
 #+end_src
 
-New kernels default to Temporary. Change a group from the board or CLI:
+CLI/Advanced Add profiles default to Temporary; the guided Quick Add defaults to
+SAVED/Core for semester-long use. Change a group from the board or CLI:
 
 #+begin_src sh
 remote_ikernel manage --set-group rik_ssh_example_python core

@@ -69,7 +69,7 @@
     (should (member "--host=example" args))
     (should (member "--tunnel-hosts=jump" args))))
 
-(ert-deftest my/jupyter-board-renders-groups ()
+(ert-deftest my/jupyter-board-renders-remote-first-management-ui ()
   (let ((entries
          (list
           '(:name "rik_core" :display-name "Core" :language "python"
@@ -90,11 +90,143 @@
                    (funcall callback '((kernels . nil)) nil))))
         (my/jupyter-board-refresh))
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
-        (should (string-match-p "Core Remote Kernels" text))
-        (should (string-match-p "Temporary Remote Kernels" text))
-        (should (string-match-p "Local / Target Kernels" text))
+        (should (string-match-p "Remote Kernel Manager" text))
+        (should (string-match-p "Start Here" text))
+        (should (string-match-p "Remote Kernels" text))
+        (should (string-match-p "Open REPL" text))
+        (should (string-match-p "Make temporary" text))
+        (should (string-match-p "Keep profile" text))
+        (should (string-match-p "Show kernels, connections & diagnostics" text))
+        (should-not (string-match-p "Local / Target Kernels" text))
         (should (string-match-p "Core" text))
         (should (string-match-p "Temp" text))))))
+
+(ert-deftest my/jupyter-board-renders-guided-empty-state ()
+  (with-temp-buffer
+    (my/jupyter-board-mode)
+    (setq my/jupyter-board--target (remote-get-target "local")
+          my/jupyter-board--entries nil
+          my/jupyter-board--runtimes nil
+          my/jupyter-board--connections nil)
+    (my/jupyter-board--render)
+    (let ((text (buffer-substring-no-properties (point-min) (point-max))))
+      (should (string-match-p "1 · Add" text))
+      (should (string-match-p "No remote profile is configured yet" text))
+      (should (string-match-p "Quick Add SSH" text)))))
+
+(ert-deftest my/jupyter-board-action-buttons-carry-entry-context ()
+  (let ((entry '(:id "spec:local:remote:test" :kind kernelspec
+                 :name "rik_test" :display-name "Test" :language "python"
+                 :remote t :group "core" :interface "ssh" :host "example"
+                 :kernel-command "python3 -m ipykernel_launcher -f {host_connection_file}")))
+    (with-temp-buffer
+      (my/jupyter-board-mode)
+      (let ((inhibit-read-only t))
+        (my/jupyter-board--insert-entry entry))
+      (goto-char (point-min))
+      (search-forward "Open REPL")
+      (should (equal (plist-get (my/jupyter-board--current-entry) :name)
+                     "rik_test")))))
+
+(ert-deftest my/jupyter-board-technical-view-is-explicit ()
+  (with-temp-buffer
+    (my/jupyter-board-mode)
+    (setq my/jupyter-board--target (remote-get-target "local")
+          my/jupyter-board--entries
+          '((:id "local" :kind kernelspec :name "python3"
+             :display-name "Python" :language "python" :resource-dir "/tmp/python")))
+    (my/jupyter-board--render)
+    (should-not (string-match-p "Local / Target Kernels"
+                                (buffer-substring-no-properties
+                                 (point-min) (point-max))))
+    (setq my/jupyter-board--show-advanced t)
+    (my/jupyter-board--render)
+    (should (string-match-p "Local / Target Kernels"
+                            (buffer-substring-no-properties
+                             (point-min) (point-max))))))
+
+(ert-deftest my/jupyter-board-validates-remote-profile-connectivity-placeholder ()
+  (should
+   (my/jupyter-board--validate-remote-args
+    '("--interface=ssh" "--host=user@example:2222" "--name=Python"
+      "--kernel_cmd=python3 -m ipykernel_launcher -f {connection_file}")))
+  (should-error
+   (my/jupyter-board--validate-remote-args
+    '("--interface=ssh" "--host=example" "--name=Python"
+      "--kernel_cmd=python3 -m ipykernel_launcher"))
+   :type 'user-error)
+  (should-error
+   (my/jupyter-board--validate-remote-args
+    '("--interface=ssh" "--host=user at example" "--name=Python"
+      "--kernel_cmd=python3 -m ipykernel_launcher -f {connection_file}"))
+   :type 'user-error))
+
+(ert-deftest my/jupyter-board-guided-edit-preserves-advanced-arguments ()
+  (let* ((args '("--interface=ssh" "--host=old" "--name=Python"
+                 "--kernel_cmd=python -m ipykernel -f {connection_file}"
+                 "--tunnel-hosts=jump" "--verbose"))
+         (updated (my/jupyter-board--replace-arg args "--host=" "new")))
+    (should (member "--host=new" updated))
+    (should-not (member "--host=old" updated))
+    (should (member "--tunnel-hosts=jump" updated))
+    (should (member "--verbose" updated))))
+
+(ert-deftest my/jupyter-board-quick-add-builds-safe-saved-profile ()
+  (let (saved-target saved-args)
+    (with-temp-buffer
+      (my/jupyter-board-mode)
+      (setq my/jupyter-board--target (remote-get-target "local"))
+      (cl-letf (((symbol-function 'my/jupyter-management-command)
+                 (lambda (_target _kind) "/usr/bin/true"))
+                ((symbol-function 'read-string)
+                 (lambda (prompt &rest _)
+                   (cond
+                    ((string-prefix-p "SSH host" prompt) "student@cluster:2222")
+                    ((string-prefix-p "Profile name" prompt) "Course Python")
+                    ((string-prefix-p "Remote working" prompt) "/srv/course")
+                    ((string-prefix-p "Remote kernel" prompt)
+                     "python3 -m ipykernel_launcher -f {connection_file}")
+                    (t (ert-fail (format "Unexpected prompt: %s" prompt))))))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _) "Saved (protected)"))
+                ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                ((symbol-function 'my/jupyter-board--save-remote-profile)
+                 (lambda (target args &optional _origin)
+                   (setq saved-target target saved-args args))))
+        (my/jupyter-remote-quick-add)))
+    (should (equal (my/jupyter-management-target-id saved-target) "local"))
+    (should (member "--host=student@cluster:2222" saved-args))
+    (should (member "--name=Course Python" saved-args))
+    (should (member "--workdir=/srv/course" saved-args))
+    (should (member "--group=core" saved-args))
+    (should (member
+             "--kernel_cmd=python3 -m ipykernel_launcher -f {connection_file}"
+             saved-args))))
+
+(ert-deftest my/jupyter-board-course-pytorch-preset-builds-remote-profile ()
+  (let (called target args)
+    (cl-letf (((symbol-function 'my/jupyter-board--start-target-command)
+               (lambda (given-target _kind given-args &optional callback)
+                 (setq target given-target args given-args called t)
+                 (when callback (funcall callback "Added kernel ['rik_course']."))))
+              ((symbol-function 'my/jupyter-board--remote-args-normalize)
+               #'identity))
+      (my/jupyter-board-add-course-pytorch
+       :host "student@cluster:2222"
+       :target (remote-get-target "local")))
+    (should called)
+    (should (equal (my/jupyter-management-target-id target) "local"))
+    (should (member "--interface=ssh" args))
+    (should (member "--host=student@cluster:2222" args))
+    (should (member "--name=Python 3.13 PyTorch CUDA" args))
+    (should (member "--workdir=/home/hc/Desktop/9444" args))
+    (should (member "--group=core" args))
+    (should (member
+             "--kernel_cmd=/home/hc/Desktop/9444/.conda/bin/python -m ipykernel_launcher -f {connection_file}"
+             args))))
+
+(ert-deftest my/jupyter-board-course-pytorch-preset-requires-host ()
+  (should-error (my/jupyter-board-add-course-pytorch :host "") :type 'user-error))
 
 (ert-deftest my/jupyter-board-diagnoses-broken-absolute-launcher ()
   (let* ((entry (my/jupyter-board--entry
@@ -114,6 +246,32 @@
   (should-not
    (my/jupyter-management-connection-valid-p
     '((transport . "tcp") (ip . "127.0.0.1") (key . "secret")))))
+
+(ert-deftest my/jupyter-board-repl-associates-the-source-buffer ()
+  (require 'jupyter-repl)
+  (let ((source (generate-new-buffer " *jupyter-board-source*")) call)
+    (unwind-protect
+        (cl-letf (((symbol-function 'jupyter-run-repl)
+                   (lambda (&rest args)
+                     (setq call (cons (current-buffer) args)))))
+          (my/jupyter-management-run-repl
+           '(:kind kernelspec :target-id "local" :name "python3") source)
+          (should (eq (car call) source))
+          (should (equal (cdr call) '("python3" nil t nil t))))
+      (kill-buffer source))))
+
+(ert-deftest my/jupyter-board-connection-associates-the-source-buffer ()
+  (require 'jupyter-repl)
+  (let ((source (generate-new-buffer " *jupyter-board-connect-source*")) call)
+    (unwind-protect
+        (cl-letf (((symbol-function 'jupyter-connect-repl)
+                   (lambda (&rest args)
+                     (setq call (cons (current-buffer) args)))))
+          (my/jupyter-management-connect-repl
+           '(:valid t :file "/tmp/kernel.json") source)
+          (should (eq (car call) source))
+          (should (equal (cdr call) '("/tmp/kernel.json" nil t nil t))))
+      (kill-buffer source))))
 
 (ert-deftest my/jupyter-board-discards-stale-refresh-results ()
   (let (spec-callbacks)

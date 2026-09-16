@@ -25,6 +25,9 @@
 (declare-function my/noema-jupyter-cell-lsp-runtime-changing
                   "init-aaronnote-jupyter-lsp" ())
 (declare-function my/language-server-ensure-deferred "init-lsp" ())
+(declare-function noema-project-root "noema-research" (path))
+(declare-function noema-project-ensure "noema-research" (path))
+(defvar my/noema--notes-root)
 
 (defvar-local my/noema-jupyter-cell-source-file nil
   "Markdown note file that owns the current Noema notebook.")
@@ -37,6 +40,8 @@
 
 (defvar-local my/noema-jupyter-cell-language nil
   "Jupyter language recorded in the current notebook.")
+(defvar-local my/noema-jupyter-cell--editor-mode-manual-p nil
+  "Non-nil after the user explicitly chooses an editor mode.")
 
 (defvar-local my/noema-jupyter-cell-storage nil
   "Storage mode for the current notebook; always ipynb.")
@@ -269,14 +274,48 @@ creation and the new standard `cell.id' are owned by Noema's document API."
     (session . ,(or my/noema-jupyter-cell-session ""))
     (language . ,(or my/noema-jupyter-cell-language ""))))
 
-(defun my/noema-jupyter-cell--api-sync (channel body &optional timeout)
-  "Synchronously call Noema CHANNEL with BODY."
+(defvar-local my/noema-jupyter-cell--project-root-cache nil
+  "Noema project root found for the current notebook, once known.")
+
+(defun my/noema-jupyter-cell--project-root (&optional ensure)
+  "Return the Noema project root that authorizes this notebook, or nil.
+Noema accepts a native notebook outside its notes root only inside a
+validated Noema project (a `noema.toml' ancestor).  When ENSURE is non-nil
+and no project exists for such a notebook, `noema-project-ensure' asks where
+to create one; quitting aborts the command.  Passive requests never ask."
+  (when-let* ((file buffer-file-name)
+              ;; Noema's own contract: logical /fs: paths are not checked
+              ;; against the native notes root.
+              ((not (string-prefix-p "/fs:" file))))
+    (require 'noema-research)
+    (or my/noema-jupyter-cell--project-root-cache
+        (setq my/noema-jupyter-cell--project-root-cache
+              (or (noema-project-root file)
+                  (and ensure
+                       (not (and (bound-and-true-p my/noema--notes-root)
+                                 (file-in-directory-p
+                                  file my/noema--notes-root)))
+                       (noema-project-ensure file)))))))
+
+(defun my/noema-jupyter-cell--with-project-root (body &optional ensure)
+  "Return BODY with this notebook's `projectRoot' when one applies.
+ENSURE is passed to `my/noema-jupyter-cell--project-root'."
+  (if-let* (((not (assq 'projectRoot body)))
+            (root (my/noema-jupyter-cell--project-root ensure)))
+      (append body `((projectRoot . ,(expand-file-name root))))
+    body))
+
+(defun my/noema-jupyter-cell--api-sync (channel body &optional timeout passive)
+  "Synchronously call Noema CHANNEL with BODY.
+PASSIVE requests, such as keystroke introspection, never ask to create a
+Noema project for the notebook."
   (unless (fboundp 'my/noema--api-call-sync)
     (user-error "Noema API bridge is unavailable"))
   (unless (bound-and-true-p my/noema--ready)
     (when (fboundp 'my/noema--ensure-server)
       (my/noema--ensure-server))
     (user-error "Noema Jupyter is starting; try again when the header is ready"))
+  (setq body (my/noema-jupyter-cell--with-project-root body (not passive)))
   (or (my/noema--api-call-sync channel (vector body) timeout)
       (user-error "Noema Jupyter did not answer")))
 
@@ -288,6 +327,7 @@ TIMEOUT is passed to `my/noema-api-call'; channels that run user code need
 one long enough for the whole run, not the default request deadline."
   (unless (fboundp 'my/noema-api-call)
     (user-error "Noema API bridge is unavailable"))
+  (setq body (my/noema-jupyter-cell--with-project-root body t))
   (let ((source-buffer (current-buffer)))
     (if (and (not (bound-and-true-p my/noema--ready))
              (fboundp 'my/noema--ensure-server))
@@ -334,6 +374,34 @@ one long enough for the whole run, not the default request deadline."
   (equal (my/noema-jupyter-cell--file-identity left)
          (my/noema-jupyter-cell--file-identity right)))
 
+(defun my/noema-jupyter-cell--auto-switch-language-mode (language)
+  "Align the source mode with LANGUAGE unless the user chose one explicitly.
+Kernel selection controls the default editor/LSP family, while the explicit
+Editor/LSP command remains an escape hatch for mixed-language notebooks."
+  (when (and (not my/noema-jupyter-cell--editor-mode-manual-p)
+             (stringp language))
+    (let ((mode (my/noema-jupyter-notebook--major-mode language)))
+      (when (and (fboundp mode)
+                 (not (derived-mode-p mode)))
+        (let ((state (list my/noema-jupyter-cell-kernel
+                           my/noema-jupyter-cell-session
+                           my/noema-jupyter-cell-language
+                           my/noema-jupyter-cell-source-file
+                           my/noema-jupyter-cell-kernel-spec
+                           my/noema-jupyter-cell-kernel-spec-error
+                           my/noema-jupyter-cell--kernel-status)))
+          (when my/noema-jupyter-cell-mode
+            (my/noema-jupyter-cell-mode -1))
+          (funcall mode)
+          (setq-local my/noema-jupyter-cell-kernel (nth 0 state)
+                      my/noema-jupyter-cell-session (nth 1 state)
+                      my/noema-jupyter-cell-language (nth 2 state)
+                      my/noema-jupyter-cell-source-file (nth 3 state)
+                      my/noema-jupyter-cell-kernel-spec (nth 4 state)
+                      my/noema-jupyter-cell-kernel-spec-error (nth 5 state)
+                      my/noema-jupyter-cell--kernel-status (nth 6 state))
+          (my/noema-jupyter-cell-mode 1))))))
+
 (defun my/noema-jupyter-cell--apply-session-snapshot (snapshot)
   "Apply Noema's authoritative document SNAPSHOT to the current buffer."
   (when-let* ((document (my/noema-jupyter-notebook--get 'document snapshot)))
@@ -345,7 +413,13 @@ one long enough for the whole run, not the default request deadline."
            (kernel (and kernel-text
                         (not (string-empty-p kernel-text))
                         kernel-text))
-           (language (and language-value (format "%s" language-value)))
+           ;; A gateway event may omit language while still carrying a newly
+           ;; selected kernel.  Derive it from that kernel instead of keeping
+           ;; the previous buffer-local Python value.
+           (language (or (and language-value (format "%s" language-value))
+                         (and kernel
+                              (my/noema-jupyter-notebook--language-for-kernel
+                               kernel))))
            (runtime-changed
             (or (not (equal kernel my/noema-jupyter-cell-kernel))
                 (and language
@@ -363,6 +437,8 @@ one long enough for the whole run, not the default request deadline."
                  (not (string-empty-p (format "%s" source-value))))
         (setq-local my/noema-jupyter-cell-source-file
                     (format "%s" source-value)))
+      (when (and runtime-changed language)
+        (my/noema-jupyter-cell--auto-switch-language-mode language))
       (setq-local my/noema-jupyter-cell--kernel-status
                   (format "%s"
                           (or (my/noema-jupyter-notebook--get
@@ -410,7 +486,8 @@ one long enough for the whole run, not the default request deadline."
     (let ((source-buffer (current-buffer)))
       (my/noema-api-call
        "aaronnote:api:jupyter:script-snapshot"
-       (vector `((scriptFile . ,buffer-file-name)))
+       (vector (my/noema-jupyter-cell--with-project-root
+                `((scriptFile . ,buffer-file-name))))
        (lambda (result error-object)
          (when (buffer-live-p source-buffer)
            (with-current-buffer source-buffer
@@ -670,12 +747,16 @@ This does not change the notebook language, kernelspec, or Noema session."
                                      choices nil t))
          (mode (alist-get selection choices nil nil #'string=)))
     (my/noema-jupyter-notebook-switch-editor-mode mode)
+    (setq-local my/noema-jupyter-cell--editor-mode-manual-p t)
     (message "Noema Jupyter: Emacs mode is %s; kernel unchanged" mode)))
 
 (defun my/noema-jupyter-cell--header-line ()
   "Render Noema-owned Jupyter controls for the current notebook."
   (let ((cell (or my/noema-jupyter-cell-current-id
-                  (plist-get (my/noema-jupyter-cell--bounds-at-point) :id))))
+                  (plist-get (my/noema-jupyter-cell--bounds-at-point) :id)))
+        (lsp-description
+         (and (fboundp 'my/language-server-runtime-description)
+              (my/language-server-runtime-description))))
     (list
      (propertize " Noema Jupyter " 'face 'mode-line-buffer-id)
      (my/noema-jupyter-cell--header-button
@@ -683,6 +764,11 @@ This does not change the notebook language, kernelspec, or Noema session."
               (or my/noema-jupyter-cell-kernel "No Kernel")
               my/noema-jupyter-cell--kernel-status)
       #'my/noema-jupyter-cell-select-kernel "Select a Noema-managed kernel")
+     (when lsp-description
+       (my/noema-jupyter-cell--header-button
+        (format "LSP:%s" lsp-description)
+        #'my/language-server-runtime-refresh
+        "Refresh the kernel-aware language-server runtime"))
      (my/noema-jupyter-cell--header-button
       "Run" #'my/noema-jupyter-cell-run-current "Run current cell in Noema"
       (unless cell 'disabled))
@@ -927,11 +1013,12 @@ An ordinary ipynb uses itself as its source document."
     (user-error "This notebook is not linked to a Noema source note"))
   (my/noema-command
    "jupyter-cell-script-saved"
-   `((file . ,my/noema-jupyter-cell-source-file)
-     (scriptFile . ,buffer-file-name)
-     (kernel . ,(or my/noema-jupyter-cell-kernel ""))
-     (session . ,(or my/noema-jupyter-cell-session ""))
-     (storage . "ipynb")))
+   (my/noema-jupyter-cell--with-project-root
+    `((file . ,my/noema-jupyter-cell-source-file)
+      (scriptFile . ,buffer-file-name)
+      (kernel . ,(or my/noema-jupyter-cell-kernel ""))
+      (session . ,(or my/noema-jupyter-cell-session ""))
+      (storage . "ipynb"))))
   t)
 
 (defun my/noema-jupyter-cell-after-save-h ()
@@ -1139,7 +1226,7 @@ surface transport errors and use the explicit-inspection timeout."
                        (let ((reply
                               (while-no-input
                                 (my/noema-jupyter-cell--api-sync
-                                 channel body timeout))))
+                                 channel body timeout t))))
                          (if (eq reply t)
                              nil
                            (my/noema-jupyter-cell--introspect-succeeded)

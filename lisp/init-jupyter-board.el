@@ -22,6 +22,12 @@
   "Jupyter kernelspec and remote kernel management."
   :group 'tools)
 
+(defcustom my/jupyter-board-show-advanced-default nil
+  "Whether a newly opened Jupyter Board shows technical resources.
+The default view keeps remote profiles and active sessions prominent."
+  :type 'boolean
+  :group 'my/jupyter-board)
+
 (defconst my/jupyter-board-buffer-name "*Jupyter Board*")
 (defconst my/jupyter-board-log-buffer-name "*Jupyter Board Log*")
 (defconst my/jupyter-board-detail-buffer-name "*Jupyter Kernel Detail*")
@@ -34,8 +40,23 @@
 (defvar-local my/jupyter-board--target nil)
 (defvar-local my/jupyter-board--source-buffer nil)
 (defvar-local my/jupyter-board--refresh-generation 0)
+(defvar-local my/jupyter-board--show-advanced nil)
+(defvar-local my/jupyter-board--show-stale-connections nil)
 (defvar my/jupyter-board--edit-origin nil)
 (defvar my/jupyter-board--edit-target nil)
+(defvar my/jupyter-board-remote-host-history nil)
+(defvar my/jupyter-board-remote-name-history nil)
+(defvar my/jupyter-board-remote-workdir-history nil)
+(defvar my/jupyter-board-remote-command-history nil)
+
+(defconst my/jupyter-board-course-pytorch-profile
+  '(:name "Python 3.13 PyTorch CUDA"
+    :workdir "/home/hc/Desktop/9444"
+    :interpreter "/home/hc/Desktop/9444/.conda/bin/python"
+    :kernel-command "/home/hc/Desktop/9444/.conda/bin/python -m ipykernel_launcher -f {connection_file}"
+    :language "python"
+    :group "core")
+  "The known-good remote profile for the 9444 CUDA/conda environment.")
 
 (define-derived-mode my/jupyter-board-mode aaron-ui-board-mode "Jupyter-Board"
   "Major mode for the Jupyter management board.")
@@ -117,7 +138,10 @@
 
 (defun my/jupyter-board--current-entry ()
   "Return the kernel entry at point."
-  (get-text-property (point) 'my/jupyter-board-entry))
+  (or (get-text-property (point) 'my/jupyter-board-entry)
+      (get-text-property (line-beginning-position) 'my/jupyter-board-entry)
+      (and (> (point) (point-min))
+           (get-text-property (1- (point)) 'my/jupyter-board-entry))))
 
 (defun my/jupyter-board--require-entry (&optional remote-only)
   "Return current entry, requiring a remote entry when REMOTE-ONLY."
@@ -175,27 +199,30 @@
                                    my/jupyter-remote-ikernel-source-directory))
     (insert "   ")
     (aaron-ui-board-insert-actions
-     '((:label "Target" :command my/jupyter-board-select-target :primary t
+     `((:label "Target" :command my/jupyter-board-select-target :primary t
                :help "Select local or Remote target")
        (:label "Refresh" :command my/jupyter-board-refresh :help "Refresh snapshots")
        (:label "Doctor" :command my/jupyter-board-doctor :help "Open target doctor")
+       ,@(when local
+           '((:label "Reinstall tool" :command my/jupyter-board-reinstall
+                     :help "Install the vendored remote_ikernel into the configured Python")))
        (:label "Log" :command my/jupyter-board-open-log :help "Open command log")))
     (insert "\n\n")))
 
 (defun my/jupyter-board--entry-detail (entry)
-  "Return a compact detail string for ENTRY."
+  "Return a compact, user-facing detail string for ENTRY."
   (if (plist-get entry :remote)
       (string-join
        (delq nil
-             (list (and (plist-get entry :interface)
-                        (format "interface=%s" (plist-get entry :interface)))
-                   (and (plist-get entry :host)
-                        (format "host=%s" (plist-get entry :host)))
-                   (and (plist-get entry :workdir)
-                        (format "workdir=%s" (plist-get entry :workdir)))
+             (list (and (plist-get entry :workdir)
+                        (format "Folder: %s" (plist-get entry :workdir)))
                    (and (plist-get entry :kernel-command)
-                        (format "command=%s" (plist-get entry :kernel-command)))))
-       "  ")
+                        (format "Starts: %s" (plist-get entry :kernel-command)))
+                   (when-let* ((health (plist-get entry :health))
+                               (status (plist-get health :status))
+                               ((eq status 'error)))
+                     (format "Needs repair: %s" (plist-get health :detail)))))
+       "  ·  ")
     (string-join
      (delq nil
            (list (format "%s" (plist-get entry :resource-dir))
@@ -204,25 +231,82 @@
                            (plist-get health :detail)))))
      "  ")))
 
+(defun my/jupyter-board--remote-interface-label (entry)
+  "Return a readable interface label for remote kernelspec ENTRY."
+  (let ((interface (plist-get entry :interface)))
+    (pcase interface
+      ("ssh" "SSH")
+      ("pbs" "PBS")
+      ("sge" "Grid Engine")
+      ("sge_qrsh" "Grid Engine / qrsh")
+      ("slurm" "Slurm")
+      ("lsf" "LSF")
+      ("local" "Local launcher")
+      (_ (if (and interface (not (string-empty-p interface)))
+             interface
+           "Remote")))))
+
+(defun my/jupyter-board--insert-entry-actions (entry actions)
+  "Insert ACTIONS for ENTRY and make the buttons entry-aware."
+  (let ((start (point)))
+    (insert "      ")
+    (aaron-ui-board-insert-actions actions)
+    (add-text-properties
+     start (point)
+     (list 'my/jupyter-board-entry entry
+           'aaron-ui-board--item-id
+           (or (plist-get entry :id) (plist-get entry :name))))
+    (insert "\n\n")))
+
 (defun my/jupyter-board--insert-entry (entry)
   "Insert one kernelspec ENTRY."
-  (aaron-ui-board-insert-row
-   :id (or (plist-get entry :id) (plist-get entry :name))
-   :icon (if (plist-get entry :remote) 'remote 'jupyter)
-   :badge (if (plist-get entry :remote)
-              (upcase (plist-get entry :group))
-            (or (plist-get entry :language) "LOCAL"))
-   :badge-tone (pcase (plist-get entry :group)
-                 ("core" 'success)
-                 ("temporary" 'warning)
-                 (_ 'muted))
-   :title (plist-get entry :display-name)
-   :meta (format "%s  %s" (plist-get entry :name)
-                 (or (plist-get entry :language) ""))
-   :detail (my/jupyter-board--entry-detail entry)
-   :action (lambda (_button) (my/jupyter-board-describe))
-   :help "RET details; r REPL; e edit; d delete"
-   :properties (list 'my/jupyter-board-entry entry)))
+  (let* ((remote (plist-get entry :remote))
+         (health (plist-get (plist-get entry :health) :status))
+         (host (plist-get entry :host))
+         (meta (if remote
+                   (string-join
+                    (delq nil
+                          (list (my/jupyter-board--remote-interface-label entry)
+                                host
+                                (unless (string-empty-p
+                                         (or (plist-get entry :language) ""))
+                                  (plist-get entry :language))
+                                (when (eq health 'error) "launcher unavailable")))
+                    "  ·  ")
+                 (format "%s  %s" (plist-get entry :name)
+                         (or (plist-get entry :language) "")))))
+    (aaron-ui-board-insert-row
+     :id (or (plist-get entry :id) (plist-get entry :name))
+     :icon (if remote 'server 'jupyter)
+     :badge (if remote
+                (if (equal (plist-get entry :group) "core") "SAVED" "TEMP")
+              (upcase (or (plist-get entry :language) "LOCAL")))
+     :badge-tone (if remote
+                     (if (equal (plist-get entry :group) "core") 'success 'warning)
+                   'muted)
+     :title (plist-get entry :display-name)
+     :meta meta
+     :detail (my/jupyter-board--entry-detail entry)
+     :action (lambda (_button) (my/jupyter-board-describe))
+     :help (if remote
+               "RET: details; use the buttons below to connect or manage"
+             "RET: details; r: open REPL; d: delete")
+     :properties (list 'my/jupyter-board-entry entry))
+    (when remote
+      (my/jupyter-board--insert-entry-actions
+       entry
+       `((:label "Open REPL" :command my/jupyter-board-repl :primary t
+                 :help "Start this remote kernel and open its Emacs REPL")
+         (:label "Edit" :command my/jupyter-remote-edit-guided
+                 :help "Edit the common settings with a guided form")
+         (:label ,(if (equal (plist-get entry :group) "core")
+                      "Make temporary" "Keep profile")
+                 :command my/jupyter-board-toggle-group
+                 :help "Toggle whether bulk cleanup may remove this profile")
+         (:label "Details" :command my/jupyter-board-describe
+                 :help "Show the complete kernelspec")
+         (:label "Delete" :command my/jupyter-board-delete
+                 :help "Delete this profile after confirmation"))))))
 
 (defun my/jupyter-board--insert-runtime (entry)
   "Insert one live runtime ENTRY."
@@ -249,8 +333,20 @@
                   (when (plist-get entry :state-lost) "state lost")))
       "  ")
      :action (lambda (_button) (my/jupyter-board-describe))
-     :help "RET details; i interrupt; R restart; k shutdown; o open"
-     :properties (list 'my/jupyter-board-entry entry))))
+     :help "RET: details; use the buttons below to control this session"
+     :properties (list 'my/jupyter-board-entry entry))
+    (my/jupyter-board--insert-entry-actions
+     entry
+     `((:label "Open" :command my/jupyter-board-repl :primary t
+               :help "Open the REPL or reconnect through its connection file")
+       (:label "Interrupt" :command my/jupyter-board-interrupt
+               :help "Interrupt the current execution")
+       ,@(unless (plist-get entry :attached)
+           '((:label "Restart" :command my/jupyter-board-restart
+                     :help "Restart this runtime after confirmation")))
+       (:label ,(if (plist-get entry :attached) "Disconnect" "Shut down")
+               :command my/jupyter-board-shutdown
+               :help "End or disconnect this runtime after confirmation")))))
 
 (defun my/jupyter-board--insert-connection (entry)
   "Insert one local connection-file ENTRY."
@@ -269,8 +365,16 @@
                                          "%Y-%m-%d %H:%M"
                                          (plist-get entry :mtime))) ""))
      :action (lambda (_button) (my/jupyter-board-describe))
-     :help "r connect REPL; o open JSON; d delete"
-     :properties (list 'my/jupyter-board-entry entry))))
+     :help "RET: details; use the buttons below to connect or inspect"
+     :properties (list 'my/jupyter-board-entry entry))
+    (my/jupyter-board--insert-entry-actions
+     entry
+     '((:label "Connect" :command my/jupyter-board-repl :primary t
+               :help "Connect an Emacs REPL to this kernel")
+       (:label "Open JSON" :command my/jupyter-board-open-resource
+               :help "Open the connection file")
+       (:label "Delete" :command my/jupyter-board-delete
+               :help "Delete the connection file after confirmation")))))
 
 (defun my/jupyter-board--insert-group (title entries &optional tone)
   "Insert TITLE section containing ENTRIES, with optional badge TONE."
@@ -278,7 +382,7 @@
   (if entries
       (progn
         (mapc #'my/jupyter-board--insert-entry entries)
-        (insert "\n"))
+        (unless (plist-get (car entries) :remote) (insert "\n")))
     (aaron-ui-board-insert-empty "No kernels in this group.")))
 
 (defun my/jupyter-board--broker-by-host-id (brokers host-id)
@@ -359,15 +463,137 @@
   "Render loading and provider error state."
   (when (or my/jupyter-board--loading
             (cl-some #'cdr my/jupyter-board--errors))
-    (aaron-ui-board-insert-section "Discovery")
+    (aaron-ui-board-insert-section "Loading & Problems")
     (dolist (provider my/jupyter-board--loading)
-      (aaron-ui-board-insert-field (format "%s" provider) "loading…"
+      (aaron-ui-board-insert-field
+       (pcase provider
+         ('specs "Kernel profiles")
+         ('connections "Connections")
+         ('noema "Live sessions")
+         (_ (format "%s" provider)))
+       "loading…"
                                    'aaron-ui-board-dim))
     (dolist (entry my/jupyter-board--errors)
       (when (cdr entry)
-        (aaron-ui-board-insert-field (format "%s" (car entry)) (cdr entry)
-                                     'aaron-ui-board-bad)))
+        (aaron-ui-board-insert-field
+         (pcase (car entry)
+           ('specs "Kernel profiles")
+           ('connections "Connections")
+           ('noema "Live sessions")
+           (_ (format "%s" (car entry))))
+         (cdr entry) 'aaron-ui-board-bad)))
+    (insert "   ")
+    (aaron-ui-board-insert-actions
+     '((:label "Diagnostics" :command my/jupyter-board-doctor
+               :help "Inspect the selected target")
+       (:label "Command log" :command my/jupyter-board-open-log
+               :help "Open output from management commands")))
     (insert "\n")))
+
+(defun my/jupyter-board--insert-quick-start (remote-count)
+  "Insert the short usage path for REMOTE-COUNT configured profiles."
+  (let* ((local (my/jupyter-management-local-target-p my/jupyter-board--target))
+         (program (my/jupyter-management-command
+                   my/jupyter-board--target 'remote-ikernel))
+         (ready (or (not local) (and program (file-executable-p program)))))
+    (aaron-ui-board-insert-section "Start Here")
+    (if (> remote-count 0)
+        (progn
+          (aaron-ui-board-insert-field
+           "1 · Connect" "Choose Open REPL on a remote profile below.")
+          (aaron-ui-board-insert-field
+           "2 · Work" "Use the new REPL from your source buffer or notebook.")
+          (aaron-ui-board-insert-field
+           "Profiles stored"
+           (format "%s — this is where profiles are stored, not necessarily the compute host."
+                   (my/jupyter-management-target-label my/jupyter-board--target))))
+      (aaron-ui-board-insert-field
+       "1 · Add" "Create an SSH profile for the machine that will run Python.")
+      (aaron-ui-board-insert-field
+       "2 · Connect" "Open its REPL; this starts the remote kernel and SSH tunnels.")
+      (aaron-ui-board-insert-field
+       "3 · Work" "Evaluate code in the REPL or from an associated source buffer."))
+    (aaron-ui-board-insert-field
+     "Launcher"
+     (cond (ready (if local "Ready" "Checked on the selected target when used"))
+           (t "Setup needed — remote_ikernel is not installed"))
+     (if ready 'aaron-ui-board-good 'aaron-ui-board-bad))
+    (insert "   ")
+    (aaron-ui-board-insert-actions
+     `((:label "Quick Add SSH" :command my/jupyter-remote-quick-add :primary t
+               :help "Create a normal SSH/Python profile with a guided form")
+       (:label "Usage Guide" :command my/jupyter-board-help
+               :help "Explain setup, targets, profiles, and daily use")
+       (:label "Advanced Add" :command my/jupyter-remote-add
+               :help "Configure schedulers, jump hosts, and custom launch commands")
+       ,@(when (and local (not ready))
+           '((:label "Install remote_ikernel" :command my/jupyter-board-reinstall
+                     :help "Install the vendored launcher into the configured Python")))))
+    (insert "\n\n")))
+
+(defun my/jupyter-board--insert-remote-profiles (entries)
+  "Insert the primary remote-kernel management section for ENTRIES."
+  (aaron-ui-board-insert-section "Remote Kernels" (length entries) 'success)
+  (insert "   ")
+  (aaron-ui-board-insert-actions
+   `((:label "Add SSH Profile" :command my/jupyter-remote-quick-add :primary t
+             :help "Add a normal SSH/Python remote kernel")
+     (:label "Add Course PyTorch" :command my/jupyter-board-add-course-pytorch
+             :help "Add the /home/hc/Desktop/9444 Python 3.13 CUDA environment")
+     (:label "Advanced Add" :command my/jupyter-remote-add
+             :help "Add a scheduler, jump-host, or custom launcher profile")
+     (:label "Refresh Profiles" :command my/jupyter-board-refresh
+             :help "Reload kernelspec profiles from the selected target")
+     (:label "Agent / CLI Guide" :command my/jupyter-board-open-agent-guide
+             :help "Open the non-interactive management API documentation")
+     ,@(when (cl-some (lambda (entry)
+                        (equal (plist-get entry :group) "temporary"))
+                      entries)
+         '((:label "Clean TEMP" :command my/jupyter-board-clean-temporary
+                   :help "Delete all temporary profiles after confirmation")))))
+  (insert "\n\n")
+  (if entries
+      (progn
+        (insert "   "
+                (propertize
+                 "SAVED profiles are protected; TEMP profiles are eligible for bulk cleanup."
+                 'face 'aaron-ui-board-meta)
+                "\n\n")
+        (mapc #'my/jupyter-board--insert-entry entries))
+    (aaron-ui-board-insert-empty
+     "No remote profile is configured yet. Choose Add SSH Profile above.")))
+
+(defun my/jupyter-board--insert-advanced
+    (connections project other)
+  "Insert technical CONNECTIONS, PROJECT, and OTHER kernel resources."
+  (my/jupyter-board--insert-context)
+  (when (my/jupyter-management-local-target-p my/jupyter-board--target)
+    (let* ((stale (cl-remove-if-not
+                   (lambda (entry) (plist-get entry :stale)) connections))
+           (current (cl-remove-if
+                     (lambda (entry) (plist-get entry :stale)) connections))
+           (visible (if my/jupyter-board--show-stale-connections
+                        connections current)))
+      (aaron-ui-board-insert-section "Connection Files"
+                                     (length connections) 'warning)
+      (when stale
+        (insert "   ")
+        (aaron-ui-board-insert-actions
+         `((:label ,(if my/jupyter-board--show-stale-connections
+                        "Hide old files"
+                      (format "Show %d old files" (length stale)))
+                   :command my/jupyter-board-toggle-stale-connections
+                   :help "Old connection files are hidden to keep this page manageable")))
+        (insert "\n\n"))
+      (if visible
+          (mapc #'my/jupyter-board--insert-connection visible)
+        (aaron-ui-board-insert-empty
+         (if stale
+             (format "No current connection files; %d old files are hidden."
+                     (length stale))
+           "No local connection files.")))))
+  (my/jupyter-board--insert-group "Noema Project Kernels" project 'success)
+  (my/jupyter-board--insert-group "Local / Target Kernels" other 'muted))
 
 (defun my/jupyter-board--render ()
   "Render the current passive Jupyter snapshots."
@@ -376,48 +602,63 @@
          (project (cl-remove-if-not
                    (lambda (entry) (eq (plist-get entry :origin) 'noema-project))
                    my/jupyter-board--entries))
-         (core (cl-remove-if-not (lambda (entry)
-                                   (equal (plist-get entry :group) "core")) remote))
-         (temporary (cl-remove-if-not (lambda (entry)
-                                        (equal (plist-get entry :group) "temporary")) remote))
          (other (cl-remove-if (lambda (entry)
                                 (or (plist-get entry :remote)
                                     (eq (plist-get entry :origin) 'noema-project)))
                               my/jupyter-board--entries)))
     (let ((inhibit-read-only t))
+      (aaron-ui-board-set-header
+       "Remote Kernels" 'server
+       (format "Profiles on %s"
+               (my/jupyter-management-target-label my/jupyter-board--target)))
       (aaron-ui-board-render
        (lambda ()
          (aaron-ui-board-insert-page-header
-          "Jupyter Board" :icon 'jupyter
-          :subtitle "Passive kernelspec, runtime, connection and target management"
-          :stats `((,(format "%d specs" (length my/jupyter-board--entries)) . info)
-                   (,(format "%d runtimes" (length my/jupyter-board--runtimes)) . success)
-                   (,(format "%d connections" (length my/jupyter-board--connections)) . warning))
-          :actions '((:label "Target" :command my/jupyter-board-select-target :primary t)
-                     (:label "Refresh" :command my/jupyter-board-refresh)
-                     (:label "Add Remote" :command my/jupyter-remote-add)
-                     (:label "Clean Idle" :command my/jupyter-board-clean-idle-runtimes)))
-         (my/jupyter-board--insert-context)
+          "Remote Kernel Manager" :icon 'server
+          :subtitle (format "Run Jupyter code on another machine · profiles stored on %s"
+                            (my/jupyter-management-target-label
+                             my/jupyter-board--target))
+          :stats `((,(format "%d remote profile%s" (length remote)
+                             (if (= (length remote) 1) "" "s")) . info)
+                   (,(format "%d active session%s" (length my/jupyter-board--runtimes)
+                             (if (= (length my/jupyter-board--runtimes) 1) "" "s"))
+                    . success))
+          :actions `((:label "Quick Add SSH" :command my/jupyter-remote-quick-add
+                             :primary t :help "Create an SSH remote kernel profile")
+                     (:label "Target" :command my/jupyter-board-select-target
+                             :help "Choose where kernelspec profiles are stored")
+                     (:label "Refresh" :command my/jupyter-board-refresh
+                             :help "Refresh profiles and live sessions")
+                     (:label "Guide" :command my/jupyter-board-help
+                             :help "Open the usage guide")
+                     (:label ,(if my/jupyter-board--show-advanced
+                                  "Hide technical" "Show technical")
+                             :command my/jupyter-board-toggle-advanced
+                             :help "Toggle local kernels, connection files, and diagnostics")))
          (my/jupyter-board--insert-provider-errors)
-         (aaron-ui-board-insert-section "Live Runtimes"
+         (my/jupyter-board--insert-quick-start (length remote))
+         (my/jupyter-board--insert-remote-profiles remote)
+         (aaron-ui-board-insert-section "Active Sessions"
                                         (length my/jupyter-board--runtimes) 'success)
          (if my/jupyter-board--runtimes
-             (progn (mapc #'my/jupyter-board--insert-runtime
-                          my/jupyter-board--runtimes) (insert "\n"))
-           (aaron-ui-board-insert-empty "No active runtime snapshots."))
-         (when (my/jupyter-management-local-target-p my/jupyter-board--target)
-           (aaron-ui-board-insert-section "Connection Files"
-                                          (length my/jupyter-board--connections) 'warning)
-           (if my/jupyter-board--connections
-               (progn (mapc #'my/jupyter-board--insert-connection
-                            my/jupyter-board--connections) (insert "\n"))
-             (aaron-ui-board-insert-empty "No local connection files.")))
-         (my/jupyter-board--insert-group "Noema Project Kernels" project 'success)
-         (my/jupyter-board--insert-group "Core Remote Kernels" core 'success)
-         (my/jupyter-board--insert-group "Temporary Remote Kernels" temporary 'warning)
-         (my/jupyter-board--insert-group "Local / Target Kernels" other 'muted)
+             (mapc #'my/jupyter-board--insert-runtime my/jupyter-board--runtimes)
+           (aaron-ui-board-insert-empty
+            "No session is running. Open a remote profile when you are ready."))
+         (if my/jupyter-board--show-advanced
+             (my/jupyter-board--insert-advanced
+              my/jupyter-board--connections project other)
+           (progn
+             (aaron-ui-board-insert-section "Technical Resources")
+             (insert "   ")
+             (aaron-ui-board-insert-actions
+              '((:label "Show kernels, connections & diagnostics"
+                        :command my/jupyter-board-toggle-advanced
+                        :help "Expand the technical management sections")
+                (:label "Commands" :command my/jupyter-board-dispatch
+                        :help "Open every Jupyter Board command")))
+             (insert "\n\n")))
          (aaron-ui-board-insert-key-hints
-          "Keys: T target  g refresh  RET detail  r REPL/connect  i interrupt  R restart  k shutdown  a/e/m remote  p install Python  d delete  o open  D doctor  ? menu"))))))
+          "Keys: a quick add  e edit  r open REPL  g refresh  T target  v technical view  ? guide  M all commands"))))))
 
 (defun my/jupyter-board-refresh ()
   "Refresh all Jupyter providers without starting services or kernels."
@@ -470,14 +711,79 @@
         (my/jupyter-board-mode)
         (setq-local my/jupyter-board--source-buffer source
                     my/jupyter-board--target (remote-get-target "local")
+                    my/jupyter-board--show-advanced
+                    my/jupyter-board-show-advanced-default
                     aaron-ui-board-refresh-function #'my/jupyter-board-refresh)
-        (aaron-ui-board-set-header "Jupyter Board" 'jupyter)
-        (use-local-map (copy-keymap special-mode-map))
+        (aaron-ui-board-set-header "Remote Kernels" 'server)
+        (use-local-map (copy-keymap aaron-ui-board-mode-map))
         (my/jupyter-board--setup-keys))
       (unless (eq source buffer)
         (setq my/jupyter-board--source-buffer source))
       (my/jupyter-board-refresh))
     (pop-to-buffer buffer)))
+
+(defun my/jupyter-board-toggle-advanced ()
+  "Toggle technical Jupyter resources in the current board."
+  (interactive)
+  (unless (derived-mode-p 'my/jupyter-board-mode)
+    (user-error "Not in the Remote Kernel Manager"))
+  (setq my/jupyter-board--show-advanced
+        (not my/jupyter-board--show-advanced))
+  (my/jupyter-board--render))
+
+(defun my/jupyter-board-toggle-stale-connections ()
+  "Toggle visibility of old local Jupyter connection files."
+  (interactive)
+  (unless (derived-mode-p 'my/jupyter-board-mode)
+    (user-error "Not in the Remote Kernel Manager"))
+  (setq my/jupyter-board--show-stale-connections
+        (not my/jupyter-board--show-stale-connections))
+  (my/jupyter-board--render))
+
+(defun my/jupyter-board-help ()
+  "Show a practical guide to remote kernels in Emacs."
+  (interactive)
+  (with-help-window "*Remote Kernel Guide*"
+    (princ "Remote Kernel Manager\n\n")
+    (princ "最常用的 SSH 工作流\n\n")
+    (princ "1. 通常保持 Target 为 Local。Target 表示 kernelspec 配置保存在哪里；")
+    (princ "真正运行计算的服务器由 SSH host 决定。\n")
+    (princ "2. 选择 Quick Add SSH，填写 user@host（非标准端口可写 user@host:2222）。\n")
+    (princ "3. 远端需要能运行 Python 和 ipykernel。默认启动命令适用于常见 Python 3 环境。\n")
+    (princ "4. 在对应 profile 下选择 Open REPL。Emacs 会启动远端 kernel、建立五个 Jupyter 端口的 SSH tunnel，并打开 REPL。\n")
+    (princ "5. 从 Python 源码 buffer 打开 Board 后，Open REPL 会自动关联该 buffer。\n")
+    (princ "   C-c C-c 运行当前行/选区，C-c C-b 运行整个 buffer，C-c C-z 跳到 REPL。\n\n")
+    (princ "首次使用前\n\n")
+    (princ "• 建议先在终端确认 ssh user@host 能登录，并配置 SSH key；交互式密码在后台启动时不够稳定。\n")
+    (princ "• 在服务器确认 python3 -c \"import ipykernel\" 成功。\n")
+    (princ "• 如果本地 remote_ikernel 未安装，展开 Technical Resources 后使用 Reinstall tool。\n\n")
+    (princ "Profile 类型\n\n")
+    (princ "• SAVED：长期保留，批量清理不会删除，适合整学期使用。\n")
+    (princ "• TEMP：试验配置，可从页面一次清理。\n")
+    (princ "• Slurm/PBS/SGE、jump hosts 和自定义启动命令请使用 Advanced Add。\n\n")
+    (princ "排错\n\n")
+    (princ "先查看 Diagnostics 和 Command log。连接失败不会静默改用本地 kernel；")
+    (princ "修好 SSH、远端 Python 或工作目录后，再次 Open REPL 即可。\n")))
+
+(defun my/jupyter-board-open-agent-guide ()
+  "Show the non-interactive API intended for an agent or background task."
+  (interactive)
+  (with-help-window "*Remote Kernel Agent Guide*"
+    (princ "Remote Kernel Manager · Agent API\n\n")
+    (princ "不要模拟点击按钮，也不要调用 transient。后台任务直接调用：\n\n")
+    (princ "  (my/jupyter-board-add-course-pytorch\n")
+    (princ "   :host \"Aaron-WSL2\"\n")
+    (princ "   :callback (lambda (output error) ...))\n\n")
+    (princ "这个函数不会读取 minibuffer，也不会弹出确认框。它会在当前 target（默认 Local）\n")
+    (princ "上创建/替换一个 SAVED profile，并把命令输出写入 *Jupyter Board Log*。\n\n")
+    (princ "预设值\n\n")
+    (princ "  name        Python 3.13 PyTorch CUDA\n")
+    (princ "  workdir     /home/hc/Desktop/9444\n")
+    (princ "  interpreter /home/hc/Desktop/9444/.conda/bin/python\n")
+    (princ "  kernel_cmd  <interpreter> -m ipykernel_launcher -f {connection_file}\n")
+    (princ "  group       core / SAVED\n\n")
+    (princ "host 必须是 SSH config 中的别名，或 user@host[:port]。\n")
+    (princ "成功后刷新 Board，在 profile 上点击 Open REPL 即可启动远端 CUDA kernel。\n")))
 
 (defun my/jupyter-board-open-log ()
   "Open the Jupyter Board command log."
@@ -778,6 +1084,20 @@
        (plist-get entry :target) 'remote-ikernel
        (list "manage" "--set-group" (plist-get entry :name) group)))))
 
+(defun my/jupyter-board-toggle-group ()
+  "Toggle whether the current remote profile is saved or temporary."
+  (interactive)
+  (let* ((entry (my/jupyter-board--require-entry t))
+         (current (plist-get entry :group))
+         (group (if (equal current "core") "temporary" "core")))
+    (when (yes-or-no-p
+           (if (equal group "core")
+               "Keep this profile and protect it from bulk cleanup? "
+             "Make this profile temporary and eligible for bulk cleanup? "))
+      (my/jupyter-board--start-target-command
+       (plist-get entry :target) 'remote-ikernel
+       (list "manage" "--set-group" (plist-get entry :name) group)))))
+
 (defun my/jupyter-board-clean-temporary ()
   "Delete all Temporary remote kernels after confirmation."
   (interactive)
@@ -905,42 +1225,197 @@
   (when-let* ((arg (cl-find-if (lambda (item) (string-prefix-p prefix item)) args)))
     (substring arg (length prefix))))
 
+(defun my/jupyter-board--replace-arg (args prefix value)
+  "In ARGS, replace PREFIX with VALUE or remove it when VALUE is empty."
+  (let ((rest (cl-remove-if (lambda (arg) (string-prefix-p prefix arg)) args)))
+    (if (and value (not (string-empty-p value)))
+        (append rest (list (concat prefix value)))
+      rest)))
+
+(defun my/jupyter-board--read-required (prompt default history)
+  "Read a non-empty value using PROMPT, DEFAULT, and HISTORY."
+  (let ((value (string-trim (read-string prompt default history))))
+    (when (string-empty-p value)
+      (user-error "This value is required"))
+    value))
+
+(defun my/jupyter-board--validate-remote-args (args)
+  "Validate remote_ikernel management ARGS before changing a profile."
+  (let ((interface (my/jupyter-board--arg-value args "--interface="))
+        (name (my/jupyter-board--arg-value args "--name="))
+        (command (my/jupyter-board--arg-value args "--kernel_cmd="))
+        (host (my/jupyter-board--arg-value args "--host="))
+        (cpus (my/jupyter-board--arg-value args "--cpus=")))
+    (unless (member interface '("ssh" "local" "pbs" "sge" "sge_qrsh" "slurm" "lsf"))
+      (user-error "Choose a supported launch interface"))
+    (unless (and name (not (string-empty-p (string-trim name))))
+      (user-error "Profile name is required"))
+    (when (string-match-p "[\n\r]" name)
+      (user-error "Profile name cannot contain a newline"))
+    (unless (and command (not (string-empty-p (string-trim command))))
+      (user-error "Remote kernel command is required"))
+    (unless (string-match-p
+             "{\\(?:host_\\)?connection_file}" command)
+      (user-error
+       "Kernel command must contain {connection_file} so Jupyter can connect"))
+    (when (equal interface "ssh")
+      (unless (and host (not (string-empty-p (string-trim host))))
+        (user-error "SSH host is required"))
+      (when (string-match-p "[[:space:]\n\r]" host)
+        (user-error "SSH host cannot contain whitespace; use user@host:port")))
+    (when (and cpus
+               (not (and (string-match-p "\\`[0-9]+\\'" cpus)
+                         (> (string-to-number cpus) 0))))
+      (user-error "CPU count must be a positive integer"))
+    t))
+
+(defun my/jupyter-board--save-remote-profile (target args &optional origin)
+  "Save remote profile ARGS on TARGET, replacing ORIGIN when renamed."
+  (my/jupyter-board--validate-remote-args args)
+  (my/jupyter-board--start-target-command
+   target 'remote-ikernel
+   (append '("manage" "--add")
+           (my/jupyter-board--remote-args-normalize args))
+   (lambda (output)
+     (when (and origin
+                (string-match "Added kernel \\['\\([^']+\\)'\\]" output))
+       (let ((created (match-string 1 output)))
+         (when (and (not (equal created origin))
+                    (yes-or-no-p
+                     (format "Profile is now %s. Delete its old copy %s? "
+                             created origin)))
+           (my/jupyter-board--start-target-command
+            target 'remote-ikernel
+            (list "manage" "--delete" origin))))))))
+
+(defun my/jupyter-board--remote-wizard (&optional entry)
+  "Create an SSH profile, or edit SSH profile ENTRY, with guided prompts."
+  (let* ((editing (and entry t))
+         (target (or (plist-get entry :target)
+                     (and (boundp 'my/jupyter-board--target)
+                          my/jupyter-board--target)
+                     (remote-get-target "local")))
+         (base (if entry
+                   (my/jupyter-board--transient-config-args entry)
+                 '("--interface=ssh" "--group=core" "--language=python")))
+         (interface (or (my/jupyter-board--arg-value base "--interface=") "ssh")))
+    (when (my/jupyter-management-local-target-p target)
+      (let ((program (my/jupyter-management-command target 'remote-ikernel)))
+        (unless (and program (file-executable-p program))
+          (user-error
+           "remote_ikernel is not installed; show Technical Resources and choose Reinstall tool"))))
+    (if (and editing (not (equal interface "ssh")))
+        (progn
+          (message "Scheduler profiles use the advanced editor")
+          (my/jupyter-remote-edit))
+      (let* ((host (my/jupyter-board--read-required
+                    "SSH host (user@host or user@host:port): "
+                    (my/jupyter-board--arg-value base "--host=")
+                    'my/jupyter-board-remote-host-history))
+             (name (my/jupyter-board--read-required
+                    "Profile name shown in the kernel picker: "
+                    (or (my/jupyter-board--arg-value base "--name=") "Python")
+                    'my/jupyter-board-remote-name-history))
+             (workdir (string-trim
+                       (read-string
+                        "Remote working directory (optional): "
+                        (my/jupyter-board--arg-value base "--workdir=")
+                        'my/jupyter-board-remote-workdir-history)))
+             (command
+              (my/jupyter-board--read-required
+               "Remote kernel command: "
+               (or (my/jupyter-board--arg-value base "--kernel_cmd=")
+                   "python3 -m ipykernel_launcher -f {connection_file}")
+               'my/jupyter-board-remote-command-history))
+             (language (or (my/jupyter-board--arg-value base "--language=")
+                           (plist-get entry :language)
+                           "python"))
+             (current-group (or (my/jupyter-board--arg-value base "--group=")
+                                "core"))
+             (lifetime
+              (completing-read
+               "Profile lifetime: " '("Saved (protected)" "Temporary") nil t nil nil
+               (if (equal current-group "temporary")
+                   "Temporary" "Saved (protected)")))
+             (group (if (string-prefix-p "Temporary" lifetime)
+                        "temporary" "core"))
+             (args base))
+        (dolist (pair `(("--interface=" . "ssh")
+                        ("--host=" . ,host)
+                        ("--name=" . ,name)
+                        ("--language=" . ,language)
+                        ("--group=" . ,group)
+                        ("--workdir=" . ,workdir)
+                        ("--kernel_cmd=" . ,command)))
+          (setq args (my/jupyter-board--replace-arg args (car pair) (cdr pair))))
+        (my/jupyter-board--validate-remote-args args)
+        (when (yes-or-no-p
+               (format "%s '%s' on %s%s? "
+                       (if editing "Update" "Create") name host
+                       (if (string-empty-p workdir) ""
+                         (format " in %s" workdir))))
+          (my/jupyter-board--save-remote-profile
+           target args (plist-get entry :name)))))))
+
+(defun my/jupyter-remote-quick-add ()
+  "Create a normal SSH remote-kernel profile with guided prompts."
+  (interactive)
+  (my/jupyter-board--remote-wizard))
+
+(defun my/jupyter-remote-edit-guided ()
+  "Edit the current SSH profile with guided prompts."
+  (interactive)
+  (my/jupyter-board--remote-wizard (my/jupyter-board--require-entry t)))
+
+(cl-defun my/jupyter-board-add-course-pytorch
+    (&key host target callback)
+  "Add the 9444 Python 3.13/PyTorch CUDA profile without prompting.
+HOST is an SSH alias or user@host[:port].  TARGET is where the kernelspec
+is stored and defaults to the current Board target or Local.  CALLBACK,
+when supplied, receives OUTPUT and nil after the asynchronous command
+completes successfully.  This entry point is intended for agents and
+background tasks; it never reads the minibuffer or asks for confirmation."
+  (interactive
+   (list :host
+         (my/jupyter-board--read-required
+          "Course PyTorch SSH host (alias or user@host[:port]): "
+          "Aaron-WSL2" 'my/jupyter-board-remote-host-history)
+         :target my/jupyter-board--target))
+  (let* ((target (or target my/jupyter-board--target (remote-get-target "local")))
+         (profile my/jupyter-board-course-pytorch-profile)
+         (host (and host (string-trim host)))
+         (args (list
+                "--interface=ssh"
+                (concat "--host=" (or host ""))
+                (concat "--name=" (plist-get profile :name))
+                (concat "--language=" (plist-get profile :language))
+                (concat "--group=" (plist-get profile :group))
+                (concat "--workdir=" (plist-get profile :workdir))
+                (concat "--kernel_cmd=" (plist-get profile :kernel-command)))))
+    (unless (and host (not (string-empty-p host)))
+      (user-error "Course PyTorch profile requires an SSH host"))
+    (my/jupyter-board--validate-remote-args args)
+    (my/jupyter-board--start-target-command
+     target 'remote-ikernel
+     (append '("manage" "--add")
+             (my/jupyter-board--remote-args-normalize args))
+     (lambda (output)
+       (when callback (funcall callback output nil))))))
+
 (defun my/jupyter-remote-add-run ()
   "Create or replace a remote kernelspec from the active transient."
   (interactive)
   (let* ((args (transient-args 'my/jupyter-remote-add-dispatch))
-         (interface (my/jupyter-board--arg-value args "--interface="))
-         (name (my/jupyter-board--arg-value args "--name="))
-         (kernel-command (my/jupyter-board--arg-value args "--kernel_cmd="))
-         (host (my/jupyter-board--arg-value args "--host="))
          (origin my/jupyter-board--edit-origin)
          (target (or my/jupyter-board--edit-target
                      (remote-get-target "local"))))
-    (unless (and interface (not (string-empty-p interface)))
-      (user-error "--interface is required"))
-    (unless (and name (not (string-empty-p name)))
-      (user-error "--name is required"))
-    (unless (and kernel-command (not (string-empty-p kernel-command)))
-      (user-error "--kernel_cmd is required"))
-    (when (and (equal interface "ssh") (or (null host) (string-empty-p host)))
-      (user-error "--host is required for SSH kernels"))
+    (my/jupyter-board--validate-remote-args args)
     (setq my/jupyter-board--edit-origin nil
           my/jupyter-board--edit-target nil)
-    (my/jupyter-board--start-target-command
-     target 'remote-ikernel
-     (append '("manage" "--add") (my/jupyter-board--remote-args-normalize args))
-     (lambda (output)
-       (when (and origin
-                  (string-match "Added kernel \\['\\([^']+\\)'\\]" output))
-         (let ((created (match-string 1 output)))
-           (when (and (not (equal created origin))
-                      (yes-or-no-p (format "New kernel %s created; delete old %s? " created origin)))
-             (my/jupyter-board--start-target-command
-              target 'remote-ikernel
-              (list "manage" "--delete" origin)))))))))
+    (my/jupyter-board--save-remote-profile target args origin)))
 
 (defun my/jupyter-remote-add ()
-  "Open the remote kernel creation transient."
+  "Open the advanced remote kernel creation transient."
   (interactive)
   (setq my/jupyter-board--edit-origin nil
         my/jupyter-board--edit-target my/jupyter-board--target)
@@ -986,6 +1461,8 @@
     ("j" "Open board" my/jupyter-board)
     ("T" "Select target" my/jupyter-board-select-target)
     ("g" "Refresh" my/jupyter-board-refresh)
+    ("v" "Technical view" my/jupyter-board-toggle-advanced)
+    ("?" "Usage guide" my/jupyter-board-help)
     ("RET" "Describe" my/jupyter-board-describe)
     ("o" "Open resource" my/jupyter-board-open-resource)
     ("r" "REPL / connect" my/jupyter-board-repl)]
@@ -995,8 +1472,10 @@
     ("k" "Shutdown" my/jupyter-board-shutdown)
     ("K" "Clean idle" my/jupyter-board-clean-idle-runtimes)]
    ["Remote"
-    ("a" "Add" my/jupyter-remote-add)
-    ("e" "Edit" my/jupyter-remote-edit)
+    ("a" "Quick add SSH" my/jupyter-remote-quick-add)
+    ("A" "Advanced add" my/jupyter-remote-add)
+    ("e" "Guided edit" my/jupyter-remote-edit-guided)
+    ("E" "Advanced edit" my/jupyter-remote-edit)
     ("m" "Set group" my/jupyter-board-set-group)
     ("C" "Clean temporary" my/jupyter-board-clean-temporary)]
    ["Maintenance"
@@ -1012,13 +1491,15 @@
   "Install local keybindings for the Jupyter Board."
   (local-set-key (kbd "g") #'my/jupyter-board-refresh)
   (local-set-key (kbd "T") #'my/jupyter-board-select-target)
-  (local-set-key (kbd "a") #'my/jupyter-remote-add)
+  (local-set-key (kbd "a") #'my/jupyter-remote-quick-add)
+  (local-set-key (kbd "A") #'my/jupyter-remote-add)
   (local-set-key (kbd "RET") #'my/jupyter-board-describe)
   (local-set-key (kbd "r") #'my/jupyter-board-repl)
   (local-set-key (kbd "i") #'my/jupyter-board-interrupt)
   (local-set-key (kbd "R") #'my/jupyter-board-restart)
   (local-set-key (kbd "k") #'my/jupyter-board-shutdown)
-  (local-set-key (kbd "e") #'my/jupyter-remote-edit)
+  (local-set-key (kbd "e") #'my/jupyter-remote-edit-guided)
+  (local-set-key (kbd "E") #'my/jupyter-remote-edit)
   (local-set-key (kbd "m") #'my/jupyter-board-set-group)
   (local-set-key (kbd "d") #'my/jupyter-board-delete)
   (local-set-key (kbd "C") #'my/jupyter-board-clean-temporary)
@@ -1026,7 +1507,9 @@
   (local-set-key (kbd "p") #'my/jupyter-board-install-python-kernel)
   (local-set-key (kbd "P") #'my/jupyter-board-refresh-project-specs)
   (local-set-key (kbd "D") #'my/jupyter-board-doctor)
-  (local-set-key (kbd "?") #'my/jupyter-board-dispatch))
+  (local-set-key (kbd "v") #'my/jupyter-board-toggle-advanced)
+  (local-set-key (kbd "?") #'my/jupyter-board-help)
+  (local-set-key (kbd "M") #'my/jupyter-board-dispatch))
 
 (provide 'init-jupyter-board)
 ;;; init-jupyter-board.el ends here

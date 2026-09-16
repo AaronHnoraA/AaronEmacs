@@ -396,6 +396,13 @@ probe 都按 generation 缓存；session 关闭时统一失效该 target 的 HOM
 PATH facts 和 environment capsule。重连因此不会复用上一条连接观察到的 server
 version、watcher、realpath 或 shell 环境。
 
+PATH facts 由 `remote-path--probe-script` 在 `sh -lc` 中探测，其中 PATH 取自
+target 用户的 POSIX 登录 shell（`$SHELL` 为 bash/zsh/ksh/dash 时执行
+`$SHELL -lc`，启动输出用 marker 丢弃），失败或非 POSIX shell 时回落到 `sh -l`
+的 PATH。`local` 与远端走同一脚本：macOS 上 Homebrew 等 PATH 通常只写在
+`~/.zprofile`，由 launchd 启动的 GUI Emacs 不会继承它，只读 `sh -l` 会找不到
+`/opt/homebrew/bin/jupyter` 这类工具。
+
 timer 驱动的 PATH、environment 与 workspace reconnect 统一经过
 `remote-background-submit`。相同 logical key 的任务只运行一个；若 TRAMP 正忙则有界
 退避并加入 jitter；函数执行期间 target epoch 变化时，结果不会写进 cache，而是从

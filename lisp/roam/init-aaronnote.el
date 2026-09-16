@@ -2742,6 +2742,23 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
      (mapcar #'my/noema--gateway-hash-value value)))
    (t value)))
 
+(defun my/noema--api-call-sync (channel args &optional timeout)
+  "Call CHANNEL with ARGS synchronously; return parsed JSON or nil.
+Only usable when the web-host is running (`my/noema--ready' is non-nil).
+Blocks the caller until the response arrives or TIMEOUT seconds elapse
+\(8 by default).  Interactive callers that run on a keystroke — completion
+at point, for instance — should pass a much shorter TIMEOUT so a busy
+kernel cannot freeze the editor."
+  (when-let* ((client
+               (and my/noema--ready
+                    (remote-gateway-find-client "aaronnote")))
+              (result
+               (remote-gateway-request-sync
+                client "aaronnote.api"
+                `((channel . ,channel) (args . ,args))
+                (or timeout 8))))
+    (my/noema--gateway-hash-value result)))
+
 (defcustom my/noema-api-call-timeout 10
   "Seconds to wait for an ordinary asynchronous Noema API reply."
   :type 'number

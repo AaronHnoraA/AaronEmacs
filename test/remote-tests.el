@@ -1891,6 +1891,36 @@ names in tree consumers such as Treemacs."
        (equal (car (remote-path-candidates))
               (car (remote-path-facts-path facts)))))))
 
+(ert-deftest remote-path-probe-script-uses-posix-login-shell-path ()
+  "PATH comes from the target's login shell, past its startup output."
+  (let* ((directory (make-temp-file "remote-login-shell-" t))
+         (shell (expand-file-name "zsh" directory))
+         (probe
+          (lambda (login-shell)
+            (with-temp-buffer
+              (let ((process-environment
+                     (append (list (concat "SHELL=" login-shell)
+                                   "PATH=/usr/bin:/bin")
+                             process-environment)))
+                (call-process "/bin/sh" nil t nil
+                              "-c" remote-path--probe-script))
+              (nth 4 (remote-path--parse-probe-output
+                      (buffer-string)))))))
+    (unwind-protect
+        (progn
+          (with-temp-file shell
+            (insert "#!/bin/sh\necho 'login banner'\n"
+                    "shift; PATH=/login/bin:$PATH exec /bin/sh -c \"$1\"\n"))
+          (set-file-modes shell #o755)
+          (should (equal (funcall probe shell) "/login/bin:/usr/bin:/bin"))
+          ;; A failing or non-POSIX login shell keeps the `sh' PATH.
+          (should (equal (funcall probe (expand-file-name "fish" directory))
+                         "/usr/bin:/bin"))
+          (should (equal (funcall probe (expand-file-name "missing/zsh"
+                                                         directory))
+                         "/usr/bin:/bin")))
+      (delete-directory directory t))))
+
 (ert-deftest remote-path-probe-ignores-remote-login-banner ()
   (should
    (equal

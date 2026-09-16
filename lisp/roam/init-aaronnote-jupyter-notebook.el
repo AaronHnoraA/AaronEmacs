@@ -233,15 +233,40 @@ KERNELSPEC defaults to `my/noema-jupyter-notebook-new-kernelspec'."
          (language-info (my/noema-jupyter-notebook--get
                          'language_info metadata))
          (kernelspec (my/noema-jupyter-notebook--get 'kernelspec metadata)))
-    (let ((language
-           (downcase (format "%s" (or (my/noema-jupyter-notebook--get
-                                        'name language-info)
-                                       (my/noema-jupyter-notebook--get
-                                        'language kernelspec)
-                                       "python")))))
-      (if (member language '("sage" "sagemath" "py" "python3"))
-          "python"
-        language))))
+    (my/noema-jupyter-notebook--language-for-kernel
+     (my/noema-jupyter-notebook--get 'name kernelspec)
+     (or (my/noema-jupyter-notebook--get 'language kernelspec)
+         (my/noema-jupyter-notebook--get 'name language-info)))))
+
+(defun my/noema-jupyter-notebook--language-for-kernel (kernel &optional requested)
+  "Return canonical notebook language for KERNEL and REQUESTED metadata.
+REQUESTED is the kernelspec's declared language and therefore wins over a
+stale `language_info'; when absent, infer a useful family from KERNEL."
+  (let* ((value (downcase (format "%s" (or kernel ""))))
+         (explicit (downcase (format "%s" (or requested ""))))
+         (language
+          (if (not (string-empty-p explicit))
+              explicit
+            (if (not (string-empty-p value))
+              (cond
+               ((string-match-p "lean" value) "lean4")
+               ((member value '("sage" "sagemath" "py" "python3"))
+                "python")
+               ((string-match-p "sage" value) "python")
+               ((or (string-match-p "python" value) (equal value "py"))
+                "python")
+               ((string-match-p "julia" value) "julia")
+               ((or (equal value "r") (string-prefix-p "ir" value)) "r")
+               ((string-match-p "bash\|zsh\|shell" value) "bash")
+               ((or (equal value "js")
+                    (string-match-p "javascript\|node" value)) "javascript")
+               ((or (equal value "ts")
+                    (string-match-p "typescript" value)) "typescript")
+               (t "python"))
+              "python"))))
+    (if (member language '("sage" "sagemath" "py" "python3"))
+        "python"
+      language)))
 
 (defun my/noema-jupyter-notebook--prefix (language)
   "Return source comment prefix for LANGUAGE."
@@ -907,6 +932,12 @@ UI talks only to Noema and never opens a Jupyter protocol connection."
                       (gethash "kernelspec" metadata))))
     (puthash "name" name kernelspec)
     (puthash "display_name" name kernelspec)
+    (let ((language (my/noema-jupyter-notebook--language-for-kernel name)))
+      (puthash "language" language kernelspec)
+      (let ((language-info (my/noema-jupyter-notebook--hash
+                            (gethash "language_info" metadata))))
+        (puthash "name" language language-info)
+        (puthash "language_info" language-info metadata)))
     (puthash "kernelspec" kernelspec metadata)
     (my/noema-jupyter-notebook-write file document)))
 

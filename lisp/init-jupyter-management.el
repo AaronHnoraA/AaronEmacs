@@ -21,6 +21,8 @@
 (declare-function jupyter-restart-kernel "jupyter-client" (client))
 (declare-function jupyter-run-repl "jupyter-repl" (kernel-name &optional repl-name associate-buffer client-class display))
 (declare-function jupyter-shutdown-kernel "jupyter-client" (client))
+(declare-function my/noema-jupyter--substitute-template
+                  "init-aaronnote-jupyter-runtime" (value variables))
 
 (config-defvar my/jupyter-board-jupyter-command nil
   "Local Jupyter executable used by the management board."
@@ -208,13 +210,13 @@ target\='s name."
            (or (and (boundp 'my/noema-jupyter-kernelspec-directory)
                     my/noema-jupyter-kernelspec-directory)
                (expand-file-name
-                "site-lisp/noema/jupyter/.jupyter/data/kernels/"
+                "site-lisp/noema/jupyter/kernel-templates/"
                 user-emacs-directory))))
       (when (file-directory-p directory)
         (cl-loop
          for child in (directory-files directory t "\\`[^.]")
          for file = (expand-file-name "kernel.json" child)
-         for raw = (and
+         for parsed = (and
                     (file-readable-p file)
                     (condition-case nil
                         (json-parse-string
@@ -224,6 +226,24 @@ target\='s name."
                          :object-type 'alist :array-type 'list
                          :null-object nil :false-object nil)
                       (error nil)))
+         for raw = (and
+                    parsed
+                    (if (fboundp 'my/noema-jupyter--substitute-template)
+                        (my/noema-jupyter--substitute-template
+                         parsed
+                         `(("AARONNOTE_JUPYTER_ROOT" .
+                            ,(expand-file-name
+                              "site-lisp/noema/jupyter"
+                              user-emacs-directory))
+                           ("AARONNOTE_JUPYTER_STATE_ROOT" .
+                            ,(expand-file-name
+                              "var/aaronnote/jupyter"
+                              user-emacs-directory))
+                           ("NOEMA_USER_HOME" . ,(expand-file-name "~/"))
+                           ("SAGE_VERSION" .
+                            ,(or (getenv "AARONNOTE_SAGE_VERSION")
+                                 "current"))))
+                      parsed))
          when raw
          collect
          (my/jupyter-management-normalize-spec
@@ -368,14 +388,14 @@ routed."
                     (concat data-dir path-separator existing)
                   data-dir))))
     (with-current-buffer (or source (current-buffer))
-      (jupyter-run-repl (plist-get entry :name) nil nil nil t))))
+      (jupyter-run-repl (plist-get entry :name) nil t nil t))))
 
 (defun my/jupyter-management-connect-repl (entry source-buffer)
   "Connect a REPL using connection ENTRY and SOURCE-BUFFER context."
   (unless (plist-get entry :valid) (user-error "Connection file is invalid"))
   (require 'jupyter-repl)
   (with-current-buffer (if (buffer-live-p source-buffer) source-buffer (current-buffer))
-    (jupyter-connect-repl (plist-get entry :file) nil nil nil t)))
+    (jupyter-connect-repl (plist-get entry :file) nil t nil t)))
 
 (defun my/jupyter-management-client-action (entry action)
   "Apply lifecycle ACTION to an Emacs runtime ENTRY."

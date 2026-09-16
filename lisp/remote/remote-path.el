@@ -43,6 +43,28 @@
   "__EMACS_REMOTE_FACTS_V1__\0"
   "Boundary marker separating shell startup output from probed facts.")
 
+(defconst remote-path--probe-script
+  (concat
+   ;; `sh -l' reads only /etc/profile and ~/.profile.  On macOS the user's
+   ;; PATH (Homebrew, pyenv, ...) normally lives in ~/.zprofile, and a GUI
+   ;; Emacs started by launchd inherits none of it, so ask the target's own
+   ;; POSIX login shell.  Its startup output is discarded by a marker; any
+   ;; failure keeps the plain `sh -l' PATH.
+   "p=\"${PATH-}\"; "
+   "case \"${SHELL##*/}\" in bash|zsh|ksh|dash) "
+   "o=$(\"$SHELL\" -lc 'printf \"__EMACS_LOGIN_PATH__%s\" \"$PATH\"' "
+   "</dev/null 2>/dev/null) && "
+   "case \"$o\" in *__EMACS_LOGIN_PATH__?*) "
+   "p=\"${o##*__EMACS_LOGIN_PATH__}\";; esac;; esac; "
+   "printf '__EMACS_REMOTE_FACTS_V1__\\0"
+   "%s\\0%s\\0%s\\0%s\\0%s\\0' "
+   "\"$(uname -s 2>/dev/null || printf unknown)\" "
+   "\"$(uname -m 2>/dev/null || printf unknown)\" "
+   "\"${SHELL-}\" \"${HOME-}\" \"$p\"")
+  "POSIX `sh -lc' script that prints framed target facts.
+The PATH field comes from the target user's login shell when it is a POSIX
+shell, falling back to the `sh -l' PATH.")
+
 (cl-defun remote-register-path-profile
     (id &key (priority 0) systems architectures paths)
   "Register static PATH hint profile ID."
@@ -103,13 +125,7 @@ probe protocol."
            "sh"
            :args
            (list
-            "-lc"
-            (concat
-             "printf '__EMACS_REMOTE_FACTS_V1__\\0"
-             "%s\\0%s\\0%s\\0%s\\0%s\\0' "
-             "\"$(uname -s 2>/dev/null || printf unknown)\" "
-             "\"$(uname -m 2>/dev/null || printf unknown)\" "
-             "\"${SHELL-}\" \"${HOME-}\" \"${PATH-}\""))
+            "-lc" remote-path--probe-script)
            :context context
            :adapter "environment"
            :filesystem-effects 'none
