@@ -50,7 +50,21 @@
 
 (cl-defstruct (remote-ssh-control
                (:constructor remote-ssh-control-create))
-  path destination state)
+  path destination state checked-at)
+
+(defcustom remote-transport-ssh-control-check-interval 2.0
+  "Seconds an OpenSSH master's `-O check' answer is trusted.
+
+Every routed file operation validates its pipeline before reusing the pooled
+connection, and validating an OpenSSH master means forking `ssh -O check'
+locally -- about 7ms here, which is an order of magnitude more than the
+remote operation it is guarding.  A master that answered a moment ago is
+still up, so the answer is reused for this long.  When it does go down inside
+the interval, the operation fails once, the framework classifies that as a
+transport failure, and the link reconnects; that is the same recovery path a
+master dying mid-operation already takes."
+  :type 'number
+  :group 'remote)
 
 (defvar remote-transports (make-hash-table :test #'equal)
   "Registered transport stage implementations.")
@@ -210,13 +224,24 @@ and DISCONNECT own resources allocated by CONNECT."
      "-O" operation
      (remote-ssh-control-destination control))))
 
-(defun remote-transport--ssh-control-check (control)
-  "Return non-nil when CONTROL's OpenSSH master answers."
-  (when-let* ((command
-               (remote-transport--ssh-control-command control "check")))
-    (let ((default-directory temporary-file-directory))
-      (zerop (apply #'call-process
-                    (car command) nil nil nil (cdr command))))))
+(defun remote-transport--ssh-control-check (control &optional force)
+  "Return non-nil when CONTROL's OpenSSH master answers.
+A recent positive answer is reused unless FORCE is non-nil; see
+`remote-transport-ssh-control-check-interval'."
+  (if (and (not force)
+           (eq (remote-ssh-control-state control) 'open)
+           (numberp (remote-ssh-control-checked-at control))
+           (< (- (float-time) (remote-ssh-control-checked-at control))
+              remote-transport-ssh-control-check-interval))
+      t
+    (when-let* ((command
+                 (remote-transport--ssh-control-command control "check")))
+      (let* ((default-directory temporary-file-directory)
+             (live (zerop (apply #'call-process
+                                 (car command) nil nil nil (cdr command)))))
+        (setf (remote-ssh-control-checked-at control)
+              (and live (float-time)))
+        live))))
 
 (defun remote-transport--ssh-connect (stage endpoint runtime)
   "Allocate a lazy managed OpenSSH control handle for STAGE.
@@ -247,7 +272,7 @@ eventual `-O exit'."
     ;; A previous abnormal exit in this Emacs process may have left a socket.
     ;; Keep a live master, but remove a stale path before OpenSSH sees it.
     (when (and (file-exists-p path)
-               (not (remote-transport--ssh-control-check control)))
+               (not (remote-transport--ssh-control-check control 'force)))
       (ignore-errors (delete-file path)))
     (remote-transport-result-create
      :endpoint endpoint

@@ -382,6 +382,15 @@ pipeline runtime 引用采用 take-before-release 所有权；即使 transport c
 SSH args，避免一个离线 target 长时间阻塞界面。pipeline config 可以用
 `:connect-timeout`、`:connection-attempts` 和 `:ssh-options` 覆盖默认值。
 
+每次路由操作在复用池中的连接前都会校验 pipeline，而校验一条 OpenSSH master
+就是在本机 fork 一次 `ssh -O check`。那一次 fork 约 7ms，比它守护的那次远端
+操作贵一个数量级，而一次 `find-file` 会走 60~190 次路由操作。因此一个刚刚答过
+的 master 在 `remote-transport-ssh-control-check-interval`（默认 2 秒）内直接复用
+上次答案；连接建立时清理陈旧 socket 会强制重问。master 在这个窗口内掉线时，操作
+失败一次，框架把它归类为 transport failure 并重连——这与 master 在操作中途死亡
+走的是同一条恢复路径。实测 `file-exists-p` 在远端从 8.0ms 降到 0.53ms，一次远端
+`find-file` 从 0.67s 降到 0.19s。
+
 每次连接尝试还获得单调递增的 generation。backend protocol contract、高层加速
 probe 都按 generation 缓存；session 关闭时统一失效该 target 的 HOME/path expansion、
 PATH facts 和 environment capsule。重连因此不会复用上一条连接观察到的 server

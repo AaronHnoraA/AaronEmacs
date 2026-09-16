@@ -211,6 +211,45 @@ that re-enters the framework.  The client boundary must not inherit it."
     (let ((exec-path (cons "/fs:elsewhere:/bin" client)))
       (should (equal (remote-client-exec-path) client)))))
 
+(ert-deftest remote-ssh-control-check-is-not-forked-per-operation ()
+  "Validating the pipeline must not cost a local fork per file operation.
+Every routed operation validates before reusing the pooled connection, so an
+unthrottled `ssh -O check' would dominate the remote call it guards."
+  (let* ((control
+          (remote-ssh-control-create
+           :path (expand-file-name "remote-control-probe"
+                                   temporary-file-directory)
+           :destination "example"
+           :state 'lazy))
+         (remote-transport-ssh-control-check-interval 60)
+         (calls 0))
+    (cl-letf (((symbol-function 'remote-transport--ssh-control-command)
+               (lambda (&rest _) '("true")))
+              ((symbol-function 'call-process)
+               (lambda (&rest _) (setq calls (1+ calls)) 0)))
+      (should (remote-transport--ssh-control-check control))
+      (should (= calls 1))
+      ;; A cached answer needs the stage to have marked the control open,
+      ;; which `remote-transport--ssh-live-p' does from the same result.
+      (should (remote-transport--ssh-control-check control))
+      (should (= calls 2))
+      (setf (remote-ssh-control-state control) 'open)
+      (dotimes (_ 20) (should (remote-transport--ssh-control-check control)))
+      (should (= calls 2))
+      ;; A caller that has to know right now still asks.
+      (should (remote-transport--ssh-control-check control 'force))
+      (should (= calls 3)))
+    ;; A negative answer is never remembered as positive.
+    (cl-letf (((symbol-function 'remote-transport--ssh-control-command)
+               (lambda (&rest _) '("false")))
+              ((symbol-function 'call-process)
+               (lambda (&rest _) (setq calls (1+ calls)) 1)))
+      (should-not (remote-transport--ssh-control-check control 'force))
+      (should-not (remote-ssh-control-checked-at control))
+      ;; A negative answer leaves nothing to reuse, so the next caller asks.
+      (should-not (remote-transport--ssh-control-check control))
+      (should (= calls 5)))))
+
 (ert-deftest remote-file-operation-cost-reports-the-selected-backend ()
   "Consumers ask what an operation costs, never which backend is selected."
   (remote-test-with-registry
