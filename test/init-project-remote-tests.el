@@ -210,5 +210,51 @@
       (should-not noema-agenda--project-root)
       (should-not noema-agenda--project-scope))))
 
+(ert-deftest my/project-directory-marker-answers-wildcards-from-one-listing ()
+  "A project marker must cost a listing per directory, not one per marker.
+Projectile ships eight wildcard markers, and expanding each one separately is
+a round trip per marker per level on a target."
+  (require 'projectile)
+  (let ((root (make-temp-file "marker-" t))
+        (listings 0))
+    (unwind-protect
+        (progn
+          (write-region "" nil (expand-file-name "thing.sln" root) nil 'silent)
+          (write-region "" nil (expand-file-name "Makefile" root) nil 'silent)
+          (make-directory (expand-file-name "src" root))
+          (let ((counted
+                 (lambda (orig &rest args)
+                   (setq listings (1+ listings))
+                   (apply orig args))))
+            (advice-add 'directory-files :around counted)
+            (unwind-protect
+                (progn
+                  ;; Like upstream, the matching MARKER is returned.
+                  (should (equal (my/project--directory-marker
+                                  root '("?*.sln") 'files-only)
+                                 "?*.sln"))
+                  (should (equal (my/project--directory-marker
+                                  root '("Makefile"))
+                                 "Makefile"))
+                  (should-not (my/project--directory-marker
+                               root '("?*.xcodeproj" "?*.csproj")))
+                  ;; A marker naming a directory is not a file marker.
+                  (should-not (my/project--directory-marker
+                               root '("src") 'files-only))
+                  (should (equal (my/project--directory-marker root '("src"))
+                                 "src"))
+                  ;; One listing per call, never one per marker.
+                  (should (= listings 5)))
+              (advice-remove 'directory-files counted))))
+      (delete-directory root t))))
+
+(ert-deftest my/project-directory-marker-override-is-installed ()
+  "Installation implies the shape check passed.
+`func-arity' reports the advice once one is installed, so the check itself
+cannot be repeated here."
+  (require 'projectile)
+  (should (advice-member-p #'my/project--directory-marker
+                           'projectile--directory-marker)))
+
 (provide 'init-project-remote-tests)
 ;;; init-project-remote-tests.el ends here

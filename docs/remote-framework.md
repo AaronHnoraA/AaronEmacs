@@ -504,6 +504,11 @@ handler 接管。
   在那层下面运行。`remote-client-exec-path` 因此丢弃属于别的文件系统的目录，并
   在什么都不剩时回答上一次可用的客户端路径——空搜索路径从来不是事实。
 
+`exec-path` 这个 handler operation 回答的是 **target-native localname**，与
+TRAMP 自己的 handler 一致；调用方（`executable-find` 的 REMOTE 分支、Citre 的
+远端查找等）自己补远端前缀。把结果投影成 `/fs:` 名字会让它们拿到
+`/fs:TARGET:/fs:TARGET:/bin`，其下每次探测都是一次注定失败的往返。
+
 一次文件操作的代价本身也是可查询的契约。backend 用 `:describe` 声明
 `:file-operation-cost`（`batched` 或 `round-trip`），consumer 用
 `(remote-file-operation-cost FILE)` 提问：

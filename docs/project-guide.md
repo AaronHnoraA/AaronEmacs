@@ -24,6 +24,18 @@ SCM 与后续 debug/task 集成都应从这个同一 identity 派生，不能各
 `file-remote-p` 再判断一次。本地普通 buffer 在框架外仍保留原生文件名，因此不会
 牺牲 Emacs package 兼容性。
 
+**项目根探测的代价**：Projectile 的 marker 列表有一百多项，其中八项是通配符
+（`?*.sln`、`?*.xcodeproj` 等）。上游用一次 `directory-files` 回答所有普通
+marker，但每个通配符仍要自己展开一次，也就是每层目录多出八次列目录。往上走四层
+就是 32 次额外往返，在 target 上这是打开一个文件最大的单项开销。
+`my/project--directory-marker` 用同一份列表回答通配符 marker，带路径分隔符的
+marker 仍然直接探测。这个改写对本地同样有效，因此不按 target 分支。
+
+同类问题还有 Citre：`citre-auto-enable-citre-mode` 会在每个 `prog-mode` buffer
+里找 ctags/readtags/global，target 上没装就是每次打开文件约 30 次往返，而答案在
+连接存续期间不会变。`my/citre-executable-find-a` 只缓存 target 侧的查找；装好工具
+后用 `M-x my/citre-forget-executables` 清掉。
+
 ## 2. 最常用入口
 
 - `SPC p .`

@@ -927,9 +927,14 @@ RETRY-SAFE controls route failover independently of capability."
     (when-let* ((spec (remote-get-file-operation operation)))
       (setf (remote-file-operation-spec-placement spec)
             'default-directory)))
+  ;; `exec-path' answers with target-native localnames, exactly as Tramp's own
+  ;; handler does.  Its callers add the remote prefix themselves -- that is what
+  ;; `executable-find' with REMOTE does -- so projecting the result here would
+  ;; hand them `/fs:TARGET:/fs:TARGET:/bin' and every probe below it would be a
+  ;; round trip that cannot succeed.
   (remote-register-file-operation
    'exec-path :capability 'environment :path-arguments nil
-   :result-kind 'path-list :retry-safe t)
+   :result-kind 'pass :retry-safe t)
   (remote-register-file-operation
    'temporary-file-directory :capability 'metadata :path-arguments nil
    :result-kind 'path :retry-safe t)

@@ -13,6 +13,10 @@
 (require 'subr-x)
 
 (declare-function consult-xref "consult" (fetcher &optional alist))
+(declare-function citre-executable-find "citre-common-util"
+                  (command &optional remote))
+(defvar remote-connection-closed-hook)
+(defvar remote-config-after-load-hook)
 (declare-function citre-register-backend
                   "citre-backend-interface" (name backend))
 (declare-function citre-xref-backend-to-citre-backend
@@ -232,6 +236,44 @@ asynchronously through the normal language-server lifecycle."
          'xref-lsp #'my/citre-lsp-usable-p
          :after-jump-fn #'my/citre-lsp-after-jump))
   (citre-register-backend 'lsp-mode my/citre-lsp-backend))
+
+(defvar my/citre--executable-cache (make-hash-table :test #'equal)
+  "Citre helper executables already located, keyed by target and command.")
+
+(defun my/citre-forget-executables (&rest _)
+  "Drop the cached Citre helper lookups."
+  (interactive)
+  (clrhash my/citre--executable-cache))
+
+(defun my/citre-executable-find-a (fn command &optional remote)
+  "Cache Citre's helper lookup on a target.
+
+`citre-executable-find' probes every `exec-path' entry with
+`file-executable-p', and `citre-auto-enable-citre-mode' asks it for several
+helpers in every `prog-mode' buffer.  On a target that has no ctags installed
+that is about 30 round trips per file open, repeated for every file, and the
+answer cannot change while the connection stands.  Only the target lookup is
+cached; a client-side lookup is already cheap and stays live.  The cache is
+dropped when a Remote session closes or the configuration is reloaded, and
+`my/citre-forget-executables' clears it by hand after installing a tool."
+  (let ((target (and remote (file-remote-p default-directory))))
+    (if (null target)
+        (funcall fn command remote)
+      (let* ((key (cons target command))
+             (cached (gethash key my/citre--executable-cache 'missing)))
+        (if (eq cached 'missing)
+            (puthash key (funcall fn command remote) my/citre--executable-cache)
+          cached)))))
+
+(with-eval-after-load 'citre-common-util
+  (unless (advice-member-p #'my/citre-executable-find-a 'citre-executable-find)
+    (advice-add 'citre-executable-find :around #'my/citre-executable-find-a)))
+
+(with-eval-after-load 'remote-connection
+  (add-hook 'remote-connection-closed-hook #'my/citre-forget-executables))
+
+(with-eval-after-load 'remote-config
+  (add-hook 'remote-config-after-load-hook #'my/citre-forget-executables))
 
 (use-package citre
   :ensure t

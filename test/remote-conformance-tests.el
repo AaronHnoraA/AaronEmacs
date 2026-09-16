@@ -145,6 +145,18 @@ keep returning nil for a buffer that `vc-registered' has already resolved."
           (should (eq (vc-backend logical) 'Git)))
       (delete-directory root t))))
 
+(ert-deftest remote-conformance-exec-path-matches-native ()
+  "`exec-path' answers with target-native names, like Tramp's own handler.
+Its callers add the remote prefix themselves, so projecting the result would
+hand them a doubly prefixed directory and every probe below it would be a
+round trip that cannot succeed."
+  (remote-fs-install)
+  (let ((default-directory
+         (remote-make-file-name "local" temporary-file-directory)))
+    (should (equal (exec-path) (default-value 'exec-path)))
+    (should-not
+     (seq-find #'remote-fs-file-name-p (exec-path)))))
+
 (ert-deftest remote-conformance-operation-effects-are-total ()
   (dolist (spec (remote-file-operation-list))
     (should

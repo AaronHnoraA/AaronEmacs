@@ -1652,6 +1652,88 @@ Returns the number of killed buffers."
                (abbreviate-file-name directory)
                synced-count))))
 
+(declare-function projectile--wildcard-p "projectile" (name))
+(declare-function projectile-file-exists-p "projectile" (file))
+(declare-function projectile-expand-file-name-wildcard "projectile"
+                  (name-pattern dir))
+
+(defun my/project--directory-marker (directory markers &optional files-only)
+  "Return the first of MARKERS present in DIRECTORY, or nil.
+
+This replaces `projectile--directory-marker' so that a wildcard marker
+without a path separator is answered from the directory listing the call
+already makes, instead of expanding it through its own
+`file-expand-wildcards'.  Projectile ships eight of those markers
+(`?*.sln', `?*.xcodeproj', ...), so walking four levels up to resolve a
+project root costs 32 extra directory listings.  Every one of them is a
+separate round trip on a target, which made this the single largest cost of
+opening a remote file here.
+
+A marker carrying a path separator still has to be probed directly.  With
+FILES-ONLY non-nil a marker naming a directory does not count as present, and
+that extra stat is only paid for a marker that actually matched."
+  (let ((entries nil)
+        (names nil)
+        (listed nil))
+    (cl-labels
+        ((listing ()
+           (unless listed
+             (setq names (ignore-errors
+                           (directory-files
+                            directory nil
+                            directory-files-no-dot-files-regexp t))
+                   entries (let ((set (make-hash-table :test #'equal)))
+                             (dolist (name names set)
+                               (puthash name t set)))
+                   listed t))
+           entries)
+         (usable-p (name)
+           (or (not files-only)
+               (not (file-directory-p (expand-file-name name directory))))))
+      (seq-find
+       (lambda (marker)
+         (cond
+          ((not (stringp marker)) nil)
+          ((string-search "/" marker)
+           (let ((expanded
+                  (projectile-expand-file-name-wildcard marker directory)))
+             (and (projectile-file-exists-p expanded)
+                  (or (not files-only)
+                      (not (file-directory-p expanded))))))
+          ((projectile--wildcard-p marker)
+           (let ((regexp (wildcard-to-regexp marker)))
+             (listing)
+             (seq-find
+              (lambda (name)
+                (and (string-match-p regexp name) (usable-p name)))
+              names)))
+          (t
+           (and (listing)
+                (gethash marker entries)
+                (usable-p marker)))))
+       markers))))
+
+(defun my/project--directory-marker-compatible-p ()
+  "Return non-nil when Projectile's marker scan still has its known shape."
+  (and (fboundp 'projectile--directory-marker)
+       (fboundp 'projectile--wildcard-p)
+       (fboundp 'projectile-file-exists-p)
+       (fboundp 'projectile-expand-file-name-wildcard)
+       (equal (func-arity 'projectile--directory-marker) '(2 . 3))))
+
+(with-eval-after-load 'projectile
+  ;; The shape check has to run before the override, because `func-arity'
+  ;; reports the advice once one is installed.
+  (unless (advice-member-p #'my/project--directory-marker
+                           'projectile--directory-marker)
+    (if (my/project--directory-marker-compatible-p)
+        (advice-add 'projectile--directory-marker
+                    :override #'my/project--directory-marker)
+      (display-warning
+       'init-project
+       "projectile--directory-marker changed shape; leaving its wildcard markers unaccelerated"
+       :warning))))
+
 (use-package projectile
   :ensure t
   :hook (after-init . projectile-mode)
