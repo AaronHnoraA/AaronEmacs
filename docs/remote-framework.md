@@ -478,7 +478,7 @@ handler 接管。
 
 `remote-client-process-environment` / `remote-client-exec-path` /
 `remote-client-executable-find` 是同一条边界上的查询入口，backend 用它们解析
-自己必须在本机执行的辅助程序（SSH、stdio bridge、协议 proxy）。两条规则由框架
+自己必须在本机执行的辅助程序（SSH、stdio bridge、协议 proxy）。三条规则由框架
 保证，consumer 和 backend 不再各自防御：
 
 - adapter 可以合法地把 `executable-find` 重定向到目标（`init-lsp.el` 就这样让
@@ -487,9 +487,31 @@ handler 接管。
   因此它永远回答本机；否则 backend 会拿到一个目标端路径再在本机 `vfork`，
   症状是 `Doing vfork No such file or directory`。
 - 路由执行期间投影 target 环境，会连 `process-environment` / `exec-path` 的
-  default value 一起改写。`remote--call-with-process-route` 先用
-  `remote-with-client-environment` 固定投影前的客户端值，client boundary 因此
-  在整个 backend 调用链里保持有效。
+  default value 一起改写。`remote--call-with-process-route` 与
+  `remote-fs--call-routed` 先用 `remote-with-client-environment` 固定投影前的
+  客户端值，client boundary 因此在整个 backend 调用链里保持有效。
+- 第三方 consumer 也会在框架之外重绑 `exec-path`。Citre 的远端可执行查找就在
+  `find-file-hook` 里把整条 `exec-path` 换成 target 目录，而 backend probe 正好
+  在那层下面运行。`remote-client-exec-path` 因此丢弃属于别的文件系统的目录，并
+  在什么都不剩时回答上一次可用的客户端路径——空搜索路径从来不是事实。
+
+一次文件操作的代价本身也是可查询的契约。backend 用 `:describe` 声明
+`:file-operation-cost`（`batched` 或 `round-trip`），consumer 用
+`(remote-file-operation-cost FILE)` 提问：
+
+```elisp
+(remote-file-operation-cost "/fs:aaron-wsl2:/home/hc/src/main.rs")
+;; => batched
+```
+
+需要"每个文件一次子进程"的功能（VC、Magit、per-file 探测）用它决定开关，而不是
+测 `file-remote-p`、TRAMP method 或 backend ID。`native` 与 `tramp-rpc` 声明
+`batched`，`tramp` 声明 `round-trip`；`local` target 因此天然走同一条判断。
+
+`vc-registered` 由 `/fs:` 句柄按逻辑名回答，不投影到物理名。VC 把结果缓存在它
+拿到的那个名字下，投影后 `vc-backend` 会对 buffer 自己的名字永远回答 nil，分支
+和 diff 指示也就不会出现。backend 无需投影：VC 后端本身用普通文件操作和
+`process-file` 访问 target。
 需要把协议 peer 留在 target 时，使用
 `remote-local-bridge-command` 生成本机可执行的 stdio bridge argv；它把 target
 cwd、workspace 环境和 pipeline 封装在所选 backend 边界内。`local` target
@@ -644,7 +666,24 @@ workspace/resource 输出诊断；加前缀参数会实际连接并运行 `uname
 ## 9. 配置兼容
 
 配置继续接受 `links`、`plugin`、`plugins`；新配置可以使用
-`pipelines`、`backend`、`backends` 和 `stages`：
+`pipelines`、`backend`、`backends` 和 `stages`。
+
+ssh-config 导入出来的 target 没有显式对象承载路由偏好，因此 pipeline 条目可以
+用 `preferences` 为它匹配到的主机声明 target 级偏好，写法与它已经用来提升
+`trusted` 的方式一致；键是 capability 名或 `default`：
+
+```json
+{
+  "id": "ssh",
+  "backends": ["tramp-rpc", "tramp"],
+  "include": ["Aaron-*"],
+  "trusted": true,
+  "preferences": { "default": ["tramp-rpc", "tramp"] }
+}
+```
+
+target 偏好优先于 adapter 偏好，所以这一条会让这些主机的普通文件操作也走
+tramp-rpc，而不只是进程、环境和 LSP。
 
 ```json
 {

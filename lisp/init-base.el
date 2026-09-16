@@ -198,9 +198,11 @@ Org, help, terminals and side buffers avoid the redisplay cost by default.")
                (_ (symbol-name next))))))
 
 (defun my/display-line-numbers-auto-enable ()
-  "Enable line numbers in buffers where they are useful by default."
+  "Enable line numbers in buffers where they are useful by default.
+Line numbers are a client-side redisplay cost that the buffer size already
+bounds, so a buffer whose file lives on another target gets the same treatment
+as a local one."
   (when (and (not (minibufferp))
-             (not (file-remote-p default-directory))
              (or (null my/display-line-numbers-large-buffer-threshold)
                  (<= (buffer-size)
                      my/display-line-numbers-large-buffer-threshold))

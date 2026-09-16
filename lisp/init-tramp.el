@@ -21,13 +21,25 @@
 
 (require 'cl-lib)
 
+;; `remote-fs' loads after this module (see `lisp/remote/init-remote.el'); the
+;; queries below are only ever called from a hook or advice, by which time the
+;; framework is up.
+(declare-function remote-file-operation-cost "remote-fs"
+                  (file-name &optional adapter))
+(declare-function remote-make-file-name "remote-fs" (target-id localname))
+(declare-function remote-project-file-name "remote-core"
+                  (file-name &optional route-or-link capability adapter-id))
+(declare-function remote-target-id "remote-core" (target))
+(defvar remote-targets)
+(defvar remote-config-after-load-hook)
+
 
 ;;; ── tramp-rpc: high-performance MessagePack-RPC TRAMP backend ───────────────
 ;; /rpc:host:/path uses a binary RPC server on the remote for ~38x faster
 ;; connection setup and ~27x faster directory listing vs traditional SSH.
 ;;
-;; The guards below (my/tramp-rpc-path-p) are safe regardless of whether
-;; tramp-rpc is installed — they are pure string checks on the file path.
+;; Whether a buffer actually gets that fast path is a route question, answered
+;; by `remote-file-operation-cost'; nothing below branches on the path spelling.
 (my/package-ensure-vc 'tramp-rpc "https://github.com/ArthurHeymans/emacs-tramp-rpc")
 
 ;; Loaded only through `remote-accelerator'.  Do not call `tramp-hlo-setup'
@@ -176,17 +188,6 @@ instead of leaving selection and idle timers visibly retrying."
   :type 'boolean
   :group 'tramp)
 
-(defun my/tramp-rpc-path-p (&optional path)
-  "Return non-nil if PATH (or current buffer path) uses Tramp method \"rpc\"."
-  (when (featurep 'tramp)
-    (let* ((path (or path buffer-file-name default-directory))
-           (vec  (and (stringp path)
-                      (tramp-tramp-file-p path)
-                      (ignore-errors
-                        (tramp-dissect-file-name path nil)))))
-      (and vec
-           (string= (tramp-file-name-method vec) "rpc")))))
-
 (defun my/tramp-set-method-parameter (method parameter value)
   "Set METHOD's TRAMP PARAMETER to VALUE in `tramp-methods'.
 When VALUE is nil, remove PARAMETER so TRAMP falls back to a quiet
@@ -252,22 +253,36 @@ non-login shell startup."
      'remote-direct-async-process)))
 
 ;;; ── VC / diff-hl suppression ────────────────────────────────────────────────
-;; VC backends make synchronous subprocess calls that are prohibitively slow
-;; over SSH.  Disable them for /ssh: buffers.
+;; VC probes the working tree with a synchronous subprocess per file.  On a
+;; backend that pays a shell round trip for each of those, VC makes editing
+;; unusable, so it is switched off there.
 ;;
-;; Exception: /rpc: buffers.  tramp-rpc-magit.el provides its own parallel git
-;; prefetch (60+ commands in a single RPC round-trip) and TTL-based caching
-;; with filesystem-watch invalidation.  Suppressing VC there would disable
-;; that fast path.
+;; The question is the cost of the route serving this buffer, not how its path
+;; is spelled.  A batched backend answers those probes over one multiplexed
+;; protocol -- tramp-rpc additionally prefetches 60+ git commands in a single
+;; RPC round trip and invalidates its cache from filesystem watches -- so VC
+;; stays on, exactly as it does for the `local' target.  Asking `file-remote-p'
+;; or a TRAMP method here instead would both miss `/fs:' buffers served by a
+;; fast backend and keep punishing them after the route improves.
 
-(defun my/remote-file-buffer-p ()
-  "Return non-nil when the current buffer visits a remote path."
-  (file-remote-p (or buffer-file-name default-directory)))
+(defun my/remote-per-file-subprocess-affordable-p (&optional path)
+  "Return non-nil when PATH's route can afford one subprocess probe per file.
+PATH defaults to the current buffer.  An unroutable path is treated as
+affordable so that ordinary local buffers keep their normal behaviour even
+before the Remote registries are populated.
+
+The query resolves a route rather than reading a cached flag, which measures
+at roughly 0.1ms here.  That is deliberate: the callers are `find-file-hook',
+`vc-refresh-state', and the memoization wrapper below, all of which already do
+far more work than that, and a cached answer would keep claiming the fast path
+after a backend has failed over."
+  (let ((path (or path buffer-file-name default-directory)))
+    (not (eq (or (ignore-errors (remote-file-operation-cost path)) 'batched)
+             'round-trip))))
 
 (defun my/disable-remote-vc-h ()
-  "Disable VC for remote SSH buffers; leave /rpc: buffers alone."
-  (when (and (my/remote-file-buffer-p)
-             (not (my/tramp-rpc-path-p)))
+  "Disable VC where each probe would cost its own round trip on the target."
+  (unless (my/remote-per-file-subprocess-affordable-p)
     (setq-local vc-handled-backends nil
                 vc-mode nil)
     (when (bound-and-true-p diff-hl-mode)
@@ -277,16 +292,62 @@ non-login shell startup."
 
 (with-eval-after-load 'vc-hooks
   (define-advice vc-refresh-state (:around (fn) my/skip-remote-vc-refresh)
-    "Skip VC state refresh for remote SSH buffers; let tramp-rpc handle /rpc:."
-    (if (and (my/remote-file-buffer-p) (not (my/tramp-rpc-path-p)))
-        (progn (my/disable-remote-vc-h) nil)
-      (funcall fn))))
+    "Skip VC state refresh when this buffer's route cannot afford the probes."
+    (if (my/remote-per-file-subprocess-affordable-p)
+        (funcall fn)
+      (my/disable-remote-vc-h)
+      nil)))
+
+;; `vc-ignore-dir-regexp' guards the directory-level entry points, which have
+;; no buffer to carry `vc-handled-backends'.  It is a regexp, so the set of
+;; too-expensive targets has to be materialized rather than asked per call;
+;; it is rebuilt whenever the Remote configuration changes.
+(defvar my/vc--ignore-dir-regexp-default nil
+  "Value of `vc-ignore-dir-regexp' before Remote targets were added to it.")
+
+(defun my/vc--expensive-target-prefixes ()
+  "Return path prefixes of targets where a VC directory probe is too slow.
+Both the logical `/fs:' spelling and the physical spelling of the selected
+backend are returned, because VC sees whichever one a caller passes in."
+  (let (prefixes)
+    (dolist (target (hash-table-values remote-targets))
+      (let* ((id (remote-target-id target))
+             (logical (remote-make-file-name id "/"))
+             ;; A target whose route cannot be resolved at all is assumed
+             ;; expensive: that is the conservative direction here, unlike the
+             ;; per-buffer query, where an unroutable path is an ordinary
+             ;; local file.
+             (cost (or (ignore-errors (remote-file-operation-cost logical))
+                       'round-trip)))
+        (when (eq cost 'round-trip)
+          (push logical prefixes)
+          (when-let* ((physical
+                       (ignore-errors
+                         (remote-project-file-name
+                          logical nil 'file-read "emacs-file"))))
+            (push physical prefixes)))))
+    (delete-dups prefixes)))
+
+(defun my/vc-refresh-ignore-dir-regexp ()
+  "Rebuild `vc-ignore-dir-regexp' from the current Remote targets."
+  (when (boundp 'vc-ignore-dir-regexp)
+    (unless my/vc--ignore-dir-regexp-default
+      (setq my/vc--ignore-dir-regexp-default
+            (default-value 'vc-ignore-dir-regexp)))
+    (setq-default
+     vc-ignore-dir-regexp
+     (if-let* ((prefixes (my/vc--expensive-target-prefixes)))
+         (format "%s\\|\\`\\(?:%s\\)"
+                 my/vc--ignore-dir-regexp-default
+                 (mapconcat #'regexp-quote prefixes "\\|"))
+       my/vc--ignore-dir-regexp-default))))
 
 (with-eval-after-load 'vc
-  (setq-default vc-ignore-dir-regexp
-                (format "%s\\|%s"
-                        vc-ignore-dir-regexp
-                        tramp-file-name-regexp)))
+  (my/vc-refresh-ignore-dir-regexp))
+
+(with-eval-after-load 'remote-config
+  (add-hook 'remote-config-after-load-hook
+            #'my/vc-refresh-ignore-dir-regexp))
 
 ;;; ── LSP stdio: per-server direct-async management ──────────────────────────
 ;;
@@ -390,9 +451,11 @@ servers use the shared ControlMaster path."
     (prog1 (apply orig filename args)
       (let* ((elapsed (- (float-time) t0))
              (remote  (ignore-errors (file-remote-p filename)))
-             (label   (cond ((my/tramp-rpc-path-p filename) "RPC")
-                            (remote "TRAMP")
-                            (t "Local"))))
+             (label   (cond
+                       ((not remote) "Local")
+                       ((my/remote-per-file-subprocess-affordable-p filename)
+                        "RPC")
+                       (t "TRAMP"))))
         (when (or remote (> elapsed my/find-file-feedback-threshold))
           (message "[%s %.2fs] %s" label elapsed filename))))))
 
@@ -424,8 +487,10 @@ Set to nil to keep caches unbounded."
 
 (defun my/tramp-memoize (key cache fn &rest args)
   "Return cached result for KEY from symbol CACHE, or call FN with ARGS.
-Caches for remote SSH paths only; passes through for local and /rpc: paths."
-  (if (and key (file-remote-p key) (not (my/tramp-rpc-path-p key)))
+Caches only where one lookup costs its own round trip on the target; a batched
+backend already caches with filesystem-watch invalidation, and wrapping that
+would only serve results it has already invalidated."
+  (if (and key (not (my/remote-per-file-subprocess-affordable-p key)))
       (if-let* ((cached (assoc key (symbol-value cache))))
           (cdr cached)
         (let ((value (apply fn args)))

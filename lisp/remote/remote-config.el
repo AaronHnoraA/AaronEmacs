@@ -301,6 +301,14 @@ Both v2 backend keys and v1 plugin keys are accepted."
             (when (remote-config--allowed-p host pipeline)
               (when (not (eq (alist-get 'trusted pipeline) nil))
                 (setf (remote-target-trusted target) t))
+              ;; Routing preferences belong to the target, but a discovered
+              ;; host has no target object to carry them.  A pipeline entry
+              ;; may therefore declare them for the hosts it matches, the same
+              ;; way it already promotes those hosts to trusted.
+              (when-let* ((preferences (alist-get 'preferences pipeline)))
+                (setf (remote-target-preferences target)
+                      (append (remote-config--preferences preferences)
+                              (remote-target-preferences target))))
               (remote-config--register-pipeline-object
                id pipeline host))))))))
 

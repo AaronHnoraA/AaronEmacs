@@ -38,6 +38,18 @@
   (let ((coding-system-for-write 'utf-8-unix))
     (write-region content nil file nil 'silent)))
 
+(defun my/lsp-remote-live-smoke--drain (seconds test)
+  "Wait up to SECONDS for TEST, keeping batch Emacs' event sources running.
+A watch backend may deliver its events through the command loop's
+special-event queue (`insert-special-event').  Batch Emacs runs no command
+loop, so that queue has to be drained explicitly or the callback never runs
+even though the event has already arrived."
+  (let ((deadline (+ (float-time) seconds)))
+    (while (and (not (funcall test)) (< (float-time) deadline))
+      (accept-process-output nil 0.1)
+      (ignore-errors (read-event nil nil 0.1)))
+    (funcall test)))
+
 (defun my/lsp-remote-live-smoke--wait-for-diagnostic (seconds)
   "Wait up to SECONDS for a Flymake diagnostic in the current buffer."
   (let ((deadline (+ (float-time) seconds)))
@@ -101,9 +113,7 @@
               (sit-for 0.1)))
           (setq valid-before (and (file-notify-valid-p descriptor) t))
           (write-region "watch" nil probe nil 'silent)
-          (let ((deadline (+ (float-time) 5)))
-            (while (and (null events) (< (float-time) deadline))
-              (sit-for 0.1)))
+          (my/lsp-remote-live-smoke--drain 10 (lambda () events))
           (list :valid valid-before
                 :registered (and (gethash descriptor file-notify-descriptors) t)
                 :handler-valid

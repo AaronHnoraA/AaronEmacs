@@ -339,7 +339,7 @@ direction."
    :program-form 'search
    :describe
    (lambda ()
-     '(:kind native :session-owner emacs))))
+     '(:kind native :session-owner emacs :file-operation-cost batched))))
 
 (provide 'remote-backend-native)
 ;;; remote-backend-native.el ends here

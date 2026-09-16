@@ -410,6 +410,13 @@ bookmark 排在前面。上下移动候选时会预览目标位置，确认后�
 
 ### Git `SPC g`
 
+远端 buffer 现在和本地一样有 Git 集成：modeline 分支、diff-hl gutter 和上面这些
+命令都可用，前提是该 target 的文件操作走 batched backend（`native` 或
+`tramp-rpc`）。仍然走 shell TRAMP 的 target 会继续关掉 VC——那里每次探测都要一次
+独立往返，开着只会让编辑卡住。想知道当前 buffer 属于哪一类，
+`M-x remote-doctor` 的 `route:file-read` 一行会直接写出来。行号也不再因为文件
+在别的 target 上而消失。
+
 - `SPC g .`
   Git Hub；把状态、当前文件 diff / log / blame / stage、merge conflict 收到一个 transient 菜单里
 - `SPC g g`

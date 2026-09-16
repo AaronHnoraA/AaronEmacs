@@ -268,12 +268,30 @@ processes must use this boundary instead of inheriting those target values."
        remote--client-process-environment
        (default-value 'process-environment))))
 
+(defvar remote--client-exec-path-snapshot nil
+  "Last client `exec-path' seen without foreign target directories.")
+
 (defun remote-client-exec-path ()
-  "Return a fresh executable search path for explicit client placement."
-  (copy-sequence
-   (or remote--buffer-base-exec-path
-       remote--client-exec-path
-       (default-value 'exec-path))))
+  "Return a fresh executable search path for explicit client placement.
+
+Directories belonging to another filesystem are dropped: this machine cannot
+execute anything found there.  A third-party consumer may legitimately rebind
+`exec-path' to target directories around a call that re-enters the framework
+-- Citre's remote executable lookup does exactly that while `find-file-hook'
+runs -- and a backend resolving a client helper underneath it must not inherit
+that list.  When nothing client-local is left, the last usable path answers
+instead of an empty one, because an empty search path is never the truth."
+  (let ((usable
+         (seq-filter
+          (lambda (directory)
+            (and (stringp directory)
+                 (not (file-remote-p directory))))
+          (or remote--buffer-base-exec-path
+              remote--client-exec-path
+              (default-value 'exec-path)))))
+    (if usable
+        (setq remote--client-exec-path-snapshot (copy-sequence usable))
+      (copy-sequence remote--client-exec-path-snapshot))))
 
 (defun remote-client-executable-find (program)
   "Find client-local PROGRAM without consulting a target environment.

@@ -66,7 +66,7 @@ service 与 channel 来自同一 owning workspace target。异步 callback 在�
 | 环境与 remote settings | remote | user → target → workspace → tool → invocation 分层 |
 | 文件 watch | remote | 真实 SSH inotify 事件、路径重写和 workspace owner 已验证；补长时间与传输断线真机故障注入 |
 | LSP/IntelliSense | remote | root/URI/server/cwd/env/watch/helper/channel 同属一个 workspace target；local/remote 同路由，断线可恢复 |
-| 搜索与 SCM | API | rg/git/Magit 在 target 执行，无本地路径泄漏 |
+| 搜索与 SCM | local | rg/git/Magit 在 target 执行，无本地路径泄漏；VC/diff-hl 已按 `remote-file-operation-cost` 开关，batched backend 上与本地一致，`vc-registered` 按逻辑名缓存；仍缺 Magit 与 rg 的远端真机回归 |
 | tasks/tests | API | task registry、并发、取消、后台任务和结果模型 |
 | debug | API | Dape adapter 在 target 启动；launch/attach/forward 可组合 |
 | TCP/TLS client | local | SSH forward 上继续使用 Emacs 原生 network stream |

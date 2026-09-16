@@ -194,6 +194,51 @@ The client boundary must keep answering with this machine's values."
         (should
          (equal (remote-client-process-environment) client-environment))))))
 
+(ert-deftest remote-client-exec-path-drops-foreign-directories ()
+  "A consumer may rebind `exec-path' to target directories around a call
+that re-enters the framework.  The client boundary must not inherit it."
+  (let ((remote--client-exec-path nil)
+        (remote--buffer-base-exec-path nil)
+        (remote--client-exec-path-snapshot nil)
+        (client (list temporary-file-directory "/usr/bin")))
+    (let ((exec-path client))
+      (should (equal (remote-client-exec-path) client)))
+    ;; Every entry belongs to another filesystem: the last usable client path
+    ;; answers instead of an empty search path.
+    (let ((exec-path '("/fs:elsewhere:/bin" "/fs:elsewhere:/usr/bin")))
+      (should (equal (remote-client-exec-path) client)))
+    ;; A partially foreign list keeps only what this machine can execute.
+    (let ((exec-path (cons "/fs:elsewhere:/bin" client)))
+      (should (equal (remote-client-exec-path) client)))))
+
+(ert-deftest remote-file-operation-cost-reports-the-selected-backend ()
+  "Consumers ask what an operation costs, never which backend is selected."
+  (remote-test-with-registry
+    (remote-register-adapter
+     "emacs-file" :capabilities '(metadata)
+     :preferences '((default . ("batched-files"))))
+    (remote-register-backend
+     "batched-files"
+     :capabilities '(metadata)
+     :project (lambda (_file _pipeline _route) "/batched/")
+     :describe (lambda () '(:file-operation-cost batched)))
+    (remote-register-backend
+     "shell-files"
+     :capabilities '(metadata)
+     :project (lambda (_file _pipeline _route) "/shell/")
+     :describe (lambda () '(:kind shell)))
+    (remote-register-target "fast" :trusted t)
+    (remote-register-pipeline
+     "fast" "only" "batched-files" :config '(:transport "direct"))
+    (remote-register-target "slow" :trusted t)
+    (remote-register-pipeline
+     "slow" "only" "shell-files" :config '(:transport "direct"))
+    (should
+     (eq (remote-file-operation-cost "/fs:fast:/work/a.el") 'batched))
+    ;; A backend that declares nothing is assumed to pay a round trip.
+    (should
+     (eq (remote-file-operation-cost "/fs:slow:/work/a.el") 'round-trip))))
+
 (ert-deftest remote-tramp-rpc-unbuildable-server-is-an-incompatibility ()
   "A server binary this client can never produce must not be retried.
 An ordinary retryable failure would repeat the bootstrap connection and the
@@ -378,9 +423,16 @@ refused build on every remote operation."
             (lambda (_route _file) "/rpc:box:/"))
            ((symbol-function 'remote-backend-tramp--method-login-args)
             (lambda (&rest _arguments) nil))
+           ;; Answer only for the projected name.  A blanket stub would also
+           ;; claim the client's own directories, and the client boundary
+           ;; legitimately drops directories that belong to another
+           ;; filesystem.
            ((symbol-function 'file-remote-p)
-            (lambda (_file &optional _identification connected)
-              (unless connected "/rpc:box:")))
+            (lambda (file &optional _identification connected)
+              (and (not connected)
+                   (stringp file)
+                   (string-prefix-p "/rpc:" file)
+                   "/rpc:box:")))
            ((symbol-function 'file-attributes)
             (lambda (_file &optional _id-format)
               (setq observed

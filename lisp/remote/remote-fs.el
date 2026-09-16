@@ -518,6 +518,30 @@ pure: it resolves placement but does not acquire a connection."
            'metadata context nil)))
     (remote-backend-client-file-name route canonical)))
 
+(defun remote-file-operation-cost (file-name &optional adapter)
+  "Return what one file operation on FILE-NAME costs on the selected backend.
+
+`batched' means the backend answers `file-attributes', `file-exists-p' and
+`process-file' over an already multiplexed protocol, so a consumer that probes
+a file per command stays responsive.  `round-trip' means every such call pays
+its own shell round trip on the target, and a per-file consumer needs its own
+caching or has to stay switched off.
+
+This is the query a consumer asks instead of testing `file-remote-p', a TRAMP
+method, or a backend ID.  ADAPTER defaults to the ordinary file adapter.  The
+query is pure: it resolves placement but does not acquire a connection."
+  (let* ((canonical (remote-canonicalize-file-name file-name))
+         (context (remote-fs--context canonical))
+         (route
+          (remote-resolve
+           (or adapter
+               (remote-fs--adapter-for-capability 'metadata))
+           'metadata context nil)))
+    (or (plist-get
+         (remote-backend-describe (remote-route-link-plugin-id route))
+         :file-operation-cost)
+        'round-trip)))
+
 (defun remote-fs-register-link-plugins ()
   "Register the built-in backend modules.
 This compatibility dispatcher keeps callers independent of backend layout."
@@ -1068,6 +1092,19 @@ the same boundary used by TRAMP for primitives which derive their file identity
 from the visiting buffer rather than from an explicit file-name argument."
   (tramp-run-real-handler operation args))
 
+(defun remote-fs-handle-vc-registered (file)
+  "Like `vc-registered' for logical FILE.
+VC caches everything it learns under the exact file name it was handed.
+Projecting FILE to its physical spelling first would leave `vc-backend' and
+the rest of that cache under the other name, so a buffer visiting the logical
+name would keep getting nil and never show its branch or diff indicators.
+The backends themselves need no projection: they reach the target through
+ordinary file operations and `process-file', which are routed normally."
+  (when (bound-and-true-p vc-handled-backends)
+    (let ((default-directory (file-name-directory file))
+          (process-file-side-effects nil))
+      (remote-fs--run-real-buffer-operation #'vc-registered (list file)))))
+
 (defun remote-fs-handle-make-process (&rest plist)
   "Route official `make-process' PLIST through the remote process API.
 This is the compatibility boundary used by third-party packages.
@@ -1305,6 +1342,14 @@ target-native namespace."
 (defun remote-fs--call-routed (operation args)
   "Route OPERATION with ARGS through the selected link."
   (remote-fs--validate-cross-target-operation operation args)
+  ;; A backend probe or connect runs under this call and may have to resolve a
+  ;; helper on this machine.  Pin the client environment here too, exactly as
+  ;; the process route does.
+  (remote-with-client-environment
+    (remote-fs--call-routed-1 operation args)))
+
+(defun remote-fs--call-routed-1 (operation args)
+  "Route OPERATION with ARGS after the client environment has been pinned."
   (let* ((known (gethash operation remote-file-operations))
          (spec (or known (remote-fs--operation-spec operation)))
          (logical (or (remote-fs--primary-file operation args)
@@ -2111,6 +2156,7 @@ the logical handler first so the public API still owns descriptor-table and
      (apply #'remote-fs-handle-start-file-process args))
     ('unhandled-file-name-directory
      (remote-fs-handle-unhandled-file-name-directory (car args)))
+    ('vc-registered (apply #'remote-fs-handle-vc-registered args))
     ((guard
       (eq (remote-file-operation-spec-placement
            (remote-fs--operation-spec operation))

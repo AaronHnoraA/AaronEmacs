@@ -946,7 +946,7 @@ rewritten to the client-side relay."
    :program-form 'search
    :describe
    (lambda ()
-     '(:kind tramp :session-owner tramp))))
+     '(:kind tramp :session-owner tramp :file-operation-cost round-trip))))
 
 (provide 'remote-backend-tramp)
 ;;; remote-backend-tramp.el ends here

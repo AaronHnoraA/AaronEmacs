@@ -4,6 +4,8 @@
 
 (require 'ert)
 (require 'remote-framework)
+(require 'vc)
+(require 'vc-git)
 
 (defun remote-conformance--normalize (value)
   "Normalize logical file identities inside VALUE to native local names."
@@ -114,6 +116,33 @@
          (equal
           (remote-conformance--outcome #'delete-file native)
           (remote-conformance--outcome #'delete-file logical)))
+      (delete-directory root t))))
+
+(ert-deftest remote-conformance-vc-registered-caches-under-the-logical-name ()
+  "VC caches under the exact name it is handed.
+A logical name must therefore be answered as itself, or `vc-backend' would
+keep returning nil for a buffer that `vc-registered' has already resolved."
+  (remote-fs-install)
+  (skip-unless (executable-find "git"))
+  (let* ((root (make-temp-file "remote-conformance-vc-" t))
+         (file (expand-file-name "tracked.txt" root))
+         (logical (remote-make-file-name "local" file))
+         (vc-handled-backends '(Git)))
+    (unwind-protect
+        (let ((default-directory root)
+              (process-environment
+               (append '("GIT_AUTHOR_NAME=t" "GIT_AUTHOR_EMAIL=t@t"
+                         "GIT_COMMITTER_NAME=t" "GIT_COMMITTER_EMAIL=t@t")
+                       process-environment)))
+          (write-region "tracked\n" nil file nil 'silent)
+          (call-process "git" nil nil nil "init" "--quiet" root)
+          (call-process "git" nil nil nil "-C" root "add" "tracked.txt")
+          (call-process "git" nil nil nil "-C" root "commit" "--quiet" "-m" "x")
+          (vc-file-clearprops file)
+          (vc-file-clearprops logical)
+          (should (vc-registered logical))
+          (should (eq (vc-file-getprop logical 'vc-backend) 'Git))
+          (should (eq (vc-backend logical) 'Git)))
       (delete-directory root t))))
 
 (ert-deftest remote-conformance-operation-effects-are-total ()

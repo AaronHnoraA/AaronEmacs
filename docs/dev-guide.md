@@ -408,8 +408,12 @@ Lean 的通知/请求 payload 一律用 `lsp-get` 读取：lsp-mode 只有在以
 - `local` target 与其他 target 走相同的 consumer API、资源所有权和验收流程
 - buffer 使用与 transport/backend 无关的 `/fs:TARGET:/path` 逻辑身份
 - target、有序 transport pipeline、执行 backend、复用 session 和调用者偏好分别注册
-- 普通 Emacs 文件 API 保留 TRAMP 的完整兼容性
+- 普通 Emacs 文件 API 保留 TRAMP 的完整兼容性；默认 adapter 偏好仍是
+  native → tramp → tramp-rpc，单个 target 可以在 `etc/remote.json` 用
+  `preferences` 把文件操作也切到 tramp-rpc（当前 `Aaron-*` 就是这样配置的）
 - lsp-mode、direnv、环境探测与自定义进程可以优先 tramp-rpc，失败时回退 TRAMP
+- 需要"每个文件一次子进程"的功能用 `remote-file-operation-cost` 判断开关，
+  VC/diff-hl 因此在 batched backend 上与本地一致，在 shell TRAMP 上仍然关闭
 - socket/stream/port-forward 走显式 channel API，远端不支持时不会静默落到本机
 - PATH 按 target/workspace ID 隔离，并由 host probe、direnv、toolchain 等分层维护
 

@@ -38,12 +38,21 @@
         },
         {
           "id": "ssh",
-          "backend": "tramp-rpc",
+          "backends": [
+            "tramp-rpc",
+            "tramp"
+          ],
           "priority": 50,
           "include": [
             "Aaron-*"
           ],
-          "trusted": true
+          "trusted": true,
+          "preferences": {
+            "default": [
+              "tramp-rpc",
+              "tramp"
+            ]
+          }
         }
       ]
     }

@@ -118,14 +118,20 @@ variables, which is routine for direnv and Nix shells."
           (directory-file-name (file-name-directory library)))))))
 
 (defun remote-backend-tramp-rpc--git-output (root &rest arguments)
-  "Run git ARGUMENTS in ROOT and return trimmed stdout, or nil."
-  (when (and root (executable-find "git"))
+  "Run git ARGUMENTS in ROOT and return trimmed stdout, or nil.
+ROOT is this package's own checkout on the client, so the call has to stay on
+the client.  It runs from the backend probe while the target connection is
+still opening: a `default-directory' inherited from the caller would route
+`process-file' back into that half-open connection, and the whole operation
+would fail with `remote-connection-busy' instead of reporting the contract."
+  (when-let* ((root root)
+              (git (remote-client-executable-find "git")))
     (with-temp-buffer
-      (let ((default-directory temporary-file-directory)
-            (status
-             (apply #'process-file
-                    (executable-find "git") nil t nil
-                    "-C" root arguments)))
+      (let* ((default-directory temporary-file-directory)
+             (process-environment (remote-client-process-environment))
+             (exec-path (remote-client-exec-path))
+             (status
+              (apply #'process-file git nil t nil "-C" root arguments)))
         (when (zerop status)
           (string-trim (buffer-string)))))))
 
@@ -410,7 +416,8 @@ VECTOR, METHOD, and PARAMS are tramp-rpc's ordinary request arguments."
    (lambda ()
      '(:kind tramp-rpc
        :session-owner tramp-rpc
-       :spawn-program absolute))))
+       :spawn-program absolute
+       :file-operation-cost batched))))
 
 (remote-backend-tramp-rpc-install)
 
