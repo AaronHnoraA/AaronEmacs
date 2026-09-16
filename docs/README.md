@@ -18,6 +18,7 @@ channels.
 - [quick-start.md](quick-start.md) First-time setup, system dependencies, fonts, path conventions, and bootstrap.
 - [daily-usage.md](daily-usage.md) Daily entry points, high-frequency keybindings, and leader-group layout.
 - [agenda.md](agenda.md) Noema `@@todo`/`@@project`/`@@clock` syntax, server agenda/project/clock view-model, repeaters, dependencies, and Web/Emacs entry points.
+- [Native Agenda integration study](../site-lisp/noema/docs/architecture/agenda-org-integration-study.md) Org Agenda UI reuse over native Markdown/WorkNode data, project-scoped indexing, and explicit Apple global attention; includes an isolated prototype.
 - [slides-demo.md](../site-lisp/noema/docs/slides-demo.md) Ready-to-open `kind: slides` Noema deck with math and HTML examples.
 - [settings-cookbook.md](settings-cookbook.md) “I want to change X” guidance that tells you where each kind of change belongs.
 - [config-management.md](config-management.md) Unified `config` registry: one front door (`config-get`/`config-set`, `M-x my/config-board`) to view, edit, live-apply, and persist every registered setting.

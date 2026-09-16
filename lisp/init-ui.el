@@ -6,6 +6,8 @@
 ;;; Code:
 
 (require 'config)
+(require 'cl-lib)
+(require 'seq)
 
 (require 'init-package-utils)
 
@@ -19,6 +21,27 @@
   "Last theme signature applied by `my/dashboard-apply-ui'.")
 (defvar my/chunlian--visibility-timer nil
   "Idle timer used to coalesce dashboard visibility checks.")
+(defvar my/dashboard--entry-refresh-timer nil
+  "Pending one-shot refresh after entering the Dashboard.")
+(defvar my/dashboard--last-current-buffer nil
+  "Dashboard buffer most recently observed as current.")
+(defvar my/dashboard--agenda-snapshot nil
+  "Last complete native Agenda snapshot rendered by the Dashboard.")
+(defvar my/dashboard--agenda-error nil
+  "Last error returned while refreshing `my/dashboard--agenda-snapshot'.")
+(defvar my/dashboard--agenda-request-pending nil
+  "Non-nil while the shared Agenda cache is being refreshed.")
+(defvar my/dashboard--agenda-waiters nil
+  "Callbacks waiting for the current Agenda cache refresh.")
+(defvar my/dashboard--agenda-request-timer nil
+  "One-shot deadline timer for the shared Agenda cache request.")
+(defvar my/dashboard--agenda-request-generation 0
+  "Generation used to reject late Agenda cache replies.")
+(defvar my/dashboard--agenda-dirty t
+  "Non-nil when an event says the Dashboard Agenda cache is stale.")
+(defvar chunlian-mode)
+(declare-function chunlian-mode "init-ui" (&optional arg))
+(declare-function chunlian--clear-display "init-ui" ())
 (defvar my/file-icon-image-cache (make-hash-table :test #'equal)
   "Cached image descriptors for custom file icons.")
 
@@ -66,8 +89,12 @@
 (declare-function material-icon-create-icon-image "material-icon-utils" (icon-path))
 (declare-function material-icon-get-icon-for-file "material-icon-utils" (filename &optional dir-p))
 (declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
+(declare-function dashboard-refresh-buffer "dashboard" ())
 (declare-function config-board "config-tools" ())
 (declare-function my/noema-roam-dashboard-insert-heatmap "init-md-roam" (&optional days))
+(declare-function noema-agenda-dashboard-query "noema-agenda" (callback))
+(defvar my/noema-host-ready-functions)
+(declare-function noema-agenda-open "noema-agenda" (&optional query))
 (declare-function my/noema-wiki-home "init-aaronnote" ())
 (declare-function my/performance-watch "init-performance" ())
 (defvar dashboard-mode-map)
@@ -312,6 +339,242 @@ height in pixels."
     (when (fboundp 'my/noema-roam-dashboard-insert-heatmap)
       (my/noema-roam-dashboard-insert-heatmap))))
 
+(defun my/dashboard--agenda-get (object key &optional default)
+  "Read KEY from JSON OBJECT, returning DEFAULT when absent."
+  (cond ((hash-table-p object) (gethash (symbol-name key) object default))
+        ((listp object) (alist-get key object default))
+        (t default)))
+
+(defun my/dashboard--agenda-list (value)
+  "Return JSON array VALUE as a list."
+  (if (vectorp value) (append value nil) (or value nil)))
+
+(defun my/dashboard--agenda-todo-map (snapshot)
+  "Return Agenda uid map for SNAPSHOT."
+  (let ((result (make-hash-table :test #'equal)))
+    (dolist (todo (my/dashboard--agenda-list
+                   (my/dashboard--agenda-get snapshot 'todos)))
+      (puthash (or (my/dashboard--agenda-get todo 'uid)
+                   (my/dashboard--agenda-get todo 'id)) todo result))
+    result))
+
+(defun my/dashboard--insert-agenda-card-content (snapshot error-object)
+  "Insert a compact Agenda card from SNAPSHOT or ERROR-OBJECT."
+  (let ((heading-face (if (facep 'dashboard-heading) 'dashboard-heading 'bold))
+        (item-face (if (facep 'dashboard-items-face) 'dashboard-items-face 'default)))
+    (insert-text-button
+     "Agenda · next 7 days"
+     'face heading-face 'follow-link t
+     'help-echo "Open Noema Agenda"
+     'action (lambda (_) (require 'noema-agenda) (noema-agenda-open)))
+    (insert "\n\n")
+    (cond
+     (error-object
+      (insert (propertize
+               (format "Agenda unavailable · %s"
+                       (or (my/dashboard--agenda-get error-object 'message)
+                           "host error")) 'face 'shadow))
+      (insert "  ")
+      (insert-text-button
+       "[retry]"
+       'face item-face 'follow-link t
+       'help-echo "Query the Noema Agenda host again"
+       'action (lambda (_) (my/dashboard-agenda-handle-change)))
+      (insert "\n"))
+     ((null snapshot)
+      (insert (propertize "Agenda cache is not ready" 'face 'shadow) "\n"))
+     (t
+      (let* ((stats (my/dashboard--agenda-get snapshot 'stats))
+             (open (my/dashboard--agenda-get stats 'open 0))
+             (doing (my/dashboard--agenda-get stats 'doing 0))
+             (blocked (my/dashboard--agenda-get stats 'blocked 0))
+             (overdue (my/dashboard--agenda-get stats 'overdue 0))
+             (todo-map (my/dashboard--agenda-todo-map snapshot))
+             (seen (make-hash-table :test #'equal))
+             rows)
+        (insert (propertize
+                 (format "%s open   %s doing   %s blocked   %s overdue"
+                         open doing blocked overdue)
+                 'face item-face) "\n\n")
+        (dolist (day (my/dashboard--agenda-list
+                      (my/dashboard--agenda-get snapshot 'days)))
+          (dolist (entry (my/dashboard--agenda-list
+                          (my/dashboard--agenda-get day 'entries)))
+            (let* ((uid (my/dashboard--agenda-get entry 'todoId))
+                   (todo (gethash uid todo-map))
+                   (kind (my/dashboard--agenda-get entry 'kind "")))
+              (when (and todo uid (not (gethash uid seen))
+                         (not (member kind '("log" "repeat"))))
+                (puthash uid t seen)
+                (push (list day entry todo) rows)))))
+        (setq rows (nreverse rows))
+        ;; The date buckets intentionally omit unscheduled work.  Complete the
+        ;; compact card from the same urgency-sorted todo projection so Roam
+        ;; tasks do not disappear merely because they have no date this week.
+        (let (undated)
+          (dolist (todo (my/dashboard--agenda-list
+                         (my/dashboard--agenda-get snapshot 'todos)))
+            (let ((uid (or (my/dashboard--agenda-get todo 'uid)
+                           (my/dashboard--agenda-get todo 'id)))
+                  (status (my/dashboard--agenda-get todo 'effectiveStatus
+                                                    (my/dashboard--agenda-get todo 'status "todo"))))
+              (when (and uid (not (gethash uid seen))
+                         (not (member status '("done" "cancelled"))))
+                (puthash uid t seen)
+                (push (list nil nil todo) undated))))
+          (setq rows (nconc rows (nreverse undated))))
+        (if (null rows)
+            (insert (propertize "No open or scheduled items" 'face 'shadow) "\n")
+          (dolist (row (seq-take rows 4))
+            (pcase-let* ((`(,day ,entry ,todo) row)
+                         (date (and day (my/dashboard--agenda-get day 'date "")))
+                         (time (and entry (my/dashboard--agenda-get entry 'time "")))
+                         (status (upcase (my/dashboard--agenda-get todo 'effectiveStatus
+                                                                   (my/dashboard--agenda-get todo 'status "todo"))))
+                         (title (my/dashboard--agenda-get todo 'text "Untitled"))
+                         (label (truncate-string-to-width title 52 nil nil "…")))
+              (insert (propertize (format "%5s  %-7s  "
+                                          (cond
+                                           ((and time (not (string-empty-p time))) time)
+                                           ((and date (not (string-empty-p date)))
+                                            (substring date (min 5 (length date))))
+                                           (t "open"))
+                                          status)
+                                  'face 'shadow))
+              (insert-text-button
+               label 'face item-face 'follow-link t
+               'help-echo "Open this task in Noema Agenda"
+               'action (lambda (_) (require 'noema-agenda) (noema-agenda-open title)))
+              (insert "\n")))))))))
+
+(defun my/dashboard-insert-agenda ()
+  "Synchronously insert the last complete native Agenda snapshot.
+Dashboard construction never starts a request and never edits the finished
+buffer from an asynchronous callback.  Cache refreshes rebuild the Dashboard
+through its normal insertion pipeline, before Chunlian is attached."
+  (let ((start (point)))
+    (my/dashboard--insert-agenda-card-content
+     my/dashboard--agenda-snapshot my/dashboard--agenda-error)
+    (my/dashboard--center-lines start (point))))
+
+(defun my/dashboard--refresh-buffer-completely (buffer)
+  "Rebuild Dashboard BUFFER, then attach Chunlian to the finished contents."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (derived-mode-p 'dashboard-mode)
+        ;; Do not let zero-width margin overlays collapse into `point-min'
+        ;; while `dashboard-refresh-buffer' erases and rebuilds the buffer.
+        (when chunlian-mode (chunlian--clear-display))
+        (dashboard-refresh-buffer)
+        (when (derived-mode-p 'dashboard-mode)
+          (chunlian-mode 1))))))
+
+(defun my/dashboard--finish-agenda-refresh (snapshot error-object &optional generation)
+  "Publish SNAPSHOT or ERROR-OBJECT and notify cache refresh waiters."
+  (when (or (null generation)
+            (and my/dashboard--agenda-request-pending
+                 (= generation my/dashboard--agenda-request-generation)))
+    (when (timerp my/dashboard--agenda-request-timer)
+      (cancel-timer my/dashboard--agenda-request-timer))
+    (setq my/dashboard--agenda-request-timer nil)
+    (let ((changed (or (not (equal error-object my/dashboard--agenda-error))
+                       (and (not error-object)
+                            (not (equal snapshot my/dashboard--agenda-snapshot)))))
+          (waiters (prog1 (nreverse my/dashboard--agenda-waiters)
+                     (setq my/dashboard--agenda-waiters nil
+                           my/dashboard--agenda-request-pending nil))))
+      (if error-object
+          (setq my/dashboard--agenda-error error-object
+                my/dashboard--agenda-dirty t)
+        (setq my/dashboard--agenda-snapshot snapshot
+              my/dashboard--agenda-error nil
+              my/dashboard--agenda-dirty nil))
+      (dolist (waiter waiters)
+        (funcall waiter changed)))))
+
+(defun my/dashboard--refresh-agenda-cache (&optional callback)
+  "Refresh the shared Agenda snapshot and call CALLBACK with CHANGED.
+Concurrent callers share one host request.  This function updates data only;
+it never edits a Dashboard buffer."
+  (if (and (not my/dashboard--agenda-dirty)
+           my/dashboard--agenda-snapshot
+           (not my/dashboard--agenda-error))
+      (when callback (funcall callback nil))
+    (when callback (push callback my/dashboard--agenda-waiters))
+    (unless my/dashboard--agenda-request-pending
+      (setq my/dashboard--agenda-request-pending t)
+      (let ((generation (cl-incf my/dashboard--agenda-request-generation)))
+        (setq my/dashboard--agenda-request-timer
+              (run-at-time
+               15 nil
+               (lambda ()
+                 (my/dashboard--finish-agenda-refresh
+                  nil '((message . "Agenda cache refresh timed out"))
+                  generation))))
+        (condition-case err
+            (progn
+              (require 'noema-agenda)
+              (noema-agenda-dashboard-query
+               (lambda (snapshot error-object)
+                 (my/dashboard--finish-agenda-refresh
+                  snapshot error-object generation))))
+          (error
+           (my/dashboard--finish-agenda-refresh
+            nil `((message . ,(error-message-string err))) generation)))))))
+
+(defun my/dashboard-agenda-host-stopped ()
+  "Release the pending Dashboard Agenda request after the host stops."
+  (cl-incf my/dashboard--agenda-request-generation)
+  (when (timerp my/dashboard--agenda-request-timer)
+    (cancel-timer my/dashboard--agenda-request-timer))
+  (setq my/dashboard--agenda-request-timer nil
+        my/dashboard--agenda-request-pending nil
+        my/dashboard--agenda-dirty t
+        my/dashboard--agenda-waiters nil))
+
+(defun my/dashboard-agenda-handle-change (&optional _payload)
+  "Refresh cached Agenda data after an event-driven source change."
+  (setq my/dashboard--agenda-dirty t)
+  (when-let* ((buffer (get-buffer "*dashboard*")))
+    (when (get-buffer-window buffer t)
+      (my/dashboard--refresh-agenda-cache
+       (lambda (changed)
+         (when (and changed
+                    (buffer-live-p buffer)
+                    (get-buffer-window buffer t))
+           (my/dashboard--refresh-buffer-completely buffer)))))))
+
+(defun my/dashboard-refresh-on-entry ()
+  "Refresh the persistent Dashboard once whenever it becomes current."
+  (let ((dashboard (and (derived-mode-p 'dashboard-mode) (current-buffer))))
+    (if (eq dashboard my/dashboard--last-current-buffer)
+        nil
+      (setq my/dashboard--last-current-buffer dashboard)
+      (when (timerp my/dashboard--entry-refresh-timer)
+        (cancel-timer my/dashboard--entry-refresh-timer))
+      (setq my/dashboard--entry-refresh-timer nil)
+      (when dashboard
+        (setq my/dashboard--entry-refresh-timer
+              (run-with-idle-timer
+               0 nil
+               (lambda (buffer)
+                 (setq my/dashboard--entry-refresh-timer nil)
+                 (when (and (buffer-live-p buffer)
+                            (eq buffer (current-buffer))
+                            (derived-mode-p 'dashboard-mode))
+                   ;; Render cached data through the ordinary Dashboard
+                   ;; pipeline, attach Chunlian, then refresh the cache.  A
+                   ;; changed snapshot causes another complete render rather
+                   ;; than an in-place asynchronous card rewrite.
+                   (my/dashboard--refresh-buffer-completely buffer)
+                   (my/dashboard--refresh-agenda-cache
+                    (lambda (changed)
+                      (when (and changed
+                                 (buffer-live-p buffer)
+                                 (eq buffer (current-buffer)))
+                        (my/dashboard--refresh-buffer-completely buffer))))))
+               dashboard))))))
+
 (defun my/dashboard--item-block-width ()
   "Return the content width used to center dashboard item sections."
   (let* ((window-width (max 40 (window-body-width nil t)))
@@ -472,6 +735,8 @@ height in pixels."
                                my/dashboard-insert-roam-heatmap
                                dashboard-insert-newline
                                dashboard-insert-items
+                               dashboard-insert-newline
+                               my/dashboard-insert-agenda
                                dashboard-insert-newline
                                dashboard-insert-footer)))
 
@@ -968,6 +1233,7 @@ When WIN is nil, restore every tracked window."
 ;; 卸载旧的，挂载安全的 Hook
 (remove-hook 'dashboard-mode-hook #'chunlian-mode)
 (add-hook 'buffer-list-update-hook #'my/chunlian-schedule-visibility-check)
+(add-hook 'buffer-list-update-hook #'my/dashboard-refresh-on-entry)
 (add-hook 'dashboard-after-initialize-hook
           (lambda ()
             (chunlian-mode 1)

@@ -32,7 +32,16 @@
 (declare-function my/noema-workspace-layout "init-aaronnote" ())
 (declare-function my/navigation--push-jump "init-navigation")
 (declare-function my/navigation-find-definition "init-navigation")
+(declare-function noema-agenda--call "noema-agenda" (operation body callback))
+(declare-function noema-agenda--get "noema-agenda" (object key &optional default))
+(declare-function noema-agenda--list "noema-agenda" (value))
+(declare-function noema-agenda--error "noema-agenda" (error-object))
+(declare-function noema-agenda--patch "noema-agenda" (todo patch &optional callback))
+(declare-function noema-agenda--write "noema-agenda" (operation body files &optional callback))
+(declare-function noema-agenda--locator "noema-agenda" (record))
+(declare-function noema-agenda-visit-record "noema-agenda" (record))
 (defvar my/noema--notes-root nil)
+(defvar my/project-active-root nil)
 
 (defvar my/noema--ready nil
   "Non-nil when the Noema web host is available.")
@@ -2348,51 +2357,19 @@ On a heading line, append `{#id}` unless an id already exists."
                                   slugs nil t)))
       (my/noema-roam--open-slug slug))))
 
-(defun my/noema-roam--scan-todos ()
-  "Return todo hash tables scanned from Markdown notes."
-  (let (todos)
-    (dolist (record (my/noema-roam--note-records))
-      (let ((file (plist-get record :file)))
-        (when (and file (file-exists-p file))
-          (with-temp-buffer
-            (insert-file-contents file)
-            (goto-char (point-min))
-            (while (not (eobp))
-              (let* ((line-start (line-beginning-position))
-                     (line-end (line-end-position))
-                     (line (string-trim
-                            (buffer-substring-no-properties
-                             line-start line-end))))
-                (when (or (string-match-p "\\`@@todo\\b" line)
-                          (string-match-p "\\`\\(?:[-*+]\\s-+\\)?\\[ \\]" line)
-                          (string-match-p "\\_<TODO\\_>" line))
-                  (let ((entry (make-hash-table :test 'equal)))
-                    (puthash "note" (plist-get record :id) entry)
-                    (puthash "noteId" (plist-get record :id) entry)
-                    (puthash "noteKey" (plist-get record :key) entry)
-                    (puthash "title" (plist-get record :title) entry)
-                    (puthash "noteTitle" (plist-get record :title) entry)
-                    (puthash "file" file entry)
-                    (puthash "path" (plist-get record :path) entry)
-                    (puthash "line" (line-number-at-pos line-start t) entry)
-                    (puthash "column" 1 entry)
-                    (puthash "index" (1- line-start) entry)
-                    (puthash "source" line entry)
-                    (puthash "text" line entry)
-                    (push entry todos))))
-              (forward-line 1))))))
-    (nreverse todos)))
+(defun my/noema-roam--agenda-call (operation body callback)
+  "Call native Agenda OPERATION asynchronously with BODY and CALLBACK."
+  (require 'noema-agenda)
+  (noema-agenda--call operation body callback))
 
-(defun my/noema-roam--todos ()
-  "Return vault-wide todos from the Noema runtime or local scan.
-Fetches through the `agenda' view-model rather than the plain `todos' list so
-dependency resolution (`effectiveStatus'/`blockedBy', computed vault-wide) and
-the urgency sort are already applied server-side instead of being re-derived
-in Elisp."
-  (let* ((runtime (my/noema-roam--runtime-call "agenda" "--json" "{}"))
-         (runtime-todos (and runtime (gethash "todos" runtime))))
-    (or runtime-todos
-        (my/noema-roam--scan-todos))))
+(defun my/noema-roam--todos (callback)
+  "Pass active-scope native tasks to CALLBACK without a CLI or regex fallback.
+An empty list is a successful result; failure preserves the current view."
+  (my/noema-roam--agenda-call
+   "query-active" nil
+   (lambda (result error-object)
+     (if error-object (noema-agenda--error error-object)
+       (funcall callback (noema-agenda--list (noema-agenda--get result 'todos)))))))
 
 (defun my/noema-roam--todo-field (entry &rest keys)
   "Return the first non-nil field from todo ENTRY matching KEYS."
@@ -2400,7 +2377,8 @@ in Elisp."
    (lambda (key)
      (cond
       ((hash-table-p entry) (gethash key entry))
-      ((plistp entry) (plist-get entry (intern (concat ":" key))))
+      ((and (listp entry) (keywordp (car entry)))
+       (plist-get entry (intern (concat ":" key))))
       ((listp entry)
        (or (cdr (assoc key entry))
            (cdr (assq (intern key) entry))))
@@ -2434,36 +2412,32 @@ being rewritten) over the raw `status' field when present."
     (_ 'info)))
 
 (defun my/noema-roam--visit-todo (entry)
-  "Open the note and source line represented by todo ENTRY."
-  (let* ((file (my/noema-roam--todo-field entry "file"))
-         (note-slug (my/noema-roam--todo-field
-                     entry "note" "noteId" "noteKey" "path"))
-         (line (my/noema-roam--todo-field entry "line"))
-         (column (my/noema-roam--todo-field entry "column"))
-         (index (my/noema-roam--todo-field entry "index"))
-         (source (my/noema-roam--todo-field entry "source")))
-    (cond
-     ((and (stringp file) (not (string-empty-p file)) (file-exists-p file))
-      (find-file file))
-     (note-slug
-      (my/noema-roam--open-slug note-slug))
-     (t
-      (user-error "Todo has no source note")))
-    (cond
-     ((and (integerp index) (>= index 0))
-      (goto-char (min (point-max) (1+ index)))
-      (when (and (stringp source) (not (string-empty-p source))
-                 (not (looking-at-p (regexp-quote source))))
-        (let ((line-end (line-end-position)))
-          (when (search-forward source line-end t)
-            (goto-char (match-beginning 0))))))
-     ((integerp line)
-      (goto-char (point-min))
-      (forward-line (max 0 (1- line)))
-      (when (integerp column)
-        (forward-char (min (max 0 (1- column))
-                           (- (line-end-position) (point)))))))
-    (recenter)))
+  "Visit ENTRY from an unchanged editor snapshot or a resolved Agenda scope."
+  (if-let* ((buffer (my/noema-roam--todo-field entry "sourceBuffer")))
+      (let ((tick (my/noema-roam--todo-field entry "sourceTick"))
+            (position (my/noema-roam--todo-field entry "bufferPoint"))
+            (source (my/noema-roam--todo-field entry "source")))
+        (unless (and (buffer-live-p buffer)
+                     (with-current-buffer buffer
+                       (and (= tick (buffer-chars-modified-tick))
+                            (equal buffer-file-name (my/noema-roam--todo-field entry "file")))))
+          (user-error "Task source changed; reopen file tasks"))
+        (pop-to-buffer buffer)
+        (widen)
+        (goto-char position)
+        (unless (looking-at-p (regexp-quote source))
+          (user-error "Task source changed; reopen file tasks"))
+        (recenter))
+    (let ((uid (my/noema-roam--todo-field entry "uid"))
+          (scope (my/noema-roam--todo-field entry "scopeId")))
+      (unless (and uid scope) (user-error "Refresh tasks to resolve their source"))
+      (my/noema-roam--agenda-call
+       "query" `((scopes . ,(vector scope)))
+       (lambda (snapshot error-object)
+         (if error-object (noema-agenda--error error-object)
+           (noema-agenda-visit-record
+            (seq-find (lambda (todo) (equal uid (noema-agenda--get todo 'uid)))
+                      (noema-agenda--list (noema-agenda--get snapshot 'todos))))))))))
 
 (defun my/noema-roam--todo-at-point ()
   "Return the todo entry on the current row."
@@ -2472,77 +2446,36 @@ being rewritten) over the raw `status' field when present."
       (get-text-property (max (point-min) (1- (point)))
                          'my/noema-roam-todo)))
 
-(defun my/noema-roam--todo-update-local (entry status)
-  "Update todo ENTRY to STATUS by editing its source file locally."
-  (let* ((file (my/noema-roam--todo-field entry "file"))
-         (index (my/noema-roam--todo-field entry "index"))
-         (source (my/noema-roam--todo-field entry "source"))
-         (status (downcase (format "%s" status)))
-         (prefix (if (string= status "todo")
-                     "@@todo "
-                   (format "@@todo(%s) " status))))
-    (unless (and (stringp file) (file-exists-p file))
-      (user-error "Todo has no editable source file"))
-    (with-current-buffer (find-file-noselect file)
-      (save-excursion
-        (save-restriction
-          (widen)
-          (cond
-           ((and (integerp index) (>= index 0))
-            (goto-char (min (point-max) (1+ index))))
-           (t
-            (goto-char (point-min))))
-          (unless (or (looking-at "@@todo\\(?:([^)\n]*)\\)?[ \t]+")
-                      (and (stringp source)
-                           (search-forward source nil t)
-                           (goto-char (match-beginning 0))
-                           (looking-at "@@todo\\(?:([^)\n]*)\\)?[ \t]+")))
-            (user-error "Todo source was not found"))
-          (replace-match prefix t t nil 0)))
-      (save-buffer)))
-  (my/noema-roam--clear-runtime-cache))
-
-(defun my/noema-roam--todo-patch (entry extra)
-  "Send a patch-todo request for todo ENTRY merging EXTRA alist fields.
-EXTRA keys are canonical (ddl/sche/prio/repeat/warn/after/afterAdd) or their
-legacy aliases (priority/due/scheduled); `patchTodo' on the server accepts
-both and preserves whichever alias the `@@todo' line already uses.  Returns
-the parsed response hash-table, or nil when the runtime is unavailable."
-  (let* ((file (my/noema-roam--todo-field entry "file"))
-         (index (my/noema-roam--todo-field entry "index"))
-         (source (my/noema-roam--todo-field entry "source"))
-         (id (my/noema-roam--todo-field entry "id"))
-         (text (my/noema-roam--todo-field entry "text"))
-         (payload (append
-                   (list (cons 'file (or file ""))
-                         (cons 'id (or id ""))
-                         (cons 'index (or index ""))
-                         (cons 'source (or source ""))
-                         (cons 'text (or text "")))
-                   extra)))
-    (unless (and file (not (string-empty-p file)))
-      (user-error "Todo has no editable source file"))
-    (my/noema-roam--runtime-call "patch-todo" "--json" (json-encode payload))))
+(defun my/noema-roam--todo-patch (entry extra &optional callback)
+  "Patch versioned native ENTRY with EXTRA and report completion to CALLBACK."
+  (require 'noema-agenda)
+  (unless (and (my/noema-roam--todo-field entry "scopeId")
+               (my/noema-roam--todo-field entry "uid")
+               (my/noema-roam--todo-field entry "sourceRef"))
+    (user-error "Refresh tasks before editing"))
+  (let ((origin (current-buffer)))
+    (noema-agenda--patch
+     entry (mapcar (lambda (field)
+                     (cons (or (cdr (assq (car field) '((priority . prio) (due . ddl) (scheduled . sche))))
+                               (car field)) (cdr field))) extra)
+     (lambda (result error-object)
+       (unless error-object
+         (my/noema-roam--clear-runtime-cache)
+         (when callback (funcall callback result))
+         (when (buffer-live-p origin)
+           (with-current-buffer origin (my/noema-roam-ui-refresh))))))))
 
 (defun my/noema-roam-update-todo-status (status &optional entry)
-  "Set current todo ENTRY to STATUS and refresh the current task view.
-Setting STATUS to \"done\" runs the repeater engine server-side: a todo with
-a `repeat' arg rolls its deadline/scheduled dates forward and resets to
-`todo' instead of closing, mirroring org's repeating-task completion."
+  "Set native ENTRY to STATUS through the Agenda source owner.
+Completion uses the same repeat semantics and revision checks as Agenda."
   (interactive
    (list (completing-read "Todo status: " '("todo" "doing" "blocked" "done" "cancelled")
-                          nil t nil nil "done")
-         nil))
-  (let* ((entry (or entry (my/noema-roam--todo-at-point))))
-    (unless entry
-      (user-error "No todo on this line"))
-    (or (if (string= status "done")
-            (my/noema-roam--todo-patch entry '((op . "complete")))
-          (my/noema-roam--todo-patch entry `((status . ,status))))
-        (my/noema-roam--todo-update-local entry status))
-    (my/noema-roam--clear-runtime-cache)
-    (message "Todo marked %s" status)
-    (my/noema-roam-ui-refresh)))
+                          nil t nil nil "done") nil))
+  (let ((entry (or entry (my/noema-roam--todo-at-point))))
+    (unless entry (user-error "No todo on this line"))
+    (my/noema-roam--todo-patch
+     entry (if (equal status "done") '((op . "complete")) `((status . ,status)))
+     (lambda (_result) (message "Todo marked %s" status)))))
 
 (defun my/noema-roam-update-todo-metadata (field value &optional entry)
   "Set todo metadata FIELD to VALUE for ENTRY and refresh the current task view.
@@ -2564,11 +2497,10 @@ clears FIELD."
       (user-error "No todo on this line"))
     (unless (member field '("priority" "due" "scheduled" "repeat" "warn"))
       (user-error "Unsupported todo metadata field: %s" field))
-    (unless (my/noema-roam--todo-patch entry (list (cons (intern field) value)))
-      (user-error "Noema runtime is required for todo metadata updates"))
-    (my/noema-roam--clear-runtime-cache)
-    (message "Todo %s %s" field (if (string-empty-p value) "cleared" value))
-    (my/noema-roam-ui-refresh)))
+    (my/noema-roam--todo-patch
+     entry (list (cons (intern field) value))
+     (lambda (_result)
+       (message "Todo %s %s" field (if (string-empty-p value) "cleared" value))))))
 
 (defun my/noema-roam-set-todo-priority (&optional priority entry)
   "Set current todo PRIORITY and refresh the current task view."
@@ -2599,44 +2531,40 @@ clears FIELD."
   (my/noema-roam-update-todo-metadata "warn" (or warn "") entry))
 
 (defun my/noema-roam-add-todo-dependency (&optional entry)
-  "Add a dependency (`after') reference from ENTRY to another todo.
-Prompts for the target todo by note and text, resolves it through the
-Noema runtime into a stable, shortest-unique text reference, and appends
-it to ENTRY's `after' arg — no ids are ever written to the source file, so
-the reference stays a plain, human-readable part of the Markdown."
+  "Add a dependency from native ENTRY through the active-scope Agenda writer."
   (interactive)
-  (let* ((entry (or entry (my/noema-roam--todo-at-point))))
-    (unless entry
-      (user-error "No todo on this line"))
-    (let* ((self-id (my/noema-roam--todo-field entry "id"))
-           (candidates
-            (delq nil
-                  (mapcar
-                   (lambda (todo)
-                     (unless (equal (my/noema-roam--todo-field todo "id") self-id)
-                       (cons (format "[%s] %s"
-                                     (or (my/noema-roam--todo-field todo "noteTitle" "title") "?")
-                                     (or (my/noema-roam--todo-field todo "text") ""))
-                             todo)))
-                   (my/noema-roam--todos))))
-           (choice (completing-read "Depends on: " candidates nil t))
-           (target (cdr (assoc choice candidates)))
-           (target-id (and target (my/noema-roam--todo-field target "id"))))
-      (unless target
-        (user-error "No matching todo"))
-      (let* ((ref-response
-              (my/noema-roam--runtime-call
-               "todo-dep-ref" "--json"
-               (json-encode `((targetId . ,target-id)
-                              (sourceId . ,(or self-id ""))))))
-             (ref (and ref-response (gethash "ref" ref-response))))
-        (unless ref
-          (user-error "Could not build a dependency reference"))
-        (unless (my/noema-roam--todo-patch entry (list (cons 'afterAdd ref)))
-          (user-error "Noema runtime is required for dependency updates"))
-        (my/noema-roam--clear-runtime-cache)
-        (message "Depends on: %s" ref)
-        (my/noema-roam-ui-refresh)))))
+  (let* ((entry (or entry (my/noema-roam--todo-at-point)))
+         (origin (current-buffer))
+         (uid (my/noema-roam--todo-field entry "uid")))
+    (unless uid (user-error "Refresh tasks before adding a dependency"))
+    (my/noema-roam--todos
+     (lambda (todos)
+       (when (buffer-live-p origin)
+         (with-current-buffer origin
+           (let* ((candidates
+                   (seq-filter
+                    (lambda (todo)
+                      (and (not (equal uid (noema-agenda--get todo 'uid)))
+                           (equal (noema-agenda--get entry 'scopeId) (noema-agenda--get todo 'scopeId))
+                           (equal (noema-agenda--get entry 'sourceKind) (noema-agenda--get todo 'sourceKind))
+                           (or (not (equal (noema-agenda--get entry 'sourceKind) "work-node"))
+                               (equal (noema-agenda--get entry 'file) (noema-agenda--get todo 'file)))))
+                    todos))
+                  (choices (cl-loop for todo in candidates for i from 1
+                                    collect (cons (format "%d. [%s] %s" i
+                                                          (noema-agenda--get todo 'noteTitle "?")
+                                                          (noema-agenda--get todo 'text "")) todo))))
+             (unless choices (user-error "No compatible dependency targets in this scope"))
+             (let ((target (cdr (assoc (completing-read "Depends on: " choices nil t) choices))))
+               (noema-agenda--write
+                "dependency" `((source . ,(noema-agenda--locator entry))
+                               (target . ,(noema-agenda--locator target)))
+                (list (noema-agenda--get entry 'file) (noema-agenda--get target 'file))
+                (lambda (_result error-object)
+                  (unless error-object
+                    (my/noema-roam--clear-runtime-cache)
+                    (when (buffer-live-p origin)
+                      (with-current-buffer origin (my/noema-roam-ui-refresh))))))))))))))
 
 (defun my/noema-roam-todo-done ()
   "Mark the current roam todo done."
@@ -2664,7 +2592,7 @@ the reference stays a plain, human-readable part of the Markdown."
                             (and (integerp line) (format "line %d" line))))
                 "  ·  ")))
     (my/noema-roam-ui-insert-row
-     :id (list note-slug line text)
+     :id (or (my/noema-roam--todo-field entry "uid") (list note-slug line text))
      :icon 'todo
      :badge (upcase status)
      :badge-tone (or deadline-tone (my/noema-roam--todo-tone entry))
@@ -2677,11 +2605,21 @@ the reference stays a plain, human-readable part of the Markdown."
                  (my/noema-roam--visit-todo todo)))
      :properties `(my/noema-roam-todo ,entry))))
 
+(defvar my/noema-roam--todo-request 0
+  "Generation of the latest requested Roam task list.")
+
 (defun my/noema-roam-todos ()
-  "List all vault todos in a *roam-todos* buffer."
+  "List native tasks from the knowledge vault and explicitly active projects."
   (interactive)
-  (let* ((todos (my/noema-roam--todos))
-         (active (seq-count
+  (let ((generation (cl-incf my/noema-roam--todo-request)))
+    (my/noema-roam--todos
+     (lambda (todos)
+       (when (= generation my/noema-roam--todo-request)
+         (my/noema-roam--render-todos todos))))))
+
+(defun my/noema-roam--render-todos (todos)
+  "Render native active-scope TODOS in the existing Roam task surface."
+  (let* ((active (seq-count
                   (lambda (entry)
                     (not (member (my/noema-roam--todo-status entry)
                                  '("done" "complete" "completed"
@@ -2697,7 +2635,7 @@ the reference stays a plain, human-readable part of the Markdown."
          (my/noema-roam-ui-insert-page-header
           "Tasks"
           :icon 'todo
-          :subtitle "All indexed Noema Markdown tasks"
+          :subtitle "Tasks in the knowledge vault and active projects"
           :stats (list (cons (format "%d active" active) 'warning)
                        (cons (format "%d total" (length todos)) 'info))
           :actions (my/noema-roam--ui-actions))
@@ -3022,86 +2960,84 @@ themselves."
                       "Agenda search (status: tag: title: roamid: file: parent: date: from: to:): ")))
   (my/noema-roam-agenda 'search query))
 
-(defun my/noema-roam--current-buffer-todos ()
-  "Return lightweight todo entries scanned from the current buffer."
-  (let ((file (buffer-file-name))
-        todos)
-    (save-excursion
-      (save-restriction
-        (widen)
-        (goto-char (point-min))
-        (while (not (eobp))
-          (let* ((line-start (line-beginning-position))
-                 (line-end (line-end-position))
-                 (line (string-trim
-                        (buffer-substring-no-properties line-start line-end)))
-                 (ddl (and
-                       (string-match
-                        "{[^}\n]*\\(?:ddl\\|deadline\\|due\\)\\s-*[:=]\\s-*\\([^,;} \t\n]+\\)"
-                        line)
-                       (match-string 1 line))))
-            (when (or (string-match-p "\\`@@todo\\b" line)
-                      (string-match-p "\\`\\(?:[-*+]\\s-+\\)?\\[ \\]" line)
-                      (string-match-p "\\_<TODO\\_>" line))
-              (let ((entry (list :file file
-                                 :path (and file
-                                            (file-relative-name
-                                             file (my/noema-roam-root)))
-                                 :line (line-number-at-pos line-start t)
-                                 :column 1
-                                 :index (1- line-start)
-                                 :source line
-                                 :text line
-                                 :ddl ddl
-                                 :status (if (string-match
-                                              "\\`@@todo(\\([^)\n]+\\))"
-                                              line)
-                                             (match-string 1 line)
-                                           "todo"))))
-                (push entry todos))))
-          (forward-line 1))))
-    (nreverse todos)))
+(defvar-local my/noema-roam--file-todo-request 0
+  "Generation of the latest current-buffer task request.")
 
-(defun my/noema-roam--current-file-todos ()
-  "Return todo entries for the current file."
-  (let* ((file (buffer-file-name))
-         (truename (and file (file-truename file)))
-         (indexed
-          (and truename
-               (seq-filter
-                (lambda (entry)
-                  (let ((todo-file (my/noema-roam--todo-field entry "file")))
-                    (and (stringp todo-file)
-                         (file-exists-p todo-file)
-                         (string= (file-truename todo-file) truename))))
-                (or (my/noema-roam--todos) '())))))
-    (or indexed
-        (and file (my/noema-roam--current-buffer-todos)))))
+(defun my/noema-roam--current-buffer-todos (callback)
+  "Pass native tasks in the current editor snapshot to CALLBACK.
+Uses supplied text only; never scans the vault, opens another file, saves the
+buffer, enters a project or publishes unsaved tasks to the persistent index."
+  (let* ((buffer (current-buffer))
+         (file buffer-file-name)
+         (tick (buffer-chars-modified-tick))
+         (generation (cl-incf my/noema-roam--file-todo-request))
+         (source (save-restriction (widen) (buffer-substring-no-properties (point-min) (point-max)))))
+    (unless (and file (string-match-p "\\.\\(?:md\\|markdown\\)\\'" (downcase file)))
+      (user-error "File tasks require a Markdown buffer"))
+    (my/noema-roam--agenda-call
+     "document" `((file . ,file) (content . ,source))
+     (lambda (result error-object)
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (when (= generation my/noema-roam--file-todo-request)
+             (cond
+              (error-object (noema-agenda--error error-object))
+              ((or (/= tick (buffer-chars-modified-tick)) (not (equal file buffer-file-name)))
+               (message "Task source changed; reopen file tasks"))
+              (t
+               (let ((todos (noema-agenda--list (noema-agenda--get result 'todos)))
+                     (units 0)
+                     entries)
+                 (save-excursion
+                   (save-restriction
+                     (widen)
+                     (goto-char (point-min))
+                     ;; Native positions use UTF-16 units. Advance monotonically
+                     ;; over the unchanged buffer, counting an astral character twice.
+                     (dolist (todo todos)
+                       (let ((index (my/noema-roam--todo-field todo "index")))
+                         (unless (and (integerp index) (>= index units))
+                           (error "Invalid task source position"))
+                         (while (and (< units index) (not (eobp)))
+                           (cl-incf units (if (> (char-after) #xffff) 2 1))
+                           (forward-char 1))
+                         (unless (and (= units index)
+                                      (looking-at-p (regexp-quote (my/noema-roam--todo-field todo "source"))))
+                           (error "Task source position does not match the editor"))
+                         (let ((entry (list :sourceBuffer buffer :sourceTick tick
+                                            :bufferPoint (point) :file file)))
+                           (dolist (key '("index" "line" "column" "source" "text" "status" "canon" "args" "ddl"))
+                             (setq entry (plist-put entry (intern (concat ":" key))
+                                                    (my/noema-roam--todo-field todo key))))
+                           (push entry entries))))))
+                 (funcall callback (nreverse entries))))))))))))
+
+(defun my/noema-roam--current-file-todos (callback)
+  "Pass current-buffer native tasks to CALLBACK, including unsaved edits."
+  (my/noema-roam--current-buffer-todos callback))
 
 (defun my/noema-roam-jump-file-todo ()
-  "Quickly jump to a todo in the current Markdown roam file."
+  "Jump to a native task in the current Markdown buffer without a vault scan."
   (interactive)
-  (unless buffer-file-name
-    (user-error "Current buffer is not visiting a file"))
-  (let* ((todos (my/noema-roam--current-file-todos))
-         (choices
-          (mapcar
-           (lambda (entry)
-             (let* ((line (or (my/noema-roam--todo-field entry "line") 0))
-                    (status (upcase (my/noema-roam--todo-status entry)))
-                    (date (my/noema-roam--todo-agenda-date entry))
-                    (text (or (my/noema-roam--todo-string-value
-                               entry "text" "source" "context")
-                              "(empty todo)"))
-                    (label (format "%5s  L%-4s  %s%s"
-                                   status line text
-                                   (if date (format "  <%s>" date) ""))))
-               (cons label entry)))
-           todos)))
-    (unless choices
-      (user-error "No todos in current file"))
-    (my/noema-roam--visit-todo
-     (cdr (assoc (completing-read "File todo: " choices nil t) choices)))))
+  (let ((origin (current-buffer)) (window (selected-window)))
+    (my/noema-roam--current-file-todos
+     (lambda (todos)
+       (if (not (and (window-live-p window) (eq window (selected-window))
+                     (eq origin (window-buffer window))))
+           (message "File task request finished after switching buffers; reopen file tasks")
+         (let ((choices
+                (mapcar
+                 (lambda (entry)
+                   (cons (format "%5s  L%-4s  %s%s"
+                                 (upcase (my/noema-roam--todo-status entry))
+                                 (or (my/noema-roam--todo-field entry "line") 0)
+                                 (my/noema-roam--todo-field entry "text")
+                                 (if-let* ((date (my/noema-roam--todo-agenda-date entry)))
+                                     (format "  <%s>" date) "")) entry))
+                 todos)))
+           (unless choices (user-error "No tasks in current file"))
+           (my/noema-roam--visit-todo
+            (cdr (assoc (completing-read "File task: " choices nil t) choices)))))))))
 
 (defun my/noema-roam--open-web-agenda (&optional view query)
   "Open the Emacs-hosted Noema agenda surface with VIEW and QUERY."
@@ -3109,7 +3045,11 @@ themselves."
                (fboundp 'my/noema--server-url)
                (fboundp 'my/noema--open-url))
     (require 'init-aaronnote))
-  (let* ((view-name (pcase view
+  (require 'noema-agenda)
+  (let* ((root (and (stringp my/project-active-root)
+                    (not (string-empty-p my/project-active-root))
+                    my/project-active-root))
+         (view-name (pcase view
                       ((or 'calendar 'month) "calendar")
                       ('log "log")
                       ('projects "projects")
@@ -3119,23 +3059,45 @@ themselves."
                       (_ "agenda")))
          (query-string (and query (format "%s" query)))
          (target-window (selected-window)))
-    (my/noema--ensure-server
-     (lambda ()
-       (when (window-live-p target-window)
-         (select-window target-window))
-       (my/noema--open-url
-        (concat (my/noema--server-url "/agenda")
-                "?view=" (url-hexify-string view-name)
-                (if (and query-string (not (string-empty-p query-string)))
-                    (concat "&q=" (url-hexify-string query-string))
-                  ""))
-        nil
-        t)))))
+    (cl-labels
+        ((open-scoped
+          (scope error-object)
+          (when error-object
+            (message "Noema Web Agenda: current project unavailable; showing Roam only (%s)"
+                     (noema-agenda--get error-object 'message error-object)))
+          (let* ((scope-id (and scope (noema-agenda--get scope 'id)))
+                 (scopes (delq nil (list "knowledge" scope-id)))
+                 (scope-query
+                  (mapconcat (lambda (id)
+                               (concat "&scope=" (url-hexify-string id)))
+                             scopes "")))
+            (my/noema--ensure-server
+             (lambda ()
+               (when (window-live-p target-window)
+                 (select-window target-window))
+               (my/noema--open-url
+                (concat (my/noema--server-url "/agenda")
+                        "?view=" (url-hexify-string view-name)
+                        scope-query
+                        (if (and query-string (not (string-empty-p query-string)))
+                            (concat "&q=" (url-hexify-string query-string))
+                          ""))
+                nil
+                t))))))
+      (if root
+          ;; Wait for entry so the page receives an explicit, stable scope
+          ;; list instead of asking the host for every active lease.
+          (noema-agenda-activate-project root #'open-scoped)
+        (noema-agenda-activate-project nil)
+        (open-scoped nil nil)))))
 
 (defun my/noema-roam-agenda (&optional mode query)
-  "Open the Noema agenda Web surface hosted inside Emacs."
+  "Open native Noema Agenda; specialized MODE views retain their Web surface."
   (interactive)
-  (my/noema-roam--open-web-agenda
+  (if (memq mode '(nil agenda))
+      (progn (unless (fboundp 'my/noema-agenda) (require 'init-aaronnote))
+             (my/noema-agenda query))
+    (my/noema-roam--open-web-agenda
    (pcase mode
      ((or 'calendar 'month) 'calendar)
      ('log 'log)
@@ -3145,7 +3107,12 @@ themselves."
      ('clocktable 'clocktable)
      ('lints 'lints)
      (_ 'agenda))
-   query))
+     query)))
+
+(defun my/noema-roam-agenda-web ()
+  "Open the complete Emacs-hosted Web Agenda."
+  (interactive)
+  (my/noema-roam--open-web-agenda 'agenda))
 
 (defun my/noema-roam-agenda-calendar ()
   "Show the agenda month calendar."

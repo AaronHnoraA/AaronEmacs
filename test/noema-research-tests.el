@@ -322,6 +322,56 @@ BODY may refer to the JuText buffer as `source'."
                          (list output)))
           (should-not (plist-get (noema-research-validate synced) :errors)))))))
 
+(ert-deftest noema-research-agenda-survives-jutext-sync-undo-and-json-save ()
+  (noema-research-test--with-jutext (noema-research-test--document)
+    (let* ((id (noema-research-test--work-id noema-research--document "c-w"))
+           (before (noema-research-serialize (noema-research-mode--sync)))
+           (prompt (noema-research-cell-source (noema-research-find-cell noema-research--document "c-w")))
+           (patch (noema-research--table "sche" "2026-09-16 10:30" "prio" "A" "progress" "37.5"
+                                         "clocks" (vector (noema-research--table "id" "clock_a" "from" "2026-09-16 09:00" "to" "2026-09-16 10:15")))))
+      (noema-research-op-set-agenda id patch)
+      (noema-research-mode--sync)
+      (let* ((cell (noema-research-find-cell noema-research--document "c-w"))
+             (source (noema-research-cell-source cell))
+             (agenda (noema-research-agenda-directive source "work")))
+        (should (equal (gethash "sche" agenda) "2026-09-16 10:30"))
+        (should (string-suffix-p prompt source))
+        (should (string-match-p "@@todo \\[" source))
+        (should-not (gethash "agenda" (noema-research-find-work-node noema-research--document id))))
+      (let* ((disk (json-parse-string (noema-research-serialize noema-research--document)
+                                     :object-type 'hash-table :array-type 'array :null-object :null :false-object :false))
+             (node (noema-research-find-work-node disk id))
+             (source (noema-research-cell-source (noema-research-find-cell disk "c-w")))
+             (agenda (noema-research-agenda-directive source "work")))
+        (should-not (gethash "agenda" node))
+        (should (equal (gethash "prio" agenda) "A"))
+        (should (equal (gethash "progress" agenda) "37.5"))
+        (should (equal (gethash "to" (aref (gethash "clocks" agenda) 0)) "2026-09-16 10:15"))
+        (should-not (plist-get (noema-research-validate disk) :errors)))
+      (noema-research-structure-undo)
+      (should (equal (noema-research-serialize (noema-research-mode--sync)) before))
+      (noema-research-structure-redo)
+      (should (noema-research-agenda-directive
+               (noema-research-cell-source (noema-research-find-cell noema-research--document "c-w"))
+               "work"))
+      ;; The history entry owns only the visible planning prefix.  Prose typed
+      ;; after planning remains intact through another undo/redo cycle.
+      (noema-research-goto-cell "c-w")
+      (search-forward "Investigate the log factor.")
+      (insert " Typed later.")
+      (noema-research-structure-undo)
+      (let ((source (noema-research-cell-source
+                     (noema-research-find-cell
+                      (noema-research-mode--sync) "c-w"))))
+        (should-not (noema-research-agenda-directive source "work"))
+        (should (string-match-p "Typed later\\." source)))
+      (noema-research-structure-redo)
+      (let ((source (noema-research-cell-source
+                     (noema-research-find-cell
+                      (noema-research-mode--sync) "c-w"))))
+        (should (noema-research-agenda-directive source "work"))
+        (should (string-match-p "Typed later\\." source))))))
+
 (ert-deftest noema-research-structure-edit-is-atomic-and-validated ()
   (noema-research-test--with-jutext (noema-research-test--document)
     (let* ((q (noema-research-test--work-id noema-research--document "c-q"))
@@ -678,6 +728,13 @@ BODY may refer to the JuText buffer as `source'."
                      "Review the evidence.\n@@agent(pi)")
              work)
     (should-not (noema-research--directive-errors document))
+    ;; D-036: an ancestor depth and switching automatic context off.
+    (puthash "source" "@@ctx(lineage:3)\n@@ctx(none)\n\nReview it." work)
+    (should-not (noema-research--directive-errors document))
+    (puthash "source" "@@ctx(lineage:4)\n\nReview it." work)
+    (should (string-match-p "unsupported @@ctx"
+                            (mapconcat #'identity
+                                       (noema-research--directive-errors document) "\n")))
     (puthash "source" "@@agent(codex)\n@@agent(pi)\n\nReview it." work)
     (should (string-match-p "conflicting @@agent"
                             (mapconcat #'identity
@@ -824,8 +881,17 @@ BODY may refer to the JuText buffer as `source'."
       (let* ((focused (noema-research-projection document :folds (list w) :focus r))
              (focused-ids (mapcar (lambda (node) (plist-get node :id))
                                   (plist-get focused :nodes))))
-        (should (equal focused-ids (list q w k r)))
-        (should (equal (plist-get focused :focus) r))))))
+        ;; Focus makes the node the root: a leaf focus draws only itself.
+        (should (equal focused-ids (list r)))
+        (should (equal (plist-get focused :focus) r)))
+      ;; Focusing the folded node shows its branch; the fold stays recorded
+      ;; for the unfocused board but does not contract the focus.
+      (let ((focused-ids (mapcar (lambda (node) (plist-get node :id))
+                                 (plist-get (noema-research-projection
+                                             document :folds (list w) :focus w)
+                                            :nodes))))
+        (should (equal focused-ids
+                       (list w k r (noema-research-test--work-id document "c-a"))))))))
 
 (ert-deftest noema-research-files-detect-revision-conflicts ()
   (noema-research-test--with-directory directory
@@ -893,6 +959,87 @@ BODY may refer to the JuText buffer as `source'."
                          (buffer-string))
                        "dist/\n.agent/\n"))))))
 
+(ert-deftest noema-project-root-is-a-query-for-the-nearest-manifest ()
+  (noema-research-test--with-directory directory
+    (let* ((nested (expand-file-name "a/b/" directory))
+           (file (expand-file-name "new.noema" nested)))
+      (make-directory nested t)
+      (should-not (noema-project-root file))
+      (should-not (file-exists-p (expand-file-name "noema.toml" nested)))
+      (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+      (should (equal (noema-project-root file) directory))
+      (should (equal (noema-project-root nested) directory)))))
+
+(ert-deftest noema-project-default-root-prefers-the-enclosing-workspace ()
+  (noema-research-test--with-directory directory
+    (let ((nested (expand-file-name "notes/sub/" directory)))
+      (make-directory nested t)
+      (let ((project-find-functions (list (lambda (_) (cons 'transient directory)))))
+        (should (equal (noema-project-default-root nested) directory)))
+      (let ((project-find-functions nil))
+        (should (equal (noema-project-default-root nested) nested))))))
+
+(ert-deftest noema-project-ensure-asks-before-creating-at-the-workspace-root ()
+  (noema-research-test--with-directory directory
+    (let* ((nested (expand-file-name "notes/sub/" directory))
+           (file (expand-file-name "a.noema" nested))
+           (project-find-functions (list (lambda (_) (cons 'transient directory))))
+           proposed)
+      (make-directory nested t)
+      (cl-letf (((symbol-function 'read-directory-name)
+                 (lambda (_prompt dir default &rest _)
+                   (setq proposed default)
+                   dir)))
+        (should (equal (noema-project-ensure file) directory)))
+      (should (equal proposed directory))
+      (should (file-regular-p (expand-file-name "noema.toml" directory)))
+      (should-not (file-exists-p (expand-file-name "noema.toml" nested)))
+      (cl-letf (((symbol-function 'read-directory-name)
+                 (lambda (&rest _) (error "An existing project must not prompt"))))
+        (should (equal (noema-project-ensure file) directory))))))
+
+(ert-deftest noema-project-ensure-writes-nothing-when-declined-or-misplaced ()
+  (noema-research-test--with-directory directory
+    (let ((file (expand-file-name "work/a.noema" directory))
+          (elsewhere (file-name-as-directory (make-temp-file "noema-elsewhere-" t)))
+          (project-find-functions nil))
+      (make-directory (expand-file-name "work/" directory))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'read-directory-name)
+                       (lambda (&rest _) (signal 'quit nil))))
+              ;; `should-error' does not catch `quit'.
+              (should (eq (condition-case nil (noema-project-ensure file) (quit 'quit))
+                          'quit)))
+            (cl-letf (((symbol-function 'read-directory-name)
+                       (lambda (&rest _) elsewhere)))
+              (should-error (noema-project-ensure file) :type 'user-error))
+            (should-not (noema-project-root file))
+            (should-not (file-exists-p (expand-file-name "noema.toml" elsewhere))))
+        (delete-directory elsewhere t)))))
+
+(ert-deftest noema-research-new-notebook-settles-the-project-before-writing ()
+  (noema-research-test--with-directory directory
+    (let ((file (expand-file-name "notes/a.noema" directory))
+          (project-find-functions (list (lambda (_) (cons 'transient directory)))))
+      (make-directory (expand-file-name "notes/" directory))
+      (cl-letf (((symbol-function 'read-directory-name)
+                 (lambda (&rest _) (signal 'quit nil))))
+        (should (eq (condition-case nil (noema-research-new-notebook file "A") (quit 'quit))
+                    'quit)))
+      (should-not (file-exists-p file))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'read-directory-name)
+                       (lambda (_prompt dir &rest _) dir)))
+              (noema-research-new-notebook file "A"))
+            (should (file-regular-p file))
+            (should (equal (noema-project-root file) directory))
+            (should-not (file-exists-p (expand-file-name "notes/noema.toml" directory))))
+        (when-let* ((buffer (get-file-buffer file)))
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer))))))
+
 (ert-deftest noema-research-mode-saves-through-the-projection ()
   (noema-research-test--with-directory directory
     (let ((file (expand-file-name "bound.noema" directory))
@@ -934,6 +1081,50 @@ BODY may refer to the JuText buffer as `source'."
               (should (eq major-mode 'noema-research-mode))
               (should (string-match-p "^%% checkpoint Reversibility invalid$" (buffer-string))))
           (kill-buffer buffer))))))
+
+(ert-deftest noema-research-visiting-a-projectless-noema-never-creates-a-project ()
+  (require 'init-aaronnote-jupyter-notebook)
+  (noema-research-test--with-directory directory
+    (let ((file (expand-file-name "bound.noema" directory))
+          (noema-research-sync-host nil))
+      (noema-research-write-file file (noema-research-test--document))
+      (cl-letf (((symbol-function 'read-directory-name)
+                 (lambda (&rest _) (error "Visiting must not prompt"))))
+        (let ((buffer (find-file-noselect file)))
+          (unwind-protect
+              (with-current-buffer buffer
+                (should (eq major-mode 'noema-research-mode))
+                (should-not (file-exists-p (expand-file-name "noema.toml" directory))))
+            (kill-buffer buffer)))))))
+
+(ert-deftest noema-research-new-noema-visit-settles-the-project-first ()
+  (require 'init-aaronnote-jupyter-notebook)
+  (noema-research-test--with-directory directory
+    (let ((file (expand-file-name "notes/new.noema" directory))
+          (project-find-functions (list (lambda (_) (cons 'transient directory))))
+          (noema-research-sync-host nil))
+      (make-directory (expand-file-name "notes/" directory))
+      (cl-letf (((symbol-function 'read-directory-name)
+                 (lambda (&rest _) (signal 'quit nil))))
+        (let ((buffer (find-file-noselect file)))
+          (unwind-protect
+              (with-current-buffer buffer
+                (should (string-empty-p (buffer-string)))
+                (should-not (file-exists-p file))
+                (should-not (noema-project-root file)))
+            (kill-buffer buffer))))
+      (cl-letf (((symbol-function 'read-directory-name)
+                 (lambda (_prompt dir &rest _) dir)))
+        (let ((buffer (find-file-noselect file)))
+          (unwind-protect
+              (with-current-buffer buffer
+                (should (eq major-mode 'noema-research-mode))
+                (should (file-regular-p file))
+                (should (equal (noema-project-root file) directory))
+                (should-not (file-exists-p
+                             (expand-file-name "notes/noema.toml" directory))))
+            (with-current-buffer buffer (set-buffer-modified-p nil))
+            (kill-buffer buffer)))))))
 
 (ert-deftest noema-research-agent-output-uses-the-canonical-noema-document ()
   (noema-research-test--with-directory directory
@@ -1208,17 +1399,50 @@ BODY may refer to the JuText buffer as `source'."
       (noema-research-test--append-work-cell
        document "c-s2" "checkpoint" "Archived result" ""
        (list (noema-research-test--work-id document "c-s")))
-      (let* ((noema-research-graph--focus
-              (noema-research-test--work-id document "c-r"))
+      (let* ((work (noema-research-test--work-id document "c-w"))
+             (earlier (noema-research-test--work-id document "c-s"))
+             (noema-research-graph--focus question)
+             (noema-research-graph--focus-depth 1)
              (noema-research-graph--zoom "branch")
              (projection (noema-research-graph--projection document))
-             (summary (seq-find (lambda (node) (plist-get node :summary))
-                                (plist-get projection :nodes))))
-        (should summary)
-        (should (equal (plist-get summary :title) "Related branches"))
-        (should (= (plist-get (plist-get summary :fold-summary) :nodes) 2))
-        (should (member (list question (plist-get summary :id) "lineage")
-                        (plist-get projection :edges)))))))
+             (summaries (seq-filter (lambda (node) (plist-get node :summary))
+                                    (plist-get projection :nodes)))
+             (below-work (seq-find (lambda (node)
+                                     (equal (plist-get node :parents) (list work)))
+                                   summaries)))
+        ;; The lens cuts the focused branch at its depth; each cut hangs
+        ;; below a drawn node, never beside or above the focus.
+        (should (= (length summaries) 2))
+        (should below-work)
+        (should (equal (plist-get below-work :title) "Deeper branches"))
+        (should (= (plist-get (plist-get below-work :fold-summary) :nodes) 2))
+        (should (member (list work (plist-get below-work :id) "lineage")
+                        (plist-get projection :edges)))
+        (should (seq-find (lambda (node) (equal (plist-get node :parents) (list earlier)))
+                          summaries))))))
+
+(ert-deftest noema-research-graph-focus-makes-the-node-the-root ()
+  (let* ((document (noema-research-test--document))
+         (question (noema-research-test--work-id document "c-q"))
+         (work (noema-research-test--work-id document "c-w"))
+         (checkpoint (noema-research-test--work-id document "c-k"))
+         (repair (noema-research-cell-work-node-id
+                  (noema-research-test--append-work-cell
+                   document "c-r" "work" "Repair" "" (list checkpoint))))
+         (earlier (noema-research-cell-work-node-id
+                   (noema-research-test--append-work-cell
+                    document "c-s" "work" "Earlier modelling" "" (list question))))
+         (projection (noema-research-projection
+                      document :focus work :depth 2 :folds (list work)
+                      :protect (list work)))
+         (ids (mapcar (lambda (node) (plist-get node :id)) (plist-get projection :nodes))))
+    ;; No ancestor or sibling of the focus is drawn, the focus has no drawn
+    ;; parent, and a fold on the focus itself does not hide its branch.
+    (should (equal ids (list work checkpoint repair)))
+    (should-not (member question ids))
+    (should-not (member earlier ids))
+    (should-not (plist-get (car (plist-get projection :nodes)) :parents))
+    (should-not (plist-get projection :folds))))
 
 (ert-deftest noema-research-graph-overview-auto-folds-but-protects-current-path ()
   (let* ((document (noema-research-test--document))
@@ -1507,7 +1731,8 @@ BODY may refer to the JuText buffer as `source'."
                         noema-research-graph--folds (list "x" "y"))
             (let ((status (noema-research-graph--header-line)))
               (should (string-match-p "Overview" status))
-              (should (string-match-p "focus: Spectral exploration" status))
+              (should (string-match-p
+                       "focus: Mixing-time problem › Spectral exploration ↓2" status))
               (should (string-match-p "2 folded" status)))))
       (kill-buffer source))))
 
@@ -1697,33 +1922,118 @@ BODY may refer to the JuText buffer as `source'."
      document "c-s2" "checkpoint" "Archived result" "" (list earlier))
     (noema-research-test--with-graph document
       (cl-letf (((symbol-function 'noema-research-graph--redraw) #'ignore))
-        (setq noema-research-graph--selected repair)
+        (setq noema-research-graph--selected work)
         (should-error (noema-research-graph-focus-deeper) :type 'user-error)
+        (should-error (noema-research-graph-focus-up) :type 'user-error)
         (noema-research-graph-toggle-focus)
-        (should (equal noema-research-graph--focus repair))
-        ;; The contraction of omitted branches is navigable: TAB on it moves
-        ;; the lens up to the summary's parent.
+        (should (equal noema-research-graph--focus work))
+        (setq noema-research-graph--focus-depth 1)
+        ;; The contraction past the lens depth is navigable: TAB on it makes
+        ;; the summary's parent the new root, continuing down the branch.
         (setq noema-research-graph--projection-cache
               (noema-research-graph--projection document))
         (let ((summary (seq-find (lambda (node) (plist-get node :summary))
                                  (plist-get noema-research-graph--projection-cache
                                             :nodes))))
           (should summary)
+          (should (equal (plist-get summary :parents) (list checkpoint)))
           (setq noema-research-graph--selected (plist-get summary :id))
           (noema-research-graph-toggle-fold)
-          (should (equal noema-research-graph--focus question)))
+          (should (equal noema-research-graph--focus checkpoint)))
         (noema-research-graph-focus-back)
-        (should (equal noema-research-graph--focus repair))
+        (should (equal noema-research-graph--focus work))
         (noema-research-graph-focus-deeper)
-        (should (= noema-research-graph--focus-depth 3))
-        (should (string-match-p "focus: Repair ±3" (noema-research-graph--header-line))))
+        (should (= noema-research-graph--focus-depth 2))
+        (should (string-match-p "focus: Mixing-time problem › Spectral exploration ↓2"
+                                (noema-research-graph--header-line)))
+        ;; ^ walks the root up and clears the focus past a lineage root.
+        (noema-research-graph-focus-up)
+        (should (equal noema-research-graph--focus question))
+        (noema-research-graph-focus-up)
+        (should-not noema-research-graph--focus)
+        ;; A selection below the lens deepens it; one outside the branch
+        ;; clears the focus but keeps it in the history.
+        (setq noema-research-graph--focus work
+              noema-research-graph--focus-depth 1)
+        (should (noema-research-graph--keep-in-focus document repair))
+        (should (= noema-research-graph--focus-depth 2))
+        (should-not (noema-research-graph--keep-in-focus document checkpoint))
+        (should (noema-research-graph--keep-in-focus document earlier))
+        (should-not noema-research-graph--focus)
+        (should (equal (car noema-research-graph--focus-history) work)))
       (let ((ids (mapcar (lambda (node) (plist-get node :id))
                          (plist-get (noema-research-projection
-                                     document :focus work :depth 1 :siblings nil)
+                                     document :focus work :depth 1)
                                     :nodes))))
         (should (member checkpoint ids))
+        (should-not (member question ids))
         (should-not (member repair ids))
         (should-not (member earlier ids))))))
+
+(ert-deftest noema-research-context-preview-shows-route-budget-and-omissions ()
+  (let ((buffer (noema-research--show-context-preview
+                 "Merge"
+                 (noema-research--table
+                  "routing" (noema-research--table
+                             "agent" "codex" "name" "merge" "parentName" "baseline"
+                             "rule" "lineage-merge" "reason" "joins several lineage parents"
+                             "rollover" :false)
+                  "context" (vector (noema-research--table "ref" "file:brief.md" "bytes" 20000
+                                                           "automatic" :false "truncated" :false)
+                                    (noema-research--table "ref" "result:wn_right" "bytes" 14000
+                                                           "automatic" t "truncated" t))
+                  "omitted" (vector (noema-research--table "ref" "cell:c-left" "bytes" 30))
+                  "totalBytes" 34000 "limitBytes" 65536 "promptBytes" 12))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (let ((text (buffer-string)))
+            (should (string-match-p "Session  merge ⇠ baseline\n" text))
+            (should (string-match-p "Route    lineage-merge — joins several lineage parents" text))
+            (should (string-match-p "auto,cut +14000  result:wn_right" text))
+            (should (string-match-p "^ +20000  file:brief.md" text))
+            (should (string-match-p "Omitted by the context budget" text))
+            (should (string-match-p "Total 34000 of 65536 bytes (prompt 12 bytes)" text))))
+      (kill-buffer buffer)))
+  (should (eq (lookup-key noema-research-mode-map (kbd "C-c j p"))
+              #'noema-research-preview-context)))
+
+(ert-deftest noema-research-graph-structural-navigation-follows-lineage ()
+  (let* ((document (noema-research-test--document))
+         (question (noema-research-test--work-id document "c-q"))
+         (work (noema-research-test--work-id document "c-w"))
+         (checkpoint (noema-research-test--work-id document "c-k"))
+         (sibling (noema-research-cell-work-node-id
+                   (noema-research-test--append-work-cell
+                    document "c-s" "work" "Numerics" "" (list question)))))
+    (noema-research-test--with-graph document
+      (cl-letf (((symbol-function 'noema-research-graph--redraw) #'ignore))
+        (setq noema-research-graph--selected work)
+        (noema-research-graph-select-next-sibling)
+        (should (equal noema-research-graph--selected sibling))
+        (should-error (noema-research-graph-select-next-sibling) :type 'user-error)
+        (noema-research-graph-select-previous-sibling)
+        (should (equal noema-research-graph--selected work))
+        (noema-research-graph-select-child)
+        (should (equal noema-research-graph--selected checkpoint))
+        (should-error (noema-research-graph-select-child) :type 'user-error)
+        (noema-research-graph-select-parent)
+        (should (equal noema-research-graph--selected work))
+        ;; At the focus root, H moves the focus up with the selection.
+        (setq noema-research-graph--focus work)
+        (noema-research-graph-select-parent)
+        (should (equal noema-research-graph--focus question))
+        (should (equal noema-research-graph--selected question))
+        (should-error (noema-research-graph-select-parent) :type 'user-error)
+        ;; Going to a node outside the focused branch clears the focus.
+        (setq noema-research-graph--focus work)
+        (noema-research-graph-goto sibling)
+        (should (equal noema-research-graph--selected sibling))
+        (should-not noema-research-graph--focus)))
+    (dolist (binding '(("H" . noema-research-graph-select-parent)
+                       ("L" . noema-research-graph-select-child)
+                       ("}" . noema-research-graph-select-next-sibling)
+                       ("/" . noema-research-graph-goto)))
+      (should (eq (lookup-key noema-research-graph-mode-map (kbd (car binding))) (cdr binding))))))
 
 (ert-deftest noema-research-graph-drop-branch-is-one-undoable-edit-and-folds ()
   (let* ((document (noema-research-test--document))
@@ -2379,6 +2689,35 @@ BODY may refer to the JuText buffer as `source'."
     (should (eq (magent-thread-turn-status
                  (magent-thread-find-turn replay (noema-agent-worker-ledger-turn-id worker)))
                 'completed))))
+
+(ert-deftest noema-agent-worker-bounds-long-lived-ledger-projections ()
+  (let ((noema-agent-worker--ledgers (make-hash-table :test #'equal))
+        (noema-agent-worker-ledger-turn-limit 2)
+        workers)
+    (dotimes (index 2)
+      (let ((worker (noema-agent-worker--create
+                     :run-id (format "run_rotate_%d" index) :session-id "ses_rotate"
+                     :root "/tmp/noema-project/" :spec (noema-research--table "prompt" "Go")
+                     :segments nil :result-parts nil)))
+        (noema-agent-worker--ledger-init worker)
+        (noema-agent-worker--ledger-start worker)
+        (should (gethash "ses_rotate" noema-agent-worker--ledgers))
+        (noema-agent-worker--ledger-terminal worker "completed" nil)
+        (push worker workers)))
+    ;; Both Runs shared one projection; reaching the limit rotates it away.
+    (should (eq (noema-agent-worker-ledger (car workers))
+                (noema-agent-worker-ledger (cadr workers))))
+    (should-not (gethash "ses_rotate" noema-agent-worker--ledgers))
+    ;; A fresh Run's provisional Run-id key does not outlive its Session.
+    (let ((fresh (noema-agent-worker--create
+                  :run-id "run_fresh" :root "/tmp/noema-project/"
+                  :spec (noema-research--table "prompt" "Go") :segments nil :result-parts nil)))
+      (noema-agent-worker--ledger-init fresh)
+      (should (gethash "run_fresh" noema-agent-worker--ledgers))
+      (setf (noema-agent-worker-session-id fresh) "ses_fresh")
+      (noema-agent-worker--ledger-attach-session fresh)
+      (should-not (gethash "run_fresh" noema-agent-worker--ledgers))
+      (should (gethash "ses_fresh" noema-agent-worker--ledgers)))))
 
 (ert-deftest noema-agent-worker-freezes-only-the-active-preparation-ticket ()
   (let ((magent-runtime-queue--arbiter-active nil)
@@ -3116,6 +3455,13 @@ BODY may refer to the JuText buffer as `source'."
     (cl-letf (((symbol-function 'noema-sessions--live-buffer) #'ignore))
       (should (equal (mapcar (lambda (entry) (noema-sessions--status entry "/tmp/")) names)
                      '("resumable" "archived" "declared" "running"))))
+    ;; The Context column shows window use and the token total, or nothing.
+    (should (equal (noema-sessions--usage
+                    (noema-research--table "usage" (noema-research--table
+                                                    "contextUsed" 170000 "contextSize" 200000
+                                                    "totalTokens" 1300000)))
+                   "85% 1.3M"))
+    (should (equal (noema-sessions--usage (car names)) ""))
     (let ((document (noema-research-test--document)))
       (puthash "notebook_id" "nb_test" (noema-research-notebook-meta document))
       (puthash "source" "@@session(pinned)\n\nGo." (noema-research-find-cell document "c-w"))

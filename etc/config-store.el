@@ -22,6 +22,8 @@
    (my/language-server-performance-read-process-output-max . 1048576)
    (lsp-restart . auto-restart) (my/noema-close-emacs-markdown-buffer . t)
    (my/noema-markdown-default-surface . app) (my/noema-roam-help-key . "?")
+   (my/noema-agenda-exclude-patterns)
+   (my/noema-agenda-capture-templates)
    (my/noema-icon-file . "/Users/hc/.emacs.d/assets/icons/Noema.svg")
    (my/dir-locals-template-root . "/Users/hc/.emacs.d/templates/emacs")
    (my/health-executables "rg" "git" "python3" "node" "cargo" "go" "just" "make"

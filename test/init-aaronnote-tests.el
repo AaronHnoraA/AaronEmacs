@@ -2345,5 +2345,23 @@ selection untouched, so the pane keeps being reported as background."
             (should (equal (alist-get 'command (car posted)) "refresh"))))
       (when (buffer-live-p pane) (kill-buffer pane)))))
 
+(ert-deftest my/noema-agenda-resolves-host-placement-through-remote ()
+  (should (equal (my/noema--agenda-host-project-root "/fs:local:/tmp/agenda/") "/tmp/agenda/"))
+  (cl-letf (((symbol-function 'remote-client-file-name) (lambda (_root) "/shared/agenda/")))
+    (should (equal (my/noema--agenda-host-project-root "/fs:shared:/agenda/") "/shared/agenda/")))
+  (cl-letf (((symbol-function 'remote-client-file-name) (lambda (_root) nil)))
+    (should (equal (my/noema--agenda-host-project-root "/fs:box:/agenda/") "/fs:box:/agenda/"))))
+
+(ert-deftest my/noema-agenda-protection-checks-buffer-identities-without-source-io ()
+  (with-temp-buffer
+    (setq buffer-file-name "/var/example/work.noema"
+          buffer-file-truename "/private/var/example/work.noema")
+    (insert "unsaved prompt")
+    (cl-letf (((symbol-function 'file-truename) (lambda (&rest _) (ert-fail "source IO")))
+              ((symbol-function 'file-exists-p) (lambda (&rest _) (ert-fail "source IO"))))
+      (should (equal (alist-get 'files (my/noema--agenda-protected-sources
+                                       '((files . ["/private/var/example/work.noema" "/inactive/other.noema"])) nil))
+                     ["/private/var/example/work.noema"])))))
+
 (provide 'init-aaronnote-tests)
 ;;; init-aaronnote-tests.el ends here

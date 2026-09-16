@@ -61,7 +61,21 @@ SCM 与后续 debug/task 集成都应从这个同一 identity 派生，不能各
 - Open / Shell
   项目根目录、项目 vterm
 - Manage
-  手动加项目、批量发现项目、彻底移除项目、杀当前项目 buffer
+  退出当前项目、手动加项目、批量发现项目、彻底移除项目、杀当前项目 buffer
+
+### 项目进入与退出
+
+项目切换、打开工作台、找文件、最近文件、切换项目 buffer、打开根目录、Magit
+或项目终端，在操作成功后发送统一的项目激活事件。身份使用 `/fs:TARGET:/root/`；
+相同项目不会重复激活。后台查询、搜索的临时上下文和已知项目列表不会触发激活。
+
+Perspective 记住明确进入过的项目，用户切换回来时恢复该项目；切到没有项目关联的
+Perspective 时退出当前项目。包内部临时切换 Perspective 不触发 Agenda 扫描。
+关闭对应 Remote workspace 也释放当前项目的消费者。
+
+`M-x my/project-leave`，或项目菜单的 `l`，退出当前项目的后台消费者并解除当前
+Perspective 的项目关联，保留文件缓冲区。Noema Agenda 随之释放项目 scope 的
+监听和缓存，知识库继续常驻；再次明确进入项目即可恢复。
 
 ## 4. 如何加项目
 

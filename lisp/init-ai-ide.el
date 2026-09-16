@@ -113,6 +113,7 @@ Do not modify provider settings, authentication, PATH or a custom command."
 (autoload 'noema-capability-manager "noema-capability-ui" nil t)
 (autoload 'noema-skill-manager "noema-capability-ui" nil t)
 (autoload 'noema-mcp-manager "noema-capability-ui" nil t)
+(autoload 'noema-capability-lookup "noema-capability-actions" nil t)
 
 ;; Standard compatibility infrastructure is also package-managed.
 (use-package compat :ensure t :defer t)

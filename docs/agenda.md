@@ -1,9 +1,9 @@
 # Noema Agenda
 
-Noema agenda is a server-backed task/project/time-tracking system for
-Markdown notes. The Markdown line is the single source of truth: every edit
-writes back to the original `@@todo`/`@@project`/`@@milestone`/`@@clock`
-command, and the Web agenda page is the only agenda UI — Emacs just opens it.
+Noema Agenda provides native Emacs and Emacs-hosted Web views over one
+task/project/time-tracking service. Markdown commands and `.noema` WorkNode
+metadata remain the native sources; edits write back with revision checks.
+Org Agenda supplies presentation primitives without intermediate Org sources.
 
 For the full DSL grammar (canonical keys/aliases, date/repeater/duration
 syntax, diagnostics) and view-model shapes, see
@@ -160,14 +160,22 @@ drained by the next explicit sync/full rebuild command.
 
 ## Web
 
-The Web agenda page (`/agenda`) is the only agenda UI: week/list/month/log/
+The Emacs-hosted Web agenda page (`/agenda`) provides week/list/month/log/
 gantt/projects/clocktable/lints tabs, priority/deadline/scheduled/repeat
-edits, quick todo capture, dependency selection, clock in/out, marks, bulk
-status changes, lints, Gantt drag-to-reschedule, and source jumps. Quick
-capture accepts `task | project=paper | ddl=today | sche=+1d | prio=A |
-file=inbox.md`; if `file` is omitted, capture uses the current selected todo's
-file, else `inbox.md`. All writes call `notes.createTodo`/`notes.patchTodo`/
-`clockIn`/`clockOut`.
+edits, template capture, dependency selection, clock in/out, marks, bulk
+status changes, lints, Gantt drag-to-reschedule, and source jumps. Capture
+shows the template, active scope, Markdown destination and prompted fields.
+Failed writes keep the form open with its inputs and error; successful writes
+close it. All writes call `notes.createTodo`/`notes.patchTodo`/`clockIn`/`clockOut`.
+
+Opening Web Agenda from Emacs sends an explicit scope list: the resident Roam
+knowledge vault (`~/Documents/Noema`) plus the one project entered through the
+project lifecycle, when present. It never expands that request to every active
+or historical lease. Opening `/agenda` directly defaults to the knowledge scope
+only. With no project filter, the DAG tab projects only that one entered
+project. Selecting a project in the header is a hard graph boundary across the
+explicit scopes: unselected nodes and edges are removed before layout and DOM
+construction rather than merely dimmed.
 
 Inline todo widgets in the editor are display-only: status, priority badge,
 repeat marker, and dependency pill are read from the parsed command and never
@@ -178,9 +186,104 @@ mechanism as tag/roam/path completion), backed by `completions:todo-refs`.
 
 ## Emacs
 
-Emacs does not render agenda UI natively — it opens the Web page:
+`M-x my/noema-agenda` opens the native Agenda. It shares the active source scopes
+and writers with the hosted Web view. Native keys include `v d/w/t` for views,
+`c` capture, `t` complete, `s/d` schedule/deadline, `%` progress, `I/O` clock,
+`v k` clock report, `R` retry deferred clock writes, and `K` keep saved source
+state when resolving a pending clock request.
 
-- `M-x my/noema-roam-agenda` — agenda (dispatch key `A`).
+The default native view contains both the seven-day calendar and the open-task
+section, so unscheduled Roam tasks remain visible even when the current week has
+no dated entries. The Dashboard renders its last complete scoped Agenda snapshot
+synchronously in the normal Dashboard build. Source events only mark that cache
+dirty and refresh it while the Dashboard is visible; concurrent refreshes share
+one request, there is no polling or partial post-render card rewrite, and
+Chunlian is attached after the complete render.
+
+The knowledge vault remains indexed. Explicit project navigation activates
+one project; switching away, closing its Remote workspace, or running
+`my/project-leave` releases it. Inactive projects are not scanned. Persisted
+clock references survive exit and host restart; pending source writes wait for
+re-entry. File notifications invalidate the index; there is no polling.
+
+Hidden paths such as `.lake/` and standard dependency/build directories are
+excluded before traversal. Additional relative glob exclusions use
+`my/noema-agenda-exclude-patterns`, available through `M-x config-board` or
+`config-set`; restart the host after changing them. For example,
+`(config-set 'my/noema-agenda-exclude-patterns '("archive/**" "scratch.md"))`
+excludes an archive directory and a specific file relative to each active root.
+
+### Shared capture templates
+
+Native `c` and Web New todo use the same host catalogue: Task, Deadline and
+Appointment. `C-u c` chooses a different destination file. The default is
+`inbox.md` in the selected active scope. Appointments require a scheduled start
+and a later end. The native date prompt uses Org's calendar picker; source
+storage remains native Markdown. Failed native captures retain their draft in
+the Agenda buffer; press `c` again to review and retry. Drafts are not saved to
+disk and do not survive closing the Agenda buffer.
+
+Customize `my/noema-agenda-capture-templates` through `config-board` or
+`config-set`, then restart the Noema host. Nil restores the built-ins; a custom
+list replaces them. For example:
+
+```elisp
+(config-set 'my/noema-agenda-capture-templates
+ '(((id . "review") (key . "r") (name . "Review")
+    (file . "daily/%Y-%m-%d.md") (scope . "selected")
+    (fields . ["text" "ddl" "prio"])
+    (required . ["ddl"])
+    (defaults . ((prio . "A") (effort . "30m") (repeat . "+1w"))))))
+```
+
+`scope` is `selected` or `knowledge`; templates never activate projects.
+`fields` must include `text`; other fields are `status`, `sche`, `ddl`, `end`,
+`prio`, `effort`, `repeat`, `project`, `tags`, and `warn`. `defaults` can include
+unprompted fields. Paths support `%Y`, `%m`, `%d` using the host's local date.
+Catalogue revisions reject a stale form after a template change or date-path
+rollover. Reopen capture to load the current catalogue; native drafts prefill
+the new prompts. Exclusions, scope containment and modified-buffer protection
+still apply. Templates are data, with no executable hooks or Org conversion.
+Headless hosts accept the same profile array as JSON in
+`NOEMA_AGENDA_CAPTURE_TEMPLATES`.
+
+Native `RET` resolves live Markdown tasks from the current editor snapshot,
+including unsaved edits, before navigating. Code examples are excluded.
+Ambiguous duplicate source text after edits requires stable task IDs. Switching
+away or starting a newer visit suppresses a delayed navigation response.
+
+Project identity and client-host placement use the Remote framework. Sources
+without client placement use a workspace-owned target process for discovery,
+versioned reads/writes and file notifications. Leaving the scope closes that
+process; gateway loss clears stale tasks and workspace recovery restores only
+active sources. The real gateway path is tested with a logical local target;
+live SSH parity still needs verification.
+
+### Apple 集成进度
+
+EventKit helper 已提供 macOS 14+ 的原生协议与 Emacs 客户端进程生命周期。
+`make agenda-apple-test` 构建并验证辅助进程、日期和资源释放；测试不请求权限，
+不读写个人提醒或日历。开发时可运行 `my/noema-agenda-apple-enable` 显式申请
+Reminders 或 Calendar 权限，`my/noema-agenda-apple-disable` 释放辅助进程。
+
+原生 Agenda 的 `P` 显式选择 Reminders 或 Calendar 及目标列表，`v a` 或
+`M-x my/noema-agenda-attention` 打开全局关注；Web 提供 Promote 和 Global
+attention。只有显式提升才创建 Apple 条目。Calendar 需要 `s` 开始、`E` 结束，
+deadline 不自动变成日历占用。启用 helper 不会提升现有任务。
+
+全局关注的 `g` 只读持久绑定，`R` 同步/重试选中条目，`s/a` 选择保留源/使用
+Apple，`RET` 明确进入源项目。`d` 删除绑定的 Apple 条目并保留源，`F` 仅解除
+绑定，两边都保留。项目未进入时只保存轻量回执；进入后才检查源版本及未保存
+buffer 并回写。冲突保留双方；连接不可用时标明正在展示已保存回执。
+
+已用临时 Apple 协议替身验证真实 host、Go 和 Emacs 网关闭环，以及重启/退出/
+回写冲突。尚未读写个人 EventKit 条目或验证设备同步；跨时区改动、重复小时和
+一个任务在同一日历的多个时间块仍有待完成。
+
+### Roam 入口
+
+- `M-x my/noema-roam-agenda` — native agenda (dispatch key `A`).
+- `M-x my/noema-roam-agenda-web` — hosted Web agenda.
 - `M-x my/noema-roam-agenda-calendar` — month calendar view.
 - `M-x my/noema-roam-agenda-log` — completion log view.
 - `M-x my/noema-roam-agenda-gantt` — Gantt view.
@@ -198,3 +301,30 @@ Emacs does not render agenda UI natively — it opens the Web page:
 `my/noema-roam-capf` (a `completion-at-point-functions` entry, so it
 works through `company`/the built-in completion UI) calling the same
 `todo-refs` backend service the Web editor uses.
+
+
+### Markdown examples
+
+Fenced/indented code, inline code, escaped commands and metadata summaries are
+excluded from native task and clock discovery. A task moved into code cannot
+be changed using an old Agenda selection. Capture into an unclosed code fence
+is rejected before saving: close the fence or select another inbox file.
+Tasks in ordinary proof-environment prose remain supported, and inline code
+inside a task title is preserved verbatim.
+
+
+### Roam task entry points
+
+`my/noema-roam-todos` retains the Roam task list and reads native records from
+Knowledge plus explicitly active projects. Empty results do not launch a CLI
+or trigger a regex scan. Completion, metadata and dependency edits use the
+same scope, revision and modified-buffer checks as Noema Agenda; source errors
+cannot fall through to a second local writer.
+
+`my/noema-roam-jump-file-todo` (`F`) asynchronously parses the current Markdown
+buffer, including unsaved edits. This read-only snapshot does not scan other
+files, enter a project or publish unsaved tasks to the index. Requests superseded
+by another invocation, buffer edits or buffer closure are discarded. Switching
+away suppresses the late selection prompt. Source jumps retain exact positions
+through Unicode and repeated identical task text. Plain `TODO` prose and ordinary
+checkboxes do not create native tasks; use `@@todo` / `@@itodo`.

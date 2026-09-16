@@ -73,6 +73,9 @@
          async-result
          async-error
          disconnected-error
+         disconnected-clients
+         (remote-gateway-client-disconnected-hook
+          (list (lambda (client) (push client disconnected-clients))))
          socket)
     (unwind-protect
         (progn
@@ -159,7 +162,11 @@
               (alist-get "message" disconnected-error nil nil #'string=)
               "Gateway client disconnected"))
             (should
-             (zerop (hash-table-count remote-gateway--pending)))))
+             (zerop (hash-table-count remote-gateway--pending)))
+            (should (equal disconnected-clients (list client)))
+            ;; A duplicate sentinel must not release the client's resources twice.
+            (remote-gateway--client-disconnected (remote-gateway-client-process client) "duplicate")
+            (should (equal disconnected-clients (list client)))))
       (when socket
         (ignore-errors (websocket-close socket))))))
 

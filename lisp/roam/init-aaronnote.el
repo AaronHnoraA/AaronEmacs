@@ -22,6 +22,14 @@
 (require 'init-aaronnote-jupyter-lsp)
 
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
+(declare-function my/noema--apple-gateway "init-aaronnote-agenda-apple" (body client))
+(declare-function my/noema--apple-start "init-aaronnote-agenda-apple" ())
+(declare-function my/noema--apple-stop "init-aaronnote-agenda-apple" ())
+(declare-function my/noema--apple-request "init-aaronnote-agenda-apple" (body callback &optional timeout))
+(declare-function my/project-activate "init-project" (root &optional remember))
+(declare-function noema-agenda-activate-project "noema-agenda" (root &optional callback))
+(declare-function noema-agenda-attention "noema-agenda-attention" ())
+(declare-function noema-agenda-attention-handle-change "noema-agenda-attention" (payload))
 (declare-function my/xwidget-current-url "init-browser" (&optional buffer))
 (declare-function my/xwidget-session-buffer "init-browser" (id))
 (declare-function my/xwidget-focus "init-browser" (&optional buffer))
@@ -70,6 +78,21 @@
 (defgroup my/noema nil
   "Noema Markdown web editor integration."
   :group 'applications)
+
+(config-defvar my/noema-agenda-exclude-patterns nil
+  "Additional Agenda exclusions, matched relative to each active scope root.
+Examples: archive/**, **/*.generated.md, or scratch.md. Hidden paths and
+standard dependency/build directories are always excluded. Restart the Noema
+host after changing this list. It applies to discovery and file events."
+  :type '(repeat string) :group 'my/noema)
+
+(config-defvar my/noema-agenda-capture-templates nil
+  "Declarative capture profiles shared by native and hosted Web Agenda.
+Each profile has id, key, name, relative Markdown file, scope (selected or
+knowledge), fields and optional required/defaults.  Nil uses the built-in
+Task, Deadline and Appointment profiles.  File names allow %Y/%m/%d tokens.
+Restart the Noema host after changing this setting."
+  :type '(repeat alist) :group 'my/noema)
 
 (defvar my/noema--web-host-script
   (expand-file-name "site-lisp/noema/web-host.mjs" user-emacs-directory)
@@ -747,6 +770,10 @@ reconnect without a reload and without losing their in-memory editor state."
             (append
              (list
             "AARONNOTE_HOST_MODE=emacs"
+            (format "NOEMA_AGENDA_CAPTURE_TEMPLATES=%s"
+                    (json-encode (vconcat my/noema-agenda-capture-templates)))
+            (format "NOEMA_AGENDA_EXCLUDE=%s"
+                    (json-encode (vconcat my/noema-agenda-exclude-patterns)))
             (format "NOEMA_ROOT=%s" (expand-file-name my/noema--notes-root))
             (format "NOEMA_GLOBAL_CAPABILITIES=%s"
                     (or (getenv "NOEMA_GLOBAL_CAPABILITIES")
@@ -844,6 +871,14 @@ reconnect without a reload and without losing their in-memory editor state."
           my/noema--gateway-binding gateway)
     proc))
 
+(defvar my/noema-host-ready-functions nil
+  "Functions run with no arguments after the web-host reports ready.
+
+Unlike `my/noema--ready-callbacks', which is a one-shot queue the ready
+watchdog may drop when the host is slow to boot, this hook is a durable
+notification: consumers that want to recover from a dropped or timed-out
+request re-issue it from here.")
+
 (defun my/noema--flush-ready-callbacks ()
   "Run callbacks waiting for the server to become ready."
   (when my/noema--ready-watchdog
@@ -853,6 +888,7 @@ reconnect without a reload and without losing their in-memory editor state."
     (setq my/noema--ready-callbacks nil)
     (dolist (callback callbacks)
       (run-at-time 0 nil callback)))
+  (run-hook-with-args 'my/noema-host-ready-functions)
   (my/noema--install-activity-hooks)
   ;; Do an initial activity check after the page has had time to load.
   (run-at-time 0.2 nil #'my/noema--update-activity))
@@ -951,6 +987,8 @@ to JSON a second time."
                 my/noema--last-port port
                 my/noema--ready t)
           (my/noema--flush-ready-callbacks)
+          (when (fboundp 'noema-agenda-host-ready)
+            (noema-agenda-host-ready))
           ;; Gateway registration/re-registration is the reconnect event for
           ;; Emacs.  Reconcile open notebooks once here; notebook buffers do
           ;; not run polling timers.
@@ -1314,6 +1352,27 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              (my/noema--defer-host-event
               #'my/noema--handle-ui-state-payload payload)
              nil)
+            ("agenda-visit"
+             (my/noema--defer-host-event
+              (lambda (record) (require 'noema-agenda) (noema-agenda-visit-record record)) payload)
+             nil)
+            ("agenda-changed"
+             (when (fboundp 'noema-agenda-handle-change)
+               (my/noema--defer-host-event #'noema-agenda-handle-change payload))
+             (when (fboundp 'my/dashboard-agenda-handle-change)
+               (my/noema--defer-host-event #'my/dashboard-agenda-handle-change payload))
+             nil)
+            ("agenda-attention-changed"
+             (my/noema--defer-host-event
+              (lambda (event)
+                (when (fboundp 'noema-agenda--reconcile-files)
+                  (noema-agenda--reconcile-files (append (alist-get 'files event) nil)))
+                (when (fboundp 'noema-agenda-attention-handle-change)
+                  (noema-agenda-attention-handle-change event))) payload)
+             nil)
+            ("agenda-attention-visit"
+             (my/noema--defer-host-event #'my/noema--agenda-attention-visit payload)
+             nil)
             ("ready"
              (format "aaronote-web-host:ready:%s"
                      (or (alist-get 'port payload) 0)))
@@ -1370,6 +1429,34 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
       (my/noema--defer-host-event #'my/noema--handle-process-line line))
     '((ok . t))))
 
+(defun my/noema--agenda-protected-sources (params _client)
+  "Report modified Emacs buffers among requested source files in PARAMS.
+This is a memory-only check; it never opens an inactive project or reads disk."
+  (let ((files (append (alist-get 'files params) nil)))
+    `((files . ,(vconcat
+                 (seq-filter
+                  (lambda (file)
+                    (seq-some (lambda (buffer)
+                                (with-current-buffer buffer
+                                  (and (buffer-modified-p)
+                                       (or (equal file buffer-file-name)
+                                           (equal file buffer-file-truename)
+                                           (and buffer-file-name
+                                                (remote-file-equal-p file buffer-file-name))))))
+                              (buffer-list))) files))))))
+
+(remote-gateway-register-method
+ "aaronnote.agenda.protected-sources" #'my/noema--agenda-protected-sources)
+(remote-gateway-register-method
+ "aaronnote.agenda.apple"
+ (lambda (params client)
+   (require 'init-aaronnote-agenda-apple)
+   (my/noema--apple-gateway params client)))
+(remote-gateway-register-method
+ "aaronnote.agenda.source"
+ (lambda (params client)
+   (require 'init-aaronnote-agenda-source)
+   (my/noema--agenda-source-request params client)))
 (remote-gateway-register-method
  "aaronnote.event" #'my/noema--gateway-event)
 (remote-gateway-register-method
@@ -1448,6 +1535,8 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
   "Handle web-host PROC state change EVENT."
   (when (and (eq proc my/noema--process)
              (not (process-live-p proc)))
+    (when (fboundp 'noema-agenda-host-stopped)
+      (noema-agenda-host-stopped))
     (when my/noema--ready-watchdog
       (cancel-timer my/noema--ready-watchdog)
       (setq my/noema--ready-watchdog nil))
@@ -2434,11 +2523,72 @@ and every renderer uses the same `runHostCommand' pause implementation."
         my/noema--activity-hooks-installed nil))
 
 ;;;###autoload
+(defun my/noema-agenda-apple-enable (kind)
+  "Enable the client EventKit helper and explicitly request access for KIND."
+  (interactive (list (completing-read "Enable Apple: " '("reminder" "event") nil t)))
+  (unless (member kind '("reminder" "event")) (user-error "Choose reminder or event"))
+  (require 'init-aaronnote-agenda-apple)
+  (my/noema--apple-start)
+  (my/noema--apple-request
+   `((op . "authorize") (kind . ,kind))
+   (lambda (result error-object)
+     (if error-object (message "Noema Apple: %s" (alist-get 'message error-object))
+       (message "Noema Apple %s access: %s" kind
+                (if (eq (alist-get 'granted result) t) "enabled" "not granted")))) 180))
+
+(defun my/noema-agenda-apple-disable ()
+  "Stop the client EventKit helper without changing Apple or source items."
+  (interactive)
+  (when (fboundp 'my/noema--apple-stop) (my/noema--apple-stop))
+  (message "Noema Apple integration disabled"))
+
+(defvar my/noema--attention-visit-request 0)
+(defun my/noema--agenda-attention-visit (reference)
+  "Explicitly activate and open the source of a global attention REFERENCE."
+  (require 'init-project)
+  (require 'noema-agenda)
+  (let ((request (cl-incf my/noema--attention-visit-request)))
+    (my/project-activate (alist-get 'root reference) t)
+    (noema-agenda-activate-project
+     my/project-active-root
+     (lambda (scope problem)
+       (when (= request my/noema--attention-visit-request)
+         (if problem (noema-agenda--error problem)
+           (let ((scope-id (noema-agenda--get scope 'id))
+                 (project-generation noema-agenda--project-request))
+             (noema-agenda--call
+              "query" `((scopes . ,(vector scope-id)))
+              (lambda (snapshot error-object)
+                (when (and (= request my/noema--attention-visit-request)
+                           (= project-generation noema-agenda--project-request)
+                           (equal scope-id noema-agenda--project-scope))
+                  (if error-object (noema-agenda--error error-object)
+                    (let ((matches
+                           (seq-filter
+                            (lambda (todo)
+                              (and (equal (noema-agenda--get todo 'uid) (alist-get 'uid reference))
+                                   (equal (noema-agenda--get todo 'file) (alist-get 'file reference))))
+                            (noema-agenda--list (noema-agenda--get snapshot 'todos)))))
+                      (if (= (length matches) 1)
+                          (noema-agenda-visit-record (car matches))
+                        (noema-agenda--error "Bound task moved, disappeared or became ambiguous; refresh its source"))))))))))))))
+
+(defun my/noema-agenda-attention ()
+  "Open the native global attention view over explicitly promoted bindings."
+  (interactive)
+  (require 'noema-agenda-attention)
+  (noema-agenda-attention))
+
+;;;###autoload
 (defun my/noema-stop ()
   "Kill the Noema web-host process and reset Appine tab state.
 The web-host (Node) is the backend; once it is gone, any Appine tabs showing
 its pages are dead, so the Emacs-side tab registry is cleared too."
   (interactive)
+  (when (fboundp 'my/dashboard-agenda-host-stopped)
+    (my/dashboard-agenda-host-stopped))
+  (when (fboundp 'noema-agenda-host-stopped)
+    (noema-agenda-host-stopped))
   (my/noema--clear-post-queue)
   (my/noema--clear-process-log-queue)
   (my/noema--remove-activity-hooks)
@@ -2538,6 +2688,37 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 (add-hook 'kill-emacs-hook #'my/noema-stop)
 
 ;;; API call — request the web-host over the shared gateway.
+
+(defun my/noema--agenda-host-project-root (root)
+  "Resolve ROOT for the client-hosted Agenda through Remote placement."
+  (require 'remote-fs)
+  (or (remote-client-file-name root)
+      (remote-canonicalize-file-name root)))
+
+(with-eval-after-load 'noema-agenda
+  (setq noema-agenda-project-root-function #'my/noema--agenda-host-project-root))
+
+(defun my/noema-agenda (&optional query)
+  "Open native Noema Agenda for the knowledge vault and current project."
+  (interactive)
+  (require 'noema-agenda)
+  (unless (derived-mode-p 'noema-agenda-mode)
+    (let ((root (when (fboundp 'my/project-current-root) (my/project-current-root))))
+      (when (fboundp 'my/project-activate) (my/project-activate root t))
+      ;; The module can be loaded after the project's original entry event.
+      (noema-agenda-activate-project
+       (if (boundp 'my/project-active-root) my/project-active-root root))))
+  (noema-agenda-open query))
+
+(defun my/noema-agenda-plan-node (scheduled deadline)
+  "Include the current DAG node in Agenda with SCHEDULED and DEADLINE dates."
+  (interactive (list (read-string "Schedule (YYYY-MM-DD [HH:MM], optional): ")
+                     (read-string "Deadline (YYYY-MM-DD [HH:MM], optional): ")))
+  (require 'noema-api)
+  (let ((patch (make-hash-table :test #'equal)))
+    (unless (string-empty-p scheduled) (puthash "sche" scheduled patch))
+    (unless (string-empty-p deadline) (puthash "ddl" deadline patch))
+    (noema-set-node-agenda (noema-current-node) patch)))
 
 (defun my/noema--gateway-hash-value (value)
   "Convert decoded gateway VALUE into hash-table object representation."

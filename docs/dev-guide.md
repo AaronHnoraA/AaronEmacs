@@ -599,6 +599,11 @@ in-process 缓存，与自动刷新保持一致。
 - 取消链路：准备中的 Run 被取消时 kernel 立即结束它、拒绝迟到的 attach/start，并把
   cancelled 写回格子；运行中的 Run 由 worker 发 ACP `session/cancel`、撤回待批权限，
   3 秒无响应再关停 agent 进程。JuText `C-c C-z` 按光标所在格子取消。
+- `M-x noema-skill-manager` / `noema-mcp-manager` / `noema-capability-manager`
+  在普通 buffer 打开能力管理器；在 agent-shell buffer（平台会话或 popup vterm 里的
+  会话）里同一命令改为只读 lookup（`M-x noema-capability-lookup`），选中后只在 agent
+  输入处草拟一行引用（Skill 给出绝对 `SKILL.md` 与资源目录，MCP 给出配置文件），
+  不启用、不打补丁、不安装、也不自动发送。
 - `C-c A i r/b/f` — 迁移后的 Noema interaction region/buffer/file 入口
 - profile 与模板在 `etc/noema/`，运行状态在 `var/noema/`
 

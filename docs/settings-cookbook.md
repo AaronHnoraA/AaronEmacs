@@ -597,6 +597,16 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 
 ---
 
+## 改启动 Dashboard 的内容或顺序
+
+启动画面的条目顺序在 `lisp/init-ui.el` 的 `dashboard-startupify-list` 里；Agenda 卡片
+（`my/dashboard-insert-agenda`）排在最后，Roam 热力图（`my/dashboard-insert-roam-heatmap`）
+在 items 之前。每个条目都是普通的 insert 函数，居中交给 `my/dashboard--center-lines`。
+
+任何要请求 Noema host 的条目都必须能失败：走 `my/noema-host-ready-functions` 重试
+（host 的 ready 队列在启动慢时会把回调丢掉），并留一个超时后可点击重试的失败态，不要让
+卡片永远停在 loading。
+
 ## 新建只读 dashboard / report / hub buffer
 
 需要新建只读面板（`special-mode` 风格）时，**请使用 `aaron-ui-board`**，不要手工构建 face 和 insert 样板：

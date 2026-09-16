@@ -1,20 +1,71 @@
 {
   "schema": "noema.capabilities/1",
   "sources": [
-    { "id": "claude", "format": "claude", "config": "linked/claude/config.json", "skills": ["linked/claude/skills"] },
-    { "id": "codex", "format": "codex", "config": "linked/codex/config.toml", "skills": ["linked/codex/skills", "linked/codex/skills/.system"] },
-    { "id": "codex-data", "format": "codex", "skills": ["linked/codex/data-skills"] },
-    { "id": "codex-science", "format": "codex", "skills": ["linked/codex/science-skills"] },
-    { "id": "codex-plugins", "format": "codex", "skills": ["linked/codex/plugin-management-skills"] },
-    { "id": "opencode", "format": "opencode", "config": "linked/opencode/config.json", "skills": ["linked/opencode/skills"] },
-    { "id": "pi", "format": "pi", "config": "linked/pi/mcp.json", "skills": ["linked/pi/skills"] }
+    {
+      "id": "claude",
+      "format": "claude",
+      "config": "linked/claude/config.json",
+      "skills": [
+        "linked/claude/skills"
+      ]
+    },
+    {
+      "id": "codex",
+      "format": "codex",
+      "config": "linked/codex/config.toml",
+      "skills": [
+        "linked/codex/skills",
+        "linked/codex/skills/.system"
+      ]
+    },
+    {
+      "id": "codex-data",
+      "format": "codex",
+      "skills": [
+        "linked/codex/data-skills"
+      ]
+    },
+    {
+      "id": "codex-science",
+      "format": "codex",
+      "skills": [
+        "linked/codex/science-skills"
+      ]
+    },
+    {
+      "id": "codex-plugins",
+      "format": "codex",
+      "skills": [
+        "linked/codex/plugin-management-skills"
+      ]
+    },
+    {
+      "id": "opencode",
+      "format": "opencode",
+      "config": "linked/opencode/config.json",
+      "skills": [
+        "linked/opencode/skills"
+      ]
+    },
+    {
+      "id": "pi",
+      "format": "pi",
+      "config": "linked/pi/mcp.json",
+      "skills": [
+        "linked/pi/skills"
+      ]
+    }
   ],
   "skills": {
     "patches": {
       "lean4": {
         "content_append": "Noema portable installation: resolve ../../vendor/lean4-skills/plugins/lean4 from this Skill's directory (the Noema Skill source header). This contains bin/lean4-skills-* wrappers and lib/scripts; invoke wrappers with their resolved absolute paths. References are bundled here in references/. No host-native /lean4:* commands, hooks or subagent definitions are installed. The optional lean-lsp MCP must be explicitly enabled for a prepared Lean project; without it use the documented CLI fallback."
       }
-    }
+    },
+    "enabled": [
+      "alphafold-skill"
+    ],
+    "disabled": []
   },
   "mcp": {
     "servers": [
@@ -23,7 +74,9 @@
         "title": "Lean LSP MCP",
         "description": "Optional Lean diagnostics and mathlib search; requires uvx and a prepared Lean project.",
         "command": "uvx",
-        "args": ["lean-lsp-mcp==0.30.0"],
+        "args": [
+          "lean-lsp-mcp==0.30.0"
+        ],
         "default_enabled": false
       }
     ]

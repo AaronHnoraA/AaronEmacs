@@ -526,6 +526,7 @@ Return non-nil only for the first settlement."
    process "Gateway client disconnected")
   (when-let* ((client (gethash process remote-gateway--process-clients)))
     (remhash process remote-gateway--process-clients)
+    (run-hook-with-args 'remote-gateway-client-disconnected-hook client)
     (remote-gateway--fail-pending-for-client
      client "Gateway client disconnected")
     (when (eq client (gethash
@@ -533,6 +534,9 @@ Return non-nil only for the first settlement."
                       remote-gateway--clients))
       (remhash (remote-gateway-client-key client)
                remote-gateway--clients))))
+
+(defvar remote-gateway-client-disconnected-hook nil
+  "Hook called with a disconnected client to release its consumer resources.")
 
 (defun remote-gateway--websocket-handler (request)
   "Upgrade WebSocket REQUEST and adopt its process."

@@ -619,53 +619,67 @@ edited through `noema-research-mode' instead of the sidecar projection."
          (error nil))
        (require 'noema-research-mode nil t)))
 
-(defun my/noema-jupyter-notebook--initialize-new-noema ()
-  "Initialize an empty visited `.noema' file and its local project.
-
-The file is made a valid work document immediately, before any OutputArea
-request can observe an empty or rootless notebook.  A nearest existing Noema
-project is reused; otherwise the file's directory becomes one."
-  (when (and buffer-file-name
-             (string-match-p "\\.noema\\'" buffer-file-name)
-             (string-empty-p (string-trim (buffer-string))))
-    (require 'noema-research-mode)
-    (unless (locate-dominating-file (file-name-directory buffer-file-name)
-                                    "noema.toml")
-      (noema-project-enable (file-name-directory buffer-file-name)))
-    (let* ((title (file-name-base buffer-file-name))
-           (document (noema-research-create-document title))
-           (serialized (noema-research-serialize document)))
-      ;; Fill the still-new visiting buffer before the atomic writer creates
-      ;; the file.  Doing this in the opposite order makes Emacs correctly
-      ;; detect a supersession and prompt while opening the new document.
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert serialized))
-      (noema-research-write-file buffer-file-name document)
-      (set-visited-file-modtime)
-      (set-buffer-modified-p nil))))
+(defun my/noema-jupyter-notebook--new-noema-p ()
+  "Return non-nil when the buffer visits a `.noema' file with no content yet."
+  (and buffer-file-name
+       (string-match-p "\\.noema\\'" buffer-file-name)
+       (string-empty-p (string-trim (buffer-string)))))
 
 (defun my/noema-jupyter-notebook--ensure-noema-project ()
-  "Ensure the current valid `.noema' file has a containing project root."
-  (when (and buffer-file-name
-             (string-match-p "\\.noema\\'" buffer-file-name)
-             (not (locate-dominating-file (file-name-directory buffer-file-name)
-                                          "noema.toml")))
-    (require 'noema-research)
-    (noema-project-enable (file-name-directory buffer-file-name))))
+  "Return the Noema project root for the new `.noema' file, or nil.
+An enclosing project is reused; otherwise `noema-project-ensure' asks where to
+create one.  Declining writes nothing."
+  (require 'noema-research)
+  (condition-case nil
+      (noema-project-ensure buffer-file-name)
+    (quit
+     (message "Noema: %s was not created; it needs a Noema project"
+              (file-name-nondirectory buffer-file-name))
+     nil)))
+
+(defun my/noema-jupyter-notebook--note-missing-project ()
+  "Tell the user when the visited `.noema' file belongs to no Noema project.
+Visiting never creates one, because previews and programs visit files too;
+the first run of a work block asks where to create it."
+  (when (and (string-match-p "\\.noema\\'" buffer-file-name)
+             (not (noema-project-root buffer-file-name)))
+    (message "Noema: %s has no project; the first run asks where to create one"
+             (file-name-nondirectory buffer-file-name))))
+
+(defun my/noema-jupyter-notebook--initialize-new-noema ()
+  "Fill the empty visited `.noema' file with a valid work document.
+The file becomes valid immediately, before any OutputArea request can observe
+an empty notebook.  The caller settles the project root first."
+  (require 'noema-research-mode)
+  (let* ((title (file-name-base buffer-file-name))
+         (document (noema-research-create-document title))
+         (serialized (noema-research-serialize document)))
+    ;; Fill the still-new visiting buffer before the atomic writer creates
+    ;; the file.  Doing this in the opposite order makes Emacs correctly
+    ;; detect a supersession and prompt while opening the new document.
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert serialized))
+    (noema-research-write-file buffer-file-name document)
+    (set-visited-file-modtime)
+    (set-buffer-modified-p nil)))
 
 ;;;###autoload
 (defun my/noema-jupyter-notebook-open-mode ()
   "Visit an ipynb as a research notebook or a native source projection.
 Research notebooks open in `noema-research-mode'; other notebooks use the
-sidecar source projection."
+sidecar source projection.  A new `.noema' file is initialized only once its
+Noema project is settled, so declining leaves the empty buffer untouched."
   (interactive)
-  (my/noema-jupyter-notebook--initialize-new-noema)
-  (if (my/noema-jupyter-notebook--research-buffer-p)
-      (progn
-        (my/noema-jupyter-notebook--ensure-noema-project)
-        (noema-research-mode))
-    (my/noema-jupyter-notebook--open-projection)))
+  (when (and (my/noema-jupyter-notebook--new-noema-p)
+             (my/noema-jupyter-notebook--ensure-noema-project))
+    (my/noema-jupyter-notebook--initialize-new-noema))
+  (cond
+   ((my/noema-jupyter-notebook--research-buffer-p)
+    (noema-research-mode)
+    (my/noema-jupyter-notebook--note-missing-project))
+   ((my/noema-jupyter-notebook--new-noema-p))
+   (t (my/noema-jupyter-notebook--open-projection))))
 
 (defun my/noema-jupyter-notebook--open-projection ()
   "Visit an ipynb as a native source projection.

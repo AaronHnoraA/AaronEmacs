@@ -17,9 +17,9 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native ui-test ui-tokens audit-ui-tokens \
-        remote-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e \
+        remote-test remote-source-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e \
         lsp-test lsp-live-smoke lsp-remote-live-smoke \
-        jupyter-test research-test \
+        jupyter-test research-test agenda-test agenda-apple-test \
         publish publish-build publish-deploy publish-clean
 
 default: up
@@ -37,7 +37,7 @@ help:
 	  '  make audit-lock           Compare installed packages against package-lock.el' \
 	  '  make ui-tokens            Regenerate Noema CSS tokens from aaron-ui' \
 	  '  make audit-ui-tokens      Verify committed Noema CSS tokens are current' \
-	  '  make ui-test              Run Aaron UI semantic-token ERT tests' \
+	  '  make ui-test              Run Aaron UI semantic-token and dashboard ERT tests' \
 	  '  make doctor               Open/check the config health doctor report in batch' \
 	  '  make state-backup         Snapshot migration-worthy local state into var/backup-snapshots' \
 	  '  make state-restore SNAPSHOT=/path/to/archive.tar.gz  Restore a saved state snapshot' \
@@ -59,6 +59,7 @@ help:
 	  '  make health-byte          Run byte-compile smoke check' \
 	  '  make health-native        Run native-compile smoke check' \
 	  '  make remote-test          Run isolated remote framework ERT suites' \
+	  '  make remote-source-test   Run source helper and workspace lifecycle checks' \
 	  '  make remote-contract-test Run remote upgrade/provider contract tests' \
 	  '  make remote-conformance-test Compare /fs:local semantics with native APIs' \
 	  '  make remote-byte-check    Strictly byte-compile remote code in a temp dir' \
@@ -68,6 +69,7 @@ help:
 	  '  make lsp-remote-live-smoke  Start real C/Python/Java LSP through TRAMP + Remote' \
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make research-test        Run Noema research notebook (JuText/Graph Board) ERT suite' \
+	  '  make agenda-apple-test    Build and check EventKit without requesting access' \
 	  '  make remote-e2e           Run opt-in real SSH E2E (REMOTE_E2E_TARGET optional)' \
 	  '' \
 	  '  make publish              Compile CV + deploy site (git push + optional NAS rsync)' \
@@ -108,6 +110,7 @@ audit-ui-tokens:
 ui-test:
 	$(UI_TOKEN_BATCH) --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)"))' -l test/aaron-ui-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/noema-icon-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-ui-dashboard-tests.el -f ert-run-tests-batch-and-exit
 
 doctor:
 	$(BATCH) --eval '(prin1 (my/health-critical-check))'
@@ -183,7 +186,11 @@ remote-byte-check:
 
 remote-check: remote-byte-check remote-test
 
-remote-test: remote-contract-test remote-conformance-test
+remote-source-test:
+	node --test test/remote-source-agent.test.cjs
+	$(REMOTE_TEST_BATCH) -l test/remote-source-tests.el -f ert-run-tests-batch-and-exit
+
+remote-test: remote-contract-test remote-conformance-test remote-source-test
 	$(REMOTE_TEST_BATCH) -l test/remote-tests.el -f ert-run-tests-batch-and-exit
 	$(REMOTE_TEST_BATCH) -l test/remote-framework-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/remote-gateway-tests.el -f ert-run-tests-batch-and-exit
@@ -210,6 +217,15 @@ jupyter-test:
 	$(BATCH) -l test/init-aaronnote-jupyter-notebook-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-runtime-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-jupyter-board-tests.el -f ert-run-tests-batch-and-exit
+
+agenda-test:
+	$(EMACS) --batch -Q -L site-lisp/noema/lisp -l noema-agenda-tests -l noema-agenda-attention-tests -l noema-agenda-capture-tests -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-aaronnote-agenda-source-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/md-roam-tests.el -f ert-run-tests-batch-and-exit
+
+agenda-apple-test:
+	$(MAKE) -C site-lisp/noema agenda-apple-test
+	$(BATCH) -l test/init-aaronnote-agenda-apple-tests.el -f ert-run-tests-batch-and-exit
 
 research-test:
 	$(BATCH) -l test/noema-startup-tests.el -f ert-run-tests-batch-and-exit

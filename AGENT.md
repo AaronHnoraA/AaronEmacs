@@ -52,6 +52,13 @@ Result cells, kernel controls, or Run All. The Jupyter bridge below applies to
 ordinary `.ipynb` and Markdown `@@cell` sidecars. Node also enforces this
 boundary if a generic Jupyter command is invoked from a `.noema` buffer.
 
+A Noema project root is the nearest `noema.toml` (`noema-project-root`).
+Visiting a `.noema` never creates one, because previews and programs visit
+files too.  Creating a `.noema` or running a work block goes through
+`noema-project-ensure`, which asks first and proposes the enclosing
+`project.el` workspace root.  Do not add silent `noema-project-enable` calls to
+visit paths.
+
 When adding a module:
 
 - Put it in the owning directory.
@@ -313,6 +320,13 @@ LSP:
 
 Org/Jupyter/research:
 
+- Noema Agenda task lists use the host's active-scope source service. Current
+  Markdown file navigation uses a read-only snapshot of the editor buffer;
+  it must not scan the vault or enter another project. Task writes use the
+  versioned scoped owner, including protected-buffer and repeat semantics.
+  Do not reintroduce regex or one-shot CLI task scans, direct prefix edits,
+  temporary Org sources, or fallback writers after an API failure. See
+  `docs/agenda.md` for the source lifecycle and editor snapshot contracts.
 - Org is intentionally feature-rich; do not add remote/large-buffer downgrades
   unless explicitly requested.
 - Org roots default to `~/HC/Org/`; changing them requires checking capture,

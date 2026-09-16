@@ -140,14 +140,28 @@ Lean 4 buffer 里 `C-c C-i` 打开右侧官方 xwidget infoview。
 Lean 服务器挂掉时 lsp-mode 会自动重启，infoview 也会自己指到新的 proxy；
 `C-c i r` 手动重启一整套（proxy + `lake serve` + 页面）。
 
+`F` 当前文件任务跳转直接解析缓冲区中的原生任务，包含尚未保存的修改；
+代码示例和普通 `TODO` 文字不进入任务列表。查询异步执行，不为跳转扫描整库
+或其他项目。等待期间改动/切走缓冲区时请重新调用 `F`。`k` 的 Roam 任务列表
+与 Agenda 共用已进入的 scopes；完成、元数据和依赖修改也经过同一个版本检查。
+
 Noema 任务使用 `@@todo(state) [text] {key: value}`，例如
 `@@todo(doing) [Write proof] {prio: A, ddl: 2026-05-20, repeat: +1w}`。
-agenda/project/clock 引擎全在 `server/lib/runtime.mjs`，priority、deadline/
-scheduled、repeat、dependency（`after`/`blocks`）、done/log、clock-in/out 都写回
-原始 `@@todo`/`@@clock` 行。Noema Web 的 `/agenda` 页是唯一的 agenda 界面
-（week/list/month/log/gantt/projects/clocktable/lints tabs，Gantt 支持拖拽改期）；
-Emacs 里 `M-x my/noema-roam-agenda` 或 dispatch `A` 直接跳转打开这个页面，
-不再有原生 Emacs agenda buffer。完整语法和 view-model 见
+原生 Agenda 和托管 Web 共用 scope 索引与任务服务，修改写回原始 Markdown
+命令或 `.noema` WorkNode 元数据。`M-x my/noema-roam-agenda` 或 dispatch `A`
+打开原生 Agenda；`my/noema-roam-agenda-web` 保留 Web 的 Gantt 等视图。
+原生 `c` 和 Web New todo 共用 Task / Deadline / Appointment 模板；`C-u c`
+可改目标 Markdown 文件。保存失败保留输入，原生再按 `c` 继续修改。
+`my/noema-agenda-capture-templates` 可配置字段、默认值和按日期命名的文件，
+修改后重启 Noema host；配置示例见 [Agenda 文档](agenda.md#shared-capture-templates)。
+项目明确进入后才扫描；切到无项目关联的 Perspective，或使用项目菜单 `l` /
+`M-x my/project-leave`，释放项目监听和缓存，知识库继续常驻。
+原生 `I/O` 开始/停止计时，`v k` 查看报表和待回写记录，`R/K` 处理待回写冲突。
+Apple 集成先用 `my/noema-agenda-apple-enable` 启用相应类型，再用原生 `P`
+或 Web 的 Promote 显式提升任务；Calendar 需要开始/结束时间（原生 `s/E`）。
+`v a` / Web Global attention 查看全局关注，刷新不会激活未进入的项目；
+`RET` 才进入源项目。个人 Apple 数据和跨设备同步尚未完成实机验证。
+完整语法和 view-model 见
 [`agenda.md`](agenda.md)。
 
 Graph 搜索框支持全文词和
@@ -301,6 +315,18 @@ Remote target 解析：本地 target 用本机 PATH 上的 latexmk，远程 targ
 `start-process`，遇到远程 `default-directory` 时会静默改到本机 `~` 下编译，而不是报错，所以
 配置选择显式拒绝而不是让它悄悄编译错文件。texlab 提供的诊断/补全在远程 target 上仍然可用。
 PDF 的阅读、批注、搜索仍由 PDF Tools 提供。
+
+### 启动 Dashboard 的 Agenda 卡片
+
+Agenda 卡片在启动画面最下面（Recent Files / Projects 之后、footer 之前），Roam 热力图
+仍在上面。
+
+- 点标题「Agenda · next 7 days」打开 Noema Agenda；点任务标题直接定位到该任务。
+- Agenda 数据是异步取的：web-host 还在启动时先显示 `Agenda is loading…`，host 就绪
+  后自动补上；期间每 `my/dashboard-agenda-retry-interval` 秒重试一次，超过
+  `my/dashboard-agenda-timeout` 秒仍无应答就显示
+  `Agenda unavailable · … [retry]`，点 `[retry]` 重新拉取（等价于刷新 Dashboard）。
+  两个参数都在 config 注册表里（`M-x config-board`，group `appearance`）。
 
 ## 2. Leader 键分组
 
@@ -934,6 +960,16 @@ tab-line/tab-bar。
 | `C-c C-j` / `C-c C-l` / `C-c C-z` | 跳到最近的 work 块 / session 列表 / 管理菜单 |
 
 重跑同一个 work 块会按上游重新开始，不会叠在上一次尝试后面（独占的 session 沿用原名换新一代）。
+
+`.noema` 的 DAG（Graph Board）：`f` 以选中节点为根聚焦（`^` 根上移一层、`[`/`]` 调深度、
+`b` 回到上一个焦点）；`h/j/k/l` 按画面移动，`H`/`L` 到 lineage 父/第一个子，`{`/`}` 到兄弟，
+`/` 按标题跳转。work 块里 `@@ctx(lineage:2)` 扩大祖先范围，`@@ctx(none)` 关闭自动附加的上下文；
+自动附加的上游结论超出 64 KiB 预算时会被截断或省略（写进 RunSpec），不会让 Run 失败。
+运行前可在 work 块上按 `C-c j p`（或右键 Preview context）预演：显示将用的 agent、会话、
+推导原因，以及每条上下文的字节数、是否自动附加（auto）/被截断（cut）、被省略的条目和总量；
+不会真的运行或触发 compaction。
+Sessions 列表（`C-c A S`）的 Context 列显示上下文窗口占用与 token 总量，`c` 让该会话下一次 Run
+从最近的 Handoff 重建对话。
 项目内的读写与执行自动批准；项目外和网络请求会弹出 Noema Attention 由你批准。
 
 取消：JuText 里 `C-c C-z` 只取消光标所在 work 块的执行，运行中、排队中、正在准备都有效；

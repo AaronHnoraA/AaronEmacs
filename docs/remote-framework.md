@@ -64,6 +64,30 @@ API、route 选择、资源所有权和验收标准；差异只在 pipeline/back
 
 ## 2. 对象模型
 
+### 按工作区管理的异步来源 IO
+
+`(require 'remote-source)` 提供 `remote-source-open`、`remote-source-request`
+和 `remote-source-close`。来源属于一个已打开的 Remote workspace；helper 通过
+`remote-make-process` 和 `source-files` adapter 在该 workspace target 上启动。
+目标需提供 Node 26.5（使用内置 `path.matchesGlob`）；不安装额外 npm 包。
+
+请求协议支持 `list`、`read`、`canonical`、`write`，文件名相对来源根目录。
+`read` 返回内容和 SHA-256 版本，`write` 必须携带 `expectedRevision`，
+新建使用 null。原地更新在相邻临时文件写入后核对版本并原子替换；这不提供
+对任意外部写入程序的跨进程锁。拒绝符号链接和根目录之外的路径。
+`extensions`、`exclude`、`hidden` 在遍历及监听入口过滤；单文件最多 16 MiB。
+
+目录通知使用 `fs.watch`，没有轮询；请求超时 timer 由请求拥有并在结束时取消。
+关闭来源或 workspace 释放进程和监听，拒绝未完成请求。workspace 恢复重建
+helper 并忽略旧进程回执；来源请求自身不重新激活已退出的 workspace。
+网关消费者还应在 `remote-gateway-client-disconnected-hook` 中释放客户端租约。
+
+`make remote-source-test` 验证真实本机进程、版本冲突、排除、资源释放和恢复，
+以及非本机 context 到进程边界的路由契约。Noema 的
+`node site-lisp/noema/scripts/check-routed-agenda.mjs` 进一步验证真实 WebSocket
+网关、目标 helper、Go 原生计算和 Emacs Agenda 操作。当前这些检查不等于真实
+SSH target 的端到端验收。
+
 新 API 使用六个对象。`remote-pipeline` 与 `remote-session` 是真实结构和 registry；
 旧的 `link` / `connection` / `link-plugin` 名称只保留为 v1 兼容入口。
 

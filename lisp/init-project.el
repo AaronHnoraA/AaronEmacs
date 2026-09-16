@@ -49,6 +49,9 @@
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
 (declare-function get-current-persp "perspective")
 (declare-function persp-parameter "perspective" (parameter &optional persp))
+(declare-function persp-curr "perspective" (&optional frame))
+(declare-function remote-workspace-root "remote-workspace" (workspace))
+(defvar remote-current-workspace)
 (declare-function projectile-find-file-in-directory "projectile")
 (declare-function projectile-ignored-project-p "projectile")
 (declare-function projectile-known-projects "projectile")
@@ -424,17 +427,78 @@ With a prefix argument, always prompt."
        (my/direnv-update-environment-maybe project-root))
      ,@body))
 
+(defvar my/project-activated-hook nil
+  "Hook called with the canonical active root, or nil on project exit.
+Only explicit navigation changes this state; background project queries do not.")
+
+(defvar my/project-active-root nil "Canonical root explicitly active for project consumers.")
+(defvar my/project--switching nil)
+(defvar my/project--perspective-roots (make-hash-table :test #'eq :weakness 'key)
+  "Project associations keyed by live Perspective objects, independent of names.")
+
+(defun my/project-activate (root &optional remember)
+  "Activate ROOT, or leave the active project when ROOT is nil.
+With REMEMBER, associate the current perspective with ROOT.  Identity changes
+emit one event without scanning files or opening a Remote connection."
+  (setq root (when root (file-name-as-directory (remote-canonicalize-file-name root))))
+  (when (and remember (fboundp 'persp-curr) (persp-curr))
+    (if root (puthash (persp-curr) root my/project--perspective-roots)
+      (remhash (persp-curr) my/project--perspective-roots)))
+  (unless (equal root my/project-active-root)
+    (setq my/project-active-root root)
+    (run-hook-with-args 'my/project-activated-hook root)))
+
+(defun my/project-leave ()
+  "Leave the active project's background consumers, preserving its buffers."
+  (interactive)
+  (my/project-activate nil t))
+
+(defun my/project-perspective-switched-h ()
+  "Follow a recorded Perspective switch, ignoring temporary package contexts."
+  (unless my/project--switching
+    (my/project-activate (gethash (persp-curr) my/project--perspective-roots))))
+
+(defun my/project-perspective-killed-h ()
+  "Forget a killed perspective and release its active project."
+  (let* ((perspective (persp-curr))
+         (root (gethash perspective my/project--perspective-roots)))
+    (remhash perspective my/project--perspective-roots)
+    (when (and root (equal root my/project-active-root))
+      (my/project-activate nil))))
+
+(defun my/project-workspace-closed-h ()
+  "Release project consumers when their Remote workspace closes."
+  (let ((root (file-name-as-directory (remote-workspace-root remote-current-workspace)))
+        expired)
+    (maphash (lambda (perspective value)
+               (when (equal root value) (push perspective expired)))
+             my/project--perspective-roots)
+    (dolist (perspective expired) (remhash perspective my/project--perspective-roots))
+    (when (equal root my/project-active-root) (my/project-activate nil))))
+
+(with-eval-after-load 'remote-workspace
+  (add-hook 'remote-workspace-close-hook #'my/project-workspace-closed-h))
+
 (defun my/project-switch (project-root &optional arg)
   "Switch to PROJECT-ROOT and open its root directory.
 With ARG, use Projectile's commander action instead."
   (interactive (list (my/project-read-known-project "Switch to project: ")
                      current-prefix-arg))
   (setq project-root (my/project-normalize-root project-root))
-  (my/project-switch-perspective project-root)
-  (my/with-project-root-context project-root
-    (if arg
-        (projectile-switch-project-by-name project-root arg)
-      (dired project-root))))
+  (let (opened)
+    (unwind-protect
+        (progn
+          (let ((my/project--switching t)) (my/project-switch-perspective project-root))
+          (my/with-project-root-context project-root
+            (if arg
+                (projectile-switch-project-by-name project-root arg)
+              (dired project-root)))
+          (setq opened t)
+          (my/project-activate project-root t))
+      ;; A cancelled opener can already have switched the perspective.  Follow
+      ;; its recorded identity instead of retaining the previous scope there.
+      (when (and (not opened) (fboundp 'persp-curr))
+        (my/project-perspective-switched-h)))))
 
 (defun my/project-ensure-treemacs ()
   "Load Treemacs integrations needed for project-aware navigation."
@@ -457,19 +521,22 @@ With ARG, Projectile uses commander mode."
 Without a prefix argument, default to the current project."
   (interactive (list (my/project-read-target-root "Find file in project: ")))
   (my/with-project-root-context project-root
-    (projectile-find-file-in-directory project-root)))
+    (projectile-find-file-in-directory project-root)
+    (my/project-activate project-root t)))
 
 (defun my/project-recent-file (project-root)
   "Open a recently visited file in PROJECT-ROOT."
   (interactive (list (my/project-read-target-root "Recent file in project: ")))
   (my/with-project-root-context project-root
-    (projectile-recentf)))
+    (projectile-recentf)
+    (my/project-activate project-root t)))
 
 (defun my/project-switch-buffer (project-root)
   "Switch to a buffer that belongs to PROJECT-ROOT."
   (interactive (list (my/project-read-target-root "Buffer in project: ")))
   (my/with-project-root-context project-root
-    (projectile-switch-to-buffer)))
+    (projectile-switch-to-buffer)
+    (my/project-activate project-root t)))
 
 (defun my/project-ripgrep (project-root)
   "Run `consult-ripgrep' in PROJECT-ROOT."
@@ -485,7 +552,8 @@ Without a prefix argument, default to the current project."
   (setq project-root (my/project-normalize-root project-root))
   (when (fboundp 'my/direnv-update-environment-maybe)
     (my/direnv-update-environment-maybe project-root))
-  (dired project-root))
+  (dired project-root)
+  (my/project-activate project-root t))
 
 (defun my/project-magit-status (project-root)
   "Open Magit status for PROJECT-ROOT."
@@ -494,7 +562,8 @@ Without a prefix argument, default to the current project."
   (when (fboundp 'my/direnv-update-environment-maybe)
     (my/direnv-update-environment-maybe project-root))
   (let ((default-directory project-root))
-    (magit-status-setup-buffer project-root)))
+    (magit-status-setup-buffer project-root)
+    (my/project-activate project-root t)))
 
 (defun my/project-vterm (project-root)
   "Open or switch to a dedicated VTerm for PROJECT-ROOT."
@@ -506,7 +575,8 @@ Without a prefix argument, default to the current project."
       (my/direnv-update-environment-maybe project-root))
     (if (get-buffer buffer-name)
         (pop-to-buffer buffer-name)
-      (vterm buffer-name))))
+      (vterm buffer-name))
+    (my/project-activate project-root t)))
 
 (defun my/project-kill-buffers (project-root)
   "Kill buffers belonging to PROJECT-ROOT."
@@ -1550,6 +1620,9 @@ Returns the number of killed buffers."
     (my/project-remove-from-treemacs-workspaces project-root)
     (my/project-kill-perspective-if-exists project-label)
     (my/project-kill-associated-buffers project-root project-label)
+    (when (and my/project-active-root
+               (remote-file-equal-p my/project-active-root project-root))
+      (my/project-leave))
     (message "Removed project %s from Emacs project management"
              (abbreviate-file-name project-root))))
 
@@ -1654,6 +1727,7 @@ Returns the number of killed buffers."
       ("d" "open root" my/project-open-root)
       ("v" "project vterm" my/project-vterm)]
      ["Manage"
+      ("l" "leave active project" my/project-leave)
       ("A" "add project" my/project-add-known-project)
       ("D" "discover in dir" my/project-discover-projects-in-directory)
       ("x" "remove project" my/project-remove-known-project)
@@ -1861,6 +1935,8 @@ Returns the number of killed buffers."
   :config
   (add-to-list 'window-persistent-parameters '(winner-ring . t))
   (persp-mode 1)
+  (add-hook 'persp-switch-hook #'my/project-perspective-switched-h)
+  (add-hook 'persp-killed-hook #'my/project-perspective-killed-h)
   (add-hook 'persp-before-deactivate-functions #'my/project-save-winner-data-h)
   (add-hook 'persp-activated-functions #'my/project-load-winner-data-h)
   (with-eval-after-load 'treemacs
