@@ -38,6 +38,15 @@ Python-family kernel，因此使用 =NOTE.python.SESSION.ipynb= 和
 =@@cell(python, session)=；=sagemath= 只写在 =metadata.kernelspec= 与 Noema
 session 状态。旧的 =*.sage.*.ipynb= 在首次打开时迁移到 =*.python.*.ipynb=。
 
+Visiting an =*.ipynb= path that does not exist yet, or one that some other
+tool left empty, seeds a valid nbformat 4.5 notebook with one empty code cell
+and writes it before the source projection opens.  An empty file is not JSON,
+so without that step neither the projection nor a kernel could read it.  The
+kernelspec recorded there is =my/noema-jupyter-notebook-new-kernelspec= (a
+registered setting, Python 3 by default); its =language= entry also selects the
+major mode the new notebook opens in.  A new =.noema= work document keeps its
+own initialization and still asks for its Noema project first.
+
 Opening any =*.ipynb= automatically composes the language major mode (for
 example =sh-mode=) with the =NCell= minor mode and Noema Jupyter header.  Old
 Noema-owned notebooks with missing or duplicate cell ids are upgraded in place

@@ -347,6 +347,15 @@ contract，以及 tramp-rpc 是否处于干净的精确 release tag；非 releas
 不禁用 RPC，而是保持 upstream 的 source-keyed build 策略，避免 client/server
 二进制错配。
 
+代价要说清楚：source-keyed 策略只接受本机构建的 server，因此 aarch64-darwin
+客户端无法为 x86_64-linux target 产出二进制，tramp-rpc route 每次都失败并回退
+TRAMP。这类"本机永远造不出该 target 的 server"被 backend 归类为
+`incompatible` 而不是可重试失败，否则每 30 秒 cooldown 过后都会重开一次
+bootstrap 连接并重试一次注定失败的构建，远端每个操作都要付这份钱。修复方式是
+把 checkout 放回 `package-lock.el` 记录的 `:last-release`（见
+[maintenance.md](maintenance.md) 的排查条目），恢复后 release 二进制对每种
+架构都能直接下载部署。
+
 当前实现持续对照的上游设计来源如下：
 
 - [GNU TRAMP](https://www.gnu.org/software/tramp/)：以运行时 operation inventory、
@@ -465,7 +474,23 @@ watch 进程由 `remote-make-process` 启动并把 target-native 事件路径重
 
 client placement 必须显式进入 `remote-make-client-process`。该 API 即使从远端
 buffer 调用，也会恢复应用 direnv 之前的客户端环境、使用本机 cwd，并禁止 `/fs:`
-handler 接管。需要把协议 peer 留在 target 时，使用
+handler 接管。
+
+`remote-client-process-environment` / `remote-client-exec-path` /
+`remote-client-executable-find` 是同一条边界上的查询入口，backend 用它们解析
+自己必须在本机执行的辅助程序（SSH、stdio bridge、协议 proxy）。两条规则由框架
+保证，consumer 和 backend 不再各自防御：
+
+- adapter 可以合法地把 `executable-find` 重定向到目标（`init-lsp.el` 就这样让
+  上游 `lsp-clients-*` 的裸 `executable-find` 变成 target-correct）。
+  `remote-client-executable-find` 在查询期间清空 `remote-current-adapter-id`，
+  因此它永远回答本机；否则 backend 会拿到一个目标端路径再在本机 `vfork`，
+  症状是 `Doing vfork No such file or directory`。
+- 路由执行期间投影 target 环境，会连 `process-environment` / `exec-path` 的
+  default value 一起改写。`remote--call-with-process-route` 先用
+  `remote-with-client-environment` 固定投影前的客户端值，client boundary 因此
+  在整个 backend 调用链里保持有效。
+需要把协议 peer 留在 target 时，使用
 `remote-local-bridge-command` 生成本机可执行的 stdio bridge argv；它把 target
 cwd、workspace 环境和 pipeline 封装在所选 backend 边界内。`local` target
 同样调用 native backend 的 bridge，不存在 consumer 侧的 local/remote 分支。

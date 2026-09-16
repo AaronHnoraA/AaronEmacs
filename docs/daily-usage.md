@@ -997,6 +997,11 @@ nbformat 4.5；Emacs 只提供可编辑的 percent-style 源码投影和
 `LANGUAGE` 是语言而不是 kernel 名：SageMath kernel 归在 Python 语言下，文件名为
 `NOTE.python.SESSION.ipynb`，而 `sagemath` 保存在 notebook kernelspec 中。
 
+新建 `.ipynb` 不会留下空文件：`find-file` 一个还不存在（或被别的工具建成空的）
+`.ipynb` 时，会先写入一份合法的 nbformat 4.5 模板（一个空 code cell），再打开
+percent-style 源码投影。模板里的 kernelspec 由 `my/noema-jupyter-notebook-new-kernelspec`
+决定（默认 Python 3），其中的 `language` 同时决定新 notebook 用哪个 major mode 打开。
+
 Kernel 是全局资源，不属于 note 或单个 buffer。每个 notebook session 显式选择
 “启动 kernelspec / 连接已有 kernel / No Kernel”；关闭 buffer 不会停 kernel，切换时
 只有无人共享的旧 owned kernel 才会关闭。kernelspec 写在 ipynb metadata，运行中的

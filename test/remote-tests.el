@@ -153,6 +153,81 @@
     (should-not
      (remote-client-file-name "/fs:isolated:/work/a.el"))))
 
+(ert-deftest remote-client-executable-find-stays-on-this-machine ()
+  "An adapter may answer `executable-find' for its target.
+A helper this machine has to execute itself must still be resolved here."
+  (let ((client-program
+         (expand-file-name "remote-client-probe"
+                           temporary-file-directory)))
+    (unwind-protect
+        (progn
+          (with-temp-file client-program (insert "#!/bin/sh\nexit 0\n"))
+          (set-file-modes client-program #o755)
+          (cl-letf* ((original (symbol-function 'executable-find))
+                     ((symbol-function 'executable-find)
+                      (lambda (command &optional remote)
+                        (if (equal remote-current-adapter-id "target-lookup")
+                            "/target-only/bin/remote-client-probe"
+                          (funcall original command remote)))))
+            (let ((exec-path (cons temporary-file-directory exec-path))
+                  (remote-current-adapter-id "target-lookup"))
+              (should
+               (equal (executable-find "remote-client-probe")
+                      "/target-only/bin/remote-client-probe"))
+              (should
+               (equal (remote-client-executable-find "remote-client-probe")
+                      client-program)))))
+      (when (file-exists-p client-program)
+        (delete-file client-program)))))
+
+(ert-deftest remote-client-environment-survives-a-target-projection ()
+  "Projecting a target environment rebinds the default `exec-path'.
+The client boundary must keep answering with this machine's values."
+  (let ((remote--client-exec-path nil)
+        (remote--client-process-environment nil)
+        (client-path (copy-sequence exec-path))
+        (client-environment (copy-sequence process-environment)))
+    (remote-with-client-environment
+      (let ((exec-path '("/target-only/bin"))
+            (process-environment '("PATH=/target-only/bin")))
+        (should (equal (remote-client-exec-path) client-path))
+        (should
+         (equal (remote-client-process-environment) client-environment))))))
+
+(ert-deftest remote-tramp-rpc-unbuildable-server-is-an-incompatibility ()
+  "A server binary this client can never produce must not be retried.
+An ordinary retryable failure would repeat the bootstrap connection and the
+refused build on every remote operation."
+  (let ((unbuildable
+         (list 'remote-file-error
+               (concat "Failed to obtain tramp-rpc-server for x86_64-linux.\n"
+                       "Errors:\n"
+                       "  build: Cannot cross-compile for x86_64-linux"
+                       " on aarch64-darwin")))
+        (transient
+         (list 'remote-file-error
+               "rpc process exited before answering method=system.info")))
+    (should
+     (equal
+      (plist-get
+       (remote-backend-tramp-rpc-classify-error unbuildable 'connect)
+       :status)
+      'incompatible))
+    (should-not
+     (plist-get
+      (remote-backend-tramp-rpc-classify-error unbuildable 'connect)
+      :retryable))
+    (should
+     (equal
+      (plist-get
+       (remote-backend-tramp-rpc-classify-error transient 'connect)
+       :status)
+      'failed))
+    (should
+     (plist-get
+      (remote-backend-tramp-rpc-classify-error transient 'connect)
+      :retryable))))
+
 (ert-deftest remote-environment-overrides-augment-resolved-capsule ()
   (should
    (equal

@@ -234,6 +234,29 @@ priority and do not claim operating-system or Emacs event-loop preemption.")
 (defvar-local remote--buffer-base-exec-path nil
   "Client executable path captured before a target environment is applied.")
 
+(defvar remote--client-process-environment nil
+  "Client `process-environment' pinned across a target-environment projection.")
+
+(defvar remote--client-exec-path nil
+  "Client `exec-path' pinned across a target-environment projection.")
+
+(defmacro remote-with-client-environment (&rest body)
+  "Pin this machine's environment for the client boundary during BODY.
+
+Framework code projects a target environment by `let'-binding the ordinary
+`process-environment' and `exec-path'.  In a buffer that has no buffer-local
+binding for them, that also replaces their default value, so a later client
+helper would resolve SSH or a protocol proxy against the target's PATH.
+Pinning the pre-projection values keeps `remote-client-process-environment'
+and `remote-client-exec-path' answering for this machine."
+  (declare (indent 0) (debug t))
+  `(let ((remote--client-process-environment
+          (or remote--client-process-environment
+              (copy-sequence process-environment)))
+         (remote--client-exec-path
+          (or remote--client-exec-path (copy-sequence exec-path))))
+     ,@body))
+
 (defun remote-client-process-environment ()
   "Return a fresh process environment for explicit client placement.
 
@@ -242,18 +265,26 @@ variables.  Client helpers such as SSH, local protocol proxies, and UI
 processes must use this boundary instead of inheriting those target values."
   (copy-sequence
    (or remote--buffer-base-process-environment
+       remote--client-process-environment
        (default-value 'process-environment))))
 
 (defun remote-client-exec-path ()
   "Return a fresh executable search path for explicit client placement."
   (copy-sequence
    (or remote--buffer-base-exec-path
+       remote--client-exec-path
        (default-value 'exec-path))))
 
 (defun remote-client-executable-find (program)
-  "Find client-local PROGRAM without consulting a target environment."
+  "Find client-local PROGRAM without consulting a target environment.
+
+The adapter binding is cleared as well.  An adapter may legitimately redirect
+`executable-find' to the active target, but a helper that this machine has to
+execute itself must still be resolved here."
   (let ((process-environment (remote-client-process-environment))
         (exec-path (remote-client-exec-path))
+        (remote-current-adapter-id nil)
+        (remote-current-route nil)
         (default-directory temporary-file-directory))
     (executable-find program)))
 

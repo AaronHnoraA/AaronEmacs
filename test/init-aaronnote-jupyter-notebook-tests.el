@@ -84,6 +84,54 @@
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (ignore-errors (delete-file file)))))
 
+(ert-deftest my/noema-jupyter-notebook-seeds-a-new-empty-file ()
+  "A new `.ipynb' must open as a notebook, not as unparsable empty text."
+  (let* ((directory (make-temp-file "noema-new-ipynb-" t))
+         (file (expand-file-name "scratch.ipynb" directory))
+         buffer)
+    (unwind-protect
+        (progn
+          (setq buffer (find-file-noselect file))
+          (with-current-buffer buffer
+            (should my/noema-jupyter-notebook--projection-p)
+            (should (derived-mode-p 'python-mode))
+            (should-not (buffer-modified-p))
+            (should (string-match-p "\\`# %% id=" (buffer-string))))
+          (should (file-exists-p file))
+          (let ((document (my/noema-jupyter-notebook--read-raw file)))
+            (should (= (gethash "nbformat" document) 4))
+            (should (= (gethash "nbformat_minor" document) 5))
+            (should (= (length (gethash "cells" document)) 1))
+            (should
+             (equal
+              (gethash "cell_type" (aref (gethash "cells" document) 0))
+              "code"))
+            (should
+             (equal
+              (gethash "name"
+                       (gethash "kernelspec" (gethash "metadata" document)))
+              "python3"))))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer (set-buffer-modified-p nil))
+        (kill-buffer buffer))
+      (ignore-errors (delete-directory directory t)))))
+
+(ert-deftest my/noema-jupyter-notebook-seeds-an-existing-blank-file ()
+  "A zero-length `.ipynb' left behind by another tool must also recover."
+  (let* ((file (make-temp-file "noema-blank-ipynb-" nil ".ipynb"))
+         buffer)
+    (unwind-protect
+        (progn
+          (setq buffer (find-file-noselect file))
+          (with-current-buffer buffer
+            (should my/noema-jupyter-notebook--projection-p)
+            (should-not (buffer-modified-p)))
+          (should (my/noema-jupyter-notebook--read-raw file)))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer (set-buffer-modified-p nil))
+        (kill-buffer buffer))
+      (ignore-errors (delete-file file)))))
+
 (ert-deftest my/noema-jupyter-notebook-output-mirror-uses-standard-fields ()
   (let* ((document (my/noema-jupyter-notebook-test--document))
          (cell (aref (gethash "cells" document) 0))

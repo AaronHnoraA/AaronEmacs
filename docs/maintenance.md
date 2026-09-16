@@ -484,6 +484,28 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
 4. `M-x my/language-server-manager` 里能不能直接开 log / session
 5. 当前 major mode 是否真的命中了你以为的那条路由
 
+### 远端变慢，或 tramp-rpc route 一直回退 TRAMP
+
+`M-x remote-doctor` 会报告 tramp-rpc 是否停在干净的精确 release tag。
+`package-lock.el` 把它锁在 `:last-release`；一旦 checkout 漂到 tag 之后的提交
+（例如手动 `package-vc-upgrade`），upstream 会改用 source-keyed binary id，
+拒绝下载已发布的 server，并尝试在本机交叉编译。macOS 造不出 Linux 二进制，
+于是每次远端操作都先失败一遍 tramp-rpc 再走 TRAMP。
+
+恢复锁定的 release：
+
+```sh
+cd elpa/tramp-rpc
+git fetch --tags origin
+git checkout "$(git tag --sort=-v:refname | head -1)"
+rm -f lisp/*.elc
+cd ../..
+emacs --batch -Q --init-directory="$PWD" -l ./early-init.el \
+  --eval '(byte-recompile-directory (expand-file-name "elpa/tramp-rpc/lisp" user-emacs-directory) 0 t)'
+```
+
+之后首次连接会自动下载并部署匹配的 server 二进制。
+
 ### Org LaTeX 预览挂了
 
 看：

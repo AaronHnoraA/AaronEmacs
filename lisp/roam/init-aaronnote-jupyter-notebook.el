@@ -9,9 +9,20 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'config)
 (require 'json)
 (require 'seq)
 (require 'subr-x)
+
+(config-defvar my/noema-jupyter-notebook-new-kernelspec
+    '(("name" . "python3")
+      ("display_name" . "Python 3")
+      ("language" . "python"))
+  "Kernelspec recorded in a newly created empty `.ipynb' file.
+The `language' entry also selects the source projection's major mode, so a
+notebook created for another kernel opens in that kernel's editor mode."
+  :type '(alist :key-type string :value-type string)
+  :group 'my/noema)
 
 (defvar-local my/noema-jupyter-notebook--document nil)
 (defvar-local my/noema-jupyter-notebook--projection-p nil)
@@ -172,6 +183,31 @@ Emacs visit or save does not silently migrate an external notebook."
   (my/noema-jupyter-notebook--normalize
    (json-parse-string text :object-type 'hash-table :array-type 'array
                       :null-object nil :false-object :json-false)))
+
+(defun my/noema-jupyter-notebook-skeleton (&optional kernelspec)
+  "Return a minimal valid nbformat 4.5 notebook holding one empty code cell.
+KERNELSPEC defaults to `my/noema-jupyter-notebook-new-kernelspec'."
+  (let* ((spec (my/noema-jupyter-notebook--hash
+                (or kernelspec my/noema-jupyter-notebook-new-kernelspec)))
+         (language (format "%s" (or (gethash "language" spec) "python")))
+         (language-info (make-hash-table :test #'equal))
+         (metadata (make-hash-table :test #'equal))
+         (cell (make-hash-table :test #'equal))
+         (document (make-hash-table :test #'equal)))
+    (puthash "name" language language-info)
+    (puthash "kernelspec" spec metadata)
+    (puthash "language_info" language-info metadata)
+    (puthash "cell_type" "code" cell)
+    (puthash "id" (my/noema-jupyter-notebook--new-id) cell)
+    (puthash "metadata" (make-hash-table :test #'equal) cell)
+    (puthash "source" "" cell)
+    (puthash "execution_count" nil cell)
+    (puthash "outputs" [] cell)
+    (puthash "cells" (vector cell) document)
+    (puthash "metadata" metadata document)
+    (puthash "nbformat" 4 document)
+    (puthash "nbformat_minor" 5 document)
+    document))
 
 (defun my/noema-jupyter-notebook--cell-ids-need-upgrade-p (document)
   "Return non-nil when DOCUMENT lacks unique nbformat 4.5 cell ids."
@@ -620,10 +656,38 @@ edited through `noema-research-mode' instead of the sidecar projection."
        (require 'noema-research-mode nil t)))
 
 (defun my/noema-jupyter-notebook--new-noema-p ()
-  "Return non-nil when the buffer visits a `.noema' file with no content yet."
+  "Return non-nil when the buffer visits a work document with no content yet.
+`.noema.ipynb' is the legacy spelling of the same work document, so an empty
+one is initialized as a work document rather than as an ordinary notebook."
   (and buffer-file-name
-       (string-match-p "\\.noema\\'" buffer-file-name)
+       (string-match-p "\\.noema\\(?:\\.ipynb\\)?\\'" buffer-file-name)
        (string-empty-p (string-trim (buffer-string)))))
+
+(defun my/noema-jupyter-notebook--new-notebook-p ()
+  "Return non-nil when the buffer visits an `.ipynb' file with no content yet.
+An empty file is not JSON, so neither the source projection nor Noema can read
+it.  Noema work documents are excluded; they have their own initialization."
+  (and buffer-file-name
+       (string-match-p "\\.ipynb\\'" buffer-file-name)
+       (not (my/noema-jupyter-notebook--new-noema-p))
+       (string-empty-p (string-trim (buffer-string)))))
+
+(defun my/noema-jupyter-notebook--initialize-new-notebook ()
+  "Fill the empty visited `.ipynb' file with a valid notebook skeleton.
+The file becomes readable immediately, before the projection parses it and
+before any kernel request can observe an unparsable notebook."
+  (let* ((document (my/noema-jupyter-notebook-skeleton))
+         (serialized (my/noema-jupyter-notebook--serialize document)))
+    ;; Fill the still-new visiting buffer before the atomic writer creates the
+    ;; file.  The opposite order makes Emacs detect a supersession and prompt
+    ;; while opening the new notebook.
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (insert serialized)
+      (insert "\n"))
+    (my/noema-jupyter-notebook--write-raw buffer-file-name document)
+    (set-visited-file-modtime)
+    (set-buffer-modified-p nil)))
 
 (defun my/noema-jupyter-notebook--ensure-noema-project ()
   "Return the Noema project root for the new `.noema' file, or nil.
@@ -669,11 +733,16 @@ an empty notebook.  The caller settles the project root first."
   "Visit an ipynb as a research notebook or a native source projection.
 Research notebooks open in `noema-research-mode'; other notebooks use the
 sidecar source projection.  A new `.noema' file is initialized only once its
-Noema project is settled, so declining leaves the empty buffer untouched."
+Noema project is settled, so declining leaves the empty buffer untouched.
+Any other new `.ipynb' is seeded from `my/noema-jupyter-notebook-skeleton'
+first, so the projection opens on a valid notebook instead of failing to parse
+an empty file."
   (interactive)
   (when (and (my/noema-jupyter-notebook--new-noema-p)
              (my/noema-jupyter-notebook--ensure-noema-project))
     (my/noema-jupyter-notebook--initialize-new-noema))
+  (when (my/noema-jupyter-notebook--new-notebook-p)
+    (my/noema-jupyter-notebook--initialize-new-notebook))
   (cond
    ((my/noema-jupyter-notebook--research-buffer-p)
     (noema-research-mode)

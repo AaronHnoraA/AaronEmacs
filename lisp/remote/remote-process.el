@@ -321,60 +321,64 @@ overrides.  Failover is limited to transport errors."
     (unless routes
       (error "No %s route for target %s"
              capability (remote-context-target-id context)))
-    (catch 'done
-      (while routes
-        (let ((route (pop routes)))
-          (condition-case err
-              (let* ((remote-current-connection
-                      (remote-connection-ensure route context))
-                     (logical-directory
-                      (remote--logical-process-directory context))
-                     (physical-directory
-                      (file-name-as-directory
-                       (remote-project-file-name
-                        logical-directory route)))
-                     (value
-                      (funcall function
-                               route physical-directory environment)))
-                (remote-report-route-success route)
-                (remote-log
-                 'process
-                 :target (remote-route-target-id route)
-                 :link (remote-route-link-id route)
-                 :plugin (remote-route-link-plugin-id route)
-                 :capability capability
-                 :adapter adapter)
-                (throw 'done value))
-            (error
-             (setq last-error err)
-             (let* ((failure-scope
-                     (remote-report-route-failure route err))
-                    (transport-error (eq failure-scope 'transport))
-                    (backend-error (eq failure-scope 'backend)))
-               (when transport-error
-                 (setq routes
-                       (seq-remove
-                        (lambda (candidate)
-                          (equal (remote-route-link-id candidate)
-                                 (remote-route-link-id route)))
-                        routes)))
-               (when backend-error
-                 (setq routes
-                       (seq-remove
-                        (lambda (candidate)
-                          (and
-                           (equal (remote-route-link-id candidate)
-                                  (remote-route-link-id route))
-                           (equal
-                            (remote-route-link-plugin-id candidate)
-                            (remote-route-link-plugin-id route))))
-                        routes)))
-               (unless (and routes
-                            (or transport-error backend-error))
-                 (signal (car err) (cdr err))))))))
-      (if last-error
-          (signal (car last-error) (cdr last-error))
-        (error "No usable %s route" capability)))))
+    ;; FUNCTION projects the target environment onto `process-environment'
+    ;; and `exec-path'.  Pin this machine's values first so a backend that
+    ;; has to spawn a client helper still resolves it here.
+    (remote-with-client-environment
+      (catch 'done
+        (while routes
+          (let ((route (pop routes)))
+            (condition-case err
+                (let* ((remote-current-connection
+                        (remote-connection-ensure route context))
+                       (logical-directory
+                        (remote--logical-process-directory context))
+                       (physical-directory
+                        (file-name-as-directory
+                         (remote-project-file-name
+                          logical-directory route)))
+                       (value
+                        (funcall function
+                                 route physical-directory environment)))
+                  (remote-report-route-success route)
+                  (remote-log
+                   'process
+                   :target (remote-route-target-id route)
+                   :link (remote-route-link-id route)
+                   :plugin (remote-route-link-plugin-id route)
+                   :capability capability
+                   :adapter adapter)
+                  (throw 'done value))
+              (error
+               (setq last-error err)
+               (let* ((failure-scope
+                       (remote-report-route-failure route err))
+                      (transport-error (eq failure-scope 'transport))
+                      (backend-error (eq failure-scope 'backend)))
+                 (when transport-error
+                   (setq routes
+                         (seq-remove
+                          (lambda (candidate)
+                            (equal (remote-route-link-id candidate)
+                                   (remote-route-link-id route)))
+                          routes)))
+                 (when backend-error
+                   (setq routes
+                         (seq-remove
+                          (lambda (candidate)
+                            (and
+                             (equal (remote-route-link-id candidate)
+                                    (remote-route-link-id route))
+                             (equal
+                              (remote-route-link-plugin-id candidate)
+                              (remote-route-link-plugin-id route))))
+                          routes)))
+                 (unless (and routes
+                              (or transport-error backend-error))
+                   (signal (car err) (cdr err))))))))
+        (if last-error
+            (signal (car last-error) (cdr last-error))
+          (error "No usable %s route" capability))))))
 
 (defun remote--project-process-file-path (path route)
   "Project logical process-file PATH through ROUTE when applicable.

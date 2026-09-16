@@ -349,23 +349,40 @@ VECTOR, METHOD, and PARAMS are tramp-rpc's ordinary request arguments."
 (defun remote-backend-tramp-rpc-classify-error (error phase)
   "Classify tramp-rpc ERROR raised during PHASE."
   (let ((message (downcase (error-message-string error))))
-    (when
-        (string-match-p
-         (rx (or "tramp-rpc-server"
-                 "rpc response"
-                 "method=system.info"
-                 "rpc process"
-                 ;; tramp-rpc can collapse deployment/bootstrap failures into
-                 ;; TRAMP's generic connection error.  Keep that first failure
-                 ;; backend-local so standard TRAMP on the same SSH pipeline
-                 ;; still receives one bounded attempt.
-                 "tramp failed to connect"))
-         message)
+    (cond
+     ;; No server binary can be produced for this target at all: the client
+     ;; cannot build one and the installed client is not allowed to fall back
+     ;; on a published artifact.  That is a property of this client/target
+     ;; pair, not a transient failure.  Retrying it on the ordinary cooldown
+     ;; costs a fresh bootstrap connection and another attempted build on
+     ;; every remote operation, which is exactly the cost the cooldown exists
+     ;; to avoid, so record the backend as incompatible instead.  Clearing
+     ;; route health (a config reload or `remote-reset') re-evaluates it.
+     ((and (string-match-p "failed to obtain tramp-rpc-server" message)
+           (string-match-p
+            (rx (or "cannot cross-compile" "unknown architecture"))
+            message))
+      (list :scope 'backend
+            :phase phase
+            :retryable nil
+            :status 'incompatible
+            :error error))
+     ((string-match-p
+       (rx (or "tramp-rpc-server"
+               "rpc response"
+               "method=system.info"
+               "rpc process"
+               ;; tramp-rpc can collapse deployment/bootstrap failures into
+               ;; TRAMP's generic connection error.  Keep that first failure
+               ;; backend-local so standard TRAMP on the same SSH pipeline
+               ;; still receives one bounded attempt.
+               "tramp failed to connect"))
+       message)
       (list :scope 'backend
             :phase phase
             :retryable t
             :status 'failed
-            :error error))))
+            :error error)))))
 
 (defun remote-backend-tramp-rpc-register ()
   "Register the tramp-rpc backend."
