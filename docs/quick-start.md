@@ -173,7 +173,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - Python 语言服务器
   这套配置走 `eglot`，你需要自己装对应 server
 - `languagetool`（Homebrew）
-  文本 buffer 与 Noema 默认在输入停顿后检查可见区域；`C-c i g` / `Cmd-Shift-C` 手动检查，NAS 失败时仅手动检查回退本地 CLI。`C-u C-c i g` 检查整个 Emacs buffer。Noema 的 `Tools > LanguageTool` 可管理 NAS、语言、检查级别、性能档位、超时、实时检测和手动 CLI fallback
+  文本 buffer 与 Noema 默认在输入停顿后仅检查带上下文的可视区域；结果进入统一 Flymake 诊断面，但不显示抢眼的行尾文案。光标停在问题上或鼠标悬停时会在 echo area 简要说明原因，`M-n` / `M-p` 可跳转，右键菜单提供替换/跳过/忽略规则/加入文件词典；左键保持普通编辑行为。`C-c i g` / `Cmd-Shift-C` 手动检查，NAS 失败时仅手动检查回退本地 CLI；`C-u C-c i g` 检查整个 Emacs buffer，`C-c i a` 修正当前位置，`C-c i A` 从当前问题中选择，`C-c i x` 清除到下一次编辑。Noema 的 `Tools > LanguageTool` 可管理 NAS、语言、检查级别、性能档位、超时、实时检测和手动 CLI fallback
 - `vscode-html-language-server`
   用于 HTML / Vue HTML
 

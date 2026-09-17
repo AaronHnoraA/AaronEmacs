@@ -367,27 +367,43 @@
 (add-to-list 'load-path
              (expand-file-name "site-lisp/ratex.el/lisp" user-emacs-directory))
 
+(defun my/latex-language-server-selection ()
+  "Return (SERVER . EXECUTABLE) for the best server on this target.
+Prefer TexLab for its build diagnostics and use Digestif as the lightweight
+fallback.  Resolve each candidate once so remote executable discovery is not
+repeated by one predicate call."
+  (if-let* ((texlab (my/language-server-executable-find "texlab")))
+      (cons 'texlab texlab)
+    (when-let* ((digestif (my/language-server-executable-find "digestif")))
+      (cons 'digestif digestif))))
+
 (defun my/latex-language-server-available-p ()
   "Return non-nil when a LaTeX language server is available."
-  (or (my/language-server-executable-find "texlab")
-      (my/language-server-executable-find "digestif")))
+  (and (my/latex-language-server-selection) t))
 
-(defun my/latex-language-server-workspace-configuration ()
-  "Return workspace settings for LaTeX language servers."
-  `(:texlab
-    (:build (:executable ,(or (my/language-server-executable-find "latexmk")
-                              "latexmk")
-             :args ["-xelatex"
-                    "-interaction=nonstopmode"
-                    "-synctex=1"
-                    "-file-line-error"
-                    "-outdir=%OUTDIR%"
-                    "%f"]
-             :onSave nil
-             :forwardSearchAfter nil)
-     :chktex (:onOpenAndSave t
-              :onEdit nil)
-     :diagnosticsDelay 300)))
+(defun my/latex-language-server-workspace-configuration (&optional selection)
+  "Return settings for LaTeX server SELECTION.
+Digestif has no TexLab configuration section, so return nil for it."
+  (let ((selection (or selection (my/latex-language-server-selection))))
+    (when (eq (car selection) 'texlab)
+      `(:texlab
+        (:build
+         (:executable ,(or (my/language-server-executable-find "latexmk")
+                           "latexmk")
+          ;; TexLab documents `%f'; output layout remains owned by latexmkrc.
+          :args ["-xelatex"
+                 "-interaction=nonstopmode"
+                 "-synctex=1"
+                 "-file-line-error"
+                 "%f"]
+          :onSave :json-false
+          :forwardSearchAfter :json-false)
+         :chktex
+         (:onOpenAndSave ,(if (my/language-server-executable-find "chktex")
+                              t
+                            :json-false)
+          :onEdit :json-false)
+         :diagnosticsDelay 300)))))
 
 (defconst my/latex-language-server-modes
   '(latex-mode LaTeX-mode
@@ -398,21 +414,22 @@
   "Major modes served by the LaTeX language server.")
 
 (defun my/latex-language-server-setup-h ()
-  "Install LaTeX workspace settings before the language server starts."
-  (when (and (my/latex-language-server-available-p)
-             (fboundp 'my/language-server-set-workspace-configuration))
-    (my/language-server-set-workspace-configuration
-     (my/latex-language-server-workspace-configuration))))
+  "Select one LaTeX client and install its settings before startup."
+  (when-let* ((selection (my/latex-language-server-selection)))
+    ;; Keep lsp-mode's stock TexLab/Digestif clients from racing the target-
+    ;; aware client registered below.
+    (setq-local lsp-enabled-clients '(my-latex))
+    (when-let* ((configuration
+                 (my/latex-language-server-workspace-configuration selection))
+                ((fboundp 'my/language-server-set-workspace-configuration)))
+      (my/language-server-set-workspace-configuration configuration))))
 
 (defun my/latex-language-server-command ()
   "Return the preferred LaTeX language server command for this target.
 texlab is preferred; digestif is the fallback."
-  (cond
-   ((my/language-server-executable-find "texlab")
-    (list (my/language-server-executable-find "texlab")))
-   ((my/language-server-executable-find "digestif")
-    (list (my/language-server-executable-find "digestif")))
-   (t (list "texlab"))))
+  (if-let* ((selection (my/latex-language-server-selection)))
+      (list (cdr selection))
+    (user-error "Neither texlab nor digestif is available on this target")))
 
 (dolist (mode my/latex-language-server-modes)
   (add-hook (intern (format "%s-hook" mode))
