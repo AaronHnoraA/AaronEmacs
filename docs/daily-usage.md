@@ -1026,6 +1026,10 @@ Sessions 列表（`C-c A S`）的 Context 列显示上下文窗口占用与 toke
 重命名 / fork / 归档 / compact 需要持久记录，会明确报错。
 项目内的读写与执行自动批准；项目外和网络请求会弹出 Noema Attention 由你批准。
 
+动手之前 agent 可以用 `proposal.create` 的 `graph.declare` 把**整张计划图**一次提出来：
+块之间可以互相引用，Graph Board 按声明的形状画成一组虚线幽灵节点，你一次接受或否决整张图
+（写入走单次 revision 比较交换，所以不会留下半张计划）。加单块仍用 `cell.create`。
+
 Run 里的 agent 可以用 `research_state` 汇报**它自己那个 WorkNode** 的状态
 （`active` / `waiting` / `done` / `regressed` / `dropped`，带一句理由或证据），改不了别的节点。
 kernel 只记录这份汇报，真正落盘的是 Emacs：它把请求当成一次普通的、可撤销的结构编辑应用，

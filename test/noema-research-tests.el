@@ -2914,6 +2914,55 @@ disconnected ghosts and lose the shape it was declared to show."
                          (plist-get projection :nodes))))
       (should (equal (plist-get top :parents) '("g-mid"))))))
 
+(ert-deftest noema-research-graph-draws-a-declared-plan-proposal-as-one-unit ()
+  "A `graph.declare' Proposal contributes every block it declares.
+Its blocks reference each other, so they are only meaningful together; the
+board must draw the whole plan, not its first cell."
+  (let* ((document (noema-research-test--document))
+         (notebook-id (noema-research-notebook-id document))
+         (proposal
+          (noema-research--table
+           "id" "prop_plan" "kind" "graph.declare" "status" "pending"
+           "payload"
+           (noema-research--table
+            "plan"
+            (noema-research--table
+             "notebookId" notebook-id "file" "research.noema"
+             "expectedRevision" "rev"
+             "cells" (vector
+                      (noema-research--table "id" "p-base" "kind" "work"
+                                             "title" "Read the fixture"
+                                             "lineageParent" "c-q")
+                      (noema-research--table "id" "p-top" "kind" "work"
+                                             "title" "Assemble"
+                                             "lineageParent" "p-base"
+                                             "depends" ["c-w"]))))))
+         (projection (noema-research-graph--with-proposals
+                      (noema-research-projection document) document (list proposal)))
+         (ids (mapcar (lambda (node) (plist-get node :id))
+                      (plist-get projection :nodes)))
+         (edges (plist-get projection :edges)))
+    (should (member "p-base" ids))
+    (should (member "p-top" ids))
+    (dolist (id '("p-base" "p-top"))
+      (let ((ghost (seq-find (lambda (node) (equal (plist-get node :id) id))
+                             (plist-get projection :nodes))))
+        (should (plist-get ghost :ghost))
+        (should (equal (plist-get ghost :proposal-id) "prop_plan"))))
+    (should (member (list (noema-research-test--work-id document "c-q") "p-base" "lineage")
+                    edges))
+    (should (member '("p-base" "p-top" "lineage") edges))
+    (should (member (list (noema-research-test--work-id document "c-w") "p-top" "depends")
+                    edges))
+    ;; Every block of the plan is a ghost, so structure edits refuse all of
+    ;; them rather than only the first.
+    (with-temp-buffer
+      (noema-research-graph-mode)
+      (setq-local noema-research-graph--proposals (list proposal))
+      (dolist (id '("p-base" "p-top"))
+        (should-error (noema-research-graph--require-materialized id)
+                      :type 'user-error)))))
+
 (ert-deftest noema-research-graph-ignores-plan-references-that-go-nowhere ()
   "An unresolvable parent or dependency is dropped, not drawn as a phantom."
   (let* ((document (noema-research-test--document))
