@@ -948,6 +948,7 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 | `C-c A .` | 把 region/buffer/file 加入 gptel context |
 | `C-c A r` | gptel rewrite/diff 预览 |
 | `C-c A p` | 把当前 agent-shell session 纳入 research |
+| `C-c A O` | 编排面板：Task / Job / Worker / Delegation / 事件 |
 | `C-c A x` | 把当前上下文发给某个 agent 会话（引用，不拷贝正文）|
 | `C-c A v` | 把选区发给某个会话 |
 | `C-c A B` | 把整个 buffer 发给某个会话 |
@@ -1006,6 +1007,12 @@ tab-line/tab-bar。
 
 重跑同一个 work 块会按上游重新开始，不会叠在上一次尝试后面（独占的 session 沿用原名换新一代）。
 
+`.noema` 的 DAG 里，`!` 把选中的 work 标成 `regressed`——「本来验证过、被后来的改动打坏了」。
+它会问你什么坏了（记在该节点上），并把状态传给合并工作 DAG 里所有 `done` 的下游节点
+（lineage 与 `depends` 都算）：下游要重新声明 done，而不是继承。进行中和已放弃的工作不受影响。
+regressed 节点不会被变暗也不会被自动折叠，画上用 `✗` 和警示描边标出。通用的 `t`（状态）
+命令选 `regressed` 走的是同一条传播路径。
+
 `.noema` 的 DAG（Graph Board）：`f` 以选中节点为根聚焦（`^` 根上移一层、`[`/`]` 调深度、
 `b` 回到上一个焦点）；`h/j/k/l` 按画面移动，`H`/`L` 到 lineage 父/第一个子，`{`/`}` 到兄弟，
 `/` 按标题跳转。work 块里 `@@ctx(lineage:2)` 扩大祖先范围，`@@ctx(none)` 关闭自动附加的上下文；
@@ -1018,6 +1025,12 @@ Sessions 列表（`C-c A S`）的 Context 列显示上下文窗口占用与 toke
 （popup、手动、裸 agent-shell，且项目没有 `noema.toml`）：`RET` 切过去、`k` 关掉都可用，
 重命名 / fork / 归档 / compact 需要持久记录，会明确报错。
 项目内的读写与执行自动批准；项目外和网络请求会弹出 Noema Attention 由你批准。
+
+Run 里的 agent 可以用 `research_state` 汇报**它自己那个 WorkNode** 的状态
+（`active` / `waiting` / `done` / `regressed` / `dropped`，带一句理由或证据），改不了别的节点。
+kernel 只记录这份汇报，真正落盘的是 Emacs：它把请求当成一次普通的、可撤销的结构编辑应用，
+所以文档权威仍然只有一个。`done` 要带证据、坏了先标 `regressed` 再修这套纪律写在内置
+Skill `noema-work-dag` 里，可以用 `@@skill(noema-work-dag)` 给某个 work 块启用。
 
 取消：JuText 里 `C-c C-z` 只取消光标所在 work 块的执行，运行中、排队中、正在准备都有效；
 网页 Cancel Run 对还在准备的 Run 立即生效；Agent 窗口 `C-c C-x` 停止当前 Run，`C-c C-c`

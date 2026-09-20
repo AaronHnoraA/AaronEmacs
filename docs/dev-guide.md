@@ -628,6 +628,14 @@ in-process 缓存，与自动刷新保持一致。
   agent-shell 内部符号（`--resolve-path`、`--read-file-content`、
   `--prompt-queue-enqueue`）一律经 `noema-agent-acp-file-uri` /
   `-file-metadata` / `-enqueue` 这层边界，不在 `noema-context.el` 里直接引用。
+- 编排面板（`noema-orchestration.el`，`C-c A O`）：kernel 的
+  Task/Job/Invocation/Worker/Delegation 模型一直完整，但 D-016/D-017 退役
+  Orchestration Lab 之后就没有任何界面，`orchestration:snapshot` 无人调用。
+  这个 board 就是那个界面。它**只读**——作业与开 Run 仍在 Graph Board——回答
+  Graph Board 答不了的问题：什么被分解成了什么、谁排在谁后面、哪个 worker 持有
+  认领、以及哪个 agent 委派给了哪个（delegation 是 Graph Board 没有的关系）。
+  一次快照喂所有视图（`t`/`j`/`w`/`d`/`e`，`TAB` 轮换），所以切视图不重新请求，
+  整块板子是同一个时刻的一致快照而不是五次独立读取。
 - profile 与模板在 `etc/noema/`，运行状态在 `var/noema/`
 
 源码边界：Noema 代码在 `site-lisp/noema/lisp/`；agent-shell、acp.el、shell-maker

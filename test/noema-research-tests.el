@@ -2874,6 +2874,67 @@ BODY may refer to the JuText buffer as `source'."
       (should-error (noema-research-graph--require-materialized "c-prop-ghost")
                     :type 'user-error))))
 
+(ert-deftest noema-research-graph-draws-a-declared-plan-with-its-own-shape ()
+  "A plan proposed block by block keeps its internal structure on the board.
+Blocks of one plan name each other before any of them exists in the document,
+so resolving references only against the document would draw the plan as
+disconnected ghosts and lose the shape it was declared to show."
+  (let* ((document (noema-research-test--document))
+         (notebook-id (noema-research-notebook-id document))
+         (proposal
+          (lambda (id title parent depends)
+            (noema-research--table
+             "id" (concat "prop_" id) "kind" "cell.create" "status" "pending"
+             "payload" (noema-research--table
+                        "cell" (noema-research--table
+                                "notebookId" notebook-id "cellId" id
+                                "kind" "work" "title" title
+                                "lineageParent" parent
+                                "depends" (vconcat depends))))))
+         ;; Declared child-first, so the fix cannot depend on arrival order.
+         (proposals (list (funcall proposal "g-top" "Assemble" "g-mid" ["g-base"])
+                          (funcall proposal "g-mid" "Transform" "g-base" [])
+                          (funcall proposal "g-base" "Read the fixture" "c-q" [])))
+         (projection (noema-research-graph--with-proposals
+                      (noema-research-projection document) document proposals))
+         (edges (plist-get projection :edges))
+         (ids (mapcar (lambda (node) (plist-get node :id))
+                      (plist-get projection :nodes))))
+    (dolist (id '("g-base" "g-mid" "g-top"))
+      (should (member id ids)))
+    ;; The plan hangs off a real WorkNode …
+    (should (member (list (noema-research-test--work-id document "c-q") "g-base" "lineage")
+                    edges))
+    ;; … and its own blocks are linked to each other, lineage and depends alike.
+    (should (member '("g-base" "g-mid" "lineage") edges))
+    (should (member '("g-mid" "g-top" "lineage") edges))
+    (should (member '("g-base" "g-top" "depends") edges))
+    ;; `:parents' drives keyboard navigation, so it must agree with the edges.
+    (let ((top (seq-find (lambda (node) (equal (plist-get node :id) "g-top"))
+                         (plist-get projection :nodes))))
+      (should (equal (plist-get top :parents) '("g-mid"))))))
+
+(ert-deftest noema-research-graph-ignores-plan-references-that-go-nowhere ()
+  "An unresolvable parent or dependency is dropped, not drawn as a phantom."
+  (let* ((document (noema-research-test--document))
+         (notebook-id (noema-research-notebook-id document))
+         (proposal (noema-research--table
+                    "id" "prop_orphan" "kind" "cell.create" "status" "pending"
+                    "payload" (noema-research--table
+                               "cell" (noema-research--table
+                                       "notebookId" notebook-id "cellId" "g-orphan"
+                                       "kind" "work" "title" "Orphan"
+                                       "lineageParent" "nothing-like-this"
+                                       "depends" ["also-missing"]))))
+         (projection (noema-research-graph--with-proposals
+                      (noema-research-projection document) document (list proposal)))
+         (ghost (seq-find (lambda (node) (equal (plist-get node :id) "g-orphan"))
+                          (plist-get projection :nodes))))
+    (should ghost)
+    (should-not (plist-get ghost :parents))
+    (should-not (seq-find (lambda (edge) (member "g-orphan" edge))
+                          (plist-get projection :edges)))))
+
 (ert-deftest noema-research-magent-sampler-has-no-tools-and-only-creates-a-proposal ()
   (require 'magent-llm)
   (require 'magent-llm-gptel)
@@ -3593,5 +3654,275 @@ BODY may refer to the JuText buffer as `source'."
     (should (equal (plist-get (noema-research-graph--activity document node) :run-status) "completed"))
     (puthash "c-w" (noema-research--table "latestRun" (noema-research--table "id" "new" "status" "running")) noema-research--session-labels)
     (should (equal (noema-research--latest-run-status cell) "running"))))
+
+
+;;;; Regression
+
+(defun noema-research-test--regression-document ()
+  "Return a document whose work fans out over both relation types."
+  (let* ((document (noema-research-test--document))
+         (work (noema-research-test--work-id document "c-w"))
+         (lineage-child (noema-research-cell-work-node-id
+                         (noema-research-test--append-work-cell
+                          document "c-l" "work" "Derived bound" "Follows from it."
+                          (list work))))
+         (depends-child (noema-research-cell-work-node-id
+                         (noema-research-test--append-work-cell
+                          document "c-d" "work" "Benchmark" "Needs the bound."
+                          nil (list work))))
+         (grandchild (noema-research-cell-work-node-id
+                      (noema-research-test--append-work-cell
+                       document "c-g" "work" "Write-up" "Rests on the benchmark."
+                       (list depends-child))))
+         (running (noema-research-cell-work-node-id
+                   (noema-research-test--append-work-cell
+                    document "c-a" "work" "Still going" "In flight."
+                    (list work))))
+         (abandoned (noema-research-cell-work-node-id
+                     (noema-research-test--append-work-cell
+                      document "c-z" "work" "Abandoned" "Gave up."
+                      (list work)))))
+    (dolist (id (list work lineage-child depends-child grandchild))
+      (noema-research-set-state document id "done"))
+    (noema-research-set-state document running "active")
+    (noema-research-set-state document abandoned "dropped" "superseded")
+    (list document work lineage-child depends-child grandchild running abandoned)))
+
+(ert-deftest noema-research-regression-reaches-finished-work-over-both-edge-types ()
+  "A regression invalidates finished work below it, lineage and depends alike."
+  (pcase-let ((`(,document ,work ,lineage-child ,depends-child ,grandchild
+                 ,running ,abandoned)
+               (noema-research-test--regression-document)))
+    (let ((targets (noema-research-regression-targets document work)))
+      (should (equal (car targets) work))
+      (dolist (id (list lineage-child depends-child grandchild))
+        (should (member id targets)))
+      ;; Work in flight and work already abandoned are left alone: a
+      ;; regression reopens finished claims, it does not restart everything.
+      (should-not (member running targets))
+      (should-not (member abandoned targets)))))
+
+(ert-deftest noema-research-regression-targets-skip-questions-and-checkpoints ()
+  "Only work carries state, so only work is regressed."
+  (pcase-let ((`(,document ,work . ,_) (noema-research-test--regression-document)))
+    (let ((question (noema-research-test--work-id document "c-q")))
+      (should-not (member question (noema-research-regression-targets document work)))
+      ;; The checkpoint hangs off the work node but never carries state.
+      (should-not (member (noema-research-test--work-id document "c-k")
+                          (noema-research-regression-targets document work))))))
+
+(ert-deftest noema-research-every-path-to-regressed-carries-the-consequence ()
+  "The generic state command propagates exactly like the dedicated one.
+Two ways of reaching `regressed' that disagreed would make the board lie."
+  (dolist (entry (list (lambda (id reason)
+                         (noema-research-op-set-regressed id reason))
+                       (lambda (id reason)
+                         (noema-research-op-set-state id "regressed" reason))))
+    (pcase-let ((`(,document ,work ,lineage-child ,depends-child ,grandchild
+                   ,running ,abandoned)
+                 (noema-research-test--regression-document)))
+      (noema-research-test--with-jutext document
+        (funcall entry work "lemma 4 no longer holds")
+        (let ((live noema-research--document))
+          (dolist (id (list work lineage-child depends-child grandchild))
+            (should (equal (noema-research-work-node-field
+                            (noema-research-find-work-node live id) "state")
+                           "regressed")))
+          (should (equal (noema-research-work-node-field
+                          (noema-research-find-work-node live running) "state")
+                         "active"))
+          (should (equal (noema-research-work-node-field
+                          (noema-research-find-work-node live abandoned) "state")
+                         "dropped"))
+          ;; What broke is recorded on the node that broke, not on everything
+          ;; the break reached.
+          (should (equal (noema-research-work-node-field
+                          (noema-research-find-work-node live work) "dropped_reason")
+                         "lemma 4 no longer holds"))
+          (should-not (noema-research-work-node-field
+                       (noema-research-find-work-node live grandchild)
+                       "dropped_reason")))))))
+
+(ert-deftest noema-research-regressed-is-a-supported-state-and-validates ()
+  "`regressed' round-trips through validation like any other work state."
+  (should (member "regressed" noema-research-work-states))
+  (pcase-let ((`(,document ,work . ,_) (noema-research-test--regression-document)))
+    (noema-research-set-state document work "regressed" "broke")
+    (should-not (plist-get (noema-research-validate document) :errors))
+    (should (equal (noema-research-work-node-field
+                    (noema-research-find-work-node document work) "state")
+                   "regressed"))))
+
+(ert-deftest noema-research-regressed-work-is-neither-dimmed-nor-auto-folded ()
+  "A broken foundation must stay visible; it is the point of the state."
+  (should-not (member "regressed" noema-research-graph-dim-states))
+  (should-not (member "regressed" noema-research-graph-auto-fold-states)))
+
+(ert-deftest noema-research-graph-marks-regressed-work-in-its-label ()
+  "The drawing carries the same signal as the stroke colour."
+  (should (string-prefix-p
+           "✗ " (car (noema-research-graph--label-lines
+                      (list :id "wn_x" :kind "work" :title "Spectral exploration"
+                            :state "regressed")))))
+  (should-not (string-prefix-p
+               "✗ " (car (noema-research-graph--label-lines
+                          (list :id "wn_x" :kind "work" :title "Spectral exploration"
+                                :state "done"))))))
+
+
+;;;; Coordinator-claimed work state
+
+(ert-deftest noema-agent-worker-claims-a-work-state-report-into-the-document ()
+  "A Run's `worknode.state' report becomes an ordinary document edit.
+The kernel only records the report; the document keeps one authority, so the
+state must actually land in the file through Emacs's own transaction."
+  (require 'noema-agent-worker)
+  (noema-research-test--with-directory directory
+    (let* ((file "research.noema")
+           (path (expand-file-name file directory))
+           (noema-research-sync-host nil)
+           (make-backup-files nil)
+           (document (noema-research-test--document))
+           (work (noema-research-test--work-id document "c-w")))
+      (noema-research-write-file path document)
+      (noema-agent-worker--claim-set-state
+       directory (noema-research--table "file" file "workNodeId" work
+                                        "state" "done" "reason" "vitest: 23 passed"))
+      ;; The buffer was opened only to apply the report, so the change is on
+      ;; disk rather than sitting unsaved in an invisible buffer.
+      (let* ((disk (noema-research-read-file path))
+             (node (noema-research-find-work-node disk work)))
+        (should (equal (noema-research-work-node-field node "state") "done")))
+      (when-let* ((buffer (find-buffer-visiting path)))
+        (kill-buffer buffer)))))
+
+(ert-deftest noema-agent-worker-refuses-a-work-state-report-it-cannot-place ()
+  "A malformed or unknown report fails loudly instead of editing something else."
+  (require 'noema-agent-worker)
+  (noema-research-test--with-directory directory
+    (let* ((file "research.noema")
+           (path (expand-file-name file directory))
+           (noema-research-sync-host nil)
+           (make-backup-files nil)
+           (document (noema-research-test--document)))
+      (noema-research-write-file path document)
+      (should-error
+       (noema-agent-worker--claim-set-state
+        directory (noema-research--table "file" file "state" "done"))
+       :type 'error)
+      (should-error
+       (noema-agent-worker--claim-set-state
+        directory (noema-research--table "file" file "workNodeId" "wn_missing"
+                                         "state" "done"))
+       :type 'error)
+      (when-let* ((buffer (find-buffer-visiting path)))
+        (kill-buffer buffer)))))
+
+
+;;;; Orchestration board
+
+(defun noema-research-test--orchestration-snapshot ()
+  "Return a snapshot shaped like `orchestration:snapshot' returns one."
+  (noema-research--table
+   "root" "/tmp/project"
+   "tasks" (vector (noema-research--table
+                    "id" "task_1" "title" "Parse the fence grammar" "state" "open"
+                    "priority" 2 "dependsOn" (vector "task_0") "createdBy" "human"
+                    "updatedAt" "2026-09-20T10:00:00Z")
+                   (noema-research--table
+                    "id" "task_2" "title" "" "state" "blocked" "parentTaskId" "task_1"
+                    "dependsOn" (vector) "createdBy" "agent" "updatedAt" ""))
+   "jobs" (vector (noema-research--table
+                   "id" "job_1" "kind" "acp" "state" "queued" "taskId" "task_1"
+                   "dependsOn" (vector "job_0") "attemptsStarted" 1
+                   "effects" (noema-research--table "class" "workspace-mutating")
+                   "retry" (noema-research--table "policy" "safe_only")))
+   "workers" (vector (noema-research--table
+                      "id" "worker_1" "kind" "acp" "state" "available"
+                      "transport" "stdio" "inferenceCapable" t
+                      "capabilities" (vector "code" "shell") "lastSeenAt" ""))
+   "delegations" (vector (noema-research--table
+                          "id" "deleg_1" "parentTaskId" "task_1" "childTaskId" "task_2"
+                          "childJobIds" (vector "job_1" "job_2")
+                          "requestedBy" (noema-research--table "type" "agent" "id" "run_9")
+                          "createdAt" ""))
+   "events" (vector (noema-research--table "seq" 1 "type" "task.created" "ts" "")
+                    (noema-research--table "seq" 2 "type" "job.queued" "ts" ""
+                                           "runId" "run_9"))))
+
+(defmacro noema-research-test--with-orchestration (&rest body)
+  "Run BODY in an orchestration board holding a fixture snapshot."
+  (declare (indent 0))
+  `(let ((buffer (generate-new-buffer " *noema-orchestration-test*")))
+     (unwind-protect
+         (with-current-buffer buffer
+           (noema-orchestration-mode)
+           (setq noema-orchestration--root "/tmp/project/"
+                 noema-orchestration--snapshot (noema-research-test--orchestration-snapshot))
+           ,@body)
+       (kill-buffer buffer))))
+
+(ert-deftest noema-orchestration-renders-every-view-from-one-snapshot ()
+  "Switching views reads the cached snapshot; it never refetches."
+  (require 'noema-orchestration)
+  (noema-research-test--with-orchestration
+    (cl-letf (((symbol-function 'noema-orchestration-refresh)
+               (lambda () (ert-fail "switching views must not refetch"))))
+      (dolist (view noema-orchestration-views)
+        (noema-orchestration-set-view view)
+        (should (equal noema-orchestration--view view))
+        (should (equal mode-name (format "Noema-Orchestration[%s]" view)))
+        ;; Every fixture view has rows, and every row matches its columns.
+        (should tabulated-list-entries)
+        (dolist (entry tabulated-list-entries)
+          (should (= (length (cadr entry)) (length tabulated-list-format))))))))
+
+(ert-deftest noema-orchestration-task-rows-carry-state-and-dependency-counts ()
+  "The task view answers what is blocked behind what."
+  (require 'noema-orchestration)
+  (noema-research-test--with-orchestration
+    (noema-orchestration-set-view "tasks")
+    (let ((first (cadr (nth 0 tabulated-list-entries)))
+          (second (cadr (nth 1 tabulated-list-entries))))
+      (should (equal (aref first 0) "Parse the fence grammar"))
+      (should (equal (aref first 1) "open"))
+      (should (equal (aref first 3) "1"))
+      (should (equal (aref first 4) ""))
+      ;; A task with no title falls back to its id rather than rendering blank,
+      ;; and a subtask is marked as one.
+      (should (equal (aref second 0) "task_2"))
+      (should (equal (aref second 4) "sub")))))
+
+(ert-deftest noema-orchestration-delegation-rows-read-parent-to-child ()
+  "Delegation is the one relation the Graph Board cannot show."
+  (require 'noema-orchestration)
+  (noema-research-test--with-orchestration
+    (noema-orchestration-set-view "delegations")
+    (let ((row (cadr (car tabulated-list-entries))))
+      (should (equal (aref row 0) "task_1"))
+      (should (equal (aref row 2) "task_2"))
+      (should (equal (aref row 3) "2"))
+      (should (equal (aref row 4) "agent:run_9")))))
+
+(ert-deftest noema-orchestration-cycles-views-in-both-directions ()
+  "TAB and S-TAB walk the same ring."
+  (require 'noema-orchestration)
+  (noema-research-test--with-orchestration
+    (noema-orchestration-set-view "tasks")
+    (noema-orchestration-cycle-view)
+    (should (equal noema-orchestration--view "jobs"))
+    (noema-orchestration-cycle-view t)
+    (should (equal noema-orchestration--view "tasks"))
+    (noema-orchestration-cycle-view t)
+    (should (equal noema-orchestration--view (car (last noema-orchestration-views))))))
+
+(ert-deftest noema-orchestration-events-view-shows-the-tail ()
+  "Events are append-only; the board bounds what it draws."
+  (require 'noema-orchestration)
+  (noema-research-test--with-orchestration
+    (let ((noema-orchestration-event-limit 1))
+      (noema-orchestration-set-view "events")
+      (should (= (length tabulated-list-entries) 1))
+      (should (equal (aref (cadr (car tabulated-list-entries)) 1) "job.queued")))))
 
 ;;; noema-research-tests.el ends here

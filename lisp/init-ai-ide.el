@@ -114,6 +114,7 @@ Do not modify provider settings, authentication, PATH or a custom command."
 (autoload 'noema-project-enable "noema-research" nil t)
 (autoload 'noema-pi-router-open "noema-pi-router" nil t)
 (autoload 'noema-pi-doctor "noema-pi-router" nil t)
+(autoload 'noema-orchestration "noema-orchestration" nil t)
 (autoload 'noema-sessions "noema-sessions" nil t)
 (autoload 'noema-sessions-switch "noema-sessions" nil t)
 (autoload 'noema-sessions-read "noema-sessions")
@@ -180,6 +181,7 @@ Do not modify provider settings, authentication, PATH or a custom command."
   "P" #'noema-pi-router-open
   "D" #'noema-pi-doctor
   "S" #'noema-sessions
+  "O" #'noema-orchestration
   "b" #'noema-sessions-switch
   "i" #'noema-agent-acp-focus-input
   ;; Editor context for a chosen session, sent as references.
@@ -210,7 +212,7 @@ Do not modify provider settings, authentication, PATH or a custom command."
 
 (defconst my/noema-config-groups
   '(noema-research noema-research-graph noema-agent-worker noema-pi-router
-    noema-agent-session noema-context)
+    noema-agent-session noema-context noema-orchestration)
   "Custom groups whose options Noema exposes through `config'.")
 
 (defun my/noema-config--type-arguments (symbol)
@@ -244,7 +246,8 @@ Do not modify provider settings, authentication, PATH or a custom command."
                  (my/noema-config--type-arguments symbol)))))))
 
 (dolist (feature '(noema-research-mode noema-research-graph noema-research-settings
-                   noema-agent-worker noema-pi-router noema-agent-acp noema-context))
+                   noema-agent-worker noema-pi-router noema-agent-acp noema-context
+                   noema-orchestration))
   (eval-after-load feature #'my/noema-config-register-groups))
 
 (defun my/noema-close-projects-of-killed-perspective ()
