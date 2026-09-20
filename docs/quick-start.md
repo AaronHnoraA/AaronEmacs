@@ -223,6 +223,10 @@ gptel、agent-shell、acp.el、shell-maker、Magent 及现有 CLI 兼容代码�
 - `M-x noema-compose` / `C-c A c` — 使用完整 gptel UI 打开任意 buffer compose
 - `C-c A s` — 从当前 buffer 发送；`C-c A m` — gptel transient；`C-c A .` / `C-c M-a` — 添加上下文
 - `C-c A r` — 使用 gptel rewrite/diff 预览；`C-c A p` — 把当前 agent-shell 会话纳入 Noema research
+- `C-c A x` / `v` / `B` / `@` — 把上下文、选区、buffer、光标位置交给某个 agent 会话；
+  发出去的是 `文件:行-行` 引用和 `resource_link`，不拷贝正文
+- `C-c A S` / `C-c A b` — 列出 / 切换该项目的全部 agent 会话（含 popup 与裸
+  `M-x agent-shell` 开的）
 - CLI sampler 只作为 gptel backend 的降级，不再提供第二套 interaction Hub/transcript/session UI；region、buffer、file 一律从 gptel compose/context 发送。
 - profile 与 prompt 模板在 `etc/noema/`；Magent session/audit 状态在 `var/noema/`
 

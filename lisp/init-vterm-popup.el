@@ -26,6 +26,7 @@
 (declare-function my/project-current-root "init-project")
 (declare-function noema-agent-acp-config-for "noema-agent-acp" (agent))
 (declare-function noema-agent-acp-start "noema-agent-acp" (&rest args))
+(declare-function noema-agent-acp-adopt "noema-agent-acp" (buffer &rest args))
 (declare-function noema-agent-acp-tabs-mode "noema-agent-acp" (&optional arg))
 (defvar noema-agent-acp-display-buffer-function)
 
@@ -206,7 +207,12 @@ CURRENT is the currently displayed popup buffer."
          (config (or (noema-agent-acp-config-for agent) (user-error "No agent-shell configuration for %s" agent)))
          ;; Protect the existing temporary popup while ACP initializes.
          (my/vterm-popup--displaying t)
-         (buffer (noema-agent-acp-start :config config :directory directory :focus nil)))
+         (buffer (noema-agent-acp-start :config config :directory directory :focus nil
+                                        :origin 'popup)))
+    ;; A popup agent keeps its own window, but it is the same managed resource
+    ;; as a Run's session: name it and key it to its project so the session
+    ;; list, session switching and buffer context can all reach it.
+    (noema-agent-acp-adopt buffer :agent agent :origin 'popup)
     (with-current-buffer buffer
       (setq-local my/vterm-popup-kind (intern (format "ai-%s" agent))
                   my/vterm-popup-title (capitalize (symbol-name agent))

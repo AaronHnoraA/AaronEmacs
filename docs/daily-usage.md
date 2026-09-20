@@ -948,6 +948,44 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 | `C-c A .` | 把 region/buffer/file 加入 gptel context |
 | `C-c A r` | gptel rewrite/diff 预览 |
 | `C-c A p` | 把当前 agent-shell session 纳入 research |
+| `C-c A x` | 把当前上下文发给某个 agent 会话（引用，不拷贝正文）|
+| `C-c A v` | 把选区发给某个会话 |
+| `C-c A B` | 把整个 buffer 发给某个会话 |
+| `C-c A f` | 把某个文件发给某个会话 |
+| `C-c A @` | 告诉会话光标在哪（文件:行:列 + 所在定义）|
+| `C-c A ,` | 发送前检视/删减上下文 |
+| `C-c A d` | 同 `C-c A x`，但只塞进输入区不提交 |
+
+### 所有 agent 会话按项目统一登记
+
+`.noema` work 块起的会话、popup 里的 agent、`C-c A a` 手动开的、以及直接
+`M-x agent-shell` 开的，全部会被登记到同一个按项目组织的注册表：有项目 root、
+有会话名（例如 `popup/claude`、`foreign/codex-2`）、有来源标记。因此
+`C-c A S`（列表）和 `C-c A b`（切换）能看到并管理全部会话，`C-c A x` 这类
+命令也可以点名把上下文交给其中任意一个。
+
+项目 root 取最近的 `noema.toml`，没有就退回普通项目根目录；**不会**为了登记而
+创建 `noema.toml`。在真正的 Noema 项目里，会话还会额外写进持久注册表，于是它
+和 Run 的会话一样可以重命名、fork、归档、看 context 用量；在普通仓库里它只存在
+于 Emacs 侧，列表里显示为 `local`。不想自动收编裸 `M-x agent-shell` 的话，把
+`noema-agent-acp-adopt-foreign-sessions` 设为 nil。
+
+### 把 buffer / 选区 / 光标交给会话
+
+上下文的挑选仍然是 gptel 那一套（`C-c A .` / `C-c M-a` 的 `gptel-add`：选区、
+buffer、文件、Dired 标记，带 overlay 高亮），**只有一份**选择，既可以给 gptel
+compose 用，也可以用 `C-c A x` 交给某个 ACP 会话。
+
+交出去的**永远是引用，不是正文**：选区变成 prompt 里的一行 `path:12-40`（就是
+agent-shell 自己写引用的格式），每个文件再附一个 `resource_link` 内容块
+（`file://` 绝对路径 + 相对名 + mime + 字节数）。agent 用自己的文件工具去读需要
+的部分，所以挂一个三千行的文件只花一行 prompt。因此被引用的 buffer 必须已保存；
+有未保存改动时会先问你要不要保存，跳过的条目会在 echo area 列出来
+（`noema-context-save-before-send` 可改成总是保存或总是跳过）。
+
+目标会话每个项目记住上一次用的那个，加前缀参数（`C-u C-c A x`）重新选，选单里
+也可以直接开一个新会话。会话还在初始化就先排队；正在回答时走 agent-shell 自己的
+pending 队列。
 
 同一项目的 agent/session 以 tab 形式共用右下角一个 Agent 窗口；每个 tab 都是
 真正的 agent-shell buffer，可以直接输入、`C-c C-c` 中断。Noema Run 结束后会补回
@@ -976,7 +1014,9 @@ tab-line/tab-bar。
 推导原因，以及每条上下文的字节数、是否自动附加（auto）/被截断（cut）、被省略的条目和总量；
 不会真的运行或触发 compaction。
 Sessions 列表（`C-c A S`）的 Context 列显示上下文窗口占用与 token 总量，`c` 让该会话下一次 Run
-从最近的 Handoff 重建对话。
+从最近的 Handoff 重建对话。列表里 State 为 `local` 的行是只登记在 Emacs 侧的会话
+（popup、手动、裸 agent-shell，且项目没有 `noema.toml`）：`RET` 切过去、`k` 关掉都可用，
+重命名 / fork / 归档 / compact 需要持久记录，会明确报错。
 项目内的读写与执行自动批准；项目外和网络请求会弹出 Noema Attention 由你批准。
 
 取消：JuText 里 `C-c C-z` 只取消光标所在 work 块的执行，运行中、排队中、正在准备都有效；
@@ -985,8 +1025,9 @@ Sessions 列表（`C-c A S`）的 Context 列显示上下文窗口占用与 toke
 停掉它的进程，session 名和历史保留，下次使用时恢复。
 
 可编辑 profile 与 prompt 资源位于 `etc/noema/`。一次性 CLI sampler 仅保留为
-gptel backend 的降级；不再有独立 interaction Hub/transcript/session UI，选区、buffer
-和文件上下文一律使用 gptel compose。完整上游源码位于
+gptel backend 的降级；不再有独立 interaction Hub/transcript/session UI。选区、buffer
+和文件的挑选一律使用 gptel 的 context UI，去向由你决定：gptel compose，或
+`C-c A x` 交给某个 ACP 会话。完整上游源码位于
 `site-lisp/noema/upstream/`；当前代码不得回退到旧 workbench 命名或另一份外部 checkout。
 
 ## 9. Jupyter cell —— 普通笔记与 kernel

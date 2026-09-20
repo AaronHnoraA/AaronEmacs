@@ -591,6 +591,8 @@ in-process 缓存，与自动刷新保持一致。
 - `M-x noema-compose` / `C-c A c` — 直接复用内化 gptel 的 compose UI
 - `C-c A s/m/./r` — send、transient、context、rewrite/diff
 - `C-c A p` — 把当前 agent-shell session 纳入 research
+- `C-c A x/v/B/f/@` — 把当前上下文、选区、buffer、文件、光标位置交给某个 agent
+  会话；`C-c A ,` 先检视，`C-c A d` 只草拟不提交
 - 每个 agent session 仍是真正可交互的 agent-shell buffer，但不进入全局
   tab-line/tab-bar。同一项目的所有 agent/session 作为 tab 显示在右下角同一个
   Agent 窗口的 tab-line 上，切换 tab 就是切换窗口里的真实 buffer，不复制
@@ -608,7 +610,24 @@ in-process 缓存，与自动刷新保持一致。
   会话）里同一命令改为只读 lookup（`M-x noema-capability-lookup`），选中后只在 agent
   输入处草拟一行引用（Skill 给出绝对 `SKILL.md` 与资源目录，MCP 给出配置文件），
   不启用、不打补丁、不安装、也不自动发送。
-- `C-c A i r/b/f` — 迁移后的 Noema interaction region/buffer/file 入口
+- 会话登记（`noema-agent-acp.el`）：`noema-agent-acp-start` 用 `:origin` 记下是哪个
+  入口开的（`run`/`popup`/`manual`/`foreign`/`pi`/`takeover`/`probe`），
+  `noema-agent-acp-adopt` 是唯一登记点，负责解析项目 root、生成唯一会话名、调用
+  `noema-agent-acp-mark-session-buffer`；`agent-shell-mode-hook` 上的收编钩子把裸
+  `M-x agent-shell` 也纳进来（`noema-agent-acp-adopt-foreign-sessions` 可关）。
+  root 解析是纯查询（`noema.toml` → projectile → project.el → 该目录），绝不创建
+  `noema.toml`。只有已经是 Noema 项目时才额外 `session:promote` + `session:name:bind`
+  写进 Node 持久注册表，失败不影响会话。`noema-agent-acp-sessions` 是合并视图，
+  `noema-sessions-read` 是统一的会话选择器（可选“新开一个”）。
+- 编辑器上下文（`noema-context.el`）：挑选完全复用 gptel 的 `gptel-context` 与
+  `*gptel-context*` 检视 buffer，只有一份选择。发送时把它解析成引用
+  （`noema-context-references`），再构造内容块：一个 text 块列出
+  `path:START-END`（与 `agent-shell--get-region-context` 同格式），每个文件一个
+  `resource_link`。**不发 embedded `resource`**，所以不吃 `embeddedContext` 能力
+  与 `agent-shell-embed-file-size-limit` 的限制，也不把正文塞进请求。
+  agent-shell 内部符号（`--resolve-path`、`--read-file-content`、
+  `--prompt-queue-enqueue`）一律经 `noema-agent-acp-file-uri` /
+  `-file-metadata` / `-enqueue` 这层边界，不在 `noema-context.el` 里直接引用。
 - profile 与模板在 `etc/noema/`，运行状态在 `var/noema/`
 
 源码边界：Noema 代码在 `site-lisp/noema/lisp/`；agent-shell、acp.el、shell-maker

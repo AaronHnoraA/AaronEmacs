@@ -10,6 +10,12 @@
 ;;
 ;; agent-shell/acp/shell-maker are pristine package-vc dependencies, pinned as
 ;; one audited group. gptel and Magent remain embedded. C-c A is the prefix.
+;;
+;; Every agent session -- a `.noema' Run's, the popup pool's, one started here
+;; and a bare `M-x agent-shell' -- is registered per project by
+;; `noema-agent-acp-adopt', so one list manages them and any of them can be
+;; given editor context by name.  `noema-context' hands the shared gptel
+;; selection to a chosen session as references, never as copied text.
 
 ;;; Code:
 
@@ -110,6 +116,14 @@ Do not modify provider settings, authentication, PATH or a custom command."
 (autoload 'noema-pi-doctor "noema-pi-router" nil t)
 (autoload 'noema-sessions "noema-sessions" nil t)
 (autoload 'noema-sessions-switch "noema-sessions" nil t)
+(autoload 'noema-sessions-read "noema-sessions")
+(autoload 'noema-context-send "noema-context" nil t)
+(autoload 'noema-context-draft "noema-context" nil t)
+(autoload 'noema-context-send-region "noema-context" nil t)
+(autoload 'noema-context-send-buffer "noema-context" nil t)
+(autoload 'noema-context-send-file "noema-context" nil t)
+(autoload 'noema-context-send-at-point "noema-context" nil t)
+(autoload 'noema-context-inspect "noema-context" nil t)
 (autoload 'noema-capability-manager "noema-capability-ui" nil t)
 (autoload 'noema-skill-manager "noema-capability-ui" nil t)
 (autoload 'noema-mcp-manager "noema-capability-ui" nil t)
@@ -167,7 +181,15 @@ Do not modify provider settings, authentication, PATH or a custom command."
   "D" #'noema-pi-doctor
   "S" #'noema-sessions
   "b" #'noema-sessions-switch
-  "i" #'noema-agent-acp-focus-input)
+  "i" #'noema-agent-acp-focus-input
+  ;; Editor context for a chosen session, sent as references.
+  "x" #'noema-context-send
+  "v" #'noema-context-send-region
+  "B" #'noema-context-send-buffer
+  "f" #'noema-context-send-file
+  "@" #'noema-context-send-at-point
+  "," #'noema-context-inspect
+  "d" #'noema-context-draft)
 
 (global-set-key (kbd "C-c M-a") #'noema-compose-add-context)
 (global-set-key (kbd "C-c A") my/noema-prefix-map)
@@ -187,7 +209,8 @@ Do not modify provider settings, authentication, PATH or a custom command."
 (declare-function persp-current-buffers "perspective" ())
 
 (defconst my/noema-config-groups
-  '(noema-research noema-research-graph noema-agent-worker noema-pi-router)
+  '(noema-research noema-research-graph noema-agent-worker noema-pi-router
+    noema-agent-session noema-context)
   "Custom groups whose options Noema exposes through `config'.")
 
 (defun my/noema-config--type-arguments (symbol)
@@ -221,7 +244,7 @@ Do not modify provider settings, authentication, PATH or a custom command."
                  (my/noema-config--type-arguments symbol)))))))
 
 (dolist (feature '(noema-research-mode noema-research-graph noema-research-settings
-                   noema-agent-worker noema-pi-router))
+                   noema-agent-worker noema-pi-router noema-agent-acp noema-context))
   (eval-after-load feature #'my/noema-config-register-groups))
 
 (defun my/noema-close-projects-of-killed-perspective ()
