@@ -4051,4 +4051,59 @@ is what keeps a discipline notice from becoming a gate people route around."
          (question (noema-research-test--work-id document "c-q")))
     (should-not (noema-research-test--warning-codes document question))))
 
+
+;;;; Claim warnings in JuText
+
+(ert-deftest noema-research-jutext-marks-a-block-whose-claim-is-unsupported ()
+  "The warning is visible while writing, not only in the Inspector.
+A notice nobody sees is the same as no notice."
+  (let* ((document (noema-research-test--document))
+         (work (noema-research-test--work-id document "c-w")))
+    (noema-research-set-state document work "done")
+    (noema-research-test--with-jutext document
+      (noema-research-mode--refresh-decorations)
+      (let* ((marked (seq-find
+                      (lambda (overlay)
+                        (and (overlay-get overlay 'noema-research-decoration)
+                             (string-match-p "⚠" (or (overlay-get overlay 'after-string) ""))))
+                      (overlays-in (point-min) (point-max)))))
+        (should marked)
+        ;; The marker explains itself on hover rather than only being a glyph.
+        (let* ((text (overlay-get marked 'after-string))
+               (at (string-match "⚠" text)))
+          (should (string-match-p "done-without-basis"
+                                  (or (get-text-property at 'help-echo text) ""))))))))
+
+(ert-deftest noema-research-jutext-leaves-supported-blocks-unmarked ()
+  (let* ((document (noema-research-test--document))
+         (work (noema-research-test--work-id document "c-w")))
+    (noema-research-set-state document work "done")
+    (noema-research-set-outcome document work "supported")
+    (noema-research-test--with-jutext document
+      (noema-research-mode--refresh-decorations)
+      (should-not (seq-find
+                   (lambda (overlay)
+                     (and (overlay-get overlay 'noema-research-decoration)
+                          (string-match-p "⚠" (or (overlay-get overlay 'after-string) ""))))
+                   (overlays-in (point-min) (point-max)))))))
+
+(ert-deftest noema-research-decoration-face-keeps-the-warning-face ()
+  "The blanket decoration face must not erase the marker's own face."
+  (let* ((faced (noema-research--decorate-face
+                 (concat "done · " (propertize "⚠" 'face 'noema-research-claim-warning-face)))))
+    (let ((at (string-match "⚠" faced)))
+      (should (member 'noema-research-claim-warning-face
+                      (ensure-list (get-text-property at 'face faced)))))))
+
+(ert-deftest noema-research-decorations-validate-once-per-refresh ()
+  "Validation walks the whole document; doing it per block would not scale."
+  (let ((document (noema-research-test--document))
+        (calls 0))
+    (noema-research-test--with-jutext document
+      (let ((real (symbol-function 'noema-research-validate)))
+        (cl-letf (((symbol-function 'noema-research-validate)
+                   (lambda (&rest args) (setq calls (1+ calls)) (apply real args))))
+          (noema-research-mode--refresh-decorations)))
+      (should (= calls 1)))))
+
 ;;; noema-research-tests.el ends here
