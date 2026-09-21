@@ -1035,7 +1035,8 @@ Inspector（节点上 `C-c C-i`）现在除了结构错误，还会提示**没�
 以及这个块是不是已经标了 done。同样只是提示，Run 照常能起。
 
 技能库在 `~/Documents/Noema/public/README/Skills/`（放在 README 命名空间里，因为那才是
-覆盖它的 git 仓库），和笔记同一个 vault：每个技能一个目录、一份
+覆盖它的 git 仓库），按 Portable Agent Plugins 结构组织：根目录有 `plugin.json` 与
+`mcp.json`，技能在 `skills/` 下——每个技能一个目录、一份
 `SKILL.md`，深度放 `references/` 里按需读。加一个技能就是新建一个目录，下一次 Run 就能
 `@@skill(<id>)` 选到，不需要发版。描述 Noema 自身机制的技能（`noema-work-dag`）仍随代码走。
 
