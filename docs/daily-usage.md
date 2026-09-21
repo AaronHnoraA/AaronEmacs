@@ -1034,7 +1034,8 @@ Inspector（节点上 `C-c C-i`）现在除了结构错误，还会提示**没�
 `C-c j p` 的运行预演会告诉你这个块正压在什么上面：有几个依赖没完成、有几个已经 regressed、
 以及这个块是不是已经标了 done。同样只是提示，Run 照常能起。
 
-技能库在 `~/Documents/Noema/public/Skills/`，和笔记同一个 vault：每个技能一个目录、一份
+技能库在 `~/Documents/Noema/public/README/Skills/`（放在 README 命名空间里，因为那才是
+覆盖它的 git 仓库），和笔记同一个 vault：每个技能一个目录、一份
 `SKILL.md`，深度放 `references/` 里按需读。加一个技能就是新建一个目录，下一次 Run 就能
 `@@skill(<id>)` 选到，不需要发版。描述 Noema 自身机制的技能（`noema-work-dag`）仍随代码走。
 

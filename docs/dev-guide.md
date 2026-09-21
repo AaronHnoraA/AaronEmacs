@@ -643,7 +643,7 @@ in-process 缓存，与自动刷新保持一致。
   扩大 research 面。能力 id 相应拆成 `noema-knowledge` / `noema-research`，配置里写旧的
   `noema` 会被展开成两者（否则「禁用 noema」只会关掉一半）。
 - 技能库：`resources/skills/` 只放描述 Noema 自身机制的技能（随代码版本走）；其余住在
-  `<NOEMA_ROOT>/public/Skills/`，由 `NOEMA_GLOBAL_SKILLS` 指向（`my/noema-skills-directory`
+  `<NOEMA_ROOT>/public/README/Skills/`，由 `NOEMA_GLOBAL_SKILLS` 指向（`my/noema-skills-directory`
   给默认值），和笔记同一个 git、同一套 search。约定是可移植的那套
   `<kebab-id>/SKILL.md`，深度放 `references/<topic>.md` 按需读——解析结果带
   `directory` 和 `references` 列表，SKILL.md 超过约 8 KiB 会给一条提示。

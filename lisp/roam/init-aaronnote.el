@@ -175,9 +175,11 @@ Restart the Noema host after changing this setting."
   "Return the vault directory the growable Skill library lives in.
 Skills are knowledge, not product code: keeping them beside the notes means
 they are versioned by the same git, reached by the same search, and can be
-added to without a Noema release.  The Skills that describe Noema\='s own
-mechanisms stay in the product tree instead, where they track the code."
-  (expand-file-name "public/Skills" my/noema--notes-root))
+added to without a Noema release.  They sit inside the README namespace
+because that is the repository covering them; a sibling of it would be
+tracked by nothing.  The Skills that describe Noema\='s own mechanisms stay in
+the product tree instead, where they track the code."
+  (expand-file-name "public/README/Skills" my/noema--notes-root))
 
 (defun my/noema--project-settings ()
   "Read Noema's project settings from the note root without evaluation."
