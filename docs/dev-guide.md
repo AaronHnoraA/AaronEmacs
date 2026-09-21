@@ -636,6 +636,28 @@ in-process 缓存，与自动刷新保持一致。
   认领、以及哪个 agent 委派给了哪个（delegation 是 Graph Board 没有的关系）。
   一次快照喂所有视图（`t`/`j`/`w`/`d`/`e`，`TAB` 轮换），所以切视图不重新请求，
   整块板子是同一个时刻的一致快照而不是五次独立读取。
+- 两个 MCP 面：`/mcp` 是知识库（笔记、搜索、块、标签），`/mcp/research` 是 AI 流程
+  （`research_cell` / `research_run` / `research_state` / `artifact` /
+  `proposal.create`），`/mcp/coordinator` 是 Pi。注册表仍然只有一个，端点只差一个投影
+  谓词（`tools.SurfaceForTool`）；没标 `Surface` 的工具算知识库，所以新增工具不会悄悄
+  扩大 research 面。能力 id 相应拆成 `noema-knowledge` / `noema-research`，配置里写旧的
+  `noema` 会被展开成两者（否则「禁用 noema」只会关掉一半）。
+- 技能库：`resources/skills/` 只放描述 Noema 自身机制的技能（随代码版本走）；其余住在
+  `<NOEMA_ROOT>/public/Skills/`，由 `NOEMA_GLOBAL_SKILLS` 指向（`my/noema-skills-directory`
+  给默认值），和笔记同一个 git、同一套 search。约定是可移植的那套
+  `<kebab-id>/SKILL.md`，深度放 `references/<topic>.md` 按需读——解析结果带
+  `directory` 和 `references` 列表，SKILL.md 超过约 8 KiB 会给一条提示。
+- 拒绝 / 警告 / 品味三分法：结构性损坏才拒绝；**认知性失守只警告**
+  （`done-without-basis`、`done-run-mismatch`、`done-over-regressed`、
+  `active-without-run`），走 `noema-research-validate` 的 `:warnings` 通道，而
+  `structure-edit` 只 diff `:errors`，所以提示永远不会变成门禁。建模品味留在 Skill 里。
+- 陈旧检测的推导链（零 schema 改动）：节点 → `artifact_links`（每个 Run 创建/修改的文件，
+  带 `run_id` + `work_node_id`）→ `artifacts.sha256` → 与磁盘当前哈希比较。
+  `Store.SourceChanges` 实现，`research_cell {action: "changes"}` 暴露；**只报告，
+  不改任何状态**。
+- 交付诚实：`research_state` 只记录一条 `worknode.state` 协调请求，由 Emacs 应用；
+  `research_state {action: "status", requestId}` 让 agent 确认它到底落没落地
+  （pending / claimed / done / failed），而不是假设。
 - profile 与模板在 `etc/noema/`，运行状态在 `var/noema/`
 
 源码边界：Noema 代码在 `site-lisp/noema/lisp/`；agent-shell、acp.el、shell-maker

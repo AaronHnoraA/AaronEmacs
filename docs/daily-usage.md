@@ -1026,6 +1026,22 @@ Sessions 列表（`C-c A S`）的 Context 列显示上下文窗口占用与 toke
 重命名 / fork / 归档 / compact 需要持久记录，会明确报错。
 项目内的读写与执行自动批准；项目外和网络请求会弹出 Noema Attention 由你批准。
 
+Inspector（节点上 `C-c C-i`）现在除了结构错误，还会提示**没有依据的断言**：标了 done 却
+既没有 Run 也没有 outcome、标了 done 但最近一次 Run 是失败的、done 压在一个 regressed
+上面、标了 active 却没有任何 Run。这些只是提示——它们走的是 warning 通道，`structure-edit`
+只回滚新引入的 error，所以提示永远不会挡住你的编辑。
+
+`C-c j p` 的运行预演会告诉你这个块正压在什么上面：有几个依赖没完成、有几个已经 regressed、
+以及这个块是不是已经标了 done。同样只是提示，Run 照常能起。
+
+技能库在 `~/Documents/Noema/public/Skills/`，和笔记同一个 vault：每个技能一个目录、一份
+`SKILL.md`，深度放 `references/` 里按需读。加一个技能就是新建一个目录，下一次 Run 就能
+`@@skill(<id>)` 选到，不需要发版。描述 Noema 自身机制的技能（`noema-work-dag`）仍随代码走。
+
+MCP 现在是两个面：知识库（笔记/搜索/标签）和 AI 流程（work DAG/Run/artifact/Proposal）
+分别在 `/mcp` 和 `/mcp/research`，能力 id 是 `noema-knowledge` 和 `noema-research`，
+可以单独启用。
+
 动手之前 agent 可以用 `proposal.create` 的 `graph.declare` 把**整张计划图**一次提出来：
 块之间可以互相引用，Graph Board 按声明的形状画成一组虚线幽灵节点，你一次接受或否决整张图
 （写入走单次 revision 比较交换，所以不会留下半张计划）。加单块仍用 `cell.create`。

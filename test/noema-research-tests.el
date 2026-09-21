@@ -3974,4 +3974,81 @@ state must actually land in the file through Emacs's own transaction."
       (should (= (length tabulated-list-entries) 1))
       (should (equal (aref (cadr (car tabulated-list-entries)) 1) "job.queued")))))
 
+
+;;;; Claim warnings
+
+(defun noema-research-test--warning-codes (document id)
+  "Return the warning code prefixes DOCUMENT reports for WorkNode ID."
+  (delq nil
+        (mapcar (lambda (entry)
+                  (when (equal (car entry) id)
+                    (car (split-string (cdr entry) ":"))))
+                (plist-get (noema-research-validate document) :warnings))))
+
+(ert-deftest noema-research-warns-when-a-done-claim-has-no-basis ()
+  "A node marked done with no Run and no outcome is noticed, not refused."
+  (let* ((document (noema-research-test--document))
+         (work (noema-research-test--work-id document "c-w")))
+    (noema-research-set-state document work "done")
+    (should (member "done-without-basis" (noema-research-test--warning-codes document work)))
+    ;; An outcome is a basis the document itself records.
+    (noema-research-set-outcome document work "supported")
+    (should-not (member "done-without-basis" (noema-research-test--warning-codes document work)))))
+
+(ert-deftest noema-research-warns-when-the-run-disagrees-with-the-claim ()
+  "Marked done while its last Run failed is the mismatch nothing used to compare."
+  (let* ((document (noema-research-test--document))
+         (work (noema-research-test--work-id document "c-w"))
+         (cell (noema-research-primary-cell document work)))
+    (puthash "outputs"
+             (vector (noema-research--table
+                      "data" (noema-research--table
+                              "application/vnd.noema.run+json"
+                              (noema-research--table "run_id" "run_1" "status" "failed"))))
+             cell)
+    (noema-research-set-state document work "done")
+    (should (member "done-run-mismatch" (noema-research-test--warning-codes document work)))))
+
+(ert-deftest noema-research-warns-when-finished-work-rests-on-a-regression ()
+  "A done node above a regressed one is the state the cascade exists to prevent."
+  (let* ((document (noema-research-test--document))
+         (work (noema-research-test--work-id document "c-w"))
+         (child (noema-research-cell-work-node-id
+                 (noema-research-test--append-work-cell
+                  document "c-child" "work" "Rests on it" "Body." (list work)))))
+    (noema-research-set-state document child "done")
+    (noema-research-set-outcome document child "supported")
+    (noema-research-set-state document work "regressed" "broke")
+    ;; Re-greening the child by hand is exactly the case worth noticing.
+    (noema-research-set-state document child "done")
+    (should (member "done-over-regressed" (noema-research-test--warning-codes document child)))))
+
+(ert-deftest noema-research-warns-when-active-work-has-no-run ()
+  (let* ((document (noema-research-test--document))
+         (work (noema-research-test--work-id document "c-w")))
+    (noema-research-set-state document work "active")
+    (should (member "active-without-run" (noema-research-test--warning-codes document work)))))
+
+(ert-deftest noema-research-claim-warnings-never-block-an-edit ()
+  "Warnings notice a lapse; they must never turn into a refusal.
+`noema-research-structure-edit' diffs only newly introduced errors, and that
+is what keeps a discipline notice from becoming a gate people route around."
+  (let ((document (noema-research-test--document)))
+    (noema-research-test--with-jutext document
+      (let ((work (noema-research-test--work-id noema-research--document "c-w")))
+        ;; This edit introduces a warning and must still succeed.
+        (should (noema-research-op-set-state work "done"))
+        (let ((live noema-research--document))
+          (should (equal (noema-research-work-node-field
+                          (noema-research-find-work-node live work) "state")
+                         "done"))
+          (should (plist-get (noema-research-validate live) :warnings))
+          (should-not (plist-get (noema-research-validate live) :errors)))))))
+
+(ert-deftest noema-research-questions-and-checkpoints-are-not-claim-checked ()
+  "Only work carries state, so only work is judged on its basis."
+  (let* ((document (noema-research-test--document))
+         (question (noema-research-test--work-id document "c-q")))
+    (should-not (noema-research-test--warning-codes document question))))
+
 ;;; noema-research-tests.el ends here

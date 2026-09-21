@@ -171,6 +171,14 @@ Restart the Noema host after changing this setting."
 (defvar my/noema--notes-root (my/noema-workspace-root)
   "Path to the canonical Noema workspace.")
 
+(defun my/noema-skills-directory ()
+  "Return the vault directory the growable Skill library lives in.
+Skills are knowledge, not product code: keeping them beside the notes means
+they are versioned by the same git, reached by the same search, and can be
+added to without a Noema release.  The Skills that describe Noema\='s own
+mechanisms stay in the product tree instead, where they track the code."
+  (expand-file-name "public/Skills" my/noema--notes-root))
+
 (defun my/noema--project-settings ()
   "Read Noema's project settings from the note root without evaluation."
   (let ((file (expand-file-name ".dir-locals.el" my/noema--notes-root)))
@@ -737,6 +745,9 @@ reconnect without a reload and without losing their in-memory editor state."
   (my/noema--clear-process-log-queue)
   (setq my/noema--notes-root (my/noema-workspace-root))
   (make-directory my/noema--notes-root t)
+  ;; The host resolves Skills from here on every Run; a missing directory
+  ;; would silently resolve to an empty library.
+  (make-directory (my/noema-skills-directory) t)
   (unless (executable-find "node")
     (user-error "Noema: `node' not found in exec-path; install Node.js"))
   (unless (file-directory-p my/noema--web-dir)
@@ -778,8 +789,13 @@ reconnect without a reload and without losing their in-memory editor state."
             (format "NOEMA_GLOBAL_CAPABILITIES=%s"
                     (or (getenv "NOEMA_GLOBAL_CAPABILITIES")
                         (expand-file-name "etc/noema/capabilities.json" user-emacs-directory)))
-            (when (getenv "NOEMA_GLOBAL_SKILLS")
-              (format "NOEMA_GLOBAL_SKILLS=%s" (getenv "NOEMA_GLOBAL_SKILLS")))
+            ;; Skills live in the vault, beside the notes, so the library grows
+            ;; with the person's knowledge and is versioned by the same git as
+            ;; the notes.  Only the skills that describe Noema's own mechanisms
+            ;; stay in the product tree, where they track the code's version.
+            (format "NOEMA_GLOBAL_SKILLS=%s"
+                    (or (getenv "NOEMA_GLOBAL_SKILLS")
+                        (my/noema-skills-directory)))
             (format "AARONNOTE_ROOT=%s" (expand-file-name my/noema--notes-root))
             (format "NOEMA_WORKSPACE_LAYOUT=%s" (my/noema-workspace-layout))
             (format "AARONNOTE_WEB_DIR=%s" (expand-file-name my/noema--web-dir))
