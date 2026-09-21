@@ -95,6 +95,14 @@ buffer 注册，而不是启动时算好一份全局命令。远程 target 上�
 `default-directory` 会静默回退到本机 `~` 编译，而不是报错，所以选择在框架层面显式拒绝。texlab 的
 诊断/补全走 lsp-mode 共享的 `language-server` remote adapter，本身已经是 target-aware 的。
 
+**buffer 内的公式预览是另一条链路**：RaTeX（vendored 在 `site-lisp/ratex.el/`），
+在 [lisp/lang/tex/init-latex.el](../lisp/lang/tex/init-latex.el) 配置，表现为光标上方的
+posframe 弹窗而不是 inline overlay。支持 `$…$`、`$$…$$`、`\(…\)`、`\[…\]` 和
+白名单内的 `\begin{…}` 环境。数学宏与 TeX 兼容规则以
+`site-lisp/noema/resources/` 为唯一来源，Emacs 与 Noema 读同一批文件——
+改宏请改那里，不要在 Elisp 里另写一份。出问题先跑 `M-x my/latex-preview-doctor`。
+完整契约见 [latex-preview.md](latex-preview.md)。
+
 ## 4. 我要改 AI 助手配置
 
 文件：

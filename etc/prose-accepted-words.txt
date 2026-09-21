@@ -1,1 +1,1 @@
-/Users/hc/HC/SOURCE/Noema/resources/prose-accepted-words.txt
+../site-lisp/noema/resources/prose-accepted-words.txt

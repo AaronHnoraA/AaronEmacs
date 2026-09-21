@@ -27,16 +27,29 @@
     nil))
 
 (defun ratex--ensure-global-hooks ()
-  "Install global hooks needed while at least one RaTeX buffer is active."
-  (add-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch))
+  "Install global hooks needed while at least one RaTeX buffer is active.
+
+Uses the window-change hooks rather than `buffer-list-update-hook': the
+latter runs on essentially every `get-buffer-create' and buffer reordering
+anywhere in the session, while all this handler needs to know is that the
+selected window now shows a different buffer."
+  (add-hook 'window-buffer-change-functions #'ratex-handle-buffer-switch)
+  (add-hook 'window-selection-change-functions #'ratex-handle-buffer-switch))
 
 (defun ratex--maybe-remove-global-hooks (&optional ignored-buffer)
   "Remove global RaTeX hooks when no active buffers remain.
 IGNORED-BUFFER is treated as already inactive, which is useful while running
-cleanup from `kill-buffer-hook' or `change-major-mode-hook'."
+cleanup from `kill-buffer-hook' or `change-major-mode-hook'.
+
+Also stops the backend: it holds a render cache of fully embedded SVGs, so
+leaving it running with no RaTeX buffer left is pure retention."
   (unless (ratex--any-active-buffer-p ignored-buffer)
+    (remove-hook 'window-buffer-change-functions #'ratex-handle-buffer-switch)
+    (remove-hook 'window-selection-change-functions #'ratex-handle-buffer-switch)
+    ;; Legacy hook placement from earlier versions of this file.
     (remove-hook 'buffer-list-update-hook #'ratex-handle-buffer-switch)
-    (ratex--cancel-cache-gc-timer)))
+    (ratex--cancel-cache-gc-timer)
+    (ratex-stop-backend)))
 
 (defun ratex--supported-buffer-p ()
   "Return non-nil when the current buffer should enable RaTeX."
@@ -95,7 +108,6 @@ cleanup from `kill-buffer-hook' or `change-major-mode-hook'."
     (ratex--disable-current-buffer)))
 
 
-;;;###autoload
 ;;;###autoload
 (defun ratex-toggle-preview-command ()
   "Toggle RaTeX preview at point."

@@ -56,6 +56,11 @@ leaves the formula or the idle timer renders first.")
 (defvar-local ratex--posframe-last-override-params nil
   "Last override-parameters used for the posframe, cached for position updates.")
 (defvar-local ratex--posframe-showing-p nil)
+(defvar-local ratex--posframe-failures 0
+  "Consecutive posframe display failures in this buffer.
+A posframe that cannot be shown used to fail silently and be retried on every
+idle tick, because `ratex-inline-preview' is off and the fallback path draws
+nothing.  Counting the failures lets us report once and stop spinning.")
 (defvar ratex--suppress-scroll-side-effects nil)
 (defvar ratex--cache-gc-timer nil)
 (defconst ratex--posframe-buffer " *ratex-preview*")
@@ -197,14 +202,25 @@ propagates outward."
                 (ratex--preview-anchor-position fragment))
     (setq-local ratex--posframe-last-override-params override-params)))
 
+(defun ratex--clear-table (table)
+  "Empty TABLE in place and return it, creating it when absent."
+  (if (hash-table-p table)
+      (progn (clrhash table) table)
+    (make-hash-table :test #'equal)))
+
 (defun ratex-reset-buffer-state ()
   "Reset buffer-local rendering state."
   (when (eq ratex--posframe-owner-buffer (current-buffer))
     (ratex--hide-posframe))
-  (setq-local ratex--render-cache (make-hash-table :test #'equal))
-  (setq-local ratex--render-cache-access (make-hash-table :test #'equal))
-  (setq-local ratex--inflight-requests (make-hash-table :test #'equal))
-  (setq-local ratex--inflight-waiters (make-hash-table :test #'equal))
+  ;; Clear in place rather than rebinding: a reply still in flight captured
+  ;; the old tables, and rebinding made it `remhash' against a table nobody
+  ;; reads and find an empty waiter list, so the render was cached but never
+  ;; drawn.  `ratex-mode' toggles run through here.
+  (setq-local ratex--render-cache (ratex--clear-table ratex--render-cache))
+  (setq-local ratex--render-cache-access (ratex--clear-table ratex--render-cache-access))
+  (setq-local ratex--inflight-requests (ratex--clear-table ratex--inflight-requests))
+  (setq-local ratex--inflight-waiters (ratex--clear-table ratex--inflight-waiters))
+  (setq-local ratex--posframe-failures 0)
   (setq-local ratex--last-error nil)
   (setq-local ratex--active-fragment nil)
   (setq-local ratex--posframe-visible nil)
@@ -447,16 +463,25 @@ currently under point."
          (string= string
                   (buffer-substring-no-properties pos (+ pos len))))))
 
-(defun ratex--find-fragment-close (close start)
-  "Return the end position of CLOSE found after START, ignoring escapes."
+(defun ratex--find-fragment-close (close start &optional limit)
+  "Return the end position of CLOSE found after START, ignoring escapes.
+
+The search stops at LIMIT, defaulting to `ratex-fragment-max-chars' past
+START.  This runs on the post-command path: while a formula is still being
+typed there is no closer to find, and an unbounded search re-scans to
+`point-max' on every refresh.  Code and comment context is skipped here for
+the same reason the full scanner skips it."
   (let ((close-len (length close))
+        (bound (min (point-max)
+                    (or limit (+ start ratex-fragment-max-chars))))
         found)
     (save-excursion
       (goto-char start)
       (while (and (not found)
-                  (search-forward close nil t))
+                  (search-forward close bound t))
         (let ((close-begin (- (point) close-len)))
-          (unless (ratex--escaped-at-p close-begin)
+          (unless (or (ratex--escaped-at-p close-begin)
+                      (ratex--code-context-at-p close-begin))
             (setq found (point))))))
     found))
 
@@ -554,27 +579,47 @@ ordinary edits."
           (plist-get fragment :content)))
 
 (defun ratex--cache-key (fragment)
-  "Return render cache key for FRAGMENT."
+  "Return render cache key for FRAGMENT.
+
+The preamble is represented by its token, not its text: it is the same for
+every fragment, so storing it in full would bloat every key for nothing,
+while the token still invalidates cached renders when macros change."
   (list (ratex--render-latex fragment)
         ratex-font-size
         ratex-svg-padding
-        (ratex--normalized-render-color)))
+        (ratex--normalized-render-color)
+        (ratex-preamble-token)))
+
+(defun ratex--fragment-display-p (fragment)
+  "Return non-nil when FRAGMENT should render in display style."
+  (or (member (plist-get fragment :open) '("\\[" "$$"))
+      (plist-get fragment :block)
+      ;; An environment carries its own display semantics; `\\displaystyle'
+      ;; in front of `\\begin{align}' would be wrong, not merely redundant.
+      nil))
 
 (defun ratex--render-latex (fragment)
   "Return backend-ready LaTeX for FRAGMENT.
 
-RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
- those wrappers during detection. To preserve display-style rendering for
- bracketed math, re-add the semantic hint as `\\displaystyle'."
-  (let ((content (string-trim (plist-get fragment :content)))
-        (open (plist-get fragment :open)))
-    (cond
-     ((equal open "\\[")
-      (if (string-empty-p content)
-          "\\displaystyle"
-        (concat "\\displaystyle " content)))
-     (t
-      content))))
+The engine does not accept `\\(', `\\[' or `$$' delimiters directly, so
+detection strips those wrappers and the display semantics are re-added as
+`\\displaystyle'.  Environment fragments are the exception: they are sent
+whole, because `\\begin{align}' is what tells the engine how to lay them
+out."
+  (let* ((content (string-trim (plist-get fragment :content)))
+         (environment (plist-get fragment :environment))
+         (latex
+          (cond
+           (environment
+            (concat (plist-get fragment :open)
+                    (plist-get fragment :content)
+                    (plist-get fragment :close)))
+           ((ratex--fragment-display-p fragment)
+            (if (string-empty-p content)
+                "\\displaystyle"
+              (concat "\\displaystyle " content)))
+           (t content))))
+    (ratex-apply-compat-rewrite latex)))
 
 (defun ratex--normalized-render-color ()
   "Return a normalized render color string, or nil."
@@ -630,12 +675,24 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
       (unless (gethash key keep)
         (ratex-remove-overlay key)))))
 
+(defun ratex--payload-latex (fragment)
+  "Return the LaTeX string sent to the backend for FRAGMENT.
+
+The shared macro preamble goes in front of the fragment body.  The engine
+caches on the whole string, and the prefix is byte-identical across
+fragments, so this costs one macro-definition pass per distinct formula."
+  (let ((latex (ratex--render-latex fragment))
+        (preamble (ratex-preamble)))
+    (if preamble
+        (concat preamble "\n" latex)
+      latex)))
+
 (defun ratex--render-payload (fragment)
   "Build the render request payload for FRAGMENT."
   (let ((payload
          (append
           `((type . "render")
-            (latex . ,(ratex--render-latex fragment))
+            (latex . ,(ratex--payload-latex fragment))
             (font_size . ,ratex-font-size)
             (padding . ,ratex-svg-padding)
             (embed_glyphs . t))
@@ -672,7 +729,10 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
          (remhash cache-key (ratex--inflight-table))
          (let ((waiters (gethash cache-key (ratex--inflight-waiters-table))))
            (remhash cache-key (ratex--inflight-waiters-table))
-           (when (alist-get 'ok response)
+           ;; Cache failures too.  The cache key is the formula text, so a
+           ;; fixed formula gets a fresh key -- but an unfinished one stops
+           ;; being re-sent to the backend on every keystroke.
+           (when (ratex--cacheable-response-p response)
              (ratex--cache-put cache-key response))
            (when ratex-mode
              (ratex--preserving-window-start
@@ -682,6 +742,18 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
                    (car entry)
                    (cdr entry)
                    response))))))))))))
+
+(defun ratex--cacheable-response-p (response)
+  "Return non-nil when RESPONSE may be stored in the render cache.
+
+Successful renders and deterministic render failures are both cacheable.
+Transport failures (timeout, dead backend) are not: they say nothing about
+the formula and must be retried."
+  (or (ratex--response-ok-p response)
+      (let ((text (alist-get 'error response)))
+        (and (stringp text)
+             (not (member text '("backend request timed out"
+                                 "backend unavailable")))))))
 
 (defun ratex--display-if-visible (fragment-key fragment response)
   "Display RESPONSE for FRAGMENT-KEY if FRAGMENT should still be visible."
@@ -703,13 +775,18 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
         (ratex-remove-overlay fragment-key))))))
 
 (defun ratex--display-response (fragment-key fragment response &optional style)
-  "Display backend RESPONSE for FRAGMENT identified by FRAGMENT-KEY."
-  (if (not (alist-get 'ok response))
+  "Display backend RESPONSE for FRAGMENT identified by FRAGMENT-KEY.
+
+A failed response is shown in the preview itself rather than through
+`message': this runs on the debounce path, so every half-typed formula would
+otherwise spam the echo area."
+  (if-let* ((error-text (ratex-response-error response)))
       (progn
-        (setq ratex--last-error (alist-get 'error response))
+        (setq ratex--last-error error-text)
         (ratex-remove-overlay fragment-key)
-        (when ratex--last-error
-          (message "RaTeX render failed: %s" ratex--last-error)))
+        (when (and (ratex--preview-enabled-p)
+                   (ratex--point-in-fragment-p fragment))
+          (ratex--display-edit-preview fragment response nil error-text)))
     (let ((image (ratex--image-from-response response)))
       (setq ratex--last-error nil)
       (if (not image)
@@ -786,6 +863,17 @@ RaTeX core does not accept `\\(' or `\\[' delimiters directly, so we strip
     (cancel-timer ratex--force-preview-timer)
     (setq-local ratex--force-preview-timer nil)))
 
+(defun ratex--arm-force-preview ()
+  "Start the real-time staleness fallback timer if it is not already running."
+  (when (and ratex--active-fragment
+             (numberp ratex-edit-preview-max-staleness)
+             (> ratex-edit-preview-max-staleness 0)
+             (not (timerp ratex--force-preview-timer)))
+    (setq-local ratex--force-preview-timer
+                (run-with-timer ratex-edit-preview-max-staleness nil
+                                #'ratex--force-refresh-preview
+                                (current-buffer)))))
+
 (defun ratex--force-refresh-preview (buffer)
   "Force-refresh the preview in BUFFER and reschedule the force timer.
 Called unconditionally by `ratex--force-preview-timer' so the preview
@@ -800,13 +888,7 @@ never goes fully stale during rapid continuous input."
         (ratex--cancel-pending-preview)
         (ratex--refresh-preview-now)
         ;; Reschedule as long as we are still editing a formula.
-        (when (and ratex--active-fragment
-                   ratex-edit-preview-max-staleness)
-          (setq-local ratex--force-preview-timer
-                      (run-with-timer
-                       ratex-edit-preview-max-staleness nil
-                       #'ratex--force-refresh-preview
-                       buffer)))))))
+        (ratex--arm-force-preview)))))
 
 (defun ratex--refresh-preview-now ()
   "Refresh the active preview immediately in the current buffer."
@@ -834,6 +916,10 @@ never goes fully stale during rapid continuous input."
         (if (or ratex--active-fragment (ratex--near-math-p))
             (progn
               (ratex--cancel-pending-preview)
+              ;; Continuous typing re-arms the idle timer on every keystroke,
+              ;; so it may never fire.  Arm the real-time fallback alongside
+              ;; it (once -- it re-arms itself) to bound preview staleness.
+              (ratex--arm-force-preview)
               (setq-local ratex--preview-timer
                           (run-with-idle-timer
                            ratex-edit-preview-idle-delay nil
@@ -850,17 +936,23 @@ never goes fully stale during rapid continuous input."
                            (current-buffer))))
           (ratex--hide-edit-preview))))))
 
-(defun ratex--display-edit-preview (fragment &optional response image)
+(defun ratex--display-edit-preview (fragment &optional response image error-text)
   "Display edit preview for FRAGMENT using the configured style.
 
-When `posframe' is selected, use a child frame."
-  (let* ((preview-image (or image (and response (ratex--image-from-response response))))
+When `posframe' is selected, use a child frame.  ERROR-TEXT, when given,
+is rendered in place of an image so a failed render is visible where the
+user is already looking instead of vanishing silently."
+  (let* ((error-text (or error-text (and response (ratex-response-error response))))
+         (preview-image (unless error-text
+                          (or image
+                              (and response (ratex--image-from-response response)))))
          (shown
           (pcase (ratex--preview-style)
             ('posframe
-             (ratex-debug-log "display-edit-preview style=posframe fragment=%S response=%s image=%s"
-                              fragment (not (null response)) (not (null image)))
-             (ratex--display-posframe fragment response preview-image))
+             (ratex-debug-log "display-edit-preview style=posframe fragment=%S response=%s image=%s error=%s"
+                              fragment (not (null response)) (not (null image))
+                              (or error-text "none"))
+             (ratex--display-posframe fragment response preview-image error-text))
             (_ nil))))
     (if shown
         (progn
@@ -891,29 +983,65 @@ When `posframe' is selected, use a child frame."
          (px-h (min (+ (ceiling (cdr size)) (* 2 ibw) 2) max-h)))
     (cons px-w px-h)))
 
-(defun ratex--display-posframe (fragment &optional response image)
-  "Display IMAGE (or RESPONSE) in a posframe for FRAGMENT."
+(defun ratex--posframe-error-string (error-text)
+  "Return the propertized text shown in the preview for ERROR-TEXT."
+  (concat (propertize "RaTeX " 'face 'shadow)
+          (propertize (ratex--truncate-error error-text) 'face 'error)))
+
+(defun ratex--truncate-error (text)
+  "Return TEXT shortened to something that fits in a small child frame."
+  (let ((text (string-trim (or text "render failed"))))
+    (if (> (length text) 160)
+        (concat (substring text 0 157) "...")
+      text)))
+
+(defun ratex--note-posframe-failure ()
+  "Record a posframe display failure and stop retrying after a few."
+  (setq-local ratex--posframe-failures (1+ ratex--posframe-failures))
+  (when (= ratex--posframe-failures 2)
+    (setq-local ratex--preview-enabled nil)
+    (display-warning
+     'ratex
+     (format "RaTeX could not display its preview child frame in %s; \
+preview disabled for this buffer.  Re-enable with `M-x ratex-mode'."
+             (buffer-name))
+     :warning))
+  nil)
+
+(defun ratex--display-posframe (fragment &optional response image error-text)
+  "Display IMAGE (or RESPONSE) in a posframe for FRAGMENT.
+
+With ERROR-TEXT and no image, show the error instead -- a failed render must
+still produce something the user can see."
   (when (and (eq (ratex--preview-style) 'posframe)
              (ratex--ensure-posframe-loaded)
              (featurep 'posframe)
              (ratex--point-in-fragment-p fragment))
-    (let ((image (or image (and response (ratex--image-from-response response)))))
-      (when image
+    (let* ((error-text (or error-text (and response (ratex-response-error response))))
+           (image (unless error-text
+                    (or image (and response (ratex--image-from-response response))))))
+      (when (or image error-text)
         (condition-case nil
             (let* ((anchor (ratex--preview-anchor-position fragment))
                    (ibw 8)
-                   (dims (ratex--posframe-pixel-size image ibw))
+                   (dims (if image
+                             (ratex--posframe-pixel-size image ibw)
+                           (cons -1 -1)))
                    (px-w (car dims))
                    (px-h (cdr dims))
                    (override-params
-                    `((width . (text-pixels . ,px-w))
-                      (height . (text-pixels . ,px-h)))))
-              (ratex-debug-log "try posframe fragment=%S size=%S" fragment dims)
+                    (when image
+                      `((width . (text-pixels . ,px-w))
+                        (height . (text-pixels . ,px-h))))))
+              (ratex-debug-log "try posframe fragment=%S size=%S error=%s"
+                               fragment dims (or error-text "none"))
               (with-current-buffer (get-buffer-create ratex--posframe-buffer)
                 (setq-local truncate-lines nil)
-                (setq-local word-wrap nil)
+                (setq-local word-wrap t)
                 (erase-buffer)
-                (insert (propertize " " 'display image)))
+                (insert (if image
+                            (propertize " " 'display image)
+                          (ratex--posframe-error-string error-text))))
               (when (and (buffer-live-p ratex--posframe-owner-buffer)
                          (not (eq ratex--posframe-owner-buffer (current-buffer))))
                 (ratex--hide-posframe))
@@ -931,11 +1059,12 @@ When `posframe' is selected, use a child frame."
                  (ratex--mask-edit-source fragment)))
               (ratex--set-posframe-owner (current-buffer) fragment override-params)
               (setq-local ratex--posframe-showing-p t)
+              (setq-local ratex--posframe-failures 0)
               (ratex-debug-log "posframe success")
               t)
           (error
            (ratex-debug-log "posframe failed")
-           nil))))))
+           (ratex--note-posframe-failure)))))))
 
 (defun ratex--point-position-relative-to-native-frame (&optional point window)
   "Return pixel position of POINT in WINDOW relative to the native frame.
@@ -1152,8 +1281,11 @@ Strategy mirrors company-box's frame-position logic:
         (when fragment
           (ratex--ensure-fragment-preview fragment))))))
 
-(defun ratex-handle-buffer-switch ()
-  "Hide the shared edit preview when its owner buffer is no longer selected."
+(defun ratex-handle-buffer-switch (&rest _)
+  "Hide the shared edit preview when its owner buffer is no longer selected.
+
+Accepts and ignores arguments so it can serve as a
+`window-buffer-change-functions' / `window-selection-change-functions' entry."
   (when (and (ratex--preview-style)
              (buffer-live-p ratex--posframe-owner-buffer)
              (not (eq (window-buffer (selected-window))

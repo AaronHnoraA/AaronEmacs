@@ -12,7 +12,6 @@
 (require 'transient)
 
 (declare-function my/typography-setup-prose-buffer "init-base")
-(declare-function my/refresh-environment-from-shell nil)
 (declare-function my/mouse-code-actions "init-mouse" (event))
 (declare-function evil-local-set-key "evil-core" (state key def))
 (declare-function TeX-command-run-all "tex" (arg))
@@ -48,11 +47,6 @@ target invokes that target's `latexmk', never the client's."
   (concat (shell-quote-argument (my/auctex-latexmk-executable))
           " " engine-flag
           " -synctex=1 %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t"))
-
-(defun my/auctex-refresh-shell-environment (&rest _)
-  "Refresh Emacs environment before starting TeX commands."
-  (when (fboundp 'my/refresh-environment-from-shell)
-    (my/refresh-environment-from-shell)))
 
 (defun my/auctex-guard-remote-master (&rest _)
   "Refuse to run a TeX command when the master directory is a remote target.
@@ -341,22 +335,42 @@ target rather than one path baked in at load time."
           (file-error nil))))
     (nreverse pdfs)))
 
+(defvar-local my/pdf-sync--master-pdf-cache nil
+  "Cons of (BUFFER-TICK . PDF) for the resolved master PDF of this buffer.")
+
+(defun my/pdf-sync--match-pdf (candidates)
+  "Return the first PDF in CANDIDATES that indexes the current buffer."
+  (catch 'match
+    (dolist (pdf (delete-dups (delq nil candidates)))
+      (when (and (file-exists-p pdf)
+                 (pdf-sync-locate-synctex-file pdf)
+                 (pdf-sync-synctex-file-name buffer-file-name pdf))
+        (throw 'match pdf)))
+    nil))
+
 (defun my/pdf-sync-master-pdf-for-current-buffer ()
-  "Return the best matching master PDF for the current TeX buffer."
+  "Return the best matching master PDF for the current TeX buffer.
+
+Tries the cheap candidates -- PDFs already open, and the one `TeX-master'
+implies -- before falling back to `my/pdf-sync--project-pdf-candidates',
+which walks the project root and several parent directories recursively.
+That walk is synchronous and sits behind the `pdf-sync-forward-correlate'
+and `TeX-view' advice, so running it first made every sync-to-PDF pay for a
+recursive scan of the whole tree.  The result is memoized per buffer."
   (when buffer-file-name
-    (let (candidates)
-      (dolist (pdf (my/pdf-sync--open-pdf-candidates))
-        (push pdf candidates))
-      (when-let* ((master-pdf (my/pdf-sync--master-pdf-candidate)))
-        (push master-pdf candidates))
-      (dolist (pdf (my/pdf-sync--project-pdf-candidates))
-        (push pdf candidates))
-      (catch 'match
-        (dolist (pdf (delete-dups (nreverse candidates)))
-          (when (and (file-exists-p pdf)
-                     (pdf-sync-locate-synctex-file pdf)
-                     (pdf-sync-synctex-file-name buffer-file-name pdf))
-            (throw 'match pdf)))))))
+    (if (and my/pdf-sync--master-pdf-cache
+             (eq (car my/pdf-sync--master-pdf-cache) (buffer-chars-modified-tick))
+             (let ((pdf (cdr my/pdf-sync--master-pdf-cache)))
+               (and pdf (file-exists-p pdf))))
+        (cdr my/pdf-sync--master-pdf-cache)
+      (let ((pdf (or (my/pdf-sync--match-pdf
+                      (append (my/pdf-sync--open-pdf-candidates)
+                              (list (my/pdf-sync--master-pdf-candidate))))
+                     (my/pdf-sync--match-pdf
+                      (my/pdf-sync--project-pdf-candidates)))))
+        (setq my/pdf-sync--master-pdf-cache
+              (cons (buffer-chars-modified-tick) pdf))
+        pdf))))
 
 (defun my/pdf-sync-forward-correlate-with-pdf (pdf &optional line column)
   "Run forward search for LINE and COLUMN against PDF."
@@ -564,8 +578,10 @@ Compiles first when no PDF exists yet."
   (setq TeX-auto-save t)
   (setq TeX-parse-self t)
 
-  (unless (advice-member-p #'my/auctex-refresh-shell-environment 'TeX-command)
-    (advice-add 'TeX-command :before #'my/auctex-refresh-shell-environment))
+  ;; Note: a `TeX-command' advice used to call `my/refresh-environment-from-shell'
+  ;; to refresh PATH here.  That function was never defined anywhere, so the
+  ;; advice was a no-op for its whole life and builds have always run without
+  ;; it.  `latexmk' is resolved through `remote-executable-find' instead.
   (unless (advice-member-p #'my/auctex-guard-remote-master 'TeX-command)
     (advice-add 'TeX-command :before #'my/auctex-guard-remote-master))
 

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 
@@ -47,6 +48,61 @@ struct PingResponse {
     protocol: &'static str,
 }
 
+/// Upper bound on cached renders.
+///
+/// Each entry holds a full SVG with embedded glyph outlines, which at editor
+/// font sizes reaches tens of kilobytes. The map used to be unbounded, so a
+/// long session accumulated every formula ever previewed. The editor keeps its
+/// own much smaller cache in front of this one; this bound exists so the
+/// process cannot grow without limit.
+const CACHE_CAPACITY: usize = 512;
+
+/// Insertion-ordered cache with a capacity bound and LRU eviction.
+struct RenderCache {
+    entries: HashMap<CacheKey, SuccessResponse>,
+    /// Least-recently used first.
+    order: VecDeque<CacheKey>,
+    capacity: usize,
+}
+
+impl RenderCache {
+    fn new(capacity: usize) -> Self {
+        Self {
+            entries: HashMap::new(),
+            order: VecDeque::new(),
+            capacity: capacity.max(1),
+        }
+    }
+
+    fn touch(&mut self, key: &CacheKey) {
+        if let Some(index) = self.order.iter().position(|entry| entry == key) {
+            self.order.remove(index);
+        }
+        self.order.push_back(key.clone());
+    }
+
+    fn get(&mut self, key: &CacheKey) -> Option<SuccessResponse> {
+        let hit = self.entries.get(key).cloned();
+        if hit.is_some() {
+            self.touch(key);
+        }
+        hit
+    }
+
+    fn insert(&mut self, key: CacheKey, value: SuccessResponse) {
+        self.entries.insert(key.clone(), value);
+        self.touch(&key);
+        while self.entries.len() > self.capacity {
+            match self.order.pop_front() {
+                Some(evicted) => {
+                    self.entries.remove(&evicted);
+                }
+                None => break,
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct CacheKey {
     latex: String,
@@ -61,7 +117,7 @@ fn main() {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = io::BufWriter::new(stdout.lock());
-    let mut cache: HashMap<CacheKey, SuccessResponse> = HashMap::new();
+    let mut cache = RenderCache::new(CACHE_CAPACITY);
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -119,7 +175,7 @@ fn main() {
 
 fn handle_request(
     request: Request,
-    cache: &mut HashMap<CacheKey, SuccessResponse>,
+    cache: &mut RenderCache,
 ) -> Result<Response, (u64, String)> {
     let kind = request.kind.as_deref().unwrap_or("render");
     match kind {
@@ -136,7 +192,7 @@ fn handle_request(
 
 fn render_request(
     request: Request,
-    cache: &mut HashMap<CacheKey, SuccessResponse>,
+    cache: &mut RenderCache,
 ) -> Result<SuccessResponse, (u64, String)> {
     let latex = request
         .latex
@@ -172,7 +228,7 @@ fn render_request(
     };
 
     if let Some(cached) = cache.get(&key) {
-        let mut response = cached.clone();
+        let mut response = cached;
         response.id = request.id;
         response.cached = true;
         return Ok(response);

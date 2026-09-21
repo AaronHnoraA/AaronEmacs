@@ -115,10 +115,86 @@ region plus a small margin. `all' renders every detected fragment."
   "Extra lines above and below the visible window to include in initial scans."
   :type 'natnum)
 
+(defcustom ratex-fragment-max-chars 20000
+  "How far the detector may search around point for fragment delimiters.
+
+This bounds the work done on the post-command path.  Without it, typing an
+opening `$' or `\\(' that has no closing delimiter yet makes every refresh
+scan to the end of the buffer.
+
+It is generous rather than tight, because a bound small enough to matter for
+typical documents would truncate long but valid fragments.  Keeping the scan
+cheap is the job of early termination in the scanners, not of this number:
+they stop at the nearest enclosing delimiter instead of examining the window."
+  :type 'natnum)
+
 (defcustom ratex-max-svg-chars 400000
   "Maximum SVG payload size accepted from the backend for one preview."
   :type '(choice (const :tag "No limit" nil)
                  natnum))
+
+(defcustom ratex-preamble-function nil
+  "Function returning a LaTeX preamble prepended to every render request.
+
+Called with no arguments and expected to return a string of macro
+definitions, or nil.  The engine understands `\\def', `\\newcommand',
+`\\renewcommand' and `\\providecommand', so a host configuration can feed
+RaTeX the same macro set its other renderers use instead of maintaining a
+second one.
+
+The preamble is identical for every fragment, so it does not weaken caching:
+it is represented in the cache key by a short token rather than by its text."
+  :type '(choice (const :tag "None" nil) function)
+  :group 'ratex)
+
+(defcustom ratex-compat-rewrite-function nil
+  "Function rewriting fragment LaTeX before it reaches the engine.
+
+Called with the fragment's LaTeX string and expected to return a string.
+Use it for constructs the engine does not implement but which have a faithful
+equivalent it does, for example `multline' rendered as `gathered'."
+  :type '(choice (const :tag "None" nil) function)
+  :group 'ratex)
+
+(defvar ratex--preamble-cache nil
+  "Cons of (TEXT . TOKEN) for the preamble most recently produced.")
+
+(defun ratex-preamble ()
+  "Return the configured render preamble, or nil."
+  (when (functionp ratex-preamble-function)
+    (let ((text (condition-case err
+                    (funcall ratex-preamble-function)
+                  (error
+                   (ratex-debug-log "preamble function failed: %s"
+                                    (error-message-string err))
+                   nil))))
+      (when (and (stringp text) (not (string-empty-p text)))
+        text))))
+
+(defun ratex-preamble-token ()
+  "Return a short stable token identifying the current preamble.
+
+Used in cache keys so a macro change invalidates cached renders without
+storing the whole preamble alongside every entry."
+  (let ((text (ratex-preamble)))
+    (cond
+     ((null text) nil)
+     ((equal (car ratex--preamble-cache) text) (cdr ratex--preamble-cache))
+     (t
+      (let ((token (secure-hash 'sha1 text)))
+        (setq ratex--preamble-cache (cons text token))
+        token)))))
+
+(defun ratex-apply-compat-rewrite (latex)
+  "Return LATEX with `ratex-compat-rewrite-function' applied."
+  (if (functionp ratex-compat-rewrite-function)
+      (condition-case err
+          (let ((result (funcall ratex-compat-rewrite-function latex)))
+            (if (stringp result) result latex))
+        (error
+         (ratex-debug-log "compat rewrite failed: %s" (error-message-string err))
+         latex))
+    latex))
 
 (defcustom ratex-render-color nil
   "Default formula color sent to backend rendering.
@@ -159,6 +235,14 @@ when there isn't enough space, similar to eldoc-box's at-point behavior."
   "When non-nil, append runtime diagnostics to the RaTeX debug buffer."
   :type 'boolean)
 
+(defcustom ratex-debug-max-entry-chars 400
+  "Maximum characters kept from any single value written to the debug buffer."
+  :type '(choice (const :tag "No limit" nil) natnum))
+
+(defcustom ratex-debug-max-buffer-chars 200000
+  "Maximum size of the RaTeX debug buffer before old lines are dropped."
+  :type '(choice (const :tag "No limit" nil) natnum))
+
 (defcustom ratex-render-cache-limit 32
   "Maximum number of in-memory render results kept per buffer."
   :type 'integer)
@@ -194,15 +278,40 @@ when there isn't enough space, similar to eldoc-box's at-point behavior."
 (defvar ratex--backend-suspended-until nil)
 (defconst ratex--debug-buffer-name "*RaTeX Debug*")
 
+(defun ratex--debug-truncate (value)
+  "Return VALUE shortened to `ratex-debug-max-entry-chars'."
+  (let ((text (if (stringp value) value (format "%S" value)))
+        (limit ratex-debug-max-entry-chars))
+    (if (and (integerp limit) (> limit 0) (> (length text) limit))
+        (concat (substring text 0 limit)
+                (format "…<%d more chars>" (- (length text) limit)))
+      text)))
+
 (defun ratex-debug-log (format-string &rest args)
-  "Append a formatted debug line using FORMAT-STRING and ARGS."
+  "Append a formatted debug line using FORMAT-STRING and ARGS.
+
+Arguments are truncated and the buffer is capped, because two call sites log
+whole backend responses: without these bounds, turning `ratex-debug' on to
+investigate a slowdown is itself a significant slowdown."
   (when ratex-debug
     (with-current-buffer (get-buffer-create ratex--debug-buffer-name)
-      (goto-char (point-max))
-      (insert
-       (format-time-string "[%H:%M:%S.%3N] ")
-       (apply #'format format-string args)
-       "\n"))))
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert
+         (format-time-string "[%H:%M:%S.%3N] ")
+         (ratex--debug-truncate
+          (apply #'format format-string
+                 (mapcar (lambda (arg)
+                           (if (stringp arg) (ratex--debug-truncate arg) arg))
+                         args)))
+         "\n")
+        (when (and (integerp ratex-debug-max-buffer-chars)
+                   (> ratex-debug-max-buffer-chars 0)
+                   (> (buffer-size) ratex-debug-max-buffer-chars))
+          (delete-region (point-min)
+                         (save-excursion
+                           (goto-char (- (point-max) ratex-debug-max-buffer-chars))
+                           (line-beginning-position 2))))))))
 
 (defun ratex-debug-open-buffer ()
   "Open the RaTeX debug buffer."
@@ -254,6 +363,28 @@ when there isn't enough space, similar to eldoc-box's at-point behavior."
     (ratex--warn
      (format "RaTeX backend suspended for %.1fs after repeated launch failures."
              ratex-backend-restart-cooldown))))
+
+(defun ratex--response-ok-p (response)
+  "Return non-nil when backend RESPONSE reports success.
+
+Accepts every falsey spelling a JSON reader may produce, so no caller has to
+know which reader parsed the line."
+  (let ((ok (alist-get 'ok response)))
+    (and ok
+         (not (memq ok '(:false :json-false false)))
+         t)))
+
+(defun ratex-response-error (response)
+  "Return the error text carried by a failed backend RESPONSE, or nil."
+  (unless (ratex--response-ok-p response)
+    (let ((text (alist-get 'error response)))
+      (if (and (stringp text) (not (string-empty-p text)))
+          text
+        "render failed"))))
+
+(defun ratex--error-response (message-text)
+  "Return a synthetic failed response carrying MESSAGE-TEXT."
+  (list (cons 'ok nil) (cons 'error message-text)))
 
 (defun ratex--cancel-pending-timeout (id)
   "Cancel and forget the timeout timer associated with request ID."
@@ -324,12 +455,25 @@ When CALLBACK is non-nil, invoke it with the live process once startup succeeds.
     nil)))
 
 (defun ratex-stop-backend ()
-  "Stop the backend process."
+  "Stop the backend process and drop every pending request.
+
+Called interactively, from `kill-emacs-hook', and when the last `ratex-mode'
+buffer goes away -- the backend holds a render cache of fully embedded SVGs,
+so an idle process is not free."
   (interactive)
   (when (ratex-backend-live-p)
     (ratex-debug-log "stop backend")
+    ;; The sentinel resolves pending requests and cancels their timers.
     (delete-process ratex--process))
-  (setq ratex--process nil))
+  (setq ratex--process nil)
+  (setq ratex--read-chunks nil
+        ratex--read-buffer ""))
+
+(defun ratex--kill-emacs-h ()
+  "Stop the backend before Emacs exits."
+  (ignore-errors (ratex-stop-backend)))
+
+(add-hook 'kill-emacs-hook #'ratex--kill-emacs-h)
 
 (defun ratex-download-backend ()
   "Download the backend binary from GitHub Releases asynchronously."
@@ -464,7 +608,7 @@ instead of downloading a pre-built binary."
           (ratex-debug-log "request timeout #%s" request-id)
           (ratex--resolve-pending-request
            request-id
-           '((ok . :false) (error . "backend request timed out"))))
+           (ratex--error-response "backend request timed out")))
         id)
        ratex--pending-timers))
     (ratex-start-backend
@@ -475,7 +619,7 @@ instead of downloading a pre-built binary."
          ;; does not accumulate forever in ratex--pending.
          (ratex--resolve-pending-request
           id
-          '((ok . :false) (error . "backend unavailable"))))))
+          (ratex--error-response "backend unavailable")))))
     id))
 
 (defun ratex-ping (callback)
@@ -509,22 +653,28 @@ for large SVG payloads."
 (defun ratex--dispatch-line (line)
   "Dispatch one backend output LINE."
   (ratex-debug-log "dispatch line=%s" line)
-  (let* ((json-object-type 'alist)
-         (json-key-type 'symbol)
-         (json-array-type 'list)
-         (json-false :false)
-        (data (ignore-errors (json-read-from-string line))))
+  ;; `json-parse-string' is the C reader and is markedly faster on the large
+  ;; SVG payloads this protocol carries.  `:false-object nil' is a correctness
+  ;; fix, not just a speed one: json.el maps JSON `false' to a keyword, and
+  ;; every keyword is non-nil in Lisp, so an `"ok": false' error response used
+  ;; to test as a success in every caller downstream.
+  (let ((data (condition-case nil
+                  (json-parse-string line
+                                     :object-type 'alist
+                                     :array-type 'list
+                                     :false-object nil
+                                     :null-object nil)
+                (error nil))))
     (when data
-      (let* ((id (alist-get 'id data))
-             (_callback (gethash id ratex--pending)))
-        (when _callback
+      (let ((id (alist-get 'id data)))
+        (when (gethash id ratex--pending)
           (ratex--resolve-pending-request id data))))))
 
 (defun ratex--process-sentinel (proc event)
   "Handle backend PROC EVENT."
   (ratex-debug-log "process sentinel live=%s event=%s" (process-live-p proc) (string-trim event))
   (unless (process-live-p proc)
-    (let ((error-response `((ok . :false) (error . ,(string-trim event))))
+    (let ((error-response (ratex--error-response (string-trim event)))
           pending-ids
           timer-ids)
       (maphash
@@ -597,7 +747,7 @@ for large SVG payloads."
                            (ratex--backend-download-url)
                          (error (format "ERROR: %s" (error-message-string err)))))
          (valid (condition-case err
-                    (ratex--backend-file-valid-p binary)
+                    (and (ratex--backend-file-valid-p binary) t)
                   (error (format "ERROR: %s" (error-message-string err)))))
          (message-text
           (format

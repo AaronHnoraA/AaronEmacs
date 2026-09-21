@@ -124,17 +124,12 @@ If one of FEATURES is already available, require MODULE immediately."
                    my/latex-preview-open-pdf
                    my/latex-sync-forward
                    my/latex-sync-forward-mouse
-                   my/latex-preview-at-point
-                   my/latex-preview-region
-                   my/latex-preview-buffer
-                   my/latex-preview-document
-                   my/latex-preview-clear-at-point
-                   my/latex-preview-clear-region-or-section
-                   my/latex-preview-clear-buffer
-                   my/latex-preview-clear-document
                    my/latex-preview-compile-and-view
                    my/latex-preview-view-pdf))
   (autoload command "init-auctex" nil t))
+;; Math-fragment preview is RaTeX, configured in init-latex.el; its doctor is
+;; the entry point when a preview misbehaves.
+(autoload 'my/latex-preview-doctor "init-latex" nil t)
 (my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
 (my/require-module-safely 'init-browser)
 (my/require-module-safely 'init-fzfs)

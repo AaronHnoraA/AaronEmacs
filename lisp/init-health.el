@@ -245,9 +245,37 @@
                   (ignore-errors (locate-library (cdr entry)))))
           my/health-critical-libraries))
 
+(defconst my/health-noema-asset-links
+  '("etc/katex-macros"
+    "etc/prose-accepted-words.txt"
+    "templates/latex"
+    "templates/tex"
+    "templates/noema")
+  "Links from this config into `site-lisp/noema/resources/'.
+
+These are the single source of truth for math macros, prose dictionaries and
+LaTeX templates.  They were once committed with absolute paths into a Noema
+checkout that later moved, and a dangling link fails silently: Emacs exports
+the dead path to the Noema server, which then loads no macros and no export
+templates at all.  Check them so that cannot happen quietly again.")
+
+(defun my/health--noema-asset-link-report ()
+  "Return each shared Noema asset link and whether it still resolves."
+  (mapcar
+   (lambda (relative)
+     (let ((path (expand-file-name relative user-emacs-directory)))
+       (cons (intern relative)
+             (cond
+              ((file-exists-p path) t)
+              ((file-symlink-p path)
+               (format "dangling -> %s" (file-symlink-p path)))
+              (t "missing")))))
+   my/health-noema-asset-links))
+
 (defun my/health--artifact-report ()
   "Return critical runtime artifact availability as an alist."
   (list
+   (cons 'noema-asset-links (my/health--noema-asset-link-report))
    (cons 'epdfinfo
          (let ((path (my/health--bundled-epdfinfo)))
            (and (file-executable-p path) path)))

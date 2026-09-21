@@ -156,6 +156,14 @@ This config already has maintenance and workflow entry points. Reuse them:
 - Templates: the built-in `auto-insert` template layer in
   `lisp/init-auto-insert.el`; do not revive the old Doom/Yasnippet file-template
   path.
+- LaTeX math preview: RaTeX, configured in `lisp/lang/tex/init-latex.el`, with
+  `my/latex-preview-doctor` as the diagnostic entry point.  Math macros and TeX
+  compatibility rules have one source, `site-lisp/noema/resources/`, which the
+  Emacs preview and Noema's KaTeX renderer both read through the relative links
+  in `etc/` and `templates/`.  Do not add a second macro table, a second
+  preamble, or a fourth parser for that subset — extend the shared files and
+  the `shared/katex-macro-fixtures.json` contract instead.  See
+  `docs/latex-preview.md`.
 - Config registry: the `config` package under `site-lisp/config/`
   (`config-register`, `config-register-hook`, `config-register-file`,
   `config-get`, `config-set`, `config-reset`, `config-board`). When a setting

@@ -25,12 +25,76 @@
     (let ((fragment (ratex-fragment-at-point)))
       (should (equal (plist-get fragment :content) "x^2")))))
 
-(ert-deftest ratex-detects-single-dollar-math-but-ignores-display-dollars ()
+(ert-deftest ratex-detects-single-and-display-dollar-math ()
+  "`$$' is display math and must not be split into two `$' fragments."
   (with-temp-buffer
     (insert "hello $$x^2$$ world and $y$")
     (let ((fragments (ratex-fragments-in-buffer)))
+      (should (= (length fragments) 2))
+      (should (equal (plist-get (nth 0 fragments) :open) "$$"))
+      (should (equal (plist-get (nth 0 fragments) :content) "x^2"))
+      (should (equal (plist-get (nth 1 fragments) :open) "$"))
+      (should (equal (plist-get (nth 1 fragments) :content) "y")))))
+
+(ert-deftest ratex-detects-multiline-display-dollar-math ()
+  (with-temp-buffer
+    (insert "text\n$$\n\\frac{a}{b}\n$$\nmore")
+    (let ((fragments (ratex-fragments-in-buffer)))
       (should (= (length fragments) 1))
-      (should (equal (plist-get (car fragments) :content) "y")))))
+      (should (equal (plist-get (car fragments) :open) "$$"))
+      (should (equal (string-trim (plist-get (car fragments) :content))
+                     "\\frac{a}{b}")))))
+
+(ert-deftest ratex-display-dollar-math-renders-in-display-style ()
+  (with-temp-buffer
+    (insert "$$x^2$$")
+    (goto-char 4)
+    (let ((fragment (ratex-fragment-at-point)))
+      (should (equal (plist-get fragment :open) "$$"))
+      (should (equal (ratex--render-latex fragment) "\\displaystyle x^2")))))
+
+(ert-deftest ratex-detects-standalone-math-environments ()
+  (dolist (name '("align" "equation" "gather" "cases" "pmatrix" "aligned"))
+    (with-temp-buffer
+      (insert (format "before\n\\begin{%s}\n  a = b\n\\end{%s}\nafter" name name))
+      (goto-char (point-min))
+      (should (search-forward "a = b" nil t))
+      (goto-char (match-beginning 0))
+      (let ((fragment (ratex-fragment-at-point)))
+        (should fragment)
+        (should (equal (plist-get fragment :environment) name))
+        (should (ratex--fragment-valid-p fragment))
+        ;; Environments are sent whole; the engine needs the wrapper.
+        (should (string-prefix-p (format "\\begin{%s}" name)
+                                 (ratex--render-latex fragment)))
+        (should (string-suffix-p (format "\\end{%s}" name)
+                                 (ratex--render-latex fragment)))))))
+
+(ert-deftest ratex-ignores-non-math-environments ()
+  (with-temp-buffer
+    (insert "\\begin{figure}\n  not math\n\\end{figure}")
+    (goto-char (point-min))
+    (should (search-forward "not math" nil t))
+    (goto-char (match-beginning 0))
+    (should-not (ratex-fragment-at-point))
+    (should (null (ratex-fragments-in-buffer)))))
+
+(ert-deftest ratex-nested-environment-prefers-outer ()
+  (with-temp-buffer
+    (insert "\\begin{align}\n x &= \\begin{cases} 1 \\end{cases}\n\\end{align}")
+    (goto-char (point-min))
+    (should (search-forward "1 " nil t))
+    (goto-char (match-beginning 0))
+    (let ((fragment (ratex-fragment-at-point)))
+      (should (equal (plist-get fragment :environment) "align")))))
+
+(ert-deftest ratex-environment-line-break-is-not-a-bracket-fragment ()
+  "`\\\\[2pt]' inside an environment must not read as `\\[' math."
+  (with-temp-buffer
+    (insert "\\begin{align}\n a &= b \\\\[2pt]\n c &= d\n\\end{align}")
+    (let ((fragments (ratex-fragments-in-buffer)))
+      (should (= (length fragments) 1))
+      (should (equal (plist-get (car fragments) :environment) "align")))))
 
 (ert-deftest ratex-single-dollar-math-ignores-escaped-delimiters ()
   (with-temp-buffer
@@ -938,3 +1002,110 @@
 (provide 'ratex-tests)
 
 ;;; ratex-tests.el ends here
+
+;;; Backend failure handling ---------------------------------------------------
+
+(ert-deftest ratex-json-false-is-a-failed-response ()
+  "The backend reports failure as JSON `false'.
+
+json.el maps that to a keyword and every keyword is non-nil in Lisp, so a
+naive `alist-get' test treated every parse error, timeout and dead backend as
+a successful render with no image -- the preview simply vanished and nothing
+was ever reported."
+  (should (ratex--response-ok-p '((ok . t) (svg . "<svg/>"))))
+  (should-not (ratex--response-ok-p '((ok . :false) (error . "parse error"))))
+  (should-not (ratex--response-ok-p '((ok . :json-false) (error . "parse error"))))
+  (should-not (ratex--response-ok-p '((ok) (error . "parse error"))))
+  (should (equal (ratex-response-error '((ok . :false) (error . "boom"))) "boom"))
+  (should-not (ratex-response-error '((ok . t)))))
+
+(ert-deftest ratex-dispatch-line-parses-false-as-nil ()
+  (let* ((ratex--pending (make-hash-table :test #'eql))
+         (ratex--pending-timers (make-hash-table :test #'eql))
+         captured)
+    (puthash 7 (lambda (response) (setq captured response)) ratex--pending)
+    (ratex--dispatch-line "{\"id\":7,\"ok\":false,\"error\":\"parse error: x\"}")
+    (should captured)
+    (should-not (ratex--response-ok-p captured))
+    (should (equal (alist-get 'error captured) "parse error: x"))))
+
+(ert-deftest ratex-failed-render-records-and-reports-the-error ()
+  (with-temp-buffer
+    (insert "\\(x\\)")
+    (goto-char 3)
+    (ratex-reset-buffer-state)
+    (let ((fragment (ratex-fragment-at-point))
+          (shown nil))
+      (cl-letf (((symbol-function 'ratex--preview-enabled-p) (lambda () t))
+                ((symbol-function 'ratex--display-edit-preview)
+                 (lambda (_fragment &optional _response _image error-text)
+                   (setq shown error-text)
+                   t)))
+        (ratex--display-response (ratex--fragment-key fragment) fragment
+                                 '((ok . :false) (error . "Undefined control sequence")))
+        ;; Visible in the preview, and recorded for the doctor -- but not
+        ;; pushed through `message', which runs on every keystroke.
+        (should (equal shown "Undefined control sequence"))
+        (should (equal ratex--last-error "Undefined control sequence"))))))
+
+(ert-deftest ratex-caches-render-failures-but-not-transport-failures ()
+  "A half-typed formula must stop being re-sent on every keystroke, while a
+timeout or a dead backend has to be retried."
+  (should (ratex--cacheable-response-p '((ok . t) (svg . "<svg/>"))))
+  (should (ratex--cacheable-response-p
+           '((ok . :false) (error . "parse error: Undefined control sequence"))))
+  (should-not (ratex--cacheable-response-p
+               '((ok . :false) (error . "backend request timed out"))))
+  (should-not (ratex--cacheable-response-p
+               '((ok . :false) (error . "backend unavailable")))))
+
+(ert-deftest ratex-reset-keeps-inflight-tables-identical ()
+  "Resetting must clear the tables in place: a reply already in flight closed
+over them, and swapping in fresh ones dropped the render silently."
+  (with-temp-buffer
+    (ratex-reset-buffer-state)
+    (let ((requests ratex--inflight-requests)
+          (waiters ratex--inflight-waiters))
+      (puthash "k" t requests)
+      (puthash "k" '(("f")) waiters)
+      (ratex-reset-buffer-state)
+      (should (eq requests ratex--inflight-requests))
+      (should (eq waiters ratex--inflight-waiters))
+      (should (= 0 (hash-table-count requests)))
+      (should (= 0 (hash-table-count waiters))))))
+
+(ert-deftest ratex-preamble-token-tracks-the-preamble ()
+  (let ((ratex--preamble-cache nil)
+        (text "\\def\\R{\\mathbb{R}}"))
+    (let ((ratex-preamble-function (lambda () text)))
+      (let ((first (ratex-preamble-token)))
+        (should first)
+        (should (equal first (ratex-preamble-token)))
+        (setq text "\\def\\R{\\mathbb{Q}}")
+        (should-not (equal first (ratex-preamble-token)))))
+    (let ((ratex-preamble-function nil))
+      (should-not (ratex-preamble-token)))))
+
+(ert-deftest ratex-payload-prepends-the-shared-preamble ()
+  (with-temp-buffer
+    (insert "\\(x\\)")
+    (goto-char 3)
+    (let* ((ratex-preamble-function (lambda () "\\def\\R{\\mathbb{R}}"))
+           (fragment (ratex-fragment-at-point))
+           (latex (alist-get 'latex (ratex--render-payload fragment))))
+      (should (string-prefix-p "\\def\\R{\\mathbb{R}}" latex))
+      (should (string-suffix-p "x" latex)))))
+
+(ert-deftest ratex-compat-rewrite-runs-before-rendering ()
+  (with-temp-buffer
+    (insert "\\begin{multline}\na\n\\end{multline}")
+    (goto-char (point-min))
+    (search-forward "a")
+    (goto-char (match-beginning 0))
+    (let* ((ratex-compat-rewrite-function
+            (lambda (latex)
+              (replace-regexp-in-string "multline" "gathered" latex t t)))
+           (fragment (ratex-fragment-at-point)))
+      (should (equal (plist-get fragment :environment) "multline"))
+      (should (string-match-p "\\\\begin{gathered}" (ratex--render-latex fragment)))
+      (should-not (string-match-p "multline" (ratex--render-latex fragment))))))

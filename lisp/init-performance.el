@@ -184,51 +184,50 @@
 (defun my/performance--org-summary-sample ()
   "Return aggregate Org runtime metrics."
   (let ((buffers 0)
-        (visible 0)
-        (latex-enabled 0)
-        (latex-running 0)
-        (latex-queued 0)
-        (latex-overlays 0)
-        (latex-pending 0))
+        (visible 0))
     (dolist (buffer (my/performance--org-buffers))
       (setq buffers (1+ buffers))
       (when (my/performance--buffer-visible-p buffer)
-        (setq visible (1+ visible)))
-      (with-current-buffer buffer
-        (when (bound-and-true-p my/org-latex--scroll-preview-enabled)
-          (setq latex-enabled (1+ latex-enabled)))
-        (setq latex-running
-              (+ latex-running
-                 (if (boundp 'my/org-latex--render-running)
-                     my/org-latex--render-running
-                   0)))
-        (setq latex-queued
-              (+ latex-queued
-                 (if (boundp 'my/org-latex--render-queue)
-                     (my/performance--list-length my/org-latex--render-queue)
-                   0)))
-        (setq latex-overlays
-              (+ latex-overlays
-                 (if (boundp 'my/org-latex--overlay-table)
-                     (my/performance--hash-count my/org-latex--overlay-table)
-                   0)))
-        (setq latex-pending
-              (+ latex-pending
-                 (if (boundp 'my/org-latex--pending-renders)
-                     (my/performance--hash-count my/org-latex--pending-renders)
-                   0)))))
+        (setq visible (1+ visible))))
     (list :buffers buffers
-          :visible visible
-          :latex-enabled latex-enabled
-          :latex-running latex-running
-          :latex-queued latex-queued
-          :latex-overlays latex-overlays
-          :latex-pending latex-pending)))
+          :visible visible)))
+
+(defun my/performance--math-preview-sample ()
+  "Return aggregate math-preview (RaTeX) runtime metrics.
+
+Replaces telemetry for an Org LaTeX preview engine that no longer exists:
+the old fields probed `my/org-latex--*' variables that nothing defines, so
+they reported zero unconditionally."
+  (let ((buffers 0)
+        (cached 0)
+        (inflight 0))
+    (dolist (buffer (buffer-list))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (when (bound-and-true-p ratex-mode)
+            (setq buffers (1+ buffers))
+            (setq cached
+                  (+ cached (my/performance--hash-count
+                             (and (boundp 'ratex--render-cache)
+                                  ratex--render-cache))))
+            (setq inflight
+                  (+ inflight (my/performance--hash-count
+                               (and (boundp 'ratex--inflight-requests)
+                                    ratex--inflight-requests))))))))
+    (list :buffers buffers
+          :cached cached
+          :inflight inflight
+          :backend-live (and (fboundp 'ratex-backend-live-p)
+                             (ratex-backend-live-p)
+                             t)
+          :pending (my/performance--hash-count
+                    (and (boundp 'ratex--pending) ratex--pending)))))
 
 (defun my/performance--sample ()
   "Return a structured performance sample."
   (let* ((process (my/performance--self-process-sample))
          (org (my/performance--org-summary-sample))
+         (math (my/performance--math-preview-sample))
          (descendants (my/performance--descendant-tree-snapshot)))
     (list :timestamp (format-time-string "%Y-%m-%d %H:%M:%S")
           :unix-time (float-time)
@@ -248,11 +247,11 @@
           :gc-elapsed gc-elapsed
           :org-buffers (plist-get org :buffers)
           :org-visible (plist-get org :visible)
-          :org-latex-enabled (plist-get org :latex-enabled)
-          :org-latex-running (plist-get org :latex-running)
-          :org-latex-queued (plist-get org :latex-queued)
-          :org-latex-overlays (plist-get org :latex-overlays)
-          :org-latex-pending (plist-get org :latex-pending))))
+          :math-preview-buffers (plist-get math :buffers)
+          :math-preview-cached (plist-get math :cached)
+          :math-preview-inflight (plist-get math :inflight)
+          :math-preview-pending (plist-get math :pending)
+          :math-preview-backend-live (plist-get math :backend-live))))
 
 (defun my/performance-record-file (&optional time)
   "Return the performance record file for TIME or now."
@@ -264,8 +263,8 @@
 (defconst my/performance--record-fields
   '(:timestamp :pid :cpu :mem :rss-kb :vsz-kb :buffers :processes
     :timers :idle-timers :gcs :gc-elapsed :org-buffers :org-visible
-    :org-latex-enabled :org-latex-running :org-latex-queued
-    :org-latex-overlays :org-latex-pending)
+    :math-preview-buffers :math-preview-cached :math-preview-inflight
+    :math-preview-pending :math-preview-backend-live)
   "Fields saved to performance record files.")
 
 (defun my/performance--record-header ()
@@ -523,61 +522,35 @@ The return value is a list of plists with `:hook', `:global-count',
   (mapcar
    (lambda (buffer)
      (with-current-buffer buffer
-       (let ((running (if (boundp 'my/org-latex--render-running)
-                          my/org-latex--render-running
-                        0))
-             (queued (if (boundp 'my/org-latex--render-queue)
-                         (my/performance--list-length
-                          my/org-latex--render-queue)
-                       0))
-             (overlays (if (boundp 'my/org-latex--overlay-table)
-                           (my/performance--hash-count my/org-latex--overlay-table)
-                         0))
-             (pending (if (boundp 'my/org-latex--pending-renders)
-                          (my/performance--hash-count my/org-latex--pending-renders)
-                        0)))
-         (list :buffer (buffer-name buffer)
-               :size (buffer-size)
-               :visible (and (my/performance--buffer-visible-p buffer) t)
-               :modified (buffer-modified-p)
-               :major-mode major-mode
-               :post-command-count
-               (my/performance--hook-count post-command-hook)
-               :after-change-count
-               (my/performance--hook-count after-change-functions)
-               :jit-lock-count
-               (my/performance--hook-count
-                (and (boundp 'jit-lock-functions) jit-lock-functions))
-               :latex-enabled
-               (bound-and-true-p my/org-latex--scroll-preview-enabled)
-               :latex-running running
-               :latex-queued queued
-               :latex-overlays overlays
-               :latex-pending pending))))
+       (list :buffer (buffer-name buffer)
+             :size (buffer-size)
+             :visible (and (my/performance--buffer-visible-p buffer) t)
+             :modified (buffer-modified-p)
+             :major-mode major-mode
+             :post-command-count
+             (my/performance--hook-count post-command-hook)
+             :after-change-count
+             (my/performance--hook-count after-change-functions)
+             :jit-lock-count
+             (my/performance--hook-count
+              (and (boundp 'jit-lock-functions) jit-lock-functions)))))
    (my/performance--org-buffers)))
 
 (defun my/performance--insert-org-buffers ()
   "Insert Org-specific runtime state."
   (my/performance--section "Org Buffers")
-  (insert (format "%-28s %8s %-7s %-6s %-5s %-5s %-5s %-5s %-7s %-7s %-8s\n"
-                  "Buffer" "Size" "Visible" "Mod" "Post" "AChg" "JIT"
-                  "Latex" "Run/Q" "Overlay" "Pending"))
+  (insert (format "%-28s %8s %-7s %-6s %-5s %-5s %-5s\n"
+                  "Buffer" "Size" "Visible" "Mod" "Post" "AChg" "JIT"))
   (dolist (row (my/performance-org-buffer-snapshot))
     (insert
-     (format "%-28s %8d %-7s %-6s %-5d %-5d %-5d %-5s %-7s %-7d %-8d\n"
+     (format "%-28s %8d %-7s %-6s %-5d %-5d %-5d\n"
              (truncate-string-to-width (plist-get row :buffer) 28 nil nil t)
              (plist-get row :size)
              (if (plist-get row :visible) "yes" "no")
              (if (plist-get row :modified) "yes" "no")
              (plist-get row :post-command-count)
              (plist-get row :after-change-count)
-             (plist-get row :jit-lock-count)
-             (if (plist-get row :latex-enabled) "on" "off")
-             (format "%s/%s"
-                     (plist-get row :latex-running)
-                     (plist-get row :latex-queued))
-             (plist-get row :latex-overlays)
-             (plist-get row :latex-pending))))
+             (plist-get row :jit-lock-count))))
   (insert "\n"))
 
 (defun my/performance-buffer-hotspot-snapshot (&optional limit)
@@ -720,17 +693,19 @@ This samples once and does not mutate or display the performance board."
    (number-to-string (plist-get sample :org-buffers))
    (/ (float (plist-get sample :org-buffers)) 20.0))
   (my/performance--insert-metric
-   "LaTeX queue"
-   (format "%s/%s"
-           (plist-get sample :org-latex-running)
-           (plist-get sample :org-latex-queued))
-   (/ (float (+ (plist-get sample :org-latex-running)
-                (plist-get sample :org-latex-queued)))
-      12.0))
+   "Math preview"
+   (format "%s buf, backend %s"
+           (plist-get sample :math-preview-buffers)
+           (if (plist-get sample :math-preview-backend-live) "up" "down"))
+   (/ (float (plist-get sample :math-preview-buffers)) 12.0))
   (my/performance--insert-metric
    "Pending renders"
-   (number-to-string (plist-get sample :org-latex-pending))
-   (/ (float (plist-get sample :org-latex-pending)) 24.0))
+   (format "%s in flight, %s queued"
+           (plist-get sample :math-preview-inflight)
+           (plist-get sample :math-preview-pending))
+   (/ (float (+ (plist-get sample :math-preview-inflight)
+                (plist-get sample :math-preview-pending)))
+      24.0))
   (insert "\n"))
 
 (defun my/performance--auto-refresh-buffer (buffer)

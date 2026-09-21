@@ -98,6 +98,40 @@ make audit-ui-tokens
 - 如果继续 vendored 管理，需要把整个 `site-lisp/general.el/` 保留在仓库或迁移快照中
 - 如果改成 package / VC 包管理，需要同步更新 `init.el` 的 load-path 和 package 恢复流程
 
+#### site-lisp/ratex.el —— 带本地改动的 fork
+
+数学公式预览引擎（见 [latex-preview.md](latex-preview.md)）。上游是
+`gongshangzheng/ratex.el`，本仓库在其上有实质改动，升级时必须逐条 rebase，
+不能直接覆盖：
+
+- `lisp/ratex-core.el`：JSON `false` 按假值解析（上游把它解析成关键字，而关键字在
+  Elisp 里是真值，导致**每一条后端错误都被当成成功**）；`ratex--response-ok-p`；
+  debug 日志截断与缓冲区上限；`kill-emacs-hook` 停止后端；`ratex-preamble-function`
+  与 `ratex-compat-rewrite-function` 两个通用钩子；`ratex-fragment-max-chars`。
+- `lisp/ratex-math-detect.el`：新增 `$$…$$` 与 `\begin{…}` 环境识别；
+  at-point 扫描器从二次复杂度改为窗口内一次线性扫描。
+- `lisp/ratex-render.el`：失败渲染在 posframe 里显示错误而不是静默消失；负缓存；
+  真正 arm 那个此前是死代码的 staleness 定时器；posframe 连续失败计数；
+  状态复位改为原地 `clrhash`，不再丢弃在途请求。
+- `lisp/ratex.el`：全局钩子从 `buffer-list-update-hook` 换成 window-change 钩子；
+  最后一个 ratex buffer 关闭时停掉后端。
+- `backend/src/main.rs`：渲染缓存加容量上限与 LRU 淘汰（上游无上限，每条都是内嵌
+  字形的完整 SVG）。这是唯一需要 `cargo` 的部分：`M-x ratex-build-backend`。
+- `test/ratex-tests.el`：新增上述行为的测试；其中断言"`$$` 不被识别"的那条旧用例
+  已按新契约改写。
+
+`ratex-auto-download-backend` 在 `init-latex.el` 里被设为 `nil`：默认值 `t` 会在
+启动失败时删掉本地编译的二进制，换成上游 release，版本可能与 vendored
+`ratex-core` 不匹配。
+
+#### 共享资产软链接
+
+`etc/` 与 `templates/` 下指向 `site-lisp/noema/resources/` 的五条链接
+（`katex-macros`、`prose-accepted-words.txt`、`templates/latex|tex|noema`）
+**必须是相对路径**。它们曾经被以绝对路径提交，指向一个后来搬走的 Noema 检出；
+断链之后 Emacs 仍会把死路径通过环境变量交给 Noema，两边都静默加载不到宏和模板。
+`make doctor` 现在会检查这五条链接。
+
 ### 新机器迁移时怎么做
 
 执行：

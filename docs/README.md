@@ -26,6 +26,7 @@ channels.
 ## By Workflow
 
 - [project-guide.md](project-guide.md) Project switching, project workbench flow, and how Treemacs / Perspective fit together.
+- [latex-preview.md](latex-preview.md) In-buffer math preview: supported delimiters, the shared macro source Emacs and Noema both read, the doctor, and the troubleshooting order.
 - [typst-math-macros.md](typst-math-macros.md) Shared Typst math macros and matching snippets for TCS, quantum computing, algebra, computing, and physics notes.
 - [dev-guide.md](dev-guide.md) Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
 - [workbench-tools.md](workbench-tools.md) Adopted Xenodium editing, file, GitHub, Bazel, calendar, Org, and macOS workbenches, with keybindings and design boundaries.
@@ -52,6 +53,7 @@ channels.
 - Want Noema tasks/agenda: [agenda.md](agenda.md)
 - Want to change behavior: [settings-cookbook.md](settings-cookbook.md)
 - Want the project workflow: [project-guide.md](project-guide.md)
+- Want math preview behaviour or a formula that will not render: [latex-preview.md](latex-preview.md)
 - Want programming / LSP / remote details: [dev-guide.md](dev-guide.md)
 - Want maintenance and lock/state guidance: [maintenance.md](maintenance.md)
 - Running on Neomacs instead of GNU Emacs: [neomacs-compat.md](neomacs-compat.md)

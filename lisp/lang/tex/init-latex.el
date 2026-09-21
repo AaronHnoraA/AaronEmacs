@@ -505,12 +505,248 @@ texlab is preferred; digestif is the fallback."
   :defer t
   :commands (zotero-browser))
 
+;; ---------------------------------------------------------------------------
+;; Shared LaTeX assets: one macro set for the Emacs preview and for Noema
+;; ---------------------------------------------------------------------------
+;;
+;; `site-lisp/noema/resources/' is the single source of truth for math macros
+;; and TeX compatibility rules; `etc/katex-macros' links there.  Noema parses
+;; those files for KaTeX, and RaTeX is a KaTeX-compatible engine, so feeding
+;; both from the same files is what makes the preview in a buffer agree with
+;; the rendered note.  See `docs/latex-preview.md'.
+
+(defvar my/latex-katex-macros-directory
+  (expand-file-name "etc/katex-macros" user-emacs-directory)
+  "Directory of .tex files defining the shared math macro environment.
+Kept in sync with `my/noema--katex-macros-dir' -- the same files, read by
+both renderers.")
+
+(defvar my/latex-tex-compat-rules-file
+  (expand-file-name "site-lisp/noema/shared/tex-compat-rules.json"
+                    user-emacs-directory)
+  "JSON file listing TeX constructs rewritten before rendering.")
+
+(defconst my/latex--macro-definition-re
+  (concat "\\\\\\(newcommand\\|renewcommand\\|providecommand"
+          "\\|DeclareMathOperator\\|def\\)\\(\\*?\\)")
+  "Regexp matching the macro definition forms in the shared preamble.")
+
+(defvar my/latex--katex-preamble-cache nil
+  "Cons of (SIGNATURE . PREAMBLE) for the last compiled macro preamble.")
+
+(defun my/latex--strip-tex-comments ()
+  "Remove unescaped `%' comments from the current buffer."
+  (goto-char (point-min))
+  (while (re-search-forward "%" nil t)
+    (let ((start (match-beginning 0)))
+      (if (and (> start (point-min))
+               (eq (char-before start) ?\\))
+          nil
+        (delete-region start (line-end-position))))))
+
+(defun my/latex--read-brace-group ()
+  "Read a balanced `{...}' group at point and return its contents, or nil.
+Point is left just past the closing brace.  Backslash escapes do not nest."
+  (when (eq (char-after) ?{)
+    (let ((depth 0)
+          (start (1+ (point)))
+          result)
+      (while (and (null result) (not (eobp)))
+        (pcase (char-after)
+          (?\\ (forward-char 1))
+          (?{ (setq depth (1+ depth)))
+          (?} (setq depth (1- depth))
+              (when (zerop depth)
+                (setq result (buffer-substring-no-properties start (point)))))
+          (_ nil))
+        (forward-char 1))
+      result)))
+
+(defun my/latex--read-macro-name ()
+  "Read a macro name at point, as `{\\name}' or a bare `\\name'."
+  (skip-chars-forward " \t\n")
+  (cond
+   ((eq (char-after) ?{)
+    (let ((group (my/latex--read-brace-group)))
+      (when (and group (string-match-p "\\`\\\\\\([A-Za-z]+\\|.\\)\\'"
+                                       (string-trim group)))
+        (string-trim group))))
+   ((eq (char-after) ?\\)
+    (let ((start (point)))
+      (forward-char 1)
+      (if (looking-at "[A-Za-z]+")
+          (goto-char (match-end 0))
+        (forward-char 1))
+      (buffer-substring-no-properties start (point))))
+   (t nil)))
+
+(defun my/latex--read-optional-arity ()
+  "Read consecutive `[...]' groups at point, returning the first as a number."
+  (let ((arity 0)
+        (first t))
+    (while (progn (skip-chars-forward " \t\n") (eq (char-after) ?\[))
+      (let ((start (1+ (point))))
+        (when (search-forward "]" nil t)
+          (when first
+            (setq arity (or (ignore-errors
+                              (string-to-number
+                               (string-trim
+                                (buffer-substring-no-properties
+                                 start (1- (point))))))
+                            0))
+            (setq first nil)))))
+    arity))
+
+(defun my/latex--read-def-parameters ()
+  "Read a plain-TeX `#1#2...' parameter text at point, returning its arity."
+  (let ((arity 0))
+    (while (and (eq (char-after) ?#)
+                (looking-at "#\\([0-9]\\)"))
+      (setq arity (max arity (string-to-number (match-string 1))))
+      (goto-char (match-end 0)))
+    arity))
+
+(defun my/latex-parse-macro-definitions (text)
+  "Parse TEXT as a LaTeX preamble and return an alist of (NAME ARITY BODY).
+
+Recognizes the same subset as `site-lisp/noema/shared/katex-macros.mjs':
+`\\newcommand' and its re-/provide- variants, `\\DeclareMathOperator', and
+`\\def'.  Later definitions win, matching both other implementations."
+  (with-temp-buffer
+    (insert text)
+    (my/latex--strip-tex-comments)
+    (goto-char (point-min))
+    (let (definitions)
+      (while (re-search-forward my/latex--macro-definition-re nil t)
+        (let ((kind (match-string 1))
+              (starred (string= (match-string 2) "*")))
+          (when-let* ((name (my/latex--read-macro-name)))
+            (pcase kind
+              ("DeclareMathOperator"
+               (skip-chars-forward " \t\n")
+               (when-let* ((body (my/latex--read-brace-group)))
+                 ;; KaTeX has no \DeclareMathOperator; normalize the way the
+                 ;; other parsers do so all three agree on the expansion.
+                 (push (list name 0
+                             (format "\\operatorname%s{%s}"
+                                     (if starred "*" "") body))
+                       definitions)))
+              ("def"
+               (let ((arity (my/latex--read-def-parameters)))
+                 (skip-chars-forward " \t\n")
+                 (when-let* ((body (my/latex--read-brace-group)))
+                   (push (list name arity body) definitions))))
+              (_
+               (let ((arity (my/latex--read-optional-arity)))
+                 (skip-chars-forward " \t\n")
+                 (when-let* ((body (my/latex--read-brace-group)))
+                   (push (list name arity body) definitions))))))))
+      (let (result)
+        (dolist (definition (nreverse definitions))
+          (setq result (cons definition (assoc-delete-all (car definition) result))))
+        (nreverse result)))))
+
+(defun my/latex--macro-files (&optional directory)
+  "Return the shared macro .tex files in DIRECTORY, sorted for stability."
+  (let ((directory (or directory
+                       ;; Same variable Noema is handed, when it is loaded, so
+                       ;; there is one path and not two that happen to agree.
+                       (and (boundp 'my/noema--katex-macros-dir)
+                            my/noema--katex-macros-dir)
+                       my/latex-katex-macros-directory)))
+    (when (file-directory-p directory)
+      (sort (directory-files directory t "\\.tex\\'" t) #'string<))))
+
+(defun my/latex--macro-signature (files)
+  "Return a value that changes when any file in FILES changes."
+  (mapcar (lambda (file)
+            (cons file (file-attribute-modification-time
+                        (file-attributes file))))
+          files))
+
+(defun my/latex-tex-compat-rules ()
+  "Return the shared TeX compatibility rules as an alist, or nil."
+  (when (file-readable-p my/latex-tex-compat-rules-file)
+    (ignore-errors
+      (with-temp-buffer
+        (insert-file-contents my/latex-tex-compat-rules-file)
+        (json-parse-buffer :object-type 'alist :array-type 'list
+                           :false-object nil :null-object nil)))))
+
+(defun my/latex--compat-macro-definitions ()
+  "Return (NAME ARITY BODY) entries for the shared compatibility macros."
+  (let ((macros (alist-get 'macros (my/latex-tex-compat-rules))))
+    (mapcar (lambda (entry)
+              (let ((name (format "%s" (car entry)))
+                    (body (cdr entry)))
+                (list name
+                      (if (string-match-p "#1" body) 1 0)
+                      body)))
+            macros)))
+
+(defun my/latex-compile-macro-preamble (definitions)
+  "Return a preamble string defining DEFINITIONS for the RaTeX engine.
+
+Emitted as `\\def' rather than `\\newcommand' deliberately: several shared
+names (`\\N', `\\vec', ...) already exist in the engine, and `\\newcommand'
+errors on redefinition, which would fail the whole preamble and with it every
+preview."
+  (mapconcat
+   (lambda (definition)
+     (pcase-let ((`(,name ,arity ,body) definition))
+       (format "\\def%s%s{%s}"
+               name
+               (mapconcat (lambda (index) (format "#%d" index))
+                          (number-sequence 1 arity)
+                          "")
+               body)))
+   definitions
+   ""))
+
+(defun my/latex-katex-preamble ()
+  "Return the shared math macro preamble for the RaTeX renderer.
+
+Recompiled only when the underlying .tex files change."
+  (let* ((files (my/latex--macro-files))
+         (signature (my/latex--macro-signature files)))
+    (if (and my/latex--katex-preamble-cache
+             (equal (car my/latex--katex-preamble-cache) signature))
+        (cdr my/latex--katex-preamble-cache)
+      (let* ((text (mapconcat (lambda (file)
+                                (with-temp-buffer
+                                  (insert-file-contents file)
+                                  (buffer-string)))
+                              files
+                              "\n"))
+             (definitions (append (my/latex-parse-macro-definitions text)
+                                  (my/latex--compat-macro-definitions)))
+             (preamble (my/latex-compile-macro-preamble definitions)))
+        (setq my/latex--katex-preamble-cache (cons signature preamble))
+        preamble))))
+
+(defun my/latex-tex-compat-rewrite (latex)
+  "Rewrite LATEX for constructs the renderer does not implement natively."
+  (let ((environments (alist-get 'environments (my/latex-tex-compat-rules))))
+    (dolist (entry environments latex)
+      (let ((from (format "%s" (car entry)))
+            (to (cdr entry)))
+        (setq latex
+              (replace-regexp-in-string
+               (format "\\\\\\(begin\\|end\\){%s}" (regexp-quote from))
+               (lambda (match)
+                 (format "\\%s{%s}"
+                         (if (string-prefix-p "\\begin" match) "begin" "end")
+                         to))
+               latex t t))))))
+
 (use-package ratex
   :commands (ratex-mode
              ratex-turn-on
              ratex-refresh-previews
              ratex-download-backend
              ratex-diagnose-backend
+             ratex-stop-backend
+             ratex-debug-open-buffer
              ratex-toggle-preview-command)
   :init
   (setq ratex-edit-preview 'posframe
@@ -518,12 +754,24 @@ texlab is preferred; digestif is the fallback."
         ratex-edit-preview-max-staleness 1.0
         ratex-edit-preview-scan-lines 2
         ratex-font-size 32.0
+        ;; Preview is the popup above point, not inline overlays.
         ratex-inline-preview nil
         ratex-initial-render-scope 'visible
         ratex-visible-region-margin 1
         ratex-debug nil
         ratex-render-cache-limit 24
         ratex-render-cache-ttl 60
+        ;; The backend is built from the vendored `ratex-core' in this repo.
+        ;; Auto-download would delete that binary on any launch failure and
+        ;; replace it with an upstream release of a possibly different
+        ;; version, so pin both the root and the policy.
+        ratex-backend-root (expand-file-name "site-lisp/ratex.el"
+                                             user-emacs-directory)
+        ratex-auto-download-backend nil
+        ;; One macro set and one compatibility table for this preview and for
+        ;; Noema's KaTeX renderer; both read `site-lisp/noema/resources/'.
+        ratex-preamble-function #'my/latex-katex-preamble
+        ratex-compat-rewrite-function #'my/latex-tex-compat-rewrite
         ratex-render-color (my/latex-ratex-color 'fg-soft "#D8DEE9")
         ratex-posframe-background-color (my/latex-ratex-color 'bg-ratex "#2B3140")
         ratex-posframe-border-color (my/latex-ratex-color 'border-ratex "#5F6F8F"))
@@ -534,6 +782,143 @@ texlab is preferred; digestif is the fallback."
          (plain-tex-mode . ratex-turn-on)
          (plain-TeX-mode . ratex-turn-on)
          (docTeX-mode . ratex-turn-on)))
+
+;; ---------------------------------------------------------------------------
+;; Preview doctor
+;; ---------------------------------------------------------------------------
+
+(declare-function ratex-backend-live-p "ratex-core")
+(declare-function ratex-diagnose-backend "ratex-core")
+(declare-function ratex-fragment-at-point "ratex-math-detect")
+(declare-function ratex-preamble "ratex-core")
+(defvar ratex--pending)
+(defvar ratex--pending-timers)
+(defvar ratex--render-cache)
+(defvar ratex--inflight-requests)
+(defvar ratex--last-error)
+(defvar ratex-mode)
+
+(defun my/latex-preview--fragment-summary ()
+  "Return a one-line description of the math fragment at point."
+  (if (not (bound-and-true-p ratex-mode))
+      "ratex-mode is off in this buffer"
+    (if-let* ((fragment (ratex-fragment-at-point)))
+        (format "%s%s  %s"
+                (plist-get fragment :open)
+                (if-let* ((env (plist-get fragment :environment)))
+                    (format " (environment %s)" env)
+                  "")
+                (truncate-string-to-width
+                 (string-trim (or (plist-get fragment :content) "")) 48 nil nil t))
+      "none at point")))
+
+(defun my/latex-preview--macro-summary ()
+  "Return a description of the shared macro preamble state."
+  (let* ((files (my/latex--macro-files))
+         (definitions
+          (condition-case err
+              (my/latex-parse-macro-definitions
+               (mapconcat (lambda (file)
+                            (with-temp-buffer
+                              (insert-file-contents file)
+                              (buffer-string)))
+                          files "\n"))
+            (error (list (list (format "PARSE ERROR: %s"
+                                       (error-message-string err))
+                               0 ""))))))
+    (list :files (length files)
+          :macros (length definitions)
+          :compat (length (my/latex--compat-macro-definitions)))))
+
+(defun my/latex-preview-report-string ()
+  "Return a diagnostic report for the LaTeX math preview stack."
+  (require 'ratex nil t)
+  (let* ((macros (my/latex-preview--macro-summary))
+         (directory (or (and (boundp 'my/noema--katex-macros-dir)
+                             my/noema--katex-macros-dir)
+                        my/latex-katex-macros-directory))
+         (wired (and (boundp 'ratex-preamble-function)
+                     (eq ratex-preamble-function #'my/latex-katex-preamble)))
+         (preamble (my/latex-katex-preamble)))
+    (string-join
+     (list
+      "LaTeX math preview (RaTeX)"
+      "--------------------------"
+      (format "backend live      : %s"
+              (if (and (fboundp 'ratex-backend-live-p) (ratex-backend-live-p))
+                  "yes" "NO"))
+      (format "pending requests  : %s"
+              (if (hash-table-p (bound-and-true-p ratex--pending))
+                  (hash-table-count ratex--pending) "n/a"))
+      (format "pending timeouts  : %s"
+              (if (hash-table-p (bound-and-true-p ratex--pending-timers))
+                  (hash-table-count ratex--pending-timers) "n/a"))
+      (format "buffer cache      : %s entries, %s in flight"
+              (if (hash-table-p (bound-and-true-p ratex--render-cache))
+                  (hash-table-count ratex--render-cache) "n/a")
+              (if (hash-table-p (bound-and-true-p ratex--inflight-requests))
+                  (hash-table-count ratex--inflight-requests) "n/a"))
+      (format "last error        : %s"
+              (or (bound-and-true-p ratex--last-error) "none"))
+      ""
+      "Shared assets (source of truth for Emacs and Noema)"
+      "--------------------------------------------------"
+      (format "macro directory   : %s%s"
+              directory
+              (if (file-directory-p directory) "" "   MISSING (dangling link?)"))
+      (format "macro files       : %s" (plist-get macros :files))
+      (format "macros defined    : %s (+%s compatibility)"
+              (plist-get macros :macros) (plist-get macros :compat))
+      (format "compat rules      : %s"
+              (if (file-readable-p my/latex-tex-compat-rules-file)
+                  my/latex-tex-compat-rules-file
+                (format "%s   MISSING" my/latex-tex-compat-rules-file)))
+      (format "preamble size     : %s chars" (length (or preamble "")))
+      (format "preamble wired    : %s"
+              (if wired "yes" "NO -- ratex-preamble-function is not set"))
+      (format "compat wired      : %s"
+              (if (and (boundp 'ratex-compat-rewrite-function)
+                       (eq ratex-compat-rewrite-function
+                           #'my/latex-tex-compat-rewrite))
+                  "yes" "NO -- ratex-compat-rewrite-function is not set"))
+      ""
+      "This buffer"
+      "-----------"
+      (format "major mode        : %s" major-mode)
+      (format "fragment at point : %s" (my/latex-preview--fragment-summary))
+      ""
+      (if (fboundp 'ratex-diagnose-backend)
+          (ratex-diagnose-backend)
+        "ratex-diagnose-backend unavailable"))
+     "\n")))
+
+;;;###autoload
+(defun my/latex-preview-doctor ()
+  "Report the state of the LaTeX math preview stack.
+
+Covers the three things that go wrong in practice: the backend process, the
+shared macro preamble, and whether the detector actually sees a fragment
+where the cursor is."
+  (interactive)
+  (let ((report (my/latex-preview-report-string)))
+    (if (called-interactively-p 'interactive)
+        (with-current-buffer (get-buffer-create "*LaTeX Preview Doctor*")
+          (let ((inhibit-read-only t))
+            (erase-buffer)
+            (insert report)
+            (goto-char (point-min)))
+          (special-mode)
+          (display-buffer (current-buffer)))
+      report)))
+
+(with-eval-after-load 'general
+  ;; Localleader rather than a global leader key: the doctor only means
+  ;; anything in a TeX buffer, where it can report the fragment at point.
+  (dolist (map '(LaTeX-mode-map TeX-mode-map latex-mode-map tex-mode-map))
+    (my/local-leader!
+      :keymaps map
+      "d" 'my/latex-preview-doctor
+      "p" 'ratex-refresh-previews)))
 
 (provide 'init-latex)
 ;;; init-latex.el ends here
