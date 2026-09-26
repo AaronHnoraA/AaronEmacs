@@ -17,8 +17,8 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native ui-test ui-tokens audit-ui-tokens \
-        remote-test remote-source-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e \
-        lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke \
+        remote-test remote-source-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
+		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke remote-vterm-live-smoke \
         jupyter-test research-test agenda-test agenda-apple-test \
         publish publish-build publish-deploy publish-clean
 
@@ -69,10 +69,24 @@ help:
 	  '  make latex-preview-test   Run the vendored RaTeX math-preview ERT suite' \
 	  '  make lsp-live-smoke      Start real clangd, Python LS, and JDTLS projects' \
 	  '  make lsp-remote-live-smoke  Start real C/Python/Java LSP through TRAMP + Remote' \
+	  '  make lsp-remote-tty-smoke  Measure real terminal redisplay during remote LSP editing' \
+	  '  make lsp-remote-gui-smoke  Measure GUI LSP editing; set REMOTE_LSP_E2E_PAIRED=1 for native/SSH pairs' \
+	  '  make lsp-gui-company-popup  Compare native/SSH GUI Company popups (set REMOTE_GUI_COMPANY_FILE)' \
+	  '  make lsp-key-to-screen   Compare native, /fs:local, and SSH key-to-PTY output (set REMOTE_KEY_SCREEN_FILE)' \
+	  '  make lsp-existing-file-live-probe  Check Python Company completion on an existing source' \
+	  '  make remote-task-live-smoke  Check target tasks, error links, and cancellation' \
+	  '  make remote-task-disconnect-smoke  Check task status after RPC transport loss' \
+	  '  make remote-terminal-live-smoke  Check routed PTY input/output on a real SSH target' \
+	  '  make remote-vterm-live-smoke  Check the actual VTerm frontend on a real SSH target' \
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make research-test        Run Noema research notebook (JuText/Graph Board) ERT suite' \
 	  '  make agenda-apple-test    Build and check EventKit without requesting access' \
 	  '  make remote-e2e           Run opt-in real SSH E2E (REMOTE_E2E_TARGET optional)' \
+	  '  make remote-route-benchmark Compare warm physical and /fs file queries (set REMOTE_BENCHMARK_TARGET)' \
+	  '  make remote-local-visit-benchmark Compare warm native and /fs:local: source visits' \
+	  '  make remote-ssh-visit-benchmark Compare warm SSH TRAMP and /fs source visits (set REMOTE_BENCHMARK_TARGET)' \
+	  '  make remote-ssh-write-benchmark Measure repeated SSH saves and attribute probes (set REMOTE_BENCHMARK_TARGET)' \
+	  '  make remote-directory-benchmark Compare Dired open and refresh on local and SSH directories' \
 	  '' \
 	  '  make publish              Compile CV + deploy site (git push + optional NAS rsync)' \
 	  '  make publish-build        Compile CV and verify the site is complete' \
@@ -113,6 +127,8 @@ ui-test:
 	$(UI_TOKEN_BATCH) --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)"))' -l test/aaron-ui-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/noema-icon-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-ui-dashboard-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-auto-insert-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-snippets-tests.el -f ert-run-tests-batch-and-exit
 
 doctor:
 	$(BATCH) --eval '(prin1 (my/health-critical-check))'
@@ -195,10 +211,12 @@ remote-source-test:
 remote-test: remote-contract-test remote-conformance-test remote-source-test
 	$(REMOTE_TEST_BATCH) -l test/remote-tests.el -f ert-run-tests-batch-and-exit
 	$(REMOTE_TEST_BATCH) -l test/remote-framework-tests.el -f ert-run-tests-batch-and-exit
+	$(REMOTE_TEST_BATCH) -l test/remote-task-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/remote-gateway-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-remote-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-toolchain-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-ui-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-copilot-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-project-remote-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-evil-tests.el -f ert-run-tests-batch-and-exit
 
@@ -223,6 +241,59 @@ lsp-live-smoke:
 lsp-remote-live-smoke:
 	REMOTE_LSP_E2E=1 $(BATCH) -l test/lsp-remote-live-smoke.el -f my/lsp-remote-live-smoke-batch
 
+lsp-remote-tty-smoke:
+	@result_file="$${REMOTE_LSP_E2E_RESULT_FILE:-}"; cleanup=; \
+	  if test -z "$$result_file"; then \
+	    result_file=$$(mktemp /tmp/emacs-lsp-tty.XXXXXX) || exit 1; cleanup=1; \
+	  fi; \
+	  REMOTE_LSP_E2E=1 REMOTE_LSP_E2E_REDISPLAY=1 \
+	  REMOTE_LSP_E2E_RESULT_FILE="$$result_file" \
+	  $(EMACS) -nw --no-site-file --no-site-lisp --no-splash --init-directory=$(CURDIR) -q -l ./early-init.el -l ./init.el -l test/lsp-remote-live-smoke.el --eval '(run-at-time 0 nil (quote my/lsp-remote-live-smoke-batch))'; \
+	  result_status=$$?; \
+	  if test -s "$$result_file"; then cat "$$result_file"; fi; \
+	  if test -n "$$cleanup"; then rm -f "$$result_file"; fi; \
+	  exit "$$result_status"
+
+lsp-remote-gui-smoke:
+	@result_file="$${REMOTE_LSP_E2E_RESULT_FILE:-}"; cleanup=; \
+	  if test -z "$$result_file"; then \
+	    result_file=$$(mktemp /tmp/emacs-lsp-gui.XXXXXX) || exit 1; cleanup=1; \
+	  fi; \
+	  REMOTE_LSP_E2E=1 REMOTE_LSP_E2E_REDISPLAY=1 \
+	  REMOTE_LSP_E2E_FRAME_COLUMNS="$${REMOTE_LSP_E2E_FRAME_COLUMNS:-120}" \
+	  REMOTE_LSP_E2E_FRAME_ROWS="$${REMOTE_LSP_E2E_FRAME_ROWS:-50}" \
+	  REMOTE_LSP_E2E_RESULT_FILE="$$result_file" \
+	  $(EMACS) -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)"))' \
+	    --eval '(condition-case error-data (progn (load-file "$(CURDIR)/early-init.el") (load-file "$(CURDIR)/init.el") (load-file "$(CURDIR)/test/lsp-remote-live-smoke.el") (when (getenv "REMOTE_LSP_E2E_UI_VARIANT") (load-file "$(CURDIR)/test/remote-gui-ui-variant.el")) (when (getenv "REMOTE_TYPING_PROFILE_OUTPUT") (load-file "$(CURDIR)/test/remote-typing-profile.el")) (when (getenv "REMOTE_GUI_CPU_PROFILE_OUTPUT") (load-file "$(CURDIR)/test/remote-gui-cpu-profile.el")) (if (equal (getenv "REMOTE_LSP_E2E_PAIRED") "1") (progn (load-file "$(CURDIR)/test/lsp-gui-paired-benchmark.el") (my/lsp-gui-paired-benchmark-run)) (my/lsp-remote-live-smoke-batch))) (error (with-temp-file (getenv "REMOTE_LSP_E2E_RESULT_FILE") (prin1 error-data (current-buffer))) (kill-emacs 1)))'; \
+	  result_status=$$?; \
+	  if test -s "$$result_file"; then cat "$$result_file"; fi; \
+	  if test -n "$$cleanup"; then rm -f "$$result_file"; fi; \
+	  exit "$$result_status"
+
+lsp-existing-file-live-probe:
+	$(BATCH) -l test/lsp-existing-file-live-probe.el
+
+lsp-key-to-screen:
+	python3 test/remote-key-to-screen.py
+
+lsp-gui-company-popup:
+	python3 test/remote-gui-company-popup.py
+
+remote-debug-live-smoke:
+	$(BATCH) -l test/remote-debug-live-smoke.el
+
+remote-task-live-smoke:
+	$(BATCH) -l test/remote-task-live-smoke.el
+
+remote-task-disconnect-smoke:
+	$(BATCH) -l test/remote-task-disconnect-smoke.el
+
+remote-terminal-live-smoke:
+	$(BATCH) -l test/remote-terminal-live-smoke.el
+
+remote-vterm-live-smoke:
+	$(BATCH) -l test/remote-vterm-live-smoke.el
+
 jupyter-test:
 	$(BATCH) -l test/init-aaronnote-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-aaronnote-jupyter-notebook-tests.el -f ert-run-tests-batch-and-exit
@@ -245,10 +316,34 @@ research-test:
 	$(BATCH) -L lisp/roam -l test/noema-research-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/test/elisp \
 	  -l noema-interaction-tests.el -l noema-interaction-magent-tests.el -l noema-api-tests.el -l noema-completion-tests.el \
+	  -l noema-project-overview-tests.el -l noema-research-workflow-tests.el -l noema-history-search-tests.el -l noema-findings-tests.el \
 	  -f ert-run-tests-batch-and-exit
 
 remote-e2e:
 	REMOTE_E2E=1 $(REMOTE_TEST_BATCH) -l test/remote-e2e-tests.el -f ert-run-tests-batch-and-exit
+	# The isolated suite can lack package-vc's tramp-rpc load path.  Run its
+	# backend-specific checks with the real init and selected RPC route too.
+	REMOTE_E2E=1 $(BATCH) -l test/remote-e2e-tests.el \
+	  --eval '(ert-run-tests-batch-and-exit "remote-e2e-\\(attribute-cache-preserves-acl-on-repeated-saves\\|rpc-path-batch-preserves-directory-filter\\|executable-lookup-honors-workspace-path\\|project-search-and-magit-worktree-identity\\|missing-java-runtime-does-not-start-jdtls\\|target-home-and-symlinks-keep-logical-identity\\)")'
+
+remote-route-benchmark:
+	@test -n "$(REMOTE_BENCHMARK_TARGET)" || { echo 'Set REMOTE_BENCHMARK_TARGET'; exit 2; }
+	$(BATCH) -l test/remote-route-benchmark.el
+
+remote-local-visit-benchmark:
+	$(BATCH) -l test/remote-local-visit-benchmark.el
+
+remote-ssh-visit-benchmark:
+	@test -n "$(REMOTE_BENCHMARK_TARGET)" || { echo 'Set REMOTE_BENCHMARK_TARGET'; exit 2; }
+	$(BATCH) -l test/remote-ssh-visit-benchmark.el
+
+remote-ssh-write-benchmark:
+	@test -n "$(REMOTE_BENCHMARK_TARGET)" || { echo 'Set REMOTE_BENCHMARK_TARGET'; exit 2; }
+	$(BATCH) -l test/remote-ssh-write-benchmark.el
+
+remote-directory-benchmark:
+	@test -n "$(REMOTE_BENCHMARK_TARGET)" || { echo 'Set REMOTE_BENCHMARK_TARGET'; exit 2; }
+	$(BATCH) -l test/remote-directory-benchmark.el
 
 # ── Publish ────────────────────────────────────────────────────────────────
 publish:

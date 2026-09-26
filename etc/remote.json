@@ -30,24 +30,42 @@
       "pipelines": [
         {
           "id": "ssh",
-          "backend": "tramp",
+          "backends": [
+            "ssh-pty",
+            "tramp"
+          ],
           "priority": 50,
           "config": {
             "method": "ssh"
+          },
+          "preferences": {
+            "pty": [
+              "ssh-pty",
+              "tramp"
+            ],
+            "default": [
+              "tramp"
+            ]
           }
         },
         {
           "id": "ssh",
           "backends": [
             "tramp-rpc",
+            "ssh-pty",
             "tramp"
           ],
           "priority": 50,
           "include": [
-            "Aaron-*"
+            "Aaron-*",
+            "login.cse.unsw.edu.au"
           ],
           "trusted": true,
           "preferences": {
+            "pty": [
+              "ssh-pty",
+              "tramp-rpc"
+            ],
             "default": [
               "tramp-rpc",
               "tramp"

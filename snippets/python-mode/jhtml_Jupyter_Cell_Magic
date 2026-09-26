@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: IPython cell magic: html
+# key: jhtml
+# --
+%%html
+$0

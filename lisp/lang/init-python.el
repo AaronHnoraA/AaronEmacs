@@ -18,6 +18,12 @@
 (declare-function my/register-language-server "init-lsp")
 (declare-function my/register-language-server-toolchain-provider "init-lsp-toolchain"
                   (family modes discover &rest properties))
+(declare-function my/python-imenu-create-index "init-python" ())
+(declare-function my/python-setup-imenu "init-python" ())
+(declare-function my/python-refresh-open-buffers "init-python" ())
+(declare-function my/python-ensure-imenu-around "init-python"
+                  (function &optional noerror))
+(declare-function python-imenu-create-index "python" ())
 (declare-function remote-context "remote-fs" (&optional path))
 (declare-function remote-expand-file-name "remote-fs"
                   (file-name &optional directory target))
@@ -153,14 +159,23 @@ interpreter and environment as the remote buffer."
     path))
 
 (defun my/python-toolchain--canonical-executable (path)
-  "Return a canonical executable PATH, or nil when it cannot be run."
+  "Return executable PATH as it must be invoked, or nil when it cannot run.
+Symlinks are kept: a virtual environment's `bin/python' usually links to the
+base interpreter, and Python finds `pyvenv.cfg' from the path it was started
+by.  Resolving the link would silently run the base interpreter instead."
   (when-let* ((logical (and (stringp path)
                             (my/python-toolchain--logical-executable path)))
-              ((file-executable-p logical))
-              (canonical
-               (or (ignore-errors (file-truename logical))
-                   (expand-file-name logical))))
-    (remote-file-local-name canonical)))
+              ((file-executable-p logical)))
+    (remote-file-local-name (expand-file-name logical))))
+
+(defun my/python-toolchain--identity (executable)
+  "Return the key under which EXECUTABLE duplicates another profile.
+Two names for one interpreter in the same directory (`python', `python3')
+are one profile; the same interpreter behind a venv directory is not."
+  (let ((logical (my/python-toolchain--logical-executable executable)))
+    (cons (file-name-directory executable)
+          (remote-file-local-name
+           (or (ignore-errors (file-truename logical)) logical)))))
 
 (defun my/python-toolchain--workspace (executable &optional extra-paths)
   "Build workspace settings for EXECUTABLE and EXTRA-PATHS."
@@ -280,22 +295,33 @@ interpreter and environment as the remote buffer."
                     (format "PATH %s" program)
                     executable
                     :kind 'path
-                    :default (string= program "python3"))))
+                    :default (null profiles))))
         (push profile profiles)))))
+
+(defun my/python-toolchain--unique-profiles (profiles)
+  "Return PROFILES with one entry per executable, preserving priority."
+  (let (seen result)
+    (dolist (profile profiles (nreverse result))
+      (let ((identity (my/python-toolchain--identity
+                       (plist-get profile :executable))))
+        (unless (member identity seen)
+          (push identity seen)
+          (push profile result))))))
+
+(defun my/python-toolchain-discover-fast (root)
+  "Discover startup Python profiles for ROOT without running Conda or Sage.
+The full picker still enumerates those environments on explicit selection."
+  (my/python-toolchain--unique-profiles
+   (append (my/python-toolchain--project-venvs root)
+           (my/python-toolchain--path-profiles))))
 
 (defun my/python-toolchain-discover (root)
   "Discover Python and Sage toolchains for project ROOT."
-  (let ((profiles (append (my/python-toolchain--project-venvs root)
-                          (my/python-toolchain--conda-profiles)
-                          (delq nil (list (my/python-toolchain--sage-profile root)))
-                          (my/python-toolchain--path-profiles)))
-        seen
-        result)
-    (dolist (profile profiles (nreverse result))
-      (let ((executable (plist-get profile :executable)))
-        (unless (member executable seen)
-          (push executable seen)
-          (push profile result))))))
+  (my/python-toolchain--unique-profiles
+   (append (my/python-toolchain--project-venvs root)
+           (my/python-toolchain--conda-profiles)
+           (delq nil (list (my/python-toolchain--sage-profile root)))
+           (my/python-toolchain--path-profiles))))
 
 (defun my/python-toolchain-apply (profile _root)
   "Apply Python-specific settings from PROFILE."
@@ -394,6 +420,7 @@ target PATH) rather than whatever happens to be installed on the client."
  'python
  '(python-mode python-ts-mode)
  #'my/python-toolchain-discover
+ :discover-fast #'my/python-toolchain-discover-fast
  :apply #'my/python-toolchain-apply
  :after-select #'my/python-toolchain-after-select
  :label "Python / Sage")

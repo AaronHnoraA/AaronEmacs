@@ -355,6 +355,7 @@ using the same plist format as `remote-doctor--check'.")
                (fboundp 'remote-backend-tramp-rpc-compat-report))
       (require 'tramp-rpc nil t)
       (require 'tramp-rpc-deploy nil t)
+      (require 'tramp-rpc-process nil t)
       (let* ((report (remote-backend-tramp-rpc-compat-report))
              (interfaces (plist-get report :private-interfaces))
              (broken
@@ -369,6 +370,39 @@ using the same plist format as `remote-doctor--check'.")
           (when broken
             (concat "Private tramp-rpc signatures changed; their optional "
                     "accelerations are disabled until the adapter is updated")))
+         checks)
+        (push
+         (remote-doctor--check
+          'tramp-rpc-versioned-shims
+          (if (and (plist-get report :verified-client-version)
+                   (plist-get report :architecture-map)
+                   (plist-get report :local-relay-cwd)
+                   (plist-get report :adapter-timeout))
+              'ok 'warning)
+          (format "verified release=%s architecture map=%s relay cwd=%s adapter timeout=%s"
+                  (if (plist-get report :verified-client-version)
+                      "yes" "no")
+                  (if (plist-get report :architecture-map)
+                      "active" "upstream")
+                  (if (plist-get report :local-relay-cwd)
+                      "active" "upstream")
+                  (if (plist-get report :adapter-timeout)
+                      "active" "upstream"))
+          (unless (plist-get report :verified-client-version)
+            (concat "Private tramp-rpc workarounds are disabled on this "
+                    "client release; revalidate its process and RPC "
+                    "contracts before enabling them")))
+         checks)
+        (push
+         (remote-doctor--check
+          'tramp-rpc-path-batch
+          (if (plist-get report :batched-path-check) 'ok 'warning)
+          (format "batched PATH directory check=%s"
+                  (if (plist-get report :batched-path-check)
+                      "enabled" "upstream fallback"))
+          (unless (plist-get report :batched-path-check)
+            (concat "Inspect the installed tramp-rpc release and private "
+                    "interfaces before re-enabling this acceleration")))
          checks)))
     (nreverse checks)))
 

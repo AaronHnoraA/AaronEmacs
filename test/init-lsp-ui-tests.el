@@ -80,20 +80,76 @@
     (setq-local lsp-managed-mode t)
     (should (citre-backend-usable-p 'lsp-mode))))
 
+(ert-deftest my/citre-remote-helper-lookup-follows-search-path-changes ()
+  "A missing helper must not stay missing after the target PATH changes."
+  (require 'remote-process)
+  (let ((default-directory "/fs:lab:/tmp/")
+        (my/citre--executable-cache (make-hash-table :test #'equal))
+        (paths '("/opt/one"))
+        (exec-suffixes '(""))
+        (comp-enable-subr-trampolines nil)
+        (remote-calls 0)
+        (fallback-calls 0)
+        seen-path)
+    (cl-letf (((symbol-function 'file-remote-p)
+               (lambda (&rest _) "/fs:lab:"))
+              ((symbol-function 'find-file-name-handler)
+               (lambda (_file operation)
+                 (and (eq operation 'exec-path)
+                      (lambda (_operation) paths))))
+              ((symbol-function 'remote-context) (lambda (&rest _) nil))
+              ((symbol-function 'remote-exec)
+               (lambda (_program &rest options)
+                 (cl-incf remote-calls)
+                 (setq seen-path
+                       (alist-get "PATH" (plist-get options :environment)
+                                  nil nil #'equal))
+                 (remote-exec-result-create
+                  :status 0
+                  :stdout (if (equal paths '("/opt/two"))
+                              "/opt/two/readtags\n"
+                            "")))))
+      (let ((fallback (lambda (&rest _)
+                        (cl-incf fallback-calls)
+                        'fallback)))
+        (should-not
+         (my/citre-executable-find-a fallback "readtags" t))
+        (should-not
+         (my/citre-executable-find-a fallback "readtags" t))
+        (should (= remote-calls 1))
+        (setq paths '("/opt/two"))
+        (should
+         (equal (my/citre-executable-find-a fallback "readtags" t)
+                "/opt/two/readtags"))
+        (should (equal seen-path "/opt/two"))
+        (should (= remote-calls 2))
+        (should (= fallback-calls 0))
+        (setq paths '("/bad:colon"))
+        (should (eq (my/citre-executable-find-a fallback "readtags" t)
+                    'fallback))
+        (should (= fallback-calls 1))))))
+
 (ert-deftest my/lsp-client-whitelist-rejections-are-quiet ()
-  "Expected add-on rejection must not masquerade as an LSP failure."
+  "Disabled clients must not run remote activation probes or log failures."
   (let ((lsp-enabled-clients '(jdtls))
         (lsp--show-message t)
-        seen)
+        seen
+        (calls 0))
     (cl-letf (((symbol-function 'lsp--client-server-id)
                (lambda (client) client)))
       (my/lsp-mode--quiet-client-whitelist-a
-       (lambda (_client) (setq seen lsp--show-message))
+       (lambda (_client)
+         (cl-incf calls)
+         (setq seen lsp--show-message))
        'semgrep-ls)
+      (should (= calls 0))
       (should-not seen)
       (my/lsp-mode--quiet-client-whitelist-a
-       (lambda (_client) (setq seen lsp--show-message))
+       (lambda (_client)
+         (cl-incf calls)
+         (setq seen lsp--show-message))
        'jdtls)
+      (should (= calls 1))
       (should seen))))
 
 (ert-deftest my/lsp-tab-line-tabs-overlay-the-view-only-breadcrumb ()
@@ -144,6 +200,39 @@
     (should
      (memq #'my/lsp-tab-line-breadcrumb
            my/tab-line-leading-segment-functions))))
+
+(ert-deftest my/lsp-target-only-breadcrumb-skips-workspace-root-on-idle ()
+  "A remote breadcrumb must not synchronously test the project root."
+  (require 'lsp-headerline)
+  (with-temp-buffer
+    (setq buffer-file-name "/fs:host:/project/source.py")
+    (setq-local lsp-managed-mode t
+                lsp-inlay-hint-enable nil
+                lsp-enable-text-document-color nil)
+    (cl-letf (((symbol-function 'remote-client-file-name)
+               (lambda (&rest _) nil)))
+      (my/lsp-managed-mode-setup))
+    (should (equal lsp-headerline-breadcrumb-segments '(file symbols)))
+    (cl-letf (((symbol-function 'lsp-workspace-root)
+               (lambda (&rest _) (ert-fail "Remote root was queried")))
+              ((symbol-function 'lsp-headerline--build-symbol-string)
+               (lambda () "symbol")))
+      (should (string-match-p "source.py"
+                              (lsp-headerline--build-string))))))
+
+(ert-deftest my/lsp-client-accessible-breadcrumb-keeps-project-segment ()
+  "A shared filesystem retains the full upstream breadcrumb."
+  (with-temp-buffer
+    (setq buffer-file-name "/fs:local:/tmp/source.py")
+    (setq-local lsp-managed-mode t
+                lsp-inlay-hint-enable nil
+                lsp-enable-text-document-color nil
+                lsp-headerline-breadcrumb-segments '(project file symbols))
+    (cl-letf (((symbol-function 'remote-client-file-name)
+               (lambda (&rest _) "/tmp/source.py")))
+      (my/lsp-managed-mode-setup))
+    (should (equal lsp-headerline-breadcrumb-segments
+                   '(project file symbols)))))
 
 (ert-deftest my/generic-breadcrumb-also-starts-directly-in-the-tab-line ()
   "The pre-LSP provider must never flash in header-line on file entry."

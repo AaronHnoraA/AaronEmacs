@@ -152,6 +152,14 @@ process、URI 和 resource-lifecycle 流程。
 债务，不能作为新语言的模板。框架缺少表达能力时，先补通用 =remote-*= API 及
 native/remote backend，再接语言业务。
 
+配置握手也是注册层的统一行为：每个经 ~my/register-language-server~ 注册的
+server 在 ~initialized~ 之后立即收到 ~workspace/didChangeConfiguration~，与
+VS Code languageclient、Eglot 一致（~my/language-server--announce-configuration~）。
+有的 server 依赖它：Pyright 1.1.408 在客户端声明 workspace folders 时不会主动
+拉取 ~workspace/configuration~，缺了这条通知就永远不分析文件，所有请求超时。
+通知内容是该 workspace 自己的 override，没有则为 ~{}~；完整设置仍经
+~workspace/configuration~ 回答。注册时传入的 ~:initialized-fn~ 在它之后运行。
+
 * Current Command Surface
 
 最常用入口：

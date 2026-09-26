@@ -8,6 +8,7 @@
 (require 'config)
 
 (require 'aaron-ui)
+(require 'remote-core)
 
 (defvar eshell-last-dir-ring)
 (defvar eshell-buffer-name)
@@ -836,6 +837,39 @@ are supplied here."
   ;; running Emacs.  Routed process startup can enter the target cwd directly.
   (advice-remove 'vterm #'my/vterm--start-in-home-and-cd)
   (advice-add 'vterm :around #'my/vterm--routed-launch-a))
+
+(defvar my/vterm--prewarm-timer nil
+  "Idle timer scheduled to load VTerm before its first use.")
+
+(defvar my/vterm--prewarm-attempted nil
+  "Whether this Emacs process has attempted idle VTerm loading.")
+
+(defun my/vterm--prewarm-idle ()
+  "Load VTerm during idle time in the client environment."
+  (setq my/vterm--prewarm-timer nil)
+  (unless (or my/vterm--prewarm-attempted (featurep 'vterm))
+    (setq my/vterm--prewarm-attempted t)
+    (let ((default-directory user-emacs-directory)
+          (process-environment (remote-client-process-environment))
+          (exec-path (remote-client-exec-path)))
+      (condition-case error-data
+          (require 'vterm nil t)
+        (error
+         (when (fboundp 'remote-log)
+           (remote-log 'vterm-prewarm-error
+                       :error (error-message-string error-data))))))))
+
+(defun my/vterm--schedule-prewarm ()
+  "Schedule a single idle VTerm load for this Emacs process."
+  (when (and (not noninteractive)
+             (not (featurep 'vterm))
+             (not my/vterm--prewarm-attempted)
+             (not (timerp my/vterm--prewarm-timer)))
+    (setq my/vterm--prewarm-timer
+          (run-with-idle-timer 1 nil #'my/vterm--prewarm-idle))))
+
+(add-hook 'emacs-startup-hook #'my/vterm--schedule-prewarm)
+(add-hook 'remote-workspace-open-hook #'my/vterm--schedule-prewarm)
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'eshell-mode 'emacs))

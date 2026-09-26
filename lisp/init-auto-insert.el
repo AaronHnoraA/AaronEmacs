@@ -45,6 +45,8 @@ still be inserted manually via `my/template-switch'."
   :type 'boolean
   :group 'my/template)
 
+(declare-function remote-file-local-name "remote-fs" (file-name))
+
 (defvar-local my/template-current-override nil
   "Dir-local override of `my/template-current'.
 
@@ -230,7 +232,10 @@ first and then opening it."
     (user-error "Template not readable: %s" file))
   (let ((start (point))
         (title nil))
-    (insert-file-contents file)
+    ;; `insert-file-contents' leaves point before the text; its return value
+    ;; carries the inserted length, which bounds the placeholder region.
+    (let ((inserted (cadr (insert-file-contents file))))
+      (goto-char (+ start inserted)))
     (let ((end (point))
           (cursor-pos nil))
       (setq title (my/auto-insert--maybe-read-title start end))
@@ -242,7 +247,12 @@ first and then opening it."
                    (cons "{{year}}" (format-time-string "%Y"))
                    (cons "{{author}}" user-full-name)
                    (cons "{{user}}" (or (getenv "USER") user-login-name))
-                   (cons "{{file}}" (or buffer-file-name ""))
+                   ;; The file's own path on the machine that holds it,
+                   ;; never an Emacs-internal /fs: or TRAMP spelling.
+                   (cons "{{file}}"
+                         (if buffer-file-name
+                             (remote-file-local-name buffer-file-name)
+                           ""))
                    (and title (cons "{{slug_title}}" (my/auto-insert--slug title)))
                    (and title (cons "{{title}}" title))))
        start end)

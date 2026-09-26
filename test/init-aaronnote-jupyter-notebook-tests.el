@@ -63,7 +63,7 @@
              (gethash "language_info" (gethash "metadata" document)))
     (should (equal (my/noema-jupyter-notebook--language document) "bash"))
     (should (equal (my/noema-jupyter-notebook--language-for-kernel
-                    "rik_ssh_aaron_wsl2_python313pytorchcuda")
+                    "rik_ssh_aaron_pc_remote_python313pytorch")
                    "python"))))
 
 (ert-deftest my/noema-jupyter-notebook-visits-source-and-preserves-results ()

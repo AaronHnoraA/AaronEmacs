@@ -48,7 +48,11 @@
 
 (defconst remote-fs-method "fs")
 (defconst remote-fs-uri-regexp
-  "\\`fs://\\([a-z0-9][a-z0-9._-]*\\)\\(/.*\\)\\'")
+  "\\`fs://\\([a-z0-9][a-z0-9._-]*\\)\\(/\\(?:.\\|\n\\)*\\)\\'")
+
+(defconst remote-fs-canonical-regexp
+  "\\`/fs:\\([a-z0-9][a-z0-9._-]*\\):\\(/\\(?:.\\|\n\\)*\\)\\'"
+  "Canonical logical names whose fields can be read without TRAMP parsing.")
 
 (defvar remote-fs--normalizing nil
   "Non-nil while visited-file names are being canonicalized.")
@@ -61,8 +65,37 @@ its supported operation contract visible to Tramp and extension packages.")
 (defvar remote-fs-path-expansion-cache (make-hash-table :test #'equal)
   "Resolved target-relative configured paths keyed by target and spelling.")
 
+(defcustom remote-fs-context-cache-limit 2048
+  "Maximum number of logical file contexts kept for repeated file operations."
+  :type 'integer
+  :group 'remote)
+
+(defvar remote-fs-context-cache (make-hash-table :test #'equal)
+  "Contexts keyed by canonical file name and guarded by target identity.")
+
+(defvar remote-fs-native-route-cache (make-hash-table :test #'equal)
+  "Single native routes keyed by adapter and capability.")
+
+(cl-defstruct (remote-fs-preferred-routes
+               (:constructor remote-fs-preferred-routes-create))
+  target link adapter plugin-ids plugins preferences routes
+  target-preferences adapter-preferences context-preferences adapter-id)
+
+(defvar remote-fs-preferred-route-cache (make-hash-table :test #'equal)
+  "Guarded two-backend file routes keyed by target, adapter, and capability.")
+
 (defun remote-fs-clear-target-cache (&optional target-id)
   "Clear path expansion state, optionally only for TARGET-ID."
+  (let (keys)
+    (maphash
+     (lambda (key _value)
+       (when (or (null target-id)
+                 (equal (remote-fs-target-id key) target-id))
+         (push key keys)))
+     remote-fs-context-cache)
+    (dolist (key keys) (remhash key remote-fs-context-cache)))
+  (clrhash remote-fs-native-route-cache)
+  (clrhash remote-fs-preferred-route-cache)
   (if (null target-id)
       (clrhash remote-fs-path-expansion-cache)
     (let (keys)
@@ -78,7 +111,7 @@ its supported operation contract visible to Tramp and extension packages.")
 (cl-defstruct (remote-file-watch
                (:constructor remote-file-watch-create))
   id descriptor physical-descriptor file flags callback target-id adapter-id
-  state workspace resource generation suppress-events metadata
+  state workspace resource generation suppress-events metadata recursive
   sequence last-event-fingerprint last-event-at)
 
 (defvar remote-file-watches (make-hash-table :test #'equal)
@@ -94,6 +127,72 @@ its supported operation contract visible to Tramp and extension packages.")
 
 (defvar remote-file-watch-metadata nil
   "Dynamically supplied resource metadata for a new logical watch.")
+
+(defvar remote-file-watch-recursive nil
+  "Non-nil while `remote-watch-tree' creates a recursive watch.")
+
+(defvar remote-fs-current-retry-safe-query nil
+  "Non-nil while a routed read-only metadata or directory query runs.
+Backends may use this to bound a stalled request without shortening writes.")
+
+(defcustom remote-file-watch-startup-timeout 2.5
+  "Seconds to wait for a Python recursive watcher to install its watches."
+  :type 'number
+  :group 'remote)
+
+(defconst remote-fs--python-watch-agent
+  (with-temp-buffer
+    (insert-file-contents
+     (expand-file-name
+      "watch-agent.py"
+      (file-name-directory (or load-file-name buffer-file-name))))
+    (buffer-string))
+  "Dependency-free Linux recursive watcher sent to the target at startup.")
+
+(defun remote-fs--watch-await-ready (watch)
+  "Wait for WATCH's Python backend to install its target-side watches.
+Other backends retain their existing readiness contract."
+  (when-let* ((physical (remote-file-watch-physical-descriptor watch))
+              ((processp physical))
+              ((eq (process-get physical 'remote-file-watch-provider)
+                   'python-inotify)))
+    (let ((deadline (+ (float-time) remote-file-watch-startup-timeout)))
+      (while (and (eq physical
+                      (remote-file-watch-physical-descriptor watch))
+                  (process-live-p physical)
+                  (not (process-get physical 'remote-file-watch-ready))
+                  (< (float-time) deadline))
+        (accept-process-output nil 0.05)))
+    (unless (and (eq physical
+                     (remote-file-watch-physical-descriptor watch))
+                 (process-live-p physical)
+                 (process-get physical 'remote-file-watch-ready))
+      (signal 'remote-backend-unsupported
+              (list "Recursive Python watcher did not become ready"))))
+  watch)
+
+(defun remote-watch-tree (directory flags callback)
+  "Watch DIRECTORY recursively and return a workspace-owned descriptor.
+The descriptor uses the public `file-notify-rm-watch' and
+`file-notify-valid-p' APIs.  An unsupported backend signals
+`remote-backend-unsupported' rather than silently watching only the root."
+  (let ((remote-file-watch-recursive t)
+        (remote-file-watch-metadata
+         (plist-put (copy-sequence remote-file-watch-metadata)
+                    :recursive t)))
+    (let* ((logical (remote-canonicalize-file-name directory))
+           (descriptor (file-notify-add-watch logical flags callback)))
+      (unless (remote-file-watch-descriptor-p descriptor)
+        (file-notify-rm-watch descriptor)
+        (signal 'remote-backend-unsupported
+                (list "Logical recursive watch handler is unavailable")))
+      (condition-case error
+          (remote-fs--watch-await-ready
+           (remote-get-file-watch descriptor))
+        ((error quit)
+         (file-notify-rm-watch descriptor)
+         (signal (car error) (cdr error))))
+      descriptor)))
 
 (defvar remote-fs--watch-public-close nil
   "Dynamic `(REASON FROM-WORKSPACE)' for public logical watch removal.")
@@ -112,13 +211,15 @@ ordinary Emacs file APIs while preparing that process.  Those nested file
 operations retain the standard `emacs-file' contract instead of making every
 process adapter falsely advertise all filesystem capabilities."
   (let* ((fallback (or fallback "emacs-file"))
-         (adapter-id (or remote-current-adapter-id fallback))
-         (adapter (remote-get-adapter adapter-id)))
-    (if (and adapter
-             (memq capability
-                   (remote-adapter-capabilities adapter)))
-        adapter-id
-      fallback)))
+         (adapter-id remote-current-adapter-id))
+    (if (or (null adapter-id) (equal adapter-id fallback))
+        fallback
+      (let ((adapter (remote-get-adapter adapter-id)))
+        (if (and adapter
+                 (memq capability
+                       (remote-adapter-capabilities adapter)))
+            adapter-id
+          fallback)))))
 
 (defun remote-fs-register-method ()
   "Teach TRAMP to parse `/fs:' syntax without enabling its handler.
@@ -143,13 +244,19 @@ file interception remains controlled by `remote-fs-install'."
 
 (defun remote-fs-target-id (file-name)
   "Return target ID encoded by FILE-NAME."
-  (when-let* ((vec (remote-fs--vector file-name)))
-    (remote-normalize-id (tramp-file-name-host vec))))
+  (if (and (stringp file-name)
+           (string-match remote-fs-canonical-regexp file-name))
+      (match-string 1 file-name)
+    (when-let* ((vec (remote-fs--vector file-name)))
+      (remote-normalize-id (tramp-file-name-host vec)))))
 
 (defun remote-fs-localname (file-name)
   "Return target-native localname encoded by FILE-NAME."
-  (when-let* ((vec (remote-fs--vector file-name)))
-    (tramp-file-name-localname vec)))
+  (if (and (stringp file-name)
+           (string-match remote-fs-canonical-regexp file-name))
+      (match-string 2 file-name)
+    (when-let* ((vec (remote-fs--vector file-name)))
+      (tramp-file-name-localname vec))))
 
 (defun remote-make-file-name (target-id localname)
   "Build a canonical fs file name for TARGET-ID and LOCALNAME."
@@ -441,34 +548,39 @@ Configured home-relative paths are expanded by TARGET's selected backend."
 
 (defun remote-fs--workspace-for (target localname)
   "Return TARGET workspace best matching LOCALNAME."
-  (car
-   (sort
-    (seq-filter
-     (lambda (workspace)
-       (when-let* ((path
-                    (remote-fs--workspace-property workspace 'path)))
-         (let ((path
-                (or
-                 (gethash
-                  (list (remote-target-id target) path)
-                  remote-fs-path-expansion-cache)
-                 (and (file-name-absolute-p path)
-                      (not (string-prefix-p "~" path))
-                      path))))
-           (and path
-                (string-prefix-p
-                 (file-name-as-directory path)
-                 (file-name-as-directory localname))))))
-     (copy-sequence (and target (remote-target-workspaces target))))
-    (lambda (left right)
-      (> (length (remote-fs--workspace-property left 'path))
-         (length (remote-fs--workspace-property right 'path)))))))
+  (when target
+    (let ((target-id (remote-target-id target))
+          (directory (file-name-as-directory localname))
+          (best-length -1)
+          best)
+      (dolist (workspace (remote-target-workspaces target))
+        (when-let* ((spelling
+                     (remote-fs--workspace-property workspace 'path)))
+          (let ((path
+                 (or (gethash (list target-id spelling)
+                              remote-fs-path-expansion-cache)
+                     (and (file-name-absolute-p spelling)
+                          (not (string-prefix-p "~" spelling))
+                          spelling))))
+            (when (and path
+                       (> (length spelling) best-length)
+                       (string-prefix-p
+                        (file-name-as-directory path) directory))
+              (setq best workspace
+                    best-length (length spelling))))))
+      best)))
 
 (defun remote-fs--context (canonical)
   "Build an I/O-free logical context for CANONICAL."
-  (let* ((target-id (or (remote-fs-target-id canonical) "local"))
-         (localname (or (remote-fs-localname canonical)
-                        (expand-file-name canonical)))
+  (let* ((matched (and (stringp canonical)
+                       (string-match remote-fs-canonical-regexp canonical)))
+         (target-id
+          (or (and matched (match-string 1 canonical))
+              (remote-fs-target-id canonical) "local"))
+         (localname
+          (or (and matched (match-string 2 canonical))
+              (remote-fs-localname canonical)
+              (expand-file-name canonical)))
          (target (remote-get-target target-id))
          (workspace (remote-fs--workspace-for target localname))
          (workspace-path
@@ -626,6 +738,14 @@ This compatibility dispatcher keeps callers independent of backend layout."
   "Return canonical logical name for FILE-NAME relative to DIRECTORY."
   (cond
    ((not (stringp file-name)) file-name)
+   ;; Most calls in a logical buffer already carry a name built by
+   ;; `remote-make-file-name'.  Avoid normalizing it again for every metadata
+   ;; query, while still normalizing hand-written names with lexical segments.
+   ((and (string-match-p remote-fs-canonical-regexp file-name)
+         (not (string-match-p
+               "\\(?:/\\.\\.?\\(?:/\\|\\'\\)\\|//\\)"
+               file-name)))
+    file-name)
    ((string-prefix-p "~" file-name)
     (remote-expand-file-name file-name directory))
    ((string-match-p "\\`fs://" file-name)
@@ -655,9 +775,34 @@ This compatibility dispatcher keeps callers independent of backend layout."
                (inhibit-file-name-operation 'expand-file-name))
            (expand-file-name file-name directory))))))))
 
+(defun remote-fs--lexically-expanded-p (name start)
+  "Return non-nil when NAME has no dot or doubled-slash component after START.
+Leading dots in ordinary names such as `.git' are not path components."
+  (and (not (string-search "//" name start))
+       (let ((dot (string-search "/." name start)))
+         (or (not dot)
+             (not (string-match-p
+                   "/\\.\\.?\\(?:/\\|\\'\\)" name dot))))))
+
 (defun remote-fs-handle-expand-file-name (name &optional directory)
   "Expand NAME relative to logical DIRECTORY."
   (cond
+   ;; Native metadata primitives first ask Emacs to expand the logical name.
+   ;; The common local spelling can skip a full canonical regexp match; the
+   ;; target and absolute-localname boundaries are already explicit here.
+   ((and (stringp name)
+         (string-prefix-p "/fs:local:/" name)
+         (remote-fs--lexically-expanded-p name 10))
+    name)
+   ;; Emacs asks file-name handlers to expand an absolute name before many
+   ;; ordinary file operations.  A canonical fs name with no lexical dot or
+   ;; duplicate-slash component is already expanded; avoid rebuilding it on
+   ;; every metadata query.
+   ((and (stringp name)
+         (string-match remote-fs-canonical-regexp name)
+         (let ((localname (match-string 2 name)))
+           (remote-fs--lexically-expanded-p localname 0)))
+    name)
    ((remote-fs-file-name-p name)
     (remote-make-file-name
      (remote-fs-target-id name)
@@ -686,8 +831,216 @@ This compatibility dispatcher keeps callers independent of backend layout."
 
 (defun remote-fs--context-for-file (file-name)
   "Return context rooted at FILE-NAME's target."
-  (remote-fs--context
-   (remote-canonicalize-file-name file-name)))
+  (let* ((canonical (remote-canonicalize-file-name file-name))
+         (target-id (remote-fs-target-id canonical))
+         (target (remote-get-target target-id))
+         (workspaces (and target (remote-target-workspaces target)))
+         (entry (gethash canonical remote-fs-context-cache)))
+    ;; Workspace properties can be mutated in place.  Cache only the builtin
+    ;; workspace-free context; any configured workspace must observe edits.
+    (if (and (null workspaces) entry
+             (eq (nth 0 entry) target))
+        (copy-remote-context (nth 2 entry))
+      (let ((context (remote-fs--context canonical)))
+        (when (null workspaces)
+          (when (>= (hash-table-count remote-fs-context-cache)
+                    remote-fs-context-cache-limit)
+            (clrhash remote-fs-context-cache))
+          (puthash canonical (list target nil
+                                   (copy-remote-context context))
+                   remote-fs-context-cache))
+        context))))
+
+(defun remote-fs--native-cache-route-valid-p
+    (target link adapter plugin context capability)
+  "Return non-nil when the cached native route is still the only route.
+Mutable registrations and capability changes are rechecked on every hit."
+  (and target link adapter plugin
+       (equal (remote-context-target-id context) "local")
+       (equal (remote-link-target-id link) "local")
+       (null (remote-target-workspaces target))
+       (equal (remote-link-plugin-ids link) '("native"))
+       (remote-link-enabled link)
+       (memq capability (remote-link-capabilities link))
+       (memq capability (remote-adapter-capabilities adapter))
+       (memq capability (remote-link-plugin-capabilities plugin))
+       (remote--plugin-available-p plugin link context)))
+
+(defun remote-fs--preferred-routes-valid-p
+    (entry target link adapter context capability)
+  "Return whether cached two-backend ENTRY still selects the same routes."
+  (when (and entry target link adapter)
+    (let ((routes (remote-fs-preferred-routes-routes entry))
+          (preferences (remote-fs-preferred-routes-preferences entry))
+          (plugin-ids (remote-fs-preferred-routes-plugin-ids entry))
+          (plugins (remote-fs-preferred-routes-plugins entry))
+          (source (remote-context-source context)))
+      (and
+       (eq (remote-fs-preferred-routes-target entry) target)
+       (eq (remote-fs-preferred-routes-link entry) link)
+       (eq (remote-fs-preferred-routes-adapter entry) adapter)
+       (equal (remote-link-target-id link)
+              (remote-context-target-id context))
+       (equal (remote-link-id link)
+              (remote-route-link-id (car routes)))
+       (not (or (equal (car preferences) (remote-link-id link))
+                (equal (car preferences) (remote-link-short-id link))))
+       (remote-link-enabled link)
+       (memq capability (remote-link-capabilities link))
+       (memq capability (remote-adapter-capabilities adapter))
+       (equal (remote-link-plugin-ids link) plugin-ids)
+       ;; The route preference result is derived only from these three
+       ;; mutable inputs when CONSTRAINTS is nil.  Comparing their snapshots
+       ;; observes in-place edits without rebuilding and deduplicating the
+       ;; preference list on every filesystem query.
+       (equal (remote-adapter-id adapter)
+              (remote-fs-preferred-routes-adapter-id entry))
+       (equal (remote-target-preferences target)
+              (remote-fs-preferred-routes-target-preferences entry))
+       (equal (remote-adapter-preferences adapter)
+              (remote-fs-preferred-routes-adapter-preferences entry))
+       (equal (and (listp source)
+                   (remote--object-value source 'preferences))
+              (remote-fs-preferred-routes-context-preferences entry))
+       (not (remote--cooling-p link capability))
+       (not (remote--backend-cooling-p (car routes)))
+       (let ((valid t))
+         (while (and valid plugin-ids plugins)
+           (let ((plugin (car plugins)))
+             (setq valid
+                   (and (eq (remote-get-link-plugin (car plugin-ids)) plugin)
+                        (memq capability
+                              (remote-link-plugin-capabilities plugin))
+                        (remote--plugin-available-p plugin link context))))
+           (setq plugin-ids (cdr plugin-ids)
+                 plugins (cdr plugins)))
+         (and valid (null plugin-ids) (null plugins)))))))
+
+(defun remote-fs--remember-preferred-routes
+    (key target link adapter context capability routes)
+  "Cache ROUTES under KEY only when one clear preference fixes their order."
+  (when (and target link adapter
+             (= (length routes) 2)
+             (= (length (remote-link-plugin-ids link)) 2)
+             (equal (mapcar #'remote-route-link-id routes)
+                    (list (remote-link-id link)
+                          (remote-link-id link))))
+    (let* ((preferences
+            (remote--route-preferences
+             target adapter capability context nil))
+           (preferred (remote-route-link-plugin-id (car routes)))
+           (plugin-ids (remote-link-plugin-ids link)))
+      ;; A 1000-point preference gap dominates the 25-point pooled-session
+      ;; bonus.  A cooldown or mutable registration invalidates the entry.
+      (when (and (equal (car preferences) preferred)
+                 (not (member preferred
+                              (list (remote-link-id link)
+                                    (remote-link-short-id link))))
+                 (not (equal preferred
+                             (remote-route-link-plugin-id (cadr routes))))
+                 (not (remote--cooling-p link capability))
+                 (not (remote--backend-cooling-p (car routes))))
+        (puthash
+         key
+         (remote-fs-preferred-routes-create
+          :target target :link link :adapter adapter
+          :plugin-ids (copy-sequence plugin-ids)
+          :plugins (mapcar #'remote-get-link-plugin plugin-ids)
+          :preferences (copy-tree preferences)
+          :target-preferences (copy-tree (remote-target-preferences target))
+          :adapter-preferences (copy-tree (remote-adapter-preferences adapter))
+          :context-preferences
+          (let ((source (remote-context-source context)))
+            (and (listp source)
+                 (copy-tree (remote--object-value source 'preferences))))
+          :adapter-id (copy-sequence (remote-adapter-id adapter))
+          :routes routes)
+         remote-fs-preferred-route-cache)))))
+
+(defun remote-fs--routes (adapter capability context)
+  "Return eligible routes with guarded hot-path reuse when selection is stable.
+A single native route and a clearly preferred two-backend remote route may be
+reused.  Mutable registrations, preferences, availability and health are
+rechecked before reuse; other route shapes use normal selection."
+  (let* ((target-id (remote-context-target-id context))
+         (target (remote-get-target target-id))
+         (links (and target (remote-target-links target)))
+         (key (list adapter capability))
+         (entry (and (equal target-id "local")
+                     (gethash key remote-fs-native-route-cache)))
+         (preferred-key (and (not (equal target-id "local"))
+                             (list target-id adapter capability)))
+         (preferred-entry
+          (and preferred-key
+               (gethash preferred-key remote-fs-preferred-route-cache)))
+         (link (and (= (length links) 1)
+                    (remote-get-link (car links))))
+         (adapter-object (remote-get-adapter adapter))
+         (plugin (remote-get-link-plugin "native")))
+    (cond
+     ((and entry link
+           (eq (nth 0 entry) target)
+           (eq (nth 1 entry) link)
+           (eq (nth 2 entry) adapter-object)
+           (eq (nth 3 entry) plugin)
+           (remote-fs--native-cache-route-valid-p
+            target link adapter-object plugin context capability))
+      (list (nth 4 entry)))
+     ((remote-fs--preferred-routes-valid-p
+       preferred-entry target link adapter-object context capability)
+      (copy-sequence (remote-fs-preferred-routes-routes preferred-entry)))
+     (t
+      (let ((routes (remote-routes adapter capability context)))
+        (when (and (equal target-id "local")
+                   link (null (cdr routes))
+                   (equal (remote-route-link-plugin-id (car routes))
+                          "native")
+                   (remote-fs--native-cache-route-valid-p
+                    target link adapter-object plugin context capability))
+          (puthash key
+                   (list target link adapter-object plugin (car routes))
+                   remote-fs-native-route-cache))
+        (when preferred-key
+          (remhash preferred-key remote-fs-preferred-route-cache)
+          (remote-fs--remember-preferred-routes
+           preferred-key target link adapter-object context capability
+           routes))
+        routes)))))
+
+(defun remote-fs--cached-native-query (operation args)
+  "Return (t . RESULT) for a previously validated native metadata route.
+This narrow file-handler fast path keeps framework-owned local buffers near
+native metadata speed without assuming that a target named local is native."
+  (when (and (memq operation remote-fs--native-metadata-operations)
+             (null (cdr args))
+             (stringp (car args))
+             (string-prefix-p "/fs:local:/" (car args)))
+    (let* ((localname (substring (car args) 10))
+           (spec (gethash operation remote-file-operations))
+           (adapter (remote-fs--adapter-for-capability 'metadata))
+           (entry (gethash (list adapter 'metadata)
+                           remote-fs-native-route-cache))
+           (target (remote-get-target "local"))
+           (links (and target (remote-target-links target)))
+           (link (and (= (length links) 1)
+                      (remote-get-link (car links))))
+           (adapter-object (remote-get-adapter adapter))
+           (plugin (remote-get-link-plugin "native"))
+           (context (and entry
+                         (remote-context-create
+                          :target-id "local"
+                          :localname localname))))
+      (when (and (remote-fs--plain-native-metadata-spec-p spec)
+                 entry link
+                 (eq (nth 0 entry) target)
+                 (eq (nth 1 entry) link)
+                 (eq (nth 2 entry) adapter-object)
+                 (eq (nth 3 entry) plugin)
+                 (remote-fs--native-cache-route-valid-p
+                  target link adapter-object plugin context 'metadata))
+        (cons t
+              (let ((default-directory temporary-file-directory))
+                (funcall operation localname)))))))
 
 (defun remote-fs--logical-file-from-vector (value)
   "Return the logical fs name represented by Tramp VALUE, or nil.
@@ -1037,12 +1390,14 @@ RETRY-SAFE controls route failover independently of capability."
       (_
        (or (cl-loop for value in args
                     for index from 0
-                    when (or
-                          (and (remote-fs--path-argument-p spec index)
-                               (remote-fs-file-name-p value))
-                          (remote-fs--logical-file-from-vector value))
-                    return (or (remote-fs--logical-file-from-vector value)
-                               value))
+                    for logical =
+                    (cond
+                     ((and (remote-fs--path-argument-p spec index)
+                           (remote-fs-file-name-p value))
+                      value)
+                     ((tramp-file-name-p value)
+                      (remote-fs--logical-file-from-vector value)))
+                    when logical return logical)
            (and (remote-fs-file-name-p default-directory)
                 default-directory))))))
 
@@ -1109,6 +1464,40 @@ ordinary file operations and `process-file', which are routed normally."
     (let ((default-directory (file-name-directory file))
           (process-file-side-effects nil))
       (remote-fs--run-real-buffer-operation #'vc-registered (list file)))))
+
+(declare-function remote-environment-resolve "remote-environment"
+                  (&optional context force))
+(declare-function remote-environment-vars "remote-environment" (environment))
+
+(defun remote-fs-handle-exec-path ()
+  "Implement `exec-path' for the logical `default-directory'.
+The backend answers first -- target-native localnames, as TRAMP does.  The
+workspace environment capsule is then layered in front: the target PATH plus
+project providers such as direnv, the same list `remote-executable-find' and
+routed processes use.  A TRAMP backend alone only knows the login PATH, so
+stock `executable-find' with REMOTE (agent-shell, acp.el, lsp-mode clients)
+would miss every tool a project environment adds.  Backend entries the
+capsule does not list, such as TRAMP's trailing `default-directory', keep
+their place after it."
+  (let* ((backend (remote-fs--call-routed 'exec-path nil))
+         (path
+          (and (fboundp 'remote-environment-resolve)
+               (ignore-errors
+                 (cdr (assoc "PATH"
+                             (remote-environment-vars
+                              (remote-environment-resolve
+                               (remote-context default-directory))))))))
+         (capsule (and (stringp path) (split-string path ":" t))))
+    (if (null capsule)
+        backend
+      (let ((normalize (lambda (directory)
+                         (directory-file-name (expand-file-name directory "/")))))
+        (append capsule
+                (seq-remove
+                 (lambda (directory)
+                   (member (funcall normalize directory)
+                           (mapcar normalize capsule)))
+                 backend))))))
 
 (defun remote-fs-handle-make-process (&rest plist)
   "Route official `make-process' PLIST through the remote process API.
@@ -1353,25 +1742,93 @@ target-native namespace."
   (remote-with-client-environment
     (remote-fs--call-routed-1 operation args)))
 
+(defconst remote-fs--native-metadata-operations
+  '(file-exists-p file-readable-p file-writable-p file-executable-p
+    file-directory-p file-regular-p file-symlink-p file-attributes)
+  "Single-path queries whose native results need no logical path rewrite.")
+
+(defun remote-fs--plain-native-metadata-spec-p (spec)
+  "Return non-nil when SPEC permits an unprojected native metadata result."
+  (and spec
+       (eq (remote-file-operation-spec-capability spec) 'metadata)
+       (eq (remote-file-operation-spec-placement spec) 'arguments)
+       (equal (remote-file-operation-spec-path-arguments spec) '(0))
+       (eq (remote-file-operation-spec-result-kind spec) 'pass)
+       (not (remote-file-operation-spec-result-projector spec))
+       (not (remote-file-operation-spec-mutating spec))))
+
+(defun remote-fs--native-metadata-call (operation args route)
+  "Return (t . RESULT) when ROUTE can answer OPERATION directly on native FS.
+The route has already been selected.  Only a single canonical path and a
+value-only result qualify; this leaves TRAMP, unknown operations, and path
+returning functions on the full contract path."
+  (when (and route
+             (remote-fs--plain-native-metadata-spec-p
+              (gethash operation remote-file-operations))
+             (equal (remote-route-link-plugin-id route) "native")
+             (memq operation remote-fs--native-metadata-operations)
+             (null (cdr args))
+             (remote-fs-file-name-p (car args))
+             (equal (remote-fs-target-id (car args))
+                    (remote-route-target-id route)))
+    (cons t
+          (let ((default-directory temporary-file-directory))
+            (funcall operation (remote-fs-localname (car args)))))))
+
 (defun remote-fs--call-routed-1 (operation args)
   "Route OPERATION with ARGS after the client environment has been pinned."
   (let* ((known (gethash operation remote-file-operations))
          (spec (or known (remote-fs--operation-spec operation)))
+         (retry-safe-query
+          (and known
+               (remote-file-operation-spec-retry-safe spec)
+               (memq (remote-file-operation-spec-capability spec)
+                     '(metadata directory))
+               (eq (remote-file-operation-spec-result-kind spec) 'pass)
+               (not (remote-file-operation-spec-result-projector spec))
+               (not (remote-file-operation-spec-mutating spec))))
          (logical (or (remote-fs--primary-file operation args)
                       (error "No logical fs context for %s" operation)))
          (context (remote-fs--context-for-file logical))
          (capability (remote-file-operation-spec-capability spec))
-         (routes (remote-routes
+         (routes (remote-fs--routes
                   (remote-fs--adapter-for-capability capability)
                   capability context))
          (retry-safe
           (remote-file-operation-spec-retry-safe spec))
          last-error result done)
+    (when (and (null (cdr routes))
+               (memq operation remote-fs--native-metadata-operations))
+      (let ((fast (remote-fs--native-metadata-call
+                   operation args (car routes))))
+        (when fast
+          (remote-report-route-success (car routes))
+          (when (or remote-log-read-query-successes
+                    (not retry-safe-query))
+            (remote-log
+             'route
+             :target (remote-route-target-id (car routes))
+             :link (remote-route-link-id (car routes))
+             :plugin (remote-route-link-plugin-id (car routes))
+             :capability capability
+             :adapter (remote-route-adapter-id (car routes))))
+          (setq result (cdr fast)
+                done t))))
     (while (and routes (not done))
       (let ((route (pop routes)))
         (condition-case err
             (let* ((remote-current-connection
-                    (remote-connection-ensure route context))
+                    (let ((remote-connection-liveness-lease-eligible
+                           (and (memq capability '(metadata directory))
+                                retry-safe
+                                (not (remote-file-operation-spec-mutating
+                                      spec))
+                                (eq (remote-file-operation-spec-result-kind
+                                     spec)
+                                    'pass)
+                                (not (remote-file-operation-spec-result-projector
+                                      spec)))))
+                      (remote-connection-ensure route context)))
                    (physical-default
                     (when (remote-fs-file-name-p default-directory)
                       (remote-project-file-name
@@ -1386,23 +1843,25 @@ target-native namespace."
                           operation route context translated
                           effective-default)))
                    (physical-result
-                    (if provider
-                        (condition-case _accelerator-error
-                            (prog1
-                                (remote-operation-provider-call
-                                 provider operation route context translated
-                                 effective-default)
-                              (remote-log
-                               'accelerator
-                               :provider
-                               (remote-operation-provider-id provider)
-                               :operation operation
-                               :target (remote-route-target-id route)))
-                          (remote-backend-unsupported
-                           (remote-fs--call-underlying
-                            operation translated effective-default)))
-                      (remote-fs--call-underlying
-                       operation translated effective-default))))
+                    (let ((remote-fs-current-retry-safe-query
+                           retry-safe-query))
+                      (if provider
+                          (condition-case _accelerator-error
+                              (prog1
+                                  (remote-operation-provider-call
+                                   provider operation route context translated
+                                   effective-default)
+                                (remote-log
+                                 'accelerator
+                                 :provider
+                                 (remote-operation-provider-id provider)
+                                 :operation operation
+                                 :target (remote-route-target-id route)))
+                            (remote-backend-unsupported
+                             (remote-fs--call-underlying
+                              operation translated effective-default)))
+                        (remote-fs--call-underlying
+                         operation translated effective-default)))))
               (setq result
                     (remote-fs--transform-result
                      spec
@@ -1419,13 +1878,15 @@ target-native namespace."
                        "Unknown operation returned a physical remote path")))
               (setq done t)
               (remote-report-route-success route)
-              (remote-log
-               'route
-               :target (remote-route-target-id route)
-               :link (remote-route-link-id route)
-               :plugin (remote-route-link-plugin-id route)
-               :capability capability
-               :adapter (remote-route-adapter-id route)))
+              (when (or remote-log-read-query-successes
+                        (not retry-safe-query))
+                (remote-log
+                 'route
+                 :target (remote-route-target-id route)
+                 :link (remote-route-link-id route)
+                 :plugin (remote-route-link-plugin-id route)
+                 :capability capability
+                 :adapter (remote-route-adapter-id route))))
           (error
            (setq last-error err)
            (let* ((failure-scope
@@ -1724,7 +2185,7 @@ as an accidental fallback."
   (let ((names (split-string (upcase names) "," t)))
     (cond
      ((seq-some
-       (lambda (name) (member name '("IGNORED" "UNMOUNT")))
+       (lambda (name) (member name '("IGNORED" "UNMOUNT" "Q_OVERFLOW")))
        names)
       'stopped)
      ((seq-some
@@ -1748,21 +2209,27 @@ as an accidental fallback."
     (let* ((pending
             (concat (or (process-get process 'remote-file-watch-rest) "")
                     output))
-           (complete (string-suffix-p "\n" pending))
-           (lines (split-string pending "\n"))
-           (rest (unless complete (car (last lines)))))
-      (unless complete
-        (setq lines (butlast lines)))
-      (process-put process 'remote-file-watch-rest rest)
-      (dolist (line lines)
-        (when (string-match "\\`\\([^\t]+\\)\t\\(.*\\)\\'" line)
-          (let* ((names (match-string 1 line))
-                 (path (match-string 2 line))
-                 (action (remote-fs--inotify-action names)))
-            (when action
-              (remote-fs--watch-deliver
-               watch
-               (list process action path)))))))))
+           (start 0)
+           end)
+      ;; `%0' is NUL in inotifywait's --format grammar.  A newline is still
+      ;; appended after each record, but it is outside the NUL-delimited path
+      ;; field.  File names containing tabs or newlines therefore stay intact.
+      (while (setq end (string-match "\0" pending start))
+        (let ((field (substring pending start end))
+              (names (process-get process 'remote-file-watch-event)))
+          (if names
+              (let ((action (remote-fs--inotify-action names)))
+                (process-put process 'remote-file-watch-event nil)
+                (if (equal names "READY")
+                    (process-put process 'remote-file-watch-ready t)
+                  (when action
+                    (remote-fs--watch-deliver
+                     watch (list process action field)))))
+            (process-put process 'remote-file-watch-event
+                         (string-trim-left field "\n+"))))
+        (setq start (1+ end)))
+      (process-put process 'remote-file-watch-rest
+                   (substring pending start)))))
 
 (defun remote-fs--inotify-sentinel (watch generation process _event)
   "Recover WATCH when its direct PROCESS for GENERATION exits."
@@ -1773,7 +2240,7 @@ as an accidental fallback."
      watch (list process 'stopped (remote-file-watch-file watch)))))
 
 (defun remote-fs--watch-add-direct-inotify (watch generation)
-  "Start a routed inotify process for WATCH, or return nil when unavailable."
+  "Start a routed recursive watcher for WATCH, or return nil if unavailable."
   (let* ((file (remote-file-watch-file watch))
          (context (remote-context file))
          (target-id (remote-context-target-id context)))
@@ -1784,9 +2251,22 @@ as an accidental fallback."
       (let* ((remote-current-adapter-id
               (remote-file-watch-adapter-id watch))
              (program
-              (ignore-errors
-                (remote-executable-find "inotifywait" context))))
-        (when program
+              (if (remote-file-watch-recursive watch)
+                  (ignore-errors
+                    (remote-executable-find "inotifywait" context))
+                (ignore-errors
+                  (remote-executable-find "inotifywait" context))))
+             (python
+              (and (remote-file-watch-recursive watch)
+                   (not program)
+                   (ignore-errors
+                     (remote-executable-find "python3" context)))))
+        (unless (or program python
+                    (not (remote-file-watch-recursive watch)))
+          (signal
+           'remote-backend-unsupported
+           (list "Recursive remote watches require inotifywait or Python 3 on Linux")))
+        (when (or program python)
           (let* ((flags (remote-file-watch-flags watch))
                  (events
                   (cond
@@ -1810,10 +2290,17 @@ as an accidental fallback."
                                  (remote-file-watch-id watch))
                          :buffer buffer
                          :command
-                         (list
-                          program "-mq" "--format" "%e\t%w%f"
-                          "-e" events
-                          (remote-file-local-name file))
+                         (if python
+                             (list python "-u" "-c"
+                                   remote-fs--python-watch-agent
+                                   (remote-file-local-name file))
+                           (list
+                            program
+                            (if (remote-file-watch-recursive watch)
+                                "-mrq" "-mq")
+                            "--format" "%e%0%w%f%0"
+                            "-e" events
+                            (remote-file-local-name file)))
                          :connection-type 'pipe
                          :coding 'utf-8-unix
                          :noquery t
@@ -1832,6 +2319,8 @@ as an accidental fallback."
                          :remote-process-class 'background))
                   (process-put process 'remote-file-watch-direct t)
                   (process-put process 'remote-file-watch-buffer buffer)
+                  (process-put process 'remote-file-watch-provider
+                               (if python 'python-inotify 'inotifywait))
                   process)
               (error
                (when (buffer-live-p buffer)
@@ -1841,13 +2330,19 @@ as an accidental fallback."
                 :target target-id
                 :file file
                 :error (error-message-string error))
+               (when (remote-file-watch-recursive watch)
+                 (signal (car error) (cdr error)))
                nil))))))))
 
 (defun remote-fs--watch-physical-valid-p (descriptor)
   "Return non-nil when backend watch DESCRIPTOR remains usable."
   (if (and (processp descriptor)
            (process-get descriptor 'remote-file-watch-direct))
-      (process-live-p descriptor)
+      (and (process-live-p descriptor)
+           (or (not (eq (process-get descriptor
+                                     'remote-file-watch-provider)
+                        'python-inotify))
+               (process-get descriptor 'remote-file-watch-ready)))
     (file-notify-valid-p descriptor)))
 
 (defun remote-file-watch-resync (watch &optional reason)
@@ -1893,17 +2388,24 @@ shared background scheduler."
         (generation
          (1+ (or (remote-file-watch-generation watch) 0))))
     (setf (remote-file-watch-generation watch) generation)
+    (when (and (remote-file-watch-recursive watch)
+               (equal (remote-file-watch-target-id watch) "local"))
+      (signal 'remote-backend-unsupported
+              (list "Native recursive watches require a backend provider")))
     (or
      (remote-fs--watch-add-direct-inotify watch generation)
-     (remote-fs--call-routed
-      'file-notify-add-watch
-      (list
-       (remote-file-watch-file watch)
-       (remote-file-watch-flags watch)
-       (lambda (event)
-         (when (= generation
-                  (remote-file-watch-generation watch))
-           (remote-fs--watch-deliver watch event))))))))
+     (if (remote-file-watch-recursive watch)
+         (signal 'remote-backend-unsupported
+                 (list "No recursive watch provider for this route"))
+       (remote-fs--call-routed
+        'file-notify-add-watch
+        (list
+         (remote-file-watch-file watch)
+         (remote-file-watch-flags watch)
+         (lambda (event)
+           (when (= generation
+                    (remote-file-watch-generation watch))
+             (remote-fs--watch-deliver watch event)))))))))
 
 (defun remote-fs--watch-remove-physical (watch)
   "Remove WATCH's current backend descriptor without stopping its identity."
@@ -1934,12 +2436,13 @@ shared background scheduler."
   (remote-fs--watch-remove-physical watch)
   (condition-case error
       (progn
-        (setf
-         (remote-file-watch-physical-descriptor watch)
-         (remote-fs--watch-add-physical watch)
-         (remote-file-watch-state watch) 'open)
+        (setf (remote-file-watch-physical-descriptor watch)
+              (remote-fs--watch-add-physical watch))
+        (remote-fs--watch-await-ready watch)
+        (setf (remote-file-watch-state watch) 'open)
         watch)
-    (error
+    ((error quit)
+     (remote-fs--watch-remove-physical watch)
      (setf (remote-file-watch-state watch) 'failed)
      (signal (car error) (cdr error)))))
 
@@ -2057,6 +2560,7 @@ recovery keeps the public identity and only removes its physical descriptor."
            :adapter-id
            (remote-fs--adapter-for-capability 'watch)
            :metadata (copy-tree remote-file-watch-metadata)
+           :recursive remote-file-watch-recursive
            :sequence 0
            :state 'opening)))
     (puthash id watch remote-file-watches)
@@ -2113,61 +2617,117 @@ the logical handler first so the public API still owns descriptor-table and
 
 (defun remote-fs-file-name-handler (operation &rest args)
   "Handle file-name OPERATION for logical fs ARGS."
-  (pcase operation
-    ('expand-file-name (apply #'remote-fs-handle-expand-file-name args))
-    ('abbreviate-file-name
-     (apply #'remote-fs-handle-abbreviate-file-name args))
-    ('file-remote-p (apply #'remote-fs-handle-file-remote-p args))
-    ('file-local-name (apply #'remote-fs-handle-file-local-name args))
-    ('file-name-directory
-     (apply #'remote-fs-handle-file-name-directory args))
-    ('file-name-nondirectory
-     (apply #'remote-fs-handle-file-name-nondirectory args))
-    ('file-name-as-directory
-     (apply #'remote-fs-handle-file-name-as-directory args))
-    ('directory-file-name
-     (apply #'remote-fs-handle-directory-file-name args))
-    ('substitute-in-file-name
-     (apply #'remote-fs-handle-substitute-in-file-name args))
-    ('file-truename (apply #'remote-fs-handle-file-truename args))
-    ('set-visited-file-modtime
-     (apply #'remote-fs-handle-set-visited-file-modtime args))
-    ('verify-visited-file-modtime
-     (apply #'remote-fs-handle-verify-visited-file-modtime args))
-    ('make-auto-save-file-name
-     (remote-fs-handle-make-auto-save-file-name))
-    ('insert-file-contents
-     (apply #'remote-fs-handle-insert-file-contents args))
-    ('directory-files
-     (apply #'remote-fs-handle-directory-files args))
-    ('directory-files-and-attributes
-     (apply #'remote-fs-handle-directory-files-and-attributes args))
-    ('file-symlink-p
-     (apply #'remote-fs-handle-file-symlink-p args))
-    ;; Some Emacs/TRAMP combinations use this internal spelling even when no
-    ;; Lisp function is bound under that name.  Preserve its two-path contract
-    ;; through the public primitive instead of calling an unbound symbol.
-    ('file-file-equal-p
-     (remote-fs--call-routed 'file-equal-p args))
-    ('file-notify-add-watch
-     (apply #'remote-fs-handle-file-notify-add-watch args))
-    ('file-notify-rm-watch
-     (remote-fs-handle-file-notify-rm-watch (car args)))
-    ('file-notify-valid-p
-     (remote-fs-handle-file-notify-valid-p (car args)))
-    ('make-process
-     (apply #'remote-fs-handle-make-process args))
-    ('start-file-process
-     (apply #'remote-fs-handle-start-file-process args))
-    ('unhandled-file-name-directory
-     (remote-fs-handle-unhandled-file-name-directory (car args)))
-    ('vc-registered (apply #'remote-fs-handle-vc-registered args))
-    ((guard
-      (eq (remote-file-operation-spec-placement
-           (remote-fs--operation-spec operation))
-          'process-buffer))
-     (remote-fs--call-process-operation operation args))
-    (_ (remote-fs--call-routed operation args))))
+  (let ((native (remote-fs--cached-native-query operation args)))
+    (if native (cdr native)
+      (pcase operation
+        ('expand-file-name (apply #'remote-fs-handle-expand-file-name args))
+        ('abbreviate-file-name
+         (apply #'remote-fs-handle-abbreviate-file-name args))
+        ('file-remote-p (apply #'remote-fs-handle-file-remote-p args))
+        ('file-local-name (apply #'remote-fs-handle-file-local-name args))
+        ('file-name-directory
+         (apply #'remote-fs-handle-file-name-directory args))
+        ('file-name-nondirectory
+         (apply #'remote-fs-handle-file-name-nondirectory args))
+        ('file-name-as-directory
+         (apply #'remote-fs-handle-file-name-as-directory args))
+        ('directory-file-name
+         (apply #'remote-fs-handle-directory-file-name args))
+        ('substitute-in-file-name
+         (apply #'remote-fs-handle-substitute-in-file-name args))
+        ('file-truename (apply #'remote-fs-handle-file-truename args))
+        ('set-visited-file-modtime
+         (apply #'remote-fs-handle-set-visited-file-modtime args))
+        ('verify-visited-file-modtime
+         (apply #'remote-fs-handle-verify-visited-file-modtime args))
+        ('make-auto-save-file-name
+         (remote-fs-handle-make-auto-save-file-name))
+        ('insert-file-contents
+         (apply #'remote-fs-handle-insert-file-contents args))
+        ('directory-files
+         (apply #'remote-fs-handle-directory-files args))
+        ('directory-files-and-attributes
+         (apply #'remote-fs-handle-directory-files-and-attributes args))
+        ('file-symlink-p
+         (apply #'remote-fs-handle-file-symlink-p args))
+        ;; Some Emacs/TRAMP combinations use this internal spelling even when no
+        ;; Lisp function is bound under that name.  Preserve its two-path contract
+        ;; through the public primitive instead of calling an unbound symbol.
+        ('file-file-equal-p
+         (remote-fs--call-routed 'file-equal-p args))
+        ('file-notify-add-watch
+         (apply #'remote-fs-handle-file-notify-add-watch args))
+        ('file-notify-rm-watch
+         (remote-fs-handle-file-notify-rm-watch (car args)))
+        ('file-notify-valid-p
+         (remote-fs-handle-file-notify-valid-p (car args)))
+        ('exec-path (remote-fs-handle-exec-path))
+        ('make-process
+         (apply #'remote-fs-handle-make-process args))
+        ('start-file-process
+         (apply #'remote-fs-handle-start-file-process args))
+        ('unhandled-file-name-directory
+         (remote-fs-handle-unhandled-file-name-directory (car args)))
+        ('vc-registered (apply #'remote-fs-handle-vc-registered args))
+        ((guard
+          (eq (remote-file-operation-spec-placement
+               (remote-fs--operation-spec operation))
+              'process-buffer))
+         (remote-fs--call-process-operation operation args))
+        (_ (remote-fs--call-routed operation args))))))
+
+(defun remote-fs--direct-file-name-handler (operation &rest args)
+  "Answer lexical expansion and metadata directly when safe.
+The local route must pass its live configuration checks.  Remote metadata
+uses the normal routed operation without TRAMP vector parsing.  Other lexical
+path and process operations keep TRAMP's full dynamic dispatch contract."
+  (cond
+   ;; `tramp-run-real-handler' inhibits TRAMP's outer dispatcher.  Honor the
+   ;; same boundary here so an operation on a logical name cannot reenter us.
+   ((and (eq operation inhibit-file-name-operation)
+         (memq #'tramp-file-name-handler inhibit-file-name-handlers))
+    (let ((inhibit-file-name-handlers
+           (cons #'remote-fs--direct-file-name-handler
+                 inhibit-file-name-handlers)))
+      (apply operation args)))
+   ;; An absolute native name under a logical default directory must stay
+   ;; native.  TRAMP owns that context-sensitive case (and relative names).
+   ((and (eq operation 'expand-file-name)
+         (stringp (car args))
+         (string-prefix-p "/fs:" (car args)))
+    (apply #'remote-fs-handle-expand-file-name args))
+   ((and (memq operation remote-fs--native-metadata-operations)
+         (not (memq #'tramp-file-name-handler
+                    inhibit-file-name-handlers)))
+    (let ((native (remote-fs--cached-native-query operation args)))
+      (if native (cdr native)
+        (if (and (stringp (car args))
+                 (not (string-prefix-p "/fs:local:/" (car args))))
+            (apply #'remote-fs-file-name-handler operation args)
+          (apply #'tramp-file-name-handler operation args)))))
+   (t (apply #'tramp-file-name-handler operation args))))
+
+(defun remote-fs--prefer-direct-dispatch ()
+  "Put the narrow `/fs:' handler before TRAMP's generic handlers.
+Keep compression, encryption, and any other handlers that precede TRAMP in
+their existing order.  Repeated installation replaces only our own entry."
+  (put #'remote-fs--direct-file-name-handler 'operations
+       (cons 'expand-file-name remote-fs--native-metadata-operations))
+  (let ((entry
+         (cons "\\`/fs:[^:]+:" #'remote-fs--direct-file-name-handler))
+        (remaining
+         (seq-remove
+          (lambda (item)
+            (eq (cdr item) #'remote-fs--direct-file-name-handler))
+          file-name-handler-alist))
+        prefix)
+    (while (and remaining
+                (not (memq (cdar remaining)
+                           '(tramp-file-name-handler
+                             tramp-completion-file-name-handler))))
+      (push (pop remaining) prefix))
+    (setq file-name-handler-alist
+          (nconc (nreverse prefix) (cons entry remaining)))))
 
 (defun remote-fs-foreign-p (value)
   "Return non-nil when Tramp dispatcher VALUE uses the fs logical method."
@@ -2175,22 +2735,27 @@ the logical handler first so the public API still owns descriptor-table and
   ;; initialized bootstrap vectors.  They must be total: an error here makes
   ;; TRAMP disable the predicate globally.
   (condition-case nil
-      (when-let* ((vec (remote-compat-tramp-vector value)))
-        (equal (tramp-file-name-method vec) remote-fs-method))
+      (if (and (stringp value)
+               (string-match-p remote-fs-canonical-regexp value))
+          t
+        (when-let* ((vec (remote-compat-tramp-vector value)))
+          (equal (tramp-file-name-method vec) remote-fs-method)))
     (error nil)))
 
 (defun remote-fs-install ()
   "Install the fs method and foreign handler."
   (remote-fs-register-method)
-  ;; The logical handler is reached through TRAMP's outer file-name dispatcher.
-  ;; Startup accelerators and init reloads may temporarily remove that entry
-  ;; even though TRAMP remains loaded.  Re-register the public dispatcher here
-  ;; so enabling `remote-mode' is a complete, self-contained operation.
+  ;; TRAMP handles the full logical contract.  A narrow direct handler answers
+  ;; explicit logical-name expansion and metadata; other lexical path and
+  ;; process operations still need TRAMP's dynamic file-handler boundary.
+  ;; Startup accelerators and init reloads may temporarily remove the outer
+  ;; entry, so restore it before installing our narrow fast path.
   (tramp-register-file-name-handlers)
   (remote-compat-tramp-register-foreign-handler
    #'remote-fs-foreign-p
    #'remote-fs-file-name-handler
    (mapcar #'car remote-fs-file-name-handler-alist))
+  (remote-fs--prefer-direct-dispatch)
   ;; The public API has no file-name argument after a watch is created; keep
   ;; logical descriptor dispatch explicit without touching filenotify's
   ;; private descriptor table.

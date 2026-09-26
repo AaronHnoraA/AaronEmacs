@@ -32,6 +32,7 @@
 (declare-function my/language-server--set-struct-slot
                   "init-lsp" (object type slot value))
 (declare-function my/language-server--project-root-for-buffer "init-lsp" ())
+(declare-function my/language-server-executable-find "init-lsp" (program))
 (declare-function my/language-server-toolchain-set-local-variable
                   "init-lsp-toolchain" (variable value))
 (defvar dape-configs)
@@ -42,6 +43,8 @@
 (defvar lsp-java-server-config-dir)
 (defvar lsp-java-workspace-dir)
 (defvar lsp-java-jdt-ls-prefer-native-command)
+(defvar lsp-java-jdt-ls-command)
+(defvar lsp-java-server-install-dir)
 (defvar lsp-enabled-clients)
 (defvar my/debug-after-register-common-configs-hook)
 (defvar my/java-debug--forwards (make-hash-table :test #'equal)
@@ -229,6 +232,14 @@ far from its cause.  Fail here instead, at toolchain-apply time."
           :target-system target-system
           :target-architecture target-architecture))))))
 
+(defun my/lsp-java--runtime-available-p ()
+  "Return whether this buffer's selected Java runtime exists on its target.
+The JDTLS launcher may already be installed on the Emacs client, so lsp-mode's
+ordinary binary check alone cannot prove that target-side `java' is usable."
+  (when-let* ((profile my/language-server-toolchain--applied-profile)
+              (java (plist-get profile :executable)))
+    (and (my/language-server-executable-find java) t)))
+
 (defun my/lsp-java--target-config-name (profile)
   "Return the JDTLS configuration directory name for target PROFILE."
   (let* ((system
@@ -275,6 +286,24 @@ identity the jar launcher would have used."
               (list "-configuration"
                     (remote-file-local-name lsp-java-server-config-dir))))
       command)))
+
+(defun my/lsp-java--locate-server-command-a (function &rest arguments)
+  "Find a target JDTLS launcher through the logical file handler.
+`locate-file' can return nil for an executable under `/fs:' even when
+`file-executable-p' succeeds.  Use the target installation checked by the
+toolchain before letting lsp-java fall back to its jar launcher."
+  (let ((candidate
+         (and (bound-and-true-p lsp-java-jdt-ls-prefer-native-command)
+              (stringp lsp-java-server-install-dir)
+              (stringp lsp-java-jdt-ls-command)
+              (expand-file-name
+               lsp-java-jdt-ls-command
+               (expand-file-name "bin/" lsp-java-server-install-dir)))))
+    (or (and candidate
+             (remote-fs-file-name-p candidate)
+             (file-executable-p candidate)
+             candidate)
+        (apply function arguments))))
 
 (defvar my/lsp-java--single-root-enforced nil
   "Canonical root last handled by `my/lsp-java--enforce-single-root', or nil.
@@ -402,7 +431,13 @@ inside the one selected root."
   (unless (advice-member-p
            #'my/lsp-java--target-command-a 'lsp-java--ls-command)
     (advice-add
-     'lsp-java--ls-command :around #'my/lsp-java--target-command-a)))
+     'lsp-java--ls-command :around #'my/lsp-java--target-command-a))
+  (when (fboundp 'lsp-java--locate-server-command)
+    (unless (advice-member-p
+             #'my/lsp-java--locate-server-command-a
+             'lsp-java--locate-server-command)
+      (advice-add 'lsp-java--locate-server-command :around
+                  #'my/lsp-java--locate-server-command-a))))
 
 (add-hook
  'my/language-server-lsp-local-settings-hook
@@ -416,6 +451,7 @@ inside the one selected root."
    '(java-mode java-ts-mode) 'lsp-java
    :label "Eclipse JDT LS (lsp-java)"
    :executables '("java")
+   :available-p #'my/lsp-java--runtime-available-p
    :note "JDTLS is provisioned onto the workspace target when it is trusted."))
 
 ;; `my/lsp-mode-ensure' previously ran a second time here, directly on

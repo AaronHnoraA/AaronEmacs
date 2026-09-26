@@ -11,7 +11,9 @@
   (declare (indent 1))
   `(let ((my/language-server-toolchain-providers nil)
          (my/language-server-toolchain--overrides (make-hash-table :test #'equal))
-         (my/language-server-toolchain--candidate-cache (make-hash-table :test #'equal)))
+         (my/language-server-toolchain--candidate-cache (make-hash-table :test #'equal))
+         (my/language-server-toolchain--fast-candidate-cache
+          (make-hash-table :test #'equal)))
      (cl-letf (((symbol-function 'my/project-local-root)
                 (lambda () temporary-file-directory))
                ((symbol-function 'my/project-local-value)
@@ -51,7 +53,56 @@
         (remhash (my/language-server-toolchain--key)
                  my/language-server-toolchain--candidate-cache)
         (my/language-server-toolchain-candidates)
-        (should (= calls 2))))))
+        (should (= calls 2))
+        (my/register-language-server-toolchain-provider
+         'test '(my/toolchain-test-mode)
+         (lambda (_root) '((:id replacement :default t))))
+        (should (eq (plist-get (car (my/language-server-toolchain-candidates))
+                               :id)
+                    'replacement))))))
+
+(ert-deftest my/toolchain-auto-start-skips-expensive-picker-discovery ()
+  "Automatic startup uses fast profiles; explicit choices use the full set."
+  (let (settings)
+    (my/toolchain-test-with-project settings
+      (let ((fast-calls 0) (full-calls 0))
+        (my/register-language-server-toolchain-provider
+         'test '(my/toolchain-test-mode)
+         (lambda (_root)
+           (cl-incf full-calls)
+           '((:id path :default t) (:id conda)))
+         :discover-fast
+         (lambda (_root)
+           (cl-incf fast-calls)
+           '((:id path :default t))))
+        (with-temp-buffer
+          (my/toolchain-test-mode)
+          (should (eq (plist-get (my/language-server-current-toolchain-profile)
+                                 :id)
+                      'path))
+          (should (= fast-calls 1))
+          (should (= full-calls 0))
+          (should (= (length (my/language-server-toolchain-candidates)) 2))
+          (should (= full-calls 1))
+          (puthash (my/language-server-toolchain--key) 'conda
+                   my/language-server-toolchain--overrides)
+          (should (eq (plist-get (my/language-server-current-toolchain-profile)
+                                 :id)
+                      'conda))
+          (should (= full-calls 1))
+          (remhash (my/language-server-toolchain--key)
+                   my/language-server-toolchain--overrides)
+          (setq settings '(:toolchain ((test . conda))))
+          (should (eq (plist-get (my/language-server-current-toolchain-profile)
+                                 :id)
+                      'conda))
+          (setq settings nil)
+          (my/language-server-refresh-toolchains)
+          (should (eq (plist-get (my/language-server-current-toolchain-profile)
+                                 :id)
+                      'path))
+          (should (= fast-calls 2))
+          (should (= full-calls 2)))))))
 
 (ert-deftest my/toolchain-applies-and-restores-generic-profile ()
   (my/toolchain-test-with-project

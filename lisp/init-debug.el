@@ -142,15 +142,70 @@ Language modules should use this hook to add language-specific debug configs.")
                    (read-file-name "Program: " root nil t))))
     (expand-file-name choice root)))
 
+(defconst my/debug-python-attach--bridge-script
+  (concat
+   "import socket, sys, threading\n"
+   "sock = socket.create_connection((sys.argv[1], int(sys.argv[2])))\n"
+   "def upload():\n"
+   "    try:\n"
+   "        while True:\n"
+   "            data = sys.stdin.buffer.read1(65536)\n"
+   "            if not data: break\n"
+   "            sock.sendall(data)\n"
+   "    finally:\n"
+   "        try: sock.shutdown(socket.SHUT_WR)\n"
+   "        except OSError: pass\n"
+   "threading.Thread(target=upload, daemon=True).start()\n"
+   "try:\n"
+   "    while True:\n"
+   "        data = sock.recv(65536)\n"
+   "        if not data: break\n"
+   "        sys.stdout.buffer.write(data)\n"
+   "        sys.stdout.buffer.flush()\n"
+   "finally: sock.close()\n")
+  "Byte bridge from Dape's target process to a debugpy loopback listener.")
+
+(defun my/debug-python-attach-config (port)
+  "Build a Dape attach configuration for debugpy on target loopback PORT.
+The bridge runs through the current buffer's Remote process route, so the
+listener is resolved on the target and no client-side forwarding is needed."
+  (unless (and (integerp port) (<= 1 port 65535))
+    (user-error "Debugpy port must be between 1 and 65535"))
+  (list 'command "python3"
+        'command-args
+        (list "-u" "-c" my/debug-python-attach--bridge-script
+              "127.0.0.1" (number-to-string port))
+        'port nil
+        :request "attach" :type "python"
+        :connect (list :host "127.0.0.1" :port port)
+        :justMyCode nil))
+
+(defun my/debug-python-attach (port)
+  "Attach Dape to a debugpy listener on the current target's PORT.
+Start Python with `python3 -m debugpy --listen 127.0.0.1:5678 --wait-for-client FILE'
+on that target, then invoke this command in a source buffer."
+  (interactive (list (read-number "Target debugpy port: " 5678)))
+  (require 'dape)
+  (dape (my/debug-python-attach-config port)))
+
 (defun my/debug-register-common-configs ()
   "Register friendly Dape aliases for common language workflows."
   (my/debug-register-config-alias
    'python-file 'debugpy
    :name "Python: current file"
+   ;; Dape's socket default chooses a client port and infers a host only for
+   ;; the `ssh' TRAMP method.  A `/fs:' workspace uses a different method;
+   ;; target stdio keeps the adapter and debugged process on the same route.
+   'command "python3"
+   'command-args '("-m" "debugpy.adapter")
+   'port nil
    :program #'dape-buffer-default)
   (my/debug-register-config-alias
    'python-module 'debugpy-module
-   :name "Python: module")
+   :name "Python: module"
+   'command "python3"
+   'command-args '("-m" "debugpy.adapter")
+   'port nil)
   (my/debug-register-config-alias
    'node-file 'js-debug-node
    :name "Node: current file"
@@ -408,6 +463,7 @@ frames, so direct clicks there toggle breakpoints."
   "Debug workflow."
   [["Session"
     ("d" "start / choose config" dape)
+    ("y" "attach Python" my/debug-python-attach)
     ("p" "profile menu" my/debug-profile-dispatch)
     ("r" "rerun profile" my/debug-profile-rerun)
     ("R" "restart session" dape-restart)

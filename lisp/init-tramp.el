@@ -7,7 +7,7 @@
 ;;
 ;; Two TRAMP methods are supported:
 ;;   /ssh:host:/path  — standard SSH, managed here (ControlMaster, pipe-mode LSP)
-;;   /rpc:host:/path  — tramp-rpc MessagePack-RPC backend, ~38x faster file ops
+;;   /rpc:host:/path  — tramp-rpc MessagePack-RPC backend
 ;;
 ;; Several subsystems (VC, memoization) are intentionally
 ;; skipped for /rpc: paths because tramp-rpc provides its own superior
@@ -35,12 +35,16 @@
 
 
 ;;; ── tramp-rpc: high-performance MessagePack-RPC TRAMP backend ───────────────
-;; /rpc:host:/path uses a binary RPC server on the remote for ~38x faster
-;; connection setup and ~27x faster directory listing vs traditional SSH.
+;; /rpc:host:/path uses a binary RPC server on the remote.  Actual latency
+;; depends on the target, the selected route, and connection warmup.
 ;;
 ;; Whether a buffer actually gets that fast path is a route question, answered
 ;; by `remote-file-operation-cost'; nothing below branches on the path spelling.
-(my/package-ensure-vc 'tramp-rpc "https://github.com/ArthurHeymans/emacs-tramp-rpc")
+;; Client and Rust server are released as a pair.  Keep the audited release
+;; fixed until a newer pair passes Remote's compatibility and SSH E2E gates.
+(my/package-ensure-vc
+ 'tramp-rpc "https://github.com/ArthurHeymans/emacs-tramp-rpc"
+ "e1d4632d576ecf2472c321de1e713b776ea2b78f")
 
 ;; Loaded only through `remote-accelerator'.  Do not call `tramp-hlo-setup'
 ;; globally: the framework selects it per logical route and operation after a

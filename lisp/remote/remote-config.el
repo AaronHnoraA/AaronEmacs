@@ -4,7 +4,8 @@
 ;;
 ;; `etc/remote.json' persists logical targets and transport pipelines.  The
 ;; older `links'/`plugins' keys remain accepted as compatibility spellings.
-;; SSH config imports are only a discovery source.
+;; SSH config imports discover targets and record non-default client config
+;; files on their pipelines.
 
 ;;; Code:
 
@@ -118,6 +119,56 @@
                          (format "%s" item)))
                   value)))))
 
+(defun remote-config-ssh-import-files (&optional file)
+  "Return absolute SSH config files imported by Remote config FILE.
+Relative file names are resolved beside FILE, independent of the current
+buffer's `default-directory'.  This function reads only the local JSON file."
+  (let* ((file (expand-file-name (or file remote-config-file)))
+         (json-object-type 'alist)
+         (json-array-type 'list)
+         (json-key-type 'symbol)
+         (json-false nil)
+         (root (json-read-file file))
+         (base (file-name-directory file))
+         files)
+    (remote-config--schema-version root)
+    (dolist (import (alist-get 'imports root))
+      (when (equal (alist-get 'type import) "ssh-config")
+        (dolist (name (remote-config--string-list
+                       (alist-get 'files import)))
+          (push (expand-file-name name base) files))))
+    (delete-dups (nreverse files))))
+
+(defun remote-config-ssh-host-importable-p (alias ssh-file &optional file)
+  "Return whether ALIAS in SSH-FILE has an enabled import pipeline in FILE.
+This checks the same include/exclude predicates used by `remote-config-load'
+before a UI command changes an SSH config file."
+  (let* ((file (expand-file-name (or file remote-config-file)))
+         (ssh-file (expand-file-name ssh-file))
+         (json-object-type 'alist)
+         (json-array-type 'list)
+         (json-key-type 'symbol)
+         (json-false nil)
+         (root (json-read-file file))
+         (base (file-name-directory file)))
+    (remote-config--schema-version root)
+    (seq-some
+     (lambda (import)
+       (and (equal (alist-get 'type import) "ssh-config")
+            (member ssh-file
+                    (mapcar
+                     (lambda (name) (expand-file-name name base))
+                     (remote-config--string-list
+                      (alist-get 'files import))))
+            (remote-config--allowed-p alias import)
+            (seq-some
+             (lambda (pipeline)
+               (and (not (eq (alist-get 'enabled pipeline t) nil))
+                    (remote-config--allowed-p alias pipeline)))
+             (or (alist-get 'pipelines import)
+                 (alist-get 'links import)))))
+     (alist-get 'imports root))))
+
 (defun remote-config--strip-ssh-comment (line)
   "Strip a trailing SSH comment from LINE."
   (string-trim
@@ -220,8 +271,10 @@ SEEN prevents recursive Include cycles."
              (lambda (id) (gethash id remote-links))
              (remote-target-links local))))))
 
-(defun remote-config--register-pipeline-object (target-id object &optional host)
+(defun remote-config--register-pipeline-object
+    (target-id object &optional host ssh-config-file)
   "Register pipeline OBJECT for TARGET-ID, defaulting its host to HOST.
+SSH-CONFIG-FILE binds an imported host to its source OpenSSH config.
 Both v2 backend keys and v1 plugin keys are accepted."
   (let* ((backends
           (or (remote-config--string-list
@@ -236,6 +289,10 @@ Both v2 backend keys and v1 plugin keys are accepted."
          (config (if (or (plist-get config :host) (null host))
                      config
                    (plist-put config :host host)))
+         (config (if (or (plist-get config :ssh-config-file)
+                         (null ssh-config-file))
+                     config
+                   (plist-put config :ssh-config-file ssh-config-file)))
          (config (if (or (not (member "tramp" backends))
                          (plist-get config :method))
                      config
@@ -281,15 +338,23 @@ Both v2 backend keys and v1 plugin keys are accepted."
        (remote-target-id target) pipeline))
     target))
 
-(defun remote-config--import-ssh (object)
+(defun remote-config--import-ssh (object &optional config-file)
   "Import SSH config targets described by OBJECT."
-  (let (hosts)
+  (let ((base (file-name-directory
+               (expand-file-name (or config-file remote-config-file))))
+        (default-ssh-file (expand-file-name "~/.ssh/config"))
+        (sources (make-hash-table :test #'equal))
+        hosts)
     (dolist (file (remote-config--string-list (alist-get 'files object)))
-      (setq hosts
-            (nconc hosts (remote-config--ssh-hosts file))))
-    (dolist (host (delete-dups hosts))
+      (let ((file (expand-file-name file base)))
+        (dolist (host (remote-config--ssh-hosts file))
+          (unless (gethash host sources)
+            (puthash host file sources)
+            (push host hosts)))))
+    (dolist (host (nreverse hosts))
       (when (remote-config--allowed-p host object)
         (let* ((id (remote-fs--slug host))
+               (source (gethash host sources))
                (target
                 (or (remote-get-target id)
                     (remote-register-target
@@ -310,7 +375,9 @@ Both v2 backend keys and v1 plugin keys are accepted."
                       (append (remote-config--preferences preferences)
                               (remote-target-preferences target))))
               (remote-config--register-pipeline-object
-               id pipeline host))))))))
+               id pipeline host
+               (unless (equal source default-ssh-file)
+                 source)))))))))
 
 (defun remote-config--schema-version (root)
   "Validate and return ROOT's configuration schema version."
@@ -348,7 +415,7 @@ Both v2 backend keys and v1 plugin keys are accepted."
           (remote-config--register-target-object target))
         (dolist (import (alist-get 'imports root))
           (pcase (alist-get 'type import)
-            ("ssh-config" (remote-config--import-ssh import))
+            ("ssh-config" (remote-config--import-ssh import file))
             (type
              (remote-log
               'config-warning

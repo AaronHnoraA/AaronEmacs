@@ -26,6 +26,30 @@
   :type 'number
   :group 'remote)
 
+(defcustom remote-backend-tramp-ssh-server-alive-interval 15
+  "Seconds without server traffic before OpenSSH probes the connection.
+Set to nil to inherit `ServerAliveInterval' from SSH config, or zero to
+disable probes.  A pipeline's explicit `:ssh-options' takes precedence."
+  :type '(choice (const :tag "Inherit SSH config" nil)
+                 (integer :tag "Seconds, zero to disable"))
+  :group 'remote)
+
+(defcustom remote-backend-tramp-ssh-server-alive-count-max 3
+  "Missed OpenSSH server-alive replies before closing the connection.
+Set to nil to inherit `ServerAliveCountMax' from SSH config.  A pipeline's
+explicit `:ssh-options' takes precedence."
+  :type '(choice (const :tag "Inherit SSH config" nil)
+                 (integer :tag "Maximum missed replies"))
+  :group 'remote)
+
+(defun remote-backend-tramp--ssh-option-present-p (options name)
+  "Return non-nil when OPTIONS explicitly set OpenSSH option NAME."
+  (let ((case-fold-search t)
+        (pattern
+         (concat "\\`[[:space:]]*" (regexp-quote name)
+                 "\\(?:[[:space:]]*=[[:space:]]*\\|[[:space:]]+\\)")))
+    (seq-some (lambda (option) (string-match-p pattern option)) options)))
+
 (defun remote-backend-tramp--ssh-options (link)
   "Return bounded SSH option strings for LINK.
 Pipeline config may set `:ssh-options', `:connect-timeout', and
@@ -57,6 +81,18 @@ default TCP connect timeout."
     (delete-dups
      (append
       managed configured
+      (unless (remote-backend-tramp--ssh-option-present-p
+               configured "ServerAliveInterval")
+        (when (and (integerp remote-backend-tramp-ssh-server-alive-interval)
+                   (>= remote-backend-tramp-ssh-server-alive-interval 0))
+          (list (format "ServerAliveInterval=%d"
+                        remote-backend-tramp-ssh-server-alive-interval))))
+      (unless (remote-backend-tramp--ssh-option-present-p
+               configured "ServerAliveCountMax")
+        (when (and (integerp remote-backend-tramp-ssh-server-alive-count-max)
+                   (> remote-backend-tramp-ssh-server-alive-count-max 0))
+          (list (format "ServerAliveCountMax=%d"
+                        remote-backend-tramp-ssh-server-alive-count-max))))
       (when (and (numberp timeout) (> timeout 0))
         (list (format "ConnectTimeout=%d" (ceiling timeout))))
       (when (and (numberp attempts) (> attempts 0))
@@ -67,58 +103,137 @@ default TCP connect timeout."
   (cl-loop for option in options
            append (list "-o" option)))
 
-(defun remote-backend-tramp--method-login-args (method options)
-  "Return METHOD login arguments decorated with SSH OPTIONS."
+(defun remote-backend-tramp--ssh-config-args (pipeline)
+  "Return raw OpenSSH args for PIPELINE's optional client config file."
+  (when-let* ((file (remote-transport-ssh-config-file pipeline)))
+    (list "-F" file)))
+
+(defun remote-backend-tramp--method-login-args
+    (method options &optional config-args)
+  "Return METHOD login arguments decorated with SSH OPTIONS and CONFIG-ARGS."
   (when-let* ((entry (assoc method tramp-methods))
               (base (cadr (assq 'tramp-login-args (cdr entry)))))
     (append
+     (when config-args (list config-args))
      (mapcar (lambda (option) (list "-o" option)) options)
      (copy-tree base))))
 
+(defun remote-backend-tramp--seed-login-args (prefix login-args)
+  "Set PREFIX's LOGIN-ARGS in TRAMP's existing connection cache.
+TRAMP initializes `tramp-connection-properties' only when it creates a cache
+entry.  A reconnect can reuse an entry created before our dynamic binding;
+write the scoped arguments directly so a custom `-F' is not lost.  Mark the
+property the same way TRAMP marks static defaults, so it is not persisted."
+  (when (and prefix login-args
+             (fboundp 'tramp-set-connection-property)
+             (fboundp 'tramp-dissect-file-name))
+    (tramp-set-connection-property
+     (tramp-dissect-file-name prefix nil)
+     (propertize "login-args" 'tramp-default t)
+     login-args)))
+
+(defvar remote-backend-tramp--prefix-cache (make-hash-table :test #'equal)
+  "Projected no-hop SSH prefixes guarded by link and active runtime state.")
+
+(defun remote-backend-tramp--snapshot-prefix-value (value)
+  "Copy mutable string VALUE for a projected prefix cache guard."
+  (if (stringp value) (copy-sequence value) value))
+
+(defun remote-backend-tramp--cached-prefix (link method runtime endpoint)
+  "Return a valid projected prefix for LINK, METHOD and ENDPOINT."
+  (when (and runtime endpoint
+             (null (remote-endpoint-hops endpoint)))
+    (when-let* ((entry
+                 (gethash (cons (remote-link-id link) method)
+                          remote-backend-tramp--prefix-cache)))
+      (when (and (eq (aref entry 0) link)
+                 (eq (aref entry 1) runtime)
+                 (equal (aref entry 2) (remote-endpoint-host endpoint))
+                 (equal (aref entry 3) (remote-endpoint-user endpoint))
+                 (equal (aref entry 4) (remote-endpoint-port endpoint))
+                 (let ((config (remote-pipeline-config link)))
+                   (and (null (plist-get config :hops))
+                        (equal (aref entry 5) (plist-get config :host))
+                        (equal (aref entry 6) (plist-get config :user))
+                        (equal (aref entry 7) (plist-get config :port)))))
+        (aref entry 8)))))
+
 (defun remote-backend-tramp-file-name (localname link method)
   "Return a TRAMP file name for LOCALNAME through LINK using METHOD."
-  (let* ((config (remote-pipeline-effective-config link))
-         (host (or (plist-get config :host)
-                   (error "Pipeline %s has no host"
-                          (remote-link-id link))))
-         (user (plist-get config :user))
-         (port (plist-get config :port))
-         (hops (plist-get config :hops)))
-    (if hops
-        (format
-         "/%s:%s"
-         (mapconcat
-          #'identity
-          (cl-loop
-           for hop in hops
-           for tail on hops
-           collect
-           (let ((hop-method
-                  (if (cdr tail)
-                      (or (remote-endpoint-method hop) "ssh")
-                    method))
-                 (hop-user (remote-endpoint-user hop))
-                 (hop-host (remote-endpoint-host hop))
-                 (hop-port (remote-endpoint-port hop)))
-             (format
-              "%s:%s%s%s"
-              hop-method
-              (if (and hop-user
-                       (not (string-empty-p hop-user)))
-                  (concat hop-user "@")
-                "")
-              hop-host
-              (if hop-port (format "#%s" hop-port) ""))))
-          "|")
-         localname)
-      (format "/%s:%s%s%s:%s"
-              method
-              (if (and user (not (string-empty-p user)))
-                  (concat user "@")
-                "")
-              host
-              (if port (format "#%s" port) "")
-              localname))))
+  (let* ((runtime (remote-pipeline-active-runtime link))
+         (endpoint (and runtime
+                        (remote-pipeline-runtime-endpoint runtime)))
+         (prefix (remote-backend-tramp--cached-prefix
+                  link method runtime endpoint)))
+    (if prefix
+        (concat prefix localname)
+      (let* ((config (remote-pipeline-effective-config link runtime))
+             (host (or (plist-get config :host)
+                       (error "Pipeline %s has no host"
+                              (remote-link-id link))))
+             (user (plist-get config :user))
+             (port (plist-get config :port))
+             (hops (plist-get config :hops))
+             (result
+              (if hops
+                  (format
+                   "/%s:%s"
+                   (mapconcat
+                    #'identity
+                    (cl-loop
+                     for hop in hops
+                     for tail on hops
+                     collect
+                     (let ((hop-method
+                            (if (cdr tail)
+                                (or (remote-endpoint-method hop) "ssh")
+                              method))
+                           (hop-user (remote-endpoint-user hop))
+                           (hop-host (remote-endpoint-host hop))
+                           (hop-port (remote-endpoint-port hop)))
+                       (format
+                        "%s:%s%s%s"
+                        hop-method
+                        (if (and hop-user
+                                 (not (string-empty-p hop-user)))
+                            (concat hop-user "@")
+                          "")
+                        hop-host
+                        (if hop-port (format "#%s" hop-port) ""))))
+                    "|")
+                   localname)
+                (format "/%s:%s%s%s:%s"
+                        method
+                        (if (and user (not (string-empty-p user)))
+                            (concat user "@")
+                          "")
+                        host
+                        (if port (format "#%s" port) "")
+                        localname))))
+        (when (and runtime endpoint (null hops)
+                   (null (remote-endpoint-hops endpoint)))
+          (when (>= (hash-table-count remote-backend-tramp--prefix-cache)
+                    256)
+            (clrhash remote-backend-tramp--prefix-cache))
+          (puthash
+           (cons (remote-link-id link) method)
+           (vector link runtime
+                   (remote-backend-tramp--snapshot-prefix-value
+                    (remote-endpoint-host endpoint))
+                   (remote-backend-tramp--snapshot-prefix-value
+                    (remote-endpoint-user endpoint))
+                   (remote-backend-tramp--snapshot-prefix-value
+                    (remote-endpoint-port endpoint))
+                   (remote-backend-tramp--snapshot-prefix-value
+                    (plist-get (remote-pipeline-config link) :host))
+                   (remote-backend-tramp--snapshot-prefix-value
+                    (plist-get (remote-pipeline-config link) :user))
+                   (remote-backend-tramp--snapshot-prefix-value
+                    (plist-get (remote-pipeline-config link) :port))
+                   (substring result 0 (- (length result)
+                                          (length localname))))
+           remote-backend-tramp--prefix-cache))
+        result))))
 
 (defun remote-backend-tramp-project (file-name link _route)
   "Project logical FILE-NAME through standard TRAMP LINK."
@@ -128,39 +243,63 @@ default TCP connect timeout."
    (or (plist-get (remote-pipeline-effective-config link) :method)
        "ssh")))
 
+(defun remote-backend-tramp--named-home-user (name)
+  "Return the account name in `~USER' NAME, or nil."
+  (and (stringp name)
+       (string-match "\\`~\\([^/]+\\)\\(/.*\\)?\\'" name)
+       (match-string 1 name)))
+
+(defun remote-backend-tramp--named-home-localname (name link method)
+  "Resolve `~USER' NAME on LINK, or return nil for other spellings."
+  (when-let* ((user (remote-backend-tramp--named-home-user name)))
+    (let* ((tail (substring name (1+ (length user))))
+           (physical (remote-backend-tramp-file-name name link method))
+           (vector (tramp-dissect-file-name physical nil))
+           ;; Some TRAMP releases turn `~user/' into `~/~user/' and silently
+           ;; select the login user's HOME.  Ask the backend for USER's home.
+           (home (tramp-get-home-directory vector user)))
+      (unless (and (stringp home) (file-name-absolute-p home))
+        (signal 'file-error
+                (list "Cannot resolve remote user's home" user)))
+      (let ((default-directory temporary-file-directory))
+        (expand-file-name
+         (concat (file-name-as-directory home)
+                 (string-remove-prefix "/" tail)))))))
+
 (defun remote-backend-tramp-expand-localname-with-method
     (name directory link method)
   "Resolve target-native NAME against DIRECTORY through LINK using METHOD."
-  (let* ((target-name
-          (if (string-prefix-p "~" name)
-              name
-            (let ((inhibit-file-name-handlers
-                   (cons #'tramp-file-name-handler
-                         inhibit-file-name-handlers))
-                  (inhibit-file-name-operation 'expand-file-name))
-              (expand-file-name name (or directory "/")))))
-         ;; Prefix the target-relative spelling before asking Emacs to
-         ;; expand it.  Passing bare `~/' with a TRAMP default directory
-         ;; would be handled as a client-local absolute name.
-         (physical
-          (remote-backend-tramp-file-name target-name link method))
-         ;; This function is commonly entered from the logical `/fs:' file
-         ;; handler.  Emacs inhibits TRAMP's handler while that handler is
-         ;; active, but PHYSICAL is a new `/ssh:' or `/rpc:' name and must be
-         ;; handed back to TRAMP so target `~' expands against the target HOME.
-         (expanded
-          (let ((inhibit-file-name-handlers
-                 (delq #'tramp-file-name-handler
-                       (copy-sequence inhibit-file-name-handlers)))
-                (inhibit-file-name-operation nil))
-            (expand-file-name physical)))
-         (vector (tramp-dissect-file-name expanded nil))
-         (localname (tramp-file-name-localname vector)))
-    (unless (and (stringp localname)
-                 (file-name-absolute-p localname)
-                 (not (string-prefix-p "~" localname)))
-      (error "TRAMP did not resolve target path %S" physical))
-    localname))
+  (or (remote-backend-tramp--named-home-localname name link method)
+      (let* ((target-name
+              (if (string-prefix-p "~" name)
+                  name
+                (let ((inhibit-file-name-handlers
+                       (cons #'tramp-file-name-handler
+                             inhibit-file-name-handlers))
+                      (inhibit-file-name-operation 'expand-file-name))
+                  (expand-file-name name (or directory "/")))))
+             ;; Prefix the target-relative spelling before asking Emacs to
+             ;; expand it.  Passing bare `~/' with a TRAMP default directory
+             ;; would be handled as a client-local absolute name.
+             (physical
+              (remote-backend-tramp-file-name target-name link method))
+             ;; This function is commonly entered from the logical `/fs:' file
+             ;; handler.  Emacs inhibits TRAMP's handler while that handler is
+             ;; active, but PHYSICAL is a new `/ssh:' or `/rpc:' name and must be
+             ;; handed back to TRAMP so target `~' expands against the target HOME.
+             (expanded
+              (let ((inhibit-file-name-handlers
+                     (delq #'tramp-file-name-handler
+                           (copy-sequence inhibit-file-name-handlers)))
+                    (inhibit-file-name-operation nil))
+                (expand-file-name physical)))
+             (vector (tramp-dissect-file-name expanded nil))
+             (localname (tramp-file-name-localname vector)))
+        (unless (and (stringp localname)
+                     (file-name-absolute-p localname)
+                     (not (string-prefix-p "~" localname)))
+          (error "TRAMP did not resolve target path %S" physical))
+        localname)))
 
 (defun remote-backend-tramp-expand-localname
     (name directory link _route)
@@ -181,6 +320,7 @@ default TCP connect timeout."
          (managed-control-options
           (remote-transport-ssh-control-options))
          (options (remote-backend-tramp--ssh-options link))
+         (config-args (remote-backend-tramp--ssh-config-args link))
          (raw-options (remote-backend-tramp--ssh-raw-args options))
          (physical
           (remote-backend-project-file-name
@@ -189,7 +329,8 @@ default TCP connect timeout."
             (remote-route-target-id route) "/")))
          (prefix (file-remote-p physical))
          (login-args
-          (remote-backend-tramp--method-login-args method options))
+          (remote-backend-tramp--method-login-args
+           method options config-args))
          ;; These are official, connection-scoped TRAMP overrides.  Dynamic
          ;; binding keeps one pipeline's SSH policy out of every other target.
          (tramp-connection-properties
@@ -205,7 +346,8 @@ default TCP connect timeout."
          (tramp-rpc-ssh-args
           ;; Do not deduplicate this flat argv: every option has its own `-o'
           ;; token, and deleting repeated `-o' changes argument boundaries.
-          (append (unless managed-control-options raw-options)
+          (append config-args
+                  (unless managed-control-options raw-options)
                   (and (boundp 'tramp-rpc-ssh-args)
                        tramp-rpc-ssh-args)))
          (tramp-rpc-ssh-options
@@ -235,6 +377,8 @@ default TCP connect timeout."
          ;; on a client-local directory while the physical remote path below
          ;; remains the connection target.
          (default-directory temporary-file-directory))
+    (when config-args
+      (remote-backend-tramp--seed-login-args prefix login-args))
     (unless (file-remote-p physical nil 'connected)
       (file-attributes physical))
     physical))
@@ -337,44 +481,27 @@ default TCP connect timeout."
   (and (stringp name)
        (string-match-p "\\`[[:alpha:]_][[:alnum:]_]*\\'" name)))
 
-(defun remote-backend-tramp-direct-async-command
-    (route command environment directory)
-  "Return a local SSH argv for target COMMAND on ROUTE.
-ENVIRONMENT is an alist of target overrides.  DIRECTORY is a target-native
-absolute working directory.  The resulting local process exposes SSH's real
-stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation."
+(cl-defun remote-backend-tramp-ssh-client-command
+    (route &key tty verbose extra-options)
+  "Return a client OpenSSH argv for ROUTE without a remote command.
+TTY non-nil requests an interactive terminal.  EXTRA-OPTIONS is a list of
+OpenSSH option strings inserted before the pipeline's own options.  VERBOSE
+requests OpenSSH's diagnostic output."
   (pcase-let* ((`(,destination ,jumps ,_config)
-                 (remote-backend-tramp--pipeline-ssh-parts route))
-                (ssh
-                 (or (remote-client-executable-find "ssh")
-                     (signal
-                      'remote-backend-unsupported
-                      '("Local ssh executable is unavailable"))))
-                (options
-                 (remote-backend-tramp--ssh-options
-                  (remote-route-pipeline route)))
-                (assignments
-                 (cl-loop
-                  for entry in environment
-                  for name = (format "%s" (car-safe entry))
-                  when (and (consp entry)
-                            (cdr entry)
-                            (remote-backend-tramp--valid-environment-name-p
-                             name))
-                  collect (concat name "=" (format "%s" (cdr entry)))))
-                (remote-shell
-                 (concat
-                  (when (and directory
-                             (file-name-absolute-p directory))
-                    (format "cd -- %s && "
-                            (shell-quote-argument directory)))
-                  "exec "
-                  (mapconcat
-                   #'shell-quote-argument
-                   (append (list "env") assignments command)
-                   " ")))
-                (arguments (list ssh "-T")))
-    (dolist (option options)
+                (remote-backend-tramp--pipeline-ssh-parts route))
+               (ssh
+                (or (remote-client-executable-find "ssh")
+                    (signal
+                     'remote-backend-unsupported
+                     '("Local ssh executable is unavailable"))))
+               (pipeline (remote-route-pipeline route))
+               (arguments
+                (append
+                 (list ssh (if tty "-tt" "-T"))
+                 (when verbose (list "-v"))
+                 (remote-backend-tramp--ssh-config-args pipeline))))
+    (dolist (option (append extra-options
+                            (remote-backend-tramp--ssh-options pipeline)))
       (setq arguments (append arguments (list "-o" option))))
     (when jumps
       (setq arguments
@@ -385,8 +512,35 @@ stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation."
       (setq arguments
             (append arguments (list "-p" (format "%s" port)))))
     (append arguments
-            (list (remote-backend-tramp--ssh-destination destination)
-                  remote-shell))))
+            (list (remote-backend-tramp--ssh-destination destination)))))
+
+(defun remote-backend-tramp-direct-async-command
+    (route command environment directory &optional tty)
+  "Return a local SSH argv for target COMMAND on ROUTE.
+ENVIRONMENT is an alist of target overrides.  DIRECTORY is a target-native
+absolute working directory.  The resulting local process exposes SSH's real
+stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation.  TTY
+requests an interactive SSH PTY instead of a pipe."
+  (let* ((assignments
+          (cl-loop
+           for entry in environment
+           for name = (format "%s" (car-safe entry))
+           when (and (consp entry)
+                     (cdr entry)
+                     (remote-backend-tramp--valid-environment-name-p name))
+           collect (concat name "=" (format "%s" (cdr entry)))))
+         (remote-shell
+          (concat
+           (when (and directory (file-name-absolute-p directory))
+             (format "cd -- %s && "
+                     (shell-quote-argument directory)))
+           "exec "
+           (mapconcat
+            #'shell-quote-argument
+            (append (list "env") assignments command)
+            " "))))
+    (append (remote-backend-tramp-ssh-client-command route :tty tty)
+            (list remote-shell))))
 
 (defun remote-backend-tramp-stdio-bridge (execution)
   "Return client SSH argv exposing target EXECUTION over stdio."
@@ -406,10 +560,13 @@ stdout and stderr pipes, avoiding TRAMP's remote FIFO implementation."
 (defun remote-backend-tramp-prepare-process
     (execution arguments environment)
   "Return an async process plan for standard TRAMP EXECUTION.
-Pipe processes use a client SSH stdio bridge.  PTY and other process forms
-remain on Emacs' ordinary file-handler path."
-  (if (eq (or (plist-get arguments :connection-type) 'pipe)
-          'pipe)
+Pipe processes use a client SSH stdio bridge.  PTY processes use a direct
+SSH PTY so interactive input bypasses TRAMP's process setup and FIFO path.
+Other process forms remain on Emacs' ordinary file-handler path."
+  (let* ((connection-type (plist-get arguments :connection-type))
+         (pty (and (memq connection-type '(pty t)) t))
+         (pipe (and (memq connection-type '(pipe nil)) t)))
+    (if (or pipe pty)
       (remote-backend-process-plan-create
        :arguments
        (plist-put
@@ -425,28 +582,67 @@ remain on Emacs' ordinary file-handler path."
                       execution)))
               (remote-file-local-name directory)
             (remote-context-localname
-             (remote-backend-execution-context execution)))))
+             (remote-backend-execution-context execution)))
+          pty))
         :file-handler nil)
        :default-directory temporary-file-directory
+       :process-environment (remote-client-process-environment)
+       :exec-path (remote-client-exec-path)
        :stderr-mode 'native
        :process-properties '((remote-direct-ssh . t))
-       :metadata '(:placement client :stdio ssh))
-    (remote-backend-tramp-handler-process-plan
-     execution arguments environment)))
+       :metadata (if pty
+                     '(:placement client :stdio ssh :pty t)
+                   '(:placement client :stdio ssh)))
+      (remote-backend-tramp-handler-process-plan
+       execution arguments environment))))
 
 (defun remote-backend-tramp-handler-process-plan
     (execution arguments _environment)
   "Return a projected file-handler process plan for EXECUTION.
 This is shared by standard TRAMP's non-pipe path and tramp-rpc."
-  (remote-backend-process-plan-create
-   :arguments
-   (if (plist-member arguments :file-handler)
-       (copy-sequence arguments)
-     (plist-put (copy-sequence arguments) :file-handler t))
-   :default-directory
-   (remote-backend-execution-physical-directory execution)
-   :stderr-mode 'framed
-   :metadata '(:placement target :stdio file-handler)))
+  (let* ((route (remote-backend-execution-route execution))
+         (pipeline (remote-route-pipeline route))
+         (config-args
+          (and pipeline
+               (remote-backend-tramp--ssh-config-args pipeline)))
+         (physical (remote-backend-execution-physical-directory execution))
+         (prefix (and config-args (file-remote-p physical)))
+         (method
+          (when config-args
+            (if (equal (remote-route-link-plugin-id route) "tramp-rpc")
+                "rpc"
+              (or (plist-get (remote-pipeline-config pipeline) :method)
+                  "ssh"))))
+         (login-args
+          (and config-args
+               (remote-backend-tramp--method-login-args
+                method (remote-backend-tramp--ssh-options pipeline)
+                config-args))))
+    (remote-backend-process-plan-create
+     :arguments
+     (if (plist-member arguments :file-handler)
+         (copy-sequence arguments)
+       (plist-put (copy-sequence arguments) :file-handler t))
+     :default-directory physical
+     :stderr-mode 'framed
+     :metadata '(:placement target :stdio file-handler)
+     :around-start
+     (when config-args
+       (lambda (start)
+         (let ((tramp-rpc-ssh-args
+                (append config-args
+                        (and (boundp 'tramp-rpc-ssh-args)
+                             tramp-rpc-ssh-args)))
+               (tramp-connection-properties
+                (if (and prefix login-args)
+                    (cons
+                     (list
+                      (concat "\\`" (regexp-quote prefix))
+                      "login-args" login-args)
+                     tramp-connection-properties)
+                  tramp-connection-properties)))
+           (remote-backend-tramp--seed-login-args prefix login-args)
+           (funcall start)))))))
 
 (defun remote-backend-tramp-direct-copy-file
     (route local-file target-file &optional _overwrite)
@@ -464,7 +660,9 @@ the file-name handler."
                 (options
                  (remote-backend-tramp--ssh-options
                   (remote-route-pipeline route)))
-                (arguments nil))
+                (arguments
+                 (remote-backend-tramp--ssh-config-args
+                  (remote-route-pipeline route))))
     (dolist (option options)
       (setq arguments (append arguments (list "-o" option))))
     (when jumps
@@ -493,7 +691,8 @@ the file-name handler."
   "Build an SSH forward command for ROUTE and the supplied endpoints.
 DIRECTION defaults to `local'.  `reverse' creates an SSH `-R' listener at
 REMOTE-HOST and REMOTE-PORT which connects to LOCAL-HOST and LOCAL-PORT."
-  (let* ((pipeline (remote-route-pipeline route))
+  (let* ((direction (or direction 'local))
+         (pipeline (remote-route-pipeline route))
          (config (remote-pipeline-effective-config pipeline))
          (hops (or (plist-get config :hops)
                    (list
@@ -518,16 +717,20 @@ REMOTE-HOST and REMOTE-PORT which connects to LOCAL-HOST and LOCAL-PORT."
                           (list "Local ssh executable is unavailable"))))
          (options
           (remote-backend-tramp--ssh-options pipeline))
+         (config-args
+          (remote-backend-tramp--ssh-config-args pipeline))
          (command
-          (list
-           ssh "-N" "-T"
-           "-o" "ExitOnForwardFailure=yes"
-           "-o" "ServerAliveInterval=30"
-           "-o" "ServerAliveCountMax=3")))
-    (when (eq direction 'reverse)
-      ;; OpenSSH reports reverse-forward allocation and confirmation at the
-      ;; debug1 level.  The bounded diagnostic buffer is also used to discover
-      ;; the target port selected for `-R ...:0:...'.
+          (append
+           (list ssh "-N" "-T" "-S" "none")
+           config-args
+           (list "-o" "ExitOnForwardFailure=yes"))))
+    ;; Forward listeners are long-lived resources with their own lifecycle.
+    ;; Sharing the workspace ControlMaster lets a reconnect close a newly
+    ;; opened listener before its client process can observe the bind.
+    (when (memq direction '(local reverse))
+      ;; OpenSSH reports listener readiness and reverse-forward allocation at
+      ;; debug1 level.  Reading that output avoids repeatedly probing the
+      ;; destination service when a local forward starts.
       (setq command (append command (list "-v"))))
     (when unsupported
       (signal
@@ -600,6 +803,28 @@ REMOTE-HOST and REMOTE-PORT which connects to LOCAL-HOST and LOCAL-PORT."
         (delete-process probe)
         t)
     (file-error nil)))
+
+(defun remote-backend-tramp--local-forward-ready-p (buffer port)
+  "Return non-nil when OpenSSH reports a listener on PORT in BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-min))
+        (re-search-forward
+         (format "Local forwarding listening on .* port %d\\b" port)
+         nil t)))))
+
+(defun remote-backend-tramp--forward-output (process string)
+  "Keep a bounded diagnostic transcript from forwarding PROCESS."
+  (when-let* ((buffer (process-buffer process))
+              ((buffer-live-p buffer)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t)
+            (inhibit-modification-hooks t))
+        (goto-char (point-max))
+        (insert string)
+        (when (> (buffer-size) 32768)
+          (delete-region (point-min) (- (point-max) 32768)))))))
 
 (defun remote-backend-tramp--reverse-forward-port
     (buffer requested-port)
@@ -689,6 +914,7 @@ dynamic listener, parse the allocated target port from OpenSSH diagnostics."
                  :command command
                  :connection-type 'pipe
                  :coding 'utf-8-unix
+                 :filter #'remote-backend-tramp--forward-output
                  :noquery t))
           (setq forward
                 (remote-forward-create
@@ -745,11 +971,20 @@ dynamic listener, parse the allocated target port from OpenSSH diagnostics."
                        (remote-backend-tramp--reverse-forward-port
                         buffer remote-port)
                      (and
-                      (remote-backend-tramp--local-port-open-p
-                       local-host local-port)
+                      (remote-backend-tramp--local-forward-ready-p
+                       buffer local-port)
                       local-port))))
                  (< (float-time) deadline))
               (accept-process-output process 0.05))
+            ;; Some SSH implementations omit the debug1 listener message.
+            ;; Make one fallback probe after the timeout instead of polling
+            ;; the destination service throughout startup.
+            (when (and (not reverse)
+                       (not confirmed-port)
+                       (process-live-p process)
+                       (remote-backend-tramp--local-port-open-p
+                        local-host local-port))
+              (setq confirmed-port local-port))
             (when (and reverse confirmed-port)
               (setq remote-port confirmed-port)
               (setf
@@ -757,12 +992,19 @@ dynamic listener, parse the allocated target port from OpenSSH diagnostics."
                (list :host remote-host :port confirmed-port)))
             (unless (and (process-live-p process) confirmed-port)
               (let ((diagnostic
-                     (when (buffer-live-p buffer)
-                       (with-current-buffer buffer
-                         (string-trim (buffer-string))))))
+                     (or (when (buffer-live-p buffer)
+                           (with-current-buffer buffer
+                             (string-trim (buffer-string))))
+                         (plist-get (remote-forward-metadata forward)
+                                    :diagnostic))))
                 (remote-backend-tramp--close-forward forward)
-                (error "SSH forward failed: %s"
-                       (or diagnostic "listener did not start")))))
+                (error "SSH forward failed (%s %s): %s"
+                       (process-status process)
+                       (process-exit-status process)
+                       (if (and diagnostic
+                                (not (string-empty-p diagnostic)))
+                           diagnostic
+                         "listener did not start")))))
           (setf (remote-forward-state forward) 'open)
           forward)
       (error

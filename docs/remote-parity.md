@@ -54,31 +54,32 @@ service 与 channel 来自同一 owning workspace target。异步 callback 在�
 | 能力 | 当前 | 完成标准 |
 |---|---|---|
 | 稳定 workspace/file 身份 | remote | backend/pipeline 切换不改变 buffer、project、LSP URI |
-| 文件读写、目录、metadata | remote | 原生 API 全量契约、跨文件操作和错误语义一致 |
-| target HOME 与符号链接 | local | SSH/WSL/container 上验证 `~user`、相对/绝对/断链、truename 与跨目录链接 |
+| 文件读写、目录、metadata | remote | 原生 API 全量契约、跨文件操作和错误语义一致；CSE 连续保存后的命名 ACL、inode、属主和权限已实测保持；经版本验证的原位写入跳过重复 ACL/SELinux 往返，小文件覆写中位耗时约 71→48 ms；属性可用性探测按连接换代缓存 |
+| target HOME 与符号链接 | remote | Aaron-PC 上 SSH 与 tramp-rpc 已验证 `~/`、`~user/`、相对/绝对/断链、truename 与跨目录链接；仍需 WSL/container 回归 |
 | 同步/异步 process | remote | cwd/env/executable 全由 backend execution 契约投影 |
-| PTY terminal | local | SSH、WSL、container 真机回归；断线和 buffer teardown |
+| PTY terminal | remote | CSE 与 Aaron-PC 真机上的 VTerm 已验证独立 `ssh-pty` 选路、workspace 跟踪、目标目录和输入输出；已有工作区中首个 PTY 不再建立 TRAMP 文件会话。RPC 传输或 PTY 进程故障后保留 disconnected buffer，工作区重连再手动重启终端已通过；仍需物理断网、buffer teardown、WSL/container 回归 |
 | 有序 transport pipeline | local | stage 准备、复用、健康、失败回滚和逆序释放 |
 | SSH jump/multi-hop | local | 真机 ProxyJump、多 backend 共用 pipeline |
 | WSL/container hop | API | `/ssh:host|docker:container:`、WSL 与 Podman 真机回归 |
 | workspace lifecycle | local | open/reconnect/close 管理服务、任务、terminal、forward |
 | workspace-side service | local | 探测、可信部署、版本协商、启动、健康、停止 |
 | 环境与 remote settings | remote | user → target → workspace → tool → invocation 分层 |
-| 文件 watch | remote | 真实 SSH inotify 事件、路径重写和 workspace owner 已验证；补长时间与传输断线真机故障注入 |
-| LSP/IntelliSense | remote | root/URI/server/cwd/env/watch/helper/channel 同属一个 workspace target；local/remote 同路由，断线可恢复 |
-| 搜索与 SCM | local | rg/git/Magit 在 target 执行，无本地路径泄漏；VC/diff-hl 已按 `remote-file-operation-cost` 开关，batched backend 上与本地一致，`vc-registered` 按逻辑名缓存；仍缺 Magit 与 rg 的远端真机回归 |
-| tasks/tests | API | task registry、并发、取消、后台任务和结果模型 |
-| debug | API | Dape adapter 在 target 启动；launch/attach/forward 可组合 |
+| 文件 watch | remote | 真实 SSH inotify 事件、路径重写、workspace owner，以及主动重连后的原句柄与新事件已验证；批处理 Emacs 的 RPC 传输进程退出、回复被丢弃及受控 TCP 流量黑洞后，新监听事件均已验证；补长期运行与物理网络故障回归 |
+| LSP/IntelliSense | remote | root/URI/server/cwd/env/watch/helper/channel 同属一个 workspace target；local/remote 同路由；受管 SSH 文件夹空闲时预热客户端 LSP 模块，Python 服务端初始化后异步预热首次补全，预热期间自动补全延后且结束后按原光标位置恢复；远程增量变更按顺序短时合批，请求前强制发送，CSE 模拟按键中位耗时约 1.25→0.83 ms；CSE 现有文件 Company 首次补全实测 959→48 ms；远端补全请求超过 1 秒时启用本地代码词补全，同时异步探活；持续无回复时按窗口限流重建 LSP 资源，CSE 故障注入已验证停旧服、新服预热及补全恢复；local 与 SSH 已验证主动重连后两个源码 buffer、诊断、补全及监听事件；RPC 传输进程退出、持续无回复及受控 SSH TCP 黑洞后均通过双 buffer 自动恢复；补 GUI 输入延迟、长期运行与更多语言服务端回归 |
+| 搜索与 SCM | remote | Aaron-PC 无系统 rg 时可在可信目标的用户缓存部署固定版本 rg，真实 Consult 异步候选含未跟踪文件；不支持的目标回退 grep。Magit status、worktree 访问、stage/unstage 已有 SSH 真机回归，未显式打开 workspace 时访问源码也复用 `/fs:` buffer，本地 target 复用原生 buffer；仍缺其他目标平台与 commit/push 等真机回归 |
+| tasks/tests | remote | `remote-task-run` 与命名 profile 在 local/CSE SSH 走同一 workspace process route；Compilation 输出与绝对错误路径回到 `/fs:`，任务可并发且随 buffer/workspace 关闭取消。CSE 的 tramp-rpc 和标准 TRAMP 真机均验证目标进程、普通子进程退出、失败码和错误跳转；RPC 传输故障注入已验证任务结果标为未知、workspace 自动恢复。仍需长时任务、真实物理断网和更多目标平台回归 |
+| debug | API | Python 文件和模块调试的 Dape adapter 与集成终端已在 local、CSE 通过同一 `/fs:` target 的真实启动、入口暂停、堆栈路径映射、继续与输出验证；`python-file`/`python-module` 改用目标侧 stdio 连接，避免 `/fs:` 的本机端口误连；CSE 的 `python-attach` 通过目标侧 DAP 字节桥接实测连接已有 debugpy 环回监听、入口暂停、堆栈映射、继续和输出。其他语言及断线恢复仍需验证 |
 | TCP/TLS client | local | SSH forward 上继续使用 Emacs 原生 network stream |
-| port forwarding | local | SSH `-L`、jump host、关闭清理；真机验证和 UI |
+| port forwarding | remote | SSH `-L` 转发经面板创建、命名、复制、关闭，并可调整本地端口；占用端口的失败操作保留原转发。独立 SSH 连接避免 ControlMaster 重建竞态；Aaron-PC 真机已验证换端口后的 SSH banner、重连后端口与名称保留；补突发断线故障注入和访问策略 |
 | remote listener/reverse forward | remote | native 回环与 SSH `-R` 真机动态端口已验证；补访问策略和断线恢复故障注入 |
 | Noema Jupyter cells | remote | kernel/cwd/env、`.cell`、五通道与 widget asset 跟随 owning Target；`hb` 心跳覆盖三种 connector 的死亡检测，liveness 探测区分确认死亡与 `unknown`，Emacs 退出时回收 broker kernel；真实 SSH kernel E2E 与传输断线故障注入仍缺，因此未到 resilient |
+| ACP agent（agent-shell） | remote | 所有 agent-shell 入口共用一条 placement：cwd 规范到 `/fs:`，进程经 `make-process` 句柄在 target 启动，可执行文件按 target PATH 查找，ACP 路径双向映射；local 与 CSE SSH 以 stdio ACP stub 实测 initialize/session/new、目标主机、cwd、显式环境变量与路径回映射；尚缺真实 agent 长会话、断线后会话恢复回归 |
 | tunnel | 模型 | 外部 Tailscale/FRP endpoint 可用；尚无托管 tunnel service |
 | Dev Container lifecycle | 未实现 | 读取 devcontainer、build/create/start/attach/rebuild |
 | 工具/“扩展”部署 | API | service manifest、版本锁、离线包、更新与回滚 |
-| 认证与 workspace trust | API | provisioning trust gate；补 host key/auth 状态与交互 UI |
-| 自动重连/恢复 | local | session 与自动资源故障注入；terminal 明确手动恢复 |
-| Remote Explorer/Doctor | remote | 统一结构化状态与 SSH target probe；Explorer UI 继续扩展 |
+| 认证与 workspace trust | API | provisioning trust gate；面板显示 SSH 认证、主机密钥、主机名和网络失败状态，以及首次建连的传输、登录、后端检查阶段；`L` 查看按目标保留的连接事件，`D` 查看异步 SSH 诊断，`T` 打开交互式登录终端；认证输入仍由 TRAMP 处理，尚无统一的认证提示 UI |
+| 自动重连/恢复 | remote | SSH 传输失败注入、真实 RPC 传输进程退出、客户端丢弃 RPC 回复，以及仅作用于测试连接的 TCP 中继丢包后，workspace、LSP 两个源码 buffer 和 watch 自动恢复；受管 SSH 主连接和转发统一启用 OpenSSH 15 秒 × 3 次保活探测，首次自动重连默认缩短建连等待、后续重试保留原上限，目标可覆盖配置；补物理网络故障、认证过期与长期运行回归；terminal 明确手动恢复 |
+| Remote Explorer/Doctor | remote | 面板可打开配置、当前和最近文件夹，按目标补全目录，显示连接阶段与端口，重连 workspace、管理转发；模式栏显示当前 target；`a` 可逐项加入 SSH 主机，`A` 可粘贴常见 SSH 连接命令，自定义文件通过 `-F` 贯通连接、进程和转发；`L`、`D`、`T` 提供连接事件、按目标诊断与登录终端 |
 
 ### SSH v1 已落地的基线
 
@@ -111,6 +112,11 @@ resilient。
 
 ## 3. Emacs 与 VS Code 的对应关系
 
+微软的 [Remote Development FAQ](https://code.visualstudio.com/docs/remote/faq)
+明确说明 Remote 扩展及组件目前并不开源，VS Code Server 也不授权给其他客户端单独
+使用。因此这里对照公开的架构与用户行为，用独立实现和官方 VS Code 客户端做性能
+基准；不把 Remote-SSH 扩展或 VS Code Server 的代码复制、翻译进 Emacs。
+
 | VS Code 概念 | 本框架 |
 |---|---|
 | URI / remote filesystem provider | `/fs:TARGET:/path` file-name handler |
@@ -129,6 +135,15 @@ Emacs package 默认继续在本地运行。需要 workspace 文件、目标 OS 
 通过 file/process/channel API 远端执行；只有高频、强状态或协议型功能才部署为
 remote service。这保留了 Emacs 生态兼容性，也避免要求所有 package 改写成远端
 插件。
+
+[VS Code Remote SSH 官方文档](https://code.visualstudio.com/docs/remote/ssh)
+明确把工作区扩展和命令放在目标侧 VS Code Server，UI 扩展留在客户端。本框架已经
+通过持久的 tramp-rpc 会话和目标侧 LSP、watch、搜索进程承担这些热路径；目前
+CSE 暖态 `/fs:` 打开源码相对直接 `/rpc:` 的配对中位数为 1.028 倍，本地
+`/fs:local:` 相对原生为 1.037 倍。因此暂时没有测量证据支持再加入一层通用 Node
+文件代理；这只是针对当前路径的设计判断，不是对 VS Code 整体速度的结论。
+如果后续实测显示大量跨进程小 RPC 或某项服务需要长期状态，优先在已有
+workspace service 契约下部署目标侧专用进程，并保持 `/fs:` 身份与重连生命周期。
 
 ## 4. 实施顺序
 

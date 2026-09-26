@@ -31,6 +31,21 @@
 (defvar remote-operation-providers nil
   "Registered high-level operation providers in preference order.")
 
+(defvar remote-operation-provider-index (make-hash-table :test #'eq)
+  "Providers grouped by operation for the current registered list.")
+
+(defvar remote-operation-provider-index-source nil
+  "List object used to build `remote-operation-provider-index'.")
+
+(defun remote-operation-provider-rebuild-index ()
+  "Index registered providers without changing their preference order."
+  (let ((index (make-hash-table :test #'eq)))
+    (dolist (provider (reverse remote-operation-providers))
+      (dolist (operation (remote-operation-provider-operations provider))
+        (push provider (gethash operation index))))
+    (setq remote-operation-provider-index index
+          remote-operation-provider-index-source remote-operation-providers)))
+
 (defvar remote-accelerator-probe-cache (make-hash-table :test #'equal)
   "Per-route operation capability probe results.")
 
@@ -82,28 +97,39 @@ same values and must return the ordinary operation result."
         (setq remote-operation-providers
               (append remote-operation-providers (list provider)))
       (push provider remote-operation-providers))
+    (remote-operation-provider-rebuild-index)
     provider))
 
 (defun remote-operation-provider-for
     (operation route context args physical-default)
   "Return the first provider applicable to OPERATION on ROUTE."
-  (seq-find
-   (lambda (provider)
-     (and
-      (memq operation (remote-operation-provider-operations provider))
-      (if-let* ((applicable
-                 (remote-operation-provider-applicable-function provider)))
-          (condition-case error
-              (funcall applicable operation route context args physical-default)
-            (error
-             (remote-log
-              'accelerator-probe-error
-              :provider (remote-operation-provider-id provider)
-              :operation operation
-              :error (error-message-string error))
-             nil))
-        t)))
-   remote-operation-providers))
+  (let* ((indexed (eq remote-operation-providers
+                      remote-operation-provider-index-source))
+         (candidates
+          (if indexed
+              (gethash operation remote-operation-provider-index)
+            remote-operation-providers)))
+    (when candidates
+      (seq-find
+       (lambda (provider)
+         (and
+          (or indexed
+              (memq operation
+                    (remote-operation-provider-operations provider)))
+          (if-let* ((applicable
+                     (remote-operation-provider-applicable-function provider)))
+              (condition-case error
+                  (funcall applicable operation route context args
+                           physical-default)
+                (error
+                 (remote-log
+                  'accelerator-probe-error
+                  :provider (remote-operation-provider-id provider)
+                  :operation operation
+                  :error (error-message-string error))
+                 nil))
+            t)))
+       candidates))))
 
 (defun remote-operation-provider-call
     (provider operation route context args physical-default)

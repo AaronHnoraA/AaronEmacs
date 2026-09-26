@@ -35,6 +35,21 @@ missing or ineffective.  Nil or a non-positive value disables the deadline."
                  (number :tag "Seconds"))
   :group 'remote)
 
+(defcustom remote-connection-read-liveness-interval 0.1
+  "Seconds a checked session may serve repeat read-only file queries.
+The backend operation still detects and reports a dead connection.  Explicit
+invalidation, a closed pipeline, and non-metadata operations bypass this
+lease.  Set to zero to check every call."
+  :type 'number
+  :group 'remote)
+
+(defvar remote-connection-liveness-lease-eligible nil
+  "Dynamically non-nil only around a retry-safe file-query session acquire.")
+
+(defvar remote-connection--last-live-check
+  (make-hash-table :test #'eq :weakness 'key)
+  "Last complete liveness check by pooled session identity.")
+
 ;; Version-1 callers used "connection" for the cached backend attachment now
 ;; represented by `remote-session'.  Preserve its layout and vocabulary for
 ;; already compiled callers, but keep one real session object and registry.
@@ -122,6 +137,25 @@ missing or ineffective.  Nil or a non-positive value disables the deadline."
 (defvar remote-connection-closed-hook nil
   "Hook run with CONNECTION, ROUTE, and REASON after session invalidation.")
 
+(defvar remote-connection-progress-hook nil
+  "Hook run with CONNECTION, ROUTE, and PHASE during a new connection.
+PHASE is one of `transport', `backend', `probe', `ready', `failed', or
+`cancelled'.  Observers are advisory and cannot interrupt the connection.")
+
+(defun remote-connection--progress (connection route phase)
+  "Record and publish CONNECTION's PHASE on ROUTE."
+  (remote-log
+   'connection-progress
+   :target (remote-route-target-id route)
+   :pipeline (remote-route-link-id route)
+   :backend (remote-route-link-plugin-id route)
+   :generation (remote-connection-generation connection)
+   :phase phase)
+  (condition-case nil
+      (run-hook-with-args
+       'remote-connection-progress-hook connection route phase)
+    (error nil)))
+
 (defun remote-connection-route-key (route)
   "Return the stable pool key for ROUTE."
   (list (remote-route-target-id route)
@@ -156,19 +190,40 @@ but only one of them can observe a non-nil owned reference."
 
 (defun remote-connection--live-p (connection route context)
   "Return whether CONNECTION remains usable for ROUTE and CONTEXT."
-  (and
-   (eq (remote-connection-state connection) 'open)
-   (remote-pipeline-runtime-live-p
-    (remote-connection-pipeline-runtime connection))
-   (let* ((plugin (remote-route-plugin route))
-          (predicate
-           (and plugin
-                (remote-link-plugin-connection-live-p plugin))))
-     (if predicate
-         (condition-case nil
-             (funcall predicate connection route context)
-           (error nil))
-       t))))
+  (let* ((runtime (remote-connection-pipeline-runtime connection))
+         (interval remote-connection-read-liveness-interval)
+         (last (and remote-connection-liveness-lease-eligible
+                    (gethash connection
+                             remote-connection--last-live-check)))
+         (age (and last (- (float-time) last))))
+    (and
+     (eq (remote-connection-state connection) 'open)
+     (remote-pipeline-runtime-p runtime)
+     (eq (remote-pipeline-runtime-state runtime) 'open)
+     (seq-every-p
+      (lambda (stage)
+        (eq (remote-stage-runtime-state stage) 'open))
+      (remote-pipeline-runtime-stages runtime))
+     (or
+      (and last (numberp interval) (> interval 0)
+           (<= 0 age)
+           (< age interval))
+      (and
+       (remote-pipeline-runtime-live-p runtime)
+       (let* ((plugin (remote-route-plugin route))
+              (predicate
+               (and plugin
+                    (remote-link-plugin-connection-live-p plugin))))
+         (if predicate
+             (condition-case nil
+                 (funcall predicate connection route context)
+               (error nil))
+           t))
+       (progn
+         (when remote-connection-liveness-lease-eligible
+           (puthash connection (float-time)
+                    remote-connection--last-live-check))
+         t))))))
 
 (defun remote-connection--open-backend
     (opener route context pipeline-runtime)
@@ -232,12 +287,14 @@ requests only validate and reuse the retained session."
       (setf (remote-session-last-used-at existing) (current-time)
             (remote-session-use-count existing)
             (1+ (remote-session-use-count existing)))
-      (remote-log
-       'connection-reuse
-       :target (remote-route-target-id route)
-       :link (remote-route-link-id route)
-       :plugin (remote-route-link-plugin-id route)
-       :uses (remote-connection-use-count existing))
+      (when (or remote-log-read-query-successes
+                (not remote-connection-liveness-lease-eligible))
+        (remote-log
+         'connection-reuse
+         :target (remote-route-target-id route)
+         :link (remote-route-link-id route)
+         :plugin (remote-route-link-plugin-id route)
+         :uses (remote-connection-use-count existing)))
       existing)
      (t
       (when existing
@@ -278,6 +335,7 @@ requests only validate and reuse the retained session."
         (puthash key connection remote-connection-pool)
         (condition-case err
             (progn
+              (remote-connection--progress connection route 'transport)
               ;; The acquire result belongs to this stack frame until it is
               ;; installed on the session.  Invalidation can run while a
               ;; transport stage is opening, before the session has any
@@ -305,6 +363,7 @@ requests only validate and reuse the retained session."
               ;; takes the field before releasing it.
               (setq pipeline-runtime pending-runtime
                     pending-runtime nil)
+              (remote-connection--progress connection route 'backend)
               (setq plugin (remote-route-plugin route)
                     closer
                     (and plugin
@@ -316,6 +375,7 @@ requests only validate and reuse the retained session."
                      route context pipeline-runtime)
                     backend-opened t)
               (setf (remote-connection-handle connection) handle)
+              (remote-connection--progress connection route 'probe)
               ;; Negotiate implementation/protocol capabilities only after a
               ;; backend has produced its live attachment.  A typed
               ;; incompatibility follows the ordinary backend-local failover
@@ -358,6 +418,7 @@ requests only validate and reuse the retained session."
                (remote-connection-state connection) 'open
                (remote-connection-last-used-at connection) (current-time)
                (remote-connection-use-count connection) 1)
+              (remote-connection--progress connection route 'ready)
               (remote-log
                'connection-open
                :target (remote-route-target-id route)
@@ -366,13 +427,18 @@ requests only validate and reuse the retained session."
               (run-hook-with-args
                'remote-connection-opened-hook connection route)
               connection)
-          (error
+          ((error quit)
            (when (eq (gethash key remote-connection-pool) connection)
              (remhash key remote-connection-pool))
            (when (and backend-opened closer)
              (ignore-errors
                (funcall closer connection route)))
-           (setf (remote-connection-state connection) 'failed
+           (setf (remote-connection-state connection)
+                 (if (memq (car err)
+                           '(quit remote-connection-cancelled
+                             remote-pipeline-cancelled))
+                     'cancelled
+                   'failed)
                  (remote-connection-error connection) err)
            (when pending-runtime
              (remote-pipeline-release pending-runtime nil err)
@@ -381,6 +447,11 @@ requests only validate and reuse the retained session."
                         (remote-connection--take-pipeline-runtime
                          connection)))
              (remote-pipeline-release owned nil err))
+           (remote-connection--progress
+            connection route
+            (if (eq (remote-connection-state connection) 'cancelled)
+                'cancelled
+              'failed))
            (remote-log
             'connection-error
             :target (remote-route-target-id route)
@@ -413,6 +484,8 @@ REASON is recorded for observability."
                (remote-connection--take-pipeline-runtime connection)))
           (setf (remote-session-state connection) 'closed
                 (remote-session-error connection) reason)
+          (when opening
+            (remote-connection--progress connection route 'cancelled))
         ;; An opener which is currently yielding still owns any handle it
         ;; returns.  It observes the cancelled placeholder and closes that
         ;; handle itself; calling a backend closer now would receive nil.

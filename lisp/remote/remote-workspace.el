@@ -15,6 +15,7 @@
 (require 'remote-session)
 (require 'remote-channel)
 (require 'remote-environment)
+(require 'remote-path)
 (require 'remote-service)
 (require 'remote-background)
 
@@ -38,6 +39,11 @@
 (defvar remote-workspace-close-hook nil
   "Hook run before a workspace's owned resources are closed.")
 
+(defvar remote-workspace-transport-failure-hook nil
+  "Hook run with WORKSPACE, ROUTE, and ERROR when its transport fails.
+The workspace has already entered `disconnected'.  Consumers may record the
+loss before their process sentinels report an untrustworthy exit status.")
+
 (defvar remote-current-workspace nil
   "Dynamically active `remote-workspace'.")
 
@@ -51,6 +57,15 @@
 (defcustom remote-workspace-reconnect-delays '(1 2 4)
   "Seconds to wait before automatic transport reconnect attempts."
   :type '(repeat number)
+  :group 'remote)
+
+(defcustom remote-workspace-reconnect-first-open-timeout 3
+  "Seconds allowed for the first automatic backend reconnect attempt.
+Later attempts retain `remote-connection-open-timeout'.  A pipeline with an
+explicit `:connect-timeout' skips this shorter first-attempt deadline.  Nil
+or a non-positive value disables the shorter first attempt."
+  :type '(choice (const :tag "Use normal connection timeout" nil)
+                 (number :tag "Seconds"))
   :group 'remote)
 
 (defun remote-workspace--resource-policy (kind metadata)
@@ -170,7 +185,11 @@ workspace object and closes resources owned by the old one."
     (cond
      ((and existing
            (not force)
-           (remote-workspace-live-p existing))
+           (memq (remote-workspace-state existing)
+                 '(open disconnected reconnecting failed)))
+      ;; A consumer may resolve its owning workspace while resource recovery
+      ;; is pending or starting.  Replacing that owner would close the very
+      ;; resources the reconnect job is restoring.
       (setf (remote-workspace-last-used-at existing) (current-time))
       existing)
      (t
@@ -260,6 +279,20 @@ recovery."
            (remote-workspace-context workspace)
            constraints)))
     (remote-workspace--remember-route workspace route)))
+
+(defun remote-workspace-track-live-route (workspace route)
+  "Remember an already selected ROUTE for WORKSPACE without resolving it again.
+Process providers can fall back while opening.  Recording the route attached
+to the live process keeps failure matching tied to the backend actually used."
+  (setq workspace
+        (or (remote-get-workspace workspace)
+            (error "Unknown remote workspace: %S" workspace)))
+  (unless (and (remote-route-p route)
+               (equal (remote-route-target-id route)
+                      (remote-workspace-target-id workspace)))
+    (error "Process route does not belong to workspace %s"
+           (remote-workspace-id workspace)))
+  (remote-workspace--remember-route workspace route))
 
 (defun remote-workspace-route
     (workspace adapter capability &optional constraints)
@@ -449,7 +482,9 @@ scoped `/fs:' handler."
     (let ((old (remote-workspace-resource-value resource)))
       (condition-case error
           (let ((_closed
-                 (when (remote-workspace-resource-close-function resource)
+                 (when (and (remote-workspace-resource-close-function resource)
+                            (not (eq (remote-workspace-resource-state resource)
+                                     'disconnected)))
                    (funcall
                     (remote-workspace-resource-close-function resource)
                     old 'transport-recovery)))
@@ -644,18 +679,72 @@ scoped `/fs:' handler."
       'degraded
     'open))
 
-(defun remote-workspace--reconnect-once (workspace)
-  "Perform one transport reconnect attempt for WORKSPACE."
+(defun remote-workspace--quiesce-transport-resources (workspace)
+  "Close recoverable channels before WORKSPACE resets its transport.
+An SSH control connection can terminate its forwards while a new session is
+opening.  Closing them first makes their process sentinels observe an
+intentional shutdown instead of reporting a second transport failure."
+  (dolist (resource (remote-workspace-resources workspace))
+    (when (and (memq (remote-workspace-resource-kind resource)
+                     '(forward channel channel-group))
+               (eq (remote-workspace-resource-recovery-policy resource)
+                   'auto)
+               (remote-workspace-resource-recovery-function resource)
+               (not (eq (remote-workspace-resource-state resource)
+                        'disconnected)))
+      (when-let* ((close (remote-workspace-resource-close-function resource)))
+        (funcall close (remote-workspace-resource-value resource)
+                 'workspace-reconnect))
+      (setf (remote-workspace-resource-state resource) 'disconnected))))
+
+(defun remote-workspace--reconnect-once (workspace &optional first-auto-attempt)
+  "Perform one transport reconnect attempt for WORKSPACE.
+FIRST-AUTO-ATTEMPT non-nil applies the short first-attempt deadline where the
+route has no explicit connection timeout."
+  (remote-workspace--assert-current workspace)
+  (remote-workspace--quiesce-transport-resources workspace)
   (dolist (route (remote-workspace-routes workspace))
     (remote-session-invalidate route t 'workspace-reconnect)
-    (remote-session-acquire
-     route (remote-workspace-context workspace)))
-  (setf (remote-workspace-state workspace)
-        (remote-workspace--recover-after-transport workspace)
-        (remote-workspace-error workspace) nil
-        (remote-workspace-last-used-at workspace)
-        (current-time))
+    (remote-background-acknowledge-own-invalidation)
+    (remote-workspace--assert-current workspace)
+    (let* ((pipeline (remote-route-pipeline route))
+           (configured-timeout
+            (and pipeline
+                 (plist-get (remote-pipeline-effective-config pipeline)
+                            :connect-timeout)))
+           (remote-connection-open-timeout
+            (if (and first-auto-attempt
+                     (null configured-timeout)
+                     (numberp remote-workspace-reconnect-first-open-timeout)
+                     (> remote-workspace-reconnect-first-open-timeout 0)
+                     (numberp remote-connection-open-timeout)
+                     (> remote-connection-open-timeout 0))
+                (min remote-connection-open-timeout
+                     remote-workspace-reconnect-first-open-timeout)
+              remote-connection-open-timeout)))
+      (remote-session-acquire
+       route (remote-workspace-context workspace)))
+    (remote-background-assert-current-epoch)
+    (remote-workspace--assert-current workspace))
+  (let* ((remote-path--deferred-cache (make-hash-table :test #'equal))
+         (state (remote-workspace--recover-after-transport workspace)))
+    (remote-background-assert-current-epoch)
+    (remote-workspace--assert-current workspace)
+    (setf (remote-workspace-state workspace) state
+          (remote-workspace-error workspace) nil
+          (remote-workspace-last-used-at workspace)
+          (current-time)))
   workspace)
+
+(defun remote-workspace--assert-current (workspace)
+  "Reject a reconnect whose WORKSPACE was closed or replaced while yielding."
+  (unless (and (eq (gethash (remote-workspace-key workspace)
+                            remote-workspaces)
+                   workspace)
+               (not (memq (remote-workspace-state workspace)
+                          '(closing closed))))
+    (signal 'remote-connection-cancelled
+            (list "Workspace was closed during reconnect"))))
 
 (defun remote-workspace-reconnect (workspace)
   "Reconnect WORKSPACE with bounded transport backoff.
@@ -667,6 +756,7 @@ Automatic resources are recreated.  Terminals remain disconnected until
              (error "Unknown remote workspace: %S" workspace)))
         (delays (copy-sequence remote-workspace-reconnect-delays))
         done last-error)
+    (remote-workspace--assert-current workspace)
     (setf (remote-workspace-state workspace) 'reconnecting)
     (remote-workspace--mark-terminals-disconnected
      workspace 'workspace-reconnect)
@@ -680,8 +770,11 @@ Automatic resources are recreated.  Terminals remain disconnected until
          (if (and delays
                   (remote-workspace--transport-error-p workspace error))
              (sleep-for (pop delays))
-           (setf (remote-workspace-state workspace) 'failed
-                 (remote-workspace-error workspace) error)
+           (when (eq (gethash (remote-workspace-key workspace)
+                              remote-workspaces)
+                     workspace)
+             (setf (remote-workspace-state workspace) 'failed
+                   (remote-workspace-error workspace) error))
            (signal (car error) (cdr error))))))
     (or (and done workspace)
         (signal (car last-error) (cdr last-error)))))
@@ -703,10 +796,18 @@ Automatic resources are recreated.  Terminals remain disconnected until
                        '("Workspace no longer needs recovery")))
              (setf (remote-workspace-state workspace) 'reconnecting)
              (condition-case error
-                 (remote-workspace--reconnect-once workspace)
+                 (remote-workspace--reconnect-once
+                  workspace
+                  (and remote-background--current-job
+                       (zerop
+                        (remote-background-job-attempts
+                         remote-background--current-job))))
                (error
-                (setf (remote-workspace-state workspace) 'disconnected
-                      (remote-workspace-error workspace) error)
+                (when (eq (gethash (remote-workspace-key workspace)
+                                   remote-workspaces)
+                          workspace)
+                  (setf (remote-workspace-state workspace) 'disconnected
+                        (remote-workspace-error workspace) error))
                 (signal (car error) (cdr error)))))
            :target-id (remote-workspace-target-id workspace)
            :owner-buffer nil
@@ -716,18 +817,62 @@ Automatic resources are recreated.  Terminals remain disconnected until
            (lambda (_value)
              (setf (remote-workspace-metadata workspace)
                    (plist-put (remote-workspace-metadata workspace)
-                              :reconnect-job nil)))
+                              :reconnect-job nil))
+             (remote-log
+              'workspace-reconnect-complete
+              :workspace (remote-workspace-id workspace)
+              :state (remote-workspace-state workspace)))
            :error-callback
            (lambda (error)
-             (setf (remote-workspace-state workspace) 'failed
-                   (remote-workspace-error workspace) error
-                   (remote-workspace-metadata workspace)
-                   (plist-put (remote-workspace-metadata workspace)
-                              :reconnect-job nil))))))
+             (when (eq (gethash (remote-workspace-key workspace)
+                                remote-workspaces)
+                       workspace)
+               (setf (remote-workspace-state workspace) 'failed
+                     (remote-workspace-error workspace) error
+                     (remote-workspace-metadata workspace)
+                     (plist-put (remote-workspace-metadata workspace)
+                                :reconnect-job nil)))
+             (remote-log
+              'workspace-reconnect-failed
+              :workspace (remote-workspace-id workspace)
+              :error (error-message-string error))))))
     (setf (remote-workspace-metadata workspace)
           (plist-put (remote-workspace-metadata workspace)
                      :reconnect-job job))
     job))
+
+(cl-defun remote-workspace-reconnect-async
+    (workspace &key callback error-callback force)
+  "Schedule a reconnect of WORKSPACE and return its coalesced background job.
+CALLBACK receives the reopened workspace; ERROR-CALLBACK receives the final
+error.  An already open workspace needs FORCE because reconnecting it stops
+its current terminal and recreates its transport session.  Each attempt can
+still wait for TRAMP, but backoff between attempts never sleeps in a command."
+  (let* ((workspace
+          (or (remote-get-workspace workspace)
+              (error "Unknown remote workspace: %S" workspace)))
+         (key (remote-workspace--reconnect-key workspace))
+         (pending (gethash key remote-background-jobs)))
+    (remote-workspace--assert-current workspace)
+    (unless (remote-workspace-routes workspace)
+      (user-error "Workspace has no transport route to reconnect"))
+    (when (and (remote-workspace-live-p workspace)
+               (not force)
+               (not pending))
+      (user-error "Workspace is open; use a prefix argument to force reconnect"))
+    (unless pending
+      (setf (remote-workspace-state workspace) 'reconnecting)
+      (remote-workspace--mark-terminals-disconnected
+       workspace 'workspace-reconnect)
+      (setq pending (remote-workspace--schedule-reconnect workspace)))
+    (when (or callback error-callback)
+      (remote-background-submit
+       key #'ignore
+       :target-id (remote-workspace-target-id workspace)
+       :owner-buffer nil
+       :callback callback
+       :error-callback error-callback))
+    pending))
 
 (defun remote-workspace-handle-transport-failure (route error)
   "Mark workspaces using ROUTE disconnected and schedule recovery."
@@ -736,11 +881,19 @@ Automatic resources are recreated.  Terminals remain disconnected until
      (when (seq-some
             (lambda (known)
               (equal
-               (remote-route-pipeline-id known)
-               (remote-route-pipeline-id route)))
+               (remote-pipeline-route-key known)
+               (remote-pipeline-route-key route)))
             (remote-workspace-routes workspace))
        (setf (remote-workspace-state workspace) 'disconnected
              (remote-workspace-error workspace) error)
+       (condition-case hook-error
+           (run-hook-with-args
+            'remote-workspace-transport-failure-hook workspace route error)
+         (error
+          (remote-log
+           'workspace-transport-failure-hook-error
+           :workspace (remote-workspace-id workspace)
+           :error (error-message-string hook-error))))
        (remote-workspace--mark-terminals-disconnected workspace error)
        (when (and remote-workspace-auto-reconnect
                   (not

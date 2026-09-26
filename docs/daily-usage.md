@@ -580,7 +580,14 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 原生 `agent-shell` / ACP buffer，不在 vterm 里运行 CLI，共用同一个顶部弹窗、
 标签池、自动收起和固定逻辑。`C-c C-e` 折叠/打开，`C-c E` 切换标签，
 `C-c M-e` 固定。Agent 原有的模型、会话模式和权限提示保留；仅点击启动时
-加载 Agent 依赖。当前只支持本地目录，ACP adapter 沿用现有 agent-shell 配置。
+加载 Agent 依赖。ACP adapter 沿用现有 agent-shell 配置；在远端 `/fs:` 工作区里
+启动时，agent 进程直接运行在该 target 上，只要 target 的 PATH 里有对应二进制
+（如 `claude-agent-acp`、`codex-acp`、`opencode`）。本地与远端走同一条路径，
+裸 `M-x agent-shell` 同样适用。查找用的是该 workspace 的环境（PATH 与项目
+direnv），因此项目 `.envrc` 提供的 agent 也能找到。popup agent 与 popup 终端一样从
+项目根目录启动（本地与远端相同），不在项目里时用当前目录。注意 `codex` / `claude`
+CLI 本身不说 ACP：远端还需要安装适配器，例如
+`npm i -g --prefix ~/.local @zed-industries/codex-acp @agentclientprotocol/claude-agent-acp`。
 - `SPC o V`
   命名 `vterm`
 - `SPC o S`
@@ -976,6 +983,18 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 和 Run 的会话一样可以重命名、fork、归档、看 context 用量；在普通仓库里它只存在
 于 Emacs 侧，列表里显示为 `local`。不想自动收编裸 `M-x agent-shell` 的话，把
 `noema-agent-acp-adopt-foreign-sessions` 设为 nil。
+
+### 会话不会被后台自动关掉
+
+自动回收只有两条路径：每 5 分钟的 warm-buffer 清扫（空闲超过
+`noema-agent-worker-warm-idle-seconds`，默认 30 分钟），以及项目最后一个 `.noema`
+关闭 `noema-pi-stop-delay` 秒后的项目收尾。二者都先问
+`noema-agent-acp-auto-stoppable-p`：会话必须空闲（没有进行中的回答或 Run）、不在
+任何窗口可见，且来源属于 `noema-agent-acp-auto-stop-origins`（默认 `run`、`probe`、
+`pi`）。空闲时间从 buffer 最后一次变化（输入或输出）算起，而不是上次被显示的
+时间。所以你自己开的会话（popup、`C-c A a`、裸 `M-x agent-shell`）只会在你
+`C-c C-k` 或交互式 `noema-pi-close-project` 时关闭；进行中的回答任何时候都不会被
+自动停止。被停止的会话名与 native id 仍在，下次可恢复。
 
 ### 把 buffer / 选区 / 光标交给会话
 

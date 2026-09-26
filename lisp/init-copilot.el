@@ -80,9 +80,24 @@ in standalone runs."
   :type '(repeat symbol)
   :group 'my/copilot)
 
+(config-defvar my/copilot-defer-on-remote t
+  "Start Copilot after editor idle time in remote editing buffers.
+This lets the file visit and language-server startup finish before the
+client-side Copilot server is loaded."
+  :type 'boolean
+  :group 'my/copilot)
+
 (config-defvar my/copilot-deferred-idle-delay nil
   "Idle seconds before automatically enabling Copilot in deferred modes."
   :type 'number
+  :group 'my/copilot)
+
+(config-defvar my/copilot-cold-local-idle-delay 0.75
+  "Idle seconds before the first automatic Copilot load in a local buffer.
+Set to nil to load Copilot synchronously on the first local source visit.
+Remote and explicitly deferred modes use `my/copilot-deferred-idle-delay'."
+  :type '(choice (const :tag "Load synchronously" nil)
+                 (number :tag "Idle seconds"))
   :group 'my/copilot)
 
 (defvar my/copilot-noema-bridge--documents (make-hash-table :test #'equal)
@@ -179,6 +194,22 @@ language-server binary always runs beside Emacs."
        (funcall
         make-fn
         :events-buffer-scrollback-size copilot-log-max)))))
+
+(defun my/copilot--nonblocking-exit-a (original &rest arguments)
+  "Avoid synchronous Copilot RPC while Emacs exits its own noquery child.
+The Copilot exit hook normally waits for a JSON-RPC shutdown reply.  If the
+agent closes during that wait, an asynchronous callback can unwind the whole
+`kill-emacs' call, leaving Emacs alive.  A client-owned noquery process is
+closed by Emacs on exit, so waiting for its reply is unnecessary.  Unknown
+connection types keep the package's original shutdown behavior."
+  (let ((process
+         (and (boundp 'copilot--connection)
+              copilot--connection
+              (fboundp 'jsonrpc--process)
+              (ignore-errors (jsonrpc--process copilot--connection)))))
+    (unless (and (processp process)
+                 (not (process-query-on-exit-flag process)))
+      (apply original arguments))))
 
 (defun my/copilot-noema-bridge--log (event &optional detail)
   "Record Noema bridge EVENT with DETAIL when bridge logging is enabled."
@@ -838,13 +869,24 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
        (or (null my/copilot-large-buffer-threshold)
            (<= (buffer-size) my/copilot-large-buffer-threshold))))
 
+(defun my/copilot--call-on-client (function)
+  "Call FUNCTION with the client-local directory and process environment."
+  (let ((default-directory temporary-file-directory)
+        (process-environment (remote-client-process-environment))
+        (exec-path (remote-client-exec-path))
+        (remote-current-adapter-id nil)
+        (remote-current-route nil)
+        (remote-current-workspace nil))
+    (funcall function)))
+
 (defun my/copilot-available-p ()
   "Return non-nil when Copilot can start in the current environment."
   (and (my/copilot-buffer-eligible-p)
        ;; `use-package' only installs the hooks here; the library itself may
        ;; still be unloaded when the first editable buffer opens.
        (or (featurep 'copilot)
-           (require 'copilot nil t))
+           (my/copilot--call-on-client
+            (lambda () (require 'copilot nil t))))
        (ignore-errors
          (when-let* ((server (copilot-server-executable)))
            (file-exists-p server)))))
@@ -865,19 +907,30 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
 
 (defun my/copilot-auto-enable-h ()
   "Auto-enable `copilot-mode' in supported editing buffers.
-Modes in `my/copilot-deferred-modes' start only after editor idle time."
+Remote, configured modes, and a cold local library start after idle."
   (my/copilot--cancel-auto-enable)
-  (if (and my/copilot-deferred-modes
-           (apply #'derived-mode-p my/copilot-deferred-modes))
-      (progn
-        (setq my/copilot--auto-enable-timer
-              (run-with-idle-timer my/copilot-deferred-idle-delay nil
-                                   #'my/copilot--enable-buffer
-                                   (current-buffer)))
-        (add-hook 'kill-buffer-hook #'my/copilot--cancel-auto-enable nil t)
-        (add-hook 'change-major-mode-hook #'my/copilot--cancel-auto-enable nil t))
-    (when (my/copilot-available-p)
-      (copilot-mode 1))))
+  (let* ((remote-p (file-remote-p default-directory))
+         (configured-mode-p
+          (and my/copilot-deferred-modes
+               (apply #'derived-mode-p my/copilot-deferred-modes)))
+         (delay
+          (cond
+           ((or (and my/copilot-defer-on-remote remote-p)
+                configured-mode-p)
+            (or my/copilot-deferred-idle-delay 1.5))
+           ((and (not remote-p)
+                 (not (featurep 'copilot)))
+            my/copilot-cold-local-idle-delay))))
+    (if delay
+        (progn
+          (setq my/copilot--auto-enable-timer
+                (run-with-idle-timer delay nil
+                                     #'my/copilot--enable-buffer
+                                     (current-buffer)))
+          (add-hook 'kill-buffer-hook #'my/copilot--cancel-auto-enable nil t)
+          (add-hook 'change-major-mode-hook #'my/copilot--cancel-auto-enable nil t))
+      (when (my/copilot-available-p)
+        (copilot-mode 1)))))
 
 (defun my/copilot-completion-visible-p ()
   "Return non-nil when Copilot currently shows a completion overlay."
@@ -1131,6 +1184,12 @@ the completion routing used before the lsp-mode migration."
     (advice-add
      'copilot--make-connection :around
      #'my/copilot--make-client-connection-a))
+  (when (and (fboundp 'copilot--shutdown-server-at-exit)
+             (not (advice-member-p
+                   #'my/copilot--nonblocking-exit-a
+                   'copilot--shutdown-server-at-exit)))
+    (advice-add 'copilot--shutdown-server-at-exit :around
+                #'my/copilot--nonblocking-exit-a))
   (defun my/copilot-check-status ()
     "Report current `copilot.el' authentication status.
 

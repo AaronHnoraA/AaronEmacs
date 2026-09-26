@@ -8,6 +8,7 @@
 (require 'aaron-ui-board)
 (require 'cl-lib)
 (require 'init-jupyter-management)
+(require 'init-aaronnote-jupyter-server)
 (require 'json)
 (require 'subr-x)
 (require 'transient)
@@ -42,6 +43,9 @@ The default view keeps remote profiles and active sessions prominent."
 (defvar-local my/jupyter-board--refresh-generation 0)
 (defvar-local my/jupyter-board--show-advanced nil)
 (defvar-local my/jupyter-board--show-stale-connections nil)
+(defvar-local my/jupyter-board--servers nil)
+(defvar-local my/jupyter-board--server-generation 0)
+(defvar-local my/jupyter-board--server-loading nil)
 (defvar my/jupyter-board--edit-origin nil)
 (defvar my/jupyter-board--edit-target nil)
 (defvar my/jupyter-board-remote-host-history nil)
@@ -563,6 +567,135 @@ The default view keeps remote profiles and active sessions prominent."
     (aaron-ui-board-insert-empty
      "No remote profile is configured yet. Choose Add SSH Profile above.")))
 
+(defun my/jupyter-board-server-add (&optional entry)
+  "Add a Jupyter URL, or edit ENTRY, with credentials kept out of config."
+  (interactive)
+  (let* ((id (or (plist-get entry :id) (read-string "Server id: ")))
+         (_ (when (and (not entry) (my/noema-jupyter-server--entry id))
+              (user-error "That id already exists; use Edit on its server row")))
+         ;; HISTORY=t means do not record this input, including pasted tokens.
+         (url (read-string "Jupyter URL (http[s]://host:port/base/): "
+                           nil t (plist-get entry :url)))
+         (parsed (my/noema-jupyter-server--parse-url url))
+         (name (read-string "Display name: " nil nil (or (plist-get entry :name) id)))
+         (target (remote-read-target "Reach server from target (local = direct URL): "))
+         (kind (intern (completing-read "Service: " '("server" "gateway") nil t
+                                        nil nil (symbol-name (or (plist-get entry :kind) 'server)))))
+         (auth (intern (completing-read "Authentication: " '("token" "password" "hub" "none")
+                                        nil t nil nil
+                                        (symbol-name (or (plist-get entry :auth) 'token)))))
+         (user (and (eq auth 'hub)
+                    (read-string "JupyterHub user: " nil nil (plist-get entry :user))))
+         (secret (unless (eq auth 'none)
+                   (or (plist-get parsed :token)
+                       (read-passwd "Credential for this Emacs session (empty = auth-source/unchanged): "))))
+         (profile (copy-sequence entry)))
+    (dolist (pair (list (cons :id id) (cons :name name) (cons :url url)
+                        (cons :target (remote-target-id target)) (cons :kind kind)
+                        (cons :auth auth) (cons :user user)))
+      (setq profile (plist-put profile (car pair) (cdr pair))))
+    (my/noema-jupyter-server-save profile secret)
+    (cl-incf my/jupyter-board--server-generation)
+    (setq my/jupyter-board--servers nil my/jupyter-board--server-loading nil)
+    (my/jupyter-board--render)
+    (message "Saved server %s; credentials use auth-source or this Emacs session" id)))
+
+(defun my/jupyter-board-server-remove (id)
+  "Forget server ID after confirmation, without shutting down its kernels."
+  (when (yes-or-no-p (format "Forget server %s and disconnect its route? " id))
+    (my/noema-jupyter-server-remove id)
+    (cl-incf my/jupyter-board--server-generation)
+    (setq my/jupyter-board--servers nil my/jupyter-board--server-loading nil)
+    (my/jupyter-board--render)))
+
+(defun my/jupyter-board-server-check ()
+  "Asynchronously query Noema's authoritative server/kernel catalog."
+  (interactive)
+  (unless (fboundp 'my/noema-api-call) (user-error "Noema API is unavailable"))
+  (let ((buffer (current-buffer))
+        (generation (cl-incf my/jupyter-board--server-generation)))
+    (setq my/jupyter-board--server-loading t)
+    (my/jupyter-board--render)
+    (my/noema-api-call
+     "aaronnote:api:jupyter-cell:kernels" []
+     (lambda (value error)
+       (when (buffer-live-p buffer)
+         (with-current-buffer buffer
+           (when (= generation my/jupyter-board--server-generation)
+             (setq my/jupyter-board--server-loading nil
+                   my/jupyter-board--servers
+                   (if error
+                       (mapcar (lambda (entry)
+                                 `((id . ,(plist-get entry :id))
+                                   (error . "Catalog request failed; see Noema diagnostics")))
+                               my/noema-jupyter-servers)
+                     (append (my/jupyter-board--alist-get 'servers value) nil)))
+             (my/jupyter-board--render))))))))
+
+(defun my/jupyter-board-select-notebook-kernel ()
+  "Open the shared kernel picker in the notebook that opened this board."
+  (interactive)
+  (unless (and (buffer-live-p my/jupyter-board--source-buffer)
+               (boundp 'my/noema-jupyter-cell-mode)
+               (buffer-local-value 'my/noema-jupyter-cell-mode
+                                   my/jupyter-board--source-buffer))
+    (user-error "Open this board from an ipynb buffer to select its kernel"))
+  (let ((source my/jupyter-board--source-buffer))
+    (pop-to-buffer source)
+    (call-interactively #'my/noema-jupyter-cell-select-kernel)))
+
+(defun my/jupyter-board--insert-servers ()
+  "Present configured HTTP services, routes and the latest catalog results."
+  (aaron-ui-board-insert-section "Jupyter Servers" (length my/noema-jupyter-servers) 'info)
+  (insert "   ")
+  (aaron-ui-board-insert-actions
+   '((:label "Add Server URL" :command my/jupyter-board-server-add :primary t)
+     (:label "Check Servers" :command my/jupyter-board-server-check)
+     (:label "Select Notebook Kernel" :command my/jupyter-board-select-notebook-kernel)))
+  (insert "\n\n")
+  (aaron-ui-board-insert-field
+   "Files / compute" "Selecting a server changes compute; notebook files stay in their current workspace.")
+  (when my/jupyter-board--server-loading
+    (aaron-ui-board-insert-field "Status" "Checking servers…"))
+  (if (null my/noema-jupyter-servers)
+      (aaron-ui-board-insert-empty "Add a local URL, remote URL, or a URL reached through a Remote target.")
+    (dolist (entry my/noema-jupyter-servers)
+      (let* ((id (plist-get entry :id))
+             (target (my/noema-jupyter-server--target entry))
+             (snapshot (seq-find (lambda (item) (equal (my/jupyter-board--alist-get 'id item) id))
+                                 my/jupyter-board--servers))
+             (error (my/jupyter-board--alist-get 'error snapshot)))
+        (aaron-ui-board-insert-field (or (plist-get entry :name) id)
+                                    (my/noema-jupyter-server--public-url entry))
+        (aaron-ui-board-insert-field
+         "Route" (if (equal target "local") "Direct from this machine"
+                   (format "Remote target %s → forwarded HTTP/WebSocket" target)))
+        (aaron-ui-board-insert-field
+         "Authentication"
+         (format "%s · %s" (or (plist-get entry :auth) 'token)
+                 (if (gethash (my/noema-jupyter-server--credential-key entry)
+                              my/noema-jupyter-server--credentials)
+                     "credential held for this Emacs session"
+                   (if (eq (plist-get entry :auth) 'none) "no credential" "auth-source / configured URL"))))
+        (aaron-ui-board-insert-field
+         "Status" (cond (error "Unavailable — check URL, route and credentials")
+                        (snapshot (format "%d kernelspecs · %d running kernels"
+                                          (length (my/jupyter-board--alist-get 'kernels snapshot))
+                                          (length (my/jupyter-board--alist-get 'running snapshot))))
+                        (t "Not checked"))
+         (if error 'aaron-ui-board-bad 'aaron-ui-board-meta))
+        (dolist (kernel (append (my/jupyter-board--alist-get 'running snapshot) nil))
+          (aaron-ui-board-insert-field
+           "Running" (format "%s · %s · %s clients"
+                             (my/jupyter-board--alist-get 'displayName kernel)
+                             (my/jupyter-board--alist-get 'executionState kernel)
+                             (my/jupyter-board--alist-get 'connections kernel))))
+        (insert "   ")
+        (aaron-ui-board-insert-actions
+         `((:label "Edit" :command ,(lambda () (my/jupyter-board-server-add entry)))
+           (:label "Forget" :command ,(lambda () (my/jupyter-board-server-remove id)))))
+        (insert "\n\n")))))
+
 (defun my/jupyter-board--insert-advanced
     (connections project other)
   "Insert technical CONNECTIONS, PROJECT, and OTHER kernel resources."
@@ -636,6 +769,7 @@ The default view keeps remote profiles and active sessions prominent."
                              :command my/jupyter-board-toggle-advanced
                              :help "Toggle local kernels, connection files, and diagnostics")))
          (my/jupyter-board--insert-provider-errors)
+         (my/jupyter-board--insert-servers)
          (my/jupyter-board--insert-quick-start (length remote))
          (my/jupyter-board--insert-remote-profiles remote)
          (aaron-ui-board-insert-section "Active Sessions"
@@ -1439,6 +1573,8 @@ background tasks; it never reads the minibuffer or asks for confirmation."
     ("-k" "Kernel command" "--kernel_cmd=")
     ("-g" "Group" "--group=" :choices ("core" "temporary"))]
    ["Remote"
+    ("u" "Add server URL" my/jupyter-board-server-add)
+    ("s" "Check servers" my/jupyter-board-server-check)
     ("-x" "Host" "--host=")
     ("-l" "Language" "--language=")
     ("-w" "Workdir" "--workdir=")

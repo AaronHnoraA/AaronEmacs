@@ -309,6 +309,22 @@ emacs --debug-init -q -l ./bootstrap.el
 - `C-c y v`
   找 snippet 文件
 
+规则：
+
+- `snippets/` 也是 Noema 的共享 catalog（`site-lisp/noema/resources/snippets`
+  是指向它的链接），Noema server 会扫描整个目录。研究笔记 snippet 放
+  `markdown-mode/`，数学放 `tex-mode/`。
+- 继承关系用 Yasnippet 自己的 `.yas-parents` 声明，不写 Lisp：`markdown-mode`
+  继承 `tex-mode`，JuText（`noema-research-mode`）继承 `markdown-mode`，所以
+  `.noema` 与 Markdown 笔记用同一套 snippet。
+- `fundamental-mode/` 在所有 buffer 生效，只放跨语言的片段；Lean 等语言语法放
+  各自的 mode 目录（Lean 在 `lean4-mode/`，`lean-mode` 通过 `.yas-parents` 继承）。
+- `.yas-compiled-snippets.el` 是 `yas-recompile-all` 的缓存（已 gitignore）。
+  比源文件旧的缓存会被忽略、直接读源文件，所以新增 snippet 不必手动重编译；
+  重编译只影响加载速度。
+- Yasnippet 在 source buffer 空闲后才启用；LSP 补全、Company 等直接调用
+  `yas-expand-snippet` 时会先在当前 buffer 启用它，本地与远端文件相同。
+
 ## 10. 我要改补全行为
 
 看这些文件：
@@ -451,7 +467,7 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 
 - `auto-insert-mode` 全局开，但只对 `my/template-auto-insert-enabled-kinds` 里的 kind 生效
 - `org` 默认不在 allowlist 里（避免干扰 `org-capture` 和 note 模板）
-- 模板存放在 `templates/<kind>/`；模板里的占位符支持 `{{date}}` / `{{title}}` / `{{file}}` / `{{author}}` / `{{cursor}}` 等
+- 模板存放在 `templates/<kind>/`；模板里的占位符支持 `{{date}}` / `{{title}}` / `{{file}}` / `{{author}}` / `{{cursor}}` 等；`{{file}}` 写入文件在其所在机器上的路径（远端文件不会写出 `/fs:` 名字）
 
 Noema / Roam Node 的 Markdown 模板集中在
 [templates/noema/](../templates/noema/)。该目录与 `templates/latex/`、`templates/tex/`

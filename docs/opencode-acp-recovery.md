@@ -27,10 +27,11 @@ Its SHA-256, verified before extraction against GitHub release asset metadata:
 The binary is local ignored state, not checked into Git. The Homebrew binary,
 shell PATH, real provider configuration, credentials, and histories are left
 unchanged. Both plain agent-shell and Noema use the same default ACP command.
-Custom `agent-shell-opencode-acp-command` settings take precedence. Set that
-command explicitly to `("opencode" "acp")` to revert in a running Emacs, or
-set `my/agent-shell-opencode-executable` to nil to disable this preference at
-startup. Keep the validated build until its replacement passes the test below.
+Custom `agent-shell-opencode-acp-command` settings take precedence. The
+preference is applied per client (advice on `agent-shell--make-acp-client`) and
+only when the agent runs on this machine; an agent started in a remote `/fs:`
+workspace resolves the target's own `opencode`. Set
+`my/agent-shell-opencode-executable` to nil to disable this preference. Keep the validated build until its replacement passes the test below.
 
 After installing/reloading the configuration, create a **new** OpenCode agent
 buffer: existing buffers retain their process. Reload without restarting Emacs:

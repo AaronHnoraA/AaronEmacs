@@ -129,6 +129,7 @@
 (defconst my/noema-jupyter-cell-snippet-actions
   '(("jcode" . my/noema-jupyter-cell-insert-code-below)
     ("jmd" . my/noema-jupyter-cell-insert-markdown-below)
+    ("jraw" . my/noema-jupyter-cell-insert-raw-below)
     ("jabove" . my/noema-jupyter-cell-insert-code-above)
     ("jdup" . my/noema-jupyter-cell-duplicate)
     ("jsplit" . my/noema-jupyter-cell-split)
@@ -900,6 +901,12 @@ Noema creates and persists the new cell's standard `cell.id'."
   (my/noema-jupyter-cell--mutate
    "insertBelow" '((cellType . "markdown"))))
 
+(defun my/noema-jupyter-cell-insert-raw-below ()
+  "Insert a standard raw cell below through Noema."
+  (interactive)
+  (my/noema-jupyter-cell--mutate
+   "insertBelow" '((cellType . "raw"))))
+
 (defun my/noema-jupyter-cell-duplicate ()
   "Duplicate the current cell through Noema."
   (interactive)
@@ -974,6 +981,8 @@ Noema creates and persists the new cell's standard `cell.id'."
             ("Open Output Page" . my/noema-jupyter-output-page)
             ("Insert Above" . my/noema-jupyter-cell-insert-above)
             ("Insert Below" . my/noema-jupyter-cell-insert-below)
+            ("Insert Markdown" . my/noema-jupyter-cell-insert-markdown-below)
+            ("Insert Raw" . my/noema-jupyter-cell-insert-raw-below)
             ("Duplicate" . my/noema-jupyter-cell-duplicate)
             ("Delete" . my/noema-jupyter-cell-delete)
             ("Move Up" . my/noema-jupyter-cell-move-up)

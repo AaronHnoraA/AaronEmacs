@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: IPython cell magic: latex
+# key: jlatex
+# --
+%%latex
+$0

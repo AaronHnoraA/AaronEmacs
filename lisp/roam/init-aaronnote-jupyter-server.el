@@ -26,6 +26,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'url-parse)
+(require 'url-util)
 (require 'config)
 (require 'remote-channel)
 (require 'remote-doctor)
@@ -63,6 +64,90 @@ Set this through the config board or `etc/config-store.el', not with `setq'.")
 
 (defvar my/noema-jupyter-server--forwards (make-hash-table :test #'equal)
   "Open client forwards to target-side Jupyter servers, keyed by server id.")
+
+(defvar my/noema-jupyter-server--credentials (make-hash-table :test #'equal)
+  "Session-only credentials keyed by server id and connection identity.
+Pasted URL tokens never enter the persistent config or public catalog.")
+
+(defun my/noema-jupyter-server--parse-url (value)
+  "Return sanitized base URL and optional token from VALUE as a plist."
+  (let* ((url (url-generic-parse-url (string-trim value)))
+         (filename (or (url-filename url) ""))
+         (parts (split-string filename "?"))
+         (query (cadr parts))
+         (path (car parts)))
+    (unless (and (member (url-type url) '("http" "https"))
+                 (url-host url) (not (string-empty-p (url-host url)))
+                 (not (url-user url)) (not (url-password url))
+                 (let ((port (url-port url))) (and (> port 0) (< port 65536))))
+      (user-error "Use an HTTP(S) Jupyter URL without username/password"))
+    (setq path (replace-regexp-in-string
+                "/\\(?:lab\\|tree\\|notebooks\\|doc\\)\\(?:/.*\\)?\\'" "/" path))
+    (unless (string-suffix-p "/" path) (setq path (concat path "/")))
+    (setf (url-filename url) path (url-target url) nil)
+    (list :url (url-recreate-url url)
+          :token (cadr (assoc "token" (and query (url-parse-query-string query)))))))
+
+(defun my/noema-jupyter-server--public-url (entry)
+  "Return ENTRY's credential-free URL for presentation."
+  (condition-case nil
+      (plist-get (my/noema-jupyter-server--parse-url (plist-get entry :url)) :url)
+    (error "Invalid server URL")))
+
+(defun my/noema-jupyter-server--credential-key (entry)
+  "Return the identity a session credential for ENTRY is allowed to serve."
+  (list (plist-get entry :id) (my/noema-jupyter-server--public-url entry)
+        (my/noema-jupyter-server--target entry)
+        (or (plist-get entry :auth) 'token) (plist-get entry :user)))
+
+(defun my/noema-jupyter-server-save (entry &optional credential)
+  "Persist ENTRY without URL credentials; keep CREDENTIAL for this session.
+An existing id updates that profile.  Connection identity changes release the
+old route, so the next resolve cannot reuse a listener for another server."
+  (let* ((entry (copy-sequence entry))
+         (id (plist-get entry :id))
+         (parsed (my/noema-jupyter-server--parse-url (plist-get entry :url)))
+         (old (my/noema-jupyter-server--entry id)))
+    (unless (and (stringp id) (string-match-p "\\`[[:alnum:]_-]+\\'" id))
+      (user-error "Server id must contain only letters, digits, underscore or dash"))
+    (unless (remote-get-target (my/noema-jupyter-server--target entry))
+      (user-error "Select a configured Remote target"))
+    (unless (and (memq (or (plist-get entry :kind) 'server) '(server gateway))
+                 (memq (or (plist-get entry :auth) 'token) '(token password hub none)))
+      (user-error "Invalid Jupyter service or authentication type"))
+    (when (and (eq (plist-get entry :auth) 'hub)
+               (string-empty-p (or (plist-get entry :user) "")))
+      (user-error "JupyterHub requires a user name"))
+    (when (and (plist-get parsed :token)
+               (memq (plist-get entry :auth) '(password none)))
+      (user-error "A token URL requires token or hub authentication"))
+    (setq entry (plist-put entry :url (plist-get parsed :url)))
+    (config-set 'my/noema-jupyter-servers
+                (append (seq-remove (lambda (item) (equal (plist-get item :id) id))
+                                    my/noema-jupyter-servers)
+                        (list entry)) nil t)
+    (when (and old (not (equal old entry)))
+      (my/noema-jupyter-server--close-resource old id 'configuration-changed)
+      (unless (equal (my/noema-jupyter-server--credential-key old)
+                     (my/noema-jupyter-server--credential-key entry))
+        (remhash (my/noema-jupyter-server--credential-key old)
+                 my/noema-jupyter-server--credentials)))
+    (when-let* ((secret (or (and credential (not (string-empty-p credential)) credential)
+                           (plist-get parsed :token)))
+                (_ (not (string-empty-p secret))))
+      (puthash (my/noema-jupyter-server--credential-key entry) secret
+               my/noema-jupyter-server--credentials))
+    entry))
+
+(defun my/noema-jupyter-server-remove (id)
+  "Forget profile ID and release its route, without shutting down kernels."
+  (when-let* ((entry (my/noema-jupyter-server--entry id)))
+    (config-set 'my/noema-jupyter-servers
+                (seq-remove (lambda (item) (equal (plist-get item :id) id))
+                            my/noema-jupyter-servers) nil t)
+    (remhash (my/noema-jupyter-server--credential-key entry)
+             my/noema-jupyter-server--credentials)
+    (my/noema-jupyter-server--close-resource entry id 'configuration-removed)))
 
 (defvar my/noema-jupyter-server--workspaces (make-hash-table :test #'equal)
   "Owning workspaces for Jupyter server forwards, keyed by server id.
@@ -102,7 +187,9 @@ REASON is passed to the workspace resource close contract."
   "Return ENTRY's secret from `auth-source', or nil.
 The host is taken from `:url' so one authinfo line serves every server on
 that host, and the user from `:user' when the entry names one."
-  (let* ((url (url-generic-parse-url (format "%s" (plist-get entry :url))))
+  (or (gethash (my/noema-jupyter-server--credential-key entry)
+               my/noema-jupyter-server--credentials)
+      (let* ((url (url-generic-parse-url (format "%s" (plist-get entry :url))))
          (host (url-host url))
          (port (url-port url))
          (found
@@ -114,7 +201,7 @@ that host, and the user from `:user' when the entry names one."
                    (when-let* ((user (plist-get entry :user)))
                      (list :user user)))))))
     (when-let* ((secret (plist-get found :secret)))
-      (if (functionp secret) (funcall secret) secret))))
+      (if (functionp secret) (funcall secret) secret)))))
 
 (defun my/noema-jupyter-server--endpoint (entry)
   "Return (HOST . PORT) for ENTRY's URL, applying the scheme's default port."
@@ -262,7 +349,7 @@ group is rather than leaving Noema pointed at a dead local port."
                       (displayName .
                                    ,(format "%s" (or (plist-get entry :name)
                                                      (plist-get entry :id))))
-                      (url . ,(format "%s" (plist-get entry :url)))
+                      (url . ,(my/noema-jupyter-server--public-url entry))
                       (kind . ,(format "%s" (or (plist-get entry :kind) "server")))
                       (target . ,(my/noema-jupyter-server--target entry))))
                   my/noema-jupyter-servers))))))

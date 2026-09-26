@@ -198,11 +198,14 @@ CURRENT is the currently displayed popup buffer."
 (defun my/vterm-popup-agent (agent)
   "Start AGENT through the Noema agent-shell boundary, never through vterm."
   (interactive (list (intern (completing-read "Popup agent: " '("claude" "codex" "opencode") nil t))))
-  (when (file-remote-p default-directory)
-    (user-error "Popup agents currently require a local directory"))
   (unless (memq agent '(claude codex opencode)) (user-error "Unsupported popup agent: %s" agent))
   (require 'noema-agent-acp)
-  (let* ((directory default-directory)
+  (let* ((directory
+          ;; The agent works on the project, as a bare `agent-shell' does:
+          ;; start it at the project root on any target, so it finds the
+          ;; project's instructions and tools; outside a project, here.
+          (file-name-as-directory
+           (or (my/vterm-popup--project-root) default-directory)))
          (workspace (my/vterm-popup--requested-workspace-id directory))
          (config (or (noema-agent-acp-config-for agent) (user-error "No agent-shell configuration for %s" agent)))
          ;; Protect the existing temporary popup while ACP initializes.

@@ -165,12 +165,24 @@ PROBE, discover and cache the target account's login shell first."
       (remote-workspace-resources workspace))))
   terminal)
 
-(defun remote-terminal--process-finished (terminal)
-  "Record TERMINAL as closed after its frontend process finishes."
+(defun remote-terminal--process-finished (terminal process)
+  "Record a finished TERMINAL PROCESS without hiding an abnormal exit."
   (when (remote-terminal-p terminal)
-    (if (eq (remote-terminal-state terminal) 'disconnected)
-        (setf (remote-terminal-process terminal) nil)
-      (remote-terminal--detach terminal))))
+    (cond
+     ((eq (remote-terminal-state terminal) 'disconnected)
+      (setf (remote-terminal-process terminal) nil))
+     ((memq (remote-terminal-state terminal) '(closing closed))
+      (remote-terminal--detach terminal))
+     ((or (memq (process-status process) '(signal failed closed))
+          (and (eq (process-status process) 'exit)
+               (= (process-exit-status process) 255)))
+      ;; A lost SSH PTY can exit while the file workspace remains healthy.
+      ;; Keep its buffer and restart recipe instead of silently removing it.
+      (remote-terminal-mark-disconnected
+       terminal (list 'process-exit (process-exit-status process)))
+      (setf (remote-terminal-process terminal) nil))
+     (t
+      (remote-terminal--detach terminal)))))
 
 (defun remote-terminal--buffer-killed ()
   "Close the terminal process owned by the current buffer."
@@ -252,7 +264,7 @@ buffer, and workspace teardown."
                (funcall frontend-sentinel finished event))
            (when (memq (process-status finished)
                        '(exit signal failed closed))
-             (remote-terminal--process-finished terminal))))))
+             (remote-terminal--process-finished terminal finished))))))
     (with-current-buffer buffer
       (setq-local remote-terminal-instance terminal)
       (add-hook 'kill-buffer-hook
@@ -264,6 +276,8 @@ buffer, and workspace teardown."
      (lambda (value _reason)
        (remote-terminal-close value))
      metadata)
+    (when-let* ((route (process-get process 'remote-route)))
+      (remote-workspace-track-live-route workspace route))
     terminal))
 
 (defun remote-terminal-mark-disconnected (terminal &optional reason)
@@ -335,6 +349,7 @@ terminal buffer."
                    :noquery t
                    :filter #'comint-output-filter
                    :remote-adapter "process"
+                   :remote-process-class 'interactive
                    :remote-context
                    (remote-workspace-context workspace)
                    :remote-environment environment
@@ -409,6 +424,7 @@ terminal buffer."
   (when (remote-terminal-p terminal)
     (let ((process (remote-terminal-process terminal))
           (buffer (remote-terminal-buffer terminal)))
+      (setf (remote-terminal-state terminal) 'closing)
       (when (and (processp process)
                  (process-live-p process))
         (delete-process process))

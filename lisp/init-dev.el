@@ -238,32 +238,96 @@ asynchronously through the normal language-server lifecycle."
   (citre-register-backend 'lsp-mode my/citre-lsp-backend))
 
 (defvar my/citre--executable-cache (make-hash-table :test #'equal)
-  "Citre helper executables already located, keyed by target and command.")
+  "Citre helper executables keyed by target, command and search path.")
 
 (defun my/citre-forget-executables (&rest _)
   "Drop the cached Citre helper lookups."
   (interactive)
   (clrhash my/citre--executable-cache))
 
-(defun my/citre-executable-find-a (fn command &optional remote)
-  "Cache Citre's helper lookup on a target.
+(defun my/citre--remote-executable-fast (command paths)
+  "Return (t . PATH) when one target command safely resolves COMMAND.
+PATHS is Citre's actual remote `exec-path'.  Return nil when its semantics
+cannot be reproduced, allowing Citre's original search to handle the case."
+  (when (and (require 'remote-process nil t)
+             (stringp command)
+             (not (string-match-p "[/\n\0]" command))
+             (equal exec-suffixes '(""))
+             (consp paths)
+             (cl-every
+              (lambda (path)
+                (and (stringp path)
+                     (file-name-absolute-p path)
+                     (not (string-match-p "[:\n\0]" path))))
+              paths))
+    (let* ((result
+            (remote-exec
+             "sh"
+             :args
+             (list
+              "-c"
+              (concat
+               "found=$(command -v \"$1\") || exit 0; "
+               "case \"$found\" in /*) ;; *) exit 3;; esac; "
+               "[ -f \"$found\" ] && [ -x \"$found\" ] || exit 3; "
+               "printf '%s\\n' \"$found\"")
+              "citre-lookup" command)
+             :context (remote-context default-directory)
+             :adapter "exec"
+             :environment
+             (list (cons "PATH" (mapconcat #'identity paths ":")))
+             :filesystem-effects 'none))
+           (output (remote-exec-result-stdout result)))
+      (when (and (equal (remote-exec-result-status result) 0)
+                 (stringp output))
+        (cond
+         ((string-empty-p output) (cons t nil))
+         ((and (string-suffix-p "\n" output)
+               (file-name-absolute-p output)
+               (not (string-match-p "\n" (substring output 0 -1))))
+          (cons t (substring output 0 -1))))))))
 
-`citre-executable-find' probes every `exec-path' entry with
-`file-executable-p', and `citre-auto-enable-citre-mode' asks it for several
-helpers in every `prog-mode' buffer.  On a target that has no ctags installed
-that is about 30 round trips per file open, repeated for every file, and the
-answer cannot change while the connection stands.  Only the target lookup is
-cached; a client-side lookup is already cheap and stays live.  The cache is
-dropped when a Remote session closes or the configuration is reloaded, and
-`my/citre-forget-executables' clears it by hand after installing a tool."
-  (let ((target (and remote (file-remote-p default-directory))))
-    (if (null target)
-        (funcall fn command remote)
-      (let* ((key (cons target command))
-             (cached (gethash key my/citre--executable-cache 'missing)))
-        (if (eq cached 'missing)
-            (puthash key (funcall fn command remote) my/citre--executable-cache)
-          cached)))))
+(defun my/citre-executable-find-a (fn &rest args)
+  "Cache Citre's target helper lookup and use one process probe when safe.
+The cache follows Citre's actual remote search path, so a PATH change cannot
+reuse a result from an earlier environment.  Unsupported path shapes and
+future Citre argument changes retain the original lookup."
+  (let ((command (car args))
+        (remote (cadr args)))
+    (if (or (cddr args)
+            (not remote)
+            (not (file-remote-p default-directory)))
+        (apply fn args)
+      (let* ((target (file-remote-p default-directory))
+             (handler
+              (find-file-name-handler default-directory 'exec-path))
+             (paths
+              (condition-case nil
+                  (and handler (funcall handler 'exec-path))
+                (error :lookup-error))))
+        (if (or (eq paths :lookup-error)
+                (not (proper-list-p paths)))
+            (apply fn args)
+          (let* ((key (list target command
+                            (mapcar
+                             (lambda (path)
+                               (if (stringp path)
+                                   (copy-sequence path)
+                                 path))
+                             paths)
+                            (copy-sequence exec-suffixes)))
+                 (cached (gethash key my/citre--executable-cache 'missing)))
+            (if (not (eq cached 'missing))
+                cached
+              (let* ((fast
+                      (condition-case nil
+                          (my/citre--remote-executable-fast command paths)
+                        (error nil)))
+                     (found (if fast (cdr fast) (apply fn args))))
+                (when (>= (hash-table-count my/citre--executable-cache) 256)
+                  (clrhash my/citre--executable-cache))
+                (puthash key found my/citre--executable-cache)
+                found))))))))
 
 (with-eval-after-load 'citre-common-util
   (unless (advice-member-p #'my/citre-executable-find-a 'citre-executable-find)

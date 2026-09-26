@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: IPython cell magic: writefile
+# key: jwrite
+# --
+%%writefile ${1:output.txt}
+$0

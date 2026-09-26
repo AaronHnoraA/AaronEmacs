@@ -32,6 +32,8 @@
 (declare-function my/project-current-root "init-project")
 (declare-function my/project-dispatch "init-project")
 (declare-function my/project-open-root "init-project")
+(declare-function my/project-ripgrep "init-project"
+                  (project-root &optional initial))
 (declare-function my/project-switch "init-project")
 (declare-function my/project-vterm "init-project")
 (declare-function my/bookmark-jump-dwim "init-windows")
@@ -92,9 +94,10 @@
   (consult-recent-file))
 
 (defun my/telescope-ripgrep ()
-  "Search the active project with ripgrep and live preview."
+  "Search the active project with an available target-side program."
   (interactive)
-  (consult-ripgrep (my/telescope--project-root)))
+  (require 'init-project)
+  (my/project-ripgrep (my/telescope--project-root)))
 
 (defun my/telescope-git-grep ()
   "Search the active project with git-grep and live preview."
@@ -117,7 +120,8 @@
   (let ((symbol (thing-at-point 'symbol t)))
     (unless symbol
       (user-error "No symbol at point"))
-    (consult-ripgrep (my/telescope--project-root) symbol)))
+    (require 'init-project)
+    (my/project-ripgrep (my/telescope--project-root) symbol)))
 
 (defun my/telescope-buffer-symbols ()
   "Search symbols in the current buffer with live preview."
@@ -187,7 +191,7 @@ the built-in bookmark list buffer."
       ("r" "recent files" my/telescope-recent-files
        :transient transient--do-exit)]
      ["Search"
-      ("g" "project ripgrep" my/telescope-ripgrep
+      ("g" "project search" my/telescope-ripgrep
        :transient transient--do-exit)
       ("G" "git grep" my/telescope-git-grep
        :transient transient--do-exit)

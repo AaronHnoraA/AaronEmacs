@@ -28,6 +28,7 @@
 (require 'remote-service)
 (require 'remote-workspace)
 (require 'remote-terminal)
+(require 'remote-task)
 (require 'remote-doctor)
 
 (defun remote-framework-register-adapters ()
@@ -107,6 +108,13 @@ Persisted targets are intentionally not reloaded; configuration ownership
   (clrhash remote-transports)
   (clrhash remote-backends)
   (remote-framework-bootstrap))
+
+(defun remote-framework-shutdown ()
+  "Close this Emacs process's backend sessions and managed transports."
+  (remote-connection-pool-clear t)
+  (remote-pipeline-runtime-clear 'emacs-exit))
+
+(add-hook 'kill-emacs-hook #'remote-framework-shutdown)
 
 (remote-framework-register-adapters)
 

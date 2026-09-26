@@ -12,6 +12,11 @@
 (require 'ert)
 (require 'remote-framework)
 (require 'remote-config)
+(require 'remote-board)
+
+(defvar tramp-rpc-ssh-args)
+(defvar remote--client-process-environment)
+(defvar remote--client-exec-path)
 
 (defmacro remote-framework-test-with-registry (&rest body)
   "Evaluate BODY with isolated framework registries."
@@ -39,9 +44,539 @@
          (remote-channel--counter 0)
          (remote-channel-group--counter 0)
          (remote-doctor-check-functions nil)
-         (remote-route-log nil))
+         (remote-route-log nil)
+         (remote-board--opening-folders (make-hash-table :test #'equal))
+         (remote-board--opening-targets (make-hash-table :test #'equal))
+         (remote-board-connection-progress
+          (make-hash-table :test #'equal))
+         (remote-board-connection-history
+          (make-hash-table :test #'equal))
+         (remote-board-ssh-statuses (make-hash-table :test #'equal))
+         (remote-board--ssh-probe-processes (make-hash-table :test #'equal))
+         (remote-board--ssh-status-generation 0))
      (remote-framework-reset)
      ,@body))
+
+(ert-deftest remote-board-lists-configured-and-recent-folders-without-connect ()
+  (remote-framework-test-with-registry
+    (let* ((target (remote-register-target "lab" :trusted t))
+           (remote-board-recent-folder-limit 2)
+           (remote-board-recent-folders nil))
+      (setf (remote-target-workspaces target)
+            '(((id . "main") (path . "/work/"))))
+      (remote-board--remember-folder "/fs:lab:/work/")
+      (remote-board--remember-folder "/fs:lab:/other/")
+      (remote-board--remember-folder "/fs:lab:/new/")
+      (should
+       (equal remote-board-recent-folders
+              '("/fs:lab:/new/" "/fs:lab:/other/")))
+      (cl-letf (((symbol-function 'remote-connection-ensure)
+                 (lambda (&rest _)
+                   (ert-fail "Board rendering opened a connection"))))
+        (let* ((rows (remote-board--folder-rows target nil))
+               (paths (mapcar (lambda (row) (nth 2 (car row))) rows)))
+          (should (equal paths
+                         '("/work/" "/fs:lab:/new/"
+                           "/fs:lab:/other/")))
+          (should (equal (aref (cadar rows) 2) "configured"))
+          (should (equal (aref (cadadr rows) 2) "recent"))))
+      (remote-board--remember-folder "/fs:lab:/work/")
+      (should (= (length (remote-board--folder-rows target nil)) 2)))))
+
+(ert-deftest remote-board-connection-progress-keeps-newest-attempt ()
+  (remote-framework-test-with-registry
+    (let* ((route
+            (remote-route-create
+             :target-id "lab" :pipeline-id "lab/ssh"
+             :backend-id "tramp-rpc"))
+           (older
+            (remote-connection-create
+             :target-id "lab" :generation 3 :state 'opening))
+           (newer
+            (remote-connection-create
+             :target-id "lab" :generation 4 :state 'opening))
+           (remote-board-connection-history-limit 3))
+      (remote-board--connection-progress older route 'transport)
+      (should (equal (remote-board--target-state "lab" nil nil)
+                     "opening route"))
+      (remote-board--connection-progress newer route 'backend)
+      (remote-board--connection-progress older route 'ready)
+      (should (equal (remote-board--target-state "lab" nil nil)
+                     "SSH login"))
+      (setf (remote-connection-state newer) 'failed
+            (remote-connection-error newer)
+            '(error "Permission denied (publickey)."))
+      (remote-board--connection-progress newer route 'failed)
+      (remote-board--record-connection-failure
+       newer route (remote-connection-error newer))
+      (should-not (gethash "lab" remote-board-connection-progress))
+      (should (= (length (gethash "lab"
+                                  remote-board-connection-history))
+                 3))
+      (should (equal (remote-board--target-state "lab" nil nil)
+                     "auth required"))
+      (let ((buffer nil))
+        (unwind-protect
+            (progn
+              (cl-letf (((symbol-function 'pop-to-buffer)
+                         (lambda (value &rest _ignored)
+                           (setq buffer value))))
+                (remote-board-connection-log "lab"))
+              (with-current-buffer buffer
+                (should (string-match-p "SSH login" (buffer-string)))
+                (should (string-match-p "Permission denied"
+                                        (buffer-string)))))
+          (when (buffer-live-p buffer)
+            (kill-buffer buffer)))))))
+
+(ert-deftest remote-board-opens-and-remembers-only-existing-folders ()
+  (remote-framework-test-with-registry
+    (remote-fs-install)
+    (let ((remote-board-recent-folders nil)
+          opened)
+      (cl-letf (((symbol-function 'find-file)
+                 (lambda (path)
+                   (setq opened path)
+                   'opened)))
+        (should (eq (remote-open-folder "local" "/tmp/") 'opened)))
+      (should (equal opened "/fs:local:/tmp/"))
+      (should (equal remote-board-recent-folders
+                     '("/fs:local:/tmp/")))
+      (let ((workspace (remote-get-workspace "/fs:local:/tmp/")))
+        (should (remote-workspace-live-p workspace))
+        (should (equal (remote-route-link-plugin-id
+                        (remote-workspace-primary-route workspace))
+                       "native")))
+      (should-not (gethash "local" remote-board--opening-targets))
+      (should-error
+       (remote-open-folder
+        "local" "/tmp/no-such-remote-board-folder-20260925/")
+       :type 'user-error)
+      (should (equal remote-board-recent-folders
+                     '("/fs:local:/tmp/"))))))
+
+(ert-deftest remote-board-folder-open-failure-releases-new-workspace ()
+  (remote-framework-test-with-registry
+    (remote-fs-install)
+    (let* ((directory (make-temp-file "remote-board-open-" t))
+           (logical (remote-make-file-name "local" directory)))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'find-file)
+                       (lambda (_path)
+                         (should (gethash "local"
+                                          remote-board--opening-targets))
+                         (should (gethash (file-name-as-directory logical)
+                                          remote-board--opening-folders))
+                         (should (equal
+                                  (remote-board--target-state
+                                   "local" nil nil)
+                                  "opening folder"))
+                         (should (equal
+                                  (remote-board--folder-state
+                                   (file-name-as-directory logical)
+                                   nil 'configured)
+                                  "opening"))
+                         (error "Injected Dired failure"))))
+              (should-error (remote-open-folder "local" directory)))
+            (should-not (remote-get-workspace logical))
+            (should-not (gethash "local" remote-board--opening-targets))
+            (should-not (gethash (file-name-as-directory logical)
+                                 remote-board--opening-folders)))
+        (delete-directory directory t)))))
+
+(ert-deftest remote-board-close-and-disconnect-release-owned-state ()
+  (remote-framework-test-with-registry
+    (remote-fs-install)
+    (let* ((directory (make-temp-file "remote-board-close-" t))
+           (logical (remote-make-file-name "local" directory)))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'find-file)
+                       (lambda (_path) 'opened)))
+              (remote-open-folder "local" directory))
+            (with-temp-buffer
+              (remote-board-mode)
+              (cl-letf (((symbol-function 'remote-board-target-at-point)
+                         (lambda () (remote-get-target "local")))
+                        ((symbol-function 'remote-board--folder-at-point)
+                         (lambda () directory)))
+                (remote-board-close-workspace)))
+            (should-not (remote-get-workspace logical))
+            (cl-letf (((symbol-function 'find-file)
+                       (lambda (_path) 'opened)))
+              (remote-open-folder "local" directory))
+            (let ((result (remote-board-disconnect-target "local")))
+              (should (= (plist-get result :workspaces) 1))
+              (should (= (plist-get result :sessions) 1)))
+            (should-not (remote-get-workspace logical))
+            (should-not (remote-connection-pool-status)))
+        (delete-directory directory t)))))
+
+(ert-deftest remote-board-folder-prompt-completes-on-selected-target ()
+  (remote-framework-test-with-registry
+    (remote-fs-install)
+    (let (completion-directory opened)
+      (with-temp-buffer
+        (remote-board-mode)
+        (cl-letf (((symbol-function 'remote-board-target-at-point)
+                   (lambda () (remote-get-target "local")))
+                  ((symbol-function 'remote-board--folder-at-point)
+                   (lambda () "/tmp/"))
+                  ((symbol-function 'read-directory-name)
+                   (lambda (_prompt directory &rest _args)
+                     (setq completion-directory directory)
+                     "/fs:local:/tmp/"))
+                  ((symbol-function 'find-file)
+                   (lambda (path) (setq opened path))))
+          (call-interactively #'remote-open-folder)))
+      (should (equal completion-directory "/fs:local:/tmp/"))
+      (should (equal opened "/fs:local:/tmp/")))))
+
+(ert-deftest remote-board-mode-line-is-remote-only-and-cheap ()
+  (remote-framework-test-with-registry
+    (remote-register-target "lab" :label "Lab" :trusted t)
+    (with-temp-buffer
+      (setq default-directory "/tmp/")
+      (should-not (remote-board--mode-line-text))
+      (setq default-directory "/fs:local:/tmp/")
+      (should-not (remote-board--mode-line-text))
+      (setq default-directory "/fs:lab:/work/")
+      (should (string-match-p "Remote:Lab"
+                              (remote-board--mode-line-text))))))
+
+(ert-deftest remote-board-folder-row-keeps-its-target-identity ()
+  (remote-framework-test-with-registry
+    (let* ((target (remote-register-target "lab" :trusted t))
+           (remote-board-recent-folders '("/fs:lab:/work/")))
+      (with-temp-buffer
+        (remote-board-mode)
+        (setq tabulated-list-entries
+              (remote-board--folder-rows target nil))
+        (tabulated-list-print)
+        (goto-char (point-min))
+        (should (eq (remote-board-target-at-point) target))
+        (should (equal (remote-board--folder-at-point)
+                       "/fs:lab:/work/"))))))
+
+(ert-deftest remote-board-port-row-copies-and-closes-owned-forward ()
+  (remote-framework-test-with-registry
+    (let* ((target (remote-register-target "lab" :trusted t))
+           (context
+            (remote-context-create
+             :target-id "lab" :localname "/work/"
+             :workspace-root "/fs:lab:/work/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (route
+            (remote-route-create
+             :target-id "lab" :link-id "lab/ssh"
+             :link-plugin-id "tramp" :capability 'port-forward
+             :adapter-id "network"))
+           (forward
+            (remote-forward-create
+             :route route :context context :state 'open
+             :local-endpoint '(:host "127.0.0.1" :port 49152)
+             :remote-endpoint '(:host "127.0.0.1" :port 8080)))
+           (opened 0)
+           (closed 0)
+           (remote-channel-opened-hook
+            (list (lambda (_channel) (cl-incf opened))))
+           (remote-channel-closed-hook
+            (list (lambda (_channel) (cl-incf closed))))
+           (channel
+            (remote-channel--adopt
+             'forward route context forward)))
+      (remote-workspace-register-resource
+       workspace 'forward forward
+       (lambda (value _reason) (remote-close-channel value)))
+      (should (= opened 1))
+      (with-temp-buffer
+        (remote-board-mode)
+        (setq tabulated-list-entries
+              (remote-board--forward-rows
+               target (remote-channel-list)))
+        (tabulated-list-print)
+        (goto-char (point-min))
+        (should (eq (remote-board-target-at-point) target))
+        (should (eq (remote-board--forward-at-point) channel))
+        (remote-copy-target-uri)
+        (should (equal (current-kill 0) "127.0.0.1:49152"))
+        (remote-board-close-forward))
+      (should (= closed 1))
+      (should (eq (remote-forward-state forward) 'closed))
+      (should-not (gethash (remote-channel-id channel) remote-channels))
+      (should-not (remote-workspace-resources workspace)))))
+
+(ert-deftest remote-board-failed-forward-closes-new-owner ()
+  (remote-framework-test-with-registry
+    (remote-fs-install)
+    (cl-letf (((symbol-function 'remote-port-forward)
+               (lambda (&rest _)
+                 (error "Injected forward failure"))))
+      (should-error (remote-board-forward-port "local" 12345)
+                    :type 'error)
+      (should (zerop (hash-table-count remote-workspaces))))
+    (let ((owner (remote-workspace-open "/fs:local:/tmp/" :connect nil)))
+      (cl-letf (((symbol-function 'remote-workspace-for-path)
+                 (lambda (_path) owner))
+                ((symbol-function 'remote-port-forward)
+                 (lambda (&rest _)
+                   (error "Injected forward failure"))))
+        (should-error (remote-board-forward-port "local" 12345)
+                      :type 'error)
+        (should (remote-workspace-live-p owner))))))
+
+(ert-deftest remote-board-moves-named-forward-without-dropping-old-on-error ()
+  (remote-framework-test-with-registry
+    (remote-fs-install)
+    (let* ((forward (remote-board-forward-port
+                     "local" 12345 "127.0.0.1" 0 "service"))
+           (old-channel (remote-channel-of forward))
+           (old-port (plist-get (remote-channel-endpoint forward 'local)
+                                :port))
+           (workspace (car (remote-board--forward-owner forward)))
+           replacement blocker)
+      (unwind-protect
+          (with-temp-buffer
+            (remote-board-mode)
+            (cl-letf (((symbol-function 'remote-board--forward-at-point)
+                       (lambda () old-channel)))
+              (remote-board-rename-forward "renamed service")
+              (should (equal (plist-get
+                              (remote-channel-metadata old-channel) :name)
+                             "renamed service"))
+              (setq replacement (remote-board-change-local-port 0)))
+            (let* ((new-channel (remote-channel-of replacement))
+                   (new-port
+                    (plist-get (remote-channel-endpoint replacement 'local)
+                               :port)))
+              (should (integerp new-port))
+              (should (/= new-port old-port))
+              (should (eq (remote-forward-state forward) 'closed))
+              (should (remote-channel-live-p new-channel))
+              (should (equal (plist-get
+                              (remote-channel-metadata new-channel) :name)
+                             "renamed service"))
+              (should (= (length (remote-workspace-resources workspace)) 1))
+              (setq blocker
+                    (make-network-process
+                     :name "remote-board-busy-port" :server t
+                     :host "127.0.0.1" :service 0 :noquery t))
+              (let ((busy-port
+                     (plist-get (process-contact blocker t) :service)))
+                (cl-letf (((symbol-function 'remote-board--forward-at-point)
+                           (lambda () new-channel)))
+                  (should-error
+                   (remote-board-change-local-port busy-port)))
+                (should (remote-channel-live-p new-channel))
+                (should (= (length
+                            (remote-workspace-resources workspace)) 1)))))
+        (when (and blocker (process-live-p blocker))
+          (delete-process blocker))
+        (when workspace (remote-workspace-close workspace 'test-cleanup))))))
+
+(ert-deftest remote-workspace-background-reconnect-accepts-own-epoch-change ()
+  (remote-framework-test-with-registry
+    (let* ((remote-background-jobs (make-hash-table :test #'equal))
+           (remote-background-target-epochs (make-hash-table :test #'equal))
+           (context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/reconnect/a.el"
+             :workspace-root "/fs:local:/tmp/reconnect/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (route (remote-resolve "process" 'process-sync context))
+           (attempts 0))
+      (setf (remote-workspace-routes workspace) (list route)
+            (remote-workspace-state workspace) 'disconnected)
+      (unwind-protect
+          (cl-letf (((symbol-function 'remote-session-invalidate)
+                     (lambda (&rest _)
+                       (remote-background-invalidate-target "local")))
+                    ((symbol-function 'remote-session-acquire)
+                     (lambda (&rest _)
+                       (cl-incf attempts)
+                       'session)))
+            (let ((job (remote-workspace--schedule-reconnect workspace)))
+              (cancel-timer (remote-background-job-timer job))
+              (remote-background--run job)
+              (should (= attempts 1))
+              (should (eq (remote-background-job-state job) 'complete))
+              (should (eq (remote-workspace-state workspace) 'open))))
+        (remote-background-clear 'test-cleanup)))))
+
+(ert-deftest remote-workspace-transport-failure-is-isolated-by-pipeline ()
+  "A failed SSH transport affects its target pipeline, not other targets."
+  (remote-framework-test-with-registry
+    (let* ((remote-workspace-auto-reconnect nil)
+           (failed-route
+            (remote-route-create
+             :target-id "host-a" :pipeline-id "ssh"
+             :backend-id "tramp-rpc"))
+           (other-target-route
+            (remote-route-create
+             :target-id "host-b" :pipeline-id "ssh"
+             :backend-id "tramp-rpc"))
+           (other-backend-route
+            (remote-route-create
+             :target-id "host-a" :pipeline-id "ssh"
+             :backend-id "tramp"))
+           (affected
+            (remote-workspace-create
+             :key 'affected :target-id "host-a" :state 'open
+             :routes (list failed-route)))
+           (other-target
+            (remote-workspace-create
+             :key 'other-target :target-id "host-b" :state 'open
+             :routes (list other-target-route)))
+           (other-backend
+            (remote-workspace-create
+             :key 'other-backend :target-id "host-a" :state 'open
+             :routes (list other-backend-route))))
+      (puthash 'affected affected remote-workspaces)
+      (puthash 'other-target other-target remote-workspaces)
+      (puthash 'other-backend other-backend remote-workspaces)
+      (remote-workspace-handle-transport-failure
+       failed-route '(error "connection lost"))
+      (should (eq (remote-workspace-state affected) 'disconnected))
+      (should (eq (remote-workspace-state other-target) 'open))
+      (should (eq (remote-workspace-state other-backend)
+                  'disconnected)))))
+
+(ert-deftest remote-workspace-open-keeps-recoverable-owner ()
+  "Reentrant consumers must not replace an owner during recovery."
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/reconnect/a.el"
+             :workspace-root "/fs:local:/tmp/reconnect/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (resource
+            (remote-workspace-register-resource
+             workspace 'lsp 'server)))
+      (dolist (state '(disconnected reconnecting failed))
+        (setf (remote-workspace-state workspace) state)
+        (should (eq (remote-workspace-open context :connect nil)
+                    workspace))
+        (should (eq (remote-get-workspace context) workspace))
+        (should (memq resource (remote-workspace-resources workspace)))
+        (should (eq (remote-workspace-state workspace) state))))))
+
+(ert-deftest remote-workspace-background-reconnect-retries-external-epoch-change ()
+  (remote-framework-test-with-registry
+    (let* ((remote-background-jobs (make-hash-table :test #'equal))
+           (remote-background-target-epochs (make-hash-table :test #'equal))
+           (remote-workspace-reconnect-delays '(0))
+           (remote-connection-open-timeout 8)
+           (remote-workspace-reconnect-first-open-timeout 3)
+           (context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/reconnect/a.el"
+             :workspace-root "/fs:local:/tmp/reconnect/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (route (remote-resolve "process" 'process-sync context))
+           (attempts 0)
+           observed-timeouts)
+      (setf (remote-workspace-routes workspace) (list route)
+            (remote-workspace-state workspace) 'disconnected)
+      (unwind-protect
+          (cl-letf (((symbol-function 'remote-session-invalidate)
+                     (lambda (&rest _)
+                       (remote-background-invalidate-target "local")))
+                    ((symbol-function 'remote-session-acquire)
+                     (lambda (&rest _)
+                       (cl-incf attempts)
+                       (push remote-connection-open-timeout
+                             observed-timeouts)
+                       (when (= attempts 1)
+                         (remote-background-invalidate-target "local"))
+                       'session)))
+            (let ((job (remote-workspace--schedule-reconnect workspace)))
+              (cancel-timer (remote-background-job-timer job))
+              (remote-background--run job)
+              (should (= attempts 1))
+              (should (eq (remote-background-job-state job) 'waiting))
+              (should (eq (remote-workspace-state workspace)
+                          'disconnected))
+              (cancel-timer (remote-background-job-timer job))
+              (remote-background--run job)
+              (should (= attempts 2))
+              (should (equal (nreverse observed-timeouts) '(3 8)))
+              (should (eq (remote-background-job-state job) 'complete))
+              (should (eq (remote-workspace-state workspace) 'open))))
+        (remote-background-clear 'test-cleanup)))))
+
+(ert-deftest remote-workspace-background-reconnect-cannot-reopen-closed-owner ()
+  (remote-framework-test-with-registry
+    (let* ((remote-background-jobs (make-hash-table :test #'equal))
+           (remote-background-target-epochs (make-hash-table :test #'equal))
+           (context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/reconnect/a.el"
+             :workspace-root "/fs:local:/tmp/reconnect/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (route (remote-resolve "process" 'process-sync context)))
+      (setf (remote-workspace-routes workspace) (list route)
+            (remote-workspace-state workspace) 'disconnected)
+      (unwind-protect
+          (cl-letf (((symbol-function 'remote-session-invalidate)
+                     (lambda (&rest _) nil))
+                    ((symbol-function 'remote-session-acquire)
+                     (lambda (&rest _)
+                       (remote-workspace-close workspace 'test-close)
+                       'session)))
+            (let ((job (remote-workspace--schedule-reconnect workspace)))
+              (cancel-timer (remote-background-job-timer job))
+              (remote-background--run job)
+              (should (eq (remote-workspace-state workspace) 'closed))
+              (should-not (remote-get-workspace
+                           "/fs:local:/tmp/reconnect/"))))
+        (remote-background-clear 'test-cleanup)))))
+
+(ert-deftest remote-workspace-manual-async-reconnect-coalesces-and-reports ()
+  (remote-framework-test-with-registry
+    (let* ((remote-background-jobs (make-hash-table :test #'equal))
+           (remote-background-target-epochs (make-hash-table :test #'equal))
+           (context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/reconnect/a.el"
+             :workspace-root "/fs:local:/tmp/reconnect/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (route (remote-resolve "process" 'process-sync context))
+           (attempts 0)
+           callbacks)
+      (setf (remote-workspace-routes workspace) (list route))
+      (should-error (remote-workspace-reconnect-async workspace)
+                    :type 'user-error)
+      (unwind-protect
+          (cl-letf (((symbol-function 'remote-session-invalidate)
+                     (lambda (&rest _)
+                       (remote-background-invalidate-target "local")))
+                    ((symbol-function 'remote-session-acquire)
+                     (lambda (&rest _)
+                       (cl-incf attempts)
+                       'session)))
+            (let ((job
+                   (remote-workspace-reconnect-async
+                    workspace :force t
+                    :callback (lambda (_value) (push 'first callbacks)))))
+              (should (eq (remote-background-job-state job) 'waiting))
+              (should (eq (remote-workspace-state workspace)
+                          'reconnecting))
+              (should
+               (eq job
+                   (remote-workspace-reconnect-async
+                    workspace
+                    :callback
+                    (lambda (_value) (push 'second callbacks)))))
+              (should (= attempts 0))
+              (cancel-timer (remote-background-job-timer job))
+              (remote-background--run job)
+              (should (= attempts 1))
+              (should (eq (remote-workspace-state workspace) 'open))
+              (should (= (length callbacks) 2))
+              (should (memq 'first callbacks))
+              (should (memq 'second callbacks))))
+        (remote-background-clear 'test-cleanup)))))
 
 (ert-deftest remote-framework-loads-public-layers ()
   (dolist (feature
@@ -460,6 +995,276 @@
             (should-not (remote-get-target "broken")))
         (delete-file file)))))
 
+(ert-deftest remote-board-add-ssh-host-imports-a-private-config-file ()
+  (remote-framework-test-with-registry
+    (let* ((root (make-temp-file "remote-add-host-" t))
+           (json-file (expand-file-name "etc/remote.json" root))
+           (ssh-file (expand-file-name "ssh/config" root))
+           (remote-config-file json-file)
+           (remote-config-generation 0))
+      (unwind-protect
+          (progn
+            (make-directory (file-name-directory json-file) t)
+            (make-directory (file-name-directory ssh-file) t)
+            (with-temp-file json-file
+              (insert
+               "{\"version\":2,\"imports\":[{\"type\":\"ssh-config\","
+               "\"files\":[\"../ssh/config\"],"
+               "\"include\":[\"new-*\",\"second-*\"],"
+               "\"pipelines\":["
+               "{\"id\":\"ssh\",\"backend\":\"tramp\","
+               "\"config\":{\"method\":\"ssh\"}}]}]}\n"))
+            (cl-letf (((symbol-function
+                        'remote-board--ssh-client-config-file)
+                       (lambda () ssh-file)))
+              (let ((default-directory "/fs:local:/tmp/"))
+                (should (equal (remote-config-ssh-import-files)
+                               (list ssh-file)))
+                (let ((target
+                       (remote-board-add-ssh-host
+                        "new-host" "example.invalid" "alice" 2222
+                        "~/.ssh/id_test" ssh-file)))
+                  (should (equal (remote-target-id target) "new-host"))
+                  (should-not (remote-target-trusted target))
+                  (should (equal
+                           (plist-get
+                            (remote-pipeline-config
+                             (remote-get-pipeline "ssh" "new-host"))
+                            :host)
+                           "new-host"))
+                  (should (equal
+                           (plist-get
+                            (remote-pipeline-config
+                             (remote-get-pipeline "ssh" "new-host"))
+                            :ssh-config-file)
+                           ssh-file)))))
+            (should (= (logand (file-modes ssh-file) #o777) #o600))
+            (with-temp-buffer
+              (insert-file-contents ssh-file)
+              (should
+               (equal (buffer-string)
+                      (concat
+                       "Host new-host\n"
+                       "    HostName example.invalid\n"
+                       "    User alice\n"
+                       "    Port 2222\n"
+                       "    IdentityFile ~/.ssh/id_test\n"))))
+            (when (executable-find "ssh")
+              (with-temp-buffer
+                (should (= 0 (call-process
+                              "ssh" nil t nil "-F" ssh-file
+                              "-G" "new-host")))
+                (should (string-match-p
+                         "^hostname example\\.invalid$" (buffer-string)))
+                (should (string-match-p
+                         "^port 2222$" (buffer-string)))))
+            (cl-letf (((symbol-function
+                        'remote-board--ssh-client-config-file)
+                       (lambda () ssh-file)))
+              (let ((before
+                     (with-temp-buffer
+                       (insert-file-contents ssh-file)
+                       (buffer-string))))
+                (should-error
+                 (remote-board-add-ssh-host
+                  "new-host" "other.invalid" nil nil nil ssh-file)
+                 :type 'user-error)
+                (should-error
+                 (remote-board-add-ssh-host
+                  "bad\nHost injected" "other.invalid" nil nil nil
+                  ssh-file)
+                 :type 'user-error)
+                (should-error
+                 (remote-board-add-ssh-host
+                  "unreachable" "other.invalid" nil nil nil
+                  (expand-file-name "other-config" root))
+                 :type 'user-error)
+                (should-error
+                 (remote-board-add-ssh-host
+                  "excluded" "other.invalid" nil nil nil ssh-file)
+                 :type 'user-error)
+                (should
+                 (equal before
+                        (with-temp-buffer
+                          (insert-file-contents ssh-file)
+                          (buffer-string)))))
+              (remote-board-add-ssh-host
+               "second-host" "second.invalid" nil 22 nil ssh-file))
+            (should (remote-get-target "new-host"))
+            (should (remote-get-target "second-host")))
+        (delete-directory root t)))))
+
+(ert-deftest remote-board-add-ssh-command-imports-open-ssh-options ()
+  (remote-framework-test-with-registry
+    (let* ((root (make-temp-file "remote-command-host-" t))
+           (json-file (expand-file-name "etc/remote.json" root))
+           (ssh-file (expand-file-name "ssh/config" root))
+           (real-file (expand-file-name "ssh/managed-config" root))
+           (identity (expand-file-name "ssh/my key" root))
+           (remote-config-file json-file)
+           (remote-config-generation 0))
+      (unwind-protect
+          (progn
+            (make-directory (file-name-directory json-file) t)
+            (make-directory (file-name-directory ssh-file) t)
+            (with-temp-file real-file
+              (insert "ServerAliveInterval 13\n"
+                      "Host other-host\n    HostName other.invalid\n"
+                      "    User bob\n"
+                      "Host *\n    HostName wildcard.invalid\n"
+                      "    User wildcard\n"))
+            (set-file-modes real-file #o600)
+            (make-symbolic-link real-file ssh-file)
+            (with-temp-file json-file
+              (insert
+               "{\"version\":2,\"imports\":[{\"type\":\"ssh-config\","
+               "\"files\":[\"../ssh/config\"],\"include\":[\"cmd-*\"],"
+               "\"pipelines\":[{\"id\":\"ssh\",\"backend\":\"tramp\","
+               "\"config\":{\"method\":\"ssh\"}}]}]}\n"))
+            (let* ((command
+                     (format
+                     "ssh -F %s -i \"%s\" -i ~/.ssh/id_other -p2222 -J jump.example -o ConnectTimeout=7 alice@example.invalid"
+                     ssh-file identity))
+                   (target
+                    (remote-board-add-ssh-command command "cmd-host")))
+              (should (equal (remote-target-id target) "cmd-host"))
+              (should-not (remote-target-trusted target))
+              (should (equal (file-symlink-p ssh-file) real-file))
+              (should (= (logand (file-modes real-file) #o777) #o600))
+              (should
+               (equal
+                (plist-get
+                 (remote-pipeline-config
+                  (remote-get-pipeline "ssh" "cmd-host"))
+                 :ssh-config-file)
+                ssh-file))
+              (with-temp-buffer
+                (insert-file-contents ssh-file)
+                (should (string-match-p "Host cmd-host" (buffer-string)))
+                (should
+                 (< (string-match "Host cmd-host" (buffer-string))
+                    (string-match "Host \\*" (buffer-string))))
+                (should
+                 (string-match-p
+                  (regexp-quote (format "IdentityFile \"%s\"" identity))
+                  (buffer-string)))
+                (should
+                 (string-match-p "IdentityFile ~/\\.ssh/id_other"
+                                 (buffer-string)))
+                (should
+                 (string-match-p "ProxyJump jump\\.example"
+                                 (buffer-string))))
+              (when (executable-find "ssh")
+                (with-temp-buffer
+                  (should (= 0 (call-process
+                                "ssh" nil t nil "-G" "-F" ssh-file
+                                "cmd-host")))
+                  (dolist (line '("hostname example.invalid"
+                                  "user alice" "port 2222"
+                                  "proxyjump jump.example"
+                                  "connecttimeout 7"))
+                    (should (string-match-p
+                             (concat "^" (regexp-quote line) "$")
+                             (buffer-string)))))
+                (with-temp-buffer
+                  (should (= 0 (call-process
+                                "ssh" nil t nil "-G" "-F" ssh-file
+                                "other-host")))
+                  (dolist (line '("hostname other.invalid" "user bob"
+                                  "serveraliveinterval 13"))
+                    (should (string-match-p
+                             (concat "^" (regexp-quote line) "$")
+                             (buffer-string))))))
+              (should
+               (remote-board-add-ssh-command
+                (format
+                 "ssh -F %s -o \"ProxyCommand=ssh -W %%h:%%p jump\" alice@example.invalid"
+                 ssh-file)
+                "cmd-proxy"))
+              (when (executable-find "ssh")
+                (with-temp-buffer
+                  (should (= 0 (call-process
+                                "ssh" nil t nil "-G" "-F" ssh-file
+                                "cmd-proxy")))
+                  (should (string-match-p
+                           "^proxycommand ssh -W %h:%p jump$"
+                           (buffer-string)))))
+              (let ((before
+                     (with-temp-buffer
+                       (insert-file-contents ssh-file)
+                       (buffer-string))))
+                (dolist (bad
+                         '("sh -c 'ssh evil'"
+                           "ssh example.invalid id"
+                           "ssh -L 8000:localhost:80 example.invalid"
+                           "ssh -o Host=evil example.invalid"
+                           "ssh -p abc example.invalid"))
+                  (should-error
+                   (remote-board-add-ssh-command bad "cmd-bad" ssh-file)
+                   :type 'user-error))
+                (when (executable-find "ssh")
+                  (should-error
+                   (remote-board-add-ssh-command
+                    "ssh -o BogusSetting=1 example.invalid"
+                    "cmd-bad" ssh-file)
+                   :type 'user-error))
+                (should-error
+                 (remote-board-add-ssh-command
+                  "ssh -F /tmp/unimported-ssh-config example.invalid"
+                  "cmd-bad")
+                 :type 'user-error)
+                (should
+                 (equal before
+                        (with-temp-buffer
+                          (insert-file-contents ssh-file)
+                          (buffer-string)))))))
+        (delete-directory root t)))))
+
+(ert-deftest remote-board-ssh-command-core-options-and-client-path ()
+  (let ((parsed
+         (remote-board--parse-ssh-command
+          (concat "ssh -o HostName=example.invalid -o User=alice "
+                  "-o Port=2200 -o IdentityFile=/tmp/id_ed25519 myalias"))))
+    (should (equal (plist-get parsed :hostname) "example.invalid"))
+    (should (equal (plist-get parsed :suggested-alias) "myalias"))
+    (should (equal (plist-get parsed :user) "alice"))
+    (should (= (plist-get parsed :port) 2200))
+    (should (equal (plist-get parsed :identity-file)
+                   "/tmp/id_ed25519")))
+  (let ((default-directory "/fs:local:/tmp/"))
+    (should (equal
+             (remote-board--ssh-command-config-file "ssh/config")
+             (expand-file-name "ssh/config" invocation-directory))))
+  (should
+   (equal
+    (remote-board--ssh-option-line
+     '("ProxyCommand" . "ssh -W %h:%p jump"))
+    "    ProxyCommand ssh -W %h:%p jump\n"))
+  (let* ((command
+          (mapconcat
+           #'shell-quote-argument
+           '("ssh" "-o" "HostName=example.invalid"
+             "-i" "/tmp/my key" "myalias")
+           " "))
+         (parsed (remote-board--parse-ssh-command command)))
+    (should (equal (plist-get parsed :hostname) "example.invalid"))
+    (should (equal (plist-get parsed :identity-file) "/tmp/my key")))
+  (should
+   (equal
+    (plist-get
+     (remote-board--parse-ssh-command
+      "ssh -i /tmp/first -o IdentityFile=/tmp/second myalias")
+     :identity-files)
+    '("/tmp/first" "/tmp/second")))
+  (should-error
+   (remote-board--parse-ssh-command "ssh host; touch /tmp/unsafe")
+   :type 'user-error)
+  (should
+   (equal (plist-get (remote-board--parse-ssh-command
+                     "ssh\t-l\talice\texample.invalid")
+                     :user)
+          "alice")))
+
 (ert-deftest remote-config-validates-schema-version ()
   (should (= (remote-config--schema-version '((version . 1))) 1))
   (should (= (remote-config--schema-version '((version . 2))) 2))
@@ -676,6 +1481,28 @@
             (remote-workspace-resource-value resource)
             '(descriptor 2))))))))
 
+(ert-deftest remote-file-watch-recovery-rejects-unready-python-backend ()
+  "A reconnect cannot report a watch open before its ready handshake."
+  (let* ((watch (remote-file-watch-create
+                 :id "watch-unready" :generation 0
+                 :state 'disconnected))
+         (process (make-pipe-process :name "remote-watch-unready-test"
+                                     :noquery t))
+         (remote-file-watch-startup-timeout 0))
+    (unwind-protect
+        (progn
+          (process-put process 'remote-file-watch-direct t)
+          (process-put process 'remote-file-watch-provider 'python-inotify)
+          (cl-letf (((symbol-function 'remote-fs--watch-add-physical)
+                     (lambda (_watch) process)))
+            (should-error (remote-file-watch-recover watch)
+                          :type 'remote-backend-unsupported))
+          (should (eq (remote-file-watch-state watch) 'failed))
+          (should-not (remote-file-watch-physical-descriptor watch))
+          (should-not (process-live-p process)))
+      (when (process-live-p process)
+        (delete-process process)))))
+
 (ert-deftest remote-workspace-reconnect-retries-transport-and-recovers-resources ()
   (remote-framework-test-with-registry
     (let* ((context
@@ -730,6 +1557,71 @@
             (remote-workspace-resources workspace)))
           'disconnected))
         (should (eq (remote-workspace-state workspace) 'open))))))
+
+(ert-deftest remote-workspace-first-auto-reconnect-has-a-short-open-deadline ()
+  (remote-framework-test-with-registry
+    (let* ((remote-connection-open-timeout 8)
+           (remote-workspace-reconnect-first-open-timeout 3)
+           (context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/reconnect/a.el"
+             :workspace-root "/fs:local:/tmp/reconnect/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (route (remote-resolve "process" 'process-sync context))
+           observed)
+      (setf (remote-workspace-routes workspace) (list route))
+      (cl-letf (((symbol-function 'remote-session-invalidate)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'remote-session-acquire)
+                 (lambda (&rest _)
+                   (push remote-connection-open-timeout observed)
+                   'session))
+                ((symbol-function 'remote-workspace--recover-after-transport)
+                 (lambda (_workspace) 'open)))
+        (remote-workspace--reconnect-once workspace t)
+        (remote-workspace--reconnect-once workspace)
+        (let* ((pipeline (remote-route-pipeline route))
+               (config (copy-sequence (remote-pipeline-config pipeline))))
+          (setf (remote-pipeline-config pipeline)
+                (plist-put config :connect-timeout 12))
+          (remote-workspace--reconnect-once workspace t))
+        (should (equal (nreverse observed) '(3 8 8)))))))
+
+(ert-deftest remote-workspace-reconnect-quiesces-forwards-before-session-reset ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/"
+             :workspace-root "/fs:local:/tmp/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (route (remote-resolve "process" 'process-sync context))
+           events)
+      (setf (remote-workspace-routes workspace) (list route)
+            (remote-workspace-primary-route workspace) route)
+      (let ((resource
+             (remote-workspace-register-recoverable-resource
+              workspace 'forward 'old-forward
+              :close (lambda (value reason)
+                       (push (list 'close value reason) events))
+              :recover (lambda (_resource _owner)
+                         (push 'recover events)
+                         'new-forward))))
+        (cl-letf (((symbol-function 'remote-session-invalidate)
+                   (lambda (&rest _args)
+                     (push 'invalidate events)))
+                  ((symbol-function 'remote-session-acquire)
+                   (lambda (&rest _args)
+                     (push 'acquire events)
+                     'session)))
+          (remote-workspace-reconnect workspace))
+        (should
+         (equal (reverse events)
+                '((close old-forward workspace-reconnect)
+                  invalidate acquire recover)))
+        (should (eq (remote-workspace-resource-value resource)
+                    'new-forward))
+        (should (eq (remote-workspace-resource-state resource)
+                    'open))))))
 
 (ert-deftest remote-workspace-does-not-retry-operation-errors ()
   (remote-framework-test-with-registry
@@ -1039,6 +1931,36 @@
             (should-not (remote-channel-list "local")))
         (remote-close-channel forward)))))
 
+(ert-deftest remote-forward-recovery-keeps-allocated-local-port ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/"
+             :workspace-root "/fs:local:/tmp/"))
+           (forward
+            (remote-port-forward
+             '(:host "127.0.0.1" :port 9)
+             :local-endpoint '(:host "127.0.0.1" :port 0)
+             :context context :register nil))
+           (channel (remote-channel-of forward))
+           (port (plist-get (remote-channel-endpoint forward 'local)
+                            :port))
+           replacement)
+      (unwind-protect
+          (progn
+            (should (and (integerp port) (> port 0)))
+            (remote-close-channel forward)
+            (setq replacement
+                  (funcall (remote-channel-recovery-function channel)))
+            (should (not (eq replacement forward)))
+            (should
+             (= (plist-get (remote-channel-endpoint replacement 'local)
+                           :port)
+                port)))
+        (ignore-errors (remote-close-channel forward))
+        (when replacement
+          (ignore-errors (remote-close-channel replacement)))))))
+
 (ert-deftest remote-doctor-reports-local-routing-boundaries ()
   (remote-framework-test-with-registry
     (let ((report (remote-doctor-report "local")))
@@ -1221,7 +2143,35 @@
              (file-executable-p
               (expand-file-name "bin/tool" native-install)))
             (should-not
-             (file-exists-p (expand-file-name "stale" native-install))))
+             (file-exists-p (expand-file-name "stale" native-install)))
+            ;; An executable can still be corrupt.  A consumer validator
+            ;; repairs that versioned leaf without accepting stale contents.
+            (let* ((launcher (expand-file-name "bin/tool" native-install))
+                   (validate
+                    (lambda (_context candidate)
+                      (with-temp-buffer
+                        (insert-file-contents
+                         (expand-file-name
+                          "bin/tool" (remote-file-local-name candidate)))
+                        (equal (buffer-string) "#!/bin/sh\nexit 0\n")))))
+              (remote-service-provision-directory
+               "test-tool" source install
+               :context context :adapter "exec"
+               :payload-directory "lib"
+               :ready-file "bin/tool" :ready-kind 'executable
+               :prepare prepare :validate validate)
+              (should (= prepare-count 2))
+              (with-temp-file launcher
+                (insert "#!/bin/sh\nexit 9\n"))
+              (set-file-modes launcher #o700)
+              (remote-service-provision-directory
+               "test-tool" source install
+               :context context :adapter "exec"
+               :payload-directory "lib"
+               :ready-file "bin/tool" :ready-kind 'executable
+               :prepare prepare :validate validate)
+              (should (= prepare-count 3))
+              (should (funcall validate context install))))
         (delete-directory source t)
         (delete-directory target-root t)))))
 
@@ -1326,12 +2276,47 @@
                  (remote-terminal-process terminal))
               (accept-process-output
                (remote-terminal-process terminal) 0.1))
-            (should
+           (should
              (string-match-p
               "terminal-ready"
               (with-current-buffer
                   (remote-terminal-buffer terminal)
-                (buffer-string)))))
+                (buffer-string))))
+            (should
+             (eq (plist-get
+                  (remote-process-description
+                   (remote-terminal-process terminal))
+                  :class)
+                 'interactive))
+            (should
+             (eq (remote-route-capability
+                  (process-get (remote-terminal-process terminal)
+                               'remote-route))
+                 'pty)))
+        (remote-workspace-close workspace)))))
+
+(ert-deftest remote-terminal-abnormal-exit-keeps-restartable-buffer ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/"
+             :workspace-id "terminal-exit"
+             :workspace-root "/fs:local:/tmp/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (terminal
+            (remote-terminal-open
+             workspace :name "abnormal-exit"
+             :shell "/bin/sh" :arguments '("-c" "read line; exit 255"))))
+      (unwind-protect
+          (progn
+            (remote-terminal-send-string terminal "finish\n")
+            (let ((deadline (+ (float-time) 5)))
+              (while (and (eq (remote-terminal-state terminal) 'open)
+                          (< (float-time) deadline))
+                (accept-process-output nil 0.05)))
+            (should (eq (remote-terminal-state terminal) 'disconnected))
+            (should (buffer-live-p (remote-terminal-buffer terminal)))
+            (should (memq terminal (remote-terminal-list workspace))))
         (remote-workspace-close workspace)))))
 
 (ert-deftest remote-terminal-probes-login-shell-and-keeps-fallback ()
@@ -1850,15 +2835,282 @@
          (equal
           (remote-backend-tramp--ssh-forward-command
            route "127.0.0.1" 49152 "127.0.0.1" 3000)
-          '("/usr/bin/ssh" "-N" "-T"
+          '("/usr/bin/ssh" "-N" "-T" "-S" "none"
             "-o" "ExitOnForwardFailure=yes"
-            "-o" "ServerAliveInterval=30"
+            "-v"
+            "-o" "ServerAliveInterval=15"
             "-o" "ServerAliveCountMax=3"
             "-o" "ConnectTimeout=8"
             "-o" "ConnectionAttempts=1"
             "-J" "ops@edge:2222"
             "-L" "127.0.0.1:49152:127.0.0.1:3000"
             "dev@lab")))))))
+
+(ert-deftest remote-ssh-forward-command-uses-target-keepalive-override ()
+  (remote-framework-test-with-registry
+    (remote-register-target "lab" :trusted t)
+    (let* ((pipeline
+            (remote-register-pipeline
+             "lab" "ssh" "tramp"
+             :config '(:host "lab" :ssh-options
+                       ("ServerAliveInterval=4" "ServerAliveCountMax=2"))))
+           (route
+            (remote-route-create
+             :target-id "lab"
+             :pipeline-id (remote-pipeline-id pipeline)
+             :backend-id "tramp"
+             :capability 'port-forward
+             :adapter-id "network")))
+      (cl-letf (((symbol-function 'executable-find)
+                 (lambda (_program &optional _remote)
+                   "/usr/bin/ssh")))
+        (let ((command
+               (remote-backend-tramp--ssh-forward-command
+                route "127.0.0.1" 49152 "127.0.0.1" 3000)))
+          (should (member "ServerAliveInterval=4" command))
+          (should (member "ServerAliveCountMax=2" command))
+          (should-not (member "ServerAliveInterval=15" command))
+          (should-not (member "ServerAliveCountMax=3" command)))))))
+
+(ert-deftest remote-ssh-custom-config-reaches-every-client-command ()
+  (remote-framework-test-with-registry
+    (let* ((config-file "/tmp/remote ssh config")
+           (_target (remote-register-target "custom" :trusted t))
+           (pipeline
+            (remote-register-pipeline
+             "custom" "ssh" '("tramp-rpc" "tramp")
+             :config (list :host "custom" :ssh-config-file config-file)))
+           (route
+            (remote-route-create
+             :target-id "custom"
+             :link-id (remote-pipeline-id pipeline)
+             :link-plugin-id "tramp-rpc"
+             :capability 'process-async
+             :adapter-id "process"))
+           (execution
+            (remote-backend-execution-create
+             :route route
+             :physical-directory "/rpc:custom:/tmp/"))
+           (plan
+            (remote-backend-tramp-handler-process-plan
+             execution '(:name "custom" :command ("true")) nil))
+           copied)
+      (cl-labels
+          ((has-config (arguments)
+             (equal (cadr (member "-F" arguments)) config-file)))
+        (should
+         (equal (remote-backend-tramp--ssh-config-args pipeline)
+                (list "-F" config-file)))
+        (should
+         (equal (car (remote-backend-tramp--method-login-args
+                      "ssh" nil (list "-F" config-file)))
+                (list "-F" config-file)))
+        (should
+         (has-config
+          (remote-backend-tramp-direct-async-command
+           route '("true") nil "/tmp/")))
+        (let ((login
+               (remote-backend-tramp-ssh-client-command
+                route :tty t)))
+          (should (member "-tt" login))
+          (should (has-config login)))
+        (should
+         (has-config
+          (remote-backend-tramp--ssh-forward-command
+           route "127.0.0.1" 50001 "127.0.0.1" 22)))
+        (cl-letf (((symbol-function 'call-process)
+                   (lambda (program _infile _destination _display
+                                    &rest arguments)
+                     (setq copied (cons program arguments))
+                     0)))
+          (should
+           (= 0 (remote-backend-tramp-direct-copy-file
+                 route "/tmp/client" "/tmp/target")))
+          (should (has-config copied)))
+        (should
+         (has-config
+          (remote-transport--ssh-control-command
+           (remote-ssh-control-create
+            :path "/tmp/control" :destination "custom"
+            :config-file config-file)
+           "check")))
+        (let ((tramp-rpc-ssh-args nil)
+              observed)
+          (should
+           (eq
+            (funcall
+             (remote-backend-process-plan-around-start plan)
+             (lambda ()
+               (setq observed tramp-rpc-ssh-args)
+               'started))
+            'started))
+          (should (has-config observed)))))))
+
+(ert-deftest remote-board-ssh-failure-state-clears-after-connection ()
+  (remote-framework-test-with-registry
+    (remote-register-target "lab" :trusted t)
+    (let* ((pipeline
+            (remote-register-pipeline
+             "lab" "ssh" "tramp" :config '(:host "lab")))
+           (route
+            (remote-route-create
+             :target-id "lab"
+             :link-id (remote-pipeline-id pipeline)
+             :link-plugin-id "tramp"
+             :capability 'file-read :adapter-id "emacs-file"))
+           (connection
+            (remote-connection-create
+             :target-id "lab" :state 'failed
+             :error '(error "Permission denied (publickey)."))))
+      (remote-board--record-connection-failure
+       connection route (remote-connection-error connection))
+      (should
+       (equal (remote-board--target-state "lab" nil nil)
+              "auth required"))
+      (remote-board--clear-connection-failure connection route)
+      (should (equal (remote-board--target-state "lab" nil nil)
+                     "idle")))))
+
+(ert-deftest remote-board-ssh-diagnostic-captures-authentication-failure ()
+  (remote-framework-test-with-registry
+    (let* ((target (remote-register-target "lab" :trusted t))
+           (name "*Remote SSH lab*")
+           process)
+      (unwind-protect
+          (cl-letf
+              (((symbol-function 'remote-board--ssh-client-command)
+                (lambda (&rest _arguments)
+                  '("sh" "-c"
+                    "printf 'Permission denied (publickey).\\n' >&2; exit 255"))))
+            (setq process (remote-board-ssh-diagnose target))
+            (let ((deadline (+ (float-time) 3)))
+              (while (and
+                      (eq (plist-get
+                           (gethash "lab" remote-board-ssh-statuses)
+                           :state)
+                          'checking)
+                      (< (float-time) deadline))
+                (accept-process-output nil 0.05)))
+            (should
+             (eq (plist-get (gethash "lab" remote-board-ssh-statuses)
+                            :state)
+                 'authentication))
+            (with-current-buffer name
+              (should
+               (string-match-p "Permission denied"
+                               (buffer-string)))))
+        (when (process-live-p process)
+          (delete-process process))
+        (when-let* ((buffer (get-buffer name)))
+          (kill-buffer buffer))))))
+
+(ert-deftest remote-board-ssh-login-uses-client-home-and-argv ()
+  (remote-framework-test-with-registry
+    (require 'term)
+    (let* ((target (remote-register-target "lab" :trusted t))
+           (buffer (generate-new-buffer " *remote-test-ssh-login*"))
+           captured)
+      (unwind-protect
+          (cl-letf
+              (((symbol-function 'remote-board--ssh-client-command)
+                (lambda (&rest _arguments)
+                  '("/usr/bin/ssh" "-tt" "-F" "/tmp/ssh config" "lab")))
+               ((symbol-function 'remote-client-process-environment)
+                (lambda () '("HOME=/Users/client" "PATH=/usr/bin")))
+               ((symbol-function 'remote-client-exec-path)
+                (lambda () '("/usr/bin")))
+               ((symbol-function 'make-term)
+                (lambda (&rest arguments)
+                  (setq captured
+                        (list arguments (getenv "HOME") default-directory))
+                  buffer))
+               ((symbol-function 'term-char-mode) #'ignore)
+               ((symbol-function 'pop-to-buffer) #'ignore))
+            (let ((process-environment '("HOME=/home/target")))
+              (should (eq (remote-board-ssh-login target) buffer)))
+            (should
+             (equal (car captured)
+                    '("Remote SSH Login lab" "/usr/bin/ssh" nil
+                      "-tt" "-F" "/tmp/ssh config" "lab")))
+            (should (equal (cadr captured) "/Users/client"))
+            (should (equal (nth 2 captured)
+                           temporary-file-directory)))
+        (kill-buffer buffer)))))
+
+(ert-deftest remote-ssh-custom-config-survives-an-existing-tramp-cache ()
+  (let* ((vector (tramp-dissect-file-name
+                  "/ssh:remote-config-cache-test:/" nil))
+         (login-args
+          (remote-backend-tramp--method-login-args
+           "ssh" nil '("-F" "/tmp/custom-ssh-config"))))
+    (unwind-protect
+        (progn
+          ;; TRAMP has already initialized this connection's cache before
+          ;; the custom config is selected.
+          (tramp-get-method-parameter vector 'tramp-login-args)
+          (remote-backend-tramp--seed-login-args
+           "/ssh:remote-config-cache-test:" login-args)
+          (should
+           (equal
+            (tramp-get-method-parameter vector 'tramp-login-args)
+            login-args))
+          (let ((key
+                 (seq-find
+                  (lambda (item) (equal item "login-args"))
+                  (hash-table-keys
+                   (tramp-get-hash-table
+                    (tramp-file-name-unify vector))))))
+            (should (get-text-property 0 'tramp-default key))))
+      (tramp-flush-connection-properties vector))))
+
+(ert-deftest remote-ssh-client-process-plan-keeps-client-home ()
+  (remote-framework-test-with-registry
+    (remote-register-target "custom" :trusted t)
+    (let* ((pipeline
+            (remote-register-pipeline
+             "custom" "ssh" "tramp"
+             :config '(:host "custom"
+                       :ssh-config-file "/tmp/custom-ssh-config")))
+           (route
+            (remote-route-create
+             :target-id "custom"
+             :link-id (remote-pipeline-id pipeline)
+             :link-plugin-id "tramp"
+             :capability 'process-async
+             :adapter-id "process"))
+           (execution
+            (remote-backend-execution-create
+             :route route :command '("sh" "-c" "true")
+             :physical-directory "/ssh:custom:/tmp/"
+             :context
+             (remote-context-create
+              :target-id "custom" :localname "/tmp/"))))
+      (let* ((remote--client-process-environment
+              '("HOME=/client" "PATH=/usr/bin"))
+             (remote--client-exec-path '("/usr/bin"))
+             (process-environment '("HOME=/target" "PATH=/remote/bin"))
+             (plan
+              (remote-backend-tramp-prepare-process
+               execution
+               '(:name "custom" :command ("sh" "-c" "true")
+                 :connection-type pipe)
+               '(("HOME" . "/target")))))
+        (should (member "HOME=/client"
+                        (remote-backend-process-plan-process-environment
+                         plan)))
+        (should-not (member "HOME=/target"
+                            (remote-backend-process-plan-process-environment
+                             plan)))
+        (should (equal
+                 (remote-backend-process-plan-exec-path plan)
+                 '("/usr/bin")))
+        (should
+         (string-match-p
+          "/target"
+          (car (last
+                (plist-get
+                 (remote-backend-process-plan-arguments plan)
+                 :command)))))))))
 
 (ert-deftest remote-ssh-reverse-forward-command-respects-pipeline-hops ()
   (remote-framework-test-with-registry
@@ -1887,11 +3139,11 @@
           (remote-backend-tramp--ssh-forward-command
            route "127.0.0.1" 3000 "127.0.0.1" 49152
            'reverse)
-          '("/usr/bin/ssh" "-N" "-T"
+          '("/usr/bin/ssh" "-N" "-T" "-S" "none"
             "-o" "ExitOnForwardFailure=yes"
-            "-o" "ServerAliveInterval=30"
-            "-o" "ServerAliveCountMax=3"
             "-v"
+            "-o" "ServerAliveInterval=15"
+            "-o" "ServerAliveCountMax=3"
             "-o" "ConnectTimeout=8"
             "-o" "ConnectionAttempts=1"
             "-J" "ops@edge:2222"

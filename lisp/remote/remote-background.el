@@ -39,6 +39,31 @@
 (defvar remote-background-defer-commit nil
   "Non-nil while background work must return observations without caching.")
 
+(defvar remote-background--current-job nil
+  "Dynamically running job, for acknowledging its own target invalidation.")
+
+(defun remote-background-acknowledge-own-invalidation ()
+  "Accept an epoch change deliberately caused by the running job.
+Ordinary observations must never call this.  A reconnect closes its old
+session before opening a new one, so that intentional invalidation should
+not make the successful reconnect look like a stale observation."
+  (when remote-background--current-job
+    (setf (remote-background-job-epoch remote-background--current-job)
+          (remote-background-target-epoch
+           (remote-background-job-target-id
+            remote-background--current-job)))))
+
+(defun remote-background-assert-current-epoch ()
+  "Reject a running job if its target changed after its own invalidation."
+  (when remote-background--current-job
+    (unless (= (remote-background-job-epoch
+                remote-background--current-job)
+               (remote-background-target-epoch
+                (remote-background-job-target-id
+                 remote-background--current-job)))
+      (signal 'remote-connection-cancelled
+              '("Target changed during background recovery")))))
+
 (defun remote-background-target-epoch (target-id)
   "Return the current background observation epoch for TARGET-ID."
   (gethash (remote-normalize-id target-id)
@@ -141,6 +166,7 @@
         (let* ((non-essential
                 (remote-background-job-non-essential job))
                (remote-background-defer-commit t)
+               (remote-background--current-job job)
                (value (funcall (remote-background-job-function job)))
                (current-epoch
                 (remote-background-target-epoch

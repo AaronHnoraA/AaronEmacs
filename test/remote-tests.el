@@ -47,6 +47,9 @@
          (remote-environment-cache (make-hash-table :test #'equal))
          (remote-environments-by-id (make-hash-table :test #'equal))
          (remote-environment-providers nil)
+         (remote-fs-preferred-route-cache (make-hash-table :test #'equal))
+         (remote-backend-tramp--prefix-cache
+          (make-hash-table :test #'equal))
          (remote-backend-contracts (make-hash-table :test #'equal)))
      (remote-reset-registries)
      (remote-fs-register-link-plugins)
@@ -193,6 +196,53 @@ The client boundary must keep answering with this machine's values."
         (should (equal (remote-client-exec-path) client-path))
         (should
          (equal (remote-client-process-environment) client-environment))))))
+
+(ert-deftest remote-client-environment-ignores-a-consumer-projection ()
+  "A consumer may bind a target projection before entering the framework.
+`python-shell-with-environment' does this around `run-python'; tramp-rpc
+then built the client's SSH ControlPath under the target's HOME.  Neither
+the unpinned fallback nor a pin taken inside that binding may see it."
+  (with-temp-buffer
+    (let ((remote--client-exec-path nil)
+          (remote--client-process-environment nil)
+          (remote--buffer-base-process-environment nil)
+          (remote--buffer-base-exec-path nil)
+          (client-home (getenv "HOME"))
+          (client-path (remote-client-exec-path)))
+      (let ((process-environment
+             (cons "HOME=/home/target" (copy-sequence process-environment)))
+            (exec-path client-path))
+        (should (equal (getenv "HOME") "/home/target"))
+        (let ((process-environment (remote-client-process-environment)))
+          (should (equal (getenv "HOME") client-home)))
+        (remote-with-client-environment
+          (let ((process-environment
+                 (cons "HOME=/home/deeper-target" process-environment)))
+            (let ((process-environment (remote-client-process-environment)))
+              (should (equal (getenv "HOME") client-home))))
+          (should (equal (remote-client-exec-path) client-path)))))))
+
+(ert-deftest remote-fs-exec-path-answers-from-the-workspace-capsule ()
+  "Stock `executable-find' with REMOTE must see project tools such as direnv's.
+The backend alone only knows the target's login PATH."
+  (let ((default-directory "/fs:box:/work/project/"))
+    (cl-letf (((symbol-function 'remote-environment-resolve)
+               (lambda (context &rest _)
+                 (should (equal (remote-context-target-id context) "box"))
+                 'capsule))
+              ((symbol-function 'remote-environment-vars)
+               (lambda (_) '(("PATH" . "/work/project/bin:/usr/bin"))))
+              ((symbol-function 'remote-fs--call-routed)
+               (lambda (&rest _) '("/usr/bin" "/bin" "/work/project/"))))
+      ;; Capsule first; backend-only entries keep their place after it.
+      (should (equal (remote-fs-handle-exec-path)
+                     '("/work/project/bin" "/usr/bin" "/bin" "/work/project/"))))
+    ;; Without a capsule PATH the backend still answers.
+    (cl-letf (((symbol-function 'remote-environment-resolve) (lambda (&rest _) 'capsule))
+              ((symbol-function 'remote-environment-vars) (lambda (_) nil))
+              ((symbol-function 'remote-fs--call-routed)
+               (lambda (operation _args) (list operation))))
+      (should (equal (remote-fs-handle-exec-path) '(exec-path))))))
 
 (ert-deftest remote-client-exec-path-drops-foreign-directories ()
   "A consumer may rebind `exec-path' to target directories around a call
@@ -496,6 +546,8 @@ refused build on every remote operation."
           ("ControlMaster=auto"
            "ControlPersist=600"
            "ControlPath=/tmp/framework-control"
+           "ServerAliveInterval=15"
+           "ServerAliveCountMax=3"
            "ConnectTimeout=8"
            "ConnectionAttempts=1")))))))
 
@@ -582,6 +634,134 @@ the default file adapter must route it without aborting later hooks."
         (should (= opens 1))
         (should (= (remote-connection-use-count second) 2))
         (should (= (length (remote-connection-pool-status)) 1))))))
+
+(ert-deftest remote-connection-read-lease-rechecks-when-disabled ()
+  (remote-test-with-registry
+    (let ((remote-connection--last-live-check
+           (make-hash-table :test #'eq))
+          (remote-connection-read-liveness-interval 10)
+          (opens 0)
+          (checks 0)
+          (live t))
+      (remote-register-link-plugin
+       "leased"
+       :capabilities '(metadata)
+       :project-file-name (lambda (_file _link _route) "/leased/")
+       :connect (lambda (_route _context)
+                  (cl-incf opens)
+                  'handle)
+       :connection-live-p
+       (lambda (_connection _route _context)
+         (cl-incf checks)
+         live))
+      (remote-register-target "lab" :trusted t)
+      (remote-register-link "lab" "ssh" "leased")
+      (remote-register-adapter
+       "test" :capabilities '(metadata)
+       :preferences '((default . ("leased"))))
+      (let* ((context
+              (remote-context-create
+               :target-id "lab" :localname "/work/a"
+               :workspace-root "/fs:lab:/work/"))
+             (route (remote-resolve "test" 'metadata context))
+             (session (remote-connection-ensure route context)))
+        (let ((remote-connection-liveness-lease-eligible t))
+          (should (eq session (remote-connection-ensure route context)))
+          (should (= checks 1))
+          (setq live nil)
+          (should (eq session (remote-connection-ensure route context)))
+          (should (= checks 1))
+          (puthash session (- (float-time) 20)
+                   remote-connection--last-live-check)
+          (should-not (eq session (remote-connection-ensure route context)))
+          (should (= checks 2))
+          (should (= opens 2)))
+        ;; A caller outside the read-only file-query boundary still performs
+        ;; a full check, even if the new session has a fresh lease.
+        (let ((replacement (gethash (remote-connection-route-key route)
+                                    remote-connection-pool)))
+          (setq live t)
+          (let ((remote-connection-liveness-lease-eligible t))
+            (should (eq replacement
+                        (remote-connection-ensure route context))))
+          (setq live nil)
+          (should-not (eq replacement
+                          (remote-connection-ensure route context)))
+          (should (= opens 3)))))))
+
+(ert-deftest remote-connection-read-lease-does-not-hide-operation-failure ()
+  (remote-test-with-registry
+    (let ((remote-connection--last-live-check
+           (make-hash-table :test #'eq))
+          (remote-connection-read-liveness-interval 10))
+      (remote-register-link-plugin
+       "leased"
+       :capabilities '(metadata)
+       :project-file-name (lambda (_file _link _route) "/tmp/")
+       :connect (lambda (_route _context) 'handle)
+       :connection-live-p (lambda (_connection _route _context) t))
+      (remote-register-target "lab" :trusted t)
+      (remote-register-link "lab" "ssh" "leased")
+      (let* ((logical "/fs:lab:/tmp/")
+             (context (remote-context logical))
+             (route (remote-resolve "emacs-file" 'metadata context))
+             (session (remote-connection-ensure route context)))
+        (let ((remote-connection-liveness-lease-eligible t))
+          (should (eq session (remote-connection-ensure route context))))
+        (cl-letf (((symbol-function 'remote-fs--call-underlying)
+                   (lambda (&rest _)
+                     (signal 'remote-transport-error
+                             '("Injected transport loss")))))
+          (should-error
+           (remote-fs--call-routed 'file-attributes (list logical))
+           :type 'remote-transport-error))
+        (should-not (remote-connection-cached-p route))))))
+
+(ert-deftest remote-read-query-successes-do-not-hide-failures-in-route-log ()
+  (remote-test-with-registry
+    (let ((remote-log-read-query-successes nil))
+      (remote-register-link-plugin
+       "read-log-test"
+       :capabilities '(metadata)
+       :project-file-name (lambda (_file _link _route) "/tmp/")
+       :connect (lambda (_route _context) 'handle)
+       :connection-live-p (lambda (_connection _route _context) t))
+      (remote-register-target "lab" :trusted t)
+      (remote-register-link "lab" "ssh" "read-log-test")
+      (let ((logical "/fs:lab:/tmp/"))
+        (should (remote-fs--call-routed 'file-exists-p (list logical)))
+        (setq remote-route-log nil)
+        (should (remote-fs--call-routed 'file-exists-p (list logical)))
+        (should-not
+         (seq-some
+          (lambda (event)
+            (memq (plist-get event :kind) '(route connection-reuse)))
+          remote-route-log))
+        (let ((remote-log-read-query-successes t))
+          (should (remote-fs--call-routed 'file-exists-p (list logical))))
+        (should
+         (seq-some
+          (lambda (event)
+            (eq (plist-get event :kind) 'route))
+          remote-route-log))
+        (should
+         (seq-some
+          (lambda (event)
+            (eq (plist-get event :kind) 'connection-reuse))
+          remote-route-log))
+        (setq remote-route-log nil)
+        (cl-letf (((symbol-function 'remote-fs--call-underlying)
+                   (lambda (&rest _)
+                     (signal 'remote-transport-error
+                             '("Injected transport loss")))))
+          (should-error
+           (remote-fs--call-routed 'file-exists-p (list logical))
+           :type 'remote-transport-error))
+        (should
+         (seq-some
+          (lambda (event)
+            (eq (plist-get event :kind) 'failure))
+          remote-route-log))))))
 
 (ert-deftest remote-connection-reentrant-open-keeps-one-session-reference ()
   (remote-test-with-registry
@@ -707,6 +887,100 @@ returns, so this covers a different ownership window from backend cancellation."
       (should-not backend-opened)
       (should (zerop (hash-table-count remote-connection-pool)))
       (should (zerop (hash-table-count remote-pipeline-runtime-pool))))))
+
+(ert-deftest remote-connection-progress-only-reports-new-session-phases ()
+  (remote-test-with-registry
+    (let (phases)
+      (remote-register-link-plugin
+       "progress-test"
+       :capabilities '(process-sync)
+       :project-file-name (lambda (_file _link _route) "/progress/")
+       :connect (lambda (_route _context) 'handle)
+       :connection-live-p (lambda (_connection _route _context) t))
+      (remote-register-target "lab" :trusted t)
+      (let* ((pipeline
+              (remote-register-pipeline "lab" "ssh" "progress-test"))
+             (route
+              (remote-route-create
+               :target-id "lab" :pipeline-id (remote-pipeline-id pipeline)
+               :backend-id "progress-test" :capability 'process-sync
+               :adapter-id "process"))
+             (context
+              (remote-context-create
+               :target-id "lab" :localname "/work/")))
+        (let ((remote-connection-progress-hook
+               (list (lambda (_connection _route phase)
+                       (push phase phases)))))
+          (should (remote-connection-ensure route context))
+          (should (remote-connection-ensure route context)))
+        (should (equal (nreverse phases)
+                       '(transport backend probe ready)))
+        (should (= (hash-table-count remote-connection-pool) 1))
+        (remote-connection-invalidate route t 'test)
+        (let ((remote-connection-progress-hook
+               (list (lambda (&rest _arguments)
+                       (error "Broken progress observer")))))
+          (should (remote-connection-ensure route context)))
+        (remote-connection-invalidate route t 'test)
+        (let ((remote-connection-progress-hook
+               (list (lambda (&rest _arguments)
+                       (signal 'quit nil))))
+              caught)
+          (condition-case nil
+              (remote-connection-ensure route context)
+            (quit (setq caught t)))
+          (should caught)
+          (should (zerop (hash-table-count remote-connection-pool)))
+          (should (zerop
+                   (hash-table-count remote-pipeline-runtime-pool))))))))
+
+(ert-deftest remote-connection-quit-cleans-partial-transport-and-progress ()
+  (remote-test-with-registry
+    (let (closed phases backend-started)
+      (remote-register-transport
+       "progress-first"
+       :connect (lambda (_stage endpoint _runtime)
+                  (remote-transport-result-create
+                   :endpoint endpoint :handle 'first-handle))
+       :disconnect (lambda (stage _runtime)
+                     (push (remote-stage-runtime-handle stage) closed)))
+      (remote-register-transport
+       "progress-quit"
+       :connect (lambda (_stage _endpoint _runtime)
+                  (signal 'quit nil)))
+      (remote-register-link-plugin
+       "quit-test"
+       :capabilities '(process-sync)
+       :project-file-name (lambda (_file _link _route) "/quit/")
+       :connect (lambda (_route _context)
+                  (setq backend-started t)))
+      (remote-register-target "lab" :trusted t)
+      (let* ((pipeline
+              (remote-register-pipeline
+               "lab" "ssh" "quit-test"
+               :stages '("progress-first" "progress-quit")))
+             (route
+              (remote-route-create
+               :target-id "lab" :pipeline-id (remote-pipeline-id pipeline)
+               :backend-id "quit-test" :capability 'process-sync
+               :adapter-id "process"))
+             (context
+              (remote-context-create
+               :target-id "lab" :localname "/work/"))
+             caught)
+        (let ((remote-connection-progress-hook
+               (list (lambda (_connection _route phase)
+                       (push phase phases)))))
+          (condition-case nil
+              (remote-connection-ensure route context)
+            (quit (setq caught t))))
+        (should caught)
+        (should-not backend-started)
+        (should (equal closed '(first-handle)))
+        (should (equal (nreverse phases) '(transport cancelled)))
+        (should (zerop (hash-table-count remote-connection-pool)))
+        (should (zerop
+                 (hash-table-count remote-pipeline-runtime-pool)))))))
 
 (ert-deftest remote-connection-open-has-framework-deadline ()
   (remote-test-with-registry
@@ -855,6 +1129,25 @@ returns, so this covers a different ownership window from backend cancellation."
         (remote-context-workspace-root context)
         "/fs:box:/home/remote/work/")))))
 
+(ert-deftest remote-context-selects-deepest-current-workspace ()
+  (remote-test-with-registry
+    (let* ((parent '((id . "parent") (path . "/srv/")))
+           (nested '((id . "nested") (path . "/srv/project/")))
+           (target (remote-register-target
+                    "lab" :trusted t
+                    :workspaces (list parent nested)))
+           (path "/fs:lab:/srv/project/main.c"))
+      (should (equal (remote-context-workspace-id (remote-context path))
+                     "nested"))
+      ;; A direct edit to the registered workspace must be visible on the
+      ;; next file query; nonlocal context selection has no stale TTL.
+      (setcdr (assq 'path nested) "/opt/project/")
+      (should (eq (remote-fs--workspace-for target
+                                            "/srv/project/main.c")
+                  parent))
+      (should (equal (remote-context-workspace-id (remote-context path))
+                     "parent")))))
+
 (ert-deftest remote-symlink-api-preserves-native-target-spelling ()
   (remote-test-with-registry
     (let* ((root (make-temp-file "remote-symlink-" t))
@@ -931,6 +1224,56 @@ returns, so this covers a different ownership window from backend cancellation."
       (setq default-directory "/ssh:box:/home/me/")
       (should (direnv--transport-connection-path-p default-directory))
       (should-not (direnv--directory)))))
+
+(ert-deftest remote-direnv-root-discovery-coalesces-and-invalidates ()
+  "Repeated root discovery must not cause repeated target RPCs."
+  (let ((direnv--envrc-root-cache (make-hash-table :test #'equal))
+        (direnv-envrc-root-cache-timeout 1.0)
+        (directory-calls 0)
+        (locate-calls 0)
+        (clock 100.0)
+        root)
+    (cl-letf (((symbol-function 'direnv--directory)
+               (lambda (&optional _path)
+                 (cl-incf directory-calls)
+                 "/fs:local:/tmp/project/"))
+              ((symbol-function 'float-time)
+               (lambda (&optional _value) clock))
+              ((symbol-function 'locate-dominating-file)
+               (lambda (_directory _name)
+                 (cl-incf locate-calls)
+                 root))
+              ((symbol-function 'remote-canonicalize-file-name)
+               #'identity))
+      (should-not (direnv--envrc-root "/fs:local:/tmp/project/main.c"))
+      (should-not (direnv--envrc-root "/fs:local:/tmp/project/main.c"))
+      (should (= directory-calls 1))
+      (should (= locate-calls 1))
+      (setq root "/fs:local:/tmp/project/")
+      (setq clock 102.0)
+      (should (equal (direnv--envrc-root
+                      "/fs:local:/tmp/project/main.c")
+                     root))
+      (should (= directory-calls 2))
+      (should (= locate-calls 2))
+      (setq root nil)
+      (direnv-invalidate-root-cache)
+      (should-not (direnv--envrc-root
+                   "/fs:local:/tmp/project/main.c"))
+      (should (= locate-calls 3)))))
+
+(ert-deftest remote-direnv-visiting-file-directory-is-lexical ()
+  "A visiting file has a known directory and needs no metadata probe."
+  (with-temp-buffer
+    (setq buffer-file-name "/tmp/project/main.c")
+    (cl-letf (((symbol-function 'direnv--transport-connection-path-p)
+               (lambda (_path) nil))
+              ((symbol-function 'remote-canonicalize-file-name)
+               #'identity)
+              ((symbol-function 'file-directory-p)
+               (lambda (_path)
+                 (ert-fail "Visiting-file root must not stat the file"))))
+      (should (equal (direnv--directory) "/tmp/project/")))))
 
 (ert-deftest remote-direnv-defers-all-discovery-while-tramp-is-busy ()
   (remote-test-with-registry
@@ -1110,6 +1453,44 @@ returns, so this covers a different ownership window from backend cancellation."
         (should
          (eq (plist-get backend-health :status) 'incompatible))))))
 
+(ert-deftest remote-workspace-process-prefers-owner-route-with-failover ()
+  "A terminal or task tries its workspace backend before another one."
+  (remote-test-with-registry
+    (dolist (plugin '("tramp-rpc" "tramp"))
+      (remote-register-link-plugin
+       plugin :capabilities '(process-sync)
+       :project-file-name
+       (lambda (_file _link _route) temporary-file-directory)))
+    (remote-register-target "box" :trusted t)
+    (remote-register-link "box" "ssh" '("tramp-rpc" "tramp"))
+    (remote-register-adapter
+     "test" :capabilities '(process-sync)
+     :preferences '((default . ("tramp-rpc" "tramp"))))
+    (let* ((context
+            (remote-context-create
+             :target-id "box" :localname "/work/"
+             :workspace-root "/fs:box:/work/"))
+           (remote-environment-inhibit t)
+           (remote-process-preferred-route
+            (seq-find
+             (lambda (route)
+               (equal (remote-route-backend-id route) "tramp"))
+             (remote-routes "test" 'process-sync context)))
+           attempts)
+      (should remote-process-preferred-route)
+      (should
+       (equal
+        (remote--call-with-process-route
+         "test" 'process-sync context nil
+         (lambda (route _directory _environment)
+           (push (remote-route-backend-id route) attempts)
+           (if (equal (remote-route-backend-id route) "tramp")
+               (signal 'remote-backend-incompatible
+                       '("injected backend failure"))
+             (remote-route-backend-id route))))
+        "tramp-rpc"))
+      (should (equal (nreverse attempts) '("tramp" "tramp-rpc"))))))
+
 (ert-deftest remote-connection-failure-cools-the-whole-pipeline ()
   (remote-test-with-registry
     (let ((attempts 0))
@@ -1165,6 +1546,36 @@ returns, so this covers a different ownership window from backend cancellation."
      '("ConnectTimeout=8" "ConnectionAttempts=1"))
     '("-o" "ConnectTimeout=8" "-o" "ConnectionAttempts=1"))))
 
+(ert-deftest remote-tramp-ssh-server-alive-defaults-respect-target-options ()
+  "Keepalives cover managed SSH unless the target explicitly overrides them."
+  (let ((remote-backend-tramp-ssh-server-alive-interval 15)
+        (remote-backend-tramp-ssh-server-alive-count-max 3)
+        (config '(:host "box")))
+    (cl-letf (((symbol-function 'remote-pipeline-effective-config)
+               (lambda (_pipeline) config))
+              ((symbol-function 'remote-transport-ssh-control-options)
+               (lambda (&optional _runtime) nil)))
+      (let ((options (remote-backend-tramp--ssh-options 'pipeline)))
+        (should (member "ServerAliveInterval=15" options))
+        (should (member "ServerAliveCountMax=3" options)))
+      (setq config
+            '(:host "box" :ssh-options
+                    ("serveraliveinterval=7" "ServerAliveCountMax=1")))
+      (let ((options (remote-backend-tramp--ssh-options 'pipeline)))
+        (should (member "serveraliveinterval=7" options))
+        (should (member "ServerAliveCountMax=1" options))
+        (should-not (member "ServerAliveInterval=15" options))
+        (should-not (member "ServerAliveCountMax=3" options)))
+      (setq config '(:host "box"))
+      (let ((remote-backend-tramp-ssh-server-alive-interval 0)
+            (remote-backend-tramp-ssh-server-alive-count-max nil))
+        (let ((options (remote-backend-tramp--ssh-options 'pipeline)))
+          (should (member "ServerAliveInterval=0" options))
+          (should-not (seq-some
+                       (lambda (option)
+                         (string-prefix-p "ServerAliveCountMax=" option))
+                       options)))))))
+
 (ert-deftest remote-tramp-rpc-local-relays-use-a-local-directory ()
   (let ((default-directory "/rpc:box:/work/")
         seen-directory)
@@ -1180,20 +1591,51 @@ returns, so this covers a different ownership window from backend cancellation."
         'relay)))
     (should (equal seen-directory temporary-file-directory))))
 
+(ert-deftest remote-tramp-rpc-controlmaster-path-stays-on-client ()
+  "The PTY socket path uses client HOME despite a target buffer context."
+  (let ((default-directory "/rpc:box:/work/")
+        (remote--buffer-base-process-environment
+         '("HOME=/Users/client" "PATH=/client/bin"))
+        (remote--buffer-base-exec-path '("/client/bin"))
+        (process-environment '("HOME=/home/target" "PATH=/target/bin"))
+        (exec-path '("/target/bin"))
+        observed)
+    (remote-backend-tramp-rpc--local-controlmaster-path-a
+     (lambda ()
+       (setq observed
+             (list (expand-file-name "~/.ssh/tramp-rpc/socket")
+                   default-directory (getenv "HOME") exec-path))))
+    (should
+     (equal observed
+            (list "/Users/client/.ssh/tramp-rpc/socket"
+                  temporary-file-directory "/Users/client"
+                  '("/client/bin"))))))
+
 (ert-deftest remote-tramp-rpc-encodes-large-process-environments ()
-  (skip-unless (require 'msgpack nil t))
-  (remote-backend-tramp-rpc-install)
-  (let* ((environment
-          (cl-loop for index below 78
-                   collect (cons (format "REMOTE_TEST_%02d" index)
-                                 (format "value-%02d" index))))
-         (encoded (msgpack-encode environment))
-         (msgpack-map-type 'alist)
-         (msgpack-key-type 'string)
-         (decoded (msgpack-read-from-string encoded)))
-    (should (= (length decoded) 78))
-    (should (equal (cdr (assoc "REMOTE_TEST_00" decoded)) "value-00"))
-    (should (equal (cdr (assoc "REMOTE_TEST_77" decoded)) "value-77"))))
+  ;; The -Q contract suite does not call `package-initialize'.  Load the
+  ;; installed msgpack source explicitly so this compatibility check runs
+  ;; when the dependency is present instead of silently skipping it.
+  (let ((load-path
+         (append
+          (cl-remove-if-not
+           #'file-directory-p
+           (file-expand-wildcards
+            (expand-file-name "elpa/msgpack-*" user-emacs-directory)
+            t))
+          load-path)))
+    (skip-unless (require 'msgpack nil t))
+    (remote-backend-tramp-rpc-install)
+    (let* ((environment
+            (cl-loop for index below 78
+                     collect (cons (format "REMOTE_TEST_%02d" index)
+                                   (format "value-%02d" index))))
+           (encoded (msgpack-encode environment))
+           (msgpack-map-type 'alist)
+           (msgpack-key-type 'string)
+           (decoded (msgpack-read-from-string encoded)))
+      (should (= (length decoded) 78))
+      (should (equal (cdr (assoc "REMOTE_TEST_00" decoded)) "value-00"))
+      (should (equal (cdr (assoc "REMOTE_TEST_77" decoded)) "value-77")))))
 
 (ert-deftest remote-project-file-name-accepts-explicit-link ()
   (remote-test-with-registry
@@ -1366,7 +1808,7 @@ names in tree consumers such as Treemacs."
         (when (file-directory-p root)
           (delete-directory root))))))
 
-(ert-deftest remote-fs-install-restores-the-outer-tramp-dispatcher ()
+(ert-deftest remote-fs-install-restores-fast-direct-dispatch ()
   (remote-test-with-registry
     ;; Reproduce daemon/reload startup with TRAMP already loaded but its
     ;; top-level file-name handler temporarily removed.
@@ -1375,8 +1817,268 @@ names in tree consumers such as Treemacs."
       (should
        (eq (find-file-name-handler
             "/fs:local:/tmp/" 'file-directory-p)
+           #'remote-fs--direct-file-name-handler))
+      (should
+       (eq (find-file-name-handler
+            "/fs:local:/tmp/" 'expand-file-name)
+           #'remote-fs--direct-file-name-handler))
+      (should
+       (eq (find-file-name-handler
+            "/fs:local:/tmp/" 'unhandled-file-name-directory)
            #'tramp-file-name-handler))
+      (remote-fs-install)
+      (should
+       (= 1 (seq-count
+             (lambda (item)
+               (eq (cdr item) #'remote-fs--direct-file-name-handler))
+             file-name-handler-alist)))
       (should (file-directory-p "/fs:local:/tmp/")))))
+
+(ert-deftest remote-fs-direct-expansion-preserves-logical-paths ()
+  (remote-test-with-registry
+    (remote-fs-install)
+    (should (equal (expand-file-name "/fs:local:/tmp/a/../b")
+                   "/fs:local:/tmp/b"))
+    (should (equal (expand-file-name "/fs:local:/tmp//.git/")
+                   "/fs:local:/tmp/.git/"))
+    (let ((default-directory "/fs:local:/tmp/work/"))
+      (should (equal (expand-file-name "child")
+                     "/fs:local:/tmp/work/child"))
+      (should (equal (expand-file-name "../other")
+                     "/fs:local:/tmp/other"))
+      (should (equal (expand-file-name "/tmp/native.txt")
+                     "/tmp/native.txt")))))
+
+(ert-deftest remote-fs-direct-dispatch-defers-unknown-operations-to-tramp ()
+  (let (seen)
+    (cl-letf (((symbol-function 'tramp-file-name-handler)
+               (lambda (operation &rest args)
+                 (setq seen (cons operation args))
+                 'upstream)))
+      (should
+       (eq (remote-fs--direct-file-name-handler
+            'future-emacs-operation "/fs:local:/tmp/")
+           'upstream)))
+    (should (equal seen '(future-emacs-operation "/fs:local:/tmp/")))))
+
+(ert-deftest remote-fs-direct-dispatch-routes-remote-metadata ()
+  (let (seen)
+    (cl-letf (((symbol-function 'remote-fs-file-name-handler)
+               (lambda (operation &rest args)
+                 (setq seen (cons operation args))
+                 'routed))
+              ((symbol-function 'tramp-file-name-handler)
+               (lambda (&rest _args)
+                 (ert-fail "Remote metadata reentered TRAMP parsing"))))
+      (should
+       (eq (remote-fs--direct-file-name-handler
+            'file-exists-p "/fs:lab:/tmp/")
+           'routed)))
+    (should (equal seen '(file-exists-p "/fs:lab:/tmp/")))))
+
+(ert-deftest remote-fs-preferred-route-cache-observes-live-changes ()
+  (remote-test-with-registry
+    (let* ((target
+            (remote-register-target
+             "lab" :trusted t
+             :preferences '((default . ("fast" "slow")))))
+           (_fast
+            (remote-register-link-plugin
+             "fast" :capabilities '(metadata)
+             :available-p (lambda (_link _context) t)))
+           (slow-available t)
+           (_slow
+            (remote-register-link-plugin
+             "slow" :capabilities '(metadata)
+             :available-p (lambda (_link _context) slow-available)))
+           (link (remote-register-link "lab" "ssh" '("fast" "slow")))
+           (context
+            (remote-context-create
+             :target-id "lab" :localname "/tmp/"))
+           (original-routes (symbol-function 'remote-routes))
+           (calls 0))
+      (cl-letf (((symbol-function 'remote-routes)
+                 (lambda (&rest args)
+                   (cl-incf calls)
+                   (apply original-routes args))))
+        (should
+         (equal (mapcar #'remote-route-link-plugin-id
+                        (remote-fs--routes "emacs-file" 'metadata context))
+                '("fast" "slow")))
+        (should (= calls 1))
+        (remote-fs--routes "emacs-file" 'metadata context)
+        (should (= calls 1))
+        ;; Editing an existing preference list must invalidate its snapshot.
+        (setcar (cdr (assq 'default (remote-target-preferences target)))
+                "slow")
+        (should
+         (equal (remote-route-link-plugin-id
+                 (car (remote-fs--routes
+                       "emacs-file" 'metadata context)))
+                "slow"))
+        (should (= calls 2))
+        (setcar (cdr (assq 'default (remote-target-preferences target)))
+                "fast")
+        (remote-fs--routes "emacs-file" 'metadata context)
+        (should (= calls 3))
+        (puthash
+         (remote--backend-health-key link "fast" 'metadata)
+         (list :status 'failed :failed-at (float-time))
+         remote-route-health)
+        (should
+         (equal (remote-route-link-plugin-id
+                 (car (remote-fs--routes
+                       "emacs-file" 'metadata context)))
+                "slow"))
+        (should (= calls 4))
+        (remhash (remote--backend-health-key link "fast" 'metadata)
+                 remote-route-health)
+        (remote-fs--routes "emacs-file" 'metadata context)
+        (should (= calls 5))
+        ;; Availability may change inside a registered plugin closure.
+        (setq slow-available nil)
+        (should
+         (equal (mapcar #'remote-route-link-plugin-id
+                        (remote-fs--routes
+                         "emacs-file" 'metadata context))
+                '("fast")))
+        (should (= calls 6))
+        (setq slow-available t)
+        (remote-fs--routes "emacs-file" 'metadata context)
+        (should (= calls 7))
+        (remote-register-link-plugin
+         "fast" :capabilities '(metadata)
+         :available-p (lambda (_link _context) nil))
+        (should
+         (equal (mapcar #'remote-route-link-plugin-id
+                        (remote-fs--routes
+                         "emacs-file" 'metadata context))
+                '("slow")))
+        (should (= calls 8))))))
+
+(ert-deftest remote-fs-preferred-route-cache-observes-adapter-and-context-edits ()
+  "Snapshot checks must notice in-place preference edits on every owner."
+  (remote-test-with-registry
+    (let* ((_target (remote-register-target "lab" :trusted t))
+           (adapter
+            (remote-register-adapter
+             "emacs-file" :capabilities '(metadata)
+             :preferences '((default . ("fast" "slow")))))
+           (_fast
+            (remote-register-link-plugin
+             "fast" :capabilities '(metadata)
+             :available-p (lambda (_link _context) t)))
+           (_slow
+            (remote-register-link-plugin
+             "slow" :capabilities '(metadata)
+             :available-p (lambda (_link _context) t)))
+           (_link (remote-register-link "lab" "ssh" '("fast" "slow")))
+           (context (remote-context-create
+                     :target-id "lab" :localname "/tmp/"))
+           (original-routes (symbol-function 'remote-routes))
+           (calls 0))
+      (cl-letf (((symbol-function 'remote-routes)
+                 (lambda (&rest args)
+                   (cl-incf calls)
+                   (apply original-routes args))))
+        (should (equal (remote-route-link-plugin-id
+                        (car (remote-fs--routes
+                              "emacs-file" 'metadata context)))
+                       "fast"))
+        (remote-fs--routes "emacs-file" 'metadata context)
+        (should (= calls 1))
+        (setcar (cdr (assq 'default (remote-adapter-preferences adapter)))
+                "slow")
+        (should (equal (remote-route-link-plugin-id
+                        (car (remote-fs--routes
+                              "emacs-file" 'metadata context)))
+                       "slow"))
+        (should (= calls 2))
+        (setcar (cdr (assq 'default (remote-adapter-preferences adapter)))
+                "fast")
+        (remote-fs--routes "emacs-file" 'metadata context)
+        (should (= calls 3))
+        (setf (remote-context-source context)
+              '((preferences . ((default . ("slow" "fast"))))))
+        (should (equal (remote-route-link-plugin-id
+                        (car (remote-fs--routes
+                              "emacs-file" 'metadata context)))
+                       "slow"))
+        (should (= calls 4))
+        (setcar
+         (cdr (assq 'default
+                    (alist-get 'preferences (remote-context-source context))))
+         "fast")
+        (should (equal (remote-route-link-plugin-id
+                        (car (remote-fs--routes
+                              "emacs-file" 'metadata context)))
+                       "fast"))
+        (should (= calls 5))))))
+
+(ert-deftest remote-fs-context-cache-observes-new-remote-workspace ()
+  (remote-test-with-registry
+    (let* ((target (remote-register-target "lab" :trusted t))
+           (path "/fs:lab:/work/a.el")
+           (first (remote-fs--context-for-file path)))
+      (should-not (remote-context-workspace-id first))
+      (should (gethash path remote-fs-context-cache))
+      (setf (remote-target-workspaces target)
+            '(((id . "main") (path . "/work/"))))
+      (let ((updated (remote-fs--context-for-file path)))
+        (should (equal (remote-context-workspace-id updated) "main"))
+        (should (equal (remote-context-workspace-root updated)
+                       "/fs:lab:/work/"))))))
+
+(ert-deftest remote-backend-tramp-prefix-follows-active-endpoint-and-hops ()
+  (remote-test-with-registry
+    (let* ((link (remote-link-create
+                  :id "lab/ssh" :target-id "lab"
+                  :config '(:host "fallback")))
+           (endpoint (remote-endpoint-create :host "first"))
+           (remote-current-pipeline-runtime
+            (remote-pipeline-runtime-create
+             :pipeline-id "lab/ssh" :endpoint endpoint))
+           (effective-config (symbol-function 'remote-pipeline-effective-config))
+           (config-calls 0))
+      (cl-letf (((symbol-function 'remote-pipeline-effective-config)
+                 (lambda (&rest args)
+                   (cl-incf config-calls)
+                   (apply effective-config args))))
+        (should (equal (remote-backend-tramp-file-name
+                        "/tmp/one" link "rpc")
+                       "/rpc:first:/tmp/one"))
+        (should (equal (remote-backend-tramp-file-name
+                        "/tmp/two" link "rpc")
+                       "/rpc:first:/tmp/two"))
+        (should (= config-calls 1))
+        (setf (remote-endpoint-host endpoint) "second")
+        (should (equal (remote-backend-tramp-file-name
+                        "/tmp/three" link "rpc")
+                       "/rpc:second:/tmp/three"))
+        (should (= config-calls 2))
+        (aset (remote-endpoint-host endpoint) 0 ?n)
+        (should (equal (remote-backend-tramp-file-name
+                        "/tmp/mutated" link "rpc")
+                       "/rpc:necond:/tmp/mutated"))
+        (should (= config-calls 3))
+        (setf (remote-endpoint-host endpoint) nil)
+        (should (equal (remote-backend-tramp-file-name
+                        "/tmp/fallback" link "rpc")
+                       "/rpc:fallback:/tmp/fallback"))
+        (should (= config-calls 4))
+        (aset (plist-get (remote-link-config link) :host) 0 ?t)
+        (should (equal (remote-backend-tramp-file-name
+                        "/tmp/config-mutated" link "rpc")
+                       "/rpc:tallback:/tmp/config-mutated"))
+        (should (= config-calls 5))
+        (setf (remote-link-config link)
+              (list :host "fallback"
+                    :hops (list (remote-endpoint-create :host "jump")
+                                (remote-endpoint-create :host "second"))))
+        (should (equal (remote-backend-tramp-file-name
+                        "/tmp/four" link "rpc")
+                       "/ssh:jump|rpc:second:/tmp/four"))
+        (should (= config-calls 6))))))
 
 (ert-deftest remote-process-and-executable-use-logical-context ()
   (remote-test-with-registry
@@ -1399,6 +2101,31 @@ names in tree consumers such as Treemacs."
            (shell (remote-executable-find "sh")))
       (should (file-name-absolute-p shell))
       (should (equal (remote-executable-find shell) shell)))))
+
+(ert-deftest remote-rpc-executable-probe-preserves-path-and-missing-result ()
+  "The target shell result is framed, and unsupported output falls back."
+  (let ((calls 0))
+    (cl-letf (((symbol-function 'process-file)
+               (lambda (_program _infile _destination _display
+                        &rest _args)
+                 (cl-incf calls)
+                 (insert "/target/my tools/server\0")
+                 0)))
+      (should (equal (remote--rpc-executable-find "server")
+                     '(t . "/target/my tools/server")))
+      (should-not (remote--rpc-executable-find "relative/server"))
+      (should (= calls 1))))
+  (cl-letf (((symbol-function 'process-file)
+             (lambda (&rest _) 1)))
+    (should (equal (remote--rpc-executable-find "missing") '(t))))
+  (cl-letf (((symbol-function 'process-file)
+             (lambda (&rest _)
+               (insert "unexpected shell output")
+               0)))
+    (should-not (remote--rpc-executable-find "server")))
+  (cl-letf (((symbol-function 'process-file)
+             (lambda (&rest _) (error "no POSIX shell"))))
+    (should-not (remote--rpc-executable-find "server"))))
 
 (ert-deftest remote-process-file-projects-logical-file-arguments ()
   "INFILE and stderr paths follow the route just like default-directory."
@@ -1522,7 +2249,7 @@ names in tree consumers such as Treemacs."
                  :command command)))
              ((symbol-function
               'remote-backend-tramp-direct-async-command)
-              (lambda (_route command _environment directory)
+              (lambda (_route command _environment directory &optional _tty)
                 (should (equal directory "/tmp/"))
                 (append '("/usr/bin/ssh" "-T" "box") command)))
              ((symbol-function 'make-process)
@@ -1547,6 +2274,60 @@ names in tree consumers such as Treemacs."
         (kill-buffer stdout))
       (when (buffer-live-p stderr)
         (kill-buffer stderr)))))
+
+(ert-deftest remote-standard-tramp-pty-spawns-client-ssh ()
+  "A target PTY must use direct SSH without a TRAMP process handler."
+  (let* ((route
+          (remote-route-create
+           :target-id "box" :pipeline-id "box/ssh"
+           :backend-id "tramp" :capability 'pty :adapter-id "process"))
+         (context
+          (remote-context-create
+           :target-id "box" :localname "/tmp/"
+           :workspace-root "/fs:box:/tmp/"))
+         (execution
+          (remote-backend-execution-create
+           :route route :context context
+           :command '("/bin/sh" "-l")))
+         seen)
+    (cl-letf
+        (((symbol-function 'remote-backend-tramp-direct-async-command)
+          (lambda (_route _command _environment directory tty)
+            (setq seen (list directory tty))
+            '("/usr/bin/ssh" "-tt" "box" "exec /bin/sh -l"))))
+      (let* ((plan
+              (remote-backend-tramp-prepare-process
+               execution '(:command ("/bin/sh" "-l")
+                           :connection-type pty)
+               '(("TERM" . "xterm-256color"))))
+             (arguments (remote-backend-process-plan-arguments plan)))
+        (should (equal seen '("/tmp/" t)))
+        (should (equal (plist-get arguments :command)
+                       '("/usr/bin/ssh" "-tt" "box"
+                         "exec /bin/sh -l")))
+        (should (eq (plist-get arguments :file-handler) nil))
+        (should (equal (remote-backend-process-plan-default-directory plan)
+                       temporary-file-directory))
+        (should (plist-get (remote-backend-process-plan-metadata plan)
+                           :pty))))))
+
+(ert-deftest remote-ssh-pty-connect-skips-tramp-file-session ()
+  "A terminal-only backend must not warm TRAMP's file connection."
+  (let ((route
+         (remote-route-create
+          :target-id "box" :pipeline-id "box/ssh"
+          :backend-id "ssh-pty" :capability 'pty :adapter-id "process")))
+    (should (equal (remote-backend-capabilities
+                    (remote-get-backend "ssh-pty"))
+                   '(pty)))
+    (cl-letf (((symbol-function 'remote-backend-tramp--pipeline-ssh-parts)
+               (lambda (_route) '(destination nil nil)))
+              ((symbol-function 'remote-client-executable-find)
+               (lambda (_name) "/usr/bin/ssh"))
+              ((symbol-function 'file-attributes)
+               (lambda (&rest _arguments)
+                 (ert-fail "Direct PTY connection opened a TRAMP file"))))
+      (should (eq (remote-backend-ssh-pty-connect route nil) 'ssh-pty)))))
 
 (ert-deftest remote-tramp-rpc-process-frames-a-process-stderr-destination ()
   "tramp-rpc must not silently merge native `:stderr PROCESS' into stdout."
@@ -1890,6 +2671,71 @@ names in tree consumers such as Treemacs."
       (should
        (equal (car (remote-path-candidates))
               (car (remote-path-facts-path facts)))))))
+
+(ert-deftest remote-path-native-facts-keep-emacs-process-environment ()
+  "A native target inherits Emacs' PATH even if its login shell resets it."
+  (remote-test-with-registry
+    (let* ((context (remote-context "/fs:local:/tmp/"))
+           (remote-path-facts-cache (make-hash-table :test #'equal))
+           (route (remote-route-create
+                   :target-id "local" :link-plugin-id "native"))
+           (output
+            (concat remote-path--probe-marker
+                    "Darwin\0arm64\0/bin/zsh\0/home/login\0/usr/bin:/bin\0")))
+      (cl-letf (((symbol-function 'remote-exec)
+                 (lambda (&rest _arguments)
+                   (remote-exec-result-create
+                    :status 0 :stdout output :route route)))
+                ((symbol-function 'remote-client-process-environment)
+                 (lambda ()
+                   '("PATH=/tmp/venv/bin:/usr/bin"
+                     "HOME=/home/client" "SHELL=/bin/fish"))))
+        (let ((facts (remote-path--probe-sync context)))
+          (should (equal (remote-path-facts-path facts)
+                         '("/tmp/venv/bin" "/usr/bin")))
+          (should (equal (remote-path-facts-home facts) "/home/client"))
+          (should (equal (remote-path-facts-shell facts) "/bin/fish")))))))
+
+(ert-deftest remote-path-deferred-facts-stay-within-recovery-attempt ()
+  "Background recovery reuses facts without publishing stale global state."
+  (remote-test-with-registry
+    (let* ((context
+            (remote-context
+             (remote-canonicalize-file-name temporary-file-directory)))
+           (remote-background-defer-commit t)
+           (remote-path-facts-cache (make-hash-table :test #'equal))
+           (remote-path--deferred-cache (make-hash-table :test #'equal))
+           (first (remote-path-probe context))
+           (second (remote-path-probe context)))
+      (should (eq first second))
+      (should-not (gethash "local" remote-path-facts-cache))
+      (remote-path-invalidate "local")
+      (should-not (gethash "local" remote-path--deferred-cache))
+      (should-not (eq first (remote-path-probe context)))
+      (should-not (gethash "local" remote-path-facts-cache)))))
+
+(ert-deftest remote-path-deferred-probe-rejects-changed-target-epoch ()
+  "A probe completed after invalidation cannot enter recovery's cache."
+  (remote-test-with-registry
+    (let* ((context
+            (remote-context
+             (remote-canonicalize-file-name temporary-file-directory)))
+           (remote-background-target-epochs (make-hash-table :test #'equal))
+           (remote-background--current-job
+            (remote-background-job-create
+             :target-id "local" :epoch 0))
+           (remote-background-defer-commit t)
+           (remote-path-facts-cache (make-hash-table :test #'equal))
+           (remote-path--deferred-cache (make-hash-table :test #'equal))
+           (parse (symbol-function 'remote-path--parse-probe-output)))
+      (cl-letf (((symbol-function 'remote-path--parse-probe-output)
+                 (lambda (output)
+                   (remote-background-invalidate-target "local")
+                   (funcall parse output))))
+        (should-error (remote-path-probe context)
+                      :type 'remote-connection-cancelled))
+      (should-not (gethash "local" remote-path-facts-cache))
+      (should-not (gethash "local" remote-path--deferred-cache)))))
 
 (ert-deftest remote-path-probe-script-uses-posix-login-shell-path ()
   "PATH comes from the target's login shell, past its startup output."

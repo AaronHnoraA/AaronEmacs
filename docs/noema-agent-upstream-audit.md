@@ -1,5 +1,17 @@
 # agent-shell / ACP 审计与包管理迁移（2026-09-15）
 
+## 2026-09-26 升级
+
+应用户要求把 ACP 工具链和内化的 gptel 升到当时的官方 main：acp.el 0.15.2
+（`242cef63`）、shell-maker 0.97.3（`f448a74a`）、agent-shell 0.79.2
+（`55d71485`）、gptel 0.9.9.6（`ec25a41f`，原快照与 `fc696363` 全树逐字相同，
+故整树替换）。升级前逐一核对 Noema、Magent、本配置和测试调用的 81 个
+agent-shell/acp/shell-maker 定义与 42 个 gptel 定义在新版本中都仍存在，
+`agent-shell--on-request`、`--make-acp-client`、`--start`、`agent-shell-cwd`、
+`--resolve-path` 的签名不变，acp.el 仍以 `:file-handler` 启动进程。Magent 带本地
+集成改动、codex-cli/claude-code-ide 只作参考源码，不在本次范围。下文是
+2026-09-15 迁移时的记录。
+
 ## 当前结果：已按用户要求迁出
 
 agent-shell 0.70.1、acp.el 0.13.1、shell-maker 0.96.1 已由 package-vc

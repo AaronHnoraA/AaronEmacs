@@ -30,27 +30,134 @@
 ;; Install missing dependencies only; normal startup does no network access.
 ;; Migration does not upgrade versions or touch currently running sessions.
 (my/package-ensure-vc 'acp "https://github.com/xenodium/acp.el"
-                      "7d5c16ebcf2af86aa0f14ad9ae0ce45df4e8c8a5")
+                      "242cef63d76cc1073485847f67a21f6d8406d158")
 (my/package-ensure-vc 'shell-maker "https://github.com/xenodium/shell-maker"
-                      "bb5e3aef17686c1c859c366eb83831b0046dc75a")
+                      "f448a74a8eded23aa42f8d60a41c5d8d3a183d07")
 (my/package-ensure-vc 'agent-shell "https://github.com/xenodium/agent-shell"
-                      "6a83589393fb67725f288d08d6f12d136564db0e")
+                      "55d7148505da2433a30b1228092e17b0775ffa25")
 
+;;; ── Agent placement: every agent-shell session, local or remote ─────────
+;;
+;; An ACP agent runs where its workspace lives.  This is the one host boundary
+;; for all agent-shell entry points (Noema Runs, the popup pool, a bare
+;; `M-x agent-shell'), and it treats local as target `local':
+;;
+;;   process   acp.el starts the agent with `:file-handler' from
+;;             `default-directory'.  A client-accessible directory spawns it
+;;             here; a logical /fs:TARGET: directory routes `make-process'
+;;             through the Remote framework to TARGET, and agent-shell's
+;;             `executable-find' check resolves the agent on TARGET's PATH.
+;;   paths     ACP carries target-native paths.  The resolver below maps
+;;             Emacs names to them and back into the session's target.
+
+(declare-function remote-canonicalize-file-name "remote-fs" (file-name &optional directory))
 (declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
+(declare-function remote-file-local-name "remote-fs" (file-name))
+(declare-function remote-file-name-target "remote-fs" (file-name))
+(declare-function remote-make-file-name "remote-fs" (target-id localname))
+(defvar agent-shell-path-resolver-function)
+(defvar noema-agent-acp-process-directory-function)
+(defvar noema-agent-acp-agent-file-function)
 
-(defun my/agent-shell-native-directory (directory)
-  "Project logical local DIRECTORY before native agent-shell uses it.
-This also covers plain `agent-shell', without a Noema Run or popup."
-  (if (not (string-prefix-p "/fs:" directory))
-      directory
-    (let ((client (and (fboundp 'remote-client-file-name)
-                       (remote-client-file-name directory))))
-      (unless (and client (not (string-prefix-p "/fs:" client))
-                   (not (file-remote-p client)))
-        (user-error "Agent directory is not accessible to a local process: %s" directory))
-      client)))
+(defun my/agent-shell-emacs-file-name (logical)
+  "Return the Emacs spelling of LOGICAL: native when this machine shares it."
+  (or (remote-client-file-name logical) logical))
 
-(defvar agent-shell--transcript-file)
+(defun my/agent-shell-process-directory (directory)
+  "Return the directory an agent process for DIRECTORY starts in.
+The workspace keeps one logical identity; the Remote framework decides whether
+the process runs here or on the directory's target.  An unreachable directory
+is an error: shell-maker would otherwise quietly start the agent in the
+local home directory, on the wrong machine."
+  (let ((process (file-name-as-directory
+                  (my/agent-shell-emacs-file-name
+                   (remote-canonicalize-file-name (expand-file-name directory))))))
+    (unless (condition-case nil (file-directory-p process) (error nil))
+      (user-error "Agent workspace is not reachable: %s" process))
+    process))
+
+(defun my/agent-shell-resolve-path (path)
+  "Map PATH across the ACP boundary in either direction.
+An Emacs name becomes the target-native path the agent sees.  A native path
+from the agent is placed on the session's target (the current buffer's), and
+comes back in its Emacs spelling.  On target `local' both are the identity."
+  (if (not (and (stringp path) (file-name-absolute-p path)))
+      path
+    (let* ((logical (remote-canonicalize-file-name path))
+           (native (remote-file-local-name logical)))
+      (if (not (equal native path))
+          native
+        (my/agent-shell-emacs-file-name
+         (remote-make-file-name
+          (remote-file-name-target default-directory) path))))))
+
+(defun my/agent-shell-agent-file-name (file session)
+  "Return FILE as SESSION's agent opens it, or nil when it cannot.
+SESSION nil is an agent on this machine.  The agent reaches FILE only when
+both live on the same target; the path is then FILE's native name there."
+  (let* ((logical (remote-canonicalize-file-name (expand-file-name file)))
+         (agent-target
+          (remote-file-name-target
+           (if session
+               (buffer-local-value 'default-directory session)
+             temporary-file-directory))))
+    (when (equal (remote-file-name-target logical) agent-target)
+      (remote-file-local-name logical))))
+
+(declare-function remote-context "remote-fs" (&optional path))
+(declare-function remote-environment-ensure "remote-environment"
+                  (&optional context force callback))
+(declare-function remote-context-target-id "remote-core" (context))
+(defvar remote-buffer-environment)
+
+(defvar my/agent-shell--lookup-target nil
+  "Target whose environment the most recent agent client was resolved in.
+agent-shell kills the shell buffer before reporting a missing executable, so
+the report cannot ask that buffer.")
+
+(defun my/agent-shell-apply-workspace-environment (&rest _)
+  "Give the agent its workspace environment before the client starts.
+The capsule is the one a source buffer of the same workspace gets: host path
+profiles, the target environment and project providers such as direnv.  The
+agent executable is looked up, and its process started, with that PATH on
+target `local' exactly as on a remote target; Emacs's global PATH is never
+the source.  Resolution failures are reported, not fatal."
+  (setq my/agent-shell--lookup-target
+        (ignore-errors
+          (remote-context-target-id (remote-context default-directory))))
+  ;; Only an agent this machine spawns natively reads its environment from
+  ;; this buffer.  A routed agent gets the target capsule from the process
+  ;; route and `exec-path' handler, while the buffer keeps doing client work
+  ;; -- agent-shell's caches and history expand `~' -- so projecting the
+  ;; target's HOME here would point those at the target's home on this Mac.
+  (unless (or (bound-and-true-p remote-buffer-environment)
+              (not (remote-client-file-name
+                    (remote-canonicalize-file-name default-directory))))
+    (condition-case error
+        (remote-environment-ensure (remote-context default-directory))
+      (error
+       (message "Agent environment for %s unavailable: %s"
+                (abbreviate-file-name default-directory)
+                (error-message-string error))))))
+
+(defun my/agent-shell-missing-executable-a (message)
+  "Name the target whose environment MESSAGE's executable was looked up in."
+  (let ((target my/agent-shell--lookup-target))
+    (if target
+        (format "%s\n[Remote] Looked up on target `%s' with its workspace environment (PATH, direnv); install it there or add it to that environment."
+                message target)
+      message)))
+
+(defun my/agent-shell-in-session-buffer-a (orig &rest args)
+  "Run agent-shell's ACP request handler ORIG with ARGS in its own session.
+acp.el dispatches from a timer, so the current buffer is arbitrary; paths the
+agent sends must resolve against the session's target."
+  (let ((buffer (map-elt (plist-get args :state) :buffer)))
+    (if (buffer-live-p buffer)
+        (with-current-buffer buffer (apply orig args))
+      (apply orig args))))
+
+(defvar agent-shell--transcript-file)(defvar agent-shell--transcript-file)
 (defvar shell-maker-prompt-before-killing-buffer)
 
 (defun my/agent-shell-disable-transcripts ()
@@ -68,8 +175,22 @@ This also covers plain `agent-shell', without a Noema Run or popup."
       (when (derived-mode-p 'agent-shell-mode)
         (my/agent-shell-disable-transcripts))))
   ;; CWD is used for both process creation and the asynchronous session/new
-  ;; request. Keep project discovery, but never serialize /fs:local: to ACP.
-  (advice-add 'agent-shell-cwd :filter-return #'my/agent-shell-native-directory))
+  ;; request; the resolver turns it into the agent's native path.
+  (advice-add 'agent-shell-cwd :filter-return #'my/agent-shell-process-directory)
+  (setq agent-shell-path-resolver-function #'my/agent-shell-resolve-path)
+  (advice-add 'agent-shell--on-request :around #'my/agent-shell-in-session-buffer-a)
+  ;; Every client (and agent-shell's early executable check) is made in the
+  ;; agent's own buffer; give that buffer its workspace environment first.
+  (advice-add 'agent-shell--make-acp-client :before
+              #'my/agent-shell-apply-workspace-environment)
+  (advice-add 'agent-shell--make-missing-executable-error :filter-return
+              #'my/agent-shell-missing-executable-a))
+
+(with-eval-after-load 'noema-agent-acp
+  (setq noema-agent-acp-process-directory-function
+        #'my/agent-shell-process-directory
+        noema-agent-acp-agent-file-function
+        #'my/agent-shell-agent-file-name))
 
 (defvar agent-shell-opencode-acp-command)
 
@@ -81,18 +202,26 @@ See docs/opencode-acp-recovery.md for provenance and the offline smoke test."
   :type 'file
   :group 'ai)
 
-(defun my/agent-shell-use-official-opencode ()
-  "Prefer the validated executable for the default OpenCode ACP command.
-Do not modify provider settings, authentication, PATH or a custom command."
-  (when (and (boundp 'agent-shell-opencode-acp-command)
-             (equal agent-shell-opencode-acp-command '("opencode" "acp"))
-             (stringp my/agent-shell-opencode-executable)
-             (file-executable-p my/agent-shell-opencode-executable))
-    (setq agent-shell-opencode-acp-command
-          (list (expand-file-name my/agent-shell-opencode-executable) "acp"))))
+(defun my/agent-shell-use-official-opencode (arguments)
+  "Prefer the validated OpenCode executable for a client-side agent.
+ARGUMENTS are `agent-shell--make-acp-client' keywords.  The pinned binary is a
+file on this machine, so it replaces the default command only when the agent
+runs here; elsewhere the target's own `opencode' is resolved from its PATH.
+Provider settings, authentication, PATH and a custom command stay untouched."
+  (if (and (equal (plist-get arguments :command) "opencode")
+           (equal (plist-get arguments :command-params) '("acp"))
+           (equal (bound-and-true-p agent-shell-opencode-acp-command) '("opencode" "acp"))
+           (stringp my/agent-shell-opencode-executable)
+           (remote-client-file-name (remote-canonicalize-file-name default-directory))
+           (file-executable-p my/agent-shell-opencode-executable))
+      (plist-put (copy-sequence arguments) :command
+                 (expand-file-name my/agent-shell-opencode-executable))
+    arguments))
 
-(with-eval-after-load 'agent-shell-opencode
-  (my/agent-shell-use-official-opencode))
+(with-eval-after-load 'agent-shell
+  (advice-add 'agent-shell--make-acp-client :filter-args
+              (lambda (args) (my/agent-shell-use-official-opencode args))
+              '((name . my/agent-shell-use-official-opencode))))
 
 (autoload 'noema "noema" nil t)
 (autoload 'noema-compose "noema-compose" nil t)

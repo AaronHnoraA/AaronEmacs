@@ -3205,6 +3205,7 @@ board must draw the whole plan, not its first cell."
            (second (generate-new-buffer " *noema-doc-b*"))
            (idle (generate-new-buffer " *noema-agent-idle*"))
            (busy (generate-new-buffer " *noema-agent-busy*"))
+           (manual (generate-new-buffer " *noema-agent-manual*"))
            (documents (list first second))
            (noema-pi-auto-start nil)
            stopped cancelled)
@@ -3212,7 +3213,7 @@ board must draw the whole plan, not its first cell."
           (cl-letf (((symbol-function 'noema-pi-router--document-root)
                      (lambda (buffer) (and (memq buffer documents) (buffer-live-p buffer) root)))
                     ((symbol-function 'noema-agent-acp-agent-buffer-p)
-                     (lambda (buffer) (and (memq buffer (list idle busy)) (buffer-live-p buffer))))
+                     (lambda (buffer) (and (memq buffer (list idle busy manual)) (buffer-live-p buffer))))
                     ((symbol-function 'noema-agent-worker-buffer-busy-p) (lambda (buffer) (eq buffer busy)))
                     ((symbol-function 'noema-agent-worker-stop-buffer)
                      (lambda (buffer) (push buffer stopped) t))
@@ -3221,8 +3222,11 @@ board must draw the whole plan, not its first cell."
                     ((symbol-function 'run-at-time)
                      (lambda (_time _repeat function &rest args)
                        (if (eq function #'noema-pi-router--stop-if-unused) 'pending-stop (apply function args)))))
-            (dolist (buffer (list idle busy))
-              (with-current-buffer buffer (setq-local noema-agent-acp-session-root root)))
+            (dolist (buffer (list idle busy manual))
+              (with-current-buffer buffer
+                (setq-local noema-agent-acp-session-root root
+                            noema-agent-acp-session-origin
+                            (if (eq buffer manual) 'manual 'run))))
             (mapc #'noema-pi-router-note-visit documents)
             (kill-buffer first)
             (should-not (gethash root noema-pi-router--stop-timers))
@@ -3230,7 +3234,8 @@ board must draw the whole plan, not its first cell."
             (should (eq (gethash root noema-pi-router--stop-timers) 'pending-stop))
             (setq documents nil)
             (noema-pi-router--stop-if-unused root)
-            ;; Idle agents stop now; the one running a Run is left alone.
+            ;; Idle agents stop now; the one running a Run is left alone, and
+            ;; a session a person opened is never stopped automatically.
             (should (equal stopped (list idle)))
             (should-not cancelled)
             (should (gethash root noema-pi-router--closing))
@@ -3240,7 +3245,54 @@ board must draw the whole plan, not its first cell."
         (remhash root noema-pi-router--closing)
         (remhash root noema-pi-router--stop-timers)
         (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
-              (list first second idle busy))))))
+              (list first second idle busy manual))))))
+
+(ert-deftest noema-agent-worker-sweep-spares-used-visible-and-personal-sessions ()
+  "The warm sweep stops only idle, hidden, background sessions.
+Idle time counts from the buffer's last change, not from its last display."
+  (let* ((root "/tmp/noema-sweep-project/")
+         (buffers (mapcar (lambda (name) (generate-new-buffer (format " *sweep-%s*" name)))
+                          '(stale active manual visible)))
+         (stale (nth 0 buffers)) (active (nth 1 buffers))
+         (manual (nth 2 buffers)) (visible (nth 3 buffers))
+         (noema-agent-worker-warm-idle-seconds 60)
+         stopped)
+    (unwind-protect
+        (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p)
+                   (lambda (buffer) (and (memq buffer buffers) (buffer-live-p buffer))))
+                  ((symbol-function 'noema-agent-worker--resumable-buffer-p)
+                   (lambda (buffer) (memq buffer buffers)))
+                  ((symbol-function 'noema-agent-worker-stop-buffer)
+                   (lambda (buffer) (push buffer stopped) t))
+                  ((symbol-function 'get-buffer-window)
+                   (lambda (buffer &optional _all) (and (eq buffer visible) 'window))))
+          (dolist (buffer buffers)
+            (with-current-buffer buffer
+              (setq-local noema-agent-acp-session-root root
+                          noema-agent-acp-session-origin (if (eq buffer manual) 'foreign 'run)
+                          noema-agent-acp-last-used-at (- (float-time) 3600))
+              (noema-agent-acp--track-activity-h)
+              ;; `--track-activity-h' keeps an existing timestamp.
+              (should (< noema-agent-acp-last-used-at (- (float-time) 3000)))))
+          ;; Streaming output or typed input counts as use.
+          (with-current-buffer active (insert "agent output"))
+          (noema-agent-worker-sweep-warm-buffers)
+          (should (equal stopped (list stale))))
+      (mapc #'kill-buffer buffers))))
+
+(ert-deftest noema-agent-worker-stop-buffer-never-cuts-an-interactive-turn ()
+  (let ((buffer (generate-new-buffer " *noema-agent-turn*"))
+        shutdown)
+    (unwind-protect
+        (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p)
+                   (lambda (candidate) (eq candidate buffer)))
+                  ((symbol-function 'noema-agent-acp-shutdown)
+                   (lambda (_) (setq shutdown t))))
+          (with-current-buffer buffer (setq-local shell-maker--busy t))
+          (should-not (noema-agent-worker-stop-buffer buffer))
+          (should-not shutdown)
+          (should (buffer-live-p buffer)))
+      (kill-buffer buffer))))
 
 (ert-deftest noema-agent-acp-mark-session-buffer-retires-an-older-holder ()
   (let ((old (generate-new-buffer " *noema-agent-old*"))

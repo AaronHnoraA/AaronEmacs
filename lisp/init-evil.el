@@ -507,7 +507,7 @@ Emacs state keep their local behavior."
     "sm" 'evil-show-marks
     "sr" 'evil-show-registers
     "si" 'imenu
-    "sp" 'consult-ripgrep
+    "sp" 'my/project-ripgrep
     "ss" 'consult-line
 
     ;; project

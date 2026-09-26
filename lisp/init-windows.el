@@ -681,20 +681,30 @@ available to explicit buffer-switching commands."
     (setq dirvish-attributes
           '(vc-state git-msg file-size subtree-state collapse file-time)))
 
-  ;; Dirvish normally starts a second Emacs to collect attributes.  In a
-  ;; remote Dired buffer that child inherits the remote default-directory and
-  ;; tries to execute the local `dirvish-emacs-bin' on the target.  Skip that
-  ;; optional fast path for every remote namespace; Dired/TRAMP already
-  ;; supplied the listing and Dirvish can initialize from it directly.
-  (defun my/dirvish-dir-data-async-remote-a
-      (function directory buffer &optional inhibit-setup)
-    "Avoid spawning Dirvish's local metadata helper on remote DIRECTORY."
-    (if (file-remote-p directory)
-        (when (buffer-live-p buffer)
-          (with-current-buffer buffer
-            (dirvish-prop :vc-backend 0)
-            (dirvish-data-for-dir directory buffer inhibit-setup)))
-      (funcall function directory buffer inhibit-setup)))
+  ;; Dirvish normally starts a second Emacs to collect attributes.  A target
+  ;; buffer can send that helper to the wrong machine; a logical local buffer
+  ;; can race its sentinel against Dirvish setup.  Skip the helper for both
+  ;; forms of Remote identity and use the listing Dired already supplied.
+  (defun my/dirvish-dir-data-async-remote-a (function &rest args)
+    "Avoid Dirvish's helper for a logical Remote Dired buffer.
+Dirvish may pass the target's native directory to this private function,
+including for `/fs:local:'; inspect the owning buffer as well.  Unknown
+upstream call shapes delegate unchanged."
+    (let ((directory (car args))
+          (buffer (cadr args)))
+      (if (and (<= 2 (length args) 3)
+               (stringp directory)
+               (bufferp buffer)
+               (or (file-remote-p directory)
+                   (and (buffer-live-p buffer)
+                        (with-current-buffer buffer
+                          (and (stringp default-directory)
+                               (string-prefix-p "/fs:" default-directory))))))
+          (when (buffer-live-p buffer)
+            (with-current-buffer buffer
+              (dirvish-prop :vc-backend 0)
+              (dirvish-data-for-dir directory buffer (nth 2 args))))
+        (apply function args))))
 
   (advice-remove
    'dirvish--dir-data-async #'my/dirvish-dir-data-async-remote-a)

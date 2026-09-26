@@ -33,11 +33,19 @@
 
 (defvar remote-background-defer-commit nil)
 
+(defvar remote-path--deferred-cache nil
+  "Attempt-local host facts while background recovery defers global commits.")
+
 (defun remote-path-invalidate (&optional target-id)
   "Invalidate probed path facts, optionally only for TARGET-ID."
   (if target-id
-      (remhash (remote-normalize-id target-id) remote-path-facts-cache)
-    (clrhash remote-path-facts-cache)))
+      (let ((target-id (remote-normalize-id target-id)))
+        (remhash target-id remote-path-facts-cache)
+        (when (hash-table-p remote-path--deferred-cache)
+          (remhash target-id remote-path--deferred-cache)))
+    (clrhash remote-path-facts-cache)
+    (when (hash-table-p remote-path--deferred-cache)
+      (clrhash remote-path--deferred-cache))))
 
 (defconst remote-path--probe-marker
   "__EMACS_REMOTE_FACTS_V1__\0"
@@ -120,6 +128,11 @@ probe protocol."
 (defun remote-path--probe-sync (context)
   "Probe target facts synchronously for CONTEXT."
   (let* ((remote-environment-inhibit t)
+         ;; The native target shares this Emacs process.  Capture its base
+         ;; environment before `remote-exec' enters a target-side binding;
+         ;; `sh -lc' may replace PATH with a login-shell value even though a
+         ;; native `make-process' inherits Emacs' current client PATH.
+         (client-environment (remote-client-process-environment))
          (result
           (remote-exec
            "sh"
@@ -135,20 +148,35 @@ probe protocol."
                (remote-exec-result-stdout result))
               (error "Remote PATH probe returned no framed facts for %s"
                      (remote-context-target-id context))))
+         (native-p
+          (equal (remote-route-link-plugin-id
+                  (remote-exec-result-route result))
+                 "native"))
          (target-id (remote-context-target-id context))
          (facts
           (remote-path-facts-create
            :target-id target-id
            :system (remote-path--normalize-fact (nth 0 fields))
            :architecture (remote-path--normalize-fact (nth 1 fields))
-           :shell (nth 2 fields)
-           :home (nth 3 fields)
-           :path (split-string (or (nth 4 fields) "")
+           :shell (or (and native-p
+                           (getenv-internal "SHELL" client-environment))
+                      (nth 2 fields))
+           :home (or (and native-p
+                          (getenv-internal "HOME" client-environment))
+                     (nth 3 fields))
+           :path (split-string (or (and native-p
+                                        (getenv-internal
+                                         "PATH" client-environment))
+                                   (nth 4 fields) "")
                                path-separator t)
            :source (remote-route-link-plugin-id
                     (remote-exec-result-route result))
            :probed-at (current-time))))
-    (unless remote-background-defer-commit
+    (if remote-background-defer-commit
+        (progn
+          (remote-background-assert-current-epoch)
+          (when (hash-table-p remote-path--deferred-cache)
+            (puthash target-id facts remote-path--deferred-cache)))
       (remote-path--commit-facts facts))
     facts))
 
@@ -179,7 +207,13 @@ and invoke CALLBACK with the facts without blocking the caller."
            (t (remote-context))))
          (target-id (remote-context-target-id context))
          (cached (and (not force)
-                      (gethash target-id remote-path-facts-cache)))
+                      (or (gethash target-id remote-path-facts-cache)
+                          (and remote-background-defer-commit
+                               (hash-table-p remote-path--deferred-cache)
+                               (progn
+                                 (remote-background-assert-current-epoch)
+                                 (gethash target-id
+                                          remote-path--deferred-cache))))))
          (buffer (current-buffer)))
     (if callback
         (progn

@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Notebook markdown cell
+# key: jmd
+# --
+`(my/snippet-jupyter-prefix)` %% [markdown] id=`(my/snippet-jupyter-cell-id)`
+`(my/snippet-jupyter-prefix)` $0

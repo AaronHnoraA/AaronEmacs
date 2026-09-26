@@ -10,4 +10,13 @@
     (should (equal (nth 1 (symbol-function command)) "noema-capability-ui")))
   (should-not (featurep 'noema-capability-ui)))
 
+(ert-deftest noema-startup-registers-research-workspace-lazily ()
+  (dolist (entry '((noema-project-overview . "noema-project-overview")
+                   (noema-research-workflow-preview . "noema-research-workflow")
+                   (noema-history-search . "noema-history-search")
+                   (noema-findings . "noema-findings")))
+    (should (commandp (car entry)))
+    (should (autoloadp (symbol-function (car entry))))
+    (should (equal (nth 1 (symbol-function (car entry))) (cdr entry)))))
+
 ;;; noema-startup-tests.el ends here

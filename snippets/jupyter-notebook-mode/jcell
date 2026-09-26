@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Notebook code cell
+# key: jcell
+# --
+`(my/snippet-jupyter-prefix)` %% id=`(my/snippet-jupyter-cell-id)`
+$0

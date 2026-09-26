@@ -217,6 +217,14 @@ priority and do not claim operating-system or Emacs event-loop preemption.")
   :type 'integer
   :group 'remote)
 
+(defcustom remote-log-read-query-successes nil
+  "Record every successful retry-safe metadata and directory read.
+These high-frequency successes can displace connection and failure events
+from the bounded route log.  Enable this while tracing individual file
+operations; failure and lifecycle events are always recorded."
+  :type 'boolean
+  :group 'remote)
+
 (defcustom remote-route-failure-cooldown 30
   "Seconds a failed link is de-prioritized."
   :type 'number
@@ -247,14 +255,19 @@ Framework code projects a target environment by `let'-binding the ordinary
 `process-environment' and `exec-path'.  In a buffer that has no buffer-local
 binding for them, that also replaces their default value, so a later client
 helper would resolve SSH or a protocol proxy against the target's PATH.
-Pinning the pre-projection values keeps `remote-client-process-environment'
-and `remote-client-exec-path' answering for this machine."
+Pinning the client values keeps `remote-client-process-environment' and
+`remote-client-exec-path' answering for this machine.  They are read through
+those functions rather than taken from the current bindings, because a
+consumer such as `python-shell-with-environment' may already have bound a
+target projection before the framework is entered."
   (declare (indent 0) (debug t))
+  ;; Pin through the client boundary, not the values current at entry: a
+  ;; consumer may already have bound a target projection around this call.
   `(let ((remote--client-process-environment
           (or remote--client-process-environment
-              (copy-sequence process-environment)))
+              (remote-client-process-environment)))
          (remote--client-exec-path
-          (or remote--client-exec-path (copy-sequence exec-path))))
+          (or remote--client-exec-path (remote-client-exec-path))))
      ,@body))
 
 (defun remote-client-process-environment ()
@@ -262,11 +275,17 @@ and `remote-client-exec-path' answering for this machine."
 
 Target buffers intentionally project target-native HOME, PATH, and other
 variables.  Client helpers such as SSH, local protocol proxies, and UI
-processes must use this boundary instead of inheriting those target values."
+processes must use this boundary instead of inheriting those target values.
+
+The last fallback is the value outside every dynamic binding.  A consumer
+that `let'-binds a target projection -- `python-shell-with-environment',
+compilation and test runners -- and then creates a process from a buffer with
+no local binding has also changed `default-value' for that extent, so only
+`default-toplevel-value' still names this machine's environment."
   (copy-sequence
    (or remote--buffer-base-process-environment
        remote--client-process-environment
-       (default-value 'process-environment))))
+       (default-toplevel-value 'process-environment))))
 
 (defvar remote--client-exec-path-snapshot nil
   "Last client `exec-path' seen without foreign target directories.")

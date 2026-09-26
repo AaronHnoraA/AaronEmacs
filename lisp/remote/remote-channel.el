@@ -55,6 +55,12 @@ itself recursively.")
 (defvar remote-channel-failure-hook nil
   "Hook run with a failed `remote-channel' after its handle terminates.")
 
+(defvar remote-channel-opened-hook nil
+  "Hook run with a newly registered `remote-channel'.")
+
+(defvar remote-channel-closed-hook nil
+  "Hook run with a `remote-channel' removed from the live registry.")
+
 (defun remote-channel--finish (channel state)
   "Move CHANNEL to terminal STATE and remove it from the live registry."
   (when (remote-channel-p channel)
@@ -62,7 +68,10 @@ itself recursively.")
     ;; caused by that close.
     (unless (eq (remote-channel-state channel) 'closed)
       (setf (remote-channel-state channel) state))
-    (remhash (remote-channel-id channel) remote-channels))
+    (when (eq (gethash (remote-channel-id channel) remote-channels)
+              channel)
+      (remhash (remote-channel-id channel) remote-channels)
+      (run-hook-with-args 'remote-channel-closed-hook channel)))
   channel)
 
 (defun remote-channel--watch-process (process channel &optional forward)
@@ -124,6 +133,8 @@ When FORWARD is non-nil, preserve its failed/closed state as well."
       (when-let* ((process (remote-forward-handle handle))
                   ((processp process)))
         (remote-channel--watch-process process channel handle))))
+     (when (eq (gethash id remote-channels) channel)
+       (run-hook-with-args 'remote-channel-opened-hook channel))
      channel)))
 
 (cl-defun remote-channel-adopt
@@ -509,7 +520,8 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
          (metadata
           (plist-put
            (copy-sequence metadata) :direction direction))
-         forward descriptor recovery-remote-endpoint)
+         forward descriptor recovery-remote-endpoint
+         recovery-local-endpoint)
     (unless function
       (signal
        'remote-backend-unsupported
@@ -525,6 +537,13 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
               (or (remote-forward-remote-endpoint forward)
                   remote-endpoint)
             remote-endpoint))
+    ;; A dynamic local listener receives its port only after the backend
+    ;; opens it.  Recover the assigned address so clients can keep using it.
+    (setq recovery-local-endpoint
+          (if (eq direction 'local)
+              (or (remote-forward-local-endpoint forward)
+                  local-endpoint)
+            local-endpoint))
     (setq descriptor
           (remote-channel--adopt
            'forward route context forward nil
@@ -533,7 +552,7 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
      (remote-channel-recovery-function descriptor)
      (lambda ()
        (remote-channel--port-forward
-        capability direction recovery-remote-endpoint local-endpoint
+        capability direction recovery-remote-endpoint recovery-local-endpoint
         :context context :adapter adapter :pipeline pipeline
         :metadata metadata :register nil
         :stable-endpoint stable-endpoint)))
@@ -554,7 +573,7 @@ PARAMETERS also accepts `:remote-context', `:remote-adapter', and
          :recover
          (lambda (_resource _owner)
            (remote-channel--port-forward
-            capability direction recovery-remote-endpoint local-endpoint
+            capability direction recovery-remote-endpoint recovery-local-endpoint
             :context context :adapter adapter :pipeline pipeline
             :metadata metadata :register nil
             :stable-endpoint stable-endpoint))
@@ -713,7 +732,10 @@ generation and returns a replacement group."
   "Close routed process or forward CHANNEL."
   (when-let* ((descriptor (remote-channel-of channel)))
     (setf (remote-channel-state descriptor) 'closed)
-    (remhash (remote-channel-id descriptor) remote-channels))
+    (when (eq (gethash (remote-channel-id descriptor) remote-channels)
+              descriptor)
+      (remhash (remote-channel-id descriptor) remote-channels)
+      (run-hook-with-args 'remote-channel-closed-hook descriptor)))
   (cond
    ((remote-channel-p channel)
     (remote-close-channel (remote-channel-handle channel)))

@@ -346,3 +346,90 @@
 
 (provide 'init-jupyter-board-tests)
 ;;; init-jupyter-board-tests.el ends here
+
+(ert-deftest my/jupyter-server-url-normalization-keeps-proxy-prefix ()
+  (let ((parsed (my/noema-jupyter-server--parse-url
+                 "https://lab.example/user/alice/lab/tree/a.ipynb?token=a%2Bb#x")))
+    (should (equal (plist-get parsed :url) "https://lab.example/user/alice/"))
+    (should (equal (plist-get parsed :token) "a+b")))
+  (should (equal (plist-get (my/noema-jupyter-server--parse-url
+                            "http://[::1]:8888/tree") :url)
+                 "http://[::1]:8888/"))
+  (dolist (url '("file:///tmp/test" "http://user:pass@example/" "http://example:70000/"))
+    (should-error (my/noema-jupyter-server--parse-url url))))
+
+(ert-deftest my/jupyter-server-save-keeps-credentials-out-of-persistent-config ()
+  (let ((my/noema-jupyter-servers nil)
+        (my/noema-jupyter-server--credentials (make-hash-table :test #'equal))
+        saved)
+    (cl-letf (((symbol-function 'config-set)
+               (lambda (_ value &rest _) (setq saved value my/noema-jupyter-servers value)))
+              ((symbol-function 'auth-source-search) (lambda (&rest _) nil)))
+      (let ((entry (my/noema-jupyter-server-save
+                    '(:id "lab" :url "http://localhost:8888/lab?token=private"
+                      :target "local" :auth token))))
+        (should-not (string-match-p "private" (prin1-to-string saved)))
+        (should (equal (my/noema-jupyter-server--secret entry) "private"))
+        ;; Another route to the same host must never inherit the credential.
+        (should-not (my/noema-jupyter-server--secret
+                     (plist-put (copy-sequence entry) :target "another-target")))))))
+
+(ert-deftest my/jupyter-server-edit-releases-old-route-and-credential ()
+  (let* ((old '(:id "lab" :url "http://old.example/" :target "local" :auth token))
+         (my/noema-jupyter-servers (list old))
+         (my/noema-jupyter-server--credentials (make-hash-table :test #'equal))
+         released)
+    (puthash (my/noema-jupyter-server--credential-key old) "old-secret"
+             my/noema-jupyter-server--credentials)
+    (cl-letf (((symbol-function 'config-set)
+               (lambda (_ value &rest _) (setq my/noema-jupyter-servers value)))
+              ((symbol-function 'my/noema-jupyter-server--close-resource)
+               (lambda (entry id reason) (push (list entry id reason) released))))
+      (my/noema-jupyter-server-save
+       '(:id "lab" :url "http://new.example/" :target "local" :auth token))
+      (should (= (length my/noema-jupyter-servers) 1))
+      (should (equal (caar released) old))
+      (should (= (hash-table-count my/noema-jupyter-server--credentials) 0))
+      (my/noema-jupyter-server-remove "lab")
+      (should-not my/noema-jupyter-servers)
+      (should (= (length released) 2)))))
+
+(ert-deftest my/jupyter-server-catalog-redacts-legacy-url-tokens ()
+  (let ((my/noema-jupyter-servers
+         '((:id "lab" :url "https://lab.example/lab?token=legacy-secret"))))
+    (cl-letf (((symbol-function 'my/noema-jupyter--defer) #'funcall))
+      (let ((payload (my/noema-jupyter-server--list nil nil)))
+        (should-not (string-match-p "legacy-secret" (prin1-to-string payload)))
+        (should (equal (alist-get 'url (car (alist-get 'servers payload)))
+                       "https://lab.example/"))))))
+
+(ert-deftest my/jupyter-board-server-render-is-passive-and-redacts-secrets ()
+  (let ((my/noema-jupyter-servers
+         '((:id "lab" :name "Research" :url "https://lab.example/lab?token=private"
+            :target "cluster" :auth token))))
+    (with-temp-buffer
+      (my/jupyter-board-mode)
+      (setq my/jupyter-board--target (remote-get-target "local")
+            my/jupyter-board--servers '(((id . "lab") (error . "secret-in-upstream-error"))))
+      (cl-letf (((symbol-function 'my/noema-api-call)
+                 (lambda (&rest _) (ert-fail "Rendering must not connect"))))
+        (my/jupyter-board--render))
+      (let ((text (buffer-string)))
+        (should (string-match-p "Add Server URL" text))
+        (should (string-match-p "Remote target cluster" text))
+        (should (string-match-p "Unavailable" text))
+        (should-not (string-match-p "private\\|secret-in-upstream-error" text))))))
+
+(ert-deftest my/jupyter-board-server-check-ignores-out-of-order-responses ()
+  (with-temp-buffer
+    (my/jupyter-board-mode)
+    (setq my/jupyter-board--target (remote-get-target "local"))
+    (let (callbacks)
+      (cl-letf (((symbol-function 'my/noema-api-call)
+                 (lambda (_channel _args callback &rest _) (push callback callbacks))))
+        (my/jupyter-board-server-check)
+        (my/jupyter-board-server-check)
+        (funcall (car callbacks) '((servers . (((id . "new"))))) nil)
+        (funcall (cadr callbacks) '((servers . (((id . "old"))))) nil)
+        (should (equal (alist-get 'id (car my/jupyter-board--servers)) "new"))
+        (should-not my/jupyter-board--server-loading)))))

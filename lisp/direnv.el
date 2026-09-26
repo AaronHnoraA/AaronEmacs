@@ -47,6 +47,14 @@ unbounded subprocess loop."
   :type 'number
   :group 'direnv)
 
+(defcustom direnv-envrc-root-cache-timeout 1.0
+  "Seconds to reuse a `.envrc' root discovery result.
+The short lifetime bounds changes made outside Emacs while coalescing repeated
+project and LSP checks on high-latency targets.  Explicit direnv commands and
+saved `.envrc' buffers invalidate the cache immediately."
+  :type 'number
+  :group 'direnv)
+
 (defvar direnv--hooks
   '(before-hack-local-variables-hook)
   "Hooks used while `direnv-mode' is enabled.")
@@ -59,6 +67,8 @@ unbounded subprocess loop."
   "Map envrc roots to their most recent fingerprinted export failure.")
 (defvar direnv--export-waiters (make-hash-table :test #'equal)
   "Map an envrc root to `(BUFFER . CALLBACKS)' export waiters.")
+(defvar direnv--envrc-root-cache (make-hash-table :test #'equal)
+  "Short-lived root discoveries keyed by the path and its file/dir role.")
 (defvar direnv--reported-selection nil
   "Last direnv state reported for the selected buffer.
 The value is `(TARGET ROOT LINK-PLUGIN LINK-ID)', or nil outside an envrc
@@ -125,21 +135,59 @@ trigger project or `.envrc' discovery while a connection is being established."
 
 (defun direnv--directory (&optional path)
   "Return canonical logical directory for PATH."
-  (let ((path (or path buffer-file-name default-directory)))
+  (let ((visiting-file (and (null path) buffer-file-name))
+        (path (or path buffer-file-name default-directory)))
     (unless (direnv--transport-connection-path-p path)
       (when-let* ((canonical
                    (and path (remote-canonicalize-file-name path))))
         (file-name-as-directory
-         (if (file-directory-p canonical)
-             canonical
-           (file-name-directory canonical)))))))
+         (if visiting-file
+             (file-name-directory canonical)
+           (if (or (string-suffix-p "/" canonical)
+                 (file-directory-p canonical))
+               canonical
+             (file-name-directory canonical))))))))
 
 (defun direnv--envrc-root (&optional path)
   "Return logical workspace root containing PATH's `.envrc'."
-  (when-let* ((directory (direnv--directory path)))
-    (when-let* ((root (locate-dominating-file directory ".envrc")))
-      (file-name-as-directory
-       (remote-canonicalize-file-name root)))))
+  (let* ((source (or path buffer-file-name default-directory))
+         (key (and source
+                   (cons (if (and (null path) buffer-file-name)
+                             'visiting-file
+                           'path)
+                         source)))
+         (cached (and key (gethash key direnv--envrc-root-cache)))
+         (now (float-time)))
+    (if (and cached
+             (numberp direnv-envrc-root-cache-timeout)
+             (> direnv-envrc-root-cache-timeout 0)
+             (< (- now (car cached)) direnv-envrc-root-cache-timeout))
+        (cdr cached)
+      (let ((root
+             (when-let* ((directory (direnv--directory path))
+                         (found (locate-dominating-file
+                                 directory ".envrc")))
+               (file-name-as-directory
+                (remote-canonicalize-file-name found)))))
+        (when key
+          (when (>= (hash-table-count direnv--envrc-root-cache) 512)
+            (clrhash direnv--envrc-root-cache))
+          (puthash key (cons (float-time) root)
+                   direnv--envrc-root-cache))
+        root))))
+
+(defun direnv-invalidate-root-cache (&rest _)
+  "Discard cached `.envrc' discoveries after a connection or file change."
+  (clrhash direnv--envrc-root-cache))
+
+(defun direnv--invalidate-root-cache-after-save ()
+  "Refresh root discovery promptly after saving an `.envrc' buffer."
+  (when (and buffer-file-name
+             (string-match-p "/\\.envrc\\'" buffer-file-name))
+    (direnv-invalidate-root-cache)))
+
+(add-hook 'remote-connection-closed-hook #'direnv-invalidate-root-cache)
+(add-hook 'after-save-hook #'direnv--invalidate-root-cache-after-save)
 
 (defun direnv--fingerprint (context)
   "Return `.envrc' state for CONTEXT."
@@ -570,6 +618,8 @@ workspace."
   "Refresh the current buffer from DIRECTORY's direnv environment.
 FORCE-SUMMARY reports the selected target and source."
   (interactive)
+  (when (called-interactively-p 'interactive)
+    (direnv-invalidate-root-cache))
   (let* ((context (remote-context (or directory default-directory)))
          (environment (remote-environment-ensure context t)))
     (when (or force-summary direnv-always-show-summary)
@@ -582,6 +632,7 @@ FORCE-SUMMARY reports the selected target and source."
   "Refresh the current buffer for FILE-NAME.
 With FORCE-SUMMARY, report the selected target and source."
   (interactive)
+  (direnv-invalidate-root-cache)
   (direnv-update-directory-environment
    (direnv--directory file-name) force-summary))
 
@@ -618,18 +669,17 @@ even looking for `.envrc' would otherwise be a forbidden reentrant call."
            ((direnv--transport-busy-p)
             (direnv--schedule-buffer-refresh
              buffer direnv-transport-busy-retry-delay))
-           ((direnv--envrc-root)
-            (let* ((root (direnv--envrc-root))
-                   (context (remote-context root))
-                   (fingerprint (direnv--fingerprint context)))
-              (if (direnv--cached-export root fingerprint)
-                  (progn
-                    (remote-environment-ensure context)
-                    (setq direnv--last-error nil))
-                (direnv--start-export
-                 context root fingerprint buffer))))
            (t
-            (direnv-clear-environment)))
+            (if-let* ((root (direnv--envrc-root)))
+                (let* ((context (remote-context root))
+                       (fingerprint (direnv--fingerprint context)))
+                  (if (direnv--cached-export root fingerprint)
+                      (progn
+                        (remote-environment-ensure context)
+                        (setq direnv--last-error nil))
+                    (direnv--start-export
+                     context root fingerprint buffer)))
+              (direnv-clear-environment))))
         (error
          ;; Discovery (`locate-dominating-file') is itself remote I/O, so its
          ;; failures belong inside the timer boundary too.  Selection changes
@@ -651,6 +701,7 @@ even looking for `.envrc' would otherwise be a forbidden reentrant call."
 (defun direnv-allow (&optional directory)
   "Run `direnv allow' for DIRECTORY on its logical target."
   (interactive)
+  (direnv-invalidate-root-cache)
   (let* ((root (or (direnv--envrc-root directory)
                    (user-error "No .envrc controls this directory")))
          (context (remote-context root))

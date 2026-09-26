@@ -10,6 +10,33 @@ buffer/file-name 哲学，以 `/fs:TARGET:/path` 表示稳定的逻辑文件身�
 (require 'remote-framework)
 ```
 
+构建和测试命令通过 `remote-task-run` 在 owning workspace 的 target 上运行：
+
+```elisp
+(remote-task-run '("make" "test") :workspace workspace :display t)
+(remote-task-register "test" '("make" "test"))
+(remote-task-run-profile "test" :workspace workspace :display t)
+```
+
+在 Remote 面板的文件夹行按 `!` 可以输入一次性 shell 命令；源码 buffer 中也可
+运行 `M-x remote-task-run-command`。输出是 Compilation buffer，`next-error`
+会把目标机的绝对路径映射为同一 `/fs:` target 的源码。`M-x remote-task-cancel`
+取消运行中的任务；关闭输出 buffer 或 workspace 也会取消。每次运行有独立结果
+和退出码。目标需有 POSIX `sh`：它先上报 PID，再以原始 argv `exec` 目标命令，
+不会重新解析 argv 中的 shell 元字符；交互式命令另由 `sh -c` 解释。
+目标支持 `setsid -w` 时，每个任务有独立进程组；取消会向整组发终止信号，
+因此普通子进程也会退出。其他目标回退为只终止顶层 PID；自行脱离进程组的
+后台进程仍须由任务自行清理。随后清理本地 process；若启动后立刻取消，
+编辑器立即返回，最多异步等待五秒取得 PID。任务不会在断线后自动重跑。
+目标侧信号也异步等待确认，最多五秒；若传输不可用或确认失败，输出窗口明确显示
+`Cancellation unconfirmed: target may still run`，不能将 relay 关闭当作目标任务退出。
+若传输在任务运行中失效，Compilation 会显示 `interrupted, remote result unknown`，
+不会把 relay 的退出码 0 误作目标命令成功；workspace 恢复后，在任务输出窗口按
+`g` 即可用相同命令、工作目录和环境重新运行。运行中的任务须先取消，避免重复构建。
+真实 SSH 验收命令是
+`REMOTE_TASK_E2E_TARGET=host make remote-task-live-smoke`；RPC 断线故障注入是
+`REMOTE_TASK_E2E_TARGET=host make remote-task-disconnect-smoke`。
+
 `init-remote.el` 只负责配置集成、UI 和启用 `remote-mode`。
 
 外部 helper 与 Emacs 的统一控制面是 `remote-gateway`。它复用本框架的 channel、
@@ -39,10 +66,11 @@ API、route 选择、资源所有权和验收标准；差异只在 pipeline/back
 
 框架实现与后续扩展必须保持以下约束：
 
-1. 进入 remote framework 的 `buffer-file-name`、`default-directory`、workspace
-   root 和 LSP 文档身份使用 `/fs:`，不保存 `/ssh:`、`/rpc:` 等临时传输形式。
-   普通本地 `find-file` 仍保留原生路径；只有 workspace/project/LSP 等框架边界
-   才把本地路径规范化为 `/fs:local:`。
+1. 框架拥有的 workspace root 与资源身份使用 `/fs:`。经 Remote 面板打开的文件，
+   其 `buffer-file-name` 和 `default-directory` 保留 `/fs:`；直接经 `/ssh:` 或
+   `/rpc:` 打开的文件保留 TRAMP buffer 身份，但 target、workspace、process、
+   LSP 所有权解析到同一个逻辑 `/fs:` workspace。普通本地 `find-file` 保留原生
+   路径；workspace/project/LSP 边界将其 target context 规范为 `/fs:local:`。
 2. `fs://TARGET/path` 是对外 URI；`/fs:TARGET:/path` 是 Emacs 内部 file name。
 3. `local` 是普通 target 的特例。框架内的 `/fs:local:/tmp/a` 在 native backend
    边界投影为 `/tmp/a`；框架外已有的原生本地 buffer 不被强制改名。
@@ -480,7 +508,9 @@ handler，这个 API 只用于 JDTLS/Pyright 等版本化工具包。
 `remote-service-provision-directory` 在这个传输边界之上统一目录型工具的供给流程：
 trusted-target 门禁、客户端打包、版本缓存、目标暂存解压、ready probe、不完整缓存修复、
 原子发布和失败清理都属于 Remote。语言层只提供源目录、版本化安装目录、ready 文件，
-以及可选的轻量 `prepare`（例如生成 Pyright launcher 或给 JDTLS launcher 加执行位）；
+以及可选的轻量 `prepare`（例如生成 Pyright launcher 或给 JDTLS launcher 加执行位）。
+可选的 `validate` 在已有缓存、暂存目录和发布后检查版本或内容摘要；即使 ready 文件
+仍可执行但内容损坏，也会先验证新暂存目录再替换该版本目录。语言层
 不再各自维护上传/安装脚本。
 
 逻辑 `file-notify-add-watch` 返回稳定 Remote descriptor。目标端有 `inotifywait` 时，
@@ -505,14 +535,26 @@ handler 接管。
 - 路由执行期间投影 target 环境，会连 `process-environment` / `exec-path` 的
   default value 一起改写。`remote--call-with-process-route` 与
   `remote-fs--call-routed` 先用 `remote-with-client-environment` 固定投影前的
-  客户端值，client boundary 因此在整个 backend 调用链里保持有效。
+  客户端值，client boundary 因此在整个 backend 调用链里保持有效。固定值通过
+  `remote-client-process-environment` / `remote-client-exec-path` 取得，而不是
+  直接复制进入时的绑定：consumer 可能在进入框架前就已绑定了 target 投影。
+  `python-shell-with-environment` 在 `run-python` 外层这样做，旧实现因此把目标
+  的 `HOME=/home/…` 固定成“客户端”值，tramp-rpc 的 SSH ControlPath 落到不存在的
+  目录，远端 REPL 一启动即退出。`remote-client-process-environment` 的最后兜底也
+  是 `default-toplevel-value`：没有 buffer-local 绑定时，consumer 的 `let` 会连
+  `default-value` 一起改写，只有顶层值仍然代表本机。
 - 第三方 consumer 也会在框架之外重绑 `exec-path`。Citre 的远端可执行查找就在
   `find-file-hook` 里把整条 `exec-path` 换成 target 目录，而 backend probe 正好
   在那层下面运行。`remote-client-exec-path` 因此丢弃属于别的文件系统的目录，并
   在什么都不剩时回答上一次可用的客户端路径——空搜索路径从来不是事实。
 
-`exec-path` 这个 handler operation 回答的是 **target-native localname**，与
-TRAMP 自己的 handler 一致；调用方（`executable-find` 的 REMOTE 分支、Citre 的
+`exec-path` 这个 handler operation 先由 backend 回答，再把 workspace
+environment capsule 的 PATH（target PATH 加 direnv 等 provider）叠在最前面，
+与 `remote-executable-find`、路由进程看到的是同一份列表；backend 独有的项
+（TRAMP 附加的 `default-directory`、本机的 `exec-directory`）保留在后面。只靠
+TRAMP 的登录 PATH 时，第三方 `(executable-find cmd t)`（agent-shell、acp.el、
+lsp-mode 自带 client）会漏掉项目环境提供的全部工具。
+它回答的是 **target-native localname**，与 TRAMP 自己的 handler 一致；调用方（`executable-find` 的 REMOTE 分支、Citre 的
 远端查找等）自己补远端前缀。把结果投影成 `/fs:` 名字会让它们拿到
 `/fs:TARGET:/fs:TARGET:/bin`，其下每次探测都是一次注定失败的往返。
 
@@ -544,6 +586,26 @@ Eglot 得到显式 process factory，因此不会因为 project root 是远端�
 `sh -c "stty raw; …"` 再包装本地 Node。proxy 的端口文件按 Eglot 实例隔离并保存在
 客户端；xwidget 直接访问本机 loopback，不需要远端 Node、远端部署或 port forward。
 在远端 buffer 内校验 proxy PID 时也强制使用客户端 process namespace。
+
+ACP agent（agent-shell 的所有入口：Noema Run、popup、`C-c A a`、裸
+`M-x agent-shell`）是 target-placement consumer，且不自带任何 remote 分支。
+`init-ai-ide.el` 把 `agent-shell-cwd` 规范成 `/fs:TARGET:/path`，再经
+`remote-client-file-name` 取本机可直接访问的写法：`local` 得到原生目录，远端 target
+保持逻辑名。acp.el 以 `:file-handler` 调用官方 `make-process`，远端时进入 `/fs:` 句柄
+和 `remote-make-process`，agent 可执行文件、cwd、环境都由 target 投影；agent-shell 的
+`executable-find … t` 同样按 target PATH 解析，所以“target 上有对应二进制”就是唯一
+前提。ACP 协议里的路径经 `agent-shell-path-resolver-function` 双向映射：Emacs 名
+→ target-native localname，agent 发来的 native 路径 → 会话 target 的 Emacs 名；
+`agent-shell--on-request` 被包在会话 buffer 内执行，映射因此不依赖 timer 触发时的
+当前 buffer。本机固定的 OpenCode 二进制只在 agent 运行于客户端时替换默认命令。
+agent 的环境与同 workspace 的源码 buffer 相同（host path、target 环境、direnv
+等 provider）：由本机原生启动的 agent，在创建 client 前用
+`remote-environment-ensure` 把 capsule 投影进它的 buffer，因此也使用项目的
+direnv/Nix PATH，而不是 Emacs 全局 PATH；路由到 target 的 agent 则由进程路由与
+`exec-path` handler 取得 capsule，它的 buffer 保留本机 HOME——agent-shell 的缓存
+与历史在这个 buffer 里展开 `~`，投影 target 的 HOME 会指向本机不存在的
+`/home/…`。判断依据是 `remote-client-file-name` 这一放置查询，而非 target ID。找不到可执行文件时报错会写明查找的
+target。workspace 不可达时直接报错，不会被 shell-maker 静默改到本机 `~/`。
 
 Copilot 是纯 client-placement consumer：Remote buffer 的文档内容仍由
 `copilot.el` 同步给 language server，但 binary、PATH、环境、进程 namespace
@@ -612,8 +674,15 @@ SSH pipeline 建立 `-L`/`-R` forward，再实现 target 侧 network client/stre
 process；其物理 socket 是本机 relay，但 `process-contact` 的 host/service 与
 `remote-channel-endpoint` 暴露 target listener 身份，避免把 relay 端口泄漏给
 原生消费者。动态 `-R` 端口从 OpenSSH 确认信息中取得；建立超时、失败诊断和关闭
-清理均由 channel/backend 边界负责。native proxy 在 outbound peer 配对完成前
+清理均由 channel/backend 边界负责。转发使用独立 SSH 连接，避免 workspace 的
+ControlMaster 重建时误关新监听；`-L` 的就绪状态从 OpenSSH 输出读取，正常路径
+不向目标服务建立探针连接。诊断输出有 32 KiB 上限。native proxy 在 outbound peer 配对完成前
 缓存已经到达的数据，避免连接刚建立时静默丢失首包。
+Remote 面板通过 `p` 建立 target 到本地回环的 `-L` 转发，并登记到 workspace
+恢复资源；端口行的 `RET`/`w` 复制动态本地地址，`k` 关闭且移除恢复资源。
+重连先关闭 workspace 拥有的 channel，再重建 session，避免关闭哨兵把预期退出
+误报为新的传输故障。恢复时复用首次分配的本地端口；端口被其他进程占用时资源
+会报告失败。Aaron-PC SSH E2E 验证建立、强制重连、原端口恢复及目标 SSH banner。
 
 多端口协议使用 `remote-channel-group-*`，不让 consumer 循环创建和恢复
 forward。成员有稳定名称并共享 context/workspace；建立中任一成员失败会回滚
@@ -657,6 +726,19 @@ process/buffer teardown 登记到 workspace。配置层的 popup vterm 已走这
 在任意 `/fs:TARGET:/path` buffer 中按 `C-c e`，会打开或复用同一 workspace 的
 terminal，且不同 target/workspace 的 popup 池不会串线。本地也是
 `/fs:local:` 的同一流程。
+PTY 按 `pty` capability 单独选路：SSH 配置优先 `ssh-pty`，直接复用 pipeline
+拥有的 OpenSSH ControlMaster，不建立 TRAMP 文件会话；文件与 LSP 按各自
+配置继续选路。选中路线失败时会尝试同一 target 的其他可用 backend。
+workspace task 仍优先复用所属 workspace 的进程路线。可运行
+`REMOTE_TERMINAL_E2E_TARGET=host make remote-terminal-live-smoke` 验证真实 SSH
+终端的 cwd、环境和双向输入输出；设置
+`REMOTE_TERMINAL_E2E_BACKEND=tramp-rpc` 可单独验证 RPC 路线。
+`REMOTE_TERMINAL_E2E_STANDALONE=1` 验证没有预先打开 workspace 时的终端。
+配合 `REMOTE_TERMINAL_E2E_FAULT=rpc` 会仅终止测试 Emacs 的 RPC 传输，验证
+disconnected 状态、工作区重连和手动重启后的终端输入输出；
+`REMOTE_TERMINAL_E2E_FAULT=pty` 则测试 PTY 进程异常退出。
+`REMOTE_VTERM_E2E_TARGET=host make remote-vterm-live-smoke` 会用真实 VTerm
+frontend 验证所选路线、workspace 跟踪与目标目录中的 shell 输入输出。
 
 冷启动远端 vterm 只执行可缓存的 host facts 探测，用它解析远端账户真正的登录
 shell（例如 bash 或 zsh）；它不会同步等待完整的 Nix/direnv capsule。shell
@@ -665,15 +747,27 @@ shell（例如 bash 或 zsh）；它不会同步等待完整的 Nix/direnv capsu
 覆盖。已有 capsule 会直接复用。本地 capsule 在 spawn 时传给进程，并在 vterm
 mode 完成初始化后投影回 terminal buffer，避免在 vterm 临时绑定
 `process-environment` 时制造 buffer-local 警告。
+交互式 Emacs 会在启动或打开 workspace 后的空闲时段，用客户端环境预加载
+VTerm 包；首次打开终端不用再同步支付 VTerm 包加载时间。可用
+`REMOTE_VTERM_E2E_TARGET=host REMOTE_VTERM_E2E_PREOPEN=1
+REMOTE_VTERM_E2E_PRELOAD=1 make remote-vterm-live-smoke` 分开测量预热后终端
+启动及首条命令响应。
+工作区关闭后，连接池会暂存会话以供快速重开；Emacs 退出时会显式关闭连接池及
+由它拥有的 SSH ControlMaster，不依赖 OpenSSH 的持久期自然到期。
 transport 断线时不会重放 shell 历史；vterm 保留为 disconnected buffer，显式
 执行 `remote-terminal-restart` 会按原目录和 frontend 新建一个 vterm。
 
 transport failure 会把相关 workspace 标记为 disconnected，并按 1、2、4 秒进行
 自动恢复。任何显式登记了 recovery function 的资源都会在 session 恢复后重建；
-框架目前自动登记 service 与 workspace-owned forward。watch 和 LSP consumer
-仍需接入 workspace resource owner，不能仅凭 capability symbol 宣称已恢复。
-Noema 的远程 Markdown watch 已使用这一边界：文件仍以 `/fs:` 标识，watch
-随 workspace 恢复，并在 Noema 停止时显式释放。
+手动 `remote-workspace-reconnect-async` 复用同一个合并调度器，命令立即返回，
+重试间隔不阻塞 Emacs；单次 TRAMP 建连本身仍可能等待。重连主动关闭旧 session
+后立即确认自己推进的 target epoch，避免把成功误判为过期；建连或资源恢复期间
+如果又发生外部失效，本次尝试会重试。workspace 在等待中被关闭或替换时，晚到的
+结果不会重新打开它。
+框架目前自动登记 service、workspace-owned forward、逻辑 watch 与 lsp-mode
+resource。Noema 的远程 Markdown watch 也使用这一边界：文件仍以 `/fs:` 标识，
+watch 随 workspace 恢复，并在 Noema 停止时显式释放。资源已登记不等于完成
+长期断线故障注入；该项仍需 SSH 真机验证。
 逻辑 watcher 还会对窄时间窗口内完全相同的 backend event 去重，并维护单调
 sequence。物理 watcher 意外发出 `stopped` 时，框架合并 resync 请求：先调用
 metadata 中可选的 `:resync` 内容扫描函数，再重建物理 descriptor。显式关闭通过
@@ -683,6 +777,24 @@ PTY shell 不安全重放，因此 terminal 只标记为 disconnected，并要�
 
 `M-x remote-doctor` 从 target → pipeline stage → backend → route → session →
 workspace/resource 输出诊断；加前缀参数会实际连接并运行 `uname -s`。
+`M-x remote-board` 中的 `D` 会针对当前 target 异步运行 OpenSSH 诊断，并在
+`*Remote SSH TARGET*` 保留详细输出；检查使用 `BatchMode=yes` 和短连接超时，
+不会弹出密码提示或启动 workspace。连接错误会在面板 State 列区分认证、主机密钥、
+主机名与网络问题，悬停可看最近错误；`T` 打开使用同一 SSH 配置与跳板参数的
+交互式登录终端，供输入密码、密钥口令或一次性验证码。终端会话是独立的客户端
+SSH 进程，登录后仍需正常打开文件夹或重连 workspace。面板绘制和状态刷新只读
+本地缓存，不发起 SSH 探测。
+首次建连时，面板 State 列会依次显示传输打开、SSH 登录与后端检查阶段；按
+`L` 可查看当前 target 最近的连接阶段和失败原因。进度事件只在创建连接时发布，
+暖态文件查询不增加进度观察开销。旧连接的迟到事件不能覆盖新连接的状态；
+`C-g` 取消会释放已打开的传输阶段并清除进行中状态。认证输入仍由 TRAMP 处理。
+从面板打开文件夹会先验证目录，再建立以该路径为上下文的受管理 workspace，
+使面板的打开状态、重连和端口等资源归属一致；若随后 Dired 打开失败，新建的
+workspace 会被关闭。`c` 关闭选中文件夹的 workspace 及其资源，`C` 关闭当前
+target 的所有 workspace 和连接。两者都保留已访问的 Emacs buffer；下次文件
+操作可以按原有路由重新连接。关闭与断开命令已通过本机状态测试和真实 SSH
+文件夹生命周期测试。面板在打开文件夹期间显示 `opening folder` / `opening`，
+成功、报错或取消后清除；刷新只读取本机缓存。
 
 ## 9. 配置兼容
 
@@ -705,6 +817,27 @@ ssh-config 导入出来的 target 没有显式对象承载路由偏好，因此 
 
 target 偏好优先于 adapter 偏好，所以这一条会让这些主机的普通文件操作也走
 tramp-rpc，而不只是进程、环境和 LSP。
+
+在 `M-x remote-board` 中按 `a` 可新增 SSH 主机：选择已导入的 SSH 配置文件，
+输入别名、主机名以及可选的用户、端口和密钥路径。新建文件权限为 `0600`，
+随后重载目标列表。新增时不发起网络连接；写入前会检查别名是否被导入过滤
+规则接受并有启用的 pipeline。可再按 `o` 打开目标，或按 `f` 选择文件夹。
+按 `A` 可以粘贴 `ssh -i ~/.ssh/key -p 2222 user@host` 一类的连接命令，再
+选择别名。支持 `-i`、`-p`、`-l`、`-J`、`-F` 和 `-o Name=Value`；远端命令
+及不支持的选项会直接拒绝，不运行粘贴内容。若本机有 OpenSSH，写入前还会用
+隔离的临时配置执行 `ssh -G` 语法检查；它不会读取现有配置的 `Match` 规则。
+`-F` 必须指向已导入的 SSH
+配置文件。新增 Host 会原子地写在现有规则之前，使它的显式连接参数优先于
+已有的 `Host *` 或 `Include`；写入后恢复 `Host *` 作用域，避免改变旧文件开头
+全局选项对其他主机的效果。已有配置文件的权限和符号链接保持有效。
+非默认 SSH 配置文件会记录在对应 pipeline 上，客户端连接以独立参数
+`-F FILE` 传给 TRAMP、tramp-rpc、直连进程、SCP、转发及控制连接；默认
+`~/.ssh/config` 保持 OpenSSH 原生解析。SSH 客户端进程使用本机环境，目标环境
+通过远端命令显式传递，避免目标 `HOME` 影响本机 `Include` 路径展开。TRAMP
+连接缓存也会收到该 pipeline 的登录参数；这些参数标记为临时属性，不写入
+TRAMP 的持久缓存，重连时仍保持选定的配置文件。
+相对路径形式的 SSH 导入文件以 `etc/remote.json` 所在目录为基准解析，不依赖
+当前 buffer 的目录。
 
 ```json
 {
@@ -777,7 +910,8 @@ emacs --batch --init-directory=. -q -l early-init.el -l init.el \
 SSH E2E 是显式 opt-in，自动选择 SSH config 导入的 `Aaron-*` target，也可以通过
 `REMOTE_E2E_TARGET` 指定。它只在本地和 target 的 `/tmp` 创建随机目录，并在结束
 时清理；覆盖文件复制/读取/枚举、target cwd 进程、session 复用，以及动态 SSH
-`-R` listener 从 target 到原生 Emacs server process 的数据往返。
+`-R` listener 从 target 到原生 Emacs server process 的数据往返，以及关闭旧
+session 后真实 SSH workspace 能在后台重新连接并恢复命令执行。
 
 当前稳定目标是 native + SSH：逻辑文件、同步/异步进程、PTY、环境、SSH
 双向 forward、workspace/service 生命周期和原生开发工具兼容。WSL/container/
@@ -794,9 +928,9 @@ devcontainer、Dape/tasks 编排、动态 SOCKS forward 与托管 tunnel 不在�
 | session 池、健康与失效 | 已建立 |
 | backend 执行准备契约 | 已建立；sync/async/process plan/stdio bridge 均由 backend 分派 |
 | native socket client/server | 已建立 |
-| TRAMP/RPC network client、remote listener 与 SSH 双向 port forward | 已通过 native 回环、命令测试和 SSH `-R` 真机数据往返；断线恢复故障注入待补 |
+| TRAMP/RPC network client、remote listener 与 SSH 双向 port forward | 已通过 native 回环、命令测试、SSH `-R` 真机数据往返，以及 `-L` 真机强制重连后原端口数据往返；突发断线与 `-R` 恢复故障注入待补 |
 | pipeline stage 的实际逐段建连 | executor/runtime 已建立；内建 overlay/hop 主要负责 endpoint 变换 |
-| workspace/service/channel/terminal 生命周期 | 基础已建立；service/forward 自动恢复，watch/LSP consumer 尚未全部登记，terminal 手动重启 |
+| workspace/service/channel/terminal 生命周期 | 基础已建立；service/forward、逻辑 watch 与 lsp-mode resource 已登记恢复，仍缺长期真机故障注入；terminal 手动重启 |
 | Remote Doctor | 已建立结构化报告与可选 target probe |
 | SSH 真机回归 | `make remote-e2e`，只使用随机临时目录 |
 | WSL2 direnv + C clangd + Python pylsp | 已真实验证走远程环境与 tramp-rpc |

@@ -109,15 +109,21 @@ remain subject to Emacs' normal local-variable confirmation."
   '(:toolchain-profiles)
   "Plist keys that contain named profile alists.")
 
+(defvar my/project-local--scoped-root nil
+  "Dynamically pinned (BUFFER . ROOT) for one synchronous operation.")
+
 (defun my/project-local-root ()
   "Return the best root for project-local workflow overrides."
-  (file-name-as-directory
-   (expand-file-name
-    (or (and (fboundp 'my/project-current-root)
-             (my/project-current-root))
-        (when-let* ((project (project-current nil default-directory)))
-          (project-root project))
-        default-directory))))
+  (or (and (consp my/project-local--scoped-root)
+           (eq (car my/project-local--scoped-root) (current-buffer))
+           (cdr my/project-local--scoped-root))
+      (file-name-as-directory
+       (expand-file-name
+        (or (and (fboundp 'my/project-current-root)
+                 (my/project-current-root))
+            (when-let* ((project (project-current nil default-directory)))
+              (project-root project))
+            default-directory)))))
 
 (defun my/project-local--pair-list-p (value)
   "Return non-nil when VALUE is a list of cons cells."

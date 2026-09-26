@@ -26,6 +26,16 @@
 (declare-function magit-stage-files "magit-apply" (files &optional force))
 (declare-function magit-status "magit" (&optional directory))
 (declare-function magit-toplevel "magit-git" (&optional directory))
+(declare-function remote-canonicalize-file-name "remote-fs"
+                  (file-name &optional directory))
+(declare-function remote-client-file-name "remote-fs"
+                  (file-name &optional adapter))
+(declare-function remote-file-local-name "remote-fs" (file-name))
+(declare-function remote-fs-file-name-p "remote-fs" (file-name))
+(declare-function remote-fs-target-id "remote-fs" (file-name))
+(declare-function remote-make-file-name "remote-fs" (target-id localname))
+(declare-function remote-workspace-for-path "remote-workspace" (path))
+(declare-function remote-workspace-live-p "remote-workspace" (workspace))
 (declare-function magit-unstage-files "magit-apply" (files))
 (declare-function git-commit-setup-flyspell "git-commit" ())
 (declare-function git-commit-turn-on-flyspell "git-commit" ())
@@ -211,6 +221,81 @@ a Git repository."
   (magit-ediff-dwim-show-on-hunks t)
   (magit-display-buffer-function 'magit-display-buffer-same-window-except-diff-v1)
   (magit-section-visibility-indicator '("▸" . "▾")))
+
+(defvar-local my/magit--logical-root nil
+  "Logical repository root captured when a Magit status opens from `/fs:'.")
+
+(defun my/magit-status-logical-root-a (function &rest arguments)
+  "Remember the logical origin of a Magit status buffer.
+Magit may choose a physical TRAMP path for its Git processes.  Keeping the
+source target ID lets later worktree visits return to the original namespace
+even when no Remote workspace has been opened explicitly."
+  (let* ((origin
+          (cond
+           ((remote-fs-file-name-p (car arguments))
+            (car arguments))
+           ((remote-fs-file-name-p default-directory)
+            default-directory)))
+         (buffer (apply function arguments)))
+    (when (and origin (buffer-live-p buffer))
+      (with-current-buffer buffer
+        (setq-local my/magit--logical-root
+                    (remote-make-file-name
+                     (remote-fs-target-id origin)
+                     (remote-file-local-name
+                      (or (ignore-errors (magit-toplevel)) origin))))))
+    buffer))
+
+(defun my/magit-find-worktree-file-logical-a (function &rest arguments)
+  "Visit Magit worktree files through their owning logical identity.
+Magit may keep its status buffer on a physical TRAMP route for Git process
+compatibility.  Source buffers opened from that status must retain the stable
+logical file identity; a shared local filesystem still uses its native path.
+Unknown revisions and changed upstream call shapes use FUNCTION unchanged."
+  (let ((revision (car arguments))
+        (file (cadr arguments)))
+    (if (and (memq (length arguments) '(2 3 4))
+             (or (null revision) (equal revision "{worktree}"))
+             (stringp file))
+        (let* ((topdir (ignore-errors (magit-toplevel)))
+               (absolute (and topdir (expand-file-name file topdir)))
+               (origin my/magit--logical-root)
+               (logical
+                (and absolute
+                     (ignore-errors
+                       (if origin
+                           (remote-make-file-name
+                            (remote-fs-target-id origin)
+                            (remote-file-local-name absolute))
+                         (remote-canonicalize-file-name absolute)))))
+               (owner (and logical (not origin)
+                           (remote-workspace-for-path logical))))
+          (if (and logical
+                   (or origin (remote-workspace-live-p owner)))
+              (apply function revision
+                     (or (ignore-errors (remote-client-file-name logical))
+                         logical)
+                     (cddr arguments))
+            (apply function arguments)))
+      (apply function arguments))))
+
+(with-eval-after-load 'magit-files
+  (require 'remote-workspace)
+  (when (and (fboundp 'magit-find-file-noselect)
+             (not (advice-member-p
+                   #'my/magit-find-worktree-file-logical-a
+                   'magit-find-file-noselect)))
+    (advice-add 'magit-find-file-noselect :around
+                #'my/magit-find-worktree-file-logical-a)))
+
+(with-eval-after-load 'magit-status
+  (when (and (fboundp 'magit-status-setup-buffer)
+             (not (advice-member-p
+                   #'my/magit-status-logical-root-a
+                   'magit-status-setup-buffer)))
+    (advice-add 'magit-status-setup-buffer :around
+                #'my/magit-status-logical-root-a
+                '((depth . -100)))))
 
 ;; NOTE: `diff-hl' depends on `vc'
 (use-package vc

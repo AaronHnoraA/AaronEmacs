@@ -22,6 +22,7 @@
 (require 'remote-process)
 (require 'remote-environment)
 (require 'remote-workspace)
+(require 'seq)
 (require 'subr-x)
 
 (declare-function my/tab-line-refresh "init-tabbar" (&rest arguments))
@@ -52,12 +53,38 @@
   "Metadata for language servers registered by `my/register-language-server'.
 
 Each entry is a plist with keys such as `:modes', `:program', `:server-id',
-`:feature', `:executables', `:placement', `:label', `:source', and `:note'.
+`:feature', `:executables', `:available-p', `:placement', `:label',
+`:source', and `:note'.
 The Hub and Doctor read it to list routes and jump back to the declaring
 file; it is the only registry of locally declared servers.")
 
 (defvar my/language-server--resolving-executable-p nil
   "Non-nil inside the Remote executable lookup implementation.")
+
+(defvar-local my/language-server--start-executable-cache nil
+  "Executable results shared by one buffer's LSP preflight and connection.")
+
+(defvar my/language-server--lookup-cache-active nil
+  "Non-nil only while one LSP preflight or connection is selecting clients.")
+
+(defun my/language-server--find-executable (program)
+  "Find PROGRAM on the target, reusing results within one LSP start.
+The cache is deliberately inactive outside preflight and connection.  Its key
+includes the workspace, environment capsule, and directory so a changed
+target or PATH cannot reuse a result from another selection context."
+  (if (not (and my/language-server--lookup-cache-active
+                (hash-table-p my/language-server--start-executable-cache)))
+      (remote-executable-find program)
+    (let* ((key (list program remote-current-workspace
+                      remote-buffer-environment default-directory))
+           (missing (make-symbol "missing"))
+           (cached (gethash key my/language-server--start-executable-cache
+                            missing)))
+      (if (eq cached missing)
+          (let ((found (remote-executable-find program)))
+            (puthash key found my/language-server--start-executable-cache)
+            found)
+        cached))))
 
 (config-defvar my/language-server-performance-read-process-output-max nil
   "Minimum `read-process-output-max' while any language server is active."
@@ -124,6 +151,7 @@ smooth without creating overlays throughout the buffer."
 (defvar company-dabbrev-code-everywhere)
 (defvar company-files-exclusions)
 (defvar lsp-managed-mode)
+(defvar my/project-local--scoped-root)
 (defvar lsp-enabled-clients)
 (defvar lsp--show-message)
 (defvar lsp--cur-workspace)
@@ -164,6 +192,37 @@ smooth without creating overlays throughout the buffer."
 (defvar-local my/lsp-mode--waiting-for-direnv nil
   "Non-nil while lsp-mode startup waits for an asynchronous direnv export.")
 
+(defcustom my/lsp-mode-start-request-coalesce-seconds 3
+  "Seconds to suppress duplicate deferred LSP starts for one buffer.
+An explicit manual start or a new runtime/environment capsule bypasses the
+coalescing window.  A failed deferred start can be retried afterward."
+  :type 'number
+  :group 'lsp-mode)
+
+(defvar-local my/lsp-mode--start-request nil
+  "Recent deferred LSP request as (TIME RUNTIME ENVIRONMENT).")
+
+(defun my/lsp-mode--start-request-active-p ()
+  "Return non-nil when this buffer already has an equivalent LSP request."
+  (and my/lsp-mode--start-request
+       (not my/language-server--manual-start)
+       (numberp my/lsp-mode-start-request-coalesce-seconds)
+       (> my/lsp-mode-start-request-coalesce-seconds 0)
+       (< (- (float-time) (nth 0 my/lsp-mode--start-request))
+          my/lsp-mode-start-request-coalesce-seconds)
+       (eq (nth 1 my/lsp-mode--start-request)
+           my/language-server-runtime-current)
+       (eq (nth 2 my/lsp-mode--start-request)
+           remote-buffer-environment)))
+
+(defun my/lsp-mode--clear-start-request-on-detach ()
+  "Allow a new start after lsp-mode detaches from this buffer."
+  (unless (bound-and-true-p lsp-managed-mode)
+    (setq my/lsp-mode--start-request nil)))
+
+(add-hook 'lsp-managed-mode-hook
+          #'my/lsp-mode--clear-start-request-on-detach)
+
 (defvar-local my/language-server--waiting-for-runtime nil
   "Non-nil while language-server startup waits for a runtime provider.")
 
@@ -176,6 +235,12 @@ smooth without creating overlays throughout the buffer."
 Merged from the project-local `:lsp-workspace' value and the active
 toolchain profile.  It layers above `lsp-mode''s global
 `lsp-client-settings' rather than replacing it.")
+
+(defvar my/language-server--pushed-workspace-configurations
+  (make-hash-table :test #'eq :weakness 'key)
+  "Last configuration announced to each live lsp-mode workspace.
+Keys are workspace generations, so a restarted server receives its settings
+again without keeping a dead workspace alive.")
 
 (defvar-local my/lsp-document-color-last-visible-region nil
   "Last visible region requested from `textDocument/documentColor'.")
@@ -210,6 +275,9 @@ toolchain profile.  It layers above `lsp-mode''s global
 (declare-function lsp--client-server-id "lsp-mode" (client))
 (declare-function lsp--client-remote? "lsp-mode" (client))
 (declare-function lsp--session-workspaces "lsp-mode" (session))
+(declare-function lsp-session-folders "lsp-mode" (session))
+(declare-function lsp-f-canonical "lsp-mode" (file-name))
+(declare-function lsp--files-same-host "lsp-mode" (file1 file2))
 (declare-function lsp-get "lsp-protocol" (hash-table key))
 (declare-function lsp-process-kill "lsp-mode" (process))
 (declare-function lsp-session "lsp-mode" ())
@@ -302,6 +370,9 @@ automatic retry; other servers keep the shared, stricter default."
 (defvar my/lsp-mode--startup-timers (make-hash-table :test #'eq)
   "Startup watchdog timers keyed by lsp-mode workspace.")
 
+(defvar my/lsp-mode--starting-client-selection nil
+  "Non-nil while `lsp' is selecting a client for the current buffer.")
+
 (defvar my/lsp-mode--restart-history (make-hash-table :test #'equal)
   "Recent automatic restart timestamps keyed by server and logical root.")
 
@@ -312,17 +383,43 @@ struct definitions while this configuration file is compiled."
   (aset object (cl-struct-slot-offset type slot) value))
 
 (defun my/lsp-mode--quiet-client-whitelist-a (fn client)
-  "Run FN for CLIENT without logging expected whitelist rejections.
-Language modules deliberately set `lsp-enabled-clients' to one workspace owner.
-lsp-mode reports every other registered stock/add-on client at info level each
-time it filters candidates; that is expected policy, not a startup problem."
-  (let ((lsp--show-message
-         (if (and lsp-enabled-clients
-                  (not (memq (lsp--client-server-id client)
-                             lsp-enabled-clients)))
-             nil
-           lsp--show-message)))
+  "Skip CLIENT before expensive activation when it is not enabled.
+`lsp--supports-buffer?' checks `lsp-enabled-clients' after calling each
+client's activation function.  Disabled clients can therefore issue remote
+filesystem and executable probes for every LSP startup, even though they
+cannot be selected.  The early check has the same whitelist result and also
+avoids expected rejection messages."
+  (unless (and lsp-enabled-clients
+               (not (member (lsp--client-server-id client)
+                            lsp-enabled-clients)))
     (funcall fn client)))
+
+(defun my/lsp-mode--find-session-folder-remote-a (fn session file-name)
+  "Find remote FILE-NAME in SESSION without probing unrelated folders.
+The upstream predicate checks existence before comparing each folder's
+spelling.  A persisted session with many roots can therefore issue dozens of
+remote metadata requests for a new workspace.  LSP's canonical comparison
+does not follow symlinks, so compare those spellings first and check only
+folders that could contain FILE-NAME.  Keep native paths on upstream FN."
+  (if (not (file-remote-p file-name))
+      (funcall fn session file-name)
+    (let ((canonical (lsp-f-canonical file-name))
+          best)
+      (dolist (folder (lsp-session-folders session))
+        (let* ((root (lsp-f-canonical folder))
+               (same (equal root canonical))
+               (ancestor
+                (and (not same)
+                     (string-prefix-p
+                      (file-name-as-directory root) canonical))))
+          (when (and (or same ancestor)
+                     (lsp--files-same-host folder canonical)
+                     (if same (file-exists-p folder)
+                       (file-directory-p folder))
+                     (or (null best)
+                         (> (length folder) (length best))))
+            (setq best folder))))
+      best)))
 (declare-function gcmh-set-high-threshold "gcmh" ())
 (declare-function hydra--call-interactively-remap-maybe "hydra" (cmd &optional keys))
 (declare-function hydra-default-pre "hydra" ())
@@ -366,7 +463,7 @@ kernel environment replace the stable target/workspace analyzer."
                    remote-buffer-environment)))
          (remote-current-adapter-id "language-server"))
     (let ((my/language-server--resolving-executable-p t))
-      (remote-executable-find program))))
+      (my/language-server--find-executable program))))
 
 (defun my/language-server-executable-available-p (program)
   "Return non-nil when PROGRAM is available locally or on the remote host."
@@ -384,6 +481,16 @@ byte-compile backend does not emit noisy warnings on startup."
 
 (defun my/lsp-managed-mode-setup ()
   "Apply per-buffer `lsp-mode' UI tweaks after a client attaches."
+  ;; lsp-headerline's project segment calls `lsp-workspace-root' on every
+  ;; idle refresh.  Its `lsp-f-same?' comparison can escape the Remote route
+  ;; and perform physical TRAMP file tests, blocking the command loop before
+  ;; it reads the next key.  Client-accessible files can retain the segment;
+  ;; target-only files keep the in-memory file and symbol segments.
+  (when (and (bound-and-true-p lsp-managed-mode)
+             buffer-file-name
+             (not (ignore-errors
+                    (remote-client-file-name buffer-file-name))))
+    (setq-local lsp-headerline-breadcrumb-segments '(file symbols)))
   (when (and (bound-and-true-p lsp-inlay-hint-enable)
              (fboundp 'lsp-feature?)
              (fboundp 'lsp-inlay-hints-mode)
@@ -788,21 +895,72 @@ existing project configuration keeps loading without a warning."
 (defun my/language-server-set-workspace-configuration (configuration)
   "Merge CONFIGURATION into this buffer's language-server workspace settings.
 
-The merged plist is stored buffer-locally and pushed to the server by
-`my/language-server--push-workspace-configuration-h', so a project-local
-override and a toolchain profile compose instead of overwriting one
-another.  `lsp-mode' keeps its own registered settings in the global
-`lsp-client-settings'; this is the per-buffer layer above it."
-  (setq-local my/language-server--workspace-configuration
-              (my/language-server--merge-values
-               my/language-server--workspace-configuration
-               configuration)))
+The merged plist is stored buffer-locally and supplied when the server asks
+for `workspace/configuration'.  A change in an already managed buffer is
+announced once to its workspace.  Project-local settings and a toolchain
+profile compose without replacing `lsp-mode''s global client settings."
+  (let ((previous my/language-server--workspace-configuration))
+    (setq-local my/language-server--workspace-configuration
+                (my/language-server--merge-values previous configuration))
+    (when (and (bound-and-true-p lsp-managed-mode)
+               (not (equal previous
+                           my/language-server--workspace-configuration)))
+      (my/language-server--push-workspace-configuration-h))))
 
 (defun my/language-server--push-workspace-configuration-h ()
-  "Send this buffer's workspace-configuration override to its server."
-  (when-let* ((configuration my/language-server--workspace-configuration))
-    (when (fboundp 'lsp--set-configuration)
-      (lsp--set-configuration configuration))))
+  "Announce changed settings once to the current LSP workspace generation.
+A server can register capabilities in response to a configuration change,
+reentering buffer configuration.  Re-sending unchanged settings there creates
+an unbounded request loop and starves completion responses."
+  (when-let* ((configuration my/language-server--workspace-configuration)
+              ((fboundp 'lsp--set-configuration))
+              ((fboundp 'lsp-workspaces))
+              (workspaces (lsp-workspaces)))
+    (when (seq-some
+           (lambda (workspace)
+             (not (equal
+                   (gethash workspace
+                            my/language-server--pushed-workspace-configurations)
+                   configuration)))
+           workspaces)
+      ;; Mark before notifying: an immediate server registration can reenter
+      ;; buffer configuration before `lsp--set-configuration' returns.
+      (dolist (workspace workspaces)
+        (puthash workspace (my/language-server--copy-value configuration)
+                 my/language-server--pushed-workspace-configurations))
+      (condition-case error
+          (lsp--set-configuration configuration)
+        (error
+         (dolist (workspace workspaces)
+           (remhash workspace
+                    my/language-server--pushed-workspace-configurations))
+         (signal (car error) (cdr error)))))))
+
+(defun my/language-server--announce-configuration (workspace)
+  "Announce WORKSPACE's settings once its server has been initialized.
+
+Standard LSP clients (VS Code's languageclient, Eglot) send
+`workspace/didChangeConfiguration' right after `initialized'.  Some servers
+depend on it: Pyright, for one, does not pull `workspace/configuration' on
+its own when the client advertises workspace folders, and then never
+analyzes a file or answers a request.  Every server registered through
+`my/register-language-server' gets this, whatever its language.  The
+payload is WORKSPACE's own override (or an empty object); servers that pull
+settings read the full values through `workspace/configuration'."
+  ;; `with-lsp-workspace' expanded by hand: this file may compile before
+  ;; lsp-mode is loaded.
+  (let ((lsp--cur-workspace workspace))
+    (let ((configuration
+           (my/language-server--workspace-configuration-override workspace)))
+      (when configuration
+        (puthash workspace (my/language-server--copy-value configuration)
+                 my/language-server--pushed-workspace-configurations))
+      (lsp--set-configuration (or configuration (make-hash-table))))))
+
+;; Remove the historical configure hook in already-running Emacs sessions
+;; when this file is reloaded; startup never installs it again.
+(remove-hook 'lsp-configure-hook
+             #'my/language-server--push-workspace-configuration-h)
 
 (defun my/language-server--workspace-configuration-override (workspace)
   "Return the workspace-configuration override owned by WORKSPACE.
@@ -837,24 +995,119 @@ the authoritative fallback in that interval."
      (my/language-server--project-root-for-buffer))))
   (run-hooks 'my/language-server-lsp-local-settings-hook))
 
+(defun my/language-server--require-on-client (feature)
+  "Load Emacs Lisp FEATURE with this machine's file and process context."
+  (let ((default-directory temporary-file-directory)
+        (process-environment (remote-client-process-environment))
+        (exec-path (remote-client-exec-path))
+        (remote-current-adapter-id nil)
+        (remote-current-route nil)
+        (remote-current-workspace nil))
+    (require feature nil t)))
+
+(defun my/language-server--external-feature-ready-p ()
+  "Return whether this buffer's external LSP feature can start on its target.
+A feature may have a registered `:available-p' predicate.  It runs after the
+toolchain environment is applied, before lsp-mode selects a client or creates
+a workspace.  Missing target prerequisites must not allow a client-local
+package installation to be mistaken for a runnable target server."
+  (let* ((feature (my/lsp-mode-required-feature))
+         (entry
+          (and feature
+               (seq-find
+                (lambda (candidate)
+                  (eq (plist-get candidate :feature) feature))
+                my/language-server-program-metadata)))
+         (predicate (plist-get entry :available-p)))
+    (or (null predicate)
+        (condition-case error
+            (funcall predicate)
+          (error
+           (remote-log
+            'language-server-preflight-error
+            :feature feature :error (error-message-string error))
+           nil)))))
+
 (defun my/language-server-contact-available-p ()
   "Return non-nil when this buffer has a usable lsp-mode client.
 The executable probe runs inside the same Remote workspace/adapter extent as
 the eventual process start, so a target binary is never confused with a
 client-side installation."
-  (and (require 'lsp-mode nil t)
+  (and (my/language-server--require-on-client 'lsp-mode)
        (fboundp 'lsp--filter-clients)
+       (my/language-server--external-feature-ready-p)
        (let* ((root (my/language-server--project-root-for-buffer))
               (workspace (my/language-server--connect-workspace root))
               (remote-current-adapter-id "language-server")
               (remote-current-workspace workspace))
          (remote-environment-ensure
           (and workspace (remote-workspace-context workspace)))
-         (ignore-errors
-           (lsp--filter-clients
-            (lambda (client)
-              (and (lsp--supports-buffer? client)
-                   (lsp--server-binary-present? client))))))))
+         (let ((my/language-server--lookup-cache-active t))
+           (ignore-errors
+             (lsp--filter-clients
+              (lambda (client)
+                (and (lsp--supports-buffer? client)
+                     (lsp--server-binary-present? client)))))))))
+
+(defun my/language-server--load-client-ui ()
+  "Load LSP UI modules from the Emacs machine before target hooks run.
+Their first load is client-local package work.  Leaving their autoloads to
+fire inside a TRAMP buffer makes package initialization probe the target and
+holds up the first `didOpen' even after the server has replied."
+  (dolist (feature '(lsp-ui lsp-headerline lsp-lens lsp-modeline lsp-diagnostics
+                    lsp-completion lsp-semantic-tokens sideline
+                    company company-capf company-files company-tempo
+                    company-yasnippet))
+    (my/language-server--require-on-client feature)))
+
+(defcustom my/language-server-folder-prewarm-idle-seconds 0.5
+  "Idle seconds after opening a managed remote Dired folder to preload LSP.
+The work runs on the Emacs client before a source file is selected.  A quick
+source visit still uses the ordinary synchronous load, and plain local
+directories do not schedule a preload.  Zero disables the folder preload."
+  :type 'number
+  :group 'my/language-server)
+
+(defvar my/language-server--folder-prewarm-timer nil
+  "Pending one-shot idle timer for client-side LSP package loading.")
+
+(defvar my/language-server--folder-prewarmed nil
+  "Non-nil after a managed remote folder preloaded the LSP client UI.")
+
+(defun my/language-server--folder-prewarm-run ()
+  "Load the LSP client and UI in the client environment after idle."
+  (setq my/language-server--folder-prewarm-timer nil)
+  (unless my/language-server--folder-prewarmed
+    (condition-case error
+        (when (my/language-server--require-on-client 'lsp-mode)
+          (my/language-server--load-client-ui)
+          (setq my/language-server--folder-prewarmed t))
+      (error
+       ;; Package failures remain retryable through ordinary LSP startup.
+       (remote-log 'language-server-client-prewarm-error
+                   :error (error-message-string error))))))
+
+(defun my/language-server--folder-prewarm-schedule ()
+  "Schedule one client-only LSP preload from a managed target Dired buffer."
+  (when (and (numberp my/language-server-folder-prewarm-idle-seconds)
+             (> my/language-server-folder-prewarm-idle-seconds 0)
+             (not my/language-server--folder-prewarmed)
+             (not my/language-server--folder-prewarm-timer)
+             (stringp default-directory)
+             (remote-fs-file-name-p default-directory)
+             (let ((owner
+                    (condition-case nil
+                        (remote-workspace-for-path default-directory)
+                      (error nil))))
+               (and (remote-workspace-live-p owner)
+                    (not (equal (remote-workspace-target-id owner)
+                                "local")))))
+    (setq my/language-server--folder-prewarm-timer
+          (run-with-idle-timer
+           my/language-server-folder-prewarm-idle-seconds nil
+           #'my/language-server--folder-prewarm-run))))
+
+(add-hook 'dired-mode-hook #'my/language-server--folder-prewarm-schedule)
 
 (defun my/language-server-program-entries ()
   "Return locally registered language servers in registration order."
@@ -919,7 +1172,8 @@ client-side installation."
 (cl-defun my/register-language-server
     (modes program &key server-id feature executables placement label source
            note priority multi-root activation-fn initialization-options
-           notification-handlers request-handlers server-id-suffix)
+           initialized-fn notification-handlers request-handlers
+           server-id-suffix)
   "Register a language server for MODES and record maintenance metadata.
 
 MODES is a major mode or list of major modes.  PROGRAM is the server
@@ -930,8 +1184,10 @@ target/workspace environment and launched through the official process
 API.  Use `client\=' only for an explicitly client-side UI helper.
 
 FEATURE, when non-nil, must be loadable before the server may start.
-EXECUTABLES, LABEL, SOURCE, and NOTE feed the Hub and Doctor.  The
-remaining keys are passed through to `make-lsp-client\='.
+EXECUTABLES, LABEL, SOURCE, and NOTE feed the Hub and Doctor.  Every
+server is sent its settings after `initialized'
+\(`my/language-server--announce-configuration'); INITIALIZED-FN runs after
+that.  The remaining keys are passed through to `make-lsp-client\='.
 
 This is the only supported way to declare a server; never call
 `lsp-register-client\=' or push onto client lists directly."
@@ -966,7 +1222,11 @@ This is the only supported way to declare a server; never call
         (list :new-connection connection
               :major-modes modes
               :server-id server-id
-              :priority (or priority 0))
+              :priority (or priority 0)
+              :initialized-fn
+              (lambda (workspace)
+                (my/language-server--announce-configuration workspace)
+                (when initialized-fn (funcall initialized-fn workspace))))
         (when multi-root (list :multi-root multi-root))
         (when activation-fn (list :activation-fn activation-fn))
         (when initialization-options
@@ -992,14 +1252,15 @@ This is the only supported way to declare a server; never call
     server-id))
 
 (cl-defun my/register-language-server-feature
-    (modes feature &key executables placement label source note)
+    (modes feature &key executables placement label source note available-p)
   "Record a language server that an external package registers for MODES.
 
 Some servers are registered by their own package (`lsp-java', `lean4-mode')
 rather than by `my/register-language-server'.  This declares the same
 maintenance metadata for them and, more importantly, records FEATURE as a
 hard prerequisite so `my/lsp-mode-supported-p' refuses to start a server
-whose support library is missing instead of failing inside lsp-mode."
+whose support library is missing instead of failing inside lsp-mode.
+AVAILABLE-P checks target-side prerequisites after the toolchain is applied."
   (let ((modes (if (listp modes) modes (list modes))))
     (dolist (mode modes)
       (setf (alist-get mode my/lsp-mode-required-features nil t #'eq) feature))
@@ -1008,6 +1269,7 @@ whose support library is missing instead of failing inside lsp-mode."
                       :program feature
                       :server-id feature
                       :feature feature
+                      :available-p available-p
                       :executables executables
                       :placement (or placement 'target)
                       :label (or label (format "%s" feature))
@@ -1032,7 +1294,7 @@ whose support library is missing instead of failing inside lsp-mode."
   (let ((feature (my/lsp-mode-required-feature)))
     (if feature
         (or (featurep feature)
-            (require feature nil t))
+            (my/language-server--require-on-client feature))
       t)))
 
 (defun my/current-language-server-backend ()
@@ -1044,19 +1306,37 @@ modules can keep dispatching on it."
 (defun my/lsp-mode-start-now ()
   "Start lsp-mode after the target environment is ready."
   (let ((report-missing my/language-server--manual-start))
-    (setq my/language-server--manual-start nil)
+    (setq my/language-server--manual-start nil
+          my/lsp-mode--start-request nil
+          my/language-server--start-executable-cache
+          (make-hash-table :test #'equal))
     (if (my/lsp-mode-supported-p)
-        (progn
+        (let ((my/project-local--scoped-root
+               (and (fboundp 'my/project-local-root)
+                    (cons (current-buffer) (my/project-local-root)))))
           (my/language-server-apply-process-environment)
           (my/language-server-apply-lsp-local-settings)
           (my/language-server-runtime-register-lsp-configuration)
           (if (my/language-server-contact-available-p)
-              (lsp-deferred)
+              (progn
+                (my/language-server--load-client-ui)
+                (setq my/lsp-mode--start-request
+                      (list (float-time)
+                            my/language-server-runtime-current
+                            remote-buffer-environment))
+                (condition-case error
+                    (lsp-deferred)
+                  (error
+                   (setq my/lsp-mode--start-request nil
+                         my/language-server--start-executable-cache nil)
+                   (signal (car error) (cdr error)))))
             (when report-missing
               (message
                "No installed language server supports %s on this target; run %s"
-               major-mode "M-x my/language-server-doctor"))))
+               major-mode "M-x my/language-server-doctor"))
+            (setq my/language-server--start-executable-cache nil)))
       (let ((feature (my/lsp-mode-required-feature)))
+        (setq my/language-server--start-executable-cache nil)
         (when report-missing
           (message "Skip lsp-mode in %s: missing `%s'" major-mode feature))))))
 
@@ -1075,7 +1355,8 @@ modules can keep dispatching on it."
   (interactive)
   (when (eq (my/language-server-preferred-backend) 'lsp-mode)
     (unless (or my/lsp-mode--waiting-for-direnv
-                (bound-and-true-p lsp-managed-mode))
+                (bound-and-true-p lsp-managed-mode)
+                (my/lsp-mode--start-request-active-p))
       (let ((state
              (and
               (fboundp 'my/direnv-update-environment-maybe)
@@ -1106,10 +1387,15 @@ modules can keep dispatching on it."
          (workspace
           (my/language-server--connect-workspace root))
          (remote-current-adapter-id "language-server")
-         (remote-current-workspace workspace))
-    (remote-environment-ensure
-     (and workspace (remote-workspace-context workspace)))
-    (apply fn args)))
+         (remote-current-workspace workspace)
+         (my/lsp-mode--starting-client-selection t)
+         (my/language-server--lookup-cache-active t))
+    (unwind-protect
+        (progn
+          (remote-environment-ensure
+           (and workspace (remote-workspace-context workspace)))
+          (apply fn args))
+      (setq my/language-server--start-executable-cache nil))))
 
 (defun my/language-server--booster-command (command)
   "Return COMMAND wrapped in `emacs-lsp-booster' for the active target.
@@ -1227,7 +1513,7 @@ ordinary meaning."
            (equal remote-current-adapter-id "language-server")
            (stringp command))
       (let ((my/language-server--resolving-executable-p t))
-        (ignore-errors (remote-executable-find command)))
+        (ignore-errors (my/language-server--find-executable command)))
     (funcall fn command remote)))
 
 (defun my/language-server--install-server-a (fn client &rest args)
@@ -1518,7 +1804,89 @@ roots are retained for callbacks which are not run in a source buffer."
       (when (and
              (eq (remote-workspace-resource-kind resource) 'lsp)
              (eq (remote-workspace-resource-value resource) value))
-        (remote-workspace-forget-resource workspace resource)))))
+        ;; A transport reset can deliver the process-exit sentinel before
+        ;; Remote reaches this resource's recovery callback.  Keep its
+        ;; ownership and source buffer so reconnect can create a new server.
+        (unless (memq (remote-workspace-state workspace)
+                      '(disconnected reconnecting))
+          (remote-workspace-forget-resource workspace resource))))))
+
+(defun my/language-server--detect-dead-transport (value)
+  "Report a lost pooled session before forgetting LSP VALUE.
+This also covers future TRAMP backends without an early transport-exit hook.
+The check uses only an existing session and its cached liveness predicate;
+it must never open a connection from a process sentinel."
+  (dolist (owner (hash-table-values remote-workspaces))
+    (when (and (eq (remote-workspace-state owner) 'open)
+               (seq-some
+                (lambda (resource)
+                  (and (eq (remote-workspace-resource-kind resource) 'lsp)
+                       (eq (remote-workspace-resource-value resource) value)))
+                (remote-workspace-resources owner)))
+      (when-let* ((route
+                   (or (and-let* ((process
+                                    (ignore-errors
+                                      (lsp--workspace-cmd-proc value))))
+                         (process-get process 'remote-route))
+                       (remote-workspace-primary-route owner)))
+                  (connection (remote-connection-cached-p route)))
+        (unless (remote-connection--live-p
+                 connection route (remote-workspace-context owner))
+          (remote-report-route-failure
+           route
+           '(remote-transport-error
+             "LSP process exited after its Remote session closed")))))))
+
+(defun my/language-server--restart-workspace-from-source
+    (old &optional remembered reason)
+  "Replace OLD LSP workspace and reattach its source buffers.
+REMEMBERED is a preferred live source buffer.  REASON is logged if the old
+workspace does not shut down cleanly.  Transport and LSP health recovery use
+this same path so both preserve sibling buffers and logical target identity."
+  (let* ((buffers (seq-filter
+                   #'buffer-live-p
+                   (ignore-errors (lsp--workspace-buffers old))))
+         (buffer (if (buffer-live-p remembered)
+                     remembered
+                   (car buffers))))
+    (unless (buffer-live-p buffer)
+      (error "No live source buffer remains for LSP recovery"))
+    (with-current-buffer buffer
+      ;; A local process can survive a session reset, while an SSH process
+      ;; may already have exited.  The public shutdown API removes either
+      ;; remaining old workspace before a fresh start on the same buffer.
+      (when (memq old (ignore-errors (lsp-workspaces)))
+        (my/lsp-mode-shutdown-workspace old reason)
+        (let ((deadline (+ (float-time) 2)))
+          (while (and (memq old (ignore-errors (lsp-workspaces)))
+                      (< (float-time) deadline))
+            (accept-process-output nil 0.05)))
+        (when (memq old (ignore-errors (lsp-workspaces)))
+          (error "Old LSP workspace did not stop during recovery")))
+      ;; The old request's coalescing window must not suppress this new start.
+      (setq my/lsp-mode--start-request nil)
+      (lsp)
+      (let ((replacement (car (lsp-workspaces))))
+        (unless (and replacement (not (eq replacement old)))
+          (error "LSP recovery did not create a new workspace"))
+        (dolist (other buffers)
+          (when (and (not (eq other buffer))
+                     (buffer-live-p other)
+                     (buffer-local-value 'buffer-file-name other))
+            (with-current-buffer other
+              (setq my/lsp-mode--start-request nil)
+              (lsp)
+              (unless (memq replacement (lsp-workspaces))
+                (error "LSP recovery did not reattach %s"
+                       (buffer-name other))))))
+        replacement))))
+
+(defun my/language-server--recover-lsp-resource (resource)
+  "Restart RESOURCE's lsp-mode server after its Remote transport recovers."
+  (my/language-server--restart-workspace-from-source
+   (remote-workspace-resource-value resource)
+   (plist-get (remote-workspace-resource-metadata resource) :buffer)
+   'transport-recovery))
 
 (defun my/language-server--skip-file-watch-p (root)
   "Return non-nil when an LSP client must decline dynamic watches for ROOT.
@@ -1544,24 +1912,121 @@ without bypassing the Remote workspace/resource lifecycle."
 
 (defun my/lsp-mode--watch-root-via-remote-a
     (fn directory callback ignored-files ignored-directories
-        &optional watch warn-big-repo-p)
+        &rest optional-arguments)
   "Create lsp-mode watches for DIRECTORY through Remote when target-owned.
 The lsp-mode session may retain an ordinary `/ssh:' workspace spelling, while
 the watch itself uses canonical `/fs:' paths.  Its public descriptor is then
 owned by the same recoverable Remote workspace as the language server."
-  (let* ((logical (my/language-server--canonical-root directory))
+  (let* ((watch (car optional-arguments))
+         (logical (my/language-server--canonical-root directory))
          (target (and logical (remote-file-name-target logical))))
-    (if (or (null logical) (equal target "local"))
-        (funcall fn directory callback ignored-files ignored-directories
-                 watch warn-big-repo-p)
+    (if (or (null logical) (equal target "local")
+            (> (length optional-arguments) 2))
+        (apply fn directory callback ignored-files ignored-directories
+               optional-arguments)
       (let* ((owner (my/language-server--connect-workspace logical))
              (remote-current-adapter-id "language-server")
              (remote-current-workspace owner)
              (remote-file-watch-workspace owner)
              (remote-file-watch-metadata
               (list :owner 'lsp-mode :root logical)))
-        (funcall fn logical callback ignored-files ignored-directories
-                 watch warn-big-repo-p)))))
+        (if (and (remote-get-target target)
+                 (fboundp 'remote-watch-tree)
+                 (fboundp 'make-lsp-watch)
+                 (fboundp 'lsp-watch-descriptors)
+                 (fboundp 'lsp--string-match-any))
+            (condition-case _unsupported
+                (let* ((watch (or watch
+                                  (condition-case error
+                                      (make-lsp-watch
+                                       :root-directory logical)
+                                    (error
+                                     (signal
+                                      'remote-backend-unsupported
+                                      (list
+                                       (error-message-string error)))))))
+                       (descriptors
+                        (condition-case error
+                            (lsp-watch-descriptors watch)
+                          (error
+                           (signal
+                            'remote-backend-unsupported
+                            (list (error-message-string error)))))))
+                  (unless (hash-table-p descriptors)
+                    (signal 'remote-backend-unsupported
+                            '("lsp-mode changed its watch descriptor shape")))
+                  (unless (gethash logical descriptors)
+                    (puthash
+                     logical
+                     (remote-watch-tree
+                      logical '(change)
+                      (lambda (event)
+                        (let ((action (nth 1 event))
+                              (file (nth 2 event)))
+                          (when (and
+                                 (memq action '(created deleted changed))
+                                 (stringp file)
+                                 (not (lsp--string-match-any
+                                       ignored-directories file)))
+                            (if (and (eq action 'created)
+                                     (file-directory-p file))
+                                ;; inotifywait registers a moved-in subtree,
+                                ;; but its pre-existing files produce no
+                                ;; individual creation events.  Match
+                                ;; lsp-mode's behavior on that rare path.
+                                (dolist (child
+                                         (directory-files-recursively
+                                          file ".*" t))
+                                  (unless (or
+                                           (file-directory-p child)
+                                           (lsp--string-match-any
+                                            ignored-directories child)
+                                           (lsp--string-match-any
+                                            ignored-files child))
+                                    (funcall callback
+                                             (list (car event)
+                                                   'created child))))
+                              (unless (lsp--string-match-any
+                                       ignored-files file)
+                                (funcall callback event)))))))
+                     descriptors))
+                  watch)
+              (remote-backend-unsupported
+               (remote-log
+                'lsp-recursive-watch-fallback
+                :root logical
+                :reason (error-message-string _unsupported))
+               (apply fn logical callback ignored-files
+                      ignored-directories optional-arguments)))
+          (apply fn logical callback ignored-files ignored-directories
+                 optional-arguments))))))
+
+(defun my/lsp-mode--require-client-packages-on-client-a (fn)
+  "Load lsp-mode client definitions from the Emacs machine.
+`lsp--require-packages' loads every registered client module once.  When its
+first call happens in a TRAMP buffer, module initialization may probe the
+target hundreds of times even though the Lisp packages live on the client.
+When startup has an explicit whitelist and every selected client is already
+registered, there is no reason to load unrelated clients.  Leave lsp-mode's
+global packages-required flag untouched so a later unlisted language or an
+explicit server-install command can still load all definitions."
+  (cond
+   ((and my/lsp-mode--starting-client-selection
+         (boundp 'lsp-enabled-clients)
+         lsp-enabled-clients
+         (boundp 'lsp-clients)
+         (hash-table-p lsp-clients)
+         (cl-every (lambda (id) (gethash id lsp-clients))
+                   lsp-enabled-clients))
+    nil)
+   ((and (boundp 'lsp--client-packages-required)
+         (not lsp--client-packages-required)
+         (file-remote-p default-directory))
+      (let ((default-directory temporary-file-directory)
+            (process-environment (remote-client-process-environment))
+            (exec-path (remote-client-exec-path)))
+        (funcall fn)))
+   (t (funcall fn))))
 
 (defun my/lsp-mode--register-capability-via-remote-a
     (fn registration)
@@ -1732,6 +2197,9 @@ only enforce process termination; they never send a second shutdown RPC."
 (defun my/lsp-mode--restart-with-circuit-breaker-a (fn workspace)
   "Call lsp-mode restart FN for WORKSPACE unless it is crash-looping."
   (let* ((key (my/lsp-mode--workspace-key workspace))
+         (owner (and (cadr key)
+                     (ignore-errors
+                       (remote-get-workspace (cadr key)))))
          (limit
           (or (alist-get (car key) my/lsp-mode-restart-limit-overrides)
               my/lsp-mode-restart-limit))
@@ -1741,25 +2209,42 @@ only enforce process termination; they never send a second shutdown RPC."
            (lambda (timestamp)
              (< (- now timestamp) my/lsp-mode-restart-window))
            (gethash key my/lsp-mode--restart-history))))
-    (if (>= (length history) (max 0 limit))
-        (progn
-          (ignore-errors
-            (my/language-server--set-struct-slot
-             workspace 'lsp--workspace 'shutdown-action 'shutdown))
-          (remote-log
-           'lsp-restart-circuit-open
-           :backend 'lsp-mode
-           :server (car key)
-           :root (cadr key)
-           :attempts (length history)
-           :window my/lsp-mode-restart-window)
-          (message
-           "LSP restart stopped after %d failure(s) in %.0fs: %s"
-           (length history)
-           my/lsp-mode-restart-window
-           (or (cadr key) (car key))))
+    (cond
+     ;; Remote owns the restart while its transport is recovering.  Starting
+     ;; lsp-mode here races the new session and can trip the crash breaker.
+     ((and owner
+           (memq (remote-workspace-state owner)
+                 '(disconnected reconnecting failed))
+           (seq-some
+            (lambda (resource)
+              (and (eq (remote-workspace-resource-kind resource) 'lsp)
+                   (eq (remote-workspace-resource-value resource)
+                       workspace)))
+            (remote-workspace-resources owner)))
+      (remote-log
+       'lsp-restart-deferred-to-remote
+       :backend 'lsp-mode
+       :server (car key)
+       :root (cadr key)))
+     ((>= (length history) (max 0 limit))
+      (ignore-errors
+        (my/language-server--set-struct-slot
+         workspace 'lsp--workspace 'shutdown-action 'shutdown))
+      (remote-log
+       'lsp-restart-circuit-open
+       :backend 'lsp-mode
+       :server (car key)
+       :root (cadr key)
+       :attempts (length history)
+       :window my/lsp-mode-restart-window)
+      (message
+       "LSP restart stopped after %d failure(s) in %.0fs: %s"
+       (length history)
+       my/lsp-mode-restart-window
+       (or (cadr key) (car key))))
+     (t
       (puthash key (cons now history) my/lsp-mode--restart-history)
-      (funcall fn workspace))))
+      (funcall fn workspace)))))
 
 (defun my/lsp-mode--read-state-safely-a (fn file)
   "Read lsp-mode state FILE with FN, treating truncated state as empty."
@@ -1820,10 +2305,8 @@ only enforce process termination; they never send a second shutdown RPC."
          (my/lsp-mode-shutdown-workspace value reason)))
      :recover
      (lambda (resource _owner)
-       (let ((value (remote-workspace-resource-value resource))
-             (my/language-server--recovering-resource-p t))
-         (lsp-workspace-restart value)
-         value))
+       (let ((my/language-server--recovering-resource-p t))
+         (my/language-server--recover-lsp-resource resource)))
      :metadata
      (list
       :backend 'lsp-mode
@@ -1838,6 +2321,7 @@ only enforce process termination; they never send a second shutdown RPC."
   "Forget an lsp-mode WORKSPACE after lsp-mode has already closed it."
   (my/lsp-mode--workspace-uninitialized-h workspace)
   (unless my/language-server--recovering-resource-p
+    (my/language-server--detect-dead-transport workspace)
     (my/language-server--forget-resource-value workspace)))
 
 (defun my/language-server-ensure-deferred ()
@@ -1875,7 +2359,8 @@ only enforce process termination; they never send a second shutdown RPC."
   (interactive)
   (when (called-interactively-p 'interactive)
     (setq my/language-server--manual-start t))
-  (unless my/language-server--waiting-for-runtime
+  (unless (or my/language-server--waiting-for-runtime
+              (my/lsp-mode--start-request-active-p))
     (let ((state
            (my/language-server-runtime-prepare
             #'my/language-server--runtime-ready)))
@@ -1924,8 +2409,287 @@ one uniform error when nothing is running."
   '((company-capf
      company-files
      :with company-tempo
-     company-yasnippet))
+     company-yasnippet)
+    company-dabbrev-code)
   "LSP-first company backends for code buffers.")
+
+(defcustom my/lsp-remote-completion-timeout 1.0
+  "Maximum seconds a remote Company completion may block Emacs.
+The normal LSP timeout remains in effect for other requests."
+  :type 'number
+  :group 'my/language-server)
+
+(defcustom my/lsp-remote-completion-retry-delay 3
+  "Seconds to use local code completion after a remote LSP timeout."
+  :type 'number
+  :group 'my/language-server)
+
+(defcustom my/lsp-remote-completion-health-timeout 8
+  "Seconds to wait for an asynchronous completion health request."
+  :type 'number
+  :group 'my/language-server)
+
+(defvar-local my/lsp-remote-completion--retry-at nil
+  "Earliest time to retry LSP completion after a timeout in this buffer.")
+
+(defvar-local my/lsp-remote-completion--probe nil
+  "Asynchronous completion health request owned by this source buffer.")
+
+(defvar-local my/lsp-remote-completion--retry-context nil
+  "Window, edit generation, point and input count for a recovered retry.")
+
+(defvar-local my/lsp-remote-completion--retried-tick nil
+  "Edit generation already given one automatic recovery retry.")
+
+(defvar my/lsp-remote-completion--restart-history
+  (make-hash-table :test #'equal)
+  "Last health-triggered restart time by server and logical workspace root.")
+
+(defun my/lsp-remote-completion--probe-clear (&optional cancel-request)
+  "Cancel this buffer's health probe timers and optionally its LSP request."
+  (when-let* ((state my/lsp-remote-completion--probe))
+    (setq my/lsp-remote-completion--probe nil)
+    (dolist (timer (list (plist-get state :start-timer)
+                         (plist-get state :watchdog)))
+      (when (timerp timer) (cancel-timer timer)))
+    (when (and cancel-request
+               (plist-get state :token)
+               (fboundp 'lsp-cancel-request-by-token))
+      (ignore-errors
+        (lsp-cancel-request-by-token (plist-get state :token))))))
+
+(defun my/lsp-remote-completion--maybe-restart (workspace process)
+  "Restart a still-live unresponsive WORKSPACE once per recovery window."
+  (when (and (fboundp 'lsp)
+             (processp process)
+             (process-live-p process)
+             (eq process (ignore-errors
+                           (lsp--workspace-cmd-proc workspace)))
+             (eq (ignore-errors (lsp--workspace-status workspace))
+                 'initialized))
+    (let* ((key (my/lsp-mode--workspace-key workspace))
+           (now (float-time))
+           (last (gethash key my/lsp-remote-completion--restart-history)))
+      (when (or (not (numberp last))
+                (>= (- now last) (max 1 my/lsp-mode-restart-window)))
+        (puthash key now my/lsp-remote-completion--restart-history)
+        (remote-log 'lsp-completion-health-restart
+                    :server (car key) :root (cadr key))
+        (condition-case error-data
+            (let ((owned
+                   (seq-some
+                    (lambda (owner)
+                      (when-let* ((resource
+                                   (seq-find
+                                    (lambda (candidate)
+                                      (and
+                                       (eq
+                                        (remote-workspace-resource-kind
+                                         candidate)
+                                        'lsp)
+                                       (eq
+                                        (remote-workspace-resource-value
+                                         candidate)
+                                        workspace)))
+                                    (remote-workspace-resources owner))))
+                        (cons owner resource)))
+                    (hash-table-values remote-workspaces))))
+              (cond
+               ((and owned
+                     (memq (remote-workspace-state (car owned))
+                           '(disconnected reconnecting failed)))
+                (remote-log 'lsp-completion-health-deferred-to-remote
+                            :server (car key) :root (cadr key)))
+               (owned
+                (my/language-server--recover-lsp-resource (cdr owned)))
+               (t
+                (my/language-server--restart-workspace-from-source
+                 workspace (current-buffer) 'completion-health-timeout))))
+          (error
+           (remote-log 'lsp-completion-health-restart-error
+                       :server (car key) :root (cadr key)
+                       :error (error-message-string error-data))))))))
+
+(defun my/lsp-remote-completion--probe-finish
+    (buffer workspace process token outcome)
+  "Finish BUFFER's health probe for WORKSPACE and PROCESS with OUTCOME."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (and (eq token
+                     (plist-get my/lsp-remote-completion--probe :token))
+                 (eq process
+                     (plist-get my/lsp-remote-completion--probe :process)))
+        (my/lsp-remote-completion--probe-clear (eq outcome 'expired))
+        (pcase outcome
+          ('ready
+           (setq my/lsp-remote-completion--retry-at nil)
+           (remote-log 'lsp-completion-health-restored
+                       :buffer (buffer-name))
+           (when-let* ((context my/lsp-remote-completion--retry-context)
+                       ((not (equal my/lsp-remote-completion--retried-tick
+                                    (nth 1 context))))
+                       ((fboundp 'company-idle-begin)))
+             (setq my/lsp-remote-completion--retried-tick (nth 1 context)
+                   my/lsp-remote-completion--retry-context nil)
+             (run-at-time 0.02 nil
+                          #'my/lsp-remote-completion--retry-if-unchanged
+                          buffer context)))
+          ('expired
+           (setq my/lsp-remote-completion--retry-at
+                 (+ (float-time) 30))
+           (my/lsp-remote-completion--maybe-restart workspace process)))))))
+
+(defun my/lsp-remote-completion--retry-if-unchanged (buffer context)
+  "Retry Company's automatic completion in BUFFER for unchanged CONTEXT."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (pcase-let ((`(,window ,tick ,position ,input-count) context))
+        (when (and (bound-and-true-p lsp-managed-mode)
+                   (bound-and-true-p company-mode)
+                   (fboundp 'company-idle-begin)
+                   (not (bound-and-true-p company-candidates))
+                   (window-live-p window)
+                   (eq window (selected-window))
+                   (eq buffer (window-buffer window))
+                   (equal tick (buffer-chars-modified-tick))
+                   (= position (point))
+                   (or (null input-count)
+                       (and (boundp 'num-nonmacro-input-events)
+                            (= input-count num-nonmacro-input-events))))
+          (company-idle-begin buffer window tick position))))))
+
+(defun my/lsp-remote-completion--probe-start (buffer workspace process token)
+  "Send a nonblocking completion health request from BUFFER."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (when (eq token
+                (plist-get my/lsp-remote-completion--probe :token))
+        (if (not (and (process-live-p process)
+                      (eq process
+                          (ignore-errors
+                            (lsp--workspace-cmd-proc workspace)))
+                      (eq (ignore-errors
+                            (lsp--workspace-status workspace))
+                          'initialized)))
+            (progn
+              (my/lsp-remote-completion--probe-clear)
+              (setq my/lsp-remote-completion--retry-at nil))
+          (condition-case error-data
+              (let* ((lsp--cur-workspace workspace)
+                     (params (lsp--text-document-position-params))
+                     (deadline
+                      (if (and (numberp
+                                my/lsp-remote-completion-health-timeout)
+                               (> my/lsp-remote-completion-health-timeout 0))
+                          my/lsp-remote-completion-health-timeout
+                        8))
+                     (watchdog
+                      (run-at-time
+                       deadline nil
+                       #'my/lsp-remote-completion--probe-finish
+                       buffer workspace process token 'expired)))
+                (setq my/lsp-remote-completion--probe
+                      (list :process process :workspace workspace
+                            :token token :watchdog watchdog))
+                (lsp-request-async
+                 "textDocument/completion" params
+                 (lambda (&rest _response)
+                   (my/lsp-remote-completion--probe-finish
+                    buffer workspace process token 'ready))
+                 :mode 'alive :cancel-token token
+                 :error-handler
+                 (lambda (&rest _error)
+                   (my/lsp-remote-completion--probe-finish
+                    buffer workspace process token 'failed))))
+            (error
+             (my/lsp-remote-completion--probe-clear t)
+             (remote-log 'lsp-completion-health-error
+                         :buffer (buffer-name)
+                         :error (error-message-string error-data)))))))))
+
+(defun my/lsp-remote-completion--schedule-probe ()
+  "Check LSP health asynchronously after a completion request times out."
+  (when (and (not my/lsp-remote-completion--probe)
+             (fboundp 'lsp-workspaces)
+             (fboundp 'lsp-request-async)
+             (fboundp 'lsp--text-document-position-params))
+    (when-let* ((workspace (car (ignore-errors (lsp-workspaces))))
+                (process (ignore-errors
+                           (lsp--workspace-cmd-proc workspace)))
+                ((processp process))
+                ((process-live-p process)))
+      (let* ((buffer (current-buffer))
+             (token (make-symbol "remote-completion-health"))
+             (timer
+              (run-at-time
+               0.05 nil #'my/lsp-remote-completion--probe-start
+               buffer workspace process token)))
+        (setq my/lsp-remote-completion--probe
+              (list :workspace workspace :process process
+                    :token token :start-timer timer))
+        (add-hook 'kill-buffer-hook
+                  #'my/lsp-remote-completion--probe-clear nil t)))))
+
+(defun my/lsp-remote-completion--managed-h ()
+  "Drop obsolete completion fallback state when LSP changes generation."
+  (my/lsp-remote-completion--probe-clear t)
+  (setq my/lsp-remote-completion--retry-at nil
+        my/lsp-remote-completion--retry-context nil
+        my/lsp-remote-completion--retried-tick nil))
+
+(add-hook 'lsp-managed-mode-hook #'my/lsp-remote-completion--managed-h)
+
+(defun my/lsp-remote-completion--record-timeout ()
+  "Enter bounded local fallback after a remote LSP completion timeout."
+  (let ((tick (buffer-chars-modified-tick)))
+    (setq my/lsp-remote-completion--retry-context
+          (unless (equal tick my/lsp-remote-completion--retried-tick)
+            (list (selected-window) tick (point)
+                  (and (boundp 'num-nonmacro-input-events)
+                       num-nonmacro-input-events)))))
+  (setq my/lsp-remote-completion--retry-at
+        (+ (float-time)
+           (if (numberp my/lsp-remote-completion-retry-delay)
+               (max 0 my/lsp-remote-completion-retry-delay)
+             3)))
+  (remote-log 'lsp-completion-timeout
+              :buffer (buffer-name)
+              :retry-at my/lsp-remote-completion--retry-at)
+  (my/lsp-remote-completion--schedule-probe)
+  nil)
+
+(defun my/lsp-remote-completion--candidates-a (original &rest arguments)
+  "Bound remote LSP completion latency while preserving local behavior."
+  (if (not (and (bound-and-true-p my/lsp-remote-change--eligible)
+                (bound-and-true-p lsp-managed-mode)
+                (numberp my/lsp-remote-completion-timeout)
+                (> my/lsp-remote-completion-timeout 0)))
+      (apply original arguments)
+    (if (or my/lsp-remote-completion--probe
+            (and (numberp my/lsp-remote-completion--retry-at)
+                 (< (float-time) my/lsp-remote-completion--retry-at)))
+        nil
+      (condition-case error-data
+          (let ((result
+                 (with-timeout
+                     (my/lsp-remote-completion-timeout
+                      :my/lsp-remote-completion-timed-out)
+                   (let ((lsp-response-timeout
+                          (if (numberp lsp-response-timeout)
+                              (min lsp-response-timeout
+                                   my/lsp-remote-completion-timeout)
+                            my/lsp-remote-completion-timeout)))
+                     (apply original arguments)))))
+            (if (eq result :my/lsp-remote-completion-timed-out)
+                (my/lsp-remote-completion--record-timeout)
+              (setq my/lsp-remote-completion--retry-at nil)
+              result))
+        (error
+         (if (string-match-p
+              "Timeout while waiting for response.*textDocument/completion"
+              (error-message-string error-data))
+             (my/lsp-remote-completion--record-timeout)
+           (signal (car error-data) (cdr error-data))))))))
 
 (defconst my/company-text-backends
   '((company-capf
@@ -1978,6 +2742,8 @@ one uniform error when nothing is running."
     "Try default completion styles."
     (let ((completion-styles '(basic partial-completion)))
       (apply func args)))
+  (advice-add 'company-capf--candidates :around
+              #'my/lsp-remote-completion--candidates-a)
   (setq company-idle-delay 0.28
         company-minimum-prefix-length 1
         company-show-quick-access t
@@ -2328,6 +3094,10 @@ lsp-mode's categorized index, whose category names provide the same fallback."
         lsp-signature-render-documentation nil
         lsp-eldoc-enable-hover nil
         lsp-enable-suggest-server-download nil
+        ;; Dape owns this configuration's debugging UI.  lsp-mode's default
+        ;; auto-configure path eagerly loads the separate dap-mode stack for
+        ;; every LSP buffer, adding seconds to the first remote didOpen.
+        lsp-enable-dap-auto-configure nil
         ;; The `/fs:' handler plus `remote-make-process' is the only process
         ;; path.  lsp-mode's own `-tramp' client clones would add a second,
         ;; parallel remote implementation whose command, environment and
@@ -2339,8 +3109,6 @@ lsp-mode's categorized index, whose category names provide the same fallback."
   (add-hook
    'lsp-after-initialize-hook
    #'my/language-server-register-lsp-resource)
-  (add-hook 'lsp-configure-hook
-            #'my/language-server--push-workspace-configuration-h)
   (add-hook
    'lsp-after-uninitialized-functions
    #'my/language-server-unregister-lsp-resource)
@@ -2368,18 +3136,38 @@ lsp-mode's categorized index, whose category names provide the same fallback."
    #'my/lsp-mode--workspace-initialized-h)
   (unless (advice-member-p #'my/lsp-mode--connect-via-remote-a 'lsp)
     (advice-add 'lsp :around #'my/lsp-mode--connect-via-remote-a))
-  (unless (advice-member-p
-           #'my/lsp-mode--supports-logical-buffer-a
-           'lsp--supports-buffer?)
+  (when (and (fboundp 'lsp--require-packages)
+             (equal (func-arity 'lsp--require-packages) '(0 . 0))
+             (not (advice-member-p
+                   #'my/lsp-mode--require-client-packages-on-client-a
+                   'lsp--require-packages)))
     (advice-add
-     'lsp--supports-buffer?
-     :around #'my/lsp-mode--supports-logical-buffer-a))
-  (unless (advice-member-p
-           #'my/lsp-mode--quiet-client-whitelist-a
-           'lsp--supports-buffer?)
-    (advice-add
-     'lsp--supports-buffer?
-     :around #'my/lsp-mode--quiet-client-whitelist-a))
+     'lsp--require-packages :around
+     #'my/lsp-mode--require-client-packages-on-client-a))
+  (when (and (fboundp 'lsp-find-session-folder)
+             (fboundp 'lsp-f-canonical)
+             (fboundp 'lsp-session-folders)
+             (fboundp 'lsp--files-same-host)
+             (equal (func-arity 'lsp-find-session-folder) '(2 . 2))
+             (not (advice-member-p
+                   #'my/lsp-mode--find-session-folder-remote-a
+                   'lsp-find-session-folder)))
+    (advice-add 'lsp-find-session-folder :around
+                #'my/lsp-mode--find-session-folder-remote-a))
+  (when (and (fboundp 'lsp--supports-buffer?)
+             (equal (func-arity 'lsp--supports-buffer?) '(1 . 1)))
+    (unless (advice-member-p
+             #'my/lsp-mode--supports-logical-buffer-a
+             'lsp--supports-buffer?)
+      (advice-add
+       'lsp--supports-buffer?
+       :around #'my/lsp-mode--supports-logical-buffer-a))
+    (unless (advice-member-p
+             #'my/lsp-mode--quiet-client-whitelist-a
+             'lsp--supports-buffer?)
+      (advice-add
+       'lsp--supports-buffer?
+       :around #'my/lsp-mode--quiet-client-whitelist-a)))
   (unless (advice-member-p
            #'my/lsp-mode--stdio-connect-via-remote-a
            'lsp-stdio-connection)
@@ -2733,6 +3521,8 @@ jit-lock renderer continues to materialize faces only around visible text."
 (require 'init-html)
 (require 'init-js2)
 (require 'init-latex)
+(require 'init-lsp-change-batch)
+(require 'init-lsp-prewarm)
 
 (provide 'init-lsp)
 ;;; init-lsp.el ends here

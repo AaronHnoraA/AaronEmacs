@@ -47,6 +47,11 @@
 (declare-function my/file-icon-for-file "init-ui" (file &rest args))
 (declare-function nerd-icons-codicon "nerd-icons" (icon-name &rest args))
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
+(declare-function consult-grep "consult" (&optional dir initial))
+(declare-function consult-ripgrep "consult" (&optional dir initial))
+(defvar consult-ripgrep-args)
+(declare-function remote-executable-find "remote-process"
+                  (program &optional context))
 (declare-function get-current-persp "perspective")
 (declare-function persp-parameter "perspective" (parameter &optional persp))
 (declare-function persp-curr "perspective" (&optional frame))
@@ -538,13 +543,42 @@ Without a prefix argument, default to the current project."
     (projectile-switch-to-buffer)
     (my/project-activate project-root t)))
 
-(defun my/project-ripgrep (project-root)
-  "Run `consult-ripgrep' in PROJECT-ROOT."
-  (interactive (list (my/project-read-target-root "Ripgrep in project: ")))
+(defun my/project-ripgrep (project-root &optional initial rg-unavailable)
+  "Search PROJECT-ROOT with its available target-side search program.
+Use a client path for a shared filesystem so local projects keep native
+process and file-visit speed.  GNU grep remains usable when an SSH
+target has no ripgrep installation.  INITIAL seeds the search prompt.
+RG-UNAVAILABLE records a previous probe by another search entry point."
+  (interactive (list (my/project-read-target-root "Search in project: ")))
+  (require 'remote-process)
+  (require 'remote-search)
+  (require 'consult)
   (setq project-root (my/project-normalize-root project-root))
   (when (fboundp 'my/direnv-update-environment-maybe)
     (my/direnv-update-environment-maybe project-root))
-  (consult-ripgrep project-root))
+  (let* ((logical (remote-canonicalize-file-name project-root))
+         (context (remote-context logical))
+         (search-root (or (remote-client-file-name logical) logical))
+         (custom-search-command
+          (not (remote-search-consult-ripgrep-args
+                consult-ripgrep-args "rg")))
+         (rg (and (not custom-search-command)
+                  (remote-search-ripgrep context rg-unavailable)))
+         (rg-args
+          (and rg
+               (remote-search-consult-ripgrep-args
+                consult-ripgrep-args rg)))
+         (remote-current-adapter-id "process"))
+    (cond
+     (custom-search-command
+      (consult-ripgrep search-root initial))
+     (rg-args
+      (let ((consult-ripgrep-args rg-args))
+        (consult-ripgrep search-root initial)))
+     ((remote-executable-find "grep" context)
+      (consult-grep search-root initial))
+     (t
+      (user-error "Neither ripgrep nor grep is available on this target")))))
 
 (defun my/project-open-root (project-root)
   "Open PROJECT-ROOT in Dired/Dirvish."
@@ -561,8 +595,10 @@ Without a prefix argument, default to the current project."
   (setq project-root (my/project-normalize-root project-root))
   (when (fboundp 'my/direnv-update-environment-maybe)
     (my/direnv-update-environment-maybe project-root))
-  (let ((default-directory project-root))
-    (magit-status-setup-buffer project-root)
+  (let* ((logical (remote-canonicalize-file-name project-root))
+         (magit-root (or (remote-client-file-name logical) logical))
+         (default-directory magit-root))
+    (magit-status-setup-buffer magit-root)
     (my/project-activate project-root t)))
 
 (defun my/project-vterm (project-root)
@@ -1802,7 +1838,7 @@ that extra stat is only paid for a marker that actually matched."
       ("r" "recent file" my/project-recent-file)
       ("b" "switch buffer" my/project-switch-buffer)]
      ["Search"
-      ("s" "ripgrep" my/project-ripgrep)
+      ("s" "search project" my/project-ripgrep)
       ("a" "all-project files" projectile-find-file-in-known-projects)
       ("g" "magit" my/project-magit-status)]
      ["Open / Shell"

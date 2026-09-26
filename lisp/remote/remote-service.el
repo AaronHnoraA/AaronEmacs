@@ -100,10 +100,20 @@ does not depend on whether the logical `/fs:' file handler is installed."
            :filesystem-effects 'none)))
       (error nil))))
 
+(defun remote-service--directory-valid-p
+    (directory ready-file ready-kind context adapter validate)
+  "Return whether DIRECTORY passes readiness and optional VALIDATE.
+VALIDATE receives CONTEXT and the logical DIRECTORY after the basic ready
+probe succeeds."
+  (and (remote-service--directory-ready-p
+        directory ready-file ready-kind context adapter)
+       (or (null validate)
+           (funcall validate context directory))))
+
 (cl-defun remote-service-provision-directory
     (service source install-directory
      &key context (adapter "service") ready-file
-     (ready-kind 'exists) (payload-directory ".") prepare)
+     (ready-kind 'exists) (payload-directory ".") prepare validate)
   "Provision a client-local directory as a versioned target-side SERVICE.
 
 SOURCE is packed on the client, transferred through the Remote bulk-copy
@@ -117,6 +127,10 @@ archive below that relative staging subdirectory.  PREPARE, when non-nil, is
 called with CONTEXT and the logical staging directory after extraction and
 before readiness validation.  It is the language/service-specific boundary
 for small steps such as creating a launcher or changing its mode.
+
+VALIDATE, when non-nil, receives CONTEXT and each logical candidate directory
+after the ready probe.  A stale ready cache that fails validation is replaced
+only after a newly staged candidate passes the same validation.
 
 Provisioning is allowed only for trusted targets.  Return the canonical
 logical installation directory."
@@ -133,6 +147,8 @@ logical installation directory."
     (error "Invalid provisioning payload directory: %S" payload-directory))
   (unless (or (null prepare) (functionp prepare))
     (error "Provision prepare hook is not callable: %S" prepare))
+  (unless (or (null validate) (functionp validate))
+    (error "Provision validation hook is not callable: %S" validate))
   (let* ((context
           (cond
            ((remote-context-p context) context)
@@ -154,8 +170,8 @@ logical installation directory."
     (unless (remote-service--safe-install-directory-p native-install)
       (error "Refusing unsafe service installation directory: %s"
              native-install))
-    (if (remote-service--directory-ready-p
-         install-directory ready-file ready-kind context adapter)
+    (if (remote-service--directory-valid-p
+         install-directory ready-file ready-kind context adapter validate)
         install-directory
       (let* ((service-name
               (replace-regexp-in-string
@@ -219,8 +235,8 @@ logical installation directory."
               (when prepare
                 (funcall prepare context staging))
               (unless
-                  (remote-service--directory-ready-p
-                   staging ready-file ready-kind context adapter)
+                  (remote-service--directory-valid-p
+                   staging ready-file ready-kind context adapter validate)
                 (signal
                  'remote-service-error
                  (list
@@ -244,8 +260,9 @@ logical installation directory."
                 native-staging native-install)
                :context context :adapter adapter :check t)
               (unless
-                  (remote-service--directory-ready-p
-                   install-directory ready-file ready-kind context adapter)
+                  (remote-service--directory-valid-p
+                   install-directory ready-file ready-kind context adapter
+                   validate)
                 (signal
                  'remote-service-error
                  (list

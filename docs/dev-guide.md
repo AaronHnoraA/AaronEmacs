@@ -419,11 +419,15 @@ Lean 的通知/请求 payload 一律用 `lsp-get` 读取：lsp-mode 只有在以
 
 ### 你应该怎么用
 
-- `M-x remote-board`：查看/打开 logical target、当前 route 与健康状态
+- `M-x remote-board`：按 target 查看 route、连接状态、配置/当前/最近文件夹和活动转发端口；可见时随连接、workspace 和 channel 生命周期刷新。`RET`/`o` 打开文件夹并建立受管理的 workspace（端口行复制本地地址），`f` 在目标文件系统中补全目录，`c` 关闭选中文件夹的 workspace 与所属资源，`C` 断开整个 target 的 workspace 与连接（已访问的 buffer 留在 Emacs，后续文件访问可重新连接），`p` 转发目标端口（`C-u p` 指定目标侧 host，`C-u C-u p` 还可指定本地端口），`n` 命名选中转发，`P` 更换其本地端口，`k` 关闭转发并移除恢复资源，`r` 后台重连 workspace（已连接时用 `C-u r`），`w` 复制行的 URI 或本地端口地址，`s` 刷新本机缓存状态，`g` 重读 target 配置
 - 编辑远程文件：使用 `fs://target/path` 或 `/fs:target:/path`
 - 旧的 `/ssh:host:/path` 仍可打开，进入 buffer 后会 canonicalize 为 `/fs`
 - 在当前本地/远端 workspace 打开终端：`C-c e`（`vterm-toggle`）
 - 按主机名直接开终端：`M-x my/vterm-ssh`
+
+`/fs:` 远程 buffer 的模式栏显示当前 target，点击可打开 Remote 面板。普通本地
+buffer 不显示这一项。面板中的最近文件夹由显式的 Remote 打开操作记忆，并由
+`savehist` 持久化；绘制面板不连接远端，只有实际打开文件夹时才检查目标目录。
 
 `C-c e` 是推荐入口。它读取当前 buffer 的 `/fs:TARGET:/path` 上下文，通过
 remote process adapter 启动 vterm，并把 terminal 生命周期登记给 workspace；
@@ -619,6 +623,14 @@ in-process 缓存，与自动刷新保持一致。
   `noema.toml`。只有已经是 Noema 项目时才额外 `session:promote` + `session:name:bind`
   写进 Node 持久注册表，失败不影响会话。`noema-agent-acp-sessions` 是合并视图，
   `noema-sessions-read` 是统一的会话选择器（可选“新开一个”）。
+- 生命周期：所有自动停止路径（warm 清扫、项目最后一个 `.noema` 关闭后的收尾、项目
+  关闭期间结束的 Run）统一经 `noema-agent-acp-auto-stoppable-p`——空闲、不可见、来源
+  在 `noema-agent-acp-auto-stop-origins`。`agent-shell-mode-hook` 给每个 agent buffer
+  装 `after-change-functions` 记录活动时间；`noema-agent-worker-stop-buffer` 在
+  `noema-agent-acp-busy-p`（含 shell-maker 的交互回答）时拒绝停止。
+- 放置：进程目录由 `noema-agent-acp-process-directory-function` 决定，本配置设为
+  `my/agent-shell-process-directory`，与裸 `agent-shell` 的 `agent-shell-cwd` advice
+  是同一函数；远端 agent 的契约见 `docs/remote-framework.md` 第 7 节。
 - 编辑器上下文（`noema-context.el`）：挑选完全复用 gptel 的 `gptel-context` 与
   `*gptel-context*` 检视 buffer，只有一份选择。发送时把它解析成引用
   （`noema-context-references`），再构造内容块：一个 text 块列出

@@ -21,6 +21,8 @@
 
 (defvar remote-environment-inhibit nil)
 (defvar remote-buffer-environment nil)
+(defvar remote-process-preferred-route nil
+  "Preferred route for a workspace-owned process, with normal failover.")
 
 (defvar process-adaptive-read-buffering)
 (defvar process-file-side-effects)
@@ -316,8 +318,28 @@ FUNCTION receives the route, a physical default directory, and environment
 overrides.  Failover is limited to transport errors."
   (let* ((context (remote--context-value context))
          (routes (remote-routes adapter capability context constraints))
+         (preferred
+          (and (remote-route-p remote-process-preferred-route)
+               (seq-find
+                (lambda (route)
+                  (and (equal (remote-route-target-id route)
+                              (remote-route-target-id
+                               remote-process-preferred-route))
+                       (equal (remote-route-pipeline-id route)
+                              (remote-route-pipeline-id
+                               remote-process-preferred-route))
+                       (equal (remote-route-backend-id route)
+                              (remote-route-backend-id
+                               remote-process-preferred-route))
+                       (not (plist-get (remote-route-reason route)
+                                       :link-cooling))
+                       (not (plist-get (remote-route-reason route)
+                                       :backend-cooling))))
+                routes)))
          (environment (remote--environment-vars context))
          last-error)
+    (when preferred
+      (setq routes (cons preferred (delq preferred routes))))
     (unless routes
       (error "No %s route for target %s"
              capability (remote-context-target-id context)))
@@ -480,7 +502,8 @@ adapter."
 (defun remote-make-process (&rest plist)
   "Create an asynchronous process in the selected logical target.
 PLIST accepts all `make-process' keys plus `:remote-adapter',
-`:remote-context', `:remote-link', `:remote-environment', and
+`:remote-context', `:remote-link', `:remote-preferred-route',
+`:remote-environment', and
 `:remote-directory'.  `:remote-process-class' can explicitly override the
 adapter's receive-buffering class.  `:remote-directory' preserves an official
 `make-process' caller's logical `default-directory' independently of its
@@ -496,16 +519,23 @@ workspace root."
           (remote-process-class-profile process-class))
          (context (plist-get plist :remote-context))
          (link (plist-get plist :remote-link))
+         (remote-process-preferred-route
+          (plist-get plist :remote-preferred-route))
+         (capability
+          (if (memq (plist-get plist :connection-type) '(pty t))
+              'pty
+            'process-async))
          (explicit-environment (plist-get plist :remote-environment))
          (logical-directory (plist-get plist :remote-directory))
          (stderr-token (plist-get plist :remote-stderr-token))
          (arguments (copy-sequence plist)))
     (dolist (key '(:remote-adapter :remote-context :remote-link
+                   :remote-preferred-route
                    :remote-environment :remote-directory
                    :remote-stderr-token :remote-process-class))
       (setq arguments (remote--plist-delete arguments key)))
     (remote--call-with-process-route
-     adapter 'process-async context (and link (list :link link))
+     adapter capability context (and link (list :link link))
      (lambda (route physical-directory resolved-environment)
        (let* ((context-value (remote--context-value context))
               (overrides
@@ -592,8 +622,19 @@ workspace root."
                            process-profile :adaptive-read-buffering)
                           (plist-get
                            process-profile :adaptive-read-buffering)
-                        process-adaptive-read-buffering)))
-                 (apply #'make-process arguments))))
+                        process-adaptive-read-buffering))
+                     (process-environment
+                      (or
+                       (remote-backend-process-plan-process-environment plan)
+                       process-environment))
+                     (exec-path
+                      (or (remote-backend-process-plan-exec-path plan)
+                          exec-path)))
+                 (let ((start (lambda () (apply #'make-process arguments))))
+                   (if-let* ((around
+                              (remote-backend-process-plan-around-start plan)))
+                       (funcall around start)
+                     (funcall start))))))
          (process-put process 'remote-route route)
          (process-put process 'remote-context context-value)
          (process-put process 'remote-process-class process-class)
@@ -684,13 +725,50 @@ routes through a `/fs:' file-name handler."
                       process-profile :adaptive-read-buffering))
         process))))
 
+(defconst remote--rpc-executable-probe-script
+  (concat
+   "case \"$1\" in /*) p=$1;; */*) exit 2;; "
+   "*) p=$(command -v \"$1\" 2>/dev/null) || exit 1;; esac; "
+   "case \"$p\" in /*) [ -f \"$p\" ] && [ -x \"$p\" ] && "
+   "printf '%s\\0' \"$p\";; *) exit 2;; esac")
+  "POSIX target-side executable probe used by the tramp-rpc process route.")
+
+(defun remote--rpc-executable-find (program)
+  "Return (SUPPORTED . PATH) for PROGRAM via one target-side process.
+SUPPORTED is nil if the probe cannot safely interpret the result, in which
+case `remote-executable-find' falls back to Emacs' usual search.  A supported
+missing program returns (t . nil)."
+  (when (and (stringp program)
+             (not (string-empty-p program))
+             (not (string-prefix-p "-" program))
+             (or (file-name-absolute-p program)
+                 (not (string-match-p "/" program))))
+    (condition-case nil
+        (with-temp-buffer
+          (let ((status
+                 (process-file "sh" nil t nil "-c"
+                               remote--rpc-executable-probe-script
+                               "sh" program))
+                (output (buffer-string)))
+            (cond
+             ((and (equal status 0)
+                   (> (length output) 1)
+                   (eq (aref output (1- (length output))) 0)
+                   (file-name-absolute-p
+                    (substring output 0 (1- (length output)))))
+              (cons t (substring output 0 (1- (length output)))))
+             ((equal status 1) (cons t nil)))))
+      ;; Other targets and future tramp-rpc transports may lack a POSIX sh.
+      ;; Let the normal file-handler lookup decide instead of failing the route.
+      (error nil))))
+
 (defun remote-executable-find (program &optional context)
   "Find PROGRAM on CONTEXT's logical target.
 The return value is a target-native path, never a physical TRAMP link name."
   (remote--call-with-process-route
    (or remote-current-adapter-id "process")
    'process-sync context nil
-   (lambda (_route physical-directory environment)
+   (lambda (route physical-directory environment)
      (let* ((default-directory physical-directory)
             (process-environment
              (remote--apply-environment process-environment environment))
@@ -710,10 +788,15 @@ The return value is a target-native path, never a physical TRAMP link name."
                       ;; explicitly for a target-native absolute argv.
                       (concat prefix program)
                     (expand-file-name program physical-directory))))
+            (rpc-probe
+             (and (equal (remote-route-link-plugin-id route) "tramp-rpc")
+                  (remote--rpc-executable-find program)))
             (found
-             (if absolute
-                 (and (file-executable-p absolute) absolute)
-               (executable-find program t))))
+             (if rpc-probe
+                 (cdr rpc-probe)
+               (if absolute
+                   (and (file-executable-p absolute) absolute)
+                 (executable-find program t)))))
        (and found (remote-file-local-name found))))))
 
 (cl-defun remote-copy-file-to-target

@@ -50,7 +50,7 @@
 
 (cl-defstruct (remote-ssh-control
                (:constructor remote-ssh-control-create))
-  path destination state checked-at)
+  path destination config-file state checked-at)
 
 (defcustom remote-transport-ssh-control-check-interval 2.0
   "Seconds an OpenSSH master's `-O check' answer is trusted.
@@ -216,13 +216,28 @@ and DISCONNECT own resources allocated by CONNECT."
         (format "%s@%s" user host)
       host)))
 
+(defun remote-transport-ssh-config-file (pipeline)
+  "Return PIPELINE's absolute client-side SSH config file, if configured."
+  (when-let* ((file
+               (plist-get (remote-pipeline-config pipeline)
+                          :ssh-config-file)))
+    (unless (and (stringp file)
+                 (file-name-absolute-p file)
+                 (not (file-remote-p file)))
+      (signal 'remote-transport-error
+              (list "SSH config file must be an absolute client path" file)))
+    file))
+
 (defun remote-transport--ssh-control-command (control operation)
   "Return an OpenSSH control COMMAND for CONTROL and OPERATION."
   (when-let* ((ssh (remote-client-executable-find "ssh")))
-    (list
-     ssh "-S" (remote-ssh-control-path control)
-     "-O" operation
-     (remote-ssh-control-destination control))))
+    (append
+     (list ssh)
+     (when-let* ((file (remote-ssh-control-config-file control)))
+       (list "-F" file))
+     (list "-S" (remote-ssh-control-path control)
+           "-O" operation
+           (remote-ssh-control-destination control)))))
 
 (defun remote-transport--ssh-control-check (control &optional force)
   "Return non-nil when CONTROL's OpenSSH master answers.
@@ -248,10 +263,15 @@ A recent positive answer is reused unless FORCE is non-nil; see
 The first backend SSH operation creates the actual master with
 `ControlMaster=auto'.  The pipeline owns its ControlPath, health check, and
 eventual `-O exit'."
-  (let* ((identity
+  (let* ((pipeline
+          (remote-route-pipeline
+           (remote-pipeline-runtime-route runtime)))
+         (config-file (remote-transport-ssh-config-file pipeline))
+         (identity
           (format "%S"
                   (list
                    (remote-pipeline-runtime-key runtime)
+                   config-file
                    (remote-pipeline-stage-id stage)
                    (remote-endpoint-host endpoint)
                    (remote-endpoint-port endpoint)
@@ -268,6 +288,7 @@ eventual `-O exit'."
            :path path
            :destination
            (remote-transport--ssh-destination endpoint)
+           :config-file config-file
            :state 'lazy)))
     ;; A previous abnormal exit in this Emacs process may have left a socket.
     ;; Keep a live master, but remove a stale path before OpenSSH sees it.
@@ -377,7 +398,7 @@ allocated."
                  (remote-transport-disconnect-function transport)))
       (condition-case error
           (funcall disconnect stage-runtime runtime)
-        (error
+        ((error quit)
          (remote-log
           'transport-close-error
           :pipeline (remote-pipeline-runtime-pipeline-id runtime)
@@ -483,7 +504,7 @@ Use `remote-pipeline-acquire' when the runtime should participate in pooling."
               (remote-stage-runtime-transport-id stage-runtime))
             (remote-pipeline-runtime-stages runtime)))
           runtime)
-      (error
+      ((error quit)
        (setf (remote-pipeline-runtime-state runtime) 'failed
              (remote-pipeline-runtime-error runtime) error)
        (dolist
@@ -597,7 +618,7 @@ Use `remote-pipeline-acquire' when the runtime should participate in pooling."
                  (list
                   (format "Pipeline %s was replaced while opening"
                           (remote-pipeline-id pipeline))))))
-          (error
+          ((error quit)
            (when (eq (gethash key remote-pipeline-runtime-pool) runtime)
              (remhash key remote-pipeline-runtime-pool))
            (signal (car err) (cdr err))))))

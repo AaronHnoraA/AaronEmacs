@@ -55,49 +55,213 @@
       (should-not (local-variable-p 'shell-maker-prompt-before-killing-buffer)))
     (should shell-maker-prompt-before-killing-buffer)))
 
-(ert-deftest agent-shell-opencode-prefers-verified-binary-without-changing-arguments ()
+(defmacro popup-agent-test-with-placement (client &rest body)
+  "Run BODY with every logical directory client-accessible when CLIENT."
+  (declare (indent 1))
+  `(cl-letf* ((directory-p (symbol-function 'file-directory-p))
+              ((symbol-function 'remote-client-file-name)
+               (lambda (path)
+                 (and ,client (string-prefix-p "/fs:local:" path)
+                      (substring path (length "/fs:local:")))))
+              ;; Only the tests' fake workspaces; everything else is real.
+              ((symbol-function 'file-directory-p)
+               (lambda (path)
+                 (cond ((string-match-p "unreachable" path) nil)
+                       ((string-match-p "\\`\\(?:/Users/test/\\|/fs:\\)" path) t)
+                       (t (funcall directory-p path))))))
+     ,@body))
+
+(ert-deftest agent-shell-opencode-prefers-verified-binary-for-client-agents ()
   (let ((agent-shell-opencode-acp-command '("opencode" "acp"))
-        (my/agent-shell-opencode-executable "/test/official/opencode"))
-    (cl-letf (((symbol-function 'file-executable-p) (lambda (path) (equal path "/test/official/opencode"))))
-      (my/agent-shell-use-official-opencode)
-      (should (equal agent-shell-opencode-acp-command '("/test/official/opencode" "acp"))))))
+        (my/agent-shell-opencode-executable "/test/official/opencode")
+        (default-directory "/Users/test/project/"))
+    (popup-agent-test-with-placement t
+      (cl-letf (((symbol-function 'file-executable-p)
+                 (lambda (path) (equal path "/test/official/opencode"))))
+        (should (equal (my/agent-shell-use-official-opencode
+                        '(:command "opencode" :command-params ("acp") :context-buffer nil))
+                       '(:command "/test/official/opencode" :command-params ("acp")
+                                  :context-buffer nil)))
+        ;; The global setting itself is never rewritten.
+        (should (equal agent-shell-opencode-acp-command '("opencode" "acp")))))))
+
+(ert-deftest agent-shell-opencode-remote-agent-uses-target-path ()
+  (let ((agent-shell-opencode-acp-command '("opencode" "acp"))
+        (my/agent-shell-opencode-executable "/test/official/opencode")
+        (default-directory "/fs:server:/home/test/project/"))
+    (popup-agent-test-with-placement t
+      (cl-letf (((symbol-function 'file-executable-p) (lambda (_) t)))
+        (should (equal (my/agent-shell-use-official-opencode
+                        '(:command "opencode" :command-params ("acp")))
+                       '(:command "opencode" :command-params ("acp"))))))))
 
 (ert-deftest agent-shell-opencode-preserves-custom-launchers-and-missing-install ()
-  (let ((agent-shell-opencode-acp-command '("/custom/opencode" "acp" "--pure")))
-    (cl-letf (((symbol-function 'file-executable-p) (lambda (_) (ert-fail "Custom launcher was inspected"))))
-      (my/agent-shell-use-official-opencode)
-      (should (equal agent-shell-opencode-acp-command '("/custom/opencode" "acp" "--pure")))))
-  (let ((agent-shell-opencode-acp-command '("opencode" "acp")))
-    (cl-letf (((symbol-function 'file-executable-p) (lambda (_) nil)))
-      (my/agent-shell-use-official-opencode)
-      (should (equal agent-shell-opencode-acp-command '("opencode" "acp"))))))
+  (let ((default-directory "/Users/test/project/"))
+    (popup-agent-test-with-placement t
+      (let ((agent-shell-opencode-acp-command '("/custom/opencode" "acp" "--pure")))
+        (cl-letf (((symbol-function 'file-executable-p)
+                   (lambda (_) (ert-fail "Custom launcher was inspected"))))
+          (should (equal (my/agent-shell-use-official-opencode
+                          '(:command "/custom/opencode" :command-params ("acp" "--pure")))
+                         '(:command "/custom/opencode" :command-params ("acp" "--pure"))))))
+      (let ((agent-shell-opencode-acp-command '("opencode" "acp")))
+        (cl-letf (((symbol-function 'file-executable-p) (lambda (_) nil)))
+          (should (equal (my/agent-shell-use-official-opencode
+                          '(:command "opencode" :command-params ("acp")))
+                         '(:command "opencode" :command-params ("acp")))))))))
 
 (ert-deftest agent-shell-opencode-expands-config-store-abbreviated-paths ()
   (let ((agent-shell-opencode-acp-command '("opencode" "acp"))
-        (my/agent-shell-opencode-executable "~/.config/emacs/var/opencode"))
-    (cl-letf (((symbol-function 'file-executable-p) (lambda (_) t)))
-      (my/agent-shell-use-official-opencode)
-      (should (equal (car agent-shell-opencode-acp-command)
-                     (expand-file-name my/agent-shell-opencode-executable))))))
+        (my/agent-shell-opencode-executable "~/.config/emacs/var/opencode")
+        (default-directory "/Users/test/project/"))
+    (popup-agent-test-with-placement t
+      (cl-letf (((symbol-function 'file-executable-p) (lambda (_) t)))
+        (should (equal (plist-get (my/agent-shell-use-official-opencode
+                                   '(:command "opencode" :command-params ("acp")))
+                                  :command)
+                       (expand-file-name my/agent-shell-opencode-executable)))))))
 
 (ert-deftest agent-shell-native-entrypoint-projects-logical-cwd ()
   ;; Call upstream's public CWD directly, without the Noema start wrapper.
   (let ((agent-shell-cwd-function (lambda () "/fs:local:/Users/test/project/")))
-    (cl-letf (((symbol-function 'remote-client-file-name)
-               (lambda (path)
-                 (should (equal path "/fs:local:/Users/test/project/"))
-                 "/Users/test/project/")))
+    (popup-agent-test-with-placement t
       (should (equal (agent-shell-cwd) "/Users/test/project/")))))
 
-(ert-deftest agent-shell-native-directory-preserves-custom-native-cwd ()
-  (cl-letf (((symbol-function 'remote-client-file-name)
-             (lambda (_) (ert-fail "Native path requires no projection"))))
-    (should (equal (my/agent-shell-native-directory "/Users/test/project/")
+(ert-deftest agent-shell-process-directory-is-native-for-local-target ()
+  (popup-agent-test-with-placement t
+    (should (equal (my/agent-shell-process-directory "/Users/test/project")
+                   "/Users/test/project/"))
+    (should (equal (my/agent-shell-process-directory "/fs:local:/Users/test/project/")
                    "/Users/test/project/"))))
 
-(ert-deftest agent-shell-native-directory-fails-early-for-unavailable-target ()
-  (cl-letf (((symbol-function 'remote-client-file-name) (lambda (_) nil)))
-    (should-error (my/agent-shell-native-directory "/fs:server:/project/") :type 'user-error)))
+(ert-deftest agent-shell-process-directory-routes-remote-target ()
+  ;; A target that shares nothing with the client keeps its logical identity,
+  ;; so acp.el's `make-process' enters the /fs: handler and runs it there.
+  (popup-agent-test-with-placement t
+    (should (equal (my/agent-shell-process-directory "/fs:server:/home/test/project")
+                   "/fs:server:/home/test/project/"))))
+
+(ert-deftest agent-shell-path-resolver-is-identity-on-local-target ()
+  (popup-agent-test-with-placement t
+    (let ((default-directory "/Users/test/project/"))
+      (should (equal (my/agent-shell-resolve-path "/Users/test/project/a.el")
+                     "/Users/test/project/a.el"))
+      (should (equal (my/agent-shell-resolve-path "/fs:local:/Users/test/project/a.el")
+                     "/Users/test/project/a.el"))
+      (should (equal (my/agent-shell-resolve-path "relative.el") "relative.el")))))
+
+(ert-deftest agent-shell-path-resolver-maps-remote-session-both-ways ()
+  (popup-agent-test-with-placement t
+    (let ((default-directory "/fs:server:/home/test/project/"))
+      ;; Emacs -> agent: session/new cwd, mentions, diffs.
+      (should (equal (my/agent-shell-resolve-path "/fs:server:/home/test/project/")
+                     "/home/test/project/"))
+      ;; Agent -> Emacs: fs/read_text_file and fs/write_text_file.
+      (should (equal (my/agent-shell-resolve-path "/home/test/project/a.py")
+                     "/fs:server:/home/test/project/a.py")))))
+
+(ert-deftest agent-shell-requests-resolve-in-their-own-session ()
+  (let ((session (generate-new-buffer " *agent-session-test*"))
+        seen)
+    (unwind-protect
+        (progn
+          (with-current-buffer session
+            (setq default-directory "/fs:server:/home/test/"))
+          (with-temp-buffer
+            (my/agent-shell-in-session-buffer-a
+             (lambda (&rest _) (setq seen default-directory))
+             :state (list (cons :buffer session)) :acp-request nil))
+          (should (equal seen "/fs:server:/home/test/")))
+      (kill-buffer session))))
+
+(ert-deftest agent-shell-context-files-map-into-the-session-machine ()
+  (popup-agent-test-with-placement t
+    (let ((remote (generate-new-buffer " *remote-session*"))
+          (local (generate-new-buffer " *local-session*")))
+      (unwind-protect
+          (progn
+            (with-current-buffer remote
+              (setq default-directory "/fs:server:/home/test/project/"))
+            (with-current-buffer local
+              (setq default-directory "/Users/test/project/"))
+            ;; Same machine: the agent gets that machine's native path.
+            (should (equal (my/agent-shell-agent-file-name
+                            "/fs:server:/home/test/project/a.py" remote)
+                           "/home/test/project/a.py"))
+            (should (equal (my/agent-shell-agent-file-name
+                            "/Users/test/project/a.py" local)
+                           "/Users/test/project/a.py"))
+            (should (equal (my/agent-shell-agent-file-name
+                            "/Users/test/project/a.py" nil)
+                           "/Users/test/project/a.py"))
+            ;; Different machine: unreachable, never a wrong path.
+            (should-not (my/agent-shell-agent-file-name
+                         "/Users/test/project/a.py" remote))
+            (should-not (my/agent-shell-agent-file-name
+                         "/fs:server:/home/test/project/a.py" local)))
+        (kill-buffer remote)
+        (kill-buffer local)))))
+
+(ert-deftest popup-agent-accepts-a-remote-workspace ()
+  ;; Placement belongs to the agent boundary; the popup does not branch on it.
+  (let (started)
+    (cl-letf (((symbol-function 'noema-agent-acp-config-for) (lambda (_) 'config))
+              ((symbol-function 'noema-agent-acp-start)
+               (lambda (&rest args) (setq started (plist-get args :directory))
+                 (generate-new-buffer " *popup-remote-agent*")))
+              ((symbol-function 'noema-agent-acp-adopt) #'ignore)
+              ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore)
+              ((symbol-function 'my/vterm-popup-display-buffer) #'ignore)
+              ((symbol-function 'my/vterm-popup--requested-workspace-id) #'ignore)
+              ((symbol-function 'my/vterm-popup--project-root)
+               (lambda () "/fs:server:/home/test/project/")))
+      ;; From a file below the project, the agent starts at the project root.
+      (let ((default-directory "/fs:server:/home/test/project/src/"))
+        (let ((buffer (my/vterm-popup-agent 'codex)))
+          (ignore buffer)))
+      (should (equal started "/fs:server:/home/test/project/"))
+      (dolist (buffer (buffer-list))
+        (when (string-prefix-p " *popup-remote-agent*" (buffer-name buffer))
+          (kill-buffer buffer))))))
+
+(ert-deftest agent-shell-process-directory-refuses-an-unreachable-workspace ()
+  ;; shell-maker would silently fall back to the local home directory.
+  (popup-agent-test-with-placement t
+    (should-error (my/agent-shell-process-directory "/fs:unreachable:/srv/")
+                  :type 'user-error)))
+
+(ert-deftest agent-shell-client-gets-its-workspace-environment ()
+  "A natively spawned agent gets its workspace capsule in its buffer.
+A routed agent gets it from the process route instead: its buffer keeps this
+machine's HOME, because agent-shell's caches expand `~' there."
+  (let (ensured my/agent-shell--lookup-target)
+    (popup-agent-test-with-placement t
+      (cl-letf (((symbol-function 'remote-environment-ensure)
+                 (lambda (context &rest _) (setq ensured context)))
+                ((symbol-function 'remote-context)
+                 (lambda (dir)
+                   (remote-context-create
+                    :target-id (if (string-prefix-p "/fs:server:" dir) "server" "local")
+                    :localname dir))))
+        (with-temp-buffer
+          (setq default-directory "/Users/test/project/")
+          (my/agent-shell-apply-workspace-environment)
+          (should (equal (remote-context-localname ensured) "/Users/test/project/"))
+          (should (equal my/agent-shell--lookup-target "local"))
+          ;; Already projected: not resolved again.
+          (setq ensured nil)
+          (setq-local remote-buffer-environment 'capsule)
+          (my/agent-shell-apply-workspace-environment)
+          (should-not ensured))
+        (with-temp-buffer
+          (setq default-directory "/fs:server:/home/test/project/")
+          (my/agent-shell-apply-workspace-environment)
+          (should-not ensured)
+          (should (equal my/agent-shell--lookup-target "server")))))
+      ;; The missing-executable report names that target even after
+      ;; agent-shell has killed the shell buffer.
+      (should (string-match-p "target `server'"
+                              (my/agent-shell-missing-executable-a "not found"))))))
 
 (ert-deftest popup-agent-launchers-are-memory-only ()
   (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) (ert-fail "Header checked executables")))

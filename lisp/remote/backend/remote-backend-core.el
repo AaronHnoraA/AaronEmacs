@@ -60,7 +60,8 @@
 
 (cl-defstruct (remote-backend-process-plan
                (:constructor remote-backend-process-plan-create))
-  arguments default-directory stderr-mode process-properties metadata)
+  arguments default-directory stderr-mode process-properties metadata
+  around-start process-environment exec-path)
 
 (cl-defstruct (remote-forward
                (:constructor remote-forward-create))
@@ -497,6 +498,10 @@ logical and physical working directories."
 EXECUTION is a `remote-backend-execution', ARGUMENTS is the official
 `make-process' plist, and ENVIRONMENT is the resolved target override alist.
 Legacy link plugins receive the default projected Emacs plan."
+  ;; Older execution producers only supplied the physical directory.  Keep
+  ;; the explicit route authoritative for process planning in that case.
+  (unless (remote-backend-execution-route execution)
+    (setf (remote-backend-execution-route execution) route))
   (let* ((backend (remote-route-backend route))
          (function
           (and backend

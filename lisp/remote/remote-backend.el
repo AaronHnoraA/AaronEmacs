@@ -13,6 +13,7 @@
 
 (declare-function remote-backend-native-register "remote-backend-native" ())
 (declare-function remote-backend-tramp-register "remote-backend-tramp" ())
+(declare-function remote-backend-ssh-pty-register "remote-backend-ssh-pty" ())
 (declare-function remote-backend-tramp-rpc-register
                   "remote-backend-tramp-rpc" ())
 
@@ -28,12 +29,14 @@
 (require 'remote-backend-core)
 
 (defun remote-backend-register-builtins ()
-  "Load and register the native, TRAMP, and tramp-rpc backends."
+  "Load and register the native, TRAMP, tramp-rpc, and SSH PTY backends."
   (require 'remote-backend-native)
   (require 'remote-backend-tramp)
+  (require 'remote-backend-ssh-pty)
   (require 'remote-backend-tramp-rpc)
   (remote-backend-native-register)
   (remote-backend-tramp-register)
+  (remote-backend-ssh-pty-register)
   (remote-backend-tramp-rpc-register))
 
 (provide 'remote-backend)

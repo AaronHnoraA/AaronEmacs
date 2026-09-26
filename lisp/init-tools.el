@@ -9,6 +9,16 @@
 (require 'config)
 
 (declare-function my/browse-url "init-browser" (url &optional new-window))
+(declare-function my/project-current-root "init-project" ())
+(declare-function my/project-ripgrep "init-project"
+                  (project-root &optional initial rg-unavailable))
+(declare-function remote-canonicalize-file-name "remote-fs"
+                  (file-name &optional directory))
+(declare-function remote-context "remote-fs" (&optional path))
+(declare-function remote-executable-find "remote-process"
+                  (program &optional context))
+(declare-function rg-menu "rg-menu" ())
+(defvar remote-current-adapter-id)
 
 ;; Tips for next keystroke
 (use-package which-key
@@ -35,11 +45,29 @@
 ;; The blazing grep tool
 ;;
 ;; Press C-c s to search
+(defun my/rg-menu-or-project-search ()
+  "Show the rg menu when available, otherwise search with target grep."
+  (interactive)
+  (require 'init-project)
+  (require 'remote-process)
+  (let* ((root (or (my/project-current-root) default-directory))
+         (context (remote-context
+                   (remote-canonicalize-file-name root)))
+         (remote-current-adapter-id "process"))
+    (if (remote-executable-find "rg" context)
+        (progn
+          (require 'rg)
+          (rg-menu))
+      (my/project-ripgrep root nil t))))
+
+(global-set-key (kbd "C-c s") #'my/rg-menu-or-project-search)
+
 (use-package rg
   :ensure t
   :defer 2
   :config
-  (rg-enable-default-bindings))
+  (rg-enable-default-bindings)
+  (global-set-key (kbd "C-c s") #'my/rg-menu-or-project-search))
 
 ;; Jump to arbitrary positions
 (use-package avy

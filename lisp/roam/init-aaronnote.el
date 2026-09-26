@@ -74,6 +74,10 @@
 (autoload 'my/noema-publish-build        "init-aaronnote-publish" nil t)
 (autoload 'my/noema-publish-deploy       "init-aaronnote-publish" nil t)
 (autoload 'my/noema-publish-clean        "init-aaronnote-publish" nil t)
+(autoload 'noema-project-overview "noema-project-overview" nil t)
+(autoload 'noema-research-workflow-preview "noema-research-workflow" nil t)
+(autoload 'noema-history-search "noema-history-search" nil t)
+(autoload 'noema-findings "noema-findings" nil t)
 
 (defgroup my/noema nil
   "Noema Markdown web editor integration."

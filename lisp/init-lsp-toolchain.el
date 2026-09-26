@@ -21,13 +21,17 @@
   "Registered language toolchain providers.
 
 Each entry is a plist containing `:family', `:modes', `:discover', and
-optional `:apply' and `:after-select' callbacks.")
+optional `:discover-fast', `:apply' and `:after-select' callbacks.")
 
 (defvar my/language-server-toolchain--overrides (make-hash-table :test #'equal)
   "Session-local project toolchain selections.")
 
 (defvar my/language-server-toolchain--candidate-cache (make-hash-table :test #'equal)
   "Provider candidate cache keyed by project root and language family.")
+
+(defvar my/language-server-toolchain--fast-candidate-cache
+  (make-hash-table :test #'equal)
+  "Fast automatic-start candidates, separate from full picker results.")
 
 (defvar my/language-server--workspace-configuration)
 
@@ -146,29 +150,34 @@ remote), so a target-only root could be truenamed as if it were local."
         (funcall function root)
       (wrong-number-of-arguments (funcall function)))))
 
-(defun my/language-server-toolchain--provider-candidates (&optional root family)
-  "Return cached provider candidates for ROOT and FAMILY."
+(defun my/language-server-toolchain--provider-candidates (&optional root family fast)
+  "Return cached provider candidates for ROOT and FAMILY.
+When FAST is non-nil, use the provider's fast discovery if it has one."
   (let* ((root (or root (my/language-server-toolchain--canonical-root)))
          (family (or family (my/language-server-toolchain-family)))
          (key (cons root family))
-         (cached (gethash key my/language-server-toolchain--candidate-cache 'missing)))
+         (provider (my/language-server-toolchain-provider))
+         (fast-discover (and fast (plist-get provider :discover-fast)))
+         (cache (if fast-discover
+                    my/language-server-toolchain--fast-candidate-cache
+                  my/language-server-toolchain--candidate-cache))
+         (cached (gethash key cache 'missing)))
     (if (not (eq cached 'missing))
         (copy-tree cached)
-      (let* ((provider (my/language-server-toolchain-provider))
-             (raw (my/language-server-toolchain--call
-                   (plist-get provider :discover) root))
+      (let* ((raw (my/language-server-toolchain--call
+                   (or fast-discover (plist-get provider :discover)) root))
              (profiles
               (delq nil
                     (mapcar
                      (lambda (entry)
                        (my/language-server-toolchain--normalize-profile entry family))
                      raw))))
-        (puthash key (copy-tree profiles)
-                 my/language-server-toolchain--candidate-cache)
+        (puthash key (copy-tree profiles) cache)
         profiles))))
 
-(defun my/language-server-toolchain-candidates (&optional root family)
-  "Return project and provider profiles for ROOT and FAMILY."
+(defun my/language-server-toolchain-candidates (&optional root family fast)
+  "Return project and provider profiles for ROOT and FAMILY.
+FAST requests bounded discovery for automatic startup when available."
   (let* ((root (or root (my/language-server-toolchain--canonical-root)))
          (family (or family (my/language-server-toolchain-family)))
          (project-profiles
@@ -180,7 +189,8 @@ remote), so a target-only root could be truenamed as if it were local."
                        (plist-get profile :modes)))))
            (my/language-server-toolchain--project-profile-entries root)))
          (profiles (append project-profiles
-                           (my/language-server-toolchain--provider-candidates root family)))
+                           (my/language-server-toolchain--provider-candidates
+                            root family fast)))
          result)
     (dolist (profile profiles (nreverse result))
       (unless (seq-find (lambda (seen)
@@ -212,19 +222,21 @@ remote), so a target-only root could be truenamed as if it were local."
 (defun my/language-server-current-toolchain-profile (&optional buffer)
   "Return the effective toolchain profile for BUFFER."
   (with-current-buffer (or buffer (current-buffer))
-    (let* ((runtime-profile
-            (and (fboundp 'my/language-server-runtime-current-profile)
-                 (my/language-server-runtime-current-profile)))
-           (root (my/language-server-toolchain--canonical-root))
-           (family (my/language-server-toolchain-family))
-           (profiles (my/language-server-toolchain-candidates root family))
-           (override (gethash (cons root family)
-                              my/language-server-toolchain--overrides))
-           (configured (my/language-server-toolchain--configured-id root family)))
-      (or runtime-profile
-          (my/language-server-toolchain--profile-by-id override profiles)
-          (my/language-server-toolchain--profile-by-id configured profiles)
-          (seq-find (lambda (profile) (plist-get profile :default)) profiles)))))
+    (or (and (fboundp 'my/language-server-runtime-current-profile)
+             (my/language-server-runtime-current-profile))
+        (let* ((root (my/language-server-toolchain--canonical-root))
+               (family (my/language-server-toolchain-family))
+               (override (gethash (cons root family)
+                                  my/language-server-toolchain--overrides))
+               (configured
+                (my/language-server-toolchain--configured-id root family))
+               (profiles
+                (my/language-server-toolchain-candidates
+                 root family (not (or override configured)))))
+          (or (my/language-server-toolchain--profile-by-id override profiles)
+              (my/language-server-toolchain--profile-by-id configured profiles)
+              (seq-find (lambda (profile) (plist-get profile :default))
+                        profiles))))))
 
 (defun my/language-server-toolchain-description (&optional buffer)
   "Return a concise description of BUFFER's effective toolchain."
@@ -241,9 +253,11 @@ remote), so a target-only root could be truenamed as if it were local."
   "Register a toolchain provider for FAMILY and MODES.
 
 DISCOVER returns profile plists for a project root.  PROPERTIES accepts
-`:apply', `:after-select', `:label', and `:source'."
+`:discover-fast', `:apply', `:after-select', `:label', and `:source'."
   (let ((entry (append (list :family family :modes modes :discover discover)
                        properties)))
+    (clrhash my/language-server-toolchain--candidate-cache)
+    (clrhash my/language-server-toolchain--fast-candidate-cache)
     (setq my/language-server-toolchain-providers
           (cons entry
                 (seq-remove
@@ -504,6 +518,7 @@ project's SDK, server cache, or workspace directory into another buffer."
   (interactive)
   (let ((key (my/language-server-toolchain--key)))
     (remhash key my/language-server-toolchain--candidate-cache)
+    (remhash key my/language-server-toolchain--fast-candidate-cache)
     (message "Refreshed %s toolchains (%d candidates)"
              (cdr key) (length (my/language-server-toolchain-candidates)))))
 
