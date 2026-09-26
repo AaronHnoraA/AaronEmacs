@@ -4,6 +4,31 @@
 (require 'cl-lib)
 (require 'init-jupyter-board)
 
+(ert-deftest my/jupyter-board-ssh-project-row-opens-remote-files ()
+  "Configured SSH projects have direct project and filesystem entries."
+  (let* ((shortcut '(:name "COMP9444" :target "aaron-pc"
+                     :root "/home/aaron/Desktop/UNSW/COMP9444/"))
+         (my/jupyter-ssh-projects (list shortcut))
+         opened files)
+    (with-temp-buffer
+      (cl-letf (((symbol-function 'my/jupyter-ssh-open-project)
+                 (lambda (project) (setq opened project)))
+                ((symbol-function 'dired)
+                 (lambda (root) (setq files root))))
+        (my/jupyter-board--insert-ssh-projects)
+        (goto-char (point-min))
+        (should (search-forward "COMP9444" nil t))
+        (should (search-forward "/fs:aaron-pc:/home/aaron/Desktop/UNSW/COMP9444/"
+                                nil t))
+        (goto-char (point-min))
+        (search-forward "Open Project")
+        (button-activate (button-at (1- (point))))
+        (should (equal opened shortcut))
+        (search-forward "Files")
+        (button-activate (button-at (1- (point))))
+        (should (equal files
+                       "/fs:aaron-pc:/home/aaron/Desktop/UNSW/COMP9444/"))))))
+
 (ert-deftest my/jupyter-connection-maintenance-runs-on-owner-and-is-throttled ()
   (let ((my/jupyter-management--cleanup-times (make-hash-table :test #'equal))
         (launched 0) (completed 0))
@@ -157,7 +182,7 @@
     (should (member "--host=example" args))
     (should (member "--tunnel-hosts=jump" args))))
 
-(ert-deftest my/jupyter-board-renders-remote-first-management-ui ()
+(ert-deftest my/jupyter-board-renders-project-first-management-ui ()
   (let ((entries
          (list
           '(:name "rik_core" :display-name "Core" :language "python"
@@ -178,9 +203,13 @@
                    (funcall callback '((kernels . nil)) nil))))
         (my/jupyter-board-refresh))
       (let ((text (buffer-substring-no-properties (point-min) (point-max))))
-        (should (string-match-p "Remote Kernel Manager" text))
+        (should (string-match-p "Jupyter Projects" text))
+        (should (string-match-p "SSH Notebook Projects" text))
+        (should (string-match-p "Open SSH Project" text))
         (should (string-match-p "Start Here" text))
         (should (string-match-p "Remote Kernels" text))
+        (should (< (string-match "SSH Notebook Projects" text)
+                   (string-match "Remote Kernels" text)))
         (should (string-match-p "Open REPL" text))
         (should (string-match-p "Make temporary" text))
         (should (string-match-p "Keep profile" text))
@@ -198,7 +227,8 @@
           my/jupyter-board--connections nil)
     (my/jupyter-board--render)
     (let ((text (buffer-substring-no-properties (point-min) (point-max))))
-      (should (string-match-p "1 · Add" text))
+      (should (string-match-p "1 · Open" text))
+      (should (string-match-p "Open SSH Project" text))
       (should (string-match-p "No remote profile is configured yet" text))
       (should (string-match-p "Quick Add SSH" text)))))
 

@@ -45,6 +45,27 @@
           (should (eq my/language-server-runtime-state 'ready))
           (should (eq (car received) runtime)))))))
 
+(ert-deftest my/runtime-provider-synchronous-callback-is-not-left-preparing ()
+  "A cached Remote probe may finish before its provider returns `pending'."
+  (my/runtime-test-with-registry
+    (let ((runtime (my/language-server-runtime-create
+                    :id "cached-kernel" :root temporary-file-directory))
+          received)
+      (my/register-language-server-runtime-provider
+       'cached
+       (lambda (_buffer callback)
+         (funcall callback runtime nil)
+         'pending)
+       :modes '(my/runtime-test-mode))
+      (with-temp-buffer
+        (my/runtime-test-mode)
+        (should (eq (my/language-server-runtime-prepare
+                     (lambda (value error)
+                       (setq received (list value error))))
+                    runtime))
+        (should (eq my/language-server-runtime-state 'ready))
+        (should (equal received (list runtime nil)))))))
+
 (ert-deftest my/runtime-expected-fallback-is-silent-but-diagnostic ()
   (let ((fallback
          (my/language-server-runtime-fallback-create
@@ -240,69 +261,95 @@
 (provide 'init-lsp-runtime-tests)
 ;;; init-lsp-runtime-tests.el ends here
 
-(ert-deftest my/noema-jupyter-server-kernels-are-an-expected-lsp-fallback ()
-  "A `server:' kernel has no target process to probe.
-
-Before this it fell through to kernelspec lookup and reported
-\"kernelspec `server:hub:python3' was not found on target `local'\", which
-described neither the kernel nor the reason, and counted as an unexpected
-fallback so it kept re-reporting itself."
-  (require 'init-aaronnote-jupyter-lsp)
-  (let ((fallback
-         (my/noema-jupyter-cell--lsp-unprobeable-connector "server:hub:python3")))
-    (should (my/language-server-runtime-fallback-p fallback))
-    (should (my/language-server-runtime-fallback-expected fallback))
-    (should (string-match-p
-             "Jupyter server"
-             (my/language-server-runtime-fallback-reason fallback)))))
-
-(ert-deftest my/noema-jupyter-contents-files-do-not-probe-an-os-environment ()
-  (require 'init-aaronnote-jupyter-lsp)
-  (require 'remote-backend-jupyter)
+(ert-deftest my/noema-jupyter-kernel-change-preserves-source-lsp ()
+  "A new execution kernel does not detach a file-owned analyzer."
+  (require 'init-aaronnote-jupyter-cell)
   (with-temp-buffer
-    (setq major-mode 'python-mode
-          my/noema-jupyter-cell-mode t
-          buffer-file-name "/fs:jupyter.4c6162:/note.ipynb")
-    (cl-letf (((symbol-function 'remote-environment-resolve)
-               (lambda (&rest _) (ert-fail "Contents cannot resolve an OS environment"))))
-      (let ((fallback (plist-get (my/noema-jupyter-cell--lsp-runtime-provider nil #'ignore)
-                                 :unsupported)))
-        (should (my/language-server-runtime-fallback-expected fallback))
-        (should (string-match-p "Contents" (my/language-server-runtime-fallback-reason fallback)))))))
+    (setq-local my/noema-jupyter-cell-kernel "old"
+                my/noema-jupyter-cell-language "python"
+                lsp-managed-mode t)
+    (cl-letf (((symbol-function 'lsp-disconnect)
+               (lambda () (ert-fail "Kernel switch disconnected LSP")))
+              ((symbol-function 'my/noema-jupyter-cell--auto-switch-language-mode)
+               #'ignore))
+      (my/noema-jupyter-cell--apply-session-snapshot
+       '((document . ((kernel . "new") (language . "python"))))))
+    (should (equal my/noema-jupyter-cell-kernel "new"))
+    (should lsp-managed-mode)))
 
-(ert-deftest my/noema-jupyter-attached-kernels-are-an-expected-lsp-fallback ()
-  (require 'init-aaronnote-jupyter-lsp)
-  (let ((fallback
-         (my/noema-jupyter-cell--lsp-unprobeable-connector "attach:/tmp/k.json")))
-    (should (my/language-server-runtime-fallback-p fallback))
-    (should (my/language-server-runtime-fallback-expected fallback))))
+(ert-deftest my/lsp-nested-envrcs-own-separate-roots-and-toolchains ()
+  "Buffers in one project may use independent environments at once."
+  (let* ((project (make-temp-file "lsp-multi-env-" t))
+         (one (expand-file-name "one/" project))
+         (two (expand-file-name "two/" project))
+         (first (generate-new-buffer " *lsp-env-one*"))
+         (second (generate-new-buffer " *lsp-env-two*"))
+         (my/enable-direnv t))
+    (unwind-protect
+        (progn
+          (make-directory one t)
+          (make-directory two t)
+          (with-temp-file (expand-file-name ".envrc" one))
+          (with-temp-file (expand-file-name ".envrc" two))
+          (cl-letf (((symbol-function 'project-current)
+                     (lambda (&rest _) 'test-project))
+                    ((symbol-function 'project-root)
+                     (lambda (_) project)))
+            (with-current-buffer first
+              (setq-local buffer-file-name (expand-file-name "a.ipynb" one)
+                          default-directory one)
+              (should (equal (my/language-server--project-root-for-buffer)
+                             (remote-canonicalize-file-name one)))
+              (should (equal (my/language-server-toolchain--canonical-root)
+                             (remote-canonicalize-file-name one))))
+            (with-current-buffer second
+              (setq-local buffer-file-name (expand-file-name "b.ipynb" two)
+                          default-directory two)
+              (should (equal (my/language-server--project-root-for-buffer)
+                             (remote-canonicalize-file-name two)))
+              (should (equal (my/language-server-toolchain--canonical-root)
+                             (remote-canonicalize-file-name two))))))
+      (kill-buffer first)
+      (kill-buffer second)
+      (delete-directory project t))))
 
-(ert-deftest my/noema-jupyter-launchable-kernels-are-not-fallbacks ()
-  "An ordinary kernelspec must still be probed, not shortcut to a fallback."
-  (require 'init-aaronnote-jupyter-lsp)
-  (should-not (my/noema-jupyter-cell--lsp-unprobeable-connector "python3")))
+(ert-deftest my/lsp-direnv-ancestor-keeps-specific-project-root ()
+  (let* ((parent (make-temp-file "lsp-env-ancestor-" t))
+         (project (expand-file-name "project/" parent))
+         (my/enable-direnv t))
+    (unwind-protect
+        (progn
+          (make-directory project t)
+          (with-temp-file (expand-file-name ".envrc" parent))
+          (with-temp-buffer
+            (setq-local buffer-file-name (expand-file-name "a.ipynb" project)
+                        default-directory project)
+            (cl-letf (((symbol-function 'project-current)
+                       (lambda (&rest _) 'test-project))
+                      ((symbol-function 'project-root)
+                       (lambda (_) project)))
+              (should (equal (my/language-server--project-root-for-buffer)
+                             (remote-canonicalize-file-name project))))))
+      (delete-directory parent t))))
 
-(ert-deftest my/noema-jupyter-kernel-change-fully-disconnects-lsp-mode ()
-  "A kernel switch must also detach a still-starting lsp-mode workspace."
-  (require 'init-aaronnote-jupyter-lsp)
-  (with-temp-buffer
-    (setq-local lsp-managed-mode nil)
-    (setq-local lsp-mode t)
-    (setq-local my/language-server-runtime-current
-                (my/language-server-runtime-create
-                 :id "old-kernel" :root "/fs:local:/work/"))
-    (setq-local my/language-server-runtime--workspace 'old-workspace)
-    (let (events)
-      (cl-letf (((symbol-function
-                  'my/language-server-runtime--buffer-leaving-h)
-                 (lambda () (push 'warm events)))
-                ((symbol-function 'lsp-disconnect)
-                 (lambda () (push 'disconnect events)))
-                ((symbol-function 'my/language-server-runtime-invalidate)
-                 (lambda () (push 'invalidate events))))
-        (my/noema-jupyter-cell-lsp-runtime-changing))
-      (should (equal (nreverse events) '(warm disconnect invalidate)))
-      (should-not my/language-server-runtime--workspace))))
+(ert-deftest my/lsp-ignores-project-root-outside-current-buffer ()
+  "A stale project selection cannot move another file's LSP workspace."
+  (let* ((directory (make-temp-file "lsp-current-file-" t))
+         (other (make-temp-file "lsp-stale-project-" t))
+         (my/enable-direnv nil))
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local buffer-file-name (expand-file-name "a.ipynb" directory)
+                      default-directory directory)
+          (cl-letf (((symbol-function 'project-current)
+                     (lambda (&rest _) 'stale-project))
+                    ((symbol-function 'project-root)
+                     (lambda (_) other)))
+            (should (equal (my/language-server--project-root-for-buffer)
+                           (file-name-as-directory
+                            (remote-canonicalize-file-name directory))))))
+      (delete-directory directory t)
+      (delete-directory other t))))
 
 (ert-deftest my/noema-jupyter-kernel-capf-precedes-lsp-capf ()
   "Live kernel names retain the completion priority they had under Eglot."

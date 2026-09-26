@@ -96,19 +96,13 @@ The selected kernelspec is the source of truth for the notebook language;
 =metadata.language_info= is treated as a cache and is refreshed on selection.
 Python-family names such as =sage= are normalized to =python=, while shell,
 Julia, R, JavaScript, and Lean names select their corresponding source mode.
-Changing a kernel invalidates the old LSP runtime before a new one is
-prepared, so completion and diagnostics cannot remain attached to the old
-interpreter.
-
-For an ordinary kernelspec, the LSP runtime is probed through the owning
-Remote target and its interpreter/path are used for the workspace.  A
-=remote_ikernel= SSH profile is probeable from its recorded =kernel_cmd=, but
-only when the SSH host is also configured in the Remote library and is the
-same target as the notebook.  If a local notebook selects a remote kernel, the
-kernel still executes remotely, while LSP deliberately falls back to the
-local workspace server; open the notebook as =/fs:TARGET:/path/file.ipynb= to
-place both kernel and LSP remotely.  This avoids presenting a remote-only
-interpreter path to a local Pyright process.
+Kernel selection changes execution and kernel completion. LSP follows the
+notebook's visiting file, its Remote target, direnv environment and Python
+toolchain; switching kernels does not restart or relocate the analyzer.
+Opening =/fs:TARGET:/path/file.ipynb= puts source files and LSP on that target.
+A local notebook using an SSH kernel retains local LSP. For project development,
+open the remote project itself. A =remote_ikernel= SSH profile remains available
+for a portable REPL or short debugging session.
 
 Noema broadcasts one authoritative session snapshot after either UI changes a
 kernel.  Emacs also reads that snapshot by =scriptFile= instead of querying a
@@ -136,6 +130,53 @@ Everything downstream — execution, completion, ipywidgets, the browser bridge
 — is identical across the three. Only lifecycle differs: the broker signals a
 process it owns, an attached kernel is never killed, and a server kernel is
 started, interrupted, restarted, and shut down over REST.
+
+* SSH 项目入口
+
+项目开发推荐 =M-x my/jupyter-ssh-open-project=，或在项目菜单 =my/project-dispatch=
+选择 =Jupyter SSH project=。=Jupyter Board= 顶部和 =SSH Notebook Projects=
+区域也有 =Open SSH Project=；Board 原有的 Remote Kernels / Open REPL
+入口继续保留。已配置的 SSH 项目还会显示独立行，可直接按 =Open Project=
+进入项目，或按 =Files= 打开远端 Dired。
+现有 =COMP9444= 快捷入口指向 =aaron-pc= 的
+=/home/aaron/Desktop/UNSW/COMP9444/=；其他项目可选 =Choose SSH folder…=。
+配置入口是 =my/jupyter-ssh-projects=，每项只有 =:name=、已有 Remote =:target=
+和该机器的绝对 =:root=。
+
+打开后用普通 Dired / =find-file= 进入 =.ipynb=，按 =C-c i K= 选目标机上的
+=python3= 等 kernelspec，再运行单元。编辑和保存通过同一个 =/fs:TARGET:=
+文件系统；项目 shell、源码、Git、任务和 lsp-mode 也走这个 Remote workspace。
+嵌套目录中的 notebook 会继承已打开的项目根目录，优先发现根目录的 =.conda=
+或 =.venv=。内核由 Remote broker 在目标机直接启动，Noema 负责 ZMQ 协议；
+这里不需要 Jupyter Server，也不需要安装 =remote_ikernel=。
+
+在远端 notebook 中可用 =C-c i p o= 重新进入 SSH 项目。Board 的
+=Quick Add SSH= / =Remote Kernels= 仍管理便携 =remote_ikernel= profile；
+=Target= 决定 Board 查看哪台机器上的 profile，notebook 的 =C-c i K=
+则列出其文件所在 target 的 kernelspec。Server URL 和活动 session 继续在
+Board 里管理。
+
+=COMP9444= 的项目根目录已有 =.envrc=，把 =PATH= 和 =CONDA_PREFIX=
+指向 =.conda=，并隔离 Python user site；=.gitignore= 排除了本地环境
+和 notebook 缓存。远端 =direnv exec .= 已验证能选中
+=/home/aaron/Desktop/UNSW/COMP9444/.conda/bin/python=。Jupyter 的
+=python3= kernelspec argv 也指向该解释器。PyTorch 的 Python 导入名是
+=torch=；notebook 应写 =import torch=，写 =import pytorch= 会产生
+=ModuleNotFoundError=，即使内核环境正确。可用 =C-c i p ?= 检查
+notebook 对应的目标、项目根目录和解释器。上一次执行失败时，页头标为
+=last run error=，与内核启动失败区分开。
+
+=aaron-pc= 的交互式 Bash 在 =~/.bashrc= 末尾加载 =direnv hook bash=；
+Emacs Remote target 的 Shell 也设为 =/bin/bash=。在终端 =cd= 进出
+=COMP9444= 会自动加载或卸载项目环境。非交互脚本若需要相同环境，使用
+=direnv exec . command=。
+
+真机回归：=JUPYTER_SSH_TARGET=aaron-pc
+JUPYTER_SSH_ROOT=/home/aaron/Desktop/UNSW/COMP9444
+make jupyter-ssh-project-live-smoke=。它创建临时 notebook 和源码，检查远端
+Dired、创建、列目录、重命名、删除、notebook 编辑与保存、项目 =.conda= 发现、
+Noema 选核与运行后输出写回，以及 Pyright 对 notebook 的实际分析。测试使用隔离的
+Noema host/state 和随机端口，结束时清理测试文件、LSP workspace、内核及 host。
 
 * Noema 与 Remote workspace
 
@@ -182,10 +223,8 @@ run-all 里每个 cell 都跑完才应答，用 10 秒的默认值会把一次�
 =my/noema-jupyter-cell-introspect-backoff=（默认 20 秒）内不再隐式打扰它；
 它一旦重新应答就立即清除。**显式** =C-c C-i= 不受 backoff 影响。
 
-LSP 的 kernel runtime probe 有 =my/noema-jupyter-cell-lsp-probe-timeout=
-（默认 30 秒）。=remote-exec-async= 自身没有截止时间，过去 target 连不上会让
-buffer 永远停在 "preparing" 且无从得知原因；probe 也会在 notebook buffer 被
-kill 时随之取消。
+LSP 由文件所在的 Remote workspace 和目录环境决定，不再查询 kernelspec 的
+Python runtime。不同目录下的 =.envrc= 可同时对应不同的 buffer 和 LSP workspace。
 
 =attach:= 的 connection file 现在在**任意 target 上**都能发现：runtime 目录取自
 该 target 自己的 =jupyter --runtime-dir=，再经 =/fs= handler 扫描。选择后也由
@@ -404,75 +443,23 @@ cell 运行期间 iopub 以补丁流（=set= / =append= / =clear= / =status=）�
 
 * Jupyter Board
 
-用 =M-x my/jupyter-board= 或 Hyper dispatch =j= 打开 Emacs 内的
-=Remote Kernel Manager=。默认页面呈现 Jupyter Server、远程 kernel profile 和正在运行
-的 session；本地 kernelspec、connection file、工具路径和诊断信息收在
-=Show technical= 中，不再与主要工作流混在一起。
-
-=Jupyter Servers= 区域提供 =Add Server URL=、=Edit=、=Forget=、=Check Servers=
-和 =Select Notebook Kernel=。Route 明确区分本机直连与 Remote target 转发；
-=Check Servers= 异步查询 Noema 的 kernelspec / running kernel 清单，初次绘制不联网。
-从 notebook 打开 Board 后，=Select Notebook Kernel= 返回该文档的统一 picker。
-=Forget= 移除配置并释放路由，不向服务器发送 shutdown。
-
-第一次使用普通 SSH/Python 服务器时：
-
-1. 一般保持 Target 为 =Local=。Target 表示 kernelspec profile 保存在哪一台机器，
-   不等于实际运行计算的 SSH host。
-2. 选择 =Quick Add SSH=，输入 =user@host=（非标准端口写
-   =user@host:2222=）、远端工作目录和 Python 命令。默认命令为
-   =python3 -m ipykernel_launcher -f {connection_file}=；占位符不可删除。
-3. 在 profile 下选择 =Open REPL=。这时才会启动远端 kernel、建立 Jupyter 五端口
-   tunnel，并打开 Emacs Jupyter REPL。
-4. Slurm/PBS/SGE、jump hosts 或自定义 launcher 使用 =Advanced Add=。
-
-** 9444 PyTorch CUDA preset
-
-Board 的 Remote Kernels 区域提供 =Add Course PyTorch=，用于这套课程环境：
-
-| Field | Value |
-|---+---|
-| Profile | =Python 3.13 PyTorch CUDA= |
-| Remote folder | =/home/hc/Desktop/9444= |
-| Interpreter | =/home/hc/Desktop/9444/.conda/bin/python= |
-| Kernel command | =/home/hc/Desktop/9444/.conda/bin/python -m ipykernel_launcher -f {connection_file}= |
-| Group | =SAVED/Core= |
-
-点击后只需要输入 SSH host，例如 =Aaron-WSL2= 或 =user@host:2222=；预设会创建
-kernelspec，之后直接点击该 profile 的 =Open REPL=。远端已有的 =python3= profile
-不会被删除。
-
-Agent 或后台任务不要模拟点击，也不要调用 transient，直接执行非交互 API：
-
-#+begin_src emacs-lisp
-(my/jupyter-board-add-course-pytorch
- :host "Aaron-WSL2"
- :callback (lambda (output _error)
-             (message "Course profile installed: %s" output)))
-#+end_src
-
-API 不读取 minibuffer、不询问确认；默认写入当前 Board target（通常为 =Local=），
-异步完成后刷新 Board，命令输出保留在 =*Jupyter Board Log*=。=host= 必须是 SSH
-config 别名或 =user@host[:port]=；如果服务器别名不是 =Aaron-WSL2=，替换该值即可。
-
-若从 Python 源码 buffer 打开 Board，=Open REPL= 会把该源码 buffer 与新 REPL 关联。
-返回源码后，=C-c C-c= 运行当前行/选区，=C-c C-b= 运行整个 buffer，
-=C-c C-z= 跳到 REPL。
-
-建议事先确认终端中的 =ssh user@host= 能以 SSH key 登录，并确认远端
-=python3 -c "import ipykernel"= 成功。页面的 =Usage Guide= 也包含这套说明。
+用 =M-x my/jupyter-board= 或 Hyper dispatch =j= 打开 =Jupyter Projects=。
+主页以 =SSH Notebook Projects= 为主入口，进入远端完整项目并直接编辑文件；
+已配置项目提供 =Open Project= / =Files= 快捷操作，按 =J= 可直接选择项目。
+=Remote Kernels · Quick REPL= 保留便携 =remote_ikernel= 的 Quick Add SSH、
+Open REPL、编辑和清理入口。=Show technical= 展开本地或目标机
+kernelspec、connection file、工具路径与诊断。Notebook 的 kernelspec
+选择仍用 =C-c i K=。
 
 Main keys:
 
 | Key | Action |
 |-----+--------|
-| =a= | Guided SSH profile creation |
-| =A= | Advanced CLI-backed profile creation |
-| =e= | Guided edit of the remote kernel at point |
-| =E= | Advanced edit of the remote kernel at point |
-| =m= | Move a remote kernel between Core and Temporary |
-| =d= | Delete the current kernelspec |
-| =C= | Delete all Temporary remote kernels |
+| =J= | Open an SSH Jupyter project |
+| =T= | Choose the target whose kernelspecs are shown |
+| =a= / =A= | Add a portable =remote_ikernel= profile |
+| =e= / =E= | Edit a portable profile |
+| =d= / =C= | Delete one profile / clean temporary profiles |
 | =RET= | Show the normalized fields and raw =kernel.json= |
 | =r= | Open/connect the profile or session REPL |
 | =o= | Open the kernelspec resource directory |
@@ -481,11 +468,8 @@ Main keys:
 | =?= | Open the usage guide |
 | =M= | Open the full Jupyter dispatch |
 
-每个远程 profile 直接提供 =Open REPL=、=Edit=、=Keep profile/Make temporary=、
-=Details= 和 =Delete= 按钮；active session 也直接提供 interrupt/restart/shutdown，
-不再要求先记住快捷键。界面中的 =SAVED= 对应底层 Core group，需要完整确认才能删除；
-=TEMP= 可单独删除或批量清理。没有 Aaron metadata 的旧 =rik_*= kernelspec 仍按 Core
-处理，升级不会意外把它清掉。
+活动 session 提供 interrupt/restart/shutdown。便携 profile 的 =SAVED= 对应
+Core group，=TEMP= 可批量清理；旧 =rik_*= kernelspec 仍按 Core 处理。
 
 * Persistent group metadata
 

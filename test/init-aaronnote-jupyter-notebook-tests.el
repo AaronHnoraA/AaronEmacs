@@ -334,6 +334,14 @@
       (should (eq (lookup-key my/noema-jupyter-cell-mode-map (kbd "C-c i l"))
                   #'my/noema-jupyter-cell-select-editor-mode)))))
 
+(ert-deftest my/noema-jupyter-cell-header-distinguishes-cell-error-from-kernel ()
+  (with-temp-buffer
+    (setq-local my/noema-jupyter-cell-kernel "python3"
+                my/noema-jupyter-cell--kernel-status "error")
+    (let ((header (substring-no-properties
+                   (apply #'concat (my/noema-jupyter-cell--header-line)))))
+      (should (string-match-p "Kernel:python3 · last run error" header)))))
+
 (ert-deftest my/noema-jupyter-cell-kernel-catalog-is-not-language-filtered ()
   (with-temp-buffer
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
@@ -349,6 +357,55 @@
       (should (seq-some (lambda (label) (string-match-p "Maple" label)) labels))
       (should (seq-some (lambda (label) (string-match-p "kernel-here" label)) labels))
       (should-not (seq-some (lambda (label) (string-match-p "kernel-other" label)) labels)))))
+
+(ert-deftest my/noema-jupyter-cell-selects-exact-kernelspec-from-board ()
+  (with-temp-buffer
+    (setq-local buffer-file-name "/tmp/notebook.ipynb")
+    (let ((catalog (json-parse-string
+                    "{\"selections\":[{\"kind\":\"start\",\"value\":\"python3\",\"label\":\"Python 3\"},{\"kind\":\"connect\",\"value\":\"live\",\"label\":\"Running Python\"}]}"
+                    :object-type 'hash-table :array-type 'array))
+          selected)
+      (cl-letf (((symbol-function 'my/noema-jupyter-cell--document-detail)
+                 (lambda () nil))
+                ((symbol-function 'my/noema-jupyter-cell--api-sync)
+                 (lambda (channel body _timeout)
+                   (if (equal channel "aaronnote:api:jupyter-cell:kernels")
+                       catalog
+                     (setq selected body)
+                     '((session . "ready")))))
+                ((symbol-function 'my/noema-jupyter-cell--apply-session-snapshot)
+                 (lambda (_reply) nil))
+                ((symbol-function 'completing-read)
+                 (lambda (&rest _) (ert-fail "Direct kernel choice prompted"))))
+        (my/noema-jupyter-cell-select-kernel nil "python3")
+        (should (equal (alist-get 'kernelSpecName selected) "python3"))
+        (should (equal (alist-get 'kind selected) "start"))
+        (should-error (my/noema-jupyter-cell-select-kernel nil "missing")
+                      :type 'user-error)))))
+
+(ert-deftest my/noema-jupyter-gateway-stages-notebook-beside-destination ()
+  (require 'init-aaronnote-jupyter-runtime)
+  (let* ((directory (make-temp-file "noema-notebook-write-" t))
+         (native (expand-file-name "demo.ipynb" directory))
+         (logical (remote-make-file-name "local" native))
+         (original-make-temp-file (symbol-function 'make-temp-file))
+         staged)
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/noema-jupyter--defer)
+                   (lambda (function) (funcall function)))
+                  ((symbol-function 'make-temp-file)
+                   (lambda (prefix &rest args)
+                     (setq staged prefix)
+                     (apply original-make-temp-file prefix args))))
+          (my/noema-jupyter--file-write
+           `((file . ,logical) (content . "{\"nbformat\":4}")) nil)
+          (should (equal (file-name-directory staged)
+                         (file-name-directory logical)))
+          (should (equal (with-temp-buffer
+                           (insert-file-contents native)
+                           (buffer-string))
+                         "{\"nbformat\":4}")))
+      (delete-directory directory t))))
 
 (ert-deftest my/noema-jupyter-cell-mode-has-no-session-polling-timer ()
   (should-not (boundp 'my/noema-jupyter-cell-session-refresh-interval))

@@ -834,6 +834,24 @@
     (should-not my/lsp-mode--waiting-for-direnv)
     (should started)))
 
+(ert-deftest language-server-ready-runtime-skips-second-direnv-export ()
+  "A kernel runtime's environment is already authoritative for LSP startup."
+  (with-temp-buffer
+    (setq-local my/language-server-runtime-required t
+                my/language-server-runtime-state 'ready
+                my/language-server-runtime-current
+                (my/language-server-runtime-create :id "kernel-python"))
+    (let (started)
+      (cl-letf (((symbol-function 'my/language-server-preferred-backend)
+                 (lambda () 'lsp-mode))
+                ((symbol-function 'my/direnv-update-environment-maybe)
+                 (lambda (&rest _) (ert-fail "Required runtime exported direnv twice")))
+                ((symbol-function 'my/lsp-mode-start-now)
+                 (lambda () (setq started t))))
+        (my/lsp-mode-ensure)
+        (should started)
+        (should-not my/lsp-mode--waiting-for-direnv)))))
+
 (ert-deftest language-server-network-contact-routes-on-local-and-remote ()
   (dolist (directory
            '("/fs:local:/tmp/project/"

@@ -191,6 +191,9 @@ workspace object and closes resources owned by the old one."
       ;; is pending or starting.  Replacing that owner would close the very
       ;; resources the reconnect job is restoring.
       (setf (remote-workspace-last-used-at existing) (current-time))
+      (when load-environment
+        (setf (remote-workspace-environment existing)
+              (remote-environment-ensure context)))
       existing)
      (t
       (when existing

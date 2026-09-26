@@ -50,7 +50,9 @@
         (my/language-server-toolchain-candidates)
         (my/language-server-toolchain-candidates)
         (should (= calls 1))
-        (remhash (my/language-server-toolchain--key)
+        (remhash (my/language-server-toolchain--candidate-key
+                  (my/language-server-toolchain--canonical-root)
+                  (my/language-server-toolchain-family))
                  my/language-server-toolchain--candidate-cache)
         (my/language-server-toolchain-candidates)
         (should (= calls 2))

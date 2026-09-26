@@ -176,6 +176,50 @@ trigger project or `.envrc' discovery while a connection is being established."
                    direnv--envrc-root-cache))
         root))))
 
+(defun direnv--context-for-root (root)
+  "Return an environment context owned by `.envrc' ROOT.
+A configured Remote workspace may encompass several independent direnv
+roots.  Retain its route and target while separating their environment IDs."
+  (let ((context (remote-context root)))
+    (unless (equal (remote-context-workspace-root context) root)
+      (setq context (copy-remote-context context))
+      (setf (remote-context-workspace-root context) root
+            (remote-context-workspace-id context) nil))
+    context))
+
+(defun direnv--environment-context-for-buffer (context)
+  "Give CONTEXT the selected buffer's nearest `.envrc' root when applicable.
+Remote workspace routes stay fixed; only the environment capsule becomes
+specific to this file.  A buffer outside CONTEXT's root or on another target
+cannot redirect a project command's environment."
+  (let ((path (or buffer-file-name default-directory))
+        (root (remote-context-workspace-root context)))
+    (if (not (and (bound-and-true-p direnv-mode)
+                  (stringp path)
+                  (stringp root)
+                  (equal (remote-context-target-id context)
+                         (remote-file-name-target path))))
+        context
+      (let* ((source (remote-canonicalize-file-name path))
+             (workspace-root (file-name-as-directory root))
+             (env-root
+              (when (string-prefix-p workspace-root source)
+                (ignore-errors
+                  (direnv--envrc-root
+                   (if buffer-file-name
+                       (file-name-directory source)
+                     source))))))
+        (if (and env-root
+                 (not (equal env-root workspace-root)))
+            (let ((specific (copy-remote-context context)))
+              (setf (remote-context-workspace-root specific) env-root
+                    (remote-context-workspace-id specific) nil)
+              specific)
+          context)))))
+
+(setq remote-environment-context-resolver
+      #'direnv--environment-context-for-buffer)
+
 (defun direnv-invalidate-root-cache (&rest _)
   "Discard cached `.envrc' discoveries after a connection or file change."
   (clrhash direnv--envrc-root-cache))
@@ -214,6 +258,67 @@ trigger project or `.envrc' discovery while a connection is being established."
     (error
      (error "Invalid `direnv export json' output: %s"
             (error-message-string err)))))
+
+(defun direnv--diff-path (diff)
+  "Return (OLD . NEW) PATH strings recorded in direnv's DIFF.
+DIFF is the `DIRENV_DIFF' value: URL-safe base64 of zlib-compressed JSON
+whose \"p\" and \"n\" maps hold the variables before and after the `.envrc'."
+  (let ((object
+         (with-temp-buffer
+           (set-buffer-multibyte nil)
+           (insert (base64-decode-string diff t))
+           (unless (zlib-decompress-region (point-min) (point-max))
+             (error "Undecodable DIRENV_DIFF"))
+           (decode-coding-region (point-min) (point-max) 'utf-8)
+           (set-buffer-multibyte t)
+           (json-parse-string (buffer-string) :object-type 'alist
+                              :null-object nil))))
+    (cons (alist-get 'PATH (alist-get 'p object))
+          (alist-get 'PATH (alist-get 'n object)))))
+
+(defun direnv--path-layers (old new)
+  "Return the PATH layers that turn OLD into NEW, both PATH strings.
+Entries NEW gains before the first entry it keeps are prepended, the rest
+appended; entries it drops are removed.  The layers decorate whatever PATH
+the target's lower providers resolved, which need not be the PATH direnv
+itself started from."
+  (let* ((old (split-string (or old "") path-separator t))
+         (new (split-string (or new "") path-separator t))
+         (first-kept (cl-position-if (lambda (entry) (member entry old)) new))
+         prepend append)
+    (seq-do-indexed
+     (lambda (entry index)
+       (unless (member entry old)
+         (if (and first-kept (> index first-kept))
+             (push entry append)
+           (push entry prepend))))
+     new)
+    (seq-filter
+     #'cdr
+     (list (cons 'remove (seq-difference old new))
+           (cons 'prepend (nreverse prepend))
+           (cons 'append (nreverse append))))))
+
+(defun direnv--make-export (stdout route root)
+  "Return the provider result for direnv JSON STDOUT from ROUTE at ROOT.
+direnv reports a whole PATH computed from the environment it ran with.  Only
+its change, recovered from `DIRENV_DIFF', reaches the capsule, so the `.envrc'
+decorates the target's host PATH instead of replacing it."
+  (let* ((vars (direnv--read-json-environment stdout))
+         (path-cell (assoc "PATH" vars))
+         (diff (cdr (assoc "DIRENV_DIFF" vars))))
+    (when (and path-cell (not (stringp diff)))
+      (error "direnv exported PATH without DIRENV_DIFF"))
+    (list
+     :vars (remove path-cell vars)
+     :path-layers
+     (and path-cell
+          (let ((paths (direnv--diff-path diff)))
+            (direnv--path-layers (car paths) (cdr paths))))
+     :source
+     (list 'direnv root
+           (and route (remote-route-link-plugin-id route))
+           (and route (remote-route-link-id route))))))
 
 (defun direnv--cached-export (root fingerprint)
   "Return cached export for ROOT matching FINGERPRINT."
@@ -261,7 +366,7 @@ trigger project or `.envrc' discovery while a connection is being established."
   (when-let* ((root
                (direnv--envrc-root
                 (remote-context-workspace-root context))))
-    (let* ((context (remote-context root))
+    (let* ((context (direnv--context-for-root root))
            (fingerprint (direnv--fingerprint context))
            (cached (direnv--cached-export root fingerprint))
            (remote-current-adapter-id "direnv"))
@@ -272,26 +377,18 @@ trigger project or `.envrc' discovery while a connection is being established."
                    (remote-executable-find "direnv" context))
            (error "direnv is not installed on target %s"
                   (remote-context-target-id context)))
-         (let* ((result
-                 (remote-exec
-                  "direnv"
-                  :args '("export" "json")
-                  :adapter "direnv"
-                  :context context
-                  :check t))
-                (route (remote-exec-result-route result))
-                (export
-                 (list
-                  :vars
-                  (direnv--read-json-environment
-                   (remote-exec-result-stdout result))
-                  :source
-                  (list 'direnv root
-                        (and route
-                             (remote-route-link-plugin-id route))
-                        (and route
-                             (remote-route-link-id route))))))
-           (direnv--cache-export root fingerprint export)))))))
+         (let ((result
+                (remote-exec
+                 "direnv"
+                 :args '("export" "json")
+                 :adapter "direnv"
+                 :context context
+                 :check t)))
+           (direnv--cache-export
+            root fingerprint
+            (direnv--make-export (remote-exec-result-stdout result)
+                                 (remote-exec-result-route result)
+                                 root))))))))
 
 (defun direnv--queue-export-waiter (root buffer callback)
   "Queue BUFFER and optional CALLBACK for ROOT's current export."
@@ -398,20 +495,12 @@ two arguments: the environment and an error."
 		(remhash root direnv--export-processes)
 		(if (zerop (remote-exec-result-status result))
 		    (condition-case err
-			(let* ((route (remote-exec-result-route result))
-                               (export
-				(list
-				 :vars
-				 (direnv--read-json-environment
-				  (remote-exec-result-stdout result))
-				 :source
-				 (list
-				  'direnv root
-				  (and route
-                                       (remote-route-link-plugin-id route))
-				  (and route
-                                       (remote-route-link-id route))))))
-			  (direnv--cache-export root fingerprint export)
+			(progn
+			  (direnv--cache-export
+			   root fingerprint
+			   (direnv--make-export (remote-exec-result-stdout result)
+						(remote-exec-result-route result)
+						root))
 			  (remote-environment-invalidate
 			   (remote-context-target-id context))
 			  (direnv--finish-export-waiters root context))
@@ -486,7 +575,7 @@ only for a pending request, in the requesting buffer."
      (t
       (condition-case err
           (if-let* ((root (direnv--envrc-root path)))
-              (let* ((context (remote-context root))
+              (let* ((context (direnv--context-for-root root))
                      (fingerprint (direnv--fingerprint context))
                      (recent-error
                       (direnv--recent-export-failure root fingerprint)))
@@ -671,7 +760,7 @@ even looking for `.envrc' would otherwise be a forbidden reentrant call."
              buffer direnv-transport-busy-retry-delay))
            (t
             (if-let* ((root (direnv--envrc-root)))
-                (let* ((context (remote-context root))
+                (let* ((context (direnv--context-for-root root))
                        (fingerprint (direnv--fingerprint context)))
                   (if (direnv--cached-export root fingerprint)
                       (progn
@@ -704,7 +793,7 @@ even looking for `.envrc' would otherwise be a forbidden reentrant call."
   (direnv-invalidate-root-cache)
   (let* ((root (or (direnv--envrc-root directory)
                    (user-error "No .envrc controls this directory")))
-         (context (remote-context root))
+         (context (direnv--context-for-root root))
          (remote-current-adapter-id "direnv")
          (result
           (remote-exec

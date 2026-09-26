@@ -88,6 +88,31 @@
     (advice-remove 'auto-revert-buffers
                    'auto-revert-buffers@buffer-list-filter)))
 
+;; Emacs 31 `c-ts-mode' compiles one tree-sitter query per optional keyword
+;; group every time a C buffer enters the mode -- about a third of a warm C
+;; visit.  The answer depends only on the grammar, and a process keeps the
+;; grammar library it first loaded (reinstalling needs a restart to take
+;; effect), so one answer per mode is exact for the process lifetime.
+(defvar my/patch-c-ts-optional-keywords-cache nil
+  "Alist of MODE to `c-ts-mode--compute-optional-keywords' results.")
+
+(defun my/patch-c-ts-optional-keywords-a (function mode)
+  "Call FUNCTION for MODE once per Emacs process."
+  (let ((cached (assq mode my/patch-c-ts-optional-keywords-cache)))
+    ;; A trailing `,@' shares its list with the caller's result, so neither
+    ;; the stored nor the returned value may be the other.
+    (if cached
+        (copy-sequence (cdr cached))
+      (let ((value (funcall function mode)))
+        (push (cons mode (copy-sequence value))
+              my/patch-c-ts-optional-keywords-cache)
+        value))))
+
+(with-eval-after-load 'c-ts-mode
+  (when (fboundp 'c-ts-mode--compute-optional-keywords)
+    (advice-add 'c-ts-mode--compute-optional-keywords
+                :around #'my/patch-c-ts-optional-keywords-a)))
+
 ;; Project API variables are not defined by all supported Emacs releases.
 (defvar project-list-exclude nil)
 

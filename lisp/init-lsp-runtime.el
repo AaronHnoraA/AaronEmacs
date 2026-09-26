@@ -199,10 +199,16 @@ current result first."
               (setq matched t)
               (my/language-server-runtime--finish generation value nil))
              ('pending
-              (setq matched t
-                    my/language-server-runtime-state 'pending
-                    my/language-server-runtime--cleanup
-                    (plist-get provider :cleanup-function)))
+              (setq matched t)
+              ;; A cached target probe may invoke DONE before its resolver
+              ;; returns.  In that case `--finish' already installed the
+              ;; result; marking it pending here would strand the header at
+              ;; "preparing" and suppress the language server.
+              (when (and (= generation my/language-server-runtime--generation)
+                         (eq my/language-server-runtime-state 'idle))
+                (setq my/language-server-runtime-state 'pending
+                      my/language-server-runtime--cleanup
+                      (plist-get provider :cleanup-function))))
              (`(:unsupported ,reason)
               (setq matched t
                     my/language-server-runtime-state 'unsupported

@@ -503,12 +503,16 @@ the backend.  The backend is chosen here, not per export."
                    "local"))))
            ;; Remote mode represents native paths as /fs:local:.  Preserve
            ;; that logical identity while resolving native directory aliases.
-           (if (and (fboundp 'remote-file-name-target)
+            (if (and (fboundp 'remote-file-name-target)
                     (fboundp 'remote-file-local-name)
                     (fboundp 'remote-canonicalize-file-name)
                     (equal (remote-file-name-target expanded) "local"))
-               (remote-canonicalize-file-name
-                (file-truename (remote-file-local-name expanded)))
+               ;; `file-truename' and the final canonicalization inherit the
+               ;; current buffer's directory.  A remote notebook must not
+               ;; turn a client-local host script into its SSH target path.
+               (let ((default-directory user-emacs-directory))
+                 (remote-canonicalize-file-name
+                  (file-truename (remote-file-local-name expanded))))
              expanded)))
         ((and (bound-and-true-p remote-mode)
               (fboundp 'remote-canonicalize-file-name))
@@ -1298,9 +1302,14 @@ to JSON a second time."
         (mtimeMs . ,mtime) (size . ,size)))
      (t
       (let* ((default-directory
-              (file-name-as-directory (file-name-directory file)))
+             (file-name-as-directory (file-name-directory file)))
              (modes (ignore-errors (file-modes file)))
-             (temporary (make-nearby-temp-file ".aaronnote-save-")))
+             ;; On a logical SSH file `make-nearby-temp-file' may choose the
+             ;; target's /tmp, which can be a different filesystem from the
+             ;; project and makes the final rename fail with EXDEV.
+             (temporary
+              (make-temp-file
+               (expand-file-name ".aaronnote-save-" default-directory))))
         (puthash
          file (+ (float-time) 30)
          my/noema--external-file-watch-suppressed)

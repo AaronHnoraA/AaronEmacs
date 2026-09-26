@@ -361,4 +361,20 @@ machine's HOME, because agent-shell's caches expand `~' there."
       (my/vterm-popup-agent-opencode))
     (should (equal (nreverse started) '(claude codex opencode)))))
 
+(ert-deftest agent-shell-adapters-run-the-workspace-cli-without-fallback ()
+  "Claude/Codex adapters get the CLI from the workspace PATH, or fail."
+  (let ((my/agent-shell--lookup-target "local"))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (program &optional _remote)
+                 (and (equal program "claude") "/home/me/.local/bin/claude"))))
+      (should (equal (plist-get (my/agent-shell-use-workspace-cli
+                                 '(:command "claude-agent-acp"
+                                   :environment-variables ("A=1")))
+                                :environment-variables)
+                     '("CLAUDE_CODE_EXECUTABLE=/home/me/.local/bin/claude" "A=1")))
+      (should-error (my/agent-shell-use-workspace-cli '(:command "codex-acp"))
+                    :type 'user-error)
+      (should (equal (my/agent-shell-use-workspace-cli '(:command "pi-acp"))
+                     '(:command "pi-acp"))))))
+
 ;;; popup-agent-tests.el ends here

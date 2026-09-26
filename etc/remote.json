@@ -6,6 +6,12 @@
   },
   "targets": [
     {
+      "id": "aaron-pc",
+      "label": "Aaron-PC",
+      "shell": "/bin/bash",
+      "trusted": true
+    },
+    {
       "id": "login.cse.unsw.edu.au",
       "label": "login.cse.unsw.edu.au",
       "trusted": true,

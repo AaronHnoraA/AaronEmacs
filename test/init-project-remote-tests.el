@@ -443,8 +443,35 @@
         (my/project-activate "/fs:box:/work/project/")
         (my/project-activate "/fs:box:/work/project")
         (my/project-leave)
-        (should (equal (reverse events)
+      (should (equal (reverse events)
                        '("/fs:local:/tmp/project/" nil "/fs:box:/work/project/" nil)))))))
+
+(ert-deftest my/project-reentry-keeps-visible-editor-instead-of-opening-dired ()
+  "Opening the SSH project or its tree must not replace a visible notebook."
+  (let* ((root (make-temp-file "project-reentry-" t))
+         (source (generate-new-buffer " *project-notebook*"))
+         (tree (generate-new-buffer " *project-tree*"))
+         opened)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (with-current-buffer source
+            (setq-local buffer-file-name (expand-file-name "test.ipynb" root)))
+          (switch-to-buffer source)
+          (select-window
+           (display-buffer-in-side-window
+            tree '((side . left) (slot . 0) (window-width . 20))))
+          (cl-letf (((symbol-function 'my/project-switch-perspective) #'ignore)
+                    ((symbol-function 'my/direnv-update-environment-maybe) #'ignore)
+                    ((symbol-function 'my/project-activate) #'ignore)
+                    ((symbol-function 'dired)
+                     (lambda (&rest _) (setq opened t))))
+            (my/project-switch root)
+            (should-not opened)
+            (should (eq (window-buffer (selected-window)) source))))
+      (kill-buffer source)
+      (kill-buffer tree)
+      (delete-directory root t))))
 
 (ert-deftest my/project-navigation-activates-after-success-and-not-after-cancellation ()
   (let ((my/project-active-root nil)

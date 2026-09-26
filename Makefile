@@ -314,6 +314,14 @@ jupyter-live-smoke:
 jupyter-project-live-smoke:
 	$(BATCH) -l test/jupyter-project-live-smoke.el
 
+.PHONY: jupyter-ssh-project-live-smoke
+jupyter-ssh-project-live-smoke:
+	$(BATCH) -l test/jupyter-ssh-project-live-smoke.el
+
+.PHONY: jupyter-local-remote-lsp-live-smoke
+jupyter-local-remote-lsp-live-smoke:
+	$(BATCH) -l test/jupyter-local-remote-lsp-live-smoke.el
+
 .PHONY: jupyter-contents-live-smoke
 jupyter-contents-live-smoke:
 	$(BATCH) -l test/jupyter-contents-live-smoke.el

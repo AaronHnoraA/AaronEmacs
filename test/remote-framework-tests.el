@@ -461,6 +461,24 @@
         (should (memq resource (remote-workspace-resources workspace)))
         (should (eq (remote-workspace-state workspace) state))))))
 
+(ert-deftest remote-workspace-existing-owner-loads-requested-environment ()
+  "Opening files first must not skip project activation on later kernel use."
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/course/test.ipynb"
+             :workspace-root "/fs:local:/tmp/course/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (loads 0))
+      (cl-letf (((symbol-function 'remote-environment-ensure)
+                 (lambda (_context) (cl-incf loads) 'project-environment)))
+        (should (eq (remote-workspace-open
+                     context :connect nil :load-environment t)
+                    workspace))
+        (should (= loads 1))
+        (should (eq (remote-workspace-environment workspace)
+                    'project-environment))))))
+
 (ert-deftest remote-workspace-background-reconnect-retries-external-epoch-change ()
   (remote-framework-test-with-registry
     (let* ((remote-background-jobs (make-hash-table :test #'equal))

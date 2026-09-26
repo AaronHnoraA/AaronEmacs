@@ -29,9 +29,11 @@ introduced.
   delegates to `init-aaronnote-jupyter-project.el`. Launch argv takes precedence
   over old descriptive `remote_kernel.config`; optional project metadata adds
   project settings without copying SSH options into each consumer.
-- The LSP runtime resolver formerly reported target mismatch and still started
-  the ordinary local language server. A required runtime now blocks startup on
-  mismatch, failed interpreter probes or failed direnv preparation.
+- The LSP runtime resolver formerly started an unrelated local language server,
+  and subsequently refused local notebooks with remote kernels. Notebook
+  projections now use remote LSP document identities; process placement follows
+  the kernel project. Failed interpreter probes or direnv preparation still
+  block startup instead of falling back to local tools.
 - The existing launcher still owns Jupyter's kernel start and five-port tunnel;
   those protocol duties were not replaced by a second filesystem layer.
 
@@ -71,7 +73,7 @@ before removing the old profile. Moving an
 installed kernelspec directory requires updating its `--project-file` path.
 The launcher on the machine that stores the profile must be this updated fork.
 
-Notebook, Board and LSP kernelspec discovery share the target-owned command
+Notebook and Board kernelspec discovery share the target-owned command
 resolver in `lisp/init-jupyter-command.el`. It checks project `.venv`/`.conda`
 environments, target PATH and Conda's `~/.conda/environments.txt` registry via
 ordinary remote file APIs. A Python module invocation is supported when the
@@ -79,11 +81,14 @@ modules are installed without a Jupyter console command. This selects the
 catalog tool only: the chosen kernelspec's `argv` still determines the kernel
 interpreter. An explicit configured command is never silently replaced.
 
-When enabled, direnv prepares the project environment before LSP and shell
-startup; the kernel launcher uses `direnv exec ROOT COMMAND`. Scripts retain
+When enabled, direnv prepares each file buffer's environment before LSP startup
+and the configured project environment before shell startup; the kernel launcher
+uses `direnv exec ROOT COMMAND`. Scripts retain
 direnv's own authorization requirements. Product code never runs `direnv allow`.
-Explicit interpreter selection takes precedence over direnv's PATH. Environment
-variables exported by `.envrc` apply to the kernel, LSP and project shell.
+Explicit kernel interpreter selection takes precedence over direnv's PATH for
+execution. LSP instead uses the visiting file's own `.envrc` and Python
+toolchain. Environment variables exported by `.envrc` apply to processes in
+that directory, including its kernel, LSP and shell when they share a root.
 For complex shell launch expressions, retain the existing launcher command;
 `project.python` rewriting deliberately accepts only a simple argv command.
 With direnv enabled, the entire kernel command runs under `/bin/sh -c` inside
@@ -114,25 +119,30 @@ the configured directory fails; it cannot silently start in the login directory.
 
 The notebook header has **Files**, **Shell**, **Project**, and **LSP** controls.
 The ordinary notebook command menu also includes these actions.
+During startup, the LSP control shows when it is loading the file's environment
+or starting the server. After changing `.envrc` or a toolchain, click **LSP**
+(or use `C-c i p l`) to restart in that file's environment.
 
 | Shortcut | Action |
 | --- | --- |
 | `C-c i p d` | Dired at the configured project root |
 | `C-c i p f` | Open a real project file, with normal Emacs completion |
 | `C-c i p s` | Standard Emacs shell on the project target at that root |
-| `C-c i p l` | Open project source if needed, then refresh/start its LSP |
+| `C-c i p l` | Restart this notebook's LSP in its file environment |
 | `C-c i p ?` | Inspect configured target/root/Python and a separate Python probe |
 
-Opening Files or Shell associates that root with the original kernel profile
-for this Emacs session. Python files subsequently opened from it use that
-profile's interpreter and LSP settings. Association does not upload or relocate
-the local notebook. Reopen Files after an Emacs restart to establish the
-association again. Existing non-Jupyter remote projects keep their usual LSP
-toolchain selection.
+Opening Files or Shell associates that root with the kernel profile for project
+navigation. Python files and notebooks always choose LSP from their own path,
+direnv and selected toolchain. Several remote project buffers with different
+`.envrc` files can remain open simultaneously; a nested `.envrc` gets its own
+LSP root. Association does not upload or relocate a local notebook.
 
-A local notebook connected to a remote kernel keeps kernel completion and
-execution, but cannot feed its local URI to the remote LSP. Its LSP action asks
-for an actual remote source file. There is no implicit synchronization. Jupyter
+A local notebook connected to an SSH kernel keeps local file and LSP identity.
+Completion from the running kernel remains available, but static diagnostics,
+imports and definitions come from the local file's Python environment. The
+remote kernel can still access its own filesystem for execution; it does not
+silently redirect the local editor's analyzer. To develop against remote
+modules and data, open the remote project files through SSH. Jupyter
 Contents-only servers still have no general-purpose SSH/LSP process route.
 
 The configured root stays stable when a kernel changes cwd. Environment
@@ -143,6 +153,9 @@ through its project action. Reload the changed Emacs modules to expose the new
 commands in an already-running Emacs.
 
 ## Acceptance evidence
+
+`make jupyter-local-remote-lsp-live-smoke` checks that a local `.ipynb` with an
+SSH kernel profile starts local Pyright from the local file environment.
 
 `make jupyter-project-live-smoke` uses Aaron-PC by default, with isolated `/tmp`
 files and only test-owned shell/LSP/kernel processes. Override target, Python,

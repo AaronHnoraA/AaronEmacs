@@ -10,6 +10,7 @@
 (require 'cl-lib)
 (require 'init-treemacs-bridge)
 (require 'remote-fs)
+(require 'remote-workspace)
 (require 'subr-x)
 
 (eval-when-compile
@@ -52,6 +53,7 @@
 (defvar consult-ripgrep-args)
 (declare-function remote-executable-find "remote-process"
                   (program &optional context))
+(declare-function remote-read-target "remote-board" (&optional prompt omit-local))
 (declare-function get-current-persp "perspective")
 (declare-function persp-parameter "perspective" (parameter &optional persp))
 (declare-function persp-curr "perspective" (&optional frame))
@@ -83,6 +85,51 @@ Entries follow the same shape as `projectile-project-search-path': either a
 directory string or a cons cell of the form (DIRECTORY . DEPTH)."
   :type '(repeat (choice (directory :tag "Directory") (cons :tag "Directory + depth" (directory :tag "Directory") (integer :tag "Depth"))))
   :group 'my/project)
+
+(config-defvar my/jupyter-ssh-projects nil
+  "SSH Jupyter project shortcuts as plists with :name, :target and :root.
+The root is an absolute path on the target.  Notebook, shell and source files
+share the ordinary Remote workspace for that folder."
+  :type 'sexp
+  :group 'my/project)
+
+(defun my/jupyter-ssh-open-project (&optional project)
+  "Enter a target-owned Jupyter PROJECT through the normal Remote filesystem.
+PROJECT is a configured plist; interactively choose one or an SSH directory."
+  (interactive)
+  (let* ((current (and (fboundp 'my/project-current-root)
+                       (my/project-current-root)))
+         (choices
+          (append
+           (when (and current
+                      (not (equal "local"
+                                  (remote-context-target-id (remote-context current)))))
+             (list (cons (format "Current project · %s" current)
+                         (list :root current))))
+           (mapcar (lambda (item)
+                     (cons (format "%s · %s" (plist-get item :name)
+                                   (plist-get item :target)) item))
+                   my/jupyter-ssh-projects)
+           '(("Choose SSH folder…" . choose))))
+         (project (or project
+                      (cdr (assoc (completing-read "Jupyter SSH project: "
+                                                   choices nil t)
+                                  choices))))
+         (root
+          (if (eq project 'choose)
+              (let* ((_ (require 'remote-board))
+                     (target (remote-read-target "SSH target: " t))
+                     (base (remote-make-file-name (remote-target-id target) "/")))
+                (read-directory-name "Project folder on target: " base nil t))
+            (let ((path (plist-get project :root)))
+              (if (remote-fs-file-name-p path)
+                  path
+                (remote-make-file-name (plist-get project :target) path))))))
+    (unless (and root (file-directory-p root))
+      (user-error "Jupyter SSH project directory is unavailable: %s" root))
+    (remote-workspace-open root :connect t :adapter "emacs-file"
+                           :capability 'file-read :load-environment t)
+    (my/project-switch root)))
 
 (config-defvar my/project-import-project-el-entries nil
   "Whether `project.el' entries may flow back into the manual project list."
@@ -485,19 +532,34 @@ emit one event without scanning files or opening a Remote connection."
   (add-hook 'remote-workspace-close-hook #'my/project-workspace-closed-h))
 
 (defun my/project-switch (project-root &optional arg)
-  "Switch to PROJECT-ROOT and open its root directory.
+  "Switch to PROJECT-ROOT, keeping an already visible project file.
 With ARG, use Projectile's commander action instead."
   (interactive (list (my/project-read-known-project "Switch to project: ")
                      current-prefix-arg))
   (setq project-root (my/project-normalize-root project-root))
-  (let (opened)
+  (let ((canonical-root
+         (file-name-as-directory
+          (remote-canonicalize-file-name project-root)))
+        opened)
     (unwind-protect
         (progn
           (let ((my/project--switching t)) (my/project-switch-perspective project-root))
           (my/with-project-root-context project-root
             (if arg
                 (projectile-switch-project-by-name project-root arg)
-              (dired project-root)))
+              (if-let* ((source-window
+                         (seq-find
+                          (lambda (window)
+                            (and (not (window-parameter window 'window-side))
+                                 (when-let* ((file (buffer-file-name
+                                                    (window-buffer window))))
+                                   (string-prefix-p
+                                    canonical-root
+                                    (remote-canonicalize-file-name file)))))
+                          (cons (selected-window)
+                                (window-list nil nil)))))
+                  (select-window source-window)
+                (dired project-root))))
           (setq opened t)
           (my/project-activate project-root t))
       ;; A cancelled opener can already have switched the perspective.  Follow
@@ -1843,7 +1905,8 @@ that extra stat is only paid for a marker that actually matched."
       ("g" "magit" my/project-magit-status)]
      ["Open / Shell"
       ("d" "open root" my/project-open-root)
-      ("v" "project vterm" my/project-vterm)]
+      ("v" "project vterm" my/project-vterm)
+      ("j" "Jupyter SSH project" my/jupyter-ssh-open-project)]
      ["Manage"
       ("l" "leave active project" my/project-leave)
       ("A" "add project" my/project-add-known-project)

@@ -9,6 +9,7 @@
 (require 'cl-lib)
 (require 'init-jupyter-management)
 (require 'init-aaronnote-jupyter-server)
+(require 'remote-fs)
 (require 'json)
 (require 'subr-x)
 (require 'transient)
@@ -18,6 +19,8 @@
                   "init-aaronnote-jupyter-runtime" (runtime-id action callback))
 (declare-function my/noema-jupyter-runtime-snapshot
                   "init-aaronnote-jupyter-runtime" (&optional target-id))
+(declare-function my/jupyter-ssh-open-project "init-project" (&optional project))
+(defvar my/jupyter-ssh-projects)
 
 (defgroup my/jupyter-board nil
   "Jupyter kernelspec and remote kernel management."
@@ -495,49 +498,68 @@ The default view keeps remote profiles and active sessions prominent."
     (insert "\n")))
 
 (defun my/jupyter-board--insert-quick-start (remote-count)
-  "Insert the short usage path for REMOTE-COUNT configured profiles."
-  (let* ((local (my/jupyter-management-local-target-p my/jupyter-board--target))
-         (program (my/jupyter-management-command
-                   my/jupyter-board--target 'remote-ikernel))
-         (ready (or (not local) (and program (file-executable-p program)))))
-    (aaron-ui-board-insert-section "Start Here")
-    (if (> remote-count 0)
-        (progn
-          (aaron-ui-board-insert-field
-           "1 · Connect" "Choose Open REPL on a remote profile below.")
-          (aaron-ui-board-insert-field
-           "2 · Work" "Use the new REPL from your source buffer or notebook.")
-          (aaron-ui-board-insert-field
-           "Profiles stored"
-           (format "%s — this is where profiles are stored, not necessarily the compute host."
-                   (my/jupyter-management-target-label my/jupyter-board--target))))
-      (aaron-ui-board-insert-field
-       "1 · Add" "Create an SSH profile for the machine that will run Python.")
-      (aaron-ui-board-insert-field
-       "2 · Connect" "Open its REPL; this starts the remote kernel and SSH tunnels.")
-      (aaron-ui-board-insert-field
-       "3 · Work" "Evaluate code in the REPL or from an associated source buffer."))
-    (aaron-ui-board-insert-field
-     "Launcher"
-     (cond (ready (if local "Ready" "Checked on the selected target when used"))
-           (t "Setup needed — remote_ikernel is not installed"))
-     (if ready 'aaron-ui-board-good 'aaron-ui-board-bad))
-    (insert "   ")
-    (aaron-ui-board-insert-actions
-     `((:label "Quick Add SSH" :command my/jupyter-remote-quick-add :primary t
-               :help "Create a normal SSH/Python profile with a guided form")
-       (:label "Usage Guide" :command my/jupyter-board-help
-               :help "Explain setup, targets, profiles, and daily use")
-       (:label "Advanced Add" :command my/jupyter-remote-add
-               :help "Configure schedulers, jump hosts, and custom launch commands")
-       ,@(when (and local (not ready))
-           '((:label "Install remote_ikernel" :command my/jupyter-board-reinstall
-                     :help "Install the vendored launcher into the configured Python")))))
-    (insert "\n\n")))
+  "Show the normal project workflow and the optional quick REPL entrance."
+  (aaron-ui-board-insert-section "Start Here")
+  (aaron-ui-board-insert-field
+   "1 · Open" "Choose an SSH project above, or enter another remote folder.")
+  (aaron-ui-board-insert-field
+   "2 · Edit" "Work on notebooks and source files in that remote filesystem.")
+  (aaron-ui-board-insert-field
+   "3 · Run" "Use the project's Python environment for Jupyter and LSP.")
+  (aaron-ui-board-insert-field
+   "Quick REPL"
+   (format "%d saved remote kernel profile%s available below."
+           remote-count (if (= remote-count 1) "" "s")))
+  (insert "   ")
+  (aaron-ui-board-insert-actions
+   '((:label "Open SSH Project" :command my/jupyter-ssh-open-project :primary t
+             :help "Enter a remote project with its files and notebooks")
+     (:label "Quick Add SSH" :command my/jupyter-remote-quick-add
+             :help "Create a remote kernel for a quick REPL")
+     (:label "Usage Guide" :command my/jupyter-board-help
+             :help "Explain projects, targets, profiles, and daily use")))
+  (insert "\n\n"))
+
+(defun my/jupyter-board--insert-ssh-projects ()
+  "Offer the ordinary SSH filesystem workflow beside remote-kernel profiles."
+  (aaron-ui-board-insert-section "SSH Notebook Projects")
+  (aaron-ui-board-insert-field
+   "Project workflow" "Open the remote folder, then edit notebooks and source files in place.")
+  (insert "   ")
+  (aaron-ui-board-insert-actions
+   '((:label "Open SSH Project" :command my/jupyter-ssh-open-project :primary t
+              :help "Enter a remote project with its files, shell and notebooks")))
+  (insert "\n\n")
+  (dolist (project (and (boundp 'my/jupyter-ssh-projects)
+                        my/jupyter-ssh-projects))
+    (let* ((shortcut project)
+           (target (plist-get shortcut :target))
+           (path (plist-get shortcut :root))
+           (root (if (remote-fs-file-name-p path)
+                     path
+                   (remote-make-file-name target path))))
+      (aaron-ui-board-insert-row
+       :id (format "ssh-project:%s:%s" target root)
+       :icon 'directory :badge "SSH" :badge-tone 'success
+       :title (or (plist-get shortcut :name) target)
+       :meta target :detail root
+       :action (lambda (_button) (my/jupyter-ssh-open-project shortcut))
+       :help "RET: open this project through the Remote filesystem")
+      (insert "      ")
+      (aaron-ui-board-insert-actions
+       `((:label "Open Project" :primary t
+                 :command ,(lambda () (my/jupyter-ssh-open-project shortcut))
+                 :help "Enter this SSH project")
+         (:label "Files"
+                 :command ,(lambda ()
+                             (my/jupyter-ssh-open-project shortcut)
+                             (dired root))
+                 :help "Open its remote files in Dired")))
+      (insert "\n\n"))))
 
 (defun my/jupyter-board--insert-remote-profiles (entries)
-  "Insert the primary remote-kernel management section for ENTRIES."
-  (aaron-ui-board-insert-section "Remote Kernels" (length entries) 'success)
+  "Insert the optional remote-kernel REPL section for ENTRIES."
+  (aaron-ui-board-insert-section "Remote Kernels · Quick REPL" (length entries) 'success)
   (insert "   ")
   (aaron-ui-board-insert-actions
    `((:label "Add SSH Profile" :command my/jupyter-remote-quick-add :primary t
@@ -734,7 +756,9 @@ The default view keeps remote profiles and active sessions prominent."
 
 (defun my/jupyter-board--render ()
   "Render the current passive Jupyter snapshots."
-  (let* ((remote (cl-remove-if-not (lambda (entry) (plist-get entry :remote))
+  (let* ((ssh-projects (and (boundp 'my/jupyter-ssh-projects)
+                            my/jupyter-ssh-projects))
+         (remote (cl-remove-if-not (lambda (entry) (plist-get entry :remote))
                                    my/jupyter-board--entries))
          (project (cl-remove-if-not
                    (lambda (entry) (eq (plist-get entry :origin) 'noema-project))
@@ -745,23 +769,27 @@ The default view keeps remote profiles and active sessions prominent."
                               my/jupyter-board--entries)))
     (let ((inhibit-read-only t))
       (aaron-ui-board-set-header
-       "Remote Kernels" 'server
-       (format "Profiles on %s"
-               (my/jupyter-management-target-label my/jupyter-board--target)))
+       "Jupyter Projects" 'server
+       "SSH projects and quick REPLs")
       (aaron-ui-board-render
        (lambda ()
          (aaron-ui-board-insert-page-header
-          "Remote Kernel Manager" :icon 'server
-          :subtitle (format "Run Jupyter code on another machine · profiles stored on %s"
+          "Jupyter Projects" :icon 'server
+          :subtitle (format "Edit SSH projects in place · quick REPL profiles stored on %s"
                             (my/jupyter-management-target-label
                              my/jupyter-board--target))
-          :stats `((,(format "%d remote profile%s" (length remote)
+          :stats `((,(format "%d SSH project%s"
+                             (length ssh-projects)
+                             (if (= (length ssh-projects) 1) "" "s")) . success)
+                   (,(format "%d remote profile%s" (length remote)
                              (if (= (length remote) 1) "" "s")) . info)
                    (,(format "%d active session%s" (length my/jupyter-board--runtimes)
                              (if (= (length my/jupyter-board--runtimes) 1) "" "s"))
                     . success))
-          :actions `((:label "Quick Add SSH" :command my/jupyter-remote-quick-add
-                             :primary t :help "Create an SSH remote kernel profile")
+          :actions `((:label "Open SSH Project" :command my/jupyter-ssh-open-project
+                             :primary t :help "Enter a remote notebook project")
+                     (:label "Quick Add SSH" :command my/jupyter-remote-quick-add
+                             :help "Create a quick REPL profile")
                      (:label "Target" :command my/jupyter-board-select-target
                              :help "Choose where kernelspec profiles are stored")
                      (:label "Refresh" :command my/jupyter-board-refresh
@@ -774,6 +802,7 @@ The default view keeps remote profiles and active sessions prominent."
                              :help "Toggle local kernels, connection files, and diagnostics")))
          (my/jupyter-board--insert-provider-errors)
          (my/jupyter-board--insert-servers)
+         (my/jupyter-board--insert-ssh-projects)
          (my/jupyter-board--insert-quick-start (length remote))
          (my/jupyter-board--insert-remote-profiles remote)
          (aaron-ui-board-insert-section "Active Sessions"
@@ -781,7 +810,7 @@ The default view keeps remote profiles and active sessions prominent."
          (if my/jupyter-board--runtimes
              (mapc #'my/jupyter-board--insert-runtime my/jupyter-board--runtimes)
            (aaron-ui-board-insert-empty
-            "No session is running. Open a remote profile when you are ready."))
+            "No remote REPL is running."))
          (if my/jupyter-board--show-advanced
              (my/jupyter-board--insert-advanced
               my/jupyter-board--connections project other)
@@ -796,7 +825,7 @@ The default view keeps remote profiles and active sessions prominent."
                         :help "Open every Jupyter Board command")))
              (insert "\n\n")))
          (aaron-ui-board-insert-key-hints
-          "Keys: a quick add  e edit  r open REPL  g refresh  T target  v technical view  ? guide  M all commands"))))))
+          "Keys: J SSH project  a quick add  e edit  r open REPL  g refresh  T target  v technical view  ? guide  M all commands"))))))
 
 (defun my/jupyter-board-refresh ()
   "Refresh all Jupyter providers without starting services or kernels."
@@ -864,7 +893,7 @@ The default view keeps remote profiles and active sessions prominent."
   "Toggle technical Jupyter resources in the current board."
   (interactive)
   (unless (derived-mode-p 'my/jupyter-board-mode)
-    (user-error "Not in the Remote Kernel Manager"))
+    (user-error "Not in the Jupyter Board"))
   (setq my/jupyter-board--show-advanced
         (not my/jupyter-board--show-advanced))
   (my/jupyter-board--render))
@@ -873,17 +902,21 @@ The default view keeps remote profiles and active sessions prominent."
   "Toggle visibility of old local Jupyter connection files."
   (interactive)
   (unless (derived-mode-p 'my/jupyter-board-mode)
-    (user-error "Not in the Remote Kernel Manager"))
+    (user-error "Not in the Jupyter Board"))
   (setq my/jupyter-board--show-stale-connections
         (not my/jupyter-board--show-stale-connections))
   (my/jupyter-board--render))
 
 (defun my/jupyter-board-help ()
-  "Show a practical guide to remote kernels in Emacs."
+  "Show the project workflow and optional remote-kernel REPL guide."
   (interactive)
-  (with-help-window "*Remote Kernel Guide*"
-    (princ "Remote Kernel Manager\n\n")
-    (princ "最常用的 SSH 工作流\n\n")
+  (with-help-window "*Jupyter Project Guide*"
+    (princ "Jupyter Projects\n\n")
+    (princ "完整项目：按 J 或选择 Open SSH Project，直接打开远端目录。\n")
+    (princ "在远端编辑 notebook 和源码；Python、shell、LSP 从各文件所在的项目")
+    (princ "与 .envrc 环境启动。同一时间可以打开多个项目。\n\n")
+    (princ "Quick REPL：Remote Kernels 区域保留便携的 remote_ikernel 入口。\n\n")
+    (princ "远程 kernel 快速连接\n\n")
     (princ "1. 通常保持 Target 为 Local。Target 表示 kernelspec 配置保存在哪里；")
     (princ "真正运行计算的服务器由 SSH host 决定。\n")
     (princ "2. 选择 Quick Add SSH，填写 user@host（非标准端口可写 user@host:2222）。\n")
@@ -1692,6 +1725,7 @@ background tasks; it never reads the minibuffer or asks for confirmation."
     ("k" "Shutdown" my/jupyter-board-shutdown)
     ("K" "Clean idle" my/jupyter-board-clean-idle-runtimes)]
    ["Remote"
+    ("J" "Open SSH project" my/jupyter-ssh-open-project)
     ("a" "Quick add SSH" my/jupyter-remote-quick-add)
     ("A" "Advanced add" my/jupyter-remote-add)
     ("e" "Guided edit" my/jupyter-remote-edit-guided)
@@ -1710,6 +1744,7 @@ background tasks; it never reads the minibuffer or asks for confirmation."
 (defun my/jupyter-board--setup-keys ()
   "Install local keybindings for the Jupyter Board."
   (local-set-key (kbd "g") #'my/jupyter-board-refresh)
+  (local-set-key (kbd "J") #'my/jupyter-ssh-open-project)
   (local-set-key (kbd "T") #'my/jupyter-board-select-target)
   (local-set-key (kbd "a") #'my/jupyter-remote-quick-add)
   (local-set-key (kbd "A") #'my/jupyter-remote-add)

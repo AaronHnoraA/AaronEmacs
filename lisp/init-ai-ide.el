@@ -224,12 +224,13 @@ Provider settings, authentication, PATH and a custom command stay untouched."
               '((name . my/agent-shell-use-official-opencode))))
 
 ;; The Claude and Codex ACP adapters each bundle a copy of their CLI and run
-;; it unless told otherwise.  That copy is only as new as the adapter, so the
-;; models and features on offer lag behind the CLI the person keeps updated.
-;; Point each adapter at the CLI its workspace environment finds -- the same
-;; PATH lookup, on the same target, that found the adapter itself -- so a
-;; local session uses the shell's `claude'/`codex' exactly as a remote one
-;; uses the target's.  Pi and OpenCode have no bundled CLI.
+;; it unless told otherwise.  Those copies are removed from this machine; the
+;; only CLI is the one the person keeps updated.  Point each adapter at the
+;; CLI its workspace environment finds -- the same PATH lookup, on the same
+;; target, that found the adapter itself -- so a local session uses the
+;; shell's `claude'/`codex' exactly as a remote one uses the target's.  There
+;; is no fallback: a missing CLI is an error naming the target.  Pi and
+;; OpenCode have no bundled CLI.
 
 (defconst my/agent-shell-adapter-clis
   '(("claude-agent-acp" "CLAUDE_CODE_EXECUTABLE" "claude")
@@ -241,26 +242,21 @@ The adapter runs CLI from ENVIRONMENT-VARIABLE when it is set.")
   "Make a CLI-bundling adapter in ARGUMENTS run the workspace's own CLI.
 ARGUMENTS are `agent-shell--make-acp-client' keywords.  The CLI is looked up
 with the agent's workspace environment on its target and passed as the
-target-native path.  An explicit setting of the variable, in the command's
-environment or Emacs's, wins; a CLI that cannot be found leaves the adapter
-on its bundled copy and says so."
+target-native path.  A CLI that cannot be found is an error."
   (let* ((command (plist-get arguments :command))
          (entry (assoc (and (stringp command) (file-name-nondirectory command))
-                       my/agent-shell-adapter-clis))
-         (variable (nth 1 entry))
-         (environment (plist-get arguments :environment-variables)))
-    (if (or (null entry)
-            (seq-some (lambda (setting) (string-prefix-p (concat variable "=") setting))
-                      environment)
-            (getenv variable))
+                       my/agent-shell-adapter-clis)))
+    (if (null entry)
         arguments
-      (if-let* ((found (executable-find (nth 2 entry) t)))
-          (plist-put (copy-sequence arguments) :environment-variables
-                     (cons (format "%s=%s" variable (remote-file-local-name found))
-                           environment))
-        (message "%s: no `%s' on this workspace's PATH; using the adapter's bundled copy"
-                 command (nth 2 entry))
-        arguments))))
+      (pcase-let ((`(,_ ,variable ,cli) entry))
+        (plist-put (copy-sequence arguments) :environment-variables
+                   (cons (format "%s=%s" variable
+                                 (remote-file-local-name
+                                  (or (executable-find cli t)
+                                      (user-error "%s: no `%s' on the PATH of target `%s'; install it there or add it to that environment"
+                                                  command cli
+                                                  (or my/agent-shell--lookup-target "local")))))
+                         (plist-get arguments :environment-variables)))))))
 
 (with-eval-after-load 'agent-shell
   ;; Innermost, so the workspace environment advice above has run first.

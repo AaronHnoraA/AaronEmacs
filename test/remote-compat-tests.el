@@ -1158,5 +1158,296 @@
     (should (= recoveries 1))
     (should (eq (remote-file-watch-state watch) 'open))))
 
+;;;; Executable lookup environment
+
+(ert-deftest remote-rpc-executable-probe-keeps-buffer-local-capsule ()
+  "A direnv capsule bound over a buffer-local environment reaches the probe.
+`remote-environment-apply' makes `process-environment' buffer-local, so the
+probe's temporary output buffer must not fall back to the global value."
+  (with-temp-buffer
+    (setq-local process-environment
+                (cons "PATH=/login/bin" (default-value 'process-environment)))
+    (setq-local exec-path '("/login/bin"))
+    (let ((process-environment
+           (cons "PATH=/project/.conda/bin:/login/bin" process-environment))
+          (exec-path '("/project/.conda/bin" "/login/bin"))
+          seen)
+      (cl-letf (((symbol-function 'process-file)
+                 (lambda (&rest _)
+                   (setq seen (list (getenv "PATH") exec-path))
+                   (insert "/project/.conda/bin/python3" 0)
+                   0)))
+        (should (equal (remote--rpc-executable-find "python3")
+                       '(t . "/project/.conda/bin/python3")))
+        (should (equal seen
+                       '("/project/.conda/bin:/login/bin"
+                         ("/project/.conda/bin" "/login/bin"))))))))
+
+;;;; tramp-rpc metadata scope
+
+(defvar tramp-rpc--file-stat-cache)
+(defvar tramp-rpc--file-truename-cache)
+(defvar tramp-rpc-protocol-error-file-not-found)
+
+(defmacro remote-tramp-rpc-metadata-test--with-stubs (batches &rest body)
+  "Run BODY with tramp-rpc's private cache seams replaced by local tables.
+BATCHES names a variable that collects every batch request list; the fake
+server answers from `remote-tramp-rpc-metadata-test--server'."
+  (declare (indent 1))
+  `(let ((tramp-rpc--file-stat-cache (make-hash-table :test #'equal))
+         (tramp-rpc--file-truename-cache (make-hash-table :test #'equal))
+         (tramp-rpc-protocol-error-file-not-found -32001)
+         (remote-backend-tramp-rpc-metadata--locate-cache
+          (make-hash-table :test #'equal))
+         (remote-backend-tramp-rpc-metadata--counters
+          (list :batches 0 :fresh-reuse 0 :modtime-reuse 0
+                :locate-hits 0 :locate-misses 0))
+         (remote-backend-tramp-rpc-metadata-scope t)
+         (remote-backend-tramp-rpc-locate-cache t)
+         (remote-file-name-inhibit-cache 10)
+         (,batches nil))
+     (cl-letf (((symbol-function 'tramp-rpc--encode-path)
+                (lambda (path) `((path . ,path))))
+               ((symbol-function 'tramp-rpc--decode-string) #'identity)
+               ((symbol-function 'tramp-rpc--file-stat-cache-key)
+                (lambda (vec localname lstat)
+                  (cons (tramp-make-tramp-file-name vec localname)
+                        (and lstat t))))
+               ((symbol-function 'tramp-rpc--cache-entry-valid-p)
+                (lambda (_timestamp) t))
+               ((symbol-function 'tramp-rpc--cache-put)
+                (lambda (cache key value)
+                  (puthash key (cons (float-time) value) cache)))
+               ((symbol-function 'tramp-rpc--cache-file-stat-result)
+                (lambda (vec localname stat &optional lstat)
+                  (puthash (cons (tramp-make-tramp-file-name vec localname)
+                                 (and lstat t))
+                           (cons (float-time) stat)
+                           tramp-rpc--file-stat-cache)))
+               ((symbol-function 'tramp-rpc--convert-file-attributes)
+                (lambda (stat _id-format)
+                  (list nil nil nil nil nil (alist-get 'mtime stat))))
+               ((symbol-function 'tramp-rpc--call-batch)
+                (lambda (_vec requests)
+                  (push (mapcar (lambda (request)
+                                  (list (car request)
+                                        (alist-get 'path (cdr request))
+                                        (alist-get 'lstat (cdr request))))
+                                requests)
+                        ,batches)
+                  (mapcar #'remote-tramp-rpc-metadata-test--server
+                          requests))))
+       ,@body)))
+
+(defun remote-tramp-rpc-metadata-test--server (request)
+  "Answer one fake batch REQUEST for a regular file below /tmp/p/."
+  (let ((path (alist-get 'path (cdr request))))
+    (cond
+     ((equal path "/tmp/p/missing.c") '(:error -32001 :message "missing"))
+     ((equal (car request) "file.truename") path)
+     ((string-suffix-p "/" path) '((type . "directory") (mtime . dir)))
+     (t '((type . "file") (mtime . disk))))))
+
+(ert-deftest remote-tramp-rpc-metadata-scope-batches-first-miss ()
+  "A visit's metadata costs one batch; later queries hit the seeded caches."
+  (require 'tramp)
+  (remote-tramp-rpc-metadata-test--with-stubs batches
+    (let* ((file "/ssh:box:/tmp/p/a.c")
+           (vec (tramp-dissect-file-name file))
+           (calls 0)
+           (stat (lambda (vec localname &optional lstat)
+                   (cl-incf calls)
+                   (ignore vec localname lstat)
+                   'network)))
+      (remote-backend-tramp-rpc-metadata--scope-a
+       (lambda ()
+         (remote-backend-tramp-rpc-metadata--stat-a stat vec "/tmp/p/a.c")
+         ;; Seeded answers are served by tramp-rpc's own cache lookup,
+         ;; which this adapter never reaches; only forced stats come here.
+         (let ((remote-file-name-inhibit-cache t))
+           (should
+            (equal (remote-backend-tramp-rpc-metadata--stat-a
+                    stat vec "/tmp/p/a.c" t)
+                   '((type . "file") (mtime . disk)))))))
+      (should (equal (length batches) 1))
+      (should (equal (car batches)
+                     '(("file.stat" "/tmp/p/a.c" nil)
+                       ("file.stat" "/tmp/p/a.c" t)
+                       ("file.truename" "/tmp/p/a.c" nil)
+                       ("file.stat" "/tmp/p/" nil)
+                       ("file.stat" "/tmp/p/" t))))
+      ;; The first stat still asks its own function after the batch; it now
+      ;; hits the cache in production.  The forced stat never went out.
+      (should (= calls 1))
+      (dolist (key (list (cons file nil) (cons file t)
+                         (cons "/ssh:box:/tmp/p/" nil)
+                         (cons "/ssh:box:/tmp/p/" t)))
+        (should (gethash key tramp-rpc--file-stat-cache)))
+      (should (equal (cdr (gethash file tramp-rpc--file-truename-cache))
+                     file))
+      (should (= (plist-get remote-backend-tramp-rpc-metadata--counters
+                            :fresh-reuse)
+                 1)))))
+
+(ert-deftest remote-tramp-rpc-metadata-scope-forgets-written-file ()
+  "After a write, a forced stat in the same save is a real round trip."
+  (require 'tramp)
+  (remote-tramp-rpc-metadata-test--with-stubs batches
+    (let* ((file "/ssh:box:/tmp/p/a.c")
+           (vec (tramp-dissect-file-name file))
+           (calls 0)
+           (stat (lambda (_vec _localname &optional _lstat)
+                   (cl-incf calls) 'fresh)))
+      (remote-backend-tramp-rpc-metadata--scope-a
+       (lambda ()
+         (let ((remote-file-name-inhibit-cache t))
+           (should (equal (remote-backend-tramp-rpc-metadata--stat-a
+                           stat vec "/tmp/p/a.c" t)
+                          '((type . "file") (mtime . disk))))
+           (remote-backend-tramp-rpc-metadata--invalidate-path-a file)
+           (should (eq (remote-backend-tramp-rpc-metadata--stat-a
+                        stat vec "/tmp/p/a.c" t)
+                       'fresh)))))
+      (should (= (length batches) 1))
+      (should (= calls 1)))))
+
+(ert-deftest remote-tramp-rpc-metadata-no-scope-is-transparent ()
+  "Outside a visit or save the adapter neither batches nor answers."
+  (require 'tramp)
+  (remote-tramp-rpc-metadata-test--with-stubs batches
+    (let ((vec (tramp-dissect-file-name "/ssh:box:/tmp/p/a.c"))
+          (remote-file-name-inhibit-cache t))
+      (should (eq (remote-backend-tramp-rpc-metadata--stat-a
+                   (lambda (&rest _) 'direct) vec "/tmp/p/a.c")
+                  'direct))
+      (should-not batches))
+    (let ((remote-backend-tramp-rpc-metadata-scope nil)
+          (vec (tramp-dissect-file-name "/ssh:box:/tmp/p/a.c")))
+      (remote-backend-tramp-rpc-metadata--scope-a
+       (lambda ()
+         (should (eq (remote-backend-tramp-rpc-metadata--stat-a
+                      (lambda (&rest _) 'direct) vec "/tmp/p/a.c")
+                     'direct))))
+      (should-not batches))))
+
+(ert-deftest remote-tramp-rpc-metadata-missing-file-and-batch-failure ()
+  "A missing file caches nil; a failed batch leaves the per-query path."
+  (require 'tramp)
+  (remote-tramp-rpc-metadata-test--with-stubs batches
+    (let ((vec (tramp-dissect-file-name "/ssh:box:/tmp/p/missing.c")))
+      (remote-backend-tramp-rpc-metadata--scope-a
+       (lambda ()
+         (let ((remote-file-name-inhibit-cache t))
+           (should-not (remote-backend-tramp-rpc-metadata--stat-a
+                        (lambda (&rest _) 'network)
+                        vec "/tmp/p/missing.c")))))
+      (should (equal (gethash (cons "/ssh:box:/tmp/p/missing.c" nil)
+                              tramp-rpc--file-stat-cache)
+                     (cons (car (gethash (cons "/ssh:box:/tmp/p/missing.c"
+                                               nil)
+                                         tramp-rpc--file-stat-cache))
+                           nil)))
+      (should-not (gethash "/ssh:box:/tmp/p/missing.c"
+                           tramp-rpc--file-truename-cache)))
+    (cl-letf (((symbol-function 'tramp-rpc--call-batch)
+               (lambda (&rest _) (signal 'remote-file-error '("down")))))
+      (let ((vec (tramp-dissect-file-name "/ssh:box:/tmp/p/b.c")))
+        (remote-backend-tramp-rpc-metadata--scope-a
+         (lambda ()
+           (let ((remote-file-name-inhibit-cache t))
+             (should (eq (remote-backend-tramp-rpc-metadata--stat-a
+                          (lambda (&rest _) 'network) vec "/tmp/p/b.c")
+                         'network)))))))))
+
+(ert-deftest remote-tramp-rpc-metadata-visit-modtime-is-pre-read-stat ()
+  "Only a visit's own stat may stand in for the post-read modtime stat."
+  (require 'tramp)
+  (remote-tramp-rpc-metadata-test--with-stubs batches
+    (let* ((file "/ssh:box:/tmp/p/a.c")
+           (vec (tramp-dissect-file-name file))
+           (modtime (lambda (&optional time) (list 'set time))))
+      (with-temp-buffer
+        (setq buffer-file-name file)
+        (should (equal (remote-backend-tramp-rpc-metadata--modtime-a modtime)
+                       '(set nil)))
+        (remote-backend-tramp-rpc-metadata--scope-a
+         (lambda ()
+           (remote-backend-tramp-rpc-metadata--stat-a
+            #'ignore vec "/tmp/p/a.c")
+           (should (equal (remote-backend-tramp-rpc-metadata--modtime-a
+                           modtime)
+                          '(set disk)))
+           (should (equal (remote-backend-tramp-rpc-metadata--modtime-a
+                           modtime 'explicit)
+                          '(set explicit)))
+           (remote-backend-tramp-rpc-metadata--invalidate-path-a file)
+           (should (equal (remote-backend-tramp-rpc-metadata--modtime-a
+                           modtime)
+                          '(set nil)))))
+        (setq buffer-file-name nil)))))
+
+(ert-deftest remote-tramp-rpc-metadata-locate-cache-scope ()
+  "Marker searches are shared by siblings and dropped only by markers."
+  (require 'tramp)
+  (remote-tramp-rpc-metadata-test--with-stubs batches
+    (let* ((searches 0)
+           (locate (lambda (_file _name)
+                     (cl-incf searches) "/ssh:box:/tmp/")))
+      (dolist (name '("a.c" "b.c"))
+        (puthash (cons (concat "/ssh:box:/tmp/p/" name) nil)
+                 (cons (float-time) '((type . "file")))
+                 tramp-rpc--file-stat-cache))
+      (dotimes (_ 2)
+        (should (equal (remote-backend-tramp-rpc-metadata--locate-a
+                        locate "/ssh:box:/tmp/p/a.c" ".git")
+                       "/ssh:box:/tmp/")))
+      (remote-backend-tramp-rpc-metadata--locate-a
+       locate "/ssh:box:/tmp/p/b.c" ".git")
+      (should (= searches 1))
+      (remote-backend-tramp-rpc-metadata--invalidate-path-a
+       "/ssh:box:/tmp/p/a.c")
+      (remote-backend-tramp-rpc-metadata--flush-file-a nil "/tmp/p/b.c")
+      (remote-backend-tramp-rpc-metadata--locate-a
+       locate "/ssh:box:/tmp/p/a.c" ".git")
+      (should (= searches 1))
+      (remote-backend-tramp-rpc-metadata--flush-file-a nil "/tmp/p/.git")
+      (remote-backend-tramp-rpc-metadata--locate-a
+       locate "/ssh:box:/tmp/p/a.c" ".git")
+      (should (= searches 2))
+      (remote-backend-tramp-rpc-metadata--locate-a
+       locate "/ssh:box:/tmp/p/a.c" #'ignore)
+      (should (= searches 3))
+      (let ((remote-file-name-inhibit-cache t))
+        (remote-backend-tramp-rpc-metadata--locate-a
+         locate "/ssh:box:/tmp/p/a.c" ".git"))
+      (should (= searches 4)))))
+
+(ert-deftest remote-tramp-rpc-metadata-install-is-gated ()
+  "The adapter installs only on the verified release with intact seams."
+  (require 'tramp)
+  (let ((tramp-rpc--file-stat-cache (make-hash-table :test #'equal))
+        (tramp-rpc--file-truename-cache (make-hash-table :test #'equal))
+        (tramp-rpc-protocol-error-file-not-found -32001))
+    (unwind-protect
+        (progn
+          (should-not (remote-backend-tramp-rpc-metadata-install
+                       nil (lambda (_contract) t)))
+          (should-not (remote-backend-tramp-rpc-metadata-install
+                       t (lambda (contract)
+                           (not (eq (car contract)
+                                    'tramp-rpc--call-batch)))))
+          (should-not (advice-member-p
+                       #'remote-backend-tramp-rpc-metadata--scope-a
+                       'find-file-noselect))
+          (should (remote-backend-tramp-rpc-metadata-install
+                   t (lambda (_contract) t)))
+          (should (advice-member-p
+                   #'remote-backend-tramp-rpc-metadata--scope-a
+                   'basic-save-buffer)))
+      (remote-backend-tramp-rpc-metadata-uninstall)
+      (should-not (advice-member-p
+                   #'remote-backend-tramp-rpc-metadata--scope-a
+                   'find-file-noselect)))))
+
 (provide 'remote-compat-tests)
 ;;; remote-compat-tests.el ends here

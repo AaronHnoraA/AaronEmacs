@@ -5,6 +5,7 @@
 (require 'cl-lib)
 (require 'remote-backend-core)
 (require 'remote-backend-tramp)
+(require 'remote-backend-tramp-rpc-metadata)
 (require 'remote-fs)
 
 (declare-function msgpack-encode "msgpack" (object))
@@ -793,7 +794,12 @@ already terminal.  An active process or any other error still propagates."
                     'tramp-rpc--connection-transport-death))
           (advice-add
            'tramp-rpc--connection-transport-death
-           :before #'remote-backend-tramp-rpc--transport-death-before-a))))))
+           :before #'remote-backend-tramp-rpc--transport-death-before-a)))
+      (remote-backend-tramp-rpc-metadata-install
+       verified
+       (lambda (contract)
+         (equal (remote-backend-tramp-rpc--upstream-arity (car contract))
+                (cdr contract)))))))
 
 (with-eval-after-load 'tramp-rpc-process
   (remote-backend-tramp-rpc-install))

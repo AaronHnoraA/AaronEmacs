@@ -173,6 +173,15 @@
       (when (file-symlink-p alias) (delete-file alias))
       (when (file-directory-p root) (delete-directory root t)))))
 
+(ert-deftest my/noema-host-script-stays-local-from-remote-notebook ()
+  (let* ((remote-mode t)
+         (script (expand-file-name "site-lisp/noema/web-host.mjs"
+                                   user-emacs-directory))
+         (expected (file-truename script)))
+    (with-temp-buffer
+      (setq default-directory "/fs:missing:/work/")
+      (should (equal (my/noema--host-file script) expected)))))
+
 (ert-deftest my/noema-host-file-preserves-remote-logical-identity ()
   (let ((remote-mode t))
     (cl-letf
@@ -221,20 +230,28 @@
                   (insert-file-contents native)
                   (buffer-string))
                 "# Initial\n")))
-            (let ((saved
-                   (my/noema--external-file-write
-                    `((file . ,logical)
-                      (content . "# Saved\n")
-                      (baseMtimeMs . ,mtime))
-                    nil)))
-              (should (eq (alist-get 'ok saved) t))
-              (should (equal (alist-get 'file saved) canonical))
-              (should
-               (equal
-                (with-temp-buffer
-                  (insert-file-contents native)
-                  (buffer-string))
-                "# Saved\n")))))
+            (let (staged
+                  (original-make-temp-file (symbol-function 'make-temp-file)))
+              (cl-letf (((symbol-function 'make-temp-file)
+                         (lambda (prefix &rest args)
+                           (setq staged prefix)
+                           (apply original-make-temp-file prefix args))))
+                (let ((saved
+                       (my/noema--external-file-write
+                        `((file . ,logical)
+                          (content . "# Saved\n")
+                          (baseMtimeMs . ,mtime))
+                        nil)))
+                  (should (eq (alist-get 'ok saved) t))
+                  (should (equal (alist-get 'file saved) canonical))
+                  (should (equal (file-name-directory staged)
+                                 (file-name-directory canonical)))
+                  (should
+                   (equal
+                    (with-temp-buffer
+                      (insert-file-contents native)
+                      (buffer-string))
+                    "# Saved\n")))))))
       (when (file-exists-p native)
         (delete-file native)))))
 
@@ -384,8 +401,6 @@
                                                (session . "default")))
                                   (kernelStatus . "idle"))
                                 nil)))
-                    ((symbol-function 'my/noema-jupyter-cell-lsp-runtime-changing)
-                     #'ignore)
                     ((symbol-function 'my/language-server-ensure-deferred)
                      #'ignore))
             (my/noema-jupyter-cell-refresh-status))
@@ -1821,103 +1836,6 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
        (string-suffix-p
         "/var/aaronnote/jupyter/runtime"
         (alist-get 'JUPYTER_RUNTIME_DIR env))))))
-
-(ert-deftest my/noema-jupyter-lsp-treats-legacy-remote-kernel-as-expected-fallback ()
-  (let* ((entry
-          '((name . "rik_ssh_example_python")
-            (spec
-             (argv . ["python" "-m" "remote_ikernel"
-                      "-f" "{connection_file}"])
-             (language . "python"))))
-         (fallback
-          (my/noema-jupyter-cell--lsp-probe-command
-           "rik_ssh_example_python" entry)))
-    (should (my/language-server-runtime-fallback-p fallback))
-    (should (my/language-server-runtime-fallback-expected fallback))
-    (should
-     (equal
-      (my/language-server-runtime-fallback-reason fallback)
-      "legacy remote_ikernel kernelspecs cannot reveal the kernel interpreter"))))
-
-(ert-deftest my/noema-jupyter-lsp-probes-remote-ikernel-kernel-command ()
-  "A managed SSH profile exposes its actual remote interpreter to LSP."
-  (let* ((entry
-          '((name . "rik_ssh_course")
-            (spec
-             (argv . ["/opt/homebrew/bin/python" "-m" "remote_ikernel"
-                      "--interface" "ssh" "--host" "Aaron-WSL2"])
-             (language . "python")
-             (metadata
-              (aaron
-               (remote_kernel
-                (config
-                 (interface . "ssh")
-                 (host . "Aaron-WSL2")
-                 (kernel_cmd . "/home/hc/Desktop/9444/.conda/bin/python -m ipykernel_launcher -f {connection_file}"))))))))
-         (probe
-          (my/noema-jupyter-cell--lsp-probe-command "rik_ssh_course" entry)))
-    (should (equal probe
-                   (list "/home/hc/Desktop/9444/.conda/bin/python"
-                         "-c"
-                         my/noema-jupyter-cell--python-runtime-probe)))))
-
-(ert-deftest my/noema-jupyter-lsp-rediscovers-missing-event-kernelspec ()
-  (let* ((my/enable-direnv nil)
-         (origin (generate-new-buffer " *noema-lsp-rediscovery*"))
-         (context
-          (remote-context-create
-           :target-id "remote-test" :localname "/work/note.md"
-           :workspace-root "/fs:remote-test:/work/"))
-         received commands)
-    (unwind-protect
-        (cl-letf
-            (((symbol-function 'my/noema-jupyter--project-kernelspecs)
-              (lambda (_file) nil))
-             ((symbol-function 'my/jupyter-target-command)
-              (lambda (_context &optional _configured) '("jupyter")))
-             ((symbol-function 'remote-exec-async)
-              (lambda (program &rest options)
-                (push program commands)
-                (let ((callback (plist-get options :callback)))
-                  (funcall
-                   callback
-                   (if (equal program "jupyter")
-                       (remote-exec-result-create
-                        :status 0 :stderr ""
-                        :stdout
-                        (concat
-                         "{\"kernelspecs\":{\"python3\":{"
-                         "\"resource_dir\":\"/target/kernels/python3\","
-                         "\"spec\":{\"argv\":[\"/target/bin/python\","
-                         "\"-m\",\"ipykernel_launcher\",\"-f\","
-                         "\"{connection_file}\"],\"language\":\"python\"}}}}"))
-                     (remote-exec-result-create
-                      :status 0 :stderr ""
-                      :stdout
-                      (concat
-                       "{\"executable\":\"/target/bin/python\","
-                       "\"prefix\":\"/target\",\"base_prefix\":\"/target\","
-                       "\"path\":[\"/target/lib/python\"],"
-                       "\"version\":\"3.14\"}"))))
-                program))))
-          (my/noema-jupyter-cell--lsp-discover-and-probe
-           origin "/fs:remote-test:/work/note.md" context
-           "/fs:remote-test:/work/" "python3" "default" nil
-           (lambda (runtime error) (setq received (list runtime error))))
-          (should (my/language-server-runtime-p (car received)))
-          (should-not (cadr received))
-          (should
-           (equal
-            (remote-normalize-id
-             (my/language-server-runtime-id (car received)))
-            (my/language-server-runtime-id (car received))))
-          (should
-           (equal
-            (plist-get
-             (my/language-server-runtime-profile (car received)) :executable)
-            "/target/bin/python"))
-          (should (equal (nreverse commands) '("jupyter" "/target/bin/python"))))
-      (when (buffer-live-p origin) (kill-buffer origin)))))
 
 (ert-deftest my/noema-jupyter-registers-remote-broker-methods ()
   (dolist (method

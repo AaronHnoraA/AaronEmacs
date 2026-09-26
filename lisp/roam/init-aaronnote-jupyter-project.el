@@ -7,6 +7,7 @@
 
 ;;; Code:
 (require 'cl-lib)
+(require 'json)
 (require 'init-aaronnote-jupyter-cell)
 (require 'init-jupyter-management)
 (require 'init-lsp-runtime)
@@ -15,9 +16,9 @@
 (require 'direnv)
 (require 'shell)
 
-(declare-function my/noema-jupyter-cell--lsp-local-kernelspec "init-aaronnote-jupyter-lsp" (kernel &optional source))
 (declare-function my/language-server-ensure "init-lsp" ())
-(declare-function my/noema-jupyter-cell-lsp-runtime-changing "init-aaronnote-jupyter-lsp" ())
+(declare-function my/noema-jupyter--context "init-aaronnote-jupyter-runtime" (file))
+(declare-function my/jupyter-ssh-open-project "init-project" (&optional project))
 
 (cl-defstruct (my/noema-jupyter-project
                (:constructor my/noema-jupyter-project-create))
@@ -33,6 +34,38 @@
 Entries reference their original kernel.json, not another saved profile.")
 
 (defvar-local my/noema-jupyter-project--shell-pending nil)
+
+(defun my/noema-jupyter-project-local-kernelspec (kernel &optional source)
+  "Read KERNEL's local profile for project file and shell commands.
+SOURCE must belong to the local target.  LSP never uses this profile."
+  (when (and (stringp kernel)
+             (equal (remote-context-target-id
+                     (my/noema-jupyter--context
+                      (or source buffer-file-name default-directory)))
+                    "local"))
+    (catch 'found
+      (dolist (directory
+               (delete-dups
+                (list (expand-file-name "~/Library/Jupyter/kernels/")
+                      (expand-file-name "~/.local/share/jupyter/kernels/")
+                      (expand-file-name "~/.jupyter/kernels/")
+                      (and (boundp 'my/noema-jupyter-kernelspec-directory)
+                           my/noema-jupyter-kernelspec-directory))))
+        (when (and directory (file-directory-p directory))
+          (let ((file (expand-file-name
+                       "kernel.json" (expand-file-name kernel directory))))
+            (when (file-readable-p file)
+              (condition-case nil
+                  (throw 'found
+                         `((name . ,kernel)
+                           (spec . ,(json-parse-string
+                                     (with-temp-buffer
+                                       (insert-file-contents file)
+                                       (buffer-string))
+                                     :object-type 'alist :array-type 'list
+                                     :null-object nil :false-object :json-false))
+                           (resourceDir . ,(file-name-directory file))))
+                (error nil)))))))))
 
 (defun my/noema-jupyter-project-config (spec)
   "Read SPEC's effective remote configuration, with argv taking precedence.
@@ -78,7 +111,7 @@ Never infer configured directories from a live kernel's mutable cwd."
   (let* ((spec (my/jupyter-management-get 'spec entry))
          (config (my/noema-jupyter-project-config spec))
          (project (my/noema-jupyter-project-metadata spec))
-         (source-context (remote-context source))
+         (source-context (my/noema-jupyter--context source))
          (host (my/jupyter-management-get 'host config))
          (target (if-let* ((id (my/jupyter-management-get 'target project)))
                      (my/noema-jupyter-project-resolve-target id)
@@ -118,7 +151,7 @@ Never infer configured directories from a live kernel's mutable cwd."
          (entry (or (and (equal my/noema-jupyter-cell-kernel
                                 (my/jupyter-management-get 'name my/noema-jupyter-cell-kernel-spec))
                          my/noema-jupyter-cell-kernel-spec)
-                    (and source (my/noema-jupyter-cell--lsp-local-kernelspec
+                    (and source (my/noema-jupyter-project-local-kernelspec
                                  my/noema-jupyter-cell-kernel source))
                     (my/noema-jupyter-project-entry-for-source source))))
     (unless entry (user-error "No resolved kernel profile; select a kernel first"))
@@ -176,7 +209,7 @@ or terminal-specific transport is constructed here."
              (spec (my/jupyter-management-get 'spec (my/noema-jupyter-project-entry project)))
              (metadata (my/noema-jupyter-project-metadata spec))
              (start
-              (lambda (_environment error)
+              (lambda (project-environment error)
                 (when (buffer-live-p buffer)
                   (with-current-buffer buffer
                     (setq my/noema-jupyter-project--shell-pending nil)
@@ -187,7 +220,8 @@ or terminal-specific transport is constructed here."
                       (let* ((python (my/noema-jupyter-project-interpreter project))
                              (environment
                               (remote-environment-derive
-                               (remote-environment-resolve context)
+                               (or project-environment
+                                   (remote-environment-resolve context))
                                "jupyter-shell" :scope 'invocation
                                :vars (my/jupyter-management-get 'env spec)
                                :path-prepend (when (and python (file-name-absolute-p python))
@@ -200,24 +234,30 @@ or terminal-specific transport is constructed here."
                                        shell-file-name "/bin/sh"))))))))))
         (if (or (eq t (my/jupyter-management-get 'direnv metadata))
                 (bound-and-true-p my/enable-direnv))
-            (when (eq 'ready (direnv-environment-ensure-async default-directory start))
-              (funcall start nil nil))
+            (let ((environment (remote-environment-resolve context)))
+              (if (and environment
+                       (equal (nth 1 (direnv--environment-source environment))
+                              default-directory))
+                  (funcall start environment nil)
+                (when (eq 'ready (direnv-environment-ensure-async default-directory start))
+                  (funcall start (remote-environment-resolve context) nil))))
           (funcall start nil nil))))
     buffer))
 
 (defun my/noema-jupyter-project-lsp ()
-  "Refresh LSP for a project source, or open remote source from a local notebook."
+  "Restart LSP for the current notebook's own filesystem environment."
   (interactive)
-  (let* ((project (my/noema-jupyter-project-current))
-         (root (my/noema-jupyter-project--directory project))
-         (source (remote-canonicalize-file-name buffer-file-name)))
-    (unless (string-prefix-p root source)
-      (let ((default-directory root))
-        (find-file (read-file-name "Open project source for remote LSP: " root nil t))))
-    (unless (string-prefix-p root (remote-canonicalize-file-name buffer-file-name))
-      (user-error "Select a source file inside %s" root))
-    (my/noema-jupyter-cell-lsp-runtime-changing)
-    (my/language-server-ensure)))
+  (unless buffer-file-name
+    (user-error "Visit a notebook or source file before starting LSP"))
+  (when (and (fboundp 'lsp-workspaces)
+             (ignore-errors (lsp-workspaces)))
+    (lsp-disconnect))
+  (when (fboundp 'my/language-server-runtime-invalidate)
+    (my/language-server-runtime-invalidate))
+  (setq-local my/lsp-mode--start-request nil
+              my/lsp-mode--waiting-for-direnv nil
+              my/language-server--waiting-for-runtime nil)
+  (my/language-server-ensure))
 
 (defun my/noema-jupyter-project-inspect ()
   "Show configured project information separately from a fresh Python probe.
@@ -245,5 +285,6 @@ The probe starts a separate process and changes no configuration."
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i p s" #'my/noema-jupyter-open-project-shell)
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i p l" #'my/noema-jupyter-project-lsp)
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i p ?" #'my/noema-jupyter-project-inspect)
+(keymap-set my/noema-jupyter-cell-mode-map "C-c i p o" #'my/jupyter-ssh-open-project)
 (provide 'init-aaronnote-jupyter-project)
 ;;; init-aaronnote-jupyter-project.el ends here

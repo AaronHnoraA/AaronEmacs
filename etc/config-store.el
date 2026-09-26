@@ -93,6 +93,9 @@
            ("ocamlearlybird") :install "opam install earlybird"))
    (my/tab-line-wheel-throttle . 0.5) (my/tab-line-min-label-width . 8)
    (my/tab-line-max-label-width . 18) (my/noema-jupyter-servers)
+   (my/jupyter-ssh-projects
+    . ((:name "COMP9444" :target "aaron-pc"
+        :root "/home/aaron/Desktop/UNSW/COMP9444/")))
    (my/jupyter-remote-ikernel-command
     . "/opt/homebrew/anaconda3/bin/remote_ikernel")
    (my/jupyter-board-jupyter-command . "/opt/homebrew/bin/jupyter")

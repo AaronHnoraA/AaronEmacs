@@ -744,20 +744,30 @@ missing program returns (t . nil)."
              (or (file-name-absolute-p program)
                  (not (string-match-p "/" program))))
     (condition-case nil
-        (with-temp-buffer
-          (let ((status
-                 (process-file "sh" nil t nil "-c"
-                               remote--rpc-executable-probe-script
-                               "sh" program))
-                (output (buffer-string)))
-            (cond
-             ((and (equal status 0)
-                   (> (length output) 1)
-                   (eq (aref output (1- (length output))) 0)
-                   (file-name-absolute-p
-                    (substring output 0 (1- (length output)))))
-              (cons t (substring output 0 (1- (length output)))))
-             ((equal status 1) (cons t nil)))))
+        ;; The caller binds the environment capsule, and a buffer projected
+        ;; by `remote-environment-apply' holds `process-environment' and
+        ;; `exec-path' buffer-locally.  `let' then binds that buffer's value,
+        ;; which a fresh temporary buffer does not see: carry the bindings in
+        ;; explicitly, or the probe searches the login PATH instead of the
+        ;; workspace's direnv/toolchain PATH.
+        (let ((environment process-environment)
+              (path exec-path))
+          (with-temp-buffer
+            (let* ((process-environment environment)
+                   (exec-path path)
+                   (status
+                    (process-file "sh" nil t nil "-c"
+                                  remote--rpc-executable-probe-script
+                                  "sh" program))
+                   (output (buffer-string)))
+              (cond
+               ((and (equal status 0)
+                     (> (length output) 1)
+                     (eq (aref output (1- (length output))) 0)
+                     (file-name-absolute-p
+                      (substring output 0 (1- (length output)))))
+                (cons t (substring output 0 (1- (length output)))))
+               ((equal status 1) (cons t nil))))))
       ;; Other targets and future tramp-rpc transports may lack a POSIX sh.
       ;; Let the normal file-handler lookup decide instead of failing the route.
       (error nil))))

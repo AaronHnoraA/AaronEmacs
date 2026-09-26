@@ -45,6 +45,11 @@
 (defvar remote-environment-inhibit nil
   "Dynamically non-nil while an environment provider is executing.")
 
+(defvar remote-environment-context-resolver nil
+  "Optional function refining an environment CONTEXT for the current buffer.
+The resolver may return a copied context with a more specific workspace root.
+File routing and Remote workspace identity remain unchanged.")
+
 (defvar remote-background-defer-commit nil)
 
 (defvar-local remote-buffer-environment nil
@@ -178,7 +183,9 @@ Hook functions receive the applied `remote-environment' as their argument.")
   "Register environment provider ID.
 PREDICATE decides whether the provider applies to a context.  FINGERPRINT
 returns state used for cache invalidation, and LOAD returns an environment
-alist or `(:vars ALIST :source VALUE)'."
+alist or `(:vars ALIST :source VALUE)'.  A PATH in ALIST replaces the lower
+layers; `:path-layers ((OPERATION . ENTRIES) ...)', with OPERATION one of
+`prepend', `append' or `remove', decorates them instead."
   (let* ((id (remote-normalize-id id))
          (provider
           (remote-environment-provider-create
@@ -312,6 +319,7 @@ alist or `(:vars ALIST :source VALUE)'."
          :path-mode
          (or (and structured (plist-get value :path-mode))
              (and path 'replace))
+         :path-layers (and structured (plist-get value :path-layers))
          :source
          (or (and structured (plist-get value :source))
              (remote-environment-provider-id provider)))))))
@@ -404,6 +412,9 @@ Return the updated VARS."
 (defun remote--environment-apply-provider
     (loaded vars path-state sources provider-ids)
   "Apply provider LOADED to environment build accumulators.
+LOADED's `:path-layers', a list of (OPERATION . ENTRIES), apply in order on
+top of the PATH so far; a provider that knows its delta uses them instead of
+a whole PATH that would replace the lower layers.
 Return (VARS SOURCES PROVIDER-IDS)."
   (remote--path-add
    path-state
@@ -412,6 +423,13 @@ Return (VARS SOURCES PROVIDER-IDS)."
    (or (plist-get loaded :path-mode) 'inherit)
    (plist-get loaded :path)
    (plist-get loaded :source))
+  (pcase-dolist (`(,operation . ,entries) (plist-get loaded :path-layers))
+    (remote--path-add
+     path-state
+     (format "%s:%s" (plist-get loaded :id) operation)
+     (or (plist-get loaded :scope) 'workspace)
+     operation entries
+     (plist-get loaded :source)))
   (list
    (remote--merge-environments vars (plist-get loaded :vars))
    (append sources (list (plist-get loaded :source)))
@@ -553,13 +571,16 @@ are applied in replace, remove, prepend, append order."
 
 (defun remote-environment-resolve (&optional context force)
   "Return CONTEXT's environment capsule without modifying any buffer.
-This is the process/workspace boundary.  Use `remote-environment-ensure' when
-the resolved environment should also become buffer-local."
+This is the process/workspace boundary.  The current buffer may refine a broad
+workspace context to its own `.envrc' root.  Use `remote-environment-ensure'
+when the resolved environment should also become buffer-local."
   (let ((context
-         (cond
-          ((remote-context-p context) context)
-          ((stringp context) (remote-context context))
-          (t (remote-context)))))
+         (funcall
+          (or remote-environment-context-resolver #'identity)
+          (cond
+           ((remote-context-p context) context)
+           ((stringp context) (remote-context context))
+           (t (remote-context))))))
     (remote--environment-build context force)))
 
 (defun remote-environment-ensure (&optional context force callback)
@@ -568,10 +589,12 @@ Apply it buffer-locally and return it.  With CALLBACK, schedule the provider
 work asynchronously and call CALLBACK with the resulting capsule; return nil
 immediately."
   (let ((context
-         (cond
-          ((remote-context-p context) context)
-          ((stringp context) (remote-context context))
-          (t (remote-context))))
+         (funcall
+          (or remote-environment-context-resolver #'identity)
+          (cond
+           ((remote-context-p context) context)
+           ((stringp context) (remote-context context))
+           (t (remote-context)))))
         (buffer (current-buffer)))
     (if callback
         (progn

@@ -364,6 +364,21 @@ handler、external operation 和 file-notify API；旧版本所需的窄 fallbac
 能力。tramp-rpc 的少数私有 seam 仅存在于 backend adapter，安装 advice 前验证
 arity；形状改变时相应优化自动停用，文件、进程和 channel 主路径仍可继续工作。
 
+tramp-rpc 的文件元数据按“每个用户操作的往返次数”设预算，对标 VS Code Remote 的
+stat + read / stat + write。`remote-backend-tramp-rpc-metadata.el` 在
+`find-file-noselect` 与 `basic-save-buffer` 外包一个文件操作作用域：作用域内第一次
+元数据未命中，用一个 `batch` 同时取该文件的 stat、lstat、truename 以及父目录的
+stat、lstat，并写入 tramp-rpc 自己的缓存；TRAMP 为数据安全强制 fresh 的 stat
+（`remote-file-name-inhibit-cache` 为 t）在同一作用域、该文件未被写入之前复用这份
+结果；visit 的 modtime 取自读之前的 stat，因此并发写入最多造成一次误报的
+“changed on disk”，不会掩盖更新的磁盘内容。写入会使作用域遗忘该文件，写后的
+modtime stat 仍是真实往返。服务端并发执行 batch 条目，所以 read/write 从不并入
+batch。`locate-dominating-file` 结果在 tramp-rpc 元数据 TTL 内复用，只有可能增删
+marker 的失效（同名 marker、目录/子树/连接级 flush）才清空。实测 Aaron-PC
+（RTT≈5ms）：热打开 6→2 次往返（约 155→90ms），保存 8→3 次往返。该适配只在已验证
+release 与私有 seam arity 完整时安装，`remote-backend-tramp-rpc-metadata-report`
+给出计数器。
+
 `remote-accelerator.el` 提供按 operation + route 选择的可选 provider。目前接入 GNU
 ELPA `tramp-hlo` 的三个高层操作，但不调用它的全局 `tramp-hlo-setup`：
 
@@ -503,7 +518,11 @@ workspace 关闭和 framework reset 会取消仍在等待的任务。
 `remote-exec` 返回 status、stdout、stderr、route、context 和 command。环境是按
 `target@workspace` 隔离的 capsule；pipeline/backend 切换不会创建另一份环境。
 direnv、Nix、语言工具链等通过 maintainer 或派生 layer 修改环境，不直接全局
-修改 `process-environment` 和 `exec-path`。
+修改 `process-environment` 和 `exec-path`。provider 返回的整份 `PATH` 是
+`replace` layer，会盖掉更低层（host path、target）；只知道增量的 provider 返回
+`:path-layers ((remove …) (prepend …) (append …))`。direnv 就是这样：它输出的
+PATH 基于它自己启动时的环境（本机即 Emacs 全局 PATH），所以只取 `DIRENV_DIFF`
+记录的前后差异叠在 target PATH 上，`.envrc` 不会抹掉 host-path 探测到的目录。
 
 语言服务器默认是 target placement。当前唯一客户端 lsp-mode 在启动前等待同一份
 workspace 环境，随后通过官方 `make-process` / `start-file-process` 边界路由；
@@ -627,6 +646,13 @@ Copilot 是纯 client-placement consumer：Remote buffer 的文档内容仍由
 tramp-rpc backend 还包含当前 `msgpack.el` 的 large-map 兼容修饰：旧 encoder 在
 环境 map 超过 15 项时会把二进制长度误传给 `unibyte-string`。direnv/Nix 环境很
 容易超过该阈值，因此兼容逻辑由 backend 集中维护，消费者不截断环境。
+
+`remote-environment-apply` 把 capsule 投影进 buffer 后，`process-environment` 与
+`exec-path` 在该 buffer 中是 buffer-local。`let` 绑定的是当前 buffer 的值，切到
+`with-temp-buffer` 等新 buffer 后绑定就不可见，子进程会退回登录 PATH（曾导致
+direnv 项目的 `.conda/bin/python3` 被 `/usr/bin/python3` 取代，pyright 无法解析
+项目依赖）。在切换 buffer 之前取出这两个值，在新 buffer 内重新绑定；
+`remote-exec` 与 `remote--rpc-executable-find` 都遵循这一写法。
 
 Emacs 的 `make-network-process` 与 `open-network-stream` 没有 file-name handler
 入口，因此使用显式 API：

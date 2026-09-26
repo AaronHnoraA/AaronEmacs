@@ -51,11 +51,13 @@
   (when (eq system-type 'darwin)
     (cond
      ((featurep 'exec-path-from-shell)
-      (dolist (variable my/shell-environment-variables)
-        (let ((value (ignore-errors
-                       (exec-path-from-shell-getenv variable))))
-          (when (stringp value)
-            (setenv variable value))))
+      ;; One login shell for all variables.
+      (pcase-dolist (`(,variable . ,value)
+                     (ignore-errors
+                       (exec-path-from-shell-getenvs
+                        my/shell-environment-variables)))
+        (when (stringp value)
+          (setenv variable value)))
       (setq exec-path
             (append (parse-colon-path (or (getenv "PATH") ""))
                     (list exec-directory))))

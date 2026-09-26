@@ -22,7 +22,8 @@
   (unwind-protect
       (progn
         (with-temp-file (expand-file-name ".envrc" root)
-          (insert "export NOEMA_PROJECT_AUDIT=remote-envrc\n"))
+          (insert (format "PATH_add %s\nexport NOEMA_PROJECT_AUDIT=remote-envrc\n"
+                          (file-name-directory python))))
         ;; Only this freshly created test script is authorized by the test.
         ;; Product commands never perform direnv allow.
         (let ((default-directory root) (remote-environment-inhibit t))
@@ -71,34 +72,22 @@
         (setq-local lsp-auto-guess-root t lsp-guess-root-without-session t
                     my/language-server--manual-start t)
         (set-buffer-modified-p t)
-        (my/noema-jupyter-cell-lsp-runtime-changing)
         (my/language-server-ensure)
         (when (and (bound-and-true-p lsp--buffer-deferred) (fboundp 'lsp--init-if-visible)) (lsp--init-if-visible))
-        (let ((deadline (+ (float-time) 45)))
-          (while (and (not (eq my/language-server-runtime-state 'ready))
-                      (< (float-time) deadline))
-            (accept-process-output nil 0.1)))
-        ;; Batch Emacs does not reliably dispatch idle visibility timers.
-        ;; Drive lsp-deferred only after the asynchronous runtime is ready.
         (when (and (bound-and-true-p lsp--buffer-deferred) (fboundp 'lsp--init-if-visible))
           (lsp--init-if-visible))
         (unless (my/lsp-live-smoke--wait 45)
-          (error "LSP failed: %s / %s" my/language-server-runtime-state my/language-server-runtime-error))
-        (unless my/language-server-runtime-current
-          (error "Missing project runtime: buffer=%s source=%s state=%s reason=%S required=%s associated=%S"
-                 (buffer-name) buffer-file-name my/language-server-runtime-state my/language-server-runtime-error
-                 my/language-server-runtime-required (my/noema-jupyter-project-entry-for-source buffer-file-name)))
-        (unless (equal (plist-get (my/language-server-runtime-profile my/language-server-runtime-current) :executable) python)
-          (error "LSP analyzed the wrong Python: %S" (my/language-server-runtime-profile my/language-server-runtime-current)))
+          (error "LSP failed in the source environment: %S" my/lsp-mode--waiting-for-direnv))
+        (unless (equal (plist-get (my/language-server-current-toolchain-profile)
+                                  :executable) python)
+          (error "LSP analyzed the wrong Python: %S"
+                 (my/language-server-current-toolchain-profile)))
         (goto-char (point-min)) (search-forward "np.array") (backward-char 2)
         (let ((hover (lsp-request "textDocument/hover" (lsp--text-document-position-params))))
           (unless (string-match-p "array" (format "%S" hover)) (error "Remote numpy hover missing: %S" hover))
           (princ "PASS remote LSP initialized and resolves numpy array using project Python\n"))
-        (unless (equal (cdr (assoc "NOEMA_PROJECT_AUDIT"
-                                  (remote-environment-vars
-                                   (my/language-server-runtime-environment my/language-server-runtime-current))))
-                       "remote-envrc")
-          (error "LSP runtime lost direnv environment"))
+        (unless (equal (getenv "NOEMA_PROJECT_AUDIT") "remote-envrc")
+          (error "LSP lost the source direnv environment"))
         (let ((default-directory user-emacs-directory))
           (with-temp-buffer
             (let ((status (process-file my/jupyter-board-python-command nil t nil

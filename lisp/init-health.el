@@ -82,9 +82,8 @@
 
 (defun my/health--claude-cli-path ()
   "Return the configured Claude CLI path."
-  (if (boundp 'claude-code-ide-cli-path)
-      claude-code-ide-cli-path
-    (executable-find "claude")))
+  (executable-find
+   (if (boundp 'claude-code-ide-cli-path) claude-code-ide-cli-path "claude")))
 
 (defun my/health--codex-executable ()
   "Return the configured Codex CLI executable path."

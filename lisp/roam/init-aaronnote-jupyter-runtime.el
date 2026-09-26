@@ -113,11 +113,21 @@
 
 (defun my/noema-jupyter--context (file)
   "Return the owning Remote context for FILE."
-  (let ((context (remote-context (remote-canonicalize-file-name file))))
+  (let* ((file (remote-canonicalize-file-name file))
+         (context (remote-context file))
+         (workspace (remote-workspace-for-path file)))
+    ;; A folder opened through the Remote workbench is the project boundary,
+    ;; even when its notebooks live in nested directories.  The static target
+    ;; configuration may know only the SSH host, not every project folder.
+    (when workspace
+      (setf (remote-context-workspace-root context)
+            (remote-workspace-root workspace)
+            (remote-context-workspace-id context)
+            (remote-workspace-workspace-id workspace)))
     (unless (remote-context-workspace-root context)
       (setf (remote-context-workspace-root context)
             (file-name-as-directory
-             (file-name-directory (remote-canonicalize-file-name file)))))
+             (file-name-directory file))))
     context))
 
 (defun my/noema-jupyter--output (context program &rest args)
@@ -1111,7 +1121,12 @@ authority for whether the external kernel is servicing Jupyter messages."
             (directory (file-name-directory file))
             temporary)
        (make-directory directory t)
-       (setq temporary (make-nearby-temp-file ".noema-notebook-"))
+       ;; A logical SSH buffer's `make-nearby-temp-file' can land in the
+       ;; target's /tmp.  Keep the staging file beside the notebook so rename
+       ;; is atomic even when /tmp and the project are different mounts.
+       (setq temporary
+             (make-temp-file
+              (expand-file-name ".noema-notebook-" directory)))
        (unwind-protect
            (let ((coding-system-for-write 'utf-8-unix))
              (write-region content nil temporary nil 'silent)

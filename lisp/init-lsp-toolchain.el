@@ -9,6 +9,7 @@
 
 (require 'cl-lib)
 (require 'init-lsp-runtime)
+(require 'remote-environment)
 (require 'project)
 (require 'seq)
 (require 'subr-x)
@@ -56,6 +57,7 @@ Each entry is `(SYMBOL LOCAL-P VALUE)'.")
 (declare-function my/direnv-update-environment-maybe
                   "init-direnv" (&optional path callback))
 (declare-function my/language-server--canonical-root "init-lsp" (root))
+(declare-function my/language-server--project-root-for-buffer "init-lsp" ())
 (declare-function my/language-server--merge-values "init-lsp" (base override))
 (declare-function my/language-server-set-workspace-configuration
                   "init-lsp" (configuration))
@@ -74,7 +76,9 @@ agree on target identity.  The previous `file-remote-p' branch here
 misclassified `/fs:' names (which `file-remote-p' does not recognize as
 remote), so a target-only root could be truenamed as if it were local."
   (with-current-buffer (or buffer (current-buffer))
-    (or (my/language-server--canonical-root
+    (or (and (fboundp 'my/language-server--project-root-for-buffer)
+             (my/language-server--project-root-for-buffer))
+        (my/language-server--canonical-root
          (or (and (fboundp 'my/project-local-root)
                   (my/project-local-root))
              (when-let* ((project (project-current nil default-directory)))
@@ -150,12 +154,33 @@ remote), so a target-only root could be truenamed as if it were local."
         (funcall function root)
       (wrong-number-of-arguments (funcall function)))))
 
+(defun my/language-server-toolchain--candidate-key (root family)
+  "Return the candidate-cache key for ROOT, FAMILY and this buffer's environment."
+  (list root family
+        (and (boundp 'remote-buffer-environment)
+             remote-buffer-environment
+             (remote-environment-key remote-buffer-environment))))
+
+(defun my/language-server-toolchain--clear-candidates (root family)
+  "Forget cached candidates for ROOT and FAMILY across all environments."
+  (dolist (cache (list my/language-server-toolchain--candidate-cache
+                       my/language-server-toolchain--fast-candidate-cache))
+    (maphash
+     (lambda (key _value)
+       (when (and (equal (nth 0 key) root)
+                  (equal (nth 1 key) family))
+         (remhash key cache)))
+     cache)))
+
 (defun my/language-server-toolchain--provider-candidates (&optional root family fast)
   "Return cached provider candidates for ROOT and FAMILY.
 When FAST is non-nil, use the provider's fast discovery if it has one."
   (let* ((root (or root (my/language-server-toolchain--canonical-root)))
          (family (or family (my/language-server-toolchain-family)))
-         (key (cons root family))
+         ;; The same project root can acquire a new .envrc while buffers from
+         ;; the old environment are still open.  Do not reuse its cached PATH
+         ;; candidates for the new capsule.
+         (key (my/language-server-toolchain--candidate-key root family))
          (provider (my/language-server-toolchain-provider))
          (fast-discover (and fast (plist-get provider :discover-fast)))
          (cache (if fast-discover
@@ -517,8 +542,7 @@ project's SDK, server cache, or workspace directory into another buffer."
   "Refresh discovered toolchains for the current project and language."
   (interactive)
   (let ((key (my/language-server-toolchain--key)))
-    (remhash key my/language-server-toolchain--candidate-cache)
-    (remhash key my/language-server-toolchain--fast-candidate-cache)
+    (my/language-server-toolchain--clear-candidates (car key) (cdr key))
     (message "Refreshed %s toolchains (%d candidates)"
              (cdr key) (length (my/language-server-toolchain-candidates)))))
 

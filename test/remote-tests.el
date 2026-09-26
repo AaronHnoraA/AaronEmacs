@@ -230,9 +230,8 @@ The backend alone only knows the target's login PATH."
               ((symbol-function 'remote-environment-resolve)
                (lambda (context &rest _)
                  (should (equal (remote-context-target-id context) "box"))
-                 'capsule))
-              ((symbol-function 'remote-environment-vars)
-               (lambda (_) '(("PATH" . "/work/project/bin:/usr/bin"))))
+                 (remote-environment-create
+                  :vars '(("PATH" . "/work/project/bin:/usr/bin")))))
               ((symbol-function 'remote-fs--call-routed)
                (lambda (&rest _) '("/usr/bin" "/bin" "/work/project/"))))
       ;; Capsule first; backend-only entries keep their place after it.
@@ -240,8 +239,8 @@ The backend alone only knows the target's login PATH."
                      '("/work/project/bin" "/usr/bin" "/bin" "/work/project/"))))
     ;; Without a capsule PATH the backend still answers.
     (cl-letf (((symbol-function 'remote-fs--routes) (lambda (&rest _) '(route)))
-              ((symbol-function 'remote-environment-resolve) (lambda (&rest _) 'capsule))
-              ((symbol-function 'remote-environment-vars) (lambda (_) nil))
+              ((symbol-function 'remote-environment-resolve)
+               (lambda (&rest _) (remote-environment-create :vars nil)))
               ((symbol-function 'remote-fs--call-routed)
                (lambda (operation _args) (list operation))))
       (should (equal (remote-fs-handle-exec-path) '(exec-path))))))
@@ -2810,6 +2809,93 @@ names in tree consumers such as Treemacs."
         (should (equal (getenv "REMOTE_TEST") "yes"))
         (should (equal (car exec-path) "/target/bin"))))))
 
+(ert-deftest remote-environment-nested-envrcs-stay-buffer-local ()
+  "Two buffers under one workspace can keep different direnv capsules."
+  (remote-test-with-registry
+    (let* ((workspace "/fs:local:/tmp/multi-env/")
+           (one "/fs:local:/tmp/multi-env/one/")
+           (two "/fs:local:/tmp/multi-env/two/")
+           (context (remote-context-create
+                     :target-id "local" :workspace-id "broad"
+                     :workspace-root workspace))
+           (first (generate-new-buffer " *remote-env-one*"))
+           (second (generate-new-buffer " *remote-env-two*"))
+           (direnv-mode t))
+      (unwind-protect
+          (progn
+            (remote-register-environment-provider
+             "nested"
+             :scope 'workspace
+             :priority 10
+             :predicate (lambda (_context) t)
+             :fingerprint (lambda (_context) 1)
+             :load (lambda (seen)
+                     (list (cons "REMOTE_BRANCH"
+                                 (remote-context-workspace-root seen)))))
+            (cl-letf (((symbol-function 'direnv--envrc-root)
+                       (lambda (path)
+                         (cond
+                          ((string-prefix-p one path) one)
+                          ((string-prefix-p two path) two)))))
+              (with-current-buffer first
+                (setq-local buffer-file-name (concat one "a.py")
+                            default-directory one)
+                (should (equal (remote-environment-workspace-root
+                                (remote-environment-resolve context))
+                               one))
+                (should (equal (cdr (assoc "REMOTE_BRANCH"
+                                           (remote--environment-vars context)))
+                               one))
+                (let ((environment (remote-environment-ensure context)))
+                  (should (equal (getenv "REMOTE_BRANCH") one))
+                  (should (equal (remote-environment-workspace-root environment)
+                                 one))
+                  (should-not (remote-environment-workspace-id environment))))
+              (with-current-buffer second
+                (setq-local buffer-file-name (concat two "b.py")
+                            default-directory two)
+                (should (equal (remote-environment-workspace-root
+                                (remote-environment-resolve context))
+                               two))
+                (should (equal (cdr (assoc "REMOTE_BRANCH"
+                                           (remote--environment-vars context)))
+                               two))
+                (let ((environment (remote-environment-ensure context)))
+                  (should (equal (getenv "REMOTE_BRANCH") two))
+                  (should (equal (remote-environment-workspace-root environment)
+                                 two))
+                  (should-not (remote-environment-workspace-id environment))))
+              (with-current-buffer first
+                (should (equal (getenv "REMOTE_BRANCH") one))
+                (should-not (eq remote-buffer-environment
+                                (buffer-local-value 'remote-buffer-environment
+                                                    second))))
+              (with-current-buffer second
+                (setq-local buffer-file-name nil)
+                (should (equal (remote-context-workspace-root
+                                (direnv--environment-context-for-buffer context))
+                               two)))
+              (should (equal (remote-context-workspace-root context) workspace))
+              (should (equal (remote-context-workspace-id context) "broad"))))
+        (kill-buffer first)
+        (kill-buffer second)))))
+
+(ert-deftest remote-direnv-export-context-uses-envrc-root ()
+  "The async export context must not inherit a broader workspace root."
+  (let* ((root "/fs:local:/tmp/multi-env/one/")
+         (broad (remote-context-create
+                 :target-id "local" :workspace-id "broad"
+                 :workspace-root "/fs:local:/tmp/multi-env/")))
+    (cl-letf (((symbol-function 'remote-context)
+               (lambda (&optional _path) broad)))
+      (let ((specific (direnv--context-for-root root)))
+        (should (equal (remote-context-workspace-root specific) root))
+        (should-not (remote-context-workspace-id specific))
+        (should-not (equal (remote-environment-instance-id specific)
+                           (remote-environment-instance-id broad)))
+        (should (equal (remote-context-workspace-root broad)
+                       "/fs:local:/tmp/multi-env/"))))))
+
 (ert-deftest remote-environment-resolve-does-not-mutate-caller-buffer ()
   (remote-test-with-registry
     (remote-register-environment-provider
@@ -2893,6 +2979,51 @@ names in tree consumers such as Treemacs."
           (remote-path-state-resolved
            (remote-environment-path-state base))
           '("/workspace/bin" "/target/bin" "/usr/bin")))))))
+
+(ert-deftest remote-provider-path-layers-decorate-lower-layers ()
+  "A provider's delta keeps the host PATH it did not start from."
+  (remote-test-with-registry
+    (remote-register-target
+     "local" :trusted t
+     :environment '((providers "host" "project")))
+    (remote-register-environment-provider
+     "host" :scope 'host
+     :load (lambda (_context)
+             '(:path ("/home/.local/bin" "/usr/bin" "/old/bin")
+               :path-mode replace)))
+    (remote-register-environment-provider
+     "project" :scope 'workspace
+     :load (lambda (_context)
+             '(:path-layers ((remove "/old/bin")
+                             (prepend "/project/bin")
+                             (append "/tail/bin")))))
+    (with-temp-buffer
+      (setq default-directory
+            (remote-canonicalize-file-name temporary-file-directory))
+      (should
+       (equal (remote-path-state-resolved
+               (remote-environment-path-state (remote-environment-ensure)))
+              '("/project/bin" "/home/.local/bin" "/usr/bin" "/tail/bin"))))))
+
+(ert-deftest remote-direnv-export-is-a-path-delta ()
+  "direnv's PATH becomes the change recorded in DIRENV_DIFF, not a whole PATH."
+  (let* ((diff
+          ;; zlib(JSON) of p.PATH=/client/bin:/usr/bin:/gone/bin and
+          ;; n.PATH=/p/bin:/client/bin:/usr/bin:/tail/bin, as direnv encodes it.
+          "eJyrVipQslKoVgpwDPEAMpT0k3MyU_NK9JMy86z0S4uLIIz0_LxUEEupVkdBKQ9VQwFECVZ9JYmZORB9tQCaGSEl")
+         (export
+          (direnv--make-export
+           (json-serialize
+            `((PATH . "/p/bin:/client/bin:/usr/bin:/tail/bin")
+              (DIRENV_DIFF . ,diff) (FOO . "bar")))
+           nil "/fs:local:/p/")))
+    (should-not (assoc "PATH" (plist-get export :vars)))
+    (should (equal (cdr (assoc "FOO" (plist-get export :vars))) "bar"))
+    (should (equal (plist-get export :path-layers)
+                   '((remove "/gone/bin") (prepend "/p/bin")
+                     (append "/tail/bin"))))
+    (should-error
+     (direnv--make-export (json-serialize '((PATH . "/p/bin"))) nil "/p/"))))
 
 (ert-deftest remote-environment-id-is-workspace-scoped-not-link-scoped ()
   (remote-test-with-registry
@@ -3078,15 +3209,16 @@ names in tree consumers such as Treemacs."
                   (remote-exec-result-create
                    :status 0
                    :stdout
-                   "{\"PATH\":\"/remote/bin:/usr/bin\",\"DEMO\":\"yes\"}"
+                   (concat "{\"PATH\":\"/remote/bin:/usr/bin\",\"DEMO\":\"yes\","
+                           "\"DIRENV_DIFF\":\"eJyrVipQslKoVgpwDPEAMpT0S4uL9JMy85RqdRSU8lClilJz80tSQbJWcGVAVS6uvv4g-crUYqXaWgCiaRdQ\"}")
                    :stderr ""))))
             (let* ((result (direnv--export (remote-context)))
                    (vars (plist-get result :vars)))
               (should (equal seen-adapter "direnv"))
               (should (equal (cdr (assoc "DEMO" vars)) "yes"))
-              (should
-               (equal (cdr (assoc "PATH" vars))
-                      "/remote/bin:/usr/bin")))))
+              (should-not (assoc "PATH" vars))
+              (should (equal (plist-get result :path-layers)
+                             '((prepend "/remote/bin")))))))
       (when (file-exists-p envrc) (delete-file envrc))
       (when (file-directory-p root) (delete-directory root)))))
 

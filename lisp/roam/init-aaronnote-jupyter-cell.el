@@ -9,6 +9,7 @@
 
 (require 'cl-lib)
 (require 'ansi-color)
+(require 'seq)
 (require 'subr-x)
 (require 'init-aaronnote-jupyter-notebook)
 
@@ -17,6 +18,7 @@
 (declare-function my/noema-jupyter-open-project-shell "init-aaronnote-jupyter-project" ())
 (declare-function my/noema-jupyter-project-lsp "init-aaronnote-jupyter-project" ())
 (declare-function my/noema-jupyter-project-inspect "init-aaronnote-jupyter-project" ())
+(declare-function my/jupyter-ssh-open-project "init-project" (&optional project))
 (declare-function my/noema-command "init-aaronnote" (command &optional detail))
 (declare-function my/noema--ensure-server "init-aaronnote" (&optional callback))
 (declare-function my/noema--api-call-sync "init-aaronnote"
@@ -28,8 +30,6 @@
                   "noema-research-mode" (snapshot))
 (declare-function noema-research-goto-cell "noema-research-mode" (id))
 (declare-function my/noema--host-file "init-aaronnote" (file))
-(declare-function my/noema-jupyter-cell-lsp-runtime-changing
-                  "init-aaronnote-jupyter-lsp" ())
 (declare-function my/language-server-ensure-deferred "init-lsp" ())
 (declare-function noema-project-root "noema-research" (path))
 (declare-function noema-project-ensure "noema-research" (path))
@@ -439,9 +439,8 @@ Editor/LSP command remains an escape hatch for mixed-language notebooks."
             (or (not (equal kernel my/noema-jupyter-cell-kernel))
                 (and language
                      (not (equal language my/noema-jupyter-cell-language))))))
-      (when (and runtime-changed
-                 (fboundp 'my/noema-jupyter-cell-lsp-runtime-changing))
-        (my/noema-jupyter-cell-lsp-runtime-changing))
+      ;; The language server follows the notebook file and its buffer-local
+      ;; environment.  Selecting a different execution kernel leaves it alone.
       (setq-local my/noema-jupyter-cell-kernel kernel)
       (when language
         (setq-local my/noema-jupyter-cell-language language))
@@ -587,8 +586,9 @@ This is a one-shot reconnect reaction, never a timer or polling loop."
                 choices))))
     (nreverse choices)))
 
-(defun my/noema-jupyter-cell-select-kernel (&optional connections-only)
-  "Select a kernel, or an existing connection when CONNECTIONS-ONLY is non-nil."
+(defun my/noema-jupyter-cell-select-kernel (&optional connections-only kernel-name)
+  "Select a kernel, or an existing connection when CONNECTIONS-ONLY is non-nil.
+When KERNEL-NAME is given, select that discovered kernelspec directly."
   (interactive)
   (when (buffer-modified-p) (save-buffer))
   (let* ((catalog (my/noema-jupyter-cell--api-sync
@@ -604,8 +604,17 @@ This is a one-shot reconnect reaction, never a timer or polling loop."
              (cl-remove-if (lambda (entry) (string-prefix-p "attach:" (alist-get 'value (cdr entry)))) entries)
              (when (eq t (my/noema-jupyter-notebook--get 'supportsConnectionFiles catalog))
                '(("Connect to Existing Kernel…" (kind . "browse-connections")))))))
-         (_ (unless choices (user-error "No existing kernel connections were found")))
-         (label (completing-read "Noema Jupyter kernel: " choices nil t))
+         (_ (unless choices (user-error "No Jupyter kernels are available")))
+         (label (if kernel-name
+                    (or (car (seq-find
+                              (lambda (item)
+                                (and (equal (my/noema-jupyter-notebook--get
+                                             'value (cdr item)) kernel-name)
+                                     (equal (my/noema-jupyter-notebook--get
+                                             'kind (cdr item)) "start")))
+                              choices))
+                        (user-error "Kernel %s is unavailable for this notebook" kernel-name))
+                  (completing-read "Noema Jupyter kernel: " choices nil t)))
          (choice (cdr (assoc label choices)))
          (kind (my/noema-jupyter-notebook--get 'kind choice))
          (value (my/noema-jupyter-notebook--get 'value choice))
@@ -783,14 +792,19 @@ This does not change the notebook language, kernelspec, or Noema session."
   (let ((cell (or my/noema-jupyter-cell-current-id
                   (plist-get (my/noema-jupyter-cell--bounds-at-point) :id)))
         (lsp-description
-         (and (fboundp 'my/language-server-runtime-description)
-              (my/language-server-runtime-description))))
+         (cond ((bound-and-true-p lsp-managed-mode) "connected")
+               ((bound-and-true-p my/lsp-mode--waiting-for-direnv) "loading env")
+               ((bound-and-true-p my/language-server--waiting-for-runtime) "preparing")
+               ((bound-and-true-p lsp--buffer-deferred) "starting")
+               (t "project env"))))
     (list
      (propertize " Noema Jupyter " 'face 'mode-line-buffer-id)
      (my/noema-jupyter-cell--header-button
       (format "Kernel:%s · %s"
               (or my/noema-jupyter-cell-kernel "No Kernel")
-              my/noema-jupyter-cell--kernel-status)
+              (if (equal my/noema-jupyter-cell--kernel-status "error")
+                  "last run error"
+                my/noema-jupyter-cell--kernel-status))
       #'my/noema-jupyter-cell-select-kernel "Select a Noema-managed kernel")
      (my/noema-jupyter-cell--header-button
       "Files" #'my/noema-jupyter-open-project-directory "Open the configured execution project in Dired")
@@ -802,7 +816,7 @@ This does not change the notebook language, kernelspec, or Noema session."
        (my/noema-jupyter-cell--header-button
         (format "LSP:%s" (truncate-string-to-width lsp-description 28 nil nil t))
         #'my/noema-jupyter-project-lsp
-        (concat lsp-description "; open or refresh the matching project source")))
+        (concat lsp-description "; restart LSP in this file's environment")))
      (my/noema-jupyter-cell--header-button
       "Run" #'my/noema-jupyter-cell-run-current "Run current cell in Noema"
       (unless cell 'disabled))
@@ -1018,6 +1032,7 @@ Noema creates and persists the new cell's standard `cell.id'."
           '(("Run Cell" . my/noema-jupyter-cell-run-current)
             ("Project Files (Dired)" . my/noema-jupyter-open-project-directory)
             ("Open Project File" . my/noema-jupyter-open-project-file)
+            ("Open SSH Jupyter Project" . my/jupyter-ssh-open-project)
             ("Project Shell" . my/noema-jupyter-open-project-shell)
             ("Project LSP / Restart" . my/noema-jupyter-project-lsp)
             ("Inspect Project Environment" . my/noema-jupyter-project-inspect)

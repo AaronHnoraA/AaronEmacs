@@ -591,8 +591,11 @@ CLI 本身不说 ACP：远端还需要安装适配器，例如
 这两个适配器各自内置一份 CLI，默认跑内置版本，模型列表因此落后（例如只有
 Opus 5）。所以 Emacs 会用同一个 workspace 环境查找 `claude` / `codex`，并通过
 `CLAUDE_CODE_EXECUTABLE` / `CODEX_PATH` 让适配器改用 shell 里那份会自动更新的
-CLI；本地和远端规则相同。显式设置了这两个变量时不覆盖；找不到 CLI 时退回内置版本
-并在 echo area 提示。Pi 与 OpenCode 没有内置 CLI，不受影响。
+CLI；本地和远端规则相同。没有 fallback：target 上找不到 CLI 时直接报错并写明
+target。本机已删除适配器内置的 CLI（`@anthropic-ai/claude-agent-sdk-darwin-arm64`、
+`@openai/codex*`），`npm update -g` 重装适配器后会重新带回，需再删一次；唯一的
+`claude` / `codex` 在 `~/.local/bin`，由 `~/.zprofile` 放进登录 shell 的 PATH，
+Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，不受影响。
 - `SPC o V`
   命名 `vterm`
 - `SPC o S`

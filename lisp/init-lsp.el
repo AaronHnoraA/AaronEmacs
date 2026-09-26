@@ -454,6 +454,9 @@ Runtime contexts intentionally do not make an analyzer installed inside a
 kernel environment replace the stable target/workspace analyzer."
   (let* ((runtime (and (boundp 'my/language-server-runtime-current)
                        my/language-server-runtime-current))
+         (default-directory (or (and (my/language-server-runtime-p runtime)
+                                     (my/language-server-runtime-root runtime))
+                                default-directory))
          (tool-environment
           (and (my/language-server-runtime-p runtime)
                (my/language-server-runtime-tool-environment runtime)))
@@ -1308,7 +1311,8 @@ modules can keep dispatching on it."
   (if (and my/language-server-runtime-required
            (not (eq my/language-server-runtime-state 'ready)))
       (setq my/lsp-mode--start-request nil)
-  (let ((report-missing my/language-server--manual-start))
+  (let ((report-missing my/language-server--manual-start)
+        (default-directory (my/language-server--project-root-for-buffer)))
     (setq my/language-server--manual-start nil
           my/lsp-mode--start-request nil
           my/language-server--start-executable-cache
@@ -1360,24 +1364,55 @@ modules can keep dispatching on it."
     (unless (or my/lsp-mode--waiting-for-direnv
                 (bound-and-true-p lsp-managed-mode)
                 (my/lsp-mode--start-request-active-p))
-      (let ((state
-             (and
-              (fboundp 'my/direnv-update-environment-maybe)
-              (my/direnv-update-environment-maybe
-               nil #'my/lsp-mode--direnv-ready))))
+      (let* ((default-directory (my/language-server--project-root-for-buffer))
+             (state
+              (and
+               ;; A required runtime already owns its resolved project
+               ;; environment.  Re-exporting direnv here can leave startup
+               ;; waiting on a second asynchronous request even though the
+               ;; kernel runtime and workspace are ready.
+               (not (and my/language-server-runtime-required
+                         (eq my/language-server-runtime-state 'ready)
+                         my/language-server-runtime-current))
+               (fboundp 'my/direnv-update-environment-maybe)
+               (my/direnv-update-environment-maybe
+                nil #'my/lsp-mode--direnv-ready))))
         (if (eq state 'pending)
             (setq my/lsp-mode--waiting-for-direnv t)
           (my/lsp-mode-start-now))))))
 
 (defun my/language-server--project-root-for-buffer ()
-  "Return the current buffer's logical project root."
-  (my/language-server--canonical-root
-   (or
-    (when-let* ((project
-                 (ignore-errors
-                   (project-current nil default-directory))))
-      (project-root project))
-    default-directory)))
+  "Return this buffer's LSP root, separating nested direnv environments.
+The visiting file determines the environment even when another Remote
+workspace on the same target is active.  A nested `.envrc' owns its own LSP
+workspace; an ancestor `.envrc' leaves a more specific project root intact."
+  (or (and (my/language-server-runtime-p my/language-server-runtime-current)
+           (my/language-server--canonical-root
+            (my/language-server-runtime-root my/language-server-runtime-current)))
+      (let* ((directory (if buffer-file-name
+                            (file-name-directory buffer-file-name)
+                          default-directory))
+             (project-root
+              (when-let* ((project
+                           (ignore-errors (project-current nil directory))))
+                (let ((root (my/language-server--canonical-root
+                             (project-root project))))
+                  (and root
+                       (string-prefix-p
+                        root
+                        (my/language-server--canonical-root directory))
+                       root))))
+             (env-root
+              (when (and (bound-and-true-p my/enable-direnv)
+                         (fboundp 'direnv--envrc-root))
+                (my/language-server--canonical-root
+                 (ignore-errors (direnv--envrc-root directory))))))
+        (or (and env-root
+                 (or (not project-root)
+                     (string-prefix-p project-root env-root))
+                 env-root)
+            project-root
+            (my/language-server--canonical-root directory)))))
 
 (defun my/language-server--connect-workspace (root)
   "Open and track the language-server workspace for ROOT."
@@ -1392,6 +1427,7 @@ modules can keep dispatching on it."
            (not (eq my/language-server-runtime-state 'ready)))
       (setq my/lsp-mode--start-request nil)
   (let* ((root (my/language-server--project-root-for-buffer))
+         (default-directory (or root default-directory))
          (workspace
           (my/language-server--connect-workspace root))
          (remote-current-adapter-id "language-server")
