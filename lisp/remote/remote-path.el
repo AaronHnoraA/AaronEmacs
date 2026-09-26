@@ -54,16 +54,20 @@
 (defconst remote-path--probe-script
   (concat
    ;; `sh -l' reads only /etc/profile and ~/.profile.  On macOS the user's
-   ;; PATH (Homebrew, pyenv, ...) normally lives in ~/.zprofile, and a GUI
-   ;; Emacs started by launchd inherits none of it, so ask the target's own
-   ;; POSIX login shell.  Its startup output is discarded by a marker; any
-   ;; failure keeps the plain `sh -l' PATH.
+   ;; PATH (Homebrew, pyenv, ~/.local/bin, ...) lives in ~/.zprofile and
+   ;; often ~/.zshrc, and a GUI Emacs started by launchd inherits none of
+   ;; it, so ask the target's own POSIX shell as the person uses it:
+   ;; interactive login first (~/.zshrc, ~/.bashrc), then login only.  Its
+   ;; startup output is discarded by a marker; any failure keeps the plain
+   ;; `sh -l' PATH.
    "p=\"${PATH-}\"; "
    "case \"${SHELL##*/}\" in bash|zsh|ksh|dash) "
-   "o=$(\"$SHELL\" -lc 'printf \"__EMACS_LOGIN_PATH__%s\" \"$PATH\"' "
+   "for f in -ilc -lc; do "
+   "o=$(\"$SHELL\" \"$f\" 'printf \"__EMACS_LOGIN_PATH__%s\" \"$PATH\"' "
    "</dev/null 2>/dev/null) && "
    "case \"$o\" in *__EMACS_LOGIN_PATH__?*) "
-   "p=\"${o##*__EMACS_LOGIN_PATH__}\";; esac;; esac; "
+   "p=\"${o##*__EMACS_LOGIN_PATH__}\"; break;; esac; "
+   "done;; esac; "
    "printf '__EMACS_REMOTE_FACTS_V1__\\0"
    "%s\\0%s\\0%s\\0%s\\0%s\\0' "
    "\"$(uname -s 2>/dev/null || printf unknown)\" "
@@ -164,11 +168,19 @@ probe protocol."
            :home (or (and native-p
                           (getenv-internal "HOME" client-environment))
                      (nth 3 fields))
-           :path (split-string (or (and native-p
-                                        (getenv-internal
-                                         "PATH" client-environment))
-                                   (nth 4 fields) "")
-                               path-separator t)
+           ;; A native target keeps Emacs' own PATH first (a venv
+           ;; activated in Emacs stays in front), then gains what the
+           ;; person's shell adds, so a CLI installed only on the shell
+           ;; PATH is found here exactly as on a remote target.
+           :path (let ((login (split-string (or (nth 4 fields) "")
+                                            path-separator t))
+                       (client (and native-p
+                                    (getenv-internal
+                                     "PATH" client-environment))))
+                   (if client
+                       (seq-uniq (append (split-string client path-separator t)
+                                         login))
+                     login))
            :source (remote-route-link-plugin-id
                     (remote-exec-result-route result))
            :probed-at (current-time))))

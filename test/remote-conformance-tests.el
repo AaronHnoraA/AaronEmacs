@@ -151,11 +151,17 @@ Its callers add the remote prefix themselves, so projecting the result would
 hand them a doubly prefixed directory and every probe below it would be a
 round trip that cannot succeed."
   (remote-fs-install)
-  (let ((default-directory
-         (remote-make-file-name "local" temporary-file-directory)))
-    (should (equal (exec-path) (default-value 'exec-path)))
+  (let* ((default-directory
+          (remote-make-file-name "local" temporary-file-directory))
+         (native (default-value 'exec-path))
+         (target (exec-path)))
+    ;; Target `local' keeps every directory of Emacs's own `exec-path', in
+    ;; Emacs's order, and may add what the person's login shell contributes
+    ;; (a GUI Emacs lacks ~/.zshrc's PATH).
+    (should (equal (seq-filter (lambda (directory) (member directory native)) target)
+                   native))
     (should-not
-     (seq-find #'remote-fs-file-name-p (exec-path)))))
+     (seq-find #'remote-fs-file-name-p target))))
 
 (ert-deftest remote-conformance-operation-effects-are-total ()
   (dolist (spec (remote-file-operation-list))

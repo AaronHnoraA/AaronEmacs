@@ -2675,7 +2675,7 @@ names in tree consumers such as Treemacs."
               (car (remote-path-facts-path facts)))))))
 
 (ert-deftest remote-path-native-facts-keep-emacs-process-environment ()
-  "A native target inherits Emacs' PATH even if its login shell resets it."
+  "A native target keeps Emacs' PATH first and adds its shell's directories."
   (remote-test-with-registry
     (let* ((context (remote-context "/fs:local:/tmp/"))
            (remote-path-facts-cache (make-hash-table :test #'equal))
@@ -2694,7 +2694,7 @@ names in tree consumers such as Treemacs."
                      "HOME=/home/client" "SHELL=/bin/fish"))))
         (let ((facts (remote-path--probe-sync context)))
           (should (equal (remote-path-facts-path facts)
-                         '("/tmp/venv/bin" "/usr/bin")))
+                         '("/tmp/venv/bin" "/usr/bin" "/bin")))
           (should (equal (remote-path-facts-home facts) "/home/client"))
           (should (equal (remote-path-facts-shell facts) "/bin/fish")))))))
 
@@ -2760,6 +2760,18 @@ names in tree consumers such as Treemacs."
             (insert "#!/bin/sh\necho 'login banner'\n"
                     "shift; PATH=/login/bin:$PATH exec /bin/sh -c \"$1\"\n"))
           (set-file-modes shell #o755)
+          (should (equal (funcall probe shell) "/login/bin:/usr/bin:/bin"))
+          ;; The interactive login PATH (~/.zshrc) wins; a shell that
+          ;; refuses interactive mode still yields its login PATH.
+          (with-temp-file shell
+            (insert "#!/bin/sh\n"
+                    "case \"$1\" in -ilc) extra=/rc/bin: ;; *) extra= ;; esac\n"
+                    "shift; PATH=${extra}/login/bin:$PATH exec /bin/sh -c \"$1\"\n"))
+          (should (equal (funcall probe shell) "/rc/bin:/login/bin:/usr/bin:/bin"))
+          (with-temp-file shell
+            (insert "#!/bin/sh\n"
+                    "[ \"$1\" = -ilc ] && exit 1\n"
+                    "shift; PATH=/login/bin:$PATH exec /bin/sh -c \"$1\"\n"))
           (should (equal (funcall probe shell) "/login/bin:/usr/bin:/bin"))
           ;; A failing or non-POSIX login shell keeps the `sh' PATH.
           (should (equal (funcall probe (expand-file-name "fish" directory))
