@@ -1183,6 +1183,103 @@ probe's temporary output buffer must not fall back to the global value."
                        '("/project/.conda/bin:/login/bin"
                          ("/project/.conda/bin" "/login/bin"))))))))
 
+;;;; Notification cost and modtime precision
+
+(defvar tramp-time-dont-know)
+
+(ert-deftest remote-builtin-backends-declare-watch-cost-and-mtime ()
+  "Push-capable, precise backends say so; shell TRAMP keeps its window."
+  (dolist (expected '(("native" push exact)
+                      ("tramp-rpc" push exact)
+                      ("tramp" process window)))
+    (let ((description (remote-backend-describe (car expected))))
+      (should (eq (plist-get description :file-watch-cost)
+                  (nth 1 expected)))
+      (should (eq (plist-get description :mtime-compare)
+                  (nth 2 expected))))))
+
+(ert-deftest remote-file-watch-cost-defaults-to-none ()
+  "A backend that declares nothing cannot be relied on for notifications."
+  (cl-letf (((symbol-function 'remote-fs--backend-property)
+             (lambda (_file property &optional _adapter)
+               (and (eq property :file-watch-cost) nil))))
+    (should (eq (remote-file-watch-cost "/fs:box:/a") 'none)))
+  (cl-letf (((symbol-function 'remote-fs--backend-property)
+             (lambda (_file property &optional _adapter)
+               (and (eq property :file-watch-cost) 'push))))
+    (should (eq (remote-file-watch-cost "/fs:box:/a") 'push))))
+
+(ert-deftest remote-fs-verify-modtime-honors-backend-precision ()
+  "Exact backends see a change one second after the visited modtime."
+  (let ((visited (seconds-to-time 1000))
+        (disk (seconds-to-time 1001))
+        compare)
+    (cl-letf (((symbol-function 'visited-file-modtime) (lambda () visited))
+              ((symbol-function 'file-attributes)
+               (lambda (&rest _) (list nil 1 0 0 disk disk disk 1)))
+              ((symbol-function 'remote-fs--backend-property)
+               (lambda (_file property &optional _adapter)
+                 (and (eq property :mtime-compare) compare))))
+      (with-temp-buffer
+        (setq buffer-file-name "/fs:box:/work/a.c")
+        (unwind-protect
+            (progn
+              (setq compare 'exact)
+              (should-not (remote-fs-handle-verify-visited-file-modtime))
+              (setq compare 'window)
+              (should (remote-fs-handle-verify-visited-file-modtime))
+              (setq compare 'exact disk visited)
+              (should (remote-fs-handle-verify-visited-file-modtime)))
+          (setq buffer-file-name nil))))))
+
+(ert-deftest remote-fs-single-file-watch-uses-push-backend ()
+  "A push route never pays an inotifywait lookup or process per buffer."
+  (let ((watch (remote-file-watch-create
+                :file "/fs:box:/work/a.c" :flags '(change)
+                :adapter-id "emacs-file"))
+        (cost 'push)
+        direct)
+    (cl-letf (((symbol-function 'remote-file-watch-cost)
+               (lambda (&rest _) cost))
+              ((symbol-function 'remote-fs--watch-add-direct-inotify)
+               (lambda (&rest _) (push 'direct direct) 'inotify))
+              ((symbol-function 'remote-fs--call-routed)
+               (lambda (&rest _) 'backend)))
+      (should (eq (remote-fs--watch-add-physical watch) 'backend))
+      (should-not direct)
+      (setq cost 'process)
+      (should (eq (remote-fs--watch-add-physical watch) 'inotify))
+      (should (equal direct '(direct)))
+      (setq cost 'push)
+      (setf (remote-file-watch-recursive watch) t)
+      (should (eq (remote-fs--watch-add-physical watch) 'inotify)))))
+
+(ert-deftest remote-tramp-rpc-verify-modtime-is-exact ()
+  "RPC buffers detect a write made one second after their modtime."
+  (let ((visited (seconds-to-time 1000))
+        (disk (seconds-to-time 1001))
+        (remote-backend-tramp-rpc-exact-mtime t)
+        (tramp-time-dont-know '(0 0 0 1000)))
+    (cl-letf (((symbol-function 'visited-file-modtime) (lambda () visited))
+              ((symbol-function 'tramp-rpc-file-name-p) (lambda (_) t))
+              ((symbol-function 'file-remote-p) (lambda (&rest _) t))
+              ((symbol-function 'file-attributes)
+               (lambda (&rest _) (list nil 1 0 0 disk disk disk 1))))
+      (with-temp-buffer
+        (setq buffer-file-name "/rpc:box:/work/a.c")
+        (unwind-protect
+            (progn
+              (should-not (remote-backend-tramp-rpc-metadata--verify-a
+                           (lambda (&rest _) 'tramp)))
+              (setq disk visited)
+              (should (remote-backend-tramp-rpc-metadata--verify-a
+                       (lambda (&rest _) 'tramp)))
+              (let ((remote-backend-tramp-rpc-exact-mtime nil))
+                (should (eq (remote-backend-tramp-rpc-metadata--verify-a
+                             (lambda (&rest _) 'tramp))
+                            'tramp))))
+          (setq buffer-file-name nil))))))
+
 ;;;; tramp-rpc metadata scope
 
 (defvar tramp-rpc--file-stat-cache)

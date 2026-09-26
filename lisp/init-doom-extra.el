@@ -44,6 +44,30 @@
   :config
   (global-auto-revert-mode 1)
 
+  (declare-function remote-file-watch-cost "remote-fs"
+                    (file-name &optional adapter))
+
+  (defun my/auto-revert-follow-pushed-changes-h ()
+    "Let auto-revert follow this file when its route pushes change events.
+`auto-revert-remote-files' stays nil globally because a polled or
+process-per-watch route would stat or spawn per buffer.  When the default
+exclusion would skip this buffer but the Remote route delivers notifications
+over a stream it already owns (VS Code's watcher model), opt this buffer in:
+external edits then revert it without any polling."
+    (when (and buffer-file-name
+               auto-revert-use-notify
+               (fboundp 'remote-file-watch-cost)
+               (string-match-p auto-revert-notify-exclude-dir-regexp
+                               (expand-file-name default-directory))
+               (eq (ignore-errors (remote-file-watch-cost buffer-file-name))
+                   'push))
+      (setq-local auto-revert-remote-files t)
+      (setq-local auto-revert-notify-exclude-dir-regexp
+                  (concat mounted-file-systems))))
+
+  ;; Run before `auto-revert--global-adopt-current-buffer' adds the watch.
+  (add-hook 'find-file-hook #'my/auto-revert-follow-pushed-changes-h -90)
+
   (defvar my/auto-revert--warned-modified-files (make-hash-table :test 'equal)
     "Files already reported as changed on disk while modified in Emacs.")
 

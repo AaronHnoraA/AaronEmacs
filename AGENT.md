@@ -111,6 +111,13 @@ Keep these rules:
 - Connection, pipeline, session, service, watch, and channel ownership belongs
   to the framework.  Consumers register intent and recoverable resources; they
   do not own ad-hoc SSH processes, relay ports, or reconnect loops.
+- Per-buffer or per-file consumers (VC, probes, auto-revert, watchers) decide
+  from the backend's declared costs — `remote-file-operation-cost` and
+  `remote-file-watch-cost` — never from `file-remote-p`.  A new backend must
+  declare `:file-operation-cost`, `:file-watch-cost` and `:mtime-compare`.
+- A projected environment capsule makes `process-environment` and `exec-path`
+  buffer-local.  Capture them before `with-temp-buffer`/`with-current-buffer`
+  and rebind inside, or target processes silently fall back to the login PATH.
 - A feature is not complete merely because the local path works or a capability
   symbol exists.  Apply the local/remote/resilience criteria in
   `docs/remote-parity.md`, and add parity tests for every new shared contract.

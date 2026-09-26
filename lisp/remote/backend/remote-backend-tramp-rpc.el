@@ -988,7 +988,11 @@ associating that HOME with a named account.  Other names keep upstream lookup."
      '(:kind tramp-rpc
        :session-owner tramp-rpc
        :spawn-program absolute
-       :file-operation-cost batched))))
+       :file-operation-cost batched
+       ;; The server pushes inotify events over the RPC stream, and both
+       ;; stat spellings report the same integer-second mtime.
+       :file-watch-cost push
+       :mtime-compare exact))))
 
 (remote-backend-tramp-rpc-install)
 

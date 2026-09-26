@@ -40,6 +40,7 @@
 (declare-function tramp-file-local-name "tramp" (name))
 (declare-function tramp-tramp-file-p "tramp" (name))
 (declare-function tramp-rpc--call-batch "tramp-rpc" (vec requests))
+(declare-function tramp-rpc-file-name-p "tramp-rpc" (filename))
 (declare-function tramp-rpc--cache-file-stat-result "tramp-rpc-magit"
                   (vec localname stat &optional lstat))
 (declare-function tramp-rpc--cache-put "tramp-rpc-magit" (cache key value))
@@ -54,10 +55,19 @@
 (defvar tramp-rpc--file-stat-cache)
 (defvar tramp-rpc--file-truename-cache)
 (defvar tramp-rpc-protocol-error-file-not-found)
+(defvar tramp-time-dont-know)
 
 (defcustom remote-backend-tramp-rpc-metadata-scope t
   "Bound RPC visit and save metadata to one batched round trip.
 Nil restores tramp-rpc's one-RPC-per-query path."
+  :type 'boolean
+  :group 'remote)
+
+(defcustom remote-backend-tramp-rpc-exact-mtime t
+  "Compare RPC modtimes exactly instead of within TRAMP's two seconds.
+Both the visited modtime and the check come from the server's stat of the
+same file, so equality is exact; the window only hides a change made right
+after a save, such as a formatter or `git checkout' on the target."
   :type 'boolean
   :group 'remote)
 
@@ -80,6 +90,8 @@ Nil restores tramp-rpc's one-RPC-per-query path."
     (tramp-rpc--invalidate-cache-for-subtree . (1 . 1))
     (tramp-rpc-handle-locate-dominating-file . (2 . 2))
     (tramp-handle-set-visited-file-modtime . (0 . 1))
+    (tramp-handle-verify-visited-file-modtime . (0 . 1))
+    (tramp-rpc-file-name-p . (1 . 1))
     (tramp-flush-file-properties . (2 . 2))
     (tramp-flush-directory-properties . (2 . 2))
     (tramp-flush-connection-properties . (1 . 1)))
@@ -324,6 +336,26 @@ forgotten the file, so the post-write modtime is measured fresh."
           (funcall function modtime))
       (funcall function time-list))))
 
+(defun remote-backend-tramp-rpc-metadata--verify-a (function &optional buffer)
+  "Verify BUFFER's RPC modtime exactly, else defer to FUNCTION.
+Only the comparison of a known modtime changes; a missing file, an unknown
+modtime and a disconnected buffer keep TRAMP's own answers."
+  (with-current-buffer (or buffer (current-buffer))
+    (let ((file buffer-file-name))
+      (if (not (and remote-backend-tramp-rpc-exact-mtime
+                    file
+                    (tramp-rpc-file-name-p file)
+                    (not (eq (visited-file-modtime) 0))
+                    (file-remote-p file nil 'connected)))
+          (funcall function buffer)
+        (let* ((remote-file-name-inhibit-cache t)
+               (attributes (file-attributes file))
+               (modtime (file-attribute-modification-time attributes)))
+          (if (and attributes
+                   (not (time-equal-p modtime tramp-time-dont-know)))
+              (time-equal-p modtime (visited-file-modtime))
+            (funcall function buffer)))))))
+
 ;;;; locate-dominating-file
 
 (defun remote-backend-tramp-rpc-metadata--locate-start (file)
@@ -421,6 +453,8 @@ DIRECTORY is the invalidated subtree; any scope file may lie below it."
      :around remote-backend-tramp-rpc-metadata--stat-a)
     (tramp-handle-set-visited-file-modtime
      :around remote-backend-tramp-rpc-metadata--modtime-a)
+    (tramp-handle-verify-visited-file-modtime
+     :around remote-backend-tramp-rpc-metadata--verify-a)
     (tramp-rpc-handle-locate-dominating-file
      :around remote-backend-tramp-rpc-metadata--locate-a)
     (tramp-rpc--invalidate-cache-for-path

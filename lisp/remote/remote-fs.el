@@ -642,6 +642,12 @@ caching or has to stay switched off.
 This is the query a consumer asks instead of testing `file-remote-p', a TRAMP
 method, or a backend ID.  ADAPTER defaults to the ordinary file adapter.  The
 query is pure: it resolves placement but does not acquire a connection."
+  (or (remote-fs--backend-property file-name :file-operation-cost adapter)
+      'round-trip))
+
+(defun remote-fs--backend-property (file-name property &optional adapter)
+  "Return PROPERTY from the description of FILE-NAME's selected backend.
+ADAPTER defaults to the ordinary file adapter.  Resolution is pure."
   (let* ((canonical (remote-canonicalize-file-name file-name))
          (context (remote-fs--context canonical))
          (route
@@ -649,10 +655,31 @@ query is pure: it resolves placement but does not acquire a connection."
            (or adapter
                (remote-fs--adapter-for-capability 'metadata))
            'metadata context nil)))
-    (or (plist-get
-         (remote-backend-describe (remote-route-link-plugin-id route))
-         :file-operation-cost)
-        'round-trip)))
+    (plist-get (remote-backend-describe (remote-route-link-plugin-id route))
+               property)))
+
+(defun remote-file-watch-cost (file-name &optional adapter)
+  "Return what keeping one file notification on FILE-NAME costs.
+
+`push' means the backend delivers change events over a channel it already
+owns (native kqueue/inotify, or the RPC server's inotify stream), so a watch
+per visited buffer is cheap and needs no polling.  `process' means every
+watch is its own target-side process.  `none' means the route cannot watch.
+
+Ask this instead of `file-remote-p' when deciding whether a per-buffer
+consumer such as auto-revert may rely on notifications.  The query is pure."
+  (or (remote-fs--backend-property file-name :file-watch-cost adapter)
+      'none))
+
+(defun remote-fs--mtime-window (file-name)
+  "Return the modtime tolerance in seconds for FILE-NAME's backend.
+Backends whose stats come from one precise source compare exactly; shell
+transports that may parse coarse timestamps keep TRAMP's two seconds."
+  (if (eq (ignore-errors
+            (remote-fs--backend-property file-name :mtime-compare))
+          'exact)
+      0
+    2))
 
 (defun remote-fs-register-link-plugins ()
   "Register the built-in backend modules.
@@ -2046,7 +2073,9 @@ therefore independent of the physical link used for that read."
   "Return non-nil when BUFFER's logical visiting file is unchanged.
 File metadata is obtained through the current route, while the comparison is
 against BUFFER's standard `visited-file-modtime' record.  A two-second window
-matches TRAMP's handling of transports with coarse timestamp resolution."
+matches TRAMP's handling of transports with coarse timestamp resolution;
+backends declaring exact modtimes compare exactly, so a change made right
+after a save (a formatter, a `git checkout') is not mistaken for our own."
   (with-current-buffer (or buffer (current-buffer))
     (let ((file buffer-file-name)
           (visited (visited-file-modtime)))
@@ -2060,7 +2089,11 @@ matches TRAMP's handling of transports with coarse timestamp resolution."
           (cond
            ((and attributes
                  (not (time-equal-p modified tramp-time-dont-know)))
-            (< (abs (float-time (time-subtract modified visited))) 2))
+            (let ((window (remote-fs--mtime-window file)))
+              (if (zerop window)
+                  (time-equal-p modified visited)
+                (< (abs (float-time (time-subtract modified visited)))
+                   window))))
            (attributes t)
            (t (time-equal-p visited tramp-time-doesnt-exist))))))))
 
@@ -2426,7 +2459,16 @@ shared background scheduler."
       (signal 'remote-backend-unsupported
               (list "Native recursive watches require a backend provider")))
     (or
-     (remote-fs--watch-add-direct-inotify watch generation)
+     ;; A single-file watch on a push backend is one registration on a
+     ;; stream the backend already owns; a routed inotifywait would cost a
+     ;; lookup round trip plus one target process per watched buffer.
+     (and (or (remote-file-watch-recursive watch)
+              (not (eq (ignore-errors
+                         (remote-file-watch-cost
+                          (remote-file-watch-file watch)
+                          (remote-file-watch-adapter-id watch)))
+                       'push)))
+          (remote-fs--watch-add-direct-inotify watch generation))
      (if (remote-file-watch-recursive watch)
          (signal 'remote-backend-unsupported
                  (list "No recursive watch provider for this route"))

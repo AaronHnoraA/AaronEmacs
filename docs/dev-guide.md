@@ -414,6 +414,8 @@ Lean 的通知/请求 payload 一律用 `lsp-get` 读取：lsp-mode 只有在以
 - lsp-mode、direnv、环境探测与自定义进程可以优先 tramp-rpc，失败时回退 TRAMP
 - 需要"每个文件一次子进程"的功能用 `remote-file-operation-cost` 判断开关，
   VC/diff-hl 因此在 batched backend 上与本地一致，在 shell TRAMP 上仍然关闭
+- 每个 buffer 挂文件通知的功能用 `remote-file-watch-cost` 判断；`push` 路由
+  （本机、tramp-rpc）上的远程 buffer 因此像本地一样随外部修改自动刷新
 - socket/stream/port-forward 走显式 channel API，远端不支持时不会静默落到本机
 - PATH 按 target/workspace ID 隔离，并由 host probe、direnv、toolchain 等分层维护
 

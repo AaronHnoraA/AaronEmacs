@@ -302,6 +302,8 @@ leader 入口：
 - TODO 高亮不再全局启用，只在编辑 buffer 本地启用。
 - `whitespace-mode` 默认只检查本地的代码/配置文件，跳过文本、大文件、远程文件和 `so-long` buffer。
 - auto-revert 优先使用文件通知，普通 buffer 不做高频轮询；PDF buffer 单独保留较快刷新。
+  远程 buffer 只在路由声明 `push` 通知（`remote-file-watch-cost`，如 tramp-rpc）时
+  参与，事件由服务端推送；shell TRAMP 远程文件仍不轮询。
 - `amx` 不保留重复 idle 更新 timer；命令索引在交互入口按需刷新。
 - `direnv` 不挂 `post-command-hook`；打开文件、切换 buffer/window、加载 dir-locals
   时异步刷新，避免远程 Nix 环境阻塞文件访问；只有 compile/task/LSP 等即将启动

@@ -339,7 +339,8 @@ direction."
    :program-form 'search
    :describe
    (lambda ()
-     '(:kind native :session-owner emacs :file-operation-cost batched))))
+     '(:kind native :session-owner emacs :file-operation-cost batched
+       :file-watch-cost push :mtime-compare exact))))
 
 (provide 'remote-backend-native)
 ;;; remote-backend-native.el ends here

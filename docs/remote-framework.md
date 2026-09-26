@@ -545,9 +545,10 @@ trusted-target 门禁、客户端打包、版本缓存、目标暂存解压、re
 仍可执行但内容损坏，也会先验证新暂存目录再替换该版本目录。语言层
 不再各自维护上传/安装脚本。
 
-逻辑 `file-notify-add-watch` 返回稳定 Remote descriptor。目标端有 `inotifywait` 时，
-watch 进程由 `remote-make-process` 启动并把 target-native 事件路径重写回 `/fs:`；否则
-回退到 backend 的公开 file-notify。descriptor 的 valid/remove、断线 resync、事件
+逻辑 `file-notify-add-watch` 返回稳定 Remote descriptor。递归 watch，以及
+`:file-watch-cost` 不是 `push` 的路由上目标端有 `inotifywait` 时，watch 进程由
+`remote-make-process` 启动并把 target-native 事件路径重写回 `/fs:`；否则使用
+backend 的公开 file-notify。descriptor 的 valid/remove、断线 resync、事件
 去重和 workspace resource 清理保持同一生命周期。
 
 client placement 必须显式进入 `remote-make-client-process`。该 API 即使从远端
@@ -602,6 +603,23 @@ lsp-mode 自带 client）会漏掉项目环境提供的全部工具。
 需要"每个文件一次子进程"的功能（VC、Magit、per-file 探测）用它决定开关，而不是
 测 `file-remote-p`、TRAMP method 或 backend ID。`native` 与 `tramp-rpc` 声明
 `batched`，`tramp` 声明 `round-trip`；`local` target 因此天然走同一条判断。
+
+文件通知的代价和时间戳精度同样是 backend 声明的契约：`:file-watch-cost` 为
+`push`（事件经 backend 已拥有的通道推送：本机 kqueue/inotify、tramp-rpc 服务端
+inotify 流）、`process`（每个 watch 一个目标进程，shell TRAMP 的 `inotifywait`）或
+`none`；`:mtime-compare` 为 `exact` 或 `window`。consumer 用
+`(remote-file-watch-cost FILE)` 决定是否给每个 buffer 挂通知，例如
+`init-doom-extra.el` 的 auto-revert 只在默认排除规则会跳过该 buffer、而路由为
+`push` 时才让它跟随外部修改（VS Code 的 watcher 模型：无轮询，远端
+`git checkout` 后已打开的 buffer 约 0.2s 内刷新）。逻辑单文件 watch 在 `push`
+路由上直接注册到 backend，不再先做一次 `inotifywait` 查找、也不为每个 buffer 起
+目标进程；递归 watch 仍走 inotifywait/Python。
+
+`exact` backend 的 `verify-visited-file-modtime` 精确比较（tramp-rpc 的 mtime 是
+服务端同一来源的整数秒），`window` backend 保留 TRAMP 的 2 秒容差。容差会把保存后
+两秒内的外部写入（格式化工具、目标端 checkout）误当成自己的写入而静默忽略；
+直接以 `/rpc:` 访问的 buffer 由 tramp-rpc 适配层的同一规则覆盖
+（`remote-backend-tramp-rpc-exact-mtime`）。
 
 `vc-registered` 由 `/fs:` 句柄按逻辑名回答，不投影到物理名。VC 把结果缓存在它
 拿到的那个名字下，投影后 `vc-backend` 会对 buffer 自己的名字永远回答 nil，分支

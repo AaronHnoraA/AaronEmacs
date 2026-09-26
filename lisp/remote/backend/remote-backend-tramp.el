@@ -1188,7 +1188,10 @@ rewritten to the client-side relay."
    :program-form 'search
    :describe
    (lambda ()
-     '(:kind tramp :session-owner tramp :file-operation-cost round-trip))))
+     '(:kind tramp :session-owner tramp :file-operation-cost round-trip
+       ;; Each watch is its own target-side inotifywait process, and shell
+       ;; timestamps can be coarser than one second.
+       :file-watch-cost process :mtime-compare window))))
 
 (provide 'remote-backend-tramp)
 ;;; remote-backend-tramp.el ends here
