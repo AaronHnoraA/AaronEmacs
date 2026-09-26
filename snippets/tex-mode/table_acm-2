@@ -2,7 +2,6 @@
 # name: Table:ACM:*
 # key: table:acm:*
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/table_acm_Table_ACM_
 # --
 \begin{table*}
 	\caption{${1:a}}\label{tab:${2:b}}

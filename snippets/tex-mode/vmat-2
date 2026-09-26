@@ -2,7 +2,6 @@
 # name: Vmatrix
 # key: vmat
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/vmat_Vmatrix
 # --
 \begin{vmatrix}
 ${1:a}

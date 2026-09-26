@@ -12,15 +12,21 @@
 (require 'subr-x)
 (require 'init-aaronnote-jupyter-notebook)
 
+(declare-function my/noema-jupyter-open-project-directory "init-aaronnote-jupyter-project" ())
+(declare-function my/noema-jupyter-open-project-file "init-aaronnote-jupyter-project" ())
+(declare-function my/noema-jupyter-open-project-shell "init-aaronnote-jupyter-project" ())
+(declare-function my/noema-jupyter-project-lsp "init-aaronnote-jupyter-project" ())
+(declare-function my/noema-jupyter-project-inspect "init-aaronnote-jupyter-project" ())
 (declare-function my/noema-command "init-aaronnote" (command &optional detail))
 (declare-function my/noema--ensure-server "init-aaronnote" (&optional callback))
 (declare-function my/noema--api-call-sync "init-aaronnote"
                   (channel args &optional timeout))
-(declare-function my/noema-api-call "init-aaronnote" (channel args callback))
+(declare-function my/noema-api-call "init-aaronnote" (channel args callback &optional timeout))
 (declare-function my/noema-jupyter-output-open "init-aaronnote"
                   (&optional cell-id focus view))
 (declare-function noema-research-accept-jupyter-runtime
                   "noema-research-mode" (snapshot))
+(declare-function noema-research-goto-cell "noema-research-mode" (id))
 (declare-function my/noema--host-file "init-aaronnote" (file))
 (declare-function my/noema-jupyter-cell-lsp-runtime-changing
                   "init-aaronnote-jupyter-lsp" ())
@@ -285,9 +291,10 @@ validated Noema project (a `noema.toml' ancestor).  When ENSURE is non-nil
 and no project exists for such a notebook, `noema-project-ensure' asks where
 to create one; quitting aborts the command.  Passive requests never ask."
   (when-let* ((file buffer-file-name)
-              ;; Noema's own contract: logical /fs: paths are not checked
-              ;; against the native notes root.
-              ((not (string-prefix-p "/fs:" file))))
+              ;; Both logical and native TRAMP spellings use the Remote
+              ;; gateway; neither belongs to the local research-project gate.
+              ((not (or (string-prefix-p "/fs:" file)
+                        (file-remote-p file)))))
     (require 'noema-research)
     (or my/noema-jupyter-cell--project-root-cache
         (setq my/noema-jupyter-cell--project-root-cache
@@ -300,7 +307,14 @@ to create one; quitting aborts the command.  Passive requests never ask."
 
 (defun my/noema-jupyter-cell--with-project-root (body &optional ensure)
   "Return BODY with this notebook's `projectRoot' when one applies.
+Project remote file identities for the gateway without changing the buffer.
 ENSURE is passed to `my/noema-jupyter-cell--project-root'."
+  (setq body (copy-tree body))
+  (dolist (key '(file scriptFile sourceFile))
+    (when-let* ((value (alist-get key body))
+                ((stringp value))
+                ((file-remote-p value)))
+      (setf (alist-get key body) (my/noema--host-file value))))
   (if-let* (((not (assq 'projectRoot body)))
             (root (my/noema-jupyter-cell--project-root ensure)))
       (append body `((projectRoot . ,(expand-file-name root))))
@@ -573,14 +587,24 @@ This is a one-shot reconnect reaction, never a timer or polling loop."
                 choices))))
     (nreverse choices)))
 
-(defun my/noema-jupyter-cell-select-kernel ()
-  "Select from Noema's kernel catalog in the Emacs source buffer."
+(defun my/noema-jupyter-cell-select-kernel (&optional connections-only)
+  "Select a kernel, or an existing connection when CONNECTIONS-ONLY is non-nil."
   (interactive)
   (when (buffer-modified-p) (save-buffer))
   (let* ((catalog (my/noema-jupyter-cell--api-sync
                    "aaronnote:api:jupyter-cell:kernels"
-                   (my/noema-jupyter-cell--document-detail) 30))
-         (choices (my/noema-jupyter-cell--kernel-choices catalog))
+                   (append (my/noema-jupyter-cell--document-detail)
+                           (when connections-only '((includeConnections . t)))) 30))
+         (entries (my/noema-jupyter-cell--kernel-choices catalog))
+         (choices
+          (if connections-only
+              (cl-remove-if-not
+               (lambda (entry) (string-prefix-p "attach:" (alist-get 'value (cdr entry)))) entries)
+            (append
+             (cl-remove-if (lambda (entry) (string-prefix-p "attach:" (alist-get 'value (cdr entry)))) entries)
+             (when (eq t (my/noema-jupyter-notebook--get 'supportsConnectionFiles catalog))
+               '(("Connect to Existing Kernel…" (kind . "browse-connections")))))))
+         (_ (unless choices (user-error "No existing kernel connections were found")))
          (label (completing-read "Noema Jupyter kernel: " choices nil t))
          (choice (cdr (assoc label choices)))
          (kind (my/noema-jupyter-notebook--get 'kind choice))
@@ -590,10 +614,13 @@ This is a one-shot reconnect reaction, never a timer or polling loop."
                  ,@(pcase kind
                      ("start" `((kernelSpecName . ,value)))
                      ("connect" `((kernelId . ,value))))))
-         (reply (my/noema-jupyter-cell--api-sync
-                 "aaronnote:api:jupyter:session-select" body 60)))
-    (my/noema-jupyter-cell--apply-session-snapshot reply)
-    (message "Noema Jupyter: %s" label)))
+         (reply (unless (equal kind "browse-connections")
+                  (my/noema-jupyter-cell--api-sync
+                   "aaronnote:api:jupyter:session-select" body 60))))
+    (if (equal kind "browse-connections")
+        (my/noema-jupyter-cell-select-kernel t)
+      (my/noema-jupyter-cell--apply-session-snapshot reply)
+      (message "Noema Jupyter: %s" label))))
 
 (defcustom my/noema-jupyter-cell-execute-timeout 86400
   "Seconds to wait for a Noema execution or kernel-control reply.
@@ -765,11 +792,17 @@ This does not change the notebook language, kernelspec, or Noema session."
               (or my/noema-jupyter-cell-kernel "No Kernel")
               my/noema-jupyter-cell--kernel-status)
       #'my/noema-jupyter-cell-select-kernel "Select a Noema-managed kernel")
+     (my/noema-jupyter-cell--header-button
+      "Files" #'my/noema-jupyter-open-project-directory "Open the configured execution project in Dired")
+     (my/noema-jupyter-cell--header-button
+      "Shell" #'my/noema-jupyter-open-project-shell "Open a shell at the execution project root")
+     (my/noema-jupyter-cell--header-button
+      "Project" #'my/noema-jupyter-project-inspect "Inspect configured target, root and Python")
      (when lsp-description
        (my/noema-jupyter-cell--header-button
-        (format "LSP:%s" lsp-description)
-        #'my/language-server-runtime-refresh
-        "Refresh the kernel-aware language-server runtime"))
+        (format "LSP:%s" (truncate-string-to-width lsp-description 28 nil nil t))
+        #'my/noema-jupyter-project-lsp
+        (concat lsp-description "; open or refresh the matching project source")))
      (my/noema-jupyter-cell--header-button
       "Run" #'my/noema-jupyter-cell-run-current "Run current cell in Noema"
       (unless cell 'disabled))
@@ -780,7 +813,12 @@ This does not change the notebook language, kernelspec, or Noema session."
      (my/noema-jupyter-cell--header-button
       "Step" #'my/noema-jupyter-run-by-line "Run by Line: start or advance one statement")
      (my/noema-jupyter-cell--header-button
-      "Stop" #'my/noema-jupyter-cell-interrupt "Interrupt Noema kernel")
+      "Stop" (if (bound-and-true-p my/noema-jupyter-debug--id)
+                  #'my/noema-jupyter-debug-stop #'my/noema-jupyter-cell-interrupt)
+      "Stop the active debug run or interrupt the kernel")
+     (when (bound-and-true-p my/noema-jupyter-debug--id)
+       (my/noema-jupyter-cell--header-button
+        "Continue" #'my/noema-jupyter-debug-continue "Continue the paused notebook"))
      (my/noema-jupyter-cell--header-button
       "Restart" #'my/noema-jupyter-cell-restart "Restart Noema kernel")
      (my/noema-jupyter-cell--header-button
@@ -978,6 +1016,17 @@ Noema creates and persists the new cell's standard `cell.id'."
   (interactive)
   (let* ((choices
           '(("Run Cell" . my/noema-jupyter-cell-run-current)
+            ("Project Files (Dired)" . my/noema-jupyter-open-project-directory)
+            ("Open Project File" . my/noema-jupyter-open-project-file)
+            ("Project Shell" . my/noema-jupyter-open-project-shell)
+            ("Project LSP / Restart" . my/noema-jupyter-project-lsp)
+            ("Inspect Project Environment" . my/noema-jupyter-project-inspect)
+            ("Export Notebook" . my/noema-jupyter-export)
+            ("Compare Notebook" . my/noema-jupyter-compare)
+            ("Debug Cell" . my/noema-jupyter-debug-start)
+            ("Run by Line / Next Statement" . my/noema-jupyter-run-by-line)
+            ("Continue Debugging" . my/noema-jupyter-debug-continue)
+            ("Stop Debugging" . my/noema-jupyter-debug-stop)
             ("Run Cell and Select Next" . my/noema-jupyter-cell-run-current-next)
             ("Run Above" . my/noema-jupyter-cell-run-above)
             ("Run Below" . my/noema-jupyter-cell-run-below)

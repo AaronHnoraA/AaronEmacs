@@ -218,6 +218,22 @@ height in pixels."
 
 (add-hook 'after-load-theme-hook #'my/theme-normalize-faces)
 
+(defun my/theme-apply-prompt-faces (&rest _)
+  "Draw shell prompts as colored text instead of a filled chip.
+Kanagawa gives `comint-highlight-prompt' a solid background.  Every comint
+prompt then shows a block, and agent-shell's chat labels, whose unfaced
+display newlines take the face of the prompt text they cover, stretch it
+into a full-width bar.  `agent-shell-prompt' inherits this face."
+  (aaron-ui-set-face 'comint-highlight-prompt
+                     :background 'unspecified
+                     :foreground 'accent-lavender
+                     :weight 'bold))
+
+(my/theme-apply-prompt-faces)
+;; `enable-theme-functions' is the built-in hook that runs on every theme
+;; switch.
+(add-hook 'enable-theme-functions #'my/theme-apply-prompt-faces)
+
 (use-package doom-modeline
   :ensure t
   :defer 1

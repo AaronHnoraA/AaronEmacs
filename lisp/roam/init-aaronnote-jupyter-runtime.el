@@ -20,6 +20,7 @@
 (require 'remote-gateway)
 (require 'remote-process)
 (require 'remote-workspace)
+(require 'init-jupyter-command)
 
 (cl-defstruct (my/noema-jupyter-runtime
                (:constructor my/noema-jupyter-runtime-create))
@@ -227,9 +228,11 @@
 (defun my/noema-jupyter--kernelspecs (file)
   "Return target kernelspec entries for logical FILE."
   (let* ((context (my/noema-jupyter--context file))
+         (command (my/jupyter-target-command context))
          (payload
-          (my/noema-jupyter--json-output
-           context "jupyter" "kernelspec" "list" "--json"))
+          (apply #'my/noema-jupyter--json-output
+                 context (car command)
+                 (append (cdr command) '("kernelspec" "list" "--json"))))
          (result (my/noema-jupyter--normalize-kernelspecs payload)))
     ;; Project launchers are overlaid only when the selected backend explicitly
     ;; says this target is client-accessible.  Remote targets never receive a
@@ -271,8 +274,10 @@
 (defun my/noema-jupyter--target-runtime-directory (file)
   "Return the logical Jupyter runtime directory on FILE's owning target."
   (let* ((context (my/noema-jupyter--context file))
+         (command (my/jupyter-target-command context))
          (target-directory
-          (my/noema-jupyter--output context "jupyter" "--runtime-dir")))
+          (apply #'my/noema-jupyter--output context (car command)
+                 (append (cdr command) '("--runtime-dir")))))
     (unless (and (stringp target-directory)
                  (not (string-empty-p target-directory)))
       (error "Target Jupyter returned no runtime directory"))
@@ -316,7 +321,8 @@
              (remote-canonicalize-file-name
               (format "%s" (my/noema-jupyter--get 'file params))))
             (specs (my/noema-jupyter--kernelspecs file))
-            (connections (my/noema-jupyter--attachable-connections file)))
+            (connections (when (eq t (my/noema-jupyter--get 'includeConnections params))
+                           (my/noema-jupyter--attachable-connections file))))
        `((ok . t) (default . "python3") (specs . ,specs)
          (connections . ,connections))))))
 

@@ -11,6 +11,10 @@ Local version `0.4.6+aaron.1` adds:
 - persistent `core` and `temporary` remote-kernel groups;
 - `manage --set-group KERNEL GROUP`;
 - namespaced management metadata in generated kernelspecs;
+- optional `metadata.aaron.project` for shared root/Python/direnv and editor LSP
+  settings, read through `--project-file` and preserved by guided profile edits;
+- direnv wraps the complete kernel command, including variable expansion and
+  compound commands; missing project directories abort startup;
 - `StrictHostKeyChecking=accept-new` for SSH connections;
 - fail-closed, keepalive-backed five-port tunnels using `-N -T`,
   `ExitOnForwardFailure=yes`, and `ProxyJump` instead of nested ten-minute

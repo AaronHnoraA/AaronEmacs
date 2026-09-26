@@ -43,13 +43,22 @@ A server URL alone therefore must not silently relocate the local project.
 | Server management UI | Jupyter Board URL add/edit/forget, routes, auth, catalog check | Implemented and ERT verified; graphical layout / accessibility and richer per-kernel actions remain |
 | Cell snippets | Shared language-aware notebook table; `jraw` structural operation; Python magics | Added; retain `.noema` / Jupyter separation. Check all snippet modes before final acceptance |
 | Cell structure / execution | Notebook codec, cell API, NCell commands | Existing code/Markdown/raw, run ranges, split/merge; multi-selection, section execution, undo parity need audit |
-| Completion / inspection / LSP | CAPF, kernel introspection, kernel runtime LSP | Remote completion passed; full language/remote LSP acceptance remains |
+| Completion / inspection / LSP | CAPF, kernel introspection, kernel runtime LSP, shared project context | Real Aaron-PC source LSP resolves numpy with project Python; local notebook/remote kernel mismatch blocks local fallback. Broader language/server matrix remains |
 | Variables / table viewer / rich output | `jupyter-variables-view.ts`, rendermime, widget runtime | Implemented pieces; sorting/filtering, large data and output-save UX need comparative verification |
-| Debug cell / run by line | No corresponding notebook `debug_request` implementation found in inspected Jupyter backend | Missing; general source DAP support does not establish notebook debugging parity |
-| Export / notebook diff / trust | No complete corresponding Emacs notebook workflow established | Missing or unverified; preserve these in scope |
+| Debug cell / run by line | `server/jupyter/notebook-debug.mjs`, native Dape adapter | Real Aaron-PC server: breakpoints, variables, evaluation, stepping, Run by Line, cross-cell/module source and stop preserving kernel passed. Raw-port/local placement and graphical UX acceptance remain |
+| Export | Native export command + nbconvert snapshot converter | Real script/HTML/PDF export of remote notebook, stored outputs and relative image passed; cells are not executed |
+| Notebook diff | Cell-aware source/output/metadata text + native Ediff/VC | Real Git revision and Ediff cleanup passed; richer rendered comparison remains |
+| Notebook trust | Renderer/execution policy audit | Incomplete: rich-output model still starts trusted; requires coordinated rendering/execution policy |
 | Python environments and kernel MRU | Kernelspec finder and selectors | Environment discovery / installation prompts / MRU need explicit comparison and implementation |
 
 ## This increment
+
+The remote development follow-up is documented in
+[Kernel project context](jupyter-project-context.md): shared kernelspec metadata,
+normal Remote/TRAMP Dired and shell, source LSP, and direnv. Real Aaron-PC checks
+covered read/save, shell cwd/environment, numpy LSP hover, and a real remote
+kernel using the same Python/root/direnv. No local-notebook mirroring or remote
+editor instance was added. This does not close the full parity audit.
 
 - Added a Jupyter Servers section to the native Board: direct URL versus Remote
   target routing, add/edit/forget, explicit asynchronous catalog checks, running
@@ -100,6 +109,69 @@ the production gateway transport. `test/jupyter-remote-fixture.py` prepares an
 isolated remote environment and provides a PID-checked `--stop ROOT` cleanup.
 
 ## Validation and reproduction
+
+### Notebook debugger increment
+
+Notebook **Debug** and **Step** controls now use Dape through a single-client
+loopback DAP bridge. Kernel requests use Jupyter's control channel and debug
+events use IOPub, following the [Jupyter messaging protocol](https://jupyter-client.readthedocs.io/en/latest/messaging.html#debug-request).
+The endpoint stays on the Emacs client even for a Contents-only workspace.
+The kernel must advertise debugger support; `.noema` is refused before launch.
+
+`C-c i g` starts Debug Cell, `C-c i .` starts Run by Line or advances one
+statement, `C-c i c` continues, and `C-c i q` stops. Dape supplies the breakpoint,
+stack, variable and evaluation interfaces. The notebook is read-only for the
+duration of the source snapshot. Stop interrupts the current run and detaches
+the debugger without shutting down its kernel. Output writes settle before
+normal cleanup; a disconnected/unresponsive kernel bounds that wait.
+
+The opt-in `make jupyter-debug-live-smoke` uses the same environment as the
+Contents smoke test. On Aaron-PC it passed actual Dape breakpoint placement,
+notebook source-line mapping, paused-frame variables, next/evaluate, Run by Line,
+stop followed by reuse of retained kernel state, a breakpoint in a previously
+executed cell, step-in to a server Python module, source retrieval by DAP
+reference, and persisted outputs. The test bridge forwards production session
+events; it exposed and fixed a missing post-debug session refresh and an output
+write/stop race. Protocol regressions additionally cover conditional/log
+breakpoint forwarding, Markdown rejection, fragmented DAP frames, cleanup,
+capability checks and timeouts.
+
+This does not establish every debugger scenario: local/raw-port deployments,
+exception UI, preplaced breakpoints in arbitrary Remote module buffers and
+graphical layout still need acceptance. Restart currently requires a fresh
+notebook Debug command; editing during a debug run is deliberately locked.
+
+### Board and connection maintenance
+
+- Normal kernel selection no longer scans or lists raw `kernel-*.json` files.
+  One **Connect to Existing Kernel…** entry opens the explicit attachment list.
+- Clicking a profile keeps the existing detail page. Its JSON section is now
+  editable; **Save to kernel.json** or `C-x C-s` validates the JSON and writes
+  the original file in the owning filesystem. The header is read-only, edits
+  support undo, and a changed original file prevents overwriting another edit.
+  Saving invalidates kernelspec caches; changes apply on the next launch.
+- Connection maintenance runs asynchronously every 15 minutes locally and
+  during target discovery, throttled per target/directory. It removes only
+  files older than ten minutes whose five local TCP ports refuse connections,
+  whose filenames have no live process references, and whose identity remains
+  unchanged through a second check. Symlinks, external addresses and uncertain
+  liveness are retained. No kernel is terminated by the cleanup script.
+  The initial local cleanup removed **159** abandoned files and retained two
+  recent files.
+- The actual `Open REPL` failure, `void-variable state`, was reproduced in
+  emacs-jupyter's compiled monad functions. A targeted compatibility check
+  reloads the unchanged upstream source after its macros/classes are available.
+  `make jupyter-repl-live-smoke` passed actual local Python startup, execution
+  through the REPL cell and shutdown; package sources remain untouched.
+
+For this increment, Noema's full suite passed **2,525** tests (**16 skipped**)
+with `VITEST_MAX_WORKERS=2`; unrestricted parallel runs exposed timing-sensitive
+LaTeX and heading-fold checks, both passing with bounded worker concurrency.
+Research ERT passed **333**, Jupyter ERT passed **211**, and the cleanup script's
+two regression tests passed. The five changed Jupyter Lisp modules passed strict
+byte compilation. Actual asynchronous maintenance through Remote retained the
+two remaining local records. Go tests, build and install passed. The Aaron-PC
+debug fixture was stopped and removed after the live tests.
 
 `make jupyter-test` runs bridge, notebook, LSP-runtime and Board ERT suites.
 `test/init-snippets-tests.el` separately checks the shared snippet activation

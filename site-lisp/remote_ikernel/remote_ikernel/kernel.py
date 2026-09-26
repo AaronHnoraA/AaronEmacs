@@ -439,10 +439,10 @@ class RemoteIKernel(object):
         # directory on the remote machine.
         if self.workdir:
             self.log.info("Remote working directory {0}.".format(self.workdir))
-            conn.sendline('cd "{0}"'.format(self.workdir))
+            conn.sendline('cd {0} || exit $?'.format(shlex.quote(self.workdir)))
         else:
             self.log.info("Current working directory {0}.".format(self.cwd))
-            conn.sendline('cd "{0}"'.format(self.cwd))
+            conn.sendline('cd {0} || exit $?'.format(shlex.quote(self.cwd)))
 
         # Create a temporary file to store a copy of the connection information
         # Delete the file if it already exists
@@ -648,6 +648,47 @@ class RemoteIKernel(object):
         return tunnel_cmd
 
 
+def apply_project_config(args):
+    """Apply optional project metadata from the owning kernelspec at launch.
+
+    SSH identity remains in the existing launcher/SSH configuration.  This
+    only adds the shared project cwd, Python command and direnv environment.
+    """
+    if not args.project_file:
+        return args
+    with open(args.project_file) as stream:
+        project = json.load(stream).get('metadata', {}).get('aaron', {}).get('project', {})
+    if not isinstance(project, dict):
+        raise ValueError('metadata.aaron.project must be an object')
+    root = project.get('root', args.workdir)
+    if root is not None and (not isinstance(root, str) or not root.startswith('/')):
+        raise ValueError('project.root must be an absolute target path')
+    args.workdir = root
+    python = project.get('python')
+    if python is not None:
+        if not isinstance(python, str) or not python:
+            raise ValueError('project.python must be a nonempty executable path')
+        if '/' in python and not python.startswith('/'):
+            if not root:
+                raise ValueError('relative project.python requires project.root')
+            python = os.path.normpath(os.path.join(root, python))
+        command = shlex.split(args.kernel_cmd)
+        if not command or any(char in args.kernel_cmd for char in (';', '|', '&', '`', '$', '\n')):
+            raise ValueError('project.python requires a simple kernel command, without shell operators')
+        command[0] = python
+        args.kernel_cmd = ' '.join(shlex.quote(arg) for arg in command)
+    if project.get('direnv', False):
+        if project['direnv'] is not True or not root:
+            raise ValueError('project.direnv requires true and an absolute project root')
+        # direnv enforces its own .envrc authorization. Never run `allow` here.
+        # Expand variables and execute every command only AFTER direnv loaded.
+        # Prefixing an unquoted command leaves $VAR expansion, pipelines and
+        # commands after a semicolon in the outer login shell's environment.
+        args.kernel_cmd = 'direnv exec {} /bin/sh -c {}'.format(
+            shlex.quote(root), shlex.quote(args.kernel_cmd))
+    return args
+
+
 def start_remote_kernel():
     """
     Read command line arguments and initialise a kernel.
@@ -663,6 +704,7 @@ def start_remote_kernel():
     parser.add_argument('--kernel_cmd',
                         default='ipython kernel -f {host_connection_file}')
     parser.add_argument('--workdir')
+    parser.add_argument('--project-file', help='Owning kernel.json with optional project/LSP metadata')
     parser.add_argument('--host')
     parser.add_argument('--precmd')
     parser.add_argument('--launch-args')
@@ -673,7 +715,7 @@ def start_remote_kernel():
                         "Jupyter kernel launcher (version {0}).\n\n"
                         "Use the '%(prog)s manage' subcommand for managing "
                         "kernels.".format(__version__))
-    args = parser.parse_args()
+    args = apply_project_config(parser.parse_args())
 
     kernel = RemoteIKernel(connection_info=args.connection_info,
                            interface=args.interface, cpus=args.cpus, pe=args.pe,

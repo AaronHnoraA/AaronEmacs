@@ -15,7 +15,12 @@
     (dolist (line (butlast lines))
       (when (string-prefix-p "@@noema-test@@" line)
         (let ((reply (json-parse-string (substring line 14) :object-type 'alist :array-type 'list)))
-          (puthash (alist-get 'id reply) reply (process-get proc 'replies)))))))
+          (pcase (alist-get 'event reply)
+            ("jupyter-session"
+             (run-at-time 0 nil #'my/noema-jupyter-cell-handle-session-event (alist-get 'payload reply)))
+            ("jupyter-debug-ended"
+             (run-at-time 0 nil #'my/noema-jupyter-debug-handle-ended (alist-get 'payload reply)))
+            (_ (puthash (alist-get 'id reply) reply (process-get proc 'replies)))))))))
 
 (defun my/jupyter-contents-live--call (proc channel body)
   "Call real service CHANNEL with BODY while pumping Remote channels."

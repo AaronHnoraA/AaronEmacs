@@ -13,7 +13,7 @@
 (require 'subr-x)
 (require 'transient)
 
-(declare-function my/noema-api-call "init-aaronnote" (channel args callback))
+(declare-function my/noema-api-call "init-aaronnote" (channel args callback &optional timeout))
 (declare-function my/noema-jupyter-runtime-control
                   "init-aaronnote-jupyter-runtime" (runtime-id action callback))
 (declare-function my/noema-jupyter-runtime-snapshot
@@ -1061,16 +1061,90 @@ The default view keeps remote profiles and active sessions prominent."
   (my/jupyter-board--start-command
    my/jupyter-remote-ikernel-install-script '("install")))
 
+(defvar-local my/jupyter-detail--file nil)
+(defvar-local my/jupyter-detail--original nil)
+(defvar-local my/jupyter-detail--json-start nil)
+(defvar-local my/jupyter-detail--json-end nil)
+(defvar jupyter--kernelspecs)
+
+(defun my/jupyter-detail--read-file (file)
+  "Read FILE without changing the detail buffer's local state."
+  (with-temp-buffer (insert-file-contents file) (buffer-string)))
+
+(define-derived-mode my/jupyter-kernel-detail-mode text-mode "Kernel-JSON"
+  "Edit the JSON section and save it to the original kernelspec."
+  (setq buffer-read-only nil)
+  (buffer-enable-undo)
+  (setq-local require-final-newline nil)
+  (keymap-local-set "C-x C-s" #'my/jupyter-detail-save)
+  (keymap-local-set "C-c C-c" #'my/jupyter-detail-save))
+
+(defun my/jupyter-detail-save ()
+  "Validate and save this detail buffer's JSON to its original kernel.json."
+  (interactive)
+  (unless (and my/jupyter-detail--file my/jupyter-detail--json-start)
+    (user-error "This detail buffer has no editable kernelspec"))
+  (let* ((text (buffer-substring-no-properties
+                my/jupyter-detail--json-start my/jupyter-detail--json-end))
+         (object (condition-case err
+                     (json-parse-string text :object-type 'hash-table :array-type 'array)
+                   (error (user-error "Invalid JSON: %s" (error-message-string err)))))
+         (argv (and (hash-table-p object) (gethash "argv" object))))
+    (unless (and (vectorp argv) (> (length argv) 0)
+                 (cl-every #'stringp (append argv nil))
+                 (stringp (gethash "display_name" object)))
+      (user-error "A kernelspec needs a nonempty argv array of strings and display_name"))
+    (unless (equal my/jupyter-detail--original
+                   (my/jupyter-detail--read-file my/jupyter-detail--file))
+      (user-error "kernel.json changed outside this page; reopen Details before saving"))
+    (when (and (member "remote_ikernel" (append argv nil))
+               (my/jupyter-management-get
+                'project (my/jupyter-management-get
+                          'aaron (my/jupyter-management-get 'metadata object)))
+               (not (member "--project-file" (append argv nil))))
+      (puthash "argv" (vconcat argv (vector "--project-file"
+                                           (file-local-name my/jupyter-detail--file))) object)
+      (setq text (with-temp-buffer
+                   (insert (json-serialize object))
+                   (json-pretty-print-buffer)
+                   (buffer-string))))
+    (setq text (concat (string-trim-right text) "\n"))
+    (let ((coding-system-for-write 'utf-8-unix))
+      (write-region text nil my/jupyter-detail--file nil 'silent))
+    (setq my/jupyter-detail--original text)
+    (unless (equal text (buffer-substring-no-properties
+                        my/jupyter-detail--json-start my/jupyter-detail--json-end))
+      (let ((inhibit-read-only t))
+        (delete-region my/jupyter-detail--json-start my/jupyter-detail--json-end)
+        (goto-char my/jupyter-detail--json-start)
+        (insert text)))
+    (set-buffer-modified-p nil)
+    (when (boundp 'jupyter--kernelspecs) (clrhash jupyter--kernelspecs))
+    (when (and (bound-and-true-p my/noema--ready) (fboundp 'my/noema-api-call))
+      (my/noema-api-call "aaronnote:api:jupyter-cell:kernels" [((refresh . t))]
+                        (lambda (&rest _) nil)))
+    (when-let* ((board (get-buffer my/jupyter-board-buffer-name)))
+      (with-current-buffer board (my/jupyter-board-refresh)))
+    (message "Saved kernel.json; changes apply to the next kernel launch")))
+
 (defun my/jupyter-board-describe ()
   "Describe the kernelspec, runtime, or connection at point."
   (interactive)
   (let* ((entry (my/jupyter-board--require-entry))
          (buffer (get-buffer-create my/jupyter-board-detail-buffer-name)))
     (with-current-buffer buffer
+      (when (and (derived-mode-p 'my/jupyter-kernel-detail-mode) (buffer-modified-p))
+        (user-error "Save the current kernel JSON before opening another detail page"))
       (let ((inhibit-read-only t))
         (erase-buffer)
+        (special-mode)
         (pcase (plist-get entry :kind)
           ('kernelspec
+           (my/jupyter-kernel-detail-mode)
+           (setq my/jupyter-detail--file
+                 (expand-file-name "kernel.json" (file-name-as-directory (plist-get entry :resource-dir)))
+                 my/jupyter-detail--original
+                 (my/jupyter-detail--read-file my/jupyter-detail--file))
            (insert (format "%s\n\n" (plist-get entry :display-name)))
            (insert (format "Target: %s\nName: %s\nLanguage: %s\nResource: %s\n"
                            (plist-get entry :target-id) (plist-get entry :name)
@@ -1083,10 +1157,15 @@ The default view keeps remote profiles and active sessions prominent."
                              (plist-get entry :group)
                              (or (plist-get entry :interface) "-")
                              (or (plist-get entry :host) "-"))))
-           (insert "\nkernel.json\n-----------\n")
-           (let ((json-encoding-pretty-print t))
-             (insert (json-encode (or (plist-get entry :raw)
-                                      (plist-get entry :spec))))))
+           (insert "\nkernel.json  ")
+           (insert-text-button "Save to kernel.json" 'follow-link t
+                               'action (lambda (_) (my/jupyter-detail-save)))
+           (insert "  (C-x C-s)\nEdit JSON below; saved changes apply to the next launch.\n\n")
+           (add-text-properties (point-min) (point)
+                                '(read-only t front-sticky (read-only) rear-nonsticky (read-only)))
+           (setq my/jupyter-detail--json-start (copy-marker (point)))
+           (insert my/jupyter-detail--original)
+           (setq my/jupyter-detail--json-end (copy-marker (point) t)))
           ('connection
            (insert (format "%s\n\nValid: %s\nStale: %s\n\n"
                            (plist-get entry :file) (plist-get entry :valid)
@@ -1097,8 +1176,9 @@ The default view keeps remote profiles and active sessions prominent."
            (insert (format "%s\n\n" (or (plist-get entry :title) "Jupyter runtime")))
            (pp entry (current-buffer)))
           (_ (pp entry (current-buffer))))
-        (insert "\n")
-        (special-mode)))
+        (unless (eq (plist-get entry :kind) 'kernelspec) (insert "\n"))
+        (setq buffer-undo-list nil)
+        (set-buffer-modified-p nil)))
     (pop-to-buffer buffer)))
 
 (defun my/jupyter-board-repl ()

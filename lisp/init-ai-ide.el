@@ -223,6 +223,51 @@ Provider settings, authentication, PATH and a custom command stay untouched."
               (lambda (args) (my/agent-shell-use-official-opencode args))
               '((name . my/agent-shell-use-official-opencode))))
 
+;; The Claude and Codex ACP adapters each bundle a copy of their CLI and run
+;; it unless told otherwise.  That copy is only as new as the adapter, so the
+;; models and features on offer lag behind the CLI the person keeps updated.
+;; Point each adapter at the CLI its workspace environment finds -- the same
+;; PATH lookup, on the same target, that found the adapter itself -- so a
+;; local session uses the shell's `claude'/`codex' exactly as a remote one
+;; uses the target's.  Pi and OpenCode have no bundled CLI.
+
+(defconst my/agent-shell-adapter-clis
+  '(("claude-agent-acp" "CLAUDE_CODE_EXECUTABLE" "claude")
+    ("codex-acp" "CODEX_PATH" "codex"))
+  "ACP adapters that bundle a CLI: (ADAPTER ENVIRONMENT-VARIABLE CLI).
+The adapter runs CLI from ENVIRONMENT-VARIABLE when it is set.")
+
+(defun my/agent-shell-use-workspace-cli (arguments)
+  "Make a CLI-bundling adapter in ARGUMENTS run the workspace's own CLI.
+ARGUMENTS are `agent-shell--make-acp-client' keywords.  The CLI is looked up
+with the agent's workspace environment on its target and passed as the
+target-native path.  An explicit setting of the variable, in the command's
+environment or Emacs's, wins; a CLI that cannot be found leaves the adapter
+on its bundled copy and says so."
+  (let* ((command (plist-get arguments :command))
+         (entry (assoc (and (stringp command) (file-name-nondirectory command))
+                       my/agent-shell-adapter-clis))
+         (variable (nth 1 entry))
+         (environment (plist-get arguments :environment-variables)))
+    (if (or (null entry)
+            (seq-some (lambda (setting) (string-prefix-p (concat variable "=") setting))
+                      environment)
+            (getenv variable))
+        arguments
+      (if-let* ((found (executable-find (nth 2 entry) t)))
+          (plist-put (copy-sequence arguments) :environment-variables
+                     (cons (format "%s=%s" variable (remote-file-local-name found))
+                           environment))
+        (message "%s: no `%s' on this workspace's PATH; using the adapter's bundled copy"
+                 command (nth 2 entry))
+        arguments))))
+
+(with-eval-after-load 'agent-shell
+  ;; Innermost, so the workspace environment advice above has run first.
+  (advice-add 'agent-shell--make-acp-client :filter-args
+              (lambda (args) (my/agent-shell-use-workspace-cli args))
+              '((name . my/agent-shell-use-workspace-cli) (depth . 100))))
+
 (autoload 'noema "noema" nil t)
 (autoload 'noema-compose "noema-compose" nil t)
 (autoload 'noema-compose-send "noema-compose" nil t)

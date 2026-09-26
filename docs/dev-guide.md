@@ -619,8 +619,8 @@ in-process 缓存，与自动刷新保持一致。
   `noema-agent-acp-adopt` 是唯一登记点，负责解析项目 root、生成唯一会话名、调用
   `noema-agent-acp-mark-session-buffer`；`agent-shell-mode-hook` 上的收编钩子把裸
   `M-x agent-shell` 也纳进来（`noema-agent-acp-adopt-foreign-sessions` 可关）。
-  root 解析是纯查询（`noema.toml` → projectile → project.el → 该目录），绝不创建
-  `noema.toml`。只有已经是 Noema 项目时才额外 `session:promote` + `session:name:bind`
+  root 解析是纯查询（含 `[project]` 的 `noema.toml` → projectile → project.el →
+  该目录，统一投影成本机原生路径），绝不创建 Project。只有已经是 Noema 项目时才额外 `session:promote` + `session:name:bind`
   写进 Node 持久注册表，失败不影响会话。`noema-agent-acp-sessions` 是合并视图，
   `noema-sessions-read` 是统一的会话选择器（可选“新开一个”）。
 - 生命周期：所有自动停止路径（warm 清扫、项目最后一个 `.noema` 关闭后的收尾、项目

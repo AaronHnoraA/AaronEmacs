@@ -2,7 +2,6 @@
 # name: Introduction
 # key: introduction
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/introduction_Introduction
 # --
 \begin{introduction}
 	${1:a}

@@ -19,6 +19,13 @@
 (require 'noema-pi-router)
 (require 'noema-sessions)
 
+(defconst noema-research-test--project-manifest "schema = 1\n[project]\nid = \"test\"\n"
+  "A minimal D-038 Project manifest.")
+
+(defun noema-research-test--accept-proposed (&rest args)
+  "Stand in for `completing-read', accepting its default (the proposal)."
+  (nth 6 args))
+
 (defmacro noema-research-test--with-directory (var &rest body)
   "Bind VAR to a temporary directory while running BODY."
   (declare (indent 1))
@@ -643,7 +650,7 @@ BODY may refer to the JuText buffer as `source'."
 
 (ert-deftest noema-research-inspector-projects-run-artifacts-by-work-node ()
   (noema-research-test--with-directory root
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" root)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" root)
                   nil 'silent)
     (let* ((document (noema-research-test--document))
            (work-node-id (noema-research-test--work-id document "c-w"))
@@ -746,7 +753,7 @@ BODY may refer to the JuText buffer as `source'."
 
 (ert-deftest noema-research-output-context-carries-the-manifest-project-root ()
   (noema-research-test--with-directory root
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" root)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" root)
                   nil 'silent)
     (let ((document (noema-research-test--document)))
       (noema-research-test--with-jutext document
@@ -762,7 +769,7 @@ BODY may refer to the JuText buffer as `source'."
 
 (ert-deftest noema-research-execute-dispatches-work-to-an-agent-run ()
   (noema-research-test--with-directory root
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" root)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" root)
                   nil 'silent)
     (let ((document (noema-research-test--document))
           captured)
@@ -913,7 +920,7 @@ BODY may refer to the JuText buffer as `source'."
 
 (ert-deftest noema-research-views-live-under-the-repository-agent-directory ()
   (noema-research-test--with-directory directory
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" directory) nil 'silent)
     (let* ((file (expand-file-name "research/deep/bound.noema" directory))
            (document (noema-research-test--document))
            (path (noema-research-view-write file document "c-w" '("c-q"))))
@@ -927,7 +934,7 @@ BODY may refer to the JuText buffer as `source'."
 
 (ert-deftest noema-research-views-persist-semantic-zoom ()
   (noema-research-test--with-directory directory
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" directory) nil 'silent)
     (let* ((file (expand-file-name "research/bound.noema" directory))
            (document (noema-research-test--document)))
       (noema-research-view-write file document "c-w" '("c-q") "detail")
@@ -945,7 +952,7 @@ BODY may refer to the JuText buffer as `source'."
                               (buffer-string))))
         (should (plist-get first :created))
         (should (string-match-p
-                 (concat "\\`schema = 1\nrepository_id = "
+                 (concat "\\`schema = 1\n\n\\[project\\]\nid = "
                          "\\\"[0-9a-f]\\{8\\}-[0-9a-f]\\{4\\}-7[0-9a-f]\\{3\\}-"
                          "[89ab][0-9a-f]\\{3\\}-[0-9a-f]\\{12\\}\\\"\n\\'")
                  manifest-text))
@@ -954,47 +961,124 @@ BODY may refer to the JuText buffer as `source'."
                        (with-temp-buffer
                          (insert-file-contents manifest)
                          (buffer-string))))
+        ;; A Project is not a Git concept: `.agent/' ignores itself and the
+        ;; person's ignore file is left alone.
+        (should (equal (with-temp-buffer (insert-file-contents ignore) (buffer-string))
+                       "dist/\n"))
         (should (equal (with-temp-buffer
-                         (insert-file-contents ignore)
+                         (insert-file-contents (expand-file-name ".agent/.gitignore" directory))
                          (buffer-string))
-                       "dist/\n.agent/\n"))))))
+                       "*\n"))))))
 
-(ert-deftest noema-project-root-is-a-query-for-the-nearest-manifest ()
+(ert-deftest noema-project-enable-keeps-a-repository-and-a-legacy-id ()
+  (noema-research-test--with-directory directory
+    (let ((manifest (expand-file-name "noema.toml" directory)))
+      ;; A Wiki repository chosen as a Project keeps its repository identity.
+      (write-region "schema = 1\nrepository_id = \"repo\"\nnamespace = \"Math\"\n" nil manifest nil 'silent)
+      (should-not (noema-project-root directory))
+      (should (plist-get (noema-project-enable directory) :created))
+      (let ((text (with-temp-buffer (insert-file-contents manifest) (buffer-string))))
+        (should (string-prefix-p "schema = 1\nrepository_id = \"repo\"\nnamespace = \"Math\"\n\n[project]\nid = \"" text))
+        (should-not (equal (noema-project-id directory) "repo")))
+      ;; A manifest whose Runs predate D-038 keeps the id they recorded.
+      (write-region "schema = 1\nrepository_id = \"legacy\"\n" nil manifest nil 'silent)
+      (make-directory (expand-file-name ".agent" directory) t)
+      (write-region "" nil (expand-file-name ".agent/state.sqlite" directory) nil 'silent)
+      (should (equal (noema-project-root directory) directory))
+      (should (equal (noema-project-ensure (expand-file-name "a.noema" directory)) directory))
+      (should (equal (noema-project-id directory) "legacy"))
+      (should (plist-get (noema-project--manifest directory) :project-p)))))
+
+(ert-deftest noema-project-root-is-a-query-for-the-nearest-project ()
   (noema-research-test--with-directory directory
     (let* ((nested (expand-file-name "a/b/" directory))
            (file (expand-file-name "new.noema" nested)))
       (make-directory nested t)
       (should-not (noema-project-root file))
       (should-not (file-exists-p (expand-file-name "noema.toml" nested)))
-      (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
-      (should (equal (noema-project-root file) directory))
-      (should (equal (noema-project-root nested) directory)))))
+      ;; A Wiki repository manifest alone does not make a Project.
+      (write-region "schema = 1\nrepository_id = \"vault\"\n" nil
+                    (expand-file-name "noema.toml" directory) nil 'silent)
+      (should-not (noema-project-root file))
+      (should (equal (noema-project-scope file) nested))
+      (write-region noema-research-test--project-manifest nil
+                    (expand-file-name "noema.toml" (expand-file-name "a/" directory)) nil 'silent)
+      (should (equal (noema-project-root file) (expand-file-name "a/" directory)))
+      (should (equal (noema-project-root nested) (expand-file-name "a/" directory))))))
 
-(ert-deftest noema-project-default-root-prefers-the-enclosing-workspace ()
+(ert-deftest noema-project-default-root-follows-code-not-vaults ()
   (noema-research-test--with-directory directory
     (let ((nested (expand-file-name "notes/sub/" directory)))
       (make-directory nested t)
+      ;; In a code repository the Project spans the repository.
       (let ((project-find-functions (list (lambda (_) (cons 'transient directory)))))
-        (should (equal (noema-project-default-root nested) directory)))
+        (should (equal (noema-project-default-root nested) directory))
+        ;; In a vault, which already carries a manifest, it does not.
+        (write-region "schema = 1\nrepository_id = \"vault\"\n" nil
+                      (expand-file-name "noema.toml" directory) nil 'silent)
+        (should (equal (noema-project-default-root nested) nested))
+        (should (equal (noema-project-candidate-roots nested)
+                       (list nested (expand-file-name "notes/" directory) directory))))
       (let ((project-find-functions nil))
         (should (equal (noema-project-default-root nested) nested))))))
 
-(ert-deftest noema-project-ensure-asks-before-creating-at-the-workspace-root ()
+(ert-deftest noema-project-workspace-defaults-to-the-root-and-round-trips ()
+  (noema-research-test--with-directory directory
+    (let ((root (expand-file-name "notes/lce/" directory))
+          (code (expand-file-name "code/lce/" directory)))
+      (make-directory root t)
+      (make-directory code t)
+      (noema-project-enable root)
+      (should (equal (noema-project-workspace root) root))
+      (should (equal (noema-project-set-workspace root code) code))
+      ;; Outside the Project a workspace is written absolute (`~/…' under
+      ;; home), so moving the notes does not break it; inside, relative.
+      (should (equal (plist-get (noema-project--manifest root) :workspace)
+                     (directory-file-name (abbreviate-file-name code))))
+      (make-directory (expand-file-name "src/" root))
+      (noema-project-set-workspace root (expand-file-name "src/" root))
+      (should (equal (plist-get (noema-project--manifest root) :workspace) "src"))
+      (noema-project-set-workspace root code)
+      (should (equal (noema-project-workspace root) code))
+      (noema-project-set-workspace root nil)
+      (should-not (plist-get (noema-project--manifest root) :workspace))
+      (should (equal (noema-project-workspace root) root))
+      (should-error (noema-project-set-workspace root (expand-file-name "missing/" directory))
+                    :type 'user-error))))
+
+(ert-deftest noema-project-paths-are-native-at-the-host-boundary ()
+  (noema-research-test--with-directory directory
+    (write-region noema-research-test--project-manifest nil
+                  (expand-file-name "noema.toml" directory) nil 'silent)
+    (let ((logical (concat "/fs:local:" directory)))
+      (cl-letf (((symbol-function 'remote-client-file-name)
+                 (lambda (name &rest _) (string-remove-prefix "/fs:local:" name))))
+        (should (equal (noema-project-client-path (concat logical "x.noema"))
+                       (expand-file-name "x.noema" directory)))
+        (should (equal (noema-project-root (concat logical "x.noema")) directory))
+        ;; Every file sent to the host, such as an index sync, is native.
+        (should (equal (noema-project-host-file (concat logical "x.noema"))
+                       (expand-file-name "x.noema" directory))))
+      (cl-letf (((symbol-function 'remote-client-file-name) (lambda (&rest _) nil)))
+        (should-not (noema-project-client-path "/fs:gpu:/srv/p/x.noema"))
+        (should-error (noema-project-ensure "/fs:gpu:/srv/p/x.noema") :type 'user-error)))))
+
+(ert-deftest noema-project-ensure-asks-before-creating-at-the-proposed-root ()
   (noema-research-test--with-directory directory
     (let* ((nested (expand-file-name "notes/sub/" directory))
            (file (expand-file-name "a.noema" nested))
            (project-find-functions (list (lambda (_) (cons 'transient directory))))
            proposed)
       (make-directory nested t)
-      (cl-letf (((symbol-function 'read-directory-name)
-                 (lambda (_prompt dir default &rest _)
-                   (setq proposed default)
-                   dir)))
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (&rest args)
+                   (setq proposed (nth 6 args))
+                   proposed)))
         (should (equal (noema-project-ensure file) directory)))
-      (should (equal proposed directory))
+      (should (equal (expand-file-name proposed) directory))
       (should (file-regular-p (expand-file-name "noema.toml" directory)))
       (should-not (file-exists-p (expand-file-name "noema.toml" nested)))
-      (cl-letf (((symbol-function 'read-directory-name)
+      (cl-letf (((symbol-function 'completing-read)
                  (lambda (&rest _) (error "An existing project must not prompt"))))
         (should (equal (noema-project-ensure file) directory))))))
 
@@ -1006,12 +1090,12 @@ BODY may refer to the JuText buffer as `source'."
       (make-directory (expand-file-name "work/" directory))
       (unwind-protect
           (progn
-            (cl-letf (((symbol-function 'read-directory-name)
+            (cl-letf (((symbol-function 'completing-read)
                        (lambda (&rest _) (signal 'quit nil))))
               ;; `should-error' does not catch `quit'.
               (should (eq (condition-case nil (noema-project-ensure file) (quit 'quit))
                           'quit)))
-            (cl-letf (((symbol-function 'read-directory-name)
+            (cl-letf (((symbol-function 'completing-read)
                        (lambda (&rest _) elsewhere)))
               (should-error (noema-project-ensure file) :type 'user-error))
             (should-not (noema-project-root file))
@@ -1023,15 +1107,15 @@ BODY may refer to the JuText buffer as `source'."
     (let ((file (expand-file-name "notes/a.noema" directory))
           (project-find-functions (list (lambda (_) (cons 'transient directory)))))
       (make-directory (expand-file-name "notes/" directory))
-      (cl-letf (((symbol-function 'read-directory-name)
+      (cl-letf (((symbol-function 'completing-read)
                  (lambda (&rest _) (signal 'quit nil))))
         (should (eq (condition-case nil (noema-research-new-notebook file "A") (quit 'quit))
                     'quit)))
       (should-not (file-exists-p file))
       (unwind-protect
           (progn
-            (cl-letf (((symbol-function 'read-directory-name)
-                       (lambda (_prompt dir &rest _) dir)))
+            (cl-letf (((symbol-function 'completing-read)
+                       #'noema-research-test--accept-proposed))
               (noema-research-new-notebook file "A"))
             (should (file-regular-p file))
             (should (equal (noema-project-root file) directory))
@@ -1088,7 +1172,7 @@ BODY may refer to the JuText buffer as `source'."
     (let ((file (expand-file-name "bound.noema" directory))
           (noema-research-sync-host nil))
       (noema-research-write-file file (noema-research-test--document))
-      (cl-letf (((symbol-function 'read-directory-name)
+      (cl-letf (((symbol-function 'completing-read)
                  (lambda (&rest _) (error "Visiting must not prompt"))))
         (let ((buffer (find-file-noselect file)))
           (unwind-protect
@@ -1104,7 +1188,7 @@ BODY may refer to the JuText buffer as `source'."
           (project-find-functions (list (lambda (_) (cons 'transient directory))))
           (noema-research-sync-host nil))
       (make-directory (expand-file-name "notes/" directory))
-      (cl-letf (((symbol-function 'read-directory-name)
+      (cl-letf (((symbol-function 'completing-read)
                  (lambda (&rest _) (signal 'quit nil))))
         (let ((buffer (find-file-noselect file)))
           (unwind-protect
@@ -1113,8 +1197,8 @@ BODY may refer to the JuText buffer as `source'."
                 (should-not (file-exists-p file))
                 (should-not (noema-project-root file)))
             (kill-buffer buffer))))
-      (cl-letf (((symbol-function 'read-directory-name)
-                 (lambda (_prompt dir &rest _) dir)))
+      (cl-letf (((symbol-function 'completing-read)
+                 #'noema-research-test--accept-proposed))
         (let ((buffer (find-file-noselect file)))
           (unwind-protect
               (with-current-buffer buffer
@@ -1493,7 +1577,7 @@ BODY may refer to the JuText buffer as `source'."
 
 (ert-deftest noema-research-graph-loads-events-by-absolute-document-path ()
   (noema-research-test--with-directory directory
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" directory) nil 'silent)
     (let ((source (generate-new-buffer " *noema-event-source*"))
           (graph (generate-new-buffer " *noema-event-graph*"))
           (file (expand-file-name "research.noema" directory))
@@ -1521,7 +1605,7 @@ BODY may refer to the JuText buffer as `source'."
 
 (ert-deftest noema-research-graph-runs-selected-work-through-agent-worker ()
   (noema-research-test--with-directory directory
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" directory) nil 'silent)
     (let ((source (generate-new-buffer " *noema-run-source*"))
           (graph (generate-new-buffer " *noema-run-graph*"))
           (file (expand-file-name "work.noema" directory))
@@ -2074,7 +2158,7 @@ BODY may refer to the JuText buffer as `source'."
 
 (ert-deftest noema-research-settings-resolve-document-over-global-over-default ()
   (noema-research-test--with-directory directory
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" directory) nil 'silent)
     (let ((file (expand-file-name "research.noema" directory))
           (document (noema-research-test--document)))
       (should (equal (noema-research-settings--standard 'noema-research-graph-rankdir) "TB"))
@@ -2120,7 +2204,7 @@ BODY may refer to the JuText buffer as `source'."
 
 (ert-deftest noema-research-views-keep-graph-state-and-unknown-keys ()
   (noema-research-test--with-directory directory
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" directory) nil 'silent)
     (let ((file (expand-file-name "research.noema" directory))
           (document (noema-research-test--document)))
       (noema-research-view-update
@@ -2817,7 +2901,7 @@ BODY may refer to the JuText buffer as `source'."
 
 (ert-deftest noema-research-synthesis-cell-request-freezes-notebook-identity ()
   (noema-research-test--with-directory directory
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" directory) nil 'silent)
     (let* ((document (noema-research-test--document))
            (file (expand-file-name "research/bound.noema" directory))
            (model (noema-research--table
@@ -2988,7 +3072,7 @@ board must draw the whole plan, not its first cell."
   (require 'magent-llm)
   (require 'magent-llm-gptel)
   (noema-research-test--with-directory directory
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" directory) nil 'silent)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" directory) nil 'silent)
     (let* ((file (expand-file-name "research/magent.noema" directory))
            (document (noema-research-test--document))
            (revision (noema-research-write-file file document))
@@ -3059,7 +3143,7 @@ board must draw the whole plan, not its first cell."
 
 (ert-deftest noema-pi-router-root-anchors-on-the-nearest-noema-toml ()
   (noema-research-test--with-directory root
-    (write-region "schema = 1\n" nil (expand-file-name "noema.toml" root) nil 'silent)
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" root) nil 'silent)
     (let ((nested (expand-file-name "nested/deeper/" root)))
       (make-directory nested t)
       (should (equal (noema-pi-router--root nested) (file-name-as-directory root))))))

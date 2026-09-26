@@ -2,6 +2,5 @@
 # name: Gamma (uppercase)
 # key: GGGG
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/GGGG_Gamma_uppercase_
 # --
 \Gamma$0

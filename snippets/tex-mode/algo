@@ -2,7 +2,6 @@
 # name: Algorithm
 # key: algo
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/algo_Algorithm
 # --
 % \usepackage{algorithm,algorithmicx,algpseudocode}
 \begin{algorithm}

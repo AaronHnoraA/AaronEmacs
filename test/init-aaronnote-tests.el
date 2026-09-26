@@ -6,6 +6,27 @@
   (defalias 'general-define-key #'ignore))
 (require 'init-aaronnote)
 
+(ert-deftest my/noema-jupyter-native-remote-paths-bypass-local-project-gate ()
+  (dolist (file '("/ssh:Aaron-PC:/home/aaron/Desktop/a.ipynb"
+                  "/rpc:Aaron-PC:/home/aaron/Desktop/a.ipynb"
+                  "/fs:aaron-pc:/home/aaron/Desktop/a.ipynb"))
+    (with-temp-buffer
+      (setq buffer-file-name file)
+      (let* ((canonical "/fs:aaron-pc:/home/aaron/Desktop/a.ipynb")
+             (body `((file . ,file) (scriptFile . ,file) (sourceFile . ,file)
+                     (kernel . "python3"))))
+        (cl-letf (((symbol-function 'noema-project-root)
+                   (lambda (&rest _) (ert-fail "Remote notebook entered local project lookup")))
+                  ((symbol-function 'noema-project-ensure)
+                   (lambda (&rest _) (ert-fail "Remote notebook requested a local project")))
+                  ((symbol-function 'my/noema--host-file) (lambda (_) canonical)))
+          (let ((request (my/noema-jupyter-cell--with-project-root body t)))
+            (dolist (key '(file scriptFile sourceFile))
+              (should (equal (alist-get key request) canonical)))
+            (should-not (assq 'projectRoot request)))
+          (should (equal buffer-file-name file))
+          (should (equal (alist-get 'file body) file)))))))
+
 (ert-deftest my/noema-workspace-root-follows-desktop-precedence ()
   (let ((process-environment (copy-sequence process-environment)))
     (setenv "NOEMA_ROOT" "/tmp/noema-primary")
@@ -1841,7 +1862,8 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                          my/noema-jupyter-cell--python-runtime-probe)))))
 
 (ert-deftest my/noema-jupyter-lsp-rediscovers-missing-event-kernelspec ()
-  (let* ((origin (generate-new-buffer " *noema-lsp-rediscovery*"))
+  (let* ((my/enable-direnv nil)
+         (origin (generate-new-buffer " *noema-lsp-rediscovery*"))
          (context
           (remote-context-create
            :target-id "remote-test" :localname "/work/note.md"
@@ -1851,6 +1873,8 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
         (cl-letf
             (((symbol-function 'my/noema-jupyter--project-kernelspecs)
               (lambda (_file) nil))
+             ((symbol-function 'my/jupyter-target-command)
+              (lambda (_context &optional _configured) '("jupyter")))
              ((symbol-function 'remote-exec-async)
               (lambda (program &rest options)
                 (push program commands)
@@ -2384,7 +2408,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                '(((token . "kernel-remote.json") (mtimeMs . 42.0))))))
     (let ((payload
            (my/noema-jupyter--kernels
-            '((file . "/fs:cluster:/work/note.md")) nil)))
+            '((file . "/fs:cluster:/work/note.md") (includeConnections . t)) nil)))
       (should (equal (alist-get 'connections payload)
                      '(((token . "kernel-remote.json") (mtimeMs . 42.0))))))))
 

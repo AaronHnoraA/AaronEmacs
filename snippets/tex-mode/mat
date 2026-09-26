@@ -2,7 +2,6 @@
 # name: Matrix
 # key: mat
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/mat_Matrix
 # --
 \begin{${1:p/b/v/V/B/small}matrix}
 	$0

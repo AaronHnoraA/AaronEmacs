@@ -1,0 +1,80 @@
+;;; init-aaronnote-jupyter-debug-tests.el --- Notebook debug placement -*- lexical-binding: t; -*-
+(require 'ert)
+(require 'cl-lib)
+(require 'init-aaronnote-jupyter-debug)
+
+(ert-deftest my/noema-kernel-picker-shows-connection-files-only-on-request ()
+  (with-temp-buffer
+    (let ((catalog '((supportsConnectionFiles . t)
+                     (selections . [((kind . "start") (value . "python3") (label . "Python"))
+                                    ((kind . "start") (value . "attach:kernel-hidden.json") (label . "Raw connection"))])))
+          requests selections)
+      (cl-letf (((symbol-function 'my/noema-jupyter-cell--document-detail) (lambda () nil))
+                ((symbol-function 'my/noema-jupyter-cell--apply-session-snapshot) #'ignore)
+                ((symbol-function 'my/noema-jupyter-cell--api-sync)
+                 (lambda (channel body &rest _)
+                   (push (cons channel body) requests)
+                   (when (equal channel "aaronnote:api:jupyter-cell:kernels") catalog)))
+                ((symbol-function 'completing-read)
+                 (lambda (_prompt choices &rest _)
+                   (push choices selections)
+                   (if (= (length selections) 1)
+                       (progn (should-not (assoc "Raw connection" choices)) "Connect to Existing Kernel…")
+                     (should (= (length choices) 1)) "Raw connection"))))
+        (my/noema-jupyter-cell-select-kernel)
+        (should (equal (alist-get 'kernelSpecName (cdar requests)) "attach:kernel-hidden.json"))
+        (should (eq t (alist-get 'includeConnections (cdr (nth 1 requests)))))
+        (should-not (alist-get 'includeConnections (cdr (nth 2 requests))))))))
+
+(ert-deftest my/noema-debug-projection-keeps-notebook-coordinates ()
+  (with-temp-buffer
+    (insert "# %% id=a\nx = 1\nx += 2\n\n# %% [markdown] id=m\n# note\n\n# %% id=b\nprint(x)\n")
+    (let ((cells (my/noema-jupyter-debug--projection)))
+      (should (= (length cells) 2))
+      (should (equal (alist-get 'id (aref cells 0)) "a"))
+      (should (= (alist-get 'line (aref cells 0)) 2))
+      (should (= (alist-get 'line (aref cells 1)) 9))
+      (should (equal (alist-get 'code (aref cells 1)) "print(x)\n")))))
+
+(ert-deftest my/noema-debug-contents-dape-endpoint-stays-on-client ()
+  (require 'dape)
+  (with-temp-buffer
+    (setq buffer-file-name "/fs:jupyter.4c6162:/notebook.ipynb"
+          default-directory "/fs:jupyter.4c6162:/"
+          my/noema-jupyter-cell-mode t
+          my/noema-jupyter-notebook--projection-p t)
+    (let ((my/noema-jupyter-debug--sessions (make-hash-table :test #'equal))
+          (dape--connections '(test-connection)) called config)
+      (cl-letf (((symbol-function 'my/noema-jupyter-cell--bounds-at-point) (lambda () '(:id "a")))
+                ((symbol-function 'my/noema-jupyter-debug--projection) (lambda () []))
+                ((symbol-function 'my/noema-jupyter-cell--api-sync)
+                 (lambda (&rest _) '((id . "debug-test") (port . 45678))))
+                ((symbol-function 'dape)
+                 (lambda (value &rest _)
+                   (setq called default-directory config value))))
+        (unwind-protect
+            (progn
+              (my/noema-jupyter-debug-start)
+              (should (equal called user-emacs-directory))
+              (should (equal (plist-get config 'host) "127.0.0.1"))
+              (should-not (plist-get config 'command))
+              (should buffer-read-only)
+              (my/noema-jupyter-debug-handle-ended '((id . "debug-test")))
+              (should-not buffer-read-only)
+              (should-not my/noema-jupyter-debug--id))
+          (my/noema-jupyter-debug--release "debug-test"))))))
+
+(ert-deftest my/noema-run-by-line-steps-only-this-notebook-session ()
+  (let ((my/noema-jupyter-debug--sessions (make-hash-table :test #'equal))
+        (my/noema-jupyter-debug--id "own") stepped)
+    (puthash "own" '(:connection notebook-connection) my/noema-jupyter-debug--sessions)
+    (cl-letf (((symbol-function 'dape-next) (lambda (conn) (setq stepped conn))))
+      (my/noema-jupyter-run-by-line)
+      (should (eq stepped 'notebook-connection)))))
+
+(ert-deftest my/noema-debug-refuses-work-document-before-api ()
+  (with-temp-buffer
+    (setq buffer-file-name "/tmp/work.noema")
+    (cl-letf (((symbol-function 'my/noema-jupyter-cell--api-sync)
+               (lambda (&rest _) (ert-fail "Work document reached kernel API"))))
+      (should-error (my/noema-jupyter-debug-start) :type 'user-error))))

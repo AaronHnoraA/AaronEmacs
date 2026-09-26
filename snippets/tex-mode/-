@@ -2,6 +2,5 @@
 # name: To
 # key: ->
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/-_To
 # --
 \to$0

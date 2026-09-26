@@ -2,6 +2,5 @@
 # name: Tilde Accent
 # key: tilde
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/tilde_Tilde_Accent
 # --
 \tilde{${1:a}}$0

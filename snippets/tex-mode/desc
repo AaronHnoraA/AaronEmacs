@@ -2,7 +2,6 @@
 # name: Description
 # key: desc
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/desc_Description
 # --
 \\begin{description}
 	\item[${1:a}] $0

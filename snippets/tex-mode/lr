@@ -2,6 +2,5 @@
 # name: Left-Right Parentheses
 # key: lr(
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/lr_Left-Right_Parentheses
 # --
 \left( ${1:a} \right) $0

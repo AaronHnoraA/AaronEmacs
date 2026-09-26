@@ -588,6 +588,11 @@ direnv），因此项目 `.envrc` 提供的 agent 也能找到。popup agent 与
 项目根目录启动（本地与远端相同），不在项目里时用当前目录。注意 `codex` / `claude`
 CLI 本身不说 ACP：远端还需要安装适配器，例如
 `npm i -g --prefix ~/.local @zed-industries/codex-acp @agentclientprotocol/claude-agent-acp`。
+这两个适配器各自内置一份 CLI，默认跑内置版本，模型列表因此落后（例如只有
+Opus 5）。所以 Emacs 会用同一个 workspace 环境查找 `claude` / `codex`，并通过
+`CLAUDE_CODE_EXECUTABLE` / `CODEX_PATH` 让适配器改用 shell 里那份会自动更新的
+CLI；本地和远端规则相同。显式设置了这两个变量时不覆盖；找不到 CLI 时退回内置版本
+并在 echo area 提示。Pi 与 OpenCode 没有内置 CLI，不受影响。
 - `SPC o V`
   命名 `vterm`
 - `SPC o S`
@@ -983,8 +988,10 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 `C-c A S`（列表）和 `C-c A b`（切换）能看到并管理全部会话，`C-c A x` 这类
 命令也可以点名把上下文交给其中任意一个。
 
-项目 root 取最近的 `noema.toml`，没有就退回普通项目根目录；**不会**为了登记而
-创建 `noema.toml`。在真正的 Noema 项目里，会话还会额外写进持久注册表，于是它
+项目 root 取最近的、带 `[project]` 表的 `noema.toml`（只有 `repository_id` 的
+vault 清单不算项目），没有就退回普通项目根目录；**不会**为了登记而创建项目。
+一个 vault 里可以有多个项目；项目的 agent 在它的 workspace 里运行，默认就是项目
+根目录，也可以用 `M-x noema-project-set-workspace` 指到别处的代码仓库。在真正的 Noema 项目里，会话还会额外写进持久注册表，于是它
 和 Run 的会话一样可以重命名、fork、归档、看 context 用量；在普通仓库里它只存在
 于 Emacs 侧，列表里显示为 `local`。不想自动收编裸 `M-x agent-shell` 的话，把
 `noema-agent-acp-adopt-foreign-sessions` 设为 nil。

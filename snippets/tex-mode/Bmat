@@ -2,7 +2,6 @@
 # name: Bmatrix (curly)
 # key: Bmat
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/Bmat_Bmatrix_curly_
 # --
 \begin{Bmatrix}
 ${1:a}

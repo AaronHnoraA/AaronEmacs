@@ -295,15 +295,24 @@ remote-vterm-live-smoke:
 	$(BATCH) -l test/remote-vterm-live-smoke.el
 
 jupyter-test:
+	python3 -m unittest discover -s test -p jupyter_connection_cleanup_test.py
+	$(REMOTE_TEST_BATCH) -l test/init-jupyter-command-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-aaronnote-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-aaronnote-jupyter-notebook-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-runtime-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-jupyter-board-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-aaronnote-jupyter-debug-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-aaronnote-jupyter-files-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-aaronnote-jupyter-project-tests.el -f ert-run-tests-batch-and-exit
 	$(REMOTE_TEST_BATCH) -l test/remote-jupyter-tests.el -f ert-run-tests-batch-and-exit
 
 .PHONY: jupyter-live-smoke
 jupyter-live-smoke:
 	$(BATCH) -l test/jupyter-remote-live-smoke.el
+
+.PHONY: jupyter-project-live-smoke
+jupyter-project-live-smoke:
+	$(BATCH) -l test/jupyter-project-live-smoke.el
 
 .PHONY: jupyter-contents-live-smoke
 jupyter-contents-live-smoke:
@@ -312,6 +321,14 @@ jupyter-contents-live-smoke:
 .PHONY: jupyter-debug-live-smoke
 jupyter-debug-live-smoke:
 	$(BATCH) -l test/jupyter-debug-live-smoke.el
+
+.PHONY: jupyter-repl-live-smoke
+jupyter-repl-live-smoke:
+	$(BATCH) -l test/jupyter-repl-live-smoke.el
+
+.PHONY: jupyter-export-live-smoke
+jupyter-export-live-smoke:
+	$(BATCH) -l test/jupyter-export-live-smoke.el
 
 agenda-test:
 	$(EMACS) --batch -Q -L site-lisp/noema/lisp -l noema-agenda-tests -l noema-agenda-attention-tests -l noema-agenda-capture-tests -f ert-run-tests-batch-and-exit

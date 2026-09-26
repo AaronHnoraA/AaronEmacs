@@ -48,6 +48,10 @@ Expected fallbacks remain available to diagnostics through
 (defvar-local my/language-server-runtime-current nil
   "Resolved `my/language-server-runtime' for the current buffer.")
 
+(defvar-local my/language-server-runtime-required nil
+  "Non-nil when a provider forbids starting with the ordinary local runtime.
+Providers must reset this when the buffer no longer needs their runtime.")
+
 (defvar-local my/language-server-runtime-state 'idle
   "Runtime preparation state: idle, pending, ready, unsupported, or error.")
 
@@ -251,7 +255,7 @@ current result first."
           (my/language-server-runtime-id my/language-server-runtime-current)))
      ((eq my/language-server-runtime-state 'pending) "preparing")
      (my/language-server-runtime-error
-      (format "fallback — %s"
+      (format "%s — %s" (if my/language-server-runtime-required "unavailable" "fallback")
               (my/language-server-runtime-fallback-text
                my/language-server-runtime-error)))
      (t "project default"))))

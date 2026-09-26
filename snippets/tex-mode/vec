@@ -2,6 +2,5 @@
 # name: Vector
 # key: vec
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/vec_Vector
 # --
 \vec{${1:a}}$0

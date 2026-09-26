@@ -2,7 +2,6 @@
 # name: \begin{}…\end{}
 # key: begin
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/begin_begin_end_
 # --
 \begin{${1:a}}
 ${2:b}

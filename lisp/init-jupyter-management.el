@@ -12,6 +12,7 @@
 (require 'remote-board)
 (require 'remote-fs)
 (require 'remote-process)
+(require 'init-jupyter-command)
 (require 'subr-x)
 
 (declare-function jupyter-all-objects "jupyter-base" (tracking-symbol))
@@ -21,6 +22,9 @@
 (declare-function jupyter-restart-kernel "jupyter-client" (client))
 (declare-function jupyter-run-repl "jupyter-repl" (kernel-name &optional repl-name associate-buffer client-class display))
 (declare-function jupyter-shutdown-kernel "jupyter-client" (client))
+(declare-function jupyter-run-with-state "jupyter-monads" (state mvalue))
+(declare-function jupyter-push "jupyter-monads" (value))
+(declare-function jupyter--gc-kernel-processes "jupyter-kernel-process" ())
 (declare-function my/noema-jupyter--substitute-template
                   "init-aaronnote-jupyter-runtime" (value variables))
 
@@ -46,6 +50,25 @@
 
 (defconst my/jupyter-management-connection-stale-seconds (* 24 60 60)
   "Age after which an unused connection file is reported as stale.")
+
+(defvar my/jupyter-management--repairing-monads nil)
+
+(defun my/jupyter-management--check-monads ()
+  "Recover Jupyter monad functions compiled before their macros were defined.
+Some package byte-compilation orders leave `state' free in `jupyter-push'.
+Reload the unchanged package source with its macros already available."
+  (unless my/jupyter-management--repairing-monads
+    (condition-case err
+        (jupyter-run-with-state nil (jupyter-push nil))
+      (void-variable
+       (unless (eq (cadr err) 'state) (signal (car err) (cdr err)))
+       (let* ((my/jupyter-management--repairing-monads t)
+              (source (concat (file-name-sans-extension (locate-library "jupyter-monads")) ".el")))
+         (load source nil t t)
+         (jupyter-run-with-state nil (jupyter-push nil)))))))
+
+(with-eval-after-load 'jupyter-client
+  (my/jupyter-management--check-monads))
 
 (defun my/jupyter-management-get (key object)
   "Return KEY from JSON OBJECT represented by an alist or hash table."
@@ -265,10 +288,14 @@ target\='s name."
   "Discover TARGET kernelspecs asynchronously and invoke CALLBACK.
 CALLBACK receives (ENTRIES ERROR)."
   (condition-case error
+      (let* ((context (my/jupyter-management-context target))
+             (command (my/jupyter-target-command
+                       context (when (my/jupyter-management-local-target-p target)
+                                 my/jupyter-board-jupyter-command))))
       (remote-exec-async
-       (my/jupyter-management-command target 'jupyter)
-       :args '("kernelspec" "list" "--json")
-       :context (my/jupyter-management-context target)
+       (car command)
+       :args (append (cdr command) '("kernelspec" "list" "--json"))
+       :context context
        :filesystem-effects 'none
        :name (format "jupyter-specs-%s" (my/jupyter-management-target-id target))
        :callback
@@ -285,7 +312,7 @@ CALLBACK receives (ENTRIES ERROR)."
            (funcall callback nil
                     (string-trim
                      (concat (remote-exec-result-stdout result) "\n"
-                             (remote-exec-result-stderr result)))))))
+                             (remote-exec-result-stderr result))))))))
     (error (funcall callback nil (error-message-string error)) nil)))
 
 (defun my/jupyter-management-connection-valid-p (payload)
@@ -324,33 +351,68 @@ CALLBACK receives (ENTRIES ERROR)."
      (sort (directory-files directory t "\\(?:kernel-.*\\|.*connection.*\\)\\.json\\'")
            #'string-lessp))))
 
+(defvar my/jupyter-management--cleanup-times (make-hash-table :test #'equal))
+(defvar my/jupyter-management--cleanup-timer nil)
+
+(defun my/jupyter-management--prune-directory (target directory callback)
+  "Maintain TARGET's native runtime DIRECTORY, then invoke CALLBACK."
+  (let* ((key (cons (my/jupyter-management-target-id target) directory))
+         (last (gethash key my/jupyter-management--cleanup-times 0)))
+    (if (< (- (float-time) last) 900)
+        (funcall callback)
+      (puthash key (float-time) my/jupyter-management--cleanup-times)
+      (condition-case nil
+          (remote-exec-async
+           (my/jupyter-management-command target 'python)
+           :args (list "-c" (with-temp-buffer
+                              (insert-file-contents
+                               (expand-file-name "etc/jupyter/prune-connections.py" user-emacs-directory))
+                              (buffer-string))
+                       "--runtime-dir" directory "--apply")
+           :context (my/jupyter-management-context target)
+           :filesystem-effects 'content :name "jupyter-connection-cleanup"
+           :callback (lambda (_result) (funcall callback)))
+        (error (funcall callback))))))
+
 (defun my/jupyter-management-discover-connections (target callback)
-  "Discover TARGET's Jupyter connection files and invoke CALLBACK.
-The runtime directory is read from TARGET's own `jupyter --runtime-dir\=' and
-then scanned through ordinary file APIs, which reach it via the `/fs\=' handler.
-Returning nothing for a non-local target used to make `attach:\=' unusable
-anywhere but the client machine, even though every step here is already
-routed."
+  "Maintain and discover TARGET's Jupyter connection files asynchronously."
   (condition-case error
+      (let* ((context (my/jupyter-management-context target))
+             (command (my/jupyter-target-command
+                       context (when (my/jupyter-management-local-target-p target)
+                                 my/jupyter-board-jupyter-command))))
       (remote-exec-async
-       (my/jupyter-management-command target 'jupyter)
-       :args '("--runtime-dir")
-       :context (my/jupyter-management-context target)
+       (car command)
+       :args (append (cdr command) '("--runtime-dir"))
+       :context context
        :filesystem-effects 'none
        :name "jupyter-runtime-dir"
        :callback
        (lambda (result)
          (if (zerop (remote-exec-result-status result))
-             (condition-case scan-error
-                 (funcall callback
-                          (my/jupyter-management-scan-connections
-                           (my/jupyter-management-logical-path
-                            target
-                            (string-trim (remote-exec-result-stdout result))))
-                          nil)
-               (error (funcall callback nil (error-message-string scan-error))))
-           (funcall callback nil (string-trim (remote-exec-result-stderr result))))))
+             (let ((directory (string-trim (remote-exec-result-stdout result))))
+               (my/jupyter-management--prune-directory
+                target directory
+                (lambda ()
+                  (condition-case scan-error
+                      (funcall callback
+                               (my/jupyter-management-scan-connections
+                                (my/jupyter-management-logical-path target directory)) nil)
+                    (error (funcall callback nil (error-message-string scan-error)))))))
+           (funcall callback nil (string-trim (remote-exec-result-stderr result)))))))
     (error (funcall callback nil (error-message-string error)) nil)))
+
+(defun my/jupyter-management-maintain-connections ()
+  "Run bounded local connection maintenance without blocking the editor."
+  (when (and (stringp my/jupyter-board-jupyter-command)
+             (stringp my/jupyter-board-python-command))
+    (when (fboundp 'jupyter--gc-kernel-processes)
+      (ignore-errors (jupyter--gc-kernel-processes)))
+    (my/jupyter-management-discover-connections "local" (lambda (&rest _) nil))))
+
+(unless (or noninteractive (timerp my/jupyter-management--cleanup-timer))
+  (setq my/jupyter-management--cleanup-timer
+        (run-with-timer 60 900 #'my/jupyter-management-maintain-connections)))
 
 (defun my/jupyter-management-object-slot (object slot)
   "Return OBJECT's SLOT, or nil when it is absent or unbound."

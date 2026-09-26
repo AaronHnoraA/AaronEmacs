@@ -113,7 +113,10 @@
   (interactive)
   (when-let* ((id my/noema-jupyter-debug--id))
     (unwind-protect
-        (my/noema-jupyter-cell--api-sync "aaronnote:api:jupyter:debug-stop" `((id . ,id)) 20)
+        (let* ((reply (my/noema-jupyter-cell--api-sync
+                       "aaronnote:api:jupyter:debug-stop" `((id . ,id)) 20))
+               (snapshot (my/noema-jupyter-notebook--get 'snapshot reply)))
+          (when snapshot (my/noema-jupyter-cell--apply-session-snapshot snapshot)))
       (my/noema-jupyter-debug--release id))))
 
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i g" #'my/noema-jupyter-debug-start)

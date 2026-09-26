@@ -16,6 +16,11 @@ try {
         root = await mkdtemp(join(tmpdir(), 'noema-contents-live-'));
         const server = request.body;
         service = createJupyterCellService({ runtimeRoot: root, noteRoot: root, workspaceRoot: root,
+          publish(channel, payload) {
+            if (['jupyter-session', 'jupyter-debug-ended'].includes(channel)) {
+              process.stdout.write(`@@noema-test@@${JSON.stringify({ event: channel, payload })}\n`);
+            }
+          },
           serverHost: { async listServers() { return [{ id: server.id, displayName: 'Live Contents', url: server.url }]; },
             async resolveServer(id) { if (id !== server.id) throw new Error('Wrong server'); return server; } },
         });

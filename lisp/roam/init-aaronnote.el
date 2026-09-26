@@ -21,6 +21,7 @@
 (require 'init-aaronnote-jupyter-server)
 (require 'init-aaronnote-jupyter-lsp)
 (require 'init-aaronnote-jupyter-debug)
+(require 'init-aaronnote-jupyter-files)
 
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
 (declare-function my/noema--apple-gateway "init-aaronnote-agenda-apple" (body client))

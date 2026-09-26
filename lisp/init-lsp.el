@@ -1305,6 +1305,9 @@ modules can keep dispatching on it."
 
 (defun my/lsp-mode-start-now ()
   "Start lsp-mode after the target environment is ready."
+  (if (and my/language-server-runtime-required
+           (not (eq my/language-server-runtime-state 'ready)))
+      (setq my/lsp-mode--start-request nil)
   (let ((report-missing my/language-server--manual-start))
     (setq my/language-server--manual-start nil
           my/lsp-mode--start-request nil
@@ -1338,7 +1341,7 @@ modules can keep dispatching on it."
       (let ((feature (my/lsp-mode-required-feature)))
         (setq my/language-server--start-executable-cache nil)
         (when report-missing
-          (message "Skip lsp-mode in %s: missing `%s'" major-mode feature))))))
+          (message "Skip lsp-mode in %s: missing `%s'" major-mode feature)))))))
 
 (defun my/lsp-mode--direnv-ready (_environment error)
   "Resume deferred lsp-mode startup, falling back after direnv ERROR."
@@ -1383,6 +1386,11 @@ modules can keep dispatching on it."
 
 (defun my/lsp-mode--connect-via-remote-a (fn &rest args)
   "Route lsp-mode startup through one owning Remote workspace."
+  ;; lsp-deferred can invoke `lsp' from an idle timer created before the
+  ;; kernel changed.  Check again at that actual connection boundary.
+  (if (and my/language-server-runtime-required
+           (not (eq my/language-server-runtime-state 'ready)))
+      (setq my/lsp-mode--start-request nil)
   (let* ((root (my/language-server--project-root-for-buffer))
          (workspace
           (my/language-server--connect-workspace root))
@@ -1395,7 +1403,7 @@ modules can keep dispatching on it."
           (remote-environment-ensure
            (and workspace (remote-workspace-context workspace)))
           (apply fn args))
-      (setq my/language-server--start-executable-cache nil))))
+      (setq my/language-server--start-executable-cache nil)))))
 
 (defun my/language-server--booster-command (command)
   "Return COMMAND wrapped in `emacs-lsp-booster' for the active target.
@@ -2343,19 +2351,34 @@ only enforce process termination; they never send a second shutdown RPC."
 (defun my/language-server--ensure-after-runtime ()
   "Start the preferred backend after runtime preparation has completed."
   (interactive)
+  (if (and my/language-server-runtime-required
+           (not (eq my/language-server-runtime-state 'ready)))
+      (message "Language server not started: %s"
+               (or (my/language-server-runtime-fallback-text
+                    my/language-server-runtime-error)
+                   "the required project runtime is unavailable"))
   (if (and (remote-fs-file-name-p default-directory)
            (not (remote-routes "emacs-file" 'process-async
                                (remote-context default-directory))))
       (message "Language server unavailable: this target provides files but no processes")
     (pcase (my/language-server-preferred-backend)
     ('lsp-mode (my/lsp-mode-ensure))
-    ('disabled (message "Language server disabled for this project")))))
+    ('disabled (message "Language server disabled for this project"))))))
 
-(defun my/language-server--runtime-ready (_runtime error)
+(defun my/language-server--runtime-ready (runtime error)
   "Resume startup after resolving a runtime, reporting fallback ERROR."
   (setq my/language-server--waiting-for-runtime nil)
   (when error
     (my/language-server-runtime-report-fallback error))
+  ;; An older asynchronous server initialization can finish while the new
+  ;; kernel's runtime is being prepared.  Detach this buffer from that server
+  ;; before selecting the new runtime, without killing other users' workspaces.
+  (when (and runtime (fboundp 'lsp-workspaces)
+             (seq-some (lambda (workspace)
+                         (not (equal (my/language-server-runtime-id runtime)
+                                     (my/language-server-runtime-workspace-id workspace))))
+                       (lsp-workspaces)))
+    (lsp-disconnect))
   (my/language-server--ensure-after-runtime))
 
 (defun my/language-server-ensure ()

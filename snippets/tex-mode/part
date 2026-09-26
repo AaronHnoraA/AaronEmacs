@@ -2,7 +2,6 @@
 # name: Part
 # key: part
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/part_Part
 # --
 \begin{part}
 	$0

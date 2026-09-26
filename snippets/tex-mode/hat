@@ -2,6 +2,5 @@
 # name: Hat Accent
 # key: hat
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/hat_Hat_Accent
 # --
 \hat{${1:a}}$0

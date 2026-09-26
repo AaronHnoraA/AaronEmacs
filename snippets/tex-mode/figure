@@ -2,7 +2,6 @@
 # name: Figure
 # key: figure
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/figure_Figure
 # --
 \begin{figure}
 	\begin{center}

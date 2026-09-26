@@ -61,12 +61,14 @@ Closing that Emacs source buffer does not stop the Noema kernel.
 
 Noema's web-host only serves native notebooks inside its notes root
 (=my/noema--notes-root=) or inside a validated Noema project, i.e. an
-ancestor directory holding =noema.toml=.  Every Jupyter request from the
+ancestor directory whose =noema.toml= has a =[project]= table (a Wiki
+repository manifest alone does not count).  Every Jupyter request from the
 source buffer carries =projectRoot= when such a project exists.  For a native
 notebook outside both (for example =~/Desktop/a.ipynb=), the first explicit
 command (kernel selection, Run, Restart, …) calls =noema-project-ensure=,
-which proposes the enclosing =project.el= root and writes nothing unless you
-accept.  Declining aborts that command.  Opening the file, session refresh,
+which offers the notebook's directory and its ancestors (proposing a code
+repository's =project.el= root, but never a vault's) and writes nothing unless
+you accept.  Declining aborts that command.  Opening the file, session refresh,
 save notifications, and keystroke completion never ask.  Logical =/fs:= paths
 are not subject to this native-root check.
 

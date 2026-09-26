@@ -306,6 +306,16 @@ def add_kernel(interface, name, kernel_cmd, cpus=1, pe=None, language=None,
     # the kernel
     kernel_json['remote_ikernel_argv'] = sys.argv
 
+    # Project/LSP settings are edited in kernel.json and are not launcher
+    # arguments.  A guided edit of the launcher must not erase them.
+    existing = ks.find_kernel_specs().get(kernel_name)
+    if existing:
+        with open(path.join(existing, 'kernel.json')) as stream:
+            previous = json.load(stream)
+        project = previous.get('metadata', {}).get(AARON_METADATA_KEY, {}).get('project')
+        if project is not None:
+            kernel_json['metadata'][AARON_METADATA_KEY]['project'] = project
+
     # False attempts a system install, otherwise install as the current user
     if system:
         username = False
@@ -319,8 +329,13 @@ def add_kernel(interface, name, kernel_cmd, cpus=1, pe=None, language=None,
         with open(path.join(temp_dir, 'kernel.json'), 'w') as kernel_file:
             json.dump(kernel_json, kernel_file, sort_keys=True, indent=2)
 
-        ks.install_kernel_spec(temp_dir, kernel_name,
-                               user=username, replace=True)
+        installed = ks.install_kernel_spec(temp_dir, kernel_name,
+                                           user=username, replace=True)
+        # Use an ordinary absolute path: both Jupyter and Noema's existing
+        # raw launcher can pass this through without new placeholder logic.
+        kernel_json['argv'].extend(['--project-file', path.join(installed, 'kernel.json')])
+        with open(path.join(installed, 'kernel.json'), 'w') as kernel_file:
+            json.dump(kernel_json, kernel_file, sort_keys=True, indent=2)
 
     return kernel_name, " ".join(display_name)
 

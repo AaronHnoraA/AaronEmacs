@@ -2,7 +2,6 @@
 # name: Compactitem
 # key: compactitem
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/compactitem_Compactitem
 # --
 \begin{compactitem}
 	\item ${1:a}

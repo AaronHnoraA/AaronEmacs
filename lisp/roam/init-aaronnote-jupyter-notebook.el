@@ -523,7 +523,8 @@ to Jupyter Server; atomicity there depends on its ContentsManager."
       (let ((coding-system-for-write 'utf-8-unix))
         (with-temp-file file
           (insert (my/noema-jupyter-notebook--serialize document) "\n")))
-   (let ((temporary (make-nearby-temp-file ".noema-notebook-" nil ".ipynb"))
+   (let ((temporary (make-nearby-temp-file
+                     (expand-file-name ".noema-notebook-" (file-name-directory file)) nil ".ipynb"))
         (serialized (my/noema-jupyter-notebook--serialize document)))
     (unwind-protect
         (let ((coding-system-for-write 'utf-8-unix))

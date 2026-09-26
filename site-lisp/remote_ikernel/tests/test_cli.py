@@ -43,7 +43,7 @@ def test_launcher_help_and_version(tmp_path):
     # argparse uses either the module file name or `python -m package' as
     # `prog' depending on Python version; both exercise the same CLI.
     assert "usage:" in help_text
-    assert "remote_ikernel" in help_text
+    assert "remote_ikernel" in help_text or "__main__.py" in help_text
     version = run_cli(tmp_path, "-V")
     assert "0.4.6+aaron.1" in version.stdout + version.stderr
 
@@ -109,3 +109,19 @@ def test_explicit_core_group(tmp_path):
     )
     spec = kernel_json(tmp_path, "rik_local_core")
     assert spec["metadata"]["aaron"]["remote_kernel"]["group"] == "core"
+
+
+def test_edit_preserves_project_and_lsp_metadata(tmp_path):
+    args = ("manage", "--add", "--interface=ssh", "--host=example",
+            "--name=Project", "--kernel_cmd=python -m ipykernel -f {connection_file}")
+    run_cli(tmp_path, *args)
+    file = tmp_path / "data/kernels/rik_ssh_example_project/kernel.json"
+    spec = json.loads(file.read_text())
+    project = {"root": "/work/project", "python": ".conda/bin/python",
+               "direnv": True, "lsp": {"server": ["pyright-langserver", "--stdio"]}}
+    spec["metadata"]["aaron"]["project"] = project
+    file.write_text(json.dumps(spec))
+    run_cli(tmp_path, *args, "--workdir=/work/project", "--group=core")
+    updated = json.loads(file.read_text())
+    assert updated["metadata"]["aaron"]["project"] == project
+    assert updated["metadata"]["aaron"]["remote_kernel"]["config"]["workdir"] == "/work/project"

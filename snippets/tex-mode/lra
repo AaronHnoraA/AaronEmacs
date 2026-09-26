@@ -2,6 +2,5 @@
 # name: Left-Right Angle
 # key: lra
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/lra_Left-Right_Angle
 # --
 \left< ${1:a} \right> $0

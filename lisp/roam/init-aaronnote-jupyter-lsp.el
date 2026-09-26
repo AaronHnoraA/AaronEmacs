@@ -12,6 +12,7 @@
 (require 'init-aaronnote-jupyter-cell)
 (require 'init-aaronnote-jupyter-runtime)
 (require 'init-lsp-runtime)
+(require 'init-aaronnote-jupyter-project)
 (require 'json)
 (require 'remote-core)
 (require 'remote-environment)
@@ -40,7 +41,7 @@ its status stuck on \"preparing\" and no way to find out why."
   (concat
    "import json,os,sys;"
    "print(json.dumps({"
-   "'executable':os.path.realpath(sys.executable),"
+   "'executable':os.path.abspath(sys.executable),"
    "'prefix':os.path.realpath(sys.prefix),"
    "'base_prefix':os.path.realpath(getattr(sys,'base_prefix',sys.prefix)),"
    "'path':[os.path.realpath(p) for p in sys.path "
@@ -54,6 +55,8 @@ its status stuck on \"preparing\" and no way to find out why."
 (defvar lsp-completion-mode)
 (defvar lsp-managed-mode)
 (defvar lsp-mode)
+(defvar my/language-server--waiting-for-runtime)
+(defvar my/lsp-mode--start-request)
 
 (defun my/noema-jupyter-cell--lsp-get (key alist)
   "Return KEY from decoded ALIST, accepting symbol and string keys."
@@ -68,23 +71,10 @@ its status stuck on \"preparing\" and no way to find out why."
         ((listp value) value)
         (t nil)))
 
-(defun my/noema-jupyter-cell--lsp-remote-ikernel-config (spec)
-  "Return the vendored `remote_ikernel' configuration in SPEC, if present.
-The configuration is emitted by the manager and is more authoritative than
-trying to reverse-engineer a shell command from `argv'."
-  (let* ((metadata (my/noema-jupyter-cell--lsp-get 'metadata spec))
-         (aaron (my/noema-jupyter-cell--lsp-get 'aaron metadata))
-         (remote (my/noema-jupyter-cell--lsp-get 'remote_kernel aaron)))
-    (my/noema-jupyter-cell--lsp-get 'config remote)))
-
-(defun my/noema-jupyter-cell--lsp-remote-target (host)
-  "Resolve REMOTE_IKERNEL HOST through the shared Remote target registry."
-  (when (and (stringp host) (not (string-empty-p host)))
-    (or (ignore-errors (remote-get-target host))
-        (seq-find
-         (lambda (target)
-           (equal (remote-target-label target) host))
-         (hash-table-values remote-targets)))))
+(defalias 'my/noema-jupyter-cell--lsp-remote-ikernel-config
+  #'my/noema-jupyter-project-config)
+(defalias 'my/noema-jupyter-cell--lsp-remote-target
+  #'my/noema-jupyter-project-resolve-target)
 
 (defun my/noema-jupyter-cell--lsp-remote-placement (source-context entry)
   "Return placement information for ENTRY, or an expected fallback.
@@ -95,20 +85,21 @@ silently starting a language server with a path that exists only on a remote
 machine (the common source of the misleading local-Python version display)."
   (let* ((spec (my/noema-jupyter-cell--lsp-get 'spec entry))
          (config (my/noema-jupyter-cell--lsp-remote-ikernel-config spec))
+         (project (my/noema-jupyter-project-metadata spec))
          (interface (and config (format "%s"
                                         (my/noema-jupyter-cell--lsp-get
                                          'interface config))))
-         (host (and config (format "%s"
-                                   (my/noema-jupyter-cell--lsp-get
-                                    'host config))))
+         (host (or (my/noema-jupyter-cell--lsp-get 'target project)
+                   (my/noema-jupyter-cell--lsp-get 'host config)
+                   (and project source-context (remote-context-target-id source-context))))
          (source-target (and source-context
                              (remote-context-target-id source-context)))
-         (target (and (equal interface "ssh")
+         (target (and (or (equal interface "ssh") project)
                       (my/noema-jupyter-cell--lsp-remote-target host)))
          (target-id (and target (remote-target-id target))))
     (cond
-     ((not config) nil)
-     ((not (equal interface "ssh"))
+     ((not (or config project)) nil)
+     ((and config (not (equal interface "ssh")))
       (my/language-server-runtime-fallback-create
        :reason (format "remote_ikernel interface `%s' has no Remote LSP route"
                        (or interface "unknown"))
@@ -254,12 +245,17 @@ string is an unexpected resolution error."
                         (not (assoc-string "VIRTUAL_ENV" vars t)))
                    (cons (cons "VIRTUAL_ENV" prefix) vars)
                  vars))
+         (project (my/noema-jupyter-project-metadata spec))
+         (lsp (my/noema-jupyter-cell--lsp-get 'lsp project))
+         (server (my/noema-jupyter-cell--lsp-list
+                  (my/noema-jupyter-cell--lsp-get 'server lsp)))
          (fingerprint
           (secure-hash
            'sha1
            (prin1-to-string
             (list (remote-context-target-id context) root kernel executable
-                  prefix vars paths))))
+                  prefix vars paths server
+                  (and base-environment (remote-environment-vars base-environment))))))
          ;; Runtime ids also become remote-environment ids; `remote-id-regexp'
          ;; deliberately excludes colons.
          (id (format "jupyter-%s" (substring fingerprint 0 16)))
@@ -269,7 +265,7 @@ string is an unexpected resolution error."
                 :family 'python :executable executable
                 :path-prepend (list (file-name-directory executable))
                 :env vars :workspace workspace :kind 'jupyter-runtime
-                :runtime-controlled t))
+                :runtime-controlled t :server-program server))
          (runtime-environment
           (if vars
               (remote-environment-derive
@@ -348,18 +344,76 @@ Remote Kernel Manager in `~/Library/Jupyter/kernels'."
 
 (defun my/noema-jupyter-cell--lsp-start-runtime-probe
     (origin context root kernel session entry base-environment callback)
+  "Prepare the shared project environment, then probe ENTRY for ORIGIN."
+  (setq-local my/language-server-runtime-required
+              (or (not (equal "local" (remote-context-target-id context)))
+                  (my/noema-jupyter-project-config
+                   (my/noema-jupyter-cell--lsp-get 'spec entry))
+                  (my/noema-jupyter-project-metadata
+                   (my/noema-jupyter-cell--lsp-get 'spec entry))))
+  (condition-case err
+      (let* ((placement (my/noema-jupyter-cell--lsp-remote-placement context entry))
+             (metadata (my/noema-jupyter-project-metadata
+                        (my/noema-jupyter-cell--lsp-get 'spec entry))))
+        (if (my/language-server-runtime-fallback-p placement)
+            (my/noema-jupyter-cell--lsp-callback-later callback nil placement)
+          (let* ((project (and (or placement metadata)
+                               (my/noema-jupyter-project-from-entry
+                                entry (remote-make-file-name
+                                       (remote-context-target-id context)
+                                       (remote-context-localname context)))))
+                 (root (if project (my/noema-jupyter-project-root project) root))
+                 (context (if project (remote-context root) context))
+                 (default-directory root)
+                 (generation my/language-server-runtime--generation)
+                 (start (lambda (environment error)
+                          (when (and (buffer-live-p origin)
+                                     (= generation (buffer-local-value
+                                                    'my/language-server-runtime--generation origin)))
+                          (if error
+                              (funcall callback nil (format "Project environment failed: %s"
+                                                            (error-message-string error)))
+                            (my/noema-jupyter-cell--lsp-start-runtime-probe-ready
+                             origin context root kernel session entry
+                             (or environment base-environment) callback))))))
+            (if (or (eq t (my/noema-jupyter-cell--lsp-get 'direnv metadata))
+                    (bound-and-true-p my/enable-direnv))
+                (progn
+                  (require 'direnv)
+                  (when (eq 'ready (direnv-environment-ensure-async root start))
+                    (funcall start (remote-environment-resolve context) nil)))
+              (funcall start (if project (remote-environment-resolve context) base-environment) nil)))))
+    (error (my/noema-jupyter-cell--lsp-callback-later
+            callback nil (error-message-string err)))))
+
+(defun my/noema-jupyter-cell--lsp-start-runtime-probe-ready
+    (origin context root kernel session entry base-environment callback)
   "Probe ENTRY and call CALLBACK with its runtime for ORIGIN.
 CONTEXT, ROOT, KERNEL, SESSION and BASE-ENVIRONMENT describe the owning target."
   (let* ((placement
           (my/noema-jupyter-cell--lsp-remote-placement context entry))
-         (probe (my/noema-jupyter-cell--lsp-probe-command kernel entry)))
+         (project (when (or (and (listp placement) (plist-get placement :target))
+                            (my/noema-jupyter-project-metadata
+                             (my/noema-jupyter-cell--lsp-get 'spec entry)))
+                    (my/noema-jupyter-project-from-entry
+                     entry (remote-make-file-name
+                            (remote-context-target-id context)
+                            (remote-context-localname context)))))
+         (probe (if project
+                    (list (my/noema-jupyter-project-interpreter project)
+                          "-c" my/noema-jupyter-cell--python-runtime-probe)
+                  (my/noema-jupyter-cell--lsp-probe-command kernel entry))))
     (if (or (stringp placement)
             (my/language-server-runtime-fallback-p placement))
         (my/noema-jupyter-cell--lsp-callback-later callback nil placement)
       (if (or (stringp probe)
               (my/language-server-runtime-fallback-p probe))
             (my/noema-jupyter-cell--lsp-callback-later callback nil probe)
-        (let* ((spec (my/noema-jupyter-cell--lsp-get 'spec entry))
+        (when project
+          (setq root (my/noema-jupyter-project-root project)
+                context (remote-context root)))
+        (let* ((default-directory root)
+               (spec (my/noema-jupyter-cell--lsp-get 'spec entry))
                (vars (my/noema-jupyter-cell--lsp-kernel-environment spec))
                (probe-environment
                 (if vars
@@ -451,9 +505,10 @@ own kernelspec registry instead of the Emacs host's registry."
          base-environment
          callback)
       (condition-case err
-          (let ((process
+          (let* ((command (my/jupyter-target-command context))
+                 (process
                  (remote-exec-async
-                  "jupyter" :args '("kernelspec" "list" "--json")
+                  (car command) :args (append (cdr command) '("kernelspec" "list" "--json"))
                   :context context :environment base-environment
                   :name "noema-kernelspec-discovery"
                   :callback
@@ -502,7 +557,10 @@ own kernelspec registry instead of the Emacs host's registry."
 
 (defun my/noema-jupyter-cell--lsp-runtime-provider (_buffer callback)
   "Resolve the selected Jupyter kernel and call CALLBACK asynchronously."
-  (when (and my/noema-jupyter-cell-mode
+  (setq-local my/language-server-runtime-required nil)
+  (let ((associated (and (not my/noema-jupyter-cell-mode)
+                         (my/noema-jupyter-project-entry-for-source buffer-file-name))))
+  (when (and (or my/noema-jupyter-cell-mode associated)
              (derived-mode-p 'python-mode 'python-ts-mode))
     (if (and (fboundp 'remote-jupyter-file-name-p)
              (remote-jupyter-file-name-p
@@ -512,9 +570,10 @@ own kernelspec registry instead of the Emacs host's registry."
                :reason "Jupyter Contents exposes files and kernel completion, but no language-server process"
                :expected t))
     (let* ((origin (current-buffer))
-           (kernel my/noema-jupyter-cell-kernel)
+           (kernel (or (my/noema-jupyter-cell--lsp-get 'name associated)
+                       my/noema-jupyter-cell-kernel))
            (session my/noema-jupyter-cell-session)
-           (entry my/noema-jupyter-cell-kernel-spec)
+           (entry (or associated my/noema-jupyter-cell-kernel-spec))
            (source (or my/noema-jupyter-cell-source-file buffer-file-name))
            (context (my/noema-jupyter--context source))
            (project-root
@@ -541,7 +600,7 @@ own kernelspec registry instead of the Emacs host's registry."
           ;; again on the target instead of permanently falling back.
           (my/noema-jupyter-cell--lsp-discover-and-probe
            origin source context root kernel session base-environment callback))
-        'pending)))))
+        'pending))))))
 
 (defun my/noema-jupyter-cell-lsp-runtime-changing ()
   "Detach from the old kernel runtime before cell metadata changes."
@@ -556,7 +615,9 @@ own kernelspec registry instead of the Emacs host's registry."
             (ignore-errors (lsp-workspaces)))
     (lsp-disconnect))
   (setq my/language-server-runtime--workspace nil)
-  (my/language-server-runtime-invalidate))
+  (my/language-server-runtime-invalidate)
+  (setq my/language-server--waiting-for-runtime nil
+        my/lsp-mode--start-request nil))
 
 (defun my/noema-jupyter-cell--lsp-capf-priority-h ()
   "Keep live-kernel completion ahead of static LSP completion.

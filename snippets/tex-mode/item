@@ -2,7 +2,6 @@
 # name: Itemize
 # key: item
 # group: Emacs migrated
-# source: /Users/hc/.config/emacs/snippets/tex-mode/item_Itemize
 # --
 \\begin{itemize}
 	\item $0

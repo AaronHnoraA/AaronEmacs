@@ -52,15 +52,25 @@ Result cells, kernel controls, or Run All. The Jupyter bridge below applies to
 ordinary `.ipynb` and Markdown `@@cell` sidecars. Node also enforces this
 boundary if a generic Jupyter command is invoked from a `.noema` buffer.
 
-A Noema project root is the nearest `noema.toml` (`noema-project-root`).
-Visiting a `.noema` never creates one, because previews and programs visit
-files too.  Creating a `.noema` or running a work block goes through
-`noema-project-ensure`, which asks first and proposes the enclosing
-`project.el` workspace root.  Do not add silent `noema-project-enable` calls to
-visit paths.  The same project boundary authorizes an ordinary native `.ipynb`
-outside the Noema notes root: Jupyter requests carry `projectRoot`, and only
-explicit commands (never visit, refresh, save, or completion) may call
-`noema-project-ensure` for such a notebook.
+A Noema Project is not a Git or `project.el` concept (Noema D-038).
+`noema.toml` may declare a Wiki repository (top-level `repository_id`, written
+into every vault Git repository) and, independently, a research Project (a
+`[project]` table).  The Project root is the nearest manifest with `[project]`
+(`noema-project-root`); a repository manifest alone never makes one, so a vault
+can hold many Projects.  A Project's agents run in its optional `workspace`
+(`noema-project-workspace`), which may be a code repository elsewhere.
+Resolve through `noema-project-root` / `noema-project-scope` rather than adding
+another fallback chain, and hand the Noema host native paths only
+(`noema-project-client-path` projects `/fs:`).  Visiting a `.noema` never
+creates a Project, because previews and programs visit files too.  Creating a
+`.noema` or running a work block goes through `noema-project-ensure`, which
+asks first, offering the file's directory and its ancestors: a code
+repository's root is proposed, a vault's is not.  Do not add silent
+`noema-project-enable` calls to visit paths.  The same project boundary
+authorizes an ordinary native `.ipynb` outside the Noema notes root: Jupyter
+requests carry `projectRoot`, and only explicit commands (never visit,
+refresh, save, or completion) may call `noema-project-ensure` for such a
+notebook.
 
 When adding a module:
 
