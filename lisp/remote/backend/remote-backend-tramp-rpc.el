@@ -458,11 +458,18 @@ COMMAND and ARGUMENTS are the exact upstream probe for this release."
         (cdr cache)
       (let* ((response
               (condition-case err
-                  (tramp-rpc--call
-                   vector "process.run"
-                   `((cmd . ,command)
-                     (args . ,arguments)
-                     (cwd . "/")))
+                  ;; A missing probe command is an expected answer, not a
+                  ;; user-visible failure: `tramp-error' would otherwise echo
+                  ;; "File is missing ... spawn_not_found" on the first save
+                  ;; to every host without SELinux or ACL tools.
+                  (let ((tramp-verbose 0)
+                        (inhibit-message t)
+                        (message-log-max nil))
+                    (tramp-rpc--call
+                     vector "process.run"
+                     `((cmd . ,command)
+                       (args . ,arguments)
+                       (cwd . "/"))))
                 (file-missing
                  (if (remote-backend-tramp-rpc--attribute-command-missing-p err)
                      :missing-command

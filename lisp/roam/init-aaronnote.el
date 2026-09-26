@@ -20,6 +20,7 @@
 (require 'init-aaronnote-jupyter-runtime)
 (require 'init-aaronnote-jupyter-server)
 (require 'init-aaronnote-jupyter-lsp)
+(require 'init-aaronnote-jupyter-debug)
 
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
 (declare-function my/noema--apple-gateway "init-aaronnote-agenda-apple" (body client))
@@ -1422,6 +1423,10 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
             ("jupyter-session"
              (my/noema--defer-host-event
               #'my/noema-jupyter-cell-handle-session-event payload)
+             nil)
+            ("jupyter-debug-ended"
+             (my/noema--defer-host-event
+              #'my/noema-jupyter-debug-handle-ended payload)
              nil)
             ("jupyter-cell-select"
              (when (fboundp 'my/noema-jupyter-cell-select-source)

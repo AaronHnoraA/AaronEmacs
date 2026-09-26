@@ -36,6 +36,7 @@
   available-function
   probe-function
   project-function
+  file-operation-function
   client-file-function
   expand-function
   prepare-function
@@ -292,7 +293,7 @@ returns a plist with at least `:status' and `:capabilities'."
     (funcall function connection route)))
 
 (cl-defun remote-register-backend
-    (id &key capabilities available probe project client-file-name
+    (id &key capabilities available probe project file-operation client-file-name
         expand-localname prepare
         connect live disconnect
         prepare-process stdio-bridge copy-file-to-target
@@ -302,6 +303,10 @@ returns a plist with at least `:status' and `:capabilities'."
 
 CAPABILITIES are route capabilities implemented by the backend.  PROJECT maps
 a logical file and selected link to a physical Emacs file name.
+FILE-OPERATION optionally implements file IO directly, receiving OPERATION,
+original logical ARGS, ROUTE and CONTEXT.  An API-backed filesystem uses this
+instead of a physical Emacs file handler.  It must signal for unsupported
+operations; its errors never fall through to a client-local filesystem call.
 CLIENT-FILE-NAME maps a logical file to an ordinary path directly accessible
 to client-side tools, or returns nil when the target filesystem is not shared.
 EXPAND-LOCALNAME resolves target-relative names such as `~/src' and must
@@ -337,6 +342,7 @@ target-native executable."
             :available-function available
             :probe-function probe
             :project-function project
+            :file-operation-function file-operation
             :client-file-function client-file-name
             :expand-function expand-localname
             :prepare-function prepare

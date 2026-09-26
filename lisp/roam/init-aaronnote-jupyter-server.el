@@ -32,6 +32,8 @@
 (require 'remote-doctor)
 (require 'remote-gateway)
 (require 'remote-workspace)
+(require 'remote-backend)
+(require 'remote-backend-jupyter)
 
 (declare-function my/noema-jupyter--defer "init-aaronnote-jupyter-runtime" (function))
 (declare-function my/noema-jupyter--get "init-aaronnote-jupyter-runtime" (key alist))
@@ -60,6 +62,7 @@ Set this through the config board or `etc/config-store.el', not with `setq'.")
 (config-register 'my/noema-jupyter-servers
   :type 'sexp
   :group 'noema
+  :on-change #'remote-jupyter-register
   :doc "Remote Jupyter servers (list of plists; see the variable docstring).")
 
 (defvar my/noema-jupyter-server--forwards (make-hash-table :test #'equal)
@@ -459,6 +462,30 @@ surfacing later as an unexplained kernel failure."
   (remote-gateway-register-method (car entry) (cdr entry)))
 
 (remote-doctor-register-check #'my/noema-jupyter-server--doctor)
+
+(add-hook 'remote-config-after-load-hook #'remote-jupyter-register)
+(remote-jupyter-register)
+
+(defun my/noema-jupyter-server-file-name (id &optional path)
+  "Return ID's logical Contents file name for PATH, relative to server root."
+  (remote-jupyter-register)
+  (let ((entry (my/noema-jupyter-server--entry id)))
+    (unless entry (user-error "Unknown Jupyter server: %s" id))
+    (when (eq (plist-get entry :kind) 'gateway)
+      (user-error "Kernel gateways do not expose a Contents filesystem"))
+    (remote-make-file-name (remote-jupyter-target-id id)
+                          (concat "/" (string-remove-prefix "/" (or path ""))))))
+
+(defun my/noema-jupyter-server-browse (id)
+  "Browse server ID's Contents root in Dired, independently of local projects."
+  (interactive (list (completing-read "Jupyter server: "
+                                     (mapcar (lambda (entry) (plist-get entry :id))
+                                             my/noema-jupyter-servers) nil t)))
+  (let ((root (my/noema-jupyter-server-file-name id)))
+    (my/noema--ensure-server
+     (lambda ()
+       (let ((dired-listing-switches "-al"))
+         (dired root))))))
 
 (provide 'init-aaronnote-jupyter-server)
 ;;; init-aaronnote-jupyter-server.el ends here

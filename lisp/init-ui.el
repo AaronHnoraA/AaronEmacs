@@ -39,6 +39,18 @@
   "Generation used to reject late Agenda cache replies.")
 (defvar my/dashboard--agenda-dirty t
   "Non-nil when an event says the Dashboard Agenda cache is stale.")
+(defvar my/dashboard--rendered-agenda 'unrendered
+  "Agenda state (SNAPSHOT . ERROR) the Dashboard was last rendered with.
+Entering the Dashboard or receiving a cache refresh rebuilds it only when
+this differs from the current cache, so an unchanged Dashboard is never
+rendered twice.")
+(defvar my/dashboard-agenda-cache-file
+  (locate-user-emacs-file "var/noema/dashboard-agenda.eld")
+  "Last good Agenda snapshot, so a new session renders it at once.
+It is display state only: the host still answers every refresh, and a
+different answer rebuilds the Dashboard.")
+(defvar my/dashboard--agenda-cache-loaded nil
+  "Non-nil once `my/dashboard-agenda-cache-file' has been read.")
 (defvar chunlian-mode)
 (declare-function chunlian-mode "init-ui" (&optional arg))
 (declare-function chunlian--clear-display "init-ui" ())
@@ -447,11 +459,45 @@ height in pixels."
                'action (lambda (_) (require 'noema-agenda) (noema-agenda-open title)))
               (insert "\n")))))))))
 
+(defun my/dashboard--load-agenda-cache ()
+  "Seed the Agenda snapshot from the previous session, once.
+The cache stays dirty, so the host still revalidates it; an unchanged answer
+then needs no second render."
+  (unless my/dashboard--agenda-cache-loaded
+    (setq my/dashboard--agenda-cache-loaded t)
+    (unless my/dashboard--agenda-snapshot
+      (when-let* ((snapshot
+                   (ignore-errors
+                     (with-temp-buffer
+                       (insert-file-contents my/dashboard-agenda-cache-file)
+                       (read (current-buffer)))))
+                  ((consp snapshot)))
+        (setq my/dashboard--agenda-snapshot snapshot)))))
+
+(defun my/dashboard--save-agenda-cache (snapshot)
+  "Write SNAPSHOT as the next session's first Agenda render."
+  (ignore-errors
+    (make-directory (file-name-directory my/dashboard-agenda-cache-file) t)
+    (let ((print-length nil)
+          (print-level nil)
+          (coding-system-for-write 'utf-8-unix))
+      (with-temp-file my/dashboard-agenda-cache-file
+        (prin1 snapshot (current-buffer))))))
+
+(defun my/dashboard--rendered-current-p ()
+  "Return non-nil when the Dashboard already shows the cached Agenda state."
+  (and (consp my/dashboard--rendered-agenda)
+       (eq (car my/dashboard--rendered-agenda) my/dashboard--agenda-snapshot)
+       (equal (cdr my/dashboard--rendered-agenda) my/dashboard--agenda-error)))
+
 (defun my/dashboard-insert-agenda ()
   "Synchronously insert the last complete native Agenda snapshot.
 Dashboard construction never starts a request and never edits the finished
 buffer from an asynchronous callback.  Cache refreshes rebuild the Dashboard
 through its normal insertion pipeline, before Chunlian is attached."
+  (my/dashboard--load-agenda-cache)
+  (setq my/dashboard--rendered-agenda
+        (cons my/dashboard--agenda-snapshot my/dashboard--agenda-error))
   (let ((start (point)))
     (my/dashboard--insert-agenda-card-content
      my/dashboard--agenda-snapshot my/dashboard--agenda-error)
@@ -486,8 +532,12 @@ through its normal insertion pipeline, before Chunlian is attached."
       (if error-object
           (setq my/dashboard--agenda-error error-object
                 my/dashboard--agenda-dirty t)
-        (setq my/dashboard--agenda-snapshot snapshot
-              my/dashboard--agenda-error nil
+        ;; An equal answer keeps the rendered object, so the Dashboard can
+        ;; tell by identity that it is already current.
+        (when changed
+          (my/dashboard--save-agenda-cache snapshot)
+          (setq my/dashboard--agenda-snapshot snapshot))
+        (setq my/dashboard--agenda-error nil
               my/dashboard--agenda-dirty nil))
       (dolist (waiter waiters)
         (funcall waiter changed)))))
@@ -532,17 +582,23 @@ it never edits a Dashboard buffer."
         my/dashboard--agenda-dirty t
         my/dashboard--agenda-waiters nil))
 
+(defun my/dashboard--rebuild-if-stale (buffer)
+  "Rebuild Dashboard BUFFER unless it already shows the cached Agenda state.
+Every refresh path goes through here: several callers can wait on one host
+request, and only the first may render its answer."
+  (when (and (buffer-live-p buffer)
+             (not (my/dashboard--rendered-current-p)))
+    (my/dashboard--refresh-buffer-completely buffer)))
+
 (defun my/dashboard-agenda-handle-change (&optional _payload)
   "Refresh cached Agenda data after an event-driven source change."
   (setq my/dashboard--agenda-dirty t)
   (when-let* ((buffer (get-buffer "*dashboard*")))
     (when (get-buffer-window buffer t)
       (my/dashboard--refresh-agenda-cache
-       (lambda (changed)
-         (when (and changed
-                    (buffer-live-p buffer)
-                    (get-buffer-window buffer t))
-           (my/dashboard--refresh-buffer-completely buffer)))))))
+       (lambda (_changed)
+         (when (get-buffer-window buffer t)
+           (my/dashboard--rebuild-if-stale buffer)))))))
 
 (defun my/dashboard-refresh-on-entry ()
   "Refresh the persistent Dashboard once whenever it becomes current."
@@ -562,17 +618,16 @@ it never edits a Dashboard buffer."
                  (when (and (buffer-live-p buffer)
                             (eq buffer (current-buffer))
                             (derived-mode-p 'dashboard-mode))
-                   ;; Render cached data through the ordinary Dashboard
-                   ;; pipeline, attach Chunlian, then refresh the cache.  A
-                   ;; changed snapshot causes another complete render rather
-                   ;; than an in-place asynchronous card rewrite.
-                   (my/dashboard--refresh-buffer-completely buffer)
+                   ;; Render only when the buffer does not already show the
+                   ;; cached state -- at startup Dashboard has just built it
+                   ;; -- then refresh the cache.  A changed snapshot causes
+                   ;; one complete render rather than an in-place asynchronous
+                   ;; card rewrite.
+                   (my/dashboard--rebuild-if-stale buffer)
                    (my/dashboard--refresh-agenda-cache
-                    (lambda (changed)
-                      (when (and changed
-                                 (buffer-live-p buffer)
-                                 (eq buffer (current-buffer)))
-                        (my/dashboard--refresh-buffer-completely buffer))))))
+                    (lambda (_changed)
+                      (when (eq buffer (current-buffer))
+                        (my/dashboard--rebuild-if-stale buffer))))))
                dashboard))))))
 
 (defun my/dashboard--item-block-width ()

@@ -256,6 +256,20 @@ fallback so it kept re-reporting itself."
              "Jupyter server"
              (my/language-server-runtime-fallback-reason fallback)))))
 
+(ert-deftest my/noema-jupyter-contents-files-do-not-probe-an-os-environment ()
+  (require 'init-aaronnote-jupyter-lsp)
+  (require 'remote-backend-jupyter)
+  (with-temp-buffer
+    (setq major-mode 'python-mode
+          my/noema-jupyter-cell-mode t
+          buffer-file-name "/fs:jupyter.4c6162:/note.ipynb")
+    (cl-letf (((symbol-function 'remote-environment-resolve)
+               (lambda (&rest _) (ert-fail "Contents cannot resolve an OS environment"))))
+      (let ((fallback (plist-get (my/noema-jupyter-cell--lsp-runtime-provider nil #'ignore)
+                                 :unsupported)))
+        (should (my/language-server-runtime-fallback-expected fallback))
+        (should (string-match-p "Contents" (my/language-server-runtime-fallback-reason fallback)))))))
+
 (ert-deftest my/noema-jupyter-attached-kernels-are-an-expected-lsp-fallback ()
   (require 'init-aaronnote-jupyter-lsp)
   (let ((fallback

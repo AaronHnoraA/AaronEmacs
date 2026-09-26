@@ -63,5 +63,74 @@
     (should (equal (buffer-string) "printf(format)"))
     (should (yas-active-snippets))))
 
+(ert-deftest init-snippets-template-names-are-unique-per-table ()
+  "Yasnippet keys templates by name; a duplicate silently drops a key."
+  (dolist (directory (directory-files
+                      (expand-file-name "snippets" user-emacs-directory)
+                      t "\\`[^.]"))
+    (when (file-directory-p directory)
+      (let ((seen (make-hash-table :test #'equal)))
+        (dolist (file (directory-files directory t "\\`[^.]"))
+          (unless (file-directory-p file)
+            (with-temp-buffer
+              (insert-file-contents file)
+              (when (re-search-forward "^# name: \\(.*\\)$" nil t)
+                (let ((name (match-string 1)))
+                  (should-not (gethash name seen))
+                  (puthash name file seen))))))))))
+
+(ert-deftest init-snippets-lsp-capf-does-not-shadow-template-group ()
+  "lsp-mode's bare `company-capf' must not hide the group with Yasnippet."
+  (with-temp-buffer
+    (setq-local lsp-completion-mode t
+                company-backends
+                (cons 'company-capf (default-value 'company-backends)))
+    (my/company-drop-shadowing-capf-h)
+    (should (equal company-backends (default-value 'company-backends))))
+  (with-temp-buffer
+    (setq-local lsp-completion-mode t
+                company-backends '(company-capf company-dabbrev))
+    (my/company-drop-shadowing-capf-h)
+    (should (equal company-backends '(company-capf company-dabbrev)))))
+
+(ert-deftest init-snippets-empty-prefix-offers-only-typed-keys ()
+  "After a trigger character only a multi-character key ending at point stays."
+  (with-temp-buffer
+    (insert "p ..")
+    (should
+     (equal (my/company--typed-key-at-empty-prefix-a
+             (lambda (&rest _) (list ".." "." "cpy" "for"))
+             'candidates "")
+            '("..")))
+    (should
+     (equal (my/company--typed-key-at-empty-prefix-a
+             (lambda (&rest _) (list "for" "fori"))
+             'candidates "fo")
+            '("for" "fori")))))
+
 (provide 'init-snippets-tests)
 ;;; init-snippets-tests.el ends here
+
+(ert-deftest init-snippets-notebook-cells-follow-projection-language ()
+  "A shared raw cell works in Python, JS, SQL and Lisp projections."
+  (dolist (prefix '("#" "//" "--" ";"))
+    (with-temp-buffer
+      (setq-local my/noema-jupyter-cell-mode t
+                  my/noema-jupyter-notebook--comment-prefix prefix)
+      (yas-minor-mode 1)
+      (should (memq 'jupyter-notebook-mode yas--extra-modes))
+      (let ((template
+             (with-temp-buffer
+               (insert-file-contents
+                (expand-file-name "snippets/jupyter-notebook-mode/jraw" user-emacs-directory))
+               (goto-char (point-min))
+               (search-forward "# --\n")
+               (buffer-substring-no-properties (point) (point-max)))))
+        (yas-expand-snippet template)
+        (should (string-match-p
+                 (concat "\\`" (regexp-quote prefix)
+                         " %% \\[raw\\] id=[A-Za-z0-9_-]+\n"
+                         (regexp-quote prefix) " ") (buffer-string))))
+      (setq-local my/noema-jupyter-cell-mode nil)
+      (my/yas-jupyter-setup)
+      (should-not (memq 'jupyter-notebook-mode yas--extra-modes)))))

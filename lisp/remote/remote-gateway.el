@@ -487,6 +487,13 @@ Return non-nil only for the first settlement."
                            (aref payload index)
                            (aref mask (% index 4)))))))
               (pcase opcode
+                ;; RFC 6455 section 5.1 requires masking for every client
+                ;; frame, including control frames. A malformed close can
+                ;; come from a peer that has already destroyed its socket;
+                ;; do not acknowledge it by writing into a closed pipe.
+                ((guard (not masked))
+                 (delete-process process)
+                 (setq continue nil buffer ""))
                 (8
                  (process-send-string
                   process

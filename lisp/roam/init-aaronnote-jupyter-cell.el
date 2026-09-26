@@ -776,6 +776,10 @@ This does not change the notebook language, kernelspec, or Noema session."
      (my/noema-jupyter-cell--header-button
       "All" #'my/noema-jupyter-cell-run-all "Run all cells in Noema")
      (my/noema-jupyter-cell--header-button
+      "Debug" #'my/noema-jupyter-debug-start "Debug this cell with Dape breakpoints")
+     (my/noema-jupyter-cell--header-button
+      "Step" #'my/noema-jupyter-run-by-line "Run by Line: start or advance one statement")
+     (my/noema-jupyter-cell--header-button
       "Stop" #'my/noema-jupyter-cell-interrupt "Interrupt Noema kernel")
      (my/noema-jupyter-cell--header-button
       "Restart" #'my/noema-jupyter-cell-restart "Restart Noema kernel")

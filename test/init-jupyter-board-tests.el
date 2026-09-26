@@ -4,6 +4,17 @@
 (require 'cl-lib)
 (require 'init-jupyter-board)
 
+(ert-deftest my/jupyter-contents-dired-skips-dirvish-process-probes ()
+  (require 'init-dired)
+  (cl-letf (((symbol-function 'remote-context) (lambda (_) 'context))
+            ((symbol-function 'remote-routes) (lambda (&rest _) nil)))
+    (should
+     (equal (my/dirvish-file-only-remote-a
+             (lambda (&rest _) (ert-fail "Dirvish would probe ls"))
+             (lambda (directory &rest _) directory)
+             "/fs:jupyter.4c6162:/")
+            "/fs:jupyter.4c6162:/"))))
+
 (defun my/jupyter-board-test--object (argv &optional metadata)
   "Return a minimal kernelspec object containing ARGV and METADATA."
   `((resource_dir . ,temporary-file-directory)

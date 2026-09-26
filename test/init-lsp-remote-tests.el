@@ -806,12 +806,20 @@
     (let ((default-directory directory)
           selected)
       (cl-letf
-          (((symbol-function 'my/language-server-preferred-backend)
+          (((symbol-function 'remote-routes) (lambda (&rest _) '(route)))
+           ((symbol-function 'my/language-server-preferred-backend)
             (lambda () 'lsp-mode))
            ((symbol-function 'my/lsp-mode-ensure)
             (lambda () (setq selected 'lsp-mode))))
         (my/language-server--ensure-after-runtime))
       (should (eq selected 'lsp-mode)))))
+
+(ert-deftest language-server-file-only-target-skips-process-discovery ()
+  (let ((default-directory "/fs:files:/folder/"))
+    (cl-letf (((symbol-function 'remote-routes) (lambda (&rest _) nil))
+              ((symbol-function 'my/language-server-preferred-backend)
+               (lambda () (ert-fail "File-only targets cannot discover processes"))))
+      (my/language-server--ensure-after-runtime))))
 
 (ert-deftest language-server-direnv-failure-does-not-disable-client ()
   (let ((started nil))

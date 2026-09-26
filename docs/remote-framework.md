@@ -188,6 +188,19 @@ handler 保持规范的绝对逻辑身份，不生成不合法的 `/fs:local:~/.
 buffer 身份意外降级成裸路径。确实只用于 UI 展示时，可显式缩写
 `remote-file-local-name` 的结果。
 
+`~` 在 Emacs 里始终表示客户端 HOME，远端 buffer 也一样。为此
+`remote-environment-apply` 把 target capsule 投影进 buffer 时保留
+`remote-environment-client-owned-variables`（目前是 `HOME`）的客户端值：Emacs
+展开 `~` 和 `getenv` 读的是 buffer 的 `process-environment`，投影 target HOME
+会把 `~/x` 变成本机上不存在的 `/home/…/x`（伪本地路径）。capsule 本身仍保存
+target HOME，路由进程显式应用 capsule，因此远端进程的 HOME 不变。
+
+minibuffer 里的 `/fs:` 名字遵循 Emacs `substitute-in-file-name` 的重启规则：
+`/fs:box:/a/~/x` → `~/x`（回到客户端）；`/fs:box:/a//fs:other:/x`、
+`//fs:local:/…`、`//ssh:host:/…` → 该名字本身（切换机器）；
+`/fs:box:/a//etc` → `/fs:box:/etc`（同 TRAMP 约定，仍在当前 target）。
+因此 `file-name-shadow-mode` 与 vertico 的 tidy 能正常隐藏被重启的前缀。
+
 符号链接保持 Emacs 原生区分：
 
 - `file-symlink-p` 返回链接中原样保存的 target string，不改写为 `/fs:`；

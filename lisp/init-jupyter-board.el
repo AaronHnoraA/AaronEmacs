@@ -693,6 +693,10 @@ The default view keeps remote profiles and active sessions prominent."
         (insert "   ")
         (aaron-ui-board-insert-actions
          `((:label "Edit" :command ,(lambda () (my/jupyter-board-server-add entry)))
+           ,@(unless (eq (plist-get entry :kind) 'gateway)
+               `((:label "Browse Files"
+                         :help "Open the server Contents filesystem in Dired"
+                         :command ,(lambda () (my/noema-jupyter-server-browse id)))))
            (:label "Forget" :command ,(lambda () (my/jupyter-board-server-remove id)))))
         (insert "\n\n")))))
 

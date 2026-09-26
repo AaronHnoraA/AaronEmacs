@@ -1,5 +1,7 @@
 #+title: Jupyter Kernel Workflow
 
+完整对齐范围、实测证据和未完成项见 [[file:jupyter-parity.md][Jupyter parity audit]]。
+
 #+begin_quote
 Scope: this document covers ordinary =.ipynb= files and Markdown =@@cell=
 sidecars. D-023 =.noema= files are AI prompt/workflow documents: work blocks
@@ -18,7 +20,8 @@ The ownership boundary follows the Jupyter Server model:
 - Noema owns the kernel registry, Jupyter protocol/ZMQ traffic, execution,
   completion, outputs, variables, widgets, and lifecycle operations;
 - Emacs projects ipynb as editable source and presents controls that call the
-  Noema API.  It has no Jupyter client or second kernel manager;
+  Noema API.  This notebook path has no second protocol owner.  Standalone
+  Board REPLs still use emacs-jupyter and are listed as separate clients;
 - for a Remote target, Emacs may place the process and forward five opaque
   ports, but Noema remains the endpoint that speaks the Jupyter protocol.
 
@@ -202,8 +205,8 @@ SSH 首连或 scheduler 排队通常超过本地进程原先的 15 秒上限；r
 "kernelspec `server:id:python3' was not found on target `local'"。
 
 =attach:= 与 =remote_ikernel= 继续用于显式 existing-kernel/Jupyter Board 工作流，
-attached kernel 不归 Noema broker 杀死或自动重启。独立 desktop host mode 继续
-使用 Node 本地 launcher。
+attached kernel 不归 Noema broker 杀死或自动重启。desktop host mode 已退役；
+它不是另一套可用的 Jupyter UI。
 
 所有 =*.ipynb= 在 Emacs 中打开时都会自动进入语言 major mode 与 =NCell= minor
 mode，并从 notebook metadata 读取当前 kernelspec；普通 notebook 没有
@@ -284,7 +287,10 @@ vendored =remote_ikernel= 的五端口 tunnel 使用单一 OpenSSH session：=-N
 注意密钥不写在这里：=:auth token= 和 =:auth password= 通过
 =auth-source-search= 按 =:url= 的 host（以及 =:user=，如果有）查找，凭据像其他
 credential 一样留在 authinfo/GPG 里。=jupyter lab= 启动时打印的
-=http://localhost:8888/lab?token=...= 可以整条粘进 =:url=，token 会被自动取出。
+=http://localhost:8888/lab?token=...= 可以整条粘进 Board 的 =Add Server URL=；
+保存前会提取 token，仅保留在本次 Emacs 会话中，持久配置只保存无密钥的 base URL。
+重启 Emacs 后使用 auth-source，或通过 =Edit= 重新输入凭据。旧配置里已有的 token
+URL 仍能连接，但不会在公开 catalog / Board 中显示密钥。
 
 ** Remote-first 路由
 
@@ -307,11 +313,10 @@ Target 无法提供 channel 时会报错，不会退回到客户端直连。这�
 远端 server 常常绑在 loopback 上，直接在本机连同一个端口要么失败得莫名其妙，
 要么连到本机上另一个恰好在监听的 server。
 
-** 独立 desktop host mode
+** Host 边界
 
-没有 Emacs broker 时，同样的清单从环境变量 =AARONNOTE_JUPYTER_SERVERS= 读取
-（JSON 数组，字段名与上面一致）。这种模式下没有 Remote 框架，所有 server 必须
-本机可达。
+当前一方交互入口是 Emacs；Node/Go 是 headless service。旧的 desktop 模式说明
+不再适用。Jupyter URL 配置表示计算服务连接，不会自动把本地项目迁移到该服务器。
 
 ** Kernel ownership
 
@@ -323,10 +328,27 @@ interrupt/restart 只有在用户显式执行对应操作时才发给 adopted ke
 
 ** Contents API
 
-=:kind server= 的服务器额外提供 =/api/contents= 的 list/read/write
-（=aaronnote:api:jupyter-cell:server-{list,read,write}=），用于浏览和打开住在
-server 上的文件。这是刻意保持狭小的接口，不是第二套通用文件框架，也不参与
-=/fs= 的身份体系。=:kind gateway= 没有 contents API。
+=:kind server= 的服务器现在通过 Remote 的 =jupyter-contents= 文件后端挂载。
+在 Jupyter Board 的服务器条目点击 =Browse Files=，或运行
+=M-x my/noema-jupyter-server-browse=，即可在 Dired 浏览服务器目录、打开
+=.ipynb=、编辑并保存。文件与执行输出都留在服务器，不要求本地 Noema project。
+也可以用 =(my/noema-jupyter-server-file-name "lab" "folder/demo.ipynb")=
+取得文件名，再交给 =find-file=。
+
+这个命名空间使用 =/fs:jupyter.<server-id 的 UTF-8 十六进制>:/路径=，路径相对于
+Contents 根目录。notebook 默认在所属服务器启动所选 kernelspec，子目录传给
+Jupyter session，因此工作目录与 notebook 所在目录一致。服务器 URL 的
+=/user/alice/= 或其他代理前缀仍是 HTTP base path，不是 OS 路径。
+
+目录、读写、复制、重命名和删除经 =aaronnote:api:jupyter-cell:server-file=
+处理。文件 API 不提供 shell、Git 或 LSP 进程，所以使用标准 Dired；补全和
+检查仍可以经 notebook 的 kernel 协议完成。需要远端 shell/LSP 时，应使用
+已有的 =/fs:TARGET:/真实路径= 工作区。=:kind gateway= 不提供 Contents 挂载。
+
+保存交给服务器的 ContentsManager；不承诺通用的 POSIX 原子替换、文件锁、
+chmod、符号链接或跨客户端原子冲突检测。隐藏文件是否可访问也由服务器决定。
+协议依据见 [[https://jupyter-server.readthedocs.io/en/latest/developers/rest-api.html][Jupyter Server REST API]]
+和 [[https://jupyter-server.readthedocs.io/en/latest/developers/contents.html][ContentsManager 文档]]。
 
 * 协议覆盖
 
@@ -359,11 +381,15 @@ live kernel 的手感，而 kernel 空闲、不可达或没有结果时仍会透
 =supported: false=。
 
 Emacs 的 snippet 入口也能调结构动作，但这些不是 Yasnippet 模板。在 ipynb
-buffer 中输入 =jcode= 或 =jmd= 后按 =C-c y y=，会通过 Noema API 在下方创建
-code/Markdown cell；新 =cell.id= 只由 Noema 生成。=jrun=、=jrunnext=、=jall=、
+buffer 中输入 =jcode=、=jmd= 或 =jraw= 后按 =C-c y y=，会通过 Noema API 在下方创建
+code/Markdown/raw cell；新 =cell.id= 只由 Noema 生成。=jrun=、=jrunnext=、=jall=、
 =jsplit=、=jmerge=、=jclear=、=jout= 等同理。=C-c y j= 可直接选择完整动作表。
 若直接调用 Yasnippet 而绕过这组结构动作，=jcode=、=jmd=、=jraw= 和 =jcell=
 模板也会生成合法 id，因此新建 cell 不会退化成裸 =# %%=。
+共享 notebook snippet 表会跟随投影语言使用 =#=、=//=、=--= 或 =;= 注释；
+离开 NCell 后该表停用。Python cell magic 模板包括 =jtime=、=jtimeit=、=jcap=、
+=jbash=、=jhtml=、=jlatex=、=jjs=、=jsql=、=jwrite=；SQL 需要 kernel 安装并加载
+相应 IPython extension。这些 magic 不是 `.noema` Agent Work block。
 对于旧会话或手工输入留下的裸 =# %%=，Noema-owned notebook 在保存/运行前会
 先把它提升为带稳定 id 的真实 cell，避免 marker 被吞进上一 cell 的 source 后再报
 =Unknown Jupyter cell=。普通外部 ipynb 仍保留其无 id 形式。
@@ -377,9 +403,15 @@ cell 运行期间 iopub 以补丁流（=set= / =append= / =clear= / =status=）�
 * Jupyter Board
 
 用 =M-x my/jupyter-board= 或 Hyper dispatch =j= 打开 Emacs 内的
-=Remote Kernel Manager=。默认页面只突出两类日常对象：远程 kernel profile 和正在运行
+=Remote Kernel Manager=。默认页面呈现 Jupyter Server、远程 kernel profile 和正在运行
 的 session；本地 kernelspec、connection file、工具路径和诊断信息收在
 =Show technical= 中，不再与主要工作流混在一起。
+
+=Jupyter Servers= 区域提供 =Add Server URL=、=Edit=、=Forget=、=Check Servers=
+和 =Select Notebook Kernel=。Route 明确区分本机直连与 Remote target 转发；
+=Check Servers= 异步查询 Noema 的 kernelspec / running kernel 清单，初次绘制不联网。
+从 notebook 打开 Board 后，=Select Notebook Kernel= 返回该文档的统一 picker。
+=Forget= 移除配置并释放路由，不向服务器发送 shutdown。
 
 第一次使用普通 SSH/Python 服务器时：
 

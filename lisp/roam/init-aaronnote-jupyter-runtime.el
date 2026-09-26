@@ -342,10 +342,23 @@ anyone who knows roughly when the kernel started."
           (mapconcat (lambda (byte) (format "%02x" byte))
                      (string-to-list (buffer-string)) ""))
       (error
-       ;; No /dev/urandom (an unusual host, or it is unreadable): fall back
-       ;; rather than refuse to start a kernel, and say so.
-       (message "Noema Jupyter: /dev/urandom unavailable; using a weaker signing key")
-       (secure-hash 'sha256 (format "%s:%s:%s" (emacs-pid) (float-time) (random)))))))
+       ;; Emacs can reject character devices as non-regular files, including
+       ;; on macOS.  Use a client-local OS-backed generator in that case;
+       ;; timestamps and Emacs `random' are not a substitute for a secret.
+       (let ((default-directory temporary-file-directory)
+             (process-environment (remote-client-process-environment))
+             (exec-path (remote-client-exec-path))
+             (remote-current-adapter-id nil)
+             (remote-current-route nil)
+             result)
+         (dolist (command '(("openssl" "rand" "-hex" "32")
+                            ("python3" "-c" "import secrets; print(secrets.token_hex(32))")))
+           (when (and (not result) (executable-find (car command)))
+             (erase-buffer)
+             (when (and (equal 0 (apply #'call-process (car command) nil t nil (cdr command)))
+                        (string-match-p "\\`[0-9a-f]\\{64\\}\\'" (string-trim (buffer-string))))
+               (setq result (string-trim (buffer-string))))))
+         (or result (error "No OS-backed random generator available for Jupyter HMAC key")))))))
 
 (defun my/noema-jupyter--connection
     (kernel ports key)

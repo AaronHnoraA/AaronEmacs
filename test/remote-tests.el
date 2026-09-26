@@ -226,7 +226,8 @@ the unpinned fallback nor a pin taken inside that binding may see it."
   "Stock `executable-find' with REMOTE must see project tools such as direnv's.
 The backend alone only knows the target's login PATH."
   (let ((default-directory "/fs:box:/work/project/"))
-    (cl-letf (((symbol-function 'remote-environment-resolve)
+    (cl-letf (((symbol-function 'remote-fs--routes) (lambda (&rest _) '(route)))
+              ((symbol-function 'remote-environment-resolve)
                (lambda (context &rest _)
                  (should (equal (remote-context-target-id context) "box"))
                  'capsule))
@@ -238,7 +239,8 @@ The backend alone only knows the target's login PATH."
       (should (equal (remote-fs-handle-exec-path)
                      '("/work/project/bin" "/usr/bin" "/bin" "/work/project/"))))
     ;; Without a capsule PATH the backend still answers.
-    (cl-letf (((symbol-function 'remote-environment-resolve) (lambda (&rest _) 'capsule))
+    (cl-letf (((symbol-function 'remote-fs--routes) (lambda (&rest _) '(route)))
+              ((symbol-function 'remote-environment-resolve) (lambda (&rest _) 'capsule))
               ((symbol-function 'remote-environment-vars) (lambda (_) nil))
               ((symbol-function 'remote-fs--call-routed)
                (lambda (operation _args) (list operation))))
@@ -3075,6 +3077,54 @@ names in tree consumers such as Treemacs."
                       "/remote/bin:/usr/bin")))))
       (when (file-exists-p envrc) (delete-file envrc))
       (when (file-directory-p root) (delete-directory root)))))
+
+(ert-deftest remote-fs-substitute-restarts-leave-or-switch-target ()
+  "Minibuffer `/~' and `//' restarts follow the client/target boundary.
+Tilde is the Emacs client's home; another logical or TRAMP spelling names
+that file; a plain absolute path stays on the current target."
+  (let ((base "/fs:box:/home/remote/work/"))
+    (should (equal (substitute-in-file-name (concat base "~/.emacs.d/"))
+                   "~/.emacs.d/"))
+    (should (equal (substitute-in-file-name (concat base "~")) "~"))
+    (should (equal (substitute-in-file-name (concat base "/etc/hosts"))
+                   "/fs:box:/etc/hosts"))
+    (should (equal (substitute-in-file-name
+                    (concat base "/fs:local:/Users/me/x"))
+                   "/fs:local:/Users/me/x"))
+    (should (equal (substitute-in-file-name
+                    (concat base "/fs:other:/tmp/x"))
+                   "/fs:other:/tmp/x"))
+    (should (equal (substitute-in-file-name (concat base "/ssh:other:/tmp/"))
+                   "/ssh:other:/tmp/"))
+    (should (equal (substitute-in-file-name (concat base "src/a.c"))
+                   (concat base "src/a.c")))))
+
+(ert-deftest remote-environment-apply-keeps-client-home ()
+  "A projected target capsule must not change what `~' means in Emacs.
+Routed processes still receive the capsule's target HOME."
+  (with-temp-buffer
+    (let ((process-environment
+           (list "HOME=/Users/client" "PATH=/client/bin"))
+          (environment
+           (remote-environment-create
+            :id "box@test" :target-id "box"
+            :vars '(("HOME" . "/home/remote")
+                    ("PATH" . "/home/remote/bin:/usr/bin")
+                    ("TARGET_ONLY" . "yes")))))
+      (remote-environment-apply environment)
+      (should (equal (getenv "HOME") "/Users/client"))
+      (should (equal (getenv "TARGET_ONLY") "yes"))
+      (should (equal (getenv "PATH") "/home/remote/bin:/usr/bin"))
+      (should (equal (expand-file-name "~/x") "/Users/client/x"))
+      (should (equal (cdr (assoc "HOME" (remote-environment-vars
+                                         remote-buffer-environment)))
+                     "/home/remote"))
+      (should (equal (getenv-internal
+                      "HOME"
+                      (remote--apply-environment
+                       process-environment
+                       (remote-environment-vars remote-buffer-environment)))
+                     "/home/remote")))))
 
 (provide 'remote-tests)
 ;;; remote-tests.el ends here

@@ -514,9 +514,16 @@ projection remained open in Emacs."
         (puthash "id" (cdr entry) (car entry))))))
 
 (defun my/noema-jupyter-notebook--write-raw (file document)
-  "Atomically write DOCUMENT as JSON to FILE."
+  "Write DOCUMENT as JSON to FILE.
+OS files use a temporary sibling and rename.  Contents files delegate saving
+to Jupyter Server; atomicity there depends on its ContentsManager."
   (make-directory (file-name-directory file) t)
-  (let ((temporary (make-nearby-temp-file ".noema-notebook-" nil ".ipynb"))
+  (if (and (fboundp 'remote-jupyter-file-name-p)
+           (remote-jupyter-file-name-p file))
+      (let ((coding-system-for-write 'utf-8-unix))
+        (with-temp-file file
+          (insert (my/noema-jupyter-notebook--serialize document) "\n")))
+   (let ((temporary (make-nearby-temp-file ".noema-notebook-" nil ".ipynb"))
         (serialized (my/noema-jupyter-notebook--serialize document)))
     (unwind-protect
         (let ((coding-system-for-write 'utf-8-unix))
@@ -525,7 +532,7 @@ projection remained open in Emacs."
             (insert "\n"))
           (rename-file temporary file t))
       (when (file-exists-p temporary)
-        (ignore-errors (delete-file temporary))))))
+        (ignore-errors (delete-file temporary)))))))
 
 (defun my/noema-jupyter-notebook--write-contents ()
   "Save current source projection as its standard notebook."

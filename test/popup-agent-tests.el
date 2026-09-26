@@ -213,7 +213,7 @@
               ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore)
               ((symbol-function 'my/vterm-popup-display-buffer) #'ignore)
               ((symbol-function 'my/vterm-popup--requested-workspace-id) #'ignore)
-              ((symbol-function 'my/vterm-popup--project-root)
+              ((symbol-function 'my/project-current-root)
                (lambda () "/fs:server:/home/test/project/")))
       ;; From a file below the project, the agent starts at the project root.
       (let ((default-directory "/fs:server:/home/test/project/src/"))
@@ -261,7 +261,25 @@ machine's HOME, because agent-shell's caches expand `~' there."
       ;; The missing-executable report names that target even after
       ;; agent-shell has killed the shell buffer.
       (should (string-match-p "target `server'"
-                              (my/agent-shell-missing-executable-a "not found"))))))
+                              (my/agent-shell-missing-executable-a "not found")))))
+
+(ert-deftest popup-agent-outside-a-project-starts-here ()
+  (let (started)
+    (cl-letf (((symbol-function 'noema-agent-acp-config-for) (lambda (_) 'config))
+              ((symbol-function 'noema-agent-acp-start)
+               (lambda (&rest args) (setq started (plist-get args :directory))
+                 (generate-new-buffer " *popup-remote-agent*")))
+              ((symbol-function 'noema-agent-acp-adopt) #'ignore)
+              ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore)
+              ((symbol-function 'my/vterm-popup-display-buffer) #'ignore)
+              ((symbol-function 'my/vterm-popup--requested-workspace-id) #'ignore)
+              ((symbol-function 'my/project-current-root) #'ignore))
+      (let ((default-directory "/fs:server:/home/test/scratch/"))
+        (my/vterm-popup-agent 'codex))
+      (should (equal started "/fs:server:/home/test/scratch/"))
+      (dolist (buffer (buffer-list))
+        (when (string-prefix-p " *popup-remote-agent*" (buffer-name buffer))
+          (kill-buffer buffer))))))
 
 (ert-deftest popup-agent-launchers-are-memory-only ()
   (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) (ert-fail "Header checked executables")))

@@ -53,6 +53,15 @@
 (defvar-local remote--buffer-base-process-environment nil)
 (defvar-local remote--buffer-base-exec-path nil)
 
+(defconst remote-environment-client-owned-variables '("HOME")
+  "Variables a buffer projection keeps from the Emacs client.
+Emacs itself reads them from `process-environment': `~' expansion in
+`expand-file-name' and `getenv' consumers locate client files through HOME.
+A target value there silently turns `~/x' into the target's home spelled as
+a client path.  Routed processes still receive the capsule's full target
+value because they apply `remote-environment-vars' explicitly; TRAMP-routed
+third-party processes fall back to the target login value.")
+
 (defvar remote-environment-after-apply-hook nil
   "Hook run after an environment capsule is applied to the current buffer.
 Hook functions receive the applied `remote-environment' as their argument.")
@@ -318,7 +327,12 @@ alist or `(:vars ALIST :source VALUE)'."
     (let ((vars (remote-environment-vars environment)))
       (setq-local process-environment
                   (remote--apply-environment
-                   remote--buffer-base-process-environment vars)
+                   remote--buffer-base-process-environment
+                   (cl-remove-if
+                    (lambda (entry)
+                      (member (format "%s" (car entry))
+                              remote-environment-client-owned-variables))
+                    vars))
                   exec-path
                   (remote--exec-path-for-environment
                    vars remote--buffer-base-exec-path)

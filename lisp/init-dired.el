@@ -19,6 +19,24 @@
   (interactive)
   (call-interactively #'dired-find-file))
 
+(defun my/dirvish-file-only-remote-a (function original directory &rest args)
+  "Use standard Dired for Remote targets without process capability.
+FUNCTION is Dirvish's wrapper around ORIGINAL.  DIRECTORY and ARGS retain
+the normal Dired calling convention.  Contents APIs cannot run Dirvish's
+remote shell probes or previews."
+  (let ((path (if (consp directory) (car directory) directory)))
+    (if (and original
+             (fboundp 'remote-fs-file-name-p)
+             (remote-fs-file-name-p path)
+             (not (remote-routes "emacs-file" 'process-sync
+                                 (remote-context path))))
+        (apply original directory args)
+      (apply function original directory args))))
+
+(with-eval-after-load 'dirvish
+  (advice-remove 'dirvish-dired-noselect-a #'my/dirvish-file-only-remote-a)
+  (advice-add 'dirvish-dired-noselect-a :around #'my/dirvish-file-only-remote-a))
+
 ;; Use ( to toggle dired-hide-details-mode
 (use-package dired
   :ensure nil

@@ -914,6 +914,11 @@ GUI frame 的两侧 fringe 分工如下：
 - `C-c y v`
   打开 snippet 文件
 
+补全弹窗在 LSP buffer（本地与远端相同）里也会列出 snippet：C/C++ 输入 `p ..`
+弹出 `..`（选中得到 `p->`），ipynb 投影里输入 `j` 弹出 `jcode` / `jmd` / `jraw` /
+`jcell` 等 cell 模板。`.`、`->` 这类触发符之后只保留刚好敲出的多字符 key，不会把
+全部模板混进成员补全；单字符 key（如 Python 的 `.` → `self.`）只能用 `C-c y y`。
+
 ## 5. Dired / Dirvish
 
 - `C-c o d`

@@ -1,6 +1,7 @@
 # -*- mode: snippet -*-
 # name: Jupytext markdown cell
 # key: jmd
+# condition: (not (bound-and-true-p my/noema-jupyter-cell-mode))
 # --
 # %% [markdown] id=`(my/snippet-jupyter-cell-id)`
 # $0

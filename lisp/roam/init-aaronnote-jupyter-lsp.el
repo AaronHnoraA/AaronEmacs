@@ -504,6 +504,13 @@ own kernelspec registry instead of the Emacs host's registry."
   "Resolve the selected Jupyter kernel and call CALLBACK asynchronously."
   (when (and my/noema-jupyter-cell-mode
              (derived-mode-p 'python-mode 'python-ts-mode))
+    (if (and (fboundp 'remote-jupyter-file-name-p)
+             (remote-jupyter-file-name-p
+              (or my/noema-jupyter-cell-source-file buffer-file-name)))
+        (list :unsupported
+              (my/language-server-runtime-fallback-create
+               :reason "Jupyter Contents exposes files and kernel completion, but no language-server process"
+               :expected t))
     (let* ((origin (current-buffer))
            (kernel my/noema-jupyter-cell-kernel)
            (session my/noema-jupyter-cell-session)
@@ -534,7 +541,7 @@ own kernelspec registry instead of the Emacs host's registry."
           ;; again on the target instead of permanently falling back.
           (my/noema-jupyter-cell--lsp-discover-and-probe
            origin source context root kernel session base-environment callback))
-        'pending))))
+        'pending)))))
 
 (defun my/noema-jupyter-cell-lsp-runtime-changing ()
   "Detach from the old kernel runtime before cell metadata changes."

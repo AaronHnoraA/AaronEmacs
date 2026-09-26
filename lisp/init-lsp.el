@@ -2343,9 +2343,13 @@ only enforce process termination; they never send a second shutdown RPC."
 (defun my/language-server--ensure-after-runtime ()
   "Start the preferred backend after runtime preparation has completed."
   (interactive)
-  (pcase (my/language-server-preferred-backend)
+  (if (and (remote-fs-file-name-p default-directory)
+           (not (remote-routes "emacs-file" 'process-async
+                               (remote-context default-directory))))
+      (message "Language server unavailable: this target provides files but no processes")
+    (pcase (my/language-server-preferred-backend)
     ('lsp-mode (my/lsp-mode-ensure))
-    ('disabled (message "Language server disabled for this project"))))
+    ('disabled (message "Language server disabled for this project")))))
 
 (defun my/language-server--runtime-ready (_runtime error)
   "Resume startup after resolving a runtime, reporting fallback ERROR."
@@ -2763,6 +2767,21 @@ The normal LSP timeout remains in effect for other requests."
     (setq company-show-numbers nil))
   (setq-default company-backends my/company-lsp-backends))
 
+(defun my/company-drop-shadowing-capf-h ()
+  "Drop the bare `company-capf' lsp-mode puts in front of our groups.
+`lsp-completion-mode' adjoins `company-capf' as a standalone first backend.
+It claims every prefix, even with no candidates, so the configured group
+that already contains CAPF never runs and its `:with company-yasnippet'
+templates (C `..', notebook `jcode'/`jmd') never reach the popup."
+  (when (and (bound-and-true-p lsp-completion-mode)
+             (eq (car-safe company-backends) 'company-capf)
+             (seq-some (lambda (backend)
+                         (and (consp backend) (memq 'company-capf backend)))
+                       (cdr company-backends)))
+    (setq-local company-backends (cdr company-backends))))
+
+(add-hook 'lsp-completion-mode-hook #'my/company-drop-shadowing-capf-h 90)
+
 (with-eval-after-load 'esh-mode
   (add-hook 'eshell-mode-hook #'my/company-setup-shell-backends))
 
@@ -2776,7 +2795,33 @@ The normal LSP timeout remains in effect for other requests."
           (condition-case-unless-debug nil
               (apply fn command arg args)
             (error nil)))
-      (apply fn command arg args))))
+      (apply fn command arg args)))
+
+  (advice-add 'company-yasnippet :around
+              #'my/company--typed-key-at-empty-prefix-a))
+
+(defun my/company--typed-key-at-empty-prefix-a (fn command &optional arg &rest args)
+  "At an empty prefix, let template backend FN offer only keys just typed.
+After a trigger character such as `.' or `->' the group prefix is empty and
+Yasnippet or tempo would otherwise list every template beside member
+completions.  Punctuation keys like C `..' still appear because they end at
+point; a one-character key such as Python's `.' would match every trigger,
+so it stays reachable only by explicit expansion.  COMMAND, ARG and ARGS are
+the Company backend arguments."
+  (let ((result (apply fn command arg args)))
+    (if (and (eq command 'candidates) (equal arg ""))
+        (let ((bol (line-beginning-position)))
+          (seq-filter
+           (lambda (candidate)
+             (let ((key (substring-no-properties candidate)))
+               (and (> (length key) 1)
+                    (looking-back (regexp-quote key) bol))))
+           result))
+      result)))
+
+(with-eval-after-load 'company-tempo
+  (advice-add 'company-tempo :around
+              #'my/company--typed-key-at-empty-prefix-a))
 
 (defconst my/company-tooltip-frontends
   '(company-pseudo-tooltip-frontend

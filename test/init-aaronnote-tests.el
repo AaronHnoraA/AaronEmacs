@@ -2124,6 +2124,40 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
          (my/noema-jupyter-server--workspaces (make-hash-table :test #'equal)))
      ,@body))
 
+(ert-deftest my/noema-jupyter-cell-raw-snippet-action-uses-noema-id-owner ()
+  (with-temp-buffer
+    (insert "# %% id=cell-a\njraw")
+    (goto-char (point-max))
+    (setq-local my/noema-jupyter-cell-mode t)
+    (let (mutation)
+      (cl-letf (((symbol-function 'save-buffer) #'ignore)
+                ((symbol-function 'my/noema-jupyter-cell--mutate)
+                 (lambda (operation &optional extra)
+                   (setq mutation (list operation extra)))))
+        (should (my/noema-jupyter-cell-expand-snippet-action)))
+      (should (equal mutation
+                     '("insertBelow" ((cellType . "raw")))))
+      (should-not (string-match-p "jraw" (buffer-string)))
+      ;; The Emacs action deliberately supplies no id; Noema generates it.
+      (should-not (assq 'cellId (cadr mutation))))))
+
+
+;;; Remote Jupyter servers.
+;;
+;; The rule these guard is the Remote-first one: a server that lives on a
+;; Target must be reached through a routed channel, and a Target that cannot
+;; provide one must produce an error — never a silent client-side connection,
+;; which would either fail confusingly or reach a different server that happens
+;; to answer on that port here.
+
+(defmacro my/noema-jupyter-server-tests--with (servers &rest body)
+  "Evaluate BODY with SERVERS configured and no forwards held open."
+  (declare (indent 1))
+  `(let ((my/noema-jupyter-servers ,servers)
+         (my/noema-jupyter-server--forwards (make-hash-table :test #'equal))
+         (my/noema-jupyter-server--workspaces (make-hash-table :test #'equal)))
+     ,@body))
+
 (ert-deftest my/noema-jupyter-server-local-target-is-used-verbatim ()
   (my/noema-jupyter-server-tests--with
       '((:id "lab" :url "http://127.0.0.1:8888/" :target "local" :auth none))
@@ -2715,3 +2749,13 @@ selection untouched, so the pane keeps being reported as background."
 
 (provide 'init-aaronnote-tests)
 ;;; init-aaronnote-tests.el ends here
+
+(ert-deftest my/noema-jupyter-signing-key-uses-csprng-when-device-read-is-rejected ()
+  (cl-letf (((symbol-function 'insert-file-contents-literally)
+             (lambda (&rest _) (signal 'file-error '("not a regular file"))))
+            ((symbol-function 'random)
+             (lambda (&rest _) (ert-fail "Kernel key must not use Emacs random"))))
+    (let ((first (my/noema-jupyter--signing-key))
+          (second (my/noema-jupyter--signing-key)))
+      (should (string-match-p "\\`[0-9a-f]\\{64\\}\\'" first))
+      (should-not (equal first second)))))

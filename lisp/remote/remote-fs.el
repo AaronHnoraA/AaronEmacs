@@ -1479,7 +1479,11 @@ stock `executable-find' with REMOTE (agent-shell, acp.el, lsp-mode clients)
 would miss every tool a project environment adds.  Backend entries the
 capsule does not list, such as TRAMP's trailing `default-directory', keep
 their place after it."
-  (let* ((backend (remote-fs--call-routed 'exec-path nil))
+  ;; File-only APIs have no executables; optional editor probes should see
+  ;; an empty PATH, never the client's PATH or a file-visit error.
+  (when (remote-fs--routes "emacs-file" 'environment
+                           (remote-context default-directory))
+   (let* ((backend (remote-fs--call-routed 'exec-path nil))
          (path
           (and (fboundp 'remote-environment-resolve)
                (ignore-errors
@@ -1497,7 +1501,7 @@ their place after it."
                  (lambda (directory)
                    (member (funcall normalize directory)
                            (mapcar normalize capsule)))
-                 backend))))))
+                 backend)))))))
 
 (defun remote-fs-handle-make-process (&rest plist)
   "Route official `make-process' PLIST through the remote process API.
@@ -1797,6 +1801,12 @@ returning functions on the full contract path."
          (retry-safe
           (remote-file-operation-spec-retry-safe spec))
          last-error result done)
+    (unless routes
+      (signal 'file-error
+              (list (format "No route supports %s (%s) on target %s"
+                            operation capability
+                            (remote-context-target-id context))
+                    logical)))
     (when (and (null (cdr routes))
                (memq operation remote-fs--native-metadata-operations))
       (let ((fast (remote-fs--native-metadata-call
@@ -1844,8 +1854,14 @@ returning functions on the full contract path."
                           effective-default)))
                    (physical-result
                     (let ((remote-fs-current-retry-safe-query
-                           retry-safe-query))
-                      (if provider
+                           retry-safe-query)
+                          (file-operation
+                           (when-let* ((backend (remote-route-backend route)))
+                             (remote-backend-file-operation-function backend))))
+                      (cond
+                       (file-operation
+                        (funcall file-operation operation args route context))
+                       (provider
                           (condition-case _accelerator-error
                               (prog1
                                   (remote-operation-provider-call
@@ -1859,9 +1875,9 @@ returning functions on the full contract path."
                                  :target (remote-route-target-id route)))
                             (remote-backend-unsupported
                              (remote-fs--call-underlying
-                              operation translated effective-default)))
-                        (remote-fs--call-underlying
-                         operation translated effective-default)))))
+                              operation translated effective-default))))
+                       (t (remote-fs--call-underlying
+                           operation translated effective-default))))))
               (setq result
                     (remote-fs--transform-result
                      spec
@@ -1976,14 +1992,31 @@ returning functions on the full contract path."
   ;; they explicitly need a native local display.
   file-name)
 
+(defun remote-fs--foreign-name-p (name)
+  "Return non-nil when NAME already names a file outside a bare localname.
+This is the minibuffer compatibility boundary: after `//' restarts a path,
+the remainder may be another logical, URI, or TRAMP spelling."
+  (or (remote-fs-file-name-p name)
+      (string-match-p "\\`fs://" name)
+      (ignore-errors (file-remote-p name))))
+
 (defun remote-fs-handle-substitute-in-file-name (file-name)
-  "Substitute environment variables in logical FILE-NAME."
-  (remote-fs--make-lexical-file-name
-   (remote-fs-target-id file-name)
-   (let ((inhibit-file-name-handlers
-          (cons #'tramp-file-name-handler inhibit-file-name-handlers))
-         (inhibit-file-name-operation 'substitute-in-file-name))
-     (substitute-in-file-name (remote-fs-localname file-name)))))
+  "Substitute environment variables in logical FILE-NAME.
+Emacs restarts a name at `//' and `/~'.  A restart at `~' leaves the target:
+tilde always denotes the Emacs client's home, as it does for every absolute
+native name.  A restart at another `/fs:', `fs://', or TRAMP spelling names
+that file instead of nesting it under this target.  A restart at a plain
+absolute path stays on this target, matching TRAMP's `//' convention."
+  (let ((substituted
+         (let ((inhibit-file-name-handlers
+                (cons #'tramp-file-name-handler inhibit-file-name-handlers))
+               (inhibit-file-name-operation 'substitute-in-file-name))
+           (substitute-in-file-name (remote-fs-localname file-name)))))
+    (if (or (string-prefix-p "~" substituted)
+            (remote-fs--foreign-name-p substituted))
+        substituted
+      (remote-fs--make-lexical-file-name
+       (remote-fs-target-id file-name) substituted))))
 
 (defun remote-fs-handle-file-truename (file-name)
   "Return logical truename for FILE-NAME."

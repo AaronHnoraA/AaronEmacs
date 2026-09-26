@@ -32,6 +32,20 @@
   "Return a shell-safe command string for PROGRAM."
   (shell-quote-argument (my/executable-or-name program)))
 
+(defun my/vterm-create-hidden (name)
+  "Create the VTerm buffer NAME without showing it in any existing window.
+`vterm' switches the selected window to the new buffer.  Wrapping it in
+`save-window-excursion' hides that visually but leaves the terminal in the
+window's buffer history, so the window later \"goes back\" into it (after
+quitting Dirvish or killing a buffer), and when that terminal exits it falls
+back further, typically to the Dashboard.  Suppress the display instead; the
+caller shows the buffer where it belongs."
+  (require 'vterm)
+  (let ((display-buffer-overriding-action
+         '(display-buffer-no-window (allow-no-window . t))))
+    (save-window-excursion
+      (vterm name))))
+
 (defun my/vterm-wrap--command-name (command)
   "Return a short display name derived from COMMAND."
   (let* ((candidate
@@ -93,8 +107,7 @@ Examples:
          (name (or buffer-name
                    (format "*vterm:wrap:%s*"
                            (my/vterm-wrap--command-name command))))
-         (buffer (save-window-excursion
-                   (vterm (generate-new-buffer-name name)))))
+         (buffer (my/vterm-create-hidden (generate-new-buffer-name name))))
     (with-current-buffer buffer
       (setq-local vterm-kill-buffer-on-exit t))
     (if (fboundp 'my/vterm-send-command)

@@ -299,6 +299,19 @@ jupyter-test:
 	$(BATCH) -l test/init-aaronnote-jupyter-notebook-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-runtime-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-jupyter-board-tests.el -f ert-run-tests-batch-and-exit
+	$(REMOTE_TEST_BATCH) -l test/remote-jupyter-tests.el -f ert-run-tests-batch-and-exit
+
+.PHONY: jupyter-live-smoke
+jupyter-live-smoke:
+	$(BATCH) -l test/jupyter-remote-live-smoke.el
+
+.PHONY: jupyter-contents-live-smoke
+jupyter-contents-live-smoke:
+	$(BATCH) -l test/jupyter-contents-live-smoke.el
+
+.PHONY: jupyter-debug-live-smoke
+jupyter-debug-live-smoke:
+	$(BATCH) -l test/jupyter-debug-live-smoke.el
 
 agenda-test:
 	$(EMACS) --batch -Q -L site-lisp/noema/lisp -l noema-agenda-tests -l noema-agenda-attention-tests -l noema-agenda-capture-tests -f ert-run-tests-batch-and-exit

@@ -38,6 +38,7 @@ channels.
 - [publish-workflow.md](publish-workflow.md) Personal site: where the hand-written pages live, the `make publish*` targets, the completeness/licence check, and the deploy path.
 - [lsp-workflow.org](lsp-workflow.org) Language-server routing, Hub/Doctor tooling, and the maintenance model.
 - [jupyter-workflow.org](jupyter-workflow.org) Kernel sources (kernelspec, `attach:`, remote Jupyter servers over HTTP(S)), protocol coverage, Remote routing rules, and the Jupyter Board.
+- [jupyter-parity.md](jupyter-parity.md) VS Code alignment register, filesystem placement distinctions, Aaron-PC live evidence, and remaining acceptance work.
 - [neopyter-protocol-notes.md](neopyter-protocol-notes.md) Historical: the Neopyter JupyterLab wire protocol. The client was removed; kept as reference only.
 
 ## Maintenance

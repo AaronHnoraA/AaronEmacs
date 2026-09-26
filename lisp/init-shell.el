@@ -14,6 +14,7 @@
 (defvar eshell-buffer-name)
 
 (declare-function my/terminal-cd-command "init-funcs" (directory))
+(declare-function my/vterm-create-hidden "init-utils" (name))
 (declare-function my/terminal-home-directory "init-funcs" (&optional directory))
 (declare-function my/terminal-normalize-directory "init-funcs" (directory))
 (declare-function comint-simple-send "comint" (proc string))
@@ -604,9 +605,7 @@ are supplied here."
          (default-directory directory)
          (my/terminal-startup-cd-inhibited (and shell-command t))
          (vterm-shell (or shell-command vterm-shell))
-         (buffer
-          (save-window-excursion
-            (vterm (remote-terminal-name terminal)))))
+         (buffer (my/vterm-create-hidden (remote-terminal-name terminal))))
     (when (and popup
                (fboundp 'my/vterm-popup-display-buffer))
       (my/vterm-popup-display-buffer buffer))

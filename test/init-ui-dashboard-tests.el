@@ -12,6 +12,10 @@
 (require 'cl-lib)
 (require 'init-ui)
 
+;; Never touch the real session cache from tests.
+(setq my/dashboard-agenda-cache-file
+      (make-temp-file "dashboard-agenda-test-" nil ".eld"))
+
 (ert-deftest my/dashboard-agenda-reports-a-retryable-host-failure ()
   "A failed Agenda answer must replace `loading' with a retryable line."
   (with-temp-buffer
@@ -75,6 +79,59 @@
       (should (= (alist-get 'open
                             (alist-get 'stats my/dashboard--agenda-snapshot))
                  1)))))
+
+(ert-deftest my/dashboard-unchanged-agenda-is-not-rendered-twice ()
+  "An equal host answer keeps the rendered snapshot, so nothing rebuilds."
+  (require 'noema-agenda)
+  (let* ((snapshot '((stats . ((open . 1))) (todos . []) (days . [])))
+         (my/dashboard--agenda-snapshot snapshot)
+         (my/dashboard--agenda-error nil)
+         (my/dashboard--agenda-request-pending nil)
+         (my/dashboard--agenda-waiters nil)
+         (my/dashboard--agenda-dirty t)
+         (my/dashboard--agenda-cache-loaded t)
+         (my/dashboard--rendered-agenda 'unrendered)
+         callback changed-answer)
+    (with-temp-buffer (my/dashboard-insert-agenda))
+    (should (my/dashboard--rendered-current-p))
+    (cl-letf (((symbol-function 'noema-agenda-dashboard-query)
+               (lambda (cb) (setq callback cb))))
+      (my/dashboard--refresh-agenda-cache
+       (lambda (changed) (setq changed-answer (list changed))))
+      (funcall callback (copy-tree snapshot) nil))
+    (should (equal changed-answer '(nil)))
+    (should (eq my/dashboard--agenda-snapshot snapshot))
+    (should (my/dashboard--rendered-current-p))))
+
+(ert-deftest my/dashboard-startup-renders-the-last-session-agenda ()
+  "The first render uses the saved snapshot; a changed answer is saved."
+  (let* ((my/dashboard-agenda-cache-file
+          (make-temp-file "dashboard-agenda-seed-" nil ".eld"))
+         (saved '((stats . ((open . 7) (doing . 0) (blocked . 0) (overdue . 0)))
+                  (todos . []) (days . [])))
+         (my/dashboard--agenda-snapshot nil)
+         (my/dashboard--agenda-error nil)
+         (my/dashboard--agenda-cache-loaded nil)
+         (my/dashboard--rendered-agenda 'unrendered))
+    (unwind-protect
+        (progn
+          (my/dashboard--save-agenda-cache saved)
+          (with-temp-buffer
+            (my/dashboard-insert-agenda)
+            (goto-char (point-min))
+            (should (search-forward "7 open" nil t)))
+          (should (equal my/dashboard--agenda-snapshot saved))
+          ;; A different answer replaces the file for the next session.
+          (let ((my/dashboard--agenda-request-pending nil))
+            (my/dashboard--finish-agenda-refresh
+             '((stats . ((open . 2))) (todos . []) (days . [])) nil))
+          (should (= 2 (alist-get 'open
+                                  (alist-get 'stats
+                                             (with-temp-buffer
+                                               (insert-file-contents
+                                                my/dashboard-agenda-cache-file)
+                                               (read (current-buffer))))))))
+      (delete-file my/dashboard-agenda-cache-file))))
 
 (ert-deftest my/dashboard-refresh-restores-chunlian-after-content ()
   "A complete Dashboard refresh clears old overlays and restores them last."

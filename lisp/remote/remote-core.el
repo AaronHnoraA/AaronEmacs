@@ -273,9 +273,10 @@ target projection before the framework is entered."
 (defun remote-client-process-environment ()
   "Return a fresh process environment for explicit client placement.
 
-Target buffers intentionally project target-native HOME, PATH, and other
-variables.  Client helpers such as SSH, local protocol proxies, and UI
-processes must use this boundary instead of inheriting those target values.
+Target buffers intentionally project target-native PATH and other
+variables (HOME stays client-owned).  Client helpers such as SSH, local
+protocol proxies, and UI processes must use this boundary instead of
+inheriting those target values.
 
 The last fallback is the value outside every dynamic binding.  A consumer
 that `let'-binds a target projection -- `python-shell-with-environment',

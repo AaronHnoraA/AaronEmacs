@@ -14,6 +14,7 @@
 
 (declare-function my/terminal-normalize-directory "init-funcs" (directory))
 (declare-function my/vterm-send-command "init-shell" (buffer command &optional retries))
+(declare-function my/vterm-create-hidden "init-utils" (name))
 (declare-function my/vterm-workspace-id "init-shell" (&optional directory))
 (declare-function remote-terminal-p "remote-terminal" (object))
 (declare-function remote-terminal-put-metadata "remote-terminal"
@@ -205,7 +206,9 @@ CURRENT is the currently displayed popup buffer."
           ;; start it at the project root on any target, so it finds the
           ;; project's instructions and tools; outside a project, here.
           (file-name-as-directory
-           (or (my/vterm-popup--project-root) default-directory)))
+           (or (and (fboundp 'my/project-current-root)
+                    (my/project-current-root))
+               default-directory)))
          (workspace (my/vterm-popup--requested-workspace-id directory))
          (config (or (noema-agent-acp-config-for agent) (user-error "No agent-shell configuration for %s" agent)))
          ;; Protect the existing temporary popup while ACP initializes.
@@ -474,8 +477,7 @@ Use BUFFER-NAME when non-nil."
          (target-name (generate-new-buffer-name
                        (or buffer-name
                            (my/vterm-popup--next-buffer-name)))))
-    (with-current-buffer (save-window-excursion
-                           (vterm target-name))
+    (with-current-buffer (my/vterm-create-hidden target-name)
       (setq-local my/vterm-popup-instance-p t)
       (setq-local my/vterm-popup-fixed nil)
       (setq-local

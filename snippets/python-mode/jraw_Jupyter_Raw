@@ -1,6 +1,7 @@
 # -*- mode: snippet -*-
 # name: Jupytext raw cell
 # key: jraw
+# condition: (not (bound-and-true-p my/noema-jupyter-cell-mode))
 # --
 # %% [raw] id=`(my/snippet-jupyter-cell-id)`
 # $0
