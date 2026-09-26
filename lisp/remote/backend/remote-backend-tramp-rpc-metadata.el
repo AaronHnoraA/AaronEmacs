@@ -41,6 +41,9 @@
 (declare-function tramp-tramp-file-p "tramp" (name))
 (declare-function tramp-rpc--call-batch "tramp-rpc" (vec requests))
 (declare-function tramp-rpc-file-name-p "tramp-rpc" (filename))
+(declare-function remote-fs-notification-proves-unchanged-p "remote-fs"
+                  (&optional buffer))
+(declare-function remote-fs-call-verified-stat "remote-fs" (function))
 (declare-function tramp-rpc--cache-file-stat-result "tramp-rpc-magit"
                   (vec localname stat &optional lstat))
 (declare-function tramp-rpc--cache-put "tramp-rpc-magit" (cache key value))
@@ -56,6 +59,7 @@
 (defvar tramp-rpc--file-truename-cache)
 (defvar tramp-rpc-protocol-error-file-not-found)
 (defvar tramp-time-dont-know)
+(defvar remote-backend-tramp-rpc--in-place-write-file)
 
 (defcustom remote-backend-tramp-rpc-metadata-scope t
   "Bound RPC visit and save metadata to one batched round trip.
@@ -89,6 +93,7 @@ after a save, such as a formatter or `git checkout' on the target."
     (tramp-rpc--invalidate-cache-for-path . (1 . 1))
     (tramp-rpc--invalidate-cache-for-subtree . (1 . 1))
     (tramp-rpc-handle-locate-dominating-file . (2 . 2))
+    (tramp-rpc-handle-file-truename . (1 . 1))
     (tramp-handle-set-visited-file-modtime . (0 . 1))
     (tramp-handle-verify-visited-file-modtime . (0 . 1))
     (tramp-rpc-file-name-p . (1 . 1))
@@ -145,6 +150,15 @@ another operation."
   (let ((remote-backend-tramp-rpc-metadata--scope
          (remote-backend-tramp-rpc-metadata--make-scope)))
     (apply function arguments)))
+
+(defun remote-backend-tramp-rpc-metadata--outer-scope-a
+    (function &rest arguments)
+  "Run FUNCTION with ARGUMENTS in a scope unless one is already active.
+A programmatic `write-region' gets the same one-batch metadata as a save,
+while a write inside `basic-save-buffer' keeps the save's prefetched scope."
+  (if remote-backend-tramp-rpc-metadata--scope
+      (apply function arguments)
+    (apply #'remote-backend-tramp-rpc-metadata--scope-a function arguments)))
 
 (defun remote-backend-tramp-rpc-metadata--host (vec)
   "Return a connection identity for VEC."
@@ -210,6 +224,28 @@ which spelling it answers."
   (when answer
     (tramp-rpc--cache-file-stat-result vec localname (car answer) lstat)))
 
+(defun remote-backend-tramp-rpc-metadata--seed-missing-truename
+    (vec localname)
+  "Seed the truename of LOCALNAME on VEC, which lstat reported missing.
+tramp-rpc's truename handler answers a missing file by chasing symlinks
+from the name itself; with no file there is no link, so the answer is the
+name.  Getting there costs a failing `file.truename' round trip whose error
+TRAMP prints (\"File is missing\") before the handler recovers -- once
+for every new file written, such as each atomic notebook save's staging
+file."
+  (unless (or (string-prefix-p "/:" localname)
+              (string-suffix-p "/" localname)
+              (tramp-tramp-file-p localname))
+    (tramp-rpc--cache-put
+     tramp-rpc--file-truename-cache
+     (expand-file-name (tramp-make-tramp-file-name vec localname))
+     (tramp-make-tramp-file-name vec (directory-file-name localname)))))
+
+(defun remote-backend-tramp-rpc-metadata--spellings (directory)
+  "Return DIRECTORY's cache spellings, with and without its final slash."
+  (delete-dups (list (file-name-as-directory directory)
+                     (directory-file-name directory))))
+
 (defun remote-backend-tramp-rpc-metadata--prefetch (vec localname)
   "Fetch metadata for LOCALNAME on VEC and its directory in one round trip.
 The batch holds the file's stat, lstat and truename and its directory's stat
@@ -240,12 +276,16 @@ charge."
       (remote-backend-tramp-rpc-metadata--count :batches)
       (pcase-let ((`(,stat ,lstat ,truename ,dir-stat ,dir-lstat) results))
         (when directory-path
-          (remote-backend-tramp-rpc-metadata--seed-stat
-           vec directory (remote-backend-tramp-rpc-metadata--answer dir-stat)
-           nil)
-          (remote-backend-tramp-rpc-metadata--seed-stat
-           vec directory (remote-backend-tramp-rpc-metadata--answer dir-lstat)
-           t))
+          ;; Callers spell a directory both ways (`file-writable-p' with the
+          ;; slash, `file-modes' without), and the cache keys differ.
+          (dolist (spelling (remote-backend-tramp-rpc-metadata--spellings
+                             directory))
+            (remote-backend-tramp-rpc-metadata--seed-stat
+             vec spelling
+             (remote-backend-tramp-rpc-metadata--answer dir-stat) nil)
+            (remote-backend-tramp-rpc-metadata--seed-stat
+             vec spelling
+             (remote-backend-tramp-rpc-metadata--answer dir-lstat) t)))
         (let ((answers
                (mapcar #'remote-backend-tramp-rpc-metadata--answer
                        (list stat lstat))))
@@ -259,11 +299,18 @@ charge."
                   (remote-backend-tramp-rpc-metadata--host vec))
             (push (cons localname (cons (caar answers) (car (cadr answers))))
                   (remote-backend-tramp-rpc-metadata--scope-stats scope))))
-        (unless (or (remote-backend-tramp-rpc-metadata--batch-error-p lstat)
-                    (remote-backend-tramp-rpc-metadata--batch-error-p
-                     truename))
+        (cond
+         ;; The server answers a missing file's stat with nil, and its
+         ;; truename with a file-not-found error; accept either spelling.
+         ((or (null lstat)
+              (remote-backend-tramp-rpc-metadata--missing-p lstat))
+          (remote-backend-tramp-rpc-metadata--seed-missing-truename
+           vec localname))
+         ((not (or (remote-backend-tramp-rpc-metadata--batch-error-p lstat)
+                   (remote-backend-tramp-rpc-metadata--batch-error-p
+                    truename)))
           (remote-backend-tramp-rpc-metadata--seed-truename
-           vec localname lstat truename))))))
+           vec localname lstat truename)))))))
 
 (defun remote-backend-tramp-rpc-metadata--cached-p (vec localname lstat)
   "Return non-nil when tramp-rpc holds a live stat for LOCALNAME on VEC."
@@ -342,6 +389,10 @@ Only the comparison of a known modtime changes; a missing file, an unknown
 modtime and a disconnected buffer keep TRAMP's own answers."
   (with-current-buffer (or buffer (current-buffer))
     (let ((file buffer-file-name))
+      (if (and file
+               (fboundp 'remote-fs-notification-proves-unchanged-p)
+               (remote-fs-notification-proves-unchanged-p))
+          t
       (if (not (and remote-backend-tramp-rpc-exact-mtime
                     file
                     (tramp-rpc-file-name-p file)
@@ -354,7 +405,14 @@ modtime and a disconnected buffer keep TRAMP's own answers."
           (if (and attributes
                    (not (time-equal-p modtime tramp-time-dont-know)))
               (time-equal-p modtime (visited-file-modtime))
-            (funcall function buffer)))))))
+            (funcall function buffer))))))))
+
+(defun remote-backend-tramp-rpc-metadata--verified-a (function &optional buffer)
+  "Let FUNCTION's proof that BUFFER is unchanged arm its watch."
+  (with-current-buffer (or buffer (current-buffer))
+    (if (fboundp 'remote-fs-call-verified-stat)
+        (remote-fs-call-verified-stat (lambda () (funcall function buffer)))
+      (funcall function buffer))))
 
 ;;;; locate-dominating-file
 
@@ -420,10 +478,64 @@ change an answer."
               nil)
         (remote-backend-tramp-rpc-metadata-flush)))))
 
-(defun remote-backend-tramp-rpc-metadata--invalidate-path-a (filename)
-  "Forget FILENAME in the operation scope and in marker searches."
-  (remote-backend-tramp-rpc-metadata--forget filename)
-  (remote-backend-tramp-rpc-metadata--flush-name filename))
+(defun remote-backend-tramp-rpc-metadata--kept-directory-stats (filename)
+  "Return the parent directory stat entries an in-place rewrite keeps valid.
+Rewriting an existing regular file in place changes neither its directory's
+mode nor its mtime; only creation, deletion and renames do.  So when the
+verified in-place RPC write of FILENAME replaces a file the scope saw as a
+regular file, the directory's own stat entries survive the invalidation.
+Directory listings are still dropped."
+  (when-let* ((scope remote-backend-tramp-rpc-metadata--scope)
+              ((stringp filename))
+              ((equal (expand-file-name filename)
+                      remote-backend-tramp-rpc--in-place-write-file))
+              ((tramp-tramp-file-p filename))
+              (vec (tramp-dissect-file-name filename))
+              (localname (tramp-file-name-localname vec))
+              (entry (assoc localname
+                            (remote-backend-tramp-rpc-metadata--scope-stats
+                             scope)))
+              ((equal (alist-get 'type (cddr entry)) "file"))
+              (directory (file-name-directory localname)))
+    (let (kept)
+      (dolist (spelling (remote-backend-tramp-rpc-metadata--spellings
+                         directory))
+        (dolist (lstat '(nil t))
+          (let ((key (tramp-rpc--file-stat-cache-key vec spelling lstat)))
+            (when-let* ((cached (gethash key tramp-rpc--file-stat-cache)))
+              (push (cons key cached) kept)))))
+      kept)))
+
+(defun remote-backend-tramp-rpc-metadata--invalidate-path-a
+    (function filename)
+  "Call FUNCTION to invalidate FILENAME, forgetting it in the scope.
+Parent directory stats that an in-place rewrite cannot change are restored."
+  (let ((kept (remote-backend-tramp-rpc-metadata--kept-directory-stats
+               filename)))
+    (remote-backend-tramp-rpc-metadata--forget filename)
+    (remote-backend-tramp-rpc-metadata--flush-name filename)
+    (prog1 (funcall function filename)
+      (pcase-dolist (`(,key . ,cached) kept)
+        (puthash key cached tramp-rpc--file-stat-cache)))))
+
+(defun remote-backend-tramp-rpc-metadata--truename-a (function filename)
+  "Let FUNCTION's truename miss for FILENAME start the scope's batch.
+`write-region' asks for the truename before any stat, so the batch that
+also seeds this answer would otherwise come one round trip too late."
+  (let ((scope remote-backend-tramp-rpc-metadata--scope))
+    (when (and scope
+               remote-backend-tramp-rpc-metadata-scope
+               (not (remote-backend-tramp-rpc-metadata--scope-prefetched
+                     scope))
+               (not (eq remote-file-name-inhibit-cache t))
+               (stringp filename)
+               (tramp-tramp-file-p filename)
+               (not (gethash (expand-file-name filename)
+                             tramp-rpc--file-truename-cache)))
+      (let ((vec (tramp-dissect-file-name (expand-file-name filename))))
+        (remote-backend-tramp-rpc-metadata--prefetch
+         vec (tramp-file-name-localname vec))))
+    (funcall function filename)))
 
 (defun remote-backend-tramp-rpc-metadata--invalidate-subtree-a (directory)
   "Forget everything the operation scope and marker cache hold.
@@ -449,16 +561,22 @@ DIRECTORY is the invalidated subtree; any scope file may lie below it."
 (defconst remote-backend-tramp-rpc-metadata--advice
   '((find-file-noselect :around remote-backend-tramp-rpc-metadata--scope-a)
     (basic-save-buffer :around remote-backend-tramp-rpc-metadata--scope-a)
+    (write-region :around remote-backend-tramp-rpc-metadata--outer-scope-a)
     (tramp-rpc--call-file-stat
      :around remote-backend-tramp-rpc-metadata--stat-a)
     (tramp-handle-set-visited-file-modtime
      :around remote-backend-tramp-rpc-metadata--modtime-a)
     (tramp-handle-verify-visited-file-modtime
      :around remote-backend-tramp-rpc-metadata--verify-a)
+    ;; Outermost, so a proof by the notification itself stays a no-op.
+    (tramp-handle-verify-visited-file-modtime
+     :around remote-backend-tramp-rpc-metadata--verified-a)
     (tramp-rpc-handle-locate-dominating-file
      :around remote-backend-tramp-rpc-metadata--locate-a)
     (tramp-rpc--invalidate-cache-for-path
-     :before remote-backend-tramp-rpc-metadata--invalidate-path-a)
+     :around remote-backend-tramp-rpc-metadata--invalidate-path-a)
+    (tramp-rpc-handle-file-truename
+     :around remote-backend-tramp-rpc-metadata--truename-a)
     (tramp-rpc--invalidate-cache-for-subtree
      :before remote-backend-tramp-rpc-metadata--invalidate-subtree-a)
     (tramp-flush-file-properties

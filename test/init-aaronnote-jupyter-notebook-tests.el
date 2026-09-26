@@ -213,6 +213,27 @@
         (should (equal (plist-get projected :id) "intro-cell"))
         (should (equal (plist-get projected :source) "# Heading\ntext"))))))
 
+(ert-deftest my/noema-jupyter-notebook-projects-markdown-blank-lines ()
+  "A blank markdown line renders as a bare comment prefix and round-trips.
+Rendering it used to insert nil, which aborted the projection and left the
+notebook in Fundamental mode without the Jupyter UI or LSP."
+  (let* ((document (my/noema-jupyter-notebook-test--document))
+         (cell (make-hash-table :test #'equal)))
+    (puthash "cell_type" "markdown" cell)
+    (puthash "id" "notes" cell)
+    (puthash "metadata" (make-hash-table :test #'equal) cell)
+    (puthash "source" "# s\n\ntext" cell)
+    (puthash "cells" (vector cell) document)
+    (with-temp-buffer
+      (setq-local my/noema-jupyter-notebook--document document)
+      (my/noema-jupyter-notebook--render document)
+      (should (equal (buffer-string)
+                     "# %% [markdown] id=notes\n# # s\n#\n# text\n\n"))
+      (should (equal (plist-get (car (my/noema-jupyter-notebook-projection-cells
+                                      document))
+                                :source)
+                     "# s\n\ntext")))))
+
 (ert-deftest my/noema-jupyter-notebook-preserves-missing-ids-in-ordinary-file ()
   (let ((file (make-temp-file "ordinary-notebook-" nil ".ipynb")) buffer)
     (unwind-protect

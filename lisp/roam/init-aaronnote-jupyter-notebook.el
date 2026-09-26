@@ -321,7 +321,7 @@ stale `language_info'; when absent, infer a useful family from KERNEL."
           (cl-loop for tail on lines
                    for line = (car tail)
                    for last = (null (cdr tail))
-                   do (insert prefix (unless (string-empty-p line) " ") line)
+                   do (insert prefix (if (string-empty-p line) "" " ") line)
                    unless last do (insert "\n")))
       (insert source))
     ;; These separators are projection-only.  Their properties let saving

@@ -63,6 +63,7 @@
     (tramp-rpc--acl-enabled-p . (1 . 1))
     (tramp-rpc--selinux-enabled-p . (1 . 1))
     (tramp-rpc-handle-write-region . (3 . 7))
+    (tramp-rpc-handle-set-file-uid-gid . (1 . 3))
     (tramp-rpc--deliver-process-output . (4 . 4))
     (tramp-rpc--connection-transport-death . (3 . 3))
     (tramp-rpc-deploy--arch-to-rust-target . (1 . 1)))
@@ -205,10 +206,10 @@ installed only for the verified tramp-rpc release and private call shapes."
   :group 'remote)
 
 (defcustom remote-backend-tramp-rpc-skip-in-place-metadata-roundtrip t
-  "Skip redundant ACL/SELinux read and restore on verified in-place writes.
+  "Skip redundant ACL/SELinux/ownership round trips on in-place writes.
 The pinned tramp-rpc server truncates an existing inode with `file.write',
-which preserves its extended attributes.  Unknown client or Emacs versions
-retain TRAMP's ordinary metadata handling."
+which preserves its extended attributes and owner.  Unknown client or Emacs
+versions retain TRAMP's ordinary metadata handling."
   :type 'boolean
   :group 'remote)
 
@@ -517,6 +518,21 @@ COMMAND and ARGUMENTS are the exact upstream probe for this release."
          (and (stringp filename) (expand-file-name filename))))
     (apply function start end filename optional)))
 
+(defun remote-backend-tramp-rpc--uid-gid-in-place-a
+    (function filename &optional uid gid)
+  "Skip FUNCTION's chown of FILENAME after the verified in-place RPC write.
+TRAMP's write skeleton chowns every non-visiting write to the owner it read
+before writing.  The 0.13.1 server truncates the existing inode, so that
+owner is already in place; a new file keeps the server's default owner and
+group, which is what a local Emacs write produces.  UID and GID are passed
+through unchanged for every other caller."
+  (if (and remote-backend-tramp-rpc-skip-in-place-metadata-roundtrip
+           remote-backend-tramp-rpc--in-place-write-file
+           (equal (expand-file-name filename)
+                  remote-backend-tramp-rpc--in-place-write-file))
+      nil
+    (funcall function filename uid gid)))
+
 (defun remote-backend-tramp-rpc--extended-attributes-in-place-a
     (function filename)
   "Keep FILENAME's existing metadata on the verified in-place RPC write.
@@ -758,6 +774,10 @@ already terminal.  An active process or any other error still propagates."
         (advice-remove
          'file-extended-attributes
          #'remote-backend-tramp-rpc--extended-attributes-in-place-a))
+      (when (fboundp 'tramp-rpc-handle-set-file-uid-gid)
+        (advice-remove
+         'tramp-rpc-handle-set-file-uid-gid
+         #'remote-backend-tramp-rpc--uid-gid-in-place-a))
       (when (and verified
                  remote-backend-tramp-rpc-skip-in-place-metadata-roundtrip
                  (= emacs-major-version 31)
@@ -770,7 +790,12 @@ already terminal.  An active process or any other error still propagates."
          #'remote-backend-tramp-rpc--write-region-in-place-a)
         (advice-add
          'file-extended-attributes :around
-         #'remote-backend-tramp-rpc--extended-attributes-in-place-a))
+         #'remote-backend-tramp-rpc--extended-attributes-in-place-a)
+        (when (remote-backend-tramp-rpc--private-compatible-p
+               'tramp-rpc-handle-set-file-uid-gid)
+          (advice-add
+           'tramp-rpc-handle-set-file-uid-gid :around
+           #'remote-backend-tramp-rpc--uid-gid-in-place-a)))
       (when (fboundp 'tramp-rpc--deliver-process-output)
         (advice-remove
          'tramp-rpc--deliver-process-output

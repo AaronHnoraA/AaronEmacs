@@ -1866,8 +1866,15 @@ returning functions on the full contract path."
                                 (not (remote-file-operation-spec-result-projector
                                       spec)))))
                       (remote-connection-ensure route context)))
+                   ;; The route belongs to the operated file.  A buffer on
+                   ;; another target (a remote Dired touching a local cache
+                   ;; file, or the reverse) must not have its directory
+                   ;; projected through it: that raises "Native backend cannot
+                   ;; access target" or invents a cwd on the wrong machine.
                    (physical-default
-                    (when (remote-fs-file-name-p default-directory)
+                    (when (and (remote-fs-file-name-p default-directory)
+                               (equal (remote-fs-target-id default-directory)
+                                      (remote-route-target-id route)))
                       (remote-project-file-name
                        default-directory route)))
                    (translated
@@ -2069,6 +2076,68 @@ therefore independent of the physical link used for that read."
     (remote-fs--run-real-buffer-operation
      #'set-visited-file-modtime (list time-list))))
 
+(defcustom remote-fs-notify-backed-lock-check t
+  "Let a live change notification answer the first-edit supersession check.
+When a buffer first becomes modified, `lock-file' asks whether its file
+changed on disk, which costs a synchronous round trip on a remote file --
+right at the first keystroke after every visit or save.  If the buffer's
+auto-revert watch is valid and has reported nothing since its last check,
+the file is known unchanged.  A save still stats the file, so an event that
+was in flight at that keystroke is caught before it can be overwritten."
+  :type 'boolean
+  :group 'remote)
+
+(defvar remote-fs--lock-check nil
+  "Non-nil while `lock-file' checks the current buffer for supersession.")
+
+(defvar auto-revert-notify-watch-descriptor)
+(defvar auto-revert-notify-modified-p)
+
+(defun remote-fs--lock-file-a (function file)
+  "Call FUNCTION for FILE with the lock-time supersession scope active."
+  (let ((remote-fs--lock-check t))
+    (funcall function file)))
+
+(defvar remote-fs--notify-generation 0
+  "Count of auto-revert notification events delivered so far.")
+
+(defun remote-fs--count-notify-a (&rest _)
+  "Count one auto-revert notification event."
+  (setq remote-fs--notify-generation (1+ remote-fs--notify-generation)))
+
+(defun remote-fs-call-verified-stat (function)
+  "Call FUNCTION, a modtime check of the current buffer, and return its value.
+When it proves the file unchanged while the buffer's auto-revert watch stayed
+the same and no notification arrived, the watch now covers every later
+change, so clear the watch's \=`maybe changed' flag.  Auto-revert itself only
+clears it by reverting, which would otherwise leave
+`remote-fs-notification-proves-unchanged-p' unusable for every buffer that
+was never changed externally."
+  (let* ((descriptor (and (boundp 'auto-revert-notify-watch-descriptor)
+                          auto-revert-notify-watch-descriptor))
+         (generation remote-fs--notify-generation)
+         (unchanged (funcall function)))
+    (when (and unchanged
+               descriptor
+               (eq descriptor auto-revert-notify-watch-descriptor)
+               (= generation remote-fs--notify-generation)
+               (ignore-errors (file-notify-valid-p descriptor)))
+      (setq auto-revert-notify-modified-p nil))
+    unchanged))
+
+(defun remote-fs-notification-proves-unchanged-p (&optional buffer)
+  "Return non-nil when BUFFER's live watch proves its file unchanged.
+Only the `lock-file' check may rely on this; see
+`remote-fs-notify-backed-lock-check'."
+  (with-current-buffer (or buffer (current-buffer))
+    (and remote-fs--lock-check
+         remote-fs-notify-backed-lock-check
+         (boundp 'auto-revert-notify-watch-descriptor)
+         auto-revert-notify-watch-descriptor
+         (not auto-revert-notify-modified-p)
+         (ignore-errors
+           (file-notify-valid-p auto-revert-notify-watch-descriptor)))))
+
 (defun remote-fs-handle-verify-visited-file-modtime (&optional buffer)
   "Return non-nil when BUFFER's logical visiting file is unchanged.
 File metadata is obtained through the current route, while the comparison is
@@ -2080,22 +2149,25 @@ after a save (a formatter, a `git checkout') is not mistaken for our own."
     (let ((file buffer-file-name)
           (visited (visited-file-modtime)))
       (if (or (not file)
-              (zerop (float-time visited)))
+              (zerop (float-time visited))
+              (remote-fs-notification-proves-unchanged-p))
           t
-        (let* ((remote-file-name-inhibit-cache t)
-               (attributes (file-attributes file))
-               (modified
-                (file-attribute-modification-time attributes)))
-          (cond
-           ((and attributes
-                 (not (time-equal-p modified tramp-time-dont-know)))
-            (let ((window (remote-fs--mtime-window file)))
-              (if (zerop window)
-                  (time-equal-p modified visited)
-                (< (abs (float-time (time-subtract modified visited)))
-                   window))))
-           (attributes t)
-           (t (time-equal-p visited tramp-time-doesnt-exist))))))))
+        (remote-fs-call-verified-stat
+         (lambda ()
+           (let* ((remote-file-name-inhibit-cache t)
+                  (attributes (file-attributes file))
+                  (modified
+                   (file-attribute-modification-time attributes)))
+             (cond
+              ((and attributes
+                    (not (time-equal-p modified tramp-time-dont-know)))
+               (let ((window (remote-fs--mtime-window file)))
+                 (if (zerop window)
+                     (time-equal-p modified visited)
+                   (< (abs (float-time (time-subtract modified visited)))
+                      window))))
+              (attributes t)
+              (t (time-equal-p visited tramp-time-doesnt-exist))))))))))
 
 (defun remote-fs-handle-make-auto-save-file-name ()
   "Return the standard Emacs auto-save name for the logical visiting buffer.
@@ -2839,6 +2911,17 @@ their existing order.  Repeated installation replaces only our own entry."
              #'remote-fs--logical-watch-public-api-a operation)
       (advice-add
        operation :around #'remote-fs--logical-watch-public-api-a)))
+  (remote-compat-install-tramp-signal-policy)
+  ;; TRAMP answers `lock-file' for every remote spelling, `/fs:' included.
+  (when (and (fboundp 'tramp-handle-lock-file)
+             (not (advice-member-p #'remote-fs--lock-file-a
+                                   'tramp-handle-lock-file)))
+    (advice-add 'tramp-handle-lock-file :around #'remote-fs--lock-file-a))
+  (with-eval-after-load 'autorevert
+    (unless (advice-member-p #'remote-fs--count-notify-a
+                             'auto-revert-notify-handler)
+      (advice-add 'auto-revert-notify-handler
+                  :before #'remote-fs--count-notify-a)))
   (remote-fs-register-link-plugins))
 
 (defun remote-fs-uninstall ()

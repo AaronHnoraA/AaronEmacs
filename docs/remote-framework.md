@@ -379,6 +379,26 @@ marker 的失效（同名 marker、目录/子树/连接级 flush）才清空。�
 release 与私有 seam arity 完整时安装，`remote-backend-tramp-rpc-metadata-report`
 给出计数器。
 
+程序化 `write-region`（`with-temp-file`、Noema 原子保存）在没有外层作用域时自建
+作用域：`write-region` 先问 truename，这次未命中也触发同一个 batch；batch 发现文件
+不存在时直接写入 truename 缓存（没有文件就没有符号链接可追，答案就是名字本身），
+省掉一次必然失败、还会打印 “File is missing” 的 `file.truename`。原地改写已存在的
+普通文件不改变父目录自身的 mode 与 mtime，所以失效后保留父目录的 stat（目录列表
+照常失效）；已验证的原地写入也不再 chown，属主本就未变，新文件保留服务端默认属主
+与组，与本机 Emacs 写入一致。实测程序化写入 5→2 次往返。
+
+`lock-file` 在第一次修改时检查文件是否被外部修改。buffer 的 auto-revert watch
+有效且自上次精确 stat 证明未变之后没有收到事件时，`remote-fs-notification-proves-unchanged-p`
+直接回答“未变”，保存后第一次按键不再同步等一次往返；保存时仍然精确 stat，
+正在路上的事件会在那里被拦下。
+
+`remote-fs` 为一次文件操作投影 `default-directory` 时，只在它与被操作文件同属一个
+target 时才投影；远端 Dired/notebook buffer 里访问本机文件（或反过来）不再报
+“Native backend cannot access target”，也不会给进程编造另一台机器上的工作目录。
+`remote-compat` 让 TRAMP 的 `tramp-signal-hook-function` 不记录 `file-missing`：
+清理、探测类调用在 `ignore-errors` 下得到“文件不存在”是正常答案，不应在关闭
+notebook、kernel 或连接时刷满 *Messages*；未处理的错误照常由命令循环报告。
+
 `remote-accelerator.el` 提供按 operation + route 选择的可选 provider。目前接入 GNU
 ELPA `tramp-hlo` 的三个高层操作，但不调用它的全局 `tramp-hlo-setup`：
 

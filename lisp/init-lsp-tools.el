@@ -9,6 +9,7 @@
 ;;; Code:
 
 (require 'aaron-ui-board)
+(require 'backtrace)
 (require 'cl-lib)
 (require 'easymenu)
 (require 'init-funcs)
@@ -1198,7 +1199,65 @@ reporting on runs on that buffer's target, not on the client machine."
     ("P" "project problems" my/language-server-manager-problems-project)
     ("d" "buffer diagnostics ui" my/language-server-manager-diagnostics-buffer-ui)
     ("T" "project diagnostics ui" my/language-server-manager-diagnostics-project-ui)
-    ("m" "diagnostics menu" my/language-server-manager-diagnostics-menu)]])
+    ("m" "diagnostics menu" my/language-server-manager-diagnostics-menu)
+    ("x" "message handler errors" my/language-server-message-errors)]])
+
+;;; Message handler failures
+
+(defconst my/language-server-message-errors-buffer-name
+  "*Language Server Message Errors*"
+  "Buffer holding backtraces of failed server-message handlers.")
+
+(defvar my/language-server-message-errors-max 20
+  "Most recent server-message handler failures kept with their backtraces.")
+
+(defvar my/language-server--message-error-count 0
+  "Failures recorded in the current buffer generation.")
+
+(defun my/language-server--record-message-error (&rest arguments)
+  "Record the backtrace of a failed server-message handler, then return.
+Installed as `debugger' only inside `lsp--parser-on-message', whose
+`with-demoted-errors' reports nothing but the error object.  Returning lets
+that form handle the error exactly as before.  ARGUMENTS are the debugger's."
+  (let ((trace (backtrace-to-string))
+        (buffer (get-buffer-create
+                 my/language-server-message-errors-buffer-name)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (insert (format-time-string "\f\n%F %T  ")
+                (format "%S\n" (cadr arguments))
+                trace "\n")
+        ;; Keep only the most recent failures; each starts with a page break.
+        (goto-char (point-max))
+        (when (search-backward "\f" nil t
+                               (1+ my/language-server-message-errors-max))
+          (delete-region (point-min) (point))))
+      (setq buffer-read-only t))
+    (cl-incf my/language-server--message-error-count)
+    nil))
+
+(defun my/language-server--parser-on-message-a (function &rest arguments)
+  "Call FUNCTION with ARGUMENTS, keeping a backtrace of handler failures.
+`debug-on-error' only reaches handlers declared with `debug', which is the
+`with-demoted-errors' boundary itself; errors that inner code catches with
+`ignore-errors' or `condition-case' are not recorded."
+  (let ((debug-on-error t)
+        (debugger #'my/language-server--record-message-error))
+    (apply function arguments)))
+
+(with-eval-after-load 'lsp-mode
+  (when (fboundp 'lsp--parser-on-message)
+    (advice-add 'lsp--parser-on-message
+                :around #'my/language-server--parser-on-message-a)))
+
+(defun my/language-server-message-errors ()
+  "Show backtraces of server messages whose handlers failed.
+These are the \"Error processing message\" lines in *Messages*."
+  (interactive)
+  (if-let* ((buffer (get-buffer my/language-server-message-errors-buffer-name)))
+      (pop-to-buffer buffer)
+    (message "No language-server message handler has failed")))
 
 (defalias 'my/language-server-ops-dispatch #'my/language-server-dispatch)
 

@@ -712,6 +712,8 @@ gptel、Magent、Claude/Codex 兼容源码仍在 `site-lisp/noema/upstream/`。
 3. 远端 PATH 里是否真的有这些 server
 4. `lsp-mode` 是否已经 attach
 5. TRAMP 主机是否能正常登录
+6. *Messages* 出现 `Error processing message ...` 时，`M-x my/language-server-message-errors`
+   （language server 菜单 `x`）给出对应的调用栈；lsp-mode 本身只打印错误对象
 
 更详细的维护和排查见 [lsp-workflow.org](lsp-workflow.org) 和 [maintenance.md](maintenance.md)。
 

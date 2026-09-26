@@ -219,6 +219,7 @@ Hub 里的重点不是“列个状态页面”，而是：
 - =P=: project problems
 - =d=: buffer diagnostics UI
 - =m=: diagnostics menu
+- =x=: 服务端消息处理失败的调用栈（=M-x my/language-server-message-errors=）
 - =A=: cycle lsp-mode restart policy
 - =S=: toggle workspace keep-alive
 - =L=: toggle =lsp-log-io=

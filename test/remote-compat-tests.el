@@ -392,6 +392,31 @@
          (lambda (_path) 'metadata) file)
         'metadata)))))
 
+(ert-deftest remote-tramp-rpc-in-place-write-skips-only-its-chown ()
+  "The verified write keeps its owner; every other chown still runs."
+  (let ((file "/tmp/current")
+        (calls nil))
+    (remote-backend-tramp-rpc--write-region-in-place-a
+     (lambda (_start _end _filename &rest _options)
+       (should-not
+        (remote-backend-tramp-rpc--uid-gid-in-place-a
+         (lambda (&rest args) (push (cons 'current args) calls))
+         file 1000 1000))
+       (remote-backend-tramp-rpc--uid-gid-in-place-a
+        (lambda (&rest args) (push (cons 'other args) calls))
+        "/tmp/other" 1000 1000))
+     "content" nil file)
+    (should (equal calls '((other "/tmp/other" 1000 1000))))
+    (remote-backend-tramp-rpc--uid-gid-in-place-a
+     (lambda (&rest args) (push (cons 'outside args) calls))
+     file nil 5)
+    (should (equal (car calls) (list 'outside file nil 5)))
+    (let ((remote-backend-tramp-rpc--in-place-write-file file)
+          (remote-backend-tramp-rpc-skip-in-place-metadata-roundtrip nil))
+      (remote-backend-tramp-rpc--uid-gid-in-place-a
+       (lambda (&rest _) (push 'disabled calls)) file 1 1)
+      (should (eq (car calls) 'disabled)))))
+
 (ert-deftest remote-tramp-rpc-closed-relay-exit-race-is-narrow ()
   "Only a closed write end on an exited relay is safe to discard."
   (let ((process (make-pipe-process
@@ -1280,10 +1305,92 @@ probe's temporary output buffer must not fall back to the global value."
                             'tramp))))
           (setq buffer-file-name nil))))))
 
+;;;; TRAMP signal logging
+
+(ert-deftest remote-compat-quiet-file-missing-keeps-other-errors ()
+  "Handled missing files stay out of *Messages*; other errors are logged."
+  (let (logged)
+    (let ((hook (lambda (symbol _data) (push symbol logged))))
+      (remote-compat--quiet-file-missing-a hook 'file-missing '("gone"))
+      (remote-compat--quiet-file-missing-a hook 'file-error '("denied"))
+      (should (equal logged '(file-error)))
+      (let ((remote-compat-quiet-file-missing nil))
+        (remote-compat--quiet-file-missing-a hook 'file-missing '("gone")))
+      (should (equal logged '(file-missing file-error))))))
+
+;;;; Cross-target default directory
+
+(ert-deftest remote-fs-other-target-default-directory-is-not-projected ()
+  "A buffer on one target may operate on another target's files."
+  (remote-fs-install)
+  (let* ((projected nil)
+         (expected (concat "/fs:local:" (file-truename "/tmp/")))
+         (spy (lambda (function file &rest arguments)
+                (push file projected)
+                (apply function file arguments))))
+    (advice-add 'remote-project-file-name :around spy)
+    (unwind-protect
+        (let ((default-directory "/fs:nowhere:/work/"))
+          (should (equal (file-truename "/fs:local:/tmp/") expected)))
+      (advice-remove 'remote-project-file-name spy))
+    (should projected)
+    (should-not (member "/fs:nowhere:/work/" projected))))
+
+;;;; Notification-backed supersession
+
+(defvar auto-revert-notify-watch-descriptor)
+(defvar auto-revert-notify-modified-p)
+
+(ert-deftest remote-fs-verified-stat-arms-only-an-undisturbed-watch ()
+  "Only a proof made under one watch with no new event clears its flag."
+  (cl-letf (((symbol-function 'file-notify-valid-p) (lambda (_) t)))
+    (with-temp-buffer
+      (setq-local auto-revert-notify-watch-descriptor 'watch)
+      (setq-local auto-revert-notify-modified-p t)
+      (should-not (remote-fs-call-verified-stat (lambda () nil)))
+      (should auto-revert-notify-modified-p)
+      (remote-fs-call-verified-stat
+       (lambda () (remote-fs--count-notify-a) t))
+      (should auto-revert-notify-modified-p)
+      (remote-fs-call-verified-stat
+       (lambda () (setq auto-revert-notify-watch-descriptor 'new) t))
+      (should auto-revert-notify-modified-p)
+      (should (remote-fs-call-verified-stat (lambda () t)))
+      (should-not auto-revert-notify-modified-p)))
+  (cl-letf (((symbol-function 'file-notify-valid-p) (lambda (_) nil)))
+    (with-temp-buffer
+      (setq-local auto-revert-notify-watch-descriptor 'watch)
+      (setq-local auto-revert-notify-modified-p t)
+      (remote-fs-call-verified-stat (lambda () t))
+      (should auto-revert-notify-modified-p))))
+
+(ert-deftest remote-fs-notification-proof-is-lock-scoped ()
+  "The first-edit check may trust a quiet watch; nothing else may."
+  (cl-letf (((symbol-function 'file-notify-valid-p) (lambda (_) t)))
+    (with-temp-buffer
+      (setq-local auto-revert-notify-watch-descriptor 'watch)
+      (setq-local auto-revert-notify-modified-p nil)
+      (should-not (remote-fs-notification-proves-unchanged-p))
+      (should (remote-fs--lock-file-a
+               (lambda (_file) (remote-fs-notification-proves-unchanged-p))
+               "/fs:box:/a"))
+      (setq auto-revert-notify-modified-p t)
+      (should-not (remote-fs--lock-file-a
+                   (lambda (_file)
+                     (remote-fs-notification-proves-unchanged-p))
+                   "/fs:box:/a"))
+      (setq auto-revert-notify-modified-p nil)
+      (let ((remote-fs-notify-backed-lock-check nil))
+        (should-not (remote-fs--lock-file-a
+                     (lambda (_file)
+                       (remote-fs-notification-proves-unchanged-p))
+                     "/fs:box:/a"))))))
+
 ;;;; tramp-rpc metadata scope
 
 (defvar tramp-rpc--file-stat-cache)
 (defvar tramp-rpc--file-truename-cache)
+(defvar remote-backend-tramp-rpc--in-place-write-file)
 (defvar tramp-rpc-protocol-error-file-not-found)
 
 (defmacro remote-tramp-rpc-metadata-test--with-stubs (batches &rest body)
@@ -1340,7 +1447,12 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
   "Answer one fake batch REQUEST for a regular file below /tmp/p/."
   (let ((path (alist-get 'path (cdr request))))
     (cond
-     ((equal path "/tmp/p/missing.c") '(:error -32001 :message "missing"))
+     ;; The real server answers a missing file's stat with nil and its
+     ;; truename with a file-not-found error.
+     ((equal path "/tmp/p/missing.c")
+      (if (equal (car request) "file.truename")
+          '(:error -32001 :message "missing")
+        nil))
      ((equal (car request) "file.truename") path)
      ((string-suffix-p "/" path) '((type . "directory") (mtime . dir)))
      (t '((type . "file") (mtime . disk))))))
@@ -1401,7 +1513,7 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
            (should (equal (remote-backend-tramp-rpc-metadata--stat-a
                            stat vec "/tmp/p/a.c" t)
                           '((type . "file") (mtime . disk))))
-           (remote-backend-tramp-rpc-metadata--invalidate-path-a file)
+           (remote-backend-tramp-rpc-metadata--invalidate-path-a #'ignore file)
            (should (eq (remote-backend-tramp-rpc-metadata--stat-a
                         stat vec "/tmp/p/a.c" t)
                        'fresh)))))
@@ -1444,8 +1556,11 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
                                                nil)
                                          tramp-rpc--file-stat-cache))
                            nil)))
-      (should-not (gethash "/ssh:box:/tmp/p/missing.c"
-                           tramp-rpc--file-truename-cache)))
+      ;; A missing file has no symlink to chase: its truename is its name,
+      ;; which saves the failing `file.truename' round trip and its noise.
+      (should (equal (cdr (gethash "/ssh:box:/tmp/p/missing.c"
+                                   tramp-rpc--file-truename-cache))
+                     "/ssh:box:/tmp/p/missing.c")))
     (cl-letf (((symbol-function 'tramp-rpc--call-batch)
                (lambda (&rest _) (signal 'remote-file-error '("down")))))
       (let ((vec (tramp-dissect-file-name "/ssh:box:/tmp/p/b.c")))
@@ -1477,11 +1592,69 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
            (should (equal (remote-backend-tramp-rpc-metadata--modtime-a
                            modtime 'explicit)
                           '(set explicit)))
-           (remote-backend-tramp-rpc-metadata--invalidate-path-a file)
+           (remote-backend-tramp-rpc-metadata--invalidate-path-a #'ignore file)
            (should (equal (remote-backend-tramp-rpc-metadata--modtime-a
                            modtime)
                           '(set nil)))))
         (setq buffer-file-name nil)))))
+
+(ert-deftest remote-tramp-rpc-metadata-truename-starts-the-batch ()
+  "`write-region' asks for a truename first; that miss starts the batch."
+  (require 'tramp)
+  (remote-tramp-rpc-metadata-test--with-stubs batches
+    (remote-backend-tramp-rpc-metadata--scope-a
+     (lambda ()
+       (should (eq (remote-backend-tramp-rpc-metadata--truename-a
+                    (lambda (_file) 'answered) "/ssh:box:/tmp/p/a.c")
+                   'answered))
+       (remote-backend-tramp-rpc-metadata--truename-a
+        (lambda (_file) 'again) "/ssh:box:/tmp/p/b.c")))
+    (should (= (length batches) 1))
+    (should (equal (cadr (car (car batches))) "/tmp/p/a.c"))
+    (should (gethash "/ssh:box:/tmp/p/a.c" tramp-rpc--file-truename-cache))
+    (dolist (spelling '("/ssh:box:/tmp/p/" "/ssh:box:/tmp/p"))
+      (should (gethash (cons spelling t) tramp-rpc--file-stat-cache)))))
+
+(ert-deftest remote-tramp-rpc-metadata-in-place-rewrite-keeps-directory ()
+  "Rewriting an existing file keeps its directory's stat; nothing else does."
+  (require 'tramp)
+  (remote-tramp-rpc-metadata-test--with-stubs batches
+    (let* ((file "/ssh:box:/tmp/p/a.c")
+           (vec (tramp-dissect-file-name file))
+           (drop (lambda (_file) (clrhash tramp-rpc--file-stat-cache))))
+      (remote-backend-tramp-rpc-metadata--scope-a
+       (lambda ()
+         (remote-backend-tramp-rpc-metadata--stat-a #'ignore vec "/tmp/p/a.c")
+         ;; A write outside the verified in-place scope drops everything.
+         (let ((remote-backend-tramp-rpc--in-place-write-file nil))
+           (remote-backend-tramp-rpc-metadata--invalidate-path-a drop file))
+         (should-not (gethash (cons "/ssh:box:/tmp/p" t)
+                              tramp-rpc--file-stat-cache))))
+      (clrhash tramp-rpc--file-stat-cache)
+      (remote-backend-tramp-rpc-metadata--scope-a
+       (lambda ()
+         (remote-backend-tramp-rpc-metadata--stat-a #'ignore vec "/tmp/p/a.c")
+         (let ((remote-backend-tramp-rpc--in-place-write-file file))
+           (remote-backend-tramp-rpc-metadata--invalidate-path-a drop file))
+         (dolist (spelling '("/ssh:box:/tmp/p/" "/ssh:box:/tmp/p"))
+           (dolist (lstat '(nil t))
+             (should (gethash (cons spelling lstat)
+                              tramp-rpc--file-stat-cache))))
+         ;; The rewritten file itself is still forgotten.
+         (should-not (gethash (cons file t) tramp-rpc--file-stat-cache))))
+      ;; A file the scope never saw as regular (a new file) keeps nothing.
+      (clrhash tramp-rpc--file-stat-cache)
+      (remote-backend-tramp-rpc-metadata--scope-a
+       (lambda ()
+         (let ((remote-backend-tramp-rpc--in-place-write-file
+                "/ssh:box:/tmp/p/missing.c"))
+           (remote-backend-tramp-rpc-metadata--stat-a
+            #'ignore (tramp-dissect-file-name "/ssh:box:/tmp/p/missing.c")
+            "/tmp/p/missing.c")
+           (remote-backend-tramp-rpc-metadata--invalidate-path-a
+            drop "/ssh:box:/tmp/p/missing.c"))
+         (should-not (gethash (cons "/ssh:box:/tmp/p" t)
+                              tramp-rpc--file-stat-cache)))))))
 
 (ert-deftest remote-tramp-rpc-metadata-locate-cache-scope ()
   "Marker searches are shared by siblings and dropped only by markers."
@@ -1502,7 +1675,7 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
        locate "/ssh:box:/tmp/p/b.c" ".git")
       (should (= searches 1))
       (remote-backend-tramp-rpc-metadata--invalidate-path-a
-       "/ssh:box:/tmp/p/a.c")
+       #'ignore "/ssh:box:/tmp/p/a.c")
       (remote-backend-tramp-rpc-metadata--flush-file-a nil "/tmp/p/b.c")
       (remote-backend-tramp-rpc-metadata--locate-a
        locate "/ssh:box:/tmp/p/a.c" ".git")

@@ -110,6 +110,35 @@ before they become global advice."
     (tramp-remove-external-operation operation backend)
     t))
 
+(defcustom remote-compat-quiet-file-missing t
+  "Keep handled \=`file-missing' answers out of *Messages*.
+TRAMP routes every signal raised inside a file handler through
+`tramp-signal-hook-function', which logs it before any caller can decide
+whether it matters.  \"No such file\" is an ordinary answer to cleanup and
+probing calls (`delete-file' of a staging file, a truename or read under
+`ignore-errors'), so closing notebooks, kernels or connections filled
+*Messages* with \"File is missing\" lines.  The error itself is unchanged: an
+unhandled one is still reported by the command loop, and TRAMP's debug
+buffer still records it at higher `tramp-verbose' levels."
+  :type 'boolean
+  :group 'remote)
+
+(defun remote-compat--quiet-file-missing-a (function error-symbol data)
+  "Call FUNCTION for ERROR-SYMBOL and DATA unless it is a missing file."
+  (unless (and remote-compat-quiet-file-missing
+               (memq 'file-missing (get error-symbol 'error-conditions)))
+    (funcall function error-symbol data)))
+
+(defun remote-compat-install-tramp-signal-policy ()
+  "Install the `file-missing' logging policy on TRAMP's signal hook.
+Only the public two-argument `signal-hook-function' shape is decorated."
+  (when (and (fboundp 'tramp-signal-hook-function)
+             (equal (func-arity 'tramp-signal-hook-function) '(2 . 2))
+             (not (advice-member-p #'remote-compat--quiet-file-missing-a
+                                   'tramp-signal-hook-function)))
+    (advice-add 'tramp-signal-hook-function
+                :around #'remote-compat--quiet-file-missing-a)))
+
 (defun remote-compat-report ()
   "Return a stable compatibility report for Doctor and tests."
   (list
