@@ -725,6 +725,21 @@ BODY may refer to the JuText buffer as `source'."
                           (noema-research-work-nodes document)))
                  1)))))
 
+(ert-deftest noema-research-planning-shapes-match-the-shared-parser ()
+  "Every leading @@todo shape shared/work-agenda.mjs accepts is a task here,
+so saving never reports it as a malformed Agent directive."
+  (let* ((document (noema-research-test--document))
+         (work (noema-research-find-cell document "c-w")))
+    (dolist (line '("@@todo [Later]" "@@todo() [Later]" "@@todo(doing) write it up"
+                    "@@todo [Later] {prio: A}"))
+      (puthash "source" (concat "@@agent(claude)\n" line "\n(placeholder)") work)
+      (should (noema-research-agenda-directive (noema-research-cell-source work) "work"))
+      (should-not (noema-research--directive-errors document)))
+    ;; Planning after the prompt text is prompt text, not a task.
+    (should-not (noema-research-agenda-directive "(placeholder)\n@@todo [Later]" "work"))
+    (puthash "source" "@@todo\n\nReview it." work)
+    (should (noema-research--directive-errors document))))
+
 (ert-deftest noema-research-validates-only-leading-work-directives ()
   (let* ((document (noema-research-test--document))
          (work (noema-research-find-cell document "c-w")))

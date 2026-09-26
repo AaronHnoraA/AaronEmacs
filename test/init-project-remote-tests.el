@@ -342,6 +342,58 @@
       (my/treemacs-project-path "/fs:box:/work/project/")
       "/ssh:box:/work/project"))))
 
+(ert-deftest my/project-roots-have-one-spelling-per-target ()
+  "Local roots stay native; remote roots are `/fs:' whatever spelled them."
+  (should (equal (my/project-normalize-root "/fs:local:/tmp/project")
+                 "/tmp/project/"))
+  (should (equal (my/project-normalize-root "/tmp/project") "/tmp/project/"))
+  (cl-letf (((symbol-function 'remote-client-file-name) (lambda (&rest _) nil)))
+    (should (equal (my/project-normalize-root "/fs:box:/work/project")
+                   "/fs:box:/work/project/"))
+    (should (equal (my/project-normalize-root "/ssh:box:/work/project/")
+                   "/fs:box:/work/project/"))))
+
+(ert-deftest my/project-known-remote-projects-are-listed-without-probing ()
+  "Listing projects never dials a target nor drops an unreachable one."
+  (let ((local (make-temp-file "project-known-" t))
+        probed)
+    (unwind-protect
+        (cl-letf* ((original-client (symbol-function 'remote-client-file-name))
+                   ((symbol-function 'remote-client-file-name)
+                    (lambda (name &rest args)
+                      (unless (string-prefix-p "/fs:box:" name)
+                        (apply original-client name args))))
+                   (original-directory-p (symbol-function 'file-directory-p))
+                   ((symbol-function 'file-directory-p)
+                    (lambda (name)
+                      (when (string-prefix-p "/fs:box:" name) (setq probed t))
+                      (funcall original-directory-p name)))
+                   ((symbol-function 'projectile-relevant-known-projects)
+                    (lambda ()
+                      (list "/fs:box:/work/project/" "/ssh:box:/work/project/"
+                            local "/fs:local:/nowhere-at-all/"))))
+          (should (equal (my/project-known-projects)
+                         (list "/fs:box:/work/project/"
+                               (file-name-as-directory local))))
+          (should-not probed))
+      (delete-directory local))))
+
+(ert-deftest my/project-remote-root-registers-through-its-workspace ()
+  (let (opened added)
+    (cl-letf (((symbol-function 'remote-client-file-name) (lambda (&rest _) nil))
+              ((symbol-function 'remote-workspace-open)
+               (lambda (root &rest _) (setq opened root)))
+              ((symbol-function 'file-directory-p) (lambda (_) t))
+              ((symbol-function 'projectile-project-p) (lambda (&rest _) t))
+              ((symbol-function 'my/project-unignore-root) #'ignore)
+              ((symbol-function 'projectile-add-known-project)
+               (lambda (root) (setq added root)))
+              ((symbol-function 'project--remember-dir) #'ignore))
+      (should (equal (my/project-register-root "/ssh:box:/work/project")
+                     "/fs:box:/work/project/"))
+      (should (equal opened "/fs:box:/work/project/"))
+      (should (equal added "/fs:box:/work/project/")))))
+
 (ert-deftest treemacs-persistence-migrates-only-path-records ()
   (cl-letf
       (((symbol-function 'my/treemacs-project-path)
@@ -407,6 +459,26 @@
           (should
            (equal captured logical-file)))
       (when (buffer-live-p source)
+        (kill-buffer source))
+      (delete-file native-file))))
+
+(ert-deftest treemacs-imenu-never-kills-the-visiting-source-buffer ()
+  "Indexing a file whose buffer visits another spelling keeps that buffer.
+Treemacs kills what it indexed unless `get-file-buffer' found it first."
+  (let* ((native-file (make-temp-file "treemacs-kill-" nil ".py" "x = 1\n"))
+         (logical-file (remote-make-file-name "local" native-file))
+         (source (find-file-noselect logical-file)))
+    (unwind-protect
+        (progn
+          (require 'treemacs-tags)
+          ;; The indexer is handed the native spelling of a `/fs:' buffer.
+          (cl-letf (((symbol-function 'my/treemacs-visit-path)
+                     (lambda (_path) native-file)))
+            (my/treemacs-get-imenu-index-a #'treemacs--get-imenu-index
+                                           native-file))
+          (should (buffer-live-p source)))
+      (when (buffer-live-p source)
+        (with-current-buffer source (set-buffer-modified-p nil))
         (kill-buffer source))
       (delete-file native-file))))
 

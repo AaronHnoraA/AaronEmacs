@@ -24,6 +24,17 @@ SCM 与后续 debug/task 集成都应从这个同一 identity 派生，不能各
 `file-remote-p` 再判断一次。本地普通 buffer 在框架外仍保留原生文件名，因此不会
 牺牲 Emacs package 兼容性。
 
+**已知项目列表里的远程项目**：`my/project-normalize-root` 让每个根只有一种写法——
+本机能直接访问的是原生路径，其余一律是 `/fs:TARGET:/root/`；`/ssh:` 或 `/fs:local:`
+写法在入口处就归一，不会产生重复条目。`my/project-add-known-project`（输入
+`/fs:aaron-pc:/…` 或 `/ssh:…` 均可）和 `my/jupyter-ssh-open-project` 先打开该 root
+的 Remote workspace 再登记。列出项目（切换、dashboard）时远程根不探测、不连线：
+主机暂时不可达也照常列出，打开时才连接并报告目录缺失。
+
+最近文件同理：`recentf` 记录逻辑名（远程是 `/fs:`，本机是原生路径），只丢弃映射不到
+target 的物理 TRAMP 写法；从不探测已记录的远程文件，dashboard 的 Recent Files
+因此也包含远程文件。
+
 **项目根探测的代价**：Projectile 的 marker 列表有一百多项，其中八项是通配符
 （`?*.sln`、`?*.xcodeproj` 等）。上游用一次 `directory-files` 回答所有普通
 marker，但每个通配符仍要自己展开一次，也就是每层目录多出八次列目录。往上走四层

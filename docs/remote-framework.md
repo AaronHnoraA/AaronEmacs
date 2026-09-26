@@ -210,6 +210,12 @@ minibuffer 里的 `/fs:` 名字遵循 Emacs `substitute-in-file-name` 的重启�
 - lexical expansion 不追踪链接，`remote-file-equal-p` 也只比较逻辑拼写；
   需要 inode/链接等价性时继续使用原生 `file-equal-p`。
 
+buffer 身份属于 Emacs，不属于 backend：`get-file-buffer` 先在逻辑名字空间里找
+访问该 `/fs:` 名的 buffer，找不到再交给 backend 用它的物理写法回答（本机原生
+buffer 借此成为 `/fs:local:` 名的别名）。只转发给 backend 会让访问 `/fs:` 名的
+buffer 对 `get-file-buffer` 不可见；Treemacs 的 imenu 索引器据此把用户正在编辑的
+buffer 当成临时访问并 kill 掉。
+
 物理投影是 backend API：
 
 ```elisp

@@ -2762,6 +2762,19 @@ the logical handler first so the public API still owns descriptor-table and
             file-name-handler-alist)))
       (funcall function descriptor))))
 
+(defun remote-fs-handle-get-file-buffer (file-name)
+  "Return the live buffer visiting logical FILE-NAME, or nil.
+Buffer identity belongs to Emacs, not to a backend: a buffer visiting this
+`/fs:' name answers first.  The backend then answers for its own spelling,
+which is how a native local buffer aliases its `/fs:local:' name.  Without
+the first step a buffer visiting the logical name is invisible to callers
+such as Treemacs' imenu indexer, which then kills it as a temporary visit."
+  (let ((name (expand-file-name file-name)))
+    (or (seq-find (lambda (buffer)
+                    (equal (buffer-local-value 'buffer-file-name buffer) name))
+                  (buffer-list))
+        (remote-fs--call-routed 'get-file-buffer (list file-name)))))
+
 (defun remote-fs-file-name-handler (operation &rest args)
   "Handle file-name OPERATION for logical fs ARGS."
   (let ((native (remote-fs--cached-native-query operation args)))
@@ -2797,6 +2810,8 @@ the logical handler first so the public API still owns descriptor-table and
          (apply #'remote-fs-handle-directory-files-and-attributes args))
         ('file-symlink-p
          (apply #'remote-fs-handle-file-symlink-p args))
+        ('get-file-buffer
+         (apply #'remote-fs-handle-get-file-buffer args))
         ;; Some Emacs/TRAMP combinations use this internal spelling even when no
         ;; Lisp function is bound under that name.  Preserve its two-path contract
         ;; through the public primitive instead of calling an unbound symbol.

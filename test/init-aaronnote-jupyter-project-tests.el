@@ -4,8 +4,10 @@
 (require 'init-project)
 
 (ert-deftest my/jupyter-ssh-project-entry-keeps-normal-remote-filesystem ()
-  (let (opened switched)
+  (let (opened switched registered)
     (cl-letf (((symbol-function 'file-directory-p) (lambda (_path) t))
+              ((symbol-function 'my/project-register-root)
+               (lambda (root) (setq registered root)))
               ((symbol-function 'remote-workspace-open)
                (lambda (root &rest args)
                  (setq opened (cons root args))))
@@ -18,7 +20,8 @@
                      "/fs:aaron-pc:/home/aaron/Desktop/UNSW/COMP9444/"))
       (should (equal (plist-get (cdr opened) :adapter) "emacs-file"))
       (should (plist-get (cdr opened) :load-environment))
-      (should (equal switched (car opened))))))
+      (should (equal switched (car opened)))
+      (should (equal registered (car opened))))))
 
 (defconst my/jupyter-project-test-entry
   '((name . "remote-project-test")

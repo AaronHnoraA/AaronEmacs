@@ -222,6 +222,22 @@ the unpinned fallback nor a pin taken inside that binding may see it."
               (should (equal (getenv "HOME") client-home))))
           (should (equal (remote-client-exec-path) client-path)))))))
 
+(ert-deftest remote-fs-get-file-buffer-finds-a-buffer-visiting-the-logical-name ()
+  "Buffer identity is answered in Emacs' namespace before the backend's."
+  (let ((buffer (generate-new-buffer " *remote-gfb*"))
+        (name "/fs:box:/work/project/main.py"))
+    (unwind-protect
+        (cl-letf (((symbol-function 'remote-fs--call-routed)
+                   (lambda (&rest _) (ert-fail "backend asked first"))))
+          (with-current-buffer buffer (setq buffer-file-name name))
+          (should (eq (remote-fs-handle-get-file-buffer name) buffer)))
+      (kill-buffer buffer)))
+  ;; No logical match: the backend's own spelling (the native alias) answers.
+  (cl-letf (((symbol-function 'remote-fs--call-routed)
+             (lambda (operation args) (list operation args))))
+    (should (equal (remote-fs-handle-get-file-buffer "/fs:box:/nowhere")
+                   '(get-file-buffer ("/fs:box:/nowhere"))))))
+
 (ert-deftest remote-fs-exec-path-answers-from-the-workspace-capsule ()
   "Stock `executable-find' with REMOTE must see project tools such as direnv's.
 The backend alone only knows the target's login PATH."

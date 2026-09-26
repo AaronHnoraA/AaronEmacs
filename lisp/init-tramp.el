@@ -27,6 +27,9 @@
 (declare-function remote-file-operation-cost "remote-fs"
                   (file-name &optional adapter))
 (declare-function remote-make-file-name "remote-fs" (target-id localname))
+(declare-function remote-canonicalize-file-name "remote-fs" (file-name &optional directory))
+(declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
+(declare-function remote-fs-file-name-p "remote-fs" (file-name))
 (declare-function remote-project-file-name "remote-core"
                   (file-name &optional route-or-link capability adapter-id))
 (declare-function remote-target-id "remote-core" (target))
@@ -593,14 +596,35 @@ when it is actually a string, avoiding `stringp' errors for calls such as
                        #'projectile-project-files orig-fn args))
               '((name . "my/tramp-projectile-project-files"))))
 
-;;; ── recentf: don't probe remote paths at startup ────────────────────────────
+;;; ── recentf: remember remote files by their logical name ────────────────────
+
+(defun my/recentf-logical-file-name (file-name)
+  "Return FILE-NAME as recentf should remember it.
+A file this machine reaches directly keeps its native name; any other file is
+its logical `/fs:TARGET:/path', whatever spelling visited it.  Spelling only:
+nothing is probed or connected.  Canonicalization is anchored at a client
+directory: recentf filters its list from whatever buffer is current, and a
+remote buffer's `default-directory' would otherwise claim a native client
+path such as ~/Documents/x for that remote target."
+  (let* ((logical (ignore-errors
+                    (remote-canonicalize-file-name
+                     file-name temporary-file-directory)))
+         (client (and logical (ignore-errors (remote-client-file-name logical)))))
+    (or client logical file-name)))
+
+(defun my/recentf-physical-remote-name-p (file-name)
+  "Return non-nil for a TRAMP spelling that has no logical `/fs:' name."
+  (and (file-remote-p file-name)
+       (not (remote-fs-file-name-p file-name))))
 
 (with-eval-after-load 'recentf
-  ;; Prevent recentf from opening SSH/RPC connections to check if recent remote
-  ;; files still exist during Emacs startup.
+  ;; Never probe recent files: a remote entry is kept without dialling its
+  ;; target, and opening it connects then.
   (setq recentf-auto-cleanup 'never)
-  (add-to-list 'recentf-exclude tramp-file-name-regexp)
-  (add-to-list 'recentf-exclude "\\`/rpc:"))
+  ;; Handlers run before the exclude check, so remote files are recorded as
+  ;; `/fs:' and only a physical name that could not be mapped is dropped.
+  (add-to-list 'recentf-filename-handlers #'my/recentf-logical-file-name)
+  (add-to-list 'recentf-exclude #'my/recentf-physical-remote-name-p))
 
 (provide 'init-tramp)
 ;;; init-tramp.el ends here

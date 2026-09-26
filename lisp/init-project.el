@@ -129,6 +129,11 @@ PROJECT is a configured plist; interactively choose one or an SSH directory."
       (user-error "Jupyter SSH project directory is unavailable: %s" root))
     (remote-workspace-open root :connect t :adapter "emacs-file"
                            :capability 'file-read :load-environment t)
+    ;; Remember it like any project; a plain folder without a project marker
+    ;; still opens, it just is not listed.
+    (condition-case err
+        (my/project-register-root root)
+      (error (message "Project not remembered: %s" (error-message-string err))))
     (my/project-switch root)))
 
 (config-defvar my/project-import-project-el-entries nil
@@ -160,9 +165,21 @@ source file's filesystem depth."
 (setq project-list-file my/project-list-file)
 
 (defun my/project-normalize-root (project-root)
-  "Return PROJECT-ROOT as a normalized directory name."
+  "Return PROJECT-ROOT as a normalized directory name.
+A root this machine reaches directly keeps its native name, so ordinary local
+projects are unchanged.  Any other root is its logical `/fs:TARGET:/path/'
+identity, so a project reached through `/ssh:' or `/fs:' is one project.
+This is spelling only: nothing is probed or connected."
   (when (stringp project-root)
-    (file-name-as-directory (expand-file-name project-root))))
+    (let* ((expanded (expand-file-name project-root))
+           (logical (ignore-errors (remote-canonicalize-file-name expanded)))
+           (client (and logical (ignore-errors (remote-client-file-name logical)))))
+      (file-name-as-directory (or client logical expanded)))))
+
+(defun my/project-client-root-p (project-root)
+  "Return non-nil when PROJECT-ROOT is reachable without a Remote connection."
+  (let ((logical (ignore-errors (remote-canonicalize-file-name project-root))))
+    (or (null logical) (ignore-errors (remote-client-file-name logical)))))
 
 (defun my/project-canonical-path (path)
   "Return PATH in a stable canonical form."
@@ -411,14 +428,19 @@ keep perspective names unique."
     projectile-known-projects))
 
 (defun my/project-known-projects ()
-  "Return known Projectile projects that still exist."
+  "Return known Projectile projects that still exist.
+A remote root is listed without probing it: listing projects must not dial
+every target, and an unreachable host must not make its projects vanish.
+Opening the project connects and reports a missing directory then."
   (when (require 'projectile nil t)
-    (seq-filter
-     (lambda (project-root)
-       (and (file-directory-p project-root)
-            (not (my/project-hidden-root-p project-root))))
-     (mapcar #'my/project-normalize-root
-             (projectile-relevant-known-projects)))))
+    (seq-uniq
+     (seq-filter
+      (lambda (project-root)
+        (and (not (my/project-hidden-root-p project-root))
+             (or (not (my/project-client-root-p project-root))
+                 (file-directory-p project-root))))
+      (mapcar #'my/project-normalize-root
+              (projectile-relevant-known-projects))))))
 
 (defun my/dashboard-projects-load-projects (orig-fn &rest args)
   "Use the custom Projectile project list for dashboard projects."
@@ -774,6 +796,11 @@ This matches canonically, so symlinked roots are cleaned as well."
   (setq project-root (my/project-normalize-root project-root))
   (unless (require 'projectile nil t)
     (user-error "Projectile is unavailable"))
+  ;; A remote root is registered through its Remote workspace, the same
+  ;; owner its files, processes and environment use.
+  (unless (my/project-client-root-p project-root)
+    (remote-workspace-open project-root :connect t :adapter "emacs-file"
+                           :capability 'file-read :load-environment t))
   (unless (file-directory-p project-root)
     (user-error "%s is not a directory" (abbreviate-file-name project-root)))
   (let ((default-directory project-root))
@@ -1172,7 +1199,19 @@ the strings rendered before outline buttons are made shallow."
   ;; buffer namespace.  Fetching tags through the model path would create a
   ;; second buffer for the same file and Treemacs may then kill that temporary
   ;; buffer after indexing.
-  (let* ((index (funcall orig-fn (my/treemacs-visit-path file)))
+  ;; Treemacs kills the buffer it indexed unless its `get-file-buffer' check
+  ;; found one first.  That primitive misses a buffer visiting another
+  ;; spelling of the same file (native vs `/fs:'), while `find-file-noselect'
+  ;; still returns it -- so the person's own buffer would be killed.  Ask the
+  ;; handler-aware `find-buffer-visiting' instead.
+  (let* ((original-get-file-buffer (symbol-function 'get-file-buffer))
+         (index (cl-letf (((symbol-function 'get-file-buffer)
+                           (lambda (name)
+                             (cl-letf (((symbol-function 'get-file-buffer)
+                                        original-get-file-buffer))
+                               (or (funcall original-get-file-buffer name)
+                                   (find-buffer-visiting name))))))
+                  (funcall orig-fn (my/treemacs-visit-path file))))
          (index (if (my/treemacs-org-imenu-index-p index)
                     (my/treemacs-prune-org-imenu-index index)
                   index))

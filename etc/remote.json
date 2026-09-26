@@ -9,7 +9,14 @@
       "id": "aaron-pc",
       "label": "Aaron-PC",
       "shell": "/bin/bash",
-      "trusted": true
+      "trusted": true,
+      "workspaces": [
+        {
+          "id": "Aaron-PC",
+          "path": "/home/aaron"
+        }
+      ]
+
     },
     {
       "id": "login.cse.unsw.edu.au",
@@ -17,8 +24,8 @@
       "trusted": true,
       "workspaces": [
         {
-          "id": "comp2511-lab03",
-          "path": "/import/reed/7/z5586493/Desktop/2511/lab03/lab03/"
+          "id": "unsw",
+          "path": "/import/reed/7/z5586493/Desktop/"
         }
       ]
     }
