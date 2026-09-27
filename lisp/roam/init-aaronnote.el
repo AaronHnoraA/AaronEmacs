@@ -1426,6 +1426,24 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
                  (my/noema--defer-host-event
                   #'my/noema--run-emacs-key key client)))
              nil)
+            ("selection-to-agent"
+             (my/noema--defer-host-event
+              (lambda (event)
+                (let* ((client (alist-get 'client event))
+                       (file (alist-get 'file event))
+                       (buffer (my/noema--buffer-for-client client)))
+                  (unless (and (buffer-live-p buffer)
+                               (stringp file)
+                               (with-current-buffer buffer
+                                 (and (stringp my/noema-buffer-file-name)
+                                      (equal (my/noema--host-file my/noema-buffer-file-name)
+                                             (my/noema--host-file file)))))
+                    (user-error "Noema selection no longer matches its pane"))
+                  (require 'noema-context)
+                  (noema-context-send-noema-selection
+                   file (alist-get 'lineStart event) (alist-get 'lineEnd event))))
+              payload)
+             nil)
             ("input-focus"
              (my/noema--defer-host-event
               #'my/noema--handle-input-focus payload)

@@ -288,6 +288,7 @@ target-native path.  A CLI that cannot be found is an error."
 (autoload 'noema-sessions "noema-sessions" nil t)
 (autoload 'noema-sessions-switch "noema-sessions" nil t)
 (autoload 'noema-sessions-read "noema-sessions")
+(autoload 'noema-agent-inbox "noema-agent-inbox" nil t)
 (autoload 'noema-context-send "noema-context" nil t)
 (autoload 'noema-context-draft "noema-context" nil t)
 (autoload 'noema-context-send-region "noema-context" nil t)
@@ -351,6 +352,7 @@ target-native path.  A CLI that cannot be found is an error."
   "P" #'noema-pi-router-open
   "D" #'noema-pi-doctor
   "S" #'noema-sessions
+  "G" #'noema-agent-inbox
   "O" #'noema-orchestration
   "b" #'noema-sessions-switch
   "i" #'noema-agent-acp-focus-input

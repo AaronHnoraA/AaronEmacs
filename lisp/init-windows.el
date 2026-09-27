@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'init-funcs)
+(require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
 (require 'tabulated-list)
@@ -506,10 +507,41 @@ Otherwise, use `ace-window' to choose the target window."
       (user-error "No target window selected"))
     (window-swap-states source target)))
 
+(defvar my/noema--ace-hint-buffers nil
+  "Noema xwidget buffers currently showing ace-window hints.")
+
+(defun my/noema--ace-window-lead (path leaf)
+  "Show ace-window PATH inside Noema xwidgets or on Emacs window LEAF."
+  (let* ((window (cdr leaf))
+         (buffer (window-buffer window)))
+    (if (and (fboundp 'my/noema--xwidget-buffer-p)
+             (my/noema--xwidget-buffer-p buffer)
+             (fboundp 'my/noema-command))
+        (let ((label (if (eq aw-leading-char-style 'char)
+                         (string (avy--key-to-char (car (last path))))
+                       (mapconcat (lambda (key) (string (avy--key-to-char key)))
+                                  (reverse path) ""))))
+          (cl-pushnew buffer my/noema--ace-hint-buffers)
+          (with-current-buffer buffer
+            (my/noema-command "window-hint" `((label . ,label)))))
+      (aw--lead-overlay path leaf))))
+
+(defun my/noema--ace-window-remove ()
+  "Remove ace-window hints from Emacs and Noema windows."
+  (aw--remove-leading-chars)
+  (dolist (buffer my/noema--ace-hint-buffers)
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (my/noema-command "window-hint-clear"))))
+  (setq my/noema--ace-hint-buffers nil))
+
 (use-package ace-window
   :bind (("M-o" . ace-window)
          ("M-O" . my/swap-window-dwim)
-         ("C-c w s" . my/swap-window-dwim)))
+         ("C-c w s" . my/swap-window-dwim))
+  :config
+  (setq aw--lead-overlay-fn #'my/noema--ace-window-lead
+        aw--remove-leading-chars-fn #'my/noema--ace-window-remove))
 
 ;; split proportionally from all sibling windows, not just the split one
 (setopt window-combination-resize t)

@@ -2848,6 +2848,72 @@ so saving never reports it as a malformed Agent directive."
         (should-not magent-runtime-queue--arbiter-active)
         (should-not (gethash second noema-agent-worker--submissions))))))
 
+;; Adopted from Pisper's bounded agent slots: freezing stays serial, a
+;; dispatched Run releases the queue, and execution is capped.
+(defmacro noema-research-test--with-run-slots (limit &rest body)
+  "Run BODY with an isolated arbiter, LIMIT slots and recorded prepare calls.
+BODY sees `calls' (newest first) and `callbacks' for prepare responses."
+  (declare (indent 1))
+  `(let ((magent-runtime-queue--arbiter-active nil)
+         (magent-runtime-queue--arbiter-pending nil)
+         (magent-runtime-queue--active nil)
+         (magent-runtime-queue--pending nil)
+         (magent-runtime-queue--arbiter-ticket-adapters (make-hash-table :test #'eq))
+         (noema-agent-worker--submissions (make-hash-table :test #'equal))
+         (noema-agent-worker--runs (make-hash-table :test #'equal))
+         (noema-agent-worker--slot-waiting nil)
+         (noema-agent-worker--busy-waiting nil)
+         (noema-agent-worker-max-concurrent-runs ,limit)
+         calls callbacks)
+     (cl-letf (((symbol-function 'my/noema--ensure-server) (lambda (callback) (funcall callback)))
+               ((symbol-function 'run-at-time)
+                (lambda (_time _repeat function &rest args) (apply function args) nil))
+               ((symbol-function 'noema-agent-worker--ledger-init) #'ignore)
+               ((symbol-function 'noema-agent-worker--dispatch) #'ignore)
+               ((symbol-function 'noema-agent-worker--api)
+                (lambda (channel body callback &optional _timeout)
+                  (push (list channel body) calls)
+                  (push callback callbacks))))
+       ,@body)))
+
+(defun noema-research-test--prepared (run-id)
+  "Return a prepare response for RUN-ID."
+  (noema-research--table "root" "/tmp/project/"
+                         "run" (noema-research--table "id" run-id)
+                         "spec" (noema-research--table "agent" "codex")))
+
+(ert-deftest noema-agent-worker-dispatch-frees-the-queue-for-parallel-runs ()
+  (noema-research-test--with-run-slots 3
+    (noema-agent-worker--enqueue-preparation "/tmp/project/" '((cellId . "c-1")))
+    (noema-agent-worker--enqueue-preparation "/tmp/project/" '((cellId . "c-2")))
+    ;; Freezing is serial: only the first RunSpec is being prepared.
+    (should (= (length calls) 1))
+    (funcall (car callbacks) (noema-research-test--prepared "run_1") nil)
+    ;; Dispatching the first releases the queue while it keeps executing.
+    (should (gethash "run_1" noema-agent-worker--runs))
+    (should (= (length calls) 2))
+    (funcall (car callbacks) (noema-research-test--prepared "run_2") nil)
+    (should (= (noema-agent-worker--executing-count) 2))
+    (should-not magent-runtime-queue--arbiter-active)))
+
+(ert-deftest noema-agent-worker-waits-in-order-for-an-execution-slot ()
+  (noema-research-test--with-run-slots 1
+    (noema-agent-worker--enqueue-preparation "/tmp/project/" '((cellId . "c-1")))
+    (funcall (car callbacks) (noema-research-test--prepared "run_1") nil)
+    (let ((second (noema-agent-worker--enqueue-preparation "/tmp/project/" '((cellId . "c-2")))))
+      ;; The slot is taken: the second Run parks without freezing a RunSpec.
+      (should (= (length calls) 1))
+      (should (equal noema-agent-worker--slot-waiting
+                     (list (gethash second noema-agent-worker--submissions))))
+      (should-not magent-runtime-queue--arbiter-active)
+      ;; The first Run ends and its slot goes to the waiting Run.
+      (let ((first (gethash "run_1" noema-agent-worker--runs)))
+        (remhash "run_1" noema-agent-worker--runs)
+        (noema-agent-worker--finish-queue first 'completed))
+      (should-not noema-agent-worker--slot-waiting)
+      (should (= (length calls) 2))
+      (should (equal (alist-get 'cellId (cadr (car calls))) "c-2")))))
+
 (ert-deftest noema-agent-worker-waits-for-web-host-before-preparing-run ()
   (let ((magent-runtime-queue--arbiter-active nil)
         (magent-runtime-queue--arbiter-pending nil)
@@ -2868,6 +2934,23 @@ so saving never reports it as a malformed Agent directive."
       (funcall ready)
       (should (equal calls '("aaronnote:api:research:run:prepare"))))))
 
+(ert-deftest noema-research-attention-previews-proposed-file-changes ()
+  (let ((noema-agent-worker--previews (make-hash-table :test #'equal)))
+    (puthash "perm_1"
+             (noema-agent-worker--diff-preview
+              '((:diffs . (((:old . "a\nb\n") (:new . "a\nc\nd\n") (:file . "/w/src/m.py"))))))
+             noema-agent-worker--previews)
+    (with-temp-buffer
+      (noema-research-attention--insert-preview "perm_1")
+      (noema-research-attention--insert-preview "perm_unknown")
+      (should (equal (buffer-string) "  change: /w/src/m.py  +3 -2  diff\n"))
+      (should (button-at (- (point-max) 2))))
+    (noema-research-attention--show-diff (car (noema-agent-worker-permission-preview "perm_1")))
+    (with-current-buffer "*Noema proposed change: m.py*"
+      (should (string-match-p "^-b$" (buffer-string)))
+      (should (string-match-p "^\\+d$" (buffer-string)))
+      (kill-buffer))))
+
 (ert-deftest noema-research-attention-renders-versioned-shared-permission-actions ()
   (with-temp-buffer
     (noema-research-attention-mode)
@@ -2877,6 +2960,7 @@ so saving never reports it as a malformed Agent directive."
       "permissions"
       (vector (noema-research--table
                "id" "perm_1" "version" 3
+               "policyReason" "src/model.py is also being edited by open Run run_9"
                "action" (noema-research--table "kind" "execute" "argv" ["go" "test" "./..."])
                "options" (vector (noema-research--table "optionId" "allow_once" "label" "Allow once")
                                  (noema-research--table "optionId" "reject_once" "label" "Reject"))))
@@ -2893,6 +2977,7 @@ so saving never reports it as a malformed Agent directive."
      nil)
     (should (string-match-p "Permissions (1)" (buffer-string)))
     (should (string-match-p "go test ./\\.\\.\\." (buffer-string)))
+    (should (string-match-p "why: src/model.py is also being edited by open Run run_9" (buffer-string)))
     (should (string-match-p "Input required (1)" (buffer-string)))
     (should (string-match-p "Proposals (1)" (buffer-string)))
     (should (string-match-p "Ghost route" (buffer-string)))
@@ -3572,12 +3657,26 @@ Idle time counts from the buffer's last change, not from its last display."
 
 (ert-deftest noema-agent-worker-lighter-counts-runs-and-pending-decisions ()
   (let ((noema-agent-worker--runs (make-hash-table :test #'equal))
+        (noema-agent-worker--slot-waiting nil)
         (noema-agent-worker--attention-count 0))
     (should-not (noema-agent-worker--attention-lighter))
     (puthash "run_1" t noema-agent-worker--runs)
     (should (equal (noema-agent-worker--attention-lighter) " Noema[▶1]"))
     (setq noema-agent-worker--attention-count 2)
-    (should (equal (noema-agent-worker--attention-lighter) " Noema[▶1 !2]"))))
+    (should (equal (noema-agent-worker--attention-lighter) " Noema[▶1 !2]"))
+    (setq noema-agent-worker--slot-waiting (list 'waiting))
+    (should (equal (noema-agent-worker--attention-lighter) " Noema[▶1 ⋯1 !2]"))))
+
+(ert-deftest noema-agent-worker-notifies-only-when-emacs-is-not-focused ()
+  (let (sent (focused nil))
+    (let ((noema-agent-worker-notify-function (lambda (title body) (push (list title body) sent))))
+      (cl-letf (((symbol-function 'frame-focus-state) (lambda (&rest _) focused)))
+        (noema-agent-worker--notify "Noema" "waiting")
+        (setq focused t)
+        (noema-agent-worker--notify "Noema" "ignored")))
+    (should (equal sent '(("Noema" "waiting"))))
+    (let ((noema-agent-worker-notify-function nil))
+      (should-not (noema-agent-worker--notify "Noema" "off")))))
 
 (ert-deftest noema-agent-worker-waits-for-a-busy-named-session-instead-of-failing ()
   (let* ((worker (noema-agent-worker--create
@@ -3734,6 +3833,103 @@ Idle time counts from the buffer's last change, not from its last display."
                                       (noema-research--table "notebookId" "nb_other" "sessionName" "draft"))
                                 (current-buffer)))
                        '("baseline" "main")))))))
+
+;; Adopted from Pisper's session organization: attention is the kernel's
+;; projection of the latest Run, and reading clears only `unread'.
+(ert-deftest noema-sessions-attention-marks-and-order ()
+  (let ((quiet (noema-research--table "name" "quiet" "state" "active" "aliases" []))
+        (new (noema-research--table "name" "new" "unread" t "state" "active" "aliases" []))
+        (failed (noema-research--table "name" "failed" "failed" t "needsAttention" t
+                                       "attentionReason" "failed" "unread" :false
+                                       "state" "active" "aliases" []))
+        (fresh-failure (noema-research--table "name" "boom" "failed" t "needsAttention" t
+                                              "attentionReason" "failed" "unread" t
+                                              "state" "active" "aliases" []))
+        (approve (noema-research--table "name" "approve" "needsAttention" t
+                                        "attentionReason" "permission" "state" "active" "aliases" [])))
+    (should (equal (mapcar #'noema-sessions--attention (list quiet new failed fresh-failure approve))
+                   '("" "new" "failed" "!failed" "!approve")))
+    (should (equal (mapcar (lambda (entry) (noema-sessions--string entry "name"))
+                           (seq-sort-by #'noema-sessions--attention-rank #'<
+                                        (list quiet new failed approve)))
+                   '("failed" "approve" "new" "quiet")))
+    (cl-letf (((symbol-function 'noema-sessions--time) (lambda (_) "09-28 10:00")))
+      (should (equal (noema-sessions--last-run
+                      (noema-research--table "status" "failed" "failureKind" "rate_limit" "retryable" t))
+                     "09-28 10:00 failed (rate limit, retry)"))
+      (should (equal (noema-sessions--last-run
+                      (noema-research--table "status" "failed" "failureKind" "auth"))
+                     "09-28 10:00 failed (auth)"))
+      (should (equal (noema-sessions--last-run (noema-research--table "status" "completed"))
+                     "09-28 10:00 completed")))
+    ;; Visiting marks read only when there is unread news.
+    (let (calls)
+      (cl-letf (((symbol-function 'noema-sessions--api)
+                 (lambda (channel body _callback) (push (cons channel body) calls))))
+        (noema-sessions--note-read quiet "/tmp/p/")
+        (noema-sessions--note-read fresh-failure "/tmp/p/"))
+      (should (equal calls '(("aaronnote:api:research:session:name:read"
+                              (cwd . "/tmp/p/") (name . "boom"))))))))
+
+(ert-deftest noema-sessions-running-status-shows-a-quiet-agent ()
+  (with-temp-buffer
+    (let ((noema-sessions-idle-threshold 30))
+      (setq-local noema-agent-acp-last-used-at (- (float-time) 5))
+      (should (equal (noema-sessions--running-status (current-buffer)) "running"))
+      (setq-local noema-agent-acp-last-used-at (- (float-time) 45))
+      (should (equal (noema-sessions--running-status (current-buffer)) "running, idle 45s"))
+      (setq-local noema-agent-acp-last-used-at (- (float-time) 600))
+      (should (equal (noema-sessions--running-status (current-buffer)) "running, idle 10m"))
+      (should (equal (noema-sessions--running-status nil) "running")))))
+
+(ert-deftest noema-sessions-retry-reruns-only-a-failed-latest-run ()
+  (with-temp-buffer
+    (setq-local noema-sessions--root "/tmp/p/"
+                noema-sessions--names
+                (list (noema-research--table "name" "ok" "lastRun" (noema-research--table "status" "completed"))
+                      (noema-research--table "name" "flaky" "lastRun"
+                                             (noema-research--table "status" "failed" "retryable" t
+                                                                    "failureKind" "rate_limit"))
+                      (noema-research--table "name" "auth" "lastRun"
+                                             (noema-research--table "status" "failed" "failureKind" "auth"))))
+    (let (jumped asked)
+      (cl-letf (((symbol-function 'noema-sessions--jump-to-run)
+                 (lambda (_root name _last then) (push (cons name then) jumped)))
+                ((symbol-function 'noema-sessions--note-read) #'ignore)
+                ((symbol-function 'yes-or-no-p) (lambda (prompt) (push prompt asked) nil)))
+        (should-error (noema-sessions-retry "ok") :type 'user-error)
+        (noema-sessions-retry "flaky")
+        (noema-sessions-retry "auth"))
+      (should (equal jumped '(("flaky" . noema-research-execute-current))))
+      (should (string-match-p "failed with auth" (car asked))))))
+
+(ert-deftest noema-sessions-side-chat-is-one-per-session-and-starts-empty ()
+  (let (started shown)
+    (cl-letf (((symbol-function 'noema-agent-acp-config-for) (lambda (agent) (list :agent agent)))
+              ((symbol-function 'noema-agent-acp-start)
+               (cl-function
+                (lambda (&key config directory origin &allow-other-keys)
+                  (let ((buffer (generate-new-buffer " *side*")))
+                    (with-current-buffer buffer (setq-local major-mode 'agent-shell-mode))
+                    (push (list config directory origin) started)
+                    buffer))))
+              ((symbol-function 'noema-agent-acp-adopt)
+               (cl-function
+                (lambda (buffer &key root &allow-other-keys)
+                  (with-current-buffer buffer
+                    (setq-local noema-agent-acp-session-root root))
+                  buffer)))
+              ((symbol-function 'noema-agent-acp-show-buffer) (lambda (buffer) (push buffer shown))))
+      (let ((first (noema-sessions--open-side-chat "/tmp/p/" "baseline" "codex" "/tmp/work/"))
+            (again (noema-sessions--open-side-chat "/tmp/p/" "baseline" "codex" "/tmp/work/")))
+        (unwind-protect
+            (progn
+              (should (eq first again))
+              ;; No session id, no fork: the parent's history is not copied.
+              (should (equal started '(((:agent "codex") "/tmp/work/" side))))
+              (should (equal (buffer-local-value 'noema-agent-acp-side-parent first) "baseline"))
+              (should (equal shown (list first first))))
+          (kill-buffer first))))))
 
 (ert-deftest noema-sessions-switch-offers-names-and-unnamed-agent-buffers ()
   (let ((named (generate-new-buffer " *noema-named*"))

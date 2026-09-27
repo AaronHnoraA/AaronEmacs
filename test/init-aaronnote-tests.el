@@ -533,11 +533,12 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
       (dolist (key '("d" "SPC" "q" "<down>" "S-<left>" "M-/" "M-y"
                      "M-=" "M-<right>" "C-<tab>"))
         (should (eq (key-binding (kbd key)) #'my/noema-xwidget-recover-key)))
-      ;; These are the only unshifted Cmd letters the renderer intentionally
-      ;; hands back to Emacs; recovery must preserve that same boundary.
+      ;; Host Cmd chords must retain their Emacs bindings in recovery mode.
       (should-not (eq (key-binding (kbd "M-x")) #'my/noema-xwidget-recover-key))
       (should-not (eq (key-binding (kbd "M-w")) #'my/noema-xwidget-recover-key))
       (should-not (eq (key-binding (kbd "M-q")) #'my/noema-xwidget-recover-key))
+      (should-not (eq (key-binding (kbd "M-o")) #'my/noema-xwidget-recover-key))
+      (should-not (eq (key-binding (kbd "M-O")) #'my/noema-xwidget-recover-key))
       (setq-local xwidget-webkit-edit-mode t)
       (my/noema--sync-xwidget-recovery-mode)
       (should-not my/noema-xwidget-recovery-mode)
@@ -916,6 +917,29 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
       (apply (car deferred) (cdr deferred)))
     (should (equal seen '("M-<right>" "split-client")))))
 
+(ert-deftest my/noema-ace-window-hint-renders-inside-xwidget ()
+  "Ace labels for native xwidgets travel to their owning page."
+  (require 'ace-window)
+  (let ((buffer (generate-new-buffer " *Noema ace hint*"))
+        (my/noema--ace-hint-buffers nil)
+        (aw-leading-char-style 'char)
+        sent)
+    (unwind-protect
+        (save-window-excursion
+          (set-window-buffer (selected-window) buffer)
+          (cl-letf (((symbol-function 'my/noema--xwidget-buffer-p)
+                     (lambda (&optional candidate) (eq candidate buffer)))
+                    ((symbol-function 'my/noema-command)
+                     (lambda (command &optional detail)
+                       (push (cons command detail) sent)))
+                    ((symbol-function 'aw--remove-leading-chars) #'ignore))
+            (my/noema--ace-window-lead '(?a) (cons 1 (selected-window)))
+            (should (equal (car sent) '("window-hint" (label . "a"))))
+            (my/noema--ace-window-remove)
+            (should (equal (car sent) '("window-hint-clear")))
+            (should-not my/noema--ace-hint-buffers)))
+      (kill-buffer buffer))))
+
 (ert-deftest my/noema-key-event-ignores-non-string-key-data ()
   (let (seen)
     (cl-letf (((symbol-function 'json-serialize)
@@ -932,6 +956,46 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
          nil)
         '((ok . t)))))
     (should-not seen)))
+
+(ert-deftest my/noema-selection-event-stays-with-its-own-pane ()
+  "A selected range can only become context for its source xwidget file."
+  (require 'noema-context)
+  (let* ((file (make-temp-file "noema-agent-selection-" nil ".md"))
+         (other (make-temp-file "noema-agent-other-" nil ".md"))
+         (buffer (generate-new-buffer " *Noema selected pane*"))
+         (my/noema--client-buffers (make-hash-table :test #'equal))
+         deferred sent)
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq-local my/noema--client-id "selected-pane")
+            (setq-local my/noema-buffer-file-name file))
+          (puthash "selected-pane" buffer my/noema--client-buffers)
+          (cl-letf (((symbol-function 'my/noema--defer-host-event)
+                     (lambda (function &rest args)
+                       (setq deferred (cons function args))))
+                    ((symbol-function 'noema-context-send-noema-selection)
+                     (lambda (&rest args) (setq sent args))))
+            (my/noema--gateway-event
+             `((type . "selection-to-agent")
+               (payload . ((client . "selected-pane") (file . ,file)
+                           (lineStart . 2) (lineEnd . 4)))) nil)
+            (apply (car deferred) (cdr deferred))
+            (should (equal sent (list file 2 4)))
+            (setq sent nil)
+            (my/noema--gateway-event
+             `((type . "selection-to-agent")
+               (payload . ((client . "selected-pane") (file . ,other)
+                           (lineStart . 2) (lineEnd . 4)))) nil)
+            (should-error (apply (car deferred) (cdr deferred)) :type 'user-error)
+            (should-not sent)))
+      (kill-buffer buffer)
+      (delete-file file)
+      (delete-file other))))
+
+(ert-deftest my/noema-agent-selection-key-keeps-its-emacs-binding ()
+  "The forwarded C-c A v sequence invokes the shared context command."
+  (should (eq (key-binding (kbd "C-c A v")) #'noema-context-send-region)))
 
 (ert-deftest my/noema-input-focus-corrects-stale-pane-bookkeeping ()
   (let* ((buffer (generate-new-buffer " *Noema stale focus*"))

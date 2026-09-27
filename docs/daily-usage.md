@@ -944,7 +944,9 @@ GUI frame 的两侧 fringe 分工如下：
 - `C-x 1`
   `my/toggle-delete-other-windows` — 最大化当前窗口，再次执行恢复先前布局（依赖 winner-mode）
 - `M-o`
-  `ace-window`
+  `ace-window`；Noema xwidget 里的目标编号会显示在页面左上角
+- `M-O`
+  交换当前窗口与目标窗口
 - `M-\``
   `vterm-toggle`
 - `H-\`` / `C-\``
@@ -974,14 +976,19 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 | `C-c A .` | 把 region/buffer/file 加入 gptel context |
 | `C-c A r` | gptel rewrite/diff 预览 |
 | `C-c A p` | 把当前 agent-shell session 纳入 research |
+| `C-c A G` | 跨 Project 的 agent 总览：待处理、未读、运行状态与会话跳转 |
 | `C-c A O` | 编排面板：Task / Job / Worker / Delegation / 事件 |
 | `C-c A x` | 把当前上下文发给某个 agent 会话（引用，不拷贝正文）|
-| `C-c A v` | 把选区发给某个会话 |
+| `C-c A v` | 把选区发给某个会话；在 Noema Markdown 页里直接使用网页选区 |
 | `C-c A B` | 把整个 buffer 发给某个会话 |
 | `C-c A f` | 把某个文件发给某个会话 |
 | `C-c A @` | 告诉会话光标在哪（文件:行:列 + 所在定义）|
 | `C-c A ,` | 发送前检视/删减上下文 |
 | `C-c A d` | 同 `C-c A x`，但只塞进输入区不提交 |
+
+Noema Markdown 页的选区工具栏也有 **Agent** 按钮。发送前会先保存笔记，
+然后把选中行作为共享 gptel context 的文件引用交给 Emacs，会话中继续输入问题。
+Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空行稍微收紧；每个源文件空行仍可见、可编辑，移动光标不会改变它们的高度。源文件的换行在编辑视图中始终保持换行，避免输入一个字符后与下一行合并。
 
 ### 所有 agent 会话按项目统一登记
 
@@ -990,6 +997,29 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 有会话名（例如 `popup/claude`、`foreign/codex-2`）、有来源标记。因此
 `C-c A S`（列表）和 `C-c A b`（切换）能看到并管理全部会话，`C-c A x` 这类
 命令也可以点名把上下文交给其中任意一个。
+
+会话列表（`C-c A S`）第一列是注意力：`!approve`/`!input` 表示正等你决定，
+`failed` 表示最近一次 Run 失败（读过也不会消失，要等后续成功的 Run），`new`
+表示有你还没看的已结束 Run；需要你的行排在最前。Last Run 列带失败类型，
+`retry` 表示限流、断网、租约丢失这类可原样重试的失败。按键：`u` 标记已读，
+`!` 跳到下一个需要处理的会话，`R` 重跑失败 Run 的 work 块（不可重试的失败会先
+确认），`s` 在该会话旁开侧聊（同 agent、同目录、不带历史，不进持久注册表，
+闲置且隐藏后自动回收；agent 标签里是 `C-c C-q`）。运行中但 30 秒无输出的会话
+显示为 `running, idle 45s`。
+
+多个 work 块可以同时执行（`noema-agent-worker-max-concurrent-runs`，默认 3，
+设为 1 即完全串行）；mode line 的 `Noema[▶2 ⋯1 !1]` 分别是执行中、等待执行
+槽位、等你决定的数量。两个仍在运行的 Run 要改同一个文件时，后一个的编辑请求
+不会自动批准，会带着原因（`why:`）进入 Attention；Attention 里编辑请求会显示
+`+N -M` 行数和 `diff` 按钮。Emacs 不在前台时，等待决定和 Run 结束会发系统通知
+（`noema-agent-worker-notify-function`，设为 nil 关闭）。
+
+`C-c A G` / `M-x noema-agent-inbox` 打开全局 agent 总览。它汇总笔记根目录中
+已有的 Noema Project、Emacs 已知的项目和当前打开的 agent；只有带 `[project]`
+的清单才进入持久会话查询，普通仓库中的活动 agent 只作为本地行显示。
+总览按待审批、待输入、失败、未读优先排序。`RET` 打开会话，`j` 跳到最近 Run 的
+work 块，`p` 打开其 Project，`s` 打开该 Project 的 Session 列表，`g` 刷新状态，`G` 重新发现
+Project。总览只读取现有注册表，不会启动 agent 或创建 Project。
 
 项目 root 取最近的、带 `[project]` 表的 `noema.toml`（只有 `repository_id` 的
 vault 清单不算项目），没有就退回普通项目根目录；**不会**为了登记而创建项目。

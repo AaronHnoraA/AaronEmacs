@@ -594,6 +594,7 @@ in-process 缓存，与自动刷新保持一致。
 
 - `M-x noema` / `C-c A W` — Noema 主入口
 - `M-x noema-agent-start` / `C-c A a` — 启动包管理的 agent-shell 上的结构化 agent
+- `M-x noema-agent-inbox` / `C-c A G` — 汇总已知 Noema Project 的会话状态、待处理项和活动 agent；`RET` 跳转，`G` 重扫项目根
 - `M-x noema-compose` / `C-c A c` — 直接复用内化 gptel 的 compose UI
 - `C-c A s/m/./r` — send、transient、context、rewrite/diff
 - `C-c A p` — 把当前 agent-shell session 纳入 research
@@ -617,7 +618,7 @@ in-process 缓存，与自动刷新保持一致。
   输入处草拟一行引用（Skill 给出绝对 `SKILL.md` 与资源目录，MCP 给出配置文件），
   不启用、不打补丁、不安装、也不自动发送。
 - 会话登记（`noema-agent-acp.el`）：`noema-agent-acp-start` 用 `:origin` 记下是哪个
-  入口开的（`run`/`popup`/`manual`/`foreign`/`pi`/`takeover`/`probe`），
+  入口开的（`run`/`popup`/`manual`/`foreign`/`pi`/`takeover`/`probe`/`side`），
   `noema-agent-acp-adopt` 是唯一登记点，负责解析项目 root、生成唯一会话名、调用
   `noema-agent-acp-mark-session-buffer`；`agent-shell-mode-hook` 上的收编钩子把裸
   `M-x agent-shell` 也纳进来（`noema-agent-acp-adopt-foreign-sessions` 可关）。
@@ -625,14 +626,21 @@ in-process 缓存，与自动刷新保持一致。
   该目录，统一投影成本机原生路径），绝不创建 Project。只有已经是 Noema 项目时才额外 `session:promote` + `session:name:bind`
   写进 Node 持久注册表，失败不影响会话。`noema-agent-acp-sessions` 是合并视图，
   `noema-sessions-read` 是统一的会话选择器（可选“新开一个”）。
+  `noema-agent-acp-ephemeral-origins`（默认 `side`）里的来源不写持久注册表。
 - 生命周期：所有自动停止路径（warm 清扫、项目最后一个 `.noema` 关闭后的收尾、项目
-  关闭期间结束的 Run）统一经 `noema-agent-acp-auto-stoppable-p`——空闲、不可见、来源
-  在 `noema-agent-acp-auto-stop-origins`。`agent-shell-mode-hook` 给每个 agent buffer
+  关闭期间结束的 Run）统一经 `noema-agent-acp-auto-stoppable-p`——空闲、没有排队的
+  prompt（agent-shell 的 `:pending-prompts`）、不可见、来源在
+  `noema-agent-acp-auto-stop-origins`。`agent-shell-mode-hook` 给每个 agent buffer
   装 `after-change-functions` 记录活动时间；`noema-agent-worker-stop-buffer` 在
   `noema-agent-acp-busy-p`（含 shell-maker 的交互回答）时拒绝停止。
 - 放置：进程目录由 `noema-agent-acp-process-directory-function` 决定，本配置设为
   `my/agent-shell-process-directory`，与裸 `agent-shell` 的 `agent-shell-cwd` advice
   是同一函数；远端 agent 的契约见 `docs/remote-framework.md` 第 7 节。
+- 并行：RunSpec 冻结仍经 Magent 全局队列逐个进行，Run 派发后立即释放队列票据；
+  同时执行的 Run 数由 `noema-agent-worker-max-concurrent-runs` 限制，超出的按顺序
+  在 `noema-agent-worker--slot-waiting` 等待。同一文件的并发编辑由 kernel 权限策略
+  转为人工决定（`policyReason`），不拒绝。设计来源与取舍见
+  `site-lisp/noema/docs/pisper-agent-lifecycle-study.md`。
 - 编辑器上下文（`noema-context.el`）：挑选完全复用 gptel 的 `gptel-context` 与
   `*gptel-context*` 检视 buffer，只有一份选择。发送时把它解析成引用
   （`noema-context-references`），再构造内容块：一个 text 块列出
