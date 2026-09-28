@@ -446,12 +446,11 @@ the backend.  The backend is chosen here, not per export."
   "M-C" #'my/noema-prose-check)
 
 ;; The pane buffer is an inert placeholder: the page owns the text.  Global
-;; Emacs text commands reached through forwarded keys (H-i, H-s, H-c, C-x C-s,
+;; Emacs text commands reached through forwarded keys (H-s, H-c, C-x C-s,
 ;; C-x h, ...) are remapped onto the page's own equivalents so they act on the
 ;; note instead of silently doing nothing.
 (pcase-dolist (`(,command . ,pane-command)
-               '((show-imenu . my/noema-outline)
-                 (imenu . my/noema-goto-heading)
+               '((imenu . my/noema-goto-heading)
                  (consult-imenu . my/noema-goto-heading)
                  (consult-outline . my/noema-goto-heading)
                  (my/search-line-forward . my/noema-find)
@@ -471,6 +470,36 @@ the backend.  The backend is chosen here, not per export."
                  (revert-buffer . my/noema-refresh-file)
                  (revert-buffer-quick . my/noema-refresh-file)))
   (define-key my/noema-keys-mode-map (vector 'remap command) pane-command))
+
+(defvar my/treemacs-tag-visit-functions)
+
+(defun my/noema-treemacs-tag-visit-h (buffer)
+  "Move the Noema page, not a raw buffer, to a Treemacs heading in BUFFER.
+`show-imenu' (H-i) in a Noema pane opens the same Treemacs outline as any
+file.  Its heading jump visits the Markdown source; when a Noema pane shows
+that note, the pane goes to the heading instead and the throwaway raw buffer
+is dropped.  A raw buffer you are editing elsewhere keeps the jump."
+  (when-let* ((file (buffer-local-value 'buffer-file-name buffer))
+              ((my/noema--markdown-file-p file))
+              ((not (with-current-buffer buffer
+                      (bound-and-true-p noema-md-bridge-source-mode))))
+              ((<= (length (get-buffer-window-list buffer nil t)) 1))
+              (pane (my/noema--buffer-for-file file)))
+    (let ((line (with-current-buffer buffer (line-number-at-pos nil t)))
+          (window (selected-window))
+          (pane-window (get-buffer-window pane 'visible)))
+      (if (and (window-live-p pane-window) (not (eq pane-window window)))
+          (progn (switch-to-prev-buffer window t)
+                 (select-window pane-window))
+        (set-window-buffer window pane)
+        (setq pane-window window))
+      (with-current-buffer pane
+        (my/noema-command "goto-line" `((value . ,line))))
+      (my/noema--focus-xwidget-window pane-window)
+      (unless (or (buffer-modified-p buffer) (get-buffer-window buffer t))
+        (kill-buffer buffer)))))
+
+(add-hook 'my/treemacs-tag-visit-functions #'my/noema-treemacs-tag-visit-h)
 
 (define-minor-mode my/noema-keys-mode
   "Buffer-local keys for an Noema browser surface."
@@ -1460,7 +1489,11 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              (my/noema--defer-host-event
               (lambda (event)
                 (require 'noema-md-bridge)
-                (noema-md-bridge-handle-selection event))
+                ;; A refusal (nothing selected, stale pane) is an answer the
+                ;; person asked for: show it plainly.
+                (condition-case failure
+                    (noema-md-bridge-handle-selection event)
+                  (user-error (message "%s" (error-message-string failure)))))
               payload)
              nil)
             ("input-focus"

@@ -482,7 +482,9 @@ signature, which many packages call with explicit region arguments."
   (scroll-down 1))
 
 (defun refresh-file ()
-  "Automatic reload current file."
+  "Reformat and reload the current file, or reload it from disk.
+Lisp, C, shell and SCSS buffers are reformatted and saved (Emacs Lisp is also
+loaded).  Every other buffer that can revert is reloaded from disk."
   (interactive)
   (cond ((eq major-mode 'emacs-lisp-mode)
          (indent-buffer)
@@ -499,6 +501,17 @@ signature, which many packages call with explicit region arguments."
         ((derived-mode-p 'scss-mode)
          (require 'css-sort)
          (css-sort))
+        ;; Anything else reloads from disk through the buffer's own revert:
+        ;; a surface's remap (a Noema page reloads its note), a mode's
+        ;; `revert-buffer-function' (a `.noema' notebook re-projects, its
+        ;; Graph Board redraws), or a plain file reload.  Useful after an
+        ;; agent or another program changed the file.
+        ((command-remapping 'revert-buffer)
+         (call-interactively (command-remapping 'revert-buffer)))
+        ((or buffer-file-name
+             (not (eq revert-buffer-function #'revert-buffer--default)))
+         (revert-buffer t (not (buffer-modified-p)))
+         (message "Reloaded %s from disk" (buffer-name)))
         (t (message "Current mode is not supported, so not reload"))))
 
 (defun cycle-buffer-in-special-mode (special-mode)

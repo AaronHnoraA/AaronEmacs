@@ -174,20 +174,29 @@ Noema 页面把 `H-`（Option）组合键、`C-x` / `C-c` 前缀序列、`C-g`�
 `M-x` / `M-w` / `M-q` / `M-o` 交给 Emacs；这些键在 CodeMirror 自己的按键表
 之前被截获，所以 `C-c C-e` 不会再同时把光标移到行尾，`H-l` / `H-u` 也不会执行两次。
 
+从页面触发的 Emacs 命令执行完后，键盘焦点跟着命令的结果走：它打开或切换了哪个普通
+Emacs 窗口（agent 会话、compose、Treemacs、vterm、源 buffer……），就选中那个窗口，
+不会回到页面编辑器。只输出消息、什么都没打开的命令保持原窗口。`C-u` 前缀、
+minibuffer 输入和 transient 菜单都会等它们结束再判断。页面发起的
+`C-c A v/@` 这类发送，最后会停在 agent 会话的输入处。
+
 xwidget buffer 本身没有正文，所以作用于“当前 buffer 文本”的常用命令会被重定向到
 页面上的等价操作（`my/noema-keys-mode-map`）：
 
 | 键 / 命令 | 在 Noema 页面里 |
 |-----------|-----------------|
-| `H-i`（`show-imenu`） | 开关页面大纲 |
+| `H-i`（`show-imenu`） | 和其他 buffer 一样打开 Treemacs 大纲，跟随页面的笔记；点击标题时页面跳到该标题，不打开原始 Markdown |
 | `imenu` / `consult-imenu` / `consult-outline` | 在 minibuffer 里选标题并跳转 |
 | `H-s`、`consult-line`、`isearch` | 打开页面查找栏 |
 | `H-c` / `M-c`、`H-X`、`H-v` / `M-v` | 复制 / 剪切 / 粘贴页面选区（含 Jupyter 输出选区） |
 | `C-x h` | 全选笔记 |
 | `C-x C-s` | 保存笔记 |
 | `C-x u`、`undo-redo` | 页面 undo / redo |
-| `revert-buffer`、`H-o !f` | `my/noema-refresh-file`：从磁盘重载 |
+| `refresh-file`、`revert-buffer`、`H-o !f` | `my/noema-refresh-file`：从磁盘重载 |
 
+`M-x refresh-file` 在任何能 revert 的 buffer 里都是“从磁盘重载”：Noema 页面走
+`my/noema-refresh-file`，`.noema` 笔记本重新投影 JuText，`*Noema DAG*` 重载源笔记本
+并重绘；Lisp/C/shell/SCSS 仍是原来的格式化并保存。
 `my/noema-refresh-file` 用于 agent 或外部程序改过文件之后。它不会像普通刷新那样先把
 页面草稿写回磁盘；页面有未保存修改时会拒绝，`C-u` 则丢弃草稿后重载。
 在 Emacs 里保存同一个 Markdown 文件（例如接受 gptel rewrite）时，没有未保存修改的
@@ -1018,11 +1027,14 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 
 Noema Markdown 页的选区工具栏有 **Agent** 和 **Rewrite** 按钮，`...` 里还有
 Add to AI context、gptel compose、在 Emacs 源 buffer 中选中；`H-o %` 是同一组操作的
-Transient。所有这些都先保存笔记，再把选区的准确位置（行 + 字符列）交给
+Transient。所有这些都先保存笔记（发送整篇笔记时不需要页面应答，直接用磁盘上的文件），再把选区的准确位置（行 + 字符列）交给
 `noema-md-bridge`，由它在笔记的 Emacs 源 buffer 上运行对应的 gptel / agent UI。
 Rewrite 的 diff / ediff / accept 审阅在源 buffer 里完成；源 buffer 处于
 `noema-md-bridge-source-mode`（mode line `Noema↔`），修改在空闲
 `noema-md-bridge-autosave-delay` 秒后保存，页面随即重载；`C-c C-c` 保存并回到页面。
+页面没有选区等无法完成的情况会直接在 echo area 说明原因；页面
+`noema-md-bridge-answer-timeout` 秒内没有应答时 Emacs 也会提示（通常是页面需要
+`H-o r` 刷新或 `H-o B` 重建）。
 Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空行稍微收紧；每个源文件空行仍可见、可编辑，移动光标不会改变它们的高度。源文件的换行在编辑视图中始终保持换行，避免输入一个字符后与下一行合并。
 
 ### 所有 agent 会话按项目统一登记

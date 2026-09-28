@@ -62,6 +62,9 @@ test helpers) where you want a raw Emacs buffer instead of the web editor.")
   "Return non-nil when the current open warrants an Noema redirect."
   (and (not noninteractive)
        (not my/noema--inhibit-redirect)
+       ;; A tool reading the file (Treemacs indexing headings) is not the
+       ;; person opening it; redirecting would blank its buffer's outline.
+       (not (bound-and-true-p my/programmatic-file-visit))
        (eq my/noema-markdown-default-surface 'app)
        ;; Block known programmatic callers that are not user-facing file opens.
        (not (memq this-command

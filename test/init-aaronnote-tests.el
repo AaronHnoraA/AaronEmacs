@@ -985,13 +985,17 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                (payload . ((client . "selected-pane") (file . ,file)
                            (lineStart . 2) (lineEnd . 4)))) nil)
             (apply (car deferred) (cdr deferred))
+            ;; The action runs as its own step after the event queue.
+            (sleep-for 0.05)
             (should (equal sent '("agent" "two\nthree\nfour\n")))
             (setq sent nil)
             (my/noema--gateway-event
              `((type . "selection-to-agent")
                (payload . ((client . "selected-pane") (file . ,other)
                            (lineStart . 2) (lineEnd . 4)))) nil)
-            (should-error (apply (car deferred) (cdr deferred)) :type 'user-error)
+            ;; A refusal is shown to the person, not raised from a timer.
+            (should (equal (apply (car deferred) (cdr deferred))
+                           "Noema selection no longer matches its pane"))
             (should-not sent)))
       (when-let* ((visiting (find-buffer-visiting file))) (kill-buffer visiting))
       (kill-buffer buffer)
@@ -2772,8 +2776,9 @@ selection untouched, so the pane keeps being reported as background."
   "Forwarded Emacs text commands act on the note, not the inert placeholder."
   (with-temp-buffer
     (my/noema-keys-mode 1)
-    (dolist (entry '((show-imenu . my/noema-outline)
-                     (my/search-line-forward . my/noema-find)
+    ;; H-i keeps the ordinary Treemacs outline, which follows the pane's note.
+    (should-not (command-remapping 'show-imenu))
+    (dolist (entry '((my/search-line-forward . my/noema-find)
                      (clipboard-kill-ring-save . my/noema-pane-copy)
                      (save-buffer . my/noema-save)
                      (revert-buffer . my/noema-refresh-file)))
@@ -2810,6 +2815,137 @@ selection untouched, so the pane keeps being reported as background."
                        '(("Top" . 1) ("  Child" . 6))))
       (delete-file file))))
 
+
+(ert-deftest my/noema-treemacs-heading-jump-moves-the-pane ()
+  "A Treemacs heading click for a note in a Noema pane moves that pane."
+  (let* ((file (make-temp-file "noema-outline" nil ".md" "# A\n\n## B\n"))
+         (raw (let ((my/noema--inhibit-redirect t)) (find-file-noselect file)))
+         (pane (generate-new-buffer " *noema pane*"))
+         sent)
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer raw)
+          (goto-char (point-min))
+          (forward-line 2)
+          (cl-letf (((symbol-function 'my/noema--buffer-for-file) (lambda (_) pane))
+                    ((symbol-function 'my/noema--focus-xwidget-window) #'ignore)
+                    ((symbol-function 'my/noema-command)
+                     (lambda (command &optional detail) (push (list command detail) sent))))
+            (my/noema-treemacs-tag-visit-h raw))
+          (should (equal sent '(("goto-line" ((value . 3))))))
+          (should (eq (window-buffer (selected-window)) pane))
+          (should-not (buffer-live-p raw)))
+      (when (buffer-live-p raw) (kill-buffer raw))
+      (kill-buffer pane)
+      (delete-file file))))
+
+(ert-deftest my/noema-refresh-file-command-reloads-a-pane ()
+  "The generic `refresh-file' reloads a Noema pane from disk."
+  (require 'basic-toolkit)
+  (let (called)
+    (with-temp-buffer
+      (my/noema-keys-mode 1)
+      (cl-letf (((symbol-function 'my/noema-refresh-file)
+                 (lambda (&optional _) (interactive "P") (setq called t))))
+        (refresh-file)))
+    (should called)))
+
+(ert-deftest my/noema-bridge-visit-is-not-redirected-to-noema ()
+  "An interactive send from a pane reads the note; it must not reopen Noema."
+  (require 'noema-context)
+  (let* ((file (make-temp-file "noema-bridge" nil ".md" "# A\n\nbody\n"))
+         (pane (generate-new-buffer " *noema pane*"))
+         redirected references)
+    (unwind-protect
+        (with-current-buffer pane
+          (setq-local my/noema-buffer-file-name file)
+          (cl-letf (((symbol-function 'my/noema--xwidget-buffer-p) (lambda (&optional _) t))
+                    ((symbol-function 'my/noema-open-file) (lambda (f) (setq redirected f)))
+                    ((symbol-function 'my/noema-command) #'ignore)
+                    ((symbol-function 'noema-context--send)
+                     (lambda (&rest arguments)
+                       (setq references (funcall (plist-get arguments :references)
+                                                 (file-name-directory file) nil)))))
+            ;; What M-x does: an interactive command, outside batch semantics.
+            (let ((noninteractive nil)
+                  (this-command 'noema-context-send-buffer))
+              (noema-context-send-buffer)))
+          (should-not redirected)
+          (should (equal (mapcar #'noema-context--reference-line references)
+                         (list (file-name-nondirectory file))))
+          (let ((source (find-buffer-visiting file)))
+            (should (buffer-live-p source))
+            (should (with-current-buffer source (derived-mode-p 'text-mode)))))
+      (when-let* ((source (find-buffer-visiting file))) (kill-buffer source))
+      (kill-buffer pane)
+      (delete-file file))))
+
+(ert-deftest my/noema-bridge-prompts-get-the-keyboard ()
+  "A bridged action releases the page's input and focuses its prompts."
+  (require 'noema-md-bridge)
+  (let* ((pane (generate-new-buffer " *noema pane*"))
+         (source (generate-new-buffer " *noema source*"))
+         released hooked)
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/noema--release-xwidget-input-buffer)
+                   (lambda (&optional buffer) (setq released buffer)))
+                  ((symbol-function 'my/noema--select-emacs-window) #'ignore)
+                  ((symbol-function 'noema-md-bridge-run)
+                   (lambda (&rest _)
+                     (setq hooked (memq #'my/noema--focus-minibuffer-if-active
+                                        minibuffer-setup-hook))
+                     (signal 'quit nil))))
+          (noema-md-bridge--run-interactively pane "agent" source 1 1)
+          (should (eq released pane))
+          (should hooked))
+      (kill-buffer pane)
+      (kill-buffer source))))
+
+(defmacro my/noema-test--with-pane-window (&rest body)
+  "Run BODY with `pane' shown in the only, selected window."
+  (declare (indent 0))
+  `(let ((pane (generate-new-buffer " noema-pane"))
+         (other (generate-new-buffer "noema-result")))
+     (unwind-protect
+         (save-window-excursion
+           (delete-other-windows)
+           (switch-to-buffer pane)
+           (cl-letf (((symbol-function 'my/noema--xwidget-buffer-p)
+                      (lambda (&optional buffer) (eq (or buffer (current-buffer)) pane)))
+                     ((symbol-function 'my/noema--release-xwidget-input-buffer) #'ignore))
+             ,@body))
+       (my/noema--forget-forwarded-command)
+       (kill-buffer pane)
+       (kill-buffer other))))
+
+(ert-deftest my/noema-forwarded-command-focuses-what-it-opened ()
+  "A command run from a Noema page leaves the keyboard in the window it opened."
+  (my/noema-test--with-pane-window
+    (my/noema--follow-forwarded-command (selected-window))
+    ;; The command shows its result beside the page without selecting it.
+    (display-buffer other '(display-buffer-pop-up-window))
+    (my/noema--after-forwarded-command)
+    (should (eq (window-buffer (selected-window)) other))
+    (should-not (memq #'my/noema--after-forwarded-command (default-value 'post-command-hook)))))
+
+(ert-deftest my/noema-forwarded-command-without-result-keeps-the-page ()
+  "A command that opens nothing leaves selection where it was."
+  (my/noema-test--with-pane-window
+    (let ((source (selected-window)))
+      (my/noema--follow-forwarded-command source)
+      (my/noema--after-forwarded-command)
+      (should (eq (selected-window) source)))))
+
+(ert-deftest my/noema-forwarded-command-waits-for-a-prefix-argument ()
+  "C-u before the command is not the command's result."
+  (my/noema-test--with-pane-window
+    (my/noema--follow-forwarded-command (selected-window))
+    (let ((prefix-arg '(4)))
+      (my/noema--after-forwarded-command))
+    (should (memq #'my/noema--after-forwarded-command (default-value 'post-command-hook)))
+    (display-buffer other '(display-buffer-pop-up-window))
+    (my/noema--after-forwarded-command)
+    (should (eq (window-buffer (selected-window)) other))))
 
 (provide 'init-aaronnote-tests)
 ;;; init-aaronnote-tests.el ends here

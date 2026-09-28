@@ -613,6 +613,40 @@ BODY may refer to the JuText buffer as `source'."
                  (lambda (&rest _) (ert-fail "an empty work block must not start a Run"))))
         (should-error (noema-research-execute-current) :type 'user-error)))))
 
+(ert-deftest noema-research-revert-takes-an-external-edit-without-asking ()
+  "Reloading after an agent rewrote the notebook never asks \"really edit?\"."
+  (noema-research-test--with-directory directory
+    (let ((file (expand-file-name "research.noema" directory))
+          (noema-research-sync-host nil)
+          (make-backup-files nil))
+      (noema-research-write-file file (noema-research-test--document))
+      (let ((buffer (let ((noema-research-open-output-on-visit nil)
+                          (noema-research-open-graph-on-visit nil))
+                      (find-file file))))
+        (unwind-protect
+            (with-current-buffer buffer
+              (should (derived-mode-p 'noema-research-mode))
+              (should (string-match-p "^%% work Spectral exploration$" (buffer-string)))
+              ;; Another program rewrites the file; this buffer keeps its
+              ;; recorded modtime, as with any external writer.
+              (with-temp-buffer
+                (insert-file-contents file)
+                (goto-char (point-min))
+                (while (search-forward "Spectral exploration" nil t)
+                  (replace-match "Agent exploration" t t))
+                (let ((write-region-inhibit-fsync t))
+                  (write-region nil nil file nil 'silent)))
+              (set-file-times file (time-add (current-time) 5))
+              (let ((asked 0))
+                (cl-letf (((symbol-function 'ask-user-about-supersession-threat)
+                           (lambda (&rest _) (cl-incf asked))))
+                  (revert-buffer t t))
+                (should (= asked 0)))
+              (should (string-match-p "^%% work Agent exploration$" (buffer-string)))
+              (should-not (buffer-modified-p)))
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer))))))
+
 (ert-deftest noema-research-save-keeps-structure-another-writer-added ()
   (noema-research-test--with-directory directory
     (let ((file (expand-file-name "research.noema" directory))
@@ -1145,10 +1179,12 @@ so saving never reports it as a malformed Agent directive."
           (noema-research-sync-host nil)
           (make-backup-files nil))
       (noema-research-write-file file (noema-research-test--document))
-      (let ((buffer (find-file-noselect file)))
+      (let ((buffer (let ((noema-research-open-output-on-visit nil)
+                          (noema-research-open-graph-on-visit nil))
+                      (find-file file))))
         (unwind-protect
             (with-current-buffer buffer
-              (noema-research-mode)
+              (should (derived-mode-p 'noema-research-mode))
               (should (string-match-p "^%% work Spectral exploration$" (buffer-string)))
               (should-not (buffer-modified-p))
               (noema-research-goto-cell "c-w")

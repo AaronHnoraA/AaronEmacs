@@ -387,8 +387,19 @@ Noema Markdown panes:
 - Host chords the renderer forwards (`shouldForwardToEmacs` in
   `aaronnote/xwidget-key-guard.ts`) are claimed in the capture phase, before
   CM6's own keymap; keep new forwarded chords on that path.
+- A key forwarded from a page follows its command's result: the window the
+  command opened or changed gets the keyboard
+  (`my/noema--follow-forwarded-command`).  Do not re-focus the page after a
+  forwarded command; bridged actions that show a buffer select it.
 - Commands bound to keyboard keys use `(interactive (list last-command-event))`,
   never `(interactive "e")`, which rejects keyboard events.
+- Code that visits a file only to read, index or reference it (Treemacs tags,
+  `noema-md-bridge`, agents) binds `my/programmatic-file-visit` to t.  An
+  interactive command otherwise triggers the Markdown→Noema redirect, which
+  blanks the visited buffer and reopens the page.
+- A Treemacs heading jump runs `my/treemacs-tag-visit-functions`; a surface
+  that shows the file elsewhere (a Noema pane) moves there instead of letting
+  the raw buffer take over the window.
 
 Browser/Appine:
 

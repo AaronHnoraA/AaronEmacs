@@ -221,6 +221,23 @@ pipeline identity into buffer state."
            (client (ignore-errors (remote-client-file-name logical))))
       (or client logical))))
 
+(defvar my/programmatic-file-visit nil
+  "Non-nil while a tool visits files only to read or index them.
+File-surface redirects (such as Markdown opening in Noema) must not fire
+then: the visit is not the person opening the file.")
+
+(defvar my/treemacs-tag-visit-functions nil
+  "Abnormal hook run after Treemacs jumps to a tag.
+Each function receives the buffer it jumped into, with point at the tag, in
+the selected window.  A file shown on another surface (a Noema page) can move
+that surface to the tag instead.")
+
+(defun my/treemacs-after-tag-visit-a (&rest _)
+  "Run `my/treemacs-tag-visit-functions' for the buffer a tag jump selected."
+  (let ((buffer (window-buffer (selected-window))))
+    (when (buffer-local-value 'buffer-file-name buffer)
+      (run-hook-with-args 'my/treemacs-tag-visit-functions buffer))))
+
 (defun my/treemacs-visit-logical-path-a (fn &rest args)
   "Run Treemacs visit FN with its model paths restored for buffers."
   (let ((original-find-file (symbol-function 'find-file))
@@ -230,12 +247,14 @@ pipeline identity into buffer state."
     (cl-letf
         (((symbol-function 'find-file)
           (lambda (file &rest arguments)
-            (apply original-find-file
-                   (my/treemacs-visit-path file) arguments)))
+            (let ((my/programmatic-file-visit t))
+              (apply original-find-file
+                     (my/treemacs-visit-path file) arguments))))
          ((symbol-function 'find-file-noselect)
           (lambda (file &rest arguments)
-            (apply original-find-file-noselect
-                   (my/treemacs-visit-path file) arguments)))
+            (let ((my/programmatic-file-visit t))
+              (apply original-find-file-noselect
+                     (my/treemacs-visit-path file) arguments))))
          ((symbol-function 'dired)
           (lambda (directory &rest arguments)
             (apply original-dired
@@ -1211,7 +1230,9 @@ the strings rendered before outline buttons are made shallow."
                                         original-get-file-buffer))
                                (or (funcall original-get-file-buffer name)
                                    (find-buffer-visiting name))))))
-                  (funcall orig-fn (my/treemacs-visit-path file))))
+                  ;; Indexing reads the file; it must not open it elsewhere.
+                  (let ((my/programmatic-file-visit t))
+                    (funcall orig-fn (my/treemacs-visit-path file)))))
          (index (if (my/treemacs-org-imenu-index-p index)
                     (my/treemacs-prune-org-imenu-index index)
                   index))
@@ -2090,7 +2111,10 @@ that extra stat is only paid for a marker that actually matched."
              'treemacs--call-imenu-and-goto-tag)
       (advice-add
        'treemacs--call-imenu-and-goto-tag
-       :around #'my/treemacs-visit-logical-path-a)))
+       :around #'my/treemacs-visit-logical-path-a))
+    (dolist (command '(treemacs--call-imenu-and-goto-tag treemacs--goto-tag))
+      (unless (advice-member-p #'my/treemacs-after-tag-visit-a command)
+        (advice-add command :after #'my/treemacs-after-tag-visit-a))))
   (with-eval-after-load 'treemacs-mouse-interface
     (dolist (command
              '(treemacs--imenu-tag-noselect

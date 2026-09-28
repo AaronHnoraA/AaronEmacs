@@ -72,6 +72,9 @@ marker 仍然直接探测。这个改写对本地同样有效，因此不按 tar
 - `SPC c i`
   打开 `show-imenu`
   左侧 Treemacs smart toggle，并跟随当前文件和光标所在符号
+  （Noema Markdown 页面也一样：大纲跟随页面的笔记，点击标题由
+  `my/treemacs-tag-visit-functions` 让页面跳过去；Treemacs 读取文件建索引时绑定
+  `my/programmatic-file-visit`，不会触发 Markdown→Noema 跳转）
 
 ## 3. 项目工作台菜单
 
