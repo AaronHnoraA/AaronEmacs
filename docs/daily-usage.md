@@ -179,6 +179,12 @@ Emacs 窗口（agent 会话、compose、Treemacs、vterm、源 buffer……）�
 不会回到页面编辑器。只输出消息、什么都没打开的命令保持原窗口。`C-u` 前缀、
 minibuffer 输入和 transient 菜单都会等它们结束再判断。页面发起的
 `C-c A v/@` 这类发送，最后会停在 agent 会话的输入处。
+在 macOS 上，点过的 WebKit 页面会一直占着键盘，Emacs 从 Lisp 拿不回来。所以 Emacs
+接管键盘后（例如页面里触发的命令打开了 vterm、agent、minibuffer），页面收到的按键
+全部转交给 Emacs 当前窗口：普通字符按输入文字、`C-x`/`M-x` 等组合键和方向键、回车、
+退格按 Emacs 键。输入不会落进 md，方向键也不会把焦点拉回页面。点击页面，或 Emacs
+把焦点移回该 pane，页面才重新接管键盘。已知限制：这期间在 Emacs 里用不了输入法
+（中文输入法仍由 WebKit 占着）；需要输入中文时先在目标窗口里点一下。
 
 xwidget buffer 本身没有正文，所以作用于“当前 buffer 文本”的常用命令会被重定向到
 页面上的等价操作（`my/noema-keys-mode-map`）：

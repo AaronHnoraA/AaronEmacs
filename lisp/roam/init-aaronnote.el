@@ -1480,10 +1480,17 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
             ;; sentinel values as invalid UTF-8.
             ("key"
              (let ((key (alist-get 'key payload))
-                   (client (alist-get 'client payload)))
-               (when (stringp key)
+                   (text (alist-get 'text payload))
+                   (client (alist-get 'client payload))
+                   (host-owned (let ((value (alist-get 'hostOwned payload)))
+                                 (and value (not (memq value '(:false :json-false)))))))
+               (cond
+                ;; Characters typed while Emacs owns the keyboard.
+                ((and host-owned (stringp text) (not (string-empty-p text)))
+                 (my/noema--defer-host-event #'my/noema--run-emacs-text text))
+                ((and (stringp key) (not (string-empty-p key)))
                  (my/noema--defer-host-event
-                  #'my/noema--run-emacs-key key client)))
+                  #'my/noema--run-emacs-key key client host-owned))))
              nil)
             ("selection-to-agent"
              ;; A pane saved and reported a range for an Emacs action (agent,

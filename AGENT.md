@@ -391,6 +391,13 @@ Noema Markdown panes:
   command opened or changed gets the keyboard
   (`my/noema--follow-forwarded-command`).  Do not re-focus the page after a
   forwarded command; bridged actions that show a buffer select it.
+- Whenever Emacs takes the keyboard from a pane
+  (`my/noema--release-xwidget-input-buffer`) the page is told
+  (`host-owns-keyboard`).  Until a click or the host's `focus` command, a
+  WebKit keydown is not proof of page focus, and every key the page still
+  receives (macOS keeps a clicked WKWebView as first responder) is forwarded
+  to Emacs as a host-owned key or text that runs in the selected window
+  (`handleHostOwnedKey`, `my/noema--run-emacs-text`).
 - Commands bound to keyboard keys use `(interactive (list last-command-event))`,
   never `(interactive "e")`, which rejects keyboard events.
 - Code that visits a file only to read, index or reference it (Treemacs tags,

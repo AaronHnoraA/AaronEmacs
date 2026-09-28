@@ -906,16 +906,31 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                (lambda (function &rest args)
                  (setq deferred (cons function args))))
               ((symbol-function 'my/noema--run-emacs-key)
-               (lambda (key &optional client)
-                 (setq seen (list key client)))))
+               (lambda (key &optional client host-owned)
+                 (setq seen (list key client host-owned)))))
       (my/noema--gateway-event
        '((type . "key")
          (payload . ((key . "M-<right>")
                      (client . "split-client"))))
        nil)
       (should-not seen)
-      (apply (car deferred) (cdr deferred)))
-    (should (equal seen '("M-<right>" "split-client")))))
+      (apply (car deferred) (cdr deferred))
+      (should (equal seen '("M-<right>" "split-client" nil)))
+      ;; A stray key WebKit got while Emacs owned the keyboard says so.
+      (my/noema--gateway-event
+       '((type . "key")
+         (payload . ((key . "<down>") (client . "split-client") (hostOwned . t))))
+       nil)
+      (apply (car deferred) (cdr deferred))
+      (should (equal seen '("<down>" "split-client" t)))
+      ;; Characters typed while Emacs owns the keyboard become typed input.
+      (let ((unread-command-events nil))
+        (my/noema--gateway-event
+         '((type . "key")
+           (payload . ((key . "") (text . "ls") (client . "split-client") (hostOwned . t))))
+         nil)
+        (apply (car deferred) (cdr deferred))
+        (should (equal unread-command-events '(?l ?s)))))))
 
 (ert-deftest my/noema-ace-window-hint-renders-inside-xwidget ()
   "Ace labels for native xwidgets travel to their owning page."
@@ -2949,6 +2964,35 @@ selection untouched, so the pane keeps being reported as background."
     (display-buffer other '(display-buffer-pop-up-window))
     (my/noema--after-forwarded-command)
     (should (eq (window-buffer (selected-window)) other))))
+
+(ert-deftest my/noema-host-owned-key-runs-where-emacs-is ()
+  "An arrow WebKit got after Emacs took the keyboard stays in Emacs' window."
+  (my/noema-test--with-pane-window
+    (let ((unread-command-events nil)
+          (released nil))
+      (display-buffer other '(display-buffer-pop-up-window))
+      (select-window (get-buffer-window other))
+      (cl-letf (((symbol-function 'my/noema--release-xwidget-input-buffer)
+                 (lambda (&rest _) (setq released t))))
+        (my/noema--run-emacs-key "<down>" "pane-client" t))
+      (should (eq (window-buffer (selected-window)) other))
+      (should-not released)
+      (should (equal unread-command-events (listify-key-sequence (kbd "<down>")))))))
+
+(ert-deftest my/noema-releasing-a-pane-tells-its-page ()
+  "Taking the keyboard from a pane also tells the page it no longer has it."
+  (let ((pane (generate-new-buffer " noema-pane"))
+        sent)
+    (unwind-protect
+        (with-current-buffer pane
+          (setq major-mode 'xwidget-webkit-mode)
+          (setq-local my/noema--client-id "pane-client")
+          (cl-letf (((symbol-function 'xwidget-webkit-edit-mode) #'ignore)
+                    ((symbol-function 'my/noema-command)
+                     (lambda (command &optional _) (push command sent))))
+            (my/noema--release-xwidget-input-buffer pane))
+          (should (equal sent '("host-owns-keyboard"))))
+      (kill-buffer pane))))
 
 (provide 'init-aaronnote-tests)
 ;;; init-aaronnote-tests.el ends here

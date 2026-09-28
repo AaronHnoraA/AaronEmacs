@@ -571,18 +571,45 @@ Relies on `winner-mode' (enabled below) to undo a prior delete."
 
 ;;; Buffer management helpers
 
-(defun my/window-skip-xwidget-fallback-p (_window buffer bury-or-kill)
-  "Return non-nil when automatic fallback should skip xwidget BUFFER.
+(defun my/window-dashboard-buffer-p (buffer)
+  "Return non-nil if BUFFER is the startup dashboard."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (derived-mode-p 'dashboard-mode))))
+
+(defun my/window-skip-dashboard-and-xwidget-p (_window buffer bury-or-kill)
+  "Skip dashboard and xwidget BUFFER during automatic window fallback.
 BURY-OR-KILL is non-nil when `switch-to-prev-buffer' is replacing a
-buffer that is being buried, killed, or quit.  Keep xwidget buffers
+buffer that is being buried, killed, or quit.  Keep these buffers
 available to explicit buffer-switching commands."
   (and bury-or-kill
        (buffer-live-p buffer)
-       (with-current-buffer buffer
-         (derived-mode-p 'xwidget-webkit-mode))))
+       (or (my/window-dashboard-buffer-p buffer)
+           (with-current-buffer buffer
+             (derived-mode-p 'xwidget-webkit-mode)))))
 
 (setopt switch-to-prev-buffer-skip
-        #'my/window-skip-xwidget-fallback-p)
+        #'my/window-skip-dashboard-and-xwidget-p)
+
+(defun my/window-quit-without-dashboard-a (orig-fn &optional window bury-or-kill)
+  "Prevent ORIG-FN from restoring dashboard when quitting WINDOW.
+`quit-restore-window' consults saved return targets before the usual
+`switch-to-prev-buffer-skip' predicate, so clear dashboard targets
+before letting it choose a useful previous buffer."
+  (let ((window (or window (selected-window))))
+    (when (and bury-or-kill
+               (window-live-p window)
+               (not (my/window-dashboard-buffer-p (window-buffer window))))
+      (dolist (parameter '(quit-restore quit-restore-prev))
+        (let ((restore (window-parameter window parameter)))
+          (when (my/window-dashboard-buffer-p (car-safe (nth 1 restore)))
+            (set-window-parameter window parameter nil)))))
+    (funcall orig-fn window bury-or-kill)))
+
+(unless (advice-member-p #'my/window-quit-without-dashboard-a
+                         'quit-restore-window)
+  (advice-add 'quit-restore-window :around
+              #'my/window-quit-without-dashboard-a))
 
 (defun my/kill-buffer-dwim ()
   "Kill the current buffer, or if it's a special/read-only buffer, bury it."
