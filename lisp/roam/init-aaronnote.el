@@ -445,6 +445,33 @@ the backend.  The backend is chosen here, not per export."
   "M-S-z" #'my/noema-redo
   "M-C" #'my/noema-prose-check)
 
+;; The pane buffer is an inert placeholder: the page owns the text.  Global
+;; Emacs text commands reached through forwarded keys (H-i, H-s, H-c, C-x C-s,
+;; C-x h, ...) are remapped onto the page's own equivalents so they act on the
+;; note instead of silently doing nothing.
+(pcase-dolist (`(,command . ,pane-command)
+               '((show-imenu . my/noema-outline)
+                 (imenu . my/noema-goto-heading)
+                 (consult-imenu . my/noema-goto-heading)
+                 (consult-outline . my/noema-goto-heading)
+                 (my/search-line-forward . my/noema-find)
+                 (consult-line . my/noema-find)
+                 (isearch-forward . my/noema-find)
+                 (isearch-backward . my/noema-find)
+                 (clipboard-kill-ring-save . my/noema-pane-copy)
+                 (kill-ring-save . my/noema-pane-copy)
+                 (clipboard-kill-region . my/noema-pane-cut)
+                 (kill-region . my/noema-pane-cut)
+                 (clipboard-yank . my/noema-pane-paste)
+                 (yank . my/noema-pane-paste)
+                 (mark-whole-buffer . my/noema-select-all)
+                 (save-buffer . my/noema-save)
+                 (undo . my/noema-undo)
+                 (undo-redo . my/noema-redo)
+                 (revert-buffer . my/noema-refresh-file)
+                 (revert-buffer-quick . my/noema-refresh-file)))
+  (define-key my/noema-keys-mode-map (vector 'remap command) pane-command))
+
 (define-minor-mode my/noema-keys-mode
   "Buffer-local keys for an Noema browser surface."
   :init-value nil
@@ -1427,21 +1454,13 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
                   #'my/noema--run-emacs-key key client)))
              nil)
             ("selection-to-agent"
+             ;; A pane saved and reported a range for an Emacs action (agent,
+             ;; gptel context/rewrite/compose, source buffer); see
+             ;; `noema-md-bridge'.  Payloads without an action are agent sends.
              (my/noema--defer-host-event
               (lambda (event)
-                (let* ((client (alist-get 'client event))
-                       (file (alist-get 'file event))
-                       (buffer (my/noema--buffer-for-client client)))
-                  (unless (and (buffer-live-p buffer)
-                               (stringp file)
-                               (with-current-buffer buffer
-                                 (and (stringp my/noema-buffer-file-name)
-                                      (equal (my/noema--host-file my/noema-buffer-file-name)
-                                             (my/noema--host-file file)))))
-                    (user-error "Noema selection no longer matches its pane"))
-                  (require 'noema-context)
-                  (noema-context-send-noema-selection
-                   file (alist-get 'lineStart event) (alist-get 'lineEnd event))))
+                (require 'noema-md-bridge)
+                (noema-md-bridge-handle-selection event))
               payload)
              nil)
             ("input-focus"
@@ -3160,6 +3179,8 @@ failure while it is still going."
       ("O" "open file…"       my/noema-open-file)
       ("s" "save"             my/noema-save)
       ("r" "refresh"          my/noema-refresh)
+      ("!f" "reload from disk" my/noema-refresh-file)
+      ("%" "AI / agent…"      my/noema-ai-dispatch)
       ("f" "focus editor"     my/noema-focus)
       ("e" "escape/normal"    my/noema-escape)
       ("v" "toggle source"    my/noema-toggle-source)
@@ -3237,6 +3258,26 @@ failure while it is still going."
       ("U" "undo"             my/noema-undo)
       ("Y" "redo"             my/noema-redo)
       ("V" "paste"            my/noema-paste)]]))
+
+(with-eval-after-load 'transient
+  (transient-define-prefix my/noema-ai-dispatch ()
+    "AI and agent actions on the Noema pane's selection.
+Each asks the page to save and report its range; `noema-md-bridge' then runs
+the gptel or agent UI on the note's Emacs source buffer."
+    ["Selection → agent session (last choice preselected)"
+     ("a" "send selection"       noema-context-send-region)
+     ("l" "send cursor line"     noema-context-send-at-point)
+     ("n" "send whole note"      noema-context-send-buffer)]
+    ["gptel"
+     ("r" "rewrite (diff review)" noema-compose-rewrite)
+     ("." "add to context"       noema-compose-add-context)
+     ("c" "compose with context" noema-compose)
+     ("m" "gptel menu"           noema-compose-menu)]
+    ["Context / sessions"
+     ("x" "send shared context"  noema-context-send)
+     ("," "inspect context"      noema-context-inspect)
+     ("e" "edit in Emacs source" noema-md-bridge-edit-source)
+     ("S" "sessions"             noema-sessions)]))
 
 (with-eval-after-load 'transient
   (transient-define-prefix my/noema-wiki-dispatch ()

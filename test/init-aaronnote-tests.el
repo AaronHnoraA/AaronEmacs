@@ -959,8 +959,9 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
 
 (ert-deftest my/noema-selection-event-stays-with-its-own-pane ()
   "A selected range can only become context for its source xwidget file."
-  (require 'noema-context)
-  (let* ((file (make-temp-file "noema-agent-selection-" nil ".md"))
+  (require 'noema-md-bridge)
+  (let* ((file (make-temp-file "noema-agent-selection-" nil ".md"
+                               "one\ntwo\nthree\nfour\nfive\n"))
          (other (make-temp-file "noema-agent-other-" nil ".md"))
          (buffer (generate-new-buffer " *Noema selected pane*"))
          (my/noema--client-buffers (make-hash-table :test #'equal))
@@ -974,14 +975,17 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
           (cl-letf (((symbol-function 'my/noema--defer-host-event)
                      (lambda (function &rest args)
                        (setq deferred (cons function args))))
-                    ((symbol-function 'noema-context-send-noema-selection)
-                     (lambda (&rest args) (setq sent args))))
+                    ((symbol-function 'noema-md-bridge-run)
+                     (lambda (action source begin end)
+                       (setq sent (list action
+                                        (with-current-buffer source
+                                          (buffer-substring-no-properties begin end)))))))
             (my/noema--gateway-event
              `((type . "selection-to-agent")
                (payload . ((client . "selected-pane") (file . ,file)
                            (lineStart . 2) (lineEnd . 4)))) nil)
             (apply (car deferred) (cdr deferred))
-            (should (equal sent (list file 2 4)))
+            (should (equal sent '("agent" "two\nthree\nfour\n")))
             (setq sent nil)
             (my/noema--gateway-event
              `((type . "selection-to-agent")
@@ -989,6 +993,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                            (lineStart . 2) (lineEnd . 4)))) nil)
             (should-error (apply (car deferred) (cdr deferred)) :type 'user-error)
             (should-not sent)))
+      (when-let* ((visiting (find-buffer-visiting file))) (kill-buffer visiting))
       (kill-buffer buffer)
       (delete-file file)
       (delete-file other))))
@@ -2753,9 +2758,6 @@ selection untouched, so the pane keeps being reported as background."
                                        '((files . ["/private/var/example/work.noema" "/inactive/other.noema"])) nil))
                      ["/private/var/example/work.noema"])))))
 
-(provide 'init-aaronnote-tests)
-;;; init-aaronnote-tests.el ends here
-
 (ert-deftest my/noema-jupyter-signing-key-uses-csprng-when-device-read-is-rejected ()
   (cl-letf (((symbol-function 'insert-file-contents-literally)
              (lambda (&rest _) (signal 'file-error '("not a regular file"))))
@@ -2765,3 +2767,49 @@ selection untouched, so the pane keeps being reported as background."
           (second (my/noema-jupyter--signing-key)))
       (should (string-match-p "\\`[0-9a-f]\\{64\\}\\'" first))
       (should-not (equal first second)))))
+
+(ert-deftest my/noema-pane-remaps-text-commands-onto-the-page ()
+  "Forwarded Emacs text commands act on the note, not the inert placeholder."
+  (with-temp-buffer
+    (my/noema-keys-mode 1)
+    (dolist (entry '((show-imenu . my/noema-outline)
+                     (my/search-line-forward . my/noema-find)
+                     (clipboard-kill-ring-save . my/noema-pane-copy)
+                     (save-buffer . my/noema-save)
+                     (revert-buffer . my/noema-refresh-file)))
+      (should (eq (command-remapping (car entry)) (cdr entry))))))
+
+(ert-deftest my/noema-pane-copy-accepts-a-keyboard-event ()
+  "Cmd-C is a plain key event; the routed copy must not demand a mouse event."
+  (let (sent)
+    (cl-letf (((symbol-function 'my/noema--xwidget-buffer-p) (lambda (&optional _) t))
+              ((symbol-function 'my/noema-command)
+               (lambda (command &optional _detail) (push command sent))))
+      (let ((last-command-event ?\M-c))
+        (call-interactively #'my/noema-xwidget-copy nil [?\M-c])
+        (call-interactively #'my/noema-pane-copy nil [?\M-c])))
+    (should (equal sent '("copy" "copy")))))
+
+(ert-deftest my/noema-refresh-file-discards-only-when-asked ()
+  "refresh-file never overwrites disk; C-u asks the page to drop its draft."
+  (let (sent)
+    (cl-letf (((symbol-function 'my/noema-command)
+               (lambda (command &optional detail) (push (list command detail) sent))))
+      (my/noema-refresh-file)
+      (my/noema-refresh-file '(4)))
+    (should (equal (reverse sent)
+                   '(("refresh-file" nil)
+                     ("refresh-file" ((value . "discard"))))))))
+
+(ert-deftest my/noema-pane-headings-skip-fenced-code ()
+  "The heading jump lists real headings with their lines, not code comments."
+  (let ((file (make-temp-file "noema-headings" nil ".md"
+                              "# Top\n\n```sh\n# not a heading\n```\n## Child  ##\n")))
+    (unwind-protect
+        (should (equal (my/noema--pane-headings file)
+                       '(("Top" . 1) ("  Child" . 6))))
+      (delete-file file))))
+
+
+(provide 'init-aaronnote-tests)
+;;; init-aaronnote-tests.el ends here

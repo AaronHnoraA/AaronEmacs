@@ -111,7 +111,7 @@ Noema Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保存、
 
 | 分组 | 常用键 |
 |------|--------|
-| **Note (web)** | `o` 打开当前, `O` 选文件, `s` 保存, `r` 刷新, `f` 聚焦, `e` Esc/normal, `v` 切换源码视图, `R` Emacs 原始编辑 |
+| **Note (web)** | `o` 打开当前, `O` 选文件, `s` 保存, `r` 刷新, `!f` 从磁盘重载（agent 改过文件后用）, `%` AI/agent 子菜单, `f` 聚焦, `e` Esc/normal, `v` 切换源码视图, `R` Emacs 原始编辑 |
 | **Find/Browse** | `j` 查找笔记, `/` 搜索（支持 `intitle:` `incategory:` `linksto:` 操作符）, `l` 最近, `.` 跟随链接, `b` 反向链接, `x` 相关, `G` 跳转定义 |
 | **Insert** | `i` roam 链接, `I` TOC 链接, `t` tag id, `T` tag-id 链接, `w` 复制链接到此处, `c` note-code |
 | **Knowledge** | `n` 新笔记, `d` 今日日记, `a` 按标签浏览, `C` 分类层次浏览（MediaWiki Category），`g` roam graph, `k` 任务, `A` 日程, `L` 日程日志, `F` 当前文件任务跳转, `M` 维护仪表板 |
@@ -167,6 +167,35 @@ Apple 集成先用 `my/noema-agenda-apple-enable` 启用相应类型，再用原
 Graph 搜索框支持全文词和
 `tag:` / `alias:` / `path:` / `title:` 过滤，并会提示 tag / alias / path 等候选。
 本地 graph xwidget buffer 里 `M-w` 会 kill graph buffer 并关掉 graph websocket。
+
+### Noema 页面里的 Emacs 按键
+
+Noema 页面把 `H-`（Option）组合键、`C-x` / `C-c` 前缀序列、`C-g`，以及
+`M-x` / `M-w` / `M-q` / `M-o` 交给 Emacs；这些键在 CodeMirror 自己的按键表
+之前被截获，所以 `C-c C-e` 不会再同时把光标移到行尾，`H-l` / `H-u` 也不会执行两次。
+
+xwidget buffer 本身没有正文，所以作用于“当前 buffer 文本”的常用命令会被重定向到
+页面上的等价操作（`my/noema-keys-mode-map`）：
+
+| 键 / 命令 | 在 Noema 页面里 |
+|-----------|-----------------|
+| `H-i`（`show-imenu`） | 开关页面大纲 |
+| `imenu` / `consult-imenu` / `consult-outline` | 在 minibuffer 里选标题并跳转 |
+| `H-s`、`consult-line`、`isearch` | 打开页面查找栏 |
+| `H-c` / `M-c`、`H-X`、`H-v` / `M-v` | 复制 / 剪切 / 粘贴页面选区（含 Jupyter 输出选区） |
+| `C-x h` | 全选笔记 |
+| `C-x C-s` | 保存笔记 |
+| `C-x u`、`undo-redo` | 页面 undo / redo |
+| `revert-buffer`、`H-o !f` | `my/noema-refresh-file`：从磁盘重载 |
+
+`my/noema-refresh-file` 用于 agent 或外部程序改过文件之后。它不会像普通刷新那样先把
+页面草稿写回磁盘；页面有未保存修改时会拒绝，`C-u` 则丢弃草稿后重载。
+在 Emacs 里保存同一个 Markdown 文件（例如接受 gptel rewrite）时，没有未保存修改的
+Noema 页面会自动重载。
+
+Jupyter 输出（`@@cell` 的 Output 区域和右侧 Jupyter Output 页面）可以直接拖选文字，
+`M-c` 复制选区；Output 工具栏的 **Copy** 在没有选区时复制整段纯文本输出，
+Output 页面右键菜单也有 Copy / Copy Output。
 
 Noema 编辑器的 xwidget window 使用 Emacs 原生 chrome：顶部铅笔按钮集中提供
 Page、Agenda、Graph、Tools、Source、Save，点击后仍调用原 Web 面板和保存逻辑；
@@ -970,24 +999,30 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 |----|------|
 | `C-c A W` | 打开 Noema（默认 Magent agent-shell） |
 | `C-c A a` | 选择 Magent/Codex/Claude/OpenCode/Pi agent-shell |
-| `C-c A c` | 打开 gptel compose buffer |
-| `C-c A s` | 从当前 buffer 发送 gptel 请求 |
+| `C-c A c` | 打开 gptel compose buffer；在 Noema 页面里带上选区（没有选区则整篇笔记）作为 context |
+| `C-c A s` | 从当前 buffer 发送 gptel 请求；在 Noema 页面里同 `C-c A c` |
 | `C-c A m` | 打开 gptel transient 设置 |
-| `C-c A .` | 把 region/buffer/file 加入 gptel context |
-| `C-c A r` | gptel rewrite/diff 预览 |
+| `C-c A .` | 把 region/buffer/file 加入 gptel context；在 Noema 页面里加入选区，没有选区则加入整篇 |
+| `C-c A r` | gptel rewrite/diff 预览；在 Noema 页面里改写选区（没有选区则光标所在行） |
+| `C-c A e` | 在 Emacs 源 buffer 里打开 Noema 页面的笔记，并选中页面选区 |
 | `C-c A p` | 把当前 agent-shell session 纳入 research |
 | `C-c A G` | 跨 Project 的 agent 总览：待处理、未读、运行状态与会话跳转 |
 | `C-c A O` | 编排面板：Task / Job / Worker / Delegation / 事件 |
 | `C-c A x` | 把当前上下文发给某个 agent 会话（引用，不拷贝正文）|
-| `C-c A v` | 把选区发给某个会话；在 Noema Markdown 页里直接使用网页选区 |
-| `C-c A B` | 把整个 buffer 发给某个会话 |
-| `C-c A f` | 把某个文件发给某个会话 |
-| `C-c A @` | 告诉会话光标在哪（文件:行:列 + 所在定义）|
+| `C-c A v` | 只把选区发给某个会话；在 Noema Markdown 页里直接使用网页选区 |
+| `C-c A B` | 只把当前 buffer 的文件发给某个会话（Noema 页面里是整篇笔记） |
+| `C-c A f` | 只把某个文件发给某个会话 |
+| `C-c A @` | 告诉会话光标在哪（文件:行:列 + 所在定义；Noema 页面里是光标所在行）|
 | `C-c A ,` | 发送前检视/删减上下文 |
 | `C-c A d` | 同 `C-c A x`，但只塞进输入区不提交 |
 
-Noema Markdown 页的选区工具栏也有 **Agent** 按钮。发送前会先保存笔记，
-然后把选中行作为共享 gptel context 的文件引用交给 Emacs，会话中继续输入问题。
+Noema Markdown 页的选区工具栏有 **Agent** 和 **Rewrite** 按钮，`...` 里还有
+Add to AI context、gptel compose、在 Emacs 源 buffer 中选中；`H-o %` 是同一组操作的
+Transient。所有这些都先保存笔记，再把选区的准确位置（行 + 字符列）交给
+`noema-md-bridge`，由它在笔记的 Emacs 源 buffer 上运行对应的 gptel / agent UI。
+Rewrite 的 diff / ediff / accept 审阅在源 buffer 里完成；源 buffer 处于
+`noema-md-bridge-source-mode`（mode line `Noema↔`），修改在空闲
+`noema-md-bridge-autosave-delay` 秒后保存，页面随即重载；`C-c C-c` 保存并回到页面。
 Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空行稍微收紧；每个源文件空行仍可见、可编辑，移动光标不会改变它们的高度。源文件的换行在编辑视图中始终保持换行，避免输入一个字符后与下一行合并。
 
 ### 所有 agent 会话按项目统一登记
@@ -1054,8 +1089,13 @@ agent-shell 自己写引用的格式），每个文件再附一个 `resource_lin
 有未保存改动时会先问你要不要保存，跳过的条目会在 echo area 列出来
 （`noema-context-save-before-send` 可改成总是保存或总是跳过）。
 
-目标会话每个项目记住上一次用的那个，加前缀参数（`C-u C-c A x`）重新选，选单里
-也可以直接开一个新会话。会话还在初始化就先排队；正在回答时走 agent-shell 自己的
+`C-c A v` / `B` / `f` / `@` 只发送命令点名的那一段，不会顺带发出之前用
+`C-c A .` 攒下的共享 context；要发送攒下的全部内容用 `C-c A x`。
+
+每次发送都会询问目标会话，本项目上一次选的会话排在第一位并预选（没有时用上一次在
+任何项目里选的），直接 `RET` 即重复上次的选择；选单里也可以直接开一个新会话。
+想恢复“静默复用上次会话、`C-u` 才重选”，把 `noema-context-always-ask-session`
+设为 nil。会话还在初始化就先排队；正在回答时走 agent-shell 自己的
 pending 队列。
 
 同一项目的 agent/session 以 tab 形式共用右下角一个 Agent 窗口；每个 tab 都是

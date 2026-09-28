@@ -375,6 +375,21 @@ Org/Jupyter/research:
 - Keep `org`, Jupytext/notebooks, and reusable `src/` code as separate sources
   of truth as described in `docs/research-notes-workflow.md`.
 
+Noema Markdown panes:
+
+- A Noema Markdown xwidget buffer is an inert placeholder; the CM6 page owns
+  the document, selection and history.  An Emacs command that reads or edits
+  "the buffer" must either be remapped in `my/noema-keys-mode-map` onto a page
+  command, or ask the page for its saved range through `noema-md-bridge`
+  (`noema-md-bridge-request` → `noema-md-bridge-handle-selection`) and run on
+  the note's ordinary source buffer.  Do not implement text features against
+  the placeholder, and never wait synchronously on the page in a command.
+- Host chords the renderer forwards (`shouldForwardToEmacs` in
+  `aaronnote/xwidget-key-guard.ts`) are claimed in the capture phase, before
+  CM6's own keymap; keep new forwarded chords on that path.
+- Commands bound to keyboard keys use `(interactive (list last-command-event))`,
+  never `(interactive "e")`, which rejects keyboard events.
+
 Browser/Appine:
 
 - `browse-url` defaults to a backend menu whose default choice is xwidget.

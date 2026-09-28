@@ -599,7 +599,13 @@ in-process 缓存，与自动刷新保持一致。
 - `C-c A s/m/./r` — send、transient、context、rewrite/diff
 - `C-c A p` — 把当前 agent-shell session 纳入 research
 - `C-c A x/v/B/f/@` — 把当前上下文、选区、buffer、文件、光标位置交给某个 agent
-  会话；`C-c A ,` 先检视，`C-c A d` 只草拟不提交
+  会话；`C-c A ,` 先检视，`C-c A d` 只草拟不提交。`v/B/f/@` 只发送点名的那一段；每次都询问会话，
+  上次的选择预选（`noema-context-always-ask-session`）
+- Noema Markdown 页面里没有 Emacs 文本：`C-c A v/B/@/./c/s/r` 和 `C-c A e` 经
+  `noema-md-bridge` 让页面先保存并报告选区的准确位置，再在笔记的 Emacs 源 buffer
+  上运行 gptel / agent UI；常用文本命令（`H-i`、`H-s`、复制粘贴、`C-x C-s` 等）在
+  `my/noema-keys-mode-map` 里重定向到页面操作，见 daily-usage“Noema 页面里的
+  Emacs 按键”
 - 每个 agent session 仍是真正可交互的 agent-shell buffer，但不进入全局
   tab-line/tab-bar。同一项目的所有 agent/session 作为 tab 显示在右下角同一个
   Agent 窗口的 tab-line 上，切换 tab 就是切换窗口里的真实 buffer，不复制

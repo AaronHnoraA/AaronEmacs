@@ -296,6 +296,10 @@ target-native path.  A CLI that cannot be found is an error."
 (autoload 'noema-context-send-file "noema-context" nil t)
 (autoload 'noema-context-send-at-point "noema-context" nil t)
 (autoload 'noema-context-inspect "noema-context" nil t)
+(autoload 'noema-md-bridge-edit-source "noema-md-bridge" nil t)
+(autoload 'noema-md-bridge-rewrite "noema-md-bridge" nil t)
+(autoload 'noema-md-bridge-add-context "noema-md-bridge" nil t)
+(autoload 'noema-md-bridge-compose "noema-md-bridge" nil t)
 (autoload 'noema-capability-manager "noema-capability-ui" nil t)
 (autoload 'noema-skill-manager "noema-capability-ui" nil t)
 (autoload 'noema-mcp-manager "noema-capability-ui" nil t)
@@ -363,7 +367,9 @@ target-native path.  A CLI that cannot be found is an error."
   "f" #'noema-context-send-file
   "@" #'noema-context-send-at-point
   "," #'noema-context-inspect
-  "d" #'noema-context-draft)
+  "d" #'noema-context-draft
+  ;; Noema Markdown pane: open its note in Emacs at the selection.
+  "e" #'noema-md-bridge-edit-source)
 
 (global-set-key (kbd "C-c M-a") #'noema-compose-add-context)
 (global-set-key (kbd "C-c A") my/noema-prefix-map)
@@ -384,7 +390,7 @@ target-native path.  A CLI that cannot be found is an error."
 
 (defconst my/noema-config-groups
   '(noema-research noema-research-graph noema-agent-worker noema-pi-router
-    noema-agent-session noema-context noema-orchestration)
+    noema-agent-session noema-context noema-md-bridge noema-orchestration)
   "Custom groups whose options Noema exposes through `config'.")
 
 (defun my/noema-config--type-arguments (symbol)
@@ -419,7 +425,7 @@ target-native path.  A CLI that cannot be found is an error."
 
 (dolist (feature '(noema-research-mode noema-research-graph noema-research-settings
                    noema-agent-worker noema-pi-router noema-agent-acp noema-context
-                   noema-orchestration))
+                   noema-md-bridge noema-orchestration))
   (eval-after-load feature #'my/noema-config-register-groups))
 
 (defun my/noema-close-projects-of-killed-perspective ()
