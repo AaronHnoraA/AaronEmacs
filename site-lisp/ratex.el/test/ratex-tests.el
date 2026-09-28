@@ -25,6 +25,25 @@
     (let ((fragment (ratex-fragment-at-point)))
       (should (equal (plist-get fragment :content) "x^2")))))
 
+(ert-deftest ratex-noema-previews-prose-but-skips-control-and-fences ()
+  (with-temp-buffer
+    (insert "%% work Review\n@@skill($skill$)\n```lean\n$code$\n```\nProof `$inline$` and $x^2$.\n")
+    (setq-local major-mode 'noema-research-mode)
+    (should (ratex--supported-buffer-p))
+    (goto-char (point-min))
+    (search-forward "$skill$")
+    (backward-char)
+    (should-not (ratex-fragment-at-point))
+    (search-forward "$code$")
+    (backward-char)
+    (should-not (ratex-fragment-at-point))
+    (search-forward "$inline$")
+    (backward-char)
+    (should-not (ratex-fragment-at-point))
+    (search-forward "$x^2$")
+    (backward-char)
+    (should (equal (plist-get (ratex-fragment-at-point) :content) "x^2"))))
+
 (ert-deftest ratex-detects-single-and-display-dollar-math ()
   "`$$' is display math and must not be split into two `$' fragments."
   (with-temp-buffer

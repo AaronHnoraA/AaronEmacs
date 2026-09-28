@@ -80,7 +80,7 @@ Math Prose 的语料校验和 16 项本地测试已通过；这些不是数学�
 | OpenCode | `~/.config/opencode/skills`、`~/.config/opencode/opencode.json` |
 | Pi | `~/.pi/agent/skills`、`~/.pi/agent/mcp.json`（采用 `mcpServers` 格式的扩展） |
 
-本机接入时共解析 86 个有效 Skill。Claude/OpenCode 尚无独立 Skill 目录；Pi
+接入的 Skill 数量随已安装的插件版本和链接状态变化。Claude/OpenCode 尚无独立 Skill 目录；Pi
 尚无上述 Skill/MCP 文件，所以为它们预留了可识别的空链接入口，没有虚报已安装。
 现有三个客户端的全局配置暂时都没有 MCP 条目。没有导入 Claude 项目历史、
 登录凭据库、未安装插件市场或任意插件 hooks。Codex 插件路径固定到当前安装
@@ -89,6 +89,9 @@ Math Prose 的语料校验和 16 项本地测试已通过；这些不是数学�
 来源顺序：内置 → 外部来源（sources 顺序）→ 本全局库 → 项目共享层 → 项目。
 同名 Skill/MCP 由后者覆盖，管理器可查 shadowed provenance。
 外部 Skill 根目录只扫描一层，不递归遍历整个插件仓库。
+Codex 插件缓存的目录带版本号；插件升级后用管理器 `C-c L` 检查链接根目录，
+若显示“not created yet”，把 `linked/codex/` 中对应符号链接改指向已安装版本，
+再按 `C-c g` 刷新。断开的 Skill 根目录不会出现在 `@@skill` 候选中。
 
 MCP 原生格式由 Node 异步解析；不复制原配置和密钥。外部 MCP 在 Noema
 一律默认关闭；native 禁用仍显示为禁用，可通过 Noema 全局或项目启用覆盖。

@@ -51,6 +51,10 @@ reply in nbformat outputs; they have no kernelspec, programming code cells,
 Result cells, kernel controls, or Run All. The Jupyter bridge below applies to
 ordinary `.ipynb` and Markdown `@@cell` sidecars. Node also enforces this
 boundary if a generic Jupyter command is invoked from a `.noema` buffer.
+JuText therefore has no LSP client: Company routes work control directives to
+Noema's project capability CAPF and ordinary prose to dabbrev; Yasnippet is
+manual there. Flymake shows Noema's existing structural validation, and RaTeX
+previews prose math while skipping controls and code examples.
 
 A Noema Project is not a Git or `project.el` concept (Noema D-038).
 `noema.toml` may declare a Wiki repository (top-level `repository_id`, written

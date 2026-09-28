@@ -623,6 +623,12 @@ in-process 缓存，与自动刷新保持一致。
   会话）里同一命令改为只读 lookup（`M-x noema-capability-lookup`），选中后只在 agent
   输入处草拟一行引用（Skill 给出绝对 `SKILL.md` 与资源目录，MCP 给出配置文件），
   不启用、不打补丁、不安装、也不自动发送。
+- `.noema` 的 JuText 是研究工作文档，没有语言服务器。Company 在 work 开头的
+  `@@agent`、`@@session`、`@@ctx`、`@@skill` 控制行只使用 Noema CAPF；普通正文
+  用文字补全，Yasnippet 模板用 `C-c y y` 显式展开，避免 TeX/Markdown 模板混进
+  Skill 候选。候选取自同一项目的能力解析缓存；启用状态和来源显示在注释里，
+  无效或明确禁用的 Skill 不可选。Flymake 把现有结构校验的错误和警告标在
+  对应块标题；公式预览复用 RaTeX 和共享 KaTeX 宏。
 - 会话登记（`noema-agent-acp.el`）：`noema-agent-acp-start` 用 `:origin` 记下是哪个
   入口开的（`run`/`popup`/`manual`/`foreign`/`pi`/`takeover`/`probe`/`side`），
   `noema-agent-acp-adopt` 是唯一登记点，负责解析项目 root、生成唯一会话名、调用

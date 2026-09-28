@@ -61,7 +61,8 @@ leaving it running with no RaTeX buffer left is pure retention."
                   'plain-tex-mode
                   'plain-TeX-mode
                   'docTeX-mode
-                  'markdown-mode))
+                  'markdown-mode
+                  'noema-research-mode))
 
 (defun ratex--disable-current-buffer ()
   "Tear down RaTeX state in the current buffer without changing `ratex-mode'."

@@ -4,6 +4,9 @@
 (require 'init-languagetool)
 (require 'init-latex)
 
+(ert-deftest my/noema-jutext-registers-ratex-preview ()
+  (should (memq #'ratex-turn-on noema-research-mode-hook)))
+
 (defun my/test-languagetool-response ()
   "Return a small LanguageTool response used by diagnostics tests."
   '((matches . [((message . "Possible spelling mistake")

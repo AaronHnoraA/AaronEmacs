@@ -776,6 +776,7 @@ Recompiled only when the underlying .tex files change."
         ratex-posframe-background-color (my/latex-ratex-color 'bg-ratex "#2B3140")
         ratex-posframe-border-color (my/latex-ratex-color 'border-ratex "#5F6F8F"))
   :hook ((latex-mode . ratex-turn-on)
+         (noema-research-mode . ratex-turn-on)
          (LaTeX-mode . ratex-turn-on)
          (tex-mode . ratex-turn-on)
          (TeX-mode . ratex-turn-on)

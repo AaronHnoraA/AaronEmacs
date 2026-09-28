@@ -1171,6 +1171,11 @@ Inspector（节点上 `C-c C-i`）现在除了结构错误，还会提示**没�
 `mcp.json`，技能在 `skills/` 下——每个技能一个目录、一份
 `SKILL.md`，深度放 `references/` 里按需读。加一个技能就是新建一个目录，下一次 Run 就能
 `@@skill(<id>)` 选到，不需要发版。描述 Noema 自身机制的技能（`noema-work-dag`）仍随代码走。
+在 `.noema` 的 work 块开头输入 `@@skill(` 后，Company 会列出当前项目可选的
+Skill；首次打开时会异步加载，随后自动更新。列表与 Skill 管理器使用同一份
+能力解析结果，但管理器还展示无效或明确禁用的项目。普通正文不再自动混入
+TeX/Markdown snippet；需要模板时用 `C-c y y`。结构问题由 Flymake 在块标题
+标出，数学公式由 RaTeX 在光标处预览，代码围栏和控制行不会被当成公式。
 
 MCP 现在是两个面：知识库（笔记/搜索/标签）和 AI 流程（work DAG/Run/artifact/Proposal）
 分别在 `/mcp` 和 `/mcp/research`，能力 id 是 `noema-knowledge` 和 `noema-research`，

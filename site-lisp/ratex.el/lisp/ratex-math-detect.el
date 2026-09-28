@@ -518,7 +518,43 @@ syntax exactly once rather than once per field it reads."
    ((derived-mode-p 'markdown-mode 'gfm-mode)
     (and (fboundp 'markdown-code-block-at-point-p)
          (markdown-code-block-at-point-p)))
+   ((derived-mode-p 'noema-research-mode)
+    (ratex--noema-code-context-p))
    (t nil)))
+
+(defun ratex--noema-code-context-p ()
+  "Keep JuText headers, controls and fenced examples out of math preview."
+  (save-excursion
+    (let ((position (point))
+          (line (buffer-substring-no-properties
+                 (line-beginning-position) (line-end-position)))
+          fence)
+      (if (string-match-p "\\`\\(?:%%\\|@@\\)" line)
+          t
+        (when (re-search-backward "^%%\\(?:[ \t].*\\)?$" nil t)
+          (forward-line 1))
+        (while (re-search-forward "^[ \t]*\\(`\\{3,\\}\\|~\\{3,\\}\\)" position t)
+          (let ((run (match-string-no-properties 1)))
+            (if fence
+                (when (and (= (aref run 0) (aref fence 0))
+                           (>= (length run) (length fence)))
+                  (setq fence nil))
+              (setq fence run))))
+        (or fence (ratex--noema-inline-code-p position))))))
+
+(defun ratex--noema-inline-code-p (position)
+  "Return non-nil when POSITION is inside a JuText backtick span."
+  (save-excursion
+    (let (delimiter)
+      (goto-char position)
+      (goto-char (line-beginning-position))
+      (while (re-search-forward "`+" position t)
+        (let ((run (match-string-no-properties 0)))
+          (unless (ratex--escaped-at-p (match-beginning 0))
+            (if (equal run delimiter)
+                (setq delimiter nil)
+              (unless delimiter (setq delimiter run))))))
+      delimiter)))
 
 (provide 'ratex-math-detect)
 

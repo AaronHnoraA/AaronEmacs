@@ -12,9 +12,10 @@
   KaTeX —— 同一套语义意味着 buffer 里看到的和发布出去的一致。
 - 预览形态是**光标上方的 posframe 弹窗**,不是 inline overlay。
   `ratex-inline-preview` 保持 `nil`;不要为了"更像 Org 预览"去打开它。
-- 只在 TeX 系列 major mode 生效(`latex-mode` / `LaTeX-mode` / `tex-mode` /
-  `plain-TeX-mode` / `docTeX-mode`)。Markdown 走 Noema 的 CM6 编辑器,
-  由 KaTeX + MathLive 负责,不经过这里。
+- 在 TeX 系列 major mode 和 `.noema` 的 JuText 编辑 buffer 生效。
+  JuText 的 work 正文支持 `$…$`、`$$…$$`、`\\(…\\)`、`\\[…\\]` 和数学环境；
+  控制行、代码围栏和行内代码不预览。Markdown 页面仍由 Noema 的 CM6、
+  KaTeX 和 MathLive 负责。
 
 ## 支持的公式写法
 
