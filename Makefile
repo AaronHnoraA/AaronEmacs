@@ -20,6 +20,8 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         remote-test remote-source-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
 		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke remote-vterm-live-smoke \
         jupyter-test research-test agenda-test agenda-apple-test \
+        noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
+        noema-server-config-init noema-server-build noema-server-start noema-server-deploy noema-disk-audit noema-clean \
         publish publish-build publish-deploy publish-clean
 
 default: up
@@ -81,6 +83,19 @@ help:
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make research-test        Run Noema research notebook (JuText/Graph Board) ERT suite' \
 	  '  make agenda-apple-test    Build and check EventKit without requesting access' \
+	  '  make noema-help          Show all Noema targets' \
+	  '  make noema-setup         Install Noema dependencies and initialize data' \
+	  '  make noema-build         Build Noema renderer and kernel' \
+	  '  make noema-install       Build and link Noema kernel' \
+	  '  make noema-test          Run Noema Node tests' \
+	  '  make noema-kernel-build  Build Noema Go kernel' \
+	  '  make noema-kernel-install Link Noema kernel on PATH' \
+	  '  make noema-server-config-init Create ignored Server mode config' \
+	  '  make noema-server-build Build Server mode release' \
+	  '  make noema-server-start Start local Server mode' \
+	  '  make noema-server-deploy Build, upload, restart and verify remote Server mode MCP' \
+	  '  make noema-disk-audit    Report Noema generated disk use' \
+	  '  make noema-clean         Remove Noema generated outputs' \
 	  '  make remote-e2e           Run opt-in real SSH E2E (REMOTE_E2E_TARGET optional)' \
 	  '  make remote-route-benchmark Compare warm physical and /fs file queries (set REMOTE_BENCHMARK_TARGET)' \
 	  '  make remote-local-visit-benchmark Compare warm native and /fs:local: source visits' \
@@ -150,6 +165,10 @@ build-force:
 
 aaronnote-build:
 	npm --prefix $(AARONNOTE_DIR) run build:aaronnote
+
+noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
+noema-server-config-init noema-server-build noema-server-start noema-server-deploy noema-disk-audit noema-clean:
+	$(MAKE) -C $(AARONNOTE_DIR) $(@:noema-%=%)
 
 compile: compile-byte  compare-native
 
