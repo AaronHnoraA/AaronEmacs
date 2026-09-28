@@ -18,6 +18,7 @@ channels.
 - [quick-start.md](quick-start.md) First-time setup, system dependencies, fonts, path conventions, and bootstrap.
 - [daily-usage.md](daily-usage.md) Daily entry points, high-frequency keybindings, and leader-group layout.
 - [agenda.md](agenda.md) Noema `@@todo`/`@@project`/`@@clock` syntax, server agenda/project/clock view-model, repeaters, dependencies, and Web/Emacs entry points.
+- [MarkWright → Noema audit](markwright-noema-audit-2026-09.md) Source-linked comparison of MarkWright with the Noema editor: merged slash-menu, inline HTML and print details; rendering, CSS, theme and lifecycle findings.
 - [Native Agenda integration study](../site-lisp/noema/docs/architecture/agenda-org-integration-study.md) Org Agenda UI reuse over native Markdown/WorkNode data, project-scoped indexing, and explicit Apple global attention; includes an isolated prototype.
 - [slides-demo.md](../site-lisp/noema/docs/slides-demo.md) Ready-to-open `kind: slides` Noema deck with math and HTML examples.
 - [settings-cookbook.md](settings-cookbook.md) “I want to change X” guidance that tells you where each kind of change belongs.

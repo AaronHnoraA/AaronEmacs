@@ -220,6 +220,10 @@ Emacs mode-line 保持原样。Opening/Saved/Edited 等日常状态静默；LaTe
 `my/noema-echo-severity` 可配置为仅 error、warning + error 或完全关闭。这个布局只应用于
 Noema 自己的 xwidget buffer，不改变普通网页的 xwidget 控制栏。
 
+编辑区输入 `/`（或中文输入法的 `、`）打开快速插入菜单；`/` 紧跟中日韩文字时也会触发，
+`、` 仍只在行首或空白后触发。筛选支持中文名、全拼和首字母（如 `bt` 标题、`wxlb`
+无序列表、`gs` 公式、`fg` 分割线）；分割线总会在上方留空行，避免把上一行变成标题。
+
 Noema 的 Emacs 原生 roam buffer（Agenda、Tasks、TOC、Backlinks、Related、
 Management、DB Status、note list 和 Roam Selector）使用统一的紧凑 workbench UI：
 header-line 显示当前视图状态，正文使用工具栏、分组、状态徽章和可点击行。通用按键为
