@@ -171,7 +171,7 @@ Graph 搜索框支持全文词和
 ### Noema 页面里的 Emacs 按键
 
 Noema 页面把 `H-`（Option）组合键、`C-x` / `C-c` 前缀序列、`C-g`，以及
-`M-x` / `M-w` / `M-q` / `M-o` 交给 Emacs；这些键在 CodeMirror 自己的按键表
+`M-x` / `M-w` / `M-W` / `M-q` / `M-o` 交给 Emacs；这些键在 CodeMirror 自己的按键表
 之前被截获，所以 `C-c C-e` 不会再同时把光标移到行尾，`H-l` / `H-u` 也不会执行两次。
 
 从页面触发的 Emacs 命令执行完后，键盘焦点跟着命令的结果走：它打开或切换了哪个普通

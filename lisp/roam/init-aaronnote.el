@@ -496,7 +496,10 @@ is dropped.  A raw buffer you are editing elsewhere keeps the jump."
       (with-current-buffer pane
         (my/noema-command "goto-line" `((value . ,line))))
       (my/noema--focus-xwidget-window pane-window)
-      (unless (or (buffer-modified-p buffer) (get-buffer-window buffer t))
+      ;; A hidden bridge copy may carry gptel context; keep it.
+      (unless (or (buffer-modified-p buffer) (get-buffer-window buffer t)
+                  (with-current-buffer buffer
+                    (bound-and-true-p noema-md-bridge--hidden)))
         (kill-buffer buffer)))))
 
 (add-hook 'my/treemacs-tag-visit-functions #'my/noema-treemacs-tag-visit-h)

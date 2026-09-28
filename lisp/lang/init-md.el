@@ -166,7 +166,10 @@ or editing when the web editor is unavailable."
                      (user-error "No Markdown file to open")))))
     (unless (my/noema--markdown-file-p target)
       (user-error "Not a Markdown file: %s" target))
-    (find-file target)))
+    (find-file target)
+    ;; A copy an AI bridge opened for reading becomes the buffer asked for.
+    (when (fboundp 'noema-md-bridge-claim)
+      (noema-md-bridge-claim))))
 
 
 ;;;###autoload

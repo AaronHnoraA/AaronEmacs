@@ -2855,7 +2855,7 @@ selection untouched, so the pane keeps being reported as background."
   (require 'noema-context)
   (let* ((file (make-temp-file "noema-bridge" nil ".md" "# A\n\nbody\n"))
          (pane (generate-new-buffer " *noema pane*"))
-         redirected references)
+         redirected references source-mode)
     (unwind-protect
         (with-current-buffer pane
           (setq-local my/noema-buffer-file-name file)
@@ -2864,6 +2864,8 @@ selection untouched, so the pane keeps being reported as background."
                     ((symbol-function 'my/noema-command) #'ignore)
                     ((symbol-function 'noema-context--send)
                      (lambda (&rest arguments)
+                       (setq source-mode (with-current-buffer (find-buffer-visiting file)
+                                           (derived-mode-p 'text-mode)))
                        (setq references (funcall (plist-get arguments :references)
                                                  (file-name-directory file) nil)))))
             ;; What M-x does: an interactive command, outside batch semantics.
@@ -2873,9 +2875,10 @@ selection untouched, so the pane keeps being reported as background."
           (should-not redirected)
           (should (equal (mapcar #'noema-context--reference-line references)
                          (list (file-name-nondirectory file))))
-          (let ((source (find-buffer-visiting file)))
-            (should (buffer-live-p source))
-            (should (with-current-buffer source (derived-mode-p 'text-mode)))))
+          ;; It was read as real Markdown, then dropped so the next open of
+          ;; the note goes to Noema again.
+          (should source-mode)
+          (should-not (find-buffer-visiting file)))
       (when-let* ((source (find-buffer-visiting file))) (kill-buffer source))
       (kill-buffer pane)
       (delete-file file))))

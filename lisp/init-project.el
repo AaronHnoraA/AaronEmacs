@@ -238,6 +238,13 @@ that surface to the tag instead.")
     (when (buffer-local-value 'buffer-file-name buffer)
       (run-hook-with-args 'my/treemacs-tag-visit-functions buffer))))
 
+(defun my/treemacs-tag-visit-programmatic-a (fn &rest args)
+  "Run the heading-jump FN with ARGS as a programmatic file visit.
+Jumping to a heading reads the file to find it; opening the file node itself
+is an ordinary visit and keeps every surface redirect (Markdown→Noema)."
+  (let ((my/programmatic-file-visit t))
+    (apply fn args)))
+
 (defun my/treemacs-visit-logical-path-a (fn &rest args)
   "Run Treemacs visit FN with its model paths restored for buffers."
   (let ((original-find-file (symbol-function 'find-file))
@@ -247,14 +254,12 @@ that surface to the tag instead.")
     (cl-letf
         (((symbol-function 'find-file)
           (lambda (file &rest arguments)
-            (let ((my/programmatic-file-visit t))
-              (apply original-find-file
-                     (my/treemacs-visit-path file) arguments))))
+            (apply original-find-file
+                   (my/treemacs-visit-path file) arguments)))
          ((symbol-function 'find-file-noselect)
           (lambda (file &rest arguments)
-            (let ((my/programmatic-file-visit t))
-              (apply original-find-file-noselect
-                     (my/treemacs-visit-path file) arguments))))
+            (apply original-find-file-noselect
+                   (my/treemacs-visit-path file) arguments)))
          ((symbol-function 'dired)
           (lambda (directory &rest arguments)
             (apply original-dired
@@ -2114,7 +2119,11 @@ that extra stat is only paid for a marker that actually matched."
        :around #'my/treemacs-visit-logical-path-a))
     (dolist (command '(treemacs--call-imenu-and-goto-tag treemacs--goto-tag))
       (unless (advice-member-p #'my/treemacs-after-tag-visit-a command)
-        (advice-add command :after #'my/treemacs-after-tag-visit-a))))
+        (advice-add command :after #'my/treemacs-after-tag-visit-a)))
+    (unless (advice-member-p #'my/treemacs-tag-visit-programmatic-a
+                             'treemacs--call-imenu-and-goto-tag)
+      (advice-add 'treemacs--call-imenu-and-goto-tag
+                  :around #'my/treemacs-tag-visit-programmatic-a)))
   (with-eval-after-load 'treemacs-mouse-interface
     (dolist (command
              '(treemacs--imenu-tag-noselect
