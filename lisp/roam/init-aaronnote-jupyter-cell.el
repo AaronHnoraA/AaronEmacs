@@ -860,6 +860,21 @@ This does not change the notebook language, kernelspec, or Noema session."
       (my/noema-jupyter-cell--update-highlight)
       t)))
 
+(defun my/noema-jupyter-cell--source-buffer (file)
+  "Return the existing editor buffer for Noema's host FILE, or visit it.
+Remote buffers can have a logical Emacs name while Noema knows their host
+path, so compare both identities before opening a new buffer."
+  (or (find-buffer-visiting file)
+      (seq-find
+       (lambda (buffer)
+         (with-current-buffer buffer
+           (and buffer-file-name
+                (fboundp 'my/noema--host-file)
+                (equal (ignore-errors (my/noema--host-file buffer-file-name))
+                       file))))
+       (buffer-list))
+      (find-file-noselect file)))
+
 (defun my/noema-jupyter-cell-select-source (payload)
   "Visit the source Cell identified by PAYLOAD from the Web output renderer.
 The renderer sends stable identity, never a projected line number.  Emacs then
@@ -870,17 +885,31 @@ location."
     (unless (and (stringp file) (not (string-empty-p file))
                  (stringp cell-id) (not (string-empty-p cell-id)))
       (user-error "Noema output source selection needs a file and cell ID"))
-    (find-file file)
-    (cond
-     ((derived-mode-p 'noema-research-mode)
-      (unless (fboundp 'noema-research-goto-cell)
-        (user-error "Noema research navigation is unavailable"))
-      (noema-research-goto-cell cell-id))
-     ((bound-and-true-p my/noema-jupyter-cell-mode)
-      (unless (my/noema-jupyter-cell--goto-id cell-id)
-        (user-error "Jupyter cell %s is not present in %s" cell-id file)))
-     (t
-      (user-error "%s is not an editable Noema/Jupyter source buffer" file)))))
+    (let* ((buffer (my/noema-jupyter-cell--source-buffer file))
+           (window (or (get-buffer-window buffer (selected-frame))
+                       (get-buffer-window buffer 'visible)
+                       (display-buffer
+                        buffer
+                        '((display-buffer-reuse-window
+                           display-buffer-use-some-window
+                           display-buffer-pop-up-window)
+                          (inhibit-same-window . t))))))
+      (unless (window-live-p window)
+        (user-error "Could not display Noema source buffer %s" file))
+      (unless (eq (window-frame window) (selected-frame))
+        (select-frame-set-input-focus (window-frame window)))
+      (select-window window)
+      (with-current-buffer buffer
+        (cond
+         ((derived-mode-p 'noema-research-mode)
+          (unless (fboundp 'noema-research-goto-cell)
+            (user-error "Noema research navigation is unavailable"))
+          (noema-research-goto-cell cell-id))
+         ((bound-and-true-p my/noema-jupyter-cell-mode)
+          (unless (my/noema-jupyter-cell--goto-id cell-id)
+            (user-error "Jupyter cell %s is not present in %s" cell-id file)))
+         (t
+          (user-error "%s is not an editable Noema/Jupyter source buffer" file)))))))
 
 (defun my/noema-jupyter-cell-next ()
   "Select the next cell in the source projection."

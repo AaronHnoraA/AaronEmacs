@@ -1350,18 +1350,73 @@ so saving never reports it as a malformed Agent directive."
           (kill-buffer buffer))))))
 
 (ert-deftest noema-research-jupyter-output-selects-source-by-stable-cell-id ()
-  (let (opened navigated)
-    (cl-letf (((symbol-function 'find-file)
-               (lambda (file) (setq opened file)))
-              ((symbol-function 'derived-mode-p)
-               (lambda (&rest modes) (memq 'noema-research-mode modes)))
-              ((symbol-function 'noema-research-goto-cell)
-               (lambda (cell-id) (setq navigated cell-id))))
-      (my/noema-jupyter-cell-select-source
-       '((scriptFile . "/work/research.noema")
-         (cellId . "cell-analysis"))))
-    (should (equal opened "/work/research.noema"))
-    (should (equal navigated "cell-analysis"))))
+  (let* ((file (make-temp-file "noema-source-" nil ".noema"))
+         (source (generate-new-buffer " *noema-source-reuse*"))
+         (output (generate-new-buffer " *noema-output-reuse*"))
+         navigated)
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer source
+            (setq buffer-file-name file)
+            (insert "Unsaved source edit"))
+          (let ((source-window (selected-window))
+                (output-window (split-window-right)))
+            (set-window-buffer source-window source)
+            (set-window-buffer output-window output)
+            (select-window output-window)
+            (cl-letf (((symbol-function 'find-file-noselect)
+                       (lambda (&rest _) (ert-fail "Opened duplicate source buffer")))
+                      ((symbol-function 'derived-mode-p)
+                       (lambda (&rest modes) (memq 'noema-research-mode modes)))
+                      ((symbol-function 'noema-research-goto-cell)
+                       (lambda (cell-id) (setq navigated cell-id))))
+              (my/noema-jupyter-cell-select-source
+               `((scriptFile . ,file) (cellId . "cell-analysis"))))
+            (should (eq (selected-window) source-window))
+            (should (eq (window-buffer source-window) source))
+            (should (eq (window-buffer output-window) output))
+            (should (with-current-buffer source
+                      (and (buffer-modified-p)
+                           (equal (buffer-string) "Unsaved source edit"))))
+            (should (equal navigated "cell-analysis"))))
+      (with-current-buffer source (set-buffer-modified-p nil))
+      (kill-buffer source)
+      (kill-buffer output)
+      (delete-file file))))
+
+(ert-deftest noema-research-jupyter-output-reuses-logical-remote-source-buffer ()
+  (let ((source (generate-new-buffer " *noema-logical-source*"))
+        (logical "/fs:remote:/work/research.noema")
+        (host "/work/research.noema"))
+    (unwind-protect
+        (progn
+          (with-current-buffer source
+            (setq buffer-file-name logical))
+          (cl-letf (((symbol-function 'my/noema--host-file)
+                     (lambda (file) (if (equal file logical) host file)))
+                    ((symbol-function 'find-file-noselect)
+                     (lambda (&rest _) (ert-fail "Opened duplicate remote buffer"))))
+            (should (eq (my/noema-jupyter-cell--source-buffer host) source))))
+      (kill-buffer source))))
+
+(ert-deftest noema-research-jupyter-output-displays-hidden-source-beside-output ()
+  (let* ((file (make-temp-file "noema-hidden-source-" nil ".noema"))
+         (source (generate-new-buffer " *noema-hidden-source*"))
+         (output (generate-new-buffer " *noema-output-visible*")))
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer source (setq buffer-file-name file))
+          (set-window-buffer (selected-window) output)
+          (cl-letf (((symbol-function 'derived-mode-p)
+                     (lambda (&rest modes) (memq 'noema-research-mode modes)))
+                    ((symbol-function 'noema-research-goto-cell) #'ignore))
+            (my/noema-jupyter-cell-select-source
+             `((scriptFile . ,file) (cellId . "cell-analysis"))))
+          (should (eq (window-buffer (selected-window)) source))
+          (should (get-buffer-window output 'visible)))
+      (kill-buffer source)
+      (kill-buffer output)
+      (delete-file file))))
 
 (ert-deftest noema-research-graph-buffer-renders-only-the-dag ()
   (skip-unless (executable-find noema-research-graph-dot-program))
