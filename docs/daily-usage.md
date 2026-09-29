@@ -170,21 +170,26 @@ Graph 搜索框支持全文词和
 
 ### Noema 页面里的 Emacs 按键
 
-Noema 页面把 `H-`（Option）组合键、`C-x` / `C-c` 前缀序列、`C-g`，以及
-`M-x` / `M-w` / `M-W` / `M-q` / `M-o` 交给 Emacs；这些键在 CodeMirror 自己的按键表
-之前被截获，所以 `C-c C-e` 不会再同时把光标移到行尾，`H-l` / `H-u` 也不会执行两次。
+所有 Noema 页面（md 编辑器、Jupyter output、Wiki、Agenda、Config、Slides）都把 `H-`（Option）
+组合键、`C-x` / `C-c` 前缀序列、`C-g`，以及 `M-x` / `M-w` / `M-W` / `M-q` / `M-o` 交给 Emacs；
+这些键在 CodeMirror 自己的按键表之前被截获，所以 `C-c C-e` 不会再同时把光标移到行尾，
+`H-l` / `H-u` 也不会执行两次。`Cmd`+方向键（`M-<left>` 等）也交给 Emacs，走 windmove
+直接切到相邻窗口，和普通 buffer 里一样；md 里行首/行尾请用 `0`/`$` 或 `Home`/`End`，
+`Shift+Cmd+方向键` 和 `Option+方向键` 仍是页面里的选择与按词移动。
 
 从页面触发的 Emacs 命令执行完后，键盘焦点跟着命令的结果走：它打开或切换了哪个普通
 Emacs 窗口（agent 会话、compose、Treemacs、vterm、源 buffer……），就选中那个窗口，
-不会回到页面编辑器。只输出消息、什么都没打开的命令保持原窗口。`C-u` 前缀、
-minibuffer 输入和 transient 菜单都会等它们结束再判断。页面发起的
+不会回到页面编辑器。什么都没打开的命令（`M-q` 回答 n、取消的 `M-x`、只输出消息）把键盘
+还给页面。命令返回后 2 秒内才由进程弹出的窗口（启动 agent、终端等）同样会接过键盘，
+但前提是你还停在原页面没动。`C-u` 前缀、minibuffer 输入和 transient 菜单都会等它们结束再判断。页面发起的
 `C-c A v/@` 这类发送，最后会停在 agent 会话的输入处。
-在 macOS 上，点过的 WebKit 页面会一直占着键盘，Emacs 从 Lisp 拿不回来。所以 Emacs
-接管键盘后（例如页面里触发的命令打开了 vterm、agent、minibuffer），页面收到的按键
-全部转交给 Emacs 当前窗口：普通字符按输入文字、`C-x`/`M-x` 等组合键和方向键、回车、
-退格按 Emacs 键。输入不会落进 md，方向键也不会把焦点拉回页面。点击页面，或 Emacs
-把焦点移回该 pane，页面才重新接管键盘。已知限制：这期间在 Emacs 里用不了输入法
-（中文输入法仍由 WebKit 占着）；需要输入中文时先在目标窗口里点一下。
+Emacs 接管键盘时（页面里触发的命令打开了 vterm、agent、minibuffer，或 `Cmd`+方向键
+移走），页面会把 macOS 的原生键盘焦点交还给 Emacs，之后所有按键——前缀序列
+`C-x 3`、回车、方向键、中文输入法——都直接、按顺序进 Emacs，不再经过页面转发，
+也没有按键特判。页面没有原生焦点时，macOS 仍会把 Ctrl/Cmd 组合键和方向键先给
+页面看一眼；每个 Noema 页面都会原样放行给 Emacs，不会截成前缀或移动页面光标。
+用键盘（windmove / ace-window）回到 Noema pane 时，Emacs 把按键转交给页面，可以
+正常移动和编辑；这时用不了输入法，要输入中文先在页面里点一下，页面即取回原生键盘。
 
 xwidget buffer 本身没有正文，所以作用于“当前 buffer 文本”的常用命令会被重定向到
 页面上的等价操作（`my/noema-keys-mode-map`）：

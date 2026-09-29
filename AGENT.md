@@ -185,6 +185,15 @@ This config already has maintenance and workflow entry points. Reuse them:
   preamble, or a fourth parser for that subset — extend the shared files and
   the `shared/katex-macro-fixtures.json` contract instead.  See
   `docs/latex-preview.md`.
+- Agent Skills: the Noema capability resolver and its manager
+  (`noema-skill-manager`).  Global Skills live flat in the vault library
+  `my/noema-skills-directory` (`NOEMA_GLOBAL_SKILLS`), not in `etc/`;
+  Skill packs (`packs` in `etc/noema/capabilities.json`, `@@pack(id)`) are
+  link lists over them, patched per project by membership deltas only; and
+  `skills.lock.json` beside that library is the single upstream record, maintained by
+  `noema-skill-upstream` (install/check/diff/update/rollback).  Do not copy a
+  Skill into a pack, hand-edit a locked Skill in place, or add another
+  installer.  See `site-lisp/noema/docs/capabilities.md`.
 - Config registry: the `config` package under `site-lisp/config/`
   (`config-register`, `config-register-hook`, `config-register-file`,
   `config-get`, `config-set`, `config-reset`, `config-board`). When a setting
@@ -389,19 +398,34 @@ Noema Markdown panes:
   the note's ordinary source buffer.  Do not implement text features against
   the placeholder, and never wait synchronously on the page in a command.
 - Host chords the renderer forwards (`shouldForwardToEmacs` in
-  `aaronnote/xwidget-key-guard.ts`) are claimed in the capture phase, before
-  CM6's own keymap; keep new forwarded chords on that path.
+  `aaronnote/xwidget-key-guard.ts`, including Cmd+Arrow → windmove) are
+  claimed in the capture phase, before CM6's own keymap; keep new forwarded
+  chords on that path.  Every Noema page gets the same keyboard contract:
+  the editor composes the primitives itself and every other page entry calls
+  `installHostKeyboardBridge` (`aaronnote/host-keyboard.ts`); a test fails if
+  a page skips it.  Never special-case one page or one buffer kind.
 - A key forwarded from a page follows its command's result: the window the
   command opened or changed gets the keyboard
-  (`my/noema--follow-forwarded-command`).  Do not re-focus the page after a
-  forwarded command; bridged actions that show a buffer select it.
-- Whenever Emacs takes the keyboard from a pane
-  (`my/noema--release-xwidget-input-buffer`) the page is told
-  (`host-owns-keyboard`).  Until a click or the host's `focus` command, a
-  WebKit keydown is not proof of page focus, and every key the page still
-  receives (macOS keeps a clicked WKWebView as first responder) is forwarded
-  to Emacs as a host-owned key or text that runs in the selected window
-  (`handleHostOwnedKey`, `my/noema--run-emacs-text`).
+  (`my/noema--follow-forwarded-command`), including a window shown by a
+  process within `my/noema-forwarded-command-grace` while the pane is still
+  selected.  Only when nothing changed does the pane get its keyboard back.
+  Bridged actions that show a buffer select it.
+- Keys follow the native keyboard focus, never a list of keys.  Whenever
+  Emacs takes the keyboard from a pane (`my/noema--release-xwidget-input-buffer`)
+  the page is told (`host-owns-keyboard`) and hands macOS first responder
+  back to the Emacs view through Emacs' own `messageHandlers.keyDown` "C-g"
+  (`handOffNativeKeyboard`), so later keys reach Emacs natively and in order.
+  A page without native focus (`document.hasFocus()` false) is still offered
+  Ctrl/Cmd chords and function keys; `installNativeKeyboardYield`, the first
+  key listener on every page, stops them before any page handler without
+  preventing their default, so Emacs handles them.  Relaying host-owned keys
+  (`handleHostOwnedKey`) is only the fallback for hosts without that handler.
+  Emacs cannot type into WKWebView on macOS, so a pane entered from the
+  keyboard gets its keys through the always-on recovery map (`key` command)
+  until it is clicked.  Sandboxed output iframes run `FRAME_KEY_RELAY_SOURCE`
+  (`src/frame-key-relay.ts`), a mirror of the chord and prefix gates kept
+  identical by `tests/frame-key-relay.test.ts`; a new srcdoc frame that can
+  take focus must include it.
 - Commands bound to keyboard keys use `(interactive (list last-command-event))`,
   never `(interactive "e")`, which rejects keyboard events.
 - Code that visits a file only to read, index or reference it (Treemacs tags,

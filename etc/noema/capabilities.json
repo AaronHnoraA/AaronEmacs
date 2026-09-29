@@ -80,5 +80,62 @@
         "default_enabled": false
       }
     ]
+  },
+  "packs": {
+    "definitions": {
+      "math-writing": {
+        "title": "Math writing",
+        "description": "English mathematical prose, precise claims, introductions and pre-submission review",
+        "members": [
+          "math-prose",
+          "claim-precision",
+          "paper-polish",
+          "intro-drafter",
+          "pre-submission-reviewer"
+        ],
+        "preamble": "Keep every hypothesis and the exact strength of each result; never strengthen a claim while rewording it. Define notation before first use and keep it consistent across the document. Mark what is proved, what is cited, and what is conjectured."
+      },
+      "math-verification": {
+        "title": "Math verification",
+        "description": "Proof planning and audit, Lean/Mathlib formalization, symbolic checks",
+        "members": [
+          "proof-plan",
+          "proof-review",
+          "lean4",
+          "lean-proof",
+          "mathlib-build",
+          "mathlib-review",
+          "sympy"
+        ],
+        "preamble": "A claim counts as verified only by a checked proof: a Lean file that compiles without sorry or axioms beyond the standard ones, or a written proof that survives proof-review. Symbolic or numerical computation is evidence, not proof; state its assumptions (field, domain, dimension, branch). Report any step that remains unverified."
+      },
+      "quantum-computing": {
+        "title": "Quantum computing",
+        "description": "Qiskit, Cirq, PennyLane and QuTiP, with SymPy for exact algebra",
+        "members": [
+          "qiskit",
+          "cirq",
+          "pennylane",
+          "qutip",
+          "sympy"
+        ],
+        "preamble": "Use Nielsen-Chuang notation unless the document says otherwise. Qubit order differs between frameworks: Qiskit is little-endian (qubit 0 is the rightmost bit of a basis label), while Cirq and PennyLane put the first qubit or wire leftmost. State the convention whenever a bitstring, statevector or matrix crosses frameworks or reaches the text. For small systems prefer exact statevector or density-matrix checks, and say whether a result comes from noiseless simulation, a noise model, or hardware."
+      },
+      "software-dev": {
+        "title": "Software development",
+        "description": "Design, plans, test-driven development, debugging, verification and code review",
+        "members": [
+          "brainstorming",
+          "writing-plans",
+          "executing-plans",
+          "test-driven-development",
+          "systematic-debugging",
+          "verification-before-completion",
+          "requesting-code-review",
+          "receiving-code-review"
+        ],
+        "preamble": "These Skills come from obra/superpowers. They may mention other superpowers Skills, slash commands or subagents; use those only if this session actually provides them. Where a Skill conflicts with the repository's own AGENTS.md or CLAUDE.md, the repository wins."
+      }
+    }
   }
 }

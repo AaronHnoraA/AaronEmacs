@@ -303,6 +303,7 @@ target-native path.  A CLI that cannot be found is an error."
 (autoload 'noema-capability-manager "noema-capability-ui" nil t)
 (autoload 'noema-skill-manager "noema-capability-ui" nil t)
 (autoload 'noema-mcp-manager "noema-capability-ui" nil t)
+(autoload 'noema-skill-upstream "noema-skill-upstream-ui" nil t)
 (autoload 'noema-capability-lookup "noema-capability-actions" nil t)
 
 ;; Standard compatibility infrastructure is also package-managed.

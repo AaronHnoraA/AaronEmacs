@@ -1909,6 +1909,15 @@ When FILE is non-nil, set buffer-local file tracking directly."
             (my/noema--buffer-for-file file))
           buffer))))
 
+(defun my/noema--url-with-client (url client)
+  "Return URL carrying CLIENT as its `client' query parameter.
+A URL that already names a client is returned unchanged."
+  (if (or (not (stringp client)) (string-empty-p client)
+          (string-match-p "[?&]client=" url))
+      url
+    (concat url (if (string-match-p "?" url) "&" "?")
+            "client=" (url-hexify-string client))))
+
 (defun my/noema--open-xwidget (url &optional file)
   "Open Noema in a per-file xwidget session.
 Each Markdown FILE gets its own dedicated xwidget session and buffer.
@@ -1921,7 +1930,10 @@ reloading.  Non-file opens (roam graph, etc.) share the singleton
          (id (my/noema--xwidget-session-id file))
          (url (if file
                   (my/noema--app-url file id)
-                url))
+                ;; Wiki, Agenda, Config and Graph pages learn their client from
+                ;; the URL too; otherwise commands addressed to this buffer
+                ;; (focus, host-owns-keyboard) never reach them.
+                (my/noema--url-with-client url id)))
          (existing (or (and file (my/noema--buffer-for-file file))
                        (and (fboundp 'my/xwidget-session-buffer)
                             (my/xwidget-session-buffer id)))))

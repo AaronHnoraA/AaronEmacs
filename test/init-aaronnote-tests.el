@@ -524,25 +524,30 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                 #'my/noema-xwidget-paste))))
 
 (ert-deftest my/noema-xwidget-recovery-follows-edit-mode-events ()
-  "Recovery is active only for a Noema pane whose native edit mode dropped."
+  "Recovery keys are active in every Noema pane, editing or not."
   (with-temp-buffer
     (let ((my/noema--app-buffer (current-buffer)))
       (setq-local xwidget-webkit-edit-mode nil)
       (my/noema--sync-xwidget-recovery-mode)
       (should my/noema-xwidget-recovery-mode)
       (dolist (key '("d" "SPC" "q" "<down>" "S-<left>" "M-/" "M-y"
-                     "M-=" "M-<right>" "C-<tab>"))
+                     "M-=" "M-S-<right>" "C-<tab>"))
         (should (eq (key-binding (kbd key)) #'my/noema-xwidget-recover-key)))
+      ;; Cmd+Arrow is windmove from every window, a Noema pane included.
+      (should-not (eq (key-binding (kbd "M-<right>")) #'my/noema-xwidget-recover-key))
       ;; Host Cmd chords must retain their Emacs bindings in recovery mode.
       (should-not (eq (key-binding (kbd "M-x")) #'my/noema-xwidget-recover-key))
       (should-not (eq (key-binding (kbd "M-w")) #'my/noema-xwidget-recover-key))
       (should-not (eq (key-binding (kbd "M-q")) #'my/noema-xwidget-recover-key))
       (should-not (eq (key-binding (kbd "M-o")) #'my/noema-xwidget-recover-key))
       (should-not (eq (key-binding (kbd "M-O")) #'my/noema-xwidget-recover-key))
+      ;; Emacs sees a pane's keys only when WebKit lacks the native keyboard
+      ;; (the page handed it over), so recovery stays on while editing too.
       (setq-local xwidget-webkit-edit-mode t)
       (my/noema--sync-xwidget-recovery-mode)
-      (should-not my/noema-xwidget-recovery-mode)
-      (should-not (eq (key-binding (kbd "d")) #'my/noema-xwidget-recover-key)))))
+      (should my/noema-xwidget-recovery-mode)
+      (should (eq (key-binding (kbd "d")) #'my/noema-xwidget-recover-key))
+      (should (eq (key-binding (kbd "RET")) #'my/noema-xwidget-recover-key)))))
 
 (ert-deftest my/noema-xwidget-recovery-normalizes-the-shared-key-payload ()
   (let ((plain (my/noema--xwidget-recovery-detail (aref (kbd "d") 0)))
@@ -2930,9 +2935,11 @@ selection untouched, so the pane keeps being reported as background."
            (switch-to-buffer pane)
            (cl-letf (((symbol-function 'my/noema--xwidget-buffer-p)
                       (lambda (&optional buffer) (eq (or buffer (current-buffer)) pane)))
-                     ((symbol-function 'my/noema--release-xwidget-input-buffer) #'ignore))
+                     ((symbol-function 'my/noema--release-xwidget-input-buffer) #'ignore)
+                     ((symbol-function 'my/noema--focus-xwidget-window) #'ignore))
              ,@body))
        (my/noema--forget-forwarded-command)
+       (my/noema--stop-awaiting-forwarded-result)
        (kill-buffer pane)
        (kill-buffer other))))
 
@@ -2993,6 +3000,70 @@ selection untouched, so the pane keeps being reported as background."
             (my/noema--release-xwidget-input-buffer pane))
           (should (equal sent '("host-owns-keyboard"))))
       (kill-buffer pane))))
+
+(ert-deftest my/noema-forwarded-command-without-result-returns-the-keyboard-to-the-page ()
+  "M-q answered with n, or M-x cancelled: the page gets its keyboard back."
+  (my/noema-test--with-pane-window
+    (let ((source (selected-window)) focused)
+      (cl-letf (((symbol-function 'my/noema--focus-xwidget-window)
+                 (lambda (window) (setq focused window))))
+        (my/noema--follow-forwarded-command source)
+        (my/noema--after-forwarded-command))
+      (should (eq focused source))
+      (should (memq #'my/noema--forwarded-result-appeared
+                    (default-value 'window-buffer-change-functions))))))
+
+(ert-deftest my/noema-forwarded-command-follows-a-window-shown-late ()
+  "A process that shows its buffer after the command returns still gets focus."
+  (my/noema-test--with-pane-window
+    (my/noema--follow-forwarded-command (selected-window))
+    (my/noema--after-forwarded-command)
+    ;; The agent/terminal buffer appears from a process callback.
+    (display-buffer other '(display-buffer-pop-up-window))
+    (my/noema--forwarded-result-appeared)
+    (should (eq (window-buffer (selected-window)) other))
+    (should-not my/noema--forwarded-await)))
+
+(ert-deftest my/noema-late-window-never-pulls-back-someone-who-moved ()
+  "Once the person selected another window, a late result does not steal it."
+  (my/noema-test--with-pane-window
+    (let ((elsewhere (split-window)))
+      (my/noema--follow-forwarded-command (selected-window))
+      (my/noema--after-forwarded-command)
+      (select-window elsewhere)
+      (set-window-buffer elsewhere other)
+      (my/noema--forwarded-result-appeared)
+      (should (eq (selected-window) elsewhere))
+      (should-not my/noema--forwarded-await))))
+
+(ert-deftest my/noema-recovery-keys-leave-meta-arrows-to-windmove ()
+  "Cmd+Arrow moves between windows from a Noema pane as everywhere else."
+  (dolist (key '("M-<left>" "M-<right>" "M-<up>" "M-<down>"))
+    (should-not (lookup-key my/noema-xwidget-recovery-mode-map (kbd key))))
+  (should (eq (lookup-key my/noema-xwidget-recovery-mode-map (kbd "<left>"))
+              #'my/noema-xwidget-recover-key)))
+
+(ert-deftest my/noema-releasing-a-pane-without-client-still-tells-pages ()
+  "A pane Emacs knows no client for gets the release as a broadcast."
+  (let ((pane (generate-new-buffer " noema-pane"))
+        sent)
+    (unwind-protect
+        (with-current-buffer pane
+          (setq major-mode 'xwidget-webkit-mode)
+          (cl-letf (((symbol-function 'xwidget-webkit-edit-mode) #'ignore)
+                    ((symbol-function 'my/noema-command)
+                     (lambda (command &optional _) (push command sent))))
+            (my/noema--release-xwidget-input-buffer pane))
+          (should (equal sent '("host-owns-keyboard"))))
+      (kill-buffer pane))))
+
+(ert-deftest my/noema-surface-urls-carry-their-client ()
+  "Non-file surfaces are addressed by the same client id Emacs registers."
+  (should (equal (my/noema--url-with-client "http://127.0.0.1:1/wiki" "aaronnote")
+                 "http://127.0.0.1:1/wiki?client=aaronnote"))
+  (should (equal (my/noema--url-with-client "http://127.0.0.1:1/agenda?view=today" "aaronnote")
+                 "http://127.0.0.1:1/agenda?view=today&client=aaronnote"))
+  (should (equal (my/noema--url-with-client "http://h/?client=x" "aaronnote") "http://h/?client=x")))
 
 (provide 'init-aaronnote-tests)
 ;;; init-aaronnote-tests.el ends here
