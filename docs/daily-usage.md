@@ -1031,6 +1031,7 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 | `C-c A e` | 在 Emacs 源 buffer 里打开 Noema 页面的笔记，并选中页面选区 |
 | `C-c A p` | 把当前 agent-shell session 纳入 research |
 | `C-c A G` | 跨 Project 的 agent 总览：待处理、未读、运行状态与会话跳转 |
+| `C-c A U` | agent 总览（abtop）：额度、会话状态/模型/上下文/token/费用，停止、强制终止、跳转 |
 | `C-c A O` | 编排面板：Task / Job / Worker / Delegation / 事件 |
 | `C-c A x` | 把当前上下文发给某个 agent 会话（引用，不拷贝正文）|
 | `C-c A v` | 只把选区发给某个会话；在 Noema Markdown 页里直接使用网页选区 |
@@ -1082,6 +1083,33 @@ Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空
 总览按待审批、待输入、失败、未读优先排序。`RET` 打开会话，`j` 跳到最近 Run 的
 work 块，`p` 打开其 Project，`s` 打开该 Project 的 Session 列表，`g` 刷新状态，`G` 重新发现
 Project。总览只读取现有注册表，不会启动 agent 或创建 Project。
+
+`C-c A U` / `M-x noema-agent-abtop` 打开 btop 风格的 agent 总览（aaron-ui 配色），三块面板：
+- **quota**：三个工具的额度总是全部列出，每个工具列出它应有的窗口（`5h`/`7d`），显示已用比例、重置倒计时
+  和数据年龄；还没有数据的窗口显示为一行说明，而不是消失。
+  - claude：两个来源写进同一张表。一是 claude-agent-acp 在 `usage_update` 里附带的 `_claude/rateLimit`
+    （一轮对话中上报，新版带 `unifiedWindows`，一次给出 5h 和 7d）；二是打开面板或按 `g` 时向 Claude 的
+    usage 接口（Claude Code `/usage` 用的同一个）要一次，5 分钟内不重复请求。令牌从 macOS 钥匙串
+    （`Claude Code-credentials`，异步 `security`）或 `~/.claude/.credentials.json` 读取，只用于这一次请求，
+    不保存、不写日志、**从不刷新**（刷新会轮换 Claude Code 的 refresh token 让它掉登录）；过期时面板提示
+    打开 Claude Code 续期。`noema-agent-abtop-claude-usage` 设为 nil 可完全离线。最后一次的值存进
+    `var/noema/agent-rate-limits.json`（值变了才写，或每 5 分钟一次保持数据年龄准确）。
+  - codex：本机 Codex 会话文件（`$CODEX_HOME/sessions`）最新一条 `token_count`；当前套餐没有的窗口显示为缺失。
+  - opencode：按 `~/.local/share/opencode/auth.json` 里登录的 provider 列出（只读 provider 名，不保留凭据）：
+    openai（ChatGPT 登录）与 codex 共用额度；github-copilot 的 premium 额度本地没有记录。
+- **sessions**：所有活动会话（Run、popup 池、手开的）一行一个：状态（`● work`/`◐ wait`/`○ idle`，
+  `+N` 是排队的 prompt）、模型、上下文条（≥70% 黄、≥90% 红）、输入/输出 token、费用、轮数、
+  压缩次数（上下文较上次骤降 30% 以上记一次）、空闲时间。窄窗口会依次隐藏 Cmp、Agent、Project 等列。
+- **session**：光标所在会话的详情：root、会话 id、上下文 used/size 与峰值、token 分项、费用、队列。
+
+按键：`RET`/`o` 打开会话，`s` 停止当前工作（取消 Run 或中断本轮），`K` 强制终止（进程和 buffer
+一起结束），`x` 关闭，`R` 重启，`r` 重命名，`C` 在下个 Run 滚动到最新 handoff，`l` 该项目的会话
+列表，`t` 切换项目范围（`C-u C-c A U` 直接只看当前项目），`TAB` 在面板标题上折叠/展开（其他位置跳到
+下一个会话），`1`/`2`/`3` 折叠 quota/sessions/session，`g` 刷新。光标不在会话行上时，操作作用于详情面板里的会话。
+数据全部来自 Emacs 已有的状态（`noema-agent-acp-usage`）：不扫进程、不轮询；面板在可见的 frame 上显示时，
+会话开启/关闭、模型切换、开始/结束一轮、上报用量之后合并 1 秒重绘一次。面板被切走、埋掉或 frame 最小化后，
+下一次变化到来时它就退订，之后完全不耗电；重新显示时再订阅并补画一次。agent 不上报的字段显示 `-`；刚启动、还没完成
+握手的会话模型也是 `-`，握手完成后自动补上。
 
 项目 root 取最近的、带 `[project]` 表的 `noema.toml`（只有 `repository_id` 的
 vault 清单不算项目），没有就退回普通项目根目录；**不会**为了登记而创建项目。

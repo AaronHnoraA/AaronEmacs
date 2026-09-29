@@ -595,6 +595,14 @@ in-process 缓存，与自动刷新保持一致。
 - `M-x noema` / `C-c A W` — Noema 主入口
 - `M-x noema-agent-start` / `C-c A a` — 启动包管理的 agent-shell 上的结构化 agent
 - `M-x noema-agent-inbox` / `C-c A G` — 汇总已知 Noema Project 的会话状态、待处理项和活动 agent；`RET` 跳转，`G` 重扫项目根
+- `M-x noema-agent-abtop` / `C-c A U` — btop 风格的 agent 总览（quota / sessions / 详情，带停止、强制
+  终止、重启等管理键）。读取边界都在 `noema-agent-acp.el`：`noema-agent-acp-usage` 读 agent-shell 的
+  `:usage`（Run 记录的 `sessionUsage` 也经它）；`agent-shell--save-usage` 与
+  `--update-usage-from-notification` 上的 `:after` advice 记录上下文峰值、压缩次数（借鉴 abtop：
+  上下文较上次跌破 70% 且上次 ≥10k）和 Claude `_claude/rateLimit`（`noema-agent-acp-rate-limits`），
+  然后运行 `noema-agent-acp-changed-functions`；该钩子也在 agent-shell 每次完整的 header 更新（会话建立、
+  模型/模式切换、一轮开始结束，不含忙碌动画的缓存帧）和 agent buffer 被杀时运行。Codex 额度只在渲染时读最新会话文件末尾 128 KiB，
+  按文件 mtime/size 缓存。不做进程扫描或轮询
 - `M-x noema-compose` / `C-c A c` — 直接复用内化 gptel 的 compose UI
 - `C-c A s/m/./r` — send、transient、context、rewrite/diff
 - `C-c A p` — 把当前 agent-shell session 纳入 research
