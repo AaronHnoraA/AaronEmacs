@@ -1123,7 +1123,8 @@ vault 清单不算项目），没有就退回普通项目根目录；**不会**�
 
 自动回收只有两条路径：每 5 分钟的 warm-buffer 清扫（空闲超过
 `noema-agent-worker-warm-idle-seconds`，默认 30 分钟），以及项目最后一个 `.noema`
-关闭 `noema-pi-stop-delay` 秒后的项目收尾。二者都先问
+关闭 `noema-pi-stop-delay` 秒后的项目收尾。Pi 是项目管理会话，不参与 warm-buffer 清扫；
+项目收尾仍会关闭它。两条路径都先问
 `noema-agent-acp-auto-stoppable-p`：会话必须空闲（没有进行中的回答或 Run）、不在
 任何窗口可见，且来源属于 `noema-agent-acp-auto-stop-origins`（默认 `run`、`probe`、
 `pi`）。空闲时间从 buffer 最后一次变化（输入或输出）算起，而不是上次被显示的
@@ -1150,7 +1151,9 @@ agent-shell 自己写引用的格式），每个文件再附一个 `resource_lin
 每次发送都会询问目标会话，只列出 ACP 进程仍在运行的 agent-shell 会话，本项目
 优先；本项目上一次选的会话若仍在运行则排在第一位并预选，直接 `RET` 即重复选择。
 历史会话不会出现在发送菜单中；需要先在 agent-shell 输入 `/resume` 恢复会话。
-如果一个会话也没打开，先用 `C-c A a` 启动 agent。
+菜单最底下的 `Copy prompt to clipboard` 把同一段提问和文件行号引用复制到系统
+剪贴板，可直接粘贴到 vterm 里的 agent；即使没有打开 ACP 会话也可以选。
+这项操作不会切换会话或清空已选的 context。
 想恢复“静默复用上次会话、`C-u` 才重选”，把 `noema-context-always-ask-session`
 设为 nil。会话还在初始化就先排队；正在回答时走 agent-shell 自己的
 pending 队列。

@@ -1025,7 +1025,10 @@ both sides of the protocol before later background transitions are deduped."
         (setq-local my/noema--activity-paused :unknown))
       (when-let* ((window (get-buffer-window buffer 'visible)))
         (unless (eq window (selected-window))
-          (my/noema--select-emacs-window window)))
+          ;; The page already owns the keyboard after its trusted pointer press.
+          ;; Selecting Emacs's frame here steals WKWebView's first responder,
+          ;; so CodeMirror briefly paints a caret and then loses it.
+          (select-window window)))
       (setq my/noema--last-activity-signature :unknown)
       (my/noema--update-activity))))
 
@@ -1582,6 +1585,123 @@ This is a memory-only check; it never opens an inactive project or reads disk."
  "aaronnote.file.read" #'my/noema--external-file-read)
 (remote-gateway-register-method
  "aaronnote.file.write" #'my/noema--external-file-write)
+
+(defvar my/noema--latex-agent-requests (make-hash-table :test #'equal)
+  "Active LaTeX export polish turns keyed by the web host request id.")
+
+(defun my/noema--latex-agent-status (_params _client)
+  "Report the ACP agents configured in this Emacs for LaTeX export."
+  (require 'noema-agent-acp)
+  `((agents . ,(vconcat
+                (mapcar (lambda (id)
+                          `((id . ,id)
+                            (available . ,(if (noema-agent-acp-config-for id)
+                                              t :json-false))))
+                        '("codex" "claude" "opencode"))))))
+
+(defun my/noema--latex-agent-finish (request-id ok &optional message)
+  "Finish LaTeX polish REQUEST-ID and retire its private ACP session."
+  (when-let* ((request (gethash request-id my/noema--latex-agent-requests)))
+    (remhash request-id my/noema--latex-agent-requests)
+    (let ((buffer (plist-get request :buffer))
+          (subscription (plist-get request :subscription))
+          (timer (plist-get request :timer))
+          (deferred (plist-get request :deferred)))
+      (when (timerp timer) (cancel-timer timer))
+      (when (and buffer subscription)
+        (noema-agent-acp-unsubscribe :buffer buffer :subscription subscription))
+      (remote-gateway-resolve
+       deferred
+       `((ok . ,(if ok t :json-false))
+         (message . ,(or message ""))))
+      (when (buffer-live-p buffer)
+        (run-at-time 0 nil
+                     (lambda ()
+                       (when (buffer-live-p buffer)
+                         (ignore-errors (noema-agent-acp-kill buffer)))))))))
+
+(defun my/noema--latex-agent-run (params _client)
+  "Run a LaTeX polish turn through Noema's Emacs ACP boundary."
+  (require 'noema-agent-acp)
+  (let* ((request-id (alist-get 'requestId params))
+         (backend (alist-get 'backend params))
+         (workdir (alist-get 'workdir params))
+         (prompt (alist-get 'prompt params))
+         (config (and (member backend '("codex" "claude" "opencode"))
+                      (noema-agent-acp-config-for backend))))
+    (unless (and (stringp request-id) (not (string-empty-p request-id))
+                 (not (gethash request-id my/noema--latex-agent-requests))
+                 config (stringp workdir) (file-directory-p workdir)
+                 (file-exists-p (expand-file-name "draft.tex" workdir))
+                 (stringp prompt) (not (string-empty-p prompt)))
+      (error "Invalid LaTeX ACP export request or unavailable agent"))
+    (let ((deferred (remote-gateway-defer 960))
+          buffer subscription)
+      (puthash request-id
+               (list :deferred deferred
+                     :timer (run-at-time
+                             930 nil
+                             (lambda ()
+                               (my/noema--latex-agent-finish
+                                request-id nil "Emacs ACP polish timed out"))))
+               my/noema--latex-agent-requests)
+      (condition-case err
+          (progn
+            (setq buffer
+                  (noema-agent-acp-start :config config :directory workdir
+                                         :origin 'side))
+            (let ((request (gethash request-id my/noema--latex-agent-requests)))
+              (setf (plist-get request :buffer) buffer))
+            (setq subscription
+                  (noema-agent-acp-subscribe
+                   :buffer buffer :event 'init-finished
+                   :callback
+                   (lambda (_event)
+                     (noema-agent-acp-unsubscribe
+                      :buffer buffer :subscription subscription)
+                     (when (gethash request-id my/noema--latex-agent-requests)
+                       (condition-case prompt-error
+                           (noema-agent-acp-prompt
+                            :buffer buffer
+                            :content (list `((type . "text") (text . ,prompt)))
+                            :on-success
+                            (lambda (response)
+                              (my/noema--latex-agent-finish
+                               request-id
+                               (not (equal (alist-get 'stopReason response)
+                                           "cancelled"))
+                               (or (alist-get 'stopReason response) "")))
+                            :on-failure
+                            (lambda (error-object _raw)
+                              (my/noema--latex-agent-finish
+                               request-id nil (format "%s" error-object))))
+                         (error
+                          (my/noema--latex-agent-finish
+                           request-id nil (error-message-string prompt-error))))))))
+            (let ((request (gethash request-id my/noema--latex-agent-requests)))
+              (setf (plist-get request :subscription) subscription)))
+        (error
+         (my/noema--latex-agent-finish
+          request-id nil (error-message-string err))))
+      deferred)))
+
+(defun my/noema--latex-agent-cancel (params _client)
+  "Cancel a LaTeX export's ACP turn after task abort or timeout."
+  (let* ((request-id (alist-get 'requestId params))
+         (request (gethash request-id my/noema--latex-agent-requests))
+         (buffer (plist-get request :buffer)))
+    (when request
+      (when (buffer-live-p buffer)
+        (ignore-errors (noema-agent-acp-interrupt buffer t)))
+      (my/noema--latex-agent-finish request-id nil "aborted")))
+  `((ok . t)))
+
+(remote-gateway-register-method
+ "aaronnote.latex.agent-status" #'my/noema--latex-agent-status)
+(remote-gateway-register-method
+ "aaronnote.latex.agent-run" #'my/noema--latex-agent-run)
+(remote-gateway-register-method
+ "aaronnote.latex.agent-cancel" #'my/noema--latex-agent-cancel)
 
 (defun my/noema--clear-process-log-queue ()
   "Cancel and discard deferred web-host diagnostic output."

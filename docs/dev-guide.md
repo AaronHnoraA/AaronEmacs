@@ -649,7 +649,8 @@ in-process 缓存，与自动刷新保持一致。
   root 解析是纯查询（含 `[project]` 的 `noema.toml` → projectile → project.el →
   该目录，统一投影成本机原生路径），绝不创建 Project。只有已经是 Noema 项目时才额外 `session:promote` + `session:name:bind`
   写进 Node 持久注册表，失败不影响会话。`noema-agent-acp-sessions` 是合并视图，
-  `noema-sessions-read` 是统一的会话选择器（可选“新开一个”）。
+  `noema-sessions-read` 是统一的会话选择器（可选“新开一个”；context send
+  还可在列表末尾选择复制 prompt 到剪贴板，不需要 ACP 会话）。
   `noema-agent-acp-ephemeral-origins`（默认 `side`）里的来源不写持久注册表。
 - 生命周期：所有自动停止路径（warm 清扫、项目最后一个 `.noema` 关闭后的收尾、项目
   关闭期间结束的 Run）统一经 `noema-agent-acp-auto-stoppable-p`——空闲、没有排队的

@@ -3611,14 +3611,15 @@ board must draw the whole plan, not its first cell."
         (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
               (list first second idle busy manual))))))
 
-(ert-deftest noema-agent-worker-sweep-spares-used-visible-and-personal-sessions ()
-  "The warm sweep stops only idle, hidden, background sessions.
+(ert-deftest noema-agent-worker-sweep-spares-used-visible-personal-and-pi-sessions ()
+  "The warm sweep stops only idle, hidden, background worker sessions.
 Idle time counts from the buffer's last change, not from its last display."
   (let* ((root "/tmp/noema-sweep-project/")
          (buffers (mapcar (lambda (name) (generate-new-buffer (format " *sweep-%s*" name)))
-                          '(stale active manual visible)))
+                          '(stale active manual visible pi)))
          (stale (nth 0 buffers)) (active (nth 1 buffers))
          (manual (nth 2 buffers)) (visible (nth 3 buffers))
+         (pi (nth 4 buffers))
          (noema-agent-worker-warm-idle-seconds 60)
          stopped)
     (unwind-protect
@@ -3633,7 +3634,10 @@ Idle time counts from the buffer's last change, not from its last display."
           (dolist (buffer buffers)
             (with-current-buffer buffer
               (setq-local noema-agent-acp-session-root root
-                          noema-agent-acp-session-origin (if (eq buffer manual) 'foreign 'run)
+                          noema-agent-acp-session-origin
+                          (cond ((eq buffer manual) 'foreign)
+                                ((eq buffer pi) 'pi)
+                                (t 'run))
                           noema-agent-acp-last-used-at (- (float-time) 3600))
               (noema-agent-acp--track-activity-h)
               ;; `--track-activity-h' keeps an existing timestamp.
