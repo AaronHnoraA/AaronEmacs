@@ -47,6 +47,331 @@
       (agent-shell--append-transcript :text "Agent output"
                                       :file-path agent-shell--transcript-file))))
 
+(defun my/agent-shell-test--execution (session-id directory &optional agent)
+  "Make a fake live ACP frontend for SESSION-ID in DIRECTORY."
+  (let ((buffer (generate-new-buffer " *agent-session-test*"))
+        (process (make-pipe-process :name "agent-session-test" :noquery t)))
+    (with-current-buffer buffer
+      (setq major-mode 'agent-shell-mode
+            default-directory directory)
+      (setq-local agent-shell--state
+                  (agent-shell--make-state
+                   :agent-config `((:identifier . ,(or agent 'codex)))
+                   :buffer buffer))
+      (map-put! (map-elt agent-shell--state :session) :id session-id)
+      (map-put! agent-shell--state :client
+                `((:process . ,process)
+                  (:command . "fake-acp")
+                  (:instance-count . 0)
+                  (:error-handlers . nil)
+                  (:notification-handlers . nil)
+                  (:request-handlers . nil)
+                  (:pending-requests . nil))))
+    buffer))
+
+(defun my/agent-shell-test--close (buffer)
+  "Release fake ACP process and BUFFER."
+  (when (buffer-live-p buffer)
+    (let ((process (noema-agent-acp-state-value buffer '(:client :process))))
+      (when (and (processp process) (process-live-p process))
+        (delete-process process)))
+    (kill-buffer buffer)))
+
+(ert-deftest agent-shell-resume-reuses-one-local-execution ()
+  (let ((default-directory "/tmp/")
+        (config '((:identifier . codex)))
+        (launches 0) buffers)
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-cwd) (lambda () default-directory)))
+          (let ((first (my/agent-shell--reuse-session-a
+                        (lambda (&rest _) (cl-incf launches)
+                          (let ((buffer (my/agent-shell-test--execution "task-a" "/tmp/")))
+                            (push buffer buffers) buffer))
+                        :config config :session-id "task-a" :no-focus t)))
+            (should (eq first
+                        (my/agent-shell--reuse-session-a
+                         (lambda (&rest _) (ert-fail "Started a duplicate process"))
+                         :config config :session-id "task-a" :no-focus t)))
+            (should (= launches 1))))
+      (mapc #'my/agent-shell-test--close buffers))))
+
+(ert-deftest agent-shell-codex-reuse-leaves-other-adapters-unchanged ()
+  (let* ((default-directory "/tmp/")
+         (config '((:identifier . claude)))
+         (first (my/agent-shell-test--execution "task-a" "/tmp/" 'claude))
+         (started nil)
+         (second nil))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-cwd) (lambda () default-directory)))
+          (setq second
+                (my/agent-shell--reuse-session-a
+                 (lambda (&rest _)
+                   (setq started t)
+                   (my/agent-shell-test--execution "task-a" "/tmp/" 'claude))
+                 :config config :session-id "task-a" :no-focus t))
+          (should started)
+          (should-not (eq first second)))
+      (my/agent-shell-test--close first)
+      (my/agent-shell-test--close second))))
+
+(ert-deftest noema-resume-reuses-codex-without-reinitializing-it ()
+  (let* ((config '((:identifier . codex)))
+         (buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+         (starts 0)
+         (subscriptions 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell--start)
+                   (lambda (&rest _) (cl-incf starts)
+                     (ert-fail "Started a second Codex client")))
+                  ((symbol-function 'noema-agent-acp-subscribe)
+                   (lambda (&rest _) (cl-incf subscriptions))))
+          (should (eq buffer (noema-agent-acp-start
+                              :config config :directory "/tmp/"
+                              :session-id "task-a")))
+          (should (zerop starts))
+          (should (zerop subscriptions)))
+      (my/agent-shell-test--close buffer))))
+
+(ert-deftest agent-shell-resume-keeps-tasks-and-hosts-separate ()
+  (let ((config '((:identifier . codex)))
+        (buffers (list (my/agent-shell-test--execution "task-a" "/tmp/")
+                       (my/agent-shell-test--execution
+                        "task-a" "/fs:server-a:/work/")))
+        (launches 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-cwd) (lambda () default-directory)))
+          (dolist (case '(("task-b" "/tmp/")
+                          ("task-a" "/fs:server-b:/work/")))
+            (let ((default-directory (cadr case)))
+              (my/agent-shell--reuse-session-a
+               (lambda (&rest _)
+                 (cl-incf launches)
+                 (let ((buffer (my/agent-shell-test--execution
+                                (car case) (cadr case))))
+                   (push buffer buffers) buffer))
+               :config config :session-id (car case) :no-focus t)))
+          (should (= launches 2))
+          (should (eq (my/agent-shell--find-execution
+                       "task-a" config "/fs:server-a:/work/")
+                      (cadr (last buffers 2)))))
+      (mapc #'my/agent-shell-test--close buffers))))
+
+(ert-deftest agent-shell-resume-ignores-dead-process-and-cleans-on-kill ()
+  (let* ((config '((:identifier . codex)))
+         (buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+         (process (noema-agent-acp-state-value buffer '(:client :process))))
+    (unwind-protect
+        (progn
+          (should (eq buffer (my/agent-shell--find-execution "task-a" config "/tmp/")))
+          (delete-process process)
+          (should-not (my/agent-shell--find-execution "task-a" config "/tmp/"))
+          (with-current-buffer buffer
+            (setq-local my/agent-shell--requested-session-id "task-a")
+            (my/agent-shell--forget-session)
+            (should-not my/agent-shell--requested-session-id)))
+      (my/agent-shell-test--close buffer))))
+
+(ert-deftest agent-shell-task-busy-suppresses-resume-fallback ()
+  (let ((state '((:agent-config . ((:identifier . codex)))))
+        (request '((:method . "session/load")
+                   (:params . ((sessionId . "task-a")))))
+        (fallback nil) wire handled)
+    (cl-letf (((symbol-function 'my/agent-shell--handle-task-busy)
+               (lambda (&rest _) (setq handled t))))
+      (my/agent-shell--busy-request-a
+       (lambda (&rest args) (setq wire args))
+       :state state :request request :buffer (current-buffer)
+       :on-failure (lambda (&rest _) (setq fallback t)))
+      (funcall (plist-get wire :on-failure)
+               '((code . -32000) (data . ((code . "TASK_BUSY")))) nil)
+      (should handled)
+      (should-not fallback)
+      (should (my/agent-shell--task-busy-p
+               '((message . "Another Codex session is using this task."))))
+      (should-not (my/agent-shell--task-busy-p
+                   '((message . "Session not found")))))))
+
+(ert-deftest agent-shell-task-busy-shows-retry-state-and-releases-client ()
+  (let* ((buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+         (request '((:method . "session/load")
+                    (:params . ((sessionId . "task-a")))))
+         fragment)
+    (unwind-protect
+        (with-current-buffer buffer
+          (cl-letf (((symbol-function 'agent-shell--update-fragment)
+                     (lambda (&rest args) (setq fragment args)))
+                    ((symbol-function 'agent-shell--emit-event) #'ignore)
+                    ((symbol-function 'shell-maker-busy) (lambda () nil))
+                    ((symbol-function 'agent-shell-heartbeat-stop) #'ignore))
+            (my/agent-shell--handle-task-busy buffer request))
+          (should (eq my/agent-shell--task-busy 'external))
+          (should (equal my/agent-shell--requested-session-id "task-a"))
+          (should (equal (plist-get fragment :label-left)
+                         "Task already active"))
+          (should-not (my/agent-shell-execution-live-p buffer)))
+      (my/agent-shell-test--close buffer))))
+
+(ert-deftest agent-shell-explicit-shutdown-still-terminates-execution ()
+  (let* ((buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+         (process (noema-agent-acp-state-value buffer '(:client :process))))
+    (unwind-protect
+        (with-current-buffer buffer
+          (cl-letf (((symbol-function 'agent-shell-heartbeat-stop) #'ignore))
+            (agent-shell--shutdown))
+          (should-not (process-live-p process))
+          (should-not (noema-agent-acp-state-value buffer '(:client))))
+      (my/agent-shell-test--close buffer))))
+
+(defun my/noema-agent-bridge-test--request (request)
+  "Send REQUEST through the same JSON boundary as emacsclient."
+  (json-parse-string
+   (my/noema-agent-bridge-request
+    (base64-encode-string
+     (encode-coding-string (json-serialize request) 'utf-8) t))
+   :object-type 'alist :array-type 'list))
+
+(ert-deftest noema-agent-bridge-lists-only-live-target-scoped-sessions ()
+  (let* ((my/noema-agent-bridge-enabled t)
+         (live (my/agent-shell-test--execution "task-a" "/tmp/"))
+         (dead (my/agent-shell-test--execution "task-b" "/tmp/")))
+    (unwind-protect
+        (progn
+          (delete-process (noema-agent-acp-state-value dead '(:client :process)))
+          (let* ((response (my/noema-agent-bridge-test--request
+                            '((action . "list"))))
+                 (sessions (alist-get 'sessions response)))
+            (should (= (length sessions) 1))
+            (should (equal (alist-get 'sessionId (car sessions)) "task-a"))
+            (should (equal (alist-get 'workspace (car sessions))
+                           (my/agent-shell--session-context "/tmp/")))))
+      (my/agent-shell-test--close live)
+      (my/agent-shell-test--close dead))))
+
+(ert-deftest noema-agent-bridge-sends-to-exact-session-and-queues-when-busy ()
+  (let* ((my/noema-agent-bridge-enabled t)
+         (buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+         (request `((action . "send") (sessionId . "task-a")
+                    (agent . "codex")
+                    (workspace . ,(my/agent-shell--session-context "/tmp/"))
+                    (message . "Mobile update")))
+         queued submitted first queued-response)
+    (unwind-protect
+        (cl-letf (((symbol-function 'noema-agent-acp-enqueue)
+                   (lambda (_buffer text) (setq queued text)))
+                  ((symbol-function 'noema-agent-acp-prompt)
+                   (lambda (&rest args) (setq submitted args)))
+                  ((symbol-function 'agent-shell--start)
+                   (lambda (&rest _) (ert-fail "Started a second process"))))
+          (setq first (my/noema-agent-bridge-test--request request))
+          (should (equal (alist-get 'state first) "submitted"))
+          (should (equal (map-elt (car (plist-get submitted :content)) 'text)
+                         "Mobile update"))
+          (with-current-buffer buffer
+            (my/noema-agent-bridge--event
+             '((:event . agent-message-chunk)
+               (:data . ((:text-chunk . "Received"))))))
+          (should (equal (alist-get 'text
+                                   (my/noema-agent-bridge-test--request
+                                    `((action . "read") (sessionId . "task-a")
+                                      (agent . "codex")
+                                      (workspace . ,(my/agent-shell--session-context "/tmp/"))
+                                      (requestId . ,(alist-get 'requestId first)))))
+                         "Received"))
+          (funcall (plist-get submitted :on-success) '((stopReason . "end_turn")))
+          (should (equal (alist-get 'state
+                                   (my/noema-agent-bridge-test--request
+                                    `((action . "read") (sessionId . "task-a")
+                                      (agent . "codex")
+                                      (workspace . ,(my/agent-shell--session-context "/tmp/"))
+                                      (requestId . ,(alist-get 'requestId first)))))
+                         "completed"))
+          (with-current-buffer buffer (setq-local shell-maker--busy t))
+          (setq queued-response (my/noema-agent-bridge-test--request request))
+          (should (equal (alist-get 'state queued-response) "queued"))
+          (should (equal queued "Mobile update"))
+          (with-current-buffer buffer
+            (my/noema-agent-bridge--event
+             '((:event . input-submitted)
+               (:data . ((:prompt . "Mobile update")))))
+            (my/noema-agent-bridge--event
+             '((:event . agent-message-chunk)
+               (:data . ((:text-chunk . "Queued reply")))))
+            (my/noema-agent-bridge--event '((:event . turn-complete))))
+          (let ((reply (my/noema-agent-bridge-test--request
+                        `((action . "read") (sessionId . "task-a")
+                          (agent . "codex")
+                          (workspace . ,(my/agent-shell--session-context "/tmp/"))
+                          (requestId . ,(alist-get 'requestId queued-response))))))
+            (should (equal (alist-get 'state reply) "completed"))
+            (should (equal (alist-get 'text reply) "Queued reply")))
+          (should (eq (alist-get 'ok
+                                 (my/noema-agent-bridge-test--request
+                                  `((action . "send") (sessionId . "task-a")
+                                    (agent . "codex")
+                                    (workspace . "/fs:other:/tmp")
+                                    (message . "wrong host"))))
+                      :false)))
+      (my/agent-shell-test--close buffer))))
+
+(ert-deftest noema-agent-bridge-requires-enabling-and-explicit-interrupt ()
+  (let* ((buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+         (request `((action . "interrupt") (sessionId . "task-a")
+                    (agent . "codex")
+                    (workspace . ,(my/agent-shell--session-context "/tmp/"))))
+         stopped)
+    (unwind-protect
+        (progn
+          (should (eq (alist-get 'ok
+                                 (my/noema-agent-bridge-test--request
+                                  '((action . "list"))))
+                      :false))
+          (let ((my/noema-agent-bridge-enabled t))
+            (with-current-buffer buffer (setq-local shell-maker--busy t))
+            (cl-letf (((symbol-function 'noema-agent-acp-stop)
+                       (lambda (target) (setq stopped target))))
+              (should (equal (alist-get 'state
+                                       (my/noema-agent-bridge-test--request request))
+                             "interrupt-requested"))
+              (should (eq stopped buffer)))))
+      (my/agent-shell-test--close buffer))))
+
+(ert-deftest noema-agent-bridge-does-not-queue-behind-structured-run ()
+  (let* ((my/noema-agent-bridge-enabled t)
+         (buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+         (request `((action . "send") (sessionId . "task-a")
+                    (agent . "codex")
+                    (workspace . ,(my/agent-shell--session-context "/tmp/"))
+                    (message . "Wait for the Run")))
+         enqueued)
+    (unwind-protect
+        (cl-letf (((symbol-function 'noema-agent-acp-busy-p) (lambda (_) t))
+                  ((symbol-function 'noema-agent-acp-enqueue)
+                   (lambda (&rest _) (setq enqueued t))))
+          (let ((response (my/noema-agent-bridge-test--request request)))
+            (should (eq (alist-get 'ok response) :false))
+            (should (string-match-p "Run is active" (alist-get 'error response)))
+            (should-not enqueued)))
+      (my/agent-shell-test--close buffer))))
+
+(ert-deftest agent-shell-command-menu-uses-advertised-commands-only ()
+  (with-temp-buffer
+    (setq major-mode 'agent-shell-mode)
+    (setq-local agent-shell-completion--shell-buffer (current-buffer)
+                agent-shell--state
+                '((:available-commands . (((name . "status")
+                                           (description . "Show status"))))))
+    (insert "/")
+    (setq-local company-mode t)
+    (let (opened)
+      (should (equal (nth 2 (agent-shell--command-completion-at-point))
+                     '("status")))
+      (cl-letf (((symbol-function 'company-manual-begin)
+                 (lambda () (setq opened t)))
+                ((symbol-function 'agent-shell--trigger-completion-at-point)
+                 (lambda () (ert-fail "Used fallback completion"))))
+        (my/agent-shell--show-completion-after-insert)
+        (should opened)))))
+
 (ert-deftest popup-agent-transcript-policy-does-not-affect-other-buffers ()
   (let ((shell-maker-prompt-before-killing-buffer t))
     (with-temp-buffer

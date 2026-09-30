@@ -21,6 +21,7 @@
 
 (require 'config)
 (require 'init-package-utils)
+(require 'seq)
 
 (add-to-list 'load-path
              (file-name-as-directory
@@ -157,8 +158,234 @@ agent sends must resolve against the session's target."
         (with-current-buffer buffer (apply orig args))
       (apply orig args))))
 
-(defvar agent-shell--transcript-file)(defvar agent-shell--transcript-file)
+(defvar agent-shell--transcript-file)
+(defvar agent-shell--state)
+(defvar agent-shell-transcript-file-path-function)
 (defvar shell-maker-prompt-before-killing-buffer)
+(defvar shell-maker--config)
+(defvar company-backends)
+(defvar company-idle-delay)
+(defvar company-minimum-prefix-length)
+(declare-function noema-agent-acp-start "noema-agent-acp" (&rest args))
+(declare-function noema-agent-acp-mark-session-buffer "noema-agent-acp" (buffer name agent directory))
+(declare-function agent-shell-cwd "agent-shell" ())
+(declare-function agent-shell--display-buffer "agent-shell" (buffer))
+(declare-function agent-shell--shutdown "agent-shell" ())
+(declare-function agent-shell--update-fragment "agent-shell" (&rest args))
+(declare-function agent-shell--emit-event "agent-shell" (&rest args))
+(declare-function agent-shell--finish-output "agent-shell" (&rest args))
+(declare-function agent-shell--start "agent-shell" (&rest args))
+(declare-function agent-shell--command-completion-at-point "agent-shell-completion" ())
+(declare-function agent-shell--trigger-completion-at-point "agent-shell-completion" ())
+(declare-function shell-maker-busy "shell-maker" ())
+(defvar-local my/agent-shell--requested-session-id nil
+  "ACP session ID requested by this frontend before session/load completes.")
+(defvar-local my/agent-shell--task-busy nil
+  "Non-nil when this frontend could not acquire its requested Codex task.")
+
+(defun my/agent-shell--session-context (directory)
+  "Return DIRECTORY's workspace and execution target as one logical identity.
+The Remote framework maps native, TRAMP and /fs: names to this identity."
+  (directory-file-name
+   (remote-canonicalize-file-name (expand-file-name directory))))
+
+(defun my/agent-shell-execution-live-p (buffer)
+  "Return non-nil when BUFFER still owns a live ACP execution process."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (and (derived-mode-p 'agent-shell-mode)
+              (let ((process (map-nested-elt agent-shell--state
+                                             '(:client :process))))
+                (and (processp process) (process-live-p process)))))))
+
+(defun my/agent-shell--find-execution (session-id config directory &optional exclude)
+  "Find a live frontend for SESSION-ID, CONFIG and DIRECTORY, except EXCLUDE.
+The ACP session ID is distinct from the Emacs buffer and OS process IDs."
+  (let ((context (my/agent-shell--session-context directory))
+        (agent (map-elt config :identifier)))
+    (seq-find
+     (lambda (buffer)
+       (and (not (eq buffer exclude))
+            (my/agent-shell-execution-live-p buffer)
+            (with-current-buffer buffer
+              (and (equal agent (map-nested-elt agent-shell--state
+                                                '(:agent-config :identifier)))
+                   (equal context (my/agent-shell--session-context default-directory))
+                   (equal session-id
+                          (or (map-nested-elt agent-shell--state '(:session :id))
+                              my/agent-shell--requested-session-id))))))
+     (buffer-list))))
+
+(defun my/agent-shell--reuse-session-a (original &rest args)
+  "Reuse a live matching ACP execution before ORIGINAL starts another process."
+  (let* ((session-id (plist-get args :session-id))
+         (existing (and (eq (map-elt (plist-get args :config) :identifier) 'codex)
+                        (stringp session-id)
+                        (my/agent-shell--find-execution
+                         session-id (plist-get args :config) (agent-shell-cwd)))))
+    (if existing
+        (progn
+          (unless (plist-get args :no-focus)
+            (agent-shell--display-buffer existing))
+          existing)
+      (let ((buffer (apply original args)))
+        (when (and (buffer-live-p buffer) (stringp session-id))
+          (with-current-buffer buffer
+            (setq-local my/agent-shell--requested-session-id session-id)
+            (add-hook 'kill-buffer-hook #'my/agent-shell--forget-session nil t)))
+        buffer))))
+
+(defun my/agent-shell--forget-session ()
+  "Forget the pending ownership claim when its frontend is destroyed."
+  (setq my/agent-shell--requested-session-id nil
+        my/agent-shell--task-busy nil))
+
+(defun my/agent-shell--task-busy-p (acp-error)
+  "Recognize a Codex task ownership conflict in ACP-ERROR.
+ACP has no standardized TASK_BUSY code.  Prefer a structured provider code
+when present; the exact Codex message is the isolated compatibility fallback."
+  (let* ((data (map-elt acp-error 'data))
+         (code (or (and (or (listp data) (hash-table-p data))
+                        (map-elt data 'code))
+                   (and (or (listp data) (hash-table-p data))
+                        (map-elt data 'errorCode))
+                   (map-elt acp-error 'code)))
+         (message (or (map-elt acp-error 'message)
+                      (and (or (listp data) (hash-table-p data))
+                           (map-elt data 'message))
+                      (and (stringp data) data))))
+    (or (member code '("TASK_BUSY" "task_busy" TASK_BUSY task_busy))
+        (and (stringp message)
+             (string-match-p
+              "Another Codex session is using this task\\.?" message)))))
+
+(defun my/agent-shell--handle-task-busy (buffer request)
+  "Stop BUFFER's failed acquisition of REQUEST and show a recoverable state."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (let* ((session-id (or (map-nested-elt request '(:params sessionId))
+                             my/agent-shell--requested-session-id
+                             (map-nested-elt agent-shell--state '(:session :id))))
+             (existing (and session-id
+                            (my/agent-shell--find-execution
+                             session-id (map-elt agent-shell--state :agent-config)
+                             default-directory buffer))))
+        (if existing
+            (progn
+              (agent-shell--display-buffer existing)
+              (kill-buffer buffer)
+              (message "Opened the existing Codex session in this Emacs"))
+          (setq-local my/agent-shell--task-busy 'external
+                      my/agent-shell--requested-session-id session-id)
+          ;; A failed client must not retain an idle ACP process or retry via
+          ;; agent-shell's generic resume-failure fallback to session/new.
+          (agent-shell--shutdown)
+          (agent-shell--update-fragment
+           :state agent-shell--state :block-id "task-busy"
+           :label-left "Task already active"
+           :body (format
+                  "Codex reports that another client owns this task.\nHost/workspace: %s\nSession: %s\nClose the owning client, then use M-x my/agent-shell-retry-task. This Emacs cannot attach to that client's process."
+                  (my/agent-shell--session-context default-directory)
+                  (or session-id "unknown"))
+           :create-new t :navigation 'never)
+          (agent-shell--emit-event
+           :event 'error :data '((:code . task-busy)
+                                  (:message . "Task active in another Codex client")))
+          (when (shell-maker-busy)
+            (agent-shell--finish-output :config shell-maker--config :success nil))
+          (message "Codex task is active in another client; see this buffer for retry"))))))
+
+(defun my/agent-shell--busy-request-a (original &rest args)
+  "Handle Codex TASK_BUSY without agent-shell's create-new fallback."
+  (let* ((request (plist-get args :request))
+         (method (map-elt request :method))
+         (state (plist-get args :state))
+         (buffer (or (plist-get args :buffer) (map-elt state :buffer)))
+         (on-failure (plist-get args :on-failure)))
+    (when (and (member method '("session/load" "session/resume" "session/prompt"))
+               (eq (map-nested-elt state '(:agent-config :identifier)) 'codex)
+               on-failure)
+      (setq args
+            (plist-put args :on-failure
+                       (lambda (acp-error raw-message)
+                         (if (my/agent-shell--task-busy-p acp-error)
+                             (progn
+                               ;; Noema's structured prompt owns a durable Run
+                               ;; receipt.  Let it finish that receipt, but do
+                               ;; not run agent-shell's resume/new fallback.
+                               (when (and (equal method "session/prompt")
+                                          (buffer-live-p buffer)
+                                          (with-current-buffer buffer
+                                            (and (boundp 'noema-agent-acp--prompt-receipt)
+                                                 (eq (plist-get
+                                                      noema-agent-acp--prompt-receipt
+                                                      :status)
+                                                     'pending))))
+                                 (funcall on-failure
+                                          '((code . "TASK_BUSY")
+                                            (message . "Task active in another client"))
+                                          raw-message))
+                               (my/agent-shell--handle-task-busy buffer request))
+                           (funcall on-failure acp-error raw-message))))))
+    (apply original args)))
+
+(defun my/agent-shell-retry-task ()
+  "Retry the Codex task after its other execution session has closed."
+  (interactive)
+  (unless (and (derived-mode-p 'agent-shell-mode)
+               (eq my/agent-shell--task-busy 'external)
+               my/agent-shell--requested-session-id)
+    (user-error "This buffer has no Codex task waiting for retry"))
+  (let ((session-id my/agent-shell--requested-session-id)
+        (config (map-elt agent-shell--state :agent-config))
+        (directory default-directory)
+        (old (current-buffer))
+        (origin (and (boundp 'noema-agent-acp-session-origin)
+                     noema-agent-acp-session-origin))
+        (name (and (boundp 'noema-agent-acp-session-name)
+                   noema-agent-acp-session-name))
+        (root (and (boundp 'noema-agent-acp-session-root)
+                   noema-agent-acp-session-root))
+        (logical-id (and (boundp 'noema-agent-promote--session-id)
+                         noema-agent-promote--session-id)))
+    (let* ((default-directory directory)
+           (new (if (and origin (fboundp 'noema-agent-acp-start))
+                    (noema-agent-acp-start :config config :directory directory
+                                           :session-id session-id :focus t
+                                           :origin origin)
+                  (agent-shell--start :config config :session-id session-id
+                                      :new-session t))))
+      (when (and name root (buffer-live-p new)
+                 (fboundp 'noema-agent-acp-mark-session-buffer))
+        (noema-agent-acp-mark-session-buffer
+         new name (format "%s" (map-elt config :identifier)) root)
+        (with-current-buffer new
+          (setq-local noema-agent-promote--session-id logical-id)))
+      (when (buffer-live-p old)
+        (kill-buffer old))
+      new)))
+
+(defun my/agent-shell--show-completion-after-insert ()
+  "Show advertised ACP slash commands after /, preserving @ completion."
+  (if (and (eq (char-before) ?/)
+           (bound-and-true-p company-mode)
+           (agent-shell--command-completion-at-point))
+      (company-manual-begin)
+    (agent-shell--trigger-completion-at-point)))
+
+(defun my/agent-shell-enable-command-completion ()
+  "Show ACP command suggestions in an agent-shell buffer after typing /."
+  (when (and (bound-and-true-p agent-shell-completion-mode)
+             (require 'company nil t))
+    ;; Only explicit @ and / triggers should open the menu in agent-shell.
+    (company-mode 1)
+    (setq-local company-backends '(company-capf)
+                company-idle-delay nil
+                company-minimum-prefix-length 0)
+    (remove-hook 'post-self-insert-hook
+                 #'agent-shell--trigger-completion-at-point t)
+    (add-hook 'post-self-insert-hook
+              #'my/agent-shell--show-completion-after-insert nil t)))
 
 (defun my/agent-shell-disable-transcripts ()
   "Disable automatic transcripts and save-on-close prompts for this agent."
@@ -170,6 +397,7 @@ agent sends must resolve against the session's target."
   ;; Apply to every entry point, including plain M-x agent-shell.
   (setq agent-shell-transcript-file-path-function nil)
   (add-hook 'agent-shell-mode-hook #'my/agent-shell-disable-transcripts)
+  (add-hook 'agent-shell-mode-hook #'my/agent-shell-enable-command-completion)
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer
       (when (derived-mode-p 'agent-shell-mode)
@@ -179,6 +407,8 @@ agent sends must resolve against the session's target."
   (advice-add 'agent-shell-cwd :filter-return #'my/agent-shell-process-directory)
   (setq agent-shell-path-resolver-function #'my/agent-shell-resolve-path)
   (advice-add 'agent-shell--on-request :around #'my/agent-shell-in-session-buffer-a)
+  (advice-add 'agent-shell--start :around #'my/agent-shell--reuse-session-a)
+  (advice-add 'agent-shell--send-request :around #'my/agent-shell--busy-request-a)
   ;; Every client (and agent-shell's early executable check) is made in the
   ;; agent's own buffer; give that buffer its workspace environment first.
   (advice-add 'agent-shell--make-acp-client :before
@@ -504,6 +734,8 @@ project's Pi and idle agents stop; a running Run finishes first."
 (with-eval-after-load 'gptel
   (require 'noema-interaction-engine-cli)
   (noema-interaction-engine-cli-register))
+
+(require 'noema-agent-bridge)
 
 (provide 'init-ai-ide)
 ;;; init-ai-ide.el ends here

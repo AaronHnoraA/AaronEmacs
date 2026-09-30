@@ -3363,7 +3363,13 @@ board must draw the whole plan, not its first cell."
   (declare (indent 1))
   `(let ((noema-pi-agent-directory (expand-file-name "pi-agent/" ,root))
          (noema-pi-credentials-file (expand-file-name "no-credentials/auth.json" ,root))
+         (noema-pi-codex-auth-file (expand-file-name "no-codex/auth.json" ,root))
          (noema-pi-model "")
+         (noema-pi-model-pool '("openai-codex/gpt-5.6-luna"
+                                "deepseek/deepseek-v4-flash"
+                                "openai-codex/gpt-5.6-sol"
+                                "openai-codex/gpt-6-astra"
+                                "anthropic/claude-sonnet-5"))
          (noema-pi-thinking-level "off"))
      ,@body))
 
@@ -3432,7 +3438,9 @@ board must draw the whole plan, not its first cell."
           (should (equal (gethash "defaultThinkingLevel" settings) "off"))
           (should (eq (gethash "enableSkillCommands" settings) :false))
           (should (equal (gethash "defaultProvider" settings) "anthropic"))
-          (should (equal (gethash "defaultModel" settings) "claude-haiku-4-5")))
+          (should (equal (gethash "defaultModel" settings) "claude-haiku-4-5"))
+          (should (equal (append (gethash "enabledModels" settings) nil)
+                         noema-pi-model-pool)))
         (should (string-match-p "session manager"
                                 (with-temp-buffer
                                   (insert-file-contents (expand-file-name "SYSTEM.md" noema-pi-agent-directory))
@@ -3445,6 +3453,87 @@ board must draw the whole plan, not its first cell."
         (let ((link (expand-file-name "auth.json" noema-pi-agent-directory)))
           (should (file-symlink-p link))
           (should (equal (file-truename link) (file-truename credentials))))))))
+
+(ert-deftest noema-pi-deploy-bridges-codex-login-without-changing-personal-pi-auth ()
+  (noema-research-test--with-directory root
+    (noema-pi-test--with-agent-directory root
+      (let* ((noema-pi-credentials-file (expand-file-name "home-pi/auth.json" root))
+             (noema-pi-codex-auth-file (expand-file-name "home-codex/auth.json" root))
+             (private (expand-file-name "auth.json" noema-pi-agent-directory))
+             (original "{\"deepseek\":{\"type\":\"api_key\",\"key\":\"test-key\"}}"))
+        (make-directory (file-name-directory noema-pi-credentials-file) t)
+        (make-directory (file-name-directory noema-pi-codex-auth-file) t)
+        (make-directory noema-pi-agent-directory t)
+        (write-region original nil noema-pi-credentials-file nil 'silent)
+        (write-region "{\"auth_mode\":\"chatgpt\",\"tokens\":{\"access_token\":\"test-token\"}}"
+                      nil noema-pi-codex-auth-file nil 'silent)
+        (write-region "{\"providers\":{\"anthropic\":{\"baseUrl\":\"https://example.test\"}},\"other\":true}"
+                      nil (expand-file-name "models.json" noema-pi-agent-directory) nil 'silent)
+        (noema-pi-deploy)
+        (should-not (file-symlink-p private))
+        (should (= (file-modes private) #o600))
+        (should (equal (noema-pi-router--credentials) "Codex CLI login"))
+        (should (equal (noema-pi-router--read-file noema-pi-credentials-file) original))
+        (let* ((auth (noema-research-parse-json (noema-pi-router--read-file private)))
+               (models (noema-research-parse-json
+                        (noema-pi-router--read-file
+                         (expand-file-name "models.json" noema-pi-agent-directory))))
+               (codex (gethash "openai-codex" (gethash "providers" models))))
+          (should (gethash "deepseek" auth))
+          (should-not (gethash "openai-codex" auth))
+          (should (eq (gethash "other" models) t))
+          (should (equal (gethash "baseUrl" (gethash "anthropic" (gethash "providers" models)))
+                         "https://example.test"))
+          (should (string-prefix-p "!" (gethash "apiKey" codex)))
+          (should-not (string-match-p "test-token" (noema-pi-router--read-file private)))
+          (should (equal (gethash "apiKey" codex) (noema-pi-router--codex-token-command))))
+        (let ((before (noema-pi-router--read-file private)))
+          (noema-pi-deploy)
+          (should (equal (noema-pi-router--read-file private) before)))))))
+
+(ert-deftest noema-pi-model-pool-default-and-saved-choice ()
+  (noema-research-test--with-directory root
+    (noema-pi-test--with-agent-directory root
+      (let ((settings-file (expand-file-name "settings.json" noema-pi-agent-directory)))
+        (let ((settings (noema-pi-router--settings settings-file)))
+          (should (equal (gethash "defaultProvider" settings) "openai-codex"))
+          (should (equal (gethash "defaultModel" settings) "gpt-5.6-luna")))
+        (make-directory noema-pi-agent-directory t)
+        (write-region "{\"defaultProvider\":\"deepseek\",\"defaultModel\":\"deepseek-v4-flash\"}"
+                      nil settings-file nil 'silent)
+        (let ((settings (noema-pi-router--settings settings-file)))
+          (should (equal (gethash "defaultProvider" settings) "deepseek"))
+          (should (equal (gethash "defaultModel" settings) "deepseek-v4-flash"))
+          (should (equal (append (gethash "enabledModels" settings) nil)
+                         noema-pi-model-pool)))))))
+
+(ert-deftest noema-pi-model-pool-switches-only-advertised-models ()
+  (with-temp-buffer
+    (setq-local noema-agent-acp-session-agent "pi")
+    (noema-pi-router-model-mode 1)
+    (let ((noema-pi-model-pool '("openai-codex/gpt-5.6-luna"
+                                 "deepseek/deepseek-v4-flash"
+                                 "openai-codex/gpt-5.6-sol"))
+          (current "openai-codex/gpt-5.6-luna")
+          selected)
+      (cl-letf (((symbol-function 'noema-agent-acp-available-model-ids)
+                 (lambda (&optional _) '("openai-codex/gpt-5.6-luna"
+                                         "deepseek/deepseek-v4-flash")))
+                ((symbol-function 'noema-agent-acp-current-model-id)
+                 (lambda (&optional _) current))
+                ((symbol-function 'noema-agent-acp-set-model)
+                 (lambda (model &optional _) (setq selected model current model))))
+        (noema-pi-cycle-model)
+        (should (equal selected "deepseek/deepseek-v4-flash"))
+        (noema-pi-cycle-model)
+        (should (equal selected "openai-codex/gpt-5.6-luna"))
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_prompt candidates &rest _)
+                     (should (equal candidates '("openai-codex/gpt-5.6-luna"
+                                                 "deepseek/deepseek-v4-flash")))
+                     "deepseek/deepseek-v4-flash")))
+          (noema-pi-select-model)
+          (should (equal selected "deepseek/deepseek-v4-flash")))))))
 
 (ert-deftest noema-pi-router-starts-one-pi-per-project-on-visit ()
   (noema-research-test--with-directory root
@@ -4027,7 +4116,9 @@ Idle time counts from the buffer's last change, not from its last display."
         (orphan (generate-new-buffer " *noema-orphan*")))
     (unwind-protect
         (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p)
-                   (lambda (buffer) (memq buffer (list named orphan)))))
+                   (lambda (buffer) (memq buffer (list named orphan))))
+                  ((symbol-function 'noema-sessions--execution-live-p)
+                   (lambda (buffer) (eq buffer named))))
           (with-current-buffer named
             (setq-local noema-agent-acp-session-name "baseline"
                         noema-agent-acp-session-root "/tmp/p/"))
