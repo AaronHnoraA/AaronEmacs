@@ -71,9 +71,14 @@ The bridge is intentionally local: it uses the already available
 `emacsclient` Unix socket, and ACP process placement remains in the Remote
 framework. There is no new SSH, TRAMP, or network service.
 
-The `/` menu in agent-shell shows only commands announced by the ACP adapter
-through `available_commands_update`. It does not copy CLI-only commands into
-ACP, and `@` completion continues through the existing path.
+The `/` menu in agent-shell shows commands announced by the ACP adapter through
+`available_commands_update`, plus the local `/resume` command. `/resume` uses
+the adapter's `session/list` for the current workspace, then reuses a live
+frontend or replaces the current Agent buffer with the selected native session
+ID in the same window. It is handled by Emacs and
+is never sent as a prompt. Codex and Claude adapters write their native session
+histories; Noema keeps a logical name and native ID rather than another copy
+of the transcript. `@` completion continues through the existing path.
 
 Protocol and implementation references:
 

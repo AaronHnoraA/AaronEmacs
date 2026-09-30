@@ -608,7 +608,11 @@ in-process 缓存，与自动刷新保持一致。
 - `C-c A p` — 把当前 agent-shell session 纳入 research
 - `C-c A x/v/B/f/@` — 把当前上下文、选区、buffer、文件、光标位置交给某个 agent
   会话；`C-c A ,` 先检视，`C-c A d` 只草拟不提交。`v/B/f/@` 只发送点名的那一段；每次都询问会话，
-  上次的选择预选（`noema-context-always-ask-session`）
+  只列运行中的 ACP 会话，本项目优先、上次仍运行的选择预选（`noema-context-always-ask-session`）
+- agent-shell 输入 `/resume` — 向当前 Codex/Claude 等 ACP adapter 读取同工作目录的原生
+  `session/list`，选中后以原生 ID 走 `session/load`/`session/resume`；已有 buffer 直接切换，
+  其他历史会话替换当前 Agent buffer、不增加 tab。Noema 已登记的 ID 恢复到原名。
+  原生历史由 agent 后端保存，不靠 Emacs transcript。
 - Noema Markdown 页面里没有 Emacs 文本：`C-c A v/B/@/./c/s/r` 和 `C-c A e` 经
   `noema-md-bridge` 让页面先保存并报告选区的准确位置，再在笔记的 Emacs 源 buffer
   上运行 gptel / agent UI；常用文本命令（`H-i`、`H-s`、复制粘贴、`C-x C-s` 等）在

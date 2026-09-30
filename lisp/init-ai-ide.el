@@ -175,6 +175,7 @@ agent sends must resolve against the session's target."
 (declare-function agent-shell--emit-event "agent-shell" (&rest args))
 (declare-function agent-shell--finish-output "agent-shell" (&rest args))
 (declare-function agent-shell--start "agent-shell" (&rest args))
+(declare-function agent-shell-restart "agent-shell" (&rest args))
 (declare-function agent-shell--command-completion-at-point "agent-shell-completion" ())
 (declare-function agent-shell--trigger-completion-at-point "agent-shell-completion" ())
 (declare-function shell-maker-busy "shell-maker" ())
@@ -373,6 +374,106 @@ when present; the exact Codex message is the isolated compatibility fallback."
       (company-manual-begin)
     (agent-shell--trigger-completion-at-point)))
 
+(defun my/agent-shell--resume-command-completion-a (original &rest args)
+  "Add the local /resume command to ORIGINAL's ACP slash completion."
+  (let* ((capf (apply original args))
+         (bounds (and (derived-mode-p 'agent-shell-mode)
+                      (agent-shell--completion-bounds "[:alnum:]_-" ?/)))
+         (start (and bounds (map-elt bounds :start))))
+    (if (and start (agent-shell-completion--command-start-p (1- start)))
+        (if capf
+            (append (list (nth 0 capf) (nth 1 capf)
+                          (cons "resume" (remove "resume" (nth 2 capf))))
+                    (nthcdr 3 capf))
+          (list start (map-elt bounds :end) '("resume")
+                :exclusive t
+                :annotation-function
+                (lambda (_) "  Resume a saved session")
+                :exit-function #'agent-shell--capf-exit-with-space))
+      capf)))
+
+(defun my/agent-shell--resume-from-list (source sessions)
+  "Pick one native conversation from SESSIONS and replace SOURCE with it."
+  (when (buffer-live-p source)
+    (let* ((state (buffer-local-value 'agent-shell--state source))
+           (current-id (map-nested-elt state '(:session :id)))
+           (sessions (agent-shell--sort-sessions-by-recency sessions))
+           (choices (mapcar
+                     (lambda (session)
+                       (let ((id (map-elt session 'sessionId)))
+                         (cons (format "%s  %s · %s"
+                                       (agent-shell--session-title session)
+                                       (agent-shell--format-session-date
+                                        (or (map-elt session 'updatedAt)
+                                            (map-elt session 'createdAt) ""))
+                                       id)
+                               id)))
+                     (seq-filter (lambda (session)
+                                   (let ((id (map-elt session 'sessionId)))
+                                     (and (stringp id)
+                                          (not (equal id current-id)))))
+                                 sessions)))
+           (config (map-elt state :agent-config))
+           (directory (buffer-local-value 'default-directory source))
+           (root (or (and (boundp 'noema-agent-acp-session-root)
+                          (buffer-local-value 'noema-agent-acp-session-root source))
+                     directory)))
+      (unless choices
+        (user-error "This agent has no other saved sessions in the current workspace"))
+      (let* ((selected (completing-read "Resume session: " choices nil t nil nil
+                                        (caar choices)))
+             (id (cdr (assoc selected choices)))
+             (live (my/agent-shell--find-execution id config directory)))
+        (with-current-buffer source
+          (when (equal (agent-shell--prompt-input) "/resume")
+            (agent-shell--clear-prompt-input)))
+        (if live
+            (progn (agent-shell--display-buffer live) live)
+          (let* ((old-name (buffer-name source))
+                 (binding (and (fboundp 'noema-sessions-native-binding)
+                               (noema-sessions-native-binding id root))))
+            ;; Upstream restart replaces the shell in its existing windows and
+            ;; resumes by native ID; it does not add another Agent tab.
+            (with-current-buffer source
+              (agent-shell-restart :session-id id))
+            (let ((target (or (get-buffer old-name)
+                              (user-error "Agent shell did not restart"))))
+              (when (and binding (fboundp 'noema-agent-acp-mark-session-buffer))
+                (noema-agent-acp-mark-session-buffer
+                 target (plist-get binding :name)
+                 (format "%s" (map-elt config :identifier)) root)
+                (with-current-buffer target
+                  (setq-local noema-agent-promote--session-id
+                              (plist-get binding :session-id))))
+              target)))))))
+
+(defun my/agent-shell-resume ()
+  "Choose an official ACP session of this agent and workspace to resume."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Open an agent-shell buffer before using /resume"))
+  (unless (map-elt agent-shell--state :supports-session-list)
+    (user-error "This agent does not support listing saved sessions"))
+  (let ((source (current-buffer)))
+    (agent-shell--list-sessions
+     :state agent-shell--state
+     :cwd (agent-shell--resolve-path (agent-shell-cwd))
+     :buffer source
+     :on-success (lambda (sessions)
+                   (my/agent-shell--resume-from-list source sessions))
+     :on-failure (lambda (error-object _raw)
+                   (message "Could not list saved sessions: %s"
+                            (or (and (listp error-object)
+                                     (map-elt error-object 'message))
+                                error-object))))))
+
+(defun my/agent-shell--submit-a (original &rest args)
+  "Run local /resume without submitting it as an agent prompt."
+  (if (and (derived-mode-p 'agent-shell-mode)
+           (equal (agent-shell--prompt-input) "/resume"))
+      (my/agent-shell-resume)
+    (apply original args)))
+
 (defun my/agent-shell-enable-command-completion ()
   "Show ACP command suggestions in an agent-shell buffer after typing /."
   (when (and (bound-and-true-p agent-shell-completion-mode)
@@ -409,6 +510,9 @@ when present; the exact Codex message is the isolated compatibility fallback."
   (advice-add 'agent-shell--on-request :around #'my/agent-shell-in-session-buffer-a)
   (advice-add 'agent-shell--start :around #'my/agent-shell--reuse-session-a)
   (advice-add 'agent-shell--send-request :around #'my/agent-shell--busy-request-a)
+  (advice-add 'agent-shell-submit :around #'my/agent-shell--submit-a)
+  (advice-add 'agent-shell--command-completion-at-point :around
+              #'my/agent-shell--resume-command-completion-a)
   ;; Every client (and agent-shell's early executable check) is made in the
   ;; agent's own buffer; give that buffer its workspace environment first.
   (advice-add 'agent-shell--make-acp-client :before
@@ -518,6 +622,7 @@ target-native path.  A CLI that cannot be found is an error."
 (autoload 'noema-sessions "noema-sessions" nil t)
 (autoload 'noema-sessions-switch "noema-sessions" nil t)
 (autoload 'noema-sessions-read "noema-sessions")
+(autoload 'noema-sessions-native-binding "noema-sessions")
 (autoload 'noema-agent-inbox "noema-agent-inbox" nil t)
 (autoload 'noema-agent-abtop "noema-agent-abtop" nil t)
 (autoload 'noema-context-send "noema-context" nil t)

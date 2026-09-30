@@ -1147,11 +1147,19 @@ agent-shell 自己写引用的格式），每个文件再附一个 `resource_lin
 `C-c A v` / `B` / `f` / `@` 只发送命令点名的那一段，不会顺带发出之前用
 `C-c A .` 攒下的共享 context；要发送攒下的全部内容用 `C-c A x`。
 
-每次发送都会询问目标会话，本项目上一次选的会话排在第一位并预选（没有时用上一次在
-任何项目里选的），直接 `RET` 即重复上次的选择；选单里也可以直接开一个新会话。
+每次发送都会询问目标会话，只列出 ACP 进程仍在运行的 agent-shell 会话，本项目
+优先；本项目上一次选的会话若仍在运行则排在第一位并预选，直接 `RET` 即重复选择。
+历史会话不会出现在发送菜单中；需要先在 agent-shell 输入 `/resume` 恢复会话。
+如果一个会话也没打开，先用 `C-c A a` 启动 agent。
 想恢复“静默复用上次会话、`C-u` 才重选”，把 `noema-context-always-ask-session`
 设为 nil。会话还在初始化就先排队；正在回答时走 agent-shell 自己的
 pending 队列。
+
+在 agent-shell 输入 `/resume` 并回车，会读取当前 agent、当前工作目录的原生
+ACP 会话列表，排除当前会话并按最近使用排序，然后选择要恢复的会话。已有活动 buffer 会直接
+切换到它；未打开的历史会话会替换当前 Agent 窗口中的 buffer，不增加新 tab。
+Noema 已登记的原生 session ID 会沿用原会话名。Codex 与 Claude 的会话
+历史由各自的官方后端保存，Noema 只登记名字与原生 ID，不复制 transcript。
 
 同一项目的 agent/session 以 tab 形式共用右下角一个 Agent 窗口；每个 tab 都是
 真正的 agent-shell buffer，可以直接输入、`C-c C-c` 中断。Noema Run 结束后会补回
