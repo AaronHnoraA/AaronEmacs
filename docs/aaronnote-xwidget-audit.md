@@ -1,5 +1,53 @@
 # Noema × xwidget Integration Audit
 
+## Wrapped figures and pane resizing (2026-10)
+
+The CM6 editor uses the outer xwidget host as its vertical scroller. A block
+replacement's **returned DOM border box** is authoritative for CM6's height
+map; setting `estimatedHeight = -1` or disabling the height cache does not
+remove that box from measurement. Returning a floated TikZ figure directly
+counted roughly 300 px that the following text did not actually move down,
+so clicks beside and below it resolved hundreds of pixels above the pointer.
+The stale height map also fed viewport restoration during typing.
+
+Wrapped TikZ and table block widgets now return a zero-height, in-flow
+`.cm-float-anchor` containing the floated figure. Their estimated block height
+is also zero. Observe the inner figure for width/height changes, without
+caching its height as a block contribution, and unregister that same inner
+node on teardown. Ordinary inline image floats retain their line container.
+TikZ DOM reuse updates source offsets on the inner figure, preserving its SVG.
+
+The optimal paragraph breaker uses the full `.cm-line` width, which is
+incorrect beside a float; native browser wrapping owns visible paragraphs
+while a wrapped figure is mounted. The editor observes actual host width
+changes and remeasures once per frame. The outer scrollbar keeps a stable
+gutter. Viewport restoration skips unchanged `scrollTop` **and** `scrollLeft`
+assignments, avoiding redundant writes that can wake WebKit's overlay bars.
+
+### Regression check
+
+`site-lisp/noema/scripts/check-wrapped-geometry.mjs` starts an isolated Vite
+fixture and checks Chromium and WebKit using Playwright. Install Playwright
+and its browser binaries in a test environment, then run from the Noema repo:
+
+```sh
+node scripts/check-wrapped-geometry.mjs
+```
+
+An external Playwright installation can be selected with
+`NOEMA_PLAYWRIGHT_MODULE=/absolute/path/to/playwright/index.mjs`; use
+`PLAYWRIGHT_BROWSERS_PATH` for externally installed browser binaries.
+The fixture contains no private note content and does not connect to Emacs.
+It checks native text rectangles against CM6 positions, real mouse clicks,
+Up/Down movement, typing, host width changes, and 125% zoom for left/right
+TikZ, image, and table wrapping. Typing samples scroll position, scroll writes,
+height transitions and figure DOM replacement; one natural line wrap is
+allowed, repeated height oscillation is not. Happy DOM unit tests alone cannot
+verify this geometry.
+
+Reload the xwidget (`M-x my/xwidget-reload`) after installing a renderer build;
+refreshing note content does not load the new JavaScript/CSS bundle.
+
 Audit of the full chain: Emacs (`init-aaronnote.el`) ↔ xwidget-webkit ↔ Node HTTP
 server (`web-host.mjs`) ↔ CodeMirror 6 app (`aaronnote/main.ts`, `src/cm6/`).
 
