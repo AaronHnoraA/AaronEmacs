@@ -208,7 +208,7 @@
     (interactive)
     (let* ((alpha (background-opacity-get-alpha))
            (next-alpha (cl-incf alpha (or n 1))))
-      (set-frame-parameter nil 'alpha-background next-alpha)))
+      (set-frame-parameter nil 'alpha next-alpha)))
 
   (defun background-opacity-dec-alpha ()
     (interactive)
@@ -216,10 +216,10 @@
 
   (defun background-opacity-set-alpha (alpha)
     (interactive "nSet to: ")
-    (set-frame-parameter nil 'alpha-background alpha))
+    (set-frame-parameter nil 'alpha alpha))
 
   (defun background-opacity-get-alpha ()
-    (pcase (frame-parameter nil 'alpha-background)
+    (pcase (frame-parameter nil 'alpha)
       ((pred (not numberp)) 100)
       (`,alpha alpha)))
 
