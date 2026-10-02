@@ -204,6 +204,24 @@ Noema 提交为 **`9676140`**，仅包含本轮 9 个文件。独立快照的 `m
 
 本轮 Noema 提交为 **`9c5396c`**。与提交树一致的独立快照通过 `make test`：**283 个通过文件、2,890 项通过、16 项跳过**；`make build`、临时目标安装规则、Go 全量测试、AaronEmacs research 424 项与 Jupyter 268 项均通过。完整字体下的 WebKit 滚动检查继续通过：持续可见行的文档坐标修正为向下 0、反向 0.36 px，正文行高采样不变；帧间隔第 95 百分位为 37 / 49 ms，源码模式 38 ms，只作为本机观测。图表生命周期脚本在同一快照通过。渲染器 242 个产物文件已安装并核对哈希，构建标识 **`1790943100455-e77a739c-e945-40d3-9df5-3eee659b5a92`**；另一会话的 5 MB 笔记修改未进入提交或构建。
 
+### 第九轮：逐功能补齐、内存生命周期与按键成本
+
+第九轮在前八轮之后，对三个项目剩余的编辑、页面与 UI 代码逐文件比对（Marker `src/` 全部、MarkText `packages/muya/src` 的 block/content、clipboard、selection、ui，files.md `web/editor.js` 与 `web/lib/` 的 keymap、table、fold-image、hide-token、click、autoscroll）。只移植交互语义，不复制源码，Markdown 仍是唯一文档模型。完整对照表见 Noema [`docs/marker-marktext-filesmd-study.md`](../site-lisp/noema/docs/marker-marktext-filesmd-study.md)。
+
+| 对照项目 | 采用的行为 |
+|---|---|
+| MarkText | 空列表项退出时保留空行，避免后续文字成为上一项的惰性续行；`Tab` 跳出行内格式（`ParagraphContent.tabHandler`）；表格单元格方向键、退格、`Mod-Enter`（`TableCellContent`）；矩形单元格选择与两段式删除（`TableRectSelection`、`clipboard/cut.ts`）；图片前后删除先选中（`Format.backspaceHandler`）；脚注悬停内容；块级 HTML 标签回车补全；空行 “Type /” 提示；块复制/删除 |
+| files.md | emoji 补全与渲染（`CompleteEmoji`）；`![](x.mp4)` 媒体播放（`fold-image.js`）；`Shift-Enter` 列表内换行（HyperMD `newline`） |
+| Marker | 表格整行/整列/整表选择删除（`tableShortcut.ts` 的 `DeleteCells`）；媒体 NodeView |
+
+同时修正两处与导出不一致的问题：编辑视图要求表格分隔行每格至少三个 `-`，`|-|:-:|` 显示为源码（GFM 与导出只要求一个）；`:name:` 在导出中渲染为 emoji 而编辑视图不渲染。
+
+**内存与生命周期**（happy-dom、强制 GC 后的堆）：打开 5 MB 夹具约 +80 MB；1,200 次按键在 200 步撤销深度后持平；40 篇笔记间 1,200 次 `setMarkdown` 切换（含输入与源码切换），编辑器自身对象不增长，残余增长经堆快照定位为 happy-dom 的样式缓存。`destroy()` 后 CM6 模块级 `scratchRange` 在 happy-dom 中保留最后一个视图，原因是 happy-dom 不在节点移除时更新 live Range（WebKit 会更新）。修复：内核重启后旧 ipywidgets manager 通过 `window` resize 监听常驻；Jupyter 页 1 s 计时器在空闲时持续唤醒；每单元格运行状态、每文件 kernel 列表、光标位置记忆在长寿命 pane 中无上限。空闲编辑器 3 s 内不调度任何定时器或动画帧。
+
+**按键成本**（中位数，120 次按键）：120 KB 笔记 4.3 → 2.2 ms（p95 5.8 → 3.7 ms），原因是块拖拽 gutter 每次编辑都为每个可见标题扫描整节，仅为判断是否禁用；TOC 签名改为按需计算。5 MB 笔记开头 17.8 → 16.6 ms；末尾约 50 ms，其中约 70% 为 Lezer 重平衡约 10 万个顶层块的扁平 Document 节点，属解析器本身成本。
+
+本轮 Noema 提交为 `16f9c5f` 至 `730f19a`（17 个）。锁定 Node 26.5.0 / npm 11.17.0 后 `make test`：**294 个文件、2,965 项通过、16 项跳过**；`make build`（渲染器 + Go 内核）通过，渲染器直接构建到 Emacs 指向的 `dist/aaronnote`，构建标识 **`1790947588038-2a5f392d-003f-439d-9b89-bdb1f59c7c93`**。本轮未运行无界面 WebKit 滚动与图表脚本，WebKit 下的 live Range 行为按规范推断，未实测。
+
 ### 第一、二轮验证记录
 
 新增/更新测试：`tests/cm6/format-toggle.test.ts`、`tests/cm6/paste-context.test.ts`、`tests/cm6/code-block-input.test.ts`、`tests/cm6/history-grouping.test.ts`、`tests/cjk-emphasis.test.ts`、`tests/live-preview-range-reveal.test.ts`、`tests/editor-line-endings.test.ts`、`tests/save-drain.test.ts`、`tests/find.test.ts`、`tests/system-clipboard.test.ts`。Noema 全量 `npm test`：277 个测试文件、2,788 个测试全部通过；`tsc --noEmit` 无新增错误。
