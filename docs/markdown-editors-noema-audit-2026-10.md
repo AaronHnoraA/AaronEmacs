@@ -116,6 +116,10 @@
 
 本轮 Noema 提交为 `243f9ec`。串行全量测试为 **278 个通过文件、2831 项通过、16 项跳过**；`tsc --noEmit` 通过。只含本轮暂存改动的独立快照 `make build` 成功（渲染器与 Go 内核），其渲染器已安装到 Emacs 使用的 `dist/aaronnote`，构建标识为 `1790931170929-28ce5334-bbf4-4bef-a149-1eba2b093d3d`。
 
+进一步拆分 5 MB 文档的编辑提交：最小 CM6 约 3 ms，分别加入公式或目录索引约 5 ms，完整 Noema 约 83 ms。剖析后修正三处：普通正文的单行输入先排除与有序列表无关的解析；视口预览只合并与视口相交的公式范围；在最后一个公式之后编辑普通文字且没有新分隔符时直接复用公式索引。相同提交探针降到约 **50 ms**；通过宿主与原生共用的 `runEditorTextInput` 测得约 **48 ms**。剩余耗时主要见于 CM6 的语法解析预算和装饰比较，仍是 happy-dom 诊断数据。对照四项目时，沿用 files.md 的当前行/可见渲染范围更新及 MarkText 的块内操作思路；MarkWright 的 120 ms 全量双栏预览节流、Marker 的 ProseMirror 文档更新各有自身模型，Noema 以已有输入合并策略承接其行为。
+
+这三处追加优化提交为 Noema `08ca3b2`。类型检查与串行全量测试通过：**278 个通过文件、2835 项通过、16 项跳过**；列表结构插入、引用内数字修正、尾部编辑复用公式索引及新增公式都有回归断言。独立快照 `make build` 成功，渲染器已安装，构建标识更新为 `1790932450001-365cfccf-925b-4503-86c8-db74e1e62223`。
+
 新增/更新测试：`tests/cm6/format-toggle.test.ts`、`tests/cm6/paste-context.test.ts`、`tests/cm6/code-block-input.test.ts`、`tests/cm6/history-grouping.test.ts`、`tests/cjk-emphasis.test.ts`、`tests/live-preview-range-reveal.test.ts`、`tests/editor-line-endings.test.ts`、`tests/save-drain.test.ts`、`tests/find.test.ts`、`tests/system-clipboard.test.ts`。Noema 全量 `npm test`：277 个测试文件、2,788 个测试全部通过；`tsc --noEmit` 无新增错误。
 
 第二轮提交为 Noema `e472254`，只含编辑器相关 18 个文件；与 LaTeX 导出、research-memory 等并行会话的未提交改动分开。锁定 Node 26.5.0 / npm 11.17.0 后，串行全量测试 **277 个文件、2,826 项通过、16 项跳过**；同一提交树的独立快照 `make build` 成功（渲染器 + Go 内核），并已将该快照的渲染器产物安装到 Emacs 指向的 `dist/aaronnote`。并行全量运行中各有一次独立的性能计时断言超阈值（链接解析比值 3.014 对 3.0；5,143 标题输入第 95 百分位 9.81 ms 对当次动态阈值 6.86 ms）；两项单独复跑分别为 1.96 倍和 3.95 ms，串行全量亦通过。未调整测试阈值，也未把这些并行负载波动记为功能通过的证据。
