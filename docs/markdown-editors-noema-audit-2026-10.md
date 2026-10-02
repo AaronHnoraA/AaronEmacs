@@ -170,6 +170,23 @@ Noema 提交为 **`9676140`**，仅包含本轮 9 个文件。独立快照的 `m
 
 追加提交为 **`9d9b2ac`**。与提交树一致的独立快照 `make test` 通过：**281 个通过文件、2,876 项通过、16 项跳过**；类型检查、`make build` 和临时安装规则通过。真实页面函数的 WebKit 检查通过。最终渲染器已安装，242 个产物文件哈希与快照一致，构建标识 **`1790940680571-27fe0b2a-df07-43a6-bbd6-696c53622dc9`**。它包含前述滚动修复。
 
+### 第七轮：图片与嵌入页面的持续性
+
+复查图片生命周期，先用回归测试复现四个问题：图片前输入普通文字，120 ms 合并输入结束后会新建 `<img>` 或 `<iframe>`；合并输入期间控件仍持有旧源码位置，点击对齐会失效；相同图片的不同宽度、标题共用一个精确高度缓存；取消拖拽缩放只恢复 width，没有恢复 max-width。
+
+现在图片内容、尺寸和解析后的资源地址不变时，只更新源码位置，保留已有媒体 DOM。合并输入期间同步映射可见图片的位置元数据，图片控件、源码点击和附件打开均能读到新位置；若编辑本身碰到图片源码，则立即重建该视口的图片装饰。尺寸改变和资源地址改变仍会刷新。高度缓存区分解析后的资源地址、完整 caption 和 layout，组估计也区分宽高；取消拖拽恢复原来的宽度约束。
+
+| 对照项目 | 本轮核对的实现与采用边界 |
+|---|---|
+| MarkText | [`loadImageAsync.ts`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/inlineRenderer/renderer/loadImageAsync.ts) 按资源保存加载状态和天然尺寸，[`image.ts`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/inlineRenderer/renderer/image.ts) 在渲染时另行应用当前尺寸。资源相同与渲染高度相同是两回事；Noema 修复后者的缓存键，未照搬其资源加载器。 |
+| Marker | [`Image.tsx`](https://github.com/tk04/Marker/blob/b878afcb2c8895702cacce2613f9081d3682ddc7/src/components/Editor/NodeViews/Image/Image.tsx) 以图片节点属性驱动 React NodeView，资源解析 effect 依赖 src。Noema 用 CM6 的 `updateDOM` 保留内容未变的媒体元素。 |
+| files.md | [`fold-image.js`](https://github.com/zakirullin/files.md/blob/9e948ba6071e320c41c866f92817cf96f9bb7ba6/web/lib/fold-image.js) 通过 CM5 marker 持有媒体，load/error 调用 `marker.changed()`；核对了“媒体加载只通知测量”的职责，未引入其灯箱。 |
+| MarkWright | [`useImageArchive.ts`](https://github.com/okazaki112/MarkWright/blob/18a0b28e4b409814db80289952ba37f8b7932a31/src/composables/useImageArchive.ts) 负责归档并插入相对路径，未提供 CM6 富预览的图片生命周期方案；本轮不改附件归档语义。 |
+
+[`image-interaction.test.ts`](../site-lisp/noema/tests/cm6/image-interaction.test.ts) 的 7 项回归覆盖上述问题，以及更改图片源码、切换笔记基址。[`check-image-stability.mjs`](../site-lisp/noema/scripts/check-image-stability.mjs) 在无界面 WebKit 中验证：嵌入页输入未保存内容后，在它上方连续打字并等待每次装饰重建，图片和 iframe 元素保持同一实例，输入内容保留，两者的网络请求均保持 1 次；输入后立即点击图片对齐，也只修改当前图片的属性。这是实际浏览器生命周期检查，未将其等同于物理滚轮手感测试。
+
+本轮提交 **`70c5f3a`**。同一暂存树的独立快照通过 `make test`（**282 个通过文件、2,883 项通过、16 项跳过**）、`make build` 和临时安装规则；Go 全量、AaronEmacs research 424 项、Jupyter 268 项通过。完整字体下的 WebKit 滚动检查保持通过：持续可见行的文档坐标修正为向下 0、反向 0.36 px，正文行高采样保持不变；帧间隔第 95 百分位为 38 / 46 ms，源码模式 36 ms，仅作本机观测。图片生命周期脚本也在该快照复验通过。渲染器 242 个产物文件已安装并核对哈希，构建标识 **`1790941862252-e91df193-8946-4155-873b-d668cd7ebf8e`**；另一会话的 5 MB 笔记修改未进入提交或构建。
+
 ### 第一、二轮验证记录
 
 新增/更新测试：`tests/cm6/format-toggle.test.ts`、`tests/cm6/paste-context.test.ts`、`tests/cm6/code-block-input.test.ts`、`tests/cm6/history-grouping.test.ts`、`tests/cjk-emphasis.test.ts`、`tests/live-preview-range-reveal.test.ts`、`tests/editor-line-endings.test.ts`、`tests/save-drain.test.ts`、`tests/find.test.ts`、`tests/system-clipboard.test.ts`。Noema 全量 `npm test`：277 个测试文件、2,788 个测试全部通过；`tsc --noEmit` 无新增错误。
