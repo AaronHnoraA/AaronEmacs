@@ -160,6 +160,16 @@ Noema 提交为 **`9676140`**，仅包含本轮 9 个文件。独立快照的 `m
 
 本轮提交为 **`d621e43`**。与该提交树一致的独立快照通过 `make test`：**280 个通过文件、2,870 项通过、16 项跳过**；`make build`、临时目标安装规则、Go 全量测试均通过。AaronEmacs 的 research 回归 424 项、Jupyter 回归 268 项通过。渲染器已安装到 `dist/aaronnote`，242 个产物文件的哈希与构建快照一致；构建标识 **`1790939658211-7dfe87dc-4fa0-4377-9603-994fe4624b9b`**。另一会话的 5 MB 测试笔记修改未纳入提交或构建。
 
+#### 追加：Company 补全与公式预览按实际位置共存
+
+用户截图指出，即使两窗没有覆盖，补全也会关掉公式预览。复查发现 `showSnippetPopup` 直接调用 `hideMathPreview`，`updateMathPreview` 又以补全可见为条件提前退出，形成无条件互斥。现在两处都移除这条条件，保留视觉公式编辑器本身的重复预览保护。
+
+[`preview-placement.ts`](../site-lisp/noema/aaronnote/preview-placement.ts) 只在实际矩形重叠时寻找视口内附近的位置，同时避开正在编辑的源码行带；补全菜单的位置和键盘焦点不变。若窗口小到没有空位，预览只设为不可见，继续保留公式会话；菜单关闭或移开后立即恢复。异步公式渲染改变尺寸、菜单重新定位、预览报错回退都走同一套避让。
+
+6 个几何用例覆盖宽屏不重叠、上下/左右避让、无空间恢复及异步尺寸变化。另有 [`scripts/check-math-completion.mjs`](../site-lisp/noema/scripts/check-math-completion.mjs)：在无界面 WebKit 中加载实际 `main.ts`，仅为测试附加私有函数入口并提供空宿主桥，不打开或保存用户笔记。验证补全先出现与预览先出现两种顺序、真实 DOM 矩形互不覆盖、400×220 小视口的暂时隐藏和关闭菜单后的会话恢复。这是实际渲染器逻辑的浏览器检查，仍不等同于 Emacs 现场输入法测试。
+
+追加提交为 **`9d9b2ac`**。与提交树一致的独立快照 `make test` 通过：**281 个通过文件、2,876 项通过、16 项跳过**；类型检查、`make build` 和临时安装规则通过。真实页面函数的 WebKit 检查通过。最终渲染器已安装，242 个产物文件哈希与快照一致，构建标识 **`1790940680571-27fe0b2a-df07-43a6-bbd6-696c53622dc9`**。它包含前述滚动修复。
+
 ### 第一、二轮验证记录
 
 新增/更新测试：`tests/cm6/format-toggle.test.ts`、`tests/cm6/paste-context.test.ts`、`tests/cm6/code-block-input.test.ts`、`tests/cm6/history-grouping.test.ts`、`tests/cjk-emphasis.test.ts`、`tests/live-preview-range-reveal.test.ts`、`tests/editor-line-endings.test.ts`、`tests/save-drain.test.ts`、`tests/find.test.ts`、`tests/system-clipboard.test.ts`。Noema 全量 `npm test`：277 个测试文件、2,788 个测试全部通过；`tsc --noEmit` 无新增错误。
