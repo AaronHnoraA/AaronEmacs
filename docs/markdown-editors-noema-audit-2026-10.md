@@ -122,6 +122,23 @@
 
 第四轮回查发现局部解析加速的语义回归：Markdown 的粗体、行内代码和链接可以跨**同一段落**的软换行，逐行解析却把第二行视作普通文本。在 `**first\nsecond**` 第二行取消粗体会插入四个星号，在 `` `first\nsecond` `` 内按粗体会插入字面星号，在 `[first\nsecond](url)` 内按链接会嵌套新链接。MarkText 的 [`format.ts:1681-1715`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/block/base/format.ts#L1681-L1715) 从当前块的完整 token 范围取得格式；files.md 的 [`markdown.js:466-477`](https://github.com/zakirullin/files.md/blob/9e948ba6071e320c41c866f92817cf96f9bb7ba6/web/lib/markdown.js#L466-L477) 在续行保留代码段状态。Marker 的链接命令扩展到整个链接 mark；MarkWright 的简单源码包裹没有这个识别层。Noema 现在优先复用 CM6 已解析的文档树，未解析到的大文档位置只解析当前块和段落续行，按不可变文档缓存局部树。链接命令可取消或改址跨行链接，也允许为同一段落的软换行创建链接；跨空行仍拒绝。局部树从代码围栏内部起步时会缺少开围栏，因此格式状态额外用代码块边界排除字面标记。引用和列表续行、5 MB 文档尾部都有回归测试。实现见 [`languages/markdown/index.ts`](../site-lisp/noema/src/cm6/languages/markdown/index.ts)、[`inline-format.ts`](../site-lisp/noema/src/cm6/inline-format.ts) 和 [`commands/index.ts`](../site-lisp/noema/src/cm6/commands/index.ts)。类型检查和串行全量测试通过：**278 个通过文件、2841 项通过、16 项跳过**。5 MB 文档尾部的单次诊断测量：首次跨行格式状态查询约 **27 ms**，缓存后约 **0.1 ms**；取消粗体和链接各约 **74–81 ms**（含 CM6 编辑提交），均为 happy-dom 计时，不代表实际 WebKit 帧预算。Noema 提交 `9bb4a75`；独立快照 `make build` 成功，渲染器已安装到 `dist/aaronnote`，构建标识 `1790933782161-67e51505-a97e-49c0-be55-563cf72bda31`。
 
+### 第五轮：跨块格式的可逆性与表格编辑成本
+
+这一轮同时检查“操作一次”“再按一次取消”“下一步继续编辑”三种状态。MarkText 的 [`muya.ts:401-535`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/muya.ts#L401-L535) 通过 `_formatAcrossBlocks` / `_formatLeafInRange` 处理各个可格式化叶块，保留选区端点并避开标题标记；Marker 用节点和 mark 状态表达格式；files.md 的 [`keymap.js:515-580`](https://github.com/zakirullin/files.md/blob/9e948ba6071e320c41c866f92817cf96f9bb7ba6/web/lib/keymap.js#L515-L580) 结合 token 状态包装选区；MarkWright 的简单字符串包装适用于单次操作，但没有完整的已有格式识别。Noema 本轮采用 MarkText 的叶块处理语义，并继续直接修改 Markdown 源码。
+
+- **多行格式可以取消**：两个列表项同时加粗后，再按粗体会移除两项的标记；工具栏能识别整段已经加粗。同一段落的软换行只使用一对粗体、斜体、删除线或代码标记，避免逐行包裹留下不能正确切换的组合。
+- **混合选区保留结构**：选区穿过正文、代码块、表格和分隔线时，只格式化段落、标题文字和表格单元格，跳过代码内容及结构标记。已有粗体与普通文字混选时先统一加粗，再按一次统一取消。反向选区保留方向。这里验证的是上述块类型，没有把结果推广到所有自定义环境。
+- **标题链接只覆盖标题文字**：Lezer 的标题节点名带级别，原有节点识别遗漏这些名字；现在 ATX 与 Setext 标题都能建立链接，开头及结尾的 `#`、Setext 下划线留在链接外。
+- **大文档尾部使用完整上下文**：局部解析表格行时带上相邻表格行，使表头和分隔行参与语法判定；选区从代码围栏内部跨到正文时，先补齐围栏上下文，清除格式不会误删代码里的字面星号。5 MB 尾部场景已有回归断言。
+- **表格编辑复用单元格**：同尺寸表格的文字或对齐变化更新已有单元格；增删行列时重建，保证新单元格获得输入和导航处理器。默认 MarkdownIt 实例只配置一次，各次渲染保持独立的 token/env；显式渲染选项仍使用独立实例，引用、脚注和 HTML 选项隔离有测试。
+- **后续操作定位当前表格**：在表格前插入文字后，再增行或提交单元格内容，旧闭包偏移可能覆盖正文。写入现在从当前 DOM 与文档表格索引重新取得范围。编辑或 Escape 恢复预览后，行列拖拽柄继续保留。
+
+性能诊断使用 100 行和 1,000 行的合成表格，把格式变换准备与编辑器提交分别计时。1,000 行整表格式操作的提交从约 **5,416 ms** 降至 **555 ms**，取消格式的提交从约 **5,123 ms** 降至 **468 ms**；100 行提交从约 **445 ms** 降至 **72 ms**。优化后，1,000 行表格中单格格式操作约 **33 ms**，直接编辑单元格后的提交约 **39 ms**。主要减少了每格重新配置 MarkdownIt 和每次提交重建整表的成本。以上是 happy-dom 单次诊断数据，**不是实际 Emacs/WebKit 的帧时间**；整表大范围格式操作仍有可见成本，不能据此声称所有大表格操作都已流畅。
+
+行为回归位于 `format-toggle.test.ts`、`large-document-format.test.ts`、`roundtrip.test.ts` 和 `render-html.test.ts`。工作区串行全量测试通过：**278 个通过文件、2,856 项通过、16 项跳过**；只含本轮暂存改动的独立快照也通过完整测试：**278 个通过文件、2,847 项通过、16 项跳过**。两者数量差来自其他会话的未提交测试。快照首次测试因 Vite 不允许读取外部链接的依赖目录、`resources/snippets` 相对链接在临时目录失效而失败；补充快照的依赖访问路径并指向规范 snippets 目录后，全量重跑通过，没有调整源码或测试阈值。
+
+Noema 提交为 **`9676140`**，仅包含本轮 9 个文件。独立快照的 `make build`（含类型检查及 Go 构建）、临时目标路径的安装规则检查、`go test -tags fts5 ./...` 均通过；AaronEmacs 的 `make research-test` 424 项、`make jupyter-test` 268 项也通过。安装时发现当前渲染器已经包含另一会话部署的 LaTeX 任务干预按钮和 TikZ 主题修正，因此另建渲染器快照，保留那 7 个前端文件的现有修改，再合入本轮已验证文件。该组合构建通过，源码哈希及安装前构建标识均核对，产物逐文件哈希与安装目录一致。渲染器已安装到 `dist/aaronnote`，构建标识 **`1790936910247-7b0be450-f00c-4464-87ac-90f85a8ecb31`**；其他会话的修改未纳入本轮代码提交。没有把这些 DOM 测试当作真实 Emacs/WebKit 交互验收。
+
 新增/更新测试：`tests/cm6/format-toggle.test.ts`、`tests/cm6/paste-context.test.ts`、`tests/cm6/code-block-input.test.ts`、`tests/cm6/history-grouping.test.ts`、`tests/cjk-emphasis.test.ts`、`tests/live-preview-range-reveal.test.ts`、`tests/editor-line-endings.test.ts`、`tests/save-drain.test.ts`、`tests/find.test.ts`、`tests/system-clipboard.test.ts`。Noema 全量 `npm test`：277 个测试文件、2,788 个测试全部通过；`tsc --noEmit` 无新增错误。
 
 第二轮提交为 Noema `e472254`，只含编辑器相关 18 个文件；与 LaTeX 导出、research-memory 等并行会话的未提交改动分开。锁定 Node 26.5.0 / npm 11.17.0 后，串行全量测试 **277 个文件、2,826 项通过、16 项跳过**；同一提交树的独立快照 `make build` 成功（渲染器 + Go 内核），并已将该快照的渲染器产物安装到 Emacs 指向的 `dist/aaronnote`。并行全量运行中各有一次独立的性能计时断言超阈值（链接解析比值 3.014 对 3.0；5,143 标题输入第 95 百分位 9.81 ms 对当次动态阈值 6.86 ms）；两项单独复跑分别为 1.96 倍和 3.95 ms，串行全量亦通过。未调整测试阈值，也未把这些并行负载波动记为功能通过的证据。
