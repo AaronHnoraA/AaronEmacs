@@ -220,7 +220,7 @@ Noema 提交为 **`9676140`**，仅包含本轮 9 个文件。独立快照的 `m
 
 **按键成本**（中位数，120 次按键）：120 KB 笔记 4.3 → 2.2 ms（p95 5.8 → 3.7 ms），原因是块拖拽 gutter 每次编辑都为每个可见标题扫描整节，仅为判断是否禁用；TOC 签名改为按需计算。5 MB 笔记开头 17.8 → 16.6 ms；末尾约 50 ms，其中约 70% 为 Lezer 重平衡约 10 万个顶层块的扁平 Document 节点，属解析器本身成本。
 
-本轮 Noema 提交为 `16f9c5f` 至 `2b82d10`。锁定 Node 26.5.0 / npm 11.17.0 后 `make test`：**294 个文件、2,965 项通过、16 项跳过**；`make build`（渲染器 + Go 内核）通过，渲染器直接构建到 Emacs 指向的 `dist/aaronnote`，构建标识 **`1790947588038-2a5f392d-003f-439d-9b89-bdb1f59c7c93`**。本轮未运行无界面 WebKit 滚动与图表脚本，WebKit 下的 live Range 行为按规范推断，未实测。
+本轮 Noema 提交为 `16f9c5f` 至 `2b82d10`。锁定 Node 26.5.0 / npm 11.17.0 后 `make test`：**294 个文件、2,965 项通过、16 项跳过**；`make build`（渲染器 + Go 内核）通过，渲染器直接构建到 Emacs 指向的 `dist/aaronnote`，构建标识 **`1790947588038-2a5f392d-003f-439d-9b89-bdb1f59c7c93`**。同一提交树的浏览器脚本通过：`check-rich-scroll`（帧间隔第 95 百分位 39 / 48 ms，源码模式 38 ms，可见行坐标修正为向下 0、反向 0.36 px）、`check-image-stability`、`check-diagram-stability`、`check-math-completion` 与 `check-wrapped-geometry`（WebKit/Chromium 均无滚动与高度跳变）。无界面 WebKit 中实测：删除节点后 live Range 移到父节点，因此 CM6 的 `scratchRange` 不会在 Emacs pane 中保留已销毁的编辑器。
 
 ### 第一、二轮验证记录
 
