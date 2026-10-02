@@ -60,6 +60,24 @@
 - 查找面板默认智能大小写；替换行默认隐藏，`⇄` 打开；`Enter` 替换当前并跳下一个。
 - 标题/列表切换保留光标在原文字上（MarkText `_withPreservedOffset`），不再跳到行尾。
 
+### 第二轮：按按键、落点和可见反馈复查
+
+第一轮的功能测试偏重“命令执行后文本是什么”。第二轮把**光标落点、下一次按键、跨容器边界、内容是否仍可见**也纳入断言。以下是具体实现判断；对照仍是上表锁定的三个提交。
+
+| 场景与原有问题 | 三项目的实现对照 | Noema 的边界与反馈 |
+| --- | --- | --- |
+| 标题位于引用或列表内时，标题命令把外层 `>` / `- ` 当正文；标题内容起点 Enter 降成段落，Backspace 留下 `#Title` | MarkText [`muya.ts:1213-1329`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/muya.ts#L1213-L1329) 在所属块内变换；[`atxHeadingContent:33-75`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/block/content/atxHeadingContent/index.ts#L33-L75) 的 Enter 保留标题、Backspace 退成段落。Marker 的 ProseMirror 节点命令不能直接用于源码。 | `block-format.ts` 先解析引用/列表容器，只改其中 `#`；`insertLineBeforeHeading` 在标题前插入空行，引用中的空行保留 `>`；`deleteHeadingMarkerBackward` 一次删完整标记。测试在 `format-toggle.test.ts`。 |
+| 列表中间转换类型时只改选中行，列表被拆开；任务项退格一次删掉任务框和列表两层 | MarkText [`_convertListType`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/muya.ts#L1641-L1685) 作用于整组同级项；files.md 的 HyperMD 保留文本模型。 | `siblingListItems` 沿同一引用深度、缩进和标记族查找同级项，跨过嵌套项及宽松列表空行；任务项 Backspace 先删 `[ ] `，下次才退出列表。成员判断用集合，避免大选区逐项线性查找形成二次开销。 |
+| 行尾 Delete 把下一标题/任务/引用的隐藏标记并成可见文字，如 `para- item` | MarkText [`Format.deleteHandler`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/block/base/format.ts#L1526-L1575) 合并块的文本内容。 | `deleteForwardJoinBlock` 只剥下一行的块前缀；代码围栏、表格行、公式边界保持原块结构。普通段落仍走 CM6 的逐字素删除。 |
+| 表格 Tab/Enter 到有内容的格子后光标只停在开头，必须手动全选才能覆盖 | files.md [`tableEnterCell`](https://github.com/zakirullin/files.md/blob/9e948ba6071e320c41c866f92817cf96f9bb7ba6/web/lib/table.js#L414-L445) 选中目标格非空内容，空格落在内边距；Marker 的表格节点也以格子为导航单位。 | `cellTarget` 计算去掉内边距后的范围，Tab/Enter 选中非空格内容；空格给出插入点。下次输入直接覆盖旧值，方向键/点击仍能定位单个字符。 |
+| 在文档最后的表格/围栏/公式块按 ↓ 后输入，会接到末行源码上；最初修复只凭末行正则，误把单独的 `\| a \| b \|` 当表格，也会抢走长行内的正常向下移动 | MarkText [`Content.arrowHandler`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/block/base/content.ts#L478-L555) 在视觉底部且无后继块时创建尾段落；files.md 保持源码行导航。 | `openLineAfterTrailingBlock` 只在**文档真正末尾的空选区**触发；表格看 Lezer `Table` 节点，围栏要求成对闭合，`\]` 要有对应的公式范围。普通管道文本和未闭合开围栏不劫持方向键，重复按 ↓ 不会不断追加空行。 |
+| 编辑独占一行的图片源码时图片消失，页面高度收缩；粘贴截图显示 `image-1.png` 伪说明 | files.md [`hide-token.js:276-289`](https://github.com/zakirullin/files.md/blob/9e948ba6071e320c41c866f92817cf96f9bb7ba6/web/lib/hide-token.js#L276-L289) 只因光标揭露标记；MarkText 图片保留可见预览并以空 alt 插入。 | 图片独占一行时源码出现、图片留在下方；行内图片只出现源码，避免破坏句内排版。粘贴或拖入图片写 `![](...)`，附件仍用文件名作链接文字。图片 `alt` 与可见说明目前同源；为截图提供可访问的描述而不显示伪说明，需要单独设计图片说明输入。 |
+| 选区工具栏点击粗体后消失；代码块里点击格式按钮无反馈；跨链接边界加粗会把链接源码截断 | Marker [`Menu.tsx:19-96`](https://github.com/tk04/Marker/blob/b878afcb2c8895702cacce2613f9081d3682ddc7/src/components/Editor/Menu.tsx#L19-L96) 用 `isActive` 显示状态；MarkText 持续显示格式栏、按 token 边界改格式。 | 保持文字选中时工具栏继续显示并刷新 `aria-pressed`；代码块里禁用无效按钮；选区端点落在链接、图片、行内代码或公式里时先扩到完整节点。格式切换按区间循环求首尾位置，避免数万节点时 `Math.min(...spans)` 参数溢出。 |
+| 查找面板打开后编辑文档，计数与跳转还用旧偏移；单个替换 `a→aa` 到文末时又绕回新插入的 `aa` | MarkText 搜索在内容变化后重算；Marker 的查找 UI 由编辑器状态管理。 | 文档变化标记匹配过期、180 ms 停顿后重算且不移动光标；按导航或替换前立即重算。替换只走到本轮文末，随后停在 `–/N`，明确按导航才开始新一轮，避免连续 Enter 不断扩写同一替换结果。 |
+| 网页 HTML 中 Google Docs 的正常字重外壳产生孤立 `**`；已有 `<strong>` 再带粗体 CSS 会产生 `****Bold****`；`<ol><li value>` 粘贴后序号错误 | MarkText [`normalizePastedHTML`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/utils/paste.ts) 清理外来 HTML；Marker 使用 turndown，但它的整篇 HTML 回写不适合 Noema。 | `normalizePastedInlines` 去掉正常字重外壳、把确有样式的 span 变语义标签，并识别同类祖先/子标签，避免重复包裹；列表规则保留 `start`、`value` 与倒序编号，一次缓存序号，长列表转换不再每项重新遍历前项。测试在 `paste-html.test.ts`。 |
+
+性能复核：5 MB 合成笔记中跨公式拖选 60 步，单独运行的第 95 百分位为 **8.46 ms**（源码模式对照 1.08 ms）；该测试在整套并行运行时曾偶发超帧，单独复跑通过。对长列表和大量格式 span 的复杂度修正是静态边界检查加功能测试，未把合成基准当成真实 Emacs/WebKit 帧时间。最终完整测试与构建状态见下方“验证”。
+
 ## 五、已核对、Noema 已有或更好
 
 | 上游 | Noema |
@@ -91,3 +109,5 @@
 ## 验证
 
 新增/更新测试：`tests/cm6/format-toggle.test.ts`、`tests/cm6/paste-context.test.ts`、`tests/cm6/code-block-input.test.ts`、`tests/cm6/history-grouping.test.ts`、`tests/cjk-emphasis.test.ts`、`tests/live-preview-range-reveal.test.ts`、`tests/editor-line-endings.test.ts`、`tests/save-drain.test.ts`、`tests/find.test.ts`、`tests/system-clipboard.test.ts`。Noema 全量 `npm test`：277 个测试文件、2,788 个测试全部通过；`tsc --noEmit` 无新增错误。
+
+第二轮提交为 Noema `e472254`，只含编辑器相关 18 个文件；与 LaTeX 导出、research-memory 等并行会话的未提交改动分开。锁定 Node 26.5.0 / npm 11.17.0 后，串行全量测试 **277 个文件、2,826 项通过、16 项跳过**；同一提交树的独立快照 `make build` 成功（渲染器 + Go 内核），并已将该快照的渲染器产物安装到 Emacs 指向的 `dist/aaronnote`。并行全量运行中各有一次独立的性能计时断言超阈值（链接解析比值 3.014 对 3.0；5,143 标题输入第 95 百分位 9.81 ms 对当次动态阈值 6.86 ms）；两项单独复跑分别为 1.96 倍和 3.95 ms，串行全量亦通过。未调整测试阈值，也未把这些并行负载波动记为功能通过的证据。
