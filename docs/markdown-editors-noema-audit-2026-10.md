@@ -139,6 +139,29 @@
 
 Noema 提交为 **`9676140`**，仅包含本轮 9 个文件。独立快照的 `make build`（含类型检查及 Go 构建）、临时目标路径的安装规则检查、`go test -tags fts5 ./...` 均通过；AaronEmacs 的 `make research-test` 424 项、`make jupyter-test` 268 项也通过。安装时发现当前渲染器已经包含另一会话部署的 LaTeX 任务干预按钮和 TikZ 主题修正，因此另建渲染器快照，保留那 7 个前端文件的现有修改，再合入本轮已验证文件。该组合构建通过，源码哈希及安装前构建标识均核对，产物逐文件哈希与安装目录一致。渲染器已安装到 `dist/aaronnote`，构建标识 **`1790936910247-7b0be450-f00c-4464-87ac-90f85a8ecb31`**；其他会话的修改未纳入本轮代码提交。没有把这些 DOM 测试当作真实 Emacs/WebKit 交互验收。
 
+### 第六轮：富预览滚动与原生表格输入
+
+用户指出富含公式、图片、图表的 Markdown 在预览中滚动“躁”，而源码模式舒服。本轮用 **Playwright 的无界面 WebKit** 加载 Noema 实际编辑器和 CSS，对同一份 100 节合成笔记执行向下、反向与源码模式滚动。它能验证 WebKit 排版和 wheel 事件，但不是 Emacs WKWebView 的物理滚轮或触控板手感验收。
+
+滚动路径修正：
+
+- **图表上方继续滚动文档**：行内图表原来截获所有 wheel，且 CSS 的 `overscroll-behavior: contain` 仍会阻断 WebKit 的滚动传递。现在普通滚轮穿过图表，拖拽平移、修饰键缩放、捏合与全屏内平移保留。
+- **监听实际滚动容器**：Emacs 页面滚动的是外层 host，原监听器却只在内部 `.cm-scroller`。捕获监听现在覆盖这两个目标，公式内部的横向滚动不触发整页策略。
+- **连续滚动仍补上公式**：原有队列会等到最后一次滚动后 120 ms，持续手势可让可见公式一直留白。现在按可见性排序，每帧最多挂载两个公式，并在已用约 4 ms 后让出下一帧；单个公式不能被中途打断，因此这不是硬帧时限。占位高度不再写入真实尺寸缓存。
+- **标题箭头不改变行高**：WebKit 中，负边距的行内折叠箭头与 CM6 的 widget buffer、`break-spaces` 组合会把标题撑成两行。箭头移出视口后多出来的一行又消失。箭头现在绝对定位在页边，不参加正文换行。
+- **稳定正文尺寸采样**：CM6 从短的纯文本行采样默认字体和行高。离屏标题失去临时标记后可能被当成正文；尚未获得语法高亮的代码行也有同样问题。采样变化会清空整篇高度图，令已离屏的图片等重新按源码高度估算。标题、引用和代码行现在保留结构标记，让采样继续取普通正文，未改 CM6 私有状态或依赖源码。
+- **图表加载保留空间**：即使命中 SVG 缓存，重新挂载仍跨过一次动态导入。等待期间保留已测高度，成功和失败后都释放占位；绕排图表的零高锚点不增加高度。
+
+对照依据：files.md [`fold.js:193-209`](https://github.com/zakirullin/files.md/blob/9e948ba6071e320c41c866f92817cf96f9bb7ba6/web/lib/fold.js#L193-L209) 明确处理可见内容延后折叠造成的闪烁，以及折叠和滚动恢复互相干扰；Noema 采用“可见内容及时出现”的原则，具体队列和高度采样修复来自 Noema/CM6 的复现。MarkText 的 [`diagramPreview.ts`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/block/extra/diagram/diagramPreview.ts) 也有异步加载占位，但不能直接解决 CM6 虚拟视口高度图的问题。Marker 的 ProseMirror 节点与 MarkWright 的源码/预览结构不同，没有把它们的实现当作本轮滚动修复的直接来源。
+
+可重复检查在 [`scripts/check-rich-scroll.mjs`](../site-lisp/noema/scripts/check-rich-scroll.mjs)。在本机一次运行中，向下/反向滚动时持续可见行的**文档坐标修正**最大分别为 **0 / 0.36 px**，正文采样行高固定为 18.1875 px；源码模式为 0 px。这里的坐标修正不是屏幕跳动幅度，因为 CM6 可能同时补偿 scrollTop。三种模式采样帧间隔的第 95 百分位分别为 **37 / 51 / 38 ms**，最大 **56 / 67 / 42 ms**；无界面滚轮调度与探针自身有成本，因此只记录计时，回归门槛检查几何、滚动传递和源码不变。预览两个方向各捕获到一帧可见公式占位，持续手势不会让队列饥饿；仍不能声称富预览帧时间已经与源码模式相同。
+
+表格输入同时修复：组合输入期间 Enter、Tab、Escape 留给输入法，兼顾 `isComposing`、composition 生命周期和 WebKit 的 keyCode 229；Shift-Enter 在选区插入 `<br>`，支持原生输入框撤销；两个快速提交的单元格各有独立撤销步骤；退出单元格输入后，预览中的 Cmd/Ctrl-Z 与重做恢复工作。MarkText [`content.ts`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/block/base/content.ts) 在 composition 中不处理导航，其 [`tableCell/index.ts`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/block/content/tableCell/index.ts) 的 Shift-Enter 插入 `<br/>`；files.md `tableEnterCell`、Marker 的表格节点及 MarkWright 的 CM6 undo/redo 用于核对导航和历史边界。Noema 的“每格提交单独撤销”是本产品选择。WebKit 已验证 Shift-Enter 后原生 Cmd-Z 能恢复原单元格，组合输入验证使用注入事件，未替代系统输入法候选窗测试。
+
+本轮提交为 **`d621e43`**。与该提交树一致的独立快照通过 `make test`：**280 个通过文件、2,870 项通过、16 项跳过**；`make build`、临时目标安装规则、Go 全量测试均通过。AaronEmacs 的 research 回归 424 项、Jupyter 回归 268 项通过。渲染器已安装到 `dist/aaronnote`，242 个产物文件的哈希与构建快照一致；构建标识 **`1790939658211-7dfe87dc-4fa0-4377-9603-994fe4624b9b`**。另一会话的 5 MB 测试笔记修改未纳入提交或构建。
+
+### 第一、二轮验证记录
+
 新增/更新测试：`tests/cm6/format-toggle.test.ts`、`tests/cm6/paste-context.test.ts`、`tests/cm6/code-block-input.test.ts`、`tests/cm6/history-grouping.test.ts`、`tests/cjk-emphasis.test.ts`、`tests/live-preview-range-reveal.test.ts`、`tests/editor-line-endings.test.ts`、`tests/save-drain.test.ts`、`tests/find.test.ts`、`tests/system-clipboard.test.ts`。Noema 全量 `npm test`：277 个测试文件、2,788 个测试全部通过；`tsc --noEmit` 无新增错误。
 
 第二轮提交为 Noema `e472254`，只含编辑器相关 18 个文件；与 LaTeX 导出、research-memory 等并行会话的未提交改动分开。锁定 Node 26.5.0 / npm 11.17.0 后，串行全量测试 **277 个文件、2,826 项通过、16 项跳过**；同一提交树的独立快照 `make build` 成功（渲染器 + Go 内核），并已将该快照的渲染器产物安装到 Emacs 指向的 `dist/aaronnote`。并行全量运行中各有一次独立的性能计时断言超阈值（链接解析比值 3.014 对 3.0；5,143 标题输入第 95 百分位 9.81 ms 对当次动态阈值 6.86 ms）；两项单独复跑分别为 1.96 倍和 3.95 ms，串行全量亦通过。未调整测试阈值，也未把这些并行负载波动记为功能通过的证据。
