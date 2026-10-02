@@ -216,7 +216,7 @@ Noema 提交为 **`9676140`**，仅包含本轮 9 个文件。独立快照的 `m
 
 同时修正两处与导出不一致的问题：编辑视图要求表格分隔行每格至少三个 `-`，`|-|:-:|` 显示为源码（GFM 与导出只要求一个）；`:name:` 在导出中渲染为 emoji 而编辑视图不渲染。
 
-**内存与生命周期**（happy-dom、强制 GC 后的堆）：打开 5 MB 夹具由 +85.5 MB 降到 +53.2 MB——约 16.5 万个行装饰各自持有属性对象（现按类名、org-env 种类与深度共享同一值），org-env 块的标题与正文是整篇 `toString()` 的子串，把一份 9.9 MB 的全文副本钉在内存里（现复制为独立字符串）；1,200 次按键在 200 步撤销深度后持平；40 篇笔记间 1,200 次 `setMarkdown` 切换（含输入与源码切换），编辑器自身对象不增长，残余增长经堆快照定位为 happy-dom 的样式缓存。`destroy()` 后 CM6 模块级 `scratchRange` 在 happy-dom 中保留最后一个视图，原因是 happy-dom 不在节点移除时更新 live Range（WebKit 会更新）。修复：内核重启后旧 ipywidgets manager 通过 `window` resize 监听常驻；Jupyter 页 1 s 计时器在空闲时持续唤醒；每单元格运行状态、每文件 kernel 列表、光标位置记忆在长寿命 pane 中无上限。空闲编辑器 3 s 内不调度任何定时器或动画帧。
+**内存与生命周期**（happy-dom、强制 GC 后的堆）：打开 5 MB 夹具由 +85.5 MB 降到 +53.2 MB——约 16.5 万个行装饰各自持有属性对象（现按类名、org-env 种类与深度共享同一值），org-env 块的标题与正文是整篇 `toString()` 的子串，把一份 9.9 MB 的全文副本钉在内存里（现复制为独立字符串）；1,200 次按键在 200 步撤销深度后持平；40 篇笔记间 1,200 次 `setMarkdown` 切换（含输入与源码切换），编辑器自身对象不增长，残余增长经堆快照定位为 happy-dom 的样式缓存。`destroy()` 后 CM6 模块级 `scratchRange` 在 happy-dom 中保留最后一个视图，原因是 happy-dom 不在节点移除时更新 live Range（WebKit 会更新）。修复：内核重启后旧 ipywidgets manager 通过 `window` resize 监听常驻；Jupyter 页 1 s 计时器在空闲时持续唤醒；每单元格运行状态、每文件 kernel 列表、光标位置记忆在长寿命 pane 中无上限。空闲编辑器 3 s 内不调度任何定时器或动画帧。真实引擎复验用 [`check-memory-soak.mjs`](../site-lisp/noema/scripts/check-memory-soak.mjs)（Chromium，经 DevTools 协议强制 GC）：起始 18.2 MB，40 篇笔记间第 100 到 600 次切换保持在 22.0–22.7 MB，20 次销毁/重建为 24.2 → 23.7 MB。
 
 **按键成本**（中位数，120 次按键）：120 KB 笔记 4.3 → 2.2 ms（p95 5.8 → 3.7 ms），原因是块拖拽 gutter 每次编辑都为每个可见标题扫描整节，仅为判断是否禁用；TOC 签名改为按需计算。5 MB 笔记开头 17.8 → 16.6 ms；末尾约 50 ms，其中约 70% 为 Lezer 重平衡约 10 万个顶层块的扁平 Document 节点，属解析器本身成本。
 
