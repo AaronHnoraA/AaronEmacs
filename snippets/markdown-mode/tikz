@@ -3,9 +3,27 @@
 # key: tikz
 # group: Noema blocks
 # --
-#+ begin tikz `(my/noema-new-id "block")`
-\draw[->] (0,0) -- (2,0) node[right] {$x$};
-\draw[->] (0,0) -- (0,2) node[above] {$y$};
-\draw[domain=0:1.4, smooth, variable=\x, blue] plot ({\x},{\x*\x});
-$0
-#+ end tikz
+#+begin tikz `(my/noema-new-id "block")`
+\begin{tikzpicture} [
+    vertex/.style={circle, draw, fill=white, minimum size=7mm, inner sep=0pt}
+]
+% Hyperedges (draw first)
+\filldraw[blue!20, fill opacity=0.5, draw=blue!60!black, thick]
+    (90:2.21) -- (30:2.2) -- (330:2.2) -- cycle;
+\draw[fill opacity=0.5, red!60!black, thick, fill=red!20]
+    (307.78:0.69) -- (29.96:2.2) -- (329.43:2.21) -- cycle;
+\filldraw[orange!25, fill opacity=0.5, draw=orange!70!black, thick]
+    (270:2.2) -- (210:2.2) -- (150:2.2) -- cycle;
+\draw[fill opacity=0.5, green!70!black, thick, fill=green!25]
+    (-0.52,0.55) -- (210:2.2) -- (150:2.2) -- cycle;
+\node[vertex] at (90:2.2)  {1};
+\node[vertex] at (30.6:2.2)  {2};
+\node[vertex] at (329.65:2.22) {3};
+\node[vertex] at (270:2.2) {4};
+\node[vertex] at (210:2.19) {5};
+\node[vertex] (node2) at (150.22:2.22) {6};
+\node[vertex] (node1) at (-0.52,0.55) {7};
+\node[vertex] at (0.42,-0.52) {8};
+\end{tikzpicture}
+#+end tikz
+
