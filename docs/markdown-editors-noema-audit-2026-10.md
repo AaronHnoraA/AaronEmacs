@@ -187,6 +187,23 @@ Noema 提交为 **`9676140`**，仅包含本轮 9 个文件。独立快照的 `m
 
 本轮提交 **`70c5f3a`**。同一暂存树的独立快照通过 `make test`（**282 个通过文件、2,883 项通过、16 项跳过**）、`make build` 和临时安装规则；Go 全量、AaronEmacs research 424 项、Jupyter 268 项通过。完整字体下的 WebKit 滚动检查保持通过：持续可见行的文档坐标修正为向下 0、反向 0.36 px，正文行高采样保持不变；帧间隔第 95 百分位为 38 / 46 ms，源码模式 36 ms，仅作本机观测。图片生命周期脚本也在该快照复验通过。渲染器 242 个产物文件已安装并核对哈希，构建标识 **`1790941862252-e91df193-8946-4155-873b-d668cd7ebf8e`**；另一会话的 5 MB 笔记修改未进入提交或构建。
 
+### 第八轮：图表交互状态与绕排几何
+
+图片之后继续审计 Mermaid/mindmap 的生命周期，先复现六类问题：在图表前插入段落会重建 SVG 并丢失缩放、平移和选中节点；普通合并输入期间，图表源码位置元数据仍停在旧偏移；同源码不同宽度共用精确高度缓存；绕排图表可能读取普通图表的非零高度估计；删除展开中的图表或销毁编辑器会留下全屏浮层；按 Escape 退出全屏后 WebKit 丢失图表焦点，方向键不再平移。
+
+现在源码与布局未变时，CM6 只更新图表位置并保留原 SVG 和交互状态。高度缓存键纳入完整 layout，组估计区分宽高；绕排图表的 CM6 块高度始终为 0，实际浮动内容由 ResizeObserver 单独观察。图表销毁会取消迟到的异步渲染、断开尺寸观察、退出全屏并移除浮层；正常按 Escape 退出则把焦点还给图表，销毁路径不抢占其他输入控件的焦点。
+
+| 对照项目 | 本轮核对的实现与采用边界 |
+|---|---|
+| MarkText | [`diagramPreview.ts`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/block/extra/diagram/diagramPreview.ts) 在更新前取消上一轮 SVG finalize，并在异步渲染后安装图表行为。Noema采用同一生命周期原则，同时保留 CM6 中未改源码的现有 DOM。 |
+| files.md | [`hypermd-mermaid.js`](https://github.com/zakirullin/files.md/blob/9e948ba6071e320c41c866f92817cf96f9bb7ba6/web/lib/hypermd-mermaid.js) 惰性加载 Mermaid、缓存模块加载，并在完成或失败时通知 CM5 marker 重新测量。Noema继续使用惰性模块与渲染缓存，同时把布局尺寸纳入高度缓存。 |
+| MarkWright | [`useRenderer.ts`](https://github.com/okazaki112/MarkWright/blob/18a0b28e4b409814db80289952ba37f8b7932a31/src/composables/useRenderer.ts) 用 IntersectionObserver 延迟渲染、缓存 SVG，并由 `dispose()` 统一释放 observer 和其他可视实例；[`PreviewPane.vue`](https://github.com/okazaki112/MarkWright/blob/18a0b28e4b409814db80289952ba37f8b7932a31/src/components/PreviewPane.vue) 以 120 ms 合并整页预览。Noema采用可见渲染与显式清理，但不在正文输入时重建未受影响的图表。 |
+| Marker | [`CodeBlockView.tsx`](https://github.com/tk04/Marker/blob/b878afcb2c8895702cacce2613f9081d3682ddc7/src/components/Editor/NodeViews/CodeBlockView.tsx) 保持持久 NodeView，但该提交未提供 Mermaid 预览；因此仅用于核对“块节点身份随外围编辑保持”的产品方向。 |
+
+[`diagram-lifecycle.test.ts`](../site-lisp/noema/tests/cm6/diagram-lifecycle.test.ts) 覆盖源码位置、SVG 身份、缩放、两种高度缓存、全屏销毁与焦点所有权。[`check-diagram-stability.mjs`](../site-lisp/noema/scripts/check-diagram-stability.mjs) 在无界面 WebKit 中加载真实 Mermaid，验证段落插入后 SVG 身份与 `translate/scale` 保持、绕排锚点高度为 0、Escape 后键盘焦点恢复，以及删除全屏图表后浮层和 body 状态均被清理。
+
+本轮 Noema 提交为 **`9c5396c`**。与提交树一致的独立快照通过 `make test`：**283 个通过文件、2,890 项通过、16 项跳过**；`make build`、临时目标安装规则、Go 全量测试、AaronEmacs research 424 项与 Jupyter 268 项均通过。完整字体下的 WebKit 滚动检查继续通过：持续可见行的文档坐标修正为向下 0、反向 0.36 px，正文行高采样不变；帧间隔第 95 百分位为 37 / 49 ms，源码模式 38 ms，只作为本机观测。图表生命周期脚本在同一快照通过。渲染器 242 个产物文件已安装并核对哈希，构建标识 **`1790943100455-e77a739c-e945-40d3-9df5-3eee659b5a92`**；另一会话的 5 MB 笔记修改未进入提交或构建。
+
 ### 第一、二轮验证记录
 
 新增/更新测试：`tests/cm6/format-toggle.test.ts`、`tests/cm6/paste-context.test.ts`、`tests/cm6/code-block-input.test.ts`、`tests/cm6/history-grouping.test.ts`、`tests/cjk-emphasis.test.ts`、`tests/live-preview-range-reveal.test.ts`、`tests/editor-line-endings.test.ts`、`tests/save-drain.test.ts`、`tests/find.test.ts`、`tests/system-clipboard.test.ts`。Noema 全量 `npm test`：277 个测试文件、2,788 个测试全部通过；`tsc --noEmit` 无新增错误。
