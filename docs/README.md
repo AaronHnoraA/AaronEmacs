@@ -20,6 +20,12 @@ channels.
 - [agenda.md](agenda.md) Noema `@@todo`/`@@project`/`@@clock` syntax, server agenda/project/clock view-model, repeaters, dependencies, and Web/Emacs entry points.
 - [MarkWright → Noema audit](markwright-noema-audit-2026-09.md) Source-linked comparison of MarkWright with the Noema editor: merged slash-menu, inline HTML and print details; rendering, CSS, theme and lifecycle findings.
 - [Marker / MarkText / files.md → Noema audit](markdown-editors-noema-audit-2026-10.md) Source-linked comparison of three Markdown editors with Noema: merged format toggles, CJK emphasis, context-aware paste, code-block input, word-sized undo, range-selection rendering, CRLF save and save retry; with a [per-file line inventory](markdown-editors-line-audit-2026-10.md).
+- [Vibemux → Noema audit](vibemux-noema-audit-2026-10.md) Source-linked comparison of both Vibemux projects with Noema's Agent sessions, attention, recovery, and permission model.
+- [Lexora / Orca ADE → Noema audit](lexora-orca-noema-audit-2026-10.md) Feature-by-feature source review, Noema upgrade decisions, and permission-boundary fixes.
+- [LangGraph / OpenHands Agent SDK / Letta Code → Noema audit](langgraph-openhands-letta-noema-audit-2026-10.md) Source-linked review of checkpoint versions, event/context views, subagent handoff, and memory isolation.
+- [Airflow / Snakemake / Luigi → Noema audit](classic-workflow-dag-noema-audit-2026-10.md) Classic workflow lessons for dependency convergence, incomplete outputs, result staleness, and verifiable completion; includes the recent-event window fix.
+- [Agent workflow landscape audit](agent-workflow-landscape-audit-2026-10.md) Source-linked shortlist across agent sessions, human collaboration, durable DAG workflows, autonomous research, and software agents.
+- [Emacs China vibe package 2 → Noema audit](emacs-vibe-package-2-noema-audit-2026-10.md) Source-linked review of conversation trees, temporary forks, Typst preview, and native Jupyter; includes the Noema Agent integration.
 - [Native Agenda integration study](../site-lisp/noema/docs/architecture/agenda-org-integration-study.md) Org Agenda UI reuse over native Markdown/WorkNode data, project-scoped indexing, and explicit Apple global attention; includes an isolated prototype.
 - [slides-demo.md](../site-lisp/noema/docs/slides-demo.md) Ready-to-open `kind: slides` Noema deck with math and HTML examples.
 - [settings-cookbook.md](settings-cookbook.md) “I want to change X” guidance that tells you where each kind of change belongs.

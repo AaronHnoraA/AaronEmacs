@@ -1470,6 +1470,9 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
             ("agenda-attention-visit"
              (my/noema--defer-host-event #'my/noema--agenda-attention-visit payload)
              nil)
+            ("latex-export-failed"
+             (my/noema--defer-host-event #'my/noema--latex-export-failed payload)
+             nil)
             ("ready"
              (format "aaronote-web-host:ready:%s"
                      (or (alist-get 'port payload) 0)))
@@ -1589,6 +1592,137 @@ This is a memory-only check; it never opens an inactive project or reads disk."
 (defvar my/noema--latex-agent-requests (make-hash-table :test #'equal)
   "Active LaTeX export polish turns keyed by the web host request id.")
 
+(defvar my/noema--latex-intervention-buffers (make-hash-table :test #'equal)
+  "Manual ACP buffers opened for failed LaTeX export task ids.")
+
+(defvar my/noema--latex-failure-notified (make-hash-table :test #'equal)
+  "Failed LaTeX task ids for which Emacs has already asked about intervention.")
+
+(defun my/noema--latex-intervention-display (buffer)
+  "Show manual export BUFFER in its own frame, outside Agent Workspace tabs."
+  (let ((window (get-buffer-window buffer t)))
+    (unless (window-live-p window)
+      (setq window
+            (if (display-graphic-p)
+                (let ((frame (make-frame '((name . "Noema LaTeX intervention")
+                                           (width . 110) (height . 36)))))
+                  (set-frame-parameter frame 'noema-latex-intervention-buffer buffer)
+                  (set-frame-parameter frame 'noema-agent-standalone t)
+                  (frame-root-window frame))
+              (display-buffer-pop-up-window buffer '((window-height . 0.4))))))
+    (unless (window-live-p window)
+      (user-error "Unable to open a separate LaTeX intervention window"))
+    (set-window-buffer window buffer)
+    (select-frame-set-input-focus (window-frame window))
+    (select-window window)
+    window))
+
+(defun my/noema--latex-intervention-prompt (params)
+  "Draft a reviewable manual repair request from failed export PARAMS."
+  (format (concat "Investigate this failed Noema LaTeX export.\n"
+                  "Source note: %s\nOutput target: %s\n\n"
+                  "Error:\n%s\n\n"
+                  "Inspect the source and make only the needed edits. "
+                  "Tell me what changed; I will rerun the export from Task Manager.")
+          (or (alist-get 'file params) "")
+          (or (alist-get 'outputPath params) "")
+          (or (alist-get 'error params) "LaTeX export failed")))
+
+(defun my/noema--latex-intervention-open (params)
+  "Open or focus an independent manual ACP session for failed export PARAMS."
+  (require 'noema-agent-acp)
+  (let* ((task-id (alist-get 'taskId params))
+         (file (alist-get 'file params))
+         (output-path (alist-get 'outputPath params))
+         (preferred-backend (or (alist-get 'backend params) "codex"))
+         (backend (seq-find #'noema-agent-acp-config-for
+                            (delete-dups
+                             (append (list preferred-backend)
+                                     '("codex" "claude" "opencode")))))
+         (directory (cond ((and (stringp file) (not (string-empty-p file))
+                                (file-directory-p
+                                 (file-name-directory (expand-file-name file))))
+                           (file-name-directory (expand-file-name file)))
+                          ((and (stringp output-path)
+                                (not (string-empty-p output-path))
+                                (file-directory-p
+                                 (file-name-directory (expand-file-name output-path))))
+                           (file-name-directory (expand-file-name output-path)))
+                          (t default-directory)))
+         (existing (gethash task-id my/noema--latex-intervention-buffers))
+         (config (and backend (noema-agent-acp-config-for backend)))
+         (buffer (and (buffer-live-p existing) existing)))
+    (unless (and (stringp task-id) (not (string-empty-p task-id)))
+      (user-error "Missing failed LaTeX task id"))
+    (unless buffer
+      (unless config (user-error "No Emacs ACP agent is available for LaTeX intervention"))
+      (setq buffer (noema-agent-acp-start
+                    :config config :directory directory :origin 'manual
+                    :display-function #'my/noema--latex-intervention-display))
+      (puthash task-id buffer my/noema--latex-intervention-buffers)
+      (with-current-buffer buffer
+        (add-hook 'kill-buffer-hook
+                  (lambda ()
+                    (remhash task-id my/noema--latex-intervention-buffers)
+                    (dolist (frame (frame-list))
+                      (when (and (> (length (frame-list)) 1)
+                                 (eq (frame-parameter frame
+                                                      'noema-latex-intervention-buffer)
+                                     (current-buffer)))
+                        (delete-frame frame t)))) nil t))
+      (let ((draft (my/noema--latex-intervention-prompt params)))
+        (if (noema-agent-acp-state-value buffer '(:session :id))
+            (noema-agent-acp-draft buffer draft)
+          (let (subscription)
+            (setq subscription
+                  (noema-agent-acp-subscribe
+                   :buffer buffer :event 'init-finished
+                   :callback (lambda (_event)
+                               (noema-agent-acp-unsubscribe
+                                :buffer buffer :subscription subscription)
+                               (when (buffer-live-p buffer)
+                                 (noema-agent-acp-draft buffer draft)))))))))
+    (noema-agent-acp-show-buffer buffer)
+    (message "LaTeX intervention with %s: edit the draft prompt and send it when ready"
+             backend)
+    buffer))
+
+(defun my/noema--latex-export-failed (params)
+  "Pop up export diagnostics and ask whether to open manual ACP help."
+  (let ((task-id (alist-get 'taskId params)))
+    (when (and (stringp task-id)
+               (not (gethash task-id my/noema--latex-failure-notified)))
+      (if (active-minibuffer-window)
+          (run-at-time 0.5 nil #'my/noema--latex-export-failed params)
+        (puthash task-id t my/noema--latex-failure-notified)
+        (display-warning
+         'noema-latex
+         (format "LaTeX export failed for %s:\n%s"
+                 (file-name-nondirectory (or (alist-get 'file params) "document"))
+                 (or (alist-get 'error params) "Unknown error"))
+         :error)
+        (when (y-or-n-p "LaTeX export failed. Intervene with an agent? ")
+          (condition-case err
+              (my/noema--latex-intervention-open params)
+            (error (message "LaTeX intervention failed: %s"
+                            (error-message-string err)))))))))
+
+(defun my/noema--latex-intervene (params _client)
+  "Open manual ACP intervention from a failed Task Manager card."
+  (let ((deferred (remote-gateway-defer 15)))
+    (my/noema--defer-host-event
+     (lambda (payload)
+       (condition-case err
+           (progn
+             (my/noema--latex-intervention-open payload)
+             (remote-gateway-resolve deferred '((ok . t))))
+         (error
+          (remote-gateway-resolve
+           deferred `((ok . :json-false)
+                      (message . ,(error-message-string err)))))))
+     params)
+    deferred))
+
 (defun my/noema--latex-agent-status (_params _client)
   "Report the ACP agents configured in this Emacs for LaTeX export."
   (require 'noema-agent-acp)
@@ -1598,6 +1732,29 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                             (available . ,(if (noema-agent-acp-config-for id)
                                               t :json-false))))
                         '("codex" "claude" "opencode"))))))
+
+(defun my/noema--latex-agent-retire-buffer (buffer)
+  "Close export ACP BUFFER after the current ACP callback returns."
+  (when (buffer-live-p buffer)
+    (run-at-time
+     0 nil
+     (lambda (agent-buffer)
+       (when (buffer-live-p agent-buffer)
+         (unless (ignore-errors (noema-agent-acp-kill agent-buffer))
+           (let ((kill-buffer-query-functions nil))
+             (kill-buffer agent-buffer)))))
+     buffer)))
+
+(defun my/noema--latex-agent-retire-workdir (workdir)
+  "Close export ACP sessions still attached to WORKDIR."
+  (when (and (stringp workdir) (not (string-empty-p workdir)))
+    (require 'noema-agent-acp)
+    (let ((directory (directory-file-name (expand-file-name workdir))))
+      (dolist (session (noema-agent-acp-sessions))
+        (when (and (noema-agent-acp-export-session-p session)
+                   (equal (directory-file-name (or (plist-get session :root) ""))
+                          directory))
+          (my/noema--latex-agent-retire-buffer (plist-get session :buffer)))))))
 
 (defun my/noema--latex-agent-finish (request-id ok &optional message)
   "Finish LaTeX polish REQUEST-ID and retire its private ACP session."
@@ -1609,16 +1766,30 @@ This is a memory-only check; it never opens an inactive project or reads disk."
           (deferred (plist-get request :deferred)))
       (when (timerp timer) (cancel-timer timer))
       (when (and buffer subscription)
-        (noema-agent-acp-unsubscribe :buffer buffer :subscription subscription))
-      (remote-gateway-resolve
-       deferred
-       `((ok . ,(if ok t :json-false))
-         (message . ,(or message ""))))
-      (when (buffer-live-p buffer)
-        (run-at-time 0 nil
-                     (lambda ()
-                       (when (buffer-live-p buffer)
-                         (ignore-errors (noema-agent-acp-kill buffer)))))))))
+        (ignore-errors
+          (noema-agent-acp-unsubscribe :buffer buffer :subscription subscription)))
+      (unwind-protect
+          (ignore-errors
+            (remote-gateway-resolve
+             deferred
+             `((ok . ,(if ok t :json-false))
+               (message . ,(or message "")))))
+        ;; ACP may still be dispatching its completion callback. Retire the
+        ;; session on the next event turn, even if the gateway is gone.
+        (my/noema--latex-agent-retire-buffer buffer)))))
+
+(defun my/noema--latex-agent-cancel-all ()
+  "Retire every LaTeX ACP turn when its web host goes away."
+  (let (request-ids)
+    (maphash (lambda (request-id _request)
+               (push request-id request-ids))
+             my/noema--latex-agent-requests)
+    (dolist (request-id request-ids)
+      (my/noema--latex-agent-finish request-id nil "Noema host stopped"))
+    (when (featurep 'noema-agent-acp)
+      (dolist (session (noema-agent-acp-sessions))
+        (when (noema-agent-acp-export-session-p session)
+          (my/noema--latex-agent-retire-buffer (plist-get session :buffer)))))))
 
 (defun my/noema--latex-agent-run (params _client)
   "Run a LaTeX polish turn through Noema's Emacs ACP boundary."
@@ -1649,7 +1820,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
           (progn
             (setq buffer
                   (noema-agent-acp-start :config config :directory workdir
-                                         :origin 'side))
+                                         :origin 'latex-export))
             (let ((request (gethash request-id my/noema--latex-agent-requests)))
               (setf (plist-get request :buffer) buffer))
             (setq subscription
@@ -1688,12 +1859,16 @@ This is a memory-only check; it never opens an inactive project or reads disk."
 (defun my/noema--latex-agent-cancel (params _client)
   "Cancel a LaTeX export's ACP turn after task abort or timeout."
   (let* ((request-id (alist-get 'requestId params))
+         (workdir (alist-get 'workdir params))
          (request (gethash request-id my/noema--latex-agent-requests))
          (buffer (plist-get request :buffer)))
     (when request
       (when (buffer-live-p buffer)
         (ignore-errors (noema-agent-acp-interrupt buffer t)))
-      (my/noema--latex-agent-finish request-id nil "aborted")))
+      (my/noema--latex-agent-finish request-id nil "aborted"))
+    ;; Export sends this again on completion. It also catches a buffer whose
+    ;; ACP callback finished but whose first retirement attempt did not.
+    (my/noema--latex-agent-retire-workdir workdir))
   `((ok . t)))
 
 (remote-gateway-register-method
@@ -1702,6 +1877,8 @@ This is a memory-only check; it never opens an inactive project or reads disk."
  "aaronnote.latex.agent-run" #'my/noema--latex-agent-run)
 (remote-gateway-register-method
  "aaronnote.latex.agent-cancel" #'my/noema--latex-agent-cancel)
+(remote-gateway-register-method
+ "aaronnote.latex.intervene" #'my/noema--latex-intervene)
 
 (defun my/noema--clear-process-log-queue ()
   "Cancel and discard deferred web-host diagnostic output."
@@ -1774,6 +1951,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
   "Handle web-host PROC state change EVENT."
   (when (and (eq proc my/noema--process)
              (not (process-live-p proc)))
+    (my/noema--latex-agent-cancel-all)
     (when (fboundp 'noema-agenda-host-stopped)
       (noema-agenda-host-stopped))
     (when my/noema--ready-watchdog
@@ -2836,6 +3014,7 @@ and every renderer uses the same `runHostCommand' pause implementation."
 The web-host (Node) is the backend; once it is gone, any Appine tabs showing
 its pages are dead, so the Emacs-side tab registry is cleared too."
   (interactive)
+  (my/noema--latex-agent-cancel-all)
   (when (fboundp 'my/dashboard-agenda-host-stopped)
     (my/dashboard-agenda-host-stopped))
   (when (fboundp 'noema-agenda-host-stopped)

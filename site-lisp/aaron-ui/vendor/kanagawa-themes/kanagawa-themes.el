@@ -488,12 +488,12 @@ names to which it refers are bound."
       (link :foreground ,bright-blue :underline nil :weight bold)
       (link-visited :foreground ,blue :underline t :weight normal)
       (default (:foreground ,fg :background ,bg))
-      (cursor (:foreground ,bg :background "#9FBDDD"))
+      (cursor (:foreground ,bg :background ,bright-blue))
       (widget-field (:foreground ,fg :background ,bg-p1))
       (escape-glyph (:foreground ,special :weight bold))
-      (fringe (:foreground "#58627A" :background ,bg))
+      (fringe (:foreground ,nontext :background ,bg))
       (header-line (:foreground ,fg :background ,bg-p1
-                                :box (:line-width 6 :color ,bg-p1)
+                                :box (:line-width 4 :color ,bg-p1)
                                 :height 0.96
                                 :extend t))
       (highlight (:foreground ,fg :background ,bg-dim :weight bold))
@@ -508,7 +508,7 @@ names to which it refers are bound."
       (window-divider (:foreground ,bg-m1 :background ,bg))
       (window-divider-first-pixel (:foreground ,bg :background ,bg))
       (window-divider-last-pixel (:foreground ,bg-m1 :background ,bg))
-      (vertical-border (:foreground ,bg-m3))
+      (vertical-border (:foreground ,bg-p2))
 ;;;;;;; font lock
       (font-lock-builtin-face (:foreground ,bright-blue :weight regular))
       (font-lock-comment-face (:foreground ,syn-comment
@@ -559,16 +559,16 @@ names to which it refers are bound."
       (lazy-highlight (:foreground ,fg :background ,bg-search))
       (minibuffer-prompt (:foreground ,bright-blue :weight bold))
 ;;;;;;; mode-line
-      (mode-line (:foreground ,fg-dim :background ,bg-m3
-                              :box (:line-width 6 :color ,bg-m3)
+      (mode-line (:foreground ,fg :background ,bg-p1
+                              :box (:line-width 4 :color ,bg-p1)
                               :overline nil :underline nil
                               :height 0.92 :weight regular))
-      (mode-line-inactive (:foreground ,nontext :background ,bg-m2
-                                       :box (:line-width 6 :color ,bg-m2)
+      (mode-line-inactive (:foreground ,fg-dim :background ,bg-m2
+                                       :box (:line-width 4 :color ,bg-m2)
                                        :overline nil :underline nil
                                        :height 0.92 :weight regular))
 ;;;;;;; hl-line-mode
-      (hl-line (:background ,bg-p2))
+      (hl-line (:background ,bg-p1))
 ;;;;;;; message
       (message-header-name (:foreground ,bg-p1))
       (message-header-other (:foreground ,extend-color-1))
@@ -603,7 +603,7 @@ names to which it refers are bound."
       (term-color-white (:foreground ,white :background ,white))
 ;;;;;;; org-mode
       (org-done (:foreground ,diag-info))
-      (org-document-title (:foreground "#F5E0DC" :weight semibold))
+      (org-document-title (:foreground ,fg :weight semibold))
       (org-document-info (:foreground ,fg-dim))
       (org-document-info-keyword (:foreground ,diag-ok :background ,diff-add))
       (org-code (:foreground ,yellow :background ,bg-m2 :weight medium))
@@ -618,27 +618,27 @@ names to which it refers are bound."
       (org-headline-todo (:foreground ,bg-m1))
       (org-upcoming-deadline (:foreground ,extend-color-1))
       (org-footnote (:foreground ,bright-cyan))
-      (org-table (:foreground "#BAC2DE"))
+      (org-table (:foreground ,fg-dim))
       (org-formula (:foreground ,bright-magenta :weight medium))
       (org-drawer (:foreground ,fg-dim))
       (org-indent (:foreground ,bg :background ,bg))
       (org-hide (:inherit org-indent))
-      (org-date (:foreground "#89B4FA" :weight medium))
-      (org-ellipsis (:foreground "#F9E2AF" :weight semibold))
-      (org-level-1 (:foreground "#F9E2AF"
+      (org-date (:foreground ,blue :weight medium))
+      (org-ellipsis (:foreground ,yellow :weight semibold))
+      (org-level-1 (:foreground ,yellow
                                 :height ,(if kanagawa-themes-org-height 1.3 1.0)
                                 :weight ,(if kanagawa-themes-org-bold 'semibold 'medium)))
-      (org-level-2 (:foreground "#89B4FA"
+      (org-level-2 (:foreground ,blue
                                 :height ,(if kanagawa-themes-org-height 1.2 1.0)
                                 :weight ,(if kanagawa-themes-org-bold 'semibold 'medium)))
-      (org-level-3 (:foreground "#CBA6F7"
+      (org-level-3 (:foreground ,magenta
                                 :height ,(if kanagawa-themes-org-height 1.1 1.0)
                                 :weight ,(if kanagawa-themes-org-bold 'medium 'normal)))
-      (org-level-4 (:foreground "#94E2D5" :weight ,(if kanagawa-themes-org-bold 'medium 'normal)))
-      (org-level-5 (:foreground "#F5E0DC" :weight medium))
-      (org-level-6 (:foreground "#B4BEFE" :weight medium))
-      (org-level-7 (:foreground "#CBA6F7" :weight medium))
-      (org-level-8 (:foreground "#94E2D5" :weight medium))
+      (org-level-4 (:foreground ,cyan :weight ,(if kanagawa-themes-org-bold 'medium 'normal)))
+      (org-level-5 (:foreground ,fg-dim :weight medium))
+      (org-level-6 (:foreground ,fg-dim :weight medium))
+      (org-level-7 (:foreground ,fg-dim :weight medium))
+      (org-level-8 (:foreground ,fg-dim :weight medium))
       (org-priority (:foreground ,extend-color-2
                                  :weight ,(if kanagawa-themes-org-priority-bold 'bold 'normal)))
 ;;;;;; show-paren
@@ -647,14 +647,14 @@ names to which it refers are bound."
       (show-paren-mismatch (:foreground ,bright-black :weight bold))
 ;;;;;; tab-line
       (tab-line (:background ,bg-m3))
-      (tab-bar (:background "#1F2434"
-                            :box (:line-width 6 :color "#1F2434")
+      (tab-bar (:foreground ,fg-dim :background ,bg-m1
+                            :box (:line-width 4 :color ,bg-m1)
                             :height 0.98))
-      (tab-bar-tab (:background "#3E4A6B"
-                                :box (:line-width 6 :color "#3E4A6B")
+      (tab-bar-tab (:foreground ,fg :background ,bg-p2
+                                :box (:line-width 4 :color ,bg-p2)
                                 :weight medium))
-      (tab-bar-tab-inactive (:background "#272C3D"
-                                         :box (:line-width 6 :color "#272C3D")
+      (tab-bar-tab-inactive (:foreground ,fg-dim :background ,bg-p1
+                                         :box (:line-width 4 :color ,bg-p1)
                                          :weight regular))
 ;;;;;; comint
       (comint-highlight-prompt (:background ,syn-punct :foreground ,bg-dim))
@@ -878,9 +878,9 @@ names to which it refers are bound."
       (ace-jump-face-foreground (:foreground ,extend-color-2 :background ,bg-m3 :weight bold))
 ;;;;;;; vertico
       (vertico-multiline (:background ,diag-error))
-      (vertico-group-title ( :foreground ,blue :background ,diff-change :weight bold))
+      (vertico-group-title (:foreground ,fg-dim :background ,bg-p1 :weight medium))
       (vertico-group-separator (:inherit vertico-group-title :strike-through t))
-      (vertico-current (:foreground ,bright-yellow :background ,fg-reverse :weight bold :slant italic))
+      (vertico-current (:foreground ,fg :background ,bg-p2 :weight medium :slant normal))
 ;;;;;;; vertico-posframe
       (vertico-posframe-border (:background ,bg))
       (vertico-posframe (:background ,bg-m1))
@@ -996,11 +996,11 @@ names to which it refers are bound."
       (dired-subtree-depth-5-face (:background ,bg))
       (dired-subtree-depth-6-face (:background ,bg))
 ;;;;;;; corfu
-      (corfu-default (:background ,bg-m1))
-      (corfu-current (:background ,bg-p2 :foreground nil))
+      (corfu-default (:background ,bg-p1))
+      (corfu-current (:background ,bg-p2 :foreground ,fg))
       (corfu-deprecated (:inherit nil))
       (corfu-bar (:background nil :inherit tooltip))
-      (corfu-border (:background ,bg))
+      (corfu-border (:background ,bg-p2))
 ;;;;;;; diredfl
       (diredfl-autofile-name (:foreground ,bg-search))
       (diredfl-compressed-file-name (:foreground ,diff-text))

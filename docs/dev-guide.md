@@ -594,7 +594,8 @@ in-process 缓存，与自动刷新保持一致。
 
 - `M-x noema` / `C-c A W` — Noema 主入口
 - `M-x noema-agent-start` / `C-c A a` — 启动包管理的 agent-shell 上的结构化 agent
-- `M-x noema-agent-inbox` / `C-c A G` — 汇总已知 Noema Project 的会话状态、待处理项和活动 agent；`RET` 跳转，`G` 重扫项目根
+- `M-x noema-agent-acp-conversation-tree` / `C-c A T` — 从当前 Noema Agent 会话浏览原生 ACP 对话树；Agent 窗口 `C-c C-t`、Sessions 列表 `T` 也可进入。`agent-shell-fork-tree` 作为固定版本的 package-vc 依赖；Noema 经 ACP 边界调用它，分叉后登记为命名会话，缓存仅驻内存（`agent-shell-fork-tree-cache-directory=nil`）。它按共享文本前缀展示，不是 WorkNode DAG 或 Noema `parentName` 的替代品
+- `M-x noema-agent-inbox` / `C-c A G` — 汇总已知 Noema Project 的会话状态、待处理项和活动 agent；`RET` 跳转，`!` 跨项目轮转待处理项，`u` 经 `session:name:read` 标记已读并只刷新所属 Project，`G` 重扫项目根。可见时 ACP 状态事件只重绘，worker 的 Run 结束及权限/输入事件只合并查询所属 Project，慢回包由逐 Project 请求序号隔离；隐藏时停止监听，再显示补查。外部客户端变更仍可用 `g` 刷新
 - `M-x noema-agent-abtop` / `C-c A U` — btop 风格的 agent 总览（quota / sessions / 详情，带停止、强制
   终止、重启等管理键）。读取边界都在 `noema-agent-acp.el`：`noema-agent-acp-usage` 读 agent-shell 的
   `:usage`（Run 记录的 `sessionUsage` 也经它）；`agent-shell--save-usage` 与
@@ -651,7 +652,7 @@ in-process 缓存，与自动刷新保持一致。
   写进 Node 持久注册表，失败不影响会话。`noema-agent-acp-sessions` 是合并视图，
   `noema-sessions-read` 是统一的会话选择器（可选“新开一个”；context send
   还可在列表末尾选择复制 prompt 到剪贴板，不需要 ACP 会话）。
-  `noema-agent-acp-ephemeral-origins`（默认 `side`）里的来源不写持久注册表。
+  `noema-agent-acp-ephemeral-origins`（默认 `side`、`latex-export`）里的来源不写持久注册表。
 - 生命周期：所有自动停止路径（warm 清扫、项目最后一个 `.noema` 关闭后的收尾、项目
   关闭期间结束的 Run）统一经 `noema-agent-acp-auto-stoppable-p`——空闲、没有排队的
   prompt（agent-shell 的 `:pending-prompts`）、不可见、来源在

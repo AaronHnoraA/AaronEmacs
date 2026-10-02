@@ -5,6 +5,11 @@ Aaron UI 是 Emacs 与 Noema 共用的设计系统。深色 Kanagawa Wave 是 Em
 Noema 继续由自己的 `aaronnote/style.css` 独占现有配色和 Markdown 宽度，
 共享层不会覆盖这些变量或布局规则。
 
+在 Emacs 中用 `M-x aaron-ui-load-theme` 选择 Wave、Dragon 或浅色 Lotus。
+启动时使用 `aaron-ui-default-variant`；三种主题的界面语义色都跟随各自的
+底色。标签栏、mode line、Org 标题和补全列表使用同一套主题色，减少
+与正文竞争注意力的高饱和色块。Noema 的已提交 CSS token 仍导出 Wave。
+
 ## 语义角色
 
 - `role-critical`：错误和不可逆操作

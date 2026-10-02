@@ -36,6 +36,14 @@
                       "f448a74a8eded23aa42f8d60a41c5d8d3a183d07")
 (my/package-ensure-vc 'agent-shell "https://github.com/xenodium/agent-shell"
                       "55d7148505da2433a30b1228092e17b0775ffa25")
+(my/package-ensure-vc 'agent-shell-fork-tree "https://github.com/roife/agent-shell-fork-tree"
+                      "c0a61ff6a3ceae53473a8533a06cb7648297d5eb")
+
+;; Noema keeps the native ACP transcript as the conversation record.  The
+;; tree's index is useful while Emacs runs, but must not write a second copy
+;; of prompt/reply text to disk.
+(setq agent-shell-fork-tree-cache-directory nil
+      agent-shell-fork-tree-scan-concurrency 2)
 
 ;;; ── Agent placement: every agent-shell session, local or remote ─────────
 ;;
@@ -605,6 +613,7 @@ target-native path.  A CLI that cannot be found is an error."
 (autoload 'noema-compose-add-context "noema-compose" nil t)
 (autoload 'noema-compose-rewrite "noema-compose" nil t)
 (autoload 'noema-agent-start "noema-agent-acp" nil t)
+(autoload 'noema-agent-acp-conversation-tree "noema-agent-acp" nil t)
 (autoload 'noema-agent-promote-current-session "noema-agent-promote" nil t)
 (autoload 'noema-research-history-index "noema-agent-promote" nil t)
 (autoload 'noema-agent-worker-run-work-cell "noema-agent-worker" nil t)
@@ -693,6 +702,7 @@ target-native path.  A CLI that cannot be found is an error."
   "P" #'noema-pi-router-open
   "D" #'noema-pi-doctor
   "S" #'noema-sessions
+  "T" #'noema-agent-acp-conversation-tree
   "G" #'noema-agent-inbox
   "U" #'noema-agent-abtop
   "O" #'noema-orchestration

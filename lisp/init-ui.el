@@ -208,7 +208,7 @@ height in pixels."
 (use-package aaron-ui
   :demand t
   :config
-  (aaron-ui-load-theme 'wave))
+  (aaron-ui-load-theme))
 
 (defun my/theme-normalize-faces ()
   "Normalize theme face attributes that Emacs 31 rejects when set to nil."
@@ -936,8 +936,9 @@ request, and only the first may render its answer."
 
 (defun my/dashboard-apply-ui ()
   "Apply local UI styling to the dashboard."
-  (setq-local truncate-lines t)
-  (setq-local auto-hscroll-mode nil)
+  (when (derived-mode-p 'dashboard-mode)
+    (setq-local truncate-lines t)
+    (setq-local auto-hscroll-mode nil))
   (when (display-graphic-p)
     (let ((signature (list custom-enabled-themes
                            (face-attribute 'default :background nil t)

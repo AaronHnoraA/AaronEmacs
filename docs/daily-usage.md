@@ -307,16 +307,15 @@ agent 处理，正文及数学含义主要由 prompt 和逐项 review 约束，�
 任务结果会显示 agent 实际耗时以及 `applied / kept` 数量；review 由 host 预生成精确 candidate 模板，
 缺失证据会显示 warning，但不会反过来否决一个已通过关键 payload 与编译检查的排版结果。agent 超时
 不再按固定三分钟直接杀进程：三分钟无输出时只检查进程是否仍存活，存活就继续等待；单次 attempt
-默认有十五分钟硬上限，到达后先请求整个 CLI 进程组正常退出，十秒后才会强制清理。失败或取消的
-LaTeX task 会在 Task Manager 的 `LaTeX exports` 页显示 `Rerun`，使用完全相同的输入新建任务，
-不会尝试复活旧进程。
+默认有十五分钟硬上限。Emacs 中的导出 agent 通过 Emacs ACP 运行；导出任务结束后自动关闭它的临时会话。
+失败的 LaTeX task 会在 Emacs 弹出错误并在 echo 区询问是否人工介入。接受后会打开独立的 agent
+窗口，错误和源文件路径预填在可编辑输入中，不会自动发送；你可以手动修改 prompt、笔记或导出设置。
+Task Manager 的 `LaTeX exports` 页也提供 `Intervene in Emacs` 和 `Rerun`。`Rerun` 用相同输入
+新建任务，不会复活旧进程；关闭失败提示后仍可从 Task Manager 介入。
 
 Codex、Claude、OpenCode 都只在每次导出的隔离 staging 目录中工作；style contract、两个 skill、
 source/draft/template/review 会预先复制到该目录，避免 agent 因找不到上下文向父目录探索。网络权限
-保持开放。Codex 使用 `workspace-write` 且不继承用户规则/额外 writable roots；Claude 不再使用
-`dangerously-skip-permissions`，只开放读取、编辑和 web 工具并禁用 Bash/Task；OpenCode 使用
-`--dir`、`--pure` 和 `external_directory: deny`。任务卡的 `Agent audit` 可展开查看最终 audit 摘要
-以及每项 `applied / kept` 的具体理由。
+保持开放。任务卡的 `Agent audit` 可展开查看最终 audit 摘要以及每项 `applied / kept` 的具体理由。
 
 引用会默认扫描 note 所在目录的 `./bib/*.bib`，正文直接写 `@@cite` 即可：
 
@@ -345,7 +344,7 @@ label 中的 citation 正常解析。
 后端可用 `my/noema-latex-export-agent` 选择：`codex`（默认）/ `claude` / `opencode`，都以
 非交互、免确认方式运行，且在配置里选定、不会每次询问。引擎开关 `my/noema-latex-export-engine`
 （`codex` = verified-first + 单次 gated polish / 必要时 repair；`mechanical` = 从不启动 agent）。中间校验用 draft
-模式加速，最终产物仍做完整两遍编译。见 Noema 的 `docs/latex-export-style.md`。
+模式加速；编译会按日志重跑，最多三遍，直到引用稳定。见 Noema 的 `docs/latex-export-style.md`。
 空闲存活检查和硬上限分别由 `my/noema-latex-export-agent-idle-timeout`（默认 180 秒）与
 `my/noema-latex-export-agent-hard-timeout`（默认 900 秒）控制。
 
@@ -1095,7 +1094,11 @@ Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空
 的清单才进入持久会话查询，普通仓库中的活动 agent 只作为本地行显示。
 总览按待审批、待输入、失败、未读优先排序。`RET` 打开会话，`j` 跳到最近 Run 的
 work 块，`p` 打开其 Project，`s` 打开该 Project 的 Session 列表，`g` 刷新状态，`G` 重新发现
-Project。总览只读取现有注册表，不会启动 agent 或创建 Project。
+Project。`!` 跨项目跳到下一个待处理或未读 Session；`u` 标记当前 Session 已读，失败状态仍保留。
+可见时，活动 agent 的状态变化会自动重绘；本地 Run 的完成及权限、输入请求变化会合并刷新
+所属 Project 的会话；`u` 成功后也只刷新所属 Project，保留其他 Project 的列表。隐藏后停止查询，再次显示时补查；其他客户端
+造成的变更可按 `g` 获取。
+总览只读取现有注册表，不会启动 agent 或创建 Project；标记已读是显式操作。
 
 `C-c A U` / `M-x noema-agent-abtop` 打开 btop 风格的 agent 总览（aaron-ui 配色），三块面板：
 - **quota**：三个工具的额度总是全部列出，每个工具列出它应有的窗口（`5h`/`7d`），显示已用比例、重置倒计时
@@ -1192,7 +1195,19 @@ tab-line/tab-bar。
 | `C-c C-r` | 重启 session 并恢复原对话 |
 | `C-c C-k` / `C-c M-k` | 关闭当前 tab / 关闭其他 tab（名字与历史保留） |
 | `C-c C-w` / `C-c C-f` / `C-c C-d` | 重命名 / fork / 归档 session |
+| `C-c C-t` | 当前原生 ACP 对话树 |
 | `C-c C-j` / `C-c C-l` / `C-c C-z` | 跳到最近的 work 块 / session 列表 / 管理菜单 |
+
+`C-c A T` 可从当前项目上下文打开 agent 的对话树；Sessions 列表中按 `T`
+打开光标所在会话的树，已关闭的原生会话会先恢复。树里 `g` 发现和更新分支，
+`C-u g` 全量重建，`/` 搜索当前对话，`s` 标注回合，`d` 看工具 diff；在
+`↳` 原生会话行按 `RET` 继续、按 `f` 从该会话末端创建原生分叉。新分叉进入
+Noema 的命名会话列表，可以重命名并作为 `@@session` 使用。普通历史回合只供
+预览，通用 ACP 不能从任意旧回合重新开始。树按同一 agent 和执行目录发现候选，
+只显示与当前对话共享非空历史前缀的会话；共享前缀不等于后端真实的父子关系。
+树索引仅保留在当前 Emacs 内存，不另存一份对话正文。后端需支持 ACP
+`session/list` 与 `session/load`。Noema 的 `F` 是为下次
+Run 声明新命名会话，与树里的原生 `f` 不同；WorkNode DAG 仍描述研究任务依赖。
 
 重跑同一个 work 块会按上游重新开始，不会叠在上一次尝试后面（独占的 session 沿用原名换新一代）。
 

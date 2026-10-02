@@ -161,7 +161,7 @@
   "Last theme signature applied by `my/minibuffer-apply-ui'.")
 
 (defun my/minibuffer-apply-ui ()
-  "Apply the local dark UI to completion and minibuffer faces."
+  "Apply the active Aaron palette to completion and minibuffer faces."
   (when (display-graphic-p)
     (let ((signature (list custom-enabled-themes
                            (face-attribute 'default :background nil t)
