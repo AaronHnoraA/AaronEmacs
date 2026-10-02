@@ -108,6 +108,14 @@
 
 ## 验证
 
+### 第三轮：链接边界与大文档操作
+
+这一轮同时核对四个上游。MarkWright 的 [`useEditorActions.ts:8-29,61`](https://github.com/okazaki112/MarkWright/blob/18a0b28e4b409814db80289952ba37f8b7932a31/src/composables/useEditorActions.ts#L8-L29) 将选区直接包成链接，短文本够用；Marker 的 [`Popover/Link.tsx`](https://github.com/tk04/Marker/blob/b878afcb2c8895702cacce2613f9081d3682ddc7/src/components/Editor/Popover/Link.tsx) 以已有链接范围执行设置/取消；MarkText 的 [`format.ts`](https://github.com/marktext/marktext/blob/34b59d0abe505fea5a801cffb3719bb7835f2ede/packages/muya/src/block/base/format.ts) 先处理当前 token；files.md 的 [`editor.js:262-275`](https://github.com/zakirullin/files.md/blob/9e948ba6071e320c41c866f92817cf96f9bb7ba6/web/editor.js#L262-L275) 在选中文字时把粘贴 URL 变为链接。Noema 保持源码模型，沿用后面三个项目的语义：已有链接可改址或取消；选区切入链接、图片、行内代码、公式时先补齐元素边界；新链接中的旧链接被摊成文字，避免生成嵌套链接；代码块中不执行链接/格式命令，工具栏相应按钮禁用。实现见 [`commands/index.ts`](../site-lisp/noema/src/cm6/commands/index.ts)、[`inline-format.ts`](../site-lisp/noema/src/cm6/inline-format.ts)，回归在 [`format-toggle.test.ts`](../site-lisp/noema/tests/cm6/format-toggle.test.ts)。
+
+5 MB 合成笔记暴露了另一条路径：Lezer 初始语法树只覆盖前约 3 KB，光标在末尾时请求从文首解析到光标，格式工具栏三个连续查询合计约 **1.25 秒**，而且拿到的仍可能是不完整的树。现在行内命令使用与编辑器相同语法配置解析所需行，围栏位置按不可变文档缓存；探针首次状态检查约 **20 ms**，其后格式状态约 **1 ms**。末尾链接命令约 **115 ms**，其中普通 CM6 编辑提交约 **60–75 ms**；这些是 happy-dom 中的诊断计时，不能外推为 WebKit 帧时间。5 MB 末尾代码块、粗体和跨链接操作有独立的 [`large-document-format.test.ts`](../site-lisp/noema/tests/cm6/large-document-format.test.ts)，并用行为断言避免把机器负载写成脆弱阈值。
+
+本轮 Noema 提交为 `243f9ec`。串行全量测试为 **278 个通过文件、2831 项通过、16 项跳过**；`tsc --noEmit` 通过。只含本轮暂存改动的独立快照 `make build` 成功（渲染器与 Go 内核），其渲染器已安装到 Emacs 使用的 `dist/aaronnote`，构建标识为 `1790931170929-28ce5334-bbf4-4bef-a149-1eba2b093d3d`。
+
 新增/更新测试：`tests/cm6/format-toggle.test.ts`、`tests/cm6/paste-context.test.ts`、`tests/cm6/code-block-input.test.ts`、`tests/cm6/history-grouping.test.ts`、`tests/cjk-emphasis.test.ts`、`tests/live-preview-range-reveal.test.ts`、`tests/editor-line-endings.test.ts`、`tests/save-drain.test.ts`、`tests/find.test.ts`、`tests/system-clipboard.test.ts`。Noema 全量 `npm test`：277 个测试文件、2,788 个测试全部通过；`tsc --noEmit` 无新增错误。
 
 第二轮提交为 Noema `e472254`，只含编辑器相关 18 个文件；与 LaTeX 导出、research-memory 等并行会话的未提交改动分开。锁定 Node 26.5.0 / npm 11.17.0 后，串行全量测试 **277 个文件、2,826 项通过、16 项跳过**；同一提交树的独立快照 `make build` 成功（渲染器 + Go 内核），并已将该快照的渲染器产物安装到 Emacs 指向的 `dist/aaronnote`。并行全量运行中各有一次独立的性能计时断言超阈值（链接解析比值 3.014 对 3.0；5,143 标题输入第 95 百分位 9.81 ms 对当次动态阈值 6.86 ms）；两项单独复跑分别为 1.96 倍和 3.95 ms，串行全量亦通过。未调整测试阈值，也未把这些并行负载波动记为功能通过的证据。
