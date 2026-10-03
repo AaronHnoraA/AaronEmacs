@@ -1138,6 +1138,8 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 | `C-c A W` | 打开 Noema（默认 Magent agent-shell） |
 | `C-c A a` | 选择 Magent/Codex/Claude/OpenCode/Pi agent-shell |
 | `C-c A w` | 在当前 Project 仓库的新 Git worktree 里启动 Codex/Claude/OpenCode 会话 |
+| `C-c A n` | 同一任务交给几个 agent 并行尝试，各自一个 worktree |
+| `C-c A A` | 并行尝试看板：比较各尝试的状态与改动 |
 | `C-c A c` | 打开 gptel compose buffer；在 Noema 页面里带上选区（没有选区则整篇笔记）作为 context |
 | `C-c A s` | 从当前 buffer 发送 gptel 请求；在 Noema 页面里同 `C-c A c` |
 | `C-c A m` | 打开 gptel transient 设置 |
@@ -1188,7 +1190,9 @@ Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空
 - 图表（` ```mermaid `、` ```marmind `/` ```markmind `）按图片排版：高度跟着内容走，没有固定窗口，点一下图就像点别的正文一样把光标放进去显示源码。需要放大时用图右上角悬停出现的 `⤢` 打开查看器，在那里缩放、平移、`Fit`，`Esc` 或 `Close` 关闭；缩放只属于查看器，不会被正文编辑打断。
 - 图表配色跟随当前主题：Mermaid 用从 `--aaron-*` 变量推出来的调色板（深色主题就是深色图），不再是浅色默认主题垫一张白卡片。换主题会自动重画。
 - `![说明](diagram.drawio)` 像引用图片一样引用 draw.io 文件：Noema 调本机 draw.io 导出 SVG 并缓存，按原图大小显示，不加载在线编辑器、不联网，导出时按当前主题要 light 或 dark 版本。要改图就用 draw.io 打开那个 `.drawio` 文件，存盘后 Noema 自动重新导出。`#page=2` 指定第几页（从 1 数）；本机没装 draw.io 时显示一张写明原因的占位图（可用 `NOEMA_DRAWIO_BIN` 指定路径）。`.drawio.svg` / `.drawio.png` 本来就是图片，直接当图片渲染。
-- draw.io 导出一次约 1 秒（要起一个 draw.io 进程），之后按「文件路径 + 修改时间 + 大小 + 页码 + 主题」命中磁盘缓存，命中是毫秒级，重复渲染只走 ETag 304。同时导出的并发上限默认 2（`NOEMA_DRAWIO_CONCURRENCY`），一篇笔记里十几张图不会同时拉起十几个 draw.io。
+- draw.io 导出一次约 1 秒（要起一个 draw.io 进程），之后按「文件路径 + 修改时间 + 大小 + 页码 + 格式」命中磁盘缓存，命中是毫秒级，重复渲染只走 ETag 304。同时导出的并发上限默认 2（`NOEMA_DRAWIO_CONCURRENCY`），一篇笔记里十几张图不会同时拉起十几个 draw.io。
+- LaTeX 导出里图表就是图：`.drawio` 由 draw.io 直接导成矢量 PDF，mermaid/marmind 由编辑器页面渲染成 SVG 随请求发过去、再用 `rsvg-convert` 转 PDF；两者都作为附带文件写到 `.tex` 旁边，所以存下来的 `.tex` 单独也能编译。某张图没能成图时保留原样并在任务警告里说明，不会整篇导出失败。
+- 发布/独立 HTML 里 `.drawio` 的 SVG 直接内联（导出 URL 只在本机宿主下有效，独立文件里会是死链），和 TikZ 一样的处理。server 模式同样能取 draw.io 导出；marmind 在 server 模式本来就由页面自己渲染。
 - 右键菜单提供“Duplicate / Move Up / Move Down / Delete Block”。Markdown 中输入关键词可从 snippet 补全展开结构：`h1`–`h6` 标题、`ul` / `ol` 列表、`bq` 引用、`math` 公式块、`hr` 分隔线、`mer` Mermaid、`mind` 思维导图等；`/` 是普通文本，不弹命令菜单。悬停脚注引用显示脚注内容，未定义的会提示。
 
 ### 所有 agent 会话按项目统一登记
@@ -1245,6 +1249,19 @@ Magit status；`d` 显示它从分出时起的全部改动（已提交和未提�
 普通会话则只显示未提交改动。`M-x noema-agent-worktree-remove` 只列出 Noema 建的 worktree：
 还有会话在里面工作的不删；有未提交改动的要加前缀参数才删；分支始终保留，
 已提交的工作不会丢。
+
+想让几个 agent 同时做同一件事、再挑一个结果时，用 `C-c A n` /
+`M-x noema-agent-worktree-parallel`：输入组名、选 agent（同一个选两次就有两份尝试）和
+一句提示。每份尝试是一个 worktree 会话，分支名 `noema/<组名>-<序号>-<agent>`，提示在会话
+就绪后自动发出；某个 agent 起不来只会报告，其余照常开始。`C-c A A` /
+`M-x noema-agent-worktree-board` 打开看板，每行一份尝试：组名后括号里是整组状态
+（有一份在等权限就是 waiting，否则有一份在做就是 working，都做完或会话已关就是 settled），
+然后是 agent、这份尝试的状态（waiting / working / done / idle / closed）和改动（自分出起的
+提交数、工作区相对分出点的文件与行数、新增的未跟踪文件数）。改动在打开看板和按 `g` 时
+重新从 Git 读取，状态则随会话事件即时更新。`RET` 打开该会话，`m`/`d` 用 Magit 查看，
+`k` 删掉这份尝试的 worktree，`K` 删掉整组（有会话还开着就不删；有未提交改动时需要前缀
+参数，否则一份都不删）；分支一律保留。分组信息记在各分支的 Git 配置里
+（`branch.<分支>.noemaGroup`），重启 Emacs 后照样在；挑中的结果由你自己用 Magit 合并。
 
 `C-c A U` / `M-x noema-agent-abtop` 打开 btop 风格的 agent 总览（aaron-ui 配色），三块面板：
 - **quota**：三个工具的额度总是全部列出，每个工具列出它应有的窗口（`5h`/`7d`），显示已用比例、重置倒计时

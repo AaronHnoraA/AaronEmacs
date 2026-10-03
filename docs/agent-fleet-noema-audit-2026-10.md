@@ -70,4 +70,14 @@ Agent Fleet 是 [Herdr](https://github.com/herdrdev/herdr) 的 Emacs 前端：ag
 - P1 补完：发给 worktree 会话的区域引用，若那几行在 worktree 副本里内容不同，就拒绝发送（行范围用与引用相同的计算方式，止于行首的选区不含该行），不再只是文档里的提醒。
 - 测试：[`noema-agent-attention-tests.el`](../site-lisp/noema/test/elisp/noema-agent-attention-tests.el) 5 项（隐藏时标记与显示时清除、只在失焦时通知、可见/打断/Run 所有/ephemeral 时跳过、worker 所有权、Inbox 排序/轮转/读），worktree 测试新增区域一致性 1 项。`make research-test` 五组全部通过（2、110、15、197、115）；改动文件 byte-compile 无警告。
 
-仍未做：Aaron-PC 远程真机回归（本轮未再尝试，状态同上）、P2 持久并行尝试组（需 kernel schema）。上游 ROADMAP 的其余条目（Session 默认名与 attach 端点固定、Ghostel、Consult 适配、child-frame）都属于 Herdr/终端前端，不适用于 Noema。
+仍未做：Aaron-PC 远程真机回归（本轮未再尝试，状态同上）。上游 ROADMAP 的其余条目（Session 默认名与 attach 端点固定、Ghostel、Consult 适配、child-frame）都属于 Herdr/终端前端，不适用于 Noema。
+
+## 第三轮吸收：P2 持久的并行尝试组
+
+原计划把组存进 kernel，但实现时发现不需要：组的成员就是那些 worktree 分支，把组名记在各分支的 Git 配置 `branch.<b>.noemaGroup`（与 `noemaBase` 同处）即可。这样满足了上游 ROADMAP“Parallel-task recovery”的要求（只持久化最小分组元数据，状态从活模型派生，不形成第二个生命周期来源），持久性随 worktree 本身，也不必改 schema。上游的 `agent-fleet--tasks` 只在内存里（发现 3），Noema 这一版重启后不丢。
+
+- [`noema-agent-worktree-board.el`](../site-lisp/noema/lisp/noema-agent-worktree-board.el)：`C-c A n` 为每个 (agent . prompt) 建 worktree 会话，就绪后发提示；单个失败只报告，不中断其余（上游 [L204-L223](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/agent-fleet-parallel.el#L204-L223) 的语义）。重名的组拒绝。交互入口仍是“同题多解”（发现 4），Lisp 入口支持每份不同提示。
+- 状态：成员 waiting/working/done/idle/closed，取自会话的 attention 与 busy；整组 waiting > working > settled。上游把消失的成员算作 failed；这里关掉的会话不是失败，worktree 与分支还在，所以算 closed，组可以 settled。
+- 看板 `C-c A A`：列出组名与整组状态、分支、agent、成员状态和改动。改动 = 自分出点起的提交数 + 工作区对 merge-base 的 shortstat + 未跟踪新文件数。上游与 P1 的 `d` 都看不到 agent 新建的未跟踪文件，这里单独计数。`RET`/`m`/`d`/`k`/`K`/`g` 见 daily-usage；`K` 先逐份检查，任何一份不能删就一份都不删。
+- 优化：`noema-agent-worktree-list` 原先每个 worktree 调一次 `git config --get`，现在一次 `git config --get-regexp` 读出全部 Noema 分支设置，远程 target 上少 N 次往返。
+- 测试：[`noema-agent-worktree-board-tests.el`](../site-lisp/noema/test/elisp/noema-agent-worktree-board-tests.el) 4 项（多份启动与失败隔离及重名拒绝、成员/整组状态、改动统计、看板列出与整组删除的保护和 hook 清理），与 worktree 测试一起 14/14 通过。

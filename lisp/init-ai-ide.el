@@ -637,6 +637,8 @@ target-native path.  A CLI that cannot be found is an error."
 (autoload 'noema-agent-worktree-remove "noema-agent-worktree" nil t)
 (autoload 'noema-agent-worktree-magit-status "noema-agent-worktree" nil t)
 (autoload 'noema-agent-worktree-magit-diff "noema-agent-worktree" nil t)
+(autoload 'noema-agent-worktree-parallel "noema-agent-worktree-board" nil t)
+(autoload 'noema-agent-worktree-board "noema-agent-worktree-board" nil t)
 (autoload 'noema-agent-abtop "noema-agent-abtop" nil t)
 (autoload 'noema-context-send "noema-context" nil t)
 (autoload 'noema-context-draft "noema-context" nil t)
@@ -696,6 +698,8 @@ target-native path.  A CLI that cannot be found is an error."
   :doc "Prefix map for Noema research and agent commands."
   "a" #'noema-agent-start
   "w" #'noema-agent-worktree-start
+  "n" #'noema-agent-worktree-parallel
+  "A" #'noema-agent-worktree-board
   "W" #'noema
   "c" #'noema-compose
   "s" #'noema-compose-send
