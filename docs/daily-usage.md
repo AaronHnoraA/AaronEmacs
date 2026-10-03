@@ -1215,6 +1215,12 @@ Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空
 `+N -M` 行数和 `diff` 按钮。Emacs 不在前台时，等待决定和 Run 结束会发系统通知
 （`noema-agent-worker-notify-function`，设为 nil 关闭）。
 
+没有 Run 的会话（`C-c A a`、`C-c A w`、popup、恢复的对话）也会提醒：它请求权限或
+答完一轮时，如果它的 buffer 不在屏幕上，Sessions 列表和总览的第一列会标
+`!approve` 或 `done`，`!` 能跳到它，打开它或按 `u` 清除；Emacs 不在前台时还会
+发系统通知（`noema-agent-acp-notify-function`，设为 nil 关闭）。你自己打断的一轮
+不算。这个标记只存在当前 Emacs 里；Run 的提醒仍以 host 为准，不会重复报。
+
 `C-c A G` / `M-x noema-agent-inbox` 打开全局 agent 总览。它汇总笔记根目录中
 已有的 Noema Project、Emacs 已知的项目和当前打开的 agent；只有带 `[project]`
 的清单才进入持久会话查询，普通仓库中的活动 agent 只作为本地行显示。
@@ -1233,7 +1239,7 @@ Project。`!` 跨项目跳到下一个待处理或未读 Session；`u` 标记当
 名为 `worktree/<名字>`；恢复会话时回到它原来的 worktree。本机和远程 Project 用同一套命令。
 用 `C-c A x` 等命令把主 checkout 里的文件或选区发给这个会话时，引用会指向 worktree
 里的同名文件，避免 agent 改到主 checkout；worktree 里没有这个文件就报错，不会退回主 checkout。
-选区的行号取自你正在编辑的 buffer，所以 worktree 里的文件改动较大时，行号可能对不上。
+选区按你正在编辑的 buffer 计行号；如果 worktree 里那几行已经不一样，会直接拒绝，并提示你到 worktree 的副本里重新选择。
 Sessions 列表（`C-c A S`）和总览（`C-c A G`）里，`m` 打开该会话所在 checkout 的
 Magit status；`d` 显示它从分出时起的全部改动（已提交和未提交的一起），
 普通会话则只显示未提交改动。`M-x noema-agent-worktree-remove` 只列出 Noema 建的 worktree：

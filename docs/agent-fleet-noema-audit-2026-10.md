@@ -54,8 +54,20 @@ Agent Fleet 是 [Herdr](https://github.com/herdrdev/herdr) 的 Emacs 前端：ag
 
 - [`noema-agent-worktree.el`](../site-lisp/noema/lisp/noema-agent-worktree.el)：`C-c A w` / `noema-agent-worktree-start` 从 Project workspace 当前所在的分支切出 `noema/<名字>`，在仓库旁边的 `<仓库名>.noema-worktrees/<名字>/` 建 linked worktree，在 workspace 在 worktree 中的对应目录启动 Codex/Claude/OpenCode，会话登记在原 Project 下，名为 `worktree/<名字>`。分出点记在 `branch.<分支>.noemaBase`，它同时标记这个 worktree 是 Noema 建的。持久 Session 本来就记录 `executionTarget`，所以恢复会话会回到原来的 worktree，不需要改 kernel。
 - 放置：所有 Git 调用都经 `process-file` 在 Emacs 目录中执行，传给 Git 的是 checkout 内的相对路径。Git 打印的目标原生路径只在原生路径之间比较，不拼回 Emacs 名，因此本机、`/fs:local:` 与远程 target 走同一条代码路径。临时 buffer 里会带上调用方的 `process-environment`/`exec-path`。
-- 发现 1 的处理：[`noema-context.el`](../site-lisp/noema/lisp/noema-context.el) 把主 checkout 文件的引用改写成会话 worktree 里的同名文件，比较用 `file-in-directory-p`，会解析符号链接（Git 打印的是解析后的路径）。worktree 里没有这个文件就报错，不会退回主 checkout。区域引用的行号仍取自正在编辑的 buffer。
+- 发现 1 的处理：[`noema-context.el`](../site-lisp/noema/lisp/noema-context.el) 把主 checkout 文件的引用改写成会话 worktree 里的同名文件，比较用 `file-in-directory-p`，会解析符号链接（Git 打印的是解析后的路径）。worktree 里没有这个文件就报错，不会退回主 checkout。
 - 审阅：Sessions 列表与 Inbox 新增 `m`（Magit status）和 `d`。worktree 会话的 `d` 是工作区对分出点 merge-base 的 diff，已提交和未提交的改动一起显示；普通会话只显示未提交改动。
 - 清理：`noema-agent-worktree-remove` 只列出 Noema 建的 worktree。还有会话在里面工作时拒绝删除（加 force 也一样）；有未提交改动时需要前缀参数；分支始终保留。
 - 测试：[`noema-agent-worktree-tests.el`](../site-lisp/noema/test/elisp/noema-agent-worktree-tests.el) 用真实临时仓库覆盖了 9 项：创建与重名拒绝、子目录定位、主 checkout 引用改写与缺文件报错、经符号链接的改写、调用方环境保留、`noema-context` 引用、列出与删除的三道保护、diff 从分出点开始、名字规整。已加入 `make research-test`，和 `noema-context` 测试一起 38/38 通过；改动文件 byte-compile 无警告。另用 `/fs:local:` 逻辑路径实际跑了创建、checkout、引用改写和列出，结果与原生路径一致。
 - **未完成**：Aaron-PC 与 Aaron-PC-Remote 本轮 SSH 都连不上，远程 target 的真机回归还没有跑。按 [remote-parity](remote-parity.md)，远程这一列仍算未验证。P2（持久的并行尝试组）需要 kernel schema，留待下一轮。
+
+## 第二轮吸收（2026-10-03）
+
+继续对照上游 [ROADMAP](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/ROADMAP.md) 的 P1“Attention workflow”和 Fleet 对所有 agent 的 `blocked`/`done` 提醒，找到 Noema 的一个缺口：系统通知与注意力只来自 Run（[`noema-agent-worker.el`](../site-lisp/noema/lisp/noema-agent-worker.el) 的 `--notify` 只在 Run 结束和 Run 的权限请求时触发）。手动会话、worktree 会话、popup 和恢复的对话请求权限或答完一轮时，没有任何提示。同时开几个 worktree 会话后离开，正好就是这种情况。
+
+- [`noema-agent-acp.el`](../site-lisp/noema/lisp/noema-agent-acp.el)：每个登记的 agent-shell 会话都订阅 agent-shell 自己发出的结构化 `permission-request` 与 `turn-complete` 事件，不从终端文本推断。buffer 不在屏幕上时设置 `noema-agent-acp-attention`（`permission`/`done`）；Emacs 不在前台时经 `noema-agent-acp-notify-function` 发通知，正文带上会话名。被打断的一轮（`cancelled`）、ephemeral/probe 会话不提醒。窗口显示该 buffer、`noema-agent-acp-show-buffer` 或 `u` 会清除标记。
+- 不重复：worker 注册 `noema-agent-acp-run-owned-functions`，有 open Run 的 buffer 让给 host 的 Run attention。
+- 呈现：Sessions 列表与 Inbox 的第一列在 host 没有给出 attention 时显示这个标记。Inbox 按它排序（权限请求与 host 的 `permission` 同级），`!` 轮转也包括无持久记录的本地行。
+- P1 补完：发给 worktree 会话的区域引用，若那几行在 worktree 副本里内容不同，就拒绝发送（行范围用与引用相同的计算方式，止于行首的选区不含该行），不再只是文档里的提醒。
+- 测试：[`noema-agent-attention-tests.el`](../site-lisp/noema/test/elisp/noema-agent-attention-tests.el) 5 项（隐藏时标记与显示时清除、只在失焦时通知、可见/打断/Run 所有/ephemeral 时跳过、worker 所有权、Inbox 排序/轮转/读），worktree 测试新增区域一致性 1 项。`make research-test` 五组全部通过（2、110、15、197、115）；改动文件 byte-compile 无警告。
+
+仍未做：Aaron-PC 远程真机回归（本轮未再尝试，状态同上）、P2 持久并行尝试组（需 kernel schema）。上游 ROADMAP 的其余条目（Session 默认名与 attach 端点固定、Ghostel、Consult 适配、child-frame）都属于 Herdr/终端前端，不适用于 Noema。
