@@ -171,6 +171,7 @@
    (display-line-numbers-type . absolute)
    (my/display-line-numbers-auto-modes prog-mode conf-mode)
    (my/display-line-numbers-large-buffer-threshold . 524288) (fill-column . 80)
+   (my/progress-indicator-style . pikachu) (my/progress-indicator-fps . 8)
    (ring-bell-function . ignore) (blink-cursor-mode) (treesit-font-lock-level . 3)
    (scroll-step . 2) (scroll-margin . 1) (hscroll-step . 1) (hscroll-margin . 5)
    (scroll-conservatively . 2305843009213693951) (scroll-preserve-screen-position)

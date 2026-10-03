@@ -1580,35 +1580,8 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
 
 ;;(setq debug-on-quit t)
 
-(defvar pv/spinner nil)
-
-(declare-function spinner-start "spinner" (&optional spinner-type))
-(declare-function spinner-stop "spinner" (spinner))
-
-(defun pv/spinner-start ()
-  (require 'spinner)
-  (setq pv/spinner (spinner-start 'progress-bar-filled))
-  (force-mode-line-update t))
-
-(defun pv/spinner-stop ()
-  (when pv/spinner
-    (spinner-stop pv/spinner)
-    (setq pv/spinner nil)
-    (force-mode-line-update t)))
-
-(defun pv/with-spinner (orig &rest args)
-  (pv/spinner-start)
-  (unwind-protect
-      (apply orig args)
-    (pv/spinner-stop)))
-
-;; 只给远程文件转圈（避免本地也烦）
-(defun pv/find-file-with-spinner (orig filename &rest args)
-  (if (file-remote-p filename)
-      (pv/with-spinner (lambda () (apply orig filename args)))
-    (apply orig filename args)))
-
-(advice-add 'find-file :around #'pv/find-file-with-spinner)
+;; The mode-line progress indicator lives in init-ui.el; see its "Progress
+;; Indicator" section for the frames, the trigger, and `my/with-progress-indicator'.
 
 
 (keymap-global-unset "C-x m")

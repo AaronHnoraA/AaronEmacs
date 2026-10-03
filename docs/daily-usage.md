@@ -1006,6 +1006,39 @@ GUI frame 的两侧 fringe 分工如下：
 - `C-M-\``
   改变 popup 类型
 
+### 卡住时的进度条
+
+Mode line 右边偶尔会出现一只原地跑步的小人：
+
+```
+ᕕ( ᐛ )ᕗ   ᕗ( ᐛ )ᕕ   ᕕ( ᐖ )ᕗ   ᕗ( ᐖ )ᕕ
+```
+
+它的机理只有一条链路，没有第二处：
+
+1. **谁画它** —— `lisp/init-ui.el` 的 `;;; Progress Indicator:` 一节。底层用
+   `spinner` 包，把帧集注册成 `spinner-types` 里的 `pikachu`，渲染进
+   `mode-line-process`。唯一的公开入口是宏 `my/with-progress-indicator`，它用
+   `unwind-protect` 保证 body 正常返回、报错、`C-g` 都会把条收掉。
+2. **什么时候抬起来** —— 目前只有一个触发点：`find-file` 打开一个
+   **每次文件操作都要单独走一趟 shell 往返**的路径。判据是
+   `my/remote-per-file-subprocess-affordable-p`（init-tramp.el），它问的是 Remote
+   后端声明的 `remote-file-operation-cost`，**不是** `file-remote-p`。所以：
+   - 本地文件 → 不出现；
+   - 走 tramp-rpc 这类批量后端的远程文件 → 也不出现（本来就快）；
+   - 走普通 SSH TRAMP 的远程文件 → 出现。
+3. **在哪个 buffer 上出现** —— 操作开始时的那个 buffer，对 `find-file` 来说就是你
+   **正要离开**的 buffer，因为新 buffer 还不存在。
+4. **为什么同步操作里它还能动** —— TRAMP 阻塞在 `accept-process-output` 里，Emacs 的
+   timer 照常跑。反过来，一个完全不让出控制权的计算会让帧停住 —— 那个「冻住」本身
+   就是真实信号，不要去掩盖它。
+5. **结束之后** —— `my/find-file-feedback-a`（init-tramp.el）在文件打开后 echo 一行
+   `[TRAMP 1.37s] /ssh:...`。进度条负责「正在等」，这行负责「等了多久」，两者是分开的
+   两个 advice，互不依赖。
+
+要改样式、速度，或给别的慢操作也加上，见
+[settings-cookbook.md](settings-cookbook.md#我要改卡住时的进度条)。
+
 ## 7. 有冲突时优先记住什么
 
 - `M-w` 关闭当前 buffer，行为与 `C-x k` 一致

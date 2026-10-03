@@ -621,6 +621,24 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 
 ---
 
+## 我要改「卡住时的进度条」
+
+文件：[lisp/init-ui.el](../lisp/init-ui.el) 的 `;;; Progress Indicator:` 一节。
+
+这是 mode line 上那只原地跑步的小人（`ᕕ( ᐛ )ᕗ`），只在一个地方被抬起来，见
+[daily-usage.md](daily-usage.md#卡住时的进度条) 的机理说明。
+
+| 想改什么 | 怎么改 |
+| --- | --- |
+| 换帧集（换成 `spinner` 包自带的其它动画） | `M-x config-set RET my/progress-indicator-style`，值是 `spinner-types` 里的 key |
+| 改快慢 | `M-x config-set RET my/progress-indicator-fps` |
+| 改皮卡丘本身的字形 | `my/progress-indicator-pikachu-frames`；**所有帧必须等宽**，否则 mode line 每帧都会抖 |
+| 给别的慢操作也加上 | 用 `my/with-progress-indicator` 包住那段代码，不要再写第二套 spinner |
+
+不要用 `spinner-stop` 去停它：`spinner-start` 返回的是一个**停止函数**而不是 spinner
+对象，把返回值交给 `spinner-stop` 是静默空操作，计时器会一直跑下去。`my/progress-indicator-stop`
+调用的就是那个闭包。
+
 ## 改启动 Dashboard 的内容或顺序
 
 启动画面的条目顺序在 `lisp/init-ui.el` 的 `dashboard-startupify-list` 里；Agenda 卡片

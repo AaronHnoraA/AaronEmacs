@@ -969,6 +969,96 @@ request, and only the first may render its answer."
 (add-hook 'dashboard-mode-hook #'my/dashboard-apply-ui)
 (add-hook 'after-load-theme-hook #'my/dashboard-apply-ui)
 
+;;; Progress Indicator:
+
+;; One activity indicator with one documented trigger, so that a long
+;; operation always looks the same wherever it is raised from.  The frames
+;; show a figure running in place rather than a bar filling up: the operations
+;; that raise it have a duration but no measurable progress, and a bar that
+;; never reaches its end reads as a stall.
+;;
+;; It renders through `mode-line-process' in the buffer that was current when
+;; the operation started, which for `find-file' is the buffer you are leaving,
+;; since the new one does not exist yet.  The animation runs during a blocking
+;; operation because TRAMP waits in `accept-process-output', which keeps
+;; running timers; a computation that never yields will freeze the frames,
+;; and that is the honest signal.
+;;
+;; The only trigger is registered at the end of this section.
+
+(declare-function spinner-start "spinner" (&optional type-or-object fps delay))
+(declare-function my/remote-per-file-subprocess-affordable-p "init-tramp"
+                  (&optional path))
+(defvar spinner-types)
+
+(defconst my/progress-indicator-pikachu-frames
+  ["ᕕ( ᐛ )ᕗ" "ᕗ( ᐛ )ᕕ" "ᕕ( ᐖ )ᕗ" "ᕗ( ᐖ )ᕕ"]
+  "Frames of the figure that runs in place while an operation blocks.
+Every frame occupies the same number of columns; a frame of another width
+makes the rest of the mode line shift on each tick.")
+
+(config-defvar my/progress-indicator-style 'pikachu
+  "Frame set of the progress indicator, as a key in `spinner-types'.
+`pikachu' is this configuration's own entry; the other keys come from the
+`spinner' package."
+  :type 'symbol :group 'ui)
+
+(config-defvar my/progress-indicator-fps 8
+  "Frames per second of the progress indicator."
+  :type 'number :group 'ui)
+
+(defvar my/progress-indicator--stop-function nil
+  "Function that stops the running indicator, or nil when none runs.
+`spinner-start' returns a closure, not a spinner object.  Handing that
+return value back to `spinner-stop' is a silent no-op, and the frame timer
+then keeps ticking for the life of the buffer; only the closure stops it.")
+
+(defun my/progress-indicator-start ()
+  "Show the progress indicator in the current buffer's mode line."
+  (require 'spinner)
+  (unless (assq 'pikachu spinner-types)
+    (push (cons 'pikachu my/progress-indicator-pikachu-frames) spinner-types))
+  ;; A second start replaces the first rather than leaving its timer behind.
+  (my/progress-indicator-stop)
+  (setq my/progress-indicator--stop-function
+        (spinner-start my/progress-indicator-style my/progress-indicator-fps))
+  (force-mode-line-update t))
+
+(defun my/progress-indicator-stop ()
+  "Hide the progress indicator and cancel its frame timer."
+  (when my/progress-indicator--stop-function
+    (funcall my/progress-indicator--stop-function)
+    (setq my/progress-indicator--stop-function nil)
+    (force-mode-line-update t)))
+
+(defmacro my/with-progress-indicator (&rest body)
+  "Run BODY with the progress indicator in the mode line.
+The indicator is removed when BODY returns, signals, or is quit."
+  (declare (indent 0) (debug t))
+  `(progn
+     (my/progress-indicator-start)
+     (unwind-protect (progn ,@body)
+       (my/progress-indicator-stop))))
+
+;; The one trigger: visiting a file whose route pays its own shell round trip
+;; per operation, which is the case where `find-file' blocks long enough to
+;; look hung.  The cost is asked from the selected Remote backend rather than
+;; from `file-remote-p', so a batched remote backend such as tramp-rpc opens
+;; without the indicator and a future slow backend raises it without this
+;; module learning anything about placement.
+;;
+;; This is the "during" half of the slow-open feedback.  The "after" half is
+;; `my/find-file-feedback-a' in init-tramp.el, which reports the elapsed time
+;; once the file is open.  The two are deliberately separate advices: this one
+;; only draws, that one only measures.
+(defun my/progress-indicator-find-file-a (fn filename &rest args)
+  "Run FN on FILENAME with the progress indicator when the route is slow."
+  (if (my/remote-per-file-subprocess-affordable-p filename)
+      (apply fn filename args)
+    (my/with-progress-indicator (apply fn filename args))))
+
+(advice-add 'find-file :around #'my/progress-indicator-find-file-a)
+
 ;;; End of Line
 (setopt eol-mnemonic-unix " LF "
         eol-mnemonic-mac  " CR "
