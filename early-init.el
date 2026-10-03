@@ -228,7 +228,7 @@ both call it."
          (tool-bar-lines . 0)
          (vertical-scroll-bars . nil)
          (horizontal-scroll-bars . nil)
-         (alpha . 94)
+         (alpha . 96)
          ,@(when my/gui-undecorated
              '((undecorated . t)))
          ,@(when (integerp my/gui-internal-border-width)
