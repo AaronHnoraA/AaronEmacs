@@ -1308,8 +1308,9 @@ modules can keep dispatching on it."
 
 (defun my/lsp-mode-start-now ()
   "Start lsp-mode after the target environment is ready."
-  (if (and my/language-server-runtime-required
-           (not (eq my/language-server-runtime-state 'ready)))
+  (if (or remote-buffer-disconnected-p
+          (and my/language-server-runtime-required
+               (not (eq my/language-server-runtime-state 'ready))))
       (setq my/lsp-mode--start-request nil)
   (let ((report-missing my/language-server--manual-start)
         (default-directory (my/language-server--project-root-for-buffer)))
@@ -1360,7 +1361,10 @@ modules can keep dispatching on it."
 (defun my/lsp-mode-ensure ()
   "Start `lsp-mode' for explicitly registered major modes."
   (interactive)
-  (when (eq (my/language-server-preferred-backend) 'lsp-mode)
+  (when (called-interactively-p 'any)
+    (setq-local remote-buffer-disconnected-p nil))
+  (when (and (not remote-buffer-disconnected-p)
+             (eq (my/language-server-preferred-backend) 'lsp-mode))
     (unless (or my/lsp-mode--waiting-for-direnv
                 (bound-and-true-p lsp-managed-mode)
                 (my/lsp-mode--start-request-active-p))
@@ -1423,8 +1427,11 @@ workspace; an ancestor `.envrc' leaves a more specific project root intact."
   "Route lsp-mode startup through one owning Remote workspace."
   ;; lsp-deferred can invoke `lsp' from an idle timer created before the
   ;; kernel changed.  Check again at that actual connection boundary.
-  (if (and my/language-server-runtime-required
-           (not (eq my/language-server-runtime-state 'ready)))
+  (when (called-interactively-p 'any)
+    (setq-local remote-buffer-disconnected-p nil))
+  (if (or remote-buffer-disconnected-p
+          (and my/language-server-runtime-required
+               (not (eq my/language-server-runtime-state 'ready))))
       (setq my/lsp-mode--start-request nil)
   (let* ((root (my/language-server--project-root-for-buffer))
          (default-directory (or root default-directory))
@@ -2384,6 +2391,18 @@ only enforce process termination; they never send a second shutdown RPC."
 
 (add-hook 'prog-mode-hook #'my/language-server-ensure-deferred)
 
+(defun my/language-server--disconnect-buffer-h ()
+  "Stop deferred diagnostics and startup for an explicitly closed buffer."
+  (setq my/lsp-mode--start-request nil
+        my/lsp-mode--waiting-for-direnv nil
+        my/language-server--waiting-for-runtime nil)
+  (my/lsp-remote-completion--probe-clear t)
+  (when (bound-and-true-p flymake-mode)
+    (flymake-mode -1)))
+
+(add-hook 'remote-buffer-disconnect-hook
+          #'my/language-server--disconnect-buffer-h)
+
 (defun my/language-server--ensure-after-runtime ()
   "Start the preferred backend after runtime preparation has completed."
   (interactive)
@@ -2420,9 +2439,11 @@ only enforce process termination; they never send a second shutdown RPC."
 (defun my/language-server-ensure ()
   "Prepare the effective runtime, then start the preferred language server."
   (interactive)
-  (when (called-interactively-p 'interactive)
+  (when (called-interactively-p 'any)
+    (setq-local remote-buffer-disconnected-p nil)
     (setq my/language-server--manual-start t))
-  (unless (or my/language-server--waiting-for-runtime
+  (unless (or remote-buffer-disconnected-p
+              my/language-server--waiting-for-runtime
               (my/lsp-mode--start-request-active-p))
     (let ((state
            (my/language-server-runtime-prepare
@@ -2864,16 +2885,17 @@ templates (C `..', notebook `jcode'/`jmd') never reach the popup."
 After a trigger character such as `.' or `->' the group prefix is empty and
 Yasnippet or tempo would otherwise list every template beside member
 completions.  Punctuation keys like C `..' still appear because they end at
-point; a one-character key such as Python's `.' would match every trigger,
-so it stays reachable only by explicit expansion.  COMMAND, ARG and ARGS are
-the Company backend arguments."
+point; the math shortcuts `;' and `:' are also offered immediately.  Other
+one-character keys such as Python's `.' stay reachable by explicit expansion.
+COMMAND, ARG and ARGS are the Company backend arguments."
   (let ((result (apply fn command arg args)))
     (if (and (eq command 'candidates) (equal arg ""))
         (let ((bol (line-beginning-position)))
           (seq-filter
            (lambda (candidate)
              (let ((key (substring-no-properties candidate)))
-               (and (> (length key) 1)
+               (and (or (> (length key) 1)
+                        (member key '(";" ":")))
                     (looking-back (regexp-quote key) bol))))
            result))
       result)))

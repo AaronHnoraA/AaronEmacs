@@ -49,3 +49,13 @@ Agent Fleet 是 [Herdr](https://github.com/herdrdev/herdr) 的 Emacs 前端：ag
 **P2：持久的并行尝试组。** 依赖 P1。组与成员存在 kernel，聚合规则借用上游：全部 done 才算 done，缺失成员算 failed，一个成员完成不终止其他成员。Inbox 中以组为单位显示，组内并排比较各成员的 diff。最终选用哪个结果由人决定，不自动合并。
 
 **不做：** Herdr 客户端、PTY 状态识别、Ghostel attach、第二个 dashboard、`$EDITOR` 桥（等确实需要终端 agent 时，再在终端层单独评估）。
+
+## 本轮落地与验证（P1）
+
+- [`noema-agent-worktree.el`](../site-lisp/noema/lisp/noema-agent-worktree.el)：`C-c A w` / `noema-agent-worktree-start` 从 Project workspace 当前所在的分支切出 `noema/<名字>`，在仓库旁边的 `<仓库名>.noema-worktrees/<名字>/` 建 linked worktree，在 workspace 在 worktree 中的对应目录启动 Codex/Claude/OpenCode，会话登记在原 Project 下，名为 `worktree/<名字>`。分出点记在 `branch.<分支>.noemaBase`，它同时标记这个 worktree 是 Noema 建的。持久 Session 本来就记录 `executionTarget`，所以恢复会话会回到原来的 worktree，不需要改 kernel。
+- 放置：所有 Git 调用都经 `process-file` 在 Emacs 目录中执行，传给 Git 的是 checkout 内的相对路径。Git 打印的目标原生路径只在原生路径之间比较，不拼回 Emacs 名，因此本机、`/fs:local:` 与远程 target 走同一条代码路径。临时 buffer 里会带上调用方的 `process-environment`/`exec-path`。
+- 发现 1 的处理：[`noema-context.el`](../site-lisp/noema/lisp/noema-context.el) 把主 checkout 文件的引用改写成会话 worktree 里的同名文件，比较用 `file-in-directory-p`，会解析符号链接（Git 打印的是解析后的路径）。worktree 里没有这个文件就报错，不会退回主 checkout。区域引用的行号仍取自正在编辑的 buffer。
+- 审阅：Sessions 列表与 Inbox 新增 `m`（Magit status）和 `d`。worktree 会话的 `d` 是工作区对分出点 merge-base 的 diff，已提交和未提交的改动一起显示；普通会话只显示未提交改动。
+- 清理：`noema-agent-worktree-remove` 只列出 Noema 建的 worktree。还有会话在里面工作时拒绝删除（加 force 也一样）；有未提交改动时需要前缀参数；分支始终保留。
+- 测试：[`noema-agent-worktree-tests.el`](../site-lisp/noema/test/elisp/noema-agent-worktree-tests.el) 用真实临时仓库覆盖了 9 项：创建与重名拒绝、子目录定位、主 checkout 引用改写与缺文件报错、经符号链接的改写、调用方环境保留、`noema-context` 引用、列出与删除的三道保护、diff 从分出点开始、名字规整。已加入 `make research-test`，和 `noema-context` 测试一起 38/38 通过；改动文件 byte-compile 无警告。另用 `/fs:local:` 逻辑路径实际跑了创建、checkout、引用改写和列出，结果与原生路径一致。
+- **未完成**：Aaron-PC 与 Aaron-PC-Remote 本轮 SSH 都连不上，远程 target 的真机回归还没有跑。按 [remote-parity](remote-parity.md)，远程这一列仍算未验证。P2（持久的并行尝试组）需要 kernel schema，留待下一轮。

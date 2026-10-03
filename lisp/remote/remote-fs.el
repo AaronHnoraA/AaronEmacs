@@ -490,6 +490,27 @@ a native path would silently substitute the client machine's HOME."
 Native paths and `fs://local/' URIs belong to the `local' target."
   (remote-fs-target-id (remote-canonicalize-file-name file-name)))
 
+(defun remote-buffer-target (&optional buffer)
+  "Return BUFFER's logical target owner without accessing files.
+File and Dired buffers use their path identity.  Process buffers retain their
+explicit owner after exit.  Other buffers count only when their directory is
+an explicit logical or TRAMP path; a scratch buffer's native directory alone
+does not make it an owned development buffer."
+  (with-current-buffer (or buffer (current-buffer))
+    (or (and buffer-file-name
+             (remote-file-name-target buffer-file-name))
+        remote-buffer-target-id
+        (when-let* ((process (get-buffer-process (current-buffer))))
+          (or (when-let* ((context (process-get process 'remote-context)))
+                (and (remote-context-p context)
+                     (remote-context-target-id context)))
+              (when-let* ((route (process-get process 'remote-route)))
+                (and (remote-route-p route) (remote-route-target-id route)))))
+        (and (or (derived-mode-p 'dired-mode)
+                 (remote-fs-file-name-p default-directory)
+                 (file-remote-p default-directory))
+             (remote-file-name-target default-directory)))))
+
 (defun remote-file-equal-p (left right)
   "Return non-nil when LEFT and RIGHT identify the same logical file.
 The comparison deliberately ignores which physical link currently serves the
@@ -1973,10 +1994,15 @@ returning functions on the full contract path."
       (signal (car last-error) (cdr last-error)))))
 
 (defun remote-fs-handle-file-remote-p
-    (file-name &optional identification _connected)
-  "Implement `file-remote-p' for logical FILE-NAME."
+    (file-name &optional identification connected)
+  "Implement `file-remote-p' for logical FILE-NAME.
+With CONNECTED, answer only while the target has an open session, as TRAMP
+does.  Background callers such as auto-revert use that query to avoid
+reopening a connection the user has just closed."
   (let ((target (remote-fs-target-id file-name)))
-    (unless (equal target "local")
+    (unless (or (equal target "local")
+                (and connected
+                     (not (remote-connection-target-open-p target))))
       (pcase identification
         ((or 'nil 't) (format "/fs:%s:" target))
         ('method "fs")

@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Blockquote
+# key: bq
+# group: Markdown structure
+# --
+> ${1:Quote}$0

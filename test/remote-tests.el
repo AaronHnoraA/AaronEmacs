@@ -1353,6 +1353,59 @@ returns, so this covers a different ownership window from backend cancellation."
         (funcall scheduled)
         (should (equal delivered (list environment nil)))))))
 
+(ert-deftest remote-direnv-disconnect-cancels-refresh-and-own-export-waiters ()
+  "Retained edits must not reopen a target through delayed .envrc discovery."
+  (let ((direnv--refresh-timers (make-hash-table :test #'eq))
+        (direnv--export-waiters (make-hash-table :test #'equal))
+        (root "/fs:box:/work/")
+        (other (generate-new-buffer " *direnv-other-waiter*")))
+    (unwind-protect
+        (with-temp-buffer
+          (setq default-directory root)
+          (direnv--schedule-buffer-refresh)
+          (let ((timer (gethash (current-buffer) direnv--refresh-timers)))
+            (should (timerp timer))
+            (direnv--queue-export-waiter root (current-buffer) #'ignore)
+            (direnv--queue-export-waiter root other #'ignore)
+            (setq-local remote-buffer-disconnected-p t)
+            (direnv--disconnect-buffer-h)
+            (should-not (gethash (current-buffer) direnv--refresh-timers))
+            (should-not (memq timer timer-idle-list))
+            (should (equal (mapcar #'car (gethash root direnv--export-waiters))
+                           (list other)))
+            (cl-letf (((symbol-function 'direnv--envrc-root)
+                       (lambda (&rest _) (ert-fail "Closed buffer probed .envrc")))
+                      ((symbol-function 'run-with-idle-timer)
+                       (lambda (&rest _) (ert-fail "Closed buffer queued refresh"))))
+              ;; A callback can already have been selected by the timer loop.
+              (apply (timer--function timer) (timer--args timer))
+              (direnv--maybe-update-environment)
+              (should (eq (direnv-environment-ensure-async) 'cancelled)))))
+      (kill-buffer other))))
+
+(ert-deftest remote-direnv-disconnect-blocks-busy-retry-and-export-delivery ()
+  "In-flight completions must not apply environments or resume consumers."
+  (with-temp-buffer
+    (let ((direnv--export-waiters (make-hash-table :test #'equal))
+          (root "/fs:box:/work/")
+          retry)
+      (cl-letf (((symbol-function 'direnv--transport-busy-p) (lambda () t))
+                ((symbol-function 'run-at-time)
+                 (lambda (_delay _repeat function &rest args)
+                   (setq retry (lambda () (apply function args)))))
+                ((symbol-function 'direnv--envrc-root)
+                 (lambda (&rest _) (ert-fail "Cancelled retry probed .envrc")))
+                ((symbol-function 'remote-environment-ensure)
+                 (lambda (&rest _) (ert-fail "Cancelled export applied environment"))))
+        (let ((callback (lambda (&rest _) (ert-fail "Cancelled consumer resumed"))))
+          (should (eq (direnv-environment-ensure-async nil callback) 'pending))
+          (direnv--queue-export-waiter root (current-buffer) callback)
+          (setq-local remote-buffer-disconnected-p t)
+          (funcall retry)
+          ;; Simulate an export completing before its waiter is unregistered.
+          (direnv--apply-export-waiters root 'context nil)
+          (should-not (gethash root direnv--export-waiters)))))))
+
 (ert-deftest remote-direnv-contains-discovery-errors-inside-timer ()
   (remote-test-with-registry
     (with-temp-buffer

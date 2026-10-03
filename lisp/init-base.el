@@ -1580,8 +1580,8 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
 
 ;;(setq debug-on-quit t)
 
-;; The mode-line progress indicator lives in init-ui.el; see its "Progress
-;; Indicator" section for the frames, the trigger, and `my/with-progress-indicator'.
+;; Background activity (the mode-line indicator and the activity board) lives
+;; in init-activity.el, together with `my/with-activity'.
 
 
 (keymap-global-unset "C-x m")

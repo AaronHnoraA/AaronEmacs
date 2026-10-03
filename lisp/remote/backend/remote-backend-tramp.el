@@ -15,6 +15,11 @@
 (defvar tramp-rpc-ssh-options)
 (defvar tramp-rpc-use-controlmaster)
 
+(defvar remote-backend-tramp-explicit-cleanup nil
+  "Non-nil while TRAMP cleanup is intentionally closing a session.
+Transport-death observers must not report this as a failure.  Internal
+session replacement also binds this to avoid user-level target teardown.")
+
 (defconst remote-backend-tramp-capabilities
   '(file-read file-write directory metadata
     process-sync process-async pty watch lsp environment
@@ -397,8 +402,178 @@ property the same way TRAMP marks static defaults, so it is not persisted."
     (when (and (stringp physical)
                (tramp-tramp-file-p physical))
       (require 'tramp-cmds)
-      (tramp-cleanup-connection
-       (tramp-dissect-file-name physical nil)))))
+      ;; Session invalidation also runs for stale handles and reconnects.
+      ;; Only the user's cleanup entry point tears down the whole target.
+      (let ((remote-backend-tramp-explicit-cleanup t))
+        (tramp-cleanup-connection
+         (tramp-dissect-file-name physical nil))))))
+
+;;;; Explicit TRAMP cleanup
+
+;; `tramp-cleanup-connection' and `tramp-cleanup-all-connections' are the
+;; user's TRAMP-level "disconnect" commands.  Without this bridge the
+;; framework only sees their side effect -- a transport process dying -- and
+;; treats it as a network failure: workspaces turn `disconnected' and
+;; auto-reconnect a few seconds later, so the cleanup is silently undone.
+
+(declare-function remote-workspace-disconnect-target "remote-workspace"
+                  (target-id &optional reason))
+(declare-function remote-workspace-routes "remote-workspace" (workspace))
+(declare-function remote-workspace-target-id "remote-workspace" (workspace))
+(defvar remote-workspaces)
+
+(defconst remote-backend-tramp--plugin-ids '("tramp" "tramp-rpc")
+  "Backend IDs whose sessions are owned by a TRAMP connection.")
+
+(defun remote-backend-tramp--physical-matches-p (physical vec)
+  "Return non-nil when PHYSICAL names VEC's TRAMP connection.
+A nil VEC matches every TRAMP name."
+  (and (stringp physical)
+       (tramp-tramp-file-p physical)
+       (or (null vec)
+           (condition-case nil
+               (tramp-file-name-equal-p
+                (tramp-dissect-file-name physical nil) vec)
+             (error nil)))))
+
+(defun remote-backend-tramp--route-physical (route)
+  "Return ROUTE's physical target root, or nil when it cannot be projected."
+  (condition-case nil
+      (remote-backend-project-file-name
+       route (remote-make-file-name (remote-route-target-id route) "/"))
+    (error nil)))
+
+(defun remote-backend-tramp--disconnect-unpooled-target-h (target-id _reason)
+  "Clean TARGET-ID's legacy TRAMP handles even without a pooled session."
+  (let ((remote-backend-tramp-explicit-cleanup t))
+    (dolist (pipeline (remote-pipelines-for-target target-id))
+      (dolist (plugin (remote-pipeline-backend-ids pipeline))
+        (when (member plugin remote-backend-tramp--plugin-ids)
+          (when-let* ((physical
+                       (remote-backend-tramp--route-physical
+                        (remote-route-create
+                         :target-id target-id :pipeline-id (remote-link-id pipeline)
+                         :backend-id plugin))))
+            (require 'tramp-cmds)
+            ;; An optional backend may never have loaded its TRAMP method.
+            ;; Its projected root then has no connection objects to release.
+            (condition-case nil
+                (tramp-cleanup-connection (tramp-dissect-file-name physical))
+              (user-error nil))))))))
+
+(add-hook 'remote-target-disconnect-hook
+          #'remote-backend-tramp--disconnect-unpooled-target-h)
+
+(defun remote-backend-tramp--targets-for-vec (vec)
+  "Return target IDs whose TRAMP sessions or workspaces use VEC.
+A nil VEC selects every target with a TRAMP-owned session or workspace.
+Pooled sessions match by their retained physical handle.  A workspace whose
+session is already gone (for example while it waits to reconnect) matches by
+projecting its routes, so cleanup also cancels that pending reconnect."
+  (let (targets)
+    ;; Buffers can outlive their last session/workspace, including protected
+    ;; edits from a previous cleanup.  Resolve their identities before walking
+    ;; pipelines so legacy TRAMP buffers can register their logical target.
+    (dolist (buffer (buffer-list))
+      (ignore-errors (remote-buffer-target buffer)))
+    (maphash
+     (lambda (_id pipeline)
+       (when (and (seq-some
+                   (lambda (plugin)
+                     (member plugin remote-backend-tramp--plugin-ids))
+                   (remote-pipeline-backend-ids pipeline))
+                  (or (null vec)
+                      (remote-fs--link-matches-vector-p pipeline vec)))
+         (cl-pushnew (remote-link-target-id pipeline) targets :test #'equal)))
+     remote-links)
+    (maphash
+     (lambda (_key connection)
+       (when (and (member (remote-connection-plugin-id connection)
+                          remote-backend-tramp--plugin-ids)
+                  (remote-backend-tramp--physical-matches-p
+                   (remote-connection-handle connection) vec))
+         (cl-pushnew (remote-connection-target-id connection) targets
+                     :test #'equal)))
+     remote-connection-pool)
+    (when (and (boundp 'remote-workspaces)
+               (hash-table-p remote-workspaces))
+      (maphash
+       (lambda (_key workspace)
+         (let ((target-id (remote-workspace-target-id workspace)))
+           (unless (member target-id targets)
+             (when (seq-some
+                    (lambda (route)
+                      (and (member (remote-route-link-plugin-id route)
+                                   remote-backend-tramp--plugin-ids)
+                           (remote-backend-tramp--physical-matches-p
+                            (remote-backend-tramp--route-physical route)
+                            vec)))
+                    (remote-workspace-routes workspace))
+               (push target-id targets)))))
+       remote-workspaces))
+    (nreverse targets)))
+
+(defun remote-backend-tramp--disconnect-targets (vec reason)
+  "Disconnect every framework target using VEC, recording REASON.
+Return results by target.  Log errors so one failure cannot skip cleanup."
+  (let (results)
+    (when (fboundp 'remote-workspace-disconnect-target)
+      (dolist (target-id (remote-backend-tramp--targets-for-vec vec))
+        (condition-case err
+            (push (cons target-id
+                        (remote-workspace-disconnect-target target-id reason))
+                  results)
+          (error
+           (remote-log 'connection-error
+                       :target target-id
+                       :reason (symbol-name reason)
+                       :error (error-message-string err))))))
+    (nreverse results)))
+
+(defun remote-backend-tramp--report-cleanup (results)
+  "Report closed and protected buffers in per-target cleanup RESULTS."
+  (when results
+    (let ((closed 0) kept)
+      (dolist (entry results)
+        (cl-incf closed (or (plist-get (cdr entry) :buffers) 0))
+        (setq kept (append kept (plist-get (cdr entry) :kept-buffers))))
+      (message "Disconnected %s; %d buffers closed%s"
+               (string-join (mapcar #'car results) ", ") closed
+               (if kept
+                   (format "; kept unsaved/vetoed: %s" (string-join kept ", "))
+                 "")))))
+
+(defun remote-backend-tramp--cleanup-connection-a (function vec &rest args)
+  "Disconnect framework targets using VEC, then call FUNCTION.
+FUNCTION is `tramp-cleanup-connection'; ARGS are its optional flags.  A
+nested call (the backend closer below) runs FUNCTION directly."
+  (if (or remote-backend-tramp-explicit-cleanup
+          ;; TRAMP uses preservation flags for timeouts, failed handshakes
+          ;; and proxy maintenance.  Those are session-level operations.
+          (seq-some #'identity args)
+          (not (tramp-file-name-p vec)))
+      (apply function vec args)
+    (let ((remote-backend-tramp-explicit-cleanup t))
+      (let ((results (remote-backend-tramp--disconnect-targets
+                      vec 'tramp-cleanup)))
+        (prog1 (apply function vec args)
+          (remote-backend-tramp--report-cleanup results))))))
+
+(defun remote-backend-tramp--cleanup-all-connections-a (function &rest args)
+  "Disconnect every TRAMP-owned framework target, then call FUNCTION.
+FUNCTION is `tramp-cleanup-all-connections' and ARGS its arguments."
+  (if remote-backend-tramp-explicit-cleanup
+      (apply function args)
+    (let ((remote-backend-tramp-explicit-cleanup t))
+      (let ((results (remote-backend-tramp--disconnect-targets
+                      nil 'tramp-cleanup-all)))
+        (prog1 (apply function args)
+          (remote-backend-tramp--report-cleanup results))))))
+
+(advice-add 'tramp-cleanup-connection :around
+            #'remote-backend-tramp--cleanup-connection-a)
+(advice-add 'tramp-cleanup-all-connections :around
+            #'remote-backend-tramp--cleanup-all-connections-a)
 
 (defun remote-backend-tramp--channel-endpoint-value
     (endpoint key &optional default)

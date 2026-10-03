@@ -442,9 +442,10 @@
             (lambda (session)
               (equal (plist-get session :target) target-id))
             (remote-session-list)))
-          (should (buffer-live-p buffer))
+          (should-not (buffer-live-p buffer))
           (should (file-directory-p logical))
-          (should (eq (remote-open-folder target native-directory) buffer))
+          (setq buffer (remote-open-folder target native-directory))
+          (should (buffer-live-p buffer))
           (should (remote-workspace-live-p
                    (remote-get-workspace logical))))
       (when-let* ((workspace (remote-get-workspace logical)))

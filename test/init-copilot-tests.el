@@ -56,6 +56,30 @@
           (should available)
           (should (= mode-starts 2)))))))
 
+(ert-deftest my/copilot-disconnect-stops-buffer-and-cancels-deferred-start ()
+  (with-temp-buffer
+    (let (mode-args)
+      (setq-local copilot-mode t
+                  my/copilot--auto-enable-timer
+                  (run-with-idle-timer 30 nil #'my/copilot--enable-buffer
+                                       (current-buffer)))
+      (let ((timer my/copilot--auto-enable-timer))
+        (cl-letf (((symbol-function 'copilot-mode)
+                   (lambda (arg) (push arg mode-args)))
+                  ((symbol-function 'my/copilot-available-p)
+                   (lambda () (ert-fail "Disconnected buffer started Copilot")))
+                  ((symbol-function 'run-with-idle-timer)
+                   (lambda (&rest _) (ert-fail "Disconnected buffer queued startup"))))
+          (setq-local remote-buffer-disconnected-p t)
+          (my/copilot--disconnect-buffer-h)
+          (should (equal mode-args '(-1)))
+          (should-not my/copilot--auto-enable-timer)
+          (should-not (memq timer timer-idle-list))
+          (should-not (my/copilot-buffer-eligible-p))
+          (apply (timer--function timer) (timer--args timer))
+          (my/copilot-auto-enable-h)
+          (should (equal mode-args '(-1))))))))
+
 (ert-deftest my/copilot-cold-local-auto-start-waits-for-short-idle ()
   "The first native source visit must not wait for Copilot startup."
   (with-temp-buffer

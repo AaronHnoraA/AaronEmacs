@@ -549,6 +549,25 @@ REASON is recorded for observability."
       (remote-connection-invalidate route t 'configuration-removed))
     (length routes)))
 
+(defun remote-connection-target-open-p (target-id)
+  "Return non-nil when TARGET-ID has an open pooled session.
+This reads framework state only and never touches the network, so it is cheap
+enough for `file-remote-p''s CONNECTED query.  Explicit disconnect and a
+reported transport failure both remove the session, so a target reads as
+disconnected until something opens it again."
+  (catch 'open
+    (maphash
+     (lambda (_key connection)
+       (when (and (equal (remote-connection-target-id connection) target-id)
+                  (eq (remote-connection-state connection) 'open)
+                  (let ((runtime
+                         (remote-connection-pipeline-runtime connection)))
+                    (and (remote-pipeline-runtime-p runtime)
+                         (eq (remote-pipeline-runtime-state runtime) 'open))))
+         (throw 'open t)))
+     remote-connection-pool)
+    nil))
+
 (defun remote-connection-pool-clear (&optional disconnect)
   "Clear every pooled session, optionally asking backends to DISCONNECT."
   (interactive "P")

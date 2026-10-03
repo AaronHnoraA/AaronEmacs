@@ -213,6 +213,150 @@
             (should-not (remote-connection-pool-status)))
         (delete-directory directory t)))))
 
+(ert-deftest remote-disconnect-closes-target-buffers-and-protects-edits ()
+  "The same lifecycle closes native and logical buffers, with no file I/O."
+  (dolist (target '("local" "box"))
+    (remote-framework-test-with-registry
+      (let* ((directory (if (equal target "local")
+                            "/tmp/" (format "/fs:%s:/work/" target)))
+             (file (generate-new-buffer " *disconnect-file*"))
+             (dirty (generate-new-buffer " *disconnect-unsaved*"))
+             (dired (generate-new-buffer " *disconnect-dired*"))
+             (output (generate-new-buffer " *disconnect-output*"))
+             (vetoed (generate-new-buffer "disconnect-veto"))
+             (other (generate-new-buffer " *disconnect-other*"))
+             (scratch (generate-new-buffer " *disconnect-scratch*"))
+             (process (make-pipe-process :name "disconnect-owned"
+                                         :buffer output :noquery t))
+             (context (remote-context-create :target-id target))
+             result)
+        (unwind-protect
+            (progn
+              (dolist (buffer (list file dirty))
+                (with-current-buffer buffer
+                  (setq buffer-file-name (concat directory (buffer-name buffer))
+                        default-directory directory)))
+              (with-current-buffer dirty
+                (insert "keep this edit"))
+              (with-current-buffer dired
+                (setq default-directory directory major-mode 'dired-mode))
+              (with-current-buffer output
+                (insert "process output is not an unsaved file"))
+              (process-put process 'remote-context context)
+              (with-current-buffer vetoed
+                (setq-local remote-buffer-target-id target)
+                (add-hook 'kill-buffer-query-functions (lambda () nil) nil t))
+              (with-current-buffer other
+                (setq buffer-file-name "/fs:other:/work/other.c"))
+              ;; A native scratch directory has no explicit lifecycle owner.
+              (with-current-buffer scratch
+                (setq default-directory "/tmp/"))
+              (cl-letf (((symbol-function 'remote-connection-ensure)
+                         (lambda (&rest _) (ert-fail "Cleanup opened a session"))))
+                (setq result (remote-workspace-disconnect-target target)))
+              (dolist (buffer (list file dired output))
+                (should-not (buffer-live-p buffer)))
+              (should-not (process-live-p process))
+              (should (>= (plist-get result :buffers) 3))
+              (should (equal (sort (plist-get result :kept-buffers) #'string<)
+                             (sort (list (buffer-name dirty) (buffer-name vetoed))
+                                   #'string<)))
+              (should (buffer-local-value 'remote-buffer-disconnected-p dirty))
+              (with-current-buffer dirty
+                (should (buffer-modified-p))
+                (should (equal (buffer-string) "keep this edit")))
+              (should (buffer-live-p other))
+              (should (buffer-live-p scratch)))
+          (when (process-live-p process) (delete-process process))
+          (dolist (buffer (list file dirty dired output vetoed other scratch))
+            (when (buffer-live-p buffer)
+              (with-current-buffer buffer
+                (set-buffer-modified-p nil)
+                (let ((kill-buffer-query-functions nil)) (kill-buffer buffer))))))))))
+
+(ert-deftest remote-disconnect-consumer-errors-do-not-skip-other-closers ()
+  (remote-framework-test-with-registry
+    (with-temp-buffer
+      (setq-local remote-buffer-target-id "box")
+      (insert "protected work")
+      (setq buffer-file-name "/fs:box:/work/edited.c")
+      (let (buffer-closed target-closed)
+        (let ((remote-buffer-disconnect-hook
+               (list (lambda () (error "broken buffer consumer"))
+                     (lambda () (setq buffer-closed t))))
+              (remote-target-disconnect-hook
+               (list (lambda (&rest _) (error "broken target consumer"))
+                     (lambda (&rest _) (setq target-closed t)))))
+          (remote-workspace-disconnect-target "box")
+          (should buffer-closed)
+          (should target-closed)
+          (should (buffer-live-p (current-buffer)))
+          (set-buffer-modified-p nil))))))
+
+(ert-deftest remote-disconnect-cancels-only-own-target-background-work ()
+  (remote-framework-test-with-registry
+    (let ((remote-background-jobs (make-hash-table :test #'equal))
+          (remote-background-target-epochs (make-hash-table :test #'equal)))
+      (dolist (target '("box" "other"))
+        (remote-background-submit
+         (list 'probe target)
+         (lambda () (ert-fail "Cancelled job ran")) :target-id target))
+      (remote-workspace-disconnect-target "box")
+      (should-not (remote-background-job-list "box"))
+      (should (= (length (remote-background-job-list "other")) 1))
+      (remote-background-clear))))
+
+(ert-deftest remote-closing-workspace-does-not-schedule-recovery ()
+  (remote-framework-test-with-registry
+    (let* ((remote-background-jobs (make-hash-table :test #'equal))
+           (route (remote-route-create :target-id "box" :pipeline-id "box/ssh"))
+           (workspace (remote-workspace-create :id "closing" :key 'closing
+                                               :target-id "box" :state 'closing
+                                               :routes (list route))))
+      (puthash 'closing workspace remote-workspaces)
+      (remote-workspace-handle-transport-failure
+       route '(remote-transport-error "intentional shutdown"))
+      (should (eq (remote-workspace-state workspace) 'closing))
+      (should-not (remote-background-job-list)))))
+
+(ert-deftest remote-tramp-target-disconnect-cleans-unpooled-handles ()
+  (remote-framework-test-with-registry
+    (require 'tramp-cmds)
+    (remote-register-target "box")
+    (remote-register-pipeline
+     "box" "ssh" '("tramp" "tramp-rpc")
+     :config '(:method "ssh" :host "cleanup-box"))
+    (let ((tramp-methods (cons '("rpc") tramp-methods)) cleaned)
+      (cl-letf (((symbol-function 'tramp-cleanup-connection)
+                 (lambda (vec &rest _)
+                   (should remote-backend-tramp-explicit-cleanup)
+                   (push (tramp-file-name-method vec) cleaned))))
+        (remote-workspace-disconnect-target "box"))
+      (should (equal (sort cleaned #'string<) '("rpc" "ssh"))))))
+
+(ert-deftest remote-routed-process-retains-stdout-and-stderr-buffer-ownership ()
+  "Native stderr directories must not lose their target after process exit."
+  (remote-framework-test-with-registry
+    (let* ((output (generate-new-buffer " *routed-owned-output*"))
+           (stderr (generate-new-buffer " *routed-owned-stderr*"))
+           (process (remote-make-process
+                     :name "routed-owned-process"
+                     :command '("sh" "-c" "printf done; printf err >&2")
+                     :remote-context (remote-context "/tmp/")
+                     :buffer output :stderr stderr :noquery t)))
+      (unwind-protect
+          (progn
+            (while (process-live-p process) (accept-process-output process 0.1))
+            (should (equal (remote-buffer-target output) "local"))
+            (should (equal (remote-buffer-target stderr) "local"))
+            (let ((result (remote-workspace-disconnect-target "local")))
+              (should (= (plist-get result :buffers) 2)))
+            (should-not (buffer-live-p output))
+            (should-not (buffer-live-p stderr)))
+        (when (process-live-p process) (delete-process process))
+        (dolist (buffer (list output stderr))
+          (when (buffer-live-p buffer) (kill-buffer buffer)))))))
+
 (ert-deftest remote-board-folder-prompt-completes-on-selected-target ()
   (remote-framework-test-with-registry
     (remote-fs-install)

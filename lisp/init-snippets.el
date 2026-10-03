@@ -179,8 +179,10 @@ as a Noema Jupyter `jcode' command."
 
 (defun my/yas-setup-auctex-extra-modes ()
   "Make AUCTeX buffers reuse `latex-mode' and `tex-mode' snippets."
-  (yas-activate-extra-mode 'latex-mode)
-  (yas-activate-extra-mode 'tex-mode))
+  (when (and (featurep 'yasnippet)
+             (derived-mode-p 'LaTeX-mode 'plain-TeX-mode))
+    (yas-activate-extra-mode 'latex-mode)
+    (yas-activate-extra-mode 'tex-mode)))
 
 (defun my/yas-setup-treesit-extra-modes ()
   "Make tree-sitter buffers reuse snippets from their original major modes."
@@ -224,6 +226,28 @@ the same catalog without putting filesystem work on the expansion hot path."
 
 (advice-add 'yas-reload-all :after
             #'my/yas-load-noema-generated-tex-snippets)
+
+;; These punctuation shortcuts are editor-specific.  Noema scans the shared
+;; snippets/ tree itself and owns its browser-side math shortcuts separately.
+(defconst my/yas-emacs-math-snippets
+  '((tex-mode
+     (";" "$${1:a}$ $0" "Inline math"
+      (not (derived-mode-p 'markdown-mode 'noema-research-mode))
+      ("LaTeX local"))
+     (":" "$$\n${1:a}\n$$\n$0" "Display math"
+      (not (derived-mode-p 'markdown-mode 'noema-research-mode))
+      ("LaTeX local")))
+    (markdown-mode
+     (";" "\\\\($1\\\\) $0" "Inline math" nil ("Noema local"))
+     (":" "\\\\[\n$1\n\\\\]\n$0" "Display math" nil ("Noema local"))))
+  "Yasnippet definitions kept on the Emacs side of the shared catalog.")
+
+(defun my/yas-define-emacs-math-snippets ()
+  "Restore Emacs-only punctuation snippets after a Yasnippet reload."
+  (dolist (entry my/yas-emacs-math-snippets)
+    (yas-define-snippets (car entry) (cdr entry))))
+
+(add-hook 'yas-after-reload-hook #'my/yas-define-emacs-math-snippets)
 
 (defun my/yas-org-cleanup-trailing-newline ()
   "Silently delete a trailing newline left by a snippet at point.
@@ -283,6 +307,7 @@ compares it with the sources, so a snippet added after the last
    (text-mode . my/yas-enable-for-source-buffer)
    (org-mode . my/yas-enable-for-source-buffer)
    (org-mode . my/yas-setup-org-behavior)
+   (yas-minor-mode . my/yas-setup-auctex-extra-modes)
    (yas-minor-mode . my/yas-setup-treesit-extra-modes)
    (LaTeX-mode . my/yas-setup-auctex-extra-modes)
    (plain-TeX-mode . my/yas-setup-auctex-extra-modes))

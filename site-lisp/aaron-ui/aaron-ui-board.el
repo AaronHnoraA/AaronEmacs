@@ -648,8 +648,9 @@ PROPERTIES is an extra text-property plist applied to the whole row."
                  aaron-ui-board--row-action   ,action
                  mouse-face                   aaron-ui-board-row-highlight
                  help-echo                    ,(or help "RET/mouse-1: open")
-                 keymap                       ,aaron-ui-board-row-map
-                 local-map                    ,aaron-ui-board-row-map)
+                 ;; `keymap' adds row activation; `local-map' would replace
+                 ;; the owning mode's navigation and action bindings.
+                 keymap                       ,aaron-ui-board-row-map)
                properties))
       (cons start end))))
 

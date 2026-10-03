@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Numbered list item
+# key: ol
+# group: Markdown structure
+# --
+1. ${1:Item}$0

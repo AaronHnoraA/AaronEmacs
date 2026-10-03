@@ -14,6 +14,7 @@
 
 ;;; ── GitHub Copilot ────────────────────────────────────────────────────────
 (declare-function copilot-server-executable "copilot" ())
+(declare-function copilot-mode "copilot" (&optional arg))
 (declare-function copilot--command "copilot" ())
 (declare-function copilot--handle-notification "copilot" (connection method params))
 (declare-function copilot--handle-request "copilot" (connection method params))
@@ -863,6 +864,7 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
 (defun my/copilot-buffer-eligible-p ()
   "Return non-nil when the current buffer is cheap enough for Copilot."
   (and (not buffer-read-only)
+       (not remote-buffer-disconnected-p)
        (not (minibufferp))
        (or (not my/copilot-disable-on-remote)
            (not (file-remote-p default-directory)))
@@ -897,40 +899,50 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
     (cancel-timer my/copilot--auto-enable-timer))
   (setq my/copilot--auto-enable-timer nil))
 
+(defun my/copilot--disconnect-buffer-h ()
+  "Stop this buffer's Copilot subscription without stopping the shared server."
+  (my/copilot--cancel-auto-enable)
+  (when (bound-and-true-p copilot-mode)
+    (copilot-mode -1)))
+
+(add-hook 'remote-buffer-disconnect-hook #'my/copilot--disconnect-buffer-h)
+
 (defun my/copilot--enable-buffer (buffer)
   "Enable Copilot in BUFFER when it is still eligible."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (setq my/copilot--auto-enable-timer nil)
-      (when (my/copilot-available-p)
+      (when (and (not remote-buffer-disconnected-p)
+                 (my/copilot-available-p))
         (copilot-mode 1)))))
 
 (defun my/copilot-auto-enable-h ()
   "Auto-enable `copilot-mode' in supported editing buffers.
 Remote, configured modes, and a cold local library start after idle."
   (my/copilot--cancel-auto-enable)
-  (let* ((remote-p (file-remote-p default-directory))
-         (configured-mode-p
-          (and my/copilot-deferred-modes
-               (apply #'derived-mode-p my/copilot-deferred-modes)))
-         (delay
-          (cond
-           ((or (and my/copilot-defer-on-remote remote-p)
-                configured-mode-p)
-            (or my/copilot-deferred-idle-delay 1.5))
-           ((and (not remote-p)
-                 (not (featurep 'copilot)))
-            my/copilot-cold-local-idle-delay))))
-    (if delay
-        (progn
-          (setq my/copilot--auto-enable-timer
-                (run-with-idle-timer delay nil
-                                     #'my/copilot--enable-buffer
-                                     (current-buffer)))
-          (add-hook 'kill-buffer-hook #'my/copilot--cancel-auto-enable nil t)
-          (add-hook 'change-major-mode-hook #'my/copilot--cancel-auto-enable nil t))
-      (when (my/copilot-available-p)
-        (copilot-mode 1)))))
+  (unless remote-buffer-disconnected-p
+    (let* ((remote-p (file-remote-p default-directory))
+           (configured-mode-p
+            (and my/copilot-deferred-modes
+                 (apply #'derived-mode-p my/copilot-deferred-modes)))
+           (delay
+            (cond
+             ((or (and my/copilot-defer-on-remote remote-p)
+                  configured-mode-p)
+              (or my/copilot-deferred-idle-delay 1.5))
+             ((and (not remote-p)
+                   (not (featurep 'copilot)))
+              my/copilot-cold-local-idle-delay))))
+      (if delay
+          (progn
+            (setq my/copilot--auto-enable-timer
+                  (run-with-idle-timer delay nil
+                                       #'my/copilot--enable-buffer
+                                       (current-buffer)))
+            (add-hook 'kill-buffer-hook #'my/copilot--cancel-auto-enable nil t)
+            (add-hook 'change-major-mode-hook #'my/copilot--cancel-auto-enable nil t))
+        (when (my/copilot-available-p)
+          (copilot-mode 1))))))
 
 (defun my/copilot-completion-visible-p ()
   "Return non-nil when Copilot currently shows a completion overlay."

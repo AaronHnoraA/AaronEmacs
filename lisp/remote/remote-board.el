@@ -935,8 +935,7 @@ An open workspace requires a prefix argument to force a new transport."
     (remote-task-run-command logical)))
 
 (defun remote-board-disconnect-target (&optional target)
-  "Close TARGET's workspaces and pooled sessions.
-Visited buffers remain in Emacs and can reconnect on their next file access."
+  "Close TARGET's resources, sessions and buffers, preserving unsaved work."
   (interactive
    (list (if (derived-mode-p 'remote-board-mode)
              (remote-board-target-at-point)
@@ -946,25 +945,21 @@ Visited buffers remain in Emacs and can reconnect on their next file access."
                    (or (remote-get-target target)
                        (error "Unknown target: %S" target))))
          (target-id (remote-target-id target))
-         (workspaces
-          (seq-filter
-           (lambda (workspace)
-             (equal (remote-workspace-target-id workspace) target-id))
-           (hash-table-values remote-workspaces)))
-         (closed-sessions 0))
-    (dolist (workspace workspaces)
-      (remote-workspace-close workspace 'target-disconnect))
-    (dolist (pipeline (remote-pipelines-for-target target-id))
-      (cl-incf closed-sessions
-              (remote-connection-invalidate-link
-               (remote-link-id pipeline) t 'target-disconnect)))
+         (result (remote-workspace-disconnect-target
+                  target-id 'target-disconnect))
+         (workspaces (plist-get result :workspaces))
+         (sessions (plist-get result :sessions)))
     (remhash target-id remote-board-ssh-statuses)
     (remote-board-refresh-status)
-    (message "Disconnected %s (%d workspace%s, %d session%s)"
+    (message "Disconnected %s (%d workspace%s, %d session%s, %d buffers closed)%s"
              (remote-target-label target)
-             (length workspaces) (if (= (length workspaces) 1) "" "s")
-             closed-sessions (if (= closed-sessions 1) "" "s"))
-    (list :workspaces (length workspaces) :sessions closed-sessions)))
+             workspaces (if (= workspaces 1) "" "s")
+             sessions (if (= sessions 1) "" "s")
+             (plist-get result :buffers)
+             (if-let* ((kept (plist-get result :kept-buffers)))
+                 (format "; kept unsaved/vetoed: %s" (string-join kept ", "))
+               ""))
+    result))
 
 (defun remote-edit-config ()
   "Visit `remote-config-file'."

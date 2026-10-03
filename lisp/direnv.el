@@ -430,7 +430,7 @@ from resuming."
                    (remhash root direnv--export-waiters))))
     (dolist (waiter waiters)
       (pcase-let ((`(,buffer . ,callbacks) waiter))
-        (when (buffer-live-p buffer)
+        (when (direnv--buffer-refreshable-p buffer)
           (with-current-buffer buffer
             (if error
                 (progn
@@ -544,15 +544,17 @@ two arguments: the environment and an error."
     (&optional path callback)
   "Ensure PATH's direnv environment without blocking on `direnv export'.
 Return `ready' when no export is needed and `pending' when CALLBACK will run
-later.  CALLBACK receives two arguments: environment and error.  It is called
-only for a pending request, in the requesting buffer."
+later.  Explicit buffer disconnect cancels requests, returning `cancelled'
+and discarding pending callbacks.  CALLBACK receives two arguments:
+environment and error, in the requesting buffer."
   (let ((buffer (current-buffer)))
     (cond
+     (remote-buffer-disconnected-p 'cancelled)
      ((direnv--transport-busy-p)
       (run-at-time
        direnv-transport-busy-retry-delay nil
        (lambda (target target-path done)
-         (when (buffer-live-p target)
+         (when (direnv--buffer-refreshable-p target)
            (with-current-buffer target
              (let ((state
                     (direnv-environment-ensure-async target-path done)))
@@ -590,7 +592,7 @@ only for a pending request, in the requesting buffer."
                     (run-at-time
                      0 nil
                      (lambda (target done failure)
-                       (when (buffer-live-p target)
+                       (when (direnv--buffer-refreshable-p target)
                          (with-current-buffer target
                            (funcall done nil failure))))
                      buffer callback recent-error))
@@ -607,7 +609,7 @@ only for a pending request, in the requesting buffer."
            (run-at-time
             0 nil
             (lambda (target done failure)
-              (when (buffer-live-p target)
+              (when (direnv--buffer-refreshable-p target)
                 (with-current-buffer target
                   (funcall done nil failure))))
             buffer callback err))
@@ -721,6 +723,8 @@ FORCE-SUMMARY reports the selected target and source."
   "Refresh the current buffer for FILE-NAME.
 With FORCE-SUMMARY, report the selected target and source."
   (interactive)
+  (when (called-interactively-p 'any)
+    (setq-local remote-buffer-disconnected-p nil))
   (direnv-invalidate-root-cache)
   (direnv-update-directory-environment
    (direnv--directory file-name) force-summary))
@@ -733,10 +737,30 @@ With FORCE-SUMMARY, report the selected target and source."
       (cancel-timer timer))
     (remhash buffer direnv--refresh-timers)))
 
+(defun direnv--buffer-refreshable-p (buffer)
+  "Whether BUFFER may still consume an automatic environment refresh."
+  (and (buffer-live-p buffer)
+       (not (buffer-local-value 'remote-buffer-disconnected-p buffer))))
+
+(defun direnv--disconnect-buffer-h ()
+  "Cancel this buffer's refresh and pending export consumers.
+Other buffers waiting on the same export keep their callbacks."
+  (direnv--cancel-refresh)
+  (let ((buffer (current-buffer)))
+    (maphash
+     (lambda (root waiters)
+       (let ((remaining (assq-delete-all buffer waiters)))
+         (if remaining
+             (puthash root remaining direnv--export-waiters)
+           (remhash root direnv--export-waiters))))
+     direnv--export-waiters)))
+
+(add-hook 'remote-buffer-disconnect-hook #'direnv--disconnect-buffer-h)
+
 (defun direnv--schedule-buffer-refresh (&optional buffer delay)
   "Schedule an automatic direnv refresh for BUFFER after DELAY seconds."
   (let ((buffer (or buffer (current-buffer))))
-    (when (buffer-live-p buffer)
+    (when (direnv--buffer-refreshable-p buffer)
       (direnv--cancel-refresh buffer)
       (puthash
        buffer
@@ -749,7 +773,7 @@ With FORCE-SUMMARY, report the selected target and source."
 If a TRAMP transaction is active, defer the complete discovery operation;
 even looking for `.envrc' would otherwise be a forbidden reentrant call."
   (remhash buffer direnv--refresh-timers)
-  (when (buffer-live-p buffer)
+  (when (direnv--buffer-refreshable-p buffer)
     (with-current-buffer buffer
       (condition-case err
           (cond

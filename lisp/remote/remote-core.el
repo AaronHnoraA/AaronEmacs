@@ -236,6 +236,21 @@ operations; failure and lifecycle events are always recorded."
 (defvar remote-current-route nil
   "Dynamically bound `remote-route' for the active operation.")
 
+(defvar-local remote-buffer-target-id nil
+  "Logical owner of a routed process buffer, retained after process exit.")
+
+(defvar-local remote-buffer-disconnected-p nil
+  "Non-nil after explicit disconnect retained this buffer's unsaved work.
+Automatic consumers must not reopen its target; an explicit start may clear it.")
+
+(defvar remote-buffer-disconnect-hook nil
+  "Hook run in each target buffer before explicit disconnect closes resources.
+Consumers stop queued per-buffer work, including work in retained edit buffers.")
+
+(defvar remote-target-disconnect-hook nil
+  "Backend cleanup hook run with target ID and reason after explicit teardown.
+Backends release compatibility connections not present in the session pool.")
+
 (defvar-local remote--buffer-base-process-environment nil
   "Client environment captured before a target environment is applied.")
 

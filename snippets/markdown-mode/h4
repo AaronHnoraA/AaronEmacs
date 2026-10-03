@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Heading 4
+# key: h4
+# group: Markdown structure
+# --
+#### ${1:Section}$0

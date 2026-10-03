@@ -40,6 +40,10 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-remote)
 (require 'init-emacs-gateway)
 (require 'init-ui)
+;; Must follow `init-ui': the activity indicator appends itself to the
+;; `mode-line-misc-info' that init-ui has finished setting up.
+(require 'init-activity)
+(require 'init-activity-noema)
 (require 'init-tabbar)
 (require 'init-display-rules)
 (require 'init-tools)

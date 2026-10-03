@@ -528,6 +528,7 @@ workspace root."
          (explicit-environment (plist-get plist :remote-environment))
          (logical-directory (plist-get plist :remote-directory))
          (stderr-token (plist-get plist :remote-stderr-token))
+         (stderr-destination (plist-get plist :stderr))
          (arguments (copy-sequence plist)))
     (dolist (key '(:remote-adapter :remote-context :remote-link
                    :remote-preferred-route
@@ -637,6 +638,17 @@ workspace root."
                      (funcall start))))))
          (process-put process 'remote-route route)
          (process-put process 'remote-context context-value)
+         ;; Stderr may use a native client directory and outlive PROCESS.
+         ;; Retain logical ownership on both buffers for explicit teardown.
+         (dolist (buffer (list (process-buffer process)
+                              (when-let* ((stderr stderr-destination))
+                                (if (processp stderr)
+                                    (process-buffer stderr)
+                                  (get-buffer stderr)))))
+           (when (buffer-live-p buffer)
+             (with-current-buffer buffer
+               (setq-local remote-buffer-target-id
+                           (remote-route-target-id route)))))
          (process-put process 'remote-process-class process-class)
          (process-put process 'remote-process-priority
                       (or (plist-get process-profile :priority) 0))

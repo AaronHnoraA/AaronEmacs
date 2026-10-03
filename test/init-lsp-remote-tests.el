@@ -1840,6 +1840,26 @@ analyzes anything without this notification."
   (should-not lsp-auto-register-remote-clients)
   (should (memq #'my/language-server-ensure-deferred prog-mode-hook)))
 
+(ert-deftest language-server-explicit-disconnect-blocks-deferred-startup ()
+  "A retained unsaved buffer must not let queued startup reopen its target."
+  (with-temp-buffer
+    (setq-local remote-buffer-disconnected-p t)
+    (cl-letf (((symbol-function 'my/language-server-runtime-prepare)
+               (lambda (&rest _) (ert-fail "Deferred ensure prepared runtime")))
+              ((symbol-function 'my/language-server--project-root-for-buffer)
+               (lambda () (ert-fail "Deferred LSP queried target"))))
+      (my/language-server-ensure)
+      (my/lsp-mode-ensure)
+      (my/lsp-mode-start-now)
+      (my/lsp-mode--connect-via-remote-a
+       (lambda (&rest _) (ert-fail "Deferred LSP connected"))))
+    (let (started)
+      (cl-letf (((symbol-function 'my/language-server-runtime-prepare)
+                 (lambda (&rest _) (setq started t))))
+        (call-interactively #'my/language-server-ensure))
+      (should started)
+      (should-not remote-buffer-disconnected-p))))
+
 (ert-deftest language-server-missing-binary-is-quiet-only-for-auto-start ()
   (with-temp-buffer
     (setq major-mode 'python-mode)

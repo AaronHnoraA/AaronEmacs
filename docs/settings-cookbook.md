@@ -314,6 +314,10 @@ emacs --debug-init -q -l ./bootstrap.el
 - `snippets/` 也是 Noema 的共享 catalog（`site-lisp/noema/resources/snippets`
   是指向它的链接），Noema server 会扫描整个目录。研究笔记 snippet 放
   `markdown-mode/`，数学放 `tex-mode/`。
+- `;`、`:` 这类仅供 Emacs 使用的数学快捷片段由 `lisp/init-snippets.el`
+  在 Yasnippet reload 后注入对应 mode，不放进共享目录；Markdown/JuText
+  使用 Noema 的 `\(…\)` / `\[…\]` 分隔符，Noema 自己维护浏览器端的快捷片段。
+  Company 在输入 `;`、`:` 后也会显示这两个候选。
 - 继承关系用 Yasnippet 自己的 `.yas-parents` 声明，不写 Lisp：`markdown-mode`
   继承 `tex-mode`，JuText（`noema-research-mode`）继承 `markdown-mode`，所以
   `.noema` 与 Markdown 笔记用同一套 snippet。
@@ -621,23 +625,54 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 
 ---
 
-## 我要改「卡住时的进度条」
+## 我要改后台任务指示器
 
-文件：[lisp/init-ui.el](../lisp/init-ui.el) 的 `;;; Progress Indicator:` 一节。
+文件：
 
-这是 mode line 上那只原地跑步的小人（`ᕕ( ᐛ )ᕗ`），只在一个地方被抬起来，见
-[daily-usage.md](daily-usage.md#卡住时的进度条) 的机理说明。
+- [lisp/init-activity.el](../lisp/init-activity.el) —— 指示器、分类、注册表、板面
+- [lisp/roam/init-activity-noema.el](../lisp/roam/init-activity-noema.el) —— Noema Core task / agent 工作快照与原生取消
+- [assets/activity/](../assets/activity/) —— 皮卡丘的 XPM 帧和画它的脚本
+
+出现机理（`(process-list)` 做枚举根、只数 `task` 一类）见
+[daily-usage.md](daily-usage.md#后台任务指示器)。
 
 | 想改什么 | 怎么改 |
 | --- | --- |
-| 换帧集（换成 `spinner` 包自带的其它动画） | `M-x config-set RET my/progress-indicator-style`，值是 `spinner-types` 里的 key |
-| 改快慢 | `M-x config-set RET my/progress-indicator-fps` |
-| 改皮卡丘本身的字形 | `my/progress-indicator-pikachu-frames`；**所有帧必须等宽**，否则 mode line 每帧都会抖 |
-| 给别的慢操作也加上 | 用 `my/with-progress-indicator` 包住那段代码，不要再写第二套 spinner |
+| 改皮卡丘的像素 | 直接编辑 `assets/activity/*.xpm`（纯文本，一个字符一个像素，颜色表在文件开头），然后 `M-x my/activity-reload-sprites` |
+| 重画 / 加帧 | 改 `assets/activity/pikachu.py` 里的字符网格，`python3 pikachu.py -p /tmp/p.png` 会同时写回 XPM 并导出放大预览，**改像素画一定要看预览** |
+| 换成别的动画 | `M-x config-set RET my/activity-indicator-style`；值是 `my/activity-frame-sets` 的 key，找不到就回落到 `spinner` 包的 `spinner-types` |
+| 改跑动快慢 | `M-x config-set RET my/activity-indicator-fps` |
+| 改多久发现一个新任务 | `M-x config-set RET my/activity-poll-interval`（秒；这不是帧率） |
+| 给别的慢操作也加上 | 用 `my/with-activity "标签"` 包住那段代码 |
+| 让某种新后台工作被**计数** | 在 `my/activity--owned-task-processes` 里加一行它的 owner 注册表。只想出现在板面上则**不需要改任何代码** |
+| 接入没有 Emacs 子进程的异步工作 | `my/activity-provider-functions` 返回缓存的 `my/activity` 列表,`my/activity-poll-functions` 异步更新快照;Noema 适配器是现成例子 |
 
-不要用 `spinner-stop` 去停它：`spinner-start` 返回的是一个**停止函数**而不是 spinner
-对象，把返回值交给 `spinner-stop` 是静默空操作，计时器会一直跑下去。`my/progress-indicator-stop`
-调用的就是那个闭包。
+| 改自动刷新快慢 | `M-x config-set RET my/activity-board-refresh-interval`（板面里 `a` 开关，默认关） |
+| 给板面加一个跳转按钮 | 往 `my/activity-board-native-links`（原生）或 `my/activity-board-config-links`（本配置）加一条 plist；命令不存在时按钮自动不显示 |
+
+两条不要踩的线：
+
+- **不要在 `my/activity-mode-line-text` 里做任何扫描。** 它在每个窗口每次 redisplay
+  都会跑，只能读 `my/activity--count` 和 `my/activity--frame-index` 两个缓存值。
+- **不要靠进程名或命令行判断是不是任务。** 任务身份一律由已有的 owner 注册表认领，
+  否则每加一个工具就要多一条正则。
+- **不要把 `process-attributes` 放进渲染路径。** 它是每进程一次系统调用。现在只有两处
+  调用它：`d` 的详情页，和某进程首次出现时取真实启动时间（之后缓存在弱键表里）。
+- **不要在 `my/activity-board-mode-map` 里绑 `j`/`k`/`n`/`p`/`RET`。** 这五个键由
+  `aaron-ui-board-mode-map` 统一提供（j/n 下、k/p 上、RET 打开），所有 board 一致；
+  盖掉它们既不一致，`k` 更会变成一次误触就停掉任务。停止类操作放在 `x`/`i`/`X`。
+- **不要在板面里重写原生管理器。** `list-processes` / `list-timers` / `list-threads` /
+  `proced` / `memory-report` 各自更称职，板面只负责分组、动作和跳转。
+- **行内映射只加 `keymap` 文本属性,不要加 `local-map`。** 后者会替换所属 board 的
+  major-mode 映射,导致光标进入行内后 `j/k/x` 落到文本输入并报只读。
+- **provider 只读缓存,轮询走异步 API。** Noema 的 agent 状态由 ACP boundary 提供,
+  Core task 由已有 `tasks:list` / `tasks:cancel` 接口提供,不要猜子进程命令行。
+
+终端下没有图形界面，指示器自动降级为颜文字；`my/activity-frame-sets` 里一个帧集的
+`:frames` 字符串必须等宽，否则 mode line 每帧都会抖。
+
+改动后运行 `make activity-test` 验证任务生命周期、Noema 快照、动画和行内键盘操作;
+共享 board 的键盘回归也包含在 `make ui-test` 里。
 
 ## 改启动 Dashboard 的内容或顺序
 

@@ -19,6 +19,8 @@
 (require 'remote-service)
 (require 'remote-background)
 
+(declare-function auto-revert-mode "autorevert" (&optional arg))
+
 (cl-defstruct (remote-workspace-resource
                (:constructor remote-workspace-resource-create))
   id kind value close-function recovery-function recovery-policy
@@ -881,12 +883,13 @@ still wait for TRAMP, but backoff between attempts never sleeps in a command."
   "Mark workspaces using ROUTE disconnected and schedule recovery."
   (maphash
    (lambda (_key workspace)
-     (when (seq-some
-            (lambda (known)
-              (equal
-               (remote-pipeline-route-key known)
-               (remote-pipeline-route-key route)))
-            (remote-workspace-routes workspace))
+     (when (and (not (memq (remote-workspace-state workspace) '(closing closed)))
+                (seq-some
+                 (lambda (known)
+                   (equal
+                    (remote-pipeline-route-key known)
+                    (remote-pipeline-route-key route)))
+                 (remote-workspace-routes workspace)))
        (setf (remote-workspace-state workspace) 'disconnected
              (remote-workspace-error workspace) error)
        (condition-case hook-error
@@ -974,6 +977,128 @@ still wait for TRAMP, but backoff between attempts never sleeps in a command."
     (dolist (workspace workspaces)
       (remote-workspace-close workspace (or reason 'clear)))
     (length workspaces)))
+
+(defun remote-workspace-disconnect-target (target-id &optional reason)
+  "Close TARGET-ID's workspaces and pooled sessions, recording REASON.
+Workspaces close first, while their sessions can still deliver graceful
+shutdowns; then every session of TARGET-ID's pipelines is invalidated and its
+backend disconnected.  Closing a workspace also cancels a pending reconnect
+job, so an explicit disconnect can never be undone by auto-reconnect.
+Close the target's file, Dired, and process buffers.  Unsaved editable buffers
+and buffers whose kill query refuses closure remain, with automatic startup
+disabled.  Return :workspaces, :sessions, :buffers counts and :kept-buffers
+names.  Internal session replacement must not call this user-level teardown."
+  (let ((reason (or reason 'target-disconnect))
+        (workspaces
+         (seq-filter
+          (lambda (workspace)
+            (equal (remote-workspace-target-id workspace) target-id))
+          (hash-table-values remote-workspaces)))
+        (buffers
+         (seq-filter
+          (lambda (buffer)
+            (equal (ignore-errors (remote-buffer-target buffer)) target-id))
+          (buffer-list)))
+        (sessions 0)
+        (closed-buffers 0)
+        kept-buffers protected)
+    ;; Decide protection before shutting down processes: their output buffers
+    ;; may be modified, but process output is not an unsaved editing session.
+    (dolist (buffer buffers)
+      (with-current-buffer buffer
+        (setq-local remote-buffer-disconnected-p t)
+        (when (and (buffer-modified-p)
+                   (or buffer-file-name
+                       (and (not buffer-read-only)
+                            (not remote-buffer-target-id)
+                            (not (get-buffer-process buffer)))))
+          (push buffer protected))
+        (when (bound-and-true-p auto-revert-mode)
+          (auto-revert-mode -1))
+        (run-hook-wrapped
+         'remote-buffer-disconnect-hook
+         (lambda (function)
+           (condition-case err
+               (funcall function)
+             (error
+              (remote-log 'buffer-disconnect-hook-error :target target-id
+                          :buffer (buffer-name buffer)
+                          :error (error-message-string err))))
+           ;; One consumer failure must not skip the remaining consumers.
+           nil))))
+    (remote-background-invalidate-target target-id)
+    (dolist (job (hash-table-values remote-background-jobs))
+      (when (equal (remote-background-job-target-id job) target-id)
+        (remote-background-cancel (remote-background-job-key job) reason)))
+    (dolist (workspace workspaces)
+      (remote-workspace-close workspace reason))
+    ;; A watch, service or channel need not have a workspace owner yet.
+    (dolist (watch (hash-table-values remote-file-watches))
+      (when (equal (remote-file-watch-target-id watch) target-id)
+        (remote-fs--watch-close watch reason)))
+    (dolist (instance (hash-table-values remote-service-instances))
+      (when (equal (remote-service-instance-target-id instance) target-id)
+        (remote-service-stop instance reason)))
+    (remote-channel-clear target-id)
+    ;; Unregistered routed processes still belong to their target.  Capture
+    ;; their buffers above, before sentinels detach the last process handle.
+    (dolist (process (process-list))
+      (let ((context (process-get process 'remote-context))
+            (route (process-get process 'remote-route)))
+        (when (or (and (remote-context-p context)
+                       (equal (remote-context-target-id context) target-id))
+                  (and (remote-route-p route)
+                       (equal (remote-route-target-id route) target-id))
+                  (memq (process-buffer process) buffers))
+          (condition-case err
+              (delete-process process)
+            (error
+             (remote-log 'process-close-error :target target-id
+                         :process (process-name process)
+                         :error (error-message-string err)))))))
+    ;; Kill hooks run while sessions can still deliver final unwatch/shutdown
+    ;; messages, before their backend disconnects.  Preserve normal vetoes.
+    (dolist (buffer buffers)
+      (when (buffer-live-p buffer)
+        (if (memq buffer protected)
+            (push (buffer-name buffer) kept-buffers)
+          (condition-case err
+              (if (kill-buffer buffer)
+                  (cl-incf closed-buffers)
+                (push (buffer-name buffer) kept-buffers))
+            (error
+             (push (buffer-name buffer) kept-buffers)
+             (remote-log 'buffer-close-error :target target-id
+                         :buffer (buffer-name buffer)
+                         :error (error-message-string err)))))))
+    ;; Include pooled sessions whose pipeline was removed from configuration.
+    (dolist (pipeline-id
+             (delete-dups
+              (append (mapcar #'remote-link-id
+                              (remote-pipelines-for-target target-id))
+                      (mapcar #'remote-connection-link-id
+                              (seq-filter
+                               (lambda (connection)
+                                 (equal (remote-connection-target-id connection)
+                                        target-id))
+                               (hash-table-values remote-connection-pool))))))
+      (cl-incf sessions
+               (remote-connection-invalidate-link
+                pipeline-id t reason)))
+    (dolist (job (hash-table-values remote-background-jobs))
+      (when (equal (remote-background-job-target-id job) target-id)
+        (remote-background-cancel (remote-background-job-key job) reason)))
+    (run-hook-wrapped
+     'remote-target-disconnect-hook
+     (lambda (function)
+       (condition-case err
+           (funcall function target-id reason)
+         (error
+          (remote-log 'target-disconnect-hook-error :target target-id
+                      :error (error-message-string err))))
+       nil))
+    (list :workspaces (length workspaces) :sessions sessions
+          :buffers closed-buffers :kept-buffers (nreverse kept-buffers))))
 
 (add-hook 'remote-transport-failure-hook
           #'remote-workspace-handle-transport-failure)

@@ -61,6 +61,38 @@
       (should (equal (alist-get 'help-echo properties)
                      "Possible spelling mistake")))))
 
+(ert-deftest my/languagetool-text-context-menu-has-corrections ()
+  "Text buffers expose a right-click menu and LanguageTool actions."
+  (with-temp-buffer
+    (insert "Ths sentence.")
+    (let* ((diagnostic
+            (car (my/languagetool--flymake-diagnostics
+                  (my/test-languagetool-response) (current-buffer)
+                  (point-min) (buffer-string))))
+           (flymake-mode t)
+           (menu (make-sparse-keymap)))
+      (should (eq (lookup-key text-mode-map [mouse-3]) #'my/mouse-text-menu))
+      (cl-letf (((symbol-function 'my/languagetool--diagnostic-at-point)
+                 (lambda () diagnostic)))
+        (my/languagetool--context-menu-function menu nil))
+      (let ((language-menu (cdr (lookup-key menu [languagetool]))))
+        (should (lookup-key language-menu [check]))
+        (let ((replacement (lookup-key language-menu [action-0])))
+          (should replacement)
+          (funcall replacement)
+          (should (equal (buffer-string) "Thissentence.")))))))
+
+(ert-deftest my/latex-buffer-has-writing-context-menu ()
+  "A cold AUCTeX buffer starts with LanguageTool and a text right-click menu."
+  (with-temp-buffer
+    (LaTeX-mode)
+    (should (eq (key-binding [mouse-3]) #'my/mouse-text-menu))
+    (should my/languagetool-auto-mode)
+    (should (memq #'my/languagetool--context-menu-function
+                  context-menu-functions))
+    (my/yas--enable-now)
+    (should (memq 'tex-mode yas--extra-modes))))
+
 (ert-deftest my/languagetool-report-suppresses-only-its-eol-summary ()
   (let ((flymake-show-diagnostics-at-end-of-line 'short)
         observed)

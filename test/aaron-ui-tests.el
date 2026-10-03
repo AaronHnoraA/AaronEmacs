@@ -4,6 +4,28 @@
 
 (require 'ert)
 (require 'aaron-ui)
+(require 'aaron-ui-board)
+
+(ert-deftest aaron-ui-board-rows-preserve-the-owning-modes-keymap ()
+  "Row activation must not replace navigation or a derived board's actions."
+  (with-temp-buffer
+    (aaron-ui-board-mode)
+    (let ((map (make-sparse-keymap))
+          (inhibit-read-only t))
+      (set-keymap-parent map aaron-ui-board-mode-map)
+      (define-key map "x" #'ignore)
+      (use-local-map map)
+      (aaron-ui-board-insert-row :id "one" :title "One" :detail "Detail"
+                                 :action #'ignore)
+      (insert "Footer\n"))
+    (goto-char (point-min))
+    (dolist (key '("j" "k" "n" "p" "g" "q" "x" "RET"))
+      (should (eq (key-binding (kbd key))
+                  (lookup-key (current-local-map) (kbd key)))))
+    (let ((inhibit-read-only nil))
+      (call-interactively (key-binding "j")))
+    (should (= (line-number-at-pos) 2))
+    (should (eq (key-binding "x") #'ignore))))
 
 (ert-deftest aaron-ui-resolves-elegant-semantic-roles ()
   (should (equal (aaron-ui-token 'role-strong) "#EEF3FF"))

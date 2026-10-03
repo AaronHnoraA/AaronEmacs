@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Horizontal rule
+# key: hr
+# group: Markdown structure
+# --
+---$0

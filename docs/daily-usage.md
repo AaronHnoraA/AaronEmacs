@@ -460,6 +460,16 @@ bookmark 排在前面。上下移动候选时会预览目标位置，确认后�
 - `SPC e 1`
   单窗口 / 恢复窗口布局切换
 
+### 关闭 Remote target
+
+`M-x remote-board` 的 `C` 关闭所选 target 的 workspace、连接及全部所属 buffer，
+包括文件、Dired、LSP 通讯和任务输出。`M-x tramp-cleanup-connection` 同样关闭其
+对应 target；`tramp-cleanup-all-connections` 对全部 TRAMP target 执行此清理。
+未保存的编辑和拒绝关闭的 buffer 会保留，echo 区列出名称，后台停止自动启动。
+保留文件中的 direnv、Copilot 和 LSP 延迟回调也会停止，避免清理后再次连接。
+保存后可再次清理；保留文件中需要恢复 LSP 时，显式运行
+`M-x my/language-server-ensure`。正常网络掉线仍会恢复连接并保留编辑 buffer。
+
 ### Git `SPC g`
 
 远端 buffer 现在和本地一样有 Git 集成：modeline 分支、diff-hl gutter 和上面这些
@@ -1006,38 +1016,110 @@ GUI frame 的两侧 fringe 分工如下：
 - `C-M-\``
   改变 popup 类型
 
-### 卡住时的进度条
+### 后台任务指示器
 
-Mode line 右边偶尔会出现一只原地跑步的小人：
+Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 24×16 XPM 像素图)。它**一直在**,
+没事时站着,有后台任务时开始跑,多于一个任务时在后面跟上数字。
+**鼠标左键点它打开 `M-x my/activity-board`。** 终端(无图形界面)里自动降级成颜文字
+`ᕕ( ᴗ )ᕗ` / `ᕕ( ᐛ )ᗴ`,不会变成空白。
 
-```
-ᕕ( ᐛ )ᕗ   ᕗ( ᐛ )ᕕ   ᕕ( ᐖ )ᕗ   ᕗ( ᐖ )ᕕ
-```
+机理只有一条链路,在 [lisp/init-activity.el](../lisp/init-activity.el):
 
-它的机理只有一条链路，没有第二处：
+1. **枚举的根是 `(process-list)`** —— Emacs 自己的异步子进程注册表,也就是
+   `M-x list-processes` 看到的那张表。以这个为根是为了**不用维护**:以后接任何新的
+   语言服务器、agent 工具或后台守护进程,它都会自动出现在板面上,这个模块不需要知道
+   它的存在。
+2. **但它太广,不能直接数。** 里面同时装着三种东西,只有第一种是会结束的活动:
 
-1. **谁画它** —— `lisp/init-ui.el` 的 `;;; Progress Indicator:` 一节。底层用
-   `spinner` 包，把帧集注册成 `spinner-types` 里的 `pikachu`，渲染进
-   `mode-line-process`。唯一的公开入口是宏 `my/with-progress-indicator`，它用
-   `unwind-protect` 保证 body 正常返回、报错、`C-g` 都会把条收掉。
-2. **什么时候抬起来** —— 目前只有一个触发点：`find-file` 打开一个
-   **每次文件操作都要单独走一趟 shell 往返**的路径。判据是
-   `my/remote-per-file-subprocess-affordable-p`（init-tramp.el），它问的是 Remote
-   后端声明的 `remote-file-operation-cost`，**不是** `file-remote-p`。所以：
-   - 本地文件 → 不出现；
-   - 走 tramp-rpc 这类批量后端的远程文件 → 也不出现（本来就快）；
-   - 走普通 SSH TRAMP 的远程文件 → 出现。
-3. **在哪个 buffer 上出现** —— 操作开始时的那个 buffer，对 `find-file` 来说就是你
-   **正要离开**的 buffer，因为新 buffer 还不存在。
-4. **为什么同步操作里它还能动** —— TRAMP 阻塞在 `accept-process-output` 里，Emacs 的
-   timer 照常跑。反过来，一个完全不让出控制权的计算会让帧停住 —— 那个「冻住」本身
-   就是真实信号，不要去掩盖它。
-5. **结束之后** —— `my/find-file-feedback-a`（init-tramp.el）在文件打开后 echo 一行
-   `[TRAMP 1.37s] /ssh:...`。进度条负责「正在等」，这行负责「等了多久」，两者是分开的
-   两个 advice，互不依赖。
+   | 分类 | 内容 |
+   | --- | --- |
+   | `task` | 有限的工作:compilation、native-comp worker、remote task |
+   | `service` | 常驻守护进程:语言服务器、epdfinfo、agent 会话 |
+   | `connection` | network / serial 端点,TRAMP 在内 |
 
-要改样式、速度，或给别的慢操作也加上，见
-[settings-cookbook.md](settings-cookbook.md#我要改卡住时的进度条)。
+   全数一遍会永远停在几十,没有信息量。所以**板面按三组展示,指示器只数 `task`**。
+3. **谁是 task 不靠猜。** 不看进程名也不看命令行,而是问**已经拥有这些工作的注册表**:
+   `compilation-in-progress`、`remote-tasks`、`comp-async-compilations`。某个进程是
+   task,当且仅当有 owner 认领它。进程任务在 `my/activity--owned-task-processes`
+   接入 owner;没有 Emacs 子进程的异步工作通过 `my/activity-provider-functions`
+   提供缓存快照。出现在进程板面上不需要另行登记。
+4. **两类活动没有进程,单独登记**:native 编译**排队中**(还没 spawn worker)和同步
+   阻塞的工作。后者用宏 `my/with-activity` 包住,`unwind-protect` 保证正常返回、报错、
+   `C-g` 都会注销。目前唯一的内置触发点是**打开一个每次文件操作都要单独走一趟 shell
+   往返的远程文件**(判据是 Remote 后端声明的 `remote-file-operation-cost`,不是
+   `file-remote-p`,所以 tramp-rpc 那批快后端不会触发)。
+5. **性能约束**:`mode-line-misc-info` 里的 `:eval` 在**每个窗口每次 redisplay** 都跑,
+   所以那段只读两个缓存值,从不扫描。扫描在一个**自我重排的单 timer** 里:空闲时按
+   `my/activity-poll-interval`(2 秒)慢轮询,一有任务立刻改按
+   `my/activity-indicator-fps` 重排。显式登记和 agent 状态通知会立即重新武装;
+   普通进程与 Noema Core task 的变化最多等一次 2 秒轮询。
+
+**Noema 也接入了同一计数**,适配器在
+[lisp/roam/init-activity-noema.el](../lisp/roam/init-activity-noema.el):
+
+- LaTeX 导出读取 Noema Core task pool,从排队、转换、agent 润色到编译 PDF 都属于
+  一个任务。完成、失败或取消后移出计数。按 `x` 走 Core 的取消接口,`RET` 打开源笔记。
+- agent 工作读取 `noema-agent-acp-sessions` 的 busy 状态,空闲会话仍是 service。
+  `RET` 打开会话,`x` 通过 ACP owner 取消 Run 或中断当前 turn。导出内部的
+  `latex-export` 会话由导出任务覆盖,不会重复计数。
+- Core task 快照每 2 秒异步读取一次,不会跟着 8 FPS 发请求,也不会为了监控启动
+  Noema。host 停止时清空快照,重启或关闭指示器前的旧回复不会恢复过期任务。
+
+`*Activity*` 板面是**集中入口,不是替代品**。Emacs 自己给每种后台工作都带了管理器,
+每个都比重写一遍更称职,所以板面负责「什么在跑 + 能对它做什么」,更深的细节一键交给原生工具。
+
+**移动和其它 board 完全一致**:`j`/`n` 下移,`k`/`p` 上移,`TAB` 下一个按钮,
+`RET` 打开当前行。停止类操作**刻意避开导航键**,放在 `x`/`i`/`X`。
+按到没绑定的字母在 echo 区列出可用的键。行内的鼠标/RET 映射保留页面的键盘映射,
+所以光标移进进程行、agent 行或详情行后,导航和动作键仍然有效。
+
+按行操作:
+
+| 键 | 作用 |
+| --- | --- |
+| `RET` | 打开当前行(进程行 = 跳到它的 buffer;按钮行 = 按下按钮) |
+| `v` | 同上,显式跳 buffer |
+| `d` | 详情:Emacs 侧字段(status/pid/type/buffer/tty/query/command)+ **OS 侧 `process-attributes`**(rss、etime、nice、majflt…) |
+| `w` | 复制命令行到 kill ring |
+| `x` | 停止。有 owner 的走 owner 的取消路径(如 `remote-task-cancel`);**没有任何注册表认领的进程会先问一遍再杀** |
+| `i` | SIGINT,礼貌停止,让编译器/shell 有机会收尾 |
+| `X` | SIGKILL,先问一遍 |
+
+视图控制:
+
+| 键 | 作用 |
+| --- | --- |
+| `g` | 刷新 |
+| `a` | 自动刷新开关(**默认关**) |
+| `/` | 按名字/命令行过滤,空输入清除 |
+| `t` | 显示/隐藏 Emacs 定时器一节 |
+| `q` | 关闭 |
+
+跳到原生管理器:
+
+| 键 | 去哪 |
+| --- | --- |
+| `P` | `list-processes` —— 内置原始进程表,字段最全 |
+| `T` | `list-timers` —— 内置定时器表 |
+| `H` | `list-threads` —— 内置线程表 |
+| `O` | `proced` —— 内置 **OS** 进程管理器,看这个 Emacs 之外的东西 |
+| `M` | `memory-report` —— 内置内存报告 |
+
+板面底部还有两排按钮:「Built-in managers」(上面五个 + `*Messages*`)和
+「This configuration」(`my/performance-watch`、`remote-board`、`my/compile-board`、
+`my/language-server-manager`、`config-board`)。按钮只在对应命令存在时出现。
+
+**性能**(这一页的硬约束,改之前先读):
+
+- **`process-attributes` 是每进程一次系统调用,绝不能进渲染路径。** 它只在两处被调用:
+  `d` 的详情页,以及某个进程**第一次**被看到时取它的真实启动时间(之后永久缓存在
+  弱键表里)。实测:首次渲染每个活进程 1 次调用,之后 10 次渲染 0 次。
+- 单次渲染实测 **0.37ms**,只走 `process-list` 和 `timer-list`,不碰网络和磁盘。
+- **自动刷新默认关**。打开后是一个受 `my/activity-board-refresh-interval` 约束的
+  timer,且只在板面**可见**时重绘;buffer 被 kill 时经 `kill-buffer-hook` 取消。
+
+要改皮卡丘的样子、速度或给别的慢操作也加上,见
+[settings-cookbook.md](settings-cookbook.md#我要改后台任务指示器).
 
 ## 7. 有冲突时优先记住什么
 
@@ -1055,6 +1137,7 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 |----|------|
 | `C-c A W` | 打开 Noema（默认 Magent agent-shell） |
 | `C-c A a` | 选择 Magent/Codex/Claude/OpenCode/Pi agent-shell |
+| `C-c A w` | 在当前 Project 仓库的新 Git worktree 里启动 Codex/Claude/OpenCode 会话 |
 | `C-c A c` | 打开 gptel compose buffer；在 Noema 页面里带上选区（没有选区则整篇笔记）作为 context |
 | `C-c A s` | 从当前 buffer 发送 gptel 请求；在 Noema 页面里同 `C-c A c` |
 | `C-c A m` | 打开 gptel transient 设置 |
@@ -1102,7 +1185,11 @@ Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空
 - 表格：方向键/退格在单元格文字边缘跨格移动，越过表格回到正文；`Mod-Enter` 在下方插入一行。拖选、`Shift` 点击或 `Shift+方向键` 选中矩形单元格：`Mod-C` 复制为 GFM 子表格，`Delete` 先清空、再删整行/整列/整表，`Mod-A` 依次扩到整表、全文。`|-|:-:|` 这种短分隔行、以及首尾不写 `|` 的 `a | b` 表格也会渲染；表格体一直延续到空行或下一个块，表格正下方紧挨着的普通文字会成为一行（与导出一致），需要分开时空一行。
 - `:smile:` 这类 emoji 短码在编辑视图直接显示；输入 `:sm` 弹出 emoji 补全。`![](clip.mp4)` / `![](talk.mp3)` 渲染为可播放的视频/音频（不自动播放）。
 - 图片后按退格（或图片前按 Delete）先选中整张图片，再按一次删除，不会把图片拆成半截源码。
-- 右键菜单提供“Duplicate / Move Up / Move Down / Delete Block”；`/` 菜单新增 Mermaid 和思维导图；光标所在的空行显示 “Type / for commands” 提示（Vim normal 模式不显示）。悬停脚注引用显示脚注内容，未定义的会提示。
+- 图表（` ```mermaid `、` ```marmind `/` ```markmind `）按图片排版：高度跟着内容走，没有固定窗口，点一下图就像点别的正文一样把光标放进去显示源码。需要放大时用图右上角悬停出现的 `⤢` 打开查看器，在那里缩放、平移、`Fit`，`Esc` 或 `Close` 关闭；缩放只属于查看器，不会被正文编辑打断。
+- 图表配色跟随当前主题：Mermaid 用从 `--aaron-*` 变量推出来的调色板（深色主题就是深色图），不再是浅色默认主题垫一张白卡片。换主题会自动重画。
+- `![说明](diagram.drawio)` 像引用图片一样引用 draw.io 文件：Noema 调本机 draw.io 导出 SVG 并缓存，按原图大小显示，不加载在线编辑器、不联网，导出时按当前主题要 light 或 dark 版本。要改图就用 draw.io 打开那个 `.drawio` 文件，存盘后 Noema 自动重新导出。`#page=2` 指定第几页（从 1 数）；本机没装 draw.io 时显示一张写明原因的占位图（可用 `NOEMA_DRAWIO_BIN` 指定路径）。`.drawio.svg` / `.drawio.png` 本来就是图片，直接当图片渲染。
+- draw.io 导出一次约 1 秒（要起一个 draw.io 进程），之后按「文件路径 + 修改时间 + 大小 + 页码 + 主题」命中磁盘缓存，命中是毫秒级，重复渲染只走 ETag 304。同时导出的并发上限默认 2（`NOEMA_DRAWIO_CONCURRENCY`），一篇笔记里十几张图不会同时拉起十几个 draw.io。
+- 右键菜单提供“Duplicate / Move Up / Move Down / Delete Block”。Markdown 中输入关键词可从 snippet 补全展开结构：`h1`–`h6` 标题、`ul` / `ol` 列表、`bq` 引用、`math` 公式块、`hr` 分隔线、`mer` Mermaid、`mind` 思维导图等；`/` 是普通文本，不弹命令菜单。悬停脚注引用显示脚注内容，未定义的会提示。
 
 ### 所有 agent 会话按项目统一登记
 
@@ -1138,6 +1225,20 @@ Project。`!` 跨项目跳到下一个待处理或未读 Session；`u` 标记当
 所属 Project 的会话；`u` 成功后也只刷新所属 Project，保留其他 Project 的列表。隐藏后停止查询，再次显示时补查；其他客户端
 造成的变更可按 `g` 获取。
 总览只读取现有注册表，不会启动 agent 或创建 Project；标记已读是显式操作。
+
+同一仓库里同时开几个写代码的会话时，用 `C-c A w` / `M-x noema-agent-worktree-start`
+给每个会话一个自己的 Git worktree：它从 Project workspace 当前所在的分支切出
+`noema/<名字>` 分支，worktree 放在仓库旁边的 `<仓库名>.noema-worktrees/<名字>/`
+（不在仓库内，也就不会出现在仓库的 status 或搜索里）。会话仍登记在原 Project 下，
+名为 `worktree/<名字>`；恢复会话时回到它原来的 worktree。本机和远程 Project 用同一套命令。
+用 `C-c A x` 等命令把主 checkout 里的文件或选区发给这个会话时，引用会指向 worktree
+里的同名文件，避免 agent 改到主 checkout；worktree 里没有这个文件就报错，不会退回主 checkout。
+选区的行号取自你正在编辑的 buffer，所以 worktree 里的文件改动较大时，行号可能对不上。
+Sessions 列表（`C-c A S`）和总览（`C-c A G`）里，`m` 打开该会话所在 checkout 的
+Magit status；`d` 显示它从分出时起的全部改动（已提交和未提交的一起），
+普通会话则只显示未提交改动。`M-x noema-agent-worktree-remove` 只列出 Noema 建的 worktree：
+还有会话在里面工作的不删；有未提交改动的要加前缀参数才删；分支始终保留，
+已提交的工作不会丢。
 
 `C-c A U` / `M-x noema-agent-abtop` 打开 btop 风格的 agent 总览（aaron-ui 配色），三块面板：
 - **quota**：三个工具的额度总是全部列出，每个工具列出它应有的窗口（`5h`/`7d`），显示已用比例、重置倒计时

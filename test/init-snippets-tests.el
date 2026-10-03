@@ -41,6 +41,22 @@
                                     (insert-file-contents parents)
                                     (buffer-string)))))))
 
+(ert-deftest init-snippets-emacs-math-shortcuts-survive-reload ()
+  "Punctuation math snippets expand in Emacs without shared catalog files."
+  (yas-reload-all t)
+  (dolist (case '((tex-mode ";" "$a$ ")
+                  (tex-mode ":" "$$\na\n$$\n")
+                  (markdown-mode ";" "\\(\\) ")
+                  (markdown-mode ":" "\\[\n\n\\]\n")
+                  (noema-research-mode ";" "\\(\\) ")
+                  (noema-research-mode ":" "\\[\n\n\\]\n")))
+    (with-temp-buffer
+      (setq major-mode (nth 0 case))
+      (yas-minor-mode 1)
+      (insert (nth 1 case))
+      (should (yas-expand))
+      (should (equal (buffer-string) (nth 2 case))))))
+
 (ert-deftest init-snippets-global-table-holds-no-language-syntax ()
   "`fundamental-mode' snippets apply in every buffer; keep Lean out of them."
   (dolist (file (directory-files
@@ -94,7 +110,7 @@
     (should (equal company-backends '(company-capf company-dabbrev)))))
 
 (ert-deftest init-snippets-empty-prefix-offers-only-typed-keys ()
-  "After a trigger character only a multi-character key ending at point stays."
+  "At an empty prefix offer typed multi-character keys and math shortcuts."
   (with-temp-buffer
     (insert "p ..")
     (should
@@ -106,7 +122,30 @@
      (equal (my/company--typed-key-at-empty-prefix-a
              (lambda (&rest _) (list "for" "fori"))
              'candidates "fo")
-            '("for" "fori")))))
+            '("for" "fori"))))
+  (with-temp-buffer
+    (insert ":")
+    (should (equal (my/company--typed-key-at-empty-prefix-a
+                    (lambda (&rest _) '(":" ";" "." ".."))
+                    'candidates "")
+                   '(":")))))
+
+(ert-deftest init-snippets-auctex-punctuation-appears-in-company ()
+  "LaTeX offers the injected math shortcuts immediately after typing them."
+  (with-temp-buffer
+    (LaTeX-mode)
+    (my/yas--enable-now)
+    (require 'company-yasnippet)
+    (dolist (key '(";" ":"))
+      (erase-buffer)
+      (insert key)
+      (should (equal (company-yasnippet 'prefix) '("" . 1)))
+      (should (seq-some (lambda (candidate) (string= candidate key))
+                        (company-yasnippet 'candidates "")))
+      (company-manual-begin)
+      (should (seq-some (lambda (candidate) (string= candidate key))
+                        company-candidates))
+      (company-abort))))
 
 (provide 'init-snippets-tests)
 ;;; init-snippets-tests.el ends here

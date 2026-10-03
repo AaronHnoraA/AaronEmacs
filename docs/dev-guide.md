@@ -421,7 +421,7 @@ Lean 的通知/请求 payload 一律用 `lsp-get` 读取：lsp-mode 只有在以
 
 ### 你应该怎么用
 
-- `M-x remote-board`：按 target 查看 route、连接状态、配置/当前/最近文件夹和活动转发端口；可见时随连接、workspace 和 channel 生命周期刷新。`RET`/`o` 打开文件夹并建立受管理的 workspace（端口行复制本地地址），`f` 在目标文件系统中补全目录，`c` 关闭选中文件夹的 workspace 与所属资源，`C` 断开整个 target 的 workspace 与连接（已访问的 buffer 留在 Emacs，后续文件访问可重新连接），`p` 转发目标端口（`C-u p` 指定目标侧 host，`C-u C-u p` 还可指定本地端口），`n` 命名选中转发，`P` 更换其本地端口，`k` 关闭转发并移除恢复资源，`r` 后台重连 workspace（已连接时用 `C-u r`），`w` 复制行的 URI 或本地端口地址，`s` 刷新本机缓存状态，`g` 重读 target 配置
+- `M-x remote-board`：按 target 查看 route、连接状态、配置/当前/最近文件夹和活动转发端口；可见时随连接、workspace 和 channel 生命周期刷新。`RET`/`o` 打开文件夹并建立受管理的 workspace（端口行复制本地地址），`f` 在目标文件系统中补全目录，`c` 关闭选中文件夹的 workspace 与所属资源，`C` 断开整个 target 的 workspace、连接和 buffer（保留未保存编辑及拒绝关闭的 buffer，并停止自动启动），`p` 转发目标端口（`C-u p` 指定目标侧 host，`C-u C-u p` 还可指定本地端口），`n` 命名选中转发，`P` 更换其本地端口，`k` 关闭转发并移除恢复资源，`r` 后台重连 workspace（已连接时用 `C-u r`），`w` 复制行的 URI 或本地端口地址，`s` 刷新本机缓存状态，`g` 重读 target 配置
 - 编辑远程文件：使用 `fs://target/path` 或 `/fs:target:/path`
 - 旧的 `/ssh:host:/path` 仍可打开，进入 buffer 后会 canonicalize 为 `/fs`
 - 在当前本地/远端 workspace 打开终端：`C-c e`（`vterm-toggle`）
@@ -594,8 +594,9 @@ in-process 缓存，与自动刷新保持一致。
 
 - `M-x noema` / `C-c A W` — Noema 主入口
 - `M-x noema-agent-start` / `C-c A a` — 启动包管理的 agent-shell 上的结构化 agent
+- `M-x noema-agent-worktree-start` / `C-c A w` — 让会话在 Project workspace 仓库的独立 linked worktree（分支 `noema/<名字>`，基点记在 `branch.<分支>.noemaBase`）里工作，会话仍登记在发起它的 Project 下（D-038 不变）。Git 都经 `process-file` 在 Emacs 目录里运行，本机和 `/fs:` 远程走同一条代码路径；临时 buffer 里会带上调用方的环境 capsule。`noema-context` 把主 checkout 的引用改写到会话的 worktree（`noema-agent-worktree-redirect`），worktree 里没有这个文件就报错。Sessions 与总览的 `m`/`d` 打开该会话 checkout 的 Magit。设计来源见 [Agent Fleet 审计](agent-fleet-noema-audit-2026-10.md)
 - `M-x noema-agent-acp-conversation-tree` / `C-c A T` — 从当前 Noema Agent 会话浏览原生 ACP 对话树；Agent 窗口 `C-c C-t`、Sessions 列表 `T` 也可进入。`agent-shell-fork-tree` 作为固定版本的 package-vc 依赖；Noema 经 ACP 边界调用它，分叉后登记为命名会话，缓存仅驻内存（`agent-shell-fork-tree-cache-directory=nil`）。它按共享文本前缀展示，不是 WorkNode DAG 或 Noema `parentName` 的替代品
-- `M-x noema-agent-inbox` / `C-c A G` — 汇总已知 Noema Project 的会话状态、待处理项和活动 agent；`RET` 跳转，`!` 跨项目轮转待处理项，`u` 经 `session:name:read` 标记已读并只刷新所属 Project，`G` 重扫项目根。可见时 ACP 状态事件只重绘，worker 的 Run 结束及权限/输入事件只合并查询所属 Project，慢回包由逐 Project 请求序号隔离；隐藏时停止监听，再显示补查。外部客户端变更仍可用 `g` 刷新
+- `M-x noema-agent-inbox` / `C-c A G` — 汇总已知 Noema Project 的会话状态、待处理项和活动 agent；`RET` 跳转，`!` 跨项目轮转待处理项，`u` 经 `session:name:read` 标记已读并只刷新所属 Project，`G` 重扫项目根，`m`/`d` 打开所选会话 checkout 的 Magit status / 自分出点起的 diff。可见时 ACP 状态事件只重绘，worker 的 Run 结束及权限/输入事件只合并查询所属 Project，慢回包由逐 Project 请求序号隔离；隐藏时停止监听，再显示补查。外部客户端变更仍可用 `g` 刷新
 - `M-x noema-agent-abtop` / `C-c A U` — btop 风格的 agent 总览（quota / sessions / 详情，带停止、强制
   终止、重启等管理键）。读取边界都在 `noema-agent-acp.el`：`noema-agent-acp-usage` 读 agent-shell 的
   `:usage`（Run 记录的 `sessionUsage` 也经它）；`agent-shell--save-usage` 与

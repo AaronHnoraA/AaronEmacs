@@ -1,0 +1,9 @@
+# -*- mode: snippet -*-
+# name: Display math block
+# key: math
+# group: Markdown structure
+# --
+\[
+${1:formula}
+\]
+$0

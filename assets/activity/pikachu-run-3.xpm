@@ -1,0 +1,26 @@
+/* XPM */
+static char *pikachu_run_3[] = {
+"24 16 6 1",
+"  c None",
+"R c #E84030",
+"W c #FFFFFF",
+"Y c #F8D030",
+"k c #1A140A",
+"o c #3A2C14",
+"  kkk      kkk          ",
+"  okko     okko         ",
+"  oYko     oYko         ",
+"  oYYo     oYYo    oo   ",
+" oYYYoooooooYYYo  ooYo  ",
+"oYYYYYYYYYYYYYYYo oYYo  ",
+"oYYkWYYYYYYYkWYYooYYo   ",
+"oYYkkYYYYYYYkkYYYYYYo   ",
+"oRRYYYYoYYYoYYRRYYYYo   ",
+"oRRYYYYYoooYYYRRYYYo    ",
+" oYYYYYYYYYYYYYYYoo     ",
+"  oYYYYYYYYYYYYYo       ",
+"   oYYYYYYYYYYo         ",
+"  oYYYYYYYYYYYo         ",
+" oYYo      oYYo         ",
+" ooo        ooo         "
+};

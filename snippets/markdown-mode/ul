@@ -1,0 +1,6 @@
+# -*- mode: snippet -*-
+# name: Bullet list item
+# key: ul
+# group: Markdown structure
+# --
+- ${1:Item}$0

@@ -500,6 +500,67 @@ workspace 关闭和 framework reset 会取消仍在等待的任务。
 (remote-session-clear)
 ```
 
+### 显式断开与 TRAMP 清理
+
+断开分两种语义，框架必须区分：
+
+- **transport failure**（网络掉线、ssh 被杀）：workspace 标记 disconnected 并按
+  1、2、4 秒自动恢复，资源随之重建。
+- **显式断开**：`remote-board` 的 disconnect、`M-x tramp-cleanup-connection` 与
+  `tramp-cleanup-all-connections`。三者都走 `remote-workspace-disconnect-target`：
+  先关闭该 target 的 workspace（取消挂起的重连任务，LSP/service/watch 在连接仍在时
+  优雅关闭），关闭该 target 的文件、Dired、任务、终端及通讯 buffer，最后失效全部
+  session、关闭底层传输。其它 target 的 buffer 不受影响。
+
+未保存的文件或可编辑 buffer、以及 kill query 拒绝关闭的 buffer 会保留，并在
+清理结果中列出名称，不自动保存或丢弃内容。保留的 buffer 关闭 auto-revert，设置
+`remote-buffer-disconnected-p`；排队的 LSP startup/idle callback 必须尊重此标志。
+direnv 取消该 buffer 的刷新和 export waiter，已排队的 retry/completion 在发现 `.envrc`
+之前检查标志；否则保留的未保存文件会通过 `locate-dominating-file` 重新建立连接。
+Copilot 取消该 buffer 的延迟启动并关闭其 mode，不停止服务其它 buffer 的共享客户端。
+用户显式执行 `my/language-server-ensure`、`my/lsp-mode-ensure` 或
+`direnv-update-environment` 可恢复该 buffer 的自动启动。
+返回值包含 `:workspaces`、`:sessions`、`:buffers` 计数和 `:kept-buffers` 名称列表。
+
+`remote-buffer-target` 只根据文件/Dired 的逻辑身份、routed process 的 owner，以及
+显式远端目录判断归属，不访问文件。`remote-make-process` 在 stdout/stderr buffer
+上保留 `remote-buffer-target-id`，因此进程退出后仍能回收使用本机临时目录的输出
+buffer；普通 scratch buffer 的本机目录不意味着它属于需要关闭的 workspace。
+
+TRAMP 清理命令是 TRAMP 兼容边界上的用户入口，由 `remote-backend-tramp.el` 以
+around advice 桥接：按 session 保留的物理 handle、workspace route 或已配置的
+pipeline 匹配 target，因此 session 已清空后也能再次关闭先前保留的文件 buffer。
+清理期间绑定 `remote-backend-tramp-explicit-cleanup`。
+`delete-process` 会同步触发 sentinel，tramp-rpc 的 transport-death 观察者看到该
+标志后不再上报 failure，否则清理会在几秒后被自动重连撤销。
+内部 backend disconnect（失效 session、切换 backend、transport recovery）同样绑定
+该标志，但跳过整个 target 的用户级清理，恢复过程不会因此关闭编辑 buffer。
+TRAMP 的 keep-debug/keep-password/keep-processes 内部清理调用也保持 session 语义。
+目标清理最后运行 `remote-target-disconnect-hook`，backend 根据 pipeline 的物理投影
+回收未进入 session pool 的旧 TRAMP 连接；buffer 消费者通过
+`remote-buffer-disconnect-hook` 停止诊断和补全探测，资源仍由 workspace 正常关闭。
+
+`file-remote-p` 的 CONNECTED 参数对 `/fs:` 只读内存中的 session 池
+（`remote-connection-target-open-p`，不做 `ssh -O check`）：target 没有 open
+session 时返回 nil。auto-revert、VC、recentf 等后台调用方用这个查询决定是否碰
+远端；用户再次访问文件时才按需重开。保留的未保存 buffer 另有上述 startup 标志，
+不能仅依靠 CONNECTED 查询防止排队的主动启动回调。
+
+tramp-rpc 0.13.1 在客户端还留下两类状态，由 `remote-backend-tramp-rpc.el` 回收：
+`tramp-buffer-name` 旁边的 `NAME stderr` buffer 及其 relay 进程（TRAMP 通用清理
+不认识它，旧 relay 存活还会让重连得到 `NAME stderr<1>`，这些编号残留也会回收）；
+单目标清理也扫描已脱离 connection 表的该主机 RPC 通讯 buffer，全局清理扫描全部。
+另有每个 file-notify
+descriptor 由 `make-pipe-process` 隐式创建的 `tramp-rpc` buffer。transport 意外
+死亡时只释放 relay，stderr buffer 保留供诊断，直到清理或下一代连接复用它。
+
+离线回归在 `make remote-check`。完整初始化的 LSP + Dired + watch + 长任务清理
+测试在 `test/remote-cleanup-live-tests.el`：运行
+`REMOTE_E2E_TARGET=host make remote-cleanup-live-smoke`，通过正常 init 加载测试。
+测试只在新建的 `/tmp` 目录写入
+Python stdio peer，不要求安装 clangd；先断言 LSP 已初始化，再验证三个清理入口、
+未保存编辑、延迟回调及 8 秒后的连接状态。
+
 错误被分为三类：
 
 - `backend`：当前 backend 不兼容，可在同一 pipeline 尝试另一个 backend；

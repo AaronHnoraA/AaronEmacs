@@ -119,6 +119,16 @@ Keep these rules:
   from the backend's declared costs — `remote-file-operation-cost` and
   `remote-file-watch-cost` — never from `file-remote-p`.  A new backend must
   declare `:file-operation-cost`, `:file-watch-cost` and `:mtime-compare`.
+- An explicit disconnect (Remote board, `tramp-cleanup-connection`,
+  `tramp-cleanup-all-connections`) goes through
+  `remote-workspace-disconnect-target` and must never be reported as a
+  transport failure, which would auto-reconnect.  `file-remote-p`'s CONNECTED
+  query on `/fs:` reflects the in-memory session pool; background consumers
+  use it to avoid reopening a closed target.  Explicit disconnect closes all
+  target-owned file, Dired and process buffers, preserving unsaved edits and
+  kill-query vetoes with `remote-buffer-disconnected-p` set.  Deferred consumers
+  must respect that flag.  Internal backend session replacement must bypass
+  user-level teardown so transport recovery preserves editing buffers.
 - A projected environment capsule makes `process-environment` and `exec-path`
   buffer-local.  Capture them before `with-temp-buffer`/`with-current-buffer`
   and rebind inside, or target processes silently fall back to the login PATH.

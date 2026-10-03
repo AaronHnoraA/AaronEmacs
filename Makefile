@@ -16,8 +16,8 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         aaronnote-build \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
-        health health-startup health-byte health-native ui-test ui-tokens audit-ui-tokens \
-        remote-test remote-source-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
+        health health-startup health-byte health-native ui-test activity-test ui-tokens audit-ui-tokens \
+        remote-test remote-source-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
 		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke remote-vterm-live-smoke \
         jupyter-test research-test agenda-test agenda-apple-test \
         noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
@@ -40,6 +40,7 @@ help:
 	  '  make ui-tokens            Regenerate Noema CSS tokens from aaron-ui' \
 	  '  make audit-ui-tokens      Verify committed Noema CSS tokens are current' \
 	  '  make ui-test              Run Aaron UI semantic-token and dashboard ERT tests' \
+	  '  make activity-test        Run activity indicator, Noema snapshot, and keyboard regressions' \
 	  '  make doctor               Open/check the config health doctor report in batch' \
 	  '  make state-backup         Snapshot migration-worthy local state into var/backup-snapshots' \
 	  '  make state-restore SNAPSHOT=/path/to/archive.tar.gz  Restore a saved state snapshot' \
@@ -66,6 +67,7 @@ help:
 	  '  make remote-conformance-test Compare /fs:local semantics with native APIs' \
 	  '  make remote-byte-check    Strictly byte-compile remote code in a temp dir' \
 	  '  make remote-check         Run all remote tests and compatibility checks' \
+	  '  make remote-cleanup-live-smoke  Check full-init target cleanup with initialized LSP' \
 	  '  make lsp-test            Run isolated LSP routing, toolchain, runtime, and UI tests' \
 	  '  make writing-test        Run LanguageTool/Flymake and LaTeX routing tests' \
 	  '  make latex-preview-test   Run the vendored RaTeX math-preview ERT suite' \
@@ -137,6 +139,9 @@ ui-tokens:
 
 audit-ui-tokens:
 	$(UI_TOKEN_BATCH) --eval '(let ((expected (aaron-ui-css-tokens '"'"'wave)) (file "$(CURDIR)/$(UI_TOKEN_FILE)")) (unless (and (file-readable-p file) (with-temp-buffer (insert-file-contents file) (equal (buffer-string) expected))) (error "Aaron UI CSS tokens are stale; run make ui-tokens")))'
+
+activity-test:
+	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L site-lisp/config -L site-lisp/aaron-ui -L lisp -L lisp/roam -l test/init-activity-tests.el -f ert-run-tests-batch-and-exit
 
 ui-test:
 	$(UI_TOKEN_BATCH) --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)"))' -l test/aaron-ui-tests.el -f ert-run-tests-batch-and-exit
@@ -307,6 +312,9 @@ remote-task-live-smoke:
 remote-task-disconnect-smoke:
 	$(BATCH) -l test/remote-task-disconnect-smoke.el
 
+remote-cleanup-live-smoke:
+	REMOTE_E2E=1 $(BATCH) -l test/remote-cleanup-live-tests.el --eval '(ert-run-tests-batch-and-exit "remote-cleanup-live-")'
+
 remote-terminal-live-smoke:
 	$(BATCH) -l test/remote-terminal-live-smoke.el
 
@@ -368,7 +376,7 @@ agenda-apple-test:
 
 research-test:
 	$(BATCH) -l test/noema-startup-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/test/elisp -l noema-agent-acp-tests.el -l noema-agent-render-tests.el -l noema-context-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/test/elisp -l noema-agent-acp-tests.el -l noema-agent-render-tests.el -l noema-context-tests.el -l noema-agent-worktree-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/test/elisp -l noema-capability-workspace-tests.el -l test/noema-manager-layout-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L lisp/roam -l test/noema-research-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/test/elisp \

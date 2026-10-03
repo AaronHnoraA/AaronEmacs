@@ -1719,5 +1719,277 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
                    #'remote-backend-tramp-rpc-metadata--scope-a
                    'find-file-noselect)))))
 
+;;;; Explicit TRAMP cleanup lifecycle
+
+(defun remote-compat-test--open-session (target handle plugin)
+  "Return an open session for TARGET with physical HANDLE through PLUGIN."
+  (remote-connection-create
+   :key (list target plugin) :target-id target
+   :link-id (concat target "/ssh") :plugin-id plugin :handle handle
+   :state 'open
+   :pipeline-runtime (remote-pipeline-runtime-create :state 'open)))
+
+(ert-deftest remote-connection-target-open-p-reads-pool-state-only ()
+  (let ((remote-connection-pool (make-hash-table :test #'equal))
+        (session (remote-compat-test--open-session
+                  "box" "/ssh:box:/" "tramp")))
+    (should-not (remote-connection-target-open-p "box"))
+    (puthash (remote-connection-key session) session remote-connection-pool)
+    (should (remote-connection-target-open-p "box"))
+    (should-not (remote-connection-target-open-p "other"))
+    (setf (remote-pipeline-runtime-state
+           (remote-connection-pipeline-runtime session))
+          'closed)
+    (should-not (remote-connection-target-open-p "box"))))
+
+(ert-deftest remote-fs-file-remote-p-connected-follows-open-session ()
+  "Background callers must not see a closed target as connected."
+  (let (open)
+    (cl-letf (((symbol-function 'remote-connection-target-open-p)
+               (lambda (_target) open)))
+      (should (equal (remote-fs-handle-file-remote-p "/fs:box:/tmp/x")
+                     "/fs:box:"))
+      (should-not (remote-fs-handle-file-remote-p "/fs:box:/tmp/x" nil t))
+      (setq open t)
+      (should (equal (remote-fs-handle-file-remote-p "/fs:box:/tmp/x" nil t)
+                     "/fs:box:"))
+      (should (equal (remote-fs-handle-file-remote-p
+                      "/fs:box:/tmp/x" 'host t)
+                     "box"))
+      (should-not (remote-fs-handle-file-remote-p "/fs:local:/tmp/x")))))
+
+(ert-deftest remote-tramp-cleanup-disconnects-owning-target-first ()
+  "An explicit TRAMP cleanup closes the framework target, not reconnects it."
+  (let ((remote-connection-pool (make-hash-table :test #'equal))
+        (remote-workspaces (make-hash-table :test #'equal))
+        (remote-backend-tramp-explicit-cleanup nil)
+        disconnected cleaned)
+    (dolist (session (list (remote-compat-test--open-session
+                            "box" "/ssh:box:/" "tramp")
+                           (remote-compat-test--open-session
+                            "other" "/ssh:other:/" "tramp")
+                           (remote-compat-test--open-session
+                            "near" "/fs:near:/" "native")))
+      (puthash (remote-connection-key session) session
+               remote-connection-pool))
+    (cl-letf (((symbol-function 'remote-workspace-disconnect-target)
+               (lambda (target reason)
+                 (should remote-backend-tramp-explicit-cleanup)
+                 (push (cons target reason) disconnected))))
+      (remote-backend-tramp--cleanup-connection-a
+       (lambda (vec &rest _)
+         (should remote-backend-tramp-explicit-cleanup)
+         (push (tramp-file-name-host vec) cleaned))
+       (tramp-dissect-file-name "/ssh:box:/"))
+      (should (equal disconnected '(("box" . tramp-cleanup))))
+      (should (equal cleaned '("box")))
+      ;; The backend closer re-enters cleanup; it must not recurse.
+      (setq disconnected nil cleaned nil)
+      (let ((remote-backend-tramp-explicit-cleanup t))
+        (remote-backend-tramp--cleanup-connection-a
+         (lambda (vec &rest _) (push (tramp-file-name-host vec) cleaned))
+         (tramp-dissect-file-name "/ssh:box:/")))
+      (should-not disconnected)
+      (should (equal cleaned '("box")))
+      (setq disconnected nil cleaned nil)
+      (remote-backend-tramp--cleanup-connection-a
+       (lambda (vec &rest flags)
+         (should (equal flags '(keep-debug nil keep-processes)))
+         (push (tramp-file-name-host vec) cleaned))
+       (tramp-dissect-file-name "/ssh:box:/") 'keep-debug nil 'keep-processes)
+      (should-not disconnected)
+      (should (equal cleaned '("box")))
+      (setq disconnected nil)
+      (remote-backend-tramp--cleanup-all-connections-a #'ignore)
+      (should (equal (sort (mapcar #'car disconnected) #'string<)
+                     '("box" "other"))))
+    (should-not remote-backend-tramp-explicit-cleanup)))
+
+(ert-deftest remote-tramp-rpc-explicit-cleanup-does-not-report-failure ()
+  "Transport death caused by an explicit cleanup must not schedule reconnect."
+  (let* ((remote-workspaces (make-hash-table :test #'equal))
+         (route (remote-route-create
+                 :target-id "box" :link-id "box/ssh"
+                 :link-plugin-id "tramp-rpc"))
+         (owner (remote-workspace-create :routes (list route)))
+         (connection (remote-connection-create :handle "/rpc:box:/tmp/"))
+         (process (make-pipe-process
+                   :name "remote-explicit-cleanup-test" :noquery t))
+         (reports 0))
+    (unwind-protect
+        (progn
+          (puthash 'owner owner remote-workspaces)
+          (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                     (lambda (_vec) (list :process process)))
+                    ((symbol-function 'tramp-rpc--connection-key)
+                     (lambda (_vec) 'same-connection))
+                    ((symbol-function 'tramp-dissect-file-name)
+                     (lambda (_name &optional _nodefault) 'vec))
+                    ((symbol-function 'remote-connection-cached-p)
+                     (lambda (_route) connection))
+                    ((symbol-function 'remote-report-route-failure)
+                     (lambda (_route _error) (cl-incf reports))))
+            (let ((remote-backend-tramp-explicit-cleanup t))
+              (remote-backend-tramp-rpc--transport-death-before-a
+               process 'vec "killed: 9"))
+            (should (= reports 0))
+            (remote-backend-tramp-rpc--transport-death-before-a
+             process 'vec "killed: 9")
+            (should (= reports 1))))
+      (delete-process process))))
+
+(ert-deftest remote-tramp-internal-session-disconnect-keeps-target-buffers ()
+  "Reconnect/stale-session cleanup must not invoke user-level teardown."
+  (require 'tramp-cmds)
+  (let ((remote-backend-tramp-explicit-cleanup nil)
+        (connection (remote-compat-test--open-session
+                     "box" "/ssh:box:/" "tramp"))
+        cleaned)
+    (cl-letf (((symbol-function 'remote-workspace-disconnect-target)
+               (lambda (&rest _) (ert-fail "Internal disconnect closed target")))
+              ((symbol-function 'tramp-cleanup-connection)
+               (lambda (_vec &rest _)
+                 (should remote-backend-tramp-explicit-cleanup)
+                 (setq cleaned t))))
+      (remote-backend-tramp-disconnect connection nil)
+      (should cleaned))))
+
+(ert-deftest remote-tramp-cleanup-finds-buffer-owner-without-a-session ()
+  "Protected edits remain discoverable on a subsequent cleanup."
+  (let ((remote-targets (make-hash-table :test #'equal))
+        (remote-links (make-hash-table :test #'equal))
+        (remote-connection-pool (make-hash-table :test #'equal))
+        (remote-workspaces (make-hash-table :test #'equal))
+        (buffer (generate-new-buffer " *legacy-cleanup-file*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer buffer
+            (setq buffer-file-name "/ssh:cleanup-box:/tmp/a.c"))
+          (should (member "cleanup-box"
+                          (remote-backend-tramp--targets-for-vec
+                           (tramp-dissect-file-name "/ssh:cleanup-box:/")))))
+      (kill-buffer buffer))))
+
+(ert-deftest remote-tramp-rpc-watch-descriptor-leaves-no-buffer ()
+  "`make-pipe-process' always creates a buffer; descriptors must drop it."
+  (when-let* ((stale (get-buffer "tramp-rpc")))
+    (kill-buffer stale))
+  (let ((descriptor (make-pipe-process :name "tramp-rpc" :noquery t)))
+    (unwind-protect
+        (progn
+          (should (get-buffer "tramp-rpc"))
+          (should (eq (remote-backend-tramp-rpc--detach-descriptor-buffer-a
+                       descriptor)
+                      descriptor))
+          (should-not (process-buffer descriptor))
+          (should-not (get-buffer "tramp-rpc")))
+      (delete-process descriptor))))
+
+(ert-deftest remote-tramp-rpc-cleanup-kills-stderr-buffer-and-relay ()
+  (let* ((vec (tramp-dissect-file-name "/ssh:box:/"))
+         (buffer (get-buffer-create "*tramp/ssh box* stderr"))
+         (relay (make-pipe-process :name "remote-stderr-relay-test"
+                                   :buffer buffer :noquery t)))
+    (unwind-protect
+        (cl-letf (((symbol-function 'remote-backend-tramp-rpc--current-stderr-buffer)
+                   (lambda (_vec) nil)))
+          (remote-backend-tramp-rpc--cleanup-connection-buffers-h vec)
+          (should-not (buffer-live-p buffer))
+          (should-not (process-live-p relay)))
+      (when (process-live-p relay) (delete-process relay))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest remote-tramp-rpc-generation-cleanup-spares-replacement-relay ()
+  "A finished generation drops its relay but never the live replacement's."
+  (let* ((buffer (get-buffer-create " remote-generation-stderr-test"))
+         (relay (make-pipe-process :name "remote-generation-relay-test"
+                                   :buffer buffer :noquery t))
+         (transport (make-pipe-process :name "remote-generation-test"
+                                       :noquery t))
+         current)
+    (unwind-protect
+        (cl-letf (((symbol-function 'remote-backend-tramp-rpc--current-stderr-buffer)
+                   (lambda (_vec) current)))
+          (process-put transport :tramp-rpc-connection
+                       (list :stderr-buffer buffer))
+          (setq current buffer)
+          (remote-backend-tramp-rpc--generation-cleanup-after-a
+           transport 'vec "late\n" :transport-death)
+          (should (process-live-p relay))
+          (setq current nil)
+          (remote-backend-tramp-rpc--generation-cleanup-after-a
+           transport 'vec "killed\n" :transport-death)
+          (should-not (process-live-p relay))
+          ;; The buffer stays for diagnostics until TRAMP cleanup.
+          (should (buffer-live-p buffer)))
+      (dolist (process (list relay transport))
+        (when (process-live-p process) (delete-process process)))
+      (kill-buffer buffer))))
+
+(ert-deftest remote-tramp-rpc-cleanup-removes-numbered-stderr-buffers ()
+  (let* ((vec (tramp-dissect-file-name "/ssh:cleanup-box:/"))
+         (base (concat (tramp-buffer-name vec) " stderr"))
+         (buffers (mapcar #'get-buffer-create
+                          (list base (concat base "<1>") (concat base "<2>"))))
+         (other (get-buffer-create "*tramp/ssh cleanup-other* stderr"))
+         (processes (mapcar (lambda (buffer)
+                             (make-pipe-process :name "numbered-stderr"
+                                                :buffer buffer :noquery t))
+                           buffers)))
+    (unwind-protect
+        (progn
+          (remote-backend-tramp-rpc--cleanup-connection-buffers-h vec)
+          (dolist (buffer buffers) (should-not (buffer-live-p buffer)))
+          (dolist (process processes) (should-not (process-live-p process)))
+          (should (buffer-live-p other)))
+      (dolist (process processes)
+        (when (process-live-p process) (delete-process process)))
+      (dolist (buffer (cons other buffers))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest remote-tramp-rpc-explicit-cleanup-sweeps-own-orphaned-main-buffers ()
+  "Single-target cleanup must also find transports no longer in any table."
+  (let* ((tramp-methods (cons '("rpc") tramp-methods))
+         (vec (tramp-dissect-file-name "/rpc:cleanup-box:/"))
+         (base (tramp-buffer-name vec))
+         (buffers (mapcar #'get-buffer-create
+                          (list base (concat base "<1>")
+                                (concat base " stderr<2>"))))
+         (other (get-buffer-create "*tramp/rpc cleanup-other*")))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'tramp-rpc--get-connection)
+                     (lambda (_vec) nil)))
+            ;; Ordinary keep-debug/internal cleanup must preserve main buffers.
+            (let ((remote-backend-tramp-explicit-cleanup nil))
+              (remote-backend-tramp-rpc--cleanup-connection-buffers-h vec))
+            (should (buffer-live-p (car buffers)))
+            (let ((remote-backend-tramp-explicit-cleanup t))
+              (remote-backend-tramp-rpc--cleanup-connection-buffers-h vec)))
+          (dolist (buffer buffers) (should-not (buffer-live-p buffer)))
+          (should (buffer-live-p other)))
+      (dolist (buffer (cons other buffers))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest remote-tramp-rpc-global-cleanup-removes-orphaned-buffers ()
+  "A missing connection-table entry must not hide transport/relay buffers."
+  (let* ((buffers (mapcar #'get-buffer-create
+                         '("*tramp/rpc cleanup-orphan*"
+                           "*tramp/rpc cleanup-orphan* stderr"
+                           "*tramp/rpc cleanup-orphan* stderr<1>")))
+         (processes (mapcar (lambda (buffer)
+                             (make-pipe-process :name "orphaned-rpc-relay"
+                                                :buffer buffer :noquery t))
+                           buffers)))
+    (unwind-protect
+        (progn
+          (remote-backend-tramp-rpc--cleanup-all-buffers-h)
+          (dolist (buffer buffers) (should-not (buffer-live-p buffer)))
+          (dolist (process processes) (should-not (process-live-p process))))
+      (dolist (process processes)
+        (when (process-live-p process) (delete-process process)))
+      (dolist (buffer buffers)
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
 (provide 'remote-compat-tests)
 ;;; remote-compat-tests.el ends here

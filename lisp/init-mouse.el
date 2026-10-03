@@ -376,6 +376,12 @@ The menu is built only on click; there is no per-buffer scanning."
     (my/mouse--source-menu-items))
    event))
 
+(defun my/mouse-text-menu (event)
+  "Show the standard context menu at EVENT in a text buffer."
+  (interactive "e")
+  (my/mouse--set-point-from-event event)
+  (popup-menu (context-menu-map event) event))
+
 (defun my/mouse-mode-line-primary (event)
   "Select the mode-line window clicked by EVENT.
 Dedicated status segments handle their own actions."
@@ -457,6 +463,7 @@ Dedicated status segments handle their own actions."
 (keymap-set prog-mode-map "M-<mouse-1>" #'my/mouse-code-actions)
 (keymap-set prog-mode-map "S-<mouse-1>" #'my/mouse-doc-at-point)
 (keymap-set prog-mode-map "<mouse-3>" #'my/mouse-source-menu)
+(keymap-set text-mode-map "<mouse-3>" #'my/mouse-text-menu)
 
 (with-eval-after-load 'lsp-mode
   (keymap-set lsp-mode-map "C-<mouse-1>" #'my/mouse-find-definition)

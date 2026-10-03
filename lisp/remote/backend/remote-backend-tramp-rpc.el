@@ -66,6 +66,8 @@
     (tramp-rpc-handle-set-file-uid-gid . (1 . 3))
     (tramp-rpc--deliver-process-output . (4 . 4))
     (tramp-rpc--connection-transport-death . (3 . 3))
+    (tramp-rpc--cleanup-connection-generation . (4 . 5))
+    (tramp-rpc--make-file-notify-descriptor . (3 . 3))
     (tramp-rpc-deploy--arch-to-rust-target . (1 . 1)))
   "Private upstream seams isolated by this backend adapter.")
 
@@ -616,8 +618,11 @@ returns to FUNCTION's ordinary directory-by-directory implementation."
     (process vec event)
   "Notify Remote before tramp-rpc closes relays owned by PROCESS.
 The early notification keeps LSP and watch resources attached to their
-workspace until Remote has reopened the physical session."
-  (when (and (boundp 'remote-workspaces)
+workspace until Remote has reopened the physical session.  An explicit
+TRAMP cleanup deletes the transport too, but it is a disconnect, not a
+failure, and must not schedule a reconnect."
+  (when (and (not remote-backend-tramp-explicit-cleanup)
+             (boundp 'remote-workspaces)
              (hash-table-p remote-workspaces)
              (processp process)
              (eq process
@@ -643,6 +648,105 @@ workspace until Remote has reopened the physical session."
                  route
                  (list 'remote-transport-error
                        (format "tramp-rpc transport exited: %s" event)))))))))))
+
+;;;; Connection buffer hygiene
+
+;; tramp-rpc 0.13.1 leaves three kinds of client state behind a closed
+;; connection.  TRAMP's generic cleanup kills `tramp-buffer-name' but not the
+;; sibling "NAME stderr" buffer that `tramp-rpc--start-server-process' creates,
+;; and that buffer's stderr relay process outlives its transport long enough to
+;; collide with a reconnect ("NAME stderr<1>").  Each file-notify descriptor is
+;; a `make-pipe-process', which always creates a buffer named after the process
+;; even without `:buffer', so watching leaves a "tramp-rpc" buffer forever.
+
+(defconst remote-backend-tramp-rpc--descriptor-buffer-name "tramp-rpc"
+  "Buffer `make-pipe-process' creates for tramp-rpc watch descriptors.")
+
+(defun remote-backend-tramp-rpc--current-stderr-buffer (vec)
+  "Return the stderr buffer of VEC's live tramp-rpc generation, or nil."
+  (and (fboundp 'tramp-rpc--get-connection)
+       (plist-get (ignore-errors (tramp-rpc--get-connection vec))
+                  :stderr-buffer)))
+
+(defun remote-backend-tramp-rpc--release-stderr (buffer &optional kill)
+  "Delete BUFFER's stderr relay process; when KILL, also kill BUFFER."
+  (when (buffer-live-p buffer)
+    (when-let* ((process (get-buffer-process buffer)))
+      (delete-process process))
+    (when kill
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buffer)))))
+
+(defun remote-backend-tramp-rpc--generation-cleanup-after-a
+    (process vec &rest _)
+  "Release the stderr relay of PROCESS's finished generation for VEC.
+The buffer stays for diagnostics until TRAMP cleanup or a reconnect reuses
+it.  A late cleanup of an old generation never touches the replacement's
+relay, which reuses the same buffer."
+  (when-let* ((connection (and (processp process)
+                               (process-get process :tramp-rpc-connection)))
+              (stderr (plist-get connection :stderr-buffer)))
+    (unless (eq stderr (remote-backend-tramp-rpc--current-stderr-buffer vec))
+      (remote-backend-tramp-rpc--release-stderr stderr))))
+
+(defun remote-backend-tramp-rpc--kill-idle-descriptor-buffer ()
+  "Kill the shared watch-descriptor buffer when no process uses it."
+  (when-let* ((buffer (get-buffer
+                       remote-backend-tramp-rpc--descriptor-buffer-name)))
+    (unless (or (get-buffer-process buffer)
+                (buffer-local-value 'buffer-file-name buffer))
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buffer)))))
+
+(defun remote-backend-tramp-rpc--detach-descriptor-buffer-a (descriptor)
+  "Detach and drop the buffer `make-pipe-process' gave DESCRIPTOR.
+Return DESCRIPTOR.  The descriptor never receives output; upstream already
+intends it to have no buffer."
+  (when (processp descriptor)
+    (let ((buffer (process-buffer descriptor)))
+      (set-process-buffer descriptor nil)
+      (when (and (buffer-live-p buffer)
+                 (equal (buffer-name buffer)
+                        remote-backend-tramp-rpc--descriptor-buffer-name)
+                 (not (eq buffer (current-buffer))))
+        (remote-backend-tramp-rpc--kill-idle-descriptor-buffer))))
+  descriptor)
+
+(defun remote-backend-tramp-rpc--cleanup-connection-buffers-h (vec)
+  "Kill tramp-rpc client buffers TRAMP's cleanup of VEC leaves behind.
+Runs from `tramp-cleanup-connection-hook'.  A buffer already reused by a live
+replacement generation is kept."
+  (when (tramp-file-name-p vec)
+    (let* ((full-cleanup (and remote-backend-tramp-explicit-cleanup
+                              (equal (tramp-file-name-method vec) "rpc")))
+           (pattern (concat "\\`"
+                            (regexp-quote (tramp-buffer-name vec))
+                            (if full-cleanup "\\(?: stderr\\)?" " stderr")
+                            "\\(?:<[0-9]+>\\)?\\'"))
+           (current (remote-backend-tramp-rpc--current-stderr-buffer vec))
+           (current-main
+            (and full-cleanup (fboundp 'tramp-rpc--get-connection)
+                 (plist-get (ignore-errors (tramp-rpc--get-connection vec))
+                            :buffer))))
+      (dolist (buffer (buffer-list))
+        (when (and (string-match-p pattern (buffer-name buffer))
+                   (not (buffer-local-value 'buffer-file-name buffer))
+                   (not (eq buffer current))
+                   (not (eq buffer current-main)))
+          (remote-backend-tramp-rpc--release-stderr buffer t)))))
+  (remote-backend-tramp-rpc--kill-idle-descriptor-buffer))
+
+(defun remote-backend-tramp-rpc--cleanup-all-buffers-h ()
+  "Kill tramp-rpc client buffers left after `tramp-cleanup-all-connections'."
+  ;; A failed or already-removed generation need not be in any connection
+  ;; table.  Sweep its owned namespace as well as the current generations.
+  (dolist (buffer (buffer-list))
+    (when (and (string-match-p
+                "\\`\\*tramp/rpc .*\\*\\(?: stderr\\)?\\(?:<[0-9]+>\\)?\\'"
+                (buffer-name buffer))
+               (not (buffer-local-value 'buffer-file-name buffer)))
+      (remote-backend-tramp-rpc--release-stderr buffer t)))
+  (remote-backend-tramp-rpc--kill-idle-descriptor-buffer))
 
 (defun remote-backend-tramp-rpc--closed-relay-exit-a
     (function process stdout stderr stderr-buffer)
@@ -820,6 +924,26 @@ already terminal.  An active process or any other error still propagates."
           (advice-add
            'tramp-rpc--connection-transport-death
            :before #'remote-backend-tramp-rpc--transport-death-before-a)))
+      ;; Buffer hygiene.  The cleanup hooks only use public TRAMP names and
+      ;; are safe on any release; the two private seams stay version-gated.
+      (when (featurep 'tramp-rpc)
+        (add-hook 'tramp-cleanup-connection-hook
+                  #'remote-backend-tramp-rpc--cleanup-connection-buffers-h t)
+        (add-hook 'tramp-cleanup-all-connections-hook
+                  #'remote-backend-tramp-rpc--cleanup-all-buffers-h t))
+      (dolist (entry
+               '((tramp-rpc--cleanup-connection-generation
+                  :after remote-backend-tramp-rpc--generation-cleanup-after-a)
+                 (tramp-rpc--make-file-notify-descriptor
+                  :filter-return
+                  remote-backend-tramp-rpc--detach-descriptor-buffer-a)))
+        (pcase-let ((`(,symbol ,how ,advice) entry))
+          (when (fboundp symbol)
+            (advice-remove symbol advice)
+            (when (and verified
+                       (remote-backend-tramp-rpc--private-compatible-p
+                        symbol))
+              (advice-add symbol how advice)))))
       (remote-backend-tramp-rpc-metadata-install
        verified
        (lambda (contract)

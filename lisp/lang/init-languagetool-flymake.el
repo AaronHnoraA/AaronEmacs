@@ -543,6 +543,8 @@ buffer therefore retain their normal end-of-line summaries."
                #'my/languagetool--schedule-viewport-check t)
   (remove-hook 'after-change-functions
                #'my/languagetool--flymake-after-change t)
+  (remove-hook 'context-menu-functions
+               #'my/languagetool--context-menu-function t)
   (remove-hook 'kill-buffer-hook #'my/languagetool--flymake-cleanup t))
 
 (define-minor-mode my/languagetool-auto-mode
@@ -556,6 +558,8 @@ buffer therefore retain their normal end-of-line summaries."
                   #'my/languagetool--schedule-viewport-check nil t)
         (add-hook 'after-change-functions
                   #'my/languagetool--flymake-after-change nil t)
+        (add-hook 'context-menu-functions
+                  #'my/languagetool--context-menu-function nil t)
         (add-hook 'kill-buffer-hook #'my/languagetool--flymake-cleanup nil t)
         (setq-local flymake-no-changes-timeout
                     my/languagetool-auto-idle-delay)
@@ -632,6 +636,30 @@ buffer therefore retain their normal end-of-line summaries."
    '(("Skip this occurrence" . (skip))
      ("Ignore this rule in buffer" . (ignore-rule))
      ("Add word to file dictionary" . (add-word)))))
+
+(defun my/languagetool--context-menu-function (menu click)
+  "Add LanguageTool actions to MENU for CLICK in a prose buffer."
+  (when (mouse-event-p click)
+    (mouse-set-point click))
+  (let* ((diagnostic (and (bound-and-true-p flymake-mode)
+                          (my/languagetool--diagnostic-at-point)))
+         (submenu (make-sparse-keymap "LanguageTool")))
+    (define-key-after submenu [check]
+      '(menu-item "Check prose" my/languagetool-check))
+    (define-key-after submenu [review]
+      '(menu-item "Review issues" my/languagetool-correct))
+    (when diagnostic
+      (define-key-after submenu [separator] menu-bar-separator)
+      (cl-loop for candidate in (my/languagetool--correction-candidates diagnostic)
+               for index from 0
+               do (let ((action (cdr candidate)))
+                    (define-key-after submenu (vector (intern (format "action-%d" index)))
+                      `(menu-item ,(car candidate)
+                                  ,(lambda () (interactive)
+                                     (my/languagetool--perform-action
+                                      diagnostic action)))))))
+    (define-key-after menu [languagetool] (cons "LanguageTool" submenu)))
+  menu)
 
 (defun my/languagetool--perform-action (diagnostic action)
   "Perform ACTION for LanguageTool DIAGNOSTIC."
