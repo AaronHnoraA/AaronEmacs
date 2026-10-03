@@ -41,6 +41,21 @@
                                     (insert-file-contents parents)
                                     (buffer-string)))))))
 
+(ert-deftest init-snippets-markdown-structure-keys-expand ()
+  "Shared Markdown structure keys expand through Yasnippet in Emacs."
+  (yas-reload-all t)
+  (dolist (case '(("Heading 2" "h2" "## Section")
+                  ("Bullet list item" "ul" "- Item")
+                  ("Mermaid diagram" "mer" "```mermaid")))
+    (with-temp-buffer
+      (markdown-mode)
+      (yas-minor-mode 1)
+      (let ((template (yas-lookup-snippet (car case) 'markdown-mode)))
+        (should (equal (yas--template-key template) (cadr case)))
+        (insert (cadr case))
+        (yas-expand-snippet template (point-min) (point))
+        (should (string-prefix-p (nth 2 case) (buffer-string)))))))
+
 (ert-deftest init-snippets-emacs-math-shortcuts-survive-reload ()
   "Punctuation math snippets expand in Emacs without shared catalog files."
   (yas-reload-all t)

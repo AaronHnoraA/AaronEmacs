@@ -3,8 +3,8 @@
 # key: mer
 # group: Noema syntax
 # --
-```mermaid
+\`\`\`mermaid
 ${1:graph TD
   A --> B}
-```
+\`\`\`
 $0
