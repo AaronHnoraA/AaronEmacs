@@ -2,12 +2,12 @@
 
 个人学术主页的构建与部署。`make publish*` 这一族目标就在这里。
 
-## 三个仓库,各管一段
+## 两个仓库,各管一段
 
 | 位置 | 角色 |
 |---|---|
-| `~/.emacs.d/publish`(→ `~/HC/Org`) | **站点本身**。手写的 HTML/CSS/JS,仓库根就是网站根 |
-| `site-lisp/noema/publish/CV/main.tex` | CV 的 LaTeX 源(在 Noema 仓库里) |
+| `~/.emacs.d/publish`(→ `~/HC/Homepage`) | **站点本身**。手写的 HTML/CSS/JS,仓库根就是网站根 |
+| `publish/CV/main.tex` | CV 的 LaTeX 源(在 publish 仓库里,与站点同仓) |
 | `lisp/roam/init-aaronnote-publish.el` | 编译 CV、检查完整性、部署 |
 
 站点没有构建步骤。页面是什么样,提交进去的就是什么样;唯一被生成的产物是 CV 的 PDF。
@@ -84,7 +84,7 @@ section 变成站在世界里的 CSS3D 面板 —— 仍是真 HTML,可选中、
 | 变量 | 含义 |
 |---|---|
 | `my/noema-publish-root` | publish 仓库根 |
-| `my/noema-publish-cv-dir` | CV LaTeX 源目录 |
+| `my/noema-publish-cv-dir` | CV LaTeX 源目录(`publish/CV`) |
 | `my/noema-publish-state-dir` | CV 编译中间产物 |
 | `my/noema-publish-nas-enable` | 是否在 push 后 rsync 到 NAS |
 | `my/noema-publish-nas-target` | rsync 目标 |
@@ -93,7 +93,7 @@ section 变成站在世界里的 CSS3D 面板 —— 仍是真 HTML,可选中、
 
 ## 部署路径
 
-1. `latexmk -xelatex` 把 CV 编到 `state-dir/cv/`,再拷成 `publish/CV/Aaron_He_CV.pdf`。
+1. `latexmk -xelatex` 把 `publish/CV/main.tex` 编到 `state-dir/cv/`,再拷成 `publish/CV/Aaron_He_CV.pdf`。
 2. 在 publish 仓库 `git add -A` + commit(消息为 `site update: <时间戳>`)+ push。
 3. 若 `nas-enable` 为真,`rsync -avh --delete` 整个仓库根到 `nas-target`,
    排除 `.git/`、`.github/`、`.DS_Store`。
