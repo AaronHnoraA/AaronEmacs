@@ -3141,6 +3141,26 @@ selection untouched, so the pane keeps being reported as background."
       (kill-buffer pane)
       (kill-buffer source))))
 
+(ert-deftest my/noema-related-notes-uses-existing-agent-context ()
+  "Related-note discovery sends a file reference through the Emacs agent path."
+  (require 'noema-context)
+  (with-temp-buffer
+    (let (prompt references)
+      (cl-letf (((symbol-function 'noema-context--region-references)
+                 (lambda (_buffer begin end)
+                   (should (= begin 1))
+                   (should (= end 4))
+                   (lambda (_root _session) '((file . "note.md")))))
+                ((symbol-function 'noema-context--send)
+                 (lambda (&rest args)
+                   (setq prompt (plist-get args :prompt)
+                         references (funcall (plist-get args :references) nil nil))
+                   nil))
+                ((symbol-function 'noema-md-bridge--drop-hidden) #'ignore))
+        (noema-md-bridge-run "related" (current-buffer) 1 4))
+      (should (string-match-p "semantic search" prompt))
+      (should (equal references '((file . "note.md")))))))
+
 (defmacro my/noema-test--with-pane-window (&rest body)
   "Run BODY with `pane' shown in the only, selected window."
   (declare (indent 0))
