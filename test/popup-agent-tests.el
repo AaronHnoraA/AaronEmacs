@@ -6,6 +6,18 @@
 (require 'noema-agent-acp)
 (require 'init-ai-ide)
 
+(ert-deftest agent-shell-refresh-skips-windows-in-hidden-frames ()
+  (let ((buffer (generate-new-buffer " *hidden-frame-refresh*"))
+        (my/auto-revert-recent-buffer-limit 0))
+    (unwind-protect
+        (save-window-excursion
+          (set-window-buffer (selected-window) buffer)
+          (should (memq buffer (my/auto-revert--candidate-buffers)))
+          (cl-letf (((symbol-function 'frame-visible-p)
+                     (lambda (_frame) nil)))
+            (should-not (memq buffer (my/auto-revert--candidate-buffers)))))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
 (ert-deftest agent-shell-turn-complete-dispatches-buffer-refresh-policy ()
   "ACP completion uses a buffer's registered refresh policy regardless of mode."
   (let* ((buffer (generate-new-buffer " *agent-refresh-policy*"))

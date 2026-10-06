@@ -1222,8 +1222,14 @@ to JSON a second time."
 
 (defun my/noema--external-file-metadata (file)
   "Return JSON-ready metadata for FILE, or signal when it is unavailable."
-  (let ((attributes (file-attributes file 'string)))
-    (unless (and attributes (file-regular-p file))
+  (let* ((attributes (file-attributes file 'string))
+         (type (and attributes (file-attribute-type attributes))))
+    ;; An ordinary file needs only one metadata operation.  For a symlink,
+    ;; inspect the target: the link's own mtime would miss agent edits.
+    (when (stringp type)
+      (setq attributes (file-attributes (file-truename file) 'string)
+            type (and attributes (file-attribute-type attributes))))
+    (unless (and attributes (null type))
       (error "Remote Markdown file is unavailable: %s" file))
     `((mtimeMs
        . ,(* 1000.0

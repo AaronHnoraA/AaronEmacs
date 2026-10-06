@@ -540,6 +540,21 @@
       (when (file-exists-p replacement) (delete-file replacement))
       (when (file-exists-p file) (delete-file file)))))
 
+(ert-deftest my/noema-external-metadata-follows-symlink-target ()
+  (let* ((target (make-temp-file "noema-link-target-" nil ".md"))
+         (link (concat target ".link.md")))
+    (unwind-protect
+        (progn
+          (make-symbolic-link target link)
+          (let ((before (alist-get 'mtimeMs
+                                   (my/noema--external-file-metadata link))))
+            (set-file-times target (time-add (current-time) (seconds-to-time 10)))
+            (should (> (alist-get 'mtimeMs
+                                  (my/noema--external-file-metadata link))
+                       before))))
+      (when (file-exists-p link) (delete-file link))
+      (when (file-exists-p target) (delete-file target)))))
+
 (ert-deftest my/noema-external-watch-notifies-host-path-for-native-pane ()
   (let ((my/noema--external-file-watch-timers (make-hash-table :test #'equal))
         sent)
