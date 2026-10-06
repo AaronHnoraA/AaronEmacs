@@ -199,22 +199,33 @@
 
 (ert-deftest my/noema-input-focus-keeps-the-webkit-first-responder ()
   (let ((buffer (generate-new-buffer " *noema-input-focus-test*"))
+        (my/noema--input-focused-window nil)
+        (my/noema--input-focus-host-window nil)
         activity-updated)
     (unwind-protect
         (save-window-excursion
           (let ((page-window (split-window-below)))
             (set-window-buffer page-window buffer)
-            (cl-letf (((symbol-function 'my/noema--buffer-for-client)
+            (let ((host-window (selected-window)))
+              (cl-letf (((symbol-function 'my/noema--buffer-for-client)
                        (lambda (_client) buffer))
                       ((symbol-function 'my/noema--update-activity)
                        (lambda () (setq activity-updated t)))
+                      ((symbol-function 'frame-focus-state) (lambda (&rest _) t))
+                      ((symbol-function 'select-window)
+                       (lambda (&rest _) (ert-fail "Emacs selected a window over WebKit")))
                       ((symbol-function 'select-frame-set-input-focus)
                        (lambda (&rest _) (ert-fail "Emacs stole WebKit input focus"))))
-              (my/noema--handle-input-focus '((client . "test-page")))
-              (should (eq (selected-window) page-window))
+                (my/noema--handle-input-focus '((client . "test-page")))
+                (should (my/noema--buffer-active-p buffer))
+                (my/noema--forget-input-focus-on-command)
+                (should-not (my/noema--buffer-active-p buffer)))
+              (should (eq (selected-window) host-window))
+              (should-not my/noema--input-focused-window)
               (should (eq (buffer-local-value 'my/noema--activity-paused buffer)
                           :unknown))
               (should activity-updated))))
+      (my/noema--forget-input-focus)
       (kill-buffer buffer))))
 
 (ert-deftest my/noema-jupyter-native-remote-paths-bypass-local-project-gate ()
@@ -509,6 +520,82 @@
       (should
        (zerop
         (hash-table-count my/noema--external-file-watches))))))
+
+(ert-deftest my/noema-external-watch-distinguishes-agent-write-after-save ()
+  (let* ((file (make-temp-file "noema-watch-self-write-" nil ".md"))
+         (replacement (concat file ".replacement"))
+         (my/noema--external-file-watch-suppressed
+          (make-hash-table :test #'equal)))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "host"))
+          (puthash file
+                   (cons (+ (float-time) 2)
+                         (my/noema--external-file-signature file))
+                   my/noema--external-file-watch-suppressed)
+          (should (my/noema--external-file-self-write-p file))
+          (with-temp-file replacement (insert "edit"))
+          (rename-file replacement file t)
+          (should-not (my/noema--external-file-self-write-p file)))
+      (when (file-exists-p replacement) (delete-file replacement))
+      (when (file-exists-p file) (delete-file file)))))
+
+(ert-deftest my/noema-external-watch-notifies-host-path-for-native-pane ()
+  (let ((my/noema--external-file-watch-timers (make-hash-table :test #'equal))
+        sent)
+    (cl-letf (((symbol-function 'remote-gateway-find-client)
+               (lambda (_name) 'mock-client))
+              ((symbol-function 'my/noema--external-file-metadata)
+               (lambda (_file) '((mtimeMs . 1234) (size . 7))))
+              ((symbol-function 'my/noema--host-file)
+               (lambda (_file) "/private/tmp/standalone.md"))
+              ((symbol-function 'remote-gateway-notify)
+               (lambda (_client _method payload) (setq sent payload))))
+      (my/noema--external-file-notify-change
+       "/fs:local:/private/tmp/standalone.md")
+      (let ((detail (alist-get 'detail sent)))
+        (should (equal (alist-get 'file detail) "/private/tmp/standalone.md"))
+        (should (equal (alist-get 'clientId detail) "remote-external")))
+      (my/noema--external-file-notify-change
+       "/fs:local:/private/tmp/standalone.md" "agent-turn")
+      (should (equal (alist-get 'clientId (alist-get 'detail sent))
+                     "agent-turn")))))
+
+(ert-deftest my/noema-agent-turn-checks-each-open-markdown-once ()
+  (should (memq #'my/noema--check-open-notes-after-agent-turn
+                my/auto-revert-agent-refresh-functions))
+  (let ((first (generate-new-buffer " *noema-turn-first*"))
+        (second (generate-new-buffer " *noema-turn-second*"))
+        (third (generate-new-buffer " *noema-turn-third*"))
+        (disconnected (generate-new-buffer " *noema-turn-disconnected*"))
+        (my/noema--ready t)
+        (checked nil))
+    (unwind-protect
+        (progn
+          (dolist (buffer (list first second third disconnected))
+            (with-current-buffer buffer
+              (setq-local major-mode 'xwidget-webkit-mode)))
+          (with-current-buffer first
+            (setq-local my/noema-buffer-file-name "/tmp/note.md"))
+          (with-current-buffer second
+            (setq-local my/noema-buffer-file-name "/tmp/note.md"))
+          (with-current-buffer third
+            (setq-local my/noema-buffer-file-name "/tmp/graph.html"))
+          (with-current-buffer disconnected
+            (setq-local my/noema-buffer-file-name "/fs:box:/work/draft.md"
+                        remote-buffer-disconnected-p t))
+          (with-current-buffer first
+            ;; Appine may expose a different major mode than xwidget-webkit.
+            (setq-local major-mode 'fundamental-mode))
+          (cl-letf (((symbol-function 'buffer-list)
+                     (lambda (&rest _) (list first second third disconnected)))
+                    ((symbol-function 'my/noema--external-file-notify-change)
+                     (lambda (file client-id)
+                       (push (list file client-id) checked))))
+            (my/noema--check-open-notes-after-agent-turn)
+            (should (equal checked '(("/tmp/note.md" "agent-turn"))))))
+      (dolist (buffer (list first second third disconnected))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
 (ert-deftest my/noema-jupyter-defaults-read-project-config-without-eval ()
   (let ((root (make-temp-file "aaronnote-project" t)))
@@ -2919,6 +3006,8 @@ selection untouched, so the pane keeps being reported as background."
          (my/noema--file-buffers (make-hash-table :test #'equal))
          (my/noema--activity-hooks-installed t)
          (my/noema--last-activity-signature 'stale)
+         (my/noema--input-focused-window nil)
+         (my/noema--input-focus-host-window nil)
          selected
          updated)
     (unwind-protect
@@ -2939,7 +3028,8 @@ selection untouched, so the pane keeps being reported as background."
             (my/noema--handle-input-focus '((client . "client-a")
                                             (file . "/notes/a.md"))))
           (should (eq my/noema--app-buffer pane))
-          (should (eq selected 'pane-window))
+          (should-not selected)
+          (should (eq my/noema--input-focused-window 'pane-window))
           (should updated)
           (should (eq my/noema--last-activity-signature :unknown))
           ;; The renderer already dropped its own host pause. Leaving the
@@ -2948,6 +3038,7 @@ selection untouched, so the pane keeps being reported as background."
           ;; replaying a stale pause and a hidden page stays fully awake.
           (should (eq (buffer-local-value 'my/noema--activity-paused pane)
                       :unknown)))
+      (my/noema--forget-input-focus)
       (when (buffer-live-p pane) (kill-buffer pane)))))
 
 (ert-deftest my/noema-input-focus-ignores-an-unknown-client ()

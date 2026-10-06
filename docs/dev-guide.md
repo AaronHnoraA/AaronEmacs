@@ -511,6 +511,10 @@ browser pipeline 额外提供：
 （如 Noema 的 CodeMirror 聚焦 JS）。打开后无需手动先按键即可直接输入。
 相关开关：`my/xwidget-auto-focus-on-load`、`my/xwidget-prime-native-focus`、`my/xwidget-prime-key`。
 手动恢复焦点：`M-x my/xwidget-focus`（xwidget buffer 内绑定到 `i`）。
+Noema 页面在暂停状态下收到真实点击时，会向 Emacs 报告页面已取得输入焦点。
+Emacs 只用这个事件更新该 pane 的前台活动状态，不重新选择窗口，以免 macOS
+把 WebKit 刚取得的 first-responder 夺走。下一次 Emacs 命令或窗口切换会清除
+这个临时活动状态；平时没有额外轮询。
 
 ## 8. Noema Markdown Web/Appine
 
@@ -594,6 +598,16 @@ in-process 缓存，与自动刷新保持一致。
 
 - `M-x noema` / `C-c A W` — Noema 主入口
 - `M-x noema-agent-start` / `C-c A a` — 启动包管理的 agent-shell 上的结构化 agent
+- agent-shell 原生 `turn-complete` 事件由 `noema-agent-acp.el` 转发给本配置，裸启动的
+  Claude 等 agent-shell 会话也在创建 buffer 时订阅：每轮结束后只检查可见及最近的普通
+  文件、JuText，以及打开的 Noema Markdown 页面。底层按 buffer-local
+  `my/auto-revert-agent-refresh-function` 分发：普通文件走安全 auto-revert，拥有磁盘合并规则
+  的模式可注册自己的函数；无普通文件 buffer 的页面可注册
+  `my/auto-revert-agent-refresh-functions`，Markdown 页面就在这条路径上。普通远程文件
+  也参与：`batched` 路由可在焦点事件检查，`round-trip` 路由只在 ACP 完成或用户显式
+  解决冲突、或旧 buffer 再次显示时检查；断开的目标一律跳过。JuText 在无草稿时接收外部正文编辑，
+  有草稿时保留本地内容并合并运行输出；页面先比较时间戳，确有变化
+  且没有草稿才读取正文；不 advise ACP 内部函数，也不扫描整个项目。
 - `M-x noema-agent-worktree-start` / `C-c A w` — 让会话在 Project workspace 仓库的独立 linked worktree（分支 `noema/<名字>`，基点记在 `branch.<分支>.noemaBase`）里工作，会话仍登记在发起它的 Project 下（D-038 不变）。Git 都经 `process-file` 在 Emacs 目录里运行，本机和 `/fs:` 远程走同一条代码路径；临时 buffer 里会带上调用方的环境 capsule。`noema-context` 把主 checkout 的引用改写到会话的 worktree（`noema-agent-worktree-redirect`），worktree 里没有这个文件就报错，区域引用的那几行在副本里内容不同也报错。Sessions 与总览的 `m`/`d` 打开该会话 checkout 的 Magit。设计来源见 [Agent Fleet 审计](agent-fleet-noema-audit-2026-10.md)
 - `M-x noema-agent-worktree-parallel` / `C-c A n` 与 `M-x noema-agent-worktree-board` / `C-c A A` — 并行尝试组（`noema-agent-worktree-board.el`）。组只记在各尝试分支的 `branch.<b>.noemaGroup`/`noemaAgent` 上，成员从 `git worktree list` 加一次 `git config --get-regexp` 得出，状态从活会话现读，不另建注册表，也不改 kernel。整组状态 waiting > working > settled，一份完成不终止其他。看板只在打开和 `g` 时调用 Git；可见时随 `noema-agent-acp-changed-functions` 重绘，buffer 被 kill 时移除 hook
 - `M-x noema-agent-acp-conversation-tree` / `C-c A T` — 从当前 Noema Agent 会话浏览原生 ACP 对话树；Agent 窗口 `C-c C-t`、Sessions 列表 `T` 也可进入。`agent-shell-fork-tree` 作为固定版本的 package-vc 依赖；Noema 经 ACP 边界调用它，分叉后登记为命名会话，缓存仅驻内存（`agent-shell-fork-tree-cache-directory=nil`）。它按共享文本前缀展示，不是 WorkNode DAG 或 Noema `parentName` 的替代品

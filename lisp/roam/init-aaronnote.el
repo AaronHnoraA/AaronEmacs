@@ -329,7 +329,7 @@ the backend.  The backend is chosen here, not per export."
   "Debounce timers for remote Noema file changes.")
 (defvar my/noema--external-file-watch-suppressed
   (make-hash-table :test #'equal)
-  "Times before which self-write watch events should be ignored.")
+  "Pending writes or recent self-write signatures for file watch filtering.")
 (defvar my/noema--port nil
   "HTTP port of the running Noema web-host.")
 (defvar my/noema--last-port nil
@@ -1010,8 +1010,8 @@ selection.  On the macOS xwidget port a click inside the WebKit view can make
 that view first responder without Emacs selecting the surrounding window, so
 the pane keeps being reported as background and re-paused under the user\'s
 cursor.  A renderer sends this only after a trusted input event it received
-while paused, so it is authoritative: select that pane\'s window and recompute
-the activity snapshot, which resumes it and pauses its siblings.
+while paused.  Record that pane as the input owner without selecting its Emacs
+window, which would take first responder away from WebKit.
 
 The renderer has already dropped its own host pause by the time this arrives,
 but the Node host still retains the old pause for reconnect replay. Mark local
@@ -1024,11 +1024,11 @@ both sides of the protocol before later background transitions are deduped."
       (with-current-buffer buffer
         (setq-local my/noema--activity-paused :unknown))
       (when-let* ((window (get-buffer-window buffer 'visible)))
-        (unless (eq window (selected-window))
-          ;; The page already owns the keyboard after its trusted pointer press.
-          ;; Selecting Emacs's frame here steals WKWebView's first responder,
-          ;; so CodeMirror briefly paints a caret and then loses it.
-          (select-window window)))
+        (if (eq window (selected-window))
+            (my/noema--forget-input-focus)
+          (setq my/noema--input-focused-window window
+                my/noema--input-focus-host-window (selected-window))
+          (add-hook 'pre-command-hook #'my/noema--forget-input-focus-on-command)))
       (setq my/noema--last-activity-signature :unknown)
       (my/noema--update-activity))))
 
@@ -1231,31 +1231,70 @@ to JSON a second time."
               (file-attribute-modification-time attributes))))
       (size . ,(or (file-attribute-size attributes) 0)))))
 
-(defun my/noema--external-file-notify-change (file)
-  "Notify the Noema peer that logical FILE changed externally."
-  (remhash file my/noema--external-file-watch-timers)
-  (when-let* ((client (remote-gateway-find-client "aaronnote")))
-    (let* ((metadata
-            (condition-case nil
-                (my/noema--external-file-metadata file)
-              (error '((mtimeMs . 0) (size . 0)))))
-           (mtime (alist-get 'mtimeMs metadata)))
-      (remote-gateway-notify
-       client "aaronnote.command"
-       `((type . "command")
-         (command . "note-saved")
-         (file . ,file)
-         (mtimeMs . ,mtime)
-         (clientId . "remote-external"))))))
+(defun my/noema--external-file-notify-change (file &optional client-id)
+  "Notify Noema about logical FILE using optional CLIENT-ID as the source."
+  (let ((client (remote-gateway-find-client "aaronnote")))
+    (when (and client client-id)
+      (when-let* ((timer (gethash file my/noema--external-file-watch-timers)))
+        (cancel-timer timer)))
+    (remhash file my/noema--external-file-watch-timers)
+    (when client
+      (let* ((metadata
+              (condition-case nil
+                  (my/noema--external-file-metadata file)
+                (error '((mtimeMs . 0) (size . 0)))))
+             (mtime (alist-get 'mtimeMs metadata)))
+        (remote-gateway-notify
+         client "aaronnote.command"
+         `((type . "command")
+           (command . "note-saved")
+           (detail . ((file . ,(my/noema--host-file file))
+                      (mtimeMs . ,mtime)
+                      (clientId . ,(or client-id "remote-external"))))))))))
+
+(defun my/noema--check-open-notes-after-agent-turn ()
+  "Send disk metadata for open Markdown pages after one ACP turn."
+  (when my/noema--ready
+    (let ((seen (make-hash-table :test #'equal)))
+      (dolist (buffer (buffer-list))
+        (when (and (local-variable-p 'my/noema-buffer-file-name buffer)
+                   (not (with-current-buffer buffer
+                          (bound-and-true-p remote-buffer-disconnected-p))))
+          (when-let* ((file (buffer-local-value 'my/noema-buffer-file-name
+                                                  buffer)))
+            (when (and (my/noema--markdown-file-p file)
+                       (not (gethash file seen)))
+              (puthash file t seen)
+              (my/noema--external-file-notify-change
+               file "agent-turn"))))))))
+
+(add-hook 'my/auto-revert-agent-refresh-functions
+          #'my/noema--check-open-notes-after-agent-turn)
+
+(defun my/noema--external-file-signature (file)
+  "Return FILE's identity and high-resolution change metadata, or nil."
+  (when-let* ((attributes (ignore-errors (file-attributes file))))
+    (list (file-attribute-inode-number attributes)
+          (file-attribute-size attributes)
+          (file-attribute-modification-time attributes)
+          (file-attribute-status-change-time attributes))))
+
+(defun my/noema--external-file-self-write-p (file)
+  "Whether FILE still matches Noema's own recent write."
+  (when-let* ((record (gethash file my/noema--external-file-watch-suppressed)))
+    (let ((until (if (numberp record) record (car record))))
+      (cond
+       ((>= (float-time) until)
+        (remhash file my/noema--external-file-watch-suppressed)
+        nil)
+       ((numberp record) t) ; An atomic write is in progress.
+       ((null (cdr record)) nil)
+       (t (equal (cdr record) (my/noema--external-file-signature file)))))))
 
 (defun my/noema--external-file-watch-event (file event)
   "Debounce Remote file watch EVENT for logical FILE."
   (unless (or (eq (nth 1 event) 'stopped)
-              (< (float-time)
-                 (or
-                  (gethash
-                   file my/noema--external-file-watch-suppressed)
-                  0)))
+              (my/noema--external-file-self-write-p file))
     (when-let* ((timer
                  (gethash
                   file my/noema--external-file-watch-timers)))
@@ -1384,7 +1423,8 @@ to JSON a second time."
           (when (file-exists-p temporary)
             (ignore-errors (delete-file temporary))))
         (puthash
-         file (+ (float-time) 2)
+         file (cons (+ (float-time) 2)
+                    (my/noema--external-file-signature file))
          my/noema--external-file-watch-suppressed)
         (let ((written
                (my/noema--external-file-metadata file)))
@@ -2723,6 +2763,10 @@ waits for a response in the invoking Emacs command."
   "Non-nil when Noema pause/resume activity hooks are installed.")
 (defvar my/noema--last-activity-signature :unknown
   "Last per-client activity snapshot scheduled by Noema.")
+(defvar my/noema--input-focused-window nil
+  "Noema pane that proved WebKit owns input without Emacs selecting it.")
+(defvar my/noema--input-focus-host-window nil
+  "Emacs selected window when `my/noema--input-focused-window' took input.")
 (defvar-local my/noema--activity-paused :unknown
   "Last pause state sent to this Noema renderer client.")
 (put 'my/noema--activity-paused 'permanent-local t)
@@ -2752,17 +2796,31 @@ waits for a response in the invoking Emacs command."
     (delete-dups buffers)))
 
 (defun my/noema--buffer-active-p (buffer)
-  "Return non-nil when BUFFER owns the selected window of a focused frame.
+  "Return non-nil when BUFFER owns the input window of a focused frame.
 A visible but unselected Noema split remains painted and readable, but its
-shared renderer activity gate may sleep until that pane is selected again."
+shared renderer activity gate may sleep until that pane receives input."
   (when (buffer-live-p buffer)
     (cl-some
      (lambda (window)
        (let ((frame (window-frame window)))
          (and (eq (frame-visible-p frame) t)
               (frame-focus-state frame)
-              (eq window (frame-selected-window frame)))))
+              (eq window (if (window-live-p my/noema--input-focused-window)
+                             my/noema--input-focused-window
+                           (frame-selected-window frame))))))
      (get-buffer-window-list buffer nil 'visible))))
+
+(defun my/noema--forget-input-focus ()
+  "Drop the WebKit input fact when Emacs handles a command or changes panes."
+  (setq my/noema--input-focused-window nil
+        my/noema--input-focus-host-window nil)
+  (remove-hook 'pre-command-hook #'my/noema--forget-input-focus-on-command))
+
+(defun my/noema--forget-input-focus-on-command ()
+  "Return Noema activity ownership to Emacs at the next host command."
+  (my/noema--forget-input-focus)
+  (setq my/noema--last-activity-signature :unknown)
+  (my/noema--update-activity))
 
 (defun my/noema--app-buffer-visible-p ()
   "Return non-nil when the current Noema buffer is the active host pane."
@@ -2889,6 +2947,10 @@ activity always applies a complete per-client snapshot."
   "Coalesce host focus/window changes into per-client pause commands.
 No polling timer is installed: Emacs reports only shell-level activity facts,
 and every renderer uses the same `runHostCommand' pause implementation."
+  (when (and my/noema--input-focused-window
+             (or (not (window-live-p my/noema--input-focused-window))
+                 (not (eq (selected-window) my/noema--input-focus-host-window))))
+    (my/noema--forget-input-focus))
   (let ((selected (and (window-live-p (selected-window))
                        (window-buffer (selected-window)))))
     (when (memq selected (my/noema--browser-buffers))
@@ -2930,6 +2992,7 @@ and every renderer uses the same `runHostCommand' pause implementation."
 
 (defun my/noema--remove-activity-hooks ()
   "Remove activity hooks and cancel the one pending debounce transition."
+  (my/noema--forget-input-focus)
   (remove-function after-focus-change-function #'my/noema--update-activity)
   (remove-hook 'focus-in-hook #'my/noema--update-activity)
   (remove-hook 'focus-out-hook #'my/noema--update-activity)

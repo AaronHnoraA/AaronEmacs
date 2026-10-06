@@ -46,6 +46,8 @@
 
   (declare-function remote-file-watch-cost "remote-fs"
                     (file-name &optional adapter))
+  (declare-function remote-file-operation-cost "remote-fs"
+                    (file-name &optional adapter))
 
   (defun my/auto-revert-follow-pushed-changes-h ()
     "Let auto-revert follow this file when its route pushes change events.
@@ -68,6 +70,31 @@ external edits then revert it without any polling."
   ;; Run before `auto-revert--global-adopt-current-buffer' adds the watch.
   (add-hook 'find-file-hook #'my/auto-revert-follow-pushed-changes-h -90)
 
+  (defun my/auto-revert-watch-open-file-h ()
+    "Start file notifications as soon as a visited file is adopted.
+Without this, Auto-Revert waits until its next timer tick to install
+the watch, so an agent's first edit just after opening a file may be
+noticed several seconds late.  The normal Auto-Revert handler still
+decides whether the buffer is safe to reload."
+    (when (and buffer-file-name
+               (bound-and-true-p auto-revert--global-mode)
+               (not (bound-and-true-p global-auto-revert-ignore-buffer))
+               auto-revert-use-notify
+               ;; Match Auto-Revert's own remote gate: only push-capable
+               ;; routes opted in by the earlier hook may install a watch.
+               (or auto-revert-remote-files
+                   (not (file-remote-p default-directory)))
+               (not auto-revert-notify-watch-descriptor)
+               (not (string-match-p auto-revert-notify-exclude-dir-regexp
+                                    (expand-file-name default-directory))))
+      ;; Register only the watch here.  The file was just read by `find-file',
+      ;; so running `auto-revert-buffer' would add an unnecessary stat (and a
+      ;; remote round trip) on every visit.
+      (auto-revert-notify-add-watch)))
+
+  ;; The built-in adoption hook runs at depth zero on `find-file-hook'.
+  (add-hook 'find-file-hook #'my/auto-revert-watch-open-file-h 90)
+
   (defvar my/auto-revert--warned-modified-files (make-hash-table :test 'equal)
     "Files already reported as changed on disk while modified in Emacs.")
 
@@ -77,6 +104,21 @@ external edits then revert it without any polling."
   (defvar my/auto-revert--scan-timer nil
     "Timer used to detect modified buffers whose files changed on disk.")
 
+  (defvar my/auto-revert--agent-turn-check-timer nil
+    "One-shot check of open files after an ACP agent turn finishes.")
+
+  (defvar-local my/auto-revert--show-check-timer nil
+    "One-shot disk check after a round-trip file buffer becomes visible.")
+
+  (defvar-local my/auto-revert-agent-refresh-function nil
+    "Optional BUFFER refresh function used after an ACP agent turn.
+Modes with their own disk merge rules can set this buffer-locally.  When nil,
+ordinary files use the safe auto-revert check.")
+
+  (defvar my/auto-revert-agent-refresh-functions nil
+    "Hook for non-buffer surfaces to refresh after an ACP turn.
+Each function runs once after the bounded buffer refresh pass.")
+
   (defvar my/auto-revert-recent-buffer-limit 12
     "Maximum recent file buffers checked after focus changes.")
 
@@ -84,11 +126,12 @@ external edits then revert it without any polling."
     "Return visible and recent file buffers worth checking."
     (let ((seen nil)
           (recent-count 0))
-      (dolist (window (window-list nil 'no-minibuf))
-        (let ((buffer (window-buffer window)))
-          (when (and (buffer-live-p buffer)
-                     (not (memq buffer seen)))
-            (push buffer seen))))
+      (dolist (frame (frame-list))
+        (dolist (window (window-list frame 'no-minibuf))
+          (let ((buffer (window-buffer window)))
+            (when (and (buffer-live-p buffer)
+                       (not (memq buffer seen)))
+              (push buffer seen)))))
       (dolist (buffer (buffer-list))
         (when (and (< recent-count my/auto-revert-recent-buffer-limit)
                    (not (memq buffer seen)))
@@ -108,7 +151,21 @@ external edits then revert it without any polling."
           (when (bound-and-true-p diff-hl-mode)
             (ignore-errors (diff-hl-update)))))))
 
-  (defun my/auto-revert--modified-stale-file-buffer-p (&optional buffer)
+  (defun my/auto-revert--file-check-allowed-p (allow-round-trip)
+    "Whether the current file may be checked at this event boundary.
+Multiplexed routes are cheap enough for a focus check.  A route that pays a
+shell round trip is checked only after an ACP turn or an explicit command.
+An explicitly disconnected target must never be reopened by either path."
+    (and (not (bound-and-true-p remote-buffer-disconnected-p))
+         (let ((cost (if (fboundp 'remote-file-operation-cost)
+                         (or (ignore-errors
+                               (remote-file-operation-cost buffer-file-name))
+                             'round-trip)
+                       'batched)))
+           (or (eq cost 'batched)
+               (and allow-round-trip (eq cost 'round-trip))))))
+
+  (defun my/auto-revert--modified-stale-file-buffer-p (&optional buffer allow-round-trip)
     "Return non-nil when BUFFER has local edits and its file changed on disk."
     (when (buffer-live-p (or buffer (current-buffer)))
       (with-current-buffer (or buffer (current-buffer))
@@ -117,24 +174,26 @@ external edits then revert it without any polling."
              (not (bound-and-true-p global-auto-revert-ignore-buffer))
              (buffer-modified-p)
              (not buffer-read-only)
-             (not (file-remote-p buffer-file-name))
-             (file-exists-p buffer-file-name)
-             (not (verify-visited-file-modtime (current-buffer)))))))
+             (my/auto-revert--file-check-allowed-p allow-round-trip)
+             ;; Unchanged files need only one metadata check.  On push-backed
+             ;; routes this may be answered from the watch without any I/O.
+             (not (verify-visited-file-modtime (current-buffer)))
+             (file-exists-p buffer-file-name)))))
 
-  (defun my/auto-revert--unmodified-stale-file-buffer-p (&optional buffer)
+  (defun my/auto-revert--unmodified-stale-file-buffer-p (&optional buffer allow-round-trip)
     "Return non-nil when BUFFER can be safely refreshed from disk."
     (when (buffer-live-p (or buffer (current-buffer)))
       (with-current-buffer (or buffer (current-buffer))
         (and buffer-file-name
              (not (bound-and-true-p global-auto-revert-ignore-buffer))
              (not (buffer-modified-p))
-             (not (file-remote-p buffer-file-name))
-             (file-exists-p buffer-file-name)
-             (not (verify-visited-file-modtime (current-buffer)))))))
+             (my/auto-revert--file-check-allowed-p allow-round-trip)
+             (not (verify-visited-file-modtime (current-buffer)))
+             (file-exists-p buffer-file-name)))))
 
   (defun my/auto-revert--preserve-undo-state (&optional buffer)
     "Record BUFFER's local edits before an intentional revert."
-    (when (my/auto-revert--modified-stale-file-buffer-p buffer)
+    (when (my/auto-revert--modified-stale-file-buffer-p buffer t)
       (with-current-buffer (or buffer (current-buffer))
         (undo-boundary)
         (when (and (bound-and-true-p undo-tree-mode)
@@ -150,21 +209,25 @@ external edits then revert it without any polling."
       (run-with-idle-timer
        0.05 nil #'my/auto-revert--refresh-review-state (current-buffer))))
 
+  (defun my/auto-revert--warn-modified-stale-buffer (buffer &optional allow-round-trip)
+    "Warn once if BUFFER has unsaved edits against a changed file."
+    (with-current-buffer buffer
+      (when (my/auto-revert--modified-stale-file-buffer-p buffer allow-round-trip)
+        (let ((file (expand-file-name buffer-file-name)))
+          (unless (gethash file my/auto-revert--warned-modified-files)
+            (puthash file t my/auto-revert--warned-modified-files)
+            (message
+             "File changed on disk while buffer has unsaved edits: %s; M-x my/auto-revert-resolve-current-buffer"
+             (abbreviate-file-name file)))))))
+
   (defun my/auto-revert-warn-modified-stale-buffers-h ()
     "Warn when a modified buffer's file also changed on disk."
     (dolist (buffer (my/auto-revert--candidate-buffers))
-      (with-current-buffer buffer
-        (when (my/auto-revert--modified-stale-file-buffer-p buffer)
-          (let ((file (expand-file-name buffer-file-name)))
-            (unless (gethash file my/auto-revert--warned-modified-files)
-              (puthash file t my/auto-revert--warned-modified-files)
-              (message
-               "File changed on disk while buffer has unsaved edits: %s; M-x my/auto-revert-resolve-current-buffer"
-               (abbreviate-file-name file))))))))
+      (my/auto-revert--warn-modified-stale-buffer buffer)))
 
-  (defun my/auto-revert--refresh-buffer-if-safe (buffer)
-    "Refresh BUFFER when it is an unmodified stale local file buffer."
-    (when (my/auto-revert--unmodified-stale-file-buffer-p buffer)
+  (defun my/auto-revert--refresh-buffer-if-safe (buffer &optional allow-round-trip)
+    "Refresh BUFFER when it is an unmodified stale file buffer."
+    (when (my/auto-revert--unmodified-stale-file-buffer-p buffer allow-round-trip)
       (with-current-buffer buffer
         (revert-buffer :ignore-auto :noconfirm :preserve-modes))))
 
@@ -175,8 +238,77 @@ external edits then revert it without any polling."
 
   (defun my/auto-revert-check-stale-buffers-h ()
     "Refresh safe buffers and warn about modified stale buffers."
-    (my/auto-revert-refresh-visible-stale-buffers-h)
-    (my/auto-revert-warn-modified-stale-buffers-h))
+    (dolist (buffer (my/auto-revert--candidate-buffers))
+      (my/auto-revert--refresh-buffer-if-safe buffer)
+      (my/auto-revert--warn-modified-stale-buffer buffer)))
+
+  (defun my/auto-revert-agent-refresh-buffer (buffer)
+    "Refresh BUFFER after an ACP turn using its registered disk policy."
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (unless (bound-and-true-p remote-buffer-disconnected-p)
+          (if (functionp my/auto-revert-agent-refresh-function)
+              (funcall my/auto-revert-agent-refresh-function buffer)
+            (my/auto-revert--refresh-buffer-if-safe buffer t)
+            (my/auto-revert--warn-modified-stale-buffer buffer t))))))
+
+  (defun my/auto-revert-agent-turn-complete-h (_buffer _event)
+    "Check visible and recent files once after an ACP turn completes."
+    (unless (timerp my/auto-revert--agent-turn-check-timer)
+      (setq my/auto-revert--agent-turn-check-timer
+            (run-at-time
+             0 nil
+             (lambda ()
+               (setq my/auto-revert--agent-turn-check-timer nil)
+               (dolist (candidate (my/auto-revert--candidate-buffers))
+                 (condition-case err
+                     (my/auto-revert-agent-refresh-buffer candidate)
+                   (error
+                    (display-warning 'autorevert
+                                     (format "Agent refresh failed for %s: %s"
+                                             (buffer-name candidate)
+                                             (error-message-string err))
+                                     :warning))))
+               (run-hooks 'my/auto-revert-agent-refresh-functions))))))
+
+  (add-hook 'noema-agent-acp-turn-complete-functions
+            #'my/auto-revert-agent-turn-complete-h)
+
+  (defun my/auto-revert-check-shown-round-trip-file-h (window)
+    "Check a costly file once when WINDOW displays it.
+This covers a remote buffer older than the recent-buffer limit without
+stat-ing every hidden remote file after each agent turn."
+    (when (window-live-p window)
+      (let ((buffer (window-buffer window)))
+        (with-current-buffer buffer
+          (when (and buffer-file-name
+                     (not (bound-and-true-p remote-buffer-disconnected-p))
+                     (fboundp 'remote-file-operation-cost)
+                     (eq (ignore-errors
+                           (remote-file-operation-cost buffer-file-name))
+                         'round-trip)
+                     (not (timerp my/auto-revert--show-check-timer)))
+            (setq-local my/auto-revert--show-check-timer
+                        (run-at-time
+                         0 nil
+                         (lambda ()
+                           (when (buffer-live-p buffer)
+                             (with-current-buffer buffer
+                               (setq-local my/auto-revert--show-check-timer nil)
+                               (when (and (get-buffer-window buffer t)
+                                          (not (bound-and-true-p remote-buffer-disconnected-p)))
+                                 (condition-case err
+                                     (my/auto-revert-agent-refresh-buffer buffer)
+                                   (error
+                                    (display-warning
+                                     'autorevert
+                                     (format "Shown file refresh failed for %s: %s"
+                                             (buffer-name buffer)
+                                             (error-message-string err))
+                                     :warning))))))))))))))
+
+  (add-hook 'window-buffer-change-functions
+            #'my/auto-revert-check-shown-round-trip-file-h)
 
   (defun my/auto-revert-schedule-stale-check-h ()
     "Schedule a debounced stale buffer check after focus changes."
@@ -192,7 +324,7 @@ external edits then revert it without any polling."
   (defun my/auto-revert-resolve-current-buffer ()
     "Resolve a modified buffer whose file changed on disk."
     (interactive)
-    (unless (my/auto-revert--modified-stale-file-buffer-p (current-buffer))
+    (unless (my/auto-revert--modified-stale-file-buffer-p (current-buffer) t)
       (user-error "Current buffer does not have unsaved edits against a changed file"))
     (pcase (completing-read
             "Resolve changed file: "
@@ -217,7 +349,7 @@ external edits then revert it without any polling."
   (defun my/auto-revert-ask-user-about-supersession-threat-a (orig-fun filename)
     "Use the local stale-buffer resolver instead of Emacs' raw save prompt."
     (if (or noninteractive
-            (not (my/auto-revert--modified-stale-file-buffer-p (current-buffer))))
+            (not (my/auto-revert--modified-stale-file-buffer-p (current-buffer) t)))
         (funcall orig-fun filename)
       (pcase (completing-read
               (format "File changed on disk: %s "
@@ -256,11 +388,12 @@ external edits then revert it without any polling."
                 #'my/auto-revert-schedule-stale-check-h)
   (add-hook 'after-save-hook
             (lambda ()
-              (when (and buffer-file-name
-                         (not (file-remote-p buffer-file-name)))
+              (when buffer-file-name
                 (remhash (expand-file-name buffer-file-name)
                          my/auto-revert--warned-modified-files)
-                (my/auto-revert-schedule-stale-check-h)))))
+                (when (and (not (bound-and-true-p global-auto-revert-ignore-buffer))
+                           (my/auto-revert--file-check-allowed-p nil))
+                  (my/auto-revert-schedule-stale-check-h))))))
 
 (with-eval-after-load 'saveplace
   (define-advice save-place-find-file-hook (:after (&rest _) my/recenter-after-save-place)

@@ -701,6 +701,9 @@ inotify 流）、`process`（每个 watch 一个目标进程，shell TRAMP 的 `
 `git checkout` 后已打开的 buffer 约 0.2s 内刷新）。逻辑单文件 watch 在 `push`
 路由上直接注册到 backend，不再先做一次 `inotifywait` 查找、也不为每个 buffer 起
 目标进程；递归 watch 仍走 inotifywait/Python。
+没有廉价 watch 的远程文件仍会在 ACP agent 完成一轮时对可见及最近的 buffer 做一次
+文件状态检查；更早的隐藏 buffer 再次显示时补查一次。`round-trip` 路由不参与焦点
+事件检查，显式断开的 buffer 一律跳过。
 
 `exact` backend 的 `verify-visited-file-modtime` 精确比较（tramp-rpc 的 mtime 是
 服务端同一来源的整数秒），`window` backend 保留 TRAMP 的 2 秒容差。容差会把保存后

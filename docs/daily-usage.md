@@ -111,7 +111,7 @@ Noema Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保存、
 
 | 分组 | 常用键 |
 |------|--------|
-| **Note (web)** | `o` 打开当前, `O` 选文件, `s` 保存, `r` 刷新, `!f` 从磁盘重载（agent 改过文件后用）, `%` AI/agent 子菜单, `f` 聚焦, `e` Esc/normal, `v` 切换源码视图, `R` Emacs 原始编辑 |
+| **Note (web)** | `o` 打开当前, `O` 选文件, `s` 保存, `r` 刷新, `!f` 手动从磁盘重载, `%` AI/agent 子菜单, `f` 聚焦, `e` Esc/normal, `v` 切换源码视图, `R` Emacs 原始编辑 |
 | **Find/Browse** | `j` 查找笔记, `/` 搜索（支持 `intitle:` `incategory:` `linksto:` 操作符）, `l` 最近, `.` 跟随链接, `b` 反向链接, `x` 相关, `G` 跳转定义 |
 | **Insert** | `i` roam 链接, `I` TOC 链接, `t` tag id, `T` tag-id 链接, `w` 复制链接到此处, `c` note-code |
 | **Knowledge** | `n` 新笔记, `d` 今日日记, `a` 按标签浏览, `C` 分类层次浏览（MediaWiki Category），`g` roam graph, `k` 任务, `A` 日程, `L` 日程日志, `F` 当前文件任务跳转, `M` 维护仪表板 |
@@ -208,10 +208,21 @@ xwidget buffer 本身没有正文，所以作用于“当前 buffer 文本”的
 `M-x refresh-file` 在任何能 revert 的 buffer 里都是“从磁盘重载”：Noema 页面走
 `my/noema-refresh-file`，`.noema` 笔记本重新投影 JuText，`*Noema DAG*` 重载源笔记本
 并重绘；Lisp/C/shell/SCSS 仍是原来的格式化并保存。
-`my/noema-refresh-file` 用于 agent 或外部程序改过文件之后。它不会像普通刷新那样先把
-页面草稿写回磁盘；页面有未保存修改时会拒绝，`C-u` 则丢弃草稿后重载。
-在 Emacs 里保存同一个 Markdown 文件（例如接受 gptel rewrite）时，没有未保存修改的
-Noema 页面会自动重载。
+Emacs 内的 Claude、Codex 等 ACP agent 完成一轮时，会检查已打开的 Noema Markdown
+页面及可见、最近的 JuText 文件；JuText 的未修改 buffer 会接收已有区块的外部正文编辑，
+有未保存编辑时保留本地草稿并合并运行输出。无需手动刷新，也不按时间轮询。
+Markdown 页面先检查文件时间戳；
+笔记库另有共享目录 watch 接收文件变更。没有未保存修改且文件确实更新的页面会自动
+从磁盘重载；有草稿时保留页面内容并提示冲突。Emacs 保存同一个 Markdown
+文件（例如接受 gptel rewrite）也会通知页面。`my/noema-refresh-file` 可在漏掉文件事件时
+手动重载；它不会先把页面草稿写回磁盘，有未保存修改时会拒绝，`C-u` 则丢弃草稿后重载。
+
+普通本地文件及远程文件 buffer 在 agent 写回磁盘后会自动刷新：支持推送通知的路由
+即时接收文件事件，其余远程路由在 ACP 回合结束时对可见及最近的文件检查一次，
+更早的隐藏 buffer 再次显示时补查一次；
+已主动断开的远程目标不会被自动重连。若你同时有未保存编辑，
+Emacs 会保留它们并提示冲突；运行 `M-x my/auto-revert-resolve-current-buffer` 可选择
+Ediff 合并、接受磁盘版本或保留本地版本并覆盖磁盘。
 
 Jupyter 输出（`@@cell` 的 Output 区域和右侧 Jupyter Output 页面）可以直接拖选文字，
 `M-c` 复制选区；Output 工具栏的 **Copy** 在没有选区时复制整段纯文本输出，

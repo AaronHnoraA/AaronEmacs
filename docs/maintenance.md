@@ -302,8 +302,22 @@ leader 入口：
 - TODO 高亮不再全局启用，只在编辑 buffer 本地启用。
 - `whitespace-mode` 默认只检查本地的代码/配置文件，跳过文本、大文件、远程文件和 `so-long` buffer。
 - auto-revert 优先使用文件通知，普通 buffer 不做高频轮询；PDF buffer 单独保留较快刷新。
-  远程 buffer 只在路由声明 `push` 通知（`remote-file-watch-cost`，如 tramp-rpc）时
-  参与，事件由服务端推送；shell TRAMP 远程文件仍不轮询。
+  新打开且支持通知的普通文件立即注册 watch，不必等下一次 5 秒扫描；agent 在后台改写已打开的
+  文件时，未修改的 buffer 自动从磁盘更新，含未保存编辑的 buffer 保留本地内容。
+  远程 buffer 在路由声明 `push` 通知（`remote-file-watch-cost`，如 tramp-rpc）时
+  由服务端推送；`batched` 路由可在焦点事件检查，`round-trip` 路由只在 ACP 完成或
+  显式冲突处理或旧 buffer 再次显示时检查。shell TRAMP 远程文件不做周期性轮询，
+  主动断开的目标不重连。
+- agent-shell/ACP 发出 `turn-complete` 时，Noema 订阅现成事件（包括未登记的 Claude
+  agent-shell buffer），对已打开的 Markdown 页面各检查一次文件时间戳；未变化就不读取
+  正文。其他 buffer 只检查可见及最近 12 个，按 buffer-local 刷新函数分发；普通文件走
+  安全 auto-revert，JuText 注册自己的同步器以接收外部正文编辑并保护未保存草稿；
+  Markdown 页面通过同一次事件的全局刷新 hook 接收通知。普通文件先比较已访问文件的
+  时间戳，只有变化时才额外检查文件是否存在；JuText 在 ACP 完成时先比较时间戳，
+  未变化就不计算整文件 SHA，文件通知则强制核对修订以覆盖同时间戳的写入。
+  不增加周期性轮询。
+  笔记库也复用 web-host 的单个递归 watcher，250 ms 合并后按路径通知页面，没有新增常驻 watch。
+  Noema 和远程文件桥接只过滤与自身保存后文件指纹一致的事件；有未保存草稿的页面只提示冲突。
 - `amx` 不保留重复 idle 更新 timer；命令索引在交互入口按需刷新。
 - `direnv` 不挂 `post-command-hook`；打开文件、切换 buffer/window、加载 dir-locals
   时异步刷新，避免远程 Nix 环境阻塞文件访问；只有 compile/task/LSP 等即将启动

@@ -3988,6 +3988,94 @@ Idle time counts from the buffer's last change, not from its last display."
           (set-buffer-modified-p nil)
           (kill-buffer))))))
 
+(ert-deftest noema-research-agent-check-skips-unchanged-file-hash ()
+  "Only a file notification forces a revision check with unchanged metadata."
+  (noema-research-test--with-directory root
+    (let ((file (expand-file-name "work.noema" root)))
+      (noema-research-write-file file (noema-research-test--document) nil)
+      (with-current-buffer (find-file-noselect file)
+        (unwind-protect
+            (progn
+              (unless (derived-mode-p 'noema-research-mode) (noema-research-mode))
+              (let ((buffer (current-buffer))
+                    (revision noema-research--revision)
+                    (hashes 0))
+                (should (verify-visited-file-modtime buffer))
+                (cl-letf (((symbol-function 'noema-research-file-revision)
+                           (lambda (&rest _) (cl-incf hashes) revision)))
+                  (noema-research--sync-from-disk buffer)
+                  (should (= hashes 0))
+                  (noema-research--sync-from-disk buffer t)
+                  (should (= hashes 1)))))
+          (noema-research--unwatch-file)
+          (set-buffer-modified-p nil)
+          (kill-buffer))))))
+
+(ert-deftest noema-research-agent-turn-reloads-existing-cell-edits ()
+  "A Claude ACP turn takes external edits to an open, clean JuText buffer."
+  (noema-research-test--with-directory root
+    (let ((file (expand-file-name "work.noema" root)))
+      (noema-research-write-file file (noema-research-test--document) nil)
+      (with-current-buffer (find-file-noselect file)
+        (unwind-protect
+            (progn
+              (unless (derived-mode-p 'noema-research-mode) (noema-research-mode))
+              (let* ((buffer (current-buffer))
+                     (before noema-research--revision)
+                     (disk (noema-research-read-file file))
+                     callback)
+                (puthash "source" "Agent rewrote this question."
+                         (noema-research-find-cell disk "c-q"))
+                (noema-research-write-file file disk before)
+                (let ((my/auto-revert--agent-turn-check-timer nil))
+                  (cl-letf (((symbol-function 'run-at-time)
+                             (lambda (_secs _repeat fn &rest _args)
+                               (setq callback fn) 'scheduled))
+                            ((symbol-function 'my/auto-revert--candidate-buffers)
+                             (lambda () (list buffer)))
+                            ((symbol-function 'my/auto-revert-check-stale-buffers-h)
+                             #'ignore))
+                    (my/auto-revert-agent-turn-complete-h nil nil)
+                    (should callback)
+                    (funcall callback)))
+                (should (string-match-p "Agent rewrote this question" (buffer-string)))
+                (should (verify-visited-file-modtime buffer))
+                (should-not (buffer-modified-p))))
+          (noema-research--unwatch-file)
+          (set-buffer-modified-p nil)
+          (kill-buffer))))))
+
+(ert-deftest noema-research-disk-sync-preserves-local-draft-after-agent-edit ()
+  (noema-research-test--with-directory root
+    (let ((file (expand-file-name "work.noema" root)))
+      (noema-research-write-file file (noema-research-test--document) nil)
+      (with-current-buffer (find-file-noselect file)
+        (unwind-protect
+            (progn
+              (unless (derived-mode-p 'noema-research-mode) (noema-research-mode))
+              (goto-char (point-max))
+              (insert "\nLocal draft stays here.")
+              (let* ((before noema-research--revision)
+                     (disk (noema-research-read-file file)))
+                (puthash "source" "Agent rewrote this question."
+                         (noema-research-find-cell disk "c-q"))
+                (puthash "outputs" (vector (noema-research--table
+                                            "output_type" "display_data"
+                                            "data" (noema-research--table "text/plain" "done")
+                                            "metadata" (noema-research--table)))
+                         (noema-research-find-cell disk "c-w"))
+                (noema-research-write-file file disk before)
+                (noema-research--sync-from-disk (current-buffer))
+                (should (string-match-p "Local draft stays here" (buffer-string)))
+                (should-not (string-match-p "Agent rewrote this question" (buffer-string)))
+                (should (buffer-modified-p))
+                (should (> (length (noema-research--get
+                                    (noema-research-find-cell noema-research--document "c-w")
+                                    "outputs")) 0))))
+          (noema-research--unwatch-file)
+          (set-buffer-modified-p nil)
+          (kill-buffer))))))
+
 (ert-deftest noema-sessions-status-and-file-scope-follow-runs-and-pins ()
   (let ((names (list (noema-research--table "name" "baseline" "agent" "codex" "sessionId" "ses_1"
                                             "sessionState" "warm" "state" "active" "aliases" [])
