@@ -88,6 +88,56 @@
           (when (buffer-live-p buf2)
             (kill-buffer buf2)))))))
 
+(ert-deftest my/xwidget-session-registry-rejects-reassigned-buffer ()
+  (my/xwidget-test--with-mocks
+    (let ((buffer (my/xwidget-open-url "example.com" :id "old"
+                                       :display 'current)))
+      (unwind-protect
+          (progn
+            (my/xwidget--record-buffer buffer "new" "https://example.org")
+            (should-not (my/xwidget-session-buffer "old"))
+            (should (eq (my/xwidget-session-buffer "new") buffer))
+            ;; A stale old entry must not be removed by a later buffer kill.
+            (puthash "old" buffer my/xwidget--sessions)
+            (kill-buffer buffer)
+            (should (eq (gethash "old" my/xwidget--sessions) buffer))
+            (should-not (gethash "new" my/xwidget--sessions)))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/xwidget-delayed-focus-does-not-steal-another-window ()
+  (save-window-excursion
+    (let* ((buffer (generate-new-buffer " *xwidget-focus*"))
+           (other (generate-new-buffer " *xwidget-other*"))
+           (window (selected-window))
+           (my/xwidget-auto-focus-on-load t)
+           focused)
+      (unwind-protect
+          (progn
+            (set-window-buffer window buffer)
+            (cl-letf (((symbol-function 'my/xwidget-focus)
+                       (lambda (&optional _buffer) (setq focused t))))
+              (my/xwidget--focus-if-selected buffer window)
+              (should focused)
+              (setq focused nil)
+              (set-window-buffer window other)
+              (my/xwidget--focus-if-selected buffer window)
+              (should-not focused)))
+        (kill-buffer buffer)
+        (kill-buffer other)))))
+
+(ert-deftest my/xwidget-webpage-navigation-right-click-opens-noema-buffer-menu ()
+  (let ((buttons (my/xwidget--header-browser-buttons))
+        events)
+    (cl-letf (((symbol-function 'my/xwidget--select-event-window) #'ignore)
+              ((symbol-function 'my/xwidget-noema-buffer-menu)
+               (lambda (event) (push event events))))
+      (dolist (button (seq-take buttons 2))
+        (let* ((map (get-text-property 0 'local-map button))
+               (right-click (lookup-key map [header-line mouse-3])))
+          (should (functionp right-click))
+          (funcall right-click 'clicked))))
+    (should (equal events '(clicked clicked)))))
+
 (ert-deftest my/xwidget-update-buffer-name-prefers-title ()
   (let ((buffer (generate-new-buffer "*xwidget*")))
     (unwind-protect

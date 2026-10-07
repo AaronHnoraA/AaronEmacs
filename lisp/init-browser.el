@@ -36,6 +36,7 @@
 (declare-function my/open-url-with-backend "init-open" (url backend &optional reuse-selected))
 (declare-function my/open--with-browser-window "init-open" (mode reuse-selected open-fn))
 (declare-function my/open-normalize-url "init-open" (url))
+(declare-function my/noema-switch-buffer-menu "init-aaronnote" (event))
 (declare-function nerd-icons-mdicon "nerd-icons" (icon-name &rest args))
 (declare-function nerd-icons-codicon "nerd-icons" (icon-name &rest args))
 
@@ -61,7 +62,9 @@
 
 (defun my/xwidget--session-cleanup ()
   "Remove this buffer's entry from `my/xwidget--sessions' when the buffer is killed."
-  (when my/xwidget--session-id
+  (when (and my/xwidget--session-id
+             (eq (gethash my/xwidget--session-id my/xwidget--sessions)
+                 (current-buffer)))
     (remhash my/xwidget--session-id my/xwidget--sessions)))
 
 (config-defvar my/xwidget-auto-focus-on-load nil
@@ -103,8 +106,15 @@ to evil insert state if evil is active in the buffer."
           (when (and my/xwidget-focus-script
                      (fboundp 'xwidget-webkit-execute-script))
             (ignore-errors
-              (xwidget-webkit-execute-script session my/xwidget-focus-script))))
-))))
+              (xwidget-webkit-execute-script session my/xwidget-focus-script))))))))
+
+(defun my/xwidget--focus-if-selected (buffer window)
+  "Focus BUFFER only while WINDOW is still the selected pane showing it."
+  (when (and (window-live-p window)
+             (eq window (selected-window))
+             (eq buffer (window-buffer window))
+             (my/xwidget--auto-focus-allowed-p buffer))
+    (my/xwidget-focus buffer)))
 
 (defun my/xwidget--load-finished-focus (xwidget _xwidget-event-type)
   "Schedule focus for XWIDGET's buffer after page load-finished."
@@ -115,10 +125,10 @@ to evil insert state if evil is active in the buffer."
                     (ignore-errors (xwidget-buffer xwidget)))))
       (when (and (buffer-live-p buf)
                  (my/xwidget--auto-focus-allowed-p buf)
-                 (or (eq buf (current-buffer))
-                     (get-buffer-window buf)))
-        ;; Delay 0.3 s to let WebKit finish rendering before injecting focus.
-        (run-at-time 0.3 nil #'my/xwidget-focus buf)))))
+                 (eq buf (window-buffer (selected-window))))
+        ;; The user may move to another pane while the page loads.
+        (run-at-time 0.3 nil #'my/xwidget--focus-if-selected
+                     buf (selected-window))))))
 
 (defun my/xwidget--callback-update-buffer-name (xwidget xwidget-event-type)
   "Update xwidget buffer name after title or load events."
@@ -147,8 +157,11 @@ to evil insert state if evil is active in the buffer."
 (defun my/xwidget-session-buffer (id)
   "Return live xwidget buffer for session ID, or nil."
   (let ((buffer (and id (gethash id my/xwidget--sessions))))
-    (when (buffer-live-p buffer)
-      buffer)))
+    (if (and (buffer-live-p buffer)
+             (equal (buffer-local-value 'my/xwidget--session-id buffer) id))
+        buffer
+      (when id (remhash id my/xwidget--sessions))
+      nil)))
 
 (defun my/xwidget-current-url (&optional buffer)
   "Return current URL for xwidget BUFFER, defaulting to current buffer."
@@ -241,6 +254,11 @@ to evil insert state if evil is active in the buffer."
   "Record BUFFER as xwidget session ID with URL."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
+      (when (and my/xwidget--session-id
+                 (not (equal my/xwidget--session-id id))
+                 (eq (gethash my/xwidget--session-id my/xwidget--sessions)
+                     buffer))
+        (remhash my/xwidget--session-id my/xwidget--sessions))
       (unless (equal my/xwidget-session-url url)
         (setq-local my/xwidget-session-title nil))
       (setq-local my/xwidget-session-url url)
@@ -284,8 +302,10 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
           (my/xwidget--record-buffer existing id url)
           (my/xwidget--display-buffer existing display)
           ;; Page already loaded — no load-finished will fire; schedule focus.
-          (when (my/xwidget--auto-focus-allowed-p existing)
-            (run-at-time 0.3 nil #'my/xwidget-focus existing))
+          (when (and (my/xwidget--auto-focus-allowed-p existing)
+                     (eq existing (window-buffer (selected-window))))
+            (run-at-time 0.3 nil #'my/xwidget--focus-if-selected
+                         existing (selected-window)))
           existing)
       (let ((buffer
              (if (eq display 'side)
@@ -315,16 +335,24 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
 (defun my/xwidget-back ()
   "Navigate the current xwidget page backward."
   (interactive)
-  (if (fboundp 'xwidget-webkit-back)
-      (call-interactively #'xwidget-webkit-back)
-    (user-error "xwidget back is not available")))
+  (cond
+   ((and (bound-and-true-p my/noema-keys-mode)
+         (fboundp 'my/noema-back))
+    (my/noema-back))
+   ((fboundp 'xwidget-webkit-back)
+    (call-interactively #'xwidget-webkit-back))
+   (t (user-error "xwidget back is not available"))))
 
 (defun my/xwidget-forward ()
   "Navigate the current xwidget page forward."
   (interactive)
-  (if (fboundp 'xwidget-webkit-forward)
-      (call-interactively #'xwidget-webkit-forward)
-    (user-error "xwidget forward is not available")))
+  (cond
+   ((and (bound-and-true-p my/noema-keys-mode)
+         (fboundp 'my/noema-forward))
+    (my/noema-forward))
+   ((fboundp 'xwidget-webkit-forward)
+    (call-interactively #'xwidget-webkit-forward))
+   (t (user-error "xwidget forward is not available"))))
 
 (defun my/xwidget-copy-selection ()
   "Copy selection from the current xwidget page."
@@ -557,9 +585,10 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
                (window-live-p window))
       (select-window window))))
 
-(defun my/xwidget--nav-button (label action help &optional area)
+(defun my/xwidget--nav-button (label action help &optional area right-action)
   "Return a propertized line button for LABEL, ACTION, and HELP.
-AREA is `mode-line' by default; pass `header-line' for header buttons."
+AREA is `mode-line' by default; pass `header-line' for header buttons.
+RIGHT-ACTION, when non-nil, receives the mouse event on right click."
   (let ((map (make-sparse-keymap)))
     (define-key map (vector (or area 'mode-line) 'mouse-1)
       (lambda (event)
@@ -568,10 +597,25 @@ AREA is `mode-line' by default; pass `header-line' for header buttons."
         (if (commandp action)
             (call-interactively action)
           (funcall action))))
+    (when right-action
+      (define-key map (vector (or area 'mode-line) 'mouse-3)
+        (lambda (event)
+          (interactive "e")
+          (my/xwidget--select-event-window event)
+          (funcall right-action event))))
     (propertize (concat " " label " ")
                 'mouse-face 'mode-line-highlight
                 'help-echo help
                 'local-map map)))
+
+(defun my/xwidget-noema-buffer-menu (event)
+  "Choose an undisplayed Noema buffer from a webpage navigation button."
+  (interactive "e")
+  (unless (fboundp 'my/noema-switch-buffer-menu)
+    (require 'init-aaronnote nil t))
+  (if (fboundp 'my/noema-switch-buffer-menu)
+      (my/noema-switch-buffer-menu event)
+    (message "Noema buffer menu is unavailable")))
 
 (defun my/xwidget--window-menu-item (label command)
   "Return an easy-menu item for LABEL and COMMAND."
@@ -629,13 +673,13 @@ AREA is `mode-line' by default; pass `header-line' for header buttons."
    (my/xwidget--nav-button
     (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_left" "back")
     #'my/xwidget-back
-    "Back [b]"
-    'header-line)
+    "Back [b] · right click: Noema buffers"
+    'header-line #'my/xwidget-noema-buffer-menu)
    (my/xwidget--nav-button
     (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_right" "fwd")
     #'my/xwidget-forward
-    "Forward [f]"
-    'header-line)
+    "Forward [f] · right click: Noema buffers"
+    'header-line #'my/xwidget-noema-buffer-menu)
    (my/xwidget--nav-button
     (my/xwidget--mode-line-icon 'codicon "nf-cod-refresh" "reload")
     #'my/xwidget-reload

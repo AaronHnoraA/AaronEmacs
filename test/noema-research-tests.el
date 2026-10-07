@@ -722,6 +722,48 @@ BODY may refer to the JuText buffer as `source'."
               (should (string-match-p "created.*run-file" (buffer-string)))))
         (kill-buffer inspector)))))
 
+(ert-deftest noema-research-inspector-loads-the-latest-output-run-context ()
+  (noema-research-test--with-directory root
+    (write-region noema-research-test--project-manifest nil (expand-file-name "noema.toml" root)
+                  nil 'silent)
+    (let* ((document (noema-research-test--document))
+           (cell (noema-research-find-cell document "c-w"))
+           (inspector (get-buffer-create "*Noema Inspector*"))
+           (requested nil)
+           (my/noema--ready t))
+      (puthash "outputs"
+               (vector (noema-research--table
+                        "data" (noema-research--table
+                                "application/vnd.noema.run+json"
+                                (noema-research--table "run_id" "run_frozen" "status" "completed"))))
+               cell)
+      (unwind-protect
+          (with-temp-buffer
+            (setq-local buffer-file-name (expand-file-name "research.noema" root))
+            (setq-local noema-research--document document)
+            (noema-research--render document)
+            (noema-research-goto-cell "c-w")
+            (cl-letf (((symbol-function 'my/noema-api-call)
+                       (lambda (channel args callback &optional _timeout)
+                         (when (equal channel "aaronnote:api:research:run:context-receipt")
+                           (setq requested (gethash "runId" (aref args 0))))
+                         (funcall callback
+                                  (if requested
+                                      (noema-research--table
+                                       "receipt" (noema-research--table
+                                                  "run" (noema-research--table
+                                                         "id" "run_frozen" "status" "completed")
+                                                  "context" [] "omitted" []))
+                                    (noema-research--table "links" [] "sources" []))
+                                  nil)))
+                      ((symbol-function 'display-buffer) #'ignore))
+              (noema-research-inspect))
+            (should (equal requested "run_frozen"))
+            (with-current-buffer inspector
+              (should (string-match-p "Run context" (buffer-string)))
+              (should (string-match-p "Run run_frozen · completed" (buffer-string)))))
+        (kill-buffer inspector)))))
+
 (ert-deftest noema-research-continue-creates-a-lineage-child ()
   (noema-research-test--with-jutext (noema-research-test--document)
     (noema-research-goto-cell "c-k")
@@ -2167,7 +2209,11 @@ so saving never reports it as a malformed Agent directive."
                   "routing" (noema-research--table
                              "agent" "codex" "name" "merge" "parentName" "baseline"
                              "rule" "lineage-merge" "reason" "joins several lineage parents"
-                             "rollover" :false)
+                             "rollover" :false
+                             "contextPressure" (noema-research--table
+                                                "state" "reported" "used" 850 "size" 1000
+                                                "ratio" 0.85 "threshold" 0.85
+                                                "updatedAt" "2026-10-07T00:00:00Z"))
                   "context" (vector (noema-research--table "ref" "file:brief.md" "bytes" 20000
                                                            "automatic" :false "truncated" :false)
                                     (noema-research--table "ref" "result:wn_right" "bytes" 14000
@@ -2178,6 +2224,9 @@ so saving never reports it as a malformed Agent directive."
         (with-current-buffer buffer
           (let ((text (buffer-string)))
             (should (string-match-p "Session  merge ⇠ baseline\n" text))
+            (should (string-match-p
+                     "Context  ACP 850/1000 tokens (85%; rollover at 85%) · reported 2026-10-07T00:00:00Z"
+                     text))
             (should (string-match-p "Route    lineage-merge — joins several lineage parents" text))
             (should (string-match-p "auto,cut +14000  result:wn_right" text))
             (should (string-match-p "^ +20000  file:brief.md" text))
@@ -2186,6 +2235,34 @@ so saving never reports it as a malformed Agent directive."
       (kill-buffer buffer)))
   (should (eq (lookup-key noema-research-mode-map (kbd "C-c j p"))
               #'noema-research-preview-context)))
+
+(ert-deftest noema-research-inspector-renders-frozen-run-context-receipt ()
+  (let ((receipt (noema-research--table
+                  "run" (noema-research--table "id" "run_old" "status" "completed")
+                  "specSha256" "abcdef0123456789" "promptBytes" 42
+                  "contextLimitBytes" 65536
+                  "context" (vector (noema-research--table
+                                     "ref" "finding:fact" "resolved_uri" "noema://finding/fact/2"
+                                     "bytes" 24 "automatic" t "truncated" t
+                                     "truncation_reason" "automatic context truncated to fit the Run context budget"))
+                  "omitted" (vector (noema-research--table
+                                     "ref" "result:old" "reason" "context budget"))
+                  "sessionUsageAtFinish" (noema-research--table
+                                          "contextUsed" 400 "contextSize" 1000
+                                          "inputTokens" 300 "outputTokens" 100))))
+    (with-temp-buffer
+      (noema-research--insert-run-context-receipt receipt)
+      (let ((rendered (buffer-string)))
+        (should (string-match-p "Run run_old · completed" rendered))
+        (should (string-match-p "Finding version 2" rendered))
+        (should (string-match-p "finding:fact \\[truncated\\]" rendered))
+        (should (string-match-p "result:old · context budget" rendered))
+        (should (string-match-p "ACP Session cumulative at Run finish: context 400/1000" rendered))))
+  (with-temp-buffer
+    (noema-research--insert-run-context-receipt
+     (noema-research--table "run" (noema-research--table "id" "run_legacy" "status" "failed")
+                            "context" [] "omitted" []))
+    (should (string-match-p "ACP usage unavailable" (buffer-string))))))
 
 (ert-deftest noema-research-graph-structural-navigation-follows-lineage ()
   (let* ((document (noema-research-test--document))
@@ -2768,6 +2845,25 @@ so saving never reports it as a malformed Agent directive."
     (should (equal (alist-get 'notebookFile body) "/tmp/noema-project/research/bound.noema"))
     (should (equal (alist-get 'cellId body) "c-work"))
     (should (equal (noema-agent-worker--result-text worker) "proof answer"))))
+
+(ert-deftest noema-agent-worker-does-not-report-unobserved-acp-usage ()
+  (let* ((worker (noema-agent-worker--create
+                  :run-id "run_1" :session-id "ses_1" :root "/tmp/noema-project/"
+                  :started t :usage-baseline 0))
+         (usage '(:total 0 :input 0 :output 0 :thought 0
+                         :cached-read 0 :cached-write 0 :context-used 0 :context-size 0
+                         :report-seq 0)))
+    (cl-letf (((symbol-function 'noema-agent-acp-usage) (lambda (_buffer) usage)))
+      (should-not (alist-get 'sessionUsage (noema-agent-worker--worker-body worker)))
+      (setq usage (plist-put usage :context-size 1000))
+      (should-not (alist-get 'sessionUsage (noema-agent-worker--worker-body worker)))
+      (setq usage (plist-put usage :report-seq 1))
+      (should (equal (alist-get 'contextSize
+                               (alist-get 'sessionUsage
+                                          (noema-agent-worker--worker-body worker)))
+                     1000))
+      (setf (noema-agent-worker-usage-baseline worker) 1)
+      (should-not (alist-get 'sessionUsage (noema-agent-worker--worker-body worker))))))
 
 (ert-deftest noema-agent-worker-terminal-batches-the-last-segment-before-status ()
   (let* ((worker (noema-agent-worker--create

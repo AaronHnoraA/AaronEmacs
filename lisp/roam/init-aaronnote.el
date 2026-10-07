@@ -440,6 +440,8 @@ the backend.  The backend is chosen here, not per export."
 (require 'noema-xwidget-keys)
 
 (defvar-keymap my/noema-keys-mode-map
+  "b" #'my/noema-back
+  "f" #'my/noema-forward
   "M-z" #'my/noema-undo
   "M-Z" #'my/noema-redo
   "M-S-z" #'my/noema-redo
@@ -465,6 +467,8 @@ the backend.  The backend is chosen here, not per export."
                  (yank . my/noema-pane-paste)
                  (mark-whole-buffer . my/noema-select-all)
                  (save-buffer . my/noema-save)
+                 (my/navigation-back . my/noema-back)
+                 (my/navigation-forward . my/noema-forward)
                  (undo . my/noema-undo)
                  (undo-redo . my/noema-redo)
                  (revert-buffer . my/noema-refresh-file)
@@ -672,6 +676,13 @@ height and the DAG stays in the bottom-left."
         (split-window parent nil 'right)
       (split-window source-window nil 'right))))
 
+(defun my/noema-jupyter--focus-if-selected (buffer window)
+  "Focus output BUFFER only if WINDOW still owns the keyboard."
+  (when (and (window-live-p window)
+             (eq window (selected-window))
+             (eq buffer (window-buffer window)))
+    (my/xwidget-focus buffer)))
+
 (defun my/noema-jupyter-output-open-document (payload &optional focus)
   "Open Noema's singleton rich-output renderer for document PAYLOAD.
 PAYLOAD names the Emacs-owned work document and optional cell.  The renderer
@@ -690,41 +701,54 @@ surface.  With FOCUS non-nil, move keyboard focus to the renderer."
        ;; already-persisted `.noema' output before doing any other Noema work.
        (let ((url (my/noema-jupyter--output-url payload)))
          (when (and (buffer-live-p source-buffer)
-                    (window-live-p source-window))
-           (with-selected-window source-window
-             (let* ((existing
-                     (and (fboundp 'my/xwidget-session-buffer)
-                          (my/xwidget-session-buffer
-                           my/noema-jupyter-output-client-id)))
-                    (target-window
-                     (or (and existing (get-buffer-window existing 'visible))
-                         (my/noema-jupyter--output-split source-window)))
-                    buffer)
-               (if (buffer-live-p existing)
-                   (progn
-                     (setq buffer existing)
-                     (set-window-buffer target-window buffer)
-                     (my/noema-jupyter--output-dispatch buffer payload))
-                 (unless (fboundp 'my/xwidget-open-url) (require 'init-browser))
-                 (with-selected-window target-window
-                   (setq buffer
-                         (my/xwidget-open-url
-                          url :id my/noema-jupyter-output-client-id
-                          :display 'current :reuse-selected t))))
-               (when (buffer-live-p buffer)
-                 (with-current-buffer buffer
-                   (setq-local my/xwidget-suppress-auto-focus (not focus))
-                   (setq-local my/noema--client-id
-                               my/noema-jupyter-output-client-id)
-                   (setq-local my/noema--xwidget-forced-name
-                               my/noema-jupyter-output-buffer-name)
-                   (unless (equal (buffer-name) my/noema-jupyter-output-buffer-name)
-                     (rename-buffer my/noema-jupyter-output-buffer-name t))))
-               (if focus
-                   (progn
-                     (select-window target-window)
-                     (run-at-time 0.2 nil #'my/xwidget-focus buffer))
-                 (select-window source-window))))))))
+                    (window-live-p source-window)
+                    (eq (window-buffer source-window) source-buffer))
+           (let ((activate (and focus (eq (selected-window) source-window)))
+                 target-window buffer)
+             (with-selected-window source-window
+               (let* ((existing
+                       (and (fboundp 'my/xwidget-session-buffer)
+                            (my/xwidget-session-buffer
+                             my/noema-jupyter-output-client-id)))
+                      (visible (and existing
+                                    (get-buffer-window existing 'visible)))
+                      (created (not visible))
+                      (success nil))
+                 (setq target-window
+                       (or visible (my/noema-jupyter--output-split source-window)))
+                 (unwind-protect
+                     (progn
+                       (if (buffer-live-p existing)
+                           (progn
+                             (setq buffer existing)
+                             (set-window-buffer target-window buffer)
+                             (my/noema-jupyter--output-dispatch buffer payload))
+                         (unless (fboundp 'my/xwidget-open-url)
+                           (require 'init-browser))
+                         (with-selected-window target-window
+                           (setq buffer
+                                 (my/xwidget-open-url
+                                  url :id my/noema-jupyter-output-client-id
+                                  :display 'current :reuse-selected t))))
+                       (when (buffer-live-p buffer)
+                         (with-current-buffer buffer
+                           (setq-local my/xwidget-suppress-auto-focus (not focus))
+                           (setq-local my/noema--client-id
+                                       my/noema-jupyter-output-client-id)
+                           (setq-local my/noema--xwidget-forced-name
+                                       my/noema-jupyter-output-buffer-name)
+                           (unless (equal (buffer-name)
+                                          my/noema-jupyter-output-buffer-name)
+                             (rename-buffer my/noema-jupyter-output-buffer-name t)))
+                         (setq success t)))
+                   (when (and created (not success)
+                              (window-live-p target-window))
+                     (delete-window target-window)))))
+             (when (and activate (window-live-p target-window)
+                        (buffer-live-p buffer))
+               (select-window target-window)
+               (run-at-time 0.2 nil #'my/noema-jupyter--focus-if-selected
+                            buffer target-window)))))))
     (get-buffer my/noema-jupyter-output-buffer-name)))
 
 ;;;###autoload
@@ -1112,21 +1136,35 @@ to JSON a second time."
                  (file (alist-get 'file payload))
                  (line-number (or (alist-get 'line payload) 1))
                  (column (or (alist-get 'col payload) 0))
-                 (tag (alist-get 'tag payload)))
-            (if (and (my/noema--markdown-file-p file)
-                     (or (null tag) (string-empty-p (or tag ""))))
-                ;; Markdown note (e.g. graph double-click): open in Noema.
-                (my/noema-open-file file)
-              ;; Source region (lean, etc.) or explicit tag: open in Emacs.
-              (my/noema--goto-location file line-number column)
-              (when (and (stringp file)
-                         (string-match-p "\\.ipynb\\'" file)
-                         (require 'init-aaronnote-jupyter-cell nil t))
-                (ignore-errors
-                  (my/noema-jupyter-cell-activate-buffer payload)))
-              (when (and tag (not (string-empty-p (or tag ""))))
-                (when (require 'init-note-code nil t)
-                  (ignore-errors (my/note-code--goto-tag tag))))))
+                 (tag (alist-get 'tag payload))
+                 (new-window (eq (alist-get 'newWindow payload) t))
+                 (client (alist-get 'client payload))
+                 (source-window
+                  (if (and (stringp client) (not (string-empty-p client)))
+                      (when-let* ((buffer (my/noema--buffer-for-client client)))
+                        (get-buffer-window buffer 'visible))
+                    (selected-window))))
+            (when (window-live-p source-window)
+              (if (and new-window (my/noema--markdown-file-p file)
+                       (or (null tag) (string-empty-p (or tag ""))))
+                  (my/noema--defer-host-event
+                   #'my/noema-open-current-note-split file source-window
+                   `(("hash" . ,(alist-get 'hash payload))
+                     ("dom" . ,(alist-get 'dom payload))))
+                (if (and (my/noema--markdown-file-p file)
+                         (or (null tag) (string-empty-p (or tag ""))))
+                    ;; Markdown note (e.g. graph double-click): open in Noema.
+                    (my/noema-open-file file source-window)
+                  ;; Source region (lean, etc.) or explicit tag: open in Emacs.
+                  (my/noema--goto-location file line-number column)
+                  (when (and (stringp file)
+                             (string-match-p "\\.ipynb\\'" file)
+                             (require 'init-aaronnote-jupyter-cell nil t))
+                    (ignore-errors
+                      (my/noema-jupyter-cell-activate-buffer payload)))
+                  (when (and tag (not (string-empty-p (or tag ""))))
+                    (when (require 'init-note-code nil t)
+                      (ignore-errors (my/note-code--goto-tag tag))))))))
 	        (error
 	         (message "Noema event parse failed: %s" (error-message-string err)))))
      ((string-prefix-p zotero-import-prefix line)
@@ -2118,7 +2156,10 @@ When BUFFER is nil, inspect the current buffer."
   "Return the live Noema buffer for CLIENT, or nil."
   (when (and (stringp client) (not (string-empty-p client)))
     (let ((buffer (gethash client my/noema--client-buffers)))
-      (unless (or (null buffer) (buffer-live-p buffer))
+      (unless (or (null buffer)
+                  (and (buffer-live-p buffer)
+                       (equal (buffer-local-value 'my/noema--client-id buffer)
+                              client)))
         (remhash client my/noema--client-buffers)
         (setq buffer nil))
       (or buffer
@@ -2200,9 +2241,12 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
 CLIENT, when present, identifies the exact xwidget page that reported the
 file switch."
   (let* ((file (my/noema--canonical-file file))
-         (target (or (my/noema--buffer-for-client client)
-                     (and file (my/noema--buffer-for-file file))
-                     my/noema--app-buffer)))
+         ;; A client-bearing event belongs to exactly one page.  A late event
+         ;; from a closed page must not relabel whichever pane is active now.
+         (target (if (and (stringp client) (not (string-empty-p client)))
+                     (my/noema--buffer-for-client client)
+                   (or (and file (my/noema--buffer-for-file file))
+                       my/noema--app-buffer))))
     (when (buffer-live-p target)
       (my/noema--register-buffer target file client t)
       (with-current-buffer target
@@ -2224,26 +2268,29 @@ When FILE is non-nil, set buffer-local file tracking directly."
   "Return a live Noema buffer tracking FILE, or nil."
   (when-let* ((abs (my/noema--canonical-file file)))
     (let ((registered (gethash abs my/noema--file-buffers)))
-      (cond
-       ((buffer-live-p registered) registered)
-       (registered
+      (unless (or (null registered)
+                  (and (buffer-live-p registered)
+                       (equal (my/noema-buffer-file registered) abs)
+                       (not (my/noema--split-client-p
+                             (buffer-local-value 'my/noema--client-id
+                                                 registered)))))
         (remhash abs my/noema--file-buffers)
-        nil)
-       (t
-        (when-let* ((found
-                     (cl-find-if
-                      (lambda (buf)
-                        (and (buffer-live-p buf)
-                             (with-current-buffer buf
-                               (and (stringp my/noema-buffer-file-name)
-                                    (not (my/noema--split-client-p
-                                          my/noema--client-id))
-                                    (string-equal
-                                     (expand-file-name my/noema-buffer-file-name)
-                                     abs)))))
-                      (buffer-list))))
-          (puthash abs found my/noema--file-buffers)
-          found))))))
+        (setq registered nil))
+      (or registered
+          (when-let* ((found
+                       (cl-find-if
+                        (lambda (buf)
+                          (and (buffer-live-p buf)
+                               (with-current-buffer buf
+                                 (and (stringp my/noema-buffer-file-name)
+                                      (not (my/noema--split-client-p
+                                            my/noema--client-id))
+                                      (string-equal
+                                       (expand-file-name my/noema-buffer-file-name)
+                                       abs)))))
+                        (buffer-list))))
+            (puthash abs found my/noema--file-buffers)
+            found)))))
 
 (defun my/noema-canonical-buffer (&optional buffer)
   "Return the canonical Noema buffer for BUFFER's file, or BUFFER."
@@ -2254,42 +2301,80 @@ When FILE is non-nil, set buffer-local file tracking directly."
           buffer))))
 
 (defun my/noema--url-with-client (url client)
-  "Return URL carrying CLIENT as its `client' query parameter.
-A URL that already names a client is returned unchanged."
-  (if (or (not (stringp client)) (string-empty-p client)
-          (string-match-p "[?&]client=" url))
+  "Return URL with its `client' query parameter set to CLIENT.
+The URL and xwidget session registry must name the same page client."
+  (if (or (not (stringp client)) (string-empty-p client))
       url
-    (concat url (if (string-match-p "?" url) "&" "?")
-            "client=" (url-hexify-string client))))
+    (let ((encoded (url-hexify-string client)))
+      (cond
+       ((string-match "\\([?&]client=\\)[^&#]*" url)
+        (replace-match (concat (match-string 1 url) encoded) t t url))
+       ((string-match "#" url)
+        (let* ((base (substring url 0 (match-beginning 0)))
+               (fragment (substring url (match-beginning 0))))
+          (concat base (if (string-match-p "?" base) "&" "?")
+                  "client=" encoded fragment)))
+       (t
+        (concat url (if (string-match-p "?" url) "&" "?")
+                "client=" encoded))))))
 
 (defun my/noema--open-xwidget (url &optional file)
-  "Open Noema in a per-file xwidget session.
-Each Markdown FILE gets its own dedicated xwidget session and buffer.
-Switching to an already-open file reuses the existing buffer without
-reloading.  Non-file opens (roam graph, etc.) share the singleton
-\"aaronnote\" session."
+  "Open Noema in an xwidget session showing FILE.
+Switching to an already-open file reuses its buffer without reloading.
+An in-page link can change the file shown by a live client; that client's id
+stays fixed while the file registry follows the page.  Hosted surfaces share
+the \"aaronnote:surface\" session."
   (unless (fboundp 'my/xwidget-open-url)
     (require 'init-browser))
   (let* ((file (my/noema--canonical-file file))
-         (id (my/noema--xwidget-session-id file))
+         ;; Hosted Wiki/Agenda/Config is a separate page family from the
+         ;; editor.  Give it one stable client even if the editor's legacy
+         ;; singleton id is already displaying a note.
+         (nominal-id (if file (my/noema--xwidget-session-id file)
+                       "aaronnote:surface"))
+         (nominal-buffer (and (fboundp 'my/xwidget-session-buffer)
+                              (my/xwidget-session-buffer nominal-id)))
+         (existing (or (and file (my/noema--buffer-for-file file))
+                       (and (buffer-live-p nominal-buffer)
+                            (equal (my/noema-buffer-file nominal-buffer) file)
+                            nominal-buffer)))
+         ;; An in-page link may move the nominal client from A to B.  Keep
+         ;; that client's identity and give a later independent open of A a
+         ;; fresh id instead of reusing B's live page under A's old id.
+         (id (if (and (not existing) (buffer-live-p nominal-buffer))
+                 (format "%s:visit:%d" nominal-id
+                         (cl-incf my/noema--split-counter))
+               nominal-id))
          (url (if file
                   (my/noema--app-url file id)
                 ;; Wiki, Agenda, Config and Graph pages learn their client from
                 ;; the URL too; otherwise commands addressed to this buffer
                 ;; (focus, host-owns-keyboard) never reach them.
-                (my/noema--url-with-client url id)))
-         (existing (or (and file (my/noema--buffer-for-file file))
-                       (and (fboundp 'my/xwidget-session-buffer)
-                            (my/xwidget-session-buffer id)))))
+                (my/noema--url-with-client url id))))
     (if existing
         ;; Session already alive for this file: switch to it without reloading.
         (progn
-          (switch-to-buffer existing)
+          ;; One WebKit session rendered in two Emacs windows has unreliable
+          ;; drawing and input.  Visit its current window instead of showing
+          ;; the same xwidget buffer a second time.
+          (if-let* ((window (get-buffer-window existing 'visible)))
+              (select-window window)
+            (switch-to-buffer existing))
           (with-current-buffer existing
             (when (fboundp 'my/xwidget-setup-control-line)
               (my/xwidget-setup-control-line)))
+          ;; Singleton hosted surfaces have distinct routes.  Reusing their
+          ;; buffer must visit the requested route, not just display whichever
+          ;; Wiki/Graph/Agenda page happened to be there last.
+          (when (and (null file)
+                     (fboundp 'my/xwidget-current-url)
+                     (not (equal (my/xwidget-current-url existing) url)))
+            (my/xwidget-open-url url :id id :display 'current
+                                 :reuse-selected t))
           (run-at-time 0.3 nil #'my/noema--focus-xwidget-buffer existing)
-          (my/noema--track-app-buffer existing file id)
+          (my/noema--track-app-buffer
+           existing file
+           (or (with-current-buffer existing my/noema--client-id) id))
           existing)
       ;; New session: open directly at the target URL.
       (let ((buffer (my/xwidget-open-url url
@@ -2370,17 +2455,54 @@ reusing a remembered one."
 
 (defun my/noema--open-hosted-surface (payload)
   "Open the safe Noema web surface named by PAYLOAD inside Emacs.
-The three surfaces share one stable host buffer, so repeated renderer clicks
-navigate that buffer instead of accumulating browser windows."
-  (let ((path (and (listp payload) (alist-get 'path payload))))
+The three surfaces share one stable host buffer.  Keep the source editor
+visible beside it, and reuse an already visible surface window."
+  (let* ((path (and (listp payload) (alist-get 'path payload)))
+         (client (and (listp payload) (alist-get 'client payload)))
+         (source-window
+          (if (and (stringp client) (not (string-empty-p client)))
+              (when-let* ((buffer (my/noema--buffer-for-client client)))
+                (get-buffer-window buffer 'visible))
+            (selected-window)))
+         (source-buffer (and (window-live-p source-window)
+                             (window-buffer source-window))))
     (if (not (and (stringp path)
                   (string-match-p
                    "\\`/\\(?:config\\|wiki\\|agenda\\)\\(?:\\?[^#\n\r]*\\)?\\'"
                    path)))
         (message "Noema ignored unsafe hosted surface: %S" path)
-      (my/noema--ensure-server
-       (lambda ()
-         (my/noema--open-url (my/noema--server-url path) nil nil))))))
+      (when (window-live-p source-window)
+        (my/noema--ensure-server
+         (lambda ()
+           (when (and (window-live-p source-window)
+                      (eq (window-buffer source-window) source-buffer))
+             (let* ((activate (eq (selected-window) source-window))
+                    (existing (and (eq my/noema-backend 'xwidget)
+                                   (fboundp 'my/xwidget-session-buffer)
+                                   (my/xwidget-session-buffer
+                                    "aaronnote:surface")))
+                    (visible (and existing
+                                  (get-buffer-window existing 'visible)))
+                    (created (and (eq my/noema-backend 'xwidget)
+                                  (not visible)
+                                  (not (eq source-buffer existing))))
+                    (target-window
+                     (or visible
+                         (if created
+                             (with-selected-window source-window
+                               (my/noema--split-window))
+                           source-window)))
+                    (success nil))
+               (unwind-protect
+                   (with-selected-window target-window
+                     (my/noema--open-url
+                      (my/noema--server-url path) nil nil)
+                     (setq success t))
+                 (when (and created (not success)
+                            (window-live-p target-window))
+                   (delete-window target-window)))
+               (when (and activate (window-live-p target-window))
+                 (select-window target-window))))))))))
 
 (defvar my/noema--post-queue nil
   "FIFO of notification payloads waiting to leave the Emacs command loop.")
@@ -2537,21 +2659,29 @@ When FILE is nil, use the current buffer."
               (pulse-momentary-highlight-one-line (point)))))))))
 
 ;;;###autoload
-(defun my/noema-open-file (file)
-  "Open Markdown FILE in Noema Web/Appine."
+(defun my/noema-open-file (file &optional origin-window)
+  "Open Markdown FILE in Noema Web/Appine from ORIGIN-WINDOW."
   (interactive "fMarkdown file: ")
   (unless (my/noema--markdown-file-p file)
     (user-error "Noema opens Markdown files, not %s" file))
-  (let ((file (my/noema--canonical-file file))
-        (target-window (selected-window)))
+  (let* ((file (my/noema--canonical-file file))
+         (target-window (if (window-live-p origin-window)
+                            origin-window (selected-window)))
+         (source-buffer (window-buffer target-window)))
     (my/noema--ensure-server
      (lambda ()
-      (when (window-live-p target-window)
-        (select-window target-window))
-      (my/noema--open-url
-       (my/noema--app-url file (my/noema--xwidget-session-id file))
-       file
-       nil)))))
+       (when (and (window-live-p target-window)
+                  (eq (window-buffer target-window) source-buffer))
+         (let ((activate (eq (selected-window) target-window))
+               result)
+           (with-selected-window target-window
+             (setq result
+                   (my/noema--open-url
+                    (my/noema--app-url file (my/noema--xwidget-session-id file))
+                    file nil)))
+           (when (and activate (buffer-live-p result))
+             (when-let* ((window (get-buffer-window result 'visible)))
+               (select-window window)))))))))
 
 ;;;###autoload
 (defun my/noema-open-current-note ()
@@ -2579,66 +2709,74 @@ When FILE is nil, use the current buffer."
     window))
 
 ;;;###autoload
-(defun my/noema-open-current-note-split ()
+(defun my/noema-open-current-note-split (&optional target-file origin-window extra-params)
   "Open the current Markdown note in a fresh editable Noema xwidget split.
 
 This intentionally does not reuse the canonical Noema xwidget for the
 file.  Multiple xwidget windows for the same live session have rendering
 issues, so this command creates an isolated editable client while keeping the
-normal file/session reuse map owned by the canonical pane."
+normal file/session reuse map owned by the canonical pane.  TARGET-FILE and
+ORIGIN-WINDOW let a link open another note beside its source; EXTRA-PARAMS
+carry optional initial anchor coordinates."
   (interactive)
-  (let ((file (my/noema--current-note-file)))
+  (let ((file (or target-file (my/noema--current-note-file))))
     (unless (and file (my/noema--markdown-file-p file))
       (user-error "No current Markdown note for Noema"))
-    (let ((file (my/noema--canonical-file file))
-          (source-window (selected-window)))
+    (let* ((file (my/noema--canonical-file file))
+           (source-window (if (window-live-p origin-window)
+                              origin-window (selected-window)))
+           (source-buffer (window-buffer source-window)))
       (my/noema--ensure-server
        (lambda ()
-         (when (window-live-p source-window)
-           (select-window source-window))
-         (unless (fboundp 'my/xwidget-open-url)
-           (require 'init-browser))
-         (let* ((ordinal (cl-incf my/noema--split-counter))
-                (client (format "aaronnote-split:%s:%d"
-                                (file-truename file)
-                                ordinal))
-                (url (my/noema--app-url file client))
-                (target-window (my/noema--split-window))
-                (buffer (my/xwidget-open-url
-                         url
-                         :id client
-                         :display 'current
-                         :force-new t
-                         :reuse-selected t)))
-           (when (buffer-live-p buffer)
-             (with-current-buffer buffer
-               (setq-local my/noema-buffer-file-name file)
-               (setq-local my/noema--client-id client)
-               (setq-local my/noema--registered-file nil)
-               (setq-local my/noema--xwidget-forced-name
-                           (my/noema--split-buffer-display-name
-                            file ordinal))
-               (puthash client (current-buffer) my/noema--client-buffers)
-               (add-hook 'kill-buffer-hook #'my/noema--cleanup-buffer nil t)
-               (when (fboundp 'my/xwidget-setup-control-line)
-                 (my/xwidget-setup-control-line))
-               ;; `xwidget-webkit-browse-url' may return before its buffer has
-               ;; finished switching to `xwidget-webkit-mode'.  Naming does
-               ;; not depend on the major mode, and delaying it leaves the
-               ;; buffer permanently named *xwidget* because the title
-               ;; callback correctly avoids overriding Noema-owned names.
-               (rename-buffer my/noema--xwidget-forced-name t)
-               (when file
-                 (setq-local default-directory
-                             (file-name-as-directory (file-name-directory file)))
-                 (when (fboundp 'my/direnv-schedule-current-buffer)
-                   (my/direnv-schedule-current-buffer)))
-               (my/noema--harden-xwidget-placeholder)
-               (my/noema-keys-mode 1)
-               (my/noema--sync-xwidget-recovery-mode)))
-           (my/noema--refresh-visible-ibuffers)
-           (when (window-live-p target-window)
-             (select-window target-window))))))))
+         (when (and (window-live-p source-window)
+                    (eq (window-buffer source-window) source-buffer))
+           (let ((activate (eq (selected-window) source-window))
+                 target-window)
+             (with-selected-window source-window
+               (unless (fboundp 'my/xwidget-open-url)
+                 (require 'init-browser))
+               (let* ((ordinal (cl-incf my/noema--split-counter))
+                      (client (format "aaronnote-split:%s:%d"
+                                      (file-truename file) ordinal))
+                      (url (my/noema--app-url file client extra-params))
+                      (success nil))
+                 (setq target-window (my/noema--split-window))
+                 (unwind-protect
+                     (let ((buffer (my/xwidget-open-url
+                                    url :id client :display 'current
+                                    :force-new t :reuse-selected t)))
+                       (when (buffer-live-p buffer)
+                         (with-current-buffer buffer
+                           (setq-local my/noema-buffer-file-name file)
+                           (setq-local my/noema--client-id client)
+                           (setq-local my/noema--registered-file nil)
+                           (setq-local my/noema--xwidget-forced-name
+                                       (my/noema--split-buffer-display-name
+                                        file ordinal))
+                           (puthash client (current-buffer)
+                                    my/noema--client-buffers)
+                           (add-hook 'kill-buffer-hook
+                                     #'my/noema--cleanup-buffer nil t)
+                           ;; WebKit may not yet have entered its major mode.
+                           (rename-buffer my/noema--xwidget-forced-name t)
+                           (setq-local default-directory
+                                       (file-name-as-directory
+                                        (file-name-directory file)))
+                           (when (fboundp 'my/direnv-schedule-current-buffer)
+                             (my/direnv-schedule-current-buffer))
+                           (when (fboundp 'my/xwidget-setup-control-line)
+                             (my/xwidget-setup-control-line))
+                           (my/noema--harden-xwidget-placeholder)
+                           (my/noema-keys-mode 1)
+                           (my/noema--sync-xwidget-recovery-mode))
+                         (setq success t)
+                         (my/noema--refresh-visible-ibuffers)))
+                   (unless success
+                     (when (and (window-live-p target-window)
+                                (not (eq target-window source-window)))
+                       (delete-window target-window))))))
+             (when (and activate (window-live-p target-window))
+               (select-window target-window)))))))))
 
 ;;;###autoload
 (defun my/noema-open-current-note-split-right ()
@@ -2691,6 +2829,18 @@ waits for a response in the invoking Emacs command."
   (my/noema--send-command command detail))
 
 ;;;###autoload
+(defun my/noema-back ()
+  "Return to the previous location in this Noema pane."
+  (interactive)
+  (my/noema-command "back"))
+
+;;;###autoload
+(defun my/noema-forward ()
+  "Move to the next location in this Noema pane."
+  (interactive)
+  (my/noema-command "forward"))
+
+;;;###autoload
 (defun my/noema-escape ()
   "Tell Noema to handle Escape."
   (interactive)
@@ -2710,18 +2860,21 @@ waits for a response in the invoking Emacs command."
 
 (defun my/noema-open-wiki-view (&optional view query)
   "Open the Emacs-hosted Wiki VIEW with optional QUERY parameters."
-  (my/noema--ensure-server
-   (lambda ()
-     (let ((path (concat "/wiki"
-                         (when (or view query)
-                           (concat "?"
-                                   (mapconcat
-                                    #'identity
-                                    (delq nil
-                                          (list (and view (format "view=%s" view))
-                                                query))
-                                    "&"))))))
-       (my/noema--open-url (my/noema--server-url path) nil nil)))))
+  (let ((path (concat "/wiki"
+                      (when (or view query)
+                        (concat "?"
+                                (mapconcat
+                                 #'identity
+                                 (delq nil
+                                       (list (and view (format "view=%s" view))
+                                             query))
+                                 "&"))))))
+    (if (my/noema--xwidget-buffer-p (current-buffer))
+        (my/noema--open-hosted-surface
+         `((path . ,path) (client . ,my/noema--client-id)))
+      (my/noema--ensure-server
+       (lambda ()
+         (my/noema--open-url (my/noema--server-url path) nil nil))))))
 
 (defmacro my/noema--def-wiki-view (name view doc)
   "Define NAME to open the Emacs-hosted Wiki VIEW with DOC."
@@ -3179,7 +3332,7 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
                          (my/noema--ensure-server
                           (lambda ()
                             (my/noema--open-url
-                             (my/noema--app-url nil "aaronnote") nil t)))))
+                             (my/noema--app-url nil "aaronnote:surface") nil t)))))
                    (display-buffer buffer)
                    (message "Noema: build failed; see %s" (buffer-name buffer))))))))
     (display-buffer buffer)))
@@ -3416,6 +3569,45 @@ failure while it is still going."
 
 ;;; Header-line for the Noema app buffer.
 
+(defun my/noema--undisplayed-buffers ()
+  "Return live Noema xwidget buffers absent from every Emacs window."
+  (seq-filter
+   (lambda (buffer)
+     (and (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (and (eq major-mode 'xwidget-webkit-mode)
+                 (my/noema--xwidget-buffer-p buffer)))
+          (not (get-buffer-window buffer t))))
+   (buffer-list)))
+
+(defun my/noema--switch-to-buffer (buffer)
+  "Show undisplayed Noema BUFFER in the selected window."
+  (when (and (buffer-live-p buffer)
+             (not (get-buffer-window buffer t)))
+    (switch-to-buffer buffer)
+    (setq my/noema--app-buffer buffer)
+    (run-at-time 0.05 nil #'my/noema--focus-xwidget-buffer buffer)))
+
+(defun my/noema-switch-buffer-menu (event)
+  "Choose an undisplayed Noema buffer from a header-line right click."
+  (interactive "e")
+  (when event (my/xwidget--select-event-window event))
+  (let ((buffers (my/noema--undisplayed-buffers)))
+    (if buffers
+        (popup-menu
+         (easy-menu-create-menu
+          "Noema buffers"
+          (mapcar
+           (lambda (buffer)
+             (vector (buffer-name buffer)
+                     (lambda ()
+                       (interactive)
+                       (my/noema--switch-to-buffer buffer))
+                     t))
+           buffers))
+         event)
+      (message "No undisplayed Noema buffers"))))
+
 (defun my/noema-editor-menu (event)
   "Open Noema editor actions from the native pencil button at EVENT."
   (interactive "e")
@@ -3456,10 +3648,12 @@ failure while it is still going."
   (list
    (my/xwidget--nav-button
     (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_left" "back")
-    #'my/xwidget-back "Back [b]" 'header-line)
+    #'my/noema-back "Back [b] · right click: Noema buffers"
+    'header-line #'my/noema-switch-buffer-menu)
    (my/xwidget--nav-button
     (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_right" "fwd")
-    #'my/xwidget-forward "Forward [f]" 'header-line)
+    #'my/noema-forward "Forward [f] · right click: Noema buffers"
+    'header-line #'my/noema-switch-buffer-menu)
    (my/xwidget--nav-button
     (my/xwidget--mode-line-icon 'codicon "nf-cod-refresh" "reload")
     #'my/xwidget-reload "Reload [g]" 'header-line)
@@ -3520,6 +3714,8 @@ failure while it is still going."
             my/noema--client-id)
     (list
      "---"
+     ["Noema: Back" my/noema-back t]
+     ["Noema: Forward" my/noema-forward t]
      ["Noema: Refresh current pane" my/noema-refresh t]
      ["Noema: Open editable split" my/noema-open-current-note-split t]
      ["Noema: Split right" my/noema-open-current-note-split-right t]
