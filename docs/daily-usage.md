@@ -117,7 +117,7 @@ Noema Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保存、
 | **Knowledge** | `n` 新笔记, `d` 今日日记, `a` 按标签浏览, `C` 分类层次浏览（MediaWiki Category），`g` roam graph, `k` 任务, `A` 日程, `L` 日程日志, `F` 当前文件任务跳转, `M` 维护仪表板 |
 | **Special pages (wiki)** | `!` 报告总入口, `!w` Wanted Pages, `!o` 孤立页, `!d` 死端页, `!u` 无标签页, `!h` 最多链接页 |
 | **Index/Files** | `y` 同步 DB, `u` 增量更新, `Z` 全量重建, `S` DB 状态, `D` dired, `m` 移动笔记（自动重写链接）, `V` magit, `q` 停止服务 |
-| **Format (web)** | `1-9/0` 粗/斜/代码/高亮/删除线/引用/列表×3/代码块, `p` 段落菜单, `z` 表格, `E` 数学块, `C` 目录, `U/Y` undo/redo |
+| **Format (web)** | `1-9/0` 粗/斜/代码/高亮/删除线/引用/列表×3/代码块, `=` 勾选/取消选中行的任务项, `$` 行内公式包裹/取消, `p` 段落菜单, `z` 表格, `E` 数学块, `C` 目录, `U/Y` undo/redo |
 
 **Wiki 搜索操作符**（`/` 搜索时可混用）：
 - `intitle:关键词` 或 `title:关键词` — 仅匹配标题

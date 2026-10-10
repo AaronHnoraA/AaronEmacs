@@ -120,12 +120,24 @@ test helpers) where you want a raw Emacs buffer instead of the web editor.")
     (setq-local my/noema--markdown-redirected t)
     (fundamental-mode)
     (setq-local buffer-read-only t)
-    (let ((target (my/noema--ensure-markdown-file file)))
+    (let ((target (my/noema--ensure-markdown-file file))
+          (close (lambda (target)
+                   (run-at-time 0 nil
+                                #'my/noema--kill-redirected-markdown-buffer
+                                buffer target))))
       (my/noema-open-file target)
-      (when my/noema-close-emacs-markdown-buffer
-        (run-at-time 0 nil
-                     #'my/noema--kill-redirected-markdown-buffer
-                     buffer target)))))
+      (cond
+       ((not my/noema-close-emacs-markdown-buffer))
+       ((or (bound-and-true-p my/noema--ready)
+            (not (fboundp 'my/noema--ensure-server)))
+        (funcall close target))
+       (t
+        ;; The web-host is still booting, so the open above is queued.  This
+        ;; buffer stays on screen as the placeholder that open replaces;
+        ;; killing it now would leave its window on an unrelated buffer and
+        ;; the queued open with no window to claim.
+        (setq-local header-line-format " Noema is starting…")
+        (my/noema--ensure-server (lambda () (funcall close target))))))))
 
 (defun my/noema-redirect-markdown-file-h ()
   "Fallback Markdown handoff for packages that override `auto-mode-alist'."

@@ -1106,6 +1106,52 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
         (when (buffer-live-p result) (kill-buffer result))
         (when (file-exists-p file) (delete-file file))))))
 
+;; A cold web-host answers after `find-file' has finished: the window that
+;; asked now shows the redirected buffer (or, with another-window commands,
+;; a different window does), not the buffer captured when the open was queued.
+(ert-deftest my/noema-open-file-after-cold-start-claims-the-redirect-placeholder ()
+  (save-window-excursion
+    (let* ((file (make-temp-file "noema-cold-open" nil ".md"))
+           (source (generate-new-buffer " *noema-cold-source*"))
+           (unrelated (generate-new-buffer " *noema-cold-unrelated*"))
+           (placeholder (generate-new-buffer " *noema-cold-placeholder*"))
+           (origin (selected-window))
+           (my/noema--port 4242)
+           callback opened-window result)
+      (unwind-protect
+          (progn
+            (set-window-buffer origin source)
+            (cl-letf (((symbol-function 'my/noema--ensure-server)
+                       (lambda (fn) (setq callback fn)))
+                      ((symbol-function 'my/noema--open-url)
+                       (lambda (&rest _)
+                         (setq opened-window (selected-window))
+                         (setq result
+                               (generate-new-buffer " *noema-cold-result*"))
+                         (switch-to-buffer result))))
+              (my/noema-open-file file)
+              (with-current-buffer placeholder
+                (setq buffer-file-name file)
+                (setq-local my/noema--markdown-redirected t)
+                (set-buffer-modified-p nil))
+              (let ((other-window (split-window-right)))
+                (set-window-buffer origin unrelated)
+                (set-window-buffer other-window placeholder)
+                (funcall callback)
+                (should (eq opened-window other-window))
+                (should (eq (window-buffer other-window) result))
+                (should (eq (window-buffer origin) unrelated))
+                ;; With neither the placeholder nor the original buffer on
+                ;; screen there is nothing to claim.
+                (setq opened-window nil)
+                (funcall callback)
+                (should-not opened-window))))
+        (dolist (buffer (list source unrelated placeholder result))
+          (when (buffer-live-p buffer)
+            (with-current-buffer buffer (set-buffer-modified-p nil))
+            (kill-buffer buffer)))
+        (when (file-exists-p file) (delete-file file))))))
+
 (ert-deftest my/noema-editable-split-rolls-back-on-open-error ()
   (save-window-excursion
     (let* ((file (make-temp-file "noema-split-error" nil ".md"))

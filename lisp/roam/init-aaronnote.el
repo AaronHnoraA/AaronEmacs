@@ -2658,6 +2658,20 @@ When FILE is nil, use the current buffer."
             (when (require 'pulse nil t)
               (pulse-momentary-highlight-one-line (point)))))))))
 
+(defvar my/noema--markdown-redirected)
+
+(defun my/noema--redirect-placeholder-window (file)
+  "Return a visible window showing the redirected Emacs buffer of FILE.
+While the web-host boots, the Markdown redirect leaves that buffer on screen
+as the placeholder its Noema pane will replace."
+  (get-window-with-predicate
+   (lambda (window)
+     (with-current-buffer (window-buffer window)
+       (and (bound-and-true-p my/noema--markdown-redirected)
+            buffer-file-name
+            (equal (my/noema--canonical-file buffer-file-name) file))))
+   'no-minibuffer 'visible))
+
 ;;;###autoload
 (defun my/noema-open-file (file &optional origin-window)
   "Open Markdown FILE in Noema Web/Appine from ORIGIN-WINDOW."
@@ -2665,13 +2679,19 @@ When FILE is nil, use the current buffer."
   (unless (my/noema--markdown-file-p file)
     (user-error "Noema opens Markdown files, not %s" file))
   (let* ((file (my/noema--canonical-file file))
-         (target-window (if (window-live-p origin-window)
-                            origin-window (selected-window)))
-         (source-buffer (window-buffer target-window)))
+         (origin (if (window-live-p origin-window)
+                     origin-window (selected-window)))
+         (source-buffer (window-buffer origin)))
     (my/noema--ensure-server
      (lambda ()
-       (when (and (window-live-p target-window)
-                  (eq (window-buffer target-window) source-buffer))
+       ;; A cold host answers after the command that asked has returned.  By
+       ;; then `find-file' has put the redirected buffer in a window, which
+       ;; need not be ORIGIN; the pane belongs wherever that placeholder is.
+       (when-let* ((target-window
+                    (or (my/noema--redirect-placeholder-window file)
+                        (and (window-live-p origin)
+                             (eq (window-buffer origin) source-buffer)
+                             origin))))
          (let ((activate (eq (selected-window) target-window))
                result)
            (with-selected-window target-window
@@ -3765,6 +3785,8 @@ failure while it is still going."
 (my/noema--def-editor-cmd "bullet-list"     "bullet-list"     "Toggle bullet list.")
 (my/noema--def-editor-cmd "ordered-list"    "ordered-list"    "Toggle ordered list.")
 (my/noema--def-editor-cmd "task-list"       "task-list"       "Toggle task/checkbox list.")
+(my/noema--def-editor-cmd "toggle-task"     "toggle-task"     "Check or uncheck the selected task items.")
+(my/noema--def-editor-cmd "inline-math"     "inline-math"     "Wrap the selection in inline math, or unwrap it.")
 (my/noema--def-editor-cmd "code-block"      "code-block"      "Insert/toggle fenced code block.")
 (my/noema--def-editor-cmd "paragraph-menu"  "paragraph-menu"  "Open heading/paragraph type menu.")
 (my/noema--def-editor-cmd "insert-table"    "insert-table"    "Insert a Markdown table.")
@@ -3860,6 +3882,7 @@ failure while it is still going."
       ("5" "strike"           my/noema-strike)
       ("^" "superscript"      my/noema-superscript)
       ("_" "subscript"        my/noema-subscript)
+      ("$" "inline math"      my/noema-inline-math)
       ("N" "footnote"         my/noema-insert-footnote)
       ("K" "revision"         my/noema-insert-revision)
       ("@" "properties"       my/noema-edit-properties)
@@ -3869,6 +3892,7 @@ failure while it is still going."
       ("7" "bullet list"      my/noema-bullet-list)
       ("8" "ordered list"     my/noema-ordered-list)
       ("9" "task list"        my/noema-task-list)
+      ("=" "check task"       my/noema-toggle-task)
       ("0" "code block"       my/noema-code-block)
       ("p" "heading menu"     my/noema-paragraph-menu)
       ("z" "insert table"     my/noema-insert-table)
