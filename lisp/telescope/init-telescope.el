@@ -35,7 +35,7 @@
 (declare-function my/project-ripgrep "init-project"
                   (project-root &optional initial))
 (declare-function my/project-switch "init-project")
-(declare-function my/project-vterm "init-project")
+(declare-function my/project-ghostel "init-project")
 (declare-function my/bookmark-jump-dwim "init-windows")
 (declare-function my/problems-buffer "init-problems" ())
 (declare-function my/problems-buffer-errors "init-problems" ())
@@ -215,7 +215,7 @@ the built-in bookmark list buffer."
        :transient transient--do-exit)
       ("o" "open root" my/project-open-root
        :transient transient--do-exit)
-      ("v" "project vterm" my/project-vterm
+      ("v" "project ghostel" my/project-ghostel
        :transient transient--do-exit)
       ("P" "project workbench" my/project-dispatch
        :transient transient--do-exit)]

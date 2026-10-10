@@ -18,10 +18,11 @@
 (when (not (eq system-type 'darwin))
   (setq server-use-tcp t
         server-host "0.0.0.0"
-        server-port 54321)
-  (unless (or noninteractive
-              (server-running-p))
-    (server-start)))
+        server-port 54321))
+
+;; The macOS terminal launcher talks to the running GUI through a local socket.
+(unless (or noninteractive (server-running-p))
+  (server-start))
 
 
 (provide 'init-server)

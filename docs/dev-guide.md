@@ -305,7 +305,7 @@ Lean 的通知/请求 payload 一律用 `lsp-get` 读取：lsp-mode 只有在以
 - `SPC p m`
   当前项目 Magit
 - `SPC p v`
-  当前项目 vterm
+  当前项目 ghostel
 - `C-c p .`
   非 Evil 场景下打开项目工作台
 
@@ -350,36 +350,36 @@ Lean 的通知/请求 payload 一律用 `lsp-get` 读取：lsp-mode 只有在以
 - `M-x shell-toggle`
   弹出 shell
 
-### VTerm
+### Ghostel
 
 - `M-\``
-  `vterm-toggle`
+  `ghostel-toggle`
 - `C-c e`
-  弹出/收起当前 workspace 的 popup `vterm`；远端 buffer 会打开远端终端
+  弹出/收起当前 workspace 的 popup `ghostel`；远端 buffer 会打开远端终端
 - `C-c C-e`
-  智能弹出或收回当前 popup `vterm`
+  智能弹出或收回当前 popup `ghostel`
 - `C-c E`
-  切换到下一个 popup `vterm`；`C-u C-c E` 新建一个
+  切换到下一个 popup `ghostel`；`C-u C-c E` 新建一个
 - `C-c M-E`
-  新建 popup `vterm`
+  新建 popup `ghostel`
 - `C-c M-e`
-  切换当前 popup `vterm` 的固定状态
+  切换当前 popup `ghostel` 的固定状态
 - `SPC o e`
-  `vterm-toggle`
+  `ghostel-toggle`
 - `SPC o E`
-  切换到下一个 popup `vterm`
+  切换到下一个 popup `ghostel`
 - `SPC o F`
-  切换当前 popup `vterm` 的固定状态
+  切换当前 popup `ghostel` 的固定状态
 - `SPC o t`
-  `vterm-toggle`
+  `ghostel-toggle`
 - `SPC o v`
-  新建 `vterm`
+  新建 `ghostel`
 - `SPC o V`
-  创建命名 `vterm`
+  创建命名 `ghostel`
 - `SPC o S`
-  `my/vterm-ssh`
-- `M-x my/project-popup-vterm-app`
-  在当前 project 根目录的新 popup `vterm` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
+  `my/ghostel-ssh`
+- `M-x my/project-popup-ghostel-app`
+  在当前 project 根目录的新 popup `ghostel` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
 
 ## 6.1 数据库 / SQL
 
@@ -424,19 +424,19 @@ Lean 的通知/请求 payload 一律用 `lsp-get` 读取：lsp-mode 只有在以
 - `M-x remote-board`：按 target 查看 route、连接状态、配置/当前/最近文件夹和活动转发端口；可见时随连接、workspace 和 channel 生命周期刷新。`RET`/`o` 打开文件夹并建立受管理的 workspace（端口行复制本地地址），`f` 在目标文件系统中补全目录，`c` 关闭选中文件夹的 workspace 与所属资源，`C` 断开整个 target 的 workspace、连接和 buffer（保留未保存编辑及拒绝关闭的 buffer，并停止自动启动），`p` 转发目标端口（`C-u p` 指定目标侧 host，`C-u C-u p` 还可指定本地端口），`n` 命名选中转发，`P` 更换其本地端口，`k` 关闭转发并移除恢复资源，`r` 后台重连 workspace（已连接时用 `C-u r`），`w` 复制行的 URI 或本地端口地址，`s` 刷新本机缓存状态，`g` 重读 target 配置
 - 编辑远程文件：使用 `fs://target/path` 或 `/fs:target:/path`
 - 旧的 `/ssh:host:/path` 仍可打开，进入 buffer 后会 canonicalize 为 `/fs`
-- 在当前本地/远端 workspace 打开终端：`C-c e`（`vterm-toggle`）
-- 按主机名直接开终端：`M-x my/vterm-ssh`
+- 在当前本地/远端 workspace 打开终端：`C-c e`（`ghostel-toggle`）
+- 按主机名直接开终端：`M-x my/ghostel-ssh`
 
 `/fs:` 远程 buffer 的模式栏显示当前 target，点击可打开 Remote 面板。普通本地
 buffer 不显示这一项。面板中的最近文件夹由显式的 Remote 打开操作记忆，并由
 `savehist` 持久化；绘制面板不连接远端，只有实际打开文件夹时才检查目标目录。
 
 `C-c e` 是推荐入口。它读取当前 buffer 的 `/fs:TARGET:/path` 上下文，通过
-remote process adapter 启动 vterm，并把 terminal 生命周期登记给 workspace；
+remote process adapter 启动 ghostel，并把 terminal 生命周期登记给 workspace；
 本地与远端走同一条路径。popup 只在同一 workspace 内复用和循环，不会把本地
 terminal 带到 WSL/SSH buffer，也不会跨两个远端 target 串线。
 
-`my/vterm-ssh` 会优先读：
+`my/ghostel-ssh` 会优先读：
 
 - `~/.ssh/config`
 
@@ -648,7 +648,7 @@ in-process 缓存，与自动刷新保持一致。
   cancelled 写回格子；运行中的 Run 由 worker 发 ACP `session/cancel`、撤回待批权限，
   3 秒无响应再关停 agent 进程。JuText `C-c C-z` 按光标所在格子取消。
 - `M-x noema-skill-manager` / `noema-mcp-manager` / `noema-capability-manager`
-  在普通 buffer 打开能力管理器；在 agent-shell buffer（平台会话或 popup vterm 里的
+  在普通 buffer 打开能力管理器；在 agent-shell buffer（平台会话或 popup ghostel 里的
   会话）里同一命令改为只读 lookup（`M-x noema-capability-lookup`），选中后只在 agent
   输入处草拟一行引用（Skill 给出绝对 `SKILL.md` 与资源目录，MCP 给出配置文件），
   不启用、不打补丁、不安装、也不自动发送。

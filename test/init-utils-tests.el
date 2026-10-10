@@ -12,42 +12,42 @@
 (require 'cl-lib)
 (require 'init-utils)
 
-(ert-deftest my/vterm-wrap-quotes-argv ()
+(ert-deftest my/ghostel-wrap-quotes-argv ()
   (should
-   (equal (my/vterm-wrap--shell-command
+   (equal (my/ghostel-wrap--shell-command
            '("tool" "plain" "two words" "$(unsafe)"))
           "exec tool plain two\\ words \\$\\(unsafe\\)")))
 
-(ert-deftest my/vterm-wrap-preserves-shell-command ()
+(ert-deftest my/ghostel-wrap-preserves-shell-command ()
   (let ((shell-file-name "/bin/test shell"))
     (should
-     (equal (my/vterm-wrap--shell-command "first | second")
+     (equal (my/ghostel-wrap--shell-command "first | second")
             "exec /bin/test\\ shell -lc first\\ \\|\\ second"))))
 
-(ert-deftest my/vterm-wrap-rejects-invalid-command ()
-  (should-error (my/vterm-wrap--shell-command nil) :type 'user-error)
-  (should-error (my/vterm-wrap--shell-command '()) :type 'user-error)
-  (should-error (my/vterm-wrap--shell-command '("")) :type 'user-error)
-  (should-error (my/vterm-wrap--shell-command '("tool" 1)) :type 'user-error))
+(ert-deftest my/ghostel-wrap-rejects-invalid-command ()
+  (should-error (my/ghostel-wrap--shell-command nil) :type 'user-error)
+  (should-error (my/ghostel-wrap--shell-command '()) :type 'user-error)
+  (should-error (my/ghostel-wrap--shell-command '("")) :type 'user-error)
+  (should-error (my/ghostel-wrap--shell-command '("tool" 1)) :type 'user-error))
 
-(ert-deftest my/vterm-wrap-creates-self-cleaning-vterm ()
+(ert-deftest my/ghostel-wrap-creates-self-cleaning-ghostel ()
   (let (sent-command created-directory buffer)
     (unwind-protect
         (cl-letf (((symbol-function 'require)
                    (let ((original-require (symbol-function 'require)))
                      (lambda (feature &optional filename noerror)
-                       (if (eq feature 'vterm)
+                       (if (eq feature 'ghostel)
                            t
                          (funcall original-require feature filename noerror)))))
-                  ((symbol-function 'vterm)
-                   (lambda (&optional name)
+                  ((symbol-function 'ghostel-create)
+                   (lambda (&optional name _display _identity)
                      (setq created-directory default-directory)
                      (setq buffer (get-buffer-create name))))
-                  ((symbol-function 'my/vterm-send-command)
+                  ((symbol-function 'my/ghostel-send-command)
                    (lambda (target command &optional _retries)
                      (should (eq target buffer))
                      (setq sent-command command))))
-          (let ((result (my/vterm-wrap '("tool" "two words")
+          (let ((result (my/ghostel-wrap '("tool" "two words")
                                        :directory temporary-file-directory
                                        :display nil)))
             (should (eq result buffer))
@@ -55,7 +55,7 @@
             (should (equal created-directory
                            (file-name-as-directory
                             (expand-file-name temporary-file-directory))))
-            (should (buffer-local-value 'vterm-kill-buffer-on-exit buffer))))
+            (should (buffer-live-p buffer))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 

@@ -18,7 +18,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native ui-test activity-test ui-tokens audit-ui-tokens \
         remote-test remote-source-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
-		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke remote-vterm-live-smoke \
+		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke remote-ghostel-live-smoke \
         jupyter-test research-test agenda-test agenda-apple-test \
         noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
         noema-server-config-init noema-server-build noema-server-start noema-server-deploy noema-disk-audit noema-clean \
@@ -81,7 +81,7 @@ help:
 	  '  make remote-task-live-smoke  Check target tasks, error links, and cancellation' \
 	  '  make remote-task-disconnect-smoke  Check task status after RPC transport loss' \
 	  '  make remote-terminal-live-smoke  Check routed PTY input/output on a real SSH target' \
-	  '  make remote-vterm-live-smoke  Check the actual VTerm frontend on a real SSH target' \
+	  '  make remote-ghostel-live-smoke  Check the actual Ghostel frontend on a real SSH target' \
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make research-test        Run Noema research notebook (JuText/Graph Board) ERT suite' \
 	  '  make agenda-apple-test    Build and check EventKit without requesting access' \
@@ -318,8 +318,8 @@ remote-cleanup-live-smoke:
 remote-terminal-live-smoke:
 	$(BATCH) -l test/remote-terminal-live-smoke.el
 
-remote-vterm-live-smoke:
-	$(BATCH) -l test/remote-vterm-live-smoke.el
+remote-ghostel-live-smoke:
+	$(BATCH) -l test/remote-ghostel-live-smoke.el
 
 jupyter-test:
 	python3 -m unittest discover -s test -p jupyter_connection_cleanup_test.py

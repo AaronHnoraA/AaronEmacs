@@ -2804,18 +2804,21 @@ so saving never reports it as a malformed Agent directive."
 		  "intervention" (noema-research--table "id" "manual_1" "version" 1))))
     (unwind-protect
 	(progn
-	  (require 'vterm)
+	  (require 'ghostel)
 	  (with-current-buffer origin
 	    (setq-local agent-shell--state '(:agent-config (:identifier codex))))
 	  (cl-letf (((symbol-function 'executable-find) (lambda (_name) "/bin/codex"))
 		    ((symbol-function 'noema-agent-acp-shutdown)
                      (lambda (_buffer) (setq shutdown t)))
-		    ((symbol-function 'vterm)
-		     (lambda (&optional _name) (setq launched-shell vterm-shell) terminal))
+		    ((symbol-function 'my/ghostel-create-hidden)
+		     (lambda (_name) terminal))
+		    ((symbol-function 'my/ghostel-send-command)
+		     (lambda (_buffer command &optional _retries)
+		       (setq launched-shell command)))
 		    ((symbol-function 'pop-to-buffer) (lambda (buffer &rest _) buffer)))
 	    (should (eq (noema-agent-takeover--launch origin result) terminal)))
 	  (should shutdown)
-	  (should (equal launched-shell "codex resume native-1"))
+	  (should (equal launched-shell "exec codex resume native-1"))
 	  (with-current-buffer terminal
 	    (should (equal noema-agent-takeover--intervention-id "manual_1"))
 	    (cl-letf (((symbol-function 'my/noema-api-call)

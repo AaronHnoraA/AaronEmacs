@@ -131,7 +131,6 @@ posframe 弹窗而不是 inline overlay。支持 `$…$`、`$$…$$`、`\(…\)`
 变量：
 
 - `codex-cli-executable`      — Codex 可执行文件名（默认 `"codex"`）
-- `codex-cli-terminal-backend` — 终端后端（默认 `vterm`）
 - 本地 override：Codex buffer 用底部普通窗口打开，高度约 18 行，可继续分屏
 
 键位前缀 `C-c c`；参见文件顶部注释。
@@ -387,7 +386,7 @@ breadcrumb 不继承 tab 的切换/关闭行为；
 - `remote-make-process` / `remote-exec`
 - `remote-make-network-process` / `remote-open-network-stream` / `remote-port-forward`
 - `remote-environment-ensure` / `remote-environment-derive`
-- `my/vterm-ssh`
+- `my/ghostel-ssh`
 
 target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境层的完整
 设计见 [remote-framework.md](remote-framework.md)。`lisp/remote/` 只放通用框架；

@@ -138,8 +138,8 @@
                                org-babel-after-execute-hook kill-buffer-hook
                                change-major-mode-hook)
    (my/performance-record-directory . "/Users/hc/.emacs.d/var/performance/")
-   (my/performance-refresh-interval . 2.0) (my/vterm-wheel-scroll-lines . 5)
-   (my/vterm-startup-send-retries . 20) (my/vterm-startup-send-delay . 0.05)
+   (my/performance-refresh-interval . 2.0) (my/ghostel-wheel-scroll-lines . 5)
+   (my/ghostel-startup-send-retries . 20) (my/ghostel-startup-send-delay . 0.05)
    (my/open-browser-window-size . 0.38)
    (my/open-routes
     (url :default menu :menu-default xwidget :backends (xwidget appine eww system))
@@ -157,9 +157,9 @@
    (my/display-rules-roam-size . 0.36) (my/display-rules-side-size . 0.33)
    (my/display-rules-bottom-size . 0.32)
    (my/symbols-preview-key :debounce 0.15 any)
-   (my/project-popup-vterm-apps ("lazygit" . "lazygit") ("btop" . "btop")
+   (my/project-popup-ghostel-apps ("lazygit" . "lazygit") ("btop" . "btop")
                                 ("yazi" . "yazi") ("tmux" . "tmux"))
-   (my/vterm-popup-window-height . 0.2) (my/copilot-deferred-idle-delay . 1.5)
+   (my/ghostel-popup-window-height . 0.2) (my/copilot-deferred-idle-delay . 1.5)
    (my/copilot-deferred-modes lean-mode) (my/copilot-disable-on-remote)
    (my/copilot-large-buffer-threshold . 524288) (my/copilot-idle-delay . 0.85)
    (my/copilot-server-max-heap-mb . 1024) (my/noema-web-host-max-heap-mb . 512)

@@ -10,13 +10,10 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function vterm "vterm" (&optional buffer-name))
-(declare-function vterm-send-string "vterm" (string &optional paste-p))
-(declare-function vterm-send-return "vterm" ())
-(declare-function my/vterm-send-command "init-shell"
+(declare-function ghostel-create "ghostel" (&optional name display identity))
+(declare-function my/ghostel-send-command "init-ghostel"
                   (buffer command &optional retries))
-(defvar vterm-kill-buffer-on-exit)
-(defvar vterm-shell)
+(defvar ghostel-shell)
 
 (defconst tldr-buffer-name "*tldr*")
 (defconst tldr-url-template "https://api.github.com/repos/tldr-pages/tldr/contents/pages/%s/%s.md")
@@ -32,21 +29,12 @@
   "Return a shell-safe command string for PROGRAM."
   (shell-quote-argument (my/executable-or-name program)))
 
-(defun my/vterm-create-hidden (name)
-  "Create the VTerm buffer NAME without showing it in any existing window.
-`vterm' switches the selected window to the new buffer.  Wrapping it in
-`save-window-excursion' hides that visually but leaves the terminal in the
-window's buffer history, so the window later \"goes back\" into it (after
-quitting Dirvish or killing a buffer), and when that terminal exits it falls
-back further, typically to the Dashboard.  Suppress the display instead; the
-caller shows the buffer where it belongs."
-  (require 'vterm)
-  (let ((display-buffer-overriding-action
-         '(display-buffer-no-window (allow-no-window . t))))
-    (save-window-excursion
-      (vterm name))))
+(defun my/ghostel-create-hidden (name)
+  "Create the Ghostel buffer NAME without displaying it."
+  (require 'ghostel)
+  (ghostel-create name))
 
-(defun my/vterm-wrap--command-name (command)
+(defun my/ghostel-wrap--command-name (command)
   "Return a short display name derived from COMMAND."
   (let* ((candidate
           (cond
@@ -61,16 +49,17 @@ caller shows the buffer where it belongs."
         (replace-regexp-in-string "[^[:alnum:]_.+-]" "-" name)
       "command")))
 
-(defun my/vterm-wrap--shell-command (command)
+(defun my/ghostel-wrap--shell-command (command)
   "Return a shell command that replaces its shell with COMMAND.
 COMMAND may be a shell command string or a non-empty list of argv strings.
 Lists are quoted argument by argument; strings are evaluated by a fresh shell."
   (cond
    ((and (stringp command) (not (string-empty-p (string-trim command))))
-    (let ((shell (or (and (boundp 'vterm-shell) vterm-shell)
-                     shell-file-name
-                     (getenv "SHELL")
-                     "/bin/sh")))
+    (let* ((configured-shell (and (boundp 'ghostel-shell) ghostel-shell))
+           (shell (or (if (consp configured-shell)
+                          (car configured-shell)
+                        configured-shell)
+                      shell-file-name (getenv "SHELL") "/bin/sh")))
       (format "exec %s -lc %s"
               (shell-quote-argument shell)
               (shell-quote-argument command))))
@@ -82,8 +71,8 @@ Lists are quoted argument by argument; strings are evaluated by a fresh shell."
     (user-error "COMMAND must be a non-empty string or argv string list"))))
 
 ;;;###autoload
-(cl-defun my/vterm-wrap (command &key directory buffer-name (display t))
-  "Run COMMAND as the foreground process of a fresh VTerm.
+(cl-defun my/ghostel-wrap (command &key directory buffer-name (display t))
+  "Run COMMAND as the foreground process of a fresh Ghostel terminal.
 
 COMMAND may be a shell string, or a list of program arguments.  Prefer an
 argument list from Lisp callers because every argument is shell-quoted.  A
@@ -91,30 +80,24 @@ string intentionally supports shell syntax such as pipes and redirections.
 
 DIRECTORY defaults to `default-directory'.  BUFFER-NAME defaults to a name
 derived from COMMAND; a unique buffer is always created.  When DISPLAY is
-non-nil, show the buffer with `pop-to-buffer'.  Return the VTerm buffer.
+non-nil, show the buffer with `pop-to-buffer'.  Return the Ghostel buffer.
 
 Examples:
 
-  (my/vterm-wrap \='(\"claude\" \"--model\" \"sonnet\"))
-  (my/vterm-wrap \"ollama run qwen3\" :directory project-root)
-  (my/vterm-wrap \='(\"ssh\" \"build-host\") :buffer-name \"*build host*\")"
-  (interactive (list (read-shell-command "VTerm command: ")))
-  (require 'vterm)
-  (let* ((shell-command (my/vterm-wrap--shell-command command))
+  (my/ghostel-wrap \='(\"claude\" \"--model\" \"sonnet\"))
+  (my/ghostel-wrap \"ollama run qwen3\" :directory project-root)
+  (my/ghostel-wrap \='(\"ssh\" \"build-host\") :buffer-name \"*build host*\")"
+  (interactive (list (read-shell-command "Ghostel command: ")))
+  (require 'ghostel)
+  (let* ((shell-command (my/ghostel-wrap--shell-command command))
          (default-directory
           (file-name-as-directory
            (expand-file-name (or directory default-directory))))
          (name (or buffer-name
-                   (format "*vterm:wrap:%s*"
-                           (my/vterm-wrap--command-name command))))
-         (buffer (my/vterm-create-hidden (generate-new-buffer-name name))))
-    (with-current-buffer buffer
-      (setq-local vterm-kill-buffer-on-exit t))
-    (if (fboundp 'my/vterm-send-command)
-        (my/vterm-send-command buffer shell-command)
-      (with-current-buffer buffer
-        (vterm-send-string shell-command)
-        (vterm-send-return)))
+                   (format "*ghostel:wrap:%s*"
+                           (my/ghostel-wrap--command-name command))))
+         (buffer (my/ghostel-create-hidden (generate-new-buffer-name name))))
+    (my/ghostel-send-command buffer shell-command)
     (when display
       (pop-to-buffer buffer))
     buffer))

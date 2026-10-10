@@ -158,8 +158,10 @@ round trip that cannot succeed."
     ;; Target `local' keeps every directory of Emacs's own `exec-path', in
     ;; Emacs's order, and may add what the person's login shell contributes
     ;; (a GUI Emacs lacks ~/.zshrc's PATH).
+    ;; Target path composition removes duplicate directories; compare the
+    ;; native directories in order without requiring redundant entries.
     (should (equal (seq-filter (lambda (directory) (member directory native)) target)
-                   native))
+                   (delete-dups (copy-sequence native))))
     (should-not
      (seq-find #'remote-fs-file-name-p target))))
 

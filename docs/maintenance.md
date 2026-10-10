@@ -151,7 +151,7 @@ make up SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - 可选先恢复状态快照
 - 按 `package-lock.el` 恢复依赖
 - 跑完整 bootstrap health
-- 尽早暴露 `pdf-tools` / `vterm` / VC checkout / 锁文件漂移这类迁移问题
+- 尽早暴露 `pdf-tools` / `ghostel` / VC checkout / 锁文件漂移这类迁移问题
 
 更轻量的路径才是：
 
@@ -163,7 +163,7 @@ make setup
 
 - 按 `package-lock.el` 恢复依赖
 - 避免把“本地碰巧已有几个包”误判成已有开发环境
-- 立刻跑一次启动 smoke check，尽早暴露 `pdf-tools` / `vterm` / VC checkout 这类迁移问题
+- 立刻跑一次启动 smoke check，尽早暴露 `pdf-tools` / `ghostel` / VC checkout 这类迁移问题
 
 如果你想把这一步提升成更接近“迁移验收”的流程，执行：
 
@@ -502,7 +502,7 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
 - [lisp/org/init-org.el](../lisp/org/init-org.el)
   Org 全家桶
 - [lisp/init-shell.el](../lisp/init-shell.el)
-  shell/eshell/vterm/ssh
+  shell/eshell/ghostel/ssh
 
 ## 7. 常见故障排查
 
@@ -564,7 +564,7 @@ emacs --batch -Q --init-directory="$PWD" -l ./early-init.el \
 2. `dvisvgm`
 3. [tools/org-xdvisvgm-hires](../tools/org-xdvisvgm-hires)
 
-### `my/vterm-ssh` 没读到主机
+### `my/ghostel-ssh` 没读到主机
 
 看：
 

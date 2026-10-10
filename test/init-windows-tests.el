@@ -117,14 +117,14 @@
       (when (buffer-live-p dashboard)
         (kill-buffer dashboard)))))
 
-(ert-deftest my/window-vterm-popup-exit-keeps-work-buffer ()
-  "Closing a managed vterm popup leaves its work window in place."
-  (require 'init-vterm-popup)
-  (let ((source (generate-new-buffer "vterm-popup-work-test"))
-        (dashboard (generate-new-buffer "*vterm-popup-dashboard-test*"))
-        (popup (generate-new-buffer "*vterm-popup-exit-test*"))
-        (my/vterm-popup-buffers nil)
-        (my/vterm-popup-current-buffer nil))
+(ert-deftest my/window-ghostel-popup-exit-keeps-work-buffer ()
+  "Closing a managed ghostel popup leaves its work window in place."
+  (require 'init-ghostel-popup)
+  (let ((source (generate-new-buffer "ghostel-popup-work-test"))
+        (dashboard (generate-new-buffer "*ghostel-popup-dashboard-test*"))
+        (popup (generate-new-buffer "*ghostel-popup-exit-test*"))
+        (my/ghostel-popup-buffers nil)
+        (my/ghostel-popup-current-buffer nil))
     (unwind-protect
         (save-window-excursion
           (delete-other-windows)
@@ -132,7 +132,7 @@
             (setq-local major-mode 'dashboard-mode))
           (switch-to-buffer dashboard)
           (switch-to-buffer source)
-          (my/vterm-popup-display-buffer popup)
+          (my/ghostel-popup-display-buffer popup)
           (should (eq (window-buffer) popup))
           (kill-buffer popup)
           (should (eq (window-buffer) source)))

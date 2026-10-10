@@ -68,7 +68,7 @@ marker 仍然直接探测。这个改写对本地同样有效，因此不按 tar
 - `SPC p m`
   打开当前项目 Magit
 - `SPC p v`
-  打开当前项目专属 vterm
+  打开当前项目专属 ghostel
 - `SPC c i`
   打开 `show-imenu`
   左侧 Treemacs smart toggle，并跟随当前文件和光标所在符号
@@ -85,7 +85,7 @@ marker 仍然直接探测。这个改写对本地同样有效，因此不按 tar
 - Search
   项目内 ripgrep、跨已知项目找文件、项目 Magit
 - Open / Shell
-  项目根目录、项目 vterm
+  项目根目录、项目 ghostel
 - Manage
   退出当前项目、手动加项目、批量发现项目、彻底移除项目、杀当前项目 buffer
 
@@ -137,7 +137,7 @@ Perspective 的项目关联，保留文件缓冲区。Noema Agenda 随之释放�
 - Emacs 内置 `project.el` 的已知项目记录
 - Treemacs workspace 里的项目项
 - 对应 perspective
-- 项目相关 buffer / 专属 vterm
+- 项目相关 buffer / 专属 ghostel
 
 `SPC p x` 会把项目加入忽略列表，所以它不会再被当前项目工作流默认选中；重新启用它的方式就是 `SPC p a`。
 

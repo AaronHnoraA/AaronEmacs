@@ -16,7 +16,7 @@
   Evil leader，总入口。
 - `<Esc>`
   编辑 buffer 中一次完成 Evil normal-state 恢复和搜索高亮清理；在未启用 Evil 的
-  buffer 中走统一取消逻辑。Minibuffer、isearch、VTerm 和浏览器仍保留各自的局部
+  buffer 中走统一取消逻辑。Minibuffer、isearch、Ghostel 和浏览器仍保留各自的局部
   Escape 行为，不会把未处理的按键漏给 macOS 全屏。
 - `SPC h K`
   在 Emacs 内打开本快捷键索引。
@@ -39,18 +39,18 @@
 - `C-x g`
   Magit
 - `M-\``
-  `vterm-toggle`
+  `ghostel-toggle`
 - `C-c e`
-  切换当前 workspace 的 popup `vterm`；在 `/fs:` 远端 buffer 中直接打开同一
+  切换当前 workspace 的 popup `ghostel`；在 `/fs:` 远端 buffer 中直接打开同一
   target/workspace 的远端终端
 - `C-c C-e`
-  智能弹出或收回当前 popup `vterm`
+  智能弹出或收回当前 popup `ghostel`
 - `C-c E`
-  切换到下一个 popup `vterm`，`C-u C-c E` 新建一个
+  切换到下一个 popup `ghostel`，`C-u C-c E` 新建一个
 - `C-c M-E`
-  新建 popup `vterm`
+  新建 popup `ghostel`
 - `C-c M-e`
-  切换当前 popup `vterm` 的固定状态
+  切换当前 popup `ghostel` 的固定状态
 - `C-\``
   `popper-toggle`
 - `C-x w d` / `C-u C-x w d`
@@ -60,7 +60,7 @@
 - `F5` / `F6` / `F7` / `F8`
   运行 profile / 测试菜单 / 调试菜单 / `olivetti-mode`
 - `F9` / `F10` / `F12`
-  `org-agenda` / popup `vterm` / Claude Code 菜单
+  `org-agenda` / popup `ghostel` / Claude Code 菜单
 
 ### macOS Option `H-`
 
@@ -178,12 +178,12 @@ Graph 搜索框支持全文词和
 `Shift+Cmd+方向键` 和 `Option+方向键` 仍是页面里的选择与按词移动。
 
 从页面触发的 Emacs 命令执行完后，键盘焦点跟着命令的结果走：它打开或切换了哪个普通
-Emacs 窗口（agent 会话、compose、Treemacs、vterm、源 buffer……），就选中那个窗口，
+Emacs 窗口（agent 会话、compose、Treemacs、ghostel、源 buffer……），就选中那个窗口，
 不会回到页面编辑器。什么都没打开的命令（`M-q` 回答 n、取消的 `M-x`、只输出消息）把键盘
 还给页面。命令返回后 2 秒内才由进程弹出的窗口（启动 agent、终端等）同样会接过键盘，
 但前提是你还停在原页面没动。`C-u` 前缀、minibuffer 输入和 transient 菜单都会等它们结束再判断。页面发起的
 `C-c A v/@` 这类发送，最后会停在 agent 会话的输入处。
-Emacs 接管键盘时（页面里触发的命令打开了 vterm、agent、minibuffer，或 `Cmd`+方向键
+Emacs 接管键盘时（页面里触发的命令打开了 ghostel、agent、minibuffer，或 `Cmd`+方向键
 移走），页面会把 macOS 的原生键盘焦点交还给 Emacs，之后所有按键——前缀序列
 `C-x 3`、回车、方向键、中文输入法——都直接、按顺序进 Emacs，不再经过页面转发，
 也没有按键特判。页面没有原生焦点时，macOS 仍会把 Ctrl/Cmd 组合键和方向键先给
@@ -636,21 +636,21 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC o q`
   `clutch-query-console`
 - `SPC o e`
-  `vterm-toggle`
+  `ghostel-toggle`
 - `SPC o E`
-  切换到下一个 popup `vterm`
+  切换到下一个 popup `ghostel`
 - `SPC o F`
-  切换当前 popup `vterm` 的固定状态
+  切换当前 popup `ghostel` 的固定状态
 - `SPC o t`
-  `vterm-toggle`
+  `ghostel-toggle`
 - `SPC o v`
-  直接打开新 `vterm`
-- `M-x my/project-popup-vterm-app`
-  在当前项目根目录的新 popup `vterm` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
+  直接打开新 `ghostel`
+- `M-x my/project-popup-ghostel-app`
+  在当前项目根目录的新 popup `ghostel` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
 
 顶部 `+term` 或标签上右键可打开启动菜单，`Applications` 列出上述已配置程序。
 `Agent` 子菜单（也可点击 `+Agent`）提供 Claude / Codex / OpenCode；它们使用
-原生 `agent-shell` / ACP buffer，不在 vterm 里运行 CLI，共用同一个顶部弹窗、
+原生 `agent-shell` / ACP buffer，不在 ghostel 里运行 CLI，共用同一个顶部弹窗、
 标签池、自动收起和固定逻辑。`C-c C-e` 折叠/打开，`C-c E` 切换标签，
 `C-c M-e` 固定。Agent 原有的模型、会话模式和权限提示保留；仅点击启动时
 加载 Agent 依赖。ACP adapter 沿用现有 agent-shell 配置；在远端 `/fs:` 工作区里
@@ -670,9 +670,9 @@ target。本机已删除适配器内置的 CLI（`@anthropic-ai/claude-agent-sdk
 `claude` / `codex` 在 `~/.local/bin`，由 `~/.zprofile` 放进登录 shell 的 PATH，
 Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，不受影响。
 - `SPC o V`
-  命名 `vterm`
+  命名 `ghostel`
 - `SPC o S`
-  `my/vterm-ssh`
+  `my/ghostel-ssh`
 - `SPC o s`
   `shell-toggle`
 - `SPC o w`
@@ -770,13 +770,13 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 - `SPC p m`
   打开当前项目 Magit
 - `SPC p v`
-  打开当前项目 vterm
+  打开当前项目 ghostel
 - `SPC p a`
   手动添加项目
 - `SPC p D`
   批量扫描目录下的项目
 - `SPC p x`
-  彻底移除一个项目及其相关状态（包含 Projectile、`project.el`、Treemacs、perspective、项目 buffer/vterm）
+  彻底移除一个项目及其相关状态（包含 Projectile、`project.el`、Treemacs、perspective、项目 buffer/ghostel）
 - `SPC p l`
   查看当前项目 project-local overrides（来自 `my/project-local-overrides` 全局配置）
 - `SPC p L`
@@ -1021,7 +1021,7 @@ GUI frame 的两侧 fringe 分工如下：
 - `M-O`
   交换当前窗口与目标窗口
 - `M-\``
-  `vterm-toggle`
+  `ghostel-toggle`
 - `H-\`` / `C-\``
   `popper-toggle`
 - `C-M-\``
@@ -1033,13 +1033,55 @@ GUI frame 的两侧 fringe 分工如下：
 `emacsclient` 调用 `my/global-mx`,在鼠标所在屏幕上弹出一个独立的
 minibuffer frame,共享当前会话的补全和历史。
 
-- 选中命令:弹窗消失,命令在原来的 Emacs frame 里执行,Emacs 留在前台。
+- 选中命令:弹窗消失,命令在原来的 Emacs frame 里执行。Emacs 在后台时,只有命令要读
+  minibuffer 或改变了那个 frame 显示的内容,主窗口才会被叫出来;否则保持在后台。
 - `C-g` 取消:弹窗消失,键盘还给呼出前的应用。
-- 弹窗还开着时再次呼出只会重新聚焦,不会开第二个。
+- 弹窗还开着时再按一次 M-x(或再次呼出)就关掉它。
+- 它是唯一的 M-x:Emacs 里的 `M-x` 也被重映射到这个弹窗(`my/global-mx`),
+  前缀参数照常传给选中的命令。终端里的 Emacs 没有独立 frame,仍用普通 minibuffer。
 
-依赖:Emacs server(`lisp/init-server.el` 启动本地 socket)和 yabai 里标题为
-`emacs-popup` 的浮动规则。快捷键在 Raycast 里给 `Emacs M-x` 这条命令录制;
+依赖:Emacs server(`lisp/init-server.el` 启动本地 socket)。yabai 对整个 Emacs
+是 `manage=off`,所有 frame 都自己决定位置和大小。快捷键在 Raycast 里给 `Emacs M-x` 这条命令录制;
 脚本目录要先在 Raycast 的 Script Commands 设置里添加一次。
+
+### Emacs 作为后台应用
+
+Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
+`bin/emacs-app`,菜单栏图标和 Raycast 脚本都只是调用它:
+
+- `bin/emacs-app start --background`
+  启动并留在后台;Emacs 已经在运行时什么都不做
+- `bin/emacs-app show` / `hide` / `toggle`
+  叫到前台 / 送回后台(`my/background-show`、`my/background-hide`)
+- `bin/emacs-app mx`
+  全局 M-x
+- `bin/emacs-app terminal`
+  新开一个 Ghostel 终端,每次都是新实例,单独占一个居中的浮动 frame;在 M-x(包括全局 M-x)里是
+  `my/ghostel-open-new`
+- `bin/emacs-app status`
+  `visible` / `background` / `busy`(在运行但没应答,比如正在启动或等你回答提问)/ `stopped`
+- `bin/emacs-app quit`
+  先把 Emacs 叫到前台再退出,保证它的确认提问看得见
+- `bin/emacs-app install` / `uninstall`
+  编译原生部分并安装 / 移除两个登录 LaunchAgent:
+  `local.emacs.background`(登录时后台启动)和 `local.emacs.menubar`(菜单栏图标)
+
+后台是 frame 不可见,不是应用隐藏,所以全局 M-x 弹出时不会把编辑 frame 一起带出来。
+
+关掉最后一个可见 frame(`delete-frame`、`:q`、点关闭按钮)不会报错也不会退出 Emacs,
+而是把它送回后台。真正退出用 `bin/emacs-app quit` 或菜单栏的 Quit Emacs。
+
+Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复为普通应用,Dock
+图标、Cmd-Tab 和顶部主菜单都回来(macOS 把这三样绑在一起,不能只去掉 Dock 图标)。
+由 `my/background-hide-dock-icon` 控制,靠 `tools/macos-background/window.m`
+编译出的动态模块实现;没有编译时 Dock 图标始终显示。
+
+同一个模块给每个顶层 frame 的整条顶边加了拖动条(默认高 12 像素,
+`my/frame-drag-handle-height`)。平时看不见,鼠标移上去会出现一个小横条并变成手形,
+按住就能拖动无标题栏的 frame。
+
+`my/ghostel-open-new` 开的浮动终端在 shell 退出时会连 buffer 和 frame 一起关掉;
+主窗口里的终端不受影响。
 
 ### 后台任务指示器
 
@@ -1356,7 +1398,7 @@ agent-shell 自己写引用的格式），每个文件再附一个 `resource_lin
 优先；本项目上一次选的会话若仍在运行则排在第一位并预选，直接 `RET` 即重复选择。
 历史会话不会出现在发送菜单中；需要先在 agent-shell 输入 `/resume` 恢复会话。
 菜单最底下的 `Copy prompt to clipboard` 把同一段提问和文件行号引用复制到系统
-剪贴板，可直接粘贴到 vterm 里的 agent；即使没有打开 ACP 会话也可以选。
+剪贴板，可直接粘贴到 ghostel 里的 agent；即使没有打开 ACP 会话也可以选。
 这项操作不会切换会话或清空已选的 context。
 想恢复“静默复用上次会话、`C-u` 才重选”，把 `noema-context-always-ask-session`
 设为 nil。会话还在初始化就先排队；正在回答时走 agent-shell 自己的

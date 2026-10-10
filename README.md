@@ -16,13 +16,14 @@ This configuration is designed to solve a concrete set of problems:
 ## Core Capabilities
 
 - Project-first workflow
-  `projectile`, `perspective`, `transient`, Treemacs, `show-imenu`, and popup `vterm` are composed into a workspace-oriented project surface.
+  `projectile`, `perspective`, `transient`, Treemacs, `show-imenu`, and popup `ghostel` are composed into a workspace-oriented project surface.
 - Programming and debugging
   `lsp-mode` is the single language-server client, with target-aware automatic startup and first-class C/C++, Python, and Java/JDTLS routes. Completion, visible-region diagnostics/CodeLens/inlay hints, semantic Treemacs outlines, build/test, debugging, tree-sitter, snippets, code navigation, and an on-demand SQL/database client are already wired together.
 - Org and research writing
   Agenda, capture, AUCTeX, Jupyter, citations, and PDF Tools workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals
-  Logical `/fs` targets keep file identity stable while capability routing selects native, TRAMP, or tramp-rpc links. PATH/environment state is isolated per target and workspace; `my/vterm-ssh` remains the interactive terminal entry point.
+  Logical `/fs` targets keep file identity stable while capability routing selects native, TRAMP, or tramp-rpc links. PATH/environment state is isolated per target and workspace; `my/ghostel-ssh` remains the interactive terminal entry point.
+  On macOS, `bin/setup-emacs-terminal` registers `~/Applications/Emacs Terminal.app` for shell commands. `bin/emacs-terminal -e PROGRAM ARG...` opens a Ghostel frame, and the Zsh configuration exports that launcher as `$TERMINAL`.
 - Browser and system integration
   `eww`, `xwidget-webkit`, Appine, and macOS `open` have explicit roles, with manual routing between them when needed.
 - AI integration

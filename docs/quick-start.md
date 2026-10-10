@@ -82,7 +82,7 @@ make up SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 - ELPA / NonGNU / Org / MELPA 普通包
 - `package-vc` 管理的 VC 包
-- 首次拉起时最容易炸的主题、ligature、`tramp-rpc`、`vterm`、`pdf-tools` 这类 Emacs 内部依赖
+- 首次拉起时最容易炸的主题、ligature、`tramp-rpc`、`ghostel`、`pdf-tools` 这类 Emacs 内部依赖
 
 它不负责安装系统级依赖，例如 Homebrew / apt 层面的工具。
 
@@ -189,7 +189,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - `zsh`
 - `ssh`
 - `~/.ssh/config`
-  `my/vterm-ssh` 会优先读这里的 Host
+  `my/ghostel-ssh` 会优先读这里的 Host
 
 ## 5. 字体依赖
 
@@ -265,7 +265,7 @@ Claude/Codex 的兼容源码仍在 Noema `upstream/`，但不再绑定全局快�
 
 1. 主题和字体是否正常
 2. `C-x C-f` / `C-x b` / `C-s` 是否符合预期
-3. `M-x my/vterm-ssh` 是否能读到 SSH 主机
+3. `M-x my/ghostel-ssh` 是否能读到 SSH 主机
 4. `C-c C-'` 是否能打开 claude-code-ide 菜单（需要 claude CLI 已安装）
 5. `C-x g` 是否能打开 Magit
 

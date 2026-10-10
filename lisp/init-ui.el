@@ -520,9 +520,14 @@ through its normal insertion pipeline, before Chunlian is attached."
     (my/dashboard--center-lines start (point))))
 
 (defun my/dashboard--refresh-buffer-completely (buffer)
-  "Rebuild Dashboard BUFFER, then attach Chunlian to the finished contents."
-  (when (buffer-live-p buffer)
-    (with-current-buffer buffer
+  "Rebuild Dashboard BUFFER, then attach Chunlian to the finished contents.
+The rebuild runs in a window that already shows BUFFER, on any frame:
+`dashboard-refresh-buffer' switches the selected window to the Dashboard, so
+from elsewhere it would take over whatever the user is editing.  A Dashboard
+shown nowhere stays stale and is rebuilt when it is next entered."
+  (when-let* (((buffer-live-p buffer))
+              (window (get-buffer-window buffer t)))
+    (with-selected-window window
       (when (derived-mode-p 'dashboard-mode)
         ;; Do not let zero-width margin overlays collapse into `point-min'
         ;; while `dashboard-refresh-buffer' erases and rebuilds the buffer.

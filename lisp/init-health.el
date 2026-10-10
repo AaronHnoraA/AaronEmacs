@@ -56,8 +56,8 @@
 (defconst my/health-critical-libraries
   '((ligature . "ligature")
     (theme . "aaron-ui")
-    (vterm . "vterm")
-    (vterm-module . "vterm-module")
+    (ghostel . "ghostel")
+    (ghostel-module . "ghostel-module")
     (pdf-tools . "pdf-tools")
     (tramp-rpc . "tramp-rpc"))
   "Libraries that should be available after a healthy bootstrap.")

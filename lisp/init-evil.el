@@ -268,7 +268,7 @@ Emacs state keep their local behavior."
 				  gptel-mode))
     (evil-set-initial-state mode 'emacs))
   (add-to-list 'evil-buffer-regexps '("^\\*Appine Window\\*$" . nil))
-  (add-to-list 'evil-buffer-regexps '("^\\*vterm.*\\*$" . nil))
+  (add-to-list 'evil-buffer-regexps '("^\\*ghostel.*\\*$" . nil))
   (dolist (hook '(ibuffer-mode-hook
                   debugger-mode-hook
                   my/diagnostics-mode-hook
@@ -327,7 +327,7 @@ Emacs state keep their local behavior."
           (seq-remove
            (lambda (mode)
              (memq (if (consp mode) (car mode) mode)
-                   '(vterm eshell ibuffer dired xwidget)))
+                   '(ghostel eshell ibuffer dired xwidget)))
            evil-collection-mode-list)))
   :hook (evil-mode . evil-collection-init)
   :bind (([remap evil-show-marks] . evil-collection-consult-mark)
@@ -521,7 +521,8 @@ Emacs state keep their local behavior."
     "ps" 'my/project-ripgrep
     "pd" 'my/project-open-root
     "pm" 'my/project-magit-status
-    "pv" 'my/project-vterm
+    "pv" 'my/project-ghostel
+    "pG" 'ghostel-project
     "pa" 'my/project-add-known-project
     "pD" 'my/project-discover-projects-in-directory
     "pk" 'my/project-kill-buffers
@@ -555,15 +556,16 @@ Emacs state keep their local behavior."
     "oD" 'dirvish-fd
     "ob" 'browse-url
     "oa" 'my/appine-open-url
-    "oe" 'vterm-toggle
-    "oE" 'my/vterm-popup-cycle
-    "oF" 'my/vterm-toggle-fixed
+    "oe" 'ghostel-toggle
+    "og" 'ghostel
+    "oE" 'my/ghostel-popup-cycle
+    "oF" 'my/ghostel-toggle-fixed
     "oq" 'clutch-query-console
-    "ot" 'vterm-toggle
+    "ot" 'ghostel-toggle
     "oT" 'ansi-term
-    "ov" 'vterm
-    "oV" 'my/vterm-named
-    "oS" 'my/vterm-ssh
+    "ov" 'ghostel
+    "oV" 'my/ghostel-named
+    "oS" 'my/ghostel-ssh
     "ow" 'my/open-eww-url
     "oW" 'my/browser-open-search
     "ox" 'my/xwidget-open-url

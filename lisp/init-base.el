@@ -217,7 +217,7 @@ as a local one."
 
 ;; 可选：在一些模式禁用（终端、目录、帮助、仪表盘等）
 (dolist (hook '(term-mode-hook
-                vterm-mode-hook
+                ghostel-mode-hook
                 eshell-mode-hook
                 shell-mode-hook
                 treemacs-mode-hook

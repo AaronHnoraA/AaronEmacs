@@ -16,7 +16,7 @@
 (declare-function my/project-run-dispatch "init-project-run" ())
 (declare-function my/test-dispatch "init-test" ())
 (declare-function my/debug-dispatch "init-debug" ())
-(declare-function vterm-toggle "init-vterm-popup" ())
+(declare-function ghostel-toggle "init-ghostel-popup" ())
 (autoload 'olivetti-mode "olivetti" nil t)
 
 (global-set-key (kbd "<f1>") #'help-command)
@@ -27,7 +27,7 @@
 (global-set-key (kbd "<f6>") #'my/test-dispatch)
 (global-set-key (kbd "<f7>") #'my/debug-dispatch)
 (global-set-key (kbd "<f8>") #'olivetti-mode)
-(global-set-key (kbd "<f10>") #'vterm-toggle)
+(global-set-key (kbd "<f10>") #'ghostel-toggle)
 ;; F11 intentionally left alone.
 
 (provide 'init-function-keys)

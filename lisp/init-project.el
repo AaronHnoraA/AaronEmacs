@@ -709,17 +709,17 @@ RG-UNAVAILABLE records a previous probe by another search entry point."
     (magit-status-setup-buffer magit-root)
     (my/project-activate project-root t)))
 
-(defun my/project-vterm (project-root)
-  "Open or switch to a dedicated VTerm for PROJECT-ROOT."
-  (interactive (list (my/project-read-target-root "VTerm project: ")))
+(defun my/project-ghostel (project-root)
+  "Open or switch to a dedicated Ghostel for PROJECT-ROOT."
+  (interactive (list (my/project-read-target-root "Ghostel project: ")))
   (let* ((project-root (my/project-normalize-root project-root))
-         (buffer-name (format "*vterm:%s*" (my/project-perspective-name project-root)))
+         (buffer-name (format "*ghostel:%s*" (my/project-perspective-name project-root)))
          (default-directory project-root))
     (when (fboundp 'my/direnv-update-environment-maybe)
       (my/direnv-update-environment-maybe project-root))
     (if (get-buffer buffer-name)
         (pop-to-buffer buffer-name)
-      (vterm buffer-name))
+      (pop-to-buffer (my/ghostel-create-hidden buffer-name)))
     (my/project-activate project-root t)))
 
 (defun my/project-kill-buffers (project-root)
@@ -1749,7 +1749,7 @@ Returns the number of killed buffers."
                        (or (my/project-path-inside-root-p buffer-file-name project-root)
                            (my/project-path-inside-root-p default-directory project-root)
                            (equal (buffer-name)
-                                  (format "*vterm:%s*" project-label)))))
+                                  (format "*ghostel:%s*" project-label)))))
                    (buffer-list)))
          (killed 0))
     (dolist (buffer (append (delq (current-buffer) buffers)
@@ -1923,7 +1923,7 @@ that extra stat is only paid for a marker that actually matched."
   (define-key projectile-command-map (kbd "g") #'my/project-ripgrep)
   (define-key projectile-command-map (kbd "d") #'my/project-open-root)
   (define-key projectile-command-map (kbd "m") #'my/project-magit-status)
-  (define-key projectile-command-map (kbd "v") #'my/project-vterm)
+  (define-key projectile-command-map (kbd "v") #'my/project-ghostel)
   (setq projectile-mode-line "Projectile"
         projectile-dynamic-mode-line nil
         projectile-track-known-projects-automatically nil)
@@ -1970,7 +1970,7 @@ that extra stat is only paid for a marker that actually matched."
       ("g" "magit" my/project-magit-status)]
      ["Open / Shell"
       ("d" "open root" my/project-open-root)
-      ("v" "project vterm" my/project-vterm)
+      ("v" "project ghostel" my/project-ghostel)
       ("j" "Jupyter SSH project" my/jupyter-ssh-open-project)]
      ["Manage"
       ("l" "leave active project" my/project-leave)

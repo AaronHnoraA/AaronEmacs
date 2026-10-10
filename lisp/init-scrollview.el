@@ -22,7 +22,7 @@
   "Major-mode families where scrollview is enabled automatically.")
 
 (defconst my/scrollview-auto-excluded-modes
-  '(special-mode comint-mode term-mode vterm-mode eshell-mode
+  '(special-mode comint-mode term-mode ghostel-mode eshell-mode
     image-mode doc-view-mode pdf-view-mode)
   "Major-mode families excluded from automatic scrollview activation.")
 

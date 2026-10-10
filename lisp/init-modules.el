@@ -105,6 +105,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-health)
 (require 'init-server)
 (require 'init-global-popup)
+(require 'init-background)
 (require 'init-md)
 (require 'init-aaronnote)
 (require 'init-md-roam)

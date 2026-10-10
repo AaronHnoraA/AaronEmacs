@@ -857,7 +857,7 @@ channel，并在关闭时按生命周期释放资源：
 (remote-terminal-open workspace)
 (remote-terminal-command workspace "default")
 (remote-terminal-adopt workspace frontend-buffer
-                       :metadata '(:frontend vterm))
+                       :metadata '(:frontend ghostel))
 (remote-terminal-restart disconnected-terminal)
 ```
 
@@ -868,8 +868,8 @@ target-scoped service 在强制恢复时原位替换 handle 并保留 instance i
 引用计数；多个 workspace 不会各自留下一个已停止的旧 instance。
 
 `remote-terminal-open` 提供内建 comint frontend；`remote-terminal-adopt` 让
-vterm 等 native frontend 保留自己的 module、filter、sentinel 与 UI，同时把
-process/buffer teardown 登记到 workspace。配置层的 popup vterm 已走这条边界：
+Ghostel 保留自己的 module、filter、sentinel 与 UI，同时把
+process/buffer teardown 登记到 workspace。配置层的 popup Ghostel 已走这条边界：
 在任意 `/fs:TARGET:/path` buffer 中按 `C-c e`，会打开或复用同一 workspace 的
 terminal，且不同 target/workspace 的 popup 池不会串线。本地也是
 `/fs:local:` 的同一流程。
@@ -884,25 +884,18 @@ workspace task 仍优先复用所属 workspace 的进程路线。可运行
 配合 `REMOTE_TERMINAL_E2E_FAULT=rpc` 会仅终止测试 Emacs 的 RPC 传输，验证
 disconnected 状态、工作区重连和手动重启后的终端输入输出；
 `REMOTE_TERMINAL_E2E_FAULT=pty` 则测试 PTY 进程异常退出。
-`REMOTE_VTERM_E2E_TARGET=host make remote-vterm-live-smoke` 会用真实 VTerm
+`REMOTE_GHOSTEL_E2E_TARGET=host make remote-ghostel-live-smoke` 会用真实 Ghostel
 frontend 验证所选路线、workspace 跟踪与目标目录中的 shell 输入输出。
 
-冷启动远端 vterm 只执行可缓存的 host facts 探测，用它解析远端账户真正的登录
-shell（例如 bash 或 zsh）；它不会同步等待完整的 Nix/direnv capsule。shell
-探测失败时按目标上的 `zsh` → `bash` → `sh` 顺序选择，最后才使用
-`/bin/sh`。routed vterm 会截断自身的 TRAMP shell 二次探测，防止正确结果又被
-覆盖。已有 capsule 会直接复用。本地 capsule 在 spawn 时传给进程，并在 vterm
-mode 完成初始化后投影回 terminal buffer，避免在 vterm 临时绑定
-`process-environment` 时制造 buffer-local 警告。
-交互式 Emacs 会在启动或打开 workspace 后的空闲时段，用客户端环境预加载
-VTerm 包；首次打开终端不用再同步支付 VTerm 包加载时间。可用
-`REMOTE_VTERM_E2E_TARGET=host REMOTE_VTERM_E2E_PREOPEN=1
-REMOTE_VTERM_E2E_PRELOAD=1 make remote-vterm-live-smoke` 分开测量预热后终端
+远端 shell 由 `remote-terminal-command` 按目标环境选择。已有 workspace 环境
+会直接复用；Ghostel 创建进程后由 `remote-terminal-adopt` 登记到对应 workspace。
+可用 `REMOTE_GHOSTEL_E2E_TARGET=host REMOTE_GHOSTEL_E2E_PREOPEN=1
+REMOTE_GHOSTEL_E2E_PRELOAD=1 make remote-ghostel-live-smoke` 分开测量预热后终端
 启动及首条命令响应。
 工作区关闭后，连接池会暂存会话以供快速重开；Emacs 退出时会显式关闭连接池及
 由它拥有的 SSH ControlMaster，不依赖 OpenSSH 的持久期自然到期。
-transport 断线时不会重放 shell 历史；vterm 保留为 disconnected buffer，显式
-执行 `remote-terminal-restart` 会按原目录和 frontend 新建一个 vterm。
+transport 断线时不会重放 shell 历史；Ghostel 保留为 disconnected buffer，显式
+执行 `remote-terminal-restart` 会按原目录和 frontend 新建一个 Ghostel buffer。
 
 transport failure 会把相关 workspace 标记为 disconnected，并按 1、2、4 秒进行
 自动恢复。任何显式登记了 recovery function 的资源都会在 session 恢复后重建；
