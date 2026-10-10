@@ -1027,6 +1027,20 @@ GUI frame 的两侧 fringe 分工如下：
 - `C-M-\``
   改变 popup 类型
 
+### 全局 M-x(在其他应用里呼出)
+
+`bin/raycast/emacs-mx.sh` 是一个 Raycast Script Command:它通过
+`emacsclient` 调用 `my/global-mx`,在鼠标所在屏幕上弹出一个独立的
+minibuffer frame,共享当前会话的补全和历史。
+
+- 选中命令:弹窗消失,命令在原来的 Emacs frame 里执行,Emacs 留在前台。
+- `C-g` 取消:弹窗消失,键盘还给呼出前的应用。
+- 弹窗还开着时再次呼出只会重新聚焦,不会开第二个。
+
+依赖:Emacs server(`lisp/init-server.el` 启动本地 socket)和 yabai 里标题为
+`emacs-popup` 的浮动规则。快捷键在 Raycast 里给 `Emacs M-x` 这条命令录制;
+脚本目录要先在 Raycast 的 Script Commands 设置里添加一次。
+
 ### 后台任务指示器
 
 Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 24×16 XPM 像素图)。它**一直在**,
