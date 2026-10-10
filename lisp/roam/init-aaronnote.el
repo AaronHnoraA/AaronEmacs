@@ -23,6 +23,7 @@
 (require 'init-aaronnote-jupyter-debug)
 (require 'init-aaronnote-jupyter-files)
 
+(declare-function my/background-make-frame "init-background" (&optional parameters))
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
 (declare-function my/noema--apple-gateway "init-aaronnote-agenda-apple" (body client))
 (declare-function my/noema--apple-start "init-aaronnote-agenda-apple" ())
@@ -2719,14 +2720,31 @@ as the placeholder its Noema pane will replace."
            buffer-file-name)))
 
 (defun my/noema--split-window (&optional direction)
-  "Create and select the window for an Noema split."
+  "Create and select the window for an Noema split.
+DIRECTION `frame' puts the split in a frame of its own.  That frame starts
+on a neutral buffer: created from the page, it would show and resize the
+page's own xwidget."
   (let* ((direction (or direction my/noema--split-direction
                         (if (>= (window-total-width) 120) 'right 'below)))
-         (window (if (eq direction 'below)
-                     (split-window-below)
-                   (split-window-right))))
+         (window (pcase direction
+                   ('below (split-window-below))
+                   ('frame
+                    (let ((frame (if (fboundp 'my/background-make-frame)
+                                     (my/background-make-frame)
+                                   (with-current-buffer
+                                       (get-scratch-buffer-create)
+                                     (make-frame)))))
+                      (select-frame-set-input-focus frame)
+                      (frame-selected-window frame)))
+                   (_ (split-window-right)))))
     (select-window window)
     window))
+
+(defun my/noema--discard-split-window (window)
+  "Remove WINDOW, a split that failed to open, with its frame if it has one."
+  (if (eq window (frame-root-window (window-frame window)))
+      (delete-frame (window-frame window) t)
+    (delete-window window)))
 
 ;;;###autoload
 (defun my/noema-open-current-note-split (&optional target-file origin-window extra-params)
@@ -2745,7 +2763,10 @@ carry optional initial anchor coordinates."
     (let* ((file (my/noema--canonical-file file))
            (source-window (if (window-live-p origin-window)
                               origin-window (selected-window)))
-           (source-buffer (window-buffer source-window)))
+           (source-buffer (window-buffer source-window))
+           ;; Captured: the server callback may run after the caller's
+           ;; binding is gone.
+           (direction my/noema--split-direction))
       (my/noema--ensure-server
        (lambda ()
          (when (and (window-live-p source-window)
@@ -2760,7 +2781,7 @@ carry optional initial anchor coordinates."
                                       (file-truename file) ordinal))
                       (url (my/noema--app-url file client extra-params))
                       (success nil))
-                 (setq target-window (my/noema--split-window))
+                 (setq target-window (my/noema--split-window direction))
                  (unwind-protect
                      (let ((buffer (my/xwidget-open-url
                                     url :id client :display 'current
@@ -2794,7 +2815,7 @@ carry optional initial anchor coordinates."
                    (unless success
                      (when (and (window-live-p target-window)
                                 (not (eq target-window source-window)))
-                       (delete-window target-window))))))
+                       (my/noema--discard-split-window target-window))))))
              (when (and activate (window-live-p target-window))
                (select-window target-window)))))))))
 
@@ -2810,6 +2831,13 @@ carry optional initial anchor coordinates."
   "Open the current note in a fresh Noema pane below."
   (interactive)
   (let ((my/noema--split-direction 'below))
+    (my/noema-open-current-note-split)))
+
+;;;###autoload
+(defun my/noema-open-current-note-split-frame ()
+  "Open the current note in a fresh Noema pane in a new frame."
+  (interactive)
+  (let ((my/noema--split-direction 'frame))
     (my/noema-open-current-note-split)))
 
 ;;;###autoload
@@ -3740,6 +3768,7 @@ failure while it is still going."
      ["Noema: Open editable split" my/noema-open-current-note-split t]
      ["Noema: Split right" my/noema-open-current-note-split-right t]
      ["Noema: Split below" my/noema-open-current-note-split-below t]
+     ["Noema: Split to new frame" my/noema-open-current-note-split-frame t]
      ["Noema: Wiki home" my/noema-wiki-home t]
      ["Noema: Workspace graph" my/noema-workspace-graph t]
      ["Noema: Focus editor" my/noema-focus t]

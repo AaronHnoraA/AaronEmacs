@@ -2,9 +2,12 @@
 
 ;;; Commentary:
 ;; Emacs keeps running with no visible frame and comes forward on demand.
-;; `bin/emacs-app' and the menu bar item drive these commands through
-;; `emacsclient'.  Hiding is frame invisibility, not application hiding, so
-;; that `my/global-mx' can raise its popup without the editing frames.
+;; `bin/emacs-app' and the Raycast extension drive these commands through
+;; `emacsclient'.  Hiding is frame invisibility, not
+;; application hiding, so one new frame can appear without the others.
+;;
+;; The launcher offers a short whitelist, `my/background-actions', and can
+;; run nothing else.  M-x itself stays inside Emacs.
 ;;
 ;; A background Emacs also leaves the Dock and Cmd-Tab; it returns to both
 ;; when shown.  Undecorated frames get a drag strip along their top edge.
@@ -16,7 +19,6 @@
 (declare-function macos-window-set-accessory "ext:macos-window" (accessory))
 (declare-function macos-window-install-drag-handles "ext:macos-window" (height))
 (declare-function ns-hide-emacs "nsfns.m" (on))
-(defvar my/global-popup-frame-name)
 
 (defvar my/background-hide-dock-icon t
   "Whether a background Emacs leaves the Dock, given the window module.")
@@ -35,12 +37,30 @@ without one.")
   "Frames made invisible by `my/background-hide', most recently used first.")
 
 (defun my/background--editing-frames ()
-  "Return top-level frames other than the global popup."
-  (seq-remove (lambda (frame)
-                (or (frame-parent frame)
-                    (equal (frame-parameter frame 'name)
-                           (bound-and-true-p my/global-popup-frame-name))))
-              (frame-list)))
+  "Return the top-level frames."
+  (seq-remove #'frame-parent (frame-list)))
+
+(defun my/background-make-frame (&optional parameters)
+  "Create a frame with PARAMETERS that starts on a neutral buffer.
+`make-frame' shows the current buffer in the new frame.  When that buffer is
+an xwidget page, the page is resized to the new frame's window and the frame
+it was in is left showing it at the wrong size."
+  (with-current-buffer (or (get-buffer "*dashboard*")
+                           (get-scratch-buffer-create))
+    (make-frame parameters)))
+
+(defun my/frame-pointer-workarea ()
+  "Return the workarea (X Y WIDTH HEIGHT) of the monitor under the pointer."
+  (let* ((pointer (mouse-absolute-pixel-position))
+         (px (car pointer))
+         (py (cdr pointer)))
+    (or (seq-some
+         (lambda (monitor)
+           (pcase-let ((`(,x ,y ,w ,h) (alist-get 'geometry monitor)))
+             (and (<= x px) (< px (+ x w)) (<= y py) (< py (+ y h))
+                  (alist-get 'workarea monitor))))
+         (display-monitor-attributes-list))
+        (frame-monitor-workarea))))
 
 (defun my/background-status ()
   "Return \"visible\" when an editing frame is shown, else \"background\"."
@@ -150,6 +170,139 @@ FOREGROUND asserts that Emacs is being shown."
   "Give every top-level frame its drag strip."
   (when (and my/frame-drag-handle-height (my/background--window-module-p))
     (macos-window-install-drag-handles my/frame-drag-handle-height)))
+
+;;; Actions from outside Emacs
+
+(defvar my/background-actions
+  '(("Toggle Emacs" my/background-toggle)
+    ("New Terminal" my/ghostel-open-new)
+    ("New Frame" my/background-new-frame)
+    ("Open File" find-file "Path")
+    ("Find Note" my/noema-roam-find-note)
+    ("Wiki Home" my/noema-wiki-home)
+    ("Quit Emacs" my/background-quit))
+  "The Emacs actions offered outside Emacs, in the order shown.
+Each entry is (TITLE COMMAND) or (TITLE COMMAND PROMPT).  With PROMPT the
+launcher asks for one string and COMMAND is called with it; otherwise
+COMMAND runs as an interactive command.  Nothing outside this list can be
+run from the launcher.")
+
+(defun my/background--argument (encoded)
+  "Decode ENCODED, a base64 UTF-8 string passed by `bin/emacs-app'."
+  (decode-coding-string (base64-decode-string encoded) 'utf-8))
+
+(defun my/background--json (value)
+  "Return VALUE as base64 JSON; a printed Lisp string is not a safe transport."
+  (base64-encode-string (json-serialize value) t))
+
+(defun my/background-actions ()
+  "Return base64 JSON for `my/background-actions'.
+Each entry has `id', `title' and `prompt' (empty when it takes no argument)."
+  (let ((index -1))
+    (my/background--json
+     (vconcat
+      (mapcar (lambda (action)
+                `((id . ,(number-to-string (setq index (1+ index))))
+                  (title . ,(car action))
+                  (prompt . ,(or (nth 2 action) ""))))
+              my/background-actions)))))
+
+(defun my/background-new-frame ()
+  "Open a new frame and give it the keyboard."
+  (interactive)
+  (my/background--focus (my/background-make-frame)))
+
+(defun my/background--act (action argument)
+  "Run ACTION, an entry of `my/background-actions', with string ARGUMENT.
+Emacs comes forward only when the action turns out to need it: it reads from
+the minibuffer or changes what the selected frame shows.  An action that
+opens its own frame shows just that frame."
+  (let* ((command (nth 1 action))
+         (origin (selected-frame))
+         (buffer (window-buffer (frame-selected-window origin)))
+         (reveal #'my/background-show))
+    (unwind-protect
+        (progn
+          (add-hook 'minibuffer-setup-hook reveal)
+          (if (nth 2 action)
+              (funcall command argument)
+            (setq this-command command
+                  real-this-command command)
+            (command-execute command 'record)))
+      (remove-hook 'minibuffer-setup-hook reveal))
+    (when (and (frame-live-p origin)
+               (not (eq buffer (window-buffer (frame-selected-window origin)))))
+      (funcall reveal))))
+
+(defun my/background-act (id argument)
+  "Run the action numbered by the base64 ID with the base64 ARGUMENT.
+Meant for `emacsclient --eval': the action is deferred so the client returns
+at once."
+  (let ((action (nth (string-to-number (my/background--argument id))
+                     my/background-actions)))
+    (unless action
+      (error "No such action"))
+    (run-at-time 0 nil #'my/background--act action
+                 (my/background--argument argument)))
+  nil)
+
+;;; Frames from outside Emacs
+
+(defun my/background--frame-id (frame)
+  "Return the string that names FRAME to `bin/emacs-app'."
+  (format "%s" (frame-parameter frame 'window-id)))
+
+(defun my/background-frames ()
+  "Return base64 JSON describing the top-level frames, selected one first.
+Each entry has `id', `title', `buffers' and `visible'."
+  (my/background--json
+   (vconcat
+    (mapcar
+     (lambda (frame)
+        (let ((buffers (mapcar (lambda (window)
+                                 (buffer-name (window-buffer window)))
+                               (window-list frame 'never))))
+          `((id . ,(my/background--frame-id frame))
+            (title . ,(buffer-name
+                       (window-buffer (frame-selected-window frame))))
+            (buffers . ,(string-join (seq-uniq buffers) ", "))
+            (visible . ,(if (frame-visible-p frame) t :false)))))
+     (my/background--editing-frames)))))
+
+(defun my/background--frame-act (action id)
+  "Apply ACTION, a string, to the frame named ID."
+  (let ((frame (seq-find (lambda (frame)
+                           (equal id (my/background--frame-id frame)))
+                         (my/background--editing-frames))))
+    (pcase action
+      ("new"
+       (my/background-new-frame))
+      ((guard (not frame)) nil)
+      ("focus"
+       (setq my/background--frames (delq frame my/background--frames))
+       (make-frame-visible frame)
+       (my/background-apply-dock-policy t)
+       (run-at-time 0.15 nil #'my/background--focus frame))
+      ("hide"
+       (if (my/background--sole-visible-p frame)
+           (my/background-hide)
+         (when (frame-visible-p frame)
+           (push frame my/background--frames)
+           (make-frame-invisible frame t))))
+      ("close"
+       ;; The last frame cannot go; closing it sends Emacs to the background.
+       (if (cdr (my/background--editing-frames))
+           (delete-frame frame t)
+         (my/background-hide))))))
+
+(defun my/background-frame-act (action id)
+  "Apply the base64 ACTION to the frame with the base64 ID.
+ACTION is new, focus, hide or close.  Deferred, so the client returns at
+once."
+  (run-at-time 0 nil #'my/background--frame-act
+               (my/background--argument action)
+               (my/background--argument id))
+  nil)
 
 ;; `make-frame' puts Emacs back in the Dock, and a deleted frame may have been
 ;; the last visible one, so the window state is applied again on both.

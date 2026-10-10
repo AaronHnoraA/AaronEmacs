@@ -1,0 +1,39 @@
+{
+  "$schema": "https://www.raycast.com/schemas/extension.json",
+  "name": "emacs",
+  "title": "Emacs",
+  "description": "One entry to a background Emacs: its whitelisted actions and its frames.",
+  "icon": "icon.png",
+  "author": "aaron",
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "emacs",
+      "title": "Emacs",
+      "description": "Run a whitelisted Emacs action or manage its frames.",
+      "mode": "view"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "emacsApp",
+      "title": "emacs-app",
+      "description": "Path to the emacs-app script that talks to Emacs.",
+      "type": "textfield",
+      "default": "~/.config/emacs/bin/emacs-app",
+      "required": false
+    }
+  ],
+  "dependencies": {
+    "@raycast/api": "^1.80.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.0.0",
+    "typescript": "^5.5.0"
+  },
+  "scripts": {
+    "build": "ray build -e dist",
+    "dev": "ray develop"
+  }
+}

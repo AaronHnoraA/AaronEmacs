@@ -186,18 +186,23 @@ This config already has maintenance and workflow entry points. Reuse them:
   Org performance.  In the watch buffer, `y` copies the full current report.
 - Background application: `bin/emacs-app` is the single entry point for
   running Emacs as a long-lived background app on macOS (start, show, hide,
-  global M-x, status, quit, login agents).  The menu bar item and the Raycast
-  script only call it.  `lisp/init-background.el` owns visibility, the Dock
-  policy and frame drag strips, `lisp/init-global-popup.el` the popup frame; native sources live in
-  `tools/macos-background/` and build into `var/macos-background/`.  Background
-  means invisible frames, not a hidden application.  Only a background Emacs
-  leaves the Dock: macOS ties the Dock icon, Cmd-Tab and the main menu
-  together, so a visible Emacs stays a regular application.  `make-frame`
-  resets the policy, so it is reapplied from `after-make-frame-functions`.
-  Closing the only visible frame hides Emacs instead of erroring or quitting
-  (narrow advice on `delete-frame` and `handle-delete-frame`).  yabai
-  does not manage Emacs at all (`manage=off` for the application), so frames
-  place and size themselves.
+  status, quit, whitelisted actions, frame list and actions, login agent).
+  The Raycast extension (`tools/raycast-emacs`) is the only control surface
+  and only calls it; nothing else speaks `emacsclient`, and every call is
+  bounded by a timeout.  The extension has one command and names no Emacs
+  action itself: it shows `my/background-actions`, the whitelist in
+  `lisp/init-background.el`, and can run nothing outside it.  M-x stays
+  inside Emacs; do not bring back an external M-x or an Emacs popup frame.  `lisp/init-background.el` owns visibility, the Dock
+  policy and frame drag strips; native sources live in
+  `tools/macos-background/` and build into `var/macos-background/`.
+  Background means invisible frames, not a hidden application.  Only a
+  background Emacs leaves the Dock: macOS ties the Dock icon, Cmd-Tab and the
+  main menu together, so a visible Emacs stays a regular application.
+  `make-frame` resets the policy, so it is reapplied from
+  `after-make-frame-functions`.  Closing the only visible frame hides Emacs
+  instead of erroring or quitting (narrow advice on `delete-frame` and
+  `handle-delete-frame`).  yabai does not manage Emacs at all (`manage=off`
+  for the application), so frames place and size themselves.
 - Templates: the built-in `auto-insert` template layer in
   `lisp/init-auto-insert.el`; do not revive the old Doom/Yasnippet file-template
   path.

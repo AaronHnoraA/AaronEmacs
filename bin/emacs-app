@@ -3,12 +3,15 @@
 #
 #   start [--background]   launch Emacs; with --background keep it hidden
 #   show | hide | toggle   bring Emacs forward or send it to the background
-#   mx                     M-x in a floating frame, from any application
+#   actions                JSON for the whitelisted actions
+#   act ID [ARGUMENT]      run a whitelisted action
+#   frames                 JSON for the top-level frames
+#   frame ACTION [ID]      focus | hide | close a frame by ID, or new
 #   terminal               a new Ghostel terminal in its own frame, every time
 #   status                 visible | background | busy | stopped
 #   quit                   quit Emacs, showing it first for its questions
-#   build                  build the window module and menu bar item
-#   install | uninstall    manage the login LaunchAgents
+#   build                  build the window module
+#   install | uninstall    manage the login LaunchAgent
 
 set -u
 
@@ -18,10 +21,10 @@ CLIENT=$APP/Contents/MacOS/bin/emacsclient
 BUILD=$ROOT/var/macos-background
 SOURCE=$ROOT/tools/macos-background
 AGENTS=$HOME/Library/LaunchAgents
-LABELS=(local.emacs.background local.emacs.menubar)
+LABEL=local.emacs.background
 
-# Bounded: an Emacs waiting on a question never answers, and a caller such
-# as the menu bar item must not hang with it.
+# Bounded: an Emacs waiting on a question never answers, and a caller must
+# not hang with it.
 client() { "$CLIENT" --timeout=4 --eval "$1" 2>/dev/null; }
 
 # The GUI application only: batch and daemon processes never register here.
@@ -58,16 +61,22 @@ start() {
     fi
 }
 
-mx() {
-    # The application to hand the keyboard back to when the read is cancelled.
-    local front
-    front=$(/usr/bin/lsappinfo info -only bundleid "$(/usr/bin/lsappinfo front)" \
-                | /usr/bin/sed -nE 's/.*[bB]undle(ID|Identifier)"?="([^"]+)".*/\2/p' | head -n1)
-    [ "$front" = "org.gnu.Emacs" ] && front=""
-    if ! client "(my/global-mx \"$front\")" >/dev/null; then
-        echo "Emacs server is not running"
-        return 1
-    fi
+# Arguments reach Emacs as base64, so no input can break out of the form.
+encode() { printf '%s' "$1" | /usr/bin/base64 | tr -d '\n'; }
+
+# Emacs answers with base64 JSON; print the JSON.
+json() {
+    local reply
+    reply=$(client "$1") || return 1
+    printf '%s' "${reply//\"/}" | /usr/bin/base64 -D
+}
+
+act() {
+    client "(my/background-act \"$(encode "${1:?action id}")\" \"$(encode "${2:-}")\")" >/dev/null
+}
+
+frame() {
+    client "(my/background-frame-act \"$(encode "${1:?action}")\" \"$(encode "${2:-}")\")" >/dev/null
 }
 
 build() {
@@ -75,41 +84,28 @@ build() {
     /usr/bin/clang -fobjc-arc -shared -O2 -I "$APP/Contents/Resources/include" \
                    -framework AppKit -o "$BUILD/macos-window.dylib" \
                    "$SOURCE/window.m" || return 1
-    /usr/bin/swiftc -O -o "$BUILD/emacs-menubar" "$SOURCE/menubar.swift" || return 1
-}
-
-plist() {
-    local label=$1; shift
-    {
-        printf '<?xml version="1.0" encoding="UTF-8"?>\n'
-        printf '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-        printf '<plist version="1.0"><dict>\n'
-        printf '  <key>Label</key><string>%s</string>\n' "$label"
-        printf '  <key>RunAtLoad</key><true/>\n'
-        printf '  <key>ProgramArguments</key><array>\n'
-        printf '    <string>%s</string>\n' "$@"
-        printf '  </array>\n</dict></plist>\n'
-    } > "$AGENTS/$label.plist"
 }
 
 uninstall() {
-    local label
-    for label in "${LABELS[@]}"; do
-        /bin/launchctl bootout "gui/$(id -u)/$label" 2>/dev/null
-        rm -f "$AGENTS/$label.plist"
-    done
+    /bin/launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
+    rm -f "$AGENTS/$LABEL.plist"
 }
 
 install() {
     build || return 1
     uninstall
     mkdir -p "$AGENTS"
-    plist local.emacs.background "$ROOT/bin/emacs-app" start --background
-    plist local.emacs.menubar "$BUILD/emacs-menubar" "$ROOT/bin/emacs-app"
-    local label
-    for label in "${LABELS[@]}"; do
-        /bin/launchctl bootstrap "gui/$(id -u)" "$AGENTS/$label.plist" || return 1
-    done
+    {
+        printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+        printf '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        printf '<plist version="1.0"><dict>\n'
+        printf '  <key>Label</key><string>%s</string>\n' "$LABEL"
+        printf '  <key>RunAtLoad</key><true/>\n'
+        printf '  <key>ProgramArguments</key><array>\n'
+        printf '    <string>%s</string>\n' "$ROOT/bin/emacs-app" start --background
+        printf '  </array>\n</dict></plist>\n'
+    } > "$AGENTS/$LABEL.plist"
+    /bin/launchctl bootstrap "gui/$(id -u)" "$AGENTS/$LABEL.plist"
 }
 
 command=${1:-status}
@@ -119,12 +115,18 @@ case "$command" in
     show) client '(my/background-show)' >/dev/null || /usr/bin/open -a "$APP" ;;
     hide) client '(my/background-hide)' >/dev/null ;;
     toggle) client '(my/background-toggle)' >/dev/null || /usr/bin/open -a "$APP" ;;
-    mx) mx ;;
+    frames) json '(my/background-frames)' ;;
+    frame) frame "$@" ;;
+    actions) json '(my/background-actions)' ;;
+    act) act "$@" ;;
+    frames) json '(my/background-frames)' ;;
+    frame) frame "$@" ;;
+    run) client "(my/background-run-command \"$(encode "${1:?command name}")\")" >/dev/null ;;
     terminal) client '(progn (my/ghostel-open-new) nil)' >/dev/null ;;
     status) status ;;
     quit) client '(my/background-quit)' >/dev/null ;;
     build) build ;;
     install) install ;;
     uninstall) uninstall ;;
-    *) /usr/bin/sed -n '2,12p' "$0"; exit 2 ;;
+    *) /usr/bin/sed -n '2,15p' "$0"; exit 2 ;;
 esac

@@ -23,7 +23,9 @@
 (declare-function ghostel-yank "ghostel" (&optional arg))
 (declare-function ghostel-sync-theme "ghostel" ())
 
-(declare-function my/global-popup--workarea "init-global-popup" ())
+(declare-function my/frame-pointer-workarea "init-background" ())
+(declare-function my/background-make-frame "init-background" (&optional parameters))
+(defvar ghostel-buffer-name)
 (defvar ghostel-shell)
 (defvar ghostel-tramp-shells)
 (defvar ghostel-semi-char-mode-map)
@@ -192,6 +194,26 @@
     (let ((default-directory directory))
       (my/ghostel-create-hidden buffer-name))))
 
+(defun my/ghostel--directory-label ()
+  "Return a short name for `default-directory', for terminal buffer names."
+  (let ((directory (directory-file-name (expand-file-name default-directory))))
+    (if (equal directory (directory-file-name (expand-file-name "~")))
+        "~"
+      (file-name-nondirectory directory))))
+
+(defun my/ghostel--always-new-a (orig-fn &optional arg)
+  "Make `ghostel' start a new terminal named after its directory.
+Without this it switches to the one `*ghostel*' buffer.  A numeric ARG keeps
+its meaning and selects that numbered terminal."
+  (if (numberp arg)
+      (funcall orig-fn arg)
+    (let ((ghostel-buffer-name
+           (format "*ghostel:%s*" (my/ghostel--directory-label))))
+      (funcall orig-fn '(4)))))
+
+(with-eval-after-load 'ghostel
+  (advice-add 'ghostel :around #'my/ghostel--always-new-a))
+
 (defun my/ghostel-named (name)
   "Create or switch to a named Ghostel buffer."
   (interactive "sGhostel name: ")
@@ -201,35 +223,56 @@
          (my/ghostel-create-hidden name)))))
 
 (defun my/ghostel-open-external (&optional path command)
-  "Open a Ghostel terminal for PATH or COMMAND from macOS.
+  "Open a Ghostel terminal for PATH or COMMAND in a new Emacs frame.
 Directories become the terminal's working directory.  Files and commands run
-as programs in a terminal that keeps their output visible after exit."
-  (when (display-graphic-p)
-    (select-frame-set-input-focus (make-frame)))
-  (let* ((path (and path (expand-file-name path)))
+as programs in a terminal that keeps their output visible after exit.  A
+plain shell has nothing to keep: when it exits, its buffer is killed and the
+frame opened for it is closed."
+  (let* ((frame (and (display-graphic-p)
+                     (if (fboundp 'my/background-make-frame)
+                         (my/background-make-frame)
+                       (make-frame))))
+         (path (and path (expand-file-name path)))
+         (program (or command (and path (not (file-directory-p path)))))
          (directory (if path
                         (if (file-directory-p path) path (file-name-directory path))
                       (expand-file-name "~")))
          (default-directory (file-name-as-directory directory))
-         (buffer
-          (if command
-              (my/ghostel-wrap command :directory directory)
-            (if (and path (not (file-directory-p path)))
-              (my/ghostel-wrap
-               (if (file-executable-p path)
-                   (list path)
-                 (list "/bin/zsh" path))
-               :directory directory
-               :buffer-name (format "*ghostel:%s*" (file-name-nondirectory path)))
-              (let ((buffer (my/ghostel-create-hidden
-                             (generate-new-buffer-name "*ghostel:macOS*"))))
-                (pop-to-buffer buffer)
-                buffer)))))
+         buffer)
+    (when frame
+      (select-frame-set-input-focus frame))
+    (setq buffer
+          (cond
+           (command (my/ghostel-wrap command :directory directory))
+           (program
+            (my/ghostel-wrap
+             (if (file-executable-p path)
+                 (list path)
+               (list "/bin/zsh" path))
+             :directory directory
+             :buffer-name (format "*ghostel:%s*" (file-name-nondirectory path))))
+           (t
+            (let ((buffer (my/ghostel-create-hidden
+                           (generate-new-buffer-name "*ghostel:macOS*"))))
+              ;; Alone in the frame made for it; a split only without one.
+              (if frame
+                  (switch-to-buffer buffer)
+                (pop-to-buffer buffer))
+              buffer))))
     (with-current-buffer buffer
-      (setq-local ghostel-kill-buffer-on-exit nil))
-    (when (display-graphic-p)
-      (set-frame-parameter nil 'alpha 87)
-      (select-frame-set-input-focus (selected-frame)))
+      (setq-local ghostel-kill-buffer-on-exit (not program))
+      (when (and frame (not program))
+        (add-hook 'kill-buffer-hook
+                  (lambda ()
+                    ;; Only while the frame still holds just this terminal.
+                    (when (and (frame-live-p frame)
+                               (eq (frame-root-window frame)
+                                   (get-buffer-window (current-buffer) frame)))
+                      (delete-frame frame t)))
+                  nil t)))
+    (when frame
+      (set-frame-parameter frame 'alpha 87)
+      (select-frame-set-input-focus frame))
     buffer))
 
 (defvar my/ghostel-floating-frame-size '(110 . 32)
@@ -245,20 +288,11 @@ Exiting the shell kills the buffer and closes that frame."
          (window (get-buffer-window buffer frame)))
     (when window
       (delete-other-windows window))
-    ;; The frame exists for this terminal, so both go when the shell exits.
-    (with-current-buffer buffer
-      (setq-local ghostel-kill-buffer-on-exit t)
-      (add-hook 'kill-buffer-hook
-                (lambda ()
-                  (when (and (frame-live-p frame)
-                             (one-window-p t frame))
-                    (delete-frame frame t)))
-                nil t))
     (set-frame-size frame
                     (car my/ghostel-floating-frame-size)
                     (cdr my/ghostel-floating-frame-size))
-    (pcase-let ((`(,x ,y ,w ,h) (if (fboundp 'my/global-popup--workarea)
-                                    (my/global-popup--workarea)
+    (pcase-let ((`(,x ,y ,w ,h) (if (fboundp 'my/frame-pointer-workarea)
+                                    (my/frame-pointer-workarea)
                                   (frame-monitor-workarea frame))))
       (set-frame-position frame
                           (+ x (max 0 (/ (- w (frame-outer-width frame)) 2)))

@@ -260,6 +260,10 @@ Roam Node 共用。Tags 在面板中显示为 `#tag`，创建前按 runtime 规�
 一个空的嵌套 `summary` block，可直接在 Abstract
 或 Properties 中编辑；模板自带 meta 时也会自动补齐，不需要每个模板重复声明。
 
+Noema 页面顶栏的窗口菜单(布局图标)第一级里,`Noema: Split right` / `Split below` 下面有
+`Noema: Split to new frame`:和分屏一样为当前笔记开一个独立的可编辑 pane,只是放进一个新
+frame 里,原页面留在原处(`my/noema-open-current-note-split-frame`)。
+
 ### Noema Slides
 
 在 meta 中设置 `kind: slides` 后，Noema 默认进入 **Reveal** 展示视图。每个一级标题
@@ -1027,49 +1031,47 @@ GUI frame 的两侧 fringe 分工如下：
 - `C-M-\``
   改变 popup 类型
 
-### 全局 M-x(在其他应用里呼出)
+### 从其他应用里操作 Emacs(Raycast)
 
-`bin/raycast/emacs-mx.sh` 是一个 Raycast Script Command:它通过
-`emacsclient` 调用 `my/global-mx`,在鼠标所在屏幕上弹出一个独立的
-minibuffer frame,共享当前会话的补全和历史。
+Raycast 扩展 `tools/raycast-emacs` 只有一个入口 **Emacs**,热键在 Raycast 里录在它上面。
+打开后是一份白名单动作列表,回车执行;带参数的动作(比如 Open File)会再让你输入一行。
+最后一项 Frames 列出所有顶层 frame(含被隐藏的),可以聚焦、隐藏、关闭。Emacs 没在
+运行时,列表里只有 Start Emacs in Background。
 
-- 选中命令:弹窗消失,命令在原来的 Emacs frame 里执行。Emacs 在后台时,只有命令要读
-  minibuffer 或改变了那个 frame 显示的内容,主窗口才会被叫出来;否则保持在后台。
-- `C-g` 取消:弹窗消失,键盘还给呼出前的应用。
-- 弹窗还开着时再按一次 M-x(或再次呼出)就关掉它。
-- 它是唯一的 M-x:Emacs 里的 `M-x` 也被重映射到这个弹窗(`my/global-mx`),
-  前缀参数照常传给选中的命令。终端里的 Emacs 没有独立 frame,仍用普通 minibuffer。
+白名单是 `lisp/init-background.el` 里的 `my/background-actions`,每项是
+`(标题 命令)` 或 `(标题 命令 参数提示)`。改它不需要重新构建扩展,下次打开列表就生效;
+列表之外的命令从 Raycast 里执行不了。M-x 本身只在 Emacs 里用。
 
-依赖:Emacs server(`lisp/init-server.el` 启动本地 socket)。yabai 对整个 Emacs
-是 `manage=off`,所有 frame 都自己决定位置和大小。快捷键在 Raycast 里给 `Emacs M-x` 这条命令录制;
-脚本目录要先在 Raycast 的 Script Commands 设置里添加一次。
+动作在后台执行:只有它要读 minibuffer 或改变了主 frame 显示的内容时,Emacs 才会被叫到
+前台;自己开 frame 的动作(比如终端)只出现那一个 frame。
 
 ### Emacs 作为后台应用
 
 Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
-`bin/emacs-app`,菜单栏图标和 Raycast 脚本都只是调用它:
+`bin/emacs-app`,Raycast 扩展只是调用它:
 
 - `bin/emacs-app start --background`
   启动并留在后台;Emacs 已经在运行时什么都不做
 - `bin/emacs-app show` / `hide` / `toggle`
   叫到前台 / 送回后台(`my/background-show`、`my/background-hide`)
-- `bin/emacs-app mx`
-  全局 M-x
+- `bin/emacs-app actions` / `act ID [ARGUMENT]`
+  列出白名单动作,或按编号执行其中一项
 - `bin/emacs-app terminal`
-  新开一个 Ghostel 终端,每次都是新实例,单独占一个居中的浮动 frame;在 M-x(包括全局 M-x)里是
+  新开一个 Ghostel 终端,每次都是新实例,单独占一个居中的浮动 frame;在 M-x 里是
   `my/ghostel-open-new`
 - `bin/emacs-app status`
   `visible` / `background` / `busy`(在运行但没应答,比如正在启动或等你回答提问)/ `stopped`
 - `bin/emacs-app quit`
   先把 Emacs 叫到前台再退出,保证它的确认提问看得见
+- `bin/emacs-app frames` / `frame focus|hide|close ID` / `frame new`
+  列出顶层 frame,或对某一个操作
 - `bin/emacs-app install` / `uninstall`
-  编译原生部分并安装 / 移除两个登录 LaunchAgent:
-  `local.emacs.background`(登录时后台启动)和 `local.emacs.menubar`(菜单栏图标)
+  编译原生模块并安装 / 移除登录 LaunchAgent `local.emacs.background`(登录时后台启动)
 
-后台是 frame 不可见,不是应用隐藏,所以全局 M-x 弹出时不会把编辑 frame 一起带出来。
+后台是 frame 不可见,不是应用隐藏,所以新开一个 frame(比如终端)时不会把其他 frame 一起带出来。
 
 关掉最后一个可见 frame(`delete-frame`、`:q`、点关闭按钮)不会报错也不会退出 Emacs,
-而是把它送回后台。真正退出用 `bin/emacs-app quit` 或菜单栏的 Quit Emacs。
+而是把它送回后台。真正退出用 `bin/emacs-app quit`,或 Raycast 列表里的 Quit Emacs。
 
 Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复为普通应用,Dock
 图标、Cmd-Tab 和顶部主菜单都回来(macOS 把这三样绑在一起,不能只去掉 Dock 图标)。

@@ -23,7 +23,6 @@ This configuration is designed to solve a concrete set of problems:
   Agenda, capture, AUCTeX, Jupyter, citations, and PDF Tools workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals
   Logical `/fs` targets keep file identity stable while capability routing selects native, TRAMP, or tramp-rpc links. PATH/environment state is isolated per target and workspace; `my/ghostel-ssh` remains the interactive terminal entry point.
-  On macOS, `bin/setup-emacs-terminal` registers `~/Applications/Emacs Terminal.app` for shell commands. `bin/emacs-terminal -e PROGRAM ARG...` opens a Ghostel frame, and the Zsh configuration exports that launcher as `$TERMINAL`.
 - Browser and system integration
   `eww`, `xwidget-webkit`, Appine, and macOS `open` have explicit roles, with manual routing between them when needed.
 - AI integration
