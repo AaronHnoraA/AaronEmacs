@@ -17,6 +17,7 @@
   (require 'evil))
 
 (declare-function my/project-current-root "init-project")
+(declare-function my/background-make-frame "init-background" (&optional parameters))
 (declare-function bookmark-bmenu-list "bookmark")
 (declare-function bookmark-completing-read "bookmark" (prompt &optional default))
 (declare-function bookmark-delete "bookmark" (bookmark))
@@ -660,7 +661,9 @@ before letting it choose a useful previous buffer."
 (defun my/frame-new ()
   "Create a new Emacs frame."
   (interactive)
-  (select-frame (make-frame)))
+  (select-frame (if (fboundp 'my/background-make-frame)
+                    (my/background-make-frame)
+                  (make-frame))))
 
 (defun my/frame-kill ()
   "Delete the current frame, or quit Emacs if it's the last one."

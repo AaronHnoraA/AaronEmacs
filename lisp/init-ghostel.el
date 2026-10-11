@@ -222,6 +222,21 @@ its meaning and selects that numbered terminal."
      (or (get-buffer name)
          (my/ghostel-create-hidden name)))))
 
+(defun my/ghostel--delete-frame-terminal-h (frame)
+  "Kill the plain shell that FRAME was opened for.
+Without this, closing the frame leaves the buffer and its shell running with
+no window.  A terminal moved into another window is kept."
+  (let ((buffer (frame-parameter frame 'my/ghostel-terminal)))
+    (set-frame-parameter frame 'my/ghostel-terminal nil)
+    (when (and (buffer-live-p buffer)
+               (not (seq-some (lambda (window)
+                                (not (eq (window-frame window) frame)))
+                              (get-buffer-window-list buffer nil t))))
+      (let ((kill-buffer-query-functions nil))
+        (kill-buffer buffer)))))
+
+(add-hook 'delete-frame-functions #'my/ghostel--delete-frame-terminal-h)
+
 (defun my/ghostel-open-external (&optional path command)
   "Open a Ghostel terminal for PATH or COMMAND in a new Emacs frame.
 Directories become the terminal's working directory.  Files and commands run
@@ -262,12 +277,17 @@ frame opened for it is closed."
     (with-current-buffer buffer
       (setq-local ghostel-kill-buffer-on-exit (not program))
       (when (and frame (not program))
+        ;; The frame and its shell end together, whichever goes first.
+        (set-frame-parameter frame 'my/ghostel-terminal buffer)
         (add-hook 'kill-buffer-hook
                   (lambda ()
                     ;; Only while the frame still holds just this terminal.
                     (when (and (frame-live-p frame)
+                               (eq (frame-parameter frame 'my/ghostel-terminal)
+                                   (current-buffer))
                                (eq (frame-root-window frame)
                                    (get-buffer-window (current-buffer) frame)))
+                      (set-frame-parameter frame 'my/ghostel-terminal nil)
                       (delete-frame frame t)))
                   nil t)))
     (when frame

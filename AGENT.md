@@ -185,8 +185,9 @@ This config already has maintenance and workflow entry points. Reuse them:
   Prefer these APIs over asking for screenshots when investigating runtime or
   Org performance.  In the watch buffer, `y` copies the full current report.
 - Background application: `bin/emacs-app` is the single entry point for
-  running Emacs as a long-lived background app on macOS (start, show, hide,
-  status, quit, whitelisted actions, frame list and actions, login agent).
+  running Emacs as a long-lived background app on macOS (start, restart,
+  kill, show, hide, status, state, quit, whitelisted actions, frame list and
+  actions, login agent).
   The Raycast extension (`tools/raycast-emacs`) is the only control surface
   and only calls it; nothing else speaks `emacsclient`, and every call is
   bounded by a timeout.  The extension has one command and names no Emacs
@@ -201,8 +202,36 @@ This config already has maintenance and workflow entry points. Reuse them:
   `make-frame` resets the policy, so it is reapplied from
   `after-make-frame-functions`.  Closing the only visible frame hides Emacs
   instead of erroring or quitting (narrow advice on `delete-frame` and
-  `handle-delete-frame`).  yabai does not manage Emacs at all (`manage=off`
+  `handle-delete-frame`).  This Emacs is expected to run for weeks and to be
+  started, restarted and quit from Raycast.  The server answers before the
+  initial frame exists, so anything a launcher asks for at startup must wait
+  for `window-setup-hook` (`my/background-start-hidden`).  A frame opened for
+  one resource owns it: closing the frame ends the resource, hiding keeps it
+  (`my/ghostel--delete-frame-terminal-h`).  A long-lived helper that would
+  survive a crashed Emacs must watch its owner's pid, as the Noema web host
+  does through `NOEMA_HOST_OWNER_PID`; exit hooks alone do not run then.  yabai does not manage Emacs at all (`manage=off`
   for the application), so frames place and size themselves.
+- Noema from outside Emacs: the Raycast entry has a Noema section, `Find Note`
+  and `Noema Maintenance` (also installed as commands of their own, for a
+  hotkey), and they do not go through Emacs at all.  Finding a page is
+  therefore not in `my/background-actions`: an entry there would bring Emacs
+  forward to do what Raycast already shows.  They read
+  `var/aaronnote/host.json`, written by the running Noema host, and call its
+  loopback `/api` (`tools/raycast-emacs/src/backend.ts`): search is answered
+  by the Go kernel, maintenance (index refresh and rebuild, repository
+  checkpoint and sync) by the host's own services.  Raycast is then the whole
+  front end and no Emacs frame opens; only opening the chosen page goes
+  through `bin/emacs-app act`, looked up in the whitelist by the action that
+  takes a path.  Keep it that way round: Emacs control goes through
+  `bin/emacs-app`, Noema data and maintenance go to the Noema backend, and
+  neither is reimplemented in the extension.
+- Page search and references: one implementation, the Noema kernel's
+  (`site-lisp/noema/kernel/noema/wikisearch`).  `lisp/roam/init-noema-search.el`
+  sends the typed text and shows the answer through the completion style
+  `my/noema-search`, which neither filters nor sorts; do not complete over a
+  local page list, and do not put the answer through orderless or flex, which
+  drop what the kernel matched fuzzily.  Link text comes from the kernel too
+  (`my/noema-insert-reference`, `M-r` in a Noema pane).
 - Templates: the built-in `auto-insert` template layer in
   `lisp/init-auto-insert.el`; do not revive the old Doom/Yasnippet file-template
   path.
@@ -455,6 +484,18 @@ Noema Markdown panes:
   (`src/frame-key-relay.ts`), a mirror of the chord and prefix gates kept
   identical by `tests/frame-key-relay.test.ts`; a new srcdoc frame that can
   take focus must include it.
+- Pausing a pane releases its editor focus, and a click inside WebKit does not
+  select the Emacs window, so Emacs can believe a pane just clicked is in the
+  background.  The page refuses a `pause` while it holds the native keyboard
+  and Emacs has not announced taking it (`holdsInputAgainstHostPause`), and
+  reports `input-focus` instead.  Take the keyboard from a pane only through
+  `my/noema--release-xwidget-input-buffer`, which makes that announcement.
+- The page's Vim layer (`site-lisp/noema/aaronnote/vim-lite.ts`) takes native
+  Vim as its reference, checked against results recorded from Neovim
+  (`tests/vim-native-parity.test.ts`); `site-lisp/noema/docs/vim.md` lists the
+  few deliberate differences.  Change behaviour by re-recording, not from
+  memory.  Outside Insert a key an input method has taken is dropped on every
+  path, the xwidget guard included: it is neither a command nor text.
 - Commands bound to keyboard keys use `(interactive (list last-command-event))`,
   never `(interactive "e")`, which rejects keyboard events.
 - Code that visits a file only to read, index or reference it (Treemacs tags,

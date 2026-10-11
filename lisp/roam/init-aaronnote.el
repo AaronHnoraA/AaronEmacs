@@ -879,6 +879,9 @@ reconnect without a reload and without losing their in-memory editor state."
             (append
              (list
             "AARONNOTE_HOST_MODE=emacs"
+            ;; The host watches this pid and exits with it, so a crashed or
+            ;; force-quit Emacs does not leave the host and its kernels behind.
+            (format "NOEMA_HOST_OWNER_PID=%d" (emacs-pid))
             (format "NOEMA_AGENDA_CAPTURE_TEMPLATES=%s"
                     (json-encode (vconcat my/noema-agenda-capture-templates)))
             (format "NOEMA_AGENDA_EXCLUDE=%s"

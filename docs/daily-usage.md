@@ -1034,9 +1034,22 @@ GUI frame 的两侧 fringe 分工如下：
 ### 从其他应用里操作 Emacs(Raycast)
 
 Raycast 扩展 `tools/raycast-emacs` 只有一个入口 **Emacs**,热键在 Raycast 里录在它上面。
-打开后是一份白名单动作列表,回车执行;带参数的动作(比如 Open File)会再让你输入一行。
-最后一项 Frames 列出所有顶层 frame(含被隐藏的),可以聚焦、隐藏、关闭。Emacs 没在
-运行时,列表里只有 Start Emacs in Background。
+它是这份 Emacs 的日常控制面,启动、重启、退出都从这里做。打开后一个列表分三组,搜索框
+同时过滤三组:
+
+- **Actions** 白名单动作,回车执行;带参数的动作(比如 Open File)会再让你输入一行。
+- **Frames** 所有顶层 frame,隐藏的带 `hidden` 标记。回车聚焦(隐藏的会先显示出来),
+  `Cmd-H` 隐藏,`Cmd-O` 只留这一个(其余隐藏),`Ctrl-X` 关闭,`Ctrl-Shift-X` 关闭其余;
+  `Cmd-N` 新建,`Cmd-Shift-S` / `Cmd-Shift-H` 全部显示 / 全部隐藏。
+- **Emacs** 一行状态:可见 / 后台 / 没应答 / 没运行,以及运行时长、常驻内存、buffer 数、
+  子进程数。回车显示或隐藏;没运行时回车在后台启动(第二个动作是启动并显示)。任何一行上
+  `Cmd-R` 刷新,`Cmd-Shift-R` 重启;Force Quit Emacs 用于没应答的 Emacs,会先确认。
+
+执行动作、聚焦 frame、启动或重启之后,Raycast 会关闭并回到根搜索,下次打开不会停在这个
+列表里;只有隐藏和关闭 frame 会留在列表里,方便连续整理。
+
+在 Emacs 里,`SPC F h`(`my/frame-hide`)只隐藏当前 frame,不删除它,其他 frame 不受影响;
+白名单里的 Hide Frame 是同一个命令。隐藏的是最后一个可见 frame 时,Emacs 整个退到后台。
 
 白名单是 `lisp/init-background.el` 里的 `my/background-actions`,每项是
 `(标题 命令)` 或 `(标题 命令 参数提示)`。改它不需要重新构建扩展,下次打开列表就生效;
@@ -1051,7 +1064,14 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
 `bin/emacs-app`,Raycast 扩展只是调用它:
 
 - `bin/emacs-app start --background`
-  启动并留在后台;Emacs 已经在运行时什么都不做
+  启动并留在后台;Emacs 已经在运行时什么都不做。隐藏在启动完成后才执行
+  (`my/background-start-hidden`),不会出现"刚藏起来又弹出来"
+- `bin/emacs-app restart` / `kill`
+  退出再启动,保持原来的可见或后台状态;Emacs 在等你回答提问时会报错而不是一直等。
+  `kill` 给没应答的 Emacs 用:先 SIGTERM(仍会跑退出钩子),20 秒后才 SIGKILL
+- `bin/emacs-app state`
+  一次返回状态、运行时长、内存、白名单动作和 frame 列表的 JSON;Emacs 没应答或没运行时
+  也返回 `{"status":"busy"}` / `{"status":"stopped"}`
 - `bin/emacs-app show` / `hide` / `toggle`
   叫到前台 / 送回后台(`my/background-show`、`my/background-hide`)
 - `bin/emacs-app actions` / `act ID [ARGUMENT]`
@@ -1063,10 +1083,19 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
   `visible` / `background` / `busy`(在运行但没应答,比如正在启动或等你回答提问)/ `stopped`
 - `bin/emacs-app quit`
   先把 Emacs 叫到前台再退出,保证它的确认提问看得见
-- `bin/emacs-app frames` / `frame focus|hide|close ID` / `frame new`
-  列出顶层 frame,或对某一个操作
+- `bin/emacs-app frames` / `frame focus|hide|hide-others|close|close-others ID` /
+  `frame new|show-all|hide-all`
+  列出顶层 frame,对某一个操作,或对全部操作
 - `bin/emacs-app install` / `uninstall`
   编译原生模块并安装 / 移除登录 LaunchAgent `local.emacs.background`(登录时后台启动)
+
+`bin/emacs-app` 启动前会清掉 `LC_*` 并保证 `LANG` 是 UTF-8:Emacs 和它启动的进程继承
+启动器的环境,而 Raycast 给的 `LC_ALL` 不是合法的 POSIX locale,会让 `pbpaste` 这类工具
+退回 C locale,把中文粘贴成一串 `?`。
+
+新 frame(启动时的第一个、Raycast 的 New Frame、`SPC F n`)默认占鼠标所在显示器工作区的
+66% × 86% 并居中,由 `my/frame-default-size` 控制(设为 nil 则用 Emacs 自己的默认大小);
+浮动终端仍用 `my/ghostel-floating-frame-size`。
 
 后台是 frame 不可见,不是应用隐藏,所以新开一个 frame(比如终端)时不会把其他 frame 一起带出来。
 
@@ -1082,7 +1111,13 @@ Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复�
 `my/frame-drag-handle-height`)。平时看不见,鼠标移上去会出现一个小横条并变成手形,
 按住就能拖动无标题栏的 frame。
 
-`my/ghostel-open-new` 开的浮动终端在 shell 退出时会连 buffer 和 frame 一起关掉;
+长期运行时不留孤儿:Noema web host 启动时拿到 Emacs 的 pid(`NOEMA_HOST_OWNER_PID`),
+Emacs 崩溃或被强制退出后几秒内自己收尾退出,连同它的 kernel;正常退出时的 SIGHUP 也走
+同一套收尾。
+
+`my/ghostel-open-new` 开的浮动终端,frame 和 shell 同生共死:关掉 frame(关闭按钮、
+`delete-frame`、Raycast 的 Close Frame)会结束它的 shell 和 buffer;想留着就用隐藏。
+它在 shell 退出时会连 buffer 和 frame 一起关掉;
 主窗口里的终端不受影响。
 
 ### 后台任务指示器

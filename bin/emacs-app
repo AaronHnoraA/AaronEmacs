@@ -2,11 +2,15 @@
 # emacs-app --- run Emacs as a background application on macOS.
 #
 #   start [--background]   launch Emacs; with --background keep it hidden
+#   restart                quit and start again, visible or hidden as before
+#   kill                   end an Emacs that no longer answers
 #   show | hide | toggle   bring Emacs forward or send it to the background
+#   state                  JSON for status, health, actions and frames at once
 #   actions                JSON for the whitelisted actions
 #   act ID [ARGUMENT]      run a whitelisted action
 #   frames                 JSON for the top-level frames
-#   frame ACTION [ID]      focus | hide | close a frame by ID, or new
+#   frame ACTION [ID]      focus | hide | hide-others | close | close-others
+#                          a frame by ID, or new | show-all | hide-all
 #   terminal               a new Ghostel terminal in its own frame, every time
 #   status                 visible | background | busy | stopped
 #   quit                   quit Emacs, showing it first for its questions
@@ -14,6 +18,15 @@
 #   install | uninstall    manage the login LaunchAgent
 
 set -u
+
+# Emacs and everything it starts inherit this environment through `open'.
+# A launcher may export an LC_ALL that is no POSIX locale; tools such as
+# pbpaste then fall back to C and turn every non-ASCII character into "?".
+unset LC_ALL LC_CTYPE LC_COLLATE LC_MESSAGES LC_MONETARY LC_NUMERIC LC_TIME
+case "${LANG:-}" in
+    *.UTF-8) ;;
+    *) export LANG=en_US.UTF-8 ;;
+esac
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 APP=/Applications/Emacs.app
@@ -55,9 +68,52 @@ start() {
         # An Emacs that is already running stays the way the user left it.
         running && return 0
         /usr/bin/open -g -j -a "$APP"
-        wait_for_server && client '(my/background-hide)' >/dev/null
+        wait_for_server && client '(my/background-start-hidden)' >/dev/null
     else
         client '(my/background-show)' >/dev/null || /usr/bin/open -a "$APP"
+    fi
+}
+
+wait_for_exit() {
+    local _
+    for _ in $(seq 1 "${1:-120}"); do
+        running || return 0
+        sleep 0.5
+    done
+    return 1
+}
+
+# Emacs may be asking about unsaved work; it is shown, and the wait is bounded.
+restart() {
+    local was
+    was=$(status)
+    if [ "$was" != stopped ]; then
+        client '(my/background-quit)' >/dev/null
+        wait_for_exit || { echo "Emacs did not quit; it may be waiting for an answer" >&2; return 1; }
+    fi
+    if [ "$was" = background ]; then start --background; else start; fi
+}
+
+# For an Emacs that no longer answers.  SIGTERM still runs its exit hooks.
+force_quit() {
+    local pid
+    pid=$(/usr/bin/lsappinfo info -only pid org.gnu.Emacs | tr -dc '0-9')
+    [ -n "$pid" ] || return 0
+    kill -TERM "$pid" 2>/dev/null
+    wait_for_exit 20 && return 0
+    kill -KILL "$pid" 2>/dev/null
+    wait_for_exit 10
+}
+
+# Always JSON: an Emacs that does not answer still has a status.
+state() {
+    local reply
+    if reply=$(client '(my/background-state)'); then
+        printf '%s' "${reply//\"/}" | /usr/bin/base64 -D
+    elif running; then
+        echo '{"status":"busy"}'
+    else
+        echo '{"status":"stopped"}'
     fi
 }
 
@@ -112,6 +168,9 @@ command=${1:-status}
 [ $# -gt 0 ] && shift
 case "$command" in
     start) start "$@" ;;
+    restart) restart ;;
+    kill) force_quit ;;
+    state) state ;;
     show) client '(my/background-show)' >/dev/null || /usr/bin/open -a "$APP" ;;
     hide) client '(my/background-hide)' >/dev/null ;;
     toggle) client '(my/background-toggle)' >/dev/null || /usr/bin/open -a "$APP" ;;
@@ -119,14 +178,11 @@ case "$command" in
     frame) frame "$@" ;;
     actions) json '(my/background-actions)' ;;
     act) act "$@" ;;
-    frames) json '(my/background-frames)' ;;
-    frame) frame "$@" ;;
-    run) client "(my/background-run-command \"$(encode "${1:?command name}")\")" >/dev/null ;;
     terminal) client '(progn (my/ghostel-open-new) nil)' >/dev/null ;;
     status) status ;;
     quit) client '(my/background-quit)' >/dev/null ;;
     build) build ;;
     install) install ;;
     uninstall) uninstall ;;
-    *) /usr/bin/sed -n '2,15p' "$0"; exit 2 ;;
+    *) /usr/bin/sed -n '2,19p' "$0"; exit 2 ;;
 esac

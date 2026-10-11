@@ -587,6 +587,73 @@ web-host 向 Emacs 进程 stdout 发送换行分隔的文本事件，由
 手动 "y sync DB"（`my/noema-roam-sync`）走 `/api` 路径，成功回调同样清空
 in-process 缓存，与自动刷新保持一致。
 
+### 页面搜索
+
+搜索只有一个实现：Noema 的 Go 内核（`site-lisp/noema/kernel/noema/wikisearch`）。
+Emacs 不保存页面列表，也不自己做匹配。`lisp/roam/init-noema-search.el` 把输入原样发到
+host 的 `aaronnote:api:knowledge:search` 通道，内核返回已经排好序的结果，以及每条结果
+是怎么找到的（`matchKind`）、标题里命中的区间（`titleRanges`）、摘要、纠正过的词
+（`corrected`）和“可以创建的页面”（`create`）。
+
+- `my/noema-roam-find-note`（`SPC n` 菜单的 `j`）在 minibuffer 里边输入边查询。候选按
+  “标题 / 相近标题 / 正文 / 纠正后的正文”分组，旁边显示文件路径和摘要。
+- minibuffer 用专门的补全样式 `my/noema-search`，它不过滤也不重排。内核把 `maintian`
+  匹配到 `maintain`；任何再比较一次“输入与候选”的样式（orderless、flex）都会把这条
+  结果丢掉。新增一个向内核查询的读取函数时，沿用 `my/noema-search-read-page`，不要
+  回到对本地快照做 `completing-read`。
+- 语法与网页端搜索框相同：`Namespace:` 前缀、`tag:` `path:` `file:` `content:`
+  `line:(a b)`、`"短语"`、`-词`、`OR`、`/正则/`。完整说明在
+  `site-lisp/noema/docs/wiki-workspace.md` 的 Search 一节。
+- 确认一个没有任何页面叫这个名字的标题，会带着它打开 New Page 工作台。
+- host 没运行时，find-note 退回到 Emacs 自己扫描的笔记列表，只能按 ID 补全。
+
+### 插入引用（`Cmd+R` / `M-r`）
+
+在笔记里按 `Cmd+R`，光标处弹出引用选择器。前缀沿用 roam 自己的语法：
+
+| 输入 | 列出 |
+| --- | --- |
+| （空） | 本页的标题、标签、带 ID 的块（按文档顺序），然后是最近的页面 |
+| `文字` | 本页的标题/标签/块，然后是页面（与搜索同一套匹配，含拼写容错） |
+| `#文字` | 标签和块：先本页，再所有页面 |
+| `@文字` | 标题：先本页，再所有页面 |
+| `页面#文字` / `页面@文字` | 某个页面内部的标签或标题；在页面行按 `Tab` 会写成 `ID@` |
+| `@@文字` | 文献键（按键名、标题、作者、年份匹配） |
+| `/文字` | 工作区里的文件；图片插入为嵌入，路径相对当前笔记 |
+
+回车插入，`Esc` 关闭。插入的是 roam 链接：页面 `[标题](roam://ID)`，标签和块
+`[名字](roam://ID#标签)`，标题 `[标题](roam://ID@上级@本级)`。插入后显示文字处于选中
+状态：直接打字就换成自己的措辞，按方向键则保留默认。
+
+- 候选和链接文本都由内核给出（搜索接口的 `references` 模式）。页面里的弹层
+  （`site-lisp/noema/aaronnote/reference-picker.ts`）和 Emacs 命令都不做匹配，也不拼
+  链接语法。
+- 在正文里手打 `[[` 或 `roam://` 也会打开同一个选择器，选中后替换掉已经打出的部分；
+  `Esc` 之后同一处不会再弹，可以继续手写。原来补全弹层（company）里针对 roam 的四路
+  补全源（`[[`、`roam://`、`roam://ID#`、`roam://ID@`）因此删除。路径链接
+  （`[x](./文件.md#标签)`）、行内 `@@tag[`、文献、任务依赖等补全没有别的入口，保持原样。
+- `Cmd+Shift+R`（Emacs 持有键盘时是 `M-R`）给光标处打标签并复制引用，即工具面板里的
+  “Tag / copy reference”。
+- Emacs 持有键盘时，Noema 窗格里的 `M-r` 调用 `my/noema-insert-reference`，它让页面
+  打开同一个弹层。在其他缓冲区里 `M-x my/noema-insert-reference` 用 minibuffer 做同样
+  的查询，问一次显示文字（默认是内核给的），再把链接插入到光标处。
+- `M-r` 在普通 xwidget 浏览器缓冲区里仍是“刷新内容”；只有 Noema 窗格里改成了插入引用。
+- Vim 的普通/可视模式下，输入法送来的按键（合成中、键码 229、全角字符）被整个吞掉：
+  既不当作 Vim 命令，也不写进笔记。切回英文输入后按键照常是命令。
+
+### 从 Raycast 使用 Noema
+
+Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 Emacs（它们也各自是独立
+命令，方便单独绑定快捷键）。查找页面因此不在 Emacs 的动作白名单里：
+
+- **Find Note**：边输入边搜索，Raycast 自己显示结果，语法和 Emacs、网页端相同。回车
+  在 Emacs 里打开所选页面；`Cmd+L` 复制 wiki 链接，`Cmd+Shift+F` 在 Finder 里显示。
+- **Noema Maintenance**：索引状态（页数、上次运行、错误）和每个仓库的同步状态；可以刷新或重建
+  索引、对某个仓库做检查点或立即同步。
+
+两者都读取 `var/aaronnote/host.json`（Noema host 启动监听时写入）找到 host，然后调用
+它的本机 `/api`。host 没运行时显示“Noema is not running”，不会去启动或唤起 Emacs。
+
 ### 诊断
 
 - 服务日志：buffer ` *aaronnote-web-host*`

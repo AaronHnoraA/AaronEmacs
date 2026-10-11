@@ -23,6 +23,8 @@
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
 (declare-function evil-local-set-key "evil-core" (state key def))
 (declare-function evil-set-initial-state "evil-core" (mode state))
+(declare-function my/noema-search-available-p "init-noema-search" ())
+(declare-function my/noema-search-read-page "init-noema-search" (prompt &optional initial))
 (declare-function my/noema-open-file "init-aaronnote" (file))
 (declare-function my/noema--ensure-server "init-aaronnote" (&optional callback))
 (declare-function my/noema--server-url "init-aaronnote" (&optional path))
@@ -730,7 +732,18 @@ Builds the reverse-link index in one pass to avoid O(n²) per-note lookups."
     slug))
 
 (defun my/noema-roam--read-note-id (prompt)
-  "Read an Noema note id with PROMPT."
+  "Read a Noema note id with PROMPT.
+The kernel searches as the person types; see `my/noema-search-read-page'.
+Only while the host is down does Emacs complete over its own scan."
+  (if (my/noema-search-available-p)
+      (let ((choice (my/noema-search-read-page prompt)))
+        (unless (hash-table-p choice)
+          (user-error "No such page"))
+        (gethash "id" choice))
+    (my/noema-roam--read-note-id-offline prompt)))
+
+(defun my/noema-roam--read-note-id-offline (prompt)
+  "Read a Noema note id with PROMPT from the notes Emacs scanned itself."
   (let* ((records (my/noema-roam--note-records))
          (candidates (mapcar (lambda (record)
                                (plist-get record :id))
@@ -1125,10 +1138,20 @@ directory; /x is resolved against the roam vault root."
           (user-error "No Markdown roam link found at point"))))))
 
 (defun my/noema-roam-find-note ()
-  "Find a roam note by Noema id/path/title with completion."
+  "Find a Wiki page, searching titles, aliases, file names and text.
+The search is the kernel's, the one the Web surfaces use: a `Namespace:'
+prefix narrows it, a misspelled title is still found, and `tag:', `path:',
+`\"a phrase\"', `-word' and `OR' work as in the search field.  Confirming a
+title no page has opens the New Page workbench with it."
   (interactive)
-  (my/noema-roam--open-slug
-   (my/noema-roam--read-note-id "Roam note: ")))
+  (if (not (my/noema-search-available-p))
+      (my/noema-roam--open-slug
+       (my/noema-roam--read-note-id-offline "Roam note: "))
+    (pcase (my/noema-search-read-page "Find page: ")
+      (`(:create ,title ,_namespace) (my/noema-roam-new-node title))
+      ((and item (pred hash-table-p))
+       (my/noema-roam--touch-recent (gethash "id" item))
+       (find-file (gethash "file" item))))))
 
 (defun my/noema-roam-delete-node (note-id)
   "Move NOTE-ID's Markdown node to trash through the Noema runtime."

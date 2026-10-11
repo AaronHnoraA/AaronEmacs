@@ -27,6 +27,7 @@
 (declare-function my/frame-kill "init-windows")
 (declare-function my/frame-other "init-windows")
 (declare-function my/frame-previous "init-windows")
+(declare-function my/frame-hide "init-background")
 (declare-function my/tab-close "init-workspaces")
 (declare-function my/tab-close-other-tabs "init-workspaces")
 (declare-function my/tab-new "init-workspaces")
@@ -482,6 +483,7 @@ Emacs state keep their local behavior."
     "F"  '(:ignore t :which-key "frame")
     "Fn" 'my/frame-new
     "Fd" 'my/frame-kill
+    "Fh" 'my/frame-hide
     "Fo" 'my/frame-other
     "FO" 'my/frame-previous
     "Fr" 'set-frame-name
