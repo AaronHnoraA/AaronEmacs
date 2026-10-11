@@ -341,6 +341,23 @@ execute itself must still be resolved here."
         (default-directory temporary-file-directory))
     (executable-find program)))
 
+(defvar remote-current-workspace)
+
+(defun remote-require-on-client (feature &optional filename noerror)
+  "Load Emacs Lisp FEATURE with this machine's file and process context.
+FILENAME and NOERROR are as for `require'.  A package is client code however
+remote the buffer that first needs it.  Loaded from a target directory, its
+load-time file operations go to the target instead: `module-load' alone asks
+for the temporary directory, which opens a whole file session there to load
+a library that is on this machine."
+  (let ((default-directory temporary-file-directory)
+        (process-environment (remote-client-process-environment))
+        (exec-path (remote-client-exec-path))
+        (remote-current-adapter-id nil)
+        (remote-current-route nil)
+        (remote-current-workspace nil))
+    (require feature filename noerror)))
+
 (defun remote--kill-internal-buffer (buffer)
   "Detach processes and kill framework-owned BUFFER without user hooks.
 Framework diagnostic and capture buffers are implementation details rather

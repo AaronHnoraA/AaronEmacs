@@ -1643,6 +1643,23 @@
             (remote-workspace-resource-value resource)
             '(descriptor 2))))))))
 
+(ert-deftest remote-file-watch-startup-allows-a-connection-on-round-trip-routes ()
+  "A watcher that must open its own connection gets the connection deadline."
+  (let ((watch (remote-file-watch-create
+                :id "watch-deadline" :file "/fs:lab:/srv/project/"))
+        (remote-file-watch-startup-timeout 2.5)
+        (remote-connection-open-timeout 8)
+        (cost 'round-trip))
+    (cl-letf (((symbol-function 'remote-file-operation-cost)
+               (lambda (&rest _) cost)))
+      (should (= (remote-fs--watch-startup-timeout watch) 8))
+      (setq cost 'batched)
+      (should (= (remote-fs--watch-startup-timeout watch) 2.5))
+      ;; A disabled wait stays disabled.
+      (setq cost 'round-trip)
+      (let ((remote-file-watch-startup-timeout 0))
+        (should (= (remote-fs--watch-startup-timeout watch) 0))))))
+
 (ert-deftest remote-file-watch-recovery-rejects-unready-python-backend ()
   "A reconnect cannot report a watch open before its ready handshake."
   (let* ((watch (remote-file-watch-create
@@ -2514,6 +2531,21 @@
       (cl-letf (((symbol-function 'remote-exec)
                  (lambda (&rest _) (error "Must not probe"))))
         (should (equal (remote-path-login-shell context) "/bin/zsh")))
+      ;; With NO-CONNECT nothing is asked unless a session is already open.
+      (clrhash remote-path-facts-cache)
+      (cl-letf (((symbol-function 'remote-exec)
+                 (lambda (&rest _) (error "Must not connect")))
+                ((symbol-function 'remote-path--session-ready-p)
+                 (lambda (_context) nil)))
+        (should-not (remote-path-login-shell context t)))
+      (cl-letf (((symbol-function 'remote-exec)
+                 (lambda (&rest _)
+                   (remote-exec-result-create
+                    :status 0 :stdout "__EMACS_LOGIN_SHELL__/bin/dash")))
+                ((symbol-function 'remote-path--session-ready-p)
+                 (lambda (_context) t)))
+        (should (equal (remote-path-login-shell context t) "/bin/dash")))
+      (setf (remote-target-shell target) nil)
       ;; A target that reports no shell yields nil, not an empty string.
       (clrhash remote-path-facts-cache)
       (cl-letf (((symbol-function 'remote-exec)
@@ -2539,44 +2571,54 @@
              :workspace-id "shell"
              :root "/fs:lab:/work/"
              :context context
-             :state 'open)))
-      (cl-letf
-          (((symbol-function 'remote-path-login-shell)
-            (lambda (&rest _arguments) "/usr/bin/zsh")))
-        (should
-         (equal
-          (remote-terminal-command workspace "default" t)
-          '("/usr/bin/zsh" "-l"))))
+             :state 'open))
+           (deferred
+            (append remote-terminal--target-shell-command '("-l"))))
+      (let (asked)
+        (cl-letf
+            (((symbol-function 'remote-path-login-shell)
+              (lambda (_context &optional no-connect)
+                (setq asked no-connect)
+                "/usr/bin/zsh")))
+          (should
+           (equal
+            (remote-terminal-command workspace "default" t)
+            '("/usr/bin/zsh" "-l")))
+          ;; A terminal never opens a session only to learn its shell.
+          (should asked)))
       (setf (remote-target-shell target) nil)
-      (let (attempts)
-        (cl-letf
-            (((symbol-function 'remote-path-login-shell)
-              (lambda (&rest _arguments)
-                (error "injected shell probe failure")))
-             ((symbol-function 'remote-executable-find)
-              (lambda (program &rest _arguments)
-                (push program attempts)
-                (and (equal program "bash") "/bin/bash"))))
+      ;; Asking would have to connect, or failed: the target starts its own
+      ;; login shell inside the terminal's session instead.
+      (dolist (answer (list (lambda (&rest _) nil)
+                            (lambda (&rest _)
+                              (error "injected shell probe failure"))))
+        (cl-letf (((symbol-function 'remote-path-login-shell) answer)
+                  ((symbol-function 'remote-executable-find)
+                   (lambda (&rest _) (error "Must not guess a shell"))))
           (should
-           (equal
-            (remote-terminal-command workspace "default" t)
-            '("/bin/bash" "-l")))
-          (should (equal (nreverse attempts) '("zsh" "bash")))))
-      (let (attempts)
-        (cl-letf
-            (((symbol-function 'remote-path-login-shell)
-              (lambda (&rest _arguments)
-                (error "injected shell probe failure")))
-             ((symbol-function 'remote-executable-find)
-              (lambda (program &rest _arguments)
-                (push program attempts)
-                nil)))
-          (should
-           (equal
-            (remote-terminal-command workspace "default" t)
-            '("/bin/sh" "-l")))
-          (should
-           (equal (nreverse attempts) '("zsh" "bash" "sh"))))))))
+           (equal (remote-terminal-command workspace "default" t)
+                  deferred))))
+      ;; Without a probe only known facts are used.
+      (cl-letf (((symbol-function 'remote-path-login-shell)
+                 (lambda (&rest _) (error "Must not ask"))))
+        (should (equal (remote-terminal-command workspace "default")
+                       deferred))
+        (setf (remote-target-shell target) "/bin/bash")
+        (should (equal (remote-terminal-command workspace "default")
+                       '("/bin/bash" "-l")))))))
+
+(ert-deftest remote-terminal-deferred-shell-starts-the-account-shell ()
+  "The deferred command really execs `$SHELL' with the profile arguments."
+  (let ((process-environment
+         (cons "SHELL=/bin/echo" process-environment)))
+    (with-temp-buffer
+      (should
+       (zerop
+        (apply #'call-process
+               (car remote-terminal--target-shell-command) nil t nil
+               (append (cdr remote-terminal--target-shell-command)
+                       '("-l" "two words")))))
+      (should (equal (buffer-string) "-l two words\n")))))
 
 (ert-deftest remote-terminal-transport-loss-requires-explicit-restart ()
   (remote-framework-test-with-registry

@@ -696,6 +696,32 @@ SSH target 约 89→51 µs。远端的复用条件是“具备该能力的后端
 重新选路（约 67 µs，恢复后约 21 µs；批处理 Emacs、真实配置、未建连，各 5000 次）。
 缓存之外的后端一旦获得该能力，条目即失效。
 
+框架自己的进程辅助函数也按这个声明行事。在 `round-trip` 后端上，它们把附带工作
+折进本来就要执行的那一条命令里（`remote-process--round-trip-route-p`）：
+
+- `remote-exec` 不再把 stderr 交给 `process-file` 的文件参数。shell TRAMP 为那个
+  文件要在 target 上创建、stat、回读、删除临时文件，一次进程 12 次往返；现在用
+  一次 `sh -c` 把 stderr 接在每次调用唯一的标记之后随 stdout 返回，状态码、参数
+  与两路输出逐字节不变。
+- `remote-executable-find` 不再对 PATH 的每个目录各发一次 `test -x`，而是把
+  `executable-find` 会检查的同一组目录、同一判定（可执行的普通文件）放进一次
+  target 端循环；找不到的工具原来最贵（每个目录一次往返）。
+- direnv 的 `.envrc` 根目录发现在这类后端上缓存
+  `direnv-envrc-root-cache-round-trip-timeout`（默认 30 秒）而不是 1 秒：发现本身
+  要逐级探测祖先目录，1 秒寿命意味着相隔一秒以上的每次进程启动都重新探测。显式
+  direnv 命令与保存 `.envrc` 仍立即失效。
+
+- 递归 Python watcher 的就绪等待在这类后端上至少是
+  `remote-connection-open-timeout`，而不是 `remote-file-watch-startup-timeout` 的
+  2.5 秒：watcher 是一个可能要先自己建连的进程，重连后恢复 watch 时尤其如此。
+  等待在 watcher 就绪或死亡时立即结束，放宽上限不影响快链路。
+
+QWD-VPS-Wiki（往返约 250 ms）上的实测：热态 `remote-exec "true"` 从约 3.86 s 降到
+约 0.23 s；首个递归 watch 就绪从约 5.8 s 降到约 2.4 s；`make remote-e2e` 的
+`-Q` 部分从 299 s 降到约 224~250 s，并且原先在该链路上失败的递归 watch 用例
+（事件送达、重连后原句柄继续收到新事件）现在通过。`batched` 与本机后端保持原有的
+直接形式。
+
 需要"每个文件一次子进程"的功能（VC、Magit、per-file 探测）用它决定开关，而不是
 测 `file-remote-p`、TRAMP method 或 backend ID。`native` 与 `tramp-rpc` 声明
 `batched`，`tramp` 声明 `round-trip`；`local` target 因此天然走同一条判断。
@@ -937,7 +963,19 @@ Ghostel 在所有 target 上走同一条启动流程：终端既不等待也不�
 `remote-path-login-shell` 回答：已知的 target fact 直接返回，否则只用一次普通
 `sh -c` 询问 `$SHELL` 并记为 target fact，不运行登录 shell 的 PATH 探测。本机
 首次打开终端因此从约 700 ms 降到约 90 ms（批处理 Emacs、zsh 登录配置，各三次），
-后续打开约 9 ms 不变；远端省掉的是同一次登录 shell 探测，尚未真机计时。`REMOTE_GHOSTEL_E2E_TARGET=local` 在本机运行同一个
+后续打开约 9 ms 不变。
+
+终端也绝不为了知道 shell 而新建会话。`remote-path-login-shell` 的 NO-CONNECT
+参数只在“执行这条命令的那条路由自己已有会话”（`remote-connection-route-open-p`；
+同一 target 上别的后端的会话不算，SSH PTY 不等于文件会话）或后端的会话就是 Emacs
+进程本身（`:session-owner emacs`）时才询问；否则 `remote-terminal-command` 返回
+`remote-terminal--target-shell-command`，由 target 在终端自己的 PTY 会话里执行
+`exec "$SHELL" -l`，不需要任何额外往返。同理，Ghostel 及其原生模块是客户端代码，
+经 `remote-require-on-client` 加载：在远程 `default-directory` 下首次 `require`
+时，`module-load` 询问临时目录就会进入 `/fs:` 句柄并为此建立整条文件会话。
+在往返约 250 ms 的 SSH target 上（QWD-VPS-Wiki，shell TRAMP 后端，真实 Ghostel），
+冷态打开首个终端从约 15.2 s 降到约 0.12 s，直到首条命令输出返回从约 16.0 s 降到
+约 5.9 s，剩余时间是 SSH 建连与登录 shell 本身。`REMOTE_GHOSTEL_E2E_TARGET=local` 在本机运行同一个
 冒烟测试（本机 Ghostel 使用自己的原生 PTY，没有 route 可查，测试用
 `remote-client-file-name` 这一放置查询区分）；`REMOTE_GHOSTEL_E2E_FAULT=transport`
 注入断线，验证 buffer 保留、提示只写一次、重启后原名终端可用。批处理 Emacs
@@ -1098,6 +1136,7 @@ Noema 等消费者留在框架外，只调用公共 API。
 
 ```sh
 make remote-check
+REMOTE_E2E_TARGET=QWD-VPS-Wiki make remote-e2e
 make remote-test
 make remote-conformance-test
 REMOTE_GHOSTEL_E2E_TARGET=local REMOTE_GHOSTEL_E2E_FAULT=transport \
@@ -1109,7 +1148,9 @@ emacs --batch --init-directory=. -q -l early-init.el -l init.el \
 ```
 
 SSH E2E 是显式 opt-in，自动选择 SSH config 导入的 `Aaron-*` target，也可以通过
-`REMOTE_E2E_TARGET` 指定。它只在本地和 target 的 `/tmp` 创建随机目录，并在结束
+`REMOTE_E2E_TARGET` 指定。局域网主机会掩盖每一次多余的往返：性能与时限相关的改动
+应在高延迟 target（例如往返约 250 ms 的 QWD-VPS-Wiki）上再跑一遍，测试里的等待
+上限也按这种链路留出余量。它只在本地和 target 的 `/tmp` 创建随机目录，并在结束
 时清理；覆盖文件复制/读取/枚举、target cwd 进程、session 复用，以及动态 SSH
 `-R` listener 从 target 到原生 Emacs server process 的数据往返，以及关闭旧
 session 后真实 SSH workspace 能在后台重新连接并恢复命令执行。

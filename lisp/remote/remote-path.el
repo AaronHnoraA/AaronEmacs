@@ -195,12 +195,30 @@ probe protocol."
 (defconst remote-path--shell-marker "__EMACS_LOGIN_SHELL__"
   "Marker in front of the shell printed for `remote-path-login-shell'.")
 
-(defun remote-path-login-shell (&optional context)
+(defun remote-path--session-ready-p (context)
+  "Return non-nil when running a command for CONTEXT opens no new session.
+That holds while the route the command would take has a pooled session, and
+always for a backend whose session is the Emacs process itself.  Another
+backend's session on the same target, such as an SSH PTY, does not count."
+  (when-let* ((route
+               (ignore-errors
+                 (remote-resolve "environment" 'process-sync context))))
+    (or (remote-connection-route-open-p route)
+        (eq (plist-get
+             (ignore-errors
+               (remote-backend-describe
+                (remote-route-link-plugin-id route)))
+             :session-owner)
+            'emacs))))
+
+(defun remote-path-login-shell (&optional context no-connect)
   "Return the login shell of the account behind CONTEXT's target, or nil.
 Facts that are already known answer without touching the target.  Otherwise
 ask for `$SHELL' alone and remember it as a target fact.  The full probe runs
 the person's whole shell startup to learn PATH; a consumer that only needs to
-know which shell to start, such as a terminal, must not wait for that."
+know which shell to start, such as a terminal, must not wait for that.
+With NO-CONNECT, return nil instead of opening a session only to ask: a cold
+file session costs far more than the shell it would name."
   (let* ((context
           (cond
            ((remote-context-p context) context)
@@ -218,7 +236,9 @@ know which shell to start, such as a terminal, must not wait for that."
            (list (and target (remote-target-shell target))
                  (and facts (remote-path-facts-shell facts))))))
     (or known
-        (let* ((remote-environment-inhibit t)
+        (unless (and no-connect
+                     (not (remote-path--session-ready-p context)))
+         (let* ((remote-environment-inhibit t)
                (output
                 (remote-exec-result-stdout
                  (remote-exec
@@ -241,7 +261,7 @@ know which shell to start, such as a terminal, must not wait for that."
           (when (and shell (not (string-empty-p shell)))
             (when target
               (setf (remote-target-shell target) shell))
-            shell)))))
+            shell))))))
 
 (defun remote-path--commit-facts (facts)
   "Commit generation-validated host FACTS to target and cache state."

@@ -1000,13 +1000,7 @@ the authoritative fallback in that interval."
 
 (defun my/language-server--require-on-client (feature)
   "Load Emacs Lisp FEATURE with this machine's file and process context."
-  (let ((default-directory temporary-file-directory)
-        (process-environment (remote-client-process-environment))
-        (exec-path (remote-client-exec-path))
-        (remote-current-adapter-id nil)
-        (remote-current-route nil)
-        (remote-current-workspace nil))
-    (require feature nil t)))
+  (remote-require-on-client feature nil t))
 
 (defun my/language-server--external-feature-ready-p ()
   "Return whether this buffer's external LSP feature can start on its target.

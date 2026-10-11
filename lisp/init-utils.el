@@ -10,6 +10,9 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+(declare-function remote-require-on-client "remote-core"
+                  (feature &optional filename noerror))
+
 (declare-function ghostel-create "ghostel" (&optional name display identity))
 (declare-function my/ghostel-send-command "init-ghostel"
                   (buffer command &optional retries))
@@ -29,9 +32,17 @@
   "Return a shell-safe command string for PROGRAM."
   (shell-quote-argument (my/executable-or-name program)))
 
+(defun my/ghostel-require ()
+  "Load Ghostel on this machine.
+Ghostel and its native module are client code: loading them from a remote
+`default-directory' would open a file session on that target first."
+  (if (fboundp 'remote-require-on-client)
+      (remote-require-on-client 'ghostel)
+    (require 'ghostel)))
+
 (defun my/ghostel-create-hidden (name)
   "Create the Ghostel buffer NAME without displaying it."
-  (require 'ghostel)
+  (my/ghostel-require)
   (ghostel-create name))
 
 (defun my/ghostel-wrap--command-name (command)
@@ -88,7 +99,7 @@ Examples:
   (my/ghostel-wrap \"ollama run qwen3\" :directory project-root)
   (my/ghostel-wrap \='(\"ssh\" \"build-host\") :buffer-name \"*build host*\")"
   (interactive (list (read-shell-command "Ghostel command: ")))
-  (require 'ghostel)
+  (my/ghostel-require)
   (let* ((shell-command (my/ghostel-wrap--shell-command command))
          (default-directory
           (file-name-as-directory

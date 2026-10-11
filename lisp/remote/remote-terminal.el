@@ -90,24 +90,20 @@
     (let ((value (string-trim value)))
       (and (not (string-empty-p value)) value))))
 
-(defun remote-terminal--fallback-shell (context)
-  "Return the first target executable among zsh, bash, and sh for CONTEXT."
-  (let ((remote-environment-inhibit t))
-    (seq-some
-     (lambda (program)
-       (ignore-errors
-         (remote-executable-find program context)))
-     '("zsh" "bash" "sh"))))
+(defconst remote-terminal--target-shell-command
+  '("/bin/sh" "-c" "exec \"${SHELL:-/bin/sh}\" \"$@\"" "sh")
+  "Command prefix that starts the target account's own login shell.
+Profile arguments are appended and reach that shell verbatim.  The target
+resolves `$SHELL' inside the terminal's own session, so starting a terminal
+needs no file session just to learn which shell to run.")
 
 (defun remote-terminal--shell (workspace profile &optional probe)
-  "Return target-native shell for WORKSPACE and PROFILE.
-When PROBE is non-nil, ask the target for its account's login shell before
-falling back to `/bin/sh'.  Only the shell is asked for: the PATH probe runs
-the whole shell startup and would hold up the terminal for it.  Probe
-failures do not prevent terminal startup."
+  "Return the target-native shell for WORKSPACE and PROFILE, or nil.
+Known facts answer first.  With PROBE, ask the target for its account's login
+shell, but only where that opens no new session.  Nil means the shell is not
+known here; `remote-terminal-command' then lets the target start it."
   (let* ((target-id (remote-workspace-target-id workspace))
          (target (remote-get-target target-id))
-         (context (remote-workspace-context workspace))
          (environment (remote-workspace-environment workspace)))
     (or
      (remote-terminal--nonempty-shell
@@ -124,33 +120,35 @@ failures do not prevent terminal startup."
      (and probe
           (remote-terminal--nonempty-shell
            (condition-case error-data
-               (remote-path-login-shell context)
+               (remote-path-login-shell
+                (remote-workspace-context workspace) t)
              (error
               (remote-log
                'terminal-shell-probe-error
                :target target-id
                :error (error-message-string error-data))
-              nil))))
-     (and probe
-          (remote-terminal--nonempty-shell
-           (remote-terminal--fallback-shell context)))
-     "/bin/sh")))
+              nil)))))))
 
 (defun remote-terminal-command (&optional workspace profile probe)
   "Return the target-native interactive shell command for WORKSPACE.
 PROFILE is a registered terminal profile or profile object.  The result is a
 list suitable for routed process APIs and native terminal frontends.  With
-PROBE, ask the target for its account's login shell first."
+PROBE, ask the target for its account's login shell when that needs no new
+session.  A shell that is not known is started by the target itself through
+`remote-terminal--target-shell-command'."
   (let* ((workspace
           (or (remote-get-workspace workspace)
               (remote-workspace-open workspace
                                      :adapter "process"
                                      :capability 'pty
                                      :load-environment t)))
-         (profile (remote-terminal--profile workspace profile)))
-    (cons (remote-terminal--shell workspace profile probe)
-          (copy-sequence
-           (remote-terminal-profile-arguments profile)))))
+         (profile (remote-terminal--profile workspace profile))
+         (shell (remote-terminal--shell workspace profile probe))
+         (arguments
+          (copy-sequence (remote-terminal-profile-arguments profile))))
+    (if shell
+        (cons shell arguments)
+      (append remote-terminal--target-shell-command arguments))))
 
 (defun remote-terminal--detach (terminal)
   "Detach TERMINAL from registries and its owning workspace."

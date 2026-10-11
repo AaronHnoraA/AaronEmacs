@@ -136,9 +136,26 @@ its supported operation contract visible to Tramp and extension packages.")
 Backends may use this to bound a stalled request without shortening writes.")
 
 (defcustom remote-file-watch-startup-timeout 2.5
-  "Seconds to wait for a Python recursive watcher to install its watches."
+  "Seconds to wait for a Python recursive watcher to install its watches.
+A backend that declares `round-trip' file operations gets at least
+`remote-connection-open-timeout': its watcher is a process that may have to
+open a connection of its own first, which this bound is too short for on a
+high-latency link."
   :type 'number
   :group 'remote)
+
+(defun remote-fs--watch-startup-timeout (watch)
+  "Return how long WATCH's backend may take to report its watches installed.
+The wait ends as soon as the watcher is ready or has died, so a longer bound
+costs nothing on a fast link."
+  (let ((timeout remote-file-watch-startup-timeout))
+    (if (and (numberp timeout) (> timeout 0)
+             (numberp remote-connection-open-timeout)
+             (eq (ignore-errors
+                   (remote-file-operation-cost (remote-file-watch-file watch)))
+                 'round-trip))
+        (max timeout remote-connection-open-timeout)
+      timeout)))
 
 (defconst remote-fs--python-watch-agent
   (with-temp-buffer
@@ -156,7 +173,8 @@ Other backends retain their existing readiness contract."
               ((processp physical))
               ((eq (process-get physical 'remote-file-watch-provider)
                    'python-inotify)))
-    (let ((deadline (+ (float-time) remote-file-watch-startup-timeout)))
+    (let ((deadline (+ (float-time)
+                       (remote-fs--watch-startup-timeout watch))))
       (while (and (eq physical
                       (remote-file-watch-physical-descriptor watch))
                   (process-live-p physical)

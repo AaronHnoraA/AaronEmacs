@@ -1317,6 +1317,40 @@ returns, so this covers a different ownership window from backend cancellation."
                    "/fs:local:/tmp/project/main.c"))
       (should (= locate-calls 3)))))
 
+(ert-deftest remote-direnv-root-discovery-lasts-longer-where-it-is-costly ()
+  "Where each probe is a round trip, discovery must outlive the trip itself."
+  (let ((direnv--envrc-root-cache (make-hash-table :test #'equal))
+        (direnv-envrc-root-cache-timeout 1.0)
+        (direnv-envrc-root-cache-round-trip-timeout 30.0)
+        (locate-calls 0)
+        (clock 100.0)
+        (cost 'round-trip))
+    (cl-letf (((symbol-function 'direnv--directory)
+               (lambda (&optional _path) "/fs:lab:/srv/project/"))
+              ((symbol-function 'float-time)
+               (lambda (&optional _value) clock))
+              ((symbol-function 'locate-dominating-file)
+               (lambda (_directory _name) (cl-incf locate-calls) nil))
+              ((symbol-function 'remote-file-operation-cost)
+               (lambda (&rest _) cost))
+              ((symbol-function 'remote-canonicalize-file-name)
+               #'identity))
+      (direnv--envrc-root "/fs:lab:/srv/project/main.c")
+      (setq clock 110.0)
+      (direnv--envrc-root "/fs:lab:/srv/project/main.c")
+      (should (= locate-calls 1))
+      (setq clock 131.0)
+      (direnv--envrc-root "/fs:lab:/srv/project/main.c")
+      (should (= locate-calls 2))
+      ;; An explicit invalidation is still immediate.
+      (direnv-invalidate-root-cache)
+      (direnv--envrc-root "/fs:lab:/srv/project/main.c")
+      (should (= locate-calls 3))
+      ;; A batched backend keeps the short lifetime.
+      (setq cost 'batched clock 133.0)
+      (direnv--envrc-root "/fs:lab:/srv/project/main.c")
+      (should (= locate-calls 4)))))
+
 (ert-deftest remote-direnv-visiting-file-directory-is-lexical ()
   "A visiting file has a known directory and needs no metadata probe."
   (with-temp-buffer
@@ -2343,6 +2377,85 @@ names in tree consumers such as Treemacs."
        (equal (remote-route-link-plugin-id
                (remote-exec-result-route result))
               "native")))))
+
+(ert-deftest remote-executable-find-searches-path-in-one-round-trip ()
+  "A round-trip backend must not pay one trip per PATH directory."
+  (remote-test-with-registry
+    (let* ((default-directory
+            (remote-canonicalize-file-name temporary-file-directory))
+           (original (symbol-function 'process-file))
+           (calls 0))
+      (cl-letf (((symbol-function 'remote-process--round-trip-route-p)
+                 (lambda (_route) t))
+                ((symbol-function 'process-file)
+                 (lambda (&rest arguments)
+                   (cl-incf calls)
+                   (apply original arguments)))
+                ((symbol-function 'executable-find)
+                 (lambda (&rest _) (error "Must not search per directory"))))
+        (should (equal (remote-executable-find "sh")
+                       (let ((default-directory temporary-file-directory))
+                         (funcall (symbol-function 'locate-file)
+                                  "sh" exec-path nil 'file-executable-p))))
+        (should (= calls 1))
+        (should-not (remote-executable-find "emacs-no-such-program-xyz"))
+        (should (= calls 2))
+        ;; A directory on PATH that shares the name is not a program.
+        (let* ((directory (make-temp-file "remote-exec-find-" t))
+               (exec-path (list directory)))
+          (unwind-protect
+              (progn
+                (make-directory (expand-file-name "tool" directory))
+                (should-not (remote-executable-find "tool"))
+                (delete-directory (expand-file-name "tool" directory))
+                (with-temp-file (expand-file-name "tool" directory)
+                  (insert "#!/bin/sh\n"))
+                (should-not (remote-executable-find "tool"))
+                (set-file-modes (expand-file-name "tool" directory) #o755)
+                (should (equal (remote-executable-find "tool")
+                               (expand-file-name "tool" directory))))
+            (delete-directory directory t)))))))
+
+(ert-deftest remote-exec-carries-stderr-inline-on-round-trip-backends ()
+  "A separate stderr file costs a round-trip backend eleven extra trips."
+  (remote-test-with-registry
+    (let* ((default-directory
+            (remote-canonicalize-file-name temporary-file-directory))
+           (original (symbol-function 'process-file))
+           destinations)
+      (cl-letf (((symbol-function 'remote-process--round-trip-route-p)
+                 (lambda (_route) t))
+                ((symbol-function 'process-file)
+                 (lambda (program infile destination &rest arguments)
+                   (push destination destinations)
+                   (apply original program infile destination arguments))))
+        (let ((result
+               (remote-exec
+                "sh"
+                :args '("-c" "printf 'out 1\nout 2'; printf 'err \"q\"\n' >&2; exit 7"))))
+          (should (= (remote-exec-result-status result) 7))
+          (should (equal (remote-exec-result-stdout result) "out 1\nout 2"))
+          (should (equal (remote-exec-result-stderr result) "err \"q\"\n")))
+        ;; One stream comes back; nothing asks the backend for a stderr file.
+        (should destinations)
+        (dolist (destination destinations)
+          (should-not (stringp (car-safe (cdr-safe destination)))))
+        ;; Arguments reach the program verbatim.
+        (should
+         (equal (remote-exec-result-stdout
+                 (remote-exec "printf" :args '("%s|%s" "a b" "$HOME;'x'")
+                              :check t))
+                "a b|$HOME;'x'"))
+        (let ((quiet (remote-exec "true" :check t)))
+          (should (equal (remote-exec-result-stdout quiet) ""))
+          (should (equal (remote-exec-result-stderr quiet) "")))
+        ;; `remote-exec-error' still reports what the program wrote.
+        (let ((failure
+               (should-error
+                (remote-exec "sh" :args '("-c" "echo broken >&2; exit 3")
+                             :check t)
+                :type 'remote-exec-error)))
+          (should (string-match-p "broken" (nth 1 failure))))))))
 
 (ert-deftest remote-exec-async-uses-routed-make-process ()
   (remote-test-with-registry

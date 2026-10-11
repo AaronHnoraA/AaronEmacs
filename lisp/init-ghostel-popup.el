@@ -15,6 +15,7 @@
 (declare-function my/terminal-normalize-directory "init-funcs" (directory))
 (declare-function my/ghostel-send-command "init-ghostel" (buffer command &optional retries))
 (declare-function my/ghostel-create-hidden "init-utils" (name))
+(declare-function my/ghostel-require "init-utils" ())
 (declare-function my/ghostel-workspace-id "init-ghostel" (&optional directory))
 (declare-function remote-terminal-p "remote-terminal" (object))
 (declare-function remote-terminal-put-metadata "remote-terminal"
@@ -479,7 +480,7 @@ When BUFFER is non-nil, return the window displaying BUFFER."
   "Create and register a new popup ghostel buffer.
 Use DIRECTORY as the initial terminal directory when non-nil.
 Use BUFFER-NAME when non-nil."
-  (require 'ghostel)
+  (my/ghostel-require)
   (let* ((default-directory (or (my/terminal-normalize-directory directory)
                                 default-directory))
          (target-name (generate-new-buffer-name

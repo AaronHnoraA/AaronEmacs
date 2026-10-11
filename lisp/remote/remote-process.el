@@ -784,6 +784,53 @@ missing program returns (t . nil)."
       ;; Let the normal file-handler lookup decide instead of failing the route.
       (error nil))))
 
+(defconst remote--path-executable-probe-script
+  (concat
+   "IFS=:; for d in $2; do "
+   "[ -n \"$d\" ] || continue; p=${d%/}/$1; "
+   "if [ -f \"$p\" ] && [ -x \"$p\" ]; then "
+   "printf '%s\\0' \"$p\"; exit 0; fi; "
+   "done; exit 1")
+  "POSIX script that finds program $1 in the colon-separated directories $2.
+It applies the test `executable-find' applies, an executable regular file,
+to the same directories in the same order.")
+
+(defun remote--path-executable-find (program)
+  "Return (SUPPORTED . PATH) for bare PROGRAM via one target-side process.
+The directories are those `executable-find' would test one round trip at a
+time.  SUPPORTED is nil when the answer cannot be trusted, in which case the
+caller falls back to that search."
+  (when (and (stringp program)
+             (not (string-empty-p program))
+             (not (string-match-p "/" program)))
+    (condition-case nil
+        (let ((directories
+               (seq-filter
+                (lambda (directory)
+                  (and (stringp directory)
+                       (file-name-absolute-p directory)
+                       (not (string-match-p ":" directory))))
+                (mapcar #'file-local-name (exec-path))))
+              (physical-directory default-directory))
+          (with-temp-buffer
+            (let* ((default-directory physical-directory)
+                   (status
+                    (process-file "/bin/sh" nil t nil "-c"
+                                  remote--path-executable-probe-script
+                                  "sh" program
+                                  (string-join directories ":")))
+                   (output (buffer-string)))
+              (cond
+               ((and (equal status 0)
+                     (> (length output) 1)
+                     (eq (aref output (1- (length output))) 0)
+                     (file-name-absolute-p
+                      (substring output 0 (1- (length output)))))
+                (cons t (concat (file-remote-p physical-directory)
+                                (substring output 0 (1- (length output))))))
+               ((equal status 1) (cons t nil))))))
+      (error nil))))
+
 (defun remote-executable-find (program &optional context)
   "Find PROGRAM on CONTEXT's logical target.
 The return value is a target-native path, never a physical TRAMP link name."
@@ -811,8 +858,12 @@ The return value is a target-native path, never a physical TRAMP link name."
                       (concat prefix program)
                     (expand-file-name program physical-directory))))
             (rpc-probe
-             (and (equal (remote-route-link-plugin-id route) "tramp-rpc")
-                  (remote--rpc-executable-find program)))
+             (cond
+              ((equal (remote-route-link-plugin-id route) "tramp-rpc")
+               (remote--rpc-executable-find program))
+              ((and (not absolute)
+                    (remote-process--round-trip-route-p route))
+               (remote--path-executable-find program))))
             (found
              (if rpc-probe
                  (cdr rpc-probe)
@@ -875,6 +926,44 @@ other stdio peer remains on the selected target."
                 physical-directory logical-directory)))
          (remote-backend-stdio-bridge-command execution))))))
 
+(defconst remote-process--inline-stderr-script
+  (concat
+   "m=$1; shift; "
+   "t=$(mktemp 2>/dev/null) || t=; "
+   "if [ -n \"$t\" ]; then \"$@\" 2>\"$t\"; else \"$@\" 2>/dev/null; fi; "
+   "s=$?; printf '%s' \"$m\"; "
+   "if [ -n \"$t\" ]; then cat \"$t\"; rm -f \"$t\"; fi; "
+   "exit \"$s\"")
+  "POSIX `sh -c' script that returns a command's stderr after its stdout.
+Its first argument is a marker unique to the call, the rest is the command.
+The command runs with its own stdout; its stderr follows the marker.")
+
+(defun remote-process--round-trip-route-p (route)
+  "Return non-nil when every file operation on ROUTE is its own round trip.
+Process helpers then fold their work into the one command they run anyway.
+Handing `process-file' a stderr file makes such a backend create, stat, read
+back and delete a target file around the command, eleven trips for one
+process; searching PATH with file tests costs one trip per directory.  A
+batched or native backend keeps the direct forms."
+  (eq (plist-get
+       (ignore-errors
+         (remote-backend-describe (remote-route-link-plugin-id route)))
+       :file-operation-cost)
+      'round-trip))
+
+(defun remote-process--split-inline-stderr (output marker)
+  "Split OUTPUT at the last MARKER into (STDOUT . STDERR).
+Without the marker the wrapper never ran to its end; all of OUTPUT is stdout."
+  (if-let* ((start (string-search marker output))
+            (last (let ((position start) next)
+                    (while (setq next (string-search
+                                       marker output (1+ position)))
+                      (setq position next))
+                    position)))
+      (cons (substring output 0 last)
+            (substring output (+ last (length marker))))
+    (cons output "")))
+
 (cl-defun remote-exec
     (program &key args context (adapter "exec") link environment check trim
              (filesystem-effects 'unknown))
@@ -910,6 +999,21 @@ conservative file-attribute cache flush."
                           execution))
                         (command
                          (remote-backend-execution-command execution))
+                        (marker
+                         (and (remote-process--round-trip-route-p route)
+                              (format "\n__EMACS_STDERR_%s__\n"
+                                      (secure-hash
+                                       'sha1
+                                       (format "%s:%s:%s" (float-time)
+                                               (random) (emacs-pid))))))
+                        (invocation
+                         (if marker
+                             (append
+                              (list "/bin/sh" "-c"
+                                    remote-process--inline-stderr-script
+                                    "sh" marker)
+                              command)
+                           command))
                         (base-process-environment process-environment)
                         (base-exec-path exec-path)
                         (remote-current-route route)
@@ -932,19 +1036,27 @@ conservative file-attribute cache flush."
                                   (remote--exec-path-for-environment
                                    overrides base-exec-path)))
                              (apply #'process-file
-                                    (car command) nil
-                                    (list stdout-buffer stderr-file)
-                                    nil (cdr command)))))
-                        (stdout
-                         (with-current-buffer stdout-buffer
-                           (buffer-substring-no-properties
-                            (point-min) (point-max))))
-                        (stderr
-                         (with-temp-buffer
-                           (when (file-readable-p stderr-file)
-                             (insert-file-contents stderr-file))
-                           (buffer-substring-no-properties
-                            (point-min) (point-max)))))
+                                    (car invocation) nil
+                                    (list stdout-buffer
+                                          (and (not marker) stderr-file))
+                                    nil (cdr invocation)))))
+                        (streams
+                         (let ((output
+                                (with-current-buffer stdout-buffer
+                                  (buffer-substring-no-properties
+                                   (point-min) (point-max)))))
+                           (if marker
+                               (remote-process--split-inline-stderr
+                                output marker)
+                             (cons
+                              output
+                              (with-temp-buffer
+                                (when (file-readable-p stderr-file)
+                                  (insert-file-contents stderr-file))
+                                (buffer-substring-no-properties
+                                 (point-min) (point-max)))))))
+                        (stdout (car streams))
+                        (stderr (cdr streams)))
                    (remote-exec-result-create
                     :status status
                     :stdout (if trim (string-trim stdout) stdout)

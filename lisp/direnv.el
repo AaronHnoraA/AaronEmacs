@@ -55,6 +55,23 @@ saved `.envrc' buffers invalidate the cache immediately."
   :type 'number
   :group 'direnv)
 
+(defcustom direnv-envrc-root-cache-round-trip-timeout 30.0
+  "Seconds to reuse a `.envrc' root discovery where each probe is a round trip.
+Discovery tests every ancestor directory.  On a backend that declares
+`round-trip' file operations that alone can take longer than
+`direnv-envrc-root-cache-timeout', so every process started more than a
+second after the last one would search again.  Explicit direnv commands and
+saved `.envrc' buffers still invalidate the cache immediately."
+  :type 'number
+  :group 'direnv)
+
+(defun direnv--envrc-root-cache-lifetime (source)
+  "Return how long a `.envrc' root discovery for SOURCE stays valid."
+  (if (eq (ignore-errors (remote-file-operation-cost source)) 'round-trip)
+      (max (or direnv-envrc-root-cache-timeout 0)
+           (or direnv-envrc-root-cache-round-trip-timeout 0))
+    direnv-envrc-root-cache-timeout))
+
 (defvar direnv--hooks
   '(before-hack-local-variables-hook)
   "Hooks used while `direnv-mode' is enabled.")
@@ -157,11 +174,12 @@ trigger project or `.envrc' discovery while a connection is being established."
                            'path)
                          source)))
          (cached (and key (gethash key direnv--envrc-root-cache)))
-         (now (float-time)))
+         (now (float-time))
+         (lifetime (and cached (direnv--envrc-root-cache-lifetime source))))
     (if (and cached
-             (numberp direnv-envrc-root-cache-timeout)
-             (> direnv-envrc-root-cache-timeout 0)
-             (< (- now (car cached)) direnv-envrc-root-cache-timeout))
+             (numberp lifetime)
+             (> lifetime 0)
+             (< (- now (car cached)) lifetime))
         (cdr cached)
       (let ((root
              (when-let* ((directory (direnv--directory path))

@@ -330,7 +330,10 @@
                                  (dolist (item event)
                                    (when (stringp item)
                                      (push item candidates)))))))
-                   (deadline (+ (float-time) 3)))
+                   ;; The wait ends with the first candidate.  The bound only
+                   ;; has to cover a high-latency target, where starting the
+                   ;; search process alone takes several round trips.
+                   (deadline (+ (float-time) 15)))
               (funcall driver 'setup)
               (unwind-protect
                   (progn

@@ -1223,6 +1223,33 @@ probe's temporary output buffer must not fall back to the global value."
       (should (eq (plist-get description :mtime-compare)
                   (nth 2 expected))))))
 
+(ert-deftest remote-require-on-client-escapes-the-target-context ()
+  "Loading a package or its native module must never reach a target."
+  (let ((default-directory "/fs:box:/work/")
+        (remote-current-adapter-id "language-server")
+        (remote-current-route 'target-route)
+        (remote-current-workspace 'target-workspace)
+        observed)
+    (cl-letf (((symbol-function 'remote-client-process-environment)
+               (lambda () '("CLIENT_ENV=1")))
+              ((symbol-function 'remote-client-exec-path)
+               (lambda () '("/client/bin")))
+              ((symbol-function 'require)
+               (lambda (feature &optional filename noerror)
+                 (setq observed
+                       (list feature filename noerror
+                             default-directory process-environment
+                             exec-path remote-current-adapter-id
+                             remote-current-route remote-current-workspace))
+                 feature)))
+      (should (eq (remote-require-on-client 'test-client-package nil t)
+                  'test-client-package)))
+    (should
+     (equal observed
+            (list 'test-client-package nil t
+                  temporary-file-directory '("CLIENT_ENV=1")
+                  '("/client/bin") nil nil nil)))))
+
 (ert-deftest remote-placement-queries-reuse-the-validated-route ()
   "Cost and placement are asked per buffer; they must not reselect a route."
   (let ((file (remote-canonicalize-file-name

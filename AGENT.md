@@ -140,9 +140,17 @@ Keep these rules:
   caches the first handle.  A consumer that ends a resource itself also takes
   it off the workspace, which otherwise recovers it on every reconnect.
 - A terminal neither waits for nor triggers an environment capsule build, and
-  asks `remote-path-login-shell` for its shell; the PATH probe runs the whole
-  shell startup inside Emacs.  Hot-path caches count the backends that provide
-  a capability, not the backends on a link.
+  never opens a session to learn its shell: `remote-path-login-shell` asks only
+  where the route already has one, otherwise the target execs `$SHELL` inside
+  the PTY session.  Hot-path caches count the backends that provide a
+  capability, not the backends on a link.
+- Client code is loaded with `remote-require-on-client`.  A package required
+  from a remote `default-directory` sends its load-time file operations to the
+  target; `module-load` alone opens a file session there.
+- On a backend that declares `round-trip` file operations, a helper folds its
+  bookkeeping into the one command it runs anyway (stderr, PATH search) instead
+  of adding file operations around it.  Measure on a high-latency target
+  before calling a remote path fast; a LAN host hides every extra round trip.
 - A terminal frontend that removes its buffer when the process ends registers
   `:disconnect-function` with `remote-terminal-adopt`, so a lost transport
   keeps the buffer for `remote-terminal-restart`.  Whether an exit can be a

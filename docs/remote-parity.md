@@ -56,15 +56,15 @@ service 与 channel 来自同一 owning workspace target。异步 callback 在�
 | 稳定 workspace/file 身份 | remote | backend/pipeline 切换不改变 buffer、project、LSP URI |
 | 文件读写、目录、metadata | remote | 原生 API 全量契约、跨文件操作和错误语义一致；CSE 连续保存后的命名 ACL、inode、属主和权限已实测保持；经版本验证的原位写入跳过重复 ACL/SELinux 往返，小文件覆写中位耗时约 71→48 ms；属性可用性探测按连接换代缓存 |
 | target HOME 与符号链接 | remote | Aaron-PC 上 SSH 与 tramp-rpc 已验证 `~/`、`~user/`、相对/绝对/断链、truename 与跨目录链接；仍需 WSL/container 回归 |
-| 同步/异步 process | remote | cwd/env/executable 全由 backend execution 契约投影 |
-| PTY terminal | remote | CSE 与 Aaron-PC 真机上的 VTerm 已验证独立 `ssh-pty` 选路、workspace 跟踪、目标目录和输入输出；已有工作区中首个 PTY 不再建立 TRAMP 文件会话。RPC 传输或 PTY 进程故障后保留 disconnected buffer，工作区重连再手动重启终端已通过。frontend 断线契约（`:disconnect-function`、先判定后交给 frontend sentinel、重启失败保留旧终端、杀 buffer 不算断线）有故障注入单元测试；真实 Ghostel 已在 `local` target 上验证断线保留与原名重启（`REMOTE_GHOSTEL_E2E_FAULT=transport`），SSH target 上的同一用例尚未真机运行；仍需物理断网、WSL/container 回归 |
+| 同步/异步 process | remote | cwd/env/executable 全由 backend execution 契约投影；`round-trip` 后端上 `remote-exec` 的 stderr 与 `remote-executable-find` 的 PATH 搜索各只用一次往返，QWD-VPS-Wiki 实测热态 `remote-exec` 约 3.86 s→0.23 s |
+| PTY terminal | remote | CSE 与 Aaron-PC 真机上的 VTerm 已验证独立 `ssh-pty` 选路、workspace 跟踪、目标目录和输入输出；已有工作区中首个 PTY 不再建立 TRAMP 文件会话。RPC 传输或 PTY 进程故障后保留 disconnected buffer，工作区重连再手动重启终端已通过。frontend 断线契约（`:disconnect-function`、先判定后交给 frontend sentinel、重启失败保留旧终端、杀 buffer 不算断线）有故障注入单元测试；真实 Ghostel 已在 `local` 与 SSH target（QWD-VPS-Wiki，`ssh-pty`，往返约 250 ms）上验证断线保留与原名重启（`REMOTE_GHOSTEL_E2E_FAULT=transport`）。终端不为询问 shell 或加载 Ghostel 建立文件会话，该 target 上冷态打开约 15.2 s→0.12 s；仍需物理断网、WSL/container 回归 |
 | 有序 transport pipeline | local | stage 准备、复用、健康、失败回滚和逆序释放 |
 | SSH jump/multi-hop | local | 真机 ProxyJump、多 backend 共用 pipeline |
 | WSL/container hop | API | `/ssh:host|docker:container:`、WSL 与 Podman 真机回归 |
 | workspace lifecycle | local | open/reconnect/close 管理服务、任务、terminal、forward |
 | workspace-side service | local | 探测、可信部署、版本协商、启动、健康、停止 |
 | 环境与 remote settings | remote | user → target → workspace → tool → invocation 分层 |
-| 文件 watch | remote | 真实 SSH inotify 事件、路径重写、workspace owner，以及主动重连后的原句柄与新事件已验证；批处理 Emacs 的 RPC 传输进程退出、回复被丢弃及受控 TCP 流量黑洞后，新监听事件均已验证；补长期运行与物理网络故障回归 |
+| 文件 watch | remote | 真实 SSH inotify 事件、路径重写、workspace owner，以及主动重连后的原句柄与新事件已验证；批处理 Emacs 的 RPC 传输进程退出、回复被丢弃及受控 TCP 流量黑洞后，新监听事件均已验证；往返约 250 ms 的 shell TRAMP target（QWD-VPS-Wiki）上递归 watch 的事件送达与重连恢复已通过，就绪等待按连接时限放宽；补长期运行与物理网络故障回归 |
 | LSP/IntelliSense | remote | root/URI/server/cwd/env/watch/helper/channel 同属一个 workspace target；local/remote 同路由；受管 SSH 文件夹空闲时预热客户端 LSP 模块，Python 服务端初始化后异步预热首次补全，预热期间自动补全延后且结束后按原光标位置恢复；远程增量变更按顺序短时合批，请求前强制发送，CSE 模拟按键中位耗时约 1.25→0.83 ms；CSE 现有文件 Company 首次补全实测 959→48 ms；远端补全请求超过 1 秒时启用本地代码词补全，同时异步探活；持续无回复时按窗口限流重建 LSP 资源，CSE 故障注入已验证停旧服、新服预热及补全恢复；local 与 SSH 已验证主动重连后两个源码 buffer、诊断、补全及监听事件；RPC 传输进程退出、持续无回复及受控 SSH TCP 黑洞后均通过双 buffer 自动恢复；补 GUI 输入延迟、长期运行与更多语言服务端回归 |
 | 搜索与 SCM | remote | Aaron-PC 无系统 rg 时可在可信目标的用户缓存部署固定版本 rg，真实 Consult 异步候选含未跟踪文件；不支持的目标回退 grep。Magit status、worktree 访问、stage/unstage 已有 SSH 真机回归，未显式打开 workspace 时访问源码也复用 `/fs:` buffer，本地 target 复用原生 buffer；仍缺其他目标平台与 commit/push 等真机回归 |
 | tasks/tests | remote | `remote-task-run` 与命名 profile 在 local/CSE SSH 走同一 workspace process route；Compilation 输出与绝对错误路径回到 `/fs:`，任务可并发且随 buffer/workspace 关闭取消。CSE 的 tramp-rpc 和标准 TRAMP 真机均验证目标进程、普通子进程退出、失败码和错误跳转；RPC 传输故障注入已验证任务结果标为未知、workspace 自动恢复。仍需长时任务、真实物理断网和更多目标平台回归 |

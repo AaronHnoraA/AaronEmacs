@@ -560,6 +560,20 @@ REASON is recorded for observability."
       (remote-connection-invalidate route t 'configuration-removed))
     (length routes)))
 
+(defun remote-connection-route-open-p (route)
+  "Return non-nil when ROUTE itself has an open pooled session.
+Like `remote-connection-target-open-p' this reads framework state only.  A
+target can hold a session for one backend and none for another: an SSH PTY
+does not make a file session exist, and a caller that must not open one asks
+about the route it would use."
+  (when-let* ((connection
+               (gethash (remote-connection-route-key route)
+                        remote-connection-pool))
+              (runtime (remote-connection-pipeline-runtime connection)))
+    (and (eq (remote-connection-state connection) 'open)
+         (remote-pipeline-runtime-p runtime)
+         (eq (remote-pipeline-runtime-state runtime) 'open))))
+
 (defun remote-connection-target-open-p (target-id)
   "Return non-nil when TARGET-ID has an open pooled session.
 This reads framework state only and never touches the network, so it is cheap
