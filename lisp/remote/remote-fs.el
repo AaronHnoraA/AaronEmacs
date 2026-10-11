@@ -137,23 +137,20 @@ Backends may use this to bound a stalled request without shortening writes.")
 
 (defcustom remote-file-watch-startup-timeout 2.5
   "Seconds to wait for a Python recursive watcher to install its watches.
-A backend that declares `round-trip' file operations gets at least
-`remote-connection-open-timeout': its watcher is a process that may have to
-open a connection of its own first, which this bound is too short for on a
-high-latency link."
+The wait is at least `remote-connection-open-timeout': after a reconnect the
+watcher is the first process of a fresh session and may have to open a
+connection of its own, which this bound is too short for on a high-latency
+link whatever the backend.  Zero disables the wait."
   :type 'number
   :group 'remote)
 
-(defun remote-fs--watch-startup-timeout (watch)
-  "Return how long WATCH's backend may take to report its watches installed.
-The wait ends as soon as the watcher is ready or has died, so a longer bound
-costs nothing on a fast link."
+(defun remote-fs--watch-startup-timeout ()
+  "Return how long a watcher may take to report its watches installed.
+The wait ends as soon as the watcher is ready or has died, so the longer
+bound costs nothing on a fast link."
   (let ((timeout remote-file-watch-startup-timeout))
     (if (and (numberp timeout) (> timeout 0)
-             (numberp remote-connection-open-timeout)
-             (eq (ignore-errors
-                   (remote-file-operation-cost (remote-file-watch-file watch)))
-                 'round-trip))
+             (numberp remote-connection-open-timeout))
         (max timeout remote-connection-open-timeout)
       timeout)))
 
@@ -174,7 +171,7 @@ Other backends retain their existing readiness contract."
               ((eq (process-get physical 'remote-file-watch-provider)
                    'python-inotify)))
     (let ((deadline (+ (float-time)
-                       (remote-fs--watch-startup-timeout watch))))
+                       (remote-fs--watch-startup-timeout))))
       (while (and (eq physical
                       (remote-file-watch-physical-descriptor watch))
                   (process-live-p physical)
@@ -2646,22 +2643,40 @@ shared background scheduler."
       (setf (remote-file-watch-physical-descriptor watch) nil
             (remote-file-watch-suppress-events watch) nil))))
 
+(defvar remote-fs--watches-recovering nil
+  "Watches whose backend descriptor is being recreated right now.")
+
 (defun remote-file-watch-recover (watch)
-  "Recreate WATCH's backend descriptor and preserve its public handle."
+  "Recreate WATCH's backend descriptor and preserve its public handle.
+A reconnect kills the old watcher with its connection, and that death
+schedules a resync, which is itself a recovery.  The two must not overlap:
+waiting for the new watcher runs timers, and a resync that fired there would
+remove the watcher being waited for.  A recovery therefore drops a pending
+resync, and one entered while another is in progress leaves it alone."
   (unless (remote-file-watch-p watch)
     (error "Not a remote file watch: %S" watch))
-  (remote-fs--watch-remove-physical watch)
-  (condition-case error
-      (progn
-        (setf (remote-file-watch-physical-descriptor watch)
-              (remote-fs--watch-add-physical watch))
-        (remote-fs--watch-await-ready watch)
-        (setf (remote-file-watch-state watch) 'open)
-        watch)
-    ((error quit)
-     (remote-fs--watch-remove-physical watch)
-     (setf (remote-file-watch-state watch) 'failed)
-     (signal (car error) (cdr error)))))
+  (if (memq watch remote-fs--watches-recovering)
+      watch
+    (let ((remote-fs--watches-recovering
+           (cons watch remote-fs--watches-recovering))
+          (resync (list 'file-watch-resync (remote-file-watch-id watch))))
+      (unless (and remote-background--current-job
+                   (equal (remote-background-job-key
+                           remote-background--current-job)
+                          resync))
+        (remote-background-cancel resync 'watch-recovered))
+      (remote-fs--watch-remove-physical watch)
+      (condition-case error
+          (progn
+            (setf (remote-file-watch-physical-descriptor watch)
+                  (remote-fs--watch-add-physical watch))
+            (remote-fs--watch-await-ready watch)
+            (setf (remote-file-watch-state watch) 'open)
+            watch)
+        ((error quit)
+         (remote-fs--watch-remove-physical watch)
+         (setf (remote-file-watch-state watch) 'failed)
+         (signal (car error) (cdr error)))))))
 
 (defun remote-fs--watch-finalize-close
     (watch reason &optional from-workspace)

@@ -1643,22 +1643,61 @@
             (remote-workspace-resource-value resource)
             '(descriptor 2))))))))
 
-(ert-deftest remote-file-watch-startup-allows-a-connection-on-round-trip-routes ()
+(ert-deftest remote-file-watch-startup-allows-a-connection ()
   "A watcher that must open its own connection gets the connection deadline."
-  (let ((watch (remote-file-watch-create
-                :id "watch-deadline" :file "/fs:lab:/srv/project/"))
-        (remote-file-watch-startup-timeout 2.5)
-        (remote-connection-open-timeout 8)
-        (cost 'round-trip))
-    (cl-letf (((symbol-function 'remote-file-operation-cost)
-               (lambda (&rest _) cost)))
-      (should (= (remote-fs--watch-startup-timeout watch) 8))
-      (setq cost 'batched)
-      (should (= (remote-fs--watch-startup-timeout watch) 2.5))
-      ;; A disabled wait stays disabled.
-      (setq cost 'round-trip)
-      (let ((remote-file-watch-startup-timeout 0))
-        (should (= (remote-fs--watch-startup-timeout watch) 0))))))
+  (let ((remote-file-watch-startup-timeout 2.5)
+        (remote-connection-open-timeout 8))
+    (should (= (remote-fs--watch-startup-timeout) 8))
+    (let ((remote-connection-open-timeout 1))
+      (should (= (remote-fs--watch-startup-timeout) 2.5)))
+    (let ((remote-connection-open-timeout nil))
+      (should (= (remote-fs--watch-startup-timeout) 2.5)))
+    ;; A disabled wait stays disabled.
+    (let ((remote-file-watch-startup-timeout 0))
+      (should (= (remote-fs--watch-startup-timeout) 0)))))
+
+(ert-deftest remote-file-watch-recovery-is-not-raced-by-its-own-resync ()
+  "The old watcher's death schedules a resync; it must not undo the recovery.
+On a slow link the resync timer fires while the recovery is still waiting for
+its new watcher, kills that watcher and leaves the watch failed."
+  (let* ((remote-file-watches (make-hash-table :test #'equal))
+         (remote-background-jobs (make-hash-table :test #'equal))
+         (remote-background-target-epochs (make-hash-table :test #'equal))
+         (remote-background-retry-jitter 0)
+         (watch (remote-file-watch-create
+                 :id "watch-race" :generation 0 :state 'disconnected
+                 :file "/fs:lab:/srv/" :target-id "lab"
+                 :descriptor '(remote-file-watch . "watch-race")))
+         (created 0) (removed 0) nested)
+    (puthash "watch-race" watch remote-file-watches)
+    (cl-letf (((symbol-function 'remote-fs--watch-add-physical)
+               (lambda (_watch) (list 'physical (cl-incf created))))
+              ((symbol-function 'remote-fs--watch-remove-physical)
+               (lambda (target)
+                 (when (remote-file-watch-physical-descriptor target)
+                   (cl-incf removed))
+                 (setf (remote-file-watch-physical-descriptor target) nil)))
+              ((symbol-function 'remote-fs--watch-await-ready)
+               (lambda (target)
+                 ;; The resync timer fires during the wait.
+                 (unless nested
+                   (setq nested t)
+                   (should (eq (remote-file-watch-recover target) target)))
+                 target)))
+      ;; What the killed watcher's sentinel leaves behind.
+      (remote-file-watch-resync watch 'backend-stopped)
+      (should (gethash '(file-watch-resync "watch-race")
+                       remote-background-jobs))
+      (should (eq (remote-file-watch-recover watch) watch))
+      (should nested)
+      (should (= created 1))
+      (should (zerop removed))
+      (should (equal (remote-file-watch-physical-descriptor watch)
+                     '(physical 1)))
+      (should (eq (remote-file-watch-state watch) 'open))
+      ;; The recovery did the resync's work; nothing is left to fire later.
+      (should-not (gethash '(file-watch-resync "watch-race")
+                           remote-background-jobs)))))
 
 (ert-deftest remote-file-watch-recovery-rejects-unready-python-backend ()
   "A reconnect cannot report a watch open before its ready handshake."

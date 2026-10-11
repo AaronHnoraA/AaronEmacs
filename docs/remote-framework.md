@@ -711,10 +711,20 @@ SSH target 约 89→51 µs。远端的复用条件是“具备该能力的后端
   要逐级探测祖先目录，1 秒寿命意味着相隔一秒以上的每次进程启动都重新探测。显式
   direnv 命令与保存 `.envrc` 仍立即失效。
 
-- 递归 Python watcher 的就绪等待在这类后端上至少是
-  `remote-connection-open-timeout`，而不是 `remote-file-watch-startup-timeout` 的
-  2.5 秒：watcher 是一个可能要先自己建连的进程，重连后恢复 watch 时尤其如此。
-  等待在 watcher 就绪或死亡时立即结束，放宽上限不影响快链路。
+
+递归 Python watcher 的就绪等待在所有后端上至少是 `remote-connection-open-timeout`，
+而不是 `remote-file-watch-startup-timeout` 的 2.5 秒：重连后 watcher 是新会话的第一个
+进程，可能要先自己建连，这与后端类型无关，只取决于链路延迟（QWD-VPS-Wiki 上 shell
+TRAMP 与 tramp-rpc 两条路由都在 2.5 秒内恢复不了 watch，workspace 因此停在
+degraded）。等待在 watcher 就绪或死亡时立即结束，放宽上限不影响快链路。
+
+watch 的恢复与它自己的 resync 互斥。重连关闭旧连接时旧 watcher 随之被杀，这次死亡
+会排一个后台 resync，而 resync 本身也是一次恢复；workspace 的恢复流程在等待新
+watcher 就绪时会运行定时器，高延迟链路上 resync 恰好在这段等待里触发，先把正在被
+等待的新 watcher 删掉，恢复于是报未就绪、watch 失败、workspace 停在 degraded。
+`remote-file-watch-recover` 因此在开始时取消尚未运行的 resync，并让恢复期间重入的
+调用直接返回。QWD-VPS-Wiki 的 tramp-rpc 路由上复现并验证：重连后 watch 与
+workspace 都回到 open。
 
 tramp-rpc 首次部署服务端走的是另一条普通 TRAMP 引导连接
 （`tramp-rpc-deploy-bootstrap-method`，默认 `scpx`），它有自己的前缀。
