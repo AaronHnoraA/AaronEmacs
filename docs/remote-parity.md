@@ -72,13 +72,13 @@ service 与 channel 来自同一 owning workspace target。异步 callback 在�
 | TCP/TLS client | local | SSH forward 上继续使用 Emacs 原生 network stream |
 | port forwarding | remote | SSH `-L` 转发经面板创建、命名、复制、关闭，并可调整本地端口；占用端口的失败操作保留原转发。独立 SSH 连接避免 ControlMaster 重建竞态；Aaron-PC 真机已验证换端口后的 SSH banner、重连后端口与名称保留；补突发断线故障注入和访问策略 |
 | remote listener/reverse forward | remote | native 回环与 SSH `-R` 真机动态端口已验证；补访问策略和断线恢复故障注入 |
-| Noema Jupyter cells | remote | kernel/cwd/env、`.cell`、五通道与 widget asset 跟随 owning Target；`hb` 心跳覆盖三种 connector 的死亡检测，liveness 探测区分确认死亡与 `unknown`，Emacs 退出时回收 broker kernel；关闭或重启 kernel 即从 workspace 取下其 runtime 与五通道资源，重连不再为已死的 kernel 重开转发，重复关闭不再向旧进程组发信号；真实 SSH kernel E2E 与传输断线故障注入仍缺，因此未到 resilient |
+| Noema Jupyter cells | remote | kernel/cwd/env、`.cell`、五通道与 widget asset 跟随 owning Target；`hb` 心跳覆盖三种 connector 的死亡检测，liveness 探测区分确认死亡与 `unknown`，Emacs 退出时回收 broker kernel；关闭或重启 kernel 即从 workspace 取下其 runtime 与五通道资源，重连不再为已死的 kernel 重开转发，重复关闭不再向旧进程组发信号。broker 生命周期已在真实 SSH + tramp-rpc 会话（本机回环 sshd）上走通：启动、心跳端口经转发可达、重连后 generation 递增且 kernel 存活、关闭后进程/资源/转发/连接文件全部回收；Linux 远端主机上的 kernel E2E 与执行中途断线的故障注入仍缺，因此未到 resilient |
 | ACP agent（agent-shell） | remote | 所有 agent-shell 入口共用一条 placement：cwd 规范到 `/fs:`，进程经 `make-process` 句柄在 target 启动，可执行文件按 target PATH 查找，ACP 路径双向映射；local 与 CSE SSH 以 stdio ACP stub 实测 initialize/session/new、目标主机、cwd、显式环境变量与路径回映射；尚缺真实 agent 长会话、断线后会话恢复回归 |
 | tunnel | 模型 | 外部 Tailscale/FRP endpoint 可用；尚无托管 tunnel service |
 | Dev Container lifecycle | 未实现 | 读取 devcontainer、build/create/start/attach/rebuild |
 | 工具/“扩展”部署 | API | service manifest、版本锁、离线包、更新与回滚 |
 | 认证与 workspace trust | API | provisioning trust gate；面板显示 SSH 认证、主机密钥、主机名和网络失败状态，以及首次建连的传输、登录、后端检查阶段；`L` 查看按目标保留的连接事件，`D` 查看异步 SSH 诊断，`T` 打开交互式登录终端；认证输入仍由 TRAMP 处理，尚无统一的认证提示 UI |
-| 自动重连/恢复 | remote | SSH 传输失败注入、真实 RPC 传输进程退出、客户端丢弃 RPC 回复，以及仅作用于测试连接的 TCP 中继丢包后，workspace、LSP 两个源码 buffer 和 watch 自动恢复；受管 SSH 主连接和转发统一启用 OpenSSH 15 秒 × 3 次保活探测，首次自动重连默认缩短建连等待、后续重试保留原上限，目标可覆盖配置；补物理网络故障、认证过期与长期运行回归；terminal 明确手动恢复 |
+| 自动重连/恢复 | remote | SSH 传输失败注入、真实 RPC 传输进程退出、客户端丢弃 RPC 回复，以及仅作用于测试连接的 TCP 中继丢包后，workspace、LSP 两个源码 buffer 和 watch 自动恢复；真实 tramp-rpc 会话上冻结服务端进程树形成的半开连接也已验证（命令在 RPC 读超时后失败、workspace 断开、下一次文件操作经新连接恢复）；受管 SSH 主连接和转发统一启用 OpenSSH 15 秒 × 3 次保活探测，首次自动重连默认缩短建连等待、后续重试保留原上限，目标可覆盖配置；补物理网络故障、认证过期与长期运行回归；terminal 明确手动恢复 |
 | Remote Explorer/Doctor | remote | 面板可打开配置、当前和最近文件夹，按目标补全目录，显示连接阶段与端口，重连 workspace、管理转发；模式栏显示当前 target；`a` 可逐项加入 SSH 主机，`A` 可粘贴常见 SSH 连接命令，自定义文件通过 `-F` 贯通连接、进程和转发；`L`、`D`、`T` 提供连接事件、按目标诊断与登录终端 |
 
 ### SSH v1 已落地的基线

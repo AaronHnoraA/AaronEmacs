@@ -123,6 +123,55 @@ default TCP connect timeout."
      (mapcar (lambda (option) (list "-o" option)) options)
      (copy-tree base))))
 
+(defvar tramp-rpc-deploy-bootstrap-method)
+
+(defun remote-backend-tramp--bootstrap-prefix (prefix)
+  "Return the TRAMP prefix tramp-rpc deploys its server through for PREFIX.
+Nil unless PREFIX is an RPC prefix.  tramp-rpc installs its server over a
+second, ordinary TRAMP connection that uses
+`tramp-rpc-deploy-bootstrap-method' for the same user, host and port."
+  (when (and (stringp prefix) (string-match "\\`/rpc:" prefix))
+    (concat "/"
+            (or (bound-and-true-p tramp-rpc-deploy-bootstrap-method) "scpx")
+            ":" (substring prefix (match-end 0)))))
+
+(defun remote-backend-tramp--bootstrap-properties (prefix options config-args)
+  "Return (PROPERTY . VALUE) pairs for the bootstrap connection of RPC PREFIX.
+The SSH OPTIONS and CONFIG-ARGS scoped to the RPC prefix do not reach the
+bootstrap connection, which has a prefix of its own.  Without them a host
+that exists only in a custom SSH config file can never get its server
+deployed and stays on the fallback backend for good."
+  (when-let* ((bootstrap (remote-backend-tramp--bootstrap-prefix prefix))
+              ((or options config-args))
+              (method (tramp-file-name-method
+                       (tramp-dissect-file-name bootstrap nil)))
+              (entry (assoc method tramp-methods)))
+    (let* ((login-args
+            (remote-backend-tramp--method-login-args
+             method options config-args))
+           (copy-base (cadr (assq 'tramp-copy-args (cdr entry))))
+           (copy-args
+            (and copy-base
+                 (append
+                  (when config-args (list config-args))
+                  (mapcar (lambda (option) (list "-o" option)) options)
+                  (copy-tree copy-base)))))
+      (delq nil
+            (list (and login-args (cons "login-args" login-args))
+                  (and copy-args (cons "copy-args" copy-args)))))))
+
+(defun remote-backend-tramp--seed-properties (prefix properties)
+  "Set PROPERTIES for PREFIX in TRAMP's existing connection cache.
+PROPERTIES is a list of (PROPERTY . VALUE).  See
+`remote-backend-tramp--seed-login-args' for why this is necessary."
+  (when (and prefix properties
+             (fboundp 'tramp-set-connection-property)
+             (fboundp 'tramp-dissect-file-name))
+    (let ((vector (tramp-dissect-file-name prefix nil)))
+      (pcase-dolist (`(,property . ,value) properties)
+        (tramp-set-connection-property
+         vector (propertize property 'tramp-default t) value)))))
+
 (defun remote-backend-tramp--seed-login-args (prefix login-args)
   "Set PREFIX's LOGIN-ARGS in TRAMP's existing connection cache.
 TRAMP initializes `tramp-connection-properties' only when it creates a cache
@@ -336,16 +385,25 @@ property the same way TRAMP marks static defaults, so it is not persisted."
          (login-args
           (remote-backend-tramp--method-login-args
            method options config-args))
+         (bootstrap-prefix (remote-backend-tramp--bootstrap-prefix prefix))
+         (bootstrap-properties
+          (remote-backend-tramp--bootstrap-properties
+           prefix options config-args))
          ;; These are official, connection-scoped TRAMP overrides.  Dynamic
          ;; binding keeps one pipeline's SSH policy out of every other target.
          (tramp-connection-properties
-          (if (and prefix login-args)
-              (cons
-               (list
-                (concat "\\`" (regexp-quote prefix))
-                "login-args" login-args)
-               tramp-connection-properties)
-            tramp-connection-properties))
+          (append
+           (and prefix login-args
+                (list
+                 (list
+                  (concat "\\`" (regexp-quote prefix))
+                  "login-args" login-args)))
+           (mapcar
+            (lambda (property)
+              (list (concat "\\`" (regexp-quote bootstrap-prefix))
+                    (car property) (cdr property)))
+            bootstrap-properties)
+           tramp-connection-properties))
          ;; tramp-rpc's ControlMaster bootstrap reads raw args, whereas its
          ;; server process reads both raw args and `tramp-rpc-ssh-options'.
          (tramp-rpc-ssh-args
@@ -383,7 +441,9 @@ property the same way TRAMP marks static defaults, so it is not persisted."
          ;; remains the connection target.
          (default-directory temporary-file-directory))
     (when config-args
-      (remote-backend-tramp--seed-login-args prefix login-args))
+      (remote-backend-tramp--seed-login-args prefix login-args)
+      (remote-backend-tramp--seed-properties
+       bootstrap-prefix bootstrap-properties))
     (unless (file-remote-p physical nil 'connected)
       (file-attributes physical))
     physical))

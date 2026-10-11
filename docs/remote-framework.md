@@ -716,6 +716,16 @@ SSH target 约 89→51 µs。远端的复用条件是“具备该能力的后端
   2.5 秒：watcher 是一个可能要先自己建连的进程，重连后恢复 watch 时尤其如此。
   等待在 watcher 就绪或死亡时立即结束，放宽上限不影响快链路。
 
+tramp-rpc 首次部署服务端走的是另一条普通 TRAMP 引导连接
+（`tramp-rpc-deploy-bootstrap-method`，默认 `scpx`），它有自己的前缀。
+`remote-backend-tramp-connect` 因此把 RPC 路由的 SSH 选项与 `-F` 同样作用到引导
+前缀的 `login-args` 和 `copy-args` 上；否则只存在于自定义 SSH 配置文件里的主机
+连引导都连不上，服务端永远部署不了，路由只能一直回退到 shell TRAMP。
+
+回环 sshd 上真实 tramp-rpc 会话的实测：文件句柄的路由查找约 65→20 µs，单次元数据
+文件操作约 210→172 µs；向半开连接发出的命令在 RPC 读超时（30 秒）后失败而不是
+永久挂起，workspace 标记为 disconnected，随后的文件操作约 4 秒内经新连接恢复。
+
 QWD-VPS-Wiki（往返约 250 ms）上的实测：热态 `remote-exec "true"` 从约 3.86 s 降到
 约 0.23 s；首个递归 watch 就绪从约 5.8 s 降到约 2.4 s；`make remote-e2e` 的
 `-Q` 部分从 299 s 降到约 224~250 s，并且原先在该链路上失败的递归 watch 用例
@@ -1148,7 +1158,18 @@ emacs --batch --init-directory=. -q -l early-init.el -l init.el \
 ```
 
 SSH E2E 是显式 opt-in，自动选择 SSH config 导入的 `Aaron-*` target，也可以通过
-`REMOTE_E2E_TARGET` 指定。局域网主机会掩盖每一次多余的往返：性能与时限相关的改动
+`REMOTE_E2E_TARGET` 指定。`REMOTE_E2E_TMPDIR` 指定 target 上的临时目录（默认
+`/tmp/`），必须是目录的真实路径：macOS target 的 `/tmp` 是符号链接，身份类断言会
+拿路径和它自己的 truename 比较，此时应设为 `/private/tmp`。递归 watch 用例只在
+Linux target 上运行，两种 provider 都基于 inotify。
+
+没有可用的受信任远端主机时，可以在本机回环上起一个用户级临时 sshd 作为 target
+（临时主机密钥与客户端密钥、`AuthorizedKeysFile` 指向临时目录、只监听 127.0.0.1），
+再把 `remote-config-file` 指向一份只导入该 SSH 配置、`trusted` 且首选 tramp-rpc
+的临时 JSON。它提供真实的 SSH 传输与真实的 RPC 会话，不改系统设置；冻结
+（`SIGSTOP`）该 sshd 的整棵子进程树即得到一条不回 RST 的半开连接。TRAMP 自己的
+引导连接在 macOS target 上找不到合用的 `ls`，这个测试台因此用
+`tramp-rpc-deploy-never-deploy` 加手动放置的服务端二进制。局域网主机会掩盖每一次多余的往返：性能与时限相关的改动
 应在高延迟 target（例如往返约 250 ms 的 QWD-VPS-Wiki）上再跑一遍，测试里的等待
 上限也按这种链路留出余量。它只在本地和 target 的 `/tmp` 创建随机目录，并在结束
 时清理；覆盖文件复制/读取/枚举、target cwd 进程、session 复用，以及动态 SSH

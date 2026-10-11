@@ -20,6 +20,15 @@
   "Return non-nil when destructive temporary E2E checks are opted in."
   (equal (getenv "REMOTE_E2E") "1"))
 
+(defun remote-e2e--tmp (&optional name)
+  "Return the target's temporary directory, or NAME inside it.
+`REMOTE_E2E_TMPDIR' names it; the default is `/tmp/'.  It has to be the
+directory's true name: on a macOS target `/tmp' is a symbolic link, and the
+identity checks below would compare a path against its own truename."
+  (let ((directory
+         (file-name-as-directory (or (getenv "REMOTE_E2E_TMPDIR") "/tmp/"))))
+    (if name (concat directory name) directory)))
+
 (defun remote-e2e--ssh-config-args (target)
   "Return client SSH config arguments for TARGET's imported pipeline."
   (when-let* ((pipeline
@@ -119,7 +128,7 @@
   (let* ((target (or (remote-e2e--target)
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
-         (context (remote-context (remote-make-file-name target-id "/tmp/")))
+         (context (remote-context (remote-make-file-name target-id (remote-e2e--tmp))))
          (remote-search--cache (make-hash-table :test #'equal))
          (remote-search--workers (make-hash-table :test #'equal)))
     (unless (remote-target-trusted target)
@@ -150,7 +159,7 @@
   (let* ((target (or (remote-e2e--target)
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
-         (logical (remote-make-file-name target-id "/tmp/")))
+         (logical (remote-make-file-name target-id (remote-e2e--tmp))))
     (when (remote-executable-find "java" logical)
       (ert-skip "Selected target already has Java"))
     (with-temp-buffer
@@ -173,11 +182,11 @@
     (unless (remote-target-trusted target)
       (ert-skip "Provisioning requires a trusted target"))
     (let* ((context (remote-context
-                     (remote-make-file-name target-id "/tmp/")))
+                     (remote-make-file-name target-id (remote-e2e--tmp))))
            (native-root
             (string-trim
              (remote-exec-output
-              "mktemp" :args '("-d" "/tmp/emacs-service-e2e.XXXXXX")
+              "mktemp" :args (list "-d" (remote-e2e--tmp "emacs-service-e2e.XXXXXX"))
               :context context :adapter "exec" :check t)))
            (install
             (remote-make-file-name
@@ -244,11 +253,11 @@
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
          (bootstrap-context
-          (remote-context (remote-make-file-name target-id "/tmp/")))
+          (remote-context (remote-make-file-name target-id (remote-e2e--tmp))))
          (native-root
           (string-trim
            (remote-exec-output
-            "mktemp" :args '("-d" "/tmp/emacs-search-e2e.XXXXXX")
+            "mktemp" :args (list "-d" (remote-e2e--tmp "emacs-search-e2e.XXXXXX"))
             :context bootstrap-context :adapter "exec" :check t)))
          (logical-root
           (file-name-as-directory
@@ -418,11 +427,11 @@
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
          (context (remote-context
-                   (remote-make-file-name target-id "/tmp/")))
+                   (remote-make-file-name target-id (remote-e2e--tmp))))
          (native-directory
           (string-trim
            (remote-exec-output
-            "mktemp" :args '("-d" "/tmp/emacs-remote-folder.XXXXXX")
+            "mktemp" :args (list "-d" (remote-e2e--tmp "emacs-remote-folder.XXXXXX"))
             :context context :adapter "exec" :check t)))
          (logical (file-name-as-directory
                    (remote-make-file-name target-id native-directory)))
@@ -474,11 +483,11 @@
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
          (context (remote-context
-                   (remote-make-file-name target-id "/tmp/")))
+                   (remote-make-file-name target-id (remote-e2e--tmp))))
          (native-directory
           (string-trim
            (remote-exec-output
-            "mktemp" :args '("-d" "/tmp/emacs-remote-acl.XXXXXX")
+            "mktemp" :args (list "-d" (remote-e2e--tmp "emacs-remote-acl.XXXXXX"))
             :context context :adapter "exec" :check t)))
          (native-file (expand-file-name "acl.txt" native-directory))
          (logical-file (remote-make-file-name target-id native-file))
@@ -549,11 +558,11 @@
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
          (context (remote-context
-                   (remote-make-file-name target-id "/tmp/")))
+                   (remote-make-file-name target-id (remote-e2e--tmp))))
          (native-directory
           (string-trim
            (remote-exec-output
-            "mktemp" :args '("-d" "/tmp/emacs-remote-path.XXXXXX")
+            "mktemp" :args (list "-d" (remote-e2e--tmp "emacs-remote-path.XXXXXX"))
             :context context :adapter "exec" :check t)))
          (logical-directory
           (file-name-as-directory
@@ -607,7 +616,7 @@
   (let* ((target (or (remote-e2e--target)
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
-         (logical-root (remote-make-file-name target-id "/tmp/"))
+         (logical-root (remote-make-file-name target-id (remote-e2e--tmp)))
          (context (remote-context logical-root))
          (route (car (remote-routes "environment" 'process-sync context nil))))
     (unless (equal (remote-route-link-plugin-id route) "tramp-rpc")
@@ -618,7 +627,7 @@
            (present
             (string-trim
              (remote-exec-output
-              "mktemp" :args '("-d" "/tmp/emacs-remote-path-batch.XXXXXX")
+              "mktemp" :args (list "-d" (remote-e2e--tmp "emacs-remote-path-batch.XXXXXX"))
               :context context :adapter "exec" :check t)))
            (absent (concat present "/not-here")))
       (unwind-protect
@@ -647,12 +656,12 @@
          (target-id (remote-target-id target))
          (bootstrap-context
           (remote-context
-           (remote-make-file-name target-id "/tmp/")))
+           (remote-make-file-name target-id (remote-e2e--tmp))))
          (remote-directory
           (string-trim
            (remote-exec-output
             "mktemp"
-            :args '("-d" "/tmp/emacs-remote-e2e.XXXXXX")
+            :args (list "-d" (remote-e2e--tmp "emacs-remote-e2e.XXXXXX"))
             :context bootstrap-context
             :adapter "exec"
             :check t)))
@@ -784,11 +793,19 @@
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
          (context (remote-context
-                   (remote-make-file-name target-id "/tmp/")))
+                   (remote-make-file-name target-id (remote-e2e--tmp))))
+         (_linux
+          ;; Both recursive providers are built on inotify.
+          (unless (equal (string-trim
+                          (remote-exec-output
+                           "uname" :args '("-s")
+                           :context context :adapter "exec" :check t))
+                         "Linux")
+            (ert-skip "Recursive watches need a Linux target")))
          (native-directory
           (string-trim
            (remote-exec-output
-            "mktemp" :args '("-d" "/tmp/emacs-remote-watch.XXXXXX")
+            "mktemp" :args (list "-d" (remote-e2e--tmp "emacs-remote-watch.XXXXXX"))
             :context context :adapter "exec" :check t)))
          (root (file-name-as-directory
                 (remote-make-file-name target-id native-directory)))
@@ -888,7 +905,7 @@
   (let* ((target (or (remote-e2e--target)
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
-         (root (remote-make-file-name target-id "/tmp/"))
+         (root (remote-make-file-name target-id (remote-e2e--tmp)))
          (workspace (remote-workspace-open root :connect t))
          (initial-epoch (remote-background-target-epoch target-id))
          result failure job)
@@ -914,7 +931,7 @@
           (should (equal (string-trim
                           (remote-exec-output
                            "pwd" :context root :adapter "exec" :check t))
-                         "/tmp")))
+                         (directory-file-name (remote-e2e--tmp)))))
       (remote-workspace-close workspace 'e2e-cleanup)
       (remote-session-clear t))))
 
@@ -1069,7 +1086,7 @@
   (let* ((target (or (remote-e2e--target)
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
-         (context (remote-context (remote-make-file-name target-id "/tmp/")))
+         (context (remote-context (remote-make-file-name target-id (remote-e2e--tmp))))
          (home (string-trim
                 (remote-exec-output
                  "sh" :args '("-c" "printf '%s' \"$HOME\"")
@@ -1087,7 +1104,7 @@
          (native-root
           (string-trim
            (remote-exec-output
-            "mktemp" :args '("-d" "/tmp/emacs-path-e2e.XXXXXX")
+            "mktemp" :args (list "-d" (remote-e2e--tmp "emacs-path-e2e.XXXXXX"))
             :context context :adapter "exec" :check t)))
          (logical-root (file-name-as-directory
                         (remote-make-file-name target-id native-root)))

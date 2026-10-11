@@ -1223,6 +1223,28 @@ probe's temporary output buffer must not fall back to the global value."
       (should (eq (plist-get description :mtime-compare)
                   (nth 2 expected))))))
 
+(ert-deftest remote-tramp-rpc-bootstrap-inherits-the-route-ssh-options ()
+  "The connection that deploys the RPC server needs the same `-F' and options."
+  (let ((tramp-rpc-deploy-bootstrap-method "scpx"))
+    (should (equal (remote-backend-tramp--bootstrap-prefix "/rpc:me@lab#2222:")
+                   "/scpx:me@lab#2222:"))
+    (should-not (remote-backend-tramp--bootstrap-prefix "/ssh:lab:"))
+    (let* ((properties
+            (remote-backend-tramp--bootstrap-properties
+             "/rpc:lab:" '("ConnectTimeout=5") '("-F" "/client/ssh_config")))
+           (login (cdr (assoc "login-args" properties)))
+           (copy (cdr (assoc "copy-args" properties))))
+      ;; Both the shell login and the scp transfer of the binary.
+      (should (equal (seq-take login 2)
+                     '(("-F" "/client/ssh_config") ("-o" "ConnectTimeout=5"))))
+      (should (equal (seq-take copy 2)
+                     '(("-F" "/client/ssh_config") ("-o" "ConnectTimeout=5"))))
+      (should (> (length login) 2))
+      (should (> (length copy) 2)))
+    (should-not (remote-backend-tramp--bootstrap-properties "/rpc:lab:" nil nil))
+    (should-not (remote-backend-tramp--bootstrap-properties
+                 "/ssh:lab:" nil '("-F" "/client/ssh_config")))))
+
 (ert-deftest remote-require-on-client-escapes-the-target-context ()
   "Loading a package or its native module must never reach a target."
   (let ((default-directory "/fs:box:/work/")
