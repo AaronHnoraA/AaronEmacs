@@ -727,11 +727,21 @@ PREFERENCES is an alist keyed by capability, adapter ID, or `default'."
       (remote-route-capability route))
      remote-route-health)))
 
+(defconst remote--transport-health-capability :transport
+  "Health slot recording that a link's transport itself failed.
+A link that cannot be reached cannot be reached for any capability.  Keyed
+by capability alone, the failure of one operation's metadata route left its
+process and environment routes to wait out the same dead transport again.")
+
 (defun remote--cooling-p (link capability)
-  "Return non-nil when LINK reachability is cooling for CAPABILITY."
-  (when-let* ((health (remote-link-health link capability))
-              (failed-at (plist-get health :failed-at)))
-    (< (- (float-time) failed-at) remote-route-failure-cooldown)))
+  "Return non-nil when LINK reachability is cooling for CAPABILITY.
+A transport failure cools the link for every capability."
+  (seq-some
+   (lambda (slot)
+     (when-let* ((health (remote-link-health link slot))
+                 (failed-at (plist-get health :failed-at)))
+       (< (- (float-time) failed-at) remote-route-failure-cooldown)))
+   (list capability remote--transport-health-capability)))
 
 (defun remote--backend-cooling-p (route)
   "Return non-nil when ROUTE's backend is unavailable or cooling."
@@ -753,6 +763,9 @@ PREFERENCES is an alist keyed by capability, adapter ID, or `default'."
   (when-let* ((link (remote-get-link (remote-route-link-id route))))
     (puthash (remote--health-key link (remote-route-capability route))
              (list :status 'healthy :succeeded-at (float-time))
+             remote-route-health)
+    ;; Anything that got through proves the transport is back.
+    (remhash (remote--health-key link remote--transport-health-capability)
              remote-route-health)
     (puthash
      (remote--backend-health-key
@@ -816,6 +829,9 @@ cools the shared physical link."
             (remote-route-link-id route) nil error))
          (puthash
           (remote--health-key link (remote-route-capability route))
+          health remote-route-health)
+         (puthash
+          (remote--health-key link remote--transport-health-capability)
           health remote-route-health)))
       (remote-log
        'failure

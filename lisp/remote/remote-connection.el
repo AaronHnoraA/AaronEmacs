@@ -131,6 +131,68 @@ lease.  Set to zero to check every call."
 (defvar remote-connection--generation-counter 0
   "Monotonic identity assigned to every connection attempt.")
 
+(defcustom remote-connection-unreachable-hold 30
+  "Seconds a link stays unreachable after it failed to open within its deadline.
+During the hold, opening another session over that link fails at once instead
+of waiting out the deadline again.  A connection attempt is synchronous, so
+without it every command issued while a host is away freezes Emacs for the
+full timeout, once per backend.  A reconnect is exempt and ends the hold as
+soon as it succeeds.  Nil or zero disables the hold."
+  :type '(choice (const :tag "No hold" nil) (number :tag "Seconds"))
+  :group 'remote)
+
+(defvar remote-connection--unreachable (make-hash-table :test #'equal)
+  "Links that recently failed to open, as LINK-ID to (TIME . ERROR).")
+
+(defvar remote-connection-ignore-unreachable-hold nil
+  "Non-nil lets a connection attempt dial a link that is being held.
+Bound by reconnects, which are the attempts that find out a host is back.")
+
+(defun remote-connection-unreachable-remaining (route)
+  "Return the seconds ROUTE's link is still held as unreachable, or nil."
+  (when-let* (((numberp remote-connection-unreachable-hold))
+              ((> remote-connection-unreachable-hold 0))
+              (entry (gethash (remote-route-link-id route)
+                              remote-connection--unreachable))
+              (remaining (- remote-connection-unreachable-hold
+                            (- (float-time) (car entry)))))
+    (if (> remaining 0)
+        remaining
+      (remhash (remote-route-link-id route) remote-connection--unreachable)
+      nil)))
+
+(defun remote-connection-forget-unreachable (&optional link-id)
+  "End the unreachable hold for LINK-ID, or for every link."
+  (if link-id
+      (remhash link-id remote-connection--unreachable)
+    (clrhash remote-connection--unreachable)))
+
+(defun remote-connection--open-timeout (route)
+  "Return the seconds a session over ROUTE may take to open, or nil."
+  (let ((timeout
+         (or (when-let* ((pipeline (ignore-errors
+                                     (remote-route-pipeline route))))
+               (plist-get (ignore-errors
+                            (remote-pipeline-effective-config pipeline))
+                          :connect-timeout))
+             remote-connection-open-timeout)))
+    (and (numberp timeout) (> timeout 0) timeout)))
+
+(defun remote-connection--note-open-failure (route error elapsed)
+  "Hold ROUTE's link when ERROR after ELAPSED seconds means it is unreachable.
+That is a failure that waited out the deadline, or one the framework itself
+raised for a deadline.  A refusal that comes back at once is cheap to try
+again and says nothing about the next attempt."
+  (when (and (not (memq (car-safe error)
+                        '(quit remote-connection-cancelled
+                               remote-connection-busy)))
+             (or (remote-compat-error-has-type-p
+                  error 'remote-connection-timeout)
+                 (when-let* ((timeout (remote-connection--open-timeout route)))
+                   (>= elapsed (* 0.9 timeout)))))
+    (puthash (remote-route-link-id route) (cons (float-time) error)
+             remote-connection--unreachable)))
+
 (defvar remote-connection-opened-hook nil
   "Hook run with CONNECTION and ROUTE after a session becomes usable.")
 
@@ -296,6 +358,18 @@ requests only validate and reuse the retained session."
          :plugin (remote-route-link-plugin-id route)
          :uses (remote-connection-use-count existing)))
       existing)
+     ((and (not remote-connection-ignore-unreachable-hold)
+           (remote-connection-unreachable-remaining route))
+      (signal
+       'remote-connection-timeout
+       (list
+        (format
+         "%s did not answer %.0fs ago; not dialing again for %.0fs (reconnect the workspace to retry now)"
+         (remote-route-target-id route)
+         (- (float-time)
+            (car (gethash (remote-route-link-id route)
+                          remote-connection--unreachable)))
+         (remote-connection-unreachable-remaining route)))))
      (t
       (when existing
         (remhash key remote-connection-pool)
@@ -424,6 +498,8 @@ requests only validate and reuse the retained session."
                :target (remote-route-target-id route)
                :link (remote-route-link-id route)
                :plugin (remote-route-link-plugin-id route))
+              (remhash (remote-route-link-id route)
+                       remote-connection--unreachable)
               (run-hook-with-args
                'remote-connection-opened-hook connection route)
               connection)
@@ -452,6 +528,9 @@ requests only validate and reuse the retained session."
             (if (eq (remote-connection-state connection) 'cancelled)
                 'cancelled
               'failed))
+           (remote-connection--note-open-failure
+            route err
+            (float-time (time-subtract (current-time) opened-at)))
            (remote-log
             'connection-error
             :target (remote-route-target-id route)
@@ -608,6 +687,7 @@ disconnected until something opens it again."
      remote-connection-pool)
     (dolist (route routes)
       (remote-connection-invalidate route disconnect 'pool-clear))
+    (remote-connection-forget-unreachable)
     (length routes)))
 
 (defun remote-connection-warm

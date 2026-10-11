@@ -156,6 +156,13 @@ Keep these rules:
   keeps the buffer for `remote-terminal-restart`.  Whether an exit can be a
   transport loss is decided by the process being routed, never by target ID
   or frontend name.
+- Failure handling follows the matrix in `docs/remote-framework.md`.  A
+  connection attempt is synchronous, so nothing may wait on a link that is
+  known to be down: one framework connection is one bounded attempt, an
+  unreachable link is held for every capability and backend that shares it,
+  and waiting for a host to return is done by an asynchronous probe, never by
+  dialing in a loop.  A new consumer that walks ancestor directories registers
+  its marker names and calls `remote-prefetch-ancestor-markers` first.
 - A feature is not complete merely because the local path works or a capability
   symbol exists.  Apply the local/remote/resilience criteria in
   `docs/remote-parity.md`, and add parity tests for every new shared contract.

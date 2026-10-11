@@ -561,6 +561,48 @@ descriptor 由 `make-pipe-process` 隐式创建的 `tramp-rpc` buffer。transpor
 Python stdio peer，不要求安装 clangd；先断言 LSP 已初始化，再验证三个清理入口、
 未保存编辑、延迟回调及 8 秒后的连接状态。
 
+### 失败工况的处理矩阵
+
+Emacs 是单线程的，一次建连或一次 TRAMP 命令是同步的：处理失败的首要目标是
+**不让界面等一条已知不通的链路**，其次才是自动恢复。VS Code Remote-SSH 的公开行为
+（界面不冻结、后台持续重连且间隔拉长、主机不可达时快速失败并提示、重连后恢复转发与
+监听）是这里的对照基线；实现是独立的。下表的耗时是在往返约 0.2~250 ms 的真实
+SSH target 上，用暂停容器（主机不回任何包）、杀连接进程、重启主机得到的。
+
+| 工况 | 如何发现 | 界面最多等多久 | 回退 | 恢复 |
+|---|---|---|---|---|
+| 连接中断（对端 RST、ssh 进程死亡） | 进程 sentinel，立即 | 不等 | — | workspace 标记 disconnected，1、2、4 秒后各重连一次 |
+| 半开连接 / 主机不回包，会话仍在池中 | 该会话上的下一条命令超时（tramp-rpc 读超时 30 秒），或 OpenSSH 保活 15 秒 × 3 | 一次读超时 | — | 同上 |
+| 建连时主机不可达 | 一次建连在 `remote-connection-open-timeout`（8 秒）内未成功 | 一次时限 | 同一链路上的其他后端**不再**尝试：它们共用同一条传输 | 链路进入不可达保持期 |
+| 不可达保持期内的后续操作 | `remote-connection-unreachable-hold`（30 秒）内直接判定 | 不等，立即报错并说明还要多久、如何手动重试 | — | 重连不受保持期限制，成功即结束保持期 |
+| 断线超过自动重连预算 | 重连任务以传输错误告终 | 不等 | — | 每 `remote-workspace-return-probe-interval`（30 秒）起一个**异步**客户端探测进程，最多 `remote-workspace-return-probe-limit`（120）次；探到主机应答才真正重连 |
+| 主机回来但没人操作 | 上面的探测，或任何一次成功的建连 | 不等 | — | 停在 failed 的 workspace 重新进入重连，watch / 转发 / 服务随之恢复 |
+| 后端自身不可用（RPC 服务端部署失败等） | 后端分类为 `backend` | 一次尝试 | 同一链路上的下一个后端（shell TRAMP） | 冷却 `remote-route-failure-cooldown` 后重试首选后端 |
+| 重连后恢复 watch | watcher 就绪握手 | 至多连接时限 | — | 恢复与旧 watcher 死亡触发的 resync 互斥 |
+| 终端的传输丢失 | PTY 进程异常退出或 workspace 重连 | 不等 | — | buffer 保留为 disconnected，显式 `remote-terminal-restart` |
+| 用户显式断开 | — | — | — | 不自动重连，探测一并停止 |
+
+实现上的四条不变量：
+
+- **一次框架建连就是一轮有界尝试。** TRAMP 不记忆刚失败的连接，一个文件操作的每一步
+  都会重新建连，tramp-rpc 在连接失败后还会再走一次部署引导连接，每次都等满 SSH 超时；
+  TRAMP 读进程输出时禁用定时器，外层的 `with-timeout` 在这些等待之间插不进去。
+  `remote-backend-tramp-connect` 因此绑定一个截止时间，
+  `tramp-maybe-open-connection` 上的检查在截止之后拒绝再开始一次尝试；已经连上的
+  慢握手不受影响。主机不可达时，一条命令的等待从约 117 秒降到一次时限。
+- **“这条链路不通”是整条链路的结论，不是某个能力的。** 传输失败按链路记一份与
+  能力无关的冷却；按能力分别记录时，同一条命令的 metadata、process、environment
+  路由会把同一条死掉的传输各等一遍。
+- **等主机回来不能用同步建连去等。** 重试预算耗尽后改由异步探测进程等待
+  （`remote-workspace-reachability-probe-functions`；SSH 后端提供一条不经
+  ControlMaster、不弹提示的 `ssh … true`），成功才触发重连。
+- **重试要节制。** 新版 OpenSSH 会临时封禁“只连接不认证”的来源，主机不可达期间的
+  一长串无效建连会让它恢复后反而拒绝这个客户端。
+
+三个时长都登记在配置注册表里（`remote-connection-open-timeout`、
+`remote-connection-unreachable-hold`、`remote-workspace-return-probe-interval` /
+`-limit`）。
+
 错误被分为三类：
 
 - `backend`：当前 backend 不兼容，可在同一 pipeline 尝试另一个 backend；
@@ -741,6 +783,16 @@ QWD-VPS-Wiki（往返约 250 ms）上的实测：热态 `remote-exec "true"` 从
 `-Q` 部分从 299 s 降到约 224~250 s，并且原先在该链路上失败的递归 watch 用例
 （事件送达、重连后原句柄继续收到新事件）现在通过。`batched` 与本机后端保持原有的
 直接形式。
+
+祖先目录里的标记文件是另一处同类开销。项目根、VC 根、`.envrc` 的发现都是“在每一级
+祖先目录里问某个名字是否存在”，Projectile 的标记名有一百多个；在往返型后端上，打开
+一个不属于任何项目的文件（例如跳转定义进入系统头文件）要背靠背发几十次往返。
+consumer 用 `remote-register-ancestor-markers` 登记自己要找的名字，在发现之前调用
+`remote-prefetch-ancestor-markers`；往返型路由上它用一次 target 端循环查完所有名字在
+所有祖先目录里的存在性，由后端写进自己的存在性缓存（shell TRAMP 写入 TRAMP 官方的
+`file-exists-p` / `file-attributes` 文件属性），consumer 原有的查找随后零往返命中。
+其他路由、没有打开会话的 target、刚扫过的目录都不做任何事。QWD-VPS 上打开
+`/usr/include/stdio.h`：约 50 次往返 / 11 秒 → 19 次 / 4.3 秒。
 
 需要"每个文件一次子进程"的功能（VC、Magit、per-file 探测）用它决定开关，而不是
 测 `file-remote-p`、TRAMP method 或 backend ID。`native` 与 `tramp-rpc` 声明

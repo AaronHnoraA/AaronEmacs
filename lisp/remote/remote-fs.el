@@ -698,6 +698,69 @@ ADAPTER defaults to the ordinary file adapter.  Resolution is pure."
     (plist-get (remote-backend-describe (remote-route-link-plugin-id route))
                property)))
 
+(defvar remote-ancestor-marker-names nil
+  "File names consumers look for in a file's ancestor directories.
+Project, version-control and environment discovery all walk upwards asking
+whether some marker exists.  Consumers register their names with
+`remote-register-ancestor-markers' so that one scan can answer all of them.")
+
+(defvar remote-ancestor-prefetch-functions nil
+  "Functions that answer ancestor marker lookups for a route in one go.
+Each is called with a route, a canonical logical directory and the list of
+marker names.  It learns which of the names exist in the directory and each
+of its ancestors and stores that where the backend's own existence checks
+will find it, returning non-nil when it did.")
+
+(defcustom remote-ancestor-prefetch-lifetime 10
+  "Seconds for which one ancestor marker scan of a directory is not repeated."
+  :type 'number
+  :group 'remote)
+
+(defvar remote-fs--ancestor-prefetched (make-hash-table :test #'equal)
+  "Canonical directories whose ancestor markers were scanned, to scan time.")
+
+(defun remote-register-ancestor-markers (names)
+  "Add NAMES to the markers scanned by `remote-prefetch-ancestor-markers'."
+  (dolist (name names)
+    (when (and (stringp name)
+               (not (string-empty-p name))
+               ;; A wildcard needs a directory listing, not an existence test.
+               (not (string-match-p "[][*?\n]" name))
+               (not (file-name-absolute-p name)))
+      (cl-pushnew name remote-ancestor-marker-names :test #'equal)))
+  remote-ancestor-marker-names)
+
+(defun remote-prefetch-ancestor-markers (directory)
+  "Learn in one round trip which registered markers DIRECTORY's ancestors hold.
+Discovery of a project root, a version-control root or an `.envrc' asks for
+each marker in each ancestor.  Where every such question is a round trip of
+its own, opening one file outside any project asks dozens of them back to
+back and freezes Emacs for their sum.  On such a route this asks them all at
+once; the consumers' own lookups then find the answers already known.
+It does nothing on other routes, for a target with no open session, or for a
+directory scanned moments ago, and it never signals."
+  (ignore-errors
+    (when-let* ((remote-ancestor-marker-names)
+                (canonical (file-name-as-directory
+                            (remote-canonicalize-file-name directory)))
+                ((eq (remote-file-operation-cost canonical) 'round-trip))
+                ((remote-connection-target-open-p
+                  (remote-file-name-target canonical))))
+      (let ((scanned (gethash canonical remote-fs--ancestor-prefetched))
+            (now (float-time)))
+        (unless (and scanned
+                     (< (- now scanned) remote-ancestor-prefetch-lifetime))
+          (when (> (hash-table-count remote-fs--ancestor-prefetched) 256)
+            (clrhash remote-fs--ancestor-prefetched))
+          ;; Record first: a scan that runs timers must not be re-entered.
+          (puthash canonical now remote-fs--ancestor-prefetched)
+          (run-hook-with-args-until-success
+           'remote-ancestor-prefetch-functions
+           (remote-fs--placement-route canonical)
+           canonical
+           remote-ancestor-marker-names))
+        t))))
+
 (defun remote-file-watch-cost (file-name &optional adapter)
   "Return what keeping one file notification on FILE-NAME costs.
 

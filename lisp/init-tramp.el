@@ -153,6 +153,24 @@ SSH backends also project this value into route-local SSH connect options."
                  (number :tag "Seconds"))
   :group 'remote)
 
+(config-defvar remote-connection-unreachable-hold 30
+  "Seconds a link stays unreachable after it failed to open within its deadline.
+During the hold further commands on that target fail at once instead of
+freezing Emacs for the deadline again.  Reconnecting is exempt."
+  :type '(choice (const :tag "No hold" nil) (number :tag "Seconds"))
+  :group 'remote)
+
+(config-defvar remote-workspace-return-probe-interval 30
+  "Seconds between asynchronous checks for a target that stayed away.
+The check starts once automatic recovery has given up and never blocks."
+  :type 'number
+  :group 'remote)
+
+(config-defvar remote-workspace-return-probe-limit 120
+  "How many times to check for a target's return before giving up for good."
+  :type 'integer
+  :group 'remote)
+
 (config-defvar tramp-rpc-ssh-options nil
   "Additional SSH options used by the tramp-rpc backend.
 Keep a bounded ConnectTimeout so an offline pipeline is cooled promptly
@@ -595,6 +613,32 @@ when it is actually a string, avoiding `stringp' errors for calls such as
                 (apply #'my/tramp-projectile-dispatch-handler-a
                        #'projectile-project-files orig-fn args))
               '((name . "my/tramp-projectile-project-files"))))
+
+(defvar projectile-dirconfig-file)
+(defvar projectile-project-root-files)
+(defvar projectile-project-root-files-bottom-up)
+(defvar projectile-project-root-files-top-down-recurring)
+(declare-function remote-prefetch-ancestor-markers "remote-fs" (directory))
+(declare-function remote-register-ancestor-markers "remote-fs" (names))
+
+(defun my/projectile-prefetch-root-markers-a (&optional dir)
+  "Answer Projectile's root markers for DIR in one round trip where it matters.
+Projectile looks for well over a hundred marker names in every ancestor of a
+file.  On a route where each lookup is its own round trip, opening one file
+outside any project, such as a system header reached by jumping to a
+definition, froze Emacs for the sum of them.  The framework scans them all
+at once on such a route and does nothing on any other."
+  (when-let* ((dir (or dir default-directory)))
+    (remote-prefetch-ancestor-markers dir)))
+
+(with-eval-after-load 'projectile
+  (remote-register-ancestor-markers
+   (append (list projectile-dirconfig-file)
+           projectile-project-root-files-bottom-up
+           projectile-project-root-files
+           projectile-project-root-files-top-down-recurring))
+  (advice-add 'projectile-project-root :before
+              #'my/projectile-prefetch-root-markers-a))
 
 ;;; ── recentf: remember remote files by their logical name ────────────────────
 

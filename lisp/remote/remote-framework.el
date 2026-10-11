@@ -73,6 +73,15 @@ This function is idempotent and is useful after
 (add-hook 'remote-connection-closed-hook
           #'remote-framework--connection-closed)
 
+(defun remote-framework--connection-opened (_connection route)
+  "Record that ROUTE's transport is reachable again.
+A reconnect opens its session directly, without selecting a route, so it is
+the one success that can end a transport cooldown before it expires."
+  (remote-report-route-success route))
+
+(add-hook 'remote-connection-opened-hook
+          #'remote-framework--connection-opened)
+
 (defun remote-framework-bootstrap ()
   "Idempotently register built-in backends and adapters."
   (remote-transport-register-builtins)

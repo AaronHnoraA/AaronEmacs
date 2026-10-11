@@ -125,6 +125,39 @@ default TCP connect timeout."
 
 (defvar tramp-rpc-deploy-bootstrap-method)
 
+(defvar remote-backend-tramp--connect-deadline nil
+  "Time after which a connection that has not opened must not be tried again.
+Bound by `remote-backend-tramp-connect' around one framework connection.")
+
+(defun remote-backend-tramp--connect-timeout (pipeline)
+  "Return the seconds one connection through PIPELINE may take, or nil."
+  (let ((timeout
+         (or (plist-get (remote-pipeline-effective-config pipeline)
+                        :connect-timeout)
+             (and (boundp 'remote-connection-open-timeout)
+                  remote-connection-open-timeout))))
+    (and (numberp timeout) (> timeout 0) timeout)))
+
+(defun remote-backend-tramp--bounded-open-connection-a (vec &rest _)
+  "Refuse to start another connection attempt for VEC past the deadline.
+One framework connection is one bounded attempt.  TRAMP keeps no memory of a
+connection that just failed, so the file operation that opens it tries again
+for each of its steps, and tramp-rpc follows a failed connection with its
+deployment bootstrap.  Each of those waits out the full SSH timeout, and
+TRAMP reads process output with timers inhibited, so a surrounding
+`with-timeout' never fires in between.  A connection that is open is left
+alone: a slow handshake that succeeds stays valid past the deadline."
+  (when (and remote-backend-tramp--connect-deadline
+             (> (float-time) remote-backend-tramp--connect-deadline)
+             (not (process-live-p
+                   (ignore-errors (tramp-get-connection-process vec)))))
+    (signal 'remote-connection-timeout
+            (list (format "Connection to %s did not open within its deadline"
+                          (tramp-file-name-host vec))))))
+
+(advice-add 'tramp-maybe-open-connection :before
+            #'remote-backend-tramp--bounded-open-connection-a)
+
 (defun remote-backend-tramp--bootstrap-prefix (prefix)
   "Return the TRAMP prefix tramp-rpc deploys its server through for PREFIX.
 Nil unless PREFIX is an RPC prefix.  tramp-rpc installs its server over a
@@ -432,6 +465,9 @@ property the same way TRAMP marks static defaults, so it is not persisted."
          ;; the wrong machine (for example /home/hc on a macOS client).
          (process-environment (remote-client-process-environment))
          (exec-path (remote-client-exec-path))
+         (remote-backend-tramp--connect-deadline
+          (when-let* ((timeout (remote-backend-tramp--connect-timeout link)))
+            (+ (float-time) timeout)))
          ;; Connecting TRAMP runs process filters, timers, and package hooks.
          ;; If their incidental file operations inherit the caller's `/fs:'
          ;; directory they re-enter the same opening framework session and
@@ -634,6 +670,88 @@ FUNCTION is `tramp-cleanup-all-connections' and ARGS its arguments."
             #'remote-backend-tramp--cleanup-connection-a)
 (advice-add 'tramp-cleanup-all-connections :around
             #'remote-backend-tramp--cleanup-all-connections-a)
+
+(defvar remote-ancestor-prefetch-functions)
+
+(defconst remote-backend-tramp--ancestor-scan-script
+  (concat
+   "d=$1; shift; "
+   "while :; do "
+   "for n in \"$@\"; do "
+   "if [ -e \"${d%/}/$n\" ] || [ -L \"${d%/}/$n\" ]; then "
+   "printf '%s\\0' \"${d%/}/$n\"; fi; done; "
+   "[ \"$d\" = / ] && break; "
+   "d=${d%/}; d=${d%/*}; [ -n \"$d\" ] || d=/; "
+   "done")
+  "POSIX script printing which of the names $2... exist in $1 and its ancestors.
+Each existing path is printed NUL-terminated.")
+
+(defun remote-backend-tramp-prefetch-ancestor-markers (route directory names)
+  "Fill TRAMP's own cache with which NAMES exist above DIRECTORY on ROUTE.
+One target-side loop tests every name in DIRECTORY and each of its ancestors.
+The answers are stored as the `file-exists-p' property TRAMP consults before
+it sends a command, and as absent attributes for the names that do not exist,
+so every later lookup of a marker is answered without a round trip for as
+long as TRAMP itself trusts its cache.  Only shell TRAMP needs this."
+  (when (equal (remote-route-link-plugin-id route) "tramp")
+    (let* ((physical (file-name-as-directory
+                      (remote-backend-project-file-name route directory)))
+           (vec (tramp-dissect-file-name physical nil))
+           (local (directory-file-name (tramp-file-name-localname vec)))
+           (local (if (string-empty-p local) "/" local))
+           (existing
+            (with-temp-buffer
+              (let ((default-directory physical)
+                    ;; Nothing is written; do not let TRAMP flush the very
+                    ;; cache this fills.
+                    (process-file-side-effects nil))
+                (when (zerop
+                       (apply #'process-file "/bin/sh" nil t nil "-c"
+                              remote-backend-tramp--ancestor-scan-script
+                              "sh" local names))
+                  (split-string (buffer-string) "\0" t)))))
+           (ancestor local)
+           done)
+      (while (not done)
+        (dolist (name names)
+          (let ((file (if (equal ancestor "/")
+                          (concat "/" name)
+                        (concat ancestor "/" name))))
+            (if (member file existing)
+                (tramp-set-file-property vec file "file-exists-p" t)
+              (tramp-set-file-property vec file "file-exists-p" nil)
+              (tramp-set-file-property vec file "file-attributes" nil))))
+        (if (equal ancestor "/")
+            (setq done t)
+          (setq ancestor
+                (or (file-name-directory (directory-file-name ancestor)) "/")
+                ancestor (if (equal ancestor "/")
+                             "/"
+                           (directory-file-name ancestor)))))
+      t)))
+
+(add-hook 'remote-ancestor-prefetch-functions
+          #'remote-backend-tramp-prefetch-ancestor-markers)
+
+(defvar remote-workspace-reachability-probe-functions)
+
+(defun remote-backend-tramp-reachability-probe-command (route)
+  "Return a client OpenSSH argv that succeeds when ROUTE's host answers.
+It logs in on a connection of its own, never through the pipeline's control
+socket, whose master may be the very thing that hangs, and never prompts.
+Nil when ROUTE does not go through an SSH pipeline."
+  (condition-case nil
+      (append
+       (remote-backend-tramp-ssh-client-command
+        route
+        :extra-options
+        '("BatchMode=yes" "ConnectTimeout=5" "ConnectionAttempts=1"
+          "ControlMaster=no" "ControlPath=none"))
+       '("true"))
+    (error nil)))
+
+(add-hook 'remote-workspace-reachability-probe-functions
+          #'remote-backend-tramp-reachability-probe-command)
 
 (defun remote-backend-tramp--channel-endpoint-value
     (endpoint key &optional default)

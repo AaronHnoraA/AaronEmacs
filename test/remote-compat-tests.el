@@ -1223,6 +1223,111 @@ probe's temporary output buffer must not fall back to the global value."
       (should (eq (plist-get description :mtime-compare)
                   (nth 2 expected))))))
 
+(ert-deftest remote-tramp-ancestor-scan-reports-existing-markers ()
+  "One shell loop answers every marker in a directory and its ancestors."
+  (let* ((root (file-truename (make-temp-file "remote-ancestor-scan-" t)))
+         (deep (expand-file-name "a/b c/d" root)))
+    (unwind-protect
+        (progn
+          (make-directory deep t)
+          (make-directory (expand-file-name "a/.git" root))
+          (make-directory (expand-file-name "a/debian" root))
+          (with-temp-file (expand-file-name "a/debian/control" root))
+          (with-temp-file (expand-file-name "a/b c/.envrc" root))
+          (make-symbolic-link "/nonexistent-target"
+                              (expand-file-name "a/b c/d/Makefile" root))
+          (let ((found
+                 (with-temp-buffer
+                   (should
+                    (zerop
+                     (call-process
+                      "/bin/sh" nil t nil "-c"
+                      remote-backend-tramp--ancestor-scan-script "sh"
+                      deep ".git" ".envrc" "debian/control" "Makefile"
+                      ".projectile")))
+                   (seq-filter (lambda (file) (string-prefix-p root file))
+                               (split-string (buffer-string) "\0" t)))))
+            (should
+             (equal (sort found #'string<)
+                    (sort (list (expand-file-name "a/.git" root)
+                                (expand-file-name "a/debian/control" root)
+                                (expand-file-name "a/b c/.envrc" root)
+                                ;; A dangling link is still a name that is
+                                ;; taken, as `file-symlink-p' would say.
+                                (expand-file-name "a/b c/d/Makefile" root))
+                          #'string<)))))
+      (delete-directory root t))))
+
+(ert-deftest remote-ancestor-prefetch-is-bounded-to-costly-open-routes ()
+  "The scan runs once per directory, and only where lookups are round trips."
+  (let* ((remote-ancestor-marker-names '(".git" ".envrc"))
+        (remote-fs--ancestor-prefetched (make-hash-table :test #'equal))
+        (remote-ancestor-prefetch-lifetime 10)
+        (cost 'round-trip)
+        (open t)
+        calls
+        (remote-ancestor-prefetch-functions
+         (list (lambda (_route directory names)
+                 (push (list directory names) calls)
+                 t))))
+    (cl-letf (((symbol-function 'remote-file-operation-cost)
+               (lambda (&rest _) cost))
+              ((symbol-function 'remote-connection-target-open-p)
+               (lambda (_target) open))
+              ((symbol-function 'remote-fs--placement-route)
+               (lambda (&rest _) 'route)))
+      (remote-prefetch-ancestor-markers "/fs:lab:/usr/include")
+      (remote-prefetch-ancestor-markers "/fs:lab:/usr/include/")
+      (should (equal calls '(("/fs:lab:/usr/include/" (".git" ".envrc")))))
+      (remote-prefetch-ancestor-markers "/fs:lab:/srv/")
+      (should (= (length calls) 2))
+      ;; Cheap lookups need no scan, and a closed target is not reopened.
+      (setq cost 'batched)
+      (remote-prefetch-ancestor-markers "/fs:lab:/opt/")
+      (setq cost 'round-trip open nil)
+      (remote-prefetch-ancestor-markers "/fs:lab:/var/")
+      (should (= (length calls) 2))
+      ;; A failing backend never breaks the lookup that asked.
+      (setq open t)
+      (let ((remote-ancestor-prefetch-functions
+             (list (lambda (&rest _) (error "Injected scan failure")))))
+        (should-not (remote-prefetch-ancestor-markers "/fs:lab:/home/")))
+      ;; Wildcards and absolute names are not existence tests.
+      (let ((remote-ancestor-marker-names nil))
+        (remote-register-ancestor-markers '("Makefile" "?*.sln" "/etc/x" ""))
+        (should (equal remote-ancestor-marker-names '("Makefile")))))))
+
+(ert-deftest remote-tramp-connect-does-not-start-over-past-its-deadline ()
+  "One framework connection is one bounded attempt, not one per TRAMP step."
+  (let ((vec (tramp-dissect-file-name "/ssh:lab:/" nil))
+        live)
+    (cl-letf (((symbol-function 'tramp-get-connection-process)
+               (lambda (_vec) live)))
+      ;; Outside a framework connection TRAMP is left alone.
+      (let ((remote-backend-tramp--connect-deadline nil))
+        (should-not (remote-backend-tramp--bounded-open-connection-a vec)))
+      ;; Before the deadline another attempt may start.
+      (let ((remote-backend-tramp--connect-deadline (+ (float-time) 60)))
+        (should-not (remote-backend-tramp--bounded-open-connection-a vec)))
+      (let ((remote-backend-tramp--connect-deadline (- (float-time) 1)))
+        (should-error (remote-backend-tramp--bounded-open-connection-a vec)
+                      :type 'remote-connection-timeout)
+        ;; A transport failure: no other backend on this link is tried.
+        (should
+         (eq (plist-get
+              (remote-backend-default-classify-error
+               (should-error
+                (remote-backend-tramp--bounded-open-connection-a vec))
+               'connect)
+              :scope)
+             'transport))
+        ;; A slow handshake that did succeed stays valid past the deadline.
+        (setq live (make-pipe-process :name "remote-tramp-deadline-test"
+                                      :noquery t))
+        (unwind-protect
+            (should-not (remote-backend-tramp--bounded-open-connection-a vec))
+          (delete-process live))))))
+
 (ert-deftest remote-tramp-rpc-bootstrap-inherits-the-route-ssh-options ()
   "The connection that deploys the RPC server needs the same `-F' and options."
   (let ((tramp-rpc-deploy-bootstrap-method "scpx"))

@@ -78,6 +78,7 @@ service 与 channel 来自同一 owning workspace target。异步 callback 在�
 | Dev Container lifecycle | 未实现 | 读取 devcontainer、build/create/start/attach/rebuild |
 | 工具/“扩展”部署 | API | service manifest、版本锁、离线包、更新与回滚 |
 | 认证与 workspace trust | API | provisioning trust gate；面板显示 SSH 认证、主机密钥、主机名和网络失败状态，以及首次建连的传输、登录、后端检查阶段；`L` 查看按目标保留的连接事件，`D` 查看异步 SSH 诊断，`T` 打开交互式登录终端；认证输入仍由 TRAMP 处理，尚无统一的认证提示 UI |
+| 失败工况（不可达、半开、长时间断线） | remote | 处理矩阵见 [remote-framework.md](remote-framework.md) 的“失败工况的处理矩阵”。Linux 容器 target 上暂停容器（主机不回包）实测：不可达时一条命令的等待约 117 s→一次时限，保持期内后续操作立即失败；断线超过重连预算后由异步探测等待，主机恢复后 workspace 与 watch 自动回到 open；重启主机后恢复。真实拔网线与跨网络切换仍未验证 |
 | 自动重连/恢复 | remote | SSH 传输失败注入、真实 RPC 传输进程退出、客户端丢弃 RPC 回复，以及仅作用于测试连接的 TCP 中继丢包后，workspace、LSP 两个源码 buffer 和 watch 自动恢复；真实 tramp-rpc 会话上冻结服务端进程树形成的半开连接也已验证（命令在 RPC 读超时后失败、workspace 断开、下一次文件操作经新连接恢复）；受管 SSH 主连接和转发统一启用 OpenSSH 15 秒 × 3 次保活探测，首次自动重连默认缩短建连等待、后续重试保留原上限，目标可覆盖配置；补物理网络故障、认证过期与长期运行回归；terminal 明确手动恢复 |
 | Remote Explorer/Doctor | remote | 面板可打开配置、当前和最近文件夹，按目标补全目录，显示连接阶段与端口，重连 workspace、管理转发；模式栏显示当前 target；`a` 可逐项加入 SSH 主机，`A` 可粘贴常见 SSH 连接命令，自定义文件通过 `-F` 贯通连接、进程和转发；`L`、`D`、`T` 提供连接事件、按目标诊断与登录终端 |
 

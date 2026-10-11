@@ -548,6 +548,113 @@
               (should (eq (remote-workspace-state workspace) 'open))))
         (remote-background-clear 'test-cleanup)))))
 
+(ert-deftest remote-workspace-failed-recovery-resumes-when-the-target-returns ()
+  "A workspace that gave up during a long outage is not left for dead."
+  (remote-framework-test-with-registry
+    (let* ((remote-workspace-auto-reconnect t)
+           (route (remote-route-create
+                   :target-id "lab" :pipeline-id "lab/ssh"
+                   :backend-id "tramp" :capability 'process-sync
+                   :adapter-id "process"))
+           (make
+            (lambda (id state error)
+              (let ((workspace
+                     (remote-workspace-create
+                      :id id :key (list "lab" id) :target-id "lab"
+                      :root (format "/fs:lab:/%s/" id)
+                      :routes (list route) :primary-route route
+                      :state state :error error)))
+                (puthash (remote-workspace-key workspace) workspace
+                         remote-workspaces)
+                workspace)))
+           (gave-up (funcall make "gave-up" 'failed
+                             '(remote-file-error "Connection timed out")))
+           (broken (funcall make "broken" 'failed
+                            '(error "Permission denied")))
+           (healthy (funcall make "healthy" 'open nil))
+           scheduled)
+      (cl-letf (((symbol-function 'remote-workspace--schedule-reconnect)
+                 (lambda (workspace) (push workspace scheduled) 'job))
+                ((symbol-function 'remote-workspace--transport-error-p)
+                 (lambda (_workspace error)
+                   (eq (car-safe error) 'remote-file-error))))
+        ;; A session opening for another target says nothing about this one.
+        (remote-workspace--revive-after-session-open
+         nil (remote-route-create :target-id "other" :pipeline-id "other/ssh"
+                                  :backend-id "tramp"))
+        (should-not scheduled)
+        (remote-workspace--revive-after-session-open nil route)
+        (should (equal scheduled (list gave-up)))
+        (should (eq (remote-workspace-state gave-up) 'disconnected))
+        ;; An error that was not about the transport stays as it is.
+        (should (eq (remote-workspace-state broken) 'failed))
+        (should (eq (remote-workspace-state healthy) 'open))
+        (let ((remote-workspace-auto-reconnect nil))
+          (setf (remote-workspace-state gave-up) 'failed)
+          (setq scheduled nil)
+          (remote-workspace--revive-after-session-open nil route)
+          (should-not scheduled))))))
+
+(ert-deftest remote-workspace-return-probe-reconnects-without-blocking ()
+  "After recovery gives up, an asynchronous probe waits for the target."
+  (remote-framework-test-with-registry
+    (let* ((remote-workspace-auto-reconnect t)
+           (remote-workspace--return-probes (make-hash-table :test #'equal))
+           (remote-workspace-return-probe-interval 0.05)
+           (remote-workspace-return-probe-limit 50)
+           (route (remote-route-create
+                   :target-id "lab" :pipeline-id "lab/ssh"
+                   :backend-id "tramp" :capability 'process-sync
+                   :adapter-id "process"))
+           (workspace
+            (remote-workspace-create
+             :id "gave-up" :key '("lab" "gave-up") :target-id "lab"
+             :root "/fs:lab:/srv/" :routes (list route) :primary-route route
+             :state 'failed
+             :error '(remote-file-error "Connection timed out")))
+           (answer "false")
+           (probes 0)
+           scheduled
+           (remote-workspace-reachability-probe-functions
+            (list (lambda (_route)
+                    (cl-incf probes)
+                    (list (executable-find answer))))))
+      (puthash (remote-workspace-key workspace) workspace remote-workspaces)
+      (unwind-protect
+          (cl-letf (((symbol-function 'remote-workspace--schedule-reconnect)
+                     (lambda (target) (push target scheduled) 'job))
+                    ((symbol-function 'remote-workspace--transport-error-p)
+                     (lambda (_workspace error)
+                       (eq (car-safe error) 'remote-file-error))))
+            (remote-workspace--watch-for-return "lab")
+            (should (gethash "lab" remote-workspace--return-probes))
+            ;; The target stays away: the probe keeps asking, nothing dials.
+            (let ((deadline (+ (float-time) 5)))
+              (while (and (< probes 3) (< (float-time) deadline))
+                (accept-process-output nil 0.05)))
+            (should (>= probes 3))
+            (should-not scheduled)
+            (should (eq (remote-workspace-state workspace) 'failed))
+            ;; It answers: recovery resumes and the probe ends.
+            (setq answer "true")
+            (let ((deadline (+ (float-time) 5)))
+              (while (and (not scheduled) (< (float-time) deadline))
+                (accept-process-output nil 0.05)))
+            (should (equal scheduled (list workspace)))
+            (should (eq (remote-workspace-state workspace) 'disconnected))
+            (should-not (gethash "lab" remote-workspace--return-probes))
+            ;; An explicit disconnect ends a probe that is still waiting.
+            (setf (remote-workspace-state workspace) 'failed)
+            (setq answer "false")
+            (remote-workspace--watch-for-return "lab")
+            (should (gethash "lab" remote-workspace--return-probes))
+            (remote-workspace--stop-return-probe "lab")
+            (should-not (gethash "lab" remote-workspace--return-probes))
+            (let ((count probes))
+              (accept-process-output nil 0.3)
+              (should (= probes count))))
+        (remote-workspace--stop-return-probe "lab")))))
+
 (ert-deftest remote-workspace-transport-failure-is-isolated-by-pipeline ()
   "A failed SSH transport affects its target pipeline, not other targets."
   (remote-framework-test-with-registry

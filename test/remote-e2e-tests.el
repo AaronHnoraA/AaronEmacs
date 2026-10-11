@@ -85,7 +85,16 @@ identity checks below would compare a path against its own truename."
     selected))
 
 (defun remote-e2e--ssh-port (target)
-  "Return the configured SSH service port for TARGET."
+  "Return the port TARGET's own SSH service listens on.
+That is the port the client connects to, unless `REMOTE_E2E_TARGET_SSH_PORT'
+says otherwise: behind a published container port or NAT the two differ, and
+a forward to the target has to name the target-side one."
+  (if-let* ((port (getenv "REMOTE_E2E_TARGET_SSH_PORT")))
+      (string-to-number port)
+    (remote-e2e--client-ssh-port target)))
+
+(defun remote-e2e--client-ssh-port (target)
+  "Return the port the client connects to for TARGET."
   (with-temp-buffer
     (unless (zerop
              (apply

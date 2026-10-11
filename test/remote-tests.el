@@ -690,6 +690,63 @@ the default file adapter must route it without aborting later hooks."
       (should-not (remote-connection-pool-status))
       (should runtime-cleared))))
 
+(ert-deftest remote-connection-holds-a-link-that-did-not-answer ()
+  "A host that is away must not cost the full deadline on every command."
+  (remote-test-with-registry
+    (let ((remote-connection--unreachable (make-hash-table :test #'equal))
+          (remote-connection-unreachable-hold 30)
+          (dials 0)
+          (answer 'timeout))
+      (remote-register-link-plugin
+       "away"
+       :capabilities '(process-sync)
+       :project-file-name (lambda (_file _link _route) "/away/")
+       :connect
+       (lambda (_route _context)
+         (cl-incf dials)
+         (pcase answer
+           ('timeout (signal 'remote-connection-timeout '("no answer")))
+           ('refused (signal 'remote-file-error '("Connection refused")))
+           (_ 'handle)))
+       :connection-live-p (lambda (_connection _route _context) t))
+      (remote-register-target "lab" :trusted t)
+      (remote-register-link "lab" "ssh" "away")
+      (remote-register-adapter
+       "test" :capabilities '(process-sync)
+       :preferences '((default . ("away"))))
+      (let* ((context
+              (remote-context-create
+               :target-id "lab" :localname "/work/"
+               :workspace-root "/fs:lab:/work/"))
+             (route (remote-resolve "test" 'process-sync context)))
+        (should-error (remote-connection-ensure route context)
+                      :type 'remote-connection-timeout)
+        (should (= dials 1))
+        ;; Held: the next command fails at once and does not dial.
+        (should-error (remote-connection-ensure route context)
+                      :type 'remote-connection-timeout)
+        (should (= dials 1))
+        (should (remote-connection-unreachable-remaining route))
+        ;; A reconnect dials anyway and ends the hold when it succeeds.
+        (setq answer 'ok)
+        (let ((remote-connection-ignore-unreachable-hold t))
+          (should (remote-connection-ensure route context)))
+        (should (= dials 2))
+        (should-not (remote-connection-unreachable-remaining route))
+        ;; A refusal that comes back at once is not a reason to hold.
+        (remote-connection-invalidate route)
+        (setq answer 'refused)
+        (should-error (remote-connection-ensure route context))
+        (should-error (remote-connection-ensure route context))
+        (should (= dials 4))
+        ;; The hold expires by itself.
+        (setq answer 'timeout)
+        (should-error (remote-connection-ensure route context))
+        (should (= dials 5))
+        (let ((remote-connection-unreachable-hold 0))
+          (should-error (remote-connection-ensure route context))
+          (should (= dials 6)))))))
+
 (ert-deftest remote-connection-read-lease-rechecks-when-disabled ()
   (remote-test-with-registry
     (let ((remote-connection--last-live-check
@@ -2097,6 +2154,31 @@ names in tree consumers such as Treemacs."
                          "emacs-file" 'metadata context))
                 '("slow")))
         (should (= calls 8))))))
+
+(ert-deftest remote-transport-failure-cools-the-link-for-every-capability ()
+  "An unreachable host is unreachable whatever the operation needs."
+  (remote-test-with-registry
+    (let* ((_target (remote-register-target "lab" :trusted t))
+           (_plugin
+            (remote-register-link-plugin
+             "wire" :capabilities '(metadata process-sync)
+             :available-p (lambda (_link _context) t)))
+           (link (remote-register-link "lab" "ssh" '("wire")))
+           (context (remote-context-create :target-id "lab" :localname "/tmp/"))
+           (route (remote-resolve "emacs-file" 'metadata context)))
+      (should-not (remote--cooling-p link 'process-sync))
+      (should (eq (remote-report-route-failure
+                   route '(remote-file-error "Connection timed out"))
+                  'transport))
+      (should (remote--cooling-p link 'metadata))
+      ;; The process route shares the dead transport and must not wait it
+      ;; out a second time.
+      (should (remote--cooling-p link 'process-sync))
+      (should (remote--cooling-p link 'environment))
+      ;; One operation getting through ends it for all of them.
+      (remote-report-route-success route)
+      (should-not (remote--cooling-p link 'process-sync))
+      (should-not (remote--cooling-p link 'metadata)))))
 
 (ert-deftest remote-fs-preferred-route-cache-ignores-backends-without-the-capability ()
   "An SSH link also carries a PTY-only backend; file routes still stay cached."

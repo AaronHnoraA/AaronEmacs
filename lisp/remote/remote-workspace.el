@@ -724,6 +724,9 @@ route has no explicit connection timeout."
   (remote-workspace--assert-current workspace)
   (remote-workspace--quiesce-transport-resources workspace)
   (dolist (route (remote-workspace-routes workspace))
+    ;; A reconnect is the attempt that finds out whether the host is back.
+    (remote-connection-forget-unreachable (remote-route-link-id route)))
+  (dolist (route (remote-workspace-routes workspace))
     (remote-session-invalidate route t 'workspace-reconnect)
     (remote-background-acknowledge-own-invalidation)
     (remote-workspace--assert-current workspace)
@@ -855,7 +858,9 @@ Automatic resources are recreated.  Terminals remain disconnected until
              (remote-log
               'workspace-reconnect-failed
               :workspace (remote-workspace-id workspace)
-              :error (error-message-string error))))))
+              :error (error-message-string error))
+             (remote-workspace--watch-for-return
+              (remote-workspace-target-id workspace))))))
     (setf (remote-workspace-metadata workspace)
           (plist-put (remote-workspace-metadata workspace)
                      :reconnect-job job))
@@ -991,6 +996,8 @@ still wait for TRAMP, but backoff between attempts never sleeps in a command."
      remote-workspaces)
     (dolist (workspace workspaces)
       (remote-workspace-close workspace (or reason 'clear)))
+    (dolist (target-id (hash-table-keys remote-workspace--return-probes))
+      (remote-workspace--stop-return-probe target-id))
     (length workspaces)))
 
 (defun remote-workspace-disconnect-target (target-id &optional reason)
@@ -1003,6 +1010,7 @@ Close the target's file, Dired, and process buffers.  Unsaved editable buffers
 and buffers whose kill query refuses closure remain, with automatic startup
 disabled.  Return :workspaces, :sessions, :buffers counts and :kept-buffers
 names.  Internal session replacement must not call this user-level teardown."
+  (remote-workspace--stop-return-probe target-id)
   (let ((reason (or reason 'target-disconnect))
         (workspaces
          (seq-filter
@@ -1114,6 +1122,149 @@ names.  Internal session replacement must not call this user-level teardown."
        nil))
     (list :workspaces (length workspaces) :sessions sessions
           :buffers closed-buffers :kept-buffers (nreverse kept-buffers))))
+
+(defcustom remote-workspace-return-probe-interval 30
+  "Seconds between checks for a target that outlasted automatic recovery.
+Each check is one asynchronous client process, so waiting for a host to come
+back never blocks Emacs the way a connection attempt does."
+  :type 'number
+  :group 'remote)
+
+(defcustom remote-workspace-return-probe-limit 120
+  "How many times to check for a target's return before giving up for good."
+  :type 'integer
+  :group 'remote)
+
+(defvar remote-workspace-reachability-probe-functions nil
+  "Functions that produce a command testing whether a route's target answers.
+Each is called with a route and returns a client argv that exits with status
+zero when the target is reachable, or nil when it has no such command.  The
+command runs as an asynchronous client process and must never prompt.")
+
+(defvar remote-workspace--return-probes (make-hash-table :test #'equal)
+  "Running return probes, as TARGET-ID to (:timer :process :attempts).")
+
+(defun remote-workspace--given-up (target-id)
+  "Return TARGET-ID's workspaces whose automatic recovery gave up.
+Those are `failed' for a transport error and have no reconnect pending."
+  (seq-filter
+   (lambda (workspace)
+     (and (equal (remote-workspace-target-id workspace) target-id)
+          (eq (remote-workspace-state workspace) 'failed)
+          (remote-workspace-routes workspace)
+          (not (plist-get (remote-workspace-metadata workspace)
+                          :reconnect-job))
+          (ignore-errors
+            (remote-workspace--transport-error-p
+             workspace (remote-workspace-error workspace)))))
+   (hash-table-values remote-workspaces)))
+
+(defun remote-workspace--revive-target (target-id)
+  "Resume recovery of TARGET-ID's workspaces that had given up."
+  (when remote-workspace-auto-reconnect
+    (dolist (workspace (remote-workspace--given-up target-id))
+      (setf (remote-workspace-state workspace) 'disconnected)
+      (remote-log
+       'workspace-revive
+       :workspace (remote-workspace-id workspace)
+       :target target-id)
+      (remote-workspace--schedule-reconnect workspace))))
+
+(defun remote-workspace--revive-after-session-open (_connection route)
+  "Resume recovery of workspaces that gave up while ROUTE's target was away.
+Automatic recovery retries a few times within seconds and then leaves the
+workspace `failed'.  After a longer outage nothing would try again: the next
+file operation reopens a session, but the workspace's watches, forwards and
+services stay down until someone reconnects it by hand.  A session opening
+for the target is the evidence that it is back."
+  (let ((target-id (remote-route-target-id route)))
+    (remote-workspace--stop-return-probe target-id)
+    (remote-workspace--revive-target target-id)))
+
+(defun remote-workspace--stop-return-probe (target-id)
+  "Stop checking whether TARGET-ID has come back."
+  (when-let* ((probe (gethash target-id remote-workspace--return-probes)))
+    (remhash target-id remote-workspace--return-probes)
+    (when (timerp (plist-get probe :timer))
+      (cancel-timer (plist-get probe :timer)))
+    (when (process-live-p (plist-get probe :process))
+      (delete-process (plist-get probe :process)))))
+
+(defun remote-workspace--schedule-return-probe (target-id attempts)
+  "Check TARGET-ID again after the probe interval, having made ATTEMPTS."
+  (puthash
+   target-id
+   (list :attempts attempts
+         :timer (run-at-time remote-workspace-return-probe-interval nil
+                             #'remote-workspace--return-probe-tick target-id))
+   remote-workspace--return-probes))
+
+(defun remote-workspace--return-probe-finished (target-id attempts process)
+  "Act on PROCESS, check number ATTEMPTS of whether TARGET-ID answers."
+  (when (and (memq (process-status process) '(exit signal))
+             (eq (plist-get (gethash target-id remote-workspace--return-probes)
+                            :process)
+                 process))
+    (if (and (eq (process-status process) 'exit)
+             (zerop (process-exit-status process)))
+        (progn
+          (remhash target-id remote-workspace--return-probes)
+          (dolist (workspace (remote-workspace--given-up target-id))
+            (dolist (route (remote-workspace-routes workspace))
+              (remote-connection-forget-unreachable
+               (remote-route-link-id route))))
+          (remote-workspace--revive-target target-id))
+      (remote-workspace--schedule-return-probe target-id attempts))))
+
+(defun remote-workspace--return-probe-tick (target-id)
+  "Run one asynchronous check of whether TARGET-ID answers again."
+  (let* ((probe (gethash target-id remote-workspace--return-probes))
+         (attempts (1+ (or (plist-get probe :attempts) 0)))
+         (workspaces (remote-workspace--given-up target-id))
+         (command
+          (and workspaces
+               remote-workspace-auto-reconnect
+               (<= attempts remote-workspace-return-probe-limit)
+               (seq-some
+                (lambda (route)
+                  (ignore-errors
+                    (run-hook-with-args-until-success
+                     'remote-workspace-reachability-probe-functions route)))
+                (remote-workspace-routes (car workspaces))))))
+    (if (not command)
+        ;; Nothing is waiting any more, or nothing can be asked.
+        (remhash target-id remote-workspace--return-probes)
+      (condition-case nil
+          (puthash
+           target-id
+           (list
+            :attempts attempts
+            :process
+            (remote-make-client-process
+             :name (format "remote-return-probe:%s" target-id)
+             :command command
+             :buffer nil
+             :connection-type 'pipe
+             :noquery t
+             :sentinel
+             (lambda (process _event)
+               (remote-workspace--return-probe-finished
+                target-id attempts process))))
+           remote-workspace--return-probes)
+        (error
+         (remote-workspace--schedule-return-probe target-id attempts))))))
+
+(defun remote-workspace--watch-for-return (target-id)
+  "Start checking for TARGET-ID's return unless a check is already running.
+Automatic recovery has given up.  A connection attempt is synchronous and
+would freeze Emacs for its whole deadline on every retry, so the long wait
+is done by a cheap asynchronous probe, and only its success reconnects."
+  (unless (gethash target-id remote-workspace--return-probes)
+    (when (remote-workspace--given-up target-id)
+      (remote-workspace--schedule-return-probe target-id 0))))
+
+(add-hook 'remote-connection-opened-hook
+          #'remote-workspace--revive-after-session-open)
 
 (add-hook 'remote-transport-failure-hook
           #'remote-workspace-handle-transport-failure)

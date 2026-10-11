@@ -72,6 +72,8 @@ saved `.envrc' buffers still invalidate the cache immediately."
            (or direnv-envrc-root-cache-round-trip-timeout 0))
     direnv-envrc-root-cache-timeout))
 
+(remote-register-ancestor-markers '(".envrc"))
+
 (defvar direnv--hooks
   '(before-hack-local-variables-hook)
   "Hooks used while `direnv-mode' is enabled.")
@@ -183,8 +185,10 @@ trigger project or `.envrc' discovery while a connection is being established."
         (cdr cached)
       (let ((root
              (when-let* ((directory (direnv--directory path))
-                         (found (locate-dominating-file
-                                 directory ".envrc")))
+                         (found (progn
+                                  (remote-prefetch-ancestor-markers directory)
+                                  (locate-dominating-file
+                                   directory ".envrc"))))
                (file-name-as-directory
                 (remote-canonicalize-file-name found)))))
         (when key
