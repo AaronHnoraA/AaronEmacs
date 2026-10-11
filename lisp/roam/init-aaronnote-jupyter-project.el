@@ -36,13 +36,14 @@ Entries reference their original kernel.json, not another saved profile.")
 (defvar-local my/noema-jupyter-project--shell-pending nil)
 
 (defun my/noema-jupyter-project-local-kernelspec (kernel &optional source)
-  "Read KERNEL's local profile for project file and shell commands.
-SOURCE must belong to the local target.  LSP never uses this profile."
+  "Read KERNEL's client-side profile for project file and shell commands.
+The profile lives in this machine's kernelspec directories, so SOURCE must be
+on a target whose files the client can open directly.  That is a placement
+question, not a target name.  LSP never uses this profile."
   (when (and (stringp kernel)
-             (equal (remote-context-target-id
-                     (my/noema-jupyter--context
-                      (or source buffer-file-name default-directory)))
-                    "local"))
+             (ignore-errors
+               (remote-client-file-name
+                (or source buffer-file-name default-directory))))
     (catch 'found
       (dolist (directory
                (delete-dups
