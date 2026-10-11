@@ -893,12 +893,51 @@ frontend 验证所选路线、workspace 跟踪与目标目录中的 shell 输入
 REMOTE_GHOSTEL_E2E_PRELOAD=1 make remote-ghostel-live-smoke` 分开测量预热后终端
 启动及首条命令响应。
 工作区关闭后，连接池会暂存会话以供快速重开；Emacs 退出时会显式关闭连接池及
-由它拥有的 SSH ControlMaster，不依赖 OpenSSH 的持久期自然到期。
+由它拥有的 SSH ControlMaster，不依赖 OpenSSH 的持久期自然到期。退出路径
+（`remote-framework-shutdown`）先取消后台任务，再逐步关闭 session 与 pipeline
+runtime，每一步各自容错：一个关不掉的 session 不能让其余 ControlMaster 留在
+后台，`kill-emacs-hook` 中的错误还会让 Emacs 询问是否退出。同理，
+`remote-connection-closed-hook` 的观察者逐个隔离，单个失败不会中断正在关闭多个
+session 的调用方。
 transport 断线时不会重放 shell 历史；Ghostel 保留为 disconnected buffer，显式
 执行 `remote-terminal-restart` 会按原目录和 frontend 新建一个 Ghostel buffer。
 
+终端断线是 frontend 与框架之间的契约，而不只是一个状态位：
+
+- `remote-terminal-adopt` 的 metadata 可带 `:disconnect-function`。终端首次失去
+  transport 时，框架在该终端 buffer 中调用它（参数为终端与原因），时机在进程被
+  停止、frontend 自己的 sentinel 看到进程结束**之前**。进程退出即删除 buffer 的
+  frontend 用它保留 buffer：Ghostel 默认 `ghostel-kill-buffer-on-exit` 为 t，没有
+  这一步，断线会连同滚动历史和重启配方一起删掉。重复标记（transport failure 之后
+  的重连会再标记一次）只更新原因，不再调用回调，也不重复写入提示行。
+- 进程自行死亡（丢失的 SSH PTY 以信号或 255 退出）走同一条路径：框架的 sentinel
+  包装先判定、先标记，再把事件交给 frontend 的 sentinel。
+- 只有经路由进程边界启动的进程（带 `remote-route`）才可能是 transport 丢失。
+  frontend 自带的句柄（例如本机原生 PTY 的事件管道）结束只表示 shell 结束，终端
+  随之移除。判断依据是进程是否被路由，而不是 target ID 或 frontend 名称。
+- 用户杀掉终端 buffer 是关闭，不是断线：先进入 `closing` 再删进程，回调不会被
+  调用。
+- `remote-terminal-restart` 先创建替代终端，成功后才关闭旧终端；重启失败（目标
+  仍不可达）时旧 buffer、原名称与 `disconnected` 状态都保留，可以再次重试。
+  尝试期间旧 buffer 暂时让出名称；Ghostel 按 slot 编号 buffer，其 restart 函数
+  同样让出并在失败时取回 slot，所以替代终端沿用原名。
+
+Ghostel 在所有 target 上走同一条启动流程：workspace 不为终端同步构建环境
+capsule，已就绪的直接使用，否则以终端 buffer 为 owner 异步 ensure；shell 来自
+target 自己的 PATH facts。`REMOTE_GHOSTEL_E2E_TARGET=local` 在本机运行同一个
+冒烟测试（本机 Ghostel 使用自己的原生 PTY，没有 route 可查，测试用
+`remote-client-file-name` 这一放置查询区分）；`REMOTE_GHOSTEL_E2E_FAULT=transport`
+注入断线，验证 buffer 保留、提示只写一次、重启后原名终端可用。批处理 Emacs
+没有窗口供 Ghostel 渲染，测试直接读取终端文本。
+
 transport failure 会把相关 workspace 标记为 disconnected，并按 1、2、4 秒进行
-自动恢复。任何显式登记了 recovery function 的资源都会在 session 恢复后重建；
+自动恢复。任何显式登记了 recovery function 的资源都会在 session 恢复后重建，
+恢复会**替换**资源的 handle。长期持有资源的 consumer 因此不能缓存首次拿到的
+handle：要么按稳定 key 向 workspace 读取当前值（`remote-workspace-find-resource`），
+要么在信任自己的记录前用 `remote-workspace-resource-live-p` 询问。关闭 workspace
+或显式断开 target 也会在不通知 consumer 的情况下释放资源。`remote-gateway` 的
+target 侧反向转发与 Noema 的远程 Markdown watch 都遵守这一点：前者缓存旧 handle
+时每次重连后会多开一条转发，后者在断开重连后会以为文件仍被监听。
 手动 `remote-workspace-reconnect-async` 复用同一个合并调度器，命令立即返回，
 重试间隔不阻塞 Emacs；单次 TRAMP 建连本身仍可能等待。重连主动关闭旧 session
 后立即确认自己推进的 target epoch，避免把成功误判为过期；建连或资源恢复期间
@@ -1039,8 +1078,11 @@ Noema 等消费者留在框架外，只调用公共 API。
 ## 11. 测试与支持范围
 
 ```sh
+make remote-check
 make remote-test
 make remote-conformance-test
+REMOTE_GHOSTEL_E2E_TARGET=local REMOTE_GHOSTEL_E2E_FAULT=transport \
+  make remote-ghostel-live-smoke
 make remote-e2e
 REMOTE_E2E_TARGET=Aaron-Pi make remote-e2e
 emacs --batch --init-directory=. -q -l early-init.el -l init.el \

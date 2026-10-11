@@ -287,6 +287,74 @@
                    -32001)))
     (remote-gateway-unregister-method "test.http-deferred")))
 
+(ert-deftest remote-gateway-target-forward-follows-workspace-recovery ()
+  "A recovered workspace forward is reused instead of joined by another."
+  (let ((remote-workspaces (make-hash-table :test #'equal))
+        (remote-gateway--forwards (make-hash-table :test #'equal))
+        (context
+         (remote-context-create
+          :target-id "lab" :localname "/work/"
+          :workspace-id "gateway" :workspace-root "/fs:lab:/work/"))
+        (opened 0)
+        dead)
+    (unwind-protect
+        (cl-letf
+            (((symbol-function 'remote-reverse-port-forward)
+              ;; What the channel layer does at the workspace boundary: one
+              ;; recoverable resource whose handle is replaced on recovery.
+              (lambda (_local &rest arguments)
+                (let ((forward (list 'forward (cl-incf opened))))
+                  (remote-workspace-register-recoverable-resource
+                   (plist-get arguments :workspace) 'forward forward
+                   :close (lambda (value _reason) (push value dead))
+                   :recover (lambda (_resource _owner)
+                              (list 'forward (cl-incf opened)))
+                   :metadata (plist-get arguments :metadata))
+                  forward)))
+             ((symbol-function 'remote-channel-live-p)
+              (lambda (value) (and value (not (memq value dead)))))
+             ((symbol-function 'remote-close-channel)
+              (lambda (value) (push value dead)))
+             ((symbol-function 'remote-channel-endpoint)
+              (lambda (forward &optional _side)
+                (list :host "127.0.0.1" :port (+ 40000 (nth 1 forward))))))
+          (let* ((first (remote-gateway-connection-info
+                         context :placement 'target))
+                 (workspace (remote-get-workspace context))
+                 (resource (car (remote-workspace-resources workspace))))
+            (should (= (plist-get first :port) 40001))
+            (should (= (plist-get
+                        (remote-gateway-connection-info
+                         context :placement 'target)
+                        :port)
+                       40001))
+            (should (= opened 1))
+            ;; Transport recovery closes the old handle and installs a new one.
+            (remote-workspace-recover-resource workspace resource)
+            (should (= opened 2))
+            (should (= (plist-get
+                        (remote-gateway-connection-info
+                         context :placement 'target)
+                        :port)
+                       40002))
+            (should (= opened 2))
+            (should (= (length (remote-workspace-resources workspace)) 1))
+            ;; A forward whose recovery failed is replaced, not accumulated.
+            (setf (remote-workspace-resource-state resource) 'failed)
+            (push (remote-workspace-resource-value resource) dead)
+            (should (= (plist-get
+                        (remote-gateway-connection-info
+                         context :placement 'target)
+                        :port)
+                       40003))
+            (should (= (length (remote-workspace-resources workspace)) 1))
+            ;; Stopping the gateway releases the forward the workspace holds
+            ;; now, not the handle the gateway saw first.
+            (remote-gateway-stop)
+            (should-not (remote-workspace-resources workspace))
+            (should (member '(forward 3) dead))))
+      (remote-gateway-stop))))
+
 (ert-deftest remote-gateway-writes-and-cleans-its-discovery-record ()
   (remote-gateway-start)
   (let ((file (remote-gateway--discovery-file)))

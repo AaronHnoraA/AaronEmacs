@@ -403,6 +403,21 @@ of accumulating one resource per observing buffer."
        :close close :recover recover :metadata metadata
        :recovery recovery))))
 
+(defun remote-workspace-resource-live-p (workspace resource)
+  "Return non-nil while RESOURCE is still owned by an open WORKSPACE.
+Closing a workspace or disconnecting its target releases its resources
+without telling their consumers.  A consumer that keeps a resource it
+registered asks here before trusting it; a resource waiting for transport
+recovery is still owned, one whose recovery failed is not."
+  (and (remote-workspace-p workspace)
+       (remote-workspace-resource-p resource)
+       (eq (gethash (remote-workspace-key workspace) remote-workspaces)
+           workspace)
+       (not (memq (remote-workspace-state workspace) '(closing closed)))
+       (memq resource (remote-workspace-resources workspace))
+       (not (eq (remote-workspace-resource-state resource) 'failed))
+       t))
+
 (defun remote-workspace-forget-resource (workspace resource)
   "Forget RESOURCE without closing it and return RESOURCE.
 This is for lifecycle notifications received after the external owner already

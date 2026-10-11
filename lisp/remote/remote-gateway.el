@@ -63,7 +63,10 @@
 (defvar remote-gateway--binding-keys (make-hash-table :test #'equal))
 (defvar remote-gateway--pending (make-hash-table :test #'equal))
 (defvar remote-gateway--inbound-pending (make-hash-table :test #'equal))
-(defvar remote-gateway--forwards (make-hash-table :test #'equal))
+(defvar remote-gateway--forwards (make-hash-table :test #'equal)
+  "Workspaces holding a gateway reverse forward, keyed by workspace ID.
+The forward itself is the workspace's resource: recovery replaces its handle,
+so only the owner is remembered here.")
 (defvar remote-gateway--request-sequence 0)
 (defvar remote-gateway--current-process nil
   "WebSocket process currently dispatching an inbound message.")
@@ -690,9 +693,12 @@ Return non-nil only for the first settlement."
   (when remote-gateway--server
     (ws-stop remote-gateway--server))
   (maphash
-   (lambda (_key forward)
-     (when (remote-channel-live-p forward)
-       (remote-close-channel forward)))
+   (lambda (_key workspace)
+     (when-let* ((resource
+                  (remote-gateway--forward-resource workspace)))
+       (ignore-errors
+         (remote-workspace-close-resource
+          workspace resource 'gateway-stop))))
    remote-gateway--forwards)
   (remote-gateway--delete-discovery)
   (setq remote-gateway--server nil
@@ -705,6 +711,48 @@ Return non-nil only for the first settlement."
   (clrhash remote-gateway--pending)
   (clrhash remote-gateway--inbound-pending)
   (clrhash remote-gateway--forwards))
+
+(defun remote-gateway--forward-key (workspace)
+  "Return the resource key of WORKSPACE's gateway reverse forward."
+  (list 'emacs-gateway (remote-workspace-id workspace)))
+
+(defun remote-gateway--forward-resource (workspace)
+  "Return the resource holding WORKSPACE's gateway reverse forward, or nil."
+  (remote-workspace-find-resource
+   workspace 'forward (remote-gateway--forward-key workspace)))
+
+(defun remote-gateway--target-forward (context local-endpoint)
+  "Return the reverse forward that brings CONTEXT's target to LOCAL-ENDPOINT.
+The workspace owns the forward and replaces its handle on transport recovery,
+so its current value is read on every call.  Keeping the first handle instead
+would see a closed forward after each reconnect and open one more beside the
+recovered one."
+  (let* ((workspace (remote-workspace-open context :connect nil))
+         (resource (remote-gateway--forward-resource workspace))
+         (known (and resource (remote-workspace-resource-value resource))))
+    (cond
+     ((remote-channel-live-p known) known)
+     ((and resource
+           (eq (remote-workspace-resource-state resource) 'disconnected))
+      ;; Recovery is going to replace this handle.  A second forward opened
+      ;; now would be left behind beside the recovered one.
+      (error "Gateway forward for %s is reconnecting"
+             (remote-workspace-id workspace)))
+     (t
+      (when resource
+        (remote-workspace-close-resource
+         workspace resource 'gateway-forward-replaced))
+      (prog1
+          (remote-reverse-port-forward
+           local-endpoint
+           :context context :workspace workspace
+           :stable-endpoint t
+           :metadata
+           (list :application "emacs-gateway"
+                 :workspace (remote-workspace-id workspace)
+                 :key (remote-gateway--forward-key workspace)))
+        (puthash (remote-workspace-id workspace) workspace
+                 remote-gateway--forwards))))))
 
 (defun remote-gateway--listener-endpoint ()
   "Return the local gateway listener endpoint."
@@ -731,22 +779,9 @@ uses a stable, workspace-owned reverse forward."
           (if (or (eq placement 'client)
                   (equal target-id "local"))
               local-endpoint
-            (let* ((workspace
-                    (remote-workspace-open context :connect nil))
-                   (key (remote-workspace-id workspace))
-                   (known (gethash key remote-gateway--forwards))
-                   (forward
-                    (if (remote-channel-live-p known)
-                        known
-                      (remote-reverse-port-forward
-                       local-endpoint
-                       :context context :workspace workspace
-                       :stable-endpoint t
-                       :metadata
-                       (list :application "emacs-gateway"
-                             :workspace key)))))
-              (puthash key forward remote-gateway--forwards)
-              (remote-channel-endpoint forward 'remote)))))
+            (remote-channel-endpoint
+             (remote-gateway--target-forward context local-endpoint)
+             'remote))))
     (let ((host (plist-get endpoint :host))
           (port (plist-get endpoint :port)))
       (list

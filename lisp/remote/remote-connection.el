@@ -503,8 +503,19 @@ REASON is recorded for observability."
           ((null reason) nil)
           ((symbolp reason) (symbol-name reason))
           (t (error-message-string reason))))
-        (run-hook-with-args
-         'remote-connection-closed-hook connection route reason))
+        ;; The session is already gone.  One failing observer must neither
+        ;; skip the others nor abort a caller that is closing more sessions.
+        (run-hook-wrapped
+         'remote-connection-closed-hook
+         (lambda (function)
+           (condition-case error-data
+               (funcall function connection route reason)
+             (error
+              (remote-log
+               'connection-closed-hook-error
+               :target (remote-route-target-id route)
+               :error (error-message-string error-data))))
+           nil)))
       connection)))
 
 (defun remote-connection-invalidate-link

@@ -26,6 +26,8 @@
 (declare-function my/frame-pointer-workarea "init-background" ())
 (declare-function my/background-make-frame "init-background" (&optional parameters))
 (defvar ghostel-buffer-name)
+(defvar ghostel-kill-buffer-on-exit)
+(defvar ghostel-identity)
 (defvar ghostel-shell)
 (defvar ghostel-tramp-shells)
 (defvar ghostel-semi-char-mode-map)
@@ -95,13 +97,15 @@
                        (1- remaining)))))))
 
 (defun my/ghostel-workspace-context (&optional directory)
-  "Return the remote workspace context for DIRECTORY."
+  "Return the remote workspace context for DIRECTORY.
+A directory outside any open workspace belongs to its project root where
+finding that root is cheap on the backend, and to itself otherwise."
   (let* ((directory (remote-canonicalize-file-name
                      (or (my/terminal-normalize-directory directory)
                          default-directory)))
          (context (remote-context directory)))
     (if (or (remote-context-workspace-id context)
-            (not (equal (remote-context-target-id context) "local")))
+            (not (eq (remote-file-operation-cost directory) 'batched)))
         context
       (let ((default-directory directory))
         (if-let* ((project (ignore-errors
@@ -122,14 +126,12 @@
            (or (my/terminal-normalize-directory default-directory)
                default-directory)))
          (context (my/ghostel-workspace-context target-directory))
-         (workspace (remote-workspace-open
-                     context :connect nil
-                     :load-environment
-                     (equal (remote-context-target-id context) "local")))
+         (workspace (remote-workspace-open context :connect nil))
          (workspace-id (remote-workspace-context-id context))
-         (shell-argv (remote-terminal-command
-                      workspace "default"
-                      (not (equal (remote-context-target-id context) "local"))))
+         ;; A terminal never waits for an environment capsule: one that is
+         ;; ready is used, and the shell comes from the target's own facts.
+         (environment (remote-workspace-environment workspace))
+         (shell-argv (remote-terminal-command workspace "default" t))
          (physical-directory (or (remote-client-file-name target-directory)
                                  target-directory))
          (method (file-remote-p physical-directory 'method))
@@ -141,9 +143,7 @@
                     ghostel-tramp-shells)
             ghostel-tramp-shells))
          (default-directory physical-directory)
-         (remote-environment-inhibit
-          (and (not (equal (remote-context-target-id context) "local"))
-               (not (remote-workspace-environment workspace))))
+         (remote-environment-inhibit (not environment))
          (buffer (apply orig-fn args))
          (process (and (buffer-live-p buffer) (get-buffer-process buffer))))
     (unless (and (processp process) (process-live-p process))
@@ -160,18 +160,41 @@
      :profile "default"
      :metadata (list :frontend 'ghostel
                      :directory target-directory
+                     :disconnect-function #'my/ghostel--keep-disconnected-h
                      :restart-function #'my/ghostel--restart-terminal))
-    (when-let* ((environment (remote-workspace-environment workspace)))
-      (remote-environment-apply environment buffer))
     (with-current-buffer buffer
-      (setq-local default-directory target-directory))
+      (setq-local default-directory target-directory)
+      (if environment
+          (remote-environment-apply environment buffer)
+        ;; The buffer owns the request, so it ends with the terminal.
+        (remote-environment-ensure context nil #'ignore)))
     buffer))
 
+(defun my/ghostel--keep-disconnected-h (_terminal _reason)
+  "Keep the current Ghostel buffer when its terminal loses its transport.
+Ghostel removes the buffer of a finished shell, which would take the
+scrollback and the restart recipe of a disconnected terminal with it."
+  (setq-local ghostel-kill-buffer-on-exit nil))
+
 (defun my/ghostel--restart-terminal (terminal _workspace)
-  "Recreate Ghostel TERMINAL after an explicit remote restart."
+  "Recreate Ghostel TERMINAL after an explicit remote restart.
+The replacement takes over the name of the disconnected buffer.  Ghostel
+numbers buffers by the slot each one claims, so that buffer gives its slot up
+for the attempt and takes it back when no replacement could be created."
   (let* ((metadata (remote-terminal-metadata terminal))
          (default-directory (plist-get metadata :directory))
-         (buffer (my/ghostel-create-hidden (remote-terminal-name terminal))))
+         (old (remote-terminal-buffer terminal))
+         (identity (and (buffer-live-p old)
+                        (buffer-local-value 'ghostel-identity old)))
+         buffer)
+    (when identity
+      (with-current-buffer old
+        (setq ghostel-identity nil)))
+    (unwind-protect
+        (setq buffer (my/ghostel-create-hidden (remote-terminal-name terminal)))
+      (when (and identity (not buffer) (buffer-live-p old))
+        (with-current-buffer old
+          (setq ghostel-identity identity))))
     (when (and (plist-get metadata :popup)
                (fboundp 'my/ghostel-popup-display-buffer))
       (my/ghostel-popup-display-buffer buffer))

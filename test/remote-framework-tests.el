@@ -2719,6 +2719,210 @@
           (kill-buffer buffer))
         (remote-workspace-close workspace)))))
 
+(defun remote-framework-test--frontend-terminal (workspace name &rest metadata)
+  "Adopt a routed process whose frontend kills its buffer on exit.
+Return (TERMINAL BUFFER PROCESS).  The sentinel mirrors a native frontend
+such as Ghostel: it removes the buffer unless `remote-framework-test--keep'
+is set in it."
+  (let* ((buffer (generate-new-buffer (format " *%s*" name)))
+         (process
+          (remote-make-process
+           :name name
+           :buffer buffer
+           :command '("/bin/sh" "-c" "sleep 30")
+           :noquery t
+           :remote-adapter "process"
+           :remote-context (remote-workspace-context workspace)
+           :sentinel
+           (lambda (finished _event)
+             (let ((owner (process-buffer finished)))
+               (when (and (buffer-live-p owner)
+                          (not (buffer-local-value
+                                'remote-framework-test--keep owner)))
+                 (kill-buffer owner)))))))
+    (list (remote-terminal-adopt
+           workspace buffer :process process :name name
+           :metadata (append (list :frontend 'test) metadata))
+          buffer process)))
+
+(defvar-local remote-framework-test--keep nil)
+
+(ert-deftest remote-terminal-disconnect-preserves-frontend-buffer ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/"
+             :workspace-id "frontend-loss"
+             :workspace-root "/fs:local:/tmp/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (calls 0)
+           (frontend
+            (remote-framework-test--frontend-terminal
+             workspace "frontend-loss"
+             :disconnect-function
+             (lambda (_terminal _reason)
+               (cl-incf calls)
+               (setq-local remote-framework-test--keep t))))
+           (terminal (nth 0 frontend))
+           (buffer (nth 1 frontend))
+           (process (nth 2 frontend)))
+      (unwind-protect
+          (progn
+            (remote-workspace--mark-terminals-disconnected
+             workspace 'injected-loss)
+            (should-not (process-live-p process))
+            (should (buffer-live-p buffer))
+            (should (eq (remote-terminal-state terminal) 'disconnected))
+            (should (memq terminal (remote-terminal-list workspace)))
+            ;; A reconnect marks the same terminal again.
+            (remote-workspace--mark-terminals-disconnected
+             workspace 'workspace-reconnect)
+            (should (= calls 1))
+            (should
+             (= 1 (with-current-buffer buffer
+                    (count-matches "transport disconnected"
+                                   (point-min) (point-max))))))
+        (when (process-live-p process) (delete-process process))
+        (when (buffer-live-p buffer) (kill-buffer buffer))
+        (remote-workspace-close workspace)))))
+
+(ert-deftest remote-terminal-lost-process-preserves-frontend-buffer ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/"
+             :workspace-id "frontend-exit"
+             :workspace-root "/fs:local:/tmp/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (frontend
+            (remote-framework-test--frontend-terminal
+             workspace "frontend-exit"
+             :disconnect-function
+             (lambda (_terminal _reason)
+               (setq-local remote-framework-test--keep t))))
+           (terminal (nth 0 frontend))
+           (buffer (nth 1 frontend))
+           (process (nth 2 frontend)))
+      (unwind-protect
+          (progn
+            ;; The process dies underneath the frontend, as a lost SSH PTY does.
+            (signal-process process 'SIGKILL)
+            (let ((deadline (+ (float-time) 5)))
+              (while (and (process-live-p process)
+                          (< (float-time) deadline))
+                (accept-process-output nil 0.05)))
+            (should (buffer-live-p buffer))
+            (should (eq (remote-terminal-state terminal) 'disconnected))
+            (should-not (remote-terminal-process terminal))
+            (should (memq terminal (remote-terminal-list workspace))))
+        (when (process-live-p process) (delete-process process))
+        (when (buffer-live-p buffer) (kill-buffer buffer))
+        (remote-workspace-close workspace)))))
+
+(ert-deftest remote-terminal-kill-buffer-is-not-a-disconnect ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/"
+             :workspace-id "frontend-kill"
+             :workspace-root "/fs:local:/tmp/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (calls 0)
+           (frontend
+            (remote-framework-test--frontend-terminal
+             workspace "frontend-kill"
+             :disconnect-function
+             (lambda (_terminal _reason) (cl-incf calls))))
+           (terminal (nth 0 frontend))
+           (buffer (nth 1 frontend))
+           (process (nth 2 frontend)))
+      (unwind-protect
+          (progn
+            (kill-buffer buffer)
+            (should-not (process-live-p process))
+            (should (= calls 0))
+            (should (eq (remote-terminal-state terminal) 'closed))
+            (should-not (remote-terminal-list workspace))
+            (should-not (remote-workspace-resources workspace)))
+        (when (process-live-p process) (delete-process process))
+        (when (buffer-live-p buffer) (kill-buffer buffer))
+        (remote-workspace-close workspace)))))
+
+(ert-deftest remote-terminal-unrouted-frontend-exit-is-not-transport-loss ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/"
+             :workspace-id "frontend-unrouted"
+             :workspace-root "/fs:local:/tmp/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (buffer (generate-new-buffer " *remote-terminal-unrouted*"))
+           ;; A frontend-owned handle that the framework did not route, like
+           ;; the event pipe of a native PTY.
+           (process
+            (make-process
+             :name "remote-terminal-unrouted" :buffer buffer
+             :command '("/bin/sh" "-c" "sleep 30") :noquery t))
+           (terminal
+            (remote-terminal-adopt
+             workspace buffer :process process :name "unrouted"
+             :metadata '(:frontend test))))
+      (unwind-protect
+          (progn
+            (signal-process process 'SIGKILL)
+            (let ((deadline (+ (float-time) 5)))
+              (while (and (process-live-p process)
+                          (< (float-time) deadline))
+                (accept-process-output nil 0.05)))
+            (should (eq (remote-terminal-state terminal) 'closed))
+            (should-not (remote-terminal-list workspace)))
+        (when (process-live-p process) (delete-process process))
+        (when (buffer-live-p buffer) (kill-buffer buffer))
+        (remote-workspace-close workspace)))))
+
+(ert-deftest remote-terminal-failed-restart-keeps-the-old-terminal ()
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/"
+             :workspace-id "frontend-restart-failure"
+             :workspace-root "/fs:local:/tmp/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (fail t)
+           seen-name
+           (frontend
+            (remote-framework-test--frontend-terminal
+             workspace "restart-failure"
+             :disconnect-function
+             (lambda (_terminal _reason)
+               (setq-local remote-framework-test--keep t))
+             :restart-function
+             (lambda (old _owner)
+               ;; The frontend recreates its buffer under the original name.
+               (setq seen-name (get-buffer (remote-terminal-name old)))
+               (if fail
+                   (error "Injected restart failure")
+                 'replacement))))
+           (terminal (nth 0 frontend))
+           (buffer (nth 1 frontend))
+           (name (buffer-name buffer)))
+      (unwind-protect
+          (progn
+            (setf (remote-terminal-name terminal) name)
+            (remote-terminal-mark-disconnected terminal 'injected-loss)
+            (should-error (remote-terminal-restart terminal))
+            (should-not seen-name)
+            (should (buffer-live-p buffer))
+            (should (equal (buffer-name buffer) name))
+            (should (eq (remote-terminal-state terminal) 'disconnected))
+            (should (memq terminal (remote-terminal-list workspace)))
+            (setq fail nil)
+            (should (eq (remote-terminal-restart terminal) 'replacement))
+            (should-not (buffer-live-p buffer))
+            (should (eq (remote-terminal-state terminal) 'closed)))
+        (when (buffer-live-p buffer) (kill-buffer buffer))
+        (remote-workspace-close workspace)))))
+
 (ert-deftest remote-backend-registration-keeps-link-plugin-compatibility ()
   (remote-framework-test-with-registry
     (remote-register-backend

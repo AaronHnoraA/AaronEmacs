@@ -527,8 +527,13 @@
           (lambda (_file) 'mock-context))
          ((symbol-function 'remote-workspace-open)
           (lambda (_context &rest _args) 'mock-workspace))
+         ((symbol-function 'remote-workspace-resource-live-p)
+          (lambda (workspace resource)
+            (and (eq workspace 'mock-workspace)
+                 (eq resource 'mock-resource))))
          ((symbol-function 'remote-workspace-add-file-watch)
           (lambda (workspace file flags _callback &rest _args)
+            (should-not opened)
             (setq opened (list workspace file flags))
             'mock-resource))
          ((symbol-function 'remote-workspace-close-resource)
@@ -552,6 +557,49 @@
       (should
        (zerop
         (hash-table-count my/noema--external-file-watches))))))
+
+(ert-deftest my/noema-external-watch-is-renewed-after-its-owner-closes ()
+  (let ((remote-mode t)
+        (my/noema--external-file-watches
+         (make-hash-table :test #'equal))
+        (my/noema--external-file-watch-timers
+         (make-hash-table :test #'equal))
+        (my/noema--external-file-watch-suppressed
+         (make-hash-table :test #'equal))
+        (file "/fs:remote:/srv/note.md")
+        (generation 0)
+        (live t)
+        closed)
+    (cl-letf
+        (((symbol-function 'remote-client-file-name)
+          (lambda (_file &optional _adapter) nil))
+         ((symbol-function 'remote-context)
+          (lambda (_file) 'mock-context))
+         ((symbol-function 'remote-workspace-open)
+          (lambda (_context &rest _args) (list 'workspace generation)))
+         ((symbol-function 'remote-workspace-resource-live-p)
+          (lambda (_workspace _resource) live))
+         ((symbol-function 'remote-workspace-add-file-watch)
+          (lambda (&rest _args)
+            (list 'resource (cl-incf generation))))
+         ((symbol-function 'remote-workspace-close-resource)
+          (lambda (_workspace resource &optional _reason)
+            (push resource closed))))
+      (my/noema--ensure-external-file-watch file)
+      (should (= generation 1))
+      ;; Disconnecting the target closed the workspace and its watch.
+      (setq live nil)
+      (my/noema--ensure-external-file-watch file)
+      (should (= generation 2))
+      (should (equal (cdr (gethash file my/noema--external-file-watches))
+                     '(resource 2)))
+      (setq live t)
+      (my/noema--ensure-external-file-watch file)
+      (should (= generation 2))
+      ;; The owner already released the first watch; only the live one is
+      ;; closed when Noema stops.
+      (my/noema--clear-external-file-watches)
+      (should (equal closed '((resource 2)))))))
 
 (ert-deftest my/noema-external-watch-distinguishes-agent-write-after-save ()
   (let* ((file (make-temp-file "noema-watch-self-write-" nil ".md"))
@@ -1047,7 +1095,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
           (cl-letf (((symbol-function 'my/noema--ensure-server)
                      (lambda (callback) (funcall callback)))
                     ((symbol-function 'my/noema--split-window)
-                     (lambda () (selected-window)))
+                     (lambda (&optional _direction) (selected-window)))
                     ((symbol-function 'my/xwidget-open-url)
                      (lambda (url &rest args)
                        (setq opened-url url

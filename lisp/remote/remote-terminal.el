@@ -167,36 +167,32 @@ PROBE, discover and cache the target account's login shell first."
       (remote-workspace-resources workspace))))
   terminal)
 
+(defun remote-terminal--routed-process-p (process)
+  "Return whether PROCESS was started through the routed process boundary.
+A frontend may hand over a handle of its own instead, such as the event pipe
+of a native PTY.  Such a handle carries no route, so its end says nothing
+about a transport."
+  (and (processp process)
+       (remote-route-p (process-get process 'remote-route))))
+
+(defun remote-terminal--lost-process-p (terminal process)
+  "Return whether PROCESS ended underneath an open TERMINAL.
+A lost SSH PTY can exit while the file workspace stays healthy."
+  (and (eq (remote-terminal-state terminal) 'open)
+       (remote-terminal--routed-process-p process)
+       (or (memq (process-status process) '(signal failed closed))
+           (and (eq (process-status process) 'exit)
+                (= (process-exit-status process) 255)))))
+
 (defun remote-terminal--process-finished (terminal process)
-  "Record a finished TERMINAL PROCESS without hiding an abnormal exit."
+  "Record that TERMINAL's PROCESS has ended.
+A disconnected terminal keeps its buffer and restart recipe; any other one is
+removed with its process."
   (when (remote-terminal-p terminal)
-    (let* ((workspace (remote-get-workspace
-                       (remote-terminal-workspace-id terminal)))
-           (local-ghostel
-            (and workspace
-                 (equal (remote-workspace-target-id workspace) "local")
-                 (eq (plist-get (remote-terminal-metadata terminal)
-                                :frontend)
-                     'ghostel))))
-      (cond
-     ((eq (remote-terminal-state terminal) 'disconnected)
-      (setf (remote-terminal-process terminal) nil))
-     ((memq (remote-terminal-state terminal) '(closing closed))
-      (remote-terminal--detach terminal))
-     (local-ghostel
-      ;; Ghostel's lifecycle pipe may close with a signal when its native
-      ;; shell exits normally; this is not a remote transport failure.
-      (remote-terminal--detach terminal))
-     ((or (memq (process-status process) '(signal failed closed))
-          (and (eq (process-status process) 'exit)
-               (= (process-exit-status process) 255)))
-      ;; A lost SSH PTY can exit while the file workspace remains healthy.
-      ;; Keep its buffer and restart recipe instead of silently removing it.
-      (remote-terminal-mark-disconnected
-       terminal (list 'process-exit (process-exit-status process)))
-      (setf (remote-terminal-process terminal) nil))
-     (t
-      (remote-terminal--detach terminal))))))
+    (if (eq (remote-terminal-state terminal) 'disconnected)
+        (when (eq (remote-terminal-process terminal) process)
+          (setf (remote-terminal-process terminal) nil))
+      (remote-terminal--detach terminal))))
 
 (defun remote-terminal--buffer-killed ()
   "Close the terminal process owned by the current buffer."
@@ -205,6 +201,10 @@ PROBE, discover and cache the target account's login shell first."
     (let* ((terminal remote-terminal-instance)
            (process (remote-terminal-process terminal)))
       (setq remote-terminal-instance nil)
+      ;; Announce the kill first: deleting the process runs its sentinel,
+      ;; which would otherwise read the signal as a lost transport.
+      (unless (eq (remote-terminal-state terminal) 'closed)
+        (setf (remote-terminal-state terminal) 'closing))
       (when (and (processp process)
                  (process-live-p process))
         (delete-process process))
@@ -217,7 +217,14 @@ PROBE, discover and cache the target account's login shell first."
 PROCESS defaults to BUFFER's process.  NAME and PROFILE are descriptive;
 METADATA can record the frontend and consumer.  The frontend keeps its native
 mode, process filter, and sentinel behavior while the framework owns process,
-buffer, and workspace teardown."
+buffer, and workspace teardown.
+
+Two METADATA entries are part of the contract.  `:disconnect-function' is
+called with the terminal and the reason, in BUFFER, once when the terminal
+loses its transport and before the frontend's sentinel sees the process end;
+a frontend that removes its buffer on exit uses it to keep the buffer instead.
+`:restart-function' is called with the terminal and its workspace by
+`remote-terminal-restart' and creates the replacement."
   (let* ((workspace
           (or (remote-get-workspace workspace)
               (error "Unknown remote workspace: %S" workspace)))
@@ -274,12 +281,20 @@ buffer, and workspace teardown."
       (set-process-sentinel
        process
        (lambda (finished event)
-         (unwind-protect
-             (when frontend-sentinel
-               (funcall frontend-sentinel finished event))
-           (when (memq (process-status finished)
-                       '(exit signal failed closed))
-             (remote-terminal--process-finished terminal finished))))))
+         (let ((ended (memq (process-status finished)
+                            '(exit signal failed closed))))
+           ;; Decide before the frontend runs: its sentinel may remove the
+           ;; buffer, and a lost terminal has to keep it.
+           (when (and ended
+                      (remote-terminal--lost-process-p terminal finished))
+             (remote-terminal-mark-disconnected
+              terminal
+              (list 'process-exit (process-exit-status finished))))
+           (unwind-protect
+               (when frontend-sentinel
+                 (funcall frontend-sentinel finished event))
+             (when ended
+               (remote-terminal--process-finished terminal finished)))))))
     (with-current-buffer buffer
       (setq-local remote-terminal-instance terminal)
       (add-hook 'kill-buffer-hook
@@ -295,24 +310,51 @@ buffer, and workspace teardown."
       (remote-workspace-track-live-route workspace route))
     terminal))
 
+(defun remote-terminal--run-disconnect-function (terminal reason)
+  "Let TERMINAL's frontend prepare for losing its transport for REASON."
+  (when-let* ((function
+               (plist-get (remote-terminal-metadata terminal)
+                          :disconnect-function))
+              (buffer (remote-terminal-buffer terminal))
+              ((buffer-live-p buffer)))
+    (condition-case error-data
+        (with-current-buffer buffer
+          (funcall function terminal reason))
+      (error
+       (remote-log
+        'terminal-disconnect-function-error
+        :terminal (remote-terminal-id terminal)
+        :error (error-message-string error-data))))))
+
 (defun remote-terminal-mark-disconnected (terminal &optional reason)
   "Keep TERMINAL visible but stop it after transport loss.
-REASON is retained for UI and Doctor output.  The shell is not replayed."
+REASON is retained for UI and Doctor output.  The shell is not replayed.
+Marking a terminal that is already disconnected only updates REASON."
   (when (and (remote-terminal-p terminal)
-             (not (eq (remote-terminal-state terminal) 'closed)))
-    (setf (remote-terminal-state terminal) 'disconnected
-          (remote-terminal-error terminal) reason)
-    (when-let* ((buffer (remote-terminal-buffer terminal)))
-      (when (buffer-live-p buffer)
+             (not (memq (remote-terminal-state terminal)
+                        '(closing closed))))
+    (let ((first (not (eq (remote-terminal-state terminal)
+                          'disconnected)))
+          (process (remote-terminal-process terminal)))
+      (setf (remote-terminal-state terminal) 'disconnected
+            (remote-terminal-error terminal) reason)
+      (when first
+        (remote-terminal--run-disconnect-function terminal reason))
+      ;; Deleting the process runs the frontend's sentinel, which finishes
+      ;; its own teardown and may write to the buffer.
+      (when (and (processp process) (process-live-p process))
+        (delete-process process))
+      (when (eq (remote-terminal-process terminal) process)
+        (setf (remote-terminal-process terminal) nil))
+      (when-let* ((buffer (and first (remote-terminal-buffer terminal)))
+                  ((buffer-live-p buffer)))
         (with-current-buffer buffer
           (let ((inhibit-read-only t))
-            (goto-char (point-max))
-            (insert
-             "\n[remote] transport disconnected; use "
-             "M-x remote-terminal-restart to start a new shell.\n")))))
-    (when-let* ((process (remote-terminal-process terminal)))
-      (when (process-live-p process)
-        (delete-process process)))
+            (save-excursion
+              (goto-char (point-max))
+              (insert
+               "\n[remote] transport disconnected; use "
+               "M-x remote-terminal-restart to start a new shell.\n"))))))
     terminal))
 
 (cl-defun remote-terminal-open
@@ -397,13 +439,22 @@ terminal buffer."
          (kill-buffer buffer))
        (signal (car error) (cdr error))))))
 
+(defun remote-terminal--disconnected (&optional workspace)
+  "Return the first disconnected terminal, optionally only in WORKSPACE."
+  (seq-find
+   (lambda (terminal)
+     (eq (remote-terminal-state terminal) 'disconnected))
+   (remote-terminal-list workspace)))
+
 (defun remote-terminal-restart (terminal)
-  "Explicitly replace disconnected TERMINAL with a fresh shell."
+  "Explicitly replace disconnected TERMINAL with a fresh shell.
+The old terminal and its buffer are given up only once the replacement
+exists, so a restart that fails can be repeated."
   (interactive
    (list
     (or remote-terminal-instance
-        (car (remote-terminal-list
-              (remote-get-workspace (remote-context)))))))
+        (remote-terminal--disconnected
+         (remote-get-workspace (remote-context))))))
   (unless (remote-terminal-p terminal)
     (error "No remote terminal to restart"))
   (unless (eq (remote-terminal-state terminal) 'disconnected)
@@ -418,13 +469,29 @@ terminal buffer."
            (remote-terminal-metadata terminal)
            :restart-function))
          (arguments
-          (plist-get (remote-terminal-metadata terminal) :restart)))
+          (plist-get (remote-terminal-metadata terminal) :restart))
+         (buffer (remote-terminal-buffer terminal))
+         (name (and (buffer-live-p buffer) (buffer-name buffer)))
+         replacement)
     (unless (or restart-function arguments)
       (error "Terminal frontend did not provide a restart recipe"))
+    ;; A frontend recreates its buffer under the original name, so the old
+    ;; buffer steps aside for the attempt and takes the name back on failure.
+    (when name
+      (with-current-buffer buffer
+        (rename-buffer (format "%s (disconnected)" name) t)))
+    (condition-case error-data
+        (setq replacement
+              (if restart-function
+                  (funcall restart-function terminal workspace)
+                (apply #'remote-terminal-open workspace arguments)))
+      ((error quit)
+       (when (and name (buffer-live-p buffer) (not (get-buffer name)))
+         (with-current-buffer buffer
+           (rename-buffer name)))
+       (signal (car error-data) (cdr error-data))))
     (remote-terminal-close terminal)
-    (if restart-function
-        (funcall restart-function terminal workspace)
-      (apply #'remote-terminal-open workspace arguments))))
+    replacement))
 
 (defun remote-terminal-send-string (terminal string)
   "Send STRING to TERMINAL."

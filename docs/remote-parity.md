@@ -57,7 +57,7 @@ service 与 channel 来自同一 owning workspace target。异步 callback 在�
 | 文件读写、目录、metadata | remote | 原生 API 全量契约、跨文件操作和错误语义一致；CSE 连续保存后的命名 ACL、inode、属主和权限已实测保持；经版本验证的原位写入跳过重复 ACL/SELinux 往返，小文件覆写中位耗时约 71→48 ms；属性可用性探测按连接换代缓存 |
 | target HOME 与符号链接 | remote | Aaron-PC 上 SSH 与 tramp-rpc 已验证 `~/`、`~user/`、相对/绝对/断链、truename 与跨目录链接；仍需 WSL/container 回归 |
 | 同步/异步 process | remote | cwd/env/executable 全由 backend execution 契约投影 |
-| PTY terminal | remote | CSE 与 Aaron-PC 真机上的 VTerm 已验证独立 `ssh-pty` 选路、workspace 跟踪、目标目录和输入输出；已有工作区中首个 PTY 不再建立 TRAMP 文件会话。RPC 传输或 PTY 进程故障后保留 disconnected buffer，工作区重连再手动重启终端已通过；仍需物理断网、buffer teardown、WSL/container 回归 |
+| PTY terminal | remote | CSE 与 Aaron-PC 真机上的 VTerm 已验证独立 `ssh-pty` 选路、workspace 跟踪、目标目录和输入输出；已有工作区中首个 PTY 不再建立 TRAMP 文件会话。RPC 传输或 PTY 进程故障后保留 disconnected buffer，工作区重连再手动重启终端已通过。frontend 断线契约（`:disconnect-function`、先判定后交给 frontend sentinel、重启失败保留旧终端、杀 buffer 不算断线）有故障注入单元测试；真实 Ghostel 已在 `local` target 上验证断线保留与原名重启（`REMOTE_GHOSTEL_E2E_FAULT=transport`），SSH target 上的同一用例尚未真机运行；仍需物理断网、WSL/container 回归 |
 | 有序 transport pipeline | local | stage 准备、复用、健康、失败回滚和逆序释放 |
 | SSH jump/multi-hop | local | 真机 ProxyJump、多 backend 共用 pipeline |
 | WSL/container hop | API | `/ssh:host|docker:container:`、WSL 与 Podman 真机回归 |

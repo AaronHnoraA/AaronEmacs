@@ -1353,6 +1353,17 @@ to JSON a second time."
       0.25 nil #'my/noema--external-file-notify-change file)
      my/noema--external-file-watch-timers)))
 
+(defun my/noema--external-file-watch-live-p (file)
+  "Whether the watch recorded for logical FILE still exists.
+Closing its workspace or disconnecting its target releases the watch without
+telling Noema.  A record whose owner is gone is dropped, so the next read of
+FILE watches it again instead of trusting a watch that no longer reports."
+  (when-let* ((owner (gethash file my/noema--external-file-watches)))
+    (or (remote-workspace-resource-live-p (car owner) (cdr owner))
+        (progn
+          (remhash file my/noema--external-file-watches)
+          nil))))
+
 (defun my/noema--ensure-external-file-watch (file)
   "Ensure one recoverable Remote watch exists for logical FILE."
   (when (and (bound-and-true-p remote-mode)
@@ -1361,7 +1372,7 @@ to JSON a second time."
              ;; watch is needed exactly when it cannot -- which is a backend
              ;; capability, not a target name.
              (not (remote-client-file-name file))
-             (not (gethash file my/noema--external-file-watches)))
+             (not (my/noema--external-file-watch-live-p file)))
     (condition-case error
         (let* ((context (remote-context (file-name-directory file)))
                (workspace (remote-workspace-open context :connect nil))

@@ -652,6 +652,44 @@ the default file adapter must route it without aborting later hooks."
         (should (= (remote-connection-use-count second) 2))
         (should (= (length (remote-connection-pool-status)) 1))))))
 
+(ert-deftest remote-framework-shutdown-survives-a-failing-session ()
+  (remote-test-with-registry
+    (let (closed runtime-cleared)
+      (remote-register-link-plugin
+       "exiting"
+       :capabilities '(process-sync)
+       :project-file-name (lambda (_file _link _route) "/exiting/")
+       :connect (lambda (_route _context) 'handle)
+       :connection-live-p (lambda (_connection _route _context) t)
+       :disconnect
+       (lambda (_connection route)
+         (push (remote-route-target-id route) closed)))
+      (dolist (target '("first" "second"))
+        (remote-register-target target :trusted t)
+        (remote-register-link target "ssh" "exiting"))
+      (remote-register-adapter
+       "test" :capabilities '(process-sync)
+       :preferences '((default . ("exiting"))))
+      (dolist (target '("first" "second"))
+        (let ((context
+               (remote-context-create
+                :target-id target :localname "/work/"
+                :workspace-root (format "/fs:%s:/work/" target))))
+          (remote-connection-ensure
+           (remote-resolve "test" 'process-sync context) context)))
+      (should (= (length (remote-connection-pool-status)) 2))
+      (let ((remote-connection-closed-hook
+             (list (lambda (&rest _)
+                     (error "Injected close observer failure")))))
+        (cl-letf (((symbol-function 'remote-pipeline-runtime-clear)
+                   (lambda (&rest _) (setq runtime-cleared t) 0)))
+          ;; Leaving Emacs must not stop at the first session it cannot
+          ;; close: the rest would keep their SSH masters.
+          (remote-framework-shutdown)))
+      (should (equal (sort closed #'string<) '("first" "second")))
+      (should-not (remote-connection-pool-status))
+      (should runtime-cleared))))
+
 (ert-deftest remote-connection-read-lease-rechecks-when-disabled ()
   (remote-test-with-registry
     (let ((remote-connection--last-live-check

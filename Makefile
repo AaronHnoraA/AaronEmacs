@@ -1,4 +1,12 @@
 EMACS ?= emacs
+# libgccjit links subr trampolines against libemutls_w, which lives in gcc's
+# versioned target directory.  Emacs.app records that directory at build time
+# and the CLI wrapper does not pass it on, so a gcc upgrade leaves every test
+# that rebinds a C primitive failing with a native-compiler error.
+GCCJIT_LIBRARY_DIR := $(firstword $(dir $(wildcard /opt/homebrew/lib/gcc/current/gcc/*/*/libemutls_w.a /usr/local/lib/gcc/current/gcc/*/*/libemutls_w.a)))
+ifneq ($(GCCJIT_LIBRARY_DIR),)
+export LIBRARY_PATH := $(patsubst %/,%,$(GCCJIT_LIBRARY_DIR))$(if $(LIBRARY_PATH),:$(LIBRARY_PATH))
+endif
 AARONNOTE_DIR = site-lisp/noema
 EMACS_BATCH_BASE = $(EMACS) --batch --no-site-file --no-site-lisp --no-splash --init-directory=$(CURDIR) -q
 PUBLISH_BATCH = $(EMACS_BATCH_BASE) -L site-lisp/config -L lisp -L lisp/roam -l ./lisp/roam/init-aaronnote-publish.el
@@ -8,7 +16,7 @@ BOOTSTRAP = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./bootstrap.el
 BOOTSTRAP_INSTALL = BOOTSTRAP_MODE=install $(BOOTSTRAP)
 BOOTSTRAP_EXPORT = BOOTSTRAP_MODE=export $(BOOTSTRAP)
 BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
-REMOTE_TEST_BATCH = $(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t)' -L lisp -L lisp/remote -L lisp/remote/backend
+REMOTE_TEST_BATCH = $(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L lisp -L lisp/remote -L lisp/remote/backend
 UI_TOKEN_FILE = site-lisp/noema/src/styles/aaron-ui-tokens.css
 UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui/aaron-ui.el
 

@@ -232,6 +232,12 @@ leader 入口：
 
 - package 安装时允许 native compile
 - native compile cache 统一放到 [var/eln-cache](../var/eln-cache)
+- 测试里用 `cl-letf` 替换 C 原语会让 libgccjit 现编一个 trampoline，它要链接 gcc
+  版本目录下的 `libemutls_w`。Emacs.app 在构建时把该目录写进自己的
+  `LSEnvironment`，命令行包装脚本不会传递它，gcc 升级后旧路径也随之失效，表现为
+  大量测试报 `native-compiler-error … library 'emutls_w' not found`。`Makefile`
+  因此自行探测该目录并导出 `LIBRARY_PATH`；不经 `make` 直接跑测试时需要自己
+  设置，纯 `-Q` 的 remote 单元测试则直接关闭 trampoline
 - JIT native compile 开启
 - async warning 策略走 `silent`
 - `custom.el` 不纳入统一编译目标

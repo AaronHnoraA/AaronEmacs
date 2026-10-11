@@ -110,9 +110,22 @@ Persisted targets are intentionally not reloaded; configuration ownership
   (remote-framework-bootstrap))
 
 (defun remote-framework-shutdown ()
-  "Close this Emacs process's backend sessions and managed transports."
-  (remote-connection-pool-clear t)
-  (remote-pipeline-runtime-clear 'emacs-exit))
+  "Close this Emacs process's backend sessions and managed transports.
+Run from `kill-emacs-hook'.  Each step is contained: a session that cannot be
+closed must not keep the remaining SSH masters alive, and an error here would
+make Emacs ask whether to exit at all."
+  (dolist (step
+           (list
+            ;; Nothing may reconnect what the next steps close.
+            (lambda () (remote-background-clear 'emacs-exit))
+            (lambda () (remote-connection-pool-clear t))
+            (lambda () (remote-pipeline-runtime-clear 'emacs-exit))))
+    (condition-case error-data
+        (funcall step)
+      ((error quit)
+       (remote-log
+        'framework-shutdown-error
+        :error (error-message-string error-data))))))
 
 (add-hook 'kill-emacs-hook #'remote-framework-shutdown)
 

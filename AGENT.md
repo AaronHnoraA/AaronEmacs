@@ -132,6 +132,17 @@ Keep these rules:
 - A projected environment capsule makes `process-environment` and `exec-path`
   buffer-local.  Capture them before `with-temp-buffer`/`with-current-buffer`
   and rebind inside, or target processes silently fall back to the login PATH.
+- Transport recovery replaces a workspace resource's handle, and closing a
+  workspace or disconnecting its target releases resources without telling
+  their consumers.  A consumer that keeps a resource reads the current value
+  from its workspace by a stable key, or asks
+  `remote-workspace-resource-live-p` before trusting its own record; it never
+  caches the first handle.
+- A terminal frontend that removes its buffer when the process ends registers
+  `:disconnect-function` with `remote-terminal-adopt`, so a lost transport
+  keeps the buffer for `remote-terminal-restart`.  Whether an exit can be a
+  transport loss is decided by the process being routed, never by target ID
+  or frontend name.
 - A feature is not complete merely because the local path works or a capability
   symbol exists.  Apply the local/remote/resilience criteria in
   `docs/remote-parity.md`, and add parity tests for every new shared contract.
