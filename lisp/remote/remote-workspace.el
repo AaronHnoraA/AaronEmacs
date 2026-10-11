@@ -844,7 +844,9 @@ Automatic resources are recreated.  Terminals remain disconnected until
              (remote-log
               'workspace-reconnect-complete
               :workspace (remote-workspace-id workspace)
-              :state (remote-workspace-state workspace)))
+              :state (remote-workspace-state workspace))
+             (remote-workspace--announce
+              (remote-workspace-target-id workspace) 'restored))
            :error-callback
            (lambda (error)
              (when (eq (gethash (remote-workspace-key workspace)
@@ -921,6 +923,8 @@ still wait for TRAMP, but backoff between attempts never sleeps in a command."
            :workspace (remote-workspace-id workspace)
            :error (error-message-string hook-error))))
        (remote-workspace--mark-terminals-disconnected workspace error)
+       (remote-workspace--announce
+        (remote-workspace-target-id workspace) 'lost)
        (when (and remote-workspace-auto-reconnect
                   (not
                    (plist-get
@@ -1011,6 +1015,7 @@ and buffers whose kill query refuses closure remain, with automatic startup
 disabled.  Return :workspaces, :sessions, :buffers counts and :kept-buffers
 names.  Internal session replacement must not call this user-level teardown."
   (remote-workspace--stop-return-probe target-id)
+  (remhash target-id remote-workspace--announced-states)
   (let ((reason (or reason 'target-disconnect))
         (workspaces
          (seq-filter
@@ -1122,6 +1127,40 @@ names.  Internal session replacement must not call this user-level teardown."
        nil))
     (list :workspaces (length workspaces) :sessions sessions
           :buffers closed-buffers :kept-buffers (nreverse kept-buffers))))
+
+(defcustom remote-workspace-announce-connection-state t
+  "Whether a target losing, awaiting and regaining its connection is announced.
+Recovery runs in the background.  Without a line in the echo area the only
+sign that a target went away is the next command failing."
+  :type 'boolean
+  :group 'remote)
+
+(defvar remote-workspace--announced-states (make-hash-table :test #'equal)
+  "The connection state last announced for each target ID.")
+
+(defun remote-workspace--announce (target-id state)
+  "Tell the user once that TARGET-ID's connection entered STATE.
+STATE is `lost', `waiting' or `restored'.  Several workspaces of one target
+change state together and are announced as one event; `restored' is only
+worth saying after a loss."
+  (let ((previous (gethash target-id remote-workspace--announced-states)))
+    (unless (or (eq previous state)
+                (and (eq state 'restored) (null previous)))
+      (if (eq state 'restored)
+          (remhash target-id remote-workspace--announced-states)
+        (puthash target-id state remote-workspace--announced-states))
+      (when (and remote-workspace-announce-connection-state
+                 (not noninteractive))
+        (let ((label (or (when-let* ((target (remote-get-target target-id)))
+                           (remote-target-label target))
+                         target-id)))
+          (message
+           (pcase state
+             ('lost "Remote %s: connection lost, reconnecting...")
+             ('waiting
+              "Remote %s: not answering; will reconnect when it does")
+             (_ "Remote %s: reconnected"))
+           label))))))
 
 (defcustom remote-workspace-return-probe-interval 30
   "Seconds between checks for a target that outlasted automatic recovery.
@@ -1261,6 +1300,7 @@ would freeze Emacs for its whole deadline on every retry, so the long wait
 is done by a cheap asynchronous probe, and only its success reconnects."
   (unless (gethash target-id remote-workspace--return-probes)
     (when (remote-workspace--given-up target-id)
+      (remote-workspace--announce target-id 'waiting)
       (remote-workspace--schedule-return-probe target-id 0))))
 
 (add-hook 'remote-connection-opened-hook

@@ -599,6 +599,10 @@ SSH target 上，用暂停容器（主机不回任何包）、杀连接进程、
 - **重试要节制。** 新版 OpenSSH 会临时封禁“只连接不认证”的来源，主机不可达期间的
   一长串无效建连会让它恢复后反而拒绝这个客户端。
 
+状态变化会在回显区各说一次（`remote-workspace-announce-connection-state`）：连接丢失
+并开始重连、主机不应答改为等待、重新连上。同一 target 的多个 workspace 一起变化
+只算一次；从未丢失过的连接不会报“重新连上”。
+
 三个时长都登记在配置注册表里（`remote-connection-open-timeout`、
 `remote-connection-unreachable-hold`、`remote-workspace-return-probe-interval` /
 `-limit`）。

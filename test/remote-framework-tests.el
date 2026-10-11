@@ -595,6 +595,36 @@
           (remote-workspace--revive-after-session-open nil route)
           (should-not scheduled))))))
 
+(ert-deftest remote-workspace-announces-each-connection-state-once ()
+  "Losing, awaiting and regaining a target is said once per target."
+  (let ((remote-workspace--announced-states (make-hash-table :test #'equal))
+        (remote-workspace-announce-connection-state t)
+        (noninteractive nil)
+        said)
+    (cl-letf (((symbol-function 'message)
+               (lambda (format-string &rest arguments)
+                 (push (apply #'format format-string arguments) said)))
+              ((symbol-function 'remote-get-target) (lambda (_id) nil)))
+      ;; A connection that was never lost has nothing to report.
+      (remote-workspace--announce "lab" 'restored)
+      (should-not said)
+      ;; Two workspaces of one target fail together.
+      (remote-workspace--announce "lab" 'lost)
+      (remote-workspace--announce "lab" 'lost)
+      (should (= (length said) 1))
+      (should (string-match-p "lab: connection lost" (car said)))
+      (remote-workspace--announce "lab" 'waiting)
+      (remote-workspace--announce "lab" 'waiting)
+      (should (= (length said) 2))
+      (remote-workspace--announce "lab" 'restored)
+      (remote-workspace--announce "lab" 'restored)
+      (should (= (length said) 3))
+      (should (string-match-p "lab: reconnected" (car said)))
+      ;; Switched off, the state is still tracked but nothing is said.
+      (let ((remote-workspace-announce-connection-state nil))
+        (remote-workspace--announce "lab" 'lost)
+        (should (= (length said) 3))))))
+
 (ert-deftest remote-workspace-return-probe-reconnects-without-blocking ()
   "After recovery gives up, an asynchronous probe waits for the target."
   (remote-framework-test-with-registry
