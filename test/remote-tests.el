@@ -2064,6 +2064,62 @@ names in tree consumers such as Treemacs."
                 '("slow")))
         (should (= calls 8))))))
 
+(ert-deftest remote-fs-preferred-route-cache-ignores-backends-without-the-capability ()
+  "An SSH link also carries a PTY-only backend; file routes still stay cached."
+  (remote-test-with-registry
+    (let* ((_target
+            (remote-register-target
+             "lab" :trusted t
+             :preferences '((default . ("fast" "slow")))))
+           (_fast
+            (remote-register-link-plugin
+             "fast" :capabilities '(metadata)
+             :available-p (lambda (_link _context) t)))
+           (_slow
+            (remote-register-link-plugin
+             "slow" :capabilities '(metadata)
+             :available-p (lambda (_link _context) t)))
+           (_pty
+            (remote-register-link-plugin
+             "pty-only" :capabilities '(pty)
+             :available-p (lambda (_link _context) t)))
+           (_link
+            (remote-register-link "lab" "ssh" '("pty-only" "slow" "fast")))
+           (context
+            (remote-context-create
+             :target-id "lab" :localname "/tmp/"))
+           (original-routes (symbol-function 'remote-routes))
+           (calls 0))
+      (cl-letf (((symbol-function 'remote-routes)
+                 (lambda (&rest args)
+                   (cl-incf calls)
+                   (apply original-routes args))))
+        (should
+         (equal (mapcar #'remote-route-link-plugin-id
+                        (remote-fs--routes "emacs-file" 'metadata context))
+                '("fast" "slow")))
+        (should (= calls 1))
+        (dotimes (_ 5)
+          (should
+           (equal (mapcar #'remote-route-link-plugin-id
+                          (remote-fs--routes
+                           "emacs-file" 'metadata context))
+                  '("fast" "slow"))))
+        (should (= calls 1))
+        ;; The bystander gaining the capability changes the eligible set.
+        (remote-register-link-plugin
+         "pty-only" :capabilities '(pty metadata)
+         :available-p (lambda (_link _context) t))
+        (should
+         (member "pty-only"
+                 (mapcar #'remote-route-link-plugin-id
+                         (remote-fs--routes
+                          "emacs-file" 'metadata context))))
+        (should (= calls 2))
+        ;; Three eligible backends are not a clear two-way preference.
+        (remote-fs--routes "emacs-file" 'metadata context)
+        (should (= calls 3))))))
+
 (ert-deftest remote-fs-preferred-route-cache-observes-adapter-and-context-edits ()
   "Snapshot checks must notice in-place preference edits on every owner."
   (remote-test-with-registry

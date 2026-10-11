@@ -1223,6 +1223,37 @@ probe's temporary output buffer must not fall back to the global value."
       (should (eq (plist-get description :mtime-compare)
                   (nth 2 expected))))))
 
+(ert-deftest remote-placement-queries-reuse-the-validated-route ()
+  "Cost and placement are asked per buffer; they must not reselect a route."
+  (let ((file (remote-canonicalize-file-name
+               (expand-file-name "init.el" user-emacs-directory)))
+        (selections 0))
+    (clrhash remote-fs-native-route-cache)
+    (let ((cost (remote-file-operation-cost file))
+          (watch (remote-file-watch-cost file))
+          (client (remote-client-file-name file))
+          (original (symbol-function 'remote-routes)))
+      (should (eq cost 'batched))
+      (should (eq watch 'push))
+      (should (equal client (remote-file-local-name file)))
+      (cl-letf (((symbol-function 'remote-routes)
+                 (lambda (&rest arguments)
+                   (cl-incf selections)
+                   (apply original arguments))))
+        (dotimes (_ 20)
+          (should (eq (remote-file-operation-cost file) cost))
+          (should (eq (remote-file-watch-cost file) watch))
+          (should (equal (remote-client-file-name file) client))))
+      (should (zerop selections))
+      ;; The reuse is guarded: a changed registration selects again.
+      (clrhash remote-fs-native-route-cache)
+      (cl-letf (((symbol-function 'remote-routes)
+                 (lambda (&rest arguments)
+                   (cl-incf selections)
+                   (apply original arguments))))
+        (should (eq (remote-file-operation-cost file) cost)))
+      (should (= selections 1)))))
+
 (ert-deftest remote-file-watch-cost-defaults-to-none ()
   "A backend that declares nothing cannot be relied on for notifications."
   (cl-letf (((symbol-function 'remote-fs--backend-property)

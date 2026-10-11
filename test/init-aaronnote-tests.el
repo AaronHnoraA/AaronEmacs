@@ -3411,6 +3411,47 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
        (my/noema-jupyter--runtime-status-payload
         (my/noema-jupyter--runtime '((runtimeId . "runtime-liveness"))))))))
 
+(ert-deftest my/noema-jupyter-shutdown-releases-its-workspace-resources ()
+  "A kernel that was shut down must not be recovered or signalled again."
+  (let* ((remote-workspaces (make-hash-table :test #'equal))
+         (my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (runtime (my/noema-jupyter-test--runtime 4321))
+         (workspace
+          (remote-workspace-open
+           (my/noema-jupyter-runtime-context runtime) :connect nil))
+         (signals 0)
+         (recoveries 0))
+    (setf (my/noema-jupyter-runtime-workspace runtime) workspace)
+    (puthash (my/noema-jupyter-runtime-id runtime) runtime
+             my/noema-jupyter-runtimes)
+    ;; What launching registers: the runtime and its five-channel group.
+    (remote-workspace-ensure-recoverable-resource
+     workspace 'jupyter-runtime (my/noema-jupyter-runtime-id runtime) runtime
+     :close (lambda (value reason)
+              (unless (eq reason 'transport-recovery)
+                (my/noema-jupyter--shutdown-runtime value)))
+     :recover (lambda (_resource _owner) (cl-incf recoveries) runtime))
+    (remote-workspace-ensure-recoverable-resource
+     workspace 'channel-group
+     (list 'noema-jupyter (my/noema-jupyter-runtime-id runtime)) 'group
+     :close #'ignore
+     :recover (lambda (_resource _owner) (cl-incf recoveries) 'group))
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/noema-jupyter--signal)
+                   (lambda (&rest _) (cl-incf signals))))
+          (my/noema-jupyter--shutdown-runtime runtime)
+          (should (= signals 1))
+          (should-not (remote-workspace-resources workspace))
+          (should (zerop (hash-table-count my/noema-jupyter-runtimes)))
+          ;; A reconnect has nothing left to reopen for the dead kernel.
+          (remote-workspace--recover-after-transport workspace)
+          (should (zerop recoveries))
+          ;; Its process group ID may belong to something else by now.
+          (my/noema-jupyter--shutdown-runtime runtime)
+          (remote-workspace-close workspace)
+          (should (= signals 1)))
+      (remote-workspace-close workspace))))
+
 (ert-deftest my/noema-jupyter-shutdown-all-releases-every-brokered-runtime ()
   "Brokered kernels are detached, so Emacs must close them before it exits."
   (let* ((my/noema-jupyter-runtimes (make-hash-table :test #'equal))

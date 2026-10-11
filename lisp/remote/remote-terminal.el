@@ -101,29 +101,19 @@
 
 (defun remote-terminal--shell (workspace profile &optional probe)
   "Return target-native shell for WORKSPACE and PROFILE.
-When PROBE is non-nil, resolve and cache the target login shell before falling
-back to `/bin/sh'.  Probe failures do not prevent terminal startup."
+When PROBE is non-nil, ask the target for its account's login shell before
+falling back to `/bin/sh'.  Only the shell is asked for: the PATH probe runs
+the whole shell startup and would hold up the terminal for it.  Probe
+failures do not prevent terminal startup."
   (let* ((target-id (remote-workspace-target-id workspace))
          (target (remote-get-target target-id))
          (context (remote-workspace-context workspace))
-         (facts
-          (when probe
-            (condition-case error-data
-                (remote-path-probe context)
-              (error
-               (remote-log
-                'terminal-shell-probe-error
-                :target target-id
-                :error (error-message-string error-data))
-               nil))))
          (environment (remote-workspace-environment workspace)))
     (or
      (remote-terminal--nonempty-shell
       (remote-terminal-profile-shell profile))
      (remote-terminal--nonempty-shell
       (and target (remote-target-shell target)))
-     (remote-terminal--nonempty-shell
-     (and facts (remote-path-facts-shell facts)))
      (remote-terminal--nonempty-shell
       (and environment
            (cdr
@@ -133,6 +123,16 @@ back to `/bin/sh'.  Probe failures do not prevent terminal startup."
              t))))
      (and probe
           (remote-terminal--nonempty-shell
+           (condition-case error-data
+               (remote-path-login-shell context)
+             (error
+              (remote-log
+               'terminal-shell-probe-error
+               :target target-id
+               :error (error-message-string error-data))
+              nil))))
+     (and probe
+          (remote-terminal--nonempty-shell
            (remote-terminal--fallback-shell context)))
      "/bin/sh")))
 
@@ -140,7 +140,7 @@ back to `/bin/sh'.  Probe failures do not prevent terminal startup."
   "Return the target-native interactive shell command for WORKSPACE.
 PROFILE is a registered terminal profile or profile object.  The result is a
 list suitable for routed process APIs and native terminal frontends.  With
-PROBE, discover and cache the target account's login shell first."
+PROBE, ask the target for its account's login shell first."
   (let* ((workspace
           (or (remote-get-workspace workspace)
               (remote-workspace-open workspace

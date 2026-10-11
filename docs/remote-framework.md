@@ -687,6 +687,15 @@ lsp-mode 自带 client）会漏掉项目环境提供的全部工具。
 ;; => batched
 ```
 
+这些查询（以及 `remote-file-watch-cost`、`remote-client-file-name`、mtime 容差）
+按 buffer、按命令被调用，所以它们与文件句柄共用带校验的路由复用
+（`remote-fs--placement-route`），不再每次从头选路：本机一次查询约 70→14 µs，
+SSH target 约 89→51 µs。远端的复用条件是“具备该能力的后端恰好两个且偏好明确”，
+按能力计数而不是按链路上的后端总数：每条 SSH 链路还带一个只提供 PTY 的
+`ssh-pty`，按总数计数曾让这条热路径在所有 SSH target 上失效，每次远端文件操作都
+重新选路（约 67 µs，恢复后约 21 µs；批处理 Emacs、真实配置、未建连，各 5000 次）。
+缓存之外的后端一旦获得该能力，条目即失效。
+
 需要"每个文件一次子进程"的功能（VC、Magit、per-file 探测）用它决定开关，而不是
 测 `file-remote-p`、TRAMP method 或 backend ID。`native` 与 `tramp-rpc` 声明
 `batched`，`tramp` 声明 `round-trip`；`local` target 因此天然走同一条判断。
@@ -922,9 +931,13 @@ transport 断线时不会重放 shell 历史；Ghostel 保留为 disconnected bu
   尝试期间旧 buffer 暂时让出名称；Ghostel 按 slot 编号 buffer，其 restart 函数
   同样让出并在失败时取回 slot，所以替代终端沿用原名。
 
-Ghostel 在所有 target 上走同一条启动流程：workspace 不为终端同步构建环境
-capsule，已就绪的直接使用，否则以终端 buffer 为 owner 异步 ensure；shell 来自
-target 自己的 PATH facts。`REMOTE_GHOSTEL_E2E_TARGET=local` 在本机运行同一个
+Ghostel 在所有 target 上走同一条启动流程：终端既不等待也不触发环境 capsule 的
+构建（构建要在 Emacs 内同步跑完用户整套 shell 启动脚本，即使放进后台任务也只是
+把卡顿挪到终端出现之后），已就绪的 capsule 直接使用。shell 由
+`remote-path-login-shell` 回答：已知的 target fact 直接返回，否则只用一次普通
+`sh -c` 询问 `$SHELL` 并记为 target fact，不运行登录 shell 的 PATH 探测。本机
+首次打开终端因此从约 700 ms 降到约 90 ms（批处理 Emacs、zsh 登录配置，各三次），
+后续打开约 9 ms 不变；远端省掉的是同一次登录 shell 探测，尚未真机计时。`REMOTE_GHOSTEL_E2E_TARGET=local` 在本机运行同一个
 冒烟测试（本机 Ghostel 使用自己的原生 PTY，没有 route 可查，测试用
 `remote-client-file-name` 这一放置查询区分）；`REMOTE_GHOSTEL_E2E_FAULT=transport`
 注入断线，验证 buffer 保留、提示只写一次、重启后原名终端可用。批处理 Emacs
@@ -938,6 +951,12 @@ handle：要么按稳定 key 向 workspace 读取当前值（`remote-workspace-f
 或显式断开 target 也会在不通知 consumer 的情况下释放资源。`remote-gateway` 的
 target 侧反向转发与 Noema 的远程 Markdown watch 都遵守这一点：前者缓存旧 handle
 时每次重连后会多开一条转发，后者在断开重连后会以为文件仍被监听。
+反过来，consumer 自己结束一个资源时也要把它从 workspace 取下
+（`remote-workspace-close-resource` 或 `remote-workspace-forget-resource`）：
+workspace 会恢复它仍持有的每个资源。Noema 关闭或重启 brokered Jupyter kernel 时
+曾留下 `jupyter-runtime` 与五通道 `channel-group` 两个资源，此后每次重连都为已死的
+kernel 重开五条转发，关闭 workspace 时还会再次向它早已不属于自己的进程组 ID 发
+信号。现在关闭 kernel 即取下两者，且对同一 runtime 重复关闭不做任何事。
 手动 `remote-workspace-reconnect-async` 复用同一个合并调度器，命令立即返回，
 重试间隔不阻塞 Emacs；单次 TRAMP 建连本身仍可能等待。重连主动关闭旧 session
 后立即确认自己推进的 target epoch，避免把成功误判为过期；建连或资源恢复期间

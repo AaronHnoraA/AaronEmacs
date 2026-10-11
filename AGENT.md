@@ -137,7 +137,12 @@ Keep these rules:
   their consumers.  A consumer that keeps a resource reads the current value
   from its workspace by a stable key, or asks
   `remote-workspace-resource-live-p` before trusting its own record; it never
-  caches the first handle.
+  caches the first handle.  A consumer that ends a resource itself also takes
+  it off the workspace, which otherwise recovers it on every reconnect.
+- A terminal neither waits for nor triggers an environment capsule build, and
+  asks `remote-path-login-shell` for its shell; the PATH probe runs the whole
+  shell startup inside Emacs.  Hot-path caches count the backends that provide
+  a capability, not the backends on a link.
 - A terminal frontend that removes its buffer when the process ends registers
   `:disconnect-function` with `remote-terminal-adopt`, so a lost transport
   keeps the buffer for `remote-terminal-restart`.  Whether an exit can be a

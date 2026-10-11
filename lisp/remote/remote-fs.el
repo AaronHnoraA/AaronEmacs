@@ -642,14 +642,22 @@ Configured home-relative paths are expanded by TARGET's selected backend."
 Return nil when the selected target backend does not share its filesystem with
 the client.  ADAPTER defaults to the ordinary file adapter.  This query is
 pure: it resolves placement but does not acquire a connection."
-  (let* ((canonical (remote-canonicalize-file-name file-name))
-         (context (remote-fs--context canonical))
-         (route
-          (remote-resolve
-           (or adapter
-               (remote-fs--adapter-for-capability 'metadata))
-           'metadata context nil)))
-    (remote-backend-client-file-name route canonical)))
+  (let ((canonical (remote-canonicalize-file-name file-name)))
+    (remote-backend-client-file-name
+     (remote-fs--placement-route canonical adapter) canonical)))
+
+(defun remote-fs--placement-route (canonical &optional adapter)
+  "Return the route that carries metadata for CANONICAL, without any I/O.
+ADAPTER defaults to the ordinary file adapter.  Placement and declared-cost
+queries replace `file-remote-p' in per-buffer and per-command consumers, so
+they share the file handler's guarded route reuse instead of selecting a
+route from scratch on every call."
+  (let ((adapter (or adapter
+                     (remote-fs--adapter-for-capability 'metadata))))
+    (or (car (remote-fs--routes
+              adapter 'metadata (remote-fs--context-for-file canonical)))
+        (error "No route for adapter %s capability %s"
+               adapter 'metadata))))
 
 (defun remote-file-operation-cost (file-name &optional adapter)
   "Return what one file operation on FILE-NAME costs on the selected backend.
@@ -669,13 +677,9 @@ query is pure: it resolves placement but does not acquire a connection."
 (defun remote-fs--backend-property (file-name property &optional adapter)
   "Return PROPERTY from the description of FILE-NAME's selected backend.
 ADAPTER defaults to the ordinary file adapter.  Resolution is pure."
-  (let* ((canonical (remote-canonicalize-file-name file-name))
-         (context (remote-fs--context canonical))
-         (route
-          (remote-resolve
-           (or adapter
-               (remote-fs--adapter-for-capability 'metadata))
-           'metadata context nil)))
+  (let ((route
+         (remote-fs--placement-route
+          (remote-canonicalize-file-name file-name) adapter)))
     (plist-get (remote-backend-describe (remote-route-link-plugin-id route))
                property)))
 
@@ -952,24 +956,46 @@ Mutable registrations and capability changes are rechecked on every hit."
               (remote-fs-preferred-routes-context-preferences entry))
        (not (remote--cooling-p link capability))
        (not (remote--backend-cooling-p (car routes)))
-       (let ((valid t))
+       (let ((valid t)
+             (routed (mapcar #'remote-route-link-plugin-id routes)))
          (while (and valid plugin-ids plugins)
-           (let ((plugin (car plugins)))
+           (let* ((plugin (car plugins))
+                  (capable
+                   (memq capability
+                         (remote-link-plugin-capabilities plugin))))
              (setq valid
                    (and (eq (remote-get-link-plugin (car plugin-ids)) plugin)
-                        (memq capability
-                              (remote-link-plugin-capabilities plugin))
-                        (remote--plugin-available-p plugin link context))))
+                        ;; A backend outside the cached routes was left out
+                        ;; because it lacks CAPABILITY, as a PTY-only backend
+                        ;; lacks file operations.  It must still lack it.
+                        (if (member (car plugin-ids) routed)
+                            (and capable
+                                 (remote--plugin-available-p
+                                  plugin link context))
+                          (not capable)))))
            (setq plugin-ids (cdr plugin-ids)
                  plugins (cdr plugins)))
          (and valid (null plugin-ids) (null plugins)))))))
 
 (defun remote-fs--remember-preferred-routes
     (key target link adapter context capability routes)
-  "Cache ROUTES under KEY only when one clear preference fixes their order."
+  "Cache ROUTES under KEY only when one clear preference fixes their order.
+The link may carry further backends as long as none of them provides
+CAPABILITY: counting every backend would switch the reuse off for each SSH
+link, which also carries a PTY-only one."
   (when (and target link adapter
              (= (length routes) 2)
-             (= (length (remote-link-plugin-ids link)) 2)
+             (equal (sort (mapcar #'remote-route-link-plugin-id routes)
+                          #'string<)
+                    (sort (seq-filter
+                           (lambda (plugin-id)
+                             (when-let* ((plugin
+                                          (remote-get-link-plugin plugin-id)))
+                               (memq capability
+                                     (remote-link-plugin-capabilities
+                                      plugin))))
+                           (copy-sequence (remote-link-plugin-ids link)))
+                          #'string<))
              (equal (mapcar #'remote-route-link-id routes)
                     (list (remote-link-id link)
                           (remote-link-id link))))

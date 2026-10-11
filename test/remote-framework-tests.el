@@ -2481,6 +2481,48 @@
             (should (memq terminal (remote-terminal-list workspace))))
         (remote-workspace-close workspace)))))
 
+(ert-deftest remote-path-login-shell-asks-for-the-shell-alone ()
+  "Knowing which shell to start must not run the person's shell startup."
+  (remote-framework-test-with-registry
+    (let* ((remote-path-facts-cache (make-hash-table :test #'equal))
+           (target (remote-register-target "lab" :trusted t))
+           (context
+            (remote-context-create
+             :target-id "lab" :localname "/work/"
+             :workspace-root "/fs:lab:/work/"))
+           commands)
+      (cl-letf (((symbol-function 'remote-exec)
+                 (lambda (program &rest arguments)
+                   (push (cons program (plist-get arguments :args)) commands)
+                   (remote-exec-result-create
+                    :status 0
+                    :stdout "motd banner\n__EMACS_LOGIN_SHELL__/usr/bin/fish"))))
+        (should (equal (remote-path-login-shell context) "/usr/bin/fish"))
+        (should (= (length commands) 1))
+        ;; A plain `sh -c': no login or interactive startup files.
+        (should (equal (caar commands) "sh"))
+        (should (equal (nth 1 (car commands)) "-c"))
+        ;; The answer is a target fact; asking again costs nothing.
+        (should (equal (remote-target-shell target) "/usr/bin/fish"))
+        (should (equal (remote-path-login-shell context) "/usr/bin/fish"))
+        (should (= (length commands) 1)))
+      ;; Facts that are already known answer without touching the target.
+      (setf (remote-target-shell target) nil)
+      (puthash "lab"
+               (remote-path-facts-create :target-id "lab" :shell "/bin/zsh")
+               remote-path-facts-cache)
+      (cl-letf (((symbol-function 'remote-exec)
+                 (lambda (&rest _) (error "Must not probe"))))
+        (should (equal (remote-path-login-shell context) "/bin/zsh")))
+      ;; A target that reports no shell yields nil, not an empty string.
+      (clrhash remote-path-facts-cache)
+      (cl-letf (((symbol-function 'remote-exec)
+                 (lambda (&rest _)
+                   (remote-exec-result-create
+                    :status 0 :stdout "__EMACS_LOGIN_SHELL__"))))
+        (should-not (remote-path-login-shell context))
+        (should-not (remote-target-shell target))))))
+
 (ert-deftest remote-terminal-probes-login-shell-and-keeps-fallback ()
   (remote-framework-test-with-registry
     (let* ((target (remote-register-target "lab" :trusted t))
@@ -2499,11 +2541,8 @@
              :context context
              :state 'open)))
       (cl-letf
-          (((symbol-function 'remote-path-probe)
-            (lambda (&rest _arguments)
-              (remote-path-facts-create
-               :target-id "lab"
-               :shell "/usr/bin/zsh"))))
+          (((symbol-function 'remote-path-login-shell)
+            (lambda (&rest _arguments) "/usr/bin/zsh")))
         (should
          (equal
           (remote-terminal-command workspace "default" t)
@@ -2511,7 +2550,7 @@
       (setf (remote-target-shell target) nil)
       (let (attempts)
         (cl-letf
-            (((symbol-function 'remote-path-probe)
+            (((symbol-function 'remote-path-login-shell)
               (lambda (&rest _arguments)
                 (error "injected shell probe failure")))
              ((symbol-function 'remote-executable-find)
@@ -2525,7 +2564,7 @@
           (should (equal (nreverse attempts) '("zsh" "bash")))))
       (let (attempts)
         (cl-letf
-            (((symbol-function 'remote-path-probe)
+            (((symbol-function 'remote-path-login-shell)
               (lambda (&rest _arguments)
                 (error "injected shell probe failure")))
              ((symbol-function 'remote-executable-find)

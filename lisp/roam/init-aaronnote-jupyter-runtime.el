@@ -803,9 +803,34 @@ cannot silently leave a live kernel running on it."
          (runtime (gethash id my/noema-jupyter-runtimes)))
     (or runtime (error "Unknown Noema Jupyter runtime: %s" id))))
 
+(defun my/noema-jupyter--forget-runtime-resources (runtime)
+  "Remove RUNTIME and its channel group from the workspace that owns them.
+A workspace recovers every resource it still holds: left behind, a kernel that
+was shut down would get its five forwards reopened on each reconnect."
+  (when-let* ((workspace (my/noema-jupyter-runtime-workspace runtime))
+              ((remote-workspace-p workspace)))
+    (dolist (identity
+             (list
+              (cons 'jupyter-runtime (my/noema-jupyter-runtime-id runtime))
+              (cons 'channel-group
+                    (list 'noema-jupyter
+                          (my/noema-jupyter-runtime-id runtime)))))
+      (when-let* ((resource
+                   (remote-workspace-find-resource
+                    workspace (car identity) (cdr identity))))
+        (remote-workspace-forget-resource workspace resource)))))
+
 (defun my/noema-jupyter--shutdown-runtime (runtime)
-  "Close and remove RUNTIME."
-  (when (my/noema-jupyter-runtime-p runtime)
+  "Close and remove RUNTIME.
+Shutting down a runtime twice does nothing the second time: its process group
+ID is no longer its own and must not be signalled again."
+  (when (and (my/noema-jupyter-runtime-p runtime)
+             (not (eq (my/noema-jupyter-runtime-state runtime) 'closed)))
+    (setf (my/noema-jupyter-runtime-state runtime) 'closed)
+    (remhash
+     (my/noema-jupyter-runtime-id runtime)
+     my/noema-jupyter-runtimes)
+    (my/noema-jupyter--forget-runtime-resources runtime)
     (ignore-errors (my/noema-jupyter--signal runtime "TERM"))
     (when-let* ((group
                  (my/noema-jupyter-runtime-channel-group runtime)))
@@ -815,11 +840,7 @@ cannot silently leave a live kernel running on it."
               (my/noema-jupyter-runtime-connection-file runtime)
               (my/noema-jupyter-runtime-log-file runtime)))
       (when (and file (file-exists-p file))
-        (ignore-errors (delete-file file))))
-    (setf (my/noema-jupyter-runtime-state runtime) 'closed)
-    (remhash
-     (my/noema-jupyter-runtime-id runtime)
-     my/noema-jupyter-runtimes))
+        (ignore-errors (delete-file file)))))
   runtime)
 
 (defun my/noema-jupyter-runtime-snapshot (&optional target-id)

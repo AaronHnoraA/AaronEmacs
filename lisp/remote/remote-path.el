@@ -192,6 +192,57 @@ probe protocol."
       (remote-path--commit-facts facts))
     facts))
 
+(defconst remote-path--shell-marker "__EMACS_LOGIN_SHELL__"
+  "Marker in front of the shell printed for `remote-path-login-shell'.")
+
+(defun remote-path-login-shell (&optional context)
+  "Return the login shell of the account behind CONTEXT's target, or nil.
+Facts that are already known answer without touching the target.  Otherwise
+ask for `$SHELL' alone and remember it as a target fact.  The full probe runs
+the person's whole shell startup to learn PATH; a consumer that only needs to
+know which shell to start, such as a terminal, must not wait for that."
+  (let* ((context
+          (cond
+           ((remote-context-p context) context)
+           ((stringp context) (remote-context context))
+           (t (remote-context))))
+         (target-id (remote-context-target-id context))
+         (target (remote-get-target target-id))
+         (facts (gethash target-id remote-path-facts-cache))
+         (known
+          (seq-some
+           (lambda (value)
+             (and (stringp value)
+                  (not (string-empty-p (string-trim value)))
+                  (string-trim value)))
+           (list (and target (remote-target-shell target))
+                 (and facts (remote-path-facts-shell facts))))))
+    (or known
+        (let* ((remote-environment-inhibit t)
+               (output
+                (remote-exec-result-stdout
+                 (remote-exec
+                  "sh"
+                  :args
+                  (list "-c"
+                        (format "printf '%s%%s' \"${SHELL-}\""
+                                remote-path--shell-marker))
+                  :context context
+                  :adapter "environment"
+                  :filesystem-effects 'none
+                  :check t)))
+               (start (string-search remote-path--shell-marker output))
+               (shell
+                (and start
+                     (string-trim
+                      (substring
+                       output
+                       (+ start (length remote-path--shell-marker)))))))
+          (when (and shell (not (string-empty-p shell)))
+            (when target
+              (setf (remote-target-shell target) shell))
+            shell)))))
+
 (defun remote-path--commit-facts (facts)
   "Commit generation-validated host FACTS to target and cache state."
   (let ((target-id (remote-path-facts-target-id facts)))

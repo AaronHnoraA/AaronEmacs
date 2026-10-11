@@ -128,8 +128,10 @@ finding that root is cheap on the backend, and to itself otherwise."
          (context (my/ghostel-workspace-context target-directory))
          (workspace (remote-workspace-open context :connect nil))
          (workspace-id (remote-workspace-context-id context))
-         ;; A terminal never waits for an environment capsule: one that is
-         ;; ready is used, and the shell comes from the target's own facts.
+         ;; A terminal neither waits for an environment capsule nor has one
+         ;; built for it: building runs the whole shell startup inside
+         ;; Emacs.  A capsule that is ready is used, and the shell is asked
+         ;; of the target directly.
          (environment (remote-workspace-environment workspace))
          (shell-argv (remote-terminal-command workspace "default" t))
          (physical-directory (or (remote-client-file-name target-directory)
@@ -162,12 +164,10 @@ finding that root is cheap on the backend, and to itself otherwise."
                      :directory target-directory
                      :disconnect-function #'my/ghostel--keep-disconnected-h
                      :restart-function #'my/ghostel--restart-terminal))
+    (when environment
+      (remote-environment-apply environment buffer))
     (with-current-buffer buffer
-      (setq-local default-directory target-directory)
-      (if environment
-          (remote-environment-apply environment buffer)
-        ;; The buffer owns the request, so it ends with the terminal.
-        (remote-environment-ensure context nil #'ignore)))
+      (setq-local default-directory target-directory))
     buffer))
 
 (defun my/ghostel--keep-disconnected-h (_terminal _reason)
