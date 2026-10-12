@@ -436,7 +436,10 @@ CALLBACK receives (ENTRIES ERROR)."
 (defun my/jupyter-management-run-repl (entry source-buffer)
   "Run ENTRY's kernelspec REPL, using SOURCE-BUFFER as context."
   (unless (and (eq (plist-get entry :kind) 'kernelspec)
-               (or (equal (plist-get entry :target-id) "local")
+               (or (ignore-errors
+                     (remote-client-file-name
+                      (remote-make-file-name
+                       (or (plist-get entry :target-id) "local") "/")))
                    (plist-get entry :remote)))
     (user-error "This target kernelspec is not client-accessible; use remote_ikernel"))
   (require 'jupyter-repl)

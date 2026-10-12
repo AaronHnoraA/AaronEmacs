@@ -597,9 +597,10 @@ Local files are projected to native host paths.  Remote files retain their
     (if (and (bound-and-true-p remote-mode)
              (fboundp 'remote-file-name-target)
              (fboundp 'remote-file-local-name))
-        (if (equal (remote-file-name-target file) "local")
-            (remote-file-local-name file)
-          file)
+        ;; The web host runs on this machine: it gets a native path for a
+        ;; file it can open itself, whatever the target is called.
+        (or (ignore-errors (remote-client-file-name file))
+            file)
       (expand-file-name file))))
 
 (defun my/noema--xwidget-session-id (&optional file)

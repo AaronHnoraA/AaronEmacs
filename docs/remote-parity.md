@@ -111,6 +111,43 @@ remote listener 已有 API、native 数据面回环、SSH 命令/lifecycle 测�
 SSH target 动态端口回归，因此达到 remote；完成断线恢复故障注入前仍不算
 resilient。
 
+### 图形界面下的延迟基线
+
+2026-10-12，QWD-VPS（往返约 184 ms，shell TRAMP 后端，clangd），独立的图形界面
+Emacs 实例，完整初始化：
+
+| 项目 | 结果 |
+|---|---|
+| 按键到重绘（40 次） | 中位 17 ms，p95 22 ms；输入在本地完成，不等待网络 |
+| 补全请求往返（12 次） | 中位 250 ms，约一次网络往返加服务端 18 ms |
+| hover 请求往返（12 次） | 中位 183 ms，即一次网络往返 |
+| 启动后首次打开远程文件 | 约 14.5 s / 54 次往返（主机事实已持久化；此前约 20 s / 69 次） |
+| 同一会话内再打开系统头文件 | 约 2.6~4.7 s |
+| 冷态打开首个远程终端 | 窗口约 30 ms 出现，首个输出约 7 s（SSH 建连与登录 shell），之后的终端约 0.7 s |
+
+首次打开文件的 54 次往返里约 24 次是 TRAMP 每条新连接固有的 shell 初始化与 PATH
+计算；要再明显缩短，需要该主机走 tramp-rpc（标记为受信任）。
+
+### 仍按 target 名判断的位置
+
+不变量要求 consumer 不按 `"local"` 选择行为。下面是 `lisp/remote/` 之外仍出现
+`"local"` 的位置及其性质，改动前先看这张表：
+
+| 位置 | 性质 |
+|---|---|
+| `init-jupyter-board.el`、`init-jupyter-management.el` 中的 `(remote-get-target "local")`、默认 owner、显示文字 | 身份与默认值，不是行为分支 |
+| `init-ai-ide.el`、`init-base.el` 的报错与分类文字 | 显示用 |
+| `init-aaronnote.el` 的原始主机路径默认归属、`init-aaronnote-jupyter-server.el` 的默认 owner | 客户端边界上的默认身份 |
+| `init-shell.el` 的终端 buffer 命名 | 仅影响名称 |
+| `init-aaronnote-jupyter-server.el`：本机 server 不建转发 | 明文规定的策略（非本机 target 必须经 channel） |
+| `init-lsp.el`：非本机 target 的 watch 归 workspace 所有、shutdown 超时放宽 | 由测试固定的 target 身份契约；换成放置查询会改变契约 |
+| `init-lsp-change-batch.el`：只对非本机 target 合批增量变更 | 债务：依据应是链路延迟，而不是 target 名 |
+| `init-jupyter-management.el` 的 `local-target-p`、`init-jupyter-board.el` 的“只对本机列出 Emacs 客户端” | 债务：应改为放置或能力查询 |
+
+已改为放置查询（`remote-client-file-name`）的：系统打开器（`init-open.el`、
+`init-macos.el`）、Noema 给本机 web host 的路径（`my/noema--host-file`）、kernelspec
+REPL 的可达性判断、客户端 kernelspec 配置读取、Ghostel 的启动流程。
+
 ## 3. Emacs 与 VS Code 的对应关系
 
 微软的 [Remote Development FAQ](https://code.visualstudio.com/docs/remote/faq)
