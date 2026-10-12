@@ -1,7 +1,8 @@
 """Linux file events for Emacs Remote without inotify-tools.
 
-Usage: python3 -u -c SOURCE PATH [flat].  A directory is watched recursively,
-or with `flat' only itself, without descending.  Any other path is one file:
+Usage: python3 -u -c SOURCE PATH [flat] [recent=SECONDS].  A directory is
+watched recursively, or with `flat' only itself, without descending.  Any
+other path is one file:
 its directory is watched, not the file itself, and only events for that name
 are reported, so a writer that replaces the file by renaming a temporary one
 over it does not end the watch.
@@ -16,6 +17,13 @@ of a path it carries how many seconds ago the watched path last changed, or
 nothing when the path does not exist.  Both ends of that interval are read
 from this machine's clock, so the owner can tell a change it could not have
 seen from one it did without comparing clocks.
+
+A tree's own timestamp says nothing about the files below it.  With
+`recent=SECONDS' the agent therefore follows READY with a MODIFY for every
+file in the tree that changed within that many seconds, up to RECENT_LIMIT of
+them: the owner asks for this when it replaces a watcher that was lost, and
+the files are the ones that may have changed while nobody was watching.  A
+file deleted meanwhile cannot be reported.
 
 The agent uses only Python's standard library and libc; it is sent as source
 on process startup, so no target-side installation or package manager is
@@ -47,9 +55,10 @@ MASK = (IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE | IN_MOVED_FROM |
         IN_MOVED_TO | IN_CREATE | IN_DELETE | IN_DELETE_SELF |
         IN_MOVE_SELF | IN_UNMOUNT | IN_Q_OVERFLOW)
 HEADER = struct.Struct("iIII")
+RECENT_LIMIT = 2000
 
 
-def run(root, flat=False):
+def run(root, flat=False, recent=0.0):
     root = os.path.abspath(root)
     libc = ctypes.CDLL(None, use_errno=True)
     libc.inotify_init1.argtypes = [ctypes.c_int]
@@ -85,6 +94,32 @@ def run(root, flat=False):
             by_wd[wd] = current
             by_path[current] = wd
 
+    def report_recent(directory):
+        remaining = RECENT_LIMIT
+        now = time.time()
+        pending = [directory]
+        while pending and remaining > 0:
+            current = pending.pop()
+            try:
+                entries = list(os.scandir(current))
+            except OSError:
+                continue
+            for entry in entries:
+                try:
+                    if entry.is_symlink():
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        pending.append(entry.path)
+                        continue
+                    status = entry.stat(follow_symlinks=False)
+                except OSError:
+                    continue
+                if now - max(status.st_mtime, status.st_ctime) <= recent:
+                    emit("MODIFY", entry.path)
+                    remaining -= 1
+                    if remaining <= 0:
+                        break
+
     def remove_tree(directory):
         prefix = directory + os.sep
         for path, wd in list(by_path.items()):
@@ -118,6 +153,8 @@ def run(root, flat=False):
         except OSError:
             age = ""
         emit("READY", age)
+        if recent > 0 and not single and not flat:
+            report_recent(root)
         # Standard input that is already at end of file (closed, or the
         # null device) carries no signal about the owner.
         owner = 0
@@ -206,7 +243,12 @@ def run(root, flat=False):
 
 if __name__ == "__main__":
     try:
-        run(sys.argv[1], len(sys.argv) > 2 and sys.argv[2] == "flat")
-    except (OSError, IndexError) as error:
+        options = sys.argv[2:]
+        window = 0.0
+        for option in options:
+            if option.startswith("recent="):
+                window = float(option[len("recent="):])
+        run(sys.argv[1], "flat" in options, window)
+    except (OSError, IndexError, ValueError, AttributeError) as error:
         print(error, file=sys.stderr)
         sys.exit(1)

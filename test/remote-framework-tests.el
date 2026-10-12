@@ -1900,6 +1900,22 @@ its new watcher, kills that watcher and leaves the watch failed."
             (should-not events)))
       (delete-process process))))
 
+(ert-deftest remote-file-watch-replacement-tree-asks-for-missed-files ()
+  "Only a tree watcher that replaces a lost one reports recent files."
+  (let ((remote-file-watch-startup-timeout 2.5)
+        (remote-connection-open-timeout 10)
+        (since (- (float-time) 60)))
+    (cl-flet ((window (state recursive since)
+                (remote-fs--watch-recent-window
+                 (remote-file-watch-create
+                  :id "watch-window" :state state :recursive recursive
+                  :uncovered-since since))))
+      (should-not (window 'opening t since))
+      (should-not (window 'stopped nil since))
+      (should-not (window 'stopped t nil))
+      ;; Sixty seconds lost, plus the time a new watcher may need.
+      (should (<= 71 (window 'stopped t since) 73)))))
+
 (ert-deftest remote-file-watch-marks-unobserved-interval ()
   "Losing the backend descriptor starts the interval a watcher reports on."
   (let* ((process (make-pipe-process :name "remote-watch-interval-test"

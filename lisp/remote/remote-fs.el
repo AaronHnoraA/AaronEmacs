@@ -2615,6 +2615,19 @@ reported too; consumers compare the file with what they hold."
     (remote-fs--watch-deliver
      watch (list process 'stopped (remote-file-watch-file watch)))))
 
+(defun remote-fs--watch-recent-window (watch)
+  "Return the seconds of change a replacement tree watcher should report.
+Nil for a watch that is being created, whose consumer has just read the tree
+itself, and for anything but a tree.  The interval runs from the moment the
+previous watcher was lost until the new one can be in place, which the
+startup bound stands in for since the connection may have to be opened."
+  (when-let* (((remote-file-watch-recursive watch))
+              ((not (eq (remote-file-watch-state watch) 'opening)))
+              (since (remote-file-watch-uncovered-since watch)))
+    (ceiling (+ (max 0.0 (- (float-time) since))
+                (or (remote-fs--watch-startup-timeout) 0)
+                remote-fs--watch-gap-margin))))
+
 (defun remote-fs--watch-add-direct-inotify (watch generation)
   "Start a routed recursive watcher for WATCH, or return nil if unavailable."
   (let* ((file (remote-file-watch-file watch))
@@ -2626,17 +2639,18 @@ reported too; consumers compare the file with what they hold."
            (fboundp 'remote-executable-find))
       (let* ((remote-current-adapter-id
               (remote-file-watch-adapter-id watch))
-             (program
-              (ignore-errors
-                (remote-executable-find "inotifywait" context)))
-             ;; Without inotifywait the agent watches a tree or, for one
-             ;; file, that file's directory.  Leaving a single file to the
-             ;; backend's own notifier there yields a watch that is valid and
-             ;; never reports anything.
+             ;; The agent is preferred wherever Python exists: it leaves
+             ;; with its owner, says when its watches are installed and
+             ;; reports what changed while nobody watched.  inotifywait does
+             ;; none of that and is kept for targets without Python.  With
+             ;; neither, a single file is left to the backend's own notifier.
              (python
-              (and (not program)
+              (ignore-errors
+                (remote-executable-find "python3" context)))
+             (program
+              (and (not python)
                    (ignore-errors
-                     (remote-executable-find "python3" context)))))
+                     (remote-executable-find "inotifywait" context)))))
         (unless (or program python
                     (not (remote-file-watch-recursive watch)))
           (signal
@@ -2674,7 +2688,11 @@ reported too; consumers compare the file with what they hold."
                               ;; A plain watch is one directory, not the
                               ;; tree below it.
                               (unless (remote-file-watch-recursive watch)
-                                '("flat")))
+                                '("flat"))
+                              (when-let* ((window
+                                           (remote-fs--watch-recent-window
+                                            watch)))
+                                (list (format "recent=%d" window))))
                            (list
                             program
                             (if (remote-file-watch-recursive watch)
