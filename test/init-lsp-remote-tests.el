@@ -1860,6 +1860,19 @@ analyzes anything without this notification."
       (should started)
       (should-not remote-buffer-disconnected-p))))
 
+(ert-deftest lsp-mode-automatic-start-never-asks-for-a-project-root ()
+  "Only a start the user asked for may take the keyboard to ask a question."
+  (with-temp-buffer
+    (let ((asked 0))
+      (cl-flet ((ask (&rest _) (cl-incf asked) "/fs:lab:/srv/"))
+        (setq-local my/lsp-mode--start-interactive nil)
+        (should-not (my/lsp-mode--quiet-root-prompt-a #'ask 'session))
+        (should (zerop asked))
+        (setq-local my/lsp-mode--start-interactive t)
+        (should (equal (my/lsp-mode--quiet-root-prompt-a #'ask 'session)
+                       "/fs:lab:/srv/"))
+        (should (= asked 1))))))
+
 (ert-deftest language-server-missing-binary-is-quiet-only-for-auto-start ()
   (with-temp-buffer
     (setq major-mode 'python-mode)

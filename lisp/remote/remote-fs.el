@@ -698,6 +698,8 @@ ADAPTER defaults to the ordinary file adapter.  Resolution is pure."
     (plist-get (remote-backend-describe (remote-route-link-plugin-id route))
                property)))
 
+(defvar tramp-error-show-message-timeout)
+
 (defvar remote-ancestor-marker-names nil
   "File names consumers look for in a file's ancestor directories.
 Project, version-control and environment discovery all walk upwards asking
@@ -1896,7 +1898,11 @@ target-native namespace."
   ;; helper on this machine.  Pin the client environment here too, exactly as
   ;; the process route does.
   (remote-with-client-environment
-    (remote-fs--call-routed-1 operation args)))
+    ;; A routed operation can reconnect underneath.  TRAMP would show its
+    ;; buffer and wait half a minute for a key on a connection error; the
+    ;; framework classifies and reports the failure itself.
+    (let ((tramp-error-show-message-timeout nil))
+      (remote-fs--call-routed-1 operation args))))
 
 (defconst remote-fs--native-metadata-operations
   '(file-exists-p file-readable-p file-writable-p file-executable-p
@@ -2224,9 +2230,21 @@ was in flight at that keystroke is caught before it can be overwritten."
 (defvar auto-revert-notify-modified-p)
 
 (defun remote-fs--lock-file-a (function file)
-  "Call FUNCTION for FILE with the lock-time supersession scope active."
+  "Call FUNCTION for FILE with the lock-time supersession scope active.
+A lock is advisory, and taking it is the first thing an edit does.  When the
+backend cannot even ask about the file, as shell TRAMP cannot stat one that
+does not exist yet, that must not abort the keystroke that made the buffer
+modified: the edit goes on without the lock, and a real problem with the
+target surfaces at the next read or save.  A lock held by someone else or a
+changed file is a different signal and still reaches the user."
   (let ((remote-fs--lock-check t))
-    (funcall function file)))
+    (condition-case error-data
+        (funcall function file)
+      (remote-file-error
+       (remote-log 'lock-file-error
+                   :file file
+                   :error (error-message-string error-data))
+       nil))))
 
 (defvar remote-fs--notify-generation 0
   "Count of auto-revert notification events delivered so far.")
@@ -2307,16 +2325,30 @@ and remote buffers follow the user's normal Emacs auto-save policy."
 
 (defun remote-fs-handle-insert-file-contents
     (file-name &optional visit beg end replace)
-  "Insert logical FILE-NAME while preserving canonical buffer identity."
+  "Insert logical FILE-NAME while preserving canonical buffer identity.
+The identity is kept when the read fails as well.  Visiting a file that does
+not exist yet signals `file-missing' after the backend has already recorded
+its own physical name in the buffer; left that way, a new file is no longer a
+`/fs:' buffer, every later operation on it bypasses this handler, and its
+first edit runs the backend's own lock-time check instead of ours."
   (let* ((canonical (remote-canonicalize-file-name file-name))
+         (identify
+          (lambda ()
+            (when visit
+              (setq buffer-file-name canonical
+                    default-directory (file-name-directory canonical)
+                    buffer-file-truename
+                    (or (ignore-errors (file-truename canonical))
+                        canonical)))))
          (result
-          (remote-fs--call-routed
-           'insert-file-contents
-           (list canonical visit beg end replace))))
-    (when visit
-      (setq buffer-file-name canonical
-            default-directory (file-name-directory canonical)
-            buffer-file-truename (file-truename canonical)))
+          (condition-case error-data
+              (remote-fs--call-routed
+               'insert-file-contents
+               (list canonical visit beg end replace))
+            (file-error
+             (funcall identify)
+             (signal (car error-data) (cdr error-data))))))
+    (funcall identify)
     (if (consp result)
         (cons canonical (cdr result))
       result)))

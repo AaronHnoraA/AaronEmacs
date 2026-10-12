@@ -199,6 +199,21 @@ coalescing window.  A failed deferred start can be retried afterward."
   :type 'number
   :group 'lsp-mode)
 
+(defvar-local my/lsp-mode--start-interactive nil
+  "Non-nil when this buffer's pending LSP start was asked for by the user.")
+
+(defun my/lsp-mode--quiet-root-prompt-a (fn &rest args)
+  "Ask which project a file belongs to only when its start was asked for.
+FN is `lsp--find-root-interactively' and ARGS are its arguments.  A file
+outside every known project, such as a system header reached by jumping to a
+definition, makes lsp-mode ask in the minibuffer whether to import a project
+root.  On an automatic start nobody asked for that question: it takes the
+keyboard away, and a buffer opened by a program waits on it forever.  The
+automatic start stays quiet and leaves the file without a server;
+`my/language-server-ensure' asks."
+  (when my/lsp-mode--start-interactive
+    (apply fn args)))
+
 (defvar-local my/lsp-mode--start-request nil
   "Recent deferred LSP request as (TIME RUNTIME ENVIRONMENT).")
 
@@ -1326,6 +1341,7 @@ modules can keep dispatching on it."
                       (list (float-time)
                             my/language-server-runtime-current
                             remote-buffer-environment))
+                (setq-local my/lsp-mode--start-interactive report-missing)
                 (condition-case error
                     (lsp-deferred)
                   (error
@@ -3287,7 +3303,11 @@ lsp-mode's categorized index, whose category names provide the same fallback."
              'lsp--supports-buffer?)
       (advice-add
        'lsp--supports-buffer?
-       :around #'my/lsp-mode--quiet-client-whitelist-a)))
+       :around #'my/lsp-mode--quiet-client-whitelist-a))
+    (unless (advice-member-p #'my/lsp-mode--quiet-root-prompt-a
+                             'lsp--find-root-interactively)
+      (advice-add 'lsp--find-root-interactively
+                  :around #'my/lsp-mode--quiet-root-prompt-a)))
   (unless (advice-member-p
            #'my/lsp-mode--stdio-connect-via-remote-a
            'lsp-stdio-connection)

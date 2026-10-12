@@ -1032,8 +1032,10 @@ line targets a `.cell/' mirror file are touched, so workers still owned by
 a live watchdog (any other Emacs/editor session) are never affected."
   (interactive)
   (let ((killed 0))
-    (dolist (pid (list-system-processes))
-      (let* ((attrs (process-attributes pid))
+    ;; The orphans are this machine's processes.  This runs from an idle
+    ;; timer, where the current buffer may well be a remote one.
+    (dolist (pid (remote-client-list-system-processes))
+      (let* ((attrs (remote-client-process-attributes pid))
              (ppid  (cdr (assq 'ppid attrs)))
              (args  (cdr (assq 'args attrs))))
         (when (and args

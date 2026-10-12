@@ -142,7 +142,18 @@ soon as it succeeds.  Nil or zero disables the hold."
   :group 'remote)
 
 (defvar remote-connection--unreachable (make-hash-table :test #'equal)
-  "Links that recently failed to open, as LINK-ID to (TIME . ERROR).")
+  "Links that recently failed to open, as LINK-ID to (TIME ERROR SERIAL).
+SERIAL is the user command during which the failure happened.")
+
+(defvar remote-connection--command-serial 0
+  "Counter advanced before every user command.")
+
+(defun remote-connection--note-command ()
+  "Record that the user issued another command."
+  (setq remote-connection--command-serial
+        (1+ remote-connection--command-serial)))
+
+(add-hook 'pre-command-hook #'remote-connection--note-command)
 
 (defvar remote-connection-ignore-unreachable-hold nil
   "Non-nil lets a connection attempt dial a link that is being held.
@@ -155,11 +166,19 @@ Bound by reconnects, which are the attempts that find out a host is back.")
               (entry (gethash (remote-route-link-id route)
                               remote-connection--unreachable))
               (remaining (- remote-connection-unreachable-hold
-                            (- (float-time) (car entry)))))
-    (if (> remaining 0)
-        remaining
+                            (- (float-time) (nth 0 entry)))))
+    (cond
+     ((<= remaining 0)
       (remhash (remote-route-link-id route) remote-connection--unreachable)
-      nil)))
+      nil)
+     ;; The hold is there so that timers, hooks and the rest of the command
+     ;; that hit the failure do not wait it out again.  A command the user
+     ;; issues afterwards is a deliberate retry and gets one bounded attempt;
+     ;; if that fails too, the hold starts over under the new command.
+     ((/= (nth 2 entry) remote-connection--command-serial)
+      (remhash (remote-route-link-id route) remote-connection--unreachable)
+      nil)
+     (t remaining))))
 
 (defun remote-connection-forget-unreachable (&optional link-id)
   "End the unreachable hold for LINK-ID, or for every link."
@@ -190,7 +209,8 @@ again and says nothing about the next attempt."
                   error 'remote-connection-timeout)
                  (when-let* ((timeout (remote-connection--open-timeout route)))
                    (>= elapsed (* 0.9 timeout)))))
-    (puthash (remote-route-link-id route) (cons (float-time) error)
+    (puthash (remote-route-link-id route)
+             (list (float-time) error remote-connection--command-serial)
              remote-connection--unreachable)))
 
 (defvar remote-connection-opened-hook nil
@@ -364,12 +384,11 @@ requests only validate and reuse the retained session."
        'remote-connection-timeout
        (list
         (format
-         "%s did not answer %.0fs ago; not dialing again for %.0fs (reconnect the workspace to retry now)"
+         "%s did not answer %.0fs ago; not dialing again within this command (repeat it to retry)"
          (remote-route-target-id route)
          (- (float-time)
-            (car (gethash (remote-route-link-id route)
-                          remote-connection--unreachable)))
-         (remote-connection-unreachable-remaining route)))))
+            (nth 0 (gethash (remote-route-link-id route)
+                            remote-connection--unreachable)))))))
      (t
       (when existing
         (remhash key remote-connection-pool)

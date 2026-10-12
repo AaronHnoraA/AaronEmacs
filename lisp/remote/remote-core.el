@@ -343,6 +343,22 @@ execute itself must still be resolved here."
 
 (defvar remote-current-workspace)
 
+(defun remote-client-list-system-processes ()
+  "Return the process IDs of this machine, whatever the current buffer is.
+`list-system-processes' and `process-attributes' are file-name-handler
+operations keyed by `default-directory'.  Called from a timer while a remote
+buffer happens to be current, they ask the target instead: the answer is
+about the wrong machine, and the question is sent down a connection that
+may be in the middle of opening."
+  (let ((default-directory temporary-file-directory))
+    (list-system-processes)))
+
+(defun remote-client-process-attributes (pid)
+  "Return the attributes of this machine's process PID.
+See `remote-client-list-system-processes'."
+  (let ((default-directory temporary-file-directory))
+    (process-attributes pid)))
+
 (defun remote-require-on-client (feature &optional filename noerror)
   "Load Emacs Lisp FEATURE with this machine's file and process context.
 FILENAME and NOERROR are as for `require'.  A package is client code however

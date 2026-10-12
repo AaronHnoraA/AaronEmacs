@@ -156,6 +156,13 @@ Keep these rules:
   keeps the buffer for `remote-terminal-restart`.  Whether an exit can be a
   transport loss is decided by the process being routed, never by target ID
   or frontend name.
+- `list-system-processes` and `process-attributes` are file-name-handler
+  operations keyed by `default-directory`.  Code that asks about this
+  machine's processes, above all from a timer, uses
+  `remote-client-list-system-processes` / `remote-client-process-attributes`;
+  otherwise a remote current buffer sends the question to the target, into a
+  connection that may still be opening.  An automatic start (LSP and the like)
+  never asks a minibuffer question; only an explicit command may.
 - Failure handling follows the matrix in `docs/remote-framework.md`.  A
   connection attempt is synchronous, so nothing may wait on a link that is
   known to be down: one framework connection is one bounded attempt, an

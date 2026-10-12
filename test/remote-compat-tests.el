@@ -1223,6 +1223,61 @@ probe's temporary output buffer must not fall back to the global value."
       (should (eq (plist-get description :mtime-compare)
                   (nth 2 expected))))))
 
+(ert-deftest remote-fs-lock-failure-does-not-abort-the-edit ()
+  "A backend that cannot ask about the file must not stop the first edit."
+  ;; `userlock' defines these as plain `file-error's; it provides no feature.
+  (dolist (condition '(file-locked file-supersession))
+    (unless (get condition 'error-conditions)
+      (define-error condition (symbol-name condition) 'file-error)))
+  (should-not
+   (remote-fs--lock-file-a
+    (lambda (_file)
+      (signal 'remote-file-error '("`stat' returns with error")))
+    "/ssh:lab:/srv/new.h"))
+  ;; The scope the supersession check relies on is still active inside.
+  (should (remote-fs--lock-file-a (lambda (_file) remote-fs--lock-check)
+                                  "/ssh:lab:/srv/new.h"))
+  ;; Someone else's lock and a file changed on disk are the user's call.
+  (should-error
+   (remote-fs--lock-file-a
+    (lambda (file) (signal 'file-locked (list file "someone")))
+    "/ssh:lab:/srv/new.h")
+   :type 'file-locked)
+  (should-error
+   (remote-fs--lock-file-a
+    (lambda (file) (signal 'file-supersession (list file)))
+    "/ssh:lab:/srv/new.h")
+   :type 'file-supersession))
+
+(ert-deftest remote-fs-visiting-a-missing-file-keeps-its-logical-identity ()
+  "A new file is still a `/fs:' buffer after the backend reported it missing."
+  (with-temp-buffer
+    (cl-letf (((symbol-function 'remote-fs--call-routed)
+               (lambda (_operation arguments)
+                 ;; What a backend does before it signals: it has already
+                 ;; recorded its own name for the file.
+                 (when (nth 1 arguments)
+                   (setq buffer-file-name "/ssh:lab:/srv/new.h"
+                         default-directory "/ssh:lab:/srv/"))
+                 (signal 'file-missing
+                         (list "Opening input file" "No such file or directory"
+                               "/ssh:lab:/srv/new.h"))))
+              ((symbol-function 'file-truename) #'identity))
+      (should-error
+       (remote-fs-handle-insert-file-contents "/fs:lab:/srv/new.h" t)
+       :type 'file-missing)
+      (should (equal buffer-file-name "/fs:lab:/srv/new.h"))
+      (should (equal default-directory "/fs:lab:/srv/"))
+      (should (equal buffer-file-truename "/fs:lab:/srv/new.h")))
+    ;; Without VISIT the buffer is not the file and stays untouched.
+    (setq buffer-file-name nil)
+    (cl-letf (((symbol-function 'remote-fs--call-routed)
+               (lambda (&rest _) (signal 'file-missing '("x")))))
+      (should-error
+       (remote-fs-handle-insert-file-contents "/fs:lab:/srv/other.h")
+       :type 'file-missing)
+      (should-not buffer-file-name))))
+
 (ert-deftest remote-tramp-ancestor-scan-reports-existing-markers ()
   "One shell loop answers every marker in a directory and its ancestors."
   (let* ((root (file-truename (make-temp-file "remote-ancestor-scan-" t)))
@@ -1296,6 +1351,43 @@ probe's temporary output buffer must not fall back to the global value."
       (let ((remote-ancestor-marker-names nil))
         (remote-register-ancestor-markers '("Makefile" "?*.sln" "/etc/x" ""))
         (should (equal remote-ancestor-marker-names '("Makefile")))))))
+
+(ert-deftest remote-tramp-timer-cannot-talk-to-an-opening-connection ()
+  "A timer that fires during a handshake must not send into that connection."
+  (let ((lab (tramp-dissect-file-name "/ssh:lab:/" nil))
+        (other (tramp-dissect-file-name "/ssh:other:/" nil)))
+    ;; Nothing is opening: every caller is left alone.
+    (let ((remote-backend-tramp--connecting nil))
+      (cl-letf (((symbol-function 'remote-backend-tramp--timer-intrusion-p)
+                 (lambda () t)))
+        (should-not (remote-backend-tramp--guard-opening-connection-a lab))))
+    (let ((remote-backend-tramp--connecting lab))
+      ;; The handshake's own commands pass.
+      (cl-letf (((symbol-function 'remote-backend-tramp--timer-intrusion-p)
+                 (lambda () nil)))
+        (should-not (remote-backend-tramp--guard-opening-connection-a lab)))
+      (cl-letf (((symbol-function 'remote-backend-tramp--timer-intrusion-p)
+                 (lambda () t)))
+        (should-error (remote-backend-tramp--guard-opening-connection-a lab)
+                      :type 'remote-connection-busy)
+        ;; Another host's connection is none of this handshake's business.
+        (should-not
+         (remote-backend-tramp--guard-opening-connection-a other))))
+    ;; The stack decides who is inside whom.
+    (should-not (remote-backend-tramp--timer-intrusion-p))))
+
+(ert-deftest remote-client-process-queries-ignore-the-current-directory ()
+  "Asking about this machine's processes never becomes a target question."
+  (let ((default-directory "/fs:lab:/srv/")
+        seen)
+    (cl-letf (((symbol-function 'list-system-processes)
+               (lambda () (push default-directory seen) '(1)))
+              ((symbol-function 'process-attributes)
+               (lambda (_pid) (push default-directory seen) '((ppid . 0)))))
+      (should (equal (remote-client-list-system-processes) '(1)))
+      (should (equal (remote-client-process-attributes 1) '((ppid . 0))))
+      (should (equal seen (list temporary-file-directory
+                                temporary-file-directory))))))
 
 (ert-deftest remote-tramp-connect-does-not-start-over-past-its-deadline ()
   "One framework connection is one bounded attempt, not one per TRAMP step."

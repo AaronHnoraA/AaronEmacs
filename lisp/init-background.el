@@ -359,7 +359,7 @@ It has `status', `uptime', `memory' (resident megabytes), `buffers',
   (my/background--json
    `((status . ,(my/background-status))
      (uptime . ,(emacs-uptime "%dd %hh %z%mm"))
-     (memory . ,(/ (or (alist-get 'rss (process-attributes (emacs-pid))) 0)
+     (memory . ,(/ (or (alist-get 'rss (remote-client-process-attributes (emacs-pid))) 0)
                    1024))
      (buffers . ,(length (buffer-list)))
      (processes . ,(length (seq-filter #'process-id (process-list))))

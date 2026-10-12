@@ -124,6 +124,7 @@ default TCP connect timeout."
      (copy-tree base))))
 
 (defvar tramp-rpc-deploy-bootstrap-method)
+(defvar tramp-error-show-message-timeout)
 
 (defvar remote-backend-tramp--connect-deadline nil
   "Time after which a connection that has not opened must not be tried again.
@@ -137,6 +138,40 @@ Bound by `remote-backend-tramp-connect' around one framework connection.")
              (and (boundp 'remote-connection-open-timeout)
                   remote-connection-open-timeout))))
     (and (numberp timeout) (> timeout 0) timeout)))
+
+(defvar remote-backend-tramp--connecting nil
+  "The TRAMP file name vector whose connection the framework is opening.")
+
+(defun remote-backend-tramp--timer-intrusion-p ()
+  "Return non-nil when a timer that fired during the connect runs this code.
+Walking outwards, a timer frame met before the connect frame means the timer
+started inside the connect; the other order is a connect started by a timer."
+  (catch 'answer
+    (mapbacktrace
+     (lambda (_evaluated function _arguments _flags)
+       (cond
+        ((eq function 'timer-event-handler) (throw 'answer t))
+        ((eq function 'remote-backend-tramp-connect) (throw 'answer nil)))))
+    nil))
+
+(defun remote-backend-tramp--guard-opening-connection-a (vec &rest _)
+  "Keep a timer from talking to VEC's connection while it is being opened.
+Opening waits for the remote shell, and that wait runs timers.  A timer that
+sends its own command down the same connection then lands in the middle of
+the handshake: the shell prompt TRAMP is waiting for never matches, and it
+gives up after showing its buffer for half a minute.  Such a caller gets a
+plain busy error instead, at once."
+  (when (and remote-backend-tramp--connecting
+             (tramp-file-name-p vec)
+             (equal (tramp-file-name-host vec)
+                    (tramp-file-name-host remote-backend-tramp--connecting))
+             (remote-backend-tramp--timer-intrusion-p))
+    (signal 'remote-connection-busy
+            (list (format "Connection to %s is still opening"
+                          (tramp-file-name-host vec))))))
+
+(advice-add 'tramp-send-command :before
+            #'remote-backend-tramp--guard-opening-connection-a)
 
 (defun remote-backend-tramp--bounded-open-connection-a (vec &rest _)
   "Refuse to start another connection attempt for VEC past the deadline.
@@ -468,6 +503,12 @@ property the same way TRAMP marks static defaults, so it is not persisted."
          (remote-backend-tramp--connect-deadline
           (when-let* ((timeout (remote-backend-tramp--connect-timeout link)))
             (+ (float-time) timeout)))
+         (remote-backend-tramp--connecting
+          (and prefix (ignore-errors (tramp-dissect-file-name prefix nil))))
+         ;; On a connection error TRAMP shows its buffer and waits up to this
+         ;; long for a key.  The framework reports the failure itself; inside
+         ;; a connect that wait is thirty seconds of a frozen Emacs.
+         (tramp-error-show-message-timeout nil)
          ;; Connecting TRAMP runs process filters, timers, and package hooks.
          ;; If their incidental file operations inherit the caller's `/fs:'
          ;; directory they re-enter the same opening framework session and

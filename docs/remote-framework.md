@@ -574,13 +574,27 @@ SSH target 上，用暂停容器（主机不回任何包）、杀连接进程、
 | 连接中断（对端 RST、ssh 进程死亡） | 进程 sentinel，立即 | 不等 | — | workspace 标记 disconnected，1、2、4 秒后各重连一次 |
 | 半开连接 / 主机不回包，会话仍在池中 | 该会话上的下一条命令超时（tramp-rpc 读超时 30 秒），或 OpenSSH 保活 15 秒 × 3 | 一次读超时 | — | 同上 |
 | 建连时主机不可达 | 一次建连在 `remote-connection-open-timeout`（8 秒）内未成功 | 一次时限 | 同一链路上的其他后端**不再**尝试：它们共用同一条传输 | 链路进入不可达保持期 |
-| 不可达保持期内的后续操作 | `remote-connection-unreachable-hold`（30 秒）内直接判定 | 不等，立即报错并说明还要多久、如何手动重试 | — | 重连不受保持期限制，成功即结束保持期 |
+| 不可达保持期内的后续操作 | `remote-connection-unreachable-hold`（30 秒）内直接判定 | 不等，立即报错 | — | 保持期只挡住同一条命令里的后续尝试、定时器和 hook；用户再发一条命令视为主动重试，放行一次有界尝试。重连不受限制，成功即结束保持期 |
+| 建连握手期间定时器向同一连接发命令 | 调用栈上定时器帧在建连帧之内 | 不等，调用方立即得到 busy 错误 | — | 握手不受干扰地完成 |
+| 新建（尚不存在）的远程文件 | 读取报 `file-missing` | — | — | buffer 保持 `/fs:` 身份；加锁时后端的 `remote-file-error` 不中断编辑 |
 | 断线超过自动重连预算 | 重连任务以传输错误告终 | 不等 | — | 每 `remote-workspace-return-probe-interval`（30 秒）起一个**异步**客户端探测进程，最多 `remote-workspace-return-probe-limit`（120）次；探到主机应答才真正重连 |
 | 主机回来但没人操作 | 上面的探测，或任何一次成功的建连 | 不等 | — | 停在 failed 的 workspace 重新进入重连，watch / 转发 / 服务随之恢复 |
 | 后端自身不可用（RPC 服务端部署失败等） | 后端分类为 `backend` | 一次尝试 | 同一链路上的下一个后端（shell TRAMP） | 冷却 `remote-route-failure-cooldown` 后重试首选后端 |
 | 重连后恢复 watch | watcher 就绪握手 | 至多连接时限 | — | 恢复与旧 watcher 死亡触发的 resync 互斥 |
 | 终端的传输丢失 | PTY 进程异常退出或 workspace 重连 | 不等 | — | buffer 保留为 disconnected，显式 `remote-terminal-restart` |
 | 用户显式断开 | — | — | — | 不自动重连，探测一并停止 |
+
+图形界面下“打开远程文件卡死 30 秒”的成因是三件事叠加，批处理里一件都不会发生：
+握手等待期间空闲定时器触发了一个查询**本机**进程的清扫函数，而
+`list-system-processes` / `process-attributes` 是按 `default-directory` 分派的
+file-name-handler 操作，当前 buffer 是远程的，这条命令就被发到了握手未完成的同一条
+连接上；握手因此找不到 shell 提示符；TRAMP 在交互会话里出错时会弹出自己的 buffer
+并等待最多 `tramp-error-show-message-timeout`（30 秒）的按键。对应三处处理：查询本机
+进程一律走 `remote-client-list-system-processes` / `remote-client-process-attributes`；
+框架建连期间，从其内部触发的定时器向同一主机发 TRAMP 命令会立即得到
+`remote-connection-busy`；框架的建连与路由操作作用域内把那个等待设为 nil，失败由
+框架自己分类和报告。QWD-VPS 上图形界面实测（冷连接后）：打开 `stdio.h` 约 4.7 秒，
+关闭后再开约 2.6~3.1 秒，新建头文件并首次编辑约 6.6 秒，均无报错。
 
 实现上的四条不变量：
 

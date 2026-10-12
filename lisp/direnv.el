@@ -187,8 +187,20 @@ trigger project or `.envrc' discovery while a connection is being established."
              (when-let* ((directory (direnv--directory path))
                          (found (progn
                                   (remote-prefetch-ancestor-markers directory)
-                                  (locate-dominating-file
-                                   directory ".envrc"))))
+                                  ;; Discovery runs from hooks and timers.
+                                  ;; A backend error while asking whether
+                                  ;; a file exists means "not found here",
+                                  ;; never an error in the user's command.
+                                  (condition-case error-data
+                                      (locate-dominating-file
+                                       directory ".envrc")
+                                    (file-error
+                                     (remote-log
+                                      'direnv-root-discovery-error
+                                      :directory directory
+                                      :error (error-message-string
+                                              error-data))
+                                     nil)))))
                (file-name-as-directory
                 (remote-canonicalize-file-name found)))))
         (when key

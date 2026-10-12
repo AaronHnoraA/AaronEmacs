@@ -727,6 +727,20 @@ the default file adapter must route it without aborting later hooks."
                       :type 'remote-connection-timeout)
         (should (= dials 1))
         (should (remote-connection-unreachable-remaining route))
+        ;; A command the user issues next is a deliberate retry: one attempt.
+        (let ((remote-connection--command-serial
+               (1+ remote-connection--command-serial)))
+          (should-error (remote-connection-ensure route context)
+                        :type 'remote-connection-timeout)
+          (should (= dials 2))
+          ;; The rest of that command is held again.
+          (should-error (remote-connection-ensure route context)
+                        :type 'remote-connection-timeout)
+          (should (= dials 2)))
+        (remote-connection-forget-unreachable)
+        (should-error (remote-connection-ensure route context)
+                      :type 'remote-connection-timeout)
+        (setq dials 1)
         ;; A reconnect dials anyway and ends the hold when it succeeds.
         (setq answer 'ok)
         (let ((remote-connection-ignore-unreachable-hold t))

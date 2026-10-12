@@ -434,7 +434,8 @@ than the age of this Emacs session."
                         (elapsed (and (integerp pid)
                                       (alist-get 'etime
                                                  (ignore-errors
-                                                   (process-attributes pid))))))
+                                                   (remote-client-process-attributes
+                                                    pid))))))
                    (if elapsed
                        (- (float-time) (float-time elapsed))
                      (float-time)))
@@ -561,7 +562,8 @@ per process and must never run while rendering the list."
   (interactive)
   (let* ((process (my/activity-board--process-at-point))
          (pid (process-id process))
-         (attributes (and (integerp pid) (process-attributes pid))))
+         (attributes (and (integerp pid)
+                          (remote-client-process-attributes pid))))
     (with-current-buffer (get-buffer-create "*Activity Process*")
       (let ((inhibit-read-only t))
         (erase-buffer)

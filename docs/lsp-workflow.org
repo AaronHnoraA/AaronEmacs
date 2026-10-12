@@ -1,5 +1,11 @@
 #+title: Language Server Workflow
 
+#+begin_quote
+自动启动不会在 minibuffer 里提问。文件不属于任何已知项目时（例如跳转定义进入系统头文件），
+lsp-mode 原本会询问是否导入项目根；自动启动时这个询问被跳过，该文件不启动服务器。
+需要时用 =M-x my/language-server-ensure= 手动启动，此时才会询问。
+#+end_quote
+
 * Scope
 
 这份文档描述当前语言服务器栈的运行方式、维护入口和扩展约定。
