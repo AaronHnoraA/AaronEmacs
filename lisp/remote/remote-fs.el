@@ -721,6 +721,30 @@ will find it, returning non-nil when it did.")
 (defvar remote-fs--ancestor-prefetched (make-hash-table :test #'equal)
   "Canonical directories whose ancestor markers were scanned, to scan time.")
 
+(defvar remote-fs--ancestor-listings (make-hash-table :test #'equal)
+  "Entry names of scanned ancestor directories, as DIRECTORY to (TIME . NAMES).")
+
+(defun remote-fs-remember-ancestor-listing (directory names)
+  "Record that canonical DIRECTORY holds exactly the entries NAMES.
+For backends: a prefetch that lists the ancestors anyway reports them here."
+  (when (> (hash-table-count remote-fs--ancestor-listings) 256)
+    (clrhash remote-fs--ancestor-listings))
+  (puthash (file-name-as-directory directory) (cons (float-time) names)
+           remote-fs--ancestor-listings))
+
+(defun remote-ancestor-directory-names (directory)
+  "Return (t . NAMES) when a recent prefetch listed DIRECTORY, else nil.
+NAMES are the entry names without `.' and `..'.  A consumer that would list
+an ancestor directory to look for markers asks here first; the answer is only
+as old as `remote-ancestor-prefetch-lifetime' allows."
+  (ignore-errors
+    (when-let* ((entry (gethash (file-name-as-directory
+                                 (remote-canonicalize-file-name directory))
+                                remote-fs--ancestor-listings))
+                ((< (- (float-time) (car entry))
+                    remote-ancestor-prefetch-lifetime)))
+      (cons t (cdr entry)))))
+
 (defun remote-register-ancestor-markers (names)
   "Add NAMES to the markers scanned by `remote-prefetch-ancestor-markers'."
   (dolist (name names)

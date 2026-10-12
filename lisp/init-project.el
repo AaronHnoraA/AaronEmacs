@@ -1816,6 +1816,7 @@ Returns the number of killed buffers."
                synced-count))))
 
 (declare-function projectile--wildcard-p "projectile" (name))
+(declare-function remote-ancestor-directory-names "remote-fs" (directory))
 (declare-function projectile-file-exists-p "projectile" (file))
 (declare-function projectile-expand-file-name-wildcard "projectile"
                   (name-pattern dir))
@@ -1841,10 +1842,16 @@ that extra stat is only paid for a marker that actually matched."
     (cl-labels
         ((listing ()
            (unless listed
-             (setq names (ignore-errors
-                           (directory-files
-                            directory nil
-                            directory-files-no-dot-files-regexp t))
+             ;; Where a lookup is a round trip, the framework has already
+             ;; listed the ancestors while scanning for markers.
+             (setq names (let ((known (remote-ancestor-directory-names
+                                       directory)))
+                           (if known
+                               (cdr known)
+                             (ignore-errors
+                               (directory-files
+                                directory nil
+                                directory-files-no-dot-files-regexp t))))
                    entries (let ((set (make-hash-table :test #'equal)))
                              (dolist (name names set)
                                (puthash name t set)))

@@ -817,8 +817,13 @@ consumer 用 `remote-register-ancestor-markers` 登记自己要找的名字，�
 `remote-prefetch-ancestor-markers`；往返型路由上它用一次 target 端循环查完所有名字在
 所有祖先目录里的存在性，由后端写进自己的存在性缓存（shell TRAMP 写入 TRAMP 官方的
 `file-exists-p` / `file-attributes` 文件属性），consumer 原有的查找随后零往返命中。
-其他路由、没有打开会话的 target、刚扫过的目录都不做任何事。QWD-VPS 上打开
-`/usr/include/stdio.h`：约 50 次往返 / 11 秒 → 19 次 / 4.3 秒。
+其他路由、没有打开会话的 target、刚扫过的目录都不做任何事。同一次扫描还带回各级
+祖先目录的条目名（超过 2000 项的目录不列），要靠列目录来匹配通配符标记的 consumer
+先问 `remote-ancestor-directory-names`，不必再为每级目录各发一次列举。QWD-VPS 上
+打开 `/usr/include/stdio.h`：约 50 次往返 / 11 秒 → 13 次 / 约 3.2 秒；冷连接后
+首次打开文件 68 → 58 次往返。跨 Emacs 重启时，保留下来的主机事实经 TRAMP 自己的
+持久化文件生效，图形界面里启动后的第一次打开从约 20.1 秒 / 69 次降到约 14.5 秒 /
+54 次。
 
 需要"每个文件一次子进程"的功能（VC、Magit、per-file 探测）用它决定开关，而不是
 测 `file-remote-p`、TRAMP method 或 backend ID。`native` 与 `tramp-rpc` 声明

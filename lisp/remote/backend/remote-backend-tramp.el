@@ -742,33 +742,61 @@ FUNCTION is `tramp-cleanup-all-connections' and ARGS its arguments."
 
 (defvar remote-ancestor-prefetch-functions)
 
+(defconst remote-backend-tramp--ancestor-scan-limit 2000
+  "Entries listed per ancestor directory; a larger directory is not listed.")
+
 (defconst remote-backend-tramp--ancestor-scan-script
   (concat
-   "d=$1; shift; "
+   "d=$1; limit=$2; shift 2; "
    "while :; do "
    "for n in \"$@\"; do "
    "if [ -e \"${d%/}/$n\" ] || [ -L \"${d%/}/$n\" ]; then "
-   "printf '%s\\0' \"${d%/}/$n\"; fi; done; "
+   "printf 'M%s\\0' \"${d%/}/$n\"; fi; done; "
+   ;; The directory's own entries, unless it is too large to be worth it.
+   "c=$(ls -A \"$d\" 2>/dev/null | wc -l); "
+   "if [ \"$c\" -le \"$limit\" ]; then printf 'D%s\\0' \"$d\"; "
+   "ls -A \"$d\" 2>/dev/null | while IFS= read -r e; do "
+   "printf 'N%s\\0' \"$e\"; done; fi; "
    "[ \"$d\" = / ] && break; "
    "d=${d%/}; d=${d%/*}; [ -n \"$d\" ] || d=/; "
    "done")
-  "POSIX script printing which of the names $2... exist in $1 and its ancestors.
-Each existing path is printed NUL-terminated.")
+  "POSIX script scanning directory $1 and each of its ancestors.
+$2 is the largest directory to list; the remaining arguments are marker
+names.  The output is NUL-terminated records: `M' and the path of a marker
+that exists, `D' and a directory whose entries follow, `N' and one entry.")
+
+(defun remote-backend-tramp--parse-ancestor-scan (output)
+  "Return (MARKERS . LISTINGS) parsed from scan OUTPUT.
+MARKERS is the list of existing marker paths.  LISTINGS is an alist from a
+directory to its entry names."
+  (let (markers listings current)
+    (dolist (record (split-string output "\0" t))
+      (let ((kind (aref record 0))
+            (value (substring record 1)))
+        (pcase kind
+          (?M (push value markers))
+          (?D (setq current (list value))
+              (push current listings))
+          (?N (when current
+                (setcdr current (cons value (cdr current))))))))
+    (cons markers listings)))
 
 (defun remote-backend-tramp-prefetch-ancestor-markers (route directory names)
   "Fill TRAMP's own cache with which NAMES exist above DIRECTORY on ROUTE.
-One target-side loop tests every name in DIRECTORY and each of its ancestors.
-The answers are stored as the `file-exists-p' property TRAMP consults before
-it sends a command, and as absent attributes for the names that do not exist,
-so every later lookup of a marker is answered without a round trip for as
-long as TRAMP itself trusts its cache.  Only shell TRAMP needs this."
+One target-side loop tests every name in DIRECTORY and each of its ancestors
+and lists those directories.  The answers are stored as the `file-exists-p'
+property TRAMP consults before it sends a command, and as absent attributes
+for the names that do not exist, so every later lookup of a marker is
+answered without a round trip for as long as TRAMP itself trusts its cache.
+The listings go to `remote-fs-remember-ancestor-listing'.  Only shell TRAMP
+needs this."
   (when (equal (remote-route-link-plugin-id route) "tramp")
     (let* ((physical (file-name-as-directory
                       (remote-backend-project-file-name route directory)))
            (vec (tramp-dissect-file-name physical nil))
            (local (directory-file-name (tramp-file-name-localname vec)))
            (local (if (string-empty-p local) "/" local))
-           (existing
+           (scan
             (with-temp-buffer
               (let ((default-directory physical)
                     ;; Nothing is written; do not let TRAMP flush the very
@@ -777,10 +805,20 @@ long as TRAMP itself trusts its cache.  Only shell TRAMP needs this."
                 (when (zerop
                        (apply #'process-file "/bin/sh" nil t nil "-c"
                               remote-backend-tramp--ancestor-scan-script
-                              "sh" local names))
-                  (split-string (buffer-string) "\0" t)))))
+                              "sh" local
+                              (number-to-string
+                               remote-backend-tramp--ancestor-scan-limit)
+                              names))
+                  (remote-backend-tramp--parse-ancestor-scan
+                   (buffer-string))))))
+           (existing (car scan))
+           (target-id (remote-route-target-id route))
            (ancestor local)
            done)
+      (pcase-dolist (`(,listed . ,entries) (cdr scan))
+        (remote-fs-remember-ancestor-listing
+         (remote-make-file-name target-id (file-name-as-directory listed))
+         entries))
       (while (not done)
         (dolist (name names)
           (let ((file (if (equal ancestor "/")

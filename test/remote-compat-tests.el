@@ -1291,17 +1291,20 @@ probe's temporary output buffer must not fall back to the global value."
           (with-temp-file (expand-file-name "a/b c/.envrc" root))
           (make-symbolic-link "/nonexistent-target"
                               (expand-file-name "a/b c/d/Makefile" root))
-          (let ((found
-                 (with-temp-buffer
-                   (should
-                    (zerop
-                     (call-process
-                      "/bin/sh" nil t nil "-c"
-                      remote-backend-tramp--ancestor-scan-script "sh"
-                      deep ".git" ".envrc" "debian/control" "Makefile"
-                      ".projectile")))
-                   (seq-filter (lambda (file) (string-prefix-p root file))
-                               (split-string (buffer-string) "\0" t)))))
+          (let* ((scan
+                  (with-temp-buffer
+                    (should
+                     (zerop
+                      (call-process
+                       "/bin/sh" nil t nil "-c"
+                       remote-backend-tramp--ancestor-scan-script "sh"
+                       deep "3" ".git" ".envrc" "debian/control" "Makefile"
+                       ".projectile")))
+                    (remote-backend-tramp--parse-ancestor-scan
+                     (buffer-string))))
+                 (found (seq-filter (lambda (file) (string-prefix-p root file))
+                                    (car scan)))
+                 (listings (cdr scan)))
             (should
              (equal (sort found #'string<)
                     (sort (list (expand-file-name "a/.git" root)
@@ -1310,8 +1313,48 @@ probe's temporary output buffer must not fall back to the global value."
                                 ;; A dangling link is still a name that is
                                 ;; taken, as `file-symlink-p' would say.
                                 (expand-file-name "a/b c/d/Makefile" root))
-                          #'string<)))))
+                          #'string<)))
+            ;; Each ancestor comes back with its own entries.
+            (should (equal (cdr (assoc deep listings)) '("Makefile")))
+            (should (equal (sort (copy-sequence
+                                  (cdr (assoc (expand-file-name "a/b c" root)
+                                              listings)))
+                                 #'string<)
+                           '(".envrc" "d")))
+            (should (equal (sort (copy-sequence
+                                  (cdr (assoc (expand-file-name "a" root)
+                                              listings)))
+                                 #'string<)
+                           '(".git" "b c" "debian")))
+            ;; A directory above the limit is left for the consumer to list.
+            (dotimes (index 5)
+              (with-temp-file (expand-file-name (format "f%d" index) root)))
+            (let ((crowded
+                   (with-temp-buffer
+                     (call-process
+                      "/bin/sh" nil t nil "-c"
+                      remote-backend-tramp--ancestor-scan-script "sh"
+                      root "3" ".git")
+                     (remote-backend-tramp--parse-ancestor-scan
+                      (buffer-string)))))
+              (should-not (assoc root (cdr crowded))))))
       (delete-directory root t))))
+
+(ert-deftest remote-ancestor-listing-is-remembered-briefly ()
+  (let ((remote-fs--ancestor-listings (make-hash-table :test #'equal))
+        (remote-ancestor-prefetch-lifetime 10)
+        (clock 100.0))
+    (cl-letf (((symbol-function 'float-time) (lambda (&optional _) clock)))
+      (should-not (remote-ancestor-directory-names "/fs:lab:/srv/"))
+      (remote-fs-remember-ancestor-listing "/fs:lab:/srv" '("Makefile" ".git"))
+      (remote-fs-remember-ancestor-listing "/fs:lab:/empty/" nil)
+      (should (equal (remote-ancestor-directory-names "/fs:lab:/srv/")
+                     '(t "Makefile" ".git")))
+      ;; A directory known to be empty is an answer, not a miss.
+      (should (equal (remote-ancestor-directory-names "/fs:lab:/empty")
+                     '(t)))
+      (setq clock 111.0)
+      (should-not (remote-ancestor-directory-names "/fs:lab:/srv/")))))
 
 (ert-deftest remote-ancestor-prefetch-is-bounded-to-costly-open-routes ()
   "The scan runs once per directory, and only where lookups are round trips."
