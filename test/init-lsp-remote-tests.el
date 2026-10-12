@@ -1861,17 +1861,39 @@ analyzes anything without this notification."
       (should-not remote-buffer-disconnected-p))))
 
 (ert-deftest lsp-mode-automatic-start-never-asks-for-a-project-root ()
-  "Only a start the user asked for may take the keyboard to ask a question."
+  "An automatic start adopts a marked project root and never asks."
   (with-temp-buffer
-    (let ((asked 0))
-      (cl-flet ((ask (&rest _) (cl-incf asked) "/fs:lab:/srv/"))
-        (setq-local my/lsp-mode--start-interactive nil)
-        (should-not (my/lsp-mode--quiet-root-prompt-a #'ask 'session))
-        (should (zerop asked))
-        (setq-local my/lsp-mode--start-interactive t)
-        (should (equal (my/lsp-mode--quiet-root-prompt-a #'ask 'session)
-                       "/fs:lab:/srv/"))
-        (should (= asked 1))))))
+    (let ((asked 0)
+          (suggested nil))
+      (cl-letf (((symbol-function 'projectile-project-root)
+                 (lambda (&optional _dir) suggested))
+                ((symbol-function 'project-current)
+                 (lambda (&rest _) nil))
+                ((symbol-function 'file-equal-p)
+                 (lambda (left right) (equal (file-name-as-directory left)
+                                             (file-name-as-directory right))))
+                ((symbol-function 'expand-file-name)
+                 (lambda (name &optional _directory)
+                   (if (equal name "~/") "/fs:lab:/home/me/" name))))
+        (cl-flet ((ask (&rest _) (cl-incf asked) "/fs:lab:/asked/"))
+          (setq-local my/lsp-mode--start-interactive nil)
+          ;; No markers around the file, e.g. a system header: no server.
+          (should-not (my/lsp-mode--quiet-root-prompt-a #'ask 'session))
+          ;; A marked project is adopted without a question.
+          (setq suggested "/fs:lab:/srv/project")
+          (should (equal (my/lsp-mode--quiet-root-prompt-a #'ask 'session)
+                         "/fs:lab:/srv/project/"))
+          ;; A filesystem root or a home directory is never adopted silently.
+          (setq suggested "/fs:lab:/")
+          (should-not (my/lsp-mode--quiet-root-prompt-a #'ask 'session))
+          (setq suggested "/fs:lab:/home/me")
+          (should-not (my/lsp-mode--quiet-root-prompt-a #'ask 'session))
+          (should (zerop asked))
+          ;; A start the user asked for may ask back.
+          (setq-local my/lsp-mode--start-interactive t)
+          (should (equal (my/lsp-mode--quiet-root-prompt-a #'ask 'session)
+                         "/fs:lab:/asked/"))
+          (should (= asked 1)))))))
 
 (ert-deftest language-server-missing-binary-is-quiet-only-for-auto-start ()
   (with-temp-buffer

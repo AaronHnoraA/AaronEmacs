@@ -202,17 +202,40 @@ coalescing window.  A failed deferred start can be retried afterward."
 (defvar-local my/lsp-mode--start-interactive nil
   "Non-nil when this buffer's pending LSP start was asked for by the user.")
 
+(defun my/lsp-mode--automatic-root ()
+  "Return the project root an automatic start may adopt, or nil.
+That is the root the project markers around the file point to, unless it is
+a filesystem root or a home directory: importing either makes a server index
+far more than the file's project.  lsp-mode's own suggestion is not used,
+because it falls back to the file's directory and would import a system
+include directory for a header that belongs to no project."
+  (when-let* ((root
+               (or (ignore-errors
+                     (and (fboundp 'projectile-project-root)
+                          (projectile-project-root)))
+                   (when-let* ((project (ignore-errors (project-current))))
+                     (project-root project))))
+              (root (file-name-as-directory root))
+              (local (file-name-as-directory
+                      (or (file-remote-p root 'localname) root))))
+    (unless (or (equal local "/")
+                (ignore-errors
+                  (file-equal-p root (expand-file-name "~/" root))))
+      root)))
+
 (defun my/lsp-mode--quiet-root-prompt-a (fn &rest args)
   "Ask which project a file belongs to only when its start was asked for.
 FN is `lsp--find-root-interactively' and ARGS are its arguments.  A file
-outside every known project, such as a system header reached by jumping to a
-definition, makes lsp-mode ask in the minibuffer whether to import a project
-root.  On an automatic start nobody asked for that question: it takes the
-keyboard away, and a buffer opened by a program waits on it forever.  The
-automatic start stays quiet and leaves the file without a server;
+outside every project lsp-mode already knows makes it ask in the minibuffer
+whether to import a project root.  On an automatic start nobody asked for
+that question: it takes the keyboard away, and a buffer opened by a program
+waits on it forever.  An automatic start therefore adopts the root the
+project markers point to, and leaves a file that has none, such as a system
+header reached by jumping to a definition, without a server.
 `my/language-server-ensure' asks."
-  (when my/lsp-mode--start-interactive
-    (apply fn args)))
+  (if my/lsp-mode--start-interactive
+      (apply fn args)
+    (my/lsp-mode--automatic-root)))
 
 (defvar-local my/lsp-mode--start-request nil
   "Recent deferred LSP request as (TIME RUNTIME ENVIRONMENT).")

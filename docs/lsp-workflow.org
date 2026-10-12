@@ -1,9 +1,10 @@
 #+title: Language Server Workflow
 
 #+begin_quote
-自动启动不会在 minibuffer 里提问。文件不属于任何已知项目时（例如跳转定义进入系统头文件），
-lsp-mode 原本会询问是否导入项目根；自动启动时这个询问被跳过，该文件不启动服务器。
-需要时用 =M-x my/language-server-ensure= 手动启动，此时才会询问。
+自动启动不会在 minibuffer 里提问。文件所在目录 lsp-mode 还没见过时，它原本会询问是否导入
+项目根；自动启动时改为直接采用项目标记（Projectile / project.el 能认出的根，例如 =.git=）
+指向的目录，但从不自动采用文件系统根或家目录。周围没有任何项目标记的文件（例如跳转定义
+进入的系统头文件）不启动服务器。需要时用 =M-x my/language-server-ensure= 手动启动，此时才会询问。
 #+end_quote
 
 * Scope
