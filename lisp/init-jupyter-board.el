@@ -456,7 +456,8 @@ The default view keeps remote profiles and active sessions prominent."
                               my/jupyter-board--target))
                   (brokers (when (fboundp 'my/noema-jupyter-runtime-snapshot)
                              (my/noema-jupyter-runtime-snapshot target-id)))
-                  (emacs (when (equal target-id "local")
+                  (emacs (when (my/jupyter-management-local-target-p
+                                my/jupyter-board--target)
                            (my/jupyter-management-emacs-clients))))
              (setq my/jupyter-board--runtimes
                    (append emacs

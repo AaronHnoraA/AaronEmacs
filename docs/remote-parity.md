@@ -152,11 +152,12 @@ Emacs 实例，完整初始化：
 | `init-shell.el` 的终端 buffer 命名 | 仅影响名称 |
 | `init-aaronnote-jupyter-server.el`：本机 server 不建转发 | 明文规定的策略（非本机 target 必须经 channel） |
 | `init-lsp.el`：非本机 target 的 watch 归 workspace 所有、shutdown 超时放宽 | 由测试固定的 target 身份契约；换成放置查询会改变契约 |
-| `init-jupyter-management.el` 的 `local-target-p`、`init-jupyter-board.el` 的“只对本机列出 Emacs 客户端” | 债务：应改为放置或能力查询 |
+| `init-jupyter-board.el` 的路由说明文字（“Direct from this machine”） | 显示用 |
 
 已改为放置查询（`remote-client-file-name`）的：系统打开器（`init-open.el`、
 `init-macos.el`）、Noema 给本机 web host 的路径（`my/noema--host-file`）、kernelspec
-REPL 的可达性判断、客户端 kernelspec 配置读取、Ghostel 的启动流程。LSP 增量变更
+REPL 的可达性判断、客户端 kernelspec 配置读取、Ghostel 的启动流程。Jupyter 管理
+的 `my/jupyter-management-local-target-p` 也是同一个放置查询。LSP 增量变更
 合批改问 `remote-process-write-cost`（backend 声明的 `:process-write-cost`：
 `direct` 或 `queued`），不再看 target 名。
 

@@ -90,8 +90,14 @@ Reload the unchanged package source with its macros already available."
   (if (remote-target-p target) (remote-target-label target) (format "%s" target)))
 
 (defun my/jupyter-management-local-target-p (target)
-  "Return non-nil when TARGET denotes the local machine."
-  (equal (my/jupyter-management-target-id target) "local"))
+  "Return non-nil when TARGET is the machine Emacs runs on.
+That is a question of placement, not of the target's name: its files are the
+client's own, so client-side kernelspecs, commands and Emacs REPLs apply."
+  (and (ignore-errors
+         (remote-client-file-name
+          (remote-make-file-name
+           (my/jupyter-management-target-id target) "/")))
+       t))
 
 (defun my/jupyter-management-command (target kind)
   "Return the executable for KIND on TARGET."
