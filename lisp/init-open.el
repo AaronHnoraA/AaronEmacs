@@ -193,12 +193,12 @@ browser opens do not leave empty splits behind."
       (let ((target
              (if (and (fboundp 'remote-fs-file-name-p)
                       (remote-fs-file-name-p target))
-                 (progn
-                   (unless (equal (remote-file-name-target target) "local")
+                 ;; The system opener runs on this machine.  Whether it can
+                 ;; reach the file is a placement question, not a target name.
+                 (or (remote-client-file-name target)
                      (user-error
                       "System opener cannot directly access target %s"
                       (remote-file-name-target target)))
-                 (remote-file-local-name target))
                target)))
         (cond
          ((fboundp 'my/macos-open-target)

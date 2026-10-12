@@ -209,12 +209,10 @@ Use nil for a regular window, `maximized' for a maximized window, or
           (if (and expanded
                    (fboundp 'remote-fs-file-name-p)
                    (remote-fs-file-name-p expanded))
-              (progn
-                (unless (equal (remote-file-name-target expanded) "local")
+              (or (remote-client-file-name expanded)
                   (user-error
                    "macOS open cannot directly access target %s"
                    (remote-file-name-target expanded)))
-                (remote-file-local-name expanded))
             expanded)))
     (cond
      ((string-empty-p target) nil)

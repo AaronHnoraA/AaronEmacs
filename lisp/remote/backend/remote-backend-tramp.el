@@ -533,17 +533,45 @@ property the same way TRAMP marks static defaults, so it is not persisted."
          (file-remote-p physical nil 'connected)
          t)))
 
+(defconst remote-backend-tramp--host-fact-properties
+  '("uname" "locale" "stat" "readlink" "id" "test" "file-exists"
+    "uid-integer" "uid-string" "gid-integer" "gid-string"
+    "groups-integer" "groups-string" "pipe-buf" "null-device")
+  "Connection properties that describe the host rather than one session.
+TRAMP learns each of them with a round trip of its own when a connection
+opens.  They say which tools the host has and who the account is; nothing
+about them changes because a session was replaced.")
+
+(defun remote-backend-tramp--host-facts (vec)
+  "Return VEC's host facts as an alist of the properties that are known."
+  (let (facts)
+    (dolist (property remote-backend-tramp--host-fact-properties)
+      (let ((value (tramp-get-connection-property
+                    vec property tramp-cache-undefined)))
+        (unless (eq value tramp-cache-undefined)
+          (push (cons property value) facts))))
+    facts))
+
 (defun remote-backend-tramp-disconnect (connection _route)
-  "Close CONNECTION through TRAMP's public cleanup command."
+  "Close CONNECTION through TRAMP's public cleanup command.
+TRAMP's cleanup also forgets what it learned about the host.  When the
+framework replaces a session, as every reconnect does, that knowledge is put
+back: asking again cost a dozen round trips per reconnect.  A cleanup the
+user asked for by name stays a complete reset."
   (let ((physical (remote-connection-handle connection)))
     (when (and (stringp physical)
                (tramp-tramp-file-p physical))
       (require 'tramp-cmds)
-      ;; Session invalidation also runs for stale handles and reconnects.
-      ;; Only the user's cleanup entry point tears down the whole target.
-      (let ((remote-backend-tramp-explicit-cleanup t))
-        (tramp-cleanup-connection
-         (tramp-dissect-file-name physical nil))))))
+      (let* ((vec (tramp-dissect-file-name physical nil))
+             (facts (unless remote-backend-tramp-explicit-cleanup
+                      (ignore-errors
+                        (remote-backend-tramp--host-facts vec)))))
+        ;; Session invalidation also runs for stale handles and reconnects.
+        ;; Only the user's cleanup entry point tears down the whole target.
+        (let ((remote-backend-tramp-explicit-cleanup t))
+          (tramp-cleanup-connection vec))
+        (pcase-dolist (`(,property . ,value) facts)
+          (tramp-set-connection-property vec property value))))))
 
 ;;;; Explicit TRAMP cleanup
 

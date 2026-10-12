@@ -1352,6 +1352,34 @@ probe's temporary output buffer must not fall back to the global value."
         (remote-register-ancestor-markers '("Makefile" "?*.sln" "/etc/x" ""))
         (should (equal remote-ancestor-marker-names '("Makefile")))))))
 
+(ert-deftest remote-tramp-session-replacement-keeps-host-facts ()
+  "A reconnect must not re-learn the host; a cleanup by name still resets."
+  (require 'tramp-cmds)
+  (let* ((tramp-cache-data (make-hash-table :test #'equal))
+         (tramp-cache-data-changed nil)
+         (physical "/ssh:lab-host-facts:/")
+         (vec (tramp-dissect-file-name physical nil))
+         (connection (remote-connection-create :handle physical)))
+    (cl-letf (((symbol-function 'tramp-cleanup-connection)
+               (lambda (cleaned &rest _)
+                 (tramp-flush-connection-properties cleaned))))
+      (dolist (explicit '(nil t))
+        (tramp-set-connection-property vec "stat" "/usr/bin/stat")
+        (tramp-set-connection-property vec "uid-integer" 1000)
+        ;; Not a host fact: it describes the session that is going away.
+        (tramp-set-connection-property vec "session-only" 'stale)
+        (let ((remote-backend-tramp-explicit-cleanup explicit))
+          (remote-backend-tramp-disconnect connection nil))
+        (should-not (tramp-get-connection-property vec "session-only"))
+        (if explicit
+            (progn
+              (should-not (tramp-get-connection-property vec "stat"))
+              (should-not (tramp-get-connection-property vec "uid-integer")))
+          (should (equal (tramp-get-connection-property vec "stat")
+                         "/usr/bin/stat"))
+          (should (equal (tramp-get-connection-property vec "uid-integer")
+                         1000)))))))
+
 (ert-deftest remote-tramp-timer-cannot-talk-to-an-opening-connection ()
   "A timer that fires during a handshake must not send into that connection."
   (let ((lab (tramp-dissect-file-name "/ssh:lab:/" nil))
