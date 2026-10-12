@@ -558,6 +558,37 @@
        (zerop
         (hash-table-count my/noema--external-file-watches))))))
 
+(ert-deftest my/noema-external-watch-ignores-sibling-files ()
+  "A note is watched through its directory; only its own events count."
+  (let ((my/noema--external-file-watch-timers (make-hash-table :test #'equal))
+        (my/noema--external-file-watch-suppressed
+         (make-hash-table :test #'equal))
+        (file "/fs:remote:/srv/note.md"))
+    (cl-letf (((symbol-function 'remote-canonicalize-file-name) #'identity))
+      (unwind-protect
+          (progn
+            (my/noema--external-file-watch-event
+             file '(descriptor changed "/fs:remote:/srv/other.md"))
+            (my/noema--external-file-watch-event
+             file '(descriptor created "/fs:remote:/srv/.tmp"))
+            (my/noema--external-file-watch-event
+             file '(descriptor changed "/fs:remote:/elsewhere/note.md"))
+            (should (zerop (hash-table-count
+                            my/noema--external-file-watch-timers)))
+            (my/noema--external-file-watch-event
+             file '(descriptor changed "/fs:remote:/srv/note.md"))
+            (should (= 1 (hash-table-count
+                          my/noema--external-file-watch-timers)))
+            ;; A rename onto the note names it as the second file.
+            (clrhash my/noema--external-file-watch-timers)
+            (my/noema--external-file-watch-event
+             file '(descriptor renamed "/fs:remote:/srv/.tmp"
+                               "/fs:remote:/srv/note.md"))
+            (should (= 1 (hash-table-count
+                          my/noema--external-file-watch-timers))))
+        (maphash (lambda (_file timer) (when (timerp timer) (cancel-timer timer)))
+                 my/noema--external-file-watch-timers)))))
+
 (ert-deftest my/noema-external-watch-is-renewed-after-its-owner-closes ()
   (let ((remote-mode t)
         (my/noema--external-file-watches

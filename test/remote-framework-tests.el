@@ -1858,6 +1858,65 @@ its new watcher, kills that watcher and leaves the watch failed."
       (when (process-live-p process)
         (delete-process process)))))
 
+(ert-deftest remote-file-watch-reports-change-missed-before-ready ()
+  "A change made while no watcher observed the file is delivered once."
+  (let* ((events nil)
+         (process (make-pipe-process :name "remote-watch-gap-test"
+                                     :noquery t))
+         (make
+          (lambda (id since recursive)
+            (remote-file-watch-create
+             :id id :generation 1 :state 'open :target-id "devbox"
+             :descriptor (cons 'remote-file-watch id)
+             :file "/fs:devbox:/srv/note.md" :flags '(change)
+             :recursive recursive :sequence 0
+             :uncovered-since since
+             :callback (lambda (event) (push event events))))))
+    (unwind-protect
+        (let ((now (float-time)))
+          ;; Changed two seconds ago, unobserved for the last five.
+          (let ((watch (funcall make "watch-gap" (- now 5) nil)))
+            (remote-fs--inotify-filter watch 1 process "READY\0002.000\000")
+            (should (process-get process 'remote-file-watch-ready))
+            (should-not (remote-file-watch-uncovered-since watch))
+            (should (equal (mapcar (lambda (event) (nth 1 event)) events)
+                           '(changed)))
+            (should (equal (nth 2 (car events)) "/fs:devbox:/srv/note.md"))
+            ;; A later READY on a covered watch reports nothing.
+            (setq events nil)
+            (remote-fs--inotify-filter watch 1 process "READY\0000.100\000")
+            (should-not events))
+          ;; Unchanged for a minute: nothing was missed.
+          (let ((watch (funcall make "watch-quiet" (- now 5) nil)))
+            (remote-fs--inotify-filter watch 1 process "READY\00060.000\000")
+            (should-not events)
+            (should-not (remote-file-watch-uncovered-since watch)))
+          ;; A missing path and a tree root say nothing about what changed.
+          (let ((watch (funcall make "watch-absent" (- now 5) nil)))
+            (remote-fs--inotify-filter watch 1 process "READY\000\000")
+            (should-not events))
+          (let ((watch (funcall make "watch-tree" (- now 5) t)))
+            (remote-fs--inotify-filter watch 1 process "READY\0000.100\000")
+            (should-not events)))
+      (delete-process process))))
+
+(ert-deftest remote-file-watch-marks-unobserved-interval ()
+  "Losing the backend descriptor starts the interval a watcher reports on."
+  (let* ((process (make-pipe-process :name "remote-watch-interval-test"
+                                     :noquery t))
+         (watch (remote-file-watch-create
+                 :id "watch-interval" :generation 1 :state 'open
+                 :physical-descriptor process)))
+    (unwind-protect
+        (progn
+          (process-put process 'remote-file-watch-direct t)
+          (should-not (remote-file-watch-uncovered-since watch))
+          (remote-fs--watch-remove-physical watch)
+          (should (numberp (remote-file-watch-uncovered-since watch)))
+          (should-not (process-live-p process)))
+      (when (process-live-p process)
+        (delete-process process)))))
+
 (ert-deftest remote-workspace-reconnect-retries-transport-and-recovers-resources ()
   (remote-framework-test-with-registry
     (let* ((context

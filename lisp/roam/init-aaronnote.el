@@ -1341,8 +1341,19 @@ to JSON a second time."
        (t (equal (cdr record) (my/noema--external-file-signature file)))))))
 
 (defun my/noema--external-file-watch-event (file event)
-  "Debounce Remote file watch EVENT for logical FILE."
+  "Debounce Remote file watch EVENT for logical FILE.
+A file is watched through its directory, so events for its siblings arrive
+here as well; only FILE's own are a change of the note."
   (unless (or (eq (nth 1 event) 'stopped)
+              (not (seq-some
+                    (lambda (name)
+                      (and (stringp name)
+                           (equal (file-name-nondirectory name)
+                                  (file-name-nondirectory file))
+                           (equal (file-name-directory
+                                   (remote-canonicalize-file-name name))
+                                  (file-name-directory file))))
+                    (list (nth 2 event) (nth 3 event))))
               (my/noema--external-file-self-write-p file))
     (when-let* ((timer
                  (gethash

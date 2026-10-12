@@ -53,11 +53,21 @@
           (eq (ignore-errors (lsp--workspace-status workspace)) 'initialized))
         (ignore-errors (lsp-workspaces)))))
 
+(defvar lsp--buffer-deferred)
+(declare-function lsp--init-if-visible "lsp-mode" ())
+
 (defun my/lsp-live-smoke--wait (seconds)
   "Wait up to SECONDS for the current language server to initialize."
   (let ((deadline (+ (float-time) seconds)))
     (while (and (not (my/lsp-live-smoke--initialized-p))
                 (< (float-time) deadline))
+      ;; `lsp-deferred' starts from an idle timer.  This loop runs inside the
+      ;; startup evaluation, where a graphical Emacs never counts as idle, and
+      ;; the start may only be requested once an asynchronous environment
+      ;; lookup has answered, after the caller's own nudge.
+      (when (and (bound-and-true-p lsp--buffer-deferred)
+                 (fboundp 'lsp--init-if-visible))
+        (lsp--init-if-visible))
       (sit-for 0.1))
     (my/lsp-live-smoke--initialized-p)))
 

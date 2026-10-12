@@ -1,9 +1,25 @@
-"""Recursive Linux file events for Emacs Remote without inotify-tools.
+"""Linux file events for Emacs Remote without inotify-tools.
 
-Usage: python3 -u -c SOURCE DIRECTORY.  Standard output consists of pairs of
-NUL-terminated event names and absolute paths.  The agent uses only Python's
-standard library and libc; it is sent as source on process startup, so no
-target-side installation or package manager is needed.
+Usage: python3 -u -c SOURCE PATH [flat].  A directory is watched recursively,
+or with `flat' only itself, without descending.  Any other path is one file:
+its directory is watched, not the file itself, and only events for that name
+are reported, so a writer that replaces the file by renaming a temporary one
+over it does not end the watch.
+
+The agent exits when its standard input closes.  Its owner holds that pipe
+open; a remote process started without a terminal gets no hangup when the
+owner goes away, and in a quiet directory would otherwise never notice.
+
+Standard output consists of pairs of NUL-terminated event names and absolute
+paths.  The first pair is READY, sent once the watches are installed; in place
+of a path it carries how many seconds ago the watched path last changed, or
+nothing when the path does not exist.  Both ends of that interval are read
+from this machine's clock, so the owner can tell a change it could not have
+seen from one it did without comparing clocks.
+
+The agent uses only Python's standard library and libc; it is sent as source
+on process startup, so no target-side installation or package manager is
+needed.
 """
 
 import ctypes
@@ -11,6 +27,7 @@ import os
 import select
 import struct
 import sys
+import time
 
 
 IN_MODIFY = 0x00000002
@@ -32,7 +49,7 @@ MASK = (IN_MODIFY | IN_ATTRIB | IN_CLOSE_WRITE | IN_MOVED_FROM |
 HEADER = struct.Struct("iIII")
 
 
-def run(root):
+def run(root, flat=False):
     root = os.path.abspath(root)
     libc = ctypes.CDLL(None, use_errno=True)
     libc.inotify_init1.argtypes = [ctypes.c_int]
@@ -76,13 +93,51 @@ def run(root):
                 by_wd.pop(wd, None)
                 libc.inotify_rm_watch(fd, wd)
 
+    single = not os.path.isdir(root)
     try:
-        add_tree(root)
-        if root not in by_path:
-            raise NotADirectoryError(root)
-        emit("READY", root)
+        if single:
+            parent = os.path.dirname(root)
+            wd = libc.inotify_add_watch(fd, os.fsencode(parent), MASK)
+            if wd < 0:
+                raise OSError(ctypes.get_errno(), "inotify_add_watch", parent)
+            by_wd[wd] = parent
+            by_path[parent] = wd
+        elif flat:
+            wd = libc.inotify_add_watch(fd, os.fsencode(root), MASK)
+            if wd < 0:
+                raise OSError(ctypes.get_errno(), "inotify_add_watch", root)
+            by_wd[wd] = root
+            by_path[root] = wd
+        else:
+            add_tree(root)
+            if root not in by_path:
+                raise NotADirectoryError(root)
+        try:
+            status = os.stat(root)
+            age = "%.3f" % max(0.0, time.time() - max(status.st_mtime, status.st_ctime))
+        except OSError:
+            age = ""
+        emit("READY", age)
+        # Standard input that is already at end of file (closed, or the
+        # null device) carries no signal about the owner.
+        owner = 0
+        try:
+            ready, _, _ = select.select([owner], [], [], 0)
+            if ready and not os.read(owner, 4096):
+                owner = None
+        except (OSError, ValueError):
+            owner = None
         while True:
-            select.select([fd], [], [])
+            waiting = [fd] if owner is None else [fd, owner]
+            readable, _, _ = select.select(waiting, [], [])
+            if owner in readable:
+                try:
+                    if not os.read(owner, 4096):
+                        return
+                except OSError:
+                    return
+                if fd not in readable:
+                    continue
             try:
                 data = os.read(fd, 1024 * 1024)
             except BlockingIOError:
@@ -100,6 +155,24 @@ def run(root):
                 if not directory:
                     continue
                 path = os.path.join(directory, os.fsdecode(name)) if name else directory
+                if single:
+                    if not name:
+                        # The directory itself went away; so did the file.
+                        if mask & (IN_IGNORED | IN_DELETE_SELF |
+                                   IN_MOVE_SELF | IN_UNMOUNT):
+                            emit("IGNORED", root)
+                            return
+                        continue
+                    if path != root:
+                        continue
+                    names = [label for bit, label in (
+                        (IN_CREATE, "CREATE"), (IN_MOVED_TO, "MOVED_TO"),
+                        (IN_MOVED_FROM, "MOVED_FROM"), (IN_DELETE, "DELETE"),
+                        (IN_MODIFY, "MODIFY"), (IN_CLOSE_WRITE, "CLOSE_WRITE"),
+                        (IN_ATTRIB, "ATTRIB")) if mask & bit]
+                    if names:
+                        emit(",".join(names), path)
+                    continue
                 if mask & IN_IGNORED:
                     by_path.pop(directory, None)
                     by_wd.pop(wd, None)
@@ -107,9 +180,9 @@ def run(root):
                         emit("IGNORED", root)
                         return
                     continue
-                if mask & (IN_MOVED_FROM | IN_DELETE) and mask & IN_ISDIR:
+                if not flat and mask & (IN_MOVED_FROM | IN_DELETE) and mask & IN_ISDIR:
                     remove_tree(path)
-                if mask & (IN_MOVED_TO | IN_CREATE) and mask & IN_ISDIR:
+                if not flat and mask & (IN_MOVED_TO | IN_CREATE) and mask & IN_ISDIR:
                     try:
                         add_tree(path)
                     except OSError:
@@ -133,7 +206,7 @@ def run(root):
 
 if __name__ == "__main__":
     try:
-        run(sys.argv[1])
+        run(sys.argv[1], len(sys.argv) > 2 and sys.argv[2] == "flat")
     except (OSError, IndexError) as error:
         print(error, file=sys.stderr)
         sys.exit(1)

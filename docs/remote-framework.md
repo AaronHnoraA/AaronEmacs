@@ -706,6 +706,21 @@ trusted-target 门禁、客户端打包、版本缓存、目标暂存解压、re
 backend 的公开 file-notify。descriptor 的 valid/remove、断线 resync、事件
 去重和 workspace resource 清理保持同一生命周期。
 
+目标端没有 `inotifywait` 时由 `lisp/remote/watch-agent.py` 代替（只需 Python 3
+和 libc，作为源码随进程启动发送，不在目标端安装任何东西）。它有三种形态：目录树
+（递归）、`flat`（只看该目录本身）、单文件（监视父目录并按文件名过滤，因此“写临时
+文件再 rename 覆盖”不会让 watch 失效）。没有这一层时，shell TRAMP 上的单文件
+watch 是“有效但永远不报事件”的。agent 在标准输入关闭时退出：无终端启动的远端进程
+收不到 hangup，Emacs 退出或连接被替换后它否则会留在目标端。
+
+watcher 总是晚于请求它的那一刻就位：冷连接要先建立，重连期间目标端更是无人观察。
+这段空窗里的修改不会有 inotify 事件。agent 的 `READY` 因此带上“被监视路径距上次
+变化已过去多少秒”（两端都取目标端时钟，不需要对表）；`remote-fs--watch-covered`
+把它和逻辑 watch 的 `uncovered-since`（创建时、以及物理 descriptor 失效时记下）
+比较，落在空窗内就补发一个 `changed`。该事件可能略有多报（空窗前一秒内的修改），
+consumer 本来就要拿文件和手里的内容比对。递归树的根目录 mtime 说明不了深层变化，
+所以树 watch 不补发，仍由 `:resync` 负责。
+
 client placement 必须显式进入 `remote-make-client-process`。该 API 即使从远端
 buffer 调用，也会恢复应用 direnv 之前的客户端环境、使用本机 cwd，并禁止 `/fs:`
 handler 接管。
@@ -838,7 +853,8 @@ inotify 流）、`process`（每个 watch 一个目标进程，shell TRAMP 的 `
 `push` 时才让它跟随外部修改（VS Code 的 watcher 模型：无轮询，远端
 `git checkout` 后已打开的 buffer 约 0.2s 内刷新）。逻辑单文件 watch 在 `push`
 路由上直接注册到 backend，不再先做一次 `inotifywait` 查找、也不为每个 buffer 起
-目标进程；递归 watch 仍走 inotifywait/Python。
+目标进程；递归 watch 仍走 inotifywait/Python，非 `push` 路由上的单文件和单目录
+watch 在缺 `inotifywait` 时也走 Python agent。
 没有廉价 watch 的远程文件仍会在 ACP agent 完成一轮时对可见及最近的 buffer 做一次
 文件状态检查；更早的隐藏 buffer 再次显示时补查一次。`round-trip` 路由不参与焦点
 事件检查，显式断开的 buffer 一律跳过。

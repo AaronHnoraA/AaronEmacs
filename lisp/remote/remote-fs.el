@@ -112,7 +112,10 @@ its supported operation contract visible to Tramp and extension packages.")
                (:constructor remote-file-watch-create))
   id descriptor physical-descriptor file flags callback target-id adapter-id
   state workspace resource generation suppress-events metadata recursive
-  sequence last-event-fingerprint last-event-at)
+  sequence last-event-fingerprint last-event-at
+  ;; When the target stopped being observed: set at creation and whenever
+  ;; the backend descriptor goes away, cleared once a watcher is in place.
+  uncovered-since)
 
 (defvar remote-file-watches (make-hash-table :test #'equal)
   "Stable logical file watches keyed by framework watch ID.")
@@ -161,7 +164,8 @@ bound costs nothing on a fast link."
       "watch-agent.py"
       (file-name-directory (or load-file-name buffer-file-name))))
     (buffer-string))
-  "Dependency-free Linux recursive watcher sent to the target at startup.")
+  "Dependency-free Linux watcher sent to the target at startup.
+It watches a directory tree, or one file through that file's directory.")
 
 (defun remote-fs--watch-await-ready (watch)
   "Wait for WATCH's Python backend to install its target-side watches.
@@ -2496,7 +2500,9 @@ as an accidental fallback."
               (remote-file-watch-sequence watch)
               (1+ (or (remote-file-watch-sequence watch) 0)))
         (when (eq (nth 1 event) 'stopped)
-          (setf (remote-file-watch-state watch) 'stopped))
+          (setf (remote-file-watch-state watch) 'stopped)
+          (unless (remote-file-watch-uncovered-since watch)
+            (setf (remote-file-watch-uncovered-since watch) now)))
         (unless (remote-file-watch-suppress-events watch)
           (funcall (remote-file-watch-callback watch) event))
         (when (and (eq (nth 1 event) 'stopped)
@@ -2545,7 +2551,9 @@ as an accidental fallback."
               (let ((action (remote-fs--inotify-action names)))
                 (process-put process 'remote-file-watch-event nil)
                 (if (equal names "READY")
-                    (process-put process 'remote-file-watch-ready t)
+                    (progn
+                      (process-put process 'remote-file-watch-ready t)
+                      (remote-fs--watch-covered watch process field))
                   (when action
                     (remote-fs--watch-deliver
                      watch (list process action field)))))
@@ -2554,6 +2562,39 @@ as an accidental fallback."
         (setq start (1+ end)))
       (process-put process 'remote-file-watch-rest
                    (substring pending start)))))
+
+(defconst remote-fs--watch-gap-margin 1.0
+  "Seconds added to an unobserved interval before comparing a change to it.
+It covers file systems that store whole-second timestamps.")
+
+(defun remote-fs--watch-covered (watch process age)
+  "Note that PROCESS now observes WATCH, and report a change it missed.
+AGE is the watcher's own report of how many seconds ago the watched path last
+changed.  A watcher starts after the request for it: a connection may have to
+be opened first, and a reconnect leaves the target unobserved for as long as
+it was away.  A change inside that interval reached nobody, so it is
+delivered here as one event.  A change shortly before the interval is
+reported too; consumers compare the file with what they hold."
+  (let ((since (remote-file-watch-uncovered-since watch))
+        (age (and (stringp age)
+                  (string-match-p "\\`[0-9]+\\(?:\\.[0-9]+\\)?\\'" age)
+                  (string-to-number age))))
+    (setf (remote-file-watch-uncovered-since watch) nil)
+    (when (and since age
+               (not (remote-file-watch-recursive watch))
+               (<= age (+ (- (float-time) since)
+                          remote-fs--watch-gap-margin)))
+      (remote-log 'watch-gap-change
+                  :watch (remote-file-watch-id watch)
+                  :target (remote-file-watch-target-id watch)
+                  :age age)
+      (remote-fs--watch-deliver
+       watch
+       (list process
+             (if (memq 'change (remote-file-watch-flags watch))
+                 'changed
+               'attribute-changed)
+             (remote-file-local-name (remote-file-watch-file watch)))))))
 
 (defun remote-fs--inotify-sentinel (watch generation process _event)
   "Recover WATCH when its direct PROCESS for GENERATION exits."
@@ -2575,14 +2616,14 @@ as an accidental fallback."
       (let* ((remote-current-adapter-id
               (remote-file-watch-adapter-id watch))
              (program
-              (if (remote-file-watch-recursive watch)
-                  (ignore-errors
-                    (remote-executable-find "inotifywait" context))
-                (ignore-errors
-                  (remote-executable-find "inotifywait" context))))
+              (ignore-errors
+                (remote-executable-find "inotifywait" context)))
+             ;; Without inotifywait the agent watches a tree or, for one
+             ;; file, that file's directory.  Leaving a single file to the
+             ;; backend's own notifier there yields a watch that is valid and
+             ;; never reports anything.
              (python
-              (and (remote-file-watch-recursive watch)
-                   (not program)
+              (and (not program)
                    (ignore-errors
                      (remote-executable-find "python3" context)))))
         (unless (or program python
@@ -2615,9 +2656,14 @@ as an accidental fallback."
                          :buffer buffer
                          :command
                          (if python
-                             (list python "-u" "-c"
-                                   remote-fs--python-watch-agent
-                                   (remote-file-local-name file))
+                             (append
+                              (list python "-u" "-c"
+                                    remote-fs--python-watch-agent
+                                    (remote-file-local-name file))
+                              ;; A plain watch is one directory, not the
+                              ;; tree below it.
+                              (unless (remote-file-watch-recursive watch)
+                                '("flat")))
                            (list
                             program
                             (if (remote-file-watch-recursive watch)
@@ -2749,6 +2795,8 @@ shared background scheduler."
     ;; descriptor installed during workspace recovery.
     (cl-incf (remote-file-watch-generation watch))
     (setf (remote-file-watch-suppress-events watch) t)
+    (unless (remote-file-watch-uncovered-since watch)
+      (setf (remote-file-watch-uncovered-since watch) (float-time)))
     (unwind-protect
         (ignore-errors
           (if (and (processp physical)
@@ -2913,6 +2961,7 @@ recovery keeps the public identity and only removes its physical descriptor."
            :metadata (copy-tree remote-file-watch-metadata)
            :recursive remote-file-watch-recursive
            :sequence 0
+           :uncovered-since (float-time)
            :state 'opening)))
     (puthash id watch remote-file-watches)
     (condition-case error

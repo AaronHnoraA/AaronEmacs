@@ -128,6 +128,17 @@ Emacs 实例，完整初始化：
 首次打开文件的 54 次往返里约 24 次是 TRAMP 每条新连接固有的 shell 初始化与 PATH
 计算；要再明显缩短，需要该主机走 tramp-rpc（标记为受信任）。
 
+同日在同一主机上的真机回归：
+
+- `make lsp-remote-gui-smoke`（`REMOTE_LSP_E2E_TARGET=QWD-VPS`，C）通过，输入探针中位
+  0.94 ms，重绘 3.8 ms。
+- 目标端没有 `inotifywait`：单文件 watch 经 Python agent 收到追加写与原子替换，
+  不递归子目录；Emacs 退出后目标端 0 个 watcher 进程。
+- 显式断开后重新注册的 watch：重连空窗内的写入由 `READY` 的变化时间补发为一次
+  `changed`，此前这次写入不会有任何事件。
+- Noema 网关：目标端经 reverse forward 访问到网关健康检查，两次重连后仍是同一个
+  forward、同一端口，停止后为 0。
+
 ### 仍按 target 名判断的位置
 
 不变量要求 consumer 不按 `"local"` 选择行为。下面是 `lisp/remote/` 之外仍出现
