@@ -2615,6 +2615,27 @@ reported too; consumers compare the file with what they hold."
     (remote-fs--watch-deliver
      watch (list process 'stopped (remote-file-watch-file watch)))))
 
+(defconst remote-fs--owner-bound-script
+  (concat
+   "exec 3<&0; \"$@\" </dev/null 3<&- & pid=$!; "
+   ;; Standard input that is the null device, or ends at once, carries no
+   ;; signal about the owner.
+   "if [ ! /dev/stdin -ef /dev/null ]; then "
+   "( start=$(date +%s); cat <&3; "
+   "[ $(( $(date +%s) - start )) -lt 2 ] || kill \"$pid\" ) "
+   ">/dev/null 2>&1 & guard=$!; fi; "
+   "exec 3<&-; wait \"$pid\"; status=$?; "
+   "[ -z \"$guard\" ] || kill \"$guard\" 2>/dev/null; exit \"$status\"")
+  "Shell script that runs its arguments until they exit or the owner leaves.
+A target process started without a terminal gets no hangup when its owner
+goes away, and one that writes nothing never notices a closed pipe.  The
+script holds the owner's pipe and ends the program when that pipe closes.")
+
+(defun remote-fs--owner-bound-command (command)
+  "Return COMMAND wrapped so that it ends when its standard input closes."
+  (append (list "sh" "-c" remote-fs--owner-bound-script "remote-owner-bound")
+          command))
+
 (defun remote-fs--watch-recent-window (watch)
   "Return the seconds of change a replacement tree watcher should report.
 Nil for a watch that is being created, whose consumer has just read the tree
@@ -2693,13 +2714,14 @@ startup bound stands in for since the connection may have to be opened."
                                            (remote-fs--watch-recent-window
                                             watch)))
                                 (list (format "recent=%d" window))))
-                           (list
-                            program
-                            (if (remote-file-watch-recursive watch)
-                                "-mrq" "-mq")
-                            "--format" "%e%0%w%f%0"
-                            "-e" events
-                            (remote-file-local-name file)))
+                           (remote-fs--owner-bound-command
+                            (list
+                             program
+                             (if (remote-file-watch-recursive watch)
+                                 "-mrq" "-mq")
+                             "--format" "%e%0%w%f%0"
+                             "-e" events
+                             (remote-file-local-name file))))
                          :connection-type 'pipe
                          :coding 'utf-8-unix
                          :noquery t
