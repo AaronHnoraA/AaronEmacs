@@ -804,6 +804,17 @@ consumer such as auto-revert may rely on notifications.  The query is pure."
   (or (remote-fs--backend-property file-name :file-watch-cost adapter)
       'none))
 
+(defun remote-process-write-cost (file-name &optional adapter)
+  "Return what one write to a process placed for FILE-NAME costs.
+
+`direct' means the write goes straight into a pipe Emacs owns.  `queued'
+means each write is relayed through the backend's transport, so a consumer
+that writes on every keystroke should combine adjacent writes.
+
+Ask this instead of comparing the target with \"local\".  The query is pure."
+  (or (remote-fs--backend-property file-name :process-write-cost adapter)
+      'queued))
+
 (defun remote-fs--mtime-window (file-name)
   "Return the modtime tolerance in seconds for FILE-NAME's backend.
 Backends whose stats come from one precise source compare exactly; shell

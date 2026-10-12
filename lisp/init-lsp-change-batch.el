@@ -44,17 +44,16 @@
   "Non-nil while replaying queued changes through lsp-mode.")
 
 (defvar-local my/lsp-remote-change--eligible nil
-  "Non-nil if this managed source buffer belongs to a nonlocal target.")
+  "Non-nil if writes to this managed buffer's server are relayed.")
 
 (defun my/lsp-remote-change--managed-h ()
   "Update remote-change eligibility when lsp-mode manages this buffer."
   (setq my/lsp-remote-change--eligible
         (and (bound-and-true-p lsp-managed-mode)
              buffer-file-name
-             (let ((context (ignore-errors (remote-context buffer-file-name))))
-               (and (remote-context-p context)
-                    (not (equal (remote-context-target-id context)
-                                "local")))))))
+             (eq (ignore-errors
+                   (remote-process-write-cost buffer-file-name))
+                 'queued))))
 
 (defun my/lsp-remote-change--clear (workspace)
   "Cancel and forget WORKSPACE's queued changes."

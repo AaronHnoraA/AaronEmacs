@@ -118,7 +118,8 @@ Keep these rules:
 - Per-buffer or per-file consumers (VC, probes, auto-revert, watchers) decide
   from the backend's declared costs — `remote-file-operation-cost` and
   `remote-file-watch-cost` — never from `file-remote-p`.  A new backend must
-  declare `:file-operation-cost`, `:file-watch-cost` and `:mtime-compare`.
+  declare `:file-operation-cost`, `:file-watch-cost`, `:mtime-compare` and
+  `:process-write-cost` (`remote-process-write-cost`).
 - An explicit disconnect (Remote board, `tramp-cleanup-connection`,
   `tramp-cleanup-all-connections`) goes through
   `remote-workspace-disconnect-target` and must never be reported as a

@@ -1141,7 +1141,9 @@ associating that HOME with a named account.  Other names keep upstream lookup."
        ;; The server pushes inotify events over the RPC stream, and both
        ;; stat spellings report the same integer-second mtime.
        :file-watch-cost push
-       :mtime-compare exact))))
+       :mtime-compare exact
+       ;; Input to a target process goes through the reliable RPC queue.
+       :process-write-cost queued))))
 
 (remote-backend-tramp-rpc-install)
 

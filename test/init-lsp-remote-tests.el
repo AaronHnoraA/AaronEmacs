@@ -62,6 +62,22 @@
                '("local")))
       (should (= seen 10)))))
 
+(ert-deftest lsp-remote-change-batching-follows-declared-write-cost ()
+  "Batching is chosen by what a write costs, not by the target's name."
+  (with-temp-buffer
+    (setq buffer-file-name "/fs:devbox:/srv/a.py")
+    (setq-local lsp-managed-mode t)
+    (cl-letf (((symbol-function 'remote-process-write-cost)
+               (lambda (_file) 'queued)))
+      (my/lsp-remote-change--managed-h)
+      (should my/lsp-remote-change--eligible))
+    (cl-letf (((symbol-function 'remote-process-write-cost)
+               (lambda (_file) 'direct)))
+      (my/lsp-remote-change--managed-h)
+      (should-not my/lsp-remote-change--eligible))
+    (setq buffer-file-name nil)
+    (set-buffer-modified-p nil)))
+
 (ert-deftest lsp-remote-company-hard-deadline-survives-error-text-changes ()
   "A slow CAPF is bounded even if a newer LSP release changes its error."
   (with-temp-buffer

@@ -340,7 +340,8 @@ direction."
    :describe
    (lambda ()
      '(:kind native :session-owner emacs :file-operation-cost batched
-       :file-watch-cost push :mtime-compare exact))))
+       :file-watch-cost push :mtime-compare exact
+       :process-write-cost direct))))
 
 (provide 'remote-backend-native)
 ;;; remote-backend-native.el ends here

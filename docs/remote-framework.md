@@ -770,6 +770,11 @@ lsp-mode 自带 client）会漏掉项目环境提供的全部工具。
 ;; => batched
 ```
 
+向 target 进程写一次的代价是同一类契约：`:process-write-cost` 为 `direct`（Emacs
+自己拥有的管道）或 `queued`（每次写都经 backend 的传输转发），未声明按 `queued`
+处理。按键级写入的 consumer 用 `(remote-process-write-cost FILE)` 决定是否合并相邻
+写入，例如 `init-lsp-change-batch.el` 的 didChange 合批。
+
 这些查询（以及 `remote-file-watch-cost`、`remote-client-file-name`、mtime 容差）
 按 buffer、按命令被调用，所以它们与文件句柄共用带校验的路由复用
 （`remote-fs--placement-route`），不再每次从头选路：本机一次查询约 70→14 µs，

@@ -1223,6 +1223,20 @@ probe's temporary output buffer must not fall back to the global value."
       (should (eq (plist-get description :mtime-compare)
                   (nth 2 expected))))))
 
+(ert-deftest remote-builtin-backends-declare-process-write-cost ()
+  "Only a pipe Emacs owns is written to directly."
+  (dolist (expected '(("native" . direct)
+                      ("tramp-rpc" . queued)
+                      ("tramp" . queued)))
+    (should (eq (plist-get (remote-backend-describe (car expected))
+                           :process-write-cost)
+                (cdr expected))))
+  (should (eq (remote-process-write-cost "/fs:local:/tmp/a.c") 'direct))
+  (cl-letf (((symbol-function 'remote-fs--backend-property)
+             (lambda (&rest _) nil)))
+    ;; A backend that says nothing is assumed to relay.
+    (should (eq (remote-process-write-cost "/fs:devbox:/tmp/a.c") 'queued))))
+
 (ert-deftest remote-fs-lock-failure-does-not-abort-the-edit ()
   "A backend that cannot ask about the file must not stop the first edit."
   ;; `userlock' defines these as plain `file-error's; it provides no feature.

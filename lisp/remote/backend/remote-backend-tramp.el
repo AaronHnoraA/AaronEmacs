@@ -1651,7 +1651,8 @@ rewritten to the client-side relay."
      '(:kind tramp :session-owner tramp :file-operation-cost round-trip
        ;; Each watch is its own target-side inotifywait process, and shell
        ;; timestamps can be coarser than one second.
-       :file-watch-cost process :mtime-compare window))))
+       :file-watch-cost process :mtime-compare window
+       :process-write-cost queued))))
 
 (provide 'remote-backend-tramp)
 ;;; remote-backend-tramp.el ends here
