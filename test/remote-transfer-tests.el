@@ -22,6 +22,7 @@
 (require 'remote-transfer)
 (require 'remote-files)
 (require 'remote-board)
+(require 'init-dirvish-keys)
 
 (when (boundp 'comp-enable-subr-trampolines)
   (setq comp-enable-subr-trampolines nil))
@@ -530,6 +531,57 @@ rsync really speaks its protocol over the command the backend handed out."
                          (derived-mode-p 'dired-mode))))
                 (buffer-list)))))
         (set-window-configuration before)))))
+
+(ert-deftest remote-dirvish-paste-between-machines-is-a-transfer ()
+  "Copy here, paste there: across machines it queues instead of blocking."
+  (skip-unless (remote-client-executable-find "rsync"))
+  (remote-transfer-test-with-registry
+    (let* ((rsh (expand-file-name "fake-rsh" directory))
+           (near (expand-file-name "near/" directory))
+           (far (expand-file-name "far/" directory))
+           (my/dirvish--paste-method nil)
+           source)
+      (with-temp-file rsh (insert "#!/bin/sh\nshift\nexec sh -c \"$*\"\n"))
+      (set-file-modes rsh #o700)
+      (make-directory near)
+      (make-directory far)
+      (with-temp-file (expand-file-name "doc.txt" near) (insert "doc"))
+      (remote-register-backend
+       "shell-only"
+       :capabilities '(metadata file-read directory process-sync process-async)
+       :project (lambda (file _link) (remote-file-local-name file))
+       :client-shell
+       (lambda (_route) (list :command (list rsh) :destination "far-host")))
+      (remote-register-target "box" :label "Box")
+      (remote-register-pipeline "box" "api" '("shell-only"))
+      (unwind-protect
+          (progn
+            (setq source (dired-noselect near))
+            (with-current-buffer source
+              (dired-goto-file (expand-file-name "doc.txt" near))
+              (my/dirvish-yank)
+              (should (eq my/dirvish--paste-method 'copy)))
+            (with-temp-buffer
+              (setq default-directory (concat "/fs:box:" far))
+              (delay-mode-hooks (dired-mode))
+              ;; The marked file is named for its own machine, not for the
+              ;; target whose folder receives it.
+              (should (equal (my/dirvish--marked-everywhere)
+                             (list (concat "/fs:local:" near "doc.txt"))))
+              (setq my/dirvish--paste-method 'cut)
+              (should-error (my/dirvish-paste) :type 'user-error)
+              (should-not remote-transfer-jobs)
+              (setq my/dirvish--paste-method 'copy)
+              (my/dirvish-paste))
+            (let ((job (car remote-transfer-jobs)))
+              (should (equal (remote-transfer-job-destination job)
+                             (concat "/fs:box:" far)))
+              (should (eq (remote-transfer-test--wait job) 'done)))
+            (should (file-exists-p (expand-file-name "doc.txt" far)))
+            (should-not my/dirvish--paste-method)
+            (with-current-buffer source
+              (should-not (my/dirvish--marked-everywhere))))
+        (when (buffer-live-p source) (kill-buffer source))))))
 
 (ert-deftest remote-files-sync-previews-before-it-changes-anything ()
   (skip-unless (remote-client-executable-find "rsync"))

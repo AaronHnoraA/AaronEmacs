@@ -700,22 +700,12 @@ before letting it choose a useful previous buffer."
   :bind (("C-c o d" . dirvish-dwim)
          ("C-c o f" . dirvish-fd)
          :map dirvish-mode-map
-         ("q" . dirvish-quit)
-         ("h" . dirvish-subtree-remove)
-         ("l" . dirvish-subtree-toggle)
-         ("a" . dirvish-quick-access)
-         ("f" . dirvish-file-info-menu)
-         ("y" . dirvish-yank-menu)
-         ("s" . dirvish-quicksort)
-         ("TAB" . dirvish-subtree-toggle)
+         ;; Single-key bindings follow yazi and live in init-dirvish-keys.el.
          ("M-t" . dirvish-layout-toggle)
          ("M-b" . dirvish-history-go-backward)
          ("M-f" . dirvish-history-go-forward)
          ("M-n" . dirvish-narrow)
          ("M-m" . dirvish-mark-menu)
-         ("?" . dirvish-dispatch)
-         ;; Upload, download and sync between this folder and another machine.
-         ("r" . remote-files)
          ;("P" . dirvish-peek-mode) ; 如果没有该函数，下面 config 会兜底处理
          ;; 鼠标（可选）
          ("<mouse-1>" . dirvish-subtree-toggle-or-open)

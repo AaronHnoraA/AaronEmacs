@@ -80,6 +80,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-doom-extra)
 (require 'init-treesit)
 (require 'init-windows)
+(require 'init-dirvish-keys)
 (require 'init-expand-region)
 (require 'init-treemacs-bridge)
 (require 'init-project)

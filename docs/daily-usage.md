@@ -482,7 +482,7 @@ bookmark 排在前面。上下移动候选时会预览目标位置，确认后�
 一台手动输入的机器，`M` 管理这些机器，`F` 打开 target 文件夹并弹出传输菜单，
 `t` 看传输队列。
 
-传输是 Dirvish 里的菜单，不是单独的界面：在任何文件夹里按 `r`（或 `C-c C-t`，
+传输是 Dirvish 里的菜单，不是单独的界面：在任何文件夹里按 `M`（或 `C-c C-t`，
 `M-x remote-files`），`c` 把标记的文件送到对面，`g` 从对面取文件，`s` / `r`
 同步文件夹，`=` 比较。对面的文件或文件夹在弹出的 Dirvish 窗口里选，
 `C-c C-c` 确认、`C-c C-k` 取消。任务在皮卡丘的 `*Activity*` 里。完整说明见
@@ -690,7 +690,7 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
   命名 `ghostel`
 - `SPC o f`
   文件传输菜单（rsync 上传/下载/同步）；不在 Dired 里时先问 target 并打开它的
-  文件夹。Dired / Dirvish 里用 `r`。详见 [remote-files.md](remote-files.md)
+  文件夹。Dirvish 里用 `M`。详见 [remote-files.md](remote-files.md)
 - `SPC o M`
   临时机器列表：手动输入地址和密码/密钥、记在 `var/` 里的 target
 - `SPC o S`
@@ -1028,13 +1028,70 @@ GUI frame 的两侧 fringe 分工如下：
   打开 Dirvish
 - `C-c o f`
   `dirvish-fd`
-- 在 Dired 里：
-  - `H`
-    显示/隐藏 dotfiles
-  - `C-c C-e`
-    进入 `wdired`
-  - `r`（或 `C-c C-t`）
-    文件传输菜单：把标记的文件送到另一台机器、从那边取文件、同步文件夹
+
+Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger 那一套），
+定义在 [lisp/init-dirvish-keys.el](../lisp/init-dirvish-keys.el)。不经 Dirvish 的
+纯 Dired 仍是 Emacs 原生键位。
+
+| 键 | 作用 |
+| --- | --- |
+| `j` / `k` | 下 / 上 |
+| `h` / `l`，`←` / `→` | 上级目录 / 进入目录或打开文件 |
+| `S-←` / `S-→` | 历史后退 / 前进 |
+| `C-u` / `C-d`，`C-b` / `C-f` | 半页 / 整页 |
+| `g g` / `g b`（或 `G`） | 顶部 / 底部 |
+| `g h` `g a` `g d` `g p` `g v` `g m` `g w` `g u` `g c` `g l` | Home、Desktop、Downloads、Pictures、Movies、Music、Documents、Public、`~/.config`、`~/.local` |
+| `g SPC` / `g f` / `g r` | 输入目录跳转 / 跟随符号链接 / 刷新 |
+| `SPC` | 选中 / 取消选中并下移 |
+| `C-a` / `C-r` / `Esc` | 全选 / 反选 / 清除选择 |
+| `y` / `x` | 复制 / 剪切选中的文件（没选就是光标所在项） |
+| `p p` / `p f` | 粘贴 / 强制覆盖粘贴。源文件在另一台机器上时改为排一个 rsync 传输任务，不阻塞 |
+| `Y` / `X` | 取消复制 / 剪切 |
+| `p l` / `p L` / `p h` | 粘贴为符号链接（绝对 / 相对）/ 硬链接 |
+| `d` / `D` | 移到回收站 / 永久删除（都会先确认） |
+| `a`（或 `c r`） | 新建文件，名字以 `/` 结尾则新建目录 |
+| `r r` / `r i` / `r a` / `r f`（`r c`） | 重命名：光标在扩展名前 / 开头 / 末尾 / 清空 |
+| `c m` | 重命名并清空文件名，保留扩展名 |
+| `c c` / `c d` / `c f` / `c n` | 复制路径 / 目录路径 / 文件名 / 不含扩展名的文件名 |
+| `RET` | 在 Emacs 里打开 |
+| `o o` | 用系统默认程序打开 |
+| `o c`、`:` / `O`、`;` | 对文件运行 shell 命令：等待 / 异步 |
+| `S` | 在当前目录开终端 |
+| `f` | 过滤（`dirvish-narrow`） |
+| `/` / `?`，`n` / `N` | 向后 / 向前搜文件名，下一个 / 上一个匹配 |
+| `s` / `z` / `Z` | fd 搜索 / 模糊查找文件 / zoxide 跳转 |
+| `.` | 显示 / 隐藏 dotfiles |
+| `m s` `m p` `m b` `m m` `m o` / `m n` | 显示详情（大小、时间、权限、所有者）/ 只显示文件名 |
+| `, m` `, M` `, b` `, B` `, e` `, E` `, a` `, A` `, n` `, N` `, s` `, S` | 排序：修改时间、创建时间、扩展名、字母、自然、大小；大写为倒序 |
+| `, ,` | Dirvish 自带的排序菜单 |
+| `TAB` | 文件信息菜单 |
+| `t`，`1`–`9`，`-` / `=`，`_` / `+` | 新标签页、切到第 N 个、上一个 / 下一个、与左 / 右交换 |
+| `w` | 任务管理（皮卡丘的 `*Activity*`） |
+| `M` | 文件传输菜单（rsync 上传 / 下载 / 同步），见 [remote-files.md](remote-files.md) |
+| `~` | Dirvish 总菜单（帮助） |
+| `q` | 退出 |
+
+和 yazi 不完全一样的地方：
+
+- `m` 组在 yazi 里分别切换单列，这里只有“显示全部详情 / 只显示名字”两档；
+- `, b` 按创建时间排序依赖 GNU `ls`（`gls`），`, r` 随机排序没有做；
+- `v` 视觉选择、`R b` 回收站管理、`M p` 挂载硬盘没有对应；
+- `-` / `=` 按你的 yazi 配置是切换标签页，所以创建链接放在 `p l` / `p L` / `p h`。
+
+被让出单键的原 Dirvish / Dired 命令：
+
+| 命令 | 原来 | 现在 |
+| --- | --- | --- |
+| 标记 | `m` | `SPC` |
+| 快速访问 `dirvish-quick-access` | `a` | `'` |
+| 复制粘贴菜单 `dirvish-yank-menu` | `y` | `p m` |
+| 排序菜单 `dirvish-quicksort` | `s` | `, ,` |
+| 文件信息 `dirvish-file-info-menu` | `f` | `TAB` |
+| 子树展开 `dirvish-subtree-toggle` | `TAB` / `l` | `S-TAB` |
+| 总菜单 `dirvish-dispatch` | `?` | `~` |
+| 刷新 | `g` | `g r` |
+| `wdired` | `C-c C-e` | 不变 |
+| 前缀参数 `C-u` | `C-u` | Dirvish 里是上翻半页，用 `M-数字` 代替 |
 
 ## 6. 窗口和弹出层
 

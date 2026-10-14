@@ -75,9 +75,10 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 
 | 入口 | 行为 |
 |---|---|
-| Dirvish / Dired 里 `r`（或 `C-c C-t`） | 弹出当前文件夹的传输菜单 |
+| Dirvish 里 `M`（或 `C-c C-t`） | 弹出当前文件夹的传输菜单 |
+| Dirvish 里 `y` 选中文件，到另一台机器的文件夹里 `p p` | 跨机器的粘贴直接排成一个传输任务，不弹菜单 |
 | `M-x remote-files` | 同上；不在 Dired 里时先问 target、打开它的文件夹再弹菜单 |
-| `SPC o f` | 同 `M-x remote-files`（Dired 里没有 `SPC` leader，用 `r`） |
+| `SPC o f` | 同 `M-x remote-files`（Dired 里没有 `SPC` leader，用 `M`） |
 | Remote 面板 `F`、临时机器列表 `f` | 打开那台机器的文件夹并弹菜单 |
 
 经 `SPC o r` / Remote 面板打开 target 文件夹时，echo 区会提示这个键。
@@ -103,13 +104,13 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 | `e` | `remote-files-terminal` | 在这个文件夹开一个终端（在文件夹所在的机器上） |
 | `x` | `remote-files-disconnect` | 断开这个文件夹的 target |
 
-所以：
+所以（Dirvish 里标记文件用 `SPC`，见 [daily-usage.md](daily-usage.md) 的 Dirvish 键位）：
 
-- **下载**：在 target 文件夹里标记文件 → `r` `c` → 弹出本机文件夹，走到要放的
+- **下载**：在 target 文件夹里标记文件 → `M` `c` → 弹出本机文件夹，走到要放的
   位置 → `C-c C-c`；
-- **上传**（从远程这边发起）：在 target 文件夹里 `r` `g` → 弹出本机文件夹，
+- **上传**（从远程这边发起）：在 target 文件夹里 `M` `g` → 弹出本机文件夹，
   标记要传的文件 → `C-c C-c`；
-- **上传**（从本机这边发起）：在本机文件夹里标记文件 → `r` `c` → 选 target →
+- **上传**（从本机这边发起）：在本机文件夹里标记文件 → `M` `c` → 选 target →
   弹出它的文件夹，走到目标位置 → `C-c C-c`。
 
 ### 弹出窗口
@@ -121,7 +122,7 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 |---|---|---|
 | `C-c C-c` | `remote-files-pick-confirm` | 确认：取标记的文件，或当前所在的文件夹 |
 | `C-c C-k` | `remote-files-pick-cancel` | 取消 |
-| `r` | | 弹一个只有确认 / 取消的小菜单 |
+| `M` | | 弹一个只有确认 / 取消的小菜单 |
 
 确认或取消后窗口关闭，为这次选择新开的 Dired buffer 一并杀掉，光标回到原来的
 文件夹。
@@ -183,7 +184,8 @@ buffer 里（`*deleting` 开头的是要删除的），按 `C-c C-c` 才执行�
 | `lisp/remote/remote-transfer.el` | rsync 任务、进度解析、传输队列 |
 | `lisp/remote/remote-files.el` | Dired 里的传输菜单和弹出式选择 |
 | `lisp/init-activity.el` | 把传输任务认领为 task（标签、取消、查看输出） |
-| `lisp/init-windows.el` | Dirvish 的 `r` 键和状态栏段 `remote-files` |
+| `lisp/init-windows.el` | Dirvish 状态栏段 `remote-files` |
+| `lisp/init-dirvish-keys.el` | Dirvish 的 `M` 键，以及跨机器 `y` / `p p` 走传输队列 |
 
 框架为此增加的两个契约见 [remote-framework.md](remote-framework.md) 的
 “target 来源”和“客户端批量工具”两节。测试：`make remote-transfer-test`；真机
