@@ -71,6 +71,15 @@ directory instead of starting another.")
   (or (remote-files--session)
       (user-error "No file manager session here; start one with M-x remote-files")))
 
+(defun remote-files--client-directory (directory)
+  "Return the logical name of DIRECTORY, a folder of this machine.
+A bare path typed or kept by a command means this machine.  Canonicalized
+from inside a target's buffer it would name a folder of that target instead,
+so it is resolved from a directory that is the client's own."
+  (let ((default-directory temporary-file-directory))
+    (file-name-as-directory
+     (remote-canonicalize-file-name (expand-file-name directory)))))
+
 (defun remote-files--pane-window (session side)
   "Return SESSION's live window for SIDE, `local' or `remote'."
   (let ((window (if (eq side 'local)
@@ -98,12 +107,21 @@ directory instead of starting another.")
   (with-current-buffer (window-buffer (remote-files--pane-window session side))
     (unless (derived-mode-p 'dired-mode)
       (user-error "The %s pane does not show a folder" side))
-    (file-name-as-directory (expand-file-name default-directory))))
+    ;; Resolved in the pane's own buffer, which is what gives a bare path
+    ;; its machine.
+    (file-name-as-directory
+     (remote-canonicalize-file-name (expand-file-name default-directory)))))
 
 (defun remote-files--show (session side directory)
   "Show DIRECTORY in SESSION's SIDE pane."
   (let ((window (remote-files--pane-window session side))
-        (buffer (dired-noselect directory)))
+        (buffer
+         ;; A folder this machine reads directly is visited under its native
+         ;; name, from a native directory, like any other local Dired.
+         (let* ((client (remote-client-file-name directory))
+                (default-directory
+                 (if client temporary-file-directory default-directory)))
+           (dired-noselect (or client directory)))))
     ;; Replacing a pane's folder leaves the old Dired behind; the session
     ;; remembers every one it showed so that quitting can take them along.
     (cl-pushnew buffer (remote-files-session-shown-buffers session))
@@ -128,7 +146,8 @@ directory instead of starting another.")
       (with-current-buffer buffer
         (when (and (derived-mode-p 'dired-mode)
                    (equal (file-name-as-directory
-                           (expand-file-name default-directory))
+                           (remote-canonicalize-file-name
+                            (expand-file-name default-directory)))
                           directory))
           (condition-case nil
               (revert-buffer)
@@ -157,7 +176,8 @@ directory instead of starting another.")
   (interactive)
   (let* ((session (remote-files--require-session))
          (side (remote-files--side session))
-         (files (dired-get-marked-files))
+         (files (mapcar #'remote-canonicalize-file-name
+                        (dired-get-marked-files)))
          (destination
           (remote-files--pane-directory session (remote-files--other side)))
          (summary (if (cdr files)
@@ -271,10 +291,13 @@ and applied on request."
   "Show DIRECTORY of this machine in the local pane."
   (interactive
    (let ((session (remote-files--require-session)))
-     (list (read-directory-name
-            "Local folder: "
-            (remote-files--pane-directory session 'local)))))
-  (remote-files--show (remote-files--require-session) 'local directory))
+     (list (let ((default-directory temporary-file-directory))
+             (read-directory-name
+              "Local folder: "
+              (remote-client-file-name
+               (remote-files--pane-directory session 'local)))))))
+  (remote-files--show (remote-files--require-session) 'local
+                      (remote-files--client-directory directory)))
 
 (defun remote-files-set-remote (directory)
   "Show DIRECTORY of the session's target in the remote pane."
@@ -446,18 +469,17 @@ frame, show its commands instead."
            (list remote)
          (list (remote-target-file-name
                 (remote-read-target "Manage files on: " t))
-               (file-name-as-directory
+               (remote-canonicalize-file-name
                 (expand-file-name default-directory)))))))
   (if (remote-files--session)
       (remote-files-dispatch)
     (let* ((remote (file-name-as-directory
                     (remote-canonicalize-file-name remote-directory)))
            (target-id (remote-file-name-target remote))
-           (local (file-name-as-directory
-                   (expand-file-name
-                    (or local-directory
-                        (gethash target-id remote-files-local-history)
-                        remote-files-local-directory))))
+           (local (remote-files--client-directory
+                   (or local-directory
+                       (gethash target-id remote-files-local-history)
+                       remote-files-local-directory)))
            (session
             (remote-files-session--create
              :target-id target-id :frame (selected-frame)

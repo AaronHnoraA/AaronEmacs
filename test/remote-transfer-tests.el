@@ -464,7 +464,14 @@ rsync really speaks its protocol over the command the backend handed out."
       (with-temp-file (expand-file-name "a.txt" near) (insert "alpha"))
       (unwind-protect
           (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
-            (remote-files (remote-canonicalize-file-name far) near)
+            ;; Started from a buffer of another target: a bare path still
+            ;; means this machine, not a folder of that target.
+            (remote-machines-add (remote-transfer-test--machine))
+            (with-temp-buffer
+              (setq default-directory "/fs:lab:/srv/")
+              (should (equal (remote-files--client-directory near)
+                             (concat "/fs:local:" near)))
+              (remote-files (concat "/fs:local:" far) near))
             (let ((session (remote-files--session)))
               (should session)
               (should (equal (remote-files-session-target-id session) "local"))
@@ -482,6 +489,14 @@ rsync really speaks its protocol over the command the backend handed out."
                                          (remote-transfer-job-name job)))
                 (should (eq (remote-transfer-test--wait job) 'done)))
               (should (file-exists-p (expand-file-name "a.txt" far)))
+              (should (equal (remote-files--pane-directory session 'local)
+                             (concat "/fs:local:" near)))
+              ;; The local pane is an ordinary native Dired.
+              (should (equal (buffer-local-value
+                              'default-directory
+                              (window-buffer
+                               (remote-files-session-local-window session)))
+                             near))
               ;; One terminal per session, opened where the remote pane is.
               (remote-files-terminal)
               (let ((terminal (remote-files-session-terminal session)))

@@ -178,6 +178,11 @@ Keep these rules:
   them and their sessions.  Temporary machines (`remote-machines.el`) are
   runtime state under `var/remote/`, stored passwords included; never move
   them into `etc/` or write a credential anywhere else.
+- `remote-canonicalize-file-name` resolves a bare absolute path against the
+  current buffer: inside a target's buffer `/Users/x/` names a folder of that
+  target.  A command that means this machine resolves the path from a client
+  directory (as `remote-files--client-directory` does) and tests it from a
+  buffer of another target.
 - A client-side bulk tool (rsync) addresses a folder by placement only:
   a plain path when `remote-client-file-name` answers, otherwise the backend's
   `:client-shell`.  Go through `remote-transfer` rather than building an SSH
