@@ -46,6 +46,7 @@
   prepare-process-function
   stdio-bridge-function
   copy-file-to-target-function
+  client-shell-function
   network-function
   stream-function
   forward-function
@@ -296,7 +297,7 @@ returns a plist with at least `:status' and `:capabilities'."
     (id &key capabilities available probe project file-operation client-file-name
         expand-localname prepare
         connect live disconnect
-        prepare-process stdio-bridge copy-file-to-target
+        prepare-process stdio-bridge copy-file-to-target client-shell
         make-network-process open-network-stream port-forward
         classify-error describe (program-form 'search))
   "Register transport backend ID and return it.
@@ -326,6 +327,12 @@ COPY-FILE-TO-TARGET receives ROUTE, a client-local source, a target-native
 destination and an overwrite flag.  It is the bulk provisioning path; normal
 editing continues to use Emacs file handlers.
 
+CLIENT-SHELL receives ROUTE and returns a plist telling a client-side bulk
+tool such as rsync or sshfs how to reach the target on a connection of its
+own: `:command' is the client argv of a remote shell without its destination,
+`:destination' that destination, and `:environment' an alist of extra client
+variables.  A backend whose files the client reads directly needs none.
+
 MAKE-NETWORK-PROCESS, OPEN-NETWORK-STREAM, and PORT-FORWARD are optional
 channel operations.  PROGRAM-FORM is `search' when the backend accepts a bare
 program name and `absolute' when its spawn protocol requires an absolute
@@ -352,6 +359,7 @@ target-native executable."
             :prepare-process-function prepare-process
             :stdio-bridge-function stdio-bridge
             :copy-file-to-target-function copy-file-to-target
+            :client-shell-function client-shell
             :network-function make-network-process
             :stream-function open-network-stream
             :forward-function port-forward
@@ -388,6 +396,15 @@ target-native executable."
          (remote-backend--legacy-disconnect backend connection route))
        :describe describe)
       backend)))
+
+(defun remote-backend-client-shell (route)
+  "Return how a client-side bulk tool reaches ROUTE's target, or nil.
+The plist has `:command', the client argv of a remote shell without its
+destination, `:destination', and `:environment', an alist of extra client
+variables.  Nil means the backend offers no such connection."
+  (when-let* ((backend (remote-route-backend route))
+              (function (remote-backend-client-shell-function backend)))
+    (funcall function route)))
 
 (defun remote-backend-copy-file-to-target
     (route local-file target-file &optional overwrite)

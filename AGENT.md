@@ -16,6 +16,8 @@ reconstructing the system from scattered Elisp:
 - `docs/remote-framework.md` is authoritative for logical `/fs` paths,
   target/pipeline/backend/session routing, routed processes and channels, and
   environment/PATH capsules.
+- `docs/remote-files.md` covers temporary machines and the rsync/sshfs file
+  manager built on that framework.
 - `docs/remote-parity.md` defines what “VS Code Remote-level” completion means;
   a registered capability without local, remote, and resilience tests is not
   complete.
@@ -171,6 +173,18 @@ Keep these rules:
   and waiting for a host to return is done by an asynchronous probe, never by
   dialing in a loop.  A new consumer that walks ancestor directories registers
   its marker names and calls `remote-prefetch-ancestor-markers` first.
+- Targets that do not come from `etc/remote.json` register through
+  `remote-config-source-functions`, inside the staged load, so a reload keeps
+  them and their sessions.  Temporary machines (`remote-machines.el`) are
+  runtime state under `var/remote/`, stored passwords included; never move
+  them into `etc/` or write a credential anywhere else.
+- A client-side bulk tool (rsync, sshfs) addresses a folder by placement only:
+  a plain path when `remote-client-file-name` answers, otherwise the backend's
+  `:client-shell`.  Go through `remote-transfer` rather than building an SSH
+  command in a consumer.  Such a tool uses a connection of its own, never the
+  editing session's control socket, and a backend offering neither is refused,
+  not served from the client's disk.  Transfers and mounts end with their
+  target and are not rerun by transport recovery.
 - A feature is not complete merely because the local path works or a capability
   symbol exists.  Apply the local/remote/resilience criteria in
   `docs/remote-parity.md`, and add parity tests for every new shared contract.
@@ -216,6 +230,10 @@ This config already has maintenance and workflow entry points. Reuse them:
 - Projects: `my/project-dispatch`, `my/project-switch`,
   `my/project-open-workbench`, `my/project-search-paths`, Projectile,
   Perspective, Transient, and `show-imenu`.
+- Remote files: `remote-files` (two panes over `remote-transfer`, queue in
+  `remote-transfer-list`) and `remote-machines` for hand-entered targets.  Do
+  not add another uploader, sync command or host list.  See
+  `docs/remote-files.md`.
 - Compile/maintenance: `my/compile-board`, `my/compile-dispatch`, `make`
   targets documented in `docs/maintenance.md`.
 - Performance diagnostics: `my/performance-watch`,

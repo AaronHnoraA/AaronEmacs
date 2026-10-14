@@ -19,6 +19,11 @@
 (require 'remote-workspace)
 (require 'remote-channel)
 (require 'remote-task)
+(require 'remote-machines)
+(require 'remote-transfer)
+
+(autoload 'remote-files "remote-files" nil t)
+(autoload 'remote-files-dispatch "remote-files" nil t)
 
 (declare-function remote-backend-tramp-ssh-client-command
                   "remote-backend-tramp" (route &rest options))
@@ -483,7 +488,10 @@ connection is consulted while the board is drawn."
            (number-to-string workspace-count)
            (remote--route-label target 'file-read "emacs-file")
            (remote--route-label target 'process-async "process")
-           (if (remote-target-trusted target) "trusted" "untrusted")))
+           (cond ((eq (remote-target-source target) 'remote-machines)
+                  "temporary")
+                 ((remote-target-trusted target) "trusted")
+                 (t "untrusted"))))
          entries)
         (dolist (row (remote-board--folder-rows target workspaces))
           (push row entries))
@@ -1583,6 +1591,22 @@ framework connection until a Remote folder is opened or reconnected."
             (remote-board-target-at-point)))
    current-prefix-arg))
 
+;;;###autoload
+(defun remote-board-files (&optional target)
+  "Open the file manager on TARGET, or on the folder of the current row."
+  (interactive)
+  (let* ((target (or target (remote-board-target-at-point)))
+         (target (if (remote-target-p target)
+                     target
+                   (or (remote-get-target target)
+                       (user-error "Unknown Remote target: %S" target)))))
+    (remote-files
+     (remote-board--folder-file-name
+      target
+      (or (and (derived-mode-p 'remote-board-mode)
+               (remote-board--folder-at-point))
+          (remote-target-default-localname target))))))
+
 (defvar remote-board--mode-line-map
   (let ((map (make-sparse-keymap)))
     (define-key map [mode-line mouse-1] #'remote-board)
@@ -1630,6 +1654,10 @@ framework connection until a Remote folder is opened or reconnected."
   "c" #'remote-board-close-workspace
   "C" #'remote-board-disconnect-target
   "w" #'remote-copy-target-uri
+  "F" #'remote-board-files
+  "t" #'remote-transfer-list
+  "m" #'remote-machines-add
+  "M" #'remote-machines
   "a" #'remote-board-add-ssh-host
   "A" #'remote-board-add-ssh-command
   "e" #'remote-edit-config
@@ -1644,7 +1672,9 @@ framework connection until a Remote folder is opened or reconnected."
 (define-derived-mode remote-board-mode tabulated-list-mode "Remote"
   "Mode for logical targets and resolved route health.
 Open targets with RET, close a folder with c or disconnect a target with C.
-Add SSH hosts with a or paste an SSH command with A.
+Add SSH hosts with a or paste an SSH command with A.  Remember a temporary
+machine with m and manage those with M.  Manage a target's files with F and
+watch transfers with t.
 Inspect SSH with D, open an SSH login terminal with T, inspect connection
 phases with L, and run the full
 Doctor with d.  See `remote-board-mode-map' for more actions."

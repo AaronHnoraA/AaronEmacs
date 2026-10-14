@@ -974,6 +974,27 @@ requests OpenSSH's diagnostic output."
     (append arguments
             (list (remote-backend-tramp--ssh-destination destination)))))
 
+(defvar remote-backend-tramp-client-environment-functions nil
+  "Functions returning extra client variables for an OpenSSH helper.
+Each receives ROUTE and returns an alist of (NAME . VALUE), or nil.  A source
+of targets that keeps credentials answers here, so a bulk tool that opens a
+connection of its own authenticates without a prompt.")
+
+(defun remote-backend-tramp-client-shell (route)
+  "Return the `:client-shell' plist of ROUTE's SSH pipeline.
+The connection is the tool's own: a long transfer does not share the editing
+session's control socket and cannot stall it."
+  (let ((command
+         (remote-backend-tramp-ssh-client-command
+          route :extra-options '("ControlMaster=no" "ControlPath=none"))))
+    (list :command (butlast command)
+          :destination (car (last command))
+          :environment
+          (apply #'append
+                 (mapcar
+                  (lambda (function) (funcall function route))
+                  remote-backend-tramp-client-environment-functions)))))
+
 (defun remote-backend-tramp-direct-async-command
     (route command environment directory &optional tty)
   "Return a local SSH argv for target COMMAND on ROUTE.
@@ -1642,6 +1663,7 @@ rewritten to the client-side relay."
    :prepare-process #'remote-backend-tramp-prepare-process
    :stdio-bridge #'remote-backend-tramp-stdio-bridge
    :copy-file-to-target #'remote-backend-tramp-direct-copy-file
+   :client-shell #'remote-backend-tramp-client-shell
    :make-network-process #'remote-backend-tramp-network
    :open-network-stream #'remote-backend-tramp-stream
    :port-forward #'remote-backend-tramp-forward

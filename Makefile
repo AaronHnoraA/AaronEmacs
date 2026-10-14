@@ -25,7 +25,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native ui-test activity-test ui-tokens audit-ui-tokens \
-        remote-test remote-source-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
+        remote-test remote-source-test remote-transfer-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
 		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke remote-ghostel-live-smoke \
         jupyter-test research-test agenda-test agenda-apple-test \
         noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
@@ -71,6 +71,7 @@ help:
 	  '  make health-native        Run native-compile smoke check' \
 	  '  make remote-test          Run isolated remote framework ERT suites' \
 	  '  make remote-source-test   Run source helper and workspace lifecycle checks' \
+	  '  make remote-transfer-test Run temporary machine, bulk transfer and mount checks' \
 	  '  make remote-contract-test Run remote upgrade/provider contract tests' \
 	  '  make remote-conformance-test Compare /fs:local semantics with native APIs' \
 	  '  make remote-byte-check    Strictly byte-compile remote code in a temp dir' \
@@ -240,7 +241,10 @@ remote-source-test:
 	node --test test/remote-source-agent.test.cjs
 	$(REMOTE_TEST_BATCH) -l test/remote-source-tests.el -f ert-run-tests-batch-and-exit
 
-remote-test: remote-contract-test remote-conformance-test remote-source-test
+remote-transfer-test:
+	$(REMOTE_TEST_BATCH) -l test/remote-transfer-tests.el -f ert-run-tests-batch-and-exit
+
+remote-test: remote-contract-test remote-conformance-test remote-source-test remote-transfer-test
 	$(REMOTE_TEST_BATCH) -l test/remote-tests.el -f ert-run-tests-batch-and-exit
 	$(REMOTE_TEST_BATCH) -l test/remote-framework-tests.el -f ert-run-tests-batch-and-exit
 	$(REMOTE_TEST_BATCH) -l test/remote-task-tests.el -f ert-run-tests-batch-and-exit

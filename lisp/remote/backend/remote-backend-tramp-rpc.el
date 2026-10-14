@@ -1127,6 +1127,7 @@ associating that HOME with a named account.  Other names keep upstream lookup."
    :prepare-process #'remote-backend-tramp-handler-process-plan
    :stdio-bridge #'remote-backend-tramp-stdio-bridge
    :copy-file-to-target #'remote-backend-tramp-direct-copy-file
+   :client-shell #'remote-backend-tramp-client-shell
    :make-network-process #'remote-backend-tramp-network
    :open-network-stream #'remote-backend-tramp-stream
    :port-forward #'remote-backend-tramp-forward

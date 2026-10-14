@@ -10,6 +10,8 @@
 
 (require 'remote-board)
 
+(defvar dired-mode-map)
+
 (defun my/remote-connectboard (&optional show-board)
   "Open a logical target, or show `remote-board' with SHOW-BOARD."
   (interactive "P")
@@ -31,7 +33,14 @@
 (my/leader!
   "o r" '(:def remote-open-target :which-key "remote open")
   "o R" '(:def remote-board :which-key "remote board")
-  "o C" '(:def remote-edit-config :which-key "remote config"))
+  "o C" '(:def remote-edit-config :which-key "remote config")
+  "o f" '(:def remote-files :which-key "remote files")
+  "o M" '(:def remote-machines :which-key "remote machines"))
+
+;; In a folder of a target this manages that folder; inside a file manager
+;; session it shows the session's commands.
+(with-eval-after-load 'dired
+  (define-key dired-mode-map (kbd "C-c C-t") #'remote-files))
 
 (provide 'init-remote-connectboard)
 ;;; init-remote-connectboard.el ends here

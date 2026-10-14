@@ -475,6 +475,14 @@ bookmark 排在前面。上下移动候选时会预览目标位置，确认后�
 - `SPC e 1`
   单窗口 / 恢复窗口布局切换
 
+### 临时机器与远程文件管理
+
+Remote 面板（`SPC o R`）上：`m` 记住一台手动输入的机器，`M` 管理这些机器，
+`F` 对光标所在 target 打开文件管理器，`t` 看传输队列。文件管理器里
+`C-c C-t` / `SPC o f` 出菜单：`c` 复制标记项到另一边，`s` 同步，`S` 镜像，
+`d` 比较，`m` sshfs 挂载，`q` 退出并释放连接。传输在后台跑，模式栏显示
+`Xfer:N P%`。完整说明见 [remote-files.md](remote-files.md)。
+
 ### 关闭 Remote target
 
 `M-x remote-board` 的 `C` 关闭所选 target 的 workspace、连接及全部所属 buffer，
@@ -675,6 +683,11 @@ target。本机已删除适配器内置的 CLI（`@anthropic-ai/claude-agent-sdk
 Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，不受影响。
 - `SPC o V`
   命名 `ghostel`
+- `SPC o f`
+  远程文件管理器：本机与 target 文件夹并排，rsync 上传/下载/同步；会话打开后
+  再按一次显示命令菜单。详见 [remote-files.md](remote-files.md)
+- `SPC o M`
+  临时机器列表：手动输入地址和密码/密钥、记在 `var/` 里的 target
 - `SPC o S`
   `my/ghostel-ssh`
 - `SPC o s`
@@ -1015,6 +1028,8 @@ GUI frame 的两侧 fringe 分工如下：
     显示/隐藏 dotfiles
   - `C-c C-e`
     进入 `wdired`
+  - `C-c C-t`
+    远程文件管理器。在 target 的文件夹里管理该文件夹；在别处先问 target
 
 ## 6. 窗口和弹出层
 

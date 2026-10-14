@@ -33,6 +33,12 @@
 (defvar remote-config-generation 0)
 (defvar remote-config-after-load-hook nil)
 
+(defvar remote-config-source-functions nil
+  "Functions registering targets that do not come from `remote-config-file'.
+Each runs without arguments during `remote-config-load', after the file's own
+targets and imports and against the same staged registries, so a source of
+targets survives a reload and a failing source leaves the live ones alone.")
+
 (defun remote-config--copy-target-registry ()
   "Return a detached copy of `remote-targets' for transactional loading."
   (let ((result (make-hash-table :test (hash-table-test remote-targets))))
@@ -419,7 +425,8 @@ Both v2 backend keys and v1 plugin keys are accepted."
             (type
              (remote-log
               'config-warning
-              :message (format "Unknown remote import type: %S" type))))))
+              :message (format "Unknown remote import type: %S" type)))))
+        (run-hooks 'remote-config-source-functions))
       (let ((changed
              (remote-config--changed-pipelines
               old-pipelines staged-pipelines)))
