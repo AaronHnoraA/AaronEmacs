@@ -1,10 +1,10 @@
-# 临时机器与远程文件管理
+# 临时机器与远程文件传输
 
 两件事，都建在 [Remote 框架](remote-framework.md) 上：
 
 - **临时机器**：手动输入地址和密码/密钥就能用的 target，记在 `var/` 里；
-- **文件管理器**：本机文件夹和 target 文件夹并排，用 rsync 上传、下载、同步，
-  全部异步并显示进度。只用普通的用户态命令行工具，不挂载文件系统，不需要
+- **文件传输**：Dired / Dirvish 里的一个菜单，用 rsync 上传、下载、同步，
+  全部异步，任务进 Emacs 的后台任务管理（皮卡丘）。只用普通的用户态命令行工具，不挂载文件系统，不需要
   任何系统扩展或系统设置改动。
 
 ## 1. 临时机器
@@ -27,7 +27,7 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 3. 名字。target ID 由名字生成，之后不变。
 
 之后它就是一个普通 target：出现在 Remote 面板（Trust 列为 `temporary`）、
-`SPC o r` 的补全、文件管理器的 target 列表里，路由、workspace、终端、断开和
+`SPC o r` 的补全、传输菜单的 target 列表里，路由、workspace、终端、断开和
 自动重连都和 SSH config 导入的主机一样。它默认不受信任，不会被部署工具包。
 
 管理列表 `*Remote Machines*` 的按键：
@@ -35,7 +35,7 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 | 键 | 作用 |
 |---|---|
 | `RET` / `o` | 打开它的默认文件夹 |
-| `f` | 打开文件管理器 |
+| `f` | 打开它的文件夹并弹出传输菜单 |
 | `a` | 添加 |
 | `e` | 修改地址、登录方式或名字（改动会关闭用旧设置建立的连接） |
 | `p` | 只忘记密码，保留机器 |
@@ -66,72 +66,98 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 临时机器的 ID 和 `etc/remote.json` 或 SSH config 的 target 撞名时，配置优先，
 列表的 Note 列会标 `shadowed by a target`。
 
-## 2. 文件管理器
+## 2. 文件传输（Dired / Dirvish 里的菜单）
 
-### 打开
+没有单独的界面：它是 Dired / Dirvish 的一个扩展。在任何文件夹里按一个键弹出菜单，
+对面那台机器的文件或文件夹在一个**弹出的 Dirvish 窗口**里选，选完窗口自动关掉。
+
+### 入口
 
 | 入口 | 行为 |
 |---|---|
-| target 的 Dired 里 `C-c C-t` | 管理当前文件夹。经 `SPC o r` / Remote 面板打开 target 文件夹时，echo 区会提示这个键 |
-| `SPC o f` 或 `M-x remote-files` | 在普通 buffer 里先问管理哪个 target。Dired 里 `SPC` 是移动光标，leader 不可用，用 `C-c C-t` |
-| Remote 面板 `F` | 管理光标所在 target 或文件夹行 |
-| 临时机器列表 `f` | 管理那台机器 |
+| Dirvish / Dired 里 `r`（或 `C-c C-t`） | 弹出当前文件夹的传输菜单 |
+| `M-x remote-files` | 同上；不在 Dired 里时先问 target、打开它的文件夹再弹菜单 |
+| `SPC o f` | 同 `M-x remote-files`（Dired 里没有 `SPC` leader，用 `r`） |
+| Remote 面板 `F`、临时机器列表 `f` | 打开那台机器的文件夹并弹菜单 |
 
-打开后当前 frame 变成三块：左边本机文件夹，右边 target 文件夹，下面是传输
-队列。默认只有文件，没有终端；需要时在菜单里按 `e` 才会开一个，每个会话
-最多一个。两个 pane 都是普通 Dired，照常进目录、标记、改名、删除。本机 pane 起始
-目录是上次在这个 target 上用过的目录，否则是 `remote-files-local-directory`
-（默认 `~/`）。
+经 `SPC o r` / Remote 面板打开 target 文件夹时，echo 区会提示这个键。
 
-会话打开期间，在任一 pane 里按 `C-c C-t` 显示命令菜单（pane 是 Dired，
-`SPC` leader 在那里不可用）：
+“对面”由当前文件夹在哪决定，两个方向是同一套操作：
 
-| 键 | 作用 |
-|---|---|
-| `c` | 把当前 pane 标记的文件（没有标记就是光标所在项）复制到另一个 pane 的文件夹。在本机 pane 是上传，在 target pane 是下载 |
-| `s` | 同步：让另一边的文件夹跟上这边，不删除任何东西 |
-| `S` | 镜像：让另一边和这边完全一致，**另一边多出来的会被删除** |
-| `d` | 只比较两边差异，不改动 |
-| `o` | 跳到另一个 pane |
-| `l` / `r` | 换本机 / target 文件夹 |
-| `t` | 重新显示传输队列 |
-| `e` | 在上方打开一个 target 上的终端（Ghostel），位置是 target pane 当前的文件夹；已有终端时让它 `cd` 过去 |
-| `.` | 让 target pane 跳到终端当前所在的文件夹 |
-| `q` | 退出并释放资源 |
+- 在 **target 的文件夹**里：对面是本机，弹出窗口显示本机文件夹（上次用过的，
+  否则 `remote-files-local-directory`，默认 `~/`）；
+- 在**本机文件夹**里：先问对面是哪个 target（列表里可选 `临时机器` 现场输入），
+  弹出窗口显示它的文件夹。
 
-`s` 和 `S` 不会直接动手：先做一次 rsync 演练，把将要发生的每一项改动列在一个
+### 菜单
+
+| 键 | `M-x` 指令 | 作用 |
+|---|---|---|
+| `c` | `remote-files-send` | 把这里标记的文件（没有标记就是光标所在项）送到对面：在弹出窗口里走到目标文件夹后确认 |
+| `g` | `remote-files-fetch` | 从对面取文件到这里：在弹出窗口里标记文件后确认 |
+| `s` | `remote-files-push` | 同步：让对面的某个文件夹跟上这个文件夹 |
+| `r` | `remote-files-pull` | 同步：让这个文件夹跟上对面的某个文件夹 |
+| `=` | `remote-files-compare` | 只比较两个文件夹的差异 |
+| `-d` | | 开关：同步时删除目标端多出来的文件（镜像） |
+| `t` | `remote-transfer-list` | 传输队列 |
+| `e` | `remote-files-terminal` | 在这个文件夹开一个终端（在文件夹所在的机器上） |
+| `x` | `remote-files-disconnect` | 断开这个文件夹的 target |
+
+所以：
+
+- **下载**：在 target 文件夹里标记文件 → `r` `c` → 弹出本机文件夹，走到要放的
+  位置 → `C-c C-c`；
+- **上传**（从远程这边发起）：在 target 文件夹里 `r` `g` → 弹出本机文件夹，
+  标记要传的文件 → `C-c C-c`；
+- **上传**（从本机这边发起）：在本机文件夹里标记文件 → `r` `c` → 选 target →
+  弹出它的文件夹，走到目标位置 → `C-c C-c`。
+
+### 弹出窗口
+
+弹出的是一个普通 Dirvish，照常进目录、标记。它的状态栏会一直写着正在选什么、
+按什么确认：
+
+| 键 | `M-x` 指令 | 作用 |
+|---|---|---|
+| `C-c C-c` | `remote-files-pick-confirm` | 确认：取标记的文件，或当前所在的文件夹 |
+| `C-c C-k` | `remote-files-pick-cancel` | 取消 |
+| `r` | | 弹一个只有确认 / 取消的小菜单 |
+
+确认或取消后窗口关闭，为这次选择新开的 Dired buffer 一并杀掉，光标回到原来的
+文件夹。
+
+`s` / `r` 同步不会直接动手：先做一次 rsync 演练，把将要发生的每一项改动列在一个
 buffer 里（`*deleting` 开头的是要删除的），按 `C-c C-c` 才执行，按 `q` 放弃。
 
-### 进度与队列
+### 任务在哪看
 
-传输都是后台进程，Emacs 不等它们：
+传输都是后台进程，Emacs 不等它们。它们进的是 Emacs 自己的后台任务管理，也就是
+模式栏那只皮卡丘：
 
-- 模式栏在有传输时显示 `Xfer:2 45%`（个数和平均进度）；
-- 传输队列 `*Remote Transfers*`（Remote 面板 `t`，或
-  `M-x remote-transfer-list`）每半秒刷新，列出状态、进度条、速率、剩余时间。
-
-队列里的按键：`RET` / `l` 看 rsync 的输出，`k` 取消，`r` 重跑，`c` 清掉已
-结束的，`g` 刷新。取消或失败后留下的半截文件带 `--partial`，重跑会接着传。
+- 有传输时皮卡丘开始跑，点它（或 `M-x my/activity-board`）打开 `*Activity*`，
+  传输列在 task 一组，名字前带百分比。`RET` 看 rsync 的输出，`x` 取消，`i` /
+  `X` 发信号；
+- Dirvish 状态栏在该 target 有传输时显示 `Transfers:2 45%`；
+- 更细的队列是 `*Remote Transfers*`（菜单 `t`、`*Activity*` 底部的
+  `Transfers` 按钮、Remote 面板 `t`、`M-x remote-transfer-list`）：进度条、速率、
+  剩余时间，`RET` / `l` 看输出，`k` 取消，`r` 重跑，`c` 清掉已结束的。取消或失败
+  后留下的半截文件带 `--partial`，重跑会接着传。
 
 传输完成后，目标文件夹对应的 Dired 自动刷新。
 
-### 退出
+### 连接和资源
 
-菜单里按 `q`，或直接关掉这个 frame。会话只收回它自己起的东西：
+没有需要“退出”的会话：
 
-1. 还在跑的传输：问一次是否取消；不取消就不退出；
-2. 关闭会话开的终端、会话建的 Dired 和传输队列窗口，恢复原来的窗口布局；
-3. 关闭会话打开的 workspace；
-4. 如果连接是这次会话建立的，而且这个 target 上没有别的 buffer 或 workspace，
-   就断开它。打开会话之前就连着的 target、或期间从 pane 里打开了文件的
-   target，保持连接。
-
-此外，在 Remote 面板上显式断开一个 target（`C`）会取消它的传输；退出 Emacs
-时还在跑的传输随之结束。
+- 每次传输用自己的 SSH 连接，传完即断；
+- 弹出窗口自己收拾它开的 buffer；
+- 浏览 target 文件夹用的连接属于那个 target，和平时一样：菜单 `x` 或 Remote
+  面板 `C` 断开，同时取消它还在跑的传输、关闭它的 buffer；
+- 退出 Emacs 时还在跑的传输随之结束（会先问一次）。
 
 ### 依赖
 
-都是本机的命令行工具，不是 Emacs 包：
+都是本机的用户态命令行工具，不是 Emacs 包，也不需要改动系统：
 
 | 工具 | 用途 | 说明 |
 |---|---|---|
@@ -142,8 +168,8 @@ buffer 里（`*deleting` 开头的是要删除的），按 `C-c C-c` 才执行�
 
 - 两个不同 target 之间不能直接传（rsync 不支持两端都是远程），经本机文件夹
   中转；
-- 传输用自己的 SSH 连接，不走编辑会话的 ControlMaster，所以大文件不会
-  卡住编辑，但也意味着每次传输各登录一次；
+- 传输用自己的 SSH 连接，不走编辑会话的 ControlMaster，所以大文件不会卡住
+  编辑，但也意味着每次传输各登录一次；
 - 需要输入密钥口令而又没有 ssh-agent 的密钥，传输工具没有终端可问，会登录
   失败。先 `ssh-add`；
 - 不提供 sshfs 挂载。在 macOS 上它依赖 macFUSE，需要降低启动安全策略或启用
@@ -155,7 +181,9 @@ buffer 里（`*deleting` 开头的是要删除的），按 `C-c C-c` 才执行�
 |---|---|
 | `lisp/remote/remote-machines.el` | 临时机器的存储、管理列表，以及作为 target 来源的注册 |
 | `lisp/remote/remote-transfer.el` | rsync 任务、进度解析、传输队列 |
-| `lisp/remote/remote-files.el` | 双 pane 会话和命令菜单 |
+| `lisp/remote/remote-files.el` | Dired 里的传输菜单和弹出式选择 |
+| `lisp/init-activity.el` | 把传输任务认领为 task（标签、取消、查看输出） |
+| `lisp/init-windows.el` | Dirvish 的 `r` 键和状态栏段 `remote-files` |
 
 框架为此增加的两个契约见 [remote-framework.md](remote-framework.md) 的
 “target 来源”和“客户端批量工具”两节。测试：`make remote-transfer-test`；真机

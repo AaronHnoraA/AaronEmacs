@@ -1,17 +1,21 @@
-;;; remote-files.el --- Two-pane file manager over bulk transfers -*- lexical-binding: t; -*-
+;;; remote-files.el --- Bulk transfers from inside Dired -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
-;; `remote-files' puts a folder of this machine beside a folder of a target,
-;; both ordinary Dired buffers, with the transfer queue underneath and, on
-;; request, a terminal on the target above.  Its commands move what is marked
-;; in one pane into the other pane's folder through `remote-transfer', which
-;; never blocks the editor.
+;; A Dired extension, not a screen of its own.  In any Dired or Dirvish
+;; buffer `remote-files' pops up a menu for the folder shown: send what is
+;; marked to the other machine, fetch files from it, or synchronize the two
+;; folders.  The other side is chosen in a second, pop-up Dired: mark files or
+;; walk to a folder there and confirm.  It closes again once the choice is
+;; made, and the transfer runs in `remote-transfer' without blocking.
 ;;
-;; A session belongs to its frame.  Quitting it ends what it started and
-;; nothing else: its running transfers, its terminal, the workspace it opened
-;; and, when the session made the connection and nothing else uses the
-;; target, the connection itself.
+;; Which side is "the other" follows placement.  From a folder this machine
+;; cannot read directly, the pop-up shows this machine; from a folder of this
+;; machine, a target is asked for and the pop-up shows it.
+;;
+;; There is no session to quit.  A transfer uses a connection of its own that
+;; ends with it; the pop-up kills the buffers it made.  The menu can also
+;; disconnect the folder's target.
 
 ;;; Code:
 
@@ -27,49 +31,27 @@
 (require 'remote-transfer)
 
 (declare-function remote-read-target "remote-board" (&optional prompt omit-local))
+(declare-function remote-open-target "remote-board" (&optional target))
 
 (defgroup remote-files nil
-  "Two-pane file manager for targets."
+  "Bulk transfers from inside Dired."
   :group 'remote)
 
 (defcustom remote-files-local-directory "~/"
-  "Folder of this machine first shown beside a target's folder."
+  "Folder of this machine first offered as the other side of a target."
   :type 'directory
   :group 'remote-files)
 
-(defcustom remote-files-queue-height 8
-  "Lines of the transfer queue window in a file manager session."
-  :type 'integer
-  :group 'remote-files)
-
-(defcustom remote-files-terminal-height 0.4
-  "Height of the terminal window in a file manager session."
-  :type 'number
-  :group 'remote-files)
-
 (defvar remote-files-terminal-function #'remote-files-default-terminal
-  "Function that opens a session's terminal.
+  "Function that opens a terminal on a folder.
 It receives a buffer name and a logical directory, and returns the terminal
 buffer.  Called again while that buffer lives, it moves the shell to the
 directory instead of starting another.")
 
-(cl-defstruct (remote-files-session
-               (:constructor remote-files-session--create))
-  target-id frame configuration local-window remote-window
-  existing-buffers shown-buffers workspace connected-before terminal)
+(defvar remote-files-other-history (make-hash-table :test #'equal)
+  "Last folder used as the other side, keyed by the target of this side.")
 
-(defvar remote-files-local-history (make-hash-table :test #'equal)
-  "Last folder of this machine used beside each target.")
-
-(defun remote-files--session (&optional frame)
-  "Return FRAME's live file manager session, if any."
-  (let ((session (frame-parameter frame 'remote-files-session)))
-    (and (remote-files-session-p session) session)))
-
-(defun remote-files--require-session ()
-  "Return the selected frame's session or signal a `user-error'."
-  (or (remote-files--session)
-      (user-error "No file manager session here; start one with M-x remote-files")))
+;;; Folders and names
 
 (defun remote-files--client-directory (directory)
   "Return the logical name of DIRECTORY, a folder of this machine.
@@ -80,67 +62,24 @@ so it is resolved from a directory that is the client's own."
     (file-name-as-directory
      (remote-canonicalize-file-name (expand-file-name directory)))))
 
-(defun remote-files--pane-window (session side)
-  "Return SESSION's live window for SIDE, `local' or `remote'."
-  (let ((window (if (eq side 'local)
-                    (remote-files-session-local-window session)
-                  (remote-files-session-remote-window session))))
-    (unless (window-live-p window)
-      (user-error "The %s pane is gone; quit the session and start again"
-                  side))
-    window))
-
-(defun remote-files--side (session &optional window)
-  "Return which of SESSION's panes WINDOW is, or signal a `user-error'."
-  (let ((window (or window (selected-window))))
-    (cond
-     ((eq window (remote-files-session-local-window session)) 'local)
-     ((eq window (remote-files-session-remote-window session)) 'remote)
-     (t (user-error "Select one of the two folder panes first")))))
-
-(defun remote-files--other (side)
-  "Return the pane opposite SIDE."
-  (if (eq side 'local) 'remote 'local))
-
-(defun remote-files--pane-directory (session side)
-  "Return the folder SESSION's SIDE pane shows."
-  (with-current-buffer (window-buffer (remote-files--pane-window session side))
-    (unless (derived-mode-p 'dired-mode)
-      (user-error "The %s pane does not show a folder" side))
-    ;; Resolved in the pane's own buffer, which is what gives a bare path
-    ;; its machine.
-    (file-name-as-directory
-     (remote-canonicalize-file-name (expand-file-name default-directory)))))
-
-(defun remote-files--show (session side directory)
-  "Show DIRECTORY in SESSION's SIDE pane."
-  (let ((window (remote-files--pane-window session side))
-        (buffer
-         ;; A folder this machine reads directly is visited under its native
-         ;; name, from a native directory, like any other local Dired.
-         (let* ((client (remote-client-file-name directory))
-                (default-directory
-                 (if client temporary-file-directory default-directory)))
-           (dired-noselect (or client directory)))))
-    ;; Replacing a pane's folder leaves the old Dired behind; the session
-    ;; remembers every one it showed so that quitting can take them along.
-    (cl-pushnew buffer (remote-files-session-shown-buffers session))
-    (set-window-buffer window buffer)
-    (when (eq side 'local)
-      (puthash (remote-files-session-target-id session)
-               (file-name-as-directory directory)
-               remote-files-local-history))))
+(defun remote-files--here ()
+  "Return the logical name of the folder the current Dired buffer shows."
+  (unless (derived-mode-p 'dired-mode)
+    (user-error "Use this in a Dired folder"))
+  ;; Resolved in the folder's own buffer, which is what gives a bare path
+  ;; its machine.
+  (file-name-as-directory
+   (remote-canonicalize-file-name (expand-file-name default-directory))))
 
 (defun remote-files--label (directory)
-  "Return a short name for logical or native DIRECTORY."
-  (let ((canonical (remote-canonicalize-file-name directory)))
-    (if (remote-client-file-name canonical)
-        (abbreviate-file-name (remote-client-file-name canonical))
-      (format "%s:%s" (remote-file-name-target canonical)
-              (remote-file-local-name canonical)))))
+  "Return a short name for logical DIRECTORY."
+  (if-let* ((client (remote-client-file-name directory)))
+      (abbreviate-file-name client)
+    (format "%s:%s" (remote-file-name-target directory)
+            (remote-file-local-name directory))))
 
 (defun remote-files--revert-directory (directory)
-  "Refresh the Dired buffers that show DIRECTORY."
+  "Refresh the Dired buffers that show logical DIRECTORY."
   (let ((directory (file-name-as-directory directory)))
     (dolist (buffer (buffer-list))
       (with-current-buffer buffer
@@ -160,39 +99,162 @@ so it is resolved from a directory that is the client's own."
      (remote-files--revert-directory (remote-transfer-job-destination job))
      (message "Transfer finished: %s" (remote-transfer-job-name job)))
     ('failed
-     (message "Transfer failed (%s): %s; RET on its row shows why"
+     (message "Transfer failed (%s): %s; M-x remote-transfer-list shows why"
               (remote-transfer-job-exit-status job)
               (remote-transfer-job-name job)))
     (_ (message "Transfer cancelled: %s" (remote-transfer-job-name job)))))
 
-;;; Transfers between the panes
+(defun remote-files--summary (files)
+  "Return a short description of FILES."
+  (if (cdr files)
+      (format "%d items" (length files))
+    (file-name-nondirectory (directory-file-name (car files)))))
 
-(defun remote-files--arrow (side)
-  "Return the direction word for moving out of the SIDE pane."
-  (if (eq side 'local) "Upload" "Download"))
+;;; The other side
 
-(defun remote-files-copy ()
-  "Copy the marked files, or the one at point, into the other pane's folder."
+(defun remote-files--other-start (here)
+  "Return the folder first shown as the other side of logical HERE.
+From a folder this machine cannot read, that is a folder of this machine.
+From a folder of this machine, a target is asked for."
+  (let ((remembered
+         (gethash (remote-file-name-target here) remote-files-other-history)))
+    (if (not (remote-client-file-name here))
+        (remote-files--client-directory
+         (or remembered remote-files-local-directory))
+      (let* ((target (remote-read-target "Other side, target: " t))
+             (id (remote-target-id target)))
+        (if (and remembered (equal (remote-file-name-target remembered) id))
+            remembered
+          (file-name-as-directory (remote-target-file-name target)))))))
+
+(defun remote-files--pick-state (&optional window)
+  "Return the pending choice WINDOW was popped up for, if any."
+  (window-parameter window 'remote-files-pick))
+
+(defun remote-files--pick-close (window)
+  "Close pop-up WINDOW and kill the Dired buffers its choice made."
+  (let* ((state (remote-files--pick-state window))
+         (origin (plist-get state :origin))
+         (made
+          (seq-remove
+           (lambda (buffer) (memq buffer (plist-get state :existing)))
+           (seq-filter
+            (lambda (buffer)
+              (and (buffer-live-p buffer)
+                   (with-current-buffer buffer (derived-mode-p 'dired-mode))))
+            (cons (window-buffer window)
+                  (mapcar #'car (window-prev-buffers window)))))))
+    (set-window-parameter window 'remote-files-pick nil)
+    (when (window-live-p window)
+      (if (plist-get state :created)
+          (ignore-errors (delete-window window))
+        (when (buffer-live-p (plist-get state :previous))
+          (set-window-buffer window (plist-get state :previous)))))
+    (dolist (buffer made)
+      (unless (get-buffer-window buffer t)
+        (kill-buffer buffer)))
+    (when (window-live-p origin)
+      (select-window origin))))
+
+(defun remote-files--pick (directory want description callback)
+  "Pop up DIRECTORY for a choice and call CALLBACK with it once confirmed.
+WANT is `files', for the marked files or the one at point, or `directory',
+for the folder shown when the choice is confirmed.  DESCRIPTION says what
+confirming does."
+  (let* ((origin (selected-window))
+         (windows (window-list nil 'no-mini))
+         (existing (buffer-list))
+         (buffer
+          ;; A folder this machine reads directly is visited under its native
+          ;; name, from a native directory, like any other local Dired.
+          (let* ((client (remote-client-file-name directory))
+                 (default-directory
+                  (if client temporary-file-directory default-directory)))
+            (dired-noselect (or client directory))))
+         (window
+          (display-buffer
+           buffer
+           '((display-buffer-pop-up-window display-buffer-use-some-window)
+             (inhibit-same-window . t)))))
+    (set-window-parameter
+     window 'remote-files-pick
+     (list :want want :description description :callback callback
+           :origin origin :existing existing
+           :created (not (memq window windows))
+           :previous (car (car (window-prev-buffers window)))))
+    (select-window window)
+    (message "%s"
+             (substitute-command-keys
+              (format "%s: %s, then \\[remote-files-pick-confirm] (\\[remote-files-pick-cancel] cancels)"
+                      description
+                      (if (eq want 'files)
+                          "mark files"
+                        "go to the folder"))))))
+
+(defun remote-files-pick-confirm ()
+  "Confirm the choice this pop-up folder was opened for."
   (interactive)
-  (let* ((session (remote-files--require-session))
-         (side (remote-files--side session))
-         (files (mapcar #'remote-canonicalize-file-name
-                        (dired-get-marked-files)))
-         (destination
-          (remote-files--pane-directory session (remote-files--other side)))
-         (summary (if (cdr files)
-                      (format "%d items" (length files))
-                    (file-name-nondirectory
-                     (directory-file-name (car files))))))
-    (when (y-or-n-p (format "%s %s to %s? "
-                            (remote-files--arrow side) summary
-                            (remote-files--label destination)))
-      (remote-transfer-start
-       files destination
-       :name (format "%s %s -> %s" (remote-files--arrow side)
-                     summary (remote-files--label destination))
-       :callback #'remote-files--finished)
-      (message "%s of %s queued" (remote-files--arrow side) summary))))
+  (let* ((window (selected-window))
+         (state (or (remote-files--pick-state window)
+                    (user-error "Nothing is being chosen in this window")))
+         (choice
+          (if (eq (plist-get state :want) 'files)
+              (mapcar #'remote-canonicalize-file-name
+                      (or (dired-get-marked-files)
+                          (user-error "Mark the files first")))
+            (remote-files--here))))
+    (remote-files--pick-close window)
+    (funcall (plist-get state :callback) choice)))
+
+(defun remote-files-pick-cancel ()
+  "Close this pop-up folder without choosing."
+  (interactive)
+  (unless (remote-files--pick-state)
+    (user-error "Nothing is being chosen in this window"))
+  (remote-files--pick-close (selected-window))
+  (message "Cancelled"))
+
+(defun remote-files--remember-other (here other)
+  "Remember logical OTHER as the other side of logical HERE's target."
+  (puthash (remote-file-name-target here) (file-name-as-directory other)
+           remote-files-other-history))
+
+;;; Transfers
+
+(defun remote-files--queue (files destination)
+  "Queue copying logical FILES into logical DESTINATION."
+  (let ((name (format "%s -> %s" (remote-files--summary files)
+                      (remote-files--label destination))))
+    (remote-transfer-start files destination
+                           :name name :callback #'remote-files--finished)
+    (message "Queued: %s" name)))
+
+(defun remote-files-send ()
+  "Copy the marked files, or the one at point, to a folder of the other side.
+The folder is chosen in a pop-up Dired."
+  (interactive)
+  (let ((here (remote-files--here))
+        (files (mapcar #'remote-canonicalize-file-name
+                       (dired-get-marked-files))))
+    (remote-files--pick
+     (remote-files--other-start here) 'directory
+     (format "Destination of %s" (remote-files--summary files))
+     (lambda (destination)
+       (remote-files--remember-other here destination)
+       (remote-files--queue files destination)))))
+
+(defun remote-files-fetch ()
+  "Copy files of the other side into this folder.
+The files are marked in a pop-up Dired."
+  (interactive)
+  (let ((here (remote-files--here)))
+    (remote-files--pick
+     (remote-files--other-start here) 'files
+     (format "Files for %s" (remote-files--label here))
+     (lambda (files)
+       (remote-files--remember-other
+        here (file-name-directory (directory-file-name (car files))))
+       (remote-files--queue files here)))))
 
 (defvar-local remote-files--apply nil
   "Function that carries out the changes a comparison buffer lists.")
@@ -213,16 +275,11 @@ so it is resolved from a directory that is the client's own."
   "Minor mode of a comparison whose changes can be applied with \\[remote-files-apply]."
   :lighter " Compare")
 
-(defun remote-files--synchronize (delete apply)
-  "Compare this pane's folder with the other pane's, then offer the changes.
-DELETE also lists what only the other folder has.  With APPLY nil the
-comparison is only shown."
-  (let* ((session (remote-files--require-session))
-         (side (remote-files--side session))
-         (source (remote-files--pane-directory session side))
-         (destination
-          (remote-files--pane-directory session (remote-files--other side)))
-         (name (format "%s %s -> %s"
+(defun remote-files--synchronize (source destination delete apply)
+  "List what bringing DESTINATION up to date with SOURCE would change.
+Both are logical folders.  DELETE also lists what only DESTINATION has.
+With APPLY the listing offers to carry the changes out."
+  (let* ((name (format "%s %s -> %s"
                        (if delete "Mirror" "Sync")
                        (remote-files--label source)
                        (remote-files--label destination)))
@@ -231,7 +288,7 @@ comparison is only shown."
             (remote-transfer-start
              (list source) destination :contents t :delete delete
              :name name :callback #'remote-files--finished)
-            (message "%s queued" name))))
+            (message "Queued: %s" name))))
     (remote-transfer-start
      (list source) destination :contents t :delete delete :dry-run t
      :name (concat "Compare: " name)
@@ -253,76 +310,55 @@ comparison is only shown."
                (when apply
                  (setq remote-files--apply run)
                  (remote-files-compare-mode 1)))
-             (display-buffer buffer))))))
+             (pop-to-buffer buffer))))))
     (message "Comparing %s with %s..."
              (remote-files--label source) (remote-files--label destination))))
 
-(defun remote-files-sync ()
-  "Bring the other pane's folder up to date with this pane's folder.
-Nothing is deleted.  The changes are listed first and applied on request."
-  (interactive)
-  (remote-files--synchronize nil t))
+(defun remote-files--with-other-folder (description function)
+  "Choose a folder of the other side, then call FUNCTION with here and it.
+DESCRIPTION says what the folder is chosen for."
+  (let ((here (remote-files--here)))
+    (remote-files--pick
+     (remote-files--other-start here) 'directory description
+     (lambda (other)
+       (remote-files--remember-other here other)
+       (funcall function here other)))))
 
-(defun remote-files-mirror ()
-  "Make the other pane's folder identical to this pane's folder.
-Files only the other folder has are deleted.  The changes are listed first
-and applied on request."
+(defun remote-files--delete-p ()
+  "Return non-nil when the menu's delete switch is on."
+  (and (member "--delete" (transient-args 'remote-files-dispatch)) t))
+
+(defun remote-files-push ()
+  "Bring a folder of the other side up to date with this folder.
+The changes are listed first and applied on request.  With the menu's delete
+switch, files only the other folder has are deleted."
   (interactive)
-  (remote-files--synchronize t t))
+  (let ((delete (remote-files--delete-p)))
+    (remote-files--with-other-folder
+     "Folder to update from here"
+     (lambda (here other)
+       (remote-files--synchronize here other delete t)))))
+
+(defun remote-files-pull ()
+  "Bring this folder up to date with a folder of the other side.
+The changes are listed first and applied on request.  With the menu's delete
+switch, files only this folder has are deleted."
+  (interactive)
+  (let ((delete (remote-files--delete-p)))
+    (remote-files--with-other-folder
+     "Folder to update this one from"
+     (lambda (here other)
+       (remote-files--synchronize other here delete t)))))
 
 (defun remote-files-compare ()
-  "List what differs between this pane's folder and the other pane's."
+  "List what differs between this folder and a folder of the other side."
   (interactive)
-  (remote-files--synchronize t nil))
+  (remote-files--with-other-folder
+   "Folder to compare with"
+   (lambda (here other)
+     (remote-files--synchronize here other t nil))))
 
-;;; Panes
-
-(defun remote-files-other-pane ()
-  "Select the other folder pane."
-  (interactive)
-  (let* ((session (remote-files--require-session))
-         (side (condition-case nil
-                   (remote-files--side session)
-                 (user-error 'remote))))
-    (select-window (remote-files--pane-window
-                    session (remote-files--other side)))))
-
-(defun remote-files-set-local (directory)
-  "Show DIRECTORY of this machine in the local pane."
-  (interactive
-   (let ((session (remote-files--require-session)))
-     (list (let ((default-directory temporary-file-directory))
-             (read-directory-name
-              "Local folder: "
-              (remote-client-file-name
-               (remote-files--pane-directory session 'local)))))))
-  (remote-files--show (remote-files--require-session) 'local
-                      (remote-files--client-directory directory)))
-
-(defun remote-files-set-remote (directory)
-  "Show DIRECTORY of the session's target in the remote pane."
-  (interactive
-   (let ((session (remote-files--require-session)))
-     (list (read-directory-name
-            "Remote folder: "
-            (remote-files--pane-directory session 'remote)))))
-  (let ((session (remote-files--require-session)))
-    (unless (equal (remote-file-name-target directory)
-                   (remote-files-session-target-id session))
-      (user-error "This session manages %s; start another for a different target"
-                  (remote-files-session-target-id session)))
-    (remote-files--show session 'remote directory)))
-
-(defun remote-files-show-queue ()
-  "Show the transfer queue under the panes."
-  (interactive)
-  (display-buffer
-   (remote-transfer-list-buffer)
-   `((display-buffer-in-side-window)
-     (side . bottom)
-     (window-height . ,remote-files-queue-height))))
-
-;;; Terminal
+;;; Terminal and connection
 
 (defun remote-files-default-terminal (name directory)
   "Open or reuse the routed terminal buffer NAME in logical DIRECTORY."
@@ -340,226 +376,117 @@ and applied on request."
     buffer))
 
 (defun remote-files-terminal ()
-  "Show a terminal on the target, in the remote pane's folder.
-The session keeps one terminal; asking again moves its shell to the folder
-the remote pane shows now."
+  "Open a terminal in this folder, on the machine the folder is on."
   (interactive)
-  (let* ((session (remote-files--require-session))
-         (directory (remote-files--pane-directory session 'remote))
-         (buffer
-          (funcall remote-files-terminal-function
-                   (format "*files:%s*" (remote-files-session-target-id session))
-                   directory)))
-    (setf (remote-files-session-terminal session) buffer)
-    (select-window
-     (display-buffer
-      buffer
-      `((display-buffer-reuse-window display-buffer-in-side-window)
-        (side . top)
-        (window-height . ,remote-files-terminal-height))))))
+  (let ((here (remote-files--here)))
+    (pop-to-buffer
+     (funcall remote-files-terminal-function
+              (format "*files:%s*" (remote-file-name-target here))
+              here))))
 
-(defun remote-files-follow-terminal ()
-  "Show the terminal's current folder in the remote pane."
+(defun remote-files-disconnect ()
+  "Disconnect this folder's target, ending its transfers and buffers."
   (interactive)
-  (let* ((session (remote-files--require-session))
-         (terminal (remote-files-session-terminal session))
-         (directory
-          (and (buffer-live-p terminal)
-               (buffer-local-value 'default-directory terminal))))
-    (unless directory
-      (user-error "This session has no terminal yet"))
-    (unless (equal (ignore-errors (remote-file-name-target directory))
-                   (remote-files-session-target-id session))
-      (user-error "The terminal's folder is not on %s"
-                  (remote-files-session-target-id session)))
-    (remote-files--show session 'remote
-                        (remote-canonicalize-file-name directory))
-    (select-window (remote-files--pane-window session 'remote))))
+  (let ((here (remote-files--here)))
+    (when (remote-client-file-name here)
+      (user-error "This folder is on this machine; there is nothing to disconnect"))
+    (let* ((target-id (remote-file-name-target here))
+           (running (remote-transfer-jobs-for-target target-id t)))
+      (when (yes-or-no-p
+             (format "Disconnect %s%s? "
+                     target-id
+                     (if running
+                         (format " and cancel %d running transfer%s"
+                                 (length running) (if (cdr running) "s" ""))
+                       "")))
+        (remote-workspace-disconnect-target target-id 'remote-files)
+        (message "Disconnected %s" target-id)))))
 
-;;; Session lifetime
+;;; Mode line
 
-(defun remote-files--target-in-use-p (target-id ignored-buffers)
-  "Return non-nil when something besides IGNORED-BUFFERS uses TARGET-ID."
-  (or (seq-some (lambda (workspace)
-                  (equal (plist-get workspace :target) target-id))
-                (remote-workspace-list))
-      (seq-some (lambda (buffer)
-                  (and (not (memq buffer ignored-buffers))
-                       (equal (ignore-errors (remote-buffer-target buffer))
-                              target-id)))
-                (buffer-list))))
+(defun remote-files-mode-line-text ()
+  "Return what a Dired mode line says about transfers in its window.
+A pop-up folder names the pending choice and its keys; any other folder
+reports the transfers running on its target.  This runs on every redisplay
+of a Dirvish window, so it only reads state that is already in memory."
+  (if-let* ((state (remote-files--pick-state)))
+      (propertize
+       (substitute-command-keys
+        (format " %s: \\[remote-files-pick-confirm] confirm, \\[remote-files-pick-cancel] cancel "
+                (plist-get state :description)))
+       'face 'warning)
+    (when-let* ((running (remote-transfer--running))
+                (target-id (ignore-errors
+                             (remote-file-name-target default-directory)))
+                (mine (seq-filter
+                       (lambda (job)
+                         (member target-id
+                                 (remote-transfer-job-target-ids job)))
+                       running)))
+      (let ((percents (delq nil (mapcar #'remote-transfer-job-percent mine))))
+        (format " Transfers:%d%s " (length mine)
+                (if percents
+                    (format " %d%%" (/ (apply #'+ percents) (length percents)))
+                  ""))))))
 
-(defun remote-files-quit (&optional force)
-  "End this frame's file manager session and release what it started.
-Running transfers are cancelled after a question, or at once with FORCE."
-  (interactive)
-  (let* ((session (remote-files--require-session))
-         (target-id (remote-files-session-target-id session))
-         (running (remote-transfer-jobs-for-target target-id t))
-         (panes
-          (delq nil
-                (mapcar (lambda (window)
-                          (and (window-live-p window) (window-buffer window)))
-                        (list (remote-files-session-local-window session)
-                              (remote-files-session-remote-window session)))))
-         (owned
-          (seq-remove
-           (lambda (buffer)
-             (memq buffer (remote-files-session-existing-buffers session)))
-           (delete-dups
-            (append panes
-                    (copy-sequence
-                     (remote-files-session-shown-buffers session)))))))
-    (when (and running
-               (not force)
-               (not (y-or-n-p
-                     (format "Cancel %d running transfer%s and quit? "
-                             (length running)
-                             (if (cdr running) "s" "")))))
-      (user-error "Session kept; its transfers are still running"))
-    (mapc #'remote-transfer-cancel running)
-    (let ((terminal (remote-files-session-terminal session)))
-      (when (and (buffer-live-p terminal)
-                 (not (memq terminal
-                            (remote-files-session-existing-buffers session))))
-        (dolist (window (get-buffer-window-list terminal nil (selected-frame)))
-          (when (window-parameter window 'window-side)
-            (delete-window window)))
-        (when-let* ((process (get-buffer-process terminal)))
-          (set-process-query-on-exit-flag process nil))
-        (let ((kill-buffer-query-functions nil))
-          (kill-buffer terminal))))
-    (set-frame-parameter nil 'remote-files-session nil)
-    (when-let* ((queue (get-buffer "*Remote Transfers*")))
-      (dolist (window (get-buffer-window-list queue nil (selected-frame)))
-        (when (window-parameter window 'window-side)
-          (delete-window window))))
-    (when (window-configuration-p
-           (remote-files-session-configuration session))
-      (set-window-configuration (remote-files-session-configuration session)))
-    (dolist (buffer owned)
-      (when (and (buffer-live-p buffer)
-                 (not (get-buffer-window buffer t)))
-        (kill-buffer buffer)))
-    (when-let* ((workspace (remote-files-session-workspace session))
-                ((remote-get-workspace workspace)))
-      (remote-workspace-close workspace 'remote-files-quit))
-    (if (or (remote-files-session-connected-before session)
-            (remote-files--target-in-use-p target-id nil))
-        (message "File manager closed; %s stays connected" target-id)
-      (remote-workspace-disconnect-target target-id 'remote-files-quit)
-      (message "File manager closed and %s disconnected" target-id))))
+;;; Entry
 
-(defun remote-files--default-remote ()
-  "Return the current folder when this machine cannot read it directly."
-  (let ((directory (expand-file-name default-directory)))
-    (unless (ignore-errors (remote-client-file-name directory))
-      (file-name-as-directory (remote-canonicalize-file-name directory)))))
-
-;;;###autoload
-(defun remote-files (&optional remote-directory local-directory)
-  "Manage REMOTE-DIRECTORY beside LOCAL-DIRECTORY of this machine.
-In a folder of a target, that folder is managed.  Anywhere else a target is
-asked for, temporary machines included.  With a session already open on this
-frame, show its commands instead."
-  (interactive
-   (unless (remote-files--session)
-     (let ((remote (remote-files--default-remote)))
-       (if remote
-           (list remote)
-         (list (remote-target-file-name
-                (remote-read-target "Manage files on: " t))
-               (remote-canonicalize-file-name
-                (expand-file-name default-directory)))))))
-  (if (remote-files--session)
-      (remote-files-dispatch)
-    (let* ((remote (file-name-as-directory
-                    (remote-canonicalize-file-name remote-directory)))
-           (target-id (remote-file-name-target remote))
-           (local (remote-files--client-directory
-                   (or local-directory
-                       (gethash target-id remote-files-local-history)
-                       remote-files-local-directory)))
-           (session
-            (remote-files-session--create
-             :target-id target-id :frame (selected-frame)
-             :configuration (current-window-configuration)
-             :existing-buffers (buffer-list)
-             ;; A folder this machine reads directly has no connection that
-             ;; the session could own.
-             :connected-before
-             (and (or (remote-client-file-name remote)
-                      (file-remote-p remote nil t))
-                  t)))
-           (started nil))
-      (unless (remote-client-file-name local)
-        (user-error "The local pane needs a folder of this machine: %s" local))
-      (unwind-protect
-          (let ((existing (remote-get-workspace remote)))
-            (unless existing
-              (setf (remote-files-session-workspace session)
-                    (remote-workspace-open
-                     remote :connect t :adapter "emacs-file"
-                     :capability 'file-read)))
-            (unless (file-directory-p remote)
-              (user-error "Folder is unavailable: %s"
-                          (remote-files--label remote)))
-            (delete-other-windows)
-            (setf (remote-files-session-local-window session)
-                  (selected-window)
-                  (remote-files-session-remote-window session)
-                  (split-window-right))
-            (set-frame-parameter nil 'remote-files-session session)
-            (remote-files--show session 'local local)
-            (remote-files--show session 'remote remote)
-            (remote-files-show-queue)
-            (select-window (remote-files-session-remote-window session))
-            (setq started t)
-            (message
-             (substitute-command-keys
-              "File manager on %s: \\[remote-files] shows its commands, q in that menu quits")
-             target-id))
-        (unless started
-          (set-frame-parameter nil 'remote-files-session nil)
-          (set-window-configuration
-           (remote-files-session-configuration session))
-          (when-let* ((workspace (remote-files-session-workspace session))
-                      ((remote-get-workspace workspace)))
-            (remote-workspace-close workspace 'remote-files-failed)))))))
-
-(defun remote-files--delete-frame-h (frame)
-  "End FRAME's file manager session when the frame goes away."
-  (when (remote-files--session frame)
-    (with-selected-frame frame
-      (condition-case nil
-          (remote-files-quit t)
-        (error nil)))))
-
-(add-hook 'delete-frame-functions #'remote-files--delete-frame-h)
+(defun remote-files--menu-title ()
+  "Return the menu heading for the current folder."
+  (condition-case nil
+      (let ((here (remote-files--here)))
+        (format "%s  <->  %s"
+                (remote-files--label here)
+                (if (remote-client-file-name here)
+                    "a target (asked for)"
+                  "this machine")))
+    (error "Files")))
 
 ;;;###autoload (autoload 'remote-files-dispatch "remote-files" nil t)
 (transient-define-prefix remote-files-dispatch ()
-  "Commands of the file manager session on this frame."
+  "Transfer commands for the folder the current Dired buffer shows."
+  [:description remote-files--menu-title
+   ["Files"
+    ("c" "Send marked to the other side" remote-files-send)
+    ("g" "Fetch from the other side" remote-files-fetch)]
+   ["Folders"
+    ("-d" "Delete extras (mirror)" "--delete")
+    ("s" "Sync this folder to the other" remote-files-push)
+    ("r" "Sync the other folder to this" remote-files-pull)
+    ("=" "Compare" remote-files-compare)]
+   ["More"
+    ("t" "Transfer queue" remote-transfer-list)
+    ("e" "Terminal here" remote-files-terminal)
+    ("x" "Disconnect target" remote-files-disconnect)]])
+
+;;;###autoload (autoload 'remote-files-pick-dispatch "remote-files" nil t)
+(transient-define-prefix remote-files-pick-dispatch ()
+  "Confirm or cancel the choice a pop-up folder was opened for."
   [:description
    (lambda ()
-     (if-let* ((session (remote-files--session)))
-         (format "Files on %s" (remote-files-session-target-id session))
-       "Files"))
-   ["Transfer to the other pane"
-    ("c" "Copy marked" remote-files-copy)
-    ("s" "Sync folder" remote-files-sync)
-    ("S" "Mirror folder (deletes extras)" remote-files-mirror)
-    ("d" "Compare folders" remote-files-compare)]
-   ["Panes"
-    ("o" "Other pane" remote-files-other-pane)
-    ("l" "Local folder" remote-files-set-local)
-    ("r" "Remote folder" remote-files-set-remote)
-    ("t" "Transfer queue" remote-files-show-queue)]
-   ["Terminal"
-    ("e" "Terminal in remote folder" remote-files-terminal)
-    ("." "Remote pane follows terminal" remote-files-follow-terminal)]
-   ["Session"
-    ("q" "Quit and release" remote-files-quit)]])
+     (or (plist-get (remote-files--pick-state) :description) "Choose"))
+   ("c" "Confirm" remote-files-pick-confirm)
+   ("k" "Cancel" remote-files-pick-cancel)])
+
+;;;###autoload
+(defun remote-files (&optional directory)
+  "Show the transfer menu for the current Dired folder.
+In a pop-up folder opened for a choice, show its confirm menu instead.
+Outside Dired, or with DIRECTORY, open that folder first; without DIRECTORY
+a target is asked for, temporary machines included."
+  (interactive)
+  (cond
+   (directory
+    (dired directory)
+    (remote-files-dispatch))
+   ((remote-files--pick-state)
+    (remote-files-pick-dispatch))
+   ((derived-mode-p 'dired-mode)
+    (remote-files-dispatch))
+   (t
+    (remote-open-target (remote-read-target "Manage files on: " t))
+    (when (derived-mode-p 'dired-mode)
+      (remote-files-dispatch)))))
 
 (provide 'remote-files)
 ;;; remote-files.el ends here

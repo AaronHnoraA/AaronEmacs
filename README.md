@@ -68,7 +68,7 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
 - Org inside Emacs: [docs/org-guide.md](docs/org-guide.md)
 - Programming, LSP, remote work, terminals, AI: [docs/dev-guide.md](docs/dev-guide.md)
 - Remote target, routing, and environment architecture: [docs/remote-framework.md](docs/remote-framework.md)
-- Temporary machines and the two-pane remote file manager (rsync): [docs/remote-files.md](docs/remote-files.md)
+- Temporary machines and file transfer from inside Dired/Dirvish (rsync): [docs/remote-files.md](docs/remote-files.md)
 - Configuration cookbook: [docs/settings-cookbook.md](docs/settings-cookbook.md)
 - Maintenance, locks, state recovery: [docs/maintenance.md](docs/maintenance.md)
 - Aaron UI and Noema visual system: [docs/elegant-ui.md](docs/elegant-ui.md)

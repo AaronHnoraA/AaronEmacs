@@ -239,9 +239,11 @@ This config already has maintenance and workflow entry points. Reuse them:
 - Projects: `my/project-dispatch`, `my/project-switch`,
   `my/project-open-workbench`, `my/project-search-paths`, Projectile,
   Perspective, Transient, and `show-imenu`.
-- Remote files: `remote-files` (two panes over `remote-transfer`, queue in
-  `remote-transfer-list`) and `remote-machines` for hand-entered targets.  Do
-  not add another uploader, sync command or host list.  See
+- Remote files: `remote-files` is a Dired/Dirvish menu over `remote-transfer`,
+  not a screen: the other side is picked in a pop-up Dired, and jobs are
+  claimed as tasks by `my/activity-board` (queue detail in
+  `remote-transfer-list`).  `remote-machines` holds hand-entered targets.  Do
+  not add another uploader, sync command, host list or progress indicator.  See
   `docs/remote-files.md`.
 - Compile/maintenance: `my/compile-board`, `my/compile-dispatch`, `make`
   targets documented in `docs/maintenance.md`.

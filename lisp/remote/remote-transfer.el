@@ -431,34 +431,12 @@ NAME labels the job in the queue.  CALLBACK receives the job when it ends."
 
 ;;; Progress display
 
-(defun remote-transfer--mode-line-text ()
-  "Return a short progress indicator while transfers run."
-  (when-let* ((running (remote-transfer--running)))
-    (let ((percents (delq nil (mapcar #'remote-transfer-job-percent running))))
-      (propertize
-       (format " Xfer:%d%s" (length running)
-               (if percents
-                   (format " %d%%" (/ (apply #'+ percents) (length percents)))
-                 ""))
-       'help-echo "Remote transfers running; M-x remote-transfer-list"))))
-
-(defconst remote-transfer--mode-line-entry
-  '(:eval (remote-transfer--mode-line-text))
-  "Mode-line entry reporting running transfers.")
-
-(unless (member remote-transfer--mode-line-entry
-                (default-value 'mode-line-misc-info))
-  (setq-default mode-line-misc-info
-                (append (default-value 'mode-line-misc-info)
-                        (list remote-transfer--mode-line-entry))))
-
 (defun remote-transfer--refresh ()
   "Redraw the visible queue and stop the timer once nothing runs."
   (when-let* ((buffer (get-buffer "*Remote Transfers*"))
               ((get-buffer-window buffer t)))
     (with-current-buffer buffer
       (remote-transfer-list-refresh)))
-  (force-mode-line-update t)
   (unless (remote-transfer--running)
     (when (timerp remote-transfer--refresh-timer)
       (cancel-timer remote-transfer--refresh-timer))

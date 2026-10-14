@@ -17,6 +17,7 @@
   (require 'evil))
 
 (declare-function my/project-current-root "init-project")
+(declare-function remote-files-mode-line-text "remote-files" ())
 (declare-function my/background-make-frame "init-background" (&optional parameters))
 (declare-function bookmark-bmenu-list "bookmark")
 (declare-function bookmark-completing-read "bookmark" (prompt &optional default))
@@ -713,6 +714,8 @@ before letting it choose a useful previous buffer."
          ("M-n" . dirvish-narrow)
          ("M-m" . dirvish-mark-menu)
          ("?" . dirvish-dispatch)
+         ;; Upload, download and sync between this folder and another machine.
+         ("r" . remote-files)
          ;("P" . dirvish-peek-mode) ; 如果没有该函数，下面 config 会兜底处理
          ;; 鼠标（可选）
          ("<mouse-1>" . dirvish-subtree-toggle-or-open)
@@ -722,9 +725,16 @@ before letting it choose a useful previous buffer."
   (dirvish-side-width 36)
   (dirvish-header-line-height '(26 . 36))
   (dirvish-header-line-format '(:left (path) :right (free-space)))
-  (dirvish-mode-line-format '(:left (sort symlink) :right (vc-info yank index)))
+  (dirvish-mode-line-format
+   '(:left (sort symlink remote-files) :right (vc-info yank index)))
 
   :config
+  ;; The pending choice of a pop-up folder, or the transfers running on this
+  ;; folder's target.  The library is only consulted once something loaded it.
+  (dirvish-define-mode-line remote-files
+    "Bulk transfer state of this folder."
+    (when (fboundp 'remote-files-mode-line-text)
+      (remote-files-mode-line-text)))
   (define-key dirvish-mode-map (kbd "RET") #'dired-find-file)
   (define-key dirvish-mode-map (kbd "<return>") #'dired-find-file)
   (with-eval-after-load 'evil

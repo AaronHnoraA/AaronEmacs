@@ -475,14 +475,18 @@ bookmark 排在前面。上下移动候选时会预览目标位置，确认后�
 - `SPC e 1`
   单窗口 / 恢复窗口布局切换
 
-### 临时机器与远程文件管理
+### 临时机器与远程文件传输
 
 选 target 的提示（`SPC o r`、`SPC o f`）里有一项 `临时机器`：选它就输入地址和
-密码/密钥，记进 `var/remote/` 并直接打开。Remote 面板（`SPC o R`）上：`m` 记住一台手动输入的机器，`M` 管理这些机器，
-`F` 对光标所在 target 打开文件管理器，`t` 看传输队列。文件管理器里
-`C-c C-t` 出菜单（Dired 里没有 `SPC` leader）：`c` 复制标记项到另一边，`s` 同步，`S` 镜像，
-`d` 比较，`e` 按需开一个 target 上的终端，`q` 退出并释放连接。传输在后台跑，模式栏显示
-`Xfer:N P%`。完整说明见 [remote-files.md](remote-files.md)。
+密码/密钥，记进 `var/remote/` 并直接打开。Remote 面板（`SPC o R`）上：`m` 记住
+一台手动输入的机器，`M` 管理这些机器，`F` 打开 target 文件夹并弹出传输菜单，
+`t` 看传输队列。
+
+传输是 Dirvish 里的菜单，不是单独的界面：在任何文件夹里按 `r`（或 `C-c C-t`，
+`M-x remote-files`），`c` 把标记的文件送到对面，`g` 从对面取文件，`s` / `r`
+同步文件夹，`=` 比较。对面的文件或文件夹在弹出的 Dirvish 窗口里选，
+`C-c C-c` 确认、`C-c C-k` 取消。任务在皮卡丘的 `*Activity*` 里。完整说明见
+[remote-files.md](remote-files.md)。
 
 ### 关闭 Remote target
 
@@ -685,8 +689,8 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
 - `SPC o V`
   命名 `ghostel`
 - `SPC o f`
-  远程文件管理器：本机与 target 文件夹并排，rsync 上传/下载/同步；会话打开后
-  再按一次显示命令菜单。详见 [remote-files.md](remote-files.md)
+  文件传输菜单（rsync 上传/下载/同步）；不在 Dired 里时先问 target 并打开它的
+  文件夹。Dired / Dirvish 里用 `r`。详见 [remote-files.md](remote-files.md)
 - `SPC o M`
   临时机器列表：手动输入地址和密码/密钥、记在 `var/` 里的 target
 - `SPC o S`
@@ -1029,8 +1033,8 @@ GUI frame 的两侧 fringe 分工如下：
     显示/隐藏 dotfiles
   - `C-c C-e`
     进入 `wdired`
-  - `C-c C-t`
-    远程文件管理器。在 target 的文件夹里管理该文件夹；在别处先问 target
+  - `r`（或 `C-c C-t`）
+    文件传输菜单：把标记的文件送到另一台机器、从那边取文件、同步文件夹
 
 ## 6. 窗口和弹出层
 
@@ -1153,13 +1157,14 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 24×16 XPM 像素�
 
    | 分类 | 内容 |
    | --- | --- |
-   | `task` | 有限的工作:compilation、native-comp worker、remote task |
+   | `task` | 有限的工作:compilation、native-comp worker、remote task、文件传输(rsync) |
    | `service` | 常驻守护进程:语言服务器、epdfinfo、agent 会话 |
    | `connection` | network / serial 端点,TRAMP 在内 |
 
    全数一遍会永远停在几十,没有信息量。所以**板面按三组展示,指示器只数 `task`**。
 3. **谁是 task 不靠猜。** 不看进程名也不看命令行,而是问**已经拥有这些工作的注册表**:
-   `compilation-in-progress`、`remote-tasks`、`comp-async-compilations`。某个进程是
+   `compilation-in-progress`、`remote-tasks`、`comp-async-compilations`、
+   `remote-transfer-jobs`。某个进程是
    task,当且仅当有 owner 认领它。进程任务在 `my/activity--owned-task-processes`
    接入 owner;没有 Emacs 子进程的异步工作通过 `my/activity-provider-functions`
    提供缓存快照。出现在进程板面上不需要另行登记。

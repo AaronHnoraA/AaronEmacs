@@ -52,10 +52,15 @@
 (with-eval-after-load 'remote-files
   (setq remote-files-terminal-function #'my/remote-files-terminal))
 
-;; In a folder of a target this manages that folder; inside a file manager
-;; session it shows the session's commands.
+;; The transfer menu belongs to the folder shown.  In a folder popped up for
+;; choosing the other side, the same key offers to confirm instead.
 (with-eval-after-load 'dired
-  (define-key dired-mode-map (kbd "C-c C-t") #'remote-files))
+  (define-key dired-mode-map (kbd "C-c C-t") #'remote-files)
+  (define-key dired-mode-map (kbd "C-c C-c") #'remote-files-pick-confirm)
+  (define-key dired-mode-map (kbd "C-c C-k") #'remote-files-pick-cancel))
+
+(autoload 'remote-files-pick-confirm "remote-files" nil t)
+(autoload 'remote-files-pick-cancel "remote-files" nil t)
 
 (provide 'init-remote-connectboard)
 ;;; init-remote-connectboard.el ends here

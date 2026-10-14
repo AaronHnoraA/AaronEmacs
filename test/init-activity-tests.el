@@ -8,6 +8,7 @@
 (defvar my/noema--ready nil)
 (defvar my/noema--process nil)
 (defvar remote-tasks nil)
+(defvar remote-transfer-jobs nil)
 (defvar features nil)
 
 (defmacro my/activity-test-isolated (&rest body)
@@ -27,6 +28,7 @@
          (comp-async-compilations nil)
          (comp-files-queue nil)
          (remote-tasks nil)
+         (remote-transfer-jobs nil)
          (my/noema--ready nil)
          (my/noema--process nil))
      (unwind-protect (progn ,@body)
@@ -50,6 +52,41 @@
         (call-interactively (key-binding "j"))
         (call-interactively (key-binding "z")))
       (should (= (line-number-at-pos) 2)))))
+
+(ert-deftest my/activity-claims-bulk-transfers-as-tasks ()
+  "A transfer is a task the board can label, show and cancel."
+  (my/activity-test-isolated
+    (let* ((process (make-process :name "transfer" :buffer nil
+                                  :command '("sleep" "30") :noquery t))
+           (log (generate-new-buffer " *activity transfer log*"))
+           (job (list process "Upload a.bin" 42 log))
+           cancelled)
+      (unwind-protect
+          (cl-letf (((symbol-function 'remote-transfer-job-process) #'car)
+                    ((symbol-function 'remote-transfer-job-name) #'cadr)
+                    ((symbol-function 'remote-transfer-job-percent) #'caddr)
+                    ((symbol-function 'remote-transfer-job-log-buffer)
+                     #'cadddr)
+                    ((symbol-function 'remote-transfer-cancel)
+                     (lambda (job) (setq cancelled job))))
+            ;; Unclaimed, the process is only a service.
+            (should (eq (my/activity-process-kind process) 'service))
+            (setq remote-transfer-jobs (list job))
+            (should (eq (my/activity-process-kind process) 'task))
+            (should (equal (my/activity--process-label process)
+                           "42% Upload a.bin"))
+            (with-temp-buffer
+              (insert (propertize "row" 'my/activity-process process))
+              (goto-char (point-min))
+              (cl-letf (((symbol-function 'my/activity-board-refresh)
+                         #'ignore))
+                (my/activity-board-stop))
+              (should (eq cancelled job))
+              (save-window-excursion
+                (my/activity-board-visit)
+                (should (eq (current-buffer) log)))))
+        (delete-process process)
+        (kill-buffer log)))))
 
 (ert-deftest my/activity-registration-cleans-up-on-return-and-error ()
   (my/activity-test-isolated

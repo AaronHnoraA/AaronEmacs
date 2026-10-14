@@ -1309,7 +1309,7 @@ remote-framework.el       public library entry
 
 `remote-config.el` 与 `remote-board.el` 是可选集成层；`remote-machines.el`
 （临时机器这一 target 来源）、`remote-transfer.el`（客户端批量传输）和
-`remote-files.el`（双 pane 文件管理 UI）同属这一层，只调用上面的公共 API。direnv、Eglot、Lean、
+`remote-files.el`（Dired 里的传输菜单）同属这一层，只调用上面的公共 API。direnv、Eglot、Lean、
 Noema 等消费者留在框架外，只调用公共 API。
 
 ## 11. 测试与支持范围

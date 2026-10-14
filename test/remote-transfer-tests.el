@@ -442,108 +442,124 @@ rsync really speaks its protocol over the command the backend handed out."
       (should-not (remote-transfer-job-kill-timer job))
       (should-not (remote-transfer-jobs-for-target "lab" t)))))
 
-(ert-deftest remote-files-session-owns-what-it-starts ()
-  "A session copies between its panes and leaves nothing behind on quit."
+(ert-deftest remote-files-pop-up-chooses-the-other-side ()
+  "Send and fetch go through a pop-up folder that cleans up after itself."
   (skip-unless (remote-client-executable-find "rsync"))
   (remote-transfer-test-with-registry
-    (let* ((near (expand-file-name "near/" directory))
+    (let* ((rsh (expand-file-name "fake-rsh" directory))
+           (near (expand-file-name "near/" directory))
            (far (expand-file-name "far/" directory))
-           (remote-files-local-history (make-hash-table :test #'equal))
+           (remote (concat "/fs:box:" far))
+           (remote-files-other-history (make-hash-table :test #'equal))
+           (remote-files-local-directory near)
            (dired-kill-when-opening-new-dired-buffer nil)
-           (terminal-calls nil)
-           (remote-files-terminal-function
-            (lambda (name directory)
-              (push directory terminal-calls)
-              (with-current-buffer (get-buffer-create name)
-                (setq default-directory directory)
-                (current-buffer))))
            (before (current-window-configuration))
            (buffers (buffer-list)))
+      (with-temp-file rsh (insert "#!/bin/sh\nshift\nexec sh -c \"$*\"\n"))
+      (set-file-modes rsh #o700)
       (make-directory near)
       (make-directory far)
-      (with-temp-file (expand-file-name "a.txt" near) (insert "alpha"))
+      (with-temp-file (expand-file-name "up.txt" near) (insert "up"))
+      (with-temp-file (expand-file-name "down.txt" far) (insert "down"))
+      ;; A target that shares no filesystem but whose folders Dired can list.
+      (remote-register-backend
+       "shell-only"
+       :capabilities '(metadata file-read directory process-sync process-async)
+       :project (lambda (file _link) (remote-file-local-name file))
+       :client-shell
+       (lambda (_route) (list :command (list rsh) :destination "far-host")))
+      (remote-register-target "box" :label "Box")
+      (remote-register-pipeline "box" "api" '("shell-only"))
+      (should-not (remote-client-file-name remote))
       (unwind-protect
-          (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t)))
-            ;; Started from a buffer of another target: a bare path still
-            ;; means this machine, not a folder of that target.
-            (remote-machines-add (remote-transfer-test--machine))
-            (with-temp-buffer
-              (setq default-directory "/fs:lab:/srv/")
-              (should (equal (remote-files--client-directory near)
-                             (concat "/fs:local:" near)))
-              (remote-files (concat "/fs:local:" far) near))
-            (let ((session (remote-files--session)))
-              (should session)
-              (should (equal (remote-files-session-target-id session) "local"))
-              (should (equal (remote-files--pane-directory session 'remote)
-                             (remote-canonicalize-file-name far)))
-              (should (get-buffer-window "*Remote Transfers*"))
-              ;; Outside the panes there is nothing to transfer from.
-              (with-selected-window (get-buffer-window "*Remote Transfers*")
-                (should-error (remote-files-copy) :type 'user-error))
-              (select-window (remote-files-session-local-window session))
-              (dired-goto-file (expand-file-name "a.txt" near))
-              (remote-files-copy)
+          (with-temp-buffer
+            ;; Stand in for the target's Dired: the commands only need its
+            ;; mode, folder and marked files.
+            (setq default-directory remote)
+            (delay-mode-hooks (dired-mode))
+            (switch-to-buffer (current-buffer))
+            (let ((origin (selected-window)))
+              (should (equal (remote-files--here) remote))
+              (should (string-match-p "this machine"
+                                      (remote-files--menu-title)))
+              ;; Fetch: the pop-up shows this machine, as a native folder,
+              ;; although the command ran in a buffer of the target.
+              (remote-files-fetch)
+              (should-not (eq (selected-window) origin))
+              (should (equal default-directory near))
+              (should (eq (plist-get (remote-files--pick-state) :want)
+                          'files))
+              (should (string-match-p "confirm"
+                                      (remote-files-mode-line-text)))
+              (dired-goto-file (expand-file-name "up.txt" near))
+              (remote-files-pick-confirm)
+              (should (eq (selected-window) origin))
+              (should (= (length (window-list nil 'no-mini)) 1))
               (let ((job (car remote-transfer-jobs)))
-                (should (string-prefix-p "Upload a.txt"
-                                         (remote-transfer-job-name job)))
+                (should (equal (remote-transfer-job-destination job) remote))
                 (should (eq (remote-transfer-test--wait job) 'done)))
-              (should (file-exists-p (expand-file-name "a.txt" far)))
-              (should (equal (remote-files--pane-directory session 'local)
-                             (concat "/fs:local:" near)))
-              ;; The local pane is an ordinary native Dired.
-              (should (equal (buffer-local-value
-                              'default-directory
-                              (window-buffer
-                               (remote-files-session-local-window session)))
-                             near))
-              ;; One terminal per session, opened where the remote pane is.
-              (remote-files-terminal)
-              (let ((terminal (remote-files-session-terminal session)))
-                (should (eq (window-buffer) terminal))
-                (should (eq (window-parameter nil 'window-side) 'top))
-                (remote-files-terminal)
-                (should (eq (remote-files-session-terminal session) terminal))
-                (should (equal terminal-calls
-                               (list (remote-canonicalize-file-name far)
-                                     (remote-canonicalize-file-name far))))
-                ;; The shell moved on; the pane can follow it.
-                (with-current-buffer terminal
-                  (setq default-directory
-                        (remote-canonicalize-file-name near)))
-                (remote-files-follow-terminal)
-                (should (equal (remote-files--pane-directory session 'remote)
-                               (remote-canonicalize-file-name near)))
-                (should (eq (selected-window)
-                            (remote-files-session-remote-window session))))
-              ;; A second session on the frame is the first one's menu.
-              (should (eq (remote-files--session) session))
-              ;; A running transfer is cancelled by the quit it belongs to.
-              (let ((sleeper
-                     (remote-transfer--launch
-                      (remote-transfer-job--create
-                       :id 901 :name "sleeper" :target-ids '("local")
-                       :command '("sleep" "60")))))
-                (remote-files-quit)
-                (should (eq (remote-transfer-test--wait sleeper)
-                            'cancelled)))
-              (should-not (remote-files--session))
-              (should-not (get-buffer-window "*Remote Transfers*"))
-              (should-not (get-buffer "*files:local*"))
-              ;; A folder of this machine is never "disconnected".
-              (should (remote-get-target "local"))
+              (should (file-exists-p (expand-file-name "up.txt" far)))
+              ;; Send: what is marked here goes to a folder chosen there.
+              (cl-letf (((symbol-function 'dired-get-marked-files)
+                         (lambda (&rest _)
+                           (list (concat remote "down.txt")))))
+                (remote-files-send))
+              (should (eq (plist-get (remote-files--pick-state) :want)
+                          'directory))
+              (remote-files-pick-confirm)
+              (let ((job (car remote-transfer-jobs)))
+                (should (equal (remote-transfer-job-destination job)
+                               (concat "/fs:local:" near)))
+                (should (eq (remote-transfer-test--wait job) 'done)))
+              (should (file-exists-p (expand-file-name "down.txt" near)))
+              ;; Cancelling leaves nothing queued and nothing open.
+              (let ((count (length remote-transfer-jobs)))
+                (remote-files-fetch)
+                (remote-files-pick-cancel)
+                (should (= (length remote-transfer-jobs) count))
+                (should (eq (selected-window) origin))
+                (should (= (length (window-list nil 'no-mini)) 1)))
+              (should-error (remote-files-pick-confirm) :type 'user-error)
+              ;; Every Dired the pop-ups made is gone again.
               (should-not
                (seq-some
                 (lambda (buffer)
                   (and (not (memq buffer buffers))
+                       (not (eq buffer (current-buffer)))
                        (with-current-buffer buffer
                          (derived-mode-p 'dired-mode))))
                 (buffer-list)))))
-        (when (remote-files--session)
-          (set-frame-parameter nil 'remote-files-session nil))
-        (set-window-configuration before)
-        (when (get-buffer "*Remote Transfers*")
-          (kill-buffer "*Remote Transfers*"))))))
+        (set-window-configuration before)))))
+
+(ert-deftest remote-files-sync-previews-before-it-changes-anything ()
+  (skip-unless (remote-client-executable-find "rsync"))
+  (remote-transfer-test-with-registry
+    (let* ((near (expand-file-name "near/" directory))
+           (far (expand-file-name "far/" directory))
+           (before (current-window-configuration)))
+      (make-directory near)
+      (make-directory far)
+      (with-temp-file (expand-file-name "new.txt" near) (insert "new"))
+      (with-temp-file (expand-file-name "extra.txt" far) (insert "extra"))
+      (unwind-protect
+          (progn
+            (remote-files--synchronize (concat "/fs:local:" near)
+                                       (concat "/fs:local:" far) t t)
+            (let ((preview (car remote-transfer-jobs)))
+              (should (eq (remote-transfer-test--wait preview) 'done))
+              ;; Listed, not done.
+              (should (file-exists-p (expand-file-name "extra.txt" far)))
+              (should-not (file-exists-p (expand-file-name "new.txt" far)))
+              (with-current-buffer (remote-transfer-job-log-buffer preview)
+                (should remote-files-compare-mode)
+                (should (string-match-p "deleting +extra\\.txt"
+                                        (buffer-string)))
+                (remote-files-apply)))
+            (let ((mirror (car remote-transfer-jobs)))
+              (should (eq (remote-transfer-test--wait mirror) 'done)))
+            (should (file-exists-p (expand-file-name "new.txt" far)))
+            (should-not (file-exists-p (expand-file-name "extra.txt" far))))
+        (set-window-configuration before)))))
 
 (ert-deftest remote-transfer-live-round-trip ()
   "Upload, download and compare against a real SSH target."

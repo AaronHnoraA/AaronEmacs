@@ -54,11 +54,17 @@
 (declare-function remote-task-buffer "remote-task" (task))
 (declare-function remote-task-started-at "remote-task" (task))
 (declare-function remote-task-cancel "remote-task" (task &optional reason))
+(declare-function remote-transfer-job-process "remote-transfer" (job))
+(declare-function remote-transfer-job-name "remote-transfer" (job))
+(declare-function remote-transfer-job-percent "remote-transfer" (job))
+(declare-function remote-transfer-job-log-buffer "remote-transfer" (job))
+(declare-function remote-transfer-cancel "remote-transfer" (job))
 (declare-function evil-set-initial-state "evil-core" (mode state))
 (declare-function my/remote-per-file-subprocess-affordable-p "init-tramp"
                   (&optional path))
 
 (defvar remote-tasks)
+(defvar remote-transfer-jobs)
 (defvar compilation-in-progress)
 (defvar comp-async-compilations)
 (defvar comp-files-queue)
@@ -220,6 +226,9 @@ claims is a service, however busy it looks."
       (dolist (task (hash-table-values remote-tasks))
         (when-let* ((process (ignore-errors (remote-task-process task))))
           (push process owned))))
+    (dolist (job (bound-and-true-p remote-transfer-jobs))
+      (when-let* ((process (ignore-errors (remote-transfer-job-process job))))
+        (push process owned)))
     (delete-dups (seq-filter #'process-live-p owned))))
 
 (cl-defun my/activity-process-kind
@@ -452,11 +461,22 @@ than the age of this Emacs session."
                 (eq process (ignore-errors (remote-task-process task))))
               (hash-table-values remote-tasks))))
 
+(defun my/activity--transfer-job-for (process)
+  "Return the bulk transfer job owning PROCESS, if any."
+  (seq-find (lambda (job)
+              (eq process (ignore-errors (remote-transfer-job-process job))))
+            (bound-and-true-p remote-transfer-jobs)))
+
 (defun my/activity--process-label (process)
   "Return a readable label for PROCESS."
-  (if-let* ((task (my/activity--remote-task-for process)))
-      (format "%s" (remote-task-name task))
-    (process-name process)))
+  (cond
+   ((when-let* ((task (my/activity--remote-task-for process)))
+      (format "%s" (remote-task-name task))))
+   ((when-let* ((job (my/activity--transfer-job-for process)))
+      (if-let* ((percent (remote-transfer-job-percent job)))
+          (format "%d%% %s" percent (remote-transfer-job-name job))
+        (format "%s" (remote-transfer-job-name job)))))
+   (t (process-name process))))
 
 (defun my/activity--process-detail (process)
   "Return the command line behind PROCESS, as a single line."
@@ -493,6 +513,9 @@ registry claims is destructive and asks first."
      ((my/activity--remote-task-for process)
       (remote-task-cancel (my/activity--remote-task-for process))
       (my/activity-board-refresh))
+     ((my/activity--transfer-job-for process)
+      (remote-transfer-cancel (my/activity--transfer-job-for process))
+      (my/activity-board-refresh))
      ((yes-or-no-p (format "Kill %s, which no task registry owns? "
                            (process-name process)))
       (delete-process process)
@@ -518,7 +541,13 @@ Unconditional and unclean, so it asks first."
 
 (defun my/activity-board--show-process (process)
   "Show PROCESS' buffer, or say that it has none."
-  (let ((buffer (and (processp process) (process-buffer process))))
+  (let ((buffer
+         (and (processp process)
+              (or (process-buffer process)
+                  ;; A transfer keeps its output in a log, not in the
+                  ;; process buffer.
+                  (when-let* ((job (my/activity--transfer-job-for process)))
+                    (remote-transfer-job-log-buffer job))))))
     (if (buffer-live-p buffer)
         (pop-to-buffer buffer)
       (user-error "%s has no buffer" (process-name process)))))
@@ -662,6 +691,8 @@ Each one is better at its own job than a reimplementation here would be.")
      :help "This configuration's performance watch")
     (:label "Remote" :command remote-board
      :help "Remote targets, routes and forwards")
+    (:label "Transfers" :command remote-transfer-list
+     :help "Bulk file transfers: progress, output, retry")
     (:label "Compile" :command my/compile-board
      :help "Byte and native compilation")
     (:label "Language servers" :command my/language-server-manager
