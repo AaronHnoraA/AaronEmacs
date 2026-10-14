@@ -3,12 +3,13 @@
 ;;; Commentary:
 ;;
 ;; `remote-files' puts a folder of this machine beside a folder of a target,
-;; both ordinary Dired buffers, with the transfer queue underneath.  Its
-;; commands move what is marked in one pane into the other pane's folder
-;; through `remote-transfer', which never blocks the editor.
+;; both ordinary Dired buffers, with the transfer queue underneath and, on
+;; request, a terminal on the target above.  Its commands move what is marked
+;; in one pane into the other pane's folder through `remote-transfer', which
+;; never blocks the editor.
 ;;
 ;; A session belongs to its frame.  Quitting it ends what it started and
-;; nothing else: its running transfers, the workspace it opened
+;; nothing else: its running transfers, its terminal, the workspace it opened
 ;; and, when the session made the connection and nothing else uses the
 ;; target, the connection itself.
 
@@ -22,6 +23,7 @@
 (require 'remote-core)
 (require 'remote-fs)
 (require 'remote-workspace)
+(require 'remote-terminal)
 (require 'remote-transfer)
 
 (declare-function remote-read-target "remote-board" (&optional prompt omit-local))
@@ -40,10 +42,21 @@
   :type 'integer
   :group 'remote-files)
 
+(defcustom remote-files-terminal-height 0.4
+  "Height of the terminal window in a file manager session."
+  :type 'number
+  :group 'remote-files)
+
+(defvar remote-files-terminal-function #'remote-files-default-terminal
+  "Function that opens a session's terminal.
+It receives a buffer name and a logical directory, and returns the terminal
+buffer.  Called again while that buffer lives, it moves the shell to the
+directory instead of starting another.")
+
 (cl-defstruct (remote-files-session
                (:constructor remote-files-session--create))
   target-id frame configuration local-window remote-window
-  existing-buffers workspace connected-before)
+  existing-buffers shown-buffers workspace connected-before terminal)
 
 (defvar remote-files-local-history (make-hash-table :test #'equal)
   "Last folder of this machine used beside each target.")
@@ -89,8 +102,12 @@
 
 (defun remote-files--show (session side directory)
   "Show DIRECTORY in SESSION's SIDE pane."
-  (let ((window (remote-files--pane-window session side)))
-    (set-window-buffer window (dired-noselect directory))
+  (let ((window (remote-files--pane-window session side))
+        (buffer (dired-noselect directory)))
+    ;; Replacing a pane's folder leaves the old Dired behind; the session
+    ;; remembers every one it showed so that quitting can take them along.
+    (cl-pushnew buffer (remote-files-session-shown-buffers session))
+    (set-window-buffer window buffer)
     (when (eq side 'local)
       (puthash (remote-files-session-target-id session)
                (file-name-as-directory directory)
@@ -282,6 +299,60 @@ and applied on request."
      (side . bottom)
      (window-height . ,remote-files-queue-height))))
 
+;;; Terminal
+
+(defun remote-files-default-terminal (name directory)
+  "Open or reuse the routed terminal buffer NAME in logical DIRECTORY."
+  (let ((buffer (get-buffer name)))
+    (if (and buffer
+             (remote-terminal-p
+              (buffer-local-value 'remote-terminal-instance buffer)))
+        (remote-terminal-send-string
+         (buffer-local-value 'remote-terminal-instance buffer)
+         (format "cd -- %s\n"
+                 (shell-quote-argument (remote-file-local-name directory))))
+      (setq buffer
+            (remote-terminal-buffer (remote-terminal-open directory)))
+      (with-current-buffer buffer (rename-buffer name t)))
+    buffer))
+
+(defun remote-files-terminal ()
+  "Show a terminal on the target, in the remote pane's folder.
+The session keeps one terminal; asking again moves its shell to the folder
+the remote pane shows now."
+  (interactive)
+  (let* ((session (remote-files--require-session))
+         (directory (remote-files--pane-directory session 'remote))
+         (buffer
+          (funcall remote-files-terminal-function
+                   (format "*files:%s*" (remote-files-session-target-id session))
+                   directory)))
+    (setf (remote-files-session-terminal session) buffer)
+    (select-window
+     (display-buffer
+      buffer
+      `((display-buffer-reuse-window display-buffer-in-side-window)
+        (side . top)
+        (window-height . ,remote-files-terminal-height))))))
+
+(defun remote-files-follow-terminal ()
+  "Show the terminal's current folder in the remote pane."
+  (interactive)
+  (let* ((session (remote-files--require-session))
+         (terminal (remote-files-session-terminal session))
+         (directory
+          (and (buffer-live-p terminal)
+               (buffer-local-value 'default-directory terminal))))
+    (unless directory
+      (user-error "This session has no terminal yet"))
+    (unless (equal (ignore-errors (remote-file-name-target directory))
+                   (remote-files-session-target-id session))
+      (user-error "The terminal's folder is not on %s"
+                  (remote-files-session-target-id session)))
+    (remote-files--show session 'remote
+                        (remote-canonicalize-file-name directory))
+    (select-window (remote-files--pane-window session 'remote))))
+
 ;;; Session lifetime
 
 (defun remote-files--target-in-use-p (target-id ignored-buffers)
@@ -312,7 +383,10 @@ Running transfers are cancelled after a question, or at once with FORCE."
           (seq-remove
            (lambda (buffer)
              (memq buffer (remote-files-session-existing-buffers session)))
-           panes)))
+           (delete-dups
+            (append panes
+                    (copy-sequence
+                     (remote-files-session-shown-buffers session)))))))
     (when (and running
                (not force)
                (not (y-or-n-p
@@ -321,6 +395,17 @@ Running transfers are cancelled after a question, or at once with FORCE."
                              (if (cdr running) "s" "")))))
       (user-error "Session kept; its transfers are still running"))
     (mapc #'remote-transfer-cancel running)
+    (let ((terminal (remote-files-session-terminal session)))
+      (when (and (buffer-live-p terminal)
+                 (not (memq terminal
+                            (remote-files-session-existing-buffers session))))
+        (dolist (window (get-buffer-window-list terminal nil (selected-frame)))
+          (when (window-parameter window 'window-side)
+            (delete-window window)))
+        (when-let* ((process (get-buffer-process terminal)))
+          (set-process-query-on-exit-flag process nil))
+        (let ((kill-buffer-query-functions nil))
+          (kill-buffer terminal))))
     (set-frame-parameter nil 'remote-files-session nil)
     (when-let* ((queue (get-buffer "*Remote Transfers*")))
       (dolist (window (get-buffer-window-list queue nil (selected-frame)))
@@ -448,6 +533,9 @@ frame, show its commands instead."
     ("l" "Local folder" remote-files-set-local)
     ("r" "Remote folder" remote-files-set-remote)
     ("t" "Transfer queue" remote-files-show-queue)]
+   ["Terminal"
+    ("e" "Terminal in remote folder" remote-files-terminal)
+    ("." "Remote pane follows terminal" remote-files-follow-terminal)]
    ["Session"
     ("q" "Quit and release" remote-files-quit)]])
 

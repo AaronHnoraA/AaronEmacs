@@ -37,6 +37,21 @@
   "o f" '(:def remote-files :which-key "remote files")
   "o M" '(:def remote-machines :which-key "remote machines"))
 
+(defvar remote-files-terminal-function)
+(declare-function my/ghostel--open-in-directory "init-ghostel"
+                  (buffer-name directory))
+(declare-function remote-files-default-terminal "remote-files"
+                  (name directory))
+
+(defun my/remote-files-terminal (name directory)
+  "Open the file manager's terminal NAME in DIRECTORY with Ghostel."
+  (if (fboundp 'my/ghostel--open-in-directory)
+      (my/ghostel--open-in-directory name directory)
+    (remote-files-default-terminal name directory)))
+
+(with-eval-after-load 'remote-files
+  (setq remote-files-terminal-function #'my/remote-files-terminal))
+
 ;; In a folder of a target this manages that folder; inside a file manager
 ;; session it shows the session's commands.
 (with-eval-after-load 'dired

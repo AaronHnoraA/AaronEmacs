@@ -424,6 +424,13 @@ rsync really speaks its protocol over the command the backend handed out."
            (far (expand-file-name "far/" directory))
            (remote-files-local-history (make-hash-table :test #'equal))
            (dired-kill-when-opening-new-dired-buffer nil)
+           (terminal-calls nil)
+           (remote-files-terminal-function
+            (lambda (name directory)
+              (push directory terminal-calls)
+              (with-current-buffer (get-buffer-create name)
+                (setq default-directory directory)
+                (current-buffer))))
            (before (current-window-configuration))
            (buffers (buffer-list)))
       (make-directory near)
@@ -449,6 +456,25 @@ rsync really speaks its protocol over the command the backend handed out."
                                          (remote-transfer-job-name job)))
                 (should (eq (remote-transfer-test--wait job) 'done)))
               (should (file-exists-p (expand-file-name "a.txt" far)))
+              ;; One terminal per session, opened where the remote pane is.
+              (remote-files-terminal)
+              (let ((terminal (remote-files-session-terminal session)))
+                (should (eq (window-buffer) terminal))
+                (should (eq (window-parameter nil 'window-side) 'top))
+                (remote-files-terminal)
+                (should (eq (remote-files-session-terminal session) terminal))
+                (should (equal terminal-calls
+                               (list (remote-canonicalize-file-name far)
+                                     (remote-canonicalize-file-name far))))
+                ;; The shell moved on; the pane can follow it.
+                (with-current-buffer terminal
+                  (setq default-directory
+                        (remote-canonicalize-file-name near)))
+                (remote-files-follow-terminal)
+                (should (equal (remote-files--pane-directory session 'remote)
+                               (remote-canonicalize-file-name near)))
+                (should (eq (selected-window)
+                            (remote-files-session-remote-window session))))
               ;; A second session on the frame is the first one's menu.
               (should (eq (remote-files--session) session))
               ;; A running transfer is cancelled by the quit it belongs to.
@@ -462,6 +488,7 @@ rsync really speaks its protocol over the command the backend handed out."
                             'cancelled)))
               (should-not (remote-files--session))
               (should-not (get-buffer-window "*Remote Transfers*"))
+              (should-not (get-buffer "*files:local*"))
               ;; A folder of this machine is never "disconnected".
               (should (remote-get-target "local"))
               (should-not
