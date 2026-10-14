@@ -38,7 +38,6 @@
 
 (defvar dirvish-mode-map)
 (defvar dirvish-yank-overwrite-existing-files)
-(defvar dired-isearch-filenames)
 
 (defvar my/dirvish--paste-method nil
   "What `my/dirvish-paste' does with the marked files: `copy' or `cut'.")
@@ -355,12 +354,6 @@ nothing or `stem' to keep only the extension."
   (interactive)
   (isearch-repeat-backward))
 
-(defun my/dirvish-find-backward ()
-  "Search file names backward."
-  (interactive)
-  (let ((dired-isearch-filenames t))
-    (isearch-backward)))
-
 (defun my/dirvish-sort (switches)
   "Return a command that lists the folder with extra ls SWITCHES."
   (my/dirvish--command
@@ -412,6 +405,149 @@ nothing or `stem' to keep only the extension."
   "Swap this tab with the next one."
   (interactive)
   (tab-bar-move-tab 1))
+
+;;; Key hints
+
+(defconst my/dirvish-key-hints
+  '(("移动"
+     ("j / k" . "下 / 上")
+     ("h / l" . "上级目录 / 进入或打开")
+     ("g g / g b" . "顶部 / 底部")
+     ("C-u / C-d" . "上 / 下半页")
+     ("C-b / C-f" . "上 / 下一页")
+     ("S-← / S-→" . "历史后退 / 前进")
+     ("TAB" . "展开 / 折叠子目录"))
+    ("跳转  g"
+     ("g h" . "Home")
+     ("g a / g d" . "Desktop / Downloads")
+     ("g w / g p" . "Documents / Pictures")
+     ("g v / g m" . "Movies / Music")
+     ("g c / g l" . "~/.config / ~/.local")
+     ("g SPC" . "输入目录")
+     ("g f" . "跟随符号链接")
+     ("g r" . "刷新"))
+    ("选择"
+     ("SPC" . "选中 / 取消并下移")
+     ("C-a" . "全选")
+     ("C-r" . "反选")
+     ("Esc" . "清除选择"))
+    ("复制 / 粘贴"
+     ("y / x" . "复制 / 剪切")
+     ("p p / p f" . "粘贴 / 强制覆盖")
+     ("Y / X" . "取消复制或剪切")
+     ("p l / p L" . "符号链接：绝对 / 相对")
+     ("p h" . "硬链接")
+     ("p m" . "Dirvish 粘贴菜单"))
+    ("文件"
+     ("a" . "新建（以 / 结尾为目录）")
+     ("d / D" . "回收站 / 永久删除")
+     ("r r" . "重命名（光标在扩展名前）")
+     ("r i / r a" . "重命名（光标在开头 / 末尾）")
+     ("r f" . "重命名（清空）")
+     ("c m" . "重命名（保留扩展名）")
+     ("C-c C-e" . "wdired 批量改名"))
+    ("复制名字  c"
+     ("c c" . "路径")
+     ("c d" . "目录路径")
+     ("c f" . "文件名")
+     ("c n" . "不含扩展名"))
+    ("打开 / 运行"
+     ("RET" . "在 Emacs 里打开")
+     ("o o" . "系统默认程序")
+     (": / o c" . "运行命令（等待）")
+     ("; / O" . "运行命令（异步）")
+     ("S" . "在这里开终端"))
+    ("查找"
+     ("f" . "过滤")
+     ("/" . "搜文件名")
+     ("n / N" . "下一个 / 上一个匹配")
+     ("s" . "fd 搜索")
+     ("z / Z" . "模糊查找 / zoxide"))
+    ("显示 / 排序"
+     ("." . "隐藏文件")
+     ("m s / m n" . "显示详情 / 只显示名字")
+     (", m / , M" . "按修改时间：正 / 倒序")
+     (", s / , S" . "按大小")
+     (", e / , E" . "按扩展名")
+     (", a / , n" . "按字母 / 自然序")
+     (", ," . "排序菜单")
+     ("S-TAB" . "文件信息"))
+    ("标签页"
+     ("t" . "新标签页")
+     ("1 … 9" . "第 N 个")
+     ("- / =" . "上一个 / 下一个")
+     ("_ / +" . "与左 / 右交换"))
+    ("管理"
+     ("M" . "文件传输（上传 / 下载 / 同步）")
+     ("w" . "任务管理（皮卡丘）")
+     ("'" . "快速访问")
+     ("~" . "Dirvish 总菜单")
+     ("?" . "这张表")
+     ("q" . "退出")))
+  "What `my/dirvish-key-help' shows: groups of (KEYS . MEANING).")
+
+(defun my/dirvish--hint-columns (width)
+  "Return the hint groups as lines laid out in columns for WIDTH."
+  (let* ((cell 44)
+         (columns (max 1 (/ width cell)))
+         (blocks
+          (mapcar
+           (lambda (group)
+             (cons (propertize (car group) 'face 'font-lock-keyword-face)
+                   (mapcar
+                    (lambda (hint)
+                      (concat
+                       "  "
+                       (propertize (car hint) 'face 'help-key-binding)
+                       (make-string
+                        (max 1 (- 13 (string-width (car hint)))) ?\s)
+                       (cdr hint)))
+                    (cdr group))))
+           my/dirvish-key-hints))
+         (per-column (ceiling (/ (float (apply #'+ (mapcar (lambda (block)
+                                                             (1+ (length block)))
+                                                           blocks)))
+                                 columns)))
+         (stacks (list nil)))
+    ;; Fill one column after another, never splitting a group.
+    (dolist (block blocks)
+      (when (and (car stacks)
+                 (> (+ (length (car stacks)) (length block)) per-column)
+                 (< (length stacks) columns))
+        (push nil stacks))
+      (setcar stacks (append (car stacks) block (list ""))))
+    (setq stacks (nreverse stacks))
+    (cl-loop
+     for row from 0 below (apply #'max (mapcar #'length stacks))
+     collect
+     (string-trim-right
+      (mapconcat
+       (lambda (stack)
+         (let ((text (or (nth row stack) "")))
+           (concat text
+                   (make-string (max 1 (- cell (string-width text))) ?\s))))
+       stacks "")))))
+
+(defun my/dirvish-key-help ()
+  "Show the Dirvish keys in a window below; q closes it."
+  (interactive)
+  (let ((buffer (get-buffer-create "*Dirvish Keys*"))
+        (width (frame-width)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (string-join (my/dirvish--hint-columns width) "\n") "\n"))
+      (special-mode)
+      (setq-local truncate-lines t
+                  cursor-type nil
+                  mode-line-format nil)
+      (goto-char (point-min)))
+    (select-window
+     (display-buffer
+      buffer
+      '((display-buffer-in-side-window)
+        (side . bottom)
+        (window-height . fit-window-to-buffer))))))
 
 ;;; Keys
 
@@ -470,7 +606,7 @@ nothing or `stem' to keep only the extension."
     ("S" . my/dirvish-shell-here)
     ;; Find and filter
     ("f" . dirvish-narrow)
-    ("/" . dired-isearch-filenames) ("?" . my/dirvish-find-backward)
+    ("/" . dired-isearch-filenames) ("?" . my/dirvish-key-help)
     ("n" . my/dirvish-find-next) ("N" . my/dirvish-find-previous)
     ("s" . dirvish-fd)
     ("z" . my/dirvish-jump-file) ("Z" . dired-jump-with-zoxide)

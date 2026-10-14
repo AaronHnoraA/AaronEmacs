@@ -1058,7 +1058,7 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 | `o c`、`:` / `O`、`;` | 对文件运行 shell 命令：等待 / 异步 |
 | `S` | 在当前目录开终端 |
 | `f` | 过滤（`dirvish-narrow`） |
-| `/` / `?`，`n` / `N` | 向后 / 向前搜文件名，下一个 / 上一个匹配 |
+| `/`，`n` / `N` | 搜文件名，下一个 / 上一个匹配 |
 | `s` / `z` / `Z` | fd 搜索 / 模糊查找文件 / zoxide 跳转 |
 | `.` | 显示 / 隐藏 dotfiles |
 | `m s` `m p` `m b` `m m` `m o` / `m n` | 显示详情（大小、时间、权限、所有者）/ 只显示文件名 |
@@ -1069,7 +1069,8 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 | `t`，`1`–`9`，`-` / `=`，`_` / `+` | 新标签页、切到第 N 个、上一个 / 下一个、与左 / 右交换 |
 | `w` | 任务管理（皮卡丘的 `*Activity*`） |
 | `M` | 文件传输菜单（rsync 上传 / 下载 / 同步），见 [remote-files.md](remote-files.md) |
-| `~` | Dirvish 总菜单（帮助） |
+| `?` | 按键提示：在下方弹出这张表，`q` 关闭 |
+| `~` | Dirvish 总菜单 |
 | `q` | 退出 |
 
 和 yazi 不完全一样的地方：
@@ -1077,6 +1078,8 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 - `m` 组在 yazi 里分别切换单列，这里只有“显示全部详情 / 只显示名字”两档；
 - `, b` 按创建时间排序依赖 GNU `ls`（`gls`），`, r` 随机排序没有做；
 - `v` 视觉选择、`R b` 回收站管理、`M p` 挂载硬盘没有对应；
+- `?` 是按键提示而不是向前搜索（用 `N`）；提示内容在
+  `my/dirvish-key-hints`，改键时一并改；
 - `TAB` 保留 Dirvish 的子目录展开，yazi 的 `TAB`（文件信息）放在 `S-TAB`；
 - `-` / `=` 按你的 yazi 配置是切换标签页，所以创建链接放在 `p l` / `p L` / `p h`。
 
@@ -1090,7 +1093,7 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 | 排序菜单 `dirvish-quicksort` | `s` | `, ,` |
 | 文件信息 `dirvish-file-info-menu` | `f` | `S-TAB` |
 | 子树展开 `dirvish-subtree-toggle` | `TAB` / `l` | `TAB` |
-| 总菜单 `dirvish-dispatch` | `?` | `~` |
+| 总菜单 `dirvish-dispatch` | `?` | `~`（`?` 现在是按键提示） |
 | 刷新 | `g` | `g r` |
 | `wdired` | `C-c C-e` | 不变 |
 | 前缀参数 `C-u` | `C-u` | Dirvish 里是上翻半页，用 `M-数字` 代替 |

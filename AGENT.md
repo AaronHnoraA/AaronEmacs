@@ -364,8 +364,8 @@ dependency, not an optional experiment.
   inside `with-eval-after-load`; `evil-define-key*` is acceptable there.
 - Dirvish single keys mirror `~/.config/yazi/keymap.toml` and have one
   source, the table in `lisp/init-dirvish-keys.el`.  Add or move a Dirvish key
-  there, not in `init-windows.el`, and keep the table in
-  `docs/daily-usage.md` in step.
+  there, not in `init-windows.el`, and keep `my/dirvish-key-hints` (the `?`
+  sheet) and the table in `docs/daily-usage.md` in step.
 - Domain-neutral route-table helpers live in vendored `general.el` as
   `general-route-*`; concrete policy still belongs in the owning init module
   such as `lisp/init-open.el`.
