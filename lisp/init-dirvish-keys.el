@@ -487,8 +487,10 @@ nothing or `stem' to keep only the extension."
     (", n" . ,(my/dirvish-sort "-v")) (", N" . ,(my/dirvish-sort "-vr"))
     (", s" . ,(my/dirvish-sort "-Sr")) (", S" . ,(my/dirvish-sort "-S"))
     (", ," . dirvish-quicksort)
-    ("TAB" . dirvish-file-info-menu)
-    ("<backtab>" . dirvish-subtree-toggle)
+    ;; yazi has no tree view; TAB keeps Dirvish's fold, and yazi's TAB (file
+    ;; info) moves to S-TAB.
+    ("TAB" . dirvish-subtree-toggle)
+    ("<backtab>" . dirvish-file-info-menu)
     ;; Tabs
     ("t" . tab-bar-new-tab)
     ,@(mapcar (lambda (number)

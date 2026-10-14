@@ -1064,7 +1064,8 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 | `m s` `m p` `m b` `m m` `m o` / `m n` | 显示详情（大小、时间、权限、所有者）/ 只显示文件名 |
 | `, m` `, M` `, b` `, B` `, e` `, E` `, a` `, A` `, n` `, N` `, s` `, S` | 排序：修改时间、创建时间、扩展名、字母、自然、大小；大写为倒序 |
 | `, ,` | Dirvish 自带的排序菜单 |
-| `TAB` | 文件信息菜单 |
+| `TAB` | 展开 / 折叠子目录（原地树形） |
+| `S-TAB` | 文件信息菜单 |
 | `t`，`1`–`9`，`-` / `=`，`_` / `+` | 新标签页、切到第 N 个、上一个 / 下一个、与左 / 右交换 |
 | `w` | 任务管理（皮卡丘的 `*Activity*`） |
 | `M` | 文件传输菜单（rsync 上传 / 下载 / 同步），见 [remote-files.md](remote-files.md) |
@@ -1076,6 +1077,7 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 - `m` 组在 yazi 里分别切换单列，这里只有“显示全部详情 / 只显示名字”两档；
 - `, b` 按创建时间排序依赖 GNU `ls`（`gls`），`, r` 随机排序没有做；
 - `v` 视觉选择、`R b` 回收站管理、`M p` 挂载硬盘没有对应；
+- `TAB` 保留 Dirvish 的子目录展开，yazi 的 `TAB`（文件信息）放在 `S-TAB`；
 - `-` / `=` 按你的 yazi 配置是切换标签页，所以创建链接放在 `p l` / `p L` / `p h`。
 
 被让出单键的原 Dirvish / Dired 命令：
@@ -1086,8 +1088,8 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 | 快速访问 `dirvish-quick-access` | `a` | `'` |
 | 复制粘贴菜单 `dirvish-yank-menu` | `y` | `p m` |
 | 排序菜单 `dirvish-quicksort` | `s` | `, ,` |
-| 文件信息 `dirvish-file-info-menu` | `f` | `TAB` |
-| 子树展开 `dirvish-subtree-toggle` | `TAB` / `l` | `S-TAB` |
+| 文件信息 `dirvish-file-info-menu` | `f` | `S-TAB` |
+| 子树展开 `dirvish-subtree-toggle` | `TAB` / `l` | `TAB` |
 | 总菜单 `dirvish-dispatch` | `?` | `~` |
 | 刷新 | `g` | `g r` |
 | `wdired` | `C-c C-e` | 不变 |
