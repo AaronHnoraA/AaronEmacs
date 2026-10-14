@@ -16,7 +16,7 @@ reconstructing the system from scattered Elisp:
 - `docs/remote-framework.md` is authoritative for logical `/fs` paths,
   target/pipeline/backend/session routing, routed processes and channels, and
   environment/PATH capsules.
-- `docs/remote-files.md` covers temporary machines and the rsync/sshfs file
+- `docs/remote-files.md` covers temporary machines and the rsync file
   manager built on that framework.
 - `docs/remote-parity.md` defines what “VS Code Remote-level” completion means;
   a registered capability without local, remote, and resilience tests is not
@@ -178,13 +178,17 @@ Keep these rules:
   them and their sessions.  Temporary machines (`remote-machines.el`) are
   runtime state under `var/remote/`, stored passwords included; never move
   them into `etc/` or write a credential anywhere else.
-- A client-side bulk tool (rsync, sshfs) addresses a folder by placement only:
+- A client-side bulk tool (rsync) addresses a folder by placement only:
   a plain path when `remote-client-file-name` answers, otherwise the backend's
   `:client-shell`.  Go through `remote-transfer` rather than building an SSH
   command in a consumer.  Such a tool uses a connection of its own, never the
   editing session's control socket, and a backend offering neither is refused,
-  not served from the client's disk.  Transfers and mounts end with their
-  target and are not rerun by transport recovery.
+  not served from the client's disk.  Transfers end with their target and
+  are not rerun by transport recovery.
+- A feature must not need a change to the operating system: no kernel or
+  system extension, no lowered boot security policy, no privileged install.
+  Use tools that run as the user, and drop a capability rather than depend on
+  one that does not (sshfs/macFUSE mounts were removed for this reason).
 - A feature is not complete merely because the local path works or a capability
   symbol exists.  Apply the local/remote/resilience criteria in
   `docs/remote-parity.md`, and add parity tests for every new shared contract.

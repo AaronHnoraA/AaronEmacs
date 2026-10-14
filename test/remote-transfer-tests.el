@@ -1,4 +1,4 @@
-;;; remote-transfer-tests.el --- Machines, transfers and mounts -*- lexical-binding: t; -*-
+;;; remote-transfer-tests.el --- Machines and transfers -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
@@ -49,10 +49,7 @@
            (expand-file-name "askpass.sh" directory))
           (remote-machines--list nil)
           (remote-machines--loaded nil)
-          (remote-transfer-mount-directory
-           (expand-file-name "mounts/" directory))
           (remote-transfer-jobs nil)
-          (remote-transfer-mounts (make-hash-table :test #'equal))
           (remote-config-file (expand-file-name "remote.json" directory)))
      (unwind-protect
          (progn
@@ -274,8 +271,6 @@
                  "ssh -o 'IdentityFile=/a b/key' -p 22"))
   (should-error (remote-transfer--rsh-string '("ssh" "it's"))
                 :type 'remote-backend-unsupported)
-  (should (equal (remote-transfer--mount-option "ssh -J a,b c\\d")
-                 "ssh\\ -J\\ a\\,b\\ c\\\\d"))
   (should (equal (remote-transfer--destination-host "u@2001:db8::1")
                  "u@[2001:db8::1]"))
   (should (equal (remote-transfer--destination-host "u@host") "u@host")))
@@ -421,39 +416,6 @@ rsync really speaks its protocol over the command the backend handed out."
       (should-not (remote-transfer-job-kill-timer job))
       (should-not (remote-transfer-jobs-for-target "lab" t)))))
 
-(ert-deftest remote-transfer-mount-of-a-client-folder-mounts-nothing ()
-  (remote-transfer-test-with-registry
-    (should (equal (remote-transfer-mount directory) directory))
-    (should (= (hash-table-count remote-transfer-mounts) 0))
-    (should-not (file-exists-p remote-transfer-mount-directory))))
-
-(ert-deftest remote-transfer-failed-mount-releases-everything ()
-  (remote-transfer-test-with-registry
-    (remote-machines-add (remote-transfer-test--machine))
-    (let* ((tool (expand-file-name "sshfs" directory))
-           (exec-path (cons directory exec-path))
-           (remote--client-exec-path (cons directory exec-path))
-           settled)
-      ;; A mount tool that refuses, as an unapproved macFUSE does.
-      (with-temp-file tool
-        (insert "#!/bin/sh\necho 'mount refused' >&2\nexit 1\n"))
-      (set-file-modes tool #o700)
-      (let* ((mount (remote-transfer-mount
-                     "/fs:lab:/srv/data"
-                     (lambda (mount) (setq settled mount))))
-             (mountpoint (remote-transfer-mount-mountpoint mount)))
-        (should (eq (remote-transfer-mount-state mount) 'mounting))
-        (should (remote-transfer-mount-get "/fs:lab:/srv/data/"))
-        (with-timeout (10 (error "Mount did not settle"))
-          (while (not settled) (accept-process-output nil 0.05)))
-        (should (eq (remote-transfer-mount-state mount) 'failed))
-        (should (string-match-p "mount refused"
-                                (remote-transfer-mount-error mount)))
-        (should-not (remote-transfer-mount-timer mount))
-        (should-not (remote-transfer-mount-get "/fs:lab:/srv/data/"))
-        (should-not (file-exists-p mountpoint))
-        (kill-buffer (remote-transfer-mount-log-buffer mount))))))
-
 (ert-deftest remote-files-session-owns-what-it-starts ()
   "A session copies between its panes and leaves nothing behind on quit."
   (skip-unless (remote-client-executable-find "rsync"))
@@ -514,30 +476,6 @@ rsync really speaks its protocol over the command the backend handed out."
         (set-window-configuration before)
         (when (get-buffer "*Remote Transfers*")
           (kill-buffer "*Remote Transfers*"))))))
-
-(ert-deftest remote-transfer-mount-that-never-appears-is-given-up ()
-  (remote-transfer-test-with-registry
-    (remote-machines-add (remote-transfer-test--machine))
-    (let* ((tool (expand-file-name "sshfs" directory))
-           (remote--client-exec-path (cons directory exec-path))
-           (remote-transfer-mount-timeout 0.5)
-           settled)
-      ;; A mount tool that waits forever, as one behind a system dialog does.
-      (with-temp-file tool (insert "#!/bin/sh\nexec sleep 60\n"))
-      (set-file-modes tool #o700)
-      (let* ((mount (remote-transfer-mount
-                     "/fs:lab:/srv/data"
-                     (lambda (mount) (setq settled mount))))
-             (process (remote-transfer-mount-process mount)))
-        (with-timeout (10 (error "Mount was never given up"))
-          (while (not settled) (accept-process-output nil 0.05)))
-        (should (eq (remote-transfer-mount-state mount) 'failed))
-        (should-not (process-live-p process))
-        (should (string-match-p "no mount appeared"
-                                (remote-transfer-mount-error mount)))
-        (should (= (hash-table-count remote-transfer-mounts) 0))
-        (should-not (file-exists-p (remote-transfer-mount-mountpoint mount)))
-        (kill-buffer (remote-transfer-mount-log-buffer mount))))))
 
 (ert-deftest remote-transfer-live-round-trip ()
   "Upload, download and compare against a real SSH target."

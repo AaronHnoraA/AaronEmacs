@@ -4,7 +4,8 @@
 
 - **临时机器**：手动输入地址和密码/密钥就能用的 target，记在 `var/` 里；
 - **文件管理器**：本机文件夹和 target 文件夹并排，用 rsync 上传、下载、同步，
-  用 sshfs 挂载，全部异步并显示进度。
+  全部异步并显示进度。只用普通的用户态命令行工具，不挂载文件系统，不需要
+  任何系统扩展或系统设置改动。
 
 ## 1. 临时机器
 
@@ -48,8 +49,7 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 |---|---|
 | `machines.json` | 机器列表，**含明文密码**，权限 `0600` |
 | `machines.authinfo` | 由上面生成的 netrc，TRAMP 通过 auth-source 读它；权限 `0600` |
-| `askpass.sh` | 给 rsync/sshfs 用的 askpass 小脚本，本身不含密码 |
-| `mounts/` | sshfs 挂载点，卸载后删除 |
+| `askpass.sh` | 给 rsync 用的 askpass 小脚本，本身不含密码 |
 
 密码是明文存的，只靠文件权限保护；这是“在 `var` 里记住”换来的代价。介意的
 机器请用密钥登录，或者添加后按 `p` 忘记密码（之后每次连接 TRAMP 会问你，而
@@ -92,8 +92,6 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 | `o` | 跳到另一个 pane |
 | `l` / `r` | 换本机 / target 文件夹 |
 | `t` | 重新显示传输队列 |
-| `m` / `u` | 用 sshfs 挂载 / 卸载 target pane 的文件夹 |
-| `f` | 在 Finder 里打开挂载点 |
 | `q` | 退出并释放资源 |
 
 `s` 和 `S` 不会直接动手：先做一次 rsync 演练，把将要发生的每一项改动列在一个
@@ -117,16 +115,14 @@ buffer 里（`*deleting` 开头的是要删除的），按 `C-c C-c` 才执行�
 菜单里按 `q`，或直接关掉这个 frame。会话只收回它自己起的东西：
 
 1. 还在跑的传输：问一次是否取消；不取消就不退出；
-2. 这个 target 的 sshfs 挂载全部卸载；
-3. 关闭会话建的两个 Dired、传输队列窗口，恢复原来的窗口布局；
-4. 关闭会话打开的 workspace；
-5. 如果连接是这次会话建立的，而且这个 target 上没有别的 buffer 或 workspace，
+2. 关闭会话建的两个 Dired、传输队列窗口，恢复原来的窗口布局；
+3. 关闭会话打开的 workspace；
+4. 如果连接是这次会话建立的，而且这个 target 上没有别的 buffer 或 workspace，
    就断开它。打开会话之前就连着的 target、或期间从 pane 里打开了文件的
    target，保持连接。
 
-此外，在 Remote 面板上显式断开一个 target（`C`）会取消它的传输并卸载它的
-挂载；退出 Emacs 时也会卸载。Emacs 崩溃留下的挂载，下次挂同一个文件夹时先
-清掉。
+此外，在 Remote 面板上显式断开一个 target（`C`）会取消它的传输；退出 Emacs
+时还在跑的传输随之结束。
 
 ### 依赖
 
@@ -135,24 +131,25 @@ buffer 里（`*deleting` 开头的是要删除的），按 `C-c C-c` 才执行�
 | 工具 | 用途 | 说明 |
 |---|---|---|
 | `rsync` | 所有传输 | 需要 3.1 以上才有整体进度；macOS 自带的 openrsync 只能显示单个文件的进度。Homebrew 的 `rsync` 即可。**target 上也要有 `rsync`**，版本不限（macOS target 自带的 openrsync 也可以）；本机 rsync 低于 3.2.4 时会改用 `-s` 保护带空格的远程文件名，那时 target 必须是正牌 rsync |
-| `ssh` | 传输和挂载的连接 | 密码登录靠 `SSH_ASKPASS_REQUIRE`，需要 OpenSSH 8.4 以上 |
-| `sshfs` + macFUSE | 挂载 | 只有 `m` 需要。第一次挂载 macOS 会要求在“系统设置 → 隐私与安全性”里批准 macFUSE 的系统扩展，批准前挂载会一直等待，`remote-transfer-mount-timeout`（默认 20 秒）后放弃并提示 |
+| `ssh` | 传输的连接 | 密码登录靠 `SSH_ASKPASS_REQUIRE`，需要 OpenSSH 8.4 以上 |
 
 ### 限制
 
 - 两个不同 target 之间不能直接传（rsync 不支持两端都是远程），经本机文件夹
   中转；
-- 传输和挂载用自己的 SSH 连接，不走编辑会话的 ControlMaster，所以大文件不会
+- 传输用自己的 SSH 连接，不走编辑会话的 ControlMaster，所以大文件不会
   卡住编辑，但也意味着每次传输各登录一次；
 - 需要输入密钥口令而又没有 ssh-agent 的密钥，传输工具没有终端可问，会登录
-  失败。先 `ssh-add`。
+  失败。先 `ssh-add`；
+- 不提供 sshfs 挂载。在 macOS 上它依赖 macFUSE，需要降低启动安全策略或启用
+  系统扩展，而上传、下载、同步和浏览都不需要它。
 
 ## 3. 实现
 
 | 模块 | 责任 |
 |---|---|
 | `lisp/remote/remote-machines.el` | 临时机器的存储、管理列表，以及作为 target 来源的注册 |
-| `lisp/remote/remote-transfer.el` | rsync 任务、进度解析、传输队列、sshfs 挂载 |
+| `lisp/remote/remote-transfer.el` | rsync 任务、进度解析、传输队列 |
 | `lisp/remote/remote-files.el` | 双 pane 会话和命令菜单 |
 
 框架为此增加的两个契约见 [remote-framework.md](remote-framework.md) 的

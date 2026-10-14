@@ -71,7 +71,7 @@ help:
 	  '  make health-native        Run native-compile smoke check' \
 	  '  make remote-test          Run isolated remote framework ERT suites' \
 	  '  make remote-source-test   Run source helper and workspace lifecycle checks' \
-	  '  make remote-transfer-test Run temporary machine, bulk transfer and mount checks' \
+	  '  make remote-transfer-test Run temporary machine, and bulk transfer checks' \
 	  '  make remote-contract-test Run remote upgrade/provider contract tests' \
 	  '  make remote-conformance-test Compare /fs:local semantics with native APIs' \
 	  '  make remote-byte-check    Strictly byte-compile remote code in a temp dir' \

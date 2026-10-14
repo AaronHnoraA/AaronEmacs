@@ -11,8 +11,8 @@
 ;; Machines are runtime state, not configuration.  They live in
 ;; `remote-machines-file' under var/, which also holds a stored password.
 ;; Two files are derived from it: a netrc file that TRAMP reads through
-;; auth-source, and an askpass helper for client tools such as rsync and
-;; sshfs that open a connection of their own.  `remote-machines' is the
+;; auth-source, and an askpass helper for client tools such as rsync that
+;; open a connection of their own.  `remote-machines' is the
 ;; management entry.
 
 ;;; Code:

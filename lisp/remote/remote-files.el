@@ -8,7 +8,7 @@
 ;; through `remote-transfer', which never blocks the editor.
 ;;
 ;; A session belongs to its frame.  Quitting it ends what it started and
-;; nothing else: its running transfers, its mounts, the workspace it opened
+;; nothing else: its running transfers, the workspace it opened
 ;; and, when the session made the connection and nothing else uses the
 ;; target, the connection itself.
 
@@ -282,60 +282,6 @@ and applied on request."
      (side . bottom)
      (window-height . ,remote-files-queue-height))))
 
-;;; Mounts
-
-(defun remote-files--mount (session)
-  "Return the live mount of SESSION's remote pane folder, if any."
-  (remote-transfer-mount-get (remote-files--pane-directory session 'remote)))
-
-(defun remote-files--reveal (directory)
-  "Hand client DIRECTORY to the system file browser, or to Dired."
-  (if-let* ((open (remote-client-executable-find "open")))
-      (let ((default-directory temporary-file-directory)
-            (process-environment (remote-client-process-environment)))
-        (call-process open nil 0 nil directory))
-    (dired-other-window directory)))
-
-(defun remote-files-mount ()
-  "Mount the remote pane's folder on this machine for other programs."
-  (interactive)
-  (let* ((session (remote-files--require-session))
-         (directory (remote-files--pane-directory session 'remote))
-         (mount
-          (remote-transfer-mount
-           directory
-           (lambda (mount)
-             (if (eq (remote-transfer-mount-state mount) 'mounted)
-                 (message "Mounted %s at %s"
-                          (remote-files--label directory)
-                          (abbreviate-file-name
-                           (remote-transfer-mount-mountpoint mount)))
-               (message "Mount of %s failed: %s"
-                        (remote-files--label directory)
-                        (remote-transfer-mount-error mount)))))))
-    (if (stringp mount)
-        (message "%s is already a folder of this machine" mount)
-      (when (eq (remote-transfer-mount-state mount) 'mounting)
-        (message "Mounting %s..." (remote-files--label directory))))))
-
-(defun remote-files-unmount ()
-  "Unmount the remote pane's folder."
-  (interactive)
-  (let ((mount (or (remote-files--mount (remote-files--require-session))
-                   (user-error "This folder is not mounted"))))
-    (remote-transfer-unmount mount)
-    (message "Unmounted %s"
-             (abbreviate-file-name (remote-transfer-mount-mountpoint mount)))))
-
-(defun remote-files-reveal-mount ()
-  "Open the mounted remote folder in the system file browser."
-  (interactive)
-  (let ((mount (or (remote-files--mount (remote-files--require-session))
-                   (user-error "Mount this folder first"))))
-    (unless (eq (remote-transfer-mount-state mount) 'mounted)
-      (user-error "The mount is not ready yet"))
-    (remote-files--reveal (remote-transfer-mount-mountpoint mount))))
-
 ;;; Session lifetime
 
 (defun remote-files--target-in-use-p (target-id ignored-buffers)
@@ -375,9 +321,6 @@ Running transfers are cancelled after a question, or at once with FORCE."
                              (if (cdr running) "s" "")))))
       (user-error "Session kept; its transfers are still running"))
     (mapc #'remote-transfer-cancel running)
-    (dolist (mount (hash-table-values remote-transfer-mounts))
-      (when (equal (remote-transfer-mount-target-id mount) target-id)
-        (remote-transfer-unmount mount)))
     (set-frame-parameter nil 'remote-files-session nil)
     (when-let* ((queue (get-buffer "*Remote Transfers*")))
       (dolist (window (get-buffer-window-list queue nil (selected-frame)))
@@ -505,10 +448,6 @@ frame, show its commands instead."
     ("l" "Local folder" remote-files-set-local)
     ("r" "Remote folder" remote-files-set-remote)
     ("t" "Transfer queue" remote-files-show-queue)]
-   ["Mount (sshfs)"
-    ("m" "Mount remote folder" remote-files-mount)
-    ("u" "Unmount" remote-files-unmount)
-    ("f" "Reveal mount" remote-files-reveal-mount)]
    ["Session"
     ("q" "Quit and release" remote-files-quit)]])
 

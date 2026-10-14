@@ -41,7 +41,7 @@ channels.
 - [dev-guide.md](dev-guide.md) Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
 - [workbench-tools.md](workbench-tools.md) Adopted Xenodium editing, file, GitHub, Bazel, calendar, Org, and macOS workbenches, with keybindings and design boundaries.
 - [remote-framework.md](remote-framework.md) Core `/fs` identity plus target/pipeline/backend/session routing, process and channel APIs, compatibility boundaries, and current implementation gaps.
-- [remote-files.md](remote-files.md) Temporary machines remembered under `var/`, and the two-pane file manager: rsync upload/download/sync with progress, sshfs mounts, and what a session releases on quit.
+- [remote-files.md](remote-files.md) Temporary machines remembered under `var/`, and the two-pane file manager: rsync upload/download/sync with progress, and what a session releases on quit.
 - [remote-io-review.md](remote-io-review.md) `emacs-io` audit, adopted resource ideas, rejected ownership/POSIX shortcuts, and Remote performance criteria.
 - [remote-parity.md](remote-parity.md) VS Code Remote-level acceptance matrix, current coverage, completion criteria, and staged roadmap.
 - [codex-session-lifecycle.md](codex-session-lifecycle.md) ACP session reuse, Codex Remote ownership limits, and the optional mobile-to-Noema message bridge.

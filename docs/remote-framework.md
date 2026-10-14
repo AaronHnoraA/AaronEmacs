@@ -307,7 +307,7 @@ backend 负责这些边界：
 - 命令、工作目录、环境和 executable 形式的执行准备；
 - async `make-process` plan 与 client-local stdio bridge；
 - client → target 大文件的 backend-native 批量传输；
-- 客户端批量工具（rsync、sshfs）到达 target 的独立连接（`:client-shell`）；
+- 客户端批量工具（rsync）到达 target 的独立连接（`:client-shell`）；
 - 可选的 network process、network stream 与 port forward；
 - backend/transport/operation 错误分类。
 
@@ -695,7 +695,7 @@ handler，这个 API 只用于 JDTLS/Pyright 等版本化工具包。
 
 ### 客户端批量工具
 
-rsync、sshfs 这类工具自己建立到 target 的连接，不经过 file-name handler。它们的
+rsync 这类工具自己建立到 target 的连接，不经过 file-name handler。它们的
 入口是 `remote-transfer`，寻址只靠两个 placement 查询，不看 target 名或 backend
 ID：
 
@@ -717,13 +717,13 @@ ID：
 (remote-transfer-start
  '("/fs:local:/Users/hc/site/") "/fs:lab:/srv/www/"
  :contents t :delete t :dry-run t)      ; 只列出将发生的改动
-(remote-transfer-mount "/fs:lab:/srv/data/" callback)
 ```
 
-传输任务和挂载归各自的 target：进程带 `remote-route` 属性，显式断开时由
-`remote-workspace-disconnect-target` 结束；`remote-target-disconnect-hook` 再取消
-任务并卸载挂载，`kill-emacs-hook` 卸载全部挂载。sshfs 以前台方式运行，进程即
-挂载，结束其一即结束另一个。它们**不**随传输恢复自动重跑：断线后任务以失败
+传输任务归它的 target：进程带 `remote-route` 属性，显式断开时由
+`remote-workspace-disconnect-target` 结束，`remote-target-disconnect-hook` 再把
+任务标为已取消。这一层只用普通用户态工具，不挂载文件系统，也不引入需要系统
+扩展或改动系统安全设置的依赖（例如 macOS 上的 sshfs/macFUSE）。任务**不**随
+传输恢复自动重跑：断线后任务以失败
 结束，重跑由用户在队列里决定（`--partial` 使其续传）。使用方式见
 [remote-files.md](remote-files.md)。
 
@@ -1308,7 +1308,7 @@ remote-framework.el       public library entry
 ```
 
 `remote-config.el` 与 `remote-board.el` 是可选集成层；`remote-machines.el`
-（临时机器这一 target 来源）、`remote-transfer.el`（客户端批量传输与挂载）和
+（临时机器这一 target 来源）、`remote-transfer.el`（客户端批量传输）和
 `remote-files.el`（双 pane 文件管理 UI）同属这一层，只调用上面的公共 API。direnv、Eglot、Lean、
 Noema 等消费者留在框架外，只调用公共 API。
 

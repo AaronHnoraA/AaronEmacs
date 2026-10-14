@@ -482,11 +482,10 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
 
 - [var/tramp](../var/tramp)
 
-### 临时机器与挂载点
+### 临时机器
 
 [var/remote](../var/remote) 保存手动添加的临时机器：`machines.json`（含明文密码，
-权限 `0600`）、由它生成的 `machines.authinfo` 和 `askpass.sh`，以及 sshfs 挂载点
-目录 `mounts/`。不要手改 `machines.authinfo`，它在每次保存时重写；增删改走
+权限 `0600`）、由它生成的 `machines.authinfo` 和 `askpass.sh`。不要手改 `machines.authinfo`，它在每次保存时重写；增删改走
 `M-x remote-machines`。整个目录删掉等于忘记全部临时机器。备份 `var/` 时注意
 这里有凭据。见 [remote-files.md](remote-files.md)。
 

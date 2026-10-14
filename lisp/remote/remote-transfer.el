@@ -1,4 +1,4 @@
-;;; remote-transfer.el --- Queued bulk transfers and client mounts -*- lexical-binding: t; -*-
+;;; remote-transfer.el --- Queued bulk transfers -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
@@ -7,16 +7,16 @@
 ;;
 ;; `remote-transfer-start' copies or synchronizes with rsync as an
 ;; asynchronous job that reports progress; `remote-transfer-list' is the
-;; queue.  `remote-transfer-mount' exposes a target directory to client-side
-;; programs through sshfs.
+;; queue.
 ;;
 ;; Neither names a machine or a backend.  A directory the client reads
 ;; directly (`remote-client-file-name') is passed as a plain path; any other
 ;; is reached through the backend's `:client-shell'.  A backend that offers
 ;; neither is refused, never silently served from the client's own disk.
 ;;
-;; Jobs and mounts belong to their targets: an explicit disconnect ends them,
-;; and so does leaving Emacs.
+;; A job belongs to its targets: an explicit disconnect ends it, and so does
+;; leaving Emacs.  Nothing here mounts a filesystem or needs a system
+;; extension; the tools are ordinary user programs.
 
 ;;; Code:
 
@@ -29,7 +29,7 @@
 (require 'remote-backend)
 
 (defgroup remote-transfer nil
-  "Queued bulk transfers and client-side mounts."
+  "Queued bulk transfers."
   :group 'remote)
 
 (defcustom remote-transfer-history-limit 40
@@ -42,20 +42,8 @@
   :type 'integer
   :group 'remote-transfer)
 
-(defcustom remote-transfer-mount-timeout 20
-  "Seconds a mount may take to appear before it is given up."
-  :type 'number
-  :group 'remote-transfer)
-
-(defvar remote-transfer-mount-directory
-  (expand-file-name "var/remote/mounts/" user-emacs-directory)
-  "Directory under which target directories are mounted.")
-
 (defvar remote-transfer-finished-functions nil
   "Functions called with a transfer job once it has ended.")
-
-(defvar remote-transfer-mount-functions nil
-  "Functions called with a mount whenever its state changes.")
 
 (cl-defstruct (remote-transfer-job
                (:constructor remote-transfer-job--create))
@@ -63,16 +51,8 @@
   state percent rate eta started finished exit-status process pending
   log-buffer callback kill-timer)
 
-(cl-defstruct (remote-transfer-mount
-               (:constructor remote-transfer-mount--create))
-  logical target-id mountpoint process state timer deadline log-buffer
-  callback)
-
 (defvar remote-transfer-jobs nil
   "Transfer jobs, newest first.")
-
-(defvar remote-transfer-mounts (make-hash-table :test #'equal)
-  "Client mounts keyed by logical directory.")
 
 (defvar remote-transfer--next-id 0)
 
@@ -442,12 +422,9 @@ NAME labels the job in the queue.  CALLBACK receives the job when it ends."
     (remote-transfer--launch copy)))
 
 (defun remote-transfer--target-disconnected (target-id _reason)
-  "End the transfers and mounts that belong to TARGET-ID."
+  "End the transfers that belong to TARGET-ID."
   (dolist (job (remote-transfer-jobs-for-target target-id t))
-    (remote-transfer-cancel job))
-  (dolist (mount (hash-table-values remote-transfer-mounts))
-    (when (equal (remote-transfer-mount-target-id mount) target-id)
-      (remote-transfer-unmount mount))))
+    (remote-transfer-cancel job)))
 
 (add-hook 'remote-target-disconnect-hook
           #'remote-transfer--target-disconnected)
@@ -608,213 +585,6 @@ the finished ones."
   "Show the bulk transfer queue."
   (interactive)
   (pop-to-buffer (remote-transfer-list-buffer)))
-
-;;; Mounts
-
-(defun remote-transfer--mounted-p (directory)
-  "Return non-nil when DIRECTORY is a mount point on this machine."
-  (let ((here (file-attributes directory))
-        (parent (file-attributes
-                 (file-name-directory (directory-file-name directory)))))
-    (and here parent
-         (not (equal (file-attribute-device-number here)
-                     (file-attribute-device-number parent))))))
-
-(defun remote-transfer--mountpoint (logical)
-  "Return the client directory on which LOGICAL is mounted."
-  (file-name-as-directory
-   (expand-file-name
-    (format "%s-%s"
-            (remote-file-name-target logical)
-            (substring (secure-hash 'sha1 logical) 0 8))
-    remote-transfer-mount-directory)))
-
-(defun remote-transfer--detach (mountpoint)
-  "Detach whatever is mounted on MOUNTPOINT, returning non-nil on success."
-  (let ((default-directory temporary-file-directory)
-        (process-environment (remote-client-process-environment))
-        (exec-path (remote-client-exec-path))
-        (directory (directory-file-name mountpoint)))
-    (seq-some
-     (lambda (command)
-       (or (not (remote-transfer--mounted-p mountpoint))
-           (when-let* ((program (executable-find (car command))))
-             (ignore-errors
-               (apply #'call-process program nil nil nil
-                      (append (cdr command) (list directory))))
-             (not (remote-transfer--mounted-p mountpoint)))))
-     '(("umount") ("fusermount" "-u") ("diskutil" "unmount" "force")))))
-
-(defun remote-transfer--mount-option (value)
-  "Return VALUE escaped for one sshfs `-o' option.
-Options are split on commas and the remote shell command on blanks."
-  (replace-regexp-in-string "[\\\\, ]" "\\\\\\&" value))
-
-(defun remote-transfer--mount-settled (mount state)
-  "Move MOUNT to STATE, release what the old state held and tell consumers."
-  (when (timerp (remote-transfer-mount-timer mount))
-    (cancel-timer (remote-transfer-mount-timer mount)))
-  (setf (remote-transfer-mount-timer mount) nil
-        (remote-transfer-mount-state mount) state)
-  (when (memq state '(failed closed))
-    (let ((mountpoint (remote-transfer-mount-mountpoint mount)))
-      (when (eq (gethash (remote-transfer-mount-logical mount)
-                         remote-transfer-mounts)
-                mount)
-        (remhash (remote-transfer-mount-logical mount)
-                 remote-transfer-mounts))
-      (when (and (file-directory-p mountpoint)
-                 (not (remote-transfer--mounted-p mountpoint)))
-        (ignore-errors (delete-directory mountpoint)))
-      (when (and (eq state 'closed)
-                 (buffer-live-p (remote-transfer-mount-log-buffer mount)))
-        (kill-buffer (remote-transfer-mount-log-buffer mount)))))
-  (let ((callback (remote-transfer-mount-callback mount)))
-    (setf (remote-transfer-mount-callback mount) nil)
-    (when callback
-      (condition-case err
-          (funcall callback mount)
-        (error (remote-log 'transfer-callback-error
-                           :error (error-message-string err))))))
-  (run-hook-with-args 'remote-transfer-mount-functions mount))
-
-(defun remote-transfer--mount-poll (mount)
-  "Notice that MOUNT appeared, or give it up after the timeout."
-  (when (eq (remote-transfer-mount-state mount) 'mounting)
-    (cond
-     ((remote-transfer--mounted-p (remote-transfer-mount-mountpoint mount))
-      (remote-transfer--mount-settled mount 'mounted))
-     ((> (float-time) (remote-transfer-mount-deadline mount))
-      (when (buffer-live-p (remote-transfer-mount-log-buffer mount))
-        (with-current-buffer (remote-transfer-mount-log-buffer mount)
-          (goto-char (point-max))
-          (insert
-           (format "no mount appeared within %s seconds; the system may still be waiting for the FUSE extension to be approved\n"
-                   remote-transfer-mount-timeout))))
-      (when (process-live-p (remote-transfer-mount-process mount))
-        (delete-process (remote-transfer-mount-process mount)))))))
-
-(defun remote-transfer-mount-get (directory)
-  "Return the live mount of logical DIRECTORY, if any."
-  (gethash (file-name-as-directory
-            (remote-canonicalize-file-name directory))
-           remote-transfer-mounts))
-
-(defun remote-transfer-mount (directory &optional callback)
-  "Expose logical DIRECTORY to client-side programs and return the mount.
-A directory the client already reads directly returns its client path, a
-string, and mounts nothing.  Otherwise the mount starts without waiting and
-CALLBACK receives it once it is `mounted' or `failed'."
-  (let* ((logical (file-name-as-directory
-                   (remote-canonicalize-file-name directory)))
-         (endpoint (remote-transfer-endpoint logical))
-         (shell (plist-get endpoint :shell))
-         (existing (gethash logical remote-transfer-mounts)))
-    (cond
-     ((not shell) (plist-get endpoint :path))
-     (existing
-      (when (and callback (eq (remote-transfer-mount-state existing) 'mounted))
-        (funcall callback existing))
-      existing)
-     (t
-      (let* ((sshfs (remote-transfer--client-tool "sshfs"))
-             (mountpoint (remote-transfer--mountpoint logical))
-             (log (generate-new-buffer " *remote-transfer mount*"))
-             (mount
-              (remote-transfer-mount--create
-               :logical logical :target-id (plist-get endpoint :target)
-               :mountpoint mountpoint :state 'mounting :log-buffer log
-               :callback callback
-               :deadline (+ (float-time) remote-transfer-mount-timeout)))
-             (process-environment
-              (remote-transfer--client-process-environment
-               (plist-get shell :environment)))
-             (exec-path (remote-client-exec-path))
-             (default-directory temporary-file-directory))
-        (condition-case err
-            (progn
-              ;; A crashed Emacs leaves its mount behind.
-              (when (and (file-directory-p mountpoint)
-                         (remote-transfer--mounted-p mountpoint))
-                (remote-transfer--detach mountpoint))
-              (make-directory mountpoint t)
-              (set-file-modes remote-transfer-mount-directory #o700)
-              (setf (remote-transfer-mount-process mount)
-                    (make-process
-                     :name (format "remote-mount-%s"
-                                   (plist-get endpoint :target))
-                     :buffer log
-                     ;; In the foreground the process is the mount: ending
-                     ;; one ends the other.
-                     :command
-                     (list sshfs "-f"
-                           (concat (remote-transfer--destination-host
-                                    (plist-get shell :destination))
-                                   ":" (plist-get endpoint :path))
-                           (directory-file-name mountpoint)
-                           "-o"
-                           (concat
-                            "ssh_command="
-                            (remote-transfer--mount-option
-                             (string-join (plist-get shell :command) " ")))
-                           "-o" "reconnect"
-                           "-o"
-                           (concat "volname="
-                                   (remote-transfer--mount-option
-                                    (plist-get endpoint :target))))
-                     :connection-type 'pipe
-                     :sentinel
-                     (lambda (process _event)
-                       (unless (process-live-p process)
-                         (remote-transfer--mount-settled
-                          mount
-                          (if (eq (remote-transfer-mount-state mount)
-                                  'mounting)
-                              'failed
-                            'closed)))))))
-          (error
-           (kill-buffer log)
-           (ignore-errors (delete-directory mountpoint))
-           (signal (car err) (cdr err))))
-        (when-let* ((route (plist-get shell :route)))
-          (process-put (remote-transfer-mount-process mount)
-                       'remote-route route))
-        (set-process-query-on-exit-flag
-         (remote-transfer-mount-process mount) nil)
-        (puthash logical mount remote-transfer-mounts)
-        (setf (remote-transfer-mount-timer mount)
-              (run-with-timer 0.3 0.3 #'remote-transfer--mount-poll mount))
-        mount)))))
-
-(defun remote-transfer-mount-error (mount)
-  "Return what the mount tool printed for MOUNT, trimmed."
-  (let ((buffer (remote-transfer-mount-log-buffer mount)))
-    (if (buffer-live-p buffer)
-        (string-trim (with-current-buffer buffer (buffer-string)))
-      "")))
-
-(defun remote-transfer-unmount (mount)
-  "Detach MOUNT and release its process and directory."
-  (let ((process (remote-transfer-mount-process mount))
-        (mountpoint (remote-transfer-mount-mountpoint mount)))
-    (unless (memq (remote-transfer-mount-state mount) '(failed closed))
-      (setf (remote-transfer-mount-state mount) 'closing))
-    (when (remote-transfer--mounted-p mountpoint)
-      (remote-transfer--detach mountpoint))
-    (if (process-live-p process)
-        ;; The sentinel settles the mount once the process is gone.
-        (delete-process process)
-      (unless (memq (remote-transfer-mount-state mount) '(failed closed))
-        (remote-transfer--mount-settled mount 'closed)))))
-
-(defun remote-transfer-shutdown ()
-  "Detach every mount before Emacs exits; its transfers die with it."
-  (dolist (mount (hash-table-values remote-transfer-mounts))
-    (condition-case nil
-        (remote-transfer-unmount mount)
-      ((error quit) nil))))
-
-(add-hook 'kill-emacs-hook #'remote-transfer-shutdown)
 
 (provide 'remote-transfer)
 ;;; remote-transfer.el ends here
