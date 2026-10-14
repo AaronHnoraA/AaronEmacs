@@ -14,6 +14,7 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 
 | 入口 | 作用 |
 |---|---|
+| 任何选 target 的提示里选 `临时机器`（`SPC o r`、`M-x my/remote-connectboard`、`SPC o f` 等） | 输入一台机器，记住并直接用它继续 |
 | Remote 面板 `m`，或 `M-x remote-machines-add` | 记住一台机器 |
 | Remote 面板 `M`，`SPC o M`，或 `M-x remote-machines` | 管理列表 |
 

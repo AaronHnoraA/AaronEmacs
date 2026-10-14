@@ -21,6 +21,7 @@
 (require 'remote-machines)
 (require 'remote-transfer)
 (require 'remote-files)
+(require 'remote-board)
 
 (when (boundp 'comp-enable-subr-trampolines)
   (setq comp-enable-subr-trampolines nil))
@@ -104,6 +105,31 @@
     (remote-machines-remove "lab")
     (should-not (remote-get-target "lab"))
     (should-not (file-exists-p remote-machines-auth-file))))
+
+(ert-deftest remote-read-target-offers-to-remember-a-machine ()
+  "Every target prompt is also the entry for a machine typed by hand."
+  (remote-transfer-test-with-registry
+    (let ((remote-target-history nil)
+          offered)
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt collection &rest _)
+                   (setq offered collection)
+                   (push remote-read-target-new-machine remote-target-history)
+                   remote-read-target-new-machine))
+                ((symbol-function 'remote-machines--read-machine)
+                 (lambda (&rest _) (remote-transfer-test--machine))))
+        (let ((target (remote-read-target "Open target: " t)))
+          (should (member remote-read-target-new-machine offered))
+          (should (equal (remote-target-id target) "lab"))
+          (should (remote-machines-target-p target))
+          (should (file-exists-p remote-machines-file))
+          (should-not remote-target-history)))
+      ;; Next time it is listed as an ordinary, marked, choice.
+      (cl-letf (((symbol-function 'completing-read)
+                 (lambda (_prompt collection &rest _)
+                   (seq-find (lambda (name) (string-prefix-p "Lab" name))
+                             collection))))
+        (should (equal (remote-target-id (remote-read-target)) "lab"))))))
 
 (ert-deftest remote-machines-do-not-replace-a-configured-target ()
   (remote-transfer-test-with-registry

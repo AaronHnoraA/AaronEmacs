@@ -111,24 +111,40 @@ reported when the user tries to open it again.")
              (remote-target-label left)
              (remote-target-label right))))))
 
+(defconst remote-read-target-new-machine
+  (format "%-24s %s" "临时机器" "输入地址和密码/密钥，记住为新 target")
+  "Candidate of `remote-read-target' that remembers a machine typed by hand.")
+
 (defun remote-read-target (&optional prompt omit-local)
   "Read and return a target.
-PROMPT customizes the minibuffer prompt.  OMIT-LOCAL excludes `local'."
+PROMPT customizes the minibuffer prompt.  OMIT-LOCAL excludes `local'.
+One candidate is not a target: it asks for a machine's address and sign-in,
+remembers it as a temporary machine and returns that new target."
   (let (table)
     (dolist (target (remote-target-list))
       (unless (and omit-local
                    (equal (remote-target-id target) "local"))
         (push (cons
-               (format "%-24s %s"
+               (format "%-24s %s%s"
                        (remote-target-label target)
-                       (remote-target-id target))
+                       (remote-target-id target)
+                       (if (remote-machines-target-p target)
+                           "  (临时机器)"
+                         ""))
                target)
               table)))
-    (cdr
-     (assoc
-      (completing-read
-       (or prompt "Target: ") table nil t nil 'remote-target-history)
-      table))))
+    (let ((choice
+           (completing-read
+            (or prompt "Target: ")
+            (cons remote-read-target-new-machine (mapcar #'car table))
+            nil t nil 'remote-target-history)))
+      (if (equal choice remote-read-target-new-machine)
+          (progn
+            ;; The pseudo candidate is no target to offer again from history.
+            (setq remote-target-history
+                  (delete choice remote-target-history))
+            (remote-machines-add (remote-machines--read-machine)))
+        (cdr (assoc choice table))))))
 
 (defun remote--route-label (target capability adapter)
   "Return compact route label for TARGET, CAPABILITY, and ADAPTER."
