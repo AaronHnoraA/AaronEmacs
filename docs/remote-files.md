@@ -72,8 +72,8 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 
 | 入口 | 行为 |
 |---|---|
-| target 的 Dired 里 `C-c C-t` | 管理当前文件夹 |
-| `SPC o f` 或 `M-x remote-files` | 在 target 的文件夹里同上；在别处先问管理哪个 target |
+| target 的 Dired 里 `C-c C-t` | 管理当前文件夹。经 `SPC o r` / Remote 面板打开 target 文件夹时，echo 区会提示这个键 |
+| `SPC o f` 或 `M-x remote-files` | 在普通 buffer 里先问管理哪个 target。Dired 里 `SPC` 是移动光标，leader 不可用，用 `C-c C-t` |
 | Remote 面板 `F` | 管理光标所在 target 或文件夹行 |
 | 临时机器列表 `f` | 管理那台机器 |
 
@@ -83,7 +83,8 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 目录是上次在这个 target 上用过的目录，否则是 `remote-files-local-directory`
 （默认 `~/`）。
 
-会话打开期间，`C-c C-t`、`SPC o f` 显示命令菜单：
+会话打开期间，在任一 pane 里按 `C-c C-t` 显示命令菜单（pane 是 Dired，
+`SPC` leader 在那里不可用）：
 
 | 键 | 作用 |
 |---|---|

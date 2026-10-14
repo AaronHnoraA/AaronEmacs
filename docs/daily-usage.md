@@ -480,7 +480,7 @@ bookmark 排在前面。上下移动候选时会预览目标位置，确认后�
 选 target 的提示（`SPC o r`、`SPC o f`）里有一项 `临时机器`：选它就输入地址和
 密码/密钥，记进 `var/remote/` 并直接打开。Remote 面板（`SPC o R`）上：`m` 记住一台手动输入的机器，`M` 管理这些机器，
 `F` 对光标所在 target 打开文件管理器，`t` 看传输队列。文件管理器里
-`C-c C-t` / `SPC o f` 出菜单：`c` 复制标记项到另一边，`s` 同步，`S` 镜像，
+`C-c C-t` 出菜单（Dired 里没有 `SPC` leader）：`c` 复制标记项到另一边，`s` 同步，`S` 镜像，
 `d` 比较，`e` 按需开一个 target 上的终端，`q` 退出并释放连接。传输在后台跑，模式栏显示
 `Xfer:N P%`。完整说明见 [remote-files.md](remote-files.md)。
 

@@ -845,7 +845,15 @@ PORT zero chooses a new free port."
             (unwind-protect
                 (prog1 (find-file logical)
                   (setq opened t)
-                  (remote-board--remember-folder logical))
+                  (remote-board--remember-folder logical)
+                  ;; The folder opens as plain Dired; say where its bulk
+                  ;; transfer commands are.
+                  (when (and (derived-mode-p 'dired-mode)
+                             (not (remote-client-file-name logical)))
+                    (message
+                     "%s"
+                     (substitute-command-keys
+                      "\\[remote-files]: 文件管理（上传 / 下载 / 同步）"))))
               (unless (or opened existing)
                 (remote-workspace-close workspace 'folder-open-failed)))))
       (remote-board--opening-update (remote-target-id target) logical -1))))
