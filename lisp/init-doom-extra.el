@@ -518,23 +518,59 @@ stat-ing every hidden remote file after each agent turn."
 (defconst my/ibuffer-base-formats
   '((mark modified read-only locked
           " " (name 30 30 :left :elide)
+          " " (my-frame 9 9 :left :elide)
           " " (size 9 -1 :right)
           " " (mode 18 18 :left :elide)
           " " (vc-status 10 10 :left)
           " " my-filename-and-process)
-    (mark " " (name 30 -1) " " filename))
+    (mark " " (name 30 -1) " " (my-frame 9 9 :left :elide)
+          " " filename))
   "Aaron's compact Ibuffer columns without graphical icons.")
 
 (defconst my/ibuffer-icon-formats
   '((mark modified read-only locked
           " " (icon 2 2)
           (name 28 28 :left :elide)
+          " " (my-frame 9 9 :left :elide)
           " " (size 9 -1 :right)
           " " (mode 18 18 :left :elide)
           " " (vc-status 10 10 :left)
           " " my-filename-and-process)
-    (mark " " (icon 2 2) (name 28 -1) " " filename))
+    (mark " " (icon 2 2) (name 28 -1)
+          " " (my-frame 9 9 :left :elide) " " filename))
   "Aaron's Ibuffer columns with Material SVG file icons.")
+
+(defun my/ibuffer-buffer-frame-ids (buffer)
+  "Return IDs of frames that have visited user-facing BUFFER."
+  (when (and (buffer-live-p buffer)
+             (my/tab-line-visible-buffer-p buffer))
+    (sort
+     (cl-loop for frame in (frame-list)
+              when (memq buffer (my/frame-buffer-list frame t))
+              collect (my/frame-short-id frame))
+     #'<)))
+
+(defun my/ibuffer-frame-tags (buffer)
+  "Return short frame tags for BUFFER, or an empty infrastructure label."
+  (mapconcat (lambda (id) (format "F%d" id))
+             (my/ibuffer-buffer-frame-ids buffer) ","))
+
+(defun my/ibuffer-frame-sort-key (buffer)
+  "Return BUFFER's frame priority, ID and name for Ibuffer sorting."
+  (let ((ids (my/ibuffer-buffer-frame-ids buffer)))
+    (list (cond ((null ids) 2)
+                ((memq buffer (my/frame-buffer-list (selected-frame) t)) 0)
+                (t 1))
+          (or (car ids) most-positive-fixnum)
+          (buffer-name buffer))))
+
+(defun my/ibuffer-frame-key-less-p (left right)
+  "Return non-nil when frame sort key LEFT precedes RIGHT."
+  (or (< (car left) (car right))
+      (and (= (car left) (car right))
+           (or (< (cadr left) (cadr right))
+               (and (= (cadr left) (cadr right))
+                    (string-lessp (caddr left) (caddr right)))))))
 
 (defun my/ibuffer-material-icons-setup ()
   "Use Material SVG icons without replacing Aaron's custom columns."
@@ -549,6 +585,17 @@ stat-ing every hidden remote file after each agent turn."
 (add-hook 'ibuffer-mode-hook #'my/ibuffer-material-icons-setup)
 
 (with-eval-after-load 'ibuffer
+  (define-ibuffer-column my-frame
+    (:name "Frame" :inline t)
+    (my/ibuffer-frame-tags buffer))
+
+  (define-ibuffer-sorter frame
+    "Sort user buffers by current frame, other frames, then name."
+    (:description "frame")
+    (my/ibuffer-frame-key-less-p
+     (my/ibuffer-frame-sort-key (car a))
+     (my/ibuffer-frame-sort-key (car b))))
+
   (define-ibuffer-column vc-status
     (:name "VC" :inline t)
     (if-let* ((buffer-file-name (buffer-local-value 'buffer-file-name buffer))
@@ -569,6 +616,8 @@ stat-ing every hidden remote file after each agent turn."
      (t "")))
 
   (setq ibuffer-formats my/ibuffer-base-formats)
+
+  (define-key ibuffer-mode-map (kbd "s F") #'ibuffer-do-sort-by-frame)
 
   (define-key ibuffer-mode-map (kbd "V") #'ibuffer-vc-set-filter-groups-by-vc-root)
   (define-key ibuffer-mode-map (kbd "P") #'ibuffer-projectile-set-filter-groups))

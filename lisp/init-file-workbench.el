@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'config)
+(require 'cl-lib)
 (require 'dired)
 (require 'remote-fs)
 (require 'remote-process)
@@ -14,7 +15,7 @@
 
 (declare-function proced-toggle-auto-update "proced" (arg))
 
-(config-defvar my/files-create-parent-directories nil
+(config-defvar my/files-create-parent-directories 'ask
   "Policy for creating missing parent directories of newly visited files."
   :type '(choice (const :tag "Ask" ask)
                  (const :tag "Always" always)
@@ -50,13 +51,12 @@
   "Return file paths selected by the current file-oriented context."
   (cond
    ((derived-mode-p 'dired-mode)
-    (cond
-     ((use-region-p)
-      (my/dired--paths-in-region (region-beginning) (region-end)))
-     ((dired-get-filename nil t)
-      (dired-get-marked-files))
-     (t
-      (list default-directory))))
+    (if (use-region-p)
+        (my/dired--paths-in-region (region-beginning) (region-end))
+      (or (dired-get-marked-files nil 'marked)
+          (when-let* ((file (dired-get-filename nil t)))
+            (list file))
+          (list default-directory))))
    (buffer-file-name
     (list buffer-file-name))
    (t
@@ -115,34 +115,53 @@ With PARENTS-ONLY, copy their de-duplicated parent directories."
   (unless (derived-mode-p 'dired-mode)
     (user-error "This command requires a Dired buffer"))
   (let* ((files (my/files-selected-paths))
-         (name (generate-new-buffer-name
-                (format "*%s selection*"
-                        (file-name-nondirectory
-                         (directory-file-name default-directory)))))
-         (relative (mapcar (lambda (file)
-                             (file-relative-name file default-directory))
-                           files)))
+         (directory default-directory))
     (unless files
       (user-error "No Dired entries selected"))
-    (dired (cons name relative))))
+    (let* ((name (generate-new-buffer-name
+                  (format "*%s selection*"
+                          (file-name-nondirectory
+                           (directory-file-name directory)))))
+           (relative (mapcar (lambda (file)
+                               (file-relative-name file directory))
+                             files))
+           ;; `dired-noselect' otherwise reuses the ordinary Dired buffer for
+           ;; DIRECTORY and replaces its full listing with this selection.
+           (selection
+            (cl-letf (((symbol-function 'dired-find-buffer-nocreate)
+                       (lambda (&rest _) nil)))
+              (dired-noselect (cons directory relative)))))
+      (unless (buffer-live-p selection)
+        (user-error "Dired could not open the selected files"))
+      (with-current-buffer selection
+        (rename-buffer name)
+        ;; This listing is generated anew for each selection.  Let Dired's
+        ;; native q restore its previous window and release this buffer.
+        (setq-local quit-window-kill-buffer t))
+      (pop-to-buffer-same-window selection))))
 
-(defun my/image-crop-dwim ()
-  "Invoke the Emacs image crop UI for the current image buffer."
+(defalias 'file-copy-paths #'my/files-copy-paths
+  "Copy selected file paths; with a prefix, copy their parent directories.")
+(defun file-copy-parent-paths ()
+  "Copy the parent directories of the selected files."
   (interactive)
-  (unless (derived-mode-p 'image-mode)
-    (user-error "This command requires an image buffer"))
-  (call-interactively #'image-crop))
+  (my/files-copy-paths t))
+(defalias 'dired-selected-size #'my/dired-marked-size
+  "Show the total size of selected Dired entries on their target.")
+(defalias 'dired-selection #'my/dired-selection
+  "Show selected Dired entries in a separate temporary listing.")
 
-(transient-define-prefix my/files-dispatch ()
-  "File and Dired utilities."
-  [["Paths"
-    ("y" "copy selected paths" my/files-copy-paths)
-    ("Y" "copy parent directories" (lambda () (interactive) (my/files-copy-paths t)))]
+(transient-define-prefix file-menu ()
+  "Open files and use context-aware file and Dired actions."
+  [["Open"
+    ("o" "open file" file-open)
+    ("O" "open in new frame" file-open-new-frame)]
+   ["Paths"
+    ("y" "copy selected paths" file-copy-paths)
+    ("Y" "copy parent directories" file-copy-parent-paths)]
    ["Dired"
-    ("s" "selected size" my/dired-marked-size)
-    ("v" "selection buffer" my/dired-selection)]
-   ["Image"
-    ("c" "crop current image" my/image-crop-dwim)]])
+    ("s" "selected size" dired-selected-size)
+    ("v" "selection buffer" dired-selection)]])
 
 (with-eval-after-load 'proced
   (add-hook 'proced-mode-hook

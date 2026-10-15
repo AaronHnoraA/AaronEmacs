@@ -7,6 +7,224 @@
 (require 'init-md-roam)
 (require 'noema-agenda)
 
+(ert-deftest noema-roam-temporary-boards-are-owned-by-frame ()
+  (let ((views (make-hash-table :test #'eq))
+        (active-frame 'frame-a)
+        first second)
+    (cl-letf (((symbol-function 'selected-frame)
+               (lambda () active-frame))
+              ((symbol-function 'frame-live-p)
+               (lambda (_frame) t))
+              ((symbol-function 'frame-parameter)
+               (lambda (frame _key) (gethash frame views)))
+              ((symbol-function 'set-frame-parameter)
+               (lambda (frame _key value) (puthash frame value views))))
+      (unwind-protect
+          (progn
+            (setq first (my/noema-roam--prepare-ui-buffer
+                         "*roam-frame-test*" "Report" 'note #'ignore))
+            (should (eq first (my/noema-roam--prepare-ui-buffer
+                               "*roam-frame-test*" "Report" 'note #'ignore)))
+            (setq active-frame 'frame-b
+                  second (my/noema-roam--prepare-ui-buffer
+                          "*roam-frame-test*" "Report" 'note #'ignore))
+            (should-not (eq first second))
+            (with-current-buffer first
+              (should (eq my/noema-roam--ui-owner-frame 'frame-a))
+              (should quit-window-kill-buffer))
+            (with-current-buffer second
+              (should (eq my/noema-roam--ui-owner-frame 'frame-b)))
+            (kill-buffer first)
+            (should-not (gethash 'frame-a views))
+            (should (buffer-live-p second))
+            (my/noema-roam--delete-frame-ui-h 'frame-b)
+            (should-not (buffer-live-p second))
+            (should-not (gethash 'frame-b views)))
+        (dolist (buffer (list first second))
+          (when (buffer-live-p buffer)
+            (kill-buffer buffer)))))))
+
+(ert-deftest noema-roam-temporary-board-q-returns-and-releases-buffer ()
+  (save-window-excursion
+    (let* ((source (generate-new-buffer "*Roam report source*"))
+           (view (my/noema-roam--prepare-ui-buffer
+                  "*roam-quit-test*" "Report" 'note #'ignore)))
+      (unwind-protect
+          (progn
+            (switch-to-buffer source)
+            (select-window
+             (display-buffer view '(display-buffer-same-window)))
+            (call-interactively (key-binding (kbd "q")))
+            (should (eq (window-buffer) source))
+            (should-not (buffer-live-p view)))
+        (when (buffer-live-p view)
+          (kill-buffer view))
+        (kill-buffer source)))))
+
+(ert-deftest noema-roam-async-reports-return-to-origin-frame ()
+  (let ((origin (generate-new-buffer " *roam-report-origin*"))
+        (active-frame 'frame-a)
+        (frame-a-live t)
+        callback rendered)
+    (unwind-protect
+        (with-current-buffer origin
+          (let ((my/noema--ready t))
+            (cl-letf (((symbol-function 'selected-frame)
+                       (lambda () active-frame))
+                      ((symbol-function 'select-frame)
+                       (lambda (frame &optional _norecord)
+                         (setq active-frame frame)))
+                      ((symbol-function 'frame-live-p)
+                       (lambda (frame)
+                         (or (eq frame 'frame-b) frame-a-live)))
+                      ((symbol-function 'my/noema--api-call)
+                       (lambda (_channel _args fn) (setq callback fn)))
+                      ((symbol-function 'my/noema-roam--render-wanted-buffer)
+                       (lambda (&rest _)
+                         (setq rendered (list active-frame (current-buffer)))))
+                      ((symbol-function 'my/noema-roam--render-orphaned-assets-buffer)
+                       (lambda (&rest _)
+                         (setq rendered (list active-frame (current-buffer)))))
+                      ((symbol-function 'my/noema-roam--render-tag-overlap-buffer)
+                       (lambda (&rest _)
+                         (setq rendered (list active-frame (current-buffer))))))
+              (my/noema-roam-report-wanted)
+              (setq active-frame 'frame-b)
+              (funcall callback '((items . [])))
+              (should (equal rendered (list 'frame-a origin)))
+              (should (eq active-frame 'frame-b))
+              (setq active-frame 'frame-a
+                    rendered nil)
+              (my/noema-roam-report-orphaned-assets)
+              (setq active-frame 'frame-b)
+              (funcall callback '((assets . [])))
+              (should (equal rendered (list 'frame-a origin)))
+              (should (eq active-frame 'frame-b))
+              (setq active-frame 'frame-a
+                    rendered nil)
+              (noema-report-tag-overlap)
+              (setq active-frame 'frame-b)
+              (funcall callback '((duplicateCase . [])
+                                  (overlaps . [])
+                                  (tagCount . 0)))
+              (should (equal rendered (list 'frame-a origin)))
+              (should (eq active-frame 'frame-b))
+              (setq active-frame 'frame-a
+                    frame-a-live nil
+                    rendered nil)
+              (my/noema-roam-report-wanted)
+              (setq active-frame 'frame-b)
+              (funcall callback '((items . [])))
+              (should-not rendered))))
+      (kill-buffer origin))))
+
+(ert-deftest noema-reports-menu-connects-wiki-and-emacs-views ()
+  (should (commandp 'noema-reports-menu))
+  (should (member "noema-reports-menu"
+                  (all-completions "noema-reports-menu" obarray #'commandp)))
+  (dolist (entry '(("v" . my/noema-wiki-reports)
+                   ("w" . my/noema-roam-report-wanted)
+                   ("o" . my/noema-roam-report-orphaned)
+                   ("a" . my/noema-roam-report-orphaned-assets)
+                   ("d" . my/noema-roam-report-dead-end)
+                   ("u" . my/noema-roam-report-uncategorized)
+                   ("h" . my/noema-roam-report-most-linked)
+                   ("t" . noema-report-tag-overlap)))
+    (should (eq (plist-get
+                 (cdr (transient-get-suffix 'noema-reports-menu (car entry)))
+                 :command)
+                (cdr entry))))
+  (should (eq (plist-get (cdr (transient-get-suffix 'noema-wiki-menu "!"))
+                         :command)
+              'my/noema-wiki-reports))
+  (should (eq (plist-get (cdr (transient-get-suffix 'noema-wiki-menu "D"))
+                         :command)
+              'noema-reports-menu))
+  (should (eq (plist-get (cdr (transient-get-suffix 'noema-menu "!n"))
+                         :command)
+              'noema-reports-menu)))
+
+(ert-deftest noema-report-tag-overlap-uses-temporary-report-board ()
+  (let (view)
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-buffer)
+                   (lambda (buffer &rest _) (setq view buffer))))
+          (my/noema-roam--render-tag-overlap-buffer
+           '((duplicateCase . [((lower . "research")
+                                (variants . ["Research" "research"]))])
+             (overlaps . [((a . "research") (b . "math")
+                           (aCount . 4) (bCount . 3) (sharedCount . 3)
+                           (containment . 1.0) (jaccard . 0.75))])
+             (tagCount . 5)))
+          (should (buffer-live-p view))
+          (with-current-buffer view
+            (should (derived-mode-p 'my/noema-roam-ui-mode))
+            (should (eq my/noema-roam--ui-owner-frame (selected-frame)))
+            (should quit-window-kill-buffer)
+            (should (eq my/noema-roam-ui-refresh-function
+                        #'noema-report-tag-overlap))
+            (should (string-match-p "Research / research" (buffer-string)))
+            (should (string-match-p "#research  ↔  #math"
+                                    (buffer-string)))
+            (should (string-match-p "3 shared · 4/3 notes"
+                                    (buffer-string)))
+            (should (string-match-p "100% containment · 75% Jaccard"
+                                    (buffer-string)))))
+      (when (buffer-live-p view)
+        (kill-buffer view)))))
+
+(ert-deftest my/noema-roam-new-note-commands-are-interactive ()
+  (dolist (command '(roam-new-note markdown-new-document
+                              my/noema-roam-new-node))
+    (should (commandp command))))
+
+(ert-deftest noema-agenda-entries-are-searchable-and-share-the-menu-route ()
+  "Native and hosted Agenda views have distinct searchable commands."
+  (dolist (command '(noema-agenda noema-agenda-web
+                     noema-agenda-calendar noema-agenda-log
+                     noema-agenda-gantt noema-agenda-projects
+                     noema-agenda-clocktable noema-agenda-lints
+                     noema-agenda-search))
+    (should (commandp command))
+    (should (member (symbol-name command)
+                    (all-completions "noema-agenda" obarray #'commandp))))
+  (should (eq (lookup-key my/noema-roam-map (kbd "A"))
+              #'noema-agenda)))
+
+(ert-deftest my/noema-roam-new-template-candidates-match-note-type ()
+  (with-temp-buffer
+    (my/noema-roam-new-mode)
+    (setq-local my/noema-roam-new--templates
+                '((:key "roam" :name "Linked" :nodeType "roam")
+                  (:key "basic" :name "Plain" :nodeType "regular")
+                  (:key "shared" :name "Shared"))
+                my/noema-roam-new--draft
+                '(:node-type "roam" :kind "note" :template-key "roam"))
+    (should (equal (mapcar #'cdr (my/noema-roam-new--template-candidates))
+                   '("" "roam" "shared")))
+    (setq-local my/noema-roam-new--draft
+                '(:node-type "regular" :kind "default" :template-key "basic"))
+    (should (equal (mapcar #'cdr (my/noema-roam-new--template-candidates))
+                   '("" "basic" "shared")))))
+
+(ert-deftest my/noema-roam-new-switch-type-changes-default-template ()
+  (with-temp-buffer
+    (my/noema-roam-new-mode)
+    (setq-local my/noema-roam-new--templates
+                '((:key "roam" :name "Linked" :nodeType "roam")
+                  (:key "basic" :name "Plain" :nodeType "regular"))
+                my/noema-roam-new--draft
+                '(:node-type "roam" :title "Test" :path "test.md"
+                  :kind "note" :template-key "roam"))
+    (my/noema-roam-new-render)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (&rest _) "regular")))
+      (my/noema-roam-new-edit-type))
+    (should (equal (plist-get my/noema-roam-new--draft :template-key)
+                   "basic"))
+    (should (equal (plist-get my/noema-roam-new--draft :kind)
+                   "default"))))
+
 (defun my/noema-roam-test--write-file (file content)
   "Write CONTENT to FILE, creating parents."
   (make-directory (file-name-directory file) t)
@@ -75,6 +293,200 @@ source: roam/demo/analysis.md
                  my/noema-roam--scan-cache nil)
            ,@body)
 	       (delete-directory root t))))
+
+(ert-deftest noema-move-note-uses-host-move-and-retargets-native-buffer ()
+  (my/noema-roam-test-with-vault
+    (let* ((target-dir (expand-file-name "archive" root))
+           (target (expand-file-name "topology.md" target-dir))
+           (source (find-file-noselect note-file))
+           (my/noema--ready t)
+           calls)
+      (make-directory target-dir)
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/noema-roam--read-note-id)
+                     (lambda (_) "20260605T120000-topology"))
+                    ((symbol-function 'my/noema-roam--slug-to-file)
+                     (lambda (_) note-file))
+                    ((symbol-function 'read-file-name)
+                     (lambda (_prompt dir _default _must-match initial &rest _)
+                       (should (equal dir (file-name-directory note-file)))
+                       (should (equal initial "topology.md"))
+                       target))
+                    ((symbol-function 'my/noema--api-call)
+                     (lambda (channel args callback)
+                       (push (cons channel args) calls)
+                       (rename-file note-file target)
+                       (with-temp-file target (insert "Rewritten after move\n"))
+                       (funcall callback
+                                `((ok . t) (file . ,target)
+                                  (referenceRewrite . ((referenceCount . 3))))))))
+            (noema-move-note)
+            (should (= (length calls) 1))
+            (should (equal (caar calls) "aaronnote:api:fs:move"))
+            (should (equal (alist-get "target" (aref (cdar calls) 0)
+                                      nil nil #'equal)
+                           target))
+            (with-current-buffer source
+              (should (file-equal-p buffer-file-name target))
+              (should (equal (buffer-string) "Rewritten after move\n"))
+              (should-not (buffer-modified-p))))
+        (when (buffer-live-p source)
+          (kill-buffer source))))))
+
+(ert-deftest noema-move-note-keeps-open-editor-drafts-safe ()
+  (my/noema-roam-test-with-vault
+    (let ((web (generate-new-buffer " *noema-move-web-pane*"))
+          (my/noema--ready t)
+          (prompted nil)
+          (called nil)
+          (destination note-file)
+          source occupied)
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/noema-roam--read-note-id)
+                     (lambda (_) "20260605T120000-topology"))
+                    ((symbol-function 'my/noema-roam--slug-to-file)
+                     (lambda (_) note-file))
+                    ((symbol-function 'read-file-name)
+                     (lambda (&rest _) (setq prompted t) destination))
+                    ((symbol-function 'my/noema--api-call)
+                     (lambda (&rest _) (setq called t))))
+            (with-current-buffer web
+              (setq-local my/noema-buffer-file-name
+                          (file-truename note-file)))
+            (should-error (noema-move-note) :type 'user-error)
+            (should-not prompted)
+            (should-not called)
+            (kill-buffer web)
+            (setq source (find-file-noselect note-file))
+            (with-current-buffer source
+              (goto-char (point-max))
+              (insert "draft"))
+            (should-error (noema-move-note) :type 'user-error)
+            (should-not prompted)
+            (should-not called)
+            (with-current-buffer source (set-buffer-modified-p nil))
+            (setq destination (expand-file-name "demo/occupied.md" root)
+                  occupied (find-file-noselect destination))
+            (should-error (noema-move-note) :type 'user-error)
+            (should prompted)
+            (should-not called))
+        (when (buffer-live-p web) (kill-buffer web))
+        (when (buffer-live-p occupied) (kill-buffer occupied))
+        (when (buffer-live-p source)
+          (with-current-buffer source (set-buffer-modified-p nil))
+          (kill-buffer source))))))
+
+(ert-deftest noema-move-note-routes-open-page-to-its-client ()
+  (my/noema-roam-test-with-vault
+    (let* ((web (generate-new-buffer " *noema-move-page*"))
+           (target (expand-file-name "demo/moved.md" root))
+           (my/noema--ready t)
+           routed)
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/noema-roam--read-note-id)
+                     (lambda (_) "20260605T120000-topology"))
+                    ((symbol-function 'my/noema-roam--slug-to-file)
+                     (lambda (_) note-file))
+                    ((symbol-function 'read-file-name)
+                     (lambda (&rest _) target))
+                    ((symbol-function 'my/noema-command)
+                     (lambda (command detail)
+                       (setq routed (list (current-buffer) command detail))))
+                    ((symbol-function 'my/noema--api-call)
+                     (lambda (&rest _) (ert-fail "Web pane must own the move"))))
+            (with-current-buffer web
+              (setq-local my/noema-buffer-file-name (file-truename note-file))
+              (setq-local my/noema--client-id "test-client"))
+            (noema-move-note)
+            (should (eq (nth 0 routed) web))
+            (should (equal (nth 1 routed) "move-note"))
+            (should (equal (alist-get 'file (nth 2 routed))
+                           (file-truename note-file)))
+            (should (equal (alist-get 'target (nth 2 routed)) target)))
+        (when (buffer-live-p web) (kill-buffer web))))))
+
+(ert-deftest noema-move-note-event-retargets-native-buffer ()
+  (my/noema-roam-test-with-vault
+    (let* ((target (expand-file-name "demo/moved.md" root))
+           (source (find-file-noselect note-file)))
+      (unwind-protect
+          (progn
+            (rename-file note-file target)
+            (with-temp-file target (insert "Host-rewritten note\n"))
+            (my/noema-roam--handle-moved-note
+             `((oldFile . ,note-file) (file . ,target)))
+            (with-current-buffer source
+              (should (file-equal-p buffer-file-name target))
+              (should (equal (buffer-string) "Host-rewritten note\n"))
+              (should-not (buffer-modified-p))))
+        (when (buffer-live-p source) (kill-buffer source))))))
+
+(ert-deftest noema-trash-note-event-closes-clean-native-buffer ()
+  (my/noema-roam-test-with-vault
+    (let ((source (find-file-noselect note-file)))
+      (unwind-protect
+          (progn
+            (delete-file note-file)
+            (my/noema-roam--handle-trashed-note `((file . ,note-file)))
+            (should-not (buffer-live-p source)))
+        (when (buffer-live-p source) (kill-buffer source))))))
+
+(ert-deftest noema-trash-note-event-keeps-edited-native-draft ()
+  (my/noema-roam-test-with-vault
+    (let ((source (find-file-noselect note-file)))
+      (unwind-protect
+          (progn
+            (with-current-buffer source
+              (goto-char (point-max))
+              (insert "Unsaved draft\n"))
+            (delete-file note-file)
+            (my/noema-roam--handle-trashed-note `((file . ,note-file)))
+            (with-current-buffer source
+              (should-not buffer-file-name)
+              (should (buffer-modified-p))
+              (should (string-prefix-p "Trashed draft:" (buffer-name)))
+              (when (fboundp 'my/tab-line-visible-buffer-p)
+                (should (my/tab-line-visible-buffer-p source)))
+              (should (string-match-p "Unsaved draft" (buffer-string)))))
+        (when (buffer-live-p source)
+          (with-current-buffer source (set-buffer-modified-p nil))
+          (kill-buffer source))))))
+
+(ert-deftest my/noema-roam-offline-scan-requires-explicit-id ()
+  (my/noema-roam-test-with-vault
+    (let ((plain-file (expand-file-name "demo/ordinary.md" root))
+          (my/noema-roam--all-files-cache nil))
+      (cl-letf (((symbol-function 'my/noema-roam--runtime-index)
+                 (lambda () nil)))
+      (my/noema-roam-test--write-file
+       plain-file "#+begin meta\ntitle: Ordinary\n#+end meta\n\n# Ordinary\n")
+      (should-not (my/noema-roam--scan-record plain-file))
+      (should (= 2 (length (my/noema-roam--scanned-note-records))))
+      (my/noema-roam-test--write-file
+       plain-file "#+begin meta\nid: ordinary-id\ntitle: Ordinary\n#+end meta\n")
+      (my/noema-roam--invalidate-note plain-file)
+      (should (equal "ordinary-id"
+                     (plist-get (my/noema-roam--resolve-note "ordinary-id") :id)))
+      (my/noema-roam-test--write-file
+       plain-file "#+begin meta\nid: ordinary-id\nroam: off\n#+end meta\n")
+      (my/noema-roam--invalidate-note plain-file)
+      (should-not (my/noema-roam--resolve-note "ordinary-id"))))))
+
+(ert-deftest my/noema-roam-runtime-records-reject-ordinary-markdown ()
+  (let* ((plain (make-hash-table :test 'equal))
+         (hidden (make-hash-table :test 'equal))
+         (active (make-hash-table :test 'equal))
+         (payload (make-hash-table :test 'equal)))
+    (puthash "id" "hidden-id" hidden)
+    (puthash "roam" "off" hidden)
+    (puthash "id" "active-id" active)
+    (puthash "roam" t active)
+    (puthash "notes" (list plain hidden active) payload)
+    (cl-letf (((symbol-function 'my/noema-roam--runtime-index)
+               (lambda () payload)))
+      (should (equal '("active-id")
+                     (mapcar (lambda (record) (plist-get record :id))
+                             (my/noema-roam--runtime-note-records)))))))
 
 (defun my/noema-roam-test--agenda-model (todos from days)
   "Return a small server-shaped agenda view model for TODOS."
@@ -711,20 +1123,6 @@ source: roam/demo/analysis.md
       (my/noema-roam--insert-todo-row '(:uid "wn-two" :note "work" :text "Same" :status "todo"))
       (should (equal (nreverse ids) '("wn-one" "wn-two"))))))
 
-(ert-deftest my/noema-roam-db-status-delegates-to-canonical-wiki-status ()
-  (let (called)
-    (cl-letf (((symbol-function 'my/noema-wiki-index-status)
-               (lambda () (setq called t))))
-      (my/noema-roam-db-status))
-    (should called)))
-
-(ert-deftest my/noema-roam-management-delegates-to-canonical-wiki-ui ()
-  (let (called)
-    (cl-letf (((symbol-function 'my/noema-wiki-repositories)
-               (lambda () (setq called t))))
-      (my/noema-roam-management))
-    (should called)))
-
 (ert-deftest my/noema-roam-search-view-refreshes-results ()
   (my/noema-roam-test-with-vault
     (let ((first '(:slug "first" :title "First result" :path "first.md"))
@@ -786,7 +1184,7 @@ source: roam/demo/analysis.md
             (should (eq displayed (get-buffer "*roam-new-node*")))
             (with-current-buffer "*roam-new-node*"
               (should (derived-mode-p 'my/noema-roam-new-mode))
-              (should (string-match-p "New node" (buffer-string)))
+              (should (string-match-p "New Markdown" (buffer-string)))
               (should (equal (plist-get my/noema-roam-new--draft :path)
                              "demo/untitled.md"))
               (should (equal (plist-get
@@ -799,11 +1197,238 @@ source: roam/demo/analysis.md
                              ""))
               (should-not (string-match-p "TAGS[[:space:]\n]+None"
                                            (buffer-string)))
-              (dolist (label '("TYPE" "TITLE" "SAVE PATH"
-                               "KIND" "TEMPLATE" "TAGS"))
+              (dolist (label '("CREATE AS" "TITLE" "SAVE PATH"
+                               "RENDER KIND" "TEMPLATE" "TAGS"))
                 (should (string-match-p label (buffer-string))))))
         (when-let* ((buffer (get-buffer "*roam-new-node*")))
           (kill-buffer buffer))))))
+
+(ert-deftest my/noema-roam-new-reopen-preserves-active-draft ()
+  "Repeating the same entry must focus the draft without clearing widgets."
+  (my/noema-roam-test-with-vault
+    (when-let* ((buffer (get-buffer "*roam-new-node*")))
+      (kill-buffer buffer))
+    (let ((calls 0))
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
+                     (lambda (&rest _args)
+                       (cl-incf calls)
+                       (let ((response (make-hash-table :test 'equal)))
+                         (puthash "templates"
+                                  '((:key "roam" :nodeType "roam")) response)
+                         response)))
+                    ((symbol-function 'pop-to-buffer)
+                     (lambda (buffer &rest _args) buffer)))
+            (my/noema-roam-new "demo" nil "roam")
+            (with-current-buffer "*roam-new-node*"
+              (widget-value-set
+               (alist-get 'title my/noema-roam-new--widgets)
+               "Keep this title"))
+            (my/noema-roam-new "demo" nil "roam")
+            (with-current-buffer "*roam-new-node*"
+              (should (equal (widget-value
+                              (alist-get 'title my/noema-roam-new--widgets))
+                             "Keep this title"))
+              (should (equal my/noema-roam-new--base-directory "demo")))
+            (should (= calls 1)))
+        (when-let* ((buffer (get-buffer "*roam-new-node*")))
+          (kill-buffer buffer))))))
+
+(ert-deftest my/noema-roam-new-keeps-separate-frame-drafts ()
+  (my/noema-roam-test-with-vault
+    (let ((views (make-hash-table :test #'eq))
+          (active-frame 'frame-a)
+          (template-loads 0)
+          first second)
+      (cl-letf (((symbol-function 'selected-frame)
+                 (lambda () active-frame))
+                ((symbol-function 'frame-live-p)
+                 (lambda (_frame) t))
+                ((symbol-function 'frame-parameter)
+                 (lambda (frame _key) (gethash frame views)))
+                ((symbol-function 'set-frame-parameter)
+                 (lambda (frame _key value) (puthash frame value views)))
+                ((symbol-function 'my/noema-roam--runtime-call)
+                 (lambda (&rest _)
+                   (cl-incf template-loads)
+                   (let ((response (make-hash-table :test 'equal)))
+                     (puthash "templates"
+                              '((:key "roam" :nodeType "roam")) response)
+                     response)))
+                ((symbol-function 'pop-to-buffer)
+                 (lambda (buffer &rest _) buffer)))
+        (unwind-protect
+            (progn
+              (setq first (my/noema-roam-new "demo" nil "roam"))
+              (with-current-buffer first
+                (setq-local my/noema-roam-new--draft
+                            (plist-put my/noema-roam-new--draft
+                                       :title "Frame A draft")))
+              (setq active-frame 'frame-b
+                    second (my/noema-roam-new "demo" nil "roam"))
+              (should-not (eq first second))
+              (with-current-buffer second
+                (should-not (equal (plist-get my/noema-roam-new--draft :title)
+                                   "Frame A draft")))
+              (setq active-frame 'frame-a)
+              (should (eq first (my/noema-roam-new "demo" nil "roam")))
+              (with-current-buffer first
+                (should (equal (plist-get my/noema-roam-new--draft :title)
+                               "Frame A draft")))
+              (should (= template-loads 2))
+              (my/noema-roam--delete-frame-ui-h 'frame-b)
+              (should (buffer-live-p first))
+              (should-not (buffer-live-p second)))
+          (dolist (buffer (list first second))
+            (when (buffer-live-p buffer)
+              (kill-buffer buffer))))))))
+
+(ert-deftest my/noema-roam-new-q-restores-origin-and-releases-form ()
+  "Cancelling the creation form follows the native board return path."
+  (my/noema-roam-test-with-vault
+    (when-let* ((buffer (get-buffer "*roam-new-node*")))
+      (kill-buffer buffer))
+    (let ((origin (generate-new-buffer " *roam-new-origin*"))
+          form)
+      (unwind-protect
+          (save-window-excursion
+            (delete-other-windows)
+            (switch-to-buffer origin)
+            (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
+                       (lambda (&rest _args)
+                         (let ((response (make-hash-table :test 'equal)))
+                           (puthash "templates"
+                                    '((:key "roam" :nodeType "roam")) response)
+                           response))))
+              (my/noema-roam-new "demo" nil "roam"))
+            (setq form (get-buffer "*roam-new-node*"))
+            (should (eq (window-buffer) form))
+            (with-current-buffer form
+              (call-interactively
+               (lookup-key my/noema-roam-new-mode-map (kbd "q"))))
+            (should (eq (window-buffer) origin))
+            (should-not (buffer-live-p form)))
+        (when (buffer-live-p form) (kill-buffer form))
+        (kill-buffer origin)))))
+
+(ert-deftest my/noema-markdown-new-document-starts-plain-in-current-folder ()
+  (my/noema-roam-test-with-vault
+    (when-let* ((buffer (get-buffer "*roam-new-node*")))
+      (kill-buffer buffer))
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
+                   (lambda (&rest _args)
+                     (let ((response (make-hash-table :test 'equal)))
+                       (puthash "templates"
+                                '((:key "roam" :nodeType "roam")
+                                  (:key "basic" :nodeType "regular"))
+                                response)
+                       response)))
+                  ((symbol-function 'pop-to-buffer)
+                   (lambda (buffer &rest _args) buffer)))
+          (let ((buffer-file-name (expand-file-name "demo/source.md" root)))
+            (markdown-new-document))
+          (with-current-buffer "*roam-new-node*"
+            (should (equal (plist-get my/noema-roam-new--draft :node-type)
+                           "regular"))
+            (should (equal (plist-get my/noema-roam-new--draft :kind)
+                           "default"))
+            (should (equal (plist-get my/noema-roam-new--draft :template-key)
+                           "basic"))
+            (should (equal (plist-get my/noema-roam-new--draft :path)
+                           "demo/untitled.md"))
+            (should (string-match-p "Regular Markdown · plain"
+                                    (buffer-string)))))
+      (when-let* ((buffer (get-buffer "*roam-new-node*")))
+        (kill-buffer buffer)))))
+
+(ert-deftest my/noema-markdown-new-document-reset-keeps-plain-type ()
+  "Resetting a regular Markdown draft must not silently make a Roam node."
+  (my/noema-roam-test-with-vault
+    (when-let* ((buffer (get-buffer "*roam-new-node*")))
+      (kill-buffer buffer))
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
+                   (lambda (&rest _args)
+                     (let ((response (make-hash-table :test 'equal)))
+                       (puthash "templates"
+                                '((:key "roam" :nodeType "roam")
+                                  (:key "basic" :nodeType "regular"))
+                                response)
+                       response)))
+                  ((symbol-function 'pop-to-buffer)
+                   (lambda (buffer &rest _args) buffer)))
+          (markdown-new-document "demo")
+          (with-current-buffer "*roam-new-node*"
+            (widget-value-set
+             (alist-get 'title my/noema-roam-new--widgets) "Draft title")
+            (my/noema-roam-new-reset)
+            (should (equal (plist-get my/noema-roam-new--draft :node-type)
+                           "regular"))
+            (should (equal (plist-get my/noema-roam-new--draft :kind)
+                           "default"))
+            (should (equal (plist-get my/noema-roam-new--draft :template-key)
+                           "basic"))
+            (should (equal (plist-get my/noema-roam-new--draft :title)
+                           "Untitled"))))
+      (when-let* ((buffer (get-buffer "*roam-new-node*")))
+        (kill-buffer buffer)))))
+
+(ert-deftest my/noema-roam-new-refresh-keeps-edits-and-validates-template ()
+  "Refreshing the catalogue must keep typed fields and reject a stale key."
+  (my/noema-roam-test-with-vault
+    (when-let* ((buffer (get-buffer "*roam-new-node*")))
+      (kill-buffer buffer))
+    (let ((calls 0))
+      (unwind-protect
+          (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
+                     (lambda (&rest _args)
+                       (cl-incf calls)
+                       (let ((response (make-hash-table :test 'equal)))
+                         (puthash "templates"
+                                  (if (= calls 1)
+                                      '((:key "basic" :nodeType "regular"))
+                                    '((:key "report" :nodeType "regular")))
+                                  response)
+                         response)))
+                    ((symbol-function 'pop-to-buffer)
+                     (lambda (buffer &rest _args) buffer)))
+            (markdown-new-document "demo")
+            (with-current-buffer "*roam-new-node*"
+              (widget-value-set
+               (alist-get 'title my/noema-roam-new--widgets) "Keep this")
+              (my/noema-roam-new-refresh)
+              (should (equal (plist-get my/noema-roam-new--draft :title)
+                             "Keep this"))
+              (should (equal (plist-get my/noema-roam-new--draft :node-type)
+                             "regular"))
+              (should (equal (plist-get my/noema-roam-new--draft :template-key)
+                             "")))
+            (should (= calls 2)))
+        (when-let* ((buffer (get-buffer "*roam-new-node*")))
+          (kill-buffer buffer))))))
+
+(ert-deftest my/noema-roam-new-note-alias-opens-the-workbench ()
+  (my/noema-roam-test-with-vault
+    (when-let* ((buffer (get-buffer "*roam-new-node*")))
+      (kill-buffer buffer))
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
+                   (lambda (&rest _args)
+                     (let ((response (make-hash-table :test 'equal)))
+                       (puthash "templates"
+                                '((:key "roam" :name "Linked" :nodeType "roam"))
+                                response)
+                       response)))
+                  ((symbol-function 'pop-to-buffer)
+                   (lambda (buffer &rest _args) buffer)))
+          (call-interactively #'roam-new-note)
+          (with-current-buffer "*roam-new-node*"
+            (should (derived-mode-p 'my/noema-roam-new-mode))
+            (should (equal (plist-get my/noema-roam-new--draft :template-key)
+                           "roam"))))
+      (when-let* ((buffer (get-buffer "*roam-new-node*")))
+        (kill-buffer buffer)))))
 
 (ert-deftest my/noema-roam-runtime-index-uses-roam-only-api ()
   (let (called-channel)
@@ -1009,7 +1634,7 @@ source: roam/demo/analysis.md
                     :template-key "project"
                     :tags ("work" "planning")))
            (created-file (expand-file-name "projects/project-atlas.md" root))
-           captured opened)
+           captured)
       (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
                  (lambda (action &rest args)
                    (setq captured
@@ -1022,19 +1647,18 @@ source: roam/demo/analysis.md
                     created-file "# Project Atlas\n")
                    (let ((response (make-hash-table :test 'equal)))
                      (puthash "file" created-file response)
-                     response)))
-                ((symbol-function 'my/noema-open-file)
-                 (lambda (file) (setq opened file))))
+                     response))))
         (should (equal (my/noema-roam-new--create-draft draft)
                        created-file)))
-      (should (equal opened created-file))
+      (should (eq (current-buffer) (find-buffer-visiting created-file)))
       (should (equal (car captured) "create"))
       (let ((payload (cadr captured)))
         (should (equal (gethash "nodeType" payload) "roam"))
         (should (equal (gethash "path" payload)
                        "projects/project-atlas.md"))
         (should (equal (gethash "templateKey" payload) "project"))
-        (should (equal (gethash "tags" payload) '("planning" "work")))))))
+        (should (equal (gethash "tags" payload) '("planning" "work"))))
+      (kill-buffer (find-buffer-visiting created-file)))))
 
 (ert-deftest my/noema-roam-new-tags-use-runtime-canonical-form ()
   (should
@@ -1068,8 +1692,7 @@ source: roam/demo/analysis.md
   (my/noema-roam-test-with-vault
     (let* ((buffer (generate-new-buffer " *roam-node-click-test*"))
            (created-file (expand-file-name "projects/direct-click.md" root))
-           captured
-           opened)
+           captured)
       (unwind-protect
           (progn
             (with-current-buffer buffer
@@ -1101,17 +1724,237 @@ source: roam/demo/analysis.md
                             created-file "# Direct Click\n")
                            (let ((response (make-hash-table :test 'equal)))
                              (puthash "file" created-file response)
-                             response)))
-                        ((symbol-function 'my/noema-open-file)
-                         (lambda (file) (setq opened file))))
+                             response))))
                 (push-button)))
             (should-not (buffer-live-p buffer))
-            (should (equal opened created-file))
+            (should (buffer-live-p (find-buffer-visiting created-file)))
             (should (equal (car captured) "create"))
             (should (equal (gethash "tags" (cadr captured))
                            '("math" "work"))))
         (when (buffer-live-p buffer)
-          (kill-buffer buffer))))))
+          (kill-buffer buffer))
+        (when-let* ((opened (find-buffer-visiting created-file)))
+          (kill-buffer opened))))))
+
+(ert-deftest my/noema-roam-new-open-failure-retries-created-file ()
+  "A failed visit must not run create-node a second time."
+  (my/noema-roam-test-with-vault
+    (let* ((form (generate-new-buffer " *roam-create-retry*"))
+           (created-file (expand-file-name "projects/retry.md" root))
+           (real-find-file (symbol-function 'find-file))
+           (creates 0)
+           (visits 0))
+      (unwind-protect
+          (save-window-excursion
+            (with-current-buffer form
+              (my/noema-roam-new-mode)
+              (setq-local my/noema-roam-new--base-directory "projects"
+                          my/noema-roam-new--templates
+                          '((:key "roam" :name "Roam note"))
+                          my/noema-roam-new--draft
+                          '(:node-type "roam" :title "Retry"
+                            :path "projects/retry.md" :kind "note"
+                            :template-key "roam" :tags nil))
+              (my/noema-roam-new-render))
+            (switch-to-buffer form)
+            (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
+                       (lambda (&rest _args)
+                         (cl-incf creates)
+                         (my/noema-roam-test--write-file
+                          created-file "# Retry\n")
+                         (let ((response (make-hash-table :test 'equal)))
+                           (puthash "file" created-file response)
+                           response)))
+                      ((symbol-function 'find-file)
+                       (lambda (file)
+                         (cl-incf visits)
+                         (if (= visits 1)
+                             (error "Visit failed")
+                           (funcall real-find-file file)))))
+              (should-error (my/noema-roam-new-create))
+              (should (eq (window-buffer) form))
+              (should (equal (buffer-local-value
+                              'my/noema-roam-new--created-file form)
+                             created-file))
+              (should (string-match-p "c Open file"
+                                      (with-current-buffer form
+                                        (buffer-string))))
+              (with-current-buffer form
+                (should-error (my/noema-roam-new-edit-type)
+                              :type 'user-error)
+                (my/noema-roam-new-create))
+              (should-not (buffer-live-p form))
+              (should (= creates 1))
+              (should (= visits 2))
+              (should (eq (window-buffer)
+                          (find-buffer-visiting created-file)))))
+        (when (buffer-live-p form) (kill-buffer form))
+        (when-let* ((opened (find-buffer-visiting created-file)))
+          (kill-buffer opened))))))
+
+(ert-deftest my/noema-roam-new-cold-noema-open-keeps-placeholder ()
+  "Creating a note must leave the redirected file visible until Noema starts."
+  (my/noema-roam-test-with-vault
+    (let* ((form (generate-new-buffer " *roam-cold-create*"))
+           (file (expand-file-name "projects/cold.md" root))
+           (my/noema-markdown-default-surface 'app)
+           (my/noema-close-emacs-markdown-buffer nil)
+           (my/noema--ready nil)
+           (my/noema--port 4242)
+           (noninteractive nil)
+           callback placeholder result)
+      (unwind-protect
+          (save-window-excursion
+            (with-current-buffer form
+              (my/noema-roam-new-mode)
+              (setq-local my/noema-roam-new--base-directory "projects"
+                          my/noema-roam-new--templates
+                          '((:key "roam" :name "Roam note"))
+                          my/noema-roam-new--draft
+                          '(:node-type "roam" :title "Cold"
+                            :path "projects/cold.md" :kind "note"
+                            :template-key "roam" :tags nil))
+              (my/noema-roam-new-render))
+            (switch-to-buffer form)
+            (cl-letf (((symbol-function 'my/noema-roam--runtime-call)
+                       (lambda (&rest _args)
+                         (my/noema-roam-test--write-file file "# Cold\n")
+                         (let ((response (make-hash-table :test 'equal)))
+                           (puthash "file" file response)
+                           response)))
+                      ((symbol-function 'my/noema--ensure-server)
+                       (lambda (fn) (setq callback fn)))
+                      ((symbol-function 'my/noema--open-url)
+                       (lambda (&rest _args)
+                         (setq result (generate-new-buffer
+                                       " *roam-cold-opened*"))
+                         (switch-to-buffer result)
+                         result)))
+              (let ((this-command 'my/noema-roam-new-create))
+                (my/noema-roam-new-create))
+              (setq placeholder (window-buffer))
+              (should-not (buffer-live-p form))
+              (should (buffer-local-value
+                       'my/noema--markdown-redirected placeholder))
+              (with-current-buffer placeholder
+                (my/noema--markdown-placeholder-cancel-timer)
+                (my/noema--markdown-placeholder-open
+                 placeholder my/noema--markdown-open-generation))
+              (should (functionp callback))
+              (funcall callback)
+              (should (eq (window-buffer) result))))
+        (dolist (buffer (list form placeholder result))
+          (when (buffer-live-p buffer)
+            (with-current-buffer buffer (set-buffer-modified-p nil))
+            (kill-buffer buffer)))))))
+
+(ert-deftest my/noema-markdown-warm-host-opens-after-native-visit ()
+  "A ready host must not have its page covered by the file placeholder."
+  (let* ((file (make-temp-file "noema-warm-markdown" nil ".md"))
+         (origin (generate-new-buffer " *noema-warm-origin*"))
+         (my/noema-markdown-default-surface 'app)
+         (my/noema-close-emacs-markdown-buffer t)
+         (my/noema--port 4242)
+         (noninteractive nil)
+         (opens 0)
+         placeholder result)
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer origin)
+          (cl-letf (((symbol-function 'my/noema--ensure-server)
+                     (lambda (fn) (funcall fn)))
+                    ((symbol-function 'my/noema--open-url)
+                     (lambda (&rest _args)
+                       (cl-incf opens)
+                       (setq result (generate-new-buffer
+                                     " *noema-warm-result*"))
+                       (switch-to-buffer result)
+                       result)))
+            (let ((this-command 'find-file))
+              (find-file file))
+            (setq placeholder (window-buffer))
+            (should (buffer-local-value
+                     'my/noema--markdown-redirected placeholder))
+            (with-current-buffer placeholder
+              (should (derived-mode-p
+                       'my/noema-markdown-placeholder-mode))
+              (should (eq (key-binding (kbd "g"))
+                          #'my/noema-markdown-placeholder-retry))
+              (should (eq (key-binding (kbd "e"))
+                          #'markdown-edit-raw))
+              (should (eq (key-binding (kbd "q")) #'quit-window)))
+            (should (commandp 'markdown-edit-raw))
+            (should (= opens 0))
+            (with-current-buffer placeholder
+              (my/noema--markdown-placeholder-cancel-timer)
+              (my/noema--markdown-placeholder-open
+               placeholder my/noema--markdown-open-generation))
+            (should (= opens 1))
+            (should (eq (window-buffer) result))
+            (sleep-for 0.05)
+            (should-not (buffer-live-p placeholder))))
+      (dolist (buffer (list origin placeholder result))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer)))
+      (when (file-exists-p file) (delete-file file)))))
+
+(ert-deftest my/noema-markdown-timeout-retry-and-raw-cancel-stale-open ()
+  "A timed-out placeholder can retry; raw editing cancels pending opens."
+  (let* ((file (make-temp-file "noema-retry-markdown" nil ".md"))
+         (origin (generate-new-buffer " *noema-retry-origin*"))
+         (my/noema-markdown-default-surface 'app)
+         (my/noema-close-emacs-markdown-buffer nil)
+         (my/noema--ready nil)
+         (my/noema--port 4242)
+         (my/noema--ready-callbacks nil)
+         (my/noema--ready-watchdog nil)
+         (noninteractive nil)
+         callbacks placeholder raw
+         (opens 0))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer origin)
+          (cl-letf (((symbol-function 'my/noema--ensure-server)
+                     (lambda (fn) (push fn callbacks)))
+                    ((symbol-function 'my/noema--open-url)
+                     (lambda (&rest _args) (cl-incf opens) nil)))
+            (let ((this-command 'find-file))
+              (find-file file))
+            (setq placeholder (window-buffer))
+            (with-current-buffer placeholder
+              (my/noema--markdown-placeholder-cancel-timer)
+              (my/noema--markdown-placeholder-open
+               placeholder my/noema--markdown-open-generation))
+            (should (= (length callbacks) 1))
+            (my/noema--watchdog-fire)
+            (should (eq (buffer-local-value
+                         'my/noema--markdown-placeholder-state placeholder)
+                        'failed))
+            (with-current-buffer placeholder
+              (call-interactively
+               (lookup-key my/noema-markdown-placeholder-mode-map
+                           (kbd "g")))
+              (my/noema--markdown-placeholder-cancel-timer)
+              (my/noema--markdown-placeholder-open
+               placeholder my/noema--markdown-open-generation))
+            (should (= (length callbacks) 2))
+            (funcall (cadr callbacks))
+            (should (= opens 0))
+            (with-current-buffer placeholder
+              (my/noema-open-markdown-raw file))
+            (setq raw (window-buffer))
+            (should-not (buffer-live-p placeholder))
+            (with-current-buffer raw
+              (should (derived-mode-p 'gfm-mode))
+              (should-not buffer-read-only))
+            (funcall (car callbacks))
+            (should (= opens 0))))
+      (dolist (buffer (list origin placeholder raw))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer (set-buffer-modified-p nil))
+          (kill-buffer buffer)))
+      (when (file-exists-p file) (delete-file file)))))
 
 (provide 'md-roam-tests)
 ;;; md-roam-tests.el ends here

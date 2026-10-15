@@ -10,24 +10,29 @@
 
 ;;; Code:
 
+(require 'general)
+
 (declare-function telescope "init-telescope" ())
-(declare-function my/project-dispatch "init-project" ())
+(declare-function project-menu "init-project" ())
 (declare-function my/telescope-ripgrep "init-telescope" ())
-(declare-function my/project-run-dispatch "init-project-run" ())
-(declare-function my/test-dispatch "init-test" ())
-(declare-function my/debug-dispatch "init-debug" ())
+(declare-function project-run-menu "init-project-run" ())
+(declare-function test-menu "init-test" ())
+(declare-function debug-menu "init-debug" ())
 (declare-function ghostel-toggle "init-ghostel-popup" ())
+(declare-function noema-agenda "init-aaronnote" (&optional query))
 (autoload 'olivetti-mode "olivetti" nil t)
 
-(global-set-key (kbd "<f1>") #'help-command)
-(global-set-key (kbd "<f2>") #'telescope)
-(global-set-key (kbd "<f3>") #'my/project-dispatch)
-(global-set-key (kbd "<f4>") #'my/telescope-ripgrep)
-(global-set-key (kbd "<f5>") #'my/project-run-dispatch)
-(global-set-key (kbd "<f6>") #'my/test-dispatch)
-(global-set-key (kbd "<f7>") #'my/debug-dispatch)
-(global-set-key (kbd "<f8>") #'olivetti-mode)
-(global-set-key (kbd "<f10>") #'ghostel-toggle)
+(general-define-key
+ "<f1>" #'help-command
+ "<f2>" #'telescope
+ "<f3>" #'project-menu
+ "<f4>" #'my/telescope-ripgrep
+ "<f5>" #'project-run-menu
+ "<f6>" #'test-menu
+ "<f7>" #'debug-menu
+ "<f8>" #'olivetti-mode
+ "<f9>" #'noema-agenda
+ "<f10>" #'ghostel-toggle)
 ;; F11 intentionally left alone.
 
 (provide 'init-function-keys)

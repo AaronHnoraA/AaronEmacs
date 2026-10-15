@@ -20,6 +20,7 @@
 (declare-function diff-hl-mode "diff-hl" (&optional arg))
 (declare-function vc-git-root "vc-git" (file))
 (declare-function my/project-current-root "init-project")
+(declare-function my/window-bury-current-buffer "init-windows" ())
 (declare-function async-handle-result "async" (callback result &optional buf))
 
 (defvar async-callback)
@@ -744,6 +745,9 @@ glyph keeps its shape while point moves through composed text.")
   (my/apply-font-config)
   (redraw-display))
 
+(defalias 'font-refresh #'my/font-reset-all
+  "Clear font caches and reapply this configuration's typography.")
+
 
 
 
@@ -1051,86 +1055,59 @@ Else, call `comment-or-uncomment-region' on the current line."
       buffer))
 
 (defun my/ibuffer-visit-noema-canonical (orig &rest args)
-  "Visit the canonical Noema buffer instead of stale duplicates."
-  (let* ((buffer (and (fboundp 'ibuffer-current-buffer)
-                      (ignore-errors (ibuffer-current-buffer))))
-         (canonical (and buffer
-                         (my/ibuffer-noema-canonical-buffer buffer))))
-    (if (and (buffer-live-p buffer)
-             (buffer-live-p canonical)
+  "Let Ibuffer visit the canonical Noema buffer for a duplicate row.
+Only replace the row's target while ORIG retains its native window,
+selection and mark behavior."
+  (let* ((listing (current-buffer))
+         (buffer (ibuffer-current-buffer t))
+         (canonical (my/ibuffer-noema-canonical-buffer buffer)))
+    (if (and (buffer-live-p canonical)
              (not (eq buffer canonical)))
-        (progn
-          (ibuffer-unmark-forward 1)
-          (switch-to-buffer canonical))
+        (let ((native-current (symbol-function 'ibuffer-current-buffer)))
+          (cl-letf (((symbol-function 'ibuffer-current-buffer)
+                     (lambda (&optional must-be-live)
+                       (let ((actual (funcall native-current must-be-live)))
+                         (if (and (eq (current-buffer) listing)
+                                  (eq actual buffer))
+                             canonical
+                           actual)))))
+            (apply orig args)))
       (apply orig args))))
 
-(defun my/ibuffer-visit-noema-canonical-other-window (orig &rest args)
-  "Visit the canonical Noema buffer in another window."
-  (let* ((buffer (and (fboundp 'ibuffer-current-buffer)
-                      (ignore-errors (ibuffer-current-buffer))))
-         (canonical (and buffer
-                         (my/ibuffer-noema-canonical-buffer buffer))))
-    (if (and (buffer-live-p buffer)
-             (buffer-live-p canonical)
-             (not (eq buffer canonical)))
-        (progn
-          (ibuffer-unmark-forward 1)
-          (switch-to-buffer-other-window canonical))
-      (apply orig args))))
+(defun my/ibuffer-use-default-groups ()
+  "Show the configured buffer groups with newest buffers first."
+  (ibuffer-switch-to-saved-filter-groups "default")
+  (ibuffer-do-sort-by-recency))
 
 (use-package ibuffer
   :ensure nil
-  :hook (ibuffer-mode . ibuffer-auto-mode)
+  :hook ((ibuffer-mode . ibuffer-auto-mode)
+         (ibuffer-mode . my/ibuffer-use-default-groups))
   :bind ([remap list-buffers] . ibuffer)
   :custom
   (ibuffer-movement-cycle nil)
-  (ibuffer-saved-filter-groups
-   '(("Default"
-      ("Emacs" (or (name . "\\*scratch\\*")
-                   (name . "\\*dashboard\\*")
-                   (name . "\\*compilation\\*")
-                   (name . "\\*Backtrace\\*")
-                   (name . "\\*Packages\\*")
-                   (name . "\\*Messages\\*")
-                   (name . "\\*Customize\\*")))
-      ("Noema" (noema . t))
-      ("Browser" (and (or (mode . eww-mode)
-                          (mode . xwidget-webkit-mode))
-                      (not (noema . t))))
-      ("Help" (or (name . "\\*Help\\*")
-                  (name . "\\*Apropos\\*")
-                  (name . "\\*info\\*")
-                  (mode . Man-mode)
-                  (mode . woman-mode)))
-      ("Repl" (or (mode . gnuplot-comint-mode)
-                  (mode . inferior-emacs-lisp-mode)
-                  (mode . inferior-python-mode)))
-      ("Term" (or (mode . term-mode)
-                  (mode . shell-mode)
-                  (mode . eshell-mode)))
-      ("Mail" (or (mode . mail-mode)
-                  (mode . message-mode)
-                  (derived-mode . gnus-mode)))
-      ("Conf" (or (mode . yaml-mode)
-                  (mode . yaml-ts-mode)
-                  (mode . conf-mode)))
-      ("Dict" (or (mode . fanyi-mode)
-                  (mode . dictionary-mode)))
-      ("Text" (and (derived-mode . text-mode)
-                   (not (starred-name))))
-      ("Magit" (or (mode . magit-repolist-mode)
-                   (mode . magit-submodule-list-mode)
-                   (mode . git-rebase-mode)
-                   (derived-mode . magit-section-mode)
-                   (mode . vc-annotate-mode)))
-      ("VC" (or (mode . diff-mode)
-                (derived-mode . log-view-mode)))
-      ("Prog" (and (derived-mode . prog-mode)
-                   (not (starred-name))))
-      ("Dired" (mode . dired-mode))
-      ("IRC" (or (mode . rcirc-mode)
-                 (mode . erc-mode))))))
+  (ibuffer-expert t)
   :config
+  (setq ibuffer-saved-filter-groups
+        '(("default"
+           ("Noema" (noema . t))
+           ("xwidget" (and (mode . xwidget-webkit-mode)
+                           (not (noema . t))))
+           ("Code"  (or (mode . c-mode) (mode . c-ts-mode)
+                        (mode . c++-mode) (mode . c++-ts-mode)
+                        (mode . python-mode) (mode . python-ts-mode)
+                        (mode . emacs-lisp-mode)
+                        (mode . rust-mode) (mode . rust-ts-mode)
+                        (mode . go-mode) (mode . go-ts-mode)
+                        (mode . java-mode) (mode . java-ts-mode)
+                        (mode . js-mode) (mode . js-ts-mode)
+                        (mode . typescript-mode) (mode . typescript-ts-mode)))
+           ("Dired" (mode . dired-mode))
+           ("Shell" (or (mode . eshell-mode) (mode . shell-mode) (mode . term-mode)))
+           ("Emacs" (or (name . "^\\*scratch\\*$")
+                        (name . "^\\*Messages\\*$")
+                        (name . "^\\*Warnings\\*$")
+                        (name . "^\\*Backtrace\\*$"))))))
   (define-ibuffer-filter noema
       "Toggle current view to buffers hosting Noema."
     (:description "Noema")
@@ -1140,7 +1117,7 @@ Else, call `comment-or-uncomment-region' on the current line."
   (advice-add 'ibuffer-visit-buffer :around
               #'my/ibuffer-visit-noema-canonical)
   (advice-add 'ibuffer-visit-buffer-other-window :around
-              #'my/ibuffer-visit-noema-canonical-other-window))
+              #'my/ibuffer-visit-noema-canonical))
 
 (defvar my/ibuffer-ui--theme-signature nil
   "Last theme signature applied by `my/ibuffer-apply-ui'.")
@@ -1335,6 +1312,12 @@ escape from the process sentinel."
 (add-hook 'after-init-hook #'my/noema-retire-legacy-commands 90)
 (add-hook 'savehist-save-hook #'my/noema-retire-legacy-commands 90)
 
+(defun my/amx-prune-stale-commands ()
+  "Remove saved Amx rankings and history entries that are no longer commands."
+  (setq amx-data (cl-remove-if-not
+                  (lambda (entry) (commandp (car-safe entry))) amx-data)
+        amx-history (cl-remove-if-not #'commandp amx-history)))
+
 (use-package amx
   :ensure t
   :defer 2
@@ -1343,6 +1326,9 @@ escape from the process sentinel."
   (add-to-list 'amx-ignored-command-matchers
                "\\`\\(?:my/.*aaronnote\\|ibuffer-filter-by-aaronnote\\)")
   (my/noema-retire-legacy-commands)
+  ;; Amx trusts saved ranking data even after a command has been removed.
+  ;; Drop stale entries before rebuilding, or selecting one asserts in Amx.
+  (my/amx-prune-stale-commands)
   (amx-rebuild-cache)
   (advice-remove 'amx-save-to-file #'my/noema-retire-legacy-commands)
   (advice-add 'amx-save-to-file
@@ -1695,7 +1681,7 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
   (interactive)
   (if (> (length (frame-list)) 1)
       (delete-frame)
-    (bury-buffer)))
+    (my/window-bury-current-buffer)))
 
 (defvar my/warning-popup-minimum-level nil
   "Minimum warning severity that may auto-display the warnings buffer.

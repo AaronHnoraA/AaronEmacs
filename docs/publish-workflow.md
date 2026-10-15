@@ -89,7 +89,7 @@ section 变成站在世界里的 CSS3D 面板 —— 仍是真 HTML,可选中、
 | `my/noema-publish-nas-enable` | 是否在 push 后 rsync 到 NAS |
 | `my/noema-publish-nas-target` | rsync 目标 |
 
-改这些用 `M-x my/config-board`,不要在代码里 `setq`。
+改这些用 `M-x config-board`,不要在代码里 `setq`。
 
 ## 部署路径
 

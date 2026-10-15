@@ -69,9 +69,9 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
 
 如果运行时新增、删除或**直接编辑**了 `etc/config-*.el`，执行
 `M-x config-refresh-store-files`（dispatch 里 `R`）。它会**以磁盘为准全量重建**：
-先丢弃内存中的覆盖，再重新发现并读入所有 store 文件，因此磁盘上的修改、新增的 key
-以及删除的 key 都会被反映出来（运行时严格对齐磁盘）。所有通过 `config-set`/面板
-改过的值都已落盘，不会因重建而丢失。
+先在临时状态中重新发现、完整解析所有 store 文件；全部成功后再替换内存覆盖并应用，
+因此磁盘上的修改、新增的 key 以及删除的 key 都会被反映出来。文件损坏或不可读时会
+报错并保留当前设置。写入失败后刷新会被拒绝，先用 `M-x config-save` 重试落盘。
 
 ## 日常用法
 
@@ -90,12 +90,16 @@ Customize 里的 `Apply` 只做运行时生效，不写 `custom.el`；`Save` 通
 
 transient `config-dispatch`：打开 `config` group、按注册表 group 打开生成的子组、
 保存 store、刷新 store（`R`，全量重建）、自检完整性（`!`，`config-check`）、
-打开主 store 文件、清空所有覆盖（`D`）。
+打开主 store 文件、清空所有覆盖（`D`）。`f` 按注册名称打开专题配置文件，`L` 调用
+该文件登记的 loader 重新加载。编辑仍使用 Emacs 原生 `find-file`；文件尚不存在时
+也可以打开新 buffer。健康板只显示设置完整性摘要，详情使用同一个 `config-check`。
 
 `config-check`（dispatch `!` / `M-x config-check`）校验注册表的不变式：覆盖索引与
 有序 alist 是否一一对应、每个覆盖是否能解析到 store 文件、各 store 文件是否还能
 正确解析。只发现索引漂移时会就地 `config--reindex` 自愈，其余问题列在
-`*Config Check*` 缓冲区。`config-store-set` / 覆盖写入只走 `config--clear-overrides`
+`*Config Check*` 缓冲区。它也会提示上次写入失败留下的未保存更改。写入失败会直接
+报错，不再显示“stores saved”；修复磁盘问题后执行 `config-save` 重试。
+`config-store-set` / 覆盖写入只走 `config--clear-overrides`
 等集中入口维护索引，确保「清空全部覆盖」等操作不会留下悬挂的 cons。
 
 ### Lisp API

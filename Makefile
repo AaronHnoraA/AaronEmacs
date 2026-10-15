@@ -27,7 +27,8 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         health health-startup health-byte health-native ui-test activity-test ui-tokens audit-ui-tokens \
         remote-test remote-source-test remote-transfer-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
 		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke remote-ghostel-live-smoke \
-        jupyter-test research-test agenda-test agenda-apple-test \
+        jupyter-test research-test agenda-test agenda-apple-test project-workflow-test \
+        jupyter-linux-disconnect-live-smoke \
         noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
         noema-server-config-init noema-server-build noema-server-start noema-server-deploy noema-disk-audit noema-clean \
         publish publish-build publish-deploy publish-clean
@@ -49,6 +50,10 @@ help:
 	  '  make audit-ui-tokens      Verify committed Noema CSS tokens are current' \
 	  '  make ui-test              Run Aaron UI semantic-token and dashboard ERT tests' \
 	  '  make activity-test        Run activity indicator, Noema snapshot, and keyboard regressions' \
+	  '  make jupyter-pending-remote-live-smoke  Test broker cleanup across Emacs sessions on a Linux SSH target (opt-in)' \
+	  '  make jupyter-abrupt-exit-live-smoke  Verify broker recovery after SIGKILL of Emacs (opt-in)' \
+	  '  make jupyter-linux-kernel-live-smoke  Run a real Linux SSH ipykernel through the broker (opt-in)' \
+	  '  make jupyter-linux-disconnect-live-smoke  Cut five forwards during a real Linux kernel execution (opt-in)' \
 	  '  make doctor               Open/check the config health doctor report in batch' \
 	  '  make state-backup         Snapshot migration-worthy local state into var/backup-snapshots' \
 	  '  make state-restore SNAPSHOT=/path/to/archive.tar.gz  Restore a saved state snapshot' \
@@ -93,6 +98,7 @@ help:
 	  '  make remote-ghostel-live-smoke  Check the actual Ghostel frontend on a real SSH target' \
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make research-test        Run Noema research notebook (JuText/Graph Board) ERT suite' \
+	  '  make project-workflow-test Run project run, task, output and local override ERT tests' \
 	  '  make agenda-apple-test    Build and check EventKit without requesting access' \
 	  '  make noema-help          Show all Noema targets' \
 	  '  make noema-setup         Install Noema dependencies and initialize data' \
@@ -150,7 +156,10 @@ audit-ui-tokens:
 	$(UI_TOKEN_BATCH) --eval '(let ((expected (aaron-ui-css-tokens '"'"'wave)) (file "$(CURDIR)/$(UI_TOKEN_FILE)")) (unless (and (file-readable-p file) (with-temp-buffer (insert-file-contents file) (equal (buffer-string) expected))) (error "Aaron UI CSS tokens are stale; run make ui-tokens")))'
 
 activity-test:
-	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L site-lisp/config -L site-lisp/aaron-ui -L lisp -L lisp/roam -l test/init-activity-tests.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L site-lisp/config -L site-lisp/aaron-ui -L lisp -L lisp/roam -L lisp/remote -L lisp/remote/backend -l test/init-activity-tests.el -f ert-run-tests-batch-and-exit
+
+project-workflow-test:
+	$(BATCH) -l test/init-project-run-tests.el -l test/init-output-frame-tests.el -l test/init-project-local-tests.el -l test/init-amx-tests.el -f ert-run-tests-batch-and-exit
 
 ui-test:
 	$(UI_TOKEN_BATCH) --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)"))' -l test/aaron-ui-tests.el -f ert-run-tests-batch-and-exit
@@ -348,6 +357,21 @@ jupyter-test:
 .PHONY: jupyter-live-smoke
 jupyter-live-smoke:
 	$(BATCH) -l test/jupyter-remote-live-smoke.el
+
+.PHONY: jupyter-pending-remote-live-smoke
+jupyter-pending-remote-live-smoke:
+	python3 test/jupyter-pending-remote-live-smoke.py
+
+.PHONY: jupyter-abrupt-exit-live-smoke
+jupyter-abrupt-exit-live-smoke:
+	python3 test/jupyter-abrupt-exit-live-smoke.py
+
+.PHONY: jupyter-linux-kernel-live-smoke
+jupyter-linux-kernel-live-smoke:
+	$(BATCH) -l test/jupyter-linux-kernel-live-smoke.el
+
+jupyter-linux-disconnect-live-smoke:
+	JUPYTER_LINUX_FAULT_INJECTION=1 $(BATCH) -l test/jupyter-linux-kernel-live-smoke.el
 
 .PHONY: jupyter-project-live-smoke
 jupyter-project-live-smoke:

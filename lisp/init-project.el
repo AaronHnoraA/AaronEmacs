@@ -20,7 +20,7 @@
   (my/treemacs-bridge-declarations))
 
 (defvar projectile-known-projects)
-(defvar project--list)
+(defvar recentf-list)
 (defvar dashboard-projects-backend)
 (defvar dashboard-projects-switch-function)
 (defvar winner-mode)
@@ -37,8 +37,6 @@
 (defvar treemacs-indentation)
 (defvar treemacs-indentation-string)
 
-(declare-function project--ensure-read-project-list "project")
-(declare-function project--write-project-list "project")
 (declare-function dashboard-projects-backend-load-projects "dashboard-widgets")
 (declare-function breadcrumb-local-mode "breadcrumb" (&optional arg))
 (declare-function lsp-headerline-check-breadcrumb "lsp-headerline" (&rest arguments))
@@ -159,6 +157,9 @@ source file's filesystem depth."
 
 (defconst my/project-list-file
   (expand-file-name "projects.eld" my/project-state-dir))
+
+(defvar my/project-ignored-roots-load-error nil
+  "Error from loading the ignored-project list, or nil when it parsed.")
 
 (make-directory my/project-state-dir t)
 
@@ -317,6 +318,10 @@ existing state owner."
   (equal (my/project-canonical-path left)
          (my/project-canonical-path right)))
 
+(defun my/project-root-member-p (root roots)
+  "Return non-nil when ROOT matches a member of ROOTS by project identity."
+  (seq-some (lambda (known) (my/project-root-equal-p known root)) roots))
+
 (defun my/project-hidden-root-p (project-root)
   "Return non-nil when PROJECT-ROOT should stay out of project UIs."
   (when (stringp project-root)
@@ -328,12 +333,29 @@ existing state owner."
 
 (defun my/project-load-ignored-roots ()
   "Return project roots suppressed from the custom project workflow."
-  (when (file-exists-p my/project-ignored-roots-file)
-    (with-temp-buffer
-      (insert-file-contents my/project-ignored-roots-file)
-      (let ((data (read (current-buffer))))
-        (when (proper-list-p data)
-          data)))))
+  (setq my/project-ignored-roots-load-error nil)
+  (condition-case err
+      (when (file-exists-p my/project-ignored-roots-file)
+        (with-temp-buffer
+          (insert-file-contents my/project-ignored-roots-file)
+          (with-syntax-table emacs-lisp-mode-syntax-table
+            (let ((data (read (current-buffer))))
+              (unless (and (proper-list-p data)
+                           (cl-every #'stringp data))
+                (user-error "Ignored-project file must contain a list of roots"))
+              (forward-comment (point-max))
+              (unless (eobp)
+                (user-error "Ignored-project file has extra forms"))
+              data))))
+    (error
+     (setq my/project-ignored-roots-load-error (error-message-string err))
+     (display-warning
+      'init-project
+      (format "Failed to load ignored projects from %s: %s"
+              my/project-ignored-roots-file
+              my/project-ignored-roots-load-error)
+      :error)
+     nil)))
 
 (defvar my/project-ignored-roots
   (or (my/project-load-ignored-roots) nil)
@@ -341,12 +363,33 @@ existing state owner."
 
 (defun my/project-save-ignored-roots ()
   "Persist `my/project-ignored-roots' to disk."
-  (with-temp-file my/project-ignored-roots-file
-    (insert ";;; -*- lisp-data -*-\n")
-    (let ((print-length nil)
-          (print-level nil))
-      (pp (mapcar #'my/project-normalize-root my/project-ignored-roots)
-          (current-buffer)))))
+  (when my/project-ignored-roots-load-error
+    (user-error "Repair %s and run project-reload-ignored-roots before saving: %s"
+                my/project-ignored-roots-file
+                my/project-ignored-roots-load-error))
+  (config--write-string-atomically
+   my/project-ignored-roots-file
+   (with-temp-buffer
+     (insert ";;; -*- lisp-data -*-\n")
+     (let ((print-length nil)
+           (print-level nil))
+       (pp (mapcar #'my/project-normalize-root my/project-ignored-roots)
+           (current-buffer)))
+     (buffer-string))))
+
+(defun my/project-reload-ignored-roots ()
+  "Reload the ignored-project list after editing its state file."
+  (interactive)
+  (let ((roots (my/project-load-ignored-roots)))
+    (when my/project-ignored-roots-load-error
+      (user-error "Ignored-project list is still invalid: %s"
+                  my/project-ignored-roots-load-error))
+    (setq my/project-ignored-roots roots)
+    (my/project-prune-hidden-project-state)
+    (message "Reloaded %d ignored project roots" (length roots))))
+
+(defalias 'project-reload-ignored-roots #'my/project-reload-ignored-roots
+  "Reload the ignored-project list after repairing its state file.")
 
 (defun my/project-ignored-root-p (project-root)
   "Return non-nil when PROJECT-ROOT is suppressed from the workflow."
@@ -358,19 +401,29 @@ existing state owner."
 (defun my/project-ignore-root (project-root)
   "Suppress PROJECT-ROOT from the custom project workflow."
   (unless (my/project-ignored-root-p project-root)
-    (push (my/project-normalize-root project-root) my/project-ignored-roots)
-    (my/project-save-ignored-roots)))
+    (let ((previous my/project-ignored-roots))
+      (push (my/project-normalize-root project-root) my/project-ignored-roots)
+      (condition-case err
+          (my/project-save-ignored-roots)
+        (error
+         (setq my/project-ignored-roots previous)
+         (signal (car err) (cdr err)))))))
 
 (defun my/project-unignore-root (project-root)
   "Re-enable PROJECT-ROOT in the custom project workflow."
-  (let ((before (length my/project-ignored-roots)))
+  (let ((previous my/project-ignored-roots)
+        (before (length my/project-ignored-roots)))
     (setq my/project-ignored-roots
           (seq-remove
            (lambda (ignored-root)
              (my/project-root-equal-p ignored-root project-root))
            my/project-ignored-roots))
     (unless (= before (length my/project-ignored-roots))
-      (my/project-save-ignored-roots)
+      (condition-case err
+          (my/project-save-ignored-roots)
+        (error
+         (setq my/project-ignored-roots previous)
+         (signal (car err) (cdr err))))
       t)))
 
 (defun my/project-project-object-ignored-p (project)
@@ -378,12 +431,12 @@ existing state owner."
   (my/project-hidden-root-p (project-root project)))
 
 (defun my/project-path-inside-root-p (path project-root)
-  "Return non-nil when PATH belongs to PROJECT-ROOT."
+  "Return non-nil when PATH belongs to PROJECT-ROOT without a target probe."
   (when-let* ((path (my/project-canonical-path path))
               (root (file-name-as-directory
                      (my/project-canonical-path project-root))))
     (or (equal path (directory-file-name root))
-        (file-in-directory-p path root))))
+        (string-prefix-p root path))))
 
 (defun my/project-name (project-root)
   "Return a display name for PROJECT-ROOT."
@@ -434,7 +487,6 @@ keep perspective names unique."
              (require 'project nil t)
              (require 'projectile nil t))
     (projectile-known-projects)
-    (project--ensure-read-project-list)
     (let ((changed nil))
       (dolist (project-root (project-known-project-roots))
         (let ((project-root (my/project-normalize-root project-root)))
@@ -621,13 +673,15 @@ With ARG, use Projectile's commander action instead."
   (require 'treemacs-evil nil t))
 
 (defun my/project-open-workbench (project-root &optional arg)
-  "Open PROJECT-ROOT as a full workbench.
-This switches perspective and runs Projectile's switch action.
-With ARG, Projectile uses commander mode."
+  "Switch to PROJECT-ROOT and activate its workbench context.
+With ARG, use Projectile's switch action."
   (interactive (list (my/project-read-known-project "Open project workbench: ")
                      current-prefix-arg))
   (setq project-root (my/project-normalize-root project-root))
   (my/project-switch project-root arg))
+
+(defalias 'project-workbench #'my/project-open-workbench
+  "Open a project as a full workbench.")
 
 (defun my/project-find-file (project-root)
   "Find a file in PROJECT-ROOT.
@@ -637,12 +691,48 @@ Without a prefix argument, default to the current project."
     (projectile-find-file-in-directory project-root)
     (my/project-activate project-root t)))
 
+(defun my/project-recent-file-choices (project-root)
+  "Return recent files in PROJECT-ROOT as (RELATIVE-NAME . VISIT-PATH).
+Read Emacs's `recentf-list' directly, so listing remote candidates does not
+ask Projectile to resolve the project root with `file-truename'."
+  (let ((canonical-root
+         (file-name-as-directory (my/project-canonical-path project-root)))
+        (seen (make-hash-table :test #'equal))
+        choices)
+    (dolist (file (and (boundp 'recentf-list) recentf-list))
+      (when (stringp file)
+        (when-let* ((canonical
+                     (ignore-errors (my/project-canonical-path file)))
+                    ((string-prefix-p canonical-root canonical))
+                    (relative (substring canonical (length canonical-root))))
+          (unless (gethash relative seen)
+            (when-let* ((logical
+                         (ignore-errors (remote-canonicalize-file-name file))))
+              (puthash relative t seen)
+              (push (cons relative
+                          (or (ignore-errors
+                                (remote-client-file-name logical))
+                              logical))
+                    choices))))))
+    (nreverse choices)))
+
 (defun my/project-recent-file (project-root)
   "Open a recently visited file in PROJECT-ROOT."
   (interactive (list (my/project-read-target-root "Recent file in project: ")))
   (my/with-project-root-context project-root
-    (projectile-recentf)
-    (my/project-activate project-root t)))
+    (let ((choices (my/project-recent-file-choices project-root)))
+      (unless choices
+        (user-error "No recent files in %s"
+                    (abbreviate-file-name project-root)))
+      (let* ((selected
+              (projectile-completing-read "Recently visited files: "
+                                          (mapcar #'car choices)
+                                          :caller 'projectile-read-file))
+             (file (cdr (assoc selected choices))))
+        (unless file
+          (user-error "Choose a recent project file"))
+        (find-file file)
+        (my/project-activate project-root t)))))
 
 (defun my/project-switch-buffer (project-root)
   "Switch to a buffer that belongs to PROJECT-ROOT."
@@ -723,8 +813,8 @@ RG-UNAVAILABLE records a previous probe by another search entry point."
     (my/project-activate project-root t)))
 
 (defun my/project-kill-buffers (project-root)
-  "Kill buffers belonging to PROJECT-ROOT."
-  (interactive (list (my/project-read-target-root "Kill buffers in project: ")))
+  "Close file-visiting buffers in PROJECT-ROOT using Projectile's policy."
+  (interactive (list (my/project-read-target-root "Close project files: ")))
   (let ((default-directory (my/project-normalize-root project-root)))
     (projectile-kill-buffers)))
 
@@ -732,8 +822,11 @@ RG-UNAVAILABLE records a previous probe by another search entry point."
   "Register PROJECT-ROOT across the project workflow."
   (interactive "DAdd project: ")
   (setq project-root (my/project-register-root project-root))
-  (message "Registered project %s in Projectile/project.el"
+  (message "Registered project %s in the project workflow"
            (abbreviate-file-name project-root)))
+
+(defalias 'project-add-to-workbench #'my/project-add-known-project
+  "Add a project to the Projectile and Perspective workbench.")
 
 (defun my/project-remove-from-projectile-known-projects (project-root)
   "Remove PROJECT-ROOT from `projectile-known-projects'.
@@ -751,23 +844,13 @@ This matches canonically, so symlinked roots are cleaned as well."
 (defun my/project-remove-from-project-list (project-root)
   "Remove PROJECT-ROOT from the built-in `project.el' project list."
   (when (require 'project nil t)
-    (project--ensure-read-project-list)
-    (let ((before (length project--list)))
-      (setq project--list
-            (seq-remove
-             (lambda (entry)
-               (let ((root (cond
-                            ((stringp entry) entry)
-                            ((stringp (car-safe entry)) (car-safe entry))
-                            ((and (listp entry)
-                                  (stringp (car-safe (last entry))))
-                             (car (last entry)))
-                            (t nil))))
-                 (and root (my/project-root-equal-p root project-root))))
-             project--list))
-      (unless (= before (length project--list))
-        (project--write-project-list)
-        t))))
+    (let ((removed nil))
+      (dolist (known-root (project-known-project-roots))
+        (when (my/project-root-equal-p known-root project-root)
+          (let ((inhibit-message t))
+            (project-forget-project known-root))
+          (setq removed t)))
+      removed)))
 
 (defun my/project-treemacs-project-name (project-root &optional workspace)
   "Return a Treemacs-safe display name for PROJECT-ROOT in WORKSPACE."
@@ -815,34 +898,134 @@ This matches canonically, so symlinked roots are cleaned as well."
                     (abbreviate-file-name project-root))
            nil))))))
 
+(defun my/project-rollback-registration (project-root ignored-before
+                                                     projectile-before native-before)
+  "Undo new registrations for PROJECT-ROOT; return any cleanup failures.
+BEFORE arguments record whether each owner already knew the project."
+  (let (failures)
+    (cl-labels ((attempt (label function)
+                  (condition-case err
+                      (funcall function)
+                    (error
+                     (push (format "%s: %s" label (error-message-string err))
+                           failures)))))
+      (unless native-before
+        (attempt "project.el"
+                 (lambda ()
+                   (my/project-remove-from-project-list project-root)
+                   (when (my/project-root-member-p
+                          project-root (project-known-project-roots))
+                     (error "project.el still remembers the root")))))
+      (unless projectile-before
+        (attempt "Projectile"
+                 (lambda ()
+                   (my/project-remove-from-projectile-known-projects
+                    project-root)
+                   (when (my/project-root-member-p
+                          project-root (projectile-known-projects))
+                     (error "Projectile still remembers the root")))))
+      (when ignored-before
+        (attempt "ignored roots"
+                 (lambda ()
+                   (my/project-ignore-root project-root)
+                   (unless (my/project-ignored-root-p project-root)
+                     (error "Ignored-project list did not restore the root"))))))
+    (nreverse failures)))
+
 (defun my/project-register-root (project-root)
   "Register PROJECT-ROOT across project backends."
   (setq project-root (my/project-normalize-root project-root))
   (unless (require 'projectile nil t)
     (user-error "Projectile is unavailable"))
-  ;; A remote root is registered through its Remote workspace, the same
-  ;; owner its files, processes and environment use.
-  (unless (my/project-client-root-p project-root)
-    (remote-workspace-open project-root :connect t :adapter "emacs-file"
-                           :capability 'file-read :load-environment t))
-  (unless (file-directory-p project-root)
-    (user-error "%s is not a directory" (abbreviate-file-name project-root)))
-  (let ((default-directory project-root))
-    (unless (projectile-project-p project-root)
-      ;; Projectile caches "rootless" directories. If a directory becomes a
-      ;; project (e.g. `git init` / `git clone`) while Emacs is running, that
-      ;; cached miss will make subsequent checks incorrectly return nil until the
-      ;; cache is cleared.
-      (when (fboundp 'projectile-invalidate-cache)
-        (projectile-invalidate-cache nil))
-      (unless (projectile-project-p project-root)
-        (user-error "%s is not recognized as a project root (try `M-x projectile-invalidate-cache` or restart Emacs)"
-                    (abbreviate-file-name project-root)))))
-  (my/project-unignore-root project-root)
-  (projectile-add-known-project project-root)
-  (when (require 'project nil t)
-    (project--remember-dir project-root))
-  project-root)
+  (when my/project-ignored-roots-load-error
+    (user-error "Repair the ignored-project file before adding projects: %s"
+                my/project-ignored-roots-load-error))
+  (let ((existing-workspace
+         (unless (my/project-client-root-p project-root)
+           (remote-get-workspace project-root)))
+        (workspace nil)
+        (registered nil)
+        (registration-started nil)
+        (ignored-before nil)
+        (projectile-before nil)
+        (native-before nil))
+    (unwind-protect
+        (condition-case err
+            (progn
+              ;; A remote root is registered through its Remote workspace, the
+              ;; same owner its files, processes and environment use.
+              (unless (my/project-client-root-p project-root)
+                (setq workspace
+                      (remote-workspace-open
+                       project-root :connect t :adapter "emacs-file"
+                       :capability 'file-read :load-environment t)))
+              (unless (file-directory-p project-root)
+                (user-error "%s is not a directory"
+                            (abbreviate-file-name project-root)))
+              (let ((default-directory project-root))
+                (unless (projectile-project-p project-root)
+                  ;; Projectile caches "rootless" directories. If a directory
+                  ;; becomes a project while Emacs runs, clear that cached miss.
+                  (when (fboundp 'projectile-invalidate-cache)
+                    (projectile-invalidate-cache nil))
+                  (unless (projectile-project-p project-root)
+                    (user-error "%s is not recognized as a project root (try `M-x projectile-invalidate-cache` or restart Emacs)"
+                                (abbreviate-file-name project-root)))))
+              (setq ignored-before (my/project-ignored-root-p project-root)
+                    projectile-before
+                    (my/project-root-member-p project-root
+                                              (projectile-known-projects))
+                    native-before
+                    (and (require 'project nil t)
+                         (my/project-root-member-p
+                          project-root (project-known-project-roots))))
+              ;; Check Projectile's other exclusions before changing state.
+              ;; Temporarily omit our own ignore entry without persisting it.
+              (let ((my/project-ignored-roots
+                     (seq-remove
+                      (lambda (root)
+                        (my/project-root-equal-p root project-root))
+                      my/project-ignored-roots)))
+                (when (projectile-ignored-project-p project-root)
+                  (user-error "Projectile excludes %s; adjust its ignored-project settings before adding it"
+                              (abbreviate-file-name project-root))))
+              (setq registration-started t)
+              (my/project-unignore-root project-root)
+              (unless projectile-before
+                (projectile-add-known-project project-root))
+              (unless native-before
+                (when (require 'project nil t)
+                  (project-remember-project (cons 'transient project-root))))
+              (unless (my/project-root-member-p
+                       project-root (projectile-known-projects))
+                (user-error "Projectile did not register %s"
+                            (abbreviate-file-name project-root)))
+              (setq registered t)
+              project-root)
+          ((error quit)
+           (let ((failures
+                  (when registration-started
+                    (my/project-rollback-registration
+                     project-root ignored-before projectile-before
+                     native-before))))
+             (when failures
+               (display-warning
+                'init-project
+                (format "Project registration failed; cleanup incomplete (%s)"
+                        (mapconcat #'identity failures "; "))
+                :error))
+             (signal (car err) (cdr err)))))
+      (when (and (not registered)
+                 (not existing-workspace)
+                 (remote-workspace-p workspace))
+        (condition-case err
+            (remote-workspace-close workspace 'project-registration-failed)
+          (error
+           (display-warning
+            'init-project
+            (format "Could not close workspace after project registration failed: %s"
+                    (error-message-string err))
+            :error)))))))
 
 (defun my/project--filter-visible-roots (roots)
   "Return ROOTS without entries that should stay hidden from project UIs."
@@ -853,49 +1036,20 @@ This matches canonically, so symlinked roots are cleaned as well."
 (defun my/project-prune-hidden-project-state ()
   "Remove ignored roots such as `~/` from persisted project state."
   (interactive)
-  (when (require 'projectile nil t)
-    (projectile-load-known-projects)
-    (let ((filtered (my/project--filter-visible-roots projectile-known-projects)))
-      (unless (equal filtered projectile-known-projects)
-        (setq projectile-known-projects filtered)
-        (projectile-merge-known-projects))))
-  (when (require 'project nil t)
-    (project--ensure-read-project-list)
-    (let ((filtered
-           (seq-remove
-            (lambda (entry)
-              (let ((root (cond
-                           ((stringp entry) entry)
-                           ;; Historical format: ("/path/")
-                           ((stringp (car-safe entry)) (car-safe entry))
-                           ;; Be tolerant of formats like (vc Git "/path/") etc.
-                           ((and (listp entry)
-                                 (stringp (car-safe (last entry))))
-                            (car (last entry)))
-                           (t nil))))
-                (and root (my/project-hidden-root-p root))))
-            project--list)))
-      (unless (equal filtered project--list)
-        (setq project--list filtered)
-        (project--write-project-list)))))
-
-(defun my/project--remember-dir-visible-only (orig-fn root &rest args)
-  "Only let ORIG-FN remember ROOT when it is explicitly managed here.
-
-Emacs 31 `project--remember-dir' takes optional arguments (NO-WRITE STABLE)."
-  ;; Be defensive: some callers may pass non-string roots (e.g. backend tags).
-  (let* ((root (and (stringp root) (my/project-normalize-root root)))
-         (managed-p
-          (or (null root)
-              (my/project-hidden-root-p root)
-              (and (require 'projectile nil t)
-                   (projectile-known-projects)
-                   (seq-some
-                    (lambda (known-root)
-                      (my/project-root-equal-p known-root root))
-                    projectile-known-projects)))))
-    (when managed-p
-      (apply orig-fn root args))))
+  ;; A damaged ignored-root file may hide additional roots.  Wait for an
+  ;; explicit reload before changing either package's persisted project list.
+  (unless my/project-ignored-roots-load-error
+    (when (require 'projectile nil t)
+      (projectile-load-known-projects)
+      (let ((filtered (my/project--filter-visible-roots projectile-known-projects)))
+        (unless (equal filtered projectile-known-projects)
+          (setq projectile-known-projects filtered)
+          (projectile-merge-known-projects))))
+    (when (require 'project nil t)
+      (dolist (root (project-known-project-roots))
+        (when (my/project-hidden-root-p root)
+          (let ((inhibit-message t))
+            (project-forget-project root)))))))
 
 (defun my/show-imenu-target-root ()
   "Return the directory root used by `show-imenu'."
@@ -1739,7 +1893,7 @@ already visible Treemacs window."
 
 (defun my/project-kill-associated-buffers (project-root &optional project-label)
   "Kill buffers associated with PROJECT-ROOT.
-Returns the number of killed buffers."
+Return a plist with counts of killed and preserved buffers and errors."
   (let* ((project-root (my/project-normalize-root project-root))
          (project-label (or project-label
                             (my/project-perspective-name project-root)))
@@ -1751,14 +1905,23 @@ Returns the number of killed buffers."
                            (equal (buffer-name)
                                   (format "*ghostel:%s*" project-label)))))
                    (buffer-list)))
-         (killed 0))
+         (killed 0)
+         (preserved 0)
+         (errors nil))
     (dolist (buffer (append (delq (current-buffer) buffers)
                             (when (memq (current-buffer) buffers)
                               (list (current-buffer)))))
       (when (buffer-live-p buffer)
-        (kill-buffer buffer)
-        (setq killed (1+ killed))))
-    killed))
+        (condition-case err
+            (kill-buffer buffer)
+          (error
+           (push (format "%s: %s" (buffer-name buffer)
+                         (error-message-string err))
+                 errors)))
+        (if (buffer-live-p buffer)
+            (setq preserved (1+ preserved))
+          (setq killed (1+ killed)))))
+    (list :killed killed :preserved preserved :errors (nreverse errors))))
 
 (defun my/project-kill-perspective-if-exists (project-name)
   "Kill the perspective named PROJECT-NAME if it exists."
@@ -1767,53 +1930,165 @@ Returns the number of killed buffers."
       (persp-kill project-name)
       t)))
 
+(defun my/project-read-removable-root ()
+  "Read a project root, including previously ignored roots for retry."
+  (let* ((roots (delete-dups
+                 (append (my/project-known-projects)
+                         (copy-sequence my/project-ignored-roots)
+                         (when my/project-active-root
+                           (list my/project-active-root)))))
+         (root (completing-read "Remove project: " roots nil nil nil nil
+                                (my/project-current-root))))
+    (when (string-empty-p root)
+      (user-error "Choose a project root to remove"))
+    (my/project-normalize-root root)))
+
 (defun my/project-remove-known-project (project-root)
   "Remove PROJECT-ROOT from Emacs project state and clean related buffers."
-  (interactive (list (my/project-read-target-root "Remove project: ")))
+  (interactive (list (my/project-read-removable-root)))
   (setq project-root (my/project-normalize-root project-root))
-  (let ((project-label (my/project-perspective-name project-root)))
+  (let ((project-label (my/project-perspective-name project-root))
+        (failures nil)
+        (buffers nil))
     (unless (yes-or-no-p
              (format "Remove project %s from Projectile/project.el/Treemacs/perspective state? "
                      (abbreviate-file-name project-root)))
       (user-error "Project removal cancelled"))
-    (my/project-ignore-root project-root)
-    (my/project-remove-from-projectile-known-projects project-root)
-    (my/project-remove-from-project-list project-root)
-    (my/project-remove-projectile-cache project-root)
-    (my/project-remove-from-treemacs-workspaces project-root)
-    (my/project-kill-perspective-if-exists project-label)
-    (my/project-kill-associated-buffers project-root project-label)
-    (when (and my/project-active-root
-               (remote-file-equal-p my/project-active-root project-root))
-      (my/project-leave))
-    (message "Removed project %s from Emacs project management"
-             (abbreviate-file-name project-root))))
+    (cl-labels
+        ((attempt (label function)
+           (condition-case err
+               (funcall function)
+             (error
+              (push (format "%s: %s" label (error-message-string err))
+                    failures)))))
+      (attempt "ignored roots" (lambda () (my/project-ignore-root project-root)))
+      (attempt "Projectile list"
+               (lambda () (my/project-remove-from-projectile-known-projects
+                           project-root)))
+      (attempt "project.el list"
+               (lambda () (my/project-remove-from-project-list project-root)))
+      (attempt "Projectile cache"
+               (lambda () (my/project-remove-projectile-cache project-root)))
+      (attempt "Treemacs"
+               (lambda () (my/project-remove-from-treemacs-workspaces
+                           project-root)))
+      (attempt "Perspective"
+               (lambda () (my/project-kill-perspective-if-exists project-label)))
+      (attempt "buffers"
+               (lambda ()
+                 (setq buffers
+                       (my/project-kill-associated-buffers
+                        project-root project-label))))
+      (when (and my/project-active-root
+                 (remote-file-equal-p my/project-active-root project-root))
+        (attempt "active project" #'my/project-leave)))
+    (dolist (error (plist-get buffers :errors))
+      (push (concat "buffer " error) failures))
+    (if failures
+        (user-error "Project %s removal incomplete (%s); retry removal"
+                    (abbreviate-file-name project-root)
+                    (mapconcat #'identity (nreverse failures) "; "))
+      (message "Removed project %s; closed %d buffer(s), preserved %d"
+               (abbreviate-file-name project-root)
+               (or (plist-get buffers :killed) 0)
+               (or (plist-get buffers :preserved) 0)))))
+
+(defalias 'project-remove-from-workbench #'my/project-remove-known-project
+  "Remove a project from the workbench and clean associated state.")
+
+(defun my/project-new-projectile-roots (known-before)
+  "Return Projectile roots added since KNOWN-BEFORE, comparing identities."
+  (seq-remove
+   (lambda (project-root)
+     (seq-some
+      (lambda (known-root)
+        (my/project-root-equal-p known-root project-root))
+      known-before))
+   (mapcar #'my/project-normalize-root projectile-known-projects)))
+
+(defun my/project-forget-failed-discovery (project-root)
+  "Remove newly discovered PROJECT-ROOT from Projectile; return error text."
+  (condition-case err
+      (progn
+        (my/project-remove-from-projectile-known-projects project-root)
+        (when (my/project-root-member-p
+               project-root (projectile-known-projects))
+          (error "Projectile still remembers the root"))
+        nil)
+    ((error quit) (error-message-string err))))
+
+(defun my/project-clean-up-discovered-roots (roots)
+  "Forget ROOTS added by an incomplete scan; return cleanup failures."
+  (let (failures)
+    (dolist (root roots)
+      (when-let* ((cleanup-error (my/project-forget-failed-discovery root)))
+        (push (format "%s: %s" root cleanup-error) failures)))
+    (nreverse failures)))
 
 (defun my/project-discover-projects-in-directory (directory depth)
   "Discover projects under DIRECTORY up to DEPTH levels deep."
   (interactive
    (list (read-directory-name "Discover projects in: " nil nil t)
          (read-number "Discovery depth: " 2)))
-  (let* ((known-before (mapcar #'my/project-normalize-root projectile-known-projects))
-         (before (length known-before)))
-    (projectile-discover-projects-in-directory directory depth)
-    (let* ((known-after (mapcar #'my/project-normalize-root projectile-known-projects))
-           (new-projects
-            (seq-remove
-             (lambda (project-root)
-               (seq-some
-                (lambda (known-root)
-                  (my/project-root-equal-p known-root project-root))
-                known-before))
-             known-after))
-           (synced-count 0))
-      (dolist (project-root new-projects)
-        (my/project-register-root project-root)
-        (setq synced-count (1+ synced-count)))
-      (message "Discovered %d project(s) under %s and synced %d into Projectile/project.el"
-               (max 0 (- (length known-after) before))
-               (abbreviate-file-name directory)
-               synced-count))))
+  (when my/project-ignored-roots-load-error
+    (user-error "Repair the ignored-project file before discovering projects: %s"
+                my/project-ignored-roots-load-error))
+  (let ((known-before (mapcar #'my/project-normalize-root
+                              (projectile-known-projects)))
+        (failures nil)
+        (registered-count 0))
+    (condition-case err
+        (projectile-discover-projects-in-directory directory depth)
+      ((error quit)
+       (setq failures
+             (my/project-clean-up-discovered-roots
+              (my/project-new-projectile-roots known-before)))
+       (when (and failures (eq (car err) 'quit))
+         (display-warning
+          'init-project
+          (format "Project discovery was cancelled; cleanup incomplete (%s)"
+                  (mapconcat #'identity failures "; "))
+          :error))
+       (if (and failures (not (eq (car err) 'quit)))
+           (user-error "Project discovery failed: %s; cleanup incomplete (%s)"
+                       (error-message-string err)
+                       (mapconcat #'identity failures "; "))
+         (signal (car err) (cdr err)))))
+    (let ((new-projects (my/project-new-projectile-roots known-before)))
+      (dolist (root new-projects)
+        (condition-case err
+            (progn
+              (my/project-register-root root)
+              (cl-incf registered-count))
+          (error
+           (let ((cleanup-error (my/project-forget-failed-discovery root)))
+             (push (format "%s: %s%s"
+                           (abbreviate-file-name root)
+                           (error-message-string err)
+                           (if cleanup-error
+                               (format "; Projectile cleanup: %s" cleanup-error)
+                             ""))
+                   failures)))
+          (quit
+           (when-let* ((cleanup-failures
+                        (my/project-clean-up-discovered-roots
+                         (member root new-projects))))
+             (display-warning
+              'init-project
+              (format "Project discovery was cancelled; cleanup incomplete (%s)"
+                      (mapconcat #'identity cleanup-failures "; "))
+              :error))
+           (signal (car err) (cdr err)))))
+      (if failures
+          (user-error "Discovered %d project(s), registered %d; failed: %s"
+                      (length new-projects) registered-count
+                      (mapconcat #'identity (nreverse failures) "; "))
+        (message "Discovered and registered %d project(s) under %s"
+                 registered-count (abbreviate-file-name directory))))))
+
+(defalias 'project-discover-in-directory
+  #'my/project-discover-projects-in-directory
+  "Discover projects under a directory and sync workbench state.")
 
 (declare-function projectile--wildcard-p "projectile" (name))
 (declare-function remote-ancestor-directory-names "remote-fs" (directory))
@@ -1921,7 +2196,7 @@ that extra stat is only paid for a marker that actually matched."
                  "bazel-out"
                  "bazel-testlogs"))
     (add-to-list 'projectile-globally-ignored-directories dir))
-  (define-key projectile-command-map (kbd ".") #'my/project-dispatch)
+  (define-key projectile-command-map (kbd ".") #'project-menu)
   (define-key projectile-command-map (kbd "p") #'my/project-switch)
   (define-key projectile-command-map (kbd "o") #'my/project-open-workbench)
   (define-key projectile-command-map (kbd "f") #'my/project-find-file)
@@ -1960,13 +2235,11 @@ that extra stat is only paid for a marker that actually matched."
   :ensure nil
   :demand t
   :config
-  (transient-define-prefix my/project-dispatch ()
+  (transient-define-prefix project-menu ()
     "Project workbench."
     :transient-suffix 'transient--do-stay
     [["Switch"
       ("p" "switch project" my/project-switch
-       :transient transient--do-exit)
-      ("o" "open workbench" my/project-open-workbench
        :transient transient--do-exit)
       ("f" "find file" my/project-find-file)
       ("r" "recent file" my/project-recent-file)
@@ -1981,10 +2254,11 @@ that extra stat is only paid for a marker that actually matched."
       ("j" "Jupyter SSH project" my/jupyter-ssh-open-project)]
      ["Manage"
       ("l" "leave active project" my/project-leave)
-      ("A" "add project" my/project-add-known-project)
-      ("D" "discover in dir" my/project-discover-projects-in-directory)
-      ("x" "remove project" my/project-remove-known-project)
-      ("k" "kill project buffers" my/project-kill-buffers)]]))
+      ("A" "add project" project-add-to-workbench)
+      ("D" "discover in dir" project-discover-in-directory)
+      ("R" "reload ignored roots" project-reload-ignored-roots)
+      ("x" "remove project" project-remove-from-workbench)
+      ("k" "close project files" my/project-kill-buffers)]]))
 
 (use-package treemacs
   :ensure t
@@ -2207,7 +2481,9 @@ that extra stat is only paid for a marker that actually matched."
   (add-to-list 'project-list-exclude #'my/project-project-object-ignored-p))
 
 (with-eval-after-load 'project
-  (advice-add 'project--remember-dir :around #'my/project--remember-dir-visible-only)
+  ;; `project-list-exclude' handles hidden roots.  Leave Emacs's own project
+  ;; remembering intact even when a project is not managed by Projectile.
+  (advice-remove 'project--remember-dir #'my/project--remember-dir-visible-only)
   (my/project-prune-hidden-project-state))
 
 (with-eval-after-load 'dashboard

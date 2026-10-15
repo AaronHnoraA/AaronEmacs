@@ -12,6 +12,8 @@
 (require 'cl-lib)
 (require 'config)
 
+(declare-function my/open-client-document "init-open" (file &optional view))
+
 (my/package-ensure-vc 'appine "https://github.com/chaoswork/appine.git")
 
 (defconst my/appine-buffer-name "*Appine Window*"
@@ -1220,7 +1222,8 @@ export default {
   "Open the local Appine README."
   (interactive)
   (if (and (boundp 'appine-root-dir) appine-root-dir)
-      (find-file (expand-file-name "README.zh-CN.md" appine-root-dir))
+      (my/open-client-document
+       (expand-file-name "README.zh-CN.md" appine-root-dir))
     (user-error "Appine root dir is not available")))
 
 (defun my/appine--ensure-window-right-a (orig-fn &rest args)

@@ -79,7 +79,7 @@ TeX 兼容改写(目前 `multline → gathered`、`\displaylines`)的规则表�
 
 ## 出问题时
 
-先跑 `M-x my/latex-preview-doctor`。它一次性报告:后端是否存活、在途请求数、
+先跑 `M-x latex-preview-doctor`。它一次性报告:后端是否存活、在途请求数、
 本 buffer 缓存条数、最近一次错误、宏目录与宏条数、前言/兼容钩子是否接上、
 以及光标处检测到的 fragment。
 

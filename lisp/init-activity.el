@@ -27,7 +27,7 @@
 ;;
 ;; Task identity is not guessed from the process name or command.  It is asked
 ;; from the registries that already own that work — `compilation-in-progress',
-;; `remote-tasks' and `comp-async-compilations' — so a process is a task
+;; `remote-tasks', `remote-transfer-jobs' and `comp-async-compilations' — so a process is a task
 ;; exactly when some owner says it is.  Adding a new kind of background work
 ;; costs one line in `my/activity--owned-task-processes', and only if it should
 ;; be counted; appearing on the board is free.
@@ -137,6 +137,9 @@ here rather than per draw.  `my/activity-reload-sprites' empties it.")
   (clrhash my/activity--sprite-cache)
   (force-mode-line-update t))
 
+(defalias 'activity-reload-sprites #'my/activity-reload-sprites
+  "Reload the Activity mode-line sprites after editing them.")
+
 (defun my/activity--frame-set ()
   "Return the active frame set as a plist, falling back to `pikachu'."
   (or (alist-get my/activity-indicator-style my/activity-frame-sets)
@@ -166,11 +169,41 @@ IO must be asynchronous; this hook also runs while the animation is active.")
 (defvar my/activity--last-poll 0
   "Time the provider caches were last polled.")
 
+(defvar my/activity--provider-errors (make-hash-table :test #'equal)
+  "Current provider failures, keyed by (PHASE . FUNCTION).")
+
+(defun my/activity--provider-name (function)
+  "Return a short name for provider FUNCTION."
+  (if (symbolp function) (symbol-name function) "anonymous function"))
+
+(defun my/activity--provider-call (phase function)
+  "Call FUNCTION for PHASE, recording errors without stopping other providers."
+  (let ((key (cons phase function)))
+    (condition-case error
+        (let ((value (funcall function)))
+          (when (and (eq phase 'snapshot)
+                     (not (and (listp value)
+                               (cl-every #'my/activity-p value))))
+            (error "Snapshot must return activity records, got %S" value))
+          (remhash key my/activity--provider-errors)
+          value)
+      (error
+       (let ((description (error-message-string error)))
+         (when (eq (gethash key my/activity--provider-errors 'missing)
+                   'missing)
+           (display-warning
+            'init-activity
+            (format "Activity %s provider %s failed: %s"
+                    phase (my/activity--provider-name function) description)
+            :warning))
+         (puthash key description my/activity--provider-errors))
+       nil))))
+
 (defun my/activity--activities ()
   "Return registered work and the current provider snapshots."
   (append my/activity--registered
           (cl-loop for provider in my/activity-provider-functions
-                   append (funcall provider))))
+                   append (my/activity--provider-call 'snapshot provider))))
 
 (defun my/activity--poll (&optional force)
   "Refresh provider caches when due, or immediately with FORCE."
@@ -178,7 +211,8 @@ IO must be asynchronous; this hook also runs while the animation is active.")
     (when (or force (>= (- now my/activity--last-poll)
                        my/activity-poll-interval))
       (setq my/activity--last-poll now)
-      (run-hooks 'my/activity-poll-functions))))
+      (dolist (provider my/activity-poll-functions)
+        (my/activity--provider-call 'poll provider)))))
 
 (cl-defun my/activity-register (label &key (kind 'task) cancel)
   "Register running work described by LABEL and return its handle.
@@ -329,17 +363,18 @@ values; the scan behind them happens in `my/activity--tick'."
 (defun my/activity--tick ()
   "Rescan, advance the frame, and re-arm."
   (setq my/activity--timer nil)
-  (my/activity--poll)
-  (let ((previous my/activity--count))
-    (setq my/activity--count (my/activity-count))
-    (if (> my/activity--count 0)
-        (setq my/activity--frame-index (1+ my/activity--frame-index))
-      (setq my/activity--frame-index 0))
-    ;; Redraw while running, and once more on the edge back to rest.
-    (when (or (> my/activity--count 0) (/= previous my/activity--count))
-      (force-mode-line-update t)))
-  (when my/activity-indicator-mode
-    (my/activity--schedule)))
+  (unwind-protect
+      (let ((previous my/activity--count))
+        (my/activity--poll)
+        (setq my/activity--count (my/activity-count))
+        (if (> my/activity--count 0)
+            (setq my/activity--frame-index (1+ my/activity--frame-index))
+          (setq my/activity--frame-index 0))
+        ;; Redraw while running, and once more on the edge back to rest.
+        (when (or (> my/activity--count 0) (/= previous my/activity--count))
+          (force-mode-line-update t)))
+    (when my/activity-indicator-mode
+      (my/activity--schedule))))
 
 (defun my/activity--refresh ()
   "Recount now, without waiting for the next scan.
@@ -393,8 +428,9 @@ starting under it would otherwise stand still until it fired."
 ;;   - `process-attributes' is an OS call per process.  It is used only in the
 ;;     detail view for one process, never while rendering the list.
 ;;   - Rendering is O(processes + timers) and touches no network or disk.
-;;   - Auto refresh is off by default.  When on it is one timer, bounded by
-;;     `my/activity-board-refresh-interval' and cancelled with the buffer.
+;;   - Auto refresh is off by default.  When on it is one timer per visible
+;;     frame view, bounded by `my/activity-board-refresh-interval'.  Hiding
+;;     the view or closing its frame releases the timer.
 
 (config-defvar my/activity-board-refresh-interval 2.0
   "Seconds between redraws while the activity board auto-refreshes.
@@ -416,6 +452,12 @@ Emacs itself holds no start time for a process.")
 
 (defvar-local my/activity-board--auto-timer nil
   "Repeating redraw timer for this board buffer, or nil.")
+
+(defvar-local my/activity-board--owner-frame nil
+  "Frame whose Activity view state belongs to this buffer.")
+
+(defvar-local my/activity-board--detail-buffer nil
+  "Temporary process details buffer owned by this Activity board.")
 
 (defun my/activity--elapsed-string (since)
   "Return SINCE formatted as an elapsed time, or a dash when unknown."
@@ -494,6 +536,16 @@ than the age of this Emacs session."
   (or (get-text-property (point) 'my/activity-process)
       (user-error "No process on this line")))
 
+(defun my/activity--cancel-owned-process (process)
+  "Ask PROCESS' task owner to cancel it, returning non-nil if claimed."
+  (cond
+   ((when-let* ((task (my/activity--remote-task-for process)))
+      (remote-task-cancel task)
+      t))
+   ((when-let* ((job (my/activity--transfer-job-for process)))
+      (remote-transfer-cancel job)
+      t))))
+
 (defun my/activity-board-stop ()
   "Stop the task on the current board row.
 A task whose owner provides a cancel path uses it.  Killing a process no
@@ -505,16 +557,13 @@ registry claims is destructive and asks first."
      ((my/activity-p activity)
       (if-let* ((cancel (my/activity-cancel activity)))
           (progn (funcall cancel)
-                 (my/activity-unregister activity)
+                 ;; The owner removes this handle when cancellation actually
+                 ;; finishes.  A deferred cancellation may still be running.
                  (my/activity-board-refresh))
         (user-error "%s cannot be cancelled" (my/activity-label activity))))
      ((not (processp process))
       (user-error "No task on this line"))
-     ((my/activity--remote-task-for process)
-      (remote-task-cancel (my/activity--remote-task-for process))
-      (my/activity-board-refresh))
-     ((my/activity--transfer-job-for process)
-      (remote-transfer-cancel (my/activity--transfer-job-for process))
+     ((my/activity--cancel-owned-process process)
       (my/activity-board-refresh))
      ((yes-or-no-p (format "Kill %s, which no task registry owns? "
                            (process-name process)))
@@ -522,32 +571,40 @@ registry claims is destructive and asks first."
       (my/activity-board-refresh)))))
 
 (defun my/activity-board-interrupt ()
-  "Send SIGINT to the process on the current row.
-This is the polite stop: a compiler or shell gets to clean up after it."
+  "Cancel a Remote task or transfer, otherwise send SIGINT.
+Remote owners must record the cancellation and clean up target-side work."
   (interactive)
   (let ((process (my/activity-board--process-at-point)))
-    (interrupt-process process)
-    (message "Interrupted %s" (process-name process))
+    (if (my/activity--cancel-owned-process process)
+        (message "Cancellation requested for %s" (process-name process))
+      (interrupt-process process)
+      (message "Interrupted %s" (process-name process)))
     (my/activity-board-refresh)))
 
 (defun my/activity-board-kill ()
-  "Send SIGKILL to the process on the current row.
-Unconditional and unclean, so it asks first."
+  "Cancel a Remote task or transfer, otherwise send SIGKILL.
+Killing only a remote task's relay could leave its target-side work running."
   (interactive)
-  (let ((process (my/activity-board--process-at-point)))
-    (when (yes-or-no-p (format "SIGKILL %s? " (process-name process)))
-      (signal-process process 'SIGKILL)
+  (let* ((process (my/activity-board--process-at-point))
+         (owner (or (my/activity--remote-task-for process)
+                    (my/activity--transfer-job-for process))))
+    (when (yes-or-no-p (format "%s %s? "
+                              (if owner "Cancel" "SIGKILL")
+                              (process-name process)))
+      (if owner
+          (my/activity--cancel-owned-process process)
+        (signal-process process 'SIGKILL))
       (my/activity-board-refresh))))
 
 (defun my/activity-board--show-process (process)
   "Show PROCESS' buffer, or say that it has none."
   (let ((buffer
          (and (processp process)
-              (or (process-buffer process)
-                  ;; A transfer keeps its output in a log, not in the
-                  ;; process buffer.
-                  (when-let* ((job (my/activity--transfer-job-for process)))
-                    (remote-transfer-job-log-buffer job))))))
+              (or (when-let* ((job (my/activity--transfer-job-for process)))
+                    ;; Target-side operations use a temporary stdout buffer;
+                    ;; the queue's log is the durable output surface.
+                    (remote-transfer-job-log-buffer job))
+                  (process-buffer process)))))
     (if (buffer-live-p buffer)
         (pop-to-buffer buffer)
       (user-error "%s has no buffer" (process-name process)))))
@@ -572,8 +629,8 @@ says nothing about what to press instead."
   (interactive)
   (message "%s" (substitute-command-keys "\\<my/activity-board-mode-map>\
 j/k move  \\[aaron-ui-board-activate] open  \\[my/activity-board-describe] details  \
-\\[my/activity-board-stop] stop  \\[my/activity-board-interrupt] interrupt  \
-\\[my/activity-board-kill] kill  \\[aaron-ui-board-refresh] refresh  \
+\\[my/activity-board-stop] stop  \\[my/activity-board-interrupt] cancel/interrupt  \
+\\[my/activity-board-kill] cancel/kill  \\[aaron-ui-board-refresh] refresh  \
 \\[my/activity-board-filter] filter  \\[describe-mode] help")))
 
 (defun my/activity-board-copy-command ()
@@ -584,6 +641,32 @@ j/k move  \\[aaron-ui-board-activate] open  \\[my/activity-board-describe] detai
     (kill-new command)
     (message "%s" command)))
 
+(defvar-keymap my/activity-process-detail-mode-map
+  :parent special-mode-map
+  :doc "Keymap for an Activity process details page."
+  "q" #'quit-window)
+
+(define-derived-mode my/activity-process-detail-mode special-mode "Activity Detail"
+  "Read-only details for one Emacs process.")
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'my/activity-process-detail-mode 'emacs))
+
+(defun my/activity-board--ensure-detail-buffer ()
+  "Return this Activity board's temporary process details buffer."
+  (unless (buffer-live-p my/activity-board--detail-buffer)
+    (let ((buffer (generate-new-buffer "*Activity Process*")))
+      (condition-case error
+          (progn
+            (with-current-buffer buffer
+              (my/activity-process-detail-mode)
+              (setq-local quit-window-kill-buffer t))
+            (setq-local my/activity-board--detail-buffer buffer))
+        (error
+         (kill-buffer buffer)
+         (signal (car error) (cdr error))))))
+  my/activity-board--detail-buffer)
+
 (defun my/activity-board-describe ()
   "Show everything Emacs and the OS know about the current row's process.
 This is the one place `process-attributes' is called: it is a system call
@@ -592,11 +675,11 @@ per process and must never run while rendering the list."
   (let* ((process (my/activity-board--process-at-point))
          (pid (process-id process))
          (attributes (and (integerp pid)
-                          (remote-client-process-attributes pid))))
-    (with-current-buffer (get-buffer-create "*Activity Process*")
+                          (remote-client-process-attributes pid)))
+         (detail (my/activity-board--ensure-detail-buffer)))
+    (with-current-buffer detail
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (special-mode)
         (insert (format "%s\n\n" (process-name process)))
         (pcase-dolist (`(,label . ,value)
                        `(("Status"  . ,(process-status process))
@@ -613,8 +696,9 @@ per process and must never run while rendering the list."
           (insert "\nOS:\n")
           (pcase-dolist (`(,key . ,value) attributes)
             (insert (format "%-10s %s\n" key value))))
-        (goto-char (point-min)))
-      (pop-to-buffer (current-buffer)))))
+        (goto-char (point-min))
+        (set-buffer-modified-p nil)))
+    (pop-to-buffer detail)))
 
 ;;; -----------------------------------------------------------------------
 ;;; Board: view controls
@@ -645,27 +729,54 @@ board left open on a fast interval is a background cost of its own."
         (setq my/activity-board--auto-timer nil)
         (message "Activity board auto refresh off"))
     (let ((buffer (current-buffer)))
-      (setq my/activity-board--auto-timer
-            (run-with-timer
-             my/activity-board-refresh-interval
-             my/activity-board-refresh-interval
-             (lambda ()
-               ;; The timer outlives nothing: a dead buffer cancels it, and
-               ;; so does `my/activity-board--cleanup' on kill.
-               (if (buffer-live-p buffer)
-                   (with-current-buffer buffer
-                     (when (get-buffer-window buffer t)
-                       (my/activity-board-refresh)))
-                 (cancel-timer my/activity-board--auto-timer))))))
+      (let (timer)
+        (setq timer
+              (run-with-timer
+               my/activity-board-refresh-interval
+               my/activity-board-refresh-interval
+               (lambda ()
+                 ;; Keep the timer handle in the closure: the board's
+                 ;; buffer-local slot is no longer accessible after kill.
+                 (if (buffer-live-p buffer)
+                     (with-current-buffer buffer
+                       (if (and (or (null my/activity-board--owner-frame)
+                                    (frame-live-p my/activity-board--owner-frame))
+                                (get-buffer-window
+                                 buffer (or my/activity-board--owner-frame t)))
+                           (my/activity-board-refresh)
+                         ;; A hidden board has no reason to keep a repeating
+                         ;; timer.  Reopening it starts with manual refresh.
+                         (cancel-timer timer)
+                         (setq my/activity-board--auto-timer nil)))
+                   (cancel-timer timer)))))
+        (setq my/activity-board--auto-timer timer)))
     (message "Activity board auto refresh every %.1fs"
              my/activity-board-refresh-interval))
   (force-mode-line-update))
 
 (defun my/activity-board--cleanup ()
-  "Cancel this board's auto-refresh timer when the buffer goes away."
+  "Release this board's timer and frame reference when it goes away."
   (when (timerp my/activity-board--auto-timer)
     (cancel-timer my/activity-board--auto-timer))
-  (setq my/activity-board--auto-timer nil))
+  (setq my/activity-board--auto-timer nil)
+  (when (buffer-live-p my/activity-board--detail-buffer)
+    (kill-buffer my/activity-board--detail-buffer))
+  (setq my/activity-board--detail-buffer nil)
+  (when (and (frame-live-p my/activity-board--owner-frame)
+             (eq (frame-parameter my/activity-board--owner-frame
+                                  'my/activity-board-buffer)
+                 (current-buffer)))
+    (set-frame-parameter my/activity-board--owner-frame
+                         'my/activity-board-buffer nil)))
+
+(defun my/activity-board--frame-deleted (frame)
+  "Release FRAME's Activity panel when the frame closes."
+  (when-let* ((buffer (frame-parameter frame 'my/activity-board-buffer)))
+    (set-frame-parameter frame 'my/activity-board-buffer nil)
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer))))
+
+(add-hook 'delete-frame-functions #'my/activity-board--frame-deleted)
 
 ;;; -----------------------------------------------------------------------
 ;;; Board: native hand-offs
@@ -737,7 +848,8 @@ Each one is better at its own job than a reimplementation here would be.")
 
 Move:   j/n down   k/p up   TAB next button
 Rows:   RET open   v buffer   d details   w copy command
-Stop:   x stop (asks when nothing owns it)   i interrupt   X SIGKILL
+Stop:   x stop (asks when nothing owns it)   i cancel / interrupt
+        X cancel / SIGKILL (asks first)
 View:   g refresh   a auto refresh   / filter   t timers
 Native: P processes  T timers  H threads  O proced  M memory"
   (add-hook 'kill-buffer-hook #'my/activity-board--cleanup nil t))
@@ -767,7 +879,7 @@ Native: P processes  T timers  H threads  O proced  M memory"
    :meta (my/activity--process-elapsed process)
    :detail (my/activity--process-detail process)
    :action (lambda (_) (my/activity-board--show-process process))
-   :help "RET shows this process' buffer"
+   :help "RET shows this task's log or process buffer"
    :properties (list 'my/activity-process process)))
 
 (defun my/activity--insert-group (title kind processes)
@@ -871,6 +983,20 @@ Reads `timer-list' and `timer-idle-list' only, the same state
                               :help "Show or hide Emacs timers")
                         (list :label "Filter" :command #'my/activity-board-filter
                               :help "Narrow to matching rows"))))
+       (unless (zerop (hash-table-count my/activity--provider-errors))
+         (aaron-ui-board-insert-section
+          "Provider problems" (hash-table-count my/activity--provider-errors)
+          'danger)
+         (maphash
+          (lambda (key description)
+            (aaron-ui-board-insert-row
+             :id (format "provider:%s:%s" (car key) (sxhash-equal key))
+             :icon 'health :badge "error" :badge-tone 'danger
+             :title (format "%s provider: %s"
+                            (capitalize (symbol-name (car key)))
+                            (my/activity--provider-name (cdr key)))
+             :detail description))
+          my/activity--provider-errors))
        ;; Work with no process of its own comes first: it is invisible to
        ;; `list-processes', so this board is the only place it shows.
        (when (or activities (> queued 0))
@@ -915,23 +1041,49 @@ Reads `timer-list' and `timer-idle-list' only, the same state
        (insert "\n\n")
        (aaron-ui-board-insert-key-hints
         (concat "Move: j/k   Rows: RET open  v buffer  d details  w copy\n"
-                "Stop: x stop  i interrupt  X kill    "
+                "Stop: x stop  i cancel/interrupt  X cancel/kill    "
                 "View: g refresh  a auto  / filter  t timers\n"
                 "Native: P processes  T timers  H threads  O proced  M memory"))))))
 
+(defun my/activity-board--buffer (&optional frame)
+  "Return FRAME's Activity buffer, creating it when needed."
+  (let* ((frame (or frame (selected-frame)))
+         (buffer (frame-parameter frame 'my/activity-board-buffer)))
+    (unless (buffer-live-p buffer)
+      (setq buffer (generate-new-buffer "*Activity*"))
+      (set-frame-parameter frame 'my/activity-board-buffer buffer))
+    buffer))
+
 ;;;###autoload
 (defun my/activity-board ()
-  "Show every process Emacs is running, grouped by what it is."
+  "Show this frame's view of Emacs background activity."
   (interactive)
   (my/activity--poll t)
   (my/activity--refresh)
-  (with-current-buffer (get-buffer-create "*Activity*")
-    (unless (derived-mode-p 'my/activity-board-mode)
-      (my/activity-board-mode))
-    (aaron-ui-board-set-header "Activity" 'process)
-    (setq-local aaron-ui-board-refresh-function #'my/activity-board-refresh)
-    (my/activity-board-refresh))
-  (pop-to-buffer "*Activity*"))
+  (let* ((frame (selected-frame))
+         (existing (frame-parameter frame 'my/activity-board-buffer)))
+    (let ((buffer (my/activity-board--buffer frame)))
+      (condition-case error
+          (progn
+            (with-current-buffer buffer
+              (unless (derived-mode-p 'my/activity-board-mode)
+                (my/activity-board-mode))
+              (setq-local my/activity-board--owner-frame frame)
+              (aaron-ui-board-set-header "Activity" 'process)
+              (setq-local aaron-ui-board-refresh-function #'my/activity-board-refresh)
+              (my/activity-board-refresh))
+            (pop-to-buffer buffer))
+        (error
+         (unless (eq existing buffer)
+           (when (buffer-live-p buffer)
+             (kill-buffer buffer))
+           (when (eq (frame-parameter frame 'my/activity-board-buffer)
+                     buffer)
+             (set-frame-parameter frame 'my/activity-board-buffer nil)))
+         (signal (car error) (cdr error)))))))
+
+(defalias 'activity-board #'my/activity-board
+  "Open the Emacs background activity board.")
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'my/activity-board-mode 'emacs))

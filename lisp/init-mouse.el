@@ -35,16 +35,16 @@
 (declare-function dape-continue "dape" (conn))
 (declare-function dape-next "dape" (conn))
 (declare-function dape-repl "dape" ())
-(declare-function my/code-actions-dispatch "init-code-actions" ())
+(declare-function code-actions-menu "init-code-actions" ())
 (declare-function my/current-language-server-backend "init-lsp" ())
-(declare-function my/debug-dispatch "init-debug" ())
+(declare-function debug-menu "init-debug" ())
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui" ())
-(declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
+(declare-function diagnostics-menu "init-diagnostics-extra" ())
 (declare-function my/diagnostics-project-ui "init-diagnostics-ui" ())
 (declare-function my/git-board "init-git-board" ())
 (declare-function my/git-diff-file-with-branch-base "init-git-diff" ())
 (declare-function my/git-diff-file-with-head "init-git-diff" ())
-(declare-function my/git-dispatch "init-git-core" ())
+(declare-function git-menu "init-git-core" ())
 (declare-function my/git-file-blame-toggle "init-git-core" ())
 (declare-function my/git-file-log "init-git-core" ())
 (declare-function my/git-stage-current-file "init-git-core" ())
@@ -73,11 +73,11 @@
 (declare-function my/navigation-peek-definition "init-navigation" ())
 (declare-function my/navigation-peek-references "init-navigation" ())
 (declare-function my/navigation-previous-defun "init-navigation" ())
-(declare-function my/navigation-up-structure "init-navigation" ())
+(declare-function structure-up "init-navigation" ())
 (declare-function my/problems-buffer "init-problems" ())
 (declare-function my/problems-project "init-problems" ())
 (declare-function my/project-current-root "init-project" ())
-(declare-function my/project-dispatch "init-project" ())
+(declare-function project-menu "init-project" ())
 (declare-function my/project-open-root "init-project" (project-root))
 (declare-function my/symbols-buffer "init-symbols" ())
 (declare-function my/symbols-project "init-symbols" ())
@@ -86,10 +86,6 @@
 
 (defvar vc-mode)
 (defvar vc-mode-line-map)
-
-(defvar my/mouse--git-mode-line-menu-last-time 0
-  "Timestamp of the last Git mode-line popup.
-Used to suppress duplicate down/up events from the same click.")
 
 (defvar my/mouse-git-mode-line-map nil
   "Mode-line keymap used for the VCS segment.")
@@ -179,7 +175,7 @@ This is only used while building click menus."
   (if-let* ((project-root (and (fboundp 'my/project-current-root)
                                (my/project-current-root))))
       (my/project-open-root project-root)
-    (call-interactively #'my/project-dispatch)))
+    (call-interactively #'project-menu)))
 
 (defun my/mouse-project-search (regexp)
   "Search the current project for REGEXP and show clickable results."
@@ -198,7 +194,7 @@ This is only used while building click menus."
      (list
       "Repository"
       (my/mouse--menu-item "Magit status" 'magit-status git-p)
-      (my/mouse--menu-item "Git workbench" 'my/git-dispatch git-p)
+      (my/mouse--menu-item "Git workbench" 'git-menu git-p)
       (my/mouse--menu-item "Magit dispatch" 'magit-dispatch git-p)
       (my/mouse--menu-item "VC directory" 'project-vc-dir git-p)
       (my/mouse--menu-item "Git board" 'my/git-board git-p)
@@ -227,17 +223,14 @@ This is only used while building click menus."
 (defun my/mouse-git-mode-line-menu (event)
   "Show a Git popup menu for the VCS mode-line segment under EVENT."
   (interactive "e")
-  (let ((now (float-time)))
-    (when (> (- now my/mouse--git-mode-line-menu-last-time) 0.35)
-      (setq my/mouse--git-mode-line-menu-last-time now)
-      (my/mouse--select-event-window event)
-      (popup-menu
-       (easy-menu-create-menu
-        (format "Git: %s" (or (and (bound-and-true-p vc-mode)
-                                   (substring-no-properties vc-mode))
-                              (buffer-name)))
-        (my/mouse--git-menu-items))
-       event))))
+  (my/mouse--select-event-window event)
+  (popup-menu
+   (easy-menu-create-menu
+    (format "Git: %s" (or (and (bound-and-true-p vc-mode)
+                               (substring-no-properties vc-mode))
+                          (buffer-name)))
+    (my/mouse--git-menu-items))
+   event))
 
 (defun my/mouse--patch-vc-mode-line-map (&rest _)
   "Patch the current buffer's `vc-mode' string with the local Git mouse map."
@@ -257,9 +250,9 @@ This is only used while building click menus."
   (setq my/mouse-git-mode-line-map
         (let ((map (make-sparse-keymap)))
           (define-key map [mode-line down-mouse-1] #'my/mouse-git-mode-line-menu)
-          (define-key map [mode-line mouse-1] #'my/mouse-git-mode-line-menu)
+          (define-key map [mode-line mouse-1] #'ignore)
           (define-key map [mode-line down-mouse-3] #'my/mouse-git-mode-line-menu)
-          (define-key map [mode-line mouse-3] #'my/mouse-git-mode-line-menu)
+          (define-key map [mode-line mouse-3] #'ignore)
           map))
   (when (boundp 'vc-mode-line-map)
     (setq vc-mode-line-map my/mouse-git-mode-line-map))
@@ -286,8 +279,8 @@ This is only used while building click menus."
   (interactive "e")
   (my/mouse--set-point-from-event event)
   (cond
-   ((fboundp 'my/code-actions-dispatch)
-    (call-interactively #'my/code-actions-dispatch))
+   ((fboundp 'code-actions-menu)
+    (call-interactively #'code-actions-menu))
    ((fboundp 'my/language-server-code-actions)
     (call-interactively #'my/language-server-code-actions))
    (t
@@ -328,7 +321,7 @@ The menu is built only on click; there is no per-buffer scanning."
       (my/mouse--menu-item "End of defun" 'my/navigation-end-of-defun t)
       (my/mouse--menu-item "Previous defun" 'my/navigation-previous-defun t)
       (my/mouse--menu-item "Next defun" 'my/navigation-next-defun t)
-      (my/mouse--menu-item "Up structure" 'my/navigation-up-structure t)
+      (my/mouse--menu-item "Up structure" 'structure-up t)
       (my/mouse--menu-item "Buffer symbols" 'my/symbols-buffer t)
       (my/mouse--menu-item "Project symbols" 'my/symbols-project t))
      (list
@@ -344,7 +337,7 @@ The menu is built only on click; there is no per-buffer scanning."
       (my/mouse--menu-item "Describe session" 'my/language-server-describe-session lsp-active-p))
      (list
       "Debug"
-      (my/mouse--menu-item "Debug menu" 'my/debug-dispatch lsp-buffer-p)
+      (my/mouse--menu-item "Debug menu" 'debug-menu lsp-buffer-p)
       (my/mouse--menu-item "Start / choose config" 'dape lsp-buffer-p)
       (my/mouse--menu-item "Toggle breakpoint" 'dape-breakpoint-toggle lsp-buffer-p)
       (my/mouse--menu-item "Continue" 'dape-continue lsp-buffer-p)
@@ -356,12 +349,12 @@ The menu is built only on click; there is no per-buffer scanning."
       (my/mouse--menu-item "Project problems" 'my/problems-project t)
       (my/mouse--menu-item "Buffer diagnostics UI" 'my/diagnostics-buffer-ui t)
       (my/mouse--menu-item "Project diagnostics UI" 'my/diagnostics-project-ui t)
-      (my/mouse--menu-item "Diagnostics menu" 'my/diagnostics-dispatch t))
+      (my/mouse--menu-item "Diagnostics menu" 'diagnostics-menu t))
      (cons "Git" (my/mouse--git-menu-items))
      (list
       "Project / Window"
       (my/mouse--menu-item "Workspace symbol" 'my/language-server-workspace-symbol lsp-active-p)
-      (my/mouse--menu-item "Project board" 'my/project-dispatch t)
+      (my/mouse--menu-item "Project board" 'project-menu t)
       (my/mouse--menu-item "Project root" 'my/mouse-project-root t)
       (my/mouse--menu-item "Project grep" 'my/mouse-project-search t)
       (my/mouse--menu-item "Ace window" 'ace-window t)))))
@@ -394,11 +387,11 @@ Dedicated status segments handle their own actions."
   (my/mouse--select-event-window event)
   (cond
    ((derived-mode-p 'prog-mode)
-    (if (fboundp 'my/code-actions-dispatch)
-        (call-interactively #'my/code-actions-dispatch)
+    (if (fboundp 'code-actions-menu)
+        (call-interactively #'code-actions-menu)
       (call-interactively #'my/language-server-manager)))
    (t
-    (call-interactively #'my/mouse-dispatch))))
+    (call-interactively #'mouse-actions-menu))))
 
 (defun my/mouse--mode-line-menu-items ()
   "Return mode-line popup menu items for the selected window."
@@ -415,7 +408,7 @@ Dedicated status segments handle their own actions."
       "Language Server"
       (my/mouse--menu-item "Hub" 'my/language-server-manager prog-p)
       (my/mouse--menu-item "Ensure / connect" 'my/language-server-ensure prog-p)
-      (my/mouse--menu-item "Code menu" 'my/code-actions-dispatch prog-p)
+      (my/mouse--menu-item "Code menu" 'code-actions-menu prog-p)
       (my/mouse--menu-item "Code actions" 'my/language-server-code-actions lsp-active-p)
       (my/mouse--menu-item "Rename symbol" 'my/language-server-rename lsp-active-p)
       (my/mouse--menu-item "Format buffer" 'my/language-server-format-buffer lsp-active-p)
@@ -423,7 +416,7 @@ Dedicated status segments handle their own actions."
       (my/mouse--menu-item "Log" 'my/language-server-open-log lsp-active-p))
      (list
       "Debug"
-      (my/mouse--menu-item "Debug menu" 'my/debug-dispatch prog-p)
+      (my/mouse--menu-item "Debug menu" 'debug-menu prog-p)
       (my/mouse--menu-item "Start / choose config" 'dape prog-p)
       (my/mouse--menu-item "Toggle breakpoint" 'dape-breakpoint-toggle prog-p)
       (my/mouse--menu-item "REPL" 'dape-repl prog-p))
@@ -431,8 +424,8 @@ Dedicated status segments handle their own actions."
       "Diagnostics / Project"
       (my/mouse--menu-item "Buffer problems" 'my/problems-buffer t)
       (my/mouse--menu-item "Project problems" 'my/problems-project t)
-      (my/mouse--menu-item "Diagnostics menu" 'my/diagnostics-dispatch t)
-      (my/mouse--menu-item "Project board" 'my/project-dispatch t)
+      (my/mouse--menu-item "Diagnostics menu" 'diagnostics-menu t)
+      (my/mouse--menu-item "Project board" 'project-menu t)
       (my/mouse--menu-item "Project root" 'my/mouse-project-root t))
      (cons "Git" (my/mouse--git-menu-items))
      (list
@@ -487,7 +480,7 @@ Dedicated status segments handle their own actions."
   :ensure nil
   :demand t
   :config
-  (transient-define-prefix my/mouse-dispatch ()
+  (transient-define-prefix mouse-actions-menu ()
     "Mouse-friendly command board. Every suffix can be triggered by click."
     [["Buffers"
       ("a" "ibuffer jump" ibuffer-jump :transient transient--do-exit)
@@ -497,12 +490,12 @@ Dedicated status segments handle their own actions."
      ["Project / Search"
       ("f" "project root" my/mouse-project-root :transient transient--do-exit)
       ("g" "project grep" my/mouse-project-search :transient transient--do-exit)
-      ("p" "project board" my/project-dispatch :transient transient--do-exit)]
+      ("p" "project board" project-menu :transient transient--do-exit)]
      ["Code / Status"
-      ("x" "code menu" my/code-actions-dispatch :transient transient--do-exit)
+      ("x" "code menu" code-actions-menu :transient transient--do-exit)
       ("l" "language server" my/language-server-manager :transient transient--do-exit)
-      ("!" "diagnostics" my/diagnostics-dispatch :transient transient--do-exit)
-      ("." "git workbench" my/git-dispatch :transient transient--do-exit)
+      ("!" "diagnostics" diagnostics-menu :transient transient--do-exit)
+      ("." "git workbench" git-menu :transient transient--do-exit)
       ("v" "magit status" magit-status :transient transient--do-exit)]
      ["Jump / Window"
       ("d" "definition" my/navigation-find-definition :transient transient--do-exit)
@@ -517,8 +510,8 @@ Dedicated status segments handle their own actions."
 (global-set-key (kbd "H-C-M-f") #'my/mouse-project-root)
 (global-set-key (kbd "H-C-M-g") #'my/mouse-project-search)
 (global-set-key (kbd "H-C-M-k") #'my/kill-buffer-dwim)
-(global-set-key (kbd "H-C-M-m") #'my/mouse-dispatch)
-(global-set-key (kbd "H-C-M-p") #'my/project-dispatch)
+(global-set-key (kbd "H-C-M-m") #'mouse-actions-menu)
+(global-set-key (kbd "H-C-M-p") #'project-menu)
 (global-set-key (kbd "H-C-M-r") #'my/mouse-recent-files)
 (global-set-key (kbd "H-C-M-w") #'ace-window)
 (global-set-key (kbd "H-C-M-z") #'my/navigation-back)

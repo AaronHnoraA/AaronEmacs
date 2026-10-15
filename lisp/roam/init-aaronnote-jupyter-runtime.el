@@ -26,7 +26,7 @@
                (:constructor my/noema-jupyter-runtime-create))
   id manager-id context workspace placement-file kernel spec pid connection-file
   target-connection client-connection channel-group generation state
-  state-lost log-file resource-directory)
+  state-lost log-file resource-directory host-name)
 
 (cl-defstruct (my/noema-jupyter-attachment
                (:constructor my/noema-jupyter-attachment-create))
@@ -38,6 +38,18 @@
 
 (defvar my/noema-jupyter-attachments (make-hash-table :test #'equal)
   "Noema Jupyter attachment routes keyed by opaque attachment ID.")
+
+(defvar my/noema-jupyter-pending-directory
+  (expand-file-name "var/aaronnote/jupyter/pending-shutdown/"
+                    user-emacs-directory)
+  "Client-local records for brokered kernels whose shutdown is unconfirmed.")
+
+(defvar my/noema-jupyter-shutdown-grace-seconds 3.0
+  "Seconds to wait for a brokered kernel to exit after TERM.
+An unconfirmed exit keeps its runtime and durable shutdown record for retry.")
+
+(defvar my/noema-jupyter--pending-record-errors nil
+  "Local pending-shutdown parse errors from the last passive snapshot.")
 
 (defvar my/noema-jupyter-kernelspec-directory
   (expand-file-name
@@ -99,6 +111,115 @@
            (alist-get (symbol-name key) alist nil nil #'string=))
       (and (stringp key)
            (alist-get (intern key) alist))))
+
+(defun my/noema-jupyter--pending-file (runtime-id)
+  "Return the client-local pending-shutdown file for RUNTIME-ID."
+  (expand-file-name
+   (concat (secure-hash 'sha256 runtime-id) ".json")
+   my/noema-jupyter-pending-directory))
+
+(defun my/noema-jupyter--record-pending-shutdown (runtime)
+  "Durably record RUNTIME before an uncertain target shutdown.
+Only brokered runtimes with a connection file have a unique target-side
+identity suitable for a later retry.  The file contains no HMAC key."
+  (when-let* ((connection-file
+               (my/noema-jupyter-runtime-connection-file runtime)))
+    (let* ((id (my/noema-jupyter-runtime-id runtime))
+           (file (my/noema-jupyter--pending-file id))
+           (directory my/noema-jupyter-pending-directory)
+           (temporary nil)
+           (entry
+            `((version . 1)
+              (runtimeId . ,id)
+              (targetId . ,(remote-context-target-id
+                            (my/noema-jupyter-runtime-context runtime)))
+              (placementFile . ,(remote-canonicalize-file-name
+                                 (my/noema-jupyter-runtime-placement-file runtime)))
+              (pid . ,(my/noema-jupyter-runtime-pid runtime))
+              (hostName . ,(my/noema-jupyter-runtime-host-name runtime))
+              (connectionFile . ,(remote-canonicalize-file-name connection-file))
+              (logFile . ,(if-let* ((log
+                                    (my/noema-jupyter-runtime-log-file runtime)))
+                             (remote-canonicalize-file-name log)
+                           "")))))
+      (with-file-modes #o700 (make-directory directory t))
+      (set-file-modes directory #o700)
+      (unwind-protect
+          (progn
+            (setq temporary (make-temp-file
+                             (expand-file-name ".pending-" directory)))
+            (set-file-modes temporary #o600)
+            (let ((coding-system-for-write 'utf-8-unix))
+              (write-region (concat (json-serialize entry) "\n")
+                            nil temporary nil 'silent))
+            (rename-file temporary file t)
+            (setq temporary nil))
+        (when (and temporary (file-exists-p temporary))
+          (delete-file temporary))))))
+
+(defun my/noema-jupyter--forget-pending-shutdown (runtime-id)
+  "Remove the durable pending-shutdown record for RUNTIME-ID."
+  (let ((file (my/noema-jupyter--pending-file runtime-id)))
+    (when (file-exists-p file)
+      (delete-file file))))
+
+(defun my/noema-jupyter--read-pending-shutdown (file)
+  "Read and validate one client-local pending-shutdown FILE."
+  (when (file-symlink-p file)
+    (error "Refusing symlinked Jupyter shutdown record: %s" file))
+  (let* ((entry (with-temp-buffer
+                  (insert-file-contents file)
+                  (json-parse-buffer :object-type 'alist
+                                     :array-type 'list :null-object nil
+                                     :false-object nil)))
+         (id (my/noema-jupyter--get 'runtimeId entry))
+         (target (my/noema-jupyter--get 'targetId entry))
+         (placement (my/noema-jupyter--get 'placementFile entry))
+         (connection (my/noema-jupyter--get 'connectionFile entry))
+         (pid (my/noema-jupyter--get 'pid entry))
+         (host (my/noema-jupyter--get 'hostName entry))
+         (log (my/noema-jupyter--get 'logFile entry)))
+    (unless (and (equal (my/noema-jupyter--get 'version entry) 1)
+                 (stringp id)
+                 (string-match-p "\\`noema-[[:xdigit:]]\\{24\\}\\'" id)
+                 (equal file (my/noema-jupyter--pending-file id))
+                 (stringp target) (not (string-empty-p target))
+                 (stringp placement) (remote-fs-file-name-p placement)
+                 (equal (remote-fs-target-id placement) target)
+                 (integerp pid) (> pid 0)
+                 (or (null host)
+                     (and (stringp host) (not (string-empty-p host))))
+                 (stringp connection) (remote-fs-file-name-p connection)
+                 (equal (remote-fs-target-id connection) target)
+                 (equal (file-name-nondirectory connection)
+                        (concat id ".json"))
+                 (stringp log)
+                 (or (string-empty-p log)
+                     (and (remote-fs-file-name-p log)
+                          (equal (remote-fs-target-id log) target)
+                          (equal (file-name-directory log)
+                                 (file-name-directory connection))
+                          (equal (file-name-nondirectory log)
+                                 (concat id ".log")))))
+      (error "Invalid Jupyter shutdown record: %s" file))
+    entry))
+
+(defun my/noema-jupyter--pending-shutdowns ()
+  "Return valid durable pending shutdowns without contacting any target."
+  (setq my/noema-jupyter--pending-record-errors nil)
+  (when (file-directory-p my/noema-jupyter-pending-directory)
+    (let (entries)
+      (dolist (file
+               (directory-files my/noema-jupyter-pending-directory t
+                                "\\`[[:xdigit:]]\\{64\\}\\.json\\'"))
+        (condition-case error
+            (push (my/noema-jupyter--read-pending-shutdown file) entries)
+          (error
+           (push (format "%s: %s" file (error-message-string error))
+                 my/noema-jupyter--pending-record-errors))))
+      (setq my/noema-jupyter--pending-record-errors
+            (nreverse my/noema-jupyter--pending-record-errors))
+      (nreverse entries))))
 
 (defun my/noema-jupyter--file (params)
   "Return the canonical logical ipynb file from PARAMS."
@@ -582,34 +703,183 @@ failure.  Only a failure to carry out the routed call signals."
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
+(defun my/noema-jupyter--probe-context (context)
+  "Return CONTEXT rooted at target `/` for process identity probes.
+The notebook's working directory may disappear or belong to a different
+machine after a load-balanced SSH target reconnects."
+  (let ((probe (copy-remote-context context)))
+    (setf (remote-context-localname probe) "/"
+          (remote-context-workspace-root probe)
+          (remote-make-file-name (remote-context-target-id context) "/"))
+    probe))
+
+(defun my/noema-jupyter--current-host (context)
+  "Return the physical machine answering CONTEXT's current route."
+  (my/noema-jupyter--output
+   (my/noema-jupyter--probe-context context) "hostname"))
+
+(defun my/noema-jupyter--kill-command (runtime signal)
+  "Return target argv to send SIGNAL only on RUNTIME's original host.
+The hostname check and `kill' run in one routed command, so a reconnect
+cannot switch hosts between the check and a process-group signal."
+  (let ((group (format "-%s" (my/noema-jupyter-runtime-pid runtime)))
+        (host (my/noema-jupyter-runtime-host-name runtime)))
+    (if host
+        (list "sh" "-c"
+              "if [ \"$(hostname)\" != \"$1\" ]; then exit 77; fi; exec /bin/kill \"$2\" -- \"$3\""
+              "sh" host (format "-%s" signal) group)
+      (list "kill" (format "-%s" signal) "--" group))))
+
 (defun my/noema-jupyter--alive-p (runtime)
   "Return the liveness of RUNTIME's target process group.
 The value is t when the group exists, nil when the target answered that it
 does not, and `unknown' when the probe itself could not be carried out.
 Keeping the third state is the point: a dropped connection must never be
 reported as a dead kernel, because callers respond to death by discarding
-the kernel\='s in-memory state."
+the kernel\='s in-memory state.  A load-balanced alias resolving to another
+machine is also unknown, even if that machine does not have this PID."
   (let ((pid (my/noema-jupyter-runtime-pid runtime)))
     (if (not (and (integerp pid) (> pid 0)))
         nil
       (condition-case nil
-          (let ((status
-                 (my/noema-jupyter--exit-status
-                  (my/noema-jupyter-runtime-context runtime)
-                  "kill" "-0" "--" (format "-%s" pid))))
-            (and (integerp status) (zerop status)))
+          (let* ((command (my/noema-jupyter--kill-command runtime "0"))
+                 (status
+                  (apply #'my/noema-jupyter--exit-status
+                         (my/noema-jupyter--probe-context
+                          (my/noema-jupyter-runtime-context runtime))
+                         command)))
+            (pcase status
+              (0 t)
+              (1 nil)
+              ;; 77 means a different physical host; 255 can mean SSH loss.
+              (_ 'unknown)))
         (error 'unknown)))))
 
 (defun my/noema-jupyter--signal (runtime signal)
   "Send SIGNAL to RUNTIME's target process group.
-The signal is skipped only when the target confirmed the group is gone.
-An unreachable target still gets the attempt, so a transient probe failure
-cannot silently leave a live kernel running on it."
-  (unless (null (my/noema-jupyter--alive-p runtime))
-    (my/noema-jupyter--output
-     (my/noema-jupyter-runtime-context runtime)
-     "kill" (format "-%s" signal) "--"
-     (format "-%s" (my/noema-jupyter-runtime-pid runtime)))))
+An unknown host or unreachable target leaves the durable shutdown record for
+retry; neither can safely receive a signal for an old process-group ID."
+  (pcase (my/noema-jupyter--alive-p runtime)
+    ('t
+     (let ((command (my/noema-jupyter--kill-command runtime signal)))
+       (apply #'my/noema-jupyter--output
+              (my/noema-jupyter--probe-context
+               (my/noema-jupyter-runtime-context runtime))
+              command)))
+    ('nil nil)
+    (_ (error "Cannot verify kernel %s on its original target host"
+              (my/noema-jupyter-runtime-id runtime)))))
+
+(defun my/noema-jupyter--await-process-exit (runtime)
+  "Confirm that RUNTIME's process group exited after TERM.
+An unreachable target or a still-live group is not a completed shutdown."
+  (let ((deadline (+ (float-time)
+                     (max 0 my/noema-jupyter-shutdown-grace-seconds)))
+        state)
+    (while (progn
+             (setq state (my/noema-jupyter--alive-p runtime))
+             (and (eq state t) (< (float-time) deadline)))
+      (accept-process-output nil 0.1))
+    (pcase state
+      ('nil t)
+      ('t (error "Kernel %s is still running after TERM"
+                 (my/noema-jupyter-runtime-id runtime)))
+      (_ (error "Cannot confirm kernel %s exited on its original host"
+                (my/noema-jupyter-runtime-id runtime))))))
+
+(defun my/noema-jupyter--delete-runtime-files (runtime)
+  "Delete RUNTIME's connection and log files on its verified target host."
+  (let* ((context (my/noema-jupyter-runtime-context runtime))
+         (target (remote-context-target-id context))
+         (files (seq-filter
+                 (lambda (file)
+                   (and (stringp file) (not (string-empty-p file))))
+                 (list (my/noema-jupyter-runtime-connection-file runtime)
+                       (my/noema-jupyter-runtime-log-file runtime)))))
+    (when files
+      (if (equal target "local")
+          (dolist (file files)
+            (when (file-exists-p file) (delete-file file)))
+        (let ((host (my/noema-jupyter-runtime-host-name runtime)))
+          (unless host
+            (error "Cannot remove kernel files: original target host is unknown"))
+          (apply #'my/noema-jupyter--output
+                 (my/noema-jupyter--probe-context context)
+                 "sh" "-c"
+                 "if [ \"$(hostname)\" != \"$1\" ]; then exit 77; fi; shift; for file do rm -f -- \"$file\" || exit; done"
+                 "sh" host
+                 (mapcar #'remote-file-local-name files)))))))
+
+(defun my/noema-jupyter--verify-pending-runtime (runtime)
+  "Verify that RUNTIME's old PID still owns its unique connection file.
+Return nil if the target confirms the process group is gone.  An unreachable
+target or a reused PID signals, leaving the runtime available for retry."
+  (let* ((id (my/noema-jupyter-runtime-id runtime))
+         (pid (my/noema-jupyter-runtime-pid runtime))
+         (connection (my/noema-jupyter-runtime-connection-file runtime))
+         (context (my/noema-jupyter-runtime-context runtime))
+         (host (my/noema-jupyter-runtime-host-name runtime)))
+    (when (and (not host)
+               (not (equal (remote-context-target-id context) "local")))
+      (error "Cannot verify pending kernel %s: original target host is unknown" id))
+    (pcase (my/noema-jupyter--alive-p runtime)
+      ('unknown
+       (error "Cannot verify pending kernel %s: target unavailable or on another host"
+              id))
+      ('nil
+       (unless (or host
+                   (equal (remote-context-target-id context) "local"))
+         (error "Cannot confirm pending kernel %s died: original host is unknown"
+                id))
+       nil)
+      ('t
+       (unless connection
+         (error "Pending kernel %s has no connection-file identity" id))
+       (let ((command
+              (if host
+                  (my/noema-jupyter--output
+                   (my/noema-jupyter--probe-context context)
+                   "sh" "-c"
+                   "if [ \"$(hostname)\" != \"$1\" ]; then exit 77; fi; exec ps -ww -p \"$2\" -o command="
+                   "sh" host (number-to-string pid))
+                (my/noema-jupyter--output
+                 (my/noema-jupyter--probe-context context)
+                 "ps" "-ww" "-p" (number-to-string pid)
+                 "-o" "command="))))
+         (unless (string-match-p
+                  (regexp-quote (file-name-nondirectory connection)) command)
+           (error "PID %s no longer names Noema kernel %s; record retained"
+                  pid id)))
+       t))))
+
+(defun my/noema-jupyter--retry-pending-shutdown (entry)
+  "Retry ENTRY shutdown after verifying the target process identity.
+An old PID is never sufficient evidence.  Uncertain cases retain the record."
+  (let* ((id (my/noema-jupyter--get 'runtimeId entry))
+         (pid (my/noema-jupyter--get 'pid entry))
+         (connection (my/noema-jupyter--get 'connectionFile entry))
+         (host (my/noema-jupyter--get 'hostName entry))
+         (log (my/noema-jupyter--get 'logFile entry))
+         (context (remote-context
+                   (my/noema-jupyter--get 'placementFile entry)))
+         (runtime (my/noema-jupyter-runtime-create
+                   :id id :pid pid :context context
+                   :connection-file connection :log-file log
+                   :host-name host
+                   :state 'shutdown-pending)))
+    (when (my/noema-jupyter--verify-pending-runtime runtime)
+      (my/noema-jupyter--signal runtime "TERM"))
+    (my/noema-jupyter--await-process-exit runtime)
+    (my/noema-jupyter--delete-runtime-files runtime)
+    (my/noema-jupyter--forget-pending-shutdown id)
+    (setf (my/noema-jupyter-runtime-state runtime) 'closed)
+    runtime))
+
+(defun my/noema-jupyter--pending-shutdown-for (runtime-id)
+  "Return the validated durable shutdown entry for RUNTIME-ID, if present."
+  (let ((file (my/noema-jupyter--pending-file runtime-id)))
+    (when (file-exists-p file)
+      (my/noema-jupyter--read-pending-shutdown file))))
 
 (defun my/noema-jupyter--update-group
     (runtime _old replacement)
@@ -622,6 +892,21 @@ cannot silently leave a live kernel running on it."
     replacement)
    (my/noema-jupyter-runtime-generation runtime)
    (1+ (my/noema-jupyter-runtime-generation runtime))))
+
+(defun my/noema-jupyter--refresh-recovered-runtime (runtime)
+  "Update RUNTIME after transport recovery without guessing kernel death."
+  (pcase (my/noema-jupyter--alive-p runtime)
+    ('nil
+     (setf (my/noema-jupyter-runtime-state runtime) 'dead
+           (my/noema-jupyter-runtime-state-lost runtime) t))
+    ('unknown
+     (unless (eq (my/noema-jupyter-runtime-state runtime)
+                 'shutdown-pending)
+       (setf (my/noema-jupyter-runtime-state runtime) 'unknown)))
+    ('t
+     (when (eq (my/noema-jupyter-runtime-state runtime) 'unknown)
+       (setf (my/noema-jupyter-runtime-state runtime) 'open))))
+  runtime)
 
 (defun my/noema-jupyter--launch-runtime (params)
   "Launch and return a target-owned runtime described by PARAMS."
@@ -655,7 +940,8 @@ cannot silently leave a live kernel running on it."
     (unless spec
       (error "Unknown Jupyter kernel %s on target %s"
              kernel (remote-context-target-id context)))
-    (let* ((runtime-id
+    (let* ((host-name (my/noema-jupyter--current-host context))
+           (runtime-id
             (format "noema-%s"
                     (substring
                      (secure-hash
@@ -716,13 +1002,18 @@ cannot silently leave a live kernel running on it."
 		   ;; Placement is only a Remote target/workspace anchor.  It is not
 		   ;; runtime identity and is never exposed as kernel ownership.
 		   :placement-file placement-file
-		   :kernel kernel :spec spec :pid pid
+		   :kernel kernel :spec spec :pid pid :host-name host-name
 		   :resource-directory
 		   (my/noema-jupyter--get 'resourceDir spec-entry)
 		   :connection-file connection-file
 		   :target-connection target-connection
 		   :generation 1 :state 'open :state-lost nil
 		   :log-file log-file))
+            ;; The detached process outlives Emacs.  Persist its identity as
+            ;; soon as the launcher returns a PID, before channel setup can
+            ;; fail or Emacs can exit without running shutdown hooks.  While
+            ;; this session owns the runtime, snapshots hide the saved row.
+            (my/noema-jupyter--record-pending-shutdown runtime)
             (setq group
                   (remote-channel-group-open
                    `((hb . (:host "127.0.0.1" :port ,(nth 0 ports)))
@@ -754,32 +1045,40 @@ cannot silently leave a live kernel running on it."
                  (my/noema-jupyter--shutdown-runtime value)))
              :recover
              (lambda (_resource _owner)
-               ;; Only a confirmed death discards in-memory kernel state.  A
-               ;; probe that could not be carried out leaves the runtime as it
-               ;; was, so the next request retries instead of losing the
-               ;; session to a transport hiccup.
-               (when (null (my/noema-jupyter--alive-p runtime))
-                 (setf
-                  (my/noema-jupyter-runtime-state runtime) 'dead
-                  (my/noema-jupyter-runtime-state-lost runtime) t))
-               runtime)
+               (my/noema-jupyter--refresh-recovered-runtime runtime))
              :recovery 'auto
              :metadata (list :application "noema-jupyter"
                              :runtime runtime-id))
             runtime)
         (error
-         ;; Roll back everything this call created.  The registry entry and the
-         ;; channel group are both installed before the last step that can
-         ;; signal, so neither can be left behind for a runtime that no caller
-         ;; will ever hold a reference to.
-         (remhash runtime-id my/noema-jupyter-runtimes)
-         (when runtime
-           (ignore-errors
-             (my/noema-jupyter--signal runtime "TERM")))
-         (when group
-           (ignore-errors (remote-channel-group-close group)))
-         (ignore-errors (delete-file connection-file))
-         (ignore-errors (delete-file log-file))
+         ;; Once the detached process has a PID, a failed rollback must keep
+         ;; its identity and connection file.  It can then be retried from the
+         ;; current Board or from the durable record after Emacs restarts.
+         (if (and (integerp pid) (> pid 0))
+             (progn
+               (unless runtime
+                 (setq runtime
+                       (my/noema-jupyter-runtime-create
+                        :id runtime-id :manager-id manager-id
+                        :context context :workspace workspace
+                        :placement-file placement-file :kernel kernel
+                        :pid pid :host-name host-name
+                        :connection-file connection-file
+                        :log-file log-file :channel-group group
+                        :state 'open)))
+               (puthash runtime-id runtime my/noema-jupyter-runtimes)
+               (condition-case rollback-error
+                   (my/noema-jupyter--shutdown-runtime runtime)
+                 (error
+                  (display-warning
+                   'noema-jupyter
+                   (format "Launched kernel %s could not be rolled back: %s"
+                           runtime-id (error-message-string rollback-error))
+                   :error))))
+           (when group
+             (ignore-errors (remote-channel-group-close group)))
+           (ignore-errors (delete-file connection-file))
+           (ignore-errors (delete-file log-file)))
          (signal (car error) (cdr error)))))))
 
 (defun my/noema-jupyter--runtime-result (runtime)
@@ -823,53 +1122,96 @@ was shut down would get its five forwards reopened on each reconnect."
 (defun my/noema-jupyter--shutdown-runtime (runtime)
   "Close and remove RUNTIME.
 Shutting down a runtime twice does nothing the second time: its process group
-ID is no longer its own and must not be signalled again."
+ID is no longer its own and must not be signalled again.  If signalling fails,
+keep the runtime registered so a later shutdown can retry."
   (when (and (my/noema-jupyter-runtime-p runtime)
              (not (eq (my/noema-jupyter-runtime-state runtime) 'closed)))
+    ;; Write before the target call: if Emacs exits while it is unreachable,
+    ;; the next session can still offer this kernel in Jupyter Board.
+    ;; A failed target call leaves the detached kernel potentially alive.
+    ;; Do not discard its identity or workspace resources until the process
+    ;; is confirmed gone and its target files were removed.  A failed local
+    ;; journal write also stops before signalling the target.
+    (condition-case error
+        (progn
+          (my/noema-jupyter--record-pending-shutdown runtime)
+          (when (eq (my/noema-jupyter-runtime-state runtime)
+                    'shutdown-pending)
+            (my/noema-jupyter--verify-pending-runtime runtime))
+          (my/noema-jupyter--signal runtime "TERM")
+          (my/noema-jupyter--await-process-exit runtime)
+          (my/noema-jupyter--delete-runtime-files runtime))
+      (error
+       (setf (my/noema-jupyter-runtime-state runtime) 'shutdown-pending)
+       (signal (car error) (cdr error))))
     (setf (my/noema-jupyter-runtime-state runtime) 'closed)
     (remhash
      (my/noema-jupyter-runtime-id runtime)
      my/noema-jupyter-runtimes)
     (my/noema-jupyter--forget-runtime-resources runtime)
-    (ignore-errors (my/noema-jupyter--signal runtime "TERM"))
     (when-let* ((group
                  (my/noema-jupyter-runtime-channel-group runtime)))
       (ignore-errors (remote-channel-group-close group)))
-    (dolist (file
-             (list
-              (my/noema-jupyter-runtime-connection-file runtime)
-              (my/noema-jupyter-runtime-log-file runtime)))
-      (when (and file (file-exists-p file))
-        (ignore-errors (delete-file file)))))
+    (when (my/noema-jupyter-runtime-connection-file runtime)
+      (condition-case error
+          (my/noema-jupyter--forget-pending-shutdown
+           (my/noema-jupyter-runtime-id runtime))
+        (error
+         (display-warning
+          'noema-jupyter
+          (format "Could not clear shutdown record for %s: %s"
+                  (my/noema-jupyter-runtime-id runtime)
+                  (error-message-string error))
+          :warning)))))
   runtime)
 
 (defun my/noema-jupyter-runtime-snapshot (&optional target-id)
   "Return a passive normalized snapshot of brokered Jupyter runtimes.
 When TARGET-ID is non-nil, include only runtimes owned by that Remote target."
-  (cl-loop
-   for runtime being the hash-values of my/noema-jupyter-runtimes
-   for context = (my/noema-jupyter-runtime-context runtime)
-   for owner = (remote-context-target-id context)
-   when (or (null target-id) (equal target-id owner))
-   collect
-   (list :id (format "runtime:noema-broker:%s"
-                     (my/noema-jupyter-runtime-id runtime))
-         :kind 'runtime :provider 'noema-broker
-         :runtime-id (my/noema-jupyter-runtime-id runtime)
-         :host-runtime-id (my/noema-jupyter-runtime-id runtime)
-         :manager-kernel-id (my/noema-jupyter-runtime-manager-id runtime)
-         :target-id owner
-         :kernel (my/noema-jupyter-runtime-kernel runtime)
-         ;; Snapshotting is intentionally passive: liveness probes belong to
-         ;; Remote Doctor and must not block or start work when the Board opens.
-         :status (or (my/noema-jupyter-runtime-state runtime) 'unknown)
-         :pid (my/noema-jupyter-runtime-pid runtime)
-         :generation (my/noema-jupyter-runtime-generation runtime)
-         :state-lost (my/noema-jupyter-runtime-state-lost runtime)
-         :connection-file (my/noema-jupyter-runtime-connection-file runtime)
-         :log-file (my/noema-jupyter-runtime-log-file runtime)
-         :resource-directory
-         (my/noema-jupyter-runtime-resource-directory runtime))))
+  (append
+   (cl-loop
+    for runtime being the hash-values of my/noema-jupyter-runtimes
+    for context = (my/noema-jupyter-runtime-context runtime)
+    for owner = (remote-context-target-id context)
+    when (or (null target-id) (equal target-id owner))
+    collect
+    (list :id (format "runtime:noema-broker:%s"
+                      (my/noema-jupyter-runtime-id runtime))
+          :kind 'runtime :provider 'noema-broker
+          :runtime-id (my/noema-jupyter-runtime-id runtime)
+          :host-runtime-id (my/noema-jupyter-runtime-id runtime)
+          :manager-kernel-id (my/noema-jupyter-runtime-manager-id runtime)
+          :target-id owner
+          :kernel (my/noema-jupyter-runtime-kernel runtime)
+          ;; Snapshotting is intentionally passive: liveness probes belong to
+          ;; Remote Doctor and must not block or start work when the Board opens.
+          :status (or (my/noema-jupyter-runtime-state runtime) 'unknown)
+          :pid (my/noema-jupyter-runtime-pid runtime)
+          :host-name (my/noema-jupyter-runtime-host-name runtime)
+          :generation (my/noema-jupyter-runtime-generation runtime)
+          :state-lost (my/noema-jupyter-runtime-state-lost runtime)
+          :connection-file (my/noema-jupyter-runtime-connection-file runtime)
+          :log-file (my/noema-jupyter-runtime-log-file runtime)
+          :resource-directory
+          (my/noema-jupyter-runtime-resource-directory runtime)))
+   (cl-loop
+    for entry in (my/noema-jupyter--pending-shutdowns)
+    for id = (my/noema-jupyter--get 'runtimeId entry)
+    for owner = (my/noema-jupyter--get 'targetId entry)
+    when (and (not (gethash id my/noema-jupyter-runtimes))
+              (or (null target-id) (equal target-id owner)))
+    collect
+    (list :id (format "runtime:noema-broker:%s" id)
+          :kind 'runtime :provider 'noema-broker
+          :runtime-id id :host-runtime-id id :target-id owner
+          :title "Broker kernel from previous Emacs session"
+          :kernel "Unknown" :status 'shutdown-pending
+          :pid (my/noema-jupyter--get 'pid entry)
+          :host-name (my/noema-jupyter--get 'hostName entry)
+          :source-file (my/noema-jupyter--get 'placementFile entry)
+          :connection-file (my/noema-jupyter--get 'connectionFile entry)
+          :log-file (my/noema-jupyter--get 'logFile entry)
+          :journal-pending t))))
 
 (defun my/noema-jupyter--restart-runtime (runtime)
   "Restart brokered RUNTIME and return its replacement.
@@ -895,13 +1237,21 @@ button's redisplay stack."
    0 nil
    (lambda ()
      (condition-case error
-         (let ((runtime (or (gethash runtime-id my/noema-jupyter-runtimes)
-                            (error "Unknown Noema Jupyter runtime: %s" runtime-id))))
-           (pcase action
-             ('interrupt (my/noema-jupyter--signal runtime "INT"))
-             ('restart (setq runtime (my/noema-jupyter--restart-runtime runtime)))
-             ('shutdown (my/noema-jupyter--shutdown-runtime runtime))
-             (_ (error "Unsupported Noema Jupyter action: %s" action)))
+         (let ((runtime (gethash runtime-id my/noema-jupyter-runtimes)))
+           (if runtime
+               (pcase action
+                 ('interrupt (my/noema-jupyter--signal runtime "INT"))
+                 ('restart (setq runtime (my/noema-jupyter--restart-runtime runtime)))
+                 ('shutdown (my/noema-jupyter--shutdown-runtime runtime))
+                 (_ (error "Unsupported Noema Jupyter action: %s" action)))
+             (let ((pending
+                    (my/noema-jupyter--pending-shutdown-for runtime-id)))
+               (unless pending
+                 (error "Unknown Noema Jupyter runtime: %s" runtime-id))
+               (unless (eq action 'shutdown)
+                 (error "Pending kernel %s can only be shut down" runtime-id))
+               (setq runtime
+                     (my/noema-jupyter--retry-pending-shutdown pending))))
            (funcall callback
                     (if (eq action 'shutdown)
                         '(:ok t)
@@ -936,10 +1286,16 @@ Signals when the target could not be probed at all.  Noema reads
 an unanswerable probe must fail the request rather than pose as an answer."
   (let ((alive (my/noema-jupyter--alive-p runtime)))
     (when (eq alive 'unknown)
-      (error "Cannot reach target %s to probe kernel %s"
-             (remote-context-target-id
-              (my/noema-jupyter-runtime-context runtime))
-             (my/noema-jupyter-runtime-id runtime)))
+      (let* ((expected (my/noema-jupyter-runtime-host-name runtime))
+             (current (and expected
+                           (ignore-errors
+                             (my/noema-jupyter--current-host
+                              (my/noema-jupyter-runtime-context runtime))))))
+        (if (and current (not (equal current expected)))
+            (error "Kernel %s is on %s; target now connects to %s"
+                   (my/noema-jupyter-runtime-id runtime) expected current)
+          (error "Cannot verify target host and process for kernel %s"
+                 (my/noema-jupyter-runtime-id runtime)))))
     (append
      `((alive . ,(if alive t :json-false))
        (message . ,(if alive "" "Target kernel process is not alive")))
@@ -1246,12 +1602,14 @@ Noema\='s orphan sweep — which only recognises the connection files it names
 itself.  Attached and server kernels are not brokered and are untouched."
   (dolist (runtime (hash-table-values my/noema-jupyter-runtimes))
     (condition-case error
-        (my/noema-jupyter--shutdown-runtime runtime)
+        (progn
+          (my/noema-jupyter--shutdown-runtime runtime)
+          (remhash (my/noema-jupyter-runtime-id runtime)
+                   my/noema-jupyter-runtimes))
       (error
        (message "Noema Jupyter: could not shut down runtime %s: %s"
                 (my/noema-jupyter-runtime-id runtime)
-                (error-message-string error)))))
-  (clrhash my/noema-jupyter-runtimes))
+                (error-message-string error))))))
 
 (defun my/noema-jupyter-release-all-attachments ()
   "Release every brokered attachment route without stopping any kernel."

@@ -11,6 +11,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'init-open)
+(require 'config-tools)
 (require 'init-smartparens)
 (require 'init-navigation-extra)
 
@@ -76,6 +77,80 @@
         (kill-buffer buffer))
       (delete-directory directory t))))
 
+(ert-deftest my/navigation-open-location-keeps-the-source-target ()
+  (with-temp-buffer
+    (setq-local default-directory "/fs:location-audit:/work/")
+    (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
+              ((symbol-function 'file-exists-p) (lambda (_path) t))
+              ((symbol-function 'file-directory-p) (lambda (_path) nil)))
+      (should (equal (my/navigation--resolve-location-file "/tmp/example.el")
+                     "/fs:location-audit:/tmp/example.el"))
+      (should (equal (my/navigation--resolve-location-file "src/example.el")
+                     "/fs:location-audit:/work/src/example.el")))))
+
+(ert-deftest my/navigation-open-location-visits-a-logical-local-file ()
+  (let* ((directory (make-temp-file "emacs-logical-location-" t))
+         (file (expand-file-name "sample.el" directory))
+         (source-directory
+          (concat "/fs:local:" (file-name-as-directory directory)))
+         buffer)
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "first\nsecond line\nthird\n"))
+          (let ((default-directory source-directory))
+            (setq buffer
+                  (open-file-location (format "%s:2:4" file))))
+          (with-current-buffer buffer
+            (should (= (line-number-at-pos) 2))
+            (should (= (current-column) 3))
+            (should (file-equal-p buffer-file-name file))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer))
+      (delete-directory directory t))))
+
+(ert-deftest my/navigation-open-location-invalid-line-keeps-the-current-window ()
+  (let* ((file (make-temp-file "emacs-invalid-location-" nil ".txt"
+                               "first line\n"))
+         (source (generate-new-buffer " *invalid location source*")))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer source)
+          (let ((window-count (length (window-list))))
+            (dolist (other-window '(nil t))
+              (should-error
+               (open-file-location (format "%s:99" file) other-window)
+               :type 'user-error)
+              (should (eq (window-buffer) source))
+              (should (= (length (window-list)) window-count))
+              (should-not (get-file-buffer file)))))
+      (when (buffer-live-p source)
+        (kill-buffer source))
+      (when-let* ((target (get-file-buffer file)))
+        (kill-buffer target))
+      (delete-file file))))
+
+(ert-deftest my/navigation-open-location-invalid-line-preserves-existing-buffer ()
+  (let* ((file (make-temp-file "emacs-existing-location-" nil ".txt"
+                               "first line\nsecond line\n"))
+         (target (find-file-noselect file)))
+    (unwind-protect
+        (with-current-buffer target
+          (goto-char (point-min))
+          (forward-line 1)
+          (let ((original-point (point)))
+            (narrow-to-region original-point (point-max))
+            (should-error
+             (open-file-location (format "%s:99" file))
+             :type 'user-error)
+            (should (buffer-live-p target))
+            (should (buffer-narrowed-p))
+            (should (= (point) original-point))))
+      (when (buffer-live-p target)
+        (with-current-buffer target (widen))
+        (kill-buffer target))
+      (delete-file file))))
+
 (ert-deftest my/open-keybinding-guide-inhibits-markdown-redirect ()
   (let (redirect-inhibited buffer)
     (unwind-protect
@@ -89,6 +164,129 @@
           (should (buffer-local-value 'view-mode buffer)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
+
+(ert-deftest my/open-keybinding-guide-uses-client-context ()
+  "The guide resolves on the client even from a Remote source buffer."
+  (let (checked buffer)
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local default-directory "/fs:guide-test:/project/")
+          (setq-local remote-buffer-target-id "guide-test")
+          (cl-letf (((symbol-function 'find-file)
+                     (lambda (_file)
+                       (setq checked
+                             (and (equal default-directory
+                                         (file-name-as-directory user-emacs-directory))
+                                  (not (bound-and-true-p remote-buffer-target-id))
+                                  (equal process-environment
+                                         (default-value 'process-environment))
+                                  (equal exec-path (default-value 'exec-path))))
+                       (setq buffer (generate-new-buffer " *guide-client-test*")))))
+            (should (eq (my/open-keybinding-guide) buffer))
+            (should checked)))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest my/elisp-local-leader-has-one-visible-eval-route ()
+  "The Emacs Lisp leader exposes the editing workbench's eval commands."
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (evil-normal-state)
+    (should (eq (key-binding (kbd "SPC m e d")) 'eros-eval-defun))
+    (should (eq (key-binding (kbd "SPC m e e")) 'eros-eval-last-sexp))
+    (should (eq (key-binding (kbd "SPC m g f")) 'find-function))
+    (should (eq (key-binding (kbd "SPC h m")) 'my/mode-keybindings))))
+
+(ert-deftest my/workflow-docs-open-on-client-from-remote-buffer ()
+  "Compile and LSP docs use client paths and remain editable."
+  (let (buffers)
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local default-directory "/fs:guide-test:/project/")
+          (setq-local remote-buffer-target-id "guide-test")
+          (cl-letf (((symbol-function 'find-file)
+                     (lambda (file)
+                       (should (file-in-directory-p file user-emacs-directory))
+                       (should (equal default-directory
+                                      (file-name-as-directory user-emacs-directory)))
+                       (should-not (bound-and-true-p remote-buffer-target-id))
+                       (let ((buffer (generate-new-buffer " *workflow-doc-test*")))
+                         (push buffer buffers)
+                         buffer))))
+            (dolist (command '(my/compile-open-docs
+                               my/language-server-manager-open-docs))
+              (let ((buffer (funcall command)))
+                (should (buffer-live-p buffer))
+                (should-not (buffer-local-value 'view-mode buffer))))))
+      (mapc #'kill-buffer buffers))))
+
+(ert-deftest config-store-opens-on-client-from-remote-buffer ()
+  "The settings menu must not interpret its local store on a Remote target."
+  (let (checked buffer)
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local default-directory "/fs:guide-test:/project/")
+          (setq-local remote-buffer-target-id "guide-test")
+          (setq-local process-environment '("PATH=/remote/bin"))
+          (setq-local exec-path '("/remote/bin"))
+          (cl-letf (((symbol-function 'find-file)
+                     (lambda (file)
+                       (setq checked
+                             (and (equal file config-store-file)
+                                  (equal default-directory
+                                         (file-name-as-directory user-emacs-directory))
+                                  (not (bound-and-true-p remote-buffer-target-id))
+                                  (equal process-environment
+                                         (default-value 'process-environment))
+                                  (equal exec-path (default-value 'exec-path))
+                                  my/noema--inhibit-redirect))
+                       (setq buffer (generate-new-buffer " *config-store-test*")))))
+            (should (eq (config-open-store) buffer))
+            (should checked)))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(ert-deftest config-file-item-uses-native-open-and-client-context ()
+  "Registered files remain editable, including a file not created yet."
+  (let* ((directory (make-temp-file "config-file-item-" t))
+         (file (expand-file-name "new-setting.txt" directory))
+         (config--registry (make-hash-table :test 'eq))
+         (opened nil)
+         (reloaded nil))
+    (puthash 'test-file
+             (list :name 'test-file :kind 'file :path file
+                   :loader (lambda ()
+                             (setq reloaded
+                                   (and (equal default-directory
+                                               (file-name-as-directory
+                                                user-emacs-directory))
+                                        (not (bound-and-true-p
+                                              remote-buffer-target-id))))))
+             config--registry)
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local default-directory "/fs:file-item-test:/project/")
+          (setq-local remote-buffer-target-id "file-item-test")
+          (setq-local process-environment '("PATH=/remote/bin"))
+          (cl-letf (((symbol-function 'find-file)
+                     (lambda (path)
+                       (setq opened
+                             (and (equal path file)
+                                  (not (file-exists-p path))
+                                  (equal default-directory
+                                         (file-name-as-directory
+                                          user-emacs-directory))
+                                  (not (bound-and-true-p
+                                        remote-buffer-target-id))
+                                  (equal process-environment
+                                         (default-value 'process-environment))))
+                       (current-buffer))))
+            (should (commandp 'config-file-open))
+            (config-file-open 'test-file)
+            (should opened))
+          (config-file-reload 'test-file)
+          (should reloaded))
+      (delete-directory directory t))))
 
 (provide 'init-interaction-utils-tests)
 

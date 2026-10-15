@@ -14,6 +14,8 @@
                   (project-root &optional initial rg-unavailable))
 (declare-function remote-canonicalize-file-name "remote-fs"
                   (file-name &optional directory))
+(declare-function remote-require-on-client "remote-core"
+                  (feature &optional filename noerror))
 (declare-function remote-context "remote-fs" (&optional path))
 (declare-function remote-executable-find "remote-process"
                   (program &optional context))
@@ -41,6 +43,16 @@
   (which-key-dont-use-unicode nil)
   (which-key-idle-delay 0.5)
   (which-key-add-column-padding 1))
+
+(defun my/mode-keybindings ()
+  "Show the live key bindings of the current major mode."
+  (interactive)
+  (if (remote-require-on-client 'which-key nil t)
+      (which-key-show-major-mode)
+    (describe-mode)))
+
+(defalias 'mode-keybindings #'my/mode-keybindings
+  "Show the current major mode's live key bindings.")
 
 ;; The blazing grep tool
 ;;

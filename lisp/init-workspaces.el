@@ -18,16 +18,15 @@
 (declare-function persp-kill "perspective" (name))
 (declare-function persp-names "perspective")
 (declare-function persp-rename "perspective" (name))
+(declare-function persp-valid-name-p "perspective" (name))
 (declare-function persp-switch-to-buffer* "perspective" (&optional buffer-or-name))
 (declare-function persp-switch "perspective" (name &optional norecord))
 (declare-function persp-switch-last "perspective")
 (declare-function switch-to-buffer "window" (buffer-or-name &optional norecord force-same-window))
 (declare-function tab-bar--current-tab "tab-bar")
-(declare-function tab-bar-close-other-tabs "tab-bar" ())
-(declare-function tab-bar-close-tab "tab-bar" (&optional tab))
 (declare-function tab-bar-new-tab "tab-bar" (&optional arg))
+(declare-function tab-bar-close-tab-by-name "tab-bar" (name))
 (declare-function tab-bar-rename-tab "tab-bar" (name))
-(declare-function tab-bar-select-tab-by-name "tab-bar" (name))
 (declare-function tab-bar-tabs "tab-bar" ())
 
 (defface my/workspace-current-face
@@ -95,9 +94,11 @@ When TAB is nil, use the currently selected tab."
           (persp-switch name))))))
 
 (defun my/workspace--generate-name ()
-  "Generate a new anonymous workspace name."
+  "Generate a name unused by workspaces and visible tabs."
   (let ((index 1)
-        (names (my/workspace-list-names))
+        (names (append (my/workspace-list-names)
+                       (when (bound-and-true-p tab-bar-mode)
+                         (my/tab-list-names))))
         candidate)
     (while
         (progn
@@ -155,8 +156,14 @@ When NAME is nil, generate an anonymous workspace name."
   (interactive)
   (my/workspace--ensure-enabled)
   (let ((name (or name (my/workspace--generate-name))))
+    (unless (persp-valid-name-p name)
+      (user-error "Choose a nonempty workspace name"))
     (when (member name (my/workspace-list-names))
       (user-error "Workspace %s already exists" name))
+    (when (and (bound-and-true-p tab-bar-mode)
+               (member name (my/tab-list-names))
+               (not (equal name (my/tab-current-name))))
+      (user-error "Another tab already uses the name %s" name))
     (persp-switch name)
     (my/tab-switch-to-current-workspace)
     (my/workspace-display)))
@@ -176,12 +183,26 @@ When NAME is nil, generate an anonymous workspace name."
 
 (defun my/workspace-kill (&optional name)
   "Kill workspace NAME.
-When NAME is nil, kill the current workspace."
+When NAME is nil, kill the current workspace.  Close tabs with that name."
   (interactive)
   (my/workspace--ensure-enabled)
   (when (<= (length (my/workspace-list-names)) 1)
     (user-error "Can't delete the last workspace"))
-  (persp-kill (or name (my/workspace-current-name)))
+  (let ((name (or name (my/workspace-current-name))))
+    (unless (member name (my/workspace-list-names))
+      (user-error "No workspace named %s" name))
+    ;; Perspective activation otherwise renames the tab before it can be
+    ;; closed.  The sole tab has to be reused for the surviving workspace.
+    (let ((my/tab-workspace-sync-in-progress t))
+      (when (bound-and-true-p tab-bar-mode)
+        (while (and (> (my/tab-count) 1)
+                    (member name (my/tab-list-names)))
+          (let ((old-count (my/tab-count)))
+            (tab-bar-close-tab-by-name name)
+            (when (= old-count (my/tab-count))
+              (user-error "Tab %s could not be closed; workspace kept" name)))))
+      (persp-kill name)))
+  (my/tab-switch-to-current-workspace)
   (my/workspace-display))
 
 (defun my/workspace-other ()
@@ -197,8 +218,11 @@ When NAME is nil, kill the current workspace."
   (interactive)
   (my/workspace--ensure-enabled)
   (let ((name (or name (my/workspace--generate-name))))
-    (when (member name (my/tab-list-names))
-      (user-error "Tab %s already exists" name))
+    (unless (persp-valid-name-p name)
+      (user-error "Choose a nonempty tab/workspace name"))
+    (when (or (member name (my/tab-list-names))
+              (member name (my/workspace-list-names)))
+      (user-error "Tab or workspace %s already exists" name))
     (let ((my/tab-workspace-sync-in-progress t))
       (tab-bar-new-tab)
       (persp-switch name)
@@ -210,16 +234,6 @@ When NAME is nil, kill the current workspace."
   (interactive "sNew tab/workspace name: ")
   (my/tab-new name))
 
-(defun my/tab-switch ()
-  "Switch to a top-level tab by name."
-  (interactive)
-  (let ((name (completing-read "Switch to tab: "
-                               (my/tab-list-names)
-                               nil t nil nil
-                               (my/tab-current-name))))
-    (tab-bar-select-tab-by-name name)
-    (my/tab-switch-to-matching-workspace)))
-
 (defun my/tab-rename (name)
   "Rename the current tab and current workspace to NAME."
   (interactive "sRename tab/workspace to: ")
@@ -230,28 +244,6 @@ When NAME is nil, kill the current workspace."
   (let ((my/tab-workspace-sync-in-progress t))
     (persp-rename name)
     (tab-bar-rename-tab name))
-  (my/workspace-display))
-
-(defun my/tab-close ()
-  "Close the current top-level tab and kill the matching workspace."
-  (interactive)
-  (my/workspace--ensure-enabled)
-  (when (<= (my/tab-count) 1)
-    (user-error "Can't delete the last tab"))
-  (let ((closed-workspace (my/workspace-current-name)))
-    (let ((my/tab-workspace-sync-in-progress t))
-      (tab-bar-close-tab))
-    (when (member closed-workspace (my/workspace-list-names))
-      (persp-kill closed-workspace))
-    (my/tab-switch-to-matching-workspace)
-    (my/tab-switch-to-current-workspace)
-    (my/workspace-display)))
-
-(defun my/tab-close-other-tabs ()
-  "Close other top-level tabs, keeping the current one."
-  (interactive)
-  (tab-bar-close-other-tabs)
-  (my/tab-switch-to-current-workspace)
   (my/workspace-display))
 
 (defun my/workspace-cycle (step)
@@ -289,7 +281,7 @@ When NAME is nil, kill the current workspace."
        (or (nth i (my/workspace-list-names))
            (user-error "No workspace at slot %d" (1+ i)))))))
 
-(transient-define-prefix my/workspace-dispatch ()
+(transient-define-prefix workspace-menu ()
   "Workspace operations."
   [["Workspace"
     ("TAB" "display" my/workspace-display :transient t)

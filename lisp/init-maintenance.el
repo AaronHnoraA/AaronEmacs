@@ -380,7 +380,7 @@ When ARCHIVE is nil, store it under `my/maintenance-state-backup-dir'."
 
 (my/leader!
   "r B" '(:def my/maintenance-state-snapshot :which-key "backup state")
-  "r R" '(:def my/maintenance-state-restore :which-key "restore state")
+  "r V" '(:def my/maintenance-state-restore :which-key "restore state")
   "r C" '(:def my/maintenance-var-cleanup :which-key "clean var"))
 
 (add-hook 'emacs-startup-hook #'my/maintenance-var-cleanup-start-timer)

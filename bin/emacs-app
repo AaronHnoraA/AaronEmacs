@@ -8,6 +8,7 @@
 #   state                  JSON for status, health, actions and frames at once
 #   actions                JSON for the whitelisted actions
 #   act ID [ARGUMENT]      run a whitelisted action
+#   result ID              poll a queued action or frame operation
 #   frames                 JSON for the top-level frames
 #   frame ACTION [ID]      focus | hide | hide-others | close | close-others
 #                          a frame by ID, or new | show-all | hide-all
@@ -127,12 +128,28 @@ json() {
     printf '%s' "${reply//\"/}" | /usr/bin/base64 -D
 }
 
+# Unlike a receipt, an action's final result is read through `result'.
+# Preserve validation errors from emacsclient for the external UI.
+queued_json() {
+    local reply
+    if reply=$("$CLIENT" --timeout=4 --eval "$1" 2>&1); then
+        printf '%s' "${reply//\"/}" | /usr/bin/base64 -D
+        return $?
+    fi
+    printf '%s\n' "${reply:-Emacs is not answering}" >&2
+    return 1
+}
+
 act() {
-    client "(my/background-act \"$(encode "${1:?action id}")\" \"$(encode "${2:-}")\")" >/dev/null
+    queued_json "(progn (unless (and (boundp 'my/background-action-protocol) (= my/background-action-protocol 1)) (user-error \"Emacs action protocol is outdated; reload init-background.el\")) (my/background-act \"$(encode "${1:?action id}")\" \"$(encode "${2:-}")\"))"
 }
 
 frame() {
-    client "(my/background-frame-act \"$(encode "${1:?action}")\" \"$(encode "${2:-}")\")" >/dev/null
+    queued_json "(progn (unless (and (boundp 'my/background-action-protocol) (= my/background-action-protocol 1)) (user-error \"Emacs action protocol is outdated; reload init-background.el\")) (my/background-frame-act \"$(encode "${1:?action}")\" \"$(encode "${2:-}")\"))"
+}
+
+result() {
+    queued_json "(my/background-result \"$(encode "${1:?request id}")\")"
 }
 
 build() {
@@ -178,6 +195,7 @@ case "$command" in
     frame) frame "$@" ;;
     actions) json '(my/background-actions)' ;;
     act) act "$@" ;;
+    result) result "$@" ;;
     terminal) client '(progn (my/ghostel-open-new) nil)' >/dev/null ;;
     status) status ;;
     quit) client '(my/background-quit)' >/dev/null ;;

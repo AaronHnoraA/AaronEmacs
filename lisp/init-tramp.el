@@ -36,6 +36,18 @@
 (defvar remote-targets)
 (defvar remote-config-after-load-hook)
 
+(config-defvar remote-client-ssh-program
+  (and (eq system-type 'darwin)
+       (file-executable-p "/usr/bin/ssh")
+       "/usr/bin/ssh")
+  "Client-side SSH executable used by Remote, TRAMP, and tramp-rpc.
+Use nil to search the ordinary client PATH.  The executable must be named
+`ssh', since tramp-rpc invokes that name directly during bootstrap."
+  :type '(choice (const :tag "Search client PATH" nil)
+                 (file :tag "SSH executable"))
+  :group 'remote
+  :on-change (lambda (_name _value) (my/tramp-configure-ssh-program)))
+
 
 ;;; ── tramp-rpc: high-performance MessagePack-RPC TRAMP backend ───────────────
 ;; /rpc:host:/path uses a binary RPC server on the remote.  Actual latency
@@ -222,6 +234,14 @@ non-login shell startup."
     (when value
       (setcdr entry (cons (list parameter value) (cdr entry))))))
 
+(defun my/tramp-configure-ssh-program ()
+  "Align TRAMP's SSH methods with the Remote client SSH setting."
+  (when (featurep 'tramp)
+    (dolist (method '("ssh" "sshx" "scp" "rpc"))
+      (my/tramp-set-method-parameter
+       method 'tramp-login-program
+       (or remote-client-ssh-program "ssh")))))
+
 ;;; ── Pre-load settings ───────────────────────────────────────────────────────
 ;; These must be set before TRAMP is first loaded.
 
@@ -231,6 +251,7 @@ non-login shell startup."
   :ensure nil
   :defer t
   :config
+  (my/tramp-configure-ssh-program)
   ;; Forcing a login shell makes TRAMP sensitive to startup chatter from
   ;; .profile/.bashrc/.zshrc.  Some teaching/login clusters print banners or
   ;; run module setup from those files, which can leave TRAMP stuck in the

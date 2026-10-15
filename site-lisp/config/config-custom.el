@@ -222,20 +222,21 @@ menu; native Custom has no first-class file-management widget."
 (defun config-custom--around-custom-save-all (orig &rest args)
   "Keep config-managed variables out of `custom-file' serialization."
   (let (managed-saved)
-    (maphash
-     (lambda (symbol _)
-       (when (get symbol 'saved-value)
-         (push (list symbol
-                     (get symbol 'saved-value)
-                     (get symbol 'customized-value))
-               managed-saved)
-         (let ((config-custom--saving t))
-           (config-custom--persist-symbol symbol))
-         (put symbol 'saved-value nil)
-         (put symbol 'customized-value nil)))
-     config-custom--managed)
     (unwind-protect
-        (apply orig args)
+        (progn
+          (maphash
+           (lambda (symbol _)
+             (when (get symbol 'saved-value)
+               (push (list symbol
+                           (get symbol 'saved-value)
+                           (get symbol 'customized-value))
+                     managed-saved)
+               (let ((config-custom--saving t))
+                 (config-custom--persist-symbol symbol))
+               (put symbol 'saved-value nil)
+               (put symbol 'customized-value nil)))
+           config-custom--managed)
+          (apply orig args))
       (dolist (state managed-saved)
         (pcase-let ((`(,symbol ,saved ,customized) state))
           (put symbol 'saved-value saved)

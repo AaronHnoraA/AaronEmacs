@@ -14,6 +14,7 @@
 (require 'remote-workspace)
 (require 'subr-x)
 (require 'cl-lib)
+(require 'transient)
 (require 'url)
 (require 'url-util)
 (require 'init-aaronnote-jupyter-cell)
@@ -52,7 +53,11 @@
 (declare-function my/open-system-target "init-open" (target))
 (declare-function my/noema-roam-note-changed "init-md-roam" (file))
 (declare-function my/noema-roam--clear-runtime-cache "init-md-roam" ())
+(declare-function my/noema-roam--handle-moved-note "init-md-roam" (event))
+(declare-function my/noema-roam--handle-trashed-note "init-md-roam" (event))
 (declare-function my/noema-roam--cancel-sync-timer "init-md-roam" ())
+(declare-function my/noema--markdown-placeholder-set-state "init-md" (state))
+(declare-function my/noema--kill-redirected-markdown-buffer "init-md" (buffer file))
 (declare-function xwidget-webkit-current-session "xwidget" ())
 (declare-function xwidget-webkit-edit-mode "xwidget" (&optional arg))
 (declare-function xwidget-webkit-execute-script "xwidget" (xwidget script &optional callback))
@@ -809,6 +814,14 @@ failure is diagnosable without hunting for it."
            (tail (my/noema--web-host-log-tail))
            (log-buf (get-buffer " *Noema web host*")))
       (setq my/noema--ready-callbacks nil)
+      (dolist (buffer (buffer-list))
+        (with-current-buffer buffer
+          (when (and (bound-and-true-p my/noema--markdown-redirected)
+                     (eq (bound-and-true-p
+                          my/noema--markdown-placeholder-state)
+                         'starting)
+                     (fboundp 'my/noema--markdown-placeholder-set-state))
+            (my/noema--markdown-placeholder-set-state 'failed))))
       (when log-buf (display-buffer log-buf))
       (message "%s"
                (concat
@@ -831,9 +844,15 @@ failure is diagnosable without hunting for it."
         (ignore-errors (my/appine-kill-all)))
       (when (fboundp 'my/appine--tab-reset)
         (my/appine--tab-reset))
-      (my/noema--start-server)
-      (when my/noema--ready-watchdog
-        (cancel-timer my/noema--ready-watchdog))
+      (condition-case err
+          (my/noema--start-server)
+        ((error quit)
+         (setq my/noema--ready-callbacks
+               (delq callback my/noema--ready-callbacks))
+         (signal (car err) (cdr err)))))
+    ;; A retry after the watchdog fired may still find a live but unready
+    ;; process.  Bound that wait too; otherwise the new callback never ends.
+    (unless (or my/noema--ready my/noema--ready-watchdog)
       (setq my/noema--ready-watchdog
             (run-at-time 10 nil #'my/noema--watchdog-fire)))))
 
@@ -1570,6 +1589,21 @@ each payload byte into a raw-byte character, so keep every piece unibyte."
              (when (fboundp 'my/dashboard-agenda-handle-change)
                (my/noema--defer-host-event #'my/dashboard-agenda-handle-change payload))
              nil)
+            ("notes-mutated"
+             (when (fboundp 'my/noema-roam--clear-runtime-cache)
+               (my/noema--defer-host-event
+                #'my/noema-roam--clear-runtime-cache))
+             nil)
+            ("note-moved"
+             (when (fboundp 'my/noema-roam--handle-moved-note)
+               (my/noema--defer-host-event
+                #'my/noema-roam--handle-moved-note payload))
+             nil)
+            ("note-trashed"
+             (when (fboundp 'my/noema-roam--handle-trashed-note)
+               (my/noema--defer-host-event
+                #'my/noema-roam--handle-trashed-note payload))
+             nil)
             ("agenda-attention-changed"
              (my/noema--defer-host-event
               (lambda (event)
@@ -2260,7 +2294,9 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
                  (fboundp 'my/noema--setup-native-chrome))
         (my/noema--setup-native-chrome))
       (when changed
-        (my/noema--refresh-visible-ibuffers))
+        (my/noema--refresh-visible-ibuffers)
+        (when (fboundp 'my/tab-line-refresh)
+          (my/tab-line-refresh)))
       buffer)))
 
 (defun my/noema--sync-app-buffer-file (file &optional client)
@@ -2686,6 +2722,9 @@ When FILE is nil, use the current buffer."
               (pulse-momentary-highlight-one-line (point)))))))))
 
 (defvar my/noema--markdown-redirected)
+(defvar my/noema--markdown-placeholder-state)
+(defvar my/noema--markdown-open-generation)
+(defvar my/noema-close-emacs-markdown-buffer)
 
 (defun my/noema--redirect-placeholder-window (file)
   "Return a visible window showing the redirected Emacs buffer of FILE.
@@ -2708,27 +2747,61 @@ as the placeholder its Noema pane will replace."
   (let* ((file (my/noema--canonical-file file))
          (origin (if (window-live-p origin-window)
                      origin-window (selected-window)))
-         (source-buffer (window-buffer origin)))
+         (source-buffer (window-buffer origin))
+         (placeholder (and (bound-and-true-p my/noema--markdown-redirected)
+                           (current-buffer)))
+         (generation (and placeholder my/noema--markdown-open-generation)))
     (my/noema--ensure-server
      (lambda ()
        ;; A cold host answers after the command that asked has returned.  By
        ;; then `find-file' has put the redirected buffer in a window, which
        ;; need not be ORIGIN; the pane belongs wherever that placeholder is.
-       (when-let* ((target-window
-                    (or (my/noema--redirect-placeholder-window file)
+       (when (or (null placeholder)
+                 (and (buffer-live-p placeholder)
+                      (with-current-buffer placeholder
+                        (and my/noema--markdown-redirected
+                             (= generation my/noema--markdown-open-generation)))))
+         (if-let* ((target-window
+                    (or (and placeholder
+                             (get-buffer-window placeholder 'visible))
+                        (my/noema--redirect-placeholder-window file)
                         (and (window-live-p origin)
                              (eq (window-buffer origin) source-buffer)
                              origin))))
-         (let ((activate (eq (selected-window) target-window))
-               result)
-           (with-selected-window target-window
-             (setq result
-                   (my/noema--open-url
-                    (my/noema--app-url file (my/noema--xwidget-session-id file))
-                    file nil)))
-           (when (and activate (buffer-live-p result))
-             (when-let* ((window (get-buffer-window result 'visible)))
-               (select-window window)))))))))
+             (let ((activate (eq (selected-window) target-window))
+                   result)
+               (condition-case err
+                   (with-selected-window target-window
+                     (setq result
+                           (my/noema--open-url
+                            (my/noema--app-url
+                             file (my/noema--xwidget-session-id file))
+                            file nil)))
+                 ((error quit)
+                  (if placeholder
+                      (progn
+                        (when (buffer-live-p placeholder)
+                          (with-current-buffer placeholder
+                            (my/noema--markdown-placeholder-set-state 'failed)))
+                        (message "Noema could not open %s: %s"
+                                 (abbreviate-file-name file)
+                                 (error-message-string err)))
+                    (signal (car err) (cdr err)))))
+               (when (buffer-live-p placeholder)
+                 (with-current-buffer placeholder
+                   (my/noema--markdown-placeholder-set-state
+                    (if (buffer-live-p result) 'opened 'failed)))
+                 (when (and (buffer-live-p result)
+                            my/noema-close-emacs-markdown-buffer)
+                   (run-at-time
+                    0 nil #'my/noema--kill-redirected-markdown-buffer
+                    placeholder file)))
+               (when (and activate (buffer-live-p result))
+                 (when-let* ((window (get-buffer-window result 'visible)))
+                   (select-window window))))
+           (when placeholder
+             (with-current-buffer placeholder
+               (my/noema--markdown-placeholder-set-state 'waiting)))))))))
 
 ;;;###autoload
 (defun my/noema-open-current-note ()
@@ -2860,11 +2933,16 @@ carry optional initial anchor coordinates."
     (my/noema-open-current-note-split)))
 
 ;;;###autoload
+(defun my/noema-open-file-split-frame (file)
+  "Open Noema note FILE in a fresh editable pane in a new frame."
+  (let ((my/noema--split-direction 'frame))
+    (my/noema-open-current-note-split file)))
+
+;;;###autoload
 (defun my/noema-open-current-note-split-frame ()
   "Open the current note in a fresh Noema pane in a new frame."
   (interactive)
-  (let ((my/noema--split-direction 'frame))
-    (my/noema-open-current-note-split)))
+  (my/noema-open-file-split-frame (my/noema--current-note-file)))
 
 ;;;###autoload
 (defun my/noema-preview ()
@@ -2903,10 +2981,27 @@ waits for a response in the invoking Emacs command."
   (my/noema--send-command command detail))
 
 ;;;###autoload
+(defun my/noema--standalone-slide-file ()
+  "Return the Markdown file shown by the current standalone Slide view."
+  (when (and (eq major-mode 'xwidget-webkit-mode)
+             (fboundp 'my/xwidget-current-url))
+    (when-let* ((url (my/xwidget-current-url))
+                (path (url-filename (url-generic-parse-url url))))
+      (when (and (string-match-p "\\`/slides\\(?:[?#]\\|\\'\\)" path)
+                 (string-match "[?&]file=\\([^&#]+\\)" path))
+        (let ((file (url-unhex-string (match-string 1 path))))
+          (and (my/noema--markdown-file-p file) file))))))
+
+;;;###autoload
 (defun my/noema-back ()
   "Return to the previous location in this Noema pane."
   (interactive)
-  (my/noema-command "back"))
+  ;; A standalone /slides page starts in a fresh WebKit window and has no
+  ;; editor entry in browser or Noema history.  Its header is Emacs chrome,
+  ;; so return to the source editor here instead of broadcasting a page event.
+  (if-let* ((file (my/noema--standalone-slide-file)))
+      (my/noema-open-file file)
+    (my/noema-command "back")))
 
 ;;;###autoload
 (defun my/noema-forward ()
@@ -2958,6 +3053,8 @@ waits for a response in the invoking Emacs command."
      (my/noema-open-wiki-view ,view)))
 
 (my/noema--def-wiki-view my/noema-wiki-home nil "Open the Noema Wiki home.")
+(defalias 'noema-wiki-home #'my/noema-wiki-home
+  "Open the Noema Wiki home.")
 (my/noema--def-wiki-view my/noema-wiki-pages "pages" "Open the Wiki page browser.")
 (my/noema--def-wiki-view my/noema-wiki-recent "recent" "Open recently changed Wiki pages.")
 (my/noema--def-wiki-view my/noema-wiki-tags "tags" "Open Wiki tag management.")
@@ -3436,6 +3533,9 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
        (if (boundp 'my/project-active-root) my/project-active-root root))))
   (noema-agenda-open query))
 
+(defalias 'noema-agenda #'my/noema-agenda
+  "Open the native Noema Agenda for the knowledge vault and current project.")
+
 (defun my/noema-agenda-plan-node (scheduled deadline)
   "Include the current DAG node in Agenda with SCHEDULED and DEADLINE dates."
   (interactive (list (read-string "Schedule (YYYY-MM-DD [HH:MM], optional): ")
@@ -3705,7 +3805,7 @@ failure while it is still going."
      ["Run prose check" my/noema-prose-check t]
      ["Export LaTeX…" my/noema-export-latex t]
      ["Settings…" my/noema-settings t]
-     ["Move document to Trash" my/noema-trash-current-note t]
+     ["Move document to Trash" noema-trash-note t]
      ["Save" my/noema-save t]))
    event))
 
@@ -3775,13 +3875,6 @@ failure while it is still going."
     (add-hook 'xwidget-webkit-mode-hook
               #'my/noema--restore-native-chrome-later-h 90)))
 
-;;;###autoload
-(defun my/noema-pop ()
-  "Open the Noema command pop."
-  (interactive)
-  (require 'transient)
-  (call-interactively #'my/noema-dispatch))
-
 (defun my/noema--xwidget-menu-section ()
   "Return Noema actions for the xwidget top-bar popup."
   (when (or my/noema-buffer-file-name
@@ -3798,7 +3891,7 @@ failure while it is still going."
      ["Noema: Wiki home" my/noema-wiki-home t]
      ["Noema: Workspace graph" my/noema-workspace-graph t]
      ["Noema: Focus editor" my/noema-focus t]
-     ["Noema: Pop" my/noema-pop t]
+     ["Noema: Pop" noema-menu t]
      (list
       "Noema lifecycle"
       ["Build + reopen" my/noema-build-and-reopen t]
@@ -3851,7 +3944,16 @@ failure while it is still going."
 (my/noema--def-editor-cmd "knowledge-search" "knowledge-search" "Search notes through Noema's unified knowledge index.")
 (my/noema--def-editor-cmd "export-latex"    "export-latex"    "Export the current scope to LaTeX.")
 (my/noema--def-editor-cmd "settings"        "settings"        "Open Noema settings.")
-(my/noema--def-editor-cmd "trash-current-note" "trash-current-note" "Move the current document to recoverable Trash.")
+
+;;;###autoload
+(defun noema-trash-note ()
+  "Save and move the current Noema document to recoverable Trash."
+  (interactive)
+  (unless (and (boundp 'my/noema--client-id)
+               (stringp my/noema--client-id)
+               (not (string-empty-p my/noema--client-id)))
+    (user-error "Select the Noema editor page to move its note to Trash"))
+  (my/noema-command "trash-current-note"))
 
 ;;; Dispatch transient.
 
@@ -3866,7 +3968,7 @@ failure while it is still going."
     (format "Noema  [%s]  %s" status sync)))
 
 (with-eval-after-load 'transient
-  (transient-define-prefix my/noema-dispatch ()
+  (transient-define-prefix noema-menu ()
     "Noema Emacs workspace and CM6 knowledge-component commands."
     [:description my/noema--dispatch-header
      ;; Row 1 ─────────────────────────────────────────────────────────────────
@@ -3874,9 +3976,10 @@ failure while it is still going."
       ("o" "open current"     my/noema-open-current-note)
       ("O" "open file…"       my/noema-open-file)
       ("s" "save"             my/noema-save)
+      ("!d" "move to Trash"  noema-trash-note)
       ("r" "refresh"          my/noema-refresh)
       ("!f" "reload from disk" my/noema-refresh-file)
-      ("%" "AI / agent…"      my/noema-ai-dispatch)
+      ("%" "AI / agent…"      noema-ai-menu)
       ("f" "focus editor"     my/noema-focus)
       ("e" "escape/normal"    my/noema-escape)
       ("v" "toggle source"    my/noema-toggle-source)
@@ -3910,12 +4013,13 @@ failure while it is still going."
       ("C" "namespaces"       my/noema-wiki-namespaces)
       ("g" "workspace graph"  my/noema-workspace-graph)
       ("k" "tasks"            my/noema-roam-todos)
-      ("A" "agenda"           my/noema-roam-agenda)
-      ("L" "agenda log"       my/noema-roam-agenda-log)
+      ("A" "agenda"           noema-agenda)
+      ("L" "agenda log"       noema-agenda-log)
       ("F" "file todos"       my/noema-roam-jump-file-todo)
       ("M" "repositories"     my/noema-wiki-repositories)]
      ["Wiki pages"
       ("!r" "reports"         my/noema-wiki-reports)
+      ("!n" "focused reports" noema-reports-menu)
       ("!w" "wanted pages"    my/noema-wiki-wanted)
       ("!p" "all pages"       my/noema-wiki-pages)
       ("!s" "sync"            my/noema-wiki-sync)]
@@ -3926,7 +4030,7 @@ failure while it is still going."
       ("P" "pause/resume"     my/noema-toggle-pause)
       ("H" "runtime status"   my/noema-runtime-status)
       ("D" "dired"            my/noema-roam-dired)
-      ("m" "move note"        my/noema-roam-move-note)
+      ("m" "move note"        noema-move-note)
       ("X" "magit"            my/noema-roam-magit)
       ("q" "stop server"      my/noema-stop)]
      ["Format (web)"
@@ -3958,7 +4062,7 @@ failure while it is still going."
       ("V" "paste"            my/noema-paste)]]))
 
 (with-eval-after-load 'transient
-  (transient-define-prefix my/noema-ai-dispatch ()
+  (transient-define-prefix noema-ai-menu ()
     "AI and agent actions on the Noema pane's selection.
 Each asks the page to save and report its range; `noema-md-bridge' then runs
 the gptel or agent UI on the note's Emacs source buffer."
@@ -3978,7 +4082,7 @@ the gptel or agent UI on the note's Emacs source buffer."
      ("S" "sessions"             noema-sessions)]))
 
 (with-eval-after-load 'transient
-  (transient-define-prefix my/noema-wiki-dispatch ()
+  (transient-define-prefix noema-wiki-menu ()
     "Emacs-hosted Wiki navigation and index maintenance."
     [:description my/noema--dispatch-header
      ["Browse"
@@ -3992,7 +4096,8 @@ the gptel or agent UI on the note's Emacs source buffer."
       ("N" "namespaces" my/noema-wiki-namespaces)
       ("R" "repositories" my/noema-wiki-repositories)
       ("s" "sync" my/noema-wiki-sync)
-      ("!" "reports" my/noema-wiki-reports)]
+      ("!" "reports" my/noema-wiki-reports)
+      ("D" "focused reports" noema-reports-menu)]
      ["Index"
       ("i" "incremental refresh" my/noema-wiki-refresh)
       ("F" "atomic full rebuild" my/noema-wiki-rebuild)
@@ -4001,15 +4106,15 @@ the gptel or agent UI on the note's Emacs source buffer."
 ;;; Keybindings.
 
 ;; Global: H-o opens the Noema dispatch panel.
-(general-define-key "H-o" #'my/noema-dispatch)
-(general-define-key "C-H-o" #'my/noema-dispatch)
+(general-define-key "H-o" #'noema-menu)
+(general-define-key "C-H-o" #'noema-menu)
 
 ;; Appine buffer direct keys — override global H- bindings that are irrelevant
 ;; when focused in the Noema pane.
 (with-eval-after-load 'appine
   (when (boundp 'appine-active-map)
-    (define-key appine-active-map (kbd "H-o") #'my/noema-dispatch)
-    (define-key appine-active-map (kbd "C-H-o") #'my/noema-dispatch)
+    (define-key appine-active-map (kbd "H-o") #'noema-menu)
+    (define-key appine-active-map (kbd "C-H-o") #'noema-menu)
     (define-key appine-active-map (kbd "M-z") #'my/noema-undo)
     (define-key appine-active-map (kbd "M-Z") #'my/noema-redo)
     (define-key appine-active-map (kbd "M-S-z") #'my/noema-redo)

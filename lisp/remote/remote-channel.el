@@ -23,6 +23,10 @@
                   (workspace kind key value &rest keys))
 (declare-function remote-workspace-resource-value
                   "remote-workspace" (resource))
+(declare-function remote-workspace-find-resource
+                  "remote-workspace" (workspace kind key))
+(declare-function remote-workspace-forget-resource
+                  "remote-workspace" (workspace resource))
 
 (cl-defstruct (remote-channel
                (:constructor remote-channel-create))
@@ -635,7 +639,7 @@ generation and returns a replacement group."
           (format "%s/group-%d"
                   (remote-context-target-id context)
                   (cl-incf remote-channel-group--counter)))
-         opened)
+         opened group)
     (condition-case error
         (progn
           (dolist (entry endpoints)
@@ -655,46 +659,59 @@ generation and returns a replacement group."
                      :metadata member-metadata :register nil)))
               (push (cons name forward) opened)))
           (setq opened (nreverse opened))
-          (let ((group
-                 (remote-channel-group-create
-                  :id id :key key :context context :workspace workspace
-                  :channels opened :state 'open
-                  :generation (or generation 1)
-                  :opened-at (current-time) :metadata metadata)))
-            (puthash id group remote-channel-groups)
-            (when (and register workspace
-                       (fboundp
-                        'remote-workspace-ensure-recoverable-resource))
-              (remote-workspace-ensure-recoverable-resource
-               workspace 'channel-group key group
-               :close
-               (lambda (value _reason)
-                 (remote-channel-group-close value))
-               :recover
-               (lambda (resource owner)
-                 (let* ((old
-                         (remote-workspace-resource-value resource))
-                        (stable
-                         (remote-channel-group-endpoints old 'local))
-                        (replacement
-                         (remote-channel-group-open
-                          endpoints
-                          :local-endpoints stable
-                          :context context :adapter adapter :pipeline pipeline
-                          :metadata metadata :workspace owner :key key
-                          :register nil
-                          :generation
-                          (1+ (remote-channel-group-generation old)))))
-                   (when-let* ((callback
-                                (plist-get metadata :on-recovered)))
-                     (funcall callback old replacement))
-                   replacement))
-               :metadata
-               (append
-                (list :key key :names (mapcar #'car endpoints))
-                metadata)))
-            group))
+          (setq group
+                (remote-channel-group-create
+                 :id id :key key :context context :workspace workspace
+                 :channels opened :state 'open
+                 :generation (or generation 1)
+                 :opened-at (current-time) :metadata metadata))
+          (puthash id group remote-channel-groups)
+          (when (and register workspace
+                     (fboundp
+                      'remote-workspace-ensure-recoverable-resource))
+            (remote-workspace-ensure-recoverable-resource
+             workspace 'channel-group key group
+             :close
+             (lambda (value _reason)
+               (remote-channel-group-close value))
+             :recover
+             (lambda (resource owner)
+               (let* ((old
+                       (remote-workspace-resource-value resource))
+                      (stable
+                       (remote-channel-group-endpoints old 'local))
+                      (replacement
+                       (remote-channel-group-open
+                        endpoints
+                        :local-endpoints stable
+                        :context context :adapter adapter :pipeline pipeline
+                        :metadata metadata :workspace owner :key key
+                        :register nil
+                        :generation
+                        (1+ (remote-channel-group-generation old)))))
+                 (when-let* ((callback
+                              (plist-get metadata :on-recovered)))
+                   (funcall callback old replacement))
+                 replacement))
+             :metadata
+             (append
+              (list :key key :names (mapcar #'car endpoints))
+              metadata)))
+          group)
       (error
+       (when group
+         (when (and workspace
+                    (fboundp 'remote-workspace-find-resource)
+                    (fboundp 'remote-workspace-forget-resource))
+           (ignore-errors
+             (when-let* ((resource
+                          (remote-workspace-find-resource
+                           workspace 'channel-group key))
+                         ((eq (remote-workspace-resource-value resource)
+                              group)))
+               (remote-workspace-forget-resource workspace resource))))
+         (setf (remote-channel-group-state group) 'closed)
+         (remhash id remote-channel-groups))
        (dolist (entry opened)
          (ignore-errors (remote-close-channel (cdr entry))))
        (signal (car error) (cdr error))))))

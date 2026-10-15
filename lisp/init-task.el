@@ -7,6 +7,7 @@
 
 (require 'cl-lib)
 (require 'init-funcs)
+(require 'init-output)
 (require 'init-project-local)
 (require 'json)
 
@@ -20,23 +21,6 @@
 (defgroup my/task nil
   "Project task helpers."
   :group 'tools)
-
-(defvar my/task-last-command nil
-  "Last project task command executed.")
-
-(defvar my/task-last-directory nil
-  "Directory where the last project task ran.")
-
-(defvar my/task-last-environment nil
-  "Environment used by the last project task.")
-(defvar my/task-build-last-command nil
-  "Last build command executed.")
-
-(defvar my/task-build-last-directory nil
-  "Directory where the last build command ran.")
-
-(defvar my/task-build-last-environment nil
-  "Environment used by the last build command.")
 
 (defun my/task--origin-buffer ()
   "Return the source buffer that initiated the current task command."
@@ -55,7 +39,7 @@
   (let ((buffer (my/task--origin-buffer)))
     (if (eq buffer (current-buffer))
         (funcall fn)
-      (if-let* ((window (get-buffer-window buffer t)))
+      (if-let* ((window (get-buffer-window buffer (selected-frame))))
           (with-selected-window window
             (funcall fn))
         (with-current-buffer buffer
@@ -130,6 +114,20 @@ client machine and returns a target-native path safe to embed in COMMAND."
               (push target targets))))))
     (nreverse (delete-dups targets))))
 
+(defun my/task--disambiguate-candidates (entries)
+  "Turn (SOURCE LABEL COMMAND) ENTRIES into distinct task choices.
+Qualify LABEL with SOURCE only when more than one tool provides that label."
+  (let ((counts (make-hash-table :test 'equal)))
+    (dolist (entry entries)
+      (cl-incf (gethash (cadr entry) counts 0)))
+    (mapcar (lambda (entry)
+              (pcase-let ((`(,source ,label ,command) entry))
+                (cons (if (> (gethash label counts) 1)
+                          (format "%s:%s" source label)
+                        label)
+                      command)))
+            entries)))
+
 (defun my/task--build-directories (root)
   "Return likely build directories in ROOT.
 The list includes directories that already look configured for CMake or Ninja."
@@ -187,31 +185,44 @@ The list includes directories that already look configured for CMake or Ninja."
 (defun my/task-candidates ()
   "Return available task candidates as an alist of (LABEL . COMMAND)."
   (let* ((root (file-name-as-directory (expand-file-name (my/task-project-root))))
+         (entries nil)
          (pairs nil))
     (when (file-exists-p (expand-file-name "Cargo.toml" root))
-      (setq pairs (append pairs '(("build" . "cargo build")
-                                  ("run" . "cargo run")
-                                  ("test" . "cargo test")
-                                  ("bench" . "cargo bench")
-                                  ("clean" . "cargo clean")))))
+      (setq entries
+            (append entries
+                    '(("cargo" "build" "cargo build")
+                      ("cargo" "run" "cargo run")
+                      ("cargo" "test" "cargo test")
+                      ("cargo" "bench" "cargo bench")
+                      ("cargo" "clean" "cargo clean")))))
     (when (file-exists-p (expand-file-name "go.mod" root))
-      (setq pairs (append pairs '(("build" . "go build ./...")
-                                  ("run" . "go run .")
-                                  ("test" . "go test ./...")
-                                  ("clean" . "go clean -cache")))))
+      (setq entries
+            (append entries
+                    '(("go" "build" "go build ./...")
+                      ("go" "run" "go run .")
+                      ("go" "test" "go test ./...")
+                      ("go" "clean" "go clean -cache")))))
     (when (cl-some (lambda (file) (file-exists-p (expand-file-name file root)))
                    '("pyproject.toml" "pytest.ini" "tox.ini" "setup.cfg"))
-      (setq pairs (append pairs '(("test" . "pytest")
-                                  ("lint" . "ruff check .")
-                                  ("format" . "ruff format .")))))
+      (setq entries
+            (append entries
+                    '(("python" "test" "pytest")
+                      ("python" "lint" "ruff check .")
+                      ("python" "format" "ruff format .")))))
     (dolist (entry (my/task--node-scripts root))
-      (push entry pairs))
+      (setq entries (append entries
+                            (list (list "node" (car entry) (cdr entry))))))
+    (setq pairs (my/task--disambiguate-candidates entries))
     (dolist (target (my/task--make-targets root "justfile"))
-      (push (cons (format "just:%s" target) (format "just %s" target)) pairs))
+      (setq pairs (append pairs
+                          (list (cons (format "just:%s" target)
+                                      (format "just %s" target))))))
     (dolist (target (my/task--make-targets root "Makefile"))
-      (push (cons (format "make:%s" target) (format "make %s" target)) pairs))
+      (setq pairs (append pairs
+                          (list (cons (format "make:%s" target)
+                                      (format "make %s" target))))))
     (my/project-local-merge-candidates 'task
-                                       (delete-dups (nreverse pairs))
+                                       pairs
                                        root)))
 
 (defun my/task--run (label)
@@ -223,14 +234,12 @@ The list includes directories that already look configured for CMake or Ninja."
          (env (my/project-local-env 'task root)))
     (when (fboundp 'my/direnv-update-environment-maybe)
       (my/direnv-update-environment-maybe command-path))
-    (setq my/task-last-command command
-          my/task-last-directory root
-          my/task-last-environment env)
     (let ((default-directory root)
           (process-environment (my/project-local-apply-env env))
-          (compilation-buffer-name-function (lambda (_) "*task*"))
           (my/direnv-subprocess-sync-inhibited t))
-      (compile (my/task--resolve-command-executable command)))))
+      (prog1 (my/output-compile
+              (my/task--resolve-command-executable command) "task" env)
+        (my/output-record-run 'task command root env)))))
 
 (defun my/task-run (label)
   "Run task LABEL selected from `my/task-candidates'."
@@ -247,16 +256,16 @@ The list includes directories that already look configured for CMake or Ninja."
      (my/task--run label))))
 
 (defun my/task-rerun ()
-  "Re-run the last task."
+  "Re-run this frame's last task."
   (interactive)
-  (unless (and my/task-last-command my/task-last-directory)
+  (unless (my/output-last-run 'task)
     (user-error "No previous task command"))
-  (let ((default-directory my/task-last-directory)
-        (process-environment (my/project-local-apply-env
-                              my/task-last-environment))
-        (compilation-buffer-name-function (lambda (_) "*task*"))
-        (my/direnv-subprocess-sync-inhibited t))
-    (compile (my/task--resolve-command-executable my/task-last-command))))
+  (pcase-let ((`(,command ,directory ,env) (my/output-last-run 'task)))
+    (let ((default-directory directory)
+          (process-environment (my/project-local-apply-env env))
+          (my/direnv-subprocess-sync-inhibited t))
+      (my/output-compile (my/task--resolve-command-executable command)
+                         "task" env))))
 
 (defun my/task--build (label)
   "Run build LABEL selected from `my/task-build-candidates'."
@@ -267,14 +276,12 @@ The list includes directories that already look configured for CMake or Ninja."
          (env (my/project-local-env 'build root)))
     (when (fboundp 'my/direnv-update-environment-maybe)
       (my/direnv-update-environment-maybe command-path))
-    (setq my/task-build-last-command command
-          my/task-build-last-directory root
-          my/task-build-last-environment env)
     (let ((default-directory root)
           (process-environment (my/project-local-apply-env env))
-          (compilation-buffer-name-function (lambda (_) "*build*"))
           (my/direnv-subprocess-sync-inhibited t))
-      (compile (my/task--resolve-command-executable command)))))
+      (prog1 (my/output-compile
+              (my/task--resolve-command-executable command) "build" env)
+        (my/output-record-run 'build command root env)))))
 
 (defun my/task-build (label)
   "Run build LABEL selected from `my/task-build-candidates'."
@@ -291,35 +298,44 @@ The list includes directories that already look configured for CMake or Ninja."
      (my/task--build label))))
 
 (defun my/task-build-rerun ()
-  "Re-run the last build command."
+  "Re-run this frame's last build command."
   (interactive)
-  (unless (and my/task-build-last-command my/task-build-last-directory)
+  (unless (my/output-last-run 'build)
     (user-error "No previous build command"))
-  (let ((default-directory my/task-build-last-directory)
-        (process-environment (my/project-local-apply-env
-                              my/task-build-last-environment))
-        (compilation-buffer-name-function (lambda (_) "*build*"))
-        (my/direnv-subprocess-sync-inhibited t))
-    (compile (my/task--resolve-command-executable my/task-build-last-command))))
+  (pcase-let ((`(,command ,directory ,env) (my/output-last-run 'build)))
+    (let ((default-directory directory)
+          (process-environment (my/project-local-apply-env env))
+          (my/direnv-subprocess-sync-inhibited t))
+      (my/output-compile (my/task--resolve-command-executable command)
+                         "build" env))))
+
+(defalias 'task-run #'my/task-run
+  "Choose and run a task in the current project.")
+(defalias 'task-rerun #'my/task-rerun
+  "Re-run this frame's last project task.")
+(defalias 'task-build #'my/task-build
+  "Choose and run a build command in the current project.")
+(defalias 'task-build-rerun #'my/task-build-rerun
+  "Re-run this frame's last project build.")
 
 (use-package transient
   :ensure nil
-  :defer t
+  :demand t
   :config
-  (transient-define-prefix my/task-dispatch ()
+  (transient-define-prefix task-menu ()
     "Project tasks."
     [["Tasks"
-      ("t" "choose task" my/task-run)
-      ("r" "rerun last" my/task-rerun)]
+      ("t" "choose task" task-run)
+      ("r" "rerun last" task-rerun)]
      ["Build"
-      ("b" "choose build" my/task-build)
-      ("B" "rerun build" my/task-build-rerun)]
+      ("b" "choose build" task-build)
+      ("B" "rerun build" task-build-rerun)]
      ["Bazel"
-      ("z" "target workbench" my/bazel-dispatch)]]))
+      ("z" "target workbench" bazel-target-menu)]]))
 
 (my/leader!
-  "r k" '(:def my/task-dispatch :which-key "tasks")
-  "r K" '(:def my/task-rerun :which-key "rerun task"))
+  "r k" '(:def task-menu :which-key "tasks")
+  "r K" '(:def task-rerun :which-key "rerun task"))
 
 (provide 'init-task)
 ;;; init-task.el ends here

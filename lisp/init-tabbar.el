@@ -19,11 +19,9 @@
 (defvar my/ghostel-popup-instance-p)
 
 (declare-function global-tab-line-mode "tab-line" (&optional arg))
-(declare-function get-current-persp "perspective" ())
+(declare-function persp-curr "perspective" (&optional frame))
 (declare-function my/file-icon-for-file "init-ui" (file &rest args))
-(declare-function persp-parameter "perspective" (parameter &optional persp))
 (declare-function persp-current-buffers* "perspective" (&optional include-global))
-(declare-function set-persp-parameter "perspective" (parameter value &optional persp))
 (declare-function tab-line--get-tab-property "tab-line" (prop string))
 (declare-function tab-line-force-update "tab-line" (all))
 (declare-function tab-bar-tabs "tab-bar" ())
@@ -84,9 +82,6 @@ Scrolling in the opposite direction is allowed immediately."
 (defconst my/tab-line-overflow-string "..."
   "Marker used when the centered tab line hides tabs on one side.")
 
-(defvar my/tab-line-global-order nil
-  "Fallback buffer order for the centered tab line outside perspective mode.")
-
 (defvar my/tab-line-cache-generation 0
   "Revision counter used to invalidate cached centered tab-line strings.")
 
@@ -101,6 +96,12 @@ Scrolling in the opposite direction is allowed immediately."
 
 (defvar-local my/tab-line--format-cache-window-width nil
   "Window body width used for `my/tab-line--format-cache'.")
+
+(defvar-local my/tab-line--format-cache-frame nil
+  "Frame for which `my/tab-line--format-cache' was rendered.")
+
+(defvar-local my/tab-line--format-cache-scope nil
+  "Perspective for which `my/tab-line--format-cache' was rendered.")
 
 (defvar-local my/tab-line--format-cache-buffer-name nil
   "Buffer name used for `my/tab-line--format-cache'.")
@@ -144,27 +145,65 @@ Centered buffer tabs use the full line and paint over this contextual text.")
 (defun my/tab-line-current-persp ()
   "Return the active perspective object, if any."
   (when (and (bound-and-true-p persp-mode)
-             (fboundp 'get-current-persp))
+             (fboundp 'persp-curr))
     (ignore-errors
-      (get-current-persp))))
+      (persp-curr))))
+
+(defvar my/frame-next-short-id 0
+  "Next short frame ID used by buffer and output views.")
+
+(defun my/frame-short-id (frame)
+  "Return FRAME's stable short ID for its lifetime."
+  (or (frame-parameter frame 'my/frame-short-id)
+      (let ((id (cl-incf my/frame-next-short-id)))
+        (set-frame-parameter frame 'my/frame-short-id id)
+        id)))
+
+(defun my/frame-buffer-list (&optional frame include-buried)
+  "Return buffers visited or displayed in FRAME.
+`buffer-list' with a frame argument still includes every other buffer, so
+use the frame's native buffer history and its currently displayed windows.
+When INCLUDE-BURIED is non-nil, include buffers explicitly buried here."
+  (let ((frame (or frame (selected-frame))))
+    (when (frame-live-p frame)
+      (delete-dups
+       (seq-filter #'buffer-live-p
+                   (append (mapcar #'window-buffer
+                                   (window-list frame 'no-minibuffer))
+                           (frame-parameter frame 'buffer-list)
+                           (when include-buried
+                             (reverse
+                              (frame-parameter frame 'buried-buffer-list)))))))))
+
+(defun my/tab-line-order-scope ()
+  "Return the current Perspective, or the frame's unscoped tab key."
+  (or (my/tab-line-current-persp) :global))
 
 (defun my/tab-line-get-order ()
-  "Return the persisted tab order for the current scope."
-  (let ((persp (my/tab-line-current-persp)))
-    (copy-sequence
-     (or (and persp
-              (fboundp 'persp-parameter)
-              (persp-parameter 'tab-line-order persp))
-         my/tab-line-global-order))))
+  "Return the centered tab order for this frame and Perspective."
+  (copy-sequence
+   (cdr (assq (my/tab-line-order-scope)
+              (frame-parameter nil 'my/tab-line-orders)))))
 
 (defun my/tab-line-set-order (order)
-  "Persist ORDER for the current scope."
-  (let ((order (delete-dups (seq-filter #'stringp order)))
-        (persp (my/tab-line-current-persp)))
-    (if (and persp (fboundp 'set-persp-parameter))
-        (set-persp-parameter 'tab-line-order order persp)
-      (setq my/tab-line-global-order order))
+  "Persist ORDER in the current frame and Perspective."
+  (let* ((order (delete-dups (seq-filter #'stringp order)))
+         (scope (my/tab-line-order-scope))
+         (orders (assq-delete-all
+                  scope (copy-sequence
+                         (frame-parameter nil 'my/tab-line-orders)))))
+    (set-frame-parameter nil 'my/tab-line-orders
+                         (cons (cons scope order) orders))
     order))
+
+(defun my/tab-line-forget-persp-order ()
+  "Drop the dying Perspective's tab order from its frame."
+  (when-let* ((persp (my/tab-line-current-persp)))
+    (set-frame-parameter
+     nil 'my/tab-line-orders
+     (assq-delete-all persp
+                      (frame-parameter nil 'my/tab-line-orders)))
+    (my/tab-line-invalidate-cache)))
 
 (defun my/tab-line-set-buffer-order (buffers)
   "Persist BUFFERS as the current centered tab order."
@@ -278,15 +317,29 @@ When FRAME is nil, use the selected frame."
         (force-mode-line-update t)
         (redraw-frame frame)))))
 
+(defun my/frame-workspace-buffers (&optional frame-buffers)
+  "Return FRAME-BUFFERS belonging to the current Perspective.
+When FRAME-BUFFERS is nil, use this frame's unburied buffer history.  A
+currently displayed buffer remains available even before Perspective has
+registered it."
+  (let* ((frame-buffers (or frame-buffers (my/frame-buffer-list)))
+         (workspace-scoped (and (bound-and-true-p persp-mode)
+                                (fboundp 'persp-current-buffers*)))
+         (workspace-buffers (and workspace-scoped
+                                 (persp-current-buffers* t))))
+    (if workspace-scoped
+        (seq-filter (lambda (buffer)
+                      (or (memq buffer workspace-buffers)
+                          (get-buffer-window buffer (selected-frame))))
+                    frame-buffers)
+      frame-buffers)))
+
 (defun my/tab-line-buffer-list ()
-  "Return buffers that belong to the current workspace."
-  (let* ((buffers (if (and (bound-and-true-p persp-mode)
-                           (fboundp 'persp-current-buffers*))
-                      (persp-current-buffers* t)
-                    (buffer-list))))
-    (my/tab-line-sort-buffers
-     (delete-dups
-      (seq-filter #'my/tab-line-visible-buffer-p buffers)))))
+  "Return visible tabs visited in this frame and current workspace."
+  (my/tab-line-sort-buffers
+   (delete-dups
+    (seq-filter #'my/tab-line-visible-buffer-p
+                (my/frame-workspace-buffers)))))
 
 (defun my/tab-line-starred-buffer-p (buffer)
   "Return non-nil when BUFFER name contains a `*...*' wrapper."
@@ -298,7 +351,8 @@ When FRAME is nil, use the selected frame."
   "Return non-nil when BUFFER should appear in the centered tab line."
   (and (buffer-live-p buffer)
        (with-current-buffer buffer
-         (let ((name (buffer-name buffer)))
+         (let ((name (buffer-name buffer))
+               (note (my/tab-bar--buffer-file-name)))
            (and (not (derived-mode-p 'dashboard-mode))
                 ;; Honor the standard tab-line opt-outs so packages that
                 ;; mark helper buffers (agent sessions, popups) stay hidden.
@@ -308,8 +362,9 @@ When FRAME is nil, use the selected frame."
                 (not (bound-and-true-p my/ghostel-popup-instance-p))
                 (not (and (stringp name)
                           (string-match-p "ghostel-pop" name)))
-                (not (my/tab-line-starred-buffer-p buffer))
-                (or buffer-file-name
+                (or note
+                    (not (my/tab-line-starred-buffer-p buffer)))
+                (or note
                     (derived-mode-p 'dired-mode
                                     'eshell-mode
                                     'shell-mode
@@ -570,8 +625,10 @@ When MAX-WIDTH is non-nil, use it to shrink labels in narrow windows."
          (face (if current
                    'my/tab-line-current-face
                  'my/tab-line-inactive-face))
+         (file (with-current-buffer buffer
+                 (my/tab-bar--buffer-file-name)))
          (icon (my/file-icon-for-file
-                (buffer-file-name buffer)
+                file
                 :height 0.9 :v-adjust -0.05 :image-height 15))
          (label (concat " "
                         (when icon (concat icon " "))
@@ -586,8 +643,7 @@ When MAX-WIDTH is non-nil, use it to shrink labels in narrow windows."
      'mouse-face 'tab-line-highlight
      'follow-link 'ignore
      'help-echo (format "%s\nmouse-1: switch\nmouse-2: close\nmouse-3: menu"
-                        (or (buffer-file-name buffer)
-                            name)))))
+                        (or file name)))))
 
 (defun my/tab-line-passive-string (text face)
   "Return TEXT with FACE and centered tab line mouse bindings."
@@ -757,8 +813,11 @@ WINDOW-WIDTH and BUFFER-NAME are passed in by the caller so the fast path does
 not allocate a fresh compound key during every redisplay."
   (and (eql my/tab-line--format-cache-generation my/tab-line-cache-generation)
        (eql my/tab-line--format-cache-window-width window-width)
+       (eq my/tab-line--format-cache-frame (selected-frame))
+       (eq my/tab-line--format-cache-scope (my/tab-line-order-scope))
        (equal my/tab-line--format-cache-buffer-name buffer-name)
-       (equal my/tab-line--format-cache-file-name buffer-file-name)
+       (equal my/tab-line--format-cache-file-name
+              (my/tab-bar--buffer-file-name))
        (eq my/tab-line--format-cache-major-mode major-mode)
        (eq my/tab-line--format-cache-ghostel-popup
            (and (bound-and-true-p my/ghostel-popup-instance-p) t))))
@@ -768,8 +827,11 @@ not allocate a fresh compound key during every redisplay."
   (setq-local my/tab-line--format-cache value
               my/tab-line--format-cache-generation my/tab-line-cache-generation
               my/tab-line--format-cache-window-width window-width
+              my/tab-line--format-cache-frame (selected-frame)
+              my/tab-line--format-cache-scope (my/tab-line-order-scope)
               my/tab-line--format-cache-buffer-name buffer-name
-              my/tab-line--format-cache-file-name buffer-file-name
+              my/tab-line--format-cache-file-name
+              (my/tab-bar--buffer-file-name)
               my/tab-line--format-cache-major-mode major-mode
               my/tab-line--format-cache-ghostel-popup
               (and (bound-and-true-p my/ghostel-popup-instance-p) t))
@@ -940,7 +1002,8 @@ The tab segment wins both visually and for hit testing where the two meet."
   (add-hook 'after-change-major-mode-hook #'my/tab-line-invalidate-cache)
   (global-tab-line-mode 1)
   (with-eval-after-load 'perspective
-    (add-hook 'persp-activated-functions #'my/tab-line-refresh))
+    (add-hook 'persp-activated-functions #'my/tab-line-refresh)
+    (add-hook 'persp-killed-hook #'my/tab-line-forget-persp-order))
   (my/tab-line-apply-ui)
   (my/tab-line-refresh))
 

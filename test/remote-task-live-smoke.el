@@ -10,6 +10,7 @@
 
 (require 'remote-config)
 (require 'remote-framework)
+(require 'init-output)
 
 (defun remote-task-live-smoke--wait (task timeout)
   "Wait up to TIMEOUT seconds for TASK to stop running."
@@ -53,7 +54,7 @@
          (workspace (remote-workspace-open
                      logical :adapter "process"
                      :capability 'process-async))
-         successful failed sleeping immediate children)
+         successful workflow workflow-rerun failed sleeping immediate children)
     (unwind-protect
         (progn
           (setq successful
@@ -104,6 +105,30 @@
                 (error "Task error opened the wrong source file: %s"
                        logical-source))
               (kill-buffer visited)))
+          (let* ((default-directory logical)
+                 (output
+                  (my/output-compile
+                   "printf 'workflow=%s\\n' \"$REMOTE_TASK_TOKEN\""
+                   "test" '(("REMOTE_TASK_TOKEN" . "workflow")))))
+            (setq workflow (buffer-local-value 'remote-task-instance output))
+            (unless (and (remote-task-p workflow)
+                         (equal (remote-task-workspace-id workflow)
+                                (remote-workspace-id workspace))
+                         (remote-task-live-smoke--wait workflow 25)
+                         (eq (remote-task-state workflow) 'succeeded)
+                         (with-current-buffer output
+                           (save-excursion
+                             (goto-char (point-min))
+                             (search-forward "workflow=workflow" nil t))))
+              (error "Project output did not use the target task route"))
+            (setq workflow-rerun (with-current-buffer output
+                                   (buffer-local-value
+                                    'remote-task-instance (my/output-rerun))))
+            (unless (and (remote-task-live-smoke--wait workflow-rerun 25)
+                         (eq (remote-task-state workflow-rerun) 'succeeded)
+                         (equal (remote-task-environment workflow-rerun)
+                                (remote-task-environment workflow)))
+              (error "Project output did not rerun on the target")))
           (setq failed
                 (remote-task-run (list "sh" "-c" "exit 7")
                                  :workspace workspace))
@@ -190,7 +215,7 @@
                    (remote-task-state sleeping))))
       (when (remote-workspace-live-p workspace)
         (remote-workspace-close workspace 'task-live-cleanup))
-      (dolist (task (list successful failed sleeping immediate children))
+      (dolist (task (list successful workflow workflow-rerun failed sleeping immediate children))
         (when (and task (buffer-live-p (remote-task-buffer task)))
           (kill-buffer (remote-task-buffer task)))))))
 

@@ -7,6 +7,7 @@
 
 (require 'cl-lib)
 (require 'init-funcs)
+(require 'init-open)
 (require 'project)
 (require 'subr-x)
 
@@ -77,9 +78,10 @@ are preserved."
          (candidates
           (delete-dups
            (delq nil
-                 (list (expand-file-name file default-directory)
+                 (list (my/open-resolve-file-name file default-directory)
                        (and project
-                            (expand-file-name file (project-root project)))))))
+                            (my/open-resolve-file-name
+                             file (project-root project)))))))
          (resolved
           (cl-find-if (lambda (candidate)
                         (and (file-exists-p candidate)
@@ -101,21 +103,43 @@ use the active region or filename at point, prompting only when neither exists."
   (let* ((parsed (my/navigation-parse-location location))
          (file (my/navigation--resolve-location-file (plist-get parsed :file)))
          (line (plist-get parsed :line))
-         (column (plist-get parsed :column)))
+         (column (plist-get parsed :column))
+         (previous-buffers (buffer-list))
+         buffer position)
+    (condition-case err
+        (progn
+          (setq buffer (find-file-noselect file))
+          (setq position
+                (with-current-buffer buffer
+                  (save-excursion
+                    (save-restriction
+                      (widen)
+                      (goto-char (point-min))
+                      (when (and line (not (zerop (forward-line (1- line)))))
+                        (user-error "Line %d is outside %s"
+                                    line (abbreviate-file-name file)))
+                      (when column
+                        (move-to-column (1- column)))
+                      (point))))))
+      ((error quit)
+       (when (and (buffer-live-p buffer)
+                  (not (memq buffer previous-buffers))
+                  (not (buffer-modified-p buffer))
+                  (not (get-buffer-window buffer t)))
+         (kill-buffer buffer))
+       (signal (car err) (cdr err))))
     (when (fboundp 'my/navigation--push-jump)
       (my/navigation--push-jump))
-    (let ((buffer (funcall (if other-window
-                               #'find-file-other-window
-                             #'find-file)
-                           file)))
-      (with-current-buffer buffer
-        (widen)
-        (goto-char (point-min))
-        (when (and line (not (zerop (forward-line (1- line)))))
-          (user-error "Line %d is outside %s" line (abbreviate-file-name file)))
-        (when column
-          (move-to-column (1- column))))
-      buffer)))
+    (funcall (if other-window
+                 #'switch-to-buffer-other-window
+               #'pop-to-buffer-same-window)
+             buffer)
+    (with-current-buffer buffer
+      (widen)
+      (goto-char position))
+    buffer))
+
+(defalias 'open-file-location #'my/navigation-open-location)
 
 (defun my/navigation-find-declaration ()
   "Jump to the declaration at point, falling back to definition."
@@ -152,13 +176,13 @@ use the active region or filename at point, prompting only when neither exists."
 (with-eval-after-load 'evil
   (evil-define-key* 'normal 'global (kbd "gD") #'my/navigation-find-declaration))
 
-(global-set-key (kbd "C-c C-j") #'my/navigation-open-location)
+(global-set-key (kbd "C-c C-j") #'open-file-location)
 
 (my/leader!
   "n D" '(:def my/navigation-find-declaration :which-key "declaration")
   "n R" '(:def my/navigation-peek-restore :which-key "restore peek")
   "n h" '(:def my/navigation-call-hierarchy :which-key "call hierarchy")
-  "n l" '(:def my/navigation-open-location :which-key "file location"))
+  "n l" '(:def open-file-location :which-key "file location"))
 
 (provide 'init-navigation-extra)
 ;;; init-navigation-extra.el ends here

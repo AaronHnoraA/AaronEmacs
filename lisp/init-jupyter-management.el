@@ -360,14 +360,15 @@ CALLBACK receives (ENTRIES ERROR)."
 (defvar my/jupyter-management--cleanup-times (make-hash-table :test #'equal))
 (defvar my/jupyter-management--cleanup-timer nil)
 
-(defun my/jupyter-management--prune-directory (target directory callback)
-  "Maintain TARGET's native runtime DIRECTORY, then invoke CALLBACK."
+(defun my/jupyter-management--prune-directory (target directory callback &optional force)
+  "Maintain TARGET's native runtime DIRECTORY, then invoke CALLBACK.
+Unless FORCE is non-nil, skip cleanup performed in the last 15 minutes."
   (let* ((key (cons (my/jupyter-management-target-id target) directory))
          (last (gethash key my/jupyter-management--cleanup-times 0)))
-    (if (< (- (float-time) last) 900)
-        (funcall callback)
+    (if (and (not force) (< (- (float-time) last) 900))
+        (funcall callback nil)
       (puthash key (float-time) my/jupyter-management--cleanup-times)
-      (condition-case nil
+      (condition-case error
           (remote-exec-async
            (my/jupyter-management-command target 'python)
            :args (list "-c" (with-temp-buffer
@@ -377,11 +378,22 @@ CALLBACK receives (ENTRIES ERROR)."
                        "--runtime-dir" directory "--apply")
            :context (my/jupyter-management-context target)
            :filesystem-effects 'content :name "jupyter-connection-cleanup"
-           :callback (lambda (_result) (funcall callback)))
-        (error (funcall callback))))))
+           :callback
+           (lambda (result)
+             (if (eq (remote-exec-result-status result) 0)
+                 (funcall callback nil)
+               (remhash key my/jupyter-management--cleanup-times)
+               (funcall callback
+                        (format "Connection cleanup exited %s: %s"
+                                (remote-exec-result-status result)
+                                (string-trim (or (remote-exec-result-stderr result) "")))))))
+        (error
+         (remhash key my/jupyter-management--cleanup-times)
+         (funcall callback (error-message-string error)))))))
 
-(defun my/jupyter-management-discover-connections (target callback)
-  "Maintain and discover TARGET's Jupyter connection files asynchronously."
+(defun my/jupyter-management-discover-connections (target callback &optional maintain)
+  "Discover TARGET's Jupyter connection files asynchronously.
+With MAINTAIN, prune abandoned files first; `force' bypasses the throttle."
   (condition-case error
       (let* ((context (my/jupyter-management-context target))
              (command (my/jupyter-target-command
@@ -397,14 +409,19 @@ CALLBACK receives (ENTRIES ERROR)."
        (lambda (result)
          (if (zerop (remote-exec-result-status result))
              (let ((directory (string-trim (remote-exec-result-stdout result))))
-               (my/jupyter-management--prune-directory
-                target directory
-                (lambda ()
-                  (condition-case scan-error
-                      (funcall callback
-                               (my/jupyter-management-scan-connections
-                                (my/jupyter-management-logical-path target directory)) nil)
-                    (error (funcall callback nil (error-message-string scan-error)))))))
+               (let ((scan
+                      (lambda (&optional cleanup-error)
+                        (if cleanup-error
+                            (funcall callback nil cleanup-error)
+                          (condition-case scan-error
+                              (funcall callback
+                                       (my/jupyter-management-scan-connections
+                                        (my/jupyter-management-logical-path target directory)) nil)
+                            (error (funcall callback nil (error-message-string scan-error))))))))
+                 (if maintain
+                     (my/jupyter-management--prune-directory
+                      target directory scan (eq maintain 'force))
+                   (funcall scan))))
            (funcall callback nil (string-trim (remote-exec-result-stderr result)))))))
     (error (funcall callback nil (error-message-string error)) nil)))
 
@@ -414,7 +431,8 @@ CALLBACK receives (ENTRIES ERROR)."
              (stringp my/jupyter-board-python-command))
     (when (fboundp 'jupyter--gc-kernel-processes)
       (ignore-errors (jupyter--gc-kernel-processes)))
-    (my/jupyter-management-discover-connections "local" (lambda (&rest _) nil))))
+    (my/jupyter-management-discover-connections
+     "local" (lambda (&rest _) nil) t)))
 
 (unless (or noninteractive (timerp my/jupyter-management--cleanup-timer))
   (setq my/jupyter-management--cleanup-timer

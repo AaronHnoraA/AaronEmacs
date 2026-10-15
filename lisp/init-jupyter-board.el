@@ -324,7 +324,7 @@ The default view keeps remote profiles and active sessions prominent."
      :badge (upcase status)
      :badge-tone (pcase status
                    ((or "dead" "error") 'danger)
-                   ("running" 'warning)
+                   ((or "running" "unknown" "shutdown-pending") 'warning)
                    (_ 'success))
      :title (or (plist-get entry :title)
                 (plist-get entry :kernel) "Jupyter runtime")
@@ -336,7 +336,11 @@ The default view keeps remote profiles and active sessions prominent."
      (string-join
       (delq nil
             (list (plist-get entry :source-file)
+                  (when-let* ((host (plist-get entry :host-name)))
+                    (format "host=%s" host))
                   (when-let* ((pid (plist-get entry :pid))) (format "pid=%s" pid))
+                  (when (plist-get entry :journal-pending)
+                    "Saved broker record; target process must be verified")
                   (when (plist-get entry :state-lost) "state lost")))
       "  ")
      :action (lambda (_button) (my/jupyter-board-describe))
@@ -344,16 +348,20 @@ The default view keeps remote profiles and active sessions prominent."
      :properties (list 'my/jupyter-board-entry entry))
     (my/jupyter-board--insert-entry-actions
      entry
-     `((:label "Open" :command my/jupyter-board-repl :primary t
-               :help "Open the REPL or reconnect through its connection file")
-       (:label "Interrupt" :command my/jupyter-board-interrupt
-               :help "Interrupt the current execution")
-       ,@(unless (plist-get entry :attached)
-           '((:label "Restart" :command my/jupyter-board-restart
-                     :help "Restart this runtime after confirmation")))
-       (:label ,(if (plist-get entry :attached) "Disconnect" "Shut down")
-               :command my/jupyter-board-shutdown
-               :help "End or disconnect this runtime after confirmation")))))
+     (if (eq (plist-get entry :status) 'shutdown-pending)
+         '((:label "Retry shutdown" :command my/jupyter-board-shutdown
+                   :primary t
+                   :help "Verify the kernel identity and retry shutdown"))
+       `((:label "Open" :command my/jupyter-board-repl :primary t
+                 :help "Open the REPL or reconnect through its connection file")
+         (:label "Interrupt" :command my/jupyter-board-interrupt
+                 :help "Interrupt the current execution")
+         ,@(unless (plist-get entry :attached)
+             '((:label "Restart" :command my/jupyter-board-restart
+                       :help "Restart this runtime after confirmation")))
+         (:label ,(if (plist-get entry :attached) "Disconnect" "Shut down")
+                 :command my/jupyter-board-shutdown
+                 :help "End or disconnect this runtime after confirmation"))))))
 
 (defun my/jupyter-board--insert-connection (entry)
   "Insert one local connection-file ENTRY."
@@ -409,32 +417,37 @@ The default view keeps remote profiles and active sessions prominent."
              (owner (or (plist-get broker :target-id) "local")))
         (when broker (push broker matched))
         (when (equal owner target-id)
-          (push
-           (list :id (format "runtime:noema:%s"
-                             (or (my/jupyter-board--alist-get 'id task)
-                                 (my/jupyter-board--alist-get 'key task)))
-                 :kind 'runtime :provider 'noema :noema-task t
-                 :target-id owner
-                 :key (my/jupyter-board--alist-get 'key task)
-                 :runtime-id (my/jupyter-board--alist-get 'id task)
-                 :host-runtime-id host-id
-                 :title (or (my/jupyter-board--alist-get 'kernel task) "Noema kernel")
-                 :kernel (my/jupyter-board--alist-get 'kernel task)
-                 :session (my/jupyter-board--alist-get 'session task)
-                 :language (my/jupyter-board--alist-get 'language task)
-                 :source-file (my/jupyter-board--alist-get 'sourceFile task)
-                 :script-file (my/jupyter-board--alist-get 'file task)
-                 :status (my/jupyter-board--alist-get 'status task)
-                 :running (my/jupyter-board--alist-get 'running task)
-                 :attached (eq t (my/jupyter-board--alist-get 'attached task))
-                 :generation (or (my/jupyter-board--alist-get 'generation task)
-                                 (plist-get broker :generation))
-                 :state-lost (or (eq t (my/jupyter-board--alist-get 'stateLost task))
-                                 (plist-get broker :state-lost))
-                 :pid (plist-get broker :pid)
-                 :log-file (plist-get broker :log-file)
-                 :connection-file (plist-get broker :connection-file))
-           result))))
+          (if (plist-get broker :journal-pending)
+              (push broker result)
+            (push
+             (list :id (format "runtime:noema:%s"
+                               (or (my/jupyter-board--alist-get 'id task)
+                                   (my/jupyter-board--alist-get 'key task)))
+                   :kind 'runtime :provider 'noema :noema-task t
+                   :target-id owner
+                   :key (my/jupyter-board--alist-get 'key task)
+                   :runtime-id (my/jupyter-board--alist-get 'id task)
+                   :host-runtime-id host-id
+                   :title (or (my/jupyter-board--alist-get 'kernel task) "Noema kernel")
+                   :kernel (my/jupyter-board--alist-get 'kernel task)
+                   :session (my/jupyter-board--alist-get 'session task)
+                   :language (my/jupyter-board--alist-get 'language task)
+                   :source-file (my/jupyter-board--alist-get 'sourceFile task)
+                   :script-file (my/jupyter-board--alist-get 'file task)
+                   :status (if (eq (plist-get broker :status) 'shutdown-pending)
+                               'shutdown-pending
+                             (my/jupyter-board--alist-get 'status task))
+                   :running (my/jupyter-board--alist-get 'running task)
+                   :attached (eq t (my/jupyter-board--alist-get 'attached task))
+                   :generation (or (my/jupyter-board--alist-get 'generation task)
+                                   (plist-get broker :generation))
+                   :state-lost (or (eq t (my/jupyter-board--alist-get 'stateLost task))
+                                   (plist-get broker :state-lost))
+                   :pid (plist-get broker :pid)
+                   :host-name (plist-get broker :host-name)
+                   :log-file (plist-get broker :log-file)
+                   :connection-file (plist-get broker :connection-file))
+             result)))))
     (dolist (broker brokers)
       (unless (memq broker matched) (push broker result)))
     (nreverse result)))
@@ -478,6 +491,7 @@ The default view keeps remote profiles and active sessions prominent."
          ('specs "Kernel profiles")
          ('connections "Connections")
          ('noema "Live sessions")
+         ('target "Target")
          (_ (format "%s" provider)))
        "loading…"
                                    'aaron-ui-board-dim))
@@ -488,6 +502,7 @@ The default view keeps remote profiles and active sessions prominent."
            ('specs "Kernel profiles")
            ('connections "Connections")
            ('noema "Live sessions")
+           ('target "Target")
            (_ (format "%s" (car entry))))
          (cdr entry) 'aaron-ui-board-bad)))
     (insert "   ")
@@ -764,6 +779,12 @@ The default view keeps remote profiles and active sessions prominent."
          (project (cl-remove-if-not
                    (lambda (entry) (eq (plist-get entry :origin) 'noema-project))
                    my/jupyter-board--entries))
+         (pending-count
+          (if (fboundp 'my/noema-jupyter-runtime-snapshot)
+              (cl-count-if
+               (lambda (entry) (plist-get entry :journal-pending))
+               (my/noema-jupyter-runtime-snapshot))
+            0))
          (other (cl-remove-if (lambda (entry)
                                 (or (plist-get entry :remote)
                                     (eq (plist-get entry :origin) 'noema-project)))
@@ -784,9 +805,12 @@ The default view keeps remote profiles and active sessions prominent."
                              (if (= (length ssh-projects) 1) "" "s")) . success)
                    (,(format "%d remote profile%s" (length remote)
                              (if (= (length remote) 1) "" "s")) . info)
-                   (,(format "%d active session%s" (length my/jupyter-board--runtimes)
-                             (if (= (length my/jupyter-board--runtimes) 1) "" "s"))
-                    . success))
+                   (,(format "%d session entr%s" (length my/jupyter-board--runtimes)
+                             (if (= (length my/jupyter-board--runtimes) 1) "y" "ies"))
+                    . success)
+                   ,@(when (> pending-count 0)
+                       `((,(format "%d pending shutdown%s" pending-count
+                                    (if (= pending-count 1) "" "s")) . warning))))
           :actions `((:label "Open SSH Project" :command my/jupyter-ssh-open-project
                              :primary t :help "Enter a remote notebook project")
                      (:label "Quick Add SSH" :command my/jupyter-remote-quick-add
@@ -801,17 +825,24 @@ The default view keeps remote profiles and active sessions prominent."
                                   "Hide technical" "Show technical")
                              :command my/jupyter-board-toggle-advanced
                              :help "Toggle local kernels, connection files, and diagnostics")))
+         (when (bound-and-true-p my/noema-jupyter--pending-record-errors)
+           (aaron-ui-board-insert-section
+            "Saved Broker Record Problems"
+            (length my/noema-jupyter--pending-record-errors) 'danger)
+           (aaron-ui-board-insert-field
+            "First error" (car my/noema-jupyter--pending-record-errors))
+           (insert "\n\n"))
          (my/jupyter-board--insert-provider-errors)
          (my/jupyter-board--insert-servers)
          (my/jupyter-board--insert-ssh-projects)
          (my/jupyter-board--insert-quick-start (length remote))
          (my/jupyter-board--insert-remote-profiles remote)
-         (aaron-ui-board-insert-section "Active Sessions"
+         (aaron-ui-board-insert-section "Sessions & Pending Shutdowns"
                                         (length my/jupyter-board--runtimes) 'success)
          (if my/jupyter-board--runtimes
              (mapc #'my/jupyter-board--insert-runtime my/jupyter-board--runtimes)
            (aaron-ui-board-insert-empty
-            "No remote REPL is running."))
+            "No Jupyter runtime is known on this target."))
          (if my/jupyter-board--show-advanced
              (my/jupyter-board--insert-advanced
               my/jupyter-board--connections project other)
@@ -822,14 +853,14 @@ The default view keeps remote profiles and active sessions prominent."
               '((:label "Show kernels, connections & diagnostics"
                         :command my/jupyter-board-toggle-advanced
                         :help "Expand the technical management sections")
-                (:label "Commands" :command my/jupyter-board-dispatch
+                (:label "Commands" :command jupyter-board-menu
                         :help "Open every Jupyter Board command")))
              (insert "\n\n")))
          (aaron-ui-board-insert-key-hints
-          "Keys: J SSH project  a quick add  e edit  r open REPL  g refresh  T target  v technical view  ? guide  M all commands"))))))
+          "Keys: J SSH project  a quick add  e edit  r open REPL  g refresh  s clean stale  T target  v technical view  ? guide  M all commands"))))))
 
 (defun my/jupyter-board-refresh ()
-  "Refresh all Jupyter providers without starting services or kernels."
+  "Refresh Jupyter providers without starting or maintaining resources."
   (interactive)
   (unless (derived-mode-p 'my/jupyter-board-mode)
     (user-error "Not in a Jupyter Board"))
@@ -887,8 +918,59 @@ The default view keeps remote profiles and active sessions prominent."
         (my/jupyter-board--setup-keys))
       (unless (eq source buffer)
         (setq my/jupyter-board--source-buffer source))
-      (my/jupyter-board-refresh))
+      ;; Reopening while the three providers are still running must not start
+      ;; another set of requests.  `g' remains an explicit retry at any time.
+      (unless my/jupyter-board--loading
+        (my/jupyter-board-refresh)))
     (pop-to-buffer buffer)))
+
+(defun my/jupyter-board--target-disconnected-h (target-id _reason)
+  "Invalidate the board snapshot when TARGET-ID is explicitly disconnected."
+  (when-let* ((buffer (get-buffer my/jupyter-board-buffer-name)))
+    (with-current-buffer buffer
+      (when (and (derived-mode-p 'my/jupyter-board-mode)
+                 my/jupyter-board--target
+                 (equal target-id
+                        (my/jupyter-management-target-id my/jupyter-board--target)))
+        (cl-incf my/jupyter-board--refresh-generation)
+        (setq my/jupyter-board--loading nil
+              my/jupyter-board--entries nil
+              my/jupyter-board--connections nil
+              my/jupyter-board--runtimes nil
+              my/jupyter-board--errors
+              '((target . "Disconnected; press g to refresh this target")))
+        (my/jupyter-board--render)))))
+
+(add-hook 'remote-target-disconnect-hook
+          #'my/jupyter-board--target-disconnected-h)
+
+(defun my/jupyter-board-clean-stale-connections ()
+  "Prune abandoned connection files on the board's target, then refresh."
+  (interactive)
+  (unless (derived-mode-p 'my/jupyter-board-mode)
+    (user-error "Not in a Jupyter Board"))
+  (let ((buffer (current-buffer))
+        (target my/jupyter-board--target)
+        (generation my/jupyter-board--refresh-generation))
+    (my/jupyter-management-discover-connections
+     target
+     (lambda (_connections error)
+       (if error
+           (message "Jupyter connection cleanup failed: %s" error)
+         (when (and (buffer-live-p buffer)
+                    (with-current-buffer buffer
+                      (and (derived-mode-p 'my/jupyter-board-mode)
+                           (= generation my/jupyter-board--refresh-generation)
+                           (equal (my/jupyter-management-target-id target)
+                                  (my/jupyter-management-target-id
+                                   my/jupyter-board--target)))))
+           (with-current-buffer buffer
+             (my/jupyter-board-refresh)))
+         (message "Jupyter connection cleanup finished")))
+     'force)))
+
+(defalias 'jupyter-board #'my/jupyter-board
+  "Open the Jupyter management board.")
 
 (defun my/jupyter-board-toggle-advanced ()
   "Toggle technical Jupyter resources in the current board."
@@ -1266,6 +1348,9 @@ The default view keeps remote profiles and active sessions prominent."
   (let ((entry (my/jupyter-board--require-entry)))
     (unless (eq (plist-get entry :kind) 'runtime)
       (user-error "This action requires a live runtime"))
+    (when (and (eq (plist-get entry :status) 'shutdown-pending)
+               (not (eq action 'shutdown)))
+      (user-error "Pending kernel can only retry shutdown"))
     (when (and (eq action 'restart) (plist-get entry :attached))
       (user-error "Attached runtimes cannot be restarted"))
     (when (and (memq action '(restart shutdown))
@@ -1406,6 +1491,8 @@ The default view keeps remote profiles and active sessions prominent."
          (cl-remove-if
           (lambda (entry)
             (or (not (memq (plist-get entry :provider) '(noema noema-broker)))
+                (plist-get entry :journal-pending)
+                (eq (plist-get entry :status) 'shutdown-pending)
                 (plist-get entry :attached)
                 (> (or (plist-get entry :running) 0) 0)))
           my/jupyter-board--runtimes)))
@@ -1540,6 +1627,22 @@ The default view keeps remote profiles and active sessions prominent."
             target 'remote-ikernel
             (list "manage" "--delete" origin))))))))
 
+(defun my/jupyter-board--confirm-profile (prompt)
+  "Ask whether to create or update a remote profile using PROMPT."
+  (yes-or-no-p prompt))
+
+(defun my/jupyter-board--read-workdir (default)
+  "Read an optional remote working directory, starting from DEFAULT."
+  (string-trim
+   (read-string "Remote working directory (optional): " default
+                'my/jupyter-board-remote-workdir-history)))
+
+(defun my/jupyter-board--read-lifetime (current-group)
+  "Read a profile lifetime, defaulting from CURRENT-GROUP."
+  (completing-read
+   "Profile lifetime: " '("Saved (protected)" "Temporary") nil t nil nil
+   (if (equal current-group "temporary") "Temporary" "Saved (protected)")))
+
 (defun my/jupyter-board--remote-wizard (&optional entry)
   "Create an SSH profile, or edit SSH profile ENTRY, with guided prompts."
   (let* ((editing (and entry t))
@@ -1568,11 +1671,8 @@ The default view keeps remote profiles and active sessions prominent."
                     "Profile name shown in the kernel picker: "
                     (or (my/jupyter-board--arg-value base "--name=") "Python")
                     'my/jupyter-board-remote-name-history))
-             (workdir (string-trim
-                       (read-string
-                        "Remote working directory (optional): "
-                        (my/jupyter-board--arg-value base "--workdir=")
-                        'my/jupyter-board-remote-workdir-history)))
+             (workdir (my/jupyter-board--read-workdir
+                       (my/jupyter-board--arg-value base "--workdir=")))
              (command
               (my/jupyter-board--read-required
                "Remote kernel command: "
@@ -1584,11 +1684,7 @@ The default view keeps remote profiles and active sessions prominent."
                            "python"))
              (current-group (or (my/jupyter-board--arg-value base "--group=")
                                 "core"))
-             (lifetime
-              (completing-read
-               "Profile lifetime: " '("Saved (protected)" "Temporary") nil t nil nil
-               (if (equal current-group "temporary")
-                   "Temporary" "Saved (protected)")))
+             (lifetime (my/jupyter-board--read-lifetime current-group))
              (group (if (string-prefix-p "Temporary" lifetime)
                         "temporary" "core"))
              (args base))
@@ -1601,7 +1697,7 @@ The default view keeps remote profiles and active sessions prominent."
                         ("--kernel_cmd=" . ,command)))
           (setq args (my/jupyter-board--replace-arg args (car pair) (cdr pair))))
         (my/jupyter-board--validate-remote-args args)
-        (when (yes-or-no-p
+        (when (my/jupyter-board--confirm-profile
                (format "%s '%s' on %s%s? "
                        (if editing "Update" "Create") name host
                        (if (string-empty-p workdir) ""
@@ -1709,7 +1805,7 @@ background tasks; it never reads the minibuffer or asks for confirmation."
    ["Apply"
     ("a" "Add / replace" my/jupyter-remote-add-run)]])
 
-(transient-define-prefix my/jupyter-board-dispatch ()
+(transient-define-prefix jupyter-board-menu ()
   "Jupyter Board command surface."
   [["Board"
     ("j" "Open board" my/jupyter-board)
@@ -1735,6 +1831,7 @@ background tasks; it never reads the minibuffer or asks for confirmation."
     ("C" "Clean temporary" my/jupyter-board-clean-temporary)]
    ["Maintenance"
     ("d" "Delete" my/jupyter-board-delete)
+    ("s" "Clean stale connections" my/jupyter-board-clean-stale-connections)
     ("p" "Install Python" my/jupyter-board-install-python-kernel)
     ("P" "Refresh project specs" my/jupyter-board-refresh-project-specs)
     ("I" "Reinstall tool" my/jupyter-board-reinstall)
@@ -1759,13 +1856,14 @@ background tasks; it never reads the minibuffer or asks for confirmation."
   (local-set-key (kbd "m") #'my/jupyter-board-set-group)
   (local-set-key (kbd "d") #'my/jupyter-board-delete)
   (local-set-key (kbd "C") #'my/jupyter-board-clean-temporary)
+  (local-set-key (kbd "s") #'my/jupyter-board-clean-stale-connections)
   (local-set-key (kbd "o") #'my/jupyter-board-open-resource)
   (local-set-key (kbd "p") #'my/jupyter-board-install-python-kernel)
   (local-set-key (kbd "P") #'my/jupyter-board-refresh-project-specs)
   (local-set-key (kbd "D") #'my/jupyter-board-doctor)
   (local-set-key (kbd "v") #'my/jupyter-board-toggle-advanced)
   (local-set-key (kbd "?") #'my/jupyter-board-help)
-  (local-set-key (kbd "M") #'my/jupyter-board-dispatch))
+  (local-set-key (kbd "M") #'jupyter-board-menu))
 
 (provide 'init-jupyter-board)
 ;;; init-jupyter-board.el ends here

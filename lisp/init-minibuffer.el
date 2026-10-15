@@ -6,6 +6,85 @@
 ;;; Code:
 
 (require 'aaron-ui)
+(require 'init-open)
+
+(defvar my/file-open-new-frame-prompt nil
+  "Non-nil while a file-open prompt accepts a new-frame exit key.")
+
+(defvar my/file-open-new-frame-requested nil
+  "Set by the file-open minibuffer's Cmd+Shift+Enter key.")
+
+(declare-function file-open-new-frame "init-windows" (file &optional wildcards))
+(declare-function my/buffer-display-new-frame "init-windows"
+                  (buffer &optional norecord))
+(declare-function consult--frame-buffer-list "consult" ())
+(declare-function my/frame-workspace-buffers "init-tabbar"
+                  (&optional frame-buffers))
+(defvar consult--buffer-display)
+(defvar consult-buffer-list-function)
+
+(defun my/consult-buffer-list ()
+  "List this frame's buffers in the active Perspective for Consult.
+Use Consult's frame history, including buried buffers.  Consult's hidden
+Other Buffer source still provides access to buffers outside this scope."
+  (my/frame-workspace-buffers (consult--frame-buffer-list)))
+
+(defun my/consult-buffer-scoped-a (original &optional sources)
+  "Call ORIGINAL with frame/workspace buffers for the default SOURCES.
+Commands such as `consult-project-buffer' pass explicit sources and keep
+Consult's normal project-wide buffer list."
+  (if sources
+      (funcall original sources)
+    (let ((consult-buffer-list-function #'my/consult-buffer-list))
+      (funcall original))))
+
+(defun my/buffer-open-new-frame ()
+  "Choose a buffer with Consult and open it in a new Emacs frame.
+Only buffer sources are offered.  Narrow with `<o' for buffers outside
+the current frame or workspace."
+  (interactive)
+  (require 'consult)
+  (let ((consult-buffer-list-function #'my/consult-buffer-list)
+        (consult--buffer-display #'my/buffer-display-new-frame))
+    (consult-buffer '(consult-source-buffer
+                      consult-source-other-buffer
+                      consult-source-hidden-buffer))))
+
+(defalias 'buffer-open-new-frame #'my/buffer-open-new-frame
+  "Choose a buffer and open it in a newly created Emacs frame.")
+
+(defun my/find-file-with-frame-choice ()
+  "Read a file name and visit it with native `find-file'.
+Cmd+Shift+Enter in the prompt instead opens it in a new Emacs frame."
+  (interactive)
+  (let ((my/file-open-new-frame-prompt t)
+        (my/file-open-new-frame-requested nil))
+    (pcase-let ((`(,file ,wildcards)
+                 (find-file-read-args "Find file: "
+                                      (confirm-nonexistent-file-or-buffer))))
+      (let ((file (my/open-resolve-file-name file)))
+        (if my/file-open-new-frame-requested
+            (file-open-new-frame file wildcards)
+          (find-file file wildcards))))))
+
+(defalias 'file-open #'my/find-file-with-frame-choice
+  "Read a file name, opening it here or in a new frame with Cmd+Shift+Enter.")
+
+(defun my/minibuffer-file-open-new-frame ()
+  "Accept the typed file name and request a new frame when supported."
+  (interactive)
+  (when (and my/file-open-new-frame-prompt
+             (my/minibuffer-file-completion-p))
+    (setq my/file-open-new-frame-requested t))
+  (if (and (fboundp 'vertico-exit-input)
+           (bound-and-true-p vertico--input))
+      (vertico-exit-input)
+    (exit-minibuffer)))
+
+(keymap-global-set "C-x C-f" #'file-open)
+(dolist (key '("M-S-RET" "M-S-<return>"))
+  (define-key minibuffer-local-filename-completion-map (kbd key)
+    #'my/minibuffer-file-open-new-frame))
 
 (defun my/minibuffer-file-completion-p ()
   "Return non-nil when the active minibuffer is completing file names."
@@ -43,7 +122,9 @@
          ;; 在 `C-x C-f` 这类文件补全场景，M-RET 直接使用你当前输入的文本，
          ;; 不选中/不补全候选（用于创建与已有文件“相似名字”的新文件）。
          ("M-RET" . vertico-exit-input)
-         ("<M-return>" . vertico-exit-input))
+         ("<M-return>" . vertico-exit-input)
+         ("M-S-RET" . my/minibuffer-file-open-new-frame)
+         ("<M-S-return>" . my/minibuffer-file-open-new-frame))
   :custom
   ;; 最近使用过的候选优先，M-x/Consult/普通补全都会更贴近使用历史。
   (vertico-sort-function #'vertico-sort-history-length-alpha))
@@ -111,6 +192,7 @@
          ([remap jump-to-register]       . consult-register-load)
          ([remap point-to-register]      . consult-register-store))
   :config
+  (advice-add 'consult-buffer :around #'my/consult-buffer-scoped-a)
   (with-no-warnings
     (consult-customize consult-ripgrep consult-git-grep consult-grep
                        consult-recent-file
@@ -133,6 +215,7 @@
   ;; This adds thin lines, sorting and hides the mode line of the window.
   (advice-add #'register-preview :override #'consult-register-window)
   :custom
+  (consult-narrow-key "<")
   (consult-fontify-preserve nil)
   (consult-async-min-input 2)
   (consult-async-refresh-delay 0.15)

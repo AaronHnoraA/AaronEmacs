@@ -29,10 +29,11 @@
 (declare-function remote-workspace-disconnect-target
                   "remote-workspace" (target-id &optional reason))
 (declare-function remote-open-target "remote-board" (&optional target))
-(declare-function remote-board-refresh-status "remote-board" ())
+(declare-function remote-board--refresh-visible-views "remote-board" ())
 (declare-function remote-files "remote-files"
                   (&optional remote-directory local-directory))
 (declare-function auth-source-forget-all-cached "auth-source" ())
+(declare-function evil-set-initial-state "evil-core" (mode state))
 
 (defvar auth-sources)
 (defvar remote-backend-tramp-client-environment-functions)
@@ -63,6 +64,13 @@ Keys are :id, :label, :host, :user, :port, :identity and :password.")
 (defvar remote-machines--loaded nil
   "Non-nil once `remote-machines-file' has been read.")
 
+(defvar remote-machines--revision nil
+  "Digest of the machine file when `remote-machines--list' was last loaded.
+The symbol `:missing' means no file existed at that time.")
+
+(defvar-local remote-machines--owner-frame nil
+  "Frame whose temporary-machine list this buffer displays.")
+
 (defun remote-machines--private-write (file content &optional modes)
   "Atomically write CONTENT to FILE with MODES, by default owner-only."
   (let ((directory (file-name-directory file))
@@ -82,19 +90,36 @@ Keys are :id, :label, :host, :user, :port, :identity and :password.")
       (when (and temporary (file-exists-p temporary))
         (delete-file temporary)))))
 
+(defun remote-machines--file-revision ()
+  "Return a content digest of the machine file, or `:missing'."
+  (if (file-exists-p remote-machines-file)
+      (with-temp-buffer
+        (let ((coding-system-for-read 'utf-8-unix))
+          (insert-file-contents remote-machines-file))
+        (secure-hash 'sha256 (current-buffer)))
+    :missing))
+
 (defun remote-machines--read ()
-  "Return the machines stored in `remote-machines-file'."
-  (when (file-readable-p remote-machines-file)
-    (let ((root
-           (with-temp-buffer
-             (insert-file-contents remote-machines-file)
-             (json-parse-buffer :object-type 'plist :array-type 'list
-                                :null-object nil :false-object nil))))
-      (seq-filter
-       (lambda (machine)
-         (and (stringp (plist-get machine :id))
-              (stringp (plist-get machine :host))))
-       (plist-get root :machines)))))
+  "Return the machines stored in `remote-machines-file'.
+Also remember the exact revision read for later conflict detection."
+  (if (file-exists-p remote-machines-file)
+      (with-temp-buffer
+        (let ((coding-system-for-read 'utf-8-unix))
+          (insert-file-contents remote-machines-file))
+        (let* ((revision (secure-hash 'sha256 (current-buffer)))
+               (root
+                (json-parse-buffer :object-type 'plist :array-type 'list
+                                   :null-object nil :false-object nil))
+               (machines
+                (seq-filter
+                 (lambda (machine)
+                   (and (stringp (plist-get machine :id))
+                        (stringp (plist-get machine :host))))
+                 (plist-get root :machines))))
+          (setq remote-machines--revision revision)
+          machines))
+    (setq remote-machines--revision :missing)
+    nil))
 
 (defun remote-machines-list ()
   "Return the remembered machines, reading them on first use."
@@ -165,6 +190,119 @@ The netrc reader knows two quoting styles and no escapes."
                             remote-machines--list))))
     "\n"))
   (remote-machines--write-auth-file))
+
+(defun remote-machines--backup-file (file)
+  "Make a private rollback copy of FILE, or return nil if it does not exist."
+  (when (file-exists-p file)
+    (let ((backup
+           (make-temp-file
+            (expand-file-name ".machines-backup-"
+                              (file-name-directory file)))))
+      (condition-case error
+          (progn
+            (copy-file file backup t)
+            (set-file-modes backup #o600)
+            backup)
+        (error
+         (delete-file backup)
+         (signal (car error) (cdr error)))))))
+
+(defun remote-machines--restore-file (file backup)
+  "Restore FILE from BACKUP, or remove it if it did not exist before."
+  (if backup
+      (rename-file backup file t)
+    (when (file-exists-p file)
+      (delete-file file))))
+
+(defun remote-machines--with-lock (function)
+  "Call FUNCTION while holding Emacs's native lock for the machine file."
+  (let ((create-lockfiles t)
+        ;; This one shared state file must use the same lock path even when
+        ;; different Emacs instances configure their editor lock directories
+        ;; differently.
+        (lock-file-name-transforms nil)
+        (directory (file-name-directory remote-machines-file))
+        locked)
+    (unless (file-directory-p directory)
+      (make-directory directory t)
+      (set-file-modes directory #o700))
+    (unwind-protect
+        (progn
+          (when (eq (file-locked-p remote-machines-file) t)
+            (user-error "Temporary machines are already being updated by this Emacs"))
+          (with-temp-buffer
+            (cl-letf (((symbol-function 'ask-user-about-lock)
+                       (lambda (_file _opponent)
+                         (user-error "Temporary machines are being updated in another Emacs"))))
+              (lock-file remote-machines-file)))
+          (setq locked t)
+          (funcall function))
+      (when locked
+        (unlock-file remote-machines-file)))))
+
+(defun remote-machines--commit-locked (machines &optional after-save)
+  "Persist MACHINES and reload their targets as one user action.
+The caller holds the native lock on `remote-machines-file'.
+AFTER-SAVE runs after the files are written but before the registry reload;
+removing a machine uses it to disconnect while the old target still exists.
+If saving or reloading fails, restore the previous in-memory list and both
+private files.  A failed rollback keeps the private backups for recovery."
+  (let ((previous remote-machines--list)
+        (generation remote-config-generation)
+        (targets remote-targets)
+        (pipelines remote-pipelines)
+        (files (list remote-machines-file remote-machines-auth-file))
+        backups retain-backups)
+    (unwind-protect
+        (progn
+          (dolist (file files)
+            (push (cons file (remote-machines--backup-file file)) backups))
+          (condition-case original-error
+              (progn
+                (let ((remote-machines--list machines))
+                  (remote-machines--save))
+                (setq remote-machines--list machines)
+                (when after-save
+                  (funcall after-save))
+                (remote-machines--reload))
+            (error
+             (setq remote-machines--list previous)
+             (condition-case rollback-error
+                 (progn
+                   (dolist (entry backups)
+                     (remote-machines--restore-file (car entry) (cdr entry)))
+                   (when (fboundp 'auth-source-forget-all-cached)
+                     (auth-source-forget-all-cached))
+                   ;; A reload hook may fail after the registry has committed.
+                   ;; Reapply the restored machine list in that case.
+                   (when (or (/= generation remote-config-generation)
+                             (not (eq targets remote-targets))
+                             (not (eq pipelines remote-pipelines)))
+                     (remote-config-reload)))
+               (error
+                (setq retain-backups t)
+                (error "Machine update failed: %s; rollback failed: %s (backups: %S)"
+                       (error-message-string original-error)
+                       (error-message-string rollback-error)
+                       (delq nil (mapcar #'cdr backups)))))
+             (signal (car original-error) (cdr original-error)))))
+      (unless retain-backups
+        (dolist (entry backups)
+          (when (and (cdr entry) (file-exists-p (cdr entry)))
+            (delete-file (cdr entry))))))))
+
+(defun remote-machines--commit (machines &optional after-save)
+  "Persist MACHINES after checking for edits from another Emacs session."
+  (remote-machines-list)
+  (remote-machines--with-lock
+   (lambda ()
+     (unless (equal remote-machines--revision
+                    (remote-machines--file-revision))
+       (user-error
+        "Temporary machines changed in another Emacs; run remote-machines-reload-from-disk"))
+     (remote-machines--commit-locked machines after-save)
+     (setq remote-machines--revision
+           (remote-machines--file-revision)))))
 
 (defun remote-machines--askpass ()
   "Return the askpass helper, writing it when it is missing."
@@ -240,15 +378,21 @@ A client tool that opens its own SSH connection has no terminal to ask on."
 
 (defun remote-machines--reload ()
   "Reload targets after the remembered machines changed."
-  (when (file-readable-p remote-config-file)
-    (remote-config-reload))
-  (when-let* ((board (get-buffer "*Remote*")))
-    (with-current-buffer board
-      (when (fboundp 'remote-board-refresh-status)
-        (remote-board-refresh-status))))
-  (when-let* ((buffer (get-buffer "*Remote Machines*")))
-    (with-current-buffer buffer
-      (remote-machines-refresh))))
+  (remote-config-reload)
+  (when (fboundp 'remote-board--refresh-visible-views)
+    (remote-board--refresh-visible-views))
+  (remote-machines--refresh-visible-views))
+
+;;;###autoload
+(defun remote-machines-reload-from-disk ()
+  "Read machine changes made by another Emacs and refresh Remote views."
+  (interactive)
+  (remote-machines--with-lock
+   (lambda ()
+     (setq remote-machines--list (remote-machines--read)
+           remote-machines--loaded t)
+     (remote-machines--reload)))
+  (message "Temporary machines reloaded from disk"))
 
 (defun remote-machines--validate (machine &optional replacing)
   "Signal a `user-error' unless MACHINE can be stored.
@@ -345,10 +489,8 @@ in `remote-machines-file', readable by its owner only."
   (interactive (list (remote-machines--read-machine)))
   (remote-machines-list)
   (remote-machines--validate machine)
-  (setq remote-machines--list
-        (append remote-machines--list (list machine)))
-  (remote-machines--save)
-  (remote-machines--reload)
+  (remote-machines--commit
+   (append remote-machines--list (list machine)))
   (message "Remembered %s as target %s%s"
            (plist-get machine :label) (plist-get machine :id)
            (if (and (plist-get machine :password)
@@ -379,11 +521,16 @@ A changed address or credential closes the sessions that used the old one."
                   (user-error "No temporary machine named %s" id)))
          (new (remote-machines--read-machine old)))
     (remote-machines--validate new id)
-    (setq remote-machines--list
-          (mapcar (lambda (machine) (if (eq machine old) new machine))
-                  remote-machines--list))
-    (remote-machines--save)
-    (remote-machines--reload)
+    (remote-machines--commit
+     (mapcar (lambda (machine) (if (eq machine old) new machine))
+             remote-machines--list))
+    ;; A new password can leave the pipeline configuration byte-for-byte
+    ;; unchanged.  Reload alone then keeps a session authenticated with the
+    ;; previous credential.
+    (when (and (not (equal (plist-get old :password)
+                           (plist-get new :password)))
+               (remote-machines-target-p id))
+      (remote-config-invalidate-target-sessions id))
     (message "Updated %s" (plist-get new :label))))
 
 (defun remote-machines-forget-password (id)
@@ -391,18 +538,16 @@ A changed address or credential closes the sessions that used the old one."
   (interactive (list (remote-machines--read-id "Forget password of: ")))
   (let ((machine (or (remote-machines-get id)
                      (user-error "No temporary machine named %s" id))))
-    (setq remote-machines--list
-          (mapcar (lambda (entry)
-                    (if (eq entry machine)
-                        (plist-put (copy-sequence entry) :password nil)
-                      entry))
-                  remote-machines--list))
-    (remote-machines--save)
-    (remote-machines--reload)
+    (remote-machines--commit
+     (mapcar (lambda (entry)
+               (if (eq entry machine)
+                   (plist-put (copy-sequence entry) :password nil)
+                 entry))
+             remote-machines--list))
     (message "Forgot the password of %s" (plist-get machine :label))))
 
 (defun remote-machines-remove (id)
-  "Forget machine ID: disconnect it, then drop its record and password."
+  "Forget machine ID: save its removal, then disconnect its target."
   (interactive
    (let ((id (remote-machines--read-id "Forget machine: ")))
      (unless (yes-or-no-p (format "Forget machine %s and its credentials? "
@@ -411,12 +556,13 @@ A changed address or credential closes the sessions that used the old one."
      (list id)))
   (let ((machine (or (remote-machines-get id)
                      (user-error "No temporary machine named %s" id))))
-    (when (and (remote-machines-target-p id)
-               (fboundp 'remote-workspace-disconnect-target))
-      (remote-workspace-disconnect-target id 'machine-removed))
-    (setq remote-machines--list (delq machine remote-machines--list))
-    (remote-machines--save)
-    (remote-machines--reload)
+    (remote-machines--commit
+     (seq-remove (lambda (entry) (eq entry machine))
+                 remote-machines--list)
+     (lambda ()
+       (when (and (remote-machines-target-p id)
+                  (fboundp 'remote-workspace-disconnect-target))
+         (remote-workspace-disconnect-target id 'machine-removed))))
     (message "Forgot %s" (plist-get machine :label))))
 
 ;;; Management list
@@ -454,6 +600,20 @@ A changed address or credential closes the sessions that used the old one."
     (setq tabulated-list-entries (remote-machines--entries))
     (tabulated-list-print t)))
 
+(defun remote-machines--visible-views ()
+  "Return temporary-machine lists visible in their owning frames."
+  (cl-loop for frame in (frame-list)
+           for buffer = (frame-parameter frame 'remote-machines-view-buffer)
+           when (and (buffer-live-p buffer)
+                     (get-buffer-window buffer frame))
+           collect buffer))
+
+(defun remote-machines--refresh-visible-views ()
+  "Refresh all visible temporary-machine lists from the shared records."
+  (dolist (buffer (remote-machines--visible-views))
+    (with-current-buffer buffer
+      (remote-machines-refresh))))
+
 (defun remote-machines-open (id)
   "Open the default folder of machine ID."
   (interactive (list (remote-machines--read-id "Open machine: ")))
@@ -471,6 +631,7 @@ A changed address or credential closes the sessions that used the old one."
 
 (defvar-keymap remote-machines-mode-map
   :parent tabulated-list-mode-map
+  "q" #'quit-window
   "RET" #'remote-machines-open
   "o" #'remote-machines-open
   "f" #'remote-machines-files
@@ -479,7 +640,7 @@ A changed address or credential closes the sessions that used the old one."
   "p" #'remote-machines-forget-password
   "k" #'remote-machines-remove
   "D" #'remote-machines-remove
-  "g" #'remote-machines-refresh)
+  "g" #'remote-machines-reload-from-disk)
 
 (define-derived-mode remote-machines-mode tabulated-list-mode "Machines"
   "Mode for the temporary machines remembered under var/.
@@ -493,17 +654,62 @@ password with p.  RET opens its folder and f its file manager."
          ("Note" 20 nil)])
   (setq tabulated-list-padding 2
         tabulated-list-entries (remote-machines--entries))
-  (tabulated-list-init-header))
+  (tabulated-list-init-header)
+  (add-hook 'kill-buffer-hook #'remote-machines--view-killed nil t))
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'remote-machines-mode 'emacs))
+
+(defun remote-machines--view-killed ()
+  "Clear this list's frame reference when its buffer is killed."
+  (when (and (frame-live-p remote-machines--owner-frame)
+             (eq (frame-parameter remote-machines--owner-frame
+                                  'remote-machines-view-buffer)
+                 (current-buffer)))
+    (set-frame-parameter remote-machines--owner-frame
+                         'remote-machines-view-buffer nil)))
+
+(defun remote-machines--frame-deleted (frame)
+  "Release FRAME's machine list without changing remembered machines."
+  (when-let* ((buffer (frame-parameter frame 'remote-machines-view-buffer)))
+    (set-frame-parameter frame 'remote-machines-view-buffer nil)
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer))))
+
+(add-hook 'delete-frame-functions #'remote-machines--frame-deleted)
+
+(defun remote-machines--buffer (&optional frame)
+  "Return FRAME's temporary-machine list, creating it when needed."
+  (let* ((frame (or frame (selected-frame)))
+         (existing (frame-parameter frame 'remote-machines-view-buffer))
+         (created (not (buffer-live-p existing)))
+         (buffer (if created
+                     (generate-new-buffer "*Remote Machines*")
+                   existing)))
+    (when created
+      (set-frame-parameter frame 'remote-machines-view-buffer buffer))
+    (condition-case error
+        (with-current-buffer buffer
+          (unless (derived-mode-p 'remote-machines-mode)
+            (remote-machines-mode))
+          (setq-local remote-machines--owner-frame frame)
+          (remote-machines-refresh))
+      (error
+       (when created
+         (when (buffer-live-p buffer)
+           (kill-buffer buffer))
+         (when (eq (frame-parameter frame 'remote-machines-view-buffer)
+                   buffer)
+           (set-frame-parameter frame 'remote-machines-view-buffer nil)))
+       (signal (car error) (cdr error))))
+    buffer))
 
 ;;;###autoload
 (defun remote-machines ()
   "List the remembered temporary machines and manage them."
   (interactive)
-  (let ((buffer (get-buffer-create "*Remote Machines*")))
-    (with-current-buffer buffer
-      (remote-machines-mode)
-      (tabulated-list-print t))
-    (pop-to-buffer buffer)))
+  (pop-to-buffer (remote-machines--buffer)
+                 '(nil (reusable-frames . nil))))
 
 (add-hook 'remote-config-source-functions #'remote-machines-register)
 (add-hook 'remote-backend-tramp-client-environment-functions

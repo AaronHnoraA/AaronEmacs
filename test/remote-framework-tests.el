@@ -377,6 +377,72 @@
       (should (equal completion-directory "/fs:local:/tmp/"))
       (should (equal opened "/fs:local:/tmp/")))))
 
+(ert-deftest remote-board-views-refresh-independently-by-frame ()
+  "A state change redraws every visible view without resetting its sort."
+  (remote-framework-test-with-registry
+    (let* ((real-frame (selected-frame))
+           (other-frame (make-symbol "other-frame"))
+           (other-parameters (make-hash-table :test #'eq))
+           (original-frame-parameter (symbol-function 'frame-parameter))
+           (original-set-frame-parameter (symbol-function 'set-frame-parameter))
+           (original-frame-live-p (symbol-function 'frame-live-p))
+           (target (remote-register-target "view-probe" :label "Before" :trusted t))
+           first second first-history second-history)
+      (cl-letf (((symbol-function 'frame-parameter)
+                 (lambda (frame key)
+                   (if (eq frame other-frame)
+                       (gethash key other-parameters)
+                     (funcall original-frame-parameter frame key))))
+                ((symbol-function 'set-frame-parameter)
+                 (lambda (frame key value)
+                   (if (eq frame other-frame)
+                       (puthash key value other-parameters)
+                     (funcall original-set-frame-parameter frame key value))))
+                ((symbol-function 'frame-live-p)
+                 (lambda (frame)
+                   (if (eq frame other-frame) t
+                     (funcall original-frame-live-p frame)))))
+        (unwind-protect
+            (progn
+              (setq first (remote-board--buffer real-frame)
+                    second (remote-board--buffer other-frame))
+              (should-not (eq first second))
+              (setq first-history
+                    (remote-board--history-buffer 'routes "*Remote Routes*"
+                                                  real-frame)
+                    second-history
+                    (remote-board--history-buffer 'routes "*Remote Routes*"
+                                                  other-frame))
+              (should-not (eq first-history second-history))
+              (with-current-buffer first
+                (setq-local tabulated-list-sort-key '("ID" . nil)))
+              (with-current-buffer second
+                (should-not tabulated-list-sort-key))
+              (setf (remote-target-label target) "After")
+              (cl-letf (((symbol-function 'frame-list)
+                         (lambda () (list real-frame other-frame)))
+                        ((symbol-function 'get-buffer-window)
+                         (lambda (buffer frame)
+                           (and (eq buffer
+                                    (frame-parameter frame
+                                                     'remote-board-view-buffer))
+                                t))))
+                (remote-board--refresh-if-open))
+              (dolist (buffer (list first second))
+                (with-current-buffer buffer
+                  (should (string-match-p "After" (buffer-string)))))
+              (with-current-buffer first
+                (should (equal tabulated-list-sort-key '("ID" . nil))))
+              (remote-board--frame-deleted other-frame)
+              (should-not (buffer-live-p second))
+              (should-not (buffer-live-p second-history))
+              (should (buffer-live-p first-history))
+              (should (buffer-live-p first)))
+          (when (buffer-live-p second-history) (kill-buffer second-history))
+          (when (buffer-live-p first-history) (kill-buffer first-history))
+          (when (buffer-live-p second) (kill-buffer second))
+          (when (buffer-live-p first) (kill-buffer first)))))))
+
 (ert-deftest remote-board-mode-line-is-remote-only-and-cheap ()
   (remote-framework-test-with-registry
     (remote-register-target "lab" :label "Lab" :trusted t)
@@ -2215,6 +2281,34 @@ its new watcher, kills that watcher and leaves the watch failed."
         (should (equal closed '(first-forward)))
         (should (zerop (hash-table-count remote-channel-groups)))))))
 
+(ert-deftest remote-channel-group-rolls-back-failed-registration ()
+  "A group that fails after opening must leave no registry or recovery owner."
+  (remote-framework-test-with-registry
+    (let* ((context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/"
+             :workspace-root "/fs:local:/tmp/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (register
+            (symbol-function 'remote-workspace-ensure-recoverable-resource))
+           closed)
+      (cl-letf (((symbol-function 'remote-port-forward)
+                 (lambda (&rest _) 'forward))
+                ((symbol-function 'remote-close-channel)
+                 (lambda (value) (push value closed)))
+                ((symbol-function 'remote-workspace-ensure-recoverable-resource)
+                 (lambda (&rest args)
+                   (apply register args)
+                   (error "Registration failed"))))
+        (should-error
+         (remote-channel-group-open
+          '((shell . (:host "127.0.0.1" :port 1)))
+          :context context :workspace workspace :key 'failed-group))
+        (should (equal closed '(forward)))
+        (should (zerop (hash-table-count remote-channel-groups)))
+        (should-not (remote-workspace-find-resource
+                     workspace 'channel-group 'failed-group))))))
+
 (ert-deftest remote-native-reverse-forward-relays-and-cleans-lifecycle ()
   (remote-framework-test-with-registry
     (let* ((context
@@ -2408,6 +2502,63 @@ its new watcher, kills that watcher and leaves the watch failed."
            :status)
           'ok))))))
 
+(ert-deftest remote-doctor-report-views-are-frame-owned ()
+  "Running Doctor in one frame leaves another frame's report untouched."
+  (remote-framework-test-with-registry
+    (let* ((real-frame (selected-frame))
+           (other-frame (make-symbol "other-frame"))
+           (other-parameters (make-hash-table :test #'eq))
+           (original-frame-parameter (symbol-function 'frame-parameter))
+           (original-set-frame-parameter (symbol-function 'set-frame-parameter))
+           (original-frame-live-p (symbol-function 'frame-live-p))
+           first second)
+      (cl-letf (((symbol-function 'frame-parameter)
+                 (lambda (frame key)
+                   (if (eq frame other-frame)
+                       (gethash key other-parameters)
+                     (funcall original-frame-parameter frame key))))
+                ((symbol-function 'set-frame-parameter)
+                 (lambda (frame key value)
+                   (if (eq frame other-frame)
+                       (puthash key value other-parameters)
+                     (funcall original-set-frame-parameter frame key value))))
+                ((symbol-function 'frame-live-p)
+                 (lambda (frame)
+                   (if (eq frame other-frame) t
+                     (funcall original-frame-live-p frame)))))
+        (unwind-protect
+            (save-window-excursion
+              (setq second (remote-doctor--buffer other-frame))
+              (with-current-buffer second
+                (let ((inhibit-read-only t))
+                  (insert "Other frame report")))
+              (remote-doctor "local")
+              (setq first (current-buffer))
+              (should-not (eq first second))
+              (with-current-buffer second
+                (should (equal (buffer-string) "Other frame report")))
+              (remote-doctor--frame-deleted other-frame)
+              (should-not (buffer-live-p second))
+              (should (buffer-live-p first)))
+          (when (buffer-live-p second) (kill-buffer second))
+          (when (buffer-live-p first) (kill-buffer first)))))))
+
+(ert-deftest remote-doctor-probe-reports-signaled-process-output ()
+  "A nonnumeric process result remains a useful probe error."
+  (remote-framework-test-with-registry
+    (cl-letf (((symbol-function 'remote-process-file)
+               (lambda (_program _infile destination _display &rest _args)
+                 (with-current-buffer destination
+                   (insert "partial output"))
+                 "terminated by signal")))
+      (let ((check (remote-doctor--probe (remote-get-target "local"))))
+        (should (eq (plist-get check :status) 'error))
+        (should (string-match-p "terminated by signal"
+                                (plist-get check :detail)))
+        (should (string-match-p "partial output"
+                                (plist-get check :detail)))
+        (should-not (get-buffer " *remote-doctor-probe*"))))))
+
 (ert-deftest remote-doctor-includes-and-isolates-consumer-checks ()
   (remote-framework-test-with-registry
     (let ((check
@@ -2430,6 +2581,31 @@ its new watcher, kills that watcher and leaves the watch failed."
           'ok)))
       (remote-doctor-unregister-check check)
       (should-not remote-doctor-check-functions))))
+
+(ert-deftest remote-doctor-isolates-malformed-consumer-checks ()
+  "A malformed extension result appears as one error, not a broken report."
+  (remote-framework-test-with-registry
+    (let* ((bad (lambda (_target _probe)
+                  (list (list :name 'bad :status "not-a-status"))))
+           (good (lambda (_target _probe)
+                   (list :name 'good :status 'ok :detail "still here"))))
+      (remote-doctor-register-check bad)
+      (remote-doctor-register-check good)
+      (let* ((report (remote-doctor-report "local"))
+             (checks (plist-get report :checks))
+             (consumer-error
+              (seq-find
+               (lambda (check)
+                 (string-prefix-p "consumer:"
+                                  (format "%s" (plist-get check :name))))
+               checks)))
+        (should (eq (plist-get consumer-error :status) 'error))
+        (should (string-match-p "Invalid Remote Doctor check"
+                                (plist-get consumer-error :detail)))
+        (should (seq-find
+                 (lambda (check)
+                   (eq (plist-get check :name) 'good))
+                 checks))))))
 
 (ert-deftest remote-service-provisioning-is-trust-gated ()
   (remote-framework-test-with-registry
@@ -3569,6 +3745,43 @@ is set in it."
           (should (member "ServerAliveCountMax=2" command))
           (should-not (member "ServerAliveInterval=15" command))
           (should-not (member "ServerAliveCountMax=3" command)))))))
+
+(ert-deftest remote-ssh-forward-command-preserves-managed-control-path ()
+  "A forward must use the same SSH master as its workspace session."
+  (remote-framework-test-with-registry
+    (remote-register-target "lab" :trusted t)
+    (let* ((pipeline
+            (remote-register-pipeline
+             "lab" "ssh" "tramp" :config '(:host "lab")))
+           (route
+            (remote-route-create
+             :target-id "lab"
+             :pipeline-id (remote-pipeline-id pipeline)
+             :backend-id "tramp"
+             :capability 'port-forward
+             :adapter-id "network")))
+      (cl-letf (((symbol-function 'executable-find)
+                 (lambda (_program &optional _remote) "/usr/bin/ssh"))
+                ((symbol-function 'remote-transport-ssh-control-options)
+                 (lambda (&optional _runtime)
+                   '("ControlMaster=auto"
+                     "ControlPath=/tmp/noema-managed-control"))))
+        (let ((command
+               (remote-backend-tramp--ssh-forward-command
+                route "127.0.0.1" 49152 "127.0.0.1" 3000)))
+          (should (member "ControlPath=/tmp/noema-managed-control"
+                          command))
+          (should-not (member "-S" command)))))))
+
+(ert-deftest remote-ssh-mux-forward-recognizes-master-session ()
+  "OpenSSH mux clients omit the ordinary local-listener debug line."
+  (with-temp-buffer
+    (insert "debug1: Requesting forwarding of local forward 127.0.0.1:50001 -> 127.0.0.1:3000\r\n")
+    (should-not
+     (remote-backend-tramp--mux-forward-session-p (current-buffer)))
+    (insert "debug1: mux_client_request_session: master session id: 5\r\n")
+    (should
+     (remote-backend-tramp--mux-forward-session-p (current-buffer)))))
 
 (ert-deftest remote-ssh-custom-config-reaches-every-client-command ()
   (remote-framework-test-with-registry

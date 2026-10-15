@@ -472,7 +472,7 @@ folders that could contain FILE-NAME.  Keep native paths on upstream FN."
 (declare-function my/project-local-value "init-project-local" (key &optional root))
 (declare-function my/problems-buffer "init-problems" ())
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui")
-(declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
+(declare-function diagnostics-menu "init-diagnostics-extra" ())
 (declare-function my/diagnostics-project-ui "init-diagnostics-ui")
 (declare-function prescient-persist-mode "prescient" (&optional arg))
 (declare-function flymake-diagnostic-beg "flymake" (diag))
@@ -3025,7 +3025,7 @@ Guards both the nil new-start case and a potentially-throwing company-box--get-f
          ("M-n" . flymake-goto-next-error)
          ("M-p" . flymake-goto-prev-error)
          ("C-c !" . my/problems-buffer)
-         ("C-c ?" . my/diagnostics-dispatch))
+         ("C-c ?" . diagnostics-menu))
   :custom
   (flymake-no-changes-timeout 1.0) ; 输入停顿后再自动检查，减少每次按键后的后台唤醒。
   (flymake-indicator-type 'fringes)

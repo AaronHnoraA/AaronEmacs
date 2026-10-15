@@ -18,6 +18,12 @@ buffer/file-name 哲学，以 `/fs:TARGET:/path` 表示稳定的逻辑文件身�
 (remote-task-run-profile "test" :workspace workspace :display t)
 ```
 
+项目运行、任务、构建、测试与 Bazel 的统一输出入口会复用路径所属的 workspace，
+包括普通本地路径已进入 `/fs:local:` workspace 的情况。`/fs:` 项目没有打开
+workspace 时会按需创建；任务启动失败只回收此次新建的 workspace。普通本地
+目录没有 owning workspace 时继续使用 Emacs 原生 `compile`。这些项目命令的
+输出仍按 frame 记录；输出页 `K` 取消、`R` 手动重跑，工作区关闭会取消任务。
+
 在 Remote 面板的文件夹行按 `!` 可以输入一次性 shell 命令；源码 buffer 中也可
 运行 `M-x remote-task-run-command`。输出是 Compilation buffer，`next-error`
 会把目标机的绝对路径映射为同一 `/fs:` target 的源码。`M-x remote-task-cancel`
@@ -792,6 +798,13 @@ handler 接管。
   在那层下面运行。`remote-client-exec-path` 因此丢弃属于别的文件系统的目录，并
   在什么都不剩时回答上一次可用的客户端路径——空搜索路径从来不是事实。
 
+客户端 SSH 由 `remote-client-ssh-program` 统一选择，可在 `config-board` 修改；
+nil 表示按客户端 PATH 搜索。在 macOS 上默认使用系统 `/usr/bin/ssh`，因为当前
+Linux Jupyter 目标的 Homebrew SSH 在连接和转发探针中出现过故障，根因尚未确认。
+Remote 的显式命令、TRAMP 的 SSH 方法和 tramp-rpc 的连接过程都使用该选择；
+tramp-rpc 按名字启动 `ssh`，因此自定义可执行文件也须名为 `ssh`。这只调整
+客户端 SSH，不改变其他辅助程序或目标环境的 PATH。
+
 `exec-path` 这个 handler operation 先由 backend 回答，再把 workspace
 environment capsule 的 PATH（target PATH 加 direnv 等 provider）叠在最前面，
 与 `remote-executable-find`、路由进程看到的是同一份列表；backend 独有的项
@@ -1021,9 +1034,15 @@ SSH pipeline 建立 `-L`/`-R` forward，再实现 target 侧 network client/stre
 process；其物理 socket 是本机 relay，但 `process-contact` 的 host/service 与
 `remote-channel-endpoint` 暴露 target listener 身份，避免把 relay 端口泄漏给
 原生消费者。动态 `-R` 端口从 OpenSSH 确认信息中取得；建立超时、失败诊断和关闭
-清理均由 channel/backend 边界负责。转发使用独立 SSH 连接，避免 workspace 的
-ControlMaster 重建时误关新监听；`-L` 的就绪状态从 OpenSSH 输出读取，正常路径
-不向目标服务建立探针连接。诊断输出有 32 KiB 上限。native proxy 在 outbound peer 配对完成前
+清理均由 channel/backend 边界负责。每条转发有自己的本地 SSH 进程；当 pipeline
+有受管 ControlPath 时，它们复用同一个 ControlMaster，确保负载均衡登录名下的
+多端口服务仍落在同一台目标主机。仅没有 ControlPath 选项时使用 `-S none`；否则它会
+覆盖后面的 ControlPath 选项。workspace 重连先关闭旧转发再重建 master，避免旧监听
+误关新连接。普通 `-L` 的就绪状态从 OpenSSH 的监听日志读取；复用 master 的 mux
+客户端不打印那一行，则在 session 就绪日志出现后立即对本地监听做一次连接确认，
+不再逐条等满 5 秒超时。OpenSSH 未提供就绪日志时仍在超时后只探测一次。
+修正后 CSE Linux 真内核的启动、执行、五通道重建与关闭探针总耗时 9.53 秒。
+诊断输出有 32 KiB 上限。native proxy 在 outbound peer 配对完成前
 缓存已经到达的数据，避免连接刚建立时静默丢失首包。
 Remote 面板通过 `p` 建立 target 到本地回环的 `-L` 转发，并登记到 workspace
 恢复资源；端口行的 `RET`/`w` 复制动态本地地址，`k` 关闭且移除恢复资源。
@@ -1178,6 +1197,11 @@ PTY shell 不安全重放，因此 terminal 只标记为 disconnected，并要�
 
 `M-x remote-doctor` 从 target → pipeline stage → backend → route → session →
 workspace/resource 输出诊断；加前缀参数会实际连接并运行 `uname -s`。
+报告从顶部打开，`g` 重跑当前 target 的诊断（原报告带 probe 时也重跑 probe），
+`C-u g` 可从普通报告发起 probe，`q` 返回来源并释放报告。每个 frame 有自己的
+报告页，切换 frame 不会覆盖别处的结果；关闭 frame 只释放该页。consumer 扩展
+抛错或返回格式错误时，Doctor 把它列成错误项，仍显示其它检查。probe 进程因信号
+结束时，报告保留退出原因和已有输出。
 `M-x remote-board` 中的 `D` 会针对当前 target 异步运行 OpenSSH 诊断，并在
 `*Remote SSH TARGET*` 保留详细输出；检查使用 `BatchMode=yes` 和短连接超时，
 不会弹出密码提示或启动 workspace。连接错误会在面板 State 列区分认证、主机密钥、
@@ -1185,6 +1209,10 @@ workspace/resource 输出诊断；加前缀参数会实际连接并运行 `uname
 交互式登录终端，供输入密码、密钥口令或一次性验证码。终端会话是独立的客户端
 SSH 进程，登录后仍需正常打开文件夹或重连 workspace。面板绘制和状态刷新只读
 本地缓存，不发起 SSH 探测。
+面板和路由、连接历史页的 `q` 使用 Emacs 的 `quit-window` 返回来源；历史页随即
+销毁，SSH 诊断输出保留供复查。面板及历史页按 frame 持有视图，同一 frame 重开
+面板保留排序，连接状态变化会刷新所有可见面板；关闭 frame 只清理其视图，
+不关闭 Remote 连接。
 首次建连时，面板 State 列会依次显示传输打开、SSH 登录与后端检查阶段；按
 `L` 可查看当前 target 最近的连接阶段和失败原因。进度事件只在创建连接时发布，
 暖态文件查询不增加进度观察开销。旧连接的迟到事件不能覆盖新连接的状态；
@@ -1308,7 +1336,8 @@ remote-framework.el       public library entry
 ```
 
 `remote-config.el` 与 `remote-board.el` 是可选集成层；`remote-machines.el`
-（临时机器这一 target 来源）、`remote-transfer.el`（客户端批量传输）和
+（临时机器这一 target 来源）、`remote-transfer.el`（客户端批量传输及经
+`remote-exec-async` 路由的同目标文件操作）和
 `remote-files.el`（Dired 里的传输菜单）同属这一层，只调用上面的公共 API。direnv、Eglot、Lean、
 Noema 等消费者留在框架外，只调用公共 API。
 

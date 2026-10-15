@@ -194,9 +194,15 @@ make bootstrap-health
 
 常用入口：
 
+- `M-x config-health`
+  查看当前会话、依赖和服务状态；打开及 `g` 刷新不启动批处理 Emacs。
+  面板内 `s` / `c` / `N` 才运行 startup / byte / native 检查，结果保存在当前会话并显示在面板里。
+  `M-x config-health-menu` 打开检查菜单。
+- `M-x config-compile` / `M-x config-compile-menu`
+  容易从 `M-x` 搜到的编译板 / 菜单入口；下面的 `my/` 名称继续兼容现有绑定和调用。
 - `M-x my/compile-board`
   统一 board。看状态、做编译、做清理、跑 smoke check。
-- `M-x my/compile-dispatch`
+- `M-x config-compile-menu`
   transient 菜单版入口。
 - `M-x my/byte-compile-config`
   编译整套本地配置。
@@ -205,6 +211,10 @@ make bootstrap-health
 - `M-x my/byte-compile-current-file`
 - `M-x my/native-compile-current-file`
 - `M-x my/native-comp-open-log`
+
+编译板及整套配置的编译、清理总在这台 Emacs 所在机器的配置目录和进程环境中执行；
+即使从 Remote buffer 打开菜单，也不会把本机配置文件当作目标机文件。编译“当前文件”
+会先确认它是这套本机配置中的 Emacs Lisp 文件，再保存并在本机编译。
 
 命令行入口：
 
@@ -221,7 +231,7 @@ leader 入口：
 
 - `SPC c b`
   打开 compile board
-- `SPC c ?`
+- `SPC c B`
   打开 compile dispatch
 - `SPC c e`
   byte-compile `lisp/`
@@ -234,10 +244,12 @@ leader 入口：
 - native compile cache 统一放到 [var/eln-cache](../var/eln-cache)
 - 测试里用 `cl-letf` 替换 C 原语会让 libgccjit 现编一个 trampoline，它要链接 gcc
   版本目录下的 `libemutls_w`。Emacs.app 在构建时把该目录写进自己的
-  `LSEnvironment`，命令行包装脚本不会传递它，gcc 升级后旧路径也随之失效，表现为
-  大量测试报 `native-compiler-error … library 'emutls_w' not found`。`Makefile`
-  因此自行探测该目录并导出 `LIBRARY_PATH`；不经 `make` 直接跑测试时需要自己
-  设置，纯 `-Q` 的 remote 单元测试则直接关闭 trampoline
+  `LSEnvironment`，gcc 升级后旧路径随之失效，表现为启动或测试报
+  `native-compiler-error … library 'emutls_w' not found`。`early-init.el` 从
+  Homebrew 的 `gcc/current` 稳定路径寻找当前库，并在安装 advice 前修正本进程的
+  `LIBRARY_PATH`；无需改动 Emacs.app。`Makefile` 对不加载 `early-init.el` 的
+  批处理也自行探测该目录并导出 `LIBRARY_PATH`；不经 `make` 直接跑这类测试时
+  仍需自己设置，纯 `-Q` 的 remote 单元测试则直接关闭 trampoline
 - JIT native compile 开启
 - async warning 策略走 `silent`
 - `custom.el` 不纳入统一编译目标
@@ -633,8 +645,16 @@ Emacs broker 放置的 kernel 走的是**另一条**路径，上面那个 sweep 
 正确的归属是：谁放置谁回收。`my/noema-jupyter-shutdown-all-on-exit-h`
 （`lisp/roam/init-aaronnote-jupyter-runtime.el`，挂在 `kill-emacs-hook`）在 Emacs
 退出时逐个关闭 `my/noema-jupyter-runtimes` 里的 runtime，并且对单个 target 不可达
-的情况只报错继续，不会因为一个连不上就漏掉其余的。残留风险只剩 Emacs 被 `kill -9`
-的情况，排查方式与 Lean worker 相同：`pgrep -fl ipykernel_launcher` 看 ppid。
+的情况只报错继续，不会因为一个连不上就漏掉其余的。每次关闭前还会把 runtime ID、
+target、PID 和专属连接文件路径写入本机
+`var/aaronnote/jupyter/pending-shutdown/`，不写 HMAC key；确认关闭后删掉记录。
+退出时断线留下的记录会在下次 Jupyter Board 选中该 target 时显示，用户可确认后重试。
+重试只在目标 PID 的命令行仍包含专属连接文件名时发 TERM，不能确认就保留记录。
+同一 Emacs 会话内重试 `shutdown-pending` 也做这项核对，不直接复用旧 PID。
+kernel 进程已经启动、但之后的通道或 workspace 注册失败时，也走同一关闭路径；
+若回滚时 target 正好断线，runtime 与连接文件会留下供 Board 重试。
+Emacs 被 `kill -9` 且此前没有进入关闭流程仍可能留下无记录的 kernel；排查方式与
+Lean worker 相同：`pgrep -fl ipykernel_launcher` 看 ppid。
 
 **写临时诊断脚本时的规则**：不要给 `createJupyterCellService`/
 `createKernelRegistry` 传一次性 `mkdtemp` 出来的 runtimeDir 然后直接退出；

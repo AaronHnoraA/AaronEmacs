@@ -33,24 +33,24 @@
 
 (defconst my/health-important-commands
   '(my/compile-board
-    my/compile-dispatch
+    config-compile-menu
     my/byte-compile-config
     my/native-compile-config
     show-imenu
-    my/test-dispatch
-    my/task-dispatch
-    my/project-run-dispatch
-    my/debug-profile-dispatch
-    my/output-dispatch
-    my/diagnostics-dispatch
-    my/language-server-dispatch
+    test-menu
+    task-menu
+    project-run-menu
+    debug-profile-menu
+    output-menu
+    diagnostics-menu
+    language-server-menu
     my/language-server-manager
     my/language-server-doctor
-    my/editing-dispatch
-    my/files-dispatch
+    editing-menu
+    file-menu
     my/calendar-year
     my/github-topic-open
-    my/bazel-dispatch)
+    bazel-target-menu)
   "Interactive commands checked in `my/health-report'.")
 
 (defconst my/health-critical-libraries
@@ -70,6 +70,9 @@
 
 (defvar my/health-startup-package-count nil
   "Installed package count recorded after startup.")
+
+(defvar my/health--batch-results nil
+  "Results of batch checks explicitly run during this Emacs session.")
 
 (defconst my/health-startup-bytecode-files
   '("early-init.el" "init.el" "bootstrap.el")
@@ -131,7 +134,9 @@
 
 (defun my/health--run-batch (&rest args)
   "Run Emacs in batch with ARGS and return a plist report."
-  (let ((default-directory (my/health-config-root)))
+  (let ((default-directory (my/health-config-root))
+        (process-environment (default-value 'process-environment))
+        (exec-path (default-value 'exec-path)))
     (with-temp-buffer
       (let ((status (apply #'call-process
                            (my/health--emacs-program)
@@ -143,6 +148,14 @@
         (list :ok (eq status 0)
               :status status
               :output output)))))
+
+(defun my/health--record-batch-result (name result)
+  "Remember RESULT for batch check NAME and refresh a visible health board."
+  (setf (alist-get name my/health--batch-results) result)
+  (when-let* ((buffer (get-buffer "*Health*"))
+              ((get-buffer-window buffer t)))
+    (my/health-report t))
+  result)
 
 (defun my/health--record-startup-metrics-h ()
   "Capture startup metrics for the current Emacs session."
@@ -186,6 +199,7 @@
                   (unless (featurep 'init-macos)
                     (error \"init-macos did not load\")))
                 (message \"INIT-OK\"))"))))
+    (my/health--record-batch-result 'startup result)
     (if (called-interactively-p 'interactive)
         (message "Startup smoke %s"
                  (if (plist-get result :ok) "passed" "failed"))
@@ -199,6 +213,7 @@
                  "-l" "./init.el"
                  "--eval" "(setq debug-on-error t)"
                  "--eval" "(my/byte-compile-config)")))
+    (my/health--record-batch-result 'byte-compile result)
     (if (called-interactively-p 'interactive)
         (message "Byte-compile smoke %s"
                  (if (plist-get result :ok) "passed" "failed"))
@@ -220,6 +235,7 @@
                          (expand-file-name \"lisp/init-compile.el\" user-emacs-directory))
                         (message \"NATIVE-OK\"))
                     (message \"NATIVE-SKIP\"))")))
+    (my/health--record-batch-result 'native-compile result)
     (if (called-interactively-p 'interactive)
         (message "Native-compile smoke %s"
                  (if (plist-get result :ok) "passed" "failed"))
@@ -232,9 +248,9 @@
           my/health-executables))
 
 (defun my/health--command-report ()
-  "Return command availability as an alist."
+  "Return interactive command availability as an alist."
   (mapcar (lambda (command)
-            (cons command (fboundp command)))
+            (cons command (commandp command)))
           my/health-important-commands))
 
 (defun my/health--library-report ()
@@ -315,15 +331,18 @@ templates at all.  Check them so that cannot happen quietly again.")
 (defun my/health-critical-check ()
   "Return a compact batch-friendly report for critical bootstrap features."
   (interactive)
-  (let ((report
-         (list
-          :libraries (my/health--library-report)
-          :artifacts (my/health--artifact-report)
-          :features (my/health--feature-report)
-          :lock (when (fboundp 'my/package-lock-audit)
-                  (my/package-lock-audit))
-          :state (when (fboundp 'my/maintenance-state-report)
-                   (my/maintenance-state-report)))))
+  (let* ((default-directory (my/health-config-root))
+         (process-environment (default-value 'process-environment))
+         (exec-path (default-value 'exec-path))
+         (report
+          (list
+           :libraries (my/health--library-report)
+           :artifacts (my/health--artifact-report)
+           :features (my/health--feature-report)
+           :lock (when (fboundp 'my/package-lock-audit)
+                   (my/package-lock-audit))
+           :state (when (fboundp 'my/maintenance-state-report)
+                    (my/maintenance-state-report)))))
     (if (called-interactively-p 'interactive)
         (message "%S" report)
       report)))
@@ -333,8 +352,12 @@ templates at all.  Check them so that cannot happen quietly again.")
   (let ((ok (plist-get result :ok)))
     (insert "   "
             (propertize (format "%-20s" label) 'face 'aaron-ui-board-meta)
-            (propertize (if ok "OK" "FAIL")
-                        'face (if ok 'aaron-ui-board-good 'aaron-ui-board-bad))
+            (propertize (cond ((null result) "NOT RUN")
+                              (ok "OK")
+                              (t "FAIL"))
+                        'face (cond ((null result) 'aaron-ui-board-meta)
+                                    (ok 'aaron-ui-board-good)
+                                    (t 'aaron-ui-board-bad)))
             "\n")
     (when-let* ((status (plist-get result :status)))
       (insert "   "
@@ -346,24 +369,45 @@ templates at all.  Check them so that cannot happen quietly again.")
               (propertize output 'face 'aaron-ui-board-detail)
               "\n"))))
 
-(defun my/health-report ()
-  "Open a health report buffer for this Emacs config."
+(defun my/health-reload-project-state ()
+  "Reload repaired project state and refresh this health board."
   (interactive)
-  (let ((buffer (get-buffer-create "*Health*"))
-        (startup (my/health-startup-check))
-        (compile (my/health-byte-compile-check))
-        (native (my/health-native-compile-check))
-        (executables (my/health--executable-report))
-        (commands (my/health--command-report))
-        (libraries (my/health--library-report))
-        (artifacts (my/health--artifact-report))
-        (features (my/health--feature-report))
-        (lock-report (and (fboundp 'my/package-lock-audit)
-                          (my/package-lock-audit)))
-        (state-report (and (fboundp 'my/maintenance-state-report)
-                           (my/maintenance-state-report))))
+  (project-reload-ignored-roots)
+  (my/health-report t))
+
+(defun my/health-report (&optional no-display)
+  "Open a health report buffer without running batch checks.
+With NO-DISPLAY, refresh an already visible board without selecting it."
+  (interactive)
+  (let* ((default-directory (my/health-config-root))
+         (process-environment (default-value 'process-environment))
+         (exec-path (default-value 'exec-path))
+         (buffer (get-buffer-create "*Health*"))
+         (startup (alist-get 'startup my/health--batch-results))
+         (compile (alist-get 'byte-compile my/health--batch-results))
+         (native (alist-get 'native-compile my/health--batch-results))
+         (executables (my/health--executable-report))
+         (commands (my/health--command-report))
+         (libraries (my/health--library-report))
+         (artifacts (my/health--artifact-report))
+         (features (my/health--feature-report))
+         (settings-issues
+          (when (fboundp 'config--integrity-issues)
+            (condition-case err
+                (config--integrity-issues)
+              (error (list (format "Settings check failed: %s"
+                                   (error-message-string err)))))))
+         (project-state-error
+          (bound-and-true-p my/project-ignored-roots-load-error))
+         (lock-report (and (fboundp 'my/package-lock-audit)
+                           (my/package-lock-audit)))
+         (state-report (and (fboundp 'my/maintenance-state-report)
+                            (my/maintenance-state-report))))
     (with-current-buffer buffer
       (my/health-mode)
+      (setq-local default-directory (my/health-config-root)
+                  process-environment (default-value 'process-environment)
+                  exec-path (default-value 'exec-path))
       (aaron-ui-board-set-header "Config Health" 'health)
       (setq-local aaron-ui-board-refresh-function #'my/health-report)
       (let ((inhibit-read-only t))
@@ -373,6 +417,18 @@ templates at all.  Check them so that cannot happen quietly again.")
             "Config Health"
             :icon 'health
             :subtitle (abbreviate-file-name (my/health-config-root)))
+
+           (insert "   ")
+           (aaron-ui-board-insert-actions
+            '((:label "Startup" :command my/health-startup-check
+               :help "Run the startup smoke test")
+              (:label "Byte check" :command my/health-byte-compile-check
+               :help "Run byte compilation in a batch Emacs")
+              (:label "Native check" :command my/health-native-compile-check
+               :help "Run native compilation in a batch Emacs")
+              (:label "Compile board" :command my/compile-board
+               :help "Open compilation and cleanup tools")))
+           (insert "\n\n")
 
            ;; --- Session ---
            (aaron-ui-board-insert-section "Current Session")
@@ -388,6 +444,71 @@ templates at all.  Check them so that cannot happen quietly again.")
                 (number-to-string my/health-startup-package-count) "N/A"))
            (insert "\n")
 
+           ;; Deferred modules are healthy while waiting for their trigger;
+           ;; absence from the failure list alone does not mean they loaded.
+           (aaron-ui-board-insert-section "Module Load")
+           (let ((modules
+                  (delete-dups
+                   (append (copy-sequence
+                            (bound-and-true-p my/module-optional-modules))
+                           (mapcar #'car
+                                   (bound-and-true-p my/module-load-failures))))))
+             (if modules
+                 (dolist (module modules)
+                   (let* ((failure
+                           (alist-get module
+                                      (bound-and-true-p my/module-load-failures)))
+                          (triggers
+                           (alist-get module
+                                      (bound-and-true-p my/module-deferred-triggers)))
+                          (status
+                           (cond
+                            (failure failure)
+                            ((featurep module) "loaded")
+                            (triggers
+                             (format "waiting for %s"
+                                     (mapconcat #'symbol-name triggers ", ")))
+                            (t "not loaded"))))
+                     (aaron-ui-board-insert-field
+                      (symbol-name module) status
+                      (cond (failure 'aaron-ui-board-bad)
+                            ((featurep module) 'aaron-ui-board-good)
+                            (t 'aaron-ui-board-warn)))))
+               (aaron-ui-board-insert-field
+                "optional modules" "none registered" 'shadow)))
+           (insert "\n")
+
+           ;; Settings and the health board share the same integrity check.
+           (aaron-ui-board-insert-section "Settings")
+           (aaron-ui-board-insert-field
+            "stores"
+            (if settings-issues
+                (format "%d issue(s)" (length settings-issues))
+              "OK")
+            (if settings-issues 'aaron-ui-board-bad 'aaron-ui-board-good))
+           (insert "   ")
+           (aaron-ui-board-insert-actions
+            '((:label "Settings" :command config-dispatch
+               :help "Open the settings menu")
+              (:label "Inspect" :command config-check
+               :help "Show store and registry problems")))
+           (insert "\n\n")
+
+           (when project-state-error
+             (aaron-ui-board-insert-section "Project State" nil 'warning)
+             (aaron-ui-board-insert-field
+              "ignored roots" project-state-error 'aaron-ui-board-bad)
+             (when (boundp 'my/project-ignored-roots-file)
+               (insert "   ")
+               (aaron-ui-board-insert-openable-path
+                my/project-ignored-roots-file)
+               (insert "\n"))
+             (insert "   ")
+             (aaron-ui-board-insert-actions
+              '((:label "Reload" :command my/health-reload-project-state
+                 :help "Reload the repaired ignored-project file")))
+             (insert "\n\n"))
+
            ;; --- Batch checks ---
            (aaron-ui-board-insert-section "Batch Checks")
            (my/health--insert-check "Startup smoke" startup)
@@ -399,7 +520,7 @@ templates at all.  Check them so that cannot happen quietly again.")
            (aaron-ui-board-insert-section "Executables" (length executables))
            (dolist (entry executables)
              (aaron-ui-board-insert-field
-              (symbol-name (car entry))
+              (format "%s" (car entry))
               (or (cdr entry) "MISSING")
               (if (cdr entry) 'aaron-ui-board-good 'aaron-ui-board-bad)))
            (insert "\n")
@@ -546,10 +667,12 @@ templates at all.  Check them so that cannot happen quietly again.")
                 my/noema--last-sync-stats
               "never"))
            (insert "\n")
-           (aaron-ui-board-insert-key-hints "Keys: g refresh  q quit"))))
+           (aaron-ui-board-insert-key-hints
+            "Keys: g refresh  s startup  c byte  N native  b compile board  ? menu  q quit")))))
+    (unless no-display
       (pop-to-buffer buffer))))
 
-(transient-define-prefix my/health-dispatch ()
+(transient-define-prefix config-health-menu ()
   "Health check workflow."
   [["Checks"
    ("h" "full report" my/health-report)
@@ -562,8 +685,18 @@ templates at all.  Check them so that cannot happen quietly again.")
    ["Ops"
     ("b" "compile board" my/compile-board)]])
 
+(define-key my/health-mode-map (kbd "s") #'my/health-startup-check)
+(define-key my/health-mode-map (kbd "c") #'my/health-byte-compile-check)
+(define-key my/health-mode-map (kbd "N") #'my/health-native-compile-check)
+(define-key my/health-mode-map (kbd "b") #'my/compile-board)
+(define-key my/health-mode-map (kbd "?") #'config-health-menu)
+
+;; Public M-x names are discoverable by purpose.  Keep `my/' names for
+;; internal callers and existing keybindings.
+(defalias 'config-health #'my/health-report
+  "Open the Emacs configuration health board.")
 (my/leader!
-  "h H" '(:def my/health-dispatch :which-key "health")
+  "h H" '(:def config-health-menu :which-key "health")
   "h i" '(:def my/health-startup-summary :which-key "init stats"))
 
 (provide 'init-health)

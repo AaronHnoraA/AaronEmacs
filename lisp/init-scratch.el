@@ -61,16 +61,21 @@ When set to t, inherit the current buffer's major mode when practical."
   (let ((name (replace-regexp-in-string "[^[:alnum:]]+" "-" (or name "scratch"))))
     (string-trim (downcase name) "-" "-")))
 
+(defun my/scratch--project-hash (project-root)
+  "Return the stable identity suffix for PROJECT-ROOT."
+  (substring (secure-hash 'sha1
+                          (file-name-as-directory (expand-file-name project-root)))
+             0 10))
+
 (defun my/scratch--project-id (project-root)
   "Return a stable identifier for PROJECT-ROOT."
   (let* ((project-root (expand-file-name project-root))
          (label (if (fboundp 'my/project-name)
                     (my/project-name project-root)
-                  (file-name-nondirectory (directory-file-name project-root))))
-         (hash (substring (secure-hash 'sha1 project-root) 0 10)))
+                  (file-name-nondirectory (directory-file-name project-root)))))
     (format "project-%s-%s"
             (my/scratch--sanitize-name label)
-            hash)))
+            (my/scratch--project-hash project-root))))
 
 (defun my/scratch--storage-id (&optional project-root)
   "Return the storage identifier for PROJECT-ROOT scratch buffers."
@@ -81,35 +86,51 @@ When set to t, inherit the current buffer's major mode when practical."
 (defun my/scratch--display-name (&optional project-root)
   "Return the buffer name for PROJECT-ROOT scratch buffers."
   (if project-root
-      (format "*scratch:%s*"
+      (format "*scratch:%s [%s]*"
               (if (fboundp 'my/project-name)
                   (my/project-name project-root)
-                (file-name-nondirectory (directory-file-name project-root))))
+                (file-name-nondirectory (directory-file-name project-root)))
+              (my/scratch--project-hash project-root))
     "*scratch*"))
 
 (defun my/scratch--state-file (storage-id)
   "Return the state file path for STORAGE-ID."
-  (expand-file-name (concat storage-id ".el") my/scratch-directory))
+  (let ((default-directory user-emacs-directory))
+    (expand-file-name (concat storage-id ".el") my/scratch-directory)))
 
 (defun my/scratch--read-state (storage-id)
   "Read persisted scratch state for STORAGE-ID."
-  (let ((state-file (my/scratch--state-file storage-id)))
+  (let ((default-directory user-emacs-directory)
+        (state-file (my/scratch--state-file storage-id)))
     (when (file-readable-p state-file)
       (with-temp-buffer
         (insert-file-contents state-file)
-        (read (current-buffer))))))
+        (let ((read-eval nil))
+          (let ((state (read (current-buffer))))
+            (skip-chars-forward " \t\n\r")
+            (unless (and (eobp)
+                         (pcase state
+                           (`(:content ,content :point ,point :mode ,mode
+                               :directory ,directory)
+                            (and (stringp content) (integerp point) (>= point 1)
+                                 (symbolp mode)
+                                 (or (null directory) (stringp directory))))))
+              (error "Invalid scratch state: %s" state-file))
+            state))))))
 
 (defun my/scratch-save-buffer-h ()
   "Persist the current scratch buffer."
   (when my/scratch-storage-id
-    (make-directory my/scratch-directory t)
-    (with-temp-file (my/scratch--state-file my/scratch-storage-id)
-      (prin1
-       (list :content (buffer-substring-no-properties (point-min) (point-max))
-             :point (point)
-             :mode major-mode
-             :directory default-directory)
-       (current-buffer)))))
+    (let ((state (list :content (buffer-substring-no-properties (point-min) (point-max))
+                       :point (point)
+                       :mode major-mode
+                       :directory default-directory))
+          (state-file (my/scratch--state-file my/scratch-storage-id)))
+      (let ((default-directory user-emacs-directory))
+        (make-directory my/scratch-directory t)
+        (let ((print-length nil)
+              (print-level nil))
+          (config--write-string-atomically state-file (prin1-to-string state)))))))
 
 (defun my/scratch-unregister-buffer-h ()
   "Forget the current scratch buffer from the live scratch registry."
@@ -134,7 +155,9 @@ When set to t, inherit the current buffer's major mode when practical."
          (funcall mode))
        (insert content)
        (goto-char (min point (point-max)))
-       (when (and directory (file-directory-p directory))
+       ;; Restoring a remote scratch must not contact a disconnected target
+       ;; just to validate the remembered working directory.
+       (when (and (stringp directory) (file-name-absolute-p directory))
          (setq default-directory (file-name-as-directory directory))))
       (_
        (when (functionp fallback-mode)
@@ -179,7 +202,7 @@ With RESET-P, start from a fresh scratch."
 With RESET-P, start from a fresh scratch."
   (interactive "P")
   (let* ((buffer (my/scratch-buffer reset-p))
-         (window (get-buffer-window buffer t)))
+         (window (get-buffer-window buffer nil)))
     (if window
         (quit-window nil window)
       (pop-to-buffer buffer))))
@@ -210,7 +233,7 @@ With RESET-P, start from a fresh scratch."
                                 (my/project-current-root))
                            (user-error "Not inside a known project")))
          (buffer (my/scratch-buffer reset-p project-root))
-         (window (get-buffer-window buffer t)))
+         (window (get-buffer-window buffer nil)))
     (if window
         (quit-window nil window)
       (pop-to-buffer buffer))))
@@ -222,6 +245,11 @@ With RESET-P, start from a fresh scratch."
     (user-error "Current buffer is not a managed scratch buffer"))
   (my/scratch--restore-buffer my/scratch-storage-id nil)
   (message "Scratch buffer reloaded"))
+
+(defalias 'persistent-scratch #'my/scratch-toggle
+  "Toggle the persistent scratch buffer in the current frame.")
+(defalias 'project-scratch #'my/scratch-project-toggle
+  "Toggle the current project's persistent scratch in the current frame.")
 
 (add-hook 'kill-emacs-hook #'my/scratch-save-all-buffers-h)
 

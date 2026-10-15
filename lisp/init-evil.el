@@ -8,33 +8,24 @@
 (require 'cl-lib)
 (require 'init-funcs)
 
-(declare-function my/bookmark-delete-dwim "init-windows")
-(declare-function my/bookmark-dispatch "init-windows")
-(declare-function my/bookmark-jump-dwim "init-windows")
-(declare-function my/bookmark-jump-other-window-dwim "init-windows")
-(declare-function my/bookmark-list "init-windows")
+(declare-function bookmark-actions-menu "init-windows")
 (declare-function my/bookmark-next-line "init-windows")
 (declare-function my/bookmark-previous-line "init-windows")
-(declare-function my/bookmark-rename-dwim "init-windows")
-(declare-function my/bookmark-set "init-windows")
-(declare-function my/bookmark-set-no-overwrite "init-windows")
 (declare-function my/bookmark-set-line "init-windows")
 (declare-function my/bookmark-toggle-line "init-windows")
-(declare-function my/debug-dispatch "init-debug" ())
+(declare-function debug-menu "init-debug" ())
 (declare-function my/kill-buffer-dwim "init-windows")
+(declare-function my/window-bury-current-buffer "init-windows" ())
 (declare-function my/kill-workspace-other-buffers "init-windows")
 (declare-function my/frame-new "init-windows")
 (declare-function my/frame-kill "init-windows")
 (declare-function my/frame-other "init-windows")
 (declare-function my/frame-previous "init-windows")
 (declare-function my/frame-hide "init-background")
-(declare-function my/tab-close "init-workspaces")
-(declare-function my/tab-close-other-tabs "init-workspaces")
 (declare-function my/tab-new "init-workspaces")
 (declare-function my/tab-new-named "init-workspaces")
 (declare-function my/tab-rename "init-workspaces")
-(declare-function my/tab-switch "init-workspaces")
-(declare-function my/workspace-dispatch "init-workspaces")
+(declare-function workspace-menu "init-workspaces")
 (declare-function my/workspace-other "init-workspaces")
 (declare-function my/workspace-switch-buffer "init-workspaces")
 (declare-function my/workspace-switch-left "init-workspaces")
@@ -255,9 +246,8 @@ Emacs state keep their local behavior."
     (if (bound-and-true-p evil-local-mode)
         (evil-save-state (apply fn args))
       (apply fn args)))
-  (dolist (mode '(my/bookmark-list-mode))
-    (evil-set-initial-state mode 'normal))
   (dolist (mode '(ibuffer-mode
+                  bookmark-bmenu-mode
                   debugger-mode
                   dired-mode
                   my/diagnostics-mode
@@ -365,9 +355,6 @@ Emacs state keep their local behavior."
     (evil-set-leader 'normal (kbd "<leader>m") :localleader))
 
   (my/leader!
-    ;; SPC, quit minibuffer.
-    "SPC" 'keyboard-escape-quit
-
     ;; Clear highlights
     "S-SPC" 'lazy-highlight-cleanup
 
@@ -382,7 +369,7 @@ Emacs state keep their local behavior."
 
     ;; file
     "f"  '(:ignore t :which-key "files")
-    "ff" 'find-file
+    "ff" 'file-open
     "fF" 'find-file-other-window
     "f/" 'find-file-other-window
     "fC" '+copy-current-file
@@ -394,31 +381,31 @@ Emacs state keep their local behavior."
     "fo" 'find-sibling-file
     "fj" 'dired-jump
     "fJ" 'dired-jump-other-window
-    "f." 'my/files-dispatch
+    "f." 'file-menu
 
     ;; buffer
     "b"  '(:ignore t :which-key "buffer")
-    "bb" 'switch-to-buffer
-    "bB" 'switch-to-buffer-other-window
+    "bb" 'consult-buffer
+    "bB" 'consult-buffer-other-window
+    "bF" 'buffer-open-new-frame
     "bo" 'previous-buffer
     "bO" 'next-buffer
     "bc" 'clone-indirect-buffer
     "bC" 'clone-indirect-buffer-other-window
     "by" '+copy-current-buffer-name
     "bv" 'revert-buffer-quick
-    "bz" 'bury-buffer
+    "bz" '(:def my/window-bury-current-buffer :which-key "bury buffer")
     "bk" 'my/kill-buffer-dwim
     "bK" 'my/kill-workspace-other-buffers
-    "bx" 'kill-buffer-and-window
     "bi" 'ibuffer
     ;; bookmarks
-    "b." 'my/bookmark-dispatch
-    "bm" 'my/bookmark-set
-    "bM" 'my/bookmark-set-no-overwrite
-    "br" 'my/bookmark-rename-dwim
-    "bj" 'my/bookmark-jump-dwim
-    "bJ" 'my/bookmark-jump-other-window-dwim
-    "bl" 'my/bookmark-list
+    "b." 'bookmark-actions-menu
+    "bm" 'bookmark-set
+    "bM" 'bookmark-set-no-overwrite
+    "br" 'bookmark-rename
+    "bj" 'consult-bookmark
+    "bJ" 'bookmark-jump-other-window
+    "bl" 'list-bookmarks
     "bn" 'my/bookmark-next-line
     "bp" 'my/bookmark-previous-line
     "bt" 'my/bookmark-toggle-line
@@ -435,15 +422,17 @@ Emacs state keep their local behavior."
     "ek" 'move-text-up
     "eb" 'my/pairs-cycle-delimiters
     "e1" 'toggle-one-window
-    "e." 'my/editing-dispatch
+    "e." 'editing-menu
 
     ;; help
     "h"  '(:ignore t :which-key "help")
     "hf" 'helpful-callable
-    "hc" 'helpful-command
+    "hC" 'helpful-command
+    "hc" '(:def config-dispatch :which-key "config")
     "hv" 'helpful-variable
     "hk" 'helpful-key
     "hK" 'my/open-keybinding-guide
+    "hm" 'my/mode-keybindings
     "hw" 'my/show-warnings-buffer
     "hF" 'describe-face
     "hd" 'devdocs-lookup
@@ -461,7 +450,6 @@ Emacs state keep their local behavior."
     "ck" 'kill-compilation
     "cl" '+switch-to-compilation
     "cL" 'lsp-lens-mode
-    "cj" 'my/debug-dispatch
     "cr" 'my/language-server-rename
     "cw" 'delete-trailing-whitespace
     "cx" 'quickrun
@@ -469,7 +457,7 @@ Emacs state keep their local behavior."
     "cE" 'my/native-compile-lisp-dir
 
     ;; specialized run workbenches
-    "rz" 'my/bazel-dispatch
+    "rz" 'bazel-target-menu
 
     ;; window
     "w"  'evil-window-map
@@ -490,14 +478,14 @@ Emacs state keep their local behavior."
 
     ;; workspace / tab-bar
     "t"  '(:ignore t :which-key "workspace")
-    "td" 'my/tab-close
-    "tD" 'my/tab-close-other-tabs
-    "tg" 'my/workspace-dispatch
+    "td" 'tab-close
+    "tD" 'tab-close-other
+    "tg" 'workspace-menu
     "ti" 'my/workspace-switch-buffer
     "tn" 'my/tab-new
     "tN" 'my/tab-new-named
     "to" 'my/workspace-other
-    "tt" 'my/tab-switch
+    "tt" 'tab-switch
     "t'" 'tab-bar-switch-to-recent-tab
     "tr" 'my/tab-rename
     "t[" 'my/workspace-switch-left
@@ -514,7 +502,7 @@ Emacs state keep their local behavior."
 
     ;; project
     "p"  '(:ignore t :which-key "project")
-    "p." 'my/project-dispatch
+    "p." 'project-menu
     "pp" 'my/project-switch
     "po" 'my/project-open-workbench
     "pf" 'my/project-find-file
@@ -528,7 +516,6 @@ Emacs state keep their local behavior."
     "pa" 'my/project-add-known-project
     "pD" 'my/project-discover-projects-in-directory
     "pk" 'my/project-kill-buffers
-    "px" 'my/project-remove-known-project
 
     ;; app
     "a"  '(:ignore t :which-key "app")
@@ -548,7 +535,7 @@ Emacs state keep their local behavior."
     "apS" 'my/browser-open-search
     "ac" 'calendar
     "ay" 'my/calendar-year
-    "am" 'my/macos-dispatch
+    "am" 'macos-tools-menu
     "ag" 'gnus
     "ai" 'rcirc
 
@@ -575,21 +562,6 @@ Emacs state keep their local behavior."
     "os" 'shell-toggle
     "op" 'proced
     "ol" 'my/beancount)
-
-  (with-eval-after-load 'elisp-mode
-    (my/local-leader!
-      :keymaps '(emacs-lisp-mode-map lisp-interaction-mode-map)
-      "i" 'info-lookup-symbol
-
-      ;; eval
-      "ed" 'eval-defun
-      "ee" 'eval-last-sexp
-      "el" 'load-library
-
-      ;; goto
-      "gf" 'find-function
-      "gv" 'find-variable
-      "gl" 'find-library))
 
 )
 

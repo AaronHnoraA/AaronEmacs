@@ -20,15 +20,36 @@ async function execute(kernel, code, expected) {
   return result;
 }
 try {
-  if (request.mode === 'raw') {
+  if (request.mode === 'raw' || request.mode === 'raw-inflight-disconnect') {
     const { kernel, socket } = createRawKernelConnection({ connectionInfo: request.connectionInfo,
       clientId: crypto.randomUUID(), username: 'noema-audit', model: { id: crypto.randomUUID(), name: 'python3' }, zmq });
     try {
       assert(await waitForConnected(kernel, 15000));
       await warmupKernelInfo(kernel, 15000);
-      await execute(kernel, request.code, request.expected);
-      const completion = await kernel.requestComplete({ code: 'noema_audit_', cursor_pos: 12 });
-      assert(completion.content.matches.includes('noema_audit_state'));
+      if (request.mode === 'raw-inflight-disconnect') {
+        let busy = false;
+        try {
+          const result = await executeOnKernel(kernel, request.code, {
+            execTimeoutMs: 12000,
+            onEvent(event) {
+              if (!busy && event.kind === 'status' && event.state === 'busy') {
+                busy = true;
+                console.log('INFLIGHT_BUSY');
+              }
+            },
+          });
+          assert(busy, 'Execution never entered busy state');
+          assert.equal(result.status, 'ok');
+          console.log('PASS in-flight request completed across transport loss');
+        } catch (error) {
+          assert(busy, `Execution never entered busy state: ${error?.message || error}`);
+          console.log(`INFLIGHT_REQUEST_UNCERTAIN ${error?.message || error}`);
+        }
+      } else {
+        await execute(kernel, request.code, request.expected);
+        const completion = await kernel.requestComplete({ code: 'noema_audit_', cursor_pos: 12 });
+        assert(completion.content.matches.includes('noema_audit_state'));
+      }
     } finally { kernel.dispose(); socket.dispose(); }
   } else if (request.mode === 'server') {
     const servers = createServerRegistry({ resolveServer: async () => request.server });

@@ -10,7 +10,10 @@
 (require 'config)
 
 (require 'cl-lib)
+(require 'subr-x)
 (require 'init-aaronnote)
+
+(declare-function evil-emacs-state "evil" ())
 
 (my/package-ensure-vc
  'markdown-mode
@@ -46,6 +49,80 @@ Either way `my/noema-open-markdown-raw' forces Emacs and
 
 (defvar-local my/noema--markdown-redirected nil
   "Non-nil when this buffer has already been handed to Noema.")
+
+(defvar-local my/noema--markdown-placeholder-state nil
+  "Current opening state of a redirected Markdown placeholder.")
+
+(defvar-local my/noema--markdown-open-generation 0
+  "Identity of the latest opening request from this Markdown buffer.")
+
+(defvar-local my/noema--markdown-open-timer nil
+  "Timer starting Noema after `find-file' has shown this buffer.")
+
+(defvar my/noema-markdown-placeholder-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "g") #'my/noema-markdown-placeholder-retry)
+    (define-key map (kbd "e") #'markdown-edit-raw)
+    (define-key map (kbd "q") #'quit-window)
+    map)
+  "Keys available while a Markdown file waits for Noema.")
+
+(define-derived-mode my/noema-markdown-placeholder-mode fundamental-mode
+  "Noema-Wait"
+  "Read-only Markdown placeholder while the Noema page is opening.")
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'my/noema-markdown-placeholder-mode 'emacs))
+
+(defun my/noema--markdown-placeholder-set-state (state)
+  "Set the current Markdown placeholder to STATE and update its help line."
+  (setq-local my/noema--markdown-placeholder-state state
+              header-line-format
+              (pcase state
+                ('starting " Noema is starting…  g retry · e edit in Emacs · q close")
+                ('failed " Noema did not open  ·  g retry · e edit in Emacs · q close")
+                ('waiting " Noema open paused  ·  g retry · e edit in Emacs · q close")
+                (_ " Noema page opened  ·  g reopen · e edit in Emacs · q close"))))
+
+(defun my/noema--markdown-placeholder-cancel-timer ()
+  "Cancel this Markdown placeholder's pending start timer."
+  (when (timerp my/noema--markdown-open-timer)
+    (cancel-timer my/noema--markdown-open-timer))
+  (setq-local my/noema--markdown-open-timer nil))
+
+(defun my/noema--markdown-placeholder-open (buffer generation)
+  "Open BUFFER in Noema if GENERATION is still current and visible."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (setq-local my/noema--markdown-open-timer nil)
+      (when (and my/noema--markdown-redirected
+                 (= generation my/noema--markdown-open-generation))
+        (if-let* ((window (get-buffer-window buffer 'visible)))
+            (condition-case err
+                (my/noema-open-file buffer-file-name window)
+              ((error quit)
+               (my/noema--markdown-placeholder-set-state 'failed)
+               (message "Noema could not open %s: %s"
+                        (abbreviate-file-name buffer-file-name)
+                        (error-message-string err))))
+          (my/noema--markdown-placeholder-set-state 'waiting))))))
+
+(defun my/noema--markdown-placeholder-schedule-open ()
+  "Open this Markdown placeholder after its visit finishes."
+  (my/noema--markdown-placeholder-cancel-timer)
+  (cl-incf my/noema--markdown-open-generation)
+  (my/noema--markdown-placeholder-set-state 'starting)
+  (setq-local my/noema--markdown-open-timer
+              (run-at-time 0 nil #'my/noema--markdown-placeholder-open
+                           (current-buffer)
+                           my/noema--markdown-open-generation)))
+
+(defun my/noema-markdown-placeholder-retry ()
+  "Retry opening this Markdown placeholder in Noema."
+  (interactive)
+  (unless (and my/noema--markdown-redirected buffer-file-name)
+    (user-error "This is not a Noema Markdown placeholder"))
+  (my/noema--markdown-placeholder-schedule-open))
 
 (defvar my/noema--inhibit-redirect nil
   "Non-nil inhibits the markdown-to-Noema redirect.
@@ -113,39 +190,38 @@ test helpers) where you want a raw Emacs buffer instead of the web editor.")
 
 (defun my/noema--redirect-current-markdown-buffer ()
   "Open the current Markdown buffer in Noema and optionally close it."
-  (let ((file buffer-file-name)
-        (buffer (current-buffer)))
+  (let ((file buffer-file-name))
     (unless (and file (my/noema--markdown-file-p file))
       (user-error "Current buffer is not visiting a Markdown file"))
+    (my/noema-markdown-placeholder-mode)
+    ;; Changing major mode clears ordinary buffer-local variables.  Keep the
+    ;; marker on the placeholder so a cold host can find its window later.
     (setq-local my/noema--markdown-redirected t)
-    (fundamental-mode)
     (setq-local buffer-read-only t)
-    (let ((target (my/noema--ensure-markdown-file file))
-          (close (lambda (target)
-                   (run-at-time 0 nil
-                                #'my/noema--kill-redirected-markdown-buffer
-                                buffer target))))
-      (my/noema-open-file target)
-      (cond
-       ((not my/noema-close-emacs-markdown-buffer))
-       ((or (bound-and-true-p my/noema--ready)
-            (not (fboundp 'my/noema--ensure-server)))
-        (funcall close target))
-       (t
-        ;; The web-host is still booting, so the open above is queued.  This
-        ;; buffer stays on screen as the placeholder that open replaces;
-        ;; killing it now would leave its window on an unrelated buffer and
-        ;; the queued open with no window to claim.
-        (setq-local header-line-format " Noema is starting…")
-        (my/noema--ensure-server (lambda () (funcall close target))))))))
+    (setq-local quit-window-kill-buffer t)
+    (add-hook 'kill-buffer-hook
+              #'my/noema--markdown-placeholder-cancel-timer nil t)
+    (my/noema--ensure-markdown-file file)
+    ;; auto-mode runs in `find-file-noselect', before `find-file' displays the
+    ;; buffer.  Even a ready host must wait until that native visit finishes.
+    (my/noema--markdown-placeholder-schedule-open)))
 
 (defun my/noema-redirect-markdown-file-h ()
   "Fallback Markdown handoff for packages that override `auto-mode-alist'."
-  (when (and buffer-file-name
-             (my/noema--markdown-file-p buffer-file-name)
-             (not my/noema--markdown-redirected)
-             (my/noema--should-redirect-p))
-    (my/noema--redirect-current-markdown-buffer)))
+  (cond
+   ((derived-mode-p 'my/noema-markdown-placeholder-mode)
+    ;; The global set-auto-mode advice restores the prior Evil state after
+    ;; major-mode setup.  Find-file-hook runs later, when that restoration is
+    ;; complete, so the placeholder's q/g/e keys win in actual key lookup.
+    (when (bound-and-true-p evil-local-mode)
+      (evil-emacs-state)))
+   ((and buffer-file-name
+         (my/noema--markdown-file-p buffer-file-name)
+         (not my/noema--markdown-redirected)
+         (my/noema--should-redirect-p))
+    (my/noema--redirect-current-markdown-buffer)
+    (when (bound-and-true-p evil-local-mode)
+      (evil-emacs-state)))))
 
 ;;;###autoload
 (defun my/noema-markdown-redirect-mode ()
@@ -178,10 +254,22 @@ or editing when the web editor is unavailable."
                      (user-error "No Markdown file to open")))))
     (unless (my/noema--markdown-file-p target)
       (user-error "Not a Markdown file: %s" target))
+    ;; Visiting an existing placeholder would otherwise return its inert,
+    ;; read-only fundamental-mode buffer.  Close it and visit afresh as raw
+    ;; Markdown; stale Noema callbacks are invalidated with that buffer.
+    (when-let* ((placeholder (find-buffer-visiting target)))
+      (when (buffer-local-value 'my/noema--markdown-redirected placeholder)
+        (with-current-buffer placeholder
+          (my/noema--markdown-placeholder-cancel-timer)
+          (cl-incf my/noema--markdown-open-generation))
+        (kill-buffer placeholder)))
     (find-file target)
     ;; A copy an AI bridge opened for reading becomes the buffer asked for.
     (when (fboundp 'noema-md-bridge-claim)
       (noema-md-bridge-claim))))
+
+(defalias 'markdown-edit-raw #'my/noema-open-markdown-raw
+  "Open the current Markdown file for native Emacs editing.")
 
 
 ;;;###autoload

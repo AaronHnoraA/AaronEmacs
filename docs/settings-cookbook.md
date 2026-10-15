@@ -7,7 +7,7 @@
 已注册进 `config` 注册表的项，直接用原生 Customize 改即可——**即时生效、自动持久化**，
 不用找模块、不用重启：
 
-- `M-x config-board` / `M-x customize-group RET config RET`，或 leader `SPC h c`。
+- `M-x config-board` / `M-x customize-group RET config RET`；leader `SPC h c` 打开设置菜单，再按 `c` 打开面板。
 - Lisp：`(config-get 'X)` / `(config-set 'X V)` / `(config-reset 'X)`。
 
 注册表与注册语法见 [config-management.md](config-management.md)。下面各节是「该改哪个
@@ -79,7 +79,7 @@ contact”，优先补齐 Remote/LSP adapter，而不是把分支写进语言模
 
 改完后可以执行：
 
-- `M-x my/font-reset-all`
+- `M-x font-refresh`
 
 ## 3. 我要改 LaTeX 构建/预览
 
@@ -100,7 +100,7 @@ buffer 注册，而不是启动时算好一份全局命令。远程 target 上�
 posframe 弹窗而不是 inline overlay。支持 `$…$`、`$$…$$`、`\(…\)`、`\[…\]` 和
 白名单内的 `\begin{…}` 环境。数学宏与 TeX 兼容规则以
 `site-lisp/noema/resources/` 为唯一来源，Emacs 与 Noema 读同一批文件——
-改宏请改那里，不要在 Elisp 里另写一份。出问题先跑 `M-x my/latex-preview-doctor`。
+改宏请改那里，不要在 Elisp 里另写一份。出问题先跑 `M-x latex-preview-doctor`。
 完整契约见 [latex-preview.md](latex-preview.md)。
 
 ## 4. 我要改 AI 助手配置
@@ -119,12 +119,8 @@ posframe 弹窗而不是 inline overlay。支持 `$…$`、`$$…$$`、`\(…\)`
 
 - `claude-code-ide-cli-path`  — Claude CLI 可执行路径（默认 `/Users/hc/.local/bin/claude`）
 
-常用入口：
-
-- `C-c C-'` / `C-c a`  — 打开 claude-code-ide 菜单
-- `F12` / `H-l`        — 同上（全局快捷键 / macOS Option 快捷键）
-
-只有在你要换 CLI 路径或调整 MCP tools 时才需要改 Elisp。
+旧的独立 Claude Code IDE 菜单已退役；兼容源码仍在 Noema 的 ACP 适配层使用。
+这里的 CLI 路径由 Noema 的 agent/export 工作流读取。
 
 ### Codex CLI
 
@@ -386,6 +382,7 @@ breadcrumb 不继承 tab 的切换/关闭行为；
 - `remote-make-process` / `remote-exec`
 - `remote-make-network-process` / `remote-open-network-stream` / `remote-port-forward`
 - `remote-environment-ensure` / `remote-environment-derive`
+- `remote-client-ssh-program`（`config-board` 中选择本机 SSH；nil 使用客户端 PATH）
 - `my/ghostel-ssh`
 
 target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境层的完整
@@ -402,7 +399,7 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 重点：
 
 - `my/project-search-paths`
-- `my/project-dispatch`
+- `project-menu`
 - `my/project-open-workbench`
 - `my/project-switch`
 - `show-imenu`
@@ -477,6 +474,10 @@ Noema / Roam Node 的 Markdown 模板集中在
 链接到 Noema 仓库；其它模板目录由 Emacs 仓库维护。它们使用 Noema 的
 snippet-style header、`{{title}}` / `{{date}}` / `{{tags}}` 等变量和 `$0` tabstop，
 由 Noema runtime 展开，不进入普通 `auto-insert` allowlist。
+`M-x roam-new-note` 与 `M-x markdown-new-document` 共用创建表单，模板头的
+`# type: roam` / `# type: regular` 决定各自的候选；新增场景模板应明确标类型，
+保留一个可直接填写的正文入口。`RENDER KIND` 是 Noema 页面呈现类型，不是
+Roam 与普通 Markdown 的开关。
 
 Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignment 模板会
 导入项目根目录下的 `/_typst/assignment.typ`；插入模板时 Emacs 会自动创建这些
@@ -556,7 +557,7 @@ Noema 侧用环境变量，默认值和含义见
 并对每台配置的 server 解析连接、请求 `/api/status`，所以坏掉的 forward
 会作为 server 故障直接报出来，而不是过一会儿变成莫名其妙的 kernel 失败。
 
-kernelspec 本身用 `M-x my/jupyter-board`（Hyper `j`）管理。
+kernelspec 本身用 `M-x jupyter-board`（Hyper `j`）管理。
 
 ## 17. 我要配置项目本地 `.dir-locals.el`
 
@@ -637,7 +638,7 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 
 | 想改什么 | 怎么改 |
 | --- | --- |
-| 改皮卡丘的像素 | 直接编辑 `assets/activity/*.xpm`（纯文本，一个字符一个像素，颜色表在文件开头），然后 `M-x my/activity-reload-sprites` |
+| 改皮卡丘的像素 | 直接编辑 `assets/activity/*.xpm`（纯文本，一个字符一个像素，颜色表在文件开头），然后 `M-x activity-reload-sprites` |
 | 重画 / 加帧 | 改 `assets/activity/pikachu.py` 里的字符网格，`python3 pikachu.py -p /tmp/p.png` 会同时写回 XPM 并导出放大预览，**改像素画一定要看预览** |
 | 换成别的动画 | `M-x config-set RET my/activity-indicator-style`；值是 `my/activity-frame-sets` 的 key，找不到就回落到 `spinner` 包的 `spinner-types` |
 | 改跑动快慢 | `M-x config-set RET my/activity-indicator-fps` |
@@ -679,9 +680,9 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 （`my/dashboard-insert-agenda`）排在最后，Roam 热力图（`my/dashboard-insert-roam-heatmap`）
 在 items 之前。每个条目都是普通的 insert 函数，居中交给 `my/dashboard--center-lines`。
 
-任何要请求 Noema host 的条目都必须能失败：走 `my/noema-host-ready-functions` 重试
-（host 的 ready 队列在启动慢时会把回调丢掉），并留一个超时后可点击重试的失败态，不要让
-卡片永远停在 loading。
+Agenda 卡片在插入阶段只读本机最近一次完整快照；Dashboard 可见时再异步请求 Noema
+host。请求共用一次 15 秒超时，失败显示可点击的 `[retry]`，隐藏的 Dashboard 只标记
+缓存过期。缓存文件写入用同目录临时文件原子替换；读取时禁用 Lisp reader 的求值。
 
 ## 新建只读 dashboard / report / hub buffer
 

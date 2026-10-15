@@ -306,6 +306,9 @@ no local binding has also changed `default-value' for that extent, so only
 (defvar remote--client-exec-path-snapshot nil
   "Last client `exec-path' seen without foreign target directories.")
 
+(defvar remote-client-ssh-program nil
+  "Preferred client SSH executable, or nil to search the client PATH.")
+
 (defun remote-client-exec-path ()
   "Return a fresh executable search path for explicit client placement.
 
@@ -339,7 +342,30 @@ execute itself must still be resolved here."
         (remote-current-adapter-id nil)
         (remote-current-route nil)
         (default-directory temporary-file-directory))
-    (executable-find program)))
+    (if (and (equal program "ssh") remote-client-ssh-program)
+        (and (stringp remote-client-ssh-program)
+             (equal (file-name-nondirectory remote-client-ssh-program) "ssh")
+             (file-name-absolute-p remote-client-ssh-program)
+             (file-executable-p remote-client-ssh-program)
+             remote-client-ssh-program)
+      (executable-find program))))
+
+(defun remote-client-ssh-exec-path ()
+  "Return a client executable search path with the chosen SSH first.
+tramp-rpc invokes `ssh' by name, so its client process must resolve the
+same executable as Remote's explicit SSH commands."
+  (let ((path (remote-client-exec-path))
+        (ssh (remote-client-executable-find "ssh")))
+    (when (and remote-client-ssh-program (not ssh))
+      (error "Invalid client SSH executable: %S" remote-client-ssh-program))
+    (if ssh
+        (let ((directory (directory-file-name (file-name-directory ssh))))
+          (cons directory
+                (seq-remove
+                 (lambda (entry)
+                   (equal (directory-file-name entry) directory))
+                 path)))
+      path)))
 
 (defvar remote-current-workspace)
 

@@ -133,7 +133,7 @@ started, interrupted, restarted, and shut down over REST.
 
 * SSH 项目入口
 
-项目开发推荐 =M-x my/jupyter-ssh-open-project=，或在项目菜单 =my/project-dispatch=
+项目开发推荐 =M-x my/jupyter-ssh-open-project=，或在项目菜单 =project-menu=
 选择 =Jupyter SSH project=。=Jupyter Board= 顶部和 =SSH Notebook Projects=
 区域也有 =Open SSH Project=；Board 原有的 Remote Kernels / Open REPL
 入口继续保留。已配置的 SSH 项目还会显示独立行，可直接按 =Open Project=
@@ -193,11 +193,12 @@ Target/workspace 中发现 kernelspec、以 workspace root 为 cwd 启动进程�
 状态丢失。不会自动安装依赖或回退到客户端 kernel；使用 Remote Doctor 的 probe
 检查目标 =python3=、=jupyter= 和 kernelspec。
 
-探测有三种结果，不是两种。=kill -0= 说进程组还在就是存活，说它不在就是确认死亡，
-而**探测本身做不成**（连接断了、target 不可达）是第三种 =unknown=。=unknown=
-既不标 =stateLost= 也不跳过 =TERM=，并且会让 =aaronnote.jupyter.status= 直接报错
-而不是回一个 =alive: false= —— Noema 收到 =alive: false= 会关掉 kernel 并丢弃
-内存状态，把一次网络抖动答成 =false= 等于让用户白白丢一个 session。
+探测有三种结果，不是两种。启动时记录实际主机名；随后在目标端同一条命令里先核对
+主机，再执行 =kill -0= 或发送信号。进程组确实不存在才是确认死亡；连接断开或
+登录别名重连到另一台节点都返回 =unknown=。=unknown= 不标 =stateLost=、不向可能
+重用旧 PID 的节点发信号，并保留本机关闭记录。=aaronnote.jupyter.status= 此时
+报错，而不是返回 =alive: false= 让 Noema 丢弃内存状态。Board 会显示记录中的
+实际主机，方便从固定节点恢复和清理。
 
 kernel 是否在服务 Jupyter 消息由 Noema 侧的 =hb= 心跳观察。五端口里的 =hb= 一直
 被 broker 转发；local kernel 连续丢失回声可直接判死。Remote broker/attach 路径则
@@ -208,6 +209,12 @@ dispose 并丢弃状态；探测失败记为 =disconnected= 并继续在稳定�
 抖动因此不会被误当成 kernel death。外部 attached kernel 没有归 broker 所有的 PID，
 所以其 liveness 明确报告为 =unknown=；connection file 消失只作为诊断信息，不能单凭
 这一点判死，最终仍由 =hb= 判断它是否还能服务消息。
+
+Noema 输出页的页头读取同一内核注册表的只读状态：=disconnected= 显示连接丢失、
+内存状态未知；=dead= 才显示状态已丢失。页面可见时每 5 秒只查询内核状态，
+恢复或内核身份变化才重读输出快照。远端文件暂时不可读时，页面保留上一次
+成功加载的输出并提示刷新失败；真正换核会清空旧的已执行源码版本记录，
+避免把失效的输出标作当前结果。完整 Noema GUI 断线交互仍需真机验收。
 
 执行本身没有 wall-clock 超时（=AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS= 默认 0），
 这是有意的：它是**空闲**超时，会被消息重置，而 =time.sleep(3600)= 这类静默长任务
@@ -443,7 +450,7 @@ cell 运行期间 iopub 以补丁流（=set= / =append= / =clear= / =status=）�
 
 * Jupyter Board
 
-用 =M-x my/jupyter-board= 或 Hyper dispatch =j= 打开 =Jupyter Projects=。
+用 =M-x jupyter-board= 或 Hyper dispatch =j= 打开 =Jupyter Projects=。
 主页以 =SSH Notebook Projects= 为主入口，进入远端完整项目并直接编辑文件；
 已配置项目提供 =Open Project= / =Files= 快捷操作，按 =J= 可直接选择项目。
 =Remote Kernels · Quick REPL= 保留便携 =remote_ikernel= 的 Quick Add SSH、
@@ -464,12 +471,70 @@ Main keys:
 | =r= | Open/connect the profile or session REPL |
 | =o= | Open the kernelspec resource directory |
 | =g= | Refresh |
+| =s= | Explicitly clean abandoned connection files on the selected target, then refresh |
 | =v= | Toggle technical resources |
 | =?= | Open the usage guide |
 | =M= | Open the full Jupyter dispatch |
 
+=g= 只发现并展示资源，不删除文件。旧连接文件的清理单独由 =s= 发起；
+本机还会每 15 分钟定时维护一次。清理脚本会再次检查进程、监听端口和文件身份，
+不会终止 kernel。发现请求还在运行时，再次打开 Board 不会重复发起请求；=g=
+可以主动重试。明确断开所选 Remote target 后，Board 清空旧快照并提示手动按 =g=；
+断开前发出的异步结果不会重新填回。
+
 活动 session 提供 interrupt/restart/shutdown。便携 profile 的 =SAVED= 对应
 Core group，=TEMP= 可批量清理；旧 =rik_*= kernelspec 仍按 Core 处理。
+
+broker kernel 启动并取得 PID 后，立即在本机
+=var/aaronnote/jupyter/pending-shutdown/= 保存进程身份；正常关闭后删除记录。
+同一 Emacs 会话中活动 runtime 遮住这条记录。若 Emacs 被强制结束，或退出时
+target 不可达，重新打开 Jupyter Board 并选择该 target，会显示
+=SHUTDOWN-PENDING= 行；该行只提供 Retry shutdown。
+重试先确认进程组仍存在，再检查该 PID 的命令行仍包含本 runtime 独有的连接文件名；
+只有匹配才发送 TERM。目标不可达、命令不匹配或探测失败时，保留记录供下次重试。
+同一 Emacs 会话里 =shutdown-pending= 的再次关闭也执行相同的 PID 核对。
+TERM 发出后还会在有界时间内核对进程组确已退出；仍存活或无法确认时不删除
+运行时和本机记录。记录写入失败则在发信号前停止。远端 PID 命令行核对和
+连接文件清理都在目标端同一条命令里重新核对原物理主机，避免动态登录名
+中途转到另一节点。持续忽略 TERM 的内核保留待关闭状态，供 Board 再次重试；
+目前不会未经再次确认就自动发送 KILL。
+Board 刷新只读本机记录，不会为查看状态连接远端。
+损坏的记录在 Board 的 Saved Broker Record Problems 区块中提示，不弹出额外窗口，
+也不会被当成可关闭的进程。
+
+Linux SSH target 的跨 Emacs 会话回收可显式运行
+=JUPYTER_PENDING_LIVE_TARGET=<SSH target> make jupyter-pending-remote-live-smoke=。
+探针在远端临时目录启动一个带专属连接文件名的睡眠进程：第一会话写入关闭记录，
+第二会话模拟 target 不可达并确认记录保留，第三会话通过真实 Remote 路由核对
+进程身份后关闭。探针退出时删除自己的远端进程、文件和本机记录。第二阶段是
+不可达状态模拟，不等同于实际拔网线；此探针也不执行真正的 ipykernel。
+
+=JUPYTER_PENDING_LIVE_TARGET=<SSH target> make jupyter-abrupt-exit-live-smoke=
+另用正式 broker 启动路径生成记录，再对测试 Emacs 发送真实 SIGKILL；新 Emacs
+会话从本机记录列出该 kernel，经 Remote 路由核对 PID 后关闭远端睡眠进程。
+即使探针失败，也会按专属临时目录和进程命令行清理测试资源。它验证强制退出
+后的回收入口，不等同于完整 ipykernel 执行测试。
+
+完整 Linux broker 路径可运行
+=JUPYTER_LINUX_TARGET=<SSH target> make jupyter-linux-kernel-live-smoke=。
+它在目标机临时目录启动真实 =ipykernel=，通过五个转发端口执行代码和补全，
+重建 channel 后确认变量状态保留，再关闭内核并检查本机记录与远端连接文件。
+探针使用生产设置 =remote-client-ssh-program=：macOS 默认 =/usr/bin/ssh=，
+也可用 =JUPYTER_LINUX_SSH= 仅覆盖本次探针。测试固定物理节点时可用
+=JUPYTER_LINUX_CONFIG=/path/to/remote.json= 指向一次性的 Remote 配置，
+不改日常 target。这个目标上的 Homebrew SSH 曾在
+转发握手时失败。
+目标只装了 =jupyter= 分发器而没有 =jupyter-kernelspec= 子命令时，目录查询改用
+目标机已安装的 =jupyter_client= / =jupyter_core= Python API；Board 的异步发现
+也使用同一命令。执行中途故障另用
+=JUPYTER_LINUX_TARGET=<SSH target> make jupyter-linux-disconnect-live-smoke=：
+内核报告 busy 后只切断探针自己的五条 SSH 转发，等待 Remote 自动恢复，并核对
+原内核若存活则状态仍在，若目标确认死亡则记录保留到关闭确认、新内核为空白状态。
+在 CSE 目标上实测为后者；前端请求 12 秒内返回不确定结果，原进程死亡的原因
+尚未确认。=login.cse.unsw.edu.au= 是动态入口；它在另一次故障注入后可能转到
+另一台节点，不能用新节点的 PID 查询确认旧内核死亡。针对多端口内核，SSH 转发
+现共用受管 ControlPath；仍应以固定物理节点 target 做重复断线验收。此探针覆盖
+broker 和原始客户端，不代替完整 Noema 页面交互验收。
 
 * Persistent group metadata
 

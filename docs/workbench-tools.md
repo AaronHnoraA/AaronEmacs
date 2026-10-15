@@ -11,15 +11,17 @@
 
 - 标识符命名风格循环转换。
 - 两阶段交换任意两个不重叠区域；第一次选择会保留高亮，`T` 可取消并释放 marker。
-- region 优先的 narrow/widen；Org 源码块、Org subtree、LaTeX environment 和普通 defun
+- region 优先的 narrow/widen；Org 源码块、引用块、Org subtree、LaTeX environment 和普通 defun
   会按当前上下文处理。
 - 对 region 或整 buffer 计算 hash 并复制结果。
-- 比较 kill ring 中最近两项、两窗口、两个文件或当前文件的 VC 版本。
+- 比较 kill ring 中最近两项、两个可见 buffer 或当前文件的 VC 版本；
+  两窗口比较读取当前 buffer 内容，临时 yank buffer 由各自 Ediff 会话结束时清理。
+  Ediff 关闭后按 frame 恢复原窗口布局；同一 frame 的多场比较结束后只恢复一次。
 - 以 Markdown、GitHub、Org、HTML、Slack、reStructuredText 或 AsciiDoc 格式复制
   region；没有 region 时处理整个 buffer。
 - Emacs Lisp buffer 中启用 Eros 求值反馈，并提供 Relint 检查。
 
-`SPC n c` 跳到最近一次可见文本编辑的位置，`SPC n n` 直接执行 narrow/widen。
+`SPC n c` 跳到最近一次可见文本编辑的位置，`SPC n n` 或 `M-x narrow-or-widen` 缩小/展开当前范围。Org 源码块和引用块在原 buffer 内缩小到块，其他位置缩小到 subtree。
 最近修改位置只保存在内存中；mode 关闭或 Emacs 退出时会释放 marker。
 
 ### 文件与 Dired 工作台：`SPC f .`
@@ -27,8 +29,11 @@
 - 复制 region 覆盖的 Dired 行、marked files、光标下文件或当前 buffer 文件路径。
 - 一次复制多个路径时用换行连接，也可只复制去重后的父目录。
 - 在本地或远程 target 上执行 `du -sk`，显示 Dired 选择项的总大小。
-- 从选择项建立一个临时 Dired 列表。
-- 在 image-mode 中进入 Emacs 自带裁剪交互。
+- 从选择项建立一个独立的临时 Dired 列表，原目录视图保持完整；在临时列表按原生
+  `q` 返回原目录并释放临时 buffer。
+- `M-x file-copy-paths`、`file-copy-parent-paths`、`dired-selected-size` 和
+  `dired-selection` 可直接搜索到这些动作。图片裁剪统一由编辑工作台的原生
+  `image-crop` 提供，文件菜单不再重复列出。
 - 新文件缺少父目录时默认询问是否创建；可把
   `my/files-create-parent-directories` 改成 `always` 或 `never`。
 - Proced buffer 自动刷新；`SPC o p` 打开 Proced。
@@ -53,6 +58,11 @@ target 上完成 `gh auth login`。
 
 ### Bazel：`SPC r z`
 
+- `M-x bazel-target-menu` 打开面向当前 logical target 的菜单；直接命令为
+  `bazel-target-build`、`bazel-target-test`、`bazel-target-run`、
+  `bazel-target-insert`、`bazel-target-jump`、`bazel-target-refresh`，输出目录用
+  `bazel-output-bin` / `bazel-output-base`。Bazel 包原生的 `bazel-build`、
+  `bazel-test`、`bazel-run` 及 mode 键位仍可直接使用。
 - 自动识别 `MODULE.bazel`、`WORKSPACE.bazel` 或 `WORKSPACE` 根目录。
 - 通过 `bazelisk`（回退到 `bazel`）异步执行 `query //...`，补全 build、test、run、
   插入 label 和跳转 target definition。
@@ -60,6 +70,9 @@ target 上完成 `gh auth login`。
 - target cache 放在 `var/bazel/`，默认有效 300 秒；保存 BUILD、MODULE、WORKSPACE 或
   `.bzl` 文件会使对应 cache 失效。
 - 构建命令进入原有 task/build 重跑链路，并应用项目环境和 direnv。
+- 异步查询后，选择目标、插入 label、跳转文件及打开输出目录都回到发起操作的
+  frame；原 buffer 或 frame 已关闭时不打开别处的页面。查询失败、空结果会反馈；
+  插入命令释放位置 marker，缓存写入失败不阻断已取得的目标列表。
 - 只有当前 target 能找到 `buildifier` 时，Bazel buffer 才启用保存时格式化。
 
 同一入口也放在 `SPC r k` 的任务工作台中。

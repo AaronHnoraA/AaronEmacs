@@ -236,6 +236,11 @@ Lean 的通知/请求 payload 一律用 `lsp-get` 读取：lsp-mode 只有在以
   直接进入 `M-x dape`
 - `M-x dape`
 
+项目调试 profile 可用 `M-x debug-profile-menu`、`SPC r d` 或 `H-D` 选择；
+`SPC r D` 重跑当前 frame、当前项目最近一次已提交给 Dape 的 profile。切换 frame
+或项目不会误用另一处的配置；启动同步报错不会覆盖上次记录。正在运行的会话仍用
+Dape 原生 `dape-restart` 重启。
+
 行号/margin 区域可以点击切换断点；左 fringe 保留给折叠图标，调试断点可用
 `S-mouse-1` 在 fringe 上切换。调试期间还有 `hydra-dape-mode`。
 
@@ -595,7 +600,7 @@ host 的 `aaronnote:api:knowledge:search` 通道，内核返回已经排好序�
 是怎么找到的（`matchKind`）、标题里命中的区间（`titleRanges`）、摘要、纠正过的词
 （`corrected`）和“可以创建的页面”（`create`）。
 
-- `my/noema-roam-find-note`（`SPC n` 菜单的 `j`）在 minibuffer 里边输入边查询。候选按
+- `my/noema-roam-find-note`（`H-o` hub 的 `j`）在 minibuffer 里边输入边查询。候选按
   “标题 / 相近标题 / 正文 / 纠正后的正文”分组，旁边显示文件路径和摘要。
 - minibuffer 用专门的补全样式 `my/noema-search`，它不过滤也不重排。内核把 `maintian`
   匹配到 `maintain`；任何再比较一次“输入与候选”的样式（orderless、flex）都会把这条
@@ -799,10 +804,9 @@ gptel、Magent、Claude/Codex 兼容源码仍在 `site-lisp/noema/upstream/`。
 
 ### Claude Code
 
-- `C-c C-'` / `C-c a` — claude-code-ide 菜单
-- `F12` / `H-l`       — 同上
-- 配置：`lisp/init-ai-ide.el`，变量 `claude-code-ide-cli-path`
-- 本地源码由 `site-lisp/noema/upstream/claude-code-ide/` 提供
+- 独立的 claude-code-ide 菜单不再全局绑定；需要 Claude 时从 Noema agent 入口选择。
+- CLI 路径在 `lisp/init-ai-ide.el` 的 `claude-code-ide-cli-path` 中配置。
+- 兼容源码保留在 `site-lisp/noema/upstream/claude-code-ide/`。
 
 ### Codex CLI
 
@@ -880,7 +884,8 @@ label-badge 字段行、hl-line 行高亮、styled header-line。
 - Language Server Hub + Doctor（`init-lsp-tools.el`）
 - Performance Watch（`init-performance.el`）
 - Compile Board（`init-compile.el`）
-- Diagnostics UI（`init-diagnostics-ui.el`）
+- 当前 buffer 的 Diagnostics UI（`init-diagnostics-ui.el`）：每个 frame 共用一个面板，
+  三种严重程度只改变筛选；项目列表使用 Emacs 原生 Flymake
 - Appine Board（`init-appine.el`）
 
 ## 11. Transient 菜单 + which-key 主题（`aaron-ui-transient`）

@@ -186,7 +186,7 @@ mechanism as tag/roam/path completion), backed by `completions:todo-refs`.
 
 ## Emacs
 
-`M-x my/noema-agenda` opens the native Agenda. It shares the active source scopes
+`M-x noema-agenda` opens the native Agenda. It shares the active source scopes
 and writers with the hosted Web view. Native keys include `v d/w/t` for views,
 `c` capture, `t` complete, `s/d` schedule/deadline, `%` progress, `I/O` clock,
 `v k` clock report, `R` retry deferred clock writes, and `K` keep saved source
@@ -282,15 +282,15 @@ buffer 并回写。冲突保留双方；连接不可用时标明正在展示已�
 
 ### Roam 入口
 
-- `M-x my/noema-roam-agenda` — native agenda (dispatch key `A`).
-- `M-x my/noema-roam-agenda-web` — hosted Web agenda.
-- `M-x my/noema-roam-agenda-calendar` — month calendar view.
-- `M-x my/noema-roam-agenda-log` — completion log view.
-- `M-x my/noema-roam-agenda-gantt` — Gantt view.
-- `M-x my/noema-roam-agenda-projects` — project rollup view.
-- `M-x my/noema-roam-agenda-clock` — clocktable view.
-- `M-x my/noema-roam-agenda-lints` — lint view.
-- `M-x my/noema-roam-agenda-search` — agenda with a search query.
+- `M-x noema-agenda` — native agenda (also `F9`, `H-a`, dispatch `A`).
+- `M-x noema-agenda-web` — hosted Web agenda.
+- `M-x noema-agenda-calendar` — month calendar view.
+- `M-x noema-agenda-log` — completion log view.
+- `M-x noema-agenda-gantt` — Gantt view.
+- `M-x noema-agenda-projects` — project rollup view.
+- `M-x noema-agenda-clocktable` — clocktable view.
+- `M-x noema-agenda-lints` — lint view.
+- `M-x noema-agenda-search` — hosted agenda with a search query.
 - `M-x my/noema-roam-jump-file-todo` — jump to a todo in the current file
   (dispatch key `F`); this one stays local to Emacs (a `completing-read` over
   the current buffer's todos), not a web redirect.

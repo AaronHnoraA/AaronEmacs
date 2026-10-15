@@ -21,11 +21,9 @@
   "Project debug profile helpers."
   :group 'tools)
 
-(defvar my/debug-profile-last-config nil
-  "Last Dape config plist started by `my/debug-profile-run'.")
-
-(defvar my/debug-profile-last-directory nil
-  "Directory where the last debug profile started.")
+(defconst my/debug-profile--frame-history-parameter
+  'my/debug-profile-last-runs
+  "Frame parameter storing debug configs by project root.")
 
 (defun my/debug-profile-root ()
   "Return the current project root for debug workflows."
@@ -174,6 +172,21 @@
       (unless (keywordp (car-safe command))
         (setq-local dape-command command)))))
 
+(defun my/debug-profile--record-run (frame root config)
+  "Remember CONFIG for ROOT in FRAME after Dape accepts a launch."
+  (when (frame-live-p frame)
+    (let ((previous (frame-parameter
+                     frame my/debug-profile--frame-history-parameter)))
+      (set-frame-parameter
+       frame my/debug-profile--frame-history-parameter
+       (cons (cons root (copy-tree config))
+             (assoc-delete-all root (copy-sequence previous)))))))
+
+(defun my/debug-profile--last-run (frame root)
+  "Return FRAME's last debug config for ROOT, if any."
+  (cdr (assoc root
+              (frame-parameter frame my/debug-profile--frame-history-parameter))))
+
 (defun my/debug-profile-run (name)
   "Run debug profile NAME with Dape."
   (interactive
@@ -183,24 +196,26 @@
      (list (completing-read "Debug profile: "
                             (mapcar #'car candidates)
                             nil t))))
-  (let* ((root (my/debug-profile-root))
+  (let* ((frame (selected-frame))
+         (root (my/debug-profile-root))
          (spec (or (cdr (assoc name (my/debug-profile-candidates)))
                    (user-error "Unknown debug profile: %s" name)))
          (config (my/debug-profile--spec->config spec root)))
-    (setq my/debug-profile-last-config config
-          my/debug-profile-last-directory root)
     (let ((default-directory root))
-      (dape config))))
+      (prog1 (dape (copy-tree config))
+        (my/debug-profile--record-run frame root config)))))
 
 (defun my/debug-profile-rerun ()
-  "Re-run the last debug profile."
+  "Re-run this frame's last debug profile for the current project."
   (interactive)
-  (unless (and my/debug-profile-last-config my/debug-profile-last-directory)
-    (user-error "No previous debug profile"))
-  (let ((default-directory my/debug-profile-last-directory))
-    (dape (copy-tree my/debug-profile-last-config))))
+  (let* ((root (my/debug-profile-root))
+         (config (my/debug-profile--last-run (selected-frame) root)))
+    (unless config
+      (user-error "No previous debug profile for this project in this frame"))
+    (let ((default-directory root))
+      (dape (copy-tree config)))))
 
-(transient-define-prefix my/debug-profile-dispatch ()
+(transient-define-prefix debug-profile-menu ()
   "Debug profile workflow."
   [["Debug"
     ("d" "choose profile" my/debug-profile-run)
@@ -210,7 +225,7 @@
 (add-hook 'prog-mode-hook #'my/debug-profile-apply-default)
 
 (my/leader!
-  "r d" '(:def my/debug-profile-dispatch :which-key "debug profile")
+  "r d" '(:def debug-profile-menu :which-key "debug profile")
   "r D" '(:def my/debug-profile-rerun :which-key "rerun debug profile"))
 
 (provide 'init-debug-profile)

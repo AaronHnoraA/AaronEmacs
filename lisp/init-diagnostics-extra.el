@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'init-funcs)
+(require 'seq)
 (require 'transient)
 
 (declare-function flymake-diagnostic-type "flymake" (diag))
@@ -13,9 +14,12 @@
 (declare-function my/problems-buffer "init-problems" ())
 (declare-function my/problems-project "init-problems" ())
 (declare-function my/problems-project-full "init-problems" ())
+(declare-function my/problems-project-errors "init-problems" ())
+(declare-function my/problems-project-warnings "init-problems" ())
+(declare-function my/problems-project-notes "init-problems" ())
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui")
 (declare-function my/diagnostics-mode "init-diagnostics-ui")
-(declare-function my/diagnostics-open "init-diagnostics-ui" (scope &optional filter title))
+(declare-function my/diagnostics-open "init-diagnostics-ui" (&optional filter origin-buffer))
 (declare-function my/diagnostics-project-ui "init-diagnostics-ui")
 (declare-function my/diagnostics-refresh "init-diagnostics-ui")
 
@@ -28,6 +32,9 @@
 
 (defvar my/diagnostics--refresh-timer nil
   "Idle timer used to coalesce diagnostics UI refreshes.")
+
+(defvar my/diagnostics--pending-refresh-sources nil
+  "Source buffers awaiting a visible diagnostics panel refresh.")
 
 (defvar my/diagnostics-modeline-mode)
 
@@ -44,7 +51,7 @@
   (let ((map (make-sparse-keymap)))
     (define-key map [mode-line mouse-1] #'my/diagnostics-buffer-ui)
     (define-key map [mode-line C-mouse-1] #'my/diagnostics-project-ui)
-    (define-key map [mode-line mouse-3] #'my/diagnostics-dispatch)
+    (define-key map [mode-line mouse-3] #'diagnostics-menu)
     map)
   "Mouse keymap used by the diagnostics mode-line segment.")
 
@@ -129,35 +136,56 @@
     (advice-add 'flymake--publish-diagnostics
                 :after #'my/diagnostics--clear-modeline-cache-a)))
 
-(defun my/diagnostics--refresh-open-buffers (&rest _)
-  "Refresh open diagnostics buffers and mode lines."
+(defun my/diagnostics--refresh-open-buffers (&optional sources)
+  "Refresh visible diagnostics buffers for SOURCES and their mode lines.
+When SOURCES is nil, refresh every visible diagnostics buffer."
   (dolist (buffer (buffer-list))
-    (with-current-buffer buffer
-      (when (derived-mode-p 'my/diagnostics-mode)
-        (ignore-errors
-          (my/diagnostics-refresh)))))
+    (when (get-buffer-window buffer t)
+      (with-current-buffer buffer
+        (when (and (derived-mode-p 'my/diagnostics-mode)
+                   (or (null sources)
+                       (memq my/diagnostics-origin-buffer sources)))
+          (let* ((windows (get-buffer-window-list buffer nil t))
+                 (positions
+                  (mapcar (lambda (window)
+                            (list window (window-point window)
+                                  (window-start window)))
+                          windows)))
+            (ignore-errors
+              (my/diagnostics-refresh))
+            (dolist (position positions)
+              (pcase-let ((`(,window ,point ,start) position))
+                (when (and (window-live-p window)
+                           (eq (window-buffer window) buffer))
+                  (set-window-point window (min point (point-max)))
+                  (set-window-start window (min start (point-max)) t)))))))))
   (force-mode-line-update t))
 
-(defun my/diagnostics--open-buffer-p ()
-  "Return non-nil when a diagnostics UI buffer is open."
-  (catch 'open
-    (dolist (buffer (buffer-list))
-      (with-current-buffer buffer
-        (when (derived-mode-p 'my/diagnostics-mode)
-          (throw 'open t))))
-    nil))
+(defun my/diagnostics--open-buffer-p (&optional source)
+  "Return non-nil when a diagnostics UI buffer for SOURCE is visible."
+  (seq-some
+   (lambda (buffer)
+     (and (get-buffer-window buffer t)
+          (with-current-buffer buffer
+            (and (derived-mode-p 'my/diagnostics-mode)
+                 (or (null source)
+                     (eq my/diagnostics-origin-buffer source))))))
+   (buffer-list)))
 
 (defun my/diagnostics--schedule-refresh-open-buffers (&rest _)
   "Coalesce diagnostics buffer refreshes after Flymake saves."
-  (when (my/diagnostics--open-buffer-p)
-    (when (timerp my/diagnostics--refresh-timer)
-      (cancel-timer my/diagnostics--refresh-timer))
-    (setq my/diagnostics--refresh-timer
-          (run-with-idle-timer
-           0.12 nil
-           (lambda ()
-             (setq my/diagnostics--refresh-timer nil)
-             (my/diagnostics--refresh-open-buffers))))))
+  (let ((source (current-buffer)))
+    (when (my/diagnostics--open-buffer-p source)
+      (add-to-list 'my/diagnostics--pending-refresh-sources source)
+      (unless (timerp my/diagnostics--refresh-timer)
+        (setq my/diagnostics--refresh-timer
+              (run-with-idle-timer
+               0.12 nil
+               (lambda ()
+                 (let ((sources my/diagnostics--pending-refresh-sources))
+                   (setq my/diagnostics--refresh-timer nil
+                         my/diagnostics--pending-refresh-sources nil)
+                   (my/diagnostics--refresh-open-buffers sources)))))))))
 
 (define-minor-mode my/diagnostics-auto-refresh-mode
   "Auto-refresh diagnostics buffers after Flymake saves."
@@ -169,61 +197,61 @@
     (remove-hook 'flymake-after-save-hook #'my/diagnostics--schedule-refresh-open-buffers)
     (when (timerp my/diagnostics--refresh-timer)
       (cancel-timer my/diagnostics--refresh-timer)
-      (setq my/diagnostics--refresh-timer nil))))
+      (setq my/diagnostics--refresh-timer nil))
+    (setq my/diagnostics--pending-refresh-sources nil)))
 
 (defun my/diagnostics-buffer-errors ()
   "Open a diagnostics buffer filtered to current-buffer errors."
   (interactive)
-  (my/diagnostics-open 'buffer :error "Buffer Errors"))
+  (my/diagnostics-open :error))
 
 (defun my/diagnostics-buffer-warnings ()
   "Open a diagnostics buffer filtered to current-buffer warnings."
   (interactive)
-  (my/diagnostics-open 'buffer :warning "Buffer Warnings"))
+  (my/diagnostics-open :warning))
 
 (defun my/diagnostics-buffer-notes ()
   "Open a diagnostics buffer filtered to current-buffer notes."
   (interactive)
-  (my/diagnostics-open 'buffer :note "Buffer Notes"))
+  (my/diagnostics-open :note))
 
 (defun my/diagnostics-project-errors ()
-  "Open a diagnostics buffer filtered to project errors."
+  "Pick an error from open files in the current project."
   (interactive)
-  (my/diagnostics-open 'project :error "Project Errors"))
+  (my/problems-project-errors))
 
 (defun my/diagnostics-project-warnings ()
-  "Open a diagnostics buffer filtered to project warnings."
+  "Pick a warning from open files in the current project."
   (interactive)
-  (my/diagnostics-open 'project :warning "Project Warnings"))
+  (my/problems-project-warnings))
 
 (defun my/diagnostics-project-notes ()
-  "Open a diagnostics buffer filtered to project notes."
+  "Pick a note from open files in the current project."
   (interactive)
-  (my/diagnostics-open 'project :note "Project Notes"))
+  (my/problems-project-notes))
 
-(transient-define-prefix my/diagnostics-dispatch ()
-  "Diagnostics workflow."
+(transient-define-prefix diagnostics-menu ()
+  "Open diagnostic pickers, panels, and Flymake project results."
   [["Jump"
     ("!" "buffer picker" my/problems-buffer)
-    ("?" "project picker" my/problems-project)
-    ("F" "project full (incl. unopened)" my/problems-project-full)]
+    ("?" "open-file project picker" my/problems-project)]
    ["Panel"
     ("b" "buffer panel" my/diagnostics-buffer-ui)
     ("e" "buffer errors" my/diagnostics-buffer-errors)
     ("w" "buffer warnings" my/diagnostics-buffer-warnings)
     ("n" "buffer notes" my/diagnostics-buffer-notes)]
    ["Project"
-    ("p" "project panel" my/diagnostics-project-ui)
-    ("E" "project errors" my/diagnostics-project-errors)
-    ("W" "project warnings" my/diagnostics-project-warnings)
-    ("N" "project notes" my/diagnostics-project-notes)]
+    ("p" "Flymake project list" my/diagnostics-project-ui)
+    ("E" "open-file errors" my/diagnostics-project-errors)
+    ("W" "open-file warnings" my/diagnostics-project-warnings)
+    ("N" "open-file notes" my/diagnostics-project-notes)]
    ["Display"
     ("m" "toggle modeline" my/diagnostics-modeline-mode)
     ("a" "toggle auto refresh" my/diagnostics-auto-refresh-mode)]])
 
 (my/leader!
-  "c m" '(:def my/diagnostics-dispatch :which-key "diagnostics menu")
-  "c ?" '(:def my/diagnostics-dispatch :which-key "diagnostics"))
+  "c m" '(:def diagnostics-menu :which-key "diagnostics menu")
+  "c ?" '(:def diagnostics-menu :which-key "diagnostics"))
 
 (my/diagnostics-modeline-mode 1)
 (my/diagnostics-auto-refresh-mode 1)

@@ -63,13 +63,25 @@ so it is resolved from a directory that is the client's own."
      (remote-canonicalize-file-name (expand-file-name directory)))))
 
 (defun remote-files--here ()
-  "Return the logical name of the folder the current Dired buffer shows."
+  "Return the logical directory selected in the current Dired buffer.
+A directory row chooses that directory; a file row chooses its parent."
   (unless (derived-mode-p 'dired-mode)
     (user-error "Use this in a Dired folder"))
   ;; Resolved in the folder's own buffer, which is what gives a bare path
   ;; its machine.
-  (file-name-as-directory
-   (remote-canonicalize-file-name (expand-file-name default-directory))))
+  (let* ((file (when dired-subdir-alist
+                 (dired-get-filename nil t)))
+         (directory (if (and file
+                             (file-directory-p file)
+                             (not (member (file-name-nondirectory
+                                           (directory-file-name file))
+                                          '("." ".."))))
+                        file
+                      (or (and file (file-name-directory file))
+                          (and dired-subdir-alist (dired-current-directory))
+                          default-directory))))
+    (file-name-as-directory
+     (remote-canonicalize-file-name directory))))
 
 (defun remote-files--label (directory)
   "Return a short name for logical DIRECTORY."
@@ -79,30 +91,41 @@ so it is resolved from a directory that is the client's own."
             (remote-file-local-name directory))))
 
 (defun remote-files--revert-directory (directory)
-  "Refresh the Dired buffers that show logical DIRECTORY."
+  "Refresh Dired buffers that show logical DIRECTORY, including subtrees."
   (let ((directory (file-name-as-directory directory)))
     (dolist (buffer (buffer-list))
       (with-current-buffer buffer
         (when (and (derived-mode-p 'dired-mode)
-                   (equal (file-name-as-directory
-                           (remote-canonicalize-file-name
-                            (expand-file-name default-directory)))
-                          directory))
+                   (or (equal (file-name-as-directory
+                               (remote-canonicalize-file-name
+                                (expand-file-name default-directory)))
+                              directory)
+                       (seq-some
+                        (lambda (entry)
+                          (equal (file-name-as-directory
+                                  (remote-canonicalize-file-name
+                                   (car entry)))
+                                 directory))
+                        dired-subdir-alist)))
           (condition-case nil
               (revert-buffer)
             (error nil)))))))
 
 (defun remote-files--finished (job)
   "Report JOB and refresh the folder it wrote into."
-  (pcase (remote-transfer-job-state job)
-    ('done
-     (remote-files--revert-directory (remote-transfer-job-destination job))
-     (message "Transfer finished: %s" (remote-transfer-job-name job)))
-    ('failed
-     (message "Transfer failed (%s): %s; M-x remote-transfer-list shows why"
-              (remote-transfer-job-exit-status job)
-              (remote-transfer-job-name job)))
-    (_ (message "Transfer cancelled: %s" (remote-transfer-job-name job)))))
+  (let ((label (if (eq (remote-transfer-job-execution job) 'target)
+                   "File operation" "Transfer")))
+    (pcase (remote-transfer-job-state job)
+      ('done
+       (remote-files--revert-directory (remote-transfer-job-destination job))
+       (message "%s finished: %s" label (remote-transfer-job-name job)))
+      ('failed
+       (message "%s failed (%s): %s; M-x remote-transfer-list shows why"
+                label (or (remote-transfer-job-exit-status job)
+                          "status unknown")
+                (remote-transfer-job-name job)))
+      (_ (message "%s cancelled: %s" label
+                  (remote-transfer-job-name job))))))
 
 (defun remote-files--summary (files)
   "Return a short description of FILES."
@@ -159,7 +182,7 @@ From a folder of this machine, a target is asked for."
 (defun remote-files--pick (directory want description callback)
   "Pop up DIRECTORY for a choice and call CALLBACK with it once confirmed.
 WANT is `files', for the marked files or the one at point, or `directory',
-for the folder shown when the choice is confirmed.  DESCRIPTION says what
+for the directory at point when the choice is confirmed.  DESCRIPTION says what
 confirming does."
   (let* ((origin (selected-window))
          (windows (window-list nil 'no-mini))
@@ -203,8 +226,10 @@ confirming does."
                       (or (dired-get-marked-files)
                           (user-error "Mark the files first")))
             (remote-files--here))))
-    (remote-files--pick-close window)
-    (funcall (plist-get state :callback) choice)))
+    ;; Keep the selection and its marks available when the action fails to
+    ;; start (for example, an unavailable route or a missing client tool).
+    (funcall (plist-get state :callback) choice)
+    (remote-files--pick-close window)))
 
 (defun remote-files-pick-cancel ()
   "Close this pop-up folder without choosing."
@@ -240,8 +265,8 @@ The folder is chosen in a pop-up Dired."
      (remote-files--other-start here) 'directory
      (format "Destination of %s" (remote-files--summary files))
      (lambda (destination)
-       (remote-files--remember-other here destination)
-       (remote-files--queue files destination)))))
+       (remote-files--queue files destination)
+       (remote-files--remember-other here destination)))))
 
 (defun remote-files-fetch ()
   "Copy files of the other side into this folder.
@@ -252,9 +277,9 @@ The files are marked in a pop-up Dired."
      (remote-files--other-start here) 'files
      (format "Files for %s" (remote-files--label here))
      (lambda (files)
+       (remote-files--queue files here)
        (remote-files--remember-other
-        here (file-name-directory (directory-file-name (car files))))
-       (remote-files--queue files here)))))
+        here (file-name-directory (directory-file-name (car files))))))))
 
 (defvar-local remote-files--apply nil
   "Function that carries out the changes a comparison buffer lists.")
@@ -264,9 +289,10 @@ The files are marked in a pop-up Dired."
   (interactive)
   (let ((apply (or remote-files--apply
                    (user-error "Nothing to apply here"))))
+    ;; A failed launch must leave the preview and its action intact.
+    (funcall apply)
     (setq remote-files--apply nil)
-    (quit-window)
-    (funcall apply)))
+    (quit-window)))
 
 (defvar-keymap remote-files-compare-mode-map
   "C-c C-c" #'remote-files-apply)
@@ -321,8 +347,8 @@ DESCRIPTION says what the folder is chosen for."
     (remote-files--pick
      (remote-files--other-start here) 'directory description
      (lambda (other)
-       (remote-files--remember-other here other)
-       (funcall function here other)))))
+       (funcall function here other)
+       (remote-files--remember-other here other)))))
 
 (defun remote-files--delete-p ()
   "Return non-nil when the menu's delete switch is on."
@@ -444,7 +470,7 @@ of a Dirvish window, so it only reads state that is already in memory."
 
 ;;;###autoload (autoload 'remote-files-dispatch "remote-files" nil t)
 (transient-define-prefix remote-files-dispatch ()
-  "Transfer commands for the folder the current Dired buffer shows."
+  "Transfer commands for the directory at point in Dired."
   [:description remote-files--menu-title
    ["Files"
     ("c" "Send marked to the other side" remote-files-send)

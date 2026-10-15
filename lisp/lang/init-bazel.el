@@ -8,6 +8,7 @@
 
 (require 'config)
 (require 'init-funcs)
+(require 'init-output)
 (require 'remote-fs)
 (require 'remote-process)
 (require 'seq)
@@ -19,13 +20,6 @@
 (declare-function my/direnv-update-environment-maybe "init-direnv" (&optional path))
 
 (defvar my/direnv-subprocess-sync-inhibited)
-(defvar my/task-last-command)
-(defvar my/task-last-directory)
-(defvar my/task-last-environment)
-(defvar my/task-build-last-command)
-(defvar my/task-build-last-directory)
-(defvar my/task-build-last-environment)
-
 (defgroup my/bazel nil
   "Bazel target discovery and execution."
   :group 'tools)
@@ -125,9 +119,9 @@
   (sort (delete-dups (split-string output "\n" t "[[:space:]]+"))
         #'string-lessp))
 
-(defun my/bazel-with-targets (callback &optional refresh)
+(defun my/bazel-with-targets (callback &optional refresh on-error)
   "Call CALLBACK with ROOT, CONTEXT, EXECUTABLE, and discovered targets.
-With REFRESH, bypass the persistent cache."
+With REFRESH, bypass the persistent cache.  Call ON-ERROR on query failure."
   (let* ((root (file-name-as-directory (my/bazel-workspace-root)))
          (context (my/bazel--context root))
          (executable (my/bazel-executable context))
@@ -145,10 +139,24 @@ With REFRESH, bypass the persistent cache."
          (if (zerop (remote-exec-result-status result))
              (let ((targets (my/bazel--parse-targets
                              (remote-exec-result-stdout result))))
-               (my/bazel--cache-write cache-file targets)
-               (funcall callback root context executable targets))
-           (message "Bazel query failed: %s"
-                    (string-trim (remote-exec-result-stderr result)))))))))
+               (if targets
+                   (progn
+                     (condition-case err
+                         (my/bazel--cache-write cache-file targets)
+                       (error
+                        (message "Bazel target cache write failed: %s"
+                                 (error-message-string err))))
+                     (funcall callback root context executable targets))
+                 (when on-error
+                   (funcall on-error result))
+                 (message "No Bazel targets found in %s" root)))
+           (when on-error
+             (funcall on-error result))
+           (message "Bazel query failed (%s): %s"
+                    (remote-exec-result-status result)
+                    (let ((detail (string-trim
+                                   (remote-exec-result-stderr result))))
+                      (if (string-empty-p detail) "no error output" detail)))))))))
 
 (defun my/bazel--read-target (targets &optional prompt)
   "Read one label from TARGETS."
@@ -171,101 +179,115 @@ With REFRESH, bypass the persistent cache."
                           (shell-quote-argument target))))
     (when (fboundp 'my/direnv-update-environment-maybe)
       (my/direnv-update-environment-maybe root))
-    (if (eq kind 'build)
-        (setq my/task-build-last-command command
-              my/task-build-last-directory root
-              my/task-build-last-environment environment)
-      (setq my/task-last-command command
-            my/task-last-directory root
-            my/task-last-environment environment))
     (let ((default-directory root)
           (process-environment
            (if (fboundp 'my/project-local-apply-env)
                (my/project-local-apply-env environment)
              process-environment))
-          (compilation-buffer-name-function
-           (lambda (_) (format "*bazel %s*" subcommand)))
           (my/direnv-subprocess-sync-inhibited t))
-      (compile command))))
+      (prog1 (my/output-compile command (format "bazel %s" subcommand)
+                                environment)
+        (my/output-record-run kind command root environment)))))
 
 (defun my/bazel-run-target (subcommand &optional refresh)
   "Choose a target and run Bazel SUBCOMMAND.
 With REFRESH, refresh target discovery first."
-  (let ((origin (current-buffer)))
+  (let ((origin (current-buffer))
+        (origin-frame (selected-frame)))
     (my/bazel-with-targets
      (lambda (root _context executable targets)
-       (when (buffer-live-p origin)
-         (with-current-buffer origin
-           (my/bazel--run-command
-            subcommand root executable
-            (my/bazel--read-target targets
-                                   (format "Bazel %s target: " subcommand))))))
+       (when (and (buffer-live-p origin) (frame-live-p origin-frame))
+         (with-selected-frame origin-frame
+           (with-current-buffer origin
+             (my/bazel--run-command
+              subcommand root executable
+              (my/bazel--read-target targets
+                                     (format "Bazel %s target: " subcommand)))))))
      refresh)))
 
-(defun my/bazel-build (&optional refresh)
+(defun bazel-target-build (&optional refresh)
   "Choose and build a Bazel target."
   (interactive "P")
   (my/bazel-run-target "build" refresh))
 
-(defun my/bazel-test (&optional refresh)
+(defun bazel-target-test (&optional refresh)
   "Choose and test a Bazel target."
   (interactive "P")
   (my/bazel-run-target "test" refresh))
 
-(defun my/bazel-run (&optional refresh)
+(defun bazel-target-run (&optional refresh)
   "Choose and run a Bazel target."
   (interactive "P")
   (my/bazel-run-target "run" refresh))
 
-(defun my/bazel-insert-target (&optional refresh)
+(defun bazel-target-insert (&optional refresh)
   "Choose and insert a Bazel target label."
   (interactive "P")
   (let ((origin (current-buffer))
+        (origin-frame (selected-frame))
         (marker (copy-marker (point) t)))
-    (my/bazel-with-targets
-     (lambda (_root _context _executable targets)
-       (unwind-protect
-           (when (and (buffer-live-p origin) (marker-buffer marker))
-             (let ((target (my/bazel--read-target targets)))
-               (with-current-buffer origin
-                 (goto-char marker)
-                 (insert target))))
-         (set-marker marker nil)))
-     refresh)))
+    (condition-case err
+        (my/bazel-with-targets
+         (lambda (_root _context _executable targets)
+           (unwind-protect
+               (when (and (buffer-live-p origin)
+                          (frame-live-p origin-frame)
+                          (marker-buffer marker))
+                 (with-selected-frame origin-frame
+                   (with-current-buffer origin
+                     (let ((target (my/bazel--read-target targets)))
+                       (goto-char marker)
+                       (insert target)))))
+             (set-marker marker nil)))
+         refresh
+         (lambda (_result) (set-marker marker nil)))
+      (error
+       (set-marker marker nil)
+       (signal (car err) (cdr err))))))
 
-(defun my/bazel-jump-to-target (&optional refresh)
+(defun bazel-target-jump (&optional refresh)
   "Choose a Bazel target and jump to its definition."
   (interactive "P")
-  (my/bazel-with-targets
-   (lambda (root context executable targets)
-     (let ((target (my/bazel--read-target targets)))
-       (remote-exec-async
-        executable :args (list "query" target "--output=location")
-        :context context :filesystem-effects 'none :name "bazel-location"
-        :callback
-        (lambda (result)
-          (let ((output (remote-exec-result-stdout result)))
-            (if (and (zerop (remote-exec-result-status result))
-                     (string-match
-                      "\\`\\(.+\\):\\([0-9]+\\):\\([0-9]+\\):" output))
-                (let ((file (remote-expand-file-name
-                             (match-string 1 output) root context))
-                      (line (string-to-number (match-string 2 output)))
-                      (column (string-to-number (match-string 3 output))))
-                  (find-file file)
-                  (goto-char (point-min))
-                  (forward-line (1- line))
-                  (move-to-column (1- column)))
-              (message "Bazel location query failed: %s"
-                       (string-trim
-                        (if (string-empty-p (remote-exec-result-stderr result))
-                            output
-                          (remote-exec-result-stderr result))))))))))
-   refresh))
+  (let ((origin (current-buffer))
+        (origin-frame (selected-frame)))
+    (my/bazel-with-targets
+     (lambda (root context executable targets)
+       (when (and (buffer-live-p origin) (frame-live-p origin-frame))
+         (with-selected-frame origin-frame
+           (with-current-buffer origin
+             (let ((target (my/bazel--read-target targets)))
+               (remote-exec-async
+                executable :args (list "query" target "--output=location")
+                :context context :filesystem-effects 'none :name "bazel-location"
+                :callback
+                (lambda (result)
+                  (let ((output (remote-exec-result-stdout result)))
+                    (if (and (zerop (remote-exec-result-status result))
+                             (string-match
+                              "\\`\\(.+\\):\\([0-9]+\\):\\([0-9]+\\):" output))
+                        (let ((file (remote-expand-file-name
+                                     (match-string 1 output) root context))
+                              (line (string-to-number (match-string 2 output)))
+                              (column (string-to-number (match-string 3 output))))
+                          (when (and (buffer-live-p origin)
+                                     (frame-live-p origin-frame))
+                            (with-selected-frame origin-frame
+                              (find-file file)
+                              (goto-char (point-min))
+                              (forward-line (1- line))
+                              (move-to-column (1- column)))))
+                      (message "Bazel location query failed: %s"
+                               (string-trim
+                                (if (string-empty-p (remote-exec-result-stderr result))
+                                    output
+                                  (remote-exec-result-stderr result)))))))))))))
+     refresh)))
 
 (defun my/bazel-open-info-directory (key)
   "Open the directory returned by `bazel info KEY'."
-  (let* ((root (file-name-as-directory (my/bazel-workspace-root)))
+  (let* ((origin (current-buffer))
+         (origin-frame (selected-frame))
+         (root (file-name-as-directory (my/bazel-workspace-root)))
          (context (my/bazel--context root))
          (executable (my/bazel-executable context)))
     (remote-exec-async
@@ -274,23 +296,25 @@ With REFRESH, refresh target discovery first."
      :callback
      (lambda (result)
        (if (zerop (remote-exec-result-status result))
-           (dired (remote-expand-file-name
-                   (string-trim (remote-exec-result-stdout result))
-                   root context))
+           (when (and (buffer-live-p origin) (frame-live-p origin-frame))
+             (with-selected-frame origin-frame
+               (dired (remote-expand-file-name
+                       (string-trim (remote-exec-result-stdout result))
+                       root context))))
          (message "bazel info failed: %s"
                   (string-trim (remote-exec-result-stderr result))))))))
 
-(defun my/bazel-open-bin ()
+(defun bazel-output-bin ()
   "Open the current workspace's Bazel binary output directory."
   (interactive)
   (my/bazel-open-info-directory "bazel-bin"))
 
-(defun my/bazel-open-out ()
+(defun bazel-output-base ()
   "Open the current workspace's Bazel output directory."
   (interactive)
   (my/bazel-open-info-directory "output_base"))
 
-(defun my/bazel-refresh-targets ()
+(defun bazel-target-refresh ()
   "Refresh cached Bazel targets for the current workspace."
   (interactive)
   (my/bazel-with-targets
@@ -298,19 +322,19 @@ With REFRESH, refresh target discovery first."
      (message "Cached %d Bazel targets" (length targets)))
    t))
 
-(transient-define-prefix my/bazel-dispatch ()
+(transient-define-prefix bazel-target-menu ()
   "Bazel target workbench."
   [["Run"
-    ("b" "build" my/bazel-build)
-    ("t" "test" my/bazel-test)
-    ("r" "run" my/bazel-run)]
+    ("b" "build" bazel-target-build)
+    ("t" "test" bazel-target-test)
+    ("r" "run" bazel-target-run)]
    ["Targets"
-    ("i" "insert label" my/bazel-insert-target)
-    ("j" "jump to definition" my/bazel-jump-to-target)
-    ("R" "refresh query" my/bazel-refresh-targets)]
+    ("i" "insert label" bazel-target-insert)
+    ("j" "jump to definition" bazel-target-jump)
+    ("R" "refresh query" bazel-target-refresh)]
    ["Outputs"
-    ("B" "open bazel-bin" my/bazel-open-bin)
-    ("O" "open output base" my/bazel-open-out)]])
+    ("B" "open bazel-bin" bazel-output-bin)
+    ("O" "open output base" bazel-output-base)]])
 
 (defun my/bazel-mode-setup-h ()
   "Configure Bazel editing for the current logical target."

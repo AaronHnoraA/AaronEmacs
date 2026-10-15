@@ -8,10 +8,6 @@
   `Command = Meta (M-)`，`Option = Hyper (H-)`
 - `M-c` / `M-v`
   系统剪贴板复制 / 粘贴
-- `H-?`
-  用一次性 CLI 请求问本地 `docs/` 里的这套 Emacs 配置怎么用；结果显示在浮层。
-  默认引擎 Codex；问题前加 `:c ` 改用 CC（`claude -p`），加 `:o ` 改用 OpenCode。
-  例：`C-c A ?` / `H-?` → `:c 如何配置 LSP？`
 - `SPC`
   Evil leader，总入口。
 - `<Esc>`
@@ -24,12 +20,85 @@
   `telescope` 统一搜索面板
 - `M-x`
   原生 `M-x` + `amx` 历史排序
+- `M-x command-hub` / `M-x keybinding-guide`
+  按用途浏览主要命令 / 打开本快捷键索引；对应 `H-,` / `SPC h K`。
+- `M-x mode-keybindings` / `SPC h m`
+  查看当前 major mode 实际生效的按键；更适合查局部模式，完整文字索引仍用
+  `keybinding-guide`。
+- `M-x config-health` / `M-x config-compile`
+  配置健康面板 / 编译面板。健康面板打开和 `g` 刷新只读取当前状态；
+  `s`、`c`、`N` 明确运行 startup、byte、native 检查，`b` 跳到编译面板。
+  对应菜单为 `config-health-menu` / `config-compile-menu`。
+- `M-x project-workbench` / `M-x activity-board` / `M-x jupyter-board`
+  项目工作台、后台活动板和 Jupyter 管理板的直达名称。Jupyter 板 `g` 只刷新，
+  `s` 显式清理所选 target 的废弃连接文件。
+- `M-x project-menu` / `workspace-menu` / `project-run-menu` / `task-menu` / `test-menu`
+  项目、工作区、运行、构建和测试的命令菜单。
+- `M-x noema-menu` / `noema-wiki-menu` / `noema-ai-menu`
+  Noema 主菜单、Wiki 菜单和 AI 菜单。`H-o` 与 Noema 顶栏菜单打开主菜单；
+  `SPC N m` 与 Markdown 中的 `C-c r m` 打开 Wiki 菜单。
+- `M-x noema-reports-menu`
+  同一菜单汇集 Wiki 网页报告总览和七种 Emacs 报告（Wanted、孤立页、孤立附件、
+  死端页、无分类页、最多链接页、标签重叠）。主菜单 `!n`、Wiki 菜单 `D` 打开它，
+  `t` 查看标签重叠；也可直接运行 `M-x noema-report-tag-overlap`。
+  原 `!r` 和 Wiki 菜单 `!` 仍直接打开网页报告总览。Emacs 报告按 frame
+  保留各自视图，`q` 回到原页面并释放临时报告；关闭 frame 也会清理其报告。
+  批量重命名／删除 Roam 标签使用 Noema 编辑器的 Tools 面板，那里有标签建议、
+  明确确认和修改结果；这里的标签重叠报告只读。
+- `M-x noema-move-note` / `noema-menu` 的 `m`
+  选一篇 Roam 笔记后，用 Emacs 原生文件名补全指定目标目录与文件名。Noema host
+  一次完成移动和引用改写；已打开的 Emacs 源文件 buffer 跟随新路径。若该笔记在
+  一个 Noema 编辑页打开，该页先保存草稿，再移动并打开新路径；同时在多个编辑页
+  打开时，先关闭多余页面。
+- `M-x noema-trash-note` / `noema-menu` 的 `!d`
+  在当前 Noema 编辑页输入 `TRASH` 确认；页面先保存当前草稿，再把文件移到可恢复的
+  废纸篓。成功后回到这个页面访问过的上一篇有效笔记；没有上一篇时打开 Wiki 首页。
+  若移动期间又产生编辑，页面会保留这些内容为未命名草稿，并提示先复制内容。
+  同一笔记的其他 Noema 页面也会收到删除事件：干净页面返回上一篇，未保存的页面
+  保留草稿并断开旧路径。原生 Emacs buffer 若有修改会变为未命名草稿；干净的
+  buffer 则关闭，窗口按现有的上一页／Dashboard 规则返回。
+- `M-x project-run` / `project-rerun` / `task-run` / `task-build`
+  直接选运行 profile、重跑本 frame 上次 profile、选项目任务或构建；任务和构建
+  也有 `task-rerun` / `task-build-rerun`。运行菜单只列出实际存在的脚本或目标。
+- `M-x bazel-target-menu`（或 `SPC r z`）
+  在当前 target 查询 Bazel label，并在发起操作的 frame 运行、插入或跳转；
+  原生 `bazel-build` / `bazel-test` / `bazel-run` 及 Bazel mode 键位仍可用。
+- `M-x test-nearest` / `test-file` / `test-project` / `test-rerun`
+  直接运行附近、当前文件、当前项目测试，或重跑上次成功启动的测试命令。
+- `M-x project-add-to-workbench` / `project-discover-in-directory` / `project-remove-from-workbench`
+  项目工作台的登记、批量发现与完整移除；原生 `project.el` 的独立项目列表仍可用。
+- `M-x git-menu` / `language-server-menu` / `debug-menu` / `file-menu` / `editing-menu`
+  Git、语言服务器、调试、文件和编辑的命令菜单；`jupyter-board-menu` 打开
+  Jupyter 板上的完整动作菜单。菜单直接使用可搜索名称；内部具体动作仍由各领域模块实现。
+- `M-x copy-as-format-menu`（或 `editing-menu` 中按 `c`）
+  选格式复制当前选区；没有选区时复制整篇。菜单只影响本次复制，不更改
+  `copy-as-format` 原生命令的默认格式，也不移动光标或选区。
+- `M-x macos-tools-menu`（或 `SPC a m`）
+  打开 macOS 工具菜单；`macos-pick-color` 复制颜色，带前缀参数时插入；
+  `macos-open-at-point` 用系统应用打开光标处的链接或文件。
+- `M-x mouse-actions-menu`（或外设映射的 `H-C-M-m`）
+  打开可点击的常用动作板。代码和文字的右键菜单按所在位置提供动作；
+  点击 mode line 的 Git 状态段打开 Git 菜单，快速切换窗口后也可立即再次打开。
+- `M-x diagnostics-menu` / `code-actions-menu`
+  诊断菜单汇集 Flymake 项目列表、当前 buffer 面板和筛选跳转；代码动作菜单汇集
+  LSP 编辑、符号查看和构建。对应 `SPC c ?` / `SPC c .`、`H-d` / `H-e`。
+- `M-x file-copy-paths` / `file-copy-parent-paths` / `dired-selected-size` / `dired-selection`
+  `file-menu` 的 `o` 打开文件、`O` 在新 frame 打开，均使用现有文件入口；
+  菜单中还有路径和 Dired 动作。`SPC f .` 与主命令面板的“files”打开同一菜单。
+  选择项临时列表按 `q` 回到原目录并自动释放。
+  图片裁剪用 `M-x image-crop`，也在编辑菜单中。
 - `M-x telescope`
   `telescope` 统一搜索面板
 - `C-x C-f`
-  `find-file` + `vertico-directory`
+  文件名补全沿用 `find-file` + `vertico-directory`；`Enter` 在当前窗口打开，
+  `Cmd+Shift+Enter` 用当前输入的文件名在新 Emacs 窗口打开（包括尚未创建的文件）。
+  `SPC f f`、`H-f`、`M-x file-open` 使用同一提示；`M-x file-open-new-frame`
+  可直接打开新窗口的文件提示。从 `/fs:` buffer 输入裸绝对路径时，两种按键
+  都在当前 target 打开；`M-x find-file` 仍保留 Emacs 原生命令的路径语义。
 - `C-x b`
-  `consult-buffer`
+  `consult-buffer`：Buffer 候选先列当前 frame 与 workspace 中访问过的 buffer，
+  包括在该 frame 埋藏的 buffer；提示中按 `<` 再按 `o` 可查其他 frame/workspace 的
+  buffer。最近文件、bookmark 等 Consult 来源仍可用。`H-b`、`SPC b b` 使用同一入口。
 - `C-s`
   `consult-line`
 - `C-c p`
@@ -59,8 +128,8 @@
   `help-command` / `telescope` / 项目工作台 / 项目 `ripgrep`
 - `F5` / `F6` / `F7` / `F8`
   运行 profile / 测试菜单 / 调试菜单 / `olivetti-mode`
-- `F9` / `F10` / `F12`
-  `org-agenda` / popup `ghostel` / Claude Code 菜单
+- `F9` / `F10`
+  Noema 日程 / popup `ghostel`
 
 ### macOS Option `H-`
 
@@ -71,9 +140,9 @@
 - `H-r` / `H-s` / `H-g` / `H-t`
   最近文件 / 当前 buffer 搜索 / 项目 ripgrep / `telescope`
 - `H-p` / `H-P` / `H-R` / `H-T`
-  项目工作台 / workspace 菜单 / run profile 菜单 / test 菜单
-- `H-m` / `H-a` / `H-l` / `H-y`
-  `magit-status` / `org-agenda` / Claude Code 菜单 / 粘贴剪贴板图片到 Typst note
+  项目菜单 / workspace 菜单 / run profile 菜单 / test 菜单
+- `H-m` / `H-a`
+  `magit-status` / Noema 日程
 - `H-h` / `H-H` / `H-z` / `H-Z`
   help / health 菜单 / zoxide 跳目录 / 当前文件目录
 - `H-e` / `H-E` / `H-d` / `H-D`
@@ -81,7 +150,7 @@
 - `H-i` / `H-u` / `H-j` / `H-n` / `H-N`
   `show-imenu` / language server 菜单 / 调试菜单 / 最近测试 / output 菜单
 - `H-\`` / `H-q` / `H-Q` / `H-w`
-  `popper-toggle` / 关闭当前 buffer / 退出 Emacs / 关当前 frame
+  `popper-toggle` / 关闭当前 buffer / 退出 Emacs / 关当前 frame；若只剩一个 frame，`H-w` 埋藏当前 buffer
 - `H-0` / `H-1` / `H-2` / `H-3`
   关当前窗口 / 单窗口切换 / 上下分屏 / 左右分屏
 - `H-o` / `H-O` / `H-k` / `H-K`
@@ -99,25 +168,35 @@
 普通 `M-x` 仍走默认 `amx` 行为。
 
 `H-,` 内部按键按用途分组：board 入口用 `c/g/L/j/a/h`，菜单入口用
-`p/w/r/k/t/o`，代码和运维入口用 `./e/d/D/u/x`，其中 `x` 打开
+`C/p/w/r/k/t/o`，其中 `C` 打开原生 Customize 设置菜单；代码和运维入口用 `./e/d/D/u/x`，其中 `x` 打开
 `telescope`；其他工具用
-`m/s/n/J/R/P`。
+`K/G/f/i/m/s/n/R/P`，其中 `K` 查看当前模式实际按键、`G` 打开完整键位指南，
+`f` 是文件菜单，`i` 是编辑菜单。
 
-打开 `.md`、`.markdown` 或 `README.md` 时，Emacs 会直接把文件交给
-Noema Web/Appine，并关闭临时 Markdown buffer。Markdown 编辑、保存、
-文件树和 graph 都在 Noema 内完成；Emacs 只保留粗粒度 bridge 命令。
+打开 `.md`、`.markdown` 或 `README.md` 时，Emacs 会按当前 Markdown 打开设置
+交给 Noema Web/Appine，页面成功打开后才关闭临时 Markdown buffer。等待 Noema
+启动时，占位页按 `g` 重试、`e` 改用 Emacs 编辑原文件、`q` 关闭；超时后仍可
+重试，选择原生编辑会取消旧的 Noema 打开请求。`M-x markdown-edit-raw` 也可直接
+进入原生编辑。使用 Noema 页面时，Markdown
+编辑、保存、文件树和 graph 都在页面内完成；Emacs 保留粗粒度 bridge 命令。
 
 `H-o` 打开 Noema 全功能 hub（单页 Transient）：
 
+`SPC N` 是 Noema 的 leader 分组：`m` 菜单、`a` 日程、`d` 文件、`v` Git、
+`S` Wiki 索引状态、`e` 原始 Markdown、`o` 打开当前笔记。运行和调试继续使用
+`SPC r`：`r R` 重跑上个运行 profile，`r V` 恢复状态快照，`r d` 调试 profile，
+`r o` / `M-x output-menu` 输出菜单；`r O` / `M-x output-switch` 打开本 frame
+最近一份仍在的输出。关闭最新输出后，会找回本 frame 上一份输出。
+
 | 分组 | 常用键 |
 |------|--------|
-| **Note (web)** | `o` 打开当前, `O` 选文件, `s` 保存, `r` 刷新, `!f` 手动从磁盘重载, `%` AI/agent 子菜单, `f` 聚焦, `e` Esc/normal, `v` 切换源码视图, `R` Emacs 原始编辑 |
+| **Note (web)** | `o` 打开当前, `O` 选文件, `s` 保存, `!d` 移到废纸篓, `r` 刷新, `!f` 手动从磁盘重载, `%` AI/agent 子菜单, `f` 聚焦, `e` Esc/normal, `v` 切换源码视图, `R` Emacs 原始编辑 |
 | **Find/Browse** | `j` 查找笔记, `/` 搜索（支持 `intitle:` `incategory:` `linksto:` 操作符）, `l` 最近, `.` 跟随链接, `b` 反向链接, `x` 相关, `G` 跳转定义 |
 | **Insert** | `i` roam 链接, `I` TOC 链接, `t` tag id, `T` tag-id 链接, `w` 复制链接到此处, `c` note-code |
-| **Knowledge** | `n` 新笔记, `d` 今日日记, `a` 按标签浏览, `C` 分类层次浏览（MediaWiki Category），`g` roam graph, `k` 任务, `A` 日程, `L` 日程日志, `F` 当前文件任务跳转, `M` 维护仪表板 |
-| **Special pages (wiki)** | `!` 报告总入口, `!w` Wanted Pages, `!o` 孤立页, `!d` 死端页, `!u` 无标签页, `!h` 最多链接页 |
-| **Index/Files** | `y` 同步 DB, `u` 增量更新, `Z` 全量重建, `S` DB 状态, `D` dired, `m` 移动笔记（自动重写链接）, `V` magit, `q` 停止服务 |
-| **Format (web)** | `1-9/0` 粗/斜/代码/高亮/删除线/引用/列表×3/代码块, `=` 勾选/取消选中行的任务项, `$` 行内公式包裹/取消, `p` 段落菜单, `z` 表格, `E` 数学块, `C` 目录, `U/Y` undo/redo |
+| **Knowledge** | `h` Wiki 首页, `n` 新页面, `d` 日记, `a` 标签, `C` 命名空间, `g` 图谱, `k` 任务, `A` 日程, `L` 日程日志, `F` 当前文件任务, `M` 仓库管理 |
+| **Wiki pages** | `!r` 网页报告总览, `!n` 详细报告菜单, `!w` Wanted Pages, `!p` 所有页面, `!s` 同步 |
+| **Index / Host** | `y` 增量刷新, `Z` 原子重建, `S` 索引状态, `P` 暂停/恢复, `H` 运行状态, `D` dired, `m` 移动笔记, `X` magit, `q` 停止服务 |
+| **Format (web)** | `1`–`5` 粗/斜/行内代码/高亮/删除线, `6`–`9` 引用/列表/任务, `0` 代码块, `$` 行内公式, `E` 数学块, `p` 标题菜单, `z` 表格, `u` 目录, `U`/`Y` 撤销/重做, `V` 粘贴；`^`/`_` 上下标, `N` 脚注, `K` 修订, `@` 属性, `[`/`]` 移块 |
 
 **Wiki 搜索操作符**（`/` 搜索时可混用）：
 - `intitle:关键词` 或 `title:关键词` — 仅匹配标题
@@ -148,8 +227,8 @@ Lean 服务器挂掉时 lsp-mode 会自动重启，infoview 也会自己指到�
 Noema 任务使用 `@@todo(state) [text] {key: value}`，例如
 `@@todo(doing) [Write proof] {prio: A, ddl: 2026-05-20, repeat: +1w}`。
 原生 Agenda 和托管 Web 共用 scope 索引与任务服务，修改写回原始 Markdown
-命令或 `.noema` WorkNode 元数据。`M-x my/noema-roam-agenda` 或 dispatch `A`
-打开原生 Agenda；`my/noema-roam-agenda-web` 保留 Web 的 Gantt 等视图。
+命令或 `.noema` WorkNode 元数据。`M-x noema-agenda`、`F9`、`H-a` 或 dispatch `A`
+打开原生 Agenda；`M-x noema-agenda-web` 打开含 Gantt 等视图的 Web Agenda。
 原生 `c` 和 Web New todo 共用 Task / Deadline / Appointment 模板；`C-u c`
 可改目标 Markdown 文件。保存失败保留输入，原生再按 `c` 继续修改。
 `my/noema-agenda-capture-templates` 可配置字段、默认值和按日期命名的文件，
@@ -173,7 +252,7 @@ Graph 搜索框支持全文词和
 所有 Noema 页面（md 编辑器、Jupyter output、Wiki、Agenda、Config、Slides）都把 `H-`（Option）
 组合键、`C-x` / `C-c` 前缀序列、`C-g`，以及 `M-x` / `M-w` / `M-W` / `M-q` / `M-o` 交给 Emacs；
 这些键在 CodeMirror 自己的按键表之前被截获，所以 `C-c C-e` 不会再同时把光标移到行尾，
-`H-l` / `H-u` 也不会执行两次。`Cmd`+方向键（`M-<left>` 等）也交给 Emacs，走 windmove
+`H-u` 也不会执行两次。`Cmd`+方向键（`M-<left>` 等）也交给 Emacs，走 windmove
 直接切到相邻窗口，和普通 buffer 里一样；md 里行首/行尾请用 `0`/`$` 或 `Home`/`End`，
 `Shift+Cmd+方向键` 和 `Option+方向键` 仍是页面里的选择与按词移动。
 
@@ -248,14 +327,32 @@ header-line 显示当前视图状态，正文使用工具栏、分组、状态�
 `g` 回根目录、`.` 回当前 note context、`u` / `^` 上一级、`r` 刷新和 `i`
 直接插入当前目标。这些是 Emacs buffer 的界面和按键，不影响 Noema Web UI。
 
-`C-c r n` / Roam 菜单里的 `Create node` 打开唯一的 `*roam-new-node*` 原生新建面板；
-不再并列显示含义相同的 New note / Create node 两个入口。字段与 Noema create-node
-一致：Type、Title、Save path、Kind、Template、Tags；Title、Save
-path、Kind 和 Tags 可在面板里直接输入，`c` 创建，`t` / `RET` 切换 roam / regular，
-`T` 选模板，`R` 重置。创建实际走
+`M-x roam-new-note`、`C-c r n` / Roam 菜单里的 `Create node` 打开
+当前 frame 的新建面板（首个名为 `*roam-new-node*`），默认创建可链接的 Roam node。
+`M-x markdown-new-document` 打开同一面板，默认创建普通 Markdown，路径从当前
+笔记目录开始。先在 `CREATE AS` 行按 `RET` 或 `t` 选择两种文档类型，再按 `T`
+挑该类型的模板；`c` 创建，`R` 重置。Title、Save path、Render kind 和 Tags
+可以直接输入。`RENDER KIND` 控制 Noema 页面的呈现方式，与是否加入 Roam 图无关。
+同一 frame、同一类型和目录的命令重复触发时会回到未提交的表单，不清掉已输入内容；
+另一 frame 有独立草稿。`R` 只重置当前文档类型，`q` 取消并释放本 frame 的表单，
+关闭 frame 也清理它；随后再次打开会得到新草稿。刷新模板目录会保留正在
+输入的字段，并重新检查当前模板是否仍适用于该类型。
+创建成功后按 Markdown 的现有打开设置进入 Emacs 或 Noema；Noema 冷启动时会保留
+文件占位页等待页面就绪。如果文件已经创建但打开报错，表单改为“已创建”状态：`c` 只重试
+打开同一文件，不会再运行创建；`R` 开始新草稿，`q` 关闭表单，均保留已创建的文件。
+创建实际走
 Noema runtime，所以默认值、路径校验、meta、模板变量和 tabstop 展开逻辑保持一致。
 Markdown 模板统一存放在 `templates/noema/`，供 Emacs 启动的 Noema 与
-Roam Node 共用。Tags 在面板中显示为 `#tag`，创建前按 runtime 规则去掉显示用 `#`、
+Roam Node 共用。`roam` 是可链接的知识节点：带稳定 ID、参与 Roam 图；
+`regular` 是普通文档：不分配 Roam ID，meta 中写入 `roam: off`。
+已有的普通 Markdown 即使写了 `#+begin meta` 或使用 Noema 语法，只要没有
+显式 `id`，就不会进入 Roam 图；`roam: off` 会显式排除已有 ID 的文档。
+选模板时只显示对应类型：Roam 有通用笔记、原子想法、概念、论断与证据、
+文献阅读、来源卡片、研究问题、实验、人物、主题地图、决策、日记和周回顾；
+普通 Markdown 有空白文档、会议纪要、项目简报、任务计划、报告、操作指南、
+规格说明、检查清单、实验日志、文章草稿和项目 README。
+模板列表从运行时读取；运行时不可用时不会显示虚构模板名。
+Tags 在面板中显示为 `#tag`，创建前按 runtime 规则去掉显示用 `#`、
 大小写去重并排序，保证面板、payload 和最终 meta 一致。所有新建 node 的 meta 都会带
 一个空的嵌套 `summary` block，可直接在 Abstract
 或 Properties 中编辑；模板自带 meta 时也会自动补齐，不需要每个模板重复声明。
@@ -289,6 +386,26 @@ Markdown 展示成基础只读演示；没有标题时整篇作为一页。它�
 Reveal 初始化、重建和销毁管线，仅关闭交互扩展。该页面不加载 Jupyter cell，也不注入
 `.slides` JavaScript/CSS mirror；同一 Tools 中的 **Slides theme** 决定新页面的亮暗主题。页面
 保存后自动刷新，并在关闭时销毁 Reveal 实例。
+新页面顶栏的返回箭头直接回到这篇 Markdown 的编辑页。
+
+### LiveTeX 公式键盘
+
+光标位于行内或块级公式内时，按 `Cmd-/` 打开完整的 LiveTeX 可视化编辑；也可在公式上
+右键选择 **Open LiveTeX** 可打开完整的可视化编辑。LiveTeX 顶部的 ✓ 应用公式，
+右上角 × 取消本次修改并关闭，原 Markdown 公式保持不变。**∑ 公式工具** 是独立的分类浮层，
+提供结构、微积分、希腊字母、关系、代数与群论、集合、箭头、函数、物理、矩阵、样式，
+以及搜索、收藏和自定义模板。代数分类包括左／右半直积、花环积、正规子群关系、函子与群名；
+搜索可用中文、LaTeX 命令或分散的英文词（例如 `semi group product`）。
+在 Markdown 中按 `Cmd-Shift-/` 直接打开工具板，无须先进入 LiveTeX；再次按下或按 `Esc` 关闭。
+默认选中分类，`Tab` / `Shift-Tab` 切换分类，分类末尾的 `Tab` 或 `Cmd-F` 进入搜索；
+方向键选择磁贴，`Enter` 插入到当前公式源码，普通文本位置会新建行内公式。
+从 Markdown 正文直接打开时，选中一个磁贴即自动关闭工具板；从 LiveTeX 弹窗打开时可连续选择。
+在空的 `\(\)` 中按 `Enter`，可把公式源码展开为多行；继续输入和换行时不会触发 Markdown
+列表或引用的自动续行。离开源码后它仍作为**行内公式**嵌在原段落，KaTeX 按 `\(…\)`
+的行内语义渲染。Insert 模式下用左右方向键从公式两端进入源码；从相邻行用上下方向键
+跨过折叠公式时也会进入。公式内部的空白行是 TeX 段落分隔，保留为源码而不折叠成公式。
+单行和跨行公式展开后使用相同的 TeX 源码字体、底色与语法高亮。收起后的公式使用
+KaTeX 默认字体，变量、黑板粗体、运算符与可伸缩结构由 KaTeX 分别绘制。
 
 在某一页标题后写 `@@slides(reveal) []`，该标记在编辑预览中隐藏，并将那一页交给原生 Reveal
 HTML：顶层 `<section data-background-color="…">…</section>` 会被直接接入 Reveal，支持
@@ -375,7 +492,7 @@ Remote target 解析：本地 target 用本机 PATH 上的 latexmk，远程 targ
 
 - `C-c C-p`：编译并查看（`TeX-command-run-all`）。
 - `C-c C-g` / `M-RET`：正向跳转到当前源码位置对应的 PDF 位置；PDF 不存在时会先编译。
-- `M-x my/latex-preview-dispatch`：统一菜单，可正向同步、打开已构建的 PDF、编译并查看、或走
+- `M-x latex-preview-menu`：统一菜单，可正向同步、打开已构建的 PDF、编译并查看、或走
   AUCTeX 自带的 `TeX-view`。
 
 远程 target 上的 buffer 目前会在执行构建命令时直接报错拒绝：AUCTeX 自身的进程启动用的是
@@ -389,18 +506,17 @@ Agenda 卡片在启动画面最下面（Recent Files / Projects 之后、footer 
 仍在上面。
 
 - 点标题「Agenda · next 7 days」打开 Noema Agenda；点任务标题直接定位到该任务。
-- Agenda 数据是异步取的：web-host 还在启动时先显示 `Agenda is loading…`，host 就绪
-  后自动补上；期间每 `my/dashboard-agenda-retry-interval` 秒重试一次，超过
-  `my/dashboard-agenda-timeout` 秒仍无应答就显示
-  `Agenda unavailable · … [retry]`，点 `[retry]` 重新拉取（等价于刷新 Dashboard）。
-  两个参数都在 config 注册表里（`M-x config-board`，group `appearance`）。
+- 首次没有本机缓存时显示 `Agenda cache is not ready`；进入 Dashboard 后异步查询
+  Noema host，成功时保存供下次启动先显示。一次查询超过 15 秒会显示
+  `Agenda unavailable · … [retry]`；点 `[retry]` 再发起查询。Dashboard 隐藏时
+  不发起查询，重新进入时再刷新。多个同时触发的刷新共用一次请求。
 
 ## 2. Leader 键分组
 
 ### 文件 `SPC f`
 
 - `SPC f f`
-  打开文件
+  打开文件；输入时 `Cmd+Shift+Enter` 改在新 Emacs 窗口打开
 - `SPC f F`
   其他窗口打开文件
 - `SPC f r`
@@ -417,33 +533,43 @@ Agenda 卡片在启动画面最下面（Recent Files / Projects 之后、footer 
 ### Buffer / Bookmark `SPC b`
 
 - `SPC b b`
-  切 buffer
+  与 `C-x b` 相同的 Consult buffer 入口
+- `SPC b B` / `H-B`
+  使用相同候选，在其他 Emacs 窗口打开
+- `SPC b F` / `M-x buffer-open-new-frame`
+  从当前 frame/workspace 的 buffer 候选中选择，并在**新建的** Emacs frame 打开；
+  `<o` 可选择其他 frame/workspace 的 buffer。Noema Markdown 页面会创建独立 pane。
+  原生 `C-x 5 b` 仍按 Emacs 的规则在其他 frame 打开，可能复用已有 frame。
 - `SPC b .`
-  打开 bookmark 管理菜单
+  打开 `bookmark-actions-menu`；也可用 `M-x bookmark-actions-menu` 搜索
 - `C-x r .`
-  打开 bookmark 管理菜单
+  打开同一个 `bookmark-actions-menu`
 - `C-x r j`
-  跳转 bookmark（带 preview）
+  用 Consult 查找书签；选中候选时按需预览
 - `C-x r l`
-  切换当前行书签
+  打开 Emacs 原生书签列表
 - `C-x r n` / `C-x r p`
   下一个 / 上一个行书签
 - `SPC b c`
   clone indirect buffer
 - `SPC b x`
-  `scratch-buffer`
+  `persistent-scratch`：切换本 frame 的持久 `*scratch*`；原生 `M-x scratch-buffer` 仍可用
+- `SPC p x` / `M-x project-scratch`
+  切换当前项目的持久 scratch；同名项目各有独立 buffer 和保存文件
 - `SPC b z`
-  bury buffer
+  埋藏当前 buffer；无上一页时显示 dashboard，临时分屏则关闭
 - `SPC b j`
-  跳转 bookmark（带 preview）
+  用 Consult 查找书签；选中候选时按需预览
 - `SPC b J`
-  在其他窗口跳转 bookmark
+  用 Emacs 原生书签命令在其他窗口跳转
 - `SPC b m`
-  设置 bookmark
+  用 Emacs 原生 `bookmark-set` 设置书签
+- `SPC b M`
+  用原生 `bookmark-set-no-overwrite` 新增同名书签，避免覆盖现有记录
 - `SPC b r`
-  重命名 bookmark
+  用 Emacs 原生 `bookmark-rename` 重命名书签
 - `SPC b l`
-  打开 bookmark 列表；`RET` 跳转，`D` 删除，当前项目条目优先
+  打开 Emacs 原生书签列表；可按列排序、标记并批量删除
 - `SPC b t`
   切换当前行书签
 - `SPC b n` / `SPC b p`
@@ -451,10 +577,13 @@ Agenda 卡片在启动画面最下面（Recent Files / Projects 之后、footer 
 - `SPC b L`
   直接设置当前行书签
 
-`SPC b j` / `C-x r j` 和 `SPC SPC m` 使用同一个 bookmark picker：
-候选里会显示 bookmark 名称、类型、项目、文件、行号和当前行摘要；当前项目的
-bookmark 排在前面。上下移动候选时会预览目标位置，确认后跳转。没有 bookmark
-时会打开 bookmark 列表，方便直接管理。
+`SPC b j` / `C-x r j` 和 `SPC SPC m` 使用 Consult 的同一个 bookmark picker。
+上下移动候选时按需预览目标位置，确认后由 Emacs 原生 bookmark 跳转；没有匹配项时
+Consult 也允许创建新书签。列表使用 Emacs 原生的 `list-bookmarks`，不会为了显示所有
+候选而访问每一个书签文件。书签沿用 Emacs 的全局列表；从当前 frame 跳转，
+`SPC b J` 则在当前 frame 的其他窗口打开。菜单中的普通设置、同名新增、重命名和删除
+也直接使用原生命令；行书签切换和跳转是配置扩展。从 Remote buffer 设置书签时，
+默认书签文件仍保存在本机。
 
 ### 编辑 `SPC e`
 
@@ -481,6 +610,11 @@ bookmark 排在前面。上下移动候选时会预览目标位置，确认后�
 密码/密钥，记进 `var/remote/` 并直接打开。Remote 面板（`SPC o R`）上：`m` 记住
 一台手动输入的机器，`M` 管理这些机器，`F` 打开 target 文件夹并弹出传输菜单，
 `t` 看传输队列。
+
+Remote 面板和路由、连接历史页按 `q` 返回上一页；历史页退出后会释放。
+同一个 frame 再开 Remote 面板会保留排序，不同 frame 的面板和历史页各自显示。
+临时机器列表也按 `q` 返回，并在各 frame 保留自己的排序。
+`M-x remote-doctor` 的报告按 `g` 刷新、`q` 返回；`C-u g` 会连接 target 执行探测。
 
 传输是 Dirvish 里的菜单，不是单独的界面：在任何文件夹里按 `M`（或 `C-c C-t`，
 `M-x remote-files`），`c` 把标记的文件送到对面，`g` 从对面取文件，`s` / `r`
@@ -535,8 +669,10 @@ bookmark 排在前面。上下移动候选时会预览目标位置，确认后�
   stage 当前 hunk
 - `SPC g h`
   查看当前 hunk
-- merge conflict 文件内
-  `o` ours，`t` theirs，`b` both，`B` base，`n` / `p` 或 `[c` / `]c` 跳冲突，`e` 进 `ediff`，`q` 打开冲突菜单
+- merge conflict 文件内：`M-x merge-conflict-menu` / `SPC g m` 打开冲突菜单；
+  Emacs 原生 `C-c ^` 前缀也保留。在 Evil normal 状态可直接用 `o` ours、`t` theirs、
+  `b` both、`B` base、`n` / `p` 或 `[c` / `]c` 跳冲突、`e` 进 `ediff`、`q` 打开菜单；
+  退出 `smerge-mode` 后这些单键恢复原义。
 - `gittree` buffer 内
   `RET` / `o` 或鼠标点 commit 查看当前 commit，`n` / `p` 上下跳 commit，`y` 复制 hash，`g` 刷新，`q` 退出回原 buffer
 
@@ -560,6 +696,8 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC h f`
   `helpful-callable`
 - `SPC h c`
+  设置菜单 `config-dispatch`；在菜单里按 `c` 打开 `config-board`
+- `SPC h C`
   `helpful-command`
 - `SPC h v`
   `helpful-variable`
@@ -567,6 +705,10 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   `helpful-key`
 - `SPC h K`
   以只读方式打开本快捷键索引
+- `SPC h m`
+  显示当前 major mode 的实际键位（`mode-keybindings`）
+- `SPC h H` / `SPC h i`
+  健康检查菜单 / 本次启动统计
 - `SPC h w`
   打开 `*Warnings*` 日志
 - `SPC h d`
@@ -577,14 +719,16 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 ### Code `SPC c`
 
 - `SPC c ?`
-  diagnostics hub
-  统一入口：当前 / 项目 picker、buffer / project panel、error / warning / note 过滤都在这里
+  diagnostics menu
+  统一入口：当前 buffer 面板、项目原生 Flymake 列表，以及按严重度筛选的 picker
+- `SPC c b` / `SPC c B`
+  配置编译板 / 编译菜单
 - `SPC c !`
-  当前 buffer diagnostics picker
+  当前 buffer 的 problems 面板
 - `SPC c a`
   code actions
 - `SPC c .`
-  code menu；`b` build，`B` rerun build，自动识别常见的 `make` / `cmake` / `ninja`
+  code actions menu；`b` build，`B` rerun build，自动识别常见的 `make` / `cmake` / `ninja`
 - `SPC c f`
   format buffer
 - `SPC c r`
@@ -598,6 +742,8 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   semantic-token 预取只覆盖可见区上下的小段缓冲，服务器缓存仍保留完整状态
 - `SPC c s`
   语言服务器菜单，可以进 Hub / Doctor / 调参 / log / session / config
+- `SPC c S`
+  搜索当前 workspace 的语言服务器符号
 - `SPC c i`
   `show-imenu`
   左侧 smart-toggle `treemacs`，并跟随当前文件和光标所在 symbol。展开文件后
@@ -628,14 +774,16 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   当前项目测试
 - `SPC c T`
   重跑上次测试
+
 - `SPC c c`
   `compile`
 - `SPC c C`
   `recompile`
 - `SPC c D`
-  当前 buffer diagnostics panel
+  当前 buffer 的 Diagnostics 面板；错误、警告、提示共用当前 frame 的一个面板，
+  `e` / `w` / `n` 筛选，`d` 显示全部，`q` 返回来源
 - `SPC c P`
-  当前项目 diagnostics panel
+  切换当前项目的 Emacs 原生 Flymake 诊断列表；包含未打开文件的已知诊断
 - `SPC c x`
   `quickrun`
 - `SPC c y`
@@ -643,6 +791,10 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   选中区域：提示输入 tag，在区域首行前自动插入 `@aaronnote TAG` 注释标记，然后复制引用。
   未选中：查找光标上方最近的 `@aaronnote`/`@note-code` 标记，复制对应引用。
   Path 规则：`/...` 表示从当前 content root 开始；roam vault 内是 roam-root，其他项目文件是 project.el 根目录。裸相对路径保留为从当前 note 目录开始。
+
+测试 runner 优先按当前文件语言选择：混合仓库中的 Go、Python、Rust 和 Node 文件各走
+自己的工具；没有可识别源文件时按项目标记回退。Go 根目录文件的“当前文件”范围只测
+根包，项目范围才使用 `./...`。项目本地 `:test` 覆盖仍优先于自动检测。
 
 ### Open `SPC o`
 
@@ -765,15 +917,52 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 ### Tab `SPC t`
 
 - `SPC t n`
-  新 tab
+  新建 tab 与同名 Perspective workspace
+- `SPC t N`
+  指定新 tab/workspace 名称；与现有 tab 或 workspace 重名会提示
 - `SPC t t`
-  切 tab
+  调用 Emacs 原生 `tab-switch`
+- `SPC t d` / `SPC t D`
+  原生 `tab-close` / `tab-close-other`，只关闭窗口布局；Perspective workspace 和 buffer 保留
+- `SPC t g`
+  工作区菜单；其中 `d` 明确删除 Perspective workspace 及其专属 buffer，并关闭同名 tab；
+  若它是唯一的 tab，则将该 tab 改名为保留下来的 workspace
 - `SPC t r`
-  重命名 tab
+  同时重命名当前 tab 与 Perspective workspace
 - `SPC t [`
-  上一个 centaur tab
+  上一个 Perspective workspace
 - `SPC t ]`
-  下一个 centaur tab
+  下一个 Perspective workspace
+
+顶部的 workspace tab 使用 Emacs 原生 frame 边界。居中的 buffer tab 只列当前 frame
+访问过、且属于当前 workspace 的 buffer；Noema 的 Markdown 页面也以笔记文件名入列。
+同一个 buffer 在两个 frame 中打开时，会出现在两边，左右移动 tab 只改变本 frame 的顺序。
+`M-x ibuffer` 保留按类型分组，新增 `Frame` 列显示 `F1`、`F2` 等访问过该 buffer 的
+frame；`s F` 可按当前 frame 优先排序。后台基础设施 buffer 不显示 frame 标记。
+`SPC r s` / `M-x workspace-session-save` 保存所有 Perspective frame 的工作区布局；
+`SPC r l` / `M-x workspace-session-load` 从同一文件恢复。路径由 Perspective 原生的
+`persp-state-default-file` 设置，原生 `persp-state-save` / `persp-state-load` 也使用它。
+工作台保存入口原子替换状态文件，失败时保留上一次文件；加载会按 Perspective 的
+原生行为恢复 frame，重复加载可能再创建 frame。退出自动保存默认关闭，可通过
+`my/session-auto-save` 启用。未关联文件的 buffer 不在 Perspective 状态文件中，
+持久 scratch 的正文由其独立状态文件保存。
+
+ibuffer 仍是全局总览；日常 `C-x b`、`H-b`、`SPC b b` 的 Buffer 候选则从本
+frame/workspace 开始，通过 `<o` 临时跨越边界。埋藏 buffer 只从可见 tab 消失，
+仍能在本 frame 的切换候选与 ibuffer 的 `Frame` 标记中找到。
+在 ibuffer 中访问同一 Noema 笔记的重复条目时，会打开它的主页面；`RET`、
+`M-RET`、单窗口前缀和不选中窗口仍沿用 ibuffer 的原生操作，现有标记保留。
+
+ibuffer、帮助页和其他用 `quit-window` 退出的临时页面，优先返回同一窗口的上一页；
+临时创建且无返回页的窗口会关闭，最后一个窗口无可返回页时显示 dashboard。
+如果弹窗有精确的来源页，仍由 Emacs 原生返回；仅在落到 scratch／dashboard 时补选
+同窗口历史，补选也遵守该 frame 的 buffer 过滤规则，不会把旧 xwidget 页当作普通候选。
+`SPC b z` 和最后一个 frame 上的 `H-w` 保留原本的埋藏动作，埋藏后也按此规则返回。
+`Cmd+Shift+W`（Emacs 的 `M-W`）仍从当前 Perspective 弹出 buffer 列表供选择；
+选中的是当前页时，杀掉后按同一规则收尾。`C-x k` 仍是原生 Perspective 选择器。
+测试、任务、构建和运行 profile 的输出按发起的 frame 命名为 `*test F1*` 等，
+各 frame 独立保存“重跑上次”与最近输出。输出面板的 `R` 仍用原生 `recompile`
+重跑该输出 buffer 自己的命令；直接 `M-x compile` 仍采用 Emacs 原生命名。
 
 ### Project `SPC p`
 
@@ -782,7 +971,7 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 - `SPC p p`
   切项目
 - `SPC p o`
-  打开项目工作台式入口
+  旧快捷键，与 `SPC p p` 进入同一项目工作流
 - `SPC p f`
   当前项目找文件
 - `SPC p s`
@@ -797,8 +986,8 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
   手动添加项目
 - `SPC p D`
   批量扫描目录下的项目
-- `SPC p x`
-  彻底移除一个项目及其相关状态（包含 Projectile、`project.el`、Treemacs、perspective、项目 buffer/ghostel）
+- `SPC p .` 后按 `x`
+  彻底移除一个项目及其相关状态（包含 Projectile、`project.el`、Treemacs、perspective、项目 buffer/ghostel）；`SPC p x` 打开项目 scratch
 - `SPC p l`
   查看当前项目 project-local overrides（来自 `my/project-local-overrides` 全局配置）
 - `SPC p L`
@@ -842,13 +1031,14 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 - `SPC SPC !` / `SPC SPC ?`
   当前 buffer / 当前项目 diagnostics picker
 - `SPC SPC B` / `SPC SPC D`
-  当前 buffer / 当前项目 diagnostics board，适合长期打开查看和过滤
+  当前 buffer 自定义诊断面板 / 当前项目原生 Flymake 列表；项目列表按项目分开，
+  会随 Flymake 自动更新，并包含未打开文件的已知诊断
 - `SPC SPC e` / `SPC SPC w` / `SPC SPC n`
   当前 buffer errors / warnings / notes picker，移动候选时预览，确认后跳转
 - `SPC SPC E` / `SPC SPC W` / `SPC SPC N`
   当前项目 errors / warnings / notes picker，移动候选时预览，确认后跳转
 - `SPC SPC d`
-  diagnostics hub
+  diagnostics menu
 - `C-s`
   当前 buffer 搜索
 - `C-x C-r`
@@ -870,6 +1060,12 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
 
 ## 4. 结构导航
 
+- `M-.` / `gd` / `SPC n d`
+  查找定义
+- `M-?` / `gr` / `SPC n r`
+  查找引用
+- `M-,` / `SPC n b`
+  返回上一跳；`SPC n f` 前进。优先使用当前窗口的跳转历史，历史中没有可用跳点时使用 Emacs 的 xref 历史
 - `SPC n a`
   跳到当前函数开头
 - `SPC n e`
@@ -878,10 +1074,10 @@ Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac
   上一个函数
 - `SPC n ]`
   下一个函数
-- `SPC n u`
-  跳到外层结构
-- `SPC n l` / `C-c C-j`
-  打开光标处或选区中的 `file:line:column`；前缀参数在其他窗口打开
+- `SPC n u` / `M-x structure-up`
+  跳到外层结构；有 Tree-sitter 语法树时按结构节点上跳，否则使用 Emacs 原生括号导航
+- `SPC n l` / `C-c C-j` / `M-x open-file-location`
+  打开光标处或选区中的 `file:line:column`；前缀参数在其他窗口打开。`/fs:` buffer 中的绝对路径仍属于当前 target；行号无效时保持原窗口
 - `[f`
   上一个函数
 - `]f`
@@ -1029,6 +1225,10 @@ GUI frame 的两侧 fringe 分工如下：
 - `C-c o f`
   `dirvish-fd`
 
+`C-c o d` 会根据窗口情况打开普通单窗口视图或带左侧上级目录和右侧预览的视图。
+在 Dirvish 中按 `m l`（也可按 `M-t`，或用 `M-x dirvish-layout-toggle`）可随时在两者之间切换；
+切换只改变当前 Dirvish 会话的布局。
+
 Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger 那一套），
 定义在 [lisp/init-dirvish-keys.el](../lisp/init-dirvish-keys.el)。不经 Dirvish 的
 纯 Dired 仍是 Emacs 原生键位。
@@ -1041,37 +1241,55 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 | `C-u` / `C-d`，`C-b` / `C-f` | 半页 / 整页 |
 | `g g` / `g b`（或 `G`） | 顶部 / 底部 |
 | `g h` `g a` `g d` `g p` `g v` `g m` `g w` `g u` `g c` `g l` | Home、Desktop、Downloads、Pictures、Movies、Music、Documents、Public、`~/.config`、`~/.local` |
-| `g SPC` / `g f` / `g r` | 输入目录跳转 / 跟随符号链接 / 刷新 |
+| `g SPC` / `g f` / `g r` | 从光标所在目录补全并跳转 / 跟随符号链接 / 刷新 |
 | `SPC` | 选中 / 取消选中并下移 |
 | `C-a` / `C-r` / `Esc` | 全选 / 反选 / 清除选择 |
 | `y` / `x` | 复制 / 剪切选中的文件（没选就是光标所在项） |
-| `p p` / `p f` | 粘贴 / 强制覆盖粘贴。源文件在另一台机器上时改为排一个 rsync 传输任务，不阻塞 |
+| `p p` / `p f` | 粘贴到光标所在目录 / 强制覆盖粘贴。跨目标源文件按来源目标分别排 rsync 任务，不阻塞 |
 | `Y` / `X` | 取消复制 / 剪切 |
-| `p l` / `p L` / `p h` | 粘贴为符号链接（绝对 / 相对）/ 硬链接 |
+| `p l` / `p L` / `p h` | 在光标所在目录建符号链接（绝对 / 相对）/ 硬链接；加前缀参数可另选目标目录 |
+| `p m` | Dirvish 原生复制粘贴菜单；其中复制、移动和链接也默认使用光标所在目录 |
 | `d` / `D` | 移到回收站 / 永久删除（都会先确认） |
-| `a`（或 `c r`） | 新建文件，名字以 `/` 结尾则新建目录 |
+| `a`（或 `c r`） | 在光标所在目录新建文件；光标在文件上则取其父目录，输入以 `/` 结尾则新建目录；提示可补全路径 |
 | `r r` / `r i` / `r a` / `r f`（`r c`） | 重命名：光标在扩展名前 / 开头 / 末尾 / 清空 |
 | `c m` | 重命名并清空文件名，保留扩展名 |
-| `c c` / `c d` / `c f` / `c n` | 复制路径 / 目录路径 / 文件名 / 不含扩展名的文件名 |
+| `c c` / `c d` / `c f` / `c n` | 复制路径 / 光标所在目录路径 / 文件名 / 不含扩展名的文件名 |
 | `RET` | 在 Emacs 里打开 |
+| `Cmd+Shift+Enter` | 在独立的新 Emacs 窗口打开文件或目录；`M-x dirvish-open-new-frame` 可搜索到相同动作 |
 | `o o` | 用系统默认程序打开 |
 | `o c`、`:` / `O`、`;` | 对文件运行 shell 命令：等待 / 异步 |
-| `S` | 在当前目录开终端 |
+| `S` | 在光标所在目录开终端 |
 | `f` | 过滤（`dirvish-narrow`） |
 | `/`，`n` / `N` | 搜文件名，下一个 / 上一个匹配 |
-| `s` / `z` / `Z` | fd 搜索 / 模糊查找文件 / zoxide 跳转 |
+| `s` / `z` / `Z` | 从光标所在目录 fd 搜索 / 模糊查找文件；zoxide 跳转 |
 | `.` | 显示 / 隐藏 dotfiles |
 | `m s` `m p` `m b` `m m` `m o` / `m n` | 显示详情（大小、时间、权限、所有者）/ 只显示文件名 |
+| `m l` / `M-t` | 切换普通视图与左侧上级目录、右侧预览的布局 |
 | `, m` `, M` `, b` `, B` `, e` `, E` `, a` `, A` `, n` `, N` `, s` `, S` | 排序：修改时间、创建时间、扩展名、字母、自然、大小；大写为倒序 |
 | `, ,` | Dirvish 自带的排序菜单 |
 | `TAB` | 展开 / 折叠子目录（原地树形） |
 | `S-TAB` | 文件信息菜单 |
 | `t`，`1`–`9`，`-` / `=`，`_` / `+` | 新标签页、切到第 N 个、上一个 / 下一个、与左 / 右交换 |
 | `w` | 任务管理（皮卡丘的 `*Activity*`） |
-| `M` | 文件传输菜单（rsync 上传 / 下载 / 同步），见 [remote-files.md](remote-files.md) |
+| `M` | 光标所在目录的文件传输菜单（rsync 上传 / 下载 / 同步），见 [remote-files.md](remote-files.md) |
 | `?` | 按键提示：在下方弹出这张表，`q` 关闭 |
 | `~` | Dirvish 总菜单 |
 | `q` | 退出 |
+
+常用扩展动作也可从 `M-x` 搜索：`dirvish-select-for-copy`、
+`dirvish-select-for-move`、`dirvish-paste-here`、`dirvish-create-here`、
+`dirvish-trash`、`dirvish-go-directory` 和 `dirvish-key-help`。按键直接绑定这些名称；`h` / `l` 则直接
+使用 Emacs 原生的 `dired-up-directory` / `dired-find-file`。
+固定目录跳转、排序和数字标签页只有按键入口，不占用 `M-x` 的命令列表。
+
+Dirvish 的复制、移动和链接在客户端可直接访问时沿用原生独立 Emacs 子进程，
+`/fs:local:` 等逻辑路径先转换为它可识别的本机路径。目标没有客户端可见路径时，
+同目标操作改由 Remote 框架在目标端异步执行，进入 `*Remote Transfers*` 队列；
+任务全局共用，但每个 frame 的队列表格各自保存排序和阅读位置；
+完成后刷新显示该目录的 Dired 视图，移动还刷新来源目录。已有文件在复制或移动前
+询问一次，`p f` 则直接覆盖；链接不会覆盖已有项。不同来源的文件若同名，会在排队前
+报错，避免并行任务覆盖同一个落点。跨目标复制仍用 rsync 队列，跨目标剪切不自动转成
+复制加删除。
 
 和 yazi 不完全一样的地方：
 
@@ -1120,15 +1338,27 @@ Raycast 扩展 `tools/raycast-emacs` 只有一个入口 **Emacs**,热键在 Rayc
 同时过滤三组:
 
 - **Actions** 白名单动作,回车执行;带参数的动作(比如 Open File)会再让你输入一行。
-- **Frames** 所有顶层 frame,隐藏的带 `hidden` 标记。回车聚焦(隐藏的会先显示出来),
+- **Frames** macOS 图形顶层 frame（TTY 客户端不在列表中）,隐藏的带 `hidden` 标记。回车聚焦(隐藏的会先显示出来),
   `Cmd-H` 隐藏,`Cmd-O` 只留这一个(其余隐藏),`Ctrl-X` 关闭,`Ctrl-Shift-X` 关闭其余;
   `Cmd-N` 新建,`Cmd-Shift-S` / `Cmd-Shift-H` 全部显示 / 全部隐藏。
 - **Emacs** 一行状态:可见 / 后台 / 没应答 / 没运行,以及运行时长、常驻内存、buffer 数、
   子进程数。回车显示或隐藏;没运行时回车在后台启动(第二个动作是启动并显示)。任何一行上
   `Cmd-R` 刷新,`Cmd-Shift-R` 重启;Force Quit Emacs 用于没应答的 Emacs,会先确认。
 
-执行动作、聚焦 frame、启动或重启之后,Raycast 会关闭并回到根搜索,下次打开不会停在这个
-列表里;只有隐藏和关闭 frame 会留在列表里,方便连续整理。
+每次打开 Raycast 列表都会重新确认 Emacs 状态；确认前显示 Checking，查询失败则显示
+Could not check Emacs，不会把上次缓存的没应答状态或 frame 当作当前状态。此时仍可用
+Show or Start Emacs 叫出已有窗口或重新启动，并可继续使用独立的 Noema 入口。
+修改 `tools/raycast-emacs` 的扩展源码后，在该目录运行 `npm run dev`，等显示构建成功后
+即可停止监听；`npm run build` 只检查构建，不会刷新 Raycast 中正在使用的扩展。
+
+动作和 frame 操作先取得 Emacs 的排队编号，再在限定时间内查询最终结果。
+若 Raycast 已更新而运行中的 Emacs 仍是旧协议，排队前会报错并提示重载
+`init-background.el`，不会执行一个无法查询结果的动作。
+无效编号、过期 frame、已确认的执行错误或接收前没有应答时，Raycast 提示并保留列表，
+方便修正后重试。确认成功后按原交互关闭 Raycast 或刷新 frame 列表；接收后若动作
+仍在等待 Emacs 输入，Raycast 提示结果尚未确认，并沿用该入口的退出或停留方式。
+后续由 Emacs 接管，避免重复执行。
+启动和重启继续在后台进行。隐藏和关闭 frame 会留在列表里，方便连续整理。
 
 在 Emacs 里,`SPC F h`(`my/frame-hide`)只隐藏当前 frame,不删除它,其他 frame 不受影响;
 白名单里的 Hide Frame 是同一个命令。隐藏的是最后一个可见 frame 时,Emacs 整个退到后台。
@@ -1136,9 +1366,12 @@ Raycast 扩展 `tools/raycast-emacs` 只有一个入口 **Emacs**,热键在 Rayc
 白名单是 `lisp/init-background.el` 里的 `my/background-actions`,每项是
 `(标题 命令)` 或 `(标题 命令 参数提示)`。改它不需要重新构建扩展,下次打开列表就生效;
 列表之外的命令从 Raycast 里执行不了。M-x 本身只在 Emacs 里用。
+命令行传入无效动作编号、frame 编号或操作名会直接报错，不会当成有效操作执行。
 
 动作在后台执行:只有它要读 minibuffer 或改变了主 frame 显示的内容时,Emacs 才会被叫到
-前台;自己开 frame 的动作(比如终端)只出现那一个 frame。
+前台;自己开 frame 的动作(比如终端)只出现那一个 frame。动作执行失败时会显示 Emacs，
+并在消息区写出动作名与错误。限定时间内发生的执行错误也会回到 Raycast；
+超过查询时限或需要在 Emacs 中回答提问的动作仍以 Emacs 消息区为最终反馈。
 
 ### Emacs 作为后台应用
 
@@ -1157,7 +1390,10 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
 - `bin/emacs-app show` / `hide` / `toggle`
   叫到前台 / 送回后台(`my/background-show`、`my/background-hide`)
 - `bin/emacs-app actions` / `act ID [ARGUMENT]`
-  列出白名单动作,或按编号执行其中一项
+  列出白名单动作，或按编号排队执行；`act` 返回含请求编号的 JSON
+- `bin/emacs-app result ID`
+  查询请求的 `pending`、`ok`、`error` 或 `unknown` 结果；记录仅在当前 Emacs
+  会话中短期保留，重启后不能继续查
 - `bin/emacs-app terminal`
   新开一个 Ghostel 终端,每次都是新实例,单独占一个居中的浮动 frame;在 M-x 里是
   `my/ghostel-open-new`
@@ -1167,7 +1403,7 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
   先把 Emacs 叫到前台再退出,保证它的确认提问看得见
 - `bin/emacs-app frames` / `frame focus|hide|hide-others|close|close-others ID` /
   `frame new|show-all|hide-all`
-  列出顶层 frame,对某一个操作,或对全部操作
+  列出顶层 frame，或排队操作某一个／全部 frame；`frame` 同样返回请求编号
 - `bin/emacs-app install` / `uninstall`
   编译原生模块并安装 / 移除登录 LaunchAgent `local.emacs.background`(登录时后台启动)
 
@@ -1206,7 +1442,7 @@ Emacs 崩溃或被强制退出后几秒内自己收尾退出,连同它的 kernel
 
 Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 24×16 XPM 像素图)。它**一直在**,
 没事时站着,有后台任务时开始跑,多于一个任务时在后面跟上数字。
-**鼠标左键点它打开 `M-x my/activity-board`。** 终端(无图形界面)里自动降级成颜文字
+**鼠标左键点它打开 `M-x activity-board`。** 终端(无图形界面)里自动降级成颜文字
 `ᕕ( ᴗ )ᕗ` / `ᕕ( ᐛ )ᗴ`,不会变成空白。
 
 机理只有一条链路,在 [lisp/init-activity.el](../lisp/init-activity.el):
@@ -1254,6 +1490,8 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 24×16 XPM 像素�
 
 `*Activity*` 板面是**集中入口,不是替代品**。Emacs 自己给每种后台工作都带了管理器,
 每个都比重写一遍更称职,所以板面负责「什么在跑 + 能对它做什么」,更深的细节一键交给原生工具。
+任务数据是全局的；每个 frame 有自己的 Activity 面板 buffer，筛选、定时器和阅读位置
+各自保存。`q` 仍用 Emacs 原生窗口返回；关闭 frame 时释放它的面板。
 
 **移动和其它 board 完全一致**:`j`/`n` 下移,`k`/`p` 上移,`TAB` 下一个按钮,
 `RET` 打开当前行。停止类操作**刻意避开导航键**,放在 `x`/`i`/`X`。
@@ -1264,13 +1502,13 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 24×16 XPM 像素�
 
 | 键 | 作用 |
 | --- | --- |
-| `RET` | 打开当前行(进程行 = 跳到它的 buffer;按钮行 = 按下按钮) |
+| `RET` | 打开当前行(传输任务 = 队列日志；其他进程 = 进程 buffer；按钮行 = 按下按钮) |
 | `v` | 同上,显式跳 buffer |
-| `d` | 详情:Emacs 侧字段(status/pid/type/buffer/tty/query/command)+ **OS 侧 `process-attributes`**(rss、etime、nice、majflt…) |
+| `d` | 详情:Emacs 侧字段(status/pid/type/buffer/tty/query/command)+ **OS 侧 `process-attributes`**(rss、etime、nice、majflt…)；详情页 `q` 返回 Activity 并释放临时 buffer |
 | `w` | 复制命令行到 kill ring |
 | `x` | 停止。有 owner 的走 owner 的取消路径(如 `remote-task-cancel`);**没有任何注册表认领的进程会先问一遍再杀** |
-| `i` | SIGINT,礼貌停止,让编译器/shell 有机会收尾 |
-| `X` | SIGKILL,先问一遍 |
+| `i` | Remote Task／Transfers 走 owner 取消接口，确保远端任务和传输队列记录结束状态；其他进程发送 SIGINT |
+| `X` | 先确认；Remote Task／Transfers 走 owner 取消接口，避免只杀本地 relay 而留下远端工作；其他进程发送 SIGKILL |
 
 视图控制:
 
@@ -1303,7 +1541,8 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 24×16 XPM 像素�
   弱键表里)。实测:首次渲染每个活进程 1 次调用,之后 10 次渲染 0 次。
 - 单次渲染实测 **0.37ms**,只走 `process-list` 和 `timer-list`,不碰网络和磁盘。
 - **自动刷新默认关**。打开后是一个受 `my/activity-board-refresh-interval` 约束的
-  timer,且只在板面**可见**时重绘;buffer 被 kill 时经 `kill-buffer-hook` 取消。
+  timer,只在所属 frame 的板面**可见**时重绘；板面隐藏后下一次计时即停止，
+  buffer 被 kill 或 frame 关闭时立即取消。
 
 要改皮卡丘的样子、速度或给别的慢操作也加上,见
 [settings-cookbook.md](settings-cookbook.md#我要改后台任务指示器).
@@ -1648,6 +1887,11 @@ Kernel 是全局资源，不属于 note 或单个 buffer。每个 notebook sessi
 “启动 kernelspec / 连接已有 kernel / No Kernel”；关闭 buffer 不会停 kernel，切换时
 只有无人共享的旧 owned kernel 才会关闭。kernelspec 写在 ipynb metadata，运行中的
 `kernelId` 不写入文件。
+
+如果退出 Emacs 时远端断线，已发起但未确认的 broker kernel 关闭会保存到本机状态目录。
+下次打开 `M-x jupyter-board`，切到对应 target 后可看到 **UNCONFIRMED KERNEL SHUTDOWN**；
+选中该行按 `k` 或点 **Retry shutdown**。重试会先核对目标进程仍使用该 kernel 的专属
+连接文件；目标仍不可达或 PID 已属于别的进程时，记录会保留，绝不凭旧 PID 强制关闭。
 
 （旧的 Neopyter / `*.ju.py` JupyterLab 实时同步已经移除，`aaron-neopyter-*` 命令
 不再存在。）

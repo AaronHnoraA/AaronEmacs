@@ -183,6 +183,36 @@ A helper this machine has to execute itself must still be resolved here."
       (when (file-exists-p client-program)
         (delete-file client-program)))))
 
+(ert-deftest remote-client-ssh-program-keeps-explicit-and-named-ssh-aligned ()
+  "The preferred SSH must win over PATH for both command and RPC startup."
+  (let* ((root (make-temp-file "remote-client-ssh-" t))
+         (ordinary (expand-file-name "ordinary" root))
+         (preferred (expand-file-name "preferred" root))
+         (ordinary-ssh (expand-file-name "ssh" ordinary))
+         (preferred-ssh (expand-file-name "ssh" preferred))
+         (other (expand-file-name "other" ordinary)))
+    (unwind-protect
+        (progn
+          (make-directory ordinary)
+          (make-directory preferred)
+          (dolist (file (list ordinary-ssh preferred-ssh other))
+            (with-temp-file file (insert "#!/bin/sh\nexit 0\n"))
+            (set-file-modes file #o755))
+          (let ((remote--client-exec-path (list ordinary preferred))
+                (remote--buffer-base-exec-path nil)
+                (remote-client-ssh-program preferred-ssh))
+            (should (equal (remote-client-executable-find "ssh") preferred-ssh))
+            (should (equal (car (remote-client-ssh-exec-path))
+                           preferred))
+            (should (equal (remote-client-executable-find "other") other))
+            (let ((remote-client-ssh-program nil))
+              (should (equal (remote-client-executable-find "ssh") ordinary-ssh)))
+            (let ((remote-client-ssh-program
+                   (expand-file-name "missing/ssh" root)))
+              (should-not (remote-client-executable-find "ssh"))
+              (should-error (remote-client-ssh-exec-path)))))
+      (delete-directory root t))))
+
 (ert-deftest remote-client-environment-survives-a-target-projection ()
   "Projecting a target environment rebinds the default `exec-path'.
 The client boundary must keep answering with this machine's values."

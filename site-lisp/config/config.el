@@ -18,7 +18,7 @@
 ;;      so each `config-register' call immediately finds and applies its
 ;;      override.
 ;;   4. Live changes via `M-x config-board' (SPC h c) update both the live
-;;      variable and the store atomically.
+;;      variable and its store.  Each store file is written atomically.
 ;;
 ;; Three kinds of items:
 ;;
@@ -35,6 +35,10 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'lisp-mode)
+
+(declare-function my/open-client-file "init-open"
+                  (file &optional view allow-missing))
 
 (defgroup config nil
   "Unified configuration registry."
@@ -89,6 +93,9 @@ persisted separately.")
 (defvar config--configured-store-files-cache nil
   "Cached list of expanded store files discovered for startup loading.")
 
+(defvar config--persist-failed nil
+  "Non-nil after a store write fails, until every store is saved successfully.")
+
 (defvar config--group-store-file-sets (make-hash-table :test 'eq)
   "Hash table mapping registry groups to store-file sets.
 Each value is a hash table where keys are expanded store file names.")
@@ -141,10 +148,11 @@ Hook functions are called with one argument, the registered entry plist.")
                                    config-extra-store-files
                                    (config--discover-store-files))))))))
 
-(defun config--load-configured-store-files ()
-  "Load all configured store files once."
+(defun config--load-configured-store-files (&optional strict)
+  "Load all configured store files once.
+With STRICT, report malformed or unreadable stores as errors."
   (dolist (file (config--configured-store-files))
-    (config--load-store-file file)))
+    (config--load-store-file file strict)))
 
 (defun config--learn-group-store-file (group file)
   "Record that GROUP has persisted configuration in FILE."
@@ -497,38 +505,74 @@ Unless NO-PERSIST, records the toggle in the store."
 
 ;;; File items ---------------------------------------------------------------
 
+(defun config--call-on-client (function)
+  "Call FUNCTION in the Emacs client's directory and process environment."
+  (let ((process-environment (default-value 'process-environment))
+        (exec-path (default-value 'exec-path)))
+    (with-temp-buffer
+      (setq default-directory (file-name-as-directory
+                               (expand-file-name user-emacs-directory)))
+      (funcall function))))
+
+(defun config--read-file-item ()
+  "Read a registered file item name with completion."
+  (intern (completing-read
+           "Config file: "
+           (mapcar (lambda (entry) (symbol-name (plist-get entry :name)))
+                   (config-list nil 'file))
+           nil t)))
+
 (defun config-file-reload (name)
   "Run the loader and update script for file item NAME."
+  (interactive (list (config--read-file-item)))
   (let ((entry (config--entry name)))
     (unless (eq (plist-get entry :kind) 'file)
       (user-error "config-file-reload: %s is not a file item" name))
-    (when-let* ((loader (plist-get entry :loader)))
-      (funcall loader))
-    (when-let* ((fn (plist-get entry :on-change)))
-      (funcall fn))
+    (config--call-on-client
+     (lambda ()
+       (when-let* ((loader (plist-get entry :loader)))
+         (funcall loader))
+       (when-let* ((fn (plist-get entry :on-change)))
+         (funcall fn))))
     (message "config: reloaded %s" name)))
 
 (defun config-file-open (name)
   "Open file item NAME for editing, seeding from its example when missing."
+  (interactive (list (config--read-file-item)))
   (let* ((entry (config--entry name))
-         (path (plist-get entry :path))
-         (example (plist-get entry :example)))
+         (path (and (plist-get entry :path)
+                    (expand-file-name (plist-get entry :path)
+                                      user-emacs-directory)))
+         (example (and (plist-get entry :example)
+                       (expand-file-name (plist-get entry :example)
+                                         user-emacs-directory))))
     (unless path (user-error "config-file-open: %s has no :path" name))
-    (when (and (not (file-exists-p path)) example (file-exists-p example)
-               (y-or-n-p (format "%s does not exist; seed from example? " name)))
-      (copy-file example path))
-    (find-file path)))
+    (config--call-on-client
+     (lambda ()
+       (unless (fboundp 'my/open-client-file)
+         (require 'init-open))
+       (when (and (not (file-exists-p path)) example (file-exists-p example)
+                  (y-or-n-p (format "%s does not exist; seed from example? " name)))
+         (copy-file example path))
+       (my/open-client-file path nil t)))))
 
 (defun config-file-reset (name)
   "Overwrite file item NAME from its example, then reload."
+  (interactive (list (config--read-file-item)))
   (let* ((entry (config--entry name))
-         (path (plist-get entry :path))
-         (example (plist-get entry :example)))
-    (unless (and example (file-exists-p example))
-      (user-error "config-file-reset: %s has no example" name))
-    (when (yes-or-no-p (format "Overwrite %s from example? " path))
-      (copy-file example path t)
-      (config-file-reload name))))
+         (path (and (plist-get entry :path)
+                    (expand-file-name (plist-get entry :path)
+                                      user-emacs-directory)))
+         (example (and (plist-get entry :example)
+                       (expand-file-name (plist-get entry :example)
+                                         user-emacs-directory))))
+    (config--call-on-client
+     (lambda ()
+       (unless (and path example (file-exists-p example))
+         (user-error "config-file-reset: %s has no example" name))
+       (when (yes-or-no-p (format "Overwrite %s from example? " path))
+         (copy-file example path t)
+         (config-file-reload name))))))
 
 ;;; Introspection ------------------------------------------------------------
 
@@ -567,6 +611,9 @@ Unless NO-PERSIST, records the toggle in the store."
 Checks the override index/alist lockstep, that every override resolves to a
 store file, and that every configured store file still parses."
   (let (issues)
+    (when config--persist-failed
+      (push "config has unsaved changes after a failed store write; run config-save"
+            issues))
     ;; Index <-> alist lockstep.
     (when (/= (hash-table-count config--override-index) (length config--overrides))
       (push (format "override index size %d != alist length %d"
@@ -589,14 +636,10 @@ store file, and that every configured store file still parses."
     (dolist (file (config--configured-store-files))
       (when (file-readable-p file)
         (condition-case err
-            (with-temp-buffer
-              (insert-file-contents file)
-              (goto-char (point-min))
-              (let ((done nil))
-                (while (not done)
-                  (condition-case nil
-                      (read (current-buffer))
-                    (end-of-file (setq done t))))))
+            (let ((config--overrides nil)
+                  (config--override-index (make-hash-table :test 'equal))
+                  (config--override-store-files (make-hash-table :test 'equal)))
+              (config--read-store-file file t))
           (error
            (push (format "store file %s fails to parse: %s"
                          (abbreviate-file-name file) (error-message-string err))
@@ -675,7 +718,7 @@ so no caller can leave a stale index referencing detached cons cells."
                file
                config--override-store-files))))
 
-(defun config--store-form-overrides (form file)
+(defun config--store-form-overrides (form file &optional strict)
   "Return the override list encoded by FORM from FILE, or nil."
   (cond
    ((and (consp form)
@@ -685,31 +728,43 @@ so no caller can leave a stale index referencing detached cons cells."
          (eq (car (cadr form)) 'quote))
     (cadr (cadr form)))
    (t
-    (display-warning
-     'config
-     (format "Ignoring unsupported form in %s: %S" file form)
-     :warning)
+    (if strict
+        (user-error "Unsupported form in %s: %S" file form)
+      (display-warning
+       'config
+       (format "Ignoring unsupported form in %s: %S" file form)
+       :warning))
     nil)))
 
-(defun config--read-store-file (file)
-  "Read config store FILE without evaluating arbitrary Lisp."
+(defun config--read-store-file (file &optional strict)
+  "Read config store FILE without evaluating arbitrary Lisp.
+With STRICT, signal malformed or unsupported forms.  Merge a file only
+after its entire contents have been read successfully."
   (with-temp-buffer
     (insert-file-contents file)
     (goto-char (point-min))
-    (let ((done nil))
-      (while (not done)
-        (condition-case err
-            (let ((form (read (current-buffer))))
-              (when-let* ((overrides (config--store-form-overrides form file)))
-                (config--merge-store-overrides overrides file)))
-          (end-of-file
-           (setq done t))
-          (error
+    (let (forms)
+      (condition-case err
+          (with-syntax-table emacs-lisp-mode-syntax-table
+            (while (progn (forward-comment (point-max)) (not (eobp)))
+              (push (config--store-form-overrides
+                     (read (current-buffer)) file strict)
+                    forms))
+            (dolist (overrides forms)
+              (unless (and (listp overrides)
+                           (cl-every #'consp overrides))
+                (user-error "Invalid config store overrides in %s: %S"
+                            file overrides)))
+            (dolist (overrides (nreverse forms))
+              (when overrides
+                (config--merge-store-overrides overrides file))))
+        (error
+         (if strict
+             (signal (car err) (cdr err))
            (display-warning
             'config
             (format "Failed to read %s: %s" file (error-message-string err))
-            :error)
-           (setq done t)))))))
+            :error)))))))
 
 (defun config--store-file-for-key (key)
   "Return the store file that owns persisted override KEY."
@@ -800,10 +855,8 @@ and re-reading all ~10 store files."
       (let ((buckets (make-hash-table :test 'equal))
             (targets (if files (delete-dups (copy-sequence files))
                        (config--store-files))))
-        ;; Only bucket overrides destined for a target file.  Prefer the
-        ;; authoritative key->file map (filled at load/record time) over
-        ;; `config--store-file-for-key', which re-runs group inference; this
-        ;; keeps a single `config-set' from doing that work for every key.
+        ;; Bucket only overrides destined for a target file.  The owner map
+        ;; avoids re-running group inference for every key on a single edit.
         (dolist (cell config--overrides)
           (let ((file (expand-file-name
                        (or (gethash (car cell) config--override-store-files)
@@ -811,26 +864,36 @@ and re-reading all ~10 store files."
             (when (or (null files) (member file targets))
               (push cell (gethash file buckets)))))
         (dolist (file targets)
-          (config--write-store-file file (nreverse (gethash file buckets)))))
+          (condition-case write-error
+              (config--write-store-file file (nreverse (gethash file buckets)))
+            (error
+             (signal 'file-error
+                     (list (format "Failed to persist config store %s: %s"
+                                   file (error-message-string write-error)))))))
+        (unless files
+          (setq config--persist-failed nil)))
     (error
-     (display-warning
-      'config (format "Failed to persist config stores: %s"
-                      (error-message-string err))
-      :error))))
+     (setq config--persist-failed t)
+     (signal (car err) (cdr err)))))
 
-(defun config--load-store-file (file)
-  "Load store FILE once, merging it into `config--overrides'."
+(defun config--load-store-file (file &optional strict)
+  "Load store FILE once, merging it into `config--overrides'.
+With STRICT, signal read and parse failures."
   (when-let* ((file (config--expand-store-file file)))
     (unless (gethash file config--loaded-store-files)
-      (puthash file t config--loaded-store-files)
+      (when (and strict (file-exists-p file) (not (file-readable-p file)))
+        (user-error "Config store is unreadable: %s" file))
       (when (file-readable-p file)
-        (condition-case err
-            (config--read-store-file file)
-          (error
-           (display-warning
-            'config (format "Failed to load %s: %s" file
-                            (error-message-string err))
-            :error)))))))
+        (if strict
+            (config--read-store-file file t)
+          (condition-case err
+              (config--read-store-file file)
+            (error
+             (display-warning
+              'config (format "Failed to load %s: %s" file
+                              (error-message-string err))
+              :error)))))
+      (puthash file t config--loaded-store-files))))
 
 (defun config-apply-store ()
   "Load config store files and apply every override live.
@@ -870,14 +933,28 @@ invoked a single time, while callbacks taking arguments run per entry."
 
 (defun config-refresh-store-files ()
   "Reload every store file from disk and re-apply, mirroring on-disk state.
-Discards in-memory overrides first, then rediscovers and re-reads the stores,
-so edits, newly added keys and removals are all reflected.  Persisted values
-are safe because `config-set' always writes through to disk; nothing lives
-only in memory."
+Read into temporary state first; if a store is malformed, preserve the
+current overrides and live settings."
   (interactive)
-  (config--clear-overrides)
-  (clrhash config--loaded-store-files)
-  (setq config--configured-store-files-cache nil)
+  (when config--persist-failed
+    (user-error "Config has unsaved changes; run config-save before refreshing"))
+  (let (overrides index owners loaded cache)
+    (let ((config--overrides nil)
+          (config--override-index (make-hash-table :test 'equal))
+          (config--override-store-files (make-hash-table :test 'equal))
+          (config--loaded-store-files (make-hash-table :test 'equal))
+          (config--configured-store-files-cache nil))
+      (config--load-configured-store-files t)
+      (setq overrides config--overrides
+            index config--override-index
+            owners config--override-store-files
+            loaded config--loaded-store-files
+            cache config--configured-store-files-cache))
+    (setq config--overrides overrides
+          config--override-index index
+          config--override-store-files owners
+          config--loaded-store-files loaded
+          config--configured-store-files-cache cache))
   (config-apply-store)
   (message "config: refreshed store files"))
 

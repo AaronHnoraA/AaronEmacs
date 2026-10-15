@@ -12,13 +12,7 @@
 (require 'transient)
 
 (declare-function better-jumper-set-jump "better-jumper" (&optional pos))
-(declare-function copy-as-format-asciidoc "copy-as-format" ())
-(declare-function copy-as-format-github "copy-as-format" ())
-(declare-function copy-as-format-html "copy-as-format" ())
-(declare-function copy-as-format-markdown "copy-as-format" ())
-(declare-function copy-as-format-org-mode "copy-as-format" ())
-(declare-function copy-as-format-rst "copy-as-format" ())
-(declare-function copy-as-format-slack "copy-as-format" ())
+(declare-function copy-as-format "copy-as-format" ())
 (declare-function ediff-buffers "ediff" (buffer-A buffer-B &optional startup-hooks job-name))
 (declare-function ediff-copy-diff "ediff-util" (n from-to &optional batch-invert-regions-p
                                                    select prefer-to-copy))
@@ -26,13 +20,9 @@
                                                               region-bounds))
 (declare-function ediff-regions-wordwise "ediff" (buffer-A buffer-B region-A region-B
                                                      &optional startup-hooks job-name))
-(declare-function ediff-files "ediff" (file-A file-B &optional startup-hooks job-name))
 (declare-function eros-eval-defun "eros" (&optional debug))
 (declare-function eros-eval-last-sexp "eros" (&optional eval-last-sexp-arg-internal))
 (declare-function LaTeX-narrow-to-environment "latex" (&optional count))
-(declare-function org-edit-special "org" (&optional arg))
-(declare-function org-in-block-p "org" (&optional names))
-(declare-function org-in-src-block-p "org" (&optional inside))
 (declare-function org-narrow-to-block "org" ())
 (declare-function org-narrow-to-subtree "org" ())
 (declare-function relint-current-buffer "relint" ())
@@ -41,6 +31,8 @@
 (defvar ediff-control-buffer)
 (defvar ediff-current-difference)
 (defvar ediff-mode-map)
+(defvar ediff-after-quit-hook-internal)
+(defvar copy-as-format-default)
 (defvar kill-ring)
 
 (defgroup my/editing-workbench nil
@@ -109,7 +101,7 @@
       (pulse-momentary-highlight-one-line (point)))))
 
 (defun my/narrow-or-widen-dwim (force-narrow)
-  "Widen, or narrow to the most useful surrounding unit.
+  "Widen, or narrow to the region, Org block/subtree, environment, or defun.
 With FORCE-NARROW, do not widen an already narrowed buffer."
   (interactive "P")
   (cond
@@ -119,18 +111,23 @@ With FORCE-NARROW, do not widen an already narrowed buffer."
     (narrow-to-region (region-beginning) (region-end)))
    ((derived-mode-p 'org-mode)
     (require 'org)
-    (cond
-     ((org-in-src-block-p)
-      (org-edit-special))
-     ((org-in-block-p)
-      (org-narrow-to-block))
-     (t
-      (org-narrow-to-subtree))))
+    (let ((block
+           (seq-find
+            (lambda (element)
+              (string-match-p "block" (symbol-name (org-element-type element))))
+            (org-element-lineage (org-element-context) nil t))))
+      (if block
+          (save-excursion
+            (goto-char (org-element-property :begin block))
+            (org-narrow-to-block))
+        (org-narrow-to-subtree))))
    ((and (derived-mode-p 'latex-mode 'LaTeX-mode)
          (fboundp 'LaTeX-narrow-to-environment))
     (LaTeX-narrow-to-environment))
    (t
     (narrow-to-defun))))
+
+(defalias 'narrow-or-widen #'my/narrow-or-widen-dwim)
 
 (defun my/transpose-regions-reset ()
   "Cancel and release a staged region transpose."
@@ -213,17 +210,25 @@ With CANCEL, discard the staged region."
     (user-error "The kill ring needs at least two entries"))
   (require 'ediff)
   (let ((a (generate-new-buffer "*yank A*"))
-        (b (generate-new-buffer "*yank B*")))
+        (b (generate-new-buffer "*yank B*"))
+        control)
     (cl-labels ((cleanup ()
+                  (when (buffer-live-p control)
+                    (with-current-buffer control
+                      (remove-hook 'ediff-cleanup-hook #'cleanup t)
+                      (remove-hook 'kill-buffer-hook #'cleanup t)))
                   (when (buffer-live-p a) (kill-buffer a))
-                  (when (buffer-live-p b) (kill-buffer b))
-                  (remove-hook 'ediff-cleanup-hook #'cleanup)))
+                  (when (buffer-live-p b) (kill-buffer b))))
       (condition-case err
           (progn
             (with-current-buffer a (insert (nth 0 kill-ring)))
             (with-current-buffer b (insert (nth 1 kill-ring)))
-            (add-hook 'ediff-cleanup-hook #'cleanup)
-            (ediff-buffers a b))
+            (ediff-buffers
+             a b
+             (list (lambda ()
+                     (setq control (current-buffer))
+                     (add-hook 'ediff-cleanup-hook #'cleanup nil t)
+                     (add-hook 'kill-buffer-hook #'cleanup nil t)))))
         (error
          (cleanup)
          (signal (car err) (cdr err)))))))
@@ -236,6 +241,57 @@ With CANCEL, discard the staged region."
                      (not (window-dedicated-p window))))
               (window-list)))
 
+(defun my/ediff--restore-frame-windows (frame control)
+  "Restore FRAME's saved layout after its last Ediff CONTROL quits."
+  (when (frame-live-p frame)
+    (let* ((state (frame-parameter frame 'my/ediff-window-state))
+           (sessions (plist-get state :sessions)))
+      (when (memq control sessions)
+        (let ((remaining
+               (seq-filter (lambda (session)
+                             (and (not (eq session control))
+                                  (buffer-live-p session)))
+                           sessions)))
+          (if remaining
+              (set-frame-parameter frame 'my/ediff-window-state
+                                   (plist-put state :sessions remaining))
+            (set-frame-parameter frame 'my/ediff-window-state nil)
+            (when-let* ((layout (plist-get state :layout))
+                        ((window-configuration-p layout)))
+              (set-window-configuration layout t))))))))
+
+(defun my/ediff--setup-windows-a (original &rest args)
+  "Track each Ediff setup in its originating frame around ORIGINAL."
+  (let* ((frame (selected-frame))
+         (state (frame-parameter frame 'my/ediff-window-state))
+         (sessions (seq-filter #'buffer-live-p (plist-get state :sessions)))
+         (before (current-window-configuration))
+         (layout (if sessions
+                     (plist-get state :layout)
+                   before))
+         control completed)
+    (unwind-protect
+        (progn
+          (setq control (apply original args))
+          (when (and (frame-live-p frame) (buffer-live-p control))
+            (set-frame-parameter frame 'my/ediff-window-state
+                                 (list :layout layout
+                                       :sessions (cons control sessions)))
+            (with-current-buffer control
+        (let ((restore (lambda ()
+                         (my/ediff--restore-frame-windows frame control))))
+          (add-hook 'ediff-after-quit-hook-internal restore nil t)
+          ;; Normal Ediff quit kills the control before its after-quit hooks;
+          ;; defer this fallback so Ediff can finish rearranging windows.
+          (add-hook 'kill-buffer-hook
+                    (lambda () (run-at-time 0 nil restore)) nil t))))
+          (setq completed t)
+          control)
+      (unless completed
+        (when (frame-live-p frame)
+          (set-frame-parameter frame 'my/ediff-window-state state)
+          (set-window-configuration before t))))))
+
 (defun my/ediff-dwim ()
   "Choose an Ediff operation from the current editing context."
   (interactive)
@@ -246,14 +302,10 @@ With CANCEL, discard the staged region."
    ((= (length (my/ediff--ordinary-windows)) 2)
     (let* ((windows (my/ediff--ordinary-windows))
            (a (window-buffer (nth 0 windows)))
-           (b (window-buffer (nth 1 windows)))
-           (file-a (buffer-file-name a))
-           (file-b (buffer-file-name b)))
-      (if (and file-a file-b
-               (not (buffer-modified-p a))
-               (not (buffer-modified-p b)))
-          (ediff-files file-a file-b)
-        (ediff-buffers a b))))
+           (b (window-buffer (nth 1 windows))))
+      (when (eq a b)
+        (user-error "The two windows show the same buffer"))
+      (ediff-buffers a b)))
    ((and buffer-file-name (vc-registered buffer-file-name))
     (call-interactively #'vc-ediff))
    (t
@@ -272,28 +324,35 @@ With CANCEL, discard the staged region."
     (ediff-get-region-contents ediff-current-difference 'A ediff-control-buffer)
     (ediff-get-region-contents ediff-current-difference 'B ediff-control-buffer))))
 
-(defmacro my/copy-as-format-define (name function)
-  "Define NAME as a region-or-buffer wrapper around FUNCTION."
+(defun my/copy-as-format-region-or-buffer (format)
+  "Copy the active region or whole buffer using native FORMAT."
+  (require 'copy-as-format)
+  (let ((copy-as-format-default format)
+        (current-prefix-arg nil)
+        (deactivate-mark nil))
+    (save-mark-and-excursion
+      (if (use-region-p)
+          (copy-as-format)
+        (let ((transient-mark-mode t))
+          (goto-char (point-min))
+          (push-mark (point-max) t t)
+          (copy-as-format))))))
+
+(defmacro my/copy-as-format-define (name format)
+  "Define NAME as a region-or-buffer wrapper for FORMAT."
   `(defun ,name ()
      (interactive)
-     (require 'copy-as-format)
-     (if (use-region-p)
-         (funcall #',function)
-       (save-mark-and-excursion
-         (let ((transient-mark-mode t))
-           (goto-char (point-min))
-           (push-mark (point-max) t t)
-           (funcall #',function))))))
+     (my/copy-as-format-region-or-buffer ,format)))
 
-(my/copy-as-format-define my/copy-as-format-markdown copy-as-format-markdown)
-(my/copy-as-format-define my/copy-as-format-github copy-as-format-github)
-(my/copy-as-format-define my/copy-as-format-org copy-as-format-org-mode)
-(my/copy-as-format-define my/copy-as-format-html copy-as-format-html)
-(my/copy-as-format-define my/copy-as-format-slack copy-as-format-slack)
-(my/copy-as-format-define my/copy-as-format-rst copy-as-format-rst)
-(my/copy-as-format-define my/copy-as-format-asciidoc copy-as-format-asciidoc)
+(my/copy-as-format-define my/copy-as-format-markdown "markdown")
+(my/copy-as-format-define my/copy-as-format-github "github")
+(my/copy-as-format-define my/copy-as-format-org "org-mode")
+(my/copy-as-format-define my/copy-as-format-html "html")
+(my/copy-as-format-define my/copy-as-format-slack "slack")
+(my/copy-as-format-define my/copy-as-format-rst "rst")
+(my/copy-as-format-define my/copy-as-format-asciidoc "asciidoc")
 
-(transient-define-prefix my/copy-as-format-dispatch ()
+(transient-define-prefix copy-as-format-menu ()
   "Copy the active region or buffer in a presentation format."
   [["Copy as"
     ("m" "Markdown" my/copy-as-format-markdown)
@@ -305,14 +364,14 @@ With CANCEL, discard the staged region."
     ("r" "reStructuredText" my/copy-as-format-rst)
     ("a" "AsciiDoc" my/copy-as-format-asciidoc)]])
 
-(transient-define-prefix my/editing-dispatch ()
+(transient-define-prefix editing-menu ()
   "Focused editing operations."
   [["Transform"
     ("i" "cycle identifier style" string-inflection-cycle)
     ("t" "transpose regions" my/transpose-regions-dwim)
     ("T" "clear staged region" my/transpose-regions-reset)]
    ["Copy / inspect"
-    ("c" "copy as format" my/copy-as-format-dispatch)
+    ("c" "copy as format" copy-as-format-menu)
     ("h" "hash region/buffer" my/hash-dwim)
     ("y" "diff last two yanks" my/ediff-last-two-yanks)]
    ["Compare / image"
@@ -325,7 +384,7 @@ With CANCEL, discard the staged region."
 
 (use-package copy-as-format
   :ensure t
-  :commands (copy-as-format-markdown copy-as-format-github
+  :commands (copy-as-format copy-as-format-markdown copy-as-format-github
              copy-as-format-org-mode copy-as-format-html
              copy-as-format-slack copy-as-format-rst
              copy-as-format-asciidoc))
@@ -346,12 +405,27 @@ With CANCEL, discard the staged region."
 (with-eval-after-load 'ediff-util
   (add-hook 'ediff-keymap-setup-hook #'my/ediff-keymap-setup-h))
 
+(use-package ediff
+  :ensure nil
+  :config
+  (advice-add 'ediff-setup :around #'my/ediff--setup-windows-a)
+  :custom
+  (ediff-highlight-all-diffs t)
+  (ediff-window-setup-function 'ediff-setup-windows-plain)
+  (ediff-split-window-function 'split-window-horizontally)
+  (ediff-merge-split-window-function 'split-window-horizontally))
+
 (with-eval-after-load 'elisp-mode
   (my/local-leader!
     :keymaps '(emacs-lisp-mode-map lisp-interaction-mode-map)
+    "i" 'info-lookup-symbol
     "ed" 'eros-eval-defun
     "ee" 'eros-eval-last-sexp
-    "er" 'relint-current-buffer))
+    "el" 'load-library
+    "er" 'relint-current-buffer
+    "gf" 'find-function
+    "gv" 'find-variable
+    "gl" 'find-library))
 
 (my/last-change-mode 1)
 (add-hook 'kill-emacs-hook #'my/last-change-clear)

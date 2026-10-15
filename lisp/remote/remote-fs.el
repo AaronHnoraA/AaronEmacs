@@ -22,6 +22,10 @@
 (require 'remote-background)
 
 (declare-function remote-make-process "remote-process" (&rest plist))
+(declare-function remote-backend-tramp-rpc-invalidate-cache
+                  "remote-backend-tramp-rpc" (physical &optional subtree))
+(declare-function remote-backend-tramp-rpc-transport-process
+                  "remote-backend-tramp-rpc" (physical))
 (declare-function remote-executable-find "remote-process"
                   (program &optional context))
 (declare-function remote-operation-provider-for
@@ -253,6 +257,52 @@ file interception remains controlled by `remote-fs-install'."
   "Return non-nil when FILE-NAME uses the logical fs method."
   (and (stringp file-name)
        (string-match-p "\\`/fs:[^:]+:" file-name)))
+
+(defun remote-fs-invalidate-mutated-path (logical route &optional subtree)
+  "Forget cached metadata for LOGICAL after an out-of-band write on ROUTE.
+When SUBTREE is non-nil, also forget cached descendants.  Native paths do
+not need invalidation.  This runs at the filesystem boundary, before a
+completed process is reported to callers."
+  (when (and route (remote-fs-file-name-p logical))
+    ;; A process may have used plain TRAMP while file metadata was read via
+    ;; TRAMP-RPC, or the reverse.  Both spellings can cache an old absence.
+    (let ((routes (cons route
+                        (ignore-errors
+                          (remote-routes
+                           "emacs-file" 'metadata
+                           (remote-fs--context-for-file logical)))))
+          seen first-error)
+      (dolist (candidate routes)
+        (condition-case err
+            (let ((physical (remote-project-file-name logical candidate)))
+              (unless (member physical seen)
+                (push physical seen)
+                (when (tramp-tramp-file-p physical)
+                  (if (and (equal (remote-route-link-plugin-id candidate)
+                                  "tramp-rpc")
+                           (fboundp 'remote-backend-tramp-rpc-invalidate-cache))
+                      (remote-backend-tramp-rpc-invalidate-cache physical subtree)
+                    (with-parsed-tramp-file-name physical nil
+                      (tramp-flush-file-properties v localname)
+                      (tramp-flush-directory-properties
+                       v (if subtree localname
+                           (file-name-directory localname))))))))
+          (error (unless first-error (setq first-error err)))))
+      (when first-error
+        (signal (car first-error) (cdr first-error))))))
+
+(defun remote-fs-route-transport-process (logical route)
+  "Return the live transport process behind LOGICAL on ROUTE, if any.
+This is an observation of TRAMP's existing connection, never a new
+connection request.  Native routes have no separate transport process."
+  (when (and route (remote-fs-file-name-p logical))
+    (let ((physical (remote-project-file-name logical route)))
+      (when (tramp-tramp-file-p physical)
+        (if (equal (remote-route-link-plugin-id route) "tramp-rpc")
+            (when (fboundp 'remote-backend-tramp-rpc-transport-process)
+              (remote-backend-tramp-rpc-transport-process physical))
+          (tramp-get-connection-process
+           (tramp-dissect-file-name physical)))))))
 
 (defun remote-fs--vector (file-name)
   "Return FILE-NAME's parsed fs TRAMP vector, or nil."

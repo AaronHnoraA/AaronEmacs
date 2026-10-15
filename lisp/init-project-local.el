@@ -304,7 +304,6 @@ When VALUE is a function, call it with ROOT when possible."
   (find-file (expand-file-name ".dir-locals.el" (my/project-local-root))))
 
 (my/leader!
-  "p"   '(:ignore t :which-key "project")
   "p l" '(:def my/project-local-describe :which-key "project local overrides")
   "p L" '(:def my/project-local-open-dir-locals :which-key "project dir-locals"))
 

@@ -486,19 +486,31 @@ then needs no second render."
                    (ignore-errors
                      (with-temp-buffer
                        (insert-file-contents my/dashboard-agenda-cache-file)
-                       (read (current-buffer)))))
+                       (let* ((read-eval nil)
+                              (value (read (current-buffer))))
+                         (skip-chars-forward " \t\n\r")
+                         (unless (eobp)
+                           (error "Trailing data in Dashboard Agenda cache"))
+                         value))))
                   ((consp snapshot)))
         (setq my/dashboard--agenda-snapshot snapshot)))))
 
 (defun my/dashboard--save-agenda-cache (snapshot)
-  "Write SNAPSHOT as the next session's first Agenda render."
+  "Atomically write SNAPSHOT as the next session's first Agenda render."
   (ignore-errors
     (make-directory (file-name-directory my/dashboard-agenda-cache-file) t)
-    (let ((print-length nil)
-          (print-level nil)
-          (coding-system-for-write 'utf-8-unix))
-      (with-temp-file my/dashboard-agenda-cache-file
-        (prin1 snapshot (current-buffer))))))
+    (let ((temporary
+           (make-temp-file (concat my/dashboard-agenda-cache-file ".tmp-"))))
+      (unwind-protect
+          (progn
+            (let ((print-length nil)
+                  (print-level nil)
+                  (coding-system-for-write 'utf-8-unix))
+              (with-temp-file temporary
+                (prin1 snapshot (current-buffer))))
+            (rename-file temporary my/dashboard-agenda-cache-file t))
+        (when (file-exists-p temporary)
+          (delete-file temporary))))))
 
 (defun my/dashboard--rendered-current-p ()
   "Return non-nil when the Dashboard already shows the cached Agenda state."

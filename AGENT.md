@@ -87,6 +87,13 @@ When adding a module:
 - Keep application-local names under the existing `my/` convention; hook
   helpers usually use a `*-h` suffix.  The public remote framework is the
   deliberate exception and uses the `remote-*` namespace without `my/`.
+- For stable user-facing `M-x` entry points other than Transient menus, add a
+  short purpose-first alias in the owning module (for example `config-health`
+  or `jupyter-board`) while retaining the `my/` implementation name for
+  existing callers. Do this selectively for top-level commands, not every
+  helper or generated command. Define public Transient prefixes directly under
+  their searchable names: `defalias` does not carry a prefix's registered menu
+  layout to the alias. Keep commands, help text, and daily-use docs aligned.
 
 ## Remote-First Core Architecture
 
@@ -236,7 +243,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   completion and inspection), and `lsp` (kernel-following lsp-mode); plus
   `my/jupyter-board` for kernelspec management and Remote Doctor for
   diagnostics.
-- Projects: `my/project-dispatch`, `my/project-switch`,
+- Projects: `project-menu`, `my/project-switch`,
   `my/project-open-workbench`, `my/project-search-paths`, Projectile,
   Perspective, Transient, and `show-imenu`.
 - Remote files: `remote-files` is a Dired/Dirvish menu over `remote-transfer`,
@@ -245,7 +252,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   `remote-transfer-list`).  `remote-machines` holds hand-entered targets.  Do
   not add another uploader, sync command, host list or progress indicator.  See
   `docs/remote-files.md`.
-- Compile/maintenance: `my/compile-board`, `my/compile-dispatch`, `make`
+- Compile/maintenance: `my/compile-board`, `config-compile-menu`, `make`
   targets documented in `docs/maintenance.md`.
 - Performance diagnostics: `my/performance-watch`,
   `my/performance-report-string`, `my/performance-snapshot`,
@@ -261,8 +268,14 @@ This config already has maintenance and workflow entry points. Reuse them:
   bounded by a timeout.  The extension has one command and names no Emacs
   action itself: it shows `my/background-actions`, the whitelist in
   `lisp/init-background.el`, and can run nothing outside it.  M-x stays
-  inside Emacs; do not bring back an external M-x or an Emacs popup frame.  `lisp/init-background.el` owns visibility, the Dock
-  policy and frame drag strips; native sources live in
+  inside Emacs; do not bring back an external M-x or an Emacs popup frame.
+  `act` and `frame` return a short-lived receipt; `result` queries completion
+  without resending the action.  The launcher checks the protocol version in
+  the same Emacs eval before queueing, so a newer Raycast cannot enqueue an
+  unqueryable action in an older Emacs.  Raycast waits only a bounded time, then
+  leaves Emacs responsible for prompts and later errors.
+  `lisp/init-background.el` owns visibility, the Dock policy, frame drag
+  strips and the action result table; native sources live in
   `tools/macos-background/` and build into `var/macos-background/`.
   Background means invisible frames, not a hidden application.  Only a
   background Emacs leaves the Dock: macOS ties the Dock icon, Cmd-Tab and the
@@ -303,6 +316,12 @@ This config already has maintenance and workflow entry points. Reuse them:
 - Templates: the built-in `auto-insert` template layer in
   `lisp/init-auto-insert.el`; do not revive the old Doom/Yasnippet file-template
   path.
+- Noema note templates are a separate catalogue in
+  `site-lisp/noema/resources/templates/noema/`, exposed to Emacs through
+  `templates/noema/`.  The runtime scans the files and creates notes; the
+  Emacs Roam workbench reads that catalogue instead of keeping a second list.
+  Use `# type: roam` or `# type: regular` to scope a template to graph nodes
+  or Markdown documents excluded from the graph; keep the two results distinct.
 - LaTeX math preview: RaTeX, configured in `lisp/lang/tex/init-latex.el`, with
   `my/latex-preview-doctor` as the diagnostic entry point.  Math macros and TeX
   compatibility rules have one source, `site-lisp/noema/resources/`, which the
@@ -357,7 +376,10 @@ dependency, not an optional experiment.
 
 - Do not add new `global-set-key` calls for normal configuration shortcuts.
 - For leader bindings, edit the existing leader definitions in
-  `lisp/init-evil.el`.
+  `lisp/init-evil.el` for shared prefixes, or the owning module for a domain
+  suffix.  Do not bind a suffix already owned by another module: load order
+  silently replaces the earlier binding.  Verify the resolved key after full
+  startup and update `docs/daily-usage.md` with the same command.
 - For localleader bindings, use the existing localleader helpers.
 - For global non-leader bindings, use `general-define-key`.
 - For concrete mode keymap objects that only exist after a package loads, bind
@@ -491,8 +513,11 @@ LSP:
 
 Org/Jupyter/research:
 
-- Noema Agenda task lists use the host's active-scope source service. Current
-  Markdown file navigation uses a read-only snapshot of the editor buffer;
+- Noema Agenda task lists use the host's active-scope source service.
+  `noema-agenda` is the searchable native entry; `noema-agenda-web` and the
+  named hosted views are distinct entries.  Keep keys and menus on these
+  names while `my/` functions own their implementations. Current Markdown
+  file navigation uses a read-only snapshot of the editor buffer;
   it must not scan the vault or enter another project. Task writes use the
   versioned scoped owner, including protected-buffer and repeat semantics.
   Do not reintroduce regex or one-shot CLI task scans, direct prefix edits,

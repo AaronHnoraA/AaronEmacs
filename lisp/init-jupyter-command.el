@@ -12,6 +12,22 @@
 (require 'remote-fs)
 (require 'remote-process)
 
+(defconst my/jupyter--python-catalog-helper
+  (concat
+   "import json,sys\n"
+   "from jupyter_client.kernelspec import KernelSpecManager\n"
+   "from jupyter_core.paths import jupyter_runtime_dir\n"
+   "args=sys.argv[1:]\n"
+   "if args==['kernelspec','list','--json']:\n"
+   " print(json.dumps({'kernelspecs':KernelSpecManager().get_all_specs()}))\n"
+   "elif args==['--runtime-dir']:\n"
+   " print(jupyter_runtime_dir())\n"
+   "else:\n"
+   " raise SystemExit('Unsupported Jupyter catalog action: '+repr(args))\n")
+  "Target-side official Python API fallback for Jupyter catalog queries.
+Some system packages ship `jupyter' without its `jupyter-kernelspec' entry
+point, so `jupyter kernelspec list' fails even though ipykernel is installed.")
+
 (defun my/jupyter-target-command (context &optional configured)
   "Return a Jupyter command argv owned by CONTEXT.
 Prefer CONFIGURED, project environments, then PATH and registered Conda
@@ -35,7 +51,12 @@ environments.  Never search the Emacs host for a remote target executable."
                 (user-error "Configured Jupyter executable is unavailable on %s: %s"
                             target configured)))
           (seq-some #'env-command environments)
-          (when-let* ((command (executable "jupyter"))) (list command))
+          ;; The generic dispatcher can exist without its kernelspec
+          ;; subcommand (for example, a split system package).  In that case
+          ;; use jupyter_client's own API instead of selecting a broken CLI.
+          (when-let* ((command (executable "jupyter"))
+                      (_subcommand (executable "jupyter-kernelspec")))
+            (list command))
           ;; Conda owns this registry.  Read it via the owning file handler;
           ;; no SSH shell startup, home-directory guess or filesystem scan.
           (let* ((registry (remote-expand-file-name "~/.conda/environments.txt" nil context))
@@ -60,8 +81,8 @@ environments.  Never search the Emacs host for a remote target executable."
                    and when
                    (with-temp-buffer
                      (zerop (process-file command nil t nil "-c"
-                                          "import jupyter_core.command,jupyter_client.kernelspec")))
-                   return (list command "-m" "jupyter"))
+                                          "import jupyter_client.kernelspec,jupyter_core.paths")))
+                   return (list command "-c" my/jupyter--python-catalog-helper))
           (user-error
            "No Jupyter installation found on %s for %s; select a project environment with jupyter_client installed"
            target native-root)))))

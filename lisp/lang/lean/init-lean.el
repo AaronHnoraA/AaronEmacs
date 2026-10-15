@@ -83,7 +83,7 @@
         (locate-library "init-lean")
         user-emacs-directory)))
   "Directory containing the Lean Node proxy and infoview bundle.")
-(declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
+(declare-function diagnostics-menu "init-diagnostics-extra" ())
 (declare-function my/flymake-diagnostic-at-point-mode "init-lsp" (&optional arg))
 (declare-function my/problems-buffer "init-problems" ())
 (declare-function my/direnv-update-environment-maybe
@@ -751,7 +751,7 @@ Completion uses the global corfu+capf surface — no company-mode override."
   (local-set-key (kbd "C-c C-e") #'lsp-ui-doc-glance)
   (local-set-key (kbd "C-c C-l") #'lean-dev-log-open)
   (local-set-key (kbd "C-c !")   #'my/problems-buffer)
-  (local-set-key (kbd "C-c ?")   #'my/diagnostics-dispatch)
+  (local-set-key (kbd "C-c ?")   #'diagnostics-menu)
   ;; Unicode / input
   (local-set-key (kbd "C-c C-k") #'quail-show-key)
   ;; Indentation

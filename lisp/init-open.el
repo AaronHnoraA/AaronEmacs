@@ -48,23 +48,62 @@ macOS `open', Linux `xdg-open', Windows shell open, or `browse-url' fallback."
 (declare-function my/appine-open-url "init-appine" (url))
 (declare-function my/macos-open-target "init-macos" (target))
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
+(declare-function remote-canonicalize-file-name "remote-fs"
+                  (file-name &optional directory))
+(declare-function remote-fs-file-name-p "remote-fs" (file-name))
+(declare-function remote-require-on-client "remote-core"
+                  (feature &optional filename noerror))
 
 (defvar eww-browse-url-new-window-is-tab)
 (defvar my/noema--inhibit-redirect)
+
+(defun my/open-resolve-file-name (file &optional directory)
+  "Expand FILE for a user-facing visit from DIRECTORY.
+Keep ordinary local names native; an explicit or source `/fs:' name retains
+its logical target.  DIRECTORY defaults to the current buffer's directory."
+  (unless (featurep 'remote-fs)
+    (remote-require-on-client 'remote-fs))
+  (let ((directory (or directory default-directory)))
+    (if (or (remote-fs-file-name-p directory)
+            (remote-fs-file-name-p file))
+        (remote-canonicalize-file-name file directory)
+      (expand-file-name file directory))))
+
+(defun my/open-client-file (file &optional view allow-missing)
+  "Visit FILE on the Emacs client, enabling `view-mode' when VIEW is non-nil.
+Relative FILE names are resolved under `user-emacs-directory'.  When
+ALLOW-MISSING is non-nil, permit visiting a new file for editing."
+  (let ((directory (file-name-as-directory
+                    (expand-file-name user-emacs-directory)))
+        (process-environment (default-value 'process-environment))
+        (exec-path (default-value 'exec-path))
+        (my/noema--inhibit-redirect t))
+    ;; Documentation is client state even when invoked from a Remote buffer.
+    (with-temp-buffer
+      (setq default-directory directory)
+      (let ((file (expand-file-name file directory)))
+        (unless (or (file-readable-p file)
+                    (and allow-missing (not (file-exists-p file))))
+          (user-error "Local file is missing: %s" file))
+        (let ((buffer (find-file file)))
+          (when view
+            (with-current-buffer buffer
+              (goto-char (point-min))
+              (view-mode 1)))
+          buffer)))))
+
+(defun my/open-client-document (file &optional view)
+  "Visit local documentation FILE, enabling `view-mode' when VIEW is non-nil."
+  (my/open-client-file file view))
 
 ;;;###autoload
 (defun my/open-keybinding-guide ()
   "Open the maintained keybinding guide as a read-only Markdown buffer."
   (interactive)
-  (let ((file (locate-user-emacs-file "docs/daily-usage.md")))
-    (unless (file-readable-p file)
-      (user-error "Keybinding guide is missing: %s" file))
-    (let* ((my/noema--inhibit-redirect t)
-           (buffer (find-file file)))
-      (with-current-buffer buffer
-        (goto-char (point-min))
-        (view-mode 1))
-      buffer)))
+  (my/open-client-document "docs/daily-usage.md" t))
+
+(defalias 'keybinding-guide #'my/open-keybinding-guide
+  "Open the maintained Emacs keybinding guide.")
 
 (defun my/open-normalize-backend (backend)
   "Normalize BACKEND into the canonical backend symbol."

@@ -44,7 +44,34 @@
                (should (equal program "/target/bin/python3"))
                (should (equal default-directory "/fs:test-remote:/project/")) 0)))
     (should (equal (my/jupyter-target-command my/jupyter-command-test-context)
-                   '("/target/bin/python3" "-m" "jupyter")))))
+                   (list "/target/bin/python3" "-c"
+                         my/jupyter--python-catalog-helper)))))
+
+(ert-deftest my/jupyter-command-broken-system-dispatcher-uses-python-api ()
+  "A bare jupyter executable is not enough to list kernelspecs."
+  (cl-letf (((symbol-function 'remote-executable-find)
+             (lambda (program _context)
+               (pcase program
+                 ("jupyter" "/usr/bin/jupyter")
+                 ("python3" "/usr/bin/python3"))))
+            ((symbol-function 'file-readable-p) (lambda (_) nil))
+            ((symbol-function 'remote-expand-file-name)
+             (lambda (&rest _) "/fs:test-remote:/home/user/.conda/environments.txt"))
+            ((symbol-function 'process-file)
+             (lambda (program &rest _)
+               (should (equal program "/usr/bin/python3")) 0)))
+    (should (equal (my/jupyter-target-command my/jupyter-command-test-context)
+                   (list "/usr/bin/python3" "-c"
+                         my/jupyter--python-catalog-helper)))))
+
+(ert-deftest my/jupyter-command-prefers-complete-system-dispatcher ()
+  (cl-letf (((symbol-function 'remote-executable-find)
+             (lambda (program _context)
+               (pcase program
+                 ("jupyter" "/usr/bin/jupyter")
+                 ("jupyter-kernelspec" "/usr/bin/jupyter-kernelspec")))))
+    (should (equal (my/jupyter-target-command my/jupyter-command-test-context)
+                   '("/usr/bin/jupyter")))))
 
 (ert-deftest my/jupyter-command-missing-installation-is-actionable ()
   (cl-letf (((symbol-function 'remote-executable-find) (lambda (&rest _) nil))

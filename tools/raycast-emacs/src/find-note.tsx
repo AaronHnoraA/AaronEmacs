@@ -3,7 +3,7 @@
 // shows that answer unfiltered.  Emacs is involved only to open the chosen page.
 import { Action, ActionPanel, Clipboard, closeMainWindow, Icon, List, PopToRootType, showToast, Toast } from "@raycast/api";
 import { useEffect, useRef, useState } from "react";
-import { emacs, emacsDetached } from "./client";
+import { emacs, emacsAction, reportCommandFailure, reportPendingAction } from "./client";
 import { NoemaDown, Page, pageLink, SearchAnswer, searchPages } from "./backend";
 
 const GROUPS: Array<{ title: (answer: SearchAnswer) => string; kinds: string[] }> = [
@@ -22,14 +22,11 @@ async function openInEmacs(file: string) {
     const actions = JSON.parse(await emacs("actions")) as Array<{ id: string; prompt: string }>;
     const open = actions.find((action) => action.prompt === "Path");
     if (!open) throw new Error("Emacs offers no action that opens a path");
-    emacsDetached("act", open.id, file);
+    const result = await emacsAction("act", open.id, file);
+    if (result === "pending") await reportPendingAction();
     await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Immediate });
   } catch (error) {
-    await showToast({
-      style: Toast.Style.Failure,
-      title: "Emacs is not answering",
-      message: error instanceof Error ? error.message.split("\n")[0] : String(error),
-    });
+    await reportCommandFailure(error);
   }
 }
 

@@ -29,6 +29,7 @@
                   "remote-backend-tramp" (route &rest options))
 (declare-function make-term "term" (name program &optional startfile &rest switches))
 (declare-function term-char-mode "term" ())
+(declare-function evil-set-initial-state "evil-core" (mode state))
 
 (defvar remote-target-history nil)
 (defvar savehist-additional-variables)
@@ -46,6 +47,15 @@ reported when the user tries to open it again.")
 
 (defvar remote-board--refresh-timer nil
   "Pending idle refresh of the visible Remote board, if any.")
+
+(defvar-local remote-board--owner-frame nil
+  "Frame whose Remote board view this buffer owns.")
+
+(defvar-local remote-board--history-owner-frame nil
+  "Frame that owns this temporary Remote history page.")
+
+(defvar-local remote-board--history-key nil
+  "Key of this page in its owner's Remote history view table.")
 
 (defvar remote-board--opening-folders (make-hash-table :test #'equal)
   "In-flight folder opens by logical file name; values are nesting counts.")
@@ -522,18 +532,28 @@ connection is consulted while the board is drawn."
     (setq tabulated-list-entries (remote-board--entries))
     (tabulated-list-print t)))
 
+(defun remote-board--visible-views ()
+  "Return Remote board buffers visible in their owning frames."
+  (cl-loop for frame in (frame-list)
+           for buffer = (frame-parameter frame 'remote-board-view-buffer)
+           when (and (buffer-live-p buffer)
+                     (get-buffer-window buffer frame))
+           collect buffer))
+
+(defun remote-board--refresh-visible-views ()
+  "Refresh every visible Remote board without contacting targets."
+  (dolist (buffer (remote-board--visible-views))
+    (with-current-buffer buffer
+      (remote-board-refresh-status))))
+
 (defun remote-board--refresh-if-open ()
   "Refresh the board after lifecycle hooks have finished mutating state."
   (setq remote-board--refresh-timer nil)
-  (when-let* ((board (get-buffer "*Remote*")))
-    (when (get-buffer-window board t)
-      (with-current-buffer board
-        (when (derived-mode-p 'remote-board-mode)
-          (remote-board-refresh-status))))))
+  (remote-board--refresh-visible-views))
 
 (defun remote-board--schedule-status-refresh (&rest _ignored)
   "Coalesce local board refreshes after connection or workspace changes."
-  (when (and (get-buffer-window "*Remote*" t)
+  (when (and (remote-board--visible-views)
              (not remote-board--refresh-timer))
     (setq remote-board--refresh-timer
           (run-with-idle-timer 0.1 nil
@@ -556,7 +576,7 @@ connection is consulted while the board is drawn."
   "Reload configuration and refresh the board."
   (interactive)
   (remote-config-reload)
-  (remote-board-refresh-status))
+  (remote-board--refresh-visible-views))
 
 (defun remote-board-target-at-point ()
   "Return target represented by the current row."
@@ -782,10 +802,8 @@ PORT zero chooses a new free port."
 
 (defun remote-board--opening-refresh ()
   "Redraw a visible board after a local folder-open state change."
-  (when-let* ((board (get-buffer "*Remote*"))
-              ((get-buffer-window board t)))
-    (with-current-buffer board
-      (remote-board-refresh-status))
+  (when (remote-board--visible-views)
+    (remote-board--refresh-visible-views)
     (unless noninteractive
       (redisplay))))
 
@@ -1361,21 +1379,61 @@ CONFIG-FILE overrides the interactive choice unless COMMAND has `-F'."
               (cdr identity-files))
       (plist-get parsed :options)))))
 
+(defvar-keymap remote-board-log-mode-map
+  :parent special-mode-map
+  :doc "Keymap for read-only Remote logs."
+  "q" #'quit-window)
+
+(define-derived-mode remote-board-log-mode special-mode "Remote Log"
+  "Read-only route, connection or SSH diagnostic output.")
+
+(defun remote-board--history-view-killed ()
+  "Forget this temporary history page from its owner frame."
+  (when (frame-live-p remote-board--history-owner-frame)
+    (when-let* ((table (frame-parameter remote-board--history-owner-frame
+                                        'remote-board-history-views)))
+      (when (eq (gethash remote-board--history-key table) (current-buffer))
+        (remhash remote-board--history-key table)))))
+
+(defun remote-board--history-buffer (key name &optional frame)
+  "Return FRAME's temporary Remote history page KEY named NAME."
+  (let* ((frame (or frame (selected-frame)))
+         (table (or (frame-parameter frame 'remote-board-history-views)
+                    (let ((new (make-hash-table :test #'equal)))
+                      (set-frame-parameter frame 'remote-board-history-views new)
+                      new)))
+         (buffer (gethash key table)))
+    (unless (buffer-live-p buffer)
+      (setq buffer (generate-new-buffer name))
+      (condition-case error
+          (with-current-buffer buffer
+            (remote-board-log-mode)
+            (setq-local quit-window-kill-buffer t
+                        remote-board--history-owner-frame frame
+                        remote-board--history-key key)
+            (add-hook 'kill-buffer-hook
+                      #'remote-board--history-view-killed nil t))
+        (error
+         (kill-buffer buffer)
+         (signal (car error) (cdr error))))
+      (puthash key buffer table))
+    buffer))
+
 (defun remote-route-log-buffer ()
   "Display recent route decisions and failures."
   (interactive)
-  (let ((buffer (get-buffer-create "*Remote Routes*")))
+  (let ((buffer (remote-board--history-buffer 'routes "*Remote Routes*")))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (special-mode)
         (dolist (entry remote-route-log)
           (insert
            (format-time-string
             "%Y-%m-%d %H:%M:%S "
             (plist-get entry :time)))
-          (insert (format "%S\n" (cdr (cdr entry)))))))
-    (pop-to-buffer buffer)))
+          (insert (format "%S\n" (cdr (cdr entry)))))
+        (set-buffer-modified-p nil)))
+    (pop-to-buffer buffer '(nil (reusable-frames . nil)))))
 
 (defun remote-board-connection-log (&optional target)
   "Display recent connection phases for TARGET without contacting it."
@@ -1389,12 +1447,12 @@ CONFIG-FILE overrides the interactive choice unless COMMAND has `-F'."
             (or target
                 (user-error "Select a target"))))
          (buffer
-          (get-buffer-create
+          (remote-board--history-buffer
+           (list 'connection target-id)
            (format "*Remote Connect %s*" target-id))))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (special-mode)
         (insert (format "Connection history: %s\n\n" target-id))
         (dolist (entry
                  (reverse
@@ -1415,8 +1473,9 @@ CONFIG-FILE overrides the interactive choice unless COMMAND has `-F'."
              (format "    %s\n"
                      (condition-case nil
                          (error-message-string error-data)
-                       (error (format "%S" error-data)))))))))
-    (pop-to-buffer buffer)))
+                       (error (format "%S" error-data)))))))
+        (set-buffer-modified-p nil)))
+    (pop-to-buffer buffer '(nil (reusable-frames . nil)))))
 
 (defun remote-board--ssh-client-command
     (target &optional tty diagnostic)
@@ -1517,7 +1576,8 @@ opens a Remote workspace or starts an LSP server."
     (if (and existing (process-live-p existing))
         (progn
           (pop-to-buffer
-           (get-buffer-create (format "*Remote SSH %s*" target-id)))
+           (get-buffer-create (format "*Remote SSH %s*" target-id))
+           '(nil (reusable-frames . nil)))
           existing)
       (let* ((command (append
                        (remote-board--ssh-client-command target nil t)
@@ -1537,7 +1597,7 @@ opens a Remote workspace or starts an LSP server."
             (erase-buffer)
             (insert (format "Checking SSH for %s...\n\n"
                             (remote-target-label target)))
-            (special-mode)))
+            (remote-board-log-mode)))
         (setq stderr-process
               (make-pipe-process
                :name (format "remote-ssh-stderr-%s" target-id)
@@ -1578,7 +1638,7 @@ opens a Remote workspace or starts an LSP server."
              (signal (car error) (cdr error)))))
         (puthash target-id process remote-board--ssh-probe-processes)
         (remote-board--ssh-status-set target-id 'checking nil)
-        (pop-to-buffer log-buffer)
+        (pop-to-buffer log-buffer '(nil (reusable-frames . nil)))
         process))))
 
 (defun remote-board-ssh-login (&optional target)
@@ -1666,6 +1726,7 @@ framework connection until a Remote folder is opened or reconnected."
 
 (defvar-keymap remote-board-mode-map
   :parent tabulated-list-mode-map
+  "q" #'quit-window
   "RET" #'remote-open-target
   "o" #'remote-open-target
   "f" #'remote-open-folder
@@ -1714,16 +1775,64 @@ Doctor with d.  See `remote-board-mode-map' for more actions."
   (setq tabulated-list-padding 2
         tabulated-list-sort-key nil
         tabulated-list-entries (remote-board--entries))
-  (tabulated-list-init-header))
+  (tabulated-list-init-header)
+  (add-hook 'kill-buffer-hook #'remote-board--view-killed nil t))
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'remote-board-mode 'emacs)
+  (evil-set-initial-state 'remote-board-log-mode 'emacs))
+
+(defun remote-board--view-killed ()
+  "Clear this Remote board's frame reference when the view is killed."
+  (when (and (frame-live-p remote-board--owner-frame)
+             (eq (frame-parameter remote-board--owner-frame
+                                  'remote-board-view-buffer)
+                 (current-buffer)))
+    (set-frame-parameter remote-board--owner-frame
+                         'remote-board-view-buffer nil)))
+
+(defun remote-board--frame-deleted (frame)
+  "Release FRAME's Remote board view without touching its connections."
+  (when-let* ((buffer (frame-parameter frame 'remote-board-view-buffer)))
+    (set-frame-parameter frame 'remote-board-view-buffer nil)
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer)))
+  (when-let* ((table (frame-parameter frame 'remote-board-history-views)))
+    (set-frame-parameter frame 'remote-board-history-views nil)
+    (dolist (buffer (hash-table-values table))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
+
+(add-hook 'delete-frame-functions #'remote-board--frame-deleted)
+
+(defun remote-board--buffer (&optional frame)
+  "Return FRAME's Remote board view, creating it when needed."
+  (let* ((frame (or frame (selected-frame)))
+         (existing (frame-parameter frame 'remote-board-view-buffer))
+         (created (not (buffer-live-p existing)))
+         (buffer (if created (generate-new-buffer "*Remote*") existing)))
+    (when created
+      (set-frame-parameter frame 'remote-board-view-buffer buffer))
+    (condition-case error
+        (with-current-buffer buffer
+          (unless (derived-mode-p 'remote-board-mode)
+            (remote-board-mode))
+          (setq-local remote-board--owner-frame frame)
+          (remote-board-refresh-status))
+      (error
+       (when created
+         (when (buffer-live-p buffer)
+           (kill-buffer buffer))
+         (when (eq (frame-parameter frame 'remote-board-view-buffer) buffer)
+           (set-frame-parameter frame 'remote-board-view-buffer nil)))
+       (signal (car error) (cdr error))))
+    buffer))
 
 (defun remote-board ()
   "Open the logical target and route board."
   (interactive)
-  (let ((buffer (get-buffer-create "*Remote*")))
-    (with-current-buffer buffer
-      (remote-board-mode)
-      (tabulated-list-print t))
-    (pop-to-buffer buffer)))
+  (pop-to-buffer (remote-board--buffer)
+                 '(nil (reusable-frames . nil))))
 
 (provide 'remote-board)
 ;;; remote-board.el ends here

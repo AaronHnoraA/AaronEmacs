@@ -499,7 +499,7 @@ property the same way TRAMP marks static defaults, so it is not persisted."
          ;; inheriting those here makes client state such as ~/.ssh resolve on
          ;; the wrong machine (for example /home/hc on a macOS client).
          (process-environment (remote-client-process-environment))
-         (exec-path (remote-client-exec-path))
+         (exec-path (remote-client-ssh-exec-path))
          (remote-backend-tramp--connect-deadline
           (when-let* ((timeout (remote-backend-tramp--connect-timeout link)))
             (+ (float-time) timeout)))
@@ -1068,7 +1068,7 @@ Other process forms remain on Emacs' ordinary file-handler path."
         :file-handler nil)
        :default-directory temporary-file-directory
        :process-environment (remote-client-process-environment)
-       :exec-path (remote-client-exec-path)
+       :exec-path (remote-client-ssh-exec-path)
        :stderr-mode 'native
        :process-properties '((remote-direct-ssh . t))
        :metadata (if pty
@@ -1108,9 +1108,9 @@ This is shared by standard TRAMP's non-pipe path and tramp-rpc."
      :stderr-mode 'framed
      :metadata '(:placement target :stdio file-handler)
      :around-start
-     (when config-args
-       (lambda (start)
-         (let ((tramp-rpc-ssh-args
+     (lambda (start)
+       (let ((exec-path (remote-client-ssh-exec-path))
+             (tramp-rpc-ssh-args
                 (append config-args
                         (and (boundp 'tramp-rpc-ssh-args)
                              tramp-rpc-ssh-args)))
@@ -1122,8 +1122,8 @@ This is shared by standard TRAMP's non-pipe path and tramp-rpc."
                       "login-args" login-args)
                      tramp-connection-properties)
                   tramp-connection-properties)))
-           (remote-backend-tramp--seed-login-args prefix login-args)
-           (funcall start)))))))
+         (remote-backend-tramp--seed-login-args prefix login-args)
+         (funcall start))))))
 
 (defun remote-backend-tramp-direct-copy-file
     (route local-file target-file &optional _overwrite)
@@ -1202,7 +1202,13 @@ REMOTE-HOST and REMOTE-PORT which connects to LOCAL-HOST and LOCAL-PORT."
           (remote-backend-tramp--ssh-config-args pipeline))
          (command
           (append
-           (list ssh "-N" "-T" "-S" "none")
+           (list ssh "-N" "-T")
+           ;; `-S none' overrides even a later managed ControlPath option.
+           ;; Forwards must share the workspace SSH master: a balanced login
+           ;; name may otherwise send each kernel channel to another host.
+           (unless (remote-backend-tramp--ssh-option-present-p
+                    options "ControlPath")
+             (list "-S" "none"))
            config-args
            (list "-o" "ExitOnForwardFailure=yes"))))
     ;; Forward listeners are long-lived resources with their own lifecycle.
@@ -1294,6 +1300,15 @@ REMOTE-HOST and REMOTE-PORT which connects to LOCAL-HOST and LOCAL-PORT."
         (re-search-forward
          (format "Local forwarding listening on .* port %d\\b" port)
          nil t)))))
+
+(defun remote-backend-tramp--mux-forward-session-p (buffer)
+  "Return non-nil when BUFFER shows a multiplexed SSH session is ready."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (save-excursion
+        (goto-char (point-min))
+        (search-forward
+         "mux_client_request_session: master session id:" nil t)))))
 
 (defun remote-backend-tramp--forward-output (process string)
   "Keep a bounded diagnostic transcript from forwarding PROCESS."
@@ -1441,6 +1456,7 @@ dynamic listener, parse the allocated target port from OpenSSH diagnostics."
           (let ((deadline
                  (+ (float-time)
                     remote-backend-ssh-forward-timeout))
+                mux-probed
                 confirmed-port)
             (while
                 (and
@@ -1451,10 +1467,21 @@ dynamic listener, parse the allocated target port from OpenSSH diagnostics."
                    (if reverse
                        (remote-backend-tramp--reverse-forward-port
                         buffer remote-port)
-                     (and
-                      (remote-backend-tramp--local-forward-ready-p
-                       buffer local-port)
-                      local-port))))
+                     (cond
+                      ((remote-backend-tramp--local-forward-ready-p
+                        buffer local-port)
+                       local-port)
+                      ((and (not mux-probed)
+                            (remote-backend-tramp--mux-forward-session-p
+                             buffer))
+                       ;; Mux clients do not print the ordinary listener
+                       ;; line.  Probe their local listener once as soon as
+                       ;; the master accepts the forwarded session instead
+                       ;; of waiting the entire startup timeout.
+                       (setq mux-probed t)
+                       (and (remote-backend-tramp--local-port-open-p
+                             local-host local-port)
+                            local-port))))))
                  (< (float-time) deadline))
               (accept-process-output process 0.05))
             ;; Some SSH implementations omit the debug1 listener message.

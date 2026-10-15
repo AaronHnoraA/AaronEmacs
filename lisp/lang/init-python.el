@@ -460,7 +460,7 @@ fails.  This keeps `consult-imenu' and Treemacs tags working in
   (defun my/python-refresh-open-buffers ()
     "Reapply Python buffer setup to already-open buffers.
 
-This makes `my/reload-init' immediately fix existing Python buffers instead of
+This updates existing Python buffers when this module is re-evaluated, without
 waiting for them to be reopened."
     (dolist (buffer (buffer-list))
       (with-current-buffer buffer

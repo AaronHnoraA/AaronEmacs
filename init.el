@@ -172,16 +172,15 @@
 (my/package-bootstrap-from-lock-if-needed)
 
 (defun my/reload-init ()
-  "Reload Emacs init file safely."
+  "Reload only the top-level Emacs init file.
+Already loaded modules are not re-evaluated; restart Emacs for module edits."
   (interactive)
   (let ((init-file user-init-file))
-    (when (and init-file (file-exists-p init-file))
-      (message "Reloading init file: %s" init-file)
-      (condition-case err
-          (load-file init-file)
-        (error
-         (message "Error reloading init file: %s"
-                  (error-message-string err)))))))
+    (unless (and init-file (file-exists-p init-file))
+      (user-error "Emacs init file is unavailable"))
+    (load-file init-file)
+    (message "Reloaded %s; loaded modules were not re-evaluated"
+             init-file)))
 
 
 

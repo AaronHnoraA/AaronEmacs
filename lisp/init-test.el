@@ -7,6 +7,7 @@
 
 (require 'cl-lib)
 (require 'init-funcs)
+(require 'init-output)
 (require 'init-project-local)
 (require 'subr-x)
 
@@ -15,15 +16,6 @@
 (defgroup my/test nil
   "Test helpers."
   :group 'tools)
-
-(defvar my/test-last-command nil
-  "Last test command executed.")
-
-(defvar my/test-last-directory nil
-  "Directory where the last test command ran.")
-
-(defvar my/test-last-environment nil
-  "Environment used by the last test command.")
 
 (defun my/test-project-root ()
   "Return the best project root for test commands."
@@ -40,18 +32,33 @@
    ((file-exists-p (expand-file-name "yarn.lock" root)) "yarn")
    (t "npm")))
 
-(defun my/test--runner (root)
-  "Return a test runner symbol for ROOT."
-  (cond
-   ((file-exists-p (expand-file-name "Cargo.toml" root)) 'cargo)
-   ((cl-some (lambda (file) (file-exists-p (expand-file-name file root)))
-             '("pyproject.toml" "pytest.ini" "tox.ini" "setup.cfg"))
-    'pytest)
-   ((file-exists-p (expand-file-name "go.mod" root)) 'go)
-   ((file-exists-p (expand-file-name "package.json" root)) 'node)
-   ((file-exists-p (expand-file-name "justfile" root)) 'just)
-   ((file-exists-p (expand-file-name "Makefile" root)) 'make)
-   (t nil)))
+(defun my/test--runner (root &optional file)
+  "Return a test runner for ROOT, using FILE's language when known."
+  (let ((extension (and file (downcase (or (file-name-extension file) "")))))
+    (pcase extension
+      ("rs" (and (file-exists-p (expand-file-name "Cargo.toml" root))
+                 'cargo))
+      ("go" (and (file-exists-p (expand-file-name "go.mod" root))
+                 'go))
+      ((or "py" "pyi")
+       (and (cl-some (lambda (name)
+                       (file-exists-p (expand-file-name name root)))
+                     '("pyproject.toml" "pytest.ini" "tox.ini" "setup.cfg"))
+            'pytest))
+      ((or "js" "jsx" "ts" "tsx" "mjs" "cjs")
+       (and (file-exists-p (expand-file-name "package.json" root))
+            'node))
+      (_
+       (cond
+        ((file-exists-p (expand-file-name "Cargo.toml" root)) 'cargo)
+        ((cl-some (lambda (name)
+                    (file-exists-p (expand-file-name name root)))
+                  '("pyproject.toml" "pytest.ini" "tox.ini" "setup.cfg"))
+         'pytest)
+        ((file-exists-p (expand-file-name "go.mod" root)) 'go)
+        ((file-exists-p (expand-file-name "package.json" root)) 'node)
+        ((file-exists-p (expand-file-name "justfile" root)) 'just)
+        ((file-exists-p (expand-file-name "Makefile" root)) 'make))))))
 
 (defun my/test--current-defun ()
   "Return the current defun name when possible."
@@ -70,31 +77,27 @@
   (let* ((dir (file-name-directory file))
          (rel (file-relative-name dir root)))
     (if (equal rel "./")
-        "./..."
+        "."
       (concat "./" (directory-file-name rel)))))
-
-(defun my/test--file-relative (root)
-  "Return the current buffer file name relative to ROOT."
-  (unless buffer-file-name
-    (user-error "Current buffer is not visiting a file"))
-  (file-relative-name buffer-file-name root))
 
 (defun my/test--command (scope)
   "Build a test command for SCOPE."
   (let* ((root (file-name-as-directory (expand-file-name (my/test-project-root))))
-         (runner (my/test--runner root))
          (file (and buffer-file-name (expand-file-name buffer-file-name)))
          (relfile (and file (file-relative-name file root)))
          (defun-name (my/test--current-defun))
-         (pm (my/test--package-manager root))
          (override (my/project-local-test-command scope root))
+         (runner (unless override (my/test--runner root file)))
+         (pm (when (eq runner 'node) (my/test--package-manager root)))
          (env (my/project-local-env 'test root)))
     (list
      root
      (or override
          (progn
            (unless runner
-             (user-error "No supported test runner detected in %s" root))
+             (user-error "No test runner for %s in %s; set a project :test override"
+                         (if file (file-name-nondirectory file) "this project")
+                         root))
            (pcase (list runner scope)
              (`(cargo nearest)
               (if (and defun-name (not (string-empty-p defun-name)))
@@ -112,9 +115,10 @@
              (`(pytest ,_) "pytest")
              (`(go nearest)
               (if (and defun-name file)
-                  (format "go test %s -run '^%s$'"
+                  (format "go test %s -run %s"
                           (shell-quote-argument (my/test--go-package root file))
-                          (replace-regexp-in-string "'" "'\\''" defun-name))
+                          (shell-quote-argument
+                           (concat "^" (regexp-quote defun-name) "$")))
                 (format "go test %s"
                         (shell-quote-argument
                          (if file (my/test--go-package root file) "./...")))))
@@ -135,13 +139,10 @@
 
 (defun my/test--run (command root &optional env)
   "Run test COMMAND from ROOT."
-  (setq my/test-last-command command
-        my/test-last-directory root
-        my/test-last-environment env)
   (let ((default-directory root)
-        (process-environment (my/project-local-apply-env env))
-        (compilation-buffer-name-function (lambda (_) "*test*")))
-    (compile command)))
+        (process-environment (my/project-local-apply-env env)))
+    (prog1 (my/output-compile command "test" env)
+      (my/output-record-run 'test command root env))))
 
 (defun my/test-nearest ()
   "Run the nearest test to point."
@@ -162,19 +163,27 @@
     (my/test--run command root env)))
 
 (defun my/test-rerun ()
-  "Re-run the last test command."
+  "Re-run this frame's last test command."
   (interactive)
-  (unless (and my/test-last-command my/test-last-directory)
+  (unless (my/output-last-run 'test)
     (user-error "No previous test command"))
-  (my/test--run my/test-last-command
-                my/test-last-directory
-                my/test-last-environment))
+  (pcase-let ((`(,command ,directory ,env) (my/output-last-run 'test)))
+    (my/test--run command directory env)))
+
+(defalias 'test-nearest #'my/test-nearest
+  "Run the nearest test to point.")
+(defalias 'test-file #'my/test-file
+  "Run tests for the current file.")
+(defalias 'test-project #'my/test-project
+  "Run the current project's test suite.")
+(defalias 'test-rerun #'my/test-rerun
+  "Re-run the last test command.")
 
 (use-package transient
   :ensure nil
-  :defer t
+  :demand t
   :config
-  (transient-define-prefix my/test-dispatch ()
+  (transient-define-prefix test-menu ()
     "Test workflow."
     [["Run"
       ("n" "nearest" my/test-nearest)
@@ -184,14 +193,14 @@
 
 (my/leader!
   "r"   '(:ignore t :which-key "run")
-  "c t" '(:def my/test-dispatch :which-key "tests")
+  "c t" '(:def test-menu :which-key "tests")
   "c n" '(:def my/test-nearest :which-key "nearest test")
   "c N" '(:def my/test-file :which-key "file tests")
   "c p" '(:def my/test-project :which-key "project tests")
   "c T" '(:def my/test-rerun :which-key "rerun test"))
 
 (my/leader!
-  "r t" '(:def my/test-dispatch :which-key "tests")
+  "r t" '(:def test-menu :which-key "tests")
   "r n" '(:def my/test-nearest :which-key "nearest test")
   "r f" '(:def my/test-file :which-key "file tests")
   "r p" '(:def my/test-project :which-key "project tests")

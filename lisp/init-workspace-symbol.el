@@ -19,7 +19,7 @@
   (call-interactively #'my/symbols-xref-apropos))
 
 (my/leader!
-  "c s" '(:def my/language-server-workspace-symbol :which-key "workspace symbol"))
+  "c S" '(:def my/language-server-workspace-symbol :which-key "workspace symbol"))
 
 (provide 'init-workspace-symbol)
 ;;; init-workspace-symbol.el ends here

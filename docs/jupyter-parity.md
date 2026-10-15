@@ -34,7 +34,7 @@ A server URL alone therefore must not silently relocate the local project.
 | Local kernelspec launch | `server/jupyter/kernel-registry.mjs`, local real-kernel suites | Implemented; rerun full local real-kernel matrix for final acceptance |
 | SSH broker launch | `init-aaronnote-jupyter-runtime.el`, live Aaron-PC probe | Real remote launch, execution and completion passed |
 | Five ports / remote connection file | Runtime broker + Remote channel groups | Real attach and channel recreation passed; same state and local endpoints preserved |
-| Network reconnect / kernel death | `jupyter-kernel-remote-reconnect.test.ts`, heartbeat tests | Unit coverage passed; channel recreation tested live. Whole-link loss during an in-flight execution remains to test |
+| Network reconnect / kernel death | `jupyter-kernel-remote-reconnect.test.ts`, heartbeat tests, Linux in-flight disconnect probe, output-page state tests | Two real five-forward cuts on a pinned `vx25` target restored the workspace and classified the dead kernel. Host identity guards PID probes and signals across a balanced alias. The output page now distinguishes disconnected, dead, and state-lost records and retains the last outputs if refresh fails; the full Noema GUI path still needs live acceptance |
 | HTTP URL, port, proxy prefix, token | `init-aaronnote-jupyter-server.el`, server registry | Real forwarded `/audit/` server with authentication passed |
 | Password, Hub, HTTPS/SNI, gateway | Server auth / connection implementations | Protocol unit checks exist; deployment-level matrix remains incomplete |
 | Adopt / restart / shutdown ownership | Server registry + kernel registry | Live adopted client detach preserves owner; owned restart clears state; owned shutdown removes kernel |
@@ -150,8 +150,9 @@ notebook Debug command; editing during a debug run is deliberately locked.
   the original file in the owning filesystem. The header is read-only, edits
   support undo, and a changed original file prevents overwriting another edit.
   Saving invalidates kernelspec caches; changes apply on the next launch.
-- Connection maintenance runs asynchronously every 15 minutes locally and
-  during target discovery, throttled per target/directory. It removes only
+- Connection maintenance runs asynchronously every 15 minutes locally, or on
+  explicit request from the Jupyter Board (=s=) for its selected target.
+  Ordinary board discovery only reads connection files. Maintenance removes only
   files older than ten minutes whose five local TCP ports refuse connections,
   whose filenames have no live process references, and whose identity remains
   unchanged through a second check. Symlinks, external addresses and uncertain
@@ -220,9 +221,55 @@ jupyter-client 8.10.0 and ipywidgets 8.1.9 passed:
 
 The isolated fixture server was stopped and its `/tmp` environment removed.
 Homebrew `/opt/homebrew/bin/ssh` returned `No route to host` while `/usr/bin/ssh`
-connected to the same endpoint. The probe selects the working executable through
-its process-local client path; no global SSH configuration was changed. The
+connected to the same endpoint. The first probe selected the working executable
+through its process-local client path. Remote now selects `/usr/bin/ssh` by default
+on macOS for its explicit commands, TRAMP methods and tramp-rpc startup. The
 underlying Homebrew SSH discrepancy remains undiagnosed.
+
+On the Linux SSH target `login.cse.unsw.edu.au`, `ipykernel` 6.29.5 and
+`jupyter_client` 8.6.3 passed `JUPYTER_LINUX_TARGET=login.cse.unsw.edu.au
+make jupyter-linux-kernel-live-smoke`: actual broker launch, code execution and
+completion through five forwarded ports, channel recovery with an existing
+Python variable retained, and shutdown. The probe uses a temporary notebook,
+client record directory and runtime directory, all removed after the run.
+The same target also passed Jupyter Board's asynchronous kernelspec discovery.
+Its system `jupyter` launcher lacks `jupyter-kernelspec`; the target command
+now uses the installed `jupyter_client` Python API for catalog and runtime-dir
+queries in that case. A repeat with the Homebrew SSH client timed out waiting
+for `requestKernelInfo`, and another failed its forwarding handshake with
+signal 9. The probe now uses the production `remote-client-ssh-program` setting
+(`JUPYTER_LINUX_SSH` can override it for one run); the system SSH route passed
+full execution and cleanup on `vx25`. The exact cause of the earlier timeout
+remains unconfirmed.
+
+The opt-in `JUPYTER_LINUX_TARGET=login.cse.unsw.edu.au make
+jupyter-linux-disconnect-live-smoke` cuts only the probe's five SSH forwards
+after the real kernel reports `busy`. On `vx25`, the in-flight client timed out
+in 12 seconds, Remote automatically restored all five forwards, and the target
+then confirmed that the original process group was gone. The broker kept its
+durable identity until that confirmation, reported `alive: false`, and a new
+kernel started with empty state; both old and new test resources were cleaned.
+The cut did not change the login node (`vx25` before and after). The reason the
+target kernel exited is not yet established. This tests the broker and raw
+client boundary, not the browser's complete notebook UI recovery.
+
+The intermittent failures led to two corrections. SSH forward commands had
+`-S none` alongside a managed `ControlPath`; `ssh -G` confirmed that `-S none`
+disabled the control socket. Five Jupyter channels could therefore take
+separate connections through a balanced login name. Forwards now share the
+workspace SSH master, and a normal live kernel passed launch, execution,
+completion, five-channel reconstruction with state retained, and cleanup.
+
+A later fault run using the login alias could not access its original `/tmp`
+directory after reconnect, consistent with the alias landing on another node.
+The runtime now records the physical hostname. Liveness checks and signals
+compare it within the same target command; a mismatch returns an uncertain
+result, keeps the shutdown journal and appears as unknown in the Board. The
+test-owned old process group was independently confirmed gone on its original
+node and its files and local record were removed. A separate fault run using
+a temporary pinned `vx25` target passed two consecutive runs of automatic
+route recovery, confirmed kernel death, clean relaunch and cleanup. The full browser notebook UI path
+remains unverified.
 
 Final acceptance still requires completing the missing rows, broad regression
 checks and actual Emacs UI verification. A green routing probe alone is not full

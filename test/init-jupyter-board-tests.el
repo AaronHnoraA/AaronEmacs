@@ -40,11 +40,96 @@
                  (should (equal (plist-get args :context) "lab"))
                  (should (equal (last (plist-get args :args) 3)
                                 '("--runtime-dir" "/run/jupyter" "--apply")))
-                 (funcall (plist-get args :callback) nil))))
+                 (funcall (plist-get args :callback)
+                          (remote-exec-result-create :status 0 :stdout "" :stderr "")))))
       (dotimes (_ 2)
-        (my/jupyter-management--prune-directory "lab" "/run/jupyter" (lambda () (cl-incf completed))))
+        (my/jupyter-management--prune-directory
+         "lab" "/run/jupyter"
+         (lambda (&optional error)
+           (should-not error)
+           (cl-incf completed))))
       (should (= launched 1))
-      (should (= completed 2)))))
+      (should (= completed 2))
+      (my/jupyter-management--prune-directory
+       "lab" "/run/jupyter"
+       (lambda (&optional error)
+         (should-not error)
+         (cl-incf completed)) t)
+      (should (= launched 2))
+      (should (= completed 3)))))
+
+(ert-deftest my/jupyter-connection-discovery-only-prunes-on-request ()
+  "Board refresh may scan connection files without modifying the target."
+  (let (maintain-requests replies)
+    (cl-letf (((symbol-function 'my/jupyter-management-context)
+               (lambda (_target) 'test-context))
+              ((symbol-function 'my/jupyter-management-local-target-p)
+               (lambda (_target) nil))
+              ((symbol-function 'my/jupyter-target-command)
+               (lambda (&rest _) '("jupyter")))
+              ((symbol-function 'remote-exec-async)
+               (lambda (_program &rest args)
+                 (funcall (plist-get args :callback)
+                          (remote-exec-result-create
+                           :status 0 :stdout "/run/jupyter" :stderr ""))))
+              ((symbol-function 'my/jupyter-management-logical-path)
+               (lambda (_target directory) directory))
+              ((symbol-function 'my/jupyter-management-scan-connections)
+               (lambda (_directory) '(connection)))
+              ((symbol-function 'my/jupyter-management--prune-directory)
+               (lambda (_target _directory callback &optional force)
+                 (push force maintain-requests)
+                 (funcall callback nil))))
+      (my/jupyter-management-discover-connections
+       "lab" (lambda (value error) (push (list value error) replies)))
+      (should-not maintain-requests)
+      (my/jupyter-management-discover-connections
+       "lab" (lambda (value error) (push (list value error) replies)) 'force)
+      (should (equal maintain-requests '(t)))
+      (should (equal replies '(((connection) nil) ((connection) nil)))))))
+
+(ert-deftest my/jupyter-connection-cleanup-failure-is-retryable ()
+  "A failed cleanup must report its error and release the throttle."
+  (let ((my/jupyter-management--cleanup-times (make-hash-table :test #'equal))
+        (launched 0)
+        errors)
+    (cl-letf (((symbol-function 'my/jupyter-management-context) #'identity)
+              ((symbol-function 'my/jupyter-management-command)
+               (lambda (_target _kind) "python3"))
+              ((symbol-function 'remote-exec-async)
+               (lambda (_program &rest args)
+                 (cl-incf launched)
+                 (funcall (plist-get args :callback)
+                          (remote-exec-result-create
+                           :status 1 :stdout "" :stderr "offline")))))
+      (dotimes (_ 2)
+        (my/jupyter-management--prune-directory
+         "lab" "/run/jupyter"
+         (lambda (&optional error) (push error errors))))
+      (should (= launched 2))
+      (should (cl-every (lambda (error) (string-match-p "offline" error))
+                        errors))
+      (should-not (gethash '("lab" . "/run/jupyter")
+                           my/jupyter-management--cleanup-times)))))
+
+(ert-deftest my/jupyter-board-explicit-cleanup-refreshes-after-completion ()
+  "The cleanup key is an explicit target operation with a visible refresh."
+  (let (requested refreshed)
+    (with-temp-buffer
+      (my/jupyter-board-mode)
+      (setq my/jupyter-board--target 'test-target)
+      (my/jupyter-board--setup-keys)
+      (cl-letf (((symbol-function 'my/jupyter-management-discover-connections)
+                 (lambda (target callback &optional maintain)
+                   (setq requested (list target maintain))
+                   (funcall callback nil nil)))
+                ((symbol-function 'my/jupyter-board-refresh)
+                 (lambda () (setq refreshed t))))
+        (should (eq (key-binding (kbd "s"))
+                    'my/jupyter-board-clean-stale-connections))
+        (my/jupyter-board-clean-stale-connections))
+      (should (equal requested '(test-target force)))
+      (should refreshed))))
 
 (ert-deftest my/jupyter-board-detail-edits-original-json-and-rejects-conflicts ()
   (let* ((directory (make-temp-file "jupyter-detail-" t))
@@ -232,6 +317,25 @@
       (should (string-match-p "No remote profile is configured yet" text))
       (should (string-match-p "Quick Add SSH" text)))))
 
+(ert-deftest my/jupyter-board-shows-damaged-local-shutdown-record ()
+  "Record parse failures stay inside the Board instead of opening warnings."
+  (let* ((directory (make-temp-file "jupyter-board-bad-record-" t))
+         (my/noema-jupyter-pending-directory directory)
+         (file (expand-file-name (concat (make-string 64 ?a) ".json")
+                                 directory)))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "{oops"))
+          (with-temp-buffer
+            (my/jupyter-board-mode)
+            (setq my/jupyter-board--target (remote-get-target "local"))
+            (my/jupyter-board--render)
+            (should (string-match-p
+                     "Saved Broker Record Problems"
+                     (buffer-substring-no-properties
+                      (point-min) (point-max))))))
+      (delete-directory directory t))))
+
 (ert-deftest my/jupyter-board-action-buttons-carry-entry-context ()
   (let ((entry '(:id "spec:local:remote:test" :kind kernelspec
                  :name "rik_test" :display-name "Test" :language "python"
@@ -296,18 +400,20 @@
       (setq my/jupyter-board--target (remote-get-target "local"))
       (cl-letf (((symbol-function 'my/jupyter-management-command)
                  (lambda (_target _kind) "/usr/bin/true"))
-                ((symbol-function 'read-string)
-                 (lambda (prompt &rest _)
+                ((symbol-function 'my/jupyter-board--read-required)
+                 (lambda (prompt _default _history)
                    (cond
                     ((string-prefix-p "SSH host" prompt) "student@cluster:2222")
                     ((string-prefix-p "Profile name" prompt) "Course Python")
-                    ((string-prefix-p "Remote working" prompt) "/srv/course")
                     ((string-prefix-p "Remote kernel" prompt)
                      "python3 -m ipykernel_launcher -f {connection_file}")
                     (t (ert-fail (format "Unexpected prompt: %s" prompt))))))
-                ((symbol-function 'completing-read)
-                 (lambda (&rest _) "Saved (protected)"))
-                ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                ((symbol-function 'my/jupyter-board--read-workdir)
+                 (lambda (_default) "/srv/course"))
+                ((symbol-function 'my/jupyter-board--read-lifetime)
+                 (lambda (_current-group) "Saved (protected)"))
+                ((symbol-function 'my/jupyter-board--confirm-profile)
+                 (lambda (&rest _) t))
                 ((symbol-function 'my/jupyter-board--save-remote-profile)
                  (lambda (target args &optional _origin)
                    (setq saved-target target saved-args args))))
@@ -413,6 +519,81 @@
           (should (equal (plist-get (car my/jupyter-board--entries) :name)
                          "new")))))))
 
+(ert-deftest my/jupyter-board-reopen-coalesces-pending-discovery ()
+  "Opening the board again does not duplicate an unfinished provider scan."
+  (let ((my/jupyter-board-buffer-name "*Jupyter Board Reopen Test*")
+        (spec-requests 0)
+        spec-callback)
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/jupyter-management-discover-specs)
+                   (lambda (_target callback)
+                     (cl-incf spec-requests)
+                     (setq spec-callback callback)))
+                  ((symbol-function 'my/jupyter-management-discover-connections)
+                   (lambda (_target callback) (funcall callback nil nil)))
+                  ((symbol-function 'my/noema-api-call)
+                   (lambda (_channel _args callback) (funcall callback nil nil)))
+                  ((symbol-function 'pop-to-buffer) (lambda (&rest _) nil)))
+          (my/jupyter-board)
+          (my/jupyter-board)
+          (should (= spec-requests 1))
+          (funcall spec-callback nil nil)
+          (my/jupyter-board)
+          (should (= spec-requests 2)))
+      (when-let* ((buffer (get-buffer my/jupyter-board-buffer-name)))
+        (kill-buffer buffer)))))
+
+(ert-deftest my/jupyter-board-disconnect-invalidates-in-flight-result ()
+  "An explicit target disconnect clears the board and rejects late replies."
+  (let ((my/jupyter-board-buffer-name "*Jupyter Board Disconnect Test*")
+        spec-callback cleanup-callback)
+    (unwind-protect
+        (with-current-buffer (get-buffer-create my/jupyter-board-buffer-name)
+          (my/jupyter-board-mode)
+          (setq my/jupyter-board--target (remote-get-target "local"))
+          (cl-letf (((symbol-function 'my/jupyter-management-discover-specs)
+                     (lambda (_target callback) (setq spec-callback callback)))
+                    ((symbol-function 'my/jupyter-management-discover-connections)
+                     (lambda (_target callback) (funcall callback nil nil)))
+                    ((symbol-function 'my/noema-api-call)
+                     (lambda (_channel _args callback) (funcall callback nil nil))))
+            (my/jupyter-board-refresh))
+          (should my/jupyter-board--loading)
+          (cl-letf (((symbol-function 'my/jupyter-management-discover-connections)
+                     (lambda (_target callback &optional _maintain)
+                       (setq cleanup-callback callback))))
+            (my/jupyter-board-clean-stale-connections))
+          (my/jupyter-board--target-disconnected-h "local" 'user)
+          (should-not my/jupyter-board--loading)
+          (should (equal (alist-get 'target my/jupyter-board--errors)
+                         "Disconnected; press g to refresh this target"))
+          (funcall spec-callback '((:name "late")) nil)
+          (should-not my/jupyter-board--entries)
+          (let ((generation my/jupyter-board--refresh-generation))
+            (funcall cleanup-callback nil nil)
+            (should (= generation my/jupyter-board--refresh-generation)))
+          (should (string-match-p
+                   "Disconnected; press g"
+                   (buffer-substring-no-properties (point-min) (point-max)))))
+      (when-let* ((buffer (get-buffer my/jupyter-board-buffer-name)))
+        (kill-buffer buffer)))))
+
+(ert-deftest my/jupyter-board-cleanup-does-not-refresh-another-target ()
+  "A cleanup reply for the old target must not refresh a new selection."
+  (let (cleanup-callback (refreshes 0))
+    (with-temp-buffer
+      (my/jupyter-board-mode)
+      (setq my/jupyter-board--target "old")
+      (cl-letf (((symbol-function 'my/jupyter-management-discover-connections)
+                 (lambda (_target callback &optional _maintain)
+                   (setq cleanup-callback callback)))
+                ((symbol-function 'my/jupyter-board-refresh)
+                 (lambda () (cl-incf refreshes))))
+        (my/jupyter-board-clean-stale-connections)
+        (setq my/jupyter-board--target "new")
+        (funcall cleanup-callback nil nil)
+        (should (= refreshes 0))))))
+
 (ert-deftest my/jupyter-board-keeps-provider-cache-on-refresh-error ()
   (with-temp-buffer
     (my/jupyter-board-mode)
@@ -442,6 +623,34 @@
     (should (= (length result) 1))
     (should (eq (plist-get (car result) :provider) 'noema))
     (should (= (plist-get (car result) :pid) 42))))
+
+(ert-deftest my/jupyter-board-shows-unconfirmed-broker-shutdown ()
+  "A stale Noema task status must not hide a failed target shutdown."
+  (let* ((broker '(:id "runtime:noema-broker:host-1" :kind runtime
+                   :provider noema-broker :runtime-id "host-1"
+                   :host-runtime-id "host-1" :target-id "local"
+                   :status shutdown-pending))
+         (payload '((kernels . (((id . "node-1") (key . "key-1")
+                                (hostRuntimeId . "host-1")
+                                (status . "idle"))))))
+         (result (my/jupyter-board--normalize-noema-runtimes
+                  payload (list broker) "local")))
+    (should (eq (plist-get (car result) :status) 'shutdown-pending))))
+
+(ert-deftest my/jupyter-board-saved-shutdown-takes-one-actionable-row ()
+  "A saved broker shutdown must not be hidden behind a stale Noema task."
+  (let* ((broker '(:id "runtime:noema-broker:host-1" :kind runtime
+                   :provider noema-broker :runtime-id "host-1"
+                   :host-runtime-id "host-1" :target-id "local"
+                   :status shutdown-pending :journal-pending t))
+         (payload '((kernels . (((id . "node-1") (key . "key-1")
+                                (hostRuntimeId . "host-1")
+                                (status . "idle"))))))
+         (result (my/jupyter-board--normalize-noema-runtimes
+                  payload (list broker) "local")))
+    (should (= (length result) 1))
+    (should (eq (car result) broker))
+    (should (eq (plist-get (car result) :provider) 'noema-broker))))
 
 (ert-deftest my/jupyter-board-async-command-captures-output ()
   (let (output (calls 0))

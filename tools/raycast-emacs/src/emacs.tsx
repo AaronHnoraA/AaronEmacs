@@ -2,7 +2,6 @@ import {
   Action,
   ActionPanel,
   Alert,
-  Cache,
   closeMainWindow,
   Color,
   confirmAlert,
@@ -13,7 +12,7 @@ import {
   useNavigation,
 } from "@raycast/api";
 import { useCallback, useEffect, useState } from "react";
-import { emacs, emacsDetached, reportFailure } from "./client";
+import { emacs, emacsAction, emacsDetached, reportCommandFailure, reportFailure, reportPendingAction } from "./client";
 import FindNote from "./find-note";
 import Noema from "./noema";
 
@@ -22,7 +21,7 @@ import Noema from "./noema";
 type EmacsAction = { id: string; title: string; prompt: string };
 type Frame = { id: string; title: string; buffers: string; visible: boolean };
 type State = {
-  status: "visible" | "background" | "busy" | "stopped";
+  status: "visible" | "background" | "busy" | "stopped" | "checking" | "unavailable";
   uptime?: string;
   memory?: number;
   buffers?: number;
@@ -31,27 +30,27 @@ type State = {
   frames?: Frame[];
 };
 
-const STATE = "state";
-const cache = new Cache();
-
-// What Emacs last reported is on screen at once; the live state replaces it.
-function cachedState(): State {
-  try {
-    return JSON.parse(cache.get(STATE) ?? "") as State;
-  } catch {
-    return { status: "stopped" };
-  }
-}
-
 // Every use ends at Raycast's root, so the next launch starts fresh instead of
 // on this list with the last search still in it.  Returning to the root
 // unloads this command, so the call to Emacs is started first, on its own.
 async function leaveWith(...args: string[]) {
-  emacsDetached(...args);
-  await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Immediate });
+  try {
+    await emacsDetached(...args);
+    await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Immediate });
+  } catch (error) {
+    await reportCommandFailure(error);
+  }
 }
 
-const run = (action: EmacsAction, argument = "") => leaveWith("act", action.id, argument);
+async function run(action: EmacsAction, argument = "") {
+  try {
+    const result = await emacsAction("act", action.id, argument);
+    if (result === "pending") await reportPendingAction();
+    await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Immediate });
+  } catch (error) {
+    await reportCommandFailure(error);
+  }
+}
 
 function ArgumentForm({ action }: { action: EmacsAction }) {
   return (
@@ -73,20 +72,26 @@ const STATUS = {
   background: { text: "In the background", color: Color.Blue },
   busy: { text: "Not answering: starting, or waiting for an answer", color: Color.Orange },
   stopped: { text: "Not running", color: Color.SecondaryText },
+  checking: { text: "Checking Emacs…", color: Color.SecondaryText },
+  unavailable: { text: "Could not check Emacs", color: Color.Orange },
 };
 
 export default function Command() {
   const { push } = useNavigation();
-  const [state, setState] = useState<State>(cachedState);
+  const [state, setState] = useState<State>({ status: "checking" });
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
       const json = await emacs("state");
-      setState(JSON.parse(json));
-      cache.set(STATE, json);
+      const next = JSON.parse(json) as State;
+      if (!["visible", "background", "busy", "stopped"].includes(next?.status)) {
+        throw new Error("Emacs returned an invalid state");
+      }
+      setState(next);
     } catch (error) {
+      setState({ status: "unavailable" });
       await reportFailure(error);
     }
     setLoading(false);
@@ -96,15 +101,31 @@ export default function Command() {
     reload();
   }, [reload]);
 
-  // Emacs applies frame actions just after the client returns.
+  // Stay in the list so several frame operations can be applied in sequence.
   const stay = async (action: string, frame?: Frame) => {
-    await emacs("frame", action, frame?.id ?? "").catch(reportFailure);
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    try {
+      const result = await emacsAction("frame", action, frame?.id ?? "");
+      if (result === "pending") {
+        await reportPendingAction();
+        return;
+      }
+    } catch (error) {
+      await reportCommandFailure(error);
+      return;
+    }
     await reload();
   };
 
   // Actions that end in a frame taking the keyboard leave Raycast.
-  const leave = (action: string, frame?: Frame) => leaveWith("frame", action, frame?.id ?? "");
+  const leave = async (action: string, frame?: Frame) => {
+    try {
+      const result = await emacsAction("frame", action, frame?.id ?? "");
+      if (result === "pending") await reportPendingAction();
+      await closeMainWindow({ clearRootSearch: true, popToRootType: PopToRootType.Immediate });
+    } catch (error) {
+      await reportCommandFailure(error);
+    }
+  };
 
   // Starting and quitting take seconds; Raycast is left at once.
   const lifecycle = (...args: string[]) => leaveWith(...args);
@@ -148,7 +169,7 @@ export default function Command() {
   const emacsActions = (
     <ActionPanel.Section title="Emacs">
       <Action title="Reload" icon={Icon.ArrowClockwise} shortcut={{ modifiers: ["cmd"], key: "r" }} onAction={reload} />
-      {state.status !== "stopped" && (
+      {(answering || state.status === "busy") && (
         <Action
           title="Restart Emacs"
           icon={Icon.RotateClockwise}
@@ -156,7 +177,7 @@ export default function Command() {
           onAction={() => lifecycle("restart")}
         />
       )}
-      {state.status !== "stopped" && (
+      {(answering || state.status === "busy") && (
         <Action title="Force Quit Emacs" icon={Icon.Bolt} style={Action.Style.Destructive} onAction={forceQuit} />
       )}
     </ActionPanel.Section>
@@ -295,9 +316,9 @@ export default function Command() {
               {state.status === "stopped" && (
                 <Action title="Start Emacs and Show It" icon={Icon.Eye} onAction={() => lifecycle("start")} />
               )}
-              {state.status === "busy" && (
+              {(state.status === "busy" || state.status === "unavailable") && (
                 <Action
-                  title="Show Emacs"
+                  title="Show or Start Emacs"
                   icon={Icon.Eye}
                   onAction={() => leaveWith("show")}
                 />

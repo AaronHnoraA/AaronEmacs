@@ -16,6 +16,7 @@
 (defvar package-user-dir)
 
 (declare-function my/show-warnings-buffer "init-utils" ())
+(declare-function my/open-client-document "init-open" (file &optional view))
 (declare-function my/health-startup-check "init-health" ())
 (declare-function my/health-byte-compile-check "init-health" ())
 (declare-function my/health-native-compile-check "init-health" ())
@@ -27,6 +28,16 @@
 (defconst my/compile-config-root
   (file-name-as-directory (expand-file-name user-emacs-directory))
   "Root directory of this Emacs config.")
+
+(defmacro my/compile--on-client (&rest body)
+  "Run BODY with this Emacs installation's file and process context."
+  (declare (indent 0) (debug t))
+  `(let ((default-directory my/compile-config-root)
+         (process-environment (default-value 'process-environment))
+         (exec-path (default-value 'exec-path)))
+     (with-temp-buffer
+       (setq default-directory my/compile-config-root)
+       ,@body)))
 
 (defconst my/lisp-dir
   (file-name-as-directory (expand-file-name "lisp" my/compile-config-root))
@@ -171,8 +182,10 @@ Skips test suites and example directories that ship with some packages."
 
 (defun my/compile--path-in-config-p (path)
   "Return non-nil when PATH is inside the current Emacs config."
-  (string-prefix-p my/compile-config-root
-                   (file-truename (expand-file-name path))))
+  (and (string-prefix-p my/compile-config-root (expand-file-name path))
+       (my/compile--on-client
+         (string-prefix-p my/compile-config-root
+                          (file-truename (expand-file-name path))))))
 
 (defun my/ensure-lisp-dir ()
   "Ensure `my/lisp-dir' exists."
@@ -311,13 +324,14 @@ Skips test suites and example directories that ship with some packages."
 (defun my/native-comp-reset-cache ()
   "Delete and recreate the dedicated native compilation cache directory."
   (interactive)
-  (let ((dir my/native-comp-cache-dir))
-    (when (file-directory-p dir)
-      (delete-directory dir t))
-    (make-directory dir t)
-    (message "Reset native compilation cache: %s"
-             (abbreviate-file-name dir))
-    (my/compile--refresh-board-if-visible)))
+  (my/compile--on-client
+    (let ((dir my/native-comp-cache-dir))
+      (when (file-directory-p dir)
+        (delete-directory dir t))
+      (make-directory dir t)
+      (message "Reset native compilation cache: %s"
+               (abbreviate-file-name dir))
+      (my/compile--refresh-board-if-visible))))
 
 (defun my/compile--count-existing-elc-files ()
   "Return the number of managed byte-compiled files that currently exist."
@@ -354,45 +368,49 @@ With prefix arg FORCE, recompile unconditionally."
   (let ((file (or (my/compile--current-managed-file)
                   (user-error "Current buffer is not a managed Emacs Lisp file"))))
     (save-buffer)
-    (if (my/compile--maybe-byte-compile-file file force)
-        (message "Byte-compiled %s" (file-name-nondirectory file))
-      (message "Byte-compiled file is already up to date: %s"
-               (file-name-nondirectory file)))
+    (my/compile--on-client
+      (if (my/compile--maybe-byte-compile-file file force)
+          (message "Byte-compiled %s" (file-name-nondirectory file))
+        (message "Byte-compiled file is already up to date: %s"
+                 (file-name-nondirectory file))))
     (my/compile--refresh-board-if-visible)))
 
 (defun my/byte-recompile-lisp-dir (&optional force)
   "Byte-recompile `my/lisp-dir' recursively.
 With prefix arg FORCE, recompile all files."
   (interactive "P")
-  (let ((base (my/ensure-lisp-dir)))
-    (byte-recompile-directory base 0 force)
-    (message "Byte-recompiled %s (force=%s)"
-             (abbreviate-file-name base)
-             (and force t))
-    (my/compile--refresh-board-if-visible)))
+  (my/compile--on-client
+    (let ((base (my/ensure-lisp-dir)))
+      (byte-recompile-directory base 0 force)
+      (message "Byte-recompiled %s (force=%s)"
+               (abbreviate-file-name base)
+               (and force t))
+      (my/compile--refresh-board-if-visible))))
 
 (defun my/byte-compile-config (&optional force)
   "Byte-compile the managed Emacs config.
 With prefix arg FORCE, recompile everything unconditionally."
   (interactive "P")
-  (let ((compiled 0))
-    (dolist (file (my/compile--root-file-paths))
-      (when (my/compile--maybe-byte-compile-file file force)
-        (cl-incf compiled)))
-    (dolist (dir (my/compile--directory-paths))
-      (byte-recompile-directory dir 0 force))
-    (message "Byte-compile finished for config (top-level compiled=%d, force=%s)"
-             compiled
-             (and force t))
-    (my/compile--refresh-board-if-visible)))
+  (my/compile--on-client
+    (let ((compiled 0))
+      (dolist (file (my/compile--root-file-paths))
+        (when (my/compile--maybe-byte-compile-file file force)
+          (cl-incf compiled)))
+      (dolist (dir (my/compile--directory-paths))
+        (byte-recompile-directory dir 0 force))
+      (message "Byte-compile finished for config (top-level compiled=%d, force=%s)"
+               compiled
+               (and force t))
+      (my/compile--refresh-board-if-visible))))
 
 (defun my/byte-compile-all (&optional force)
   "Byte-compile the local config and third-party Elisp directories.
 With prefix arg FORCE, recompile everything unconditionally."
   (interactive "P")
   (my/byte-compile-config force)
-  (dolist (dir (my/compile--third-party-directory-paths))
-    (byte-recompile-directory dir 0 force))
+  (my/compile--on-client
+    (dolist (dir (my/compile--third-party-directory-paths))
+      (byte-recompile-directory dir 0 force)))
   (message "Byte-compile finished for config + third-party Elisp (force=%s)"
            (and force t))
   (my/compile--refresh-board-if-visible))
@@ -406,12 +424,13 @@ With prefix arg FORCE, delete the file's current `.eln' first."
   (let ((file (or (my/compile--current-managed-file)
                   (user-error "Current buffer is not a managed Emacs Lisp file"))))
     (save-buffer)
-    (my/compile-apply-runtime-settings)
-    (when force
-      (when-let* ((eln-file (my/native-comp--el-to-eln-file file))
-                  ((file-exists-p eln-file)))
-        (delete-file eln-file)))
-    (native-compile-async file)
+    (my/compile--on-client
+      (my/compile-apply-runtime-settings)
+      (when force
+        (when-let* ((eln-file (my/native-comp--el-to-eln-file file))
+                    ((file-exists-p eln-file)))
+          (delete-file eln-file)))
+      (native-compile-async file))
     (my/native-comp--maybe-show-log)
     (my/native-comp--start-progress (file-name-nondirectory file))
     (message "Queued native compilation for %s" (file-name-nondirectory file))
@@ -423,16 +442,17 @@ With prefix arg FORCE, delete existing managed `.eln' artifacts first."
   (interactive "P")
   (unless (my/native-comp-available-p)
     (user-error "Native compilation is not available in this Emacs"))
-  (let ((base (my/ensure-lisp-dir)))
-    (my/compile-apply-runtime-settings)
-    (when force
-      (message "Deleted %d managed native artifacts before recompiling"
-               (my/native-comp--delete-config-artifacts)))
-    (native-compile-async base t)
-    (my/native-comp--maybe-show-log)
-    (my/native-comp--start-progress (abbreviate-file-name base))
-    (message "Queued native compilation for %s" (abbreviate-file-name base))
-    (my/compile--refresh-board-if-visible)))
+  (my/compile--on-client
+    (let ((base (my/ensure-lisp-dir)))
+      (my/compile-apply-runtime-settings)
+      (when force
+        (message "Deleted %d managed native artifacts before recompiling"
+                 (my/native-comp--delete-config-artifacts)))
+      (native-compile-async base t)
+      (my/native-comp--maybe-show-log)
+      (my/native-comp--start-progress (abbreviate-file-name base))
+      (message "Queued native compilation for %s" (abbreviate-file-name base))
+      (my/compile--refresh-board-if-visible))))
 
 (defun my/native-compile-config (&optional force)
   "Queue native compilation for the managed Emacs config.
@@ -440,14 +460,15 @@ With prefix arg FORCE, delete managed `.eln' artifacts first."
   (interactive "P")
   (unless (my/native-comp-available-p)
     (user-error "Native compilation is not available in this Emacs"))
-  (my/compile-apply-runtime-settings)
-  (when force
-    (message "Deleted %d managed native artifacts before recompiling"
-             (my/native-comp--delete-config-artifacts)))
-  (dolist (file (my/compile--root-file-paths))
-    (native-compile-async file))
-  (dolist (dir (my/compile--directory-paths))
-    (native-compile-async dir t))
+  (my/compile--on-client
+    (my/compile-apply-runtime-settings)
+    (when force
+      (message "Deleted %d managed native artifacts before recompiling"
+               (my/native-comp--delete-config-artifacts)))
+    (dolist (file (my/compile--root-file-paths))
+      (native-compile-async file))
+    (dolist (dir (my/compile--directory-paths))
+      (native-compile-async dir t)))
   (my/native-comp--maybe-show-log)
   (my/native-comp--start-progress "config")
   (message "Queued native compilation for the local Emacs config")
@@ -459,21 +480,22 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
   (interactive "P")
   (unless (my/native-comp-available-p)
     (user-error "Native compilation is not available in this Emacs"))
-  (my/compile-apply-runtime-settings)
-  (when force
-    (my/native-comp-reset-cache))
-  (let ((compiled 0) (skipped 0))
-    (dolist (file (my/compile--all-el-files))
-      (condition-case err
-          (progn (native-compile file)
-                 (cl-incf compiled))
-        (error
-         (cl-incf skipped)
-         (message "Native-compile skipped %s: %s"
-                  (file-relative-name file user-emacs-directory)
-                  (error-message-string err)))))
-    (message "Native-compile finished (compiled=%d, skipped=%d, force=%s)"
-             compiled skipped (and force t)))
+  (my/compile--on-client
+    (my/compile-apply-runtime-settings)
+    (when force
+      (my/native-comp-reset-cache))
+    (let ((compiled 0) (skipped 0))
+      (dolist (file (my/compile--all-el-files))
+        (condition-case err
+            (progn (native-compile file)
+                   (cl-incf compiled))
+          (error
+           (cl-incf skipped)
+           (message "Native-compile skipped %s: %s"
+                    (file-relative-name file user-emacs-directory)
+                    (error-message-string err)))))
+      (message "Native-compile finished (compiled=%d, skipped=%d, force=%s)"
+               compiled skipped (and force t))))
   (my/compile--refresh-board-if-visible))
 
 (defun my/build-all (&optional force)
@@ -485,20 +507,22 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
 (defun my/compile-clean-byte-artifacts ()
   "Delete managed byte-compiled files."
   (interactive)
-  (let ((deleted 0))
-    (dolist (file (my/compile--target-el-files))
-      (let ((elc-file (my/compile--byte-dest-file file)))
-        (when (file-exists-p elc-file)
-          (delete-file elc-file)
-          (cl-incf deleted))))
-    (message "Deleted %d managed .elc files" deleted)
-    (my/compile--refresh-board-if-visible)))
+  (my/compile--on-client
+    (let ((deleted 0))
+      (dolist (file (my/compile--target-el-files))
+        (let ((elc-file (my/compile--byte-dest-file file)))
+          (when (file-exists-p elc-file)
+            (delete-file elc-file)
+            (cl-incf deleted))))
+      (message "Deleted %d managed .elc files" deleted)
+      (my/compile--refresh-board-if-visible))))
 
 (defun my/compile-clean-native-artifacts ()
   "Delete managed native-compiled files for this config."
   (interactive)
-  (message "Deleted %d managed .eln files"
-           (my/native-comp--delete-config-artifacts))
+  (my/compile--on-client
+    (message "Deleted %d managed .eln files"
+             (my/native-comp--delete-config-artifacts)))
   (my/compile--refresh-board-if-visible))
 
 (defun my/compile-clean-all-artifacts ()
@@ -514,7 +538,9 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
   (when (and my/compile-auto-native-on-save
              (my/native-comp-available-p)
              (my/compile--current-managed-file))
-    (native-compile-async buffer-file-name)
+    (let ((file buffer-file-name))
+      (my/compile--on-client
+        (native-compile-async file)))
     (message "Auto-queued native compilation for %s"
              (file-name-nondirectory buffer-file-name))
     (my/compile--refresh-board-if-visible)))
@@ -533,7 +559,8 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
 (defun my/compile-open-docs ()
   "Open the maintenance documentation for compile and cleanup workflows."
   (interactive)
-  (find-file (expand-file-name "docs/maintenance.md" my/compile-config-root)))
+  (my/open-client-document
+   (expand-file-name "docs/maintenance.md" my/compile-config-root)))
 
 (defun my/compile-board--insert-button (label action help)
   "Insert a text button with LABEL, ACTION, and HELP."
@@ -550,6 +577,8 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
 (defun my/compile-board-refresh ()
   "Refresh the compile management board."
   (interactive)
+  (unless (derived-mode-p 'my/compile-board-mode)
+    (user-error "Not in the Compile Board"))
   (let ((inhibit-read-only t)
         (target-files (my/compile--target-el-files))
         (native-available (my/native-comp-available-p)))
@@ -562,7 +591,7 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
                 (cons (format "%d .el" (length target-files)) nil)
                 (cons (format "%d .elc" (my/compile--count-existing-elc-files)) nil)
                 (cons (format "%d .eln" (my/compile--count-existing-config-eln-files)) nil))
-        :actions '((:label "Dispatch" :command my/compile-dispatch :primary t :help "Transient menu")
+        :actions '((:label "Dispatch" :command config-compile-menu :primary t :help "Transient menu")
                    (:label "Docs"     :command my/compile-open-docs             :help "Maintenance docs")))
 
        ;; Overview
@@ -641,6 +670,9 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
   (let ((buffer (get-buffer-create my/compile-board-buffer-name)))
     (with-current-buffer buffer
       (my/compile-board-mode)
+      (setq-local default-directory my/compile-config-root
+                  process-environment (default-value 'process-environment)
+                  exec-path (default-value 'exec-path))
       (aaron-ui-board-set-header "Compile Board" 'compile)
       (setq-local aaron-ui-board-refresh-function #'my/compile-board-refresh)
       (let ((map (copy-keymap special-mode-map)))
@@ -658,7 +690,7 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
         (local-set-key (kbd "l") #'my/native-comp-open-log)
         (local-set-key (kbd "o") #'my/compile-open-docs)
         (local-set-key (kbd "t") #'my/compile-toggle-auto-native-on-save)
-        (local-set-key (kbd "?") #'my/compile-dispatch)
+        (local-set-key (kbd "?") #'config-compile-menu)
         (local-set-key (kbd "s")
                        (lambda ()
                          (interactive)
@@ -680,7 +712,7 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
       (my/compile-board-refresh))
     (pop-to-buffer buffer)))
 
-(transient-define-prefix my/compile-dispatch ()
+(transient-define-prefix config-compile-menu ()
   "Compile and cleanup workflow for the local Emacs config."
   [["Board"
     ("b" "open board" my/compile-board)
@@ -719,9 +751,11 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
     ("l" "native log" my/native-comp-open-log)
     ("t" "toggle auto native on save" my/compile-toggle-auto-native-on-save)]])
 
+(defalias 'config-compile #'my/compile-board
+  "Open the Emacs configuration compile board.")
 (my/leader!
   "cb" '(:def my/compile-board :which-key "compile board")
-  "c?" '(:def my/compile-dispatch :which-key "compile menu"))
+  "cB" '(:def config-compile-menu :which-key "compile menu"))
 
 (provide 'init-compile)
 ;;; init-compile.el ends here

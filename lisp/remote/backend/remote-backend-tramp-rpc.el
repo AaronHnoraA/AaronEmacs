@@ -12,6 +12,10 @@
 (declare-function msgpack-encode-alist "msgpack" (alist))
 (declare-function msgpack-unsigned-to-bytes "msgpack" (integer size))
 (declare-function tramp-rpc--cached-system-info "tramp-rpc" (vec))
+(declare-function tramp-rpc--invalidate-cache-for-path
+                  "tramp-rpc-magit" (filename))
+(declare-function tramp-rpc--invalidate-cache-for-subtree
+                  "tramp-rpc-magit" (directory))
 (declare-function tramp-rpc--call "tramp-rpc"
                   (vec method params &optional connection))
 (declare-function tramp-rpc--decode-output "tramp-rpc" (data encoding))
@@ -1145,6 +1149,28 @@ associating that HOME with a named account.  Other names keep upstream lookup."
        :mtime-compare exact
        ;; Input to a target process goes through the reliable RPC queue.
        :process-write-cost queued))))
+
+(defun remote-backend-tramp-rpc-invalidate-cache (physical &optional subtree)
+  "Forget RPC metadata for PHYSICAL after a target-side process changes it.
+TRAMP-RPC keeps its own stat and existence caches in addition to TRAMP's
+file properties.  Keep that private cache boundary inside this adapter."
+  (if (and (fboundp 'tramp-rpc--invalidate-cache-for-path)
+           (or (not subtree)
+               (fboundp 'tramp-rpc--invalidate-cache-for-subtree)))
+      (if subtree
+          (tramp-rpc--invalidate-cache-for-subtree physical)
+        (tramp-rpc--invalidate-cache-for-path physical))
+    (with-parsed-tramp-file-name physical nil
+      (tramp-flush-file-properties v localname)
+      (tramp-flush-directory-properties
+       v (if subtree localname (file-name-directory localname))))))
+
+(defun remote-backend-tramp-rpc-transport-process (physical)
+  "Return the current RPC transport process for PHYSICAL, if connected."
+  (when (fboundp 'tramp-rpc--get-connection)
+    (plist-get (tramp-rpc--get-connection
+                (tramp-dissect-file-name physical))
+               :process)))
 
 (remote-backend-tramp-rpc-install)
 

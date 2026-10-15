@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'copy-as-format)
 (require 'ert)
 (require 'init-bazel)
 (require 'init-calendar-tools)
@@ -15,6 +16,7 @@
 (require 'init-file-workbench)
 (require 'init-github)
 (require 'init-macos-tools)
+(require 'init-navigation)
 (require 'init-org-tools)
 
 (defmacro my/workbench-test-with-region (beg end &rest body)
@@ -55,12 +57,30 @@
                    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"))))
 
 (ert-deftest my/copy-as-format-uses-the-whole-buffer-without-a-region ()
-  (with-temp-buffer
-    (insert "alpha\nbeta\n")
-    (goto-char (point-min))
-    (my/copy-as-format-markdown)
-    (should (string-match-p "alpha" (current-kill 0)))
-    (should (string-match-p "beta" (current-kill 0)))))
+  (let ((copy-as-format-default "slack"))
+    (with-temp-buffer
+      (insert "alpha\nbeta\n")
+      (goto-char (point-min))
+      (my/copy-as-format-markdown)
+      (should (string-match-p "alpha" (current-kill 0)))
+      (should (string-match-p "beta" (current-kill 0)))
+      (should (= (point) (point-min)))
+      (should (equal (buffer-string) "alpha\nbeta\n"))
+      (should (equal copy-as-format-default "slack")))))
+
+(ert-deftest my/copy-as-format-preserves-an-active-region-and-default ()
+  (let ((copy-as-format-default "slack"))
+    (with-temp-buffer
+      (insert "alpha beta")
+      (let ((transient-mark-mode t))
+        (goto-char (point-min))
+        (push-mark 6 t t)
+        (my/copy-as-format-html)
+        (should (equal (current-kill 0) "<pre><code>\nalpha\n</code></pre>\n"))
+        (should (= (point) (point-min)))
+        (should (= (mark) 6))
+        (should mark-active)
+        (should (equal copy-as-format-default "slack"))))))
 
 (ert-deftest my/narrow-or-widen-dwim-prefers-the-active-region ()
   (with-temp-buffer
@@ -71,6 +91,112 @@
     (should (equal (buffer-string) "middle"))
     (my/narrow-or-widen-dwim nil)
     (should-not (buffer-narrowed-p))))
+
+(ert-deftest my/narrow-or-widen-stays-in-org-for-source-and-quote-blocks ()
+  (require 'org)
+  (with-temp-buffer
+    (org-mode)
+    (insert "* Heading\n#+begin_src emacs-lisp\n(+ 1 2)\n#+end_src\n"
+            "#+begin_quote\nquoted words\n#+end_quote\n* Other heading\n")
+    (let ((original-buffer (current-buffer)))
+      (goto-char (point-min))
+      (search-forward "(+ 1 2)")
+      (narrow-or-widen nil)
+      (should (eq (current-buffer) original-buffer))
+      (should (buffer-narrowed-p))
+      (should (string-search "(+ 1 2)" (buffer-string)))
+      (should-not (string-match-p "quoted words" (buffer-string)))
+      (narrow-or-widen nil)
+      (should-not (buffer-narrowed-p))
+      (goto-char (point-min))
+      (search-forward "quoted words")
+      (narrow-or-widen nil)
+      (should (eq (current-buffer) original-buffer))
+      (should (buffer-narrowed-p))
+      (should (string-match-p "quoted words" (buffer-string)))
+      (should-not (string-search "(+ 1 2)" (buffer-string)))
+      (narrow-or-widen nil)
+      (should-not (buffer-narrowed-p))
+      (goto-char (point-min))
+      (search-forward "Heading")
+      (narrow-or-widen nil)
+      (should (buffer-narrowed-p))
+      (should (string-match-p "quoted words" (buffer-string))))))
+
+(ert-deftest my/navigation-back-and-forward-use-the-recorded-jump ()
+  (require 'better-jumper)
+  (let ((file (make-temp-file "navigation-history-" nil ".txt"
+                              "first line\nsecond line\n")))
+    (unwind-protect
+        (save-window-excursion
+          (let ((buffer (find-file-noselect file)))
+            (switch-to-buffer buffer)
+            (better-jumper-clear-jumps)
+            (goto-char (point-min))
+            (my/navigation--push-jump)
+            (goto-char (point-max))
+            (my/navigation-back)
+            (should (= (point) (point-min)))
+            (my/navigation-forward)
+            (should (= (point) (point-max)))
+            (better-jumper-clear-jumps)))
+      (when-let* ((buffer (get-file-buffer file)))
+        (kill-buffer buffer))
+      (delete-file file))))
+
+(ert-deftest my/navigation-history-uses-native-xref-when-jump-list-is-empty ()
+  (require 'better-jumper)
+  (require 'xref)
+  (let ((buffer (generate-new-buffer " *navigation xref fallback*")))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (let* ((window (selected-window))
+                 (old-history (window-parameter window 'xref--history))
+                 (xref-history-storage #'xref-window-local-history))
+            (unwind-protect
+                (progn
+                  (set-window-parameter window 'xref--history (cons nil nil))
+                  (better-jumper-clear-jumps)
+                  (insert "first line\nsecond line\n")
+                  (goto-char (point-min))
+                  (xref-push-marker-stack)
+                  (goto-char (point-max))
+                  (my/navigation-back)
+                  (should (= (point) (point-min)))
+                  (my/navigation-forward)
+                  (should (= (point) (point-max))))
+              (set-window-parameter window 'xref--history old-history))))
+      (kill-buffer buffer))))
+
+(ert-deftest my/structure-up-falls-back-to-native-list-navigation ()
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (insert "(outer (inner value))")
+    (search-backward "value")
+    (structure-up)
+    (should (= (point) (save-excursion
+                         (goto-char (point-min))
+                         (search-forward "(inner")
+                         (- (point) (length "(inner")))))
+    (structure-up)
+    (should (= (point) (point-min)))
+    (should-error (structure-up) :type 'user-error)
+    (should (= (point) (point-min)))))
+
+(ert-deftest my/structure-up-uses-the-nearest-c-tree-sitter-statement ()
+  (skip-unless (and (fboundp 'treesit-language-available-p)
+                    (treesit-language-available-p 'c)))
+  (with-temp-buffer
+    (c-ts-mode)
+    (insert "int outer(void) { if (1) { return 2; } }\n")
+    (let ((inner-block (save-excursion
+                         (goto-char (point-min))
+                         (search-forward "{ return")
+                         (- (point) (length "{ return")))))
+      (search-backward "return")
+      (structure-up)
+      (should (= (point) inner-block)))))
 
 (ert-deftest my/last-change-mode-records-and-releases-its-marker ()
   (let ((buffer (generate-new-buffer " *last-change-test*"))
@@ -89,6 +215,145 @@
       (when was-enabled
         (my/last-change-mode 1)))))
 
+(ert-deftest my/ediff-last-two-yanks-owns-its-own-cleanup ()
+  "Another Ediff session must not clean up the yank comparison."
+  (require 'ediff)
+  (let ((kill-ring '("new text" "old text"))
+        (ediff-cleanup-hook nil)
+        control a b other)
+    (unwind-protect
+        (cl-letf (((symbol-function 'ediff-buffers)
+                   (lambda (left right &optional startup-hooks _job-name)
+                     (setq a left b right
+                           control (generate-new-buffer "*Ediff yank test*"))
+                     (with-current-buffer control
+                       (mapc #'funcall startup-hooks))
+                     control)))
+          (my/ediff-last-two-yanks)
+          (should (buffer-live-p a))
+          (should (buffer-live-p b))
+          (should-not ediff-cleanup-hook)
+          (setq other (generate-new-buffer "*Other Ediff test*"))
+          (with-current-buffer other
+            (run-hooks 'ediff-cleanup-hook))
+          (should (buffer-live-p a))
+          (should (buffer-live-p b))
+          (with-current-buffer control
+            (run-hooks 'ediff-cleanup-hook))
+          (should-not (buffer-live-p a))
+          (should-not (buffer-live-p b)))
+      (dolist (buffer (list control a b other))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))))))
+
+(ert-deftest my/ediff-dwim-compares-the-visible-buffers ()
+  "Two visible file buffers should be compared without rereading disk."
+  (require 'ediff)
+  (let ((first (generate-new-buffer "*Ediff visible A*"))
+        (second (generate-new-buffer "*Ediff visible B*"))
+        compared)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer first)
+          (with-current-buffer first
+            (setq buffer-file-name "/tmp/ediff-visible-a.txt"))
+          (split-window-right)
+          (other-window 1)
+          (switch-to-buffer second)
+          (with-current-buffer second
+            (setq buffer-file-name "/tmp/ediff-visible-b.txt"))
+          (cl-letf (((symbol-function 'ediff-buffers)
+                     (lambda (a b &rest _)
+                       (setq compared (list a b))))
+                    ((symbol-function 'ediff-files)
+                     (lambda (&rest _)
+                       (error "Ediff reread files instead of visible buffers"))))
+            (my/ediff-dwim))
+          (should (equal (sort compared
+                               (lambda (a b)
+                                 (string-lessp (buffer-name a) (buffer-name b))))
+                         (list first second))))
+      (dolist (buffer (list first second))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))))))
+
+(ert-deftest my/ediff-window-layout-restores-after-last-session ()
+  "Overlapping Ediff sessions on one frame share one original layout."
+  (require 'ediff)
+  (let* ((frame (selected-frame))
+         (previous (frame-parameter frame 'my/ediff-window-state))
+         first second restored baseline)
+    (unwind-protect
+        (progn
+          (should (advice-member-p #'my/ediff--setup-windows-a 'ediff-setup))
+          (setq first
+                (my/ediff--setup-windows-a
+                 (lambda (&rest _)
+                   (generate-new-buffer "*Ediff layout first*"))))
+          (setq baseline
+                (plist-get (frame-parameter frame 'my/ediff-window-state)
+                           :layout))
+          (setq second
+                (my/ediff--setup-windows-a
+                 (lambda (&rest _)
+                   (generate-new-buffer "*Ediff layout second*"))))
+          (should (eq (plist-get
+                       (frame-parameter frame 'my/ediff-window-state)
+                       :layout)
+                      baseline))
+          (cl-letf (((symbol-function 'set-window-configuration)
+                     (lambda (layout &rest _)
+                       (push layout restored))))
+            (with-current-buffer first
+              (run-hooks 'ediff-after-quit-hook-internal))
+            (should-not restored)
+            (with-current-buffer second
+              (run-hooks 'ediff-after-quit-hook-internal))
+            (should (equal restored (list baseline))))
+          (should-not (frame-parameter frame 'my/ediff-window-state)))
+      (set-frame-parameter frame 'my/ediff-window-state previous)
+      (dolist (buffer (list first second))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))))))
+
+(ert-deftest my/ediff-window-layout-rolls-back-failed-setup ()
+  "A failed Ediff setup restores the frame without leaving session state."
+  (save-window-excursion
+    (delete-other-windows)
+    (let* ((frame (selected-frame))
+           (previous (frame-parameter frame 'my/ediff-window-state)))
+      (unwind-protect
+          (progn
+            (should-error
+             (my/ediff--setup-windows-a
+              (lambda (&rest _)
+                (split-window-right)
+                (error "Ediff setup failed"))))
+            (should (= (length (window-list)) 1))
+            (should (eq (frame-parameter frame 'my/ediff-window-state)
+                        previous)))
+        (set-frame-parameter frame 'my/ediff-window-state previous)))))
+
+(ert-deftest my/ediff-window-layout-cleans-when-control-is-killed ()
+  "Closing an Ediff control buffer directly releases its frame state."
+  (let* ((frame (selected-frame))
+         (previous (frame-parameter frame 'my/ediff-window-state))
+         control)
+    (unwind-protect
+        (progn
+          (setq control
+                (my/ediff--setup-windows-a
+                 (lambda (&rest _)
+                   (generate-new-buffer "*Ediff killed control*"))))
+          (should (frame-parameter frame 'my/ediff-window-state))
+          (kill-buffer control)
+          (sleep-for 0.01)
+          (should-not (frame-parameter frame 'my/ediff-window-state)))
+      (set-frame-parameter frame 'my/ediff-window-state previous)
+      (when (buffer-live-p control)
+        (kill-buffer control)))))
+
 (ert-deftest my/files-create-parent-directories-honors-always-policy ()
   (let* ((root (make-temp-file "file-workbench-" t))
          (parent (expand-file-name "nested/deeper/" root))
@@ -106,6 +371,76 @@
     (setq buffer-file-name "/tmp/example.txt")
     (should (equal (my/files-copy-paths nil) "/tmp/example.txt"))
     (should (equal (current-kill 0) "/tmp/example.txt"))))
+
+(ert-deftest my/file-menu-uses-searchable-actions-and-native-image-crop ()
+  "File actions have M-x names; crop remains Emacs's editing action."
+  (should (member "file-menu"
+                  (all-completions "file-menu" obarray #'commandp)))
+  (should (eq (plist-get (cdr (transient-get-suffix
+                              'command-hub "f")) :command)
+              #'file-menu))
+  (with-current-buffer (get-buffer "*scratch*")
+    (evil-normal-state)
+    (should (eq (key-binding (kbd "SPC f .")) #'file-menu)))
+  (dolist (entry '(("o" . file-open)
+                   ("O" . file-open-new-frame)
+                   ("y" . file-copy-paths)
+                   ("Y" . file-copy-parent-paths)
+                   ("s" . dired-selected-size)
+                   ("v" . dired-selection)))
+    (let ((command (cdr entry)))
+      (should (commandp command))
+      (should (member (symbol-name command)
+                      (all-completions (symbol-name command)
+                                       obarray #'commandp)))
+      (should (eq (plist-get
+                   (cdr (transient-get-suffix 'file-menu
+                                              (car entry)))
+                   :command)
+                  command))))
+  (should-error (transient-get-suffix 'file-menu "c"))
+  (should (eq (plist-get (cdr (transient-get-suffix
+                              'editing-menu "p")) :command)
+              #'image-crop)))
+
+(ert-deftest my/dired-selection-keeps-source-directory-list ()
+  "A selected-file view should use a real Dired directory and keep its source."
+  (let* ((root (make-temp-file "dired-selection-" t))
+         (first (expand-file-name "first.txt" root))
+         (second (expand-file-name "second.txt" root))
+         (source nil)
+         (selection nil))
+    (unwind-protect
+        (progn
+          (with-temp-file first (insert "first"))
+          (with-temp-file second (insert "second"))
+          (setq source (dired-noselect root))
+          (save-window-excursion
+            (switch-to-buffer source)
+            (dired-goto-file first)
+            (dired-mark 1)
+            (goto-char (point-min))
+            (should (= (length (my/files-selected-paths)) 1))
+            (should (file-equal-p (car (my/files-selected-paths)) first))
+            (setq selection (my/dired-selection))
+            (should (eq (window-buffer) selection))
+            (should-not (eq source selection))
+            (with-current-buffer selection
+              (should (file-equal-p (car dired-directory) root))
+              (should (= (length (dired-get-marked-files)) 1))
+              (should (file-equal-p (car (dired-get-marked-files)) first)))
+            (with-current-buffer selection
+              (call-interactively (lookup-key dired-mode-map (kbd "q"))))
+            (should (eq (window-buffer) source)))
+          (should (buffer-live-p source))
+          (should-not (buffer-live-p selection))
+          (with-current-buffer source
+            (should (file-equal-p dired-directory root))
+            (should (dired-goto-file (file-truename second)))))
+      (dolist (buffer (list source selection))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer)))
+      (delete-directory root t))))
 
 (ert-deftest my/dired-parse-du-kib-sums-each-entry ()
   (should (= (my/dired--parse-du-kib "4\t/tmp/a\n12\t/tmp/b\n") 16)))
@@ -126,8 +461,8 @@
                  '("//a:t" "//z:t"))))
 
 (ert-deftest my/bazel-workbench-commands-are-top-level-definitions ()
-  (dolist (command '(my/bazel-build my/bazel-test my/bazel-run
-                     my/bazel-insert-target my/bazel-jump-to-target))
+  (dolist (command '(bazel-target-build bazel-target-test bazel-target-run
+                     bazel-target-insert bazel-target-jump))
     (should (fboundp command))))
 
 (ert-deftest my/bazel-target-query-uses-the-logical-target ()
@@ -224,6 +559,43 @@
 
 (ert-deftest my/macos-ns-color-conversion-uses-eight-bit-components ()
   (should (equal (my/macos--ns-color-to-hex "65535,32768,0") "#ff8000")))
+
+(ert-deftest macos-tools-menu-has-searchable-actions ()
+  (skip-unless (eq system-type 'darwin))
+  (dolist (command '(macos-tools-menu macos-pick-color macos-open-at-point))
+    (should (commandp command))
+    (should (member (symbol-name command)
+                    (all-completions (symbol-name command) obarray #'commandp))))
+  (should (eq (plist-get (cdr (transient-get-suffix 'macos-tools-menu "c"))
+                        :command)
+              'macos-pick-color))
+  (should (eq (plist-get (cdr (transient-get-suffix 'macos-tools-menu "o"))
+                        :command)
+              'macos-open-at-point))
+  (with-temp-buffer
+    (evil-normal-state)
+    (should (eq (key-binding (kbd "SPC a m")) 'macos-tools-menu))))
+
+(ert-deftest macos-pick-color-reports-script-and-insertion-errors ()
+  (skip-unless (eq system-type 'darwin))
+  (cl-letf (((symbol-function 'do-applescript)
+             (lambda (&rest _) (error "AppleScript bridge unavailable"))))
+    (let ((err (should-error (macos-pick-color nil) :type 'error)))
+      (should (string-match-p "AppleScript bridge unavailable"
+                              (error-message-string err)))))
+  (cl-letf (((symbol-function 'do-applescript)
+             (lambda (&rest _) (error "User canceled. (-128)"))))
+    (let ((err (should-error (macos-pick-color nil) :type 'user-error)))
+      (should (string-match-p "Color selection cancelled"
+                              (error-message-string err)))))
+  (cl-letf (((symbol-function 'do-applescript)
+             (lambda (&rest _) "65535,32768,0")))
+    (let ((kill-ring nil)
+          (kill-ring-yank-pointer nil))
+      (with-temp-buffer
+        (setq buffer-read-only t)
+        (should-error (macos-pick-color t) :type 'buffer-read-only)
+        (should (equal (current-kill 0) "#ff8000"))))))
 
 (ert-deftest my/org-link-dwim-wraps-a-region-with-the-clipboard-url ()
   (with-temp-buffer

@@ -16,6 +16,7 @@
 (require 'cl-lib)
 (require 'dired)
 (require 'seq)
+(require 'remote-core)
 
 (declare-function dired-dotfiles-toggle "init-dired" (&rest _))
 (declare-function dired-do-shell-command "dired-aux"
@@ -28,38 +29,42 @@
 (declare-function dired-isearch-filenames "dired-aux" ())
 (declare-function dirvish-yank "dirvish-yank" (&optional dest))
 (declare-function dirvish-move "dirvish-yank" (&optional dest))
+(declare-function dirvish-symlink "dirvish-yank" (&optional dest))
+(declare-function dirvish-relative-symlink "dirvish-yank" (&optional dest))
+(declare-function dirvish-hardlink "dirvish-yank" (&optional dest))
 (declare-function my/open-system-target "init-open" (target))
+(declare-function file-open-new-frame "init-windows" (file &optional wildcards))
 (declare-function dired-jump-with-zoxide "init-zoxide" (&optional other-window))
 (declare-function remote-files-terminal "remote-files" ())
 (declare-function remote-files--queue "remote-files" (files destination))
+(declare-function remote-files--finished "remote-files" (job))
+(declare-function remote-files--revert-directory "remote-files" (directory))
 (declare-function remote-canonicalize-file-name "remote-fs"
                   (file-name &optional directory))
 (declare-function remote-file-name-target "remote-fs" (file-name))
+(declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
+(declare-function remote-transfer-command "remote-transfer" (&rest args))
+(declare-function remote-transfer-plan-file-operation "remote-transfer" (&rest args))
+(declare-function remote-transfer-start-file-operation "remote-transfer" (&rest args))
+(declare-function remote-transfer-job-kind "remote-transfer" (job))
+(declare-function remote-transfer-job-sources "remote-transfer" (job))
+(declare-function remote-transfer-job-state "remote-transfer" (job))
 
 (defvar dirvish-mode-map)
 (defvar dirvish-yank-overwrite-existing-files)
+(defvar dirvish-yank-sources)
 
 (defvar my/dirvish--paste-method nil
   "What `my/dirvish-paste' does with the marked files: `copy' or `cut'.")
 
 (defun my/dirvish--command (name docstring function)
-  "Define FUNCTION as the command NAME with DOCSTRING and return its symbol.
-Keys bound to a named command stay readable in help and which-key."
-  (let ((symbol (intern name)))
+  "Define FUNCTION as a key-only command NAME with DOCSTRING.
+The uninterned symbol stays readable in key help without entering M-x."
+  (let ((symbol (make-symbol name)))
     (defalias symbol function docstring)
     symbol))
 
 ;;; Movement
-
-(defun my/dirvish-leave ()
-  "Go to the parent folder, as yazi's `leave'."
-  (interactive)
-  (dired-up-directory))
-
-(defun my/dirvish-enter ()
-  "Enter the folder at point, or open the file there, as yazi's `enter'."
-  (interactive)
-  (dired-find-file))
 
 (defun my/dirvish-top ()
   "Go to the first file."
@@ -100,7 +105,7 @@ Keys bound to a named command stay readable in help and which-key."
 (defun my/dirvish-go (directory)
   "Return a command that shows DIRECTORY of this machine."
   (my/dirvish--command
-   (format "my/dirvish-go:%s" directory)
+   (format "dirvish-go:%s" directory)
    (format "Show %s." directory)
    (lambda ()
      (interactive)
@@ -113,8 +118,9 @@ Keys bound to a named command stay readable in help and which-key."
        (dired directory)))))
 
 (defun my/dirvish-go-interactive (directory)
-  "Show DIRECTORY, read with completion from the current folder."
-  (interactive (list (read-directory-name "Go to: ")))
+  "Show DIRECTORY, read with completion from the directory at point."
+  (interactive (list (read-directory-name "Go to: "
+                                           (my/dirvish--directory-at-point))))
   (dired directory))
 
 (defun my/dirvish-follow-link ()
@@ -192,41 +198,176 @@ this machine from the same path on a target."
         (mapcar #'remote-canonicalize-file-name
                 (dired-map-over-marks (dired-get-filename) nil)))))))
 
+(defun my/dirvish--yank-method (command)
+  "Return the target file operation corresponding to Dirvish COMMAND."
+  (cond ((eq command #'dirvish-yank) 'copy)
+        ((eq command #'dirvish-move) 'move)
+        ((eq command #'dirvish-symlink) 'symlink)
+        ((eq command #'dirvish-relative-symlink) 'relative-symlink)
+        ((eq command #'dirvish-hardlink) 'hardlink)
+        (t (error "Unsupported Dirvish file operation: %s" command))))
+
+(defun my/dirvish--clear-marks ()
+  "Unmark files in live Dired buffers after an operation is queued."
+  (dolist (buffer (my/dirvish--dired-buffers))
+    (with-current-buffer buffer (dired-unmark-all-marks))))
+
+(defun my/dirvish--target-operation-finished (job)
+  "Refresh source folders after a routed move and report JOB's result."
+  (when (and (eq (remote-transfer-job-state job) 'done)
+             (eq (remote-transfer-job-kind job) 'move))
+    (dolist (source (remote-transfer-job-sources job))
+      (remote-files--revert-directory (file-name-directory source))))
+  (remote-files--finished job))
+
+(defun my/dirvish--client-yank (command destination sources &optional force plan)
+  "Run Dirvish COMMAND on SOURCES into DESTINATION.
+Use Dirvish's stock worker for client-visible paths.  Otherwise queue PLAN,
+or preflight and queue a routed operation on the target."
+  (unless sources
+    (user-error "No files are marked"))
+  (let* ((destination (remote-canonicalize-file-name destination))
+         (target (remote-file-name-target destination))
+         (client-destination (remote-client-file-name destination))
+         (client-sources (mapcar #'remote-client-file-name sources)))
+    (unless (cl-every (lambda (source)
+                        (equal (remote-file-name-target source) target))
+                      sources)
+      (user-error "Dirvish file operation requires one source target"))
+    (if (and client-destination (cl-every #'identity client-sources))
+        (progn
+          (remote-require-on-client 'dirvish-yank)
+          (let ((dirvish-yank-sources (lambda () client-sources))
+                (dirvish-yank-overwrite-existing-files
+                 (if force 'always dirvish-yank-overwrite-existing-files)))
+            (funcall command client-destination)))
+      (remote-require-on-client 'remote-files)
+      (remote-require-on-client 'remote-transfer)
+      (let ((job
+             (remote-transfer-start-file-operation
+              (or plan
+                  (remote-transfer-plan-file-operation
+                   (my/dirvish--yank-method command) sources destination
+                   :overwrite (if force t 'ask)))
+              :callback #'my/dirvish--target-operation-finished)))
+        (my/dirvish--clear-marks)
+        job))))
+
+(defun my/dirvish--group-sources (sources)
+  "Group SOURCES by target, preserving target and file order."
+  (let (groups)
+    (dolist (source sources)
+      (let* ((target (remote-file-name-target source))
+             (group (assoc target groups)))
+        (if group
+            (push source (cdr group))
+          (push (cons target (list source)) groups))))
+    (mapcar (lambda (group)
+              (cons (car group) (nreverse (cdr group))))
+            (nreverse groups))))
+
+(defun my/dirvish--check-transfer-names (sources)
+  "Reject ambiguous SOURCE basenames before independent transfer jobs start."
+  (let ((seen (make-hash-table :test #'equal)))
+    (dolist (source sources)
+      (let ((name (file-name-nondirectory (directory-file-name source))))
+        (when (gethash name seen)
+          (user-error "Multiple selected sources are named %s" name))
+        (puthash name t seen)))))
+
 (defun my/dirvish-paste (&optional force)
-  "Copy or move the selected files into this folder.
+  "Copy or move the selected files into the directory at point.
 With FORCE, existing files are overwritten without a question.  Files that
 come from another machine are not copied by Emacs, which would block until
 done: they are queued as a bulk transfer."
   (interactive)
   (let* ((here (remote-canonicalize-file-name
-                (expand-file-name default-directory)))
+                (my/dirvish--directory-at-point)))
          (sources (my/dirvish--marked-everywhere))
-         (target (remote-file-name-target here)))
+         (target (remote-file-name-target here))
+         (groups (my/dirvish--group-sources sources))
+         (same (cdr (assoc target groups)))
+         (foreign (seq-remove (lambda (group) (equal (car group) target))
+                              groups))
+         same-plan)
     (unless sources
       (user-error "Nothing selected; mark files and press y or x first"))
-    (if (seq-some (lambda (file)
-                    (not (equal (remote-file-name-target file) target)))
-                  sources)
-        (progn
-          (when (eq my/dirvish--paste-method 'cut)
-            (user-error
-             "Moving between machines is not offered; copy, then delete the originals"))
-          (require 'remote-files)
-          (remote-files--queue sources here)
-          (dolist (buffer (my/dirvish--dired-buffers))
-            (with-current-buffer buffer (dired-unmark-all-marks))))
-      (require 'dirvish-yank)
-      (let ((dirvish-yank-overwrite-existing-files
-             (if force 'always dirvish-yank-overwrite-existing-files)))
-        (if (eq my/dirvish--paste-method 'cut)
-            (dirvish-move)
-          (dirvish-yank)))))
+    (when (and foreign (eq my/dirvish--paste-method 'cut))
+      (user-error
+       "Moving between machines is not offered; copy, then delete the originals"))
+    ;; Validate every route before starting any of the independent jobs.
+    (when foreign
+      (my/dirvish--check-transfer-names sources)
+      (remote-require-on-client 'remote-files)
+      (remote-require-on-client 'remote-transfer)
+      (dolist (group foreign)
+        (remote-transfer-command (cdr group) here)))
+    (when same
+      (unless (and (remote-client-file-name here)
+                   (cl-every #'remote-client-file-name same))
+        (remote-require-on-client 'remote-transfer)
+        (setq same-plan
+              (remote-transfer-plan-file-operation
+               (if (eq my/dirvish--paste-method 'cut) 'move 'copy)
+               same here :overwrite (if force t 'ask)))))
+    (dolist (group foreign)
+      (remote-files--queue (cdr group) here))
+    (when same
+      (my/dirvish--client-yank
+       (if (eq my/dirvish--paste-method 'cut)
+           #'dirvish-move #'dirvish-yank)
+       here same force same-plan))
+    (when foreign
+      (my/dirvish--clear-marks)))
   (setq my/dirvish--paste-method nil))
 
 (defun my/dirvish-paste-force ()
   "Paste, overwriting existing files."
   (interactive)
   (my/dirvish-paste t))
+
+(defun my/dirvish-copy-here ()
+  "Copy marked files to the directory at point from the yank menu."
+  (interactive)
+  (setq my/dirvish--paste-method 'copy)
+  (my/dirvish-paste))
+
+(defun my/dirvish-move-here ()
+  "Move marked files to the directory at point from the yank menu."
+  (interactive)
+  (setq my/dirvish--paste-method 'cut)
+  (my/dirvish-paste))
+
+(defun my/dirvish-symlink (&optional destination)
+  "Link marked files in the directory at point.
+With a prefix argument, read DESTINATION explicitly."
+  (interactive (list (when current-prefix-arg
+                       (read-directory-name "Symlink files to: "
+                                            (my/dirvish--directory-at-point)))))
+  (my/dirvish--client-yank
+   #'dirvish-symlink (or destination (my/dirvish--directory-at-point))
+   (my/dirvish--marked-everywhere)))
+
+(defun my/dirvish-relative-symlink (&optional destination)
+  "Link marked files relatively in the directory at point.
+With a prefix argument, read DESTINATION explicitly."
+  (interactive (list (when current-prefix-arg
+                       (read-directory-name "Relative symlink files to: "
+                                            (my/dirvish--directory-at-point)))))
+  (my/dirvish--client-yank
+   #'dirvish-relative-symlink
+   (or destination (my/dirvish--directory-at-point))
+   (my/dirvish--marked-everywhere)))
+
+(defun my/dirvish-hardlink (&optional destination)
+  "Hardlink marked files in the directory at point.
+With a prefix argument, read DESTINATION explicitly."
+  (interactive (list (when current-prefix-arg
+                       (read-directory-name "Hardlink files to: "
+                                            (my/dirvish--directory-at-point)))))
+  (my/dirvish--client-yank
+   #'dirvish-hardlink (or destination (my/dirvish--directory-at-point))
+   (my/dirvish--marked-everywhere)))
 
 ;;; Delete, create, rename
 
@@ -242,12 +383,33 @@ done: they are queued as a bulk transfer."
   (let ((delete-by-moving-to-trash nil))
     (dired-do-delete)))
 
+(defun my/dirvish--directory-at-point ()
+  "Return the directory of the current Dired row.
+A directory row names itself; a file row names its parent."
+  (let ((file (when dired-subdir-alist
+                (dired-get-filename nil t))))
+    (if (and file
+             (file-directory-p file)
+             (not (member (file-name-nondirectory
+                           (directory-file-name file)) '("." ".."))))
+        (file-name-as-directory file)
+      (or (and file (file-name-directory file))
+          (and dired-subdir-alist (dired-current-directory))
+          default-directory))))
+
 (defun my/dirvish-create (name)
-  "Create the file NAME here, or the folder when NAME ends with a slash."
-  (interactive (list (read-string "Create (end with / for a folder): ")))
-  (when (string-empty-p name)
-    (user-error "No name given"))
-  (let ((path (expand-file-name name)))
+  "Create NAME beside the file at point, or inside the directory at point.
+Append a slash to NAME to create a directory.  The prompt completes paths
+from the selected row's directory, including entries in expanded subtrees."
+  (interactive
+   (list (read-file-name "Create (end with / for a folder): "
+                         (my/dirvish--directory-at-point))))
+  (let* ((directory (my/dirvish--directory-at-point))
+         (path (expand-file-name name directory)))
+    (when (or (string-empty-p name)
+              (equal (directory-file-name path)
+                     (directory-file-name directory)))
+      (user-error "No name given"))
     (if (directory-name-p name)
         (make-directory path t)
       (make-directory (file-name-directory path) t)
@@ -322,9 +484,10 @@ nothing or `stem' to keep only the extension."
   (my/dirvish--copy (dired-get-filename)))
 
 (defun my/dirvish-copy-dirname ()
-  "Copy the path of the folder shown."
+  "Copy the directory at point, or the parent of the file at point."
   (interactive)
-  (my/dirvish--copy (directory-file-name (dired-current-directory))))
+  (my/dirvish--copy (directory-file-name
+                     (my/dirvish--directory-at-point))))
 
 (defun my/dirvish-copy-filename ()
   "Copy the name of the file at point."
@@ -338,6 +501,14 @@ nothing or `stem' to keep only the extension."
   (my/dirvish--copy (file-name-base (directory-file-name (dired-get-filename)))))
 
 ;;; Open, find, sort, view
+
+(defun my/dirvish-open-new-frame ()
+  "Open the file or directory at point in a new Emacs frame."
+  (interactive)
+  (file-open-new-frame (dired-get-file-for-visit)))
+
+(defalias 'dirvish-open-new-frame #'my/dirvish-open-new-frame
+  "Open the Dirvish entry at point in a new Emacs frame.")
 
 (defun my/dirvish-open-externally ()
   "Open the file at point with the operating system."
@@ -357,7 +528,7 @@ nothing or `stem' to keep only the extension."
 (defun my/dirvish-sort (switches)
   "Return a command that lists the folder with extra ls SWITCHES."
   (my/dirvish--command
-   (format "my/dirvish-sort:%s" (if (string-empty-p switches) "name" switches))
+   (format "dirvish-sort:%s" (if (string-empty-p switches) "name" switches))
    (format "List this folder with ls switches %S." switches)
    (lambda ()
      (interactive)
@@ -367,7 +538,7 @@ nothing or `stem' to keep only the extension."
 (defun my/dirvish-details (show)
   "Return a command that shows file details when SHOW, else hides them."
   (my/dirvish--command
-   (if show "my/dirvish-details-show" "my/dirvish-details-hide")
+   (if show "dirvish-details-show" "dirvish-details-hide")
    (if show
        "Show size, time, permissions and owner."
      "Show file names only.")
@@ -376,25 +547,33 @@ nothing or `stem' to keep only the extension."
      (dired-hide-details-mode (if show -1 1)))))
 
 (defun my/dirvish-shell-here ()
-  "Open a terminal in the folder shown, on the machine it is on."
+  "Open a terminal in the directory at point, on its machine."
   (interactive)
   (require 'remote-files)
-  (remote-files-terminal))
+  (let ((default-directory (my/dirvish--directory-at-point)))
+    (remote-files-terminal)))
 
 (defun my/dirvish-tab (number)
   "Return a command that selects tab NUMBER."
   (my/dirvish--command
-   (format "my/dirvish-tab:%d" number)
+   (format "dirvish-tab:%d" number)
    (format "Select tab %d." number)
    (lambda ()
      (interactive)
      (tab-bar-select-tab number))))
 
 (defun my/dirvish-jump-file ()
-  "Find a file under this folder by fuzzy name and go to it."
+  "Find a file under the directory at point and go to it."
   (interactive)
-  (call-interactively
-   (if (fboundp 'consult-fd) 'consult-fd 'dirvish-fd)))
+  (let ((default-directory (my/dirvish--directory-at-point)))
+    (call-interactively
+     (if (fboundp 'consult-fd) 'consult-fd 'dirvish-fd))))
+
+(defun my/dirvish-fd-here ()
+  "Run Dirvish fd search from the directory at point."
+  (interactive)
+  (let ((default-directory (my/dirvish--directory-at-point)))
+    (call-interactively #'dirvish-fd)))
 
 (defun my/dirvish-tab-move-left ()
   "Swap this tab with the previous one."
@@ -453,6 +632,7 @@ nothing or `stem' to keep only the extension."
      ("c n" . "不含扩展名"))
     ("打开 / 运行"
      ("RET" . "在 Emacs 里打开")
+     ("Cmd+Shift+RET" . "在新的 Emacs 窗口打开")
      ("o o" . "系统默认程序")
      (": / o c" . "运行命令（等待）")
      ("; / O" . "运行命令（异步）")
@@ -466,6 +646,7 @@ nothing or `stem' to keep only the extension."
     ("显示 / 排序"
      ("." . "隐藏文件")
      ("m s / m n" . "显示详情 / 只显示名字")
+     ("m l / M-t" . "普通 / 上级目录视图")
      (", m / , M" . "按修改时间：正 / 倒序")
      (", s / , S" . "按大小")
      (", e / , E" . "按扩展名")
@@ -549,13 +730,44 @@ nothing or `stem' to keep only the extension."
         (side . bottom)
         (window-height . fit-window-to-buffer))))))
 
+;;; Searchable commands for the actions that extend Dired/Dirvish.
+
+(defalias 'dirvish-select-for-copy #'my/dirvish-yank
+  "Select marked files for copying with `dirvish-paste-here'.")
+(defalias 'dirvish-select-for-move #'my/dirvish-cut
+  "Select marked files for moving with `dirvish-paste-here'.")
+(defalias 'dirvish-paste-here #'my/dirvish-paste
+  "Copy or move selected files into the directory at point.")
+(defalias 'dirvish-paste-force #'my/dirvish-paste-force
+  "Paste selected files into the directory at point, overwriting files.")
+(defalias 'dirvish-copy-here #'my/dirvish-copy-here
+  "Copy marked files into the directory at point.")
+(defalias 'dirvish-move-here #'my/dirvish-move-here
+  "Move marked files into the directory at point.")
+(defalias 'dirvish-symlink-here #'my/dirvish-symlink
+  "Create symbolic links in the directory at point.")
+(defalias 'dirvish-relative-symlink-here #'my/dirvish-relative-symlink
+  "Create relative symbolic links in the directory at point.")
+(defalias 'dirvish-hardlink-here #'my/dirvish-hardlink
+  "Create hard links in the directory at point.")
+(defalias 'dirvish-create-here #'my/dirvish-create
+  "Create a file or directory in the directory at point.")
+(defalias 'dirvish-trash #'my/dirvish-trash
+  "Move selected files to the trash.")
+(defalias 'dirvish-delete-permanently #'my/dirvish-delete-permanently
+  "Permanently delete selected files after confirmation.")
+(defalias 'dirvish-key-help #'my/dirvish-key-help
+  "Show the Dirvish key reference in a temporary window.")
+(defalias 'dirvish-go-directory #'my/dirvish-go-interactive
+  "Read a directory from the current row and open it in Dired.")
+
 ;;; Keys
 
 (defconst my/dirvish-yazi-keys
   `(;; Movement
     ("j" . dired-next-line) ("k" . dired-previous-line)
-    ("h" . my/dirvish-leave) ("l" . my/dirvish-enter)
-    ("<left>" . my/dirvish-leave) ("<right>" . my/dirvish-enter)
+    ("h" . dired-up-directory) ("l" . dired-find-file)
+    ("<left>" . dired-up-directory) ("<right>" . dired-find-file)
     ("S-<left>" . dirvish-history-go-backward)
     ("S-<right>" . dirvish-history-go-forward)
     ("C-u" . my/dirvish-half-page-up) ("C-d" . my/dirvish-half-page-down)
@@ -572,7 +784,7 @@ nothing or `stem' to keep only the extension."
     ("g u" . ,(my/dirvish-go "~/Public/"))
     ("g c" . ,(my/dirvish-go "~/.config/"))
     ("g l" . ,(my/dirvish-go "~/.local/"))
-    ("g SPC" . my/dirvish-go-interactive)
+    ("g SPC" . dirvish-go-directory)
     ("g f" . my/dirvish-follow-link)
     ("g r" . revert-buffer)
     ;; Selection
@@ -584,14 +796,15 @@ nothing or `stem' to keep only the extension."
     ("o c" . dired-do-shell-command)
     ("O" . dired-do-async-shell-command)
     ;; Copy, cut, paste, link
-    ("y" . my/dirvish-yank) ("x" . my/dirvish-cut)
+    ("y" . dirvish-select-for-copy) ("x" . dirvish-select-for-move)
     ("Y" . my/dirvish-unyank) ("X" . my/dirvish-unyank)
-    ("p p" . my/dirvish-paste) ("p f" . my/dirvish-paste-force)
-    ("p l" . dirvish-symlink) ("p L" . dirvish-relative-symlink)
-    ("p h" . dirvish-hardlink) ("p m" . dirvish-yank-menu)
+    ("p p" . dirvish-paste-here) ("p f" . dirvish-paste-force)
+    ("p l" . dirvish-symlink-here)
+    ("p L" . dirvish-relative-symlink-here)
+    ("p h" . dirvish-hardlink-here) ("p m" . dirvish-yank-menu)
     ;; Delete, create, rename
-    ("d" . my/dirvish-trash) ("D" . my/dirvish-delete-permanently)
-    ("a" . my/dirvish-create)
+    ("d" . dirvish-trash) ("D" . dirvish-delete-permanently)
+    ("a" . dirvish-create-here)
     ("r r" . my/dirvish-rename-before-extension)
     ("r i" . my/dirvish-rename-from-start)
     ("r a" . my/dirvish-rename-from-end)
@@ -600,21 +813,22 @@ nothing or `stem' to keep only the extension."
     ("c c" . my/dirvish-copy-path) ("c d" . my/dirvish-copy-dirname)
     ("c f" . my/dirvish-copy-filename)
     ("c n" . my/dirvish-copy-name-without-extension)
-    ("c m" . my/dirvish-rename-stem) ("c r" . my/dirvish-create)
+    ("c m" . my/dirvish-rename-stem) ("c r" . dirvish-create-here)
     ;; Shell
     (";" . dired-do-async-shell-command) (":" . dired-do-shell-command)
     ("S" . my/dirvish-shell-here)
     ;; Find and filter
     ("f" . dirvish-narrow)
-    ("/" . dired-isearch-filenames) ("?" . my/dirvish-key-help)
+    ("/" . dired-isearch-filenames) ("?" . dirvish-key-help)
     ("n" . my/dirvish-find-next) ("N" . my/dirvish-find-previous)
-    ("s" . dirvish-fd)
+    ("s" . my/dirvish-fd-here)
     ("z" . my/dirvish-jump-file) ("Z" . dired-jump-with-zoxide)
     ;; View
     ("." . dired-dotfiles-toggle)
     ("m s" . ,(my/dirvish-details t)) ("m p" . ,(my/dirvish-details t))
     ("m b" . ,(my/dirvish-details t)) ("m m" . ,(my/dirvish-details t))
     ("m o" . ,(my/dirvish-details t)) ("m n" . ,(my/dirvish-details nil))
+    ("m l" . dirvish-layout-toggle)
     (", m" . ,(my/dirvish-sort "-tr")) (", M" . ,(my/dirvish-sort "-t"))
     (", b" . ,(my/dirvish-sort "--time=birth -tr"))
     (", B" . ,(my/dirvish-sort "--time=birth -t"))
@@ -653,6 +867,17 @@ nothing or `stem' to keep only the extension."
 
 (with-eval-after-load 'dirvish
   (my/dirvish-apply-yazi-keys))
+
+(with-eval-after-load 'dirvish-yank
+  ;; Keep Dirvish's native transient, with the same destination semantics as
+  ;; the direct keys.  `setopt' invokes its public menu setter.
+  (setopt dirvish-yank-keys
+          '(("y" "Copy to directory at point" dirvish-copy-here)
+            ("m" "Move to directory at point" dirvish-move-here)
+            ("s" "Symlink in directory at point" dirvish-symlink-here)
+            ("r" "Relative symlink in directory at point"
+             dirvish-relative-symlink-here)
+            ("h" "Hardlink in directory at point" dirvish-hardlink-here))))
 
 (provide 'init-dirvish-keys)
 ;;; init-dirvish-keys.el ends here

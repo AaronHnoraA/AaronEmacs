@@ -12,6 +12,8 @@
 (require 'cl-lib)
 (require 'init-ui)
 
+(defvar my/dashboard-test-read-eval nil)
+
 ;; Never touch the real session cache from tests.
 (setq my/dashboard-agenda-cache-file
       (make-temp-file "dashboard-agenda-test-" nil ".eld"))
@@ -133,20 +135,68 @@
                                                (read (current-buffer))))))))
       (delete-file my/dashboard-agenda-cache-file))))
 
+(ert-deftest my/dashboard-agenda-cache-rejects-reader-code-and-trailing-data ()
+  "A damaged cache cannot evaluate Lisp or supply a partial snapshot."
+  (let* ((my/dashboard-agenda-cache-file
+          (make-temp-file "dashboard-agenda-untrusted-" nil ".eld"))
+         (my/dashboard--agenda-cache-loaded nil)
+         (my/dashboard--agenda-snapshot nil)
+         (my/dashboard-test-read-eval nil)
+         (read-eval t))
+    (unwind-protect
+        (progn
+          (with-temp-file my/dashboard-agenda-cache-file
+            (insert "#.(progn (setq my/dashboard-test-read-eval t) '((stats . nil)))"))
+          (my/dashboard--load-agenda-cache)
+          (should-not my/dashboard-test-read-eval)
+          (should-not my/dashboard--agenda-snapshot)
+          (with-temp-file my/dashboard-agenda-cache-file
+            (insert "((stats . nil)) ((stats . ((open . 99))))"))
+          (setq my/dashboard--agenda-cache-loaded nil)
+          (my/dashboard--load-agenda-cache)
+          (should-not my/dashboard--agenda-snapshot))
+      (delete-file my/dashboard-agenda-cache-file))))
+
+(ert-deftest my/dashboard-agenda-cache-rename-failure-preserves-last-good-file ()
+  "A failed cache replacement leaves the previous session snapshot intact."
+  (let* ((my/dashboard-agenda-cache-file
+          (make-temp-file "dashboard-agenda-atomic-" nil ".eld"))
+         (old '((stats . ((open . 7))) (todos . []) (days . [])))
+         (new '((stats . ((open . 2))) (todos . []) (days . []))))
+    (unwind-protect
+        (progn
+          (my/dashboard--save-agenda-cache old)
+          (cl-letf (((symbol-function 'rename-file)
+                     (lambda (&rest _) (error "simulated rename failure"))))
+            (my/dashboard--save-agenda-cache new))
+          (with-temp-buffer
+            (insert-file-contents my/dashboard-agenda-cache-file)
+            (should (equal (read (current-buffer)) old)))
+          (should-not
+           (directory-files
+            (file-name-directory my/dashboard-agenda-cache-file)
+            nil
+            (concat "^" (regexp-quote
+                           (file-name-nondirectory my/dashboard-agenda-cache-file))
+                    "\\.tmp-"))))
+      (delete-file my/dashboard-agenda-cache-file))))
+
 (ert-deftest my/dashboard-refresh-restores-chunlian-after-content ()
   "A complete Dashboard refresh clears old overlays and restores them last."
   (let (calls)
     (with-temp-buffer
       (dashboard-mode)
       (setq-local chunlian-mode t)
-      (cl-letf (((symbol-function 'chunlian--clear-display)
-                 (lambda () (push 'clear calls)))
-                ((symbol-function 'dashboard-refresh-buffer)
-                 (lambda () (push 'refresh calls)))
-                ((symbol-function 'chunlian-mode)
-                 (lambda (&optional _arg) (push 'chunlian calls))))
-        (my/dashboard--refresh-buffer-completely (current-buffer))
-        (should (equal (nreverse calls) '(clear refresh chunlian)))))))
+      (save-window-excursion
+        (set-window-buffer (selected-window) (current-buffer))
+        (cl-letf (((symbol-function 'chunlian--clear-display)
+                   (lambda () (push 'clear calls)))
+                  ((symbol-function 'dashboard-refresh-buffer)
+                   (lambda () (push 'refresh calls)))
+                  ((symbol-function 'chunlian-mode)
+                   (lambda (&optional _arg) (push 'chunlian calls))))
+          (my/dashboard--refresh-buffer-completely (current-buffer))
+          (should (equal (nreverse calls) '(clear refresh chunlian))))))))
 
 (ert-deftest my/dashboard-agenda-change-does-no-io-while-hidden ()
   "A hidden Dashboard only marks its cache dirty."

@@ -445,11 +445,14 @@ recursive scan of the whole tree.  The result is memoized per buffer."
   (unless (and buffer-file-name
                (or (derived-mode-p 'LaTeX-mode 'TeX-mode)
                    (derived-mode-p 'latex-mode 'tex-mode)))
-    (user-error "Not in a file-backed LaTeX buffer")))
+    (user-error "Not in a file-backed LaTeX buffer"))
+  (require 'tex))
 
 (defun my/latex-preview-open-pdf (&optional file)
   "Open FILE, or the current TeX master PDF, in a right-side PDF window."
   (interactive)
+  (unless file
+    (my/latex-preview--ensure-tex-buffer))
   (let ((pdf (expand-file-name (or file (my/latex-preview--output-pdf-file))))
         (source-window (selected-window)))
     (unless (file-exists-p pdf)
@@ -506,14 +509,16 @@ Compiles first when no PDF exists yet."
 (defun my/latex-preview-compile-and-view (&optional arg)
   "Run AUCTeX's compile-and-view command."
   (interactive "P")
+  (my/latex-preview--ensure-tex-buffer)
   (TeX-command-run-all arg))
 
 (defun my/latex-preview-view-pdf ()
   "View the current LaTeX document PDF via AUCTeX."
   (interactive)
+  (my/latex-preview--ensure-tex-buffer)
   (TeX-view))
 
-(transient-define-prefix my/latex-preview-dispatch ()
+(transient-define-prefix latex-preview-menu ()
   "LaTeX preview and PDF workflow."
   [["Preview"
     ("g" "sync to PDF" my/latex-sync-forward :transient transient--do-exit)

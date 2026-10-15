@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'aaron-ui-board)
+(require 'flymake)
 (require 'init-funcs)
 (require 'project)
 (require 'seq)
@@ -17,48 +18,35 @@
 (declare-function flymake-diagnostics "flymake" (&optional beg end))
 (declare-function flymake-start "flymake" ())
 (declare-function flymake--lookup-type-property "flymake" (type property &optional default))
-(declare-function flymake--project-diagnostics "flymake" (project))
-(declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
-
-(defconst my/diagnostics-project-buffer-name "*Diagnostics: Project*"
-  "Buffer name used by the toggleable project diagnostics panel.")
+(declare-function flymake--project-diagnostics-buffer "flymake" (root))
+(declare-function diagnostics-menu "init-diagnostics-extra" ())
+(declare-function my/problems-project-full "init-problems" ())
+(declare-function my/frame-short-id "init-tabbar" (frame))
 
 (defvar my/diagnostics-ui--theme-signature nil
   "Last theme signature applied by `my/diagnostics-apply-ui'.")
 
-(defvar-local my/diagnostics-buffer-scope 'buffer
-  "Scope used by the current diagnostics UI buffer.")
-
 (defvar-local my/diagnostics-buffer-filter nil
   "Optional severity filter for the current diagnostics buffer.")
 
-(defvar-local my/diagnostics-buffer-file-scope nil
-  "Optional file scope for the current diagnostics buffer.
-
-When nil, show all files.  When `current', show only the origin file.
-When `other', show only other files.")
-
-(defvar-local my/diagnostics-buffer-title nil
-  "Readable title for the current diagnostics buffer.")
-
 (defvar-local my/diagnostics-origin-buffer nil
-  "Source buffer used as the current-file reference for this diagnostics UI.")
+  "Source buffer whose diagnostics this frame's panel shows.")
+
+(defvar-local my/diagnostics-owner-frame nil
+  "Frame that owns this diagnostics panel.")
 
 (defvar my/diagnostics-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map special-mode-map)
     (define-key map (kbd "g") #'my/diagnostics-refresh)
     (define-key map (kbd "q") #'quit-window)
-    (define-key map (kbd "a") #'my/diagnostics-show-all-files)
-    (define-key map (kbd "c") #'my/diagnostics-show-current-file)
-    (define-key map (kbd "o") #'my/diagnostics-show-other-files)
     (define-key map (kbd "d") #'my/diagnostics-clear-severity-filter)
     (define-key map (kbd "e") #'my/diagnostics-show-errors)
     (define-key map (kbd "w") #'my/diagnostics-show-warnings)
     (define-key map (kbd "n") #'my/diagnostics-show-notes)
     (define-key map (kbd "x") #'my/diagnostics-rerun)
-    (define-key map (kbd "?") #'my/diagnostics-dispatch)
-    (define-key map (kbd "C-c ?") #'my/diagnostics-dispatch)
+    (define-key map (kbd "?") #'diagnostics-menu)
+    (define-key map (kbd "C-c ?") #'diagnostics-menu)
     map)
   "Keymap for `my/diagnostics-mode'.")
 
@@ -132,14 +120,6 @@ When `other', show only other files.")
     (or buffer-file-name
         (buffer-name))))
 
-(defun my/diagnostics--buffer-id (buffer)
-  "Return a stable identity string for BUFFER."
-  (when (buffer-live-p buffer)
-    (with-current-buffer buffer
-      (or (and buffer-file-name
-               (expand-file-name buffer-file-name))
-          (format "buffer:%s" (buffer-name))))))
-
 (defun my/diagnostics--origin-buffer-name ()
   "Return a readable name for the origin buffer."
   (if (buffer-live-p my/diagnostics-origin-buffer)
@@ -148,21 +128,6 @@ When `other', show only other files.")
          (or buffer-file-name
              (buffer-name))))
     "unknown"))
-
-(defun my/diagnostics--origin-project-root ()
-  "Return the project root used by the diagnostics buffer."
-  (when (buffer-live-p my/diagnostics-origin-buffer)
-    (with-current-buffer my/diagnostics-origin-buffer
-      (when-let* ((project (project-current nil default-directory)))
-        (abbreviate-file-name (project-root project))))))
-
-(defun my/diagnostics--diag-in-origin-buffer-p (diag)
-  "Return non-nil when DIAG belongs to the origin buffer."
-  (let ((origin-id (my/diagnostics--buffer-id my/diagnostics-origin-buffer)))
-    (and origin-id
-         (equal origin-id
-                (my/diagnostics--buffer-id
-                 (flymake-diagnostic-buffer diag))))))
 
 (defun my/diagnostics--with-origin-buffer (fn)
   "Call FN in `my/diagnostics-origin-buffer'."
@@ -177,35 +142,18 @@ When `other', show only other files.")
    (lambda ()
      (flymake-diagnostics))))
 
-(defun my/diagnostics--collect-project ()
-  "Collect diagnostics for the origin buffer's project."
-  (my/diagnostics--with-origin-buffer
-   (lambda ()
-     (when-let* ((project (project-current nil default-directory)))
-       (if (fboundp 'flymake--project-diagnostics)
-           (flymake--project-diagnostics project)
-         (flymake-diagnostics))))))
-
-(defun my/diagnostics--apply-file-scope (diags)
-  "Apply the active file scope to DIAGS."
-  (pcase my/diagnostics-buffer-file-scope
-    ('current (seq-filter #'my/diagnostics--diag-in-origin-buffer-p diags))
-    ('other (seq-remove #'my/diagnostics--diag-in-origin-buffer-p diags))
-    (_ diags)))
-
 (defun my/diagnostics--apply-filter (diags)
-  "Apply the active severity and file filters to DIAGS."
-  (let ((scoped (my/diagnostics--apply-file-scope diags)))
-    (if my/diagnostics-buffer-filter
-        (seq-filter (lambda (diag)
-                      (eq (my/diagnostics--severity-category diag)
-                          (pcase my/diagnostics-buffer-filter
-                            (:error 'error)
-                            (:warning 'warning)
-                            (:note 'note)
-                            (_ my/diagnostics-buffer-filter))))
-                    scoped)
-      scoped)))
+  "Apply the active severity filter to DIAGS."
+  (if my/diagnostics-buffer-filter
+      (seq-filter (lambda (diag)
+                    (eq (my/diagnostics--severity-category diag)
+                        (pcase my/diagnostics-buffer-filter
+                          (:error 'error)
+                          (:warning 'warning)
+                          (:note 'note)
+                          (_ my/diagnostics-buffer-filter))))
+                  diags)
+    diags))
 
 (defun my/diagnostics--sort (diags)
   "Return DIAGS sorted by severity, file, and position."
@@ -239,13 +187,6 @@ When `other', show only other files.")
     (format "E%d W%d N%d"
             errors warnings notes)))
 
-(defun my/diagnostics--file-scope-label ()
-  "Return the current file-scope label."
-  (pcase my/diagnostics-buffer-file-scope
-    ('current "current file")
-    ('other "other files")
-    (_ "all files")))
-
 (defun my/diagnostics--severity-filter-label ()
   "Return the current severity filter label."
   (pcase my/diagnostics-buffer-filter
@@ -253,10 +194,6 @@ When `other', show only other files.")
     (:warning "warnings")
     (:note "notes")
     (_ "all severities")))
-
-(defun my/diagnostics--insert-action-button (label command help)
-  "Insert an action button with LABEL, COMMAND, and HELP."
-  (aaron-ui-board-insert-action label command help))
 
 (defun my/diagnostics--goto-location (file buffer-name position)
   "Visit FILE or BUFFER-NAME and move to POSITION."
@@ -278,33 +215,13 @@ When `other', show only other files.")
 
 (defun my/diagnostics--insert-toolbar ()
   "Insert the diagnostics toolbar."
-  (let* ((root (and (eq my/diagnostics-buffer-scope 'project)
-                    (my/diagnostics--origin-project-root)))
-         (subtitle (if root
-                       (format "Current: %s  Project: %s  View: %s, %s"
-                               (my/diagnostics--origin-buffer-name)
-                               root
-                               (my/diagnostics--file-scope-label)
-                               (my/diagnostics--severity-filter-label))
-                     (format "Current: %s  View: %s, %s"
-                             (my/diagnostics--origin-buffer-name)
-                             (my/diagnostics--file-scope-label)
-                             (my/diagnostics--severity-filter-label)))))
-    (aaron-ui-board-insert-page-header
-     (or my/diagnostics-buffer-title "Diagnostics")
-     :icon 'diagnostics
-     :subtitle subtitle))
+  (aaron-ui-board-insert-page-header
+   "Buffer diagnostics"
+   :icon 'diagnostics
+   :subtitle (format "Current: %s  View: %s"
+                     (my/diagnostics--origin-buffer-name)
+                     (my/diagnostics--severity-filter-label)))
   (insert "   ")
-  (if (eq my/diagnostics-buffer-scope 'project)
-      (progn
-        (aaron-ui-board-insert-action "All Files"    #'my/diagnostics-show-all-files    "Show all files")
-        (insert " ")
-        (aaron-ui-board-insert-action "Current File" #'my/diagnostics-show-current-file "Current file only")
-        (insert " ")
-        (aaron-ui-board-insert-action "Other Files"  #'my/diagnostics-show-other-files  "Other files only")
-        (insert " "))
-    (aaron-ui-board-insert-action "All Files" #'my/diagnostics-show-all-files "Show all files" t)
-    (insert " "))
   (aaron-ui-board-insert-action "All Sev"   #'my/diagnostics-clear-severity-filter "All severities")
   (insert " ")
   (aaron-ui-board-insert-action "Errors"    #'my/diagnostics-show-errors    "Errors only")
@@ -357,69 +274,69 @@ When `other', show only other files.")
   (let ((inhibit-read-only t)
         (diags (my/diagnostics--sort
                 (my/diagnostics--apply-filter
-                 (pcase my/diagnostics-buffer-scope
-                   ('project (my/diagnostics--collect-project))
-                   (_ (my/diagnostics--collect-buffer)))))))
+                 (my/diagnostics--collect-buffer)))))
     (erase-buffer)
     (my/diagnostics--insert-toolbar)
-    (pcase my/diagnostics-buffer-scope
-      ('project
-       (let* ((current (seq-filter #'my/diagnostics--diag-in-origin-buffer-p diags))
-              (others (seq-remove #'my/diagnostics--diag-in-origin-buffer-p diags)))
-         (pcase my/diagnostics-buffer-file-scope
-           ('current
-            (my/diagnostics--insert-section "Current File" current
-                                            "No diagnostics in the current file."))
-           ('other
-            (my/diagnostics--insert-section "Other Files" others
-                                            "No diagnostics in other files."))
-           (_
-            (my/diagnostics--insert-section "Current File" current
-                                            "No diagnostics in the current file.")
-            (my/diagnostics--insert-section "Other Files" others
-                                            "No diagnostics in other files.")))))
-      (_
-       (my/diagnostics--insert-section "Current Buffer" diags
-                                       "No diagnostics.")))
+    (my/diagnostics--insert-section "Current Buffer" diags
+                                    "No diagnostics.")
     (goto-char (point-min))))
 
 (defun my/diagnostics--clear-origin-buffer-references ()
-  "Clear diagnostics panels that point at the current buffer."
+  "Close diagnostics panels owned by the buffer being killed."
   (let ((origin (current-buffer)))
     (dolist (buffer (buffer-list))
       (when (buffer-live-p buffer)
         (with-current-buffer buffer
           (when (and (derived-mode-p 'my/diagnostics-mode)
                      (eq my/diagnostics-origin-buffer origin))
-            (setq-local my/diagnostics-origin-buffer nil)))))))
+            (setq-local my/diagnostics-origin-buffer nil)
+            (quit-windows-on buffer t)))))))
 
-(defun my/diagnostics-open (scope &optional filter title origin-buffer file-scope buffer-name)
-  "Open a persistent diagnostics buffer for SCOPE, FILTER, and TITLE.
+(defun my/diagnostics--frame-deleted (frame)
+  "Release diagnostics panels owned by FRAME as it closes."
+  (dolist (buffer (buffer-list))
+    (when (and (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (and (derived-mode-p 'my/diagnostics-mode)
+                      (eq my/diagnostics-owner-frame frame))))
+      (kill-buffer buffer))))
 
-ORIGIN-BUFFER is used as the reference for current-file grouping.
-FILE-SCOPE limits display to `current', `other', or nil.
-BUFFER-NAME overrides the generated buffer name."
-  (let* ((title (or title
-                    (format "%s diagnostics"
-                            (capitalize (symbol-name scope)))))
-         (origin (or origin-buffer
-                     (window-buffer (selected-window))))
+(add-hook 'delete-frame-functions #'my/diagnostics--frame-deleted)
+
+(defun my/diagnostics-open (&optional filter origin-buffer)
+  "Open this frame's buffer diagnostics panel, optionally showing FILTER.
+ORIGIN-BUFFER overrides the current editing buffer.  Reopening the panel for
+the same source retains its severity filter unless FILTER is specified."
+  (let* ((invoking (window-buffer (selected-window)))
+         (origin
+          (let ((candidate
+                 (or origin-buffer
+                     (with-current-buffer invoking
+                       (if (derived-mode-p 'my/diagnostics-mode)
+                           my/diagnostics-origin-buffer
+                         invoking)))))
+            (unless (buffer-live-p candidate)
+              (user-error "The source buffer for this diagnostics panel is gone"))
+            candidate))
          (buffer (get-buffer-create
-                  (or buffer-name
-                      (format "*Diagnostics: %s*" title)))))
-    (when (buffer-live-p origin)
-      (with-current-buffer origin
-        (add-hook 'kill-buffer-hook
-                  #'my/diagnostics--clear-origin-buffer-references nil t)))
+                  (format "*Diagnostics F%d*"
+                          (my/frame-short-id (selected-frame)))))
+         (same-origin
+          (with-current-buffer buffer
+            (and (derived-mode-p 'my/diagnostics-mode)
+                 (eq my/diagnostics-origin-buffer origin)))))
+    (with-current-buffer origin
+      (add-hook 'kill-buffer-hook
+                #'my/diagnostics--clear-origin-buffer-references nil t))
     (with-current-buffer buffer
-      (my/diagnostics-mode)
-      (aaron-ui-board-set-header (or title "Diagnostics") 'diagnostics)
+      (unless same-origin
+        (my/diagnostics-mode))
+      (aaron-ui-board-set-header "Buffer diagnostics" 'diagnostics)
       (setq-local aaron-ui-board-refresh-function #'my/diagnostics-refresh)
-      (setq-local my/diagnostics-buffer-scope scope)
-      (setq-local my/diagnostics-buffer-filter filter)
-      (setq-local my/diagnostics-buffer-file-scope file-scope)
-      (setq-local my/diagnostics-buffer-title title)
+      (when (or filter (not same-origin))
+        (setq-local my/diagnostics-buffer-filter filter))
       (setq-local my/diagnostics-origin-buffer origin)
+      (setq-local my/diagnostics-owner-frame (selected-frame))
       (setq-local default-directory
                   (with-current-buffer origin
                     default-directory))
@@ -427,62 +344,42 @@ BUFFER-NAME overrides the generated buffer name."
     (pop-to-buffer buffer)))
 
 (defun my/diagnostics--close-visible-buffer (buffer)
-  "Close all visible windows showing BUFFER.
+  "Close windows in the current frame showing BUFFER.
 
 Return non-nil when BUFFER was visible."
-  (let ((windows (get-buffer-window-list buffer nil t)))
+  (let ((windows (get-buffer-window-list buffer nil nil)))
     (when windows
       (dolist (window windows)
         (when (window-live-p window)
           (quit-window nil window)))
       t)))
 
-(defun my/diagnostics--set-view (file-scope filter)
-  "Set FILE-SCOPE and FILTER for the current diagnostics buffer."
+(defun my/diagnostics--set-view (filter)
+  "Set the severity FILTER for the current diagnostics buffer."
   (unless (derived-mode-p 'my/diagnostics-mode)
     (user-error "Not in a diagnostics buffer"))
-  (setq-local my/diagnostics-buffer-file-scope file-scope)
   (setq-local my/diagnostics-buffer-filter filter)
   (my/diagnostics-refresh))
-
-(defun my/diagnostics-show-all-files ()
-  "Show diagnostics from all files."
-  (interactive)
-  (my/diagnostics--set-view nil my/diagnostics-buffer-filter))
-
-(defun my/diagnostics-show-current-file ()
-  "Show diagnostics from the current file."
-  (interactive)
-  (if (eq my/diagnostics-buffer-scope 'project)
-      (my/diagnostics--set-view 'current my/diagnostics-buffer-filter)
-    (user-error "Current-file filtering is only available in project diagnostics")))
-
-(defun my/diagnostics-show-other-files ()
-  "Show diagnostics from files other than the current file."
-  (interactive)
-  (if (eq my/diagnostics-buffer-scope 'project)
-      (my/diagnostics--set-view 'other my/diagnostics-buffer-filter)
-    (user-error "Other-file filtering is only available in project diagnostics")))
 
 (defun my/diagnostics-clear-severity-filter ()
   "Show all severities."
   (interactive)
-  (my/diagnostics--set-view my/diagnostics-buffer-file-scope nil))
+  (my/diagnostics--set-view nil))
 
 (defun my/diagnostics-show-errors ()
   "Show only errors."
   (interactive)
-  (my/diagnostics--set-view my/diagnostics-buffer-file-scope :error))
+  (my/diagnostics--set-view :error))
 
 (defun my/diagnostics-show-warnings ()
   "Show only warnings."
   (interactive)
-  (my/diagnostics--set-view my/diagnostics-buffer-file-scope :warning))
+  (my/diagnostics--set-view :warning))
 
 (defun my/diagnostics-show-notes ()
   "Show only notes."
   (interactive)
-  (my/diagnostics--set-view my/diagnostics-buffer-file-scope :note))
+  (my/diagnostics--set-view :note))
 
 (defun my/diagnostics-rerun ()
   "Run Flymake again in the origin buffer and refresh."
@@ -498,26 +395,23 @@ Return non-nil when BUFFER was visible."
 (defun my/diagnostics-buffer-ui ()
   "Open a persistent diagnostics buffer for the current buffer."
   (interactive)
-  (my/diagnostics-open 'buffer))
+  (my/diagnostics-open))
 
 (defun my/diagnostics-project-ui ()
-  "Toggle the persistent diagnostics buffer for the current project."
+  "Toggle Emacs Flymake's diagnostics list for the current project."
   (interactive)
-  (let ((buffer (get-buffer my/diagnostics-project-buffer-name))
-        (origin (current-buffer)))
-    (if (and buffer
-             (my/diagnostics--close-visible-buffer buffer))
-        (message "Closed project diagnostics")
-      (my/diagnostics-open 'project
-                           nil
-                           "Project Diagnostics"
-                           origin
-                           nil
-                           my/diagnostics-project-buffer-name))))
+  (let* ((project (project-current nil default-directory)))
+    (unless project
+      (user-error "No project for project diagnostics"))
+    (let ((buffer (flymake--project-diagnostics-buffer
+                   (project-root project))))
+      (if (my/diagnostics--close-visible-buffer buffer)
+          (message "Closed project diagnostics")
+        (my/problems-project-full)))))
 
 (my/leader!
   "c D" '(:def my/diagnostics-buffer-ui :which-key "diagnostics ui")
-  "c P" '(:def my/diagnostics-project-ui :which-key "project diagnostics ui"))
+  "c P" '(:def my/diagnostics-project-ui :which-key "Flymake project list"))
 
 (provide 'init-diagnostics-ui)
 ;;; init-diagnostics-ui.el ends here

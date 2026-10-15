@@ -24,19 +24,19 @@
 (declare-function my/diagnostics-buffer-notes "init-diagnostics-extra" ())
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui" ())
 (declare-function my/diagnostics-buffer-warnings "init-diagnostics-extra" ())
-(declare-function my/diagnostics-dispatch "init-diagnostics-extra" ())
+(declare-function diagnostics-menu "init-diagnostics-extra" ())
 (declare-function my/diagnostics-project-errors "init-diagnostics-extra" ())
 (declare-function my/diagnostics-project-notes "init-diagnostics-extra" ())
 (declare-function my/diagnostics-project-ui "init-diagnostics-ui" ())
 (declare-function my/diagnostics-project-warnings "init-diagnostics-extra" ())
 (declare-function my/project-current-root "init-project")
-(declare-function my/project-dispatch "init-project")
+(declare-function project-menu "init-project")
 (declare-function my/project-open-root "init-project")
 (declare-function my/project-ripgrep "init-project"
                   (project-root &optional initial))
 (declare-function my/project-switch "init-project")
 (declare-function my/project-ghostel "init-project")
-(declare-function my/bookmark-jump-dwim "init-windows")
+(declare-function consult-bookmark "consult" (name))
 (declare-function my/problems-buffer "init-problems" ())
 (declare-function my/problems-buffer-errors "init-problems" ())
 (declare-function my/problems-buffer-notes "init-problems" ())
@@ -134,11 +134,9 @@
   (my/symbols-project))
 
 (defun my/telescope-bookmarks ()
-  "Browse bookmarks from a centralized Telescope entry.
-Load bookmark data first; if no bookmark exists yet, fall back to
-the built-in bookmark list buffer."
+  "Browse bookmarks through Consult's native bookmark source."
   (interactive)
-  (my/bookmark-jump-dwim))
+  (call-interactively #'consult-bookmark))
 
 (defun my/telescope-yank-ring ()
   "Browse the kill ring from a centralized Telescope picker."
@@ -217,16 +215,16 @@ the built-in bookmark list buffer."
        :transient transient--do-exit)
       ("v" "project ghostel" my/project-ghostel
        :transient transient--do-exit)
-      ("P" "project workbench" my/project-dispatch
+      ("P" "project workbench" project-menu
        :transient transient--do-exit)]
      ["Diagnostics"
       ("!" "buffer picker" my/problems-buffer
        :transient transient--do-exit)
       ("?" "project picker" my/problems-project
        :transient transient--do-exit)
-      ("d" "diagnostics hub" my/diagnostics-dispatch
+      ("d" "diagnostics menu" diagnostics-menu
        :transient transient--do-exit)
-      ("D" "project board" my/diagnostics-project-ui
+      ("D" "Flymake project list" my/diagnostics-project-ui
        :transient transient--do-exit)]
      ["Buffer Diags"
       ("e" "errors" my/problems-buffer-errors

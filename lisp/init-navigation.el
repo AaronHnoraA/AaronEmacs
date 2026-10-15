@@ -30,6 +30,8 @@
 (declare-function citre-peek "citre" (&optional buf point reference))
 (declare-function citre-peek-reference "citre")
 
+(defvar better-jumper-post-jump-hook)
+
 (defconst my/navigation-structural-node-regexp
   (rx (or "function"
           "method"
@@ -45,8 +47,7 @@
           "block"
           "body"
           "suite"
-          "statement_block"
-          "statement_list"))
+          "statement"))
   "Tree-sitter node fragments treated as structural navigation anchors.")
 
 (defconst my/navigation-pulse-excluded-modes
@@ -149,25 +150,25 @@
   (interactive)
   (my/navigation--call-primary-or-fallback #'my/language-server-find-type-definition))
 
+(defun my/navigation--history-step (jump-command xref-command)
+  "Run JUMP-COMMAND, falling back to XREF-COMMAND if no jump occurred."
+  (let ((jumped nil))
+    (when (fboundp jump-command)
+      (let ((better-jumper-post-jump-hook
+             (cons (lambda () (setq jumped t)) better-jumper-post-jump-hook)))
+        (funcall jump-command)))
+    (unless jumped
+      (funcall xref-command))))
+
 (defun my/navigation-back ()
   "Go back to the previous navigation location."
   (interactive)
-  (condition-case err
-      (xref-go-back)
-    ((user-error error)
-     (if (fboundp 'evil-jump-backward)
-         (call-interactively #'evil-jump-backward)
-       (signal (car err) (cdr err))))))
+  (my/navigation--history-step #'better-jumper-jump-backward #'xref-go-back))
 
 (defun my/navigation-forward ()
   "Go forward to the next navigation location."
   (interactive)
-  (condition-case err
-      (xref-go-forward)
-    ((user-error error)
-     (if (fboundp 'evil-jump-forward)
-         (call-interactively #'evil-jump-forward)
-       (signal (car err) (cdr err))))))
+  (my/navigation--history-step #'better-jumper-jump-forward #'xref-go-forward))
 
 (defun my/navigation-peek-definition ()
   "Peek the definition at point using Citre."
@@ -229,25 +230,32 @@
 (defun my/navigation-up-structure ()
   "Jump to the nearest enclosing structural form."
   (interactive)
-  (my/navigation--push-jump)
-  (cond
-   ((and (fboundp 'treesit-node-at)
-         (fboundp 'treesit-node-parent))
-    (let ((node (or (ignore-errors (treesit-node-at (point)))
-                    (and (> (point) (point-min))
-                         (ignore-errors (treesit-node-at (1- (point))))))))
-      (catch 'done
-        (while node
-          (setq node (treesit-node-parent node))
-          (when (and node
-                     (string-match-p my/navigation-structural-node-regexp
-                                     (treesit-node-type node)))
-            (goto-char (treesit-node-start node))
-            (throw 'done t)))
-        (user-error "No enclosing structural form"))))
-   ((ignore-errors (backward-up-list) t))
-   (t
-    (user-error "No enclosing structural form"))))
+  (let* ((node (and (fboundp 'treesit-node-at)
+                    (fboundp 'treesit-node-parent)
+                    (or (ignore-errors (treesit-node-at (point)))
+                        (and (> (point) (point-min))
+                             (ignore-errors (treesit-node-at (1- (point))))))))
+         (target
+          (catch 'found
+            (while node
+              (setq node (treesit-node-parent node))
+              (when (and node
+                         (< (treesit-node-start node) (point))
+                         (string-match-p my/navigation-structural-node-regexp
+                                         (treesit-node-type node)))
+                (throw 'found (treesit-node-start node)))))))
+    (unless target
+      (setq target
+            (save-excursion
+              (condition-case nil
+                  (progn (backward-up-list) (point))
+                (scan-error nil)))))
+    (unless target
+      (user-error "No enclosing structural form"))
+    (my/navigation--push-jump)
+    (goto-char target)))
+
+(defalias 'structure-up #'my/navigation-up-structure)
 
 (global-set-key (kbd "M-.") #'my/navigation-find-definition)
 (global-set-key (kbd "M-?") #'my/navigation-find-references)
@@ -273,12 +281,12 @@
   "n p" '(:def my/navigation-peek-definition :which-key "peek definition")
   "n P" '(:def my/navigation-peek-references :which-key "peek references")
   "n c" '(:def my/last-change-jump :which-key "last change")
-  "n n" '(:def my/narrow-or-widen-dwim :which-key "narrow / widen")
+  "n n" '(:def narrow-or-widen :which-key "narrow / widen")
   "n a" '(:def my/navigation-beginning-of-defun :which-key "defun start")
   "n e" '(:def my/navigation-end-of-defun :which-key "defun end")
   "n [" '(:def my/navigation-previous-defun :which-key "previous defun")
   "n ]" '(:def my/navigation-next-defun :which-key "next defun")
-  "n u" '(:def my/navigation-up-structure :which-key "up structure"))
+  "n u" '(:def structure-up :which-key "up structure"))
 
 (provide 'init-navigation)
 ;;; init-navigation.el ends here

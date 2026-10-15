@@ -912,6 +912,9 @@ where the cursor is."
           (display-buffer (current-buffer)))
       report)))
 
+(defalias 'latex-preview-doctor #'my/latex-preview-doctor
+  "Inspect the LaTeX math preview backend, macros and fragment at point.")
+
 (with-eval-after-load 'general
   ;; Localleader rather than a global leader key: the doctor only means
   ;; anything in a TeX buffer, where it can report the fragment at point.

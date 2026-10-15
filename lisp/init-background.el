@@ -37,8 +37,11 @@ without one.")
   "Frames made invisible by `my/background-hide', most recently used first.")
 
 (defun my/background--editing-frames ()
-  "Return the top-level frames."
-  (seq-remove #'frame-parent (frame-list)))
+  "Return top-level graphical frames managed by the macOS launcher."
+  (seq-filter (lambda (frame)
+                (and (not (frame-parent frame))
+                     (display-graphic-p frame)))
+              (frame-list)))
 
 (defvar my/frame-default-size '(0.66 . 0.86)
   "Width and height of a new frame, as fractions of its monitor's workarea.
@@ -67,12 +70,20 @@ and the frame then grows past the screen."
 an xwidget page, the page is resized to the new frame's window and the frame
 it was in is left showing it at the wrong size.  Without a size in
 PARAMETERS the frame gets the default one."
-  (let ((frame (with-current-buffer (or (get-buffer "*dashboard*")
-                                        (get-scratch-buffer-create))
-                 (make-frame parameters))))
-    (unless (or (assq 'width parameters) (assq 'height parameters))
-      (my/frame-fit-default frame))
-    frame))
+  (let (frame completed)
+    (unwind-protect
+        (progn
+          (setq frame
+                (with-current-buffer (or (get-buffer "*dashboard*")
+                                         (get-scratch-buffer-create))
+                  (make-frame parameters)))
+          (unless (or (assq 'width parameters) (assq 'height parameters))
+            (my/frame-fit-default frame))
+          (setq completed t)
+          frame)
+      (unless completed
+        (when (and frame (frame-live-p frame))
+          (delete-frame frame t))))))
 
 (defun my/frame-pointer-workarea ()
   "Return the workarea (X Y WIDTH HEIGHT) of the monitor under the pointer."
@@ -117,6 +128,8 @@ only just shown does not report as visible yet."
 (defun my/background--hide-frame (frame)
   "Make FRAME invisible, leaving the other frames as they are.
 The only visible frame takes Emacs to the background with it."
+  (unless (display-graphic-p frame)
+    (user-error "Only graphical Emacs frames can be hidden"))
   (cond
    ((my/background--sole-visible-p frame)
     (my/background-hide))
@@ -180,15 +193,14 @@ hidden again once startup has finished."
     (select-frame-set-input-focus frame)))
 
 (defun my/background--sole-visible-p (frame)
-  "Return non-nil when FRAME is the only visible top-level frame."
+  "Return non-nil when FRAME is the only visible top-level graphical frame."
   (and (frame-live-p frame)
+       (memq frame (my/background--editing-frames))
        (frame-visible-p frame)
-       (not (frame-parent frame))
        (not (seq-some (lambda (other)
                         (and (not (eq other frame))
-                             (frame-visible-p other)
-                             (not (frame-parent other))))
-                      (frame-list)))))
+                             (frame-visible-p other)))
+                      (my/background--editing-frames)))))
 
 ;; Emacs refuses to delete its only visible frame, and closing that frame's
 ;; window asks to quit Emacs.  A background application hides instead.  The
@@ -272,6 +284,64 @@ run from the launcher.")
   "Return VALUE as base64 JSON; a printed Lisp string is not a safe transport."
   (base64-encode-string (json-serialize value) t))
 
+(defvar my/background--requests (make-hash-table :test #'equal)
+  "Short-lived results for actions queued through `bin/emacs-app'.")
+
+(defconst my/background-action-protocol 1
+  "Version of the queued-action receipt used by `bin/emacs-app'.")
+
+(defconst my/background-request-retention 300
+  "Seconds to retain a launcher action's result for bounded queries.")
+
+(defun my/background--prune-requests ()
+  "Forget old launcher results without installing a permanent timer."
+  (let ((now (float-time)) expired)
+    (maphash
+     (lambda (id record)
+       (when (> (- now (plist-get record :created))
+                my/background-request-retention)
+         (push id expired)))
+     my/background--requests)
+    (dolist (id expired)
+      (remhash id my/background--requests))))
+
+(defun my/background--queue-request (callback &rest args)
+  "Schedule CALLBACK with ARGS and a result ID, returning a JSON receipt."
+  (my/background--prune-requests)
+  (let ((id (substring
+             (secure-hash
+              'sha256
+              (format "%s:%s:%s" (emacs-pid) (float-time)
+                      (random most-positive-fixnum)))
+             0 24)))
+    (puthash id (list :status "pending" :created (float-time))
+             my/background--requests)
+    (condition-case error
+        (apply #'run-at-time 0 nil callback (append args (list id)))
+      (error
+       (remhash id my/background--requests)
+       (signal (car error) (cdr error))))
+    (my/background--json `((id . ,id)))))
+
+(defun my/background--finish-request (id status &optional message)
+  "Record STATUS and MESSAGE for launcher request ID, when it is still live."
+  (let ((record (and id (gethash id my/background--requests))))
+    (when record
+      (puthash id (plist-put (plist-put record :status status)
+                             :message message)
+               my/background--requests))))
+
+(defun my/background-result (encoded-id)
+  "Return base64 JSON with the final state of ENCODED-ID.
+The result is `pending', `ok', `error' or `unknown'.  An unknown ID can also
+mean that Emacs restarted or the short-lived result expired."
+  (my/background--prune-requests)
+  (let* ((id (my/background--argument encoded-id))
+         (record (gethash id my/background--requests)))
+    (my/background--json
+     `((status . ,(or (plist-get record :status) "unknown"))
+       (message . ,(or (plist-get record :message) ""))))))
+
 (defun my/background--action-list ()
   "Return `my/background-actions' as a vector of alists.
 Each entry has `id', `title' and `prompt' (empty when it takes no argument)."
@@ -314,17 +384,31 @@ opens its own frame shows just that frame."
                (not (eq buffer (window-buffer (frame-selected-window origin)))))
       (funcall reveal))))
 
+(defun my/background--act-safely (action argument &optional request-id)
+  "Run deferred ACTION with ARGUMENT and report REQUEST-ID's result."
+  (condition-case error
+      (progn
+        (my/background--act action argument)
+        (my/background--finish-request request-id "ok"))
+    ((error quit)
+     (my/background--finish-request
+      request-id "error" (error-message-string error))
+     (my/background-show)
+     (message "Emacs action %s failed: %s"
+              (car action) (error-message-string error)))))
+
 (defun my/background-act (id argument)
   "Run the action numbered by the base64 ID with the base64 ARGUMENT.
 Meant for `emacsclient --eval': the action is deferred so the client returns
 at once."
-  (let ((action (nth (string-to-number (my/background--argument id))
-                     my/background-actions)))
+  (let* ((decoded (my/background--argument id))
+         (index (and (string-match-p "\\`[0-9]+\\'" decoded)
+                     (string-to-number decoded)))
+         (action (and index (nth index my/background-actions))))
     (unless action
-      (error "No such action"))
-    (run-at-time 0 nil #'my/background--act action
-                 (my/background--argument argument)))
-  nil)
+      (user-error "No such action: %s" decoded))
+    (my/background--queue-request
+     #'my/background--act-safely action (my/background--argument argument))))
 
 ;;; Frames from outside Emacs
 
@@ -333,7 +417,7 @@ at once."
   (format "%s" (frame-parameter frame 'window-id)))
 
 (defun my/background--frame-list ()
-  "Return the top-level frames as a vector of alists, selected one first.
+  "Return graphical top-level frames as a vector of alists.
 Each entry has `id', `title', `buffers' and `visible'."
   (vconcat
    (mapcar
@@ -392,7 +476,8 @@ The actions new, show-all and hide-all take no frame."
        (when frames
          (my/background--show-frame (car frames))))
       ("hide-all" (my/background-hide))
-      ((guard (not frame)) nil)
+      ((guard (not frame))
+       (user-error "Frame %s closed before the action ran" id))
       ("focus" (my/background--show-frame frame))
       ("hide" (my/background--hide-frame frame))
       ("hide-others"
@@ -413,14 +498,34 @@ The actions new, show-all and hide-all take no frame."
        (dolist (other others)
          (delete-frame other t))))))
 
+(defun my/background--frame-act-safely (action id &optional request-id)
+  "Run deferred frame ACTION for ID and report REQUEST-ID's result."
+  (condition-case error
+      (progn
+        (my/background--frame-act action id)
+        (my/background--finish-request request-id "ok"))
+    ((error quit)
+     (my/background--finish-request
+      request-id "error" (error-message-string error))
+     (my/background-show)
+     (message "Emacs frame action %s failed: %s"
+              action (error-message-string error)))))
+
 (defun my/background-frame-act (action id)
   "Apply the base64 ACTION to the frame with the base64 ID.
 ACTION is one of those in `my/background--frame-act'.  Deferred, so the
 client returns at once."
-  (run-at-time 0 nil #'my/background--frame-act
-               (my/background--argument action)
-               (my/background--argument id))
-  nil)
+  (let ((action (my/background--argument action))
+        (id (my/background--argument id)))
+    (unless (member action '("new" "show-all" "hide-all" "focus" "hide"
+                             "hide-others" "close" "close-others"))
+      (user-error "No such frame action: %s" action))
+    (unless (or (member action '("new" "show-all" "hide-all"))
+                (seq-some (lambda (frame)
+                            (equal id (my/background--frame-id frame)))
+                          (my/background--editing-frames)))
+      (user-error "No such frame: %s" id))
+    (my/background--queue-request #'my/background--frame-act-safely action id)))
 
 ;; `make-frame' puts Emacs back in the Dock, and a deleted frame may have been
 ;; the last visible one, so the window state is applied again on both.

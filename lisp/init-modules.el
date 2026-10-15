@@ -5,11 +5,31 @@
 
 ;;; Code:
 
+(defvar my/module-load-failures nil
+  "Modules that failed to load, as (MODULE . ERROR-MESSAGE) pairs.")
+
+(defvar my/module-optional-modules nil
+  "Optional modules registered during startup, in declaration order.")
+
+(defvar my/module-deferred-triggers nil
+  "Deferred module triggers as (MODULE . FEATURES) pairs.")
+
+(defun my/module--register-optional (module)
+  "Record optional MODULE once for the health board."
+  (unless (memq module my/module-optional-modules)
+    (setq my/module-optional-modules
+          (append my/module-optional-modules (list module)))))
+
 (defun my/require-module-safely (module)
   "Require MODULE and report errors without aborting the rest of init."
+  (my/module--register-optional module)
   (condition-case err
-      (require module)
+      (prog1 (require module)
+        (setq my/module-load-failures
+              (assq-delete-all module my/module-load-failures)))
     (error
+     (setf (alist-get module my/module-load-failures)
+           (error-message-string err))
      (display-warning
       'init-modules
       (format "Failed to load %s: %s" module (error-message-string err))
@@ -19,6 +39,8 @@
 (defun my/require-module-after-any-feature (module &rest features)
   "Require MODULE after any of FEATURES loads.
 If one of FEATURES is already available, require MODULE immediately."
+  (my/module--register-optional module)
+  (setf (alist-get module my/module-deferred-triggers) features)
   (if (catch 'loaded
         (dolist (feature features)
           (when (featurep feature)
@@ -68,7 +90,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-file-workbench)
 (autoload 'my/calendar-year "init-calendar-tools" nil t)
 (when (eq system-type 'darwin)
-  (autoload 'my/macos-dispatch "init-macos-tools" nil t))
+  (autoload 'macos-tools-menu "init-macos-tools" nil t))
 (my/require-module-after-any-feature 'init-org-tools 'org)
 (my/require-module-safely 'init-zoxide)
 (my/require-module-safely 'init-ai-ide)
@@ -91,15 +113,15 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-rename)
 (require 'init-harpoon)
 (require 'init-scrollview)
+(require 'init-output)
 (require 'init-test)
 (require 'init-task)
 (require 'init-project-run)
 (require 'init-debug)
 (require 'init-debug-profile)
-(require 'init-output)
 (require 'init-session)
 (require 'init-maintenance)
-(my/require-module-safely 'config-tools)
+(require 'config-tools)
 (require 'init-performance)
 (require 'init-diagnostics-ui)
 (require 'init-diagnostics-extra)
@@ -127,7 +149,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-rainbow-delimiters)
 (require 'init-avy)
 (require 'init-multiple-cursors)
-(dolist (command '(my/latex-preview-dispatch
+(dolist (command '(latex-preview-menu
                    my/latex-preview-open-pdf
                    my/latex-sync-forward
                    my/latex-sync-forward-mouse
@@ -137,6 +159,7 @@ If one of FEATURES is already available, require MODULE immediately."
 ;; Math-fragment preview is RaTeX, configured in init-latex.el; its doctor is
 ;; the entry point when a preview misbehaves.
 (autoload 'my/latex-preview-doctor "init-latex" nil t)
+(autoload 'latex-preview-doctor "init-latex" nil t)
 (my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
 (my/require-module-safely 'init-browser)
 (my/require-module-safely 'init-fzfs)

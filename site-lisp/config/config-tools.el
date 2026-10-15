@@ -3,19 +3,14 @@
 ;;; Commentary:
 ;;
 ;; The config registry now uses native Customize for its UI.  This module keeps
-;; the old command names and leader route stable for muscle memory.
+;; the old command names stable; the leader route lives in `init-evil'.
 
 ;;; Code:
 
 (require 'config)
 (require 'config-custom)
+(require 'init-open)
 (require 'transient)
-
-;;;###autoload
-(defun config-board ()
-  "Open the native Customize group for the config registry."
-  (interactive)
-  (config-custom-open))
 
 (defun config-filter-group ()
   "Open a generated native Customize group selected from the registry."
@@ -44,9 +39,9 @@
     (message "config: all overrides cleared")))
 
 (defun config-open-store ()
-  "Open the primary config store file."
+  "Open the primary config store on the Emacs client."
   (interactive)
-  (find-file config-store-file))
+  (my/open-client-file config-store-file))
 
 (transient-define-prefix config-dispatch ()
   "Configuration management workflow."
@@ -58,11 +53,10 @@
     ("R" "refresh stores" config-refresh-store-files)
     ("!" "check integrity" config-check)
     ("o" "open primary store" config-open-store)
-    ("D" "clear all overrides" config-reset-all)]])
-
-(when (fboundp 'my/leader!)
-  (my/leader!
-    "h c" '(:def config-dispatch :which-key "config")))
+    ("D" "clear all overrides" config-reset-all)]
+   ["Registered files"
+    ("f" "edit config file" config-file-open)
+    ("L" "reload config file" config-file-reload)]])
 
 (provide 'config-tools)
 ;;; config-tools.el ends here

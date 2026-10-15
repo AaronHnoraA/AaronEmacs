@@ -6,6 +6,72 @@
   (defalias 'general-define-key #'ignore))
 (require 'init-aaronnote)
 
+(ert-deftest my/noema-bulk-tag-change-invalidates-roam-cache-once ()
+  (require 'init-md-roam)
+  (let ((my/noema-roam--runtime-index-cache 'stale)
+        (my/noema-roam--runtime-index-cache-key 'stale)
+        (my/noema-roam--scan-cache 'stale)
+        (my/noema-roam--all-files-cache 'stale)
+        (my/noema-roam--all-note-summaries-cache 'stale)
+        (dispatch-count 0))
+    (cl-letf (((symbol-function 'my/noema--defer-host-event)
+               (lambda (fn &rest args)
+                 (cl-incf dispatch-count)
+                 (apply fn args))))
+      (should (equal (my/noema--gateway-event
+                      '((type . "notes-mutated")
+                        (payload . ((count . 3)))) nil)
+                     '((ok . t))))
+      (should (= dispatch-count 1))
+      (should-not my/noema-roam--runtime-index-cache)
+      (should-not my/noema-roam--runtime-index-cache-key)
+      (should-not my/noema-roam--scan-cache)
+      (should-not my/noema-roam--all-files-cache)
+      (should-not my/noema-roam--all-note-summaries-cache))))
+
+(ert-deftest my/noema-note-moved-event-reaches-roam-buffer-owner ()
+  (require 'init-md-roam)
+  (let (dispatched)
+    (cl-letf (((symbol-function 'my/noema--defer-host-event)
+               (lambda (fn &rest args)
+                 (setq dispatched (cons fn args)))))
+      (should (equal (my/noema--gateway-event
+                      '((type . "note-moved")
+                        (payload . ((oldFile . "/tmp/old.md")
+                                    (file . "/tmp/new.md")))) nil)
+                     '((ok . t))))
+      (should (eq (car dispatched) #'my/noema-roam--handle-moved-note))
+      (should (equal (cadr dispatched)
+                     '((oldFile . "/tmp/old.md")
+                       (file . "/tmp/new.md")))))))
+
+(ert-deftest my/noema-note-trashed-event-reaches-roam-buffer-owner ()
+  (require 'init-md-roam)
+  (let (dispatched)
+    (cl-letf (((symbol-function 'my/noema--defer-host-event)
+               (lambda (fn &rest args)
+                 (setq dispatched (cons fn args)))))
+      (should (equal (my/noema--gateway-event
+                      '((type . "note-trashed")
+                        (payload . ((file . "/tmp/trashed.md")))) nil)
+                     '((ok . t))))
+      (should (eq (car dispatched) #'my/noema-roam--handle-trashed-note))
+      (should (equal (cadr dispatched)
+                     '((file . "/tmp/trashed.md")))))))
+
+(ert-deftest noema-trash-note-requires-a-target-page ()
+  (let (sent)
+    (cl-letf (((symbol-function 'my/noema--post)
+               (lambda (payload) (setq sent payload))))
+      (with-temp-buffer
+        (setq-local my/noema--client-id nil)
+        (should-error (noema-trash-note) :type 'user-error)
+        (should-not sent)
+        (setq-local my/noema--client-id "pane-1")
+        (noema-trash-note)
+        (should (equal (alist-get 'command sent) "trash-current-note"))
+        (should (equal (alist-get 'client sent) "pane-1"))))))
+
 (ert-deftest my/noema-latex-agent-status-uses-emacs-acp-configs ()
   (require 'noema-agent-acp)
   (cl-letf (((symbol-function 'noema-agent-acp-config-for)
@@ -976,14 +1042,28 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
 (ert-deftest my/noema-xwidget-recovery-normalizes-the-shared-key-payload ()
   (let ((plain (my/noema--xwidget-recovery-detail (aref (kbd "d") 0)))
         (space (my/noema--xwidget-recovery-detail (aref (kbd "SPC") 0)))
+        (tab (my/noema--xwidget-recovery-detail (aref (kbd "TAB") 0)))
+        (enter (my/noema--xwidget-recovery-detail (aref (kbd "RET") 0)))
+        (backspace (my/noema--xwidget-recovery-detail (aref (kbd "DEL") 0)))
         (source (my/noema--xwidget-recovery-detail (aref (kbd "M-/") 0)))
+        (palette (my/noema--xwidget-recovery-detail (aref (kbd "M-?") 0)))
         (selection (my/noema--xwidget-recovery-detail (aref (kbd "S-<left>") 0))))
     (should (equal (alist-get 'key plain) "d"))
     (should (equal (alist-get 'code plain) "KeyD"))
     (should (equal (alist-get 'key space) " "))
     (should (equal (alist-get 'code space) "Space"))
+    (should (equal (alist-get 'key tab) "Tab"))
+    (should (equal (alist-get 'code tab) "Tab"))
+    (should-not (alist-get 'ctrlKey tab))
+    (should (equal (alist-get 'key enter) "Enter"))
+    (should (equal (alist-get 'code enter) "Enter"))
+    (should-not (alist-get 'ctrlKey enter))
+    (should (equal (alist-get 'key backspace) "Backspace"))
     (should (equal (alist-get 'key source) "/"))
     (should (eq (alist-get 'metaKey source) t))
+    (should (equal (alist-get 'key palette) "?"))
+    (should (equal (alist-get 'code palette) "Slash"))
+    (should (eq (alist-get 'shiftKey palette) t))
     (should (equal (alist-get 'key selection) "ArrowLeft"))
     (should (eq (alist-get 'shiftKey selection) t))))
 
@@ -1302,6 +1382,35 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                              (nreverse messages))
                      '("back" "forward")))
       (should (equal (alist-get 'client (car messages)) "pane-a")))))
+
+(ert-deftest my/noema-back-from-standalone-slides-opens-source-editor ()
+  (let (opened posted)
+    (with-temp-buffer
+      (setq-local major-mode 'xwidget-webkit-mode)
+      (cl-letf (((symbol-function 'my/xwidget-current-url)
+                 (lambda (&optional _buffer)
+                   "http://127.0.0.1:18456/slides?file=%2Ftmp%2Fordinary%20note.md"))
+                ((symbol-function 'my/noema-open-file)
+                 (lambda (file &optional _window) (setq opened file)))
+                ((symbol-function 'my/noema--post)
+                 (lambda (payload) (setq posted payload))))
+        (my/noema-back))
+      (should (equal opened "/tmp/ordinary note.md"))
+      (should-not posted))))
+
+(ert-deftest my/noema-topbar-menu-opens-the-public-transient ()
+  (with-temp-buffer
+    (setq-local my/noema-buffer-file-name "/tmp/noema-menu-test.md")
+    (let ((entry (cl-find-if
+                  (lambda (item)
+                    (and (vectorp item)
+                         (equal (aref item 0) "Noema: Pop")))
+                  (my/noema--xwidget-menu-section))))
+      (should entry)
+      (should (eq (aref entry 1) #'noema-menu))
+      (should (eq (plist-get (cdr (transient-get-suffix 'noema-menu "o"))
+                             :command)
+                  #'my/noema-open-current-note)))))
 
 (ert-deftest my/noema-header-navigation-right-click-opens-buffer-menu ()
   (let ((buttons (my/noema--header-browser-buttons))
@@ -2197,6 +2306,43 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
     (my/noema--watchdog-fire)
     (should-not my/noema--ready-watchdog)
     (should-not my/noema--ready-callbacks)))
+
+(ert-deftest my/noema-retry-on-unready-live-host-gets-a-new-watchdog ()
+  "Retrying a hung live host must have a bounded callback lifetime."
+  (let* ((buffer (generate-new-buffer " *noema-unready-host*"))
+         (process (make-process :name "noema-unready-host-test"
+                                :buffer buffer :command '("cat")))
+         (my/noema--process process)
+         (my/noema--ready nil)
+         (my/noema--ready-watchdog nil)
+         (my/noema--ready-callbacks nil)
+         (callback #'ignore)
+         scheduled)
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (delay repeat fn &rest _args)
+                     (setq scheduled (list delay repeat fn))
+                     'retry-watchdog)))
+          (my/noema--ensure-server callback)
+          (should (equal scheduled
+                         '(10 nil my/noema--watchdog-fire)))
+          (should (eq my/noema--ready-watchdog 'retry-watchdog))
+          (should (equal my/noema--ready-callbacks (list callback))))
+      (when (process-live-p process) (delete-process process))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
+
+(ert-deftest my/noema-start-failure-removes-unrunnable-callback ()
+  (let ((my/noema--process nil)
+        (my/noema--ready nil)
+        (my/noema--ready-watchdog nil)
+        (my/noema--ready-callbacks nil))
+    (cl-letf (((symbol-function 'my/noema--start-server)
+               (lambda (&rest _args) (error "Missing host")))
+              ((symbol-function 'my/appine-kill-all) #'ignore)
+              ((symbol-function 'my/appine--tab-reset) #'ignore))
+      (should-error (my/noema--ensure-server #'ignore))
+      (should-not my/noema--ready-callbacks)
+      (should-not my/noema--ready-watchdog))))
 
 (ert-deftest my/noema-activity-hooks-install-idempotently ()
   (let ((after-focus-change-function nil)
@@ -3380,10 +3526,10 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
 ;; "we could not ask the target", because every caller treats the first as
 ;; permission to discard the kernel's in-memory state.
 
-(defun my/noema-jupyter-test--runtime (&optional pid)
-  "Return a brokered runtime struct for liveness tests, owning PID."
+(defun my/noema-jupyter-test--runtime (&optional pid id)
+  "Return a brokered runtime struct for liveness tests, owning PID and ID."
   (my/noema-jupyter-runtime-create
-   :id "runtime-liveness" :manager-id "kernel-liveness"
+   :id (or id "runtime-liveness") :manager-id "kernel-liveness"
    :context (remote-context (remote-target-file-name "local" "/tmp/"))
    :kernel "python3" :placement-file "/tmp/note.md"
    :pid (or pid 4321) :generation 1 :state 'idle))
@@ -3407,8 +3553,75 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                (lambda (&rest _) (error "Connection closed by remote host"))))
       (should (eq 'unknown (my/noema-jupyter--alive-p runtime))))))
 
-(ert-deftest my/noema-jupyter-signal-still-tries-when-liveness-is-unknown ()
-  "A probe failure must not silently leave a live kernel on the target."
+(ert-deftest my/noema-jupyter-alive-p-keeps-an-ssh-exit-unknown ()
+  "SSH exit 255 reports a failed probe, not the target kernel's death."
+  (let ((runtime (my/noema-jupyter-test--runtime)))
+    (cl-letf (((symbol-function 'my/noema-jupyter--exit-status)
+               (lambda (&rest _) 255)))
+      (should (eq 'unknown (my/noema-jupyter--alive-p runtime))))))
+
+(ert-deftest my/noema-jupyter-alive-p-keeps-another-host-unknown ()
+  "A load-balanced alias must not report an old PID missing on a new host."
+  (let ((runtime (my/noema-jupyter-test--runtime))
+        command)
+    (setf (my/noema-jupyter-runtime-host-name runtime) "vx14")
+    (cl-letf (((symbol-function 'my/noema-jupyter--exit-status)
+               (lambda (_context program &rest args)
+                 (setq command (cons program args))
+                 77)))
+      (should (eq 'unknown (my/noema-jupyter--alive-p runtime)))
+      (should (equal (car command) "sh"))
+      (should (member "vx14" command))
+      (should (member "-0" command)))))
+
+(ert-deftest my/noema-jupyter-host-guard-distinguishes-moved-host-from-death ()
+  "Exercise the guarded shell probe on the real local process route."
+  (let* ((runtime (my/noema-jupyter-test--runtime 999999999))
+         (host (my/noema-jupyter--current-host
+                (my/noema-jupyter-runtime-context runtime))))
+    (setf (my/noema-jupyter-runtime-host-name runtime)
+          "not-the-current-host.invalid")
+    (should (eq 'unknown (my/noema-jupyter--alive-p runtime)))
+    (setf (my/noema-jupyter-runtime-host-name runtime) host)
+    (should-not (my/noema-jupyter--alive-p runtime))))
+
+(ert-deftest my/noema-jupyter-host-guard-works-with-dash-kill ()
+  "Dash's kill builtin rejects `--'; the guarded probe uses external kill."
+  (skip-unless (file-executable-p "/bin/dash"))
+  (let* ((runtime (my/noema-jupyter-test--runtime 999999999))
+         (host (my/noema-jupyter--current-host
+                (my/noema-jupyter-runtime-context runtime)))
+         (script (nth 2 (progn
+                          (setf (my/noema-jupyter-runtime-host-name runtime)
+                                host)
+                          (my/noema-jupyter--kill-command runtime "0")))))
+    (should (= 77 (call-process
+                   "/bin/dash" nil nil nil "-c" script "sh"
+                   "another-host.invalid" "-0" "-999999999")))
+    (should (= 1 (call-process
+                  "/bin/dash" nil nil nil "-c" script "sh"
+                  host "-0" "-999999999")))))
+
+(ert-deftest my/noema-jupyter-recovery-keeps-uncertain-kernel-state ()
+  "A moved host is visible as unknown without claiming state loss."
+  (let ((runtime (my/noema-jupyter-test--runtime))
+        (liveness 'unknown))
+    (setf (my/noema-jupyter-runtime-state runtime) 'open)
+    (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+               (lambda (_runtime) liveness)))
+      (my/noema-jupyter--refresh-recovered-runtime runtime)
+      (should (eq (my/noema-jupyter-runtime-state runtime) 'unknown))
+      (should-not (my/noema-jupyter-runtime-state-lost runtime))
+      (setq liveness t)
+      (my/noema-jupyter--refresh-recovered-runtime runtime)
+      (should (eq (my/noema-jupyter-runtime-state runtime) 'open))
+      (setq liveness nil)
+      (my/noema-jupyter--refresh-recovered-runtime runtime)
+      (should (eq (my/noema-jupyter-runtime-state runtime) 'dead))
+      (should (my/noema-jupyter-runtime-state-lost runtime)))))
+
+(ert-deftest my/noema-jupyter-signal-refuses-unknown-liveness ()
+  "An uncertain route may point at a different host with a reused PID."
   (let ((runtime (my/noema-jupyter-test--runtime))
         (sent nil))
     (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
@@ -3417,11 +3630,26 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                (lambda (_context program &rest args)
                  (setq sent (cons program args))
                  "")))
-      (my/noema-jupyter--signal runtime "TERM")
-      (should (equal (car sent) "kill"))
-      (should (member "-TERM" sent)))))
+      (should-error (my/noema-jupyter--signal runtime "TERM"))
+      (should-not sent))))
 
-(ert-deftest my/noema-jupyter-signal-is-skipped-only-for-a-confirmed-death ()
+(ert-deftest my/noema-jupyter-signal-rechecks-host-in-same-command ()
+  "The signal command must guard against a host switch after liveness."
+  (let ((runtime (my/noema-jupyter-test--runtime))
+        command)
+    (setf (my/noema-jupyter-runtime-host-name runtime) "vx14")
+    (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+               (lambda (_runtime) t))
+              ((symbol-function 'my/noema-jupyter--output)
+               (lambda (_context program &rest args)
+                 (setq command (cons program args))
+                 "")))
+      (my/noema-jupyter--signal runtime "TERM")
+      (should (equal (car command) "sh"))
+      (should (member "vx14" command))
+      (should (member "-TERM" command)))))
+
+(ert-deftest my/noema-jupyter-signal-skips-a-confirmed-death ()
   (let ((runtime (my/noema-jupyter-test--runtime))
         (sent nil))
     (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
@@ -3441,6 +3669,153 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
       (should-error
        (my/noema-jupyter--runtime-status-payload
         (my/noema-jupyter--runtime '((runtimeId . "runtime-liveness"))))))))
+
+(ert-deftest my/noema-jupyter-launch-registration-failure-forgets-routes ()
+  "A failed final registration cannot leave reconnectable channel resources."
+  (let* ((directory (make-temp-file "noema-jupyter-rollback-" t))
+         (workspace (remote-workspace-create :root directory))
+         (my/noema-jupyter-pending-directory
+          (expand-file-name "pending/" directory))
+         (my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         forgotten stopped closed failed-id)
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/noema-jupyter--context)
+                   (lambda (_file)
+                     (remote-context (remote-make-file-name
+                                      "local" "/tmp/note.ipynb"))))
+                  ((symbol-function 'remote-workspace-open)
+                   (lambda (&rest _) workspace))
+                  ((symbol-function 'my/noema-jupyter--kernelspecs)
+                   (lambda (_file)
+                     '(((name . "python3")
+                        (spec . ((argv . ["python3" "{connection_file}"])))))))
+                  ((symbol-function 'my/noema-jupyter--runtime-directory)
+                   (lambda (_workspace) directory))
+                  ((symbol-function 'my/noema-jupyter--json-output)
+                   (lambda (&rest _) '(41001 41002 41003 41004 41005)))
+                  ((symbol-function 'my/noema-jupyter--signing-key)
+                   (lambda () "test-key"))
+                  ((symbol-function 'my/noema-jupyter--output)
+                   (lambda (&rest _) "12345"))
+                  ((symbol-function 'remote-file-local-name) #'identity)
+                  ((symbol-function 'remote-channel-group-open)
+                   (lambda (_channels &rest options)
+                     (let ((id (cadr (plist-get options :key))))
+                       (should (my/noema-jupyter--pending-shutdown-for id)))
+                     'test-group))
+                  ((symbol-function 'my/noema-jupyter--client-connection)
+                   (lambda (target _group) target))
+                  ((symbol-function 'remote-workspace-ensure-recoverable-resource)
+                   (lambda (&rest _) (error "Registration failed")))
+                  ((symbol-function 'my/noema-jupyter--forget-runtime-resources)
+                   (lambda (runtime)
+                     (setq forgotten (my/noema-jupyter-runtime-id runtime))))
+                  ((symbol-function 'my/noema-jupyter--signal)
+                   (lambda (&rest _) (setq stopped t)))
+                  ((symbol-function 'my/noema-jupyter--alive-p)
+                   (lambda (&rest _) nil))
+                  ((symbol-function 'remote-channel-group-close)
+                   (lambda (group) (setq closed group))))
+          (let ((failure
+                 (should-error
+                  (my/noema-jupyter--launch-runtime
+                   '((kernelId . "kernel-a")
+                     (sourceFile . "/tmp/note.ipynb")
+                     (kernelName . "python3"))))))
+            (should (equal (error-message-string failure)
+                           "Registration failed")))
+          (should (stringp forgotten))
+          (should stopped)
+          (should (eq closed 'test-group))
+          (should (zerop (hash-table-count my/noema-jupyter-runtimes)))
+          (should-not
+           (directory-files my/noema-jupyter-pending-directory nil
+                            "\\.json\\'"))
+          ;; A failed rollback must retain enough identity for the next
+          ;; session, including the target connection file used for PID checks.
+          (cl-letf (((symbol-function 'my/noema-jupyter--signal)
+                     (lambda (runtime _signal)
+                       (setq failed-id (my/noema-jupyter-runtime-id runtime))
+                       (error "Target unreachable"))))
+            (should-error
+             (my/noema-jupyter--launch-runtime
+              '((kernelId . "kernel-b")
+                (sourceFile . "/tmp/note.ipynb")
+                (kernelName . "python3")))))
+          (let ((pending (gethash failed-id my/noema-jupyter-runtimes)))
+            (should pending)
+            (should (equal (my/noema-jupyter-runtime-host-name pending)
+                           "12345"))
+            (should (eq (my/noema-jupyter-runtime-state pending)
+                        'shutdown-pending))
+            (should (file-exists-p
+                     (my/noema-jupyter-runtime-connection-file pending)))
+            (should (file-exists-p
+                     (my/noema-jupyter--pending-file failed-id)))
+            (should (equal
+                     (my/noema-jupyter--get
+                      'hostName
+                      (my/noema-jupyter--pending-shutdown-for failed-id))
+                     "12345"))))
+      (delete-directory directory t))))
+
+(ert-deftest my/noema-jupyter-launch-record-survives-abrupt-emacs-exit ()
+  "A detached kernel is recoverable even if shutdown hooks never run."
+  (let* ((directory (make-temp-file "noema-jupyter-abrupt-exit-" t))
+         (workspace (remote-workspace-create :root directory))
+         (my/noema-jupyter-pending-directory
+          (expand-file-name "pending/" directory))
+         (my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         runtime)
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/noema-jupyter--context)
+                   (lambda (_file)
+                     (remote-context (remote-make-file-name
+                                      "local" "/tmp/note.ipynb"))))
+                  ((symbol-function 'remote-workspace-open)
+                   (lambda (&rest _) workspace))
+                  ((symbol-function 'my/noema-jupyter--kernelspecs)
+                   (lambda (_file)
+                     '(((name . "python3")
+                        (spec . ((argv . ["python3" "{connection_file}"])))))))
+                  ((symbol-function 'my/noema-jupyter--runtime-directory)
+                   (lambda (_workspace) directory))
+                  ((symbol-function 'my/noema-jupyter--json-output)
+                   (lambda (&rest _) '(41001 41002 41003 41004 41005)))
+                  ((symbol-function 'my/noema-jupyter--signing-key)
+                   (lambda () "test-key"))
+                  ((symbol-function 'my/noema-jupyter--output)
+                   (lambda (&rest _) "12345"))
+                  ((symbol-function 'remote-file-local-name) #'identity)
+                  ((symbol-function 'remote-channel-group-open)
+                   (lambda (&rest _) 'test-group))
+                  ((symbol-function 'my/noema-jupyter--client-connection)
+                   (lambda (target _group) target))
+                  ((symbol-function 'remote-workspace-ensure-recoverable-resource)
+                   (lambda (&rest _) t)))
+          (setq runtime
+                (my/noema-jupyter--launch-runtime
+                 '((kernelId . "kernel-a")
+                   (sourceFile . "/tmp/note.ipynb")
+                   (kernelName . "python3"))))
+          (should (my/noema-jupyter--pending-shutdown-for
+                   (my/noema-jupyter-runtime-id runtime)))
+          (should (equal
+                   (my/noema-jupyter--get
+                    'hostName
+                    (my/noema-jupyter--pending-shutdown-for
+                     (my/noema-jupyter-runtime-id runtime)))
+                   "12345"))
+          (should-not (plist-get (car (my/noema-jupyter-runtime-snapshot "local"))
+                                 :journal-pending))
+          ;; A SIGKILL loses the in-memory map without running any hooks.
+          (clrhash my/noema-jupyter-runtimes)
+          (let ((saved (car (my/noema-jupyter-runtime-snapshot "local"))))
+            (should saved)
+            (should (eq (plist-get saved :status) 'shutdown-pending))
+            (should (plist-get saved :journal-pending))
+            (should (equal (plist-get saved :pid) 12345))))
+      (delete-directory directory t))))
 
 (ert-deftest my/noema-jupyter-shutdown-releases-its-workspace-resources ()
   "A kernel that was shut down must not be recovered or signalled again."
@@ -3469,7 +3844,9 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
      :recover (lambda (_resource _owner) (cl-incf recoveries) 'group))
     (unwind-protect
         (cl-letf (((symbol-function 'my/noema-jupyter--signal)
-                   (lambda (&rest _) (cl-incf signals))))
+                   (lambda (&rest _) (cl-incf signals)))
+                  ((symbol-function 'my/noema-jupyter--alive-p)
+                   (lambda (&rest _) nil)))
           (my/noema-jupyter--shutdown-runtime runtime)
           (should (= signals 1))
           (should-not (remote-workspace-resources workspace))
@@ -3483,12 +3860,177 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
           (should (= signals 1)))
       (remote-workspace-close workspace))))
 
+(ert-deftest my/noema-jupyter-shutdown-retains-runtime-until-target-accepts-signal ()
+  "A transport failure must leave the detached kernel available for retry."
+  (let* ((my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (runtime (my/noema-jupyter-test--runtime))
+         (attempts 0))
+    (setf (my/noema-jupyter-runtime-host-name runtime) "test-host")
+    (puthash (my/noema-jupyter-runtime-id runtime) runtime
+             my/noema-jupyter-runtimes)
+    (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+               (lambda (_runtime) nil))
+              ((symbol-function 'my/noema-jupyter--signal)
+               (lambda (&rest _)
+                 (cl-incf attempts)
+                 (when (= attempts 1)
+                   (error "Target is unreachable")))))
+      (should-error (my/noema-jupyter--shutdown-runtime runtime))
+      (should (eq (my/noema-jupyter-runtime-state runtime) 'shutdown-pending))
+      (should (eq (gethash (my/noema-jupyter-runtime-id runtime)
+                           my/noema-jupyter-runtimes)
+                  runtime))
+      (my/noema-jupyter--shutdown-runtime runtime)
+      (should (= attempts 2))
+      (should (eq (my/noema-jupyter-runtime-state runtime) 'closed))
+      (should-not (gethash (my/noema-jupyter-runtime-id runtime)
+                           my/noema-jupyter-runtimes)))))
+
+(ert-deftest my/noema-jupyter-shutdown-retains-runtime-until-exit-confirmed ()
+  "TERM delivery alone must not discard a still-running detached kernel."
+  (let* ((directory (make-temp-file "noema-jupyter-term-pending-" t))
+         (my/noema-jupyter-pending-directory
+          (expand-file-name "pending/" directory))
+         (my/noema-jupyter-shutdown-grace-seconds 0)
+         (my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (id "noema-0123456789abcdef01234567")
+         (connection
+          (remote-make-file-name
+           "local" (expand-file-name (concat id ".json") directory)))
+         (runtime (my/noema-jupyter-runtime-create
+                   :id id :context (remote-context connection)
+                   :placement-file connection :connection-file connection
+                   :pid 4321 :state 'open))
+         (alive t)
+         (signals 0))
+    (unwind-protect
+        (progn
+          (with-temp-file connection (insert "connection"))
+          (puthash id runtime my/noema-jupyter-runtimes)
+          (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+                     (lambda (_runtime) alive))
+                    ((symbol-function 'my/noema-jupyter--signal)
+                     (lambda (_runtime _signal) (cl-incf signals))))
+            (should-error (my/noema-jupyter--shutdown-runtime runtime)
+                          :type 'error)
+            (should (= signals 1))
+            (should (eq (my/noema-jupyter-runtime-state runtime)
+                        'shutdown-pending))
+            (should (eq (gethash id my/noema-jupyter-runtimes) runtime))
+            (should (file-exists-p connection))
+            (should (file-exists-p (my/noema-jupyter--pending-file id)))
+            (setq alive nil)
+            (my/noema-jupyter--shutdown-runtime runtime)
+            (should (eq (my/noema-jupyter-runtime-state runtime) 'closed))
+            (should-not (gethash id my/noema-jupyter-runtimes))
+            (should-not (file-exists-p connection))
+            (should-not (file-exists-p (my/noema-jupyter--pending-file id)))))
+      (delete-directory directory t))))
+
+(ert-deftest my/noema-jupyter-shutdown-journal-failure-keeps-runtime ()
+  "A local record write failure must stop before signalling the target."
+  (let* ((my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (runtime (my/noema-jupyter-test--runtime))
+         signalled)
+    (puthash (my/noema-jupyter-runtime-id runtime) runtime
+             my/noema-jupyter-runtimes)
+    (cl-letf (((symbol-function 'my/noema-jupyter--record-pending-shutdown)
+               (lambda (_runtime) (error "State disk unavailable")))
+              ((symbol-function 'my/noema-jupyter--signal)
+               (lambda (&rest _) (setq signalled t))))
+      (should-error (my/noema-jupyter--shutdown-runtime runtime))
+      (should-not signalled)
+      (should (eq (my/noema-jupyter-runtime-state runtime)
+                  'shutdown-pending))
+      (should (eq (gethash (my/noema-jupyter-runtime-id runtime)
+                           my/noema-jupyter-runtimes)
+                  runtime)))))
+
+(ert-deftest my/noema-jupyter-shutdown-confirms-a-real-local-process-exit ()
+  "TERM a detached local process and remove its journal only after it exits."
+  (let* ((directory (make-temp-file "noema-jupyter-real-term-" t))
+         (my/noema-jupyter-pending-directory
+          (expand-file-name "pending/" directory))
+         (my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (id "noema-abcdef0123456789abcdef01")
+         (connection (remote-make-file-name
+                      "local" (expand-file-name (concat id ".json") directory)))
+         (context (remote-context connection))
+         (pid (string-to-number
+               (my/noema-jupyter--output
+                context "python3" "-c"
+                "import subprocess; p=subprocess.Popen(['sleep','15'],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True); print(p.pid)")))
+         (runtime (my/noema-jupyter-runtime-create
+                   :id id :context context :placement-file connection
+                   :connection-file connection :pid pid
+                   :host-name (my/noema-jupyter--current-host context)
+                   :state 'open)))
+    (unwind-protect
+        (progn
+          (should (> pid 0))
+          (with-temp-file connection (insert "connection"))
+          (puthash id runtime my/noema-jupyter-runtimes)
+          (my/noema-jupyter--shutdown-runtime runtime)
+          (should (eq (my/noema-jupyter-runtime-state runtime) 'closed))
+          (should-not (my/noema-jupyter--alive-p runtime))
+          (should-not (file-exists-p connection))
+          (should-not (file-exists-p (my/noema-jupyter--pending-file id))))
+      (when (eq (ignore-errors (my/noema-jupyter--alive-p runtime)) t)
+        (ignore-errors (my/noema-jupyter--signal runtime "KILL")))
+      (delete-directory directory t))))
+
+(ert-deftest my/noema-jupyter-pending-pid-check-rechecks-host ()
+  "The PID command itself must verify the physical host before matching argv."
+  (let* ((runtime (my/noema-jupyter-test--runtime))
+         (connection (remote-make-file-name
+                      "local" "/tmp/noema-test-connection.json"))
+         command)
+    (setf (my/noema-jupyter-runtime-host-name runtime) "original-host"
+          (my/noema-jupyter-runtime-connection-file runtime) connection)
+    (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+               (lambda (_runtime) t))
+              ((symbol-function 'my/noema-jupyter--output)
+               (lambda (_context program &rest args)
+                 (setq command (cons program args))
+                 (concat "python -m ipykernel_launcher -f " connection))))
+      (should (my/noema-jupyter--verify-pending-runtime runtime))
+      (should (equal (car command) "sh"))
+      (should (member "original-host" command)))))
+
+(ert-deftest my/noema-jupyter-remote-file-cleanup-rechecks-host ()
+  "The target-side cleanup refuses a changed host before removing a file."
+  (let* ((file (make-temp-file "noema-jupyter-cleanup-"))
+         (context (remote-context-create
+                   :target-id "remote-test" :localname "/"))
+         (runtime (my/noema-jupyter-runtime-create
+                   :id "runtime-cleanup" :context context
+                   :host-name "wrong-host.invalid"
+                   :connection-file file))
+         command)
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'my/noema-jupyter--output)
+                     (lambda (_context program &rest args)
+                       (setq command (cons program args))
+                       ""))
+                    ((symbol-function 'remote-file-local-name) #'identity))
+            (my/noema-jupyter--delete-runtime-files runtime))
+          (should (equal (car command) "sh"))
+          (let ((args (copy-sequence (cdr command))))
+            (should (= 77 (apply #'call-process "/bin/sh" nil nil nil args)))
+            (should (file-exists-p file))
+            (setf (nth 3 args) (string-trim
+                                (shell-command-to-string "hostname")))
+            (should (= 0 (apply #'call-process "/bin/sh" nil nil nil args)))
+            (should-not (file-exists-p file))))
+      (when (file-exists-p file) (delete-file file)))))
+
 (ert-deftest my/noema-jupyter-shutdown-all-releases-every-brokered-runtime ()
   "Brokered kernels are detached, so Emacs must close them before it exits."
   (let* ((my/noema-jupyter-runtimes (make-hash-table :test #'equal))
          (closed '()))
-    (puthash "a" (my/noema-jupyter-test--runtime 11) my/noema-jupyter-runtimes)
-    (puthash "b" (my/noema-jupyter-test--runtime 22) my/noema-jupyter-runtimes)
+    (puthash "a" (my/noema-jupyter-test--runtime 11 "a") my/noema-jupyter-runtimes)
+    (puthash "b" (my/noema-jupyter-test--runtime 22 "b") my/noema-jupyter-runtimes)
     (cl-letf (((symbol-function 'my/noema-jupyter--shutdown-runtime)
                (lambda (runtime)
                  (push (my/noema-jupyter-runtime-pid runtime) closed)
@@ -3501,8 +4043,8 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
   "One unreachable target must not strand the rest of the kernels."
   (let* ((my/noema-jupyter-runtimes (make-hash-table :test #'equal))
          (closed '()))
-    (puthash "a" (my/noema-jupyter-test--runtime 11) my/noema-jupyter-runtimes)
-    (puthash "b" (my/noema-jupyter-test--runtime 22) my/noema-jupyter-runtimes)
+    (puthash "a" (my/noema-jupyter-test--runtime 11 "a") my/noema-jupyter-runtimes)
+    (puthash "b" (my/noema-jupyter-test--runtime 22 "b") my/noema-jupyter-runtimes)
     (cl-letf (((symbol-function 'my/noema-jupyter--shutdown-runtime)
                (lambda (runtime)
                  (when (= (my/noema-jupyter-runtime-pid runtime) 11)
@@ -3511,7 +4053,212 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                  runtime)))
       (my/noema-jupyter-shutdown-all))
     (should (equal closed '(22)))
-    (should (zerop (hash-table-count my/noema-jupyter-runtimes)))))
+    (should (= 1 (hash-table-count my/noema-jupyter-runtimes)))
+    (should (gethash "a" my/noema-jupyter-runtimes))
+    (should-not (gethash "b" my/noema-jupyter-runtimes))))
+
+(ert-deftest my/noema-jupyter-pending-shutdown-survives-emacs-restart ()
+  "An unreachable target remains actionable after the in-memory map is lost."
+  (let* ((directory (make-temp-file "noema-jupyter-pending-" t))
+         (my/noema-jupyter-pending-directory
+          (expand-file-name "pending/" directory))
+         (my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (id "noema-0123456789abcdef01234567")
+         (placement (remote-make-file-name
+                     "local" (expand-file-name "note.ipynb" directory)))
+         (native-connection (expand-file-name (concat id ".json") directory))
+         (connection (remote-make-file-name "local" native-connection))
+         (runtime (my/noema-jupyter-runtime-create
+                   :id id :manager-id "kernel-test"
+                   :context (remote-context placement)
+                   :placement-file placement :pid 4321
+                   :connection-file connection :state 'open))
+         sent)
+    (unwind-protect
+        (progn
+          (with-temp-file native-connection (insert "test connection"))
+          (puthash id runtime my/noema-jupyter-runtimes)
+          (cl-letf (((symbol-function 'my/noema-jupyter--signal)
+                     (lambda (&rest _) (error "Target unavailable"))))
+            (should-error (my/noema-jupyter--shutdown-runtime runtime)))
+          (should (eq (my/noema-jupyter-runtime-state runtime)
+                      'shutdown-pending))
+          (should (file-exists-p (my/noema-jupyter--pending-file id)))
+          (should (= (logand #o777 (file-modes
+                                    (my/noema-jupyter--pending-file id))) #o600))
+          (should (= (logand #o777 (file-modes
+                                    my/noema-jupyter-pending-directory)) #o700))
+          ;; Simulate a fresh Emacs session: only the local record survives.
+          (clrhash my/noema-jupyter-runtimes)
+          (let* ((snapshot (my/noema-jupyter-runtime-snapshot "local"))
+                 (entry (my/noema-jupyter--pending-shutdown-for id)))
+            (should (= (length snapshot) 1))
+            (should (eq (plist-get (car snapshot) :status)
+                        'shutdown-pending))
+            (should (plist-get (car snapshot) :journal-pending))
+            (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+                       (lambda (_runtime) (if sent nil t)))
+                      ((symbol-function 'my/noema-jupyter--output)
+                       (lambda (&rest _)
+                         (concat "python -m ipykernel_launcher -f "
+                                 native-connection)))
+                      ((symbol-function 'my/noema-jupyter--signal)
+                       (lambda (_runtime signal) (setq sent signal))))
+              (my/noema-jupyter--retry-pending-shutdown entry)))
+          (should (equal sent "TERM"))
+          (should-not (file-exists-p native-connection))
+          (should-not (file-exists-p (my/noema-jupyter--pending-file id))))
+      (delete-directory directory t))))
+
+(ert-deftest my/noema-jupyter-pending-shutdown-rejects-reused-pid ()
+  "A recycled PID may never be signalled from a saved shutdown record."
+  (let* ((directory (make-temp-file "noema-jupyter-reused-pid-" t))
+         (my/noema-jupyter-pending-directory
+          (expand-file-name "pending/" directory))
+         (id "noema-abcdef0123456789abcdef01")
+         (placement (remote-make-file-name
+                     "local" (expand-file-name "note.ipynb" directory)))
+         (connection (remote-make-file-name
+                      "local" (expand-file-name (concat id ".json") directory)))
+         (runtime (my/noema-jupyter-runtime-create
+                   :id id :context (remote-context placement)
+                   :placement-file placement :pid 4321
+                   :connection-file connection :state 'shutdown-pending))
+         signalled)
+    (unwind-protect
+        (progn
+          (my/noema-jupyter--record-pending-shutdown runtime)
+          (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+                     (lambda (_runtime) t))
+                    ((symbol-function 'my/noema-jupyter--output)
+                     (lambda (&rest _) "python another-program.py"))
+                    ((symbol-function 'my/noema-jupyter--signal)
+                     (lambda (&rest _) (setq signalled t))))
+            (should-error
+             (my/noema-jupyter--retry-pending-shutdown
+              (my/noema-jupyter--pending-shutdown-for id))))
+          (should-not signalled)
+          (should (file-exists-p (my/noema-jupyter--pending-file id))))
+      (delete-directory directory t))))
+
+(ert-deftest my/noema-jupyter-pending-shutdown-keeps-record-on-host-switch ()
+  "A saved broker must not be cleared by probing another physical node."
+  (let* ((directory (make-temp-file "noema-jupyter-moved-host-" t))
+         (my/noema-jupyter-pending-directory
+          (expand-file-name "pending/" directory))
+         (id "noema-1234567890abcdef12345678")
+         (placement (remote-make-file-name
+                     "local" (expand-file-name "note.ipynb" directory)))
+         (connection (remote-make-file-name
+                      "local" (expand-file-name (concat id ".json")
+                                                     directory)))
+         (runtime (my/noema-jupyter-runtime-create
+                   :id id :context (remote-context placement)
+                   :placement-file placement :pid 4321
+                   :host-name "original-host"
+                   :connection-file connection :state 'shutdown-pending))
+         signalled)
+    (unwind-protect
+        (progn
+          (my/noema-jupyter--record-pending-shutdown runtime)
+          (cl-letf (((symbol-function 'my/noema-jupyter--exit-status)
+                     (lambda (&rest _) 77))
+                    ((symbol-function 'my/noema-jupyter--output)
+                     (lambda (&rest _) (setq signalled t) "")))
+            (should-error
+             (my/noema-jupyter--retry-pending-shutdown
+              (my/noema-jupyter--pending-shutdown-for id))))
+          (should-not signalled)
+          (should (file-exists-p (my/noema-jupyter--pending-file id))))
+      (delete-directory directory t))))
+
+(ert-deftest my/noema-jupyter-in-memory-shutdown-retry-checks-pid ()
+  "The current Emacs session must not signal a reused pending kernel PID."
+  (let* ((directory (make-temp-file "noema-jupyter-live-retry-" t))
+         (my/noema-jupyter-pending-directory
+          (expand-file-name "pending/" directory))
+         (my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (id "noema-abcdefabcdefabcdefabcdef")
+         (placement (remote-make-file-name
+                     "local" (expand-file-name "note.ipynb" directory)))
+         (connection (remote-make-file-name
+                      "local" (expand-file-name (concat id ".json") directory)))
+         (runtime (my/noema-jupyter-runtime-create
+                   :id id :context (remote-context placement)
+                   :placement-file placement :pid 4321
+                   :connection-file connection :state 'shutdown-pending))
+         signalled)
+    (unwind-protect
+        (progn
+          (puthash id runtime my/noema-jupyter-runtimes)
+          (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+                     (lambda (_runtime) t))
+                    ((symbol-function 'my/noema-jupyter--output)
+                     (lambda (&rest _) "python another-program.py"))
+                    ((symbol-function 'my/noema-jupyter--signal)
+                     (lambda (&rest _) (setq signalled t))))
+            (should-error (my/noema-jupyter--shutdown-runtime runtime)))
+          (should-not signalled)
+          (should (eq (my/noema-jupyter-runtime-state runtime)
+                      'shutdown-pending))
+          (should (eq (gethash id my/noema-jupyter-runtimes) runtime))
+          (should (file-exists-p (my/noema-jupyter--pending-file id))))
+      (delete-directory directory t))))
+
+(ert-deftest my/noema-jupyter-runtime-control-routes-saved-shutdown ()
+  "The Board's shutdown action can use a record after the runtime map is lost."
+  (let* ((directory (make-temp-file "noema-jupyter-control-" t))
+         (my/noema-jupyter-pending-directory
+          (expand-file-name "pending/" directory))
+         (my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (id "noema-123456789abcdef012345678")
+         (placement (remote-make-file-name
+                     "local" (expand-file-name "note.ipynb" directory)))
+         (connection (remote-make-file-name
+                      "local" (expand-file-name (concat id ".json") directory)))
+         (runtime (my/noema-jupyter-runtime-create
+                   :id id :context (remote-context placement)
+                   :placement-file placement :pid 4321
+                   :connection-file connection :state 'shutdown-pending))
+         result failure retried)
+    (unwind-protect
+        (progn
+          (my/noema-jupyter--record-pending-shutdown runtime)
+          (cl-letf (((symbol-function 'run-at-time)
+                     (lambda (_delay _repeat function &rest args)
+                       (apply function args)))
+                    ((symbol-function 'my/noema-jupyter--retry-pending-shutdown)
+                     (lambda (entry)
+                       (setq retried (my/noema-jupyter--get 'runtimeId entry))
+                       runtime)))
+            (my/noema-jupyter-runtime-control
+             id 'shutdown
+             (lambda (value error)
+               (setq result value failure error))))
+          (should (equal retried id))
+          (should (equal result '(:ok t)))
+          (should-not failure))
+      (delete-directory directory t))))
+
+(ert-deftest my/noema-jupyter-invalid-record-does-not-pop-warning-on-board-read ()
+  "A damaged local record is reported in the snapshot, without a pop-up."
+  (let* ((directory (make-temp-file "noema-jupyter-bad-record-" t))
+         (my/noema-jupyter-pending-directory directory)
+         (my/noema-jupyter--pending-record-errors nil)
+         (my/noema-jupyter-runtimes (make-hash-table :test #'equal))
+         (file (expand-file-name (concat (make-string 64 ?a) ".json")
+                                 directory)))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "{oops"))
+          (cl-letf (((symbol-function 'display-warning)
+                     (lambda (&rest _) (error "Unexpected warning window"))))
+            (should-not (my/noema-jupyter-runtime-snapshot "local")))
+          (should (= (length my/noema-jupyter--pending-record-errors) 1))
+          (should (string-match-p
+                   (regexp-quote file)
+                   (car my/noema-jupyter--pending-record-errors))))
+      (delete-directory directory t))))
 
 (ert-deftest my/noema-input-focus-overrides-a-stale-background-belief ()
   "A renderer that proves it owns input must not stay paused under the cursor.

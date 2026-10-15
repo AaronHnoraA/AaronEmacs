@@ -10,6 +10,7 @@
 
 (require 'remote-config)
 (require 'remote-framework)
+(require 'init-output)
 (require 'tramp)
 (require 'tramp-rpc)
 
@@ -39,11 +40,13 @@
          (transport nil))
     (unwind-protect
         (progn
-          (setq task
-                (remote-task-run
-                 (list "sh" "-c"
-                       "printf 'task_host=%s\\n' \"$(hostname)\"; printf 'task_pid=%s\\n' \"$$\"; exec sleep 30")
-                 :workspace workspace))
+          (let ((default-directory logical))
+            (setq task
+                  (buffer-local-value
+                   'remote-task-instance
+                   (my/output-compile
+                    "printf 'task_host=%s\\n' \"$(hostname)\"; printf 'task_pid=%s\\n' \"$$\"; exec sleep 30"
+                    "test"))))
           (unless
               (remote-task-disconnect-smoke--wait
                (lambda () (remote-task-target-pid task)) 8)
@@ -83,7 +86,10 @@
                 (remote-task-disconnect-smoke--wait
                  (lambda () (remote-workspace-live-p workspace)) 12)
               (error "Workspace did not recover after task transport loss"))
-            (setq rerun (remote-task-rerun task))
+            (setq rerun
+                  (with-current-buffer (remote-task-buffer task)
+                    (buffer-local-value 'remote-task-instance
+                                        (my/output-rerun))))
             (unless
                 (remote-task-disconnect-smoke--wait
                  (lambda () (remote-task-target-pid rerun)) 8)

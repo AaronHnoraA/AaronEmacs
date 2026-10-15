@@ -31,6 +31,7 @@
 (declare-function my/noema--open-url "init-aaronnote" (url &optional file force-new))
 (declare-function my/noema--api-call "init-aaronnote" (channel args callback))
 (declare-function my/noema--api-call-sync "init-aaronnote" (channel args &optional timeout))
+(declare-function my/noema-command "init-aaronnote" (command &optional detail))
 (declare-function my/noema-workspace-layout "init-aaronnote" ())
 (declare-function my/navigation--push-jump "init-navigation")
 (declare-function my/navigation-find-definition "init-navigation")
@@ -1024,13 +1025,65 @@ Each entry is a plist with :id, :text, and :pos."
       :command quit-window
       :help "Close this Noema roam view"))))
 
+(defvar-local my/noema-roam--ui-owner-frame nil
+  "Frame that owns this temporary Noema roam board.")
+
+(defun my/noema-roam--ui-buffer-killed-h ()
+  "Remove the current board from its owning frame's view table."
+  (let ((frame my/noema-roam--ui-owner-frame))
+    (when (frame-live-p frame)
+      (set-frame-parameter
+       frame 'my/noema-roam-ui-buffers
+       (seq-remove (lambda (entry) (eq (cdr entry) (current-buffer)))
+                   (frame-parameter frame 'my/noema-roam-ui-buffers))))))
+
+(defun my/noema-roam--delete-frame-ui-h (frame)
+  "Release temporary Noema roam boards owned by FRAME."
+  (let ((views (frame-parameter frame 'my/noema-roam-ui-buffers)))
+    (set-frame-parameter frame 'my/noema-roam-ui-buffers nil)
+    (dolist (entry views)
+      (when (buffer-live-p (cdr entry))
+        (kill-buffer (cdr entry))))))
+
+(add-hook 'delete-frame-functions #'my/noema-roam--delete-frame-ui-h)
+
+(defun my/noema-roam--frame-ui-buffer (name)
+  "Return this frame's temporary Noema roam buffer named NAME."
+  (let* ((frame (selected-frame))
+         (views (frame-parameter frame 'my/noema-roam-ui-buffers))
+         (buffer (alist-get name views nil nil #'equal)))
+    (unless (buffer-live-p buffer)
+      (setq buffer
+            (let* ((existing (get-buffer name))
+                   (owner (and existing
+                               (buffer-local-value
+                                'my/noema-roam--ui-owner-frame existing))))
+              (if (and existing owner (not (eq owner frame)))
+                  (generate-new-buffer name)
+                (get-buffer-create name))))
+      (set-frame-parameter
+       frame 'my/noema-roam-ui-buffers
+       (cons (cons name buffer) (assoc-delete-all name views))))
+    buffer))
+
+(defun my/noema-roam--own-ui-buffer (buffer)
+  "Attach temporary BUFFER to the selected frame's lifecycle."
+  (let ((frame (selected-frame)))
+    (with-current-buffer buffer
+      (setq-local my/noema-roam--ui-owner-frame frame)
+      (setq-local quit-window-kill-buffer t)
+      (add-hook 'kill-buffer-hook #'my/noema-roam--ui-buffer-killed-h nil t)))
+  buffer)
+
 (defun my/noema-roam--prepare-ui-buffer
     (name title icon refresh-function &optional status)
-  "Prepare native roam buffer NAME with TITLE, ICON, REFRESH-FUNCTION, and STATUS."
-  (let ((buffer (get-buffer-create name)))
+  "Prepare this frame's temporary roam buffer NAME with TITLE and ICON.
+Set its REFRESH-FUNCTION and optional STATUS."
+  (let ((buffer (my/noema-roam--frame-ui-buffer name)))
     (with-current-buffer buffer
       (unless (derived-mode-p 'my/noema-roam-ui-mode)
         (my/noema-roam-ui-mode))
+      (my/noema-roam--own-ui-buffer buffer)
       (setq-local my/noema-roam-ui-refresh-function refresh-function)
       (my/noema-roam-ui-set-header title icon status))
     buffer))
@@ -1195,6 +1248,9 @@ title no page has opens the New Page workbench with it."
 (defvar-local my/noema-roam-new--widgets nil
   "Editable widgets in the current Roam Node buffer.")
 
+(defvar-local my/noema-roam-new--created-file nil
+  "File already created from this form but not yet opened successfully.")
+
 (defvar my/noema-roam-new-mode-map
   (let ((map (make-sparse-keymap)))
     (set-keymap-parent map my/noema-roam-ui-mode-map)
@@ -1212,6 +1268,9 @@ title no page has opens the New Page workbench with it."
   ;; This view is a form.  Keep it writable so Emacs widget fields accept direct
   ;; typing instead of forcing every edit through the minibuffer.
   (setq-local buffer-read-only nil)
+  ;; A dismissed draft is not a persistent document.  Let the shared board's
+  ;; native q restore the previous window and release this temporary buffer.
+  (setq-local quit-window-kill-buffer t)
   (setq-local my/noema-roam-ui-refresh-function
               #'my/noema-roam-new-refresh)
   (setq-local widget-button-face 'my/noema-roam-ui-action)
@@ -1299,15 +1358,16 @@ Duplicates are removed case-insensitively and the result is sorted."
              (my/noema-roam-new--normalize-tags tags)
              " "))
 
-(defun my/noema-roam-new--default-draft (&optional directory)
-  "Return a default Roam Node draft rooted in DIRECTORY."
-  (list :node-type "roam"
+(defun my/noema-roam-new--default-draft (&optional directory node-type)
+  "Return a new Markdown draft of NODE-TYPE rooted in DIRECTORY."
+  (let ((regular (equal node-type "regular")))
+    (list :node-type (if regular "regular" "roam")
         :title "Untitled"
         :path (my/noema-roam-new--unique-path
                (my/noema-roam-new--default-path "Untitled" directory))
-        :kind "note"
-        :template-key "roam"
-        :tags nil))
+        :kind (if regular "default" "note")
+        :template-key (if regular "basic" "roam")
+        :tags nil)))
 
 (defun my/noema-roam-new--draft-for-create (draft &optional directory)
   "Return DRAFT normalized for Noema create-node.
@@ -1354,17 +1414,26 @@ create-node API.  DIRECTORY defaults to the current Roam Node base directory."
 (defun my/noema-roam-new--load-templates ()
   "Return templates reported by the Noema runtime."
   (let ((response (my/noema-roam--runtime-call "templates" "--force")))
-    (or (and response (gethash "templates" response))
-        '((:key "basic" :name "Basic Markdown note")
-          (:key "daily" :name "Daily note")
-          (:key "decision" :name "Decision record")
-          (:key "meeting" :name "Meeting notes")
-          (:key "project" :name "Project brief")
-          (:key "reading" :name "Reading notes")
-          (:key "roam" :name "Roam note")
-          (:key "task-plan" :name "Task plan")
-          (:key "weekly-review" :name "Weekly review")
-          (:key "zettel" :name "Zettel")))))
+    (and response (gethash "templates" response))))
+
+(defun my/noema-roam-new--default-template-key (node-type)
+  "Return an available default template key for NODE-TYPE, or empty."
+  (let ((key (if (equal node-type "regular") "basic" "roam")))
+    (if (member key (mapcar #'cdr (my/noema-roam-new--template-candidates)))
+        key
+      "")))
+
+(defun my/noema-roam-new--ensure-template ()
+  "Replace an unavailable draft template with the current type's default."
+  (unless (seq-find
+           (lambda (candidate)
+             (equal (cdr candidate)
+                    (plist-get my/noema-roam-new--draft :template-key)))
+           (my/noema-roam-new--template-candidates))
+    (setq-local my/noema-roam-new--draft
+                (plist-put my/noema-roam-new--draft :template-key
+                           (my/noema-roam-new--default-template-key
+                            (plist-get my/noema-roam-new--draft :node-type))))))
 
 (defun my/noema-roam-new--template-label (key)
   "Return a display label for template KEY."
@@ -1383,13 +1452,18 @@ create-node API.  DIRECTORY defaults to the current Roam Node base directory."
 (defun my/noema-roam-new--template-candidates ()
   "Return display-name and key pairs for available templates."
   (let* ((active-kind (plist-get my/noema-roam-new--draft :kind))
+         (active-type (plist-get my/noema-roam-new--draft :node-type))
          (templates
           (seq-filter
            (lambda (template)
              (let ((kind
-                    (my/noema-roam-new--template-field template :kind)))
-               (or (string-empty-p (or kind ""))
-                   (equal kind active-kind))))
+                    (my/noema-roam-new--template-field template :kind))
+                   (node-type
+                    (my/noema-roam-new--template-field template :nodeType)))
+               (and (or (string-empty-p (or kind ""))
+                        (equal kind active-kind))
+                    (or (string-empty-p (or node-type ""))
+                        (equal node-type active-type)))))
            my/noema-roam-new--templates)))
     (cons
      '("None" . "")
@@ -1446,6 +1520,7 @@ create-node API.  DIRECTORY defaults to the current Roam Node base directory."
 
 (defun my/noema-roam-new--set (key value)
   "Set draft KEY to VALUE and rerender the Roam Node buffer."
+  (my/noema-roam-new--ensure-draft-editable)
   (my/noema-roam-new--sync-draft-from-widgets)
   (setq-local my/noema-roam-new--draft
               (plist-put my/noema-roam-new--draft key value))
@@ -1472,30 +1547,38 @@ create-node API.  DIRECTORY defaults to the current Roam Node base directory."
                          (my/noema-roam-new--normalize-tags tags))))
       (setq-local my/noema-roam-new--draft draft))))
 
+(defun my/noema-roam-new--ensure-draft-editable ()
+  "Require a draft that has not already created a file."
+  (when my/noema-roam-new--created-file
+    (user-error "File already created; use c to open it or R for a new draft")))
+
 (defun my/noema-roam-new-edit-type ()
-  "Edit the note type in the current Roam Node draft."
+  "Choose whether this draft is a linked Roam node or plain Markdown."
   (interactive)
+  (my/noema-roam-new--ensure-draft-editable)
   (my/noema-roam-new--sync-draft-from-widgets)
   (let* ((old (plist-get my/noema-roam-new--draft :node-type))
-         (next (completing-read "Note type: " '("roam" "regular")
-                                nil t nil nil old))
-         (template (plist-get my/noema-roam-new--draft :template-key))
+         (choices '(("Roam node · linked knowledge, stable ID" . "roam")
+                    ("Regular Markdown · plain document, no Roam ID" . "regular")))
+         (choice (completing-read "Create as: " choices nil t nil nil
+                                  (car (rassoc old choices))))
+         (next (or (cdr (assoc choice choices)) choice))
          (kind (plist-get my/noema-roam-new--draft :kind)))
+    (unless (member next '("roam" "regular"))
+      (user-error "Unknown Markdown document type: %s" choice))
     (setq-local my/noema-roam-new--draft
                 (plist-put my/noema-roam-new--draft :node-type next))
-    (when (member template '("roam" "basic"))
-      (setq-local my/noema-roam-new--draft
-                  (plist-put my/noema-roam-new--draft :template-key
-                             (if (string= next "roam") "roam" "basic"))))
     (when (member kind '("note" "default"))
       (setq-local my/noema-roam-new--draft
                   (plist-put my/noema-roam-new--draft :kind
                              (if (string= next "roam") "note" "default"))))
+    (my/noema-roam-new--ensure-template)
     (my/noema-roam-new-render t)))
 
 (defun my/noema-roam-new-edit-title ()
   "Edit the title in the current Roam Node draft."
   (interactive)
+  (my/noema-roam-new--ensure-draft-editable)
   (my/noema-roam-new--sync-draft-from-widgets)
   (let* ((old-title (plist-get my/noema-roam-new--draft :title))
          (old-default
@@ -1515,6 +1598,7 @@ create-node API.  DIRECTORY defaults to the current Roam Node base directory."
 (defun my/noema-roam-new-edit-path ()
   "Edit the save directory in the current Roam Node draft."
   (interactive)
+  (my/noema-roam-new--ensure-draft-editable)
   (my/noema-roam-new--sync-draft-from-widgets)
   (let* ((root (file-name-as-directory (expand-file-name (my/noema-roam-root))))
          (current (plist-get my/noema-roam-new--draft :path))
@@ -1542,6 +1626,7 @@ create-node API.  DIRECTORY defaults to the current Roam Node base directory."
 (defun my/noema-roam-new-edit-kind ()
   "Edit the note kind in the current Roam Node draft."
   (interactive)
+  (my/noema-roam-new--ensure-draft-editable)
   (my/noema-roam-new--set
    :kind
    (completing-read "Kind: " (my/noema-roam-new--kind-suggestions)
@@ -1551,6 +1636,7 @@ create-node API.  DIRECTORY defaults to the current Roam Node base directory."
 (defun my/noema-roam-new-edit-template ()
   "Edit the template in the current Roam Node draft."
   (interactive)
+  (my/noema-roam-new--ensure-draft-editable)
   (my/noema-roam-new--sync-draft-from-widgets)
   (let* ((candidates (my/noema-roam-new--template-candidates))
          (current (my/noema-roam-new--template-label
@@ -1562,6 +1648,7 @@ create-node API.  DIRECTORY defaults to the current Roam Node base directory."
 (defun my/noema-roam-new-edit-tags ()
   "Edit tags in the current Roam Node draft, adding one at a time."
   (interactive)
+  (my/noema-roam-new--ensure-draft-editable)
   (my/noema-roam-new--sync-draft-from-widgets)
   (let* ((suggestions (my/noema-roam-new--tag-suggestions))
          (tags (copy-sequence
@@ -1653,6 +1740,33 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
            mouse-face aaron-ui-board-row-highlight
            keymap ,my/noema-roam-ui-row-map))))))
 
+(defun my/noema-roam-new--render-created ()
+  "Show the file already created by this form, with a safe open retry."
+  (my/noema-roam-ui-set-header "Roam Node" 'new "file created")
+  (my/noema-roam-ui-render
+   (lambda ()
+     (my/noema-roam-ui-insert-page-header
+      "Markdown created"
+      :icon 'new
+      :subtitle "The file exists; opening it did not finish"
+      :actions
+      '((:label "c Open file"
+         :command my/noema-roam-new-create
+         :help "Open the file already created; do not create another"
+         :primary t)
+        (:label "R New draft"
+         :command my/noema-roam-new-reset
+         :help "Start another draft; keep the file already created")
+        (:label "q Close"
+         :command quit-window
+         :help "Close this form; keep the file already created")))
+     (my/noema-roam-ui-insert-section "Created file")
+     (my/noema-roam-ui-insert-field
+      "Path" (abbreviate-file-name my/noema-roam-new--created-file)
+      'my/noema-roam-ui-path)
+     (widget-setup)))
+  (my/noema-roam-ui-goto-first-item))
+
 (defun my/noema-roam-new-render (&optional skip-sync)
   "Render the current Roam Node draft."
   (interactive)
@@ -1663,7 +1777,9 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
   (dolist (entry my/noema-roam-new--widgets)
     (condition-case nil (widget-delete (cdr entry)) (error nil)))
   (setq-local my/noema-roam-new--widgets nil)
-  (let* ((draft my/noema-roam-new--draft)
+  (if my/noema-roam-new--created-file
+      (my/noema-roam-new--render-created)
+    (let* ((draft my/noema-roam-new--draft)
          (node-type (plist-get draft :node-type))
          (title (plist-get draft :title))
          (path (plist-get draft :path))
@@ -1681,10 +1797,11 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
      (lambda ()
        (setq-local my/noema-roam-new--widgets nil)
        (my/noema-roam-ui-insert-page-header
-        "New node"
+        "New Markdown"
         :icon 'new
-        :subtitle "Type in fields; p for path; a to add tags one by one; c to create"
-        :stats (list (cons (upcase node-type)
+        :subtitle "Choose Roam node or regular Markdown, then a matching template"
+        :stats (list (cons (if (string= node-type "roam")
+                               "ROAM NODE" "PLAIN MARKDOWN")
                            (if (string= node-type "roam") 'info 'muted))
                      (cons template-label 'muted))
         :actions
@@ -1692,9 +1809,9 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
            :command my/noema-roam-new-create
            :help "Create this node through the Noema runtime"
            :primary t)
-          (:label "t Type"
+          (:label "t Create as"
            :command my/noema-roam-new-edit-type
-           :help "Switch between a roam node and a regular Markdown document")
+           :help "Choose linked Roam node or regular Markdown document")
           (:label "T Template"
            :command my/noema-roam-new-edit-template
            :help "Choose a Markdown template")
@@ -1707,13 +1824,17 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
           (:label "R Reset"
            :command my/noema-roam-new-reset
            :help "Reset this draft")
-          (:label "q Close"
+          (:label "q Cancel"
            :command quit-window
-           :help "Close without creating")))
+           :help "Discard this draft and return")))
        (my/noema-roam-ui-insert-section "Draft" 6)
        (my/noema-roam-new--insert-field
-        'type 'status "TYPE" node-type
-        "Press RET or t to switch roam / regular."
+        'type 'status "CREATE AS"
+        (if (string= node-type "roam")
+            "Roam node · linked" "Regular Markdown · plain")
+        (if (string= node-type "roam")
+            "Stable ID, backlinks and knowledge graph. RET/t changes type."
+          "No Roam ID; metadata uses roam: off. RET/t changes type.")
         #'my/noema-roam-new-edit-type
         (if (string= node-type "roam") 'info 'muted))
        (my/noema-roam-new--insert-editable-field
@@ -1724,14 +1845,14 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
         'path 'path "SAVE PATH" path
         "Vault-relative .md or .markdown path; p chooses a folder."
         'path "untitled.md" #'my/noema-roam-new-edit-path)
-       (my/noema-roam-new--insert-editable-field
-        'kind 'status "KIND" kind
-        "Controls Noema note-kind behavior."
-        'kind (if (string= node-type "roam") "note" "default"))
        (my/noema-roam-new--insert-field
         'template 'template "TEMPLATE" template-label
-        "Press RET or T to choose a template."
+        "Templates match the selected document type. RET/T to change."
         #'my/noema-roam-new-edit-template)
+       (my/noema-roam-new--insert-editable-field
+        'kind 'status "RENDER KIND" kind
+        "Optional Noema page behavior; this does not choose Roam versus Markdown."
+        'kind (if (string= node-type "roam") "note" "default"))
        (my/noema-roam-new--insert-editable-field
         'tags 'tag "TAGS"
         (my/noema-roam-new--tag-display tags)
@@ -1752,29 +1873,42 @@ ID, ICON, LABEL, VALUE, DETAIL, PLACEHOLDER, and ACTION control display."
         "Create engine" "Noema create-node runtime" 'my/noema-roam-ui-meta)
        (widget-setup)))
     (unless (get-text-property (point) 'aaron-ui-board--item-id)
-      (my/noema-roam-ui-goto-first-item))))
+      (my/noema-roam-ui-goto-first-item)))))
 
 (defun my/noema-roam-new-refresh ()
   "Reload templates and rerender the current Roam Node draft."
   (interactive)
-  (setq-local my/noema-roam-new--templates
-              (my/noema-roam-new--load-templates))
-  (my/noema-roam-new-render))
+  (unless my/noema-roam-new--created-file
+    (my/noema-roam-new--sync-draft-from-widgets)
+    (setq-local my/noema-roam-new--templates
+                (my/noema-roam-new--load-templates))
+    (my/noema-roam-new--ensure-template))
+  (my/noema-roam-new-render t))
 
 (defun my/noema-roam-new-reset ()
   "Reset the current Roam Node draft."
   (interactive)
+  (setq-local my/noema-roam-new--created-file nil)
   (setq-local my/noema-roam-new--draft
               (my/noema-roam-new--default-draft
-               my/noema-roam-new--base-directory))
-  (my/noema-roam-new-render))
+               my/noema-roam-new--base-directory
+               (plist-get my/noema-roam-new--draft :node-type)))
+  (my/noema-roam-new--ensure-template)
+  (my/noema-roam-new-render t))
 
-(defun my/noema-roam-new (&optional base-directory draft)
+(defun my/noema-roam-new (&optional base-directory draft node-type)
   "Open the native Roam Node workbench.
-BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
-  (let* ((base-directory
+BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist.
+NODE-TYPE selects the default when DRAFT is nil.  Reopening the same type and
+directory without DRAFT resumes the current unsubmitted form."
+  (let* ((requested-type
+          (if (equal (or node-type (plist-get draft :node-type)) "regular")
+              "regular" "roam"))
+         (base-directory
           (my/noema-roam-new--normalize-directory
            (or base-directory
+               (when (derived-mode-p 'my/noema-roam-new-mode)
+                 my/noema-roam-new--base-directory)
                (when-let* ((file buffer-file-name)
                            ((file-in-directory-p file
                                                  (my/noema-roam-root))))
@@ -1782,16 +1916,28 @@ BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
                   (file-name-directory file)
                   (my/noema-roam-root)))
                "")))
-         (buffer (get-buffer-create "*roam-new-node*")))
-    (with-current-buffer buffer
-      (my/noema-roam-new-mode)
-      (setq-local my/noema-roam-new--base-directory base-directory
-                  my/noema-roam-new--templates
-                  (my/noema-roam-new--load-templates)
-                  my/noema-roam-new--draft
-                  (or draft
-                      (my/noema-roam-new--default-draft base-directory)))
-      (my/noema-roam-new-render))
+         (buffer (my/noema-roam--frame-ui-buffer "*roam-new-node*"))
+         (reuse
+          (and (null draft)
+               (with-current-buffer buffer
+                 (and (derived-mode-p 'my/noema-roam-new-mode)
+                      (equal base-directory my/noema-roam-new--base-directory)
+                      (equal requested-type
+                             (plist-get my/noema-roam-new--draft :node-type)))))))
+    (unless reuse
+      (with-current-buffer buffer
+        (my/noema-roam-new-mode)
+        (setq-local my/noema-roam-new--base-directory base-directory
+                    my/noema-roam-new--created-file nil
+                    my/noema-roam-new--templates
+                    (my/noema-roam-new--load-templates)
+                    my/noema-roam-new--draft
+                    (or draft
+                        (my/noema-roam-new--default-draft
+                         base-directory node-type)))
+        (my/noema-roam-new--ensure-template)
+        (my/noema-roam-new-render)))
+    (my/noema-roam--own-ui-buffer buffer)
     (pop-to-buffer buffer)))
 
 (defun my/noema-roam-new--payload (draft)
@@ -1820,17 +1966,41 @@ BASE-DIRECTORY is vault-relative.  DRAFT overrides the initial draft plist."
                   (or file "nil")))
     (my/noema-roam--clear-runtime-cache)
     (when (derived-mode-p 'my/noema-roam-new-mode)
-      (kill-buffer (current-buffer)))
-    (if (fboundp 'my/noema-open-file)
-        (my/noema-open-file file)
-      (find-file file))
-    file))
+      (setq-local my/noema-roam-new--created-file file)
+      (my/noema-roam-new-render t))
+    (my/noema-roam-new--visit-created-file file)))
+
+(defun my/noema-roam-new--visit-created-file (file)
+  "Visit created FILE through the normal Markdown route, then close its form.
+The native `find-file' path keeps the Markdown placeholder visible while a
+cold Noema host starts.  If visiting fails, leave the form available so c
+retries opening the same FILE without asking the runtime to create another."
+  (let ((form (and (derived-mode-p 'my/noema-roam-new-mode)
+                   (current-buffer))))
+    (condition-case err
+        (progn
+          (unless (buffer-live-p (find-file file))
+            (error "Created Markdown file did not open: %s" file))
+          (when (buffer-live-p form)
+            (kill-buffer form))
+          file)
+      ((error quit)
+       (when (buffer-live-p form)
+         (pop-to-buffer form))
+       (signal (car err) (cdr err))))))
 
 (defun my/noema-roam-new-create ()
   "Create the current Roam Node draft."
   (interactive)
-  (my/noema-roam-new--sync-draft-from-widgets)
-  (my/noema-roam-new--create-draft my/noema-roam-new--draft))
+  (if my/noema-roam-new--created-file
+      (progn
+        (unless (file-exists-p my/noema-roam-new--created-file)
+          (user-error "Created file is missing: %s; use R for a new draft"
+                      my/noema-roam-new--created-file))
+        (my/noema-roam-new--visit-created-file
+         my/noema-roam-new--created-file))
+    (my/noema-roam-new--sync-draft-from-widgets)
+    (my/noema-roam-new--create-draft my/noema-roam-new--draft)))
 
 (defun my/noema-roam--create-linked-node (slug &optional title tags)
   "Create an internal missing-link node at fixed roam SLUG.
@@ -1857,9 +2027,9 @@ TITLE defaults from SLUG.  TAGS use the canonical create-node tag rules."
 (defun my/noema-roam-new-node (&optional title directory tags)
   "Open Roam Node, or create a timestamped node from TITLE in DIRECTORY.
 Optional TAGS are normalized with the same rules as the interactive form."
-  (interactive)
-  (if (called-interactively-p 'interactive)
-      (my/noema-roam-new directory)
+  (interactive (list :interactive))
+  (if (eq title :interactive)
+      (my/noema-roam-new directory nil "roam")
     (let* ((title (or title "Untitled"))
            (directory (my/noema-roam-new--normalize-directory directory))
            (id (format "%s-%s"
@@ -1876,6 +2046,14 @@ Optional TAGS are normalized with the same rules as the interactive form."
              :kind "note"
              :template-key "roam"
              :tags (my/noema-roam-new--normalize-tags tags))))))
+
+(defalias 'roam-new-note #'my/noema-roam-new-node
+  "Open the Roam note creation workbench.")
+
+(defun markdown-new-document (&optional directory)
+  "Open the Markdown workbench with a plain document selected."
+  (interactive)
+  (my/noema-roam-new directory nil "regular"))
 
 ;; ── Canonical Wiki records ───────────────────────────────────────────────────
 
@@ -2048,10 +2226,6 @@ in Noema's `shared/meta-summary.mjs'."
            (my/noema-roam--first-markdown-heading)
            (file-name-base file)))
       (my/noema-roam--put-note-field
-       note "id"
-       (or (my/noema-roam--note-field note "id")
-           (my/noema-roam--path-without-note-extension rel)))
-      (my/noema-roam--put-note-field
        note "summary"
        (my/noema-roam--extract-summary-block))
       (my/noema-roam--put-note-field
@@ -2059,6 +2233,13 @@ in Noema's `shared/meta-summary.mjs'."
        (append (my/noema-roam--note-list-field note "refs")
                (my/noema-roam--extract-links-from-buffer))))
     note))
+
+(defun my/noema-roam--indexed-note-p (note)
+  "Return non-nil when NOTE explicitly opts into the Roam graph."
+  (and (my/noema-roam--note-field note "id")
+       (not (equal (downcase (string-trim (or (my/noema-roam--note-field note "roam") "")))
+                   "off"))
+       (not (memq (gethash "roam" note) '(:false :json-false)))))
 
 (defun my/noema-roam--canonical-note-id (key note)
   "Return Noema's canonical note id for NOTE with DB KEY."
@@ -2131,36 +2312,41 @@ in Noema's `shared/meta-summary.mjs'."
   (let* ((note (my/noema-roam--scan-note-file file))
          (key (my/noema-roam--file-to-slug file))
          (id (my/noema-roam--canonical-note-id key note)))
-    (list :key key
-          :id id
-          :note note
-          :file file
-          :title (or (my/noema-roam--note-field note "title") id)
-          :values (my/noema-roam--note-search-values key note))))
+    (when (my/noema-roam--indexed-note-p note)
+      (list :key key
+            :id id
+            :note note
+            :file file
+            :title (or (my/noema-roam--note-field note "title") id)
+            :values (my/noema-roam--note-search-values key note)))))
 
 (defun my/noema-roam--scanned-note-records ()
   "Return cached note records by scanning Markdown files."
   (or my/noema-roam--scan-cache
       (setq my/noema-roam--scan-cache
-            (mapcar #'my/noema-roam--scan-record (my/noema-roam--all-files)))))
+            (delq nil (mapcar #'my/noema-roam--scan-record
+                              (my/noema-roam--all-files))))))
 
 (defun my/noema-roam--runtime-note-records ()
   "Return note records from the vendored Noema runtime."
   (when-let* ((payload (my/noema-roam--runtime-index))
               (notes (gethash "notes" payload)))
-    (mapcar (lambda (note)
-              (let* ((key (or (my/noema-roam--note-field note "key")
-                              (my/noema-roam--note-field note "id")
-                              (my/noema-roam--note-field note "path")
-                              (my/noema-roam--note-field note "link")))
-                     (id (my/noema-roam--canonical-note-id key note)))
-                (list :key key
-                      :id id
-                      :note note
-                      :file (my/noema-roam--note-file-from-fields key note)
-                      :title (or (my/noema-roam--note-field note "title") id)
-                      :values (my/noema-roam--note-search-values key note))))
-            notes)))
+    (delq nil
+          (mapcar
+           (lambda (note)
+             (when (my/noema-roam--indexed-note-p note)
+               (let* ((key (or (my/noema-roam--note-field note "key")
+                               (my/noema-roam--note-field note "id")
+                               (my/noema-roam--note-field note "path")
+                               (my/noema-roam--note-field note "link")))
+                      (id (my/noema-roam--canonical-note-id key note)))
+                 (list :key key
+                       :id id
+                       :note note
+                       :file (my/noema-roam--note-file-from-fields key note)
+                       :title (or (my/noema-roam--note-field note "title") id)
+                       :values (my/noema-roam--note-search-values key note)))))
+           notes))))
 
 (defun my/noema-roam--note-records ()
   "Return note records with :key, :id, :note, :file, :title, and :values."
@@ -3167,6 +3353,23 @@ buffer, enters a project or publishes unsaved tasks to the persistent index."
   (interactive)
   (my/noema-roam--open-web-agenda 'lints))
 
+(defalias 'noema-agenda-web #'my/noema-roam-agenda-web
+  "Open the hosted Noema Agenda with its full set of views.")
+(defalias 'noema-agenda-calendar #'my/noema-roam-agenda-calendar
+  "Open the hosted Noema Agenda calendar.")
+(defalias 'noema-agenda-log #'my/noema-roam-agenda-log
+  "Open the hosted Noema Agenda completion log.")
+(defalias 'noema-agenda-gantt #'my/noema-roam-agenda-gantt
+  "Open the hosted Noema Agenda Gantt view.")
+(defalias 'noema-agenda-projects #'my/noema-roam-agenda-projects
+  "Open the hosted Noema Agenda project rollup.")
+(defalias 'noema-agenda-clocktable #'my/noema-roam-agenda-clock
+  "Open the hosted Noema Agenda clocktable.")
+(defalias 'noema-agenda-lints #'my/noema-roam-agenda-lints
+  "Open the hosted Noema Agenda lints.")
+(defalias 'noema-agenda-search #'my/noema-roam-agenda-search
+  "Search the hosted Noema Agenda.")
+
 ;; ── Roam activity heatmap ────────────────────────────────────────────────────
 
 (defconst my/noema-roam--activity-heatmap-days 70
@@ -3342,20 +3545,6 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
              #'my/noema-roam-ui--tone-face))
           (insert "\n\n")))
     (error nil)))
-
-;; ── Canonical Wiki index compatibility ───────────────────────────────────────
-
-(defun my/noema-roam-sync-full ()
-  "Compatibility command for an atomic wiki.db rebuild."
-  (interactive)
-  (unless (fboundp 'my/noema-wiki-rebuild) (require 'init-aaronnote))
-  (my/noema-wiki-rebuild))
-
-(defun my/noema-roam-db-status ()
-  "Compatibility command for canonical Wiki index status."
-  (interactive)
-  (unless (fboundp 'my/noema-wiki-index-status) (require 'init-aaronnote))
-  (my/noema-wiki-index-status))
 
 (defun my/noema-roam-magit ()
   "Open magit-status in the roam notes root."
@@ -4123,25 +4312,26 @@ canonical `roam://note-id#tag' target."
     (define-key map (kbd "t") #'my/noema-wiki-tags)
     (define-key map (kbd "T") #'my/noema-roam-todos)
     (define-key map (kbd "F") #'my/noema-roam-jump-file-todo)
-    (define-key map (kbd "A") #'my/noema-roam-agenda)
+    (define-key map (kbd "A") #'noema-agenda)
     (define-key map (kbd "u") #'my/noema-wiki-refresh)
     (define-key map (kbd "U") #'my/noema-wiki-rebuild)
     (define-key map (kbd "S") #'my/noema-wiki-index-status)
     (define-key map (kbd "V") #'my/noema-roam-magit)
     (define-key map (kbd "D") #'my/noema-roam-dired)
     (define-key map (kbd "Q") #'my/noema-stop)
-    (define-key map (kbd "m") #'my/noema-roam-dispatch)
+    (define-key map (kbd "m") #'noema-wiki-menu)
     map)
   "Roam keymap for Markdown buffers. Bound to C-c r.")
 
 (my/leader!
-  "r m" '(:def my/noema-roam-dispatch :which-key "md roam")
-  "r a" '(:def my/noema-roam-agenda   :which-key "roam agenda")
-  "r d" '(:def my/noema-roam-dired    :which-key "roam dired")
-  "r v" '(:def my/noema-roam-magit    :which-key "roam magit")
-  "r S" '(:def my/noema-wiki-index-status :which-key "Wiki index status")
-  "r e" '(:def my/noema-open-markdown-raw :which-key "edit raw md")
-  "r o" '(:def my/noema-open-current-note :which-key "open in Noema"))
+  "N" '(:ignore t :which-key "Noema")
+  "N m" '(:def noema-wiki-menu :which-key "Wiki menu")
+  "N a" '(:def noema-agenda :which-key "Noema agenda")
+  "N d" '(:def my/noema-roam-dired :which-key "Noema files")
+  "N v" '(:def my/noema-roam-magit :which-key "Noema Git")
+  "N S" '(:def my/noema-wiki-index-status :which-key "Wiki index status")
+  "N e" '(:def my/noema-open-markdown-raw :which-key "edit raw md")
+  "N o" '(:def my/noema-open-current-note :which-key "open in Noema"))
 
 ;; ── xref backend: gd / M-. for note-link ─────────────────────────────────
 
@@ -4252,11 +4442,11 @@ canonical `roam://note-id#tag' target."
     ("Create"    my/noema-roam-new-node)
     ("Search"    my/noema-roam-search-notes my/noema-roam-backlinks
                  my/noema-wiki-tags my/noema-roam-graph)
-    ("Tasks"     my/noema-roam-todos my/noema-roam-agenda)
+    ("Tasks"     my/noema-roam-todos noema-agenda)
     ("Maintain"  my/noema-wiki-refresh my/noema-wiki-rebuild
                  my/noema-wiki-index-status my/noema-wiki-repositories
                  my/noema-roam-magit my/noema-roam-dired my/noema-stop
-                 my/noema-roam-dispatch my/noema-roam-help))
+                 noema-wiki-menu my/noema-roam-help))
   "Grouping of `my/noema-roam-map' commands for the help board.
 Only the grouping lives here; the keys themselves are read back out of the
 keymap so this page cannot drift away from the bindings it documents.")
@@ -4326,7 +4516,7 @@ are collected under \"Other\" so nothing is silently undocumented."
      (aaron-ui-board-insert-section "Also" 3)
      (aaron-ui-board-insert-field "gd / M-." "follow the note link at point (xref)")
      (aaron-ui-board-insert-field "H-o" "global Noema dispatch")
-     (aaron-ui-board-insert-field "M-x reports"
+     (aaron-ui-board-insert-field "M-x noema-reports-menu"
                                   "orphans, dead ends, hubs, wanted pages")
      (insert "\n")
      (aaron-ui-board-insert-key-hints "g refresh  ·  q close"))))
@@ -4376,44 +4566,10 @@ added separately by `my/noema-roam--capf-setup')."
 
 (add-hook 'markdown-mode-hook #'my/noema-roam-setup-keys)
 
-;; Update transient with daily + gd hint
-(defun my/noema-roam-dispatch ()
-  "Open Noema's Emacs-hosted Wiki knowledge dispatch."
-  (interactive)
-  (unless (fboundp 'my/noema-wiki-dispatch) (require 'init-aaronnote))
-  (my/noema-wiki-dispatch))
-
 ;;; Native report helpers (the canonical overview is Emacs-hosted Wiki).
 
 (defconst my/noema-roam--report-limit 200
   "Maximum rows shown in a single wiki report.")
-
-(defun my/noema-roam--wiki-stats ()
-  "Return a plist of vault-wide wiki statistics from the cached index."
-  (let* ((entries (my/noema-roam--all-note-summaries))
-         (total (length entries))
-         (orphaned (seq-count
-                    (lambda (e)
-                      (and (null (plist-get e :backlinks))
-                           (not (string-prefix-p "daily/"
-                                                 (or (plist-get e :slug) "")))))
-                    entries))
-         (dead-end (seq-count (lambda (e) (null (plist-get e :links))) entries))
-         (uncategorized (seq-count (lambda (e) (null (plist-get e :tags))) entries))
-         (all-links (seq-mapcat (lambda (e) (plist-get e :links)) entries))
-         (link-count (length all-links))
-         (wanted-count (hash-table-count
-                        (let ((ht (make-hash-table :test 'equal))
-                              (known (make-hash-table :test 'equal)))
-                          (dolist (e entries)
-                            (puthash (plist-get e :slug) t known))
-                          (dolist (lnk all-links)
-                            (unless (gethash lnk known)
-                              (puthash lnk t ht)))
-                          ht))))
-    (list :total total :orphaned orphaned :dead-end dead-end
-          :uncategorized uncategorized :link-count link-count
-          :wanted wanted-count)))
 
 (defun my/noema-roam-report-orphaned ()
   "Show notes with no backlinks (MediaWiki Special:LonelyPages analog)."
@@ -4581,14 +4737,19 @@ added separately by `my/noema-roam--capf-setup')."
   (interactive)
   (unless (and (boundp 'my/noema--ready) my/noema--ready)
     (user-error "Noema web-host is not running; start it with H-o o first"))
-  (message "Noema: fetching wanted pages...")
-  (my/noema--api-call
-   "aaronnote:api:notes:wanted" []
-   (lambda (result)
-     (let ((items (alist-get 'items result)))
-       (my/noema-roam--render-wanted-buffer
-        (if (vectorp items) (append items nil)
-          (or items nil)))))))
+  (let ((origin (current-buffer))
+        (frame (selected-frame)))
+    (message "Noema: fetching wanted pages...")
+    (my/noema--api-call
+     "aaronnote:api:notes:wanted" []
+     (lambda (result)
+       (when (and (buffer-live-p origin) (frame-live-p frame))
+         (with-selected-frame frame
+           (with-current-buffer origin
+             (let ((items (alist-get 'items result)))
+               (my/noema-roam--render-wanted-buffer
+                (if (vectorp items) (append items nil)
+                  (or items nil)))))))))))
 
 (defun my/noema-roam--asset-items (items)
   "Normalize JSON asset ITEMS into a list."
@@ -4717,28 +4878,31 @@ added separately by `my/noema-roam--capf-setup')."
   (interactive)
   (unless (and (boundp 'my/noema--ready) my/noema--ready)
     (user-error "Noema web-host is not running; start it with H-o o first"))
-  (message "Noema: scanning orphaned attachments...")
-  (my/noema--api-call
-   "aaronnote:api:assets:scan-orphans" []
-   (lambda (result)
-     (my/noema-roam--render-orphaned-assets-buffer
-      (alist-get 'assets result)))))
+  (let ((origin (current-buffer))
+        (frame (selected-frame)))
+    (message "Noema: scanning orphaned attachments...")
+    (my/noema--api-call
+     "aaronnote:api:assets:scan-orphans" []
+     (lambda (result)
+       (when (and (buffer-live-p origin) (frame-live-p frame))
+         (with-selected-frame frame
+           (with-current-buffer origin
+             (my/noema-roam--render-orphaned-assets-buffer
+              (alist-get 'assets result)))))))))
 
 (with-eval-after-load 'transient
-  ;; Named apart from `my/noema-roam-reports', which opens the web Wiki
-  ;; reports view.  Both used to be called `my/noema-roam-reports': because
-  ;; `transient' is required at the top of this file the `with-eval-after-load'
-  ;; body ran immediately, so the plain `defun' 340 lines below always won and
-  ;; these six native reports were reachable only through `M-x'.
-  (transient-define-prefix my/noema-roam-reports-native ()
-    "Native knowledge-health reports rendered in Emacs board buffers."
-    [["Special pages"
+  (transient-define-prefix noema-reports-menu ()
+    "Open the Wiki overview or a focused Emacs knowledge-health report."
+    [["Overview"
+      ("v" "Wiki reports"        my/noema-wiki-reports)]
+     ["Emacs reports"
       ("w" "wanted pages"       my/noema-roam-report-wanted)
       ("o" "orphaned pages"     my/noema-roam-report-orphaned)
       ("a" "orphaned attachments" my/noema-roam-report-orphaned-assets)
       ("d" "dead-end pages"     my/noema-roam-report-dead-end)
       ("u" "uncategorized"      my/noema-roam-report-uncategorized)
-      ("h" "most-linked (hubs)" my/noema-roam-report-most-linked)]]))
+      ("h" "most-linked (hubs)" my/noema-roam-report-most-linked)
+      ("t" "tag overlap"        noema-report-tag-overlap)]]))
 
 ;;; Wiki category browser (MediaWiki Category: system analog).
 
@@ -4829,112 +4993,222 @@ Select a top-level category to drill down; select a note to open it."
                    (my/noema-roam--open-slug val))))))))
       (browse prefix))))
 
-;;; Wiki move-page with automatic link rewrite (MediaWiki "Move page").
+;;; The host owns note path changes; Emacs follows their buffer lifecycle.
 
-(defun my/noema-roam-move-note ()
-  "Rename/move a roam note and rewrite all referencing links.
-Prompts for the note to move and a new file name, then calls the
-backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
+(defun my/noema-roam--same-local-path-p (a b)
+  "Return whether local paths A and B name the same location after symlinks."
+  (and (stringp a) (stringp b)
+       (ignore-errors
+         (equal (file-truename a) (file-truename b)))))
+
+(defun my/noema-roam--handle-moved-note (event)
+  "Retarget native buffers after the host moves a note described by EVENT."
+  (let ((old-file (alist-get 'oldFile event))
+        (new-file (alist-get 'file event)))
+    (when (and (stringp old-file) (stringp new-file)
+               (file-exists-p new-file))
+      (my/noema-roam--clear-runtime-cache)
+      (dolist (buffer (buffer-list))
+        (when (and (buffer-local-value 'buffer-file-name buffer)
+                   (my/noema-roam--same-local-path-p
+                    (buffer-local-value 'buffer-file-name buffer) old-file))
+          (with-current-buffer buffer
+            (let ((edited (buffer-modified-p)))
+              (set-visited-file-name new-file t)
+              (if edited
+                  (message "Noema: moved file; unsaved edits in %s were kept—review before saving"
+                           (buffer-name buffer))
+                (revert-buffer :ignore-auto :noconfirm)))))))))
+
+(defun my/noema-roam--handle-trashed-note (event)
+  "Close clean native buffers for EVENT's trashed file; keep edited drafts."
+  (when-let* ((file (alist-get 'file event))
+              ((stringp file)))
+    (my/noema-roam--clear-runtime-cache)
+    (dolist (buffer (buffer-list))
+      (when (and (buffer-local-value 'buffer-file-name buffer)
+                 (my/noema-roam--same-local-path-p
+                  (buffer-local-value 'buffer-file-name buffer) file))
+        (if (buffer-modified-p buffer)
+            (with-current-buffer buffer
+              (set-visited-file-name nil t)
+              (rename-buffer
+               (format "Trashed draft: %s" (file-name-nondirectory file)) t)
+              (message "Noema: edited note moved to Trash; kept %s as an unnamed draft"
+                       (buffer-name buffer)))
+          ;; `init-windows' owns the normal previous-page/dashboard fallback.
+          (kill-buffer buffer))))))
+
+(defun my/noema-roam--web-panes-visiting-file (file)
+  "Return Noema web panes visiting FILE."
+  (seq-filter
+   (lambda (buffer)
+     (and (local-variable-p 'my/noema-buffer-file-name buffer)
+          (let ((visited (buffer-local-value
+                          'my/noema-buffer-file-name buffer)))
+            (and (stringp visited)
+                 (or (equal (expand-file-name visited)
+                            (expand-file-name file))
+                     (ignore-errors (file-equal-p visited file)))))))
+   (buffer-list)))
+
+(defun noema-move-note ()
+  "Move a Roam note with native path completion and host-owned link updates.
+When one Noema web pane has the source open, let that pane save its draft
+before it asks the host to move the file."
   (interactive)
   (unless (and (boundp 'my/noema--ready) my/noema--ready)
     (user-error "Noema web-host is not running; start it with H-o o first"))
   (let* ((slug (my/noema-roam--read-note-id "Move note: "))
          (file (my/noema-roam--slug-to-file slug))
-         (old-name (file-name-nondirectory file))
-         (new-name (read-string (format "New file name for '%s': " old-name)
-                                old-name))
-         (old-rel (file-relative-name file (my/noema-roam-root)))
-         (new-rel (concat (file-name-directory old-rel) new-name)))
+         (source-buffer (find-buffer-visiting file))
+         (source-visited (and source-buffer
+                              (buffer-local-value 'buffer-file-name
+                                                  source-buffer)))
+         (web-panes (my/noema-roam--web-panes-visiting-file file)))
     (unless (file-exists-p file)
       (user-error "File not found: %s" file))
-    (when (string= old-name new-name)
-      (user-error "New name is the same as old name"))
-    (message "Moving '%s' → '%s' and rewriting links..." old-rel new-rel)
+    (when (> (length web-panes) 1)
+      (user-error "This note is open in multiple Noema pages; close the extra pages before moving it"))
+    (when (and web-panes
+               (not (let ((client (buffer-local-value 'my/noema--client-id
+                                                      (car web-panes))))
+                      (and (stringp client) (not (string-empty-p client))))))
+      (user-error "Noema page is still starting; retry the move when it is ready"))
+    (when (and source-buffer (buffer-modified-p source-buffer))
+      (user-error "Save the Emacs buffer for this note before moving it"))
+    (let* ((chosen (read-file-name
+                    "Move note to: " (file-name-directory file) nil nil
+                    (file-name-nondirectory file)))
+           (target (expand-file-name
+                    (if (file-directory-p chosen)
+                        (expand-file-name (file-name-nondirectory file) chosen)
+                      chosen))))
+      (unless (member (downcase (or (file-name-extension target) ""))
+                      '("md" "markdown"))
+        (user-error "A Roam note must remain a Markdown file: %s" target))
+      (when (equal target file)
+        (user-error "Source and target are the same"))
+      (when (file-exists-p target)
+        (user-error "Destination already exists: %s" target))
+      (when (find-buffer-visiting target)
+        (user-error "An Emacs buffer already visits the destination: %s"
+                    target))
+      (unless (file-directory-p (file-name-directory target))
+        (user-error "Destination folder does not exist: %s"
+                    (file-name-directory target)))
+      (if web-panes
+          (progn
+            (with-current-buffer (car web-panes)
+              (my/noema-command
+               "move-note"
+               `((file . ,my/noema-buffer-file-name) (target . ,target))))
+            (message "Noema: saving the open page, then moving '%s' → '%s'..."
+                     file target))
+        (message "Moving '%s' → '%s'..." file target)
+        (my/noema--api-call
+         "aaronnote:api:fs:move"
+         (vector (list (cons "file" file) (cons "target" target)))
+         (lambda (result)
+           (if (not (alist-get 'ok result))
+               (message "Noema move failed: %s" (alist-get 'message result))
+             (let* ((moved-to (or (alist-get 'file result) target))
+                    (rewrite (alist-get 'referenceRewrite result))
+                    (relative-error
+                     (alist-get 'relativeReferenceRewriteError result))
+                    (reference-error (alist-get 'referenceRewriteError result))
+                    (edits-after-start nil))
+               (my/noema-roam--clear-runtime-cache)
+               (when (and (buffer-live-p source-buffer)
+                          (with-current-buffer source-buffer
+                            (equal buffer-file-name source-visited)))
+                 (with-current-buffer source-buffer
+                   (setq edits-after-start (buffer-modified-p))
+                   (set-visited-file-name moved-to t)
+                   (unless edits-after-start
+                     (revert-buffer :ignore-auto :noconfirm))))
+               (message "Moved '%s' → '%s'; %d references updated%s%s%s"
+                        file moved-to
+                        (or (alist-get 'referenceCount rewrite) 0)
+                        (if relative-error
+                            (format "; relative link repair failed: %s"
+                                    relative-error) "")
+                        (if reference-error
+                            (format "; incoming link repair failed: %s"
+                                    reference-error) "")
+                        (if edits-after-start
+                            "; unsaved buffer edits kept—review links before saving"
+                          ""))))))))))
+
+;;; Tag overlap is a read-only native report.  Bulk tag edits use Noema's
+;;; existing web command palette, which owns their confirmation and results.
+
+(defun my/noema-roam--render-tag-overlap-buffer (result)
+  "Render tag overlap RESULT in this frame's temporary report board."
+  (let* ((duplicates (alist-get 'duplicateCase result))
+         (duplicates (if (vectorp duplicates)
+                         (append duplicates nil) (or duplicates nil)))
+         (overlaps (alist-get 'overlaps result))
+         (overlaps (if (vectorp overlaps)
+                       (append overlaps nil) (or overlaps nil)))
+         (tag-count (or (alist-get 'tagCount result) 0))
+         (buf (my/noema-roam--prepare-ui-buffer
+               "*roam-tag-overlap*" "Tag Overlap" 'tag
+               #'noema-report-tag-overlap
+               (format "%d pairs" (length overlaps)))))
+    (with-current-buffer buf
+      (my/noema-roam-ui-render
+       (lambda ()
+         (my/noema-roam-ui-insert-page-header
+          "Tag overlap"
+          :icon 'tag
+          :subtitle "Case variants and heavily overlapping tag sets"
+          :stats (list (cons (format "%d tags" tag-count) 'info)
+                       (cons (format "%d overlaps" (length overlaps)) 'warning)
+                       (cons (format "%d case variants" (length duplicates))
+                             'muted))
+          :actions (my/noema-roam--ui-actions))
+         (my/noema-roam-ui-insert-section "Case variants" (length duplicates))
+         (if (null duplicates)
+             (my/noema-roam-ui-insert-empty "No case variants found.")
+           (dolist (item duplicates)
+             (let ((variants (alist-get 'variants item)))
+               (my/noema-roam-ui-insert-field
+                (format "#%s" (alist-get 'lower item "?"))
+                (string-join (if (vectorp variants)
+                                 (append variants nil) (or variants nil))
+                             " / ")))))
+         (my/noema-roam-ui-insert-section "Overlapping tags" (length overlaps))
+         (if (null overlaps)
+             (my/noema-roam-ui-insert-empty "No overlapping tags found.")
+           (dolist (pair overlaps)
+             (my/noema-roam-ui-insert-field
+              (format "#%s  ↔  #%s"
+                      (alist-get 'a pair "?")
+                      (alist-get 'b pair "?"))
+              (format "%d shared · %d/%d notes · %.0f%% containment · %.0f%% Jaccard"
+                      (or (alist-get 'sharedCount pair) 0)
+                      (or (alist-get 'aCount pair) 0)
+                      (or (alist-get 'bCount pair) 0)
+                      (* 100 (or (alist-get 'containment pair) 0))
+                      (* 100 (or (alist-get 'jaccard pair) 0)))))))))
+    (display-buffer buf)))
+
+(defun noema-report-tag-overlap ()
+  "Show overlapping tags in a frame-local Noema report."
+  (interactive)
+  (unless (and (boundp 'my/noema--ready) my/noema--ready)
+    (user-error "Noema web-host is not running; start it with H-o o first"))
+  (let ((origin (current-buffer))
+        (frame (selected-frame)))
+    (message "Noema: analyzing tag overlap...")
     (my/noema--api-call
-     "aaronnote:api:fs:rename"
-     (vector (list (cons "file" file) (cons "targetName" new-name)))
+     "aaronnote:api:roam-tools:tag-overlap" []
      (lambda (result)
-       (if (not (alist-get 'ok result))
-           (message "Noema move failed: %s" (alist-get 'message result))
-         (my/noema--api-call
-          "aaronnote:api:roam-tools:rewrite-path-refs"
-          (vector (list (cons "oldPath" old-rel) (cons "newPath" new-rel)))
-          (lambda (rewrite-result)
-            (my/noema-roam--clear-runtime-cache)
-            (let ((changed (length (or (alist-get 'changed rewrite-result) []))))
-              (message "Moved '%s' → '%s'; rewrote links in %d file%s."
-                       old-rel new-rel changed
-                       (if (= changed 1) "" "s"))))))))))
-
-;;; Tag management wrappers for the management dashboard.
-
-(defun my/noema-roam-rename-tag ()
-  "Rename a tag across all vault notes via the Noema runtime."
-  (interactive)
-  (unless (and (boundp 'my/noema--ready) my/noema--ready)
-    (user-error "Noema web-host is not running"))
-  (let* ((old-tag (read-string "Old tag name: "))
-         (new-tag (read-string (format "Rename '%s' to: " old-tag) old-tag)))
-    (when (string-empty-p old-tag)
-      (user-error "Tag name cannot be empty"))
-    (when (string= old-tag new-tag)
-      (user-error "New tag is the same as old tag"))
-    (message "Renaming tag '%s' → '%s'..." old-tag new-tag)
-    (my/noema--api-call
-     "aaronnote:api:roam-tools:rename-tag"
-     (vector (list (cons "oldTag" old-tag) (cons "newTag" new-tag)))
-     (lambda (result)
-       (my/noema-roam--clear-runtime-cache)
-       (let ((changed (or (alist-get 'changed result) 0)))
-         (message "Renamed tag '%s' → '%s' in %d file%s."
-                  old-tag new-tag changed (if (= changed 1) "" "s")))))))
-
-(defun my/noema-roam-delete-tag ()
-  "Delete a tag from all vault notes via the Noema runtime."
-  (interactive)
-  (unless (and (boundp 'my/noema--ready) my/noema--ready)
-    (user-error "Noema web-host is not running"))
-  (let ((tag (read-string "Delete tag: ")))
-    (when (string-empty-p tag)
-      (user-error "Tag name cannot be empty"))
-    (when (yes-or-no-p (format "Delete tag '%s' from all notes? " tag))
-      (message "Deleting tag '%s'..." tag)
-      (my/noema--api-call
-       "aaronnote:api:roam-tools:delete-tag"
-       (vector (list (cons "tag" tag)))
-       (lambda (result)
-         (my/noema-roam--clear-runtime-cache)
-         (let ((changed (or (alist-get 'changed result) 0)))
-           (message "Deleted tag '%s' from %d file%s."
-                    tag changed (if (= changed 1) "" "s"))))))))
-
-(defun my/noema-roam-tag-overlap ()
-  "Show overlapping/redundant tags report via the Noema runtime."
-  (interactive)
-  (unless (and (boundp 'my/noema--ready) my/noema--ready)
-    (user-error "Noema web-host is not running"))
-  (message "Analyzing tag overlap...")
-  (my/noema--api-call
-   "aaronnote:api:roam-tools:tag-overlap"
-   []
-   (lambda (result)
-     (let* ((pairs (alist-get 'pairs result))
-            (pairs (if (vectorp pairs) (append pairs nil) (or pairs nil)))
-            (buf (get-buffer-create "*roam-tag-overlap*")))
-       (with-current-buffer buf
-         (let ((inhibit-read-only t))
-           (erase-buffer)
-           (insert "Tag Overlap Report\n\n")
-           (if (null pairs)
-               (insert "No overlapping tags found.\n")
-             (dolist (pair pairs)
-               (insert (format "  %s  ↔  %s  (%.0f%% overlap)\n"
-                               (alist-get 'a pair "?")
-                               (alist-get 'b pair "?")
-                               (* 100 (or (alist-get 'overlap pair) 0))))))
-           (goto-char (point-min))
-           (special-mode)))
-       (display-buffer buf)))))
+       (when (and (buffer-live-p origin) (frame-live-p frame))
+         (with-selected-frame frame
+           (with-current-buffer origin
+             (my/noema-roam--render-tag-overlap-buffer result))))))))
 
 ;;; Upgrade management dashboard with wiki statistics.
 
@@ -4980,7 +5254,7 @@ backend's fs:rename + roam-tools:rewrite-path-refs pipeline."
      :title "Agenda"
      :meta "open tasks"
      :detail "Review open todos grouped by due date and status."
-     :command my/noema-roam-agenda
+     :command noema-agenda
      :help "Open the roam agenda")
     (:id todos
      :icon todo
@@ -5090,12 +5364,17 @@ go; the runtime payload is owned by the web-host and is stale after any write."
              (member file my/noema-roam--all-files-cache)
              (file-exists-p file))
         (when my/noema-roam--scan-cache
-          (setq my/noema-roam--scan-cache
-                (mapcar (lambda (record)
-                          (if (equal (plist-get record :file) file)
-                              (my/noema-roam--scan-record file)
-                            record))
-                        my/noema-roam--scan-cache)))
+          (let ((replacement (my/noema-roam--scan-record file))
+                found)
+            (setq my/noema-roam--scan-cache
+                  (delq nil
+                        (mapcar (lambda (record)
+                                  (if (equal (plist-get record :file) file)
+                                      (progn (setq found t) replacement)
+                                    record))
+                                my/noema-roam--scan-cache)))
+            (when (and replacement (not found))
+              (push replacement my/noema-roam--scan-cache))))
       ;; Created or deleted: the directory listing itself is out of date.
       (setq my/noema-roam--all-files-cache nil
             my/noema-roam--scan-cache nil))))
@@ -5126,18 +5405,6 @@ watcher, so this only has to repair the Emacs side."
   (add-hook 'after-save-hook #'my/noema-roam--after-save-h nil t))
 
 (add-hook 'markdown-mode-hook #'my/noema-roam--setup-save-hook)
-
-(defun my/noema-roam-management ()
-  "Open the Emacs-hosted Wiki repository management surface."
-  (interactive)
-  (unless (fboundp 'my/noema-wiki-repositories) (require 'init-aaronnote))
-  (my/noema-wiki-repositories))
-
-(defun my/noema-roam-reports ()
-  "Open the Emacs-hosted Wiki reports surface."
-  (interactive)
-  (unless (fboundp 'my/noema-wiki-reports) (require 'init-aaronnote))
-  (my/noema-wiki-reports))
 
 (provide 'init-md-roam)
 ;;; init-md-roam.el ends here

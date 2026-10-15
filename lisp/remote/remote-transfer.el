@@ -1,15 +1,16 @@
-;;; remote-transfer.el --- Queued bulk transfers -*- lexical-binding: t; -*-
+;;; remote-transfer.el --- Queued file jobs -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
-;; Bulk file movement between two logical directories, run by client tools on
-;; a connection of their own so the editing session never waits for it.
+;; Bulk transfers between logical directories run through client tools;
+;; same-target file operations run through routed target processes.  Both
+;; are asynchronous and use one queue and lifecycle.
 ;;
 ;; `remote-transfer-start' copies or synchronizes with rsync as an
 ;; asynchronous job that reports progress; `remote-transfer-list' is the
 ;; queue.
 ;;
-;; Neither names a machine or a backend.  A directory the client reads
+;; Neither path names a machine or a backend.  A directory the client reads
 ;; directly (`remote-client-file-name') is passed as a plain path; any other
 ;; is reached through the backend's `:client-shell'.  A backend that offers
 ;; neither is refused, never silently served from the client's own disk.
@@ -27,6 +28,9 @@
 (require 'remote-core)
 (require 'remote-fs)
 (require 'remote-backend)
+(require 'remote-process)
+
+(declare-function evil-set-initial-state "evil-core" (mode state))
 
 (defgroup remote-transfer nil
   "Queued bulk transfers."
@@ -48,8 +52,13 @@
 (cl-defstruct (remote-transfer-job
                (:constructor remote-transfer-job--create))
   id name kind sources destination target-ids command environment route
-  state percent rate eta started finished exit-status process pending
+  execution overwrite state percent rate eta started finished exit-status process
+  transport-process pending
   log-buffer callback kill-timer)
+
+(cl-defstruct (remote-file-operation-plan
+               (:constructor remote-file-operation-plan--create))
+  method sources destination overwrite command target-id)
 
 (defvar remote-transfer-jobs nil
   "Transfer jobs, newest first.")
@@ -61,6 +70,21 @@
 
 (defvar-local remote-transfer--log-job nil
   "Transfer whose output the current log buffer shows.")
+
+(defvar-local remote-transfer--queue-owner-frame nil
+  "Frame whose transfer queue view this buffer owns.")
+
+(defvar-keymap remote-transfer-log-mode-map
+  :parent special-mode-map
+  :doc "Keymap for a transfer job's read-only output."
+  "q" #'quit-window)
+
+(define-derived-mode remote-transfer-log-mode special-mode "Transfer Log"
+  "Read-only output for one transfer job.")
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'remote-transfer-log-mode 'emacs)
+  (evil-set-initial-state 'remote-transfer-list-mode 'emacs))
 
 ;;; Endpoints
 
@@ -214,6 +238,90 @@ only lists the changes."
      (and shell (plist-get shell :route))
      target-ids)))
 
+(cl-defun remote-transfer-file-operation-command
+    (method sources destination &key overwrite)
+  "Return a target-side argv for METHOD on SOURCES into DESTINATION.
+METHOD is `copy', `move', `symlink', `relative-symlink' or `hardlink'.
+All names must belong to one target.  OVERWRITE is nil, `ask' or t; links
+never replace an existing entry.  Preflight completes before any process is
+started, so a rejected selection cannot partly execute."
+  (unless (memq method '(copy move symlink relative-symlink hardlink))
+    (user-error "Unsupported target file operation: %s" method))
+  (unless sources
+    (user-error "No files selected"))
+  (let* ((destination (file-name-as-directory
+                       (remote-canonicalize-file-name destination)))
+         (sources (mapcar #'remote-canonicalize-file-name sources))
+         (target (remote-file-name-target destination))
+         (seen (make-hash-table :test #'equal))
+         conflicts)
+    (unless (cl-every (lambda (source)
+                        (equal (remote-file-name-target source) target))
+                      sources)
+      (user-error "Target file operation requires one source target"))
+    (unless (file-directory-p destination)
+      (user-error "Destination is not a directory: %s" destination))
+    (dolist (source sources)
+      (let* ((name (file-name-nondirectory (directory-file-name source)))
+             (output (expand-file-name name destination)))
+        (unless (or (file-exists-p source) (file-symlink-p source))
+          (user-error "Selected file no longer exists: %s" source))
+        (when (and (eq method 'hardlink) (file-directory-p source))
+          (user-error "Cannot hardlink a directory: %s" source))
+        (when (gethash name seen)
+          (user-error "Multiple selected sources are named %s" name))
+        (puthash name t seen)
+        (when (equal source output)
+          (user-error "Cannot %s a file into its own path: %s"
+                      method source))
+        (when (and (memq method '(copy move))
+                   (file-directory-p source)
+                   (string-prefix-p (file-name-as-directory source)
+                                    destination))
+          (user-error "Cannot %s a directory into itself: %s"
+                      method source))
+        (when (or (file-exists-p output) (file-symlink-p output))
+          (when (or (memq method '(symlink relative-symlink hardlink))
+                    (file-directory-p output))
+            (user-error "Destination already exists: %s" output))
+          (push output conflicts))))
+    (when conflicts
+      (pcase overwrite
+        ('ask
+         (unless (yes-or-no-p
+                  (format "Overwrite %d existing file%s on %s? "
+                          (length conflicts)
+                          (if (= (length conflicts) 1) "" "s") target))
+           (user-error "Target file operation cancelled")))
+         ('t nil)
+         (_ (user-error "Destination exists: %s" (car conflicts)))))
+    (let* ((physical-destination (remote-file-local-name destination))
+           (physical-sources (mapcar #'remote-file-local-name sources))
+           (program (pcase method
+                      ('copy "cp") ('move "mv") (_ "ln")))
+           (arguments
+            (pcase method
+              ('copy (append (list "-R" "-p")
+                             (list (if conflicts "-f" "-n"))
+                             physical-sources
+                             (list physical-destination)))
+              ('move (append (list (if conflicts "-f" "-n"))
+                             physical-sources
+                             (list physical-destination)))
+              ('relative-symlink
+               (append (list "-s")
+                       (mapcar (lambda (source)
+                                 (file-relative-name
+                                  source physical-destination))
+                               physical-sources)
+                       (list physical-destination)))
+              ('symlink
+               (append (list "-s") physical-sources
+                       (list physical-destination)))
+              ('hardlink
+               (append physical-sources (list physical-destination))))))
+      (cons program arguments))))
+
 ;;; Jobs
 
 (defun remote-transfer--running ()
@@ -274,31 +382,29 @@ only lists the changes."
       (if (eq (remote-transfer-job-state job) 'running)
           (push job kept)
         (cl-incf finished)
-        (if (<= finished remote-transfer-history-limit)
+        ;; Do not close a log while the user is reading it.  The explicit
+        ;; clear action can still remove it, using Emacs's window return.
+        (if (or (<= finished remote-transfer-history-limit)
+                (when-let* ((log (remote-transfer-job-log-buffer job)))
+                  (get-buffer-window log t)))
             (push job kept)
           (when (buffer-live-p (remote-transfer-job-log-buffer job))
             (kill-buffer (remote-transfer-job-log-buffer job))))))
     (setq remote-transfer-jobs (nreverse kept))))
 
-(defun remote-transfer--sentinel (job process)
-  "Record how JOB's PROCESS ended and release what it held."
-  (unless (process-live-p process)
+(defun remote-transfer--complete (job status outcome)
+  "Finish JOB with exit STATUS and OUTCOME, preserving cancellation."
+  (unless (remote-transfer-job-finished job)
     (when (timerp (remote-transfer-job-kill-timer job))
       (cancel-timer (remote-transfer-job-kill-timer job))
       (setf (remote-transfer-job-kill-timer job) nil))
-    (when-let* ((pending (remote-transfer-job-pending job))
-                ((not (string-blank-p pending))))
-      (remote-transfer--filter job "\n"))
-    (let ((status (process-exit-status process)))
-      (setf (remote-transfer-job-exit-status job) status
-            (remote-transfer-job-finished job) (float-time)
-            (remote-transfer-job-process job) nil
-            (remote-transfer-job-state job)
-            (cond
-             ((eq (remote-transfer-job-state job) 'cancelled) 'cancelled)
-             ((not (eq (process-status process) 'exit)) 'cancelled)
-             ((zerop status) 'done)
-             (t 'failed))))
+    (setf (remote-transfer-job-exit-status job) status
+          (remote-transfer-job-finished job) (float-time)
+          (remote-transfer-job-process job) nil
+          (remote-transfer-job-transport-process job) nil
+          (remote-transfer-job-state job)
+          (if (eq (remote-transfer-job-state job) 'cancelled)
+              'cancelled outcome))
     (when (eq (remote-transfer-job-state job) 'done)
       (setf (remote-transfer-job-percent job) 100))
     (remote-transfer--log
@@ -312,13 +418,67 @@ only lists the changes."
                            :error (error-message-string err)))))
     (run-hook-with-args 'remote-transfer-finished-functions job)))
 
+(defun remote-transfer--sentinel (job process)
+  "Record how JOB's client PROCESS ended and release what it held."
+  (unless (process-live-p process)
+    (when-let* ((pending (remote-transfer-job-pending job))
+                ((not (string-blank-p pending))))
+      (remote-transfer--filter job "\n"))
+    (let ((status (process-exit-status process)))
+      (remote-transfer--complete
+       job status
+       (cond
+        ((not (eq (process-status process) 'exit)) 'cancelled)
+        ((zerop status) 'done)
+        (t 'failed))))))
+
+(defun remote-transfer--invalidate-target-cache (job route)
+  "Forget paths JOB may have changed through target ROUTE."
+  (when route
+    (condition-case err
+        (progn
+          (remote-fs-invalidate-mutated-path
+           (remote-transfer-job-destination job) route t)
+          (pcase (remote-transfer-job-kind job)
+            ('move
+             (dolist (parent (delete-dups
+                              (mapcar #'file-name-directory
+                                      (remote-transfer-job-sources job))))
+               (remote-fs-invalidate-mutated-path parent route t)))
+            ('hardlink
+             (dolist (source (remote-transfer-job-sources job))
+               (remote-fs-invalidate-mutated-path source route)))))
+      (error
+       (remote-transfer--log
+        job (format "Cache refresh failed: %s\n"
+                    (error-message-string err)))))))
+
+(defun remote-transfer--target-finished (job result)
+  "Record target-side RESULT for JOB and release its process."
+  (unless (remote-transfer-job-finished job)
+    (dolist (output (list (remote-exec-result-stdout result)
+                          (remote-exec-result-stderr result)))
+      (when (and (stringp output) (not (string-empty-p output)))
+        (remote-transfer--log
+         job (if (string-suffix-p "\n" output) output (concat output "\n")))))
+    ;; `make-process' does not flush metadata the way `process-file' does.
+    ;; Invalidate before reporting completion, even after partial failure.
+    (remote-transfer--invalidate-target-cache
+     job (remote-exec-result-route result))
+    (let ((status (remote-exec-result-status result)))
+      (remote-transfer--complete
+       job (if (integerp status) status 1)
+       (if (and (integerp status) (zerop status)) 'done 'failed)))))
+
 (defun remote-transfer--state-text (job)
   "Return JOB's state as a short phrase."
   (pcase (remote-transfer-job-state job)
     ('running "running")
     ('done "done")
     ('cancelled "cancelled")
-    ('failed (format "failed (%s)" (remote-transfer-job-exit-status job)))
+    ('failed (if-let* ((status (remote-transfer-job-exit-status job)))
+                 (format "failed (%s)" status)
+               "failed (status unknown)"))
     (state (format "%s" state))))
 
 (defun remote-transfer--client-process-environment (environment)
@@ -329,17 +489,12 @@ only lists the changes."
    (remote-client-process-environment)))
 
 (defun remote-transfer--launch (job)
-  "Start JOB's client process and return JOB."
-  (let* ((process-environment
-          (remote-transfer--client-process-environment
-           (remote-transfer-job-environment job)))
-         (exec-path (remote-client-exec-path))
-         (default-directory temporary-file-directory)
-         (log (generate-new-buffer
+  "Start JOB's client or target process and return JOB."
+  (let* ((log (generate-new-buffer
                (format " *remote-transfer %d*" (remote-transfer-job-id job))))
          process)
     (with-current-buffer log
-      (special-mode)
+      (remote-transfer-log-mode)
       (setq-local remote-transfer--log-job job))
     (setf (remote-transfer-job-log-buffer job) log
           (remote-transfer-job-state job) 'running
@@ -353,23 +508,46 @@ only lists the changes."
     (remote-transfer--log job (format "%s\n\n" (remote-transfer-job-name job)))
     (condition-case err
         (setq process
-              (make-process
-               :name (format "remote-transfer-%d" (remote-transfer-job-id job))
-               :buffer nil
-               :command (remote-transfer-job-command job)
-               :connection-type 'pipe
-               :coding 'utf-8
-               :filter (lambda (_process output)
-                         (remote-transfer--filter job output))
-               :sentinel (lambda (process _event)
-                           (remote-transfer--sentinel job process))))
+              (if (eq (remote-transfer-job-execution job) 'target)
+                  (remote-exec-async
+                   (car (remote-transfer-job-command job))
+                   :args (cdr (remote-transfer-job-command job))
+                   :context (remote-transfer-job-destination job)
+                   :name (format "remote-file-operation-%d"
+                                 (remote-transfer-job-id job))
+                   :coding 'utf-8
+                   :filesystem-effects 'content
+                   :callback (lambda (result)
+                               (remote-transfer--target-finished job result)))
+                (let ((process-environment
+                       (remote-transfer--client-process-environment
+                        (remote-transfer-job-environment job)))
+                      (exec-path (remote-client-exec-path))
+                      (default-directory temporary-file-directory))
+                  (make-process
+                   :name (format "remote-transfer-%d"
+                                 (remote-transfer-job-id job))
+                   :buffer nil
+                   :command (remote-transfer-job-command job)
+                   :connection-type 'pipe
+                   :coding 'utf-8
+                   :filter (lambda (_process output)
+                             (remote-transfer--filter job output))
+                   :sentinel (lambda (process _event)
+                               (remote-transfer--sentinel job process))))))
       (error
        (kill-buffer log)
        (signal (car err) (cdr err))))
     ;; An explicit disconnect ends every process carrying the target's route.
     (when-let* ((route (remote-transfer-job-route job)))
       (process-put process 'remote-route route))
-    (setf (remote-transfer-job-process job) process)
+    (setf (remote-transfer-job-process job) process
+          (remote-transfer-job-transport-process job)
+          (when (eq (remote-transfer-job-execution job) 'target)
+            (ignore-errors
+              (remote-fs-route-transport-process
+               (remote-transfer-job-destination job)
+               (process-get process 'remote-route)))))
     (push job remote-transfer-jobs)
     (remote-transfer--start-refresh)
     job))
@@ -397,8 +575,49 @@ NAME labels the job in the queue.  CALLBACK receives the job when it ends."
       :target-ids target-ids :command command
       :environment environment :route route :callback callback))))
 
+(cl-defun remote-transfer-plan-file-operation
+    (method sources destination &key overwrite)
+  "Preflight METHOD on SOURCES into DESTINATION and return a reusable plan.
+OVERWRITE is nil, `ask' or t.  No target process starts before this returns."
+  (let* ((destination (remote-canonicalize-file-name destination))
+         (sources (mapcar #'remote-canonicalize-file-name sources))
+         (command (remote-transfer-file-operation-command
+                   method sources destination :overwrite overwrite)))
+    (remote-file-operation-plan--create
+     :method method :sources sources :destination destination
+     :overwrite overwrite :command command
+     :target-id (remote-file-name-target destination))))
+
+(cl-defun remote-transfer-start-file-operation (plan &key name callback)
+  "Launch preflighted target-side file operation PLAN as a queued job.
+The same routed process, cancellation, disconnect and log lifecycle applies
+to native and remote targets.  CALLBACK receives the finished job."
+  (unless (remote-file-operation-plan-p plan)
+    (error "Expected a preflighted remote file operation plan"))
+  (let ((method (remote-file-operation-plan-method plan))
+        (sources (remote-file-operation-plan-sources plan))
+        (destination (remote-file-operation-plan-destination plan)))
+    (remote-transfer--launch
+     (remote-transfer-job--create
+      :id (cl-incf remote-transfer--next-id)
+      :name (or name
+                (format "%s %s -> %s"
+                        method
+                        (mapconcat
+                         (lambda (source)
+                           (file-name-nondirectory
+                            (directory-file-name source)))
+                         sources ", ")
+                        destination))
+      :kind method :execution 'target
+      :overwrite (remote-file-operation-plan-overwrite plan)
+      :sources sources :destination destination
+      :target-ids (list (remote-file-operation-plan-target-id plan))
+      :command (remote-file-operation-plan-command plan)
+      :callback callback))))
+
 (defun remote-transfer-cancel (job)
-  "Stop JOB if it is running.  Partial files stay for a later resume."
+  "Stop JOB if it is running.  A transfer may leave a partial file."
   (when-let* ((process (remote-transfer-job-process job))
               ((process-live-p process)))
     (setf (remote-transfer-job-state job) 'cancelled)
@@ -413,13 +632,23 @@ NAME labels the job in the queue.  CALLBACK receives the job when it ends."
                              (delete-process process))))))))
 
 (defun remote-transfer-retry (job)
-  "Run JOB's command again as a new queue entry and return the new job."
+  "Retry JOB as a new queue entry and return it.
+Target-side operations are preflighted again against the current filesystem."
   (when (eq (remote-transfer-job-state job) 'running)
     (user-error "Transfer is still running"))
-  (let ((copy (copy-remote-transfer-job job)))
-    (setf (remote-transfer-job-id copy) (cl-incf remote-transfer--next-id)
-          (remote-transfer-job-kill-timer copy) nil)
-    (remote-transfer--launch copy)))
+  (if (eq (remote-transfer-job-execution job) 'target)
+      (remote-transfer-start-file-operation
+       (remote-transfer-plan-file-operation
+        (remote-transfer-job-kind job)
+        (remote-transfer-job-sources job)
+        (remote-transfer-job-destination job)
+        :overwrite (remote-transfer-job-overwrite job))
+       :name (remote-transfer-job-name job)
+       :callback (remote-transfer-job-callback job))
+    (let ((copy (copy-remote-transfer-job job)))
+      (setf (remote-transfer-job-id copy) (cl-incf remote-transfer--next-id)
+            (remote-transfer-job-kill-timer copy) nil)
+      (remote-transfer--launch copy))))
 
 (defun remote-transfer--target-disconnected (target-id _reason)
   "End the transfers that belong to TARGET-ID."
@@ -431,12 +660,31 @@ NAME labels the job in the queue.  CALLBACK receives the job when it ends."
 
 ;;; Progress display
 
+(defun remote-transfer--transport-lost (job)
+  "Finish JOB when its target transport vanished before reporting an outcome."
+  (unless (remote-transfer-job-finished job)
+    (let ((relay (remote-transfer-job-process job)))
+      (remote-transfer--log
+       job "Target transport lost; remote command outcome is unknown.\n")
+      (remote-transfer--invalidate-target-cache
+       job (and relay (process-get relay 'remote-route)))
+      (remote-transfer--complete job nil 'failed)
+      (when (and relay (process-live-p relay))
+        (ignore-errors (delete-process relay))))))
+
 (defun remote-transfer--refresh ()
-  "Redraw the visible queue and stop the timer once nothing runs."
-  (when-let* ((buffer (get-buffer "*Remote Transfers*"))
-              ((get-buffer-window buffer t)))
-    (with-current-buffer buffer
-      (remote-transfer-list-refresh)))
+  "Redraw visible frame queue views and stop the timer once nothing runs."
+  (dolist (job (remote-transfer--running))
+    (when-let* ((transport (remote-transfer-job-transport-process job))
+                ((not (process-live-p transport))))
+      (remote-transfer--transport-lost job)))
+  (dolist (frame (frame-list))
+    (when-let* ((buffer (frame-parameter frame
+                                         'remote-transfer-queue-buffer))
+                ((buffer-live-p buffer))
+                ((get-buffer-window buffer frame)))
+      (with-current-buffer buffer
+        (remote-transfer-list-refresh))))
   (unless (remote-transfer--running)
     (when (timerp remote-transfer--refresh-timer)
       (cancel-timer remote-transfer--refresh-timer))
@@ -514,7 +762,7 @@ NAME labels the job in the queue.  CALLBACK receives the job when it ends."
   (let ((buffer (remote-transfer-job-log-buffer job)))
     (unless (buffer-live-p buffer)
       (user-error "This transfer's log is gone"))
-    (pop-to-buffer buffer)))
+    (pop-to-buffer buffer '(nil (reusable-frames . nil)))))
 
 (defun remote-transfer-list-clear ()
   "Remove finished transfers and their logs from the queue."
@@ -522,12 +770,13 @@ NAME labels the job in the queue.  CALLBACK receives the job when it ends."
   (dolist (job remote-transfer-jobs)
     (unless (eq (remote-transfer-job-state job) 'running)
       (when (buffer-live-p (remote-transfer-job-log-buffer job))
-        (kill-buffer (remote-transfer-job-log-buffer job)))))
+        (quit-windows-on (remote-transfer-job-log-buffer job) t))))
   (setq remote-transfer-jobs (remote-transfer--running))
-  (remote-transfer-list-refresh))
+  (remote-transfer--refresh))
 
 (defvar-keymap remote-transfer-list-mode-map
   :parent tabulated-list-mode-map
+  "q" #'quit-window
   "RET" #'remote-transfer-show-log
   "l" #'remote-transfer-show-log
   "k" #'remote-transfer-list-cancel
@@ -536,7 +785,7 @@ NAME labels the job in the queue.  CALLBACK receives the job when it ends."
   "g" #'remote-transfer-list-refresh)
 
 (define-derived-mode remote-transfer-list-mode tabulated-list-mode "Transfers"
-  "Mode for the bulk transfer queue.
+  "Mode for the file job queue.
 RET shows a transfer's output, k cancels it, r runs it again and c clears
 the finished ones."
   (setq tabulated-list-format
@@ -544,25 +793,63 @@ the finished ones."
          ("Progress" 22 nil)
          ("Rate" 12 nil)
          ("Time" 9 nil)
-         ("Transfer" 60 nil)])
+         ("Operation" 60 nil)])
   (setq tabulated-list-padding 1
         tabulated-list-entries (remote-transfer--entries))
-  (tabulated-list-init-header))
+  (tabulated-list-init-header)
+  (add-hook 'kill-buffer-hook #'remote-transfer--queue-buffer-killed nil t))
 
-(defun remote-transfer-list-buffer ()
-  "Return the transfer queue buffer, creating it when needed."
-  (let ((buffer (get-buffer-create "*Remote Transfers*")))
-    (with-current-buffer buffer
-      (unless (derived-mode-p 'remote-transfer-list-mode)
-        (remote-transfer-list-mode))
-      (remote-transfer-list-refresh))
+(defun remote-transfer--queue-buffer-killed ()
+  "Clear this queue buffer's frame reference when it is killed."
+  (when (and (frame-live-p remote-transfer--queue-owner-frame)
+             (eq (frame-parameter remote-transfer--queue-owner-frame
+                                  'remote-transfer-queue-buffer)
+                 (current-buffer)))
+    (set-frame-parameter remote-transfer--queue-owner-frame
+                         'remote-transfer-queue-buffer nil)))
+
+(defun remote-transfer--frame-deleted (frame)
+  "Release FRAME's transfer queue view, leaving the jobs running."
+  (when-let* ((buffer (frame-parameter frame
+                                       'remote-transfer-queue-buffer)))
+    (set-frame-parameter frame 'remote-transfer-queue-buffer nil)
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer))))
+
+(add-hook 'delete-frame-functions #'remote-transfer--frame-deleted)
+
+(defun remote-transfer-list-buffer (&optional frame)
+  "Return FRAME's transfer queue view, creating it when needed."
+  (let* ((frame (or frame (selected-frame)))
+         (existing (frame-parameter frame 'remote-transfer-queue-buffer))
+         (created (not (buffer-live-p existing)))
+         (buffer (if created
+                     (generate-new-buffer "*Remote Transfers*")
+                   existing)))
+    (when created
+      (set-frame-parameter frame 'remote-transfer-queue-buffer buffer))
+    (condition-case error
+        (with-current-buffer buffer
+          (unless (derived-mode-p 'remote-transfer-list-mode)
+            (remote-transfer-list-mode))
+          (setq-local remote-transfer--queue-owner-frame frame)
+          (remote-transfer-list-refresh))
+      (error
+       (when created
+         (when (buffer-live-p buffer)
+           (kill-buffer buffer))
+         (when (eq (frame-parameter frame 'remote-transfer-queue-buffer)
+                   buffer)
+           (set-frame-parameter frame 'remote-transfer-queue-buffer nil)))
+       (signal (car error) (cdr error))))
     buffer))
 
 ;;;###autoload
 (defun remote-transfer-list ()
-  "Show the bulk transfer queue."
+  "Show the transfer and target file operation queue."
   (interactive)
-  (pop-to-buffer (remote-transfer-list-buffer)))
+  (pop-to-buffer (remote-transfer-list-buffer)
+                 '(nil (reusable-frames . nil))))
 
 (provide 'remote-transfer)
 ;;; remote-transfer.el ends here

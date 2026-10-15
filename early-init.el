@@ -6,6 +6,32 @@
 ;; Prefer fresh source over stale bytecode throughout the startup chain.
 (setq load-prefer-newer t)
 
+(defun my/native-comp-refresh-gcc-library-path ()
+  "Find Homebrew's current GCC runtime library before native compilation.
+Emacs.app can retain a versioned `LIBRARY_PATH' from its build.  After a GCC
+upgrade that path no longer contains libemutls_w, which subr trampolines need."
+  (when (eq system-type 'darwin)
+    (let* ((library
+            (car (append
+                  (file-expand-wildcards
+                   "/opt/homebrew/lib/gcc/current/gcc/*/*/libemutls_w.a" t)
+                  (file-expand-wildcards
+                   "/usr/local/lib/gcc/current/gcc/*/*/libemutls_w.a" t))))
+           (directory (and library
+                           (directory-file-name
+                            (file-name-directory library))))
+           (existing (getenv "LIBRARY_PATH")))
+      (when (and directory
+                 (not (equal directory
+                             (car (split-string (or existing "")
+                                                path-separator t)))))
+        (setenv "LIBRARY_PATH"
+                (if (and existing (not (string= existing "")))
+                    (concat directory path-separator existing)
+                  directory))))))
+
+(my/native-comp-refresh-gcc-library-path)
+
 (defconst my/startup-byte-compiled-files
   '("early-init.el" "init.el" "bootstrap.el")
   "Top-level startup files whose bytecode can break bootstrap.")

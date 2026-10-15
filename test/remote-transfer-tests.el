@@ -51,6 +51,7 @@
            (expand-file-name "askpass.sh" directory))
           (remote-machines--list nil)
           (remote-machines--loaded nil)
+          (remote-machines--revision nil)
           (remote-transfer-jobs nil)
           (remote-config-file (expand-file-name "remote.json" directory)))
      (unwind-protect
@@ -74,6 +75,13 @@
     (cl-loop for (key value) on overrides by #'cddr
              do (setq machine (plist-put machine key value)))
     machine))
+
+(defun remote-transfer-test--file-digest (file)
+  "Return a digest of FILE without exposing its stored credentials."
+  (when (file-exists-p file)
+    (with-temp-buffer
+      (insert-file-contents-literally file)
+      (secure-hash 'sha256 (current-buffer)))))
 
 (defun remote-transfer-test--wait (job)
   "Wait until JOB has ended and return its state."
@@ -106,6 +114,306 @@
     (remote-machines-remove "lab")
     (should-not (remote-get-target "lab"))
     (should-not (file-exists-p remote-machines-auth-file))))
+
+(ert-deftest remote-machines-reject-stale-edits-until-disk-reload ()
+  "An external edit is preserved until this Emacs explicitly reloads it."
+  (remote-transfer-test-with-registry
+    (remote-machines-add (remote-transfer-test--machine))
+    (let* ((outside (remote-transfer-test--machine
+                     :id "outside" :label "Outside" :host "192.0.2.11"
+                     :password nil))
+           (local (remote-transfer-test--machine
+                   :id "local-new" :label "Local New" :host "192.0.2.12"
+                   :password nil))
+           (outside-json
+            (concat
+             (json-serialize
+              (list :version 1
+                    :machines
+                    (vconcat (mapcar #'remote-machines--compact
+                                     (list (remote-machines-get "lab") outside)))))
+             "\n")))
+      ;; Another Emacs has saved a newer copy of the shared machine list.
+      (remote-machines--private-write remote-machines-file outside-json)
+      (let ((disk-digest (remote-transfer-test--file-digest
+                          remote-machines-file)))
+        (should (string-match-p
+                 "remote-machines-reload-from-disk"
+                 (error-message-string
+                  (should-error (remote-machines-add local)
+                                :type 'user-error))))
+        (should (equal (remote-transfer-test--file-digest
+                        remote-machines-file)
+                       disk-digest))
+        (should-not (remote-machines-get "local-new"))
+        (should-not (remote-machines-target-p "local-new")))
+      (remote-machines-reload-from-disk)
+      (should (remote-machines-target-p "outside"))
+      (remote-machines-add local)
+      (dolist (id '("lab" "outside" "local-new"))
+        (should (remote-machines-get id))
+        (should (remote-machines-target-p id)))
+      (should (= (length (plist-get
+                          (json-parse-string
+                           (with-temp-buffer
+                             (insert-file-contents remote-machines-file)
+                             (buffer-string))
+                           :object-type 'plist :array-type 'list)
+                          :machines))
+                 3)))))
+
+(ert-deftest remote-machines-native-lock-blocks-another-emacs ()
+  "An independent Emacs holding the machine file lock prevents a commit."
+  (remote-transfer-test-with-registry
+    (remote-machines-add (remote-transfer-test--machine))
+    (let* ((ready (expand-file-name "other-emacs-ready" directory))
+           (child-form
+            `(let ((create-lockfiles t)
+                   (lock-file-name-transforms nil))
+               (lock-file ,remote-machines-file)
+               (unwind-protect
+                   (progn
+                     (with-temp-file ,ready (insert "ready"))
+                     (sleep-for 4))
+                 (unlock-file ,remote-machines-file))))
+           (child
+            (make-process
+             :name "remote-machines-lock-test"
+             :buffer nil
+             :noquery t
+             :command
+             (list (expand-file-name invocation-name invocation-directory)
+                   "-Q" "--batch" "--eval" (prin1-to-string child-form)))))
+      (unwind-protect
+          (progn
+            (with-timeout (5 (error "Other Emacs did not acquire the machine lock"))
+              (while (and (process-live-p child)
+                          (not (file-exists-p ready)))
+                (accept-process-output child 0.05)))
+            (should (file-exists-p ready))
+            (should (process-live-p child))
+            (let ((disk-digest
+                   (remote-transfer-test--file-digest remote-machines-file)))
+              (should (string-match-p
+                       "being updated in another Emacs"
+                       (error-message-string
+                        (should-error
+                         (remote-machines-add
+                          (remote-transfer-test--machine
+                           :id "local-new" :label "Local New"
+                           :host "192.0.2.12"))
+                         :type 'user-error))))
+              (should (equal (remote-transfer-test--file-digest
+                              remote-machines-file)
+                             disk-digest))
+              (should-not (remote-machines-get "local-new"))))
+        (when (process-live-p child)
+          (delete-process child))))))
+
+(ert-deftest remote-machines-views-refresh-and-close-independently-by-frame ()
+  "Edits refresh both visible lists; frame closing releases only its view."
+  (remote-transfer-test-with-registry
+    (remote-machines-add (remote-transfer-test--machine))
+    (let* ((real-frame (selected-frame))
+           (other-frame (make-symbol "other-frame"))
+           (other-parameters (make-hash-table :test #'eq))
+           (original-frame-parameter (symbol-function 'frame-parameter))
+           (original-set-frame-parameter (symbol-function 'set-frame-parameter))
+           (original-frame-live-p (symbol-function 'frame-live-p))
+           first second first-board second-board)
+      (cl-letf (((symbol-function 'frame-parameter)
+                 (lambda (frame key)
+                   (if (eq frame other-frame)
+                       (gethash key other-parameters)
+                     (funcall original-frame-parameter frame key))))
+                ((symbol-function 'set-frame-parameter)
+                 (lambda (frame key value)
+                   (if (eq frame other-frame)
+                       (puthash key value other-parameters)
+                     (funcall original-set-frame-parameter frame key value))))
+                ((symbol-function 'frame-live-p)
+                 (lambda (frame)
+                   (if (eq frame other-frame) t
+                     (funcall original-frame-live-p frame))))
+                ((symbol-function 'frame-list)
+                 (lambda () (list real-frame other-frame)))
+                ((symbol-function 'get-buffer-window)
+                 (lambda (buffer frame)
+                   (or (eq buffer (frame-parameter
+                                   frame 'remote-machines-view-buffer))
+                       (eq buffer (frame-parameter
+                                   frame 'remote-board-view-buffer))))))
+        (unwind-protect
+            (progn
+              (setq first (remote-machines--buffer real-frame)
+                    second (remote-machines--buffer other-frame)
+                    first-board (remote-board--buffer real-frame)
+                    second-board (remote-board--buffer other-frame))
+              (should-not (eq first second))
+              (remote-machines-add
+               (remote-transfer-test--machine
+                :id "other" :label "Other" :host "192.0.2.11"))
+              (dolist (buffer (list first second first-board second-board))
+                (with-current-buffer buffer
+                  (should (string-match-p "Other" (buffer-string)))))
+              (remote-machines--frame-deleted other-frame)
+              (remote-board--frame-deleted other-frame)
+              (should-not (buffer-live-p second))
+              (should-not (buffer-live-p second-board))
+              (should (buffer-live-p first))
+              (should (buffer-live-p first-board)))
+          (when (buffer-live-p second-board) (kill-buffer second-board))
+          (when (buffer-live-p first-board) (kill-buffer first-board))
+          (when (buffer-live-p second) (kill-buffer second))
+          (when (buffer-live-p first) (kill-buffer first)))))))
+
+(ert-deftest remote-machines-password-edit-invalidates-old-session ()
+  "Changing only a stored password also closes the old pooled SSH session."
+  (remote-transfer-test-with-registry
+    (remote-machines-add (remote-transfer-test--machine))
+    (let ((pipeline-id
+           (remote-pipeline-id
+            (car (remote-pipelines-for-target "lab"))))
+          invalidated)
+      (cl-letf (((symbol-function 'remote-machines--read-machine)
+                 (lambda (old)
+                   (plist-put (copy-sequence old) :password "new-secret")))
+                ((symbol-function 'remote-connection-invalidate-link)
+                 (lambda (id disconnect reason)
+                   (push (list id disconnect reason) invalidated))))
+        (remote-machines-edit "lab"))
+      (should (equal (plist-get (remote-machines-get "lab") :password)
+                     "new-secret"))
+      (should (member (list pipeline-id t 'credentials-changed)
+                      invalidated)))))
+
+(ert-deftest remote-machines-add-restores-state-after-auth-write-error ()
+  "An auth-file failure cannot leave an unregistered saved machine."
+  (remote-transfer-test-with-registry
+    (cl-letf (((symbol-function 'remote-machines--write-auth-file)
+               (lambda () (error "injected auth write failure"))))
+      (should-error (remote-machines-add (remote-transfer-test--machine))))
+    (should-not (remote-machines-get "lab"))
+    (should-not (remote-get-target "lab"))
+    (should-not (file-exists-p remote-machines-file))
+    (should-not (file-exists-p remote-machines-auth-file))))
+
+(ert-deftest remote-machines-add-needs-a-loadable-target-config ()
+  "A missing framework config cannot produce a saved but unusable machine."
+  (remote-transfer-test-with-registry
+    (delete-file remote-config-file)
+    (should-error (remote-machines-add (remote-transfer-test--machine)))
+    (should-not (remote-machines-get "lab"))
+    (should-not (remote-get-target "lab"))
+    (should-not (file-exists-p remote-machines-file))
+    (should-not (file-exists-p remote-machines-auth-file))))
+
+(ert-deftest remote-machines-edit-restores-record-after-config-error ()
+  "A failed target reload restores memory and both private files."
+  (remote-transfer-test-with-registry
+    (remote-machines-add (remote-transfer-test--machine))
+    (let ((original (remote-machines-get "lab"))
+          (json-digest (remote-transfer-test--file-digest
+                        remote-machines-file))
+          (auth-digest (remote-transfer-test--file-digest
+                        remote-machines-auth-file)))
+      (cl-letf (((symbol-function 'remote-machines--read-machine)
+                 (lambda (old)
+                   (plist-put (copy-sequence old) :password "replacement")))
+                ((symbol-function 'remote-config-reload)
+                 (lambda () (error "injected config reload failure"))))
+        (should-error (remote-machines-edit "lab")))
+      (should (eq (remote-machines-get "lab") original))
+      (should (remote-machines-target-p "lab"))
+      (should (equal (remote-transfer-test--file-digest
+                      remote-machines-file)
+                     json-digest))
+      (should (equal (remote-transfer-test--file-digest
+                      remote-machines-auth-file)
+                     auth-digest)))))
+
+(ert-deftest remote-machines-edit-restores-committed-registry-after-hook-error ()
+  "A hook failing after config commit cannot leave a new target behind."
+  (remote-transfer-test-with-registry
+    (remote-machines-add (remote-transfer-test--machine))
+    (let ((json-digest (remote-transfer-test--file-digest
+                        remote-machines-file))
+          (auth-digest (remote-transfer-test--file-digest
+                        remote-machines-auth-file))
+          failed-once)
+      (let ((remote-config-after-load-hook
+             (list (lambda ()
+                     (unless failed-once
+                       (setq failed-once t)
+                       (error "injected after-load failure"))))))
+        (cl-letf (((symbol-function 'remote-machines--read-machine)
+                   (lambda (old)
+                     (plist-put (copy-sequence old) :host "192.0.2.20"))))
+          (should-error (remote-machines-edit "lab"))))
+      (should failed-once)
+      (should (equal (plist-get (remote-machines-get "lab") :host)
+                     "192.0.2.10"))
+      (should (equal (plist-get
+                      (remote-pipeline-config
+                       (car (remote-pipelines-for-target "lab")))
+                      :host)
+                     "192.0.2.10"))
+      (should (equal (remote-transfer-test--file-digest
+                      remote-machines-file)
+                     json-digest))
+      (should (equal (remote-transfer-test--file-digest
+                      remote-machines-auth-file)
+                     auth-digest)))))
+
+(ert-deftest remote-machines-edit-recovers-from-invalidation-error ()
+  "A reload failing before generation increments still restores the target."
+  (remote-transfer-test-with-registry
+    (remote-machines-add (remote-transfer-test--machine))
+    (let ((invalidate (symbol-function 'remote-config--invalidate-pipelines))
+          failed-once)
+      (cl-letf (((symbol-function 'remote-machines--read-machine)
+                 (lambda (old)
+                   (plist-put (copy-sequence old) :host "192.0.2.20")))
+                ((symbol-function 'remote-config--invalidate-pipelines)
+                 (lambda (ids &optional reason)
+                   (if (and ids (not failed-once))
+                       (progn
+                         (setq failed-once t)
+                         (error "injected invalidation failure"))
+                     (funcall invalidate ids reason)))))
+        (should-error (remote-machines-edit "lab")))
+      (should failed-once)
+      (should (equal (plist-get (remote-machines-get "lab") :host)
+                     "192.0.2.10"))
+      (should (equal (plist-get
+                      (remote-pipeline-config
+                       (car (remote-pipelines-for-target "lab")))
+                      :host)
+                     "192.0.2.10")))))
+
+(ert-deftest remote-machines-remove-does-not-disconnect-before-save ()
+  "Forgetting a machine only tears down its target after persistence works."
+  (remote-transfer-test-with-registry
+    (remote-machines-add (remote-transfer-test--machine))
+    (let ((json-digest (remote-transfer-test--file-digest
+                        remote-machines-file))
+          (auth-digest (remote-transfer-test--file-digest
+                        remote-machines-auth-file))
+          disconnected)
+      (cl-letf (((symbol-function 'remote-machines--write-auth-file)
+                 (lambda () (error "injected auth write failure")))
+                ((symbol-function 'remote-workspace-disconnect-target)
+                 (lambda (&rest _) (setq disconnected t))))
+        (should-error (remote-machines-remove "lab")))
+      (should-not disconnected)
+      (should (remote-machines-get "lab"))
+      (should (remote-machines-target-p "lab"))
+      (should (equal (remote-transfer-test--file-digest
+                      remote-machines-file)
+                     json-digest))
+      (should (equal (remote-transfer-test--file-digest
+                      remote-machines-auth-file)
+                     auth-digest)))))
 
 (ert-deftest remote-read-target-offers-to-remember-a-machine ()
   "Every target prompt is also the entry for a machine typed by hand."
@@ -373,6 +681,232 @@
       (remote-transfer-list-clear)
       (should-not remote-transfer-jobs))))
 
+(ert-deftest remote-transfer-target-side-operations-use-one-routed-lifecycle ()
+  "Copy, move and all link methods work through the same local target route."
+  (remote-transfer-test-with-registry
+    (dolist (method '(copy move symlink relative-symlink hardlink))
+      (let* ((source (expand-file-name (format "%s.txt" method) directory))
+             (destination (expand-file-name (format "out-%s" method) directory))
+             (output (expand-file-name (file-name-nondirectory source)
+                                       destination)))
+        (make-directory destination)
+        (with-temp-file source (insert (format "%s\n" method)))
+        (let* ((plan (remote-transfer-plan-file-operation
+                      method (list source) destination :overwrite 'ask))
+               (job (remote-transfer-start-file-operation plan)))
+          (should (eq (remote-transfer-job-execution job) 'target))
+          (should (eq (remote-transfer-test--wait job) 'done))
+          (should (file-exists-p output))
+          (pcase method
+            ('move (should-not (file-exists-p source)))
+            ((or 'symlink 'relative-symlink)
+             (should (file-symlink-p output))
+             (should (equal (file-truename output) (file-truename source)))
+             (when (eq method 'relative-symlink)
+               (should-not (file-name-absolute-p (file-symlink-p output)))))
+            ('hardlink
+             (should (= (file-attribute-link-number (file-attributes source)) 2)))
+            ('copy
+             (should-not (file-symlink-p output)))))))
+    ;; A directory copy must preserve the subtree, too.
+    (let* ((source (expand-file-name "tree" directory))
+           (destination (expand-file-name "out-tree" directory)))
+      (make-directory source)
+      (make-directory destination)
+      (with-temp-file (expand-file-name "child.txt" source) (insert "child"))
+      (should
+       (eq (remote-transfer-test--wait
+            (remote-transfer-start-file-operation
+             (remote-transfer-plan-file-operation
+              'copy (list source) destination)))
+           'done))
+      (should (file-exists-p
+               (expand-file-name "tree/child.txt" destination))))))
+
+(ert-deftest remote-transfer-target-side-preflight-rejects-unsafe-batches ()
+  "An invalid operation never enters the queue; overwrite is explicit."
+  (remote-transfer-test-with-registry
+    (let* ((source (expand-file-name "source.txt" directory))
+           (other (expand-file-name "elsewhere/source.txt" directory))
+           (destination (expand-file-name "out" directory))
+           (output (expand-file-name "source.txt" destination)))
+      (make-directory destination)
+      (make-directory (file-name-directory other))
+      (with-temp-file source (insert "new"))
+      (with-temp-file other (insert "other"))
+      (with-temp-file output (insert "old"))
+      (should-error
+       (remote-transfer-plan-file-operation 'copy (list source) destination)
+       :type 'user-error)
+      (should-error
+       (remote-transfer-plan-file-operation 'copy (list source other)
+                                            destination :overwrite t)
+       :type 'user-error)
+      (should-error
+       (remote-transfer-plan-file-operation 'symlink (list source)
+                                            destination :overwrite t)
+       :type 'user-error)
+      (should-error
+       (remote-transfer-plan-file-operation
+        'hardlink (list (file-name-directory other)) destination)
+       :type 'user-error)
+      (should-not remote-transfer-jobs)
+      (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t)))
+        (let ((job (remote-transfer-start-file-operation
+                    (remote-transfer-plan-file-operation
+                     'copy (list source) destination :overwrite 'ask))))
+          (should (eq (remote-transfer-test--wait job) 'done))
+          (should (equal (with-temp-buffer
+                           (insert-file-contents output)
+                           (buffer-string))
+                         "new")))))))
+
+(ert-deftest remote-files-refreshes-expanded-dired-destination ()
+  "A completed target operation updates the subtree shown under its parent."
+  (remote-transfer-test-with-registry
+    (let* ((nested (expand-file-name "nested" directory))
+           (new-file (expand-file-name "new.txt" nested))
+           (buffer nil))
+      (unwind-protect
+          (progn
+            (make-directory nested)
+            (setq buffer (dired-noselect
+                          (remote-canonicalize-file-name directory)))
+            (with-current-buffer buffer
+              (dired-insert-subdir (remote-canonicalize-file-name nested)))
+            (with-temp-file new-file (insert "new"))
+            (remote-files--revert-directory
+             (remote-canonicalize-file-name nested))
+            (with-current-buffer buffer
+              (should (dired-goto-file
+                       (remote-canonicalize-file-name new-file)))))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest remote-transfer-queue-q-returns-to-its-origin ()
+  "Opening the persistent queue twice does not make q fall to scratch."
+  (remote-transfer-test-with-registry
+    (let ((origin (generate-new-buffer " *transfer-origin*")))
+      (unwind-protect
+          (save-window-excursion
+            (delete-other-windows)
+            (switch-to-buffer origin)
+            (let ((queue (remote-transfer-list-buffer)))
+              (dotimes (_ 2)
+                (remote-transfer-list)
+                (should (eq (window-buffer) queue))
+                (with-current-buffer queue
+                  (should (eq (key-binding "q") #'quit-window))
+                  (call-interactively (key-binding "q")))
+                (should (eq (window-buffer) origin)))))
+        (kill-buffer origin)
+        (when-let* ((queue (get-buffer "*Remote Transfers*")))
+          (kill-buffer queue))))))
+
+(ert-deftest remote-transfer-queue-views-are-frame-owned ()
+  "The global job queue redraws two independent frame views."
+  (let* ((real-frame (selected-frame))
+         (other-frame (make-symbol "other-frame"))
+         (other-parameters (make-hash-table :test #'eq))
+         (original-frame-parameter (symbol-function 'frame-parameter))
+         (original-set-frame-parameter (symbol-function 'set-frame-parameter))
+         (original-frame-live-p (symbol-function 'frame-live-p))
+         (remote-transfer-jobs
+          (list (remote-transfer-job--create
+                 :id 901 :name "frame probe" :state 'running :started 1)))
+         (remote-transfer--refresh-timer nil)
+         first second)
+    (cl-letf (((symbol-function 'frame-parameter)
+               (lambda (frame key)
+                 (if (eq frame other-frame)
+                     (gethash key other-parameters)
+                   (funcall original-frame-parameter frame key))))
+              ((symbol-function 'set-frame-parameter)
+               (lambda (frame key value)
+                 (if (eq frame other-frame)
+                     (puthash key value other-parameters)
+                   (funcall original-set-frame-parameter frame key value))))
+              ((symbol-function 'frame-live-p)
+               (lambda (frame)
+                 (if (eq frame other-frame) t
+                   (funcall original-frame-live-p frame)))))
+      (unwind-protect
+          (progn
+            (setq first (remote-transfer-list-buffer real-frame)
+                  second (remote-transfer-list-buffer other-frame))
+            (should-not (eq first second))
+            (should (eq first (remote-transfer-list-buffer real-frame)))
+            (with-current-buffer first
+              (setq-local tabulated-list-sort-key '("Operation" . nil)))
+            (with-current-buffer second
+              (should-not tabulated-list-sort-key))
+            (setf (remote-transfer-job-state (car remote-transfer-jobs)) 'done
+                  (remote-transfer-job-finished (car remote-transfer-jobs)) 2)
+            (cl-letf (((symbol-function 'frame-list)
+                       (lambda () (list real-frame other-frame)))
+                      ((symbol-function 'get-buffer-window)
+                       (lambda (buffer frame)
+                         (and (eq buffer
+                                  (frame-parameter frame
+                                                   'remote-transfer-queue-buffer))
+                              t))))
+              (remote-transfer--refresh))
+            (with-current-buffer first
+              (should (string-match-p "done" (buffer-string))))
+            (with-current-buffer second
+              (should (string-match-p "done" (buffer-string))))
+            (cl-letf (((symbol-function 'frame-list)
+                       (lambda () (list real-frame other-frame)))
+                      ((symbol-function 'get-buffer-window)
+                       (lambda (buffer frame)
+                         (and (eq buffer
+                                  (frame-parameter frame
+                                                   'remote-transfer-queue-buffer))
+                              t))))
+              (with-current-buffer first
+                (remote-transfer-list-clear)))
+            (should-not remote-transfer-jobs)
+            (with-current-buffer first
+              (should-not tabulated-list-entries))
+            (with-current-buffer second
+              (should-not tabulated-list-entries))
+            (remote-transfer--frame-deleted other-frame)
+            (should-not (buffer-live-p second))
+            (should (buffer-live-p first)))
+        (when (buffer-live-p second) (kill-buffer second))
+        (when (buffer-live-p first) (kill-buffer first))))))
+
+(ert-deftest remote-transfer-visible-log-survives-trim-and-clear-returns ()
+  "Automatic history trim leaves a visible log; clear restores its window."
+  (remote-transfer-test-with-registry
+    (let* ((log (generate-new-buffer " *transfer-log*"))
+           (queue (remote-transfer-list-buffer))
+           (job (remote-transfer-job--create
+                 :id 901 :name "finished" :state 'done
+                 :started 1 :finished 2 :log-buffer log))
+           (remote-transfer-history-limit 0)
+           (remote-transfer-jobs (list job)))
+      (unwind-protect
+          (save-window-excursion
+            (delete-other-windows)
+            (with-current-buffer log (remote-transfer-log-mode))
+            (switch-to-buffer queue)
+            (switch-to-buffer log)
+            (with-current-buffer log
+              (should (eq (key-binding "q") #'quit-window))
+              (call-interactively (key-binding "q")))
+            (should (eq (window-buffer) queue))
+            (switch-to-buffer log)
+            (remote-transfer--trim-history)
+            (should (equal remote-transfer-jobs (list job)))
+            (should (buffer-live-p log))
+            (with-current-buffer queue
+              (remote-transfer-list-clear))
+            (should-not (buffer-live-p log))
+            (should-not remote-transfer-jobs)
+            (should (eq (window-buffer) queue)))
+        (when (buffer-live-p log) (kill-buffer log))
+        (when (buffer-live-p queue) (kill-buffer queue))))))
+
 (ert-deftest remote-transfer-crosses-a-client-shell-both-ways ()
   "Upload and download through a backend that shares no filesystem.
 The remote shell is a stand-in that, like ssh, hands the far command to a
@@ -613,6 +1147,158 @@ rsync really speaks its protocol over the command the backend handed out."
             (should-not (file-exists-p (expand-file-name "extra.txt" far))))
         (set-window-configuration before)))))
 
+(ert-deftest remote-files-pick-keeps-popup-when-action-cannot-start ()
+  "A failed transfer leaves the chosen folder open for correction and retry."
+  (remote-transfer-test-with-registry
+    (save-window-excursion
+      (let ((origin (selected-window))
+            popup folder-buffer chosen)
+        (unwind-protect
+            (progn
+              (remote-files--pick
+               directory 'directory "Choose destination"
+               (lambda (_destination) (user-error "route unavailable")))
+              (setq popup (selected-window)
+                    folder-buffer (window-buffer popup))
+              (should (remote-files--pick-state popup))
+              (should-error (remote-files-pick-confirm) :type 'user-error)
+              (should (window-live-p popup))
+              (should (eq (window-buffer popup) folder-buffer))
+              (should (remote-files--pick-state popup))
+              (set-window-parameter
+               popup 'remote-files-pick
+               (plist-put (remote-files--pick-state popup) :callback
+                          (lambda (destination)
+                            (setq chosen destination))))
+              (remote-files-pick-confirm)
+              (should chosen)
+              (should (eq (selected-window) origin))
+              (should-not (remote-files--pick-state popup)))
+          (when (and (window-live-p popup)
+                     (remote-files--pick-state popup))
+            (remote-files--pick-close popup)))))))
+
+(ert-deftest remote-files-apply-keeps-preview-when-task-cannot-start ()
+  "A failed sync launch must leave the preview's apply action available."
+  (with-temp-buffer
+    (let (quit-called applied)
+      (setq-local remote-files--apply
+                  (lambda () (user-error "rsync unavailable")))
+      (cl-letf (((symbol-function 'quit-window)
+                 (lambda (&rest _) (setq quit-called t))))
+        (should-error (remote-files-apply) :type 'user-error)
+        (should remote-files--apply)
+        (should-not quit-called)
+        (setq-local remote-files--apply
+                    (lambda () (setq applied t)))
+        (remote-files-apply)
+        (should applied)
+        (should quit-called)
+        (should-not remote-files--apply)))))
+
+(ert-deftest remote-transfer-completes-once-after-a-late-relay-callback ()
+  "A relay callback after transport loss cannot rewrite the task outcome."
+  (let* ((log (generate-new-buffer " *remote-transfer-once*"))
+         (calls 0)
+         (job (remote-transfer-job--create
+               :id 700 :name "late callback" :state 'running
+               :started (float-time) :log-buffer log
+               :callback (lambda (_job) (cl-incf calls)))))
+    (unwind-protect
+        (progn
+          (remote-transfer--complete job 1 'failed)
+          (remote-transfer--complete job 0 'done)
+          (should (eq (remote-transfer-job-state job) 'failed))
+          (should (= (remote-transfer-job-exit-status job) 1))
+          (should (= calls 1)))
+      (when (buffer-live-p log) (kill-buffer log)))))
+
+(ert-deftest remote-transfer-live-target-cancel ()
+  "Cancel a real target process through the transfer queue's disconnect hook."
+  (let ((target (getenv "REMOTE_TRANSFER_E2E_TARGET")))
+    (skip-unless (and target (not (string-empty-p target))))
+    (remote-config-load
+     (expand-file-name "etc/remote.json" user-emacs-directory))
+    (let* ((job (remote-transfer--launch
+                 (remote-transfer-job--create
+                  :id (cl-incf remote-transfer--next-id)
+                  :name "live cancellation probe"
+                  :kind 'copy :execution 'target
+                  :destination (format "/fs:%s:/tmp/" target)
+                  :target-ids (list target)
+                  :command '("sleep" "30"))))
+           (process (remote-transfer-job-process job)))
+      (should (process-live-p process))
+      (remote-transfer--target-disconnected "unrelated" 'target-disconnect)
+      (should (eq (remote-transfer-job-state job) 'running))
+      (remote-transfer--target-disconnected target 'target-disconnect)
+      (should (eq (remote-transfer-job-state job) 'cancelled))
+      (with-timeout (10 (error "Target process survived cancellation"))
+        (while (or (process-live-p process)
+                   (remote-transfer-job-process job))
+          (accept-process-output nil 0.05)))
+      (should-not (remote-transfer-job-kill-timer job)))))
+
+(ert-deftest remote-transfer-live-transport-death ()
+  "A lost SSH transport finishes its queued target process without hanging."
+  (let ((target (getenv "REMOTE_TRANSFER_E2E_TARGET")))
+    (skip-unless (and target (not (string-empty-p target))))
+    (remote-config-load
+     (expand-file-name "etc/remote.json" user-emacs-directory))
+    (let* ((job (remote-transfer--launch
+                 (remote-transfer-job--create
+                  :id (cl-incf remote-transfer--next-id)
+                  :name "live transport loss probe"
+                  :kind 'copy :execution 'target
+                  :destination (format "/fs:%s:/tmp/" target)
+                  :target-ids (list target)
+                  :command '("sleep" "30"))))
+           (relay (remote-transfer-job-process job))
+           (route (process-get relay 'remote-route)))
+      (unwind-protect
+          (progn
+            (unless (and route
+                         (member (remote-route-link-plugin-id route)
+                                 '("tramp" "tramp-rpc")))
+              (ert-skip
+               (format "Exec route uses %S"
+                       (and route (remote-route-link-plugin-id route)))))
+            (let* ((physical
+                    (remote-project-file-name
+                     (remote-transfer-job-destination job) route))
+                   (vector (tramp-dissect-file-name physical))
+                   (transport
+                    (if (equal (remote-route-link-plugin-id route)
+                               "tramp-rpc")
+                        (plist-get (tramp-rpc--get-connection vector)
+                                   :process)
+                      (tramp-get-connection-process vector))))
+              (should (process-live-p relay))
+              (should (process-live-p transport))
+              (should (eq (remote-transfer-job-transport-process job)
+                          transport))
+              ;; Only the connection owned by this batch Emacs is removed.
+              (delete-process transport)
+              (with-timeout
+                  (10 (error "Transfer survived transport loss: state=%S relay=%S transport=%S"
+                             (remote-transfer-job-state job)
+                             (process-status relay)
+                             (process-status transport)))
+                (while (or (eq (remote-transfer-job-state job) 'running)
+                           (remote-transfer-job-process job))
+                  (accept-process-output nil 0.05)))
+              (should (eq (remote-transfer-job-state job) 'failed))
+              (should-not (remote-transfer-job-exit-status job))
+              (should (equal (remote-transfer--state-text job)
+                             "failed (status unknown)"))
+              (should-not (process-live-p relay))
+              (should-not (remote-transfer-job-kill-timer job))
+              (with-current-buffer (remote-transfer-job-log-buffer job)
+                (should (string-match-p "remote command outcome is unknown"
+                                        (buffer-string))))
+              (should-not (remote-transfer-jobs-for-target target t))))
+        (remote-transfer-cancel job)))))
+
 (ert-deftest remote-transfer-live-round-trip ()
   "Upload, download and compare against a real SSH target."
   (let ((target (getenv "REMOTE_TRANSFER_E2E_TARGET")))
@@ -624,7 +1310,8 @@ rsync really speaks its protocol over the command the backend handed out."
            (back (file-name-as-directory
                   (make-temp-file "remote-transfer-back-" t)))
            (name (format "emacs-transfer-%d" (emacs-pid)))
-           (remote (format "/fs:%s:/tmp/%s/" target name)))
+           (remote (format "/fs:%s:/tmp/%s/" target name))
+           dired-buffer)
       (unwind-protect
           (progn
             (with-temp-file (expand-file-name "payload.bin" local)
@@ -639,7 +1326,58 @@ rsync really speaks its protocol over the command the backend handed out."
             (should (= (file-attribute-size
                         (file-attributes
                          (expand-file-name "payload.bin" back)))
-                       400000)))
+                       400000))
+            ;; Use the same marked-file and directory-at-point entry as
+            ;; Dirvish.  The client cannot read these target paths directly,
+            ;; so every operation must become a target-side queue job.
+            (let ((source (expand-file-name "payload.bin" remote)))
+              (dolist (method '(copy symlink relative-symlink hardlink move))
+                (make-directory
+                 (expand-file-name (format "out-%s" method) remote)))
+              (setq dired-buffer (dired-noselect remote))
+              (dolist (method '(copy symlink relative-symlink hardlink move))
+                (let* ((destination
+                        (expand-file-name (format "out-%s" method) remote))
+                       (output (expand-file-name "payload.bin" destination))
+                       (previous-job (car remote-transfer-jobs))
+                       job)
+                  ;; Preflight caches this absence.  Completion must evict it.
+                  (should-not (file-exists-p output))
+                  (with-current-buffer dired-buffer
+                    (should (dired-goto-file source))
+                    (dired-mark 1)
+                    (should (dired-goto-file destination))
+                    (funcall
+                     (pcase method
+                       ('copy #'my/dirvish-copy-here)
+                       ('move #'my/dirvish-move-here)
+                       ('symlink #'my/dirvish-symlink)
+                       ('relative-symlink #'my/dirvish-relative-symlink)
+                       ('hardlink #'my/dirvish-hardlink))))
+                  (setq job (car remote-transfer-jobs))
+                  (should-not (eq job previous-job))
+                  (should (eq (remote-transfer-job-execution job) 'target))
+                  (should (equal (remote-transfer-job-target-ids job)
+                                 (list target)))
+                  (should (eq (remote-transfer-test--wait job) 'done))
+                  (should (file-exists-p output))
+                  (pcase method
+                    ('copy
+                     (should (= (file-attribute-size
+                                 (file-attributes output)) 400000)))
+                    ('move (should-not (file-exists-p source)))
+                    ((or 'symlink 'relative-symlink)
+                     (should (file-symlink-p output))
+                     (should (equal (file-truename output)
+                                    (file-truename source)))
+                     (when (eq method 'relative-symlink)
+                       (should-not
+                        (file-name-absolute-p (file-symlink-p output)))))
+                    ('hardlink
+                     (should (= (file-attribute-link-number
+                                 (file-attributes source)) 2))))))))
+        (when (buffer-live-p dired-buffer)
+          (kill-buffer dired-buffer))
         (ignore-errors
           (let* ((shell (plist-get (remote-transfer-endpoint remote) :shell))
                  (default-directory temporary-file-directory))

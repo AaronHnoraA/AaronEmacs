@@ -24,6 +24,16 @@
 
 (declare-function remote-process-file "remote-process"
                   (program &optional infile destination display &rest args))
+(declare-function evil-set-initial-state "evil-core" (mode state))
+
+(defvar-local remote-doctor--owner-frame nil
+  "Frame that owns this Remote Doctor report.")
+
+(defvar-local remote-doctor--target-id nil
+  "Target ID shown by this Remote Doctor report.")
+
+(defvar-local remote-doctor--probe-p nil
+  "Whether refreshing this report should repeat its routed probe.")
 
 (defvar remote-doctor-check-functions nil
   "Registered consumer diagnostic functions.
@@ -233,14 +243,25 @@ using the same plist format as `remote-doctor--check'.")
   (let (checks)
     (dolist (function remote-doctor-check-functions)
       (condition-case error
-          (let ((value (funcall function target probe)))
-            (setq checks
-                  (append
-                   checks
-                   (cond
-                    ((null value) nil)
-                    ((keywordp (car-safe value)) (list value))
-                    (t value)))))
+          (let* ((value (funcall function target probe))
+                 (returned
+                  (cond
+                   ((null value) nil)
+                   ((keywordp (car-safe value)) (list value))
+                   (t value))))
+            (unless
+                (and (listp returned)
+                     (cl-every
+                      (lambda (check)
+                        (and (listp check)
+                             (let ((name (plist-get check :name)))
+                               (or (and name (symbolp name))
+                                   (stringp name)))
+                             (memq (plist-get check :status)
+                                   '(ok warning error))))
+                      returned))
+              (error "Invalid Remote Doctor check from %S" function))
+            (setq checks (append checks returned)))
         (error
          (push
           (remote-doctor--check
@@ -427,9 +448,9 @@ using the same plist format as `remote-doctor--check'.")
                       (string-trim (buffer-string))))
               (remote-doctor--check
                'probe
-               (if (zerop status) 'ok 'error)
+               (if (and (integerp status) (zerop status)) 'ok 'error)
                (format "uname exit=%s output=%s" status output)
-               (unless (zerop status)
+               (unless (and (integerp status) (zerop status))
                  "Inspect the route log and target shell environment")))
           (error
            (remote-doctor--check
@@ -522,6 +543,73 @@ When PROBE is non-nil, establish a session and execute `uname -s'."
     (when-let* ((remedy (plist-get check :remedy)))
       (insert (format "         → %s\n" remedy)))))
 
+(defvar-keymap remote-doctor-mode-map
+  :parent special-mode-map
+  :doc "Keymap for the Remote Doctor report."
+  "q" #'quit-window
+  "g" #'remote-doctor-refresh)
+
+(define-derived-mode remote-doctor-mode special-mode "Remote Doctor"
+  "Read-only Remote report.  Refresh with g and return with q."
+  (setq-local quit-window-kill-buffer t)
+  (add-hook 'kill-buffer-hook #'remote-doctor--view-killed nil t))
+
+(with-eval-after-load 'evil
+  (evil-set-initial-state 'remote-doctor-mode 'emacs))
+
+(defun remote-doctor--view-killed ()
+  "Clear this report's frame reference when the buffer is killed."
+  (when (and (frame-live-p remote-doctor--owner-frame)
+             (eq (frame-parameter remote-doctor--owner-frame
+                                  'remote-doctor-view-buffer)
+                 (current-buffer)))
+    (set-frame-parameter remote-doctor--owner-frame
+                         'remote-doctor-view-buffer nil)))
+
+(defun remote-doctor--frame-deleted (frame)
+  "Release FRAME's report without changing Remote resources."
+  (when-let* ((buffer (frame-parameter frame 'remote-doctor-view-buffer)))
+    (set-frame-parameter frame 'remote-doctor-view-buffer nil)
+    (when (buffer-live-p buffer)
+      (kill-buffer buffer))))
+
+(add-hook 'delete-frame-functions #'remote-doctor--frame-deleted)
+
+(defun remote-doctor--buffer (&optional frame)
+  "Return FRAME's Remote Doctor buffer, creating it when needed."
+  (let* ((frame (or frame (selected-frame)))
+         (existing (frame-parameter frame 'remote-doctor-view-buffer))
+         (created (not (buffer-live-p existing)))
+         (buffer (if created
+                     (generate-new-buffer "*Remote Doctor*")
+                   existing)))
+    (when created
+      (set-frame-parameter frame 'remote-doctor-view-buffer buffer))
+    (condition-case error
+        (with-current-buffer buffer
+          (unless (derived-mode-p 'remote-doctor-mode)
+            (remote-doctor-mode))
+          (setq-local remote-doctor--owner-frame frame))
+      (error
+       (when created
+         (when (buffer-live-p buffer)
+           (kill-buffer buffer))
+         (when (eq (frame-parameter frame 'remote-doctor-view-buffer)
+                   buffer)
+           (set-frame-parameter frame 'remote-doctor-view-buffer nil)))
+       (signal (car error) (cdr error))))
+    buffer))
+
+(defun remote-doctor-refresh (&optional probe)
+  "Refresh the current Remote Doctor report.
+With prefix argument PROBE, run a routed probe even if the last report did not."
+  (interactive "P")
+  (unless (and (derived-mode-p 'remote-doctor-mode)
+               remote-doctor--target-id)
+    (user-error "No Remote Doctor report to refresh"))
+  (remote-doctor remote-doctor--target-id
+                 (or probe remote-doctor--probe-p)))
+
 (defun remote-doctor (&optional target probe)
   "Display diagnostics for TARGET.
 With a prefix argument PROBE, also connect and run a target-side probe."
@@ -531,13 +619,20 @@ With a prefix argument PROBE, also connect and run a target-side probe."
       (remote-read-target "Doctor target: "))
     current-prefix-arg))
   (let* ((report (remote-doctor-report target probe))
-         (buffer (get-buffer-create "*Remote Doctor*")))
+         (contents
+          (with-temp-buffer
+            (remote-doctor--insert-report report)
+            (buffer-string)))
+         (buffer (remote-doctor--buffer)))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (remote-doctor--insert-report report)
-        (special-mode)))
-    (pop-to-buffer buffer)
+        (insert contents)
+        (goto-char (point-min))
+        (set-buffer-modified-p nil))
+      (setq-local remote-doctor--target-id (plist-get report :target)
+                  remote-doctor--probe-p (and probe t)))
+    (pop-to-buffer buffer '(nil (reusable-frames . nil)))
     report))
 
 (provide 'remote-doctor)

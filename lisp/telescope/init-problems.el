@@ -129,7 +129,7 @@ whichever files have no live buffer."
                       (stringp file)
                       (not (get-file-buffer file))
                       (string-prefix-p
-                       canonical-root
+                       (file-name-as-directory canonical-root)
                        (or (ignore-errors (remote-canonicalize-file-name file))
                            file)))
              (let ((locus (or (ignore-errors (remote-client-file-name file))

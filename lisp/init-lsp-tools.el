@@ -17,6 +17,8 @@
 (require 'subr-x)
 (require 'transient)
 
+(declare-function my/open-client-document "init-open" (file &optional view))
+
 (defconst my/language-server-tools--module-file
   (or load-file-name buffer-file-name)
   "Absolute path of `init-lsp-tools.el' at load time.")
@@ -83,7 +85,7 @@
 (declare-function my/problems-project "init-problems")
 (declare-function my/diagnostics-buffer-ui "init-diagnostics-ui")
 (declare-function my/diagnostics-project-ui "init-diagnostics-ui")
-(declare-function my/diagnostics-dispatch "init-diagnostics-extra")
+(declare-function diagnostics-menu "init-diagnostics-extra")
 (declare-function lsp-inlay-hints-mode "lsp-mode" (&optional arg))
 
 (define-derived-mode my/language-server-manager-mode aaron-ui-board-mode "Lang-Server-Hub"
@@ -407,7 +409,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
       (my/language-server-manager--menu-item
        "Doctor" 'my/language-server-doctor t)
       (my/language-server-manager--menu-item
-       "Dispatch" 'my/language-server-dispatch t)
+       "Dispatch" 'language-server-menu t)
       (my/language-server-manager--menu-item
        "Docs" 'my/language-server-manager-open-docs t)))))
 
@@ -427,7 +429,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
       (my/language-server-manager--menu-item
        "Doctor" 'my/language-server-doctor t)
       (my/language-server-manager--menu-item
-       "Dispatch" 'my/language-server-dispatch t)
+       "Dispatch" 'language-server-menu t)
       (my/language-server-manager--menu-item
        "Docs" 'my/language-server-manager-open-docs t))
      (list
@@ -485,7 +487,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 (defun my/language-server-manager-open-docs ()
   "Open the dedicated language-server workflow document."
   (interactive)
-  (find-file my/language-server-doc-file))
+  (my/open-client-document my/language-server-doc-file))
 
 (defun my/language-server--executable-lookup (name)
   "Resolve NAME in the associated source buffer's tooling environment.
@@ -724,14 +726,14 @@ reporting on runs on that buffer's target, not on the client machine."
   (my/language-server--call-in-source-buffer #'my/diagnostics-buffer-ui))
 
 (defun my/language-server-manager-diagnostics-project-ui ()
-  "Open the project diagnostics UI for the source buffer."
+  "Open Flymake's project diagnostics list for the source buffer."
   (interactive)
   (my/language-server--call-in-source-buffer #'my/diagnostics-project-ui))
 
 (defun my/language-server-manager-diagnostics-menu ()
   "Open the diagnostics dispatch menu for the source buffer."
   (interactive)
-  (my/language-server--call-in-source-buffer #'my/diagnostics-dispatch))
+  (my/language-server--call-in-source-buffer #'diagnostics-menu))
 
 (defun my/language-server-manager-insert-maintenance-section ()
   "Insert the top-level maintenance section."
@@ -747,7 +749,7 @@ reporting on runs on that buffer's target, not on the client machine."
   (insert "   ")
   (aaron-ui-board-insert-actions
    '((:label "Doctor"    :command my/language-server-doctor    :help "Doctor report")
-     (:label "Dispatch"  :command my/language-server-dispatch  :help "Transient menu")
+     (:label "Dispatch"  :command language-server-menu  :help "Transient menu")
      (:label "Docs"      :command my/language-server-manager-open-docs :help "Workflow docs")
      (:label "Problems"  :command my/language-server-manager-problems-project :help "Project problems")))
   (insert "\n\n"))
@@ -931,7 +933,7 @@ reporting on runs on that buffer's target, not on the client machine."
         "Language Server Hub"
         :icon 'server
         :actions '((:label "Doctor"   :command my/language-server-doctor   :help "Doctor report")
-                   (:label "Dispatch" :command my/language-server-dispatch :help "Transient menu" :primary t)
+                   (:label "Dispatch" :command language-server-menu :help "Transient menu" :primary t)
                    (:label "Docs"     :command my/language-server-manager-open-docs :help "Workflow docs")))
        (my/language-server-manager-insert-maintenance-section)
        (run-hooks 'my/language-server-manager-extra-section-functions)
@@ -1071,7 +1073,7 @@ reporting on runs on that buffer's target, not on the client machine."
         "Language Server Doctor"
         :icon 'diagnostics
         :actions '((:label "Hub"      :command my/language-server-manager  :help "Open Hub"  :primary t)
-                   (:label "Dispatch" :command my/language-server-dispatch :help "Transient menu")))
+                   (:label "Dispatch" :command language-server-menu :help "Transient menu")))
        (my/language-server--doctor-insert-libraries)
        (my/language-server--doctor-insert-executables)
        (my/language-server--doctor-insert-current-buffer source)
@@ -1109,7 +1111,7 @@ reporting on runs on that buffer's target, not on the client machine."
         (local-set-key (kbd "M") #'my/language-server-set-read-process-output-max)
         (local-set-key (kbd "E") #'my/language-server-set-log-max)
         (local-set-key (kbd "O") #'my/language-server-manager-open-docs)
-        (local-set-key (kbd "?") #'my/language-server-dispatch)
+        (local-set-key (kbd "?") #'language-server-menu)
         (local-set-key [mouse-3] #'my/language-server-manager-popup-menu)
         (my/language-server-doctor-refresh)))
     (pop-to-buffer buffer)))
@@ -1143,7 +1145,7 @@ reporting on runs on that buffer's target, not on the client machine."
   (local-set-key (kbd "M") #'my/language-server-set-read-process-output-max)
   (local-set-key (kbd "E") #'my/language-server-set-log-max)
   (local-set-key (kbd "O") #'my/language-server-manager-open-docs)
-  (local-set-key (kbd "?") #'my/language-server-dispatch)
+  (local-set-key (kbd "?") #'language-server-menu)
   (local-set-key (kbd "RET") #'my/language-server-manager-context-action)
   (local-set-key [mouse-3] #'my/language-server-manager-popup-menu))
 
@@ -1165,7 +1167,7 @@ reporting on runs on that buffer's target, not on the client machine."
         (my/language-server-manager-refresh)))
     (pop-to-buffer buffer)))
 
-(transient-define-prefix my/language-server-dispatch ()
+(transient-define-prefix language-server-menu ()
   "Language-server command surface."
   [["Views"
     ("h" "hub" my/language-server-manager)
@@ -1198,7 +1200,7 @@ reporting on runs on that buffer's target, not on the client machine."
     ("p" "buffer problems" my/language-server-manager-problems-buffer)
     ("P" "project problems" my/language-server-manager-problems-project)
     ("d" "buffer diagnostics ui" my/language-server-manager-diagnostics-buffer-ui)
-    ("T" "project diagnostics ui" my/language-server-manager-diagnostics-project-ui)
+    ("T" "Flymake project list" my/language-server-manager-diagnostics-project-ui)
     ("m" "diagnostics menu" my/language-server-manager-diagnostics-menu)
     ("x" "message handler errors" my/language-server-message-errors)]])
 
@@ -1259,10 +1261,8 @@ These are the \"Error processing message\" lines in *Messages*."
       (pop-to-buffer buffer)
     (message "No language-server message handler has failed")))
 
-(defalias 'my/language-server-ops-dispatch #'my/language-server-dispatch)
-
 (my/leader!
-  "c s" '(:def my/language-server-dispatch :which-key "language server"))
+  "c s" '(:def language-server-menu :which-key "language server"))
 
 (provide 'init-lsp-tools)
 ;;; init-lsp-tools.el ends here

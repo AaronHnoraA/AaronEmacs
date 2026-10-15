@@ -44,7 +44,7 @@
 (declare-function my/git-diff-file-with-head "init-git-diff" ())
 (declare-function my/git-diff-file-with-revision "init-git-diff" (revision))
 (declare-function my/git-tree "init-git-tree" ())
-(declare-function my/smerge-dispatch "init-smerge" ())
+(declare-function merge-conflict-menu "init-smerge" ())
 
 (defvar magit-blame-mode)
 (defvar vc-dir-process-output-limit)
@@ -171,14 +171,14 @@ a Git repository."
       (magit-unstage-files (list relative-path)))
     (message "Unstaged %s" relative-path)))
 
-(transient-define-prefix my/git-dispatch ()
+(transient-define-prefix git-menu ()
   "Git workbench for repository and current-file operations."
   [["Repository"
     ("g" "status" magit-status :transient transient--do-exit)
     ("w" "git board" my/git-board :transient transient--do-exit)
     ("t" "git tree" my/git-tree :transient transient--do-exit)
     ("." "magit dispatch" magit-dispatch :transient transient--do-exit)
-    ("m" "merge conflict" my/smerge-dispatch :transient transient--do-exit)]
+    ("m" "merge conflict" merge-conflict-menu :transient transient--do-exit)]
    ["Current file"
     ("d" "diff vs revision" my/git-diff-file-with-revision :transient transient--do-exit)
     ("=" "diff vs HEAD" my/git-diff-file-with-head :transient transient--do-exit)
@@ -398,27 +398,6 @@ Unknown revisions and changed upstream call shapes use FUNCTION unchanged."
 (add-hook 'server-after-make-frame-hook #'my/git-apply-ui)
 (add-hook 'after-load-theme-hook #'my/git-apply-ui)
 
-;; Visual diff interface
-(use-package ediff
-  :ensure nil
-  ;; Restore window config after quitting ediff
-  :hook ((ediff-before-setup . ediff-save-window-conf)
-         (ediff-quit         . ediff-restore-window-conf))
-  :config
-  (defvar local-ediff-saved-window-conf nil)
-
-  (defun ediff-save-window-conf ()
-    (setq local-ediff-saved-window-conf (current-window-configuration)))
-
-  (defun ediff-restore-window-conf ()
-    (when (window-configuration-p local-ediff-saved-window-conf)
-      (set-window-configuration local-ediff-saved-window-conf)))
-  :custom
-  (ediff-highlight-all-diffs t)
-  (ediff-window-setup-function 'ediff-setup-windows-plain)
-  (ediff-split-window-function 'split-window-horizontally)
-  (ediff-merge-split-window-function 'split-window-horizontally))
-
 ;; Setup gitignore mode
 (use-package conf-mode
   :ensure nil
@@ -437,7 +416,7 @@ Unknown revisions and changed upstream call shapes use FUNCTION unchanged."
 
 (my/leader!
   "g"   '(:ignore t :which-key "git")
-  "g ." '(:def my/git-dispatch :which-key "git hub")
+  "g ." '(:def git-menu :which-key "git hub")
   "g g" '(:def magit-status :which-key "status")
   "g w" '(:def my/git-board :which-key "git board")
   "g t" '(:def my/git-tree :which-key "git tree")

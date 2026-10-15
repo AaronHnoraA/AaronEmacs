@@ -33,10 +33,10 @@
 
 (use-package transient
   :ensure nil
-  :defer t
+  :demand t
   :config
-  (transient-define-prefix my/code-actions-dispatch ()
-    "Unified code action menu."
+  (transient-define-prefix code-actions-menu ()
+    "Open code editing, inspection, and build actions."
     [["Edit"
       ("a" "code actions" my/language-server-code-actions)
       ("r" "rename symbol" my/language-server-rename)
@@ -54,7 +54,7 @@
       ("B" "rerun build" my/task-build-rerun)]]))
 
 (my/leader!
-  "c ." '(:def my/code-actions-dispatch :which-key "code menu"))
+  "c ." '(:def code-actions-menu :which-key "code menu"))
 
 (provide 'init-code-actions)
 ;;; init-code-actions.el ends here

@@ -92,12 +92,13 @@ targets survives a reload and a failing source leaves the live ones alone.")
           (push id changed))))
     changed))
 
-(defun remote-config--invalidate-pipelines (pipeline-ids)
-  "Close sessions and orphan runtimes belonging to PIPELINE-IDS."
+(defun remote-config--invalidate-pipelines (pipeline-ids &optional reason)
+  "Close sessions and orphan runtimes of PIPELINE-IDS for REASON."
+  (setq reason (or reason 'config-reload))
   (dolist (pipeline-id pipeline-ids)
     (when (fboundp 'remote-connection-invalidate-link)
       (remote-connection-invalidate-link
-       pipeline-id t 'config-reload))
+       pipeline-id t reason))
     ;; A runtime normally belongs to a session.  Also close any runtime left
     ;; behind by an interrupted backend startup.
     (when (boundp 'remote-pipeline-runtime-pool)
@@ -111,7 +112,16 @@ targets survives a reload and a failing source leaves the live ones alone.")
              (push runtime runtimes)))
          remote-pipeline-runtime-pool)
         (dolist (runtime runtimes)
-          (remote-pipeline-close runtime 'config-reload))))))
+          (remote-pipeline-close runtime reason))))))
+
+(defun remote-config-invalidate-target-sessions (target-id &optional reason)
+  "Close TARGET-ID's pooled sessions after a credential change.
+Editing buffers remain in place.  A later operation reconnects using the
+current configuration.  REASON defaults to `credentials-changed'."
+  (remote-config--invalidate-pipelines
+   (mapcar #'remote-pipeline-id
+           (remote-pipelines-for-target target-id))
+   (or reason 'credentials-changed)))
 
 (defun remote-config--string-list (value)
   "Return VALUE as a list of strings."

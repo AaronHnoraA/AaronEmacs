@@ -60,7 +60,7 @@
 (declare-function dape-until "dape" (conn))
 (declare-function dape-watch-dwim "dape" (expression &optional remove-only-p add-only-p display-p))
 (declare-function dape-breakpoint-global-mode "dape" (&optional arg))
-(declare-function my/debug-profile-dispatch "init-debug-profile" ())
+(declare-function debug-profile-menu "init-debug-profile" ())
 (declare-function my/debug-profile-rerun "init-debug-profile" ())
 
 (defvar dape-adapter-dir)
@@ -459,12 +459,12 @@ frames, so direct clicks there toggle breakpoints."
         (special-mode)))
     (pop-to-buffer buffer)))
 
-(transient-define-prefix my/debug-dispatch ()
+(transient-define-prefix debug-menu ()
   "Debug workflow."
   [["Session"
     ("d" "start / choose config" dape)
     ("y" "attach Python" my/debug-python-attach)
-    ("p" "profile menu" my/debug-profile-dispatch)
+    ("p" "profile menu" debug-profile-menu)
     ("r" "rerun profile" my/debug-profile-rerun)
     ("R" "restart session" dape-restart)
     ("q" "quit" dape-quit)
@@ -564,7 +564,7 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
         ("bd" dape-breakpoint-remove-at-point)
         ("bc" dape-breakpoint-expression)
         ("bh" dape-breakpoint-hits)
-        ("dd" my/debug-dispatch)
+        ("dd" debug-menu)
         ("dr" dape-restart)
         ("dR" dape-repl)
         ("dq" dape-quit :color blue)
@@ -589,7 +589,7 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
   (dape-toolbar-mode 1))
 
 (my/leader!
-  "c j" '(:def my/debug-dispatch :which-key "debug")
+  "c j" '(:def debug-menu :which-key "debug")
   "c J" '(:def dape :which-key "debug start"))
 
 (provide 'init-debug)
