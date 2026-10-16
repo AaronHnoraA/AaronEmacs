@@ -173,7 +173,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - Python 语言服务器
   这套配置走 `eglot`，你需要自己装对应 server
 - `languagetool`（Homebrew）
-  文本 buffer 与 Noema 默认在输入停顿后仅检查带上下文的可视区域；结果进入统一 Flymake 诊断面，但不显示抢眼的行尾文案。光标停在问题上或鼠标悬停时会在 echo area 简要说明原因，`M-n` / `M-p` 可跳转，右键菜单提供替换/跳过/忽略规则/加入文件词典；左键保持普通编辑行为。`C-c i g` / `Cmd-Shift-C` 手动检查，NAS 失败时仅手动检查回退本地 CLI；`C-u C-c i g` 检查整个 Emacs buffer，`C-c i a` 修正当前位置，`C-c i A` 从当前问题中选择，`C-c i x` 清除到下一次编辑。Noema 的 `Tools > LanguageTool` 可管理 NAS、语言、检查级别、性能档位、超时、实时检测和手动 CLI fallback
+  文本 buffer 与 Noema 默认在输入停顿后仅检查带上下文的可视区域，并按段落缓存结果：编辑后只重发被改动的段落。问题按 LanguageTool 的类别着色——拼写红、语法橙、标点黄、用词紫、排版青、风格蓝——Emacs 与 Noema 一致。Emacs 中结果进入统一 Flymake 诊断面（不显示行尾文案），光标停留或悬停时 echo area 显示「类别: 说明 → 建议」，`M-n` / `M-p` 跳转，手动检查按类别汇总数量；右键菜单提供替换/忽略此处/加入词典/关闭规则。Noema 中单击下划线打开卡片：类别、说明、带替换预览的原句、建议按钮（键盘打开时数字键选建议），以及忽略/加入词典/关闭规则/规则说明；顶部状态栏的彩色计数徽章按类别显示问题数，点击跳到下一个问题（Emacs `my/noema-prose-next` / `my/noema-prose-previous`）。“忽略”按规则与所在行上下文记忆，别处编辑不会让它重现。加入的词写入共享的 `etc/prose-accepted-words.txt`，关闭的规则写入共享的 `etc/prose-disabled-rules.txt`，两端都读这两个文件；`M-x my/languagetool-enable-rule` 重新启用规则。`C-c i g` / `Cmd-Shift-C` 手动检查，NAS 失败时仅手动检查回退本地 CLI；`C-u C-c i g` 检查整个 Emacs buffer，`C-c i a` 修正当前位置，`C-c i A` 从当前问题中选择，`C-c i x` 清除到下一次编辑。Noema 的 `Tools > LanguageTool` 可管理 NAS、语言、检查级别、性能档位、超时、实时检测和手动 CLI fallback
 - `vscode-html-language-server`
   用于 HTML / Vue HTML
 

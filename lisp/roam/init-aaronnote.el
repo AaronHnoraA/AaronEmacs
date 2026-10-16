@@ -478,7 +478,9 @@ the backend.  The backend is chosen here, not per export."
                  (undo . my/noema-undo)
                  (undo-redo . my/noema-redo)
                  (revert-buffer . my/noema-refresh-file)
-                 (revert-buffer-quick . my/noema-refresh-file)))
+                 (revert-buffer-quick . my/noema-refresh-file)
+                 (flymake-goto-next-error . my/noema-prose-next)
+                 (flymake-goto-prev-error . my/noema-prose-previous)))
   (define-key my/noema-keys-mode-map (vector 'remap command) pane-command))
 
 (defvar my/treemacs-tag-visit-functions)
@@ -929,6 +931,9 @@ reconnect without a reload and without losing their in-memory editor state."
                         "http://10.243.90.222:8765"))
             (format "AARONNOTE_PROSE_WORDS=%s"
                     (expand-file-name "etc/prose-accepted-words.txt"
+                                      user-emacs-directory))
+            (format "AARONNOTE_PROSE_DISABLED_RULES=%s"
+                    (expand-file-name "etc/prose-disabled-rules.txt"
                                       user-emacs-directory))
             (format "AARONNOTE_PUBLISH_JS_DIR=%s"
                     (expand-file-name "js" my/noema--runtime-root))
@@ -3803,6 +3808,7 @@ failure while it is still going."
      "---"
      ["Toggle source" my/noema-toggle-source t]
      ["Run prose check" my/noema-prose-check t]
+     ["Next prose issue" my/noema-prose-next t]
      ["Export LaTeX…" my/noema-export-latex t]
      ["Settings…" my/noema-settings t]
      ["Move document to Trash" noema-trash-note t]
@@ -3941,6 +3947,8 @@ failure while it is still going."
 (my/noema--def-editor-cmd "insert-math"     "insert-math-block" "Insert a math block.")
 (my/noema--def-editor-cmd "insert-toc"      "insert-toc"      "Insert a table of contents.")
 (my/noema--def-editor-cmd "prose-check"     "prose-check"     "Run a bounded LanguageTool check in Noema.")
+(my/noema--def-editor-cmd "prose-next"      "prose-next"      "Open the card of the next prose issue in Noema.")
+(my/noema--def-editor-cmd "prose-previous"  "prose-previous"  "Open the card of the previous prose issue in Noema.")
 (my/noema--def-editor-cmd "knowledge-search" "knowledge-search" "Search notes through Noema's unified knowledge index.")
 (my/noema--def-editor-cmd "export-latex"    "export-latex"    "Export the current scope to LaTeX.")
 (my/noema--def-editor-cmd "settings"        "settings"        "Open Noema settings.")

@@ -59,7 +59,65 @@
                   #'my/languagetool-menu-mouse))
       (should-not (assq 'mouse-face properties))
       (should (equal (alist-get 'help-echo properties)
-                     "Possible spelling mistake")))))
+                     "Spelling: Possible spelling mistake → This"))
+      (should (eq (flymake-diagnostic-type diagnostic)
+                  'my/languagetool-spelling)))))
+
+(ert-deftest my/languagetool-classifies-like-noema ()
+  (should (eq (my/languagetool--category
+               '((rule . ((issueType . "misspelling"))))) 'spelling))
+  (should (eq (my/languagetool--category
+               '((rule . ((category . ((id . "REDUNDANCY"))))))) 'style))
+  (should (eq (my/languagetool--category
+               '((rule . ((category . ((id . "PUNCTUATION"))))))) 'punctuation))
+  (should (eq (my/languagetool--category
+               '((rule . ((category . ((id . "CONFUSED_WORDS"))))))) 'word))
+  (should (eq (my/languagetool--category
+               '((rule . ((issueType . "whitespace"))))) 'typography))
+  (should (eq (my/languagetool--category
+               '((rule . ((issueType . "grammar"))))) 'grammar))
+  (should (eq (get 'my/languagetool-style 'flymake-category) 'flymake-note)))
+
+(ert-deftest my/languagetool-caches-paragraphs ()
+  "A second check sends only the paragraph that changed."
+  (let ((my/languagetool--paragraph-cache (make-hash-table :test #'equal))
+        (my/languagetool-words-file "/nonexistent/words")
+        (my/languagetool-builtin-words-file "/nonexistent/builtin")
+        (my/languagetool-disabled-rules-file "/nonexistent/rules"))
+    (with-temp-buffer
+      (insert "Ths one.\n\nSecond 😀 paragraph.")
+      (let ((plan (my/languagetool--plan (point-min) (point-max))))
+        (should (equal (plist-get plan :text) (buffer-string)))
+        (my/languagetool--remember-plan plan (my/test-languagetool-response))
+        (should (= (length (my/languagetool--plan-diagnostics
+                            plan (current-buffer)))
+                   1)))
+      (goto-char (point-max))
+      (insert " More.")
+      (let ((plan (my/languagetool--plan (point-min) (point-max))))
+        (should (equal (plist-get plan :text) "Second 😀 paragraph. More."))
+        (my/languagetool--remember-plan plan '((matches . [])))
+        (let ((diagnostic (car (my/languagetool--plan-diagnostics
+                                plan (current-buffer)))))
+          (should (= (flymake-diagnostic-beg diagnostic) 1)))))))
+
+(ert-deftest my/languagetool-ignore-survives-other-edits ()
+  (let ((my/languagetool-words-file "/nonexistent/words")
+        (my/languagetool-builtin-words-file "/nonexistent/builtin")
+        (my/languagetool-disabled-rules-file "/nonexistent/rules"))
+    (with-temp-buffer
+      (insert "Ths sentence.")
+      (let ((diagnostic (car (my/languagetool--flymake-diagnostics
+                              (my/test-languagetool-response) (current-buffer)
+                              (point-min) (buffer-string)))))
+        (cl-letf (((symbol-function 'flymake-start) #'ignore))
+          (my/languagetool--ignore-once diagnostic)))
+      (goto-char (point-max))
+      (insert "\n\nLater text.")
+      (my/languagetool--flymake-after-change)
+      (should-not (my/languagetool--flymake-diagnostics
+                   (my/test-languagetool-response) (current-buffer)
+                   (point-min) "Ths sentence.")))))
 
 (ert-deftest my/languagetool-text-context-menu-has-corrections ()
   "Text buffers expose a right-click menu and LanguageTool actions."

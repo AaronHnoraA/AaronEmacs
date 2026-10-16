@@ -6,6 +6,12 @@
 ;; and carry enough data for keyboard and context-menu corrections.  They are
 ;; deliberately quieter than compiler diagnostics: no end-of-line summary and
 ;; no primary-click action.
+;;
+;; The behaviour follows Noema's checker: spelling, grammar and style are
+;; coloured red, amber and blue; the accepted-word list and the turned-off
+;; rules are the files Noema writes (`my/languagetool-words-file',
+;; `my/languagetool-disabled-rules-file'); and results are cached per
+;; paragraph, so an edit re-sends only the paragraph it touched.
 
 ;;; Code:
 (require 'cl-lib)
@@ -61,6 +67,65 @@
   "Seconds to pause automatic checks after the NAS is unavailable."
   :type 'number
   :group 'languages)
+
+(defvar my/languagetool-words-file
+  (expand-file-name "etc/prose-accepted-words.txt" user-emacs-directory)
+  "Accepted-word list shared with Noema's prose checker.")
+
+(defvar my/languagetool-builtin-words-file
+  (expand-file-name "site-lisp/noema/resources/prose-accepted-words.txt"
+                    user-emacs-directory)
+  "Noema's built-in technical vocabulary.")
+
+(defvar my/languagetool-disabled-rules-file
+  (expand-file-name "etc/prose-disabled-rules.txt" user-emacs-directory)
+  "LanguageTool rules turned off for Noema and Emacs alike.")
+
+(defconst my/languagetool-categories
+  '((spelling "Spelling" "#e5484d" flymake-warning)
+    (grammar "Grammar" "#d97706" flymake-warning)
+    (punctuation "Punctuation" "#ca8a04" flymake-warning)
+    (word "Word choice" "#8b5cf6" flymake-warning)
+    (typography "Typography" "#0d9488" flymake-note)
+    (style "Style" "#3b82f6" flymake-note))
+  "LanguageTool classes: label, underline colour and Flymake category.
+They match the classes and colours of Noema's prose diagnostics.")
+
+;; One face and one Flymake diagnostic type per class.  Severity (and so the
+;; mode-line count and `flymake-goto-next-error' filtering) comes from the
+;; Flymake category; the colour from the class.
+(pcase-dolist (`(,class ,label ,colour ,category) my/languagetool-categories)
+  (let ((symbol (intern (format "my/languagetool-%s" class))))
+    (custom-declare-face
+     symbol `((t :underline (:style wave :color ,colour)))
+     (format "Face for LanguageTool %s issues." (downcase label))
+     :group 'languages)
+    (put symbol 'flymake-category category)
+    (put symbol 'face symbol)))
+
+(defconst my/languagetool--style-issue-types
+  '("style" "register" "locale-violation" "inconsistency"))
+
+(defconst my/languagetool--style-categories
+  '("STYLE" "REDUNDANCY" "PLAIN_ENGLISH" "REPETITIONS_STYLE" "WIKIPEDIA"
+    "GENDER_NEUTRALITY" "MISC"))
+
+(defconst my/languagetool--word-choice-categories
+  '("CONFUSED_WORDS" "SEMANTICS" "COLLOCATIONS" "NONSTANDARD_PHRASES"
+    "FALSE_FRIENDS" "COMPOUNDING"))
+
+(defconst my/languagetool--paragraph-cache-limit 4000
+  "Paragraph results kept before the cache is emptied.")
+
+(defvar my/languagetool--paragraph-cache (make-hash-table :test #'equal)
+  "LanguageTool matches keyed by language, level and paragraph text.
+Offsets are relative to the paragraph, in UTF-16 units.")
+
+(defvar my/languagetool--file-sets nil
+  "Alist of FILE to (MTIME . TABLE) for the shared word and rule files.")
+
+(defconst my/languagetool--ignored-limit 500
+  "Ignored occurrences kept per buffer.")
 
 (defconst my/languagetool--ignored-faces
   '(font-lock-comment-face font-lock-constant-face
@@ -163,15 +228,115 @@
           (append (alist-get 'replacements correction) nil)))
 
 (defun my/languagetool--match-fingerprint (correction begin end original)
-  "Return a fingerprint for CORRECTION at BEGIN END with ORIGINAL text."
-  (list (alist-get 'id (alist-get 'rule correction)) begin end original))
+  "Return a fingerprint for CORRECTION at BEGIN END with ORIGINAL text.
+It names the rule, the text and up to 24 characters on each side within
+its line, so an ignored occurrence stays ignored while other text changes."
+  (save-excursion
+    (list (alist-get 'id (alist-get 'rule correction))
+          (buffer-substring-no-properties
+           (max (progn (goto-char begin) (line-beginning-position)) (- begin 24))
+           begin)
+          original
+          (buffer-substring-no-properties
+           end (min (progn (goto-char end) (line-end-position)) (+ end 24))))))
+
+(defun my/languagetool--category (correction)
+  "Return the class of LanguageTool CORRECTION, as Noema classifies it."
+  (let* ((rule (alist-get 'rule correction))
+         (issue (downcase (or (alist-get 'issueType rule) "")))
+         (category (upcase (or (alist-get 'id (alist-get 'category rule)) ""))))
+    (cond ((or (equal issue "misspelling") (equal category "TYPOS")) 'spelling)
+          ((equal category "PUNCTUATION") 'punctuation)
+          ((or (member category '("TYPOGRAPHY" "CASING"))
+               (member issue '("whitespace" "typographical")))
+           'typography)
+          ((member category my/languagetool--word-choice-categories) 'word)
+          ((or (member issue my/languagetool--style-issue-types)
+               (member category my/languagetool--style-categories))
+           'style)
+          (t 'grammar))))
 
 (defun my/languagetool--diagnostic-type (correction)
   "Return the Flymake type for LanguageTool CORRECTION."
-  (if (member (alist-get 'issueType (alist-get 'rule correction))
-              '("misspelling" "grammar"))
-      :warning
-    :note))
+  (intern (format "my/languagetool-%s" (my/languagetool--category correction))))
+
+(defun my/languagetool--category-label (correction)
+  "Return the human label for CORRECTION's LanguageTool class."
+  (cadr (assq (my/languagetool--category correction) my/languagetool-categories)))
+
+(defun my/languagetool--hint (correction message suggestions)
+  "Return the one-line hint for CORRECTION with MESSAGE and SUGGESTIONS."
+  (concat (my/languagetool--category-label correction) ": " message
+          (when suggestions
+            (concat " → "
+                    (string-join
+                     (mapcar (lambda (value)
+                               (if (string-empty-p value) "(remove)" value))
+                             (seq-take suggestions 3))
+                     ", ")))))
+
+(defun my/languagetool--file-set (file normalize)
+  "Return a hash table of FILE's lines passed through NORMALIZE.
+The table is reread only when FILE's modification time changes."
+  (let* ((attributes (file-attributes file))
+         (mtime (and attributes (file-attribute-modification-time attributes)))
+         (cached (cdr (assoc file my/languagetool--file-sets))))
+    (if (and cached (equal (car cached) mtime))
+        (cdr cached)
+      (let ((table (make-hash-table :test #'equal)))
+        (when attributes
+          (with-temp-buffer
+            (insert-file-contents file)
+            (dolist (line (split-string (buffer-string) "\n" t))
+              (when-let* ((value (funcall normalize line)))
+                (puthash value t table)))))
+        (setf (alist-get file my/languagetool--file-sets nil nil #'equal)
+              (cons mtime table))
+        table))))
+
+(defun my/languagetool--normalize-word (value)
+  "Return VALUE as an accepted-word key, or nil.  Matches Noema's rule."
+  (let ((word (string-trim value)))
+    (and (string-match-p "\\`[A-Za-z][A-Za-z'’-]\\{1,63\\}\\'" word)
+         (downcase word))))
+
+(defun my/languagetool--normalize-rule (value)
+  "Return the rule id on line VALUE, or nil."
+  (let ((rule (string-trim (replace-regexp-in-string "#.*" "" value))))
+    (and (string-match-p "\\`[A-Za-z0-9_.:-]\\{1,128\\}\\'" rule) rule)))
+
+(defun my/languagetool--accepted-word-p (word)
+  "Return non-nil when WORD is in Noema's built-in or shared word list."
+  (when-let* ((key (my/languagetool--normalize-word word)))
+    (or (gethash key (my/languagetool--file-set
+                      my/languagetool-words-file
+                      #'my/languagetool--normalize-word))
+        (gethash key (my/languagetool--file-set
+                      my/languagetool-builtin-words-file
+                      #'my/languagetool--normalize-word)))))
+
+(defun my/languagetool--rule-disabled-p (rule-id)
+  "Return non-nil when RULE-ID is turned off here or in the shared file."
+  (and rule-id
+       (or (member rule-id my/languagetool-disabled-rules)
+           (gethash rule-id (my/languagetool--file-set
+                             my/languagetool-disabled-rules-file
+                             #'my/languagetool--normalize-rule)))))
+
+(defun my/languagetool--update-list-file (file value add normalize)
+  "ADD (or remove) VALUE in the sorted line list FILE, keyed by NORMALIZE."
+  (let* ((key (funcall normalize value))
+         (lines (when (file-exists-p file)
+                  (with-temp-buffer
+                    (insert-file-contents file)
+                    (split-string (buffer-string) "\n" t "[ \t\r]+"))))
+         (kept (seq-remove (lambda (line) (equal (funcall normalize line) key))
+                           lines)))
+    (when add (push (string-trim value) kept))
+    (make-directory (file-name-directory file) t)
+    (with-temp-file file
+      (dolist (line (sort kept (lambda (a b) (string< (downcase a) (downcase b)))))
+        (insert line "\n")))))
 
 (defvar my/languagetool-diagnostic-map
   (let ((map (make-sparse-keymap)))
@@ -200,23 +365,26 @@
                              correction start end original)))
           (unless (or (= start end)
                       (my/languagetool--face-ignored-p start)
+                      (my/languagetool--rule-disabled-p rule-id)
+                      (my/languagetool--accepted-word-p original)
                       (my/languagetool--local-word-p original)
-                      (member rule-id my/languagetool-disabled-rules)
                       (member fingerprint my/languagetool--ignored-matches))
             (let* ((message (or (alist-get 'message correction)
                                 "LanguageTool issue"))
+                   (suggestions (my/languagetool--replacement-values correction))
+                   (hint (my/languagetool--hint correction message suggestions))
                    (data (list :source 'languagetool
                                :correction correction
-                               :suggestions
-                               (my/languagetool--replacement-values correction)
+                               :category (my/languagetool--category correction)
+                               :suggestions suggestions
                                :rule-id rule-id
                                :original original)))
               (push
                (flymake-make-diagnostic
                 buffer start end (my/languagetool--diagnostic-type correction)
-                (list "LanguageTool" rule-id message) data
+                (list "LanguageTool" rule-id hint) data
                 `((keymap . ,my/languagetool-diagnostic-map)
-                  (help-echo . ,message)))
+                  (help-echo . ,hint)))
                diagnostics)))))
       (nreverse diagnostics))))
 
@@ -254,20 +422,42 @@ buffer therefore retain their normal end-of-line summaries."
        (= tick (buffer-chars-modified-tick))))
 
 (defun my/languagetool--flymake-publish
-    (parsed buffer begin end tick text request-id report-fn quiet)
-  "Publish PARSED LanguageTool output through REPORT-FN."
+    (parsed buffer begin end tick plan request-id report-fn quiet)
+  "Publish PARSED LanguageTool output for PLAN through REPORT-FN.
+PARSED is nil when every paragraph of PLAN was already cached."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (when (my/languagetool--request-current-p request-id tick)
         (setq my/languagetool--active-request nil
               my/languagetool--auto-suspended-until 0.0)
-        (let ((diagnostics (my/languagetool--flymake-diagnostics
-                            parsed buffer begin text)))
+        (when parsed (my/languagetool--remember-plan plan parsed))
+        (let ((diagnostics (my/languagetool--plan-diagnostics plan buffer)))
           (my/languagetool--report
            report-fn diagnostics :region (cons begin end))
           (unless quiet
-            (message "LanguageTool: %d issue%s" (length diagnostics)
-                     (if (= (length diagnostics) 1) "" "s"))))))))
+            (message "LanguageTool: %s"
+                     (my/languagetool--summary diagnostics))))))))
+
+(defun my/languagetool--summary (diagnostics)
+  "Return a count of DIAGNOSTICS by LanguageTool class."
+  (if (null diagnostics)
+      "no issues"
+    (let ((counts (mapcar
+                   (lambda (entry)
+                     (cons (cadr entry)
+                           (seq-count
+                            (lambda (diagnostic)
+                              (eq (plist-get (flymake-diagnostic-data diagnostic)
+                                             :category)
+                                  (car entry)))
+                            diagnostics)))
+                   my/languagetool-categories)))
+      (format "%d issue%s: %s" (length diagnostics)
+              (if (= (length diagnostics) 1) "" "s")
+              (mapconcat (lambda (entry)
+                           (format "%d %s" (cdr entry) (downcase (car entry))))
+                         (seq-filter (lambda (entry) (> (cdr entry) 0)) counts)
+                         ", ")))))
 
 (defun my/languagetool--local-command ()
   "Return argv for a JSON-producing local LanguageTool invocation."
@@ -280,9 +470,7 @@ buffer therefore retain their normal end-of-line summaries."
    languagetool-console-arguments
    (list "--encoding" "utf8" "--json"
          "--language" languagetool-correction-language
-         "--level" (upcase languagetool-suggestion-level))
-   (when my/languagetool-disabled-rules
-     (list "--disable" (string-join my/languagetool-disabled-rules ",")))))
+         "--level" (upcase languagetool-suggestion-level))))
 
 (defun my/languagetool--parse-cli-buffer (buffer)
   "Parse the final JSON object from LanguageTool CLI BUFFER."
@@ -293,7 +481,7 @@ buffer therefore retain their normal end-of-line summaries."
     (json-read)))
 
 (defun my/languagetool--local-finished
-    (process _event buffer begin end tick text request-id report-fn quiet)
+    (process _event buffer begin end tick plan request-id report-fn quiet)
   "Handle completion of local LanguageTool PROCESS."
   (when (memq (process-status process) '(exit signal))
     (let ((output (process-buffer process)) parsed failure)
@@ -316,10 +504,10 @@ buffer therefore retain their normal end-of-line summaries."
                    :explanation failure)
                   (message "LanguageTool failed: %s" failure))
               (my/languagetool--flymake-publish
-               parsed buffer begin end tick text request-id report-fn quiet))))))))
+               parsed buffer begin end tick plan request-id report-fn quiet))))))))
 
 (defun my/languagetool--start-local
-    (buffer begin end tick text request-id report-fn quiet reason)
+    (buffer begin end tick plan request-id report-fn quiet reason)
   "Start a local fallback check for BUFFER after REASON."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
@@ -333,10 +521,10 @@ buffer therefore retain their normal end-of-line summaries."
                    :sentinel
                    (lambda (proc event)
                      (my/languagetool--local-finished
-                      proc event buffer begin end tick text request-id
+                      proc event buffer begin end tick plan request-id
                       report-fn quiet)))))
             (setq my/languagetool--local-process process)
-            (process-send-string process text)
+            (process-send-string process (plist-get plan :text))
             (process-send-eof process)
             (unless quiet
               (message "NAS LanguageTool unavailable (%s); using local CLI"
@@ -351,7 +539,7 @@ buffer therefore retain their normal end-of-line summaries."
                     (error-message-string err))))))))
 
 (defun my/languagetool--flymake-request-failed
-    (buffer begin end tick text request-id report-fn allow-fallback quiet reason)
+    (buffer begin end tick plan request-id report-fn allow-fallback quiet reason)
   "Handle a failed request for BUFFER with REASON."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
@@ -362,7 +550,7 @@ buffer therefore retain their normal end-of-line summaries."
             ;; one JVM fallback.
             (unless (process-live-p my/languagetool--local-process)
               (my/languagetool--start-local
-               buffer begin end tick text request-id report-fn quiet reason))
+               buffer begin end tick plan request-id report-fn quiet reason))
           (setq my/languagetool--active-request nil
                 my/languagetool--auto-suspended-until
                 (+ (float-time) my/languagetool-auto-retry-delay))
@@ -372,7 +560,7 @@ buffer therefore retain their normal end-of-line summaries."
                                 reason)))))))
 
 (defun my/languagetool--flymake-http-finished
-    (status buffer begin end tick text request-id report-fn allow-fallback quiet)
+    (status buffer begin end tick plan request-id report-fn allow-fallback quiet)
   "Handle LanguageTool HTTP STATUS for BUFFER."
   (let ((request-error (plist-get status :error)))
     ;; url.el can emit an intermediate "deleted" callback immediately before
@@ -404,13 +592,13 @@ buffer therefore retain their normal end-of-line summaries."
         (when (buffer-live-p response) (kill-buffer response))
         (if failure
             (my/languagetool--flymake-request-failed
-             buffer begin end tick text request-id report-fn
+             buffer begin end tick plan request-id report-fn
              allow-fallback quiet failure)
           (my/languagetool--flymake-publish
-           parsed buffer begin end tick text request-id report-fn quiet))))))
+           parsed buffer begin end tick plan request-id report-fn quiet))))))
 
 (defun my/languagetool--flymake-timeout
-    (request-buffer buffer begin end tick text request-id report-fn
+    (request-buffer buffer begin end tick plan request-id report-fn
                     allow-fallback quiet)
   "Cancel REQUEST-BUFFER and handle a timeout for BUFFER."
   (when (buffer-live-p request-buffer)
@@ -425,8 +613,85 @@ buffer therefore retain their normal end-of-line summaries."
         (setq my/languagetool--request-buffer nil
               my/languagetool--request-timer nil))))
   (my/languagetool--flymake-request-failed
-   buffer begin end tick text request-id report-fn
+   buffer begin end tick plan request-id report-fn
    allow-fallback quiet "timeout"))
+
+(defun my/languagetool--utf16-length (text)
+  "Return the length of TEXT in UTF-16 code units."
+  (let ((units (length text)))
+    (dotimes (index (length text))
+      (when (> (aref text index) #xffff) (setq units (1+ units))))
+    units))
+
+(defun my/languagetool--paragraphs (begin end)
+  "Return (POSITION . TEXT) for each paragraph with words in BEGIN..END."
+  (let ((start begin) paragraphs)
+    (save-excursion
+      (goto-char begin)
+      (while (re-search-forward "\n[ \t]*\n" end t)
+        (push (cons start (buffer-substring-no-properties
+                           start (match-beginning 0)))
+              paragraphs)
+        (setq start (match-end 0)))
+      (when (< start end)
+        (push (cons start (buffer-substring-no-properties start end))
+              paragraphs)))
+    (seq-filter (lambda (paragraph) (string-match-p "[[:alpha:]]" (cdr paragraph)))
+                (nreverse paragraphs))))
+
+(defun my/languagetool--cache-key (text)
+  "Return the paragraph-cache key for TEXT under the current settings."
+  (concat my/languagetool-language "\0picky\0" text))
+
+(defun my/languagetool--plan (begin end)
+  "Plan a check of BEGIN..END: which paragraphs to send, joined as :text.
+:missing holds (PARAGRAPH START END) in UTF-16 units of :text."
+  (let ((paragraphs (my/languagetool--paragraphs begin end))
+        (units 0) parts missing)
+    (dolist (paragraph paragraphs)
+      (unless (gethash (my/languagetool--cache-key (cdr paragraph))
+                       my/languagetool--paragraph-cache)
+        (when parts
+          (push "\n\n" parts)
+          (setq units (+ units 2)))
+        (let ((length (my/languagetool--utf16-length (cdr paragraph))))
+          (push (list paragraph units (+ units length)) missing)
+          (setq units (+ units length)))
+        (push (cdr paragraph) parts)))
+    (list :paragraphs paragraphs
+          :missing (nreverse missing)
+          :text (apply #'concat (nreverse parts)))))
+
+(defun my/languagetool--remember-plan (plan parsed)
+  "Cache PARSED matches per paragraph of PLAN's :missing list."
+  (let ((buckets (make-vector (length (plist-get plan :missing)) nil)))
+    (dolist (match (append (alist-get 'matches parsed) nil))
+      (let* ((offset (or (alist-get 'offset match) 0))
+             (end (+ offset (or (alist-get 'length match) 0))))
+        (cl-loop for (_paragraph start stop) in (plist-get plan :missing)
+                 for index from 0
+                 when (and (>= offset start) (<= end stop))
+                 do (push (cons (cons 'offset (- offset start))
+                                (assq-delete-all 'offset (copy-alist match)))
+                          (aref buckets index))
+                 and return nil)))
+    (when (> (hash-table-count my/languagetool--paragraph-cache)
+             my/languagetool--paragraph-cache-limit)
+      (clrhash my/languagetool--paragraph-cache))
+    (cl-loop for (paragraph) in (plist-get plan :missing)
+             for index from 0
+             do (puthash (my/languagetool--cache-key (cdr paragraph))
+                         (vconcat (nreverse (aref buckets index)))
+                         my/languagetool--paragraph-cache))))
+
+(defun my/languagetool--plan-diagnostics (plan buffer)
+  "Return Flymake diagnostics for every cached paragraph of PLAN in BUFFER."
+  (cl-loop for (position . text) in (plist-get plan :paragraphs)
+           for matches = (gethash (my/languagetool--cache-key text)
+                                  my/languagetool--paragraph-cache)
+           when (and matches (> (length matches) 0))
+           append (my/languagetool--flymake-diagnostics
+                   `((matches . ,matches)) buffer position text)))
 
 (defun my/languagetool--flymake-server-check
     (begin end report-fn &optional allow-fallback quiet)
@@ -435,42 +700,45 @@ buffer therefore retain their normal end-of-line summaries."
   (let* ((buffer (current-buffer))
          (tick (buffer-chars-modified-tick))
          (request-id (gensym "languagetool-request-"))
-         (text (buffer-substring-no-properties begin end))
+         (plan (my/languagetool--plan begin end))
+         (text (plist-get plan :text))
          (url-request-method "POST")
          (url-request-extra-headers
           '(("Content-Type" . "application/x-www-form-urlencoded")))
+         ;; Turned-off rules are filtered locally, which keeps cached
+         ;; paragraphs valid when a rule is turned back on.
          (params `(("language" ,my/languagetool-language)
-                   ("level" "picky") ("text" ,text)
-                   ,@(when my/languagetool-disabled-rules
-                       `(("disabledRules"
-                          ,(string-join my/languagetool-disabled-rules ","))))))
+                   ("level" "picky") ("text" ,text)))
          (url-request-data (url-build-query-string params nil t))
          (endpoint (concat (string-remove-suffix "/" my/languagetool-server-url)
                            "/v2/check")))
     (setq my/languagetool--active-request request-id
           my/languagetool--report-fn report-fn)
-    (condition-case err
-        (let ((request
-               (url-retrieve
-                endpoint #'my/languagetool--flymake-http-finished
-                (list buffer begin end tick text request-id report-fn
-                      allow-fallback quiet)
-                t t)))
-          (if (not (buffer-live-p request))
-              (my/languagetool--flymake-request-failed
-               buffer begin end tick text request-id report-fn allow-fallback
-               quiet "request startup failed")
-            (setq my/languagetool--request-buffer request
-                  my/languagetool--request-timer
-                  (run-at-time
-                   my/languagetool-server-timeout nil
-                   #'my/languagetool--flymake-timeout
-                   request buffer begin end tick text request-id report-fn
-                   allow-fallback quiet))))
-      (error
-       (my/languagetool--flymake-request-failed
-        buffer begin end tick text request-id report-fn allow-fallback quiet
-        (error-message-string err))))))
+    (if (null (plist-get plan :missing))
+        (my/languagetool--flymake-publish
+         nil buffer begin end tick plan request-id report-fn quiet)
+      (condition-case err
+          (let ((request
+                 (url-retrieve
+                  endpoint #'my/languagetool--flymake-http-finished
+                  (list buffer begin end tick plan request-id report-fn
+                        allow-fallback quiet)
+                  t t)))
+            (if (not (buffer-live-p request))
+                (my/languagetool--flymake-request-failed
+                 buffer begin end tick plan request-id report-fn allow-fallback
+                 quiet "request startup failed")
+              (setq my/languagetool--request-buffer request
+                    my/languagetool--request-timer
+                    (run-at-time
+                     my/languagetool-server-timeout nil
+                     #'my/languagetool--flymake-timeout
+                     request buffer begin end tick plan request-id report-fn
+                     allow-fallback quiet))))
+        (error
+         (my/languagetool--flymake-request-failed
+          buffer begin end tick plan request-id report-fn allow-fallback quiet
+          (error-message-string err)))))))
 
 (defun my/languagetool-flymake-backend (report-fn &rest _args)
   "Flymake backend that checks a bounded prose scope with REPORT-FN."
@@ -530,9 +798,9 @@ buffer therefore retain their normal end-of-line summaries."
                  (current-buffer) signature)))))))
 
 (defun my/languagetool--flymake-after-change (&rest _)
-  "Invalidate one-shot LanguageTool state after a buffer edit."
+  "Invalidate one-shot LanguageTool state after a buffer edit.
+Ignored occurrences are keyed by their surrounding text, so they stay."
   (setq my/languagetool--cleared-tick nil
-        my/languagetool--ignored-matches nil
         my/languagetool--last-viewport-request nil))
 
 (defun my/languagetool--flymake-cleanup ()
@@ -596,9 +864,12 @@ buffer therefore retain their normal end-of-line summaries."
       (insert replacement))))
 
 (defun my/languagetool--ignore-once (diagnostic)
-  "Ignore DIAGNOSTIC until the next buffer edit."
+  "Ignore DIAGNOSTIC while its text and surroundings are unchanged."
   (let* ((data (flymake-diagnostic-data diagnostic))
          (correction (plist-get data :correction)))
+    (when (>= (length my/languagetool--ignored-matches)
+              my/languagetool--ignored-limit)
+      (setq my/languagetool--ignored-matches nil))
     (cl-pushnew
      (my/languagetool--match-fingerprint
       correction (flymake-diagnostic-beg diagnostic)
@@ -614,28 +885,61 @@ buffer therefore retain their normal end-of-line summaries."
     (flymake-start)
     (message "LanguageTool rule %s ignored in this buffer" rule-id)))
 
-(defun my/languagetool--add-word (diagnostic)
-  "Add DIAGNOSTIC's text to the file-local ispell dictionary."
-  (require 'ispell)
-  (let ((word (plist-get (flymake-diagnostic-data diagnostic) :original)))
-    (unless (and word (string-match-p "\\`[[:alpha:]][[:alpha:]'-]*\\'" word))
-      (user-error "The diagnostic text is not a single dictionary word"))
-    (save-excursion
-      (goto-char (flymake-diagnostic-beg diagnostic))
-      (ispell-add-per-file-word-list word))
+(defun my/languagetool--turn-off-rule (diagnostic)
+  "Turn DIAGNOSTIC's rule off in Emacs and Noema alike."
+  (let ((rule-id (plist-get (flymake-diagnostic-data diagnostic) :rule-id)))
+    (unless rule-id (user-error "This diagnostic has no LanguageTool rule ID"))
+    (my/languagetool--update-list-file
+     my/languagetool-disabled-rules-file rule-id t
+     #'my/languagetool--normalize-rule)
     (flymake-start)
-    (message "Added %s to this file's LocalWords" word)))
+    (message "LanguageTool rule %s turned off (%s)" rule-id
+             (abbreviate-file-name my/languagetool-disabled-rules-file))))
+
+(defun my/languagetool-enable-rule (rule-id)
+  "Turn LanguageTool RULE-ID back on in Emacs and Noema."
+  (interactive
+   (list (completing-read
+          "Turn rule back on: "
+          (hash-table-keys (my/languagetool--file-set
+                            my/languagetool-disabled-rules-file
+                            #'my/languagetool--normalize-rule))
+          nil t)))
+  (my/languagetool--update-list-file
+   my/languagetool-disabled-rules-file rule-id nil
+   #'my/languagetool--normalize-rule)
+  (setq my/languagetool-disabled-rules
+        (delete rule-id my/languagetool-disabled-rules))
+  (when my/languagetool-auto-mode (flymake-start))
+  (message "LanguageTool rule %s turned back on" rule-id))
+
+(defun my/languagetool--add-word (diagnostic)
+  "Add DIAGNOSTIC's text to the dictionary Emacs and Noema share."
+  (let ((word (plist-get (flymake-diagnostic-data diagnostic) :original)))
+    (unless (and word (my/languagetool--normalize-word word))
+      (user-error "The diagnostic text is not a single dictionary word"))
+    (my/languagetool--update-list-file
+     my/languagetool-words-file word t #'my/languagetool--normalize-word)
+    (flymake-start)
+    (message "Added %s to the prose dictionary" (string-trim word))))
 
 (defun my/languagetool--correction-candidates (diagnostic)
   "Return completion candidates for DIAGNOSTIC."
-  (append
-   (mapcar (lambda (replacement)
-             (cons (format "Replace with: %s" replacement)
-                   (cons 'replace replacement)))
-           (plist-get (flymake-diagnostic-data diagnostic) :suggestions))
-   '(("Skip this occurrence" . (skip))
-     ("Ignore this rule in buffer" . (ignore-rule))
-     ("Add word to file dictionary" . (add-word)))))
+  (let ((data (flymake-diagnostic-data diagnostic)))
+    (append
+     (mapcar (lambda (replacement)
+               (cons (format "Replace with: %s"
+                             (if (string-empty-p replacement) "(remove)" replacement))
+                     (cons 'replace replacement)))
+             (plist-get data :suggestions))
+     '(("Ignore this occurrence" . (skip)))
+     (when (and (eq (plist-get data :category) 'spelling)
+                (my/languagetool--normalize-word (or (plist-get data :original) "")))
+       `((,(format "Add “%s” to dictionary" (string-trim (plist-get data :original)))
+          . (add-word))))
+     (when (plist-get data :rule-id)
+       `((,(format "Turn off rule %s" (plist-get data :rule-id)) . (turn-off-rule))
+         ("Ignore this rule in buffer" . (ignore-rule)))))))
 
 (defun my/languagetool--context-menu-function (menu click)
   "Add LanguageTool actions to MENU for CLICK in a prose buffer."
@@ -667,7 +971,8 @@ buffer therefore retain their normal end-of-line summaries."
     (`(replace . ,replacement) (my/languagetool--replace diagnostic replacement))
     (`(skip) (my/languagetool--ignore-once diagnostic))
     (`(ignore-rule) (my/languagetool--ignore-rule diagnostic))
-    (`(add-word) (my/languagetool--add-word diagnostic))))
+    (`(add-word) (my/languagetool--add-word diagnostic))
+    (`(turn-off-rule) (my/languagetool--turn-off-rule diagnostic))))
 
 (defun my/languagetool-correct-at-point (&optional diagnostic)
   "Choose and apply a correction for DIAGNOSTIC or the issue at point."
