@@ -328,7 +328,12 @@ This config already has maintenance and workflow entry points. Reuse them:
   Emacs preview and Noema's KaTeX renderer both read through the relative links
   in `etc/` and `templates/`.  Do not add a second macro table, a second
   preamble, or a fourth parser for that subset — extend the shared files and
-  the `shared/katex-macro-fixtures.json` contract instead.  See
+  the `shared/katex-macro-fixtures.json` contract instead.  On top of the
+  shared files sit three user layers, later winning: a note's meta
+  `macros-from:` project files, the user's global
+  `~/.config/noema/katex-macros.tex` (managed in Noema's formula palette, also
+  read by RaTeX) and the note's `#+begin macros` block.  They reuse the same
+  parser; do not add another store for personal macros.  See
   `docs/latex-preview.md`.
 - Agent Skills: the Noema capability resolver and its manager
   (`noema-skill-manager`).  Global Skills live flat in the vault library

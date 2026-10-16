@@ -647,15 +647,28 @@ Recognizes the same subset as `site-lisp/noema/shared/katex-macros.mjs':
         (nreverse result)))))
 
 (defun my/latex--macro-files (&optional directory)
-  "Return the shared macro .tex files in DIRECTORY, sorted for stability."
+  "Return the shared macro .tex files in DIRECTORY, then the user's file.
+The shared files are sorted for stability; the user's global layer
+\(`my/latex-user-macros-file') comes last so it wins, as in Noema."
   (let ((directory (or directory
                        ;; Same variable Noema is handed, when it is loaded, so
                        ;; there is one path and not two that happen to agree.
                        (and (boundp 'my/noema--katex-macros-dir)
                             my/noema--katex-macros-dir)
                        my/latex-katex-macros-directory)))
-    (when (file-directory-p directory)
-      (sort (directory-files directory t "\\.tex\\'" t) #'string<))))
+    (append
+     (when (file-directory-p directory)
+       (sort (directory-files directory t "\\.tex\\'" t) #'string<))
+     ;; The user's own global layer, managed from Noema's formula palette.
+     ;; Read last so it overrides shared names, as it does in Noema.
+     (let ((user (my/latex-user-macros-file)))
+       (when (file-readable-p user) (list user))))))
+
+(defun my/latex-user-macros-file ()
+  "Return the user's global math macro file, managed by Noema."
+  (expand-file-name "katex-macros.tex"
+                    (or (getenv "NOEMA_CONFIG_DIR")
+                        (expand-file-name "~/.config/noema"))))
 
 (defun my/latex--macro-signature (files)
   "Return a value that changes when any file in FILES changes."

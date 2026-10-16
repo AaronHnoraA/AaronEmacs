@@ -69,6 +69,24 @@ templates/noema              -> ../site-lisp/noema/resources/templates/noema
   定义,`\newcommand` 遇到重定义会报错,那会让**整个前言连同每条预览**一起失败。
 - 前言对所有公式相同,所以缓存键里只放它的哈希 token,不放正文。
 
+### 宏的分层
+
+共享宏之外还有三层,后面的覆盖前面的:
+
+| 层 | 位置 | 管理方式 | 谁读 |
+|---|---|---|---|
+| 共享 | `resources/katex-macros/*.tex` | 改文件 | 全部 |
+| 项目 | 笔记 meta 的 `macros-from: a.cls, b.sty` | 改文件 | Noema 页面、LaTeX 导出 |
+| 全局 | `~/.config/noema/katex-macros.tex`(`NOEMA_CONFIG_DIR`) | 公式工具板的「宏」分类 | 全部 |
+| 本笔记 | 笔记 meta 的 `#+begin macros … #+end macros` | 公式工具板或直接编辑 | Noema 页面、LaTeX 导出 |
+
+全局层是 Noema 自己的用户配置,不在任一 git 仓库里;`my/latex--macro-files` 把它排在共享
+文件之后读入,所以 RaTeX 与 Noema 对同名宏的取舍一致。项目层与本笔记层属于某篇 Markdown,
+由 `shared/note-macros.mjs` 解析(只扫 meta 块),Emacs 的 TeX/JuText 预览不涉及。
+`physics.tex` 按 CTAN physics 宏包的命令名移植了参数个数固定的部分;需要扫描定界符的形式
+(`\qty( )`、`\mqty( )`)、带星号或可选幂次的形式,以及会改变内建命令含义的重定义
+(`\div`、`\Re`、`\sin` 等)没有移植,文件头注释列出了全部取舍。
+
 TeX 兼容改写(目前 `multline → gathered`、`\displaylines`)的规则表在
 `site-lisp/noema/shared/tex-compat-rules.json`,TS 和 Elisp 各自读它。
 

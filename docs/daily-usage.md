@@ -393,9 +393,19 @@ Reveal 初始化、重建和销毁管线，仅关闭交互扩展。该页面不�
 光标位于行内或块级公式内时，按 `Cmd-/` 打开完整的 LiveTeX 可视化编辑；也可在公式上
 右键选择 **Open LiveTeX** 可打开完整的可视化编辑。LiveTeX 顶部的 ✓ 应用公式，
 右上角 × 取消本次修改并关闭，原 Markdown 公式保持不变。**∑ 公式工具** 是独立的分类浮层，
-提供结构、微积分、希腊字母、关系、代数与群论、集合、箭头、函数、物理、矩阵、样式，
-以及搜索、收藏和自定义模板。代数分类包括左／右半直积、花环积、正规子群关系、函子与群名；
-搜索可用中文、LaTeX 命令或分散的英文词（例如 `semi group product`）。
+提供结构、微积分、希腊字母、关系、代数与群论、集合、箭头、函数、物理、矩阵、样式、搜索，
+最后一个分类是 **宏**。代数分类包括左／右半直积、花环积、正规子群关系、函子与群名；
+搜索可用中文、LaTeX 命令或分散的英文词（例如 `semi group product`），也会搜到所有生效的宏。
+
+**宏** 分类分四层，后面的覆盖前面的：**共享**（`site-lisp/noema/resources/katex-macros/`，
+文件管理，含 physics 宏包的 `\abs \pqty \dv \pdv \comm \mel \pmqty …`）、**项目**（meta 里
+`macros-from: ../assignment.cls, notation.sty`，按笔记所在目录读取，远程笔记在其 target 上读取；
+只取 `\newcommand`/`\def`/`\DeclareMathOperator` 里不含 `@` 的记号）、**全局**
+（`~/.config/noema/katex-macros.tex`，在这里增删改）和 **本笔记**（meta 里的
+`#+begin macros … #+end macros` 块，在这里增删改会直接写回笔记）。每一行点一下即插入该宏，
+带参数的宏按参数个数插入占位符；被覆盖的同名宏标“覆盖”。KaTeX 预览、MathLive 弹出编辑器与
+弹出预览、Emacs 里的 RaTeX 预览和 LaTeX 导出用的是同一套分层宏。打开笔记时宏在首次渲染前就装好；
+编辑 meta 里的宏块，停止输入约半秒后只重渲一次。
 在 Markdown 中按 `Cmd-Shift-/` 直接打开工具板，无须先进入 LiveTeX；再次按下或按 `Esc` 关闭。
 默认选中分类，`Tab` / `Shift-Tab` 切换分类，分类末尾的 `Tab` 或 `Cmd-F` 进入搜索；
 方向键选择磁贴，`Enter` 插入到当前公式源码，普通文本位置会新建行内公式。
@@ -1615,6 +1625,12 @@ Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空
 - 图片后按退格（或图片前按 Delete）先选中整张图片，再按一次删除，不会把图片拆成半截源码。
 - 图表（` ```mermaid `、` ```marmind `/` ```markmind `）按图片排版：高度跟着内容走，没有固定窗口，点一下图就像点别的正文一样把光标放进去显示源码。需要放大时用图右上角悬停出现的 `⤢` 打开查看器，在那里缩放、平移、`Fit`，`Esc` 或 `Close` 关闭；缩放只属于查看器，不会被正文编辑打断。
 - 图表配色跟随当前主题：Mermaid 用从 `--aaron-*` 变量推出来的调色板（深色主题就是深色图），不再是浅色默认主题垫一张白卡片。换主题会自动重画。
+- `![说明](page.html)` 嵌入一个 HTML 页面（沙箱 iframe，不共享 Noema 的存储）。它在滚动到附近时才加载，
+  离开视口约 90 秒或窗格隐藏约 60 秒后卸载为空白页、回来时重新加载，所以一篇笔记里多个交互页面
+  不会一直在后台跑。图片悬停工具条的 `⤢` 全屏显示（同一个页面原地放大，状态保留），`Esc` 或 `×`
+  退出。页面可用 `parent.postMessage` 与 Noema 通信：`{type: "noema:open-url", href: "roam://<id>"}`
+  打开笔记，`{type: "noema:resize", height: 480}` 调整高度（笔记里写了高度时忽略），
+  `{type: "noema:fullscreen"}` 切换全屏。
 - `![说明](diagram.drawio)` 像引用图片一样引用 draw.io 文件：Noema 调本机 draw.io 导出 SVG 并缓存，按原图大小显示，不加载在线编辑器、不联网，导出时按当前主题要 light 或 dark 版本。要改图就用 draw.io 打开那个 `.drawio` 文件，存盘后 Noema 自动重新导出。`#page=2` 指定第几页（从 1 数）；本机没装 draw.io 时显示一张写明原因的占位图（可用 `NOEMA_DRAWIO_BIN` 指定路径）。`.drawio.svg` / `.drawio.png` 本来就是图片，直接当图片渲染。
 - draw.io 导出一次约 1 秒（要起一个 draw.io 进程），之后按「文件路径 + 修改时间 + 大小 + 页码 + 格式」命中磁盘缓存，命中是毫秒级，重复渲染只走 ETag 304。同时导出的并发上限默认 2（`NOEMA_DRAWIO_CONCURRENCY`），一篇笔记里十几张图不会同时拉起十几个 draw.io。
 - LaTeX 导出里图表就是图：`.drawio` 由 draw.io 直接导成矢量 PDF，mermaid/marmind 由编辑器页面渲染成 SVG 随请求发过去、再用 `rsvg-convert` 转 PDF；两者都作为附带文件写到 `.tex` 旁边，所以存下来的 `.tex` 单独也能编译。某张图没能成图时保留原样并在任务警告里说明，不会整篇导出失败。
