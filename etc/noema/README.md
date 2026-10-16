@@ -73,6 +73,7 @@ JuText work block 的开头可直接输入 `@@`，由 Company/CAPF 补全指令�
 | `math-verification` | proof-plan、proof-review、lean4、lean-proof、mathlib-build、mathlib-review、sympy | 只有通过检查的证明才算验证；符号/数值计算只是证据 |
 | `quantum-computing` | qiskit、cirq、pennylane、qutip、sympy | Nielsen–Chuang 记号；Qiskit 小端、Cirq/PennyLane 首比特在左，跨框架时写明约定 |
 | `software-dev` | brainstorming、writing-plans、executing-plans、test-driven-development、systematic-debugging、verification-before-completion、requesting-code-review、receiving-code-review | 来自 superpowers；提到的其它 skill/子代理只在本会话真有时使用；仓库 AGENTS.md/CLAUDE.md 优先 |
+| `visualization` | noema-data-visualization、noema-tikz-figures、noema-web-visualization | 根据目标选择数据图表、LaTeX/TikZ 或 HTML/SVG；保留可编辑源文件并检查渲染 |
 
 项目想调整某个包：在 Packs 页选包按 `C-c p`，写入项目 `noema-capabilities.json` 的
 `packs.patches`，只有 `members_remove`、`members_add`、`preamble_append` 三种增量，

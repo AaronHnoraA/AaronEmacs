@@ -135,6 +135,29 @@
           "receiving-code-review"
         ],
         "preamble": "These Skills come from obra/superpowers. They may mention other superpowers Skills, slash commands or subagents; use those only if this session actually provides them. Where a Skill conflicts with the repository's own AGENTS.md or CLAUDE.md, the repository wins."
+      },
+      "visualization": {
+        "title": "Visualization",
+        "description": "Data charts, LaTeX/TikZ figures, and HTML/SVG visualizations",
+        "members": [
+          "noema-data-visualization",
+          "noema-tikz-figures",
+          "noema-web-visualization"
+        ],
+        "preamble": "Follow the requested output format or the destination's native format. Keep quantitative values and transformations traceable. Render and inspect the final figure; supply editable source and state any unverified browser or layout behavior."
+      },
+      "noema-emacs": {
+        "title": "Noema in Emacs",
+        "description": "Noema and Emacs operation, authoring syntax, and verified design context",
+        "members": [
+          "noema-emacs-workflow",
+          "aaron-emacs-context",
+          "noema-authoring-syntax",
+          "noema-design-context",
+          "noema-elisp-api",
+          "noema-work-dag"
+        ],
+        "preamble": "Work in the current Noema and Emacs context. Keep Markdown and .noema source authoritative, use the public semantic API for structural changes, and distinguish verified product contracts from design assumptions. Read the relevant Skill reference before using a detailed command or syntax."
       }
     }
   }
