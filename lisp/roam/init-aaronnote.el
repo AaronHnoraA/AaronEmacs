@@ -3948,6 +3948,23 @@ failure while it is still going."
 (my/noema--def-editor-cmd "export-latex"    "export-latex"    "Export the current scope to LaTeX.")
 (my/noema--def-editor-cmd "settings"        "settings"        "Open Noema settings.")
 
+;; Layout syntax and editor preferences are owned by Noema. Emacs sends the
+;; same source-backed commands as the web editor and keeps no block defaults.
+(defun my/noema-insert-layout-grid ()
+  "Wrap the selection in a two-column Noema layout grid."
+  (interactive)
+  (my/noema-command "insert-layout" '((value . "grid"))))
+
+(defun my/noema-insert-layout-three-columns ()
+  "Wrap the selection in a three-column Noema layout grid."
+  (interactive)
+  (my/noema-command "insert-layout" '((value . "grid:3"))))
+
+(defun my/noema-insert-layout-flow ()
+  "Wrap the selection in a flowing two-column Noema layout."
+  (interactive)
+  (my/noema-command "insert-layout" '((value . "flow"))))
+
 ;;;###autoload
 (defun noema-trash-note ()
   "Save and move the current Noema document to recoverable Trash."
@@ -4062,7 +4079,12 @@ failure while it is still going."
       ("u" "insert TOC"       my/noema-insert-toc)
       ("U" "undo"             my/noema-undo)
       ("Y" "redo"             my/noema-redo)
-      ("V" "paste"            my/noema-paste)]]))
+      ("V" "paste"            my/noema-paste)]
+     ["Layout (web)"
+      ("!g" "grid"            my/noema-insert-layout-grid)
+      ("!3" "three columns"   my/noema-insert-layout-three-columns)
+      ("!l" "flowing columns" my/noema-insert-layout-flow)
+      ("!e" "editor settings" my/noema-settings)]]))
 
 (with-eval-after-load 'transient
   (transient-define-prefix noema-ai-menu ()
