@@ -1066,6 +1066,151 @@ rsync really speaks its protocol over the command the backend handed out."
                 (buffer-list)))))
         (set-window-configuration before)))))
 
+(ert-deftest remote-files-other-side-selection-and-history-are-isolated ()
+  "Changing the other machine never reuses another pair's directory."
+  (remote-transfer-test-with-registry
+    (remote-register-target "box" :label "Box")
+    (remote-register-target "lab" :label "Lab")
+    (let* ((box "/fs:box:/work/")
+           (lab "/fs:lab:/work/")
+           (local-a "/fs:local:/tmp/source-a/")
+           (local-b "/fs:local:/tmp/source-b/")
+           (remote-files-local-directory directory)
+           (remote-files-other-history (make-hash-table :test #'equal))
+           (remote-files-other-selections (make-hash-table :test #'equal)))
+      (should (equal (remote-file-name-target
+                      (remote-files--other-start box)) "local"))
+      (should (equal (remote-file-name-target
+                      (remote-files--other-start lab)) "local"))
+      (cl-letf (((symbol-function 'remote-files--here) (lambda () box))
+                ((symbol-function 'remote-read-target)
+                 (lambda (&rest _) (remote-get-target "lab"))))
+        (remote-files-select-other-target)
+        (should (string-match-p "<->  lab" (remote-files--menu-title))))
+      (should (equal (remote-files--other-start box) "/fs:lab:/"))
+      (should (equal (remote-file-name-target
+                      (remote-files--other-start lab)) "local"))
+      (remote-files--remember-other box "/fs:lab:/shared/")
+      (remote-files--remember-other box "/fs:local:/tmp/box-downloads/")
+      (should (equal (gethash '("box" . "lab") remote-files-other-history)
+                     "/fs:lab:/shared/"))
+      (should (equal (gethash '("box" . "local") remote-files-other-history)
+                     "/fs:local:/tmp/box-downloads/"))
+      (should (equal (remote-files--other-start box)
+                     "/fs:local:/tmp/box-downloads/"))
+      (should (equal (remote-file-name-target
+                      (remote-files--other-start lab)) "local"))
+      (puthash local-a "box" remote-files-other-selections)
+      (remote-files--remember-other local-a "/fs:box:/out/")
+      (should (equal (remote-files--other-start local-a) "/fs:box:/out/"))
+      (cl-letf (((symbol-function 'remote-read-target)
+                 (lambda (&rest _) (remote-get-target "lab"))))
+        (should (equal (remote-files--other-start local-b) "/fs:lab:/")))
+      (should (equal (remote-files--other-start local-a) "/fs:box:/out/")))))
+
+(ert-deftest remote-files-copies-between-remote-targets-via-client ()
+  "Both target transports are used and the temporary local folder is removed."
+  (skip-unless (remote-client-executable-find "rsync"))
+  (remote-transfer-test-with-registry
+    (let* ((rsh (expand-file-name "fake-rsh" directory))
+           (source-dir (expand-file-name "box/" directory))
+           (destination-dir (expand-file-name "lab/" directory))
+           (source (expand-file-name "payload.txt" source-dir))
+           (destination (concat "/fs:lab:" destination-dir))
+           (logical-source (concat "/fs:box:" source)))
+      (with-temp-file rsh (insert "#!/bin/sh\nshift\nexec sh -c \"$*\"\n"))
+      (set-file-modes rsh #o700)
+      (make-directory source-dir)
+      (make-directory destination-dir)
+      (with-temp-file source (insert "from box"))
+      (remote-register-backend
+       "shell-only"
+       :capabilities '(metadata file-read directory process-sync process-async)
+       :project (lambda (file _link) (remote-file-local-name file))
+       :client-shell
+       (lambda (_route) (list :command (list rsh) :destination "fake-host")))
+      (dolist (id '("box" "lab"))
+        (remote-register-target id)
+        (remote-register-pipeline id "api" '("shell-only")))
+      (with-temp-buffer
+        (setq default-directory (concat "/fs:box:" source-dir))
+        (remote-files--queue (list logical-source) destination))
+      (let ((download (car remote-transfer-jobs)))
+        (should (equal (remote-transfer-job-target-ids download)
+                       '("local" "box")))
+        (should (equal (remote-route-target-id
+                        (remote-transfer-job-route download)) "box"))
+        (should (eq (remote-transfer-test--wait download) 'done))
+        (let ((upload (car remote-transfer-jobs))
+              (stage (remote-file-local-name
+                      (remote-transfer-job-destination download))))
+          (should-not (eq upload download))
+          (should (equal (remote-transfer-job-target-ids upload)
+                         '("lab" "local")))
+          (should (equal (remote-route-target-id
+                          (remote-transfer-job-route upload)) "lab"))
+          (should (eq (remote-transfer-test--wait upload) 'done))
+          (should (equal (with-temp-buffer
+                           (insert-file-contents
+                            (expand-file-name "payload.txt" destination-dir))
+                           (buffer-string))
+                         "from box"))
+          (should-not (file-exists-p stage))))
+      (with-temp-buffer
+        (setq default-directory (concat "/fs:box:" source-dir))
+        (remote-files--queue
+         (list (concat "/fs:box:" (expand-file-name "missing" source-dir)))
+         destination))
+      (let* ((failed (car remote-transfer-jobs))
+             (stage (remote-file-local-name
+                     (remote-transfer-job-destination failed))))
+        (should (eq (remote-transfer-test--wait failed) 'failed))
+        (should-not (file-exists-p stage))
+        (with-temp-file (expand-file-name "missing" source-dir)
+          (insert "retry works"))
+        (let ((retry (remote-transfer-retry failed)))
+          (should-not (equal (remote-transfer-job-destination retry)
+                             (remote-transfer-job-destination failed)))
+          (should (eq (remote-transfer-test--wait retry) 'done))
+          (should (eq (remote-transfer-test--wait
+                       (car remote-transfer-jobs)) 'done))
+          (should (file-exists-p
+                   (expand-file-name "missing" destination-dir))))))))
+
+(ert-deftest remote-dirvish-yank-keeps-unrelated-dired-marks ()
+  "A copy snapshot and its cleanup belong only to the source Dired buffer."
+  (remote-transfer-test-with-registry
+    (let* ((first (expand-file-name "first/" directory))
+           (second (expand-file-name "second/" directory))
+           (file-a (expand-file-name "a.txt" first))
+           (file-b (expand-file-name "b.txt" second))
+           (my/dirvish--paste-method nil)
+           (my/dirvish--paste-sources nil)
+           (my/dirvish--paste-source-buffer nil)
+           buffer-a buffer-b)
+      (make-directory first)
+      (make-directory second)
+      (with-temp-file file-a (insert "a"))
+      (with-temp-file file-b (insert "b"))
+      (unwind-protect
+          (progn
+            (setq buffer-a (dired-noselect first)
+                  buffer-b (dired-noselect second))
+            (with-current-buffer buffer-b
+              (dired-goto-file file-b)
+              (dired-mark 1))
+            (with-current-buffer buffer-a
+              (dired-goto-file file-a)
+              (my/dirvish-yank)
+              (should (equal (my/dirvish--marked-everywhere)
+                             (list (remote-canonicalize-file-name file-a))))
+              (my/dirvish--clear-marks))
+            (with-current-buffer buffer-b
+              (should (equal (dired-map-over-marks (dired-get-filename) nil)
+                             (list file-b)))))
+        (when (buffer-live-p buffer-a) (kill-buffer buffer-a))
+        (when (buffer-live-p buffer-b) (kill-buffer buffer-b))))))
+
 (ert-deftest remote-dirvish-paste-between-machines-is-a-transfer ()
   "Copy here, paste there: across machines it queues instead of blocking."
   (skip-unless (remote-client-executable-find "rsync"))

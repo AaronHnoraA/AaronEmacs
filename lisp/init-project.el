@@ -165,6 +165,17 @@ source file's filesystem depth."
 
 (setq project-list-file my/project-list-file)
 
+(defun my/project--canonical-file-name (path)
+  "Canonicalize PATH without assigning a native absolute path to a target.
+Relative paths still belong to the current buffer's directory."
+  (let ((default-directory
+         (if (and (file-name-absolute-p path)
+                  (not (remote-fs-file-name-p path))
+                  (not (file-remote-p path)))
+             temporary-file-directory
+           default-directory)))
+    (remote-canonicalize-file-name path)))
+
 (defun my/project-normalize-root (project-root)
   "Return PROJECT-ROOT as a normalized directory name.
 A root this machine reaches directly keeps its native name, so ordinary local
@@ -172,24 +183,27 @@ projects are unchanged.  Any other root is its logical `/fs:TARGET:/path/'
 identity, so a project reached through `/ssh:' or `/fs:' is one project.
 This is spelling only: nothing is probed or connected."
   (when (stringp project-root)
-    (let* ((expanded (expand-file-name project-root))
-           (logical (ignore-errors (remote-canonicalize-file-name expanded)))
+    (let* ((logical (ignore-errors
+                      (my/project--canonical-file-name project-root)))
+           (expanded (if logical
+                         logical
+                       (expand-file-name project-root)))
            (client (and logical (ignore-errors (remote-client-file-name logical)))))
       (file-name-as-directory (or client logical expanded)))))
 
 (defun my/project-client-root-p (project-root)
   "Return non-nil when PROJECT-ROOT is reachable without a Remote connection."
-  (let ((logical (ignore-errors (remote-canonicalize-file-name project-root))))
+  (let ((logical (ignore-errors (my/project--canonical-file-name project-root))))
     (or (null logical) (ignore-errors (remote-client-file-name logical)))))
 
 (defun my/project-canonical-path (path)
   "Return PATH in a stable canonical form."
   (when (stringp path)
-    (let* ((logical (remote-canonicalize-file-name path))
+    (let* ((logical (my/project--canonical-file-name path))
            (client (ignore-errors (remote-client-file-name logical)))
            (canonical
             (if client
-                (remote-canonicalize-file-name
+                (my/project--canonical-file-name
                  (or (ignore-errors (file-truename client)) client))
               logical)))
       (directory-file-name canonical))))
@@ -202,7 +216,7 @@ client-accessible target uses its client path; otherwise the `treemacs'
 adapter projects the logical path to a standard file-handler path such as
 TRAMP.  The source buffer itself keeps its ordinary logical identity."
   (when (stringp path)
-    (let* ((logical (remote-canonicalize-file-name path))
+    (let* ((logical (my/project--canonical-file-name path))
            (client (ignore-errors (remote-client-file-name logical)))
            (physical
             (or
@@ -218,7 +232,7 @@ paths are restored to `/fs:' so opening a Treemacs node cannot leak a TRAMP
 pipeline identity into buffer state."
   (if (not (stringp path))
       path
-    (let* ((logical (remote-canonicalize-file-name path))
+    (let* ((logical (my/project--canonical-file-name path))
            (client (ignore-errors (remote-client-file-name logical))))
       (or client logical))))
 
@@ -590,7 +604,8 @@ Only explicit navigation changes this state; background project queries do not."
   "Activate ROOT, or leave the active project when ROOT is nil.
 With REMEMBER, associate the current perspective with ROOT.  Identity changes
 emit one event without scanning files or opening a Remote connection."
-  (setq root (when root (file-name-as-directory (remote-canonicalize-file-name root))))
+  (setq root (when root (file-name-as-directory
+                         (my/project--canonical-file-name root))))
   (when (and remember (fboundp 'persp-curr) (persp-curr))
     (if root (puthash (persp-curr) root my/project--perspective-roots)
       (remhash (persp-curr) my/project--perspective-roots)))
@@ -637,7 +652,7 @@ With ARG, use Projectile's commander action instead."
   (setq project-root (my/project-normalize-root project-root))
   (let ((canonical-root
          (file-name-as-directory
-          (remote-canonicalize-file-name project-root)))
+          (my/project--canonical-file-name project-root)))
         opened)
     (unwind-protect
         (progn
@@ -653,7 +668,7 @@ With ARG, use Projectile's commander action instead."
                                                     (window-buffer window))))
                                    (string-prefix-p
                                     canonical-root
-                                    (remote-canonicalize-file-name file)))))
+                                    (my/project--canonical-file-name file)))))
                           (cons (selected-window)
                                 (window-list nil nil)))))
                   (select-window source-window)
@@ -754,7 +769,7 @@ RG-UNAVAILABLE records a previous probe by another search entry point."
   (setq project-root (my/project-normalize-root project-root))
   (when (fboundp 'my/direnv-update-environment-maybe)
     (my/direnv-update-environment-maybe project-root))
-  (let* ((logical (remote-canonicalize-file-name project-root))
+  (let* ((logical (my/project--canonical-file-name project-root))
          (context (remote-context logical))
          (search-root (or (remote-client-file-name logical) logical))
          (custom-search-command
@@ -784,7 +799,8 @@ RG-UNAVAILABLE records a previous probe by another search entry point."
   (setq project-root (my/project-normalize-root project-root))
   (when (fboundp 'my/direnv-update-environment-maybe)
     (my/direnv-update-environment-maybe project-root))
-  (dired project-root)
+  (let ((default-directory project-root))
+    (dired project-root))
   (my/project-activate project-root t))
 
 (defun my/project-magit-status (project-root)
@@ -793,7 +809,7 @@ RG-UNAVAILABLE records a previous probe by another search entry point."
   (setq project-root (my/project-normalize-root project-root))
   (when (fboundp 'my/direnv-update-environment-maybe)
     (my/direnv-update-environment-maybe project-root))
-  (let* ((logical (remote-canonicalize-file-name project-root))
+  (let* ((logical (my/project--canonical-file-name project-root))
          (magit-root (or (remote-client-file-name logical) logical))
          (default-directory magit-root))
     (magit-status-setup-buffer magit-root)

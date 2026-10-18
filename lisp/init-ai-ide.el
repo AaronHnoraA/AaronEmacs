@@ -31,11 +31,11 @@
 ;; Install missing dependencies only; normal startup does no network access.
 ;; Migration does not upgrade versions or touch currently running sessions.
 (my/package-ensure-vc 'acp "https://github.com/xenodium/acp.el"
-                      "242cef63d76cc1073485847f67a21f6d8406d158")
+                      "73940c8905b930b2386c1d2e355cf44c0feabfb2")
 (my/package-ensure-vc 'shell-maker "https://github.com/xenodium/shell-maker"
-                      "f448a74a8eded23aa42f8d60a41c5d8d3a183d07")
+                      "fc5fd0ef732f816c38fa4840e988eaa6707839e7")
 (my/package-ensure-vc 'agent-shell "https://github.com/xenodium/agent-shell"
-                      "55d7148505da2433a30b1228092e17b0775ffa25")
+                      "1cfb5697e8410485f317967c3c67a05d0eb0645f")
 (my/package-ensure-vc 'agent-shell-fork-tree "https://github.com/roife/agent-shell-fork-tree"
                       "c0a61ff6a3ceae53473a8533a06cb7648297d5eb")
 
@@ -231,7 +231,8 @@ The ACP session ID is distinct from the Emacs buffer and OS process IDs."
          (existing (and (eq (map-elt (plist-get args :config) :identifier) 'codex)
                         (stringp session-id)
                         (my/agent-shell--find-execution
-                         session-id (plist-get args :config) (agent-shell-cwd)))))
+                         session-id (plist-get args :config)
+                         (or (plist-get args :cwd) (agent-shell-cwd))))))
     (if existing
         (progn
           (unless (plist-get args :no-focus)
@@ -502,9 +503,20 @@ when present; the exact Codex message is the isolated compatibility fallback."
   (setq-local agent-shell--transcript-file nil
               shell-maker-prompt-before-killing-buffer nil))
 
+(defun my/agent-shell-busy-submit-steer-or-queue (prompt)
+  "Steer PROMPT when the adapter supports it, otherwise queue it."
+  (if (agent-shell-steering-supported-p)
+      (agent-shell-busy-submit-steer prompt)
+    (agent-shell-busy-submit-queue prompt)))
+
 (with-eval-after-load 'agent-shell
   ;; Apply to every entry point, including plain M-x agent-shell.
-  (setq agent-shell-transcript-file-path-function nil)
+  (setq agent-shell-transcript-file-path-function nil
+        agent-shell-persistent-prompt-enabled t
+        agent-shell-busy-submit-default-function
+        #'my/agent-shell-busy-submit-steer-or-queue
+        agent-shell-busy-submit-override-function
+        #'agent-shell-busy-submit-queue)
   (add-hook 'agent-shell-mode-hook #'my/agent-shell-disable-transcripts)
   (add-hook 'agent-shell-mode-hook #'my/agent-shell-enable-command-completion)
   (dolist (buffer (buffer-list))
@@ -566,9 +578,8 @@ Provider settings, authentication, PATH and a custom command stay untouched."
               '((name . my/agent-shell-use-official-opencode))))
 
 ;; The Claude and Codex ACP adapters each bundle a copy of their CLI and run
-;; it unless told otherwise.  Those copies are removed from this machine; the
-;; only CLI is the one the person keeps updated.  Point each adapter at the
-;; CLI its workspace environment finds -- the same PATH lookup, on the same
+;; it unless told otherwise.  Point each adapter at the CLI its workspace
+;; environment finds -- the same PATH lookup, on the same
 ;; target, that found the adapter itself -- so a local session uses the
 ;; shell's `claude'/`codex' exactly as a remote one uses the target's.  There
 ;; is no fallback: a missing CLI is an error naming the target.  Pi and

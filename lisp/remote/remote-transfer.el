@@ -54,7 +54,7 @@
   id name kind sources destination target-ids command environment route
   execution overwrite state percent rate eta started finished exit-status process
   transport-process pending
-  log-buffer callback kill-timer)
+  log-buffer callback kill-timer retry-function)
 
 (cl-defstruct (remote-file-operation-plan
                (:constructor remote-file-operation-plan--create))
@@ -636,7 +636,10 @@ to native and remote targets.  CALLBACK receives the finished job."
 Target-side operations are preflighted again against the current filesystem."
   (when (eq (remote-transfer-job-state job) 'running)
     (user-error "Transfer is still running"))
-  (if (eq (remote-transfer-job-execution job) 'target)
+  (cond
+   ((remote-transfer-job-retry-function job)
+    (funcall (remote-transfer-job-retry-function job)))
+   ((eq (remote-transfer-job-execution job) 'target)
       (remote-transfer-start-file-operation
        (remote-transfer-plan-file-operation
         (remote-transfer-job-kind job)
@@ -644,11 +647,12 @@ Target-side operations are preflighted again against the current filesystem."
         (remote-transfer-job-destination job)
         :overwrite (remote-transfer-job-overwrite job))
        :name (remote-transfer-job-name job)
-       :callback (remote-transfer-job-callback job))
+       :callback (remote-transfer-job-callback job)))
+   (t
     (let ((copy (copy-remote-transfer-job job)))
       (setf (remote-transfer-job-id copy) (cl-incf remote-transfer--next-id)
             (remote-transfer-job-kill-timer copy) nil)
-      (remote-transfer--launch copy))))
+      (remote-transfer--launch copy)))))
 
 (defun remote-transfer--target-disconnected (target-id _reason)
   "End the transfers that belong to TARGET-ID."

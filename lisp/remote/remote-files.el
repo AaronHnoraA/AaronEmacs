@@ -49,7 +49,11 @@ buffer.  Called again while that buffer lives, it moves the shell to the
 directory instead of starting another.")
 
 (defvar remote-files-other-history (make-hash-table :test #'equal)
-  "Last folder used as the other side, keyed by the target of this side.")
+  "Last other folder, keyed by (SOURCE-TARGET . DESTINATION-TARGET).")
+
+(defvar remote-files-other-selections (make-hash-table :test #'equal)
+  "Chosen other target, keyed by the source's logical directory.
+An entry for one Dired folder must not change another folder's destination.")
 
 ;;; Folders and names
 
@@ -85,10 +89,11 @@ A directory row chooses that directory; a file row chooses its parent."
 
 (defun remote-files--label (directory)
   "Return a short name for logical DIRECTORY."
-  (if-let* ((client (remote-client-file-name directory)))
-      (abbreviate-file-name client)
-    (format "%s:%s" (remote-file-name-target directory)
-            (remote-file-local-name directory))))
+  (let ((target (remote-file-name-target directory)))
+    (if (equal target "local")
+        (abbreviate-file-name (or (remote-client-file-name directory)
+                                  (remote-file-local-name directory)))
+      (format "%s:%s" target (remote-file-local-name directory)))))
 
 (defun remote-files--revert-directory (directory)
   "Refresh Dired buffers that show logical DIRECTORY, including subtrees."
@@ -135,20 +140,49 @@ A directory row chooses that directory; a file row chooses its parent."
 
 ;;; The other side
 
+(defun remote-files--other-target-id (here &optional ask)
+  "Return HERE's chosen other target, asking for one when ASK is non-nil.
+An unchosen remote folder defaults to the client.  A local folder asks for a
+remote target when an operation first needs one."
+  (let* ((source (remote-file-name-target here))
+         (chosen (gethash here remote-files-other-selections)))
+    (when (and chosen (not (remote-get-target chosen)))
+      (remhash here remote-files-other-selections)
+      (setq chosen nil))
+    (or chosen
+        (unless (equal source "local") "local")
+        (when ask
+          (let ((target (remote-read-target "Other side, target: " t)))
+            (puthash here (remote-target-id target)
+                     remote-files-other-selections)
+            (remote-target-id target))))))
+
+(defun remote-files-select-other-target ()
+  "Select the other machine for this Dired folder's transfer menu.
+The selection belongs to this source folder.  Choosing a different target
+restores that pair's last directory when the next picker opens."
+  (interactive)
+  (let* ((here (remote-files--here))
+         (target (remote-read-target "Other side, target: "))
+         (id (remote-target-id target)))
+    (puthash here id remote-files-other-selections)
+    (message "Other side of %s: %s" (remote-files--label here)
+             (remote-target-label target))))
+
 (defun remote-files--other-start (here)
   "Return the folder first shown as the other side of logical HERE.
-From a folder this machine cannot read, that is a folder of this machine.
-From a folder of this machine, a target is asked for."
-  (let ((remembered
-         (gethash (remote-file-name-target here) remote-files-other-history)))
-    (if (not (remote-client-file-name here))
-        (remote-files--client-directory
-         (or remembered remote-files-local-directory))
-      (let* ((target (remote-read-target "Other side, target: " t))
-             (id (remote-target-id target)))
-        (if (and remembered (equal (remote-file-name-target remembered) id))
-            remembered
-          (file-name-as-directory (remote-target-file-name target)))))))
+Choose the other target explicitly with `remote-files-select-other-target'."
+  (let* ((source (remote-file-name-target here))
+         (id (remote-files--other-target-id here t))
+         (target (or (remote-get-target id)
+                     (user-error "Unknown target: %s" id)))
+         (remembered (gethash (cons source id) remote-files-other-history)))
+    (cond
+     ((and remembered (equal (remote-file-name-target remembered) id))
+      remembered)
+     ((equal id "local")
+      (remote-files--client-directory remote-files-local-directory))
+     (t (file-name-as-directory (remote-target-file-name target))))))
 
 (defun remote-files--pick-state (&optional window)
   "Return the pending choice WINDOW was popped up for, if any."
@@ -240,9 +274,12 @@ confirming does."
   (message "Cancelled"))
 
 (defun remote-files--remember-other (here other)
-  "Remember logical OTHER as the other side of logical HERE's target."
-  (puthash (remote-file-name-target here) (file-name-as-directory other)
-           remote-files-other-history))
+  "Remember logical OTHER for the source and destination target pair."
+  (let ((source (remote-file-name-target here))
+        (destination (remote-file-name-target other)))
+    (puthash (cons source destination) (file-name-as-directory other)
+             remote-files-other-history)
+    (puthash here destination remote-files-other-selections)))
 
 ;;; Transfers
 
@@ -250,9 +287,76 @@ confirming does."
   "Queue copying logical FILES into logical DESTINATION."
   (let ((name (format "%s -> %s" (remote-files--summary files)
                       (remote-files--label destination))))
-    (remote-transfer-start files destination
-                           :name name :callback #'remote-files--finished)
+    (if (and (not (remote-client-file-name (car files)))
+             (not (remote-client-file-name destination)))
+        (remote-files--queue-via-client files destination name)
+      (remote-transfer-start files destination
+                             :name name :callback #'remote-files--finished))
     (message "Queued: %s" name)))
+
+(defun remote-files--remove-client-stage (stage)
+  "Remove client-owned STAGE, independent of the active target buffer."
+  (let ((default-directory temporary-file-directory))
+    (when (file-directory-p stage)
+      (delete-directory stage t))))
+
+(defun remote-files--queue-via-client (files destination name)
+  "Copy FILES between two remote-only targets through a client staging folder.
+The download and upload are separate jobs so each uses its own target's
+transport and credentials.  The staging folder is removed after either job
+fails or the upload finishes, including cancellation."
+  (let* ((stage (let ((default-directory temporary-file-directory))
+                  (make-temp-file "remote-transfer-stage-" t)))
+         (logical-stage (remote-files--client-directory stage))
+         (names (mapcar (lambda (file)
+                          (file-name-nondirectory (directory-file-name file)))
+                        files))
+         (staged (mapcar (lambda (name)
+                           (remote-make-file-name
+                            "local" (expand-file-name name stage)))
+                         names))
+         (retry (lambda ()
+                  (remote-files--queue-via-client files destination name)))
+         (launched nil)
+         job)
+    (unwind-protect
+        (progn
+          (when (or (member "" names)
+                    (/= (length names) (length (delete-dups (copy-sequence names)))))
+            (user-error "Remote transfer sources need distinct file names"))
+          ;; Check both routes before starting the download.  The staged names
+          ;; do not exist yet, but command planning only needs their identity.
+          (remote-transfer-command files logical-stage)
+          (remote-transfer-command staged destination)
+          (setq job
+                (remote-transfer-start
+                 files logical-stage :name (format "Stage %s" name)
+                 :callback
+                 (lambda (download)
+                   (if (eq (remote-transfer-job-state download) 'done)
+                       (condition-case err
+                           (let ((upload
+                                  (remote-transfer-start
+                                   staged destination :name name
+                                   :callback
+                                   (lambda (upload)
+                                     (unwind-protect
+                                         (remote-files--finished upload)
+                                       (remote-files--remove-client-stage
+                                        stage))))))
+                             (setf (remote-transfer-job-retry-function upload)
+                                   retry))
+                         (error
+                          (remote-files--remove-client-stage stage)
+                          (message "Upload could not start: %s"
+                                   (error-message-string err))))
+                     (remote-files--remove-client-stage stage)
+                     (remote-files--finished download)))))
+          (setf (remote-transfer-job-retry-function job) retry)
+          (setq launched t)
+          job)
+      (unless launched
+        (remote-files--remove-client-stage stage)))))
 
 (defun remote-files-send ()
   "Copy the marked files, or the one at point, to a folder of the other side.
@@ -461,17 +565,19 @@ of a Dirvish window, so it only reads state that is already in memory."
   "Return the menu heading for the current folder."
   (condition-case nil
       (let ((here (remote-files--here)))
-        (format "%s  <->  %s"
+        (format "%s  <->  %s  (o: choose machine)"
                 (remote-files--label here)
-                (if (remote-client-file-name here)
-                    "a target (asked for)"
-                  "this machine")))
+                (let ((target (remote-files--other-target-id here)))
+                  (cond ((equal target "local") "local (this machine)")
+                        (target target)
+                        (t "choose target")))))
     (error "Files")))
 
 ;;;###autoload (autoload 'remote-files-dispatch "remote-files" nil t)
 (transient-define-prefix remote-files-dispatch ()
   "Transfer commands for the directory at point in Dired."
   [:description remote-files--menu-title
+   ("o" "Choose other machine" remote-files-select-other-target :transient t)
    ["Files"
     ("c" "Send marked to the other side" remote-files-send)
     ("g" "Fetch from the other side" remote-files-fetch)]

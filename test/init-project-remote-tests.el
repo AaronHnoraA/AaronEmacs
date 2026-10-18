@@ -8,6 +8,34 @@
 (require 'remote-board)
 (require 'remote-search)
 
+(ert-deftest my/project-local-root-stays-local-from-a-remote-buffer ()
+  "Switching to a native project must not inherit the source buffer's target."
+  (let* ((local (file-name-as-directory
+                 (make-temp-file "project-local-switch-" t)))
+         (my/project-active-root nil)
+         (my/project-activated-hook nil)
+         (my/project--perspective-roots (make-hash-table :test #'eq))
+         opened-in)
+    (unwind-protect
+        (with-temp-buffer
+          (setq default-directory "/fs:box:/work/")
+          (should (equal (my/project-normalize-root local) local))
+          (should (equal (my/project--canonical-file-name local)
+                         (concat "/fs:local:" local)))
+          (cl-letf (((symbol-function 'my/project-switch-perspective) #'ignore)
+                    ((symbol-function 'my/direnv-update-environment-maybe)
+                     #'ignore)
+                    ((symbol-function 'dired)
+                     (lambda (_path) (setq opened-in default-directory))))
+            (my/project-switch local)
+            (should (equal opened-in local))
+            (should (equal my/project-active-root
+                           (concat "/fs:local:" local)))
+            (my/project-switch "/fs:lab:/work/")
+            (should (equal opened-in "/fs:lab:/work/"))
+            (should (equal my/project-active-root "/fs:lab:/work/"))))
+      (delete-directory local t))))
+
 (ert-deftest project-managed-ripgrep-preserves-consult-options ()
   (should
    (equal

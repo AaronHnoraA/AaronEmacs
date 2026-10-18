@@ -57,6 +57,12 @@
 (defvar my/dirvish--paste-method nil
   "What `my/dirvish-paste' does with the marked files: `copy' or `cut'.")
 
+(defvar my/dirvish--paste-sources nil
+  "Logical files captured by the most recent explicit copy or cut.")
+
+(defvar my/dirvish--paste-source-buffer nil
+  "Dired buffer whose marks belong to `my/dirvish--paste-sources'.")
+
 (defun my/dirvish--command (name docstring function)
   "Define FUNCTION as a key-only command NAME with DOCSTRING.
 The uninterned symbol stays readable in key help without entering M-x."
@@ -149,7 +155,13 @@ The uninterned symbol stays readable in key help without entering M-x."
 (defun my/dirvish-escape ()
   "Clear the selection and the pending copy or cut."
   (interactive)
-  (setq my/dirvish--paste-method nil)
+  (when (and (buffer-live-p my/dirvish--paste-source-buffer)
+             (not (eq my/dirvish--paste-source-buffer (current-buffer))))
+    (with-current-buffer my/dirvish--paste-source-buffer
+      (dired-unmark-all-marks)))
+  (setq my/dirvish--paste-method nil
+        my/dirvish--paste-sources nil
+        my/dirvish--paste-source-buffer nil)
   (dired-unmark-all-marks))
 
 ;;; Copy, cut, paste
@@ -158,7 +170,10 @@ The uninterned symbol stays readable in key help without entering M-x."
   "Remember METHOD for the marked files, marking the one at point if none."
   (unless (cdr (dired-get-marked-files nil nil nil t))
     (dired-mark 1))
-  (setq my/dirvish--paste-method method)
+  (setq my/dirvish--paste-method method
+        my/dirvish--paste-sources
+        (mapcar #'remote-canonicalize-file-name (dired-get-marked-files))
+        my/dirvish--paste-source-buffer (current-buffer))
   (message "%s: go to the destination and paste"
            (if (eq method 'cut) "Cut" "Copied")))
 
@@ -178,25 +193,16 @@ The uninterned symbol stays readable in key help without entering M-x."
   (my/dirvish-escape)
   (message "Nothing pending"))
 
-(defun my/dirvish--dired-buffers ()
-  "Return the live Dired buffers."
-  (seq-filter (lambda (buffer)
-                (with-current-buffer buffer (derived-mode-p 'dired-mode)))
-              (buffer-list)))
-
 (defun my/dirvish--marked-everywhere ()
-  "Return the logical names of the files marked in any Dired buffer.
-Each name is resolved in its own buffer, which is what tells a bare path of
-this machine from the same path on a target."
-  (delete-dups
-   (cl-loop
-    for buffer in (my/dirvish--dired-buffers) append
-    (with-current-buffer buffer
-      (when (save-excursion
-              (goto-char (point-min))
-              (re-search-forward (dired-marker-regexp) nil t))
+  "Return pending logical files, or marks in the current Dired buffer.
+Unrelated marks in another machine's Dired buffer are never implicit sources."
+  (or (and my/dirvish--paste-method my/dirvish--paste-sources)
+      (when (and (derived-mode-p 'dired-mode)
+                 (save-excursion
+                   (goto-char (point-min))
+                   (re-search-forward (dired-marker-regexp) nil t)))
         (mapcar #'remote-canonicalize-file-name
-                (dired-map-over-marks (dired-get-filename) nil)))))))
+                (dired-map-over-marks (dired-get-filename) nil)))))
 
 (defun my/dirvish--yank-method (command)
   "Return the target file operation corresponding to Dirvish COMMAND."
@@ -208,9 +214,12 @@ this machine from the same path on a target."
         (t (error "Unsupported Dirvish file operation: %s" command))))
 
 (defun my/dirvish--clear-marks ()
-  "Unmark files in live Dired buffers after an operation is queued."
-  (dolist (buffer (my/dirvish--dired-buffers))
-    (with-current-buffer buffer (dired-unmark-all-marks))))
+  "Unmark the source Dired buffer after an operation is queued."
+  (let ((buffer (or my/dirvish--paste-source-buffer (current-buffer))))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (when (derived-mode-p 'dired-mode)
+          (dired-unmark-all-marks))))))
 
 (defun my/dirvish--target-operation-finished (job)
   "Refresh source folders after a routed move and report JOB's result."
@@ -319,7 +328,9 @@ done: they are queued as a bulk transfer."
        here same force same-plan))
     (when foreign
       (my/dirvish--clear-marks)))
-  (setq my/dirvish--paste-method nil))
+  (setq my/dirvish--paste-method nil
+        my/dirvish--paste-sources nil
+        my/dirvish--paste-source-buffer nil))
 
 (defun my/dirvish-paste-force ()
   "Paste, overwriting existing files."

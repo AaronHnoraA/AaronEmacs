@@ -203,6 +203,29 @@
       (agent-shell--append-transcript :text "Agent output"
                                       :file-path agent-shell--transcript-file))))
 
+(ert-deftest agent-shell-busy-submit-steers-supported-agents-and-queues-others ()
+  "Busy Enter steers only when the active adapter advertised support."
+  (should agent-shell-persistent-prompt-enabled)
+  (should (eq agent-shell-busy-submit-default-function
+              #'my/agent-shell-busy-submit-steer-or-queue))
+  (should (eq agent-shell-busy-submit-override-function
+              #'agent-shell-busy-submit-queue))
+  (with-temp-buffer
+    (let (calls)
+      (cl-letf (((symbol-function 'agent-shell-busy-submit-steer)
+                 (lambda (prompt) (push (list 'steer prompt) calls)))
+                ((symbol-function 'agent-shell-busy-submit-queue)
+                 (lambda (prompt) (push (list 'queue prompt) calls))))
+        (setq-local agent-shell--state '((:supports-steering . t)))
+        (funcall agent-shell-busy-submit-default-function "Change direction")
+        (setq-local agent-shell--state '((:supports-steering . nil)))
+        (funcall agent-shell-busy-submit-default-function "Next turn")
+        (funcall agent-shell-busy-submit-override-function "Explicit queue")
+        (should (equal (nreverse calls)
+                       '((steer "Change direction")
+                         (queue "Next turn")
+                         (queue "Explicit queue"))))))))
+
 (defun my/agent-shell-test--execution (session-id directory &optional agent)
   "Make a fake live ACP frontend for SESSION-ID in DIRECTORY."
   (let ((buffer (generate-new-buffer " *agent-session-test*"))
@@ -250,6 +273,20 @@
                          :config config :session-id "task-a" :no-focus t)))
             (should (= launches 1))))
       (mapc #'my/agent-shell-test--close buffers))))
+
+(ert-deftest agent-shell-resume-reuses-explicit-upstream-cwd ()
+  "The new :cwd argument selects the matching execution even from elsewhere."
+  (let* ((config '((:identifier . codex)))
+         (buffer (my/agent-shell-test--execution "task-a" "/tmp/")))
+    (unwind-protect
+        (cl-letf (((symbol-function 'agent-shell-cwd)
+                   (lambda () (ert-fail "Ignored explicit :cwd"))))
+          (should (eq buffer
+                      (my/agent-shell--reuse-session-a
+                       (lambda (&rest _) (ert-fail "Started a duplicate process"))
+                       :config config :session-id "task-a"
+                       :cwd "/tmp/" :no-focus t))))
+      (my/agent-shell-test--close buffer))))
 
 (ert-deftest agent-shell-codex-reuse-leaves-other-adapters-unchanged ()
   (let* ((default-directory "/tmp/")
