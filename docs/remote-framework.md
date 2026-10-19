@@ -1107,8 +1107,9 @@ target-scoped service 在强制恢复时原位替换 handle 并保留 instance i
 `remote-terminal-open` 提供内建 comint frontend；`remote-terminal-adopt` 让
 Ghostel 保留自己的 module、filter、sentinel 与 UI，同时把
 process/buffer teardown 登记到 workspace。配置层的 popup Ghostel 已走这条边界：
-在任意 `/fs:TARGET:/path` buffer 中按 `C-c e`，会打开或复用同一 workspace 的
-terminal，且不同 target/workspace 的 popup 池不会串线。本地也是
+在任意 `/fs:TARGET:/path` buffer 中按 `C-c e`，会打开或复用全局 popup 窗口；
+tab 可跨项目和 target 切换。新建 terminal/agent 使用最近聚焦的工作 buffer 的
+目录与 target，每个已有 buffer 的进程和生命周期仍属于原 workspace。本地也是
 `/fs:local:` 的同一流程。
 PTY 按 `pty` capability 单独选路：SSH 配置优先 `ssh-pty`，直接复用 pipeline
 拥有的 OpenSSH ControlMaster，不建立 TRAMP 文件会话；文件与 LSP 按各自

@@ -360,7 +360,7 @@ Dape 原生 `dape-restart` 重启。
 - `M-\``
   `ghostel-toggle`
 - `C-c e`
-  弹出/收起当前 workspace 的 popup `ghostel`；远端 buffer 会打开远端终端
+  弹出/收起全局 popup；新建终端时按最近聚焦的项目和 target 启动
 - `C-c C-e`
   智能弹出或收回当前 popup `ghostel`
 - `C-c E`
@@ -438,8 +438,9 @@ buffer 不显示这一项。面板中的最近文件夹由显式的 Remote 打�
 
 `C-c e` 是推荐入口。它读取当前 buffer 的 `/fs:TARGET:/path` 上下文，通过
 remote process adapter 启动 ghostel，并把 terminal 生命周期登记给 workspace；
-本地与远端走同一条路径。popup 只在同一 workspace 内复用和循环，不会把本地
-terminal 带到 WSL/SSH buffer，也不会跨两个远端 target 串线。
+本地与远端走同一条路径。popup 的 tab 和当前窗口在所有项目及 target 间共享；
+新建 terminal 或 agent 时读取最近聚焦的工作 buffer，在该项目和 target 启动进程。
+切换旧 tab 只显示原有 buffer，不改变其进程所属的 workspace。
 
 `my/ghostel-ssh` 会优先读：
 
@@ -700,7 +701,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   只列运行中的 ACP 会话，本项目优先、上次仍运行的选择预选（`noema-context-always-ask-session`）
 - agent-shell 输入 `/resume` — 向当前 Codex/Claude 等 ACP adapter 读取同工作目录的原生
   `session/list`，选中后以原生 ID 走 `session/load`/`session/resume`；已有 buffer 直接切换，
-  其他历史会话替换当前 Agent buffer、不增加 tab。Noema 已登记的 ID 恢复到原名。
+  其他历史会话替换当前 Agent 或 popup buffer、不增加 tab。Noema 已登记的 ID 恢复到原名。
   原生历史由 agent 后端保存，不靠 Emacs transcript。
 - Noema Markdown 页面里没有 Emacs 文本：`C-c A v/B/@/./c/s/r` 和 `C-c A e` 经
   `noema-md-bridge` 让页面先保存并报告选区的准确位置，再在笔记的 Emacs 源 buffer
@@ -733,8 +734,9 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 - 会话登记（`noema-agent-acp.el`）：`noema-agent-acp-start` 用 `:origin` 记下是哪个
   入口开的（`run`/`popup`/`manual`/`foreign`/`pi`/`takeover`/`probe`/`side`），
   `noema-agent-acp-adopt` 是唯一登记点，负责解析项目 root、生成唯一会话名、调用
-  `noema-agent-acp-mark-session-buffer`；`agent-shell-mode-hook` 上的收编钩子把裸
-  `M-x agent-shell` 也纳进来（`noema-agent-acp-adopt-foreign-sessions` 可关）。
+  `noema-agent-acp-mark-session-buffer`；裸 `M-x agent-shell` 经管理入口以
+  `manual` 来源在调用窗口启动，其他程序自行创建的 agent-shell buffer 仍由
+  `agent-shell-mode-hook` 收编（`noema-agent-acp-adopt-foreign-sessions` 可关）。
   root 解析是纯查询（含 `[project]` 的 `noema.toml` → projectile → project.el →
   该目录，统一投影成本机原生路径），绝不创建 Project。只有已经是 Noema 项目时才额外 `session:promote` + `session:name:bind`
   写进 Node 持久注册表，失败不影响会话。`noema-agent-acp-sessions` 是合并视图，

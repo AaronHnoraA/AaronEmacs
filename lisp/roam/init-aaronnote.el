@@ -3768,7 +3768,7 @@ failure while it is still going."
     (run-at-time 0.05 nil #'my/noema--focus-xwidget-buffer buffer)))
 
 (defun my/noema-switch-buffer-menu (event)
-  "Choose an undisplayed Noema buffer from a header-line right click."
+  "Choose an undisplayed Noema buffer from a header-line button."
   (interactive "e")
   (when event (my/xwidget--select-event-window event))
   (let ((buffers (my/noema--undisplayed-buffers)))
@@ -3824,24 +3824,19 @@ failure while it is still going."
 
 (defun my/noema--header-browser-buttons ()
   "Return native xwidget controls with Noema actions under the pencil."
-  (list
-   (my/xwidget--nav-button
-    (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_left" "back")
-    #'my/noema-back "Back [b] · right click: Noema buffers"
-    'header-line #'my/noema-switch-buffer-menu)
-   (my/xwidget--nav-button
-    (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_right" "fwd")
-    #'my/noema-forward "Forward [f] · right click: Noema buffers"
-    'header-line #'my/noema-switch-buffer-menu)
-   (my/xwidget--nav-button
-    (my/xwidget--mode-line-icon 'codicon "nf-cod-refresh" "reload")
-    #'my/xwidget-reload "Reload [g]" 'header-line)
-   (my/xwidget--nav-button
-    (my/xwidget--mode-line-icon 'codicon "nf-cod-edit" "edit")
-    #'my/noema-editor-menu "Noema actions" 'header-line)
-   (my/xwidget--nav-button
-    (my/xwidget--mode-line-icon 'codicon "nf-cod-layout" "win")
-    #'my/xwidget-window-menu "Window menu" 'header-line)))
+  (append
+   (my/xwidget--header-history-and-popup
+    #'my/noema-back #'my/noema-forward #'my/noema-switch-buffer-menu)
+   (list
+    (my/xwidget--nav-button
+     (my/xwidget--mode-line-icon 'codicon "nf-cod-refresh" "reload")
+     #'my/xwidget-reload "Reload [g]" 'header-line)
+    (my/xwidget--nav-button
+     (my/xwidget--mode-line-icon 'codicon "nf-cod-edit" "edit")
+     #'my/noema-editor-menu "Noema actions" 'header-line)
+    (my/xwidget--nav-button
+     (my/xwidget--mode-line-icon 'codicon "nf-cod-layout" "win")
+     #'my/xwidget-window-menu "Window menu" 'header-line))))
 
 (defun my/noema--header-line ()
   "Return native browser and editor controls for an Noema buffer."

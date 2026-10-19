@@ -10,6 +10,7 @@
 (require 'aaron-ui)
 (require 'cl-lib)
 (require 'seq)
+(require 'subr-x)
 (require 'easymenu)
 
 (declare-function my/terminal-normalize-directory "init-funcs" (directory))
@@ -54,6 +55,9 @@
 (defvar my/ghostel-popup-current-buffer nil
   "Current popup ghostel buffer.")
 
+(defvar my/ghostel-popup-origin-buffer nil
+  "Last focused work buffer used to place new popup terminals and agents.")
+
 (defvar my/ghostel-popup-last-height nil
   "Last popup ghostel height ratio recorded from a visible window.")
 
@@ -74,6 +78,9 @@
 
 (defvar-local my/ghostel-popup-workspace-id nil
   "Stable remote workspace ID which owns the current popup buffer.")
+
+(defvar-local my/ghostel-popup--saved-ui nil
+  "Window-line values to restore when this buffer leaves the popup pool.")
 
 (defface my/ghostel-popup-tab-current
   `((t (:inherit mode-line-buffer-id
@@ -118,12 +125,27 @@
       ('ai-claude "cc")
       ('ai-codex "codex")
       ('ai-opencode "opencode")
+      ('agent "agent")
+      ('buffer "buf")
       (_ "term"))))
 
 (defun my/ghostel-popup--tab-title (buffer)
   "Return the display title for popup BUFFER."
   (or (buffer-local-value 'my/ghostel-popup-title buffer)
       (buffer-name buffer)))
+
+(defun my/ghostel-popup--location-label (buffer)
+  "Return BUFFER's project and target label without contacting its host."
+  (let* ((directory (buffer-local-value 'default-directory buffer))
+         (workspace (buffer-local-value 'my/ghostel-popup-workspace-id buffer))
+         (target (and (stringp workspace)
+                      (string-match "\\`\\([^@]+\\)@" workspace)
+                      (match-string 1 workspace)))
+         (name (file-name-nondirectory (directory-file-name directory))))
+    (concat (if (string-empty-p name) "/" name)
+            (if (and target (not (equal target "local")))
+                (concat "@" target)
+              ""))))
 
 (defun my/ghostel-popup-select-buffer (buffer)
   "Select popup BUFFER in the shared popup window."
@@ -135,13 +157,11 @@
   buffer)
 
 (defun my/ghostel-popup-select-index (index)
-  "Switch to popup terminal tab INDEX in the current workspace."
+  "Switch to popup terminal tab INDEX in the global popup pool."
   (interactive "nPopup tab number: ")
-  (let* ((workspace-id (my/ghostel-popup--requested-workspace-id))
-         (buffer (nth (1- index)
-                      (my/ghostel-popup--live-buffers workspace-id))))
+  (let ((buffer (nth (1- index) (my/ghostel-popup--live-buffers))))
     (unless buffer
-      (user-error "No popup terminal tab %d in this workspace" index))
+      (user-error "No popup terminal tab %d" index))
     (my/ghostel-popup-select-buffer buffer)))
 
 (defun my/ghostel-popup--tab-segment (buffer index current)
@@ -150,16 +170,19 @@ CURRENT is the currently displayed popup buffer."
   (let* ((selected (eq buffer current))
          (face (if selected 'my/ghostel-popup-tab-current 'my/ghostel-popup-tab))
          (title (my/ghostel-popup--tab-title buffer))
-         (label (format " %d:%s %s "
+         (label (format " %d:%s %s · %s "
                         index
                         (my/ghostel-popup--kind-label buffer)
                         (file-name-nondirectory
-                         (directory-file-name title)))))
+                         (directory-file-name title))
+                        (my/ghostel-popup--location-label buffer))))
     (propertize
      label
      'face face
      'mouse-face 'mode-line-highlight
-     'help-echo (format "Switch to %s" (buffer-name buffer))
+     'help-echo (format "Switch to %s (%s)"
+                        (buffer-name buffer)
+                        (buffer-local-value 'default-directory buffer))
      'local-map (let ((map (make-sparse-keymap)))
                   (define-key map [header-line mouse-3] #'my/ghostel-popup-menu)
                   (define-key map [tab-line mouse-3] #'my/ghostel-popup-menu)
@@ -172,11 +195,13 @@ CURRENT is the currently displayed popup buffer."
                   map))))
 
 (defun my/ghostel-popup-new ()
-  "Create a fresh popup ghostel in `default-directory' and switch to it."
+  "Create a popup ghostel in the focused work buffer's directory."
   (interactive)
-  (select-window
-   (my/ghostel-popup--show-buffer
-    (my/ghostel-popup--create-buffer default-directory))))
+  (let ((directory (buffer-local-value
+                    'default-directory (my/ghostel-popup--context-buffer))))
+    (select-window
+     (my/ghostel-popup--show-buffer
+      (my/ghostel-popup--create-buffer directory)))))
 
 (defun my/ghostel-popup--agent-menu-items ()
   "Return agent commands without loading agent-shell or starting processes."
@@ -191,7 +216,12 @@ CURRENT is the currently displayed popup buffer."
   (popup-menu
    (easy-menu-create-menu
     "New popup"
-    (append '(["Terminal" my/ghostel-popup-new t])
+    (append '(["Terminal" my/ghostel-popup-new t]
+              "---"
+              ["Move buffer into popup" my/ghostel-popup-move-buffer-in t]
+              ["Move popup buffer to window…" my/ghostel-popup-move-buffer-out
+               (my/ghostel-popup--live-buffers)]
+              "---")
             (list (cons "Applications"
                         (mapcar (lambda (app)
                                   (vector (car app)
@@ -205,37 +235,46 @@ CURRENT is the currently displayed popup buffer."
   (when (mouse-event-p event) (mouse-set-point event))
   (popup-menu (easy-menu-create-menu "Agent" (my/ghostel-popup--agent-menu-items)) event))
 
+(defun my/agent-shell-launch-context ()
+  "Return (NOEMA-ROOT . DIRECTORY) for the focused work buffer."
+  (with-current-buffer (my/ghostel-popup--context-buffer)
+    (let* ((noema-root (and (require 'noema-research nil t)
+                            (noema-project-root default-directory)))
+           (directory
+            (file-name-as-directory
+             (or (and noema-root (noema-project-workspace noema-root))
+                 (and (fboundp 'my/project-current-root)
+                      (my/project-current-root))
+                 default-directory))))
+      (cons noema-root directory))))
+
 (defun my/ghostel-popup-agent (agent)
   "Start AGENT through the Noema agent-shell boundary, never through ghostel."
   (interactive (list (intern (completing-read "Popup agent: " '("claude" "codex" "opencode") nil t))))
   (unless (memq agent '(claude codex opencode)) (user-error "Unsupported popup agent: %s" agent))
   (require 'noema-agent-acp)
-  (let* ((directory
-          ;; The agent works on the project, as a bare `agent-shell' does:
-          ;; start it at the project root on any target, so it finds the
-          ;; project's instructions and tools; outside a project, here.
-          (file-name-as-directory
-           (or (and (fboundp 'my/project-current-root)
-                    (my/project-current-root))
-               default-directory)))
-         (workspace (my/ghostel-popup--requested-workspace-id directory))
-         (config (or (noema-agent-acp-config-for agent) (user-error "No agent-shell configuration for %s" agent)))
-         ;; Protect the existing temporary popup while ACP initializes.
-         (my/ghostel-popup--displaying t)
-         (buffer (noema-agent-acp-start :config config :directory directory :focus nil
-                                        :origin 'popup)))
-    ;; A popup agent keeps its own window, but it is the same managed resource
-    ;; as a Run's session: name it and key it to its project so the session
-    ;; list, session switching and buffer context can all reach it.
-    (noema-agent-acp-adopt buffer :agent agent :origin 'popup)
-    (with-current-buffer buffer
-      (setq-local my/ghostel-popup-kind (intern (format "ai-%s" agent))
-                  my/ghostel-popup-title (capitalize (symbol-name agent))
-                  my/ghostel-popup-workspace-id workspace
-                  noema-agent-acp-display-buffer-function #'my/ghostel-popup-display-buffer)
-      (noema-agent-acp-tabs-mode -1)
-      (my/ghostel-popup-agent-keys-mode 1))
-    (my/ghostel-popup-display-buffer buffer)))
+  (pcase-let* ((`(,noema-root . ,directory) (my/agent-shell-launch-context)))
+    (let* ((workspace (my/ghostel-popup--requested-workspace-id directory))
+           (config (or (noema-agent-acp-config-for agent)
+                       (user-error "No agent-shell configuration for %s" agent)))
+           ;; Protect the existing temporary popup while ACP initializes.
+           (my/ghostel-popup--displaying t)
+           (buffer (noema-agent-acp-start :config config :directory directory
+                                          :focus nil :origin 'popup)))
+      (noema-agent-acp-adopt buffer :agent agent :origin 'popup
+                             :root noema-root)
+      (with-current-buffer buffer
+        (setq-local my/ghostel-popup-kind (intern (format "ai-%s" agent))
+                    my/ghostel-popup-title (capitalize (symbol-name agent))
+                    my/ghostel-popup-workspace-id workspace
+                    noema-agent-acp-display-buffer-function
+                    #'my/ghostel-popup-display-buffer)
+        (noema-agent-acp-tabs-mode -1)
+        (my/ghostel-popup-agent-keys-mode 1))
+      (my/ghostel-popup-display-buffer buffer))))
+
+(defalias 'my/agent-shell #'my/ghostel-popup-agent
+  "Start a managed agent in the global popup from the focused project.")
 
 (defun my/ghostel-popup-agent-claude ()
   "Open Claude in the popup using agent-shell."
@@ -287,9 +326,7 @@ CURRENT is the currently displayed popup buffer."
 
 (defun my/ghostel-popup--tab-line ()
   "Return the popup ghostel tab strip for the header line."
-  (let* ((buffers
-          (my/ghostel-popup--live-buffers
-           my/ghostel-popup-workspace-id))
+  (let* ((buffers (my/ghostel-popup--live-buffers))
          (current (current-buffer))
          (tabs (cl-loop for buffer in buffers
                         for index from 1
@@ -309,35 +346,76 @@ CURRENT is the currently displayed popup buffer."
   "Apply local popup terminal UI to BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (if (derived-mode-p 'agent-shell-mode)
-          ;; Agent-shell retains its native model/status/permission header.
-          ;; It never rewrites tab-line-format, so no heartbeat advice is needed.
-          (setq-local tab-line-format '(:eval (my/ghostel-popup--tab-line))
-                      tab-line-exclude t)
-        (setq-local mode-line-format '((:eval (my/ghostel-popup--separator-line))))
-        (setq-local header-line-format '(:eval (my/ghostel-popup--tab-line))))
-      (setq-local fringes-outside-margins nil)
-      (setq-local left-margin-width 0)
-      (setq-local right-margin-width 0))))
+      (if (derived-mode-p 'ghostel-mode)
+          (progn
+            (setq-local mode-line-format '((:eval (my/ghostel-popup--separator-line))))
+            (setq-local header-line-format '(:eval (my/ghostel-popup--tab-line))))
+        ;; Native agent headers and ordinary buffer headers stay intact.
+        (setq-local tab-line-format '(:eval (my/ghostel-popup--tab-line))
+                    tab-line-exclude t))
+      (when (or (derived-mode-p 'ghostel-mode)
+                (derived-mode-p 'agent-shell-mode))
+        (setq-local fringes-outside-margins nil)
+        (setq-local left-margin-width 0)
+        (setq-local right-margin-width 0)))))
+
+(defun my/ghostel-popup--save-ui ()
+  "Save the current buffer's window-line values before popup adoption."
+  (unless my/ghostel-popup--saved-ui
+    (setq-local my/ghostel-popup--saved-ui
+                (mapcar (lambda (variable)
+                          (list variable (local-variable-p variable)
+                                (symbol-value variable)))
+                        '(mode-line-format header-line-format
+                          tab-line-format tab-line-exclude
+                          fringes-outside-margins left-margin-width
+                          right-margin-width)))))
+
+(defun my/ghostel-popup--restore-ui ()
+  "Restore the current buffer's window-line values after popup release."
+  (if my/ghostel-popup--saved-ui
+      (dolist (entry my/ghostel-popup--saved-ui)
+        (if (cadr entry)
+            (set (make-local-variable (car entry)) (caddr entry))
+          (kill-local-variable (car entry))))
+    ;; A buffer from an Emacs session that loaded the old popup UI has no
+    ;; snapshot.  Remove only the chrome that old code installed.
+    (if (derived-mode-p 'ghostel-mode)
+        (progn
+          (kill-local-variable 'mode-line-format)
+          (kill-local-variable 'header-line-format))
+      (kill-local-variable 'tab-line-format)
+      (kill-local-variable 'tab-line-exclude)))
+  (setq-local my/ghostel-popup--saved-ui nil))
 
 (defun my/ghostel-popup--buffer-p (buffer)
   "Return non-nil when BUFFER is a live popup ghostel buffer."
   (and (buffer-live-p buffer)
        (buffer-local-value 'my/ghostel-popup-instance-p buffer)))
 
-(defun my/ghostel-popup--live-buffers (&optional workspace-id)
-  "Return live popup ghostel buffers, pruning dead entries.
-When WORKSPACE-ID is non-nil, return only buffers owned by that workspace."
+(defun my/ghostel-popup--live-buffers ()
+  "Return every live popup buffer in creation order, pruning dead entries."
   (setq my/ghostel-popup-buffers
-        (cl-remove-if-not #'my/ghostel-popup--buffer-p my/ghostel-popup-buffers))
-  (if workspace-id
-      (seq-filter
-       (lambda (buffer)
-         (equal
-          (buffer-local-value 'my/ghostel-popup-workspace-id buffer)
-          workspace-id))
-       my/ghostel-popup-buffers)
-    my/ghostel-popup-buffers))
+        (cl-remove-if-not #'my/ghostel-popup--buffer-p my/ghostel-popup-buffers)))
+
+(defun my/ghostel-popup--context-buffer ()
+  "Return the focused work buffer, even while the popup has focus."
+  (let ((selected (window-buffer (selected-window))))
+    (if (or (minibufferp selected)
+            (my/ghostel-popup--buffer-p selected))
+        (or (and (buffer-live-p my/ghostel-popup-origin-buffer)
+                 my/ghostel-popup-origin-buffer)
+            (and (minibufferp selected)
+                 (window-buffer (minibuffer-selected-window)))
+            selected)
+      selected)))
+
+(defun my/ghostel-popup--remember-origin (&rest _)
+  "Remember the focused work buffer for popup launchers."
+  (let ((buffer (window-buffer (selected-window))))
+    (unless (or (minibufferp buffer)
+                (my/ghostel-popup--buffer-p buffer))
+      (setq my/ghostel-popup-origin-buffer buffer))))
 
 (defun my/ghostel-popup--requested-workspace-id (&optional directory)
   "Return the popup workspace ID implied by DIRECTORY or current buffer."
@@ -348,18 +426,10 @@ When WORKSPACE-ID is non-nil, return only buffers owned by that workspace."
 
 (defun my/ghostel-popup--current-buffer (&optional create directory)
   "Return the current popup ghostel buffer.
-When CREATE is non-nil, create one if the current workspace's pool is empty.
-DIRECTORY selects the logical workspace and defaults to `default-directory'."
-  (let* ((workspace-id
-          (my/ghostel-popup--requested-workspace-id directory))
-         (buffers (my/ghostel-popup--live-buffers workspace-id)))
-    (unless (and
-             (my/ghostel-popup--buffer-p my/ghostel-popup-current-buffer)
-             (equal
-              (buffer-local-value
-               'my/ghostel-popup-workspace-id
-               my/ghostel-popup-current-buffer)
-              workspace-id))
+When CREATE is non-nil, create one if the global pool is empty.
+DIRECTORY is used only when creating a buffer."
+  (let ((buffers (my/ghostel-popup--live-buffers)))
+    (unless (my/ghostel-popup--buffer-p my/ghostel-popup-current-buffer)
       (setq my/ghostel-popup-current-buffer (car buffers)))
     (or my/ghostel-popup-current-buffer
         (when create
@@ -414,6 +484,7 @@ When BUFFER is non-nil, return the window displaying BUFFER."
 (defun my/ghostel-popup--show-buffer (buffer)
   "Show popup ghostel BUFFER in the shared side window."
   (let ((my/ghostel-popup--displaying t))
+    (my/ghostel-popup--remember-origin)
     (setq my/ghostel-popup-current-buffer buffer)
     (let ((window (or (my/ghostel-popup--window)
                       (display-buffer-in-side-window
@@ -439,7 +510,12 @@ When BUFFER is non-nil, return the window displaying BUFFER."
   (unless (buffer-live-p buffer)
     (user-error "Dead buffer: %s" buffer))
   (with-current-buffer buffer
+    (unless my/ghostel-popup-instance-p
+      (my/ghostel-popup--save-ui))
     (setq-local my/ghostel-popup-instance-p t)
+    (unless (or (derived-mode-p 'ghostel-mode)
+                (derived-mode-p 'agent-shell-mode))
+      (setq-local my/ghostel-popup-kind 'buffer))
     (unless my/ghostel-popup-workspace-id
       (setq-local my/ghostel-popup-workspace-id
                   (my/ghostel-workspace-id default-directory)))
@@ -449,6 +525,19 @@ When BUFFER is non-nil, return the window displaying BUFFER."
                (remote-terminal-p remote-terminal-instance))
       (remote-terminal-put-metadata
        remote-terminal-instance :popup t))
+    (when (derived-mode-p 'agent-shell-mode)
+      (when (eq my/ghostel-popup-kind 'terminal)
+        (let ((agent (and (boundp 'noema-agent-acp-session-agent)
+                          noema-agent-acp-session-agent)))
+          (setq-local my/ghostel-popup-kind
+                      (if agent (intern (format "ai-%s" agent)) 'agent)
+                      my/ghostel-popup-title
+                      (and agent (capitalize (format "%s" agent))))))
+      (when (fboundp 'noema-agent-acp-tabs-mode)
+        (noema-agent-acp-tabs-mode -1))
+      (setq-local noema-agent-acp-display-buffer-function
+                  #'my/ghostel-popup-display-buffer)
+      (my/ghostel-popup-agent-keys-mode 1))
     (my/ghostel-popup-apply-ui buffer)
     (add-hook 'kill-buffer-hook #'my/ghostel-popup--on-kill nil t))
   (unless (memq buffer (my/ghostel-popup--live-buffers))
@@ -457,13 +546,105 @@ When BUFFER is non-nil, return the window displaying BUFFER."
   (select-window (my/ghostel-popup--show-buffer buffer))
   buffer)
 
+(defun my/ghostel-popup--normal-windows ()
+  "Return ordinary windows on the selected frame."
+  (seq-remove (lambda (window)
+                (or (window-minibuffer-p window)
+                    (window-parameter window 'my-ghostel-popup)))
+              (window-list (selected-frame) 'nomini)))
+
+(defun my/ghostel-popup--choose-normal-window (prompt)
+  "Choose a non-popup window with PROMPT, using ace-window when needed."
+  (let ((windows (my/ghostel-popup--normal-windows)))
+    (unless windows
+      (user-error "No ordinary window is available"))
+    (if (= (length windows) 1)
+        (car windows)
+      (require 'ace-window)
+      (let ((original (symbol-function 'aw-window-list))
+            (aw-scope 'frame))
+        (cl-letf (((symbol-function 'aw-window-list)
+                   (lambda ()
+                     (seq-filter (lambda (window) (memq window windows))
+                                 (funcall original)))))
+          (let ((window (aw-select prompt)))
+            (unless (memq window windows)
+              (user-error "No window selected"))
+            window))))))
+
+(defun my/ghostel-popup-move-buffer-in ()
+  "Move the current ordinary buffer into the shared popup.
+From a popup tab, use ace-window to choose the ordinary source window."
+  (interactive)
+  (let* ((my/ghostel-popup--displaying t)
+         (source (if (window-parameter (selected-window) 'my-ghostel-popup)
+                     (my/ghostel-popup--choose-normal-window
+                      "Move buffer into popup")
+                   (selected-window)))
+         (buffer (window-buffer source)))
+    (when (window-dedicated-p source)
+      (user-error "Cannot move a buffer from a dedicated window"))
+    (with-selected-window source
+      (switch-to-prev-buffer source 'bury))
+    (my/ghostel-popup-display-buffer buffer)))
+
+(defun my/ghostel-popup--release-buffer (buffer target)
+  "Remove BUFFER from the popup pool and send future displays to TARGET."
+  (with-current-buffer buffer
+    (setq-local my/ghostel-popup-instance-p nil)
+    (remove-hook 'kill-buffer-hook #'my/ghostel-popup--on-kill t)
+    (my/ghostel-popup--restore-ui)
+    (when (and (boundp 'remote-terminal-instance)
+               (remote-terminal-p remote-terminal-instance))
+      (remote-terminal-put-metadata remote-terminal-instance :popup nil))
+    (when (derived-mode-p 'agent-shell-mode)
+      (my/ghostel-popup-agent-keys-mode -1)
+      (when (equal tab-line-format '(:eval (noema-agent-acp--tab-line)))
+        (kill-local-variable 'tab-line-format))
+      (setq-local noema-agent-acp-display-buffer-function
+                  (lambda (session)
+                    (when (window-live-p target)
+                      (select-window target))
+                    (switch-to-buffer session)))))
+  (setq my/ghostel-popup-buffers (delq buffer my/ghostel-popup-buffers)))
+
+(defun my/ghostel-popup-move-buffer-out ()
+  "Move the current popup buffer into an ordinary window chosen with ace-window."
+  (interactive)
+  (let* ((popup (my/ghostel-popup--window))
+         (buffer (if popup (window-buffer popup)
+                   (my/ghostel-popup--current-buffer))))
+    (unless (my/ghostel-popup--buffer-p buffer)
+      (user-error "No popup buffer is available"))
+    (let* ((my/ghostel-popup--displaying t)
+           (target (my/ghostel-popup--choose-normal-window
+                    "Move popup buffer to window"))
+           (next (seq-find (lambda (entry) (not (eq entry buffer)))
+                           (my/ghostel-popup--live-buffers))))
+      (my/ghostel-popup--release-buffer buffer target)
+      (when (eq my/ghostel-popup-current-buffer buffer)
+        (setq my/ghostel-popup-current-buffer next))
+      (set-window-buffer target buffer)
+      (when (and popup (eq (window-buffer popup) buffer))
+        (if next
+            (progn
+              (set-window-buffer popup next)
+              (set-window-parameter
+               popup 'my-ghostel-fixed
+               (buffer-local-value 'my/ghostel-popup-fixed next)))
+          (my/ghostel-hide-popup)))
+      (select-window target)
+      (let ((my/ghostel-popup--displaying nil))
+        (my/ghostel-popup--auto-hide))
+      buffer)))
+
 (defun my/ghostel-popup--on-kill ()
   "Clean up popup ghostel state when the current buffer is killed."
   (let* ((buffer (current-buffer))
-         (workspace-id my/ghostel-popup-workspace-id)
-         (buffers (my/ghostel-popup--live-buffers workspace-id))
+         (buffers (my/ghostel-popup--live-buffers))
          (tail (member buffer buffers))
-         (next (or (cadr tail) (car buffers)))
+         (next (or (cadr tail)
+                   (seq-find (lambda (entry) (not (eq entry buffer))) buffers)))
          (window (my/ghostel-popup--window buffer)))
     (when window
       (my/ghostel-popup--record-window-height window))
@@ -487,6 +668,7 @@ Use BUFFER-NAME when non-nil."
                        (or buffer-name
                            (my/ghostel-popup--next-buffer-name)))))
     (with-current-buffer (my/ghostel-create-hidden target-name)
+      (my/ghostel-popup--save-ui)
       (setq-local my/ghostel-popup-instance-p t)
       (setq-local my/ghostel-popup-fixed nil)
       (setq-local
@@ -509,12 +691,13 @@ Use BUFFER-NAME when non-nil."
 (defun my/ghostel-popup--project-root ()
   "Return the current project root.
 Signal a user error when outside a project."
-  (or (and (fboundp 'my/project-current-root)
-           (my/project-current-root))
-      (when (fboundp 'project-current)
-        (when-let* ((project (project-current nil default-directory)))
-          (project-root project)))
-      (user-error "Not inside a project")))
+  (with-current-buffer (my/ghostel-popup--context-buffer)
+    (or (and (fboundp 'my/project-current-root)
+             (my/project-current-root))
+        (when (fboundp 'project-current)
+          (when-let* ((project (project-current nil default-directory)))
+            (project-root project)))
+        (user-error "Not inside a project"))))
 
 (defun my/ghostel-popup--project-name (project-root)
   "Return a short project name for PROJECT-ROOT."
@@ -531,7 +714,11 @@ Signal a user error when outside a project."
                      (mapcar #'car my/project-popup-ghostel-apps)
                      nil t)))
   (let* ((project-root (file-name-as-directory
-                        (expand-file-name (or directory default-directory))))
+                        (expand-file-name
+                         (or directory
+                             (buffer-local-value
+                              'default-directory
+                              (my/ghostel-popup--context-buffer))))))
          (command (or (cdr (assoc app my/project-popup-ghostel-apps))
                       (user-error "Unknown project terminal app: %s" app)))
          (buffer-name (format "*ghostel-popup:%s:%s*"
@@ -552,8 +739,7 @@ Signal a user error when outside a project."
 
 (defun my/ghostel-popup--next-buffer ()
   "Return the next popup ghostel buffer in creation order."
-  (let* ((workspace-id (my/ghostel-popup--requested-workspace-id))
-         (buffers (my/ghostel-popup--live-buffers workspace-id))
+  (let* ((buffers (my/ghostel-popup--live-buffers))
          (current (my/ghostel-popup--current-buffer)))
     (cond
      ((null buffers)
@@ -566,8 +752,7 @@ Signal a user error when outside a project."
 
 (defun my/ghostel-popup--read-buffer (prompt)
   "Read a popup ghostel buffer with PROMPT."
-  (let* ((workspace-id (my/ghostel-popup--requested-workspace-id))
-         (buffers (my/ghostel-popup--live-buffers workspace-id))
+  (let* ((buffers (my/ghostel-popup--live-buffers))
          (current (my/ghostel-popup--current-buffer))
          (default (and current (buffer-name current))))
     (unless buffers
@@ -594,9 +779,13 @@ Signal a user error when outside a project."
 With prefix ARG, create a new popup ghostel and switch to it."
   (interactive "P")
   (let ((buffer (if arg
-                    (my/ghostel-popup--create-buffer default-directory)
+                    (my/ghostel-popup--create-buffer
+                     (buffer-local-value
+                      'default-directory (my/ghostel-popup--context-buffer)))
                   (or (my/ghostel-popup--next-buffer)
-                      (my/ghostel-popup--create-buffer default-directory)))))
+                      (my/ghostel-popup--create-buffer
+                       (buffer-local-value
+                        'default-directory (my/ghostel-popup--context-buffer)))))))
     (select-window (my/ghostel-popup--show-buffer buffer))
     buffer))
 
@@ -674,11 +863,14 @@ With prefix ARG, create a new popup ghostel and switch to it."
 (global-set-key (kbd "C-c E") #'my/ghostel-popup-cycle)
 (global-set-key (kbd "C-c M-E") #'my/ghostel-popup-new)
 (global-set-key (kbd "C-c M-e") #'my/ghostel-toggle-fixed)
+(global-set-key (kbd "C-c w p") #'my/ghostel-popup-move-buffer-in)
+(global-set-key (kbd "C-c w P") #'my/ghostel-popup-move-buffer-out)
 
 (with-eval-after-load 'savehist
   (add-to-list 'savehist-additional-variables 'my/ghostel-popup-last-height))
 
 (add-hook 'window-selection-change-functions #'my/ghostel-popup--auto-hide)
+(add-hook 'window-selection-change-functions #'my/ghostel-popup--remember-origin)
 (add-hook 'buffer-list-update-hook #'my/ghostel-popup--auto-hide)
 
 ;; Reloading this library also updates agents already in the popup pool.

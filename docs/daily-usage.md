@@ -112,8 +112,7 @@
 - `M-\``
   `ghostel-toggle`
 - `C-c e`
-  切换当前 workspace 的 popup `ghostel`；在 `/fs:` 远端 buffer 中直接打开同一
-  target/workspace 的远端终端
+  切换全局 popup 的当前 tab；首次打开或新建终端时，从最近聚焦的项目和 target 启动
 - `C-c C-e`
   智能弹出或收回当前 popup `ghostel`
 - `C-c E`
@@ -122,6 +121,9 @@
   新建 popup `ghostel`
 - `C-c M-e`
   切换当前 popup `ghostel` 的固定状态
+- `C-c w p` / `C-c w P`
+  把当前普通 buffer 移进 popup / 把当前 popup buffer 移到普通窗口；需要选窗口时显示
+  `ace-window` 编号。顶部 `+term` 的右键菜单也有这两个动作
 - `C-\``
   `popper-toggle`
 - `C-x w d` / `C-u C-x w d`
@@ -874,6 +876,10 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
   在 `eww` / `xwidget` / `appine` / macOS `open` 之间切换当前页面
 
 ### Browser `C-c w`
+
+`xwidget` 和 Noema 页眉的历史图标左键返回、右键打开“返回 / 前进”菜单；
+旁边的面板图标左键展开全局 popup，右键列出未显示的 Noema buffer。
+键盘 `b` / `f` 仍可直接返回 / 前进。
 
 - `C-c w w`
   统一 `browse-url` 入口，默认弹选择菜单，默认项是 `xwidget`
@@ -1740,8 +1746,9 @@ vault 清单不算项目），没有就退回普通项目根目录；**不会**�
 一个 vault 里可以有多个项目；项目的 agent 在它的 workspace 里运行，默认就是项目
 根目录，也可以用 `M-x noema-project-set-workspace` 指到别处的代码仓库。在真正的 Noema 项目里，会话还会额外写进持久注册表，于是它
 和 Run 的会话一样可以重命名、fork、归档、看 context 用量；在普通仓库里它只存在
-于 Emacs 侧，列表里显示为 `local`。不想自动收编裸 `M-x agent-shell` 的话，把
-`noema-agent-acp-adopt-foreign-sessions` 设为 nil。
+于 Emacs 侧，列表里显示为 `local`。`M-x agent-shell` 在当前窗口启动并登记到 Noema；
+其他程序启动的原生 agent-shell buffer 仍由
+`noema-agent-acp-adopt-foreign-sessions` 控制是否收编。
 
 ### 会话不会被后台自动关掉
 
@@ -1784,9 +1791,14 @@ pending 队列。
 
 在 agent-shell 输入 `/resume` 并回车，会读取当前 agent、当前工作目录的原生
 ACP 会话列表，排除当前会话并按最近使用排序，然后选择要恢复的会话。已有活动 buffer 会直接
-切换到它；未打开的历史会话会替换当前 Agent 窗口中的 buffer，不增加新 tab。
+切换到它；未打开的历史会话会替换当前 Agent 或 popup 窗口中的 buffer，不增加新 tab。
 Noema 已登记的原生 session ID 会沿用原会话名。Codex 与 Claude 的会话
 历史由各自的官方后端保存，Noema 只登记名字与原生 ID，不复制 transcript。
+
+`M-x agent-shell` 从当前工作 buffer 启动 Noema 管理的 agent，并显示在当前窗口；
+顶部 `+Agent` 和 `M-x my/agent-shell` 才在全局 popup 中打开。两条入口使用同一套
+项目目录、target、环境和会话登记。
+`C-u C-u M-x agent-shell` 保留上游的已有会话选择器。
 
 同一项目的 agent/session 以 tab 形式共用右下角一个 Agent 窗口；每个 tab 都是
 真正的 agent-shell buffer，可以直接输入、`C-c C-c` 中断。Noema Run 结束后会补回

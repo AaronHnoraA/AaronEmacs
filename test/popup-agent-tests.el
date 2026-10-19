@@ -596,6 +596,7 @@
                 default-directory "/tmp/")
           (setq-local agent-shell--state
                       '((:supports-session-list . t)
+                        (:supports-session-resume . t)
                         (:agent-config . ((:identifier . codex)))
                         (:session . ((:id . "current")))))
           (cl-letf (((symbol-function 'agent-shell-cwd) (lambda () "/tmp/"))
@@ -671,6 +672,260 @@
             (should (eq shown target))
             (should (buffer-live-p source))))
       (mapc #'kill-buffer (list source target)))))
+
+(ert-deftest agent-shell-resume-keeps-popup-session-in-popup-pool ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *resume-popup-source*"))
+          (target (generate-new-buffer " *resume-popup-target*"))
+          (my/ghostel-popup-buffers nil)
+          (my/ghostel-popup-current-buffer nil)
+          (my/ghostel-popup--displaying t)
+          resumed-id)
+      (unwind-protect
+          (progn
+            (with-current-buffer source
+              (setq major-mode 'agent-shell-mode
+                    default-directory "/tmp/")
+              (setq-local my/ghostel-popup-workspace-id "local-work"
+                          agent-shell--state
+                          '((:agent-config . ((:identifier . claude)))
+                            (:session . ((:id . "current"))))))
+            (my/ghostel-popup-display-buffer source)
+            (cl-letf (((symbol-function 'agent-shell--sort-sessions-by-recency) #'identity)
+                      ((symbol-function 'agent-shell--session-title)
+                       (lambda (_) "Saved conversation"))
+                      ((symbol-function 'agent-shell--format-session-date)
+                       (lambda (_) "today"))
+                      ((symbol-function 'completing-read)
+                       (lambda (_prompt choices &rest _) (caar choices)))
+                      ((symbol-function 'my/agent-shell--find-execution)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'agent-shell--prompt-input) (lambda () nil))
+                      ((symbol-function 'noema-sessions-native-binding)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'noema-agent-acp-start)
+                       (lambda (&rest args)
+                         (setq resumed-id (plist-get args :session-id))
+                         (with-current-buffer target
+                           (setq major-mode 'agent-shell-mode
+                                 default-directory "/tmp/"))
+                         target))
+                      ((symbol-function 'noema-agent-acp-adopt) #'ignore)
+                      ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore))
+              (my/agent-shell--resume-from-list
+               source '(((sessionId . "saved-native-id")
+                         (updatedAt . "2026-09-30T00:00:00Z")))))
+            (should (equal resumed-id "saved-native-id"))
+            (should-not (buffer-live-p source))
+            (should (eq (window-buffer (my/ghostel-popup--window)) target))
+            (should (equal (my/ghostel-popup--live-buffers) (list target)))
+            (should (equal (buffer-local-value 'my/ghostel-popup-workspace-id target)
+                           "local-work")))
+        (my/ghostel-hide-popup)
+        (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
+              (list source target))))))
+
+(ert-deftest agent-shell-resume-keeps-manual-session-in-its-window ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *resume-manual-source*"))
+          (target (generate-new-buffer " *resume-manual-target*"))
+          started)
+      (unwind-protect
+          (let ((window (selected-window)))
+            (set-window-buffer window source)
+            (with-current-buffer source
+              (setq major-mode 'agent-shell-mode
+                    default-directory "/tmp/")
+              (setq-local agent-shell--state
+                          '((:agent-config . ((:identifier . codex)))
+                            (:session . ((:id . "current")))))
+              (setq-local noema-agent-acp-display-buffer-function
+                          (lambda (buffer) (set-window-buffer window buffer))))
+            (cl-letf (((symbol-function 'agent-shell--sort-sessions-by-recency) #'identity)
+                      ((symbol-function 'agent-shell--session-title)
+                       (lambda (_) "Saved conversation"))
+                      ((symbol-function 'agent-shell--format-session-date)
+                       (lambda (_) "today"))
+                      ((symbol-function 'completing-read)
+                       (lambda (_prompt choices &rest _) (caar choices)))
+                      ((symbol-function 'my/agent-shell--find-execution)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'agent-shell--prompt-input) (lambda () nil))
+                      ((symbol-function 'noema-sessions-native-binding)
+                       (lambda (&rest _) nil))
+                      ((symbol-function 'noema-agent-acp-start)
+                       (lambda (&rest args)
+                         (setq started args)
+                         (with-current-buffer target
+                           (setq major-mode 'agent-shell-mode
+                                 default-directory "/tmp/")
+                           (setq-local noema-agent-acp-display-buffer-function
+                                       (plist-get args :display-function)))
+                         target))
+                      ((symbol-function 'noema-agent-acp-adopt) #'ignore)
+                      ((symbol-function 'agent-shell-restart)
+                       (lambda (&rest _) (ert-fail "Lost manual window"))))
+              (my/agent-shell--resume-from-list
+               source '(((sessionId . "saved-native-id")
+                         (updatedAt . "2026-09-30T00:00:00Z")))))
+            (should (equal (plist-get started :session-id) "saved-native-id"))
+            (should (eq (plist-get started :origin) 'manual))
+            (should (eq (window-buffer window) target))
+            (should-not (buffer-live-p source))
+            (should (eq (buffer-local-value
+                         'noema-agent-acp-display-buffer-function target)
+                        (plist-get started :display-function))))
+        (dolist (buffer (list source target))
+          (when (buffer-live-p buffer) (kill-buffer buffer)))))))
+
+(ert-deftest popup-tabs-and-current-buffer-span-workspaces ()
+  (save-window-excursion
+    (let ((work-a (generate-new-buffer " *popup-work-a*"))
+          (work-b (generate-new-buffer " *popup-work-b*"))
+          (term-a (generate-new-buffer " *popup-term-a*"))
+          (term-b (generate-new-buffer " *popup-term-b*"))
+          (term-new (generate-new-buffer " *popup-term-new*"))
+          (my/ghostel-popup-buffers nil)
+          (my/ghostel-popup-current-buffer nil)
+          (my/ghostel-popup-origin-buffer nil)
+          (my/ghostel-popup--displaying t)
+          created-in)
+      (unwind-protect
+          (let ((work-window (selected-window)))
+            (with-current-buffer work-a (setq default-directory "/tmp/project-a/"))
+            (with-current-buffer work-b (setq default-directory "/fs:box:/work/project-b/"))
+            (with-current-buffer term-a
+              (setq-local default-directory "/tmp/project-a/"
+                          my/ghostel-popup-workspace-id "local-a"))
+            (with-current-buffer term-b
+              (setq-local default-directory "/fs:box:/work/project-b/"
+                          my/ghostel-popup-workspace-id "box@remote-b"))
+            (set-window-buffer work-window work-a)
+            (my/ghostel-popup-display-buffer term-a)
+            (select-window work-window)
+            (set-window-buffer work-window work-b)
+            (my/ghostel-popup-display-buffer term-b)
+            (should (equal (my/ghostel-popup--live-buffers)
+                           (list term-a term-b)))
+            (should (string-match-p "popup-term-a"
+                                    (substring-no-properties
+                                     (nth 1 (my/ghostel-popup--tab-line)))))
+            (should (string-match-p "popup-term-b"
+                                    (substring-no-properties
+                                     (nth 2 (my/ghostel-popup--tab-line)))))
+            (should (string-match-p "project-b@box"
+                                    (substring-no-properties
+                                     (nth 2 (my/ghostel-popup--tab-line)))))
+            (my/ghostel-popup-cycle nil)
+            (should (eq (window-buffer (my/ghostel-popup--window)) term-a))
+            (my/ghostel-popup-select-index 2)
+            (should (eq (window-buffer (my/ghostel-popup--window)) term-b))
+            (cl-letf (((symbol-function 'my/ghostel-popup--create-buffer)
+                       (lambda (directory &rest _)
+                         (setq created-in directory)
+                         (with-current-buffer term-new
+                           (setq-local my/ghostel-popup-instance-p t))
+                         term-new)))
+              (my/ghostel-popup-new))
+            (should (equal created-in "/fs:box:/work/project-b/")))
+        (my/ghostel-hide-popup)
+        (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
+              (list work-a work-b term-a term-b term-new))))))
+
+(ert-deftest popup-buffer-can-move-in-and-out-with-its-own-ui ()
+  (save-window-excursion
+    (let ((work (generate-new-buffer " *popup-move-work*"))
+          (term (generate-new-buffer " *popup-move-term*"))
+          (my/ghostel-popup-buffers nil)
+          (my/ghostel-popup-current-buffer nil))
+      (unwind-protect
+          (let ((work-window (selected-window)))
+            (with-current-buffer work
+              (setq-local header-line-format "Work header"
+                          tab-line-format "Work tabs"))
+            (with-current-buffer term
+              (setq-local my/ghostel-popup-fixed t))
+            (set-window-buffer work-window work)
+            (my/ghostel-popup-display-buffer term)
+            (let ((my/ghostel-popup--displaying t))
+              (select-window work-window))
+            (my/ghostel-popup-move-buffer-in)
+            (should (eq (window-buffer (my/ghostel-popup--window)) work))
+            (should (memq work (my/ghostel-popup--live-buffers)))
+            (with-current-buffer work
+              (should (equal header-line-format "Work header"))
+              (should-not (equal tab-line-format "Work tabs")))
+            (my/ghostel-popup-move-buffer-out)
+            (should (eq (window-buffer work-window) work))
+            (should (eq (window-buffer (my/ghostel-popup--window)) term))
+            (should (equal (my/ghostel-popup--live-buffers) (list term)))
+            (with-current-buffer work
+              (should-not my/ghostel-popup-instance-p)
+              (should (equal header-line-format "Work header"))
+              (should (equal tab-line-format "Work tabs"))))
+        (my/ghostel-hide-popup)
+        (dolist (buffer (list work term))
+          (when (buffer-live-p buffer) (kill-buffer buffer)))))))
+
+(ert-deftest popup-agent-move-updates-its-session-display-route ()
+  (save-window-excursion
+    (let ((agent (generate-new-buffer " *popup-move-agent*"))
+          (my/ghostel-popup-buffers nil)
+          (my/ghostel-popup-current-buffer nil))
+      (unwind-protect
+          (let ((work-window (selected-window)))
+            (with-current-buffer agent
+              (setq major-mode 'agent-shell-mode)
+              (setq-local header-line-format "Native agent header"
+                          noema-agent-acp-session-agent "codex"
+                          noema-agent-acp-display-buffer-function
+                          (lambda (buffer)
+                            (set-window-buffer work-window buffer))))
+            (set-window-buffer work-window agent)
+            (my/ghostel-popup-move-buffer-in)
+            (should (eq (window-buffer (my/ghostel-popup--window)) agent))
+            (with-current-buffer agent
+              (should (eq noema-agent-acp-display-buffer-function
+                          #'my/ghostel-popup-display-buffer))
+              (should (eq my/ghostel-popup-kind 'ai-codex))
+              (should (equal header-line-format "Native agent header")))
+            (my/ghostel-popup-move-buffer-out)
+            (should (eq (window-buffer work-window) agent))
+            (with-current-buffer agent
+              (should-not my/ghostel-popup-instance-p)
+              (should-not my/ghostel-popup-agent-keys-mode)
+              (should (equal header-line-format "Native agent header"))
+              (should (functionp noema-agent-acp-display-buffer-function))
+              (should-not (eq noema-agent-acp-display-buffer-function
+                              #'my/ghostel-popup-display-buffer))))
+        (my/ghostel-hide-popup)
+        (when (buffer-live-p agent) (kill-buffer agent))))))
+
+(ert-deftest popup-buffer-window-picker-excludes-the-popup ()
+  (save-window-excursion
+    (let ((popup-buffer (generate-new-buffer " *popup-window-picker*"))
+          (my/ghostel-popup-buffers nil)
+          (my/ghostel-popup-current-buffer nil)
+          offered)
+      (unwind-protect
+          (let* ((first (selected-window))
+                 (second (split-window-right)))
+            (my/ghostel-popup-display-buffer popup-buffer)
+            (require 'ace-window)
+            (cl-letf (((symbol-function 'aw-window-list)
+                       (lambda () (window-list)))
+                      ((symbol-function 'aw-select)
+                       (lambda (&rest _)
+                         (setq offered (aw-window-list))
+                         second)))
+              (should (eq (my/ghostel-popup--choose-normal-window "Move")
+                          second)))
+            (should (memq first offered))
+            (should (memq second offered))
+            (should-not (memq (my/ghostel-popup--window) offered)))
+        (my/ghostel-hide-popup)
+        (when (buffer-live-p popup-buffer)
+          (kill-buffer popup-buffer))))))
 
 (ert-deftest popup-agent-transcript-policy-does-not-affect-other-buffers ()
   (let ((shell-maker-prompt-before-killing-buffer t))
@@ -859,7 +1114,12 @@
 
 (ert-deftest popup-agent-accepts-a-remote-workspace ()
   ;; Placement belongs to the agent boundary; the popup does not branch on it.
-  (let (started)
+  (let ((work (generate-new-buffer " *popup-remote-work*")) started)
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer work
+            (setq default-directory "/fs:server:/home/test/project/src/"))
+          (set-window-buffer (selected-window) work)
     (cl-letf (((symbol-function 'noema-agent-acp-config-for) (lambda (_) 'config))
               ((symbol-function 'noema-agent-acp-start)
                (lambda (&rest args) (setq started (plist-get args :directory))
@@ -871,13 +1131,90 @@
               ((symbol-function 'my/project-current-root)
                (lambda () "/fs:server:/home/test/project/")))
       ;; From a file below the project, the agent starts at the project root.
-      (let ((default-directory "/fs:server:/home/test/project/src/"))
-        (let ((buffer (my/ghostel-popup-agent 'codex)))
-          (ignore buffer)))
+      (my/ghostel-popup-agent 'codex)
       (should (equal started "/fs:server:/home/test/project/"))
       (dolist (buffer (buffer-list))
         (when (string-prefix-p " *popup-remote-agent*" (buffer-name buffer))
-          (kill-buffer buffer))))))
+          (kill-buffer buffer)))))
+      (kill-buffer work))))
+
+(ert-deftest popup-agent-launches-from-last-focused-work-buffer ()
+  (save-window-excursion
+    (let ((work (generate-new-buffer " *popup-focused-work*"))
+          (term (generate-new-buffer " *popup-focused-term*"))
+          (agent (generate-new-buffer " *popup-focused-agent*"))
+          (my/ghostel-popup-buffers nil)
+          (my/ghostel-popup-current-buffer nil)
+          (my/ghostel-popup-origin-buffer nil)
+          (my/ghostel-popup--displaying t)
+          started)
+      (unwind-protect
+          (progn
+            (with-current-buffer work
+              (setq default-directory "/fs:box:/work/project/src/"))
+            (with-current-buffer term
+              (setq-local my/ghostel-popup-workspace-id "box-work"))
+            (set-window-buffer (selected-window) work)
+            (my/ghostel-popup-display-buffer term)
+            (cl-letf (((symbol-function 'my/project-current-root)
+                       (lambda ()
+                         (should (eq (current-buffer) work))
+                         "/fs:box:/work/project/"))
+                      ((symbol-function 'my/ghostel-popup--requested-workspace-id)
+                       (lambda (&rest _) "box-work"))
+                      ((symbol-function 'noema-agent-acp-config-for)
+                       (lambda (_) 'config))
+                      ((symbol-function 'noema-agent-acp-start)
+                       (lambda (&rest args)
+                         (setq started (plist-get args :directory))
+                         agent))
+                      ((symbol-function 'noema-agent-acp-adopt) #'ignore)
+                      ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore))
+              (my/ghostel-popup-agent 'claude))
+            (should (equal started "/fs:box:/work/project/"))
+            (should (eq (window-buffer (my/ghostel-popup--window)) agent)))
+        (my/ghostel-hide-popup)
+        (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
+              (list work term agent))))))
+
+(ert-deftest popup-agent-uses-noema-project-workspace-and-session-root ()
+  (save-window-excursion
+    (let ((work (generate-new-buffer " *popup-noema-work*"))
+          (agent (generate-new-buffer " *popup-noema-agent*"))
+          started adopted-root)
+      (unwind-protect
+          (progn
+            (with-current-buffer work
+              (setq default-directory "/tmp/noema-project/notes/"))
+            (set-window-buffer (selected-window) work)
+            (cl-letf (((symbol-function 'noema-project-root)
+                       (lambda (directory)
+                         (should (equal directory "/tmp/noema-project/notes/"))
+                         "/tmp/noema-project/"))
+                      ((symbol-function 'noema-project-workspace)
+                       (lambda (root)
+                         (should (equal root "/tmp/noema-project/"))
+                         "/tmp/code-workspace/"))
+                      ((symbol-function 'my/project-current-root)
+                       (lambda () (ert-fail "Ignored Noema workspace")))
+                      ((symbol-function 'my/ghostel-popup--requested-workspace-id)
+                       (lambda (&rest _) "local-code"))
+                      ((symbol-function 'noema-agent-acp-config-for)
+                       (lambda (_) 'config))
+                      ((symbol-function 'noema-agent-acp-start)
+                       (lambda (&rest args)
+                         (setq started (plist-get args :directory))
+                         agent))
+                      ((symbol-function 'noema-agent-acp-adopt)
+                       (lambda (_buffer &rest args)
+                         (setq adopted-root (plist-get args :root))))
+                      ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore)
+                      ((symbol-function 'my/ghostel-popup-display-buffer) #'ignore))
+              (my/ghostel-popup-agent 'claude))
+            (should (equal started "/tmp/code-workspace/"))
+            (should (equal adopted-root "/tmp/noema-project/")))
+        (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
+              (list work agent))))))
 
 (ert-deftest agent-shell-process-directory-refuses-an-unreachable-workspace ()
   ;; shell-maker would silently fall back to the local home directory.
@@ -919,7 +1256,12 @@ machine's HOME, because agent-shell's caches expand `~' there."
                               (my/agent-shell-missing-executable-a "not found")))))
 
 (ert-deftest popup-agent-outside-a-project-starts-here ()
-  (let (started)
+  (let ((work (generate-new-buffer " *popup-scratch-work*")) started)
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer work
+            (setq default-directory "/fs:server:/home/test/scratch/"))
+          (set-window-buffer (selected-window) work)
     (cl-letf (((symbol-function 'noema-agent-acp-config-for) (lambda (_) 'config))
               ((symbol-function 'noema-agent-acp-start)
                (lambda (&rest args) (setq started (plist-get args :directory))
@@ -929,12 +1271,12 @@ machine's HOME, because agent-shell's caches expand `~' there."
               ((symbol-function 'my/ghostel-popup-display-buffer) #'ignore)
               ((symbol-function 'my/ghostel-popup--requested-workspace-id) #'ignore)
               ((symbol-function 'my/project-current-root) #'ignore))
-      (let ((default-directory "/fs:server:/home/test/scratch/"))
-        (my/ghostel-popup-agent 'codex))
+      (my/ghostel-popup-agent 'codex)
       (should (equal started "/fs:server:/home/test/scratch/"))
       (dolist (buffer (buffer-list))
         (when (string-prefix-p " *popup-remote-agent*" (buffer-name buffer))
-          (kill-buffer buffer))))))
+          (kill-buffer buffer)))))
+      (kill-buffer work))))
 
 (ert-deftest popup-agent-launchers-are-memory-only ()
   (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) (ert-fail "Header checked executables")))
@@ -1015,6 +1357,54 @@ machine's HOME, because agent-shell's caches expand `~' there."
       (my/ghostel-popup-agent-codex)
       (my/ghostel-popup-agent-opencode))
     (should (equal (nreverse started) '(claude codex opencode)))))
+
+(ert-deftest agent-shell-interactive-entry-uses-managed-window ()
+  (let (managed original)
+    (cl-letf (((symbol-function 'my/agent-shell-here)
+               (lambda () (interactive) (setq managed t)))
+              ((symbol-function 'agent-shell--dwim)
+               (lambda (&rest _) (setq original t))))
+      (call-interactively #'agent-shell)
+      (should managed)
+      (should-not original)
+      (setq managed nil)
+      (agent-shell)
+      (should managed)
+      (should-not original)
+      (setq managed nil)
+      (agent-shell '(16))
+      (should original)
+      (should-not managed))))
+
+(ert-deftest agent-shell-manual-entry-displays-in-invoking-window ()
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *agent-shell-source*"))
+          (agent-buffer (generate-new-buffer " *agent-shell-manual*"))
+          started adopted)
+      (unwind-protect
+          (progn
+            (set-window-buffer (selected-window) source)
+            (let ((window (selected-window)))
+              (cl-letf (((symbol-function 'my/agent-shell-launch-context)
+                         (lambda () (cons "/tmp/project/" "/tmp/project/code/")))
+                        ((symbol-function 'noema-agent-acp-config-for)
+                         (lambda (agent) (list :identifier agent)))
+                        ((symbol-function 'noema-agent-acp-start)
+                         (lambda (&rest args) (setq started args) agent-buffer))
+                        ((symbol-function 'noema-agent-acp-adopt)
+                         (lambda (buffer &rest args)
+                           (setq adopted args) buffer)))
+                (should (eq (my/agent-shell-here 'codex) agent-buffer))
+                (should (eq (selected-window) window))
+                (should (eq (window-buffer window) agent-buffer))
+                (should (equal (plist-get started :directory)
+                               "/tmp/project/code/"))
+                (should (eq (plist-get started :origin) 'manual))
+                (should-not (plist-get started :focus))
+                (should (functionp (plist-get started :display-function)))
+                (should (equal (plist-get adopted :root) "/tmp/project/")))))
+        (when (buffer-live-p source) (kill-buffer source))
+        (when (buffer-live-p agent-buffer) (kill-buffer agent-buffer))))))
 
 (ert-deftest agent-shell-adapters-run-the-workspace-cli-without-fallback ()
   "Claude/Codex adapters get the CLI from the workspace PATH, or fail."

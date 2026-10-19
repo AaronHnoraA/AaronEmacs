@@ -185,6 +185,10 @@ agent sends must resolve against the session's target."
 (declare-function agent-shell--finish-output "agent-shell" (&rest args))
 (declare-function agent-shell--start "agent-shell" (&rest args))
 (declare-function agent-shell-restart "agent-shell" (&rest args))
+(declare-function my/agent-shell "init-ghostel-popup" (&optional agent))
+(declare-function my/agent-shell-launch-context "init-ghostel-popup" ())
+(declare-function my/ghostel-popup--window "init-ghostel-popup" (&optional buffer))
+(declare-function my/ghostel-popup-agent "init-ghostel-popup" (agent))
 (declare-function agent-shell--command-completion-at-point "agent-shell-completion" ())
 (declare-function agent-shell--trigger-completion-at-point "agent-shell-completion" ())
 (declare-function shell-maker-busy "shell-maker" ())
@@ -439,23 +443,74 @@ when present; the exact Codex message is the isolated compatibility fallback."
             (agent-shell--clear-prompt-input)))
         (if live
             (progn (agent-shell--display-buffer live) live)
-          (let* ((old-name (buffer-name source))
+          (let* ((popup (and (boundp 'my/ghostel-popup-instance-p)
+                             (buffer-local-value 'my/ghostel-popup-instance-p source)))
+                 (display (and (boundp 'noema-agent-acp-display-buffer-function)
+                               (buffer-local-value
+                                'noema-agent-acp-display-buffer-function source)))
+                 (old-name (buffer-name source))
                  (binding (and (fboundp 'noema-sessions-native-binding)
-                               (noema-sessions-native-binding id root))))
-            ;; Upstream restart replaces the shell in its existing windows and
-            ;; resumes by native ID; it does not add another Agent tab.
-            (with-current-buffer source
-              (agent-shell-restart :session-id id))
-            (let ((target (or (get-buffer old-name)
-                              (user-error "Agent shell did not restart"))))
-              (when (and binding (fboundp 'noema-agent-acp-mark-session-buffer))
-                (noema-agent-acp-mark-session-buffer
-                 target (plist-get binding :name)
-                 (format "%s" (map-elt config :identifier)) root)
-                (with-current-buffer target
-                  (setq-local noema-agent-promote--session-id
-                              (plist-get binding :session-id))))
-              target)))))))
+                               (noema-sessions-native-binding id root)))
+                 (target
+                  (cond
+                   (popup
+                      ;; Keep popup presentation attached to the new ACP
+                      ;; execution.  Upstream restart loses its popup-local
+                      ;; display function when it kills SOURCE.
+                      (let ((buffer
+                             (noema-agent-acp-start
+                              :config config :directory directory :session-id id
+                              :focus nil :origin 'popup
+                              :display-function #'my/ghostel-popup-display-buffer)))
+                        (noema-agent-acp-adopt
+                         buffer :agent (map-elt config :identifier)
+                         :origin 'popup
+                         :name (and binding (plist-get binding :name))
+                         :root root)
+                        (with-current-buffer buffer
+                          (setq-local my/ghostel-popup-kind
+                                      (intern (format "ai-%s" (map-elt config :identifier)))
+                                      my/ghostel-popup-title
+                                      (capitalize (format "%s" (map-elt config :identifier)))
+                                      my/ghostel-popup-workspace-id
+                                      (buffer-local-value 'my/ghostel-popup-workspace-id source)
+                                      noema-agent-acp-display-buffer-function
+                                      #'my/ghostel-popup-display-buffer)
+                          (noema-agent-acp-tabs-mode -1)
+                          (my/ghostel-popup-agent-keys-mode 1))
+                        (my/ghostel-popup-display-buffer buffer)
+                        (kill-buffer source)
+                        buffer))
+                   (display
+                    ;; An agent opened with M-x agent-shell owns its invoking
+                    ;; window.  Keep that display function across a resume.
+                    (let ((buffer
+                           (noema-agent-acp-start
+                            :config config :directory directory :session-id id
+                            :focus nil :origin 'manual
+                            :display-function display)))
+                      (noema-agent-acp-adopt
+                       buffer :agent (map-elt config :identifier)
+                       :origin 'manual
+                       :name (and binding (plist-get binding :name))
+                       :root root)
+                      (funcall display buffer)
+                      (kill-buffer source)
+                      buffer))
+                   (t
+                    ;; A normal Agent window uses upstream replacement.
+                    (with-current-buffer source
+                      (agent-shell-restart :session-id id))
+                    (or (get-buffer old-name)
+                        (user-error "Agent shell did not restart"))))))
+            (when (and binding (fboundp 'noema-agent-acp-mark-session-buffer))
+              (noema-agent-acp-mark-session-buffer
+               target (plist-get binding :name)
+               (format "%s" (map-elt config :identifier)) root)
+              (with-current-buffer target
+                (setq-local noema-agent-promote--session-id
+                            (plist-get binding :session-id))))
+            target))))))
 
 (defun my/agent-shell-resume ()
   "Choose an official ACP session of this agent and workspace to resume."
@@ -464,6 +519,9 @@ when present; the exact Codex message is the isolated compatibility fallback."
     (user-error "Open an agent-shell buffer before using /resume"))
   (unless (map-elt agent-shell--state :supports-session-list)
     (user-error "This agent does not support listing saved sessions"))
+  (unless (or (map-elt agent-shell--state :supports-session-load)
+              (map-elt agent-shell--state :supports-session-resume))
+    (user-error "This agent does not support resuming saved sessions"))
   (let ((source (current-buffer)))
     (agent-shell--list-sessions
      :state agent-shell--state
@@ -483,6 +541,42 @@ when present; the exact Codex message is the isolated compatibility fallback."
            (equal (agent-shell--prompt-input) "/resume"))
       (my/agent-shell-resume)
     (apply original args)))
+
+(defun my/agent-shell-here (agent)
+  "Start a managed AGENT in the window where this command was invoked."
+  (interactive
+   (list (intern (completing-read "Agent: " '("claude" "codex" "opencode")
+                                  nil t))))
+  (unless (memq agent '(claude codex opencode))
+    (user-error "Unsupported agent: %s" agent))
+  (require 'init-ghostel-popup)
+  (if (eq (selected-window) (my/ghostel-popup--window))
+      (my/ghostel-popup-agent agent)
+    (require 'noema-agent-acp)
+    (pcase-let* ((`(,noema-root . ,directory) (my/agent-shell-launch-context))
+                 (window (selected-window))
+                 (config (or (noema-agent-acp-config-for agent)
+                             (user-error "No agent-shell configuration for %s" agent)))
+                 (display (lambda (buffer)
+                            (when (window-live-p window)
+                              (select-window window))
+                            (switch-to-buffer buffer)))
+                 (buffer (noema-agent-acp-start
+                          :config config :directory directory :focus nil
+                          :origin 'manual :display-function display)))
+      (noema-agent-acp-adopt buffer :agent agent :origin 'manual
+                             :root noema-root)
+      (funcall display buffer)
+      buffer)))
+
+(defun my/agent-shell--managed-entry-a (original &optional arg)
+  "Open `agent-shell' in the invoking window with Noema session handling.
+Double prefix ARG keeps the upstream existing-session picker."
+  (if (not (equal arg '(16)))
+      (progn
+        (require 'init-ghostel-popup)
+        (call-interactively #'my/agent-shell-here))
+    (funcall original arg)))
 
 (defun my/agent-shell-enable-command-completion ()
   "Show ACP command suggestions in an agent-shell buffer after typing /."
@@ -532,6 +626,7 @@ when present; the exact Codex message is the isolated compatibility fallback."
   (advice-add 'agent-shell--start :around #'my/agent-shell--reuse-session-a)
   (advice-add 'agent-shell--send-request :around #'my/agent-shell--busy-request-a)
   (advice-add 'agent-shell-submit :around #'my/agent-shell--submit-a)
+  (advice-add 'agent-shell :around #'my/agent-shell--managed-entry-a)
   (advice-add 'agent-shell--command-completion-at-point :around
               #'my/agent-shell--resume-command-completion-a)
   ;; Every client (and agent-shell's early executable check) is made in the

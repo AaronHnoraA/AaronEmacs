@@ -609,13 +609,48 @@ RIGHT-ACTION, when non-nil, receives the mouse event on right click."
                 'local-map map)))
 
 (defun my/xwidget-noema-buffer-menu (event)
-  "Choose an undisplayed Noema buffer from a webpage navigation button."
+  "Choose an undisplayed Noema buffer from a webpage header button."
   (interactive "e")
   (unless (fboundp 'my/noema-switch-buffer-menu)
     (require 'init-aaronnote nil t))
   (if (fboundp 'my/noema-switch-buffer-menu)
       (my/noema-switch-buffer-menu event)
     (message "Noema buffer menu is unavailable")))
+
+(defun my/xwidget-show-popup ()
+  "Open the shared popup buffer from a browser header button."
+  (interactive)
+  (unless (fboundp 'my/ghostel-show-popup)
+    (require 'init-ghostel-popup nil t))
+  (if (fboundp 'my/ghostel-show-popup)
+      (my/ghostel-show-popup)
+    (message "Popup buffer is unavailable")))
+
+(defun my/xwidget--history-menu (event back forward)
+  "Show BACK and FORWARD actions for the header history button at EVENT."
+  (popup-menu
+   (easy-menu-create-menu
+    "History"
+    (list (vector "Back  [b]" back t)
+          (vector "Forward  [f]" forward t)))
+   event))
+
+(defun my/xwidget--header-history-and-popup (back forward buffer-menu)
+  "Return one history button and one shared popup button.
+BACK is the history button's primary action; right click exposes BACK and
+FORWARD together.  The popup button's right click opens BUFFER-MENU."
+  (list
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-history" "hist")
+    back
+    "Back [b] · right click: Back / Forward [f]"
+    'header-line
+    (lambda (event) (my/xwidget--history-menu event back forward)))
+   (my/xwidget--nav-button
+    (my/xwidget--mode-line-icon 'codicon "nf-cod-layout_panel" "pop")
+    #'my/xwidget-show-popup
+    "Show popup [C-c C-e] · right click: Noema buffers"
+    'header-line buffer-menu)))
 
 (defun my/xwidget--window-menu-item (label command)
   "Return an easy-menu item for LABEL and COMMAND."
@@ -669,32 +704,25 @@ RIGHT-ACTION, when non-nil, receives the mouse event on right click."
 
 (defun my/xwidget--header-browser-buttons ()
   "Return xwidget header-line buttons for browser controls."
-  (list
-   (my/xwidget--nav-button
-    (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_left" "back")
-    #'my/xwidget-back
-    "Back [b] · right click: Noema buffers"
-    'header-line #'my/xwidget-noema-buffer-menu)
-   (my/xwidget--nav-button
-    (my/xwidget--mode-line-icon 'codicon "nf-cod-arrow_right" "fwd")
-    #'my/xwidget-forward
-    "Forward [f] · right click: Noema buffers"
-    'header-line #'my/xwidget-noema-buffer-menu)
-   (my/xwidget--nav-button
-    (my/xwidget--mode-line-icon 'codicon "nf-cod-refresh" "reload")
-    #'my/xwidget-reload
-    "Reload [g]"
-    'header-line)
-   (my/xwidget--nav-button
-    (my/xwidget--mode-line-icon 'codicon "nf-cod-edit" "focus")
-    #'my/xwidget-focus
-    "Focus editor [i]"
-    'header-line)
-   (my/xwidget--nav-button
-    (my/xwidget--mode-line-icon 'codicon "nf-cod-layout" "win")
-    #'my/xwidget-window-menu
-    "Window menu"
-    'header-line)))
+  (append
+   (my/xwidget--header-history-and-popup
+    #'my/xwidget-back #'my/xwidget-forward #'my/xwidget-noema-buffer-menu)
+   (list
+    (my/xwidget--nav-button
+     (my/xwidget--mode-line-icon 'codicon "nf-cod-refresh" "reload")
+     #'my/xwidget-reload
+     "Reload [g]"
+     'header-line)
+    (my/xwidget--nav-button
+     (my/xwidget--mode-line-icon 'codicon "nf-cod-edit" "focus")
+     #'my/xwidget-focus
+     "Focus editor [i]"
+     'header-line)
+    (my/xwidget--nav-button
+     (my/xwidget--mode-line-icon 'codicon "nf-cod-layout" "win")
+     #'my/xwidget-window-menu
+     "Window menu"
+     'header-line))))
 
 (defun my/xwidget-setup-control-line ()
   "Install browser controls and a window popup in this xwidget header line."
