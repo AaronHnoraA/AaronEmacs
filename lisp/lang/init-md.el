@@ -10,6 +10,7 @@
 (require 'config)
 
 (require 'cl-lib)
+(require 'init-open)
 (require 'subr-x)
 (require 'init-aaronnote)
 
@@ -245,7 +246,7 @@ or editing when the web editor is unavailable."
                          (or (my/noema-buffer-file) buffer-file-name)
                          t)))
   (let ((my/noema--inhibit-redirect t)
-        (target (expand-file-name
+        (target (my/open-resolve-file-name
                  (or file
                      (my/noema-buffer-file)
                      (and buffer-file-name
@@ -257,13 +258,14 @@ or editing when the web editor is unavailable."
     ;; Visiting an existing placeholder would otherwise return its inert,
     ;; read-only fundamental-mode buffer.  Close it and visit afresh as raw
     ;; Markdown; stale Noema callbacks are invalidated with that buffer.
-    (when-let* ((placeholder (find-buffer-visiting target)))
+    (when-let* ((placeholder (my/open-call-with-file-context
+                             target #'find-buffer-visiting)))
       (when (buffer-local-value 'my/noema--markdown-redirected placeholder)
         (with-current-buffer placeholder
           (my/noema--markdown-placeholder-cancel-timer)
           (cl-incf my/noema--markdown-open-generation))
         (kill-buffer placeholder)))
-    (find-file target)
+    (my/open-visit-file target)
     ;; A copy an AI bridge opened for reading becomes the buffer asked for.
     (when (fboundp 'noema-md-bridge-claim)
       (noema-md-bridge-claim))))

@@ -16,6 +16,7 @@
 (require 'cl-lib)
 (require 'dired)
 (require 'seq)
+(require 'init-open)
 (require 'remote-core)
 
 (declare-function dired-dotfiles-toggle "init-dired" (&rest _))
@@ -127,7 +128,8 @@ The uninterned symbol stays readable in key help without entering M-x."
   "Show DIRECTORY, read with completion from the directory at point."
   (interactive (list (read-directory-name "Go to: "
                                            (my/dirvish--directory-at-point))))
-  (dired directory))
+  (my/open-call-with-file-context
+   (my/open-resolve-file-name directory) #'dired))
 
 (defun my/dirvish-follow-link ()
   "Go to what the symbolic link at point names."

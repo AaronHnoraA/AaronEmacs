@@ -766,6 +766,36 @@
     (should (equal (my/agent-shell-process-directory "/fs:server:/home/test/project")
                    "/fs:server:/home/test/project/"))))
 
+(ert-deftest agent-shell-explicit-local-workspace-stays-local-from-remote-buffer ()
+  "Agent placement and session keys must not borrow the source target."
+  (let ((default-directory "/fs:server:/home/test/project/"))
+    (popup-agent-test-with-placement t
+      (should (equal (my/agent-shell-process-directory "/Users/test/project")
+                     "/Users/test/project/"))
+      (should (equal (my/agent-shell--session-context "/Users/test/project")
+                     "/fs:local:/Users/test/project"))
+      (should-not (my/agent-shell-agent-file-name
+                   "/Users/test/project/a.el"
+                   (current-buffer))))))
+
+(ert-deftest terminal-explicit-local-directory-stays-local-from-remote-buffer ()
+  "Terminal and Ghostel identities use the requested directory's machine."
+  (let ((default-directory "/fs:server:/home/test/project/"))
+    (should (equal (my/terminal-normalize-directory "/Users/test/project")
+                   "/Users/test/project/"))
+    (should (equal (my/terminal-context-key "/Users/test/project")
+                   "local"))
+    (should (equal (my/terminal-context-key
+                    "/fs:local:/Users/test/project")
+                   "local"))
+    (should (equal (my/terminal-home-directory
+                    "/fs:local:/Users/test/project")
+                   (file-name-as-directory
+                    (expand-file-name "~" temporary-file-directory))))
+    (should (equal (remote-context-target-id
+                    (my/ghostel-workspace-context "/Users/test/project"))
+                   "local"))))
+
 (ert-deftest agent-shell-path-resolver-is-identity-on-local-target ()
   (popup-agent-test-with-placement t
     (let ((default-directory "/Users/test/project/"))

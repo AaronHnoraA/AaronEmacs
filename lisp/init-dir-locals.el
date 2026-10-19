@@ -15,6 +15,7 @@
 ;;; Code:
 
 (require 'config)
+(require 'init-open)
 
 (require 'seq)
 (require 'pp)
@@ -36,7 +37,7 @@
 (defun my/dir-locals--root ()
   "Return the project root to use for dir-locals operations."
   (file-name-as-directory
-   (expand-file-name
+   (my/open-resolve-file-name
     (if (fboundp 'my/project-local-root)
         (my/project-local-root)
       (or (when-let* ((proj (project-current nil default-directory)))
@@ -117,7 +118,8 @@
 (defun my/dir-locals-edit ()
   "Open .dir-locals.el for the current project root."
   (interactive)
-  (find-file (my/dir-locals--file)))
+  (my/open-visit-file (my/open-resolve-file-name
+                       (my/dir-locals--file))))
 
 ;;;###autoload
 (defun my/dir-locals-create (&optional template-name)
@@ -137,7 +139,7 @@
       (unless tmpl-alist
         (user-error "Template '%s' is empty or could not be read" name))
       (my/dir-locals--write tmpl-alist target))
-    (find-file target)
+    (my/open-visit-file (my/open-resolve-file-name target))
     (message "Created .dir-locals.el from template '%s'" name)))
 
 ;;;###autoload
@@ -155,7 +157,7 @@
       (unless tmpl-alist
         (user-error "Template '%s' is empty or could not be read" name))
       (my/dir-locals--write merged target))
-    (find-file target)
+    (my/open-visit-file (my/open-resolve-file-name target))
     (message "Merged template '%s' into .dir-locals.el" name)))
 
 ;;;###autoload

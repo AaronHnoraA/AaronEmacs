@@ -59,15 +59,29 @@ macOS `open', Linux `xdg-open', Windows shell open, or `browse-url' fallback."
 
 (defun my/open-resolve-file-name (file &optional directory)
   "Expand FILE for a user-facing visit from DIRECTORY.
-Keep ordinary local names native; an explicit or source `/fs:' name retains
-its logical target.  DIRECTORY defaults to the current buffer's directory."
+An explicit `/fs:' name retains its target.  A native absolute name always
+belongs to this machine, even when the current buffer is remote.  Relative
+names still belong to DIRECTORY, which defaults to the current buffer."
   (unless (featurep 'remote-fs)
     (remote-require-on-client 'remote-fs))
-  (let ((directory (or directory default-directory)))
-    (if (or (remote-fs-file-name-p directory)
-            (remote-fs-file-name-p file))
-        (remote-canonicalize-file-name file directory)
-      (expand-file-name file directory))))
+  (remote-resolve-emacs-file-name file directory))
+
+(defun my/open-call-with-file-context (file function &rest arguments)
+  "Call FUNCTION on resolved FILE and ARGUMENTS on FILE's own machine.
+A native absolute FILE is visited from a temporary client buffer so the
+source buffer's remote directory and environment cannot alter its identity."
+  (apply #'remote-call-with-emacs-file-context file function arguments))
+
+(defun my/open-visit-file (file &optional wildcards)
+  "Visit resolved FILE without inheriting the source buffer's target.
+WILDCARDS has the same meaning as for `find-file'."
+  (if wildcards
+      (my/open-call-with-file-context file #'find-file wildcards)
+    (my/open-call-with-file-context file #'find-file)))
+
+(defun my/open-visit-file-noselect (file)
+  "Visit resolved FILE without displaying it or borrowing a remote directory."
+  (my/open-call-with-file-context file #'find-file-noselect))
 
 (defun my/open-client-file (file &optional view allow-missing)
   "Visit FILE on the Emacs client, enabling `view-mode' when VIEW is non-nil.
@@ -143,7 +157,7 @@ If the selected backend is `menu', prompt with `my/open-read-backend'."
               (remote-uri-to-file-name target)
             target))
          (expanded (and (not (string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" target))
-                        (expand-file-name target))))
+                        (my/open-resolve-file-name target))))
     (cond
      ((string-empty-p target) nil)
      ((string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" target) target)
@@ -284,10 +298,10 @@ When BACKEND is nil, use the `url' route in `my/open-routes'."
 
 (defun my/open-file-with-backend (file backend)
   "Open FILE with BACKEND."
-  (let ((file (expand-file-name file))
+  (let ((file (my/open-resolve-file-name file))
         (backend (my/open-normalize-backend backend)))
     (pcase backend
-      ('emacs (find-file file))
+      ('emacs (my/open-visit-file file))
       ('appine
        (cond
         ((fboundp 'my/appine-open-file) (my/appine-open-file file))

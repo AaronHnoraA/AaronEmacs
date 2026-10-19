@@ -9,6 +9,7 @@
 
 (require 'cl-lib)
 (require 'init-funcs)
+(require 'init-open)
 (require 'subr-x)
 
 (defvar consult--buffer-display)
@@ -158,7 +159,8 @@ Use OPENER to open the file temporarily when provided."
                          (get-text-property 0 'my-symbol-file cand)))
               (line (get-text-property 0 'my-symbol-line cand)))
     (consult--marker-from-line-column
-     (funcall (or opener #'find-file-noselect) file)
+     (my/open-call-with-file-context
+      file (or opener #'find-file-noselect))
      line
      0)))
 

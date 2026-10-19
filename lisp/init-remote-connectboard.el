@@ -57,9 +57,11 @@
 (with-eval-after-load 'dired
   (define-key dired-mode-map (kbd "C-c C-t") #'remote-files)
   (define-key dired-mode-map (kbd "C-c C-c") #'remote-files-pick-confirm)
+  (define-key dired-mode-map (kbd "C-c C-o") #'remote-files-pick-other-target)
   (define-key dired-mode-map (kbd "C-c C-k") #'remote-files-pick-cancel))
 
 (autoload 'remote-files-pick-confirm "remote-files" nil t)
+(autoload 'remote-files-pick-other-target "remote-files" nil t)
 (autoload 'remote-files-pick-cancel "remote-files" nil t)
 
 (provide 'init-remote-connectboard)

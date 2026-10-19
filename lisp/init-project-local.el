@@ -8,6 +8,7 @@
 (require 'config)
 
 (require 'init-funcs)
+(require 'init-open)
 (require 'pp)
 (require 'seq)
 (require 'subr-x)
@@ -301,7 +302,9 @@ When VALUE is a function, call it with ROOT when possible."
 (defun my/project-local-open-dir-locals ()
   "Open the current project's `.dir-locals.el'."
   (interactive)
-  (find-file (expand-file-name ".dir-locals.el" (my/project-local-root))))
+  (my/open-visit-file
+   (my/open-resolve-file-name
+    (expand-file-name ".dir-locals.el" (my/project-local-root)))))
 
 (my/leader!
   "p l" '(:def my/project-local-describe :which-key "project local overrides")

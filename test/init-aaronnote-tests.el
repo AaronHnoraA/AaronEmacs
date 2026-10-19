@@ -4356,6 +4356,9 @@ selection untouched, so the pane keeps being reported as background."
 
 (ert-deftest my/noema-agenda-resolves-host-placement-through-remote ()
   (should (equal (my/noema--agenda-host-project-root "/fs:local:/tmp/agenda/") "/tmp/agenda/"))
+  (let ((default-directory "/fs:box:/work/"))
+    (should (equal (my/noema--agenda-host-project-root "/Users/test/agenda/")
+                   "/Users/test/agenda/")))
   (cl-letf (((symbol-function 'remote-client-file-name) (lambda (_root) "/shared/agenda/")))
     (should (equal (my/noema--agenda-host-project-root "/fs:shared:/agenda/") "/shared/agenda/")))
   (cl-letf (((symbol-function 'remote-client-file-name) (lambda (_root) nil)))

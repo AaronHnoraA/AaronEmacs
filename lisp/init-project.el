@@ -8,6 +8,7 @@
 (require 'config)
 
 (require 'cl-lib)
+(require 'init-open)
 (require 'init-treemacs-bridge)
 (require 'remote-fs)
 (require 'remote-workspace)
@@ -168,13 +169,7 @@ source file's filesystem depth."
 (defun my/project--canonical-file-name (path)
   "Canonicalize PATH without assigning a native absolute path to a target.
 Relative paths still belong to the current buffer's directory."
-  (let ((default-directory
-         (if (and (file-name-absolute-p path)
-                  (not (remote-fs-file-name-p path))
-                  (not (file-remote-p path)))
-             temporary-file-directory
-           default-directory)))
-    (remote-canonicalize-file-name path)))
+  (remote-canonicalize-emacs-file-name path))
 
 (defun my/project-normalize-root (project-root)
   "Return PROJECT-ROOT as a normalized directory name.
@@ -722,7 +717,7 @@ ask Projectile to resolve the project root with `file-truename'."
                     (relative (substring canonical (length canonical-root))))
           (unless (gethash relative seen)
             (when-let* ((logical
-                         (ignore-errors (remote-canonicalize-file-name file))))
+                         (ignore-errors (my/project--canonical-file-name file))))
               (puthash relative t seen)
               (push (cons relative
                           (or (ignore-errors
@@ -748,6 +743,16 @@ ask Projectile to resolve the project root with `file-truename'."
           (user-error "Choose a recent project file"))
         (find-file file)
         (my/project-activate project-root t)))))
+
+(defun my/project-find-file-in-known-projects ()
+  "Find a file across known projects, preserving its own machine identity."
+  (interactive)
+  (let* ((file (projectile-completing-read
+                "Find file in projects: " (projectile-all-project-files)
+                :caller 'projectile-read-file))
+         (logical (my/project--canonical-file-name file))
+         (visit (or (remote-client-file-name logical) logical)))
+    (my/open-visit-file visit)))
 
 (defun my/project-switch-buffer (project-root)
   "Switch to a buffer that belongs to PROJECT-ROOT."
@@ -2222,6 +2227,10 @@ that extra stat is only paid for a marker that actually matched."
   (define-key projectile-command-map (kbd "d") #'my/project-open-root)
   (define-key projectile-command-map (kbd "m") #'my/project-magit-status)
   (define-key projectile-command-map (kbd "v") #'my/project-ghostel)
+  (unless (advice-member-p #'my/project-find-file-in-known-projects
+                           'projectile-find-file-in-known-projects)
+    (advice-add 'projectile-find-file-in-known-projects :override
+                #'my/project-find-file-in-known-projects))
   (setq projectile-mode-line "Projectile"
         projectile-dynamic-mode-line nil
         projectile-track-known-projects-automatically nil)
@@ -2262,7 +2271,7 @@ that extra stat is only paid for a marker that actually matched."
       ("b" "switch buffer" my/project-switch-buffer)]
      ["Search"
       ("s" "search project" my/project-ripgrep)
-      ("a" "all-project files" projectile-find-file-in-known-projects)
+      ("a" "all-project files" my/project-find-file-in-known-projects)
       ("g" "magit" my/project-magit-status)]
      ["Open / Shell"
       ("d" "open root" my/project-open-root)

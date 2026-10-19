@@ -316,7 +316,9 @@ they reported zero unconditionally."
   "Open `my/performance-record-directory'."
   (interactive)
   (make-directory my/performance-record-directory t)
-  (find-file my/performance-record-directory))
+  (require 'init-open)
+  (my/open-visit-file
+   (my/open-resolve-file-name my/performance-record-directory)))
 
 (defun my/performance--insert-os-processes ()
   "Insert OS-level Emacs process metrics from `ps'."

@@ -166,5 +166,48 @@
     (should (assoc inside flymake-list-only-diagnostics))
     (should-not (assoc outside flymake-list-only-diagnostics))))
 
+(ert-deftest diagnostics-project-bridge-separates-local-and-remote-machines ()
+  "A native local diagnostic cannot enter a remote project by path spelling."
+  (let* ((root "/fs:box:/work/project/")
+         (inside "/fs:box:/work/project/main.el")
+         (local "/work/project/main.el")
+         (other "/fs:other:/work/project/main.el")
+         (table (make-hash-table :test 'equal))
+         (default-directory root)
+         (flymake-list-only-diagnostics nil)
+         (my/problems--lsp-list-only-owned nil))
+    (dolist (file (list inside local other))
+      (puthash file (list '(:message "diagnostic")) table))
+    (cl-letf (((symbol-function 'lsp-diagnostics)
+               (lambda (&rest _) table))
+              ((symbol-function 'my/problems--lsp-diagnostic-to-flymake)
+               (lambda (&rest _) 'diagnostic)))
+      (my/problems--sync-lsp-list-only-diagnostics root))
+    (should (assoc inside flymake-list-only-diagnostics))
+    (should-not (assoc local flymake-list-only-diagnostics))
+    (should-not (assoc other flymake-list-only-diagnostics))))
+
+(ert-deftest diagnostics-location-opens-local-file-from-remote-panel ()
+  (let ((panel (generate-new-buffer " *remote-diagnostics-panel*"))
+        (destination (generate-new-buffer " *local-diagnostics-file*"))
+        opened visit-directory)
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer panel
+            (setq default-directory "/fs:box:/work/"))
+          (switch-to-buffer panel)
+          (cl-letf (((symbol-function 'find-file)
+                     (lambda (file &rest _)
+                       (setq opened file visit-directory default-directory)
+                       (switch-to-buffer destination))))
+            (my/diagnostics--goto-location
+             "/Users/test/project/main.el" nil 1))
+          (should (equal opened "/Users/test/project/main.el"))
+          (should (equal visit-directory temporary-file-directory))
+          (should (equal (buffer-local-value 'default-directory panel)
+                         "/fs:box:/work/")))
+      (kill-buffer panel)
+      (kill-buffer destination))))
+
 (provide 'init-diagnostics-entry-tests)
 ;;; init-diagnostics-entry-tests.el ends here

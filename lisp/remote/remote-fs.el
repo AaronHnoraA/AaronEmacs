@@ -996,6 +996,59 @@ This compatibility dispatcher keeps callers independent of backend layout."
                (inhibit-file-name-operation 'expand-file-name))
            (expand-file-name file-name directory))))))))
 
+(defun remote-canonicalize-emacs-file-name (file-name &optional directory)
+  "Canonicalize an Emacs FILE-NAME without borrowing another buffer's target.
+An explicit logical or TRAMP name keeps its target.  A native absolute name
+belongs to the Emacs client even when DIRECTORY or `default-directory' names
+a remote machine.  Relative names continue to belong to DIRECTORY.  Use
+`remote-canonicalize-file-name' instead for target-native paths received from
+a remote process or protocol."
+  (if (and (stringp file-name)
+           (file-name-absolute-p file-name)
+           (not (file-remote-p file-name)))
+      (let ((default-directory temporary-file-directory))
+        (remote-canonicalize-file-name file-name))
+    (if directory
+        (remote-canonicalize-file-name file-name directory)
+      (remote-canonicalize-file-name file-name))))
+
+(defun remote-resolve-emacs-file-name (file-name &optional directory)
+  "Return FILE-NAME for a client-side Emacs file operation.
+This is the entry boundary for names chosen from Emacs UI, saved state, or
+another Emacs buffer.  Native absolute names stay native and local; explicit
+Remote names keep their target; relative names use DIRECTORY.  Target-native
+paths received from a remote process must use `remote-expand-file-name' with
+that process's target instead."
+  (let ((directory (or directory default-directory)))
+    (cond
+     ((or (remote-fs-file-name-p file-name)
+          (and (stringp file-name) (string-prefix-p "fs://" file-name))
+          (file-remote-p file-name))
+      (remote-canonicalize-file-name file-name directory))
+     ((file-name-absolute-p file-name)
+      (let ((default-directory temporary-file-directory))
+        (expand-file-name file-name)))
+     ((remote-fs-file-name-p directory)
+      (remote-canonicalize-file-name file-name directory))
+     (t (expand-file-name file-name directory)))))
+
+(defun remote-call-with-emacs-file-context (file-name function &rest arguments)
+  "Call FUNCTION on FILE-NAME and ARGUMENTS in FILE-NAME's client context.
+Native absolute names get a temporary local buffer, preventing a source
+buffer's remote directory from changing their identity.  Preserve the buffer
+FUNCTION selected, if any, so callers can continue editing after a visit."
+  (if (and (file-name-absolute-p file-name)
+           (not (file-remote-p file-name)))
+      (let (result selected)
+        (with-temp-buffer
+          (setq default-directory temporary-file-directory)
+          (setq result (apply function file-name arguments)
+                selected (current-buffer)))
+        (when (buffer-live-p selected)
+          (set-buffer selected))
+        result)
+    (apply function file-name arguments)))
+
 (defun remote-fs--lexically-expanded-p (name start)
   "Return non-nil when NAME has no dot or doubled-slash component after START.
 Leading dots in ordinary names such as `.git' are not path components."

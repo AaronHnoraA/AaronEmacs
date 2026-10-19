@@ -10,6 +10,7 @@
 (require 'config)
 
 (require 'subr-x)
+(require 'init-open)
 
 (declare-function my/noema-roam-root "init-md-roam" ())
 (defvar my/noema--notes-root)
@@ -154,7 +155,7 @@ SELECTOR is a path relative to the note root, e.g. \"math/foo.lean\"."
          (tag (plist-get call :tag)))
     (unless (file-exists-p file)
       (user-error "Source file does not exist: %s" file))
-    (find-file file)
+    (my/open-visit-file (my/open-resolve-file-name file))
     (my/note-code--goto-tag tag)))
 
 (defun my/note-code--ensure-preamble ()

@@ -23,6 +23,7 @@
 (require 'init-aaronnote-jupyter-lsp)
 (require 'init-aaronnote-jupyter-debug)
 (require 'init-aaronnote-jupyter-files)
+(require 'init-open)
 
 (declare-function my/background-make-frame "init-background" (&optional parameters))
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
@@ -2705,7 +2706,8 @@ When FILE is nil, use the current buffer."
     (let ((same-location (equal key my/noema--goto-last))
           (buffer (if abs
                       (or (find-buffer-visiting abs)
-                          (find-file-noselect abs))
+                          (my/open-visit-file-noselect
+                           (my/open-resolve-file-name abs)))
                     (current-buffer))))
       (setq my/noema--goto-last key)
       (when (buffer-live-p buffer)
@@ -3518,8 +3520,8 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 (defun my/noema--agenda-host-project-root (root)
   "Resolve ROOT for the client-hosted Agenda through Remote placement."
   (require 'remote-fs)
-  (or (remote-client-file-name root)
-      (remote-canonicalize-file-name root)))
+  (let ((logical (remote-canonicalize-emacs-file-name root)))
+    (or (remote-client-file-name logical) logical)))
 
 (with-eval-after-load 'noema-agenda
   (setq noema-agenda-project-root-function #'my/noema--agenda-host-project-root))

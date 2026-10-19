@@ -137,7 +137,7 @@ Never infer configured directories from a live kernel's mutable cwd."
       (user-error "Set an absolute workdir in this kernel profile before opening project tools"))
     (setq root (file-name-as-directory
                 (if (or config project) (remote-target-file-name target root)
-                  (remote-canonicalize-file-name root))))
+                  (remote-canonicalize-emacs-file-name root))))
     (when (and interpreter (not (file-name-absolute-p interpreter))
                (string-match-p "/" interpreter))
       (setq interpreter (file-local-name (expand-file-name interpreter root))))
@@ -163,7 +163,7 @@ Never infer configured directories from a live kernel's mutable cwd."
 (defun my/noema-jupyter-project-entry-for-source (source)
   "Return the explicitly associated kernelspec for remote SOURCE, if any."
   (when source
-    (let ((canonical (remote-canonicalize-file-name source)) matches)
+    (let ((canonical (remote-canonicalize-emacs-file-name source)) matches)
       (maphash (lambda (root entry)
                  (when (string-prefix-p root canonical)
                    (push (cons root entry) matches)))

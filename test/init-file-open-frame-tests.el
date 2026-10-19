@@ -41,15 +41,17 @@
 (ert-deftest file-open-prompt-uses-one-target-for-both-keys ()
   "Enter and Cmd+Shift+Enter differ only in their destination frame."
   (let ((default-directory "/fs:prompt-audit:/work/")
-        visited framed)
+        visited framed visit-directory)
     (cl-letf (((symbol-function 'find-file-read-args)
                (lambda (&rest _) (list "/tmp/new-file.txt" t)))
               ((symbol-function 'find-file)
-               (lambda (file &optional _wildcards) (setq visited file)))
+               (lambda (file &optional _wildcards)
+                 (setq visited file visit-directory default-directory)))
               ((symbol-function 'file-open-new-frame)
                (lambda (file &optional _wildcards) (setq framed file))))
       (my/find-file-with-frame-choice)
-      (should (equal visited "/fs:prompt-audit:/tmp/new-file.txt"))
+      (should (equal visited "/tmp/new-file.txt"))
+      (should (equal visit-directory temporary-file-directory))
       (should-not framed)
       (cl-letf (((symbol-function 'find-file-read-args)
                  (lambda (&rest _)
@@ -58,23 +60,50 @@
         (my/find-file-with-frame-choice))
       (should (equal framed visited)))))
 
-(ert-deftest file-open-prompt-visits-a-logical-local-file ()
-  "The native file prompt's bare name must open on its logical target."
+(ert-deftest file-open-prompt-visits-local-file-from-logical-buffer ()
+  "A native absolute file chosen in a remote buffer opens locally."
   (let* ((file (make-temp-file "prompt-logical-open-" nil ".txt"))
-         (default-directory
-          (remote-make-file-name "local" (file-name-directory file)))
          visited)
     (unwind-protect
         (progn
           (with-temp-file file (insert "prompt target\n"))
-          (cl-letf (((symbol-function 'completing-read)
-                     (lambda (&rest _) file)))
-            (setq visited (my/find-file-with-frame-choice)))
+          (with-temp-buffer
+            (setq default-directory "/fs:prompt-audit:/work/")
+            (let ((source (current-buffer)))
+              (cl-letf (((symbol-function 'completing-read)
+                         (lambda (&rest _) file)))
+                (setq visited (my/find-file-with-frame-choice)))
+              (should (eq (current-buffer) visited))
+              (should (equal (buffer-local-value 'default-directory source)
+                             "/fs:prompt-audit:/work/"))))
           (should (buffer-live-p visited))
-          (should (remote-fs-file-name-p (buffer-file-name visited)))
-          (should (file-equal-p (buffer-file-name visited) file)))
+          (should-not (file-remote-p (buffer-file-name visited)))
+          (should (file-equal-p (buffer-file-name visited) file))
+          (should-not (file-remote-p
+                       (buffer-local-value 'default-directory visited))))
       (when (buffer-live-p visited) (kill-buffer visited))
       (delete-file file))))
+
+(ert-deftest file-open-prompt-opens-local-directory-from-remote-buffer ()
+  "Switching to a local Dired folder leaves the remote source unchanged."
+  (let ((directory (make-temp-file "prompt-local-dir-" t))
+        visited)
+    (unwind-protect
+        (with-temp-buffer
+          (setq default-directory "/fs:prompt-audit:/work/")
+          (let ((source (current-buffer)))
+            (cl-letf (((symbol-function 'find-file-read-args)
+                       (lambda (&rest _) (list directory nil))))
+              (setq visited (my/find-file-with-frame-choice)))
+            (should (eq (current-buffer) visited))
+            (should (equal (buffer-local-value 'default-directory source)
+                           "/fs:prompt-audit:/work/")))
+          (with-current-buffer visited
+            (should (derived-mode-p 'dired-mode))
+            (should-not (file-remote-p default-directory))
+            (should (file-equal-p default-directory directory))))
+      (when (buffer-live-p visited) (kill-buffer visited))
+      (delete-directory directory t))))
 
 (ert-deftest file-open-frame-keymaps-cover-native-and-vertico-prompts ()
   (require 'vertico)
@@ -120,7 +149,7 @@
     (should (equal opened '("/tmp/frame-new.md" t t)))))
 
 (ert-deftest file-open-new-frame-keeps-the-source-target ()
-  "A bare absolute name in a logical buffer belongs to that target."
+  "Relative and explicit logical names keep their target across frames."
   (let ((default-directory "/fs:frame-audit:/work/")
         opened)
     (cl-letf (((symbol-function 'my/frame-open-with)
@@ -132,15 +161,14 @@
       (file-open-new-frame "notes/new-note.md")
       (file-open-new-frame "/fs:other-audit:/tmp/../new-note.md"))
     (should (equal (nreverse opened)
-                   '("/fs:frame-audit:/tmp/new-note.md"
+                   '("/tmp/new-note.md"
                      "/fs:frame-audit:/work/notes/new-note.md"
                      "/fs:other-audit:/new-note.md")))))
 
-(ert-deftest file-open-new-frame-visits-a-logical-local-file ()
-  "The target-preserving name must also work with native `find-file'."
+(ert-deftest file-open-new-frame-visits-local-file-from-logical-buffer ()
+  "A native absolute name must work with `find-file' from a remote buffer."
   (let* ((file (make-temp-file "frame-logical-open-" nil ".txt"))
-         (default-directory
-          (remote-make-file-name "local" (file-name-directory file)))
+         (default-directory "/fs:frame-audit:/work/")
          visited)
     (unwind-protect
         (progn
@@ -149,7 +177,7 @@
                      (lambda (visit) (funcall visit))))
             (setq visited (file-open-new-frame file)))
           (should (buffer-live-p visited))
-          (should (remote-fs-file-name-p (buffer-file-name visited)))
+          (should-not (file-remote-p (buffer-file-name visited)))
           (should (file-equal-p (buffer-file-name visited) file)))
       (when (buffer-live-p visited) (kill-buffer visited))
       (delete-file file))))

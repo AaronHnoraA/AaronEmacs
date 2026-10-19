@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'tabulated-list)
+(require 'init-open)
 
 (declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
 (declare-function magit-stage-files "magit-apply" (files &optional force))
@@ -122,7 +123,7 @@
          (path (expand-file-name file my/git-board-repo-root)))
     (unless (file-exists-p path)
       (user-error "File no longer exists: %s" file))
-    (find-file path)))
+    (my/open-visit-file (my/open-resolve-file-name path))))
 
 (defun my/git-board--with-file-buffer (fn)
   "Call FN in a buffer visiting the current board file."
@@ -130,7 +131,8 @@
          (path (expand-file-name file my/git-board-repo-root)))
     (unless (file-exists-p path)
       (user-error "File no longer exists: %s" file))
-    (with-current-buffer (find-file-noselect path)
+    (with-current-buffer (my/open-visit-file-noselect
+                          (my/open-resolve-file-name path))
       (funcall fn))))
 
 (defun my/git-board-diff ()

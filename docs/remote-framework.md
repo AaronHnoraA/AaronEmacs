@@ -186,6 +186,24 @@ jump host 和端口映射属于 pipeline stage；TRAMP 与 tramp-rpc 属于 back
 HOME。配置里的 workspace path 也走这条边界并缓存绝对结果，不能使用客户端
 HOME 猜测远端身份。
 
+### 路径来源边界
+
+文件路径必须先按**来源**解释，不能仅凭当前 buffer 的 `default-directory`
+猜机器。来自 Emacs UI、`buffer-file-name`、项目索引或持久化状态的路径，使用
+`remote-canonicalize-emacs-file-name` 建立缓存身份，使用
+`remote-resolve-emacs-file-name` 得到可访问的文件名；需要 `find-file`、`dired`
+等访问时，调用 `remote-call-with-emacs-file-context`（配置层封装为
+`my/open-resolve-file-name` 和 `my/open-visit-file`）。这种来源的原生绝对路径
+始终属于客户端；显式 `/fs:` 或 TRAMP 路径保留指定机器；相对路径才继承给定
+目录的机器。缓存键与跳转记录应保存完整逻辑身份，不能只保存 target-native
+路径或工作目录字符串。
+
+远程进程、LSP/ACP 响应或后端协议返回的裸绝对路径属于**响应的 target**。
+用 `remote-expand-file-name` 或带该 target 目录的
+`remote-canonicalize-file-name` 显式绑定身份，然后再传给文件访问入口。
+两种来源不能共用一个无来源参数的“猜测”函数：例如远端响应 `/tmp/a`
+和本地用户选择 `/tmp/a` 的字面值相同，身份不同。
+
 Emacs 在咨询 file-name handler 之前就把裸 `~/` 当作客户端绝对路径，因此框架
 不全局 advice `expand-file-name`。配置入口和需要表达 target HOME 的调用者使用
 `remote-expand-file-name`；普通第三方 package 的原生 `expand-file-name` 行为

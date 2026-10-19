@@ -1108,6 +1108,37 @@ rsync really speaks its protocol over the command the backend handed out."
         (should (equal (remote-files--other-start local-b) "/fs:lab:/")))
       (should (equal (remote-files--other-start local-a) "/fs:box:/out/")))))
 
+(ert-deftest remote-files-picker-can-switch-from-local-to-another-target ()
+  "The picker carries its source identity when choosing another machine."
+  (remote-transfer-test-with-registry
+    (remote-register-target "box" :label "Box")
+    (remote-register-target "lab" :label "Lab")
+    (let* ((source "/fs:box:/work/")
+           (remote-files-other-history (make-hash-table :test #'equal))
+           (remote-files-other-selections (make-hash-table :test #'equal))
+           (window (selected-window))
+           (callback #'ignore)
+           closed reopened)
+      (set-window-parameter
+       window 'remote-files-pick
+       (list :source source :want 'directory :description "Destination"
+             :callback callback))
+      (unwind-protect
+          (cl-letf (((symbol-function 'remote-read-target)
+                     (lambda (&rest _) (remote-get-target "lab")))
+                    ((symbol-function 'remote-files--pick-close)
+                     (lambda (_window) (setq closed t)))
+                    ((symbol-function 'remote-files--pick)
+                     (lambda (&rest args) (setq reopened args))))
+            (remote-files-pick-other-target)
+            (should closed)
+            (should (equal reopened
+                           (list "/fs:lab:/" 'directory "Destination"
+                                 callback source)))
+            (should (equal (gethash source remote-files-other-selections)
+                           "lab")))
+        (set-window-parameter window 'remote-files-pick nil)))))
+
 (ert-deftest remote-files-copies-between-remote-targets-via-client ()
   "Both target transports are used and the temporary local folder is removed."
   (skip-unless (remote-client-executable-find "rsync"))

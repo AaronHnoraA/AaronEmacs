@@ -403,13 +403,17 @@ frames, so direct clicks there toggle breakpoints."
   (interactive)
   (require 'dape)
   (make-directory dape-adapter-dir t)
-  (dired dape-adapter-dir))
+  (require 'init-open)
+  (my/open-call-with-file-context
+   (my/open-resolve-file-name dape-adapter-dir) #'dired))
 
 (defun my/debug-open-breakpoints-file ()
   "Open the persistent Dape breakpoints file."
   (interactive)
   (require 'dape)
-  (find-file dape-default-breakpoints-file))
+  (require 'init-open)
+  (my/open-visit-file
+   (my/open-resolve-file-name dape-default-breakpoints-file)))
 
 (defun my/debug--command-status (commands)
   "Return a compact status string for COMMANDS."

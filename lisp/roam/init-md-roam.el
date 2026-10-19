@@ -8,6 +8,7 @@
 (require 'config)
 
 (require 'init-funcs)
+(require 'init-open)
 (require 'init-md-roam-ui)
 (require 'calendar)
 (require 'cl-lib)
@@ -577,7 +578,7 @@ defaults to the current buffer's directory."
       (user-error "Note not found: %s" slug))
     (unless no-recent
       (my/noema-roam--touch-recent note-id))
-    (find-file file)))
+    (my/open-visit-file (my/open-resolve-file-name file))))
 
 (defun my/noema-roam--touch-recent (slug)
   "Move SLUG to the front of the recent list."
@@ -1135,7 +1136,8 @@ Set its REFRESH-FUNCTION and optional STATUS."
                       (position pos))
                   (lambda (_button)
                     (cond
-                     (target (find-file target))
+                     (target (my/open-visit-file
+                              (my/open-resolve-file-name target)))
                      ((buffer-live-p source) (pop-to-buffer source))
                      (t (user-error "TOC source buffer is no longer available")))
                     (my/noema-roam--goto-pos position)
@@ -1149,11 +1151,12 @@ optional #tag / @dom target for Markdown notes."
   (cond
    ;; Directory → dired.
    ((file-directory-p file)
-    (dired file))
+    (my/open-call-with-file-context
+     (my/open-resolve-file-name file) #'dired))
    ;; Markdown note → Emacs + optional in-note navigation.
    ((string-match-p "\\.\\(?:md\\|markdown\\)\\'" file)
     (my/noema-roam--touch-recent (plist-get parsed :slug))
-    (find-file file)
+    (my/open-visit-file (my/open-resolve-file-name file))
     (cond
      ((plist-get parsed :id)
       (my/noema-roam--goto-tag-id (plist-get parsed :id)))
@@ -1204,7 +1207,8 @@ title no page has opens the New Page workbench with it."
       (`(:create ,title ,_namespace) (my/noema-roam-new-node title))
       ((and item (pred hash-table-p))
        (my/noema-roam--touch-recent (gethash "id" item))
-       (find-file (gethash "file" item))))))
+       (my/open-visit-file
+        (my/open-resolve-file-name (gethash "file" item)))))))
 
 (defun my/noema-roam-delete-node (note-id)
   "Move NOTE-ID's Markdown node to trash through the Noema runtime."
@@ -1979,7 +1983,8 @@ retries opening the same FILE without asking the runtime to create another."
                    (current-buffer))))
     (condition-case err
         (progn
-          (unless (buffer-live-p (find-file file))
+          (unless (buffer-live-p
+                   (my/open-visit-file (my/open-resolve-file-name file)))
             (error "Created Markdown file did not open: %s" file))
           (when (buffer-live-p form)
             (kill-buffer form))
@@ -3556,7 +3561,8 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
 (defun my/noema-roam-dired ()
   "Open dired at the roam notes root."
   (interactive)
-  (dired (my/noema-roam-root)))
+  (my/open-call-with-file-context
+   (my/open-resolve-file-name (my/noema-roam-root)) #'dired))
 
 ;; ── Roam completion-at-point (roam:// and ../ paths) ─────────────────────────
 
@@ -4788,7 +4794,7 @@ added separately by `my/noema-roam--capf-setup')."
   "Open ASSET's file in Emacs."
   (let ((file (my/noema-roam--asset-file asset)))
     (if (and (not (string-empty-p file)) (file-exists-p file))
-        (find-file file)
+        (my/open-visit-file (my/open-resolve-file-name file))
       (user-error "Asset file does not exist: %s" file))))
 
 (defun my/noema-roam--trash-orphaned-assets (assets)

@@ -6,6 +6,22 @@
 (require 'cl-lib)
 (require 'init-note-code)
 
+(ert-deftest my/note-code-opens-local-source-from-remote-buffer ()
+  (let ((default-directory "/fs:box:/work/")
+        visited context)
+    (cl-letf (((symbol-function 'my/note-code-at-point)
+               (lambda () '(:lang "python" :path "source.py" :tag "sample")))
+              ((symbol-function 'my/note-code-source-path)
+               (lambda (_call) "/Users/test/project/source.py"))
+              ((symbol-function 'file-exists-p) (lambda (_file) t))
+              ((symbol-function 'find-file)
+               (lambda (file &rest _)
+                 (setq visited file context default-directory)))
+              ((symbol-function 'my/note-code--goto-tag) #'ignore))
+      (my/note-code-open-at-point))
+    (should (equal visited "/Users/test/project/source.py"))
+    (should-not (file-remote-p context))))
+
 (ert-deftest my/note-code-parses-lean-default-root-path ()
   (with-temp-buffer
     (insert "#note-code(lang: lean)[group-cancel]")
@@ -28,11 +44,12 @@
          (my/note-code-root root)
          (my/noema-roam-root root)
          (buffer-file-name (expand-file-name "math/group.typ" root)))
-    (should (equal (my/note-code-lean-path-for-note)
-                   (expand-file-name "math/group.lean" root)))
-    (should (equal (my/note-code-source-path
-                    '(:lang "python" :path "/src/demo.py" :tag "x"))
-                   (expand-file-name "src/demo.py" root)))))
+    (cl-letf (((symbol-function 'my/noema-roam-root) (lambda () root)))
+      (should (equal (my/note-code-lean-path-for-note)
+                     (expand-file-name "math/group.lean" root)))
+      (should (equal (my/note-code-source-path
+                      '(:lang "python" :path "/src/demo.py" :tag "x"))
+                     (expand-file-name "src/demo.py" root))))))
 
 (ert-deftest my/note-code-requires-path-for-non-lean ()
   (let ((my/note-code-root temporary-file-directory)
@@ -52,13 +69,14 @@
          (my/note-code-root root)
          (my/noema-roam-root root)
          (buffer-file-name (expand-file-name "math/group.typ" root)))
-    (with-temp-buffer
-      (setq buffer-file-name (expand-file-name "math/group.typ" root))
-      (my/note-code--ensure-preamble)
-      (should (string-match-p
-               (regexp-quote "#import \"/_typst/roam.typ\": *")
-               (buffer-string)))
-      (should-not (string-match-p "note-code\\.typ" (buffer-string))))))
+    (cl-letf (((symbol-function 'my/noema-roam-root) (lambda () root)))
+      (with-temp-buffer
+        (setq buffer-file-name (expand-file-name "math/group.typ" root))
+        (my/note-code--ensure-preamble)
+        (should (string-match-p
+                 (regexp-quote "#import \"/_typst/roam.typ\": *")
+                 (buffer-string)))
+        (should-not (string-match-p "note-code\\.typ" (buffer-string)))))))
 
 (ert-deftest my/note-code-ref-path-uses-root-relative-roam-path ()
   (let* ((root (file-name-as-directory (make-temp-file "note-code-test-" t)))

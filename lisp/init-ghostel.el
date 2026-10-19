@@ -100,7 +100,7 @@
   "Return the remote workspace context for DIRECTORY.
 A directory outside any open workspace belongs to its project root where
 finding that root is cheap on the backend, and to itself otherwise."
-  (let* ((directory (remote-canonicalize-file-name
+  (let* ((directory (remote-canonicalize-emacs-file-name
                      (or (my/terminal-normalize-directory directory)
                          default-directory)))
          (context (remote-context directory)))
@@ -111,7 +111,7 @@ finding that root is cheap on the backend, and to itself otherwise."
         (if-let* ((project (ignore-errors
                             (project-current nil directory)))
                   (root (project-root project)))
-            (remote-context (remote-canonicalize-file-name root directory))
+            (remote-context (remote-canonicalize-emacs-file-name root directory))
           context)))))
 
 (defun my/ghostel-workspace-id (&optional directory)
@@ -122,7 +122,7 @@ finding that root is cheap on the backend, and to itself otherwise."
 (defun my/ghostel--routed-launch-a (orig-fn &rest args)
   "Create a Ghostel terminal through the routed workspace around ORIG-FN."
   (let* ((target-directory
-          (remote-canonicalize-file-name
+          (remote-canonicalize-emacs-file-name
            (or (my/terminal-normalize-directory default-directory)
                default-directory)))
          (context (my/ghostel-workspace-context target-directory))

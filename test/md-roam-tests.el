@@ -7,6 +7,18 @@
 (require 'init-md-roam)
 (require 'noema-agenda)
 
+(ert-deftest noema-roam-opens-local-note-from-remote-buffer ()
+  (let ((default-directory "/fs:box:/work/")
+        visited context)
+    (cl-letf (((symbol-function 'my/noema-roam--touch-recent) #'ignore)
+              ((symbol-function 'find-file)
+               (lambda (file &rest _)
+                 (setq visited file context default-directory))))
+      (my/noema-roam--open-file-smart
+       "/Users/test/notes/page.md" '(:slug "page")))
+    (should (equal visited "/Users/test/notes/page.md"))
+    (should-not (file-remote-p context))))
+
 (ert-deftest noema-roam-temporary-boards-are-owned-by-frame ()
   (let ((views (make-hash-table :test #'eq))
         (active-frame 'frame-a)

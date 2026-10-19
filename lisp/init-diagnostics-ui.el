@@ -8,6 +8,7 @@
 (require 'aaron-ui-board)
 (require 'flymake)
 (require 'init-funcs)
+(require 'init-open)
 (require 'project)
 (require 'seq)
 
@@ -197,17 +198,19 @@
 
 (defun my/diagnostics--goto-location (file buffer-name position)
   "Visit FILE or BUFFER-NAME and move to POSITION."
-  (let ((buffer (and buffer-name (get-buffer buffer-name))))
+  (let ((buffer (and buffer-name (get-buffer buffer-name)))
+        (resolved (and file (my/open-resolve-file-name file))))
     (cond
      ((and buffer
            (buffer-live-p buffer)
-           (or (null file)
+           (or (null resolved)
                (with-current-buffer buffer
                  (and buffer-file-name
-                      (equal (expand-file-name buffer-file-name) file)))))
+                      (equal (my/open-resolve-file-name buffer-file-name)
+                             resolved)))))
       (pop-to-buffer buffer))
-     (file
-      (find-file file))
+     (resolved
+      (my/open-visit-file resolved))
      (t
       (user-error "Diagnostic source buffer is no longer available"))))
   (goto-char position)

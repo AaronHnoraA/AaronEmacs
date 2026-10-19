@@ -65,7 +65,7 @@ Cmd+Shift+Enter in the prompt instead opens it in a new Emacs frame."
       (let ((file (my/open-resolve-file-name file)))
         (if my/file-open-new-frame-requested
             (file-open-new-frame file wildcards)
-          (find-file file wildcards))))))
+          (my/open-visit-file file wildcards))))))
 
 (defalias 'file-open #'my/find-file-with-frame-choice
   "Read a file name, opening it here or in a new frame with Cmd+Shift+Enter.")

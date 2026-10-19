@@ -108,7 +108,7 @@ use the active region or filename at point, prompting only when neither exists."
          buffer position)
     (condition-case err
         (progn
-          (setq buffer (find-file-noselect file))
+          (setq buffer (my/open-visit-file-noselect file))
           (setq position
                 (with-current-buffer buffer
                   (save-excursion

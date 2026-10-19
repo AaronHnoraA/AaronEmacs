@@ -158,7 +158,7 @@ trigger project or `.envrc' discovery while a connection is being established."
         (path (or path buffer-file-name default-directory)))
     (unless (direnv--transport-connection-path-p path)
       (when-let* ((canonical
-                   (and path (remote-canonicalize-file-name path))))
+                   (and path (remote-canonicalize-emacs-file-name path))))
         (file-name-as-directory
          (if visiting-file
              (file-name-directory canonical)
@@ -170,14 +170,17 @@ trigger project or `.envrc' discovery while a connection is being established."
 (defun direnv--envrc-root (&optional path)
   "Return logical workspace root containing PATH's `.envrc'."
   (let* ((source (or path buffer-file-name default-directory))
+         (canonical-source
+          (and source (remote-canonicalize-emacs-file-name source)))
          (key (and source
                    (cons (if (and (null path) buffer-file-name)
                              'visiting-file
                            'path)
-                         source)))
+                         canonical-source)))
          (cached (and key (gethash key direnv--envrc-root-cache)))
          (now (float-time))
-         (lifetime (and cached (direnv--envrc-root-cache-lifetime source))))
+         (lifetime (and cached (direnv--envrc-root-cache-lifetime
+                                canonical-source))))
     (if (and cached
              (numberp lifetime)
              (> lifetime 0)

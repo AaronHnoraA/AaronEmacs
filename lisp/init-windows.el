@@ -478,7 +478,7 @@ source buffer keeps its target."
     (my/frame-open-with
      (lambda ()
        (let ((find-file-run-dired t))
-         (find-file file wildcards))))))
+         (my/open-visit-file file wildcards))))))
 
 (defalias 'file-open-new-frame #'my/file-open-new-frame
   "Visit a file or directory in a newly created Emacs frame.")

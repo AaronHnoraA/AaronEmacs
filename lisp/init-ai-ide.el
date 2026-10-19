@@ -60,6 +60,7 @@
 ;;             Emacs names to them and back into the session's target.
 
 (declare-function remote-canonicalize-file-name "remote-fs" (file-name &optional directory))
+(declare-function remote-canonicalize-emacs-file-name "remote-fs" (file-name &optional directory))
 (declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
 (declare-function remote-file-local-name "remote-fs" (file-name))
 (declare-function remote-file-name-target "remote-fs" (file-name))
@@ -80,7 +81,7 @@ is an error: shell-maker would otherwise quietly start the agent in the
 local home directory, on the wrong machine."
   (let ((process (file-name-as-directory
                   (my/agent-shell-emacs-file-name
-                   (remote-canonicalize-file-name (expand-file-name directory))))))
+                   (remote-canonicalize-emacs-file-name directory)))))
     (unless (condition-case nil (file-directory-p process) (error nil))
       (user-error "Agent workspace is not reachable: %s" process))
     process))
@@ -104,7 +105,7 @@ comes back in its Emacs spelling.  On target `local' both are the identity."
   "Return FILE as SESSION's agent opens it, or nil when it cannot.
 SESSION nil is an agent on this machine.  The agent reaches FILE only when
 both live on the same target; the path is then FILE's native name there."
-  (let* ((logical (remote-canonicalize-file-name (expand-file-name file)))
+  (let* ((logical (remote-canonicalize-emacs-file-name file))
          (agent-target
           (remote-file-name-target
            (if session
@@ -196,7 +197,7 @@ agent sends must resolve against the session's target."
   "Return DIRECTORY's workspace and execution target as one logical identity.
 The Remote framework maps native, TRAMP and /fs: names to this identity."
   (directory-file-name
-   (remote-canonicalize-file-name (expand-file-name directory))))
+   (remote-canonicalize-emacs-file-name directory)))
 
 (defun my/agent-shell-execution-live-p (buffer)
   "Return non-nil when BUFFER still owns a live ACP execution process."
@@ -624,6 +625,10 @@ target-native path.  A CLI that cannot be found is an error."
 (autoload 'noema-compose-add-context "noema-compose" nil t)
 (autoload 'noema-compose-rewrite "noema-compose" nil t)
 (autoload 'noema-agent-start "noema-agent-acp" nil t)
+(with-eval-after-load 'agent-shell
+  ;; The ACP boundary also owns the shared, invisible Hy Memory adapter.
+  ;; Defer one event turn: agent-shell may be loading inside noema-agent-acp.
+  (run-at-time 0 nil (lambda () (require 'noema-agent-acp))))
 (autoload 'noema-agent-acp-conversation-tree "noema-agent-acp" nil t)
 (autoload 'noema-agent-promote-current-session "noema-agent-promote" nil t)
 (autoload 'noema-research-history-index "noema-agent-promote" nil t)

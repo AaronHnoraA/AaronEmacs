@@ -8,6 +8,8 @@
 (require 'config)
 
 (require 'init-funcs)
+(require 'init-open)
+(require 'remote-fs)
 
 (declare-function my/project-current-root "init-project")
 
@@ -26,12 +28,26 @@
 (defvar my/harpoon-state nil
   "Alist mapping project roots to quick-mark slots.")
 
+(defun my/harpoon--identity (path)
+  "Return PATH's logical identity, including its machine."
+  (remote-canonicalize-emacs-file-name path))
+
+(defun my/harpoon--root-key (root)
+  "Return the target-qualified key for ROOT."
+  (file-name-as-directory (my/harpoon--identity root)))
+
 (defun my/harpoon-load-state ()
   "Load persisted harpoon state."
   (when (file-readable-p my/harpoon-state-file)
     (with-temp-buffer
       (insert-file-contents my/harpoon-state-file)
-      (setq my/harpoon-state (read (current-buffer))))))
+      (setq my/harpoon-state
+            (mapcar (lambda (entry)
+                      (cons (my/harpoon--root-key (car entry))
+                            (mapcar (lambda (file)
+                                      (and file (my/harpoon--identity file)))
+                                    (cdr entry))))
+                    (read (current-buffer)))))))
 
 (defun my/harpoon-save-state ()
   "Persist harpoon state to disk."
@@ -49,14 +65,16 @@
 
 (defun my/harpoon--slots (&optional root)
   "Return slots list for ROOT."
-  (let ((root (file-name-as-directory (expand-file-name (or root (my/harpoon-project-root))))))
+  (let ((root (my/harpoon--root-key (or root (my/harpoon-project-root)))))
     (or (alist-get root my/harpoon-state nil nil #'equal)
         (make-list my/harpoon-slot-count nil))))
 
 (defun my/harpoon--set-slots (slots &optional root)
   "Store SLOTS for ROOT."
-  (let ((root (file-name-as-directory (expand-file-name (or root (my/harpoon-project-root))))))
-    (setf (alist-get root my/harpoon-state nil nil #'equal) slots)
+  (let ((root (my/harpoon--root-key (or root (my/harpoon-project-root)))))
+    (setf (alist-get root my/harpoon-state nil nil #'equal)
+          (mapcar (lambda (file) (and file (my/harpoon--identity file)))
+                  slots))
     (my/harpoon-save-state)))
 
 (defun my/harpoon-mark-current-file (&optional index)
@@ -68,7 +86,7 @@
          (index (or index
                     (cl-position nil slots :test #'equal)
                     0)))
-    (setf (nth index slots) (expand-file-name buffer-file-name))
+    (setf (nth index slots) (my/harpoon--identity buffer-file-name))
     (my/harpoon--set-slots slots)
     (message "Marked %s in slot %d" (buffer-name) (1+ index))))
 
@@ -77,7 +95,7 @@
   (interactive)
   (unless buffer-file-name
     (user-error "Current buffer is not visiting a file"))
-  (let* ((file (expand-file-name buffer-file-name))
+  (let* ((file (my/harpoon--identity buffer-file-name))
          (slots (mapcar (lambda (slot) (unless (equal slot file) slot))
                         (my/harpoon--slots))))
     (my/harpoon--set-slots slots)
@@ -90,7 +108,7 @@
          (file (nth (1- index) slots)))
     (unless file
       (user-error "Harpoon slot %d is empty" index))
-    (find-file file)))
+    (my/open-visit-file (or (remote-client-file-name file) file))))
 
 (defun my/harpoon-quick-menu ()
   "Select a marked file from the current project's slots."
@@ -103,9 +121,10 @@
                    collect (cons (format "%d: %s" idx (abbreviate-file-name file)) file))))
     (unless candidates
       (user-error "No harpoon marks for this project"))
-    (find-file (cdr (assoc (completing-read "Harpoon: "
+    (let ((file (cdr (assoc (completing-read "Harpoon: "
                                             (mapcar #'car candidates) nil t)
-                           candidates)))))
+                            candidates))))
+      (my/open-visit-file (or (remote-client-file-name file) file)))))
 
 (my/harpoon-load-state)
 

@@ -9,6 +9,7 @@
 (require 'cl-lib)
 (require 'init-jupyter-management)
 (require 'init-aaronnote-jupyter-server)
+(require 'init-open)
 (require 'remote-fs)
 (require 'json)
 (require 'subr-x)
@@ -1047,23 +1048,32 @@ The default view keeps remote profiles and active sessions prominent."
 (defun my/jupyter-board-open-source ()
   "Open the vendored remote_ikernel source directory."
   (interactive)
-  (dired my/jupyter-remote-ikernel-source-directory))
+  (my/open-call-with-file-context
+   (my/open-resolve-file-name my/jupyter-remote-ikernel-source-directory)
+   #'dired))
 
 (defun my/jupyter-board-open-resource ()
   "Open the most useful resource for the entry at point."
   (interactive)
   (let ((entry (my/jupyter-board--require-entry)))
     (pcase (plist-get entry :kind)
-      ('kernelspec (dired (plist-get entry :resource-dir)))
-      ('connection (find-file (plist-get entry :file)))
+      ('kernelspec
+       (my/open-call-with-file-context
+        (my/open-resolve-file-name (plist-get entry :resource-dir))
+        #'dired))
+      ('connection
+       (my/open-visit-file
+        (my/open-resolve-file-name (plist-get entry :file))))
       ('runtime
        (cond
         ((buffer-live-p (plist-get entry :buffer))
          (pop-to-buffer (plist-get entry :buffer)))
         ((plist-get entry :source-file)
-         (find-file (plist-get entry :source-file)))
+         (my/open-visit-file
+          (my/open-resolve-file-name (plist-get entry :source-file))))
         ((plist-get entry :log-file)
-         (find-file (plist-get entry :log-file)))
+         (my/open-visit-file
+          (my/open-resolve-file-name (plist-get entry :log-file))))
         (t (user-error "This runtime has no openable resource"))))
       (_ (user-error "No openable resource at point")))))
 

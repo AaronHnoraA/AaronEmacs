@@ -33,6 +33,35 @@
 
 (remote-fs-install)
 
+(ert-deftest remote-emacs-file-identity-does-not-inherit-another-target ()
+  (let ((default-directory "/fs:first:/work/"))
+    (should (equal (remote-canonicalize-emacs-file-name
+                    "/Users/test/project/main.el")
+                   "/fs:local:/Users/test/project/main.el"))
+    (should (equal (remote-canonicalize-emacs-file-name
+                    "/fs:second:/work/main.el")
+                   "/fs:second:/work/main.el"))
+    (should (equal (remote-canonicalize-emacs-file-name "src/main.el")
+                   "/fs:first:/work/src/main.el"))))
+
+(ert-deftest remote-emacs-file-resolution-preserves-path-source ()
+  (let ((default-directory "/fs:first:/work/")
+        seen)
+    (should (equal (remote-resolve-emacs-file-name "/Users/test/main.el")
+                   "/Users/test/main.el"))
+    (should (equal (remote-resolve-emacs-file-name
+                    "/fs:second:/work/main.el")
+                   "/fs:second:/work/main.el"))
+    (should (equal (remote-resolve-emacs-file-name "src/main.el")
+                   "/fs:first:/work/src/main.el"))
+    (remote-call-with-emacs-file-context
+     "/Users/test/main.el"
+     (lambda (file)
+       (setq seen (list file default-directory))))
+    (should (equal (car seen) "/Users/test/main.el"))
+    (should-not (file-remote-p (cadr seen)))
+    (should (equal default-directory "/fs:first:/work/"))))
+
 (defmacro remote-test-with-registry (&rest body)
   "Evaluate BODY with an isolated remote registry."
   (declare (indent 0) (debug t))
@@ -1451,6 +1480,37 @@ returns, so this covers a different ownership window from backend cancellation."
       (setq cost 'batched clock 133.0)
       (direnv--envrc-root "/fs:lab:/srv/project/main.c")
       (should (= locate-calls 4)))))
+
+(ert-deftest remote-direnv-relative-root-cache-separates-targets ()
+  "The same relative spelling on two machines must get two cache entries."
+  (let ((direnv--envrc-root-cache (make-hash-table :test #'equal))
+        (direnv-envrc-root-cache-timeout 1000)
+        (calls 0))
+    (cl-letf (((symbol-function 'direnv--directory)
+               (lambda (&optional path)
+                 (file-name-directory
+                  (remote-canonicalize-emacs-file-name path))))
+              ((symbol-function 'remote-prefetch-ancestor-markers) #'ignore)
+              ((symbol-function 'locate-dominating-file)
+               (lambda (directory _marker)
+                 (cl-incf calls)
+                 directory)))
+      (let ((default-directory "/fs:first:/work/"))
+        (should (equal (direnv--envrc-root "src/main.c")
+                       "/fs:first:/work/src/")))
+      (let ((default-directory "/fs:second:/work/"))
+        (should (equal (direnv--envrc-root "src/main.c")
+                       "/fs:second:/work/src/")))
+      (let ((default-directory "/fs:first:/work/"))
+        (should (equal (direnv--envrc-root "src/main.c")
+                       "/fs:first:/work/src/")))
+      (should (= calls 2)))))
+
+(ert-deftest remote-direnv-explicit-local-directory-stays-local ()
+  (let ((default-directory "/fs:first:/work/")
+        (local "/Users/test/project/"))
+    (should (equal (direnv--directory local)
+                   "/fs:local:/Users/test/project/"))))
 
 (ert-deftest remote-direnv-visiting-file-directory-is-lexical ()
   "A visiting file has a known directory and needs no metadata probe."

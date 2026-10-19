@@ -9,6 +9,7 @@
 
 (require 'cl-lib)
 (require 'browse-url)
+(require 'init-open)
 (require 'subr-x)
 
 (declare-function consult-buffer "consult" ())
@@ -206,7 +207,7 @@ Use nil for a regular window, `maximized' for a maximized window, or
               (remote-uri-to-file-name target)
             target))
          (expanded (and (not (string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" target))
-                        (expand-file-name target)))
+                        (my/open-resolve-file-name target)))
          (expanded
           (if (and expanded
                    (fboundp 'remote-fs-file-name-p)
@@ -267,7 +268,7 @@ Use nil for a regular window, `maximized' for a maximized window, or
            ((member link-type '("http" "https"))
             (concat link-type ":" path))
            ((equal link-type "file")
-            (expand-file-name path))
+            (my/open-resolve-file-name path))
            ((and link-type path
                  (not (member link-type '("custom-id" "fuzzy" "id"))))
             (concat link-type ":" path))))))))
@@ -280,7 +281,9 @@ Use nil for a regular window, `maximized' for a maximized window, or
       (and (derived-mode-p 'dired-mode)
            (ignore-errors (dired-get-file-for-visit)))
       (let ((file (thing-at-point 'filename t)))
-        (and file (file-exists-p (expand-file-name file)) file))
+        (and file
+             (file-exists-p (my/open-resolve-file-name file))
+             file))
       (and (fboundp 'my/browser-current-url)
            (ignore-errors (my/browser-current-url)))
       buffer-file-name))

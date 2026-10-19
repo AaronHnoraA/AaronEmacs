@@ -1441,6 +1441,17 @@ so saving never reports it as a malformed Agent directive."
             (should (eq (my/noema-jupyter-cell--source-buffer host) source))))
       (kill-buffer source))))
 
+(ert-deftest noema-research-jupyter-source-opens-local-host-file-from-remote-buffer ()
+  (let ((default-directory "/fs:box:/work/")
+        visited context)
+    (cl-letf (((symbol-function 'find-file-noselect)
+               (lambda (file &rest _)
+                 (setq visited file context default-directory))))
+      (my/noema-jupyter-cell--source-buffer
+       "/Users/test/notes/source.noema"))
+    (should (equal visited "/Users/test/notes/source.noema"))
+    (should-not (file-remote-p context))))
+
 (ert-deftest noema-research-jupyter-output-displays-hidden-source-beside-output ()
   (let* ((file (make-temp-file "noema-hidden-source-" nil ".noema"))
          (source (generate-new-buffer " *noema-hidden-source*"))

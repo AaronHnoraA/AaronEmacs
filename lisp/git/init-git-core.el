@@ -267,7 +267,7 @@ Unknown revisions and changed upstream call shapes use FUNCTION unchanged."
                            (remote-make-file-name
                             (remote-fs-target-id origin)
                             (remote-file-local-name absolute))
-                         (remote-canonicalize-file-name absolute)))))
+                         (remote-canonicalize-emacs-file-name absolute)))))
                (owner (and logical (not origin)
                            (remote-workspace-for-path logical))))
           (if (and logical

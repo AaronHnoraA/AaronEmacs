@@ -97,7 +97,9 @@
   "Return a stable local-or-remote context key for DIRECTORY."
   (when-let* ((directory (my/terminal-normalize-directory
                           (or directory default-directory))))
-    (if-let* ((remote-prefix (file-remote-p directory)))
+    (if-let* ((remote-prefix (file-remote-p directory))
+              (_ (not (and (remote-fs-file-name-p directory)
+                           (equal (remote-file-name-target directory) "local")))))
         (replace-regexp-in-string
          "[^[:alnum:]@._#-]+"
          ":"

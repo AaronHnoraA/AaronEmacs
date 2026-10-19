@@ -213,7 +213,7 @@ Choose the other target explicitly with `remote-files-select-other-target'."
     (when (window-live-p origin)
       (select-window origin))))
 
-(defun remote-files--pick (directory want description callback)
+(defun remote-files--pick (directory want description callback &optional source)
   "Pop up DIRECTORY for a choice and call CALLBACK with it once confirmed.
 WANT is `files', for the marked files or the one at point, or `directory',
 for the directory at point when the choice is confirmed.  DESCRIPTION says what
@@ -236,17 +236,14 @@ confirming does."
     (set-window-parameter
      window 'remote-files-pick
      (list :want want :description description :callback callback
+           :source source
            :origin origin :existing existing
            :created (not (memq window windows))
            :previous (car (car (window-prev-buffers window)))))
     (select-window window)
-    (message "%s"
-             (substitute-command-keys
-              (format "%s: %s, then \\[remote-files-pick-confirm] (\\[remote-files-pick-cancel] cancels)"
-                      description
-                      (if (eq want 'files)
-                          "mark files"
-                        "go to the folder"))))))
+    (message "%s: %s; C-c C-c confirm, C-c C-o choose machine, C-c C-k cancel"
+             description
+             (if (eq want 'files) "mark files" "go to the folder"))))
 
 (defun remote-files-pick-confirm ()
   "Confirm the choice this pop-up folder was opened for."
@@ -272,6 +269,23 @@ confirming does."
     (user-error "Nothing is being chosen in this window"))
   (remote-files--pick-close (selected-window))
   (message "Cancelled"))
+
+(defun remote-files-pick-other-target ()
+  "Choose another machine while the destination or source picker is open."
+  (interactive)
+  (let* ((window (selected-window))
+         (state (or (remote-files--pick-state window)
+                    (user-error "Nothing is being chosen in this window")))
+         (source (or (plist-get state :source)
+                     (user-error "This picker has no source folder")))
+         (target (remote-read-target "Other side, target: "))
+         (id (remote-target-id target)))
+    (puthash source id remote-files-other-selections)
+    (let ((directory (remote-files--other-start source)))
+      (remote-files--pick-close window)
+      (remote-files--pick directory (plist-get state :want)
+                          (plist-get state :description)
+                          (plist-get state :callback) source))))
 
 (defun remote-files--remember-other (here other)
   "Remember logical OTHER for the source and destination target pair."
@@ -370,7 +384,8 @@ The folder is chosen in a pop-up Dired."
      (format "Destination of %s" (remote-files--summary files))
      (lambda (destination)
        (remote-files--queue files destination)
-       (remote-files--remember-other here destination)))))
+       (remote-files--remember-other here destination))
+     here)))
 
 (defun remote-files-fetch ()
   "Copy files of the other side into this folder.
@@ -383,7 +398,8 @@ The files are marked in a pop-up Dired."
      (lambda (files)
        (remote-files--queue files here)
        (remote-files--remember-other
-        here (file-name-directory (directory-file-name (car files))))))))
+        here (file-name-directory (directory-file-name (car files)))))
+     here)))
 
 (defvar-local remote-files--apply nil
   "Function that carries out the changes a comparison buffer lists.")
@@ -452,7 +468,8 @@ DESCRIPTION says what the folder is chosen for."
      (remote-files--other-start here) 'directory description
      (lambda (other)
        (funcall function here other)
-       (remote-files--remember-other here other)))))
+       (remote-files--remember-other here other))
+     here)))
 
 (defun remote-files--delete-p ()
   "Return non-nil when the menu's delete switch is on."
@@ -541,9 +558,8 @@ reports the transfers running on its target.  This runs on every redisplay
 of a Dirvish window, so it only reads state that is already in memory."
   (if-let* ((state (remote-files--pick-state)))
       (propertize
-       (substitute-command-keys
-        (format " %s: \\[remote-files-pick-confirm] confirm, \\[remote-files-pick-cancel] cancel "
-                (plist-get state :description)))
+       (format " %s: C-c C-c confirm / C-c C-o machine / C-c C-k cancel "
+               (plist-get state :description))
        'face 'warning)
     (when-let* ((running (remote-transfer--running))
                 (target-id (ignore-errors
@@ -598,6 +614,7 @@ of a Dirvish window, so it only reads state that is already in memory."
    (lambda ()
      (or (plist-get (remote-files--pick-state) :description) "Choose"))
    ("c" "Confirm" remote-files-pick-confirm)
+   ("o" "Choose machine" remote-files-pick-other-target)
    ("k" "Cancel" remote-files-pick-cancel)])
 
 ;;;###autoload

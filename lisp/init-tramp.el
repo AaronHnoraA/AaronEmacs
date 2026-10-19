@@ -28,6 +28,7 @@
                   (file-name &optional adapter))
 (declare-function remote-make-file-name "remote-fs" (target-id localname))
 (declare-function remote-canonicalize-file-name "remote-fs" (file-name &optional directory))
+(declare-function remote-canonicalize-emacs-file-name "remote-fs" (file-name &optional directory))
 (declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
 (declare-function remote-fs-file-name-p "remote-fs" (file-name))
 (declare-function remote-project-file-name "remote-core"
@@ -672,8 +673,7 @@ directory: recentf filters its list from whatever buffer is current, and a
 remote buffer's `default-directory' would otherwise claim a native client
 path such as ~/Documents/x for that remote target."
   (let* ((logical (ignore-errors
-                    (remote-canonicalize-file-name
-                     file-name temporary-file-directory)))
+                    (remote-canonicalize-emacs-file-name file-name)))
          (client (and logical (ignore-errors (remote-client-file-name logical)))))
     (or client logical file-name)))
 

@@ -11,6 +11,7 @@
 (require 'aaron-ui-board)
 (require 'cl-lib)
 (require 'config)
+(require 'init-open)
 
 (declare-function my/open-client-document "init-open" (file &optional view))
 
@@ -248,13 +249,14 @@ toolbar, which bypasses `appine-close-tab')."
   "Open PATH in Appine (tab registry is updated via advice on `appine-open-url')."
   (interactive "fFile: ")
   (my/appine--discard-registry-if-host-dead)
-  (appine-open-file path))
+  (setq path (my/open-resolve-file-name path))
+  (my/open-call-with-file-context path #'appine-open-file))
 
 (defun my/appine--open-current-file ()
   "Open the remembered Appine file in Emacs."
   (interactive)
   (if-let* ((file (my/appine-current-file)))
-      (find-file file)
+      (my/open-visit-file (my/open-resolve-file-name file))
     (user-error "当前 Appine tab 不是文件")))
 
 (defun my/appine-open-current-with-macos ()
@@ -724,7 +726,8 @@ Returns the user plugin directory path."
 (defun my/appine-open-plugins-dir ()
   "Open the user Appine plugins directory in Dired."
   (interactive)
-  (dired my/appine-user-plugins-dir))
+  (my/open-call-with-file-context
+   (my/open-resolve-file-name my/appine-user-plugins-dir) #'dired))
 
 (defun my/appine-create-plugin (name js-code)
   "Create a new user Appine plugin NAME with JS-CODE.
@@ -760,8 +763,10 @@ into the appine native plugins directory so it survives git pull."
   "Open a user plugin's index.js for editing."
   (interactive
    (list (completing-read "Open plugin: " (my/appine--list-plugins) nil t)))
-  (find-file (expand-file-name (concat name "/index.js")
-                               my/appine-user-plugins-dir)))
+  (my/open-visit-file
+   (my/open-resolve-file-name
+    (expand-file-name (concat name "/index.js")
+                      my/appine-user-plugins-dir))))
 
 (defun my/appine-clear-cache ()
   "Delete the browser cache directory and confirm."
@@ -1199,7 +1204,8 @@ export default {
   (interactive)
   (if (and (boundp 'xwidget-webkit-cookie-file)
            xwidget-webkit-cookie-file)
-      (find-file xwidget-webkit-cookie-file)
+      (my/open-visit-file
+       (my/open-resolve-file-name xwidget-webkit-cookie-file))
     (user-error "Cookie file is not configured")))
 
 (defun my/appine-open-cache-directory ()
@@ -1207,7 +1213,8 @@ export default {
   (interactive)
   (if (and (boundp 'xwidget-webkit-cache-directory)
            xwidget-webkit-cache-directory)
-      (dired xwidget-webkit-cache-directory)
+      (my/open-call-with-file-context
+       (my/open-resolve-file-name xwidget-webkit-cache-directory) #'dired)
     (user-error "Cache directory is not configured")))
 
 (defun my/appine-open-local-storage-directory ()
@@ -1215,7 +1222,9 @@ export default {
   (interactive)
   (if (and (boundp 'xwidget-webkit-local-storage-directory)
            xwidget-webkit-local-storage-directory)
-      (dired xwidget-webkit-local-storage-directory)
+      (my/open-call-with-file-context
+       (my/open-resolve-file-name xwidget-webkit-local-storage-directory)
+       #'dired)
     (user-error "Local storage directory is not configured")))
 
 (defun my/appine-open-docs ()

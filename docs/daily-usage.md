@@ -93,8 +93,10 @@
   文件名补全沿用 `find-file` + `vertico-directory`；`Enter` 在当前窗口打开，
   `Cmd+Shift+Enter` 用当前输入的文件名在新 Emacs 窗口打开（包括尚未创建的文件）。
   `SPC f f`、`H-f`、`M-x file-open` 使用同一提示；`M-x file-open-new-frame`
-  可直接打开新窗口的文件提示。从 `/fs:` buffer 输入裸绝对路径时，两种按键
-  都在当前 target 打开；`M-x find-file` 仍保留 Emacs 原生命令的路径语义。
+  可直接打开新窗口的文件提示。从 `/fs:` buffer 输入本机绝对路径（例如
+  `/Users/hc/...`）会打开本机文件；相对路径仍在当前 target 查找。要打开
+  另一台机器上的绝对路径，请输入 `/fs:目标ID:/路径`。`M-x find-file`
+  仍保留 Emacs 原生命令的路径语义。
 - `C-x b`
   `consult-buffer`：Buffer 候选先列当前 frame 与 workspace 中访问过的 buffer，
   包括在该 frame 埋藏的 buffer；提示中按 `<` 再按 `o` 可查其他 frame/workspace 的
@@ -628,7 +630,8 @@ Remote 面板和路由、连接历史页按 `q` 返回上一页；历史页退�
 
 传输是 Dirvish 里的菜单，不是单独的界面：在任何文件夹里按 `M`（或 `C-c C-t`，
 `M-x remote-files`），`c` 把标记的文件送到对面，`g` 从对面取文件，`s` / `r`
-同步文件夹，`=` 比较。对面的文件或文件夹在弹出的 Dirvish 窗口里选，
+同步文件夹，`=` 比较。菜单中的 `o` 可以更换对面机器；在弹出的 Dirvish 里也能
+用 `C-c C-o` 从默认的 local 切到其他机器，再选文件或文件夹。
 `C-c C-c` 确认、`C-c C-k` 取消。任务在皮卡丘的 `*Activity*` 里。完整说明见
 [remote-files.md](remote-files.md)。
 
@@ -1087,7 +1090,7 @@ ibuffer、帮助页和其他用 `quit-window` 退出的临时页面，优先返�
 - `SPC n u` / `M-x structure-up`
   跳到外层结构；有 Tree-sitter 语法树时按结构节点上跳，否则使用 Emacs 原生括号导航
 - `SPC n l` / `C-c C-j` / `M-x open-file-location`
-  打开光标处或选区中的 `file:line:column`；前缀参数在其他窗口打开。`/fs:` buffer 中的绝对路径仍属于当前 target；行号无效时保持原窗口
+  打开光标处或选区中的 `file:line:column`；前缀参数在其他窗口打开。本机绝对路径在 `/fs:` buffer 中仍指向本机；远程绝对路径要写完整 `/fs:目标ID:/路径`。行号无效时保持原窗口
 - `[f`
   上一个函数
 - `]f`

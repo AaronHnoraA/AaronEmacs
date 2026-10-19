@@ -64,7 +64,7 @@
   (require 'remote-process)
   (let* ((root (or (my/project-current-root) default-directory))
          (context (remote-context
-                   (remote-canonicalize-file-name root)))
+                   (remote-canonicalize-emacs-file-name root)))
          (remote-current-adapter-id "process"))
     (if (remote-executable-find "rg" context)
         (progn

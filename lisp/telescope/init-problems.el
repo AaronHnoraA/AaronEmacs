@@ -117,28 +117,41 @@ populates the same public `flymake-list-only-diagnostics' extension
 point Flymake itself uses for diagnostics on unopened files, for
 whichever files have no live buffer."
   (when (fboundp 'lsp-diagnostics)
-    (let* ((canonical-root (ignore-errors (remote-canonicalize-file-name root)))
+    (let* ((canonical-root
+            (ignore-errors (remote-canonicalize-emacs-file-name root)))
            (previously (and canonical-root
                             (cdr (assoc canonical-root
                                        my/problems--lsp-list-only-owned))))
+           (open-files (make-hash-table :test #'equal))
            (fresh nil))
       (when canonical-root
+        (dolist (buffer (buffer-list))
+          (when-let* ((file (buffer-local-value 'buffer-file-name buffer))
+                      (canonical
+                       (ignore-errors
+                         (remote-canonicalize-emacs-file-name file))))
+            (puthash canonical t open-files)))
         (maphash
          (lambda (file diags)
-           (when (and diags
-                      (stringp file)
-                      (not (get-file-buffer file))
-                      (string-prefix-p
-                       (file-name-as-directory canonical-root)
-                       (or (ignore-errors (remote-canonicalize-file-name file))
-                           file)))
-             (let ((locus (or (ignore-errors (remote-client-file-name file))
-                              file)))
-               (push locus fresh)
-               (setf (alist-get locus flymake-list-only-diagnostics nil nil #'equal)
-                     (mapcar (lambda (diag)
-                               (my/problems--lsp-diagnostic-to-flymake locus diag))
-                             diags)))))
+           (let* ((canonical-file
+                   (and (stringp file)
+                        (ignore-errors
+                          (remote-canonicalize-emacs-file-name file))))
+                  (client-file
+                   (and canonical-file
+                        (ignore-errors
+                          (remote-client-file-name canonical-file)))))
+             (when (and diags canonical-file
+                        (not (gethash canonical-file open-files))
+                        (string-prefix-p
+                         (file-name-as-directory canonical-root)
+                         canonical-file))
+               (let ((locus (or client-file canonical-file)))
+                 (push locus fresh)
+                 (setf (alist-get locus flymake-list-only-diagnostics nil nil #'equal)
+                       (mapcar (lambda (diag)
+                                 (my/problems--lsp-diagnostic-to-flymake locus diag))
+                               diags))))))
          (lsp-diagnostics t))
         (dolist (stale (seq-difference previously fresh))
           (setf (alist-get stale flymake-list-only-diagnostics nil 'remove #'equal)

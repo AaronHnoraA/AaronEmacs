@@ -1716,7 +1716,7 @@ client that the Remote contract does not manage."
   (when (stringp root)
     (ignore-errors
       (file-name-as-directory
-       (remote-canonicalize-file-name root)))))
+       (remote-canonicalize-emacs-file-name root)))))
 
 (defun my/language-server--path-on-root (path root)
   "Return server PATH in the logical namespace selected by ROOT.
@@ -1749,7 +1749,7 @@ normalizing both sides here they never match, and Flymake silently
 reports zero diagnostics for locally opened buffers."
   (let ((path (funcall fn path)))
     (if (stringp path)
-        (or (ignore-errors (remote-canonicalize-file-name path)) path)
+        (or (ignore-errors (remote-canonicalize-emacs-file-name path)) path)
       path)))
 
 (defun my/language-server--doctor-check (_target _probe)

@@ -29,6 +29,22 @@
         (should (equal files
                        "/fs:aaron-pc:/home/aaron/Desktop/UNSW/COMP9444/"))))))
 
+(ert-deftest my/jupyter-board-opens-local-resource-from-remote-view ()
+  "Client-owned runtime files keep their machine when opened from a remote board."
+  (let (visited context)
+    (with-temp-buffer
+      (setq default-directory "/fs:box:/work/")
+      (cl-letf (((symbol-function 'my/jupyter-board--require-entry)
+                 (lambda (&rest _)
+                   '(:kind connection :file "/tmp/local-kernel.json")))
+                ((symbol-function 'find-file)
+                 (lambda (file &rest _)
+                   (setq visited file context default-directory))))
+        (my/jupyter-board-open-resource))
+      (should (equal default-directory "/fs:box:/work/")))
+    (should (equal visited "/tmp/local-kernel.json"))
+    (should-not (file-remote-p context))))
+
 (ert-deftest my/jupyter-connection-maintenance-runs-on-owner-and-is-throttled ()
   (let ((my/jupyter-management--cleanup-times (make-hash-table :test #'equal))
         (launched 0) (completed 0))

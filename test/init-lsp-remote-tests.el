@@ -1370,6 +1370,17 @@ must cover it without a `-tramp' counterpart."
      (lambda () (cl-incf loads)))
     (should (= loads 2))))
 
+(ert-deftest lsp-diagnostic-identity-keeps-local-path-out-of-remote-buffer ()
+  (let ((default-directory "/fs:box:/work/"))
+    (should (equal (my/language-server--canonical-root "/Users/test/project")
+                   "/fs:local:/Users/test/project/"))
+    (should (equal (my/lsp-mode--fix-path-casing-a
+                    #'identity "/Users/test/project/main.el")
+                   "/fs:local:/Users/test/project/main.el"))
+    (should (equal (my/language-server--canonical-root
+                    "/fs:other:/work/project")
+                   "/fs:other:/work/project/"))))
+
 (ert-deftest lsp-mode-target-watch-root-is-logical-and-workspace-owned ()
   (let (seen-directory seen-owner seen-adapter seen-metadata
         seen-flags seen-callback delivered)

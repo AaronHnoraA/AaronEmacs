@@ -77,37 +77,106 @@
         (kill-buffer buffer))
       (delete-directory directory t))))
 
-(ert-deftest my/navigation-open-location-keeps-the-source-target ()
+(ert-deftest my/navigation-open-location-distinguishes-local-and-source-target ()
   (with-temp-buffer
     (setq-local default-directory "/fs:location-audit:/work/")
     (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
               ((symbol-function 'file-exists-p) (lambda (_path) t))
               ((symbol-function 'file-directory-p) (lambda (_path) nil)))
       (should (equal (my/navigation--resolve-location-file "/tmp/example.el")
-                     "/fs:location-audit:/tmp/example.el"))
+                     "/tmp/example.el"))
       (should (equal (my/navigation--resolve-location-file "src/example.el")
                      "/fs:location-audit:/work/src/example.el")))))
 
-(ert-deftest my/navigation-open-location-visits-a-logical-local-file ()
+(ert-deftest my/navigation-open-location-visits-a-local-file-from-remote ()
   (let* ((directory (make-temp-file "emacs-logical-location-" t))
          (file (expand-file-name "sample.el" directory))
-         (source-directory
-          (concat "/fs:local:" (file-name-as-directory directory)))
+         (source-directory "/fs:location-audit:/work/")
          buffer)
     (unwind-protect
         (progn
           (with-temp-file file
             (insert "first\nsecond line\nthird\n"))
-          (let ((default-directory source-directory))
-            (setq buffer
-                  (open-file-location (format "%s:2:4" file))))
+          (with-temp-buffer
+            (setq default-directory source-directory)
+            (let ((source (current-buffer)))
+              (setq buffer
+                    (open-file-location (format "%s:2:4" file)))
+              (should (equal (buffer-local-value 'default-directory source)
+                             source-directory))))
           (with-current-buffer buffer
             (should (= (line-number-at-pos) 2))
             (should (= (current-column) 3))
+            (should-not (file-remote-p buffer-file-name))
             (should (file-equal-p buffer-file-name file))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer))
       (delete-directory directory t))))
+
+(ert-deftest my/symbols-preview-keeps-local-file-out-of-remote-context ()
+  "A project-symbol preview must open a native file on the client."
+  (require 'init-symbols)
+  (let ((default-directory "/fs:box:/work/")
+        (candidate (my/symbols-make-file-line-candidate
+                    nil "/Users/test/project/main.lean" 3 "main"))
+        opened visit-directory)
+    (cl-letf (((symbol-function 'consult--marker-from-line-column)
+               (lambda (buffer _line _column) buffer)))
+      (my/symbols--file-line-marker
+       candidate
+       (lambda (file)
+         (setq opened file visit-directory default-directory)
+         'preview-buffer)))
+    (should (equal opened "/Users/test/project/main.lean"))
+    (should (equal visit-directory temporary-file-directory))
+    (should (equal default-directory "/fs:box:/work/"))))
+
+(ert-deftest my/open-routes-keep-native-local-target-from-remote-buffer ()
+  "Central Emacs and system openers must use the chosen file's machine."
+  (let ((default-directory "/fs:box:/work/")
+        opened visit-directory)
+    (cl-letf (((symbol-function 'find-file)
+               (lambda (file &rest _)
+                 (setq opened file visit-directory default-directory))))
+      (my/open-file-with-backend "/Users/test/project/note.md" 'emacs))
+    (should (equal opened "/Users/test/project/note.md"))
+    (should (equal visit-directory temporary-file-directory))
+    (should (equal (my/open-normalize-target opened) opened))))
+
+(ert-deftest my/harpoon-separates-machine-keys-and-opens-local-slot ()
+  (require 'init-harpoon)
+  (let ((my/harpoon-state
+         '(("/fs:box:/work/" "/fs:local:/Users/test/project/main.el")))
+        (default-directory "/fs:box:/work/")
+        opened visit-directory)
+    (should (equal (my/harpoon--root-key "/Users/test/project")
+                   "/fs:local:/Users/test/project/"))
+    (should (equal (my/harpoon--root-key "/fs:box:/Users/test/project")
+                   "/fs:box:/Users/test/project/"))
+    (cl-letf (((symbol-function 'my/harpoon-project-root)
+               (lambda () "/fs:box:/work/"))
+              ((symbol-function 'find-file)
+               (lambda (file &rest _)
+                 (setq opened file visit-directory default-directory))))
+      (my/harpoon-jump 1))
+    (should (equal opened "/Users/test/project/main.el"))
+    (should (equal visit-directory temporary-file-directory))))
+
+(ert-deftest my/macos-open-keeps-native-local-path-from-remote-buffer ()
+  (require 'init-macos)
+  (let ((default-directory "/fs:box:/work/"))
+    (should (equal (my/macos-open--normalize-target
+                    "/Users/test/project/document.pdf")
+                   "/Users/test/project/document.pdf"))))
+
+(ert-deftest recentf-native-local-history-stays-local-from-remote-buffer ()
+  (let ((default-directory "/fs:box:/work/"))
+    (should (equal (my/recentf-logical-file-name
+                    "/Users/test/project/document.pdf")
+                   "/Users/test/project/document.pdf"))
+    (should (equal (my/recentf-logical-file-name
+                    "/fs:lab:/work/document.pdf")
+                   "/fs:lab:/work/document.pdf"))))
 
 (ert-deftest my/navigation-open-location-invalid-line-keeps-the-current-window ()
   (let* ((file (make-temp-file "emacs-invalid-location-" nil ".txt"

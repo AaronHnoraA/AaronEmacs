@@ -8,6 +8,7 @@
 (require 'config)
 
 (require 'cl-lib)
+(require 'init-open)
 (require 'subr-x)
 (require 'transient)
 
@@ -401,8 +402,9 @@ recursive scan of the whole tree.  The result is memoized per buffer."
   "Display the PDF location for LINE and COLUMN in PDF."
   (cl-destructuring-bind (resolved-pdf page _x1 y1 _x2 _y2)
       (my/pdf-sync-forward-correlate-with-pdf pdf line column)
-    (let ((buffer (or (find-buffer-visiting resolved-pdf)
-                      (find-file-noselect resolved-pdf))))
+    (let ((buffer (or (my/open-call-with-file-context
+                       resolved-pdf #'find-buffer-visiting)
+                      (my/open-visit-file-noselect resolved-pdf))))
       (with-selected-window (display-buffer buffer pdf-sync-forward-display-action)
         (pdf-util-assert-pdf-window)
         (when page
@@ -423,8 +425,9 @@ recursive scan of the whole tree.  The result is memoized per buffer."
           (if (and TeX-source-correlate-mode
                    (fboundp 'pdf-sync-forward-search))
               (my/pdf-sync-forward-search-with-pdf pdf)
-            (pop-to-buffer (or (find-buffer-visiting pdf)
-                               (find-file-noselect pdf))))
+            (pop-to-buffer (or (my/open-call-with-file-context
+                                pdf #'find-buffer-visiting)
+                               (my/open-visit-file-noselect pdf))))
         (apply orig args)))))
 
 (defun my/pdf-view-display-in-right-window (buffer &optional _alist)
@@ -453,11 +456,13 @@ recursive scan of the whole tree.  The result is memoized per buffer."
   (interactive)
   (unless file
     (my/latex-preview--ensure-tex-buffer))
-  (let ((pdf (expand-file-name (or file (my/latex-preview--output-pdf-file))))
+  (let ((pdf (if file
+                 (my/open-resolve-file-name file)
+               (my/latex-preview--output-pdf-file)))
         (source-window (selected-window)))
-    (unless (file-exists-p pdf)
+    (unless (my/open-call-with-file-context pdf #'file-exists-p)
       (user-error "PDF does not exist yet: %s" pdf))
-    (let ((buffer (find-file-noselect pdf)))
+    (let ((buffer (my/open-visit-file-noselect pdf)))
       (display-buffer buffer '(my/pdf-view-display-in-right-window))
       (with-current-buffer buffer
         (when (derived-mode-p 'pdf-view-mode)

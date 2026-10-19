@@ -11,6 +11,7 @@
 (require 'ansi-color)
 (require 'seq)
 (require 'subr-x)
+(require 'init-open)
 (require 'init-aaronnote-jupyter-notebook)
 
 (declare-function my/noema-jupyter-open-project-directory "init-aaronnote-jupyter-project" ())
@@ -873,7 +874,7 @@ path, so compare both identities before opening a new buffer."
                 (equal (ignore-errors (my/noema--host-file buffer-file-name))
                        file))))
        (buffer-list))
-      (find-file-noselect file)))
+      (my/open-visit-file-noselect (my/open-resolve-file-name file))))
 
 (defun my/noema-jupyter-cell-select-source (payload)
   "Visit the source Cell identified by PAYLOAD from the Web output renderer.

@@ -32,17 +32,22 @@
   :type 'integer)
 
 (defun my/terminal-normalize-directory (directory)
-  "Return DIRECTORY as an absolute directory name."
+  "Return DIRECTORY as an absolute directory name on its own machine."
   (when directory
-    (file-name-as-directory (expand-file-name directory))))
+    (require 'remote-fs)
+    (file-name-as-directory
+     (remote-resolve-emacs-file-name directory))))
 
 (defun my/terminal-home-directory (&optional directory)
   "Return the home directory for DIRECTORY's local or remote context."
   (when-let* ((directory (my/terminal-normalize-directory
                           (or directory default-directory))))
-    (if-let* ((remote-prefix (file-remote-p directory)))
+    (if-let* ((remote-prefix (file-remote-p directory))
+              (_ (not (and (remote-fs-file-name-p directory)
+                           (equal (remote-file-name-target directory) "local")))))
         (concat remote-prefix "~/")
-      (file-name-as-directory (expand-file-name "~")))))
+      (let ((default-directory temporary-file-directory))
+        (file-name-as-directory (expand-file-name "~"))))))
 
 (defun my/terminal-shell-directory (directory)
   "Return DIRECTORY in the form expected by an interactive shell."

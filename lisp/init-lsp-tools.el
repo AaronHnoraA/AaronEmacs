@@ -13,6 +13,7 @@
 (require 'cl-lib)
 (require 'easymenu)
 (require 'init-funcs)
+(require 'init-open)
 (require 'pp)
 (require 'subr-x)
 (require 'transient)
@@ -295,7 +296,7 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
 
 (defun my/language-server--openable-path (path)
   "Return PATH abbreviated for display."
-  (abbreviate-file-name (expand-file-name path)))
+  (abbreviate-file-name (my/open-resolve-file-name path)))
 
 (defun my/language-server--insert-button (label action help)
   "Insert a text button with LABEL, ACTION, and HELP."
@@ -334,14 +335,14 @@ When REFRESH is non-nil, refresh the current hub/doctor view afterwards."
          (source (and entry (my/language-server--entry-source entry))))
     (unless source
       (user-error "No source file is attached to the entry at point"))
-    (find-file source)))
+    (my/open-visit-file (my/open-resolve-file-name source))))
 
 (defun my/language-server-manager-context-action ()
   "Run the default action for the entry at point."
   (interactive)
   (if-let* ((entry (my/language-server-manager--current-entry))
             (source (my/language-server--entry-source entry)))
-      (find-file source)
+      (my/open-visit-file (my/open-resolve-file-name source))
     (my/language-server-manager-ensure)))
 
 (defun my/language-server-manager--mouse-set-point (event)
@@ -905,7 +906,9 @@ reporting on runs on that buffer's target, not on the client machine."
             (when source
               (insert "   ")
               (aaron-ui-board-insert-action
-               "Open source" (lambda () (find-file source))
+               "Open source"
+               (lambda ()
+                 (my/open-visit-file (my/open-resolve-file-name source)))
                "Open the file registering this server")
               (insert "\n"))
             (insert "\n")
