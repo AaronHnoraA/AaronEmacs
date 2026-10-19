@@ -183,8 +183,11 @@ agent sends must resolve against the session's target."
 (declare-function agent-shell--update-fragment "agent-shell" (&rest args))
 (declare-function agent-shell--emit-event "agent-shell" (&rest args))
 (declare-function agent-shell--finish-output "agent-shell" (&rest args))
+(declare-function agent-shell--delete-fragment "agent-shell" (&rest args))
 (declare-function agent-shell--start "agent-shell" (&rest args))
+(declare-function agent-shell-subscribe-to "agent-shell" (&rest args))
 (declare-function agent-shell-restart "agent-shell" (&rest args))
+(declare-function agent-shell-insert "agent-shell" (&rest args))
 (declare-function my/agent-shell "init-ghostel-popup" (&optional agent))
 (declare-function my/agent-shell-launch-context "init-ghostel-popup" ())
 (declare-function my/ghostel-popup--window "init-ghostel-popup" (&optional buffer))
@@ -196,6 +199,168 @@ agent sends must resolve against the session's target."
   "ACP session ID requested by this frontend before session/load completes.")
 (defvar-local my/agent-shell--task-busy nil
   "Non-nil when this frontend could not acquire its requested Codex task.")
+
+(config-defvar my/agent-shell-stall-warning-seconds 180
+  "Seconds without ACP activity before showing a pending-request warning.")
+
+(defvar-local my/agent-shell--last-activity nil)
+(defvar-local my/agent-shell--stall-timer nil)
+(defvar-local my/agent-shell--stall-shown nil)
+(defvar-local my/agent-shell--stall-subscribed nil
+  "Agent-shell state subscribed to ACP activity in this buffer.")
+
+(defun my/agent-shell--stop-stall-watch ()
+  "Stop the pending ACP request watch in the current buffer."
+  (when (timerp my/agent-shell--stall-timer)
+    (cancel-timer my/agent-shell--stall-timer))
+  (setq my/agent-shell--stall-timer nil))
+
+(defun my/agent-shell--note-activity (event)
+  "Record ACP EVENT and remove a stale warning after new activity."
+  (unless (eq (map-elt event :event) 'idle)
+    (setq my/agent-shell--last-activity (float-time))
+    (when my/agent-shell--stall-shown
+      (setq my/agent-shell--stall-shown nil)
+      (when (derived-mode-p 'agent-shell-mode)
+        (condition-case nil
+            (agent-shell--delete-fragment
+             :state agent-shell--state :block-id "acp-stalled")
+          (error nil))))
+    (when (memq (map-elt event :event) '(turn-complete error clean-up))
+      (my/agent-shell--stop-stall-watch))))
+
+(defun my/agent-shell--stall-tick (buffer state)
+  "Check BUFFER's pending requests in STATE without contacting the agent."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (if (or (not (eq agent-shell--state state))
+              (not (or (map-elt state :active-requests)
+                       (shell-maker-busy))))
+          (my/agent-shell--stop-stall-watch)
+        (let* ((seconds (floor (- (float-time)
+                                  (or my/agent-shell--last-activity
+                                      (float-time)))))
+               (process (map-nested-elt state '(:client :process)))
+               (live (and (processp process) (process-live-p process))))
+          (when (and (not my/agent-shell--stall-shown)
+                     (or (not live)
+                         (>= seconds my/agent-shell-stall-warning-seconds)))
+            (setq my/agent-shell--stall-shown t)
+            (let ((report
+                   (if live
+                       (format "No ACP activity for %s seconds. The agent process is running; it may still be thinking or waiting on a tool. Use M-x my/agent-shell-health to inspect the connection."
+                               seconds)
+                     "The ACP agent process exited while a request was pending. Use M-x my/agent-shell-reconnect to restore the session.")))
+              (condition-case nil
+                  (agent-shell--update-fragment
+                   :state state :block-id "acp-stalled"
+                   :label-left "ACP waiting" :body report
+                   :create-new t :navigation 'never)
+                (error nil))
+              (message "%s: %s" (buffer-name buffer) report)))
+          (setq my/agent-shell--stall-timer
+                (run-at-time 10 nil #'my/agent-shell--stall-tick buffer state)))))))
+
+(defun my/agent-shell--watch-request-a (original &rest args)
+  "Watch asynchronous ORIGINAL ACP requests for missing progress."
+  (let* ((state (plist-get args :state))
+         (buffer (or (plist-get args :buffer) (map-elt state :buffer))))
+    (when (and (not (plist-get args :sync))
+               (buffer-live-p buffer)
+               (assq :event-subscriptions state)
+               (map-elt state :client))
+      (with-current-buffer buffer
+        (unless (eq my/agent-shell--stall-subscribed state)
+          (agent-shell-subscribe-to
+           :shell-buffer buffer :on-event #'my/agent-shell--note-activity)
+          (setq-local my/agent-shell--stall-subscribed state)
+          (add-hook 'kill-buffer-hook #'my/agent-shell--stop-stall-watch nil t))
+        (setq my/agent-shell--last-activity (float-time))
+        (my/agent-shell--stop-stall-watch)
+        (setq my/agent-shell--stall-timer
+              (run-at-time 10 nil #'my/agent-shell--stall-tick buffer state))))
+    (apply original args)))
+
+(defun my/agent-shell--dead-client-p (state)
+  "Return non-nil when STATE still names an exited ACP process."
+  (let ((process (map-nested-elt state '(:client :process))))
+    (and (processp process)
+         (not (process-live-p process)))))
+
+(defun my/agent-shell--reject-dead-client-a (original &rest args)
+  "Prevent an old session request from silently starting a new ACP process.
+The new process has no handshake or session yet.  In that state acp.el's
+implicit process restart cannot preserve agent-shell's session identity."
+  (let ((state (plist-get args :state)))
+    (if (and state
+             (my/agent-shell--dead-client-p state)
+             (not (equal (map-elt (plist-get args :request) :method)
+                         "initialize")))
+        (let* ((failure (plist-get args :on-failure))
+               (error-object
+                '((code . -32603)
+                  (message . "ACP process exited; reconnect this agent session before sending"))))
+          (when failure (funcall failure error-object nil))
+          nil)
+      (apply original args))))
+
+(defun my/agent-shell-health ()
+  "Report the current agent's ACP process and pending request state."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Open an agent-shell buffer first"))
+  (let* ((state agent-shell--state)
+         (client (map-elt state :client))
+         (process (map-elt client :process))
+         (seconds (and my/agent-shell--last-activity
+                       (floor (- (float-time) my/agent-shell--last-activity))))
+         (status (cond ((not (processp process)) "not started")
+                       ((process-live-p process) "running")
+                       (t (format "exited (%s)" (process-status process)))))
+         (report (format "ACP process: %s; initialized: %s; active requests: %d; queued prompts: %d; transport pending: %d; last activity: %s"
+                         status
+                         (if (map-elt state :initialized) "yes" "no")
+                         (length (map-elt state :active-requests))
+                         (length (map-elt state :pending-prompts))
+                         (length (map-elt client :pending-requests))
+                         (if seconds (format "%ds ago" seconds) "unknown"))))
+    (message "%s" report)
+    report))
+
+(defun my/agent-shell-reconnect ()
+  "Reconnect an exited ACP client, retaining the current editable input.
+Only a new, unsent input is carried across.  A request that was active when
+the process exited is never replayed, since its tool effects may have run."
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (user-error "Open an agent-shell buffer first"))
+  (unless (my/agent-shell--dead-client-p agent-shell--state)
+    (user-error "The ACP process has not exited"))
+  (let* ((old-name (buffer-name))
+         (session-id (map-nested-elt agent-shell--state '(:session :id)))
+         (draft (agent-shell--prompt-input))
+         (origin (and (boundp 'noema-agent-acp-session-origin)
+                      noema-agent-acp-session-origin))
+         (name (and (boundp 'noema-agent-acp-session-name)
+                    noema-agent-acp-session-name))
+         (agent (and (boundp 'noema-agent-acp-session-agent)
+                     noema-agent-acp-session-agent))
+         (root (and (boundp 'noema-agent-acp-session-root)
+                    noema-agent-acp-session-root)))
+    ;; The process is gone; any remaining active request was already lost.
+    ;; Clear it so upstream does not ask whether to stop an exited process.
+    (map-put! agent-shell--state :active-requests nil)
+    (agent-shell-restart :session-id session-id)
+    (when-let* ((new-buffer (get-buffer old-name))
+                ((buffer-live-p new-buffer)))
+      (when (and origin (fboundp 'noema-agent-acp-adopt))
+        (noema-agent-acp-adopt new-buffer :origin origin :name name
+                              :agent agent :root root))
+      (when (and (stringp draft) (not (string-empty-p draft)))
+        (agent-shell-insert :text draft :submit nil :no-focus t
+                            :shell-buffer new-buffer))
+      (message "ACP session reconnecting; review the retained input and press RET to send")
+      new-buffer)))
 
 (defun my/agent-shell--session-context (directory)
   "Return DIRECTORY's workspace and execution target as one logical identity.
@@ -536,11 +701,14 @@ when present; the exact Codex message is the isolated compatibility fallback."
                                 error-object))))))
 
 (defun my/agent-shell--submit-a (original &rest args)
-  "Run local /resume without submitting it as an agent prompt."
-  (if (and (derived-mode-p 'agent-shell-mode)
-           (equal (agent-shell--prompt-input) "/resume"))
-      (my/agent-shell-resume)
-    (apply original args)))
+  "Reconnect exited clients or run local /resume before agent submission."
+  (cond ((and (derived-mode-p 'agent-shell-mode)
+              (my/agent-shell--dead-client-p agent-shell--state))
+         (my/agent-shell-reconnect))
+        ((and (derived-mode-p 'agent-shell-mode)
+              (equal (agent-shell--prompt-input) "/resume"))
+         (my/agent-shell-resume))
+        (t (apply original args))))
 
 (defun my/agent-shell-here (agent)
   "Start a managed AGENT in the window where this command was invoked."
@@ -625,6 +793,8 @@ Double prefix ARG keeps the upstream existing-session picker."
   (advice-add 'agent-shell--on-request :around #'my/agent-shell-in-session-buffer-a)
   (advice-add 'agent-shell--start :around #'my/agent-shell--reuse-session-a)
   (advice-add 'agent-shell--send-request :around #'my/agent-shell--busy-request-a)
+  (advice-add 'agent-shell--send-request :around #'my/agent-shell--watch-request-a)
+  (advice-add 'agent-shell--send-request :around #'my/agent-shell--reject-dead-client-a)
   (advice-add 'agent-shell-submit :around #'my/agent-shell--submit-a)
   (advice-add 'agent-shell :around #'my/agent-shell--managed-entry-a)
   (advice-add 'agent-shell--command-completion-at-point :around

@@ -6,6 +6,35 @@
   (defalias 'general-define-key #'ignore))
 (require 'init-aaronnote)
 
+(ert-deftest my/noema-latex-agent-progress-is-bounded-and-content-free ()
+  (let ((request-id "test-latex-progress")
+        (clock 100.0)
+        sent)
+    (puthash request-id (list :last-progress 0)
+             my/noema--latex-agent-requests)
+    (unwind-protect
+        (cl-letf (((symbol-function 'remote-gateway-find-client)
+                   (lambda (_) 'test-client))
+                  ((symbol-function 'remote-gateway-notify)
+                   (lambda (_client method params)
+                     (push (cons method params) sent)))
+                  ((symbol-function 'float-time)
+                   (lambda (&optional _) clock)))
+          (my/noema--latex-agent-progress
+           request-id "claude" '((:event . tool-call-update)))
+          (my/noema--latex-agent-progress
+           request-id "claude" '((:event . agent-message-chunk)))
+          (should (= (length sent) 1))
+          (should (equal (cdar sent)
+                         '((requestId . "test-latex-progress")
+                           (text . "claude is using a tool…"))))
+          (setq clock 116.0)
+          (my/noema--latex-agent-progress
+           request-id "claude" '((:event . agent-message-chunk)))
+          (should (= (length sent) 2))
+          (should (equal (caar sent) "aaronnote.latex.agent-progress")))
+      (remhash request-id my/noema--latex-agent-requests))))
+
 (ert-deftest my/noema-bulk-tag-change-invalidates-roam-cache-once ()
   (require 'init-md-roam)
   (let ((my/noema-roam--runtime-index-cache 'stale)

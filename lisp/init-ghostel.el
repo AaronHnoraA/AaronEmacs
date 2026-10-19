@@ -30,6 +30,8 @@
 (defvar ghostel-identity)
 (defvar ghostel-shell)
 (defvar ghostel-tramp-shells)
+(defvar ghostel-immediate-redraw-interval)
+(defvar ghostel-timer-delay)
 (defvar ghostel-semi-char-mode-map)
 (defvar ghostel-mode-map)
 (defvar ghostel-char-mode-map)
@@ -46,6 +48,30 @@
 
 (defvar my/ghostel-wheel-scroll-lines 5
   "Number of lines scrolled by a Ghostel mouse wheel event.")
+
+(defvar my/ghostel-remote-read-size (* 128 1024)
+  "Maximum bytes parsed in one remote Ghostel process callback.
+Keep one large TUI frame from monopolizing Emacs's event loop.  Local
+Ghostel uses its native PTY and keeps the upstream read size.")
+
+(defun my/ghostel--bounded-remote-read-a (original &rest args)
+  "Limit a remote Emacs PTY read before ORIGINAL starts its process."
+  (if (not (nth 2 args))
+      (apply original args)
+    (let ((read-process-output-max my/ghostel-remote-read-size))
+      (apply original args))))
+
+(with-eval-after-load 'ghostel
+  (advice-add 'ghostel--spawn-via-emacs :around
+              #'my/ghostel--bounded-remote-read-a))
+
+(defun my/ghostel--tune-remote-buffer (buffer)
+  "Coalesce remote TUI redraws in Ghostel BUFFER."
+  (with-current-buffer buffer
+    ;; An input-triggered redraw runs inside the process filter.  A TUI such
+    ;; as lazygit can emit several frames during that 50 ms interval.
+    (setq-local ghostel-immediate-redraw-interval 0
+                ghostel-timer-delay 0.05)))
 
 (defconst my/ghostel-kitty-palette
   '((ghostel-color-black . "#45475A")
@@ -168,6 +194,8 @@ finding that root is cheap on the backend, and to itself otherwise."
       (remote-environment-apply environment buffer))
     (with-current-buffer buffer
       (setq-local default-directory target-directory))
+    (when method
+      (my/ghostel--tune-remote-buffer buffer))
     buffer))
 
 (defun my/ghostel--keep-disconnected-h (_terminal _reason)

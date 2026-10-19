@@ -1911,12 +1911,17 @@ This is a memory-only check; it never opens an inactive project or reads disk."
     (remhash request-id my/noema--latex-agent-requests)
     (let ((buffer (plist-get request :buffer))
           (subscription (plist-get request :subscription))
+          (progress-subscription (plist-get request :progress-subscription))
           (timer (plist-get request :timer))
           (deferred (plist-get request :deferred)))
       (when (timerp timer) (cancel-timer timer))
       (when (and buffer subscription)
         (ignore-errors
           (noema-agent-acp-unsubscribe :buffer buffer :subscription subscription)))
+      (when (and buffer progress-subscription)
+        (ignore-errors
+          (noema-agent-acp-unsubscribe :buffer buffer
+                                       :subscription progress-subscription)))
       (unwind-protect
           (ignore-errors
             (remote-gateway-resolve
@@ -1940,6 +1945,25 @@ This is a memory-only check; it never opens an inactive project or reads disk."
         (when (noema-agent-acp-export-session-p session)
           (my/noema--latex-agent-retire-buffer (plist-get session :buffer)))))))
 
+(defun my/noema--latex-agent-progress (request-id backend event)
+  "Report bounded ACP EVENT activity for export REQUEST-ID to Noema."
+  (when-let* ((request (gethash request-id my/noema--latex-agent-requests))
+              (client (remote-gateway-find-client "aaronnote")))
+    (let* ((kind (map-elt event :event))
+           (now (float-time))
+           (last (or (plist-get request :last-progress) 0))
+           (text (pcase kind
+                   ('tool-call-update (format "%s is using a tool…" backend))
+                   ('agent-message-chunk (format "%s is responding…" backend))
+                   ('permission-request (format "%s is waiting for permission…" backend))
+                   (_ nil))))
+      (when (and text
+                 (or (eq kind 'permission-request) (>= (- now last) 15)))
+        (setf (plist-get request :last-progress) now)
+        (remote-gateway-notify
+         client "aaronnote.latex.agent-progress"
+         `((requestId . ,request-id) (text . ,text)))))))
+
 (defun my/noema--latex-agent-run (params _client)
   "Run a LaTeX polish turn through Noema's Emacs ACP boundary."
   (require 'noema-agent-acp)
@@ -1956,7 +1980,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                  (stringp prompt) (not (string-empty-p prompt)))
       (error "Invalid LaTeX ACP export request or unavailable agent"))
     (let ((deferred (remote-gateway-defer 960))
-          buffer subscription)
+          buffer subscription progress-subscription)
       (puthash request-id
                (list :deferred deferred
                      :timer (run-at-time
@@ -1972,6 +1996,15 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                                          :origin 'latex-export))
             (let ((request (gethash request-id my/noema--latex-agent-requests)))
               (setf (plist-get request :buffer) buffer))
+            (setq progress-subscription
+                  (noema-agent-acp-subscribe
+                   :buffer buffer
+                   :callback (lambda (event)
+                               (my/noema--latex-agent-progress
+                                request-id backend event))))
+            (let ((request (gethash request-id my/noema--latex-agent-requests)))
+              (setf (plist-get request :progress-subscription)
+                    progress-subscription))
             (setq subscription
                   (noema-agent-acp-subscribe
                    :buffer buffer :event 'init-finished
