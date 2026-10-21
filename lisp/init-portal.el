@@ -463,7 +463,6 @@ splits below.  The active terminal is omitted from the choices."
     (setq buffer (my/portal-create :directory directory :command program))
     (when frame
       (set-frame-parameter frame 'my/portal-terminal buffer)
-      (set-frame-parameter frame 'alpha 87)
       (when (null program)
         (with-current-buffer buffer
           (add-hook 'kill-buffer-hook

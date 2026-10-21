@@ -278,6 +278,7 @@
                      (setq timer (cons callback args)))))
           (should (eq (my/portal-open-external nil "true") terminal))
           (should-not focused)
+          (should-not (assq 'alpha parameters))
           (should timer)
           (apply (car timer) (cdr timer))
           (should (equal (car parameters) '(no-focus-on-map)))
