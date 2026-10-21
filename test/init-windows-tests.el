@@ -121,7 +121,8 @@
             (set-window-buffer second-window second)
             (with-current-buffer first
               (setq-local portal-input-mode t
-                          portal-view--target "web:first"))
+                          portal-view--target "web:first"
+                          my/portal--explicitly-unfocused t))
             (with-current-buffer second
               (setq-local portal-input-mode t
                           portal-view--target "web:second"))
@@ -140,6 +141,8 @@
                      (lambda (frame) (push frame frame-focuses))))
             (my/portal--focus-selected-window (selected-frame))
             (my/portal--focus-selected-window (selected-frame))
+            (with-current-buffer first
+              (should-not my/portal--explicitly-unfocused))
             (should (equal focuses '("web:first")))
             (should (equal gained (list first)))
             ;; Explicit escape stays in Emacs until a real window change.
@@ -173,6 +176,97 @@
             (should (equal (car unfocuses) "web:first")))))
       (dolist (buffer (list first second ordinary))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/portal-terminal-uses-physical-local-workspace-directory ()
+  "A local Remote workspace path reaches Ghostty as a real directory."
+  (require 'init-portal)
+  (let ((terminal (generate-new-buffer " *portal-directory-test*"))
+        (logical "/fs:local:/tmp/portal-project/")
+        (physical "/tmp/portal-project/")
+        started-in)
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/terminal-normalize-directory)
+                   (lambda (directory) directory))
+                  ((symbol-function 'remote-client-file-name)
+                   (lambda (_directory) physical))
+                  ((symbol-function 'my/portal--ensure) #'ignore)
+                  ((symbol-function 'portal-terminal-new)
+                   (lambda ()
+                     (setq started-in default-directory)
+                     terminal)))
+          (should (eq (my/portal-create :directory logical :display nil)
+                      terminal))
+          (should (equal started-in physical)))
+      (when (buffer-live-p terminal) (kill-buffer terminal)))))
+
+(ert-deftest my/portal-windmove-boundary-restores-native-focus ()
+  "A missing neighboring window reports its warning and returns focus."
+  (require 'init-portal)
+  (require 'portal-input)
+  (let ((terminal (generate-new-buffer " *portal-windmove-test*"))
+        resumed warning)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer terminal)
+          (with-current-buffer terminal (setq-local portal-input-mode t))
+          (cl-letf (((symbol-function 'portal-view-buffers)
+                     (lambda (&rest _) (list terminal)))
+                    ((symbol-function 'portal-input-focus)
+                     (lambda () (setq resumed t)))
+                    ((symbol-function 'portal--input)
+                     (lambda (&rest _) t))
+                    ((symbol-function 'message)
+                     (lambda (format-string &rest args)
+                       (setq warning (apply #'format format-string args)))))
+            (let ((unread-command-events nil))
+              (portal-input--run
+               "terminal:test" 1 (kbd "s-j")
+               (lambda () (interactive) (windmove-left))))
+          (should resumed)
+          (should (string-match-p "No window left" warning))
+          (setq resumed nil warning nil)
+          (cl-letf (((symbol-function 'windmove-find-other-window)
+                     (lambda (&rest _) (minibuffer-window))))
+            (let ((unread-command-events nil))
+              (portal-input--run
+               "terminal:test" 2 (kbd "s-j")
+               (lambda () (interactive) (windmove-down)))))
+          (should resumed)
+          (should (equal warning "Minibuffer is inactive"))))
+      (when (buffer-live-p terminal) (kill-buffer terminal)))))
+
+(ert-deftest my/portal-windmove-direct-web-boundary-restores-page-focus ()
+  "A Web pane's direct Windmove shortcut also returns focus at an edge."
+  (require 'init-portal)
+  (let ((page (generate-new-buffer " *portal-web-boundary-test*"))
+        reclaimed focused)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer page)
+          (with-current-buffer page
+            (setq-local portal-input-mode t
+                        portal-view--target "web:test"))
+          (cl-letf (((symbol-function 'my/portal--focus-selected-window)
+                     (lambda (_frame &optional force)
+                       (setq reclaimed force)))
+                    ((symbol-function 'portal-input--action)
+                     (lambda (&rest _) focused)))
+            (let ((portal-input--resume nil))
+              (windmove-right)
+              (should reclaimed)
+              (setq reclaimed nil)
+              (my/portal--record-explicit-unfocus-a #'ignore)
+              (should my/portal--explicitly-unfocused)
+              (should-error (windmove-right) :type 'user-error)
+              (should-not reclaimed)
+              ;; Clicking the page after an explicit escape makes it eligible
+              ;; for focus restoration again.
+              (setq focused t)
+              (windmove-right)
+              (should reclaimed))))
+      (when (buffer-live-p page) (kill-buffer page)))))
 
 (define-minor-mode my/portal-test-plugin-mode
   "A local editor plugin used only by Portal isolation tests.")

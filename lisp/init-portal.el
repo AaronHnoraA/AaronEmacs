@@ -61,10 +61,42 @@
                (logior 4 (logand modifiers (lognot 8)))
              modifiers)))
 
+(defun my/portal-windmove-boundary-a (original &rest args)
+  "Keep a native Portal view focused when Windmove reaches a boundary."
+  (let ((origin (selected-window))
+        (portal-buffer (and (bound-and-true-p portal-input-mode)
+                            (bound-and-true-p portal-view--target)
+                            (current-buffer))))
+    (condition-case err
+        (apply original args)
+      (user-error
+       (if (or (bound-and-true-p portal-input--resume)
+               (and portal-buffer
+                    (eq origin (selected-window))
+                    (eq portal-buffer (window-buffer origin))
+                    (or (not my/portal--explicitly-unfocused)
+                        (portal-input--action "focused"))))
+           (progn
+             (message "%s" (error-message-string err))
+             (when (and portal-buffer
+                        (not (bound-and-true-p portal-input--resume)))
+               (my/portal--focus-selected-window (selected-frame) t)))
+         (signal (car err) (cdr err)))))))
+
+(with-eval-after-load 'windmove
+  (unless (advice-member-p #'my/portal-windmove-boundary-a
+                           'windmove-do-window-select)
+    (advice-add 'windmove-do-window-select :around
+                #'my/portal-windmove-boundary-a)))
+
 (with-eval-after-load 'portal-input
   (unless (advice-member-p #'my/portal--translate-command-key 'portal-input--event)
     (advice-add 'portal-input--event :around
-                #'my/portal--translate-command-key)))
+                #'my/portal--translate-command-key))
+  (unless (advice-member-p #'my/portal--record-explicit-unfocus-a
+                           'portal-input-unfocus)
+    (advice-add 'portal-input-unfocus :around
+                #'my/portal--record-explicit-unfocus-a)))
 
 (defvar my/portal--focusing-selected-window nil
   "Non-nil while synchronizing keyboard focus after a window event.")
@@ -74,6 +106,14 @@
   "Last selected Portal view, window, and native placement.")
 (defvar my/portal-focus-gained-hook nil
   "Hook run in a Portal buffer after its native view gains keyboard focus.")
+(defvar-local my/portal--explicitly-unfocused nil
+  "Non-nil after the user explicitly returns a Portal view to Emacs.")
+
+(defun my/portal--record-explicit-unfocus-a (original &rest args)
+  "Remember an explicit Portal escape before calling ORIGINAL with ARGS."
+  (when (bound-and-true-p portal-input-mode)
+    (setq-local my/portal--explicitly-unfocused t))
+  (apply original args))
 
 (defconst my/portal-buffer-kept-modes
   '(portal-input-mode my/noema-keys-mode)
@@ -129,6 +169,7 @@ escape alone until selection, buffer, or native placement actually changes."
                              (not (portal-input--action "focused" target))))
                 (portal-input-focus)
                 (when (portal-input--action "focused" target)
+                  (setq-local my/portal--explicitly-unfocused nil)
                   (run-hooks 'my/portal-focus-gained-hook))))))))))
 
 (defun my/portal--focus-after-selection-change (frame)
@@ -227,7 +268,7 @@ terminal frontend."
                 (my/portal--ensure)
                 (let ((default-directory (if method
                                              (expand-file-name "~/")
-                                           directory)))
+                                           physical)))
                   (cond
                    (method
                     (let ((result
