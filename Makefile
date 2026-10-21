@@ -1,4 +1,7 @@
 EMACS ?= emacs
+# Pinned, prebuilt emacs-plus cask asset for Apple Silicon macOS 26+.
+include config/emacs-binary.mk
+EMACS_BINARY_URL = https://github.com/d12frosted/homebrew-emacs-plus/releases/download/cask-stable-$(EMACS_BINARY_BUILD)/emacs-plus-$(EMACS_BINARY_VERSION)-arm64-26.zip
 # libgccjit links subr trampolines against libemutls_w, which lives in gcc's
 # versioned target directory.  Emacs.app records that directory at build time
 # and the CLI wrapper does not pass it on, so a gcc upgrade leaves every test
@@ -20,13 +23,13 @@ REMOTE_TEST_BATCH = $(EMACS) --batch -Q --eval '(setq user-emacs-directory (file
 UI_TOKEN_FILE = site-lisp/noema/src/styles/aaron-ui-tokens.css
 UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui/aaron-ui.el
 
-.PHONY: default help up setup setup-full bootstrap-health install remote-ikernel-install lock audit-lock doctor build build-force \
+.PHONY: default help up setup setup-full bootstrap-health install emacs-binary-install emacs-binary-update emacs-binary-verify portal-build remote-ikernel-install lock audit-lock doctor build build-force \
         aaronnote-build \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
-        health health-startup health-byte health-native ui-test activity-test ui-tokens audit-ui-tokens \
+        health health-startup health-byte health-native ui-test activity-test performance-test ui-tokens audit-ui-tokens \
         remote-test remote-source-test remote-transfer-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
-		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke remote-ghostel-live-smoke \
+		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke \
         jupyter-test research-test agenda-test agenda-apple-test project-workflow-test \
         jupyter-linux-disconnect-live-smoke \
         noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
@@ -43,6 +46,10 @@ help:
 	  '  make setup-full           Restore + full health suite + doctor report' \
 	  '  make bootstrap-health     Restore + health + doctor + lock audit' \
 	  '  make install              Deterministically restore packages from package-lock.el' \
+	  '  make emacs-binary-install Install pinned prebuilt Emacs+ into /Applications' \
+	  '  make emacs-binary-update  Update and install the latest official Emacs+ binary' \
+	  '  make emacs-binary-verify  Verify installed Emacs and CLI entry points' \
+	  '  make portal-build         Link Ghostty config and build local Portal' \
 	  '  make remote-ikernel-install  Install the vendored remote_ikernel into Anaconda' \
 	  '  make lock                 Export the current package set back into package-lock.el' \
 	  '  make audit-lock           Compare installed packages against package-lock.el' \
@@ -50,6 +57,7 @@ help:
 	  '  make audit-ui-tokens      Verify committed Noema CSS tokens are current' \
 	  '  make ui-test              Run Aaron UI semantic-token and dashboard ERT tests' \
 	  '  make activity-test        Run activity indicator, Noema snapshot, and keyboard regressions' \
+	  '  make performance-test     Run the ETAF Performance Watch regression' \
 	  '  make jupyter-pending-remote-live-smoke  Test broker cleanup across Emacs sessions on a Linux SSH target (opt-in)' \
 	  '  make jupyter-abrupt-exit-live-smoke  Verify broker recovery after SIGKILL of Emacs (opt-in)' \
 	  '  make jupyter-linux-kernel-live-smoke  Run a real Linux SSH ipykernel through the broker (opt-in)' \
@@ -95,7 +103,6 @@ help:
 	  '  make remote-task-live-smoke  Check target tasks, error links, and cancellation' \
 	  '  make remote-task-disconnect-smoke  Check task status after RPC transport loss' \
 	  '  make remote-terminal-live-smoke  Check routed PTY input/output on a real SSH target' \
-	  '  make remote-ghostel-live-smoke  Check the actual Ghostel frontend on a real SSH target' \
 	  '  make jupyter-test         Run Noema/Jupyter and notebook ERT suites' \
 	  '  make research-test        Run Noema research notebook (JuText/Graph Board) ERT suite' \
 	  '  make project-workflow-test Run project run, task, output and local override ERT tests' \
@@ -140,6 +147,18 @@ bootstrap-health: install health doctor audit-lock
 install:
 	$(BOOTSTRAP_INSTALL)
 
+emacs-binary-install:
+	EMACS_BINARY_VERSION='$(EMACS_BINARY_VERSION)' EMACS_BINARY_SHA256='$(EMACS_BINARY_SHA256)' EMACS_BINARY_URL='$(EMACS_BINARY_URL)' EMACS_BINARY_ARCHIVE='$(EMACS_BINARY_ARCHIVE)' scripts/install-emacs-binary
+
+emacs-binary-update:
+	scripts/install-emacs-binary --update
+
+emacs-binary-verify:
+	EMACS_BINARY_VERSION='$(EMACS_BINARY_VERSION)' scripts/install-emacs-binary --verify
+
+portal-build:
+	@EMACS='$(EMACS)' ./scripts/build-portal-local
+
 remote-ikernel-install:
 	bin/install-remote-ikernel install
 
@@ -156,7 +175,10 @@ audit-ui-tokens:
 	$(UI_TOKEN_BATCH) --eval '(let ((expected (aaron-ui-css-tokens '"'"'wave)) (file "$(CURDIR)/$(UI_TOKEN_FILE)")) (unless (and (file-readable-p file) (with-temp-buffer (insert-file-contents file) (equal (buffer-string) expected))) (error "Aaron UI CSS tokens are stale; run make ui-tokens")))'
 
 activity-test:
-	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L site-lisp/config -L site-lisp/aaron-ui -L lisp -L lisp/roam -L lisp/remote -L lisp/remote/backend -l test/init-activity-tests.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L site-lisp/config -L site-lisp/aaron-ui -L lisp -L lisp/roam -L lisp/remote -L lisp/remote/backend -l test/init-activity-tests.el -f ert-run-tests-batch-and-exit
+
+performance-test:
+	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L site-lisp/config -L site-lisp/aaron-ui -L site-lisp/general.el -L lisp -l test/init-performance-tests.el -f ert-run-tests-batch-and-exit
 
 project-workflow-test:
 	$(BATCH) -l test/init-project-run-tests.el -l test/init-output-frame-tests.el -l test/init-project-local-tests.el -l test/init-amx-tests.el -f ert-run-tests-batch-and-exit
@@ -338,9 +360,6 @@ remote-cleanup-live-smoke:
 
 remote-terminal-live-smoke:
 	$(BATCH) -l test/remote-terminal-live-smoke.el
-
-remote-ghostel-live-smoke:
-	$(BATCH) -l test/remote-ghostel-live-smoke.el
 
 jupyter-test:
 	python3 -m unittest discover -s test -p jupyter_connection_cleanup_test.py

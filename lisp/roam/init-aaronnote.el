@@ -1,6 +1,6 @@
-;;; init-aaronnote.el --- Noema Web/Appine bridge -*- lexical-binding: t; -*-
+;;; init-aaronnote.el --- Noema Web/xwidget bridge -*- lexical-binding: t; -*-
 ;;
-;; Emacs starts the local Noema web host and opens it in Appine/xwidget.
+;; Emacs starts the local Noema web host and opens it in xwidget.
 ;; The editable document state lives in Noema's CodeMirror app; Emacs does
 ;; not mirror buffer edits into the browser.
 
@@ -44,13 +44,6 @@
 (declare-function my/xwidget-undo "init-browser" ())
 (declare-function my/xwidget-redo "init-browser" ())
 (declare-function my/xwidget-setup-control-line "init-browser" ())
-(declare-function my/appine-open-url "init-appine" (url))
-(declare-function my/appine-open-url-fresh "init-appine" (url))
-(declare-function my/appine-kill-all "init-appine" ())
-(declare-function my/appine--tab-forget "init-appine" (url))
-(declare-function my/appine--tab-reset "init-appine" ())
-(declare-function my/appine--switch-to-tab-index "init-appine" (target-index))
-(declare-function appine-focus "appine" ())
 (declare-function my/open-system-target "init-open" (target))
 (declare-function my/noema-roam-note-changed "init-md-roam" (file))
 (declare-function my/noema-roam--clear-runtime-cache "init-md-roam" ())
@@ -74,7 +67,6 @@
 (declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
 (declare-function remote-file-local-name "remote-fs" (file-name))
 (defvar remote-mode nil)
-(defvar my/appine-tab-list)
 (defvar my/xwidget--session-id)
 (defvar my/xwidget-suppress-auto-focus)
 
@@ -232,7 +224,8 @@ product tree instead, where they track the code."
 
 (config-defvar my/noema-backend nil
   "Backend used to display Noema."
-  :type '(choice (const :tag "xwidget-webkit" xwidget) (const :tag "Appine" appine))
+  :type '(choice (const :tag "Portal Web" portal)
+                 (const :tag "xwidget-webkit" xwidget))
   :group 'my/noema)
 
 (config-defvar my/noema-web-port nil
@@ -298,12 +291,14 @@ the backend.  The backend is chosen here, not per export."
   :group 'my/noema)
 
 (config-defvar my/noema-codex-model ""
-  "Optional model id for codex during LaTeX export polish (empty = codex default)."
+  "Optional Codex model id for LaTeX export polish (empty = gpt-5.6-terra)."
   :type 'string
   :group 'my/noema)
 
 (config-defvar my/noema-latex-export-model ""
-  "Optional model id passed to the active LaTeX export backend (empty = default)."
+  "Optional model id for LaTeX export polish.
+Empty selects gpt-5.6-terra for Codex, Sonnet for Claude, or the OpenCode
+default.  This setting does not change interactive agent sessions."
   :type 'string
   :group 'my/noema)
 
@@ -346,7 +341,7 @@ the backend.  The backend is chosen here, not per export."
 (defvar my/noema--ready-callbacks nil
   "Callbacks waiting for the web-host to become ready.")
 (defvar my/noema--app-buffer nil
-  "Buffer hosting the Appine/xwidget Noema page.")
+  "Buffer hosting the xwidget Noema page.")
 (defvar my/noema--ready-watchdog nil
   "Watchdog timer cancelled when the web-host becomes ready.")
 (defvar my/noema--goto-timer nil
@@ -416,7 +411,7 @@ the backend.  The backend is chosen here, not per export."
   "Preferred direction for the next explicit Noema split.")
 
 (defvar-local my/noema-buffer-file-name nil
-  "Current note file represented by an Noema Appine/xwidget buffer.")
+  "Current note file represented by a Noema xwidget buffer.")
 
 (put 'my/noema-buffer-file-name 'permanent-local t)
 
@@ -445,6 +440,7 @@ the backend.  The backend is chosen here, not per export."
 (add-to-list 'load-path
              (expand-file-name "site-lisp/noema/lisp" user-emacs-directory))
 (require 'noema-xwidget-keys)
+(require 'noema-portal)
 
 (defvar-keymap my/noema-keys-mode-map
   "b" #'my/noema-back
@@ -659,16 +655,19 @@ Local files are projected to native host paths.  Remote files retain their
 
 (defun my/noema-jupyter--output-dispatch (buffer payload)
   "Ask an existing Jupyter output BUFFER to open PAYLOAD as a tab."
-  (when (and (buffer-live-p buffer)
-             (fboundp 'xwidget-webkit-current-session)
-             (fboundp 'xwidget-webkit-execute-script))
+  (when (buffer-live-p buffer)
     (with-current-buffer buffer
-      (when-let* ((session (xwidget-webkit-current-session)))
-        (xwidget-webkit-execute-script
-         session
-         (format
-          "(() => { const p = %s; if (typeof window.noemaJupyterOpenDocument === 'function') { window.noemaJupyterOpenDocument(p); if (p.view && typeof window.noemaJupyterOpenView === 'function') window.noemaJupyterOpenView(p.view); return true; } return false; })()"
-          (json-serialize payload :null-object nil :false-object :json-false)))))))
+      (if (eq major-mode 'portal-web-mode)
+          (my/noema-portal-send buffer
+                                (list :type "jupyter-open" :payload payload))
+        (when (and (fboundp 'xwidget-webkit-current-session)
+                   (fboundp 'xwidget-webkit-execute-script))
+          (when-let* ((session (xwidget-webkit-current-session)))
+            (xwidget-webkit-execute-script
+             session
+             (format
+              "(() => { const p = %s; if (typeof window.noemaJupyterOpenDocument === 'function') { window.noemaJupyterOpenDocument(p); if (p.view && typeof window.noemaJupyterOpenView === 'function') window.noemaJupyterOpenView(p.view); return true; } return false; })()"
+              (json-serialize payload :null-object nil :false-object :json-false)))))))))
 
 (defun my/noema-jupyter--output-split (source-window)
   "Create the right-side output window for SOURCE-WINDOW.
@@ -689,7 +688,9 @@ height and the DAG stays in the bottom-left."
   (when (and (window-live-p window)
              (eq window (selected-window))
              (eq buffer (window-buffer window)))
-    (my/xwidget-focus buffer)))
+    (if (my/noema-portal-buffer-p buffer)
+        (my/noema-portal-focus buffer)
+      (my/xwidget-focus buffer))))
 
 (defun my/noema-jupyter-output-open-document (payload &optional focus)
   "Open Noema's singleton rich-output renderer for document PAYLOAD.
@@ -715,9 +716,14 @@ surface.  With FOCUS non-nil, move keyboard focus to the renderer."
                  target-window buffer)
              (with-selected-window source-window
                (let* ((existing
-                       (and (fboundp 'my/xwidget-session-buffer)
-                            (my/xwidget-session-buffer
-                             my/noema-jupyter-output-client-id)))
+                       (pcase my/noema-backend
+                         ('portal
+                          (my/noema-portal--session-buffer
+                           my/noema-jupyter-output-client-id))
+                         ('xwidget
+                          (and (fboundp 'my/xwidget-session-buffer)
+                               (my/xwidget-session-buffer
+                                my/noema-jupyter-output-client-id)))))
                       (visible (and existing
                                     (get-buffer-window existing 'visible)))
                       (created (not visible))
@@ -731,16 +737,20 @@ surface.  With FOCUS non-nil, move keyboard focus to the renderer."
                              (setq buffer existing)
                              (set-window-buffer target-window buffer)
                              (my/noema-jupyter--output-dispatch buffer payload))
-                         (unless (fboundp 'my/xwidget-open-url)
-                           (require 'init-browser))
                          (with-selected-window target-window
                            (setq buffer
-                                 (my/xwidget-open-url
-                                  url :id my/noema-jupyter-output-client-id
-                                  :display 'current :reuse-selected t))))
+                                 (if (eq my/noema-backend 'portal)
+                                     (my/noema-portal-open-client
+                                      url my/noema-jupyter-output-client-id)
+                                   (unless (fboundp 'my/xwidget-open-url)
+                                     (require 'init-browser))
+                                   (my/xwidget-open-url
+                                    url :id my/noema-jupyter-output-client-id
+                                    :display 'current :reuse-selected t)))))
                        (when (buffer-live-p buffer)
                          (with-current-buffer buffer
-                           (setq-local my/xwidget-suppress-auto-focus (not focus))
+                           (when (eq major-mode 'xwidget-webkit-mode)
+                             (setq-local my/xwidget-suppress-auto-focus (not focus)))
                            (setq-local my/noema--client-id
                                        my/noema-jupyter-output-client-id)
                            (setq-local my/noema--xwidget-forced-name
@@ -841,10 +851,6 @@ failure is diagnosable without hunting for it."
       (push callback my/noema--ready-callbacks))
     (unless (and my/noema--process
                  (process-live-p my/noema--process))
-      (when (fboundp 'my/appine-kill-all)
-        (ignore-errors (my/appine-kill-all)))
-      (when (fboundp 'my/appine--tab-reset)
-        (my/appine--tab-reset))
       (condition-case err
           (my/noema--start-server)
         ((error quit)
@@ -1741,19 +1747,26 @@ This is a memory-only check; it never opens an inactive project or reads disk."
 (defvar my/noema--latex-agent-requests (make-hash-table :test #'equal)
   "Active LaTeX export polish turns keyed by the web host request id.")
 
+(defun my/noema--latex-agent-request-set (request-id key value)
+  "Store VALUE under KEY in the active export REQUEST-ID."
+  (when-let* ((request (gethash request-id my/noema--latex-agent-requests)))
+    (puthash request-id (plist-put request key value)
+             my/noema--latex-agent-requests)
+    value))
+
 (defvar my/noema--latex-intervention-buffers (make-hash-table :test #'equal)
   "Manual ACP buffers opened for failed LaTeX export task ids.")
 
 (defvar my/noema--latex-failure-notified (make-hash-table :test #'equal)
   "Failed LaTeX task ids for which Emacs has already asked about intervention.")
 
-(defun my/noema--latex-intervention-display (buffer)
-  "Show manual export BUFFER in its own frame, outside Agent Workspace tabs."
+(defun my/noema--latex-intervention-display (buffer &optional title)
+  "Show export agent BUFFER in its own frame, outside Agent Workspace tabs."
   (let ((window (get-buffer-window buffer t)))
     (unless (window-live-p window)
       (setq window
             (if (display-graphic-p)
-                (let ((frame (make-frame '((name . "Noema LaTeX intervention")
+                (let ((frame (make-frame `((name . ,(or title "Noema LaTeX intervention"))
                                            (width . 110) (height . 36)))))
                   (set-frame-parameter frame 'noema-latex-intervention-buffer buffer)
                   (set-frame-parameter frame 'noema-agent-standalone t)
@@ -1765,6 +1778,10 @@ This is a memory-only check; it never opens an inactive project or reads disk."
     (select-frame-set-input-focus (window-frame window))
     (select-window window)
     window))
+
+(defun my/noema--latex-export-display (buffer)
+  "Show a live export BUFFER outside the ordinary Agent Workspace tabs."
+  (my/noema--latex-intervention-display buffer "Noema LaTeX export agent"))
 
 (defun my/noema--latex-intervention-prompt (params)
   "Draft a reviewable manual repair request from failed export PARAMS."
@@ -1872,6 +1889,40 @@ This is a memory-only check; it never opens an inactive project or reads disk."
      params)
     deferred))
 
+(defun my/noema--latex-agent-open (params _client)
+  "Focus the live export ACP session named by PARAMS."
+  (let ((deferred (remote-gateway-defer 15)))
+    (my/noema--defer-host-event
+     (lambda (payload)
+       (condition-case err
+           (let* ((request-id (alist-get 'requestId payload))
+                  (request (and (stringp request-id)
+                                (gethash request-id my/noema--latex-agent-requests)))
+                  (buffer (plist-get request :buffer)))
+             (unless (buffer-live-p buffer)
+               (user-error "This LaTeX export agent session is no longer active"))
+             (with-current-buffer buffer
+               (setq-local noema-agent-acp-display-buffer-function
+                           #'my/noema--latex-export-display)
+               (unless (bound-and-true-p my/noema--latex-export-shown)
+                 (setq-local my/noema--latex-export-shown t)
+                 (add-hook 'kill-buffer-hook
+                           (lambda ()
+                             (dolist (frame (frame-list))
+                               (when (and (> (length (frame-list)) 1)
+                                          (eq (frame-parameter frame
+                                                               'noema-latex-intervention-buffer)
+                                              (current-buffer)))
+                                 (delete-frame frame t)))) nil t)))
+             (noema-agent-acp-show-buffer buffer)
+             (remote-gateway-resolve deferred '((ok . t))))
+         (error
+          (remote-gateway-resolve
+           deferred `((ok . :json-false)
+                      (message . ,(error-message-string err)))))))
+     params)
+    deferred))
+
 (defun my/noema--latex-agent-status (_params _client)
   "Report the ACP agents configured in this Emacs for LaTeX export."
   (require 'noema-agent-acp)
@@ -1959,7 +2010,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                    (_ nil))))
       (when (and text
                  (or (eq kind 'permission-request) (>= (- now last) 15)))
-        (setf (plist-get request :last-progress) now)
+        (my/noema--latex-agent-request-set request-id :last-progress now)
         (remote-gateway-notify
          client "aaronnote.latex.agent-progress"
          `((requestId . ,request-id) (text . ,text)))))))
@@ -1971,8 +2022,12 @@ This is a memory-only check; it never opens an inactive project or reads disk."
          (backend (alist-get 'backend params))
          (workdir (alist-get 'workdir params))
          (prompt (alist-get 'prompt params))
-         (config (and (member backend '("codex" "claude" "opencode"))
-                      (noema-agent-acp-config-for backend))))
+         (context-items (alist-get 'contextItems params))
+         (model (alist-get 'model params))
+         (base-config (and (member backend '("codex" "claude" "opencode"))
+                           (noema-agent-acp-config-for backend)))
+         (config (and base-config
+                      (noema-agent-acp-export-config base-config model))))
     (unless (and (stringp request-id) (not (string-empty-p request-id))
                  (not (gethash request-id my/noema--latex-agent-requests))
                  config (stringp workdir) (file-directory-p workdir)
@@ -1993,18 +2048,18 @@ This is a memory-only check; it never opens an inactive project or reads disk."
           (progn
             (setq buffer
                   (noema-agent-acp-start :config config :directory workdir
-                                         :origin 'latex-export))
-            (let ((request (gethash request-id my/noema--latex-agent-requests)))
-              (setf (plist-get request :buffer) buffer))
+                                         :origin 'latex-export
+                                         :display-function
+                                         #'my/noema--latex-export-display))
+            (my/noema--latex-agent-request-set request-id :buffer buffer)
             (setq progress-subscription
                   (noema-agent-acp-subscribe
                    :buffer buffer
                    :callback (lambda (event)
                                (my/noema--latex-agent-progress
                                 request-id backend event))))
-            (let ((request (gethash request-id my/noema--latex-agent-requests)))
-              (setf (plist-get request :progress-subscription)
-                    progress-subscription))
+            (my/noema--latex-agent-request-set
+             request-id :progress-subscription progress-subscription)
             (setq subscription
                   (noema-agent-acp-subscribe
                    :buffer buffer :event 'init-finished
@@ -2014,9 +2069,17 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                       :buffer buffer :subscription subscription)
                      (when (gethash request-id my/noema--latex-agent-requests)
                        (condition-case prompt-error
-                           (noema-agent-acp-prompt
+                           (progn
+                             (when (and (stringp model) (not (string-empty-p model)))
+                               (let ((selected (noema-agent-acp-export-model-id model buffer))
+                                     (current (noema-agent-acp-current-model-id buffer)))
+                                 (unless (and selected (equal current selected))
+                                   (error "Export model %s unavailable or not selected (current: %s)"
+                                          model (or current "unknown")))))
+                             (noema-agent-acp-prompt
                             :buffer buffer
-                            :content (list `((type . "text") (text . ,prompt)))
+                            :content (noema-agent-acp-context-blocks
+                                      buffer prompt context-items)
                             :on-success
                             (lambda (response)
                               (my/noema--latex-agent-finish
@@ -2027,12 +2090,12 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                             :on-failure
                             (lambda (error-object _raw)
                               (my/noema--latex-agent-finish
-                               request-id nil (format "%s" error-object))))
+                               request-id nil (format "%s" error-object)))))
                          (error
                           (my/noema--latex-agent-finish
                            request-id nil (error-message-string prompt-error))))))))
-            (let ((request (gethash request-id my/noema--latex-agent-requests)))
-              (setf (plist-get request :subscription) subscription)))
+            (my/noema--latex-agent-request-set
+             request-id :subscription subscription))
         (error
          (my/noema--latex-agent-finish
           request-id nil (error-message-string err))))
@@ -2059,6 +2122,8 @@ This is a memory-only check; it never opens an inactive project or reads disk."
  "aaronnote.latex.agent-run" #'my/noema--latex-agent-run)
 (remote-gateway-register-method
  "aaronnote.latex.agent-cancel" #'my/noema--latex-agent-cancel)
+(remote-gateway-register-method
+ "aaronnote.latex.agent-open" #'my/noema--latex-agent-open)
 (remote-gateway-register-method
  "aaronnote.latex.intervene" #'my/noema--latex-intervene)
 
@@ -2198,7 +2263,7 @@ When BUFFER is nil, inspect the current buffer."
   (dolist (buffer (buffer-list))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
-        (when (and (eq major-mode 'xwidget-webkit-mode)
+        (when (and (memq major-mode '(xwidget-webkit-mode portal-web-mode))
                    (or my/noema-buffer-file-name my/noema--client-id))
           (let ((name
                  (if (my/noema--split-client-p my/noema--client-id)
@@ -2265,7 +2330,7 @@ When BUFFER is nil, inspect the current buffer."
            (lambda (buf)
              (and (buffer-live-p buf)
                   (with-current-buffer buf
-                    (and (eq major-mode 'xwidget-webkit-mode)
+                    (and (memq major-mode '(xwidget-webkit-mode portal-web-mode))
                          (stringp my/noema--client-id)
                          (string-equal my/noema--client-id client)))))
            (buffer-list))))))
@@ -2302,9 +2367,11 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
                          file
                          (or (my/noema--split-client-ordinal client) 0))
                       (my/noema--buffer-display-name file)))
-        (my/noema--harden-xwidget-placeholder)
+        (when (eq major-mode 'xwidget-webkit-mode)
+          (my/noema--harden-xwidget-placeholder))
         (my/noema-keys-mode 1)
-        (my/noema--sync-xwidget-recovery-mode)
+        (when (eq major-mode 'xwidget-webkit-mode)
+          (my/noema--sync-xwidget-recovery-mode))
         (when file
           (setq-local default-directory
                       (file-name-as-directory (file-name-directory file)))
@@ -2315,7 +2382,7 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
             (my/direnv-schedule-current-buffer)))
         (add-hook 'kill-buffer-hook #'my/noema--cleanup-buffer nil t)
         (when (and rename
-                   (eq major-mode 'xwidget-webkit-mode)
+                   (memq major-mode '(xwidget-webkit-mode portal-web-mode))
                    (not (equal (buffer-name)
                                my/noema--xwidget-forced-name)))
           (rename-buffer my/noema--xwidget-forced-name t)
@@ -2330,6 +2397,8 @@ When RENAME is non-nil, rename xwidget buffers to a note-specific name."
       (when (and (eq major-mode 'xwidget-webkit-mode)
                  (fboundp 'my/noema--setup-native-chrome))
         (my/noema--setup-native-chrome))
+      (when (eq major-mode 'portal-web-mode)
+        (my/noema--setup-portal-chrome))
       (when changed
         (my/noema--refresh-visible-ibuffers)
         (when (fboundp 'my/tab-line-refresh)
@@ -2488,68 +2557,10 @@ the \"aaronnote:surface\" session."
         (my/noema--track-app-buffer buffer file id)
         buffer))))
 
-(defun my/noema--open-appine (url &optional file force-new)
-  "Open Noema URL in Appine, one Appine tab per md file.
-If a tab with URL already exists, switch to it; otherwise open a new tab.
-
-With FORCE-NEW non-nil, always open a fresh native tab.  Singleton pages
-like the roam graph use this: their native tab may have been closed via the
-Appine toolbar (which bypasses `appine-close-tab' and leaves the Emacs-side
-tab registry stale), so trusting a remembered index would silently no-op."
-  (unless (fboundp 'my/appine-open-url)
-    (require 'init-appine))
-  (let* ((norm-url (and (fboundp 'my/appine--normalize-url)
-                        (my/appine--normalize-url url)))
-         (existing-idx (and (not force-new) norm-url
-                            (cl-position norm-url my/appine-tab-list :test #'equal)))
-         (buffer (get-buffer-create "*Appine Window*")))
-    (my/noema--track-app-buffer buffer file)
-    (with-current-buffer buffer
-      (setq-local mode-line-format nil)
-      (setq-local header-line-format '(:eval (my/noema--header-line)))
-      (setq-local cursor-type nil)
-      (setq buffer-read-only t))
-    (set-window-buffer (selected-window) buffer)
-    ;; When forcing a fresh tab, drop any stale registry entry for this URL so
-    ;; repeated opens (after a native toolbar close) do not accumulate.
-    (when (and force-new norm-url (fboundp 'my/appine--tab-forget))
-      (my/appine--tab-forget norm-url))
-    (let ((is-new (not existing-idx)))
-      (if existing-idx
-          (when (fboundp 'my/appine--switch-to-tab-index)
-            (my/appine--switch-to-tab-index existing-idx))
-        (with-current-buffer buffer
-          (if (and force-new (fboundp 'my/appine-open-url-fresh))
-              (my/appine-open-url-fresh url)
-            (my/appine-open-url url))))
-      (when (fboundp 'appine-focus)
-        (run-at-time (if is-new 0.4 0.05) nil
-                     (lambda ()
-                       (when (get-buffer-window buffer 'visible)
-                         (ignore-errors (appine-focus)))))))))
-
-(defun my/noema--appine-available-p ()
-  "Return non-nil when Noema can dispatch opens through Appine."
-  (condition-case err
-      (progn
-        (unless (fboundp 'my/appine-open-url)
-          (require 'init-appine))
-        (fboundp 'my/appine-open-url))
-    (error
-     (message "Noema: Appine unavailable (%s)"
-              (error-message-string err))
-     nil)))
-
-(defun my/noema--open-url (url &optional file force-new)
-  "Open Noema URL using `my/noema-backend'.
-FORCE-NEW, when non-nil, asks the Appine backend for a fresh tab instead of
-reusing a remembered one."
+(defun my/noema--open-url (url &optional file _force-new)
+  "Open Noema URL using `my/noema-backend'."
   (pcase my/noema-backend
-    ('appine
-     (if (my/noema--appine-available-p)
-         (my/noema--open-appine url file force-new)
-       (message "Noema: using xwidget because Appine is unavailable")
-       (my/noema--open-xwidget url file)))
+    ('portal (my/noema-portal-open url file))
     ('xwidget (my/noema--open-xwidget url file))
     (_ (user-error "Unsupported Noema backend: %S" my/noema-backend))))
 
@@ -2577,14 +2588,17 @@ visible beside it, and reuse an already visible surface window."
            (when (and (window-live-p source-window)
                       (eq (window-buffer source-window) source-buffer))
              (let* ((activate (eq (selected-window) source-window))
-                    (existing (and (eq my/noema-backend 'xwidget)
-                                   (fboundp 'my/xwidget-session-buffer)
-                                   (my/xwidget-session-buffer
-                                    "aaronnote:surface")))
+                    (existing (pcase my/noema-backend
+                                ('portal
+                                 (my/noema-portal--session-buffer
+                                  "aaronnote:surface"))
+                                ('xwidget
+                                 (and (fboundp 'my/xwidget-session-buffer)
+                                      (my/xwidget-session-buffer
+                                       "aaronnote:surface")))))
                     (visible (and existing
                                   (get-buffer-window existing 'visible)))
-                    (created (and (eq my/noema-backend 'xwidget)
-                                  (not visible)
+                    (created (and (not visible)
                                   (not (eq source-buffer existing))))
                     (target-window
                      (or visible
@@ -2778,7 +2792,7 @@ as the placeholder its Noema pane will replace."
 
 ;;;###autoload
 (defun my/noema-open-file (file &optional origin-window)
-  "Open Markdown FILE in Noema Web/Appine from ORIGIN-WINDOW."
+  "Open Markdown FILE in Noema Web from ORIGIN-WINDOW."
   (interactive "fMarkdown file: ")
   (unless (my/noema--markdown-file-p file)
     (user-error "Noema opens Markdown files, not %s" file))
@@ -2843,7 +2857,7 @@ as the placeholder its Noema pane will replace."
 
 ;;;###autoload
 (defun my/noema-open-current-note ()
-  "Open the current Markdown note in Noema Web/Appine."
+  "Open the current Markdown note in Noema Web."
   (interactive)
   (unless buffer-file-name
     (user-error "Current buffer is not visiting a file"))
@@ -2911,8 +2925,9 @@ carry optional initial anchor coordinates."
            (let ((activate (eq (selected-window) source-window))
                  target-window)
              (with-selected-window source-window
-               (unless (fboundp 'my/xwidget-open-url)
-                 (require 'init-browser))
+               (when (eq my/noema-backend 'xwidget)
+                 (unless (fboundp 'my/xwidget-open-url)
+                   (require 'init-browser)))
                (let* ((ordinal (cl-incf my/noema--split-counter))
                       (client (format "aaronnote-split:%s:%d"
                                       (file-truename file) ordinal))
@@ -2920,33 +2935,35 @@ carry optional initial anchor coordinates."
                       (success nil))
                  (setq target-window (my/noema--split-window direction))
                  (unwind-protect
-                     (let ((buffer (my/xwidget-open-url
-                                    url :id client :display 'current
-                                    :force-new t :reuse-selected t)))
+                     (let ((buffer (if (eq my/noema-backend 'portal)
+                                       (my/noema-portal-open-client url client file)
+                                     (my/xwidget-open-url
+                                      url :id client :display 'current
+                                      :force-new t :reuse-selected t))))
                        (when (buffer-live-p buffer)
                          (with-current-buffer buffer
-                           (setq-local my/noema-buffer-file-name file)
-                           (setq-local my/noema--client-id client)
-                           (setq-local my/noema--registered-file nil)
-                           (setq-local my/noema--xwidget-forced-name
-                                       (my/noema--split-buffer-display-name
-                                        file ordinal))
-                           (puthash client (current-buffer)
-                                    my/noema--client-buffers)
-                           (add-hook 'kill-buffer-hook
-                                     #'my/noema--cleanup-buffer nil t)
-                           ;; WebKit may not yet have entered its major mode.
-                           (rename-buffer my/noema--xwidget-forced-name t)
-                           (setq-local default-directory
-                                       (file-name-as-directory
-                                        (file-name-directory file)))
-                           (when (fboundp 'my/direnv-schedule-current-buffer)
-                             (my/direnv-schedule-current-buffer))
-                           (when (fboundp 'my/xwidget-setup-control-line)
-                             (my/xwidget-setup-control-line))
-                           (my/noema--harden-xwidget-placeholder)
-                           (my/noema-keys-mode 1)
-                           (my/noema--sync-xwidget-recovery-mode))
+                           (when (eq my/noema-backend 'xwidget)
+                             (setq-local my/noema-buffer-file-name file)
+                             (setq-local my/noema--client-id client)
+                             (setq-local my/noema--registered-file nil)
+                             (setq-local my/noema--xwidget-forced-name
+                                         (my/noema--split-buffer-display-name
+                                          file ordinal))
+                             (puthash client (current-buffer)
+                                      my/noema--client-buffers)
+                             (add-hook 'kill-buffer-hook
+                                       #'my/noema--cleanup-buffer nil t)
+                             (rename-buffer my/noema--xwidget-forced-name t)
+                             (setq-local default-directory
+                                         (file-name-as-directory
+                                          (file-name-directory file)))
+                             (when (fboundp 'my/direnv-schedule-current-buffer)
+                               (my/direnv-schedule-current-buffer))
+                             (when (fboundp 'my/xwidget-setup-control-line)
+                               (my/xwidget-setup-control-line))
+                             (my/noema--harden-xwidget-placeholder)
+                             (my/noema-keys-mode 1)
+                             (my/noema--sync-xwidget-recovery-mode)))
                          (setq success t)
                          (my/noema--refresh-visible-ibuffers)))
                    (unless success
@@ -3021,9 +3038,12 @@ waits for a response in the invoking Emacs command."
 ;;;###autoload
 (defun my/noema--standalone-slide-file ()
   "Return the Markdown file shown by the current standalone Slide view."
-  (when (and (eq major-mode 'xwidget-webkit-mode)
-             (fboundp 'my/xwidget-current-url))
-    (when-let* ((url (my/xwidget-current-url))
+  (when (or (eq major-mode 'portal-web-mode)
+            (and (eq major-mode 'xwidget-webkit-mode)
+                 (fboundp 'my/xwidget-current-url)))
+    (when-let* ((url (if (eq major-mode 'portal-web-mode)
+                         portal-web--url
+                       (my/xwidget-current-url)))
                 (path (url-filename (url-generic-parse-url url))))
       (when (and (string-match-p "\\`/slides\\(?:[?#]\\|\\'\\)" path)
                  (string-match "[?&]file=\\([^&#]+\\)" path))
@@ -3076,7 +3096,8 @@ waits for a response in the invoking Emacs command."
                                        (list (and view (format "view=%s" view))
                                              query))
                                  "&"))))))
-    (if (my/noema--xwidget-buffer-p (current-buffer))
+    (if (or (my/noema--xwidget-buffer-p (current-buffer))
+            (my/noema-portal-buffer-p (current-buffer)))
         (my/noema--open-hosted-surface
          `((path . ,path) (client . ,my/noema--client-id)))
       (my/noema--ensure-server
@@ -3204,29 +3225,27 @@ shared renderer activity gate may sleep until that pane receives input."
      (string-lessp (buffer-name (car left)) (buffer-name (car right))))))
 
 (defun my/noema--notify-xwidgets-core-ready ()
-  "Reconnect retained xwidgets and replay host lifecycle after core restart."
-  (when (and (fboundp 'xwidget-webkit-current-session)
-             (fboundp 'xwidget-webkit-execute-script))
-    (dolist (buffer (buffer-list))
-      (when (and (buffer-live-p buffer)
-                 (my/noema--xwidget-buffer-p buffer))
-        (with-current-buffer buffer
-          ;; The replacement Node host has no memory of commands accepted by
-          ;; its predecessor. Force the next complete activity snapshot to
-          ;; replay even when the Emacs-side foreground state did not change.
-          (setq-local my/noema--activity-paused :unknown)
-          (when-let* ((session (ignore-errors
-                                 (xwidget-webkit-current-session))))
-            (condition-case nil
+  "Reconnect retained Noema pages and replay host lifecycle after restart."
+  (dolist (buffer (my/noema--browser-buffers))
+    (when (buffer-live-p buffer)
+      (with-current-buffer buffer
+        (setq-local my/noema--activity-paused :unknown)
+        (condition-case nil
+            (cond
+             ((my/noema-portal-buffer-p buffer)
+              (my/noema-portal-send buffer '(:type "core-ready")))
+             ((and (my/noema--xwidget-buffer-p buffer)
+                   (fboundp 'xwidget-webkit-current-session)
+                   (fboundp 'xwidget-webkit-execute-script))
+              (when-let* ((session (xwidget-webkit-current-session)))
                 (xwidget-webkit-execute-script
-                 session my/noema--core-ready-script)
-              (quit
-               (my/noema--record-interrupted-operation
-                "retained xwidget core reconnect"))
-              (error nil))))))
-    (when my/noema--activity-hooks-installed
-      (setq my/noema--last-activity-signature :unknown)
-      (my/noema--update-activity))))
+                 session my/noema--core-ready-script))))
+          (quit
+           (my/noema--record-interrupted-operation "retained Noema core reconnect"))
+          (error nil)))))
+  (when my/noema--activity-hooks-installed
+    (setq my/noema--last-activity-signature :unknown)
+    (my/noema--update-activity)))
 
 (defun my/noema--maybe-reconnect-core-on-activity ()
   "Restart a disconnected core only while an Noema browser is active.
@@ -3441,9 +3460,7 @@ and every renderer uses the same `runHostCommand' pause implementation."
 
 ;;;###autoload
 (defun my/noema-stop ()
-  "Kill the Noema web-host process and reset Appine tab state.
-The web-host (Node) is the backend; once it is gone, any Appine tabs showing
-its pages are dead, so the Emacs-side tab registry is cleared too."
+  "Kill the Noema web-host process."
   (interactive)
   (my/noema--latex-agent-cancel-all)
   (when (fboundp 'my/dashboard-agenda-host-stopped)
@@ -3478,8 +3495,6 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
         (lambda ()
           (when (process-live-p proc)
             (delete-process proc))))))
-  (when (fboundp 'my/appine--tab-reset)
-    (my/appine--tab-reset))
   (message "Noema web-host stopped."))
 
 (defun my/noema--kill-browser-buffers ()
@@ -3490,7 +3505,7 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
        (with-current-buffer buffer
          (when (or my/noema-buffer-file-name
                    my/noema--client-id
-                   (and (derived-mode-p 'xwidget-webkit-mode)
+                   (and (memq major-mode '(xwidget-webkit-mode portal-web-mode))
                         (string-prefix-p "*Noema" (buffer-name buffer))))
            (kill-buffer buffer)))))
    (buffer-list))
@@ -3502,8 +3517,6 @@ its pages are dead, so the Emacs-side tab registry is cleared too."
 (defun my/noema-close ()
   "Completely close Noema browser surfaces and stop the web-host."
   (interactive)
-  (when (fboundp 'my/appine-kill-all)
-    (ignore-errors (my/appine-kill-all)))
   (my/noema--kill-browser-buffers)
   (my/noema-stop))
 
@@ -3855,21 +3868,23 @@ failure while it is still going."
   (let ((fn (car entry)) (command (cdr entry)))
     (fset fn (lambda () (interactive) (my/noema-command command)))))
 
-(defun my/noema--header-browser-buttons ()
-  "Return native xwidget controls with Noema actions under the pencil."
+(defun my/noema--header-browser-buttons (&optional reload window-menu)
+  "Return shared browser controls for Noema's xwidget or Portal view.
+RELOAD and WINDOW-MENU select the backend's implementations."
   (append
    (my/xwidget--header-history-and-popup
     #'my/noema-back #'my/noema-forward #'my/noema-switch-buffer-menu)
    (list
     (my/xwidget--nav-button
      (my/xwidget--mode-line-icon 'codicon "nf-cod-refresh" "reload")
-     #'my/xwidget-reload "Reload [g]" 'header-line)
+     (or reload #'my/xwidget-reload) "Reload [g]" 'header-line)
     (my/xwidget--nav-button
      (my/xwidget--mode-line-icon 'codicon "nf-cod-edit" "edit")
      #'my/noema-editor-menu "Noema actions" 'header-line)
     (my/xwidget--nav-button
      (my/xwidget--mode-line-icon 'codicon "nf-cod-layout" "win")
-     #'my/xwidget-window-menu "Window menu" 'header-line))))
+     (or window-menu #'my/xwidget-window-menu)
+     "Window menu" 'header-line))))
 
 (defun my/noema--header-line ()
   "Return native browser and editor controls for an Noema buffer."
@@ -3884,6 +3899,47 @@ failure while it is still going."
   "Install Noema-only Emacs chrome in the current xwidget buffer."
   (setq-local header-line-format '(:eval (my/noema--header-line)))
   (kill-local-variable 'mode-line-format)
+  (force-mode-line-update t))
+
+(defun my/noema-portal-menu ()
+  "Show the Noema page actions in a Portal pane."
+  (interactive)
+  (popup-menu
+   (easy-menu-create-menu
+    "Noema"
+    (list
+     ["Focus editor" my/noema-focus t]
+     ["Save" my/noema-save t]
+     ["Back" my/noema-back t]
+     ["Forward" my/noema-forward t]
+     ["Refresh pane" my/noema-refresh t]
+     "---"
+     ["Editable split right" my/noema-open-current-note-split-right t]
+     ["Editable split below" my/noema-open-current-note-split-below t]
+     ["Editable split in new frame" my/noema-open-current-note-split-frame t]
+     ["Page outline" my/noema-toggle-page t]
+     ["Agenda" my/noema-toggle-agenda t]
+     ["Local graph" my/noema-toggle-graph t]
+     ["Wiki home" my/noema-wiki-home t]
+     ["Tools" my/noema-toggle-tools t]
+     ["Jupyter cells" my/noema-toggle-jupyter t]
+     ["Settings" my/noema-settings t]
+     ["Close Noema" my/noema-close t]))))
+
+(defun my/noema--portal-header-line ()
+  "Return the shared Noema browser controls for a Portal page."
+  (let ((file (my/noema-buffer-file)))
+    (append
+     (list " ")
+     (my/noema--header-browser-buttons
+      #'my/noema-refresh #'my/noema-portal-menu)
+     (list "  "
+           (propertize (if file (file-name-nondirectory file) "Noema")
+                       'face 'mode-line-buffer-id)))))
+
+(defun my/noema--setup-portal-chrome ()
+  "Install native Noema controls in the current Portal page."
+  (setq-local header-line-format '(:eval (my/noema--portal-header-line)))
   (force-mode-line-update t))
 
 (defun my/noema--restore-native-chrome-h ()
@@ -4163,22 +4219,6 @@ the gptel or agent UI on the note's Emacs source buffer."
 ;; Global: H-o opens the Noema dispatch panel.
 (general-define-key "H-o" #'noema-menu)
 (general-define-key "C-H-o" #'noema-menu)
-
-;; Appine buffer direct keys — override global H- bindings that are irrelevant
-;; when focused in the Noema pane.
-(with-eval-after-load 'appine
-  (when (boundp 'appine-active-map)
-    (define-key appine-active-map (kbd "H-o") #'noema-menu)
-    (define-key appine-active-map (kbd "C-H-o") #'noema-menu)
-    (define-key appine-active-map (kbd "M-z") #'my/noema-undo)
-    (define-key appine-active-map (kbd "M-Z") #'my/noema-redo)
-    (define-key appine-active-map (kbd "M-S-z") #'my/noema-redo)
-    (define-key appine-active-map (kbd "H-s") #'my/noema-save)
-    (define-key appine-active-map (kbd "H-r") #'my/noema-refresh)
-    (define-key appine-active-map (kbd "H-B") #'my/noema-build-and-reopen)
-    (define-key appine-active-map (kbd "H-q") #'my/noema-close)
-    (define-key appine-active-map (kbd "H-y") #'my/noema-wiki-refresh)
-    (define-key appine-active-map (kbd "H-g") #'my/noema-roam-graph)))
 
 (my/noema--rename-live-buffers)
 

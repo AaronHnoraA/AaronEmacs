@@ -18,7 +18,7 @@
 (declare-function project-run-menu "init-project-run" ())
 (declare-function test-menu "init-test" ())
 (declare-function debug-menu "init-debug" ())
-(declare-function ghostel-toggle "init-ghostel-popup" ())
+(declare-function my/portal-popup-toggle "init-portal-popup" ())
 (declare-function noema-agenda "init-aaronnote" (&optional query))
 (autoload 'olivetti-mode "olivetti" nil t)
 
@@ -32,7 +32,7 @@
  "<f7>" #'debug-menu
  "<f8>" #'olivetti-mode
  "<f9>" #'noema-agenda
- "<f10>" #'ghostel-toggle)
+ "<f10>" #'my/portal-popup-toggle)
 ;; F11 intentionally left alone.
 
 (provide 'init-function-keys)

@@ -3,6 +3,7 @@
 (require 'ert)
 (require 'compile)
 (require 'comp-run)
+(require 'aaron-ui-activity)
 (require 'init-activity-noema)
 (require 'remote-task)
 (require 'remote-transfer)
@@ -127,6 +128,9 @@
             (my/activity-board)
             (setq board (current-buffer))
             (should (eq board (frame-parameter frame 'my/activity-board-buffer)))
+            (should (etaf-runtime-for-buffer board))
+            (should (eq (key-binding "j") #'etaf-focus-next))
+            (should (string-match-p "Built-in managers" (buffer-string)))
             (setq-local my/activity-board--filter "process")
             (call-interactively (key-binding "q"))
             (should (eq (window-buffer (selected-window)) source))
@@ -146,7 +150,7 @@
       (unwind-protect
           (progn
             (set-frame-parameter frame 'my/activity-board-buffer nil)
-            (cl-letf (((symbol-function 'aaron-ui-board-set-header)
+            (cl-letf (((symbol-function 'etaf-mount)
                        (lambda (&rest _)
                          (setq created
                                (frame-parameter frame 'my/activity-board-buffer))
@@ -168,10 +172,12 @@
             (switch-to-buffer source)
             (my/activity-board)
             (setq board (current-buffer))
-            (let ((row (text-property-any (point-min) (point-max)
-                                          'my/activity-process process)))
-              (should row)
-              (goto-char row)
+            (let ((ref (intern (format "activity-process-%s"
+                                       (process-name process)))))
+              (should (eq (gethash ref my/activity-board--entries) process))
+              (etaf-focus nil ref)
+              (should (eq (key-binding "x") #'my/activity-board-stop))
+              (should (eq (key-binding "j") #'etaf-focus-next))
               (my/activity-board-describe))
             (setq detail (current-buffer))
             (should (eq detail

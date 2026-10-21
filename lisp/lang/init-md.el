@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 ;; Markdown editing is owned by Noema.  Emacs redirects opened Markdown
-;; files into the local Noema Web/Appine bridge for interactive opens, and
+;; files into the local Noema Web bridge for interactive opens, and
 ;; falls back to a raw text buffer for programmatic callers (magit, grep, xref).
 
 ;;; Code:

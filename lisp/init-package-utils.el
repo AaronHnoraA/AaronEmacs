@@ -7,10 +7,17 @@
 
 (require 'cl-lib)
 (require 'package)
+(require 'subr-x)
 
 (defvar package-selected-packages)
 (defvar package-vc-selected-packages)
 (defvar my/package-lock-version)
+(defvar my/package-vc-patches nil
+  "Alist of VC package symbols and patch files relative to `user-emacs-directory'.")
+
+(let ((manifest (expand-file-name "config/package-patches.el" user-emacs-directory)))
+  (when (file-exists-p manifest)
+    (load manifest nil 'nomessage)))
 
 (defgroup my/package-utils nil
   "Helpers for installing and loading packages."
@@ -86,7 +93,86 @@ REV defaults to `:last-release'."
                 ;; If the library is already loadable, treat it as installed.
                 (locate-library (symbol-name package)))
       (require 'package-vc)
-      (package-vc-install (cons package spec) (plist-get spec :rev)))))
+      (package-vc-install (cons package spec) (plist-get spec :rev)))
+    (my/package-apply-vc-patch package)))
+
+(defun my/package-vc-source-directory (package)
+  "Return PACKAGE's package-vc checkout directory, or signal a useful error."
+  (let* ((desc (my/package--package-desc package))
+         (dir (and desc (eq (package-desc-kind desc) 'vc)
+                   (or (alist-get :vc-dir (package-desc-extras desc))
+                       (package-desc-dir desc)))))
+    (unless (and (stringp dir) (file-directory-p dir))
+      (error "VC checkout for %s is missing; install the package first" package))
+    dir))
+
+(defun my/package--vc-patch-file (package)
+  "Return PACKAGE's registered patch as an absolute path, or nil."
+  (when-let* ((name (alist-get package my/package-vc-patches)))
+    (let ((file (expand-file-name name user-emacs-directory)))
+      (unless (file-readable-p file)
+        (error "Patch for %s is missing: %s" package file))
+      file)))
+
+(defun my/package--git-result (directory &rest args)
+  "Run Git ARGS in DIRECTORY and return (EXIT-CODE . OUTPUT)."
+  (with-temp-buffer
+    (let ((status (apply #'call-process "git" nil t nil "-C" directory args)))
+      (cons status (string-trim (buffer-string))))))
+
+(defun my/package-apply-vc-patch (package)
+  "Apply PACKAGE's registered patch once; fail clearly on upstream conflicts.
+Return `applied', `already', or nil when PACKAGE has no patch."
+  (when-let* ((patch (my/package--vc-patch-file package)))
+    (let* ((dir (my/package-vc-source-directory package))
+           (reverse (my/package--git-result dir "apply" "--reverse" "--check" patch)))
+      (if (zerop (car reverse))
+          'already
+        (let ((check (my/package--git-result dir "apply" "--check" patch)))
+          (unless (zerop (car check))
+            (error "Patch for %s conflicts with %s: %s"
+                   package dir (cdr check)))
+          (let ((result (my/package--git-result dir "apply" patch)))
+            (unless (zerop (car result))
+              (error "Applying patch for %s failed: %s" package (cdr result)))
+            'applied))))))
+
+(defun my/package-unapply-vc-patch (package)
+  "Remove PACKAGE's registered patch before package-vc updates its checkout.
+Return `removed', nil if it was already absent, or signal on a conflict."
+  (when-let* ((patch (my/package--vc-patch-file package)))
+    (let* ((dir (my/package-vc-source-directory package))
+           (reverse (my/package--git-result dir "apply" "--reverse" "--check" patch)))
+      (if (zerop (car reverse))
+          (let ((result (my/package--git-result dir "apply" "--reverse" patch)))
+            (unless (zerop (car result))
+              (error "Removing patch for %s failed: %s" package (cdr result)))
+            'removed)
+        (let ((check (my/package--git-result dir "apply" "--check" patch)))
+          (unless (zerop (car check))
+            (error "Patch state for %s is neither applied nor clean: %s"
+                   package (cdr check)))
+          nil)))))
+
+(defun my/package-with-vc-patches-suspended (function)
+  "Run FUNCTION with registered VC patches removed, then restore them.
+This gives package-vc a clean checkout for upgrades.  Other local source
+changes stop the upgrade instead of being overwritten or silently retained."
+  (unwind-protect
+      (progn
+        (dolist (entry my/package-vc-patches)
+          (let ((package (car entry)))
+            (when (package-installed-p package)
+              (my/package-unapply-vc-patch package)
+              (let* ((dir (my/package-vc-source-directory package))
+                     (status (my/package--git-result dir "diff" "--quiet" "HEAD" "--")))
+                (unless (zerop (car status))
+                  (error "VC checkout for %s has other local changes: %s"
+                         package dir))))))
+        (funcall function))
+    (dolist (entry my/package-vc-patches)
+      (when (package-installed-p (car entry))
+        (my/package-apply-vc-patch (car entry))))))
 
 (defun my/package-read-lock-file ()
   "Load `my/package-lock-file' if it exists."
@@ -281,6 +367,9 @@ Return a plist suitable for batch checks."
                 (format "Failed to install VC package %s: %s"
                         pkg (error-message-string err))
                 :error)))))))
+    (dolist (entry my/package-vc-patches)
+      (when (package-installed-p (car entry))
+        (my/package-apply-vc-patch (car entry))))
     t))
 
 (defun my/package--upgrade-archive-packages (query)
@@ -304,16 +393,17 @@ When QUERY is non-nil, allow the underlying package upgrader to prompt."
 (defun my/package--upgrade-vc-packages ()
   "Upgrade installed VC packages."
   (require 'package-vc)
-  (cond
-   ((fboundp 'package-vc-upgrade-all)
-    (package-vc-upgrade-all)
-    t)
-   ((and (fboundp 'package-vc-upgrade)
-         (boundp 'package-vc-selected-packages))
-    (dolist (entry package-vc-selected-packages)
-      (package-vc-upgrade (car entry)))
-    t)
-   (t nil)))
+  (let ((upgrade (cond
+                  ((fboundp 'package-vc-upgrade-all)
+                   #'package-vc-upgrade-all)
+                  ((and (fboundp 'package-vc-upgrade)
+                        (boundp 'package-vc-selected-packages))
+                   (lambda ()
+                     (dolist (entry package-vc-selected-packages)
+                       (package-vc-upgrade (car entry))))))))
+    (when upgrade
+      (my/package-with-vc-patches-suspended upgrade)
+      t)))
 
 (defun my/package-bootstrap-from-lock-if-needed ()
   "Install packages from `my/package-lock-file' on first startup.

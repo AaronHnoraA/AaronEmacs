@@ -2925,6 +2925,34 @@ its new watcher, kills that watcher and leaves the watch failed."
             (should (memq terminal (remote-terminal-list workspace))))
         (remote-workspace-close workspace)))))
 
+(ert-deftest remote-terminal-normal-exit-closes-buffer-after-sentinel ()
+  "A completed remote shell closes its buffer through the normal kill path."
+  (remote-framework-test-with-registry
+    (let* ((remote-terminal-auto-close-on-exit t)
+           (context
+            (remote-context-create
+             :target-id "local" :localname "/tmp/"
+             :workspace-id "terminal-normal-exit"
+             :workspace-root "/fs:local:/tmp/"))
+           (workspace (remote-workspace-open context :connect nil))
+           (terminal
+            (remote-terminal-open
+             workspace :name "normal-exit"
+             :shell "/bin/sh" :arguments '("-c" "read line; exit 0")))
+           (buffer (remote-terminal-buffer terminal)))
+      (unwind-protect
+          (progn
+            (remote-terminal-send-string terminal "finish\n")
+            (let ((deadline (+ (float-time) 5)))
+              (while (and (buffer-live-p buffer)
+                          (< (float-time) deadline))
+                (accept-process-output nil 0.05)
+                (sit-for 0.01)))
+            (should-not (buffer-live-p buffer))
+            (should (eq (remote-terminal-state terminal) 'closed))
+            (should-not (memq terminal (remote-terminal-list workspace))))
+        (remote-workspace-close workspace)))))
+
 (ert-deftest remote-path-login-shell-asks-for-the-shell-alone ()
   "Knowing which shell to start must not run the person's shell startup."
   (remote-framework-test-with-registry
@@ -3230,7 +3258,7 @@ its new watcher, kills that watcher and leaves the watch failed."
 (defun remote-framework-test--frontend-terminal (workspace name &rest metadata)
   "Adopt a routed process whose frontend kills its buffer on exit.
 Return (TERMINAL BUFFER PROCESS).  The sentinel mirrors a native frontend
-such as Ghostel: it removes the buffer unless `remote-framework-test--keep'
+such as Portal: it removes the buffer unless `remote-framework-test--keep'
 is set in it."
   (let* ((buffer (generate-new-buffer (format " *%s*" name)))
          (process

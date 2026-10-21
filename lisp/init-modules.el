@@ -135,7 +135,7 @@ If one of FEATURES is already available, require MODULE immediately."
 
 ;; standalone apps
 (when (eq system-type 'darwin)
-  (my/require-module-safely 'init-appine))
+  (my/require-module-safely 'init-portal))
 (require 'init-text)
 (require 'init-shell)
 (require 'init-remote-connectboard)

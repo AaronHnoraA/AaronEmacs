@@ -29,6 +29,25 @@
 
 (remote-fs-install)
 
+(ert-deftest remote-files-menu-renders-with-transient ()
+  "The transfer menu renders its heading, command, and grouped commands."
+  (let ((transient--prefix nil)
+        (transient--layout nil)
+        (transient--suffixes nil))
+    (cl-letf (((symbol-function 'remote-files--menu-title)
+               (lambda () "Target folder <-> local")))
+      (dolist (transient-force-single-column '(nil t))
+        (transient--init-objects 'remote-files-dispatch nil nil)
+        (with-temp-buffer
+          (transient--insert-groups)
+          (goto-char (point-min))
+          (dolist (label '("Target folder <-> local" "Choose other machine"
+                           "Files" "Send marked to the other side" "Folders"
+                           "Sync this folder to the other" "More"
+                           "Disconnect target"))
+            (should (search-forward label nil t))
+            (goto-char (point-min))))))))
+
 (defmacro remote-transfer-test-with-registry (&rest body)
   "Evaluate BODY with isolated registries, machines and transfer state."
   (declare (indent 0) (debug t))

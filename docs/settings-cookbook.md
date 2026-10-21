@@ -383,7 +383,7 @@ breadcrumb 不继承 tab 的切换/关闭行为；
 - `remote-make-network-process` / `remote-open-network-stream` / `remote-port-forward`
 - `remote-environment-ensure` / `remote-environment-derive`
 - `remote-client-ssh-program`（`config-board` 中选择本机 SSH；nil 使用客户端 PATH）
-- `my/ghostel-ssh`
+- `my/portal-ssh`
 
 target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境层的完整
 设计见 [remote-framework.md](remote-framework.md)。`lisp/remote/` 只放通用框架；
@@ -629,7 +629,8 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 
 文件：
 
-- [lisp/init-activity.el](../lisp/init-activity.el) —— 指示器、分类、注册表、板面
+- [lisp/init-activity.el](../lisp/init-activity.el) —— 指示器、分类、注册表、板面数据与动作
+- [site-lisp/aaron-ui/aaron-ui-activity.el](../site-lisp/aaron-ui/aaron-ui-activity.el) —— Activity 的 ETAF 整页布局；继续取 Aaron UI 色板和原有图标
 - [lisp/roam/init-activity-noema.el](../lisp/roam/init-activity-noema.el) —— Noema Core task / agent 工作快照与原生取消
 - [assets/activity/](../assets/activity/) —— 皮卡丘的 XPM 帧和画它的脚本
 
@@ -658,20 +659,20 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
   否则每加一个工具就要多一条正则。
 - **不要把 `process-attributes` 放进渲染路径。** 它是每进程一次系统调用。现在只有两处
   调用它：`d` 的详情页，和某进程首次出现时取真实启动时间（之后缓存在弱键表里）。
-- **不要在 `my/activity-board-mode-map` 里绑 `j`/`k`/`n`/`p`/`RET`。** 这五个键由
-  `aaron-ui-board-mode-map` 统一提供（j/n 下、k/p 上、RET 打开），所有 board 一致；
-  盖掉它们既不一致，`k` 更会变成一次误触就停掉任务。停止类操作放在 `x`/`i`/`X`。
+- **Activity 的 ETAF 页继续用 `j/n` 下移、`k/p` 上移、`RET` 打开。**
+  这些键在 `my/activity-board-keys-mode-map` 中路由到 ETAF 焦点；停止类操作
+  仍放在 `x`/`i`/`X`，不要占用导航键。其他 Aaron UI board 的映射不变。
 - **不要在板面里重写原生管理器。** `list-processes` / `list-timers` / `list-threads` /
   `proced` / `memory-report` 各自更称职，板面只负责分组、动作和跳转。
-- **行内映射只加 `keymap` 文本属性,不要加 `local-map`。** 后者会替换所属 board 的
-  major-mode 映射,导致光标进入行内后 `j/k/x` 落到文本输入并报只读。
+- **ETAF 行以稳定 `:ref` 对应原进程或任务。** 快捷键从当前焦点取对象，
+  不依赖文本属性；其他旧 board 继续遵守原来的行内映射规则。
 - **provider 只读缓存,轮询走异步 API。** Noema 的 agent 状态由 ACP boundary 提供,
   Core task 由已有 `tasks:list` / `tasks:cancel` 接口提供,不要猜子进程命令行。
 
 终端下没有图形界面，指示器自动降级为颜文字；`my/activity-frame-sets` 里一个帧集的
 `:frames` 字符串必须等宽，否则 mode line 每帧都会抖。
 
-改动后运行 `make activity-test` 验证任务生命周期、Noema 快照、动画和行内键盘操作;
+改动后运行 `make activity-test` 验证任务生命周期、Noema 快照、动画和 ETAF 键盘操作;
 共享 board 的键盘回归也包含在 `make ui-test` 里。
 
 ## 改启动 Dashboard 的内容或顺序

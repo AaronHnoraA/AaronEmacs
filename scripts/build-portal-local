@@ -1,0 +1,23 @@
+#!/bin/sh
+# Link Aaron UI's Ghostty config and apply the local Portal bridge patch.
+set -eu
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+source_dir="$root/site-lisp/portal"
+ghostty_config="$root/site-lisp/aaron-ui/ghostty.conf"
+ghostty_link="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/config"
+emacs_bin="${EMACS:-emacs}"
+[ -d "$source_dir/.git" ] || { echo "Portal checkout missing: $source_dir" >&2; exit 1; }
+if [ -e "$ghostty_link" ] && [ ! -L "$ghostty_link" ]; then
+    echo "Ghostty config is a regular file; move it before linking: $ghostty_link" >&2
+    exit 1
+fi
+mkdir -p "$(dirname -- "$ghostty_link")"
+ln -sfn "$ghostty_config" "$ghostty_link"
+cd "$source_dir"
+PORTAL_CONFIG_ROOT="$root" "$emacs_bin" --batch -Q \
+    --eval '(setq user-emacs-directory (file-name-as-directory (getenv "PORTAL_CONFIG_ROOT")) package-user-dir (expand-file-name "elpa" user-emacs-directory))' \
+    --eval '(require (quote package))' \
+    --eval '(package-initialize)' \
+    -L "$root/lisp" -l "$root/lisp/init-package-utils.el" \
+    --eval '(my/package-apply-vc-patch (quote portal))'
+./build.sh "$@"

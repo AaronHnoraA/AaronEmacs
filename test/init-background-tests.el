@@ -204,10 +204,33 @@
                      (lambda (frame &rest _) (setq deleted frame))))
             (should-error (my/background-make-frame))))
       (kill-buffer source))
-    (should (memq created-from
-                  (list (get-buffer "*dashboard*")
-                        (get-buffer "*scratch*"))))
+    (should (eq created-from (my/window-dashboard-buffer)))
     (should (eq deleted (selected-frame)))))
+
+(ert-deftest background-raw-make-frame-starts-on-dashboard ()
+  "The frame hook gives even a plain `make-frame' the Dashboard."
+  (let ((source (generate-new-buffer "*frame-dashboard-source*")))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer source)
+          (should (memq #'my/background--new-frame-dashboard
+                        after-make-frame-functions))
+          (my/background--new-frame-dashboard (selected-frame))
+          (should (eq (window-buffer) (my/window-dashboard-buffer))))
+      (when (buffer-live-p source) (kill-buffer source)))))
+
+(ert-deftest background-child-frame-keeps-its-own-buffer ()
+  "Dashboard setup does not replace a child frame's popup content."
+  (let ((source (generate-new-buffer "*child-frame-source*")))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer source)
+          (cl-letf (((symbol-function 'frame-parent)
+                     (lambda (_frame) 'parent)))
+            (my/background--new-frame-dashboard (selected-frame)))
+          (should (eq (window-buffer) source)))
+      (when (buffer-live-p source) (kill-buffer source)))))
 
 (ert-deftest background-frame-factory-keeps-successful-frame ()
   (let (deleted)

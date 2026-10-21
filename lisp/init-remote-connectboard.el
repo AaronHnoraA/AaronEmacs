@@ -38,15 +38,15 @@
   "o M" '(:def remote-machines :which-key "remote machines"))
 
 (defvar remote-files-terminal-function)
-(declare-function my/ghostel--open-in-directory "init-ghostel"
+(declare-function my/portal-open-in-directory "init-portal"
                   (buffer-name directory))
 (declare-function remote-files-default-terminal "remote-files"
                   (name directory))
 
 (defun my/remote-files-terminal (name directory)
-  "Open the file manager's terminal NAME in DIRECTORY with Ghostel."
-  (if (fboundp 'my/ghostel--open-in-directory)
-      (my/ghostel--open-in-directory name directory)
+  "Open the file manager's terminal NAME in DIRECTORY with Portal."
+  (if (fboundp 'my/portal-open-in-directory)
+      (my/portal-open-in-directory name directory)
     (remote-files-default-terminal name directory)))
 
 (with-eval-after-load 'remote-files

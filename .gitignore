@@ -94,3 +94,4 @@ __pycache__/
 
 # Noema is its own repository, installed beside this configuration.
 /site-lisp/noema/
+/site-lisp/portal/

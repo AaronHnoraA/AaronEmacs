@@ -258,8 +258,7 @@ Emacs state keep their local behavior."
 				  my/health-mode
 				  gptel-mode))
     (evil-set-initial-state mode 'emacs))
-  (add-to-list 'evil-buffer-regexps '("^\\*Appine Window\\*$" . nil))
-  (add-to-list 'evil-buffer-regexps '("^\\*ghostel.*\\*$" . nil))
+  (add-to-list 'evil-buffer-regexps '("^\\*portal.*\\*$" . nil))
   (dolist (hook '(ibuffer-mode-hook
                   debugger-mode-hook
                   my/diagnostics-mode-hook
@@ -318,7 +317,7 @@ Emacs state keep their local behavior."
           (seq-remove
            (lambda (mode)
              (memq (if (consp mode) (car mode) mode)
-                   '(ghostel eshell ibuffer dired xwidget)))
+                   '(portal-terminal eshell ibuffer dired xwidget)))
            evil-collection-mode-list)))
   :hook (evil-mode . evil-collection-init)
   :bind (([remap evil-show-marks] . evil-collection-consult-mark)
@@ -511,28 +510,16 @@ Emacs state keep their local behavior."
     "ps" 'my/project-ripgrep
     "pd" 'my/project-open-root
     "pm" 'my/project-magit-status
-    "pv" 'my/project-ghostel
-    "pG" 'ghostel-project
+    "pv" 'my/project-portal
+    "pG" 'my/project-portal
     "pa" 'my/project-add-known-project
     "pD" 'my/project-discover-projects-in-directory
     "pk" 'my/project-kill-buffers
 
     ;; app
     "a"  '(:ignore t :which-key "app")
-    "ap" '(:ignore t :which-key "appine")
-    "apa" 'my/appine-open-url
-    "apf" 'my/appine-open-file
-    "app" 'my/appine-open-at-point
-    "apr" 'my/appine-reload
-    "aph" 'my/appine-back
-    "apl" 'my/appine-forward
-    "ap[" 'my/appine-prev-tab
-    "ap]" 'my/appine-next-tab
-    "apc" 'my/appine-close-tab
-    "apk" 'my/appine-kill-all
-    "apR" 'my/appine-restart
-    "aps" 'my/browser-switch-to
-    "apS" 'my/browser-open-search
+    "as" 'my/browser-switch-to
+    "aS" 'my/browser-open-search
     "ac" 'calendar
     "ay" 'my/calendar-year
     "am" 'macos-tools-menu
@@ -544,23 +531,23 @@ Emacs state keep their local behavior."
     "od" 'dirvish-dwim
     "oD" 'dirvish-fd
     "ob" 'browse-url
-    "oa" 'my/appine-open-url
-    "oe" 'ghostel-toggle
-    "og" 'ghostel
-    "oE" 'my/ghostel-popup-cycle
-    "oF" 'my/ghostel-toggle-fixed
+    "oe" 'my/portal-popup-toggle
+    "og" 'my/portal-terminal
+    "oE" 'my/portal-popup-cycle
+    "oF" 'my/portal-toggle-fixed
     "oq" 'clutch-query-console
-    "ot" 'ghostel-toggle
+    "ot" 'my/portal-popup-toggle
     "oT" 'ansi-term
-    "ov" 'ghostel
-    "oV" 'my/ghostel-named
-    "oS" 'my/ghostel-ssh
+    "ov" 'my/portal-terminal
+    "oV" 'my/portal-named
+    "oS" 'my/portal-ssh
     "ow" 'my/open-eww-url
     "oW" 'my/browser-open-search
     "ox" 'my/xwidget-open-url
     "oB" 'my/browser-switch-to
     "os" 'shell-toggle
     "op" 'proced
+    "oP" 'my/portal-terminal
     "ol" 'my/beancount)
 
 )

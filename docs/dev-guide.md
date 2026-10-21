@@ -310,7 +310,7 @@ Dape 原生 `dape-restart` 重启。
 - `SPC p m`
   当前项目 Magit
 - `SPC p v`
-  当前项目 ghostel
+  当前项目 portal
 - `C-c p .`
   非 Evil 场景下打开项目工作台
 
@@ -355,36 +355,44 @@ Dape 原生 `dape-restart` 重启。
 - `M-x shell-toggle`
   弹出 shell
 
-### Ghostel
+### Portal
 
 - `M-\``
-  `ghostel-toggle`
+  `my/portal-popup-toggle`
 - `C-c e`
   弹出/收起全局 popup；新建终端时按最近聚焦的项目和 target 启动
 - `C-c C-e`
-  智能弹出或收回当前 popup `ghostel`
+  智能弹出或收回当前 popup `portal`
 - `C-c E`
-  切换到下一个 popup `ghostel`；`C-u C-c E` 新建一个
+  切换到下一个 popup `portal`；`C-u C-c E` 新建一个
 - `C-c M-E`
-  新建 popup `ghostel`
+  新建 popup `portal`
 - `C-c M-e`
-  切换当前 popup `ghostel` 的固定状态
+  切换当前 popup `portal` 的固定状态
 - `SPC o e`
-  `ghostel-toggle`
+  `my/portal-popup-toggle`
 - `SPC o E`
-  切换到下一个 popup `ghostel`
+  切换到下一个 popup `portal`
 - `SPC o F`
-  切换当前 popup `ghostel` 的固定状态
+  切换当前 popup `portal` 的固定状态
 - `SPC o t`
-  `ghostel-toggle`
+  `my/portal-popup-toggle`
 - `SPC o v`
-  新建 `ghostel`
+  新建 `portal`
 - `SPC o V`
-  创建命名 `ghostel`
+  创建命名 `portal`
 - `SPC o S`
-  `my/ghostel-ssh`
-- `M-x my/project-popup-ghostel-app`
-  在当前 project 根目录的新 popup `ghostel` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
+  `my/portal-ssh`
+- `M-x my/project-popup-portal-app`
+  在当前 project 根目录的新 popup `portal` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
+
+### Portal
+
+- `SPC o P` / `M-x my/portal-terminal`
+  在当前 Emacs 窗口打开 GhosttyKit 原生终端。需要 macOS GUI Emacs 31.1+。
+  本地目录使用 Portal；远端 workspace 继续使用 Portal。
+- Portal 锁定在 `package-lock.el` 的 VC revision，源码和已经验证的构建存放在
+  `site-lisp/portal/`（不纳入本仓库）。首次在新机器安装时依 Portal 提示构建原生模块。
 
 ## 6.1 数据库 / SQL
 
@@ -429,20 +437,20 @@ Dape 原生 `dape-restart` 重启。
 - `M-x remote-board`：按 target 查看 route、连接状态、配置/当前/最近文件夹和活动转发端口；可见时随连接、workspace 和 channel 生命周期刷新。`RET`/`o` 打开文件夹并建立受管理的 workspace（端口行复制本地地址），`f` 在目标文件系统中补全目录，`c` 关闭选中文件夹的 workspace 与所属资源，`C` 断开整个 target 的 workspace、连接和 buffer（保留未保存编辑及拒绝关闭的 buffer，并停止自动启动），`p` 转发目标端口（`C-u p` 指定目标侧 host，`C-u C-u p` 还可指定本地端口），`n` 命名选中转发，`P` 更换其本地端口，`k` 关闭转发并移除恢复资源，`r` 后台重连 workspace（已连接时用 `C-u r`），`w` 复制行的 URI 或本地端口地址，`s` 刷新本机缓存状态，`g` 重读 target 配置
 - 编辑远程文件：使用 `fs://target/path` 或 `/fs:target:/path`
 - 旧的 `/ssh:host:/path` 仍可打开，进入 buffer 后会 canonicalize 为 `/fs`
-- 在当前本地/远端 workspace 打开终端：`C-c e`（`ghostel-toggle`）
-- 按主机名直接开终端：`M-x my/ghostel-ssh`
+- 在当前本地/远端 workspace 打开终端：`C-c e`（`my/portal-popup-toggle`）
+- 按主机名直接开终端：`M-x my/portal-ssh`
 
 `/fs:` 远程 buffer 的模式栏显示当前 target，点击可打开 Remote 面板。普通本地
 buffer 不显示这一项。面板中的最近文件夹由显式的 Remote 打开操作记忆，并由
 `savehist` 持久化；绘制面板不连接远端，只有实际打开文件夹时才检查目标目录。
 
 `C-c e` 是推荐入口。它读取当前 buffer 的 `/fs:TARGET:/path` 上下文，通过
-remote process adapter 启动 ghostel，并把 terminal 生命周期登记给 workspace；
+remote process adapter 启动 portal，并把 terminal 生命周期登记给 workspace；
 本地与远端走同一条路径。popup 的 tab 和当前窗口在所有项目及 target 间共享；
 新建 terminal 或 agent 时读取最近聚焦的工作 buffer，在该项目和 target 启动进程。
 切换旧 tab 只显示原有 buffer，不改变其进程所属的 workspace。
 
-`my/ghostel-ssh` 会优先读：
+`my/portal-ssh` 会优先读：
 
 - `~/.ssh/config`
 
@@ -462,11 +470,10 @@ channel lifecycle 必须委托给 Remote 框架。若必须写 local/remote 条�
 
 ## 7. 浏览器
 
-### 三套入口
+### 浏览器入口
 
 - `eww`
 - `xwidget-webkit`
-- `appine`
 
 ### 常用命令
 
@@ -474,16 +481,12 @@ channel lifecycle 必须委托给 Remote 框架。若必须写 local/remote 条�
   `my/open-eww-url`
 - `C-c w x`
   `my/open-xwidget-url`
-- `C-c w a`
-  `my/appine-open-url`
 - `C-c w s`
   交互选择当前页面的目标后端
-- `C-c w E` / `C-c w X` / `C-c w A` / `C-c w O`
-  当前页面直达 `eww` / `xwidget-webkit` / `appine` / macOS `open`
+- `C-c w E` / `C-c w X` / `C-c w O`
+  当前页面直达 `eww` / `xwidget-webkit` / macOS `open`
 - `C-c w d` / browser buffer `M-w`
-  kill 当前 `eww` / `xwidget-webkit` buffer 并删除对应窗口，或关闭当前 Appine tab
-- `C-c w k`
-  `my/appine-kill-all`
+  kill 当前 `eww` / `xwidget-webkit` buffer 并删除对应窗口
 - `C-c w w`
   统一 `browse-url`
 
@@ -496,21 +499,16 @@ channel lifecycle 必须委托给 Remote 框架。若必须写 local/remote 条�
 browser pipeline 额外提供：
 
 - EWW <-> Xwidget
-- EWW/Xwidget <-> Appine
 - EWW/Xwidget 默认打开到独立浏览 buffer，连续多开不覆盖已显示的浏览 buffer
 - 当前页面 -> macOS `open`
 - 统一搜索入口：`my/browser-open-search`
 - 当前页面后端切换：`my/browser-switch-to`
-- Appine 便携动作：打开文件、打开光标下链接、前进后退、刷新、标签切换、全杀
-- Appine board 的文件、目录、URL、tab registry 上都有 macOS `open` 入口
 
 因此当前建议是：
 
 - 文本/阅读优先 `eww`
 - 默认真实网页优先 `xwidget-webkit`
-- 原生嵌入或 AppKit 文件查看需要时手动走 `appine`
 - 文件、URL 需要系统应用接管时走 `system` / macOS `open`
-- 关闭 Appine 的最后一个标签会自动清掉 host buffer
 
 **xwidget 焦点**：页面加载完成（`load-finished`）时自动开启 `xwidget-webkit-edit-mode`、
 注入一次 `<right>` 唤醒 native WebKit first-responder、并运行 buffer-local `my/xwidget-focus-script`
@@ -522,7 +520,7 @@ Emacs 只用这个事件更新该 pane 的前台活动状态，不重新选择�
 把 WebKit 刚取得的 first-responder 夺走。下一次 Emacs 命令或窗口切换会清除
 这个临时活动状态；平时没有额外轮询。
 
-## 8. Noema Markdown Web/Appine
+## 8. Noema Markdown Web/xwidget
 
 ### 架构
 
@@ -538,7 +536,7 @@ Emacs (init-aaronnote.el)
        ├─ POST /api            ← Web app 调 runtime 保存/索引/文件操作
        ├─ GET  /events         ← Emacs 控制事件推送到页面
        └─ POST /emacs/command  ← Emacs 粗粒度控制通道
-  └─ 当前 window 直接切到 Appine/xwidget，加载 http://127.0.0.1:<port>/?file=<md>
+  └─ 当前 window 直接切到 xwidget，加载 http://127.0.0.1:<port>/?file=<md>
 ```
 
 笔记仓库通过 `.roam` 符号链接挂载（机器本地，不入 git）。Noema 是
@@ -557,7 +555,7 @@ Noema 与 Emacs 共用：
 
 | 文件 | 用途 |
 |------|------|
-| `lisp/roam/init-aaronnote.el` | Emacs 入口：进程管理、Appine/xwidget 打开、控制命令 |
+| `lisp/roam/init-aaronnote.el` | Emacs 入口：进程管理、xwidget 打开、控制命令 |
 | `site-lisp/noema/` | 完整 Noema 独立 git 项目；安装位置固定，但由根仓库忽略，不是 submodule 或符号链接 |
 | `site-lisp/noema/web-host.mjs` | Node HTTP+SSE 桥接服务器和 preload adapter |
 | `site-lisp/noema/dist/aaronnote/` | Noema static build |
@@ -569,7 +567,7 @@ Noema 与 Emacs 共用：
 - Emacs 打开 `.md` / `.markdown` / `README.md` 时直接交给 Noema，并关闭临时 Markdown buffer。
 - Emacs 不再通过 `after-change-functions` 推送 buffer 全文，也不做 per-keystroke preview。
 - Emacs 侧命令只做打开当前 note、打开 graph、发送小型 command，以及接收 Web 端 “open in Emacs” 事件。
-- 后续融合优先通过 Appine/webhook/pipeline 做文件管理、外部动作和索引刷新，而不是恢复 Emacs→browser 实时全文同步。
+- 后续融合优先通过 webhook/pipeline 做文件管理、外部动作和索引刷新，而不是恢复 Emacs→browser 实时全文同步。
 
 ### stdout 事件协议
 
@@ -721,7 +719,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   cancelled 写回格子；运行中的 Run 由 worker 发 ACP `session/cancel`、撤回待批权限，
   3 秒无响应再关停 agent 进程。JuText `C-c C-z` 按光标所在格子取消。
 - `M-x noema-skill-manager` / `noema-mcp-manager` / `noema-capability-manager`
-  在普通 buffer 打开能力管理器；在 agent-shell buffer（平台会话或 popup ghostel 里的
+  在普通 buffer 打开能力管理器；在 agent-shell buffer（平台会话或 popup portal 里的
   会话）里同一命令改为只读 lookup（`M-x noema-capability-lookup`），选中后只在 agent
   输入处草拟一行引用（Skill 给出绝对 `SKILL.md` 与资源目录，MCP 给出配置文件），
   不启用、不打补丁、不安装、也不自动发送。
@@ -888,7 +886,6 @@ label-badge 字段行、hl-line 行高亮、styled header-line。
 - Compile Board（`init-compile.el`）
 - 当前 buffer 的 Diagnostics UI（`init-diagnostics-ui.el`）：每个 frame 共用一个面板，
   三种严重程度只改变筛选；项目列表使用 Emacs 原生 Flymake
-- Appine Board（`init-appine.el`）
 
 ## 11. Transient 菜单 + which-key 主题（`aaron-ui-transient`）
 

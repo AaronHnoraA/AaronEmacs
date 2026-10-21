@@ -10,13 +10,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function remote-require-on-client "remote-core"
-                  (feature &optional filename noerror))
-
-(declare-function ghostel-create "ghostel" (&optional name display identity))
-(declare-function my/ghostel-send-command "init-ghostel"
-                  (buffer command &optional retries))
-(defvar ghostel-shell)
+(declare-function my/portal-create "init-portal" (&rest args))
 
 (defconst tldr-buffer-name "*tldr*")
 (defconst tldr-url-template "https://api.github.com/repos/tldr-pages/tldr/contents/pages/%s/%s.md")
@@ -32,20 +26,7 @@
   "Return a shell-safe command string for PROGRAM."
   (shell-quote-argument (my/executable-or-name program)))
 
-(defun my/ghostel-require ()
-  "Load Ghostel on this machine.
-Ghostel and its native module are client code: loading them from a remote
-`default-directory' would open a file session on that target first."
-  (if (fboundp 'remote-require-on-client)
-      (remote-require-on-client 'ghostel)
-    (require 'ghostel)))
-
-(defun my/ghostel-create-hidden (name)
-  "Create the Ghostel buffer NAME without displaying it."
-  (my/ghostel-require)
-  (ghostel-create name))
-
-(defun my/ghostel-wrap--command-name (command)
+(defun my/portal-wrap--command-name (command)
   "Return a short display name derived from COMMAND."
   (let* ((candidate
           (cond
@@ -60,58 +41,36 @@ Ghostel and its native module are client code: loading them from a remote
         (replace-regexp-in-string "[^[:alnum:]_.+-]" "-" name)
       "command")))
 
-(defun my/ghostel-wrap--shell-command (command)
-  "Return a shell command that replaces its shell with COMMAND.
-COMMAND may be a shell command string or a non-empty list of argv strings.
-Lists are quoted argument by argument; strings are evaluated by a fresh shell."
-  (cond
-   ((and (stringp command) (not (string-empty-p (string-trim command))))
-    (let* ((configured-shell (and (boundp 'ghostel-shell) ghostel-shell))
-           (shell (or (if (consp configured-shell)
-                          (car configured-shell)
-                        configured-shell)
-                      shell-file-name (getenv "SHELL") "/bin/sh")))
-      (format "exec %s -lc %s"
-              (shell-quote-argument shell)
-              (shell-quote-argument command))))
-   ((and (consp command)
-         (cl-every #'stringp command)
-         (not (string-empty-p (car command))))
-    (format "exec %s" (mapconcat #'shell-quote-argument command " ")))
-   (t
-    (user-error "COMMAND must be a non-empty string or argv string list"))))
-
 ;;;###autoload
-(cl-defun my/ghostel-wrap (command &key directory buffer-name (display t))
-  "Run COMMAND as the foreground process of a fresh Ghostel terminal.
+(cl-defun my/portal-wrap (command &key directory buffer-name (display t))
+  "Run COMMAND in a fresh Portal terminal.
 
 COMMAND may be a shell string, or a list of program arguments.  Prefer an
 argument list from Lisp callers because every argument is shell-quoted.  A
 string intentionally supports shell syntax such as pipes and redirections.
 
 DIRECTORY defaults to `default-directory'.  BUFFER-NAME defaults to a name
-derived from COMMAND; a unique buffer is always created.  When DISPLAY is
-non-nil, show the buffer with `pop-to-buffer'.  Return the Ghostel buffer.
+derived from COMMAND.  Return the terminal buffer.
 
 Examples:
 
-  (my/ghostel-wrap \='(\"claude\" \"--model\" \"sonnet\"))
-  (my/ghostel-wrap \"ollama run qwen3\" :directory project-root)
-  (my/ghostel-wrap \='(\"ssh\" \"build-host\") :buffer-name \"*build host*\")"
-  (interactive (list (read-shell-command "Ghostel command: ")))
-  (my/ghostel-require)
-  (let* ((shell-command (my/ghostel-wrap--shell-command command))
-         (default-directory
-          (file-name-as-directory
-           (expand-file-name (or directory default-directory))))
-         (name (or buffer-name
-                   (format "*ghostel:wrap:%s*"
-                           (my/ghostel-wrap--command-name command))))
-         (buffer (my/ghostel-create-hidden (generate-new-buffer-name name))))
-    (my/ghostel-send-command buffer shell-command)
-    (when display
-      (pop-to-buffer buffer))
-    buffer))
+  (my/portal-wrap \='(\"claude\" \"--model\" \"sonnet\"))
+  (my/portal-wrap \"ollama run qwen3\" :directory project-root)"
+  (interactive (list (read-shell-command "Portal command: ")))
+  (unless (or (and (stringp command)
+                   (not (string-empty-p (string-trim command))))
+              (and (consp command)
+                   (cl-every #'stringp command)
+                   (not (string-empty-p (car command)))))
+    (user-error "COMMAND must be a non-empty string or argv string list"))
+  (require 'init-portal)
+  (my/portal-create
+   :directory (or directory default-directory)
+   :name (generate-new-buffer-name
+          (or buffer-name
+              (format "*portal:wrap:%s*"
+                      (my/portal-wrap--command-name command))))
+   :command command :display display))
 
 ;;;###autoload
 (defun tldr (cmd &optional op)

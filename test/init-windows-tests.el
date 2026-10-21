@@ -52,36 +52,164 @@
           (should (eq (window-buffer) source)))
       (when (buffer-live-p source) (kill-buffer source)))))
 
-(ert-deftest my/window-close-last-page-opens-dashboard ()
-  "A sole window with no previous work should show the dashboard."
-  (let ((page (generate-new-buffer "close-last-page"))
-        (scratch (get-buffer-create "*scratch*"))
-        dashboard)
+(ert-deftest my/window-ibuffer-q-avoids-duplicate-visible-buffer ()
+  "A Portal-created picker does not restore a page shown elsewhere."
+  (require 'portal-input)
+  (let ((source (generate-new-buffer "portal-picker-source")))
     (unwind-protect
         (save-window-excursion
           (delete-other-windows)
-          (switch-to-buffer scratch)
-          (switch-to-buffer page)
-          (set-window-prev-buffers (selected-window)
-                                   (list (list scratch 1 1)))
-          (cl-letf (((symbol-function 'dashboard-open)
-                     (lambda (&rest _)
-                       (setq dashboard
-                             (get-buffer-create "*dashboard-close-test*"))
-                       (with-current-buffer dashboard
-                         (setq-local major-mode 'dashboard-mode))
-                       (switch-to-buffer dashboard))))
-            (kill-current-buffer)
-            (sit-for 0.02))
-          (should (eq (window-buffer) dashboard)))
-      (dolist (buffer (list page dashboard))
+          (switch-to-buffer source)
+          (let ((origin (selected-window)))
+            (portal-input-split-right)
+            (should (derived-mode-p 'ibuffer-mode))
+            (call-interactively (key-binding (kbd "q")))
+            (should (eq (window-buffer origin) source))
+            (when (= (count-windows) 2)
+              (should-not (eq (window-buffer (next-window origin)) source)))))
+      (when (buffer-live-p source) (kill-buffer source)))))
+
+(ert-deftest my/window-ordinary-ibuffer-q-avoids-duplicate-visible-buffer ()
+  "The same fallback rule applies to an ordinary buffer split."
+  (let ((source (generate-new-buffer "ordinary-picker-source")))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer source)
+          (let ((origin (selected-window)))
+            (select-window (split-window-right))
+            (ibuffer)
+            (call-interactively (key-binding (kbd "q")))
+            (should (eq (window-buffer origin) source))
+            (when (= (count-windows) 2)
+              (should-not (eq (window-buffer (next-window origin)) source)))))
+      (when (buffer-live-p source) (kill-buffer source)))))
+
+(ert-deftest my/window-portal-command-keys-use-normal-buffer-actions ()
+  "Portal's native Command keys run the same bindings as other buffers."
+  (require 'init-portal)
+  (require 'portal-terminal-bindings)
+  (should (eq (lookup-key portal-terminal-native-map (kbd "s-w"))
+              (key-binding (kbd "M-w"))))
+  (should (eq (lookup-key portal-terminal-native-map (kbd "s-W"))
+              (key-binding (kbd "M-W")))))
+
+(ert-deftest my/window-portal-focus-follows-selected-pane-and-buffer ()
+  "Portal gives up focus on ordinary panes and follows view changes."
+  (require 'init-portal)
+  (require 'portal-input)
+  (let* ((first (generate-new-buffer "portal-focus-first"))
+        (second (generate-new-buffer "portal-focus-second"))
+        (ordinary (generate-new-buffer "treemacs-focus-test"))
+        (focused (make-hash-table :test #'equal))
+        (focuses nil)
+        (frame-focuses nil)
+        (unfocuses nil)
+        (gained nil)
+        (my/portal-focus-gained-hook
+         (list (lambda () (push (current-buffer) gained))))
+        (my/portal--selected-pane-state nil)
+        (my/portal--selected-view-state nil))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer first)
+          (let* ((first-window (selected-window))
+                 (ordinary-window (split-window-right))
+                 (second-window (split-window ordinary-window nil 'right)))
+            (set-window-buffer ordinary-window ordinary)
+            (set-window-buffer second-window second)
+            (with-current-buffer first
+              (setq-local portal-input-mode t
+                          portal-view--target "web:first"))
+            (with-current-buffer second
+              (setq-local portal-input-mode t
+                          portal-view--target "web:second"))
+          (cl-letf (((symbol-function 'portal-input--action)
+                     (lambda (action target &rest _)
+                       (pcase action
+                         ("focused" (gethash target focused))
+                         ("unfocus"
+                          (push target unfocuses)
+                          (puthash target nil focused)))))
+                    ((symbol-function 'portal-input-focus)
+                     (lambda ()
+                       (push portal-view--target focuses)
+                       (puthash portal-view--target t focused)))
+                    ((symbol-function 'select-frame-set-input-focus)
+                     (lambda (frame) (push frame frame-focuses))))
+            (my/portal--focus-selected-window (selected-frame))
+            (my/portal--focus-selected-window (selected-frame))
+            (should (equal focuses '("web:first")))
+            (should (equal gained (list first)))
+            ;; Explicit escape stays in Emacs until a real window change.
+            (puthash "web:first" nil focused)
+            (my/portal--focus-selected-window (selected-frame))
+            (should (equal focuses '("web:first")))
+            (with-current-buffer first
+              (setq-local portal-view--geometry '(resized)))
+            (my/portal--focus-selected-window (selected-frame))
+            (should (equal focuses '("web:first" "web:first")))
+            (should (equal gained (list first first)))
+            (select-window ordinary-window)
+            (my/portal--focus-after-command)
+            (should (equal unfocuses '("web:first")))
+            (should (equal frame-focuses (list (selected-frame))))
+            (select-window second-window)
+            (my/portal--focus-after-command)
+            (should (equal (car focuses) "web:second"))
+            (select-window first-window)
+            (my/portal--focus-after-command)
+            (should (equal (car unfocuses) "web:second"))
+            (should (equal (car focuses) "web:first"))
+            ;; A frame can retain its native first responder while another
+            ;; frame is key; activation must reassert its actual keyboard.
+            (let ((count (length focuses)))
+              (my/portal--focus-selected-window (selected-frame) t)
+              (should (= (length focuses) (1+ count))))
+            ;; Replacing a selected Portal buffer also returns focus.
+            (set-window-buffer first-window ordinary)
+            (my/portal--focus-after-command)
+            (should (equal (car unfocuses) "web:first")))))
+      (dolist (buffer (list first second ordinary))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
-(ert-deftest my/window-bury-last-page-opens-dashboard ()
-  "The one-frame close action buries its page without showing scratch."
-  (let ((page (generate-new-buffer "bury-last-page"))
-        (scratch (get-buffer-create "*scratch*"))
-        dashboard)
+(define-minor-mode my/portal-test-plugin-mode
+  "A local editor plugin used only by Portal isolation tests.")
+
+(ert-deftest my/portal-buffer-disables-editor-plugins ()
+  "A Portal buffer retains native input without editor completion workers."
+  (with-temp-buffer
+    (setq-local portal-input-mode t
+                completion-at-point-functions '(ignore)
+                eldoc-documentation-functions '(ignore))
+    (my/portal-test-plugin-mode 1)
+    (my/portal--quiet-buffer)
+    (should portal-input-mode)
+    (should-not my/portal-test-plugin-mode)
+    (should-not completion-at-point-functions)
+    (should-not eldoc-documentation-functions)))
+
+(ert-deftest my/window-ibuffer-from-portal-returns-to-live-view ()
+  "Ordinary Ibuffer q restores the same Portal session."
+  (let ((portal (generate-new-buffer "portal-list-view")))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer portal)
+          (with-current-buffer portal (setq-local portal-input-mode t))
+          (ibuffer)
+          (should (buffer-live-p portal))
+          (should (derived-mode-p 'ibuffer-mode))
+          (call-interactively (key-binding (kbd "q")))
+          (should (eq (window-buffer) portal))
+          (should (buffer-live-p portal)))
+      (when (buffer-live-p portal) (kill-buffer portal)))))
+
+(ert-deftest my/window-close-last-page-opens-project-directory ()
+  "A sole window with no previous work should show its project directory."
+  (let ((page (generate-new-buffer "close-last-page"))
+        (scratch (get-buffer-create "*scratch*")))
     (unwind-protect
         (save-window-excursion
           (delete-other-windows)
@@ -89,18 +217,65 @@
           (switch-to-buffer page)
           (set-window-prev-buffers (selected-window)
                                    (list (list scratch 1 1)))
-          (cl-letf (((symbol-function 'dashboard-open)
-                     (lambda (&rest _)
-                       (setq dashboard
-                             (get-buffer-create "*dashboard-bury-test*"))
-                       (with-current-buffer dashboard
-                         (setq-local major-mode 'dashboard-mode))
-                       (switch-to-buffer dashboard))))
-            (my/delete-frame-dwim))
-          (should (buffer-live-p page))
-          (should (eq (window-buffer) dashboard)))
-      (dolist (buffer (list page dashboard))
+          (kill-current-buffer)
+          (sit-for 0.02)
+          (with-current-buffer (window-buffer)
+            (should (derived-mode-p 'dired-mode))))
+      (when (buffer-live-p page) (kill-buffer page)))))
+
+(ert-deftest my/window-quit-home-fallback-opens-dashboard ()
+  "Quitting a sole page returns to Dashboard instead of Dired home."
+  (let ((page (generate-new-buffer "quit-home-page"))
+        (scratch (get-buffer-create "*scratch*"))
+        (home (file-name-as-directory (expand-file-name "~"))))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer scratch)
+          (switch-to-buffer page)
+          (with-current-buffer page (setq-local default-directory home))
+          (set-window-prev-buffers (selected-window)
+                                   (list (list scratch 1 1)))
+          (quit-window)
+          (should (eq (window-buffer) (my/window-dashboard-buffer))))
+      (when (buffer-live-p page) (kill-buffer page)))))
+
+(ert-deftest my/window-quit-home-dired-returns-to-dashboard ()
+  "An old Dired home entry does not become a page after q."
+  (let ((page (generate-new-buffer "quit-home-dired-page"))
+        (home-dired (generate-new-buffer "quit-home-dired"))
+        (home (file-name-as-directory (expand-file-name "~"))))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (with-current-buffer home-dired
+            (setq-local major-mode 'dired-mode
+                        default-directory home))
+          (switch-to-buffer home-dired)
+          (switch-to-buffer page)
+          (set-window-prev-buffers (selected-window)
+                                   (list (list home-dired 1 1)))
+          (quit-window)
+          (should (eq (window-buffer) (my/window-dashboard-buffer))))
+      (dolist (buffer (list page home-dired))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/window-bury-last-page-opens-project-directory ()
+  "The one-frame close action buries its page into its project directory."
+  (let ((page (generate-new-buffer "bury-last-page"))
+        (scratch (get-buffer-create "*scratch*")))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer scratch)
+          (switch-to-buffer page)
+          (set-window-prev-buffers (selected-window)
+                                   (list (list scratch 1 1)))
+          (my/delete-frame-dwim)
+          (should (buffer-live-p page))
+          (with-current-buffer (window-buffer)
+            (should (derived-mode-p 'dired-mode))))
+      (when (buffer-live-p page) (kill-buffer page)))))
 
 (ert-deftest my/window-bury-returns-to-previous-page ()
   "Burying keeps the old buffer alive and restores the prior page."
@@ -280,14 +455,14 @@
       (when (buffer-live-p dashboard)
         (kill-buffer dashboard)))))
 
-(ert-deftest my/window-ghostel-popup-exit-keeps-work-buffer ()
-  "Closing a managed ghostel popup leaves its work window in place."
-  (require 'init-ghostel-popup)
-  (let ((source (generate-new-buffer "ghostel-popup-work-test"))
-        (dashboard (generate-new-buffer "*ghostel-popup-dashboard-test*"))
-        (popup (generate-new-buffer "*ghostel-popup-exit-test*"))
-        (my/ghostel-popup-buffers nil)
-        (my/ghostel-popup-current-buffer nil))
+(ert-deftest my/window-portal-popup-exit-keeps-work-buffer ()
+  "Closing a managed portal popup leaves its work window in place."
+  (require 'init-portal-popup)
+  (let ((source (generate-new-buffer "portal-popup-work-test"))
+        (dashboard (generate-new-buffer "*portal-popup-dashboard-test*"))
+        (popup (generate-new-buffer "*portal-popup-exit-test*"))
+        (my/portal-popup-buffers nil)
+        (my/portal-popup-current-buffer nil))
     (unwind-protect
         (save-window-excursion
           (delete-other-windows)
@@ -295,11 +470,32 @@
             (setq-local major-mode 'dashboard-mode))
           (switch-to-buffer dashboard)
           (switch-to-buffer source)
-          (my/ghostel-popup-display-buffer popup)
+          (my/portal-popup-display-buffer popup)
           (should (eq (window-buffer) popup))
           (kill-buffer popup)
           (should (eq (window-buffer) source)))
       (dolist (buffer (list source dashboard popup))
+        (when (buffer-live-p buffer)
+          (kill-buffer buffer))))))
+
+(ert-deftest my/window-portal-popup-exit-closes-unselected-window ()
+  "A popup closes when its buffer exits while another pane is selected."
+  (require 'init-portal-popup)
+  (let ((source (generate-new-buffer "portal-popup-other-work"))
+        (popup (generate-new-buffer "*portal-popup-unselected-test*"))
+        (my/portal-popup-buffers nil)
+        (my/portal-popup-current-buffer nil))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer source)
+          (my/portal-popup-display-buffer popup)
+          (let ((popup-window (selected-window)))
+            (select-window (get-buffer-window source))
+            (kill-buffer popup)
+            (should-not (window-live-p popup-window))
+            (should (eq (window-buffer) source))))
+      (dolist (buffer (list source popup))
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 

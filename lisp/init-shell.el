@@ -387,8 +387,8 @@ If popup is focused, kill it."
         (completing-read "SSH host: " hosts nil nil nil 'my/ssh-host-history)
       (read-string "SSH host: " nil 'my/ssh-host-history))))
 
-(require 'init-ghostel)
-(require 'init-ghostel-popup)
+(require 'init-portal)
+(require 'init-portal-popup)
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'eshell-mode 'emacs))

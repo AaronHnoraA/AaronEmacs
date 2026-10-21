@@ -62,6 +62,8 @@
 (declare-function evil-set-initial-state "evil-core" (mode state))
 (declare-function my/remote-per-file-subprocess-affordable-p "init-tramp"
                   (&optional path))
+(declare-function remote-client-process-attributes "remote-core" (pid))
+(declare-function aaron-ui-activity-view "aaron-ui-activity" (state owner))
 
 (defvar remote-tasks)
 (defvar remote-transfer-jobs)
@@ -459,6 +461,20 @@ Emacs itself holds no start time for a process.")
 (defvar-local my/activity-board--detail-buffer nil
   "Temporary process details buffer owned by this Activity board.")
 
+(defvar-local my/activity-board--state nil
+  "ETAF ref holding this frame's Activity page snapshot.")
+
+(defvar-local my/activity-board--entries nil
+  "Host reference to task or process mapping for ETAF row actions.")
+
+(defun my/activity-board--selected-entry ()
+  "Return the selected ETAF row entry, or the classic row's entry."
+  (or (and my/activity-board--state
+           (etaf-runtime-for-buffer (current-buffer))
+           (gethash (etaf-focused-host-ref) my/activity-board--entries))
+      (get-text-property (point) 'my/activity-process)
+      (get-text-property (point) 'my/activity-handle)))
+
 (defun my/activity--elapsed-string (since)
   "Return SINCE formatted as an elapsed time, or a dash when unknown."
   (if (not since)
@@ -533,7 +549,8 @@ than the age of this Emacs session."
 
 (defun my/activity-board--process-at-point ()
   "Return the process on the current row, or signal."
-  (or (get-text-property (point) 'my/activity-process)
+  (or (let ((entry (my/activity-board--selected-entry)))
+        (and (processp entry) entry))
       (user-error "No process on this line")))
 
 (defun my/activity--cancel-owned-process (process)
@@ -551,8 +568,9 @@ than the age of this Emacs session."
 A task whose owner provides a cancel path uses it.  Killing a process no
 registry claims is destructive and asks first."
   (interactive)
-  (let ((process (get-text-property (point) 'my/activity-process))
-        (activity (get-text-property (point) 'my/activity-handle)))
+  (let* ((entry (my/activity-board--selected-entry))
+         (process (and (processp entry) entry))
+         (activity (and (my/activity-p entry) entry)))
     (cond
      ((my/activity-p activity)
       (if-let* ((cancel (my/activity-cancel activity)))
@@ -612,14 +630,15 @@ Killing only a remote task's relay could leave its target-side work running."
 (defun my/activity-board-visit ()
   "Show the buffer behind the current board row, if it has one."
   (interactive)
-  (if-let* ((activity (get-text-property (point) 'my/activity-handle)))
+  (if-let* ((entry (my/activity-board--selected-entry))
+            (activity (and (my/activity-p entry) entry)))
       (cond ((my/activity-visit activity)
              (funcall (my/activity-visit activity)))
             ((buffer-live-p (my/activity-buffer activity))
              (pop-to-buffer (my/activity-buffer activity)))
             (t (user-error "%s has no buffer" (my/activity-label activity))))
     (my/activity-board--show-process
-     (get-text-property (point) 'my/activity-process))))
+     (my/activity-board--process-at-point))))
 
 (defun my/activity-board-help ()
   "Say which keys this board takes, instead of a read-only error.
@@ -627,11 +646,13 @@ Every board here is read-only, so an unbound letter would otherwise reach
 `self-insert-command' and report that the buffer cannot be edited, which
 says nothing about what to press instead."
   (interactive)
-  (message "%s" (substitute-command-keys "\\<my/activity-board-mode-map>\
+  (message "%s" (if my/activity-board--state
+                    "j/k move  RET open  d details  x stop  i cancel/interrupt  X cancel/kill  g refresh  / filter  t timers  q close"
+                  (substitute-command-keys "\\<my/activity-board-mode-map>\
 j/k move  \\[aaron-ui-board-activate] open  \\[my/activity-board-describe] details  \
 \\[my/activity-board-stop] stop  \\[my/activity-board-interrupt] cancel/interrupt  \
 \\[my/activity-board-kill] cancel/kill  \\[aaron-ui-board-refresh] refresh  \
-\\[my/activity-board-filter] filter  \\[describe-mode] help")))
+\\[my/activity-board-filter] filter  \\[describe-mode] help"))))
 
 (defun my/activity-board-copy-command ()
   "Copy the current row's command line to the kill ring."
@@ -752,7 +773,24 @@ board left open on a fast interval is a background cost of its own."
         (setq my/activity-board--auto-timer timer)))
     (message "Activity board auto refresh every %.1fs"
              my/activity-board-refresh-interval))
-  (force-mode-line-update))
+  (force-mode-line-update)
+  (when my/activity-board--state
+    (my/activity-board-refresh)))
+
+(defun my/activity-board--theme-changed (&rest _)
+  "Repaint live ETAF Activity views after the Aaron UI palette changes."
+  (dolist (frame (frame-list))
+    (when-let* ((buffer (frame-parameter frame 'my/activity-board-buffer))
+                ((buffer-live-p buffer)))
+      (with-current-buffer buffer
+        (when my/activity-board--state
+          (etaf-update-value
+           my/activity-board--state
+           (lambda (snapshot)
+             (plist-put (copy-sequence snapshot) :theme-revision
+                        (1+ (or (plist-get snapshot :theme-revision) 0))))))))))
+
+(add-hook 'after-load-theme-hook #'my/activity-board--theme-changed)
 
 (defun my/activity-board--cleanup ()
   "Release this board's timer and frame reference when it goes away."
@@ -929,7 +967,7 @@ Reads `timer-list' and `timer-idle-list' only, the same state
          :title label))
       (aaron-ui-board-insert-empty "T opens the built-in timer list"))))
 
-(defun my/activity-board-refresh ()
+(defun my/activity-board--classic-refresh ()
   "Redraw the activity board."
   (interactive)
   (my/activity--refresh)
@@ -1045,6 +1083,185 @@ Reads `timer-list' and `timer-idle-list' only, the same state
                 "View: g refresh  a auto  / filter  t timers\n"
                 "Native: P processes  T timers  H threads  O proced  M memory"))))))
 
+(defun my/activity-board--snapshot ()
+  "Collect one Activity page snapshot without opening external managers."
+  (let* ((task-processes (my/activity--owned-task-processes))
+         (activities (my/activity--activities))
+         (queued (my/activity--native-comp-queue-length))
+         (process-groups (list (cons 'task nil) (cons 'service nil)
+                               (cons 'connection nil)))
+         (entries (make-hash-table :test #'eq))
+         (total 0)
+         sections)
+    (dolist (process (process-list))
+      (when (process-live-p process)
+        (cl-incf total)
+        (when (my/activity-board--matches-p
+               (my/activity--process-label process)
+               (my/activity--process-detail process))
+          (push process
+                (alist-get (my/activity-process-kind process task-processes)
+                           process-groups)))))
+    (unless (zerop (hash-table-count my/activity--provider-errors))
+      (let (rows)
+        (maphash
+         (lambda (key description)
+           (push (list :ref (intern (format "activity-provider-%s" (sxhash-equal key)))
+                       :kind 'error :badge "ERROR"
+                       :icon (aaron-ui-board-icon 'health)
+                       :title (format "%s provider: %s"
+                                      (capitalize (symbol-name (car key)))
+                                      (my/activity--provider-name (cdr key)))
+                       :detail description)
+                 rows))
+         my/activity--provider-errors)
+        (push (list :key 'providers :title "Provider problems"
+                    :rows (nreverse rows)) sections)))
+    (when (or activities (> queued 0))
+      (let (rows)
+        (dolist (activity activities)
+          (let ((ref (intern
+                      (format "activity-handle-%x"
+                              (sxhash-equal
+                               (list (my/activity-kind activity)
+                                     (my/activity-label activity)
+                                     (my/activity-started-at activity)))))))
+            (puthash ref activity entries)
+            (push (list :ref ref :kind (my/activity-kind activity)
+                        :icon (aaron-ui-board-icon 'clock)
+                        :badge (symbol-name (my/activity-kind activity))
+                        :title (my/activity-label activity)
+                        :meta (my/activity--elapsed-string
+                               (my/activity-started-at activity))
+                        :detail (my/activity-detail activity))
+                  rows)))
+        (when (> queued 0)
+          (push (list :ref 'activity-native-queue :kind 'task
+                      :icon (aaron-ui-board-icon 'compile)
+                      :badge "queued" :title "Native compilation queue"
+                      :meta (format "%d file(s)" queued))
+                rows))
+        (push (list :key 'in-flight :title "In flight (no process)"
+                    :rows (nreverse rows)) sections)))
+    (dolist (group '((task . "Tasks") (service . "Services")
+                     (connection . "Connections")))
+      (let (rows)
+        (dolist (process (nreverse (alist-get (car group) process-groups)))
+          (let ((ref (intern (format "activity-process-%s"
+                                     (process-name process)))))
+            (puthash ref process entries)
+            (push (list :ref ref :kind (car group)
+                        :icon (aaron-ui-board-icon
+                               (pcase (car group)
+                                 ('task 'compile)
+                                 ('connection 'server)
+                                 (_ 'process)))
+                        :badge (symbol-name (process-status process))
+                        :title (my/activity--process-label process)
+                        :meta (my/activity--process-elapsed process)
+                        :detail (my/activity--process-detail process))
+                  rows)))
+        (push (list :key (car group) :title (cdr group)
+                    :rows (nreverse rows)) sections)))
+    (when my/activity-board--show-timers
+      (let ((index 0)
+            rows)
+        (dolist (timer (my/activity--timer-rows))
+          (when (my/activity-board--matches-p (car timer))
+            (push (list :ref (intern (format "activity-timer-%d"
+                                             (cl-incf index)))
+                        :kind 'timer :icon (aaron-ui-board-icon 'clock)
+                        :badge "timer"
+                        :title (car timer) :meta (cadr timer))
+                  rows)))
+        (push (list :key 'timers :title "Emacs timers"
+                    :rows (nreverse rows)) sections)))
+    (setq-local my/activity-board--entries entries)
+    (list :summary (if (> my/activity--count 0)
+                       (format "%d task(s) running · %d process(es) total"
+                               my/activity--count total)
+                     (format "Nothing running · %d process(es) total" total))
+          :stats (delq nil
+                       (list (cons (format "%d tasks" my/activity--count)
+                                   (if (> my/activity--count 0) 'success 'muted))
+                             (cons (format "%d services"
+                                           (length (alist-get 'service
+                                                             process-groups)))
+                                   'info)
+                             (cons (format "%d connections"
+                                           (length (alist-get 'connection
+                                                             process-groups)))
+                                   'info)
+                             (when my/activity-board--filter
+                               (cons (format "filter: %s"
+                                             my/activity-board--filter)
+                                     'warning))
+                             (when my/activity-board--auto-timer
+                               (cons "auto" 'warning))))
+          :sections (nreverse sections)
+          :auto (timerp my/activity-board--auto-timer)
+          :timers my/activity-board--show-timers
+          :filter my/activity-board--filter
+          :native-links
+          (my/activity-board--available-links my/activity-board-native-links)
+          :config-links
+          (my/activity-board--available-links my/activity-board-config-links))))
+
+(defun my/activity-board--activate-row (row)
+  "Open the task or process represented by ROW."
+  (let ((entry (gethash (plist-get row :ref) my/activity-board--entries)))
+    (cond ((processp entry) (my/activity-board--show-process entry))
+          ((my/activity-p entry)
+           (cond ((my/activity-visit entry)
+                  (funcall (my/activity-visit entry)))
+                 ((buffer-live-p (my/activity-buffer entry))
+                  (pop-to-buffer (my/activity-buffer entry)))
+                 (t (user-error "%s has no buffer"
+                                (my/activity-label entry)))))
+          (t (message "%s" (or (plist-get row :detail)
+                               (plist-get row :title)))))))
+
+(defun my/activity-board-refresh ()
+  "Refresh the ETAF Activity page or a legacy board buffer."
+  (interactive)
+  (if (not my/activity-board--state)
+      (my/activity-board--classic-refresh)
+    (my/activity--refresh)
+    (etaf-set-value my/activity-board--state
+                    (my/activity-board--snapshot))))
+
+(defvar-keymap my/activity-board-keys-mode-map
+  :doc "Activity shortcuts layered over ETAF's focus and activation."
+  "j" #'etaf-focus-next
+  "n" #'etaf-focus-next
+  "k" #'etaf-focus-previous
+  "p" #'etaf-focus-previous
+  "RET" #'etaf-activate
+  "x" #'my/activity-board-stop
+  "i" #'my/activity-board-interrupt
+  "X" #'my/activity-board-kill
+  "v" #'my/activity-board-visit
+  "w" #'my/activity-board-copy-command
+  "d" #'my/activity-board-describe
+  "/" #'my/activity-board-filter
+  "t" #'my/activity-board-toggle-timers
+  "a" #'my/activity-board-toggle-auto-refresh
+  "g" #'my/activity-board-refresh
+  "P" #'list-processes
+  "T" #'list-timers
+  "H" #'list-threads
+  "O" #'proced
+  "M" #'memory-report
+  "q" #'quit-window
+  "<remap> <self-insert-command>" #'my/activity-board-help)
+
+(define-minor-mode my/activity-board-keys-mode
+  "Keep the Activity board's shortcuts on its ETAF page."
+  :lighter " Activity"
+  :keymap my/activity-board-keys-mode-map
+  (when (and my/activity-board-keys-mode (fboundp 'evil-local-mode))
+    (evil-local-mode -1)))
+
 (defun my/activity-board--buffer (&optional frame)
   "Return FRAME's Activity buffer, creating it when needed."
   (let* ((frame (or frame (selected-frame)))
@@ -1058,6 +1275,7 @@ Reads `timer-list' and `timer-idle-list' only, the same state
 (defun my/activity-board ()
   "Show this frame's view of Emacs background activity."
   (interactive)
+  (require 'aaron-ui-activity)
   (my/activity--poll t)
   (my/activity--refresh)
   (let* ((frame (selected-frame))
@@ -1066,11 +1284,13 @@ Reads `timer-list' and `timer-idle-list' only, the same state
       (condition-case error
           (progn
             (with-current-buffer buffer
-              (unless (derived-mode-p 'my/activity-board-mode)
-                (my/activity-board-mode))
+              (unless (etaf-runtime-for-buffer buffer)
+                (let ((state (etaf-ref nil)))
+                  (etaf-mount buffer (aaron-ui-activity-view state buffer))
+                  (setq-local my/activity-board--state state)
+                  (my/activity-board-keys-mode 1)
+                  (add-hook 'kill-buffer-hook #'my/activity-board--cleanup nil t)))
               (setq-local my/activity-board--owner-frame frame)
-              (aaron-ui-board-set-header "Activity" 'process)
-              (setq-local aaron-ui-board-refresh-function #'my/activity-board-refresh)
               (my/activity-board-refresh))
             (pop-to-buffer buffer))
         (error

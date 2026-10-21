@@ -16,15 +16,15 @@ This configuration is designed to solve a concrete set of problems:
 ## Core Capabilities
 
 - Project-first workflow
-  `projectile`, `perspective`, `transient`, Treemacs, `show-imenu`, and popup `ghostel` are composed into a workspace-oriented project surface.
+  `projectile`, `perspective`, `transient`, Treemacs, `show-imenu`, and popup `portal` are composed into a workspace-oriented project surface.
 - Programming and debugging
   `lsp-mode` is the single language-server client, with target-aware automatic startup and first-class C/C++, Python, and Java/JDTLS routes. Completion, visible-region diagnostics/CodeLens/inlay hints, semantic Treemacs outlines, build/test, debugging, tree-sitter, snippets, code navigation, and an on-demand SQL/database client are already wired together.
 - Org and research writing
   Agenda, capture, AUCTeX, Jupyter, citations, and PDF Tools workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals
-  Logical `/fs` targets keep file identity stable while capability routing selects native, TRAMP, or tramp-rpc links. PATH/environment state is isolated per target and workspace; `my/ghostel-ssh` remains the interactive terminal entry point.
+  Logical `/fs` targets keep file identity stable while capability routing selects native, TRAMP, or tramp-rpc links. PATH/environment state is isolated per target and workspace; `my/portal-ssh` remains the interactive terminal entry point.
 - Browser and system integration
-  `eww`, `xwidget-webkit`, Appine, and macOS `open` have explicit roles, with manual routing between them when needed.
+  Portal Web is the default in-Emacs browser and Noema host. `xwidget-webkit` loads only when selected explicitly; `eww` and macOS `open` remain available.
 - AI integration
   `gptel`, Claude Code, Codex CLI, and Copilot are integrated into the editing environment rather than bolted on as separate tools.
 - Recoverable dependency management

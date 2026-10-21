@@ -12,7 +12,7 @@
   Evil leader，总入口。
 - `<Esc>`
   编辑 buffer 中一次完成 Evil normal-state 恢复和搜索高亮清理；在未启用 Evil 的
-  buffer 中走统一取消逻辑。Minibuffer、isearch、Ghostel 和浏览器仍保留各自的局部
+  buffer 中走统一取消逻辑。Minibuffer、isearch、Portal 和浏览器仍保留各自的局部
   Escape 行为，不会把未处理的按键漏给 macOS 全屏。
 - `SPC h K`
   在 Emacs 内打开本快捷键索引。
@@ -56,7 +56,7 @@
   若移动期间又产生编辑，页面会保留这些内容为未命名草稿，并提示先复制内容。
   同一笔记的其他 Noema 页面也会收到删除事件：干净页面返回上一篇，未保存的页面
   保留草稿并断开旧路径。原生 Emacs buffer 若有修改会变为未命名草稿；干净的
-  buffer 则关闭，窗口按现有的上一页／Dashboard 规则返回。
+  buffer 则关闭，窗口返回上一页；无可返回页时打开项目目录或关闭多余窗口。
 - `M-x project-run` / `project-rerun` / `task-run` / `task-build`
   直接选运行 profile、重跑本 frame 上次 profile、选项目任务或构建；任务和构建
   也有 `task-rerun` / `task-build-rerun`。运行菜单只列出实际存在的脚本或目标。
@@ -110,17 +110,17 @@
 - `C-x g`
   Magit
 - `M-\``
-  `ghostel-toggle`
+  `my/portal-popup-toggle`
 - `C-c e`
   切换全局 popup 的当前 tab；首次打开或新建终端时，从最近聚焦的项目和 target 启动
 - `C-c C-e`
-  智能弹出或收回当前 popup `ghostel`
+  智能弹出或收回当前 popup `portal`
 - `C-c E`
-  切换到下一个 popup `ghostel`，`C-u C-c E` 新建一个
+  切换到下一个 popup `portal`，`C-u C-c E` 新建一个
 - `C-c M-E`
-  新建 popup `ghostel`
+  新建 popup `portal`
 - `C-c M-e`
-  切换当前 popup `ghostel` 的固定状态
+  切换当前 popup `portal` 的固定状态
 - `C-c w p` / `C-c w P`
   把当前普通 buffer 移进 popup / 把当前 popup buffer 移到普通窗口；需要选窗口时显示
   `ace-window` 编号。顶部 `+term` 的右键菜单也有这两个动作
@@ -133,7 +133,7 @@
 - `F5` / `F6` / `F7` / `F8`
   运行 profile / 测试菜单 / 调试菜单 / `olivetti-mode`
 - `F9` / `F10`
-  Noema 日程 / popup `ghostel`
+  Noema 日程 / popup `portal`
 
 ### macOS Option `H-`
 
@@ -178,7 +178,7 @@
 `f` 是文件菜单，`i` 是编辑菜单。
 
 打开 `.md`、`.markdown` 或 `README.md` 时，Emacs 会按当前 Markdown 打开设置
-交给 Noema Web/Appine，页面成功打开后才关闭临时 Markdown buffer。等待 Noema
+交给 Noema Web/xwidget，页面成功打开后才关闭临时 Markdown buffer。等待 Noema
 启动时，占位页按 `g` 重试、`e` 改用 Emacs 编辑原文件、`q` 关闭；超时后仍可
 重试，选择原生编辑会取消旧的 Noema 打开请求。`M-x markdown-edit-raw` 也可直接
 进入原生编辑。使用 Noema 页面时，Markdown
@@ -253,7 +253,12 @@ Graph 搜索框支持全文词和
 
 ### Noema 页面里的 Emacs 按键
 
-所有 Noema 页面（md 编辑器、Jupyter output、Wiki、Agenda、Config、Slides）都把 `H-`（Option）
+Noema 默认由 Portal Web 承载，与 Portal 终端共用 `portal-input`：按键穿透、
+`Cmd` 到 Emacs `Meta` 的转换，以及切换窗口后的自动聚焦由同一层处理。
+Noema 只补充编辑器命令映射。顶栏的返回、前进、刷新、编辑器聚焦和菜单按钮
+属于 Emacs。`xwidget` 仍可显式选择；以下专门说明它的旧键盘桥接行为。
+
+在 xwidget 后端，所有 Noema 页面（md 编辑器、Jupyter output、Wiki、Agenda、Config、Slides）都把 `H-`（Option）
 组合键、`C-x` / `C-c` 前缀序列、`C-g`，以及 `M-x` / `M-w` / `M-W` / `M-q` / `M-o` 交给 Emacs；
 这些键在 CodeMirror 自己的按键表之前被截获，所以 `C-c C-e` 不会再同时把光标移到行尾，
 `H-u` 也不会执行两次。`Cmd`+方向键（`M-<left>` 等）也交给 Emacs，走 windmove
@@ -261,12 +266,12 @@ Graph 搜索框支持全文词和
 `Shift+Cmd+方向键` 和 `Option+方向键` 仍是页面里的选择与按词移动。
 
 从页面触发的 Emacs 命令执行完后，键盘焦点跟着命令的结果走：它打开或切换了哪个普通
-Emacs 窗口（agent 会话、compose、Treemacs、ghostel、源 buffer……），就选中那个窗口，
+Emacs 窗口（agent 会话、compose、Treemacs、portal、源 buffer……），就选中那个窗口，
 不会回到页面编辑器。什么都没打开的命令（`M-q` 回答 n、取消的 `M-x`、只输出消息）把键盘
 还给页面。命令返回后 2 秒内才由进程弹出的窗口（启动 agent、终端等）同样会接过键盘，
 但前提是你还停在原页面没动。`C-u` 前缀、minibuffer 输入和 transient 菜单都会等它们结束再判断。页面发起的
 `C-c A v/@` 这类发送，最后会停在 agent 会话的输入处。
-Emacs 接管键盘时（页面里触发的命令打开了 ghostel、agent、minibuffer，或 `Cmd`+方向键
+Emacs 接管键盘时（页面里触发的命令打开了 portal、agent、minibuffer，或 `Cmd`+方向键
 移走），页面会把 macOS 的原生键盘焦点交还给 Emacs，之后所有按键——前缀序列
 `C-x 3`、回车、方向键、中文输入法——都直接、按顺序进 Emacs，不再经过页面转发，
 也没有按键特判。页面没有原生焦点时，macOS 仍会把 Ctrl/Cmd 组合键和方向键先给
@@ -571,7 +576,7 @@ Agenda 卡片在启动画面最下面（Recent Files / Projects 之后、footer 
 - `SPC p x` / `M-x project-scratch`
   切换当前项目的持久 scratch；同名项目各有独立 buffer 和保存文件
 - `SPC b z`
-  埋藏当前 buffer；无上一页时显示 dashboard，临时分屏则关闭
+  埋藏当前 buffer；无上一页时打开项目目录，临时分屏则关闭
 - `SPC b j`
   用 Consult 查找书签；选中候选时按需预览
 - `SPC b J`
@@ -820,21 +825,21 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC o q`
   `clutch-query-console`
 - `SPC o e`
-  `ghostel-toggle`
+  `my/portal-popup-toggle`
 - `SPC o E`
-  切换到下一个 popup `ghostel`
+  切换到下一个 popup `portal`
 - `SPC o F`
-  切换当前 popup `ghostel` 的固定状态
+  切换当前 popup `portal` 的固定状态
 - `SPC o t`
-  `ghostel-toggle`
+  `my/portal-popup-toggle`
 - `SPC o v`
-  直接打开新 `ghostel`
-- `M-x my/project-popup-ghostel-app`
-  在当前项目根目录的新 popup `ghostel` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
+  直接打开新 `portal`
+- `M-x my/project-popup-portal-app`
+  在当前项目根目录的新 popup `portal` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
 
 顶部 `+term` 或标签上右键可打开启动菜单，`Applications` 列出上述已配置程序。
 `Agent` 子菜单（也可点击 `+Agent`）提供 Claude / Codex / OpenCode；它们使用
-原生 `agent-shell` / ACP buffer，不在 ghostel 里运行 CLI，共用同一个顶部弹窗、
+原生 `agent-shell` / ACP buffer，不在 portal 里运行 CLI，共用同一个顶部弹窗、
 标签池、自动收起和固定逻辑。`C-c C-e` 折叠/打开，`C-c E` 切换标签，
 `C-c M-e` 固定。Agent 原有的模型、会话模式和权限提示保留；仅点击启动时
 加载 Agent 依赖。ACP adapter 沿用现有 agent-shell 配置；在远端 `/fs:` 工作区里
@@ -854,84 +859,56 @@ target。本机已删除适配器内置的 CLI（`@anthropic-ai/claude-agent-sdk
 `claude` / `codex` 在 `~/.local/bin`，由 `~/.zprofile` 放进登录 shell 的 PATH，
 Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，不受影响。
 - `SPC o V`
-  命名 `ghostel`
+  命名 `portal`
 - `SPC o f`
   文件传输菜单（rsync 上传/下载/同步）；不在 Dired 里时先问 target 并打开它的
   文件夹。Dirvish 里用 `M`。详见 [remote-files.md](remote-files.md)
 - `SPC o M`
   临时机器列表：手动输入地址和密码/密钥、记在 `var/` 里的 target
 - `SPC o S`
-  `my/ghostel-ssh`
+  `my/portal-ssh`
 - `SPC o s`
   `shell-toggle`
 - `SPC o w`
   `my/open-eww-url`
 - `SPC o x`
   `my/open-xwidget-url`
-- `SPC o a`
-  `my/appine-open-url`
+- `SPC o P`
+  `my/portal-terminal`，在当前窗口打开原生 Ghostty 终端（本地 macOS GUI）
+
 - `SPC o W`
   统一搜索入口，可选搜索引擎和浏览后端
 - `SPC o B`
-  在 `eww` / `xwidget` / `appine` / macOS `open` 之间切换当前页面
+  在 `eww` / `xwidget` / macOS `open` 之间切换当前页面
+
+Portal 终端聚焦时，`C-c e` 也会切换 popup。此时 `C-c` 是 Emacs 前缀；要把
+原本的 `C-c` 发送给终端（例如中断程序），连按 `C-c C-c`。本地 Ghostty 和
+远端终端正常退出后都会按进程事件关闭 buffer；远端连接意外断开时保留可重连的
+buffer。popup 中的 buffer 关闭时，其窗口也随之收起。mode line 使用普通 Emacs
+buffer 的样式。
 
 ### Browser `C-c w`
 
-`xwidget` 和 Noema 页眉的历史图标左键返回、右键打开“返回 / 前进”菜单；
+显式打开的 `xwidget` 和 Noema 页眉提供历史导航；
 旁边的面板图标左键展开全局 popup，右键列出未显示的 Noema buffer。
 键盘 `b` / `f` 仍可直接返回 / 前进。
 
 - `C-c w w`
-  统一 `browse-url` 入口，默认弹选择菜单，默认项是 `xwidget`
-- `C-c w e` / `C-c w x` / `C-c w a`
-  直接用 `eww` / `xwidget-webkit` / `appine` 打开 URL；`eww` 和 `xwidget-webkit`
+  统一 `browse-url` 入口，默认使用 Portal
+- `C-c w p` / `C-c w e` / `C-c w x`
+  直接用 Portal / `eww` / `xwidget-webkit` 打开 URL；这些后端
   会在独立浏览 buffer 里打开，连续多开也不会顶掉已显示的浏览 buffer
-- `C-c w E` / `C-c w X` / `C-c w A` / `C-c w O`
-  把当前页面快速切到 `eww` / `xwidget-webkit` / `appine` / macOS `open`
+- `C-c w P` / `C-c w E` / `C-c w X` / `C-c w O`
+  把当前页面快速切到 Portal / `eww` / `xwidget-webkit` / macOS `open`
 - `C-c w s`
-  交互选择目标后端；可选 `xwidget` / `appine` / `eww` / `system`
-- `C-c w f` / `C-c w g`
-  用 `appine` 打开文件 / 打开光标下 URL
-- `C-c w h` / `C-c w l` / `C-c w r`
-  `appine` 后退 / 前进 / 刷新
-- `C-c w [` / `C-c w ]` / `C-c w 0`
-  `appine` 上一标签 / 下一标签 / 关闭当前标签
+  交互选择目标后端；可选 `portal` / `xwidget` / `eww` / `system`
 - `C-c w d`
-  关闭当前浏览后端；在 `eww` / `xwidget-webkit` buffer 中也可以按 `M-w`，
+  关闭当前浏览后端；在 Portal / `eww` / `xwidget-webkit` buffer 中也可以按 `M-w`，
   会同时 kill browser buffer 并删除对应窗口
-- `C-c w ?` / `C-c w k`
-  打开 Appine board / 清理全部 Appine view
-
 当前策略是手动分流：默认打开方式统一在 `lisp/init-open.el` 的
 `my/open-routes` 里维护，route DSL helper 来自 vendored `general.el` 的
-`general-route-*`。`browse-url` 会先让你选后端，默认项是 `xwidget`；
-`appine` 保留为原生嵌入/文件查看入口，`eww` 适合阅读，`system` 用系统
-应用处理文件或链接。
-
-### Appine `SPC a p`
-
-- `SPC a p a`
-  打开 URL 到 `appine`
-- `SPC a p f`
-  用 `appine` 打开文件
-- `SPC a p p`
-  用 `appine` 打开光标下 URL
-- `SPC a p h` / `SPC a p l` / `SPC a p r`
-  后退 / 前进 / 刷新
-- `SPC a p [` / `SPC a p ]` / `SPC a p c`
-  上一标签 / 下一标签 / 关闭当前标签
-- `SPC a p k`
-  `my/appine-kill-all`
-- `SPC a p R`
-  `my/appine-restart`
-- `SPC a p s`
-  切换当前页面到 `eww` / `xwidget` / `appine` / macOS `open`
-- `SPC a p S`
-  统一搜索入口
-
-关闭 Appine 的最后一个标签时会自动清掉 `*Appine Window*` host buffer。
-Appine board 里的文件、目录、URL 和 tab registry 都带 `[open]` / `mac open`
-入口，用 macOS `open` 交给系统应用处理。
+`general-route-*`。`browse-url` 默认走 Portal；
+`eww` 适合阅读，`system` 用系统应用处理文件或链接。
 
 ### Tab `SPC t`
 
@@ -973,9 +950,9 @@ frame/workspace 开始，通过 `<o` 临时跨越边界。埋藏 buffer 只从�
 `M-RET`、单窗口前缀和不选中窗口仍沿用 ibuffer 的原生操作，现有标记保留。
 
 ibuffer、帮助页和其他用 `quit-window` 退出的临时页面，优先返回同一窗口的上一页；
-临时创建且无返回页的窗口会关闭，最后一个窗口无可返回页时显示 dashboard。
-如果弹窗有精确的来源页，仍由 Emacs 原生返回；仅在落到 scratch／dashboard 时补选
-同窗口历史，补选也遵守该 frame 的 buffer 过滤规则，不会把旧 xwidget 页当作普通候选。
+已经在其他窗口显示的 buffer 不作自动返回目标。临时创建且无返回页的窗口会关闭；
+最后一个窗口无可返回页时打开项目目录。如果弹窗有精确的来源页，仍由 Emacs 原生返回；
+自动补选遵守该 frame 的 buffer 过滤规则，不会把旧 xwidget 页当作普通候选。
 `SPC b z` 和最后一个 frame 上的 `H-w` 保留原本的埋藏动作，埋藏后也按此规则返回。
 `Cmd+Shift+W`（Emacs 的 `M-W`）仍从当前 Perspective 弹出 buffer 列表供选择；
 选中的是当前页时，杀掉后按同一规则收尾。`C-x k` 仍是原生 Perspective 选择器。
@@ -1000,13 +977,13 @@ ibuffer、帮助页和其他用 `quit-window` 退出的临时页面，优先返�
 - `SPC p m`
   打开当前项目 Magit
 - `SPC p v`
-  打开当前项目 ghostel
+  打开当前项目 portal
 - `SPC p a`
   手动添加项目
 - `SPC p D`
   批量扫描目录下的项目
 - `SPC p .` 后按 `x`
-  彻底移除一个项目及其相关状态（包含 Projectile、`project.el`、Treemacs、perspective、项目 buffer/ghostel）；`SPC p x` 打开项目 scratch
+  彻底移除一个项目及其相关状态（包含 Projectile、`project.el`、Treemacs、perspective、项目 buffer/portal）；`SPC p x` 打开项目 scratch
 - `SPC p l`
   查看当前项目 project-local overrides（来自 `my/project-local-overrides` 全局配置）
 - `SPC p L`
@@ -1344,7 +1321,7 @@ Dirvish 的复制、移动和链接在客户端可直接访问时沿用原生独
 - `M-O`
   交换当前窗口与目标窗口
 - `M-\``
-  `ghostel-toggle`
+  `my/portal-popup-toggle`
 - `H-\`` / `C-\``
   `popper-toggle`
 - `C-M-\``
@@ -1414,8 +1391,8 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
   查询请求的 `pending`、`ok`、`error` 或 `unknown` 结果；记录仅在当前 Emacs
   会话中短期保留，重启后不能继续查
 - `bin/emacs-app terminal`
-  新开一个 Ghostel 终端,每次都是新实例,单独占一个居中的浮动 frame;在 M-x 里是
-  `my/ghostel-open-new`
+  新开一个 Portal 终端,每次都是新实例,单独占一个居中的浮动 frame;在 M-x 里是
+  `my/portal-open-new`。Emacs 未运行时会先启动，待图形窗口初始化完成后再开终端。
 - `bin/emacs-app status`
   `visible` / `background` / `busy`(在运行但没应答,比如正在启动或等你回答提问)/ `stopped`
 - `bin/emacs-app quit`
@@ -1432,7 +1409,7 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
 
 新 frame(启动时的第一个、Raycast 的 New Frame、`SPC F n`)默认占鼠标所在显示器工作区的
 66% × 86% 并居中,由 `my/frame-default-size` 控制(设为 nil 则用 Emacs 自己的默认大小);
-浮动终端仍用 `my/ghostel-floating-frame-size`。
+浮动终端仍用 `my/portal-floating-frame-size`。
 
 后台是 frame 不可见,不是应用隐藏,所以新开一个 frame(比如终端)时不会把其他 frame 一起带出来。
 
@@ -1452,14 +1429,14 @@ Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复�
 Emacs 崩溃或被强制退出后几秒内自己收尾退出,连同它的 kernel;正常退出时的 SIGHUP 也走
 同一套收尾。
 
-`my/ghostel-open-new` 开的浮动终端,frame 和 shell 同生共死:关掉 frame(关闭按钮、
+`my/portal-open-new` 开的浮动终端,frame 和 shell 同生共死:关掉 frame(关闭按钮、
 `delete-frame`、Raycast 的 Close Frame)会结束它的 shell 和 buffer;想留着就用隐藏。
 它在 shell 退出时会连 buffer 和 frame 一起关掉;
 主窗口里的终端不受影响。
 
 ### 后台任务指示器
 
-Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 24×16 XPM 像素图)。它**一直在**,
+Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 28×20 XPM 像素图)。它**一直在**,
 没事时站着,有后台任务时开始跑,多于一个任务时在后面跟上数字。
 **鼠标左键点它打开 `M-x activity-board`。** 终端(无图形界面)里自动降级成颜文字
 `ᕕ( ᴗ )ᕗ` / `ᕕ( ᐛ )ᗴ`,不会变成空白。
@@ -1507,15 +1484,17 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 24×16 XPM 像素�
 - Core task 快照每 2 秒异步读取一次,不会跟着 8 FPS 发请求,也不会为了监控启动
   Noema。host 停止时清空快照,重启或关闭指示器前的旧回复不会恢复过期任务。
 
-`*Activity*` 板面是**集中入口,不是替代品**。Emacs 自己给每种后台工作都带了管理器,
+`*Activity*` 板面是**集中入口,不是替代品**。页面用 ETAF 保留布局、焦点和刷新状态，
+颜色和图标仍取自 Aaron UI 的原有主题。Emacs 自己给每种后台工作都带了管理器,
 每个都比重写一遍更称职,所以板面负责「什么在跑 + 能对它做什么」,更深的细节一键交给原生工具。
 任务数据是全局的；每个 frame 有自己的 Activity 面板 buffer，筛选、定时器和阅读位置
 各自保存。`q` 仍用 Emacs 原生窗口返回；关闭 frame 时释放它的面板。
+ETAF 只在第一次打开这个整页时加载，常驻 mode line 和 Dashboard 不会因此加载它。
 
 **移动和其它 board 完全一致**:`j`/`n` 下移,`k`/`p` 上移,`TAB` 下一个按钮,
 `RET` 打开当前行。停止类操作**刻意避开导航键**,放在 `x`/`i`/`X`。
-按到没绑定的字母在 echo 区列出可用的键。行内的鼠标/RET 映射保留页面的键盘映射,
-所以光标移进进程行、agent 行或详情行后,导航和动作键仍然有效。
+按到没绑定的字母在 echo 区列出可用的键。ETAF 行焦点和鼠标点击都调用原来的
+进程／任务动作；`j/k` 与停止键由 Activity 页自己的快捷键层提供。
 
 按行操作:
 
@@ -1558,7 +1537,8 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 24×16 XPM 像素�
 - **`process-attributes` 是每进程一次系统调用,绝不能进渲染路径。** 它只在两处被调用:
   `d` 的详情页,以及某个进程**第一次**被看到时取它的真实启动时间(之后永久缓存在
   弱键表里)。实测:首次渲染每个活进程 1 次调用,之后 10 次渲染 0 次。
-- 单次渲染实测 **0.37ms**,只走 `process-list` 和 `timer-list`,不碰网络和磁盘。
+- 页面刷新只读取现有进程、provider 快照和可选的定时器列表，不在 ETAF 的
+  响应式排版里执行网络请求；详细 OS 属性仍只在按 `d` 时按需读取。
 - **自动刷新默认关**。打开后是一个受 `my/activity-board-refresh-interval` 约束的
   timer,只在所属 frame 的板面**可见**时重绘；板面隐藏后下一次计时即停止，
   buffer 被 kill 或 frame 关闭时立即取消。
@@ -1783,7 +1763,7 @@ agent-shell 自己写引用的格式），每个文件再附一个 `resource_lin
 优先；本项目上一次选的会话若仍在运行则排在第一位并预选，直接 `RET` 即重复选择。
 历史会话不会出现在发送菜单中；需要先在 agent-shell 输入 `/resume` 恢复会话。
 菜单最底下的 `Copy prompt to clipboard` 把同一段提问和文件行号引用复制到系统
-剪贴板，可直接粘贴到 ghostel 里的 agent；即使没有打开 ACP 会话也可以选。
+剪贴板，可直接粘贴到 portal 里的 agent；即使没有打开 ACP 会话也可以选。
 这项操作不会切换会话或清空已选的 context。
 想恢复“静默复用上次会话、`C-u` 才重选”，把 `noema-context-always-ask-session`
 设为 nil。会话还在初始化就先排队；正在回答时走 agent-shell 自己的

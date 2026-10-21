@@ -18,6 +18,7 @@
   (require 'evil))
 
 (declare-function remote-files-mode-line-text "remote-files" ())
+(declare-function dashboard-insert-startupify-lists "dashboard" (&optional force-refresh))
 (declare-function my/background-make-frame "init-background" (&optional parameters))
 (declare-function my/ibuffer-noema-file-name "init-base" (buffer))
 (declare-function my/noema-open-file-split-frame "init-aaronnote" (file))
@@ -37,6 +38,8 @@
 (declare-function project-current "project" (&optional maybe-prompt dir))
 (declare-function project-root "project" (project))
 (declare-function toggle-one-window "toggle-one-window" ())
+
+(defvar dashboard-buffer-name)
 
 (defun my/bookmark--load ()
   "Load bookmark data for the current session."
@@ -307,14 +310,42 @@ Relies on `winner-mode' (enabled below) to undo a prior delete."
        (with-current-buffer buffer
          (derived-mode-p 'dashboard-mode))))
 
-(defun my/window-skip-dashboard-and-xwidget-p (_window buffer bury-or-kill)
-  "Skip dashboard and xwidget BUFFER during automatic window fallback.
+(defun my/window-dashboard-buffer ()
+  "Return the initialized startup Dashboard without selecting a window."
+  (require 'dashboard)
+  (unless (my/window-dashboard-buffer-p (get-buffer dashboard-buffer-name))
+    (dashboard-insert-startupify-lists t))
+  (get-buffer dashboard-buffer-name))
+
+(defun my/window--home-directory-p (directory)
+  "Return non-nil if DIRECTORY is the local home directory."
+  (and (stringp directory)
+       (not (file-remote-p directory))
+       (equal (file-name-as-directory (expand-file-name directory))
+              (file-name-as-directory (expand-file-name "~")))))
+
+(defun my/window--home-dired-buffer-p (buffer)
+  "Return non-nil if BUFFER is Dired showing the home directory."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (and (derived-mode-p 'dired-mode)
+              (my/window--home-directory-p default-directory)))))
+
+(defun my/window--shown-in-other-window-p (window buffer)
+  "Whether BUFFER is already visible outside WINDOW, across all frames."
+  (and (buffer-live-p buffer)
+       (seq-some (lambda (other) (not (eq other window)))
+                 (get-buffer-window-list buffer nil t))))
+
+(defun my/window-skip-dashboard-and-xwidget-p (window buffer bury-or-kill)
+  "Skip dashboard, xwidget, and already visible BUFFER during fallback.
 BURY-OR-KILL is non-nil when `switch-to-prev-buffer' is replacing a
 buffer that is being buried, killed, or quit.  Keep these buffers
 available to explicit buffer-switching commands."
   (and bury-or-kill
        (buffer-live-p buffer)
-       (or (my/window-dashboard-buffer-p buffer)
+       (or (my/window--shown-in-other-window-p window buffer)
+           (my/window-dashboard-buffer-p buffer)
            (with-current-buffer buffer
              (derived-mode-p 'xwidget-webkit-mode)))))
 
@@ -337,41 +368,62 @@ when choosing a fallback.  Exact popup restoration remains native."
             (not (string-prefix-p " " (buffer-name buffer)))))
      (mapcar #'car (window-prev-buffers window)))))
 
-(defun my/window--repair-after-close (window closing previous)
+(defun my/window--project-directory (directory)
+  "Return DIRECTORY's project root, or DIRECTORY when it has no project."
+  (let ((default-directory (if (and (stringp directory)
+                                    (file-directory-p directory))
+                               directory
+                             default-directory)))
+    (require 'project)
+    (if-let* ((project (project-current nil default-directory)))
+        (project-root project)
+      default-directory)))
+
+(defun my/window--repair-after-close (window closing previous &optional directory)
   "Complete WINDOW's close transition after CLOSING, using PREVIOUS.
-The native close action owns exact popup restoration and window deletion.
-Only a generic scratch/dashboard fallback needs further routing."
+Native quit owns exact popup restoration.  A duplicate visible buffer or
+scratch/dashboard/home fallback returns to PREVIOUS, closes a spare window,
+or opens DIRECTORY's project when this is the last window.  Home opens the
+Dashboard instead."
   (when (and (window-live-p window)
              (not (eq (window-buffer window) closing))
-             (or (equal (buffer-name (window-buffer window)) "*scratch*")
-                 (my/window-dashboard-buffer-p (window-buffer window))))
+             (or (my/window--shown-in-other-window-p window (window-buffer window))
+                 (equal (buffer-name (window-buffer window)) "*scratch*")
+                 (my/window-dashboard-buffer-p (window-buffer window))
+                 (my/window--home-dired-buffer-p (window-buffer window))))
     (cond
-     ((buffer-live-p previous)
+     ((and (buffer-live-p previous)
+           (not (my/window--home-dired-buffer-p previous)))
       (set-window-buffer window previous))
      ((window-parent window)
       (delete-window window))
-     ((and (not (my/window-dashboard-buffer-p closing))
-           (fboundp 'dashboard-open))
-      (with-selected-window window (dashboard-open))))))
+     (t
+      (let ((project-directory (my/window--project-directory directory)))
+        (if (or (my/window--home-dired-buffer-p previous)
+                (my/window--home-directory-p project-directory))
+            (set-window-buffer window (my/window-dashboard-buffer))
+          (with-selected-window window
+            (dired project-directory))))))))
 
 (defun my/window-quit-return-a (orig-fn &optional kill window)
   "Make ORIG-FN return to this window's previous page when possible."
   (let* ((window (or window (selected-window)))
          (closing (and (window-live-p window) (window-buffer window)))
-         (previous (and closing (my/window--return-buffer window closing))))
+         (previous (and closing (my/window--return-buffer window closing)))
+         (directory (and closing (buffer-local-value 'default-directory closing))))
     (prog1 (funcall orig-fn kill window)
       (when closing
-        (my/window--repair-after-close window closing previous)))))
+        (my/window--repair-after-close window closing previous directory)))))
 
 (let ((native-comp-enable-subr-trampolines nil))
   (unless (advice-member-p #'my/window-quit-return-a 'quit-window)
     (advice-add 'quit-window :around #'my/window-quit-return-a)))
 
-(defun my/window--repair-killed-buffer (closing windows)
+(defun my/window--repair-killed-buffer (closing windows directory)
   "Settle WINDOWS after CLOSING is actually killed."
   (unless (buffer-live-p closing)
     (dolist (entry windows)
-      (my/window--repair-after-close (car entry) closing (cdr entry)))))
+      (my/window--repair-after-close (car entry) closing (cdr entry) directory))))
 
 (defun my/window-kill-buffer-h ()
   "Record visible windows before the current buffer is killed."
@@ -381,7 +433,8 @@ Only a generic scratch/dashboard fallback needs further routing."
                                   (my/window--return-buffer window closing)))
                           (get-buffer-window-list closing nil t))))
     (when windows
-      (run-at-time 0 nil #'my/window--repair-killed-buffer closing windows))))
+      (run-at-time 0 nil #'my/window--repair-killed-buffer
+                   closing windows default-directory))))
 
 (add-hook 'kill-buffer-hook #'my/window-kill-buffer-h)
 
@@ -390,9 +443,10 @@ Only a generic scratch/dashboard fallback needs further routing."
   (interactive)
   (let* ((window (selected-window))
          (closing (window-buffer window))
-         (previous (my/window--return-buffer window closing)))
+         (previous (my/window--return-buffer window closing))
+         (directory (buffer-local-value 'default-directory closing)))
     (bury-buffer)
-    (my/window--repair-after-close window closing previous)))
+    (my/window--repair-after-close window closing previous directory)))
 
 (defun my/kill-buffer-dwim ()
   "Kill the current buffer, or if it's a special/read-only buffer, bury it."

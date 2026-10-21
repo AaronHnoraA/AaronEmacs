@@ -23,13 +23,16 @@
 
 ;; 仓库按需改
 (setq package-archives
-      '(("melpa"  . "https://melpa.org/packages/")
+      '(("etaf"   . "https://etaf.top/packages/")
+        ("melpa"  . "https://melpa.org/packages/")
         ("gnu"    . "https://elpa.gnu.org/packages/")
         ("nongnu" . "https://elpa.nongnu.org/nongnu/")
         ("org"    . "https://orgmode.org/elpa/")))
 
 (setq package-enable-at-startup nil)
 (package-initialize)
+(add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
+(require 'init-package-utils)
 
 ;; ------------------------------------------------------------
 ;; 配置：你的 init.el 和 lock 文件路径
@@ -310,7 +313,10 @@ This lets deferred package declarations register their VC recipes.")
                   (error "Unsupported VC package spec: %S" spec))))
             (error
              (message "Failed to install VC package %s: %s"
-                      pkg (error-message-string err)))))))))
+                      pkg (error-message-string err)))))))
+    (dolist (entry my/package-vc-patches)
+      (when (package-installed-p (car entry))
+        (my/package-apply-vc-patch (car entry))))))
 
 ;; ------------------------------------------------------------
 ;; Main flow

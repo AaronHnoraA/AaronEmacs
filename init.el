@@ -15,7 +15,8 @@
 
 ;; 包源要在任何安装逻辑之前设置好
 (setq package-archives
-      '(("melpa"  . "https://melpa.org/packages/")
+      '(("etaf"   . "https://etaf.top/packages/")
+        ("melpa"  . "https://melpa.org/packages/")
         ("gnu"    . "https://elpa.gnu.org/packages/")
         ("nongnu" . "https://elpa.nongnu.org/nongnu/")
         ("org"    . "https://orgmode.org/elpa/")))

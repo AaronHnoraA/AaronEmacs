@@ -40,14 +40,13 @@ macOS `open', Linux `xdg-open', Windows shell open, or `browse-url' fallback."
     (xweight . xwidget))
   "Accepted aliases for open backends.")
 
-(declare-function appine-open-file "appine" (path))
-(declare-function appine-open-url "appine" (url))
 (declare-function eww-browse-url "eww" (url &optional new-window))
 (declare-function eww "eww" (url &optional new-buffer))
-(declare-function my/appine-open-file "init-appine" (path))
-(declare-function my/appine-open-url "init-appine" (url))
 (declare-function my/macos-open-target "init-macos" (target))
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
+(declare-function my/portal--ensure "init-portal" ())
+(declare-function portal-open-url "portal-web" (url))
+(declare-function portal-input-focus "portal-input" ())
 (declare-function remote-canonicalize-file-name "remote-fs"
                   (file-name &optional directory))
 (declare-function remote-fs-file-name-p "remote-fs" (file-name))
@@ -239,6 +238,19 @@ browser opens do not leave empty splits behind."
     (require 'init-browser))
   (my/xwidget-open-url url :display 'side :reuse-selected reuse-selected))
 
+(defun my/open-portal-url (url &optional reuse-selected)
+  "Open URL in a Portal web view in a browser window."
+  (interactive (browse-url-interactive-arg "Portal URL: "))
+  (require 'init-portal)
+  (my/portal--ensure)
+  (require 'portal-web)
+  (my/open--with-browser-window
+   'portal-web-mode reuse-selected
+   (lambda ()
+     (portal-open-url (my/open-normalize-url url))
+     (portal-input-focus)
+     (current-buffer))))
+
 (defun my/open-system-target (target)
   "Open TARGET with the operating system."
   (interactive "sSystem open: ")
@@ -278,15 +290,11 @@ browser opens do not leave empty splits behind."
         (backend (my/open-normalize-backend backend)))
     (pcase backend
       ('eww (my/open-eww-url url reuse-selected))
+      ('portal (my/open-portal-url url reuse-selected))
       ('xwidget
        (unless (fboundp 'my/xwidget-open-url)
          (require 'init-browser))
        (my/xwidget-open-url url :display 'side :reuse-selected reuse-selected))
-      ('appine
-       (cond
-        ((fboundp 'my/appine-open-url) (my/appine-open-url url))
-        ((fboundp 'appine-open-url) (appine-open-url url))
-        (t (user-error "Appine is not available"))))
       ('system (my/open-system-target url))
       (_ (user-error "Unsupported URL backend: %s" backend)))))
 
@@ -302,11 +310,6 @@ When BACKEND is nil, use the `url' route in `my/open-routes'."
         (backend (my/open-normalize-backend backend)))
     (pcase backend
       ('emacs (my/open-visit-file file))
-      ('appine
-       (cond
-        ((fboundp 'my/appine-open-file) (my/appine-open-file file))
-        ((fboundp 'appine-open-file) (appine-open-file file))
-        (t (user-error "Appine is not available"))))
       ('system (my/open-system-target file))
       (_ (user-error "Unsupported file backend: %s" backend)))))
 

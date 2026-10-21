@@ -1,0 +1,153 @@
+#!/usr/bin/env bash
+# Install the official emacs-plus prebuilt cask asset without Homebrew ownership.
+set -euo pipefail
+
+repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+app_dir="${EMACS_APP_DIR:-/Applications}"
+bin_dir="${EMACS_BIN_DIR:-/opt/homebrew/bin}"
+app="$app_dir/Emacs.app"
+client_app="$app_dir/Emacs Client.app"
+mode="${1:-install}"
+
+verify() {
+  local expected="$1" actual client_version
+  test -x "$app/Contents/MacOS/Emacs"
+  test -x "$app/Contents/MacOS/bin/emacs"
+  test -x "$app/Contents/MacOS/bin/emacsclient"
+  test -x "$bin_dir/emacs"
+  test -x "$bin_dir/emacsclient"
+  actual="$("$bin_dir/emacs" --batch -Q --eval '(princ emacs-version)')"
+  client_version="$("$bin_dir/emacsclient" --version | head -n 1)"
+  if [[ "$actual" != "$expected" || "$client_version" != *"$expected"* ]]; then
+    echo "Version mismatch: emacs=$actual, $client_version, expected=$expected" >&2
+    return 1
+  fi
+  "$bin_dir/emacs" --batch -Q --eval \
+    '(unless (and (featurep '\''ns) (featurep '\''xwidget-internal) (member "MODULES" (split-string system-configuration-features))) (error "Required NS/module/xwidget feature missing"))'
+  echo "Verified Emacs $actual, emacsclient, NS, modules, and xwidgets in $app"
+}
+
+if [[ "$mode" == "--verify" ]]; then
+  verify "${EMACS_BINARY_VERSION:?EMACS_BINARY_VERSION is required}"
+  exit 0
+fi
+
+if [[ "$mode" == "--update" ]]; then
+  cask="$(curl -fsSL --retry 3 https://raw.githubusercontent.com/d12frosted/homebrew-emacs-plus/master/Casks/emacs-plus-app.rb)"
+  release="$(printf '%s\n' "$cask" | sed -n 's/^  version "\([^"]*\)".*/\1/p' | head -n 1)"
+  checksum="$(printf '%s\n' "$cask" | sed -n 's/^    sha256 "\([0-9a-f]*\)".*/\1/p' | head -n 1)"
+  [[ "$release" =~ ^[0-9]+\.[0-9]+-[0-9]+$ && "$checksum" =~ ^[0-9a-f]{64}$ ]] || {
+    echo "Cannot parse the official macOS 26 cask version/checksum" >&2
+    exit 1
+  }
+  build="${release##*-}"
+  version="${release%-*}"
+  url="https://github.com/d12frosted/homebrew-emacs-plus/releases/download/cask-stable-$build/emacs-plus-$version-arm64-26.zip"
+  if [[ -f "$repo_dir/config/emacs-binary.mk" ]] &&
+     grep -Fqx "EMACS_BINARY_VERSION := $version" "$repo_dir/config/emacs-binary.mk" &&
+     grep -Fqx "EMACS_BINARY_BUILD := $build" "$repo_dir/config/emacs-binary.mk" &&
+     grep -Fqx "EMACS_BINARY_SHA256 := $checksum" "$repo_dir/config/emacs-binary.mk" &&
+     verify "$version"; then
+    echo "Already at the latest emacs-plus binary release $release"
+    exit 0
+  fi
+elif [[ "$mode" == "install" ]]; then
+  version="${EMACS_BINARY_VERSION:?EMACS_BINARY_VERSION is required}"
+  checksum="${EMACS_BINARY_SHA256:?EMACS_BINARY_SHA256 is required}"
+  url="${EMACS_BINARY_URL:?EMACS_BINARY_URL is required}"
+else
+  echo "Usage: $0 [--update|--verify]" >&2
+  exit 2
+fi
+
+[[ "$(uname -m)" == arm64 && "$(sw_vers -productVersion | cut -d. -f1)" -ge 26 ]] || {
+  echo "This pinned binary requires Apple Silicon and macOS 26 or newer" >&2
+  exit 1
+}
+[[ "$checksum" =~ ^[0-9a-f]{64}$ ]] || { echo "Invalid SHA256" >&2; exit 1; }
+if pgrep -x Emacs >/dev/null 2>&1; then
+  echo "Quit running Emacs before replacing its app bundle" >&2
+  exit 1
+fi
+
+cache_dir="${EMACS_BINARY_CACHE_DIR:-$HOME/Library/Caches/aaron-emacs}"
+mkdir -p "$cache_dir"
+archive="${EMACS_BINARY_ARCHIVE:-$cache_dir/$(basename "$url")}" 
+if [[ ! -f "$archive" ]]; then
+  curl -fL --retry 3 --output "$archive" "$url"
+fi
+if [[ "$(shasum -a 256 "$archive" | cut -d' ' -f1)" != "$checksum" ]]; then
+  echo "SHA256 mismatch for $archive" >&2
+  exit 1
+fi
+
+stage="$(mktemp -d "${TMPDIR:-/tmp}/emacs-plus-binary.XXXXXX")"
+new_app="$app_dir/.Emacs.app.new.$$"
+old_app="$app_dir/.Emacs.app.previous.$$"
+new_client="$app_dir/.Emacs Client.app.new.$$"
+old_client="$app_dir/.Emacs Client.app.previous.$$"
+installed=0
+cleanup() {
+  if [[ "$installed" != 1 && -d "$old_app" ]]; then
+    rm -rf "$app"
+    mv "$old_app" "$app"
+  fi
+  if [[ "$installed" != 1 && -d "$old_client" ]]; then
+    rm -rf "$client_app"
+    mv "$old_client" "$client_app"
+  fi
+  rm -rf "$stage" "$new_app" "$new_client"
+}
+trap cleanup EXIT
+
+ditto -x -k "$archive" "$stage"
+test -x "$stage/Emacs.app/Contents/MacOS/Emacs"
+test -x "$stage/Emacs.app/Contents/MacOS/bin/emacsclient"
+actual="$("$stage/Emacs.app/Contents/MacOS/Emacs" --batch -Q --eval '(princ emacs-version)')"
+[[ "$actual" == "$version" ]] || { echo "Archive contains Emacs $actual, expected $version" >&2; exit 1; }
+ditto "$stage/Emacs.app" "$new_app"
+cat > "$new_app/Contents/MacOS/bin/emacs" <<EOF
+#!/bin/sh
+exec "$app/Contents/MacOS/Emacs" "\$@"
+EOF
+chmod 755 "$new_app/Contents/MacOS/bin/emacs"
+xattr -dr com.apple.quarantine "$new_app" 2>/dev/null || true
+codesign --force --deep --sign - "$new_app" >/dev/null
+codesign --verify --deep --strict "$new_app"
+if [[ -d "$stage/Emacs Client.app" ]]; then
+  ditto "$stage/Emacs Client.app" "$new_client"
+  xattr -dr com.apple.quarantine "$new_client" 2>/dev/null || true
+fi
+
+if [[ -e "$app" ]]; then mv "$app" "$old_app"; fi
+mv "$new_app" "$app"
+if [[ -d "$new_client" ]]; then
+  if [[ -e "$client_app" ]]; then mv "$client_app" "$old_client"; fi
+  mv "$new_client" "$client_app"
+fi
+mkdir -p "$bin_dir"
+for command in emacs emacsclient; do
+  link="$bin_dir/$command"
+  target="$app/Contents/MacOS/bin/$command"
+  if [[ -e "$link" && ! -L "$link" ]]; then
+    echo "Refusing to replace non-symlink $link" >&2
+    exit 1
+  fi
+  ln -sfn "$target" "$link"
+done
+verify "$version"
+installed=1
+rm -rf "$old_app" "$old_client"
+
+if [[ "$mode" == "--update" ]]; then
+  lock="$repo_dir/config/emacs-binary.mk"
+  temp_lock="$(mktemp "$lock.XXXXXX")"
+  cat > "$temp_lock" <<EOF
+# Prebuilt emacs-plus-app asset for Apple Silicon macOS 26+.
+# \`make emacs-binary-update\` refreshes these values from the upstream cask.
+EMACS_BINARY_VERSION := $version
+EMACS_BINARY_BUILD := $build
+EMACS_BINARY_SHA256 := $checksum
+EOF
+  mv "$temp_lock" "$lock"
+fi

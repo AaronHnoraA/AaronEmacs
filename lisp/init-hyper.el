@@ -4,7 +4,6 @@
 
 ;;; Code:
 
-(declare-function my/appine-board "init-appine" ())
 (declare-function code-actions-menu "init-code-actions" ())
 (declare-function my/compile-board "init-compile" ())
 (declare-function config-compile-menu "init-compile" ())
@@ -49,7 +48,6 @@
       ("g" "git board" my/git-board :transient transient--do-exit)
       ("L" "language server" my/language-server-manager :transient transient--do-exit)
       ("j" "jupyter board" my/jupyter-board :transient transient--do-exit)
-      ("a" "appine board" my/appine-board :transient transient--do-exit)
       ("h" "health report" my/health-report :transient transient--do-exit)]
      ["Menus"
       ("C" "settings" config-dispatch :transient transient--do-exit)

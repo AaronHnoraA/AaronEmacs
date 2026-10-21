@@ -188,10 +188,10 @@ agent sends must resolve against the session's target."
 (declare-function agent-shell-subscribe-to "agent-shell" (&rest args))
 (declare-function agent-shell-restart "agent-shell" (&rest args))
 (declare-function agent-shell-insert "agent-shell" (&rest args))
-(declare-function my/agent-shell "init-ghostel-popup" (&optional agent))
-(declare-function my/agent-shell-launch-context "init-ghostel-popup" ())
-(declare-function my/ghostel-popup--window "init-ghostel-popup" (&optional buffer))
-(declare-function my/ghostel-popup-agent "init-ghostel-popup" (agent))
+(declare-function my/agent-shell "init-portal-popup" (&optional agent))
+(declare-function my/agent-shell-launch-context "init-portal-popup" ())
+(declare-function my/portal-popup--window "init-portal-popup" (&optional buffer))
+(declare-function my/portal-popup-agent "init-portal-popup" (agent))
 (declare-function agent-shell--command-completion-at-point "agent-shell-completion" ())
 (declare-function agent-shell--trigger-completion-at-point "agent-shell-completion" ())
 (declare-function shell-maker-busy "shell-maker" ())
@@ -608,8 +608,8 @@ when present; the exact Codex message is the isolated compatibility fallback."
             (agent-shell--clear-prompt-input)))
         (if live
             (progn (agent-shell--display-buffer live) live)
-          (let* ((popup (and (boundp 'my/ghostel-popup-instance-p)
-                             (buffer-local-value 'my/ghostel-popup-instance-p source)))
+          (let* ((popup (and (boundp 'my/portal-popup-instance-p)
+                             (buffer-local-value 'my/portal-popup-instance-p source)))
                  (display (and (boundp 'noema-agent-acp-display-buffer-function)
                                (buffer-local-value
                                 'noema-agent-acp-display-buffer-function source)))
@@ -626,24 +626,24 @@ when present; the exact Codex message is the isolated compatibility fallback."
                              (noema-agent-acp-start
                               :config config :directory directory :session-id id
                               :focus nil :origin 'popup
-                              :display-function #'my/ghostel-popup-display-buffer)))
+                              :display-function #'my/portal-popup-display-buffer)))
                         (noema-agent-acp-adopt
                          buffer :agent (map-elt config :identifier)
                          :origin 'popup
                          :name (and binding (plist-get binding :name))
                          :root root)
                         (with-current-buffer buffer
-                          (setq-local my/ghostel-popup-kind
+                          (setq-local my/portal-popup-kind
                                       (intern (format "ai-%s" (map-elt config :identifier)))
-                                      my/ghostel-popup-title
+                                      my/portal-popup-title
                                       (capitalize (format "%s" (map-elt config :identifier)))
-                                      my/ghostel-popup-workspace-id
-                                      (buffer-local-value 'my/ghostel-popup-workspace-id source)
+                                      my/portal-popup-workspace-id
+                                      (buffer-local-value 'my/portal-popup-workspace-id source)
                                       noema-agent-acp-display-buffer-function
-                                      #'my/ghostel-popup-display-buffer)
+                                      #'my/portal-popup-display-buffer)
                           (noema-agent-acp-tabs-mode -1)
-                          (my/ghostel-popup-agent-keys-mode 1))
-                        (my/ghostel-popup-display-buffer buffer)
+                          (my/portal-popup-agent-keys-mode 1))
+                        (my/portal-popup-display-buffer buffer)
                         (kill-buffer source)
                         buffer))
                    (display
@@ -717,9 +717,9 @@ when present; the exact Codex message is the isolated compatibility fallback."
                                   nil t))))
   (unless (memq agent '(claude codex opencode))
     (user-error "Unsupported agent: %s" agent))
-  (require 'init-ghostel-popup)
-  (if (eq (selected-window) (my/ghostel-popup--window))
-      (my/ghostel-popup-agent agent)
+  (require 'init-portal-popup)
+  (if (eq (selected-window) (my/portal-popup--window))
+      (my/portal-popup-agent agent)
     (require 'noema-agent-acp)
     (pcase-let* ((`(,noema-root . ,directory) (my/agent-shell-launch-context))
                  (window (selected-window))
@@ -742,7 +742,7 @@ when present; the exact Codex message is the isolated compatibility fallback."
 Double prefix ARG keeps the upstream existing-session picker."
   (if (not (equal arg '(16)))
       (progn
-        (require 'init-ghostel-popup)
+        (require 'init-portal-popup)
         (call-interactively #'my/agent-shell-here))
     (funcall original arg)))
 

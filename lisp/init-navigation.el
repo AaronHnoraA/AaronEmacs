@@ -51,7 +51,7 @@
   "Tree-sitter node fragments treated as structural navigation anchors.")
 
 (defconst my/navigation-pulse-excluded-modes
-  '(so-long-mode special-mode comint-mode term-mode ghostel-mode)
+  '(so-long-mode special-mode comint-mode term-mode portal-terminal-mode)
   "Major modes where jump pulses are suppressed.")
 
 (use-package better-jumper

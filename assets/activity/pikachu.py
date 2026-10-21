@@ -4,7 +4,7 @@
 The XPM files beside this script are what Emacs loads, and they are plain
 text, so a one-pixel fix can be made in them directly.  Anything bigger is
 easier here, because this script also writes a scaled PNG of every frame
-side by side -- the only way to actually see what a 24x16 grid looks like.
+side by side -- the only way to actually see what a 28x20 grid looks like.
 
     python3 pikachu.py            # rewrite the .xpm frames in place
     python3 pikachu.py -p out.png # ... and a magnified preview to look at
@@ -22,65 +22,79 @@ PALETTE = {
     'B': (0xa0, 0x5a, 0x20),  # tail base brown
 }
 
-W, H = 24, 16
+W, H = 28, 20
 
-# Side view, facing right.  Each frame is H strings of W chars.
-STAND = [
-    "  kkk      kkk          ",
-    "  okko     okko         ",
-    "  oYko     oYko         ",
-    "  oYYo     oYYo    oo   ",
-    " oYYYoooooooYYYo  ooYo  ",
-    "oYYYYYYYYYYYYYYYo oYYo  ",
-    "oYYkWYYYYYYYkWYYooYYo   ",
-    "oYYkkYYYYYYYkkYYYYYYo   ",
-    "oRRYYYYoYYYoYYRRYYYYo   ",
-    "oRRYYYYYoooYYYRRYYYo    ",
-    " oYYYYYYYYYYYYYYYoo     ",
-    "  oYYYYYYYYYYYYYo       ",
-    "   oYYYYYYYYYYo         ",
-    "   oYYYYYYYYYYo         ",
-    "   oYYo  oYYo           ",
-    "   ooo    ooo           ",
+# A full silhouette at mode-line scale: long dark-tipped ears, a separate
+# head and body, cheek disks, back stripes, paws, and a zigzag tail.  Tail
+# pixels are drawn first so its brown base sits naturally behind the body.
+BODY = [
+    "     kkk        kk",
+    "     kkko      kkk",
+    "      kYo      oYk",
+    "      oYYo     oYo",
+    "      oYYo    oYYo",
+    "       oYYooooYYo",
+    "      oYYYYYYYYYYYo",
+    "     oYYYYYYYYYYYYYo",
+    "     oYkWYYYYYYkWYYo",
+    "     oYkkYYYYYYkkYYo",
+    "    oYRRYYYYYYYYRRYYo",
+    "    oYRRYYYYoYYYRRYYo",
+    "     oYYYYYYoooYYYYYo",
+    "      oYYYYYYYYYBBYYo",
+    "       oYYYYYYYYYYYYo",
+    "       oYYYYYYYDBBYYo",
+    "       oYYYYYYYYYYYYo",
+    "       oYYYooYYYYYYYo",
+    "      oYYYo  oo oYYYo",
+    "      oooo       oooo",
 ]
 
-RUN_A = [
-    "  kkk      kkk          ",
-    "  okko     okko         ",
-    "  oYko     oYko         ",
-    "  oYYo     oYYo    oo   ",
-    " oYYYoooooooYYYo  ooYo  ",
-    "oYYYYYYYYYYYYYYYo oYYo  ",
-    "oYYkWYYYYYYYkWYYooYYo   ",
-    "oYYkkYYYYYYYkkYYYYYYo   ",
-    "oRRYYYYoYYYoYYRRYYYYo   ",
-    "oRRYYYYYoooYYYRRYYYo    ",
-    " oYYYYYYYYYYYYYYYoo     ",
-    "  oYYYYYYYYYYYYYo       ",
-    "   oYYYYYYYYYYo         ",
-    "  oYYYYYYYYYYYo         ",
-    " oYYo      oYYo         ",
-    " ooo        ooo         ",
+TAIL = [
+    (4, 26, 27), (5, 24, 27), (6, 23, 26), (7, 24, 26),
+    (8, 22, 25), (9, 20, 24), (10, 21, 24), (11, 19, 23),
+    (12, 20, 23), (13, 18, 22), (14, 18, 21), (15, 17, 20),
 ]
 
-RUN_B = [
-    "  kkk      kkk          ",
-    "  okko     okko         ",
-    "  oYko     oYko         ",
-    "  oYYo     oYYo    oo   ",
-    " oYYYoooooooYYYo  ooYo  ",
-    "oYYYYYYYYYYYYYYYo oYYo  ",
-    "oYYkWYYYYYYYkWYYooYYo   ",
-    "oYYkkYYYYYYYkkYYYYYYo   ",
-    "oRRYYYYoYYYoYYRRYYYYo   ",
-    "oRRYYYYYoooYYYRRYYYo    ",
-    " oYYYYYYYYYYYYYYYoo     ",
-    "  oYYYYYYYYYYYYYo       ",
-    "   oYYYYYYYYYYo         ",
-    "   oYYYYYYYYYYo         ",
-    "     oYYooYYo           ",
-    "     ooo  ooo           ",
+
+def sprite(body, tail_lift=0):
+    """Layer a dark-edged lightning tail behind the hand-drawn body."""
+    pixels = [[' '] * W for _ in range(H)]
+    filled = set()
+    for y, start, end in TAIL:
+        y -= tail_lift
+        for x in range(start, end + 1):
+            if 0 <= y < H:
+                filled.add((x, y))
+    for x, y in filled:
+        for dx, dy in ((0, 1), (0, -1), (1, 0), (-1, 0)):
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < W and 0 <= ny < H and (nx, ny) not in filled:
+                pixels[ny][nx] = 'o'
+    for x, y in filled:
+        pixels[y][x] = 'B' if y >= 14 else 'Y'
+    for y, line in enumerate(body):
+        for x, ch in enumerate(line):
+            if ch != ' ':
+                pixels[y][x] = ch
+    return [''.join(row) for row in pixels]
+
+
+STAND = sprite(BODY)
+RUN_A_BODY = BODY.copy()
+RUN_A_BODY[17:] = [
+    "      oYYYooYYYYYYYo",
+    "     oYYYo      oYYYo",
+    "     oooo        oooo",
 ]
+RUN_B_BODY = BODY.copy()
+RUN_B_BODY[17:] = [
+    "       oYYYooYYYYYYYo",
+    "         oYYoooYYYo",
+    "         ooo   oooo",
+]
+RUN_A = sprite(RUN_A_BODY, 1)
+RUN_B = sprite(RUN_B_BODY)
 
 
 def bob(frame, dy):

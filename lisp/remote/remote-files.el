@@ -593,8 +593,8 @@ of a Dirvish window, so it only reads state that is already in memory."
 (transient-define-prefix remote-files-dispatch ()
   "Transfer commands for the directory at point in Dired."
   [:description remote-files--menu-title
-   ("o" "Choose other machine" remote-files-select-other-target :transient t)
-   ["Files"
+   ("o" "Choose other machine" remote-files-select-other-target :transient t)]
+  [["Files"
     ("c" "Send marked to the other side" remote-files-send)
     ("g" "Fetch from the other side" remote-files-fetch)]
    ["Folders"

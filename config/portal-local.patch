@@ -1,0 +1,435 @@
+diff --git a/native/NativeHost.swift b/native/NativeHost.swift
+index 696e1cb..553bf2a 100644
+--- a/native/NativeHost.swift
++++ b/native/NativeHost.swift
+@@ -26,6 +26,12 @@ private final class WeakSurface {
+     init(_ value: any NativeSurface) { self.value = value }
+ }
+ 
++@MainActor
++private final class WeakResponder {
++    weak var value: NSView?
++    init(_ value: NSView) { self.value = value }
++}
++
+ /// Shared AppKit ownership for one Emacs frame. No WebKit or Ghostty dependency.
+ @MainActor
+ final class NativeHost: NSObject {
+@@ -45,6 +51,10 @@ final class NativeHost: NSObject {
+     weak var view: NSView?
+     private weak var editor: NSResponder?
+     private var surfaces: [ObjectIdentifier: WeakSurface] = [:]
++    /// WebKit gives its internal content view the keyboard after a click.
++    /// Retain that responder weakly per surface so a later pane switch can
++    /// restore the editing position without synthesizing another click.
++    private var lastResponders: [ObjectIdentifier: WeakResponder] = [:]
+ 
+     private init(view: NSView) {
+         self.view = view
+@@ -89,8 +99,40 @@ final class NativeHost: NSObject {
+         return responder === surface || responder.isDescendant(of: surface)
+     }
+ 
++    private func rememberResponder(for surface: NSView) {
++        guard let responder = view?.window?.firstResponder as? NSView,
++              responder === surface || responder.isDescendant(of: surface) else { return }
++        lastResponders[ObjectIdentifier(surface)] = WeakResponder(responder)
++    }
++
++    /// Restore the responder established by a real click, if WebKit still
++    /// owns it. A replaced or detached content view falls back to SURFACE.
++    func focus(_ surface: NSView) -> Bool {
++        guard let window = view?.window, surface.window === window else { return false }
++        if let previous = focusedSurface?.nativeView, previous !== surface {
++            rememberResponder(for: previous)
++        }
++        if let responder = lastResponders[ObjectIdentifier(surface)]?.value,
++           responder.window === window,
++           (responder === surface || responder.isDescendant(of: surface)),
++           window.makeFirstResponder(responder) { return true }
++        return window.makeFirstResponder(surface)
++    }
++
+     func returnFocus(from surface: NSView) {
+-        if ownsFocus(surface) { view?.window?.makeFirstResponder(editor) }
++        if ownsFocus(surface), let window = view?.window {
++            rememberResponder(for: surface)
++            // The responder captured when the host was created is weak.  It
++            // can disappear after Emacs recreates its text view.  Sending a
++            // Command+Arrow back to AppKit while the native surface remains
++            // first responder would deliver the replay to that surface again.
++            if let editor {
++                _ = window.makeFirstResponder(editor)
++            }
++            if ownsFocus(surface), let emacsView = view {
++                _ = window.makeFirstResponder(emacsView)
++            }
++        }
+         refreshOwnership()
+     }
+ 
+@@ -122,6 +164,7 @@ final class NativeHost: NSObject {
+     func remove(_ surface: any NativeSurface) {
+         returnFocus(from: surface.nativeView)
+         surfaces[ObjectIdentifier(surface)] = nil
++        lastResponders[ObjectIdentifier(surface.nativeView)] = nil
+         surface.nativeView.removeFromSuperview()
+         let hosts = Self.frames.objectEnumerator()?.allObjects as? [NativeHost] ?? []
+         if hosts.allSatisfy({ $0.surfaces.values.allSatisfy { $0.value == nil } }) {
+@@ -148,6 +191,9 @@ final class NativeHost: NSObject {
+             guard view.window === window, !view.isHiddenOrHasHiddenAncestor,
+                   view.bounds.contains(view.convert(event.locationInWindow, from: nil)) else { continue }
+             if !host.ownsFocus(view), let input = surface.input {
++                if let previous = host.focusedSurface?.nativeView {
++                    host.rememberResponder(for: previous)
++                }
+                 // First, as it abandons a handoff whose keys Emacs may be reading.
+                 input.claim()
+                 Core.notify("select", target: input.target)
+diff --git a/native/NativeInput.swift b/native/NativeInput.swift
+index 9dc02b2..e3cdd6c 100644
+--- a/native/NativeInput.swift
++++ b/native/NativeInput.swift
+@@ -99,6 +99,16 @@ final class NativeInput: NativeInputHandler {
+             return true
+         }
+         guard event.type == .keyDown else { return false }
++        // Emacs owns Command+Arrow pane navigation in every Portal view.
++        // Arrows have no printable character, so the core's chord handoff
++        // cannot represent them. Return focus and replay the original event
++        // to Emacs, whose normal windmove binding selects the next pane.
++        let flags = event.modifierFlags.intersection([.command, .control, .option, .shift])
++        if flags == .command, (123...126).contains(event.keyCode) {
++            escape()
++            NSApp.postEvent(event, atStart: true)
++            return true
++        }
+         switch Core.key(target, event) {
+         case PORTAL_KEY_HOLD:
+             if trigger == nil {
+diff --git a/native/Terminal.swift b/native/Terminal.swift
+index 443fdba..b6abbe4 100644
+--- a/native/Terminal.swift
++++ b/native/Terminal.swift
+@@ -70,11 +70,17 @@ private final class HostedTerminal: TerminalView, TerminalSurfaceTitleDelegate,
+             // Ghostty then reports the exit at once, as a close request,
+             // which leaves the view and its last output.
+             waitAfterCommand: false)
+-        controller = TerminalController(theme: theme) { builder in
+-            builder.withFontThicken(false)
+-            // Every exit takes that path: none counts as a failed launch.
+-            builder.withCustom("abnormal-command-exit-runtime", "0")
+-            builder.withFontSize(Float(PORTAL_TERMINAL_POINTS))
++        let configPath = ProcessInfo.processInfo.environment["PORTAL_GHOSTTY_CONFIG"]
++            ?? NSHomeDirectory() + "/.config/ghostty/config"
++        if FileManager.default.fileExists(atPath: configPath) {
++            controller = TerminalController(configFilePath: configPath, theme: theme)
++        } else {
++            controller = TerminalController(theme: theme) { builder in
++                builder.withFontThicken(false)
++                // Every exit takes that path: none counts as a failed launch.
++                builder.withCustom("abnormal-command-exit-runtime", "0")
++                builder.withFontSize(Float(PORTAL_TERMINAL_POINTS))
++            }
+         }
+     }
+ 
+@@ -189,7 +195,8 @@ final class TerminalSession: PortalView {
+     func copy() throws { terminal.performBindingAction("copy_to_clipboard") }
+ 
+     func paste() throws {
+-        guard terminal.performBindingAction("paste_from_clipboard") else {
++        guard let text = NSPasteboard.general.string(forType: .string),
++              terminal.paste(text: text) else {
+             throw NativeError.message("No terminal accepting input")
+         }
+     }
+@@ -237,7 +244,11 @@ enum Terminals {
+     /// The theme NAME, which the core has checked, or the default for nil,
+     /// which follows the system's appearance.
+     static func theme(named name: String?) throws -> TerminalTheme {
+-        guard let name else { return .default }
++        guard let name else {
++            let configPath = ProcessInfo.processInfo.environment["PORTAL_GHOSTTY_CONFIG"]
++                ?? NSHomeDirectory() + "/.config/ghostty/config"
++            return FileManager.default.fileExists(atPath: configPath) ? TerminalTheme() : .default
++        }
+         guard let theme = GhosttyThemeCatalog.theme(named: name) else {
+             throw NativeError.message("Unknown terminal theme: \(name)")
+         }
+diff --git a/native/WebView.swift b/native/WebView.swift
+index 1ea1c96..c272895 100644
+--- a/native/WebView.swift
++++ b/native/WebView.swift
+@@ -321,7 +321,7 @@ final class WebSession: PortalView {
+         self.page = page
+         input = NativeInput(target: target, view: page, host: NativeView.parking) { [weak page] in
+             guard let page, !page.isHidden else { return false }
+-            return page.window?.makeFirstResponder(page) ?? false
++            return page.input?.host.focus(page) ?? false
+         }
+         page.input = input
+         input.offer = { [weak page] event in page?.offer(event) }
+diff --git a/portal-input.el b/portal-input.el
+index dcd4e67..3f2308d 100644
+--- a/portal-input.el
++++ b/portal-input.el
+@@ -33,6 +33,33 @@
+     (keymap-set map "s-." #'portal-input-unfocus)
+     map)
+   "Keys of a Portal view's buffer while Emacs has the keyboard.")
++
++(defun portal-input--split (side)
++  "Split a Portal pane toward SIDE and choose a buffer in Ibuffer."
++  (let ((configuration (current-window-configuration)))
++    (condition-case err
++        (let ((window (split-window nil nil side)))
++          (select-window window)
++          (ibuffer)
++          window)
++      (error
++       (set-window-configuration configuration)
++       (signal (car err) (cdr err))))))
++
++(defun portal-input-split-below ()
++  "Split below a Portal view and choose a buffer in Ibuffer."
++  (interactive)
++  (portal-input--split 'below))
++
++(defun portal-input-split-right ()
++  "Split right of a Portal view and choose a buffer in Ibuffer."
++  (interactive)
++  (portal-input--split 'right))
++
++(define-key portal-input-mode-map [remap split-window-below]
++            #'portal-input-split-below)
++(define-key portal-input-mode-map [remap split-window-right]
++            #'portal-input-split-right)
+ ;; Keep the wrapper controls available in Evil states as well.
+ (with-eval-after-load 'evil
+   (evil-make-overriding-map portal-input-mode-map))
+diff --git a/portal-terminal.el b/portal-terminal.el
+index 41f21ff..bae93ce 100644
+--- a/portal-terminal.el
++++ b/portal-terminal.el
+@@ -47,8 +47,8 @@ never by the shell changing directory.")
+ (defcustom portal-terminal-theme nil
+   "Color theme for all Portal terminals.
+ Use an exact, case-sensitive name from `portal-terminal-themes', such as
+-\"Dracula\".  Nil follows native system appearance, using Alabaster in light
+-mode and Afterglow in dark mode.  Named themes stay fixed in both modes.
++\"Dracula\".  Nil uses the user's Ghostty config when present; without one,
++it follows native system appearance.  Named themes stay fixed in both modes.
+ Changes with `setq' or Customize apply to running and future terminals
+ without restarting their shells.  May be set before loading Portal;
+ the name is validated when the native module is available."
+@@ -70,6 +70,20 @@ process.  A terminal whose program has exited is killed without asking."
+   :type 'boolean
+   :group 'portal-terminal)
+ 
++(defcustom portal-terminal-auto-close-on-exit nil
++  "Kill a terminal buffer when its program exits.
++The exit record schedules this outside the native process filter, so window
++fallback uses the same path as killing any other buffer."
++  :type 'boolean
++  :group 'portal-terminal)
++
++(defun portal-terminal--close-exited (buffer)
++  "Kill BUFFER after its terminal program has exited."
++  (when (buffer-live-p buffer)
++    (with-current-buffer buffer
++      (when (and portal-terminal-auto-close-on-exit portal-terminal--exited)
++        (kill-buffer buffer)))))
++
+ (define-derived-mode portal-terminal-mode special-mode "Ghostty"
+   "A real native Ghostty surface occupies this buffer's displayed pane.
+ RET focuses Ghostty.  The shell gets typing and Control and Meta chords; a
+@@ -149,7 +163,9 @@ ordinary file commands, and `list-buffers-directory', for buffer lists."
+               list-buffers-directory directory))
+       (unless (eq portal-terminal--exited (plist-get state :exited))
+         (setq portal-terminal--exited (plist-get state :exited))
+-        (force-mode-line-update)))))
++        (force-mode-line-update)
++        (when (and portal-terminal-auto-close-on-exit portal-terminal--exited)
++          (run-at-time 0 nil #'portal-terminal--close-exited (current-buffer)))))))
+ 
+ (setf (alist-get "terminal" portal-view-record-handlers nil nil #'equal)
+       #'portal-terminal--changed)
+@@ -197,12 +213,12 @@ the abbreviated DIRECTORY stands in for it."
+   (portal-terminal-refresh-bindings))
+ 
+ ;;;###autoload
+-(defun portal-terminal (&optional new)
+-  "Open or return to a native Ghostty terminal in the selected pane.
+-With prefix argument NEW, always start a new shell.  Hidden shells persist."
++(defun portal-terminal (&optional reuse)
++  "Start a native Ghostty terminal in the selected pane.
++With prefix argument REUSE, return to the oldest shell instead."
+   (interactive "P")
+   (let ((buffer (car (portal-terminal-buffers))))
+-    (if (and buffer (not new))
++    (if (and buffer reuse)
+         (progn (portal-terminal--switch buffer) (portal-terminal-focus))
+       (portal-terminal-new))))
+ 
+@@ -242,12 +258,7 @@ QUICK-ROOT, or to the project of `default-directory', where it starts."
+                   portal-terminal--project project
+                   portal-terminal--quick-root quick-root
+                   portal-terminal--last-buffer previous)
+-            (let ((inhibit-read-only t))
+-              (insert "Native Ghostty terminal\n\n"
+-                      "RET or a click focuses Ghostty. The configured escape returns to Emacs.\n"
+-                      "See M-x customize-option RET portal-input-escape-key for that key.\n"
+-                      "Super chords, such as your s- bindings, reach Emacs from Ghostty.\n"
+-                      "This buffer has one live view, which follows its selected pane.\n")))
++            (setq-local buffer-read-only t))
+           (if quick-root
+               (portal-terminal-quick--display buffer)
+             (if elsewhere
+diff --git a/test/portal-input-tests.c b/test/portal-input-tests.c
+index 72c6431..95ec47b 100644
+--- a/test/portal-input-tests.c
++++ b/test/portal-input-tests.c
+@@ -656,11 +656,11 @@ static void test_native_bindings_by_profile(void)
+     press('j', C);
+     CHECK(binding(quick_terminal) == 100);
+     close_view(quick_terminal);
+-    /* Web views have none. */
++    /* Web views use the same Emacs bindings as ordinary terminals. */
+     char *web = open_view("web", false);
+     press('j', C);
+-    portal_fake_answer(true);
+-    CHECK(went("held s-`, held s-`, held C-j, offered C-j, used C-j"));
++    CHECK(binding(web) == 100);
++    CHECK(went("held s-`, held s-`, held C-j, held C-j"));
+     close_view(web);
+     CHECK(bindings(NULL, 0, NULL, 0, NULL));
+ }
+diff --git a/test/portal-terminal-metadata-tests.el b/test/portal-terminal-metadata-tests.el
+index 8ae3928..349c4fb 100644
+--- a/test/portal-terminal-metadata-tests.el
++++ b/test/portal-terminal-metadata-tests.el
+@@ -60,6 +60,16 @@ a folder, loose, in no project."
+   "Have BUFFER's terminal report FACTS, such as :title, :pwd and :exited."
+   (apply #'portal-fake-native-report (buffer-local-value 'portal-view--target buffer) facts))
+ 
++(ert-deftest portal-terminal-auto-close-on-exit-kills-the-buffer ()
++  (portal-metadata-test--environment
++    (let* ((portal-terminal-auto-close-on-exit t)
++           (terminal (portal-metadata-test--open "loose")))
++      (portal-metadata-test--report terminal :exited t)
++      (should (buffer-live-p terminal))
++      (accept-process-output nil 0.02)
++      (should-not (buffer-live-p terminal))
++      (should-not (portal-terminal-buffers)))))
++
+ (ert-deftest portal-terminal-metadata-names-and-projects ()
+   (portal-metadata-test--environment
+     (let* ((one (portal-metadata-test--path "one/app/"))
+diff --git a/test/portal-terminal-tests.el b/test/portal-terminal-tests.el
+index a8dc275..fe86324 100644
+--- a/test/portal-terminal-tests.el
++++ b/test/portal-terminal-tests.el
+@@ -151,7 +151,7 @@
+                                (plist-get initial :pid)))
+                 (setq portal-terminal-theme nil)
+                 (should (member (plist-get (portal-terminal-test--colors first) :background)
+-                                '("f7f7f7" "212121")))))))
++                                '("f7f7f7" "212121" "1e1e2e")))))))
+       (setq portal-terminal-theme original))))
+ 
+ (ert-deftest portal-terminal-real-shell-survives-hiding-and-resizes ()
+@@ -365,6 +365,14 @@
+             (should (plist-get (portal-terminal-test--state) :focused)))
+         (gui-set-selection 'CLIPBOARD clipboard)))))
+ 
++(ert-deftest portal-terminal-exit-auto-closes-session ()
++  (let ((portal-terminal-auto-close-on-exit t))
++    (portal-terminal-test--session
++      (let ((buffer (current-buffer)))
++        (portal-terminal-test--paste "exit" t)
++        (portal-terminal-test--wait (lambda () (not (buffer-live-p buffer))))
++        (should-not (portal-terminal-buffers))))))
++
+ (ert-deftest portal-terminal-windowless-escape-restores-emacs-input ()
+   (skip-unless (fboundp 'portal-test-native-post-key))
+   (portal-terminal-test--session
+@@ -695,7 +703,7 @@ The terminal does not use TRIGGER, so Emacs reads it, and STROKES after it."
+     (unwind-protect
+         (progn
+           (portal-terminal-test--paste
+-           (format "old=$(stty -g); stty -icanon -echo min 1 time 0; touch %s; dd bs=1 count=1 2>/dev/null | od -An -tu1 > %s; stty \"$old\""
++           (format "old=$(stty -g); stty -icanon -echo -isig min 1 time 0; touch %s; dd bs=1 count=1 2>/dev/null | od -An -tu1 > %s; stty \"$old\""
+                    (shell-quote-argument ready) (shell-quote-argument receipt)) t)
+           (portal-terminal-test--wait (lambda () (file-exists-p ready)))
+           (funcall sender)
+@@ -710,6 +718,26 @@ The terminal does not use TRIGGER, so Emacs reads it, and STROKES after it."
+   (interactive)
+   (user-error "Deliberate native binding failure"))
+ 
++(defun portal-terminal-test--mark-binding ()
++  (interactive)
++  (setq portal-terminal-test--answer t))
++
++(ert-deftest portal-terminal-control-c-prefix-runs-emacs-and-repeats-literally ()
++  (portal-terminal-test--native-maps
++    (portal-terminal-test--session
++      (portal-terminal-bind-key portal-terminal-native-map
++                                "C-c e" #'portal-terminal-test--mark-binding)
++      (setq portal-terminal-test--answer nil)
++      (portal-terminal-test--native-binding
++       (list 8 (ash 1 18) "\C-c" t) '(14 0 "e"))
++      (should portal-terminal-test--answer)
++      (portal-terminal-test--raw-byte
++       (lambda ()
++         (portal-terminal-test--native-binding
++          (list 8 (ash 1 18) "\C-c" t)
++          (list 8 (ash 1 18) "\C-c" t)))
++       3))))
++
+ (ert-deftest portal-terminal-bindings-live-rebind-prompt-error-and-unbind ()
+   (portal-terminal-test--native-maps
+     (portal-terminal-test--session
+diff --git a/test/portal-view-tests.el b/test/portal-view-tests.el
+index c256e37..24420bd 100644
+--- a/test/portal-view-tests.el
++++ b/test/portal-view-tests.el
+@@ -92,6 +92,16 @@ Return the view's target."
+       (should (portal-view-test--shown target origin))
+       (should (= (length (portal-fake-native-calls 'portal--open)) 1)))))
+ 
++(ert-deftest portal-view-terminal-split-offers-a-buffer-picker ()
++  (portal-view-test--environment
++    (let* ((first (portal-terminal-new))
++           (origin (selected-window)))
++      (portal-input-split-right)
++      (should (= (count-windows) 2))
++      (should (eq (window-buffer origin) first))
++      (should (derived-mode-p 'ibuffer-mode))
++      (should (= (length (portal-view-buffers 'terminal)) 1)))))
++
+ (ert-deftest portal-view-follows-the-selected-pane-showing-its-buffer ()
+   (portal-view-test--environment
+     (let* ((target (portal-view-test--open "view"))
+@@ -295,8 +305,8 @@ Return the view's target."
+           (second (progn (portal-terminal-new) (current-buffer))))
+       (portal-fake-native-with-frame other
+         (select-frame other)
+-        ;; The first terminal comes to this frame, keeping its shell.
+-        (portal-terminal)
++        ;; Explicit reuse brings the first shell to this frame.
++        (portal-terminal t)
+         (should (eq (current-buffer) first))
+         (should (eq (plist-get (portal--inspect (portal-view-target)) :frame) other))
+         (portal-terminal-next)
+@@ -326,8 +336,8 @@ Return the view's target."
+       (quit-window)
+       (portal-view-sync)
+       (should-not (plist-get (portal--inspect target) :visible))
+-      ;; Returning reuses the same hidden shell.
+-      (portal-terminal)
++      ;; Explicit reuse returns to the same hidden shell.
++      (portal-terminal t)
+       (should (eq (current-buffer) buffer))
+       (should (portal-view-test--shown target))
+       (should (= (length (portal-fake-native-calls 'portal--open)) 1))

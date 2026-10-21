@@ -35,7 +35,7 @@
 (declare-function my/project-ripgrep "init-project"
                   (project-root &optional initial))
 (declare-function my/project-switch "init-project")
-(declare-function my/project-ghostel "init-project")
+(declare-function my/project-portal "init-project")
 (declare-function consult-bookmark "consult" (name))
 (declare-function my/problems-buffer "init-problems" ())
 (declare-function my/problems-buffer-errors "init-problems" ())
@@ -213,7 +213,7 @@
        :transient transient--do-exit)
       ("o" "open root" my/project-open-root
        :transient transient--do-exit)
-      ("v" "project ghostel" my/project-ghostel
+      ("v" "project portal" my/project-portal
        :transient transient--do-exit)
       ("P" "project workbench" project-menu
        :transient transient--do-exit)]

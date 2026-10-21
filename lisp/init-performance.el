@@ -15,6 +15,12 @@
 
 (declare-function evil-local-mode "evil-core" (&optional arg))
 (declare-function evil-set-initial-state "evil-core" (mode state))
+(declare-function profiler-report "profiler" ())
+(declare-function my/open-resolve-file-name "init-open"
+                  (file &optional directory))
+(declare-function my/open-visit-file "init-open" (file &optional wildcards))
+(declare-function aaron-ui-performance-view "aaron-ui-performance"
+                  (state selected owner))
 
 (defgroup my/performance nil
   "Runtime performance and power diagnostics."
@@ -50,8 +56,17 @@
 (defvar-local my/performance--last-sample nil
   "Most recent structured performance sample for this board.")
 
+(defvar-local my/performance--view-state nil
+  "ETAF ref holding the current Performance Watch snapshot.")
+
+(defvar-local my/performance--tab-state nil
+  "ETAF ref holding the selected Performance Watch section.")
+
 (defvar-local my/performance--recording nil
   "Whether each refresh should append a performance record.")
+
+(defvar my/performance--capture-buffer nil
+  "Transient buffer used only to capture one ETAF report section.")
 
 (defface my/performance-title-face
   '((t :inherit font-lock-function-name-face :weight bold :height 1.25))
@@ -91,6 +106,40 @@
 
 (with-eval-after-load 'evil
   (evil-set-initial-state 'my/performance-watch-mode 'emacs))
+
+(defvar-keymap my/performance-watch-keys-mode-map
+  :doc "Shortcuts layered over the ETAF Performance Watch page."
+  "g" #'my/performance-watch-refresh
+  "G" #'my/performance-garbage-collect
+  "y" #'my/performance-copy-page
+  "a" #'my/performance-watch-toggle-auto-refresh
+  "s" #'my/performance-save-record
+  "R" #'my/performance-toggle-recording
+  "o" #'my/performance-open-record-directory
+  "p" #'my/performance-profiler-start-cpu
+  "P" #'profiler-report
+  "1" (lambda () (interactive) (my/performance-watch-select-tab 'overview))
+  "2" (lambda () (interactive) (my/performance-watch-select-tab 'processes))
+  "3" (lambda () (interactive) (my/performance-watch-select-tab 'buffers))
+  "4" (lambda () (interactive) (my/performance-watch-select-tab 'hooks))
+  "q" #'my/performance-watch-quit)
+
+(define-minor-mode my/performance-watch-keys-mode
+  "Keyboard shortcuts for the ETAF Performance Watch page."
+  :lighter " PerfWatch"
+  :keymap my/performance-watch-keys-mode-map
+  (when (and my/performance-watch-keys-mode (fboundp 'evil-local-mode))
+    (evil-local-mode -1)))
+
+(defun my/performance-watch-select-tab (tab)
+  "Select Performance Watch TAB."
+  (interactive
+   (list (intern (completing-read "Performance section: "
+                                  '("overview" "processes" "buffers" "hooks")
+                                  nil t))))
+  (unless my/performance--tab-state
+    (user-error "Not in a Performance Watch page"))
+  (etaf-set-value my/performance--tab-state tab))
 
 (defun my/performance--hook-count (value)
   "Return a display count for hook VALUE."
@@ -305,7 +354,8 @@ they reported zero unconditionally."
 (defun my/performance-toggle-recording ()
   "Toggle appending a record on every performance refresh."
   (interactive)
-  (unless (derived-mode-p 'my/performance-watch-mode)
+  (unless (or (derived-mode-p 'my/performance-watch-mode)
+              my/performance--view-state)
     (user-error "Not in a performance watch buffer"))
   (setq-local my/performance--recording (not my/performance--recording))
   (my/performance-watch-refresh)
@@ -421,7 +471,9 @@ place instead of requiring a manual audit."
   (my/performance--section "Emacs Runtime")
   (insert (format "%-24s %s\n" "Version" emacs-version))
   (insert (format "%-24s %s\n" "Uptime" (emacs-uptime)))
-  (insert (format "%-24s %d\n" "Buffers" (length (buffer-list))))
+  (insert (format "%-24s %d\n" "Buffers"
+                  (length (delq my/performance--capture-buffer
+                                (buffer-list)))))
   (insert (format "%-24s %d\n" "Processes" (length (process-list))))
   (insert (format "%-24s %d / %d\n" "Timers / idle timers"
                   (length timer-list)
@@ -571,7 +623,8 @@ The return value is a list of plists with `:hook', `:global-count',
              (my/performance--hook-count
               (and (boundp 'jit-lock-functions) jit-lock-functions)))))
    (seq-take
-    (sort (copy-sequence (buffer-list))
+    (sort (delq my/performance--capture-buffer
+                (copy-sequence (buffer-list)))
           (lambda (left right)
             (> (buffer-size left) (buffer-size right))))
     (or limit 20))))
@@ -597,7 +650,8 @@ The return value is a list of plists with `:hook', `:global-count',
 This API is intended for quick debugging from `emacsclient --eval' or batch
 tools; it samples once and does not start any refresh timers."
   (let ((buffer (or inspected-buffer
-                    (and (derived-mode-p 'my/performance-watch-mode)
+                    (and (or (derived-mode-p 'my/performance-watch-mode)
+                             my/performance--view-state)
                          (buffer-live-p my/performance--inspected-buffer)
                          my/performance--inspected-buffer)
                     (current-buffer))))
@@ -636,19 +690,80 @@ This samples once and does not mutate or display the performance board."
 (defun my/performance-watch-refresh ()
   "Refresh the performance watch board."
   (interactive)
-  (unless (derived-mode-p 'my/performance-watch-mode)
+  (unless (or (derived-mode-p 'my/performance-watch-mode)
+              my/performance--view-state)
     (user-error "Not in a performance watch buffer"))
-  (let ((inhibit-read-only t)
-        (selected-buffer (if (buffer-live-p my/performance--inspected-buffer)
-                             my/performance--inspected-buffer
-                           (window-buffer (selected-window))))
-        (sample (my/performance--sample)))
+  (let* ((inhibit-read-only t)
+         (selected-buffer (if (buffer-live-p my/performance--inspected-buffer)
+                              my/performance--inspected-buffer
+                            (current-buffer)))
+         (sample (my/performance--sample)))
     (setq-local my/performance--last-sample sample)
     (when my/performance--recording
       (my/performance-save-record sample))
-    (erase-buffer)
-    (my/performance--insert-report sample selected-buffer)
-    (goto-char (point-min))))
+    (if my/performance--view-state
+        (etaf-set-value
+         my/performance--view-state
+         (my/performance--ui-snapshot sample selected-buffer))
+      (erase-buffer)
+      (my/performance--insert-report sample selected-buffer)
+      (goto-char (point-min)))))
+
+(defun my/performance--section-body (render)
+  "Capture the body of a legacy section produced by RENDER."
+  (with-temp-buffer
+    (let ((my/performance--capture-buffer (current-buffer)))
+      (funcall render)
+      (goto-char (point-min))
+      (forward-line 1)
+      (string-trim-right
+       (buffer-substring-no-properties (point) (point-max))))))
+
+(defun my/performance--ui-snapshot (sample inspected-buffer)
+  "Create the ETAF page snapshot from SAMPLE and INSPECTED-BUFFER."
+  (let ((definitions
+         (list
+          (list 'overview 'overview "Overview"
+                (lambda () (my/performance--insert-overview sample)))
+          (list 'os 'overview "OS Process Metrics"
+                #'my/performance--insert-os-processes)
+          (list 'toolchain 'overview "Toolchain Memory"
+                #'my/performance--insert-toolchain-memory)
+          (list 'runtime 'overview "Emacs Runtime"
+                #'my/performance--insert-emacs-summary)
+          (list 'emacs-processes 'processes "Emacs Process List"
+                #'my/performance--insert-emacs-processes)
+          (list 'org 'buffers "Org Buffers"
+                #'my/performance--insert-org-buffers)
+          (list 'largest 'buffers "Largest Buffers"
+                #'my/performance--insert-buffer-hotspots)
+          (list 'hooks 'hooks "Hook Table"
+                (lambda () (my/performance--insert-hook-table
+                            inspected-buffer)))
+          (list 'timers 'hooks "Timers"
+                (lambda () (my/performance--insert-timer-summary
+                            "Timers" timer-list)))
+          (list 'idle-timers 'hooks "Idle Timers"
+                (lambda () (my/performance--insert-timer-summary
+                            "Idle Timers" timer-idle-list))))))
+    (list :summary
+          (format "Inspecting: %s   Updated: %s   ·   auto %s   rec %s"
+                  (if (buffer-live-p inspected-buffer)
+                      (buffer-name inspected-buffer) "-")
+                  (plist-get sample :timestamp)
+                  (if (timerp my/performance--auto-refresh-timer) "on" "off")
+                  (if my/performance--recording "on" "off"))
+          :auto (timerp my/performance--auto-refresh-timer)
+          :recording my/performance--recording
+          :sections
+          (mapcar
+           (lambda (definition)
+             (list :key (nth 0 definition)
+                   :tab (nth 1 definition)
+                   :title (nth 2 definition)
+                   :body (my/performance--section-body
+                          (nth 3 definition))))
+           definitions))))
 
 (defun my/performance--insert-header (sample inspected-buffer)
   "Insert board usage and metadata for SAMPLE inspecting INSPECTED-BUFFER."
@@ -722,15 +837,16 @@ This samples once and does not mutate or display the performance board."
   (unless (timerp my/performance--auto-refresh-timer)
     (setq my/performance--auto-refresh-timer
           (run-with-timer
-           my/performance-refresh-interval
-           my/performance-refresh-interval
+           (max 1 (or my/performance-refresh-interval 5))
+           (max 1 (or my/performance-refresh-interval 5))
            #'my/performance--auto-refresh-buffer
            (current-buffer)))))
 
 (defun my/performance-watch-toggle-auto-refresh ()
   "Toggle automatic refresh for the current performance watch buffer."
   (interactive)
-  (unless (derived-mode-p 'my/performance-watch-mode)
+  (unless (or (derived-mode-p 'my/performance-watch-mode)
+              my/performance--view-state)
     (user-error "Not in a performance watch buffer"))
   (if (timerp my/performance--auto-refresh-timer)
       (progn
@@ -762,7 +878,8 @@ This samples once and does not mutate or display the performance board."
          (stats (garbage-collect))
          (elapsed (- (float-time) start))
          (after (my/performance--self-process-sample)))
-    (when (derived-mode-p 'my/performance-watch-mode)
+    (when (or (derived-mode-p 'my/performance-watch-mode)
+              my/performance--view-state)
       (my/performance-watch-refresh))
     (message "GC %.3fs; RSS %s -> %s; %d statistic rows"
              elapsed
@@ -773,9 +890,21 @@ This samples once and does not mutate or display the performance board."
 (defun my/performance-copy-page ()
   "Copy the full current performance page to the kill ring."
   (interactive)
-  (let ((text (if (derived-mode-p 'my/performance-watch-mode)
-                  (buffer-substring-no-properties (point-min) (point-max))
-                (my/performance-report-string (current-buffer)))))
+  (let ((text
+         (cond
+          (my/performance--view-state
+           (let ((sample my/performance--last-sample)
+                 (inspected my/performance--inspected-buffer)
+                 (auto my/performance--auto-refresh-timer)
+                 (recording my/performance--recording))
+             (with-temp-buffer
+               (setq-local my/performance--auto-refresh-timer auto
+                           my/performance--recording recording)
+               (my/performance--insert-report sample inspected)
+               (buffer-substring-no-properties (point-min) (point-max)))))
+          ((derived-mode-p 'my/performance-watch-mode)
+           (buffer-substring-no-properties (point-min) (point-max)))
+          (t (my/performance-report-string (current-buffer))))))
     (kill-new text)
     (message "Copied performance report (%d chars)" (length text))))
 
@@ -806,34 +935,45 @@ This samples once and does not mutate or display the performance board."
   (with-selected-frame my/performance--frame
     (delete-other-windows)
     (switch-to-buffer buffer)
+    (when (and (fboundp 'etaf-runtime-for-buffer)
+               (etaf-runtime-for-buffer buffer))
+      (etaf-refit))
     (set-window-dedicated-p (selected-window) t)
     (selected-window)))
 
 (defun my/performance-watch ()
   "Open a runtime performance and power diagnostics board."
   (interactive)
+  (require 'aaron-ui-performance)
   (let ((inspected-buffer (current-buffer))
         (buffer (get-buffer-create my/performance-buffer-name)))
     (with-current-buffer buffer
-      (my/performance-watch-mode)
-      (aaron-ui-board-set-header "Performance Watch" 'chart)
+      (unless (etaf-runtime-for-buffer buffer)
+        (let ((view-state (etaf-ref nil))
+              (tab-state (etaf-ref 'overview)))
+          (etaf-mount
+           buffer (aaron-ui-performance-view view-state tab-state buffer))
+          (setq-local my/performance--view-state view-state
+                      my/performance--tab-state tab-state)
+          (my/performance-watch-keys-mode 1)
+          (add-hook 'kill-buffer-hook #'my/performance-watch-cleanup nil t)))
       (setq-local my/performance--inspected-buffer inspected-buffer)
-      (setq-local aaron-ui-board-refresh-function #'my/performance-watch-refresh)
-      (let ((map (copy-keymap special-mode-map)))
-        (use-local-map map)
-        (local-set-key (kbd "g") #'my/performance-watch-refresh)
-        (local-set-key (kbd "G") #'my/performance-garbage-collect)
-        (local-set-key (kbd "y") #'my/performance-copy-page)
-        (local-set-key (kbd "a") #'my/performance-watch-toggle-auto-refresh)
-        (local-set-key (kbd "s") #'my/performance-save-record)
-        (local-set-key (kbd "R") #'my/performance-toggle-recording)
-        (local-set-key (kbd "o") #'my/performance-open-record-directory)
-        (local-set-key (kbd "p") #'my/performance-profiler-start-cpu)
-        (local-set-key (kbd "P") #'profiler-report)
-        (local-set-key (kbd "q") #'my/performance-watch-quit))
-      (add-hook 'kill-buffer-hook #'my/performance-watch-cleanup nil t)
       (my/performance-watch-refresh))
     (my/performance-watch-display-buffer buffer)))
+
+(defun my/performance--theme-changed (&rest _)
+  "Repaint the ETAF Performance Watch after a theme change."
+  (when-let* ((buffer (get-buffer my/performance-buffer-name)))
+    (with-current-buffer buffer
+      (when my/performance--view-state
+        (etaf-update-value
+         my/performance--view-state
+         (lambda (snapshot)
+           (plist-put (copy-sequence snapshot) :theme-revision
+                      (1+ (or (plist-get snapshot :theme-revision)
+                              0)))))))))
+
+(add-hook 'after-load-theme-hook #'my/performance--theme-changed)
 
 (my/leader!
   "h p" '(:def my/performance-watch :which-key "performance watch"))

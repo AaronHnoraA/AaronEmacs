@@ -12,7 +12,7 @@ reconstructing the system from scattered Elisp:
 - `docs/maintenance.md` covers package locks, vendored Elisp, runtime state,
   compile helpers, bootstrap, and recovery.
 - `docs/dev-guide.md` covers completion, LSP, projects, TRAMP, terminals,
-  browser/Appine, and AI integrations.
+  browsers, Portal, and AI integrations.
 - `docs/remote-framework.md` is authoritative for logical `/fs` paths,
   target/pipeline/backend/session routing, routed processes and channels, and
   environment/PATH capsules.
@@ -608,7 +608,7 @@ Noema Markdown panes:
   that shows the file elsewhere (a Noema pane) moves there instead of letting
   the raw buffer take over the window.
 
-Browser/Appine:
+Browser and Portal:
 
 - `browse-url` defaults to a backend menu whose default choice is xwidget.
 - EWW is for text/reading.
@@ -616,8 +616,8 @@ Browser/Appine:
   buffers, not replace the current editing buffer or an already visible browser
   buffer.
 - `xwidget-webkit` is the default real-webpage backend.
-- Appine is available for native embedding, but should not be the default route
-  while its native overlay is unstable outside the host buffer.
+- Portal provides native Ghostty terminal panes on graphical macOS Emacs 31.1+;
+  keep Ghostel for remote workspaces.
 - macOS `open` is the system handoff for files and URLs.
 - Keep browser routing manual; do not add "smart" URL auto-routing unless
   explicitly requested and documented.

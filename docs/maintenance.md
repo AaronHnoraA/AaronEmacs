@@ -2,6 +2,46 @@
 
 这份文档讲长期维护，不讲日常使用。
 
+## Emacs+ 预编译版
+
+本机 `/Applications/Emacs.app` 由本仓库管理，不由 Homebrew formula/cask 或 Nix 管理。
+Apple Silicon macOS 26+ 使用 emacs-plus 官方 cask 发布的二进制资产；版本、构建号与
+SHA256 固定在 `config/emacs-binary.mk`。
+
+```sh
+make emacs-binary-install  # 安装锁定版本，替换 /Applications/Emacs.app
+make emacs-binary-update   # 读取官方 cask 的最新版，安装并更新锁文件
+make emacs-binary-verify   # 检查 Emacs、emacsclient、NS、模块与 xwidgets
+```
+
+安装脚本先校验下载文件的 SHA256，再安装并验证；失败会恢复原 App。
+升级前退出正在运行的 Emacs。`brew upgrade` 和 Nix 更新不会安装或升级 Emacs。
+
+## Portal 的 Ghostty 外观
+
+终端字体、20pt 字号、Catppuccin Mocha 背景 `#1E1E2E` 与 87% 不透明度
+由 `site-lisp/aaron-ui/ghostty.conf` 管理，并链接到 `~/.config/ghostty/config`。
+原生桥接改动放在 `config/portal-local.patch`，并登记在
+`config/package-patches.el`。`package-vc` 安装时自动应用补丁；统一包升级先撤销补丁，
+升级后再应用。新版源码若与补丁冲突，升级会明确报错，需调整补丁后重试。
+单独重建 Portal 时运行：
+
+```sh
+make portal-build
+```
+
+Portal 由 `package-vc` 锁定版本管理。`elpa/portal` 是加载入口，包的 VC 工作树
+由其中的 `:vc-dir` 指向 `site-lisp/portal`。`make portal-build` 同样经由通用
+补丁助手检查并应用补丁；不要直接在 VC 工作树保留未导出到补丁的改动。
+
+其他 VC 包需要本地补丁时，把 `git diff` 导出到 `config/`，再在
+`config/package-patches.el` 登记 `(包名 . "config/补丁.patch")`。
+`make install` 会给新安装的包应用补丁；`M-x my/package-upgrade-all` 会在升级前
+撤销、升级后重放。补丁冲突会停止升级并保留具体 Git 错误，修好补丁再继续。
+
+构建后重启 Emacs 才能载入新的原生模块。Portal 终端与 Noema Portal 页面共用
+`portal-input`；`xwidget-webkit` 只在显式选择该浏览后端时加载。
+
 ## 1. 依赖管理
 
 先记住边界：
@@ -151,7 +191,7 @@ make up SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - 可选先恢复状态快照
 - 按 `package-lock.el` 恢复依赖
 - 跑完整 bootstrap health
-- 尽早暴露 `pdf-tools` / `ghostel` / VC checkout / 锁文件漂移这类迁移问题
+- 尽早暴露 `pdf-tools` / `portal` / VC checkout / 锁文件漂移这类迁移问题
 
 更轻量的路径才是：
 
@@ -163,7 +203,7 @@ make setup
 
 - 按 `package-lock.el` 恢复依赖
 - 避免把“本地碰巧已有几个包”误判成已有开发环境
-- 立刻跑一次启动 smoke check，尽早暴露 `pdf-tools` / `ghostel` / VC checkout 这类迁移问题
+- 立刻跑一次启动 smoke check，尽早暴露 `pdf-tools` / `portal` / VC checkout 这类迁移问题
 
 如果你想把这一步提升成更接近“迁移验收”的流程，执行：
 
@@ -272,6 +312,7 @@ leader 入口：
 文件：
 
 - [lisp/init-performance.el](../lisp/init-performance.el)
+- [site-lisp/aaron-ui/aaron-ui-performance.el](../site-lisp/aaron-ui/aaron-ui-performance.el)
 
 常用入口：
 
@@ -280,7 +321,12 @@ leader 入口：
 - `SPC h p`
   同上。
 
-这个 buffer 默认打开到独立 frame，避免和 dashboard/Org 分屏共绘。默认只在打开和按 `g` 时采样；如果按 `a` 临时开启自动刷新，`q` 退出时会停止刷新 timer 并关闭监管 frame。顶部有用法区和概览条形图。里面可以看：
+这个 buffer 默认打开到独立 frame，避免和 dashboard/Org 分屏共绘。页面用 ETAF
+排列数据，仍使用 Aaron UI 原有色板和图标；`1`～`4` 或顶部按钮切换
+Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` 时采样；
+如果按 `a` 临时开启自动刷新，`q` 退出时会停止刷新 timer 并关闭监管 frame。
+原来的纯文本完整报告可用 `y` 复制。ETAF 在第一次打开整页时才加载，
+启动和简单的 Transient dispatch 不加载它。里面可以看：
 
 - `ps` 里的 Emacs CPU、内存、RSS、子进程（原始 `ps` 行，只到直接子进程）。
 - **Toolchain Memory**：Emacs 整个后代进程树（递归，不止直接子进程）的 RSS
@@ -527,7 +573,7 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
 - [lisp/org/init-org.el](../lisp/org/init-org.el)
   Org 全家桶
 - [lisp/init-shell.el](../lisp/init-shell.el)
-  shell/eshell/ghostel/ssh
+  shell/eshell/portal/ssh
 
 ## 7. 常见故障排查
 
@@ -589,7 +635,7 @@ emacs --batch -Q --init-directory="$PWD" -l ./early-init.el \
 2. `dvisvgm`
 3. [tools/org-xdvisvgm-hires](../tools/org-xdvisvgm-hires)
 
-### `my/ghostel-ssh` 没读到主机
+### `my/portal-ssh` 没读到主机
 
 看：
 

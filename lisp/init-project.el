@@ -820,17 +820,15 @@ RG-UNAVAILABLE records a previous probe by another search entry point."
     (magit-status-setup-buffer magit-root)
     (my/project-activate project-root t)))
 
-(defun my/project-ghostel (project-root)
-  "Open or switch to a dedicated Ghostel for PROJECT-ROOT."
-  (interactive (list (my/project-read-target-root "Ghostel project: ")))
+(defun my/project-portal (project-root)
+  "Open or switch to a dedicated Portal terminal for PROJECT-ROOT."
+  (interactive (list (my/project-read-target-root "Portal project: ")))
   (let* ((project-root (my/project-normalize-root project-root))
-         (buffer-name (format "*ghostel:%s*" (my/project-perspective-name project-root)))
+         (buffer-name (format "*portal:%s*" (my/project-perspective-name project-root)))
          (default-directory project-root))
     (when (fboundp 'my/direnv-update-environment-maybe)
       (my/direnv-update-environment-maybe project-root))
-    (if (get-buffer buffer-name)
-        (pop-to-buffer buffer-name)
-      (pop-to-buffer (my/ghostel-create-hidden buffer-name)))
+    (my/portal-open-in-directory buffer-name project-root)
     (my/project-activate project-root t)))
 
 (defun my/project-kill-buffers (project-root)
@@ -1924,7 +1922,7 @@ Return a plist with counts of killed and preserved buffers and errors."
                        (or (my/project-path-inside-root-p buffer-file-name project-root)
                            (my/project-path-inside-root-p default-directory project-root)
                            (equal (buffer-name)
-                                  (format "*ghostel:%s*" project-label)))))
+                                  (format "*portal:%s*" project-label)))))
                    (buffer-list)))
          (killed 0)
          (preserved 0)
@@ -2226,7 +2224,7 @@ that extra stat is only paid for a marker that actually matched."
   (define-key projectile-command-map (kbd "g") #'my/project-ripgrep)
   (define-key projectile-command-map (kbd "d") #'my/project-open-root)
   (define-key projectile-command-map (kbd "m") #'my/project-magit-status)
-  (define-key projectile-command-map (kbd "v") #'my/project-ghostel)
+  (define-key projectile-command-map (kbd "v") #'my/project-portal)
   (unless (advice-member-p #'my/project-find-file-in-known-projects
                            'projectile-find-file-in-known-projects)
     (advice-add 'projectile-find-file-in-known-projects :override
@@ -2275,7 +2273,7 @@ that extra stat is only paid for a marker that actually matched."
       ("g" "magit" my/project-magit-status)]
      ["Open / Shell"
       ("d" "open root" my/project-open-root)
-      ("v" "project ghostel" my/project-ghostel)
+      ("v" "project portal" my/project-portal)
       ("j" "Jupyter SSH project" my/jupyter-ssh-open-project)]
      ["Manage"
       ("l" "leave active project" my/project-leave)

@@ -16,7 +16,7 @@
 (defvar persp-mode)
 (defvar tab-line-exclude-modes)
 (defvar tab-line-tab-map)
-(defvar my/ghostel-popup-instance-p)
+(defvar my/portal-popup-instance-p)
 
 (declare-function global-tab-line-mode "tab-line" (&optional arg))
 (declare-function persp-curr "perspective" (&optional frame))
@@ -112,8 +112,8 @@ Scrolling in the opposite direction is allowed immediately."
 (defvar-local my/tab-line--format-cache-major-mode nil
   "Major mode used for `my/tab-line--format-cache'.")
 
-(defvar-local my/tab-line--format-cache-ghostel-popup nil
-  "Ghostel popup state used for `my/tab-line--format-cache'.")
+(defvar-local my/tab-line--format-cache-portal-popup nil
+  "Portal popup state used for `my/tab-line--format-cache'.")
 
 (defvar-local my/tab-line-leading-segment-functions nil
   "Functions returning contextual strings for the tab line's left edge.
@@ -359,9 +359,9 @@ registered it."
                 (not (bound-and-true-p tab-line-exclude))
                 (not (and (bound-and-true-p tab-line-exclude-modes)
                           (apply #'derived-mode-p tab-line-exclude-modes)))
-                (not (bound-and-true-p my/ghostel-popup-instance-p))
+                (not (bound-and-true-p my/portal-popup-instance-p))
                 (not (and (stringp name)
-                          (string-match-p "ghostel-pop" name)))
+                          (string-match-p "portal-pop" name)))
                 (or note
                     (not (my/tab-line-starred-buffer-p buffer)))
                 (or note
@@ -369,7 +369,7 @@ registered it."
                                     'eshell-mode
                                     'shell-mode
                                     'term-mode
-                                    'ghostel-mode)
+                                    'portal-terminal-mode)
                     (and (stringp name)
                          (not (string-prefix-p " " name)))))))))
 
@@ -819,8 +819,8 @@ not allocate a fresh compound key during every redisplay."
        (equal my/tab-line--format-cache-file-name
               (my/tab-bar--buffer-file-name))
        (eq my/tab-line--format-cache-major-mode major-mode)
-       (eq my/tab-line--format-cache-ghostel-popup
-           (and (bound-and-true-p my/ghostel-popup-instance-p) t))))
+       (eq my/tab-line--format-cache-portal-popup
+           (and (bound-and-true-p my/portal-popup-instance-p) t))))
 
 (defun my/tab-line-store-format-cache (window-width buffer-name value)
   "Cache centered tab-line VALUE for WINDOW-WIDTH and BUFFER-NAME."
@@ -833,8 +833,8 @@ not allocate a fresh compound key during every redisplay."
               my/tab-line--format-cache-file-name
               (my/tab-bar--buffer-file-name)
               my/tab-line--format-cache-major-mode major-mode
-              my/tab-line--format-cache-ghostel-popup
-              (and (bound-and-true-p my/ghostel-popup-instance-p) t))
+              my/tab-line--format-cache-portal-popup
+              (and (bound-and-true-p my/portal-popup-instance-p) t))
   value)
 
 (defun my/tab-line-format-uncached ()

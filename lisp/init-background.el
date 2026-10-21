@@ -19,6 +19,7 @@
 (declare-function macos-window-set-accessory "ext:macos-window" (accessory))
 (declare-function macos-window-install-drag-handles "ext:macos-window" (height))
 (declare-function ns-hide-emacs "nsfns.m" (on))
+(declare-function my/window-dashboard-buffer "init-windows" ())
 
 (defvar my/background-hide-dock-icon t
   "Whether a background Emacs leaves the Dock, given the window module.")
@@ -65,7 +66,7 @@ and the frame then grows past the screen."
                           (+ y (max 0 (/ (- h (frame-outer-height frame)) 2)))))))
 
 (defun my/background-make-frame (&optional parameters)
-  "Create a frame with PARAMETERS that starts on a neutral buffer.
+  "Create a frame with PARAMETERS that starts on the Dashboard.
 `make-frame' shows the current buffer in the new frame.  When that buffer is
 an xwidget page, the page is resized to the new frame's window and the frame
 it was in is left showing it at the wrong size.  Without a size in
@@ -74,8 +75,7 @@ PARAMETERS the frame gets the default one."
     (unwind-protect
         (progn
           (setq frame
-                (with-current-buffer (or (get-buffer "*dashboard*")
-                                         (get-scratch-buffer-create))
+                (with-current-buffer (my/window-dashboard-buffer)
                   (make-frame parameters)))
           (unless (or (assq 'width parameters) (assq 'height parameters))
             (my/frame-fit-default frame))
@@ -264,7 +264,7 @@ symbol `background', or any other non-nil value for the foreground."
 
 (defvar my/background-actions
   '(("Toggle Emacs" my/background-toggle)
-    ("New Terminal" my/ghostel-open-new)
+    ("New Terminal" my/portal-open-new)
     ("New Frame" my/background-new-frame)
     ("Hide Frame" my/frame-hide)
     ("Open File" find-file "Path")
@@ -536,11 +536,19 @@ client returns at once."
   (my/background-apply-dock-policy)
   (my/frame-install-drag-handles))
 
+(defun my/background--new-frame-dashboard (frame)
+  "Show the Dashboard in a new top-level editing FRAME."
+  (let ((window (frame-selected-window frame)))
+    (unless (or (frame-parent frame)
+                (window-minibuffer-p window))
+      (set-window-buffer window (my/window-dashboard-buffer)))))
+
 ;; The initial frame exists by now and already has its font.
 (unless after-init-time
   (my/frame-fit-default (selected-frame)))
 
 (add-hook 'emacs-startup-hook #'my/background--refresh-window-state-h)
+(add-hook 'after-make-frame-functions #'my/background--new-frame-dashboard)
 (add-hook 'after-make-frame-functions #'my/background--refresh-window-state-h)
 (add-hook 'after-delete-frame-functions #'my/background--refresh-window-state-h)
 

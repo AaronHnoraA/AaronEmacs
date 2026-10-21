@@ -4,7 +4,7 @@
 ;;
 ;; Remote terminals are workspace-owned PTY processes backed by the routed
 ;; process API.  The built-in frontend is comint; native terminal frontends
-;; such as Ghostel can keep their own process/filter implementation and register
+;; can keep their own process/filter implementation and register
 ;; the resulting buffer through `remote-terminal-adopt'.
 
 ;;; Code:
@@ -17,7 +17,6 @@
 (require 'remote-path)
 (require 'remote-workspace)
 
-(declare-function ghostel-send-string "ghostel" (string))
 
 (cl-defstruct (remote-terminal-profile
                (:constructor remote-terminal-profile-create))
@@ -36,6 +35,13 @@
 
 (defvar-local remote-terminal-instance nil
   "Terminal object owned by the current buffer.")
+
+(defcustom remote-terminal-auto-close-on-exit t
+  "Kill a remote terminal buffer when its process exits normally.
+Transport loss keeps the buffer and its restart action.  Buffer cleanup runs
+after the process sentinel returns, so window and popup hooks run normally."
+  :type 'boolean
+  :group 'remote)
 
 (defun remote-terminal-put-metadata (terminal property value)
   "Set TERMINAL metadata PROPERTY to VALUE and return TERMINAL."
@@ -182,6 +188,13 @@ A lost SSH PTY can exit while the file workspace stays healthy."
            (and (eq (process-status process) 'exit)
                 (= (process-exit-status process) 255)))))
 
+(defun remote-terminal--close-exited-buffer (terminal buffer)
+  "Close BUFFER after TERMINAL's process sentinel has returned."
+  (when (and (buffer-live-p buffer)
+             (eq (remote-terminal-state terminal) 'closed)
+             (eq (buffer-local-value 'remote-terminal-instance buffer) terminal))
+    (kill-buffer buffer)))
+
 (defun remote-terminal--process-finished (terminal process)
   "Record that TERMINAL's PROCESS has ended.
 A disconnected terminal keeps its buffer and restart recipe; any other one is
@@ -190,7 +203,13 @@ removed with its process."
     (if (eq (remote-terminal-state terminal) 'disconnected)
         (when (eq (remote-terminal-process terminal) process)
           (setf (remote-terminal-process terminal) nil))
-      (remote-terminal--detach terminal))))
+      (let ((close (and remote-terminal-auto-close-on-exit
+                        (eq (remote-terminal-state terminal) 'open)))
+            (buffer (remote-terminal-buffer terminal)))
+        (remote-terminal--detach terminal)
+        (when (and close (buffer-live-p buffer))
+          (run-at-time 0 nil #'remote-terminal--close-exited-buffer
+                       terminal buffer))))))
 
 (defun remote-terminal--buffer-killed ()
   "Close the terminal process owned by the current buffer."
@@ -497,10 +516,7 @@ exists, so a restart that fails can be repeated."
     (unless (and (processp process)
                  (process-live-p process))
       (error "Remote terminal is not live: %S" terminal))
-    (if (eq (plist-get (remote-terminal-metadata terminal) :frontend) 'ghostel)
-        (with-current-buffer (remote-terminal-buffer terminal)
-          (ghostel-send-string string))
-      (process-send-string process string))))
+    (process-send-string process string)))
 
 (defun remote-terminal-close (terminal)
   "Close TERMINAL and its buffer."

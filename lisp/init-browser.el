@@ -15,18 +15,6 @@
 (require 'easymenu)
 (require 'init-open)
 
-(declare-function appine-open-url "appine" (url))
-(declare-function my/appine-get-url "init-appine" ())
-(declare-function my/appine-kill-all "init-appine" ())
-(declare-function my/appine-back "init-appine" ())
-(declare-function my/appine-close-tab "init-appine" ())
-(declare-function my/appine-forward "init-appine" ())
-(declare-function my/appine-next-tab "init-appine" ())
-(declare-function my/appine-open-url "init-appine" (url))
-(declare-function my/appine-open-file "init-appine" (path))
-(declare-function my/appine-open-at-point "init-appine" ())
-(declare-function my/appine-prev-tab "init-appine" ())
-(declare-function my/appine-reload "init-appine" ())
 (declare-function my/macos-open-url "init-macos" (url))
 (declare-function my/open-normalize-backend "init-open" (backend))
 (declare-function my/open-eww-url "init-open" (url &optional reuse-selected))
@@ -37,6 +25,7 @@
 (declare-function my/open--with-browser-window "init-open" (mode reuse-selected open-fn))
 (declare-function my/open-normalize-url "init-open" (url))
 (declare-function my/noema-switch-buffer-menu "init-aaronnote" (event))
+(declare-function portal-web-reload "portal-web" ())
 (declare-function nerd-icons-mdicon "nerd-icons" (icon-name &rest args))
 (declare-function nerd-icons-codicon "nerd-icons" (icon-name &rest args))
 
@@ -620,10 +609,10 @@ RIGHT-ACTION, when non-nil, receives the mouse event on right click."
 (defun my/xwidget-show-popup ()
   "Open the shared popup buffer from a browser header button."
   (interactive)
-  (unless (fboundp 'my/ghostel-show-popup)
-    (require 'init-ghostel-popup nil t))
-  (if (fboundp 'my/ghostel-show-popup)
-      (my/ghostel-show-popup)
+  (unless (fboundp 'my/portal-show-popup)
+    (require 'init-portal-popup nil t))
+  (if (fboundp 'my/portal-show-popup)
+      (my/portal-show-popup)
     (message "Popup buffer is unavailable")))
 
 (defun my/xwidget--history-menu (event back forward)
@@ -780,24 +769,15 @@ FORWARD together.  The popup button's right click opens BUFFER-MENU."
 (general-define-key
  :keymaps 'global
  "C-c w e" #'my/open-eww-url
+ "C-c w p" #'my/open-portal-url
  "C-c w x" #'my/xwidget-open-url
- "C-c w a" #'my/appine-open-url
- "C-c w f" #'my/appine-open-file
- "C-c w g" #'my/appine-open-at-point
- "C-c w h" #'my/appine-back
- "C-c w l" #'my/appine-forward
- "C-c w [" #'my/appine-prev-tab
- "C-c w ]" #'my/appine-next-tab
- "C-c w 0" #'my/appine-close-tab
  "C-c w d" #'my/browser-close-current
- "C-c w ?" #'my/appine-board
  "C-c w w" #'browse-url
  "C-c w s" #'my/browser-switch-to
  "C-c w E" #'my/browser-switch-to-eww
+ "C-c w P" #'my/browser-switch-to-portal
  "C-c w X" #'my/browser-switch-to-xwidget
- "C-c w A" #'my/browser-switch-to-appine
- "C-c w O" #'my/browser-switch-to-open
- "C-c w k" #'my/appine-kill-all)
+ "C-c w O" #'my/browser-switch-to-open)
 
 
 (with-eval-after-load 'eww
@@ -805,8 +785,7 @@ FORWARD together.  The popup button's right click opens BUFFER-MENU."
   (define-key eww-mode-map (kbd "M-r") #'my/refresh-current-content)
   (define-key eww-mode-map (kbd "M-w") #'delete-window)
   (define-key eww-mode-map (kbd "R") #'eww-readable)
-  (define-key eww-mode-map (kbd "X") #'my/eww-to-xwidget)
-  (define-key eww-mode-map (kbd "A") #'my/eww-to-appine))
+  (define-key eww-mode-map (kbd "X") #'my/eww-to-xwidget))
 ;;; init-base.el ends here
 
 ;;; eww <-> xwidget-webkit 互转 (稳健版)
@@ -839,19 +818,16 @@ FORWARD together.  The popup button's right click opens BUFFER-MENU."
   "Return the current browser backend symbol, or nil."
   (cond
    ((derived-mode-p 'eww-mode) 'eww)
+   ((eq major-mode 'portal-web-mode) 'portal)
    ((eq major-mode 'xwidget-webkit-mode) 'xwidget)
-   ((and (fboundp 'my/appine-get-url)
-         (ignore-errors (my/appine-get-url)))
-    'appine)
    (t nil)))
 
 (defun my/browser-current-url ()
   "Return the current page URL for the active browser backend."
   (pcase (my/browser-current-backend)
     ('eww (my/eww-get-url))
+    ('portal (and (boundp 'portal-web--url) portal-web--url))
     ('xwidget (my/xwidget-get-url))
-    ('appine (and (fboundp 'my/appine-get-url)
-                  (my/appine-get-url)))
     (_ nil)))
 
 (defun my/browser--kill-buffer-and-window ()
@@ -867,15 +843,13 @@ FORWARD together.  The popup button's right click opens BUFFER-MENU."
 
 (defun my/browser-close-current ()
   "Close the current browser view or tab.
-For EWW and xwidget-webkit, this kills the browser buffer and deletes its
+For EWW, Portal and xwidget-webkit, this kills the browser buffer and deletes its
 window, avoiding orphan browser buffers/windows."
   (interactive)
   (pcase (my/browser-current-backend)
-    ('appine
-     (if (fboundp 'my/appine-close-tab)
-         (my/appine-close-tab)
-       (user-error "Appine close command is not available")))
     ('eww
+     (my/browser--kill-buffer-and-window))
+    ('portal
      (my/browser--kill-buffer-and-window))
     ('xwidget
      (my/browser--kill-buffer-and-window))
@@ -886,24 +860,19 @@ window, avoiding orphan browser buffers/windows."
   "Open URL with browser BACKEND."
   (my/open-url-with-backend url backend reuse-selected))
 
-(defun my/browser-cleanup-backend (backend buffer)
-  "Clean up BACKEND using BUFFER after a successful switch."
-  (pcase backend
-    ('appine
-     (when (fboundp 'my/appine-kill-all)
-       (my/appine-kill-all)))
-    (_
-     (when (buffer-live-p buffer)
-       (kill-buffer buffer)))))
+(defun my/browser-cleanup-backend (_backend buffer)
+  "Kill BUFFER after a successful browser switch."
+  (when (buffer-live-p buffer)
+    (kill-buffer buffer)))
 
 (defun my/refresh-current-content ()
   "Refresh the current web view or file buffer."
   (interactive)
   (cond
-   ((eq (my/browser-current-backend) 'appine)
-    (call-interactively #'my/appine-reload))
    ((derived-mode-p 'eww-mode)
     (call-interactively #'eww-reload))
+   ((eq major-mode 'portal-web-mode)
+    (call-interactively #'portal-web-reload))
    ((eq major-mode 'xwidget-webkit-mode)
     (call-interactively #'my/xwidget-reload))
    ((or (buffer-file-name) (derived-mode-p 'dired-mode))
@@ -941,40 +910,20 @@ window, avoiding orphan browser buffers/windows."
   (interactive)
   (my/browser-switch-to 'eww))
 
+(defun my/browser-switch-to-portal ()
+  "Switch the current browser page to Portal."
+  (interactive)
+  (my/browser-switch-to 'portal))
+
 (defun my/browser-switch-to-xwidget ()
   "Switch the current browser page to xwidget-webkit."
   (interactive)
   (my/browser-switch-to 'xwidget))
 
-(defun my/browser-switch-to-appine ()
-  "Switch the current browser page to Appine."
-  (interactive)
-  (my/browser-switch-to 'appine))
-
 (defun my/browser-switch-to-open ()
   "Open the current browser page with macOS open."
   (interactive)
   (my/browser-switch-to 'system))
-
-(defun my/eww-to-appine ()
-  "Switch the current EWW page to Appine."
-  (interactive)
-  (my/browser-switch-to 'appine))
-
-(defun my/xwidget-to-appine ()
-  "Switch the current xwidget page to Appine."
-  (interactive)
-  (my/browser-switch-to 'appine))
-
-(defun my/appine-to-eww ()
-  "Switch the current Appine page to EWW."
-  (interactive)
-  (my/browser-switch-to 'eww))
-
-(defun my/appine-to-xwidget ()
-  "Switch the current Appine page to xwidget-webkit."
-  (interactive)
-  (my/browser-switch-to 'xwidget))
 
 ;; ---------- 2. 核心切换逻辑 (带延迟清理) ----------
 
@@ -1034,8 +983,11 @@ window, avoiding orphan browser buffers/windows."
   (define-key xwidget-webkit-mode-map (kbd "M-w") #'my/browser-close-current)
   (define-key xwidget-webkit-edit-mode-map (kbd "M-w") #'my/browser-close-current)
   (define-key xwidget-webkit-mode-map (kbd "W") #'my/xwidget-to-eww)
-  (define-key xwidget-webkit-mode-map (kbd "A") #'my/xwidget-to-appine)
   (add-hook 'xwidget-webkit-mode-hook #'my/xwidget-setup-control-line))
+
+(with-eval-after-load 'portal-web
+  (define-key portal-web-mode-map (kbd "M-w") #'my/browser-close-current)
+  (define-key portal-web-mode-map (kbd "M-r") #'my/refresh-current-content))
 
 
 

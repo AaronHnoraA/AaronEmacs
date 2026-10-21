@@ -12,7 +12,7 @@
 #   frames                 JSON for the top-level frames
 #   frame ACTION [ID]      focus | hide | hide-others | close | close-others
 #                          a frame by ID, or new | show-all | hide-all
-#   terminal               a new Ghostel terminal in its own frame, every time
+#   terminal               a new Portal terminal in its own frame, every time
 #   status                 visible | background | busy | stopped
 #   quit                   quit Emacs, showing it first for its questions
 #   build                  build the window module
@@ -64,6 +64,16 @@ wait_for_server() {
     return 1
 }
 
+wait_for_startup() {
+    # The server can answer before the initial graphical frame is ready.
+    local _
+    for _ in $(seq 1 120); do
+        [ "$(client '(and (boundp (quote my/background--startup-done)) my/background--startup-done)' 2>/dev/null)" = t ] && return 0
+        sleep 0.5
+    done
+    return 1
+}
+
 start() {
     if [ "${1:-}" = "--background" ]; then
         # An Emacs that is already running stays the way the user left it.
@@ -73,6 +83,15 @@ start() {
     else
         client '(my/background-show)' >/dev/null || /usr/bin/open -a "$APP"
     fi
+}
+
+open_terminal() {
+    start || return 1
+    if ! wait_for_startup; then
+        echo 'Emacs did not complete startup in time' >&2
+        return 1
+    fi
+    "$CLIENT" --timeout=4 --eval '(progn (my/portal-open-new) nil)' >/dev/null
 }
 
 wait_for_exit() {
@@ -196,7 +215,7 @@ case "$command" in
     actions) json '(my/background-actions)' ;;
     act) act "$@" ;;
     result) result "$@" ;;
-    terminal) client '(progn (my/ghostel-open-new) nil)' >/dev/null ;;
+    terminal) open_terminal ;;
     status) status ;;
     quit) client '(my/background-quit)' >/dev/null ;;
     build) build ;;

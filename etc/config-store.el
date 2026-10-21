@@ -57,7 +57,7 @@
    (my/noema-publish-cv-dir . "/Users/hc/.emacs.d/publish/CV")
    (my/noema-publish-state-dir . "/Users/hc/.emacs.d/var/aaronnote/publish")
    (my/noema-publish-root . "/Users/hc/.emacs.d/publish") (my/session-auto-save)
-   (my/noema-web-port . 50815) (my/noema-backend . xwidget)
+   (my/noema-web-port . 50815) (my/noema-backend . portal)
    (my/noema-latex-export-engine . "codex")
    (my/noema-latex-export-agent . "codex")
    (my/noema-latex-export-max-attempts . 3) (my/noema-codex-model . "")
@@ -138,16 +138,15 @@
                                org-babel-after-execute-hook kill-buffer-hook
                                change-major-mode-hook)
    (my/performance-record-directory . "/Users/hc/.emacs.d/var/performance/")
-   (my/performance-refresh-interval . 2.0) (my/ghostel-wheel-scroll-lines . 5)
-   (my/ghostel-startup-send-retries . 20) (my/ghostel-startup-send-delay . 0.05)
+   (my/performance-refresh-interval . 2.0)
    (my/open-browser-window-size . 0.38)
    (my/open-routes
-    (url :default menu :menu-default xwidget :backends (xwidget appine eww system))
-    (search :default xwidget :menu-default xwidget :backends
-            (xwidget appine eww system))
-    (file :default emacs :menu-default emacs :backends (emacs appine system))
+    (url :default portal :menu-default portal :backends (portal xwidget eww system))
+    (search :default portal :menu-default portal :backends
+            (portal xwidget eww system))
+    (file :default emacs :menu-default emacs :backends (emacs system))
     (pdf :match ("\\.pdf\\'") :default system :menu-default system :backends
-         (emacs appine system)))
+         (emacs system)))
    (my/xwidget-auto-focus-on-load . t)
    (my/clutch-config-file . "/Users/hc/.emacs.d/etc/clutch-config.el")
    (my/fold-restore-idle-delay . 0.5) (my/fold-deferred-modes lean-mode)
@@ -157,9 +156,9 @@
    (my/display-rules-roam-size . 0.36) (my/display-rules-side-size . 0.33)
    (my/display-rules-bottom-size . 0.32)
    (my/symbols-preview-key :debounce 0.15 any)
-   (my/project-popup-ghostel-apps ("lazygit" . "lazygit") ("btop" . "btop")
+   (my/project-popup-portal-apps ("lazygit" . "lazygit") ("btop" . "btop")
                                 ("yazi" . "yazi") ("tmux" . "tmux"))
-   (my/ghostel-popup-window-height . 0.2) (my/copilot-deferred-idle-delay . 1.5)
+   (my/portal-popup-window-height . 0.2) (my/copilot-deferred-idle-delay . 1.5)
    (my/copilot-deferred-modes lean-mode) (my/copilot-disable-on-remote)
    (my/copilot-large-buffer-threshold . 524288) (my/copilot-idle-delay . 0.85)
    (my/copilot-server-max-heap-mb . 1024) (my/noema-web-host-max-heap-mb . 512)
