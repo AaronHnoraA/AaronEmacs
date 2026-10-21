@@ -41,6 +41,45 @@
 
 (defvar dashboard-buffer-name)
 
+(defun my/open-entry-in-split (side open)
+  "Split the selected window on SIDE and run OPEN in the new pane.
+The source list stays open.  Remove the new pane if opening fails."
+  (let* ((origin (selected-window))
+         (target (split-window origin nil side))
+         completed)
+    (unwind-protect
+        (progn
+          (set-window-point target (window-point origin))
+          (select-window target)
+          (prog1 (funcall open)
+            (setq completed t)))
+      (unless completed
+        (when (window-live-p target)
+          (delete-window target))
+        (when (window-live-p origin)
+          (select-window origin))))))
+
+(defun my/dired-open-right ()
+  "Open the Dired or Dirvish entry in a new pane on the right."
+  (interactive)
+  (dired-get-file-for-visit)
+  (my/open-entry-in-split 'right #'dired-find-file))
+
+(defun my/dired-open-below ()
+  "Open the Dired or Dirvish entry in a new pane below."
+  (interactive)
+  (dired-get-file-for-visit)
+  (my/open-entry-in-split 'below #'dired-find-file))
+
+(with-eval-after-load 'dired
+  (dolist (entry '(("S-RET" . my/dired-open-right)
+                   ("S-<return>" . my/dired-open-right)
+                   ("M-RET" . my/dired-open-below)
+                   ("M-<return>" . my/dired-open-below)
+                   ("s-RET" . my/dired-open-below)
+                   ("s-<return>" . my/dired-open-below)))
+    (keymap-set dired-mode-map (car entry) (cdr entry))))
+
 (defun my/bookmark--load ()
   "Load bookmark data for the current session."
   (require 'bookmark)
@@ -595,7 +634,7 @@ its own editable pane because its xwidget cannot be shared between frames."
          ("C-c o f" . dirvish-fd)
          :map dirvish-mode-map
          ;; Single-key bindings follow yazi and live in init-dirvish-keys.el.
-         ("M-t" . dirvish-layout-toggle)
+         ("M-t" . my/terminal-selector)
          ("M-b" . dirvish-history-go-backward)
          ("M-f" . dirvish-history-go-forward)
          ("M-n" . dirvish-narrow)
@@ -621,11 +660,26 @@ its own editable pane because its xwidget cannot be shared between frames."
       (remote-files-mode-line-text)))
   (define-key dirvish-mode-map (kbd "RET") #'dired-find-file)
   (define-key dirvish-mode-map (kbd "<return>") #'dired-find-file)
+  (dolist (entry '(("S-RET" . my/dired-open-right)
+                   ("S-<return>" . my/dired-open-right)
+                   ("M-RET" . my/dired-open-below)
+                   ("M-<return>" . my/dired-open-below)
+                   ("s-RET" . my/dired-open-below)
+                   ("s-<return>" . my/dired-open-below)))
+    (define-key dirvish-mode-map (kbd (car entry)) (cdr entry)))
   (dolist (key '("M-S-RET" "M-S-<return>"))
     (define-key dirvish-mode-map (kbd key) #'dirvish-open-new-frame))
   (with-eval-after-load 'evil
     (evil-define-key* 'normal dirvish-mode-map (kbd "RET") #'dired-find-file)
     (evil-define-key* 'normal dirvish-mode-map (kbd "<return>") #'dired-find-file)
+    (dolist (entry '(("S-RET" . my/dired-open-right)
+                     ("S-<return>" . my/dired-open-right)
+                     ("M-RET" . my/dired-open-below)
+                     ("M-<return>" . my/dired-open-below)
+                     ("s-RET" . my/dired-open-below)
+                     ("s-<return>" . my/dired-open-below)))
+      (evil-define-key* 'normal dirvish-mode-map
+        (kbd (car entry)) (cdr entry)))
     (dolist (key '("M-S-RET" "M-S-<return>"))
       (evil-define-key* 'normal dirvish-mode-map (kbd key)
         #'dirvish-open-new-frame)))

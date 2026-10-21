@@ -1,0 +1,16 @@
+#!/bin/sh
+# Open files from Ghostty in the running graphical Emacs.
+
+if [ "${TERM-}" != xterm-ghostty ]; then
+    printf 'emacsopen: available only in Ghostty (TERM=xterm-ghostty)\n' >&2
+    exit 2
+fi
+
+if [ "$#" -eq 0 ]; then
+    printf 'usage: emacsopen FILE...\n' >&2
+    exit 2
+fi
+
+# The Emacs server keeps buffers opened by no-wait clients.  Passing each
+# argument literally handles file and directory names with spaces or quotes.
+exec emacsclient --no-wait -- "$@"

@@ -15,6 +15,10 @@
 
 (require 'server)
 
+;; Ghostty/Yazi opens files through a no-wait client.  Keep the visited
+;; buffer after that short-lived client disconnects so it remains visible.
+(setq server-kill-new-buffers nil)
+
 (when (not (eq system-type 'darwin))
   (setq server-use-tcp t
         server-host "0.0.0.0"

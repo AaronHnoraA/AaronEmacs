@@ -391,6 +391,10 @@ Dape 原生 `dape-restart` 重启。
 - `SPC o P` / `M-x my/portal-terminal`
   在当前 Emacs 窗口打开 GhosttyKit 原生终端。需要 macOS GUI Emacs 31.1+。
   本地目录使用 Portal；远端 workspace 继续使用 Portal。
+- 普通 Portal 终端顶部使用独立标签组；全局工作区栏不占用顶行。
+  终端标签不混入普通文件或 popup 标签：点击切换，右键重命名、关闭、移动位置或新建。
+  `M-t` / `Cmd-t` 在任何 buffer 打开终端选择器，当前终端不出现在自己的候选列表里。
+  `Enter` 在当前窗口、`Shift-Enter` 在右侧、`Cmd-Enter` 在下方打开；选择 popup 终端则切换对应弹窗。
 - Portal 锁定在 `package-lock.el` 的 VC revision，源码和已经验证的构建存放在
   `site-lisp/portal/`（不纳入本仓库）。首次在新机器安装时依 Portal 提示构建原生模块。
 

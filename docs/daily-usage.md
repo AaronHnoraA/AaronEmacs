@@ -91,7 +91,10 @@
   `telescope` 统一搜索面板
 - `C-x C-f`
   文件名补全沿用 `find-file` + `vertico-directory`；`Enter` 在当前窗口打开，
+  `Shift+Enter` 在右侧分屏打开，`Cmd+Enter` 选择已有文件时在下方分屏打开；
+  输入新文件名时，`Cmd+Enter` 按当前输入的名字精确新建，不选择相似候选。
   `Cmd+Shift+Enter` 用当前输入的文件名在新 Emacs 窗口打开（包括尚未创建的文件）。
+  若候选与输入相似，`Ctrl+Enter` 可按当前输入的文件名打开。
   `SPC f f`、`H-f`、`M-x file-open` 使用同一提示；`M-x file-open-new-frame`
   可直接打开新窗口的文件提示。从 `/fs:` buffer 输入本机绝对路径（例如
   `/Users/hc/...`）会打开本机文件；相对路径仍在当前 target 查找。要打开
@@ -100,7 +103,9 @@
 - `C-x b`
   `consult-buffer`：Buffer 候选先列当前 frame 与 workspace 中访问过的 buffer，
   包括在该 frame 埋藏的 buffer；提示中按 `<` 再按 `o` 可查其他 frame/workspace 的
-  buffer。最近文件、bookmark 等 Consult 来源仍可用。`H-b`、`SPC b b` 使用同一入口。
+  buffer。`Enter` 在当前窗口打开，`Shift+Enter` 在右侧分屏打开，`Cmd+Enter`
+  在下方分屏打开；最近文件、bookmark 等 Consult 来源同样适用。
+  `H-b`、`SPC b b` 使用同一入口。
 - `C-s`
   `consult-line`
 - `C-c p`
@@ -837,7 +842,8 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `M-x my/project-popup-portal-app`
   在当前项目根目录的新 popup `portal` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
 
-顶部 `+term` 或标签上右键可打开启动菜单，`Applications` 列出上述已配置程序。
+顶部 `+term` 右键可打开启动菜单，`Applications` 列出上述已配置程序。
+弹窗终端的标签左键切换，右键可重命名、关闭或移动标签位置。
 `Agent` 子菜单（也可点击 `+Agent`）提供 Claude / Codex / OpenCode；它们使用
 原生 `agent-shell` / ACP buffer，不在 portal 里运行 CLI，共用同一个顶部弹窗、
 标签池、自动收起和固定逻辑。`C-c C-e` 折叠/打开，`C-c E` 切换标签，
@@ -876,6 +882,16 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
 - `SPC o P`
   `my/portal-terminal`，在当前窗口打开原生 Ghostty 终端（本地 macOS GUI）
 
+普通 Portal 终端在窗口顶部有独立的终端标签组；全局工作区栏不占用顶行。
+终端标签不混入普通文件标签或 popup 标签。
+各分屏使用同一终端标签列表，但已在其他分屏显示的终端不再列出；点击只切换
+被点击的分屏。普通页面沿用原来的文件标签；Noema 页面若已在其他分屏打开，
+不会在当前分屏的标签里重复出现。
+左键切换，右键可新建、重命名、关闭或调整顺序。
+`M-t`（macOS `Cmd-t`）在任何 buffer 打开终端选择器；在终端里调用时，列表不显示当前终端。
+列表包括普通终端、弹窗终端，最后一项是新建终端。`Enter` 在当前窗口打开，
+`Shift-Enter` 在右侧分屏打开，`Cmd-Enter` 在下方分屏打开；选择弹窗终端时直接切换到对应弹窗。
+
 - `SPC o W`
   统一搜索入口，可选搜索引擎和浏览后端
 - `SPC o B`
@@ -886,6 +902,9 @@ Portal 终端聚焦时，`C-c e` 也会切换 popup。此时 `C-c` 是 Emacs 前
 远端终端正常退出后都会按进程事件关闭 buffer；远端连接意外断开时保留可重连的
 buffer。popup 中的 buffer 关闭时，其窗口也随之收起。mode line 使用普通 Emacs
 buffer 的样式。
+
+仅在 Ghostty 中可用 `emacsopen 文件或目录…`：它通过 Emacs server 在当前图形窗口打开。
+Yazi 按 `Enter` 打开光标下的文本或目录时也使用它；PDF、图片等仍交给 macOS 应用。
 
 ### Browser `C-c w`
 
@@ -946,8 +965,9 @@ frame；`s F` 可按当前 frame 优先排序。后台基础设施 buffer 不显
 ibuffer 仍是全局总览；日常 `C-x b`、`H-b`、`SPC b b` 的 Buffer 候选则从本
 frame/workspace 开始，通过 `<o` 临时跨越边界。埋藏 buffer 只从可见 tab 消失，
 仍能在本 frame 的切换候选与 ibuffer 的 `Frame` 标记中找到。
-在 ibuffer 中访问同一 Noema 笔记的重复条目时，会打开它的主页面；`RET`、
-`M-RET`、单窗口前缀和不选中窗口仍沿用 ibuffer 的原生操作，现有标记保留。
+在 ibuffer 中访问同一 Noema 笔记的重复条目时，会打开它的主页面。`RET`
+在当前窗口打开，`Shift+Enter` 在右侧分屏打开，`Cmd+Enter` 在下方分屏打开；
+列表保留在原窗口。单窗口前缀和不选中窗口仍沿用 ibuffer 的原生操作，现有标记保留。
 
 ibuffer、帮助页和其他用 `quit-window` 退出的临时页面，优先返回同一窗口的上一页；
 已经在其他窗口显示的 buffer 不作自动返回目标。临时创建且无返回页的窗口会关闭；
@@ -1222,7 +1242,7 @@ GUI frame 的两侧 fringe 分工如下：
   `dirvish-fd`
 
 `C-c o d` 会根据窗口情况打开普通单窗口视图或带左侧上级目录和右侧预览的视图。
-在 Dirvish 中按 `m l`（也可按 `M-t`，或用 `M-x dirvish-layout-toggle`）可随时在两者之间切换；
+在 Dirvish 中按 `m l`（或用 `M-x dirvish-layout-toggle`）可随时在两者之间切换；
 切换只改变当前 Dirvish 会话的布局。
 
 Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger 那一套），
@@ -1251,6 +1271,7 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 | `c m` | 重命名并清空文件名，保留扩展名 |
 | `c c` / `c d` / `c f` / `c n` | 复制路径 / 光标所在目录路径 / 文件名 / 不含扩展名的文件名 |
 | `RET` | 在 Emacs 里打开 |
+| `Shift+Enter` / `Cmd+Enter` | 在右侧 / 下方分屏打开，原文件列表保留；普通 Dired 同样可用 |
 | `Cmd+Shift+Enter` | 在独立的新 Emacs 窗口打开文件或目录；`M-x dirvish-open-new-frame` 可搜索到相同动作 |
 | `o o` | 用系统默认程序打开 |
 | `o c`、`:` / `O`、`;` | 对文件运行 shell 命令：等待 / 异步 |
@@ -1260,7 +1281,7 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 | `s` / `z` / `Z` | 从光标所在目录 fd 搜索 / 模糊查找文件；zoxide 跳转 |
 | `.` | 显示 / 隐藏 dotfiles |
 | `m s` `m p` `m b` `m m` `m o` / `m n` | 显示详情（大小、时间、权限、所有者）/ 只显示文件名 |
-| `m l` / `M-t` | 切换普通视图与左侧上级目录、右侧预览的布局 |
+| `m l` | 切换普通视图与左侧上级目录、右侧预览的布局 |
 | `, m` `, M` `, b` `, B` `, e` `, E` `, a` `, A` `, n` `, N` `, s` `, S` | 排序：修改时间、创建时间、扩展名、字母、自然、大小；大写为倒序 |
 | `, ,` | Dirvish 自带的排序菜单 |
 | `TAB` | 展开 / 折叠子目录（原地树形） |
@@ -1421,9 +1442,9 @@ Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复�
 由 `my/background-hide-dock-icon` 控制,靠 `tools/macos-background/window.m`
 编译出的动态模块实现;没有编译时 Dock 图标始终显示。
 
-同一个模块给每个顶层 frame 的整条顶边加了拖动条(默认高 12 像素,
-`my/frame-drag-handle-height`)。平时看不见,鼠标移上去会出现一个小横条并变成手形,
-按住就能拖动无标题栏的 frame。
+同一个模块让每个顶层 frame 的顶部边框可拖动（默认 6 点，
+`my/frame-drag-handle-height`）。它不覆盖下面的标签，也不绘制拖动条；
+按住原来向上调整窗口大小的边框即可移动无标题栏的 frame。
 
 长期运行时不留孤儿:Noema web host 启动时拿到 Emacs 的 pid(`NOEMA_HOST_OWNER_PID`),
 Emacs 崩溃或被强制退出后几秒内自己收尾退出,连同它的 kernel;正常退出时的 SIGHUP 也走

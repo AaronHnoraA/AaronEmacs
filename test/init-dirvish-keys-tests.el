@@ -391,11 +391,13 @@
   (should (eq (lookup-key dirvish-mode-map (kbd "m l"))
               #'dirvish-layout-toggle))
   (should (eq (lookup-key dirvish-mode-map (kbd "M-t"))
-              #'dirvish-layout-toggle))
+              #'my/terminal-selector))
   (let ((root (make-temp-file "dirvish-layout-test-" t)))
     (unwind-protect
         (save-window-excursion
           (dirvish root)
+          (should (eq (key-binding (kbd "M-t"))
+                      #'my/terminal-selector))
           (should (> (car (dv-curr-layout (dirvish-curr))) 0))
           (dirvish-layout-toggle)
           (should-not (dv-curr-layout (dirvish-curr)))
@@ -470,6 +472,49 @@
                       #'dirvish-open-new-frame))
       (should-not (eq (lookup-key normal-map (kbd key))
                       #'dirvish-open-new-frame)))))
+
+(ert-deftest dirvish-return-split-keymaps ()
+  "Dirvish and ordinary Dired share right and below opening gestures."
+  (require 'dirvish)
+  (let ((normal-map (evil-get-auxiliary-keymap dirvish-mode-map 'normal)))
+    (dolist (map (list dired-mode-map dirvish-mode-map normal-map))
+      (dolist (key '("S-RET" "S-<return>"))
+        (should (eq (lookup-key map (kbd key)) #'my/dired-open-right)))
+      (dolist (key '("M-RET" "M-<return>"))
+        (should (eq (lookup-key map (kbd key)) #'my/dired-open-below))))))
+
+(ert-deftest dirvish-return-splits-open-files-and-directories ()
+  "Open a file right and a directory below while the list stays in place."
+  (let* ((root (file-truename (make-temp-file "dirvish-return-split-" t)))
+         (file (expand-file-name "entry.txt" root))
+         (folder (expand-file-name "folder" root)))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "entry\n"))
+          (make-directory folder)
+          (save-window-excursion
+            (delete-other-windows)
+            (dired root)
+            (let ((source (selected-window))
+                  (listing (current-buffer)))
+              (should (dired-goto-file file))
+              (my/dired-open-right)
+              (let ((right (selected-window)))
+                (should (eq (window-buffer source) listing))
+                (should (file-equal-p
+                         (buffer-file-name (window-buffer right)) file))
+                (should (> (car (window-edges right))
+                           (car (window-edges source)))))
+              (select-window source)
+              (should (dired-goto-file folder))
+              (my/dired-open-below)
+              (let ((below (selected-window)))
+                (should (eq (window-buffer source) listing))
+                (should (with-current-buffer (window-buffer below)
+                          (derived-mode-p 'dired-mode)))
+                (should (> (cadr (window-edges below))
+                           (cadr (window-edges source))))))))
+      (delete-directory root t))))
 
 (provide 'init-dirvish-keys-tests)
 ;;; init-dirvish-keys-tests.el ends here

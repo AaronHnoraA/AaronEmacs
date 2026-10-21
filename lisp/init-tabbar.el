@@ -17,6 +17,8 @@
 (defvar tab-line-exclude-modes)
 (defvar tab-line-tab-map)
 (defvar my/portal-popup-instance-p)
+(defvar my/tab-line-terminal-order nil
+  "Ordinary Portal terminals in user-selected order, by buffer identity.")
 
 (declare-function global-tab-line-mode "tab-line" (&optional arg))
 (declare-function persp-curr "perspective" (&optional frame))
@@ -25,6 +27,9 @@
 (declare-function tab-line--get-tab-property "tab-line" (prop string))
 (declare-function tab-line-force-update "tab-line" (all))
 (declare-function tab-bar-tabs "tab-bar" ())
+(declare-function portal-terminal-buffers "portal-terminal" (&optional project quick))
+(declare-function portal-terminal-new "portal-terminal" ())
+(declare-function portal-terminal-rename "portal-terminal" (name))
 
 (defface my/tab-bar-buffer-face
   `((t (:inherit tab-bar-tab
@@ -100,6 +105,9 @@ Scrolling in the opposite direction is allowed immediately."
 (defvar-local my/tab-line--format-cache-frame nil
   "Frame for which `my/tab-line--format-cache' was rendered.")
 
+(defvar-local my/tab-line--format-cache-window nil
+  "Window for which `my/tab-line--format-cache' was rendered.")
+
 (defvar-local my/tab-line--format-cache-scope nil
   "Perspective for which `my/tab-line--format-cache' was rendered.")
 
@@ -126,10 +134,13 @@ Centered buffer tabs use the full line and paint over this contextual text.")
   (let ((map (make-sparse-keymap)))
     (define-key map [tab-line down-mouse-1] #'ignore)
     (define-key map [tab-line mouse-1] #'my/tab-line-select-buffer)
+    (define-key map [header-line mouse-1] #'my/tab-line-select-buffer)
     (define-key map [tab-line down-mouse-2] #'ignore)
     (define-key map [tab-line mouse-2] #'my/tab-line-close-buffer)
+    (define-key map [header-line mouse-2] #'my/tab-line-close-buffer)
     (define-key map [tab-line down-mouse-3] #'ignore)
     (define-key map [tab-line mouse-3] #'my/tab-line-popup-menu)
+    (define-key map [header-line mouse-3] #'my/tab-line-popup-menu)
     (define-key map [tab-line wheel-up] #'my/tab-line-wheel-up)
     (define-key map [tab-line wheel-down] #'my/tab-line-wheel-down)
     (define-key map [tab-line mouse-4] #'my/tab-line-wheel-up)
@@ -141,6 +152,15 @@ Centered buffer tabs use the full line and paint over this contextual text.")
     (define-key map (kbd "RET") #'my/tab-line-select-current)
     map)
   "Keymap for clickable centered buffer tabs.")
+
+;; `defvar' retains the map in an already-running Emacs when this file reloads.
+(dolist (entry '(([header-line down-mouse-1] . ignore)
+                 ([header-line mouse-1] . my/tab-line-select-buffer)
+                 ([header-line down-mouse-2] . ignore)
+                 ([header-line mouse-2] . my/tab-line-close-buffer)
+                 ([header-line down-mouse-3] . ignore)
+                 ([header-line mouse-3] . my/tab-line-popup-menu)))
+  (define-key my/tab-line-click-map (car entry) (cdr entry)))
 
 (defun my/tab-line-current-persp ()
   "Return the active perspective object, if any."
@@ -305,16 +325,23 @@ When INCLUDE-BURIED is non-nil, include buffers explicitly buried here."
      (propertize " " 'face face))))
 
 (defun my/tab-bar-ensure-visible (&optional frame)
-  "Force the top-level tab bar to be visible on FRAME.
+  "Keep tab-bar commands available without adding a top row to FRAME.
 When FRAME is nil, use the selected frame."
   (let ((frame (or frame (selected-frame))))
     (when (display-graphic-p frame)
       (with-selected-frame frame
         (setopt tab-bar-show 0)
         (tab-bar-mode 1)
-        (set-frame-parameter frame 'tab-bar-lines 1)
-        (modify-frame-parameters frame '((tab-bar-lines . 1)))
+        (set-frame-parameter frame 'tab-bar-lines 0)
         (force-mode-line-update t)
+        (redraw-frame frame)))))
+
+(defun my/tab-bar-update-terminal-visibility (&rest _)
+  "Keep the unused workspace row hidden on graphical frames."
+  (dolist (frame (frame-list))
+    (when (display-graphic-p frame)
+      (unless (eql (frame-parameter frame 'tab-bar-lines) 0)
+        (set-frame-parameter frame 'tab-bar-lines 0)
         (redraw-frame frame)))))
 
 (defun my/frame-workspace-buffers (&optional frame-buffers)
@@ -334,12 +361,78 @@ registered it."
                     frame-buffers)
       frame-buffers)))
 
-(defun my/tab-line-buffer-list ()
-  "Return visible tabs visited in this frame and current workspace."
+(defun my/tab-line-all-normal-buffers ()
+  "Return all normal tabs in this frame and workspace, including occupied ones."
   (my/tab-line-sort-buffers
    (delete-dups
-    (seq-filter #'my/tab-line-visible-buffer-p
+    (seq-filter (lambda (buffer)
+                  (and (my/tab-line-visible-buffer-p buffer)
+                       (not (my/tab-line-ordinary-terminal-p buffer))))
                 (my/frame-workspace-buffers)))))
+
+(defun my/tab-line-noema-buffer-p (buffer)
+  "Return non-nil when BUFFER is a Noema page shown in normal tabs."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (or (and (boundp 'my/noema-buffer-file-name)
+                  (stringp my/noema-buffer-file-name)
+                  (not (string-empty-p my/noema-buffer-file-name)))
+             (and (boundp 'my/noema--xwidget-forced-name)
+                  my/noema--xwidget-forced-name)
+             (string-prefix-p "*Noema" (buffer-name buffer))))))
+
+(defun my/tab-line-occupied-elsewhere-p (buffer &optional window)
+  "Return non-nil if BUFFER is displayed in another window of WINDOW's frame."
+  (let ((window (or window (selected-window)))
+        occupied)
+    (walk-windows
+     (lambda (other)
+       (when (and (not (eq other window))
+                  (eq (window-buffer other) buffer))
+         (setq occupied t)))
+     'no-minibuf (window-frame window))
+    occupied))
+
+(defun my/tab-line-available-buffers (buffers &optional window)
+  "Hide occupied Portal or Noema BUFFERS from WINDOW's tabs."
+  (let* ((window (or window (selected-window)))
+         (current (window-buffer window)))
+    (seq-remove (lambda (buffer)
+                  (and (not (eq buffer current))
+                       (or (my/tab-line-ordinary-terminal-p buffer)
+                           (my/tab-line-noema-buffer-p buffer))
+                       (my/tab-line-occupied-elsewhere-p buffer window)))
+                buffers)))
+
+(defun my/tab-line-buffer-list ()
+  "Return this window's available tabs from the shared buffer order."
+  (if (my/tab-line-ordinary-terminal-p (current-buffer))
+      (my/tab-line-terminal-buffers)
+    (my/tab-line-available-buffers (my/tab-line-all-normal-buffers))))
+
+(defun my/tab-line-ordinary-terminal-p (buffer)
+  "Return non-nil if BUFFER is an ordinary Portal terminal."
+  (and (buffer-live-p buffer)
+       (with-current-buffer buffer
+         (and (derived-mode-p 'portal-terminal-mode)
+              (not (bound-and-true-p my/portal-popup-instance-p))))))
+
+(defun my/tab-line-all-terminal-buffers ()
+  "Return all ordinary Portal terminals in user-selected order."
+  (let* ((live (and (fboundp 'portal-terminal-buffers)
+                    (seq-filter #'my/tab-line-ordinary-terminal-p
+                                (portal-terminal-buffers))))
+         (ordered (seq-filter (lambda (buffer) (memq buffer live))
+                              my/tab-line-terminal-order)))
+    (setq my/tab-line-terminal-order
+          (append ordered
+                  (seq-filter (lambda (buffer) (not (memq buffer ordered)))
+                              live)))))
+
+(defun my/tab-line-terminal-buffers (&optional window)
+  "Return shared terminal tabs not already open in another window."
+  (my/tab-line-available-buffers
+   (my/tab-line-all-terminal-buffers) window))
 
 (defun my/tab-line-starred-buffer-p (buffer)
   "Return non-nil when BUFFER name contains a `*...*' wrapper."
@@ -363,6 +456,7 @@ registered it."
                 (not (and (stringp name)
                           (string-match-p "portal-pop" name)))
                 (or note
+                    (derived-mode-p 'portal-terminal-mode)
                     (not (my/tab-line-starred-buffer-p buffer)))
                 (or note
                     (derived-mode-p 'dired-mode
@@ -405,11 +499,23 @@ registered it."
         (window-buffer (my/tab-line-event-window event)))))
 
 (defun my/tab-line-switch-to-buffer (buffer &optional window)
-  "Display BUFFER in WINDOW and refresh the centered tab line."
+  "Display BUFFER only in WINDOW and refresh the centered tab line."
   (when (buffer-live-p buffer)
-    (with-selected-window (or window (selected-window))
-      (let ((switch-to-buffer-obey-display-actions nil))
-        (switch-to-buffer buffer))
+    (let ((window (or window (selected-window))))
+      (unless (window-live-p window)
+        (user-error "Tab window is no longer live"))
+      (when (and (or (my/tab-line-ordinary-terminal-p buffer)
+                     (my/tab-line-noema-buffer-p buffer))
+                 (my/tab-line-occupied-elsewhere-p buffer window))
+        (user-error "Buffer is already open in another window"))
+      (if (or (my/tab-line-ordinary-terminal-p buffer)
+              (my/tab-line-noema-buffer-p buffer))
+          (progn
+            (set-window-buffer window buffer)
+            (select-window window))
+        (with-selected-window window
+          (let ((switch-to-buffer-obey-display-actions nil))
+            (switch-to-buffer buffer))))
       (my/tab-line-refresh))))
 
 (defun my/tab-line-cycle (step &optional window)
@@ -475,8 +581,23 @@ NOW is a float timestamp in seconds and defaults to the current time."
              (ordered (append (seq-take without index)
                               (list buffer)
                               (seq-drop without index))))
-        (my/tab-line-set-buffer-order ordered)
+        (if (my/tab-line-ordinary-terminal-p buffer)
+            (setq my/tab-line-terminal-order
+                  (my/tab-line-merge-visible-order
+                   (my/tab-line-all-terminal-buffers) ordered))
+          (my/tab-line-set-buffer-order
+           (my/tab-line-merge-visible-order
+            (my/tab-line-all-normal-buffers) ordered)))
         (my/tab-line-refresh)))))
+
+(defun my/tab-line-merge-visible-order (all visible)
+  "Apply reordered VISIBLE tabs to ALL without moving occupied hidden tabs."
+  (let ((remaining (copy-sequence visible)))
+    (mapcar (lambda (buffer)
+              (if (memq buffer visible)
+                  (pop remaining)
+                buffer))
+            all)))
 
 (defun my/tab-line-move-buffer-left (buffer &optional window)
   "Move BUFFER one slot to the left in WINDOW's centered tab order."
@@ -511,8 +632,10 @@ NOW is a float timestamp in seconds and defaults to the current time."
                           (seq-drop buffers insert-at))))
     (with-selected-window window
       (let ((switch-to-buffer-obey-display-actions nil))
-        (switch-to-buffer new-buffer)))
-    (my/tab-line-set-buffer-order ordered)
+        (switch-to-buffer new-buffer))
+      (my/tab-line-set-buffer-order
+       (my/tab-line-merge-visible-order
+        (my/tab-line-all-normal-buffers) ordered)))
     (my/tab-line-refresh)
     new-buffer))
 
@@ -520,13 +643,24 @@ NOW is a float timestamp in seconds and defaults to the current time."
   "Kill BUFFER for real and refresh WINDOW's centered tabs."
   (when (buffer-live-p buffer)
     (let* ((window (or window (selected-window)))
-           (buffers (with-selected-window window
-                      (my/tab-line-buffer-list)))
-           (remaining (delq buffer (copy-sequence buffers))))
+           (terminal (my/tab-line-ordinary-terminal-p buffer)))
       (with-selected-window window
-        (kill-buffer buffer))
-      (my/tab-line-set-buffer-order remaining)
+        (kill-buffer buffer)
+        (if terminal
+            (setq my/tab-line-terminal-order
+                  (delq buffer my/tab-line-terminal-order))
+          (my/tab-line-set-buffer-order
+           (my/tab-line-all-normal-buffers))))
       (my/tab-line-refresh))))
+
+(defun my/tab-line-rename-terminal (buffer)
+  "Prompt for a new name for Portal terminal BUFFER."
+  (unless (my/tab-line-ordinary-terminal-p buffer)
+    (user-error "Not an ordinary Portal terminal"))
+  (let ((name (read-string "Terminal name: " (buffer-name buffer))))
+    (with-current-buffer buffer
+      (portal-terminal-rename name))
+    (my/tab-line-refresh)))
 
 (defun my/tab-line-menu-items (buffer window)
   "Return popup menu entries for BUFFER in WINDOW."
@@ -534,23 +668,35 @@ NOW is a float timestamp in seconds and defaults to the current time."
          (buffers (with-selected-window window
                     (my/tab-line-buffer-list)))
          (count (length buffers))
-         (index (cl-position target buffers :test #'eq)))
+         (index (cl-position target buffers :test #'eq))
+         (terminal (my/tab-line-ordinary-terminal-p target)))
     (append
      (when (buffer-live-p target)
-       (list
-        (vector (format "切换到 %s" (buffer-name target))
-                `(lambda () (interactive)
-                   (my/tab-line-switch-to-buffer ,target ,window))
-                t)
-        (vector (format "关闭 %s" (buffer-name target))
-                `(lambda () (interactive)
-                   (my/tab-line-kill-buffer ,target ,window))
-                t)))
+       (append
+        (list
+         (vector (format "切换到 %s" (buffer-name target))
+                 `(lambda () (interactive)
+                    (my/tab-line-switch-to-buffer ,target ,window))
+                 t)
+         (vector (format "关闭 %s" (buffer-name target))
+                 `(lambda () (interactive)
+                    (my/tab-line-kill-buffer ,target ,window))
+                 t))
+        (when terminal
+          (list (vector "重命名终端"
+                        `(lambda () (interactive)
+                           (my/tab-line-rename-terminal ,target))
+                        t)))))
      (list
-      (vector "新增空 Buffer"
-              `(lambda () (interactive)
-                 (my/tab-line-create-buffer ,target ,window))
-              t))
+      (if terminal
+          (vector "新建终端"
+                  `(lambda () (interactive)
+                     (with-selected-window ,window (portal-terminal-new)))
+                  t)
+        (vector "新增空 Buffer"
+                `(lambda () (interactive)
+                   (my/tab-line-create-buffer ,target ,window))
+                t)))
      (when (and (buffer-live-p target) index)
        (list
         (vector "左移"
@@ -814,6 +960,7 @@ not allocate a fresh compound key during every redisplay."
   (and (eql my/tab-line--format-cache-generation my/tab-line-cache-generation)
        (eql my/tab-line--format-cache-window-width window-width)
        (eq my/tab-line--format-cache-frame (selected-frame))
+       (eq my/tab-line--format-cache-window (selected-window))
        (eq my/tab-line--format-cache-scope (my/tab-line-order-scope))
        (equal my/tab-line--format-cache-buffer-name buffer-name)
        (equal my/tab-line--format-cache-file-name
@@ -828,6 +975,7 @@ not allocate a fresh compound key during every redisplay."
               my/tab-line--format-cache-generation my/tab-line-cache-generation
               my/tab-line--format-cache-window-width window-width
               my/tab-line--format-cache-frame (selected-frame)
+              my/tab-line--format-cache-window (selected-window)
               my/tab-line--format-cache-scope (my/tab-line-order-scope)
               my/tab-line--format-cache-buffer-name buffer-name
               my/tab-line--format-cache-file-name
@@ -974,7 +1122,10 @@ The tab segment wins both visually and for hit testing where the two meet."
   (tab-bar-tab-name-function 'tab-bar-tab-name-truncated)
   :config
   (when (display-graphic-p)
-    (my/tab-bar-ensure-visible)))
+    (my/tab-bar-ensure-visible))
+  (remove-hook 'post-command-hook #'my/tab-bar-update-terminal-visibility)
+  (remove-hook 'server-switch-hook #'my/tab-bar-update-terminal-visibility)
+  (my/tab-bar-update-terminal-visibility))
 
 (use-package tab-line
   :ensure nil
@@ -998,6 +1149,8 @@ The tab segment wins both visually and for hit testing where the two meet."
                 #'my/tab-line-previous-buffer))
   (add-to-list 'tab-line-exclude-modes 'dashboard-mode)
   (add-hook 'buffer-list-update-hook #'my/tab-line-schedule-invalidate-cache)
+  (add-hook 'window-buffer-change-functions #'my/tab-line-invalidate-cache)
+  (add-hook 'window-state-change-functions #'my/tab-line-invalidate-cache)
   (add-hook 'kill-buffer-hook #'my/tab-line-invalidate-cache)
   (add-hook 'after-change-major-mode-hook #'my/tab-line-invalidate-cache)
   (global-tab-line-mode 1)

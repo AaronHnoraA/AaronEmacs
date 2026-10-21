@@ -14,7 +14,23 @@
 (defvar my/file-open-new-frame-requested nil
   "Set by the file-open minibuffer's Cmd+Shift+Enter key.")
 
+(defvar my/file-open-placement 'current
+  "Where to visit the file chosen by the current file-open prompt.")
+
+(defvar my/terminal-selector-active nil)
+
+(defvar my/consult-buffer-active nil
+  "Non-nil while a normal Consult buffer switcher is reading a choice.")
+
+(defvar my/consult-buffer-placement 'current
+  "Placement requested in the current Consult buffer switcher.")
+
+(defvar my/consult-buffer-origin nil
+  "Window that opened the current Consult buffer switcher.")
+
 (declare-function file-open-new-frame "init-windows" (file &optional wildcards))
+(declare-function my/open-entry-in-split "init-windows" (side open))
+(declare-function my/terminal-selector-exit "init-portal" (placement))
 (declare-function my/buffer-display-new-frame "init-windows"
                   (buffer &optional norecord))
 (declare-function consult--frame-buffer-list "consult" ())
@@ -33,10 +49,29 @@ Other Buffer source still provides access to buffers outside this scope."
   "Call ORIGINAL with frame/workspace buffers for the default SOURCES.
 Commands such as `consult-project-buffer' pass explicit sources and keep
 Consult's normal project-wide buffer list."
-  (if sources
-      (funcall original sources)
-    (let ((consult-buffer-list-function #'my/consult-buffer-list))
-      (funcall original))))
+  (let* ((my/consult-buffer-active
+          (eq consult--buffer-display #'switch-to-buffer))
+         (my/consult-buffer-placement 'current)
+         (my/consult-buffer-origin (selected-window))
+         (consult--buffer-display
+          (if my/consult-buffer-active
+              #'my/consult-buffer-display
+            consult--buffer-display)))
+    (if sources
+        (funcall original sources)
+      (let ((consult-buffer-list-function #'my/consult-buffer-list))
+        (funcall original)))))
+
+(defun my/consult-buffer-display (buffer &optional norecord)
+  "Display Consult BUFFER in the selected pane requested by the user."
+  (when (window-live-p my/consult-buffer-origin)
+    (select-window my/consult-buffer-origin))
+  (pcase my/consult-buffer-placement
+    ((or 'right 'below)
+     (my/open-entry-in-split
+      my/consult-buffer-placement
+      (lambda () (switch-to-buffer buffer norecord))))
+    (_ (switch-to-buffer buffer norecord))))
 
 (defun my/buffer-open-new-frame ()
   "Choose a buffer with Consult and open it in a new Emacs frame.
@@ -55,20 +90,27 @@ the current frame or workspace."
 
 (defun my/find-file-with-frame-choice ()
   "Read a file name and visit it with native `find-file'.
-Cmd+Shift+Enter in the prompt instead opens it in a new Emacs frame."
+Shift+Return opens right.  Command+Return opens an existing file below or
+accepts a new file name exactly.  Command+Shift+Return opens a new frame."
   (interactive)
   (let ((my/file-open-new-frame-prompt t)
-        (my/file-open-new-frame-requested nil))
+        (my/file-open-new-frame-requested nil)
+        (my/file-open-placement 'current))
     (pcase-let ((`(,file ,wildcards)
                  (find-file-read-args "Find file: "
                                       (confirm-nonexistent-file-or-buffer))))
       (let ((file (my/open-resolve-file-name file)))
-        (if my/file-open-new-frame-requested
-            (file-open-new-frame file wildcards)
-          (my/open-visit-file file wildcards))))))
+        (cond
+         (my/file-open-new-frame-requested
+          (file-open-new-frame file wildcards))
+         ((memq my/file-open-placement '(right below))
+          (my/open-entry-in-split
+           my/file-open-placement
+           (lambda () (my/open-visit-file file wildcards))))
+         (t (my/open-visit-file file wildcards)))))))
 
 (defalias 'file-open #'my/find-file-with-frame-choice
-  "Read a file name, opening it here or in a new frame with Cmd+Shift+Enter.")
+  "Read a file name and choose its pane with Return modifiers.")
 
 (defun my/minibuffer-file-open-new-frame ()
   "Accept the typed file name and request a new frame when supported."
@@ -81,7 +123,56 @@ Cmd+Shift+Enter in the prompt instead opens it in a new Emacs frame."
       (vertico-exit-input)
     (exit-minibuffer)))
 
+(defun my/minibuffer-open-with-placement (placement)
+  "Accept a file or terminal candidate and request PLACEMENT."
+  (interactive)
+  (cond
+   (my/terminal-selector-active
+    (my/terminal-selector-exit placement))
+   (my/consult-buffer-active
+    (setq my/consult-buffer-placement placement)
+    (if (bound-and-true-p vertico--input)
+        (vertico-exit)
+      (exit-minibuffer)))
+   ((and my/file-open-new-frame-prompt
+         (my/minibuffer-file-completion-p))
+    (if (and (eq placement 'below)
+             (not (file-exists-p
+                   (expand-file-name (minibuffer-contents-no-properties)))))
+        ;; Command+Return has always accepted a new name literally.  The
+        ;; highlighted similar file must not replace that name.
+        (if (bound-and-true-p vertico--input)
+            (vertico-exit-input)
+          (exit-minibuffer))
+      (setq my/file-open-placement placement)
+      (if (bound-and-true-p vertico--input)
+          (vertico-exit)
+        (exit-minibuffer))))
+   ((bound-and-true-p vertico--input)
+    (if (eq placement 'below)
+        (vertico-exit-input)
+      (vertico-exit)))
+   (t (exit-minibuffer))))
+
+(defun my/minibuffer-open-right ()
+  "Accept the selected item and open it to the right when supported."
+  (interactive)
+  (my/minibuffer-open-with-placement 'right))
+
+(defun my/minibuffer-open-below ()
+  "Accept the selected item and open it below when supported."
+  (interactive)
+  (my/minibuffer-open-with-placement 'below))
+
 (keymap-global-set "C-x C-f" #'file-open)
+(dolist (entry '(("S-RET" . my/minibuffer-open-right)
+                 ("S-<return>" . my/minibuffer-open-right)
+                 ("M-RET" . my/minibuffer-open-below)
+                 ("M-<return>" . my/minibuffer-open-below)
+                 ("s-RET" . my/minibuffer-open-below)
+                 ("s-<return>" . my/minibuffer-open-below)))
+  (define-key minibuffer-local-filename-completion-map
+    (kbd (car entry)) (cdr entry)))
 (dolist (key '("M-S-RET" "M-S-<return>"))
   (define-key minibuffer-local-filename-completion-map (kbd key)
     #'my/minibuffer-file-open-new-frame))
@@ -119,10 +210,16 @@ Cmd+Shift+Enter in the prompt instead opens it in a new Emacs frame."
   :bind (:map vertico-map
          ("TAB" . my/vertico-tab-dwim)
          ("<tab>" . my/vertico-tab-dwim)
-         ;; 在 `C-x C-f` 这类文件补全场景，M-RET 直接使用你当前输入的文本，
-         ;; 不选中/不补全候选（用于创建与已有文件“相似名字”的新文件）。
-         ("M-RET" . vertico-exit-input)
-         ("<M-return>" . vertico-exit-input)
+         ("S-RET" . my/minibuffer-open-right)
+         ("S-<return>" . my/minibuffer-open-right)
+         ("M-RET" . my/minibuffer-open-below)
+         ("M-<return>" . my/minibuffer-open-below)
+         ("s-RET" . my/minibuffer-open-below)
+         ("s-<return>" . my/minibuffer-open-below)
+         ;; Keep an explicit way to accept the typed name without selecting a
+         ;; similar completion candidate.
+         ("C-RET" . vertico-exit-input)
+         ("C-<return>" . vertico-exit-input)
          ("M-S-RET" . my/minibuffer-file-open-new-frame)
          ("<M-S-return>" . my/minibuffer-file-open-new-frame))
   :custom

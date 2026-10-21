@@ -4,9 +4,8 @@
    An accessory application keeps its windows and keyboard focus but has no
    Dock icon, no Cmd-Tab entry and no main menu.
 
-   `macos-window-install-drag-handles' gives every top-level Emacs window a
-   strip along its top edge that moves the window, so undecorated frames can
-   be dragged.
+   `macos-window-install-drag-handles' routes a mouse-down on a top-level
+   Emacs window's actual top border to the native window-drag operation.
 
    Built by `bin/emacs-app build' into var/macos-background/.  */
 
@@ -15,65 +14,37 @@
 
 int plugin_is_GPL_compatible;
 
-@interface EmacsDragHandle : NSView
-@property (nonatomic) BOOL hovered;
-@end
+static CGFloat drag_edge_height = 0;
+static id drag_edge_monitor = nil;
 
-@implementation EmacsDragHandle
-- (void)mouseDown:(NSEvent *)event
+static BOOL
+top_level_emacs_window (NSWindow *window)
 {
-  [self.window performWindowDragWithEvent:event];
+  return (window && window.contentView && !window.parentWindow
+          && [NSStringFromClass ([window class]) hasPrefix:@"Emacs"]);
 }
 
-- (BOOL)acceptsFirstMouse:(NSEvent *)event
+static NSEvent *
+drag_top_edge (NSEvent *event)
 {
-  return YES;
-}
+  NSWindow *window = event.window;
+  if (!top_level_emacs_window (window)
+      || (window.styleMask & NSWindowStyleMaskFullScreen))
+    return event;
 
-/* The strip is invisible until the pointer is over it; then it shows a
-   grabber and an open hand, so it can be found.  */
-- (void)updateTrackingAreas
-{
-  [super updateTrackingAreas];
-  for (NSTrackingArea *area in [self.trackingAreas copy])
-    [self removeTrackingArea:area];
-  [self addTrackingArea:
-          [[NSTrackingArea alloc]
-            initWithRect:NSZeroRect
-                 options:(NSTrackingMouseEnteredAndExited
-                          | NSTrackingActiveAlways | NSTrackingInVisibleRect)
-                   owner:self
-                userInfo:nil]];
-}
+  /* locationInWindow uses window coordinates, not the content view's
+     coordinates.  This catches the real resize border before AppKit gives it
+     to the window, leaving the tab line and the other three edges alone. */
+  NSPoint point = event.locationInWindow;
+  NSRect frame = window.frame;
+  if (point.y < frame.size.height - drag_edge_height
+      || point.y > frame.size.height
+      || point.x < 8 || point.x > frame.size.width - 8)
+    return event;
 
-- (void)mouseEntered:(NSEvent *)event
-{
-  self.hovered = YES;
-  [[NSCursor openHandCursor] set];
-  self.needsDisplay = YES;
+  [window performWindowDragWithEvent:event];
+  return nil;
 }
-
-- (void)mouseExited:(NSEvent *)event
-{
-  self.hovered = NO;
-  [[NSCursor arrowCursor] set];
-  self.needsDisplay = YES;
-}
-
-- (void)drawRect:(NSRect)dirty
-{
-  if (!self.hovered)
-    return;
-  NSRect bounds = self.bounds;
-  CGFloat height = MIN (4, bounds.size.height);
-  NSRect grabber = NSMakeRect (NSMidX (bounds) - 28, NSMidY (bounds) - height / 2,
-                               56, height);
-  [[NSColor colorWithWhite:1 alpha:0.55] setFill];
-  [[NSBezierPath bezierPathWithRoundedRect:grabber
-                                   xRadius:height / 2
-                                   yRadius:height / 2] fill];
-}
-@end
 
 static emacs_value
 set_accessory (emacs_env *env, ptrdiff_t nargs, emacs_value *args, void *data)
@@ -93,34 +64,31 @@ static emacs_value
 install_drag_handles (emacs_env *env, ptrdiff_t nargs, emacs_value *args,
                       void *data)
 {
-  CGFloat height = env->extract_integer (env, args[0]);
-  intmax_t installed = 0;
+  drag_edge_height = MAX (0, env->extract_integer (env, args[0]));
+
+  /* Remove the old content overlay when updating a running Emacs.  Its
+     three-pixel view never received clicks on the actual resize border. */
   for (NSWindow *window in [NSApp windows])
     {
-      NSView *content = window.contentView;
-      /* Child frames follow their parent; only top-level frames move.  */
-      if (!content || window.parentWindow
-          || ![NSStringFromClass ([window class]) hasPrefix:@"Emacs"])
+      if (!top_level_emacs_window (window))
         continue;
-      EmacsDragHandle *handle = nil;
-      for (NSView *view in content.subviews)
-        if ([view isKindOfClass:[EmacsDragHandle class]])
-          handle = (EmacsDragHandle *) view;
-      if (!handle)
-        {
-          handle = [[EmacsDragHandle alloc] initWithFrame:NSZeroRect];
-          [content addSubview:handle];
-          installed++;
-        }
-      NSRect bounds = content.bounds;
-      BOOL flipped = content.isFlipped;
-      handle.frame = NSMakeRect (0, flipped ? 0 : bounds.size.height - height,
-                                 bounds.size.width, height);
-      handle.autoresizingMask = (NSViewWidthSizable
-                                 | (flipped ? NSViewMaxYMargin
-                                            : NSViewMinYMargin));
+      for (NSView *view in [window.contentView.subviews copy])
+        if ([NSStringFromClass ([view class]) isEqualToString:@"EmacsDragHandle"])
+          [view removeFromSuperview];
     }
-  return env->make_integer (env, installed);
+
+  if (drag_edge_height > 0 && !drag_edge_monitor)
+    drag_edge_monitor =
+      [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
+                                            handler:^NSEvent *(NSEvent *event) {
+        return drag_top_edge (event);
+      }];
+  else if (drag_edge_height == 0 && drag_edge_monitor)
+    {
+      [NSEvent removeMonitor:drag_edge_monitor];
+      drag_edge_monitor = nil;
+    }
+  return env->make_integer (env, drag_edge_monitor ? 1 : 0);
 }
 
 static void
@@ -142,8 +110,8 @@ emacs_module_init (struct emacs_runtime *runtime)
   define (env, "macos-window-set-accessory", 1, set_accessory,
           "Hide the Dock icon when ACCESSORY is non-nil, else show it.");
   define (env, "macos-window-install-drag-handles", 1, install_drag_handles,
-          "Give each top-level frame a drag strip HEIGHT pixels tall.\n"
-          "The strip spans the top edge.  Return the number added.");
+          "Drag top-level Emacs windows from the top HEIGHT-point border.\n"
+          "This leaves the content and its tab line unobstructed.");
   emacs_value feature = env->intern (env, "macos-window");
   env->funcall (env, env->intern (env, "provide"), 1, &feature);
   return 0;

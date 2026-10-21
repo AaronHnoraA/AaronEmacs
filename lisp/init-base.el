@@ -21,6 +21,7 @@
 (declare-function vc-git-root "vc-git" (file))
 (declare-function my/project-current-root "init-project")
 (declare-function my/window-bury-current-buffer "init-windows" ())
+(declare-function my/open-entry-in-split "init-windows" (side open))
 (declare-function async-handle-result "async" (callback result &optional buf))
 
 (defvar async-callback)
@@ -1079,6 +1080,18 @@ selection and mark behavior."
   (ibuffer-switch-to-saved-filter-groups "default")
   (ibuffer-do-sort-by-recency))
 
+(defun my/ibuffer-visit-right ()
+  "Visit the Ibuffer row in a new pane on the right."
+  (interactive)
+  (ibuffer-current-buffer t)
+  (my/open-entry-in-split 'right #'ibuffer-visit-buffer))
+
+(defun my/ibuffer-visit-below ()
+  "Visit the Ibuffer row in a new pane below."
+  (interactive)
+  (ibuffer-current-buffer t)
+  (my/open-entry-in-split 'below #'ibuffer-visit-buffer))
+
 (use-package ibuffer
   :ensure nil
   :hook ((ibuffer-mode . ibuffer-auto-mode)
@@ -1112,8 +1125,13 @@ selection and mark behavior."
       "Toggle current view to buffers hosting Noema."
     (:description "Noema")
     (my/ibuffer-noema-buffer-p buf))
-  (keymap-set ibuffer-mode-map "M-<return>" #'ibuffer-visit-buffer-other-window)
-  (keymap-set ibuffer-mode-map "M-RET" #'ibuffer-visit-buffer-other-window)
+  (dolist (entry '(("S-RET" . my/ibuffer-visit-right)
+                   ("S-<return>" . my/ibuffer-visit-right)
+                   ("M-RET" . my/ibuffer-visit-below)
+                   ("M-<return>" . my/ibuffer-visit-below)
+                   ("s-RET" . my/ibuffer-visit-below)
+                   ("s-<return>" . my/ibuffer-visit-below)))
+    (keymap-set ibuffer-mode-map (car entry) (cdr entry)))
   (advice-add 'ibuffer-visit-buffer :around
               #'my/ibuffer-visit-noema-canonical)
   (advice-add 'ibuffer-visit-buffer-other-window :around

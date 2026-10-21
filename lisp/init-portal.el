@@ -7,6 +7,7 @@
 ;;; Code:
 
 (require 'init-package-utils)
+(require 'general)
 (require 'cl-lib)
 (require 'seq)
 (require 'subr-x)
@@ -18,6 +19,7 @@
 (declare-function portal-terminal "portal-terminal" (&optional new))
 (declare-function portal-terminal-new "portal-terminal" ())
 (declare-function portal-terminal-buffers "portal-terminal" (&optional project quick))
+(declare-function portal-terminal-focus "portal-terminal" ())
 (declare-function portal-terminal-start "portal-terminal"
                   (directory program arguments &optional name))
 (declare-function portal--terminal-paste "portal-terminal" (target text &optional enter))
@@ -32,6 +34,13 @@
 (declare-function remote-canonicalize-emacs-file-name
                   "remote-fs" (file-name &optional directory))
 (declare-function my/background-make-frame "init-background" (&optional parameters))
+(declare-function my/tab-line-all-terminal-buffers "init-tabbar" ())
+(declare-function my/portal-popup--live-buffers "init-portal-popup" ())
+(declare-function my/portal-popup--normal-windows "init-portal-popup" ())
+(declare-function my/portal-popup-select-buffer "init-portal-popup" (buffer))
+(declare-function vertico-exit "vertico" ())
+(defvar vertico--input)
+(defvar vertico-sort-override-function)
 
 (defconst my/portal-package-url "https://github.com/xiaoxinghu/portal.git"
   "Portal package repository.")
@@ -308,6 +317,107 @@ the native Portal view with SSH running inside it."
   (interactive)
   (my/portal-create :directory default-directory))
 
+(defalias 'terminal #'portal-terminal
+  "Open a native Ghostty terminal in the selected Emacs window.")
+
+(defvar my/terminal-selector-placement 'current
+  "Window placement requested from the terminal minibuffer.")
+
+(defvar my/terminal-selector-active nil
+  "Non-nil while the terminal choice minibuffer is active.")
+
+(defun my/terminal-selector-exit (placement)
+  "Accept the highlighted terminal with PLACEMENT."
+  (setq my/terminal-selector-placement placement)
+  (if (bound-and-true-p vertico--input)
+      (vertico-exit)
+    (exit-minibuffer)))
+
+(defun my/terminal-selector-setup ()
+  "Add placement keys to this terminal selection minibuffer."
+  (let ((map (copy-keymap (current-local-map))))
+    (dolist (entry '(("S-RET" . right)
+                     ("S-<return>" . right)
+                     ("M-RET" . below)
+                     ("M-<return>" . below)
+                     ("s-RET" . below)
+                     ("s-<return>" . below)))
+      (let ((placement (cdr entry)))
+        (keymap-set map (car entry)
+                    (lambda () (interactive)
+                      (my/terminal-selector-exit placement)))))
+    (use-local-map map)))
+
+(defun my/terminal-selector-candidates (&optional exclude)
+  "Return ordinary and popup terminal choices, omitting EXCLUDE."
+  (append
+   (mapcar (lambda (buffer)
+             (cons (format "终端 · %s" (buffer-name buffer)) buffer))
+           (seq-remove (lambda (buffer) (eq buffer exclude))
+                       (my/tab-line-all-terminal-buffers)))
+   (mapcar (lambda (buffer)
+             (cons (format "弹窗 · %s" (buffer-name buffer)) buffer))
+           (seq-filter
+            (lambda (buffer)
+              (and (not (eq buffer exclude))
+                   (with-current-buffer buffer
+                     (or (derived-mode-p 'portal-terminal-mode)
+                         (bound-and-true-p remote-terminal-instance)))))
+            (my/portal-popup--live-buffers)))
+   (list (cons "＋ 新建终端" :new))))
+
+(defun my/terminal-selector ()
+  "Switch to a terminal or create one, choosing the window with Return.
+Return uses this window, Shift-Return splits right, and Command-Return
+splits below.  The active terminal is omitted from the choices."
+  (interactive)
+  (let* ((source (current-buffer))
+         (source-directory default-directory)
+         (popup (bound-and-true-p my/portal-popup-instance-p))
+         (origin (if popup
+                     (or (car (my/portal-popup--normal-windows))
+                         (user-error "No ordinary window for a terminal"))
+                   (selected-window)))
+         (candidates (my/terminal-selector-candidates
+                      (and (or popup (derived-mode-p 'portal-terminal-mode))
+                           source)))
+         (my/terminal-selector-active t)
+         (my/terminal-selector-placement 'current)
+         (vertico-sort-override-function #'identity)
+         (choice (minibuffer-with-setup-hook #'my/terminal-selector-setup
+                   (completing-read
+                    "终端 (RET 当前 / S-RET 右侧 / Cmd-RET 下方): "
+                    candidates nil t)))
+         (selected (cdr (assoc choice candidates))))
+    (unless selected
+      (user-error "No terminal selected"))
+    (if (and (bufferp selected)
+             (buffer-local-value 'my/portal-popup-instance-p selected))
+        (my/portal-popup-select-buffer selected)
+      (let ((target (pcase my/terminal-selector-placement
+                      ('right (split-window origin nil 'right))
+                      ('below (split-window origin nil 'below))
+                      (_ origin))))
+        (select-window target)
+        (if (eq selected :new)
+            (let ((default-directory source-directory))
+              (portal-terminal-new))
+          (switch-to-buffer selected)
+          (when (derived-mode-p 'portal-terminal-mode)
+            (portal-terminal-focus)))))))
+
+(defalias 'terminal-switcher #'my/terminal-selector
+  "Choose an existing terminal or create a new one.")
+
+(general-define-key :keymaps 'global "M-t" #'my/terminal-selector)
+
+(defun my/portal-ordinary-terminal-tabs-h ()
+  "Keep ordinary Portal sessions in one tab line after configuration reload."
+  (when (equal header-line-format '(:eval (my/tab-line-format)))
+    (kill-local-variable 'header-line-format))
+  (unless tab-line-format
+    (setq-local tab-line-format '(:eval (tab-line-format)))))
+
 (defun my/portal-open-in-directory (name directory)
   "Open or reuse a terminal named NAME in DIRECTORY."
   (let ((buffer (get-buffer name)))
@@ -334,8 +444,8 @@ the native Portal view with SSH running inside it."
   "Open PATH or COMMAND in a Portal terminal in a new Emacs frame."
   (let* ((frame (when (display-graphic-p)
                   (if (fboundp 'my/background-make-frame)
-                      (my/background-make-frame)
-                    (make-frame))))
+                      (my/background-make-frame '((no-focus-on-map . t)))
+                    (make-frame '((no-focus-on-map . t))))))
          (path (and path (expand-file-name path)))
          (directory (if path
                         (if (file-directory-p path)
@@ -347,7 +457,9 @@ the native Portal view with SSH running inside it."
                                (list path)
                              (list "/bin/zsh" path)))))
          buffer)
-    (when frame (select-frame-set-input-focus frame))
+    ;; Select the new frame for Portal's window placement without activating
+    ;; its NSWindow while the external launcher still owns the keyboard.
+    (when frame (select-frame frame))
     (setq buffer (my/portal-create :directory directory :command program))
     (when frame
       (set-frame-parameter frame 'my/portal-terminal buffer)
@@ -365,7 +477,15 @@ the native Portal view with SSH running inside it."
                                      (current-buffer)))
                         (set-frame-parameter frame 'my/portal-terminal nil)
                         (delete-frame frame t)))
-                    nil t))))
+                    nil t)))
+      ;; Raycast closes its own window after the action completes.  Activating
+      ;; the frame before then lets macOS restore the old terminal on close.
+      (run-at-time 0.4 nil
+                   (lambda (target)
+                     (when (frame-live-p target)
+                       (set-frame-parameter target 'no-focus-on-map nil)
+                       (select-frame-set-input-focus target)))
+                   frame))
     buffer))
 
 (defun my/portal--delete-frame-terminal (frame)
@@ -463,7 +583,7 @@ the native Portal view with SSH running inside it."
 (defun my/portal-install-keys ()
   "Install Portal terminal shortcuts."
   (require 'portal-terminal-bindings)
-  (dolist (entry '(("M-t" . my/portal-popup-new)
+  (dolist (entry '(("M-t" . my/terminal-selector)
                    ("M-S-f" . my/portal-scrollback)
                    ("C-M-f" . toggle-frame-fullscreen)
                    ("M-S-h" . windmove-left)
@@ -485,6 +605,7 @@ the native Portal view with SSH running inside it."
   ;; Native bindings claim keys before Ghostty or the macOS window menu.
   ;; Command uses Meta in this Emacs, so use the same commands as other buffers.
   (dolist (entry `(("C-x" . ,ctl-x-map)
+                   ("s-t" . my/terminal-selector)
                    ("C-c e" . my/portal-popup-toggle)
                    ("C-c C-e" . my/portal-popup-toggle)
                    ("C-c E" . my/portal-popup-cycle)
@@ -507,6 +628,11 @@ the native Portal view with SSH running inside it."
 
 (with-eval-after-load 'portal-terminal
   (setq portal-terminal-auto-close-on-exit t)
+  (add-hook 'portal-terminal-mode-hook #'my/portal-ordinary-terminal-tabs-h)
+  (dolist (buffer (portal-terminal-buffers))
+    (when (my/tab-line-ordinary-terminal-p buffer)
+      (with-current-buffer buffer
+        (my/portal-ordinary-terminal-tabs-h))))
   (add-hook 'portal-terminal-mode-hook
             (lambda () (setq-local mode-line-process nil)))
   (my/portal-install-keys))

@@ -10,9 +10,9 @@
 ;; run nothing else.  M-x itself stays inside Emacs.
 ;;
 ;; A background Emacs also leaves the Dock and Cmd-Tab; it returns to both
-;; when shown.  Undecorated frames get a drag strip along their top edge.
+;; when shown.  Undecorated frames drag from their narrow top edge.
 ;; Both need the `macos-window' module built by `bin/emacs-app build';
-;; without it the Dock icon stays and frames have no drag strip.
+;; without it the Dock icon stays and frames have no drag edge.
 
 ;;; Code:
 
@@ -29,10 +29,9 @@
                     user-emacs-directory)
   "The built `macos-window' module.")
 
-(defvar my/frame-drag-handle-height 12
-  "Height in pixels of the drag strip along a frame's top edge.
-The strip shows a grabber while the pointer is over it.  Nil leaves frames
-without one.")
+(defvar my/frame-drag-handle-height 6
+  "Height in points of the draggable top border of a frame.
+Nil leaves frames without an edge drag target.")
 
 (defvar my/background--frames nil
   "Frames made invisible by `my/background-hide', most recently used first.")
@@ -256,7 +255,7 @@ symbol `background', or any other non-nil value for the foreground."
                    (equal (my/background-status) "background")))))))
 
 (defun my/frame-install-drag-handles ()
-  "Give every top-level frame its drag strip."
+  "Let every top-level frame be dragged from its narrow top edge."
   (when (and my/frame-drag-handle-height (my/background--window-module-p))
     (macos-window-install-drag-handles my/frame-drag-handle-height)))
 
@@ -530,7 +529,7 @@ client returns at once."
 ;; `make-frame' puts Emacs back in the Dock, and a deleted frame may have been
 ;; the last visible one, so the window state is applied again on both.
 (defun my/background--refresh-window-state-h (&rest _)
-  "Reapply the Dock policy and drag strips after the frame list changes."
+  "Reapply the Dock policy and top-edge drag after frame changes."
   (setq my/background--frames
         (seq-filter #'frame-live-p my/background--frames))
   (my/background-apply-dock-policy)

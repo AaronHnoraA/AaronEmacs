@@ -180,8 +180,11 @@ CURRENT is the currently displayed popup buffer."
                         (buffer-name buffer)
                         (buffer-local-value 'default-directory buffer))
      'local-map (let ((map (make-sparse-keymap)))
-                  (define-key map [header-line mouse-3] #'my/portal-popup-menu)
-                  (define-key map [tab-line mouse-3] #'my/portal-popup-menu)
+                  (dolist (key '([header-line mouse-3] [tab-line mouse-3]))
+                    (define-key map key
+                                (lambda (event)
+                                  (interactive "e")
+                                  (my/portal-popup-tab-menu buffer event))))
                   (define-key map [tab-line mouse-1]
                               (lambda () (interactive) (my/portal-popup-select-buffer buffer)))
                   (define-key map [header-line mouse-1]
@@ -189,6 +192,59 @@ CURRENT is the currently displayed popup buffer."
                                 (interactive)
                                 (my/portal-popup-select-buffer buffer)))
                   map))))
+
+(defun my/portal-popup-move-tab (buffer position)
+  "Move popup BUFFER to one-based POSITION in the popup tab strip."
+  (let* ((buffers (my/portal-popup--live-buffers))
+         (without (delq buffer (copy-sequence buffers))))
+    (unless (memq buffer buffers)
+      (user-error "Popup tab is no longer available"))
+    (setq my/portal-popup-buffers
+          (append (seq-take without (1- position))
+                  (list buffer)
+                  (seq-drop without (1- position))))
+    (force-mode-line-update t)))
+
+(defun my/portal-popup-tab-menu (buffer &optional event)
+  "Show actions for popup BUFFER at mouse EVENT."
+  (let* ((buffers (my/portal-popup--live-buffers))
+         (index (cl-position buffer buffers :test #'eq)))
+    (unless index
+      (user-error "Popup tab is no longer available"))
+    (popup-menu
+     (easy-menu-create-menu
+      (format "Popup: %s" (buffer-name buffer))
+      (append
+       (list
+        (vector "切换到此标签"
+                `(lambda () (interactive)
+                   (my/portal-popup-select-buffer ,buffer)) t)
+        (vector "重命名"
+                `(lambda () (interactive)
+                   (my/portal-popup-rename
+                    ,buffer
+                    (read-string "New popup name: " (buffer-name ,buffer)))) t)
+        (vector "关闭"
+                `(lambda () (interactive)
+                   (my/portal-popup-kill ,buffer)) t)
+        "---"
+        (vector "左移"
+                `(lambda () (interactive)
+                   (my/portal-popup-move-tab ,buffer ,index))
+                (> index 0))
+        (vector "右移"
+                `(lambda () (interactive)
+                   (my/portal-popup-move-tab ,buffer ,(+ index 2)))
+                (< index (1- (length buffers)))))
+       (list
+        (cons "移动到位置"
+              (cl-loop for position from 1 to (length buffers)
+                       collect
+                       (vector (format "第 %d 个" position)
+                               `(lambda () (interactive)
+                                  (my/portal-popup-move-tab ,buffer ,position))
+                               (/= position (1+ index))))))))
+     event)))
 
 (defun my/portal-popup-new ()
   "Create a popup portal in the focused work buffer's directory."
