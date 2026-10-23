@@ -15,6 +15,7 @@ channels.
 
 ## Start Here
 
+- [architecture.md](architecture.md) Structure map of this config and Noema: load order, layers, directory ownership, the Emacs ↔ Noema boundary, where a change belongs, and known structural debt.
 - [quick-start.md](quick-start.md) First-time setup, system dependencies, fonts, path conventions, and bootstrap.
 - [daily-usage.md](daily-usage.md) Daily entry points, high-frequency keybindings, and leader-group layout.
 - [agenda.md](agenda.md) Noema `@@todo`/`@@project`/`@@clock` syntax, server agenda/project/clock view-model, repeaters, dependencies, and Web/Emacs entry points.
