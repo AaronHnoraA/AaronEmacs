@@ -421,7 +421,7 @@ jupyter-export-live-smoke:
 	$(BATCH) -l test/jupyter-export-live-smoke.el
 
 agenda-test:
-	$(EMACS) --batch -Q -L site-lisp/noema/lisp -l noema-agenda-tests -l noema-agenda-attention-tests -l noema-agenda-capture-tests -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -Q -L site-lisp/noema/lisp -L site-lisp/noema/tests/elisp -l noema-agenda-tests -l noema-agenda-attention-tests -l noema-agenda-capture-tests -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-aaronnote-agenda-source-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/md-roam-tests.el -f ert-run-tests-batch-and-exit
 
@@ -431,10 +431,10 @@ agenda-apple-test:
 
 research-test:
 	$(BATCH) -l test/noema-startup-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/test/elisp -l noema-agent-acp-tests.el -l noema-agent-render-tests.el -l noema-context-tests.el -l noema-agent-worktree-tests.el -l noema-agent-worktree-board-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -L site-lisp/noema/test/elisp -l noema-capability-workspace-tests.el -l test/noema-manager-layout-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/tests/elisp -l noema-agent-acp-tests.el -l noema-agent-render-tests.el -l noema-context-tests.el -l noema-agent-worktree-tests.el -l noema-agent-worktree-board-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -L site-lisp/noema/tests/elisp -l noema-capability-workspace-tests.el -l test/noema-manager-layout-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L lisp/roam -l test/noema-research-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/test/elisp \
+	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/tests/elisp \
 	  -l noema-interaction-tests.el -l noema-interaction-magent-tests.el -l noema-api-tests.el -l noema-completion-tests.el \
 	  -l noema-project-overview-tests.el -l noema-agent-inbox-tests.el -l noema-agent-attention-tests.el -l noema-research-workflow-tests.el -l noema-history-search-tests.el -l noema-findings-tests.el \
 	  -f ert-run-tests-batch-and-exit

@@ -44,7 +44,7 @@ Noema 对照边界：[`noema-agent-acp.el`](../site-lisp/noema/lisp/noema-agent-
 
 - [`noema-agent-inbox.el`](../site-lisp/noema/lisp/noema-agent-inbox.el)：`!` 跳到下一个有权限、输入、失败或未读信息的持久 Session；跨项目循环，跳过无注意力的行与错误行。`u` 对所选项目和 Session 调用已有的 `session:name:read`，成功后刷新总览。失败标记仍由 kernel 投影，读取不清除。
 - [`noema-agent-worker.el`](../site-lisp/noema/lisp/noema-agent-worker.el) 与 Inbox：待决请求数量变化发出带 worker 的 hook；Inbox 的可见 ACP 事件只重绘，Run/请求事件在 400 ms 内合并为一次 Project 查询。隐藏期间不查询，重新显示后补查；查询仍用原有 Session API，保留过期响应隔离。
-- [`noema-agent-inbox-tests.el`](../site-lisp/noema/test/elisp/noema-agent-inbox-tests.el)：覆盖跨项目循环、同名 Session 身份、事件合并、隐藏时不查询以及重新显示时补查。定向 ERT 7/7 通过。
+- [`noema-agent-inbox-tests.el`](../site-lisp/noema/tests/elisp/noema-agent-inbox-tests.el)：覆盖跨项目循环、同名 Session 身份、事件合并、隐藏时不查询以及重新显示时补查。定向 ERT 7/7 通过。
 - 上游 yoko `cargo test --lib` 为 22/22。Noema 本轮定向 ERT 7/7、`make research-test`、`make jupyter-test`、kernel `go test -tags fts5 ./...` 均通过。完整 `make test` 在与根配置测试并发的首轮有 3 个编辑器性能/布局测试失败；这 3 项单独复测通过，随后独立重跑完整 `make test` 为 2713 通过、16 跳过。
 - `make build` 首次被同时进行的研究记忆改动挡在 TypeScript 检查：测试引用了新文件 `server/lib/research-memory.mjs`，当时尚无对应 `.d.mts`，报 TS7016。该声明随后由那组改动补齐；本轮未修改它，并在当前工作区重跑 `make build`、`make install`，均通过。构建仍报告原有字体路径和大 chunk 警告。
 - 验证期间共享工作区又引入粘贴接口改动，曾使旧的 clipboard 断言与新参数不符，且 5 MB 拖选性能测试偶有耗时阈值失败。对应测试更新后，两组定向测试 15/15 通过；按当时最新树独立重跑完整 `make test` 为 2749 通过、16 跳过。相关粘贴实现和测试未由本轮修改。

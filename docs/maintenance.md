@@ -124,6 +124,8 @@ make audit-ui-tokens
 
 `site-lisp/` 里放的是不走 package-lock 的本地 Elisp。
 
+单文件第三方包集中在 `site-lisp/vendored/`（`init.el` 加入 `load-path`，`init-base.el` require）。更新时整文件替换并保留上游头注释，不在其中写本地改动。
+
 当前启动链里有一个重要项：
 
 - [site-lisp/general.el/general.el](../site-lisp/general.el/general.el)

@@ -49,12 +49,12 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 ### 目录职责
 
 ```text
-lisp/                 init-*.el 本地模块；少量单文件第三方包（见“已知结构问题”）
+lisp/                 init-*.el 本地模块与本仓库自写的单文件包（如 direnv.el）
 lisp/remote/          Remote 框架，只放框架代码；消费者留在各自模块
 lisp/roam/            Noema 的 Emacs 侧桥接（aaronnote = Noema 的旧名，文件名保留）
 lisp/lang/            语言模块
 lisp/git/             Git/GitHub 工作台
-lisp/telescope/       问题/诊断面板
+lisp/telescope/       Telescope 风格选择器（含诊断选择器 init-problems）
 lisp/patches/         对上游包的窄补丁
 site-lisp/            自维护或 vendored 的 Elisp 包：
   general.el/           键位层（启动依赖）
@@ -63,6 +63,8 @@ site-lisp/            自维护或 vendored 的 Elisp 包：
   portal/               原生 Ghostty 终端窗格
   ratex.el/             数学预览
   dape-toolbar/, remote_ikernel/
+  vendored/             单文件第三方包（Andy Stewart 的 fingertip、thing-edit 等，
+                        symbol-overlay、winpoint），原样保留上游头注释
   noema/                Noema 产品仓库（见下）
 etc/                  私有配置与密钥：config-*.el、config-store.el、remote.json、
                       以及指向 Noema 共享资源的链接（katex-macros、noema/）
@@ -136,16 +138,9 @@ Noema 的 Elisp 由 `init-ai-ide` 把 `site-lisp/noema/lisp` 加入 `load-path`�
 
 阅读时发现、尚未处理的整理项。动手前逐项确认影响面，并同步本表：
 
-- `lisp/` 顶层混有单文件第三方包（`basic-toolkit`、`duplicate-line`、`fingertip`、
-  `move-text`、`open-newline`、`thing-edit`、`toggle-one-window`、`symbol-overlay`、
-  `winpoint`、`direnv`）。它们不是 `init-*` 模块，更适合放进 `site-lisp/` 并在
-  [maintenance.md](maintenance.md) 的 vendored Elisp 清单中登记。
-- `lisp/noema-agent-bridge.el` 是 Noema 胶水，却在 `lisp/` 顶层；按上文约定应归
-  `lisp/roam/` 或 Noema 的 `lisp/`。
 - Jupyter 相关模块分散在三处：`lisp/init-jupyter-*`、`lisp/roam/init-aaronnote-jupyter-*`
   与 Noema `jupyter/`。前者是 kernelspec 管理与 Board，后者是 Noema 桥；命名不能反映
   这一分工。
 - `aaronnote` 是 Noema 的旧名，仍出现在 `lisp/roam/` 文件名、`var/aaronnote/` 与 Noema 的
   `aaronnote/` 目录。改名牵涉状态路径与外部工具（Raycast 读 `host.json`），需要迁移步骤，
   不应顺手改。
-- `lisp/telescope/` 实际承载问题面板（`init-problems`），目录名不反映内容。

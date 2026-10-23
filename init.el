@@ -141,7 +141,8 @@
        (beancount-dir (expand-file-name "lang/beancount" dir))
        (general-dir (locate-user-emacs-file "site-lisp/general.el"))
        (aaron-ui-dir (locate-user-emacs-file "site-lisp/aaron-ui"))
-       (config-dir (locate-user-emacs-file "site-lisp/config")))
+       (config-dir (locate-user-emacs-file "site-lisp/config"))
+       (vendored-dir (locate-user-emacs-file "site-lisp/vendored")))
   (add-to-list 'load-path (file-name-as-directory dir))
   (add-to-list 'load-path (file-name-as-directory remote-dir))
   (add-to-list 'load-path (file-name-as-directory config-dir))
@@ -154,7 +155,8 @@
   (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang/lean" dir)))
   (add-to-list 'load-path (file-name-as-directory beancount-dir))
   (add-to-list 'load-path (file-name-as-directory general-dir))
-  (add-to-list 'load-path (file-name-as-directory aaron-ui-dir)))
+  (add-to-list 'load-path (file-name-as-directory aaron-ui-dir))
+  (add-to-list 'load-path (file-name-as-directory vendored-dir)))
 
 (setq custom-file (locate-user-emacs-file "etc/custom.el"))
 

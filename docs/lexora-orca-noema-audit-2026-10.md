@@ -44,7 +44,7 @@
 1. [noema-agent-worker.el](../site-lisp/noema/lisp/noema-agent-worker.el) 现在保留 ACP rawInput 的字符串 command 和原始文件路径。当前安装的 agent-shell [测试](../elpa/agent-shell/tests/agent-shell-tests.el) 展示了 command 为字符串且没有 locations 的 tool call；旧 Action 只有 kind 和空 paths。
 2. [permission_policy.go](../site-lisp/noema/kernel/noema/research/permission_policy.go) 对未知工具、缺少路径的读写和缺少结构化 argv 的执行改为人工决定；字符串命令仍参与硬拒绝和 Attention 显示，精确命令才能作为记忆规则。不带路径/命令的请求不能建立“始终允许”规则。
 3. 同一策略文件用真实路径检查 symlink，包括尚未创建文件的现有父目录；指向项目外的链接不再被字面路径前缀自动放行，并在并发编辑比较中归并相同真实文件。
-4. [runtime_test.go](../site-lisp/noema/kernel/noema/research/runtime_test.go) 与 [noema-api-tests.el](../site-lisp/noema/test/elisp/noema-api-tests.el) 覆盖字符串 push、缺信息、精确记忆规则和 symlink 逃逸。Go kernel 的 go test -tags fts5 ./... 与 Emacs make research-test 均通过。
+4. [runtime_test.go](../site-lisp/noema/kernel/noema/research/runtime_test.go) 与 [noema-api-tests.el](../site-lisp/noema/tests/elisp/noema-api-tests.el) 覆盖字符串 push、缺信息、精确记忆规则和 symlink 逃逸。Go kernel 的 go test -tags fts5 ./... 与 Emacs make research-test 均通过。
 5. 后续继续检查答复闭环时发现，Node 的 `delivered` 只表示 WebSocket 通知已排队，Emacs 原先却在调用 ACP 回调前清除待答复映射。[worker](../site-lisp/noema/lisp/noema-agent-worker.el) 现改为回调成功后清理；回调抛错会让 Run 明确失败并停止 ACP。成功续租会复查仍待答复的内核记录，按 Run、Session 和 epoch 恢复丢失的网关通知，且不会重复答复。活跃 Run 的畸形权限请求也不再退回 agent-shell 自有审批界面；迟到的 broker 回包不能复活已终止 Run。故障注入测试覆盖了权限、输入、自动审批、旧 epoch、回调同步结束和迟到回包。
 
 验证：Emacs `make research-test`、`make jupyter-test`，Noema `make test`（2832 项通过）、`make build`、`make install`，Go `go test -tags fts5 ./...` 均通过。Node 命令使用仓库固定的 v26.5.0 / npm 11.17.0；系统默认 v26.7.0 不符合该仓库 `check-env`。`make install` 重建并重新链接了现有的 `~/.local/bin/noema-kernel` 目标。
