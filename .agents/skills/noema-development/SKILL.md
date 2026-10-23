@@ -45,6 +45,20 @@ implementation, `kernel/noema/wikisearch`.
 | Clock journal `agenda-clocks.sqlite` | `agenda-dsl.md` |
 | Research DAG, Proposals, Findings | `AGENTS.md`; `kernel/noema/research` |
 
+## Agents and Runs
+
+| Need | Read |
+| --- | --- |
+| Work documents, WorkNodes, Runs, Proposals, Findings (the rules) | `site-lisp/noema/AGENTS.md` D-023, D-038 |
+| Run lifecycle: directives → RunSpec → stream → result | `server/lib/research-*.mjs` (`directives`, `runtime`, `run-stream`, `notebook`, `session-routing`); `kernel/noema/research` |
+| Proposals and synthesis | `docs/noema/design/research-synthesis.md` |
+| ACP agents and sessions in Emacs | `docs/noema/design/codex-session-lifecycle.md`; `lisp/noema-agent-*.el`, `noema-sessions.el` |
+| Magent runtime | `docs/noema/design/magent-runtime.md`; `lisp/noema-interaction-magent*.el` |
+| Composition and agent entry points | `docs/noema/design/interaction-plan.md`; `lisp/noema-compose.el` |
+| Project memory | `docs/noema/design/hy-memory.md`; `server/lib/research-memory.mjs` |
+| What a Run is given (Skills, packs, MCP) | `docs/noema/design/capabilities.md`, `mcp.md` |
+| The guided workflow from the user's side | `docs/noema/guide/research-workflow.md` |
+
 ## APIs
 
 | Surface | Read |
