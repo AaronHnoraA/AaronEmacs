@@ -48,8 +48,8 @@ verify this geometry.
 Reload the xwidget (`M-x my/xwidget-reload`) after installing a renderer build;
 refreshing note content does not load the new JavaScript/CSS bundle.
 
-Audit of the full chain: Emacs (`init-aaronnote.el`) ↔ xwidget-webkit ↔ Node HTTP
-server (`web-host.mjs`) ↔ CodeMirror 6 app (`aaronnote/main.ts`, `src/cm6/`).
+Audit of the full chain: Emacs (`init-noema.el`) ↔ xwidget-webkit ↔ Node HTTP
+server (`web-host.mjs`) ↔ CodeMirror 6 app (`pages/main.ts`, `src/cm6/`).
 
 ## Chain Overview
 
@@ -62,23 +62,23 @@ Emacs Lisp
 
 Node web-host (web-host.mjs)
   HTTP server (127.0.0.1:PORT, port from env or ephemeral)
-  Static: dist/aaronnote/  (Vite bundle)
-  API: /emacs/command, /emacs/event, /api, /note-asset, /aaronnote-asset
+  Static: dist/pages/  (Vite bundle)
+  API: /emacs/command, /emacs/event, /api, /note-asset, /noema-asset
 
 Browser (xwidget-webkit or Appine)
-  aaronnote/main.ts  → window.aaronnoteApi (injected by Emacs)
+  pages/main.ts  → window.noemaApi (injected by Emacs)
   src/cm6/           → CodeMirror 6 editor + live preview + vim
-  aaronnote/xwidget-key-guard.ts  → key interception
+  pages/xwidget-key-guard.ts  → key interception
 ```
 
-Key event channel: `stdout` newline-delimited events, e.g.  
+Key event channel: `stdout` newline-delimited events, e.g.<br>
 `aaronote-event:key:{"key":"C-x"}`, `aaronote-event:saved:{"file":"..."}`.
 
 ## Findings & Status
 
 ### P0 — Raw-HTML widgets rendered unsanitized ← **Fixed**
 
-**Files:** `src/cm6/live-preview.ts:533`, `:1645`  
+**Files:** `src/cm6/live-preview.ts:533`, `:1645`<br>
 **Issue:** `HtmlInlineWidget` and `HtmlBlockWidget` assigned `this.source`
 (user-authored markdown HTML) directly to `innerHTML` with no sanitization.
 The rest of the codebase deliberately uses `html: false` in markdown-it plus
@@ -93,7 +93,7 @@ call it. Tests in `tests/sanitize-html.test.ts`.
 
 ### P1a — `url-retrieve` with no hang timeout ← **Fixed**
 
-**Files:** `lisp/roam/init-aaronnote.el:588` (`/emacs/command`), `:805` (`/api`)  
+**Files:** `lisp/roam/init-noema.el:588` (`/emacs/command`), `:805` (`/api`)<br>
 **Issue:** If the Node server hangs, the response buffer is never killed. Violates
 the project resource lifecycle rule ("url-retrieve callbacks should kill their
 response buffer").
@@ -104,7 +104,7 @@ buffer if the server never replies.
 
 ### P1b — `xwidget-webkit-callback` advice installed permanently ← **Fixed**
 
-**Files:** `lisp/roam/init-aaronnote.el:1001`  
+**Files:** `lisp/roam/init-noema.el:1001`<br>
 **Issue:** `advice-add` ran unconditionally inside `with-eval-after-load 'xwidget`
 with no idempotency guard. File reload accumulated advice chain entries.
 
@@ -113,7 +113,7 @@ exactly once, mirroring the `my/noema--activity-hooks-installed` pattern.
 
 ### P1c — xwidget session hash retains dead buffer pointers ← **Fixed**
 
-**Files:** `lisp/init-browser.el`  
+**Files:** `lisp/init-browser.el`<br>
 **Issue:** `my/xwidget--sessions` entries were only reclaimed on forced reload.
 User-killed xwidget buffers left dead buffer pointers in the hash. Bounded leak
 that grows with multi-file sessions.
@@ -124,7 +124,7 @@ in `my/xwidget--record-buffer`; it `remhash`es the entry when the buffer is kill
 
 ### P2 — Vim mode not reset on xwidget focus loss ← **Fixed**
 
-**Files:** `aaronnote/main.ts:268`  
+**Files:** `pages/main.ts:268`<br>
 **Issue:** When the user switches to another Emacs buffer and back, the CM6 `blur`
 event fired but there was no vim mode reset. Returning to the editor in silent
 insert or visual mode caused unexpected keystroke interpretation.
@@ -149,8 +149,8 @@ All three items are minor optimizations on an already viewport-aware pipeline:
 - The `url-retrieve` callbacks already had `unwind-protect` buffer cleanup on the
   success/error path — only the hang/no-reply path was unguarded.
 - `xwidget-webkit-callback` advice is NOT removed on `my/noema-stop` because
-  xwidget-webkit may still be in use for non-aaronnote pages; the callback
-  function is a no-op for non-aaronnote buffers.
+  xwidget-webkit may still be in use for non-noema pages; the callback
+  function is a no-op for non-noema buffers.
 - No architectural changes to the bridge protocol, build system, or server routing.
 
 ## Test Verification
@@ -161,14 +161,14 @@ cd site-lisp/noema
 npm test -- tests/sanitize-html.test.ts tests/cm6/commands.test.ts tests/paste-html.test.ts
 
 # Build
-npm run build:aaronnote
+npm run build:pages
 
 # Elisp parse check
-emacs --batch -Q --eval '(with-temp-buffer (insert-file-contents "lisp/roam/init-aaronnote.el") (emacs-lisp-mode) (check-parens))'
+emacs --batch -Q --eval '(with-temp-buffer (insert-file-contents "lisp/roam/init-noema.el") (emacs-lisp-mode) (check-parens))'
 emacs --batch -Q --eval '(with-temp-buffer (insert-file-contents "lisp/init-browser.el") (emacs-lisp-mode) (check-parens))'
 
 # ERT lifecycle tests
-emacs --batch -Q -L lisp -L site-lisp/general.el -l test/init-aaronnote-tests.el \
+emacs --batch -Q -L lisp -L site-lisp/general.el -l test/init-noema-tests.el \
   --eval '(ert-run-tests-batch-and-exit t)'
 ```
 
@@ -186,18 +186,18 @@ End-to-end manual checks:
 
 | # | Priority | File | Change |
 |---|---|---|---|
-| 1 | P1 | `init-aaronnote.el:373` | Process filter generation guard — `my/noema--handle-process-line` now fires only when `(eq proc my/noema--process)`; a dying old process can no longer clobber port/ready state |
-| 2 | P1 | `aaronnote/main.ts:317` | Save file-identity guard — `savingFile = currentFile` captured before `await api.notes.save()`; metadata update returns early if note switched during flight |
+| 1 | P1 | `init-noema.el:373` | Process filter generation guard — `my/noema--handle-process-line` now fires only when `(eq proc my/noema--process)`; a dying old process can no longer clobber port/ready state |
+| 2 | P1 | `pages/main.ts:317` | Save file-identity guard — `savingFile = currentFile` captured before `await api.notes.save()`; metadata update returns early if note switched during flight |
 | 3 | P2 | `server/lib/runtime.mjs:3823` | Copilot SIGKILL fallback — `stop()` now arms a 2 s `.unref()` timer to `SIGKILL` if child ignores SIGTERM; mirrors the existing Emacs-side escalation |
-| 4 | P2 | `init-aaronnote.el:998` | Pending-file POST buffer guard — deferred `my/noema--open-file-in-web` lambda captures buffer; wraps call in `(when (buffer-live-p pending-buf) ...)` |
+| 4 | P2 | `init-noema.el:998` | Pending-file POST buffer guard — deferred `my/noema--open-file-in-web` lambda captures buffer; wraps call in `(when (buffer-live-p pending-buf) ...)` |
 | 5 | P3 | `src/diagram-render.ts:348,361,370` | `isConnected` guard — each post-await key check now also tests `!element.isConnected`, matching the pattern in `math-render.ts` |
-| 6 | P3 | `init-aaronnote.el:379` | Accumulator cap — `aaronnote-pending` is reset if it exceeds 256 KB without a newline, preventing unbounded memory growth from pathological output |
+| 6 | P3 | `init-noema.el:379` | Accumulator cap — `noema-pending` is reset if it exceeds 256 KB without a newline, preventing unbounded memory growth from pathological output |
 
 New ERT test: `my/noema-process-filter-ignores-stale-proc-ready-line` — asserts that a non-current proc emitting a `ready:` line does not mutate `my/noema--port`.
 
 ### Verified false alarms (excluded)
 
-- **Roam sync is not debounce-scheduled** — `queueRoamDbSync` is the accumulator by design; `syncRoamDb` is normally triggered on demand via the `aaronnote:api:notes:roam-sync` channel, with a calibrated one-in-50,000 editor-save sample as a low-rate fallback.
+- **Roam sync is not debounce-scheduled** — `queueRoamDbSync` is the accumulator by design; `syncRoamDb` is normally triggered on demand via the `noema:api:notes:roam-sync` channel, with a calibrated one-in-50,000 editor-save sample as a low-rate fallback.
 - **Activity hooks duplicate on restart** — already guarded by `my/noema--activity-hooks-installed` (Pass 1).
 
 ### Out of scope (verified safe)
@@ -212,11 +212,11 @@ Bounded LRU caches (math/code/diagram/note-code/save-dedup), SSE client teardown
 
 | # | Priority | File | Change |
 |---|---|---|---|
-| 1 | P1 | `aaronnote/main.ts` | Removed the main app's `onSelectionChange` cursor-position hook; cursor memory is now saved on blur/open/pagehide/beforeunload/visibility hidden and explicit navigation events |
-| 2 | P1 | `aaronnote/main.ts` | `selectionchange` no longer schedules snippets/math/cursor/TOC work; it only updates the floating selection toolbar when the browser selection touches the editor |
-| 3 | P1 | `aaronnote/main.ts` | Pure cursor movement, scroll, resize, xwidget key guard movement, and formatting shortcuts no longer request TOC updates; document changes still update TOC through `onChange` |
-| 4 | P2 | `aaronnote/main.ts` | Cursor-position cache update now replaces the current file entry in place instead of rebuilding the positions array on every tracked event |
-| 5 | P2 | `aaronnote/main.ts` | In-flight cursor-position saves now queue one latest-position follow-up instead of dropping the final lifecycle flush |
+| 1 | P1 | `pages/main.ts` | Removed the main app's `onSelectionChange` cursor-position hook; cursor memory is now saved on blur/open/pagehide/beforeunload/visibility hidden and explicit navigation events |
+| 2 | P1 | `pages/main.ts` | `selectionchange` no longer schedules snippets/math/cursor/TOC work; it only updates the floating selection toolbar when the browser selection touches the editor |
+| 3 | P1 | `pages/main.ts` | Pure cursor movement, scroll, resize, xwidget key guard movement, and formatting shortcuts no longer request TOC updates; document changes still update TOC through `onChange` |
+| 4 | P2 | `pages/main.ts` | Cursor-position cache update now replaces the current file entry in place instead of rebuilding the positions array on every tracked event |
+| 5 | P2 | `pages/main.ts` | In-flight cursor-position saves now queue one latest-position follow-up instead of dropping the final lifecycle flush |
 
 ### Benchmark
 
@@ -225,7 +225,7 @@ Benchmark file used: `/Users/hc/HC/Org/Noema/tests/synthetic_qc_note_5mb.md` (5,
 Command used while the temporary benchmark test existed (the test file was removed after the run):
 
 ```sh
-AARONNOTE_BENCH_FILE=/Users/hc/HC/Org/Noema/tests/synthetic_qc_note_5mb.md npm test -- tests/perf-cursor-bench.test.ts --reporter verbose
+NOEMA_BENCH_FILE=/Users/hc/HC/Org/Noema/tests/synthetic_qc_note_5mb.md npm test -- tests/perf-cursor-bench.test.ts --reporter verbose
 ```
 
 Result from the temporary explicit benchmark:

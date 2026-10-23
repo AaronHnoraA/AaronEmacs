@@ -24,7 +24,7 @@
 (declare-function my/open-url-with-backend "init-open" (url backend &optional reuse-selected))
 (declare-function my/open--with-browser-window "init-open" (mode reuse-selected open-fn))
 (declare-function my/open-normalize-url "init-open" (url))
-(declare-function my/noema-switch-buffer-menu "init-aaronnote" (event))
+(declare-function my/noema-switch-buffer-menu "init-noema" (event))
 (declare-function portal-web-reload "portal-web" ())
 (declare-function nerd-icons-mdicon "nerd-icons" (icon-name &rest args))
 (declare-function nerd-icons-codicon "nerd-icons" (icon-name &rest args))
@@ -363,7 +363,7 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
   "Open the current Noema page's Core task manager without polling."
   (interactive)
   (my/xwidget--execute-script
-   "(() => { if (typeof window.aaronnoteOpenTaskManager === 'function') { window.aaronnoteOpenTaskManager(); return true; } return false; })()"))
+   "(() => { if (typeof window.noemaOpenTaskManager === 'function') { window.noemaOpenTaskManager(); return true; } return false; })()"))
 
 (defun my/xwidget--execute-script (script)
   "Execute JavaScript SCRIPT in the current xwidget session."
@@ -601,7 +601,7 @@ RIGHT-ACTION, when non-nil, receives the mouse event on right click."
   "Choose an undisplayed Noema buffer from a webpage header button."
   (interactive "e")
   (unless (fboundp 'my/noema-switch-buffer-menu)
-    (require 'init-aaronnote nil t))
+    (require 'init-noema nil t))
   (if (fboundp 'my/noema-switch-buffer-menu)
       (my/noema-switch-buffer-menu event)
     (message "Noema buffer menu is unavailable")))

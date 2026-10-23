@@ -1,7 +1,7 @@
-;;; init-aaronnote-agenda-source-tests.el --- Gateway source tests -*- lexical-binding: t; -*-
+;;; init-noema-agenda-source-tests.el --- Gateway source tests -*- lexical-binding: t; -*-
 (require 'ert)
-(require 'init-aaronnote)
-(require 'init-aaronnote-agenda-source)
+(require 'init-noema)
+(require 'init-noema-agenda-source)
 (require 'noema-agenda)
 
 (ert-deftest my/noema-attention-navigation-waits-for-entry-and-resolves-the-exact-task ()
@@ -73,4 +73,4 @@
           (my/noema--agenda-source-release-client client)
           (delete-directory root t))))))
 
-(provide 'init-aaronnote-agenda-source-tests)
+(provide 'init-noema-agenda-source-tests)

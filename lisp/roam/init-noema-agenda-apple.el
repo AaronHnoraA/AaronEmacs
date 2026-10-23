@@ -1,4 +1,4 @@
-;;; init-aaronnote-agenda-apple.el --- Client EventKit boundary -*- lexical-binding: t; -*-
+;;; init-noema-agenda-apple.el --- Client EventKit boundary -*- lexical-binding: t; -*-
 (require 'cl-lib)
 (require 'json)
 (require 'remote-framework)
@@ -31,7 +31,7 @@
 (defun my/noema--apple-notify (event)
   (maphash (lambda (client _)
              (ignore-errors
-               (remote-gateway-notify client "aaronnote.agenda.apple-event" event)))
+               (remote-gateway-notify client "noema.agenda.apple-event" event)))
            my/noema--apple-clients))
 
 (defun my/noema--apple-close-process (&optional _value _reason)
@@ -139,4 +139,4 @@
   (remhash client my/noema--apple-clients))
 (add-hook 'remote-gateway-client-disconnected-hook #'my/noema--apple-client-left)
 (add-hook 'kill-emacs-hook #'my/noema--apple-stop)
-(provide 'init-aaronnote-agenda-apple)
+(provide 'init-noema-agenda-apple)

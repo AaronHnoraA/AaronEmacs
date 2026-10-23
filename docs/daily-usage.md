@@ -813,8 +813,8 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   `quickrun`
 - `SPC c y`
   `my/note-code-copy-reference` — 从代码 buffer 生成 `@@note-code(path)[tag]` 到剪贴板。
-  选中区域：提示输入 tag，在区域首行前自动插入 `@aaronnote TAG` 注释标记，然后复制引用。
-  未选中：查找光标上方最近的 `@aaronnote`/`@note-code` 标记，复制对应引用。
+  选中区域：提示输入 tag，在区域首行前自动插入 `@noema TAG` 注释标记，然后复制引用。
+  未选中：查找光标上方最近的 `@noema`/`@note-code` 标记，复制对应引用。
   Path 规则：`/...` 表示从当前 content root 开始；roam vault 内是 roam-root，其他项目文件是 project.el 根目录。裸相对路径保留为从当前 note 目录开始。
 
 测试 runner 优先按当前文件语言选择：混合仓库中的 Go、Python、Rust 和 Node 文件各走

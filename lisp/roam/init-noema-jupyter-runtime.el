@@ -1,4 +1,4 @@
-;;; init-aaronnote-jupyter-runtime.el --- Remote-owned Noema kernels -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-runtime.el --- Remote-owned Noema kernels -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
@@ -40,7 +40,7 @@
   "Noema Jupyter attachment routes keyed by opaque attachment ID.")
 
 (defvar my/noema-jupyter-pending-directory
-  (expand-file-name "var/aaronnote/jupyter/pending-shutdown/"
+  (expand-file-name "var/noema/jupyter/pending-shutdown/"
                     user-emacs-directory)
   "Client-local records for brokered kernels whose shutdown is unconfirmed.")
 
@@ -322,17 +322,17 @@ identity suitable for a later retry.  The file contains no HMAC key."
                             (buffer-string))
                           :object-type 'alist :array-type 'list
                           :null-object nil :false-object :json-false)
-                         `(("AARONNOTE_JUPYTER_ROOT" .
+                         `(("NOEMA_JUPYTER_ROOT" .
                             ,(expand-file-name
                               "site-lisp/noema/jupyter"
                               user-emacs-directory))
-                           ("AARONNOTE_JUPYTER_STATE_ROOT" .
+                           ("NOEMA_JUPYTER_STATE_ROOT" .
                             ,(expand-file-name
-                              "var/aaronnote/jupyter"
+                              "var/noema/jupyter"
                               user-emacs-directory))
                            ("NOEMA_USER_HOME" . ,(expand-file-name "~/"))
                            ("SAGE_VERSION" .
-                            ,(or (getenv "AARONNOTE_SAGE_VERSION")
+                            ,(or (getenv "NOEMA_SAGE_VERSION")
                                  "current")))))
                  (resourceDir . ,directory))
                result)))))
@@ -1638,27 +1638,27 @@ itself.  Attached and server kernels are not brokered and are untouched."
 (add-hook 'kill-emacs-hook #'my/noema-jupyter-shutdown-all-on-exit-h)
 
 (dolist (entry
-         `(("aaronnote.jupyter.kernels" . ,#'my/noema-jupyter--kernels)
-           ("aaronnote.jupyter.launch" . ,#'my/noema-jupyter--launch)
-           ("aaronnote.jupyter.status" . ,#'my/noema-jupyter--status)
-           ("aaronnote.jupyter.interrupt" . ,#'my/noema-jupyter--interrupt)
-           ("aaronnote.jupyter.restart" . ,#'my/noema-jupyter--restart)
-           ("aaronnote.jupyter.shutdown" . ,#'my/noema-jupyter--shutdown)
-           ("aaronnote.jupyter.attach" . ,#'my/noema-jupyter--attach)
-           ("aaronnote.jupyter.attachment.status" .
+         `(("noema.jupyter.kernels" . ,#'my/noema-jupyter--kernels)
+           ("noema.jupyter.launch" . ,#'my/noema-jupyter--launch)
+           ("noema.jupyter.status" . ,#'my/noema-jupyter--status)
+           ("noema.jupyter.interrupt" . ,#'my/noema-jupyter--interrupt)
+           ("noema.jupyter.restart" . ,#'my/noema-jupyter--restart)
+           ("noema.jupyter.shutdown" . ,#'my/noema-jupyter--shutdown)
+           ("noema.jupyter.attach" . ,#'my/noema-jupyter--attach)
+           ("noema.jupyter.attachment.status" .
             ,#'my/noema-jupyter--attachment-status)
-           ("aaronnote.jupyter.attachment.release" .
+           ("noema.jupyter.attachment.release" .
             ,#'my/noema-jupyter--release-attachment)
-           ("aaronnote.jupyter.read-nbextension" .
+           ("noema.jupyter.read-nbextension" .
             ,#'my/noema-jupyter--read-nbextension)
-           ("aaronnote.jupyter.file.read" . ,#'my/noema-jupyter--file-read)
-           ("aaronnote.jupyter.file.write" . ,#'my/noema-jupyter--file-write)
-           ("aaronnote.jupyter.file.rename" . ,#'my/noema-jupyter--file-rename)
-           ("aaronnote.jupyter.file.delete" . ,#'my/noema-jupyter--file-delete)
-           ("aaronnote.jupyter.file.stat" . ,#'my/noema-jupyter--file-stat)))
+           ("noema.jupyter.file.read" . ,#'my/noema-jupyter--file-read)
+           ("noema.jupyter.file.write" . ,#'my/noema-jupyter--file-write)
+           ("noema.jupyter.file.rename" . ,#'my/noema-jupyter--file-rename)
+           ("noema.jupyter.file.delete" . ,#'my/noema-jupyter--file-delete)
+           ("noema.jupyter.file.stat" . ,#'my/noema-jupyter--file-stat)))
   (remote-gateway-register-method (car entry) (cdr entry)))
 
 (remote-doctor-register-check #'my/noema-jupyter--doctor)
 
-(provide 'init-aaronnote-jupyter-runtime)
-;;; init-aaronnote-jupyter-runtime.el ends here
+(provide 'init-noema-jupyter-runtime)
+;;; init-noema-jupyter-runtime.el ends here

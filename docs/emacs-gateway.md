@@ -138,8 +138,8 @@ peer 断开和 gateway stop 会清理 descriptor 与 timer。HTTP `/rpc` 不持�
 - Lean：LSP 继续走 stdio；infoview endpoint 注册、cursor 通知走网关。
 - Noema：命令、事件与 `/api` 控制调用走网关；页面、静态资源、SSE 等数据面
   保留在 Noema HTTP server。远程 Markdown 的逻辑 `/fs:` 路径不投影成
-  Noema 所在机器的路径，而是通过 `aaronnote.file.read` 和
-  `aaronnote.file.write` 回调 Emacs，由 Remote/TRAMP 完成读写。
+  Noema 所在机器的路径，而是通过 `noema.file.read` 和
+  `noema.file.write` 回调 Emacs，由 Remote/TRAMP 完成读写。
 - Copilot：Noema 通过网关调用 Emacs 的 `copilot.request`，不再维护独立
   bridge server。普通 Remote buffer 也复用 Emacs 客户端的同一个 Copilot
   language-server binary；进程通过 `remote-make-client-process` 固定为 client

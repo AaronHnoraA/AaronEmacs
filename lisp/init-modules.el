@@ -129,7 +129,7 @@ If one of FEATURES is already available, require MODULE immediately."
 (require 'init-server)
 (require 'init-background)
 (require 'init-md)
-(require 'init-aaronnote)
+(require 'init-noema)
 (require 'init-noema-search)
 (require 'init-md-roam)
 

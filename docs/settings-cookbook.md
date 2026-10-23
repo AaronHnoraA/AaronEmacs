@@ -142,8 +142,8 @@ posframe 弹窗而不是 inline overlay。支持 `$…$`、`$$…$$`、`\(…\)`
 - `my/noema-codex-model`               — 仅 codex 的模型 id（空 = 默认）
 - CLI 路径复用：codex → `codex-cli-executable`，claude → `claude-code-ide-cli-path`，opencode → `my/noema-opencode-executable`
 
-模板：`templates/latex/*.tex`（`aaronnote-article` / `aaronnote-report` /
-`aaronnote-assignment`），每个文件首行 `% aaronnote-template: {json}` 可声明显示名、
+模板：`templates/latex/*.tex`（`noema-article` / `noema-report` /
+`noema-assignment`），每个文件首行 `% noema-template: {json}` 可声明显示名、
 编译引擎、document role、共享文件及 typed fields（text/select、required、options、
 placeholder、description、group、escape）。新增模板即放一个带该首行的 `.tex`。契约见
 `agents/latex-export/AGENTS.md` 与 `docs/latex-export-style.md`。
@@ -538,7 +538,7 @@ loopback，本机同端口很可能是另一个进程。
 
 ```elisp
 ((nil . ((eval . (setq-local my/project-local-settings
-                             '(:aaronnote-jupyter (:language python
+                             '(:noema-jupyter (:language python
                                                    :kernel sagemath
                                                    :session research))))))))
 ```

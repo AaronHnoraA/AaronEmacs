@@ -1,4 +1,4 @@
-;;; init-aaronnote-jupyter-lsp.el --- Notebook LSP UI integration -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-lsp.el --- Notebook LSP UI integration -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;; Notebook LSP uses the ordinary file-owned Remote workspace, direnv and
@@ -7,8 +7,8 @@
 
 ;;; Code:
 
-(require 'init-aaronnote-jupyter-cell)
-(require 'init-aaronnote-jupyter-project)
+(require 'init-noema-jupyter-cell)
+(require 'init-noema-jupyter-project)
 (require 'init-lsp-runtime)
 
 ;; A live Emacs may reload this module after the old kernel-owned provider was
@@ -46,5 +46,5 @@
 
 (add-hook 'my/noema-jupyter-cell-mode-hook #'my/noema-jupyter-cell--lsp-ui-h)
 
-(provide 'init-aaronnote-jupyter-lsp)
-;;; init-aaronnote-jupyter-lsp.el ends here
+(provide 'init-noema-jupyter-lsp)
+;;; init-noema-jupyter-lsp.el ends here

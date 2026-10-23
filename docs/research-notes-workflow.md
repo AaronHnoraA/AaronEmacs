@@ -330,8 +330,8 @@ be omitted:
 ```
 
 For `math/group.typ`, this reads the region after
-`-- @aaronnote group-cancel` from `/math/group.lean`, stopping at the next
-`@aaronnote` or `@note-code` marker.
+`-- @noema group-cancel` from `/math/group.lean`, stopping at the next
+`@noema` or `@note-code` marker.
 
 Every other language requires an explicit project-root source path:
 
@@ -354,6 +354,6 @@ it directly. Semantic HTML cannot translate Typst paged show rules into browser
 layout, so `roam/render.css` remains a thin DOM adapter that mirrors the Typst
 theme rather than an independent design.
 
-Tinymist preview passes `aaronnote-preview=continuous`, so notes render as one
+Tinymist preview passes `noema-preview=continuous`, so notes render as one
 continuous Typst page without browser page seams or pagination whitespace.
 Normal PDF compilation does not receive this input and remains A4 paged output.

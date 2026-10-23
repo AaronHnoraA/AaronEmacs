@@ -1,4 +1,4 @@
-;;; init-aaronnote-jupyter-notebook-tests.el --- Native ipynb tests -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-notebook-tests.el --- Native ipynb tests -*- lexical-binding: t; -*-
 
 (require 'ert)
 (require 'json)
@@ -8,12 +8,12 @@
              (expand-file-name "../lisp/roam"
                                (file-name-directory (or load-file-name
                                                         buffer-file-name))))
-(require 'init-aaronnote-jupyter-notebook)
+(require 'init-noema-jupyter-notebook)
 (unless (fboundp 'my/noema-command)
   (defun my/noema-command (&rest _args)
     "Test stub for the Noema event bridge."
     nil))
-(require 'init-aaronnote-jupyter-cell)
+(require 'init-noema-jupyter-cell)
 
 (defun my/noema-jupyter-notebook-test--document ()
   "Return a representative notebook JSON object."
@@ -390,7 +390,7 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
                  (lambda () nil))
                 ((symbol-function 'my/noema-jupyter-cell--api-sync)
                  (lambda (channel body _timeout)
-                   (if (equal channel "aaronnote:api:jupyter-cell:kernels")
+                   (if (equal channel "noema:api:jupyter-cell:kernels")
                        catalog
                      (setq selected body)
                      '((session . "ready")))))
@@ -405,7 +405,7 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
                       :type 'user-error)))))
 
 (ert-deftest my/noema-jupyter-gateway-stages-notebook-beside-destination ()
-  (require 'init-aaronnote-jupyter-runtime)
+  (require 'init-noema-jupyter-runtime)
   (let* ((directory (make-temp-file "noema-notebook-write-" t))
          (native (expand-file-name "demo.ipynb" directory))
          (logical (remote-make-file-name "local" native))
@@ -578,9 +578,9 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
       (should (equal shown-message
                      "Noema Jupyter: showing kernel documentation for `int'")))))
 
-(provide 'init-aaronnote-jupyter-notebook-tests)
+(provide 'init-noema-jupyter-notebook-tests)
 
-;;; init-aaronnote-jupyter-notebook-tests.el ends here
+;;; init-noema-jupyter-notebook-tests.el ends here
 
 (ert-deftest my/noema-jupyter-notebook-refuses-to-save-over-an-unreadable-file ()
   "Saving must not fall back to the opened-at document.

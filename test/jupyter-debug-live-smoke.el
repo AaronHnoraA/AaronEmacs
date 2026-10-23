@@ -1,5 +1,5 @@
 ;;; jupyter-debug-live-smoke.el --- Real kernel, Noema and Dape debugging -*- lexical-binding: t; -*-
-(require 'init-aaronnote-jupyter-debug)
+(require 'init-noema-jupyter-debug)
 (require 'dape)
 (defvar my/jupyter-contents-live-extra nil)
 
@@ -96,7 +96,7 @@
               "audit_result = audit_twice(7)\n"
               "print(audit_result)\n")
       (save-buffer)
-      (my/noema-jupyter-cell--api-sync "aaronnote:api:jupyter:document-execute"
+      (my/noema-jupyter-cell--api-sync "noema:api:jupyter:document-execute"
                                       `((scriptFile . ,file) (cellId . "audit-setup")) 60)
       (goto-char (point-min))
       (search-forward "    return audit_debug_module")

@@ -514,7 +514,7 @@
         (my/activity-noema--poll)
         (my/activity-noema--poll)
         (should (= calls 1))
-        (should (equal channel "aaronnote:api:tasks:list"))
+        (should (equal channel "noema:api:tasks:list"))
         (should (equal arguments [((activeOnly . t))]))
         (funcall callback
                  '((tasks . [((id . "latex") (title . "Export note")
@@ -526,10 +526,10 @@
         (should (string-match-p "Compiling"
                                 (my/activity-detail (car my/activity-noema--tasks))))
         (funcall (my/activity-cancel (car my/activity-noema--tasks)))
-        (should (equal channel "aaronnote:api:tasks:cancel"))
+        (should (equal channel "noema:api:tasks:cancel"))
         (should (equal arguments [((id . "latex"))]))
         (funcall callback '((ok . t)) nil)
-        (should (equal channel "aaronnote:api:tasks:list"))
+        (should (equal channel "noema:api:tasks:list"))
         (funcall callback '((tasks . [])) nil)
         (should (= 0 (my/activity-count)))))))
 

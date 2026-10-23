@@ -107,7 +107,7 @@ different answer rebuilds the Dashboard.")
 (declare-function noema-agenda-dashboard-query "noema-agenda" (callback))
 (defvar my/noema-host-ready-functions)
 (declare-function noema-agenda-open "noema-agenda" (&optional query))
-(declare-function my/noema-wiki-home "init-aaronnote" ())
+(declare-function my/noema-wiki-home "init-noema" ())
 (declare-function my/performance-watch "init-performance" ())
 (defvar dashboard-mode-map)
 
@@ -342,7 +342,7 @@ into a full-width bar.  `agent-shell-prompt' inherits this face."
   "Open the canonical Noema Wiki from the dashboard button."
   (interactive)
   (unless (fboundp 'my/noema-wiki-home)
-    (require 'init-aaronnote))
+    (require 'init-noema))
   (my/noema-wiki-home))
 
 (defun my/dashboard-open-monitor (&rest _)

@@ -35,7 +35,8 @@
 
 (defconst my/note-code--marker-regexp
   (rx line-start (* nonl)
-      "@" (or "aaronnote" "note-code") (+ space)
+      ;; `aaronnote' is the marker written before the Noema rename.
+      "@" (or "noema" "note-code" "aaronnote") (+ space)
       (group (+ (not space)))
       (* space) line-end)
   "Regexp matching Noema and generic source-region markers.")
@@ -204,7 +205,7 @@ SELECTOR is a path relative to the note root, e.g. \"math/foo.lean\"."
              (file-in-directory-p buffer-file-name (my/note-code--root)))
     (let ((directory (expand-file-name "_typst" (my/note-code--root))))
       (dolist (entry '(("notes/note-code.typ" . "note-code.typ")
-                       ("notes/aaronnote-html.css" . "roam/note.css")))
+                       ("notes/noema-html.css" . "roam/note.css")))
         (let ((source (expand-file-name (car entry) user-emacs-directory))
               (link (expand-file-name (cdr entry) directory)))
           (when (file-exists-p source)
@@ -250,7 +251,7 @@ Signals an error if the buffer is not visiting a file."
      (t file))))
 
 (defun my/note-code--marker-on-line ()
-  "Return the @aaronnote/@note-code tag already present on the current line.
+  "Return the @noema/@note-code/@aaronnote tag present on the current line.
 Returns nil if the line is not a marker line."
   (save-excursion
     (goto-char (line-beginning-position))
@@ -267,7 +268,7 @@ Returns nil if the line is not a marker line."
   "Copy an @@note-code(path)[id] reference to the kill ring.
 
 With an active region: prompt for a tag (default: function name or
-timestamp), insert an @aaronnote marker comment before the first line
+timestamp), insert an @noema marker comment before the first line
 of the region, deactivate the mark, and copy @@note-code(PATH)[TAG].
 
 Without a region: if the current line is already a marker comment,
@@ -290,7 +291,7 @@ so Noema resolves it from the relevant root rather than the note directory."
           (save-excursion
             (goto-char (region-beginning))
             (goto-char (line-beginning-position))
-            (insert (format "%s@aaronnote %s\n"
+            (insert (format "%s@noema %s\n"
                             (my/note-code--comment-prefix) tag)))
           (deactivate-mark)
           (let ((ref (format "@@note-code(%s)[%s]" path tag)))
@@ -312,7 +313,7 @@ so Noema resolves it from the relevant root rather than the note directory."
               (user-error "Tag cannot be empty"))
             (save-excursion
               (goto-char (line-beginning-position))
-              (insert (format "%s@aaronnote %s\n"
+              (insert (format "%s@noema %s\n"
                               (my/note-code--comment-prefix) tag)))
             (let ((ref (format "@@note-code(%s)[%s]" path tag)))
               (kill-new ref)

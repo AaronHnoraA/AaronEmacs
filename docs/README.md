@@ -60,7 +60,7 @@ channels.
 - [neomacs-compat.md](neomacs-compat.md) Running this configuration on Neomacs: the modifier-rename layer, fringe and startup-frame fixes, Elsa concurrency, and why the 0.0.18 migration was paused. Neomacs is not installed; the layer is inert on GNU Emacs.
 - [maintenance.md](maintenance.md) Package management, lock workflow, state directories, cleanup, troubleshooting, and maintenance cadence.
 - [migration.md](migration.md) New-machine setup, restore workflow, and the migration lessons learned from this configuration.
-- [aaronnote-xwidget-audit.md](aaronnote-xwidget-audit.md) Full-chain stability, HCI, and security audit of the Emacs ↔ xwidget ↔ aaronnote bridge.
+- [noema-xwidget-audit.md](noema-xwidget-audit.md) Full-chain stability, HCI, and security audit of the Emacs ↔ xwidget ↔ noema bridge.
 
 ## Shortest Path
 

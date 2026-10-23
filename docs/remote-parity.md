@@ -151,9 +151,9 @@ Emacs 实例，完整初始化：
 |---|---|
 | `init-jupyter-board.el`、`init-jupyter-management.el` 中的 `(remote-get-target "local")`、默认 owner、显示文字 | 身份与默认值，不是行为分支 |
 | `init-ai-ide.el`、`init-base.el` 的报错与分类文字 | 显示用 |
-| `init-aaronnote.el` 的原始主机路径默认归属、`init-aaronnote-jupyter-server.el` 的默认 owner | 客户端边界上的默认身份 |
+| `init-noema.el` 的原始主机路径默认归属、`init-noema-jupyter-server.el` 的默认 owner | 客户端边界上的默认身份 |
 | `init-shell.el` 的终端 buffer 命名 | 仅影响名称 |
-| `init-aaronnote-jupyter-server.el`：本机 server 不建转发 | 明文规定的策略（非本机 target 必须经 channel） |
+| `init-noema-jupyter-server.el`：本机 server 不建转发 | 明文规定的策略（非本机 target 必须经 channel） |
 | `init-lsp.el`：非本机 target 的 watch 归 workspace 所有、shutdown 超时放宽 | 由测试固定的 target 身份契约；换成放置查询会改变契约 |
 | `init-jupyter-board.el` 的路由说明文字（“Direct from this machine”） | 显示用 |
 

@@ -1,4 +1,4 @@
-;;; init-aaronnote-publish.el --- Personal site build and deploy -*- lexical-binding: t; -*-
+;;; init-noema-publish.el --- Personal site build and deploy -*- lexical-binding: t; -*-
 ;;
 ;; Lazy-loaded: not required at startup.  Loaded on first publish command.
 ;; Both interactive commands and batch (make publish-*) entry points live here.
@@ -127,7 +127,7 @@ LABEL is shown in progress messages.  SENTINEL is called when the process exits.
   (let ((default-directory my/noema-publish-root))
     (setq my/noema-publish--process
           (make-process
-           :name "aaronnote-publish"
+           :name "noema-publish"
            :buffer my/noema-publish--log-buffer
            :command args
            :sentinel
@@ -306,5 +306,5 @@ LABEL names the operation in the failure message."
   "Batch entry: clean build state."
   (my/noema-publish-clean))
 
-(provide 'init-aaronnote-publish)
-;;; init-aaronnote-publish.el ends here
+(provide 'init-noema-publish)
+;;; init-noema-publish.el ends here

@@ -1,6 +1,6 @@
-;;; init-aaronnote-jupyter-files-tests.el --- Notebook file workflows -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-files-tests.el --- Notebook file workflows -*- lexical-binding: t; -*-
 (require 'ert)
-(require 'init-aaronnote-jupyter-files)
+(require 'init-noema-jupyter-files)
 
 (defun my/notebook-files-test--document (&optional source)
   (json-parse-string

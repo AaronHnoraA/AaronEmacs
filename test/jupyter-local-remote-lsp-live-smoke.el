@@ -1,6 +1,6 @@
 ;;; jupyter-local-remote-lsp-live-smoke.el --- Local file, SSH kernel, local LSP -*- lexical-binding: t; -*-
 ;; Opt-in live check.  The SSH kernelspec is metadata only; no SSH is needed.
-(require 'init-aaronnote-jupyter-lsp)
+(require 'init-noema-jupyter-lsp)
 (require 'init-lsp)
 (load (expand-file-name "test/lsp-live-smoke.el" user-emacs-directory) nil t)
 

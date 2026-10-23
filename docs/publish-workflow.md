@@ -8,7 +8,7 @@
 |---|---|
 | `~/.emacs.d/publish`(→ `~/HC/Homepage`) | **站点本身**。手写的 HTML/CSS/JS,仓库根就是网站根 |
 | `publish/CV/main.tex` | CV 的 LaTeX 源(在 publish 仓库里,与站点同仓) |
-| `lisp/roam/init-aaronnote-publish.el` | 编译 CV、检查完整性、部署 |
+| `lisp/roam/init-noema-publish.el` | 编译 CV、检查完整性、部署 |
 
 站点没有构建步骤。页面是什么样,提交进去的就是什么样;唯一被生成的产物是 CV 的 PDF。
 要改主页,直接编辑 publish 仓库里的文件。
@@ -23,7 +23,7 @@ make publish-clean    # 清掉 CV 编译中间产物
 ```
 
 这些目标走的是一个精简的 batch Emacs(`PUBLISH_BATCH`),只加载
-`init-aaronnote-publish.el`,不加载 `init.el`,所以发布不受配置状态影响。
+`init-noema-publish.el`,不加载 `init.el`,所以发布不受配置状态影响。
 对应的交互命令是 `my/noema-publish`、`my/noema-publish-build`、
 `my/noema-publish-deploy`、`my/noema-publish-clean`。
 

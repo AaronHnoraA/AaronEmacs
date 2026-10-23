@@ -713,7 +713,7 @@ BODY may refer to the JuText buffer as `source'."
                                   nil)))
                       ((symbol-function 'display-buffer) #'ignore))
               (noema-research-inspect))
-            (should (equal (car seen) "aaronnote:api:research:artifact:links"))
+            (should (equal (car seen) "noema:api:research:artifact:links"))
             (let ((request (aref (cadr seen) 0)))
               (should (equal (gethash "workNodeId" request) work-node-id)))
             (with-current-buffer inspector
@@ -745,7 +745,7 @@ BODY may refer to the JuText buffer as `source'."
             (noema-research-goto-cell "c-w")
             (cl-letf (((symbol-function 'my/noema-api-call)
                        (lambda (channel args callback &optional _timeout)
-                         (when (equal channel "aaronnote:api:research:run:context-receipt")
+                         (when (equal channel "noema:api:research:run:context-receipt")
                            (setq requested (gethash "runId" (aref args 0))))
                          (funcall callback
                                   (if requested
@@ -1247,7 +1247,7 @@ so saving never reports it as a malformed Agent directive."
           (kill-buffer buffer))))))
 
 (ert-deftest noema-research-ipynb-dispatch-selects-the-research-mode ()
-  (require 'init-aaronnote-jupyter-notebook)
+  (require 'init-noema-jupyter-notebook)
   (noema-research-test--with-directory directory
     (let ((file (expand-file-name "bound.noema" directory))
           (noema-research-sync-host nil))
@@ -1260,7 +1260,7 @@ so saving never reports it as a malformed Agent directive."
           (kill-buffer buffer))))))
 
 (ert-deftest noema-research-visiting-a-projectless-noema-never-creates-a-project ()
-  (require 'init-aaronnote-jupyter-notebook)
+  (require 'init-noema-jupyter-notebook)
   (noema-research-test--with-directory directory
     (let ((file (expand-file-name "bound.noema" directory))
           (noema-research-sync-host nil))
@@ -1275,7 +1275,7 @@ so saving never reports it as a malformed Agent directive."
             (kill-buffer buffer)))))))
 
 (ert-deftest noema-research-new-noema-visit-settles-the-project-first ()
-  (require 'init-aaronnote-jupyter-notebook)
+  (require 'init-noema-jupyter-notebook)
   (noema-research-test--with-directory directory
     (let ((file (expand-file-name "notes/new.noema" directory))
           (project-find-functions (list (lambda (_) (cons 'transient directory))))
@@ -1878,7 +1878,7 @@ so saving never reports it as a malformed Agent directive."
               (should (eq (noema-research-graph-dock source) graph-window)))
             (should (eq (selected-window) source-window))
             (should (eq (window-in-direction 'below source-window) graph-window))
-            (when (require 'init-aaronnote nil t)
+            (when (require 'init-noema nil t)
               (let ((output (my/noema-jupyter--output-split source-window)))
                 (should (eq (window-in-direction 'right source-window) output))
                 (should (eq (window-in-direction 'right graph-window) output))))))
@@ -2713,7 +2713,7 @@ so saving never reports it as a malformed Agent directive."
                          (funcall callback (noema-research--table "id" "ses_noema") nil))))
               (noema-agent-promote-current-session "Bound" "Improve it")
               (should (equal requested-channel
-                             "aaronnote:api:research:session:promote"))
+                             "noema:api:research:session:promote"))
               (should (equal (alist-get 'goal (aref requested-args 0)) "Improve it"))
               (should (equal noema-agent-promote--session-id "ses_noema"))))
         (setq my/noema--ready old-ready)))))
@@ -2907,7 +2907,7 @@ so saving never reports it as a malformed Agent directive."
                      (setq channel actual-channel body actual-body)
                      (funcall callback '((run . ((status . "failed")))) nil))))
           (noema-agent-worker--fail-prepared worker "adapter missing")
-          (should (equal channel "aaronnote:api:research:run:fail-preparing"))
+          (should (equal channel "noema:api:research:run:fail-preparing"))
           (should (equal (alist-get 'failureReason body) "adapter missing"))
           (should (noema-agent-worker-terminal worker))
           (should-not (gethash "run_boot" noema-agent-worker--runs)))
@@ -2924,7 +2924,7 @@ so saving never reports it as a malformed Agent directive."
                  (setq channel actual-channel body actual-body)
                  (funcall callback '((lease . ((epoch . 4)))) nil))))
       (noema-agent-worker--renew worker)
-      (should (equal channel "aaronnote:api:research:worker:lease"))
+      (should (equal channel "noema:api:research:worker:lease"))
       (should (= (alist-get 'ttlMillis body) 30000)))))
 
 (ert-deftest noema-agent-worker-reconciles-a-lost-start-response-without-reprompting ()
@@ -2936,17 +2936,17 @@ so saving never reports it as a malformed Agent directive."
                (lambda (channel _body callback &optional _timeout)
                  (push channel channels)
                  (pcase channel
-                   ("aaronnote:api:research:run:fail-preparing"
+                   ("noema:api:research:run:fail-preparing"
                     (funcall callback nil '((message . "cannot fail before dispatch from running"))))
-                   ("aaronnote:api:research:run:get"
+                   ("noema:api:research:run:get"
                     (funcall callback '((run . ((status . "running")))) nil))
-                   ("aaronnote:api:research:worker:events"
+                   ("noema:api:research:worker:events"
                     (funcall callback '((events . [])) nil))))))
       (noema-agent-worker--fail-prepared worker "start response lost")
       (should (equal (nreverse channels)
-                     '("aaronnote:api:research:run:fail-preparing"
-                       "aaronnote:api:research:run:get"
-                       "aaronnote:api:research:worker:events")))
+                     '("noema:api:research:run:fail-preparing"
+                       "noema:api:research:run:get"
+                       "noema:api:research:worker:events")))
       (should (noema-agent-worker-started worker))
       (should (noema-agent-worker-terminal worker)))))
 
@@ -3132,7 +3132,7 @@ BODY sees `calls' (newest first) and `callbacks' for prepare responses."
       (should (functionp ready))
       (should-not calls)
       (funcall ready)
-      (should (equal calls '("aaronnote:api:research:run:prepare"))))))
+      (should (equal calls '("noema:api:research:run:prepare"))))))
 
 (ert-deftest noema-research-attention-previews-proposed-file-changes ()
   (let ((noema-agent-worker--previews (make-hash-table :test #'equal)))
@@ -3404,7 +3404,7 @@ board must draw the whole plan, not its first cell."
                                :disable-provider-tools))
             (should (string-match-p "UNTRUSTED_RESEARCH_DATA"
                                     (magent-llm-request-prompt request)))
-            (should (equal api-channel "aaronnote:api:research:proposal:create"))
+            (should (equal api-channel "noema:api:research:proposal:create"))
             (should (equal (alist-get 'proposedBy api-body) "agent:magent:curator"))
             (should (equal (alist-get 'sourceAdapter api-body) "magent/gptel"))
             (should-not (buffer-modified-p)))
@@ -3492,12 +3492,12 @@ board must draw the whole plan, not its first cell."
                       ((symbol-function 'my/noema-api-call)
                        (lambda (channel _args callback &optional _timeout)
                          (pcase channel
-                           ("aaronnote:api:research:coordinator:endpoint"
+                           ("noema:api:research:coordinator:endpoint"
                             (funcall callback (noema-research--table
                                                "mcpUrl" "http://127.0.0.1:9/mcp"
                                                "coordinatorUrl" "http://127.0.0.1:9/mcp/coordinator")
                                      nil))
-                           ("aaronnote:api:research:session:name:get"
+                           ("noema:api:research:session:name:get"
                             (funcall callback (noema-research--table
                                                "name" (noema-research--table "name" "pi" "nativeSessionId" "native-pi"))
                                      nil)))))
@@ -3854,15 +3854,15 @@ Idle time counts from the buffer's last change, not from its last display."
                     ((symbol-function 'my/noema-api-call)
                      (lambda (channel args callback &optional _timeout)
                        (pcase channel
-                         ("aaronnote:api:research:coordinator:endpoint"
+                         ("noema:api:research:coordinator:endpoint"
                           (funcall callback (noema-research--table
                                              "coordinatorUrl" "http://127.0.0.1:9/mcp/coordinator")
                                    nil))
-                         ("aaronnote:api:research:session:name:get"
+                         ("noema:api:research:session:name:get"
                           (funcall callback nil (noema-research--table "message" "not found")))
-                         ("aaronnote:api:research:session:promote"
+                         ("noema:api:research:session:promote"
                           (funcall callback (noema-research--table "id" "ses_pi") nil))
-                         ("aaronnote:api:research:session:name:bind"
+                         ("noema:api:research:session:name:bind"
                           (setq bound (aref args 0))
                           (funcall callback (noema-research--table) nil)))))
                     ((symbol-function 'noema-agent-acp-config-for) (lambda (_) (list (cons :identifier 'pi))))
@@ -4002,7 +4002,7 @@ Idle time counts from the buffer's last change, not from its last display."
   (let (claimed runs)
     (cl-letf (((symbol-function 'noema-agent-worker--api)
                (lambda (channel body callback &optional _timeout)
-                 (should (equal channel "aaronnote:api:research:coordinator:claim"))
+                 (should (equal channel "noema:api:research:coordinator:claim"))
                  (setq claimed body)
                  (funcall callback
                           (noema-research--table
@@ -4249,7 +4249,7 @@ Idle time counts from the buffer's last change, not from its last display."
                  (lambda (channel body _callback) (push (cons channel body) calls))))
         (noema-sessions--note-read quiet "/tmp/p/")
         (noema-sessions--note-read fresh-failure "/tmp/p/"))
-      (should (equal calls '(("aaronnote:api:research:session:name:read"
+      (should (equal calls '(("noema:api:research:session:name:read"
                               (cwd . "/tmp/p/") (name . "boom"))))))))
 
 (ert-deftest noema-sessions-running-status-shows-a-quiet-agent ()
@@ -4385,7 +4385,7 @@ Idle time counts from the buffer's last change, not from its last display."
       (should (noema-agent-worker-terminal-events worker))
       (noema-agent-worker-check-completion worker)
       (should (noema-agent-worker-terminal-acked worker))
-      (should (equal (reverse channels) '("aaronnote:api:research:worker:events" "aaronnote:api:research:run:get"))))))
+      (should (equal (reverse channels) '("noema:api:research:worker:events" "noema:api:research:run:get"))))))
 
 (ert-deftest noema-agent-worker-done-prose-is-not-a-completion-receipt ()
   (let ((worker (noema-agent-worker--create :run-id "r" :result-parts '("All done."))))

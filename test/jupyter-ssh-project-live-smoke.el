@@ -2,10 +2,10 @@
 ;; Opt-in: JUPYTER_SSH_TARGET=aaron-pc JUPYTER_SSH_ROOT=/home/.../COMP9444
 ;; The probe creates one temporary notebook in ROOT and removes it on exit.
 
-(require 'init-aaronnote)
-(require 'init-aaronnote-jupyter-notebook)
-(require 'init-aaronnote-jupyter-runtime)
-(require 'init-aaronnote-jupyter-lsp)
+(require 'init-noema)
+(require 'init-noema-jupyter-notebook)
+(require 'init-noema-jupyter-runtime)
+(require 'init-noema-jupyter-lsp)
 (require 'init-lsp)
 (require 'init-project)
 (load (expand-file-name "test/lsp-live-smoke.el" user-emacs-directory) nil t)
@@ -130,7 +130,7 @@
               (my/noema-jupyter-cell-select-kernel nil "python3")
               (princ "PASS Noema selected the target kernelspec\n")
               (unless (my/noema-jupyter-cell--api-sync
-                       "aaronnote:api:jupyter:script-action"
+                       "noema:api:jupyter:script-action"
                        (append (my/noema-jupyter-cell--document-detail)
                                '((action . "run-all"))) 60)
                 (error "Noema did not execute the SSH notebook")))
@@ -206,7 +206,7 @@
         (when (and my/noema--ready (buffer-live-p notebook))
           (ignore-errors
             (my/noema--api-call-sync
-             "aaronnote:api:jupyter:script-action"
+             "noema:api:jupyter:script-action"
              (vector `((scriptFile . ,file) (action . "shutdown"))) 20)))
         (when (buffer-live-p notebook)
           (with-current-buffer notebook

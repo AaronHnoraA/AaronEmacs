@@ -55,7 +55,7 @@
    (my/noema-publish-nas-enable . t)
    (my/noema-publish-nas-target . "Aaron-nas:/volume1/web/public/")
    (my/noema-publish-cv-dir . "/Users/hc/.emacs.d/publish/CV")
-   (my/noema-publish-state-dir . "/Users/hc/.emacs.d/var/aaronnote/publish")
+   (my/noema-publish-state-dir . "/Users/hc/.emacs.d/var/noema/publish")
    (my/noema-publish-root . "/Users/hc/.emacs.d/publish") (my/session-auto-save)
    (my/noema-web-port . 50815) (my/noema-backend . portal)
    (my/noema-latex-export-engine . "codex")

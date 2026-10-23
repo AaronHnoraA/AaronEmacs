@@ -235,7 +235,7 @@ connection types keep the package's original shutdown behavior."
   (let ((buffer (get-buffer-create " *Noema copilot bridge*")))
     (with-current-buffer buffer
       (setq-local buffer-file-name
-                  (expand-file-name "var/aaronnote/copilot-bridge/bridge.md"
+                  (expand-file-name "var/noema/copilot-bridge/bridge.md"
                                     user-emacs-directory))
       (setq-local default-directory
                   (file-name-as-directory user-emacs-directory)))
@@ -294,12 +294,12 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
     (error "copilot.el is unavailable"))
   (let* ((raw (if (and (stringp file) (not (string-empty-p file)))
                   (expand-file-name file)
-                "aaronnote-copilot.md"))
+                "noema-copilot.md"))
          (ext (or (file-name-extension raw t) ".md"))
          (base (file-name-nondirectory raw))
          (hash (secure-hash 'sha1 raw))
          (synthetic (expand-file-name
-                     (format "var/aaronnote/copilot-bridge/%s-%s%s"
+                     (format "var/noema/copilot-bridge/%s-%s%s"
                              hash
                              (file-name-base base)
                              ext)

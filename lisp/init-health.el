@@ -306,7 +306,7 @@ templates at all.  Check them so that cannot happen quietly again.")
            (require 'tramp)
            (or (assoc "rpc" tramp-methods)
                (assoc 'rpc tramp-methods))))
-   (cons 'aaronnote-latex-agent
+   (cons 'noema-latex-agent
          ;; OK unless the Noema LaTeX export engine wants an AI backend but
          ;; that backend's binary is missing (export still works via mechanical
          ;; fallback).

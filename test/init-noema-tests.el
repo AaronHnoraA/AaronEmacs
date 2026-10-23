@@ -1,10 +1,10 @@
-;;; init-aaronnote-tests.el --- Aaronnote bridge tests -*- lexical-binding: t; -*-
+;;; init-noema-tests.el --- Noema bridge tests -*- lexical-binding: t; -*-
 
 (require 'ert)
 (require 'cl-lib)
 (unless (fboundp 'general-define-key)
   (defalias 'general-define-key #'ignore))
-(require 'init-aaronnote)
+(require 'init-noema)
 
 (ert-deftest my/noema-latex-agent-progress-is-bounded-and-content-free ()
   (let ((request-id "test-latex-progress")
@@ -34,7 +34,7 @@
           (my/noema--latex-agent-progress
            request-id "claude" '((:event . agent-message-chunk)))
           (should (= (length sent) 2))
-          (should (equal (caar sent) "aaronnote.latex.agent-progress")))
+          (should (equal (caar sent) "noema.latex.agent-progress")))
       (remhash request-id my/noema--latex-agent-requests))))
 
 (ert-deftest my/noema-bulk-tag-change-invalidates-roam-cache-once ()
@@ -455,16 +455,12 @@
 (ert-deftest my/noema-workspace-root-follows-desktop-precedence ()
   (let ((process-environment (copy-sequence process-environment)))
     (setenv "NOEMA_ROOT" "/tmp/noema-primary")
-    (setenv "AARONNOTE_ROOT" "/tmp/noema-compat")
-    (should (equal (my/noema-workspace-root) "/tmp/noema-primary/"))
-    (setenv "NOEMA_ROOT" nil)
-    (should (equal (my/noema-workspace-root) "/tmp/noema-compat/"))))
+    (should (equal (my/noema-workspace-root) "/tmp/noema-primary/"))))
 
 (ert-deftest my/noema-workspace-root-and-layout-use-app-config ()
   (let ((process-environment (copy-sequence process-environment))
         (workspace (make-hash-table :test #'equal)))
     (setenv "NOEMA_ROOT" nil)
-    (setenv "AARONNOTE_ROOT" nil)
     (setenv "NOEMA_WORKSPACE_LAYOUT" nil)
     (puthash "root" "~/Documents/Noema-test" workspace)
     (puthash "layout" "wiki" workspace)
@@ -545,7 +541,7 @@
                  (funcall callback '((notes . nil) (generation . "1234567890")
                                      (maintenance . ((mode . "incremental"))))))))
       (my/noema-wiki-refresh)
-      (should (equal (car call) "aaronnote:api:wiki:refresh"))
+      (should (equal (car call) "noema:api:wiki:refresh"))
       (should (equal (alist-get 'mode (aref (cadr call) 0)) "incremental")))))
 
 (ert-deftest my/noema-wiki-index-status-renders-repository-hash-tables ()
@@ -661,7 +657,7 @@
         "/tmp/note.md")))))
 
 (ert-deftest my/noema-external-provider-reads-and-writes-through-logical-file-api ()
-  (let* ((native (make-temp-file "aaronnote-remote-provider-" nil ".md"))
+  (let* ((native (make-temp-file "noema-remote-provider-" nil ".md"))
          (logical (remote-expand-file-name native nil "local"))
          (canonical (my/noema--canonical-file logical)))
     (unwind-protect
@@ -756,7 +752,7 @@
       (my/noema--clear-external-file-watches)
       (should
        (equal closed
-              '(mock-workspace mock-resource aaronnote-stop)))
+              '(mock-workspace mock-resource noema-stop)))
       (should
        (zerop
         (hash-table-count my/noema--external-file-watches))))))
@@ -927,22 +923,22 @@
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
 (ert-deftest my/noema-jupyter-defaults-read-project-config-without-eval ()
-  (let ((root (make-temp-file "aaronnote-project" t)))
+  (let ((root (make-temp-file "noema-project" t)))
     (unwind-protect
         (progn
           (with-temp-file (expand-file-name ".dir-locals.el" root)
             (insert "((nil . ((my/project-local-settings . "
                     "(:toolchain ((python . sage)) "
-                    ":aaronnote-jupyter (:language sage :kernel sagemath :session research))))))\n"))
+                    ":noema-jupyter (:language sage :kernel sagemath :session research))))))\n"))
           (let ((my/noema--notes-root root))
             (should
              (equal (my/noema--jupyter-defaults)
                     '(:language "sage" :kernel "sagemath" :session "research")))
             (should
              (equal (my/noema--jupyter-default-environment)
-                    '("AARONNOTE_JUPYTER_DEFAULT_LANGUAGE=sage"
-                      "AARONNOTE_JUPYTER_DEFAULT_KERNEL=sagemath"
-                      "AARONNOTE_JUPYTER_DEFAULT_SESSION=research")))))
+                    '("NOEMA_JUPYTER_DEFAULT_LANGUAGE=sage"
+                      "NOEMA_JUPYTER_DEFAULT_KERNEL=sagemath"
+                      "NOEMA_JUPYTER_DEFAULT_SESSION=research")))))
       (delete-directory root t))))
 
 (ert-deftest my/noema-prose-check-is-an-editor-command ()
@@ -1004,7 +1000,7 @@
                 ((symbol-function 'my/noema-jupyter-output-open)
                  (lambda (&rest _args) (setq output-opened t))))
         (my/noema-jupyter-cell--execute "current")))
-    (should (equal (car api-call) "aaronnote:api:jupyter:script-action"))
+    (should (equal (car api-call) "noema:api:jupyter:script-action"))
     (should-not output-opened)))
 
 (ert-deftest my/noema-jupyter-refresh-uses-authoritative-script-snapshot ()
@@ -1032,7 +1028,7 @@
                      #'ignore))
             (my/noema-jupyter-cell-refresh-status))
           (should (equal (car call)
-                         "aaronnote:api:jupyter:script-snapshot"))
+                         "noema:api:jupyter:script-snapshot"))
           (should (equal (aref (cadr call) 0)
                          '((scriptFile . "/tmp/notebook.ipynb"))))
           (should (equal my/noema-jupyter-cell-kernel "sagemath"))
@@ -1068,7 +1064,7 @@
        nil))
     (should-not seen)))
 
-(ert-deftest my/noema-xwidget-redo-routes-only-aaronnote-buffer ()
+(ert-deftest my/noema-xwidget-redo-routes-only-noema-buffer ()
   (let ((buffer (generate-new-buffer "*Noema-test*"))
         (my/noema--app-buffer nil)
         sent passed)
@@ -1087,7 +1083,7 @@
                        (setq passed (or event last-command-event)))))
             (with-current-buffer buffer
               (setq my/noema--app-buffer buffer)
-              (my/noema-xwidget-redo 'aaronnote-event))
+              (my/noema-xwidget-redo 'noema-event))
             (should (equal sent '("redo" nil)))
             (should-not passed)
             (setq sent nil)
@@ -1306,7 +1302,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
         (progn
           (with-current-buffer buffer
             (setq-local major-mode 'xwidget-webkit-mode)
-            (setq-local my/xwidget--session-id "aaronnote-jupyter"))
+            (setq-local my/xwidget--session-id "noema-jupyter"))
           (cl-letf (((symbol-function 'my/noema-command)
                      (lambda (command &optional detail)
                        (setq sent (list command detail))))
@@ -1328,7 +1324,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
         (kill-buffer buffer)))))
 
 (ert-deftest my/noema-editable-split-opens-fresh-client-xwidget ()
-  (let* ((file (make-temp-file "aaronnote-split" nil ".md"))
+  (let* ((file (make-temp-file "noema-split" nil ".md"))
          (source (generate-new-buffer "*Noema-split-source*"))
          (xwidget-buffer (generate-new-buffer "*Noema-split-xwidget*"))
          (my/noema--port 4242)
@@ -1354,8 +1350,8 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                        xwidget-buffer)))
             (my/noema-open-current-note-split))
           (should-not (string-match-p "readonly=1" opened-url))
-          (should (string-match-p "client=aaronnote-split%3A" opened-url))
-          (should (string-prefix-p "aaronnote-split:" opened-id))
+          (should (string-match-p "client=noema-split%3A" opened-url))
+          (should (string-prefix-p "noema-split:" opened-id))
           (should (eq opened-display 'current))
           (should opened-force-new)
           (should opened-reuse)
@@ -1660,9 +1656,9 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
          visited-id visited-url)
     (unwind-protect
         (cl-letf (((symbol-function 'my/xwidget-session-buffer)
-                   (lambda (id) (and (equal id "aaronnote:surface") existing)))
+                   (lambda (id) (and (equal id "noema:surface") existing)))
                   ((symbol-function 'my/xwidget-current-url)
-                   (lambda (&optional _) "http://127.0.0.1:4242/wiki?client=aaronnote"))
+                   (lambda (&optional _) "http://127.0.0.1:4242/wiki?client=noema"))
                   ((symbol-function 'my/xwidget-open-url)
                    (lambda (url &rest args)
                      (setq visited-url url visited-id (plist-get args :id))
@@ -1670,22 +1666,22 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                   ((symbol-function 'my/noema--track-app-buffer) #'ignore)
                   ((symbol-function 'run-at-time) (lambda (&rest _) nil)))
           (my/noema--open-xwidget "http://127.0.0.1:4242/graph" nil)
-          (should (equal visited-id "aaronnote:surface"))
-          (should (string-match-p (regexp-quote "/graph?client=aaronnote%3Asurface")
+          (should (equal visited-id "noema:surface"))
+          (should (string-match-p (regexp-quote "/graph?client=noema%3Asurface")
                                   visited-url))
           (with-current-buffer existing
             (setq-local my/noema-buffer-file-name "/tmp/kept.md"))
           (my/noema--open-xwidget "http://127.0.0.1:4242/wiki" nil)
-          (should (string-prefix-p "aaronnote:surface:visit:" visited-id))
+          (should (string-prefix-p "noema:surface:visit:" visited-id))
           (should (equal (my/noema-buffer-file existing) "/tmp/kept.md")))
       (dolist (buffer (list existing fresh))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
 (ert-deftest my/noema-split-registration-does-not-steal-canonical-file-buffer ()
-  (let* ((file (make-temp-file "aaronnote-split-register" nil ".md"))
+  (let* ((file (make-temp-file "noema-split-register" nil ".md"))
          (canonical (generate-new-buffer "*Noema-canonical*"))
          (split (generate-new-buffer "*Noema-split*"))
-         (client "aaronnote-split:/tmp/note.md:7")
+         (client "noema-split:/tmp/note.md:7")
          (my/noema--file-buffers (make-hash-table :test #'equal))
          (my/noema--client-buffers (make-hash-table :test #'equal)))
     (unwind-protect
@@ -1758,7 +1754,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
     (should (eq scheduled-fn #'my/noema--focus-forwarded-key-target))
     (should (equal scheduled-args (list (selected-window))))))
 
-(ert-deftest my/noema-focus-forwarded-key-target-focuses-window-left-from-aaronnote ()
+(ert-deftest my/noema-focus-forwarded-key-target-focuses-window-left-from-noema ()
   (let ((source (generate-new-buffer "*Noema-source*"))
         (target (generate-new-buffer "*Noema-target*"))
         (my/noema--app-buffer nil)
@@ -1855,15 +1851,15 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
         (progn
           (with-current-buffer buffer
             (setq-local major-mode 'xwidget-webkit-mode)
-            (setq-local my/noema--client-id "aaronnote-split:/tmp/note.md:1"))
-          (should-not (gethash "aaronnote-split:/tmp/note.md:1"
+            (setq-local my/noema--client-id "noema-split:/tmp/note.md:1"))
+          (should-not (gethash "noema-split:/tmp/note.md:1"
                                my/noema--client-buffers))
           (should (eq (my/noema--buffer-for-client
-                       "aaronnote-split:/tmp/note.md:1")
+                       "noema-split:/tmp/note.md:1")
                       buffer)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
-(ert-deftest my/noema-xwidget-buffer-p-accepts-local-aaronnote-client ()
+(ert-deftest my/noema-xwidget-buffer-p-accepts-local-noema-client ()
   (let ((buffer (generate-new-buffer "*Noema-split*"))
         (my/noema--app-buffer nil)
         (my/noema--port nil))
@@ -1871,7 +1867,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
         (progn
           (with-current-buffer buffer
             (setq-local major-mode 'xwidget-webkit-mode)
-            (setq-local my/noema--client-id "aaronnote-split:/tmp/note.md:1"))
+            (setq-local my/noema--client-id "noema-split:/tmp/note.md:1"))
           (should (my/noema--xwidget-buffer-p buffer)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
@@ -2159,7 +2155,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                        "zotero://select/library/items/C4ULFN2X"))))))
 
 (ert-deftest my/zotero-append-bibtex-does-not-duplicate-a-key ()
-  (let ((file (make-temp-file "aaronnote-zotero-test-" nil ".bib"))
+  (let ((file (make-temp-file "noema-zotero-test-" nil ".bib"))
         (bibtex "@article{UniqueKey,\n  title = {One}\n}\n"))
     (unwind-protect
         (cl-letf (((symbol-function 'find-file-noselect)
@@ -2181,7 +2177,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
       (when (file-exists-p file)
         (delete-file file)))))
 
-(ert-deftest my/noema-windmove-focus-advice-focuses-aaronnote-target ()
+(ert-deftest my/noema-windmove-focus-advice-focuses-noema-target ()
   (let ((source (generate-new-buffer "*Noema-source*"))
         (target (generate-new-buffer "*Noema-target*"))
         (my/noema--app-buffer nil)
@@ -2214,7 +2210,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
       (when (buffer-live-p source) (kill-buffer source))
       (when (buffer-live-p target) (kill-buffer target)))))
 
-(ert-deftest my/noema-focus-move-between-aaronnote-windows-releases-source-and-focuses-target ()
+(ert-deftest my/noema-focus-move-between-noema-windows-releases-source-and-focuses-target ()
   (let ((source (generate-new-buffer "*Noema-source*"))
         (target (generate-new-buffer "*Noema-split*"))
         (released-buffer nil)
@@ -2355,7 +2351,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
 (ert-deftest my/noema-sentinel-resets-dead-current-process ()
   (let* ((buffer (generate-new-buffer " *Noema-sentinel-test*"))
          (proc (make-process
-                :name "aaronnote-sentinel-test"
+                :name "noema-sentinel-test"
                 :buffer buffer
                 :command (list "cat")))
          (my/noema--process proc)
@@ -2401,7 +2397,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest my/noema-inactive-page-does-not-restart-core ()
-  "A dead core remains dormant until the Aaronnote page is actively focused."
+  "A dead core remains dormant until the Noema page is actively focused."
   (let* ((buffer (generate-new-buffer "*Noema-inactive-reconnect*"))
          (my/noema--app-buffer buffer)
          (my/noema--process nil)
@@ -2466,7 +2462,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                      (setq displayed buffer)
                      buffer)))
           (my/noema-runtime-status)
-          (should (equal channel "aaronnote:api:runtime:debug"))
+          (should (equal channel "noema:api:runtime:debug"))
           (should (equal args []))
           (should (eq displayed (get-buffer "*Noema runtime status*")))
           (with-current-buffer "*Noema runtime status*"
@@ -2491,12 +2487,12 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                  (funcall callback '((ok . t)) nil)
                  '(done))))
       (my/noema--api-call
-       "aaronnote:api:test" [1 2]
+       "noema:api:test" [1 2]
        (lambda (result) (setq callback-result result)))
       (should
        (equal request
-              '(mock-client "aaronnote.api"
-                            ((channel . "aaronnote:api:test")
+              '(mock-client "noema.api"
+                            ((channel . "noema:api:test")
                              (args . [1 2]))
                             10)))
       (should (equal callback-result '((ok . t)))))))
@@ -2793,12 +2789,12 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
   "A dying old process emitting a ready: line must not clobber the new port."
   (let* ((buffer (generate-new-buffer " *Noema-stale-proc-test*"))
          (stale-proc (make-process
-                      :name "aaronnote-stale-test"
+                      :name "noema-stale-test"
                       :buffer buffer
                       :command (list "cat")))
          ;; Simulate a new process by using a different proc object as current.
          (new-proc (make-process
-                    :name "aaronnote-new-test"
+                    :name "noema-new-test"
                     :buffer buffer
                     :command (list "cat")))
          (my/noema--process new-proc)
@@ -2827,7 +2823,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
   "Child output must leave the process filter before touching its log buffer."
   (let* ((buffer (generate-new-buffer " *Noema-deferred-log-test*"))
          (proc (make-process
-                :name "aaronnote-deferred-log-test"
+                :name "noema-deferred-log-test"
                 :buffer buffer
                 :command (list "cat")))
          (my/noema--process-log-queue nil)
@@ -3062,28 +3058,28 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
       (should python)
       (should (file-name-absolute-p (car argv)))
       (should-not
-       (string-match-p "@AARONNOTE" (remote-gateway--encode spec)))
+       (string-match-p "@NOEMA" (remote-gateway--encode spec)))
       (should
        (string-suffix-p
-        "/var/aaronnote/jupyter/runtime"
+        "/var/noema/jupyter/runtime"
         (alist-get 'JUPYTER_RUNTIME_DIR env))))))
 
 (ert-deftest my/noema-jupyter-registers-remote-broker-methods ()
   (dolist (method
-           '("aaronnote.jupyter.kernels"
-             "aaronnote.jupyter.launch"
-             "aaronnote.jupyter.status"
-             "aaronnote.jupyter.interrupt"
-             "aaronnote.jupyter.restart"
-             "aaronnote.jupyter.shutdown"
-             "aaronnote.jupyter.attach"
-             "aaronnote.jupyter.attachment.status"
-             "aaronnote.jupyter.attachment.release"
-             "aaronnote.jupyter.read-nbextension"
-             "aaronnote.jupyter.file.read"
-             "aaronnote.jupyter.file.write"
-             "aaronnote.jupyter.file.delete"
-             "aaronnote.jupyter.file.stat"))
+           '("noema.jupyter.kernels"
+             "noema.jupyter.launch"
+             "noema.jupyter.status"
+             "noema.jupyter.interrupt"
+             "noema.jupyter.restart"
+             "noema.jupyter.shutdown"
+             "noema.jupyter.attach"
+             "noema.jupyter.attachment.status"
+             "noema.jupyter.attachment.release"
+             "noema.jupyter.read-nbextension"
+             "noema.jupyter.file.read"
+             "noema.jupyter.file.write"
+             "noema.jupyter.file.delete"
+             "noema.jupyter.file.stat"))
     (should (functionp (gethash method remote-gateway--methods))))
   (should
    (memq #'my/noema-jupyter--doctor
@@ -3091,22 +3087,22 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
 
 (ert-deftest my/noema-jupyter-does-not-register-an-emacs-protocol-engine ()
   (dolist (method
-           '("aaronnote.jupyter.document.snapshot"
-             "aaronnote.jupyter.manager.snapshot"
-             "aaronnote.jupyter.script.snapshot"
-             "aaronnote.jupyter.script.action"
-             "aaronnote.jupyter.session.select"
-             "aaronnote.jupyter.kernel.control"
-             "aaronnote.jupyter.document.execute"
-             "aaronnote.jupyter.document.mutate"
-             "aaronnote.jupyter.output.clear"
-             "aaronnote.jupyter.output.clear-all"
-             "aaronnote.jupyter.variables"
-             "aaronnote.jupyter.kernel.interrupt"
-             "aaronnote.jupyter.kernel.restart"
-             "aaronnote.jupyter.kernel.shutdown"
-             "aaronnote.jupyter.kernel.channel"
-             "aaronnote.jupyter.board.open"))
+           '("noema.jupyter.document.snapshot"
+             "noema.jupyter.manager.snapshot"
+             "noema.jupyter.script.snapshot"
+             "noema.jupyter.script.action"
+             "noema.jupyter.session.select"
+             "noema.jupyter.kernel.control"
+             "noema.jupyter.document.execute"
+             "noema.jupyter.document.mutate"
+             "noema.jupyter.output.clear"
+             "noema.jupyter.output.clear-all"
+             "noema.jupyter.variables"
+             "noema.jupyter.kernel.interrupt"
+             "noema.jupyter.kernel.restart"
+             "noema.jupyter.kernel.shutdown"
+             "noema.jupyter.kernel.channel"
+             "noema.jupyter.board.open"))
     (should-not (functionp (gethash method remote-gateway--methods)))))
 
 (ert-deftest my/noema-public-api-callback-reports-offline ()
@@ -3115,7 +3111,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                (lambda (_time _repeat function &rest args)
                  (apply function args))))
       (my/noema-api-call
-       "aaronnote:api:jupyter-cell:tasks" []
+       "noema:api:jupyter-cell:tasks" []
        (lambda (result error) (setq received (list result error)))))
     (should-not (car received))
     (should (equal (alist-get 'code (cadr received)) "offline"))))
@@ -3128,7 +3124,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
                (lambda (_client _method _params callback _timeout)
                  (funcall callback '((ok . t) (kernels . nil)) nil))))
       (my/noema-api-call
-       "aaronnote:api:jupyter-cell:tasks" []
+       "noema:api:jupyter-cell:tasks" []
        (lambda (result error) (setq received (list result error)))))
     (should-not (cadr received))
     (should (eq t (alist-get 'ok (car received))))))
@@ -4869,14 +4865,14 @@ selection untouched, so the pane keeps being reported as background."
 
 (ert-deftest my/noema-surface-urls-carry-their-client ()
   "Non-file surfaces are addressed by the same client id Emacs registers."
-  (should (equal (my/noema--url-with-client "http://127.0.0.1:1/wiki" "aaronnote")
-                 "http://127.0.0.1:1/wiki?client=aaronnote"))
-  (should (equal (my/noema--url-with-client "http://127.0.0.1:1/agenda?view=today" "aaronnote")
-                 "http://127.0.0.1:1/agenda?view=today&client=aaronnote"))
-  (should (equal (my/noema--url-with-client "http://h/?client=x" "aaronnote")
-                 "http://h/?client=aaronnote"))
-  (should (equal (my/noema--url-with-client "http://h/wiki#section" "aaronnote")
-                 "http://h/wiki?client=aaronnote#section")))
+  (should (equal (my/noema--url-with-client "http://127.0.0.1:1/wiki" "noema")
+                 "http://127.0.0.1:1/wiki?client=noema"))
+  (should (equal (my/noema--url-with-client "http://127.0.0.1:1/agenda?view=today" "noema")
+                 "http://127.0.0.1:1/agenda?view=today&client=noema"))
+  (should (equal (my/noema--url-with-client "http://h/?client=x" "noema")
+                 "http://h/?client=noema"))
+  (should (equal (my/noema--url-with-client "http://h/wiki#section" "noema")
+                 "http://h/wiki?client=noema#section")))
 
-(provide 'init-aaronnote-tests)
-;;; init-aaronnote-tests.el ends here
+(provide 'init-noema-tests)
+;;; init-noema-tests.el ends here

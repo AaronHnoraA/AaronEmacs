@@ -1,8 +1,8 @@
-;;; init-aaronnote-jupyter-server.el --- Remote Jupyter servers for Noema -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-server.el --- Remote Jupyter servers for Noema -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
-;; Kernels normally come from `init-aaronnote-jupyter-runtime': the broker
+;; Kernels normally come from `init-noema-jupyter-runtime': the broker
 ;; launches a process on the note's Target and forwards its five ZMQ channels.
 ;; This module covers the other case — a Jupyter server that already exists and
 ;; is spoken to over HTTP(S): a lab server on a cluster login node, a
@@ -35,8 +35,8 @@
 (require 'remote-backend)
 (require 'remote-backend-jupyter)
 
-(declare-function my/noema-jupyter--defer "init-aaronnote-jupyter-runtime" (function))
-(declare-function my/noema-jupyter--get "init-aaronnote-jupyter-runtime" (key alist))
+(declare-function my/noema-jupyter--defer "init-noema-jupyter-runtime" (function))
+(declare-function my/noema-jupyter--get "init-noema-jupyter-runtime" (key alist))
 
 (defvar my/noema-jupyter-servers nil
   "Remote Jupyter servers Noema may connect to.
@@ -456,9 +456,9 @@ surfacing later as an unexplained kernel failure."
         (kill-buffer buffer)))))
 
 (dolist (entry
-         `(("aaronnote.jupyter.server.list" . ,#'my/noema-jupyter-server--list)
-           ("aaronnote.jupyter.server.resolve" . ,#'my/noema-jupyter-server--resolve)
-           ("aaronnote.jupyter.server.release" . ,#'my/noema-jupyter-server--release)))
+         `(("noema.jupyter.server.list" . ,#'my/noema-jupyter-server--list)
+           ("noema.jupyter.server.resolve" . ,#'my/noema-jupyter-server--resolve)
+           ("noema.jupyter.server.release" . ,#'my/noema-jupyter-server--release)))
   (remote-gateway-register-method (car entry) (cdr entry)))
 
 (remote-doctor-register-check #'my/noema-jupyter-server--doctor)
@@ -487,5 +487,5 @@ surfacing later as an unexplained kernel failure."
        (let ((dired-listing-switches "-al"))
          (dired root))))))
 
-(provide 'init-aaronnote-jupyter-server)
-;;; init-aaronnote-jupyter-server.el ends here
+(provide 'init-noema-jupyter-server)
+;;; init-noema-jupyter-server.el ends here

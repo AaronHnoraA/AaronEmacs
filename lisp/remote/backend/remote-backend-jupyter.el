@@ -10,7 +10,7 @@
 (require 'remote-fs)
 (require 'remote-pipeline)
 
-(declare-function my/noema--api-call-sync "init-aaronnote" (channel args &optional timeout))
+(declare-function my/noema--api-call-sync "init-noema" (channel args &optional timeout))
 (declare-function ls-lisp-insert-directory "ls-lisp" (file switches time-index wildcard full))
 (defvar my/noema-jupyter-servers nil)
 
@@ -45,7 +45,7 @@
                  (operation . ,operation)
                  (path . ,(remote-jupyter--path file route))
                  ,@fields))
-         (reply (my/noema--api-call-sync "aaronnote:api:jupyter-cell:server-file"
+         (reply (my/noema--api-call-sync "noema:api:jupyter-cell:server-file"
                                          (vector body) 60)))
     (unless reply (signal 'file-error (list "Noema host is offline" file)))
     (unless (eq t (remote-jupyter--get 'ok reply))

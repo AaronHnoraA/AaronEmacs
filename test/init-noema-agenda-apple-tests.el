@@ -1,6 +1,6 @@
-;;; init-aaronnote-agenda-apple-tests.el --- Client helper lifecycle -*- lexical-binding: t; -*-
+;;; init-noema-agenda-apple-tests.el --- Client helper lifecycle -*- lexical-binding: t; -*-
 (require 'ert)
-(require 'init-aaronnote-agenda-apple)
+(require 'init-noema-agenda-apple)
 
 (ert-deftest my/noema-apple-status-uses-owned-client-process-without-authorizing ()
   (unwind-protect
@@ -59,4 +59,4 @@
       (my/noema--apple-client-left client)
       (my/noema--apple-stop))))
 
-(provide 'init-aaronnote-agenda-apple-tests)
+(provide 'init-noema-agenda-apple-tests)

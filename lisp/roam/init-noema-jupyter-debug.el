@@ -1,11 +1,11 @@
-;;; init-aaronnote-jupyter-debug.el --- Notebook DAP through Noema -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-debug.el --- Notebook DAP through Noema -*- lexical-binding: t; -*-
 ;;; Commentary:
 ;; Noema owns the kernel and debugger protocol. Dape owns breakpoints, stack,
 ;; stepping, watches and variable inspection. The DAP listener is client-local
 ;; even when notebook storage or compute belongs to a Remote target.
 ;;; Code:
 (require 'cl-lib)
-(require 'init-aaronnote-jupyter-cell)
+(require 'init-noema-jupyter-cell)
 (require 'remote-core)
 
 (declare-function dape "dape" (config &optional skip-compile))
@@ -62,7 +62,7 @@
          (origin (current-buffer))
          (was-read-only buffer-read-only)
          (reply (my/noema-jupyter-cell--api-sync
-                 "aaronnote:api:jupyter:debug-start"
+                 "noema:api:jupyter:debug-start"
                  `((scriptFile . ,buffer-file-name) (cellId . ,id)
                    (projection . ,(my/noema-jupyter-debug--projection))
                    (runByLine . ,(if by-line t :json-false))) 60))
@@ -91,7 +91,7 @@
           debug-id)
       (error
        (ignore-errors
-         (my/noema-jupyter-cell--api-sync "aaronnote:api:jupyter:debug-stop" `((id . ,debug-id)) 15))
+         (my/noema-jupyter-cell--api-sync "noema:api:jupyter:debug-stop" `((id . ,debug-id)) 15))
        (signal (car err) (cdr err))))))
 
 (defun my/noema-jupyter-run-by-line ()
@@ -114,7 +114,7 @@
   (when-let* ((id my/noema-jupyter-debug--id))
     (unwind-protect
         (let* ((reply (my/noema-jupyter-cell--api-sync
-                       "aaronnote:api:jupyter:debug-stop" `((id . ,id)) 20))
+                       "noema:api:jupyter:debug-stop" `((id . ,id)) 20))
                (snapshot (my/noema-jupyter-notebook--get 'snapshot reply)))
           (when snapshot (my/noema-jupyter-cell--apply-session-snapshot snapshot)))
       (my/noema-jupyter-debug--release id))))
@@ -124,5 +124,5 @@
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i c" #'my/noema-jupyter-debug-continue)
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i q" #'my/noema-jupyter-debug-stop)
 
-(provide 'init-aaronnote-jupyter-debug)
-;;; init-aaronnote-jupyter-debug.el ends here
+(provide 'init-noema-jupyter-debug)
+;;; init-noema-jupyter-debug.el ends here

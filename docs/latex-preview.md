@@ -56,7 +56,7 @@ templates/noema              -> ../site-lisp/noema/resources/templates/noema
 ```
 
 这些链接**必须是相对路径**。历史上它们指向一个后来搬走的绝对路径,
-断链之后 Emacs 会把死路径通过 `AARONNOTE_KATEX_MACROS_DIR` 交给 Noema,
+断链之后 Emacs 会把死路径通过 `NOEMA_KATEX_MACROS_DIR` 交给 Noema,
 于是两边都加载不到任何宏,而且没有任何报错。
 `my/health-critical-check`(`make doctor`)现在会检查这五条链接。
 
@@ -92,7 +92,7 @@ TeX 兼容改写(目前 `multline → gathered`、`\displaylines`)的规则表�
 
 `\tr` 是带一个参数的转置,`\Tr` 是迹,`\im` 是 `im`。
 `assignment.cls` 曾经另外声明 `\tr`=Tr、`\im`=Im,但生成的
-`aaronnote-macros.sty` 会覆盖 `.cls`,结果作业 PDF 里 `\tr{A}` 被静默渲染成
+`noema-macros.sty` 会覆盖 `.cls`,结果作业 PDF 里 `\tr{A}` 被静默渲染成
 转置。冲突声明已从 `.cls` 移除,以 `katex-macros/` 为准。
 
 ## 出问题时

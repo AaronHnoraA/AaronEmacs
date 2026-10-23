@@ -1,6 +1,6 @@
 ;;; jupyter-project-live-smoke.el --- Real remote project acceptance -*- lexical-binding: t; -*-
 ;; Opt-in, isolated files and shell/LSP processes; existing kernels stay alive.
-(require 'init-aaronnote-jupyter-lsp)
+(require 'init-noema-jupyter-lsp)
 (require 'init-lsp)
 (load (expand-file-name "test/lsp-live-smoke.el" user-emacs-directory) nil t)
 (let* ((target (or (getenv "JUPYTER_PROJECT_TARGET") "aaron-pc"))

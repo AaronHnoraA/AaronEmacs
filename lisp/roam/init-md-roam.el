@@ -26,14 +26,14 @@
 (declare-function evil-set-initial-state "evil-core" (mode state))
 (declare-function my/noema-search-available-p "init-noema-search" ())
 (declare-function my/noema-search-read-page "init-noema-search" (prompt &optional initial))
-(declare-function my/noema-open-file "init-aaronnote" (file))
-(declare-function my/noema--ensure-server "init-aaronnote" (&optional callback))
-(declare-function my/noema--server-url "init-aaronnote" (&optional path))
-(declare-function my/noema--open-url "init-aaronnote" (url &optional file force-new))
-(declare-function my/noema--api-call "init-aaronnote" (channel args callback))
-(declare-function my/noema--api-call-sync "init-aaronnote" (channel args &optional timeout))
-(declare-function my/noema-command "init-aaronnote" (command &optional detail))
-(declare-function my/noema-workspace-layout "init-aaronnote" ())
+(declare-function my/noema-open-file "init-noema" (file))
+(declare-function my/noema--ensure-server "init-noema" (&optional callback))
+(declare-function my/noema--server-url "init-noema" (&optional path))
+(declare-function my/noema--open-url "init-noema" (url &optional file force-new))
+(declare-function my/noema--api-call "init-noema" (channel args callback))
+(declare-function my/noema--api-call-sync "init-noema" (channel args &optional timeout))
+(declare-function my/noema-command "init-noema" (command &optional detail))
+(declare-function my/noema-workspace-layout "init-noema" ())
 (declare-function my/navigation--push-jump "init-navigation")
 (declare-function my/navigation-find-definition "init-navigation")
 (declare-function noema-agenda--call "noema-agenda" (operation body callback))
@@ -88,7 +88,7 @@
   (expand-file-name
    (if (boundp 'my/noema--state-root)
        my/noema--state-root
-     "var/aaronnote")
+     "var/noema")
    user-emacs-directory))
 
 (defun my/noema-roam--tmp-root ()
@@ -145,17 +145,17 @@
 (defun my/noema-roam--action-to-channel (action)
   "Map roam-cli ACTION keyword to web-host /api channel string, or nil."
   (cdr (assoc action
-              '(("index"     . "aaronnote:api:notes:roam-index")
-                ("tags"      . "aaronnote:api:completions:tags")
-                ("todos"     . "aaronnote:api:notes:todos")
-                ("templates" . "aaronnote:api:notes:templates")
-                ("update-todo" . "aaronnote:api:notes:update-todo")
-                ("agenda"    . "aaronnote:api:notes:agenda")
-                ("patch-todo" . "aaronnote:api:notes:patch-todo")
-                ("todo-dep-ref" . "aaronnote:api:notes:todo-dep-ref")
-                ("todo-refs"  . "aaronnote:api:completions:todo-refs")
-                ("create"    . "aaronnote:api:notes:create-node")
-                ("delete-node" . "aaronnote:api:notes:delete-node")))))
+              '(("index"     . "noema:api:notes:roam-index")
+                ("tags"      . "noema:api:completions:tags")
+                ("todos"     . "noema:api:notes:todos")
+                ("templates" . "noema:api:notes:templates")
+                ("update-todo" . "noema:api:notes:update-todo")
+                ("agenda"    . "noema:api:notes:agenda")
+                ("patch-todo" . "noema:api:notes:patch-todo")
+                ("todo-dep-ref" . "noema:api:notes:todo-dep-ref")
+                ("todo-refs"  . "noema:api:completions:todo-refs")
+                ("create"    . "noema:api:notes:create-node")
+                ("delete-node" . "noema:api:notes:delete-node")))))
 
 (defun my/noema-roam--runtime-call-via-api (action args &optional timeout)
   "Delegate ACTION with roam-cli ARGS to the running web-host /api.
@@ -230,15 +230,15 @@ is down (offline / not yet started)."
       (let* ((root (my/noema-roam-root))
              (default-directory my/noema-roam--module-directory)
              (process-environment
-              (append (list (format "AARONNOTE_ROOT=%s" root)
-                            (format "AARONNOTE_RUNTIME_ROOT=%s"
+              (append (list (format "NOEMA_ROOT=%s" root)
+                            (format "NOEMA_RUNTIME_ROOT=%s"
                                     (expand-file-name
                                      my/noema-roam-runtime-root))
-                            (format "AARONNOTE_WORKSPACE_ROOT=%s"
+                            (format "NOEMA_WORKSPACE_ROOT=%s"
                                     user-emacs-directory)
-                            (format "AARONNOTE_STATE_DIR=%s"
+                            (format "NOEMA_STATE_DIR=%s"
                                     (my/noema-roam--state-root))
-                            (format "AARONNOTE_TMP_DIR=%s"
+                            (format "NOEMA_TMP_DIR=%s"
                                     (my/noema-roam--tmp-root))
                             ;; Without this the CLI configures the runtime as
                             ;; "legacy" and drops every note under `public/',
@@ -247,7 +247,7 @@ is down (offline / not yet started)."
                             (format "NOEMA_WORKSPACE_LAYOUT=%s"
                                     (my/noema-roam--workspace-layout)))
                       process-environment))
-             (stderr-file (make-temp-file "aaronnote-runtime-"))
+             (stderr-file (make-temp-file "noema-runtime-"))
              (status (apply #'process-file
                             "node" nil (list (current-buffer) stderr-file) nil
                             my/noema-roam-runtime-cli
@@ -2507,7 +2507,7 @@ On a heading line, append `{#id}` unless an id already exists."
   (interactive "P")
   (my/noema-roam--clear-runtime-cache)
   (unless (fboundp 'my/noema-wiki-refresh)
-    (require 'init-aaronnote))
+    (require 'init-noema))
   (my/noema-wiki-refresh full))
 
 (defun my/noema-roam--summary-entry-for-slug (slug &optional summaries)
@@ -3258,7 +3258,7 @@ buffer, enters a project or publishes unsaved tasks to the persistent index."
   (unless (and (fboundp 'my/noema--ensure-server)
                (fboundp 'my/noema--server-url)
                (fboundp 'my/noema--open-url))
-    (require 'init-aaronnote))
+    (require 'init-noema))
   (require 'noema-agenda)
   (let* ((root (and (stringp my/project-active-root)
                     (not (string-empty-p my/project-active-root))
@@ -3309,7 +3309,7 @@ buffer, enters a project or publishes unsaved tasks to the persistent index."
   "Open native Noema Agenda; specialized MODE views retain their Web surface."
   (interactive)
   (if (memq mode '(nil agenda))
-      (progn (unless (fboundp 'my/noema-agenda) (require 'init-aaronnote))
+      (progn (unless (fboundp 'my/noema-agenda) (require 'init-noema))
              (my/noema-agenda query))
     (my/noema-roam--open-web-agenda
    (pcase mode
@@ -4347,10 +4347,10 @@ canonical `roam://note-id#tag' target."
           (my/noema-roam--note-records)))
 
 (defun my/noema-roam-xref-backend ()
-  "Use aaronnote-roam as xref backend when point is on a Markdown roam link."
-  (when (my/noema-roam--target-at-point) 'aaronnote-roam))
+  "Use noema-roam as xref backend when point is on a Markdown roam link."
+  (when (my/noema-roam--target-at-point) 'noema-roam))
 
-(cl-defmethod xref-backend-identifier-at-point ((_backend (eql aaronnote-roam)))
+(cl-defmethod xref-backend-identifier-at-point ((_backend (eql noema-roam)))
   (my/noema-roam--target-at-point))
 
 (defun my/noema-roam-goto-definition ()
@@ -4397,19 +4397,19 @@ canonical `roam://note-id#tag' target."
                                      (current-column)))
         (xref-make-file-location file 1 0)))))
 
-(cl-defmethod xref-backend-definitions ((_backend (eql aaronnote-roam)) target)
+(cl-defmethod xref-backend-definitions ((_backend (eql noema-roam)) target)
   (when-let* ((parsed (my/noema-roam--parse-target target))
               (file (plist-get parsed :file))
               ((file-exists-p file)))
     (list (xref-make (concat "note: " target)
                      (my/noema-roam--xref-location file parsed)))))
 
-(cl-defmethod xref-backend-identifier-completion-table ((_backend (eql aaronnote-roam)))
+(cl-defmethod xref-backend-identifier-completion-table ((_backend (eql noema-roam)))
   (mapcar #'my/noema-roam--roam-href
           (my/noema-roam--all-slugs-cached)))
 
 (defun my/noema-roam--xref-setup ()
-  "Register aaronnote-roam xref backend for this buffer (highest priority)."
+  "Register noema-roam xref backend for this buffer (highest priority)."
   (add-hook 'xref-backend-functions #'my/noema-roam-xref-backend -90 t))
 
 ;; ── Preview click → note-link intercept ──────────────────────────────────
@@ -4747,7 +4747,7 @@ added separately by `my/noema-roam--capf-setup')."
         (frame (selected-frame)))
     (message "Noema: fetching wanted pages...")
     (my/noema--api-call
-     "aaronnote:api:notes:wanted" []
+     "noema:api:notes:wanted" []
      (lambda (result)
        (when (and (buffer-live-p origin) (frame-live-p frame))
          (with-selected-frame frame
@@ -4812,7 +4812,7 @@ added separately by `my/noema-roam--capf-setup')."
                                (if (= (length files) 1) "" "s")))
       (message "Noema: moving orphaned attachments to Trash...")
       (my/noema--api-call
-       "aaronnote:api:assets:trash-orphans" (vector files)
+       "noema:api:assets:trash-orphans" (vector files)
        (lambda (result)
          (let ((next-assets (my/noema-roam--asset-items
                              (alist-get 'assets result)))
@@ -4888,7 +4888,7 @@ added separately by `my/noema-roam--capf-setup')."
         (frame (selected-frame)))
     (message "Noema: scanning orphaned attachments...")
     (my/noema--api-call
-     "aaronnote:api:assets:scan-orphans" []
+     "noema:api:assets:scan-orphans" []
      (lambda (result)
        (when (and (buffer-live-p origin) (frame-live-p frame))
          (with-selected-frame frame
@@ -5113,7 +5113,7 @@ before it asks the host to move the file."
                      file target))
         (message "Moving '%s' → '%s'..." file target)
         (my/noema--api-call
-         "aaronnote:api:fs:move"
+         "noema:api:fs:move"
          (vector (list (cons "file" file) (cons "target" target)))
          (lambda (result)
            (if (not (alist-get 'ok result))
@@ -5209,7 +5209,7 @@ before it asks the host to move the file."
         (frame (selected-frame)))
     (message "Noema: analyzing tag overlap...")
     (my/noema--api-call
-     "aaronnote:api:roam-tools:tag-overlap" []
+     "noema:api:roam-tools:tag-overlap" []
      (lambda (result)
        (when (and (buffer-live-p origin) (frame-live-p frame))
          (with-selected-frame frame
@@ -5324,7 +5324,7 @@ before it asks the host to move the file."
 
 
 
-;;; Public lifecycle API (called from init-aaronnote.el).
+;;; Public lifecycle API (called from init-noema.el).
 
 (defun my/noema-roam--cancel-sync-timer ()
   "Compatibility no-op; Wiki index maintenance is owned by the web host."

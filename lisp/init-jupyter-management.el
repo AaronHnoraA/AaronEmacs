@@ -26,7 +26,7 @@
 (declare-function jupyter-push "jupyter-monads" (value))
 (declare-function jupyter--gc-kernel-processes "jupyter-kernel-process" ())
 (declare-function my/noema-jupyter--substitute-template
-                  "init-aaronnote-jupyter-runtime" (value variables))
+                  "init-noema-jupyter-runtime" (value variables))
 
 (config-defvar my/jupyter-board-jupyter-command nil
   "Local Jupyter executable used by the management board."
@@ -260,17 +260,17 @@ target\='s name."
                     (if (fboundp 'my/noema-jupyter--substitute-template)
                         (my/noema-jupyter--substitute-template
                          parsed
-                         `(("AARONNOTE_JUPYTER_ROOT" .
+                         `(("NOEMA_JUPYTER_ROOT" .
                             ,(expand-file-name
                               "site-lisp/noema/jupyter"
                               user-emacs-directory))
-                           ("AARONNOTE_JUPYTER_STATE_ROOT" .
+                           ("NOEMA_JUPYTER_STATE_ROOT" .
                             ,(expand-file-name
-                              "var/aaronnote/jupyter"
+                              "var/noema/jupyter"
                               user-emacs-directory))
                            ("NOEMA_USER_HOME" . ,(expand-file-name "~/"))
                            ("SAGE_VERSION" .
-                            ,(or (getenv "AARONNOTE_SAGE_VERSION")
+                            ,(or (getenv "NOEMA_SAGE_VERSION")
                                  "current"))))
                       parsed))
          when raw

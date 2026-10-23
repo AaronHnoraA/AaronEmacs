@@ -1,7 +1,7 @@
-;;; init-aaronnote-jupyter-files.el --- Notebook export and comparison -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-files.el --- Notebook export and comparison -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
-(require 'init-aaronnote-jupyter-cell)
+(require 'init-noema-jupyter-cell)
 (require 'init-jupyter-management)
 (require 'remote-process)
 (require 'url-util)
@@ -201,5 +201,5 @@ With a prefix argument, choose whether outputs and metadata are included."
 
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i e" #'my/noema-jupyter-export)
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i =" #'my/noema-jupyter-compare)
-(provide 'init-aaronnote-jupyter-files)
-;;; init-aaronnote-jupyter-files.el ends here
+(provide 'init-noema-jupyter-files)
+;;; init-noema-jupyter-files.el ends here

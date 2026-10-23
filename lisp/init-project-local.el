@@ -37,7 +37,7 @@ Supported plist keys:
 - `:lsp-workspace' as extra workspace configuration merged before startup
 - `:toolchain' as a language-family to profile-id alist
 - `:toolchain-profiles' as named language-server toolchain profiles
-- `:aaronnote-jupyter' as project Jupyter cell defaults."
+- `:noema-jupyter' as project Jupyter cell defaults."
   :type '(repeat (cons :tag "Project override" sexp sexp))
   :group 'my/project-local)
 
@@ -90,7 +90,7 @@ remain subject to Emacs' normal local-variable confirmation."
                        (pcase key
                          (:toolchain
                           (my/project-local--simple-toolchain-selection-p item))
-                         (:aaronnote-jupyter
+                         (:noema-jupyter
                           (my/project-local--simple-jupyter-defaults-p item))
                          (_ nil)))))))
          (and valid (null rest)))))

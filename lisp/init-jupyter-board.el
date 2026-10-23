@@ -8,18 +8,18 @@
 (require 'aaron-ui-board)
 (require 'cl-lib)
 (require 'init-jupyter-management)
-(require 'init-aaronnote-jupyter-server)
+(require 'init-noema-jupyter-server)
 (require 'init-open)
 (require 'remote-fs)
 (require 'json)
 (require 'subr-x)
 (require 'transient)
 
-(declare-function my/noema-api-call "init-aaronnote" (channel args callback &optional timeout))
+(declare-function my/noema-api-call "init-noema" (channel args callback &optional timeout))
 (declare-function my/noema-jupyter-runtime-control
-                  "init-aaronnote-jupyter-runtime" (runtime-id action callback))
+                  "init-noema-jupyter-runtime" (runtime-id action callback))
 (declare-function my/noema-jupyter-runtime-snapshot
-                  "init-aaronnote-jupyter-runtime" (&optional target-id))
+                  "init-noema-jupyter-runtime" (&optional target-id))
 (declare-function my/jupyter-ssh-open-project "init-project" (&optional project))
 (defvar my/jupyter-ssh-projects)
 
@@ -656,7 +656,7 @@ The default view keeps remote profiles and active sessions prominent."
     (setq my/jupyter-board--server-loading t)
     (my/jupyter-board--render)
     (my/noema-api-call
-     "aaronnote:api:jupyter-cell:kernels" []
+     "noema:api:jupyter-cell:kernels" []
      (lambda (value error)
        (when (buffer-live-p buffer)
          (with-current-buffer buffer
@@ -891,7 +891,7 @@ The default view keeps remote profiles and active sessions prominent."
                buffer generation 'connections value error)))
     (if (fboundp 'my/noema-api-call)
         (my/noema-api-call
-         "aaronnote:api:jupyter-cell:tasks" []
+         "noema:api:jupyter-cell:tasks" []
          (lambda (value error)
            (my/jupyter-board--set-provider-result
             buffer generation 'noema value
@@ -1247,7 +1247,7 @@ The default view keeps remote profiles and active sessions prominent."
     (set-buffer-modified-p nil)
     (when (boundp 'jupyter--kernelspecs) (clrhash jupyter--kernelspecs))
     (when (and (bound-and-true-p my/noema--ready) (fboundp 'my/noema-api-call))
-      (my/noema-api-call "aaronnote:api:jupyter-cell:kernels" [((refresh . t))]
+      (my/noema-api-call "noema:api:jupyter-cell:kernels" [((refresh . t))]
                         (lambda (&rest _) nil)))
     (when-let* ((board (get-buffer my/jupyter-board-buffer-name)))
       (with-current-buffer board (my/jupyter-board-refresh)))
@@ -1331,7 +1331,7 @@ The default view keeps remote profiles and active sessions prominent."
 (defun my/jupyter-board--noema-action (entry action)
   "Apply Noema ACTION to runtime ENTRY."
   (if (plist-get entry :noema-task)
-      (let ((channel (format "aaronnote:api:jupyter-cell:%s" action))
+      (let ((channel (format "noema:api:jupyter-cell:%s" action))
             (body `((key . ,(plist-get entry :key))
                     (id . ,(plist-get entry :runtime-id))
                     (file . ,(or (plist-get entry :source-file) ""))
@@ -1512,7 +1512,7 @@ The default view keeps remote profiles and active sessions prominent."
              (format "Ask Noema to clean eligible idle/dead runtimes (%d visible)? "
                      (length candidates)))
         (my/noema-api-call
-         "aaronnote:api:jupyter-cell:cleanup" [((force . :json-false))]
+         "noema:api:jupyter-cell:cleanup" [((force . :json-false))]
          (lambda (_result error)
            (if error
                (message "Noema cleanup failed: %s"

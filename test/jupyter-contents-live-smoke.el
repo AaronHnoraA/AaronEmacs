@@ -1,6 +1,6 @@
 ;;; jupyter-contents-live-smoke.el --- Real URL filesystem notebook workflow -*- lexical-binding: t; -*-
-(require 'init-aaronnote)
-(require 'init-aaronnote-jupyter-server)
+(require 'init-noema)
+(require 'init-noema-jupyter-server)
 (require 'remote-config)
 (require 'remote-framework)
 (require 'cl-lib)
@@ -26,7 +26,7 @@
   "Call real service CHANNEL with BODY while pumping Remote channels."
   (let* ((id (1+ (or (process-get proc 'sequence) 0)))
          (deadline (+ (float-time) 75)) reply)
-    (when (member channel '("init" "close" "aaronnote:api:jupyter:document-execute"))
+    (when (member channel '("init" "close" "noema:api:jupyter:document-execute"))
       (message "Contents live: %s" channel))
     (process-put proc 'sequence id)
     (process-send-string proc (concat (json-serialize `((id . ,id) (channel . ,channel) (body . ,body)) :false-object :json-false :null-object nil) "\n"))
@@ -89,7 +89,7 @@
               (with-current-buffer notebook
                 (unless my/noema-jupyter-cell-mode (error "Notebook source projection was not activated"))
                 (let* ((catalog (my/noema-jupyter-cell--api-sync
-                                 "aaronnote:api:jupyter-cell:kernels" `((file . ,file))))
+                                 "noema:api:jupyter-cell:kernels" `((file . ,file))))
                        (names (mapcar (lambda (entry) (gethash "name" entry))
                                       (append (gethash "kernels" catalog) nil))))
                   (unless (and (member "python3" names) (not (member "lean4" names)))
@@ -98,7 +98,7 @@
                 (search-forward "audit_value = 41")
                 (replace-match "audit_value = 42")
                 (save-buffer)
-                (my/noema-jupyter-cell--api-sync "aaronnote:api:jupyter:document-execute"
+                (my/noema-jupyter-cell--api-sync "noema:api:jupyter:document-execute"
                                                 `((scriptFile . ,file) (cellId . "audit-cell")) 60)
                 (let* ((raw (my/noema-jupyter-notebook--read-raw file))
                        (cell (aref (gethash "cells" raw) 0))

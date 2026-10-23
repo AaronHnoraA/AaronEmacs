@@ -49,7 +49,7 @@
 
 (config-defvar my/maintenance-var-cleanup-targets
   '((:path "auctex/output" :age-days 7)
-    (:path "Aaronnote/tmp" :age-days 2)
+    (:path "Noema/tmp" :age-days 2)
     (:path "log" :age-days 30)
     (:path "auto-save/sessions" :age-days 14)
     (:path "backup" :age-days 60)

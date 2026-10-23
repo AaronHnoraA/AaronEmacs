@@ -1,4 +1,4 @@
-;;; init-aaronnote-jupyter-project.el --- Project tools for kernels -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-project.el --- Project tools for kernels -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;; A view of the existing kernelspec, not another SSH/profile registry.
@@ -8,7 +8,7 @@
 ;;; Code:
 (require 'cl-lib)
 (require 'json)
-(require 'init-aaronnote-jupyter-cell)
+(require 'init-noema-jupyter-cell)
 (require 'init-jupyter-management)
 (require 'init-lsp-runtime)
 (require 'remote-fs)
@@ -17,7 +17,7 @@
 (require 'shell)
 
 (declare-function my/language-server-ensure "init-lsp" ())
-(declare-function my/noema-jupyter--context "init-aaronnote-jupyter-runtime" (file))
+(declare-function my/noema-jupyter--context "init-noema-jupyter-runtime" (file))
 (declare-function my/jupyter-ssh-open-project "init-project" (&optional project))
 
 (cl-defstruct (my/noema-jupyter-project
@@ -287,5 +287,5 @@ The probe starts a separate process and changes no configuration."
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i p l" #'my/noema-jupyter-project-lsp)
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i p ?" #'my/noema-jupyter-project-inspect)
 (keymap-set my/noema-jupyter-cell-mode-map "C-c i p o" #'my/jupyter-ssh-open-project)
-(provide 'init-aaronnote-jupyter-project)
-;;; init-aaronnote-jupyter-project.el ends here
+(provide 'init-noema-jupyter-project)
+;;; init-noema-jupyter-project.el ends here

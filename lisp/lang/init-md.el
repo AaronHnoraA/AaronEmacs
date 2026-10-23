@@ -12,7 +12,7 @@
 (require 'cl-lib)
 (require 'init-open)
 (require 'subr-x)
-(require 'init-aaronnote)
+(require 'init-noema)
 
 (declare-function evil-emacs-state "evil" ())
 
@@ -34,7 +34,7 @@
   "Which surface an interactive Markdown open lands in.
 
 `emacs' opens the file in `gfm-mode', where the roam keymap on `C-c r',
-the `SPC r' leader, the `aaronnote-roam' xref backend and ordinary
+the `SPC r' leader, the `noema-roam' xref backend and ordinary
 `markdown-mode' fontification all work.  `app' hands the file to the Noema
 web editor and leaves a read-only stub buffer behind.
 

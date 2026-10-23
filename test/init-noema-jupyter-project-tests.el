@@ -1,6 +1,6 @@
-;;; init-aaronnote-jupyter-project-tests.el -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-project-tests.el -*- lexical-binding: t; -*-
 (require 'ert)
-(require 'init-aaronnote-jupyter-lsp)
+(require 'init-noema-jupyter-lsp)
 (require 'init-project)
 
 (ert-deftest my/jupyter-ssh-project-entry-keeps-normal-remote-filesystem ()
@@ -176,5 +176,5 @@
       (should (equal (nreverse events)
                      '(disconnect invalidate ensure))))))
 
-(provide 'init-aaronnote-jupyter-project-tests)
-;;; init-aaronnote-jupyter-project-tests.el ends here
+(provide 'init-noema-jupyter-project-tests)
+;;; init-noema-jupyter-project-tests.el ends here

@@ -32,10 +32,10 @@ A server URL alone therefore must not silently relocate the local project.
 | Requirement | Authoritative implementation / evidence | Status and remaining acceptance |
 | --- | --- | --- |
 | Local kernelspec launch | `server/jupyter/kernel-registry.mjs`, local real-kernel suites | Implemented; rerun full local real-kernel matrix for final acceptance |
-| SSH broker launch | `init-aaronnote-jupyter-runtime.el`, live Aaron-PC probe | Real remote launch, execution and completion passed |
+| SSH broker launch | `init-noema-jupyter-runtime.el`, live Aaron-PC probe | Real remote launch, execution and completion passed |
 | Five ports / remote connection file | Runtime broker + Remote channel groups | Real attach and channel recreation passed; same state and local endpoints preserved |
 | Network reconnect / kernel death | `jupyter-kernel-remote-reconnect.test.ts`, heartbeat tests, Linux in-flight disconnect probe, output-page state tests | Two real five-forward cuts on a pinned `vx25` target restored the workspace and classified the dead kernel. Host identity guards PID probes and signals across a balanced alias. The output page now distinguishes disconnected, dead, and state-lost records and retains the last outputs if refresh fails; the full Noema GUI path still needs live acceptance |
-| HTTP URL, port, proxy prefix, token | `init-aaronnote-jupyter-server.el`, server registry | Real forwarded `/audit/` server with authentication passed |
+| HTTP URL, port, proxy prefix, token | `init-noema-jupyter-server.el`, server registry | Real forwarded `/audit/` server with authentication passed |
 | Password, Hub, HTTPS/SNI, gateway | Server auth / connection implementations | Protocol unit checks exist; deployment-level matrix remains incomplete |
 | Adopt / restart / shutdown ownership | Server registry + kernel registry | Live adopted client detach preserves owner; owned restart clears state; owned shutdown removes kernel |
 | Server filesystem | `remote-backend-jupyter.el`, `contents-files.mjs`, `serverFile` API | Real Emacs Dired → ipynb edit/save → nested-directory kernel execution → persisted output passed on Aaron-PC; server storage limitations below |

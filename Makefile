@@ -10,9 +10,9 @@ GCCJIT_LIBRARY_DIR := $(firstword $(dir $(wildcard /opt/homebrew/lib/gcc/current
 ifneq ($(GCCJIT_LIBRARY_DIR),)
 export LIBRARY_PATH := $(patsubst %/,%,$(GCCJIT_LIBRARY_DIR))$(if $(LIBRARY_PATH),:$(LIBRARY_PATH))
 endif
-AARONNOTE_DIR = site-lisp/noema
+NOEMA_DIR = site-lisp/noema
 EMACS_BATCH_BASE = $(EMACS) --batch --no-site-file --no-site-lisp --no-splash --init-directory=$(CURDIR) -q
-PUBLISH_BATCH = $(EMACS_BATCH_BASE) -L site-lisp/config -L lisp -L lisp/roam -l ./lisp/roam/init-aaronnote-publish.el
+PUBLISH_BATCH = $(EMACS_BATCH_BASE) -L site-lisp/config -L lisp -L lisp/roam -l ./lisp/roam/init-noema-publish.el
 # Load early-init first so native-comp never writes into top-level eln-cache.
 BATCH = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./init.el
 BOOTSTRAP = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./bootstrap.el
@@ -24,7 +24,7 @@ UI_TOKEN_FILE = site-lisp/noema/src/styles/aaron-ui-tokens.css
 UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui/aaron-ui.el
 
 .PHONY: default help up setup setup-full bootstrap-health install emacs-binary-install emacs-binary-update emacs-binary-verify portal-build remote-ikernel-install lock audit-lock doctor build build-force \
-        aaronnote-build \
+        noema-web-build \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
         health health-startup health-byte health-native ui-test activity-test performance-test ui-tokens audit-ui-tokens \
@@ -67,7 +67,7 @@ help:
 	  '  make state-restore SNAPSHOT=/path/to/archive.tar.gz  Restore a saved state snapshot' \
 	  '  make build                Full Elisp compile plus Noema static build' \
 	  '  make build-force          Same as build, but reset ELN cache first' \
-	  '  make aaronnote-build      Build Noema static assets' \
+	  '  make noema-web-build      Build Noema static assets' \
 	  '  make compile              btye and native compile'\
 	  '  make compile-force        Force btye and native compile'\
 	  '  make compile-byte         SByte-compile the local Emacs config' \
@@ -202,18 +202,18 @@ state-restore:
 
 build:
 	$(BATCH) --eval '(my/build-all)'
-	$(MAKE) aaronnote-build
+	$(MAKE) noema-web-build
 
 build-force:
 	$(BATCH) --eval '(my/build-all t)'
-	$(MAKE) aaronnote-build
+	$(MAKE) noema-web-build
 
-aaronnote-build:
-	npm --prefix $(AARONNOTE_DIR) run build:aaronnote
+noema-web-build:
+	npm --prefix $(NOEMA_DIR) run build:pages
 
 noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
 noema-server-config-init noema-server-build noema-server-start noema-server-deploy noema-disk-audit noema-clean:
-	$(MAKE) -C $(AARONNOTE_DIR) $(@:noema-%=%)
+	$(MAKE) -C $(NOEMA_DIR) $(@:noema-%=%)
 
 compile: compile-byte  compare-native
 
@@ -364,13 +364,13 @@ remote-terminal-live-smoke:
 jupyter-test:
 	python3 -m unittest discover -s test -p jupyter_connection_cleanup_test.py
 	$(REMOTE_TEST_BATCH) -l test/init-jupyter-command-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/init-aaronnote-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/init-aaronnote-jupyter-notebook-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-noema-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-noema-jupyter-notebook-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-runtime-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-jupyter-board-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/init-aaronnote-jupyter-debug-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/init-aaronnote-jupyter-files-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/init-aaronnote-jupyter-project-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-noema-jupyter-debug-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-noema-jupyter-files-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-noema-jupyter-project-tests.el -f ert-run-tests-batch-and-exit
 	$(REMOTE_TEST_BATCH) -l test/remote-jupyter-tests.el -f ert-run-tests-batch-and-exit
 
 .PHONY: jupyter-live-smoke
@@ -422,12 +422,12 @@ jupyter-export-live-smoke:
 
 agenda-test:
 	$(EMACS) --batch -Q -L site-lisp/noema/lisp -L site-lisp/noema/tests/elisp -l noema-agenda-tests -l noema-agenda-attention-tests -l noema-agenda-capture-tests -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/init-aaronnote-agenda-source-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-noema-agenda-source-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/md-roam-tests.el -f ert-run-tests-batch-and-exit
 
 agenda-apple-test:
 	$(MAKE) -C site-lisp/noema agenda-apple-test
-	$(BATCH) -l test/init-aaronnote-agenda-apple-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-noema-agenda-apple-tests.el -f ert-run-tests-batch-and-exit
 
 research-test:
 	$(BATCH) -l test/noema-startup-tests.el -f ert-run-tests-batch-and-exit

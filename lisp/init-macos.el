@@ -38,7 +38,7 @@
 (declare-function my/browser-current-url "init-browser" ())
 (declare-function my/kill-buffer-dwim "init-windows" ())
 (declare-function language-server-menu "init-lsp-tools" ())
-(declare-function noema-agenda "init-aaronnote" (&optional query))
+(declare-function noema-agenda "init-noema" (&optional query))
 (declare-function output-menu "init-output" ())
 (declare-function magit-status "magit-status" (&optional directory))
 (declare-function open-newline-above "open-newline" (arg))

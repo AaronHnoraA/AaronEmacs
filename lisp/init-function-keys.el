@@ -19,7 +19,7 @@
 (declare-function test-menu "init-test" ())
 (declare-function debug-menu "init-debug" ())
 (declare-function my/portal-popup-toggle "init-portal-popup" ())
-(declare-function noema-agenda "init-aaronnote" (&optional query))
+(declare-function noema-agenda "init-noema" (&optional query))
 (autoload 'olivetti-mode "olivetti" nil t)
 
 (general-define-key

@@ -10,7 +10,7 @@ type HostDescriptor = { url: string; pid: number; noteRoot?: string };
 
 function stateRoot(): string {
   const { noemaState } = getPreferenceValues<{ noemaState?: string }>();
-  return (noemaState || "~/.config/emacs/var/aaronnote").replace(/^~/, homedir());
+  return (noemaState || "~/.config/emacs/var/noema").replace(/^~/, homedir());
 }
 
 function alive(pid: number): boolean {
@@ -45,7 +45,7 @@ export async function noema<T>(channel: string, args: unknown[] = [], timeoutMs 
   const response = await fetch(`${host.url}/api`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ channel: `aaronnote:api:${channel}`, args }),
+    body: JSON.stringify({ channel: `noema:api:${channel}`, args }),
     signal: AbortSignal.timeout(timeoutMs),
   });
   const payload = (await response.json()) as T & { ok?: boolean; error?: string; message?: string };

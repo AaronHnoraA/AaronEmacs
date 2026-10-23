@@ -1,5 +1,5 @@
 ;;; jupyter-export-live-smoke.el --- Actual nbconvert and Remote file writes -*- lexical-binding: t; -*-
-(require 'init-aaronnote-jupyter-files)
+(require 'init-noema-jupyter-files)
 (require 'remote-config)
 (remote-config-load)
 (remote-fs-install)

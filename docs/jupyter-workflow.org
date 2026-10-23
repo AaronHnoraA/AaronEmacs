@@ -196,7 +196,7 @@ Target/workspace 中发现 kernelspec、以 workspace root 为 cwd 启动进程�
 探测有三种结果，不是两种。启动时记录实际主机名；随后在目标端同一条命令里先核对
 主机，再执行 =kill -0= 或发送信号。进程组确实不存在才是确认死亡；连接断开或
 登录别名重连到另一台节点都返回 =unknown=。=unknown= 不标 =stateLost=、不向可能
-重用旧 PID 的节点发信号，并保留本机关闭记录。=aaronnote.jupyter.status= 此时
+重用旧 PID 的节点发信号，并保留本机关闭记录。=noema.jupyter.status= 此时
 报错，而不是返回 =alive: false= 让 Noema 丢弃内存状态。Board 会显示记录中的
 实际主机，方便从固定节点恢复和清理。
 
@@ -216,7 +216,7 @@ Noema 输出页的页头读取同一内核注册表的只读状态：=disconnect
 成功加载的输出并提示刷新失败；真正换核会清空旧的已执行源码版本记录，
 避免把失效的输出标作当前结果。完整 Noema GUI 断线交互仍需真机验收。
 
-执行本身没有 wall-clock 超时（=AARONNOTE_JUPYTER_EXEC_TIMEOUT_MS= 默认 0），
+执行本身没有 wall-clock 超时（=NOEMA_JUPYTER_EXEC_TIMEOUT_MS= 默认 0），
 这是有意的：它是**空闲**超时，会被消息重置，而 =time.sleep(3600)= 这类静默长任务
 不发消息，给它非零默认值会杀掉合法计算。存活性归心跳管，不归超时管。
 
@@ -244,7 +244,7 @@ Emacs broker 在同一 target 读取并验证完整的 =hb/control/shell/stdin/i
 保持 client listener 不变而替换 target tuple；通配 bind IP 也会改写为 target loopback，
 绝不会把 =0.0.0.0= 当成 Node 侧连接地址。
 
-kernel 启动握手默认允许 60 秒（=AARONNOTE_JUPYTER_KERNEL_LAUNCH_TIMEOUT_MS=），因为
+kernel 启动握手默认允许 60 秒（=NOEMA_JUPYTER_KERNEL_LAUNCH_TIMEOUT_MS=），因为
 SSH 首连或 scheduler 排队通常超过本地进程原先的 15 秒上限；readiness 仍必须收到
 =kernel_info_reply=，仅仅 ZMQ socket 打开不算成功。
 
@@ -280,7 +280,7 @@ Treemacs、定位当前 Imenu node 并 pulse。Noema 的 kernel / Run / output �
 =remote_ikernel= 会从 =kernel_cmd= 提取解释器并通过 Remote target 探测；旧版或
 非 SSH 的不透明 launcher、=attach:= 仍回退到项目默认 toolchain。这类预期回退不再
 反复写入 minibuffer，具体原因仍可在 Language Server Hub / Doctor 查看。笔记项目的
-=:aaronnote-jupyter= 默认 kernel 仍可设置，但不要再用项目级 =:toolchain= 把 Python
+=:noema-jupyter= 默认 kernel 仍可设置，但不要再用项目级 =:toolchain= 把 Python
 固定到 Sage。
 
 当前配置不启用 Jupyter 包可选的 =/jpy:= 和 =/jpys:= TRAMP 文件名处理器。该
@@ -388,7 +388,7 @@ Contents 根目录。notebook 默认在所属服务器启动所选 kernelspec，
 Jupyter session，因此工作目录与 notebook 所在目录一致。服务器 URL 的
 =/user/alice/= 或其他代理前缀仍是 HTTP base path，不是 OS 路径。
 
-目录、读写、复制、重命名和删除经 =aaronnote:api:jupyter-cell:server-file=
+目录、读写、复制、重命名和删除经 =noema:api:jupyter-cell:server-file=
 处理。文件 API 不提供 shell、Git 或 LSP 进程，所以使用标准 Dired；补全和
 检查仍可以经 notebook 的 kernel 协议完成。需要远端 shell/LSP 时，应使用
 已有的 =/fs:TARGET:/真实路径= 工作区。=:kind gateway= 不提供 Contents 挂载。
@@ -486,7 +486,7 @@ Main keys:
 Core group，=TEMP= 可批量清理；旧 =rik_*= kernelspec 仍按 Core 处理。
 
 broker kernel 启动并取得 PID 后，立即在本机
-=var/aaronnote/jupyter/pending-shutdown/= 保存进程身份；正常关闭后删除记录。
+=var/noema/jupyter/pending-shutdown/= 保存进程身份；正常关闭后删除记录。
 同一 Emacs 会话中活动 runtime 遮住这条记录。若 Emacs 被强制结束，或退出时
 target 不可达，重新打开 Jupyter Board 并选择该 target，会显示
 =SHUTDOWN-PENDING= 行；该行只提供 Retry shutdown。

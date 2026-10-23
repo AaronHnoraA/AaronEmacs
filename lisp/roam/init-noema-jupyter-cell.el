@@ -1,4 +1,4 @@
-;;; init-aaronnote-jupyter-cell.el --- Noema ipynb source buffers -*- lexical-binding: t -*-
+;;; init-noema-jupyter-cell.el --- Noema ipynb source buffers -*- lexical-binding: t -*-
 
 ;;; Commentary:
 ;; Noema owns Jupyter kernels, protocol traffic, execution, and outputs.
@@ -12,25 +12,25 @@
 (require 'seq)
 (require 'subr-x)
 (require 'init-open)
-(require 'init-aaronnote-jupyter-notebook)
+(require 'init-noema-jupyter-notebook)
 
-(declare-function my/noema-jupyter-open-project-directory "init-aaronnote-jupyter-project" ())
-(declare-function my/noema-jupyter-open-project-file "init-aaronnote-jupyter-project" ())
-(declare-function my/noema-jupyter-open-project-shell "init-aaronnote-jupyter-project" ())
-(declare-function my/noema-jupyter-project-lsp "init-aaronnote-jupyter-project" ())
-(declare-function my/noema-jupyter-project-inspect "init-aaronnote-jupyter-project" ())
+(declare-function my/noema-jupyter-open-project-directory "init-noema-jupyter-project" ())
+(declare-function my/noema-jupyter-open-project-file "init-noema-jupyter-project" ())
+(declare-function my/noema-jupyter-open-project-shell "init-noema-jupyter-project" ())
+(declare-function my/noema-jupyter-project-lsp "init-noema-jupyter-project" ())
+(declare-function my/noema-jupyter-project-inspect "init-noema-jupyter-project" ())
 (declare-function my/jupyter-ssh-open-project "init-project" (&optional project))
-(declare-function my/noema-command "init-aaronnote" (command &optional detail))
-(declare-function my/noema--ensure-server "init-aaronnote" (&optional callback))
-(declare-function my/noema--api-call-sync "init-aaronnote"
+(declare-function my/noema-command "init-noema" (command &optional detail))
+(declare-function my/noema--ensure-server "init-noema" (&optional callback))
+(declare-function my/noema--api-call-sync "init-noema"
                   (channel args &optional timeout))
-(declare-function my/noema-api-call "init-aaronnote" (channel args callback &optional timeout))
-(declare-function my/noema-jupyter-output-open "init-aaronnote"
+(declare-function my/noema-api-call "init-noema" (channel args callback &optional timeout))
+(declare-function my/noema-jupyter-output-open "init-noema"
                   (&optional cell-id focus view))
 (declare-function noema-research-accept-jupyter-runtime
                   "noema-research-mode" (snapshot))
 (declare-function noema-research-goto-cell "noema-research-mode" (id))
-(declare-function my/noema--host-file "init-aaronnote" (file))
+(declare-function my/noema--host-file "init-noema" (file))
 (declare-function my/language-server-ensure-deferred "init-lsp" ())
 (declare-function noema-project-root "noema-research" (path))
 (declare-function noema-project-ensure "noema-research" (path))
@@ -500,7 +500,7 @@ Editor/LSP command remains an escape hatch for mixed-language notebooks."
     (setq-local my/noema-jupyter-cell--session-refresh-pending t)
     (let ((source-buffer (current-buffer)))
       (my/noema-api-call
-       "aaronnote:api:jupyter:script-snapshot"
+       "noema:api:jupyter:script-snapshot"
        (vector (my/noema-jupyter-cell--with-project-root
                 `((scriptFile . ,buffer-file-name))))
        (lambda (result error-object)
@@ -593,7 +593,7 @@ When KERNEL-NAME is given, select that discovered kernelspec directly."
   (interactive)
   (when (buffer-modified-p) (save-buffer))
   (let* ((catalog (my/noema-jupyter-cell--api-sync
-                   "aaronnote:api:jupyter-cell:kernels"
+                   "noema:api:jupyter-cell:kernels"
                    (append (my/noema-jupyter-cell--document-detail)
                            (when connections-only '((includeConnections . t)))) 30))
          (entries (my/noema-jupyter-cell--kernel-choices catalog))
@@ -626,7 +626,7 @@ When KERNEL-NAME is given, select that discovered kernelspec directly."
                      ("connect" `((kernelId . ,value))))))
          (reply (unless (equal kind "browse-connections")
                   (my/noema-jupyter-cell--api-sync
-                   "aaronnote:api:jupyter:session-select" body 60))))
+                   "noema:api:jupyter:session-select" body 60))))
     (if (equal kind "browse-connections")
         (my/noema-jupyter-cell-select-kernel t)
       (my/noema-jupyter-cell--apply-session-snapshot reply)
@@ -659,7 +659,7 @@ When REQUIRE-CELL is non-nil, require the cell at point.  Append EXTRA fields."
   (let ((action (format "run-%s" mode))
         (needs-cell (not (equal mode "all"))))
     (my/noema-jupyter-cell--api-async
-     "aaronnote:api:jupyter:script-action"
+     "noema:api:jupyter:script-action"
      (my/noema-jupyter-cell--action-body action needs-cell)
      (format "%s finished" action)
      nil my/noema-jupyter-cell-execute-timeout)
@@ -693,7 +693,7 @@ When REQUIRE-CELL is non-nil, require the cell at point.  Append EXTRA fields."
 (defun my/noema-jupyter-cell--control (action message-text)
   "Ask Noema to perform kernel ACTION and report MESSAGE-TEXT."
   (my/noema-jupyter-cell--api-async
-   "aaronnote:api:jupyter:script-action"
+   "noema:api:jupyter:script-action"
    (my/noema-jupyter-cell--action-body action)
    message-text
    nil my/noema-jupyter-cell-execute-timeout))
@@ -713,7 +713,7 @@ When REQUIRE-CELL is non-nil, require the cell at point.  Append EXTRA fields."
   (interactive)
   (when (buffer-modified-p) (save-buffer))
   (my/noema-jupyter-cell--api-async
-   "aaronnote:api:jupyter:script-action"
+   "noema:api:jupyter:script-action"
    (my/noema-jupyter-cell--action-body "restart-run-all")
    "kernel restarted and all cells finished"))
 
@@ -947,7 +947,7 @@ location."
   "Ask Noema to apply structural cell OPERATION with EXTRA fields."
   (when (buffer-modified-p) (save-buffer))
   (let* ((result (my/noema-jupyter-cell--api-sync
-                  "aaronnote:api:jupyter:script-action"
+                  "noema:api:jupyter:script-action"
                   (my/noema-jupyter-cell--action-body operation t extra)
                   30))
          (active (my/noema-jupyter-notebook--get 'activeCellId result)))
@@ -1043,7 +1043,7 @@ Noema creates and persists the new cell's standard `cell.id'."
   "Clear the current cell's persisted output through Noema."
   (interactive)
   (my/noema-jupyter-cell--api-async
-   "aaronnote:api:jupyter:script-action"
+   "noema:api:jupyter:script-action"
    (my/noema-jupyter-cell--action-body "clear-output" t)
    "output cleared"))
 
@@ -1051,7 +1051,7 @@ Noema creates and persists the new cell's standard `cell.id'."
   "Clear every persisted output in this notebook through Noema."
   (interactive)
   (my/noema-jupyter-cell--api-async
-   "aaronnote:api:jupyter:script-action"
+   "noema:api:jupyter:script-action"
    (my/noema-jupyter-cell--action-body "clear-all-outputs")
    "all outputs cleared"))
 
@@ -1312,7 +1312,7 @@ surface transport errors and use the explicit-inspection timeout."
                                    (buffer-substring-no-properties
                                     body-beg (min (point) body-end)))))))
                 extra))
-              (channel (format "aaronnote:api:jupyter-cell:%s" kind))
+              (channel (format "noema:api:jupyter-cell:%s" kind))
               (timeout (if explicit
                            my/noema-jupyter-cell-inspect-timeout
                          my/noema-jupyter-cell-introspect-timeout))
@@ -1501,6 +1501,6 @@ kernel and protocol owner."
                   (funcall get 'kernelSpecError))
       (my/noema-jupyter-cell-mode 1))))
 
-(provide 'init-aaronnote-jupyter-cell)
+(provide 'init-noema-jupyter-cell)
 
-;;; init-aaronnote-jupyter-cell.el ends here
+;;; init-noema-jupyter-cell.el ends here

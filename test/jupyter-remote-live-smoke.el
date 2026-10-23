@@ -3,8 +3,8 @@
 ;; ROOT must contain an isolated venv with ipykernel/Jupyter Server, runtime/
 ;; and work/. A running test server's jpserver-*.json must be in runtime/.
 ;; This probe never persists target environment/profile changes.
-(require 'init-aaronnote)
-(require 'init-aaronnote-jupyter-server)
+(require 'init-noema)
+(require 'init-noema-jupyter-server)
 (require 'remote-config)
 (require 'remote-framework)
 

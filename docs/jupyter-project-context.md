@@ -26,7 +26,7 @@ introduced.
   There is no built-in general-purpose `remote.el` here: this configuration's
   `lisp/remote/` library sits above Emacs/TRAMP.
 - Existing Jupyter LSP code duplicated remote-profile interpretation. That now
-  delegates to `init-aaronnote-jupyter-project.el`. Launch argv takes precedence
+  delegates to `init-noema-jupyter-project.el`. Launch argv takes precedence
   over old descriptive `remote_kernel.config`; optional project metadata adds
   project settings without copying SSH options into each consumer.
 - The LSP runtime resolver formerly started an unrelated local language server,

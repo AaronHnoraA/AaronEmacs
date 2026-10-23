@@ -51,7 +51,7 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 ```text
 lisp/                 init-*.el 本地模块与本仓库自写的单文件包（如 direnv.el）
 lisp/remote/          Remote 框架，只放框架代码；消费者留在各自模块
-lisp/roam/            Noema 的 Emacs 侧桥接（aaronnote = Noema 的旧名，文件名保留）
+lisp/roam/            Noema 的 Emacs 侧桥接（init-noema*.el，含 Jupyter 桥 init-noema-jupyter-*）
 lisp/lang/            语言模块
 lisp/git/             Git/GitHub 工作台
 lisp/telescope/       Telescope 风格选择器（含诊断选择器 init-problems）
@@ -68,7 +68,7 @@ site-lisp/            自维护或 vendored 的 Elisp 包：
   noema/                Noema 产品仓库（见下）
 etc/                  私有配置与密钥：config-*.el、config-store.el、remote.json、
                       以及指向 Noema 共享资源的链接（katex-macros、noema/）
-var/                  运行时状态与缓存（eln-cache、remote/、aaronnote/host.json …）
+var/                  运行时状态与缓存（eln-cache、remote/、noema/host.json …）
 templates/            auto-insert 模板；templates/noema 链到 Noema 模板目录
 bin/                  emacs-app（后台应用唯一入口）及辅助脚本
 tools/                raycast-emacs（唯一外部控制面）、macos-background 原生源码等
@@ -93,27 +93,27 @@ docs/                 运维文档，入口 docs/README.md
 ## Emacs ↔ Noema 边界
 
 ```text
-Emacs (lisp/roam/init-aaronnote.el)
+Emacs (lisp/roam/init-noema.el)
   │ 启动并监督
   ▼
 Node host  site-lisp/noema/web-host.mjs    HTTP/SSE、静态资源、server/Features/*
-  │ 监督                  ▲ xwidget/Appine 加载 dist/aaronnote
+  │ 监督                  ▲ xwidget/Appine 加载 dist/pages
   ▼                       │
 Go kernel  site-lisp/noema/kernel          Markdown 打开/保存(CAS)、索引、搜索、引用、
                                            研究 DAG、MCP
-Raycast ──(var/aaronnote/host.json → loopback /api)──▶ Node host
+Raycast ──(var/noema/host.json → loopback /api)──▶ Node host
 ```
 
 | 通路 | Emacs 侧 | Noema 侧 |
 | --- | --- | --- |
-| Markdown 页面 | `lang/init-md`（重定向）、`roam/init-aaronnote`（xwidget 桥） | `aaronnote/`（页面）、`src/cm6/`（编辑器） |
-| 按键 | `noema-xwidget-keys`、`my/noema-keys-mode-map` | `aaronnote/host-keyboard.ts`、`xwidget-key-guard.ts` |
+| Markdown 页面 | `lang/init-md`（重定向）、`roam/init-noema`（xwidget 桥） | `pages/`（页面）、`src/cm6/`（编辑器） |
+| 按键 | `noema-xwidget-keys`、`my/noema-keys-mode-map` | `pages/host-keyboard.ts`、`xwidget-key-guard.ts` |
 | 页面文本给 Emacs 工具 | `noema-md-bridge` | 页面保存的选区 |
 | 搜索与引用 | `roam/init-noema-search` | `kernel/noema/wikisearch`、`references.go` |
-| Agenda | `noema-agenda`、`roam/init-aaronnote-agenda-*` | `server/lib/agenda-*`、`kernel/noema/agenda` |
+| Agenda | `noema-agenda`、`roam/init-noema-agenda-*` | `server/lib/agenda-*`、`kernel/noema/agenda` |
 | `.noema` 工作文档 | `noema-research*`（JuText、Graph Board） | `kernel/noema/research`、`server/Features/Research` |
 | Agent | `noema-agent-*`、`init-ai-ide` | ACP 边界、`kernel/agent`、`kernel/mcp` |
-| Jupyter（`.ipynb`） | `roam/init-aaronnote-jupyter-*`、`init-jupyter-board` | `server/Features/Jupyter`、`server/jupyter/`、`jupyter/` |
+| Jupyter（`.ipynb`） | `roam/init-noema-jupyter-*`、`init-jupyter-board` | `server/Features/Jupyter`、`server/jupyter/`、`jupyter/` |
 | 数学宏 | `lang/tex/init-latex`（RaTeX） | `resources/katex-macros`、`shared/katex-macros.mjs` |
 
 Noema 的 Elisp 由 `init-ai-ide` 把 `site-lisp/noema/lisp` 加入 `load-path`。约定：
@@ -128,19 +128,20 @@ Noema 的 Elisp 由 `init-ai-ide` 把 `site-lisp/noema/lisp` 加入 `load-path`�
 | 可调设置 | `config-register` + `etc/config-store.el` |
 | 文件/进程/网络/环境 | `remote-*` API；缺能力就扩展框架并实现 native 与远程 backend |
 | 语言服务器 | `my/register-language-server`，语言模块不维护本地/远程两套 |
-| Noema 页面行为 | Noema 仓库 `aaronnote/` 或 `src/cm6/`，不在 placeholder buffer 上实现 |
+| Noema 页面行为 | Noema 仓库 `pages/` 或 `src/cm6/`，不在 placeholder buffer 上实现 |
 | Noema 数据、搜索、引用 | Go kernel；Node/Emacs 只转发与显示 |
 | `.noema` 语义 | Noema `lisp/noema-research*.el` 与 kernel `noema/research` |
 
 更细的“该改哪里”见 [settings-cookbook.md](settings-cookbook.md)。
 
-## 已知结构问题
+## 命名
 
-阅读时发现、尚未处理的整理项。动手前逐项确认影响面，并同步本表：
+Noema 早先叫 Aaronnote。两个仓库里的文件、模块、通道（`noema:api:*`）、环境变量
+（`NOEMA_*`）、CSS 类与状态目录都已改为 `noema`；Noema 的页面源码目录是 `pages/`，
+构建到 `dist/pages`。旧名只保留在读取既有数据的地方：`@aaronnote` 代码标记、配置里
+保存的 `aaronnote` 主题 id、`init-base.el` 清理旧 `my/aaronnote-*` 命令历史，以及
+`init.el` 启动时把 `var/aaronnote/` 一次性并入 `var/noema/`。不要新增 `aaronnote` 名字。
 
-- Jupyter 相关模块分散在三处：`lisp/init-jupyter-*`、`lisp/roam/init-aaronnote-jupyter-*`
-  与 Noema `jupyter/`。前者是 kernelspec 管理与 Board，后者是 Noema 桥；命名不能反映
-  这一分工。
-- `aaronnote` 是 Noema 的旧名，仍出现在 `lisp/roam/` 文件名、`var/aaronnote/` 与 Noema 的
-  `aaronnote/` 目录。改名牵涉状态路径与外部工具（Raycast 读 `host.json`），需要迁移步骤，
-  不应顺手改。
+Jupyter 在 Emacs 侧分两部分：`lisp/init-jupyter-*`（kernelspec 管理、Jupyter Board）与
+`lisp/roam/init-noema-jupyter-*`（Noema 的 notebook/cell 桥）；Noema 的 `jupyter/`
+放 kernelspec 模板与安装脚本。

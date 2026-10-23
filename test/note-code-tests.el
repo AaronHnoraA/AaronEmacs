@@ -58,11 +58,17 @@
      (my/note-code-source-path '(:lang "rust" :path nil :tag "x"))
      :type 'user-error)))
 
-(ert-deftest my/note-code-jumps-to-aaronnote-and-generic-tags ()
+(ert-deftest my/note-code-jumps-to-noema-and-generic-tags ()
   (with-temp-buffer
-    (insert "-- @aaronnote first\n#check Nat\n// @note-code second\nvalue\n")
+    (insert "-- @noema first\n#check Nat\n// @note-code second\nvalue\n")
     (my/note-code--goto-tag "second")
     (should (looking-at-p "value"))))
+
+(ert-deftest my/note-code-jumps-to-tag-written-before-noema-rename ()
+  (with-temp-buffer
+    (insert "-- @aaronnote legacy\n#check Nat\n")
+    (my/note-code--goto-tag "legacy")
+    (should (looking-at-p "#check"))))
 
 (ert-deftest my/note-code-preamble-uses-only-roam-entrypoint ()
   (let* ((root (make-temp-file "note-code-test-" t))

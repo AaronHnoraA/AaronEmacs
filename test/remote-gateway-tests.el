@@ -22,7 +22,7 @@
     (puthash "tags" ["algebra" "qc"] draft)
     (let* ((encoded
             (remote-gateway--encode
-             `((channel . "aaronnote:api:notes:create-node")
+             `((channel . "noema:api:notes:create-node")
                (args . [,draft]))))
            (decoded
             (json-parse-string encoded
@@ -30,7 +30,7 @@
                                :array-type 'list))
            (body (car (gethash "args" decoded))))
       (should (equal (gethash "channel" decoded)
-                     "aaronnote:api:notes:create-node"))
+                     "noema:api:notes:create-node"))
       (should (equal (gethash "title" body) "Group"))
       (should (equal (gethash "tags" body) '("algebra" "qc"))))))
 

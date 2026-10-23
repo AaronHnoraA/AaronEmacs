@@ -3,7 +3,7 @@
 > **Status: historical reference only.** This configuration no longer has a
 > Neopyter client. `lisp/init-neopyter.el`, `site-lisp/aaron-neopyter/`, and
 > every `aaron-neopyter-*` command referenced below were removed when the
-> Jupyter stack moved to the Noema bridge (`lisp/roam/init-aaronnote-jupyter-*.el`)
+> Jupyter stack moved to the Noema bridge (`lisp/roam/init-noema-jupyter-*.el`)
 > and its raw-ZMQ / HTTP kernel connectors. For the workflow that replaced it
 > see [jupyter-workflow.org](jupyter-workflow.org). These notes are kept
 > because the reverse-engineered wire contract is not documented upstream.

@@ -1,4 +1,4 @@
-;;; init-aaronnote.el --- Noema Web/xwidget bridge -*- lexical-binding: t; -*-
+;;; init-noema.el --- Noema Web/xwidget bridge -*- lexical-binding: t; -*-
 ;;
 ;; Emacs starts the local Noema web host and opens it in xwidget.
 ;; The editable document state lives in Noema's CodeMirror app; Emacs does
@@ -17,20 +17,20 @@
 (require 'transient)
 (require 'url)
 (require 'url-util)
-(require 'init-aaronnote-jupyter-cell)
-(require 'init-aaronnote-jupyter-runtime)
-(require 'init-aaronnote-jupyter-server)
-(require 'init-aaronnote-jupyter-lsp)
-(require 'init-aaronnote-jupyter-debug)
-(require 'init-aaronnote-jupyter-files)
+(require 'init-noema-jupyter-cell)
+(require 'init-noema-jupyter-runtime)
+(require 'init-noema-jupyter-server)
+(require 'init-noema-jupyter-lsp)
+(require 'init-noema-jupyter-debug)
+(require 'init-noema-jupyter-files)
 (require 'init-open)
 
 (declare-function my/background-make-frame "init-background" (&optional parameters))
 (declare-function my/xwidget-open-url "init-browser" (url &rest args))
-(declare-function my/noema--apple-gateway "init-aaronnote-agenda-apple" (body client))
-(declare-function my/noema--apple-start "init-aaronnote-agenda-apple" ())
-(declare-function my/noema--apple-stop "init-aaronnote-agenda-apple" ())
-(declare-function my/noema--apple-request "init-aaronnote-agenda-apple" (body callback &optional timeout))
+(declare-function my/noema--apple-gateway "init-noema-agenda-apple" (body client))
+(declare-function my/noema--apple-start "init-noema-agenda-apple" ())
+(declare-function my/noema--apple-stop "init-noema-agenda-apple" ())
+(declare-function my/noema--apple-request "init-noema-agenda-apple" (body callback &optional timeout))
 (declare-function my/project-activate "init-project" (root &optional remember))
 (declare-function noema-agenda-activate-project "noema-agenda" (root &optional callback))
 (declare-function noema-agenda-attention "noema-agenda-attention" ())
@@ -71,10 +71,10 @@
 (defvar my/xwidget-suppress-auto-focus)
 
 ;; Publish module — lazy, loaded only when a publish command is first invoked.
-(autoload 'my/noema-publish              "init-aaronnote-publish" nil t)
-(autoload 'my/noema-publish-build        "init-aaronnote-publish" nil t)
-(autoload 'my/noema-publish-deploy       "init-aaronnote-publish" nil t)
-(autoload 'my/noema-publish-clean        "init-aaronnote-publish" nil t)
+(autoload 'my/noema-publish              "init-noema-publish" nil t)
+(autoload 'my/noema-publish-build        "init-noema-publish" nil t)
+(autoload 'my/noema-publish-deploy       "init-noema-publish" nil t)
+(autoload 'my/noema-publish-clean        "init-noema-publish" nil t)
 (autoload 'noema-project-overview "noema-project-overview" nil t)
 (autoload 'noema-research-workflow-preview "noema-research-workflow" nil t)
 (autoload 'noema-history-search "noema-history-search" nil t)
@@ -104,7 +104,7 @@ Restart the Noema host after changing this setting."
   "Path to the Noema web host script.")
 
 (defvar my/noema--web-dir
-  (expand-file-name "site-lisp/noema/dist/aaronnote" user-emacs-directory)
+  (expand-file-name "site-lisp/noema/dist/pages" user-emacs-directory)
   "Path to the built Noema web app.")
 
 (defvar my/noema--runtime-root
@@ -112,7 +112,7 @@ Restart the Noema host after changing this setting."
   "Path to the vendored Noema runtime.")
 
 (defvar my/noema--state-root
-  (expand-file-name "var/aaronnote" user-emacs-directory)
+  (expand-file-name "var/noema" user-emacs-directory)
   "Path to Noema state files under the Emacs config.")
 
 (defvar my/noema--tmp-root
@@ -120,7 +120,7 @@ Restart the Noema host after changing this setting."
   "Path to Noema runtime temporary files under the Emacs config.")
 
 (defconst my/noema-jupyter-output-buffer-name "*Noema Jupyter*")
-(defconst my/noema-jupyter-output-client-id "aaronnote-jupyter")
+(defconst my/noema-jupyter-output-client-id "noema-jupyter")
 
 (defvar my/noema--snippets-root
   (expand-file-name "snippets" user-emacs-directory)
@@ -161,7 +161,6 @@ Restart the Noema host after changing this setting."
   (let* ((workspace (my/noema--workspace-config))
          (configured (and workspace (gethash "root" workspace)))
          (root (or (getenv "NOEMA_ROOT")
-                   (getenv "AARONNOTE_ROOT")
                    (and (stringp configured) (not (string-empty-p configured)) configured)
                    "~/Documents/Noema")))
     (file-name-as-directory (expand-file-name root))))
@@ -205,7 +204,7 @@ product tree instead, where they track the code."
 (defun my/noema--jupyter-defaults ()
   "Return project-configured Jupyter defaults for new Noema cells."
   (let* ((settings (my/noema--project-settings))
-         (configured (plist-get settings :aaronnote-jupyter)))
+         (configured (plist-get settings :noema-jupyter)))
     (list :language (format "%s" (or (plist-get configured :language) "python"))
           :kernel (format "%s" (or (plist-get configured :kernel) "python3"))
           :session (format "%s" (or (plist-get configured :session) "default")))))
@@ -214,9 +213,9 @@ product tree instead, where they track the code."
   "Return web-host environment entries for project Jupyter defaults."
   (let ((defaults (my/noema--jupyter-defaults)))
     (list
-     (format "AARONNOTE_JUPYTER_DEFAULT_LANGUAGE=%s" (plist-get defaults :language))
-     (format "AARONNOTE_JUPYTER_DEFAULT_KERNEL=%s" (plist-get defaults :kernel))
-     (format "AARONNOTE_JUPYTER_DEFAULT_SESSION=%s" (plist-get defaults :session)))))
+     (format "NOEMA_JUPYTER_DEFAULT_LANGUAGE=%s" (plist-get defaults :language))
+     (format "NOEMA_JUPYTER_DEFAULT_KERNEL=%s" (plist-get defaults :kernel))
+     (format "NOEMA_JUPYTER_DEFAULT_SESSION=%s" (plist-get defaults :session)))))
 
 (defvar my/noema--katex-macros-dir
   (expand-file-name "etc/katex-macros" user-emacs-directory)
@@ -521,7 +520,7 @@ is dropped.  A raw buffer you are editing elsewhere keeps the jump."
   "(() => {
   const focusEditor = () => {
     try {
-      window.dispatchEvent(new CustomEvent('aaronnote:command', {
+      window.dispatchEvent(new CustomEvent('noema:command', {
         detail: { command: 'focus' }
       }));
     } catch (_) {}
@@ -608,13 +607,13 @@ Local files are projected to native host paths.  Remote files retain their
 (defun my/noema--xwidget-session-id (&optional file)
   "Return the stable xwidget session/client id for FILE."
   (if-let* ((file (my/noema--canonical-file file)))
-      (format "aaronnote:%s" file)
-    "aaronnote"))
+      (format "noema:%s" file)
+    "noema"))
 
 (defun my/noema--split-client-p (client)
   "Return non-nil when CLIENT identifies a split pane."
   (and (stringp client)
-       (string-prefix-p "aaronnote-split:" client)))
+       (string-prefix-p "noema-split:" client)))
 
 (defun my/noema--app-url (&optional file client extra-params)
   "Return the Noema app URL, optionally opening FILE for CLIENT."
@@ -893,9 +892,9 @@ reconnect without a reload and without losing their in-memory editor state."
           (require 'init-copilot nil t))
          (gateway
           (remote-gateway-prepare-client
-           "aaronnote" (remote-context my/noema--notes-root)
+           "noema" (remote-context my/noema--notes-root)
            :placement 'client
-           :provides '("aaronnote.command" "aaronnote.api")))
+           :provides '("noema.command" "noema.api")))
          (copilot-server
           (when (and (not _copilot-gateway-method)
                      (require 'copilot nil t))
@@ -905,7 +904,7 @@ reconnect without a reload and without losing their in-memory editor state."
            (delq nil
             (append
              (list
-            "AARONNOTE_HOST_MODE=emacs"
+            "NOEMA_HOST_MODE=emacs"
             ;; The host watches this pid and exits with it, so a crashed or
             ;; force-quit Emacs does not leave the host and its kernels behind.
             (format "NOEMA_HOST_OWNER_PID=%d" (emacs-pid))
@@ -924,80 +923,80 @@ reconnect without a reload and without losing their in-memory editor state."
             (format "NOEMA_GLOBAL_SKILLS=%s"
                     (or (getenv "NOEMA_GLOBAL_SKILLS")
                         (my/noema-skills-directory)))
-            (format "AARONNOTE_ROOT=%s" (expand-file-name my/noema--notes-root))
+            (format "NOEMA_ROOT=%s" (expand-file-name my/noema--notes-root))
             (format "NOEMA_WORKSPACE_LAYOUT=%s" (my/noema-workspace-layout))
-            (format "AARONNOTE_WEB_DIR=%s" (expand-file-name my/noema--web-dir))
-            (format "AARONNOTE_RUNTIME_ROOT=%s" (expand-file-name my/noema--runtime-root))
-            (format "AARONNOTE_WORKSPACE_ROOT=%s" (expand-file-name my/noema--notes-root))
-            (format "AARONNOTE_LANGUAGETOOL_LANGUAGE=%s"
+            (format "NOEMA_WEB_DIR=%s" (expand-file-name my/noema--web-dir))
+            (format "NOEMA_RUNTIME_ROOT=%s" (expand-file-name my/noema--runtime-root))
+            (format "NOEMA_WORKSPACE_ROOT=%s" (expand-file-name my/noema--notes-root))
+            (format "NOEMA_LANGUAGETOOL_LANGUAGE=%s"
                     (or (bound-and-true-p my/languagetool-language) "en-US"))
-            (format "AARONNOTE_LANGUAGETOOL_URL=%s"
+            (format "NOEMA_LANGUAGETOOL_URL=%s"
                     (or (bound-and-true-p my/languagetool-server-url)
                         "http://10.243.90.222:8765"))
-            (format "AARONNOTE_PROSE_WORDS=%s"
+            (format "NOEMA_PROSE_WORDS=%s"
                     (expand-file-name "etc/prose-accepted-words.txt"
                                       user-emacs-directory))
-            (format "AARONNOTE_PROSE_DISABLED_RULES=%s"
+            (format "NOEMA_PROSE_DISABLED_RULES=%s"
                     (expand-file-name "etc/prose-disabled-rules.txt"
                                       user-emacs-directory))
-            (format "AARONNOTE_PUBLISH_JS_DIR=%s"
+            (format "NOEMA_PUBLISH_JS_DIR=%s"
                     (expand-file-name "js" my/noema--runtime-root))
-            (format "AARONNOTE_STATE_DIR=%s" (expand-file-name my/noema--state-root))
-            (format "AARONNOTE_TMP_DIR=%s" (expand-file-name my/noema--tmp-root))
-            (format "AARONNOTE_SNIPPETS_ROOT=%s" (expand-file-name my/noema--snippets-root))
-            (format "AARONNOTE_TEMPLATES_ROOT=%s" (expand-file-name my/noema--templates-root))
-            (format "AARONNOTE_LATEX_TEMPLATES_ROOT=%s"
+            (format "NOEMA_STATE_DIR=%s" (expand-file-name my/noema--state-root))
+            (format "NOEMA_TMP_DIR=%s" (expand-file-name my/noema--tmp-root))
+            (format "NOEMA_SNIPPETS_ROOT=%s" (expand-file-name my/noema--snippets-root))
+            (format "NOEMA_TEMPLATES_ROOT=%s" (expand-file-name my/noema--templates-root))
+            (format "NOEMA_LATEX_TEMPLATES_ROOT=%s"
                     (expand-file-name my/noema--latex-templates-root))
-            (format "AARONNOTE_KATEX_MACROS_DIR=%s" (expand-file-name my/noema--katex-macros-dir)))
+            (format "NOEMA_KATEX_MACROS_DIR=%s" (expand-file-name my/noema--katex-macros-dir)))
             (my/noema--jupyter-default-environment)
             (list
-            (format "AARONNOTE_LATEX_EXPORT_ENGINE=%s"
+            (format "NOEMA_LATEX_EXPORT_ENGINE=%s"
                     (or my/noema-latex-export-engine "codex"))
-            (format "AARONNOTE_LATEX_EXPORT_AGENT=%s"
+            (format "NOEMA_LATEX_EXPORT_AGENT=%s"
                     (or (bound-and-true-p my/noema-latex-export-agent) "codex"))
-            (format "AARONNOTE_LATEX_EXPORT_MAX_ATTEMPTS=%d"
+            (format "NOEMA_LATEX_EXPORT_MAX_ATTEMPTS=%d"
                     (or my/noema-latex-export-max-attempts 3))
-            (format "AARONNOTE_LATEX_EXPORT_AGENT_IDLE_TIMEOUT_MS=%d"
+            (format "NOEMA_LATEX_EXPORT_AGENT_IDLE_TIMEOUT_MS=%d"
                     (* 1000 (max 10 (or my/noema-latex-export-agent-idle-timeout 180))))
-            (format "AARONNOTE_LATEX_EXPORT_AGENT_HARD_TIMEOUT_MS=%d"
+            (format "NOEMA_LATEX_EXPORT_AGENT_HARD_TIMEOUT_MS=%d"
                     (* 1000 (max (or my/noema-latex-export-agent-idle-timeout 180)
                                  (or my/noema-latex-export-agent-hard-timeout 900))))
-            (format "AARONNOTE_CODEX_BIN=%s"
+            (format "NOEMA_CODEX_BIN=%s"
                     (or (bound-and-true-p codex-cli-executable) "codex"))
-            (format "AARONNOTE_CLAUDE_BIN=%s"
+            (format "NOEMA_CLAUDE_BIN=%s"
                     (or (bound-and-true-p claude-code-ide-cli-path) "claude"))
-            (format "AARONNOTE_OPENCODE_BIN=%s"
+            (format "NOEMA_OPENCODE_BIN=%s"
                     (or (bound-and-true-p my/noema-opencode-executable) "opencode"))
             (when (and (boundp 'my/noema-codex-model)
                        (stringp my/noema-codex-model)
                        (not (string-empty-p my/noema-codex-model)))
-              (format "AARONNOTE_CODEX_MODEL=%s" my/noema-codex-model))
+              (format "NOEMA_CODEX_MODEL=%s" my/noema-codex-model))
             (when (and (boundp 'my/noema-latex-export-model)
                        (stringp my/noema-latex-export-model)
                        (not (string-empty-p my/noema-latex-export-model)))
-              (format "AARONNOTE_LATEX_EXPORT_MODEL=%s" my/noema-latex-export-model))
-            (format "AARONNOTE_WEB_PORT=%d"
+              (format "NOEMA_LATEX_EXPORT_MODEL=%s" my/noema-latex-export-model))
+            (format "NOEMA_WEB_PORT=%d"
                     (or reconnect-port my/noema-web-port 0))
             ;; Emacs-started Noema should share Emacs' existing Copilot LS
             ;; through the gateway, not spawn a second memory-heavy copy.
-            "AARONNOTE_COPILOT_DISABLE_LOCAL=1"
-            (format "AARONNOTE_EMACS_GATEWAY_URL=%s"
+            "NOEMA_COPILOT_DISABLE_LOCAL=1"
+            (format "NOEMA_EMACS_GATEWAY_URL=%s"
                     (plist-get gateway :websocket-url))
-            (format "AARONNOTE_EMACS_GATEWAY_BINDING=%s"
+            (format "NOEMA_EMACS_GATEWAY_BINDING=%s"
                     (plist-get gateway :binding-id))
-            (format "AARONNOTE_EMACS_GATEWAY_CLIENT_ID=%s"
+            (format "NOEMA_EMACS_GATEWAY_CLIENT_ID=%s"
                     (plist-get gateway :client-id))
             (when copilot-server
-              (format "AARONNOTE_COPILOT_LANGUAGE_SERVER=%s"
+              (format "NOEMA_COPILOT_LANGUAGE_SERVER=%s"
                       (expand-file-name copilot-server)))
             (when (and (not _copilot-gateway-method)
                        (bound-and-true-p my/copilot-server-max-heap-mb))
-              (format "AARONNOTE_COPILOT_MAX_HEAP_MB=%d"
+              (format "NOEMA_COPILOT_MAX_HEAP_MB=%d"
                       my/copilot-server-max-heap-mb)))))
            process-environment))
          (proc
           (remote-make-client-process
-             :name "aaronnote-web-host"
+             :name "noema-web-host"
              :buffer log-buf
              :command
              (append
@@ -1193,7 +1192,7 @@ to JSON a second time."
                   (my/noema--goto-location file line-number column)
                   (when (and (stringp file)
                              (string-match-p "\\.ipynb\\'" file)
-                             (require 'init-aaronnote-jupyter-cell nil t))
+                             (require 'init-noema-jupyter-cell nil t))
                     (ignore-errors
                       (my/noema-jupyter-cell-activate-buffer payload)))
                   (when (and tag (not (string-empty-p (or tag ""))))
@@ -1311,7 +1310,7 @@ to JSON a second time."
 
 (defun my/noema--external-file-notify-change (file &optional client-id)
   "Notify Noema about logical FILE using optional CLIENT-ID as the source."
-  (let ((client (remote-gateway-find-client "aaronnote")))
+  (let ((client (remote-gateway-find-client "noema")))
     (when (and client client-id)
       (when-let* ((timer (gethash file my/noema--external-file-watch-timers)))
         (cancel-timer timer)))
@@ -1323,7 +1322,7 @@ to JSON a second time."
                 (error '((mtimeMs . 0) (size . 0)))))
              (mtime (alist-get 'mtimeMs metadata)))
         (remote-gateway-notify
-         client "aaronnote.command"
+         client "noema.command"
          `((type . "command")
            (command . "note-saved")
            (detail . ((file . ,(my/noema--host-file file))
@@ -1422,9 +1421,9 @@ FILE watches it again instead of trusting a watch that no longer reports."
                  workspace file '(change attribute-change)
                  (lambda (event)
                    (my/noema--external-file-watch-event file event))
-                 :key (list 'aaronnote-external-file file)
+                 :key (list 'noema-external-file file)
                  :metadata
-                 (list :application "aaronnote" :file file))))
+                 (list :application "noema" :file file))))
           (puthash
            file (cons workspace resource)
            my/noema--external-file-watches))
@@ -1445,7 +1444,7 @@ FILE watches it again instead of trusting a watch that no longer reports."
    (lambda (_file owner)
      (ignore-errors
        (remote-workspace-close-resource
-        (car owner) (cdr owner) 'aaronnote-stop)))
+        (car owner) (cdr owner) 'noema-stop)))
    my/noema--external-file-watches)
   (clrhash my/noema--external-file-watch-timers)
   (clrhash my/noema--external-file-watches)
@@ -1510,7 +1509,7 @@ FILE watches it again instead of trusting a watch that no longer reports."
              ;; project and makes the final rename fail with EXDEV.
              (temporary
               (make-temp-file
-               (expand-file-name ".aaronnote-save-" default-directory))))
+               (expand-file-name ".noema-save-" default-directory))))
         (puthash
          file (+ (float-time) 30)
          my/noema--external-file-watch-suppressed)
@@ -1726,23 +1725,23 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                               (buffer-list))) files))))))
 
 (remote-gateway-register-method
- "aaronnote.agenda.protected-sources" #'my/noema--agenda-protected-sources)
+ "noema.agenda.protected-sources" #'my/noema--agenda-protected-sources)
 (remote-gateway-register-method
- "aaronnote.agenda.apple"
+ "noema.agenda.apple"
  (lambda (params client)
-   (require 'init-aaronnote-agenda-apple)
+   (require 'init-noema-agenda-apple)
    (my/noema--apple-gateway params client)))
 (remote-gateway-register-method
- "aaronnote.agenda.source"
+ "noema.agenda.source"
  (lambda (params client)
-   (require 'init-aaronnote-agenda-source)
+   (require 'init-noema-agenda-source)
    (my/noema--agenda-source-request params client)))
 (remote-gateway-register-method
- "aaronnote.event" #'my/noema--gateway-event)
+ "noema.event" #'my/noema--gateway-event)
 (remote-gateway-register-method
- "aaronnote.file.read" #'my/noema--external-file-read)
+ "noema.file.read" #'my/noema--external-file-read)
 (remote-gateway-register-method
- "aaronnote.file.write" #'my/noema--external-file-write)
+ "noema.file.write" #'my/noema--external-file-write)
 
 (defvar my/noema--latex-agent-requests (make-hash-table :test #'equal)
   "Active LaTeX export polish turns keyed by the web host request id.")
@@ -1999,7 +1998,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
 (defun my/noema--latex-agent-progress (request-id backend event)
   "Report bounded ACP EVENT activity for export REQUEST-ID to Noema."
   (when-let* ((request (gethash request-id my/noema--latex-agent-requests))
-              (client (remote-gateway-find-client "aaronnote")))
+              (client (remote-gateway-find-client "noema")))
     (let* ((kind (map-elt event :event))
            (now (float-time))
            (last (or (plist-get request :last-progress) 0))
@@ -2012,7 +2011,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                  (or (eq kind 'permission-request) (>= (- now last) 15)))
         (my/noema--latex-agent-request-set request-id :last-progress now)
         (remote-gateway-notify
-         client "aaronnote.latex.agent-progress"
+         client "noema.latex.agent-progress"
          `((requestId . ,request-id) (text . ,text)))))))
 
 (defun my/noema--latex-agent-run (params _client)
@@ -2117,15 +2116,15 @@ This is a memory-only check; it never opens an inactive project or reads disk."
   `((ok . t)))
 
 (remote-gateway-register-method
- "aaronnote.latex.agent-status" #'my/noema--latex-agent-status)
+ "noema.latex.agent-status" #'my/noema--latex-agent-status)
 (remote-gateway-register-method
- "aaronnote.latex.agent-run" #'my/noema--latex-agent-run)
+ "noema.latex.agent-run" #'my/noema--latex-agent-run)
 (remote-gateway-register-method
- "aaronnote.latex.agent-cancel" #'my/noema--latex-agent-cancel)
+ "noema.latex.agent-cancel" #'my/noema--latex-agent-cancel)
 (remote-gateway-register-method
- "aaronnote.latex.agent-open" #'my/noema--latex-agent-open)
+ "noema.latex.agent-open" #'my/noema--latex-agent-open)
 (remote-gateway-register-method
- "aaronnote.latex.intervene" #'my/noema--latex-intervene)
+ "noema.latex.intervene" #'my/noema--latex-intervene)
 
 (defun my/noema--clear-process-log-queue ()
   "Cancel and discard deferred web-host diagnostic output."
@@ -2492,7 +2491,7 @@ The URL and xwidget session registry must name the same page client."
 Switching to an already-open file reuses its buffer without reloading.
 An in-page link can change the file shown by a live client; that client's id
 stays fixed while the file registry follows the page.  Hosted surfaces share
-the \"aaronnote:surface\" session."
+the \"noema:surface\" session."
   (unless (fboundp 'my/xwidget-open-url)
     (require 'init-browser))
   (let* ((file (my/noema--canonical-file file))
@@ -2500,7 +2499,7 @@ the \"aaronnote:surface\" session."
          ;; editor.  Give it one stable client even if the editor's legacy
          ;; singleton id is already displaying a note.
          (nominal-id (if file (my/noema--xwidget-session-id file)
-                       "aaronnote:surface"))
+                       "noema:surface"))
          (nominal-buffer (and (fboundp 'my/xwidget-session-buffer)
                               (my/xwidget-session-buffer nominal-id)))
          (existing (or (and file (my/noema--buffer-for-file file))
@@ -2591,11 +2590,11 @@ visible beside it, and reuse an already visible surface window."
                     (existing (pcase my/noema-backend
                                 ('portal
                                  (my/noema-portal--session-buffer
-                                  "aaronnote:surface"))
+                                  "noema:surface"))
                                 ('xwidget
                                  (and (fboundp 'my/xwidget-session-buffer)
                                       (my/xwidget-session-buffer
-                                       "aaronnote:surface")))))
+                                       "noema:surface")))))
                     (visible (and existing
                                   (get-buffer-window existing 'visible)))
                     (created (and (not visible)
@@ -2634,8 +2633,8 @@ visible beside it, and reuse an already visible surface window."
   "Write one small control PAYLOAD to an already-ready Noema web-host."
   (when-let* ((client
                (and my/noema--ready
-                    (remote-gateway-find-client "aaronnote"))))
-    (remote-gateway-notify client "aaronnote.command" payload)
+                    (remote-gateway-find-client "noema"))))
+    (remote-gateway-notify client "noema.command" payload)
     t))
 
 (defun my/noema--schedule-post-drain ()
@@ -2663,7 +2662,7 @@ visible beside it, and reuse an already visible surface window."
    ((null my/noema--post-queue)
     (setq my/noema--post-awaiting-ready nil))
    ((not (and my/noema--ready
-              (remote-gateway-find-client "aaronnote")))
+              (remote-gateway-find-client "noema")))
     (unless my/noema--post-awaiting-ready
       (setq my/noema--post-awaiting-ready t)
       (my/noema--ensure-server
@@ -2929,7 +2928,7 @@ carry optional initial anchor coordinates."
                  (unless (fboundp 'my/xwidget-open-url)
                    (require 'init-browser)))
                (let* ((ordinal (cl-incf my/noema--split-counter))
-                      (client (format "aaronnote-split:%s:%d"
+                      (client (format "noema-split:%s:%d"
                                       (file-truename file) ordinal))
                       (url (my/noema--app-url file client extra-params))
                       (success nil))
@@ -3030,7 +3029,7 @@ Cursor-level sync is intentionally no longer a per-keystroke preview channel."
   "Queue COMMAND with optional DETAIL for the open Noema page.
 This function never starts the host, writes a socket, evaluates JavaScript or
 waits for a response in the invoking Emacs command."
-  (interactive "sAaronnote command: ")
+  (interactive "sNoema command: ")
   ;; `my/noema--send-command' captures the current pane id into the queued
   ;; payload now; the later timer therefore cannot turn it into a broadcast.
   (my/noema--send-command command detail))
@@ -3162,7 +3161,7 @@ waits for a response in the invoking Emacs command."
 
 (defconst my/noema--core-ready-script
   "(() => {
-  const connection = window.aaronnoteApi && window.aaronnoteApi.connection;
+  const connection = window.noemaApi && window.noemaApi.connection;
   if (!connection || typeof connection.reconnect !== 'function') return false;
   connection.reconnect('host-ready');
   return true;
@@ -3406,7 +3405,7 @@ and every renderer uses the same `runHostCommand' pause implementation."
   "Enable the client EventKit helper and explicitly request access for KIND."
   (interactive (list (completing-read "Enable Apple: " '("reminder" "event") nil t)))
   (unless (member kind '("reminder" "event")) (user-error "Choose reminder or event"))
-  (require 'init-aaronnote-agenda-apple)
+  (require 'init-noema-agenda-apple)
   (my/noema--apple-start)
   (my/noema--apple-request
    `((op . "authorize") (kind . ,kind))
@@ -3536,9 +3535,9 @@ and every renderer uses the same `runHostCommand' pause implementation."
     (message "Noema: building web assets...")
     (setq my/noema--build-process
           (make-process
-           :name "aaronnote-build"
+           :name "noema-web-build"
            :buffer buffer
-           :command '("make" "aaronnote-build")
+           :command '("make" "noema-web-build")
            :noquery t
            :sentinel
            (lambda (proc _event)
@@ -3554,7 +3553,7 @@ and every renderer uses the same `runHostCommand' pause implementation."
                          (my/noema--ensure-server
                           (lambda ()
                             (my/noema--open-url
-                             (my/noema--app-url nil "aaronnote:surface") nil t)))))
+                             (my/noema--app-url nil "noema:surface") nil t)))))
                    (display-buffer buffer)
                    (message "Noema: build failed; see %s" (buffer-name buffer))))))))
     (display-buffer buffer)))
@@ -3628,10 +3627,10 @@ at point, for instance — should pass a much shorter TIMEOUT so a busy
 kernel cannot freeze the editor."
   (when-let* ((client
                (and my/noema--ready
-                    (remote-gateway-find-client "aaronnote")))
+                    (remote-gateway-find-client "noema")))
               (result
                (remote-gateway-request-sync
-                client "aaronnote.api"
+                client "noema.api"
                 `((channel . ,channel) (args . ,args))
                 (or timeout 8))))
     (my/noema--gateway-hash-value result)))
@@ -3652,9 +3651,9 @@ because the default deadline would report a perfectly healthy run as a
 failure while it is still going."
   (if-let* ((client
              (and my/noema--ready
-                  (remote-gateway-find-client "aaronnote"))))
+                  (remote-gateway-find-client "noema"))))
       (remote-gateway-request-async
-       client "aaronnote.api"
+       client "noema.api"
        `((channel . ,channel) (args . ,args))
        (lambda (result error-object)
          (if error-object
@@ -3705,7 +3704,7 @@ failure while it is still going."
     (user-error "Noema web-host is not ready"))
   (message "Noema: loading runtime status…")
   (my/noema-api-call
-   "aaronnote:api:runtime:debug" []
+   "noema:api:runtime:debug" []
    (lambda (result error-object)
      (if error-object
          (message "Noema runtime status unavailable: %s"
@@ -3738,7 +3737,7 @@ failure while it is still going."
   (let ((mode (if full "full" "incremental")))
     (message "Noema: %s Wiki index..." (if full "rebuilding" "refreshing"))
     (my/noema--api-call
-     "aaronnote:api:wiki:refresh"
+     "noema:api:wiki:refresh"
      (vector (list (cons 'mode mode)))
      (lambda (result)
        (let* ((maintenance (alist-get 'maintenance result))
@@ -3765,7 +3764,7 @@ failure while it is still going."
     (user-error "Noema: server not running"))
   (message "Noema: loading Wiki index status…")
   (my/noema-api-call
-   "aaronnote:api:wiki:index-status" []
+   "noema:api:wiki:index-status" []
    (lambda (result error-object)
      (if error-object
          (message "Noema Wiki index status unavailable: %s"
@@ -4222,5 +4221,5 @@ the gptel or agent UI on the note's Emacs source buffer."
 
 (my/noema--rename-live-buffers)
 
-(provide 'init-aaronnote)
-;;; init-aaronnote.el ends here
+(provide 'init-noema)
+;;; init-noema.el ends here

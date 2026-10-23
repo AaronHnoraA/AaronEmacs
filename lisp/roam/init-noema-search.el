@@ -14,7 +14,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function my/noema--api-call-sync "init-aaronnote" (channel args &optional timeout))
+(declare-function my/noema--api-call-sync "init-noema" (channel args &optional timeout))
 (defvar my/noema--ready)
 
 (defgroup my/noema-search nil
@@ -39,7 +39,7 @@
   "Face for a result's location and excerpt."
   :group 'my/noema-search)
 
-(defconst my/noema-search-channel "aaronnote:api:knowledge:search"
+(defconst my/noema-search-channel "noema:api:knowledge:search"
   "Host channel that forwards a search to the kernel.")
 
 (defun my/noema-search-available-p ()
@@ -304,7 +304,7 @@ to insert."
     (car (or (gethash choice state)
              (gethash (car (funcall candidates choice)) state)))))
 
-(declare-function my/noema-command "init-aaronnote" (command &rest args))
+(declare-function my/noema-command "init-noema" (command &rest args))
 (defvar my/noema-keys-mode)
 (defvar my/noema-keys-mode-map)
 
@@ -370,7 +370,7 @@ The page tags an equation or the current place inline, as its tool
 ;; Command-R refers to something, Command-Shift-R makes the place at the
 ;; caret referable.  The page binds both keys for itself; these cover the
 ;; pane while Emacs holds the keyboard.
-(with-eval-after-load 'init-aaronnote
+(with-eval-after-load 'init-noema
   (define-key my/noema-keys-mode-map (kbd "M-r") #'my/noema-insert-reference)
   (define-key my/noema-keys-mode-map (kbd "M-R") #'my/noema-tag-reference))
 

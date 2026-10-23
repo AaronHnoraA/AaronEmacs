@@ -171,7 +171,7 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(ert-deftest my/xwidget-update-buffer-name-skips-aaronnote-owned-buffer ()
+(ert-deftest my/xwidget-update-buffer-name-skips-noema-owned-buffer ()
   (let ((buffer (generate-new-buffer "*Noema: note.md*")))
     (unwind-protect
         (with-current-buffer buffer

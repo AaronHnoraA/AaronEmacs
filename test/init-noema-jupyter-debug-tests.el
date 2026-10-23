@@ -1,7 +1,7 @@
-;;; init-aaronnote-jupyter-debug-tests.el --- Notebook debug placement -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-debug-tests.el --- Notebook debug placement -*- lexical-binding: t; -*-
 (require 'ert)
 (require 'cl-lib)
-(require 'init-aaronnote-jupyter-debug)
+(require 'init-noema-jupyter-debug)
 
 (ert-deftest my/noema-kernel-picker-shows-connection-files-only-on-request ()
   (with-temp-buffer
@@ -14,7 +14,7 @@
                 ((symbol-function 'my/noema-jupyter-cell--api-sync)
                  (lambda (channel body &rest _)
                    (push (cons channel body) requests)
-                   (when (equal channel "aaronnote:api:jupyter-cell:kernels") catalog)))
+                   (when (equal channel "noema:api:jupyter-cell:kernels") catalog)))
                 ((symbol-function 'completing-read)
                  (lambda (_prompt choices &rest _)
                    (push choices selections)

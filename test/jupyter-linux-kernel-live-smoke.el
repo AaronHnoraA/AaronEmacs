@@ -4,8 +4,8 @@
 ;; JUPYTER_LINUX_CONFIG=<temporary Remote JSON> can pin a physical test host.
 ;; Requires python3, ipykernel, jupyter_client, and jupyter_core on the target.
 
-(require 'init-aaronnote)
-(require 'init-aaronnote-jupyter-runtime)
+(require 'init-noema)
+(require 'init-noema-jupyter-runtime)
 (require 'remote-config)
 (require 'remote-framework)
 

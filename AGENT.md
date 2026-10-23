@@ -236,7 +236,7 @@ This config already has maintenance and workflow entry points. Reuse them:
 - LSP: `my/register-language-server`,
   `my/register-language-server-feature`, `my/language-server-manager`, and
   `my/language-server-doctor`.
-- Jupyter: the Noema bridge under `lisp/roam/init-aaronnote-jupyter-*.el` —
+- Jupyter: the Noema bridge under `lisp/roam/init-noema-jupyter-*.el` —
   `runtime` (kernelspec discovery, target process, connection file, the
   five-channel forward group), `server` (remote Jupyter servers over HTTP(S),
   `my/noema-jupyter-servers`), `cell` (the `.cell/` script mode, kernel
@@ -297,7 +297,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   hotkey), and they do not go through Emacs at all.  Finding a page is
   therefore not in `my/background-actions`: an entry there would bring Emacs
   forward to do what Raycast already shows.  They read
-  `var/aaronnote/host.json`, written by the running Noema host, and call its
+  `var/noema/host.json`, written by the running Noema host, and call its
   loopback `/api` (`tools/raycast-emacs/src/backend.ts`): search is answered
   by the Go kernel, maintenance (index refresh and rebuild, repository
   checkpoint and sync) by the host's own services.  Raycast is then the whole
@@ -558,11 +558,11 @@ Noema Markdown panes:
   the note's ordinary source buffer.  Do not implement text features against
   the placeholder, and never wait synchronously on the page in a command.
 - Host chords the renderer forwards (`shouldForwardToEmacs` in
-  `aaronnote/xwidget-key-guard.ts`, including Cmd+Arrow → windmove) are
+  `pages/xwidget-key-guard.ts`, including Cmd+Arrow → windmove) are
   claimed in the capture phase, before CM6's own keymap; keep new forwarded
   chords on that path.  Every Noema page gets the same keyboard contract:
   the editor composes the primitives itself and every other page entry calls
-  `installHostKeyboardBridge` (`aaronnote/host-keyboard.ts`); a test fails if
+  `installHostKeyboardBridge` (`pages/host-keyboard.ts`); a test fails if
   a page skips it.  Never special-case one page or one buffer kind.
 - A key forwarded from a page follows its command's result: the window the
   command opened or changed gets the keyboard
@@ -592,7 +592,7 @@ Noema Markdown panes:
   and Emacs has not announced taking it (`holdsInputAgainstHostPause`), and
   reports `input-focus` instead.  Take the keyboard from a pane only through
   `my/noema--release-xwidget-input-buffer`, which makes that announcement.
-- The page's Vim layer (`site-lisp/noema/aaronnote/vim-lite.ts`) takes native
+- The page's Vim layer (`site-lisp/noema/pages/vim-lite.ts`) takes native
   Vim as its reference, checked against results recorded from Neovim
   (`tests/vim-native-parity.test.ts`); `site-lisp/noema/docs/vim.md` lists the
   few deliberate differences.  Change behaviour by re-recording, not from

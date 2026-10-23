@@ -1,4 +1,4 @@
-;;; init-aaronnote-jupyter-notebook.el --- Native ipynb source projection -*- lexical-binding: t; -*-
+;;; init-noema-jupyter-notebook.el --- Native ipynb source projection -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;; Visit an ipynb as an ordinary language buffer without asking Jupytext to
@@ -972,6 +972,6 @@ UI talks only to Noema and never opens a Jupyter protocol connection."
                                 (string-match-p "noema" (car entry)))))
                      auto-mode-alist)))))
 
-(provide 'init-aaronnote-jupyter-notebook)
+(provide 'init-noema-jupyter-notebook)
 
-;;; init-aaronnote-jupyter-notebook.el ends here
+;;; init-noema-jupyter-notebook.el ends here

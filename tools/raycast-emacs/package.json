@@ -40,7 +40,7 @@
       "title": "Noema state directory",
       "description": "Where the running Noema host writes host.json.",
       "type": "textfield",
-      "default": "~/.config/emacs/var/aaronnote",
+      "default": "~/.config/emacs/var/noema",
       "required": false
     }
   ],

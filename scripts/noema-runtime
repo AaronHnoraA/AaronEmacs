@@ -5,12 +5,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 EMACS_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 RUNTIME_ROOT="${EMACS_ROOT}/site-lisp/noema"
 JUPYTER_ROOT="${RUNTIME_ROOT}/jupyter"
-STATE_ROOT="${EMACS_ROOT}/var/aaronnote"
+STATE_ROOT="${EMACS_ROOT}/var/noema"
 RUNTIME_STATE="${STATE_ROOT}/runtime"
 BACKUP_ROOT="${STATE_ROOT}/backups"
-NOTE_ROOT="${AARONNOTE_ROOT:-${EMACS_ROOT}/.roam}"
-CONDA_ENV_NAME="${AARONNOTE_CONDA_ENV:-aaronnote-python}"
-CONDA_SPEC="${EMACS_ROOT}/etc/conda/aaronnote-python.yml"
+NOTE_ROOT="${NOEMA_ROOT:-${EMACS_ROOT}/.roam}"
+CONDA_ENV_NAME="${NOEMA_CONDA_ENV:-noema-python}"
+CONDA_SPEC="${EMACS_ROOT}/etc/conda/noema-python.yml"
 SAGE_REQUIREMENTS="${EMACS_ROOT}/etc/sage/requirements.txt"
 PYTHON_ENV_FILE="${RUNTIME_STATE}/python.env"
 SAGE_ENV_FILE="${RUNTIME_STATE}/sage.env"
@@ -18,7 +18,7 @@ ROAM_DB="${NOTE_ROOT}/roam.db"
 ROAM_CLI="${RUNTIME_ROOT}/roam-cli.mjs"
 
 die() {
-  printf 'aaronnote-runtime: %s\n' "$*" >&2
+  printf 'noema-runtime: %s\n' "$*" >&2
   exit 1
 }
 
@@ -66,11 +66,11 @@ python_refresh() {
   prefix="$($conda run --no-capture-output -n "$CONDA_ENV_NAME" python -c 'import sys; print(sys.prefix)')"
   [[ -x "$python" ]] || die "resolved Conda Python is not executable: $python"
   {
-    quote_env AARONNOTE_CONDA_EXE "$conda"
-    quote_env AARONNOTE_CONDA_ENV "$CONDA_ENV_NAME"
-    quote_env AARONNOTE_CONDA_PREFIX "$prefix"
-    quote_env AARONNOTE_PYTHON "$python"
-    quote_env AARONNOTE_PYTHON_VERSION "$version"
+    quote_env NOEMA_CONDA_EXE "$conda"
+    quote_env NOEMA_CONDA_ENV "$CONDA_ENV_NAME"
+    quote_env NOEMA_CONDA_PREFIX "$prefix"
+    quote_env NOEMA_PYTHON "$python"
+    quote_env NOEMA_PYTHON_VERSION "$version"
   } | atomic_write "$PYTHON_ENV_FILE"
   printf 'Python runtime: %s (%s)\n' "$python" "$version"
 }
@@ -117,11 +117,11 @@ sage_refresh() {
   [[ -x "$python" ]] || die "resolved Sage Python is not executable: $python"
   [[ -d "$site_packages" ]] || die "resolved Sage site-packages is missing: $site_packages"
   {
-    quote_env AARONNOTE_SAGE "$sage"
-    quote_env AARONNOTE_SAGE_PYTHON "$python"
-    quote_env AARONNOTE_SAGE_VERSION "$version"
-    quote_env AARONNOTE_SAGE_SITE_PACKAGES "$site_packages"
-    quote_env AARONNOTE_SAGE_USER_SITE "$user_site"
+    quote_env NOEMA_SAGE "$sage"
+    quote_env NOEMA_SAGE_PYTHON "$python"
+    quote_env NOEMA_SAGE_VERSION "$version"
+    quote_env NOEMA_SAGE_SITE_PACKAGES "$site_packages"
+    quote_env NOEMA_SAGE_USER_SITE "$user_site"
   } | atomic_write "$SAGE_ENV_FILE"
   if [[ -d "$NOTE_ROOT" ]]; then
     ln -sfn "$site_packages" "${NOTE_ROOT}/.sage-site-packages"
@@ -205,7 +205,7 @@ db_rebuild() {
 db_vacuum() {
   need sqlite3
   if pgrep -f "${RUNTIME_ROOT}/web-host.mjs" >/dev/null 2>&1; then
-    die 'Aaronnote web-host is running; stop it before db-vacuum'
+    die 'Noema web-host is running; stop it before db-vacuum'
   fi
   db_backup
   sqlite3 "$ROAM_DB" 'VACUUM; PRAGMA optimize;'
@@ -218,7 +218,7 @@ runtime_clean() {
   rm -rf "${JUPYTER_ROOT}/.venv"
   find "${JUPYTER_ROOT}/.jupyter/data/kernels" -mindepth 1 -maxdepth 1 -type d -name 'sagemath-*' -exec rm -rf -- {} + 2>/dev/null || true
   find "${JUPYTER_ROOT}/.jupyter/runtime" -maxdepth 1 -type f -name '*.json' -mtime +7 -delete 2>/dev/null || true
-  printf 'Removed the retired Aaronnote venv, versioned Sage specs, and stale runtime JSON.\n'
+  printf 'Removed the retired Noema venv, versioned Sage specs, and stale runtime JSON.\n'
 }
 
 doctor() {
@@ -235,7 +235,7 @@ doctor() {
 
 usage() {
   cat <<'USAGE'
-usage: aaronnote-runtime COMMAND [ARGS...]
+usage: noema-runtime COMMAND [ARGS...]
 
 Environment: setup doctor runtime-update python-env python-refresh
 Sage:        sage-info sage-refresh sage-packages sage-pip PACKAGE...

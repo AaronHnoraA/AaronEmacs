@@ -1,4 +1,4 @@
-name: aaronnote-python
+name: noema-python
 channels:
   - conda-forge
 dependencies:

@@ -675,27 +675,27 @@ Noema 的 Jupyter kernel 同理：`server/jupyter/kernel-process.mjs` 用
 `detached: true` 启动 kernel，一旦孵化它的 node 进程（web-host 或某个临时
 诊断 harness）整体退出而没有干净调用 `shutdown()`，kernel 会被 reparent 到
 PID 1。`server/jupyter/kernel-registry.mjs` 的 `sweepOrphanKernels` 只能靠
-per-runtimeDir 的 `aaronnote-owned.json` sidecar 回收**同一个 runtimeDir 的
+per-runtimeDir 的 `noema-owned.json` sidecar 回收**同一个 runtimeDir 的
 上一轮**孤儿；如果调用方每次都 `mkdtemp` 一个新的临时 runtimeDir（例如一次性
 诊断脚本），sidecar 永远追不上。`web-host.mjs` 启动时额外跑一次
 `sweepGlobalOrphanKernels`：只要是 ppid=1 且命令行匹配
-`ipykernel_launcher ... aaronnote-kernel-*.json` 的进程，不管来自哪个
+`ipykernel_launcher ... noema-kernel-*.json` 的进程，不管来自哪个
 runtimeDir 一律清理（这个命名模式只有本模块会用到，正常存活的 kernel
 ppid 是它的 node 宿主进程，不会命中）。
 
 Emacs broker 放置的 kernel 走的是**另一条**路径，上面那个 sweep 覆盖不到它：
 它的连接文件叫 `noema-<hex>.json`，而 `sweepGlobalOrphanKernels` 匹配的是
-`aaronnote-kernel-*.json`；而且那个 sweep 在 Noema 宿主机上跑 `ps`，远端 target
+`noema-kernel-*.json`；而且那个 sweep 在 Noema 宿主机上跑 `ps`，远端 target
 上的 kernel 它根本看不见。**不要试图靠放宽那个正则来"修好"它** —— broker kernel
 是 `start_new_session=True` 启动的，即使 Emacs 还活着它的 ppid 也是 1，放宽正则
 会让 web-host 启动时把用户正在用的 kernel 杀掉。
 
 正确的归属是：谁放置谁回收。`my/noema-jupyter-shutdown-all-on-exit-h`
-（`lisp/roam/init-aaronnote-jupyter-runtime.el`，挂在 `kill-emacs-hook`）在 Emacs
+（`lisp/roam/init-noema-jupyter-runtime.el`，挂在 `kill-emacs-hook`）在 Emacs
 退出时逐个关闭 `my/noema-jupyter-runtimes` 里的 runtime，并且对单个 target 不可达
 的情况只报错继续，不会因为一个连不上就漏掉其余的。每次关闭前还会把 runtime ID、
 target、PID 和专属连接文件路径写入本机
-`var/aaronnote/jupyter/pending-shutdown/`，不写 HMAC key；确认关闭后删掉记录。
+`var/noema/jupyter/pending-shutdown/`，不写 HMAC key；确认关闭后删掉记录。
 退出时断线留下的记录会在下次 Jupyter Board 选中该 target 时显示，用户可确认后重试。
 重试只在目标 PID 的命令行仍包含专属连接文件名时发 TERM，不能确认就保留记录。
 同一 Emacs 会话内重试 `shutdown-pending` 也做这项核对，不直接复用旧 PID。
@@ -718,13 +718,13 @@ registry(`etc/config-store.el`，改值用 `config-set` 或直接编辑该文件
 | 键 | 位置 | 默认 | 作用 |
 |---|---|---|---|
 | `my/gcmh-high-cons-threshold` | `lisp/init-tools.el` (gcmh) | 128 MB | Emacs 空闲 GC 前允许堆积的垃圾上限；LSP 活跃时会被 `lisp/init-lsp.el` 的 `my/language-server-performance-gcmh-factor`(默认 2) 临时翻倍。之前是 512 MB(LSP 活跃时 1 GB),下调后 GC 更勤但单次更短,交互延迟影响很小。 |
-| `my/copilot-server-max-heap-mb` | `lisp/init-copilot.el` | 1024 | Emacs 自己 spawn 的 Copilot language server 的 V8 堆上限,通过 `NODE_OPTIONS` 注入(该 LS 不是走命令行参数,`copilot-server-args` 只能传给二进制本身,包不去掉支持自定义 env,所以用 `copilot--make-connection` 的 advice)。同一个键的值会通过 `AARONNOTE_COPILOT_MAX_HEAP_MB` 环境变量传给 Noema 侧自己 spawn 的第二份 Copilot LSP 实例(`server/lib/runtime.mjs` 的 `CopilotLspClient`),两边共享一个上限。**实测 384/512 MB 都会让该 LS 在启动几秒内以 `SIGABRT`(V8 `Ineffective mark-compacts near heap limit` OOM)崩溃退出——它自身(sharp 原生模块 + tf-idf/diff worker 的宿主进程)启动期就需要 ~700 MB old-space,768 MB 是实测最低可用值;1024 MB 留出安全余量,仍比不设上限时的 4 GB 默认值收紧很多。改这个键前先用 `node --max-old-space-size=<N> dist/language-server.js --stdio` 走一遍 initialize 握手再空闲等 20s 确认不 OOM,不要凭感觉调小。** |
-| `my/noema-web-host-max-heap-mb` | `lisp/roam/init-aaronnote.el` | 512 | Noema `web-host.mjs` 自身的 V8 堆上限,**必须用 `--max-old-space-size` 命令行 flag 而不是 `NODE_OPTIONS` 环境变量**——web-host 的 `process.env` 会原样传给它 shell 出去的 codex/claude/opencode CLI(LaTeX export 用),用环境变量会把堆上限错误地传染给这些 node 程序。 |
-| `my/noema-latex-export-agent-idle-timeout` | `lisp/roam/init-aaronnote.el` | 180 | LaTeX export agent 无输出多久后做一次存活检查；活着就继续等，不会 kill。 |
-| `my/noema-latex-export-agent-hard-timeout` | `lisp/roam/init-aaronnote.el` | 900 | 单次 agent attempt 的绝对上限；先 SIGTERM，默认留十秒收尾后才 SIGKILL。 |
+| `my/copilot-server-max-heap-mb` | `lisp/init-copilot.el` | 1024 | Emacs 自己 spawn 的 Copilot language server 的 V8 堆上限,通过 `NODE_OPTIONS` 注入(该 LS 不是走命令行参数,`copilot-server-args` 只能传给二进制本身,包不去掉支持自定义 env,所以用 `copilot--make-connection` 的 advice)。同一个键的值会通过 `NOEMA_COPILOT_MAX_HEAP_MB` 环境变量传给 Noema 侧自己 spawn 的第二份 Copilot LSP 实例(`server/lib/runtime.mjs` 的 `CopilotLspClient`),两边共享一个上限。**实测 384/512 MB 都会让该 LS 在启动几秒内以 `SIGABRT`(V8 `Ineffective mark-compacts near heap limit` OOM)崩溃退出——它自身(sharp 原生模块 + tf-idf/diff worker 的宿主进程)启动期就需要 ~700 MB old-space,768 MB 是实测最低可用值;1024 MB 留出安全余量,仍比不设上限时的 4 GB 默认值收紧很多。改这个键前先用 `node --max-old-space-size=<N> dist/language-server.js --stdio` 走一遍 initialize 握手再空闲等 20s 确认不 OOM,不要凭感觉调小。** |
+| `my/noema-web-host-max-heap-mb` | `lisp/roam/init-noema.el` | 512 | Noema `web-host.mjs` 自身的 V8 堆上限,**必须用 `--max-old-space-size` 命令行 flag 而不是 `NODE_OPTIONS` 环境变量**——web-host 的 `process.env` 会原样传给它 shell 出去的 codex/claude/opencode CLI(LaTeX export 用),用环境变量会把堆上限错误地传染给这些 node 程序。 |
+| `my/noema-latex-export-agent-idle-timeout` | `lisp/roam/init-noema.el` | 180 | LaTeX export agent 无输出多久后做一次存活检查；活着就继续等，不会 kill。 |
+| `my/noema-latex-export-agent-hard-timeout` | `lisp/roam/init-noema.el` | 900 | 单次 agent attempt 的绝对上限；先 SIGTERM，默认留十秒收尾后才 SIGKILL。 |
 
 Noema 侧的 Copilot LSP 实例(`CopilotLspClient`)另外做了**空闲 TTL 自动
-停止**:`AARONNOTE_COPILOT_IDLE_TTL_MS`(默认 15 分钟,0 关闭)内如果没有
+停止**:`NOEMA_COPILOT_IDLE_TTL_MS`(默认 15 分钟,0 关闭)内如果没有
 真实的补全请求(inline/shown/accept,不含单纯的 status 轮询)、且没有
 pending 请求,就会自动 `stop()`;下次任何请求经 `ensureReady()` 自动重启。
 用一次 web 端 copilot 不会永久多驻留一个 ~400 MB 的进程。

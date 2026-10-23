@@ -532,11 +532,11 @@ Markdown 笔记现在由 Noema Web 自己编辑和渲染，Emacs 只负责启动
 打开、粗粒度命令和文件定位：
 
 ```
-Emacs (init-aaronnote.el)
+Emacs (init-noema.el)
   └─ spawn node site-lisp/noema/web-host.mjs
-       ├─ 静态服务 site-lisp/noema/dist/aaronnote/
+       ├─ 静态服务 site-lisp/noema/dist/pages/
        ├─ 运行时 site-lisp/noema/server/ + shared/
-       ├─ 注入 window.aaronnoteApi 适配器（替代 Electron preload）
+       ├─ 注入 window.noemaApi 适配器（替代 Electron preload）
        ├─ POST /api            ← Web app 调 runtime 保存/索引/文件操作
        ├─ GET  /events         ← Emacs 控制事件推送到页面
        └─ POST /emacs/command  ← Emacs 粗粒度控制通道
@@ -551,7 +551,7 @@ clone 到该路径，再按 Noema 的 README 安装依赖。
 
 Noema 与 Emacs 共用：
 
-- 状态与缓存：`var/aaronnote/`
+- 状态与缓存：`var/noema/`
 - snippets：`snippets/`（`markdown-mode/`、`tex-mode/` 已直接并入 AaronEmacs；Noema 资源路径指向这份唯一副本）
 - templates：`templates/`（只有 `noema/`、`latex/`、`tex/` 链接到 Noema，其它模板由 Emacs 仓库维护）
 
@@ -559,11 +559,11 @@ Noema 与 Emacs 共用：
 
 | 文件 | 用途 |
 |------|------|
-| `lisp/roam/init-aaronnote.el` | Emacs 入口：进程管理、xwidget 打开、控制命令 |
+| `lisp/roam/init-noema.el` | Emacs 入口：进程管理、xwidget 打开、控制命令 |
 | `site-lisp/noema/` | 完整 Noema 独立 git 项目；安装位置固定，但由根仓库忽略，不是 submodule 或符号链接 |
 | `site-lisp/noema/web-host.mjs` | Node HTTP+SSE 桥接服务器和 preload adapter |
-| `site-lisp/noema/dist/aaronnote/` | Noema static build |
-| `.roam` | → Markdown 笔记目录（`AARONNOTE_ROOT`） |
+| `site-lisp/noema/dist/pages/` | Noema static build |
+| `.roam` | → Markdown 笔记目录（`NOEMA_ROOT`） |
 
 ### 边界
 
@@ -599,7 +599,7 @@ in-process 缓存，与自动刷新保持一致。
 
 搜索只有一个实现：Noema 的 Go 内核（`site-lisp/noema/kernel/noema/wikisearch`）。
 Emacs 不保存页面列表，也不自己做匹配。`lisp/roam/init-noema-search.el` 把输入原样发到
-host 的 `aaronnote:api:knowledge:search` 通道，内核返回已经排好序的结果，以及每条结果
+host 的 `noema:api:knowledge:search` 通道，内核返回已经排好序的结果，以及每条结果
 是怎么找到的（`matchKind`）、标题里命中的区间（`titleRanges`）、摘要、纠正过的词
 （`corrected`）和“可以创建的页面”（`create`）。
 
@@ -634,7 +634,7 @@ host 的 `aaronnote:api:knowledge:search` 通道，内核返回已经排好序�
 状态：直接打字就换成自己的措辞，按方向键则保留默认。
 
 - 候选和链接文本都由内核给出（搜索接口的 `references` 模式）。页面里的弹层
-  （`site-lisp/noema/aaronnote/reference-picker.ts`）和 Emacs 命令都不做匹配，也不拼
+  （`site-lisp/noema/pages/reference-picker.ts`）和 Emacs 命令都不做匹配，也不拼
   链接语法。
 - 在正文里手打 `[[` 或 `roam://` 也会打开同一个选择器，选中后替换掉已经打出的部分；
   `Esc` 之后同一处不会再弹，可以继续手写。原来补全弹层（company）里针对 roam 的四路
@@ -659,12 +659,12 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 - **Noema Maintenance**：索引状态（页数、上次运行、错误）和每个仓库的同步状态；可以刷新或重建
   索引、对某个仓库做检查点或立即同步。
 
-两者都读取 `var/aaronnote/host.json`（Noema host 启动监听时写入）找到 host，然后调用
+两者都读取 `var/noema/host.json`（Noema host 启动监听时写入）找到 host，然后调用
 它的本机 `/api`。host 没运行时显示“Noema is not running”，不会去启动或唤起 Emacs。
 
 ### 诊断
 
-- 服务日志：buffer ` *aaronnote-web-host*`
+- 服务日志：buffer ` *noema-web-host*`
 - 手动停止：`M-x my/noema-stop`
 - 重新打开当前 note：`M-x my/noema-refresh`（localleader `r`）
 - 健康状态：`M-x my/health-report` → Noema 栏（process、ready、runtime、last-sync）

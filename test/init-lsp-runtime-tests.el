@@ -263,7 +263,7 @@
 
 (ert-deftest my/noema-jupyter-kernel-change-preserves-source-lsp ()
   "A new execution kernel does not detach a file-owned analyzer."
-  (require 'init-aaronnote-jupyter-cell)
+  (require 'init-noema-jupyter-cell)
   (with-temp-buffer
     (setq-local my/noema-jupyter-cell-kernel "old"
                 my/noema-jupyter-cell-language "python"
@@ -353,7 +353,7 @@
 
 (ert-deftest my/noema-jupyter-kernel-capf-precedes-lsp-capf ()
   "Live kernel names retain the completion priority they had under Eglot."
-  (require 'init-aaronnote-jupyter-lsp)
+  (require 'init-noema-jupyter-lsp)
   (with-temp-buffer
     (setq-local my/noema-jupyter-cell-mode t)
     (setq-local completion-at-point-functions
@@ -366,7 +366,7 @@
               lsp-completion-at-point t)))))
 
 (ert-deftest my/noema-jupyter-keeps-lsp-in-tab-line-above-its-header ()
-  (require 'init-aaronnote-jupyter-lsp)
+  (require 'init-noema-jupyter-lsp)
   (with-temp-buffer
     (setq-local my/noema-jupyter-cell-mode t)
     (setq-local lsp-managed-mode t)
@@ -388,7 +388,7 @@
            my/tab-line-leading-segment-functions))))
 
 (ert-deftest my/noema-jupyter-lsp-breadcrumb-is-view-only-after-moving ()
-  (require 'init-aaronnote-jupyter-lsp)
+  (require 'init-noema-jupyter-lsp)
   (let* ((map (make-sparse-keymap))
          (breadcrumb
           (propertize "project > symbol"

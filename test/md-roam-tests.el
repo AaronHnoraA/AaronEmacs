@@ -334,7 +334,7 @@ source: roam/demo/analysis.md
                                   (referenceRewrite . ((referenceCount . 3))))))))
             (noema-move-note)
             (should (= (length calls) 1))
-            (should (equal (caar calls) "aaronnote:api:fs:move"))
+            (should (equal (caar calls) "noema:api:fs:move"))
             (should (equal (alist-get "target" (aref (cdar calls) 0)
                                       nil nil #'equal)
                            target))
@@ -765,7 +765,7 @@ source: roam/demo/analysis.md
                     ("roam://20260605T120000-topology@nested@child-heading" 18 0)
                     ("demo/topology.md@nested@child-heading" 18 0)))
       (pcase-let ((`(,target ,line ,column) case))
-        (let* ((defs (xref-backend-definitions 'aaronnote-roam target))
+        (let* ((defs (xref-backend-definitions 'noema-roam target))
                (loc (xref-item-location (car defs))))
           (should (equal (file-truename (xref-file-location-file loc))
                          (file-truename note-file)))
@@ -877,7 +877,7 @@ source: roam/demo/analysis.md
           (cl-letf (((symbol-function 'my/noema--api-call)
                      (lambda (channel args callback)
                        (should (equal channel
-                                      "aaronnote:api:assets:scan-orphans"))
+                                      "noema:api:assets:scan-orphans"))
                        (should (equal args []))
                        (funcall callback
                                 `((type . "unused-assets")
@@ -929,7 +929,7 @@ source: roam/demo/analysis.md
                      (lambda (buffer &rest _args) buffer)))
             (my/noema-roam--trash-orphaned-assets (list asset))
             (should (equal called-channel
-                           "aaronnote:api:assets:trash-orphans"))
+                           "noema:api:assets:trash-orphans"))
             (should (equal (aref called-args 0) (list asset-file)))
             (with-current-buffer "*roam-orphaned-assets*"
               (should (string-match-p "No orphaned attachments"
@@ -1451,7 +1451,7 @@ source: roam/demo/analysis.md
                    (puthash "notes" [] response)
                    response))))
       (my/noema-roam--runtime-call-via-api "index" nil))
-    (should (equal called-channel "aaronnote:api:notes:roam-index"))))
+    (should (equal called-channel "noema:api:notes:roam-index"))))
 
 (ert-deftest my/noema-roam-runtime-create-api-uses-string-keyed-hash-payload ()
   (let ((draft-json
@@ -1470,7 +1470,7 @@ source: roam/demo/analysis.md
       (my/noema-roam--runtime-call-via-api
        "create" (list "--json" draft-json)))
     (should (equal (car captured)
-                   "aaronnote:api:notes:create-node"))
+                   "noema:api:notes:create-node"))
     (let ((body (aref (cadr captured) 0)))
       (should (equal (gethash "tags" body) ["algebra" "qc"])))))
 
@@ -1620,7 +1620,7 @@ source: roam/demo/analysis.md
       (should (equal (plist-get draft :path)
                      "projects/project-atlas-2.md")))))
 
-(ert-deftest my/noema-roam-new-create-defaults-match-aaronnote ()
+(ert-deftest my/noema-roam-new-create-defaults-match-noema ()
   (my/noema-roam-test-with-vault
     (let ((my/noema-roam-new--base-directory "projects"))
       (let ((draft
@@ -1637,7 +1637,7 @@ source: roam/demo/analysis.md
         (should (equal (plist-get draft :kind) "default"))
         (should (equal (plist-get draft :tags) '("work")))))))
 
-(ert-deftest my/noema-roam-new-create-uses-aaronnote-runtime-draft ()
+(ert-deftest my/noema-roam-new-create-uses-noema-runtime-draft ()
   (my/noema-roam-test-with-vault
     (let* ((draft '(:node-type "roam"
                     :title "Project Atlas"

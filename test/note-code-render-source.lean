@@ -1,7 +1,7 @@
 import Mathlib
 
--- @aaronnote first
+-- @noema first
 #check Nat
 
--- @aaronnote unused
+-- @noema unused
 #check Int

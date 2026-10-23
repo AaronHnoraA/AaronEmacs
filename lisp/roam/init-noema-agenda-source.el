@@ -1,9 +1,9 @@
-;;; init-aaronnote-agenda-source.el --- Agenda source gateway -*- lexical-binding: t; -*-
+;;; init-noema-agenda-source.el --- Agenda source gateway -*- lexical-binding: t; -*-
 (require 'remote-source)
 (require 'remote-gateway)
 
 (defvar my/noema--agenda-source-handles (make-hash-table :test #'equal))
-(declare-function my/noema--agenda-protected-sources "init-aaronnote" (params client))
+(declare-function my/noema--agenda-protected-sources "init-noema" (params client))
 
 (defun my/noema--agenda-source-release-client (client)
   (let (leases)
@@ -47,7 +47,7 @@
                                    (remote-gateway-resolve deferred '((protocol . 1)))))
                      :event (lambda (event)
                               (when (eq entry (gethash lease my/noema--agenda-source-handles))
-                                (remote-gateway-notify client "aaronnote.agenda.source-event"
+                                (remote-gateway-notify client "noema.agenda.source-event"
                                                        (cons (cons 'lease lease) event))))))
           (error
            (remhash lease my/noema--agenda-source-handles)
@@ -66,4 +66,4 @@
                                    (remote-gateway-resolve deferred (if error-object `((error . ,error-object)) result)))))
         deferred)))))
 
-(provide 'init-aaronnote-agenda-source)
+(provide 'init-noema-agenda-source)

@@ -10,9 +10,9 @@
 
 (require 'init-activity)
 
-(declare-function my/noema-api-call "init-aaronnote"
+(declare-function my/noema-api-call "init-noema"
                   (channel args callback &optional timeout))
-(declare-function my/noema-open-file "init-aaronnote" (file))
+(declare-function my/noema-open-file "init-noema" (file))
 (declare-function noema-agent-acp-sessions "noema-agent-acp" (&optional root))
 (declare-function noema-agent-acp-show-buffer "noema-agent-acp" (buffer))
 (declare-function noema-agent-acp-stop "noema-agent-acp" (&optional buffer))
@@ -73,7 +73,7 @@ and a Run acquiring a session before agent-shell updates its header."
 (defun my/activity-noema--cancel-task (id)
   "Cancel Core task ID through its owner, then refresh the snapshot."
   (my/noema-api-call
-   "aaronnote:api:tasks:cancel" (vector `((id . ,id)))
+   "noema:api:tasks:cancel" (vector `((id . ,id)))
    (lambda (result error-object)
      (if (or error-object (not (eq (alist-get 'ok result) t)))
          (message "Noema task cancellation failed: %s"
@@ -118,7 +118,7 @@ previous host or a disabled indicator cannot resurrect old work."
       (setq my/activity-noema--pending token)
       (condition-case nil
           (my/noema-api-call
-           "aaronnote:api:tasks:list" [((activeOnly . t))]
+           "noema:api:tasks:list" [((activeOnly . t))]
            (lambda (result error-object)
              (when (eq token my/activity-noema--pending)
                (setq my/activity-noema--pending nil)
@@ -160,7 +160,7 @@ previous host or a disabled indicator cannot resurrect old work."
   (add-hook 'noema-agent-acp-changed-functions #'my/activity-noema--update-agents)
   (my/activity-noema--update-agents))
 
-(with-eval-after-load 'init-aaronnote
+(with-eval-after-load 'init-noema
   (add-hook 'my/noema-host-ready-functions #'my/activity-noema--poll)
   (advice-add 'my/noema-stop :after #'my/activity-noema--host-stopped)
   (advice-add 'my/noema--sentinel :after #'my/activity-noema--host-stopped))

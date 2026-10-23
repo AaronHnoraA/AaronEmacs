@@ -158,6 +158,36 @@
   (add-to-list 'load-path (file-name-as-directory aaron-ui-dir))
   (add-to-list 'load-path (file-name-as-directory vendored-dir)))
 
+(defun my/migrate-legacy-noema-state ()
+  "Move state from `var/aaronnote/', Noema's former name, into `var/noema/'.
+Entries already present under `var/noema/' are left in place.  Nothing
+moves while a Noema host started from the old layout is still running."
+  (let* ((legacy (locate-user-emacs-file "var/aaronnote/"))
+         (current (locate-user-emacs-file "var/noema/"))
+         (host (expand-file-name "host.json" legacy))
+         (pid (and (file-readable-p host)
+                   (ignore-errors
+                     (with-temp-buffer
+                       (insert-file-contents host)
+                       (gethash "pid" (json-parse-buffer)))))))
+    (when (and (file-directory-p legacy)
+               (not (and (natnump pid)
+                         (ignore-errors (zerop (signal-process pid 0))))))
+      (make-directory current t)
+      (dolist (child (directory-files legacy nil
+                                      directory-files-no-dot-files-regexp))
+        (let ((target (expand-file-name child current)))
+          (unless (file-exists-p target)
+            (rename-file (expand-file-name child legacy) target))))
+      (when (directory-empty-p legacy)
+        (delete-directory legacy)))))
+
+(condition-case err
+    (my/migrate-legacy-noema-state)
+  (error
+   (display-warning 'init (format "Noema state migration failed: %s"
+                                  (error-message-string err)))))
+
 (setq custom-file (locate-user-emacs-file "etc/custom.el"))
 
 (when (file-exists-p custom-file)

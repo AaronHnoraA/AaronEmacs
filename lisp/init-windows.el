@@ -21,7 +21,7 @@
 (declare-function dashboard-insert-startupify-lists "dashboard" (&optional force-refresh))
 (declare-function my/background-make-frame "init-background" (&optional parameters))
 (declare-function my/ibuffer-noema-file-name "init-base" (buffer))
-(declare-function my/noema-open-file-split-frame "init-aaronnote" (file))
+(declare-function my/noema-open-file-split-frame "init-noema" (file))
 (declare-function bookmark-delete "bookmark" (bookmark))
 (declare-function bookmark-get-filename "bookmark" (bookmark-name-or-record))
 (declare-function bookmark-get-position "bookmark" (bookmark-name-or-record))

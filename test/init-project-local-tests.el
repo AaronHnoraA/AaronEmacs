@@ -9,7 +9,7 @@
   (should
    (my/project-local-settings-safe-p
     '(:toolchain ((python . sage))
-      :aaronnote-jupyter (:language sage :kernel sagemath :session default))))
+      :noema-jupyter (:language sage :kernel sagemath :session default))))
   (should-not
    (my/project-local-settings-safe-p
     '(:toolchain-profiles
