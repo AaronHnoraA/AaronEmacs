@@ -22,6 +22,7 @@
 (declare-function my/background-make-frame "init-background" (&optional parameters))
 (declare-function my/ibuffer-noema-file-name "init-base" (buffer))
 (declare-function my/noema-open-file-split-frame "init-noema" (file))
+(declare-function my/portal-frame-only-shows-buffer-p "init-portal" (frame buffer))
 (declare-function bookmark-delete "bookmark" (bookmark))
 (declare-function bookmark-get-filename "bookmark" (bookmark-name-or-record))
 (declare-function bookmark-get-position "bookmark" (bookmark-name-or-record))
@@ -71,6 +72,11 @@ The source list stays open.  Remove the new pane if opening fails."
   (dired-get-file-for-visit)
   (my/open-entry-in-split 'below #'dired-find-file))
 
+(defun my/dired-open-new-frame ()
+  "Open the Dired entry at point in a new Emacs frame."
+  (interactive)
+  (file-open-new-frame (dired-get-file-for-visit)))
+
 (with-eval-after-load 'dired
   (dolist (entry '(("S-RET" . my/dired-open-right)
                    ("S-<return>" . my/dired-open-right)
@@ -78,7 +84,9 @@ The source list stays open.  Remove the new pane if opening fails."
                    ("M-<return>" . my/dired-open-below)
                    ("s-RET" . my/dired-open-below)
                    ("s-<return>" . my/dired-open-below)))
-    (keymap-set dired-mode-map (car entry) (cdr entry))))
+    (keymap-set dired-mode-map (car entry) (cdr entry)))
+  (dolist (key '("M-S-RET" "M-S-<return>"))
+    (keymap-set dired-mode-map key #'my/dired-open-new-frame)))
 
 (defun my/bookmark--load ()
   "Load bookmark data for the current session."
@@ -381,12 +389,15 @@ Relies on `winner-mode' (enabled below) to undo a prior delete."
 BURY-OR-KILL is non-nil when `switch-to-prev-buffer' is replacing a
 buffer that is being buried, killed, or quit.  Keep these buffers
 available to explicit buffer-switching commands."
-  (and bury-or-kill
-       (buffer-live-p buffer)
-       (or (my/window--shown-in-other-window-p window buffer)
-           (my/window-dashboard-buffer-p buffer)
-           (with-current-buffer buffer
-             (derived-mode-p 'xwidget-webkit-mode)))))
+  (and (buffer-live-p buffer)
+       (or (and (my/window--shown-in-other-window-p window buffer)
+                (boundp 'portal-view--target)
+                (buffer-local-value 'portal-view--target buffer))
+           (and bury-or-kill
+                (or (my/window--shown-in-other-window-p window buffer)
+                    (my/window-dashboard-buffer-p buffer)
+                    (with-current-buffer buffer
+                      (derived-mode-p 'xwidget-webkit-mode)))))))
 
 (setopt switch-to-prev-buffer-skip
         #'my/window-skip-dashboard-and-xwidget-p)
@@ -466,14 +477,15 @@ Dashboard instead."
 
 (defun my/window-kill-buffer-h ()
   "Record visible windows before the current buffer is killed."
-  (let* ((closing (current-buffer))
-         (windows (mapcar (lambda (window)
-                            (cons window
-                                  (my/window--return-buffer window closing)))
-                          (get-buffer-window-list closing nil t))))
-    (when windows
-      (run-at-time 0 nil #'my/window--repair-killed-buffer
-                   closing windows default-directory))))
+  (unless (derived-mode-p 'portal-terminal-mode)
+    (let* ((closing (current-buffer))
+           (windows (mapcar (lambda (window)
+                              (cons window
+                                    (my/window--return-buffer window closing)))
+                            (get-buffer-window-list closing nil t))))
+      (when windows
+        (run-at-time 0 nil #'my/window--repair-killed-buffer
+                     closing windows default-directory)))))
 
 (add-hook 'kill-buffer-hook #'my/window-kill-buffer-h)
 
@@ -595,6 +607,34 @@ its own editable pane because its xwidget cannot be shared between frames."
            (eq (buffer-local-value 'major-mode existing)
                'xwidget-webkit-mode))
       (user-error "Open this xwidget page through its own new-window command"))
+     ((and existing (boundp 'my/portal-popup-instance-p)
+           (buffer-local-value 'my/portal-popup-instance-p existing))
+      (unless (fboundp 'my/portal-popup-move-buffer-to-window)
+        (require 'init-portal-popup))
+      (my/frame-open-with
+       (lambda ()
+         (my/portal-popup-move-buffer-to-window existing (selected-window))))
+      existing)
+     ((and existing (boundp 'portal-view--target)
+           (buffer-local-value 'portal-view--target existing))
+      (unless (fboundp 'my/portal-move-buffer-to-window)
+        (require 'init-portal))
+      (let ((old-owner
+             (seq-find (lambda (frame)
+                         (eq (frame-parameter frame 'my/portal-terminal) existing))
+                       (frame-list)))
+            close-old-owner)
+        (setq close-old-owner
+              (and old-owner
+                   (my/portal-frame-only-shows-buffer-p old-owner existing)))
+        (my/frame-open-with
+         (lambda ()
+           (my/portal-move-buffer-to-window existing (selected-window))))
+        (when (and old-owner (frame-live-p old-owner))
+          (set-frame-parameter old-owner 'my/portal-terminal nil)
+          (when close-old-owner
+            (delete-frame old-owner t)))
+        existing))
      (t
       (my/frame-open-with
        (lambda () (switch-to-buffer buffer norecord)))))))

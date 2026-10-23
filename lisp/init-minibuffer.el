@@ -71,6 +71,7 @@ Consult's normal project-wide buffer list."
      (my/open-entry-in-split
       my/consult-buffer-placement
       (lambda () (switch-to-buffer buffer norecord))))
+    ('frame (my/buffer-display-new-frame buffer norecord))
     (_ (switch-to-buffer buffer norecord))))
 
 (defun my/buffer-open-new-frame ()
@@ -112,16 +113,27 @@ accepts a new file name exactly.  Command+Shift+Return opens a new frame."
 (defalias 'file-open #'my/find-file-with-frame-choice
   "Read a file name and choose its pane with Return modifiers.")
 
-(defun my/minibuffer-file-open-new-frame ()
-  "Accept the typed file name and request a new frame when supported."
+(defun my/minibuffer-open-new-frame ()
+  "Accept the current choice and open it in a new frame when supported."
   (interactive)
-  (when (and my/file-open-new-frame-prompt
-             (my/minibuffer-file-completion-p))
-    (setq my/file-open-new-frame-requested t))
-  (if (and (fboundp 'vertico-exit-input)
-           (bound-and-true-p vertico--input))
-      (vertico-exit-input)
-    (exit-minibuffer)))
+  (cond
+   (my/terminal-selector-active
+    (my/terminal-selector-exit 'frame))
+   (my/consult-buffer-active
+    (setq my/consult-buffer-placement 'frame)
+    (if (bound-and-true-p vertico--input)
+        (vertico-exit)
+      (exit-minibuffer)))
+   ((and my/file-open-new-frame-prompt
+         (my/minibuffer-file-completion-p))
+    (setq my/file-open-new-frame-requested t)
+    (if (and (fboundp 'vertico-exit-input)
+             (bound-and-true-p vertico--input))
+        (vertico-exit-input)
+      (exit-minibuffer)))
+   ((bound-and-true-p vertico--input)
+    (vertico-exit))
+   (t (exit-minibuffer))))
 
 (defun my/minibuffer-open-with-placement (placement)
   "Accept a file or terminal candidate and request PLACEMENT."
@@ -175,7 +187,7 @@ accepts a new file name exactly.  Command+Shift+Return opens a new frame."
     (kbd (car entry)) (cdr entry)))
 (dolist (key '("M-S-RET" "M-S-<return>"))
   (define-key minibuffer-local-filename-completion-map (kbd key)
-    #'my/minibuffer-file-open-new-frame))
+    #'my/minibuffer-open-new-frame))
 
 (defun my/minibuffer-file-completion-p ()
   "Return non-nil when the active minibuffer is completing file names."
@@ -220,8 +232,8 @@ accepts a new file name exactly.  Command+Shift+Return opens a new frame."
          ;; similar completion candidate.
          ("C-RET" . vertico-exit-input)
          ("C-<return>" . vertico-exit-input)
-         ("M-S-RET" . my/minibuffer-file-open-new-frame)
-         ("<M-S-return>" . my/minibuffer-file-open-new-frame))
+         ("M-S-RET" . my/minibuffer-open-new-frame)
+         ("<M-S-return>" . my/minibuffer-open-new-frame))
   :custom
   ;; 最近使用过的候选优先，M-x/Consult/普通补全都会更贴近使用历史。
   (vertico-sort-function #'vertico-sort-history-length-alpha))

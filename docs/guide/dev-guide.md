@@ -392,9 +392,11 @@ Dape 原生 `dape-restart` 重启。
   在当前 Emacs 窗口打开 GhosttyKit 原生终端。需要 macOS GUI Emacs 31.1+。
   本地目录使用 Portal；远端 workspace 继续使用 Portal。
 - 普通 Portal 终端顶部使用独立标签组；全局工作区栏不占用顶行。
-  终端标签不混入普通文件或 popup 标签：点击切换，右键重命名、关闭、移动位置或新建。
+  终端标签不混入普通文件或 popup 标签：当前终端显示，其他已在任意分屏或 frame
+  显示的终端隐藏，终端不再显示时恢复为标签；点击切换，右键重命名、关闭、移动位置或新建。
   `M-t` / `Cmd-t` 在任何 buffer 打开终端选择器，当前终端不出现在自己的候选列表里。
-  `Enter` 在当前窗口、`Shift-Enter` 在右侧、`Cmd-Enter` 在下方打开；选择 popup 终端则切换对应弹窗。
+  `Enter` 在当前窗口、`Shift-Enter` 在右侧、`Cmd-Enter` 在下方、`Cmd+Shift+Enter`
+  在新 frame 打开；已有终端会从旧窗口移出。普通 `Enter` 选择 popup 终端则切换对应弹窗。
 - Portal 锁定在 `package-lock.el` 的 VC revision，源码和已经验证的构建存放在
   `site-lisp/portal/`（不纳入本仓库）。首次在新机器安装时依 Portal 提示构建原生模块。
 
@@ -649,13 +651,13 @@ host 的 `noema:api:knowledge:search` 通道，内核返回已经排好序的结
 - Vim 的普通/可视模式下，输入法送来的按键（合成中、键码 229、全角字符）被整个吞掉：
   既不当作 Vim 命令，也不写进笔记。切回英文输入后按键照常是命令。
 
-### 从 Raycast 使用 Noema
-
 ### 从 Raycast 打开终端
 
 Raycast 的 Emacs 插件有独立的 **New Terminal** 命令；`skhd` 将全局
 `Option+Enter` 绑定到这个 Raycast 命令，在新 Emacs frame 中打开 Portal
 终端。Emacs 未运行时会先启动。
+
+### 从 Raycast 使用 Noema
 
 Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 Emacs（它们也各自是独立
 命令，方便单独绑定快捷键）。查找页面因此不在 Emacs 的动作白名单里：
@@ -689,7 +691,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   解决冲突、或旧 buffer 再次显示时检查；断开的目标一律跳过。JuText 在无草稿时接收外部正文编辑，
   有草稿时保留本地内容并合并运行输出；页面先比较时间戳，确有变化
   且没有草稿才读取正文；不 advise ACP 内部函数，也不扫描整个项目。
-- `M-x noema-agent-worktree-start` / `C-c A w` — 让会话在 Project workspace 仓库的独立 linked worktree（分支 `noema/<名字>`，基点记在 `branch.<分支>.noemaBase`）里工作，会话仍登记在发起它的 Project 下（D-038 不变）。Git 都经 `process-file` 在 Emacs 目录里运行，本机和 `/fs:` 远程走同一条代码路径；临时 buffer 里会带上调用方的环境 capsule。`noema-context` 把主 checkout 的引用改写到会话的 worktree（`noema-agent-worktree-redirect`），worktree 里没有这个文件就报错，区域引用的那几行在副本里内容不同也报错。Sessions 与总览的 `m`/`d` 打开该会话 checkout 的 Magit。设计来源见 [Agent Fleet 审计](agent-fleet-noema-audit-2026-10.md)
+- `M-x noema-agent-worktree-start` / `C-c A w` — 让会话在 Project workspace 仓库的独立 linked worktree（分支 `noema/<名字>`，基点记在 `branch.<分支>.noemaBase`）里工作，会话仍登记在发起它的 Project 下（D-038 不变）。Git 都经 `process-file` 在 Emacs 目录里运行，本机和 `/fs:` 远程走同一条代码路径；临时 buffer 里会带上调用方的环境 capsule。`noema-context` 把主 checkout 的引用改写到会话的 worktree（`noema-agent-worktree-redirect`），worktree 里没有这个文件就报错，区域引用的那几行在副本里内容不同也报错。Sessions 与总览的 `m`/`d` 打开该会话 checkout 的 Magit。设计来源见 [Agent Fleet 审计](../noema/records/audits/agent-fleet-noema-audit-2026-10.md)
 - `M-x noema-agent-worktree-parallel` / `C-c A n` 与 `M-x noema-agent-worktree-board` / `C-c A A` — 并行尝试组（`noema-agent-worktree-board.el`）。组只记在各尝试分支的 `branch.<b>.noemaGroup`/`noemaAgent` 上，成员从 `git worktree list` 加一次 `git config --get-regexp` 得出，状态从活会话现读，不另建注册表，也不改 kernel。整组状态 waiting > working > settled，一份完成不终止其他。看板只在打开和 `g` 时调用 Git；可见时随 `noema-agent-acp-changed-functions` 重绘，buffer 被 kill 时移除 hook
 - `M-x noema-agent-acp-conversation-tree` / `C-c A T` — 从当前 Noema Agent 会话浏览原生 ACP 对话树；Agent 窗口 `C-c C-t`、Sessions 列表 `T` 也可进入。`agent-shell-fork-tree` 作为固定版本的 package-vc 依赖；Noema 经 ACP 边界调用它，分叉后登记为命名会话，缓存仅驻内存（`agent-shell-fork-tree-cache-directory=nil`）。它按共享文本前缀展示，不是 WorkNode DAG 或 Noema `parentName` 的替代品
 - `M-x noema-agent-inbox` / `C-c A G` — 汇总已知 Noema Project 的会话状态、待处理项和活动 agent；`RET` 跳转，`!` 跨项目轮转待处理项，`u` 经 `session:name:read` 标记已读并只刷新所属 Project，`G` 重扫项目根，`m`/`d` 打开所选会话 checkout 的 Magit status / 自分出点起的 diff。没有 Run 的活会话请求权限或答完一轮而 buffer 不在屏幕上时，`noema-agent-acp-attention` 在第一列标 `!approve`/`done` 并参与 `!` 轮转，显示该 buffer 或按 `u` 清除，Emacs 不在前台时经 `noema-agent-acp-notify-function` 发系统通知；有 open Run 的 buffer 由 `noema-agent-acp-run-owned-functions`（worker 注册）让给 host 的 Run attention，不重复报。可见时 ACP 状态事件只重绘，worker 的 Run 结束及权限/输入事件只合并查询所属 Project，慢回包由逐 Project 请求序号隔离；隐藏时停止监听，再显示补查。外部客户端变更仍可用 `g` 刷新

@@ -661,35 +661,41 @@ From a popup tab, use ace-window to choose the ordinary source window."
                     (switch-to-buffer session)))))
   (setq my/portal-popup-buffers (delq buffer my/portal-popup-buffers)))
 
+(defun my/portal-popup-move-buffer-to-window (buffer target)
+  "Move popup BUFFER into ordinary TARGET window."
+  (unless (my/portal-popup--buffer-p buffer)
+    (user-error "No popup buffer is available"))
+  (let* ((my/portal-popup--displaying t)
+         (popup (my/portal-popup--window buffer))
+         (next (seq-find (lambda (entry) (not (eq entry buffer)))
+                         (my/portal-popup--live-buffers))))
+    (my/portal-popup--release-buffer buffer target)
+    (when (eq my/portal-popup-current-buffer buffer)
+      (setq my/portal-popup-current-buffer next))
+    (when (and popup (eq (window-buffer popup) buffer))
+      (if next
+          (progn
+            (set-window-buffer popup next)
+            (set-window-parameter
+             popup 'my-portal-fixed
+             (buffer-local-value 'my/portal-popup-fixed next)))
+        (with-selected-frame (window-frame popup)
+          (my/portal-hide-popup))))
+    (set-window-buffer target buffer)
+    (select-window target)
+    (let ((my/portal-popup--displaying nil))
+      (my/portal-popup--auto-hide))
+    buffer))
+
 (defun my/portal-popup-move-buffer-out ()
   "Move the current popup buffer into an ordinary window chosen with ace-window."
   (interactive)
   (let* ((popup (my/portal-popup--window))
          (buffer (if popup (window-buffer popup)
                    (my/portal-popup--current-buffer))))
-    (unless (my/portal-popup--buffer-p buffer)
-      (user-error "No popup buffer is available"))
-    (let* ((my/portal-popup--displaying t)
-           (target (my/portal-popup--choose-normal-window
-                    "Move popup buffer to window"))
-           (next (seq-find (lambda (entry) (not (eq entry buffer)))
-                           (my/portal-popup--live-buffers))))
-      (my/portal-popup--release-buffer buffer target)
-      (when (eq my/portal-popup-current-buffer buffer)
-        (setq my/portal-popup-current-buffer next))
-      (set-window-buffer target buffer)
-      (when (and popup (eq (window-buffer popup) buffer))
-        (if next
-            (progn
-              (set-window-buffer popup next)
-              (set-window-parameter
-               popup 'my-portal-fixed
-               (buffer-local-value 'my/portal-popup-fixed next)))
-          (my/portal-hide-popup)))
-      (select-window target)
-      (let ((my/portal-popup--displaying nil))
-        (my/portal-popup--auto-hide))
-      buffer)))
+    (my/portal-popup-move-buffer-to-window
+     buffer (my/portal-popup--choose-normal-window
+             "Move popup buffer to window"))))
 
 (defun my/portal-popup--on-kill ()
   "Clean up popup portal state when the current buffer is killed."

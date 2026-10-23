@@ -22,6 +22,8 @@
 (declare-function my/project-current-root "init-project")
 (declare-function my/window-bury-current-buffer "init-windows" ())
 (declare-function my/open-entry-in-split "init-windows" (side open))
+(declare-function my/buffer-display-new-frame "init-windows"
+                  (buffer &optional norecord))
 (declare-function async-handle-result "async" (callback result &optional buf))
 
 (defvar async-callback)
@@ -1092,6 +1094,12 @@ selection and mark behavior."
   (ibuffer-current-buffer t)
   (my/open-entry-in-split 'below #'ibuffer-visit-buffer))
 
+(defun my/ibuffer-visit-new-frame ()
+  "Visit the Ibuffer row in a new Emacs frame."
+  (interactive)
+  (my/buffer-display-new-frame
+   (my/ibuffer-noema-canonical-buffer (ibuffer-current-buffer t))))
+
 (use-package ibuffer
   :ensure nil
   :hook ((ibuffer-mode . ibuffer-auto-mode)
@@ -1132,6 +1140,8 @@ selection and mark behavior."
                    ("s-RET" . my/ibuffer-visit-below)
                    ("s-<return>" . my/ibuffer-visit-below)))
     (keymap-set ibuffer-mode-map (car entry) (cdr entry)))
+  (dolist (key '("M-S-RET" "M-S-<return>"))
+    (keymap-set ibuffer-mode-map key #'my/ibuffer-visit-new-frame))
   (advice-add 'ibuffer-visit-buffer :around
               #'my/ibuffer-visit-noema-canonical)
   (advice-add 'ibuffer-visit-buffer-other-window :around

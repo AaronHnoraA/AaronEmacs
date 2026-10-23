@@ -24,6 +24,7 @@
                   (directory program arguments &optional name))
 (declare-function portal--terminal-paste "portal-terminal" (target text &optional enter))
 (declare-function portal--terminal-text "portal-terminal" (target))
+(declare-function portal--inspect "portal-view" (target))
 (declare-function portal-terminal-bind-key "portal-terminal-bindings" (map key command))
 (declare-function portal-terminal-refresh-bindings "portal-terminal-bindings" ())
 (declare-function portal-input-focus "portal-input" ())
@@ -38,6 +39,10 @@
 (declare-function my/portal-popup--live-buffers "init-portal-popup" ())
 (declare-function my/portal-popup--normal-windows "init-portal-popup" ())
 (declare-function my/portal-popup-select-buffer "init-portal-popup" (buffer))
+(declare-function my/portal-popup-move-buffer-to-window
+                  "init-portal-popup" (buffer target))
+(declare-function my/window-dashboard-buffer "init-windows" ())
+(declare-function my/background-hide "init-background" (&optional all))
 (declare-function vertico-exit "vertico" ())
 (defvar vertico--input)
 (defvar vertico-sort-override-function)
@@ -57,6 +62,9 @@
 
 (defvar my/portal-floating-frame-size '(110 . 32)
   "Columns and lines of a standalone Portal terminal frame.")
+
+(defvar my/portal--last-raycast-frame nil
+  "Newest floating terminal frame launched by Raycast.")
 
 (defvar my/portal-wheel-scroll-lines 5
   "Lines scrolled per wheel event in a Portal terminal.")
@@ -200,7 +208,6 @@ escape alone until selection, buffer, or native placement actually changes."
 (add-hook 'window-state-change-functions
           #'my/portal--focus-selected-window 90)
 (add-hook 'post-command-hook #'my/portal--focus-after-command 90)
-
 (defun my/portal--ensure ()
   "Load only Portal's terminal feature in a supported graphical Emacs."
   (unless (and (eq system-type 'darwin)
@@ -341,7 +348,9 @@ the native Portal view with SSH running inside it."
                      ("M-RET" . below)
                      ("M-<return>" . below)
                      ("s-RET" . below)
-                     ("s-<return>" . below)))
+                     ("s-<return>" . below)
+                     ("M-S-RET" . frame)
+                     ("M-S-<return>" . frame)))
       (let ((placement (cdr entry)))
         (keymap-set map (car entry)
                     (lambda () (interactive)
@@ -366,17 +375,150 @@ the native Portal view with SSH running inside it."
             (my/portal-popup--live-buffers)))
    (list (cons "＋ 新建终端" :new))))
 
+(defun my/portal-vacate-window (window buffer)
+  "Remove Portal BUFFER from WINDOW without displaying another Portal view."
+  (when (and (window-live-p window) (eq (window-buffer window) buffer))
+    (let ((previous
+           (seq-find
+            (lambda (candidate)
+              (and (buffer-live-p candidate)
+                   (not (eq candidate buffer))
+                   (with-current-buffer candidate
+                     (not (or (derived-mode-p 'portal-terminal-mode)
+                              (bound-and-true-p remote-terminal-instance)
+                              (bound-and-true-p portal-input-mode)
+                              (bound-and-true-p portal-view--target))))
+                   (not (get-buffer-window candidate t))))
+            (mapcar #'car (window-prev-buffers window)))))
+      (set-window-buffer window (or previous (my/window-dashboard-buffer))))))
+
+(defun my/portal-move-buffer-to-window (buffer target)
+  "Show Portal BUFFER only in TARGET, vacating every other window first."
+  (unless (window-live-p target)
+    (user-error "Target window was closed"))
+  (dolist (window (get-buffer-window-list buffer nil t))
+    (unless (eq window target)
+      (my/portal-vacate-window window buffer)))
+  (set-window-buffer target buffer)
+  (select-window target)
+  buffer)
+
+(defvar my/portal--enforcing-single-window nil
+  "Non-nil while vacating duplicate windows for a Portal view.")
+
+(defun my/portal-sync-single-window-a (original buffer)
+  "Keep Portal BUFFER in one window before ORIGINAL places its native view."
+  (unless my/portal--enforcing-single-window
+    (let ((my/portal--enforcing-single-window t))
+      (let* ((windows (get-buffer-window-list buffer nil t))
+             (selected (if (eq (selected-window) (active-minibuffer-window))
+                           (minibuffer-selected-window)
+                         (selected-window)))
+             (previous (and (buffer-live-p buffer)
+                            (buffer-local-value 'portal-view--window buffer)))
+             (target (cond ((memq selected windows) selected)
+                           ((memq previous windows) previous)
+                           (t (car windows)))))
+        (dolist (window windows)
+          (unless (eq window target)
+            (my/portal-vacate-window window buffer)))
+        ;; A temporary buffer (for example Ibuffer) can hide the native layer
+        ;; while Portal still remembers the same geometry.  Its ordinary sync
+        ;; would then skip placement and leave a blank terminal pane.
+        (when (and target
+                   (frame-visible-p (window-frame target))
+                   (fboundp 'portal--inspect))
+          (with-current-buffer buffer
+            (when (and (bound-and-true-p portal-view--target)
+                       portal-view--geometry)
+              (let ((state (ignore-errors
+                             (portal--inspect portal-view--target))))
+                (when (and state
+                           (plist-member state :visible)
+                           (not (plist-get state :visible)))
+                  (setq portal-view--geometry nil)))))))
+      (funcall original buffer))))
+
+(defun my/portal-close-terminal-buffer-a (original &rest args)
+  "Remove an empty terminal BUFFER after ORIGINAL closes its native view."
+  (let ((buffer (current-buffer))
+        (terminal (derived-mode-p 'portal-terminal-mode)))
+    (prog1 (apply original args)
+      ;; `portal-view-close' also runs inside `kill-buffer-hook'.  Defer the
+      ;; cleanup so that an already running buffer kill can finish first.
+      (when terminal
+        (run-at-time
+         0 nil
+         (lambda (candidate)
+           (when (and (buffer-live-p candidate)
+                      (with-current-buffer candidate
+                        (and (derived-mode-p 'portal-terminal-mode)
+                             (not (bound-and-true-p portal-view--target)))))
+             (kill-buffer candidate)))
+         buffer)))))
+
+(with-eval-after-load 'portal-view
+  (unless (advice-member-p #'my/portal-sync-single-window-a
+                           'portal-view--sync-buffer)
+    (advice-add 'portal-view--sync-buffer :around
+                #'my/portal-sync-single-window-a))
+  (unless (advice-member-p #'my/portal-close-terminal-buffer-a
+                           'portal-view-close)
+    (advice-add 'portal-view-close :around
+                #'my/portal-close-terminal-buffer-a)))
+
+(defun my/portal-frame-only-shows-buffer-p (frame buffer)
+  "Return non-nil if BUFFER occupies every ordinary window of FRAME."
+  (and (frame-live-p frame)
+       (get-buffer-window buffer frame)
+       (cl-every (lambda (window) (eq (window-buffer window) buffer))
+                 (window-list frame 'no-minibuf))))
+
+(defun my/terminal-selector-move-to-new-frame (buffer)
+  "Move terminal BUFFER to a new frame without leaving it visible elsewhere."
+  (let* ((owners (seq-filter
+                  (lambda (frame)
+                    (eq (frame-parameter frame 'my/portal-terminal) buffer))
+                  (frame-list)))
+         (close-owners
+          (seq-filter (lambda (frame)
+                        (my/portal-frame-only-shows-buffer-p frame buffer))
+                      owners))
+         (frame (if (fboundp 'my/background-make-frame)
+                    (my/background-make-frame)
+                  (make-frame)))
+         (target (frame-selected-window frame))
+         completed)
+    (unwind-protect
+        (progn
+          (if (buffer-local-value 'my/portal-popup-instance-p buffer)
+              (my/portal-popup-move-buffer-to-window buffer target)
+            (my/portal-move-buffer-to-window buffer target))
+          (dolist (owner owners)
+            (set-frame-parameter owner 'my/portal-terminal nil))
+          (dolist (owner close-owners)
+            (when (frame-live-p owner)
+              (delete-frame owner t)))
+          (set-frame-parameter frame 'my/portal-terminal buffer)
+          (select-frame frame)
+          (select-frame-set-input-focus frame)
+          (setq completed t)
+          buffer)
+      (unless completed
+        (when (frame-live-p frame)
+          (delete-frame frame t))))))
+
 (defun my/terminal-selector ()
   "Switch to a terminal or create one, choosing the window with Return.
 Return uses this window, Shift-Return splits right, and Command-Return
-splits below.  The active terminal is omitted from the choices."
+splits below.  Command-Shift-Return opens a new frame.  The active terminal
+is omitted from the choices."
   (interactive)
   (let* ((source (current-buffer))
          (source-directory default-directory)
          (popup (bound-and-true-p my/portal-popup-instance-p))
          (origin (if popup
-                     (or (car (my/portal-popup--normal-windows))
-                         (user-error "No ordinary window for a terminal"))
+                     (car (my/portal-popup--normal-windows))
                    (selected-window)))
          (candidates (my/terminal-selector-candidates
                       (and (or popup (derived-mode-p 'portal-terminal-mode))
@@ -386,14 +528,22 @@ splits below.  The active terminal is omitted from the choices."
          (vertico-sort-override-function #'identity)
          (choice (minibuffer-with-setup-hook #'my/terminal-selector-setup
                    (completing-read
-                    "终端 (RET 当前 / S-RET 右侧 / Cmd-RET 下方): "
+                    "终端 (RET 当前 / S-RET 右侧 / Cmd-RET 下方 / Cmd-S-RET 新窗口): "
                     candidates nil t)))
          (selected (cdr (assoc choice candidates))))
     (unless selected
       (user-error "No terminal selected"))
-    (if (and (bufferp selected)
-             (buffer-local-value 'my/portal-popup-instance-p selected))
-        (my/portal-popup-select-buffer selected)
+    (cond
+     ((eq my/terminal-selector-placement 'frame)
+      (if (eq selected :new)
+          (my/portal-open-external source-directory)
+        (my/terminal-selector-move-to-new-frame selected)))
+     ((and (bufferp selected)
+           (buffer-local-value 'my/portal-popup-instance-p selected))
+      (my/portal-popup-select-buffer selected))
+     (t
+      (unless origin
+        (user-error "No ordinary window for a terminal"))
       (let ((target (pcase my/terminal-selector-placement
                       ('right (split-window origin nil 'right))
                       ('below (split-window origin nil 'below))
@@ -402,9 +552,9 @@ splits below.  The active terminal is omitted from the choices."
         (if (eq selected :new)
             (let ((default-directory source-directory))
               (portal-terminal-new))
-          (switch-to-buffer selected)
+          (my/portal-move-buffer-to-window selected target)
           (when (derived-mode-p 'portal-terminal-mode)
-            (portal-terminal-focus)))))))
+            (portal-terminal-focus))))))))
 
 (defalias 'terminal-switcher #'my/terminal-selector
   "Choose an existing terminal or create a new one.")
@@ -444,8 +594,8 @@ splits below.  The active terminal is omitted from the choices."
   "Open PATH or COMMAND in a Portal terminal in a new Emacs frame."
   (let* ((frame (when (display-graphic-p)
                   (if (fboundp 'my/background-make-frame)
-                      (my/background-make-frame '((no-focus-on-map . t)))
-                    (make-frame '((no-focus-on-map . t))))))
+                      (my/background-make-frame)
+                    (make-frame))))
          (path (and path (expand-file-name path)))
          (directory (if path
                         (if (file-directory-p path)
@@ -457,48 +607,66 @@ splits below.  The active terminal is omitted from the choices."
                                (list path)
                              (list "/bin/zsh" path)))))
          buffer)
-    ;; Select the new frame for Portal's window placement without activating
-    ;; its NSWindow while the external launcher still owns the keyboard.
     (when frame (select-frame frame))
     (setq buffer (my/portal-create :directory directory :command program))
     (when frame
-      (set-frame-parameter frame 'my/portal-terminal buffer)
-      (when (null program)
-        (with-current-buffer buffer
-          (add-hook 'kill-buffer-hook
-                    (lambda ()
-                      (when (and (frame-live-p frame)
-                                 (seq-some (lambda (other)
-                                             (and (not (eq other frame))
-                                                  (frame-live-p other)))
-                                           (frame-list))
-                                 (eq (frame-parameter frame 'my/portal-terminal)
-                                     (current-buffer)))
-                        (set-frame-parameter frame 'my/portal-terminal nil)
-                        (delete-frame frame t)))
-                    nil t)))
-      ;; Raycast closes its own window after the action completes.  Activating
-      ;; the frame before then lets macOS restore the old terminal on close.
-      (run-at-time 0.4 nil
-                   (lambda (target)
-                     (when (frame-live-p target)
-                       (set-frame-parameter target 'no-focus-on-map nil)
-                       (select-frame-set-input-focus target)))
-                   frame))
+      (set-frame-parameter frame 'my/portal-terminal buffer))
     buffer))
 
-(defun my/portal--delete-frame-terminal (frame)
-  "End the standalone terminal owned by FRAME when FRAME closes."
-  (when-let* ((buffer (frame-parameter frame 'my/portal-terminal))
-              ((buffer-live-p buffer)))
-    (set-frame-parameter frame 'my/portal-terminal nil)
-    (unless (seq-some (lambda (window)
-                        (not (eq (window-frame window) frame)))
-                      (get-buffer-window-list buffer nil t))
-      (let ((kill-buffer-query-functions nil))
-        (kill-buffer buffer)))))
+(defun my/portal-terminal-kill-h ()
+  "Close the owning frame or vacate windows before this terminal exits."
+  (save-current-buffer
+    (let ((buffer (current-buffer)))
+      (unless (bound-and-true-p my/portal-popup-instance-p)
+        (let* ((windows (get-buffer-window-list buffer nil t))
+               (owners (seq-filter
+                        (lambda (frame)
+                          (eq (frame-parameter frame 'my/portal-terminal)
+                              buffer))
+                        (frame-list)))
+               (close-owners
+                (seq-filter
+                 (lambda (frame)
+                   (my/portal-frame-only-shows-buffer-p frame buffer))
+                 owners)))
+          ;; A frame may still carry ownership after the terminal was hidden.
+          ;; Clear it regardless of whether that frame currently shows BUFFER.
+          (dolist (frame owners)
+            (set-frame-parameter frame 'my/portal-terminal nil))
+          (dolist (window windows)
+            (my/portal-vacate-window window buffer))
+          (dolist (frame close-owners)
+            (when (frame-live-p frame)
+              (if (> (length (frame-list)) 1)
+                  (delete-frame frame t)
+                (when (fboundp 'my/background-hide)
+                  (my/background-hide t)))))
+          ;; Frame deletion and `kill-buffer' can both change the selected
+          ;; pane after their hooks return.  Re-place surviving native views
+          ;; after that transaction, so another terminal does not stay blank.
+          (when (fboundp 'portal-view-sync)
+            (run-at-time 0 nil #'portal-view-sync)))))))
 
-(add-hook 'delete-frame-functions #'my/portal--delete-frame-terminal)
+(defun my/portal-clear-stale-frame-owner-h (window &rest _)
+  "Clear a floating terminal owner when its FRAME no longer displays it."
+  (when (window-live-p window)
+    (let* ((frame (window-frame window))
+           (owner (frame-parameter frame 'my/portal-terminal)))
+      (when (and owner
+                 (not (and (buffer-live-p owner)
+                           (get-buffer-window owner frame))))
+        (set-frame-parameter frame 'my/portal-terminal nil)))))
+
+(add-hook 'window-buffer-change-functions
+          #'my/portal-clear-stale-frame-owner-h)
+
+(dolist (frame (frame-list))
+  (my/portal-clear-stale-frame-owner-h (frame-selected-window frame)))
+
+;; Portal already hides a native view when its frame is deleted.  Removing
+;; this older hook also fixes a running Emacs after reloading the config:
+;; closing a frame must leave its terminal session in the buffer list.
+(remove-hook 'delete-frame-functions #'my/portal--delete-frame-terminal)
 
 (defun my/portal-open-new ()
   "Open a fresh Portal terminal in a centered floating frame."
@@ -512,6 +680,19 @@ splits below.  The active terminal is omitted from the choices."
       (set-frame-position frame
                           (+ x (max 0 (/ (- w (frame-outer-width frame)) 2)))
                           (+ y (max 0 (/ (- h (frame-outer-height frame)) 2)))))
+    ;; Raycast closes its window after Emacs has returned.  Claim the new
+    ;; frame once then, never an older frame from a rapid earlier invocation.
+    (setq my/portal--last-raycast-frame frame)
+    (run-at-time
+     0.4 nil
+     (lambda (target expected-buffer)
+       (when (and (frame-live-p target)
+                  (eq target my/portal--last-raycast-frame)
+                  (eq target (selected-frame))
+                  (eq expected-buffer
+                      (window-buffer (frame-selected-window target))))
+         (select-frame-set-input-focus target)))
+     frame buffer)
     buffer))
 
 (defun my/portal--terminal-target ()
@@ -627,6 +808,12 @@ splits below.  The active terminal is omitted from the choices."
 
 (with-eval-after-load 'portal-terminal
   (setq portal-terminal-auto-close-on-exit t)
+  (add-hook 'portal-terminal-mode-hook
+            (lambda () (add-hook 'kill-buffer-hook
+                            #'my/portal-terminal-kill-h nil t)))
+  (dolist (buffer (portal-terminal-buffers))
+    (with-current-buffer buffer
+      (add-hook 'kill-buffer-hook #'my/portal-terminal-kill-h nil t)))
   (add-hook 'portal-terminal-mode-hook #'my/portal-ordinary-terminal-tabs-h)
   (dolist (buffer (portal-terminal-buffers))
     (when (my/tab-line-ordinary-terminal-p buffer)

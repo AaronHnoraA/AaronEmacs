@@ -314,7 +314,7 @@ into a full-width bar.  `agent-shell-prompt' inherits this face."
   :hook (after-init . tab-bar-history-mode)
   :custom
   (tab-bar-history-buttons-show nil)
-  (tab-bar-show 0))
+  (tab-bar-show nil))
 
 
 

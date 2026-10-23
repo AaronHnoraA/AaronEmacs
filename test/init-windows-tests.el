@@ -137,6 +137,8 @@
                      (lambda ()
                        (push portal-view--target focuses)
                        (puthash portal-view--target t focused)))
+                    ((symbol-function 'frame-focus-state)
+                     (lambda (&rest _) t))
                     ((symbol-function 'select-frame-set-input-focus)
                      (lambda (frame) (push frame frame-focuses))))
             (my/portal--focus-selected-window (selected-frame))
@@ -176,6 +178,303 @@
             (should (equal (car unfocuses) "web:first")))))
       (dolist (buffer (list first second ordinary))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/portal-moving-buffer-vacates-its-old-window ()
+  "Moving a native view leaves exactly one window showing its buffer."
+  (require 'init-portal)
+  (let ((terminal (generate-new-buffer "portal-move-terminal"))
+        (other (generate-new-buffer "portal-move-other")))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer terminal)
+          (let ((old (selected-window))
+                (new (split-window-right)))
+            (set-window-buffer new other)
+            (my/portal-move-buffer-to-window terminal new)
+            (should (eq (window-buffer new) terminal))
+            (should-not (eq (window-buffer old) terminal))
+            (should (= (length (get-buffer-window-list terminal nil t)) 1))))
+      (dolist (buffer (list terminal other))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/portal-native-sync-vacates-duplicate-before-placement ()
+  "A generic buffer switch cannot leave a second host for one native view."
+  (require 'init-portal)
+  (require 'portal-view)
+  (let ((terminal (generate-new-buffer "portal-sync-terminal"))
+        placed)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer terminal)
+          (let ((old (selected-window))
+                (new (split-window-right)))
+            (set-window-buffer new terminal)
+            (select-window new)
+            (cl-letf (((symbol-function 'portal-view--with-frame-title)
+                       (lambda (_frame callback) (funcall callback "host")))
+                      ((symbol-function 'portal--place)
+                       (lambda (&rest _) (setq placed t))))
+              (with-current-buffer terminal
+                (setq-local portal-view--target "terminal:test"))
+              (portal-view--sync-buffer terminal))
+            (should placed)
+            (should (eq (window-buffer new) terminal))
+            (should-not (eq (window-buffer old) terminal))
+            (should (= (length (get-buffer-window-list terminal nil t)) 1))))
+      (when (buffer-live-p terminal) (kill-buffer terminal)))))
+
+(ert-deftest my/portal-native-sync-restores-hidden-view-with-cached-geometry ()
+  "Ibuffer returning to a terminal must replace a hidden native view."
+  (require 'init-portal)
+  (require 'portal-view)
+  (let ((terminal (generate-new-buffer "portal-hidden-native-view"))
+        placed)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer terminal)
+          (let ((window (selected-window))
+                (frame (selected-frame)))
+            (with-current-buffer terminal
+              (setq-local portal-view--target "terminal:hidden-native"
+                          portal-view--window window
+                          portal-view--geometry
+                          (list frame (frame-pixel-height frame)
+                                (vconcat (window-inside-pixel-edges window)))))
+            (cl-letf (((symbol-function 'portal--inspect)
+                       (lambda (_target) '(:visible nil)))
+                      ((symbol-function 'portal-view--with-frame-title)
+                       (lambda (_frame callback) (funcall callback "host")))
+                      ((symbol-function 'portal--place)
+                       (lambda (&rest _) (setq placed t))))
+              (portal-view--sync-buffer terminal))
+            (should placed)))
+      (when (buffer-live-p terminal) (kill-buffer terminal)))))
+
+(ert-deftest my/portal-close-removes-terminal-without-native-view ()
+  "A closed Ghostty session must not remain as a black Ibuffer candidate."
+  (require 'init-portal)
+  (let ((terminal (generate-new-buffer "portal-closed-shell"))
+        cleanup)
+    (with-current-buffer terminal
+      (setq-local major-mode 'portal-terminal-mode
+                  portal-view--target "terminal:closed-shell"))
+    (unwind-protect
+        (cl-letf (((symbol-function 'run-at-time)
+                   (lambda (_delay _repeat function &rest args)
+                     (setq cleanup (cons function args)))))
+          (with-current-buffer terminal
+            (my/portal-close-terminal-buffer-a
+             (lambda () (setq-local portal-view--target nil))))
+          (should (buffer-live-p terminal))
+          (apply (car cleanup) (cdr cleanup))
+          (should-not (buffer-live-p terminal)))
+      (when (buffer-live-p terminal) (kill-buffer terminal)))))
+
+(ert-deftest my/portal-terminal-exit-does-not-reuse-another-visible-terminal ()
+  "Closing one terminal keeps the other terminal alive in its own window."
+  (require 'init-portal)
+  (let ((closing (generate-new-buffer "portal-exit-closing"))
+        (remaining (generate-new-buffer "portal-exit-remaining"))
+        (stale (generate-new-buffer "portal-exit-stale")))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer closing)
+          (let ((left (selected-window))
+                (right (split-window-right)))
+            (set-window-buffer right remaining)
+            ;; Both a terminal shown in another pane and an old terminal
+            ;; whose native target is gone may be in this pane's history.
+            (set-window-buffer left remaining)
+            (set-window-buffer left stale)
+            (set-window-buffer left closing)
+            (with-current-buffer stale
+              (setq-local major-mode 'portal-terminal-mode))
+            (with-current-buffer closing
+              (setq-local major-mode 'portal-terminal-mode)
+              (add-hook 'kill-buffer-hook #'my/portal-terminal-kill-h nil t))
+            (kill-buffer closing)
+            (should (buffer-live-p remaining))
+            (should (eq (window-buffer right) remaining))
+            (should-not (eq (window-buffer left) remaining))
+            (should-not (eq (window-buffer left) stale))
+            (should (= (length (get-buffer-window-list remaining nil t)) 1))))
+      (dolist (buffer (list closing remaining stale))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/portal-deleting-frame-keeps-terminal-session ()
+  "Deleting a frame cannot remove its terminal from Ibuffer or the selector."
+  (require 'init-portal)
+  (require 'portal-view)
+  (let ((terminal (generate-new-buffer "portal-frame-session"))
+        (frame (selected-frame))
+        hidden)
+    (unwind-protect
+        (progn
+          (should-not (memq 'my/portal--delete-frame-terminal
+                            delete-frame-functions))
+          (with-current-buffer terminal
+            (setq-local portal-view--target "terminal:frame-session"
+                        portal-view--geometry (list frame 1 [0 0 1 1])))
+          (let ((portal-view--buffers (list terminal)))
+            (cl-letf (((symbol-function 'portal--hide)
+                       (lambda (target) (setq hidden target))))
+              (portal-view--frame-deleted frame)))
+          (should (equal hidden "terminal:frame-session"))
+          (should (buffer-live-p terminal))
+          (with-current-buffer terminal
+            (should (equal portal-view--target "terminal:frame-session"))
+            (should-not portal-view--geometry)))
+      (when (buffer-live-p terminal) (kill-buffer terminal)))))
+
+(ert-deftest my/window-fallback-never-duplicates-visible-portal-view ()
+  "A native view is ineligible as implicit fallback even without bury mode."
+  (require 'portal-view)
+  (let ((terminal (generate-new-buffer "portal-fallback-occupied"))
+        (ordinary (generate-new-buffer "portal-fallback-ordinary")))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer terminal)
+          (with-current-buffer terminal
+            (setq-local portal-view--target "terminal:fallback"))
+          (let ((other-window (split-window-right)))
+            (set-window-buffer other-window ordinary)
+            (should (my/window-skip-dashboard-and-xwidget-p
+                     other-window terminal nil))
+            (should-not (my/window-skip-dashboard-and-xwidget-p
+                         other-window ordinary nil))))
+      (dolist (buffer (list terminal ordinary))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/portal-hidden-owner-exit-keeps-current-frame-content ()
+  "A hidden former owner cannot close the frame's currently shown page."
+  (require 'init-portal)
+  (let ((hidden (generate-new-buffer "portal-hidden-owner"))
+        (shown (generate-new-buffer "portal-owner-survivor"))
+        (frame (selected-frame))
+        (old-owner (frame-parameter (selected-frame) 'my/portal-terminal)))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer shown)
+          (set-frame-parameter frame 'my/portal-terminal hidden)
+          (with-current-buffer hidden
+            (setq-local major-mode 'portal-terminal-mode)
+            (add-hook 'kill-buffer-hook #'my/portal-terminal-kill-h nil t))
+          (kill-buffer hidden)
+          (should (buffer-live-p shown))
+          (should (eq (window-buffer) shown))
+          (should-not (frame-parameter frame 'my/portal-terminal)))
+      (set-frame-parameter frame 'my/portal-terminal old-owner)
+      (dolist (buffer (list hidden shown))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/portal-owner-exit-keeps-other-pane-in-same-frame ()
+  "Exiting one owned terminal cannot hide a frame with another live pane."
+  (require 'init-portal)
+  (let ((closing (generate-new-buffer "portal-owner-closing"))
+        (remaining (generate-new-buffer "portal-owner-remaining"))
+        (frame (selected-frame))
+        (old-owner (frame-parameter (selected-frame) 'my/portal-terminal))
+        closed)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer closing)
+          (let ((left (selected-window))
+                (right (split-window-right)))
+            (set-window-buffer right remaining)
+            (set-frame-parameter frame 'my/portal-terminal closing)
+            (with-current-buffer closing
+              (setq-local major-mode 'portal-terminal-mode)
+              (add-hook 'kill-buffer-hook #'my/portal-terminal-kill-h nil t))
+            (cl-letf (((symbol-function 'delete-frame)
+                       (lambda (&rest _) (setq closed t)))
+                      ((symbol-function 'my/background-hide)
+                       (lambda (&rest _) (setq closed t))))
+              (kill-buffer closing))
+            (should-not closed)
+            (should (eq (window-buffer right) remaining))
+            (should-not (eq (window-buffer left) remaining))))
+      (set-frame-parameter frame 'my/portal-terminal old-owner)
+      (dolist (buffer (list closing remaining))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest my/portal-terminal-kill-hook-keeps-its-current-buffer ()
+  "Frame deletion must not redirect later buffer-local Portal cleanup hooks."
+  (require 'init-portal)
+  (require 'portal-view)
+  (let ((closing (generate-new-buffer "portal-hook-closing"))
+        (survivor (generate-new-buffer "portal-hook-survivor"))
+        (frame (selected-frame))
+        (old-owner (frame-parameter (selected-frame) 'my/portal-terminal))
+        deleted closed)
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (switch-to-buffer closing)
+          (set-frame-parameter frame 'my/portal-terminal closing)
+          (with-current-buffer closing
+            (add-hook 'kill-buffer-hook #'my/portal-terminal-kill-h nil t)
+            (add-hook 'kill-buffer-hook #'portal-view-close 90 t))
+          (cl-letf (((symbol-function 'frame-list)
+                     (lambda () (list frame frame)))
+                    ((symbol-function 'delete-frame)
+                     (lambda (&rest _)
+                       (setq deleted t)
+                       (set-buffer survivor)))
+                    ((symbol-function 'portal-view-close)
+                     (lambda () (setq closed (current-buffer))))
+                    ((symbol-function 'run-at-time)
+                     (lambda (&rest _) nil)))
+            (kill-buffer closing)
+            (should deleted)
+            (should (eq closed closing))
+            (should (buffer-live-p survivor))))
+      (set-frame-parameter frame 'my/portal-terminal old-owner)
+      (dolist (buffer (list closing survivor))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
+(ert-deftest terminal-selector-command-shift-return-requests-new-frame ()
+  (require 'init-portal)
+  (with-temp-buffer
+    (use-local-map (make-sparse-keymap))
+    (my/terminal-selector-setup)
+    (dolist (key '("M-S-RET" "M-S-<return>"))
+      (let (placement)
+        (cl-letf (((symbol-function 'my/terminal-selector-exit)
+                   (lambda (chosen) (setq placement chosen))))
+          (call-interactively (lookup-key (current-local-map) (kbd key))))
+        (should (eq placement 'frame))))))
+
+(ert-deftest terminal-selector-frame-choice-routes-new-and-existing ()
+  (require 'init-portal)
+  (let ((buffer (generate-new-buffer "terminal-selector-frame-existing"))
+        (default-directory "/tmp/")
+        opened moved)
+    (unwind-protect
+        (cl-letf (((symbol-function 'my/terminal-selector-candidates)
+                   (lambda (&rest _)
+                     (list (cons "existing" buffer)
+                           (cons "new" :new))))
+                  ((symbol-function 'my/portal-open-external)
+                   (lambda (directory &optional _command)
+                     (setq opened directory)))
+                  ((symbol-function 'my/terminal-selector-move-to-new-frame)
+                   (lambda (target) (setq moved target))))
+          (dolist (choice '("new" "existing"))
+            (cl-letf (((symbol-function 'completing-read)
+                       (lambda (&rest _)
+                         (setq my/terminal-selector-placement 'frame)
+                         choice)))
+              (my/terminal-selector)))
+          (should (equal opened "/tmp/"))
+          (should (eq moved buffer)))
+      (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest my/portal-terminal-uses-physical-local-workspace-directory ()
   "A local Remote workspace path reaches Ghostty as a real directory."

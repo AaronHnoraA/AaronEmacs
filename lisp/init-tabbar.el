@@ -324,13 +324,13 @@ When INCLUDE-BURIED is non-nil, include buffers explicitly buried here."
      (propertize name 'face face)
      (propertize " " 'face face))))
 
-(defun my/tab-bar-ensure-visible (&optional frame)
+(defun my/tab-bar-ensure-hidden (&optional frame)
   "Keep tab-bar commands available without adding a top row to FRAME.
 When FRAME is nil, use the selected frame."
   (let ((frame (or frame (selected-frame))))
     (when (display-graphic-p frame)
       (with-selected-frame frame
-        (setopt tab-bar-show 0)
+        (setopt tab-bar-show nil)
         (tab-bar-mode 1)
         (set-frame-parameter frame 'tab-bar-lines 0)
         (force-mode-line-update t)
@@ -382,7 +382,9 @@ registered it."
              (string-prefix-p "*Noema" (buffer-name buffer))))))
 
 (defun my/tab-line-occupied-elsewhere-p (buffer &optional window)
-  "Return non-nil if BUFFER is displayed in another window of WINDOW's frame."
+  "Return non-nil if BUFFER is displayed outside WINDOW's pane.
+For ordinary terminals, check every frame because one native view cannot
+appear in two panes at once."
   (let ((window (or window (selected-window)))
         occupied)
     (walk-windows
@@ -390,7 +392,9 @@ registered it."
        (when (and (not (eq other window))
                   (eq (window-buffer other) buffer))
          (setq occupied t)))
-     'no-minibuf (window-frame window))
+     'no-minibuf (if (my/tab-line-ordinary-terminal-p buffer)
+                    t
+                  (window-frame window)))
     occupied))
 
 (defun my/tab-line-available-buffers (buffers &optional window)
@@ -430,9 +434,12 @@ registered it."
                               live)))))
 
 (defun my/tab-line-terminal-buffers (&optional window)
-  "Return shared terminal tabs not already open in another window."
-  (my/tab-line-available-buffers
-   (my/tab-line-all-terminal-buffers) window))
+  "Return the current terminal and terminals hidden in every frame."
+  (let ((current (window-buffer (or window (selected-window)))))
+    (seq-filter (lambda (buffer)
+                  (or (eq buffer current)
+                      (not (get-buffer-window buffer t))))
+                (my/tab-line-all-terminal-buffers))))
 
 (defun my/tab-line-starred-buffer-p (buffer)
   "Return non-nil when BUFFER name contains a `*...*' wrapper."
@@ -1107,10 +1114,10 @@ The tab segment wins both visually and for hit testing where the two meet."
 
 (use-package tab-bar
   :ensure nil
-  :hook ((after-init . my/tab-bar-ensure-visible)
-         (server-after-make-frame . my/tab-bar-ensure-visible))
+  :hook ((after-init . my/tab-bar-ensure-hidden)
+         (server-after-make-frame . my/tab-bar-ensure-hidden))
   :custom
-  (tab-bar-show 0)
+  (tab-bar-show nil)
   (tab-bar-tab-hints nil)
   (tab-bar-auto-width t)
   (tab-bar-close-button-show nil)
@@ -1122,7 +1129,7 @@ The tab segment wins both visually and for hit testing where the two meet."
   (tab-bar-tab-name-function 'tab-bar-tab-name-truncated)
   :config
   (when (display-graphic-p)
-    (my/tab-bar-ensure-visible))
+    (my/tab-bar-ensure-hidden))
   (remove-hook 'post-command-hook #'my/tab-bar-update-terminal-visibility)
   (remove-hook 'server-switch-hook #'my/tab-bar-update-terminal-visibility)
   (my/tab-bar-update-terminal-visibility))

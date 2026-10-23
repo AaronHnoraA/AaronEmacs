@@ -473,6 +473,30 @@
       (should-not (eq (lookup-key normal-map (kbd key))
                       #'dirvish-open-new-frame)))))
 
+(ert-deftest dired-command-shift-return-opens-point-in-new-frame ()
+  (let* ((root (make-temp-file "dired-frame-key-" t))
+         (file (expand-file-name "entry.txt" root))
+         (listing nil)
+         opened)
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert "entry\n"))
+          (setq listing (dired-noselect root))
+          (with-current-buffer listing
+            (goto-char (point-min))
+            (should (search-forward "entry.txt" nil t))
+            (beginning-of-line)
+            (dolist (key '("M-S-RET" "M-S-<return>"))
+              (should (eq (lookup-key dired-mode-map (kbd key))
+                          #'my/dired-open-new-frame)))
+            (cl-letf (((symbol-function 'file-open-new-frame)
+                       (lambda (target &optional _wildcards)
+                         (setq opened target))))
+              (call-interactively #'my/dired-open-new-frame))
+            (should (file-equal-p opened file))))
+      (when (buffer-live-p listing) (kill-buffer listing))
+      (delete-directory root t))))
+
 (ert-deftest dirvish-return-split-keymaps ()
   "Dirvish and ordinary Dired share right and below opening gestures."
   (require 'dirvish)

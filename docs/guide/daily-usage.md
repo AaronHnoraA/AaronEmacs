@@ -104,7 +104,8 @@
   `consult-buffer`：Buffer 候选先列当前 frame 与 workspace 中访问过的 buffer，
   包括在该 frame 埋藏的 buffer；提示中按 `<` 再按 `o` 可查其他 frame/workspace 的
   buffer。`Enter` 在当前窗口打开，`Shift+Enter` 在右侧分屏打开，`Cmd+Enter`
-  在下方分屏打开；最近文件、bookmark 等 Consult 来源同样适用。
+  在下方分屏打开，`Cmd+Shift+Enter` 在新 frame 打开；最近文件、bookmark 等
+  Consult 来源同样适用。
   `H-b`、`SPC b b` 使用同一入口。
 - `C-s`
   `consult-line`
@@ -884,13 +885,16 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
 
 普通 Portal 终端在窗口顶部有独立的终端标签组；全局工作区栏不占用顶行。
 终端标签不混入普通文件标签或 popup 标签。
-各分屏使用同一终端标签列表，但已在其他分屏显示的终端不再列出；点击只切换
-被点击的分屏。普通页面沿用原来的文件标签；Noema 页面若已在其他分屏打开，
+各分屏使用同一终端标签顺序：当前终端保留在顶部，已在其他分屏或 frame 显示的
+终端不再列出，隐藏后重新出现；点击只切换被点击的分屏。
+普通页面沿用原来的文件标签；Noema 页面若已在其他分屏打开，
 不会在当前分屏的标签里重复出现。
 左键切换，右键可新建、重命名、关闭或调整顺序。
 `M-t`（macOS `Cmd-t`）在任何 buffer 打开终端选择器；在终端里调用时，列表不显示当前终端。
 列表包括普通终端、弹窗终端，最后一项是新建终端。`Enter` 在当前窗口打开，
-`Shift-Enter` 在右侧分屏打开，`Cmd-Enter` 在下方分屏打开；选择弹窗终端时直接切换到对应弹窗。
+`Shift-Enter` 在右侧分屏打开，`Cmd-Enter` 在下方分屏打开；
+`Cmd+Shift+Enter` 在新 frame 打开，已有终端会从旧窗口移出。选择弹窗终端并按普通
+`Enter` 时仍切换到对应弹窗。
 
 - `SPC o W`
   统一搜索入口，可选搜索引擎和浏览后端
@@ -967,7 +971,8 @@ frame/workspace 开始，通过 `<o` 临时跨越边界。埋藏 buffer 只从�
 仍能在本 frame 的切换候选与 ibuffer 的 `Frame` 标记中找到。
 在 ibuffer 中访问同一 Noema 笔记的重复条目时，会打开它的主页面。`RET`
 在当前窗口打开，`Shift+Enter` 在右侧分屏打开，`Cmd+Enter` 在下方分屏打开；
-列表保留在原窗口。单窗口前缀和不选中窗口仍沿用 ibuffer 的原生操作，现有标记保留。
+`Cmd+Shift+Enter` 在新 frame 打开。列表保留在原窗口。单窗口前缀和不选中窗口
+仍沿用 ibuffer 的原生操作，现有标记保留。
 
 ibuffer、帮助页和其他用 `quit-window` 退出的临时页面，优先返回同一窗口的上一页；
 已经在其他窗口显示的 buffer 不作自动返回目标。临时创建且无返回页的窗口会关闭；
@@ -1272,7 +1277,7 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 | `c c` / `c d` / `c f` / `c n` | 复制路径 / 光标所在目录路径 / 文件名 / 不含扩展名的文件名 |
 | `RET` | 在 Emacs 里打开 |
 | `Shift+Enter` / `Cmd+Enter` | 在右侧 / 下方分屏打开，原文件列表保留；普通 Dired 同样可用 |
-| `Cmd+Shift+Enter` | 在独立的新 Emacs 窗口打开文件或目录；`M-x dirvish-open-new-frame` 可搜索到相同动作 |
+| `Cmd+Shift+Enter` | 在独立的新 Emacs 窗口打开文件或目录，普通 Dired 同样可用；`M-x dirvish-open-new-frame` 可搜索到相同动作 |
 | `o o` | 用系统默认程序打开 |
 | `o c`、`:` / `O`、`;` | 对文件运行 shell 命令：等待 / 异步 |
 | `S` | 在光标所在目录开终端 |
@@ -1450,10 +1455,12 @@ Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复�
 Emacs 崩溃或被强制退出后几秒内自己收尾退出,连同它的 kernel;正常退出时的 SIGHUP 也走
 同一套收尾。
 
-`my/portal-open-new` 开的浮动终端,frame 和 shell 同生共死:关掉 frame(关闭按钮、
-`delete-frame`、Raycast 的 Close Frame)会结束它的 shell 和 buffer;想留着就用隐藏。
-它在 shell 退出时会连 buffer 和 frame 一起关掉;
-主窗口里的终端不受影响。
+`my/portal-open-new` 开的浮动终端在关闭 frame（关闭按钮、`delete-frame`、
+Raycast 的 Close Frame）后仍保留 shell 和 buffer，可从 Ibuffer 或终端选择器重新打开。
+shell 退出时会关闭 buffer；若该 frame 当时只显示这个终端，frame 也会关闭或退回后台。
+若 frame 还有其他分屏，或这个终端此前已被隐藏，其他内容会保留。
+主窗口里的终端不受影响。同一 Portal buffer 只显示在一个窗口；移动它时旧窗口先恢复
+未被占用的普通 buffer，终端退出时也不会回退到别处正在显示的终端。
 
 ### 后台任务指示器
 
@@ -1618,7 +1625,7 @@ Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空
 
 ### Noema Markdown 编辑行为
 
-依据 [Marker / MarkText / files.md 审计](markdown-editors-noema-audit-2026-10.md)：
+依据 [Marker / MarkText / files.md 审计](../noema/records/audits/markdown-editors-noema-audit-2026-10.md)：
 
 - 格式是**切换**：`Cmd-B` / `Cmd-I` / `Cmd-Shift-X` 与选区工具栏在已有格式内再按即移除；选区首尾空白留在标记外；多光标逐个生效；中文标点旁的 `**（注）**` 也会渲染。`Mod-\` 或工具栏 `Tx` 清除选区内全部行内格式，工具栏按钮高亮显示已生效的格式。
 - 标题、引用、列表命令作用于选中的所有行，同类型再按即还原；快速插入里有“Promote / Demote heading”。

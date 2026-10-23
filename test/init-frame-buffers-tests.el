@@ -97,6 +97,29 @@
       (dolist (buffer (list first second listing))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
+(ert-deftest ibuffer-command-shift-return-visits-canonical-buffer-in-frame ()
+  (let ((row (generate-new-buffer "ibuffer-frame-row"))
+        (canonical (generate-new-buffer "ibuffer-frame-canonical"))
+        listing opened)
+    (unwind-protect
+        (save-window-excursion
+          (ibuffer)
+          (setq listing (current-buffer))
+          (ibuffer-update nil t)
+          (my/test-ibuffer-goto-buffer row)
+          (dolist (key '("M-S-RET" "M-S-<return>"))
+            (should (eq (lookup-key ibuffer-mode-map (kbd key))
+                        #'my/ibuffer-visit-new-frame)))
+          (cl-letf (((symbol-function 'my/ibuffer-noema-canonical-buffer)
+                     (lambda (_buffer) canonical))
+                    ((symbol-function 'my/buffer-display-new-frame)
+                     (lambda (buffer &optional _norecord)
+                       (setq opened buffer))))
+            (my/ibuffer-visit-new-frame))
+          (should (eq opened canonical)))
+      (dolist (buffer (list row canonical listing))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
 (ert-deftest frame-tabs-use-visited-buffers-not-global-buffer-list ()
   (let ((visited (generate-new-buffer "frame-tabs-visited"))
         (unvisited (generate-new-buffer "frame-tabs-unvisited")))
@@ -215,7 +238,7 @@
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
 (ert-deftest terminal-tabs-share-order-without-switching-other-panes ()
-  "Terminal tab clicks switch one pane and hide terminals in other panes."
+  "A terminal tab remains visible only in its pane or while hidden."
   (let ((first (generate-new-buffer "*terminal-test-1*"))
         (second (generate-new-buffer "*terminal-test-2*"))
         (free (generate-new-buffer "*terminal-test-3*"))
@@ -239,9 +262,19 @@
               (with-selected-window right
                 (should (equal (my/tab-line-buffer-list)
                                (list second free))))
+              (cl-letf (((symbol-function 'get-buffer-window)
+                         (lambda (buffer &optional all-frames)
+                           (should (eq all-frames t))
+                           (when (eq buffer second) right))))
+                (with-selected-window left
+                  (should (equal (my/tab-line-buffer-list)
+                                 (list first free)))))
               (my/tab-line-switch-to-buffer free right)
               (should (eq (window-buffer left) first))
               (should (eq (window-buffer right) free))
+              (with-selected-window left
+                (should (equal (my/tab-line-buffer-list)
+                               (list first second))))
               (should (equal (my/tab-line-all-terminal-buffers)
                              (list first second free))))))
       (dolist (buffer (list first second free))
