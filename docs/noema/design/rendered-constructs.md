@@ -109,8 +109,16 @@ export const myExtension = inlineConstruct({
    的组件；若源码由会话而不是选区打开，提供 `revealed(view, construct)`。
 5. 增加高度的 widget 继承 `MeasuredWidget`（见 `CLAUDE.md` Widget Rules）。
 
-**不要**：比较 `sel.empty && sel.from ...`；读 `dataset.vimMode`；给装饰加私有标记让
-Vim 识别；在 Vim 里扫描 Markdown 找组件。守卫测试会拒绝这些写法。
+**不要**：比较 `sel.empty && sel.from ...`；读 `dataset.vimMode`（用
+`renderedConstructsPinned(state)`）；在 `pages/vim-lite.ts` 的 `publishMode` 之外设置它；
+在 `src/cm6/embedded-surface.ts` 之外拼写 `data-noema-vim`；在视口家族里自己调用
+`isCoalescedVisualTyping` 或持久缓存 helper（交给 `constructViewPlugin`）；给装饰加私有
+标记让 Vim 识别；在 Vim 里扫描 Markdown 找组件。守卫测试会拒绝这些写法。
+
+**视口**：点击组件不移动视图（导航除外）。组件内聚焦用 `{ preventScroll: true }`，
+显示位置用事务的 `scrollIntoView`，不用 `element.scrollIntoView` 或 `scrollTop`
+（[scroll-ownership.md](scroll-ownership.md)）。新组件在 `scripts/check-scroll-invariance.mjs`
+的样例里加一段，标明点击意图（`opens`、`edits`、`navigates`），再跑 `npm run check:scroll`。
 
 ## 左右与词移动：光标从不被隐藏
 
@@ -251,6 +259,15 @@ Vim 的 `j`/`k` 与编辑器的 ↑/↓（原生按键与 xwidget 宿主都经�
 | `tests/cm6/table-cell-assist.test.ts` | 格内公式进入正文相同的源码编辑路径 |
 | `tests/vim-row-geometry.test.ts` | 折行处以组件开头时的屏幕行 |
 | `tests/rendered-constructs.test.ts`（vertical motion） | ↑/↓ 进入表格的首/末行 |
+
+新组件要在 `tests/architecture-constructs.test.ts` 的样例笔记里加一段、把 `kind` 加进它检查的列表，
+证明 registry 与绘制一致。改动后依次运行：
+
+```sh
+npx tsc --noEmit -p .
+npx vp test --run tests/architecture-constructs.test.ts tests/rendered-constructs.test.ts tests/vim-row-geometry.test.ts
+npm test
+```
 
 守卫没有允许列表。失败时修代码；规则本身需要改变时，先改本文，再改守卫。
 
