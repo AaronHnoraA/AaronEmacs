@@ -1,61 +1,63 @@
 ---
 name: noema-development
-description: Develop or change Noema — the CM6 editor pages, Node host, Go kernel, .noema research model, agents and capabilities, and their Emacs side. Use for design decisions and code changes in ~/.config/emacs/site-lisp/noema; to operate Noema as a user, use noema-emacs-workflow instead.
+description: Change or explain Noema's implementation in ~/.config/emacs/site-lisp/noema — its source syntax and parsers, the Wiki workspace and search, the kernel's databases and projections, and its Elisp, HTTP and MCP APIs. Use only for work on Noema's code or design; to use Noema as an author, use noema-emacs-workflow or noema-authoring-syntax instead.
 ---
 
-# Developing Noema
+# Noema
 
-Noema is its own Git repository at `~/.config/emacs/site-lisp/noema/`, but its
-documentation lives in the Emacs configuration at `~/.config/emacs/docs/noema/`.
-A change to Noema is committed in the Noema repository; the documents it
-changes are committed in the Emacs repository.
+Code: `~/.config/emacs/site-lisp/noema/` (its own Git repository). Docs:
+`~/.config/emacs/docs/noema/`, committed in the Emacs repository. This file is
+only a router. Open the one row your task needs; the rules live in the file it
+names.
 
-## Read in this order
+## Orientation
 
-1. `site-lisp/noema/AGENTS.md` — the product rules (D-023 work documents,
-   D-038 Projects, Proposals, Findings, search and reference authority).
-2. `docs/noema/architecture.md` — what each top-level directory owns and where
-   a change belongs.
-3. The owning document in `docs/noema/design/`, e.g. `current-architecture.md`
-   (editor and host), `rendered-constructs.md`, `scroll-ownership.md`,
-   `capabilities.md`, `wiki-workspace.md`, `agenda-dsl.md`, `elisp-api.md`.
-4. `site-lisp/noema/CLAUDE.md` for the editor's core files, widget rules and
-   invariants.
-5. For anything the editor draws over Markdown source, the
-   `rendered-construct` Skill.
+| Need | Read |
+| --- | --- |
+| Product rules (D-023 work documents, D-038 Projects, Proposals, Findings) | `site-lisp/noema/AGENTS.md` |
+| What each directory owns, where a change belongs | `docs/noema/architecture.md` |
+| Editor, host and kernel as they work now | `docs/noema/design/current-architecture.md` |
+| Editor core files, widget rules, test commands | `site-lisp/noema/CLAUDE.md` |
 
-`docs/noema/records/` holds dated studies, audits, change logs and incidents:
-history, not the current contract.
+## Syntax
 
-## Design decisions already made
+| Need | Read |
+| --- | --- |
+| Every source form, its parser and its spec | `docs/noema/design/syntax.md` |
+| Planning commands (`@@todo`, `@@clock`, …) | `docs/noema/design/agenda-dsl.md` |
+| `.noema` work-block directives | `docs/noema/design/capabilities.md` “Work-cell syntax” |
+| Drawing a construct over source (widgets, reveal) | the `rendered-construct` Skill |
+| Math macros and TeX compatibility | `docs/design/latex-preview.md`; export in `docs/noema/design/latex-export-style.md` |
 
-- Emacs owns the first-party interaction: buffers, navigation, JuText, Graph
-  Board, Inspector, approvals and agent sessions. CM6 is an Emacs-hosted
-  document surface; Node and Go are headless services.
-- Markdown source is the truth for notes. A `.noema` file is an AI work
-  document with stable WorkNode identity, never a Jupyter notebook.
-- A Wiki repository and a research Project are separate; `[project]` in
-  `noema.toml` declares a Project, and visiting a file never creates one.
-- Structure changes go through validated, undoable transactions or reviewed
-  Proposals. Agent reports are recorded first and applied by the editor.
-  Findings need evidence review.
-- Search and reference text have one implementation, in the Go kernel. Views
-  show its answer and never rank or format again.
-- Skills that describe a mechanism ship with the code that implements it;
-  packs list flat Skill ids and never copy Skill text.
+## Wiki
 
-Do not turn a principle into a new feature, constraint or permission without a
-source in `AGENTS.md`, the design docs or the user's direction. `AGENTS.md`
-names `DESIGN.md` v1.8 as historical design authority; that file is not
-available, so state the gap rather than guessing what it said.
+`docs/noema/design/wiki-workspace.md`: “Layouts”, “Links and identity”,
+“Search” (query syntax, reference text), “Namespaces”, “Git collaboration
+cadence”, “Publishing boundary”. Search and reference text have one
+implementation, `kernel/noema/wikisearch`.
+
+## Database
+
+| Store | Read |
+| --- | --- |
+| `wiki.db`, the disposable SQLite projection of Git-owned Markdown | `wiki-workspace.md` “Layouts”, “Index maintenance” |
+| Agenda, Todo and attribute-view projections, generated only by Go | `current-architecture.md` “Node host”; `kernel/noema/agenda`, `kernel/noema/attributeview` |
+| Clock journal `agenda-clocks.sqlite` | `agenda-dsl.md` |
+| Research DAG, Proposals, Findings | `AGENTS.md`; `kernel/noema/research` |
+
+## APIs
+
+| Surface | Read |
+| --- | --- |
+| Elisp semantic API (`noema-current-*`, `noema-create-work`, …) | `docs/noema/design/elisp-api.md` |
+| Host HTTP/SSE endpoints | `server/Features/<Feature>/api.mjs`; placement rule in `docs/noema/architecture.md` “改动落点” |
+| MCP servers | `docs/noema/design/mcp.md` |
+| Skills, packs, capability resolution | `docs/noema/design/capabilities.md` |
 
 ## Finishing a change
 
-- Update the matching `docs/noema/design/` or `guide/` document in the Emacs
-  repository; no dates or change logs there.
-- Tests: `npm test` (focused files first, per `CLAUDE.md`), `npm run
-  build:pages` for type checks, `go test -tags fts5 ./...` under `kernel/`
-  for kernel changes, and `make research-test` / `make agenda-test` from the
-  Emacs root for Noema Elisp.
-- The running Emacs serves `dist/pages`; a renderer change needs
-  `make build-web` before it is visible.
+Update the owning `docs/noema/` document in the Emacs repository (no dates or
+change logs there; a new syntax takes its row in `syntax.md`). Tests are
+listed in `site-lisp/noema/CLAUDE.md`; `make research-test` and `make
+agenda-test` from the Emacs root cover Noema's Elisp. A renderer change needs
+`make noema-web-build` before the running Emacs shows it.

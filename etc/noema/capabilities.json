@@ -155,16 +155,24 @@
       },
       "noema-emacs": {
         "title": "Noema in Emacs",
-        "description": "Noema and Emacs operation, authoring syntax, and verified design context",
+        "description": "Operate Noema from Emacs: entry points and keys, note and work-block syntax, the semantic Elisp API and the work DAG",
         "members": [
           "noema-emacs-workflow",
-          "emacs-config",
           "noema-authoring-syntax",
-          "noema-development",
           "noema-elisp-api",
           "noema-work-dag"
         ],
-        "preamble": "Work in the current Noema and Emacs context. Keep Markdown and .noema source authoritative, use the public semantic API for structural changes, and distinguish verified product contracts from design assumptions. Read the relevant Skill reference before using a detailed command or syntax."
+        "preamble": "Work in the current Noema and Emacs context. Keep Markdown and .noema source authoritative, and use the public semantic API for structural changes. Read the relevant Skill reference before using a detailed command or syntax."
+      },
+      "emacs-noema-dev": {
+        "title": "Developing Emacs and Noema",
+        "description": "Change the Emacs configuration or Noema's code: where rules and docs live, how changes are verified and committed",
+        "members": [
+          "emacs-config",
+          "noema-development",
+          "rendered-construct"
+        ],
+        "preamble": "The repository's AGENT.md (Emacs) or AGENTS.md (Noema) wins over any Skill. Both projects' documents live in ~/.config/emacs/docs; records/ there is history, not the current contract. Commit code in its own repository, only your own changes."
       }
     }
   }

@@ -126,6 +126,20 @@ Noema 的 Elisp 由 `init-ai-ide` 把 `site-lisp/noema/lisp` 加入 `load-path`�
 产品语义（数据模型、Agent、Proposal、能力）放在 Noema 的 `lisp/noema-*.el`；
 只与本配置的窗口、键位、Remote、Portal 相关的胶水放在本仓库 `lisp/roam/`。
 
+## 命令行入口
+
+从 Emacs 外部调用的命令都在 `bin/`，每个只做一件事，细节在所列文档：
+
+| 命令 | 作用 | 规格 |
+| --- | --- | --- |
+| `bin/emacs-app` | 后台 Emacs 的唯一入口：start/restart/kill/show/hide/status、白名单动作 `act`、`frame`、`terminal`、登录项 | `AGENT.md` “Background application”，[daily-usage.md](guide/daily-usage.md) “Emacs 作为后台应用” |
+| `bin/emacsopen` | 仅在 Ghostty 内：`emacsclient --no-wait` 在运行中的 Emacs 打开文件或目录（`~/.local/bin/emacsopen` 链到这里） | [daily-usage.md](guide/daily-usage.md) “Open `SPC o`” |
+| `bin/install-remote-ikernel` | 安装 `site-lisp/remote_ikernel` | [jupyter-workflow.md](design/jupyter-workflow.md) |
+| `bin/sage-jupyter-kernel` | SageMath kernel 启动包装，日志写 `var/log/`；由 Noema 的 sagemath kernelspec 模板调用 | — |
+| `make <target>` | 编译、测试、锁文件、健康检查；`make help` 列出全部 | [maintenance.md](ops/maintenance.md) |
+
+Raycast 扩展只调用 `bin/emacs-app`；新增外部入口放进 `bin/`，并在这张表里占一行。
+
 ## 改动落点速查
 
 | 想改的东西 | 落点 |

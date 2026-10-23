@@ -1,49 +1,54 @@
 ---
 name: emacs-config
-description: Maintain the user's Emacs configuration at ~/.config/emacs — settings, modules, packages, keybindings, the Remote framework, LSP, Jupyter, terminals, background app and its docs. Use for any change to or question about this configuration; not for generic Emacs advice, and not for Noema's own code (use noema-development).
+description: Change or explain the user's Emacs configuration in ~/.config/emacs — where code and settings live, its APIs (remote-*, LSP, Jupyter, config registry, keybindings), its command-line entry points (bin/emacs-app, emacsopen, make), and its development and documentation rules. Use only for work on this repository; not for general Emacs questions, Noema's own code (noema-development) or using Noema (noema-emacs-workflow).
 ---
 
-# Maintaining the Emacs configuration
+# Emacs configuration
 
-The configuration lives in `~/.config/emacs` (`~/.emacs.d` is a link to it).
-This Skill only says where things are decided; the rules themselves are in the
-repository, and they win over anything remembered.
+Repository: `~/.config/emacs` (`~/.emacs.d` links to it). This file is only a
+router. Open the one row your task needs; every rule lives in the file it
+names, and that file wins over anything remembered.
 
-## Read in this order
+## Where things are
 
-1. `AGENT.md` — the rules: load order, Remote-first architecture, keybinding,
-   package, state, lifecycle and documentation rules. Read the sections your
-   change touches before designing it.
-2. `docs/README.md` — the map of every document, and what each directory may
-   contain.
-3. `docs/architecture.md` — layers, directory ownership, the Emacs ↔ Noema
-   boundary, and a table of where each kind of change belongs.
-4. The owning document under `docs/design/` (how it works now) or
-   `docs/guide/` (how it is used), then the code.
+| Need | Read |
+| --- | --- |
+| Load order, layers, which directory owns what | `docs/architecture.md` “加载链与分层”, “目录职责” |
+| Where a given change belongs | `docs/architecture.md` “改动落点速查”, then `docs/guide/settings-cookbook.md` |
+| Which document covers a topic | `docs/README.md` |
+| Emacs ↔ Noema boundary | `docs/architecture.md` “Emacs ↔ Noema 边界” |
 
-`docs/records/` holds dated audits, incidents and measurements. Read them for
-why something is the way it is, never as a description of the current system.
+## APIs
 
-## Before changing anything
+| Area | Read |
+| --- | --- |
+| Files, processes, environment, channels, workspaces, terminals (`remote-*`) | `docs/design/remote-framework.md` §3, §7, §8; rules in `AGENT.md` “Remote-First Core Architecture” |
+| Temporary machines, rsync transfers | `docs/design/remote-files.md` |
+| Language servers (`my/register-language-server`, Hub, Doctor) | `docs/design/lsp-workflow.md`; `AGENT.md` “Domain Policies” → LSP |
+| Jupyter kernels and the Noema bridge | `docs/design/jupyter-workflow.md` |
+| User settings (`config-register`, `config-get/set`, `etc/config-store.el`) | `docs/design/config-management.md` “注册语法” |
+| Keybindings (general.el, leader, localleader, Dirvish keys) | `AGENT.md` “Keybinding Rules”; keys listed in `docs/guide/daily-usage.md` |
+| Existing entry points not to duplicate | `AGENT.md` “Do Not Reinvent Existing Surfaces” |
+| Performance diagnostics | `AGENT.md` “Performance Diagnostics” |
+| Noema's Elisp API | `docs/noema/design/elisp-api.md` |
 
-- A user setting is usually registered: try `M-x config-board`,
-  `config-get`/`config-set`, and `etc/config-store.el` before editing a module.
-- Files, projects, processes, executables, environments, terminals, sockets
-  and LSP go through the `remote-*` API with the client as target `local`.
-  Never branch on `file-remote-p` or a target name in a consumer.
-- Reuse the existing entry points that `AGENT.md` lists under "Do Not
-  Reinvent Existing Surfaces" instead of adding a parallel one.
-- Noema's code is a separate repository at `site-lisp/noema/`; its docs live
-  here in `docs/noema/`. For work on Noema itself, use `noema-development`.
+## Commands outside Emacs
 
-## Finishing a change
+`docs/architecture.md` “命令行入口” lists every `bin/` command
+(`emacs-app`, `emacsopen`, …) with its spec; `make help` lists the make
+targets, described in `docs/ops/maintenance.md`.
 
-- Update the matching `docs/design/` or `docs/guide/` document in the same
-  commit; a new document first takes its slot in `docs/README.md`. Do not
-  write dates or change logs into those documents.
-- Verify as `AGENT.md` "Verification" says: `check-parens` on edited Elisp,
-  `git diff --check`, the focused `make` test target (listed in
-  `docs/ops/maintenance.md`), and `make health-startup` for anything loaded at
-  startup.
-- Commit only your own changes; the tree often holds someone else's
-  unfinished work.
+## Development rules
+
+`AGENT.md` sections, read the ones your change touches: “Project Model”
+(adding a module, naming), “Package Rules”, “Runtime State”, “Resource
+Lifecycle Rules”, “Runtime Builds”, “Domain Policies”, “Verification”.
+Commit only your own changes; the tree often holds someone else's work.
+
+## Documentation rules
+
+`AGENT.md` “Documentation Rules”, and the table at the top of
+`docs/README.md`: structural docs (`guide/ design/ acceptance/ ops/`) describe
+the present with no dates; dated history goes to `records/`. Update the owning
+doc in the same commit as the behaviour; a new doc takes its row in
+`docs/README.md` first.

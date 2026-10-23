@@ -114,6 +114,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 - [research-synthesis.md](noema/design/research-synthesis.md) Research synthesis and Proposals
 - [scroll-ownership.md](noema/design/scroll-ownership.md) 视口归属：滚动只有一个主人
 - [snippet-catalog.md](noema/design/snippet-catalog.md) Snippet catalog and upstream synchronization
+- [syntax.md](noema/design/syntax.md) Noema source syntax: every form, its parser and its spec
 - [wiki-workspace.md](noema/design/wiki-workspace.md) Noema Wiki workspace
 
 ## noema/records/ — history
