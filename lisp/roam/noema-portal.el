@@ -30,6 +30,7 @@
 (defvar my/noema-buffer-file-name)
 (defvar portal-web--target)
 (defvar portal-web--url)
+(defvar my/portal--explicitly-unfocused)
 
 (defun my/noema-portal--focus-gained ()
   "Tell the selected Noema page to focus its editor after native focus."
@@ -131,6 +132,8 @@
                      (get-buffer-window buffer 'visible))))
       (when window
         (select-window window)
+        (with-current-buffer buffer
+          (setq-local my/portal--explicitly-unfocused nil))
         (my/portal--focus-selected-window (selected-frame) t)))))
 
 (defun my/noema-portal-send (buffer message)

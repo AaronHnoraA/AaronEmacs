@@ -29,6 +29,9 @@
 (declare-function portal-terminal-refresh-bindings "portal-terminal-bindings" ())
 (declare-function portal-input-focus "portal-input" ())
 (declare-function portal-input--action "portal-input" (action &optional target serial))
+(declare-function portal-view--target-buffer "portal-view" (target))
+(defvar portal-input--resume)
+(defvar portal-input--origin)
 (declare-function my/read-ssh-host "init-shell" ())
 (declare-function my/terminal-normalize-directory "init-funcs" (directory))
 (declare-function remote-client-file-name "remote-fs" (file))
@@ -151,10 +154,25 @@
     (setq-local completion-at-point-functions nil
                 eldoc-documentation-functions nil)))
 
+(defun my/portal--keep-emacs-after-minibuffer-h ()
+  "Leave Emacs the keyboard after a handed-off command reads the minibuffer.
+A chord typed in a view that opens a prompt, as `M-x' does, starts work in
+Emacs, so the view does not take the keyboard back when it finishes."
+  (when (and (bound-and-true-p portal-input--resume)
+             (bound-and-true-p portal-input--origin))
+    (setq portal-input--resume nil)
+    (when-let* ((buffer (portal-view--target-buffer portal-input--origin)))
+      (with-current-buffer buffer
+        (setq-local my/portal--explicitly-unfocused t)))))
+
+(add-hook 'minibuffer-setup-hook #'my/portal--keep-emacs-after-minibuffer-h)
+
 (defun my/portal--focus-selected-window (frame &optional selection-changed)
   "Match native keyboard focus to FRAME's selected Emacs window.
-SELECTION-CHANGED also handles a frame activation.  Leave a view's explicit
-escape alone until selection, buffer, or native placement actually changes."
+SELECTION-CHANGED also handles a frame activation.  Leave a view's escape
+alone until selection, buffer, or native placement actually changes; once
+Emacs holds the keyboard explicitly, only moving to another pane or buffer
+and back gives it to the view again."
   (when (and (not my/portal--focusing-selected-window)
              (eq frame (selected-frame))
              (not (active-minibuffer-window)))
@@ -171,7 +189,10 @@ escape alone until selection, buffer, or native placement actually changes."
                (view (and target
                           (list frame window target portal-view--geometry)))
                (view-changed (not (equal view my/portal--selected-view-state))))
-          (when (or selection-changed pane-changed view-changed)
+          (when (and (or selection-changed pane-changed view-changed)
+                     ;; Leaving the minibuffer reselects the same pane.
+                     (not (and target my/portal--explicitly-unfocused
+                               (not pane-changed))))
             (setq my/portal--selected-view-state view)
             (let ((my/portal--focusing-selected-window t))
               (when (and previous-target

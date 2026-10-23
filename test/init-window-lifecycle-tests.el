@@ -129,6 +129,70 @@ MODE is set as the buffer's `major-mode' symbol only; no mode body runs."
       (dolist (buffer (cons (get-buffer "*q3-other*") pages))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
+;;; C12, C13: who has the keyboard in a native view
+
+(ert-deftest c12-a-handed-off-prompt-leaves-emacs-the-keyboard ()
+  "A chord whose command reads the minibuffer does not resume the view."
+  (require 'init-portal)
+  (require 'portal-input)
+  (window-lifecycle-tests--with-buffers ((terminal " *c12-terminal*"))
+    (switch-to-buffer terminal)
+    (setq-local portal-input-mode t
+                portal-view--target "terminal:c12")
+    (let (resumed)
+      (cl-letf (((symbol-function 'portal-view-buffers)
+                 (lambda (&rest _) (list terminal)))
+                ((symbol-function 'portal-input-focus)
+                 (lambda () (setq resumed t)))
+                ((symbol-function 'portal--input) (lambda (&rest _) t)))
+        (let ((unread-command-events nil))
+          ;; A direct shortcut gives the view its keyboard back.
+          (portal-input--run "terminal:c12" 1 (kbd "s-j")
+                             (lambda () (interactive)))
+          (should resumed)
+          (setq resumed nil)
+          ;; A prompt, as M-x opens, keeps Emacs in control.
+          (portal-input--run "terminal:c12" 2 (kbd "M-x")
+                             (lambda () (interactive)
+                               (should (memq #'my/portal--keep-emacs-after-minibuffer-h
+                                             minibuffer-setup-hook))
+                               (my/portal--keep-emacs-after-minibuffer-h))))
+        (should-not resumed)
+        (should (buffer-local-value 'my/portal--explicitly-unfocused
+                                    terminal))))))
+
+(ert-deftest c13-emacs-keeps-the-keyboard-until-the-pane-changes ()
+  "After Emacs takes the keyboard, its next commands stay in Emacs."
+  (require 'init-portal)
+  (window-lifecycle-tests--with-buffers ((terminal " *c13-terminal*")
+                                         (ordinary " *c13-ordinary*"))
+    (switch-to-buffer terminal)
+    (setq-local portal-input-mode t
+                portal-view--target "terminal:c13"
+                my/portal--explicitly-unfocused t)
+    (let ((other (split-window-right))
+          (my/portal--selected-pane-state nil)
+          (my/portal--selected-view-state nil)
+          (focuses 0))
+      (set-window-buffer other ordinary)
+      (cl-letf (((symbol-function 'portal-input--action) #'ignore)
+                ((symbol-function 'portal-input-focus)
+                 (lambda () (cl-incf focuses))))
+        (setq my/portal--selected-pane-state
+              (list (selected-frame) (selected-window) terminal))
+        ;; Returning from the minibuffer reselects the same pane, and the
+        ;; frame may change layout: neither gives the view the keyboard.
+        (my/portal--focus-selected-window (selected-frame) t)
+        (setq-local portal-view--geometry '(resized))
+        (my/portal--focus-selected-window (selected-frame))
+        (should (= focuses 0))
+        ;; Moving away and back does.
+        (select-window other)
+        (my/portal--focus-after-command)
+        (select-window (get-buffer-window terminal))
+        (my/portal--focus-after-command)
+        (should (= focuses 1))))))
+
 (provide 'init-window-lifecycle-tests)
 
 ;;; init-window-lifecycle-tests.el ends here

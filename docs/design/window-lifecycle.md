@@ -6,7 +6,8 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 
 ## 范围
 
-- 管：关视图、结束 buffer、关窗口、关 frame，以及之后窗口显示什么。
+- 管：关视图、结束 buffer、关窗口、关 frame，以及之后窗口显示什么；原生视图
+  （Portal 终端、Portal Web 上的 Noema 页面）与 Emacs 之间谁拿键盘。
 - 不管：buffer 内容的保存与撤销；Remote 断开时 buffer 的处理（见
   [remote-framework.md](remote-framework.md)）；Emacs 作为后台应用时的隐藏（见
   `AGENT.md` “Background application”）。
@@ -74,6 +75,14 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
    `*scratch*`、Dashboard 或主目录 Dired 时，改为第 1 步的候选；没有候选时删掉这个
    多余窗口；最后一个窗口打开项目目录（主目录或无项目时打开 Dashboard）。
 
+### 原生视图的键盘归属
+
+原生视图的 buffer 有两种键盘状态：视图持有（mode line `[app]`）与 Emacs 持有
+（`[emacs]`）。视图里按下它不用的组合键会交给 Emacs 执行一条命令（handoff）。
+Emacs 持有分两种：handoff 期间的暂时持有，命令结束后视图取回键盘；以及明确持有
+（`Cmd-.` 退出视图，或 handoff 的命令打开了 minibuffer，如 `M-x`），之后的命令都在
+Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buffer 再回来。
+
 ### 未显示的 Noema 页面
 
 未显示的页面最多保留 `my/noema-detached-page-limit` 个（config 注册表，默认 8，nil
@@ -117,6 +126,13 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 - **C11** 未显示的 Noema 页面不超过 `my/noema-detached-page-limit` 个，超出时先结束
   最久未显示的。测试：`q3-detached-pages-beyond-the-limit-are-ended`。
 
+- **C12** 视图交给 Emacs 的命令若读 minibuffer（`M-x`、提示输入），结束后 Emacs
+  明确持有键盘；不读 minibuffer 的快捷键结束后视图取回键盘。测试：
+  `c12-a-handed-off-prompt-leaves-emacs-the-keyboard`。
+- **C13** Emacs 明确持有键盘时，离开 minibuffer、frame 重新激活或视图布局变化都不把
+  键盘还给视图；只有进入视图（`RET`、点击、显式聚焦请求）或窗口 / buffer 真正变化后
+  再选回它才会。测试：`c13-emacs-keeps-the-keyboard-until-the-pane-changes`。
+
 测试文件：`test/init-window-lifecycle-tests.el`、`test/init-windows-tests.el`，
 均由 `make ui-test` 运行。
 
@@ -129,6 +145,7 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 | `H-w` | `lisp/init-base.el` `my/delete-frame-dwim` |
 | 浏览后端的 `M-w` 与 `C-c w d` | `lisp/init-browser.el` |
 | 终端原生键表的 `s-w`、终端移动与 frame 关闭 | `lisp/init-portal.el`、`lisp/init-portal-popup.el` |
+| 原生视图键盘归属 | `lisp/init-portal.el` `my/portal--focus-selected-window` |
 | 未显示页面上限 | `lisp/roam/init-noema.el` |
 | 后台 frame | `lisp/init-background.el` |
 

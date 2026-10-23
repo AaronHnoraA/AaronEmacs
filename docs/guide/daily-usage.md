@@ -261,6 +261,9 @@ Graph 搜索框支持全文词和
 
 Noema 默认由 Portal Web 承载，与 Portal 终端共用 `portal-input`：按键穿透、
 `Cmd` 到 Emacs `Meta` 的转换，以及切换窗口后的自动聚焦由同一层处理。
+在视图里按 `M-x`（或任何打开 minibuffer 的组合键）后，键盘留在 Emacs：之后的命令
+都在 Emacs 里执行，直到 `RET` / 点击回到视图，或移到别的窗口再回来；不打开
+minibuffer 的快捷键执行完仍回到视图。`Cmd-.` 同样把键盘留给 Emacs。
 Noema 只补充编辑器命令映射。顶栏的返回、前进、刷新、编辑器聚焦和菜单按钮
 属于 Emacs。`xwidget` 仍可显式选择；以下专门说明它的旧键盘桥接行为。
 
