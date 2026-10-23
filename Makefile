@@ -186,6 +186,7 @@ project-workflow-test:
 ui-test:
 	$(UI_TOKEN_BATCH) --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)"))' -l test/aaron-ui-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/noema-icon-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-open-place-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-ui-dashboard-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-auto-insert-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-snippets-tests.el -f ert-run-tests-batch-and-exit

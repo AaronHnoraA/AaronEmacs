@@ -133,7 +133,7 @@ Noema 的 Elisp 由 `init-ai-ide` 把 `site-lisp/noema/lisp` 加入 `load-path`�
 | 命令 | 作用 | 规格 |
 | --- | --- | --- |
 | `bin/emacs-app` | 后台 Emacs 的唯一入口：start/restart/kill/show/hide/status、白名单动作 `act`、`frame`、`terminal`、登录项 | `AGENT.md` “Background application”，[daily-usage.md](guide/daily-usage.md) “Emacs 作为后台应用” |
-| `bin/emacsopen` | 仅在 Ghostty 内：`emacsclient --no-wait` 在运行中的 Emacs 打开文件或目录（`~/.local/bin/emacsopen` 链到这里） | [daily-usage.md](guide/daily-usage.md) “Open `SPC o`” |
+| `bin/emacsopen` | 在运行中的 Emacs 打开文件，供 agent、脚本与终端调用：位置 `-o`/`-l`/`-r`/`-a`/`-b`/`-f`（其他窗口、四向分割、新 frame；默认选中窗口，`here`/`-o` 复用已显示该文件的窗口），`+行[:列]` 或 `文件:行[:列]`，`-n` 不抢焦点；每个文件输出一行 JSON（buffer、窗口、frame、是否复用与定位），失败退出非零；不依赖 Ghostty。实现 `my/open-place`（`lisp/init-open.el`）；`~/.local/bin/emacsopen` 链到这里 | `emacsopen --help` |
 | `bin/install-remote-ikernel` | 安装 `site-lisp/remote_ikernel` | [jupyter-workflow.md](design/jupyter-workflow.md) |
 | `bin/sage-jupyter-kernel` | SageMath kernel 启动包装，日志写 `var/log/`；由 Noema 的 sagemath kernelspec 模板调用 | — |
 | `make <target>` | 编译、测试、锁文件、健康检查；`make help` 列出全部 | [maintenance.md](ops/maintenance.md) |

@@ -11,6 +11,7 @@
 
 (require 'browse-url)
 (require 'general)
+(require 'seq)
 (require 'subr-x)
 
 (defgroup my/open nil
@@ -321,6 +322,111 @@ route default."
   (let* ((kind (or kind (my/open-kind-for-file file)))
          (backend (my/open-resolve-backend kind backend)))
     (my/open-file-with-backend file backend)))
+
+;;; Placed visits for agents and scripts (`bin/emacsopen')
+
+(declare-function my/file-open-new-frame "init-windows" (file &optional wildcards))
+(declare-function my/background-show "init-background" ())
+(declare-function my/background-status "init-background" ())
+
+(defconst my/open-placements '(here other left right above below frame)
+  "Where `my/open-place' may show a file.")
+
+(defun my/open--visible-window (buffer)
+  "Return a live window on a visible frame showing BUFFER, or nil."
+  (and buffer
+       (seq-find (lambda (window)
+                   (frame-visible-p (window-frame window)))
+                 (get-buffer-window-list buffer nil t))))
+
+(defun my/open--placement-window (placement base)
+  "Return the window PLACEMENT designates relative to BASE, creating it.
+`frame' is handled by the caller."
+  (pcase placement
+    ('here base)
+    ('other (let ((next (next-window base 'nomini)))
+              (if (eq next base) (split-window base nil 'right) next)))
+    ((or 'left 'right 'above 'below) (split-window base nil placement))
+    (_ (user-error "Unknown placement: %s" placement))))
+
+(defun my/open--goto (buffer line column)
+  "Move point in BUFFER's windows to LINE and COLUMN (both 1-based).
+Return non-nil when the buffer holds the text, so the position means
+something; a Noema page placeholder does not."
+  (when (and line (buffer-live-p buffer))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'xwidget-webkit-mode)
+        (goto-char (point-min))
+        (forward-line (1- (max 1 line)))
+        (when column (move-to-column (1- (max 1 column))))
+        (dolist (window (get-buffer-window-list buffer nil t))
+          (set-window-point window (point)))
+        t))))
+
+(defun my/open-place (file &optional placement line column no-focus)
+  "Visit FILE at PLACEMENT and return what happened as an alist.
+PLACEMENT is one of `my/open-placements' (default `here', the selected
+window).  `here' and `other' reuse a window already showing FILE; the
+splits and `frame' always make a new one.  LINE and COLUMN are 1-based.
+With NO-FOCUS the user's selected window and frame are kept and a
+background Emacs stays hidden.  Never prompts."
+  (let* ((placement (or placement 'here))
+         (file (my/open-resolve-file-name file))
+         (existing (find-buffer-visiting file))
+         (shown (and (memq placement '(here other))
+                     (my/open--visible-window existing)))
+         (origin (selected-window))
+         window buffer)
+    (unless (memq placement my/open-placements)
+      (user-error "Unknown placement: %s" placement))
+    (cond
+     (shown (setq window shown buffer existing))
+     ((eq placement 'frame)
+      (setq buffer (my/file-open-new-frame file)
+            window (get-buffer-window buffer t)))
+     (t
+      (setq window (my/open--placement-window placement (my/open--base-window)))
+      (with-selected-window window
+        (setq buffer (my/open-visit-file file)
+              ;; A Noema page may move itself to another window.
+              window (or (get-buffer-window buffer t) window)))))
+    (let ((positioned (my/open--goto buffer line column)))
+      (if no-focus
+          (when (window-live-p origin)
+            (select-frame-set-input-focus (window-frame origin))
+            (select-window origin))
+        (when (and (fboundp 'my/background-status)
+                   (equal (my/background-status) "background"))
+          (my/background-show))
+        (when (window-live-p window)
+          (select-frame-set-input-focus (window-frame window))
+          (select-window window)))
+      `((file . ,file)
+        (buffer . ,(if (buffer-live-p buffer) (buffer-name buffer) :null))
+        (placement . ,(symbol-name placement))
+        (reused . ,(if shown t :false))
+        (window . ,(if (window-live-p window) (format "%s" window) :null))
+        (frame . ,(if (window-live-p window)
+                      (frame-parameter (window-frame window) 'name)
+                    :null))
+        (line . ,(or line :null))
+        (column . ,(or column :null))
+        (positioned . ,(if positioned t :false))))))
+
+(defun my/open-place-from-client (encoded-file placement line column no-focus)
+  "Run `my/open-place' for `bin/emacsopen' and return base64 JSON.
+ENCODED-FILE is the base64 UTF-8 file name; the other arguments are already
+validated by the script.  An error is returned as {\"error\": MESSAGE}
+rather than signalled, so the caller always gets one parseable answer."
+  (base64-encode-string
+   (json-serialize
+    (condition-case err
+        (let ((inhibit-message t))
+          (my/open-place (decode-coding-string
+                          (base64-decode-string encoded-file) 'utf-8)
+                         (intern placement) line column no-focus))
+      (error `((error . ,(error-message-string err))))))
+   t))
 
 (provide 'init-open)
 ;;; init-open.el ends here

@@ -1,16 +1,108 @@
 #!/bin/sh
-# Open files from Ghostty in the running graphical Emacs.
+# Open files in the running graphical Emacs at a chosen place, for agents,
+# scripts and terminals.  Prints one JSON object per file, as returned by
+# `my/open-place-from-client' (lisp/init-open.el), and exits non-zero when
+# any file could not be opened.
 
-if [ "${TERM-}" != xterm-ghostty ]; then
-    printf 'emacsopen: available only in Ghostty (TERM=xterm-ghostty)\n' >&2
+usage() {
+    cat >&2 <<'EOF'
+usage: emacsopen [placement] [-n] [+LINE[:COL]] FILE[:LINE[:COL]]...
+
+placement (default: the selected window; reuses a window already showing FILE)
+  -o, --other    the other window (split right when there is none);
+                 reuses a window already showing FILE
+  -l, --left     split the selected window, FILE on the left
+  -r, --right    split the selected window, FILE on the right
+  -a, --above    split the selected window, FILE above
+  -b, --below    split the selected window, FILE below
+  -f, --frame    a new frame
+
+  -n, --no-focus keep the user's window and frame selected; a background
+                 Emacs stays hidden
+  +LINE[:COL]    go to LINE (and COL) in the next FILE
+EOF
     exit 2
-fi
+}
 
-if [ "$#" -eq 0 ]; then
-    printf 'usage: emacsopen FILE...\n' >&2
-    exit 2
-fi
+unset LC_ALL LC_CTYPE
+case "${LANG:-}" in
+    *.UTF-8) ;;
+    *) export LANG=en_US.UTF-8 ;;
+esac
 
-# The Emacs server keeps buffers opened by no-wait clients.  Passing each
-# argument literally handles file and directory names with spaces or quotes.
-exec emacsclient --no-wait -- "$@"
+CLIENT=/Applications/Emacs.app/Contents/MacOS/bin/emacsclient
+[ -x "$CLIENT" ] || CLIENT=emacsclient
+
+placement=here
+focus=nil
+line=nil
+column=nil
+status=0
+opened=0
+
+number() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; }
+
+# FILE:LINE[:COL] is read as a position only when FILE itself does not exist.
+split_position() {
+    file=$1
+    [ -e "$file" ] && return
+    rest=${1%:*}; last=${1##*:}
+    number "$last" || return
+    if [ "$rest" != "$1" ]; then
+        prev=${rest##*:}
+        if number "$prev" && [ "${rest%:*}" != "$rest" ]; then
+            file=${rest%:*}; line=$prev; column=$last
+        else
+            file=$rest; line=$last
+        fi
+    fi
+}
+
+open_one() {
+    split_position "$1"
+    case "$file" in
+        /*) ;;
+        *) file=$PWD/$file ;;
+    esac
+    encoded=$(printf '%s' "$file" | base64 | tr -d '\n')
+    reply=$("$CLIENT" --timeout=6 --eval \
+        "(my/open-place-from-client \"$encoded\" \"$placement\" $line $column $focus)" 2>&1)
+    if [ $? -ne 0 ]; then
+        printf '{"error":"emacsclient failed","detail":"%s"}\n' \
+            "$(printf '%s' "$reply" | tr -d '"\\' | tr '\n' ' ')"
+        status=1
+    else
+        json=$(printf '%s' "$reply" | tr -d '"' | base64 -d 2>/dev/null)
+        printf '%s\n' "$json"
+        case "$json" in
+            '{"error"'*|'') status=1 ;;
+        esac
+    fi
+    line=nil; column=nil
+    opened=$((opened + 1))
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        -h|--help) usage ;;
+        -o|--other) placement=other ;;
+        -l|--left) placement=left ;;
+        -r|--right) placement=right ;;
+        -a|--above) placement=above ;;
+        -b|--below) placement=below ;;
+        -f|--frame) placement=frame ;;
+        -n|--no-focus) focus=t ;;
+        +*)
+            spec=${arg#+}
+            line=${spec%%:*}
+            case "$spec" in *:*) column=${spec#*:} ;; esac
+            number "$line" || usage
+            [ "$column" = nil ] || number "$column" || usage
+            ;;
+        -*) usage ;;
+        *) open_one "$arg" ;;
+    esac
+done
+
+[ "$opened" -gt 0 ] || usage
+exit "$status"

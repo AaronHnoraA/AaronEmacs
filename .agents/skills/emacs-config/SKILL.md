@@ -1,6 +1,6 @@
 ---
 name: emacs-config
-description: Change or explain the user's Emacs configuration in ~/.config/emacs — where code and settings live, its APIs (remote-*, LSP, Jupyter, config registry, keybindings), its command-line entry points (bin/emacs-app, emacsopen, make), and its development and documentation rules. Use only for work on this repository; not for general Emacs questions, Noema's own code (noema-development) or using Noema (noema-emacs-workflow).
+description: Change or explain the user's Emacs configuration in ~/.config/emacs — where code and settings live, its APIs (remote-*, LSP, Jupyter, config registry, keybindings), its command-line entry points (bin/emacs-app, emacsopen / emacs-open for opening files at a placement, make), and its development and documentation rules. Use only for work on this repository; not for general Emacs questions, Noema's own code (noema-development) or using Noema (noema-emacs-workflow).
 ---
 
 # Emacs configuration
@@ -37,6 +37,11 @@ names, and that file wins over anything remembered.
 `docs/architecture.md` “命令行入口” lists every `bin/` command
 (`emacs-app`, `emacsopen`, …) with its spec; `make help` lists the make
 targets, described in `docs/ops/maintenance.md`.
+
+To show the user a file, run `emacsopen` (see `emacsopen --help`): it takes
+a placement (`-o`, `-l`, `-r`, `-a`, `-b`, `-f`), a position (`+LINE[:COL]`)
+and `-n` to leave the user's focus alone, and answers with one JSON line per
+file. Do not call `emacsclient` yourself for this.
 
 ## Development rules
 
