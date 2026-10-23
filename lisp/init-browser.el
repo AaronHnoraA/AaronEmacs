@@ -16,6 +16,7 @@
 (require 'init-open)
 
 (declare-function my/macos-open-url "init-macos" (url))
+(declare-function my/close-view "init-windows" ())
 (declare-function my/open-normalize-backend "init-open" (backend))
 (declare-function my/open-eww-url "init-open" (url &optional reuse-selected))
 (declare-function my/open-read-backend "init-open" (kind &optional prompt default))
@@ -783,7 +784,7 @@ FORWARD together.  The popup button's right click opens BUFFER-MENU."
 (with-eval-after-load 'eww
   (define-key eww-mode-map (kbd "g") #'my/refresh-current-content)
   (define-key eww-mode-map (kbd "M-r") #'my/refresh-current-content)
-  (define-key eww-mode-map (kbd "M-w") #'delete-window)
+  (define-key eww-mode-map (kbd "M-w") #'my/close-view)
   (define-key eww-mode-map (kbd "R") #'eww-readable)
   (define-key eww-mode-map (kbd "X") #'my/eww-to-xwidget))
 ;;; init-base.el ends here
@@ -980,13 +981,13 @@ window, avoiding orphan browser buffers/windows."
    (my/browser-build-search-url search-term engine)))
 
 (with-eval-after-load 'xwidget
-  (define-key xwidget-webkit-mode-map (kbd "M-w") #'my/browser-close-current)
-  (define-key xwidget-webkit-edit-mode-map (kbd "M-w") #'my/browser-close-current)
+  (define-key xwidget-webkit-mode-map (kbd "M-w") #'my/close-view)
+  (define-key xwidget-webkit-edit-mode-map (kbd "M-w") #'my/close-view)
   (define-key xwidget-webkit-mode-map (kbd "W") #'my/xwidget-to-eww)
   (add-hook 'xwidget-webkit-mode-hook #'my/xwidget-setup-control-line))
 
 (with-eval-after-load 'portal-web
-  (define-key portal-web-mode-map (kbd "M-w") #'my/browser-close-current)
+  (define-key portal-web-mode-map (kbd "M-w") #'my/close-view)
   (define-key portal-web-mode-map (kbd "M-r") #'my/refresh-current-content))
 
 

@@ -3329,6 +3329,38 @@ activity always applies a complete per-client snapshot."
       (my/noema-resume)
     (my/noema-pause)))
 
+;;; Undisplayed pages (docs/design/window-lifecycle.md, Q3)
+
+(defvar my/noema-detached-page-limit 8
+  "How many Noema pages may stay alive while shown in no window.
+Closing a page's view keeps it, with its editing state, for switching
+back; beyond this many the least recently shown are ended.  Pages save
+themselves as they are edited, so ending one loses no text.  nil keeps
+every page.")
+
+(config-register 'my/noema-detached-page-limit
+  :type '(choice (const :tag "Keep all" nil) natnum)
+  :group 'noema
+  :doc "Undisplayed Noema pages kept alive before the oldest are ended.")
+
+(defun my/noema--detached-pages ()
+  "Return live Noema pages shown in no window, most recently used first.
+The shared app buffer is never included."
+  (let ((pages (my/noema--browser-buffers)))
+    (seq-filter (lambda (buffer)
+                  (and (memq buffer pages)
+                       (not (eq buffer my/noema--app-buffer))
+                       (not (get-buffer-window buffer t))))
+                (buffer-list))))
+
+(defun my/noema--trim-detached-pages ()
+  "End the undisplayed pages beyond `my/noema-detached-page-limit'."
+  (when (natnump my/noema-detached-page-limit)
+    (let ((kill-buffer-query-functions nil))
+      (dolist (buffer (nthcdr my/noema-detached-page-limit
+                              (my/noema--detached-pages)))
+        (kill-buffer buffer)))))
+
 (defun my/noema--update-activity (&rest _)
   "Coalesce host focus/window changes into per-client pause commands.
 No polling timer is installed: Emacs reports only shell-level activity facts,
@@ -3357,7 +3389,8 @@ and every renderer uses the same `runHostCommand' pause implementation."
                (if my/noema--ready
                    (let ((current (my/noema--activity-snapshot)))
                      (setq my/noema--last-activity-signature current)
-                     (my/noema--apply-activity-snapshot current))
+                     (my/noema--apply-activity-snapshot current)
+                     (my/noema--trim-detached-pages))
                  ;; A ready transition must retry even if focus did not change.
                  (setq my/noema--last-activity-signature :unknown))))))))
 

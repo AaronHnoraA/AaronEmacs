@@ -20,7 +20,7 @@
 (declare-function diff-hl-mode "diff-hl" (&optional arg))
 (declare-function vc-git-root "vc-git" (file))
 (declare-function my/project-current-root "init-project")
-(declare-function my/window-bury-current-buffer "init-windows" ())
+(declare-function my/close-view "init-windows" ())
 (declare-function my/open-entry-in-split "init-windows" (side open))
 (declare-function my/buffer-display-new-frame "init-windows"
                   (buffer &optional norecord))
@@ -1705,11 +1705,12 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
 
 
 (defun my/delete-frame-dwim ()
-  "Close the current frame when possible, otherwise bury the current buffer."
+  "Close the current frame when possible, otherwise close the current view.
+Either way the buffers stay alive (docs/design/window-lifecycle.md)."
   (interactive)
   (if (> (length (frame-list)) 1)
       (delete-frame)
-    (my/window-bury-current-buffer)))
+    (my/close-view)))
 
 (defvar my/warning-popup-minimum-level nil
   "Minimum warning severity that may auto-display the warnings buffer.

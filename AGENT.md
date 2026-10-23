@@ -290,9 +290,9 @@ This config already has maintenance and workflow entry points. Reuse them:
   `handle-delete-frame`).  This Emacs is expected to run for weeks and to be
   started, restarted and quit from Raycast.  The server answers before the
   initial frame exists, so anything a launcher asks for at startup must wait
-  for `window-setup-hook` (`my/background-start-hidden`).  A frame opened for
-  one resource owns it: closing the frame ends the resource, hiding keeps it
-  (`my/ghostel--delete-frame-terminal-h`).  A long-lived helper that would
+  for `window-setup-hook` (`my/background-start-hidden`).  Closing a view,
+  a window or a frame never ends a buffer; only ending actions do
+  (`docs/design/window-lifecycle.md`).  A long-lived helper that would
   survive a crashed Emacs must watch its owner's pid, as the Noema web host
   does through `NOEMA_HOST_OWNER_PID`; exit hooks alone do not run then.  yabai does not manage Emacs at all (`manage=off`
   for the application), so frames place and size themselves.
@@ -621,6 +621,11 @@ Noema Markdown panes:
 
 Browser and Portal:
 
+- Closing follows `docs/design/window-lifecycle.md`: `Cmd-W` (`my/close-view`)
+  only takes a buffer out of view, `H-q` ends it, and fallback never shows a
+  single-instance buffer that is on screen elsewhere.  Window rules ask
+  `my/buffer-single-instance-p`, never a mode or a package variable; a new
+  native-view or xwidget mode joins `my/single-instance-modes`.
 - `browse-url` defaults to a backend menu whose default choice is xwidget.
 - EWW is for text/reading.
 - EWW and `xwidget-webkit` route opens should create/show separate browser
@@ -680,6 +685,13 @@ retired notes (`topic-YYYY-MM.md`), written once and never authoritative.
 Never mix the two: a finding worth keeping moves into the structural doc it
 changes, and the record keeps the history.  A new document takes its slot in
 `docs/README.md` first; adding or moving one is a change to that map.
+
+Behaviour changes go through the owning `design/` document (the loop in
+`docs/README.md`, “Changing behaviour through the documents”): a bug is
+recorded there as a gap, the person settles the contracts, the code is
+changed to satisfy them with tests named after them, and the same commit
+closes the gap.  Do not implement behaviour the document does not describe;
+record the gap instead.
 
 - Daily workflow and keys: `docs/guide/daily-usage.md`.
 - Architecture and backend behavior: the owning `docs/design/` doc, or

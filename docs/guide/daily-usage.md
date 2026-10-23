@@ -160,7 +160,7 @@
 - `H-i` / `H-u` / `H-j` / `H-n` / `H-N`
   `show-imenu` / language server 菜单 / 调试菜单 / 最近测试 / output 菜单
 - `H-\`` / `H-q` / `H-Q` / `H-w`
-  `popper-toggle` / 关闭当前 buffer / 退出 Emacs / 关当前 frame；若只剩一个 frame，`H-w` 埋藏当前 buffer
+  `popper-toggle` / 结束当前 buffer（终端程序运行中会先确认；只读或 `*…*` buffer 只关视图）/ 退出 Emacs / 关当前 frame；若只剩一个 frame，`H-w` 只关当前视图
 - `H-0` / `H-1` / `H-2` / `H-3`
   关当前窗口 / 单窗口切换 / 上下分屏 / 左右分屏
 - `H-o` / `H-O` / `H-k` / `H-K`
@@ -255,7 +255,7 @@ Apple 集成先用 `my/noema-agenda-apple-enable` 启用相应类型，再用原
 
 Graph 搜索框支持全文词和
 `tag:` / `alias:` / `path:` / `title:` 过滤，并会提示 tag / alias / path 等候选。
-本地 graph xwidget buffer 里 `M-w` 会 kill graph buffer 并关掉 graph websocket。
+本地 graph xwidget buffer 里 `M-w` 只关视图；`C-c w d` 或 `H-q` 结束 graph buffer 并关掉 graph websocket。
 
 ### Noema 页面里的 Emacs 按键
 
@@ -926,8 +926,8 @@ Yazi 按 `Enter` 打开光标下的文本或目录时也使用它；PDF、图片
 - `C-c w s`
   交互选择目标后端；可选 `portal` / `xwidget` / `eww` / `system`
 - `C-c w d`
-  关闭当前浏览后端；在 Portal / `eww` / `xwidget-webkit` buffer 中也可以按 `M-w`，
-  会同时 kill browser buffer 并删除对应窗口
+  结束当前浏览后端：kill browser buffer 并删除对应窗口。Portal / `eww` / `xwidget-webkit`
+  buffer 里的 `M-w` 与其他 buffer 一样只关视图
 当前策略是手动分流：默认打开方式统一在 `lisp/init-open.el` 的
 `my/open-routes` 里维护，route DSL helper 来自 vendored `general.el` 的
 `general-route-*`。`browse-url` 默认走 Portal；
@@ -978,7 +978,8 @@ ibuffer、帮助页和其他用 `quit-window` 退出的临时页面，优先返�
 已经在其他窗口显示的 buffer 不作自动返回目标。临时创建且无返回页的窗口会关闭；
 最后一个窗口无可返回页时打开项目目录。如果弹窗有精确的来源页，仍由 Emacs 原生返回；
 自动补选遵守该 frame 的 buffer 过滤规则，不会把旧 xwidget 页当作普通候选。
-`SPC b z` 和最后一个 frame 上的 `H-w` 保留原本的埋藏动作，埋藏后也按此规则返回。
+`SPC b z` 和最后一个 frame 上的 `H-w` 只关当前视图（buffer 保留），之后也按此规则返回。
+关闭与回退的完整规则见 [window-lifecycle.md](../design/window-lifecycle.md)。
 `Cmd+Shift+W`（Emacs 的 `M-W`）仍从当前 Perspective 弹出 buffer 列表供选择；
 选中的是当前页时，杀掉后按同一规则收尾。`C-x k` 仍是原生 Perspective 选择器。
 测试、任务、构建和运行 profile 的输出按发起的 frame 命名为 `*test F1*` 等，
@@ -1576,7 +1577,7 @@ ETAF 只在第一次打开这个整页时加载，常驻 mode line 和 Dashboard
 
 ## 7. 有冲突时优先记住什么
 
-- `M-w` 关闭当前 buffer，行为与 `C-x k` 一致
+- `M-w`（`Cmd-W`）只关当前视图：buffer 保留（终端继续运行、页面保留状态），窗口回到上一页；结束 buffer 用 `H-q`
 - 关 frame 用 `H-w`
 - 普通 warning 现在只写入 `*Warnings*`，不再自动弹窗抢操作；需要时用 `SPC h w`
 - `C-c y` 现在是 snippet 前缀，不再直接展开

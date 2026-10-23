@@ -491,8 +491,8 @@ channel lifecycle 必须委托给 Remote 框架。若必须写 local/remote 条�
   交互选择当前页面的目标后端
 - `C-c w E` / `C-c w X` / `C-c w O`
   当前页面直达 `eww` / `xwidget-webkit` / macOS `open`
-- `C-c w d` / browser buffer `M-w`
-  kill 当前 `eww` / `xwidget-webkit` buffer 并删除对应窗口
+- `C-c w d`
+  kill 当前 `eww` / `xwidget-webkit` buffer 并删除对应窗口；browser buffer 的 `M-w` 只关视图
 - `C-c w w`
   统一 `browse-url`
 

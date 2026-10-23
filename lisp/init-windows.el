@@ -339,7 +339,7 @@ Relies on `winner-mode' (enabled below) to undo a prior delete."
  :keymaps 'global
  "C-x 1" #'my/toggle-delete-other-windows
  "C-x SPC" #'toggle-one-window
- "M-w" #'delete-window)
+ "M-w" #'my/close-view)
 
 (use-package winner
   :ensure nil
@@ -384,15 +384,40 @@ Relies on `winner-mode' (enabled below) to undo a prior delete."
        (seq-some (lambda (other) (not (eq other window)))
                  (get-buffer-window-list buffer nil t))))
 
-(defun my/window-skip-dashboard-and-xwidget-p (window buffer bury-or-kill)
-  "Skip dashboard, xwidget, and already visible BUFFER during fallback.
-BURY-OR-KILL is non-nil when `switch-to-prev-buffer' is replacing a
-buffer that is being buried, killed, or quit.  Keep these buffers
-available to explicit buffer-switching commands."
+(defcustom my/single-instance-modes
+  '(portal-terminal-mode portal-web-mode portal-excalidraw-mode
+    xwidget-webkit-mode)
+  "Major modes whose buffers can be shown in only one window at a time.
+A native view or an xwidget cannot be in two windows; showing it elsewhere
+moves it.  See docs/design/window-lifecycle.md (Q2, C8)."
+  :type '(repeat symbol)
+  :group 'convenience)
+
+(defvar-local my/buffer-single-instance nil
+  "Non-nil when this buffer can be shown in only one window at a time.
+For buffers whose major mode is not in `my/single-instance-modes'.")
+
+(defun my/buffer-single-instance-p (buffer)
+  "Return non-nil when BUFFER can be shown in only one window at a time.
+Every window rule asks this, never a mode or package variable."
   (and (buffer-live-p buffer)
-       (or (and (my/window--shown-in-other-window-p window buffer)
-                (boundp 'portal-view--target)
+       (or (buffer-local-value 'my/buffer-single-instance buffer)
+           ;; Every Portal native view, whatever its mode.
+           (and (boundp 'portal-view--target)
                 (buffer-local-value 'portal-view--target buffer))
+           (provided-mode-derived-p
+            (buffer-local-value 'major-mode buffer) my/single-instance-modes))))
+
+(defun my/window-skip-dashboard-and-xwidget-p (window buffer bury-or-kill)
+  "Return non-nil when fallback in WINDOW must not choose BUFFER.
+A single-instance buffer shown in another window is always skipped (C8).
+BURY-OR-KILL is non-nil when `switch-to-prev-buffer' is replacing a buffer
+that is being buried, killed, or quit; then anything already visible, the
+Dashboard and xwidget pages are skipped too (C3).  Explicit
+buffer-switching commands are not affected."
+  (and (buffer-live-p buffer)
+       (or (and (my/buffer-single-instance-p buffer)
+                (my/window--shown-in-other-window-p window buffer))
            (and bury-or-kill
                 (or (my/window--shown-in-other-window-p window buffer)
                     (my/window-dashboard-buffer-p buffer)
@@ -499,21 +524,37 @@ Dashboard instead."
     (bury-buffer)
     (my/window--repair-after-close window closing previous directory)))
 
-(defun my/kill-buffer-dwim ()
-  "Kill the current buffer, or if it's a special/read-only buffer, bury it."
+(defun my/close-view ()
+  "Stop showing the current buffer in this window and keep it alive.
+The close-view verb of docs/design/window-lifecycle.md: the buffer becomes
+undisplayed (a terminal keeps running, a page keeps its state) and the
+window falls back to its previous valid buffer, or closes when it is a
+spare window without one.  A popup returns exactly where it came from."
   (interactive)
-  (if (or buffer-read-only
-          (and (string-prefix-p "*" (buffer-name))
-               (not (buffer-file-name))))
-      (let* ((closing (current-buffer))
-             (restore (window-parameter nil 'quit-restore))
-             (previous (window-parameter nil 'quit-restore-prev)))
-        ;; Preserve the existing bury/quit choice.  Only repair fallback
-        ;; after burying, since quit-window is handled by its own advice.
-        (if (or (eq (nth 3 restore) closing)
-                (eq (nth 3 previous) closing))
-            (quit-window)
-          (my/window-bury-current-buffer)))
+  (let ((closing (current-buffer))
+        (restore (window-parameter nil 'quit-restore))
+        (previous (window-parameter nil 'quit-restore-prev)))
+    ;; Native quit owns exact popup restoration; its advice repairs the
+    ;; fallback.  Otherwise bury, which settles the fallback itself.
+    (if (or (eq (nth 3 restore) closing)
+            (eq (nth 3 previous) closing))
+        (quit-window)
+      (my/window-bury-current-buffer))))
+
+(defalias 'close-view #'my/close-view
+  "Stop showing the current buffer in this window and keep it alive.")
+
+(defun my/kill-buffer-dwim ()
+  "End the current buffer, or only close its view when it is special.
+A single-instance buffer (terminal, page) and a file buffer are ended;
+the terminal asks first while its program runs.  A read-only or `*…*'
+buffer is only taken out of view, as with `my/close-view'."
+  (interactive)
+  (if (and (not (my/buffer-single-instance-p (current-buffer)))
+           (or buffer-read-only
+               (and (string-prefix-p "*" (buffer-name))
+                    (not (buffer-file-name)))))
+      (my/close-view)
     (kill-current-buffer)))
 
 (defun my/kill-other-buffers ()

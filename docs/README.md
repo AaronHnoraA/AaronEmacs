@@ -88,7 +88,7 @@ channels.
 - [config-management.md](design/config-management.md) Unified `config` registry: one front door (`config-get`/`config-set`, `M-x config-board`) to view, edit, live-apply, and persist every registered setting.
 - [latex-preview.md](design/latex-preview.md) In-buffer math preview: supported delimiters, the shared macro source Emacs and Noema both read, the doctor, and the troubleshooting order.
 - [elegant-ui.md](design/elegant-ui.md) Aaron UI, the design tokens Emacs and Noema share, and where each side keeps its own styling.
-- [window-lifecycle.md](design/window-lifecycle.md) Windows, buffers and closing: what each close action does to each kind of buffer, what a window falls back to, and the open state-machine design.
+- [window-lifecycle.md](design/window-lifecycle.md) Windows, buffers and closing: the shown/undisplayed/ended state machine, close actions as verbs, single-instance buffers, and what a window falls back to.
 - [neomacs-compat.md](design/neomacs-compat.md) Running this configuration on Neomacs: the modifier-rename layer, fringe and startup-frame fixes, Elsa concurrency, and why the 0.0.18 migration was paused. Neomacs is not installed; the layer is inert on GNU Emacs.
 
 ## acceptance/ — what done means
