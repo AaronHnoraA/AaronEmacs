@@ -59,9 +59,11 @@ than failing.
 
 Todos, comments, side comments, and revisions are **exported by default**. Todos,
 side comments, and revisions form an annotation column in the margin. A side
-comment has a short orange mark at its source position and a small orange arrow
-in the gutter beside the margin note. Todos and revisions use matching short
-gutter arrows, with no leader line crossing body text. Long notes are divided
+comment has a short orange mark at its source position. When source and note
+share a page, a thin elbow line follows the gap below that source line, then
+the gutter, to an arrow beside the note. Todos and revisions use matching
+elbow lines; the line does not run diagonally across body text. A note moved
+to another page keeps its source mark without a cross-page line. Long notes are divided
 into page-sized pieces before `marginfix` places them in the margin, allowing
 them to continue on later pages without losing text. The `marginnotes` option on
 `noema-macros` reserves a 52 mm right margin only for documents with side
