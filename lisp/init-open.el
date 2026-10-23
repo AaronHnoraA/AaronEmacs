@@ -113,7 +113,7 @@ ALLOW-MISSING is non-nil, permit visiting a new file for editing."
 (defun my/open-keybinding-guide ()
   "Open the maintained keybinding guide as a read-only Markdown buffer."
   (interactive)
-  (my/open-client-document "docs/daily-usage.md" t))
+  (my/open-client-document "docs/guide/daily-usage.md" t))
 
 (defalias 'keybinding-guide #'my/open-keybinding-guide
   "Open the maintained Emacs keybinding guide.")

@@ -2,7 +2,7 @@
 
 本文是 Emacs 内数学公式预览的权威说明:支持哪些公式写法、宏从哪里来、出问题先看哪里。
 文档编译(latexmk/XeLaTeX → PDF Tools/SyncTeX)属于另一条链路,见
-[settings-cookbook.md](settings-cookbook.md) 第 3 节。
+[settings-cookbook.md](../guide/settings-cookbook.md) 第 3 节。
 
 ## 取向
 
@@ -121,4 +121,4 @@ TeX 兼容改写(目前 `multline → gathered`、`\displaylines`)的规则表�
 ## 本地 fork 说明
 
 `site-lisp/ratex.el/` 是 vendored 上游并带有本地改动,详见
-[maintenance.md](maintenance.md)。
+[maintenance.md](../ops/maintenance.md)。

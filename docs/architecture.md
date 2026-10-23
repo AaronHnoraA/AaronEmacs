@@ -35,10 +35,10 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 | 层 | 位置 | 内容 |
 | --- | --- | --- |
 | 0 基础 | `init-utils`、`init-base`、`init-open`、`patches/`、`init-macos`、`init-neomacs` | 工具函数、基础设置、打开路由、上游补丁、平台与构建兼容层（只有 `init-neomacs` 知道当前是哪个构建） |
-| 1 Remote 框架 | `lisp/remote/`（`init-remote` 入口） | `/fs:TARGET:/path` 身份、target/pipeline/backend/session、进程、通道、环境胶囊、workspace 资源。核心基础设施，见 [remote-framework.md](remote-framework.md) |
+| 1 Remote 框架 | `lisp/remote/`（`init-remote` 入口） | `/fs:TARGET:/path` 身份、target/pipeline/backend/session、进程、通道、环境胶囊、workspace 资源。核心基础设施，见 [remote-framework.md](design/remote-framework.md) |
 | 2 外壳 | `init-emacs-gateway`、`init-ui`、`init-activity*`、`init-tabbar`、`init-display-rules`、`init-tools`、`init-evil` | 外部网关、主题与 mode-line、活动指示、标签栏、窗口显示规则、leader 键（`general.el`） |
-| 3 开发 | `init-lsp*`、`init-format`、`telescope/`、`init-symbols`、`init-code-actions`、`lisp/git/`、`init-dev`、`init-debug*`、`init-test`、`init-task`、`init-project-run` | LSP 路由与工具（分层见 [lsp-workflow.org](lsp-workflow.org)）、诊断面板、Git、调试/测试/任务 |
-| 4 工作台 | `init-navigation*`、`init-dired`、`init-dirvish-keys`、`init-*-workbench`、`init-minibuffer`、`init-consult-project`、`init-windows`、`init-project*`、`init-workspaces`、`init-treemacs-bridge`、`init-session` | 导航、文件管理、补全、窗口、项目（Projectile + Perspective + Transient），见 [project-guide.md](project-guide.md) |
+| 3 开发 | `init-lsp*`、`init-format`、`telescope/`、`init-symbols`、`init-code-actions`、`lisp/git/`、`init-dev`、`init-debug*`、`init-test`、`init-task`、`init-project-run` | LSP 路由与工具（分层见 [lsp-workflow.md](design/lsp-workflow.md)）、诊断面板、Git、调试/测试/任务 |
+| 4 工作台 | `init-navigation*`、`init-dired`、`init-dirvish-keys`、`init-*-workbench`、`init-minibuffer`、`init-consult-project`、`init-windows`、`init-project*`、`init-workspaces`、`init-treemacs-bridge`、`init-session` | 导航、文件管理、补全、窗口、项目（Projectile + Perspective + Transient），见 [project-guide.md](guide/project-guide.md) |
 | 5 运维 | `init-maintenance`、`config-tools`、`init-performance`、`init-diagnostics-*`、`init-health`、`init-server`、`init-background` | 包锁/状态维护、配置注册表 UI、性能观测、健康检查、server 与后台应用（`bin/emacs-app`） |
 | 6 Noema 桥 | `lang/init-md`、`lisp/roam/` | Markdown → Noema 页面、xwidget 桥、知识搜索、roam 导航、Jupyter 桥、发布 |
 | 7 应用与输入 | `init-portal`、`init-text`、`init-shell`、`init-remote-connectboard`、`init-jupyter-board`、`init-search*`、`init-direnv`、编辑小件、`init-auctex`/`init-latex`、`init-browser`、`init-function-keys`、`init-hyper`、`init-mouse` | 终端（Portal/Ghostel）、搜索、浏览器、LaTeX、按键层 |
@@ -73,7 +73,8 @@ templates/            auto-insert 模板；templates/noema 链到 Noema 模板�
 bin/                  emacs-app（后台应用唯一入口）及辅助脚本
 tools/                raycast-emacs（唯一外部控制面）、macos-background 原生源码等
 test/                 ERT 测试（*-tests.el），按模块命名
-docs/                 运维文档，入口 docs/README.md
+docs/                 文档，入口 docs/README.md：guide/ 用法、design/ 现行机制、
+                      acceptance/ 验收、ops/ 运维、records/ 审计与历史（带日期，不更新）
 ```
 
 ### 横切机制
@@ -83,9 +84,9 @@ docs/                 运维文档，入口 docs/README.md
 - 身份与执行：Remote 框架（`remote-*` API）。本机是 target `local`，消费者不按
   `file-remote-p` 或 target ID 分支。
 - 配置值：`site-lisp/config` 注册表 + `etc/config-store.el`，见
-  [config-management.md](config-management.md)。
+  [config-management.md](design/config-management.md)。
 - 键位：`general.el`；leader 前缀在 `init-evil.el`，域内后缀在所属模块，见
-  [daily-usage.md](daily-usage.md)。
+  [daily-usage.md](guide/daily-usage.md)。
 - 运行时资源：timer/进程/overlay 的生命周期规则见 `AGENT.md` “Resource Lifecycle Rules”。
 - 观测：`my/performance-*`、`config-health`、Remote Doctor、LSP Doctor、
   `my/latex-preview-doctor`。
@@ -132,7 +133,7 @@ Noema 的 Elisp 由 `init-ai-ide` 把 `site-lisp/noema/lisp` 加入 `load-path`�
 | Noema 数据、搜索、引用 | Go kernel；Node/Emacs 只转发与显示 |
 | `.noema` 语义 | Noema `lisp/noema-research*.el` 与 kernel `noema/research` |
 
-更细的“该改哪里”见 [settings-cookbook.md](settings-cookbook.md)。
+更细的“该改哪里”见 [settings-cookbook.md](guide/settings-cookbook.md)。
 
 ## 命名
 

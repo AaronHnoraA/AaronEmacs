@@ -4,7 +4,7 @@
 ;; Both interactive commands and batch (make publish-*) entry points live here.
 ;;
 ;; The website itself is hand-written and lives in the publish repository; see
-;; `docs/publish-workflow.md'.  Nothing here renders it.  This module compiles
+;; `docs/guide/publish-workflow.md'.  Nothing here renders it.  This module compiles
 ;; the LaTeX CV into that repository and then ships the repository: git commit
 ;; and push, plus an optional rsync to the NAS that serves it.
 

@@ -6,7 +6,7 @@
 ;; tree, SPC selects, y/x/p copy, cut and paste, d trashes, r renames, and the
 ;; g, c, m, o, p and `,' prefixes mean what they mean there.  Where yazi and
 ;; Dired disagree, yazi wins; a Dired command that lost its key is listed in
-;; docs/daily-usage.md with where it went.
+;; docs/guide/daily-usage.md with where it went.
 ;;
 ;; All bindings live in `dirvish-mode-map', which shadows `dired-mode-map',
 ;; so a plain Dired without Dirvish keeps Emacs' own keys.

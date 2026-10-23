@@ -127,7 +127,7 @@ Remote 主配置不可读取时，添加会直接报错并回收写入的机器�
 | `e` | `remote-files-terminal` | 在这个文件夹开一个终端（在文件夹所在的机器上） |
 | `x` | `remote-files-disconnect` | 断开这个文件夹的 target |
 
-所以（Dirvish 里标记文件用 `SPC`，见 [daily-usage.md](daily-usage.md) 的 Dirvish 键位）：
+所以（Dirvish 里标记文件用 `SPC`，见 [daily-usage.md](../guide/daily-usage.md) 的 Dirvish 键位）：
 
 - **下载**：在 target 文件夹里标记文件 → `M` `c` → 弹出本机文件夹，走到要放的
   位置 → `C-c C-c`；

@@ -62,18 +62,18 @@ It is probably not the right fit if your priority is:
 Detailed operational documentation lives in [`docs/`](docs/). The documents themselves are written in Chinese; the README files stay in English.
 
 - Doc index: [docs/README.md](docs/README.md)
-- First setup and dependencies: [docs/quick-start.md](docs/quick-start.md)
-- Daily usage and keybindings: [docs/daily-usage.md](docs/daily-usage.md)
-- Project workflow: [docs/project-guide.md](docs/project-guide.md)
-- Programming, LSP, remote work, terminals, AI: [docs/dev-guide.md](docs/dev-guide.md)
-- Remote target, routing, and environment architecture: [docs/remote-framework.md](docs/remote-framework.md)
-- Temporary machines and file transfer from inside Dired/Dirvish (rsync): [docs/remote-files.md](docs/remote-files.md)
-- Configuration cookbook: [docs/settings-cookbook.md](docs/settings-cookbook.md)
-- Maintenance, locks, state recovery: [docs/maintenance.md](docs/maintenance.md)
-- Aaron UI and Noema visual system: [docs/elegant-ui.md](docs/elegant-ui.md)
-- Migration notes: [docs/migration.md](docs/migration.md)
-- Running on Neomacs instead of GNU Emacs: [docs/neomacs-compat.md](docs/neomacs-compat.md)
-- Deep-dive workflow docs: [docs/lsp-workflow.org](docs/lsp-workflow.org), [docs/jupyter-workflow.org](docs/jupyter-workflow.org), [docs/research-notes-workflow.md](docs/research-notes-workflow.md)
+- First setup and dependencies: [docs/guide/quick-start.md](docs/guide/quick-start.md)
+- Daily usage and keybindings: [docs/guide/daily-usage.md](docs/guide/daily-usage.md)
+- Project workflow: [docs/guide/project-guide.md](docs/guide/project-guide.md)
+- Programming, LSP, remote work, terminals, AI: [docs/guide/dev-guide.md](docs/guide/dev-guide.md)
+- Remote target, routing, and environment architecture: [docs/design/remote-framework.md](docs/design/remote-framework.md)
+- Temporary machines and file transfer from inside Dired/Dirvish (rsync): [docs/design/remote-files.md](docs/design/remote-files.md)
+- Configuration cookbook: [docs/guide/settings-cookbook.md](docs/guide/settings-cookbook.md)
+- Maintenance, locks, state recovery: [docs/ops/maintenance.md](docs/ops/maintenance.md)
+- Aaron UI and Noema visual system: [docs/design/elegant-ui.md](docs/design/elegant-ui.md)
+- Migration notes: [docs/ops/migration.md](docs/ops/migration.md)
+- Running on Neomacs instead of GNU Emacs: [docs/design/neomacs-compat.md](docs/design/neomacs-compat.md)
+- Deep-dive workflow docs: [docs/design/lsp-workflow.md](docs/design/lsp-workflow.md), [docs/design/jupyter-workflow.md](docs/design/jupyter-workflow.md), [docs/guide/research-notes-workflow.md](docs/guide/research-notes-workflow.md)
 
 ## Repository Layout
 
@@ -97,7 +97,7 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
 ## Environment Assumptions
 
 - The primary target is macOS GUI Emacs, currently maintained around Emacs 31.
-- [Neomacs](docs/neomacs-compat.md) was evaluated as an alternative runtime and the migration is
+- [Neomacs](docs/design/neomacs-compat.md) was evaluated as an alternative runtime and the migration is
   paused at 0.0.18: xwidgets render at half size on HiDPI displays, which no configuration change can
   fix. `lisp/init-neomacs.el` stays as the single build boundary - it renames Neomacs' physical
   modifiers back to this configuration's Option-as-Hyper / Command-as-Meta layout and repairs the

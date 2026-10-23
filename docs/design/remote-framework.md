@@ -460,7 +460,7 @@ TRAMP。这类"本机永远造不出该 target 的 server"被 backend 归类为
 `incompatible` 而不是可重试失败，否则每 30 秒 cooldown 过后都会重开一次
 bootstrap 连接并重试一次注定失败的构建，远端每个操作都要付这份钱。修复方式是
 把 checkout 放回 `package-lock.el` 记录的 `:last-release`（见
-[maintenance.md](maintenance.md) 的排查条目），恢复后 release 二进制对每种
+[maintenance.md](../ops/maintenance.md) 的排查条目），恢复后 release 二进制对每种
 架构都能直接下载部署。
 
 当前实现持续对照的上游设计来源如下：

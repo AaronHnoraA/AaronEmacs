@@ -85,7 +85,7 @@ make audit-ui-tokens
 ### 第三方兼容补丁
 
 针对 Emacs/ELPA 版本错配的临时修复统一放在
-[`lisp/patches/init-patches.el`](../lisp/patches/init-patches.el)，并由
+[`lisp/patches/init-patches.el`](../../lisp/patches/init-patches.el)，并由
 `init-modules.el` 的早期加载阶段统一启用。不要把这类 workaround 散落到业务模块
 或 `init.el`。包更新后重新运行启动检查；如果上游已经修复，应删除对应补丁和注释，
 而不是继续保留无效兼容代码。
@@ -128,7 +128,7 @@ make audit-ui-tokens
 
 当前启动链里有一个重要项：
 
-- [site-lisp/general.el/general.el](../site-lisp/general.el/general.el)
+- [site-lisp/general.el/general.el](../../site-lisp/general.el/general.el)
 
 `general.el` 是按键绑定 DSL，主要服务 `lisp/init-funcs.el` 里的 `my/evil-define-key`。它让 leader 绑定可以统一处理 Evil state、符号 keymap、真实 keymap object 和批量绑定。
 
@@ -142,7 +142,7 @@ make audit-ui-tokens
 
 #### site-lisp/ratex.el —— 带本地改动的 fork
 
-数学公式预览引擎（见 [latex-preview.md](latex-preview.md)）。上游是
+数学公式预览引擎（见 [latex-preview.md](../design/latex-preview.md)）。上游是
 `gongshangzheng/ratex.el`，本仓库在其上有实质改动，升级时必须逐条 rebase，
 不能直接覆盖：
 
@@ -232,7 +232,7 @@ make bootstrap-health
 
 文件：
 
-- [lisp/init-compile.el](../lisp/init-compile.el)
+- [lisp/init-compile.el](../../lisp/init-compile.el)
 
 常用入口：
 
@@ -283,7 +283,7 @@ leader 入口：
 默认策略：
 
 - package 安装时允许 native compile
-- native compile cache 统一放到 [var/eln-cache](../var/eln-cache)
+- native compile cache 统一放到 [var/eln-cache](../../var/eln-cache)
 - 测试里用 `cl-letf` 替换 C 原语会让 libgccjit 现编一个 trampoline，它要链接 gcc
   版本目录下的 `libemutls_w`。Emacs.app 在构建时把该目录写进自己的
   `LSEnvironment`，gcc 升级后旧路径随之失效，表现为启动或测试报
@@ -313,8 +313,8 @@ leader 入口：
 
 文件：
 
-- [lisp/init-performance.el](../lisp/init-performance.el)
-- [site-lisp/aaron-ui/aaron-ui-performance.el](../site-lisp/aaron-ui/aaron-ui-performance.el)
+- [lisp/init-performance.el](../../lisp/init-performance.el)
+- [site-lisp/aaron-ui/aaron-ui-performance.el](../../site-lisp/aaron-ui/aaron-ui-performance.el)
 
 常用入口：
 
@@ -400,7 +400,7 @@ Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` �
   Copilot、Company、Flymake 默认等待更明确的输入停顿后再启动。
 - diagnostics mode line 使用缓存，只在 buffer 变化或 Flymake 发布新诊断后重新统计。
 
-记录保存在 [var/performance/](../var/performance/)：
+记录保存在 [var/performance/](../../var/performance)：
 
 - `s` 会把当前采样追加到当天的 `performance-YYYYMMDD.tsv`。
 - `R` 会切换录制模式，录制开启后每次刷新都会追加一条。
@@ -420,7 +420,7 @@ Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` �
 
 ## 4. 状态目录
 
-集中在 [var/](../var/)：
+集中在 [var/](../../var)：
 
 - backup
 - auto-save
@@ -514,40 +514,40 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
 
 删：
 
-- [var/transient](../var/transient)
+- [var/transient](../../var/transient)
 
 ### 清 projectile 历史
 
 删：
 
-- [var/projectile](../var/projectile)
+- [var/projectile](../../var/projectile)
 
 ### 清 dirvish / treemacs 状态
 
 删：
 
-- [var/dirvish](../var/dirvish)
-- [var/treemacs](../var/treemacs)
+- [var/dirvish](../../var/dirvish)
+- [var/treemacs](../../var/treemacs)
 
 ### 清 backup / auto-save
 
 删：
 
-- [var/backup](../var/backup)
-- [var/auto-save](../var/auto-save)
+- [var/backup](../../var/backup)
+- [var/auto-save](../../var/auto-save)
 
 ### 清 TRAMP 状态
 
 删：
 
-- [var/tramp](../var/tramp)
+- [var/tramp](../../var/tramp)
 
 ### 临时机器
 
 [var/remote](../var/remote) 保存手动添加的临时机器：`machines.json`（含明文密码，
 权限 `0600`）、由它生成的 `machines.authinfo` 和 `askpass.sh`。不要手改 `machines.authinfo`，它在每次保存时重写；增删改走
 `M-x remote-machines`。整个目录删掉等于忘记全部临时机器。备份 `var/` 时注意
-这里有凭据。见 [remote-files.md](remote-files.md)。
+这里有凭据。见 [remote-files.md](../design/remote-files.md)。
 
 ## 5. 升级 package 的基本原则
 
@@ -558,23 +558,23 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
 
 ## 6. 当前需要记住的结构边界
 
-- [lisp/init-base.el](../lisp/init-base.el)
+- [lisp/init-base.el](../../lisp/init-base.el)
   基础行为、字体、系统交互、状态目录
-- [lisp/init-ui.el](../lisp/init-ui.el)
+- [lisp/init-ui.el](../../lisp/init-ui.el)
   主题、dashboard、help、window behavior
-- [lisp/init-minibuffer.el](../lisp/init-minibuffer.el)
+- [lisp/init-minibuffer.el](../../lisp/init-minibuffer.el)
   vertico/orderless/consult/embark
-- [lisp/init-search.el](../lisp/init-search.el)
+- [lisp/init-search.el](../../lisp/init-search.el)
   ivy/counsel/swiper
-- [lisp/telescope/](../lisp/telescope/)
+- [lisp/telescope/](../../lisp/telescope)
   `telescope` 统一入口，以及 diagnostics picker 这类 Telescope 风格的选择器
-- [lisp/init-lsp.el](../lisp/init-lsp.el)
+- [lisp/init-lsp.el](../../lisp/init-lsp.el)
   company/eglot/lsp-mode/flymake/dape
-- [lisp/init-lsp-tools.el](../lisp/init-lsp-tools.el)
+- [lisp/init-lsp-tools.el](../../lisp/init-lsp-tools.el)
   language server hub / doctor / dispatch / runtime knobs
-- [lisp/init-org-tools.el](../lisp/init-org-tools.el)
+- [lisp/init-org-tools.el](../../lisp/init-org-tools.el)
   Org 编辑小工具（Org 主体沿用内置默认）
-- [lisp/init-shell.el](../lisp/init-shell.el)
+- [lisp/init-shell.el](../../lisp/init-shell.el)
   shell/eshell/portal/ssh
 
 ## 7. 常见故障排查
@@ -635,7 +635,7 @@ emacs --batch -Q --init-directory="$PWD" -l ./early-init.el \
 
 1. `xelatex`
 2. `dvisvgm`
-3. [tools/org-xdvisvgm-hires](../tools/org-xdvisvgm-hires)
+3. [tools/org-xdvisvgm-hires](../../tools/org-xdvisvgm-hires)
 
 ### `my/portal-ssh` 没读到主机
 
@@ -739,6 +739,6 @@ pending 请求,就会自动 `stop()`;下次任何请求经 `ensureReady()` 自�
 1. 更新依赖
 2. 跑一次 batch 启动检查
 3. 清理不用的键位和旧包
-4. 同步更新 [docs/](.)
+4. 同步更新 [docs/](..)
 
-如果你继续大改配置，记得同时更新 [docs/README.md](README.md) 里的索引。
+如果你继续大改配置，记得同时更新 [docs/README.md](../README.md) 里的索引。

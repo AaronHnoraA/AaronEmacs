@@ -241,7 +241,7 @@ Noema 任务使用 `@@todo(state) [text] {key: value}`，例如
 原生 `c` 和 Web New todo 共用 Task / Deadline / Appointment 模板；`C-u c`
 可改目标 Markdown 文件。保存失败保留输入，原生再按 `c` 继续修改。
 `my/noema-agenda-capture-templates` 可配置字段、默认值和按日期命名的文件，
-修改后重启 Noema host；配置示例见 [Agenda 文档](agenda.md#shared-capture-templates)。
+修改后重启 Noema host；配置示例见 [Agenda 文档](../design/agenda.md#shared-capture-templates)。
 项目明确进入后才扫描；切到无项目关联的 Perspective，或使用项目菜单 `l` /
 `M-x my/project-leave`，释放项目监听和缓存，知识库继续常驻。
 原生 `I/O` 开始/停止计时，`v k` 查看报表和待回写记录，`R/K` 处理待回写冲突。
@@ -250,7 +250,7 @@ Apple 集成先用 `my/noema-agenda-apple-enable` 启用相应类型，再用原
 `v a` / Web Global attention 查看全局关注，刷新不会激活未进入的项目；
 `RET` 才进入源项目。个人 Apple 数据和跨设备同步尚未完成实机验证。
 完整语法和 view-model 见
-[`agenda.md`](agenda.md)。
+[`agenda.md`](../design/agenda.md)。
 
 Graph 搜索框支持全文词和
 `tag:` / `alias:` / `path:` / `title:` 过滤，并会提示 tag / alias / path 等候选。
@@ -645,7 +645,7 @@ Remote 面板和路由、连接历史页按 `q` 返回上一页；历史页退�
 同步文件夹，`=` 比较。菜单中的 `o` 可以更换对面机器；在弹出的 Dirvish 里也能
 用 `C-c C-o` 从默认的 local 切到其他机器，再选文件或文件夹。
 `C-c C-c` 确认、`C-c C-k` 取消。任务在皮卡丘的 `*Activity*` 里。完整说明见
-[remote-files.md](remote-files.md)。
+[remote-files.md](../design/remote-files.md)。
 
 ### 关闭 Remote target
 
@@ -784,7 +784,7 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC m d`（TeX/LaTeX buffer 内）
   `my/latex-preview-doctor`：公式预览体检——后端是否存活、在途请求、宏目录与
   宏条数、最近一次错误、光标处检测到的公式。预览不出来或卡顿先看这个，
-  见 [latex-preview.md](latex-preview.md)
+  见 [latex-preview.md](../design/latex-preview.md)
 - `SPC m p`（TeX/LaTeX buffer 内）
   `ratex-refresh-previews`
 - `SPC c j`
@@ -868,7 +868,7 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
   命名 `portal`
 - `SPC o f`
   文件传输菜单（rsync 上传/下载/同步）；不在 Dired 里时先问 target 并打开它的
-  文件夹。Dirvish 里用 `M`。详见 [remote-files.md](remote-files.md)
+  文件夹。Dirvish 里用 `M`。详见 [remote-files.md](../design/remote-files.md)
 - `SPC o M`
   临时机器列表：手动输入地址和密码/密钥、记在 `var/` 里的 target
 - `SPC o S`
@@ -1246,7 +1246,7 @@ GUI frame 的两侧 fringe 分工如下：
 切换只改变当前 Dirvish 会话的布局。
 
 Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger 那一套），
-定义在 [lisp/init-dirvish-keys.el](../lisp/init-dirvish-keys.el)。不经 Dirvish 的
+定义在 [lisp/init-dirvish-keys.el](../../lisp/init-dirvish-keys.el)。不经 Dirvish 的
 纯 Dired 仍是 Emacs 原生键位。
 
 | 键 | 作用 |
@@ -1288,7 +1288,7 @@ Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger �
 | `S-TAB` | 文件信息菜单 |
 | `t`，`1`–`9`，`-` / `=`，`_` / `+` | 新标签页、切到第 N 个、上一个 / 下一个、与左 / 右交换 |
 | `w` | 任务管理（皮卡丘的 `*Activity*`） |
-| `M` | 光标所在目录的文件传输菜单（rsync 上传 / 下载 / 同步），见 [remote-files.md](remote-files.md) |
+| `M` | 光标所在目录的文件传输菜单（rsync 上传 / 下载 / 同步），见 [remote-files.md](../design/remote-files.md) |
 | `?` | 按键提示：在下方弹出这张表，`q` 关闭 |
 | `~` | Dirvish 总菜单 |
 | `q` | 退出 |
@@ -1462,7 +1462,7 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 28×20 XPM 像素�
 **鼠标左键点它打开 `M-x activity-board`。** 终端(无图形界面)里自动降级成颜文字
 `ᕕ( ᴗ )ᕗ` / `ᕕ( ᐛ )ᗴ`,不会变成空白。
 
-机理只有一条链路,在 [lisp/init-activity.el](../lisp/init-activity.el):
+机理只有一条链路,在 [lisp/init-activity.el](../../lisp/init-activity.el):
 
 1. **枚举的根是 `(process-list)`** —— Emacs 自己的异步子进程注册表,也就是
    `M-x list-processes` 看到的那张表。以这个为根是为了**不用维护**:以后接任何新的
@@ -1495,7 +1495,7 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 28×20 XPM 像素�
    普通进程与 Noema Core task 的变化最多等一次 2 秒轮询。
 
 **Noema 也接入了同一计数**,适配器在
-[lisp/roam/init-activity-noema.el](../lisp/roam/init-activity-noema.el):
+[lisp/roam/init-activity-noema.el](../../lisp/roam/init-activity-noema.el):
 
 - LaTeX 导出读取 Noema Core task pool,从排队、转换、agent 润色到编译 PDF 都属于
   一个任务。完成、失败或取消后移出计数。按 `x` 走 Core 的取消接口,`RET` 打开源笔记。
@@ -1971,4 +1971,4 @@ Yasnippet。`jcode` / `jmd` 在下方新建 code / Markdown cell，ID 由 Noema 
 token/密码从 `auth-source` 读取，不写进仓库。配好之后 kernel 选择器里会多出
 `server:<id>:<kernelspec>` 和已经在跑的 `server:<id>:kernel:<id>`。
 服务器属于某个 Remote target 时，Emacs 会先开通道再把本地 URL 交给 Noema。
-详见 `docs/jupyter-workflow.org`。
+详见 `docs/design/jupyter-workflow.md`。

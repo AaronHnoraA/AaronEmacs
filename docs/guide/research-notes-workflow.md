@@ -237,7 +237,7 @@ org <-> jupytext <-> ipynb
 - 普通 Markdown 笔记里的 `@@cell(language, session)` 块由 Noema 自己的 Jupyter manager 执行；
   源码和输出保存在笔记旁 `.cell/` 的标准 ipynb sidecar 中，并在 Emacs 的源码投影里编辑。
   Emacs 的 notebook controls 只是 Noema API 的 UI client，不连接 kernel ZMQ
-  （见 [jupyter-workflow.org](jupyter-workflow.org)）
+  （见 [jupyter-workflow.md](../design/jupyter-workflow.md)）
 - `.noema` work 块由 ACP agent 执行，输出写回 work outputs；不经过 Jupyter。
 
 所以你的选择不应该是“二选一”，而应该是：
@@ -284,7 +284,7 @@ Noema 的 Markdown vault 现在具备 MediaWiki 级别的 wiki 维护能力，�
 
 | 功能 | 入口 | 说明 |
 |------|------|------|
-| Wanted pages | `H-o !w` | 被 `[[..]]` / `roam://` 链接但尚不存在的笔记；点击行直接进入新建流程 |
+| Wanted pages | `H-o !w` | 被 `[[../..]]` / `roam://` 链接但尚不存在的笔记；点击行直接进入新建流程 |
 | Orphaned pages | `H-o !o` | 没有任何入链的笔记（自动排除日记） |
 | Dead-end pages | `H-o !d` | 没有任何出链的笔记 |
 | Uncategorized | `H-o !u` | 没有标签的笔记 |

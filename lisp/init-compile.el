@@ -560,7 +560,7 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
   "Open the maintenance documentation for compile and cleanup workflows."
   (interactive)
   (my/open-client-document
-   (expand-file-name "docs/maintenance.md" my/compile-config-root)))
+   (expand-file-name "docs/ops/maintenance.md" my/compile-config-root)))
 
 (defun my/compile-board--insert-button (label action help)
   "Insert a text button with LABEL, ACTION, and HELP."

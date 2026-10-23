@@ -7,7 +7,7 @@ Org Agenda supplies presentation primitives without intermediate Org sources.
 
 For the full DSL grammar (canonical keys/aliases, date/repeater/duration
 syntax, diagnostics) and view-model shapes, see
-[`site-lisp/noema/docs/agenda.md`](../site-lisp/noema/docs/agenda.md).
+[`site-lisp/noema/docs/agenda.md`](../../site-lisp/noema/docs/agenda.md).
 This page is the config-level summary.
 
 ## Syntax

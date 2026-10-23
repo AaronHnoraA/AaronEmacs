@@ -26,7 +26,7 @@ service、socket 或 port 的新设计，即使第一版只在本机使用，也
 - 框架 API 不够时，先补通用 `remote-*` 契约及 native/remote 实现，不在语言或
   package 模块里补一段一次性的远程代码；
 - local、remote 和断线/取消/恢复测试共同决定能力是否完成，验收见
-  [remote-parity.md](remote-parity.md)。
+  [remote-parity.md](../acceptance/remote-parity.md)。
 
 ## 1. 补全栈
 
@@ -73,7 +73,7 @@ LSP 对路径和进程身份最敏感，因此比普通 consumer 更严格：
   有 local/remote root 与 URI 测试；宣称可重连前，还要覆盖 watcher/helper/channel
   的故障恢复。
 
-完整维护契约见 [lsp-workflow.org](lsp-workflow.org)。现有语言模块中残留的
+完整维护契约见 [lsp-workflow.md](../design/lsp-workflow.md)。现有语言模块中残留的
 local/remote 特判属于待迁移债务，不是新增接入可复制的模式。
 
 ### 默认组件
@@ -164,7 +164,7 @@ Doctor 更适合快速排查：
 - 本地 server executable 是否存在
 - 当前 buffer 命中了哪条路由
 
-详细模型看 [lsp-workflow.org](lsp-workflow.org)。
+详细模型看 [lsp-workflow.md](../design/lsp-workflow.md)。
 
 ### Lean (lsp-mode + xwidget infoview)
 
@@ -407,7 +407,7 @@ Dape 原生 `dape-restart` 重启。
 
 这套配置把数据库客户端接到了 `clutch`，但保持懒加载：
 
-- 包声明在 [lisp/init-clutch.el](../lisp/init-clutch.el)
+- 包声明在 [lisp/init-clutch.el](../../lisp/init-clutch.el)
 - 第一次打开控制台时，才会安装/加载 `clutch`
 - 连接配置单独放在本地 `etc/clutch-config.el`
 
@@ -465,7 +465,7 @@ remote process adapter 启动 portal，并把 terminal 生命周期登记给 wor
 `remote-executable-find`。没有 file-name 参数的网络操作使用
 `remote-make-network-process`、`remote-open-network-stream` 与
 `remote-port-forward`。完整对象模型、能力矩阵、配置 schema、当前缺口与接入清单
-见 [remote-framework.md](remote-framework.md)。
+见 [remote-framework.md](../design/remote-framework.md)。
 
 开发新的 project/LSP/search/SCM/debug/task 集成时，所属模块可以保留业务策略，
 但 path projection、process placement、environment、session、watch、service 和
@@ -753,7 +753,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   `noema-agent-acp-busy-p`（含 shell-maker 的交互回答）时拒绝停止。
 - 放置：进程目录由 `noema-agent-acp-process-directory-function` 决定，本配置设为
   `my/agent-shell-process-directory`，与裸 `agent-shell` 的 `agent-shell-cwd` advice
-  是同一函数；远端 agent 的契约见 `docs/remote-framework.md` 第 7 节。
+  是同一函数；远端 agent 的契约见 `docs/design/remote-framework.md` 第 7 节。
 - 并行：RunSpec 冻结仍经 Magent 全局队列逐个进行，Run 派发后立即释放队列票据；
   同时执行的 Run 数由 `noema-agent-worker-max-concurrent-runs` 限制，超出的按顺序
   在 `noema-agent-worker--slot-waiting` 等待。同一文件的并发编辑由 kernel 权限策略
@@ -840,7 +840,7 @@ gptel、Magent、Claude/Codex 兼容源码仍在 `site-lisp/noema/upstream/`。
 6. *Messages* 出现 `Error processing message ...` 时，`M-x my/language-server-message-errors`
    （language server 菜单 `x`）给出对应的调用栈；lsp-mode 本身只打印错误对象
 
-更详细的维护和排查见 [lsp-workflow.org](lsp-workflow.org) 和 [maintenance.md](maintenance.md)。
+更详细的维护和排查见 [lsp-workflow.md](../design/lsp-workflow.md) 和 [maintenance.md](../ops/maintenance.md)。
 
 Citre 的 definition/reference fallback 也复用 `lsp-mode` 的 `xref-lsp`
 backend，然后才尝试 tags/global；它内置的 Eglot adapter 不在本配置的

@@ -513,7 +513,7 @@ texlab is preferred; digestif is the fallback."
 ;; and TeX compatibility rules; `etc/katex-macros' links there.  Noema parses
 ;; those files for KaTeX, and RaTeX is a KaTeX-compatible engine, so feeding
 ;; both from the same files is what makes the preview in a buffer agree with
-;; the rendered note.  See `docs/latex-preview.md'.
+;; the rendered note.  See `docs/design/latex-preview.md'.
 
 (defvar my/latex-katex-macros-directory
   (expand-file-name "etc/katex-macros" user-emacs-directory)

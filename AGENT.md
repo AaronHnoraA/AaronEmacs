@@ -10,25 +10,25 @@ reconstructing the system from scattered Elisp:
 - `docs/README.md` is the documentation map, and `docs/architecture.md` the
   structure map: load order, layers, directory ownership and the Emacs ↔ Noema
   boundary.
-- `docs/settings-cookbook.md` answers "where should this change live?"
-- `docs/maintenance.md` covers package locks, vendored Elisp, runtime state,
+- `docs/guide/settings-cookbook.md` answers "where should this change live?"
+- `docs/ops/maintenance.md` covers package locks, vendored Elisp, runtime state,
   compile helpers, bootstrap, and recovery.
-- `docs/dev-guide.md` covers completion, LSP, projects, TRAMP, terminals,
+- `docs/guide/dev-guide.md` covers completion, LSP, projects, TRAMP, terminals,
   browsers, Portal, and AI integrations.
-- `docs/remote-framework.md` is authoritative for logical `/fs` paths,
+- `docs/design/remote-framework.md` is authoritative for logical `/fs` paths,
   target/pipeline/backend/session routing, routed processes and channels, and
   environment/PATH capsules.
-- `docs/remote-files.md` covers temporary machines and the rsync file
+- `docs/design/remote-files.md` covers temporary machines and the rsync file
   manager built on that framework.
-- `docs/remote-parity.md` defines what “VS Code Remote-level” completion means;
+- `docs/acceptance/remote-parity.md` defines what “VS Code Remote-level” completion means;
   a registered capability without local, remote, and resilience tests is not
   complete.
-- `docs/lsp-workflow.org` covers the lsp-mode route model, Hub, Doctor, and how
+- `docs/design/lsp-workflow.md` covers the lsp-mode route model, Hub, Doctor, and how
   to register target-aware language servers.
-- `docs/jupyter-workflow.org` covers kernel sources (kernelspecs,
+- `docs/design/jupyter-workflow.md` covers kernel sources (kernelspecs,
   `attach:` connection files, remote Jupyter servers), Remote routing, and the
   Jupyter Board.
-- `docs/project-guide.md` and `docs/research-notes-workflow.md` cover their
+- `docs/guide/project-guide.md` and `docs/guide/research-notes-workflow.md` cover their
   respective domains.
 
 If code and docs disagree, inspect the current code, make the minimal correct
@@ -105,7 +105,7 @@ optional feature used only by SSH buffers.  Any design involving file or
 workspace identity, project roots, processes, executable/tool placement,
 environment, file watching, services, terminals, sockets, streams, or port
 forwarding — including a design that is likely to need remote support later —
-must start from the contracts in `docs/remote-framework.md`.
+must start from the contracts in `docs/design/remote-framework.md`.
 
 Keep these rules:
 
@@ -176,7 +176,7 @@ Keep these rules:
   otherwise a remote current buffer sends the question to the target, into a
   connection that may still be opening.  An automatic start (LSP and the like)
   never asks a minibuffer question; only an explicit command may.
-- Failure handling follows the matrix in `docs/remote-framework.md`.  A
+- Failure handling follows the matrix in `docs/design/remote-framework.md`.  A
   connection attempt is synchronous, so nothing may wait on a link that is
   known to be down: one framework connection is one bounded attempt, an
   unreachable link is held for every capability and backend that shares it,
@@ -206,7 +206,7 @@ Keep these rules:
   one that does not (sshfs/macFUSE mounts were removed for this reason).
 - A feature is not complete merely because the local path works or a capability
   symbol exists.  Apply the local/remote/resilience criteria in
-  `docs/remote-parity.md`, and add parity tests for every new shared contract.
+  `docs/acceptance/remote-parity.md`, and add parity tests for every new shared contract.
 
 ## Runtime Builds (GNU Emacs and Neomacs)
 
@@ -230,7 +230,7 @@ rules below when touching the boundary so the work stays reusable.
   `num-processors` needs a cap that is automatic on interpreted builds and
   inert on natively compiled ones; `my/elisp-elsa-worker-limit` is the pattern.
 - Changes must stay a no-op on GNU Emacs.  Verify both builds before claiming
-  a fix, and record new differences in `docs/neomacs-compat.md`.
+  a fix, and record new differences in `docs/design/neomacs-compat.md`.
 
 ## Do Not Reinvent Existing Surfaces
 
@@ -254,9 +254,9 @@ This config already has maintenance and workflow entry points. Reuse them:
   claimed as tasks by `my/activity-board` (queue detail in
   `remote-transfer-list`).  `remote-machines` holds hand-entered targets.  Do
   not add another uploader, sync command, host list or progress indicator.  See
-  `docs/remote-files.md`.
+  `docs/design/remote-files.md`.
 - Compile/maintenance: `my/compile-board`, `config-compile-menu`, `make`
-  targets documented in `docs/maintenance.md`.
+  targets documented in `docs/ops/maintenance.md`.
 - Performance diagnostics: `my/performance-watch`,
   `my/performance-report-string`, `my/performance-snapshot`,
   `my/performance-hook-snapshot`, and `my/performance-org-buffer-snapshot`.
@@ -337,7 +337,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   `~/.config/noema/katex-macros.tex` (managed in Noema's formula palette, also
   read by RaTeX) and the note's `#+begin macros` block.  They reuse the same
   parser; do not add another store for personal macros.  See
-  `docs/latex-preview.md`.
+  `docs/design/latex-preview.md`.
 - Agent Skills: the Noema capability resolver and its manager
   (`noema-skill-manager`).  Global Skills live flat in the vault library
   `my/noema-skills-directory` (`NOEMA_GLOBAL_SKILLS`), not in `etc/`;
@@ -353,7 +353,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   should be user-tunable: register it, put the value in `etc/config-store.el`
   (or a registered `etc/` file), and **remove any scattered `setq` call** — that
   is variable pollution.  Do NOT encode values in Lisp code if they are tracked
-  here.  See `docs/config-management.md`.
+  here.  See `docs/design/config-management.md`.
 
 Do not add a repo-wide "unified tool" just to make unrelated domains look
 consistent. Prefer the existing pattern: keep core behavior in the owning
@@ -387,7 +387,7 @@ dependency, not an optional experiment.
   `lisp/init-evil.el` for shared prefixes, or the owning module for a domain
   suffix.  Do not bind a suffix already owned by another module: load order
   silently replaces the earlier binding.  Verify the resolved key after full
-  startup and update `docs/daily-usage.md` with the same command.
+  startup and update `docs/guide/daily-usage.md` with the same command.
 - For localleader bindings, use the existing localleader helpers.
 - For global non-leader bindings, use `general-define-key`.
 - For concrete mode keymap objects that only exist after a package loads, bind
@@ -395,14 +395,14 @@ dependency, not an optional experiment.
 - Dirvish single keys mirror `~/.config/yazi/keymap.toml` and have one
   source, the table in `lisp/init-dirvish-keys.el`.  Add or move a Dirvish key
   there, not in `init-windows.el`, and keep `my/dirvish-key-hints` (the `?`
-  sheet) and the table in `docs/daily-usage.md` in step.
+  sheet) and the table in `docs/guide/daily-usage.md` in step.
 - Domain-neutral route-table helpers live in vendored `general.el` as
   `general-route-*`; concrete policy still belongs in the owning init module
   such as `lisp/init-open.el`.
 
 When changing user-facing shortcuts, update the relevant docs, usually
-`docs/daily-usage.md`, `README.md`, and sometimes `docs/dev-guide.md` or
-`docs/settings-cookbook.md`.
+`docs/guide/daily-usage.md`, `README.md`, and sometimes `docs/guide/dev-guide.md` or
+`docs/guide/settings-cookbook.md`.
 
 ## Package Rules
 
@@ -416,7 +416,7 @@ When changing user-facing shortcuts, update the relevant docs, usually
   `gls`, language servers, and local build chains are not Emacs package deps.
 
 After package changes, use the documented lock/install/audit flow from
-`docs/maintenance.md` and `docs/migration.md`.
+`docs/ops/maintenance.md` and `docs/ops/migration.md`.
 
 ## Runtime State
 
@@ -431,7 +431,7 @@ Do not reintroduce top-level runtime files such as:
 - stray `.elc` files
 - local API keys or machine-local query URLs
 
-Existing state backup/restore flows are documented in `docs/maintenance.md`.
+Existing state backup/restore flows are documented in `docs/ops/maintenance.md`.
 
 ## Resource Lifecycle Rules
 
@@ -530,7 +530,7 @@ Org/Jupyter/research:
   versioned scoped owner, including protected-buffer and repeat semantics.
   Do not reintroduce regex or one-shot CLI task scans, direct prefix edits,
   temporary Org sources, or fallback writers after an API failure. See
-  `docs/agenda.md` for the source lifecycle and editor snapshot contracts.
+  `docs/design/agenda.md` for the source lifecycle and editor snapshot contracts.
 - Org is intentionally feature-rich; do not add remote/large-buffer downgrades
   unless explicitly requested.
 - Org auto-insert is intentionally disabled by default to avoid capture/roam
@@ -547,7 +547,7 @@ Org/Jupyter/research:
   error — never a client-side connection, which may silently reach a different
   server listening on that port here.
 - Keep `org`, Jupytext/notebooks, and reusable `src/` code as separate sources
-  of truth as described in `docs/research-notes-workflow.md`.
+  of truth as described in `docs/guide/research-notes-workflow.md`.
 
 Noema Markdown panes:
 
@@ -636,7 +636,7 @@ Projects/remote/terminal:
   native until they cross that boundary.  `/ssh:` and `/rpc:` are compatibility
   inputs, not identities for new code.
 - New custom file, process, executable, LSP, and environment integrations must
-  use the APIs in `docs/remote-framework.md`.  Do not infer policy by parsing
+  use the APIs in `docs/design/remote-framework.md`.  Do not infer policy by parsing
   TRAMP method strings and do not expose physical backend paths outside a
   backend or explicit OS boundary.
 - Treat SSH, FRP, Tailscale, jump hosts, and forwarding as ordered pipeline
@@ -662,14 +662,22 @@ Projects/remote/terminal:
 
 Update docs in the same change when user-visible behavior changes.
 
-- Daily workflow and keys: `docs/daily-usage.md`.
-- Architecture and backend behavior: `docs/dev-guide.md` or a focused workflow
-  doc.
-- "Where should I change this?" guidance: `docs/settings-cookbook.md`.
-- Bootstrap, locks, recovery, state, vendored Elisp: `docs/maintenance.md` and
-  `docs/migration.md`.
+Documents are Markdown and sit in one directory by kind (see `docs/README.md`):
+`guide/` (how to use), `design/` (how it works now), `acceptance/` (what done
+means), `ops/` (maintenance) describe the current state only, with no dates or
+change logs; `records/` holds dated audits, incidents, measurements and
+retired notes (`topic-YYYY-MM.md`), written once and never authoritative.
+Never mix the two: a finding worth keeping moves into the structural doc it
+changes, and the record keeps the history.  A new document takes its slot in
+`docs/README.md` first; adding or moving one is a change to that map.
+
+- Daily workflow and keys: `docs/guide/daily-usage.md`.
+- Architecture and backend behavior: the owning `docs/design/` doc, or
+  `docs/guide/dev-guide.md` for the overview.
+- "Where should I change this?" guidance: `docs/guide/settings-cookbook.md`.
+- Bootstrap, locks, recovery, state, vendored Elisp: `docs/ops/maintenance.md` and
+  `docs/ops/migration.md`.
 - Top-level summary and highlights: `README.md`.
-- Additions to `docs/` must also be linked from `docs/README.md`.
 
 Do not leave docs describing old keybindings, old package flows, old state
 paths, or removed routing behavior.
@@ -691,7 +699,7 @@ emacs --batch -Q -L lisp -L site-lisp/general.el --eval '...'
 
 For behavior wrappers, add a focused batch smoke test when practical. For
 package/bootstrap/state work, use the `make` targets documented in
-`docs/maintenance.md` and `docs/migration.md`.
+`docs/ops/maintenance.md` and `docs/ops/migration.md`.
 
 
 如果开发中有对项目整体性有影响的设计,需要会过来维护这个文档,使得项目可以被长期,统一,持续的维护.

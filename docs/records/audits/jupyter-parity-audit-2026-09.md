@@ -54,7 +54,7 @@ A server URL alone therefore must not silently relocate the local project.
 ## This increment
 
 The remote development follow-up is documented in
-[Kernel project context](jupyter-project-context.md): shared kernelspec metadata,
+[Kernel project context](../../design/jupyter-project-context.md): shared kernelspec metadata,
 normal Remote/TRAMP Dired and shell, source LSP, and direnv. Real Aaron-PC checks
 covered read/save, shell cwd/environment, numpy LSP hover, and a real remote
 kernel using the same Python/root/direnv. No local-notebook mirroring or remote

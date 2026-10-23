@@ -14,8 +14,8 @@
 
 ### 两个容易混淆的边界
 
-1. **版本变化不等于研究结论撤回。** LangGraph 的 versions_seen 控制自己的自动图执行；Noema [SourceChanges](../site-lisp/noema/kernel/noema/research/capture.go) 已报告文件证据变化，且 [WorkNode 校验](../site-lisp/noema/server/lib/research-notebook.mjs) 会警告部分不一致状态。父 Work 输出的摘要比较应同样只生成提示，供人判断是否需要重跑或调整研究状态。
-2. **压缩视图不等于完整经历。** OpenHands 把压缩事件和完整事件日志分离；Letta 也让新记忆 Worker 按需读取父记录。Noema [RunSpec 与 context manifest](../site-lisp/noema/server/lib/research-runtime.mjs) 已冻结显式内容；Inspector 应展示内容来自原生会话、重建 Handoff 还是父输出，以及自动上下文是否截断/遗漏。不得把重建摘要说成完整继承了父 Agent 的隐含状态。
+1. **版本变化不等于研究结论撤回。** LangGraph 的 versions_seen 控制自己的自动图执行；Noema [SourceChanges](../../../site-lisp/noema/kernel/noema/research/capture.go) 已报告文件证据变化，且 [WorkNode 校验](../../../site-lisp/noema/server/lib/research-notebook.mjs) 会警告部分不一致状态。父 Work 输出的摘要比较应同样只生成提示，供人判断是否需要重跑或调整研究状态。
+2. **压缩视图不等于完整经历。** OpenHands 把压缩事件和完整事件日志分离；Letta 也让新记忆 Worker 按需读取父记录。Noema [RunSpec 与 context manifest](../../../site-lisp/noema/server/lib/research-runtime.mjs) 已冻结显式内容；Inspector 应展示内容来自原生会话、重建 Handoff 还是父输出，以及自动上下文是否截断/遗漏。不得把重建摘要说成完整继承了父 Agent 的隐含状态。
 
 ## 建议实现顺序
 

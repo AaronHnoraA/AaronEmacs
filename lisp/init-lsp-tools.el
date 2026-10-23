@@ -32,7 +32,7 @@
 
 (defconst my/language-server-doc-file
   (expand-file-name
-   "../docs/lsp-workflow.org"
+   "../docs/design/lsp-workflow.md"
    (file-name-directory my/language-server-tools--module-file))
   "Primary language-server workflow document.")
 

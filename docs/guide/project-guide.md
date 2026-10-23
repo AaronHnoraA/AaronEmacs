@@ -196,7 +196,7 @@ workspace 或输出 buffer 会取消仍在运行的任务，输出窗口的 `K` 
 
 如果你有固定项目根目录，去改：
 
-- [lisp/init-project.el](../lisp/init-project.el)
+- [lisp/init-project.el](../../lisp/init-project.el)
 
 变量是：
 

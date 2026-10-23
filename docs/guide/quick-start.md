@@ -33,21 +33,21 @@ macOS 图形界面下当前修饰键约定是：
 
 ## 2. 核心目录
 
-- [init.el](../init.el)
+- [init.el](../../init.el)
   主入口。
-- [early-init.el](../early-init.el)
+- [early-init.el](../../early-init.el)
   提前做启动优化。
-- [lisp/](../lisp/)
+- [lisp/](../../lisp)
   主配置模块。
-- [lisp/lang/](../lisp/lang/)
+- [lisp/lang/](../../lisp/lang)
   语言专项配置。
-- [bootstrap.el](../bootstrap.el)
+- [bootstrap.el](../../bootstrap.el)
   依赖导出/恢复入口。
-- [package-lock.el](../package-lock.el)
+- [package-lock.el](../../package-lock.el)
   锁文件。
-- [var/](../var/)
+- [var/](../../var)
   运行时状态目录。备份、自动保存、eln-cache、transient、projectile、dirvish 等状态都集中放这里。
-- [docs/](.)
+- [docs/](..)
   这套使用文档。
 
 ## 3. 首次安装
@@ -207,7 +207,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 ### AI 助手
 
-[lisp/init-ai-ide.el](../lisp/init-ai-ide.el) 提供 Noema 的统一 AI/agent 入口。
+[lisp/init-ai-ide.el](../../lisp/init-ai-ide.el) 提供 Noema 的统一 AI/agent 入口。
 gptel、agent-shell、acp.el、shell-maker、Magent 及现有 CLI 兼容代码均完整内化在
 `site-lisp/noema/upstream/`，不再从 `package.el`、VC package 或旧 workbench 目录加载。
 
@@ -240,7 +240,7 @@ Claude/Codex 的兼容源码仍在 Noema `upstream/`，但不再绑定全局快�
 
 ### 运行时状态目录
 
-配置已经统一把容易污染项目目录的文件收到了 [var/](../var/)：
+配置已经统一把容易污染项目目录的文件收到了 [var/](../../var)：
 
 - backup
 - auto-save

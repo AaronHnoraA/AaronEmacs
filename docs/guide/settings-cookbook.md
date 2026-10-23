@@ -10,7 +10,7 @@
 - `M-x config-board` / `M-x customize-group RET config RET`；leader `SPC h c` 打开设置菜单，再按 `c` 打开面板。
 - Lisp：`(config-get 'X)` / `(config-set 'X V)` / `(config-reset 'X)`。
 
-注册表与注册语法见 [config-management.md](config-management.md)。下面各节是「该改哪个
+注册表与注册语法见 [config-management.md](../design/config-management.md)。下面各节是「该改哪个
 文件」的底层说明；当某项尚未注册时按下面的指引改源码，并顺手把它注册进 `config`。
 
 ## 0.1 涉及开发路径、进程或连接时先看 Remote 框架
@@ -18,13 +18,13 @@
 Remote 是核心开发模型，不是只有 SSH 场景才需要看的附加模块。任何设置或功能如果
 涉及文件身份、project/workspace root、进程、可执行文件、PATH/toolchain、watch、
 terminal、service、socket 或端口，都先读
-[remote-framework.md](remote-framework.md)，再决定修改位置。
+[remote-framework.md](../design/remote-framework.md)，再决定修改位置。
 
 - 通用 target/pipeline/backend、路径投影、process/channel 与生命周期能力：
-  改 [lisp/remote/](../lisp/remote/) 并同时补 native 与 remote 测试。
+  改 [lisp/remote/](../../lisp/remote) 并同时补 native 与 remote 测试。
 - 某个语言或 package 的业务规则：留在所属模块，但只调用 `remote-*` API，不自己
   解析 TRAMP、拼 SSH 命令或按 `"local"`/`file-remote-p` 分叉。
-- target、pipeline 与 backend 配置：改 [etc/remote.json](../etc/remote.json)。
+- target、pipeline 与 backend 配置：改 [etc/remote.json](../../etc/remote.json)。
 - 本地也是 target `local`。consumer 应走与远程相同的 API；普通本地 buffer 只在
   框架外保留原生文件名，以继续兼容 Emacs package。
 
@@ -36,7 +36,7 @@ contact”，优先补齐 Remote/LSP adapter，而不是把分支写进语言模
 
 文件：
 
-- [lisp/init-ui.el](../lisp/init-ui.el)
+- [lisp/init-ui.el](../../lisp/init-ui.el)
 
 现在默认：
 
@@ -51,9 +51,9 @@ contact”，优先补齐 Remote/LSP adapter，而不是把分支写进语言模
 
 文件：
 
-- [lisp/init-base.el](../lisp/init-base.el)
-- [lisp/init-text.el](../lisp/init-text.el)
-- [lisp/lang/tex/init-auctex.el](../lisp/lang/tex/init-auctex.el)
+- [lisp/init-base.el](../../lisp/init-base.el)
+- [lisp/init-text.el](../../lisp/init-text.el)
+- [lisp/lang/tex/init-auctex.el](../../lisp/lang/tex/init-auctex.el)
 
 重点变量：
 
@@ -83,8 +83,8 @@ contact”，优先补齐 Remote/LSP adapter，而不是把分支写进语言模
 
 ## 3. 我要改 LaTeX 构建/预览
 
-文件：[lisp/lang/tex/init-auctex.el](../lisp/lang/tex/init-auctex.el)（AUCTeX、latexmk 命令、
-PDF Tools/SyncTeX 预览）、[lisp/lang/tex/init-latex.el](../lisp/lang/tex/init-latex.el)（texlab/
+文件：[lisp/lang/tex/init-auctex.el](../../lisp/lang/tex/init-auctex.el)（AUCTeX、latexmk 命令、
+PDF Tools/SyncTeX 预览）、[lisp/lang/tex/init-latex.el](../../lisp/lang/tex/init-latex.el)（texlab/
 digestif、BibTeX、Zotero）。
 
 `latexmk` 可执行文件通过 `remote-executable-find`（AUCTeX 侧）/
@@ -96,18 +96,18 @@ buffer 注册，而不是启动时算好一份全局命令。远程 target 上�
 诊断/补全走 lsp-mode 共享的 `language-server` remote adapter，本身已经是 target-aware 的。
 
 **buffer 内的公式预览是另一条链路**：RaTeX（vendored 在 `site-lisp/ratex.el/`），
-在 [lisp/lang/tex/init-latex.el](../lisp/lang/tex/init-latex.el) 配置，表现为光标上方的
+在 [lisp/lang/tex/init-latex.el](../../lisp/lang/tex/init-latex.el) 配置，表现为光标上方的
 posframe 弹窗而不是 inline overlay。支持 `$…$`、`$$…$$`、`\(…\)`、`\[…\]` 和
 白名单内的 `\begin{…}` 环境。数学宏与 TeX 兼容规则以
 `site-lisp/noema/resources/` 为唯一来源，Emacs 与 Noema 读同一批文件——
 改宏请改那里，不要在 Elisp 里另写一份。出问题先跑 `M-x latex-preview-doctor`。
-完整契约见 [latex-preview.md](latex-preview.md)。
+完整契约见 [latex-preview.md](../design/latex-preview.md)。
 
 ## 4. 我要改 AI 助手配置
 
 文件：
 
-- [lisp/init-ai-ide.el](../lisp/init-ai-ide.el)
+- [lisp/init-ai-ide.el](../../lisp/init-ai-ide.el)
 
 当前 AI 相关源码完整内化在 `site-lisp/noema/upstream/`；Noema 公共入口和领域适配位于
 `site-lisp/noema/lisp/`。不要重新添加 gptel、agent-shell、acp.el、shell-maker 或 Magent
@@ -152,7 +152,7 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 文件：
 
-- [lisp/init-windows.el](../lisp/init-windows.el)
+- [lisp/init-windows.el](../../lisp/init-windows.el)
 
 现有快捷键：
 
@@ -169,8 +169,8 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 文件：
 
-- [lisp/init-open.el](../lisp/init-open.el)
-- [site-lisp/general.el/general.el](../site-lisp/general.el/general.el)
+- [lisp/init-open.el](../../lisp/init-open.el)
+- [site-lisp/general.el/general.el](../../site-lisp/general.el/general.el)
 
 改默认 URL / 搜索 / 文件 / PDF 打开方式时，优先改 `lisp/init-open.el`
 里的 `my/open-routes`。
@@ -190,9 +190,9 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 文件：
 
-- [lisp/init-evil.el](../lisp/init-evil.el)
-- [lisp/init-funcs.el](../lisp/init-funcs.el)
-- [site-lisp/general.el/general.el](../site-lisp/general.el/general.el)
+- [lisp/init-evil.el](../../lisp/init-evil.el)
+- [lisp/init-funcs.el](../../lisp/init-funcs.el)
+- [site-lisp/general.el/general.el](../../site-lisp/general.el/general.el)
 
 你会看到：
 
@@ -247,7 +247,7 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 文件：
 
-- [lisp/init-package-utils.el](../lisp/init-package-utils.el)
+- [lisp/init-package-utils.el](../../lisp/init-package-utils.el)
 
 改完后执行：
 
@@ -267,9 +267,9 @@ emacs --debug-init -q -l ./bootstrap.el
 
 文件：
 
-- [lisp/init-clutch.el](../lisp/init-clutch.el)
+- [lisp/init-clutch.el](../../lisp/init-clutch.el)
 - `etc/clutch-config.el`（本地私有配置，默认不进 Git）
-- [etc/clutch-config.el.example](../etc/clutch-config.el.example)
+- [etc/clutch-config.el.example](../../etc/clutch-config.el.example)
 
 职责：
 
@@ -294,8 +294,8 @@ emacs --debug-init -q -l ./bootstrap.el
 
 文件：
 
-- [snippets/](../snippets/)
-- [lisp/init-snippets.el](../lisp/init-snippets.el)
+- [snippets/](../../snippets)
+- [lisp/init-snippets.el](../../lisp/init-snippets.el)
 
 入口：
 
@@ -328,12 +328,12 @@ emacs --debug-init -q -l ./bootstrap.el
 
 看这些文件：
 
-- [lisp/init-minibuffer.el](../lisp/init-minibuffer.el)
-- [lisp/init-search.el](../lisp/init-search.el)
-- [lisp/init-lsp.el](../lisp/init-lsp.el)
-- [lisp/init-lsp-ops.el](../lisp/init-lsp-ops.el)
-- [lisp/init-lsp-tools.el](../lisp/init-lsp-tools.el)
-- [lsp-workflow.org](lsp-workflow.org)
+- [lisp/init-minibuffer.el](../../lisp/init-minibuffer.el)
+- [lisp/init-search.el](../../lisp/init-search.el)
+- [lisp/init-lsp.el](../../lisp/init-lsp.el)
+- [lisp/init-lsp-ops.el](../../lisp/init-lsp-ops.el)
+- [lisp/init-lsp-tools.el](../../lisp/init-lsp-tools.el)
+- [lsp-workflow.md](../design/lsp-workflow.md)
 
 职责划分：
 
@@ -371,9 +371,9 @@ breadcrumb 不继承 tab 的切换/关闭行为；
 
 文件：
 
-- [lisp/remote/](../lisp/remote/)
-- [etc/remote.json](../etc/remote.json)
-- [lisp/init-shell.el](../lisp/init-shell.el)
+- [lisp/remote/](../../lisp/remote)
+- [etc/remote.json](../../etc/remote.json)
+- [lisp/init-shell.el](../../lisp/init-shell.el)
 
 重点：
 
@@ -386,15 +386,15 @@ breadcrumb 不继承 tab 的切换/关闭行为；
 - `my/portal-ssh`
 
 target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境层的完整
-设计见 [remote-framework.md](remote-framework.md)。`lisp/remote/` 只放通用框架；
+设计见 [remote-framework.md](../design/remote-framework.md)。`lisp/remote/` 只放通用框架；
 具体插件接入留在所属模块，但不得重新拥有物理路径、spawn、连接、转发或恢复逻辑。
 
 ## 12. 我要改项目管理行为
 
 文件：
 
-- [lisp/init-project.el](../lisp/init-project.el)
-- [lisp/init-evil.el](../lisp/init-evil.el)
+- [lisp/init-project.el](../../lisp/init-project.el)
+- [lisp/init-evil.el](../../lisp/init-evil.el)
 
 重点：
 
@@ -424,8 +424,8 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 
 文件：
 
-- [lisp/init-dired.el](../lisp/init-dired.el)
-- [lisp/init-windows.el](../lisp/init-windows.el)
+- [lisp/init-dired.el](../../lisp/init-dired.el)
+- [lisp/init-windows.el](../../lisp/init-windows.el)
 
 职责：
 
@@ -438,7 +438,7 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 
 文件：
 
-- [lisp/init-base.el](../lisp/init-base.el)
+- [lisp/init-base.el](../../lisp/init-base.el)
 
 重点变量：
 
@@ -447,14 +447,14 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 - `my/auto-save-dir`
 - `my/lockfile-dir`
 
-现在所有这些都写到 [var/](../var/)。
+现在所有这些都写到 [var/](../../var)。
 
 ## 15. 我要改新建文件模板（auto-insert）
 
 文件：
 
-- [lisp/init-auto-insert.el](../lisp/init-auto-insert.el)
-- [templates/](../templates/)
+- [lisp/init-auto-insert.el](../../lisp/init-auto-insert.el)
+- [templates/](../../templates)
 
 入口：
 
@@ -470,7 +470,7 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 - 模板存放在 `templates/<kind>/`；模板里的占位符支持 `{{date}}` / `{{title}}` / `{{file}}` / `{{author}}` / `{{cursor}}` 等；`{{file}}` 写入文件在其所在机器上的路径（远端文件不会写出 `/fs:` 名字）
 
 Noema / Roam Node 的 Markdown 模板集中在
-[templates/noema/](../templates/noema/)。该目录与 `templates/latex/`、`templates/tex/`
+[templates/noema/](../../templates/noema)。该目录与 `templates/latex/`、`templates/tex/`
 链接到 Noema 仓库；其它模板目录由 Emacs 仓库维护。它们使用 Noema 的
 snippet-style header、`{{title}}` / `{{date}}` / `{{tags}}` 等变量和 `$0` tabstop，
 由 Noema runtime 展开，不进入普通 `auto-insert` allowlist。
@@ -478,15 +478,6 @@ snippet-style header、`{{title}}` / `{{date}}` / `{{tags}}` 等变量和 `$0` t
 `# type: roam` / `# type: regular` 决定各自的候选；新增场景模板应明确标类型，
 保留一个可直接填写的正文入口。`RENDER KIND` 是 Noema 页面呈现类型，不是
 Roam 与普通 Markdown 的开关。
-
-Typst 模板集中在 [templates/typst/](../templates/typst/)。当前 assignment 模板会
-导入项目根目录下的 `/_typst/assignment.typ`；插入模板时 Emacs 会自动创建这些
-`_typst/*.typ` 软链，样式源文件统一维护在 [notes/](../notes/)。
-
-`default.typ`、`academic-report.typ`、`manuscript-review.typ`、
-`rebuttal-letter.typ`、`longform-book.typ`、`project-financial-report.typ`、
-`lab-report.typ`、`grant-proposal.typ` 是普通独立 Typst 文档模板。
-`touying-simple.typ` 是 Touying slides 模板。
 
 项目内按目录开关（`.dir-locals.el`）：
 
@@ -563,8 +554,8 @@ kernelspec 本身用 `M-x jupyter-board`（Hyper `j`）管理。
 
 文件：
 
-- [lisp/init-dir-locals.el](../lisp/init-dir-locals.el)
-- [templates/emacs/](../templates/emacs/)
+- [lisp/init-dir-locals.el](../../lisp/init-dir-locals.el)
+- [templates/emacs/](../../templates/emacs)
 
 入口（`SPC p e`）：
 
@@ -600,7 +591,7 @@ kernelspec 本身用 `M-x jupyter-board`（Hyper `j`）管理。
 
 **env 刷新**：`SPC p e r` 在 dir-locals 重载后会调用
 `my/direnv-update-environment-maybe`。仓库内置的
-[lisp/direnv.el](../lisp/direnv.el) 把 direnv 注册为 Remote 框架的 workspace
+[lisp/direnv.el](../../lisp/direnv.el) 把 direnv 注册为 Remote 框架的 workspace
 environment maintainer；本地与远端都生成隔离的 `target@workspace` 环境实例，
 远端执行优先 tramp-rpc、回退 TRAMP。PATH、编译器路径等变量只投影到所属 buffer
 和它启动的进程，不需要重启，也不会污染别的 target。
@@ -621,7 +612,7 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 - 打开 `.el` 文件时机器被压满：`my/elisp-elsa-worker-limit`。
 
 两个可调项都在 `config` registry 里，用 `M-x config-board` 改。完整背景、原因和
-仍然存在的上游差异见 [neomacs-compat.md](neomacs-compat.md)。
+仍然存在的上游差异见 [neomacs-compat.md](../design/neomacs-compat.md)。
 
 ---
 
@@ -629,10 +620,10 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 
 文件：
 
-- [lisp/init-activity.el](../lisp/init-activity.el) —— 指示器、分类、注册表、板面数据与动作
-- [site-lisp/aaron-ui/aaron-ui-activity.el](../site-lisp/aaron-ui/aaron-ui-activity.el) —— Activity 的 ETAF 整页布局；继续取 Aaron UI 色板和原有图标
-- [lisp/roam/init-activity-noema.el](../lisp/roam/init-activity-noema.el) —— Noema Core task / agent 工作快照与原生取消
-- [assets/activity/](../assets/activity/) —— 皮卡丘的 XPM 帧和画它的脚本
+- [lisp/init-activity.el](../../lisp/init-activity.el) —— 指示器、分类、注册表、板面数据与动作
+- [site-lisp/aaron-ui/aaron-ui-activity.el](../../site-lisp/aaron-ui/aaron-ui-activity.el) —— Activity 的 ETAF 整页布局；继续取 Aaron UI 色板和原有图标
+- [lisp/roam/init-activity-noema.el](../../lisp/roam/init-activity-noema.el) —— Noema Core task / agent 工作快照与原生取消
+- [assets/activity/](../../assets/activity) —— 皮卡丘的 XPM 帧和画它的脚本
 
 出现机理（`(process-list)` 做枚举根、只数 `task` 一类）见
 [daily-usage.md](daily-usage.md#后台任务指示器)。
