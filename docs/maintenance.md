@@ -572,8 +572,8 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
   company/eglot/lsp-mode/flymake/dape
 - [lisp/init-lsp-tools.el](../lisp/init-lsp-tools.el)
   language server hub / doctor / dispatch / runtime knobs
-- [lisp/org/init-org.el](../lisp/org/init-org.el)
-  Org 全家桶
+- [lisp/init-org-tools.el](../lisp/init-org-tools.el)
+  Org 编辑小工具（Org 主体沿用内置默认）
 - [lisp/init-shell.el](../lisp/init-shell.el)
   shell/eshell/portal/ssh
 

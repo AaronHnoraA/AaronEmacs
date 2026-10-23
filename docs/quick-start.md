@@ -205,11 +205,6 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 ## 6. 路径约定
 
-### Typst
-
-项目外写 assignment 时，用 `templates/typst/assignment.typ` 插入模板；插入时会在项目根目录创建
-`_typst/*.typ` 软链，指向 [notes/](../notes/) 里维护的样式文件。
-
 ### AI 助手
 
 [lisp/init-ai-ide.el](../lisp/init-ai-ide.el) 提供 Noema 的统一 AI/agent 入口。

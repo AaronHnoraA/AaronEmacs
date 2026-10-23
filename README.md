@@ -65,7 +65,6 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
 - First setup and dependencies: [docs/quick-start.md](docs/quick-start.md)
 - Daily usage and keybindings: [docs/daily-usage.md](docs/daily-usage.md)
 - Project workflow: [docs/project-guide.md](docs/project-guide.md)
-- Org inside Emacs: [docs/org-guide.md](docs/org-guide.md)
 - Programming, LSP, remote work, terminals, AI: [docs/dev-guide.md](docs/dev-guide.md)
 - Remote target, routing, and environment architecture: [docs/remote-framework.md](docs/remote-framework.md)
 - Temporary machines and file transfer from inside Dired/Dirvish (rsync): [docs/remote-files.md](docs/remote-files.md)
@@ -103,7 +102,7 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
   fix. `lisp/init-neomacs.el` stays as the single build boundary - it renames Neomacs' physical
   modifiers back to this configuration's Option-as-Hyper / Command-as-Meta layout and repairs the
   runtime differences that break opening files and the first startup frame - and is inert on GNU Emacs.
-- Some local paths and workflow conventions are intentionally opinionated, such as `~/HC/Org/`, `etc/mygpt.json`, and `~/.ssh/config`.
+- Some local paths and workflow conventions are intentionally opinionated, such as `~/Documents/Noema` and `~/.ssh/config`.
 - Some features depend on system tools, fonts, and local applications; the repository does not attempt to vendor those system dependencies.
 - Vendored code and lock files may belong in Git. Runtime caches, build artifacts, local state, and secrets do not.
 

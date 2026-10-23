@@ -19,7 +19,7 @@ channels.
 - [quick-start.md](quick-start.md) First-time setup, system dependencies, fonts, path conventions, and bootstrap.
 - [daily-usage.md](daily-usage.md) Daily entry points, high-frequency keybindings, and leader-group layout.
 - [agenda.md](agenda.md) Noema `@@todo`/`@@project`/`@@clock` syntax, server agenda/project/clock view-model, repeaters, dependencies, and Web/Emacs entry points.
-- [MarkWright → Noema audit](markwright-noema-audit-2026-09.md) Source-linked comparison of MarkWright with the Noema editor: merged slash-menu, inline HTML and print details; rendering, CSS, theme and lifecycle findings.
+- [MarkWright → Noema audit](markwright-noema-audit-2026-09.md) Source-linked comparison of MarkWright with the Noema editor: merged slash-menu, inline HTML and print details; rendering, CSS, theme and lifecycle findings; with a [per-file line inventory](markwright-line-audit-2026-09.md).
 - [Marker / MarkText / files.md → Noema audit](markdown-editors-noema-audit-2026-10.md) Source-linked comparison of three Markdown editors with Noema: merged format toggles, CJK emphasis, context-aware paste, code-block input, word-sized undo, range-selection rendering, CRLF save and save retry; with a [per-file line inventory](markdown-editors-line-audit-2026-10.md).
 - [Vibemux → Noema audit](vibemux-noema-audit-2026-10.md) Source-linked comparison of both Vibemux projects with Noema's Agent sessions, attention, recovery, and permission model.
 - [Lexora / Orca ADE → Noema audit](lexora-orca-noema-audit-2026-10.md) Feature-by-feature source review, Noema upgrade decisions, and permission-boundary fixes.
@@ -33,19 +33,23 @@ channels.
 - [slides-demo.md](../site-lisp/noema/docs/slides-demo.md) Ready-to-open `kind: slides` Noema deck with math and HTML examples.
 - [settings-cookbook.md](settings-cookbook.md) “I want to change X” guidance that tells you where each kind of change belongs.
 - [Emacs entrypoint audit](entrypoint-audit-2026-10.md) Current entry map, comparisons with Lunarymacs, Doom, Spacemacs and Prelude, and the ongoing command and lifecycle review.
+- [elegant-ui.md](elegant-ui.md) Aaron UI, the design tokens Emacs and Noema share, and where each side keeps its own styling.
 - [config-management.md](config-management.md) Unified `config` registry: one front door (`config-get`/`config-set`, `M-x config-board`) to view, edit, live-apply, and persist every registered setting.
 
 ## By Workflow
 
 - [project-guide.md](project-guide.md) Project switching, project workbench flow, and how Treemacs / Perspective fit together.
 - [latex-preview.md](latex-preview.md) In-buffer math preview: supported delimiters, the shared macro source Emacs and Noema both read, the doctor, and the troubleshooting order.
-- [typst-math-macros.md](typst-math-macros.md) Shared Typst math macros and matching snippets for TCS, quantum computing, algebra, computing, and physics notes.
+- [jupyter-project-context.md](jupyter-project-context.md) How a kernel gets its project: the Remote target owns connection identity, the kernelspec owns execution settings.
 - [dev-guide.md](dev-guide.md) Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
 - [workbench-tools.md](workbench-tools.md) Adopted Xenodium editing, file, GitHub, Bazel, calendar, Org, and macOS workbenches, with keybindings and design boundaries.
 - [remote-framework.md](remote-framework.md) Core `/fs` identity plus target/pipeline/backend/session routing, process and channel APIs, compatibility boundaries, and current implementation gaps.
 - [remote-files.md](remote-files.md) Temporary machines remembered under `var/`, and file transfer from inside Dired/Dirvish: rsync upload/download/sync through a pop-up chooser, with jobs in the activity board.
 - [remote-io-review.md](remote-io-review.md) `emacs-io` audit, adopted resource ideas, rejected ownership/POSIX shortcuts, and Remote performance criteria.
 - [remote-parity.md](remote-parity.md) VS Code Remote-level acceptance matrix, current coverage, completion criteria, and staged roadmap.
+- [emacs-gateway.md](emacs-gateway.md) `remote-gateway`, the loopback JSON-RPC/WebSocket control plane through which Lean, Noema and other processes reach Emacs.
+- [noema-run-completion.md](noema-run-completion.md) When an Agent Run counts as finished, model selection at session start, and derived Run state.
+- [opencode-acp-recovery.md](opencode-acp-recovery.md) The OpenCode ACP prompt-stage regression and how it was worked around.
 - [codex-session-lifecycle.md](codex-session-lifecycle.md) ACP session reuse, Codex Remote ownership limits, and the optional mobile-to-Noema message bridge.
 - [remote-performance.md](remote-performance.md) Reproducible local/SSH latency measurements, implemented optimizations, version boundary, and remaining gaps.
 - [research-notes-workflow.md](research-notes-workflow.md) Division of labor between notes, Jupytext notebooks, Jupyter, and reusable source code.
@@ -60,6 +64,7 @@ channels.
 - [neomacs-compat.md](neomacs-compat.md) Running this configuration on Neomacs: the modifier-rename layer, fringe and startup-frame fixes, Elsa concurrency, and why the 0.0.18 migration was paused. Neomacs is not installed; the layer is inert on GNU Emacs.
 - [maintenance.md](maintenance.md) Package management, lock workflow, state directories, cleanup, troubleshooting, and maintenance cadence.
 - [migration.md](migration.md) New-machine setup, restore workflow, and the migration lessons learned from this configuration.
+- [noema-agent-upstream-audit.md](noema-agent-upstream-audit.md) agent-shell / ACP audit and the move to package-managed upstreams, with the 2026-09-26 upgrade.
 - [noema-xwidget-audit.md](noema-xwidget-audit.md) Full-chain stability, HCI, and security audit of the Emacs ↔ xwidget ↔ noema bridge.
 
 ## Shortest Path
@@ -73,3 +78,8 @@ channels.
 - Want programming / LSP / remote details: [dev-guide.md](dev-guide.md)
 - Want maintenance and lock/state guidance: [maintenance.md](maintenance.md)
 - Running on Neomacs instead of GNU Emacs: [neomacs-compat.md](neomacs-compat.md)
+
+## Working Files
+
+- [agent.md](agent.md) Prompt for the docs Q&A agent (`noema-interaction-docs`); it reads this directory to answer questions about the config.
+- [TODO.md](TODO.md) Collected feature ideas and bugs waiting to be handled together.

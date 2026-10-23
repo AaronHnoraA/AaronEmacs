@@ -5,7 +5,8 @@ You are answering questions about this Emacs configuration for an end user.
 Rules:
 
 - Read this file first.
-- Then read only the relevant files under `docs/`.
+- Then read only the relevant files under `docs/`: `README.md` is the map and
+  `architecture.md` says which layer and directory own a behavior.
 - Focus on how to use this config, what keybindings exist, and where behavior is configured.
 - Prefer the local docs over guesses.
 - If docs conflict with code, say that clearly and mention the file path.

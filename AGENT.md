@@ -7,7 +7,9 @@ Guidance for coding agents working in this Emacs configuration.
 Before changing behavior, read the closest existing documentation instead of
 reconstructing the system from scattered Elisp:
 
-- `docs/README.md` is the documentation map.
+- `docs/README.md` is the documentation map, and `docs/architecture.md` the
+  structure map: load order, layers, directory ownership and the Emacs ↔ Noema
+  boundary.
 - `docs/settings-cookbook.md` answers "where should this change live?"
 - `docs/maintenance.md` covers package locks, vendored Elisp, runtime state,
   compile helpers, bootstrap, and recovery.
@@ -23,10 +25,11 @@ reconstructing the system from scattered Elisp:
   complete.
 - `docs/lsp-workflow.org` covers the lsp-mode route model, Hub, Doctor, and how
   to register target-aware language servers.
-- `docs/jupyter-workflow.org` covers Org Babel, existing-kernel workflows,
-  Jupytext, kernelspecs, and remote kernels.
-- `docs/org-guide.md`, `docs/project-guide.md`, and
-  `docs/research-notes-workflow.md` cover their respective domains.
+- `docs/jupyter-workflow.org` covers kernel sources (kernelspecs,
+  `attach:` connection files, remote Jupyter servers), Remote routing, and the
+  Jupyter Board.
+- `docs/project-guide.md` and `docs/research-notes-workflow.md` cover their
+  respective domains.
 
 If code and docs disagree, inspect the current code, make the minimal correct
 change, and update stale docs when that is part of the task.
@@ -530,8 +533,6 @@ Org/Jupyter/research:
   `docs/agenda.md` for the source lifecycle and editor snapshot contracts.
 - Org is intentionally feature-rich; do not add remote/large-buffer downgrades
   unless explicitly requested.
-- Org roots default to `~/HC/Org/`; changing them requires checking capture,
-  Typst notes, and bibliography paths.
 - Org auto-insert is intentionally disabled by default to avoid capture/roam
   template collisions.
 - Only route a language through Jupyter when it has a working Jupyter kernel or
@@ -645,7 +646,7 @@ Projects/remote/terminal:
   `remote-channel` APIs.  An unsupported remote channel must fail rather than
   silently opening a socket on the client machine.
 - Keep `lisp/remote/` framework-only.  Consumers such as direnv, lsp-mode, Lean,
-  Aaronote, terminals, and project tools stay in their owning modules and
+  Noema, terminals, and project tools stay in their owning modules and
   register adapters or environment maintainers.
 - PATH must remain target/workspace isolated and ID-addressable.  Model changes
   as inherited maintainer/decorator layers; do not mutate global `exec-path` or
