@@ -730,11 +730,10 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 - 取消链路：准备中的 Run 被取消时 kernel 立即结束它、拒绝迟到的 attach/start，并把
   cancelled 写回格子；运行中的 Run 由 worker 发 ACP `session/cancel`、撤回待批权限，
   3 秒无响应再关停 agent 进程。JuText `C-c C-z` 按光标所在格子取消。
-- `M-x noema-skill-manager` / `noema-mcp-manager` / `noema-capability-manager`
-  在普通 buffer 打开能力管理器；在 agent-shell buffer（平台会话或 popup portal 里的
-  会话）里同一命令改为只读 lookup（`M-x noema-capability-lookup`），选中后只在 agent
-  输入处草拟一行引用（Skill 给出绝对 `SKILL.md` 与资源目录，MCP 给出配置文件），
-  不启用、不打补丁、不安装、也不自动发送。
+- `M-x noema-skill` 打开 Skill／Pack 搜索页；`Cmd+,` 进入完整 Skill 管理
+  buffer。在 agent-shell 或 Portal 终端中从搜索结果按 `RET`，只在输入处草拟引用，
+  不自动发送。`noema-mcp-manager` / `noema-capability-manager` 打开完整管理页；
+  从 agent-shell 调用它们时仍进入只读 lookup（`M-x noema-capability-lookup`）。
 - `.noema` 的 JuText 是研究工作文档，没有语言服务器。Company 在 work 开头的
   `@@agent`、`@@session`、`@@ctx`、`@@skill` 控制行只使用 Noema CAPF；普通正文
   用文字补全，Yasnippet 模板用 `C-c y y` 显式展开，避免 TeX/Markdown 模板混进

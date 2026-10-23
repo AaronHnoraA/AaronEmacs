@@ -4,7 +4,7 @@
 
 ;; Run with the real Emacs init, before any research-mode/UI test requires.
 (ert-deftest noema-startup-registers-capability-managers-lazily ()
-  (dolist (command '(noema-capability-manager noema-skill-manager noema-mcp-manager))
+  (dolist (command '(noema-capability-manager noema-skill noema-skill-manager noema-mcp-manager))
     (should (commandp command))
     (should (autoloadp (symbol-function command)))
     (should (equal (nth 1 (symbol-function command)) "noema-capability-ui")))
