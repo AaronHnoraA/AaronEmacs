@@ -266,6 +266,8 @@ Noema 默认由 Portal Web 承载，与 Portal 终端共用 `portal-input`：按
 minibuffer 的快捷键执行完仍回到视图。`Cmd-.` 同样把键盘留给 Emacs。
 Noema 只补充编辑器命令映射。顶栏的返回、前进、刷新、编辑器聚焦和菜单按钮
 属于 Emacs。`xwidget` 仍可显式选择；以下专门说明它的旧键盘桥接行为。
+Portal 与 xwidget 的 Noema 菜单都能打开 Task Manager、Wiki Home、页面工具和导出；
+未显示的 Noema 页面可从顶栏页面列表切回。
 
 在 xwidget 后端，所有 Noema 页面（md 编辑器、Jupyter output、Wiki、Agenda、Config、Slides）都把 `H-`（Option）
 组合键、`C-x` / `C-c` 前缀序列、`C-g`，以及 `M-x` / `M-w` / `M-W` / `M-q` / `M-o` 交给 Emacs；
@@ -1617,7 +1619,8 @@ Noema 统一承接轻量模型交互与结构化 coding-agent 会话。gptel 是
 
 Noema Markdown 页的选区工具栏有 **Agent** 和 **Rewrite** 按钮，`...` 里还有
 Add to AI context、gptel compose、在 Emacs 源 buffer 中选中；`H-o %` 是同一组操作的
-Transient。所有这些都先保存笔记（发送整篇笔记时不需要页面应答，直接用磁盘上的文件），再把选区的准确位置（行 + 字符列）交给
+Transient。Portal 与 xwidget 页面都先保存笔记，发送整篇笔记也等待保存回执，
+再把选区的准确位置（行 + 字符列）交给
 `noema-md-bridge`，由它在笔记的 Emacs 源 buffer 上运行对应的 gptel / agent UI。
 Rewrite 的 diff / ediff / accept 审阅在源 buffer 里完成；源 buffer 处于
 `noema-md-bridge-source-mode`（mode line `Noema↔`），修改在空闲

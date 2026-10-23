@@ -232,9 +232,19 @@ generation 变化会精确清空 10 分钟有界 LRU。Node 只转发窄 mention
 ```text
 lisp/roam/init-noema.el
   进程、buffer/session、公开命令和 UI 装配
+lisp/roam/noema-portal.el
+  Portal Web 页面、client 复用、焦点与宿主消息
+site-lisp/noema/lisp/noema-md-bridge.el
+  Portal / xwidget 共用的页面选区、保存回执、Emacs 源 buffer 与 agent / gptel 动作
 site-lisp/noema/lisp/noema-xwidget-keys.el
   md/xwidget 输入、焦点、Undo/Redo、Shift-Tab 与 Emacs windmove 焦点修复
 ```
+
+Noema 默认在 Portal Web 中打开。任务管理器、Wiki Home、导出、页面工具和
+AI 发送都经页面 client 的宿主命令路由，不依赖 xwidget 的脚本执行。
+发送选区、光标行或整篇笔记时，页面先保存并报告范围；Emacs 只在收到
+该 client 的保存回执后读取磁盘和启动 agent / gptel。Emacs 源 buffer 保存后
+通知显示同一笔记的 Portal 与 xwidget 页面重载，页面有未保存草稿时仍保留草稿。
 
 按键桥迁移时保留了原命令名和调用协议。Cmd+方向键不经 Emacs/windmove
 转发，由 CodeMirror/WebKit 保持原生编辑行为。

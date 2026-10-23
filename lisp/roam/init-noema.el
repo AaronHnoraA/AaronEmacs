@@ -1,6 +1,6 @@
-;;; init-noema.el --- Noema Web/xwidget bridge -*- lexical-binding: t; -*-
+;;; init-noema.el --- Noema Web page bridge -*- lexical-binding: t; -*-
 ;;
-;; Emacs starts the local Noema web host and opens it in xwidget.
+;; Emacs starts the local Noema web host and opens it in Portal or xwidget.
 ;; The editable document state lives in Noema's CodeMirror app; Emacs does
 ;; not mirror buffer edits into the browser.
 
@@ -3084,6 +3084,12 @@ waits for a response in the invoking Emacs command."
   (interactive)
   (my/noema-command "focus"))
 
+;;;###autoload
+(defun my/noema-task-manager ()
+  "Open the current Noema page's task manager on either web backend."
+  (interactive)
+  (my/noema-command "task-manager"))
+
 (defun my/noema-open-wiki-view (&optional view query)
   "Open the Emacs-hosted Wiki VIEW with optional QUERY parameters."
   (let ((path (concat "/wiki"
@@ -3827,13 +3833,14 @@ failure while it is still going."
 ;;; Header-line for the Noema app buffer.
 
 (defun my/noema--undisplayed-buffers ()
-  "Return live Noema xwidget buffers absent from every Emacs window."
+  "Return live Noema page buffers absent from every Emacs window."
   (seq-filter
    (lambda (buffer)
      (and (buffer-live-p buffer)
           (with-current-buffer buffer
-            (and (eq major-mode 'xwidget-webkit-mode)
-                 (my/noema--xwidget-buffer-p buffer)))
+            (or (and (eq major-mode 'xwidget-webkit-mode)
+                     (my/noema--xwidget-buffer-p buffer))
+                (my/noema-portal-buffer-p buffer)))
           (not (get-buffer-window buffer t))))
    (buffer-list)))
 
@@ -3843,7 +3850,9 @@ failure while it is still going."
              (not (get-buffer-window buffer t)))
     (switch-to-buffer buffer)
     (setq my/noema--app-buffer buffer)
-    (run-at-time 0.05 nil #'my/noema--focus-xwidget-buffer buffer)))
+    (if (my/noema-portal-buffer-p buffer)
+        (my/noema-portal-focus buffer)
+      (run-at-time 0.05 nil #'my/noema--focus-xwidget-buffer buffer))))
 
 (defun my/noema-switch-buffer-menu (event)
   "Choose an undisplayed Noema buffer from a header-line button."
@@ -3874,7 +3883,7 @@ failure while it is still going."
     "Noema"
     (list
      ["Focus editor" my/noema-focus t]
-     ["Task manager" my/xwidget-open-task-manager t]
+     ["Task manager" my/noema-task-manager t]
      "---"
      ["Page outline" my/noema-toggle-page t]
      ["Agenda" my/noema-toggle-agenda t]
@@ -3945,6 +3954,7 @@ RELOAD and WINDOW-MENU select the backend's implementations."
      ["Back" my/noema-back t]
      ["Forward" my/noema-forward t]
      ["Refresh pane" my/noema-refresh t]
+     ["Task manager" my/noema-task-manager t]
      "---"
      ["Editable split right" my/noema-open-current-note-split-right t]
      ["Editable split below" my/noema-open-current-note-split-below t]
@@ -3952,10 +3962,16 @@ RELOAD and WINDOW-MENU select the backend's implementations."
      ["Page outline" my/noema-toggle-page t]
      ["Agenda" my/noema-toggle-agenda t]
      ["Local graph" my/noema-toggle-graph t]
+     ["Workspace graph" my/noema-workspace-graph t]
      ["Wiki home" my/noema-wiki-home t]
      ["Tools" my/noema-toggle-tools t]
      ["Jupyter cells" my/noema-toggle-jupyter t]
+     "---"
+     ["Toggle source" my/noema-toggle-source t]
+     ["Run prose check" my/noema-prose-check t]
+     ["Export LaTeX…" my/noema-export-latex t]
      ["Settings" my/noema-settings t]
+     ["Move document to Trash" noema-trash-note t]
      ["Close Noema" my/noema-close t]))))
 
 (defun my/noema--portal-header-line ()

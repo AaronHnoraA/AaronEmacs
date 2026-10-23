@@ -26,6 +26,7 @@
 (declare-function my/open--with-browser-window "init-open" (mode reuse-selected open-fn))
 (declare-function my/open-normalize-url "init-open" (url))
 (declare-function my/noema-switch-buffer-menu "init-noema" (event))
+(declare-function my/noema-task-manager "init-noema" ())
 (declare-function portal-web-reload "portal-web" ())
 (declare-function nerd-icons-mdicon "nerd-icons" (icon-name &rest args))
 (declare-function nerd-icons-codicon "nerd-icons" (icon-name &rest args))
@@ -361,10 +362,11 @@ When FORCE-NEW is non-nil, replace the old buffer for ID."
     (user-error "No xwidget URL available")))
 
 (defun my/xwidget-open-task-manager ()
-  "Open the current Noema page's Core task manager without polling."
+  "Compatibility command for the current Noema page's task manager."
   (interactive)
-  (my/xwidget--execute-script
-   "(() => { if (typeof window.noemaOpenTaskManager === 'function') { window.noemaOpenTaskManager(); return true; } return false; })()"))
+  (unless (fboundp 'my/noema-task-manager)
+    (require 'init-noema))
+  (my/noema-task-manager))
 
 (defun my/xwidget--execute-script (script)
   "Execute JavaScript SCRIPT in the current xwidget session."

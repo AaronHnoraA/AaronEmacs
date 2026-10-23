@@ -506,6 +506,7 @@
            (other (generate-new-buffer " *noema-output-other*"))
            (output (generate-new-buffer " *noema-output-page*"))
            (source-window (selected-window))
+           (my/noema-backend 'xwidget)
            (my/noema--port 4242)
            callback)
       (unwind-protect
@@ -1150,27 +1151,29 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
   "Recovery keys are active in every Noema pane, editing or not."
   (with-temp-buffer
     (let ((my/noema--app-buffer (current-buffer)))
-      (setq-local xwidget-webkit-edit-mode nil)
-      (my/noema--sync-xwidget-recovery-mode)
-      (should my/noema-xwidget-recovery-mode)
-      (dolist (key '("d" "SPC" "q" "<down>" "S-<left>" "M-/" "M-y"
-                     "M-=" "M-S-<right>" "C-<tab>"))
-        (should (eq (key-binding (kbd key)) #'my/noema-xwidget-recover-key)))
-      ;; Cmd+Arrow is windmove from every window, a Noema pane included.
-      (should-not (eq (key-binding (kbd "M-<right>")) #'my/noema-xwidget-recover-key))
-      ;; Host Cmd chords must retain their Emacs bindings in recovery mode.
-      (should-not (eq (key-binding (kbd "M-x")) #'my/noema-xwidget-recover-key))
-      (should-not (eq (key-binding (kbd "M-w")) #'my/noema-xwidget-recover-key))
-      (should-not (eq (key-binding (kbd "M-q")) #'my/noema-xwidget-recover-key))
-      (should-not (eq (key-binding (kbd "M-o")) #'my/noema-xwidget-recover-key))
-      (should-not (eq (key-binding (kbd "M-O")) #'my/noema-xwidget-recover-key))
-      ;; Emacs sees a pane's keys only when WebKit lacks the native keyboard
-      ;; (the page handed it over), so recovery stays on while editing too.
-      (setq-local xwidget-webkit-edit-mode t)
-      (my/noema--sync-xwidget-recovery-mode)
-      (should my/noema-xwidget-recovery-mode)
-      (should (eq (key-binding (kbd "d")) #'my/noema-xwidget-recover-key))
-      (should (eq (key-binding (kbd "RET")) #'my/noema-xwidget-recover-key)))))
+      (cl-letf (((symbol-function 'my/noema--xwidget-buffer-p)
+                 (lambda (&optional _) t)))
+        (setq-local xwidget-webkit-edit-mode nil)
+        (my/noema--sync-xwidget-recovery-mode)
+        (should my/noema-xwidget-recovery-mode)
+        (dolist (key '("d" "SPC" "q" "<down>" "S-<left>" "M-/" "M-y"
+                       "M-=" "M-S-<right>" "C-<tab>"))
+          (should (eq (key-binding (kbd key)) #'my/noema-xwidget-recover-key)))
+        ;; Cmd+Arrow is windmove from every window, a Noema pane included.
+        (should-not (eq (key-binding (kbd "M-<right>")) #'my/noema-xwidget-recover-key))
+        ;; Host Cmd chords must retain their Emacs bindings in recovery mode.
+        (should-not (eq (key-binding (kbd "M-x")) #'my/noema-xwidget-recover-key))
+        (should-not (eq (key-binding (kbd "M-w")) #'my/noema-xwidget-recover-key))
+        (should-not (eq (key-binding (kbd "M-q")) #'my/noema-xwidget-recover-key))
+        (should-not (eq (key-binding (kbd "M-o")) #'my/noema-xwidget-recover-key))
+        (should-not (eq (key-binding (kbd "M-O")) #'my/noema-xwidget-recover-key))
+        ;; Emacs sees a pane's keys only when WebKit lacks the native keyboard
+        ;; (the page handed it over), so recovery stays on while editing too.
+        (setq-local xwidget-webkit-edit-mode t)
+        (my/noema--sync-xwidget-recovery-mode)
+        (should my/noema-xwidget-recovery-mode)
+        (should (eq (key-binding (kbd "d")) #'my/noema-xwidget-recover-key))
+        (should (eq (key-binding (kbd "RET")) #'my/noema-xwidget-recover-key))))))
 
 (ert-deftest my/noema-xwidget-recovery-normalizes-the-shared-key-payload ()
   (let ((plain (my/noema--xwidget-recovery-detail (aref (kbd "d") 0)))
@@ -1327,6 +1330,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
   (let* ((file (make-temp-file "noema-split" nil ".md"))
          (source (generate-new-buffer "*Noema-split-source*"))
          (xwidget-buffer (generate-new-buffer "*Noema-split-xwidget*"))
+         (my/noema-backend 'xwidget)
          (my/noema--port 4242)
          (my/noema--file-buffers (make-hash-table :test #'equal))
          (my/noema--client-buffers (make-hash-table :test #'equal))
@@ -4657,7 +4661,7 @@ selection untouched, so the pane keeps being reported as background."
     (should called)))
 
 (ert-deftest my/noema-bridge-visit-is-not-redirected-to-noema ()
-  "An interactive send from a pane reads the note; it must not reopen Noema."
+  "A bridged send reads the note without reopening Noema."
   (require 'noema-context)
   (let* ((file (make-temp-file "noema-bridge" nil ".md" "# A\n\nbody\n"))
          (pane (generate-new-buffer " *noema pane*"))
@@ -4665,19 +4669,17 @@ selection untouched, so the pane keeps being reported as background."
     (unwind-protect
         (with-current-buffer pane
           (setq-local my/noema-buffer-file-name file)
-          (cl-letf (((symbol-function 'my/noema--xwidget-buffer-p) (lambda (&optional _) t))
-                    ((symbol-function 'my/noema-open-file) (lambda (f) (setq redirected f)))
-                    ((symbol-function 'my/noema-command) #'ignore)
+          (cl-letf (((symbol-function 'my/noema-open-file) (lambda (f) (setq redirected f)))
                     ((symbol-function 'noema-context--send)
                      (lambda (&rest arguments)
                        (setq source-mode (with-current-buffer (find-buffer-visiting file)
                                            (derived-mode-p 'text-mode)))
                        (setq references (funcall (plist-get arguments :references)
                                                  (file-name-directory file) nil)))))
-            ;; What M-x does: an interactive command, outside batch semantics.
-            (let ((noninteractive nil)
-                  (this-command 'noema-context-send-buffer))
-              (noema-context-send-buffer)))
+            (pcase-let ((`(,source ,begin . ,end)
+                         (noema-md-bridge-region
+                          file (list :line-start 1 :line-end 3))))
+              (noema-md-bridge-run "agent" source begin end)))
           (should-not redirected)
           (should (equal (mapcar #'noema-context--reference-line references)
                          (list (file-name-nondirectory file))))
@@ -4688,6 +4690,67 @@ selection untouched, so the pane keeps being reported as background."
       (when-let* ((source (find-buffer-visiting file))) (kill-buffer source))
       (kill-buffer pane)
       (delete-file file))))
+
+(ert-deftest my/noema-portal-task-wiki-and-send-use-the-current-client ()
+  "Portal pages use the same task, Wiki and saved-selection command routes."
+  (require 'noema-context)
+  (let ((file (make-temp-file "noema-portal-commands" nil ".md" "# A\nbody\n"))
+        sent opened)
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local major-mode 'portal-web-mode)
+          (setq-local my/noema--client-id "portal-note")
+          (setq-local my/noema-buffer-file-name file)
+          (should (noema-md-bridge-pane-p))
+          (cl-letf (((symbol-function 'my/noema--post)
+                     (lambda (payload) (push payload sent)))
+                    ((symbol-function 'my/noema--open-hosted-surface)
+                     (lambda (payload) (setq opened payload))))
+            (my/noema-task-manager)
+            (my/noema-wiki-home)
+            (noema-context-send-buffer))
+          (should (equal (alist-get 'path opened) "/wiki"))
+          (should (equal (alist-get 'client opened) "portal-note"))
+          (should (equal (alist-get 'command (cadr sent)) "task-manager"))
+          (should (equal (alist-get 'client (cadr sent)) "portal-note"))
+          (should (equal (alist-get 'command (car sent)) "emacs-selection"))
+          (should (equal (alist-get 'client (car sent)) "portal-note"))
+          (let ((detail (alist-get 'detail (car sent))))
+            (should (equal (alist-get 'action detail) "agent"))
+            (should (equal (alist-get 'scope detail) "document"))
+            (noema-md-bridge--settle (alist-get 'requestId detail))))
+      (delete-file file))))
+
+(ert-deftest my/noema-portal-pages-return-from-buffer-list-and-reload-after-source-save ()
+  (require 'noema-md-bridge)
+  (let* ((file (make-temp-file "noema-portal-reload" nil ".md" "# A\n"))
+         (pane (generate-new-buffer " *Noema Portal undisp*"))
+         sent)
+    (unwind-protect
+        (progn
+          (with-current-buffer pane
+            (setq-local major-mode 'portal-web-mode)
+            (setq-local my/noema--client-id "portal-reload")
+            (setq-local my/noema-buffer-file-name file))
+          (should (memq pane (my/noema--undisplayed-buffers)))
+          (should (memq pane (noema-md-bridge--panes-for file)))
+          (cl-letf (((symbol-function 'my/noema-command)
+                     (lambda (command &optional detail)
+                       (push (list command detail) sent))))
+            (noema-md-bridge-notify-saved file))
+          (should (equal sent `(("reload-if-clean" ((file . ,file)))))))
+      (kill-buffer pane)
+      (delete-file file))))
+
+(ert-deftest my/noema-legacy-task-manager-command-uses-page-route ()
+  (require 'init-browser)
+  (let (sent)
+    (cl-letf (((symbol-function 'my/noema-task-manager)
+               (lambda () (interactive) (setq sent t)))
+              ((symbol-function 'my/xwidget--execute-script)
+               (lambda (&rest _) (ert-fail "Task manager used xwidget script"))))
+      (my/xwidget-open-task-manager))
+    (should sent)))
 
 (ert-deftest my/noema-bridge-prompts-get-the-keyboard ()
   "A bridged action releases the page's input and focuses its prompts."

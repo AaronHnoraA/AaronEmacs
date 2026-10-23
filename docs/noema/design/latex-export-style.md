@@ -50,22 +50,28 @@ than failing.
 | `@@revision(kind) [original] {advice: "..."; reason: "..."}` | `\\aaronrevision[kind]{original}{advice}{reason}` — the original stays underlined inline, the suggestion goes to the margin |
 | `@@todo(...) [title] {...}` / `@@itodo` | `\\aarontodo{title}` — an orange margin note. The planning attribute block is **never** exported |
 | `@@comment [text]` | `\\aaroncomment{text}` — inline, pink, prefixed `COMMENT:` |
-| `@@scomment [text]` | `\\sidecomment{text}` — a small in-text aside behind a thin orange rule, no prefix; breaks across pages |
+| `@@scomment [text]` | `\\sidecomment{text}` — a short orange mark in the text with the comment in the right margin; long notes can continue on the next page |
 | `@@project` / `@@milestone` / `@@clock` | **dropped** (planning bookkeeping, never exported) |
 | `#+begin meta ... #+end meta` | consumed for title/date/`annotations`; not emitted |
 | `#+begin tikz [id] ... #+end tikz` | native `tikzpicture` in the LaTeX body |
 
 ### Review annotations
 
-Todos, comments, side comments, and revisions are **exported by default**. Todos
-and revisions form an annotation column in the margin; a side comment is an
-explanatory aside, so it stays in the text flow where it can break across pages. Each kind is distinguishable by colour and
+Todos, comments, side comments, and revisions are **exported by default**. Todos,
+side comments, and revisions form an annotation column in the margin. A side
+comment has a short orange mark at its source position and a small orange arrow
+in the gutter beside the margin note. Todos and revisions use matching short
+gutter arrows, with no leader line crossing body text. Long notes are divided
+into page-sized pieces before `marginfix` places them in the margin, allowing
+them to continue on later pages without losing text. The `marginnotes` option on
+`noema-macros` reserves a 52 mm right margin only for documents with side
+comments. Each kind is distinguishable by colour and
 prefix, so a reviewed PDF can be read without the source:
 
 | Source | Placement | Colour | Prefix |
 |---|---|---|---|
 | `@@todo` / `@@itodo` | margin | orange | `TODO:` |
-| `@@scomment` | in-text aside | orange rule | none |
+| `@@scomment` | right margin, with an inline mark | orange | none |
 | `@@comment` | inline | pink | `COMMENT:` |
 | `@@revision(suggest)` | margin + inline underline | indigo | `REV:` |
 | `@@revision(question)` | margin + inline underline | amber | `Q:` |
@@ -77,12 +83,14 @@ The pre-kind colour spellings (`indigo`, `yellow`, `red`, `green`, `teal`) are
 accepted and normalize to the kind that already carried that hue, so an older
 note renders unchanged.
 
-Two constraints follow from `todonotes`:
+Placement constraints:
 
 - A margin note cannot be typeset in a moving argument or a tabular cell.
   Annotations on a heading or a pipe-table row degrade automatically to an
   inline form (`\\aarontodoinline`, `\\sidecommentinline`,
   `\\aaronrevisioninline`). This is a placement fallback, not an error.
+- A side comment in a footnote, minipage, or other box stays inline because a
+  margin note cannot be placed there. `@@comment` always remains inline.
 - A bracket-less `@@todo some text` takes its title to the **end of the line**
   (this is the planning DSL's grammar, identical to the editor). Mid-sentence,
   prefer the bracketed `@@todo [title]` form so the rest of the sentence is not

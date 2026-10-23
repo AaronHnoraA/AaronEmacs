@@ -261,7 +261,7 @@ Editor rendering: `src/cm6/extensions/visual/widgets/inline-commands.ts`.
 | `@@cite(namespace) [key1; key2] {locator: "p. 12"; prefix: "see"; suffix: …}` | citation from a bibliography namespace (`shared/bibliography-syntax.mjs`, `bibliography-fixtures.json`) |
 | `@@revision(kind) [original] {advice: "…"; reason: "…"}` | review suggestion; kinds `suggest`, `question`, `error`, `ok`, `note`; old colour names `indigo`, `yellow`, `red`, `green`, `teal` still read (`shared/revision-kinds.mjs`) |
 | `@@comment [text]`, `@@comment(true) [text]` | private comment, collapsed / always shown |
-| `@@scomment [text]` | side comment, an aside in the text flow |
+| `@@scomment [text]` | side comment, shown beside the text in the editor and LaTeX export; inside a footnote or box the LaTeX form stays inline, and long margin notes can continue across pages |
 | `@@part [title]`, `@@section(level) [title] {id: …}` | semantic headings; `level` is empty/`sec`/`section`, `sub`, `subsub`, `subsubsub` (`src/semantic-outline.ts`) |
 | `@@latexmk(mark)` | LaTeX layout mark: `newline`, `nbsp`, `allowbreak`, `noindent`, `newpage`, `clearpage`, `nopagebreak`, `keepnext`, `appendix` (`shared/latex-marks.mjs`) |
 | `@@slides(reveal) []`, `@@slides(vertical) []` | slide deck markers (below) |
