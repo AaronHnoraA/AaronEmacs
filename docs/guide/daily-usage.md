@@ -241,7 +241,7 @@ Noema 任务使用 `@@todo(state) [text] {key: value}`，例如
 原生 `c` 和 Web New todo 共用 Task / Deadline / Appointment 模板；`C-u c`
 可改目标 Markdown 文件。保存失败保留输入，原生再按 `c` 继续修改。
 `my/noema-agenda-capture-templates` 可配置字段、默认值和按日期命名的文件，
-修改后重启 Noema host；配置示例见 [Agenda 文档](../design/agenda.md#shared-capture-templates)。
+修改后重启 Noema host；配置示例见 [Agenda 文档](../noema/guide/agenda.md#shared-capture-templates)。
 项目明确进入后才扫描；切到无项目关联的 Perspective，或使用项目菜单 `l` /
 `M-x my/project-leave`，释放项目监听和缓存，知识库继续常驻。
 原生 `I/O` 开始/停止计时，`v k` 查看报表和待回写记录，`R/K` 处理待回写冲突。
@@ -250,7 +250,7 @@ Apple 集成先用 `my/noema-agenda-apple-enable` 启用相应类型，再用原
 `v a` / Web Global attention 查看全局关注，刷新不会激活未进入的项目；
 `RET` 才进入源项目。个人 Apple 数据和跨设备同步尚未完成实机验证。
 完整语法和 view-model 见
-[`agenda.md`](../design/agenda.md)。
+[`agenda.md`](../noema/guide/agenda.md)。
 
 Graph 搜索框支持全文词和
 `tag:` / `alias:` / `path:` / `title:` 过滤，并会提示 tag / alias / path 等候选。

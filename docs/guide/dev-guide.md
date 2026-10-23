@@ -611,7 +611,7 @@ host 的 `noema:api:knowledge:search` 通道，内核返回已经排好序的结
   回到对本地快照做 `completing-read`。
 - 语法与网页端搜索框相同：`Namespace:` 前缀、`tag:` `path:` `file:` `content:`
   `line:(a b)`、`"短语"`、`-词`、`OR`、`/正则/`。完整说明在
-  `site-lisp/noema/docs/wiki-workspace.md` 的 Search 一节。
+  `docs/noema/design/wiki-workspace.md` 的 Search 一节。
 - 确认一个没有任何页面叫这个名字的标题，会带着它打开 New Page 工作台。
 - host 没运行时，find-note 退回到 Emacs 自己扫描的笔记列表，只能按 ID 补全。
 
@@ -758,7 +758,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   同时执行的 Run 数由 `noema-agent-worker-max-concurrent-runs` 限制，超出的按顺序
   在 `noema-agent-worker--slot-waiting` 等待。同一文件的并发编辑由 kernel 权限策略
   转为人工决定（`policyReason`），不拒绝。设计来源与取舍见
-  `site-lisp/noema/docs/pisper-agent-lifecycle-study.md`。
+  `docs/noema/records/audits/pisper-agent-lifecycle-study-2026-09.md`。
 - 编辑器上下文（`noema-context.el`）：挑选完全复用 gptel 的 `gptel-context` 与
   `*gptel-context*` 检视 buffer，只有一份选择。发送时把它解析成引用
   （`noema-context-references`），再构造内容块：一个 text 块列出

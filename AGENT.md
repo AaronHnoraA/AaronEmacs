@@ -346,7 +346,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   `skills.lock.json` beside that library is the single upstream record, maintained by
   `noema-skill-upstream` (install/check/diff/update/rollback).  Do not copy a
   Skill into a pack, hand-edit a locked Skill in place, or add another
-  installer.  See `site-lisp/noema/docs/capabilities.md`.
+  installer.  See `docs/noema/design/capabilities.md`.
 - Config registry: the `config` package under `site-lisp/config/`
   (`config-register`, `config-register-hook`, `config-register-file`,
   `config-get`, `config-set`, `config-reset`, `config-board`). When a setting
@@ -530,7 +530,7 @@ Org/Jupyter/research:
   versioned scoped owner, including protected-buffer and repeat semantics.
   Do not reintroduce regex or one-shot CLI task scans, direct prefix edits,
   temporary Org sources, or fallback writers after an API failure. See
-  `docs/design/agenda.md` for the source lifecycle and editor snapshot contracts.
+  `docs/noema/guide/agenda.md` for the source lifecycle and editor snapshot contracts.
 - Org is intentionally feature-rich; do not add remote/large-buffer downgrades
   unless explicitly requested.
 - Org auto-insert is intentionally disabled by default to avoid capture/roam
@@ -595,7 +595,7 @@ Noema Markdown panes:
   `my/noema--release-xwidget-input-buffer`, which makes that announcement.
 - The page's Vim layer (`site-lisp/noema/pages/vim-lite.ts`) takes native
   Vim as its reference, checked against results recorded from Neovim
-  (`tests/vim-native-parity.test.ts`); `site-lisp/noema/docs/vim.md` lists the
+  (`tests/vim-native-parity.test.ts`); `docs/noema/guide/vim.md` lists the
   few deliberate differences.  Change behaviour by re-recording, not from
   memory.  Outside Insert a key an input method has taken is dropped on every
   path, the xwidget guard included: it is neither a command nor text.

@@ -59,7 +59,7 @@ It is probably not the right fit if your priority is:
 
 ## Documentation
 
-Detailed operational documentation lives in [`docs/`](docs/). The documents themselves are written in Chinese; the README files stay in English.
+Detailed operational documentation lives in [`docs/`](docs). The documents themselves are written in Chinese; the README files stay in English.
 
 - Doc index: [docs/README.md](docs/README.md)
 - First setup and dependencies: [docs/guide/quick-start.md](docs/guide/quick-start.md)
@@ -85,13 +85,13 @@ Detailed operational documentation lives in [`docs/`](docs/). The documents them
   Dependency restore/export entry point for the bootstrap workflow.
 - [package-lock.el](package-lock.el)
   Generated dependency lock file.
-- [lisp/](lisp/)
+- [lisp/](lisp)
   Main configuration modules.
-- [lisp/lang/](lisp/lang/)
+- [lisp/lang/](lisp/lang)
   Language-specific modules.
-- [site-lisp/](site-lisp/)
+- [site-lisp/](site-lisp)
   Vendored local components.
-- [docs/](docs/)
+- [docs/](docs)
   Operational documentation and workflow notes.
 
 ## Environment Assumptions

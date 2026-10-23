@@ -123,7 +123,7 @@ Noema 的 `wiki.db` diagnostics 目前只有结构类代码：`duplicate-page-id
 
 ## 附：本次核对中发现的 vault 现状偏差
 
-这些问题不是代码 bug，但与 `site-lisp/noema/docs/wiki-workspace.md` 的描述不一致，建议另行处理：
+这些问题不是代码 bug，但与 `docs/noema/design/wiki-workspace.md` 的描述不一致，建议另行处理：
 
 1. `public/Philosophy` 不是 Git 仓库，因此其中 2 篇笔记未被索引（`wiki.db` 中唯一的诊断 `non-git-directory`）。
 2. 文档中的 Deferred Legacy migration 规划了 `public: Philosophy, QC, books, learn, math, papers, references` 与 `private: daily, project, scratch`。实际上 `books/learn/papers/references/daily/project/scratch` 全部位于 `private/research/` 之下，`public/AI`、`Bio`、`CS` 是空仓库。

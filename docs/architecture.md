@@ -2,7 +2,7 @@
 
 本文是 Emacs 配置与 Noema 两个仓库的结构地图：每层在哪、谁依赖谁、改动该落在哪一层。
 各层的契约细节不在这里重复，见文中链接的专题文档。Noema 自己的目录地图见
-[`site-lisp/noema/docs/architecture/repository-map.md`](../site-lisp/noema/docs/architecture/repository-map.md)。
+[`docs/noema/architecture.md`](noema/architecture.md)。
 
 ## 两个仓库
 
@@ -16,6 +16,8 @@
 - Noema 拥有知识/研究的数据与服务：Markdown 编辑面（CM6）、Node host、Go kernel、
   `.noema` 工作文档模型、Agent/Skill/MCP 能力，以及一组随产品发布的 Elisp（`lisp/noema-*.el`）。
 - Emacs 是 Noema 唯一的第一方 UI；Node host 与 Go kernel 是 headless 服务。
+- 文档只有一棵树：Noema 的文档也在本仓库 `docs/noema/`，Noema 仓库只保留贴着代码的
+  `AGENTS.md`、`CLAUDE.md`、`README.md`、`UPSTREAMS.md`。
 - 两个仓库分别提交。改动跨越边界时（例如 xwidget 协议、`host.json`、共享 KaTeX 宏）
   两边的测试和文档要在同一轮里一起更新。
 
@@ -73,8 +75,9 @@ templates/            auto-insert 模板；templates/noema 链到 Noema 模板�
 bin/                  emacs-app（后台应用唯一入口）及辅助脚本
 tools/                raycast-emacs（唯一外部控制面）、macos-background 原生源码等
 test/                 ERT 测试（*-tests.el），按模块命名
-docs/                 文档，入口 docs/README.md：guide/ 用法、design/ 现行机制、
-                      acceptance/ 验收、ops/ 运维、records/ 审计与历史（带日期，不更新）
+docs/                 两个仓库的全部文档，入口 docs/README.md：guide/ 用法、design/ 现行机制、
+                      acceptance/ 验收、ops/ 运维、records/ 审计与历史（带日期，不更新）；
+                      noema/ 下是 Noema 的文档，分类相同
 ```
 
 ### 横切机制

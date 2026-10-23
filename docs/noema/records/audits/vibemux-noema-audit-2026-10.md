@@ -2,7 +2,7 @@
 
 审计固定在 [yoko19191/vibemux `efcf704`](https://github.com/yoko19191/vibemux/tree/efcf704daef899b2a8448e66396b9e7176350b88) 和 [UgOrange/vibemux `fc1b51a`](https://github.com/UgOrange/vibemux/tree/fc1b51a6c2c6b37b7dd6416914a138b680d7c65f)。两者同名，但不是同一套实现：前者是 Tauri/Rust/Svelte 终端复用器，后者是 Go/Bubble Tea 的 agent CLI TUI。核查的是会话创建、输出路由、后台驻留、恢复、提醒、权限、配置和键盘导航的实际路径；图标、字体、纯样式与介绍性文字不作为行为依据。
 
-Noema 对照边界：[`noema-agent-acp.el`](../../../site-lisp/noema/lisp/noema-agent-acp.el) 负责 ACP 会话，[`noema-agent-render.el`](../../../site-lisp/noema/lisp/noema-agent-render.el) 负责隐藏渲染，[`noema-sessions.el`](../../../site-lisp/noema/lisp/noema-sessions.el) 与 [kernel `session_names.go`](../../../site-lisp/noema/kernel/noema/research/session_names.go) 负责持久身份和注意力，[`noema-agent-inbox.el`](../../../site-lisp/noema/lisp/noema-agent-inbox.el) 负责跨项目总览，[`noema-agent-worker.el`](../../../site-lisp/noema/lisp/noema-agent-worker.el) 负责 Run、权限和通知；终端入口是 [`init-vterm-popup.el`](../lisp/init-vterm-popup.el)。Noema 的 Agent 窗口是 Emacs 内真正的 agent-shell buffer，不是终端转录副本。
+Noema 对照边界：[`noema-agent-acp.el`](../../../../site-lisp/noema/lisp/noema-agent-acp.el) 负责 ACP 会话，[`noema-agent-render.el`](../../../../site-lisp/noema/lisp/noema-agent-render.el) 负责隐藏渲染，[`noema-sessions.el`](../../../../site-lisp/noema/lisp/noema-sessions.el) 与 [kernel `session_names.go`](../../../../site-lisp/noema/kernel/noema/research/session_names.go) 负责持久身份和注意力，[`noema-agent-inbox.el`](../../../../site-lisp/noema/lisp/noema-agent-inbox.el) 负责跨项目总览，[`noema-agent-worker.el`](../../../../site-lisp/noema/lisp/noema-agent-worker.el) 负责 Run、权限和通知；终端入口是 [`init-vterm-popup.el`](../lisp/init-vterm-popup.el)。Noema 的 Agent 窗口是 Emacs 内真正的 agent-shell buffer，不是终端转录副本。
 
 ## 功能与取舍
 
@@ -42,9 +42,9 @@ Noema 对照边界：[`noema-agent-acp.el`](../../../site-lisp/noema/lisp/noema-
 
 ## 本轮落地与验证
 
-- [`noema-agent-inbox.el`](../../../site-lisp/noema/lisp/noema-agent-inbox.el)：`!` 跳到下一个有权限、输入、失败或未读信息的持久 Session；跨项目循环，跳过无注意力的行与错误行。`u` 对所选项目和 Session 调用已有的 `session:name:read`，成功后刷新总览。失败标记仍由 kernel 投影，读取不清除。
-- [`noema-agent-worker.el`](../../../site-lisp/noema/lisp/noema-agent-worker.el) 与 Inbox：待决请求数量变化发出带 worker 的 hook；Inbox 的可见 ACP 事件只重绘，Run/请求事件在 400 ms 内合并为一次 Project 查询。隐藏期间不查询，重新显示后补查；查询仍用原有 Session API，保留过期响应隔离。
-- [`noema-agent-inbox-tests.el`](../../../site-lisp/noema/tests/elisp/noema-agent-inbox-tests.el)：覆盖跨项目循环、同名 Session 身份、事件合并、隐藏时不查询以及重新显示时补查。定向 ERT 7/7 通过。
+- [`noema-agent-inbox.el`](../../../../site-lisp/noema/lisp/noema-agent-inbox.el)：`!` 跳到下一个有权限、输入、失败或未读信息的持久 Session；跨项目循环，跳过无注意力的行与错误行。`u` 对所选项目和 Session 调用已有的 `session:name:read`，成功后刷新总览。失败标记仍由 kernel 投影，读取不清除。
+- [`noema-agent-worker.el`](../../../../site-lisp/noema/lisp/noema-agent-worker.el) 与 Inbox：待决请求数量变化发出带 worker 的 hook；Inbox 的可见 ACP 事件只重绘，Run/请求事件在 400 ms 内合并为一次 Project 查询。隐藏期间不查询，重新显示后补查；查询仍用原有 Session API，保留过期响应隔离。
+- [`noema-agent-inbox-tests.el`](../../../../site-lisp/noema/tests/elisp/noema-agent-inbox-tests.el)：覆盖跨项目循环、同名 Session 身份、事件合并、隐藏时不查询以及重新显示时补查。定向 ERT 7/7 通过。
 - 上游 yoko `cargo test --lib` 为 22/22。Noema 本轮定向 ERT 7/7、`make research-test`、`make jupyter-test`、kernel `go test -tags fts5 ./...` 均通过。完整 `make test` 在与根配置测试并发的首轮有 3 个编辑器性能/布局测试失败；这 3 项单独复测通过，随后独立重跑完整 `make test` 为 2713 通过、16 跳过。
 - `make build` 首次被同时进行的研究记忆改动挡在 TypeScript 检查：测试引用了新文件 `server/lib/research-memory.mjs`，当时尚无对应 `.d.mts`，报 TS7016。该声明随后由那组改动补齐；本轮未修改它，并在当前工作区重跑 `make build`、`make install`，均通过。构建仍报告原有字体路径和大 chunk 警告。
 - 验证期间共享工作区又引入粘贴接口改动，曾使旧的 clipboard 断言与新参数不符，且 5 MB 拖选性能测试偶有耗时阈值失败。对应测试更新后，两组定向测试 15/15 通过；按当时最新树独立重跑完整 `make test` 为 2749 通过、16 跳过。相关粘贴实现和测试未由本轮修改。
@@ -54,6 +54,6 @@ Noema 对照边界：[`noema-agent-acp.el`](../../../site-lisp/noema/lisp/noema-
 
 两个上游都把状态事件绑定到具体会话：[yoko 的 `sessionUpdated`](https://github.com/yoko19191/vibemux/blob/efcf704daef899b2a8448e66396b9e7176350b88/apps/desktop/src/App.svelte#L482-L493) 先取单会话快照，失败才回退到整个 workspace；[UgOrange 的 `SessionOutputMsg`](https://github.com/UgOrange/vibemux/blob/fc1b51a6c2c6b37b7dd6416914a138b680d7c65f/internal/ui/update.go#L159-L185) 更新指定 project 的终端和 tab。Noema 上轮虽合并事件，但任意一个 worker 事件会重查所有已知 Project；有 N 个 Project 时一次本地审批变化就会发 N 个 `session:names` 请求。
 
-现在 [`noema-agent-inbox.el`](../../../site-lisp/noema/lisp/noema-agent-inbox.el) 根据 worker 的规范 Project root，只查询变化的 Project；同一合并窗口内重复事件只查一次，其他 Project 的行保留。`u` 标记已读成功后也只刷新所属 Project。全量 `g`、初次打开和隐藏后重新显示仍同步所有已知 Project；新 worker Project 会加入已知根。每个 Project 的请求另有序号，慢的旧回包不能覆盖更新的会话列表。该优化复用现有 Session API，没有改 host 协议，也没有按终端文本猜测状态。
+现在 [`noema-agent-inbox.el`](../../../../site-lisp/noema/lisp/noema-agent-inbox.el) 根据 worker 的规范 Project root，只查询变化的 Project；同一合并窗口内重复事件只查一次，其他 Project 的行保留。`u` 标记已读成功后也只刷新所属 Project。全量 `g`、初次打开和隐藏后重新显示仍同步所有已知 Project；新 worker Project 会加入已知根。每个 Project 的请求另有序号，慢的旧回包不能覆盖更新的会话列表。该优化复用现有 Session API，没有改 host 协议，也没有按终端文本猜测状态。
 
 本次追加验证：定向 ERT 9/9（含所属 Project 查询、重复事件合并、旧回包隔离），`make research-test`、`make jupyter-test`、kernel `go test -tags fts5 ./...`、`make build`、`make install` 均通过。完整 `make test` 为 2765 通过、16 跳过、1 项 5 MB 拖选性能阈值失败（p95 17.62 ms，阈值 16 ms）；该项单独复测 3/3 通过，且不涉及本次 Elisp 路径。

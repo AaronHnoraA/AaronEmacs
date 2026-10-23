@@ -1,6 +1,6 @@
 # Agent Fleet → Noema / Emacs AI 工具箱审计（2026-10-03）
 
-审计固定在 [Hirozy/agent-fleet `f23a0d4`](https://github.com/Hirozy/agent-fleet/tree/f23a0d484e1d9a10c263c2a0c5fa395436c77607)（约 1.1 万行 Elisp，13 个源文件）。对照对象是本配置的 AI 工具箱：[`init-ai-ide.el`](../../../lisp/init-ai-ide.el)（agent-shell/ACP 放置、`C-c A`）、Noema 的 [`noema-agent-acp.el`](../../../site-lisp/noema/lisp/noema-agent-acp.el)、[`noema-sessions.el`](../../../site-lisp/noema/lisp/noema-sessions.el)、[`noema-agent-inbox.el`](../../../site-lisp/noema/lisp/noema-agent-inbox.el)、[`noema-agent-abtop.el`](../../../site-lisp/noema/lisp/noema-agent-abtop.el)、[`noema-context.el`](../../../site-lisp/noema/lisp/noema-context.el)，以及终端入口 [`init-vterm-popup.el`](../lisp/init-vterm-popup.el)。
+审计固定在 [Hirozy/agent-fleet `f23a0d4`](https://github.com/Hirozy/agent-fleet/tree/f23a0d484e1d9a10c263c2a0c5fa395436c77607)（约 1.1 万行 Elisp，13 个源文件）。对照对象是本配置的 AI 工具箱：[`init-ai-ide.el`](../../../../lisp/init-ai-ide.el)（agent-shell/ACP 放置、`C-c A`）、Noema 的 [`noema-agent-acp.el`](../../../../site-lisp/noema/lisp/noema-agent-acp.el)、[`noema-sessions.el`](../../../../site-lisp/noema/lisp/noema-sessions.el)、[`noema-agent-inbox.el`](../../../../site-lisp/noema/lisp/noema-agent-inbox.el)、[`noema-agent-abtop.el`](../../../../site-lisp/noema/lisp/noema-agent-abtop.el)、[`noema-context.el`](../../../../site-lisp/noema/lisp/noema-context.el)，以及终端入口 [`init-vterm-popup.el`](../lisp/init-vterm-popup.el)。
 
 上游测试：本机 Emacs 31.0.91 上 `make test`（含 `byte-compile-error-on-warn`）420/420 通过。本机没有 `herdr` 与 Ghostel，因此未跑 `make test-live`，与 Herdr 服务端交互的结论均来自源码和 [`docs/PROTOCOL.md`](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/docs/PROTOCOL.md)。
 
@@ -11,7 +11,7 @@ Agent Fleet 是 [Herdr](https://github.com/herdrdev/herdr) 的 Emacs 前端：ag
 | 冲突 | 上游实现 | 本配置规则 |
 |---|---|---|
 | 第二套 agent 运行时与会话注册表 | Herdr 持有 agent 进程与生命周期；Fleet 维护自己的 agent/workspace/task 缓存。见 [`herdr.el` 同步](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/herdr.el#L173-L222)。 | 所有 agent 会话由 `noema-agent-acp-adopt` 按项目登记，Sessions/Inbox/abtop 只有一个来源。与不暴露 Eglot 的理由相同：不并存一个未受管的第二客户端。 |
-| 只能在本机 | 传输是 `make-network-process :path` 的本机 Unix socket（[`herdr-protocol.el`](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/herdr-protocol.el#L338)）；agent 的 PATH/环境来自 Herdr 服务端进程而非 workspace 环境 capsule。 | agent 必须跟随 workspace 的 target 放置，网络必须走 `remote-channel`（见 [remote-framework](../../design/remote-framework.md)）。Noema 的 ACP 会话已经满足本机/远程同一路径。 |
+| 只能在本机 | 传输是 `make-network-process :path` 的本机 Unix socket（[`herdr-protocol.el`](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/herdr-protocol.el#L338)）；agent 的 PATH/环境来自 Herdr 服务端进程而非 workspace 环境 capsule。 | agent 必须跟随 workspace 的 target 放置，网络必须走 `remote-channel`（见 [remote-framework](../../../design/remote-framework.md)）。Noema 的 ACP 会话已经满足本机/远程同一路径。 |
 | 状态来自屏幕识别 | `agent_status` 由 Herdr 对 PTY 画面做 agent 识别（协议中的 `screen_detection_skipped` 字段，见 [PROTOCOL.md](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/docs/PROTOCOL.md#L214)）。 | 与 [Vibemux 审计](vibemux-noema-audit-2026-10.md) 的决定一致：状态以结构化 ACP 事件与 kernel Run 事实为准，不从终端文本推断。 |
 
 因此不安装、不 vendor、不以 package-vc 锁定 Agent Fleet。值得吸收的是两项 Noema 当前**确实缺少**的机制（见下文 P1、P2），按 Noema 自己的边界实现。
@@ -44,7 +44,7 @@ Agent Fleet 是 [Herdr](https://github.com/herdrdev/herdr) 的 Emacs 前端：ag
 - 放置：在 Project workspace 所在 target 上用 `remote-process-file` 执行 `git worktree add/remove`，worktree 路径用 `/fs:TARGET:/…` 表示，agent 进程经现有 `my/agent-shell-process-directory` 启动在那里。本机走同一条代码路径，不判断 `file-remote-p`。
 - 归属：kernel 的 Session 记录发起 Project 和 worktree 路径，Inbox 按发起 Project 归组，不改 D-038 的 Project 定义；worktree 不得创建在 vault 内。
 - 上下文：按发现 1 处理 `noema-context`，把引用映射到 worktree。
-- 测试：本机与 Aaron-PC 远程各一组（创建、发送引用、Magit、脏 worktree 拒删、强制删除），按 [remote-parity](../../acceptance/remote-parity.md) 补齐。
+- 测试：本机与 Aaron-PC 远程各一组（创建、发送引用、Magit、脏 worktree 拒删、强制删除），按 [remote-parity](../../../acceptance/remote-parity.md) 补齐。
 
 **P2：持久的并行尝试组。** 依赖 P1。组与成员存在 kernel，聚合规则借用上游：全部 done 才算 done，缺失成员算 failed，一个成员完成不终止其他成员。Inbox 中以组为单位显示，组内并排比较各成员的 diff。最终选用哪个结果由人决定，不自动合并。
 
@@ -52,23 +52,23 @@ Agent Fleet 是 [Herdr](https://github.com/herdrdev/herdr) 的 Emacs 前端：ag
 
 ## 本轮落地与验证（P1）
 
-- [`noema-agent-worktree.el`](../../../site-lisp/noema/lisp/noema-agent-worktree.el)：`C-c A w` / `noema-agent-worktree-start` 从 Project workspace 当前所在的分支切出 `noema/<名字>`，在仓库旁边的 `<仓库名>.noema-worktrees/<名字>/` 建 linked worktree，在 workspace 在 worktree 中的对应目录启动 Codex/Claude/OpenCode，会话登记在原 Project 下，名为 `worktree/<名字>`。分出点记在 `branch.<分支>.noemaBase`，它同时标记这个 worktree 是 Noema 建的。持久 Session 本来就记录 `executionTarget`，所以恢复会话会回到原来的 worktree，不需要改 kernel。
+- [`noema-agent-worktree.el`](../../../../site-lisp/noema/lisp/noema-agent-worktree.el)：`C-c A w` / `noema-agent-worktree-start` 从 Project workspace 当前所在的分支切出 `noema/<名字>`，在仓库旁边的 `<仓库名>.noema-worktrees/<名字>/` 建 linked worktree，在 workspace 在 worktree 中的对应目录启动 Codex/Claude/OpenCode，会话登记在原 Project 下，名为 `worktree/<名字>`。分出点记在 `branch.<分支>.noemaBase`，它同时标记这个 worktree 是 Noema 建的。持久 Session 本来就记录 `executionTarget`，所以恢复会话会回到原来的 worktree，不需要改 kernel。
 - 放置：所有 Git 调用都经 `process-file` 在 Emacs 目录中执行，传给 Git 的是 checkout 内的相对路径。Git 打印的目标原生路径只在原生路径之间比较，不拼回 Emacs 名，因此本机、`/fs:local:` 与远程 target 走同一条代码路径。临时 buffer 里会带上调用方的 `process-environment`/`exec-path`。
-- 发现 1 的处理：[`noema-context.el`](../../../site-lisp/noema/lisp/noema-context.el) 把主 checkout 文件的引用改写成会话 worktree 里的同名文件，比较用 `file-in-directory-p`，会解析符号链接（Git 打印的是解析后的路径）。worktree 里没有这个文件就报错，不会退回主 checkout。
+- 发现 1 的处理：[`noema-context.el`](../../../../site-lisp/noema/lisp/noema-context.el) 把主 checkout 文件的引用改写成会话 worktree 里的同名文件，比较用 `file-in-directory-p`，会解析符号链接（Git 打印的是解析后的路径）。worktree 里没有这个文件就报错，不会退回主 checkout。
 - 审阅：Sessions 列表与 Inbox 新增 `m`（Magit status）和 `d`。worktree 会话的 `d` 是工作区对分出点 merge-base 的 diff，已提交和未提交的改动一起显示；普通会话只显示未提交改动。
 - 清理：`noema-agent-worktree-remove` 只列出 Noema 建的 worktree。还有会话在里面工作时拒绝删除（加 force 也一样）；有未提交改动时需要前缀参数；分支始终保留。
-- 测试：[`noema-agent-worktree-tests.el`](../../../site-lisp/noema/tests/elisp/noema-agent-worktree-tests.el) 用真实临时仓库覆盖了 9 项：创建与重名拒绝、子目录定位、主 checkout 引用改写与缺文件报错、经符号链接的改写、调用方环境保留、`noema-context` 引用、列出与删除的三道保护、diff 从分出点开始、名字规整。已加入 `make research-test`，和 `noema-context` 测试一起 38/38 通过；改动文件 byte-compile 无警告。另用 `/fs:local:` 逻辑路径实际跑了创建、checkout、引用改写和列出，结果与原生路径一致。
-- **未完成**：Aaron-PC 与 Aaron-PC-Remote 本轮 SSH 都连不上，远程 target 的真机回归还没有跑。按 [remote-parity](../../acceptance/remote-parity.md)，远程这一列仍算未验证。P2（持久的并行尝试组）需要 kernel schema，留待下一轮。
+- 测试：[`noema-agent-worktree-tests.el`](../../../../site-lisp/noema/tests/elisp/noema-agent-worktree-tests.el) 用真实临时仓库覆盖了 9 项：创建与重名拒绝、子目录定位、主 checkout 引用改写与缺文件报错、经符号链接的改写、调用方环境保留、`noema-context` 引用、列出与删除的三道保护、diff 从分出点开始、名字规整。已加入 `make research-test`，和 `noema-context` 测试一起 38/38 通过；改动文件 byte-compile 无警告。另用 `/fs:local:` 逻辑路径实际跑了创建、checkout、引用改写和列出，结果与原生路径一致。
+- **未完成**：Aaron-PC 与 Aaron-PC-Remote 本轮 SSH 都连不上，远程 target 的真机回归还没有跑。按 [remote-parity](../../../acceptance/remote-parity.md)，远程这一列仍算未验证。P2（持久的并行尝试组）需要 kernel schema，留待下一轮。
 
 ## 第二轮吸收（2026-10-03）
 
-继续对照上游 [ROADMAP](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/ROADMAP.md) 的 P1“Attention workflow”和 Fleet 对所有 agent 的 `blocked`/`done` 提醒，找到 Noema 的一个缺口：系统通知与注意力只来自 Run（[`noema-agent-worker.el`](../../../site-lisp/noema/lisp/noema-agent-worker.el) 的 `--notify` 只在 Run 结束和 Run 的权限请求时触发）。手动会话、worktree 会话、popup 和恢复的对话请求权限或答完一轮时，没有任何提示。同时开几个 worktree 会话后离开，正好就是这种情况。
+继续对照上游 [ROADMAP](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/ROADMAP.md) 的 P1“Attention workflow”和 Fleet 对所有 agent 的 `blocked`/`done` 提醒，找到 Noema 的一个缺口：系统通知与注意力只来自 Run（[`noema-agent-worker.el`](../../../../site-lisp/noema/lisp/noema-agent-worker.el) 的 `--notify` 只在 Run 结束和 Run 的权限请求时触发）。手动会话、worktree 会话、popup 和恢复的对话请求权限或答完一轮时，没有任何提示。同时开几个 worktree 会话后离开，正好就是这种情况。
 
-- [`noema-agent-acp.el`](../../../site-lisp/noema/lisp/noema-agent-acp.el)：每个登记的 agent-shell 会话都订阅 agent-shell 自己发出的结构化 `permission-request` 与 `turn-complete` 事件，不从终端文本推断。buffer 不在屏幕上时设置 `noema-agent-acp-attention`（`permission`/`done`）；Emacs 不在前台时经 `noema-agent-acp-notify-function` 发通知，正文带上会话名。被打断的一轮（`cancelled`）、ephemeral/probe 会话不提醒。窗口显示该 buffer、`noema-agent-acp-show-buffer` 或 `u` 会清除标记。
+- [`noema-agent-acp.el`](../../../../site-lisp/noema/lisp/noema-agent-acp.el)：每个登记的 agent-shell 会话都订阅 agent-shell 自己发出的结构化 `permission-request` 与 `turn-complete` 事件，不从终端文本推断。buffer 不在屏幕上时设置 `noema-agent-acp-attention`（`permission`/`done`）；Emacs 不在前台时经 `noema-agent-acp-notify-function` 发通知，正文带上会话名。被打断的一轮（`cancelled`）、ephemeral/probe 会话不提醒。窗口显示该 buffer、`noema-agent-acp-show-buffer` 或 `u` 会清除标记。
 - 不重复：worker 注册 `noema-agent-acp-run-owned-functions`，有 open Run 的 buffer 让给 host 的 Run attention。
 - 呈现：Sessions 列表与 Inbox 的第一列在 host 没有给出 attention 时显示这个标记。Inbox 按它排序（权限请求与 host 的 `permission` 同级），`!` 轮转也包括无持久记录的本地行。
 - P1 补完：发给 worktree 会话的区域引用，若那几行在 worktree 副本里内容不同，就拒绝发送（行范围用与引用相同的计算方式，止于行首的选区不含该行），不再只是文档里的提醒。
-- 测试：[`noema-agent-attention-tests.el`](../../../site-lisp/noema/tests/elisp/noema-agent-attention-tests.el) 5 项（隐藏时标记与显示时清除、只在失焦时通知、可见/打断/Run 所有/ephemeral 时跳过、worker 所有权、Inbox 排序/轮转/读），worktree 测试新增区域一致性 1 项。`make research-test` 五组全部通过（2、110、15、197、115）；改动文件 byte-compile 无警告。
+- 测试：[`noema-agent-attention-tests.el`](../../../../site-lisp/noema/tests/elisp/noema-agent-attention-tests.el) 5 项（隐藏时标记与显示时清除、只在失焦时通知、可见/打断/Run 所有/ephemeral 时跳过、worker 所有权、Inbox 排序/轮转/读），worktree 测试新增区域一致性 1 项。`make research-test` 五组全部通过（2、110、15、197、115）；改动文件 byte-compile 无警告。
 
 仍未做：Aaron-PC 远程真机回归（本轮未再尝试，状态同上）。上游 ROADMAP 的其余条目（Session 默认名与 attach 端点固定、Ghostel、Consult 适配、child-frame）都属于 Herdr/终端前端，不适用于 Noema。
 
@@ -76,8 +76,8 @@ Agent Fleet 是 [Herdr](https://github.com/herdrdev/herdr) 的 Emacs 前端：ag
 
 原计划把组存进 kernel，但实现时发现不需要：组的成员就是那些 worktree 分支，把组名记在各分支的 Git 配置 `branch.<b>.noemaGroup`（与 `noemaBase` 同处）即可。这样满足了上游 ROADMAP“Parallel-task recovery”的要求（只持久化最小分组元数据，状态从活模型派生，不形成第二个生命周期来源），持久性随 worktree 本身，也不必改 schema。上游的 `agent-fleet--tasks` 只在内存里（发现 3），Noema 这一版重启后不丢。
 
-- [`noema-agent-worktree-board.el`](../../../site-lisp/noema/lisp/noema-agent-worktree-board.el)：`C-c A n` 为每个 (agent . prompt) 建 worktree 会话，就绪后发提示；单个失败只报告，不中断其余（上游 [L204-L223](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/agent-fleet-parallel.el#L204-L223) 的语义）。重名的组拒绝。交互入口仍是“同题多解”（发现 4），Lisp 入口支持每份不同提示。
+- [`noema-agent-worktree-board.el`](../../../../site-lisp/noema/lisp/noema-agent-worktree-board.el)：`C-c A n` 为每个 (agent . prompt) 建 worktree 会话，就绪后发提示；单个失败只报告，不中断其余（上游 [L204-L223](https://github.com/Hirozy/agent-fleet/blob/f23a0d484e1d9a10c263c2a0c5fa395436c77607/agent-fleet-parallel.el#L204-L223) 的语义）。重名的组拒绝。交互入口仍是“同题多解”（发现 4），Lisp 入口支持每份不同提示。
 - 状态：成员 waiting/working/done/idle/closed，取自会话的 attention 与 busy；整组 waiting > working > settled。上游把消失的成员算作 failed；这里关掉的会话不是失败，worktree 与分支还在，所以算 closed，组可以 settled。
 - 看板 `C-c A A`：列出组名与整组状态、分支、agent、成员状态和改动。改动 = 自分出点起的提交数 + 工作区对 merge-base 的 shortstat + 未跟踪新文件数。上游与 P1 的 `d` 都看不到 agent 新建的未跟踪文件，这里单独计数。`RET`/`m`/`d`/`k`/`K`/`g` 见 daily-usage；`K` 先逐份检查，任何一份不能删就一份都不删。
 - 优化：`noema-agent-worktree-list` 原先每个 worktree 调一次 `git config --get`，现在一次 `git config --get-regexp` 读出全部 Noema 分支设置，远程 target 上少 N 次往返。
-- 测试：[`noema-agent-worktree-board-tests.el`](../../../site-lisp/noema/tests/elisp/noema-agent-worktree-board-tests.el) 4 项（多份启动与失败隔离及重名拒绝、成员/整组状态、改动统计、看板列出与整组删除的保护和 hook 清理），与 worktree 测试一起 14/14 通过。
+- 测试：[`noema-agent-worktree-board-tests.el`](../../../../site-lisp/noema/tests/elisp/noema-agent-worktree-board-tests.el) 4 项（多份启动与失败隔离及重名拒绝、成员/整组状态、改动统计、看板列出与整组删除的保护和 hook 清理），与 worktree 测试一起 14/14 通过。

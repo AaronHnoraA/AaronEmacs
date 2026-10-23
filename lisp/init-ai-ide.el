@@ -818,7 +818,7 @@ Double prefix ARG keeps the upstream existing-session picker."
   (locate-user-emacs-file "var/noema/tools/opencode/1.18.30-official/opencode")
   "Validated official OpenCode executable used instead of the Homebrew build.
 An explicitly customized `agent-shell-opencode-acp-command' takes precedence.
-See docs/records/incidents/opencode-acp-recovery-2026-09.md for provenance and the offline smoke test."
+See docs/noema/records/incidents/opencode-acp-recovery-2026-09.md for provenance and the offline smoke test."
   :type 'file
   :group 'ai)
 

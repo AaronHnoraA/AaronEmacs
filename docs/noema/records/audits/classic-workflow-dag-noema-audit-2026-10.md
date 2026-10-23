@@ -69,23 +69,23 @@ Luigi 允许生成器式 `run()` 在运行中 yield 新依赖。这适合数据�
 
 ### 已经具备，不必重复实现
 
-- [Task 创建](../../../site-lisp/noema/kernel/noema/research/orchestration.go) 要求依赖 Task 已存在且属于同一 workstream。依赖只能从已有 Task 指向新 Task，因此创建路径不会形成回边；WorkNode 图本身另有显式环检测。
+- [Task 创建](../../../../site-lisp/noema/kernel/noema/research/orchestration.go) 要求依赖 Task 已存在且属于同一 workstream。依赖只能从已有 Task 指向新 Task，因此创建路径不会形成回边；WorkNode 图本身另有显式环检测。
 - Job 创建要求依赖 Job 已存在且属于同一 workstream；Job claim 会在事务里重新确认全部依赖均 completed，并校验 attempt、worker 状态、执行模式、能力、预算和输入 Artifact。
 - Invocation 冻结执行事实，completed Job 需要满足 CompletionCondition。Noema 在这一点上已经强于 Luigi 的默认完成模型。
 - WorkNode 是人控制的研究文档，SourceChanges 只报告。这个设计比把研究结论变成自动构建缓存更适合 Noema。
 
 ### 本轮修复：事件窗口取错方向且取错范围
 
-原实现位于 [research-runtime.mjs](../../../site-lisp/noema/server/lib/research-runtime.mjs)：`orchestrationSnapshot` 调用 `events({after: 0, limit: 1000})`，得到全项目最早 1000 条事件，再在 Node 层按 workstream 过滤。后果有两个：
+原实现位于 [research-runtime.mjs](../../../../site-lisp/noema/server/lib/research-runtime.mjs)：`orchestrationSnapshot` 调用 `events({after: 0, limit: 1000})`，得到全项目最早 1000 条事件，再在 Node 层按 workstream 过滤。后果有两个：
 
 - 第 1001 条以后的新事件永远不会出现在 Snapshot；
 - 其他 workstream 的旧事件会占用 1000 条额度。
 
 修复跨越四层：
 
-- [store.go](../../../site-lisp/noema/kernel/noema/research/store.go) 新增 `RecentEvents`，在 SQL 中先按 notebook/workstream 过滤，再按 seq 倒序截取最近窗口，最后恢复时间正序；同时增加 `(workstream_id, seq)` 索引；
-- [noema_research.go](../../../site-lisp/noema/kernel/api/noema_research.go) 的 events API 接受 `workstreamId` 与 `latest`；
-- [kernel-research-provider.mjs](../../../site-lisp/noema/server/lib/kernel-research-provider.mjs) 透传新参数；
+- [store.go](../../../../site-lisp/noema/kernel/noema/research/store.go) 新增 `RecentEvents`，在 SQL 中先按 notebook/workstream 过滤，再按 seq 倒序截取最近窗口，最后恢复时间正序；同时增加 `(workstream_id, seq)` 索引；
+- [noema_research.go](../../../../site-lisp/noema/kernel/api/noema_research.go) 的 events API 接受 `workstreamId` 与 `latest`；
+- [kernel-research-provider.mjs](../../../../site-lisp/noema/server/lib/kernel-research-provider.mjs) 透传新参数；
 - `orchestrationSnapshot` 请求当前 workstream 的最近 1000 条事件，同时保留 Node 端防御性过滤。
 
 相关测试覆盖“先筛 workstream 再取最近 N 条”、API 路由和 Snapshot 的请求契约。
