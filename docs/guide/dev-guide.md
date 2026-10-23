@@ -651,6 +651,12 @@ host 的 `noema:api:knowledge:search` 通道，内核返回已经排好序的结
 
 ### 从 Raycast 使用 Noema
 
+### 从 Raycast 打开终端
+
+Raycast 的 Emacs 插件有独立的 **New Terminal** 命令；`skhd` 将全局
+`Option+Enter` 绑定到这个 Raycast 命令，在新 Emacs frame 中打开 Portal
+终端。Emacs 未运行时会先启动。
+
 Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 Emacs（它们也各自是独立
 命令，方便单独绑定快捷键）。查找页面因此不在 Emacs 的动作白名单里：
 

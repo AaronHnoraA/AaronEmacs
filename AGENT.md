@@ -268,9 +268,10 @@ This config already has maintenance and workflow entry points. Reuse them:
   actions, login agent).
   The Raycast extension (`tools/raycast-emacs`) is the only control surface
   and only calls it; nothing else speaks `emacsclient`, and every call is
-  bounded by a timeout.  The extension has one command and names no Emacs
-  action itself: it shows `my/background-actions`, the whitelist in
-  `lisp/init-background.el`, and can run nothing outside it.  M-x stays
+  bounded by a timeout.  Its main command names no Emacs action itself: it
+  shows `my/background-actions`, the whitelist in `lisp/init-background.el`.
+  The separate `New Terminal` command calls `bin/emacs-app terminal` so it can
+  have a global hotkey and launch Emacs when needed.  M-x stays
   inside Emacs; do not bring back an external M-x or an Emacs popup frame.
   `act` and `frame` return a short-lived receipt; `result` queries completion
   without resending the action.  The launcher checks the protocol version in

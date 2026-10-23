@@ -14,6 +14,12 @@
       "mode": "view"
     },
     {
+      "name": "terminal",
+      "title": "New Terminal",
+      "description": "Open a new Portal terminal in its own Emacs frame.",
+      "mode": "no-view"
+    },
+    {
       "name": "find-note",
       "title": "Find Note",
       "description": "Search Noema pages by title, text, namespace or tag. Answered by Noema's backend; Emacs opens only the page you choose.",

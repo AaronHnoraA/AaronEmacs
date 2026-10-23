@@ -86,7 +86,11 @@ start() {
 }
 
 open_terminal() {
-    start || return 1
+    # Do not call `start' for an already running app: it schedules focus on
+    # an existing frame while this command is creating a different one.
+    if ! running; then
+        start --background || return 1
+    fi
     if ! wait_for_startup; then
         echo 'Emacs did not complete startup in time' >&2
         return 1
