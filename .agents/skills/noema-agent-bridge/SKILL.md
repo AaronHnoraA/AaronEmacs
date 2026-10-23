@@ -9,7 +9,7 @@ Use this skill when the user wants a new Codex Remote chat to contact a Codex
 ACP session already running inside Emacs. The new chat is a messenger; it does
 not attach to that session or inherit its conversation history.
 
-Run `python3 ~/.codex/skills/noema-agent-bridge/scripts/bridge.py list`.
+Run `python3 ~/.config/emacs/.agents/skills/noema-agent-bridge/scripts/bridge.py list`.
 Choose the exact `sessionId`, `agent`, and `workspace` from the result. If no
 matching session is listed, report that it is unavailable; do not resume it or
 start another process. The Emacs owner must first run

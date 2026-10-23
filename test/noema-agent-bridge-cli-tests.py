@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 
-SCRIPT = Path(__file__).resolve().parents[1] / "skills/noema-agent-bridge/scripts/bridge.py"
+SCRIPT = Path(__file__).resolve().parents[1] / ".agents/skills/noema-agent-bridge/scripts/bridge.py"
 SPEC = importlib.util.spec_from_file_location("noema_agent_bridge_cli", SCRIPT)
 BRIDGE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(BRIDGE)

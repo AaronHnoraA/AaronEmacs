@@ -347,6 +347,15 @@ This config already has maintenance and workflow entry points. Reuse them:
   `noema-skill-upstream` (install/check/diff/update/rollback).  Do not copy a
   Skill into a pack, hand-edit a locked Skill in place, or add another
   installer.  See `docs/noema/design/capabilities.md`.
+  That library holds knowledge Skills only.  Skills that describe how to
+  maintain this configuration or Noema's code live with the code in
+  `.agents/skills/` (`emacs-config`, `noema-development`,
+  `rendered-construct`, `noema-agent-bridge`); Claude Code reads them through
+  the tracked `.claude/skills` link (Noema has the same link), and Noema Runs
+  through the `emacs-config` source in `etc/noema/capabilities.json`.  A
+  maintenance Skill points to `AGENT.md` and the docs map instead of copying
+  rules or path tables, and changes in the same commit as the code or docs it
+  describes.
 - Config registry: the `config` package under `site-lisp/config/`
   (`config-register`, `config-register-hook`, `config-register-file`,
   `config-get`, `config-set`, `config-reset`, `config-board`). When a setting

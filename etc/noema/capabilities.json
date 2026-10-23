@@ -2,6 +2,13 @@
   "schema": "noema.capabilities/1",
   "sources": [
     {
+      "id": "emacs-config",
+      "format": "codex",
+      "skills": [
+        "linked/emacs/skills"
+      ]
+    },
+    {
       "id": "claude",
       "format": "claude",
       "config": "linked/claude/config.json",
@@ -151,9 +158,9 @@
         "description": "Noema and Emacs operation, authoring syntax, and verified design context",
         "members": [
           "noema-emacs-workflow",
-          "aaron-emacs-context",
+          "emacs-config",
           "noema-authoring-syntax",
-          "noema-design-context",
+          "noema-development",
           "noema-elisp-api",
           "noema-work-dag"
         ],

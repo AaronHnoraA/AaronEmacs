@@ -70,6 +70,8 @@ site-lisp/            自维护或 vendored 的 Elisp 包：
   noema/                Noema 产品仓库（见下）
 etc/                  私有配置与密钥：config-*.el、config-store.el、remote.json、
                       以及指向 Noema 共享资源的链接（katex-macros、noema/）
+.agents/skills/       维护本配置与 Noema 代码用的 Skill（emacs-config、noema-development 等）；
+                      .claude/skills 与 etc/noema/linked/emacs/skills 都链接到这里
 var/                  运行时状态与缓存（eln-cache、remote/、noema/host.json …）
 templates/            auto-insert 模板；templates/noema 链到 Noema 模板目录
 bin/                  emacs-app（后台应用唯一入口）及辅助脚本

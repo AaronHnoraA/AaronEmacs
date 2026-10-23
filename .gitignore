@@ -47,8 +47,9 @@ coverage/
 # Rust build output
 target/
 
-# Local agent/workspace scratch state
-.claude/
+# Local agent/workspace scratch state; skills are shared through .agents/skills
+.claude/*
+!.claude/skills
 
 # Local config and app state kept under etc/
 /etc/eshell/
