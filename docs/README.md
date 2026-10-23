@@ -17,6 +17,40 @@ This tree holds the documentation of both repositories: the Emacs configuration 
 
 A new document takes a slot in this map before it is written. Agents may write a document's body; adding a document or moving one between directories is a change to this map and is reviewed as one.
 
+## Changing behaviour through the documents
+
+A behaviour change or a bug fix starts in the owning `design/` document, not in a
+prompt. The person settles the design there; an agent then reads the document and
+implements it; tests and audits are checked against it. For that to work every
+`design/` document is written with these sections (see
+[window-lifecycle.md](design/window-lifecycle.md) for an example):
+
+| Section | Holds |
+| --- | --- |
+| 范围 | What the document owns and what it leaves to others. |
+| 模型 | The concepts and states, as the code implements them now. |
+| 契约 | Numbered rules (`C1`, `C2`, …) that hold now and must keep holding. Numbers are stable; tests and commits cite them. |
+| 实现位置 | Where each part lives in the code. |
+| 已知差距 | Numbered gaps (`G1`, …): a rule that does not hold yet, or behaviour nobody has defined. A bug report is written here first. |
+| 待定设计 | Questions only the person can decide. Once decided, the answer moves into 模型 and 契约. |
+
+The loop:
+
+1. **Record.** Describe the bug as a gap (`Gn`) in the owning document, or add the
+   document if none owns the behaviour.
+2. **Design.** The person answers the open questions and writes the target rules as
+   contracts. An agent may draft, but the document must stay inside the person's
+   model of the system.
+3. **Implement.** An agent reads the document, changes the code to satisfy the
+   contracts, and adds tests named after them.
+4. **Close.** In the same commit the gap is deleted and its contract added; the
+   document again describes what the code does.
+5. **Audit.** An audit compares contracts with code and tests and is filed under
+   `records/audits/`; findings go back to step 1.
+
+Older design documents predate this structure and are converted when they are next
+changed.
+
 ## Core Architecture
 
 The [Remote framework](design/remote-framework.md) is the repository's core execution
@@ -54,6 +88,7 @@ channels.
 - [config-management.md](design/config-management.md) Unified `config` registry: one front door (`config-get`/`config-set`, `M-x config-board`) to view, edit, live-apply, and persist every registered setting.
 - [latex-preview.md](design/latex-preview.md) In-buffer math preview: supported delimiters, the shared macro source Emacs and Noema both read, the doctor, and the troubleshooting order.
 - [elegant-ui.md](design/elegant-ui.md) Aaron UI, the design tokens Emacs and Noema share, and where each side keeps its own styling.
+- [window-lifecycle.md](design/window-lifecycle.md) Windows, buffers and closing: what each close action does to each kind of buffer, what a window falls back to, and the open state-machine design.
 - [neomacs-compat.md](design/neomacs-compat.md) Running this configuration on Neomacs: the modifier-rename layer, fringe and startup-frame fixes, Elsa concurrency, and why the 0.0.18 migration was paused. Neomacs is not installed; the layer is inert on GNU Emacs.
 
 ## acceptance/ — what done means

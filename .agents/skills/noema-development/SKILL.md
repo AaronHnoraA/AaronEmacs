@@ -68,6 +68,14 @@ implementation, `kernel/noema/wikisearch`.
 | MCP servers | `docs/noema/design/mcp.md` |
 | Skills, packs, capability resolution | `docs/noema/design/capabilities.md` |
 
+## Fixing a bug or changing behaviour
+
+Read the owning `docs/noema/design/` document first and work to what it says;
+the loop is “Changing behaviour through the documents” in
+`~/.config/emacs/docs/README.md`. Behaviour the document does not describe is
+recorded there as a gap before it is changed. Window and close behaviour of
+Noema pages inside Emacs is `docs/design/window-lifecycle.md`.
+
 ## Finishing a change
 
 Update the owning `docs/noema/` document in the Emacs repository (no dates or

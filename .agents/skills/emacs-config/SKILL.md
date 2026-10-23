@@ -28,6 +28,7 @@ names, and that file wins over anything remembered.
 | Jupyter kernels and the Noema bridge | `docs/design/jupyter-workflow.md` |
 | User settings (`config-register`, `config-get/set`, `etc/config-store.el`) | `docs/design/config-management.md` “注册语法” |
 | Keybindings (general.el, leader, localleader, Dirvish keys) | `AGENT.md` “Keybinding Rules”; keys listed in `docs/guide/daily-usage.md` |
+| Windows, buffers, closing and fallback (Portal, Noema pages, popups, frames) | `docs/design/window-lifecycle.md` |
 | Existing entry points not to duplicate | `AGENT.md` “Do Not Reinvent Existing Surfaces” |
 | Performance diagnostics | `AGENT.md` “Performance Diagnostics” |
 | Noema's Elisp API | `docs/noema/design/elisp-api.md` |
@@ -49,6 +50,13 @@ file. Do not call `emacsclient` yourself for this.
 (adding a module, naming), “Package Rules”, “Runtime State”, “Resource
 Lifecycle Rules”, “Runtime Builds”, “Domain Policies”, “Verification”.
 Commit only your own changes; the tree often holds someone else's work.
+
+## Fixing a bug or changing behaviour
+
+Read the owning `design/` document's 契约 (`C…`) and 已知差距 (`G…`) first and
+work to them; `docs/README.md` “Changing behaviour through the documents” is
+the loop. If the behaviour is not described there, stop and record it as a gap
+rather than inventing the design.
 
 ## Documentation rules
 
