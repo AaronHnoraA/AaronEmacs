@@ -349,13 +349,13 @@ retain their Evil meanings):
 | `C-c u` | insert `@@skill(id)` or `@@pack(id)` into the originating work block |
 | `C-c U` | upstream versions: `C-c g` check, `RET`/`C-c =` diff, `C-c u` update, `C-c R` pin/rollback, `C-c i` install, `C-c l` VC log |
 
-`M-x noema-skill` opens a searchable Skill and pack page for the opening
-buffer's project (the global library outside a project). It prompts for a
-query on entry; `C-c /` searches again, `RET` opens the selected source or
-pack details, and `Cmd+,` (`M-,`) opens the full Skill manager with that
-project context. In an agent input, `RET` drafts the selected Skill or pack
-reference for review instead. The old `noema-skill-manager` name redirects to
-this search page; `M-x noema-mcp-manager` opens its MCP-filtered full view.
+`M-x noema-skill` opens the input-driven Skill and pack completion prompt for
+the opening buffer's project (the global library outside a project). Selecting
+a Skill opens its source; selecting a pack shows its details. While that prompt
+is active, `Cmd+,` (`M-,`) opens the full Skill manager with the same project
+context. In an agent input, selecting a result drafts its reference for review
+instead. The old `noema-skill-manager` name redirects to this search prompt;
+`M-x noema-mcp-manager` opens its MCP-filtered full view.
 In an `agent-shell` buffer — the platform session or a popup vterm one — the
 full management commands are a read-only lookup instead, because the manager's
 scoped writes reach Noema Runs, not a running external client. `M-x
