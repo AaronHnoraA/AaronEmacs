@@ -59,7 +59,7 @@ Go kernel  kernel/（二进制 noema）
 | HTTP/SSE 端点 | `server/Features/<Feature>/api.mjs`，领域逻辑不再加进 `server/lib/runtime.mjs` |
 | 搜索、引用文本、索引、Markdown 保存 | `kernel/noema/` 下的 Go 包 |
 | `.noema` 结构与研究语义 | `kernel/noema/research` 与 `lisp/noema-research*.el`，两侧测试一起改 |
-| Agent/ACP 行为 | `lisp/noema-agent-acp.el` 边界之后，不重写 gptel/agent-shell |
+| Agent/ACP 行为 | `lisp/noema-agent-acp.el` 边界之后，不重写 gptel/agent-shell；上下文契约见 [design/agent-context.md](design/agent-context.md) |
 | Skill/MCP 能力 | `noema-capabilities.mjs` 与 `lisp/noema-capability-*`，见 [design/capabilities.md](design/capabilities.md) |
 | 宏、模板、Skill 内容 | `resources/` |
 

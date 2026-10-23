@@ -135,6 +135,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 
 ## noema/design/ — how it works now
 
+- [agent-context.md](noema/design/agent-context.md) Noema Agent 上下文管理：普通会话引用、研究 Run 冻结输入、预算、记忆、换代与回执契约。
 - [agenda-dsl.md](noema/design/agenda-dsl.md) Agenda / Planning DSL
 - [capabilities.md](noema/design/capabilities.md) Project Skills and MCP capabilities
 - [codex-session-lifecycle.md](noema/design/codex-session-lifecycle.md) ACP session reuse, Codex Remote ownership limits, and the optional mobile-to-Noema message bridge.

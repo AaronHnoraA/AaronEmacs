@@ -39,10 +39,15 @@ names, and that file wins over anything remembered.
 (`emacs-app`, `emacsopen`, …) with its spec; `make help` lists the make
 targets, described in `docs/ops/maintenance.md`.
 
-To show the user a file, run `emacsopen` (see `emacsopen --help`): it takes
-a placement (`-o`, `-l`, `-r`, `-a`, `-b`, `-f`), a position (`+LINE[:COL]`)
-and `-n` to leave the user's focus alone, and answers with one JSON line per
-file. Do not call `emacsclient` yourself for this.
+To show the user a file, run `emacsopen` (see `emacsopen --help`); do not call
+`emacsclient` yourself. With no placement it opens in the selected window,
+reusing a visible window already showing that file. `-o` uses the other window
+(splitting right if needed) and also reuses a visible file window. `-l`, `-r`,
+`-a`, `-b` always split the selected window in that direction; `-f` makes a
+new frame. Use `-n` only when the user's current window and focus should stay
+as they are. `+LINE[:COL]` before a file, or `FILE:LINE[:COL]`, requests a
+position. The command prints one JSON result per file, including the buffer,
+window, frame, reuse and positioning result; check it for errors.
 
 ## Development rules
 

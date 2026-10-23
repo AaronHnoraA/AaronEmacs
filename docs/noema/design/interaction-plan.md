@@ -16,6 +16,9 @@ agent, queue, ledger and gptel integration. These surfaces share Noema project
 context but do not collapse compose buffers, AgentSessions and WorkNodes into
 one object.
 
+The context handed to each surface and the frozen Run budget are specified in
+[agent-context.md](agent-context.md).
+
 ## Current entry points
 
 1. `noema-compose` opens the gptel composition surface.

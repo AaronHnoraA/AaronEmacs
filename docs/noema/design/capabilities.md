@@ -439,6 +439,9 @@ validation and runtime state.
 
 ## Agent construction
 
+The Run-wide context selection and budget contract lives in
+[agent-context.md](agent-context.md).
+
 `run:prepare` resolves capabilities once. Enabled Skill content is added to the
 same frozen context budget as other context. Enabled valid MCP definitions are
 copied into `mcp_servers`. A configured Skill whose definition has disappeared

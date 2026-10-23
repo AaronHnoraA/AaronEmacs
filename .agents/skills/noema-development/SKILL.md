@@ -55,6 +55,7 @@ implementation, `kernel/noema/wikisearch`.
 | ACP agents and sessions in Emacs | `docs/noema/design/codex-session-lifecycle.md`; `lisp/noema-agent-*.el`, `noema-sessions.el` |
 | Magent runtime | `docs/noema/design/magent-runtime.md`; `lisp/noema-interaction-magent*.el` |
 | Composition and agent entry points | `docs/noema/design/interaction-plan.md`; `lisp/noema-compose.el` |
+| Agent context selection, budget, memory and receipts | `docs/noema/design/agent-context.md`; `lisp/noema-context.el`, `server/lib/research-runtime.mjs` |
 | Project memory | `docs/noema/design/hy-memory.md`; `server/lib/research-memory.mjs` |
 | What a Run is given (Skills, packs, MCP) | `docs/noema/design/capabilities.md`, `mcp.md` |
 | The guided workflow from the user's side | `docs/noema/guide/research-workflow.md` |
@@ -67,6 +68,16 @@ implementation, `kernel/noema/wikisearch`.
 | Host HTTP/SSE endpoints | `server/Features/<Feature>/api.mjs`; placement rule in `docs/noema/architecture.md` “改动落点” |
 | MCP servers | `docs/noema/design/mcp.md` |
 | Skills, packs, capability resolution | `docs/noema/design/capabilities.md` |
+
+## Showing a Noema file to the user
+
+Use `emacsopen` to open a requested document in the running Emacs. The Emacs
+configuration's `emacs-config` Skill, “Commands outside Emacs”, and
+`emacsopen --help` own its placement options: default selected window, `-o`
+other window, `-l`/`-r`/`-a`/`-b` directional splits, `-f` new frame, `-n`
+leave focus alone, and `+LINE[:COL]` for a position. Default and `-o` reuse a
+visible file window; explicit splits and new frames create one. Check the JSON
+result. Do not open a file for the user by calling `emacsclient` directly.
 
 ## Fixing a bug or changing behaviour
 
