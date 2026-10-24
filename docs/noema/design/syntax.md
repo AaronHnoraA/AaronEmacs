@@ -188,12 +188,59 @@ Open and close lines pair by kind and nest.  Parser: `ORG_ENV_OPEN_RE` in
 | `av [title]` | attribute view (below) |
 | `embed [title]` | query embed (below) |
 | `lean4` | Lean source carrier, not rendered as an environment |
+| `ediff [title]` | local pending edit at its original lines; editor review card, old side used for export |
 | any other word | generic titled box with that label |
 
 Which kinds are prose for spelling and diagnostics:
 `TECHNICAL_ORG_ENV_KINDS` in `shared/prose-mask.mjs`.  Which kinds can carry
 a block id: everything except `NON_SEMANTIC_ORG_ENVS` in
 `shared/block-identity.mjs`.
+
+### Pending Markdown edits (`ediff`)
+
+An `ediff` environment replaces the exact Markdown lines **at its position**
+with a local diff. Put it where the old lines currently are, including inside
+a table. A block covers one contiguous span; use separate blocks for
+separated edits. Its old side remains the approved Markdown until a person
+accepts.
+
+```text
+The existing paragraph stays here.
+#+begin ediff Clarify the context receipt
+@@ediff-comment "Could we state the limit more directly?"
+-old first line
+-old second line
++new first line
++new second line
+#+end ediff
+The next paragraph stays here.
+```
+
+Every diff line begins with one space (unchanged context), `-` (old only), or
+`+` (new only). A literal Markdown line beginning with one of these
+characters gets another prefix. The block can express a replacement,
+insertion (no old lines), or deletion (no new lines). For a final line without
+a newline, use `\ No newline at end of file` immediately after that side's
+last line; the marker is valid only at the end of the note. The card derives
+GitHub-like old/new line numbers and a blue hunk heading from the block's
+position. The compact review strip shows all changed lines when there are at
+most four. Longer edits preview the first old and first new line (two lines
+for a one-sided edit), and Details states how many changed lines are hidden.
+The heading shows total added/deleted counts; Details reveals every line and
+its context.
+Source has no file headers or absolute
+hunk coordinates to rebase.
+
+`@@ediff-comment "JSON string"` lines may appear after the opener and before
+the diff lines. Reject inserts `@@ediff-status rejected` immediately after
+the opener and leaves the old side active for agent follow-up. Accept replaces
+only that environment with its new side in one undoable edit. HTML, LaTeX and
+Wiki indexing resolve valid pending and rejected environments to the old
+side, including lines inside tables. Malformed blocks remain literal source
+for repair. The Tools panel has a file-wide review list; each card remains at
+its affected lines. Editor implementation: `src/ediff.ts`,
+`src/cm6/extensions/visual/widgets/ediff.ts`, and the org-env branch of
+`block-extras.ts`.
 
 ### Attribute view
 

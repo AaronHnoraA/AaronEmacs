@@ -159,6 +159,7 @@
         "members": [
           "noema-emacs-workflow",
           "noema-authoring-syntax",
+          "noema-ediff-review",
           "noema-elisp-api",
           "noema-work-dag"
         ],

@@ -59,6 +59,7 @@
 | 表格 | `live-preview.ts` | structure（块） | `edge`（文档开头的 0 偏移不算） | 自有字段 + `constructSources` |
 | HTML 块、行内标记、emoji | `live-preview.ts` | structure | `caret-edge` / `interior` | `selectionOpensSource` / `rangeRevealsSource` |
 | org 环境、TOC、HR、语义标题、front matter | `widgets/block-extras.ts` | structure（TikZ 为 object） | `caret-edge`（front matter `caret-interior`） | `selectionOpensSource` |
+| `ediff` 待审 patch | `widgets/ediff.ts`，由 `block-extras.ts` 放置 | structure | `caret-interior` | `selectionOpensSource`，进入源码可改 patch |
 | `@@` 行内命令 | `widgets/inline-commands.ts` | structure | `caret-edge` | `selectionOpensSource` |
 | wiki 链接标题 | `roam-link-status.ts` | structure | `edge`（任一选区） | `anySelectionRevealsSource` |
 
@@ -119,6 +120,16 @@ export const myExtension = inlineConstruct({
 显示位置用事务的 `scrollIntoView`，不用 `element.scrollIntoView` 或 `scrollTop`
 （[scroll-ownership.md](scroll-ownership.md)）。新组件在 `scripts/check-scroll-invariance.mjs`
 的样例里加一段，标明点击意图（`opens`、`edits`、`navigates`），再跑 `npm run check:scroll`。
+
+`ediff` 复用已有 org-env 范围索引与块级装饰；每个环境直接放在要修改的
+原文行处。审阅条继承正文的字号；diff 行使用等宽字体、独立旧／新行号栏、
+蓝色 hunk 行和红绿底色。四行以内的改动默认全部显示；更长的块预览新旧各一行
+（单侧改动预览前两行），标题记录总行数，Details 标明隐藏数量并可展开
+其余改动、上下文和留言。悬停或聚焦时显示接受、拒绝、留言与编辑源码。
+接受只把该块替换成新行，拒绝和留言只写回
+该 environment 的元数据。光标进入块内显示原始局部 diff；块外保持卡片。
+HTML、LaTeX 和 Wiki 索引把待审块还原为旧行。Tools 的汇总弹窗按本文档中的
+位置列出所有提案，并提供跳转和同样的审阅动作。
 
 ## 左右与词移动：光标从不被隐藏
 

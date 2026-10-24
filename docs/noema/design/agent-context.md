@@ -51,8 +51,13 @@ Hy Memory 使用同一项目根隔离普通 ACP 对话与 Run，但召回项标�
 | 普通会话的隐式记忆上下文 | `lisp/noema-hy-memory.el`、`server/lib/hy-memory-bridge.mjs` |
 | 工作块控制区与会话路由 | `server/lib/research-directives.mjs`、`server/lib/research-session-routing.mjs` |
 | 引用解析、预算、冻结、预览与换代 | `server/lib/research-runtime.mjs`、`server/lib/research-context-excerpt.mjs` |
-| Finding 召回 | `server/lib/research-memory.mjs` |
-| ACP 派发、用量与终态 | `lisp/noema-agent-worker.el`、`lisp/noema-agent-acp.el` |
+#+begin ediff 明确 Finding 与 ACP 职责
+@@ediff-comment "s s s"
+-| Finding 召回 | `server/lib/research-memory.mjs` |
+-| ACP 派发、用量与终态 | `lisp/noema-agent-worker.el`、`lisp/noema-agent-acp.el` |
++| 已审核 Finding 召回 | `server/lib/research-memory.mjs` |
++| ACP 派发、用量报告与终态 | `lisp/noema-agent-worker.el`、`lisp/noema-agent-acp.el` |
+#+end ediff
 | JuText 入口、预览与 Inspector | `lisp/noema-research-mode.el` |
 
 ## 已知差距

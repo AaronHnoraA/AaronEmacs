@@ -65,6 +65,13 @@ rebuild. Ordinary file changes are coalesced and applied incrementally. Link
 resolution is recomputed from the complete page snapshot, so adding or moving a
 target also repairs links in otherwise unchanged source notes.
 
+Valid in-place `ediff` review environments are resolved to their old
+lines before body, link, dependency, and block identity indexing. A proposed
+change inside a table therefore preserves the table's approved content and
+links. Malformed or incomplete review syntax remains ordinary source for
+repair; `shared/ediff-source.mjs` performs this projection without changing
+the Git-owned file.
+
 The database records each repository identity, last indexed HEAD, scan time,
 last full and incremental runs, and the reason for the selected maintenance
 mode. No index operation creates commits, tags, branches, or other Git refs.
