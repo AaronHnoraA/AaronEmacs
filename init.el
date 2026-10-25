@@ -143,6 +143,7 @@
        (config-dir (locate-user-emacs-file "site-lisp/config"))
        (vendored-dir (locate-user-emacs-file "site-lisp/vendored")))
   (add-to-list 'load-path (file-name-as-directory dir))
+  (add-to-list 'load-path (file-name-as-directory (expand-file-name "core" dir)))
   (add-to-list 'load-path (file-name-as-directory remote-dir))
   (add-to-list 'load-path (file-name-as-directory config-dir))
   (add-to-list 'load-path (file-name-as-directory git-dir))

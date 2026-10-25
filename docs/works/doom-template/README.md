@@ -7,7 +7,7 @@
   - `upstream/modules`：[doomemacs/modules](https://github.com/doomemacs/modules)，`42a0479`（2026-10-02）。v3 起模块从内核仓库拆了出来，共 154 个模块，约 4.2 万行。
   - 更新用 `git -C docs/works/doom-template/upstream/<core|modules> pull`。
 - 许可：两个仓库都是 MIT。拿过来的代码在文件或函数头注明出处，格式为 `Adapted from Doom Emacs (MIT, Henrik Lissner): <上游路径> @ <commit>`。
-- 骨架不变：`package.el` + `use-package`、`init-modules.el` 作为唯一顺序、Remote-first、config 注册表、`general.el`、`my/` 命名约定。Doom 的 straight 包管理、profiles 和 `doom` CLI 框架不引入。
+- 骨架不变：`package.el` + `use-package`、`init-modules.el` 作为唯一顺序、Remote-first、config 注册表、`general.el`。命名改为照 Doom（见“决定”）。Doom 的 straight 包管理、profiles 和 `doom` CLI 框架不引入。
 
 ## Doom 的抽象结构，逐层对照
 
@@ -45,7 +45,7 @@ Doom 的一个模块是一个目录 `modules/<分类>/<模块>/`，里面的文�
 2. **模块清单**：每个模块用一份纯数据描述自己：分类、flag、过期 flag、用到的外部可执行文件、自检。参照 `.doommodule` 的字段，但不含包声明，包仍按 use-package 的做法写在模块里。
 3. **自检统一**：清单里的 `checks` 汇总进 `config-health`。现有的各个 doctor 保留，作为深入诊断的入口，Health 只负责汇总和链接。
 4. **`autoload/` 拆分**：只在交互时才用到的大块命令（board、menu、doctor）移到模块的 autoload 文件，用 `loaddefs-generate` 生成 autoloads。要结合 `make` 的编译流程和启动时间测量来做。
-5. **`modulep!`**：等价物叫 `my/module-p`，模块之间用它判断对方是否启用，代替现在的 `featurep` 或 `fboundp` 试探。
+5. **`modulep!`**：等价物就叫 `modulep!`，模块之间用它判断对方是否启用，代替现在的 `featurep` 或 `fboundp` 试探。
 6. **模块文档模板**：采用 Doom README 的章节结构，但内容放在 `docs/` 里（每个分类目录一份索引），不在代码目录里放第二份。
 
 ### B. 生命周期 hook
@@ -76,7 +76,7 @@ Doom 在 `core/lisp/doom-emacs.el` 和 `doom.el` 里提供了这些 hook：
 
 处理：**拿代码**，集中放进一个核心库文件。
 
-- 本配置已有 `shut-up!` 这种不带前缀、以 `!` 结尾的宏名先例，所以这批宏沿用 Doom 的名字。函数名仍按 `my/` 约定。
+- 本配置已有 `shut-up!` 这种不带前缀、以 `!` 结尾的宏名先例，所以这批宏沿用 Doom 的名字；函数和变量按“决定”里的命名。
 - 好处：hook 和 advice 有名字，可以移除，也能在 `my/performance-hook-snapshot` 里看出是谁。`doom-run-hooks` 式的报错能指到具体函数。
 - 现有代码不强制一次性改写，新代码和后续迁移时使用。
 
@@ -164,12 +164,23 @@ Doom 的做法：
 
 每一步一个或几个提交，每个提交都要能完整启动，并通过 `make` 测试和 `config-health`。
 
-## 待定（需要你拍板）
-
-- **分类名**：用 Doom 的分类（`:core :ui :editor :emacs :completion :checkers :tools :lang :term :app :os :input :config`），还是用本配置现有的 0–7 层？既然以 Doom 为模板，我倾向用 Doom 的分类名做目录。Remote 和 Noema 桥是 Doom 没有的，作为额外分类保留。
-- **宏名**：C 的宏是否沿用 Doom 原名（`after!`、`add-hook!`…）。我倾向沿用：已有 `shut-up!` 这个先例，而且对照 Doom 源码时最省事。
-- **第一步从哪开始**：我建议从 P1a 开始，它最小、最独立，后面每一步都要用到它。
-
 ## 决定
 
-（尚无）
+- 2026-10-26 分类：`lisp/` 下按 Doom 的分类分目录（`core ui editor emacs completion checkers tools lang term app os input config`），Remote 与 Noema 桥作为额外分类保留。
+- 2026-10-26 命名：全量照 Doom。核心 `aaron-`（`aaron--`、`aaron/`），模块 `+模块-`（`+模块--`、`+模块/`），hook 函数 `-h`，advice `-a`，宏沿用 Doom 原名。核心文件名也对应 Doom：`aaron-lib.el` ↔ `doom-lib.el`，`aaron-emacs.el` ↔ `doom-emacs.el`。
+- 2026-10-26 `my/` 迁移：随 P1b 模块搬迁逐个改名，旧名留 obsolete alias 一个周期，`etc/config-store.el` 键与 Noema/Raycast 引用在同一改动里迁移。
+- 2026-10-26 第一步做 P1a。
+
+## 进度
+
+- [x] P1a 核心库：`lisp/core/aaron-lib.el`（`after!` `add-hook!` `remove-hook!` `setq-hook!` `unsetq-hook!` `add-transient-hook!` `defadvice!` `undefadvice!` `letf!` `quiet!` `quiet!!` `with-delayed-gc!` `cmd!` `cmd!!` `cmds!` `fn!` `lambda!` `defer-until!` `defer-feature!` `file!` `dir!`，`aaron-log`、`aaron-run-hooks`、`aaron-run-hook-on`）；`lisp/core/aaron-emacs.el`（`aaron-first-input/file/buffer-hook`、`aaron-init-ui-hook`、`aaron-switch-buffer/window/frame-hook`、`MODE-local-vars-hook`、`aaron-load-packages-incrementally`）。`make core-test` 32 项。与 Doom 的差异：
+  - `aaron-run-hook-on` 触发后把自己从所有触发点摘掉（Doom 留在 `pre-command-hook` 上）。
+  - 用 `after-init-time` 判断启动完成，代替 Doom 的 `doom-context`。
+  - 增量加载在本机目录、只留 `jka-compr` handler 的环境里 `require`，远端 buffer 里也不会把加载发到 target（Remote 规则）；定时器存起来，可用 `aaron/cancel-incremental-loading` 取消。
+  - `letf!` 的 `(defadvice FN HOW ADVICE)` 形式按文档实现（Doom 上游把 FN 当成了 advice）。
+  - `after!` 不再查 Doom 的 `doom-disabled-packages`；`load!`、`add-load-path!`、`versionp!`、`doom-context`、pcase 扩展没拿。
+  - 尚未有模块挂到这些 hook 上；迁移现有的 `after-init`/`window-setup`/首次触发逻辑归入 P1b。
+- [ ] P1b 模块系统与分类目录（含 `my/` 改名）
+- [ ] P1c 注册 API
+- [ ] P1d 默认行为与键位比对
+- [ ] P1e 模块目录比对

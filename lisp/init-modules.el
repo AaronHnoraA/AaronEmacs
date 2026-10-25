@@ -50,6 +50,8 @@ If one of FEATURES is already available, require MODULE immediately."
       (with-eval-after-load feature
         (my/require-module-safely module)))))
 
+(require 'aaron-lib)
+(require 'aaron-emacs)
 (require 'init-utils)
 (require 'init-base)
 (require 'init-open)

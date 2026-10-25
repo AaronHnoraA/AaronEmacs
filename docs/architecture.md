@@ -36,7 +36,7 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 
 | 层 | 位置 | 内容 |
 | --- | --- | --- |
-| 0 基础 | `init-utils`、`init-base`、`init-open`、`patches/`、`init-macos`、`init-neomacs` | 工具函数、基础设置、打开路由、上游补丁、平台与构建兼容层（只有 `init-neomacs` 知道当前是哪个构建） |
+| 0 基础 | `lisp/core/`（`aaron-lib` 宏与 hook 运行器、`aaron-emacs` 生命周期 hook 与增量加载，最先加载）、`init-utils`、`init-base`、`init-open`、`patches/`、`init-macos`、`init-neomacs` | 工具函数、基础设置、打开路由、上游补丁、平台与构建兼容层（只有 `init-neomacs` 知道当前是哪个构建） |
 | 1 Remote 框架 | `lisp/remote/`（`init-remote` 入口） | `/fs:TARGET:/path` 身份、target/pipeline/backend/session、进程、通道、环境胶囊、workspace 资源。核心基础设施，见 [remote-framework.md](design/remote-framework.md) |
 | 2 外壳 | `init-emacs-gateway`、`init-ui`、`init-activity*`、`init-tabbar`、`init-display-rules`、`init-tools`、`init-evil` | 外部网关、主题与 mode-line、活动指示、标签栏、窗口显示规则、leader 键（`general.el`） |
 | 3 开发 | `init-lsp*`、`init-format`、`telescope/`、`init-symbols`、`init-code-actions`、`lisp/git/`、`init-dev`、`init-debug*`、`init-test`、`init-task`、`init-project-run` | LSP 路由与工具（分层见 [lsp-workflow.md](design/lsp-workflow.md)）、诊断面板、Git、调试/测试/任务 |
@@ -52,6 +52,9 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 
 ```text
 lisp/                 init-*.el 本地模块与本仓库自写的单文件包（如 direnv.el）
+lisp/core/            核心库：aaron-lib（after!/add-hook!/setq-hook!/defadvice!/cmd!/letf! 等宏、
+                      aaron-run-hooks）与 aaron-emacs（aaron-first-*-hook、aaron-switch-*-hook、
+                      MODE-local-vars-hook、增量加载），以 Doom 的 doom-lib/doom-emacs 为模板
 lisp/remote/          Remote 框架，只放框架代码；消费者留在各自模块
 lisp/roam/            Noema 的 Emacs 侧桥接（init-noema*.el，含 Jupyter 桥 init-noema-jupyter-*）
 lisp/lang/            语言模块
@@ -155,6 +158,13 @@ Raycast 扩展只调用 `bin/emacs-app`；新增外部入口放进 `bin/`，并�
 更细的“该改哪里”见 [settings-cookbook.md](guide/settings-cookbook.md)。
 
 ## 命名
+
+符号命名照 Doom：核心 `lisp/core/` 用 `aaron-`（私有 `aaron--`，命令 `aaron/`），对应 Doom
+的 `doom-`；模块用 `+模块-`（私有 `+模块--`，命令 `+模块/`）；hook 函数以 `-h` 结尾，advice
+以 `-a` 结尾；宏沿用 Doom 的 `!` 名字。`remote-*`、`config-*`、`noema-*`、`aaron-ui-*` 等公开
+子系统保留自己的命名空间。现有的 `my/` 是旧命名，随模块迁入分类目录逐个改名，旧名留一个
+周期的 obsolete alias；规则见 `AGENT.md`，进度见
+[doom-template](works/doom-template/README.md)。`aaron-` 与下面的旧名 Aaronnote 无关。
 
 Noema 早先叫 Aaronnote。两个仓库里的文件、模块、通道（`noema:api:*`）、环境变量
 （`NOEMA_*`）、CSS 类与状态目录都已改为 `noema`；Noema 的页面源码目录是 `pages/`，

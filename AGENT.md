@@ -46,7 +46,9 @@ Load order is:
 early-init.el -> init.el -> lisp/init-modules.el
 ```
 
-`lisp/init-modules.el` is the authoritative module order. Most local modules
+`lisp/init-modules.el` is the authoritative module order; it loads the core
+library first (`lisp/core/`: `aaron-lib` macros and hook runners,
+`aaron-emacs` lifecycle hooks and incremental loading). Most local modules
 live under `lisp/`; language-specific modules live under `lisp/lang/`; the
 Noema/Jupyter bridge lives under `lisp/roam/`.
 
@@ -87,12 +89,27 @@ When adding a module:
 - End it with `(provide 'init-foo)`.
 - Add it to `lisp/init-modules.el` in dependency order.
 - Use `declare-function` for cross-module calls when byte compilation needs it.
-- Keep application-local names under the existing `my/` convention; hook
-  helpers usually use a `*-h` suffix.  The public remote framework is the
-  deliberate exception and uses the `remote-*` namespace without `my/`.
+- Name things the Doom way (the restructuring in `docs/works/doom-template/`
+  takes Doom Emacs as its template).  The core under `lisp/core/` uses
+  `aaron-` (`aaron--` private, `aaron/` commands), as Doom's uses `doom-`;
+  a module uses `+MODULE-` (`+MODULE--` private, `+MODULE/` commands).  Hook
+  functions end in `-h`, advice in `-a`.  Macros keep Doom's `!` names
+  (`after!`, `add-hook!`, `setq-hook!`, `defadvice!`, `cmd!`, `letf!`; see
+  `lisp/core/aaron-lib.el`); use them instead of a raw
+  `with-eval-after-load`, an anonymous hook lambda or an unnamed advice.
+  Attach first-use work to `aaron-first-input-hook`, `aaron-first-file-hook`
+  or `aaron-first-buffer-hook`, buffer and window changes to
+  `aaron-switch-buffer-hook` / `aaron-switch-window-hook`, settings that must
+  see file and directory locals to `MODE-local-vars-hook`, and idle
+  preloading to `aaron-load-packages-incrementally`.  Existing `my/` names
+  are legacy: they are renamed module by module as each module moves into
+  its category directory, keeping the old name as an obsolete alias for one
+  cycle and migrating `etc/config-store.el` keys and Noema/Raycast callers
+  in the same change.  Public subsystems keep their own namespaces
+  (`remote-*`, `config-*`, `noema-*`).
 - For stable user-facing `M-x` entry points other than Transient menus, add a
   short purpose-first alias in the owning module (for example `config-health`
-  or `jupyter-board`) while retaining the `my/` implementation name for
+  or `jupyter-board`) while retaining the implementation name for
   existing callers. Do this selectively for top-level commands, not every
   helper or generated command. Define public Transient prefixes directly under
   their searchable names: `defalias` does not carry a prefix's registered menu

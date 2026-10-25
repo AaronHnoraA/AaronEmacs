@@ -27,7 +27,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
         noema-web-build \
         compile compile-byte compile-byte-force compile-native compile-native-force \
         clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
-        health health-startup health-byte health-native ui-test activity-test performance-test ui-tokens audit-ui-tokens \
+        health health-startup health-byte health-native core-test ui-test activity-test performance-test ui-tokens audit-ui-tokens \
         remote-test remote-source-test remote-transfer-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
 		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke \
         jupyter-test research-test agenda-test agenda-apple-test project-workflow-test \
@@ -173,6 +173,9 @@ ui-tokens:
 
 audit-ui-tokens:
 	$(UI_TOKEN_BATCH) --eval '(let ((expected (aaron-ui-css-tokens '"'"'wave)) (file "$(CURDIR)/$(UI_TOKEN_FILE)")) (unless (and (file-readable-p file) (with-temp-buffer (insert-file-contents file) (equal (buffer-string) expected))) (error "Aaron UI CSS tokens are stale; run make ui-tokens")))'
+
+core-test:
+	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L lisp/core -l test/aaron-lib-tests.el -l test/aaron-emacs-tests.el -f ert-run-tests-batch-and-exit
 
 activity-test:
 	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L site-lisp/config -L site-lisp/aaron-ui -L lisp -L lisp/roam -L lisp/remote -L lisp/remote/backend -l test/init-activity-tests.el -f ert-run-tests-batch-and-exit
