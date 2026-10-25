@@ -51,6 +51,9 @@ target/
 .claude/*
 !.claude/skills
 
+# Third-party clones studied by projects under docs/works/
+/docs/works/*/upstream/
+
 # Local config and app state kept under etc/
 /etc/eshell/
 /etc/gnus/

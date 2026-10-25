@@ -684,6 +684,9 @@ change logs; `records/` holds dated audits, incidents, measurements and
 retired notes (`topic-YYYY-MM.md`), written once and never authoritative.
 Never mix the two: a finding worth keeping moves into the structural doc it
 changes, and the record keeps the history.  A new document takes its slot in
+`works/<project>/` holds a project in progress: a `README.md` workbench plus
+an ignored `upstream/` clone when it studies another codebase; it is never
+authoritative, and its settled results move into `design/` and this file.
 `docs/README.md` first; adding or moving one is a change to that map.
 
 Behaviour changes go through the owning `design/` document (the loop in

@@ -14,6 +14,7 @@ This tree holds the documentation of both repositories: the Emacs configuration 
 | `acceptance/` | What done means | Criteria, not evidence. |
 | `ops/` | Maintenance and recovery | Current procedure only. |
 | `records/` | Audits and studies, change logs, incidents, measurements, retired notes | Named `topic-YYYY-MM.md`, written once and not updated to follow later code. A record never overrides a structural doc. |
+| `works/` | Projects in progress | One folder per project with a `README.md` workbench; third-party clones sit in its ignored `upstream/`. Never authoritative: settled results move into `design/` and `AGENT.md`, and the finished workbench moves to `records/`. |
 
 A new document takes a slot in this map before it is written. Agents may write a document's body; adding a document or moving one between directories is a change to this map and is reviewed as one.
 
@@ -65,6 +66,10 @@ channels.
 # Emacs configuration
 
 - [architecture.md](architecture.md) Structure map of this config and Noema: load order, layers, directory ownership, the Emacs ↔ Noema boundary, and where a change belongs.
+
+## works/ — projects in progress
+
+- [neo-emacs/](works/neo-emacs/README.md) Studying the Doom-based neo-emacs module layout to restructure `lisp/`; upstream clone in `works/neo-emacs/upstream/`.
 
 ## guide/ — how to use it
 
