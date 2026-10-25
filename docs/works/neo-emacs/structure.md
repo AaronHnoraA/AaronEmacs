@@ -4,6 +4,8 @@
 
 逐条配置怎么吸收，记在 [inventory.md](inventory.md)（下一步）。
 
+> 第一阶段改为先以 Doom 为模板升级骨架（[doom-template](../doom-template/README.md)）。本文 §3 的目录和模块声明方案以那边定稿为准，§2、§3.3 的映射关系仍然有效。
+
 原则（用户定）：**全量吸收 neo-emacs 的配置和细节，骨架用本配置的。**
 
 ## 1. 两边的框架

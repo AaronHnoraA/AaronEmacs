@@ -69,7 +69,8 @@ channels.
 
 ## works/ — projects in progress
 
-- [neo-emacs/](works/neo-emacs/README.md) Studying the Doom-based neo-emacs module layout to restructure `lisp/`; upstream clone in `works/neo-emacs/upstream/`.
+- [doom-template/](works/doom-template/README.md) Phase 1 of the restructuring: Doom Emacs as the template for this config's module system, lifecycle hooks, macro library, registration APIs and defaults, without depending on Doom; upstream clones in `works/doom-template/upstream/`.
+- [neo-emacs/](works/neo-emacs/README.md) Phase 2: absorbing every neo-emacs setting on top of the Doom-templated skeleton; upstream clone in `works/neo-emacs/upstream/`.
 
 ## guide/ — how to use it
 

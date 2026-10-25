@@ -1,5 +1,7 @@
 # neo-emacs 结构化升级
 
+> 第二阶段。先完成第一阶段 [以 Doom 为模板升级配置](../doom-template/README.md)，再在那个骨架上吸收本项目。
+
 研究 [sincebyte/neo-emacs](https://github.com/sincebyte/neo-emacs)，借它的模块框架把本配置的 `lisp/` 重新组织成可按模块开关、自带说明的结构。
 
 - 上游代码：`upstream/`（本地 clone，被 `.gitignore` 忽略，不进本仓库）。更新用 `git -C docs/works/neo-emacs/upstream pull`。
