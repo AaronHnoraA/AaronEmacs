@@ -20,6 +20,14 @@
   :type 'sexp
   :group 'treesit)
 
+;; Opening a file never offers to build a grammar (see `treesit-auto-install'
+;; below).  Emacs 31 asks on its own through this option, so a .ts file
+;; without its grammar prompted anyway; Doom keeps the same rule.
+(config-register 'treesit-auto-install-grammar
+  :group 'treesit
+  :type '(choice (const never) (const ask) (const always))
+  :doc "Whether visiting a file may install its missing tree-sitter grammar.")
+
 
 (aaron-package-ensure-vc 'treesit-fold "https://github.com/emacs-tree-sitter/treesit-fold.git")
 

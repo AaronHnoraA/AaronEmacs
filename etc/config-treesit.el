@@ -23,5 +23,6 @@
     (typescript "https://github.com/tree-sitter/tree-sitter-typescript" "master"
                 "typescript/src")
     (toml "https://github.com/tree-sitter/tree-sitter-toml")
-    (yaml "https://github.com/ikatyang/tree-sitter-yaml")))
+    (yaml "https://github.com/ikatyang/tree-sitter-yaml"))
+   (treesit-auto-install-grammar . never))
 )

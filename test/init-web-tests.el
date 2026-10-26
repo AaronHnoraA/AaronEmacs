@@ -93,5 +93,22 @@
       (should (eq (mode "/p/.jshintrc") json))
       (should (eq (mode "/p/style.xslt") (mode "/p/data.xml"))))))
 
+(ert-deftest +tree-sitter-visiting-never-offers-to-install-a-grammar ()
+  "Opening a file whose grammar is missing does not ask to build it."
+  (require 'treesit)
+  (should (eq treesit-auto-install-grammar 'never))
+  (let ((dir (make-temp-file "grammar-" t))
+        asked)
+    (unwind-protect
+        (cl-letf (((symbol-function 'y-or-n-p)
+                   (lambda (&rest _) (setq asked t) nil))
+                  ((symbol-function 'yes-or-no-p)
+                   (lambda (&rest _) (setq asked t) nil)))
+          (let ((file (expand-file-name "a.ts" dir)))
+            (write-region "const a = 1;\n" nil file nil 'silent)
+            (kill-buffer (find-file-noselect file))
+            (should-not asked)))
+      (delete-directory dir t))))
+
 (provide 'init-web-tests)
 ;;; init-web-tests.el ends here

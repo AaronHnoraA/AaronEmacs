@@ -291,3 +291,9 @@ Doom 的做法：
 | `lang/json`、`lang/data` | `.jshintrc`/`.jscsrc` 为 JSON、`.xslt` 为 XML | **吸收**：之前这两类文件打开没有模式；`.plist`、`pom.xml`、`.xsd`、`.rss` 已是 `nxml-mode` |
 | `lang/json`、`lang/yaml`、`lang/data`、`lang/graphviz`、`lang/plantuml`、`lang/scala` | json-mode 的路径/布尔键、`Procfile` 当 YAML、nxml 自动补全与 xmllint、csv 键、graphviz 预览键、plantuml jar 下载、scala 缩进与 REPL | **不收**：tree-sitter 模式已覆盖；`Procfile` 不是 YAML；其余是键位与 Doom 自己的格式化/REPL 体系 |
 | `tools/debugger`、`editor/snippets`、`checkers/grammar`、`ui/nav-flash`、`app/calendar` | dape 断点目录、ESC 中止 snippet、选区包裹 snippet、LanguageTool 路径、writegood、跳转闪烁点、calfw 键 | **已有或不收**：dape 状态目录启动时建立；snippet 与闪烁是手感；语法检查已用 LanguageTool；日历键以本配置为准 |
+| `tools/tree-sitter` | 缺 grammar 时安静地退回、统一遵守 `treesit-auto-install-grammar` | **吸收**：本配置的约定是“打开文件时不提示、不安装 grammar”（treesit-auto 已设），但 Emacs 31 自己的 `treesit-auto-install-grammar` 还是 `ask`，打开 `.ts` 仍会问；登记为 config 设置，值 `never`。本机缺 TypeScript grammar，需要时用 `M-x treesit-install-language-grammar` |
+| `tools/tree-sitter` | 30.x ts-mode 副作用、`set-tree-sitter!` 映射、font-lock 级别 4 | **不需要**：31.1 已修；映射由 `+treesit-major-mode-remap-candidates` 负责 |
+| `emacs/tramp` | `remote-file-name-inhibit-*`、复制阈值、scp 直传、补全缓存、ssh 默认方法、magit/project/vc-git 结果记忆化 | **已有或不收**：前六项本配置已是相同值；记忆化没有失效机制，本配置的 Remote 框架有自己的根目录预取与缓存 |
+| `lang/beancount` | electric 货币、`custom` 指令着色、nerd-icons、flymake-bean、补全增强 | **不收**：记账走本配置的 language server 与录入向导；着色与图标是外观 |
+| `checkers/syntax` | flycheck 体系、ESC 时重跑检查、flymake 右侧 fringe、不环绕 | **不收**：本配置用 Flymake，空闲时自动检查；位置和环绕是偏好 |
+| `emacs/ibuffer`、`ui/treemacs`、`ui/ligatures`、`ui/doom`、`ui/dashboard` | 列宽与图标、Treemacs 主题加载顺序、连字表、Doom 主题与 solaire、Doom 首页 | **不收**：外观，第 1、6 节已列 |
