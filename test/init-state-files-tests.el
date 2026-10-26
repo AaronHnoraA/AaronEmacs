@@ -281,4 +281,33 @@
             (setq buffer-file-name nil)))
       (delete-directory dir t))))
 
+(ert-deftest aaron-enabling-a-command-writes-custom-file-not-init ()
+  "Enabling a disabled command for good is recorded in `custom-file'."
+  ;; novice loads after startup; the advice must still apply.
+  (require 'novice)
+  (let* ((dir (file-name-as-directory (make-temp-file "novice-" t)))
+         (init (expand-file-name "init.el" dir))
+         (custom-file (expand-file-name "custom.el" dir))
+         (user-init-file init))
+    (unwind-protect
+        (progn
+          (write-region ";; init\n" nil init nil 'silent)
+          (write-region ";; custom\n" nil custom-file nil 'silent)
+          (defalias 'aaron-test-disabled-command (lambda () (interactive)))
+          (put 'aaron-test-disabled-command 'disabled t)
+          (en/disable-command 'aaron-test-disabled-command nil)
+          (should (string-match-p "aaron-test-disabled-command"
+                                  (with-temp-buffer
+                                    (insert-file-contents custom-file)
+                                    (buffer-string))))
+          (should (equal (with-temp-buffer
+                           (insert-file-contents init)
+                           (buffer-string))
+                         ";; init\n")))
+      (put 'aaron-test-disabled-command 'disabled nil)
+      (dolist (buffer (buffer-list))
+        (when (member (buffer-file-name buffer) (list init custom-file))
+          (kill-buffer buffer)))
+      (delete-directory dir t))))
+
 ;;; init-state-files-tests.el ends here

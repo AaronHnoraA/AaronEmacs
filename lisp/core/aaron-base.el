@@ -2263,6 +2263,16 @@ interrupt the current window layout.")
   :path (expand-file-name "etc/custom.el" user-emacs-directory)
   :loader (lambda () (load custom-file nil 'nomessage)))
 
+;; From Doom: answering "enable this command for future sessions" makes
+;; `en/disable-command' append a `put' form to `user-init-file', which here is
+;; the tracked init.el.  Write it to `custom-file' (etc/custom.el, loaded at
+;; startup) with the other Customize-written settings.
+(defadvice! aaron--disabled-commands-to-custom-file-a (fn &rest args)
+  "Record enabled or disabled commands in `custom-file', not init.el."
+  :around #'en/disable-command
+  (let ((user-init-file (or custom-file user-init-file)))
+    (apply fn args)))
+
 (config-register-file 'dashboard
   :group 'ui
   :doc "Startup dashboard banner text."

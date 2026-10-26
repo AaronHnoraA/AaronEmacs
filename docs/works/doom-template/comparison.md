@@ -317,3 +317,14 @@ Doom 的做法：
 | `lib/projects.el` | `set-project-type!`、在其他项目找文件、把目录登记为项目；后两项已有（`+project/switch`、`project-add-to-workbench`），前者没有使用者 |
 | `lib/help.el`（全文） | `doom/help-package-config` | **吸收**：`elisp-find-package-config`，在本配置的 `lisp/` 里找设置某个包的位置 |
 | `lib/help.el`（全文） | `describe-option`（只列 defcustom）、`describe-package`（带 straight 信息与模块来源）、`describe-autodef`、`search-loaded-files`、主页与报 bug、旧别名 | **不收**：前两项是 Emacs 自带命令的变体，模块来源已在 `aaron/describe-module`；其余属于 Doom 自己 |
+
+## 13. `doom-emacs.el` 余下部分（全文）
+
+| 段落 | 处理 |
+| --- | --- |
+| 第 1–100 行：29.1–31 的向前兼容（`enable-theme-functions`、treesit 空函数、`major-mode-remap`、`safe-local-variable-directories`、`mode-line-invisible-mode`） | **不需要**：本配置只跑 Emacs 31 |
+| 字体、主题变量与 emoji/符号回退字体表 | **已有**：`aaron/apply-font-config` |
+| `doom-file-lines-threshold-alist`（按行数开 so-long） | **已有**：`aaron-base` 的 so-long 判定 |
+| 生命周期 hook | **已移植**（`aaron-emacs`） |
+| `custom-theme-directory`、`custom-file` | **已有**：`custom-file` 在 `etc/custom.el` |
+| `en/disable-command` 写到 `custom-file` | **吸收**：Emacs 把“以后都启用这个命令”写进 `user-init-file`，即受版本控制的 `init.el`；改写到 `etc/custom.el`（`aaron--disabled-commands-to-custom-file-a`）。检查过 `init.el` 历史，还没被写过 |
