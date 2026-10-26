@@ -110,5 +110,35 @@
             (should-not asked)))
       (delete-directory dir t))))
 
+(ert-deftest +sh-bats-zunit-and-compdef-files-open-as-shell ()
+  "Bats and ZUnit tests and zsh completion functions open in sh-mode."
+  (require 'sh-script)
+  (let ((dir (make-temp-file "sh-types-" t)))
+    (unwind-protect
+        (dolist (spec '(("t.bats" . "@test x {\n}\n")
+                        ("t.zunit" . "@test x {\n}\n")
+                        ("_mycmd" . "#compdef mycmd\n_arguments\n")
+                        ("plain" . "hello\n")))
+          (let ((file (expand-file-name (car spec) dir)))
+            (write-region (cdr spec) nil file nil 'silent)
+            (with-current-buffer (find-file-noselect file)
+              (unwind-protect
+                  (if (equal (car spec) "plain")
+                      (should-not (derived-mode-p 'sh-base-mode))
+                    (should (derived-mode-p 'sh-base-mode)))
+                (kill-buffer)))))
+      (delete-directory dir t))))
+
+(ert-deftest +eshell-history-records-a-repeated-command-once ()
+  "A command run twice in a row leaves one history entry."
+  (require 'em-hist)
+  (with-temp-buffer
+    (let ((eshell-history-ring (make-ring 10))
+          (eshell-hist--new-items 0))
+      (should eshell-hist-ignoredups)
+      (eshell-add-input-to-history "ls -l")
+      (eshell-add-input-to-history "ls -l")
+      (should (= (ring-length eshell-history-ring) 1)))))
+
 (provide 'init-web-tests)
 ;;; init-web-tests.el ends here
