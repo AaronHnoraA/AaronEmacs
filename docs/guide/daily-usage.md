@@ -258,7 +258,7 @@ Apple 集成先用 `my/noema-agenda-apple-enable` 启用相应类型，再用原
 
 Graph 搜索框支持全文词和
 `tag:` / `alias:` / `path:` / `title:` 过滤，并会提示 tag / alias / path 等候选。
-本地 graph xwidget buffer 里 `M-w` 只关视图；`C-c w d` 或 `H-q` 结束 graph buffer 并关掉 graph websocket。
+本地 graph xwidget buffer 里 `M-w` 有多个窗格时关当前窗格，唯一窗格时只关视图；`C-c w d` 或 `H-q` 结束 graph buffer 并关掉 graph websocket。
 
 ### Noema 页面里的 Emacs 按键
 
@@ -935,7 +935,7 @@ Yazi 按 `Enter` 打开光标下的文本或目录时也使用它；PDF、图片
   交互选择目标后端；可选 `portal` / `xwidget` / `eww` / `system`
 - `C-c w d`
   结束当前浏览后端：kill browser buffer 并删除对应窗口。Portal / `eww` / `xwidget-webkit`
-  buffer 里的 `M-w` 与其他 buffer 一样只关视图
+  buffer 里的 `M-w` 与其他 buffer 一样关当前窗格，唯一窗格时只关视图
 当前策略是手动分流：默认打开方式统一在 `lisp/init-open.el` 的
 `my/open-routes` 里维护，route DSL helper 来自 vendored `general.el` 的
 `general-route-*`。`browse-url` 默认走 Portal；
@@ -986,7 +986,8 @@ ibuffer、帮助页和其他用 `quit-window` 退出的临时页面，优先返�
 已经在其他窗口显示的 buffer 不作自动返回目标。临时创建且无返回页的窗口会关闭；
 最后一个窗口无可返回页时打开项目目录。如果弹窗有精确的来源页，仍由 Emacs 原生返回；
 自动补选遵守该 frame 的 buffer 过滤规则，不会把旧 xwidget 页当作普通候选。
-`SPC b z` 和最后一个 frame 上的 `H-w` 只关当前视图（buffer 保留），之后也按此规则返回。
+`SPC b z`、最后一个 frame 上的 `H-w` 和唯一窗格上的 `Cmd-W` 只关当前视图
+（buffer 和 frame 保留），之后也按此规则返回。有多个窗格时，`Cmd-W` 直接关闭当前窗格。
 关闭与回退的完整规则见 [window-lifecycle.md](../design/window-lifecycle.md)。
 `Cmd+Shift+W`（Emacs 的 `M-W`）仍从当前 Perspective 弹出 buffer 列表供选择；
 选中的是当前页时，杀掉后按同一规则收尾。`C-x k` 仍是原生 Perspective 选择器。
@@ -1585,7 +1586,7 @@ ETAF 只在第一次打开这个整页时加载，常驻 mode line 和 Dashboard
 
 ## 7. 有冲突时优先记住什么
 
-- `M-w`（`Cmd-W`）只关当前视图：buffer 保留（终端继续运行、页面保留状态），窗口回到上一页；结束 buffer 用 `H-q`
+- `M-w`（`Cmd-W`）有多个窗格时关当前窗格，唯一窗格时只关视图并返回上一页；buffer 和 frame 保留。结束当前 buffer 用 `H-q`
 - 关 frame 用 `H-w`
 - 普通 warning 现在只写入 `*Warnings*`，不再自动弹窗抢操作；需要时用 `SPC h w`
 - `C-c y` 现在是 snippet 前缀，不再直接展开

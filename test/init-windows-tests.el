@@ -89,6 +89,7 @@
   "Portal's native Command keys run the same bindings as other buffers."
   (require 'init-portal)
   (require 'portal-terminal-bindings)
+  (should (eq (key-binding (kbd "M-w")) #'my/close-window))
   (should (eq (lookup-key portal-terminal-native-map (kbd "s-w"))
               (key-binding (kbd "M-w"))))
   (should (eq (lookup-key portal-terminal-native-map (kbd "s-W"))

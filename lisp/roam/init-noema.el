@@ -3918,7 +3918,8 @@ RELOAD and WINDOW-MENU select the backend's implementations."
    (list
     (my/xwidget--nav-button
      (my/xwidget--mode-line-icon 'codicon "nf-cod-refresh" "reload")
-     (or reload #'my/xwidget-reload) "Reload [g]" 'header-line)
+     (or reload #'my/xwidget-reload)
+     (if reload "Refresh note from disk" "Reload page [g]") 'header-line)
     (my/xwidget--nav-button
      (my/xwidget--mode-line-icon 'codicon "nf-cod-edit" "edit")
      #'my/noema-editor-menu "Noema actions" 'header-line)

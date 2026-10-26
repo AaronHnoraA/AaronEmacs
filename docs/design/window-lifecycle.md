@@ -49,12 +49,29 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 
 | 动词 | 键 / 命令 | buffer | 窗口 |
 | --- | --- | --- | --- |
-| 关视图 | `Cmd-W`（`M-w`）`my/close-view`；`SPC b z`；最后一个 frame 上的 `H-w` | 显示中 → 未显示 | 回退（见下）；popup 由原生 quit 精确返回来源 |
+| 关视图 | `SPC b z`；最后一个 frame 上的 `H-w`；唯一窗格上的 `Cmd-W`（`my/close-view`） | 当前窗口撤下 buffer；若无别的窗口显示它则变为未显示 | 回退（见下）；popup 由原生 quit 精确返回来源 |
 | 结束 | `H-q` `my/kill-buffer-dwim`；`C-c w d`（浏览后端） | → 已结束；终端程序运行中先确认（Portal 的 kill 询问）。只读或 `*…*` 的普通 buffer 只关视图 | 回退 |
-| 关窗口 | `H-0` `delete-window` | 它的最后一个窗口消失时：显示中 → 未显示 | 窗口消失，不回退 |
-| 关 frame | `H-w` `my/delete-frame-dwim`（多于一个 frame 时） | frame 中各 buffer：显示中 → 未显示；终端 frame 也保留终端 | frame 消失；唯一可见 frame 只隐藏 |
+| 关窗口 | `Cmd-W`（`M-w`）`my/close-window`；`H-0` `delete-window` | 它的最后一个窗口消失时：显示中 → 未显示 | `Cmd-W` 有多个窗格时删当前窗格；唯一窗格时关视图，frame 保留 |
+| 关 frame | `H-w` `my/delete-frame-dwim`（多于一个 frame 时） | frame 中各 buffer 若无别的窗口显示则变为未显示；终端 buffer 保留 | 多于一个 frame 时 frame 消失；只有一个 frame 时只关当前视图 |
 
-每种 buffer 上，`Cmd-W` 都只关视图：终端、页面、EWW、Portal Web 和普通 buffer 一样。
+`Cmd-W` 在普通 buffer、终端、Noema 页面和浏览视图上执行相同的窗格动作；不调用
+`kill-buffer`。唯一窗格时用既有回退规则，popup 按原生 `quit-window` 返回来源。
+`Cmd-Shift-W`（`M-W`）继续调用 Perspective 的 buffer 选择器，选定后才结束 buffer；
+它不参与 `Cmd-W` 的关闭动作。Noema 未显示页面的数量清理另见下文。
+
+### Command-W 两键的分支
+
+1. 普通 macOS Emacs 把物理 Command 映射为 Meta；Portal 原生视图把 `s-w` / `s-W`
+   分别交给 Emacs 的关窗格命令和 Perspective 选择器；Noema xwidget 编辑区把
+   `M-w` / `M-W` 转交给 Emacs，页面输入框中的 `Cmd-W` 也交给 Emacs。
+   Shift 只决定两个不同命令，不改变关闭深度。
+2. `Cmd-W` 若正处于 minibuffer，先退出提示；否则，有多个窗格时执行
+   `delete-window`，只有一个窗格时执行 `my/close-view`。后一分支保留 frame，
+   按同窗格历史回退；popup 用 `quit-window` 返回来源。没有合格历史候选时显示
+   项目目录，主目录或无项目时显示 Dashboard。两个分支都不 kill buffer。
+3. `Cmd-Shift-W` 打开当前 Perspective 的 buffer 选择器；取消不改布局，选择
+   buffer 后调用 `kill-buffer`。若选中正在显示的 buffer，原生 kill 后按回退规则
+   修复窗口；选中别处的 buffer 时当前窗格不变。`C-x k` 使用同一个选择器。
 
 ### 回退：窗口失去 buffer 后显示什么
 
@@ -132,6 +149,12 @@ Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buff
 - **C13** Emacs 明确持有键盘时，离开 minibuffer、frame 重新激活或视图布局变化都不把
   键盘还给视图；只有进入视图（`RET`、点击、显式聚焦请求）或窗口 / buffer 真正变化后
   再选回它才会。测试：`c13-emacs-keeps-the-keyboard-until-the-pane-changes`。
+- **C14** `Cmd-W` 有多个窗格时删当前窗格，唯一窗格时只关视图并保留 frame；
+  当前 buffer 在两条路径中都保持存活。`Cmd-Shift-W` 保持 Perspective 的交互式
+  buffer 结束动作。测试：`c14-cmd-w-closes-pane-and-keeps-buffer`、
+  `c14-cmd-w-keeps-frame-for-sole-pane`、
+  `c14-cmd-w-dismisses-minibuffer-before-changing-layout`、
+  `my/window-close-select-key-keeps-picker-and-window-history`。
 
 测试文件：`test/init-window-lifecycle-tests.el`、`test/init-windows-tests.el`，
 均由 `make ui-test` 运行。
@@ -141,7 +164,7 @@ Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buff
 | 部分 | 位置 |
 | --- | --- |
 | 单实例判定、跳过规则、回退候选、修复 | `lisp/init-windows.el` “Buffer management helpers” |
-| 关视图 `my/close-view`、结束 `my/kill-buffer-dwim`、全局 `M-w` | `lisp/init-windows.el` |
+| 关视图 `my/close-view`、关窗格 `my/close-window`、结束 `my/kill-buffer-dwim`、全局 `M-w` | `lisp/init-windows.el` |
 | `H-w` | `lisp/init-base.el` `my/delete-frame-dwim` |
 | 浏览后端的 `M-w` 与 `C-c w d` | `lisp/init-browser.el` |
 | 终端原生键表的 `s-w`、终端移动与 frame 关闭 | `lisp/init-portal.el`、`lisp/init-portal-popup.el` |

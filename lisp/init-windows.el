@@ -339,7 +339,7 @@ Relies on `winner-mode' (enabled below) to undo a prior delete."
  :keymaps 'global
  "C-x 1" #'my/toggle-delete-other-windows
  "C-x SPC" #'toggle-one-window
- "M-w" #'my/close-view)
+ "M-w" #'my/close-window)
 
 (use-package winner
   :ensure nil
@@ -540,6 +540,17 @@ spare window without one.  A popup returns exactly where it came from."
             (eq (nth 3 previous) closing))
         (quit-window)
       (my/window-bury-current-buffer))))
+
+(defun my/close-window ()
+  "Close the selected window and keep its buffer alive.
+If it is the frame's only window, close the view in place so the frame stays
+open and its previous buffer can return.  An active minibuffer is dismissed
+before any window is closed."
+  (interactive)
+  (cond
+   ((minibufferp) (abort-recursive-edit))
+   ((window-parent (selected-window)) (delete-window))
+   (t (my/close-view))))
 
 (defalias 'close-view #'my/close-view
   "Stop showing the current buffer in this window and keep it alive.")

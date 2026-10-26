@@ -656,8 +656,10 @@ Noema Markdown panes:
 
 Browser and Portal:
 
-- Closing follows `docs/design/window-lifecycle.md`: `Cmd-W` (`my/close-view`)
-  only takes a buffer out of view, `H-q` ends it, and fallback never shows a
+- Closing follows `docs/design/window-lifecycle.md`: `Cmd-W` (`my/close-window`)
+  closes the current pane, or only its view when it is the sole pane, without
+  killing the buffer or frame. `Cmd-Shift-W` keeps Perspective's interactive
+  buffer-kill picker; `H-q` ends the current buffer. Fallback never shows a
   single-instance buffer that is on screen elsewhere.  Window rules ask
   `my/buffer-single-instance-p`, never a mode or a package variable; a new
   native-view or xwidget mode joins `my/single-instance-modes`.
@@ -717,11 +719,11 @@ Documents are Markdown and sit in one directory by kind (see `docs/README.md`):
 means), `ops/` (maintenance) describe the current state only, with no dates or
 change logs; `records/` holds dated audits, incidents, measurements and
 retired notes (`topic-YYYY-MM.md`), written once and never authoritative.
-Never mix the two: a finding worth keeping moves into the structural doc it
-changes, and the record keeps the history.  A new document takes its slot in
 `works/<project>/` holds a project in progress: a `README.md` workbench plus
 an ignored `upstream/` clone when it studies another codebase; it is never
 authoritative, and its settled results move into `design/` and this file.
+Never mix the two: a finding worth keeping moves into the structural doc it
+changes, and the record keeps the history.  A new document takes its slot in
 `docs/README.md` first; adding or moving one is a change to that map.
 
 Behaviour changes go through the owning `design/` document (the loop in

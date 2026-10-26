@@ -45,7 +45,7 @@
 (declare-function my/portal-popup-move-buffer-to-window
                   "init-portal-popup" (buffer target))
 (declare-function my/window-dashboard-buffer "init-windows" ())
-(declare-function my/close-view "init-windows" ())
+(declare-function my/close-window "init-windows" ())
 (declare-function my/background-hide "init-background" (&optional all))
 (declare-function vertico-exit "vertico" ())
 (defvar vertico--input)
@@ -812,7 +812,7 @@ is omitted from the choices."
                    ("C-c C-e" . my/portal-popup-toggle)
                    ("C-c E" . my/portal-popup-cycle)
                    ("C-c M-e" . my/portal-toggle-fixed)
-                   ("s-w" . my/close-view)
+                   ("s-w" . my/close-window)
                    ("s-W" . persp-kill-buffer*)
                    ("s-x" . execute-extended-command)))
     (keymap-set portal-terminal-native-map (car entry) (cdr entry)))
