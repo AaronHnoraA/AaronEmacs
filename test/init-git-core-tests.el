@@ -39,4 +39,12 @@
 
 (provide 'init-git-core-tests)
 
+(ert-deftest +magit-status-turns-off-long-line-shortcuts ()
+  "A large Magit status buffer keeps its section motion (magit#5320)."
+  (require 'magit)
+  (with-temp-buffer
+    (magit-status-mode)
+    (should (local-variable-p 'long-line-threshold))
+    (should-not long-line-threshold)))
+
 ;;; init-git-core-tests.el ends here
