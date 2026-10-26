@@ -264,3 +264,5 @@ Doom 的做法：
 | `lang/emacs-lisp` | `elisp-flymake-byte-compile` 带上 `load-path` | **吸收并修正**：本配置每个文件的字节编译检查都停在第一个 `require`（“Cannot open load file”），什么也查不出；只追加 `load-path` 还不够，目录模块里 `./config.el` 就是模块自己，会遮住核心的 `config`（“Recursive require”），所以会话的 `load-path` 放在 `./` 前面。修好后查出 `editor/editing` 缺的 4 个 `declare-function`，一并补上 |
 | `lang/emacs-lisp` | eldoc 在变量文档旁显示当前值 | **吸收**：改用 Emacs 31 自带的 `elisp-eldoc-var-docstring-with-value`，不移植 Doom 的 advice |
 | `lang/emacs-lisp` | 改写 `calculate-lisp-indent`（plist 对齐）、`;;;` outline、额外着色、highlight-quoted、非 package 文件压低编译警告、checkdoc 放宽、buttercup、working buffer、ielm 着色 | **不收**：缩进改写会重排现有代码；其余是外观或 Doom 自己的测试/求值约定；本配置的 checkdoc 警告保持原样 |
+| `lang/latex` | `fill-nobreak-predicate` 加 `texmathp` | **吸收**：`+auctex-keep-math-unbroken-h`，填充段落时不在行内公式中间换行 |
+| `lang/latex` | `.auctex-auto` 隐藏目录、`TeX-save-query nil`、`chktex` 参数、smartparens 的 `\\left(` 配对、条目续行缩进、viewer 列表、tex-fold、cdlatex/company | **已有或不收**：本配置把 AUCTeX 的解析缓存放到项目外（`+auctex-setup-auto-cache`），比 Doom 更干净；保存询问与缩进是习惯；预览走 RaTeX 与 PDF Tools |

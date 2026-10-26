@@ -558,11 +558,21 @@ Compiles first when no PDF exists yet."
                   (kbd "C-c C-g")
                   #'+latex/sync-forward))))
 
+(declare-function texmathp "texmathp" ())
+
+;; From Doom: filling a paragraph never breaks a line inside inline math, so
+;; a formula stays on one source line for reading and preview.
+(defun +auctex-keep-math-unbroken-h ()
+  "Keep `fill-paragraph' from breaking lines inside math."
+  (require 'texmathp)
+  (add-hook 'fill-nobreak-predicate #'texmathp nil t))
+
 (use-package tex
   :ensure auctex
   :defer t
   :hook
   (LaTeX-mode . aaron-typography-setup-prose-buffer)
+  (TeX-mode . +auctex-keep-math-unbroken-h)
   (LaTeX-mode . LaTeX-math-mode)
   (LaTeX-mode . turn-on-reftex)
   (LaTeX-mode . TeX-source-correlate-mode)

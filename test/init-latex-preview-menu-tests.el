@@ -51,5 +51,18 @@
                            "/fs:box:/work/"))))
       (kill-buffer preview))))
 
+(ert-deftest +auctex-fill-keeps-inline-math-on-one-line ()
+  "Filling a LaTeX paragraph does not break a line inside inline math."
+  (require 'latex)
+  (with-temp-buffer
+    (LaTeX-mode)
+    (setq fill-column 30)
+    ;; The formula is longer than the line, so plain filling breaks it.
+    (insert "Words $a + b + c + d + e + f + g + h + i + j = k$ end of it here.")
+    (goto-char (point-min))
+    (fill-paragraph)
+    (should (string-match-p (regexp-quote "$a + b + c + d + e + f + g + h + i + j = k$")
+                            (buffer-string)))))
+
 (provide 'init-latex-preview-menu-tests)
 ;;; init-latex-preview-menu-tests.el ends here
