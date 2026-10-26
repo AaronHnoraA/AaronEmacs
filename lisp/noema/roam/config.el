@@ -4327,7 +4327,7 @@ canonical `roam://note-id#tag' target."
     map)
   "Roam keymap for Markdown buffers. Bound to C-c r.")
 
-(aaron-leader!
+(define-leader-key!
   "N" '(:ignore t :which-key "Noema")
   "N m" '(:def noema-wiki-menu :which-key "Wiki menu")
   "N a" '(:def noema-agenda :which-key "Noema agenda")

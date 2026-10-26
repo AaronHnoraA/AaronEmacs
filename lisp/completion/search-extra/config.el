@@ -41,7 +41,7 @@
       (consult-line-multi nil)
     (user-error "consult-line-multi is unavailable")))
 
-(aaron-leader!
+(define-leader-key!
   "s t" '(:def +search/todos :which-key "todos")
   "s P" '(:def +search/symbol-at-point :which-key "grep symbol")
   "s L" '(:def +search/project-lines :which-key "project lines"))

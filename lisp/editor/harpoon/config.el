@@ -128,7 +128,7 @@
 
 (+harpoon-load-state)
 
-(aaron-leader!
+(define-leader-key!
   "j"   '(:ignore t :which-key "jump")
   "j m" '(:def +harpoon/mark-current-file :which-key "mark file")
   "j d" '(:def +harpoon/unmark-current-file :which-key "unmark file")

@@ -1264,7 +1264,7 @@ These are the \"Error processing message\" lines in *Messages*."
       (pop-to-buffer buffer)
     (message "No language-server message handler has failed")))
 
-(aaron-leader!
+(define-leader-key!
   "c s" '(:def language-server-menu :which-key "language server"))
 
 ;; Boards start in Emacs state.

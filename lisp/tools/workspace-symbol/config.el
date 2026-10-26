@@ -18,7 +18,7 @@
     (user-error "No active language server in the current buffer"))
   (call-interactively #'+symbols/xref-apropos))
 
-(aaron-leader!
+(define-leader-key!
   "c S" '(:def +language-server/workspace-symbol :which-key "workspace symbol"))
 
 (provide 'tools/workspace-symbol/config)

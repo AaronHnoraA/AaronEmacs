@@ -306,7 +306,7 @@ When VALUE is a function, call it with ROOT when possible."
    (aaron-open-resolve-file-name
     (expand-file-name ".dir-locals.el" (+project-local-root)))))
 
-(aaron-leader!
+(define-leader-key!
   "p l" '(:def +project-local/describe :which-key "project local overrides")
   "p L" '(:def +project-local/open-dir-locals :which-key "project dir-locals"))
 

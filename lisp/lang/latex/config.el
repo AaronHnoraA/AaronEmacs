@@ -932,7 +932,7 @@ where the cursor is."
   ;; Localleader rather than a global leader key: the doctor only means
   ;; anything in a TeX buffer, where it can report the fragment at point.
   (dolist (map '(LaTeX-mode-map TeX-mode-map latex-mode-map tex-mode-map))
-    (aaron-local-leader!
+    (define-localleader-key!
       :keymaps map
       "d" '+latex/preview-doctor
       "p" 'ratex-refresh-previews)))

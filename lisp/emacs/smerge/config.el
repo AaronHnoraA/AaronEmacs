@@ -74,7 +74,7 @@
     ("e" "ediff" smerge-ediff)
     ("q" "quit mode" smerge-mode)]])
 
-(aaron-leader!
+(define-leader-key!
   "g m" '(:def merge-conflict-menu :which-key "merge conflict"))
 
 (provide 'emacs/smerge/config)

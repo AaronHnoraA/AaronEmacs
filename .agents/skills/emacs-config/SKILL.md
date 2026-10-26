@@ -28,7 +28,7 @@ names, and that file wins over anything remembered.
 | Language servers (`set-language-server!`, Hub, Doctor) | `docs/design/lsp-workflow.md`; `AGENT.md` “Domain Policies” → LSP |
 | Jupyter kernels and the Noema bridge | `docs/design/jupyter-workflow.md` |
 | User settings (`config-register`, `config-get/set`, `etc/config-store.el`) | `docs/design/config-management.md` “注册语法” |
-| Keybindings (general.el, leader, localleader, Dirvish keys) | `AGENT.md` “Keybinding Rules”; keys listed in `docs/guide/daily-usage.md` |
+| Keybindings (`map!`, `define-leader-key!`, general.el, Dirvish keys) | `AGENT.md` “Keybinding Rules”; keys listed in `docs/guide/daily-usage.md` |
 | Windows, buffers, closing and fallback (Portal, Noema pages, popups, frames) | `docs/design/window-lifecycle.md` |
 | Existing entry points not to duplicate | `AGENT.md` “Do Not Reinvent Existing Surfaces” |
 | Performance diagnostics | `AGENT.md` “Performance Diagnostics” |

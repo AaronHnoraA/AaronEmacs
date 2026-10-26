@@ -34,7 +34,8 @@
 例外：
 
 - `:core` 是平铺的 `lisp/core/aaron-*.el`，和 Doom 的 `doom-*.el` 一样，声明为 `(base :feature aaron-base)`。
-- `config`、`config-tools`、`config-custom`（配置注册表）、`general`（键位 DSL）和 `aaron-ui/`（board 组件、主题 token、`vendor/` 主题、`ghostty.conf`）也在核心里，但保留各自的公开命名（`config-*`、`general-*`、`aaron-ui-*`），用 `:feature` 声明。`aaron-ui/` 是核心里唯一的子目录，因为它带着主题和非 Elisp 文件。
+- `config`、`config-tools`、`config-custom`（配置注册表）、`general`（键位 DSL）和 `aaron-ui/`（board 组件、主题 token、`vendor/` 主题、`ghostty.conf`）也在核心里，但保留各自的公开命名（`config-*`、`general-*`、`aaron-ui-*`），用 `:feature` 声明。`aaron-ui/` 是核心里唯一的子目录，因为它带着主题和非 Elisp 文件。`:core` 的前三项是 `config`、`general`、`keybinds`（`aaron-keybinds`）：注册表最先加载，后面每个模块加载时都能登记设置；键位层随后，所以模块面板也给这三项记账。
+- `aaron-keybinds` 是 Doom `+keybinds.el` 的改写：`map!`、`define-leader-key!`、`define-localleader-key!`、`define-key!`、`undefine-key!`。leader 仍是 Evil 自己的 `<leader>` / `<localleader>`（normal state，在 `editor/evil` 里设置），`:desc` 转成 general 的 `:which-key`，所以 which-key 标签和以前一样；不带 Doom 的 `:prefix-map`、leader 键选项和 `general-auto-unbind-keys`。
 - Remote 框架库 `lisp/remote/remote-*.el` 保留 `remote-*` 的公开 feature 名。
 
 **与 Doom 的差异**：Doom 按路径加载 `config.el`，模块之间通过 `autoload/` 共享函数。本配置让每个模块文件都是一个 feature，名字就是它在 `lisp/` 下的路径，所以只要 `lisp/` 在 `load-path` 上就能 `require`。这样做有三个原因：
@@ -151,7 +152,10 @@
   - `file-remote-p` 分支、与 `"local"` 比较、经 `default-directory` 查询进程：`:remote` 分类除外；
   - `global-set-key`；
   - 直接调用 `package-vc-install`；
-  - 定义旧的 `my/` 名字。
+  - 定义旧的 `my/` 名字；
+  - `config-setq`：在加载期间用 `setq` / `setq-default` / `setopt` 设置一个已在 `config` 注册表登记的设置。这种值会盖过 `etc/` 里的存储值，而 config-board 显示的仍是存储值。函数体、hook 体和 advice 体里的赋值（`aaron-doctor-runtime-forms`）是运行时改动，不算。
+
+  策略的 `:regexp` 可以是返回正则的函数（`config-setq` 的正则取自注册表），`:when` 是在每个匹配处调用的过滤函数。
 - **模块的 `doctor.el`**：用 Doom 的 `assert!`、`warn!`、`error!`、`explain!` 写。
 
 例外：某一行确实是规则允许的例外（例如 TRAMP 兼容边界上的 `file-remote-p`）时，在同一行加注释 `aaron-allow: 规则ID`。
@@ -169,7 +173,7 @@
 在一行上按 RET 打开 `aaron/describe-module`，显示：
 
 - 源文件；
-- 在 `config` 注册表里登记的设置（按 `:source` 文件归属）；
+- 在 `config` 注册表里登记的设置：注册表把登记所在文件记为 `:source`，取它在 `lisp/` 下的路径（`config-source-label`，如 `tools/lsp/config.el`），面板按模块源文件的同一标签归属；
 - 诊断与策略命中，可以跳到源码行；
 - 键冲突、hook、advice；
 - 仍在运行的 timer，可以取消；

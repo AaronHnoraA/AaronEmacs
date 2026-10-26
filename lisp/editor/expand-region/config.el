@@ -381,7 +381,7 @@ current major mode's notion of a function."
   (interactive)
   (call-interactively #'+expand-region/expand-region))
 
-(aaron-leader!
+(define-leader-key!
   "v"   '(:ignore t :which-key "selection")
   "v v" '(:def +expand-region/expand-region :which-key "expand region")
   "v V" '(:def +expand-region/contract-region :which-key "contract region")

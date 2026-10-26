@@ -58,7 +58,7 @@
                   diff-mode))
     (add-to-list 'ws-butler-global-exempt-modes mode)))
 
-(aaron-leader!
+(define-leader-key!
   "c F" '(:def +format/toggle-on-save :which-key "format on save"))
 
 (provide 'editor/format/config)

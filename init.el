@@ -198,15 +198,7 @@ Already loaded modules are not re-evaluated; restart Emacs for module edits."
     (message "Reloaded %s; loaded modules were not re-evaluated"
              init-file)))
 
-
-
-;; Unified configuration registry: load before the module graph so modules can
-;; register while loading.  `config-apply-store' runs on `after-init-hook'.
-(require 'config)
-
 (require 'init-modules)
-
-
 
 (provide 'init)
 

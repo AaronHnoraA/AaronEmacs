@@ -412,7 +412,7 @@ Return non-nil when BUFFER was visible."
           (message "Closed project diagnostics")
         (+problems/project-full)))))
 
-(aaron-leader!
+(define-leader-key!
   "c D" '(:def +diagnostics/buffer-ui :which-key "diagnostics ui")
   "c P" '(:def +diagnostics/project-ui :which-key "Flymake project list"))
 

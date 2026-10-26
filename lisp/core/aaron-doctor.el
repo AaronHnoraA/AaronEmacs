@@ -71,11 +71,60 @@
      :exempt-files ("core/aaron-packages.el" "bootstrap.el" "package-lock.el"))
     (:id legacy-name
      :regexp "^(def\\(?:un\\|var\\|custom\\|macro\\|alias\\|const\\) my/"
-     :message "defines a legacy `my/' name; modules use `+DOMAIN-' and `+DOMAIN/COMMAND'"))
+     :message "defines a legacy `my/' name; modules use `+DOMAIN-' and `+DOMAIN/COMMAND'")
+    (:id config-setq
+     :regexp aaron-doctor--config-setq-regexp
+     :when aaron-doctor--load-time-p
+     :message "sets a `config' setting in code; its value lives in etc/ (`config-set', the store)"))
   "Rules checked against module sources.
 Each is a plist: :id, :regexp, :message, and optionally :exempt-groups
 \(categories), :exempt-files (file names) and :kinds (`directory' or
-`feature'; default both).")
+`feature'; default both).  :regexp may be a function returning the
+regexp, or nil to skip the rule.  :when, a function, is called at each
+match with the match data set and keeps only matches it returns non-nil
+for.")
+
+(defvar aaron-doctor-runtime-forms
+  '(defun defun* defsubst defmacro cl-defun cl-defmacro cl-defmethod lambda
+    define-minor-mode define-globalized-minor-mode define-derived-mode
+    defadvice! fn! cmd! cmd!! add-hook! setq-hook! add-transient-hook!
+    transient-define-suffix transient-define-infix)
+  "Forms whose bodies run later, not while their file loads.")
+
+(defun aaron-doctor--load-time-p ()
+  "Return non-nil when the match runs while its file loads.
+False when any enclosing form is one of `aaron-doctor-runtime-forms'."
+  (save-excursion
+    (not (cl-some (lambda (open)
+                    (goto-char (1+ open))
+                    (memq (ignore-errors (read (current-buffer)))
+                          aaron-doctor-runtime-forms))
+                  (nth 9 (syntax-ppss (match-beginning 0)))))))
+
+(defvar config--registry)
+
+(defvar aaron-doctor--config-setq-cache nil
+  "(COUNT . REGEXP) for `aaron-doctor--config-setq-regexp'.")
+
+(defun aaron-doctor--config-setq-regexp ()
+  "Match a `setq', `setq-default' or `setopt' of a `config' setting.
+Only the first variable of the form is checked.  `setq-local' is a
+buffer's own value and is not matched."
+  (when (and (boundp 'config--registry) (hash-table-p config--registry))
+    (let ((count (hash-table-count config--registry)))
+      (unless (eql (car aaron-doctor--config-setq-cache) count)
+        (let (vars)
+          (maphash (lambda (_ entry)
+                     (when-let* (((eq (plist-get entry :kind) 'variable))
+                                 (var (plist-get entry :var)))
+                       (push (symbol-name var) vars)))
+                   config--registry)
+          (setq aaron-doctor--config-setq-cache
+                (cons count
+                      (and vars
+                           (concat "(\\(?:setq\\(?:-default\\)?\\|setopt\\)[ \t\n]+"
+                                   (regexp-opt vars 'symbols)))))))
+      (cdr aaron-doctor--config-setq-cache))))
 
 (defun aaron-doctor--policy-applies-p (policy module file)
   "Return non-nil when POLICY applies to FILE of MODULE."
@@ -95,11 +144,16 @@ ID', are skipped."
       (set-syntax-table emacs-lisp-mode-syntax-table)
       (dolist (policy policies)
         (goto-char (point-min))
-        (while (re-search-forward (plist-get policy :regexp) nil t)
+        (while (when-let* ((re (plist-get policy :regexp))
+                           (re (if (functionp re) (funcall re) re)))
+                 (re-search-forward re nil t))
           (let ((ppss (save-excursion (syntax-ppss (match-beginning 0))))
                 (line (buffer-substring-no-properties (line-beginning-position)
                                                       (line-end-position))))
             (unless (or (nth 3 ppss) (nth 4 ppss)
+                        (let ((pred (plist-get policy :when)))
+                          (and pred (not (save-match-data
+                                           (save-excursion (funcall pred))))))
                         (string-match-p
                          (format "aaron-allow:.*\\_<%s\\_>" (plist-get policy :id))
                          line))

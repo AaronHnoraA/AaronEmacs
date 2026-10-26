@@ -224,7 +224,7 @@
 
 (add-hook 'prog-mode-hook #'+debug-profile-apply-default)
 
-(aaron-leader!
+(define-leader-key!
   "r d" '(:def debug-profile-menu :which-key "debug profile")
   "r D" '(:def +debug-profile/rerun :which-key "rerun debug profile"))
 

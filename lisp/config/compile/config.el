@@ -753,7 +753,7 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
 
 (defalias 'config-compile #'+compile/board
   "Open the Emacs configuration compile board.")
-(aaron-leader!
+(define-leader-key!
   "cb" '(:def +compile/board :which-key "compile board")
   "cB" '(:def config-compile-menu :which-key "compile menu"))
 

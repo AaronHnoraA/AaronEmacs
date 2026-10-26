@@ -414,7 +414,7 @@ Unknown revisions and changed upstream call shapes use FUNCTION unchanged."
   :commands (browse-at-remote
              browse-at-remote-kill))
 
-(aaron-leader!
+(define-leader-key!
   "g"   '(:ignore t :which-key "git")
   "g ." '(:def git-menu :which-key "git hub")
   "g g" '(:def magit-status :which-key "status")

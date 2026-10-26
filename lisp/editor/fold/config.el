@@ -1177,7 +1177,7 @@ hideshow 6.0.  This function deliberately never changes overlay bounds."
 
 (add-hook 'prog-mode-hook #'+fold-diagnostics-setup)
 
-(aaron-leader!
+(define-leader-key!
   "z"   '(:ignore t :which-key "fold")
   "z a" '(:def +fold/toggle :which-key "toggle fold")
   "z o" '(:def +fold/open :which-key "open fold")

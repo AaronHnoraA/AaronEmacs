@@ -31,8 +31,10 @@
 (ert-deftest aaron-registration-evil-initial-state-now-or-later ()
   ;; `featurep' ignores a let-bound `features' in Emacs 31, so this goes
   ;; through a real `provide'; the batch running core-test never loads Evil.
+  ;; Other files' Evil setup (general.el's) must not run against the stub.
   (skip-unless (not (featurep 'evil)))
-  (let (calls)
+  (let ((after-load-alist (assq-delete-all 'evil (copy-alist after-load-alist)))
+        calls)
     (cl-letf (((symbol-function 'evil-set-initial-state)
                (lambda (mode state) (push (cons mode state) calls))))
       (set-evil-initial-state! 'm1 'normal)

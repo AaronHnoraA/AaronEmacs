@@ -30,7 +30,7 @@
 (defalias '+remote-connectboard/open #'remote-open-target)
 (defalias '+remote-connectboard-entries #'remote-target-list)
 
-(aaron-leader!
+(define-leader-key!
   "o r" '(:def remote-open-target :which-key "remote open")
   "o R" '(:def remote-board :which-key "remote board")
   "o C" '(:def remote-edit-config :which-key "remote config")

@@ -717,7 +717,7 @@ With NO-DISPLAY, refresh an already visible board without selecting it."
 ;; internal callers and existing keybindings.
 (defalias 'config-health #'+health/report
   "Open the Emacs configuration health board.")
-(aaron-leader!
+(define-leader-key!
   "h H" '(:def config-health-menu :which-key "health")
   "h i" '(:def +health/startup-summary :which-key "init stats"))
 

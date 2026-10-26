@@ -10,6 +10,7 @@
 (require 'ert)
 (require 'aaron-modules)
 (require 'aaron-doctor)
+(require 'config)
 
 (defvar aaron-modules-tests--log nil)
 
@@ -252,6 +253,38 @@
               :exempt-groups (:t1)))))
       (aaron! :t1 remote-ish)
       (should-not (plist-get (aaron-doctor-module '(:t1 . remote-ish)) :violations)))))
+
+(ert-deftest aaron-modules-doctor-flags-setq-of-config-settings ()
+  (aaron-modules-tests--with-registry
+    (let ((config--registry (make-hash-table :test 'eq))
+          (aaron-doctor--config-setq-cache nil))
+      (puthash 'aaron-mt-setting
+               '(:name aaron-mt-setting :kind variable :var aaron-mt-setting)
+               config--registry)
+      (aaron-modules-tests--dir-module
+       root :t1 'setter
+       '(("config.el" . "(setq aaron-mt-setting 1)
+(setq-local aaron-mt-setting 2)
+(setq aaron-mt-setting-other 3)
+(setq-default aaron-mt-setting 4) ; aaron-allow: config-setq
+(setopt aaron-mt-setting 5)
+(defun aaron-mt-toggle () (setq aaron-mt-setting 6))
+(with-eval-after-load 'x (setq aaron-mt-setting 7))")))
+      (aaron! :t1 setter)
+      (should (equal (mapcar (lambda (hit) (nth 2 hit))
+                             (plist-get (aaron-doctor-module '(:t1 . setter)) :violations))
+                     '(2 6 8))))))
+
+;;; Settings
+
+(ert-deftest aaron-modules-config-source-label-is-the-path-under-lisp ()
+  (let ((user-emacs-directory "/tmp/cfg/"))
+    (should (equal (config-source-label "/tmp/cfg/lisp/tools/lsp/config.el")
+                   "tools/lsp/config.el"))
+    (should (equal (config-source-label "/tmp/cfg/lisp/tools/lsp/config.elc")
+                   "tools/lsp/config.el"))
+    (should (equal (config-source-label "/tmp/cfg/etc/x.el") "etc/x.el"))
+    (should (equal (config-source-label "/elsewhere/y.el") "y.el"))))
 
 (provide 'aaron-modules-tests)
 ;;; aaron-modules-tests.el ends here

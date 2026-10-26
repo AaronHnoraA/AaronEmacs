@@ -350,7 +350,7 @@ Emacs state keep their local behavior."
     (evil-set-leader 'normal (kbd "SPC"))
     (evil-set-leader 'normal (kbd "<leader>m") :localleader))
 
-  (aaron-leader!
+  (define-leader-key!
     ;; Clear highlights
     "S-SPC" 'lazy-highlight-cleanup
 

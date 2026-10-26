@@ -354,7 +354,7 @@ back to `consult-imenu-multi', which only covers opened buffers."
 
 (global-set-key (kbd "M-g i") #'+symbols/buffer)
 
-(aaron-leader!
+(define-leader-key!
   "s b" '(:def +symbols/buffer :which-key "buffer symbols")
   "s I" '(:def +symbols/project :which-key "project symbols"))
 

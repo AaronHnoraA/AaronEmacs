@@ -269,7 +269,7 @@
   (evil-define-key* 'normal 'global (kbd "[f") #'+navigation/previous-defun)
   (evil-define-key* 'normal 'global (kbd "]f") #'+navigation/next-defun))
 
-(aaron-leader!
+(define-leader-key!
   "n"   '(:ignore t :which-key "navigate")
   "n d" '(:def +navigation/find-definition :which-key "definition")
   "n r" '(:def +navigation/find-references :which-key "references")

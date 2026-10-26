@@ -66,7 +66,7 @@
 (require 'lang/beancount/frame)
 
 (with-eval-after-load 'beancount
-  (aaron-local-leader!
+  (define-localleader-key!
     :keymaps 'beancount-mode-map
     "c" 'compile
     "d" '+beancount/beancount

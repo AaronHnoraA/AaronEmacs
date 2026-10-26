@@ -249,7 +249,7 @@ When SOURCES is nil, refresh every visible diagnostics buffer."
     ("m" "toggle modeline" +diagnostics-modeline-mode)
     ("a" "toggle auto refresh" +diagnostics-auto-refresh-mode)]])
 
-(aaron-leader!
+(define-leader-key!
   "c m" '(:def diagnostics-menu :which-key "diagnostics menu")
   "c ?" '(:def diagnostics-menu :which-key "diagnostics"))
 

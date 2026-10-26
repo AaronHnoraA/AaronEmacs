@@ -378,7 +378,7 @@ When ARCHIVE is nil, store it under `+maintenance-state-backup-dir'."
       (message "State snapshot restored from %s" archive))
     archive))
 
-(aaron-leader!
+(define-leader-key!
   "r B" '(:def +maintenance/state-snapshot :which-key "backup state")
   "r V" '(:def +maintenance/state-restore :which-key "restore state")
   "r C" '(:def +maintenance/var-cleanup :which-key "clean var"))

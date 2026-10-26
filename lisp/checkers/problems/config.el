@@ -236,7 +236,7 @@ bridging in whatever lsp-mode currently knows for this project."
   (interactive)
   (+problems--read 'project :note))
 
-(aaron-leader!
+(define-leader-key!
   "c !" '(:def +problems/buffer :which-key "buffer problems"))
 
 (provide 'checkers/problems/config)

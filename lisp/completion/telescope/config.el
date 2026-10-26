@@ -249,7 +249,7 @@
 
 ;; Bind physical `SPC SPC` under the Evil leader map. Using `<leader><leader>`
 ;; here does not resolve to the same key sequence as the literal leader key.
-(aaron-leader!
+(define-leader-key!
   "SPC" '(:def telescope :which-key "telescope"))
 
 (provide 'completion/telescope/config)

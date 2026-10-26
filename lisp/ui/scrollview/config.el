@@ -66,7 +66,7 @@
   :config
   (+global-scrollview-mode 1))
 
-(aaron-leader!
+(define-leader-key!
   "j n" '(:def scrollview-next :which-key "next overview sign")
   "j p" '(:def scrollview-prev :which-key "previous overview sign")
   "j v" '(:def scrollview-legend :which-key "overview legend"))

@@ -53,7 +53,7 @@
       ("b" "build" +task/build)
       ("B" "rerun build" +task/build-rerun)]]))
 
-(aaron-leader!
+(define-leader-key!
   "c ." '(:def code-actions-menu :which-key "code menu"))
 
 (provide 'tools/code-actions/config)

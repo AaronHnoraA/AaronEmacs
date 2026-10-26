@@ -91,7 +91,7 @@
 
 (add-hook 'kill-emacs-hook #'+session-save-maybe)
 
-(aaron-leader!
+(define-leader-key!
   "r s" '(:def workspace-session-save :which-key "save workspace session")
   "r l" '(:def workspace-session-load :which-key "load workspace session"))
 

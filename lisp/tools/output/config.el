@@ -275,7 +275,7 @@ The workspace, rather than the frame, owns a running Remote task."
 (add-hook 'compilation-start-hook #'+output--track-started)
 (add-hook 'delete-frame-functions #'+output--forget-frame)
 
-(aaron-leader!
+(define-leader-key!
   "r o" '(:def output-menu :which-key "output")
   "r O" '(:def output-switch :which-key "latest output"))
 

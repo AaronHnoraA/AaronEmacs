@@ -191,7 +191,7 @@
       ("p" "project" +test/project)
       ("T" "rerun last" +test/rerun)]]))
 
-(aaron-leader!
+(define-leader-key!
   "r"   '(:ignore t :which-key "run")
   "c t" '(:def test-menu :which-key "tests")
   "c n" '(:def +test/nearest :which-key "nearest test")
@@ -199,7 +199,7 @@
   "c p" '(:def +test/project :which-key "project tests")
   "c T" '(:def +test/rerun :which-key "rerun test"))
 
-(aaron-leader!
+(define-leader-key!
   "r t" '(:def test-menu :which-key "tests")
   "r n" '(:def +test/nearest :which-key "nearest test")
   "r f" '(:def +test/file :which-key "file tests")

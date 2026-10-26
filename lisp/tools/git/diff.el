@@ -121,7 +121,7 @@ LABEL is displayed in the diff header for the historical side."
   (let ((revision (+git-diff--branch-base-revision)))
     (+git-diff--show-file-against-revision revision "branch-base")))
 
-(aaron-leader!
+(define-leader-key!
   "g d" '(:def +git-diff/file-with-revision :which-key "diff file vs revision")
   "g =" '(:def +git-diff/file-with-head :which-key "diff file vs HEAD")
   "g b" '(:def +git-diff/file-with-branch-base :which-key "diff file vs branch base"))

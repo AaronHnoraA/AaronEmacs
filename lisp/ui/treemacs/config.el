@@ -103,7 +103,7 @@
       (+treemacs-cursor-follow-mode 1))
     (message "Treemacs workspace refreshed")))
 
-(aaron-leader!
+(define-leader-key!
   "p T" '(:def +treemacs/repair-workspace :which-key "repair treemacs"))
 
 (provide 'ui/treemacs/config)

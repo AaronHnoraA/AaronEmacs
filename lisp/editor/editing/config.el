@@ -416,7 +416,7 @@ With CANCEL, discard the staged region."
   (ediff-merge-split-window-function 'split-window-horizontally))
 
 (with-eval-after-load 'elisp-mode
-  (aaron-local-leader!
+  (define-localleader-key!
     :keymaps '(emacs-lisp-mode-map lisp-interaction-mode-map)
     "i" 'info-lookup-symbol
     "ed" 'eros-eval-defun

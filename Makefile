@@ -179,7 +179,7 @@ audit-ui-tokens:
 	$(UI_TOKEN_BATCH) --eval '(let ((expected (aaron-ui-css-tokens '"'"'wave)) (file "$(CURDIR)/$(UI_TOKEN_FILE)")) (unless (and (file-readable-p file) (with-temp-buffer (insert-file-contents file) (equal (buffer-string) expected))) (error "Aaron UI CSS tokens are stale; run make ui-tokens")))'
 
 core-test:
-	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L lisp/core -l test/aaron-lib-tests.el -l test/aaron-emacs-tests.el -l test/aaron-modules-tests.el -l test/aaron-registration-tests.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L lisp/core -l test/aaron-lib-tests.el -l test/aaron-emacs-tests.el -l test/aaron-modules-tests.el -l test/aaron-registration-tests.el -l test/aaron-keybinds-tests.el -f ert-run-tests-batch-and-exit
 
 activity-test:
 	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L lisp -L lisp/core -L lisp/core/aaron-ui -L lisp/remote --eval '(progn (require (quote aaron-modules)) (aaron-modules-load-standalone-autoloads))' -l test/init-activity-tests.el -f ert-run-tests-batch-and-exit

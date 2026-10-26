@@ -664,7 +664,7 @@ stat-ing every hidden remote file after each agent turn."
     (revert-buffer t t)
     (message "Saved %s as root" buffer-file-name)))
 
-(aaron-leader!
+(define-leader-key!
   "f d" '(:def consult-dir :which-key "consult dir")
   "f u" '(:def +default/sudo-find-file :which-key "sudo find file")
   "f U" '(:def +default/sudo-this-file :which-key "sudo this file")

@@ -253,7 +253,7 @@ With RESET-P, start from a fresh scratch."
 
 (add-hook 'kill-emacs-hook #'+scratch-save-all-buffers-h)
 
-(aaron-leader!
+(define-leader-key!
   "b x" '(:def +scratch/toggle :which-key "scratch buffer")
   "b X" '(:def +scratch/switch :which-key "scratch here")
   "p x" '(:def +scratch/project-toggle :which-key "project scratch")

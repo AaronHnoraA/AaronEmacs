@@ -20,7 +20,7 @@
       (vc-rename-file buffer-file-name newname)
     (+rename-current-file newname)))
 
-(aaron-leader!
+(define-leader-key!
   "f m" '(:def +rename/rename-current-file-dwim :which-key "rename file dwim"))
 
 (provide 'emacs/rename/config)

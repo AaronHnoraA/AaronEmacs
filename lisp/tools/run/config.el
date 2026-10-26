@@ -153,7 +153,7 @@ MATCHER can be a directory path or regexp matched against the project root."
       ("r" "choose profile" project-run)
       ("R" "rerun last" project-rerun)]]))
 
-(aaron-leader!
+(define-leader-key!
   "r r" '(:def project-run-menu :which-key "run profile")
   "r R" '(:def project-rerun :which-key "rerun profile"))
 

@@ -585,7 +585,7 @@ _p_: Pause          _sb_: Breakpoints         _bh_: Hit count
   :config
   (dape-toolbar-mode 1))
 
-(aaron-leader!
+(define-leader-key!
   "c j" '(:def debug-menu :which-key "debug")
   "c J" '(:def dape :which-key "debug start"))
 

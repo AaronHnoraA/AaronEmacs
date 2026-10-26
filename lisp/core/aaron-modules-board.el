@@ -20,6 +20,7 @@
 (require 'aaron-ui-board)
 
 (defvar config--registry)
+(declare-function config-source-label "config" (file))
 
 ;;; Facts about a module
 
@@ -30,7 +31,7 @@
 (defun aaron-modules-board--settings (module)
   "Return the `config' setting names registered from MODULE's files."
   (when (boundp 'config--registry)
-    (let ((files (aaron-modules-board--source-names module))
+    (let ((files (mapcar #'config-source-label (aaron-module-source-files module)))
           names)
       (maphash (lambda (name entry)
                  (when (member (plist-get entry :source) files)

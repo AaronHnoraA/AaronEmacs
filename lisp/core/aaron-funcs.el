@@ -6,17 +6,7 @@
 
 (require 'config)
 
-(declare-function evil-define-key* "evil" (state keymap key def &rest bindings))
-(require 'general)
-
-(general-create-definer aaron-leader!
-  :states 'normal
-  :keymaps 'global
-  :prefix "<leader>")
-
-(general-create-definer aaron-local-leader!
-  :states 'normal
-  :prefix "<localleader>")
+(require 'aaron-keybinds)
 
 (declare-function yas-active-snippets "yasnippet" (&optional beg end))
 (declare-function yas-current-field "yasnippet" ())
@@ -345,31 +335,6 @@ registration whose MODES list is `equal' to the new one."
   (if-let* ((fn (aaron-jump--handler :backward)))
       (funcall fn)
     (aaron/backward-delimiter-dwim)))
-
-(defun aaron-evil-define-key (state keymap key command)
-  "Bind KEY to COMMAND for Evil STATE in KEYMAP.
-Use vendored `general.el' for symbolic keymaps and Evil's native
-binding helper for live keymap objects."
-  (with-eval-after-load 'evil
-    (if (symbolp keymap)
-        (general-define-key
-         :states state
-         :keymaps keymap
-         key command)
-      (evil-define-key* state keymap (kbd key) command))))
-
-(defun aaron-evil-global-leader-set (key command &optional replacement)
-  "Bind COMMAND to `SPC KEY' in Evil normal state.
-When REPLACEMENT is non-nil, register it with Which-Key."
-  (aaron-evil-define-key 'normal 'global (concat "<leader>" key) command)
-  (when replacement
-    (aaron-leader-key-label key replacement)))
-
-(defun aaron-leader-key-label (key replacement)
-  "Register REPLACEMENT for `SPC KEY' in Which-Key."
-  (when replacement
-    (with-eval-after-load 'which-key
-      (which-key-add-key-based-replacements (concat "SPC " key) replacement))))
 
 (defvar aaron-escape-hook nil
   "Hook run by `aaron/escape'.

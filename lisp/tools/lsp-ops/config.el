@@ -60,7 +60,7 @@
   (+language-server--backend)
   (call-interactively #'lsp-describe-session))
 
-(aaron-leader!
+(define-leader-key!
   "c o" '(:def +language-server/organize-imports :which-key "organize imports")
   "c R" '(:def +language-server/restart :which-key "restart language server"))
 

@@ -109,12 +109,26 @@ Hook functions are called with one argument, the registered entry plist.")
 
 ;;; Internal helpers ---------------------------------------------------------
 
+(defun config-source-label (file)
+  "Return the registry's `:source' label for FILE.
+It is FILE's path under lisp/ (\"tools/lsp/config.el\"), else under
+`user-emacs-directory', else its name: modules are directories whose
+files share names, so a bare name would not say which module it was."
+  (let ((file (expand-file-name (if (string-suffix-p ".elc" file)
+                                     (substring file 0 -1)
+                                   file))))
+    (or (cl-loop for root in (list (expand-file-name "lisp/" user-emacs-directory)
+                                   (expand-file-name user-emacs-directory))
+                 when (string-prefix-p root file)
+                 return (substring file (length root)))
+        (file-name-nondirectory file))))
+
 (defun config--caller-source ()
-  "Return a short label for the file currently being loaded."
+  "Return the `:source' label of the file currently being loaded."
   (cond
-   (load-file-name (file-name-nondirectory load-file-name))
+   (load-file-name (config-source-label load-file-name))
    ((bound-and-true-p byte-compile-current-file)
-    (file-name-nondirectory byte-compile-current-file))
+    (config-source-label byte-compile-current-file))
    (t "interactive")))
 
 (defun config--entry (name)
@@ -284,7 +298,8 @@ Recognised keys:
   :store-file persisted store file for this item; defaults to the key's
              previously loaded store, then an unambiguous inferred store for
              the entry's group, then `config-store-file'.
-  :source    origin label; defaults to the loading file.
+  :source    origin label; defaults to the loading file's path under
+             lisp/ (see `config-source-label').
 
 There is no `:default' key.  Initial values live in `config-store-file',
 not in Lisp code.  Re-registering NAME replaces the previous entry and

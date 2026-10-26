@@ -232,7 +232,7 @@ Skips `eval' entries.  Saves to custom file."
 
 ;;; Keybindings  ("p e" = project environment / dir-locals)
 
-(aaron-leader!
+(define-leader-key!
   "p e"   '(:ignore t :which-key "dir-locals / env")
   "p e e" '(:def +dir-locals/edit           :which-key "edit")
   "p e c" '(:def +dir-locals/create         :which-key "create from template")

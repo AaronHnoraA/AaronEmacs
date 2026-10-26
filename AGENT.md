@@ -409,7 +409,9 @@ This config already has maintenance and workflow entry points. Reuse them:
   `config-get`, `config-set`, `config-reset`, `config-board`). When a setting
   should be user-tunable: register it, put the value in `etc/config-store.el`
   (or a registered `etc/` file), and **remove any scattered `setq` call** — that
-  is variable pollution.  Do NOT encode values in Lisp code if they are tracked
+  is variable pollution, and `M-x module-doctor` reports it (policy
+  `config-setq`: a load-time `setq`/`setq-default`/`setopt` of a registered
+  setting).  Do NOT encode values in Lisp code if they are tracked
   here.  See `docs/design/config-management.md`.
 
 Do not add a repo-wide "unified tool" just to make unrelated domains look
@@ -437,7 +439,12 @@ surface:
 ## Keybinding Rules
 
 The keybinding layer is `general.el`, internalised into the core as
-`lisp/core/general.el`. It is a startup dependency, not an optional
+`lisp/core/general.el`, under Doom's front door in
+`lisp/core/aaron-keybinds.el`: `map!` (`:leader`, `:localleader`, `:map`,
+`:mode`, `:after`, `:when`, `:prefix`, `:desc` and the state letters
+`:n :v :i ...`), `define-leader-key!` (SPC) and `define-localleader-key!`
+(SPC m).  All of them end in `general-define-key`, so the module ledger
+records who bound what.  It is a startup dependency, not an optional
 experiment.
 
 - Do not add new `global-set-key` calls for normal configuration shortcuts.
@@ -446,15 +453,17 @@ experiment.
   suffix.  Do not bind a suffix already owned by another module: load order
   silently replaces the earlier binding.  Verify the resolved key after full
   startup and update `docs/guide/daily-usage.md` with the same command.
-- For localleader bindings, use the existing localleader helpers.
-- For global non-leader bindings, use `general-define-key`.
+- For localleader bindings, use `define-localleader-key!` or `map!
+  :localleader`.
+- For new bindings outside the leader, prefer `map!`; `general-define-key`
+  remains fine for existing code.  `:desc` gives which-key its label.
 - For concrete mode keymap objects that only exist after a package loads, bind
   inside `with-eval-after-load`; `evil-define-key*` is acceptable there.
 - Dirvish single keys mirror `~/.config/yazi/keymap.toml` and have one
   source, the table in `lisp/emacs/dirvish/config.el`.  Add or move a Dirvish key
   there, not in `ui/windows/config.el`, and keep `+dirvish-key-hints` (the `?`
   sheet) and the table in `docs/guide/daily-usage.md` in step.
-- Domain-neutral route-table helpers live in vendored `general.el` as
+- Domain-neutral route-table helpers live in the core's `general.el` as
   `general-route-*`; concrete policy still belongs in the owning init module
   such as `lisp/core/aaron-open.el`.
 

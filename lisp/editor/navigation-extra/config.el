@@ -178,7 +178,7 @@ use the active region or filename at point, prompting only when neither exists."
 
 (global-set-key (kbd "C-c C-j") #'open-file-location)
 
-(aaron-leader!
+(define-leader-key!
   "n D" '(:def +navigation/find-declaration :which-key "declaration")
   "n R" '(:def +navigation/peek-restore :which-key "restore peek")
   "n h" '(:def +navigation/call-hierarchy :which-key "call hierarchy")

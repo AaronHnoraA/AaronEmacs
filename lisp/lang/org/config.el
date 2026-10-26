@@ -48,7 +48,7 @@
   :commands org-cliplink)
 
 (with-eval-after-load 'org
-  (aaron-local-leader!
+  (define-localleader-key!
     :keymaps 'org-mode-map
     "l" '+org/insert-link-dwim))
 

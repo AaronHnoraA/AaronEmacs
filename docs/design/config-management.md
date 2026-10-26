@@ -149,6 +149,14 @@ transient `config-dispatch`：打开 `config` group、按注册表 group 打开�
 传 `:var nil` 表示纯注册表值）、`:doc`、`:choices`、`:on-change`、`:set`/`:get`、
 `:source`、`:store-file`。
 
+`:source` 默认是登记所在文件在 `lisp/` 下的路径（`config-source-label`，例如
+`tools/lsp/config.el`）：模块都是目录，文件名大多是 `config.el`，只记文件名分不清
+模块。`M-x module-board` 用它把设置归到模块。
+
+在代码里加载期间 `setq` 一个已登记的设置，会盖过存储值，而 board 上显示的仍是存储值。
+`M-x module-doctor` 的 `config-setq` 策略报告这种写法；函数、hook、advice 体里的
+运行时赋值不算。确实需要时在那一行写 `aaron-allow: config-setq`。
+
 **没有 `:default`。** 初始值在 `etc/config-store.el` 或专题 `etc/config-*.el` 里。
 
 通常不需要写 `:store-file`：已有 key 会按加载来源写回，`etc/config-*.el` 会自动发现。

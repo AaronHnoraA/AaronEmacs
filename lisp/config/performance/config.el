@@ -974,7 +974,7 @@ This samples once and does not mutate or display the performance board."
 
 (add-hook 'after-load-theme-hook #'+performance--theme-changed)
 
-(aaron-leader!
+(define-leader-key!
   "h p" '(:def +performance/watch :which-key "performance watch"))
 
 (provide 'config/performance/config)

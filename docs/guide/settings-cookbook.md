@@ -202,26 +202,39 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 当前按键绑定链路：
 
-- `define-leader-key` 是配置里的 leader 入口，定义在 `lisp/editor/evil/config.el`
-- `aaron-evil-define-key` 是底层封装，定义在 `lisp/core/aaron-funcs.el`
-- `general.el` 是按键绑定 DSL，已收进核心：`lisp/core/general.el`
+- `define-leader-key!` / `define-localleader-key!` 是 leader / localleader 入口，
+  共享前缀的绑定列表在 `lisp/editor/evil/config.el`，域内后缀在各自模块
+- `map!` 是 Doom 的统一绑定宏，和这两个 definer 一起定义在
+  `lisp/core/aaron-keybinds.el`
+- `general.el` 是底层的按键绑定 DSL，已收进核心：`lisp/core/general.el`
 
 `general.el` 的职责很窄：声明式定义快捷键。它不是 UI、补全、LSP 或包管理框架。这里引入它，主要是为了统一处理 Evil state、keymap、leader key 和批量绑定，尤其是符号 keymap，例如 `'global`。
 
-这类绑定会走 `general-define-key`：
+这些入口最终都走 `general-define-key`，模块账本因此知道每个键是哪个模块绑的。
+新代码用 `map!`：
+
+示例（键是虚构的，用前先查冲突）：
 
 ```elisp
-(general-define-key
- :states 'normal
- :keymaps 'global
- "<leader>ff" #'find-file)
+(map! :leader
+      :desc "find file" "xf" #'find-file          ; SPC x f
+      (:prefix ("xo" . "open")                    ; SPC x o，which-key 显示 open
+       "d" #'dired-jump))
+
+(map! :map dired-mode-map
+      :n "h" #'dired-up-directory                 ; Evil normal state
+      "C-c C-e" #'wdired-change-to-wdired-mode)   ; 不分 state
+
+(map! :localleader :map org-mode-map "e" #'org-export-dispatch)  ; SPC m e
+(map! :after magit :map magit-mode-map "C-c C-o" #'magit-browse-thing)  ; magit 加载后
 ```
 
-真实 keymap object 仍然优先用 Evil 自己的 `evil-define-key*`。所以日常加 leader 键时，不需要直接改 `general.el`，只需要改 `define-leader-key` 的绑定列表。
+真实 keymap object 仍然优先用 Evil 自己的 `evil-define-key*`。所以日常加 leader 键时，不需要直接改 `general.el`，只需要改 `define-leader-key!` 的绑定列表。
+加键前看 `M-x module-board` 的键冲突：两个模块绑同一个键时，后加载的那个生效。
 
 改法：
 
-1. 找到 `define-leader-key`
+1. 找到 `define-leader-key!`
 2. 在对应分组加命令
 3. 如果是 mode 专属功能，优先放 localleader
 

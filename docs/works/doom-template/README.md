@@ -206,5 +206,11 @@ Doom 的做法：
   - **留在 `site-lisp`**：`dape-toolbar` 是独立发布的包（有 Eask、LICENSE、CHANGELOG）；`ratex.el`、`vendored/`、`noema`、`portal`、`remote_ikernel` 不动。
   - **删除**：空的 `site-lisp/init.sh`。
   - **验证**：`state-check` 只剩 `+compile-target-directories` 去掉 `site-lisp/config` 这一行；`test-check` 无变化。顺带修好 `make activity-test` / `performance-test`：这两个 `-Q` 套件单独加载模块，自 `set-…!` 接口改为 autoload 后就找不到它们，现在先调用 `aaron-modules-load-standalone-autoloads`。
+- [x] P1g 用 Doom 的抽象增强 config 与 general.el。
+  - **键位**：新增 `lisp/core/aaron-keybinds.el`，改写自 Doom 的 `+keybinds.el`：`map!`、`define-leader-key!`、`define-localleader-key!`（原 `aaron-leader!` / `aaron-local-leader!`，41 处调用一并改名）、`define-key!`、`undefine-key!`。leader 机制不变（Evil `<leader>`），`:desc` 转成 general 的 `:which-key`。没有调用者的 `aaron-evil-define-key`、`aaron-evil-global-leader-set`、`aaron-leader-key-label` 删除。
+  - **模块化**：`config`、`general`、`keybinds` 成为 `:core` 的前三个模块，面板上有账本；`init.el` 不再单独 `require 'config`。
+  - **配置注册表**：`:source` 改记 `lisp/` 下的路径（迁移后所有模块文件都叫 `config.el`，原来的文件名归属已失效，面板上每个模块都会显示所有 `config.el` 的设置）。新增 doctor 策略 `config-setq`，并让策略支持函数正则和 `:when` 过滤。
+  - **验证**：`state-check` 只多出 `FEATURE aaron-keybinds`；`test-check` 见提交说明。
+  - **发现（只报告，不改）**：`config-setq` 在加载期间命中 5 处：`completion-styles`（`completion/minibuffer` 的 `:init` 设为 `(orderless basic partial-completion)`，盖过 `etc/config-store.el` 里的 `(basic partial-completion substring flex)`，board 显示的存储值实际不生效）、`undo-tree-auto-save-history`（`aaron-base` 两处，与存储值相同）、`treesit-language-source-alist`（`editor/fold`，另有 `etc/config-treesit.el`）、`persp-state-default-file`（`ui/session`，登记前先给默认值）。
 - [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。只列候选，不改用户习惯，等用户决定。
 - [x] P1e 模块目录比对：[comparison.md](comparison.md) 第 1 节。

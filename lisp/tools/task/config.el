@@ -333,7 +333,7 @@ The list includes directories that already look configured for CMake or Ninja."
      ["Bazel"
       ("z" "target workbench" bazel-target-menu)]]))
 
-(aaron-leader!
+(define-leader-key!
   "r k" '(:def task-menu :which-key "tasks")
   "r K" '(:def task-rerun :which-key "rerun task"))
 
