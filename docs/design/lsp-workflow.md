@@ -196,6 +196,13 @@ target 上一个来回可能有几百毫秒，每次选中补全、每按一次�
   （lsp-mode #3498），但它只认 server-id `ts-ls`；本配置的 TypeScript client 是
   `+typescript`，这个补丁不生效。是否会插入不完整的文本需要用真实
   typescript-language-server 验证；补丁本身是同步请求，验证后再决定是否接入。
+- **G-L1** 关掉一个 workspace 的最后一个 buffer 时，`lsp-keep-workspace-alive`
+  为 nil 的 server 立即关闭；紧接着打开同一项目的另一个文件（`H-q` 后再打开、
+  批量关闭再打开）要重新启动 server，远程 target 和 Lean 一类重启很贵。Doom
+  把关闭推迟 3 秒（`+lsp-defer-server-shutdown-a`，期间有新 buffer 打开就不关）。
+  接入前要先定契约：显式断开 target（`remote-workspace-disconnect-target`）和
+  `+language-server/shutdown` 必须立即关闭、不经推迟；推迟中的计时器属于
+  workspace 资源，target 断开时取消；并补故障注入测试。
 
 # Current Command Surface
 

@@ -213,3 +213,6 @@ Doom 的做法：
 | `+default/yank-buffer-path-relative-to-project` | **吸收**：`file-copy-project-paths`（`file-menu` 的 `r`），沿用文件菜单的选择规则（Dired 选区、标记、当前文件），用项目的规范写法比较 |
 | `+default--delete-backward-char-a`（智能退格）、`newline-above/below`、`yank-pop`、`man-or-woman` | **不收**：退格手感改变；其余已有对应（`SPC e o/O`、Consult、`man`） |
 | `+default/search-*`、`+default/browse-*` | **已有**：telescope 统一搜索面板与项目工作台 |
+| `completion/vertico` | CRM 提示前缀、`vertico-directory-tidy`、Consult 异步参数、Embark 导出、company 补全时改用 basic 优先的 styles | **已有或不收**：Emacs 31 的 `crm-prompt` 自带 `[%d] %p`；其余参数本配置已是相同值；company 的 styles 是本配置有意按类别设置的 |
+| `tools/lsp` | 最后一个 buffer 关掉后推迟 3 秒再关 server | **记为缺口** G-L1（`docs/design/lsp-workflow.md`）：LSP 生命周期属于 Remote/LSP 契约，显式断开和手动关闭必须立即生效，需要先定契约并补故障注入测试 |
+| `tools/lsp` | GC/IPC 优化模式、ESC 关签名、`lsp-ui-doc` 尺寸 | **已有或不收**：本配置 `read-process-output-max` 已是 4MB、GC 由 gcmh 管；ESC 已有 `+lsp-dismiss-popup-h`；doc 尺寸是外观 |
