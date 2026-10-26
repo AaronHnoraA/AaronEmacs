@@ -297,3 +297,6 @@ Doom 的做法：
 | `lang/beancount` | electric 货币、`custom` 指令着色、nerd-icons、flymake-bean、补全增强 | **不收**：记账走本配置的 language server 与录入向导；着色与图标是外观 |
 | `checkers/syntax` | flycheck 体系、ESC 时重跑检查、flymake 右侧 fringe、不环绕 | **不收**：本配置用 Flymake，空闲时自动检查；位置和环绕是偏好 |
 | `emacs/ibuffer`、`ui/treemacs`、`ui/ligatures`、`ui/doom`、`ui/dashboard` | 列宽与图标、Treemacs 主题加载顺序、连字表、Doom 主题与 solaire、Doom 首页 | **不收**：外观，第 1、6 节已列 |
+| `config/default`（`config.el`） | avy 范围、GPG loopback、`RET` 续写注释、智能退格、tabulated-list 的 `q`、macOS `S-iso-lefttab`、woman manpath | **已有或不收**：GPG 已走 minibuffer；续写注释与退格改变手感；其余已有或不适用。`+evil-bindings.el`/`+emacs-bindings.el` 的键位见第 4 节，仍待用户决定 |
+
+未逐个展开的 Doom 模块都是本配置不用的领域：`completion/corfu ivy helm ido`、`editor/god lispy objed parinfer rotate-text`、`email/*`、`input/*`、`app/emms everywhere irc rss`、`os/tty`、`term/shell term vterm`、`tools/ansible biblio collab docker ein llm pass terraform tmux upload make`、`ui/deft doom-quit emoji indent-guides minimap neotree ophints smooth-scroll unicode vi-tilde-fringe zen`，以及本配置不写的语言（`lang/` 下除上面各节以外的模块；`lang/java`、`lang/org` 用户不用）。

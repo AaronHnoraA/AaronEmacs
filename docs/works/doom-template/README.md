@@ -231,3 +231,9 @@ Doom 的做法：
   打开折叠、Magit 关长行优化、PDF 页面隐藏光标、apropos 用 Helpful、复制项目相对
   路径。延迟关闭 LSP server 记为 `lsp-workflow.md` 的缺口 G-L1。第 2、4 节的手感
   与键位候选仍等用户决定。
+- [x] 逐文件补完（2026-10-27）：`core/lisp/lib/` 每个文件、框架文件和本配置用到的
+  每个语言与工具模块，结果在 [comparison.md](comparison.md) 第 8–11 节。期间修了
+  本配置自己的缺陷：`SPC f D` 不进废纸篓、加密文件的 undo 历史写成明文、Elisp 的
+  Flymake 编译检查在第一个 `require` 就失败、lsp-mode 按 server id 的签名提炼对
+  `+rust-analyzer`/`+clangd` 不生效、`.lock` 全按 TOML、`.mts`/`.cts` 无模式、macOS
+  上 `locate` 查不到、打开文件仍会提示安装 grammar。
