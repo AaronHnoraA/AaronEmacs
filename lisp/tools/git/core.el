@@ -306,6 +306,28 @@ Unknown revisions and changed upstream call shapes use FUNCTION unchanged."
   (vc-allow-async-diff t)
   (vc-handled-backends '(Git)))
 
+;; diff-hl sizes its fringe bitmaps to the frame's character height, so a
+;; taller line (CJK text, an Org heading or table) is only partly covered and
+;; consecutive changed lines show gaps.  Emacs crops a bitmap taller than its
+;; row (centred, or from the top or bottom edge as aligned), so taller hunk
+;; bitmaps fill any row.  Single-line hunks have no neighbour and keep theirs.
+(defun +git--diff-hl-tall-bitmaps-a (&rest _)
+  "Redefine diff-hl's top, middle and bottom bitmaps taller than any line."
+  (when (and (display-graphic-p) (boundp 'diff-hl-bmp-max-width))
+    (let* ((w (min (or (frame-parameter nil (intern (format "%s-fringe" diff-hl-side)))
+                       0)
+                   diff-hl-bmp-max-width))
+           (w (if (zerop w) diff-hl-bmp-max-width w))
+           (h (min 255 (max 64 (* 6 (frame-char-height)))))
+           (middle (make-vector h (expt 2 (1- w))))
+           (top (copy-sequence middle))
+           (bottom (copy-sequence middle)))
+      (aset top 0 (1- (expt 2 w)))
+      (aset bottom (1- h) (1- (expt 2 w)))
+      (define-fringe-bitmap 'diff-hl-bmp-top top h w 'top)
+      (define-fringe-bitmap 'diff-hl-bmp-middle middle h w 'center)
+      (define-fringe-bitmap 'diff-hl-bmp-bottom bottom h w 'bottom))))
+
 ;; Highlight uncommitted changes using VC
 (use-package diff-hl
   :ensure t
@@ -313,6 +335,8 @@ Unknown revisions and changed upstream call shapes use FUNCTION unchanged."
   :hook ((dired-mode         . diff-hl-dired-mode-unless-remote)
          (magit-post-refresh . diff-hl-magit-post-refresh))
   :config
+  (advice-add 'diff-hl-define-bitmaps :after #'+git--diff-hl-tall-bitmaps-a)
+  (+git--diff-hl-tall-bitmaps-a)
   (global-diff-hl-mode 1)
   (when (fboundp 'diff-hl-show-hunk-mouse-mode)
     (diff-hl-show-hunk-mouse-mode 1))

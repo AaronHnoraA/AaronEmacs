@@ -236,3 +236,13 @@
   - 写死的 emacsclient 路径；
   - dashboard 外观；
   - `K` 键。
+
+### git（2026-10-26，已完成）
+
+- **吸收**：加长 diff-hl 的改动竖线位图（`+git--diff-hl-tall-bitmaps-a`，在 `tools/git`），中文行、Org 标题这类较高的行之间不再断开。本配置的 diff-hl 用上、中、下三种位图，三种都加长（他只加长了中间那种）；单行改动没有相邻行，保持原样。
+- **已一致**：magit-delta、magit 同窗显示（diff 除外）。
+- **不收**：
+  - diff-hl 改动竖线的颜色修正（修的是 tokyonight 的问题，kanagawa 下竖线本来可见）；
+  - 被注释掉的 persp 代码；
+  - magit 里的 `J/K` 键；
+  - 退出时关闭远程 buffer 的 diff-hl，留到审计 Remote 相关项时再看。
