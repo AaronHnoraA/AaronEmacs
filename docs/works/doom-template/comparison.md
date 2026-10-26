@@ -268,3 +268,10 @@ Doom 的做法：
 | `lang/latex` | `.auctex-auto` 隐藏目录、`TeX-save-query nil`、`chktex` 参数、smartparens 的 `\\left(` 配对、条目续行缩进、viewer 列表、tex-fold、cdlatex/company | **已有或不收**：本配置把 AUCTeX 的解析缓存放到项目外（`+auctex-setup-auto-cache`），比 Doom 更干净；保存询问与缩进是习惯；预览走 RaTeX 与 PDF Tools |
 | `lang/nix` | `flake.lock` 用 JSON 模式、NixOS 的 `tramp-remote-path`、nix 补全与 REPL | **吸收并扩大**：本配置把所有 `.lock` 当 TOML，`flake.lock`、`composer.lock`、`Pipfile.lock` 其实是 JSON，现在改走 JSON 模式；远程 PATH 走 Remote 环境胶囊 |
 | `lang/haskell`、`lang/ocaml`、`lang/lean`、`lang/markdown` | stack/dune 项目根、`.hi` 忽略、cabal 构建键、utop/merlin、Lean 3/nael、Markdown 编译与插入键 | **不收**：项目根由本配置的根解析决定；Haskell/OCaml 走 LSP；Lean 4 用 lean4-mode 与本配置的 infoview；Markdown 由 Noema 接管 |
+
+## 11. 其余模块逐个对照
+
+| Doom 模块 | 内容 | 处理 |
+| --- | --- | --- |
+| `os/macos` | `locate-command "mdfind"` | **吸收并修正**：本机没有 locate 数据库，`consult-locate-args` 的 `--ignore-case` 又是 GNU 参数，`M-x locate` 和 `consult-locate` 都查不到东西。改用 `mdfind -name`；`locate` 会把 stderr 当结果读，而 mdfind 总在 stderr 打日志，所以经 `/bin/sh` 丢掉 |
+| `os/macos` | Keychain 作 auth-source、`ns-auto-titlebar`、`ns-pop-up-frames nil`、`delete-by-moving-to-trash` | **不收或已有**：Keychain 查询可能弹出系统授权框；标题栏与 frame 由 `config/background` 管；废纸篓已开启 |

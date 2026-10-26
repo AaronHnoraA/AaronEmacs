@@ -535,5 +535,21 @@ directly qualifies; a file on another target is refused."
 (define-leader-key! "fg" '(:def +macos/copy-file-to-clipboard
                            :which-key "copy file to clipboard"))
 
+;; From Doom: macOS keeps no locate database (/var/db/locate.database is never
+;; built) and its BSD locate rejects GNU's --ignore-case, so `locate' and
+;; `consult-locate' found nothing.  Spotlight's file-name index answers instead.
+(defvar consult-locate-args)
+(defun +macos-locate-command-line (search-string)
+  "Return the Spotlight command that finds files named like SEARCH-STRING.
+`locate' reads the command's stderr as results too, and mdfind always logs
+its query parser there, so the shell drops it."
+  (list "/bin/sh" "-c" "exec mdfind -name \"$1\" 2>/dev/null"
+        "mdfind" search-string))
+
+(after! locate
+  (setq locate-make-command-line #'+macos-locate-command-line))
+(after! consult
+  (setq consult-locate-args "mdfind -name"))
+
 (provide 'os/macos/config)
 ;;; os/macos/config.el ends here
