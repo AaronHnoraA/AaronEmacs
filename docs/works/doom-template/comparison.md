@@ -261,3 +261,4 @@ Doom 的做法：
 | `lang/cc` | `.h` 按内容判断 C/C++/ObjC、ffap 头文件路径、doom 缩进风格、cmake/glsl/cuda | **不收**：`.h` 走 Emacs 的 `c-or-c++-mode`；缩进风格不改；头文件跳转走 clangd |
 | `lang/python` | `python3` 作解释器、`Pipfile`/`.flake8` 为 conf、pytest 键、nose、pyvenv、pip-requirements | **已有或不收**：解释器由项目 toolchain profile 决定；`Pipfile`、`.flake8` 已是 `conf-mode`；测试走 `test-nearest` |
 | `lang/rust` | rust-analyzer 悬停签名的提炼方法、`rust-indent-method-chain`、rustic | **吸收并推广**：发现本配置用 `+rust-analyzer`、`+clangd` 注册，lsp-mode 按 `rust-analyzer`、`clangd` 分派的签名提炼从未生效（Rust 类型的 echo area 显示 `// size = …` 注释行）。`set-language-server!` 加 `:upstream-id`，共享 adapter 按它分派；Doom 自己那段 rust 签名解析依赖 rust-analyzer 输出格式，不收 |
+| `lang/emacs-lisp` | `elisp-flymake-byte-compile` 带上 `load-path` | **吸收并修正**：本配置每个文件的字节编译检查都停在第一个 `require`（“Cannot open load file”），什么也查不出；只追加 `load-path` 还不够，目录模块里 `./config.el` 就是模块自己，会遮住核心的 `config`（“Recursive require”），所以会话的 `load-path` 放在 `./` 前面。修好后查出 `editor/editing` 缺的 4 个 `declare-function`，一并补上 |

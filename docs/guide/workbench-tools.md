@@ -20,6 +20,8 @@
 - 以 Markdown、GitHub、Org、HTML、Slack、reStructuredText 或 AsciiDoc 格式复制
   region；没有 region 时处理整个 buffer。
 - Emacs Lisp buffer 中启用 Eros 求值反馈，并提供 Relint 检查。
+- Elisp buffer 的 Flymake 字节编译检查用当前会话的 `load-path`，本配置的模块文件
+  能查到 `require` 之后的真实警告（以前停在第一个 `require` 报“Cannot open load file”）。
 - `M-x elisp-search-load-path` 用 ripgrep 搜索 `load-path` 上的所有目录（本配置的模块
   和已安装的包），以光标处的符号为初始输入。
 

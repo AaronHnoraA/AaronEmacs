@@ -74,6 +74,21 @@
 (add-hook 'emacs-lisp-mode-hook #'+elisp-mode-setup)
 (add-hook 'lisp-interaction-mode-hook #'+elisp-mode-setup)
 
+;; From Doom: the byte-compile check runs in a child Emacs that only sees
+;; `elisp-flymake-byte-compile-load-path' ("./"), so in this configuration
+;; every file stopped at its first `require' ("Cannot open load file") and
+;; reported nothing else.  Give the child this session's `load-path', ahead of
+;; "./": in a directory module "./config.el" is the module itself and would
+;; shadow the core `config' feature.
+(defvar elisp-flymake-byte-compile-load-path)
+
+(defadvice! +elisp--flymake-session-load-path-a (fn &rest args)
+  "Byte-compile for Flymake with the running session's `load-path'."
+  :around #'elisp-flymake-byte-compile
+  (let ((elisp-flymake-byte-compile-load-path
+         (append load-path elisp-flymake-byte-compile-load-path)))
+    (apply fn args)))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Optional Elsa LSP support (same explicit lsp-mode route pattern as Lean)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

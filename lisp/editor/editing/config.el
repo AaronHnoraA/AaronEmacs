@@ -23,6 +23,12 @@
 (declare-function eros-eval-defun "eros" (&optional debug))
 (declare-function eros-eval-last-sexp "eros" (&optional eval-last-sexp-arg-internal))
 (declare-function LaTeX-narrow-to-environment "latex" (&optional count))
+(declare-function org-element-context "org-element" (&optional element))
+(declare-function org-element-lineage "org-element-ast"
+                  (datum &optional types with-self))
+(declare-function org-element-property "org-element-ast"
+                  (property node &optional dflt force-undefer))
+(declare-function org-element-type "org-element-ast" (node &optional anonymous))
 (declare-function org-narrow-to-block "org" ())
 (declare-function org-narrow-to-subtree "org" ())
 (declare-function relint-current-buffer "relint" ())
