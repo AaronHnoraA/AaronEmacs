@@ -380,3 +380,29 @@
   - auto-revert 轮询间隔 2 秒：会增加远程开销；
   - ultra-scroll；
   - 毛玻璃：用户没有要，而且需要自编带补丁的 Emacs，本配置用的是官方二进制。
+
+### config.el 其余部分、keymap.el、packages.el（2026-10-27，已完成）
+
+逐行对照 `config.el` 前两次审计之外的段落，以及 `keymap.el` 和 `packages.el`。
+
+- **吸收**：ialign 交互对齐，放在 `editing-menu` 的 `a`，没有占他的 `g l`
+  （Git 的 `SPC g l` 不冲突，但 normal 下的 `g l` 留给 Evil 原生前缀）。
+- **已有**：
+  - `kill-do-not-save-duplicates`、`save-interprogram-paste-before-kill`（config 注册）；
+  - yank 路径用绝对路径（`+copy-current-filename` 本来就复制绝对路径）；
+  - tramp-rpc 的 release 部署策略（`remote-backend-tramp-rpc` 在 `auto` 且有 release checkout 时改为 `release`）；
+  - string-inflection、expand-region、rainbow-delimiters、magit-delta、keyfreq、yaml、Dockerfile。
+- **不收**：
+  - 按屏幕分辨率设窗口几何：frame 由 `config/background` 自己放置，固定像素表只适合他的屏幕；
+  - 清空标题栏：外观偏好；
+  - flycheck 的排除模式：本配置用 Flymake，没有 checker 的模式不刷消息；
+  - `warning-minimum-level :error`：本配置有 `aaron-warning-suppress-elpa-noise`，只压 elpa 噪声，不藏自己的警告；
+  - 启动后用 AppleScript 抢焦点、毛玻璃、ultra-scroll、vterm 的 fontset/fringe/margin（本配置不用 vterm）；
+  - 加载 straight 里另一份 transient、切到 eshell 时独占窗口；
+  - `keymap.el` 的 dired `c`、`SPC o t`、insert `s-y`：键位以本配置为准；
+  - `packages.el` 中其余包：xml-format、d2-mode、docker-compose-mode、uniline、zygospore、
+    company-posframe、bookmark+、focus、pulsing-cursor、neoscroll、kaolin/ef/tokyonight 主题，
+    用户没有用到相应语言或是外观偏好；
+    Java、Org、翻译、RSS、Telegram 相关包随对应模块不收。
+
+至此 neo-emacs 的每个文件都有了去处。

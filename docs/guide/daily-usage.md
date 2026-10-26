@@ -76,6 +76,8 @@
 - `M-x copy-as-format-menu`（或 `editing-menu` 中按 `c`）
   选格式复制当前选区；没有选区时复制整篇。菜单只影响本次复制，不更改
   `copy-as-format` 原生命令的默认格式，也不移动光标或选区。
+- `M-x ialign`（或 `editing-menu` 中按 `a`）
+  交互对齐选区：边输入正则边预览对齐结果，`RET` 确认，`C-g` 还原。
 - `M-x macos-tools-menu`（或 `SPC a m`）
   打开 macOS 工具菜单；`macos-pick-color` 复制颜色，带前缀参数时插入；
   `macos-open-at-point` 用系统应用打开光标处的链接或文件。

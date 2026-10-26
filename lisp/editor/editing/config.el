@@ -368,6 +368,7 @@ With CANCEL, discard the staged region."
   "Focused editing operations."
   [["Transform"
     ("i" "cycle identifier style" string-inflection-cycle)
+    ("a" "align interactively" ialign)
     ("t" "transpose regions" +editing/transpose-regions-dwim)
     ("T" "clear staged region" +editing/transpose-regions-reset)]
    ["Copy / inspect"
@@ -381,6 +382,10 @@ With CANCEL, discard the staged region."
 (use-package string-inflection
   :ensure t
   :commands string-inflection-cycle)
+
+(use-package ialign
+  :ensure t
+  :commands ialign)
 
 (use-package copy-as-format
   :ensure t
