@@ -302,6 +302,12 @@ This config already has maintenance and workflow entry points. Reuse them:
   `remote-transfer-list`).  `remote-machines` holds hand-entered targets.  Do
   not add another uploader, sync command, host list or progress indicator.  See
   `docs/design/remote-files.md`.
+- Command shell: eshell, through `+eshell-run` / `+eshell-run-sync` /
+  `+eshell-buffer` (queued, with status and output) and `SPC o s`
+  (`+eshell/toggle`); see `docs/design/command-shell.md`.  Code that needs to
+  run a shell command and see it, or hand the user a shell, uses this rather
+  than its own comint buffer or shell process.  Builds, runs and tests stay on
+  `compile` / `+output`; full-screen programs go to Portal.
 - Compile/maintenance: `+compile/board`, `config-compile-menu`, `make`
   targets documented in `docs/ops/maintenance.md`.
 - Performance diagnostics: `+performance/watch`,

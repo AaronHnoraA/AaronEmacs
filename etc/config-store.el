@@ -35,7 +35,7 @@
                              "var/tramp/persistency.el" "var/treemacs")
    (+maintenance-state-backup-dir . "/Users/hc/.emacs.d/var/backup-snapshots")
    (+enable-direnv . t) (+tramp-memoize-cache-limit . 128)
-   (+find-file-feedback-threshold . 0.4) (+tramp-lsp-pipe-mode-servers "lean4")
+   (+find-file-feedback-threshold . 0.4) (+eshell-sync-timeout . 600) (+tramp-lsp-pipe-mode-servers "lean4")
    (+tramp-use-ssh-controlmaster) (+tramp-shell-methods "ssh" "scp" "sshx")
    (+tramp-use-login-shell) (+compile-auto-native-on-save)
    (+native-comp-warning-on-missing-source) (+native-comp-speed . 2)

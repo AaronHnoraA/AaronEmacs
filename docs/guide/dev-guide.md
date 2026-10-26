@@ -350,10 +350,23 @@ Dape 原生 `dape-restart` 重启。
 
 ## 6. 终端
 
-### Shell
+### 命令 shell（eshell）
 
-- `M-x shell-toggle`
-  弹出 shell
+需要一个 shell 跑命令时默认用 eshell，每个 target 上下文一个 buffer。设计和契约见
+[command-shell.md](../design/command-shell.md)。
+
+- `SPC o s` / `M-x command-shell`
+  在底部弹出当前目录所在上下文的 eshell；已选中时关掉窗口，buffer 保留
+- `M-x command-shell-run`
+  读一条命令，在项目根的 eshell 里排队执行并显示
+- 程序调用：
+  - `(+eshell-run "make test" :directory dir :callback fn)` 立即返回，结束时
+    `fn` 收到 `:status`、`:output`；
+  - `(+eshell-run-sync "git status" :directory dir)` 等到结束，最多等
+    `+eshell-sync-timeout` 秒；
+  - `+eshell-busy-p`、`+eshell-interrupt`、`+eshell-cancel` 查询、中断和取消。
+- 进度条之类就地重画的输出（`ESC[1G`、`ESC[2K`）会就地覆盖，不会叠成多行
+- comint shell 仍可用 `M-x shell-toggle` 打开
 
 ### Portal
 

@@ -93,6 +93,7 @@ channels.
 - [jupyter-project-context.md](design/jupyter-project-context.md) How a kernel gets its project: the Remote target owns connection identity, the kernelspec owns execution settings.
 - [emacs-gateway.md](design/emacs-gateway.md) `remote-gateway`, the loopback JSON-RPC/WebSocket control plane through which Lean, Noema and other processes reach Emacs.
 - [config-management.md](design/config-management.md) Unified `config` registry: one front door (`config-get`/`config-set`, `M-x config-board`) to view, edit, live-apply, and persist every registered setting.
+- [command-shell.md](design/command-shell.md) The command shell: eshell per target context, the `+eshell-run` / `+eshell-run-sync` automation API with queueing and results, and `SPC o s`.
 - [local-variable-trust.md](design/local-variable-trust.md) File and directory local variable trust: default roots, one-time approval, and persistent project decisions.
 - [latex-preview.md](design/latex-preview.md) In-buffer math preview: supported delimiters, the shared macro source Emacs and Noema both read, the doctor, and the troubleshooting order.
 - [elegant-ui.md](design/elegant-ui.md) Aaron UI, the design tokens Emacs and Noema share, and where each side keeps its own styling.

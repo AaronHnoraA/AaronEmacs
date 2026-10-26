@@ -8,6 +8,11 @@
 
 (require 'aaron-keybinds)
 
+(declare-function remote-expand-file-name "remote-fs" (file-name &optional directory target))
+(declare-function remote-file-name-target "remote-fs" (file-name))
+(declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
+(declare-function remote-fs-file-name-p "remote-fs" (file-name))
+(declare-function remote-resolve-emacs-file-name "remote-fs" (file-name &optional directory))
 (declare-function yas-active-snippets "yasnippet" (&optional beg end))
 (declare-function yas-current-field "yasnippet" ())
 (declare-function yas-next-field "yasnippet" (&optional arg))
@@ -29,15 +34,23 @@
      (remote-resolve-emacs-file-name directory))))
 
 (defun aaron-terminal-home-directory (&optional directory)
-  "Return the home directory for DIRECTORY's local or remote context."
+  "Return the home directory for DIRECTORY's local or remote context.
+A `/fs:' target's home is resolved by its backend: `/fs:' names have no
+`~' spelling (docs/design/remote-framework.md)."
   (when-let* ((directory (aaron-terminal-normalize-directory
                           (or directory default-directory))))
-    (if-let* ((remote-prefix (file-remote-p directory))
-              (_ (not (and (remote-fs-file-name-p directory)
-                           (equal (remote-file-name-target directory) "local")))))
-        (concat remote-prefix "~/")
+    (cond
+     ((and (remote-fs-file-name-p directory)
+           (not (remote-client-file-name directory)))
+      (file-name-as-directory
+       (remote-expand-file-name "~/" nil (remote-file-name-target directory))))
+     ;; A TRAMP name keeps TRAMP's own `~' spelling.  A `/fs:' name of this
+     ;; machine falls through to the client's home.
+     ((file-remote-p directory)        ; aaron-allow: file-remote-p
+      (concat (file-remote-p directory) "~/")) ; aaron-allow: file-remote-p
+     (t
       (let ((default-directory temporary-file-directory))
-        (file-name-as-directory (expand-file-name "~"))))))
+        (file-name-as-directory (expand-file-name "~")))))))
 
 (defun aaron-terminal-shell-directory (directory)
   "Return DIRECTORY in the form expected by an interactive shell."

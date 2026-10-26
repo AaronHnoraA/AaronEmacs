@@ -387,6 +387,7 @@ If popup is focused, kill it."
         (completing-read "SSH host: " hosts nil nil nil '+ssh-host-history)
       (read-string "SSH host: " nil '+ssh-host-history))))
 
+(require 'term/shell/eshell)
 (require 'term/portal/config)
 (require 'term/portal/popup)
 

@@ -894,7 +894,9 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
 - `SPC o S`
   `+portal/ssh`
 - `SPC o s`
-  `shell-toggle`
+  `+eshell/toggle`：弹出当前目录的命令 shell（eshell），再按一次关掉窗口；
+  `M-x command-shell-run` 在项目根里跑一条命令。原来的 comint shell 用
+  `M-x shell-toggle`
 - `SPC o w`
   `aaron/open-eww-url`
 - `SPC o x`

@@ -542,7 +542,7 @@ Emacs state keep their local behavior."
     "oW" '+browser/open-search
     "ox" '+xwidget/open-url
     "oB" '+browser/switch-to
-    "os" 'shell-toggle
+    "os" '(:def +eshell/toggle :which-key "command shell")
     "op" 'proced
     "oP" '+portal/terminal
     "ol" '+beancount/beancount)

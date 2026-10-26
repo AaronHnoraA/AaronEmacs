@@ -260,3 +260,18 @@
   - `git rev-parse` 找项目根。
 - **已一致**：dired 的 `h/l`。
 - **延后到 Java**：`jump-to-class-at-point`，即 Java 栈帧跳转和 Mapper→XML 跳转，需要另找空键。
+
+### shell（2026-10-26，已完成）
+
+- **吸收并扩展**：eshell 作为默认的命令 shell，见 `docs/design/command-shell.md`。
+  - 从他那里来：输出规整（`ESC[nG` 改成 `\r`，去掉光标和清屏序列，缓存末尾的 `\r`）。
+  - 本配置补上：自动化 API（`+eshell-run`、`+eshell-run-sync`、队列、结果、取消），
+    `SPC o s` 改为 eshell。
+  - 顺手修好：`/fs:` 远程目录启动终端时的起始目录（原来拼成非法的 `/fs:T:~/`）。
+- **不适用**：他那些 vterm 的显示细节，Portal 由 Ghostty 自己绘制。
+- **不收**：
+  - eshell 下 normal 模式的 `C-j/C-k` 滚动；
+  - quickrun 的中断修复；
+  - 切到 eshell 窗口时独占布局；
+  - 他的键；
+  - 写死的 JDK、Maven、代理和 fish 路径。
