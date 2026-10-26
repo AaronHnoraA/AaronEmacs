@@ -11,6 +11,10 @@
 (require 'config)
 
 (require 'aaron-packages)
+(require 'aaron-lib)
+
+(declare-function clutch-redis-mode "clutch-redis" ())
+(declare-function sql-mode "sql" ())
 
 (defgroup +clutch nil
   "Local integration for the clutch database client."
@@ -88,6 +92,34 @@
   :defer t
   :config
   (+clutch--load-config))
+
+;; Limits of clutch's connections and results, tunable from config-board.
+;; Registered before clutch loads, so its defcustoms keep the stored values.
+(dolist (setting '((clutch-connect-timeout-seconds . "Seconds to open a database connection")
+                   (clutch-read-idle-timeout-seconds . "Seconds of silence tolerated while reading a result")
+                   (clutch-query-timeout-seconds . "Seconds a query may run on the database")
+                   (clutch-jdbc-rpc-timeout-seconds . "Seconds for a round trip to the JDBC agent")
+                   (clutch-result-max-rows . "Rows shown in a result table")))
+  (config-register (car setting) :type 'integer :group '+clutch :doc (cdr setting)))
+
+;; SQL files open in clutch-mode, which is `sql-mode' plus running the SQL
+;; against a connection; Redis command files in clutch-redis-mode.  A file
+;; visit never installs clutch: without it the plain modes are used.
+(defun +clutch-sql-mode ()
+  "Use `clutch-mode' for this SQL file when clutch is installed, else `sql-mode'."
+  (if (locate-library "clutch")
+      (+clutch-mode)
+    (sql-mode)))
+
+(defun +clutch-redis-mode ()
+  "Use `clutch-redis-mode' when clutch is installed, else `prog-mode'."
+  (if (locate-library "clutch")
+      (progn (+clutch--ensure-loaded) (clutch-redis-mode))
+    (prog-mode)))
+
+;; The file types themselves are mapped in lang/filetypes.
+
+(setq-hook! 'sql-mode-hook indent-tabs-mode nil)
 
 (provide 'tools/clutch/config)
 ;;; tools/clutch/config.el ends here

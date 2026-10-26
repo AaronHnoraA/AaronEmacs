@@ -137,9 +137,12 @@
  '("\\(?:\\`\\|/\\)Makefile\\'" "\\(?:\\`\\|/\\)GNUmakefile\\'"
    "\\(?:\\`\\|/\\)BSDmakefile\\'" "\\.mk\\'")
  #'makefile-mode)
+;; SQL opens in clutch-mode (sql-mode that can run it) when clutch is
+;; installed; see tools/clutch.
 (+filetypes--prefer-mode
  '("\\.sql\\'" "\\.ddl\\'" "\\.dml\\'")
- #'sql-mode)
+ #'+clutch-sql-mode)
+(+filetypes--prefer-mode '("\\.redis\\'") #'+clutch-redis-mode)
 (+filetypes--prefer-mode
  '("\\.log\\'" "\\.out\\'" "\\.err\\'")
  #'text-mode)

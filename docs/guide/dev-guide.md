@@ -430,7 +430,11 @@ Dape 原生 `dape-restart` 重启。
 
 - `clutch-connection-alist` 放在 `etc/clutch-config.el`
 - 密码优先走 `auth-source` / `pass`
-- 不默认接管 `.sql` 文件，避免打断现有 SQL 编辑流；需要时手动 `M-x clutch-mode`
+- 连接、查询、JDBC 的超时和结果行数上限是 config 设置（config-board 的 `+clutch` 组）
+
+文件：`.sql` / `.ddl` / `.dml` 用 `clutch-mode` 打开。它就是 `sql-mode`，只是能连库执行；
+`.redis` 用 `clutch-redis-mode`。打开文件不会安装 clutch：没装时分别退回
+`sql-mode` 和 `prog-mode`。SQL 缩进不用 tab。
 
 ## 6. Remote 框架、TRAMP 与 tramp-rpc
 

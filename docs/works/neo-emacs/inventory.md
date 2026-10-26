@@ -292,3 +292,17 @@
   - `(focus-mode nil)`，这样写实际是开启；
   - web-mode 的 modeline 图标设置。
 - **同时完成**：横杠形式 `my-` 名字的改名，doctor 也扩展到能抓 `my-`；`set-language-server!` 默认 server-id 改为 `+MODE`。
+
+### sql（2026-10-26，已完成）
+
+- **吸收**：
+  - `.sql` / `.ddl` / `.dml` 用 `clutch-mode` 打开，`.redis` 用 `clutch-redis-mode` 打开，映射在 `lang/filetypes`；没装 clutch 时退回普通模式。
+  - SQL 缩进不用 tab。
+  - clutch 的 5 个超时和行数上限登记为 config 设置，值保持 clutch 自己的默认（10/30/30/30 秒、500 行），没有采用他更紧的值。
+- **已一致**：SQL 里的 yasnippet。
+- **不收**：
+  - clutch buffer 里的 `?`、`RET`、`n/N`，`SPC e c`；
+  - ejc-sql。
+- **延后**：
+  - MyBatis XML 里执行 SQL，放到 Java 审计；
+  - 21 个 SQL 片段，放到 snippets 审计。

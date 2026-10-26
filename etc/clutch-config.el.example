@@ -3,15 +3,12 @@
 ;;; Commentary:
 ;;
 ;; Mirror this structure in `etc/clutch-config.el` and keep secrets in
-;; auth-source or pass when possible.
+;; auth-source or pass when possible.  Timeouts and the result row limit are
+;; `config' settings (config-board, group +clutch), not set here.
 
 ;;; Code:
 
-(setq clutch-connect-timeout-seconds 10
-      clutch-read-idle-timeout-seconds 30
-      clutch-query-timeout-seconds 20
-      clutch-jdbc-rpc-timeout-seconds 15
-      clutch-connection-alist
+(setq clutch-connection-alist
       '(("dev-mysql" . (:backend mysql
                         :host "127.0.0.1"
                         :port 3306
