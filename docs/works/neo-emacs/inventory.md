@@ -317,3 +317,12 @@
   - 用户不写 Java，不用鼠须管，不用翻译和 RSS。因此 eglot/java（JDT、Maven、lombok、栈帧跳转、MyBatis 跳转、XML 里执行 SQL）、rime、translate、elfeed 全部不收。
   - 他自己没启用的 telega、eredis、alpha、addspace、windows（popwin）、modeline（awesome-tray）也不收。
   - eglot 模块里与 Java 无关的部分同样不收：corfu/kind-icon（本配置用 Company），`vertico-map` 的 `C-j/C-k` 和那些 `;` 键（键位以本配置为准），`flymake-no-changes-timeout 30`（会把诊断推迟 30 秒）。
+
+### agentshell（2026-10-26，部分完成）
+
+- **吸收**：
+  - agent 回复里的远程图片不下载，渲染成链接。neo 是覆盖 agent-shell 的私有下载函数；这里改用公开的 `agent-shell-markdown-render-function` 包一层，不传缓存目录。可用 `+agent-shell-fetch-remote-images` 恢复下载。
+  - 打开会话时不自动带入光标所在行（`agent-shell-context-sources` 为 files region error）。
+  - 两处 agent 选择器合并为一份 `+agent-shell-agents`。
+- **不收**：Cursor（用户不用）；两行会话头（和 Portal 的 tab 条冲突）；右侧面板和 `; d`；隐藏 modeline 等个人偏好。
+- **待做**：固定输入窗（compose），需要先写设计文档。

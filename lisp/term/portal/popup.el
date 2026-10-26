@@ -15,6 +15,9 @@
 (require 'general)
 
 (declare-function aaron-terminal-normalize-directory "aaron-funcs" (directory))
+(declare-function +agent-shell--read-agent "tools/agent/config" (prompt))
+(declare-function +agent-shell--check-agent "tools/agent/config" (agent))
+(defvar +agent-shell-agents)
 (declare-function +portal-create "term/portal/config" (&rest args))
 (declare-function +portal-workspace-id "term/portal/config" (&optional directory))
 (declare-function remote-terminal-p "remote-terminal" (object))
@@ -258,9 +261,11 @@ CURRENT is the currently displayed popup buffer."
 
 (defun +portal-popup--agent-menu-items ()
   "Return agent commands without loading agent-shell or starting processes."
-  '(["Claude" +portal-popup/agent-claude t]
-    ["Codex" +portal-popup/agent-codex t]
-    ["OpenCode" +portal-popup/agent-opencode t]))
+  (mapcar (lambda (agent)
+            (vector (cdr agent)
+                    (intern (format "+portal-popup/agent-%s" (car agent)))
+                    t))
+          +agent-shell-agents))
 
 (defun +portal-popup/menu (&optional event)
   "Open the popup launcher menu at mouse EVENT, or at point."
@@ -303,8 +308,8 @@ CURRENT is the currently displayed popup buffer."
 
 (defun +portal-popup/agent (agent)
   "Start AGENT through the Noema agent-shell boundary, never through portal."
-  (interactive (list (intern (completing-read "Popup agent: " '("claude" "codex" "opencode") nil t))))
-  (unless (memq agent '(claude codex opencode)) (user-error "Unsupported popup agent: %s" agent))
+  (interactive (list (+agent-shell--read-agent "Popup agent: ")))
+  (+agent-shell--check-agent agent)
   (require 'noema-agent-acp)
   (pcase-let* ((`(,noema-root . ,directory) (+agent-shell-launch-context)))
     (let* ((workspace (+portal-popup--requested-workspace-id directory))

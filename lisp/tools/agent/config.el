@@ -179,6 +179,7 @@ agent sends must resolve against the session's target."
 (declare-function noema-agent-acp-mark-session-buffer "noema-agent-acp" (buffer name agent directory))
 (declare-function agent-shell-cwd "agent-shell" ())
 (declare-function agent-shell--display-buffer "agent-shell" (buffer))
+(declare-function agent-shell-markdown-replace-markup "agent-shell-markdown" (&rest args))
 (declare-function agent-shell--shutdown "agent-shell" ())
 (declare-function agent-shell--update-fragment "agent-shell" (&rest args))
 (declare-function agent-shell--emit-event "agent-shell" (&rest args))
@@ -199,6 +200,44 @@ agent sends must resolve against the session's target."
   "ACP session ID requested by this frontend before session/load completes.")
 (defvar-local +agent-shell--task-busy nil
   "Non-nil when this frontend could not acquire its requested Codex task.")
+
+(defconst +agent-shell-agents
+  '((claude . "Claude") (codex . "Codex") (opencode . "OpenCode"))
+  "Agents started through Noema's ACP boundary, as (ID . LABEL).
+The pickers here and in the Portal popup offer exactly these.")
+
+(defun +agent-shell--read-agent (prompt)
+  "Read an agent ID from `+agent-shell-agents' with PROMPT."
+  (intern (completing-read prompt (mapcar (lambda (a) (symbol-name (car a)))
+                                          +agent-shell-agents)
+                           nil t)))
+
+(defun +agent-shell--check-agent (agent)
+  "Signal a user error unless AGENT is one of `+agent-shell-agents'."
+  (unless (assq agent +agent-shell-agents)
+    (user-error "Unsupported agent: %s" agent)))
+
+;; Remote images in an agent's reply are not downloaded: agent-shell fetches
+;; each `![](https://...)' synchronously while rendering, shown or not, and
+;; caches it.  Without a cache directory the renderer turns them into links
+;; that open in the browser; local and inline images still render.
+(config-defvar +agent-shell-fetch-remote-images nil
+  "Non-nil downloads and shows remote images in agent replies."
+  :type 'boolean)
+
+(defun +agent-shell-render-markdown (&rest args)
+  "Render agent-shell markdown, skipping remote image downloads.
+ARGS are those of `agent-shell-markdown-render-function'."
+  (apply #'agent-shell-markdown-replace-markup
+         (if +agent-shell-fetch-remote-images
+             args
+           (plist-put (copy-sequence args) :image-cache-directory nil))))
+
+;; Opening a session does not bring the line at point along; files, the
+;; region and the diagnostic at point still do.
+(config-register 'agent-shell-context-sources
+                 :type 'sexp
+                 :doc "What agent-shell takes as context when a session opens")
 
 (config-defvar +agent-shell-stall-warning-seconds 180
   "Seconds without ACP activity before showing a pending-request warning.")
@@ -713,10 +752,8 @@ when present; the exact Codex message is the isolated compatibility fallback."
 (defun +agent-shell/here (agent)
   "Start a managed AGENT in the window where this command was invoked."
   (interactive
-   (list (intern (completing-read "Agent: " '("claude" "codex" "opencode")
-                                  nil t))))
-  (unless (memq agent '(claude codex opencode))
-    (user-error "Unsupported agent: %s" agent))
+   (list (+agent-shell--read-agent "Agent: ")))
+  (+agent-shell--check-agent agent)
   (require 'term/portal/popup)
   (if (eq (selected-window) (+portal-popup--window))
       (+portal-popup/agent agent)
@@ -771,6 +808,9 @@ Double prefix ARG keeps the upstream existing-session picker."
   (if (agent-shell-steering-supported-p)
       (agent-shell-busy-submit-steer prompt)
     (agent-shell-busy-submit-queue prompt)))
+
+(with-eval-after-load 'agent-shell
+  (setq agent-shell-markdown-render-function #'+agent-shell-render-markdown))
 
 (with-eval-after-load 'agent-shell
   ;; Apply to every entry point, including plain M-x agent-shell.
@@ -890,6 +930,37 @@ target-native path.  A CLI that cannot be found is an error."
 (autoload 'noema-compose-add-context "noema-compose" nil t)
 (autoload 'noema-compose-rewrite "noema-compose" nil t)
 (autoload 'noema-agent-start "noema-agent-acp" nil t)
+(declare-function noema-agent-acp-draft "noema-agent-acp" (buffer text))
+
+;;;###autoload
+(defun +config/ask-agent (question &optional agent)
+  "Draft QUESTION about this Emacs and Noema setup in AGENT's shell.
+The existing Noema agent-shell integration owns the session.  The draft is
+left for review; it is not submitted automatically.  With a prefix argument,
+choose Codex, Claude or OpenCode instead of the default Codex."
+  (interactive
+   (list (read-string "询问 Emacs/Noema 配置: ")
+         (if current-prefix-arg
+             (intern (completing-read "Agent: "
+                                      '("codex" "claude" "opencode")
+                                      nil t nil nil "codex"))
+           'codex)))
+  (unless (and (stringp question) (string-match-p "\\S-" question))
+    (user-error "请输入配置问题"))
+  (let* ((default-directory (file-name-as-directory
+                             (expand-file-name user-emacs-directory)))
+         (buffer (noema-agent-start (or agent 'codex)))
+         (draft
+          (format
+           (concat "请以当前 Emacs 配置仓库为工作区回答问题。先用 "
+                   "docs/guide/documentation-center.md 和 docs/README.md "
+                   "找到相关文档；Emacs 结构见 docs/architecture.md，Noema 结构见 "
+                   "docs/noema/architecture.md，设置后端见 "
+                   "docs/design/config-management.md。需要当前行为或设置值时，"
+                   "再检查实际代码与注册表。请给出所依据的文件路径。\n\n问题：%s")
+           question)))
+    (noema-agent-acp-draft buffer draft)
+    buffer))
 (with-eval-after-load 'agent-shell
   ;; The ACP boundary also owns the shared, invisible Hy Memory adapter.
   ;; Defer one event turn: agent-shell may be loading inside noema-agent-acp.

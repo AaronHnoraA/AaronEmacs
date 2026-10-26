@@ -874,6 +874,9 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 direnv），因此项目 `.envrc` 提供的 agent 也能找到。popup agent 与 popup 终端一样从
 项目根目录启动（本地与远端相同），不在项目里时用当前目录。
 popup 终端和 Agent 的共享标签都只占顶部一行；Agent 的原生会话标题仍显示在其下。
+Agent 回复里的远程图片不下载，显示为可点击的链接，点开用浏览器打开（本地图片照常显示；
+设置 `+agent-shell-fetch-remote-images` 可恢复下载）。打开会话时不自动带入光标所在行，
+文件、选区和光标处的诊断仍会带入（`agent-shell-context-sources`）。
 注意 `codex` / `claude` CLI 本身不说 ACP：远端还需要安装适配器，例如
 `npm i -g --prefix ~/.local @zed-industries/codex-acp @agentclientprotocol/claude-agent-acp`。
 这两个适配器各自内置一份 CLI，默认跑内置版本，模型列表因此落后（例如只有
