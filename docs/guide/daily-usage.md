@@ -83,7 +83,9 @@
   `r` 把缩进转成当前风格（带前缀参数转成另一种）。
 - `M-x macos-tools-menu`（或 `SPC a m`）
   打开 macOS 工具菜单；`macos-pick-color` 复制颜色，带前缀参数时插入；
-  `macos-open-at-point` 用系统应用打开光标处的链接或文件。
+  `macos-open-at-point` 用系统应用打开光标处的链接或文件；`r` / `R`
+  （`macos-reveal-in-finder` / `macos-reveal-project-in-finder`）在 Finder 中选中
+  当前文件（Dired 里是光标处的条目）或项目根目录，其他 target 上的文件会被拒绝。
 - `M-x mouse-actions-menu`（或外设映射的 `H-C-M-m`）
   打开可点击的常用动作板。代码和文字的右键菜单按所在位置提供动作；
   点击 mode line 的 Git 状态段打开 Git 菜单，快速切换窗口后也可立即再次打开。

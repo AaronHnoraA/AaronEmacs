@@ -341,3 +341,13 @@ Doom 的做法：
 | `doom-profiles.el` | profile 的 init 文件与 loaddefs 生成；本配置的模块系统自己生成 autoload |
 | `doom-docs.el` | Doom 文档的 Org 阅读模式与 `kbd:`/`M-x:`/`module:` 链接；本配置文档是 Markdown，由文档中心呈现 |
 | `doom-cli.el` | `doom` 命令行框架（参数解析、帮助、日志、会话重启）；本配置的对应物是 `bin/emacs-app` 与 `make` |
+
+## 15. 模块全文：`os`、`app`
+
+| 模块 | 处理 |
+| --- | --- |
+| `os/macos`（`autoload.el`） | **吸收** `reveal-in-finder`、`reveal-project-in-finder`：`macos-tools-menu` 的 `r`/`R`，只接受本机能读的路径；`open-with`、iTerm/Transmit/LaunchBar 不收（本配置用 `macos-open-at-point` 与 Portal） |
+| `os/macos`（`config.el`、`doctor.el`、`packages.el`） | `mdfind` 已吸收；Keychain auth-source、`ns-auto-titlebar` 不收（见第 11 节）；doctor 只针对 Emacs ≤ 29.2 |
+| `os/tty` | 终端 Emacs 的剪贴板、光标形状、kkp 键协议；本配置只用图形界面 |
+| `app/calendar` | calfw + org-gcal；本配置的日历是内置 `calendar` 的全年视图，用户不用 Org |
+| `app/emms`、`app/everywhere`、`app/irc`、`app/rss` | 用户不用音乐播放、emacs-everywhere、IRC、RSS（neo 审计也已记 RSS 不收） |
