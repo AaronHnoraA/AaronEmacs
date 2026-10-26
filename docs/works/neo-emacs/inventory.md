@@ -115,7 +115,7 @@
 | lsp-java `execute-command` 包装（未启用） | java | `lang/java` | **合并**比较 |
 | corfu + kind-icon 外观 | eglot | `tools/lsp`（Company） | **换实现**：只映射外观参数 |
 | tramp-rpc：release 部署策略、本地二进制缓存目录 | config.el | `remote/backend` | **合并**比较 |
-| agent-shell 面板（683 行）：右侧面板、独立输入窗（compose）、`; d` 开关和最大化、opencode/Cursor ACP 会话、禁止下载远程图片 | agentshell | `tools/agent` + Noema agent | **待定**：本配置已有 Noema/agent-shell 入口，只吸收缺的交互，不另开一套 |
+| agent-shell 面板（683 行）：右侧面板、独立输入窗（compose）、`; d` 开关和最大化、opencode/Cursor ACP 会话、禁止下载远程图片 | agentshell | `tools/agent` + Noema agent | **吸收**远程图片策略等不改变输入习惯的改进；固定输入窗不收 |
 | clutch：超时与行数上限、`.sql`/`.redis` 关联、执行 XML 标签内的 SQL（去注释）、结果/记录视图键 | sql | `tools/clutch` | **合并** |
 | ejc-sql（db-work.el）、eredis（未启用） | neoemacs/、eredis | — | **不收**：clutch 已取代 |
 | verb（org 里写 REST 请求） | org、packages | 新 `lang/rest` 或 `lang/org` | **吸收**候选 |
@@ -318,14 +318,15 @@
   - 他自己没启用的 telega、eredis、alpha、addspace、windows（popwin）、modeline（awesome-tray）也不收。
   - eglot 模块里与 Java 无关的部分同样不收：corfu/kind-icon（本配置用 Company），`vertico-map` 的 `C-j/C-k` 和那些 `;` 键（键位以本配置为准），`flymake-no-changes-timeout 30`（会把诊断推迟 30 秒）。
 
-### agentshell（2026-10-26，部分完成）
+### agentshell（2026-10-26，已完成）
 
 - **吸收**：
   - agent 回复里的远程图片不下载，渲染成链接。neo 是覆盖 agent-shell 的私有下载函数；这里改用公开的 `agent-shell-markdown-render-function` 包一层，不传缓存目录。可用 `+agent-shell-fetch-remote-images` 恢复下载。
   - 打开会话时不自动带入光标所在行（`agent-shell-context-sources` 为 files region error）。
   - 两处 agent 选择器合并为一份 `+agent-shell-agents`。
-- **不收**：Cursor（用户不用）；两行会话头（和 Portal 的 tab 条冲突）；右侧面板和 `; d`；隐藏 modeline 等个人偏好。
-- **待做**：固定输入窗（compose），需要先写设计文档。
+- **不收**：固定输入窗（会改变原生 agent-shell 的输入与焦点习惯，还造成重复
+  会话头和无法编辑的窄窗口）；Cursor（用户不用）；两行会话头（和 Portal 的
+  tab 条冲突）；右侧面板和 `; d`；隐藏 modeline 等个人偏好。
 
 ### eglot 的通用 LSP 逻辑（2026-10-26，学习完成）
 
