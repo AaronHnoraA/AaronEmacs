@@ -356,3 +356,13 @@
   - recentf 用 CONNECTED 查询，不碰未连接的 target，自动清理关闭；
   - TRAMP 的 recentf 清理不作用于 `/fs:` 名字。
 - **不收**：退出期间临时关掉 diff-hl/flycheck、把 TRAMP 超时压到 5 秒。本配置的保持期和有界尝试已经覆盖这两点。
+
+### snippets（2026-10-26，已完成）
+
+- **已有**：他的 sql、sh、yaml、vue、gitconfig 片段之前已经导入。
+- **吸收**：
+  - Python 的 `type: ignore`（键 `/r`），并修好它原本缺失的头部；
+  - `sh-mode/run` 吸收他的两处修正：`grep -v grep`，`xargs -r`；
+  - `.vue` 用 web-mode 打开后，通过 `snippets/web-mode/.yas-parents` 继续使用 vue-mode 片段；
+  - 修好 5 个从他那里导入时头部损坏的片段文件（首行是 ` -*-`）。
+- **不收**：Java、Org、nxml（MyBatis）、Go 的片段，用户不使用这些语言；`run` 里的 `git pull` 和 JVM 参数。
