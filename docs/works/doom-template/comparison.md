@@ -300,3 +300,18 @@ Doom 的做法：
 | `config/default`（`config.el`） | avy 范围、GPG loopback、`RET` 续写注释、智能退格、tabulated-list 的 `q`、macOS `S-iso-lefttab`、woman manpath | **已有或不收**：GPG 已走 minibuffer；续写注释与退格改变手感；其余已有或不适用。`+evil-bindings.el`/`+emacs-bindings.el` 的键位见第 4 节，仍待用户决定 |
 
 未逐个展开的 Doom 模块都是本配置不用的领域：`completion/corfu ivy helm ido`、`editor/god lispy objed parinfer rotate-text`、`email/*`、`input/*`、`app/emms everywhere irc rss`、`os/tty`、`term/shell term vterm`、`tools/ansible biblio collab docker ein llm pass terraform tmux upload make`、`ui/deft doom-quit emoji indent-guides minimap neotree ophints smooth-scroll unicode vi-tilde-fringe zen`，以及本配置不写的语言（`lang/` 下除上面各节以外的模块；`lang/java`、`lang/org` 用户不用）。
+
+## 12. 补读的内核库与框架文件（全文）
+
+| 文件 | 全文读后的处理 |
+| --- | --- |
+| `lib/sandbox.el` | **吸收**：`M-x elisp-sandbox`，在 `emacs -Q`（带当前 `load-path`）里运行一段 Elisp。只做“原生 Emacs + 已装包”一种：另起一个加载完整配置的实例会和正在运行的后台 Emacs 抢 server 与状态 |
+| `lib/store.el` | 已标记弃用的带 TTL 的键值缓存；本配置的持久化走 config 注册表与 `var/`，不收 |
+| `lib/system.el` | 发行版识别、图标、CPU 数、symlink 支持检测；本配置只跑 macOS，CPU 数用 `num-processors`，不收 |
+| `lib/process.el` | `doom-call-process`/`doom-exec-process`；本配置的进程走 Remote 进程 API，不收 |
+| `lib/plist.el` | 已弃用，Doom 自己推荐 `map.el`，不收 |
+| `lib/strings.el` | `doom-pcre-quote`；本配置把输入交给 Consult 转换，不需要 |
+| `lib/git.el` | `git rev-parse --show-toplevel`；本配置的根由项目层解析，不收 |
+| `lib/packages.el` | straight.el 的 pin 升级命令；本配置的版本锁在 `package-lock.el`，用 `make lock`，不适用 |
+| `lib/config.el` | `doom/reload`、打开私有配置；本配置重载走模块系统，不收 |
+| `lib/projects.el` | `set-project-type!`、在其他项目找文件、把目录登记为项目；后两项已有（`+project/switch`、`project-add-to-workbench`），前者没有使用者 |

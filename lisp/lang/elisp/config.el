@@ -237,6 +237,61 @@ INITIAL, the symbol at point when called interactively, seeds the input."
 (defalias 'elisp-search-load-path #'+elisp/search-load-path
   "Search the source of every directory Emacs loads from.")
 
+;; From Doom's `doom/sandbox': run a snippet in a fresh `emacs -Q' that still
+;; sees every installed package, to tell a package's behaviour from this
+;; configuration's.  Only the vanilla run is offered: a second instance loading
+;; the full configuration would compete with this one for its server and
+;; background state.
+(defvar +elisp-sandbox-buffer-name "*elisp-sandbox*"
+  "Name of the Emacs Lisp sandbox buffer.")
+
+(defun +elisp-sandbox--command (file)
+  "Return the command that runs FILE in a vanilla Emacs with this `load-path'."
+  (list (expand-file-name invocation-name invocation-directory)
+        "-Q"
+        "--eval" (prin1-to-string `(setq load-path ',load-path))
+        "-l" file))
+
+(defun +elisp-sandbox/run ()
+  "Run the sandbox buffer's code in a new vanilla Emacs."
+  (interactive)
+  (let* ((dir (make-temp-file "elisp-sandbox-" t))
+         (file (expand-file-name "sandbox.el" dir))
+         (code (buffer-substring-no-properties (point-min) (point-max)))
+         ;; A client-side helper: never route it through a remote buffer.
+         (default-directory temporary-file-directory))
+    (with-temp-file file
+      (insert ";; -*- lexical-binding: t; -*-\n" code))
+    (make-process :name "elisp-sandbox"
+                  :command (+elisp-sandbox--command file)
+                  :noquery t
+                  :sentinel (lambda (process _event)
+                              (unless (process-live-p process)
+                                (delete-directory dir t))))
+    (message "Sandbox started in a vanilla Emacs")))
+
+(defvar-keymap +elisp-sandbox-mode-map
+  :parent emacs-lisp-mode-map
+  "C-c C-c" #'+elisp-sandbox/run)
+
+(define-derived-mode +elisp-sandbox-mode emacs-lisp-mode "Sandbox"
+  "Emacs Lisp to run in a vanilla Emacs with \\[+elisp-sandbox/run].")
+
+(defun +elisp/sandbox ()
+  "Open the Emacs Lisp sandbox."
+  (interactive)
+  (pop-to-buffer
+   (with-current-buffer (get-buffer-create +elisp-sandbox-buffer-name)
+     (unless (derived-mode-p '+elisp-sandbox-mode)
+       (+elisp-sandbox-mode)
+       (insert (substitute-command-keys
+                ";; Code here runs in `emacs -Q' with every installed package on
+;; `load-path' but none of this configuration.  \\[+elisp-sandbox/run] runs it.\n\n")))
+     (current-buffer))))
+
+(defalias 'elisp-sandbox #'+elisp/sandbox
+  "Try Emacs Lisp in a vanilla Emacs that sees the installed packages.")
+
 (provide 'lang/elisp/config)
 
 ;;; lang/elisp/config.el ends here

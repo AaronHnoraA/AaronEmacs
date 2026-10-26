@@ -60,4 +60,27 @@ It used to stop at its first `require': the core feature was missing, or
        (lambda (text &rest _) (setq doc text)))
       (should (string-match-p (regexp-quote (format "%S" fill-column)) doc)))))
 
+(ert-deftest +elisp-sandbox-runs-vanilla-with-installed-packages ()
+  "The sandbox Emacs loads installed packages but none of this configuration."
+  (require 'lang/elisp/config)
+  (let* ((dir (make-temp-file "sandbox-test-" t))
+         (file (expand-file-name "probe.el" dir))
+         (out (expand-file-name "out.eld" dir))
+         (default-directory temporary-file-directory))
+    (unwind-protect
+        (progn
+          (write-region
+           (format "(with-temp-file %S (prin1 (list (and (require 'dash nil t) t) (featurep 'aaron-modules)) (current-buffer)))"
+                   out)
+           nil file nil 'silent)
+          (let ((command (+elisp-sandbox--command file)))
+            (should (member "-Q" command))
+            (should (zerop (apply #'call-process (car command) nil nil nil
+                                  "--batch" (cdr command)))))
+          (should (equal (with-temp-buffer
+                           (insert-file-contents out)
+                           (read (current-buffer)))
+                         '(t nil))))
+      (delete-directory dir t))))
+
 ;;; init-elisp-flymake-tests.el ends here

@@ -24,6 +24,8 @@
   能查到 `require` 之后的真实警告（以前停在第一个 `require` 报“Cannot open load file”）。
 - 光标在变量上时，eldoc 在文档旁显示它的当前值（Emacs 自带的
   `elisp-eldoc-var-docstring-with-value`）。
+- `M-x elisp-sandbox` 打开一个 Elisp 缓冲区，`C-c C-c` 在新的 `emacs -Q` 里运行它：
+  已安装的包都能 `require`，但不加载本配置，用来分辨问题出在包还是配置。
 - `M-x elisp-search-load-path` 用 ripgrep 搜索 `load-path` 上的所有目录（本配置的模块
   和已安装的包），以光标处的符号为初始输入。
 
