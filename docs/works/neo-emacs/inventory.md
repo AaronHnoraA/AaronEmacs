@@ -366,3 +366,16 @@
   - `.vue` 用 web-mode 打开后，通过 `snippets/web-mode/.yas-parents` 继续使用 vue-mode 片段；
   - 修好 5 个从他那里导入时头部损坏的片段文件（首行是 ` -*-`）。
 - **不收**：Java、Org、nxml（MyBatis）、Go 的片段，用户不使用这些语言；`run` 里的 `git pull` 和 JVM 参数。
+
+### config.el：字体、主题与显示（2026-10-26，已完成）
+
+- **已有，而且更完整**：
+  - 字体系统 `aaron/apply-font-config`：中文通过 fontset 绑定，并带缩放系数，跟随任何字号变化，所以不需要他的“大字号模式联动 CJK”；
+  - 换主题后修正 face 的 hook（`+theme-normalize-faces`）；
+  - auto-revert 用文件通知；
+  - `ns-use-proxy-icon nil`。
+- **不收**：
+  - 按 major mode 换字体、行号斜体、去掉 modeline 下方横线（window-divider）：都是外观偏好，用户没有选；
+  - auto-revert 轮询间隔 2 秒：会增加远程开销；
+  - ultra-scroll；
+  - 毛玻璃：用户没有要，而且需要自编带补丁的 Emacs，本配置用的是官方二进制。
