@@ -21,6 +21,8 @@
 (declare-function eshell/cd "esh-mode")
 (declare-function eshell-reset "esh-mode")
 (declare-function eshell-grep "em-unix")
+(declare-function eshell-input-filter-default "em-hist" (input))
+(declare-function eshell-input-filter-initial-space "em-hist" (input))
 (declare-function evil-set-initial-state "evil-core")
 (declare-function project-current "project" (&optional maybe-prompt directory))
 (declare-function project-root "project" (project))
@@ -284,6 +286,13 @@ current directory."
     (let ((dir (completing-read "Directory: " (delete-dups (ring-elements eshell-last-dir-ring)) nil t)))
       (eshell/cd dir)))
 
+  ;; From Doom: `emacs FILE' opens FILE here instead of starting a nested
+  ;; Emacs inside the shell.
+  (defun eshell/emacs (&rest files)
+    "Visit FILES in this Emacs."
+    (mapc #'find-file (mapcar #'expand-file-name (flatten-tree files))))
+  (defalias 'eshell/e #'eshell/emacs)
+
   (defun eshell/rg (&rest args)
     "ripgrep with eshell integration."
     (eshell-grep "rg" (append '("--no-heading") args) t))
@@ -299,6 +308,13 @@ current directory."
   (eshell-cmpl-ignore-case t)
   (eshell-cmpl-cycle-completions nil))
 
+(defun +eshell-history-input-p (input)
+  "Return non-nil when INPUT belongs in the history.
+Blank input never does, nor, as with a shell's ignorespace, input that starts
+with a space: a command carrying a secret can be kept out (from Doom)."
+  (and (eshell-input-filter-default input)
+       (eshell-input-filter-initial-space input)))
+
 (use-package em-hist
   :ensure nil
   :hook (eshell-hist-load . eshell-hist-initialize)
@@ -307,7 +323,8 @@ current directory."
   :custom
   (eshell-history-size 10000)
   ;; From Doom: a command repeated back to back is recorded once.
-  (eshell-hist-ignoredups t))
+  (eshell-hist-ignoredups t)
+  (eshell-input-filter #'+eshell-history-input-p))
 
 (use-package em-rebind
   :ensure nil

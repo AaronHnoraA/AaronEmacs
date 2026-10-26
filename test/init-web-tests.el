@@ -140,5 +140,30 @@
       (eshell-add-input-to-history "ls -l")
       (should (= (ring-length eshell-history-ring) 1)))))
 
+(ert-deftest +eshell-history-skips-input-that-starts-with-a-space ()
+  "A command typed with a leading space, or a blank one, stays out of history."
+  (require 'em-hist)
+  (should (funcall eshell-input-filter "ls -l"))
+  (should-not (funcall eshell-input-filter " export TOKEN=x"))
+  (should-not (funcall eshell-input-filter ""))
+  (should-not (funcall eshell-input-filter "   ")))
+
+(ert-deftest +eshell-emacs-command-visits-files-here ()
+  "`emacs FILE' and `e FILE' in eshell visit FILE in this Emacs."
+  (require 'eshell)
+  (let* ((dir (make-temp-file "eshell-e" t))
+         (default-directory (file-name-as-directory dir))
+         (buffers nil))
+    (unwind-protect
+        (progn
+          (eshell/emacs "one.txt" '("two.txt"))
+          (eshell/e "three.txt")
+          (dolist (name '("one.txt" "two.txt" "three.txt"))
+            (let ((buffer (find-buffer-visiting (expand-file-name name dir))))
+              (should buffer)
+              (push buffer buffers))))
+      (mapc #'kill-buffer buffers)
+      (delete-directory dir t))))
+
 (provide 'init-web-tests)
 ;;; init-web-tests.el ends here

@@ -53,6 +53,10 @@ buffer 和同一份实现，位于 `lisp/term/shell/eshell.el`。
 - `M-x command-shell-run`（`+eshell/run-command`）读一条命令，在项目根（没有项目
   时用当前目录）的 eshell 里排队执行并显示。
 
+在 shell 里：连续重复的命令只记一次历史；以空格开头的命令不进历史（同 shell 的
+`ignorespace`，用于带密钥的命令）；`emacs FILE` / `e FILE` 与 `vi FILE` 一样在本
+Emacs 里打开文件，不会在 shell 里再起一个 Emacs。
+
 ## 契约
 
 - **C1 上下文**：`+eshell-buffer` 对同一上下文返回同一个 buffer，并把它切到调用给的

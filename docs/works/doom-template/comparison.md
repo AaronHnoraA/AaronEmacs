@@ -406,3 +406,14 @@ Doom 的做法：
 | `editor/snippets` | yasnippet 字段内 `C-a`/`C-e` 跳字段首尾、退格不越过字段、空字段按 Delete 跳过、Escape 放弃 snippet、私有 snippet 优先、在 Visual 选区上展开：本配置的 snippet 层（`C-c y`）键位与 Copilot 共用 `yas-keymap`，属于手感，不收 |
 | `editor/whitespace` | dtrt-indent 猜缩进**已有**（`config/default`）；ws-butler **已有**；高亮与 `indent-tabs-mode` 相反的缩进（外观，不收） |
 | `editor/word-wrap` | `+word-wrap-mode`（adaptive-wrap 加按语言缩进的折行）：本配置长行按模式各自处理，不收 |
+
+## 20. 模块全文：`email`、`input`、`term`
+
+| 模块 | 处理 |
+| --- | --- |
+| `email/mu4e`、`notmuch`、`wanderlust` | 用户邮件走 Gnus（`SPC a g`），不用这三个客户端；mu4e 的空主题检查 Gnus 的 `message-check` 已有 |
+| `input/bidi`、`japanese`、`layout`（bépo、azerty） | 用户不写从右到左文字和日文，键盘是 QWERTY |
+| `input/chinese` | pyim、liberime 输入法和 pangu 自动空格不收（用户用系统输入法）；`fcitx-evil-turn-on`（离开 Insert 时关掉中文输入法）在 macOS 上对应切换输入源，见下一节 |
+| `term/eshell` | **吸收**两项：以空格开头的命令不进历史（`eshell-input-filter` 组合默认过滤与 `eshell-input-filter-initial-space`）；`emacs FILE`/`e FILE` 在本 Emacs 打开文件（本配置已有 `vi`/`vim`/`nvim` 同类别名）。重复命令只记一次已在第 16 节吸收。不收：提示符、输出只读与命令期间停用撤销（本配置 eshell 在 Emacs 状态，且有自己的输出规范化与命令队列）、Evil 键、别名表、分屏与工作区跟踪、esh-help、did-you-mean、语法高亮 |
+| `term/ghostel` | 本配置已用 Ghostel（远程工作区）与 Portal；去掉 `DIRENV_*` 变量的问题未在本配置复现（终端从 PTY 里执行目标 `$SHELL`），不收 |
+| `term/shell`、`term`、`vterm` | `+shell-idle-p` 用 `file-remote-p` 分支，与 Remote 规则相悖；本配置终端走 Portal/Ghostel，不收 |
