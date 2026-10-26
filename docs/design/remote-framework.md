@@ -608,6 +608,7 @@ SSH target 上，用暂停容器（主机不回任何包）、杀连接进程、
 | 重连后恢复 watch | watcher 就绪握手 | 至多连接时限 | — | 恢复与旧 watcher 死亡触发的 resync 互斥 |
 | 终端的传输丢失 | PTY 进程异常退出或 workspace 重连 | 不等 | — | buffer 保留为 disconnected，显式 `remote-terminal-restart` |
 | 用户显式断开 | — | — | — | 不自动重连，探测一并停止 |
+| 退出 Emacs 时保存某个 buffer 失败（目标不可达、目录只读等） | 保存报错 | 一次有界尝试 | 询问：放弃这个 buffer 的修改并继续退出，或取消退出（`aaron-exit-save-failure-a`）；未修改的远程 buffer 不询问 | 不适用：退出流程本身不重连 |
 
 图形界面下“打开远程文件卡死 30 秒”的成因是三件事叠加，批处理里一件都不会发生：
 握手等待期间空闲定时器触发了一个查询**本机**进程的清扫函数，而

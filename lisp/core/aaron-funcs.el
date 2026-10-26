@@ -382,6 +382,35 @@ If any function returns non-nil, later hooks are skipped.")
   (when (yes-or-no-p "Quit Emacs? ")
     (save-buffers-kill-terminal)))
 
+;; A save that fails while Emacs exits (an unreachable target, a read-only
+;; directory) would abort the whole exit.  Offer to drop that buffer's changes
+;; and keep exiting instead (docs/design/remote-framework.md failure matrix).
+(defvar aaron--exiting nil
+  "Non-nil while `save-buffers-kill-emacs' runs.")
+
+(defadvice! aaron--exiting-a (orig &rest args)
+  "Mark the dynamic extent of exiting Emacs around ORIG with ARGS."
+  :around #'save-buffers-kill-emacs
+  (let ((aaron--exiting t))
+    (apply orig args)))
+
+(defadvice! aaron-exit-save-failure-a (orig &rest args)
+  "During exit, let a save that fails be discarded instead of aborting.
+ORIG is `save-buffer', called with ARGS."
+  :around #'save-buffer
+  (if (not aaron--exiting)
+      (apply orig args)
+    (condition-case err
+        (apply orig args)
+      (error
+       (pcase (car (read-multiple-choice
+                    (format "Saving %s failed: %s" (buffer-name)
+                            (error-message-string err))
+                    '((?d "discard" "Drop this buffer's changes and keep exiting")
+                      (?c "cancel" "Cancel exiting Emacs"))))
+         (?d (set-buffer-modified-p nil) nil)
+         (_ (signal (car err) (cdr err))))))))
+
 (define-minor-mode aaron-global-quit-key-mode
   "Keep global quit bindings available above local keymaps."
   :init-value t

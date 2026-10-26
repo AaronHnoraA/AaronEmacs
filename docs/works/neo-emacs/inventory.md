@@ -346,3 +346,13 @@
   - `flymake` 30 秒；
   - eldoc 单行、高亮斜体和 modeline 提示，这三项是偏好，用户没有选。
 - **发现**：lsp-mode 对 TypeScript snippet 补全的 resolve 补丁只认 `ts-ls`，对本配置的 `+typescript` 不生效。已在 lsp-workflow.md 记为缺口 G-A1，待用真实 server 验证。
+
+### config.el：退出流程与 recentf（2026-10-26，已完成）
+
+- **吸收（推广为通用规则）**：退出时保存失败不再中止整个退出，而是询问放弃这个 buffer 的修改并继续退出，还是取消退出（`aaron-exit-save-failure-a`）。neo 只针对远程 buffer、并靠 `file-remote-p` 分支实现；这里不区分远程和本地，写进 remote-framework.md 的故障表。
+- **已有**：
+  - 退出时先取消后台任务，再逐步关闭会话（`remote-framework-shutdown`）；
+  - 不可达链路保持期挡住了退出期间定时器的重连；
+  - recentf 用 CONNECTED 查询，不碰未连接的 target，自动清理关闭；
+  - TRAMP 的 recentf 清理不作用于 `/fs:` 名字。
+- **不收**：退出期间临时关掉 diff-hl/flycheck、把 TRAMP 超时压到 5 秒。本配置的保持期和有界尝试已经覆盖这两点。
