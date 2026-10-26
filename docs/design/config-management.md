@@ -77,12 +77,8 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
 
 ### 原生 Customize
 
-- Dashboard 顶部的 `[config]` 打开 ETAF Config 手册浮窗：左侧目录跳转，顶部
-  可打开注册项说明或原生 Customize。TTY 打开本 Markdown 原文件。
 - `M-x config-board` 打开 `config` 的原生 Customize group。
 - `M-x config-dispatch`，或 leader `SPC h c`，打开调度菜单。
-- `M-x config-documentation-panel` 查看单个注册项的说明；调度菜单按 `d`。
-- `M-x config-manual-panel` 打开本手册；调度菜单按 `m`。
 - `M-x customize-group RET config RET` 也会显示同一批注册项。
 
 Customize 里的 `Apply` 只做运行时生效，不写 `custom.el`；`Save` 通过
