@@ -199,6 +199,10 @@ Emacs state keep their local behavior."
            (funcall fill from to justify t to-eop))
     (apply fn args)))
 
+(defun +evil-delete-selection-off-h ()
+  "Leave `delete-selection-mode' when Insert state ends."
+  (delete-selection-mode -1))
+
 (defun +evil/avy-goto-char-in-line (char)
   "Jump to a character on the current line using `avy'."
   (interactive (list (read-char "char: " t)))
@@ -331,6 +335,10 @@ Emacs state keep their local behavior."
   (remove-hook 'aaron-escape-hook #'+evil-force-normal-state-h)
   (remove-hook 'aaron-escape-hook #'+evil-clear-ex-highlights-h)
   (add-hook 'aaron-escape-hook #'+evil-escape-state-h)
+  ;; From Doom: in Insert state, typing over a selection (made with the mouse
+  ;; or shifted motion) replaces it, as everywhere else on the system.
+  (add-hook 'evil-insert-state-entry-hook #'delete-selection-mode)
+  (add-hook 'evil-insert-state-exit-hook #'+evil-delete-selection-off-h)
   (add-hook 'after-change-major-mode-hook #'+evil-sync-shift-width)
   (add-hook 'hack-local-variables-hook #'+evil-sync-shift-width)
   (+evil-sync-shift-width-existing-buffers)

@@ -378,3 +378,12 @@ Doom 的做法：
 | `completion/helm`、`ido`、`ivy`（全文） | 各自的项目搜索、Ex 命令、posframe、ivy-rich 等 | 不用这些前端 |
 | `completion/ivy`、`vertico`（全文） | `wgrep-auto-save-buffer t` | **吸收**：本配置应用 wgrep 修改后不保存文件，`C-c C-e` 导出编辑后还要逐个保存；现在 `C-c C-c` 一并写盘（端到端测试） |
 | `completion/vertico`（`config.el` 全文） | 用 minibuffer 做 buffer 内补全、multiform 高亮目录与已启用模式、Consult 预览键、consult-dir 容器源、ripgrep PCRE 检查 | 不收或已满足：buffer 内补全是 Company；高亮与预览键是外观和手感；本机 ripgrep 支持 PCRE 前瞻 |
+
+## 18. 模块全文：`config`
+
+| 文件 | 处理 |
+| --- | --- |
+| `config/default/config.el` | **吸收**：Insert 状态下开 `delete-selection-mode`（输入覆盖鼠标或 Shift 选中的文字，离开 Insert 关掉）。不收：`man` 换 `woman`（实测 macOS 上 `man` 补全首次 1.3 秒、之后有缓存）；GPG 默认收件人（本机没有 `.gpg` 文件）；智能退格与 RET 续写注释（手感）；macOS `s-` 键与 help 键表（第 4 节）；avy、woman 路径 |
+| `config/default/autoload/*.el` | 复制项目相对路径已吸收；`compile`/搜索/浏览/新 buffer/重启 server/诊断等包装与本配置已有命令重复 |
+| `config/default/+emacs-bindings.el`、`+evil-bindings.el` | 键位全文看过，归入第 4 节的候选：Doom 的 minibuffer `C-r` 取寄存器、`C-u` 删到缩进是 Vim 命令行的行为，可与 `SPC .` `SPC ,` 等空位一并由用户决定；其余命令本配置已有或属于不用的模块 |
+| `config/literate` | 本配置不是 Org literate 配置 |

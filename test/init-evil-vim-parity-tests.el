@@ -59,4 +59,25 @@
     (evil-fill (point-min) (point-max))
     (should (equal (buffer-string) "a  b.  c d\n"))))
 
+(ert-deftest +evil-insert-state-typing-replaces-the-selection ()
+  "Typing over an active region in Insert state replaces it."
+  (with-temp-buffer
+    (switch-to-buffer (current-buffer))
+    (evil-local-mode 1)
+    (insert "hello world")
+    (evil-insert-state)
+    (unwind-protect
+        (progn
+          (set-mark 1)
+          (goto-char 6)
+          (activate-mark)
+          (should delete-selection-mode)
+          (setq last-command-event ?X
+                this-command 'self-insert-command)
+          (run-hooks 'pre-command-hook)
+          (self-insert-command 1 ?X)
+          (should (equal (buffer-string) "X world")))
+      (evil-normal-state)
+      (should-not delete-selection-mode))))
+
 ;;; init-evil-vim-parity-tests.el ends here
