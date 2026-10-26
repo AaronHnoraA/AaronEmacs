@@ -306,3 +306,7 @@
 - **延后**：
   - MyBatis XML 里执行 SQL，放到 Java 审计；
   - 21 个 SQL 片段，放到 snippets 审计。
+
+### org（2026-10-26，已完成）
+
+- **不收**：用户不使用 Org，Org 相关的外观、工作流、导出、babel、roam 设置全部不吸收。
