@@ -95,7 +95,7 @@ export const myExtension = inlineConstruct({
 });
 ```
 
-工厂负责：跳过代码与公式、reveal 与 pinning、打字合并期间只映射、拖选结束才重建、
+工厂负责：跳过代码与公式、reveal 与 pinning、打字合并期间只映射、拖选中的视口刷新与松开后的选区结算、
 可视模式切换时的缓存、在 registry 中登记。把扩展加入
 `extensions/visual/index.ts` 的 `createVisualMarkdownExtensions()`。
 
@@ -162,7 +162,7 @@ object 是一个东西，不会被删掉半个。插入模式下，在 object �
 
 由 ViewPlugin 绘制的家族（行内组件工厂、图片、`@@` 命令、wiki 标题、代码块）都用
 `constructs/view-plugin.ts` 的 `constructViewPlugin`：输入法组字时的选区移动不重建；打字合并时
-只映射（家族可映射自己的状态，或拒绝）；鼠标拖选在松开时结算一次；文档、视口、刷新变化时重建；
+只映射（家族可映射自己的状态，或拒绝）；鼠标拖选时纯选区变化到松开后结算，边缘滚动和解析刷新照常绘制新视口，并用按下时的选区决定源码显示；文档、视口、刷新变化时重建；
 选区变化只在"打开了哪些组件"（`revealKey`）改变或 Vim 固定状态切换时重建；插件重建之间经持久
 缓存保留。家族只提供 `build`，以及可选的 `revealKey`、`extra`（自有状态）、`mapDuringTyping`、
 `invalidates`、`beforeUpdate`、`setup`、`provide`。

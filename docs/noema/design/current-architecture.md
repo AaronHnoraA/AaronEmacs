@@ -26,7 +26,18 @@ src/cm6/
 `editor-cm6.ts` 只决定宿主策略（history、editable、DOM event、callback）；语言、
 feature 顺序和 visual mode 由 composition root 决定。Visual mode 使用
 `StateField + StateEffect + Compartment`，不再依赖闭包状态。
-Pointer drag 使用独立 StateField；拖选期间复用 decoration，结束后一次刷新。
+Pointer drag 使用独立 StateField；纯选区移动期间复用 decoration，松开指针后按最终选区结算。
+滚动引起视口变化时仍渲染新进入视口的公式和 Markdown，但显示源码的判断固定在按下鼠标时
+的选区，避免拖选途中重排。解析器刷新仍可更新视口内容；全篇块组件刷新延到松开后。
+选区工具栏在下一次按下编辑器内容时立即隐藏，松开后才按最终范围显示；
+工具栏无需背景模糊，因此滚动或拖选时不让 WebKit 重绘其背后的选区。
+拖选期间 `cm-content` 暂停 WebKit 原生文本选择，由 CM6 的鼠标选区模型与绘制层处理；
+嵌入式输入控件仍使用原生选择，松开或取消指针时恢复普通编辑。
+CM6 的选区绘制层本来就裁剪到编辑器视口；拖选时还暂停它把完整逻辑选区写入 WebKit
+DOM Selection 的动作，避免长选区跨过视口外的大量公式节点。松开时恢复一次 DOM 同步。
+页面层的 Vim 接管、Copilot、字数统计与辅助界面只处理拖选结束的选区；编辑器在松开指针时
+额外发一次选区回调，即使范围没有再移动。选区列裁剪在布局宽度变化时测量，不能在每次
+选择或滚动时读取元素几何。复制直接从 CM6 选区取源码，不为复制查询已绘制的选区矩形。
 
 原有性能路径保持：viewport delta、8ms/16KB 解析预算、CJK line cache、近变更修补、
 byte-budget caches、MeasuredWidget、async epoch 以及 worker/observer teardown。
@@ -38,6 +49,8 @@ byte-budget caches、MeasuredWidget、async epoch 以及 worker/observer teardow
 它只对抗重排：滚轮、拖选边缘自动滚动、滚动条、点击处理器自己发起的跳转（链接、大纲、
 Emacs 滚动命令）一律优先，包括尚未派发 `scroll` 事件的写入。不要在应用层为点击另加
 滚动修正；需要新的豁免时扩展这个类。
+拖选期间纯选区事务不会重排，稳定器不能对每次鼠标移动安排滚动位置校正；那会与 CM6 的
+边缘自动滚动争夺 `scrollTop`。松开指针后的源码显露，以及实际改文档或刷新组件时仍校正。
 
 两种不是“读者在滚动”的位移也归这个类处理。其一，点击文末附近的已渲染块会重建它的
 widget，未测量前文档瞬间变短，浏览器自己把 `scrollTop` 夹到新的最大值（没有任何输入或
@@ -211,7 +224,11 @@ Emacs 网关的 `noema.command` 只把 `detail` 内的 `file`、`mtimeMs`、`cli
 页面仅在无草稿时自动重读当前文件；所有重读在异步结果返回时再次核对文件与
 页面版本，自动重读还核对期间是否收到新的文件事件。没有为库外
 独立 Markdown 新增常驻 watch 或轮询。自身保存事件依文件身份和高精度时间戳过滤，
-紧随其后的外部改动仍会触发通知。
+并在批次发出前重新核对。写入尚未得到 Go 回执时，watcher 保留该路径的事件，
+直到写入结束、最终签名可核对为止；不能用固定延时推断它已经结束。
+页面收到文件事件后也等待自身保存回执，再比较磁盘内容版本与当前打开版本，
+相同则不提示外部修改；不同才保留草稿并提示复核。紧随其后的外部改动改变
+文件身份，仍会触发通知。
 
 Agenda/Todo/Attribute View 的 canonical workspace projection 也只由 Go 生成。kernel 在一次
 request 中联结窄 note metadata、planning nodes 与可选 property blocks；Node 不再先 walk/stat/read
@@ -253,6 +270,9 @@ AI 发送都经页面 client 的宿主命令路由，不依赖 xwidget 的脚本
 
 按键桥迁移时保留了原命令名和调用协议。Cmd+方向键不经 Emacs/windmove
 转发，由 CodeMirror/WebKit 保持原生编辑行为。
+Portal 页面的 Emacs 顶栏圆形箭头调用 `my/noema-refresh`，先尝试保存草稿，再从磁盘
+重读当前笔记并保留光标；它不是浏览器整页重载。xwidget 顶栏的对应按钮才
+调用网页重载，提示文字须区分这两种动作。
 
 ## 输入与 Vim
 
