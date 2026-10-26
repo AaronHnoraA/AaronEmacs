@@ -435,3 +435,19 @@ Doom 的做法：
 | `tools/magit` | **吸收**：Magit 进程 buffer 里的 URL 可点（`goto-address-mode`，如 push 后给出的 PR 链接）。已有：细粒度 hunk diff、`long-line-threshold`、访问文件时打开折叠（第 12 节）。不收：`--tags`/`--autostash` 开关（新版 Magit 已自带）、`magit-uniquify-buffer-names`、窗口布局函数、`magit-save-repository-buffers`、提交信息规范检查与空信息时进 Insert（手感）、`magit-revision-insert-related-refs`（关掉能省远程往返，但会少掉“包含该提交的分支”信息，留给用户）、Forge 与 code-review |
 | `tools/make`、`pass`、`terraform`、`tmux`、`upload` | 构建走 `compile`/`+compile/board` 与 `make` 目标；用户不用 pass、Terraform、tmux 发送、ssh-deploy（远程文件走 Remote 框架与 `remote-files`） |
 | `tools/tree-sitter` | `treesit-auto-install-grammar` 设为 `never` 已在第 10 节吸收；语法源配方表与 ABI 选择：本配置的语法由 `tools/tree-sitter` 自行管理，未遇到 ABI 问题，不收 |
+
+## 22. 模块全文：`ui`
+
+| 模块 | 处理 |
+| --- | --- |
+| `ui/vc-gutter` | **吸收**：VC diff（diff-hl 边栏、`vc-diff`）用 Git 的 histogram 算法（`vc-git-diff-switches`，默认 t 表示无开关，实测 `vc-git-diff` 正常输出；Magit 用自己的参数不受影响；用户的 gitconfig 未设 `diff.algorithm`）。已有：异步更新（`diff-hl-update-async`）、Magit 刷新后同步、dired 里远程不开。不收：细窄的 fringe 位图（本配置有自己的高位图）、`diff-hl-show-staged-changes`（手感）、撤回 hunk 后光标位置补丁（新版 diff-hl 在 `save-window-excursion` 里应用，不再移动光标）、TRAMP 临时文件提示（本配置远程走 `/fs:` 与 Remote 框架的代价声明） |
+| `ui/dashboard` | 本配置有自己的 ETAF Dashboard（`+window-dashboard-buffer`），按钮式启动页与 Doom 的 banner 不收 |
+| `ui/hl-todo` | 已有（`editor/fold`）；`hl-todo-text-modes` 设为 nil 会让 Markdown 正文里的 TODO 不再高亮，对用户的笔记不利，不收；关键字表用 hl-todo 默认 |
+| `ui/nav-flash` | **已有**：`+navigation-pulse-line-h` 在跳转、save-place 后闪烁当前行 |
+| `ui/ligatures` | **已有**（`aaron-base` 的 `ligature`）；`prettify-symbols` 的 λ 等替换属外观，不收 |
+| `ui/indent-guides` | 本配置不用 indent-bars；其 `move-to-column` 补丁随之不需要 |
+| `ui/modeline` | 本配置有自己的 modeline；anzu 计数、宏录制提示、选区统计等段：选区字数已在 Noema 与 `+performance` 面板，Evil 搜索计数不收（外观） |
+| `ui/popup` | 本配置有自己的 popup 规则表（`ui/popup`）；Doom 对 help/helpful 链接回原窗口、Org 不删其他窗口等补丁与本配置的窗口生命周期（`window-lifecycle.md`）重叠或不适用 |
+| `ui/treemacs` | 已有且更深（Noema 图标、tag 轮廓）；`treemacs-is-never-other-window` 本配置有意设为 nil |
+| `ui/workspaces` | 本配置用 Perspective + tab-bar（`ui/workspaces`），persp-mode 的会话保存、每工作区 winner、项目即工作区不收 |
+| `ui/doom`、`doom-quit`、`emoji`、`minimap`、`neotree`、`ophints`、`smooth-scroll`、`tabs`、`unicode`、`vi-tilde-fringe`、`window-select`、`zen` | 主题、退出提示语、emoji、迷你地图、neotree、Evil 操作提示、平滑滚动（本配置有 `+macos-scroll-profile`）、centaur-tabs、unicode-fonts、`~` 边栏、ace-window/winum、writeroom：外观与手感，或已有等价物 |

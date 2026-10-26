@@ -44,6 +44,11 @@
     (magit-process-mode)
     (should goto-address-mode)))
 
+(ert-deftest +git-vc-diffs-use-the-histogram-algorithm ()
+  "VC diffs, which feed the diff-hl gutter, use git's histogram algorithm."
+  (require 'vc-git)
+  (should (member "--histogram" (ensure-list vc-git-diff-switches))))
+
 (provide 'init-git-core-tests)
 
 (ert-deftest +magit-status-turns-off-long-line-shortcuts ()

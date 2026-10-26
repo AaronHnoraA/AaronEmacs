@@ -14,6 +14,7 @@
 (declare-function diff-hl-next-hunk "diff-hl" (&optional backward))
 (declare-function diff-hl-previous-hunk "diff-hl" ())
 (declare-function diff-hl-revert-hunk "diff-hl" ())
+(defvar vc-git-diff-switches)
 (declare-function diff-hl-show-hunk "diff-hl-show-hunk" ())
 (declare-function diff-hl-stage-current-hunk "diff-hl" ())
 (declare-function diff-hl-dired-status-files "diff-hl-dired"
@@ -221,6 +222,17 @@ a Git repository."
   (magit-ediff-dwim-show-on-hunks t)
   (magit-display-buffer-function 'magit-display-buffer-same-window-except-diff-v1)
   (magit-section-visibility-indicator '("▸" . "▾")))
+
+;; From Doom: VC diffs (the diff-hl gutter, `vc-diff') use Git's histogram
+;; algorithm, whose hunks split less often on repeated lines such as lone
+;; braces.  Magit passes its own arguments and is not affected.
+(with-eval-after-load 'vc-git
+  ;; The default, t, means no switches at all.
+  (unless (and (listp vc-git-diff-switches)
+               (member "--histogram" vc-git-diff-switches))
+    (setq vc-git-diff-switches
+          (cons "--histogram" (and (listp vc-git-diff-switches)
+                                   vc-git-diff-switches)))))
 
 ;; From Doom: URLs in Git's output (the pull-request link a push prints) can
 ;; be followed from the process buffer.
