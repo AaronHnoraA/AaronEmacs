@@ -203,3 +203,5 @@ Doom 的做法：
 | `tools/direnv`、`term/ghostel` | envrc 提前到 major mode body 之后、ghostel 清 `DIRENV_*` | **不适用**：环境走 Remote 环境胶囊；后台 Emacs 不从 direnv 环境启动 |
 | `editor/multiple-cursors`、`tools/eval`、`ui/treemacs` | evil-mc 初始化、quickrun 结果放 overlay、treemacs-nerd-icons 加载顺序 | **不适用**：本配置用 multiple-cursors、quickrun 弹窗和自己的 Treemacs 主题 |
 | `ui/hl-todo` | 增加 REVIEW、DEPRECATED、BUG 关键字 | **不收**：外观 |
+| `lang/emacs-lisp` | apropos 结果的按钮改用 helpful | **吸收**：本配置已把 `describe-*` 命令换成 Helpful，但 apropos 按钮直接调用函数，仍打开普通 `*Help*`；放在 `ui/theme` 的 helpful 配置旁 |
+| `lang/python`、`lang/cc`、`lang/beancount`、`lang/rust`、`lang/nix` | `PYTHON_BASIC_REPL`、C 模式 remap 的空项、bean-check 的 flymake 修正、rust-analyzer 悬停缓存、nix 补全延迟 | **不需要**：Emacs 31 的 python.el 已设 `PYTHON_BASIC_REPL`；本配置 `c-mode` 每次都 remap 到 `c-ts-mode`；Beancount 走 language server 而不是 flymake-bean；本配置没有 company-nixos-options；悬停缓存问题无法在本配置复现 |

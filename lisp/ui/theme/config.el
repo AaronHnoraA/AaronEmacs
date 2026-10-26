@@ -14,6 +14,8 @@
 (require 'aaron-ui)
 
 (declare-function on-screen-mode "on-screen" (&optional arg))
+(declare-function helpful-callable "helpful" (symbol))
+(declare-function helpful-variable "helpful" (symbol))
 (defvar kanagawa-themes-custom-colors)
 (defvar +theme-unspecified 'unspecified
   "Literal face attribute value used by some themes during runtime expansion.")
@@ -270,6 +272,23 @@ into a full-width bar.  `agent-shell-prompt' inherits this face."
          ([remap describe-key]      . helpful-key))
   :custom
   (helpful-switch-buffer-function #'pop-to-buffer))
+
+;; From Doom: `describe-function' and `describe-variable' are remapped to
+;; Helpful as commands, but apropos buttons call them as functions and still
+;; open plain *Help*.  Point those buttons at Helpful too.
+(defun +helpful-apropos-callable-button (button)
+  "Describe the function on apropos BUTTON with Helpful."
+  (helpful-callable (button-get button 'apropos-symbol)))
+
+(defun +helpful-apropos-variable-button (button)
+  "Describe the variable on apropos BUTTON with Helpful."
+  (helpful-variable (button-get button 'apropos-symbol)))
+
+(after! apropos
+  (dolist (type '(apropos-function apropos-macro apropos-command))
+    (button-type-put type 'action #'+helpful-apropos-callable-button))
+  (dolist (type '(apropos-variable apropos-user-option))
+    (button-type-put type 'action #'+helpful-apropos-variable-button)))
 
 ;; Windows layout recorder
 ;;
