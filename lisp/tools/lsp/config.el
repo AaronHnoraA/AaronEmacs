@@ -2862,6 +2862,26 @@ The normal LSP timeout remains in effect for other requests."
   (setq-local company-idle-delay 0.25)
   (setq-local company-minimum-prefix-length 1))
 
+;; From Doom (its Corfu setup): a PDF, DocView or TAGS buffer holds raw file
+;; bytes, which dabbrev scanned for words and offered as completions in prose
+;; ("FlateDecode").  Leave those buffers out of `dabbrev-expand' and of
+;; Company's dabbrev, which otherwise only skips `*...*' buffers.
+(with-eval-after-load 'dabbrev
+  (dolist (mode '(pdf-view-mode doc-view-mode tags-table-mode))
+    (add-to-list 'dabbrev-ignored-buffer-modes mode)))
+
+(defvar dabbrev-ignored-buffer-modes)
+(defun +company-dabbrev-ignore-buffer-p (buffer)
+  "Return non-nil when Company's dabbrev should not scan BUFFER."
+  (require 'dabbrev)
+  (or (string-match-p "\\`[ *]" (buffer-name buffer))
+      (apply #'provided-mode-derived-p
+             (buffer-local-value 'major-mode buffer)
+             dabbrev-ignored-buffer-modes)))
+
+(with-eval-after-load 'company-dabbrev
+  (setq company-dabbrev-ignore-buffers #'+company-dabbrev-ignore-buffer-p))
+
 (use-package company
   :ensure t
   :demand t

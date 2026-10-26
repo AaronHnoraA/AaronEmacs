@@ -605,5 +605,27 @@
                     (lsp-clients-extract-signature-on-hover contents '+rust-analyzer))
                    "pub struct Point"))))
 
+(ert-deftest +company-dabbrev-skips-raw-pdf-buffers ()
+  "Company's dabbrev offers words from prose buffers, not from PDF bytes."
+  (require 'company-dabbrev)
+  (let ((pdf (get-buffer-create "paper-test.pdf"))
+        (notes (get-buffer-create "notes-test.txt")))
+    (unwind-protect
+        (progn
+          (with-current-buffer pdf
+            (insert "%PDF-1.7 /Filter /FlateDecodeStream")
+            (setq major-mode 'pdf-view-mode))
+          (with-current-buffer notes
+            (text-mode)
+            (insert "Flatland is a novella"))
+          (with-temp-buffer
+            (text-mode)
+            (insert "Flat")
+            (let ((candidates (company-dabbrev 'candidates "Flat")))
+              (should (member "Flatland" candidates))
+              (should-not (member "FlateDecodeStream" candidates)))))
+      (kill-buffer pdf)
+      (kill-buffer notes))))
+
 (provide 'init-lsp-ui-tests)
 ;;; init-lsp-ui-tests.el ends here

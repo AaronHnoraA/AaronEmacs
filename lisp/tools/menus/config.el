@@ -140,7 +140,10 @@
   :ensure t
   :hook (grep-setup . wgrep-setup)
   :custom
-  (wgrep-change-readonly-file t))
+  (wgrep-change-readonly-file t)
+  ;; From Doom: applying wgrep edits (C-c C-c) also saves the files it
+  ;; changed, as the exported search promised.
+  (wgrep-auto-save-buffer t))
 
 ;; GC optimization
 (config-defvar +gcmh-idle-delay nil

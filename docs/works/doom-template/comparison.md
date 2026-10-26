@@ -373,3 +373,8 @@ Doom 的做法：
 | `completion/vertico`（其余） | 项目搜索包装、Ex 搜索命令、跳转列表、which-key 风格的 embark 提示、fd 版本判断、远程用 basic 补全、工作区 buffer 源；已有对应（telescope、`consult-ripgrep`、better-jumper）或属于 Doom 的工作区实现 |
 | `completion/company` | 后端注册表、整行补全（Evil 的 `C-x C-l` 已有）、切换自动补全、在 minibuffer 里选候选；不收（第 5 节） |
 | `completion/corfu`、`helm`、`ido`、`ivy` | 另一套补全前端，本配置只用 Vertico + Company |
+| `completion/corfu`（全文） | dabbrev 跳过 `pdf-view`/`doc-view`/`tags-table` buffer | **吸收**：实测 Company 的 dabbrev 会扫描 PDF buffer 里的原始字节，在正文里补出 `FlateDecode` 一类词；`dabbrev-expand` 与 Company 的 dabbrev 现在都跳过这些模式 |
+| `completion/corfu`（其余） | Corfu 本身、cape、RET 行为、minibuffer 补全、ispell capf 出错自动关闭、yasnippet-capf | 另一套补全前端，不收 |
+| `completion/helm`、`ido`、`ivy`（全文） | 各自的项目搜索、Ex 命令、posframe、ivy-rich 等 | 不用这些前端 |
+| `completion/ivy`、`vertico`（全文） | `wgrep-auto-save-buffer t` | **吸收**：本配置应用 wgrep 修改后不保存文件，`C-c C-e` 导出编辑后还要逐个保存；现在 `C-c C-c` 一并写盘（端到端测试） |
+| `completion/vertico`（`config.el` 全文） | 用 minibuffer 做 buffer 内补全、multiform 高亮目录与已启用模式、Consult 预览键、consult-dir 容器源、ripgrep PCRE 检查 | 不收或已满足：buffer 内补全是 Company；高亮与预览键是外观和手感；本机 ripgrep 支持 PCRE 前瞻 |
