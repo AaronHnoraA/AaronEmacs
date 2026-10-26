@@ -26,6 +26,10 @@
 
 ;;; Logging
 
+(defgroup aaron nil
+  "The configuration's core: library, lifecycle and modules."
+  :group 'initialization)
+
 (defvar aaron-log-level (if init-file-debug 2 0)
   "How verbosely `aaron-log' reports.
 0 logs nothing, 1 warnings, 2 notices, 3 debug detail.  Logged lines go

@@ -29,6 +29,9 @@
   配置健康面板 / 编译面板。健康面板打开和 `g` 刷新只读取当前状态；
   `s`、`c`、`N` 明确运行 startup、byte、native 检查，`b` 跳到编译面板。
   对应菜单为 `config-health-menu` / `config-compile-menu`。
+- `M-x module-board` / `M-x module-doctor`
+  模块面板：每个模块的状态、加载耗时、装了哪些 hook/advice/timer/键、键冲突和策略
+  命中；`module-doctor` 先诊断全部模块。RET 打开单个模块的详情。
 - `M-x project-workbench` / `M-x activity-board` / `M-x jupyter-board`
   项目工作台、后台活动板和 Jupyter 管理板的直达名称。Jupyter 板 `g` 只刷新，
   `s` 显式清理所选 target 的废弃连接文件。

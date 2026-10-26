@@ -168,7 +168,9 @@ Doom 的做法：
 
 - 2026-10-26 分类：`lisp/` 下按 Doom 的分类分目录（`core ui editor emacs completion checkers tools lang term app os input config`），Remote 与 Noema 桥作为额外分类保留。
 - 2026-10-26 命名：全量照 Doom。核心 `aaron-`（`aaron--`、`aaron/`），模块 `+模块-`（`+模块--`、`+模块/`），hook 函数 `-h`，advice `-a`，宏沿用 Doom 原名。核心文件名也对应 Doom：`aaron-lib.el` ↔ `doom-lib.el`，`aaron-emacs.el` ↔ `doom-emacs.el`。
-- 2026-10-26 `my/` 迁移：随 P1b 模块搬迁逐个改名，旧名留 obsolete alias 一个周期，`etc/config-store.el` 键与 Noema/Raycast 引用在同一改动里迁移。
+- 2026-10-26 `my/` 迁移：随 P1b 模块搬迁逐个改名，`etc/config-store.el` 键与 Noema/Raycast 引用在同一改动里迁移，不留兼容别名和 fallback（用户：直接融合）。
+- 2026-10-26 用户习惯和原有逻辑不变：本轮只优化后端。发现的键冲突、提前加载等只报告，不擅自改行为。
+- 2026-10-26 Remote 库是底层：`:remote` 分类固定在 `:core`/`:os` 之后加载，模块系统发起的后续加载都经过它。
 - 2026-10-26 第一步做 P1a。
 
 ## 进度
@@ -180,7 +182,12 @@ Doom 的做法：
   - `letf!` 的 `(defadvice FN HOW ADVICE)` 形式按文档实现（Doom 上游把 FN 当成了 advice）。
   - `after!` 不再查 Doom 的 `doom-disabled-packages`；`load!`、`add-load-path!`、`versionp!`、`doom-context`、pcase 扩展没拿。
   - 尚未有模块挂到这些 hook 上；迁移现有的 `after-init`/`window-setup`/首次触发逻辑归入 P1b。
-- [ ] P1b 模块系统与分类目录（含 `my/` 改名）
+- [x] P1b-1 模块系统（`docs/design/module-system.md`）：`lisp/core/aaron-modules.el`（`aaron!`、`modulep!`、Doom 的 init/config 两阶段与四个阶段 hook、目录模块与 feature 模块、目录模块 autoloads、`:optional/:after/:autoload/:doctor/:depth`、`aaron/load-module`）；`init-modules.el` 改为 `aaron!` 声明（98 个模块，Doom 分类加 `:remote`、`:noema`）；`:core/:os/:remote` 固定为最先加载的底层，启动后由模块系统发起的加载都走 `remote-require-on-client`。
+  - 监督：加载账本记录每个模块装的 hook（693）、advice（327）、timer（66）、键、以及它 `require` 进来的文件（173），并区分包默认键与本配置的键来检测模块间键冲突；`aaron-doctor`（加载状态、冲突、`AGENT.md` 规则的策略检查、目录模块 `doctor.el`）；`module-board` / `module-doctor`；Health 的 “Modules” 一节与 `make doctor` 接入同一份数据；LSP/Remote/LaTeX/Jupyter/DAP 的 doctor 以 `:doctor` 挂到模块上；`config` 注册表的设置按来源文件归到模块。
+  - 验证：启动状态快照（特性、全部 hook 顺序、advice、所有 keymap 绑定、全部 custom 变量，23197 行）与迁移前逐行比较，只多出新特性和四个阶段 hook；账本开关对启动耗时的影响在测量误差内；`make core-test` 46 项、Health 测试 13 项通过。
+  - 去掉了 `my/require-module-safely` 等旧入口和兼容别名，Health 与其测试直接改用新接口（用户要求：不留 fallback，直接融合）。
+  - 发现（只报告，未改用户行为）：5 个由加载顺序决定的键冲突（`C-c w P/s/p`、`` M-` ``、`M-o`）；`init-auctex` 因 `tex-site`/`pdf-tools` 启动即加载而在启动时耗时约 0.9s；95 处策略命中（41 `file-remote-p`、47 `global-set-key`、7 `"local"` 比较）；按分类重排声明会改变 166 行启动状态，说明存在隐式顺序依赖，重排随目录迁移逐个做。
+- [ ] P1b-2 目录迁移与改名：模块逐个迁入 `lisp/CATEGORY/NAME/`，`my/` 改 `+模块-`，同时按分类重排，每步快照对比
 - [ ] P1c 注册 API
 - [ ] P1d 默认行为与键位比对
 - [ ] P1e 模块目录比对

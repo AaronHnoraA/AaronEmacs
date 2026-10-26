@@ -173,40 +173,47 @@
 
 (ert-deftest health-failed-optional-module-is-recorded-and-cleared-on-retry ()
   "A recovered optional module should disappear from the health report."
-  (let* ((my/module-load-failures nil)
-         (my/module-optional-modules nil)
+  (let* ((aaron-modules (make-hash-table :test 'equal))
+         (aaron-module-load-failures nil)
+         (aaron-module-optional-modules nil)
+         (aaron-module-ledger-enabled nil)
          (warning-minimum-level :emergency)
          (module 'emacs-audit-test-module)
+         (key (cons :health-test module))
          (directory (make-temp-file "emacs-audit-module-" t))
          (file (expand-file-name "emacs-audit-test-module.el" directory))
          (load-path (cons directory load-path)))
     (unwind-protect
         (progn
           (with-temp-file file (insert "(error \"test load failure\")\n"))
-          (should-not (my/require-module-safely module))
-          (should (equal my/module-optional-modules (list module)))
-          (should (equal (alist-get module my/module-load-failures)
+          (aaron-modules--declare `(:health-test (,module :optional t)))
+          (aaron-module--load-config (aaron-module-get key))
+          (should (equal aaron-module-optional-modules (list module)))
+          (should (equal (alist-get module aaron-module-load-failures)
                          "test load failure"))
+          (should (eq (aaron-module-state (aaron-module-get key)) 'failed))
           (with-temp-file file
             (insert "(provide 'emacs-audit-test-module)\n"))
-          (should (my/require-module-safely module))
-          (should-not my/module-load-failures))
+          (aaron/load-module key)
+          (should (eq (aaron-module-state (aaron-module-get key)) 'loaded))
+          (should-not aaron-module-load-failures))
+      (put :health-test module nil)
       (setq features (delq module features))
       (delete-directory directory t))))
 
 (ert-deftest health-board-shows-optional-module-failures ()
   "Loaded, waiting and failed optional modules have distinct board states."
-  (let ((my/module-optional-modules
+  (let ((aaron-module-optional-modules
          '(subr-x init-pending-example init-optional-example))
-        (my/module-deferred-triggers
+        (aaron-module-deferred-triggers
          '((init-pending-example . (org tex))))
-        (my/module-load-failures '((init-optional-example . "load failed"))))
+        (aaron-module-load-failures '((init-optional-example . "load failed"))))
     (unwind-protect
         (progn
           (my/health-report t)
           (with-current-buffer "*Health*"
             (goto-char (point-min))
-            (should (search-forward "Module Load" nil t))
+            (should (search-forward "Modules" nil t))
             (should (search-forward "subr-x" nil t))
             (should (search-forward "loaded" nil t))
             (should (search-forward "init-pending-example" nil t))

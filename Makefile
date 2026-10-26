@@ -175,7 +175,7 @@ audit-ui-tokens:
 	$(UI_TOKEN_BATCH) --eval '(let ((expected (aaron-ui-css-tokens '"'"'wave)) (file "$(CURDIR)/$(UI_TOKEN_FILE)")) (unless (and (file-readable-p file) (with-temp-buffer (insert-file-contents file) (equal (buffer-string) expected))) (error "Aaron UI CSS tokens are stale; run make ui-tokens")))'
 
 core-test:
-	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L lisp/core -l test/aaron-lib-tests.el -l test/aaron-emacs-tests.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L lisp/core -l test/aaron-lib-tests.el -l test/aaron-emacs-tests.el -l test/aaron-modules-tests.el -f ert-run-tests-batch-and-exit
 
 activity-test:
 	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L site-lisp/config -L site-lisp/aaron-ui -L lisp -L lisp/roam -L lisp/remote -L lisp/remote/backend -l test/init-activity-tests.el -f ert-run-tests-batch-and-exit
@@ -196,7 +196,7 @@ ui-test:
 	$(BATCH) -l test/init-snippets-tests.el -f ert-run-tests-batch-and-exit
 
 doctor:
-	$(BATCH) --eval '(prin1 (my/health-critical-check))'
+	$(BATCH) --eval '(prin1 (my/health-critical-check))' --eval '(progn (require (quote aaron-doctor)) (terpri) (princ (aaron-doctor-report-string)))'
 
 state-backup:
 	$(BATCH) --eval '(princ (my/maintenance-state-snapshot))'

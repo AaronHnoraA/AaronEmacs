@@ -96,17 +96,12 @@
       (should (null loaded))
       (should (equal scheduled '(0.75 (aaron-emacs-tests--a) t))))))
 
-(ert-deftest aaron-emacs-incremental-require-uses-client-directory ()
+(ert-deftest aaron-emacs-incremental-require-goes-through-remote ()
   (let (seen)
-    (cl-letf (((symbol-function 'require)
-               (lambda (&rest _)
-                 (setq seen (list default-directory file-name-handler-alist)))))
-      (with-temp-buffer
-        (setq default-directory "/fs:somewhere:/tmp/")
-        (aaron--incremental-require 'aaron-emacs-tests--a)))
-    (should (equal (car seen) (expand-file-name user-emacs-directory)))
-    (should (cl-every (lambda (cell) (eq (cdr cell) 'jka-compr-handler))
-                      (cadr seen)))))
+    (cl-letf (((symbol-function 'remote-require-on-client)
+               (lambda (feature &rest args) (setq seen (cons feature args)))))
+      (should (aaron--incremental-require 'aaron-emacs-tests--a)))
+    (should (equal seen '(aaron-emacs-tests--a nil t)))))
 
 (ert-deftest aaron-emacs-switch-buffer-hook-ignores-unchanged-buffer ()
   (let ((aaron-emacs-tests--log nil)

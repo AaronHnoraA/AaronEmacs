@@ -5,173 +5,107 @@
 
 ;;; Code:
 
-(defvar my/module-load-failures nil
-  "Modules that failed to load, as (MODULE . ERROR-MESSAGE) pairs.")
-
-(defvar my/module-optional-modules nil
-  "Optional modules registered during startup, in declaration order.")
-
-(defvar my/module-deferred-triggers nil
-  "Deferred module triggers as (MODULE . FEATURES) pairs.")
-
-(defun my/module--register-optional (module)
-  "Record optional MODULE once for the health board."
-  (unless (memq module my/module-optional-modules)
-    (setq my/module-optional-modules
-          (append my/module-optional-modules (list module)))))
-
-(defun my/require-module-safely (module)
-  "Require MODULE and report errors without aborting the rest of init."
-  (my/module--register-optional module)
-  (condition-case err
-      (prog1 (require module)
-        (setq my/module-load-failures
-              (assq-delete-all module my/module-load-failures)))
-    (error
-     (setf (alist-get module my/module-load-failures)
-           (error-message-string err))
-     (display-warning
-      'init-modules
-      (format "Failed to load %s: %s" module (error-message-string err))
-      :error)
-     nil)))
-
-(defun my/require-module-after-any-feature (module &rest features)
-  "Require MODULE after any of FEATURES loads.
-If one of FEATURES is already available, require MODULE immediately."
-  (my/module--register-optional module)
-  (setf (alist-get module my/module-deferred-triggers) features)
-  (if (catch 'loaded
-        (dolist (feature features)
-          (when (featurep feature)
-            (throw 'loaded t))))
-      (my/require-module-safely module)
-    (dolist (feature features)
-      (with-eval-after-load feature
-        (my/require-module-safely module)))))
+;; The module system lives in lisp/core/aaron-modules.el.  This file is the
+;; configuration's `aaron!' declaration: every module, its category and its
+;; load position.  Categories follow Doom's, plus :remote (the foundation
+;; layer, loaded right after :core and :os) and :noema.
 
 (require 'aaron-lib)
 (require 'aaron-emacs)
-(require 'init-utils)
-(require 'init-base)
-(require 'init-open)
-(require 'patches/init-patches)
-(when (eq system-type 'darwin)
-  (my/require-module-safely 'init-macos))
-;; Must follow `init-macos': it restores the Option/Command layout that the
-;; `H-' bindings above assume when the host build is Neomacs.
-(my/require-module-safely 'init-neomacs)
-(require 'init-remote)
-(require 'init-emacs-gateway)
-(require 'init-ui)
-;; Must follow `init-ui': the activity indicator appends itself to the
-;; `mode-line-misc-info' that init-ui has finished setting up.
-(require 'init-activity)
-(require 'init-activity-noema)
-(require 'init-tabbar)
-(require 'init-display-rules)
-(require 'init-tools)
-(require 'init-evil)
-(require 'init-lsp)
-(require 'init-format)
-(require 'init-problems)
-(require 'init-symbols)
-(require 'init-workspace-symbol)
-(require 'init-lsp-ops)
-(require 'init-lsp-tools)
-(require 'init-code-actions)
-(require 'init-git)
-(require 'init-smerge)
-(require 'init-dev)
-(require 'init-clutch)
-(require 'init-filetypes)
-(require 'init-navigation)
-(require 'init-navigation-extra)
-(require 'init-dired)
-(require 'init-editing-workbench)
-(require 'init-file-workbench)
-(autoload 'my/calendar-year "init-calendar-tools" nil t)
-(when (eq system-type 'darwin)
-  (autoload 'macos-tools-menu "init-macos-tools" nil t))
-(my/require-module-after-any-feature 'init-org-tools 'org)
-(my/require-module-safely 'init-zoxide)
-(my/require-module-safely 'init-ai-ide)
-(require 'init-copilot)
-(require 'init-minibuffer)
-(require 'init-consult-project)
-(require 'init-snippets)
-(require 'init-auto-insert)
-(require 'init-doom-extra)
-(require 'init-treesit)
-(require 'init-windows)
-(require 'init-dirvish-keys)
-(require 'init-expand-region)
-(require 'init-treemacs-bridge)
-(require 'init-project)
-(require 'init-workspaces)
-(require 'init-scratch)
-(require 'init-project-local)
-(require 'init-dir-locals)
-(require 'init-rename)
-(require 'init-harpoon)
-(require 'init-scrollview)
-(require 'init-output)
-(require 'init-test)
-(require 'init-task)
-(require 'init-project-run)
-(require 'init-debug)
-(require 'init-debug-profile)
-(require 'init-session)
-(require 'init-maintenance)
-(require 'config-tools)
-(require 'init-performance)
-(require 'init-diagnostics-ui)
-(require 'init-diagnostics-extra)
-(require 'init-health)
-(require 'init-server)
-(require 'init-background)
-(require 'init-md)
-(require 'init-noema)
-(require 'init-noema-search)
-(require 'init-md-roam)
+(require 'aaron-modules)
+(autoload 'aaron/modules "aaron-modules-board" nil t)
+(autoload 'aaron/describe-module "aaron-modules-board" nil t)
+(autoload 'aaron/doctor "aaron-modules-board" nil t)
+(autoload 'module-board "aaron-modules-board" nil t)
+(autoload 'module-doctor "aaron-modules-board" nil t)
 
-;; standalone apps
-(when (eq system-type 'darwin)
-  (my/require-module-safely 'init-portal))
-(require 'init-text)
-(require 'init-shell)
-(require 'init-remote-connectboard)
-(require 'init-jupyter-board)
-(my/require-module-safely 'init-spell)
-(require 'init-search)
-(require 'init-search-extra)
-(require 'init-telescope)
-(require 'init-direnv)
-(require 'init-smartparens)
-(require 'init-rainbow-delimiters)
-(require 'init-avy)
-(require 'init-multiple-cursors)
-(dolist (command '(latex-preview-menu
-                   my/latex-preview-open-pdf
-                   my/latex-sync-forward
-                   my/latex-sync-forward-mouse
-                   my/latex-preview-compile-and-view
-                   my/latex-preview-view-pdf))
-  (autoload command "init-auctex" nil t))
-;; Math-fragment preview is RaTeX, configured in init-latex.el; its doctor is
-;; the entry point when a preview misbehaves.
-(autoload 'my/latex-preview-doctor "init-latex" nil t)
-(autoload 'latex-preview-doctor "init-latex" nil t)
-(my/require-module-after-any-feature 'init-auctex 'tex 'tex-site 'pdf-tools 'pdf-view)
-(my/require-module-safely 'init-browser)
-(my/require-module-safely 'init-fzfs)
-(require 'init-function-keys)
-(require 'init-hyper)
-(require 'init-mouse)
+(aaron!
+ :core   init-utils init-base init-open patches/init-patches
+ :os     (:when (eq system-type 'darwin) (init-macos :optional t))
+         ;; Must follow `init-macos': it restores the Option/Command layout
+         ;; that the `H-' bindings assume when the host build is Neomacs.
+         (init-neomacs :optional t)
+ :remote (init-remote :doctor remote-doctor) init-emacs-gateway
+ :ui     init-ui
+         ;; Must follow `init-ui': the activity indicator appends itself to
+         ;; the `mode-line-misc-info' that init-ui has finished setting up.
+         init-activity
+ :noema  init-activity-noema
+ :ui     init-tabbar init-display-rules
+ :tools  init-tools
+ :editor init-evil
+ :tools  init-lsp
+ :editor init-format
+ :checkers init-problems
+ :tools  init-symbols init-workspace-symbol init-lsp-ops
+         (init-lsp-tools :doctor my/language-server-doctor)
+         init-code-actions init-git
+ :emacs  init-smerge
+ :tools  init-dev init-clutch
+ :lang   init-filetypes
+ :editor init-navigation init-navigation-extra
+ :emacs  init-dired
+ :editor init-editing-workbench
+ :emacs  init-file-workbench
+ :app    (init-calendar-tools :autoload my/calendar-year)
+ :os     (:when (eq system-type 'darwin)
+           (init-macos-tools :autoload macos-tools-menu))
+ :lang   (init-org-tools :after org)
+ :tools  (init-zoxide :optional t) (init-ai-ide :optional t) init-copilot
+ :completion init-minibuffer init-consult-project
+ :editor init-snippets init-auto-insert
+ :config init-doom-extra
+ :tools  init-treesit
+ :ui     init-windows
+ :emacs  init-dirvish-keys
+ :editor init-expand-region
+ :ui     init-treemacs-bridge
+ :tools  init-project
+ :ui     init-workspaces
+ :emacs  init-scratch
+ :tools  init-project-local
+ :emacs  init-dir-locals init-rename
+ :editor init-harpoon
+ :ui     init-scrollview
+ :tools  init-output init-test init-task init-project-run (init-debug :doctor my/debug-adapter-doctor)
+         init-debug-profile
+ :ui     init-session
+ :config init-maintenance config-tools init-performance
+ :checkers init-diagnostics-ui init-diagnostics-extra
+ :config (init-health :doctor config-health) init-server init-background
+ :lang   init-md
+ :noema  init-noema init-noema-search init-md-roam
+ :term   (:when (eq system-type 'darwin) (init-portal :optional t))
+ :editor init-text
+ :term   init-shell
+ :tools  init-remote-connectboard
+         (init-jupyter-board :doctor my/jupyter-board-doctor)
+ :checkers (init-spell :optional t)
+ :completion init-search init-search-extra init-telescope
+ :tools  init-direnv
+ :editor init-smartparens
+ :ui     init-rainbow-delimiters
+ :editor init-avy init-multiple-cursors
+ :lang   (init-auctex :after (tex tex-site pdf-tools pdf-view)
+                      :autoload (latex-preview-menu
+                                 my/latex-preview-open-pdf
+                                 my/latex-sync-forward
+                                 my/latex-sync-forward-mouse
+                                 my/latex-preview-compile-and-view
+                                 my/latex-preview-view-pdf))
+         ;; Math-fragment preview is RaTeX, configured in init-latex.el; its
+         ;; doctor is the entry point when a preview misbehaves.
+         (init-latex :autoload (my/latex-preview-doctor latex-preview-doctor)
+                     :doctor my/latex-preview-doctor)
+ :app    (init-browser :optional t)
+ :completion (init-fzfs :optional t)
+ :config init-function-keys init-hyper init-mouse init-ignored)
+
+(aaron-modules-load)
+
 (my/package-register-vc 'joplin-mode
                         '(:url "https://github.com/cinsk/joplin-mode.git"
                           :rev :last-release))
-(require 'init-ignored)
 
 (provide 'init-modules)
 ;;; init-modules.el ends here

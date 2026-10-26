@@ -28,16 +28,17 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 ```
 
 `init.el` 只做包管理初始化（`package.el` + `use-package`）、登录 shell 环境、
-`load-path` 与 `etc/` 配置载入；之后的一切按 `init-modules.el` 的顺序加载。
-可选模块用 `my/require-module-safely`（失败记入 Health board，不中断启动），
-依赖某个包的模块用 `my/require-module-after-any-feature` 延迟。
+`load-path` 与 `etc/` 配置载入；之后由 `init-modules.el` 里的 `aaron!` 声明决定
+一切：每个模块带 Doom 分类，`:optional`（失败记录、不中断启动）、`:after`（延迟）、
+`:autoload`（只注册命令）、`:doctor`（模块自己的诊断）。加载器、加载账本、诊断与
+模块面板见 [module-system.md](design/module-system.md)。
 
 按依赖方向，自下而上：
 
 | 层 | 位置 | 内容 |
 | --- | --- | --- |
 | 0 基础 | `lisp/core/`（`aaron-lib` 宏与 hook 运行器、`aaron-emacs` 生命周期 hook 与增量加载，最先加载）、`init-utils`、`init-base`、`init-open`、`patches/`、`init-macos`、`init-neomacs` | 工具函数、基础设置、打开路由、上游补丁、平台与构建兼容层（只有 `init-neomacs` 知道当前是哪个构建） |
-| 1 Remote 框架 | `lisp/remote/`（`init-remote` 入口） | `/fs:TARGET:/path` 身份、target/pipeline/backend/session、进程、通道、环境胶囊、workspace 资源。核心基础设施，见 [remote-framework.md](design/remote-framework.md) |
+| 1 Remote 框架 | `lisp/remote/`（`init-remote` 入口；`:remote` 分类，深度 -100，永远紧跟核心与系统层） | `/fs:TARGET:/path` 身份、target/pipeline/backend/session、进程、通道、环境胶囊、workspace 资源。核心基础设施，见 [remote-framework.md](design/remote-framework.md) |
 | 2 外壳 | `init-emacs-gateway`、`init-ui`、`init-activity*`、`init-tabbar`、`init-display-rules`、`init-tools`、`init-evil` | 外部网关、主题与 mode-line、活动指示、标签栏、窗口显示规则、leader 键（`general.el`） |
 | 3 开发 | `init-lsp*`、`init-format`、`telescope/`、`init-symbols`、`init-code-actions`、`lisp/git/`、`init-dev`、`init-debug*`、`init-test`、`init-task`、`init-project-run` | LSP 路由与工具（分层见 [lsp-workflow.md](design/lsp-workflow.md)）、诊断面板、Git、调试/测试/任务 |
 | 4 工作台 | `init-navigation*`、`init-dired`、`init-dirvish-keys`、`init-*-workbench`、`init-minibuffer`、`init-consult-project`、`init-windows`、`init-project*`、`init-workspaces`、`init-treemacs-bridge`、`init-session` | 导航、文件管理、补全、窗口、项目（Projectile + Perspective + Transient），见 [project-guide.md](guide/project-guide.md) |
@@ -52,9 +53,11 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 
 ```text
 lisp/                 init-*.el 本地模块与本仓库自写的单文件包（如 direnv.el）
-lisp/core/            核心库：aaron-lib（after!/add-hook!/setq-hook!/defadvice!/cmd!/letf! 等宏、
-                      aaron-run-hooks）与 aaron-emacs（aaron-first-*-hook、aaron-switch-*-hook、
-                      MODE-local-vars-hook、增量加载），以 Doom 的 doom-lib/doom-emacs 为模板
+lisp/core/            核心库与模块系统，以 Doom 的 doom-lib/doom-emacs/doom-modules 为模板：
+                      aaron-lib（after!/add-hook!/defadvice!/cmd! 等宏）、aaron-emacs（生命周期
+                      hook、增量加载）、aaron-modules（aaron!、modulep!、加载器、加载账本）、
+                      aaron-doctor（诊断与策略）、aaron-modules-board（module-board）
+lisp/CATEGORY/NAME/   目录模块（迁移目标）：config.el、init.el、autoload/、doctor.el、README.md
 lisp/remote/          Remote 框架，只放框架代码；消费者留在各自模块
 lisp/roam/            Noema 的 Emacs 侧桥接（init-noema*.el，含 Jupyter 桥 init-noema-jupyter-*）
 lisp/lang/            语言模块
@@ -162,8 +165,8 @@ Raycast 扩展只调用 `bin/emacs-app`；新增外部入口放进 `bin/`，并�
 符号命名照 Doom：核心 `lisp/core/` 用 `aaron-`（私有 `aaron--`，命令 `aaron/`），对应 Doom
 的 `doom-`；模块用 `+模块-`（私有 `+模块--`，命令 `+模块/`）；hook 函数以 `-h` 结尾，advice
 以 `-a` 结尾；宏沿用 Doom 的 `!` 名字。`remote-*`、`config-*`、`noema-*`、`aaron-ui-*` 等公开
-子系统保留自己的命名空间。现有的 `my/` 是旧命名，随模块迁入分类目录逐个改名，旧名留一个
-周期的 obsolete alias；规则见 `AGENT.md`，进度见
+子系统保留自己的命名空间。现有的 `my/` 是旧命名，随模块迁入分类目录逐个改名，同一改动里
+更新所有调用方，不留兼容别名；规则见 `AGENT.md`，进度见
 [doom-template](works/doom-template/README.md)。`aaron-` 与下面的旧名 Aaronnote 无关。
 
 Noema 早先叫 Aaronnote。两个仓库里的文件、模块、通道（`noema:api:*`）、环境变量

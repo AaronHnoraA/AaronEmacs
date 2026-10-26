@@ -85,6 +85,7 @@ channels.
 
 ## design/ — how it works now
 
+- [module-system.md](design/module-system.md) The module system: `aaron!` declaration with Doom categories, load phases with Remote as the foundation layer, `modulep!`, the load ledger (hooks, advice, timers, keys, files per module), the doctor and policy checks, and the module board.
 - [remote-framework.md](design/remote-framework.md) Core `/fs` identity plus target/pipeline/backend/session routing, process and channel APIs, compatibility boundaries, and current implementation gaps.
 - [remote-files.md](design/remote-files.md) Temporary machines remembered under `var/`, and file transfer from inside Dired/Dirvish: rsync upload/download/sync through a pop-up chooser, with jobs in the activity board.
 - [lsp-workflow.md](design/lsp-workflow.md) Language-server routing, Hub/Doctor tooling, and the maintenance model.

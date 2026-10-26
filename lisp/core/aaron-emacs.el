@@ -22,9 +22,7 @@
 
 (require 'aaron-lib)
 
-(defgroup aaron nil
-  "Session lifecycle hooks and incremental loading."
-  :group 'initialization)
+(declare-function remote-require-on-client "remote-core" (feature &optional filename noerror))
 
 ;;; Hooks
 
@@ -116,16 +114,11 @@ Nil disables it; 0 loads everything at startup instead.")
   "Pending incremental loading timer.")
 
 (defun aaron--incremental-require (feature)
-  "Require FEATURE from this machine, quietly.
-The client directory and the reduced `file-name-handler-alist' keep a
-remote current buffer from sending the load to its target."
-  (let* ((file-name-handler-alist
-          (list (rassq 'jka-compr-handler file-name-handler-alist)))
-         ;; Bound after the handler list so expanding it cannot reach a
-         ;; remote `default-directory'.
-         (default-directory (expand-file-name user-emacs-directory "/"))
-         (inhibit-message t))
-    (require feature nil t)
+  "Require FEATURE quietly from this machine's context.
+The Remote framework is loaded long before Emacs is first idle, so a
+remote current buffer cannot send the load to its target."
+  (let ((inhibit-message t))
+    (remote-require-on-client feature nil t)
     t))
 
 (defun aaron-load-packages-incrementally (packages &optional now)

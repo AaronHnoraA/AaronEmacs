@@ -236,6 +236,10 @@ make bootstrap-health
 
 常用入口：
 
+- `M-x module-board` / `M-x module-doctor`
+  模块面板：每个模块的状态、加载耗时、装了哪些 hook/advice/timer/键、键冲突、策略命中；
+  `module-doctor` 先诊断全部模块。`make doctor` 在批处理里输出同一份诊断，`make core-test`
+  跑核心库与模块系统的测试。见 [module-system.md](../design/module-system.md)。
 - `M-x config-health`
   查看当前会话、依赖和服务状态；打开及 `g` 刷新不启动批处理 Emacs。
   面板内 `s` / `c` / `N` 才运行 startup / byte / native 检查，结果保存在当前会话并显示在面板里。

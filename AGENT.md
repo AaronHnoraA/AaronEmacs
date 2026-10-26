@@ -46,10 +46,12 @@ Load order is:
 early-init.el -> init.el -> lisp/init-modules.el
 ```
 
-`lisp/init-modules.el` is the authoritative module order; it loads the core
-library first (`lisp/core/`: `aaron-lib` macros and hook runners,
-`aaron-emacs` lifecycle hooks and incremental loading). Most local modules
-live under `lisp/`; language-specific modules live under `lisp/lang/`; the
+`lisp/init-modules.el` is the configuration's `aaron!` declaration and the
+authoritative module order; the module system that reads it is in
+`lisp/core/` (`aaron-lib` macros and hook runners, `aaron-emacs` lifecycle
+hooks and incremental loading, `aaron-modules` registry, loader and load
+ledger, `aaron-doctor`, `aaron-modules-board`), described in
+`docs/design/module-system.md`. Most local modules live under `lisp/`; language-specific modules live under `lisp/lang/`; the
 Noema/Jupyter bridge lives under `lisp/roam/`.
 
 `.noema` files are D-023 AI prompt/workflow documents, not Jupyter notebooks.
@@ -85,9 +87,25 @@ notebook.
 
 When adding a module:
 
-- Put it in the owning directory.
-- End it with `(provide 'init-foo)`.
-- Add it to `lisp/init-modules.el` in dependency order.
+- Put it in the owning directory: a directory module `lisp/CATEGORY/NAME/`
+  (`config.el`, optional `init.el`, `autoload/`, `doctor.el`, `README.md`)
+  for new work; a single `init-foo.el` ending in `(provide 'init-foo)` only
+  while an existing module has not moved yet.
+- Declare it in the `aaron!` form in `lisp/init-modules.el` under its Doom
+  category (`:core :os :remote :ui :completion :editor :emacs :term
+  :checkers :tools :lang :noema :app :config`), with `:optional`, `:after`,
+  `:autoload` or `:doctor` instead of hand-written `require`/`autoload`
+  calls.  `:core`, `:os` and `:remote` always load first: the Remote
+  framework is the layer every other module stands on.
+- Do not reorder the declaration casually: load order still decides hook
+  order and key ownership.  Compare the startup state before and after a
+  reorder, and check `M-x module-board` for key conflicts (two modules
+  binding one key) before adding a binding.
+- Keep `M-x module-doctor` clean for the module you touch: a policy hit
+  (`file-remote-p` branching, `"local"` comparisons, `global-set-key`, raw
+  `package-vc-install`, `my/` names in directory modules) is either fixed
+  or, when the rule itself allows it, marked on its line with
+  `aaron-allow: ID`.
 - Use `declare-function` for cross-module calls when byte compilation needs it.
 - Name things the Doom way (the restructuring in `docs/works/doom-template/`
   takes Doom Emacs as its template).  The core under `lisp/core/` uses
@@ -103,9 +121,9 @@ When adding a module:
   see file and directory locals to `MODE-local-vars-hook`, and idle
   preloading to `aaron-load-packages-incrementally`.  Existing `my/` names
   are legacy: they are renamed module by module as each module moves into
-  its category directory, keeping the old name as an obsolete alias for one
-  cycle and migrating `etc/config-store.el` keys and Noema/Raycast callers
-  in the same change.  Public subsystems keep their own namespaces
+  its category directory, updating every caller (including
+  `etc/config-store.el` keys and Noema/Raycast) in the same change, with no
+  compatibility alias.  Public subsystems keep their own namespaces
   (`remote-*`, `config-*`, `noema-*`).
 - For stable user-facing `M-x` entry points other than Transient menus, add a
   short purpose-first alias in the owning module (for example `config-health`

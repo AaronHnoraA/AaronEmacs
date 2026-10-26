@@ -11,6 +11,8 @@
 (require 'init-funcs)
 (require 'subr-x)
 (require 'transient)
+(require 'aaron-modules)
+(require 'aaron-doctor)
 
 (declare-function my/compile-board "init-compile" ())
 (declare-function my/byte-compile-config "init-compile" (&optional force))
@@ -442,39 +444,61 @@ With NO-DISPLAY, refresh an already visible board without selecting it."
                 (number-to-string my/health-startup-package-count) "N/A"))
            (insert "\n")
 
-           ;; Deferred modules are healthy while waiting for their trigger;
-           ;; absence from the failure list alone does not mean they loaded.
-           (aaron-ui-board-insert-section "Module Load")
-           (let ((modules
-                  (delete-dups
-                   (append (copy-sequence
-                            (bound-and-true-p my/module-optional-modules))
-                           (mapcar #'car
-                                   (bound-and-true-p my/module-load-failures))))))
-             (if modules
-                 (dolist (module modules)
-                   (let* ((failure
-                           (alist-get module
-                                      (bound-and-true-p my/module-load-failures)))
-                          (triggers
-                           (alist-get module
-                                      (bound-and-true-p my/module-deferred-triggers)))
-                          (status
-                           (cond
-                            (failure failure)
-                            ((featurep module) "loaded")
-                            (triggers
-                             (format "waiting for %s"
-                                     (mapconcat #'symbol-name triggers ", ")))
-                            (t "not loaded"))))
-                     (aaron-ui-board-insert-field
-                      (symbol-name module) status
-                      (cond (failure 'aaron-ui-board-bad)
-                            ((featurep module) 'aaron-ui-board-good)
-                            (t 'aaron-ui-board-warn)))))
-               (aaron-ui-board-insert-field
-                "optional modules" "none registered" 'shadow)))
-           (insert "\n")
+           ;; The module registry (lisp/core/aaron-modules.el) is the source
+           ;; of truth; the module board holds the full detail.  Deferred
+           ;; modules are healthy while they wait for their trigger.
+           (aaron-ui-board-insert-section "Modules")
+           (let* ((keys (aaron-module-list))
+                  (states (mapcar (lambda (k) (aaron-module-state (aaron-module-get k)))
+                                  keys))
+                  (summary (aaron-doctor-summary)))
+             (aaron-ui-board-insert-field
+              "Declared"
+              (format "%d (%d loaded, %d waiting, %d autoload, %d failed) in %s"
+                      (length keys) (cl-count 'loaded states) (cl-count 'waiting states)
+                      (cl-count 'autoload states) (cl-count 'failed states)
+                      (if aaron-modules-init-time
+                          (format "%.2fs" aaron-modules-init-time) "-"))
+              (if (memq 'failed states) 'aaron-ui-board-bad 'aaron-ui-board-good))
+             (aaron-ui-board-insert-field
+              "Key conflicts" (number-to-string (length aaron-module-key-conflicts))
+              (if aaron-module-key-conflicts 'aaron-ui-board-warn 'aaron-ui-board-good))
+             (aaron-ui-board-insert-field
+              "Doctor"
+              (if (zerop (plist-get summary :modules))
+                  "not run"
+                (format "%d errors, %d warnings, %d policy hits"
+                        (plist-get summary :errors) (plist-get summary :warnings)
+                        (plist-get summary :violations)))
+              (cond ((zerop (plist-get summary :modules)) 'shadow)
+                    ((> (plist-get summary :errors) 0) 'aaron-ui-board-bad)
+                    ((> (plist-get summary :violations) 0) 'aaron-ui-board-warn)
+                    (t 'aaron-ui-board-good)))
+             (dolist (module (delete-dups
+                              (append (copy-sequence aaron-module-optional-modules)
+                                      (mapcar #'car aaron-module-load-failures))))
+               (let* ((failure (alist-get module aaron-module-load-failures))
+                      (triggers (alist-get module aaron-module-deferred-triggers))
+                      (status
+                       (cond
+                        (failure failure)
+                        ((featurep module) "loaded")
+                        (triggers
+                         (format "waiting for %s"
+                                 (mapconcat #'symbol-name triggers ", ")))
+                        (t "not loaded"))))
+                 (aaron-ui-board-insert-field
+                  (format "%s" module) status
+                  (cond (failure 'aaron-ui-board-bad)
+                        ((featurep module) 'aaron-ui-board-good)
+                        (t 'aaron-ui-board-warn)))))
+             (insert "   ")
+             (aaron-ui-board-insert-actions
+              '((:label "Module board" :command aaron/modules
+                 :help "Every module's state, footprint and findings")
+                (:label "Doctor" :command aaron/doctor
+                 :help "Diagnose every module"))))
+           (insert "\n\n")
 
            ;; Settings and the health board share the same integrity check.
            (aaron-ui-board-insert-section "Settings")
