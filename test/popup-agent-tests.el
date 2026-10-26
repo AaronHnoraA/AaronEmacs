@@ -974,6 +974,33 @@
         (dolist (buffer (list work term))
           (when (buffer-live-p buffer) (kill-buffer buffer)))))))
 
+(ert-deftest popup-terminal-and-agent-use-one-shared-tab-row ()
+  "The terminal does not add a header above its popup tabs."
+  (let ((terminal (generate-new-buffer " *popup-ui-terminal*"))
+        (agent (generate-new-buffer " *popup-ui-agent*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer terminal
+            (setq major-mode 'portal-terminal-mode)
+            (setq-local tab-line-format "ordinary terminal tabs"
+                        header-line-format "ordinary terminal header")
+            (+portal-popup--save-ui)
+            (+portal-popup-apply-ui terminal)
+            (should (equal tab-line-format '(:eval (+portal-popup--tab-line))))
+            (should tab-line-exclude)
+            (should-not header-line-format)
+            (+portal-popup--restore-ui)
+            (should (equal tab-line-format "ordinary terminal tabs"))
+            (should (equal header-line-format "ordinary terminal header")))
+          (with-current-buffer agent
+            (setq major-mode 'agent-shell-mode)
+            (setq-local header-line-format "Native agent header")
+            (+portal-popup-apply-ui agent)
+            (should (equal tab-line-format '(:eval (+portal-popup--tab-line))))
+            (should (equal header-line-format "Native agent header"))))
+      (kill-buffer terminal)
+      (kill-buffer agent))))
+
 (ert-deftest popup-agent-move-updates-its-session-display-route ()
   (save-window-excursion
     (let ((agent (generate-new-buffer " *popup-move-agent*"))

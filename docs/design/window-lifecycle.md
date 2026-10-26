@@ -49,13 +49,14 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 
 | 动词 | 键 / 命令 | buffer | 窗口 |
 | --- | --- | --- | --- |
-| 关视图 | `SPC b z`；最后一个 frame 上的 `H-w`；唯一窗格上的 `Cmd-W`（`+windows/close-view`） | 当前窗口撤下 buffer；若无别的窗口显示它则变为未显示 | 回退（见下）；popup 由原生 quit 精确返回来源 |
+| 关视图 | `SPC b z`；最后一个 frame 上的 `H-w`；唯一主窗格上的 `Cmd-W`（`+windows/close-view`） | 当前窗口撤下 buffer；若无别的窗口显示它则变为未显示 | 回退（见下）；popup 由原生 quit 精确返回来源 |
 | 结束 | `H-q` `+windows/kill-buffer-dwim`；`C-c w d`（浏览后端） | → 已结束；终端程序运行中先确认（Portal 的 kill 询问）。只读或 `*…*` 的普通 buffer 只关视图 | 回退 |
-| 关窗口 | `Cmd-W`（`M-w`）`+windows/close-window`；`H-0` `delete-window` | 它的最后一个窗口消失时：显示中 → 未显示 | `Cmd-W` 有多个窗格时删当前窗格；唯一窗格时关视图，frame 保留 |
+| 关窗口 | `Cmd-W`（`M-w`）`+windows/close-window`；`H-0` `delete-window` | 它的最后一个窗口消失时：显示中 → 未显示 | `Cmd-W` 删选中的侧窗格或多余主窗格；唯一主窗格时关视图，frame 保留 |
 | 关 frame | `H-w` `aaron/delete-frame-dwim`（多于一个 frame 时） | frame 中各 buffer 若无别的窗口显示则变为未显示；终端 buffer 保留 | 多于一个 frame 时 frame 消失；只有一个 frame 时只关当前视图 |
 
 `Cmd-W` 在普通 buffer、终端、Noema 页面和浏览视图上执行相同的窗格动作；不调用
-`kill-buffer`。唯一窗格时用既有回退规则，popup 按原生 `quit-window` 返回来源。
+`kill-buffer`。唯一主窗格时（即使 Treemacs 等 side window 仍在）用既有回退规则，
+popup 按原生 `quit-window` 返回来源。
 `Cmd-Shift-W`（`M-W`）继续调用 Perspective 的 buffer 选择器，选定后才结束 buffer；
 它不参与 `Cmd-W` 的关闭动作。Noema 未显示页面的数量清理另见下文。
 
@@ -63,11 +64,11 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 
 1. 普通 macOS Emacs 把物理 Command 映射为 Meta；Portal 原生视图把 `s-w` / `s-W`
    分别交给 Emacs 的关窗格命令和 Perspective 选择器；Noema xwidget 编辑区把
-   `M-w` / `M-W` 转交给 Emacs，页面输入框中的 `Cmd-W` 也交给 Emacs。
+   `M-w` / `M-W` 转交给 Emacs，页面输入框中的 `Cmd-W` / `Cmd-Shift-W` 也交给 Emacs。
    Shift 只决定两个不同命令，不改变关闭深度。
-2. `Cmd-W` 若正处于 minibuffer，先退出提示；否则，有多个窗格时执行
-   `delete-window`，只有一个窗格时执行 `+windows/close-view`。后一分支保留 frame，
-   按同窗格历史回退；popup 用 `quit-window` 返回来源。没有合格历史候选时显示
+2. `Cmd-W` 若正处于 minibuffer，先退出提示；否则，选中的侧窗格或多余主窗格执行
+   `delete-window`，唯一主窗格执行 `+windows/close-view`。side window 不算可替代
+   主窗格；后一分支保留 frame，按同窗格历史回退；popup 用 `quit-window` 返回来源。没有合格历史候选时显示
    项目目录，主目录或无项目时显示 Dashboard。两个分支都不 kill buffer。
 3. `Cmd-Shift-W` 打开当前 Perspective 的 buffer 选择器；取消不改布局，选择
    buffer 后调用 `kill-buffer`。若选中正在显示的 buffer，原生 kill 后按回退规则
@@ -90,7 +91,7 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
      页面只由显式切换带回）。
 3. **修复**（`+window--repair-after-close`）：窗口最终显示的是重复可见的 buffer、
    `*scratch*`、Dashboard 或主目录 Dired 时，改为第 1 步的候选；没有候选时删掉这个
-   多余窗口；最后一个窗口打开项目目录（主目录或无项目时打开 Dashboard）。
+   多余窗口；最后一个主窗口打开项目目录（主目录或无项目时打开 Dashboard）。
 
 ### 原生视图的键盘归属
 
@@ -99,6 +100,12 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 Emacs 持有分两种：handoff 期间的暂时持有，命令结束后视图取回键盘；以及明确持有
 （`Cmd-.` 退出视图，或 handoff 的命令打开了 minibuffer，如 `M-x`），之后的命令都在
 Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buffer 再回来。
+
+### 共享 popup 顶栏
+
+Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab line。
+终端 popup 不另占 header line；agent-shell 的原生会话 header line 保留。
+移出 popup 时恢复 buffer 进入前的 tab line 和 header line。
 
 ### 未显示的 Noema 页面
 
@@ -138,6 +145,7 @@ Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buff
   `+portal-native-sync-vacates-duplicate-before-placement`。
 - **C10** 回退没有合格候选时：多余窗口被删除；最后一个窗口打开当前项目目录，主目录
   或无项目时打开 Dashboard。测试：`c10-last-window-without-candidates-stays-open`、
+  `c10-sole-main-view-beside-side-window-has-no-history`、
   `+window-close-last-page-opens-project-directory`、
   `+window-quit-home-fallback-opens-dashboard`。
 - **C11** 未显示的 Noema 页面不超过 `+noema-detached-page-limit` 个，超出时先结束
@@ -149,15 +157,22 @@ Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buff
 - **C13** Emacs 明确持有键盘时，离开 minibuffer、frame 重新激活或视图布局变化都不把
   键盘还给视图；只有进入视图（`RET`、点击、显式聚焦请求）或窗口 / buffer 真正变化后
   再选回它才会。测试：`c13-emacs-keeps-the-keyboard-until-the-pane-changes`。
-- **C14** `Cmd-W` 有多个窗格时删当前窗格，唯一窗格时只关视图并保留 frame；
+- **C14** `Cmd-W` 在侧窗格或有多个主窗格时删当前窗格，唯一主窗格时只关视图并保留 frame；
+  side window 不会让唯一主窗格变成可删除窗格；
   当前 buffer 在两条路径中都保持存活。`Cmd-Shift-W` 保持 Perspective 的交互式
   buffer 结束动作。测试：`c14-cmd-w-closes-pane-and-keeps-buffer`、
   `c14-cmd-w-keeps-frame-for-sole-pane`、
+  `c14-cmd-w-closes-sole-main-view-beside-side-window`、
   `c14-cmd-w-dismisses-minibuffer-before-changing-layout`、
-  `+window-close-select-key-keeps-picker-and-window-history`。
+  `+window-close-select-key-keeps-picker-and-window-history`，以及 Noema 的
+  `xwidget-key-guard.test.ts` 中页面输入框转交两键的测试。
+- **C15** 共享 popup 标签只占一个 tab line；Portal 终端没有附加 header line，
+  agent-shell 保留自身 header line；移出 popup 恢复原 UI。测试：
+  `popup-terminal-and-agent-use-one-shared-tab-row`。
 
-测试文件：`test/init-window-lifecycle-tests.el`、`test/init-windows-tests.el`，
-均由 `make ui-test` 运行。
+窗口测试文件：`test/init-window-lifecycle-tests.el`、`test/init-windows-tests.el`，
+由 `make ui-test` 运行。popup 顶栏测试在 `test/popup-agent-tests.el`；Noema 页面
+转交测试在 `site-lisp/noema/tests/xwidget-key-guard.test.ts`。
 
 ## 实现位置
 
@@ -167,7 +182,7 @@ Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buff
 | 关视图 `+windows/close-view`、关窗格 `+windows/close-window`、结束 `+windows/kill-buffer-dwim`、全局 `M-w` | `lisp/ui/windows/config.el` |
 | `H-w` | `lisp/core/aaron-base.el` `aaron/delete-frame-dwim` |
 | 浏览后端的 `M-w` 与 `C-c w d` | `lisp/app/browser/config.el` |
-| 终端原生键表的 `s-w`、终端移动与 frame 关闭 | `lisp/term/portal/config.el`、`lisp/term/portal/popup.el` |
+| 终端原生键表的 `s-w`、终端移动、popup 顶栏与 frame 关闭 | `lisp/term/portal/config.el`、`lisp/term/portal/popup.el` |
 | 原生视图键盘归属 | `lisp/term/portal/config.el` `+portal--focus-selected-window` |
 | 未显示页面上限 | `lisp/noema/bridge/config.el` |
 | 后台 frame | `lisp/config/background/config.el` |

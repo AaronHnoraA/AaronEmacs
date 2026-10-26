@@ -106,6 +106,39 @@ MODE is set as the buffer's `major-mode' symbol only; no mode body runs."
       (should (eq (window-buffer) previous))
       (should (buffer-live-p only)))))
 
+(ert-deftest c14-cmd-w-closes-sole-main-view-beside-side-window ()
+  "A Treemacs-style side window does not make the main window deletable."
+  (window-lifecycle-tests--with-buffers ((previous "c14-side-previous")
+                                         (page "c14-side-page" xwidget-webkit-mode)
+                                         (sidebar "c14-sidebar"))
+    (switch-to-buffer previous)
+    (switch-to-buffer page)
+    (let* ((main (selected-window))
+           (side (display-buffer-in-side-window
+                  sidebar '((side . left) (slot . 0)))))
+      (should (window-parent main))
+      (should (eq main (window-main-window)))
+      (call-interactively (key-binding (kbd "M-w")))
+      (should (window-live-p main))
+      (should (window-live-p side))
+      (should (eq (window-buffer main) previous))
+      (should (buffer-live-p page)))))
+
+(ert-deftest c10-sole-main-view-beside-side-window-has-no-history ()
+  "The fallback does not try to delete the frame's sole main window."
+  (window-lifecycle-tests--with-buffers ((page "c10-side-page" xwidget-webkit-mode)
+                                         (sidebar "c10-sidebar"))
+    (switch-to-buffer page)
+    (let* ((main (selected-window))
+           (side (display-buffer-in-side-window
+                  sidebar '((side . left) (slot . 0)))))
+      (set-window-prev-buffers main nil)
+      (+windows/close-view)
+      (should (window-live-p main))
+      (should (window-live-p side))
+      (should-not (eq (window-buffer main) page))
+      (should (buffer-live-p page)))))
+
 (ert-deftest c14-cmd-w-dismisses-minibuffer-before-changing-layout ()
   (let (dismissed)
     (with-current-buffer (window-buffer (minibuffer-window))

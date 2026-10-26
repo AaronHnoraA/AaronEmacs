@@ -395,12 +395,13 @@ CURRENT is the currently displayed popup buffer."
                        'face 'shadow)))))
 
 (defun +portal-popup-apply-ui (buffer)
-  "Apply local popup terminal UI to BUFFER."
+  "Apply the shared one-line popup tab strip to BUFFER."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (if (derived-mode-p 'portal-terminal-mode)
-          (progn
-            (setq-local header-line-format '(:eval (+portal-popup--tab-line))))
+          (setq-local tab-line-format '(:eval (+portal-popup--tab-line))
+                      tab-line-exclude t
+                      header-line-format nil)
         ;; Native agent headers and ordinary buffer headers stay intact.
         (setq-local tab-line-format '(:eval (+portal-popup--tab-line))
                     tab-line-exclude t))

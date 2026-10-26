@@ -862,8 +862,9 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 （如 `claude-agent-acp`、`codex-acp`、`opencode`）。本地与远端走同一条路径，
 裸 `M-x agent-shell` 同样适用。查找用的是该 workspace 的环境（PATH 与项目
 direnv），因此项目 `.envrc` 提供的 agent 也能找到。popup agent 与 popup 终端一样从
-项目根目录启动（本地与远端相同），不在项目里时用当前目录。注意 `codex` / `claude`
-CLI 本身不说 ACP：远端还需要安装适配器，例如
+项目根目录启动（本地与远端相同），不在项目里时用当前目录。
+popup 终端和 Agent 的共享标签都只占顶部一行；Agent 的原生会话标题仍显示在其下。
+注意 `codex` / `claude` CLI 本身不说 ACP：远端还需要安装适配器，例如
 `npm i -g --prefix ~/.local @zed-industries/codex-acp @agentclientprotocol/claude-agent-acp`。
 这两个适配器各自内置一份 CLI，默认跑内置版本，模型列表因此落后（例如只有
 Opus 5）。所以 Emacs 会用同一个 workspace 环境查找 `claude` / `codex`，并通过
@@ -986,8 +987,9 @@ ibuffer、帮助页和其他用 `quit-window` 退出的临时页面，优先返�
 已经在其他窗口显示的 buffer 不作自动返回目标。临时创建且无返回页的窗口会关闭；
 最后一个窗口无可返回页时打开项目目录。如果弹窗有精确的来源页，仍由 Emacs 原生返回；
 自动补选遵守该 frame 的 buffer 过滤规则，不会把旧 xwidget 页当作普通候选。
-`SPC b z`、最后一个 frame 上的 `H-w` 和唯一窗格上的 `Cmd-W` 只关当前视图
-（buffer 和 frame 保留），之后也按此规则返回。有多个窗格时，`Cmd-W` 直接关闭当前窗格。
+`SPC b z`、最后一个 frame 上的 `H-w` 和唯一主窗格上的 `Cmd-W` 只关当前视图
+（buffer 和 frame 保留），之后也按此规则返回。在侧窗格或有多个主窗格时，`Cmd-W` 直接关闭当前窗格。
+Treemacs 等侧边栏不算另一个主窗格；它们打开时，`Cmd-W` 仍可关闭唯一主窗格中的视图。
 关闭与回退的完整规则见 [window-lifecycle.md](../design/window-lifecycle.md)。
 `Cmd+Shift+W`（Emacs 的 `M-W`）仍从当前 Perspective 弹出 buffer 列表供选择；
 选中的是当前页时，杀掉后按同一规则收尾。`C-x k` 仍是原生 Perspective 选择器。

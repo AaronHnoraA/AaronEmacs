@@ -470,7 +470,7 @@ Dashboard instead."
      ((and (buffer-live-p previous)
            (not (+window--home-dired-buffer-p previous)))
       (set-window-buffer window previous))
-     ((window-parent window)
+     ((not (eq window (window-main-window (window-frame window))))
       (delete-window window))
      (t
       (let ((project-directory (+window--project-directory directory)))
@@ -543,13 +543,13 @@ spare window without one.  A popup returns exactly where it came from."
 
 (defun +windows/close-window ()
   "Close the selected window and keep its buffer alive.
-If it is the frame's only window, close the view in place so the frame stays
-open and its previous buffer can return.  An active minibuffer is dismissed
-before any window is closed."
+If it is the frame's only main window, close the view in place so the frame
+stays open and its previous buffer can return, even with side windows.
+An active minibuffer is dismissed before any window is closed."
   (interactive)
   (cond
    ((minibufferp) (abort-recursive-edit))
-   ((window-parent (selected-window)) (delete-window))
+   ((not (eq (selected-window) (window-main-window))) (delete-window))
    (t (+windows/close-view))))
 
 (defalias 'close-view #'+windows/close-view
