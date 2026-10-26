@@ -452,6 +452,10 @@ savehist 整个丢掉这个变量，而当前会话里的 kill ring 保留原来
 里改），不只在正常退出时写：后台 Emacs 一次运行几周，崩溃时不会丢掉这段时间的
 记录。
 
+undo-tree 历史保存在 `var/undo-tree-history/`，但加密文件（`.gpg`、`.age` 及其备份）
+和 Git 的提交/合并/rebase 消息文件不保存：前者的历史里是解密后的明文，后者每次都被
+重写（`aaron-undo-tree-history-excluded-regexp`）。
+
 这意味着：
 
 - 项目目录更干净

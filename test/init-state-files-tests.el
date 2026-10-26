@@ -250,4 +250,35 @@
       (unless recentf-mode-was (recentf-mode -1))
       (delete-directory dir t))))
 
+(ert-deftest aaron-undo-tree-history-skips-encrypted-and-git-message-files ()
+  "No undo history is written for encrypted files or Git message files."
+  (require 'undo-tree)
+  (should (aaron-undo-tree-history-enabled-p "/a/notes.md"))
+  (dolist (file '("/a/authinfo.gpg" "/a/secret.age" "/a/x.gpg~"
+                  "/r/.git/COMMIT_EDITMSG" "/r/.git/rebase-merge/git-rebase-todo"))
+    (should-not (aaron-undo-tree-history-enabled-p file)))
+  (let* ((dir (file-name-as-directory (make-temp-file "undo-gpg-" t)))
+         (aaron-undo-tree-history-dir (expand-file-name "history/" dir))
+         (written nil))
+    (unwind-protect
+        (dolist (name '("notes.md" "secret.gpg"))
+          (setq written nil)
+          (with-temp-buffer
+            ;; `with-temp-buffer' turns undo off; there must be history.
+            (buffer-enable-undo)
+            (setq buffer-file-name (expand-file-name name dir))
+            (undo-tree-mode 1)
+            (insert "decrypted secret")
+            (undo-boundary)
+            (insert ".")
+            (undo-boundary)
+            (cl-letf (((symbol-function 'write-region)
+                       (lambda (&rest args) (push args written))))
+              (undo-tree-save-history nil t))
+            (if (equal name "notes.md")
+                (should written)
+              (should-not written))
+            (setq buffer-file-name nil)))
+      (delete-directory dir t))))
+
 ;;; init-state-files-tests.el ends here

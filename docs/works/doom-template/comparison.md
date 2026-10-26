@@ -277,3 +277,6 @@ Doom 的做法：
 | `os/macos` | Keychain 作 auth-source、`ns-auto-titlebar`、`ns-pop-up-frames nil`、`delete-by-moving-to-trash` | **不收或已有**：Keychain 查询可能弹出系统授权框；标题栏与 frame 由 `config/background` 管；废纸篓已开启 |
 | `term/eshell` | `eshell-hist-ignoredups` | **吸收**：连续重复的命令只记一次 |
 | `term/eshell` | 提示符、别名表、只读保护已执行的输入输出、执行中关 undo、切分窗口开新 shell、visual 命令、各种键 | **不收**：eshell 的行为由 `docs/design/command-shell.md` 定义（自动化 API、输出规整），键位以本配置为准 |
+| `emacs/undo` | undo-fu-session 不保存 `.gpg`、`COMMIT_EDITMSG`、`git-rebase-todo` 的历史 | **吸收**：本配置的 undo-tree 给每个文件都写历史，加密文件的明文会进 `var/undo-tree-history/`；现在加密文件（`.gpg`/`.age`/`epa-file-name-regexp`）和 Git 消息文件不保存也不读取历史。检查过现有历史目录，没有已泄漏的文件 |
+| `emacs/undo` | undo-fu、vundo、undo 上限、zstd 压缩 | **不收**：本配置用 undo-tree，上限已更大 |
+| `emacs/dired` | `-v` 自然排序、远程去掉 GNU ls 参数、virtual buffer 不自动刷新、ESC 退出 wdired | **已有或不收**：dwim、自动刷新、`gls`、目录创建询问已一致；排序是外观；远程 Dired 由 Remote 框架处理 |

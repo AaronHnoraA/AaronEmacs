@@ -1469,10 +1469,24 @@ escape from the process sentinel."
   (setq undo-tree-history-directory-alist
         `(("." . ,aaron-undo-tree-history-dir)))
 
+  (defvar epa-file-name-regexp)
+
+  ;; From Doom's undo-fu-session exclusions: an encrypted file's history
+  ;; holds its decrypted text and would land in plain form on disk, and Git's
+  ;; message files are rewritten for every commit or rebase.
+  (defconst aaron-undo-tree-history-excluded-regexp
+    "\\.\\(?:gpg\\|age\\)\\(?:~\\|\\.~[0-9]+~\\)?\\'\\|/\\(?:COMMIT_EDITMSG\\|MERGE_MSG\\|TAG_EDITMSG\\|git-rebase-todo\\)\\'"
+    "Files whose undo-tree history is never saved.")
+
   (defun aaron-undo-tree-history-enabled-p (&optional file)
-    "Return non-nil when FILE should persist undo-tree history locally."
+    "Return non-nil when FILE should persist undo-tree history locally.
+Encrypted files (see `aaron-undo-tree-history-excluded-regexp' and
+`epa-file-name-regexp') and Git's message files are left out."
     (and (stringp file)
-         (not (string-empty-p file))))
+         (not (string-empty-p file))
+         (not (string-match-p aaron-undo-tree-history-excluded-regexp file))
+         (not (and (bound-and-true-p epa-file-name-regexp)
+                   (string-match-p epa-file-name-regexp file)))))
 
   (defun aaron-undo-tree-sanitize-history-label (label)
     "Return LABEL sanitized for use in a local undo history filename."
