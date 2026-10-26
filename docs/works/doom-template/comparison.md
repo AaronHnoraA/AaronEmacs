@@ -216,3 +216,11 @@ Doom 的做法：
 | `completion/vertico` | CRM 提示前缀、`vertico-directory-tidy`、Consult 异步参数、Embark 导出、company 补全时改用 basic 优先的 styles | **已有或不收**：Emacs 31 的 `crm-prompt` 自带 `[%d] %p`；其余参数本配置已是相同值；company 的 styles 是本配置有意按类别设置的 |
 | `tools/lsp` | 最后一个 buffer 关掉后推迟 3 秒再关 server | **记为缺口** G-L1（`docs/design/lsp-workflow.md`）：LSP 生命周期属于 Remote/LSP 契约，显式断开和手动关闭必须立即生效，需要先定契约并补故障注入测试 |
 | `tools/lsp` | GC/IPC 优化模式、ESC 关签名、`lsp-ui-doc` 尺寸 | **已有或不收**：本配置 `read-process-output-max` 已是 4MB、GC 由 gcmh 管；ESC 已有 `+lsp-dismiss-popup-h`；doc 尺寸是外观 |
+
+## 8. 内核库逐文件对照（`core/lisp/lib/`）
+
+| 文件 | 内容 | 处理 |
+| --- | --- | --- |
+| `text.el` | `doom/set-indent-width`、`toggle-indent-style`、`retab` | **吸收**：`editing-menu` 的 Indentation 列（`+editing/set-indent-width` 借用 Emacs 自带 EditorConfig 的“模式 → 缩进变量”表，ts-mode 和 `evil-shift-width` 一并设置） |
+| `text.el` | `syntax-ppss` 记忆化、`point-in-comment/string-p`、region 辅助、`backward-to-bol-or-indent`、`forward-to-last-non-comment-or-eol` | **已有或不需要**：行首/行尾在注释与缩进之间切换由 `mwim` 提供；其余是 Doom 自己命令的辅助 |
+| `text.el` | `delete-backward-word`（不进 kill ring）、`backward-kill-to-bol-and-indent`、`delete-trailing-newlines`、`dos2unix`/`unix2dos` | **不收**：前两项改变删除手感；后两项分别是 `delete-blank-lines` 和 `C-x RET f` |

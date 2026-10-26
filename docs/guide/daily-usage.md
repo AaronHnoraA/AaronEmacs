@@ -78,6 +78,9 @@
   `copy-as-format` 原生命令的默认格式，也不移动光标或选区。
 - `M-x ialign`（或 `editing-menu` 中按 `a`）
   交互对齐选区：边输入正则边预览对齐结果，`RET` 确认，`C-g` 还原。
+- `editing-menu` 的 Indentation 列：`w` 设置当前 buffer 的缩进宽度（按 major mode
+  设到它实际读取的变量，同时更新 Evil 的 `>`/`<` 宽度）、`s` 切换 tab/空格、
+  `r` 把缩进转成当前风格（带前缀参数转成另一种）。
 - `M-x macos-tools-menu`（或 `SPC a m`）
   打开 macOS 工具菜单；`macos-pick-color` 复制颜色，带前缀参数时插入；
   `macos-open-at-point` 用系统应用打开光标处的链接或文件。

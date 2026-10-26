@@ -352,6 +352,43 @@ With CANCEL, discard the staged region."
 (+copy-as-format-define +copy-as/format-rst "rst")
 (+copy-as-format-define +copy-as/format-asciidoc "asciidoc")
 
+(declare-function editorconfig--get-indentation "editorconfig" (props))
+
+;; From Doom's text library: change one buffer's indentation without knowing
+;; which variables its mode reads.  Emacs's EditorConfig support already maps
+;; an indent size onto every variable a mode uses (including `evil-shift-width').
+(defun +editing/set-indent-width (width)
+  "Set the current buffer's indentation to WIDTH columns."
+  (interactive
+   (list (if (integerp current-prefix-arg)
+             current-prefix-arg
+           (read-number "Indent width: " standard-indent))))
+  (require 'editorconfig)
+  (let ((props (make-hash-table)))
+    (puthash 'indent_size (number-to-string width) props)
+    (pcase-dolist (`(,var . ,value) (editorconfig--get-indentation props))
+      (set (make-local-variable var) value)))
+  (message "Indent width is now %d" width))
+
+(defun +editing/toggle-indent-style ()
+  "Switch the current buffer between tab and space indentation."
+  (interactive)
+  (setq-local indent-tabs-mode (not indent-tabs-mode))
+  (message "Indenting with %s" (if indent-tabs-mode "tabs" "spaces")))
+
+(defun +editing/retab (opposite beg end)
+  "Convert indentation between BEG and END to the buffer's style.
+Without a region, the whole buffer.  With OPPOSITE (a prefix argument),
+convert to the other style instead."
+  (interactive (list current-prefix-arg
+                     (and (use-region-p) (region-beginning))
+                     (and (use-region-p) (region-end))))
+  (let ((beg (or beg (point-min)))
+        (end (or end (point-max))))
+    (if (if opposite (not indent-tabs-mode) indent-tabs-mode)
+        (tabify beg end)
+      (untabify beg end))))
+
 (transient-define-prefix copy-as-format-menu ()
   "Copy the active region or buffer in a presentation format."
   [["Copy as"
@@ -377,7 +414,11 @@ With CANCEL, discard the staged region."
     ("y" "diff last two yanks" +ediff/last-two-yanks)]
    ["Compare / image"
     ("d" "Ediff DWIM" +ediff/dwim)
-    ("p" "crop image" image-crop)]])
+    ("p" "crop image" image-crop)]
+   ["Indentation"
+    ("w" "set indent width" +editing/set-indent-width)
+    ("s" "toggle tabs/spaces" +editing/toggle-indent-style)
+    ("r" "retab to buffer style" +editing/retab)]])
 
 (use-package string-inflection
   :ensure t
