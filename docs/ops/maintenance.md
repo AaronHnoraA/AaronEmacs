@@ -446,6 +446,10 @@ savehist 的临时 buffer 里去掉文本属性：带图片、overlay 之类属�
 savehist 整个丢掉这个变量，而当前会话里的 kill ring 保留原来的属性。mark ring
 里是 marker，无法保存，所以不在保存列表里。
 
+最近文件列表每 10 分钟写一次盘（`recentf-autosave-interval`，在 `config-board`
+里改），不只在正常退出时写：后台 Emacs 一次运行几周，崩溃时不会丢掉这段时间的
+记录。
+
 这意味着：
 
 - 项目目录更干净

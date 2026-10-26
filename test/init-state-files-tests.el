@@ -100,4 +100,20 @@
           (should (eq (get-text-property 0 'aaron-test (car kill-ring)) marker)))
       (delete-file file))))
 
+(ert-deftest aaron-recentf-autosave-follows-the-setting ()
+  "The recent-file list is saved on a timer that follows its setting."
+  (require 'recentf)
+  (let ((old (config-get 'recentf-autosave-interval))
+        (recentf-mode-was recentf-mode))
+    (unwind-protect
+        (progn
+          (recentf-mode 1)
+          (config-set 'recentf-autosave-interval 900 t t)
+          (should (timerp recentf--autosave-timer))
+          (should (= (timer--repeat-delay recentf--autosave-timer) 900))
+          (config-set 'recentf-autosave-interval nil t t)
+          (should-not recentf--autosave-timer))
+      (config-set 'recentf-autosave-interval old t t)
+      (unless recentf-mode-was (recentf-mode -1)))))
+
 ;;; init-state-files-tests.el ends here

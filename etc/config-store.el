@@ -176,6 +176,7 @@
    (kept-new-versions . 10) (kept-old-versions . 3) (auto-save-default . t)
    (auto-save-timeout . 20) (auto-save-interval . 200) (create-lockfiles . t)
    (delete-by-moving-to-trash . t) (recentf-max-saved-items . 200)
+   (recentf-autosave-interval . 600)
    (undo-tree-auto-save-history . t) (gc-cons-threshold . 100663296)
    (gc-cons-percentage . 0.3) (inhibit-compacting-font-caches . t)
    (enable-recursive-minibuffers . t) (completion-ignore-case . t)

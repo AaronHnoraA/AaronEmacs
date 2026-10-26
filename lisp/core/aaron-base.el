@@ -2092,6 +2092,21 @@ interrupt the current window layout.")
   :group 'files :type 'integer
   :doc "Number of recent files remembered across sessions.")
 
+;; Emacs runs here for weeks, and recentf otherwise writes its list only on a
+;; clean exit; Doom saves it on a timer in a daemon for the same reason.
+;; recentf restarts its timer from its custom setter, which the registry's
+;; Customize bridge replaces, so the restart is done here.
+(declare-function recentf--cancel-autosave-timer "recentf" ())
+(declare-function recentf--manage-autosave-timer "recentf" ())
+(config-register 'recentf-autosave-interval
+  :group 'files :type '(choice (const nil) integer)
+  :set (lambda (name value)
+         (set-default name value)
+         (when (fboundp 'recentf--manage-autosave-timer)
+           (recentf--cancel-autosave-timer)
+           (recentf--manage-autosave-timer)))
+  :doc "Seconds between saves of the recent-file list; nil saves only on exit.")
+
 (config-register 'undo-tree-auto-save-history
   :group 'files :type 'boolean
   :doc "Persist undo-tree history to disk across sessions.")
