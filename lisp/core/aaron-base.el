@@ -103,8 +103,9 @@
 ;; stays readable but passes APFS's 255-character name limit for deep paths.
 ;; Emacs then skips the auto-save and the lock without a word, so such a name
 ;; is hashed instead, as Doom does for every name.  The margin leaves room for
-;; backup version suffixes.
-(defconst aaron-state-file-name-max-length 230
+;; the suffixes added to these names: backup versions, and diff-hl's
+;; ".~REVISION.~" (a 40-character commit) on its revision temp files.
+(defconst aaron-state-file-name-max-length 180
   "Longest non-directory part, in characters, kept readable in state file names.
 Auto-save, lock and backup names longer than this are hashed.")
 

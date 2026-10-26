@@ -149,7 +149,7 @@ Doom 的做法：
 
 | Doom | 本配置 | 处理 |
 | --- | --- | --- |
-| `auto-save-file-name-transforms` 用 sha1 命名；`make-backup-file-name-1` 对长路径取哈希 | 用可读的 `!` 拼接全路径 | **吸收并改良**：只有超过 230 个字符的名字才哈希（`aaron-state-file-name-fit`，同时管 auto-save、lock、backup）。实测路径拼出的名字超过 APFS 的 255 字符上限时，Emacs 不报错地跳过自动保存和文件锁 |
+| `auto-save-file-name-transforms` 用 sha1 命名；`make-backup-file-name-1` 对长路径取哈希 | 用可读的 `!` 拼接全路径 | **吸收并改良**：只有超过 180 个字符的名字才哈希（给 diff-hl 在后面加的 40 位提交号留出余量）（`aaron-state-file-name-fit`，同时管 auto-save、lock、backup）。实测路径拼出的名字超过 APFS 的 255 字符上限时，Emacs 不报错地跳过自动保存和文件锁 |
 | `savehist-save-hook` 去掉历史变量的文本属性、去掉不能打印的寄存器 | 配了保存 `kill-ring`、`mark-ring`、`global-mark-ring`，实际一个都没存下 | **吸收并改良**：savehist 遇到一处不可打印的值就整个丢掉变量；mark ring 是 marker，永远存不下，删掉；kill ring 只在 savehist 的临时 buffer 里换成无属性副本（`aaron-savehist-plain-kill-ring-h`），不像 Doom 那样改动会话里的值。寄存器本配置不保存，不需要 |
 | daemon 下 `recentf-autosave-interval 1200` | 只在正常退出时保存最近文件 | **吸收**：本配置的 Emacs 作为后台 app 一次运行几周，改为每 600 秒保存，登记为 config 设置；registry 的 Customize 桥会替换 recentf 自带的 setter，所以在 `:set` 里自己重启 recentf 的计时器 |
 | `doom-guess-mode-h`：保存 `fundamental-mode` 文件后重新判断模式 | 没有 | **吸收**：`+files-guess-mode-h`（`emacs/files`），同样只作用于当前窗口的 buffer；Evil 状态由已有的 `set-auto-mode` advice 保持 |

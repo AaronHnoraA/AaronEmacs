@@ -437,7 +437,7 @@ Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` �
 - org
 
 backup、auto-save 和 lockfiles 的文件名把被访问文件的完整路径拼成一个名字（`/`
-换成 `!`），一眼能认出是哪个文件。名字超过 230 个字符时（APFS 单个文件名上限是
+换成 `!`），一眼能认出是哪个文件。名字超过 180 个字符时（APFS 单个文件名上限是
 255 个字符，深层目录、远程路径会超过），改为“SHA-1 + 原名末尾 40 个字符”，否则
 Emacs 会不报错地跳过这次自动保存和文件锁（`aaron-state-file-name-fit`）。
 删掉一大段内容后自动保存照常进行（`auto-save-include-big-deletions`）；Emacs
