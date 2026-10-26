@@ -26,7 +26,7 @@
 (ert-deftest +runtime-provider-prepares-asynchronously ()
   (+runtime-test-with-registry
     (let (finish received)
-      (+register-language-server-runtime-provider
+      (set-language-server-runtime-provider!
        'async
        (lambda (_buffer callback)
          (setq finish callback)
@@ -51,7 +51,7 @@
     (let ((runtime (+language-server-runtime-create
                     :id "cached-kernel" :root temporary-file-directory))
           received)
-      (+register-language-server-runtime-provider
+      (set-language-server-runtime-provider!
        'cached
        (lambda (_buffer callback)
          (funcall callback runtime nil)
@@ -83,7 +83,7 @@
               "fallback — kernel launcher is intentionally opaque")))
     (+runtime-test-with-registry
       (let (finish)
-        (+register-language-server-runtime-provider
+        (set-language-server-runtime-provider!
          'expected
          (lambda (_buffer callback)
            (setq finish callback)

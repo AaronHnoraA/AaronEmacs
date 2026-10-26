@@ -1281,8 +1281,7 @@ title no page has opens the New Page workbench with it."
   (setq-local widget-field-face '+noema-roam-ui-row-title)
   (+noema-roam-ui-set-header "Roam Node" 'new "draft"))
 
-(with-eval-after-load 'evil
-  (evil-set-initial-state '+noema-roam-new-mode 'emacs))
+(set-evil-initial-state! '+noema-roam-new-mode 'emacs)
 
 (defun +noema-roam-new--normalize-directory (directory)
   "Return DIRECTORY as a clean vault-relative directory."
@@ -3675,8 +3674,7 @@ completes to `#id', otherwise to the shortest unique text ref."
                 (set-marker +noema-roam-select--origin-marker nil)))
             nil t))
 
-(with-eval-after-load 'evil
-  (evil-set-initial-state '+noema-roam-select-mode 'emacs))
+(set-evil-initial-state! '+noema-roam-select-mode 'emacs)
 
 (defun +noema-roam--record-path-ref (record)
   "Return RECORD's path-like link ref."
@@ -5411,6 +5409,10 @@ watcher, so this only has to repair the Emacs side."
   (add-hook 'after-save-hook #'+noema-roam--after-save-h nil t))
 
 (add-hook 'markdown-mode-hook #'+noema-roam--setup-save-hook)
+
+;; Popup rule for this module's buffers (see ui/popup).
+(defvar +display-rules-roam-size)
+(set-popup-rule! "\\*roam-\\|\\*Noema roam " :select t :align 'right :size +display-rules-roam-size :regexp t)
 
 (provide 'noema/roam/config)
 ;;; noema/roam/config.el ends here

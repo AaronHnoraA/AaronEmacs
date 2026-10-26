@@ -288,5 +288,9 @@
   "n ]" '(:def +navigation/next-defun :which-key "next defun")
   "n u" '(:def structure-up :which-key "up structure"))
 
+;; Popup rule for this module's buffers (see ui/popup).
+(defvar +display-rules-bottom-size)
+(set-popup-rule! "\\*xref\\*" :select t :align 'below :size +display-rules-bottom-size :regexp t)
+
 (provide 'editor/navigation/config)
 ;;; editor/navigation/config.el ends here

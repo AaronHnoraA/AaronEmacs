@@ -41,8 +41,8 @@
 - language server executable 在当前 workspace target 的环境中存在。
 
 自动启动找不到 server 时保持安静；手动执行 `+language-server/ensure` 才显示
-缺失提示。自定义 client 用 `+register-language-server`，`lsp-java` 这类由包
-自身注册的 client 用 `+register-language-server-feature` 声明给 Hub/Doctor。
+缺失提示。自定义 client 用 `set-language-server!`，`lsp-java` 这类由包
+自身注册的 client 用 `set-language-server-feature!` 声明给 Hub/Doctor。
 
 进程启动统一绑定到 Remote 框架的 `language-server` adapter。默认 placement 是
 target：本地 buffer 使用 `local` target，远程 buffer 使用自己的 target/workspace
@@ -157,7 +157,7 @@ process、URI 和 resource-lifecycle 流程。
 债务，不能作为新语言的模板。框架缺少表达能力时，先补通用 `remote-*` API 及
 native/remote backend，再接语言业务。
 
-配置握手也是注册层的统一行为：每个经 `+register-language-server` 注册的
+配置握手也是注册层的统一行为：每个经 `set-language-server!` 注册的
 server 在 `initialized` 之后立即收到 `workspace/didChangeConfiguration`，与
 VS Code languageclient、Eglot 一致（`+language-server--announce-configuration`）。
 有的 server 依赖它：Pyright 1.1.408 在客户端声明 workspace folders 时不会主动
@@ -295,7 +295,7 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 自定义 stdio client 用：
 
 ```
-(+register-language-server
+(set-language-server!
  '(some-mode another-mode)
  '("some-language-server" "--stdio")
  :server-id 'my-some-language-server
@@ -307,7 +307,7 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 如果 package 自己调用 `lsp-register-client`，只声明 feature 与维护 metadata：
 
 ```
-(+register-language-server-feature
+(set-language-server-feature!
  '(some-mode) 'lsp-some-language
  :executables '("some-language-server")
  :placement 'target

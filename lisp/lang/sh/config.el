@@ -7,7 +7,7 @@
 
 (declare-function +language-server-executable-available-p "tools/lsp/config" (program))
 (declare-function +language-server-executable-find "tools/lsp/config" (program))
-(declare-function +register-language-server "tools/lsp/config")
+(declare-function set-language-server! "tools/lsp/config")
 
 ;; Edit shell scripts
 ;;
@@ -46,8 +46,8 @@
                          'sh-tempo-tags))
 
 (with-eval-after-load 'lsp-mode
-  (when (fboundp '+register-language-server)
-    (+register-language-server
+  (when (fboundp 'set-language-server!)
+    (set-language-server!
      '(sh-mode bash-ts-mode)
      (lambda ()
        (list (or (+language-server-executable-find "bash-language-server")

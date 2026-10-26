@@ -157,5 +157,9 @@ MATCHER can be a directory path or regexp matched against the project root."
   "r r" '(:def project-run-menu :which-key "run profile")
   "r R" '(:def project-rerun :which-key "rerun profile"))
 
+;; Popup rule for this module's buffers (see ui/popup).
+(defvar +display-rules-bottom-size)
+(set-popup-rule! "\\*run\\*" :select t :align 'below :size +display-rules-bottom-size :regexp t)
+
 (provide 'tools/run/config)
 ;;; tools/run/config.el ends here

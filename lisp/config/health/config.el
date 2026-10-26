@@ -721,5 +721,8 @@ With NO-DISPLAY, refresh an already visible board without selecting it."
   "h H" '(:def config-health-menu :which-key "health")
   "h i" '(:def +health/startup-summary :which-key "init stats"))
 
+;; Boards start in Emacs state.
+(set-evil-initial-state! '+health-mode 'emacs)
+
 (provide 'config/health/config)
 ;;; config/health/config.el ends here

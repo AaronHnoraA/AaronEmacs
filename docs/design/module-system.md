@@ -110,6 +110,19 @@
 - `aaron/load-module` 用来重试失败的模块，或者立刻加载正在等待的模块；
 - `aaron-modules-init-time` 是全部模块的加载耗时。
 
+## 注册接口（`set-…!`）
+
+模块用 Doom 风格的 `set-…!` 接口声明自己需要什么，由拥有对应子系统的模块统一实现。这些接口放在实现它的模块的 `autoload/` 里，因此任何模块在加载时都能调用，不必先 `require`，也不必关心那个模块是否已经加载。
+
+| 接口 | 实现模块 | 用法 |
+| --- | --- | --- |
+| `set-popup-rule!`、`set-popup-rules!` | `ui/popup`（shackle） | 声明本模块 buffer 的弹出方式。规则写法同 shackle（缓冲区名、`:regexp t` 正则或 major mode，加 shackle 的键）。和 Doom 一样，后声明的优先。`ui/popup` 自己只声明内置 buffer 的默认规则 |
+| `set-evil-initial-state!` | `editor/evil` | 声明本模块 mode 的初始 Evil 状态；Evil 尚未加载时会等它加载后再生效。Remote 框架层不依赖编辑器层，所以仍直接调用 `evil-set-initial-state` |
+| `set-language-server!`、`set-language-server-feature!` | `tools/lsp` | 注册自定义 lsp-mode client / 声明包自带的 client |
+| `set-language-server-toolchain-provider!`、`set-language-server-runtime-provider!` | `tools/lsp` | 注册项目工具链与运行时 provider |
+
+只有在已经存在、只是分散各处的注册代码需要收拢时，才加一个这样的接口。查找走 Emacs 自己的 `xref-backend-functions` 链，格式化只走 LSP，文件模板按目录组织，所以没有加 `set-lookup-handlers!`、`set-formatter!` 和 `set-file-template!`。
+
 ## 加载账本
 
 模块加载期间（`aaron-modules-load`、每次延迟加载、`aaron/load-module`），账本临时挂上 advice，记录当前模块装了什么：

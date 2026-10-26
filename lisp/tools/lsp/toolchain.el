@@ -274,7 +274,7 @@ FAST requests bounded discovery for automatic startup when available."
             (format "%s" label)))
       "automatic / PATH")))
 
-(defun +register-language-server-toolchain-provider (family modes discover &rest properties)
+(defun set-language-server-toolchain-provider! (family modes discover &rest properties)
   "Register a toolchain provider for FAMILY and MODES.
 
 DISCOVER returns profile plists for a project root.  PROPERTIES accepts

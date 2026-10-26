@@ -8,7 +8,6 @@
 
 ;;; Code:
 
-(declare-function +register-lsp-mode-preference "tools/lsp/config" (mode &optional feature source note))
 (declare-function +lsp/mode-ensure "tools/lsp/config")
 (defvar lsp-beancount-journal-file)
 (defvar lsp-beancount-langserver-executable)
@@ -56,13 +55,6 @@
   :mode (("\\.bean\\'" . beancount-mode)
          ("\\.beancount\\'" . beancount-mode))
   :hook (beancount-mode . +beancount-setup))
-
-(when (fboundp '+register-lsp-mode-preference)
-  (+register-lsp-mode-preference
-   'beancount-mode
-   'lsp-beancount
-   load-file-name
-   "Beancount buffers use beancount-language-server through lsp-mode."))
 
 (with-eval-after-load 'lsp-beancount
   (setq lsp-beancount-langserver-executable

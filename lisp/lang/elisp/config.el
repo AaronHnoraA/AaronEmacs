@@ -12,7 +12,6 @@
 (require 'subr-x)
 
 (declare-function +lsp/mode-ensure "tools/lsp/config")
-(declare-function +register-lsp-mode-preference "tools/lsp/config" (mode &optional feature source note))
 (declare-function flymake-start "flymake" (&optional report-fn))
 (declare-function elisp-flymake-byte-compile "elisp-mode" (report-fn &rest args))
 (declare-function elisp-flymake-checkdoc "elisp-mode" (report-fn &rest args))
@@ -80,13 +79,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (aaron-package-install-archive 'elsa)
-
-(when (fboundp '+register-lsp-mode-preference)
-  (+register-lsp-mode-preference
-   'emacs-lisp-mode
-   nil
-   nil
-   "Emacs Lisp buffers prefer the separately registered Elsa lsp-mode client."))
 
 (defgroup +elisp nil
   "Emacs Lisp editing and analysis."

@@ -8,7 +8,7 @@
 (declare-function +language-server-set-workspace-configuration
                   "tools/lsp/config" (configuration))
 (declare-function +language-server-executable-find "tools/lsp/config" (program))
-(declare-function +register-language-server "tools/lsp/config")
+(declare-function set-language-server! "tools/lsp/config")
 
 (use-package rust-mode
   :ensure t
@@ -32,8 +32,8 @@
                             :trait (:enable t))))))))
 
 (with-eval-after-load 'lsp-mode
-  (when (fboundp '+register-language-server)
-    (+register-language-server
+  (when (fboundp 'set-language-server!)
+    (set-language-server!
      '(rust-mode rust-ts-mode)
      (lambda ()
        (list (or (+language-server-executable-find "rust-analyzer")

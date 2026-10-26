@@ -8,14 +8,14 @@
 ;;; Code:
 
 (declare-function +language-server-executable-find "tools/lsp/config" (program))
-(declare-function +register-language-server "tools/lsp/config")
+(declare-function set-language-server! "tools/lsp/config")
 
 ;; 1. HTML LSP server 映射
 ;; lsp-mode 自带 html-mode / mhtml-mode 客户端；这里把 html-ts-mode 和
 ;; 自定义的 vue-html-mode 也绑定到同一个 HTML language server。
 (with-eval-after-load 'lsp-mode
-  (when (fboundp '+register-language-server)
-    (+register-language-server
+  (when (fboundp 'set-language-server!)
+    (set-language-server!
      '(html-mode html-ts-mode mhtml-mode vue-html-mode)
      (lambda ()
        (list (or (+language-server-executable-find

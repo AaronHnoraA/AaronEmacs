@@ -104,8 +104,7 @@
   (when (fboundp 'evil-local-mode)
     (evil-local-mode -1)))
 
-(with-eval-after-load 'evil
-  (evil-set-initial-state '+performance-watch-mode 'emacs))
+(set-evil-initial-state! '+performance-watch-mode 'emacs)
 
 (defvar-keymap +performance-watch-keys-mode-map
   :doc "Shortcuts layered over the ETAF Performance Watch page."

@@ -72,8 +72,7 @@ Either way `+noema/open-markdown-raw' forces Emacs and
   "Noema-Wait"
   "Read-only Markdown placeholder while the Noema page is opening.")
 
-(with-eval-after-load 'evil
-  (evil-set-initial-state '+noema-markdown-placeholder-mode 'emacs))
+(set-evil-initial-state! '+noema-markdown-placeholder-mode 'emacs)
 
 (defun +noema--markdown-placeholder-set-state (state)
   "Set the current Markdown placeholder to STATE and update its help line."

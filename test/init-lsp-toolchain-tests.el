@@ -23,7 +23,7 @@
 (ert-deftest +toolchain-project-default-and-session-override ()
   (+toolchain-test-with-project
       '(:toolchain ((test . second)))
-    (+register-language-server-toolchain-provider
+    (set-language-server-toolchain-provider!
      'test '(+toolchain-test-mode)
      (lambda (_root)
        '((:id first :label "First" :default t)
@@ -40,7 +40,7 @@
 (ert-deftest +toolchain-provider-discovery-is-cached-and-refreshable ()
   (+toolchain-test-with-project nil
     (let ((calls 0))
-      (+register-language-server-toolchain-provider
+      (set-language-server-toolchain-provider!
        'test '(+toolchain-test-mode)
        (lambda (_root)
          (cl-incf calls)
@@ -56,7 +56,7 @@
                  +language-server-toolchain--candidate-cache)
         (+language-server-toolchain-candidates)
         (should (= calls 2))
-        (+register-language-server-toolchain-provider
+        (set-language-server-toolchain-provider!
          'test '(+toolchain-test-mode)
          (lambda (_root) '((:id replacement :default t))))
         (should (eq (plist-get (car (+language-server-toolchain-candidates))
@@ -68,7 +68,7 @@
   (let (settings)
     (+toolchain-test-with-project settings
       (let ((fast-calls 0) (full-calls 0))
-        (+register-language-server-toolchain-provider
+        (set-language-server-toolchain-provider!
          'test '(+toolchain-test-mode)
          (lambda (_root)
            (cl-incf full-calls)
@@ -109,7 +109,7 @@
 (ert-deftest +toolchain-applies-and-restores-generic-profile ()
   (+toolchain-test-with-project
       '(:toolchain ((test . selected)))
-    (+register-language-server-toolchain-provider
+    (set-language-server-toolchain-provider!
      'test '(+toolchain-test-mode)
      (lambda (_root)
        '((:id selected
@@ -153,7 +153,7 @@
 (ert-deftest +toolchain-runtime-profile-is-authoritative ()
   (+toolchain-test-with-project
       '(:toolchain ((test . configured)))
-    (+register-language-server-toolchain-provider
+    (set-language-server-toolchain-provider!
      'test '(+toolchain-test-mode)
      (lambda (_root)
        '((:id configured :label "Configured" :default t))))
@@ -169,7 +169,7 @@
 
 (ert-deftest +toolchain-restores-provider-specific-lsp-variables ()
   (+toolchain-test-with-project nil
-    (+register-language-server-toolchain-provider
+    (set-language-server-toolchain-provider!
      'test '(+toolchain-test-mode)
      (lambda (_root)
        '((:id selected :label "Selected" :default t)))

@@ -670,8 +670,7 @@ j/k move  \\[aaron-ui-board-activate] open  \\[+activity-board/describe] details
 (define-derived-mode +activity-process-detail-mode special-mode "Activity Detail"
   "Read-only details for one Emacs process.")
 
-(with-eval-after-load 'evil
-  (evil-set-initial-state '+activity-process-detail-mode 'emacs))
+(set-evil-initial-state! '+activity-process-detail-mode 'emacs)
 
 (defun +activity-board--ensure-detail-buffer ()
   "Return this Activity board's temporary process details buffer."
@@ -1305,8 +1304,7 @@ Reads `timer-list' and `timer-idle-list' only, the same state
 (defalias 'activity-board #'+activity/board
   "Open the Emacs background activity board.")
 
-(with-eval-after-load 'evil
-  (evil-set-initial-state '+activity-board-mode 'emacs))
+(set-evil-initial-state! '+activity-board-mode 'emacs)
 
 ;;; -----------------------------------------------------------------------
 ;;; In-band triggers

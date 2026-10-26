@@ -50,7 +50,7 @@
   "Major modes that should never auto-start a language server.")
 
 (defvar +language-server-program-metadata nil
-  "Metadata for language servers registered by `+register-language-server'.
+  "Metadata for language servers registered by `set-language-server!'.
 
 Each entry is a plist with keys such as `:modes', `:program', `:server-id',
 `:feature', `:executables', `:available-p', `:placement', `:label',
@@ -985,7 +985,7 @@ Standard LSP clients (VS Code's languageclient, Eglot) send
 depend on it: Pyright, for one, does not pull `workspace/configuration' on
 its own when the client advertises workspace folders, and then never
 analyzes a file or answers a request.  Every server registered through
-`+register-language-server' gets this, whatever its language.  The
+`set-language-server!' gets this, whatever its language.  The
 payload is WORKSPACE's own override (or an empty object); servers that pull
 settings read the full values through `workspace/configuration'."
   ;; `with-lsp-workspace' expanded by hand: this file may compile before
@@ -1204,7 +1204,7 @@ directories do not schedule a preload.  Zero disables the folder preload."
 (add-hook 'kill-buffer-hook #'+language-server-performance--leave-buffer)
 (add-hook 'change-major-mode-hook #'+language-server-performance--leave-buffer)
 
-(cl-defun +register-language-server
+(cl-defun set-language-server!
     (modes program &key server-id feature executables placement label source
            note priority multi-root activation-fn initialization-options
            initialized-fn notification-handlers request-handlers
@@ -1286,12 +1286,12 @@ This is the only supported way to declare a server; never call
                  +language-server-program-metadata)))
     server-id))
 
-(cl-defun +register-language-server-feature
+(cl-defun set-language-server-feature!
     (modes feature &key executables placement label source note available-p)
   "Record a language server that an external package registers for MODES.
 
 Some servers are registered by their own package (`lsp-java', `lean4-mode')
-rather than by `+register-language-server'.  This declares the same
+rather than by `set-language-server!'.  This declares the same
 maintenance metadata for them and, more importantly, records FEATURE as a
 hard prerequisite so `+lsp-mode-supported-p' refuses to start a server
 whose support library is missing instead of failing inside lsp-mode.

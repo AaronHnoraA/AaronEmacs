@@ -757,5 +757,12 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
   "cb" '(:def +compile/board :which-key "compile board")
   "cB" '(:def config-compile-menu :which-key "compile menu"))
 
+;; Popup rule for this module's buffers (see ui/popup).
+(defvar +display-rules-bottom-size)
+(set-popup-rule! 'compilation-mode :select t :align 'below :size +display-rules-bottom-size)
+
+;; Boards start in Emacs state.
+(set-evil-initial-state! '+compile-board-mode 'emacs)
+
 (provide 'config/compile/config)
 ;;; config/compile/config.el ends here

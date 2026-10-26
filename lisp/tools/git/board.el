@@ -190,8 +190,8 @@
       (+git-board/refresh))
     (switch-to-buffer buffer)))
 
+(set-evil-initial-state! '+git-board-mode 'normal)
 (with-eval-after-load 'evil
-  (evil-set-initial-state '+git-board-mode 'normal)
   (evil-define-key* 'normal +git-board-mode-map
     (kbd "RET") #'+git-board/visit
     (kbd "<return>") #'+git-board/visit

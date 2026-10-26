@@ -390,8 +390,7 @@ If popup is focused, kill it."
 (require 'term/portal/config)
 (require 'term/portal/popup)
 
-(with-eval-after-load 'evil
-  (evil-set-initial-state 'eshell-mode 'emacs))
+(set-evil-initial-state! 'eshell-mode 'emacs)
 
 (provide 'term/shell/config)
 ;;; term/shell/config.el ends here

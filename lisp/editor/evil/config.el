@@ -246,17 +246,14 @@ Emacs state keep their local behavior."
     (if (bound-and-true-p evil-local-mode)
         (evil-save-state (apply fn args))
       (apply fn args)))
+  ;; Built-in and package modes; a module declares its own modes' state
+  ;; with `set-evil-initial-state!'.
   (dolist (mode '(ibuffer-mode
                   bookmark-bmenu-mode
                   debugger-mode
                   dired-mode
-                  +diagnostics-mode
-                  +language-server-manager-mode
-                  +language-server-doctor-mode
-                  +compile-board-mode
                   org-agenda-mode
-				  +health-mode
-				  gptel-mode))
+                  gptel-mode))
     (evil-set-initial-state mode 'emacs))
   (add-to-list 'evil-buffer-regexps '("^\\*portal.*\\*$" . nil))
   (dolist (hook '(ibuffer-mode-hook

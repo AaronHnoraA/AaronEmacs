@@ -27,7 +27,7 @@
 (declare-function lsp-session-server-id->folders "lsp-mode" (session))
 (declare-function lsp-java--get-root "lsp-java" ())
 (declare-function +debug-register-adapter-spec "tools/debugger/config" (name &rest plist))
-(declare-function +register-language-server-feature "tools/lsp/config")
+(declare-function set-language-server-feature! "tools/lsp/config")
 (declare-function +lsp/mode-ensure "tools/lsp/config" ())
 (declare-function +language-server--set-struct-slot
                   "tools/lsp/config" (object type slot value))
@@ -416,7 +416,7 @@ inside the one selected root."
       ".cache/"
       (+lsp-java--target-workspace-directory context root)))))
 
-(+register-language-server-toolchain-provider
+(set-language-server-toolchain-provider!
  'java '(java-mode java-ts-mode)
  #'+lsp-java--java-profile
  :apply #'+lsp-java--apply-toolchain
@@ -446,8 +446,8 @@ inside the one selected root."
 ;; `lsp-java' registers the JDTLS clients itself, so this records the route
 ;; for the Hub/Doctor and declares the feature that must be loadable before
 ;; a Java buffer may start a server.
-(when (fboundp '+register-language-server-feature)
-  (+register-language-server-feature
+(when (fboundp 'set-language-server-feature!)
+  (set-language-server-feature!
    '(java-mode java-ts-mode) 'lsp-java
    :label "Eclipse JDT LS (lsp-java)"
    :executables '("java")

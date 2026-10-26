@@ -103,7 +103,7 @@ Projectile and ordinary file navigation keep seeing the real project.")
 (declare-function +language-server--merge-values
                   "tools/lsp/config" (base override))
 
-(defun +register-language-server-runtime-provider
+(defun set-language-server-runtime-provider!
     (name resolver &rest properties)
   "Register runtime provider NAME using RESOLVER.
 

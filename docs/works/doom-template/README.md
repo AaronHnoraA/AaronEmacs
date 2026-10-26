@@ -193,6 +193,12 @@ Doom 的做法：
   - **声明**：`aaron!` 改用新的模块键，原先由 `tools/lsp` 连带加载的 lang 模块、`noema/jupyter`、`checkers/grammar` 和 `config/compile` 在它们实际加载的位置补上声明。
   - **删除**：`init-mail`、`init-stock`、`init-ignored`（空模块），`lisp/roam/` 下一个无主的编辑器备份文件。
   - **验证**：迁移前的启动状态快照按改名表换算后，与迁移后的快照逐行比较，剩下的差异只有比较脚本的编码误差和主机名变化（`Mac` → `AaronMac.local`）。全部 Makefile 测试目标通过；`agenda-apple-test` 卡在 Node 版本，与本改动无关。`remote-transfer-test` 原本就跑不起来，修好 Makefile 后有 4 项失败，迁移前同样失败。Noema 测试 3360 项通过。另外把每个测试文件在新旧两棵树上各跑一遍，逐项比对结果。
-- [ ] P1c 注册 API（见 [comparison.md](comparison.md) 第 5 节）
+- [x] P1c 注册 API（[comparison.md](comparison.md) 第 5 节，[module-system.md](../../design/module-system.md) “注册接口”）：
+  - **popup**：`set-popup-rule!` / `set-popup-rules!` 放在 `ui/popup/autoload/`，shackle 由 `ui/popup` 统一管理，7 条开发 buffer 规则分别归入它们所属的模块。
+  - **evil 状态**：新增 `set-evil-initial-state!`，12 处改用它；本配置自己的 board mode 从 `editor/evil` 的集中列表搬回各自模块。
+  - **LSP 注册**：5 个函数改名为 `set-…!`。
+  - **删除**：从未被调用的 `set-company-backends-for!`，以及两处从未定义、只有 `fboundp` 保护的偏好注册调用。
+  - **autoloads**：目录模块的 autoloads 生成后，路径改为相对 `lisp/`。
+  - **验证**：启动状态只多出 `module-autoloads` 这个 feature；`evil-emacs-state-modes` 成员不变；`shackle-rules` 仍是 23 条，`compilation-mode` 仍排第一，其余开发规则之间的谓词互不重叠。core 50 / lsp 131 / ui 96 项测试通过。
 - [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。只列候选，不改用户习惯，等用户决定。
 - [x] P1e 模块目录比对：[comparison.md](comparison.md) 第 1 节。

@@ -150,7 +150,7 @@ Raycast 扩展只调用 `bin/emacs-app`；新增外部入口放进 `bin/`，并�
 | 新本地模块 | 所属目录 + `init-modules.el` 中按依赖插入 |
 | 可调设置 | `config-register` + `etc/config-store.el` |
 | 文件/进程/网络/环境 | `remote-*` API；缺能力就扩展框架并实现 native 与远程 backend |
-| 语言服务器 | `+register-language-server`，语言模块不维护本地/远程两套 |
+| 语言服务器 | `set-language-server!`，语言模块不维护本地/远程两套 |
 | Noema 页面行为 | Noema 仓库 `pages/` 或 `src/cm6/`，不在 placeholder buffer 上实现 |
 | Noema 数据、搜索、引用 | Go kernel；Node/Emacs 只转发与显示 |
 | `.noema` 语义 | Noema `lisp/noema-research*.el` 与 kernel `noema/research` |

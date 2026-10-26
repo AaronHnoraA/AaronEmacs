@@ -865,7 +865,7 @@ reporting on runs on that buffer's target, not on the client machine."
     (aaron-ui-board-insert-empty "No source buffer.")))
 
 (defun +language-server-manager--insert-routing-section ()
-  "Insert the language servers registered by `+register-language-server'."
+  "Insert the language servers registered by `set-language-server!'."
   (+language-server-manager--assert-view-buffer)
   (let ((entries (+language-server-program-entries)))
     (aaron-ui-board-insert-section "Registered Language Servers" (length entries))
@@ -1266,6 +1266,9 @@ These are the \"Error processing message\" lines in *Messages*."
 
 (aaron-leader!
   "c s" '(:def language-server-menu :which-key "language server"))
+
+;; Boards start in Emacs state.
+(set-evil-initial-state! '(+language-server-manager-mode +language-server-doctor-mode) 'emacs)
 
 (provide 'tools/lsp-hub/config)
 ;;; tools/lsp-hub/config.el ends here

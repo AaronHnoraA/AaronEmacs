@@ -1746,7 +1746,7 @@ target; outside it, ordinary client-side lookups must be untouched."
               ((symbol-function 'make-lsp-client) (lambda (&rest args) args))
               ((symbol-function 'lsp-register-client)
                (lambda (value) (setq client value))))
-      (+register-language-server
+      (set-language-server!
        '(latex-mode) '("texlab")
        :server-id 'test-latex
        :activation-fn (lambda (&rest _) t)))
@@ -1771,7 +1771,7 @@ analyzes anything without this notification."
                (lambda (settings)
                  (push (list lsp--cur-workspace settings) sent)
                  (push 'announce order))))
-      (+register-language-server
+      (set-language-server!
        '(python-mode) '("pyright-langserver" "--stdio")
        :server-id 'test-announce
        :initialized-fn (lambda (_workspace) (push 'custom order)))

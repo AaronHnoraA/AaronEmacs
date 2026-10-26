@@ -102,6 +102,11 @@ When adding a module:
   `:autoload` or `:doctor` instead of hand-written `require`/`autoload`
   calls.  `:core`, `:os` and `:remote` always load first: the Remote
   framework is the layer every other module stands on.
+- Declare what the module needs through the `set-…!` interfaces rather than
+  by editing another module: popups with `set-popup-rule!`, initial Evil
+  states with `set-evil-initial-state!`, language servers with
+  `set-language-server!` and its siblings.  They are autoloaded from their
+  owning module's `autoload/`, so they work at load time in any order.
 - Do not reorder the declaration casually: load order still decides hook
   order and key ownership.  Compare the startup state before and after a
   reorder, and check `M-x module-board` for key conflicts (two modules
@@ -278,8 +283,8 @@ rules below when touching the boundary so the work stays reusable.
 
 This config already has maintenance and workflow entry points. Reuse them:
 
-- LSP: `+register-language-server`,
-  `+register-language-server-feature`, `+language-server/manager`, and
+- LSP: `set-language-server!`,
+  `set-language-server-feature!`, `+language-server/manager`, and
   `+language-server/doctor`.
 - Jupyter: the Noema bridge under `lisp/noema/jupyter/` —
   `runtime` (kernelspec discovery, target process, connection file, the
@@ -518,9 +523,9 @@ LSP:
 - File-backed programming buffers auto-start only when a registered client and
   target-side executable are available.  Manual ensure reports missing tools;
   automatic startup stays quiet.
-- Custom clients go through `+register-language-server`; package-owned
+- Custom clients go through `set-language-server!`; package-owned
   clients such as JDTLS are declared through
-  `+register-language-server-feature`.
+  `set-language-server-feature!`.
 - LSP is the strictest consumer of the Remote-first rule.  One logical
   workspace root and target context must determine document URIs, server
   process placement, executable lookup, environment/toolchain, file watchers,

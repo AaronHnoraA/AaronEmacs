@@ -357,15 +357,17 @@ breadcrumb 不继承 tab 的切换/关闭行为；
 
 如果你是新增某个语言服务器映射：
 
-- `lsp-mode` 例外路由，优先用 `+register-lsp-mode-preference`
-- 自定义 Eglot server，优先用 `+register-eglot-server-program`
+- 自定义 lsp-mode client 用 `set-language-server!`；包自带的 client（如 JDTLS）用
+  `set-language-server-feature!` 声明
+- 工具链和运行时 provider 用 `set-language-server-toolchain-provider!` /
+  `set-language-server-runtime-provider!`
 - server 默认放在 workspace target；不要用 `file-remote-p` 注册另一套 contact
 - executable、环境和 URI 必须从 server 所属 logical root 推导，不能依赖当前
   buffer 恰好位于本地还是远端
 - client-side UI helper 必须显式声明 client placement，并通过 Remote bridge/channel
   连接 target peer
 
-不要再到处散落手写 `add-to-list 'eglot-server-programs`。
+不要在语言模块里手写 `lsp-register-client`，也不要启用 Eglot：lsp-mode 是唯一的语言服务器客户端。
 
 ## 11. 我要改远程和终端行为
 

@@ -5,7 +5,7 @@
 ;; syntax/indent/unicode-input building blocks without pulling in
 ;; lean4-mode.el itself, whose own client registration would compete with the
 ;; one declared here.  LSP is driven by lsp-mode through
-;; `+register-language-server\='; the Lean-specific notifications
+;; `set-language-server!\='; the Lean-specific notifications
 ;; ($/lean/fileProgress, incremental publishDiagnostics, lean/restartFile)
 ;; live in lang/lean/lsp.el.  The xwidget infoview is in
 ;; lang/lean/infoview.el.
@@ -40,7 +40,7 @@
 (declare-function lean4-eri-indent-reverse "lean4-eri")
 (declare-function quail-show-key "quail")
 (declare-function aaron-package-ensure-vc "init-package-vc")
-(declare-function +register-language-server "tools/lsp/config")
+(declare-function set-language-server! "tools/lsp/config")
 (declare-function +lsp-mode-start-now "tools/lsp/config")
 (declare-function +language-server-executable-find "tools/lsp/config" (program))
 (declare-function +project-current-root "tools/project/config")
@@ -1007,8 +1007,8 @@ compete with the one this module declares."
     (advice-add 'lsp-managed-mode :around #'lean--lsp-managed-mode-a))
   (add-hook 'lsp-managed-mode-hook #'lean--lsp-managed-mode-log-h)
   (add-to-list 'lsp-language-id-configuration '(lean-mode . "lean4"))
-  (when (fboundp '+register-language-server)
-    (+register-language-server
+  (when (fboundp 'set-language-server!)
+    (set-language-server!
      'lean-mode
      (lean--lsp-connection)
      :server-id 'lean4

@@ -17,7 +17,7 @@
 (declare-function +language-server-executable-available-p "tools/lsp/config" (program))
 (declare-function +language-server-set-workspace-configuration
                   "tools/lsp/config" (configuration))
-(declare-function +register-language-server "tools/lsp/config")
+(declare-function set-language-server! "tools/lsp/config")
 (declare-function remote-environment-apply "remote-environment" (environment &optional buffer))
 (declare-function remote-environment-derive "remote-environment" (environment id &rest keys))
 (declare-function remote-environment-ensure "remote-environment" (&optional context force callback))
@@ -142,8 +142,8 @@
   (add-hook hook #'+js-ts-language-server-setup-h))
 
 (with-eval-after-load 'lsp-mode
-  (when (fboundp '+register-language-server)
-    (+register-language-server
+  (when (fboundp 'set-language-server!)
+    (set-language-server!
      '(js-mode js2-mode js-ts-mode js-jsx-mode
        typescript-mode typescript-ts-mode tsx-ts-mode)
      (lambda ()

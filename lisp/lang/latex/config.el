@@ -18,7 +18,7 @@
 (declare-function aaron-ui-color "aaron-ui" (token &optional fallback variant))
 (declare-function +language-server-executable-find "tools/lsp/config" (program))
 (declare-function yas-minor-mode "yasnippet" (&optional arg))
-(declare-function +register-language-server "tools/lsp/config")
+(declare-function set-language-server! "tools/lsp/config")
 
 (defcustom +zotero-better-bibtex-rpc-url
   "http://127.0.0.1:23119/better-bibtex/json-rpc"
@@ -436,8 +436,8 @@ texlab is preferred; digestif is the fallback."
             #'+latex-language-server-setup-h))
 
 (with-eval-after-load 'lsp-mode
-  (when (fboundp '+register-language-server)
-    (+register-language-server
+  (when (fboundp 'set-language-server!)
+    (set-language-server!
      +latex-language-server-modes
      #'+latex-language-server-command
      :server-id 'my-latex

@@ -15,8 +15,8 @@
 (declare-function +language-server-executable-find "tools/lsp/config" (program))
 (declare-function +language-server-set-workspace-configuration
                   "tools/lsp/config" (configuration))
-(declare-function +register-language-server "tools/lsp/config")
-(declare-function +register-language-server-toolchain-provider "tools/lsp/toolchain"
+(declare-function set-language-server! "tools/lsp/config")
+(declare-function set-language-server-toolchain-provider! "tools/lsp/toolchain"
                   (family modes discover &rest properties))
 (declare-function +python-imenu-create-index "lang/python/config" ())
 (declare-function +python/setup-imenu "lang/python/config" ())
@@ -403,8 +403,8 @@ target PATH) rather than whatever happens to be installed on the client."
 (add-hook 'python-ts-mode-hook #'+python-language-server-setup-h)
 
 (with-eval-after-load 'lsp-mode
-  (when (fboundp '+register-language-server)
-    (+register-language-server
+  (when (fboundp 'set-language-server!)
+    (set-language-server!
      '(python-mode python-ts-mode)
      #'+python-language-server-command
      :server-id 'my-python
@@ -416,7 +416,7 @@ target PATH) rather than whatever happens to be installed on the client."
                     "jedi-language-server")
      :note "Select the first available server from the workspace target environment.")))
 
-(+register-language-server-toolchain-provider
+(set-language-server-toolchain-provider!
  'python
  '(python-mode python-ts-mode)
  #'+python-toolchain-discover

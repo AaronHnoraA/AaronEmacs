@@ -337,5 +337,9 @@ The list includes directories that already look configured for CMake or Ninja."
   "r k" '(:def task-menu :which-key "tasks")
   "r K" '(:def task-rerun :which-key "rerun task"))
 
+;; Popup rule for this module's buffers (see ui/popup).
+(defvar +display-rules-bottom-size)
+(set-popup-rule! "\\*task\\*" :select t :align 'below :size +display-rules-bottom-size :regexp t)
+
 (provide 'tools/task/config)
 ;;; tools/task/config.el ends here

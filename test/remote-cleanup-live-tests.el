@@ -62,7 +62,7 @@ test resources and deferred source startup instead of global quiescence."
                   (buffer-string)))
           (remote-cleanup-live--write source "int clean(void) { return 1; }\n")
           (remote-cleanup-live--write edited "int edited(void) { return 2; }\n")
-          (+register-language-server
+          (set-language-server!
            'c-mode (list "python3" "-u" (remote-file-local-name peer)
                          (remote-file-local-name events))
            :server-id 'remote-cleanup-probe :executables '("python3"))

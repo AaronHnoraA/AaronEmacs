@@ -109,7 +109,7 @@ Doom 的做法：
 
 - **`set-popup-rule!` / `set-popup-rules!`**：在 `ui/popup` 的 autoload 里。各模块注册自己的弹窗规则，默认规则由 `ui/popup` 注册。
 - **`set-evil-initial-state!`**：在 `editor/evil` 的 autoload 里。模块不再自己写 `with-eval-after-load 'evil`。Remote 框架层不依赖编辑器层，所以继续直接调用。
-- **语言服务器注册改名为 `set-…!`**：`set-language-server!`、`set-language-server-feature!`、`set-lsp-mode-preference!`、`set-language-server-runtime-provider!`、`set-language-server-toolchain-provider!`。
+- **语言服务器注册改名为 `set-…!`**：`set-language-server!`、`set-language-server-feature!`、`set-language-server-runtime-provider!`、`set-language-server-toolchain-provider!`；从未定义、只有 `fboundp` 保护着调用的 `set-lsp-mode-preference!` 两处死调用删除。
 - **没有加的接口**：
   - `set-lookup-handlers!`：查找已经是 Emacs 自己的 `xref-backend-functions` 链，再加一层会和它重复；
   - `set-formatter!`：格式化只走 LSP；

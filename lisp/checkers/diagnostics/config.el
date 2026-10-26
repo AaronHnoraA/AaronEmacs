@@ -416,5 +416,12 @@ Return non-nil when BUFFER was visible."
   "c D" '(:def +diagnostics/buffer-ui :which-key "diagnostics ui")
   "c P" '(:def +diagnostics/project-ui :which-key "Flymake project list"))
 
+;; Popup rule for this module's buffers (see ui/popup).
+(defvar +display-rules-bottom-size)
+(set-popup-rule! "\\*Diagnostics:.*\\*" :select t :align 'below :size +display-rules-bottom-size :regexp t)
+
+;; Boards start in Emacs state.
+(set-evil-initial-state! '+diagnostics-mode 'emacs)
+
 (provide 'checkers/diagnostics/config)
 ;;; checkers/diagnostics/config.el ends here

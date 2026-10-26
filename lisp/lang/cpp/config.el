@@ -11,7 +11,7 @@
 
 (require 'aaron-funcs)
 
-(declare-function +register-language-server "tools/lsp/config")
+(declare-function set-language-server! "tools/lsp/config")
 (declare-function +language-server-executable-find "tools/lsp/config" (program))
 (defvar lsp-enabled-clients)
 
@@ -93,10 +93,10 @@ the client."
 (add-hook 'c++-ts-mode-hook #'+cpp-language-server-setup-h)
 
 (with-eval-after-load 'lsp-mode
-  (when (fboundp '+register-language-server)
+  (when (fboundp 'set-language-server!)
     ;; A higher priority than lsp-mode's stock clangd client so these
     ;; arguments stay authoritative.
-    (+register-language-server
+    (set-language-server!
      '(c-mode c++-mode c-ts-mode c++-ts-mode objc-mode)
      #'+cpp-clangd-command
      :server-id 'my-clangd
