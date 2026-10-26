@@ -229,3 +229,10 @@ Doom 的做法：
 | `files.el` | `doom-files--update-refs`：删除、移动文件后更新 recentf、VC、Magit、Projectile 缓存 | **吸收并修正**：`SPC f D` / `SPC f R` 之后按名字从最近文件里去掉旧路径（换成新路径）并刷新 VC 状态。审计中发现 `+delete-current-file` 调 `delete-file` 时没传 TRASH，`delete-by-moving-to-trash` 开着也直接永久删除；改为和 `delete-file`、Dired 一样默认进废纸篓，前缀参数才永久删除 |
 | `files.el` | `doom/sudo-*`、`copy/move-this-file`、`file-size`、`glob`、`file-cookie` | **已有或不需要**：`+default/sudo-*`、`+copy-current-file`、`+rename-current-file`；其余是 Doom 自己的工具函数 |
 | `ui.el` | 最大化/放大窗口、间接 narrow、退出确认、`shut-up` advice | **已有或不收**：`SPC e 1`、`narrow-or-widen`、`clone-indirect-buffer`、`shut-up!`；退出确认会挡住 Raycast 退出后台 Emacs |
+| `help.el` | `doom/help-search-load-path` | **吸收**：`elisp-search-load-path`（`+elisp/search-load-path`），把 `load-path` 上的目录整组交给 `consult-ripgrep` |
+| `help.el` | `describe-active-minor-mode`、`describe-char` 取鼠标位置、`describe-package`/`describe-autodef`/`describe-module`、报 bug | **不收**：`describe-mode` 已列出启用的 minor mode；其余是 Doom 自己的模块和包系统的帮助 |
+| `fonts.el`、`themes.el` | 字号增减、big-font 模式、`custom-set-faces!`、重载主题 | **已有**：`aaron/apply-font-config` 跟随字号变化，Emacs 29 的 `global-text-scale-adjust`，`+theme-normalize-faces` 在换主题后修 face |
+| `sessions.el` | 保存/恢复会话、`doom/restart` | **已有**：`ui/session`；重启走 `bin/emacs-app restart` |
+| `debug.el` | `doom-debug-mode`（批量打开调试变量）、`doom/info`、profiler 开关 | **已有或不需要**：`+performance/watch` 与 profiler 入口；`config-health` 输出环境信息 |
+| `projects.el`、`config.el` | 在其他项目找文件、浏览配置目录、`doom/reload` | **已有**：项目工作台、`+project/switch`；重新加载走模块系统 |
+| `store.el`、`system.el`、`process.el`、`plist.el`、`strings.el`、`git.el`、`packages.el`、`sandbox.el` | 持久化 KV、系统识别、进程辅助、plist/字符串工具、Doom 自己的 git 与包、沙盒 | **不需要**：对应本配置的 config 注册表、`os/*` 层、Remote 进程 API、`package-lock.el`；沙盒是 Doom CLI 的功能 |

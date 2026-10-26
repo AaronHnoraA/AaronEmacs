@@ -20,6 +20,8 @@
 - 以 Markdown、GitHub、Org、HTML、Slack、reStructuredText 或 AsciiDoc 格式复制
   region；没有 region 时处理整个 buffer。
 - Emacs Lisp buffer 中启用 Eros 求值反馈，并提供 Relint 检查。
+- `M-x elisp-search-load-path` 用 ripgrep 搜索 `load-path` 上的所有目录（本配置的模块
+  和已安装的包），以光标处的符号为初始输入。
 
 `SPC n c` 跳到最近一次可见文本编辑的位置，`SPC n n` 或 `M-x narrow-or-widen` 缩小/展开当前范围。Org 源码块和引用块在原 buffer 内缩小到块，其他位置缩小到 subtree。
 最近修改位置只保存在内存中；mode 关闭或 Emacs 退出时会释放 marker。

@@ -199,6 +199,22 @@ the already-installed ELPA package."
 
 
 
+;; From Doom's `doom/help-search-load-path': search the source of everything
+;; Emacs can load, the config's own modules and the installed packages alike.
+(declare-function consult-ripgrep "consult" (&optional dir initial))
+
+(defun +elisp/search-load-path (&optional initial)
+  "Search every directory on `load-path' with ripgrep.
+INITIAL, the symbol at point when called interactively, seeds the input."
+  (interactive (list (thing-at-point 'symbol t)))
+  (require 'consult)
+  (consult-ripgrep (seq-filter #'file-directory-p
+                               (delete-dups (copy-sequence load-path)))
+                   initial))
+
+(defalias 'elisp-search-load-path #'+elisp/search-load-path
+  "Search the source of every directory Emacs loads from.")
+
 (provide 'lang/elisp/config)
 
 ;;; lang/elisp/config.el ends here
