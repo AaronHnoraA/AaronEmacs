@@ -86,7 +86,7 @@
  :tools  output test task run (debugger :doctor +debug/adapter-doctor)
          debug-profile
  :ui     session
- :config maintenance (config-tools :feature config-tools) performance
+ :config maintenance (config-tools :feature config-tools) performance keyfreq
  :checkers diagnostics diagnostics-extra
  :config (health :doctor config-health) server background
  :noema  bridge search roam

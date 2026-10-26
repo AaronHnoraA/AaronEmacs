@@ -6,12 +6,14 @@
 
 (require 'config)
 (require 'general)
+(require 'aaron-keybinds)
 
 (require 'cl-lib)
 (require 'browse-url)
 (require 'aaron-open)
 (require 'subr-x)
 
+(declare-function remote-client-file-name "remote-fs" (file-name &optional adapter))
 (declare-function consult-buffer "consult" ())
 (declare-function consult-buffer-other-window "consult" ())
 (declare-function comment-or-uncomment "aaron-base" ())
@@ -510,6 +512,28 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
 
 (add-hook 'window-setup-hook #'+macos-apply-startup-window-state)
 
+
+(defun +macos/copy-file-to-clipboard ()
+  "Put the current file itself on the macOS clipboard.
+Pasting into another application (a chat, Mail, Finder) attaches the file
+rather than inserting its path.  Only a file this machine can read
+directly qualifies; a file on another target is refused."
+  (interactive)
+  (let* ((file (or buffer-file-name (user-error "Current buffer is not visiting a file")))
+         (path (or (remote-client-file-name file)
+                   (user-error "Not a file on this machine: %s" file)))
+         ;; osascript is a process of this machine, whatever the buffer's target.
+         (default-directory temporary-file-directory))
+    (unless (file-exists-p path)
+      (user-error "File does not exist: %s" path))
+    (unless (eql 0 (call-process "osascript" nil nil nil "-e"
+                                 (format "set the clipboard to (POSIX file %s)"
+                                         (prin1-to-string path))))
+      (user-error "Failed to copy file to clipboard: %s" path))
+    (message "Copied file to clipboard: %s" path)))
+
+(define-leader-key! "fg" '(:def +macos/copy-file-to-clipboard
+                           :which-key "copy file to clipboard"))
 
 (provide 'os/macos/config)
 ;;; os/macos/config.el ends here

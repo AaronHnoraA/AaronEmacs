@@ -12,6 +12,7 @@ Modules are declared, in load order, in [`lisp/init-modules.el`](../init-modules
 | [`function-keys`](function-keys/) | yes | Global function-key shortcuts | `config.el` |
 | [`health`](health/) | yes | Config health checks | `config.el` |
 | [`hyper`](hyper/) | yes | Personal Hyper command surfaces | `config.el` |
+| [`keyfreq`](keyfreq/) | yes | Command frequency statistics | `config.el` |
 | [`maintenance`](maintenance/) | yes | Migration and state maintenance helpers | `config.el` |
 | [`mouse`](mouse/) | yes | Mouse-triggered shortcut layer | `config.el` |
 | [`performance`](performance/) | yes | Runtime performance watch board | `config.el` |

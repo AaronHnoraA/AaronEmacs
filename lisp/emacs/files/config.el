@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'config)
+(require 'aaron-keybinds)
 (require 'cl-lib)
 (require 'dired)
 (require 'remote-fs)
@@ -162,6 +163,28 @@ With PARENTS-ONLY, copy their de-duplicated parent directories."
    ["Dired"
     ("s" "selected size" dired-selected-size)
     ("v" "selection buffer" dired-selection)]])
+
+(defun +files/copy-file-line ()
+  "Copy the current file's name and line as NAME:LINE.
+With an active region over several lines, copy NAME:START,END."
+  (interactive)
+  (let* ((file (or buffer-file-name (user-error "No file is visiting")))
+         (region (use-region-p))
+         (start (line-number-at-pos (if region (region-beginning) (point))))
+         (end (and region
+                   (line-number-at-pos
+                    ;; A region ending at a line start does not include that line.
+                    (if (and (> (region-end) (region-beginning))
+                             (save-excursion (goto-char (region-end)) (bolp)))
+                        (1- (region-end))
+                      (region-end)))))
+         (text (if (and end (> end start))
+                   (format "%s:%d,%d" (file-name-nondirectory file) start end)
+                 (format "%s:%d" (file-name-nondirectory file) start))))
+    (kill-new text)
+    (message "Copied: %s" text)))
+
+(define-leader-key! "fn" '(:def +files/copy-file-line :which-key "copy file:line"))
 
 (with-eval-after-load 'proced
   (add-hook 'proced-mode-hook

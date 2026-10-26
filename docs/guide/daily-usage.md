@@ -562,6 +562,16 @@ Agenda 卡片在启动画面最下面（Recent Files / Projects 之后、footer 
   重命名当前文件
 - `SPC f D`
   删除当前文件
+- `SPC f y`
+  复制当前文件的完整路径
+- `SPC f n`
+  复制 `文件名:行号`；有选区时复制 `文件名:起,止`（`+files/copy-file-line`）
+- `SPC f g`
+  把当前文件本身放进 macOS 剪贴板，粘贴到其他应用时是附件而不是路径；
+  只限本机文件，其他 target 上的文件会被拒绝（`+macos/copy-file-to-clipboard`）
+
+按键频率统计：首次输入后开始记录，`M-x keyfreq-show` 查看各命令的使用次数，
+数据在 `var/keyfreq.el`。
 
 ### Buffer / Bookmark `SPC b`
 

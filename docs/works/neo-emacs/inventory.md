@@ -213,3 +213,26 @@
   - `custom-file` 指向 null-device，`enable-local-variables :safe`
   - 按 `file-remote-p` 分支的项目根
   - 所有硬编码的私人路径和代理
+
+## 审计记录
+
+逐个模块审计，每项由用户批准后再动手。
+
+### common（2026-10-26，已完成）
+
+- **吸收**：
+  - keyfreq，新模块 `config/keyfreq`，首次输入后开始记录；
+  - 复制 `文件名:行号`，命令 `+files/copy-file-line`，键 `SPC f n`，只在 normal state 可用：visual 下的 `SPC` 是 `evil-forward-char`，不占用；
+  - 把文件本身放进剪贴板，命令 `+macos/copy-file-to-clipboard`，键 `SPC f g`，其他 target 上的文件会被拒绝。
+- **已一致**：`truncate-lines`、`RET`、utf-8 编码、undo-tree 持久历史和静默加载、`save-place-mode`、GC 阈值。
+- **不收**：
+  - 强制所有文件按 utf-8 读；
+  - `read-process-output-max` 1MB（现值 4MB 更大）；
+  - 递归深度 5000；
+  - `font-lock-maximum-decoration nil`；
+  - `enable-local-variables :safe`；
+  - `byte-compile-warnings`；
+  - `menu-bar-mode -1`；
+  - 写死的 emacsclient 路径；
+  - dashboard 外观；
+  - `K` 键。
