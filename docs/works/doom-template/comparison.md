@@ -431,3 +431,7 @@ Doom 的做法：
 | `tools/lookup` | 本配置的跳转是 `editor/navigation`（LSP → xref → 搜索的回退链已有）；在线搜索已有（`+browser/open-search` 与 `tools/menus` 的搜索引擎表）；Dash docset、字典、bug-reference 打开 issue 不收 |
 | `tools/ansible`、`biblio`、`collab`、`docker`、`ein`、`llm` | 用户不用 Ansible、Org 引用、CRDT 协作、Docker、EIN（Jupyter 走 Noema）；LLM 走 agent-shell/ACP |
 | `tools/debugger` | dape **已有**；断点跨会话保存（`dape-breakpoint-global-mode`，文件在已存在的 `var/dape/`）**已有**，Doom 的建目录补丁不需要 |
+| `tools/pdf` | **吸收**：再次打开 PDF 回到上次的页（Doom 用 saveplace-pdf-view 包；本配置不加包，`+pdf-save-place-a` 把页码以 `((pdf-page . N))` 记入 `save-place-alist`，`save-place-find-file-hook` 遇到非位置的条目本就跳过，`+pdf-restore-page-h` 在打开时翻到该页）。已有：大文件不询问、Evil 光标不画在页面上、HiDPI 缩放（`pdf-view-use-scaling` 默认 t）。不收：关闭时清理批注列表窗口、主题切换后刷新夜间模式颜色（用户不用批注与夜间模式） |
+| `tools/magit` | **吸收**：Magit 进程 buffer 里的 URL 可点（`goto-address-mode`，如 push 后给出的 PR 链接）。已有：细粒度 hunk diff、`long-line-threshold`、访问文件时打开折叠（第 12 节）。不收：`--tags`/`--autostash` 开关（新版 Magit 已自带）、`magit-uniquify-buffer-names`、窗口布局函数、`magit-save-repository-buffers`、提交信息规范检查与空信息时进 Insert（手感）、`magit-revision-insert-related-refs`（关掉能省远程往返，但会少掉“包含该提交的分支”信息，留给用户）、Forge 与 code-review |
+| `tools/make`、`pass`、`terraform`、`tmux`、`upload` | 构建走 `compile`/`+compile/board` 与 `make` 目标；用户不用 pass、Terraform、tmux 发送、ssh-deploy（远程文件走 Remote 框架与 `remote-files`） |
+| `tools/tree-sitter` | `treesit-auto-install-grammar` 设为 `never` 已在第 10 节吸收；语法源配方表与 ABI 选择：本配置的语法由 `tools/tree-sitter` 自行管理，未遇到 ABI 问题，不收 |

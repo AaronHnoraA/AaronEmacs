@@ -222,6 +222,10 @@ a Git repository."
   (magit-display-buffer-function 'magit-display-buffer-same-window-except-diff-v1)
   (magit-section-visibility-indicator '("▸" . "▾")))
 
+;; From Doom: URLs in Git's output (the pull-request link a push prints) can
+;; be followed from the process buffer.
+(add-hook 'magit-process-mode-hook #'goto-address-mode)
+
 ;; From Doom (magit/magit#5320): Emacs's long-line shortcuts narrow a large
 ;; status buffer around point, which breaks section motion and TAB there.
 (setq-hook! 'magit-status-mode-hook long-line-threshold nil)

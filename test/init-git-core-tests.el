@@ -37,6 +37,13 @@
     #'+diff-hl-dired-status-files-with-full-output-a
     'diff-hl-dired-status-files)))
 
+(ert-deftest +git-process-buffer-links-are-buttons ()
+  "A URL printed by git in the Magit process buffer can be followed."
+  (require 'magit-process)
+  (with-temp-buffer
+    (magit-process-mode)
+    (should goto-address-mode)))
+
 (provide 'init-git-core-tests)
 
 (ert-deftest +magit-status-turns-off-long-line-shortcuts ()

@@ -539,7 +539,8 @@ Remote target 解析：本地 target 用本机 PATH 上的 latexmk，远程 targ
 远程 target 上的 buffer 目前会在执行构建命令时直接报错拒绝：AUCTeX 自身的进程启动用的是
 `start-process`，遇到远程 `default-directory` 时会静默改到本机 `~` 下编译，而不是报错，所以
 配置选择显式拒绝而不是让它悄悄编译错文件。texlab 提供的诊断/补全在远程 target 上仍然可用。
-PDF 的阅读、批注、搜索仍由 PDF Tools 提供。
+PDF 的阅读、批注、搜索仍由 PDF Tools 提供。再次打开一个 PDF 时回到上次看到的页
+（页码随 `save-place-mode` 一起保存）。
 
 ### 启动 Dashboard 的 Agenda 卡片
 

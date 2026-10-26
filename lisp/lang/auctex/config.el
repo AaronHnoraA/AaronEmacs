@@ -13,6 +13,15 @@
 (require 'subr-x)
 (require 'transient)
 
+(declare-function image-mode-window-get "image-mode" (prop &optional winprops))
+(declare-function pdf-view-goto-page "pdf-view" (page &optional window))
+(declare-function save-place-load-alist-from-file "saveplace" ())
+(defvar save-place)
+(defvar save-place-alist)
+(defvar save-place-loaded)
+(defvar save-place-abbreviate-file-names)
+(defvar save-place-ignore-files-regexp)
+
 (declare-function aaron-typography-setup-prose-buffer "aaron-base")
 (declare-function +mouse/code-actions "config/mouse/config" (event))
 (declare-function evil-local-set-key "evil-core" (state key def))
@@ -243,6 +252,48 @@ target rather than one path baked in at load time."
   :around #'abort-if-file-too-large
   (unless (string-match-p "\\.pdf\\'" filename)
     (apply fn size op-type filename args)))
+
+;; From Doom (saveplace-pdf-view): `save-place-mode' remembers point, which
+;; means nothing in a PDF, so a paper always reopened at page 1.  Its page now
+;; goes into `save-place-alist' as ((pdf-page . N)); `save-place-find-file-hook'
+;; leaves such an entry alone because it is not a position.
+(defun +pdf--save-place-item ()
+  "Return the `save-place-alist' key of the current PDF, or nil."
+  (when (and buffer-file-name
+             (not (and save-place-ignore-files-regexp
+                       (string-match-p save-place-ignore-files-regexp
+                                       buffer-file-name))))
+    (if save-place-abbreviate-file-names
+        (abbreviate-file-name buffer-file-name)
+      buffer-file-name)))
+
+(defun +pdf-save-place-a (fn &rest args)
+  "Record the page of a PDF buffer, else call FN with ARGS."
+  (if (not (derived-mode-p 'pdf-view-mode))
+      (apply fn args)
+    (or save-place-loaded (save-place-load-alist-from-file))
+    (when-let* ((item (+pdf--save-place-item))
+                ;; `pdf-view-current-page' is this, as a macro.
+                (page (ignore-errors
+                        (image-mode-window-get
+                         'page (or (get-buffer-window nil t) t)))))
+      (setq save-place-alist (assoc-delete-all item save-place-alist))
+      (when (and save-place (> page 1))
+        (push (list item (cons 'pdf-page page)) save-place-alist)))))
+
+(defun +pdf-restore-page-h ()
+  "Open a PDF at the page it was left on."
+  (when-let* (((derived-mode-p 'pdf-view-mode))
+              ((not revert-buffer-in-progress))
+              (item (+pdf--save-place-item))
+              (place (cdr (assoc item save-place-alist)))
+              ((consp place))
+              (page (alist-get 'pdf-page place)))
+    (ignore-errors (pdf-view-goto-page page))))
+
+(after! saveplace
+  (advice-add 'save-place-to-alist :around #'+pdf-save-place-a)
+  (add-hook 'save-place-after-find-file-hook #'+pdf-restore-page-h))
 
 (defun +pdf-view-setup-interaction ()
   "Configure local interaction keys for PDF buffers."
