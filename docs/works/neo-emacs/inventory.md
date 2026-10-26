@@ -326,3 +326,23 @@
   - 两处 agent 选择器合并为一份 `+agent-shell-agents`。
 - **不收**：Cursor（用户不用）；两行会话头（和 Portal 的 tab 条冲突）；右侧面板和 `; d`；隐藏 modeline 等个人偏好。
 - **待做**：固定输入窗（compose），需要先写设计文档。
+
+### eglot 的通用 LSP 逻辑（2026-10-26，学习完成）
+
+- **吸收并推广**：
+  - neo 只把 JDT 的一条补全命令改成异步；这里归纳为“编辑不等 server”的契约 A1–A3，写在 `docs/design/lsp-workflow.md`，实现在 `lisp/tools/lsp/completion.el`。
+  - A1：选中补全后附带的 server 命令一律异步发送，包括先异步 resolve、再在回调里执行的那条路径。
+  - A2：浏览候选时，echo area 的签名不再同步 resolve，原来每按一次上下键都要等 server 一个来回。
+  - A3：用户主动触发的命令保持同步。
+- **已有或更好**：
+  - TRAMP 的性能设置；
+  - 按 workspace 管理的 server 设置，以及启动后主动发送 `didChangeConfiguration`；
+  - 异步连接。
+- **不收**：
+  - 补全注释去重（只有 JDT 会重复，弹窗宽度本来就限制在 100 列）；
+  - JDT 的虚拟文件和命令；
+  - corfu 调参；
+  - `vertico` 键；
+  - `flymake` 30 秒；
+  - eldoc 单行、高亮斜体和 modeline 提示，这三项是偏好，用户没有选。
+- **发现**：lsp-mode 对 TypeScript snippet 补全的 resolve 补丁只认 `ts-ls`，对本配置的 `+typescript` 不生效。已在 lsp-workflow.md 记为缺口 G-A1，待用真实 server 验证。

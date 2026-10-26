@@ -165,6 +165,38 @@ VS Code languageclient、Eglot 一致（`+language-server--announce-configuratio
 通知内容是该 workspace 自己的 override，没有则为 `{}`；完整设置仍经
 `workspace/configuration` 回答。注册时传入的 `:initialized-fn` 在它之后运行。
 
+# Editing Never Waits On The Server
+
+lsp-mode 在几处会**同步**等待 server：选中补全后执行补全项附带的命令，以及在补全
+列表里移动选择时取候选的签名。本地 server 一个来回只有几毫秒，所以感觉不到；远程
+target 上一个来回可能有几百毫秒，每次选中补全、每按一次上下键都会卡住。规则是：
+**用户没有主动等待结果的地方，一律不同步等 server**。实现在
+`lisp/tools/lsp/completion.el`。
+
+- **A1 补全项命令异步**：选中补全后，补全项附带的 server 命令
+  （`workspace/executeCommand`，如 JDT 的 `java.completion.onDidSelect`、
+  TypeScript 的自动导入）异步发送，失败只记入 `*lsp-log*`，不报错。
+  补全项需要先 `completionItem/resolve` 才知道命令时（resolve 本来就是异步的，
+  命令会在它的回调里执行），回调里的命令同样异步。客户端自己实现的命令
+  （`lsp-execute-command` 方法、action handler）照常执行。
+  测试：`lsp-async-a1-completion-command-is-sent-async`、
+  `lsp-async-a1-command-after-async-resolve-is-async`。
+- **A2 浏览候选不等 server**：Company 的 echo-area 元信息（`:company-docsig`）
+  在候选未 resolve 时，若列表里已带 detail 就直接显示，不发请求；没有 detail 时
+  异步 resolve，结果回来且该候选仍被选中时刷新显示。测试：
+  `lsp-async-a2-docsig-uses-unresolved-detail`、
+  `lsp-async-a2-docsig-resolves-later-and-refreshes`。
+- **A3 主动操作保持同步**：用户显式触发并要看结果的命令（code action、`M-x`
+  执行的 server 命令、文档弹窗 `doc-buffer`）不受 A1/A2 影响。测试：
+  `lsp-async-a3-explicit-commands-stay-sync`。
+
+已知差距：
+
+- **G-A1** lsp-mode 对 TypeScript 的 snippet 补全有一个先 resolve 再插入的补丁
+  （lsp-mode #3498），但它只认 server-id `ts-ls`；本配置的 TypeScript client 是
+  `+typescript`，这个补丁不生效。是否会插入不完整的文本需要用真实
+  typescript-language-server 验证；补丁本身是同步请求，验证后再决定是否接入。
+
 # Current Command Surface
 
 最常用入口：

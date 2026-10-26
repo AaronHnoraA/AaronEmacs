@@ -3686,6 +3686,7 @@ jit-lock renderer continues to materialize faces only around visible text."
 (require 'lang/latex/config)
 (require 'tools/lsp/change-batch)
 (require 'tools/lsp/prewarm)
+(require 'tools/lsp/completion)
 
 (provide 'tools/lsp/config)
 ;;; tools/lsp/config.el ends here
