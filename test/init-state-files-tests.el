@@ -116,4 +116,36 @@
       (config-set 'recentf-autosave-interval old t t)
       (unless recentf-mode-was (recentf-mode -1)))))
 
+(ert-deftest +files-guess-mode-after-saving-a-shebang ()
+  "A shown fundamental-mode file gets its mode once a shebang is saved."
+  (require 'emacs/files/config)
+  (let* ((dir (make-temp-file "guess-mode-" t))
+         (file (expand-file-name "tool" dir))
+         (buffer (find-file-noselect file)))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (should (eq major-mode 'fundamental-mode))
+          (insert "#!/bin/sh\necho hi\n")
+          (save-buffer)
+          (should (derived-mode-p 'sh-base-mode)))
+      (with-current-buffer buffer (set-buffer-modified-p nil))
+      (kill-buffer buffer)
+      (delete-directory dir t))))
+
+(ert-deftest +files-guess-mode-leaves-background-buffers ()
+  "A buffer saved while not shown keeps its mode."
+  (require 'emacs/files/config)
+  (let* ((dir (make-temp-file "guess-mode-" t))
+         (file (expand-file-name "tool" dir))
+         (buffer (find-file-noselect file)))
+    (unwind-protect
+        (with-current-buffer buffer
+          (insert "#!/bin/sh\n")
+          (save-buffer)
+          (should (eq major-mode 'fundamental-mode)))
+      (with-current-buffer buffer (set-buffer-modified-p nil))
+      (kill-buffer buffer)
+      (delete-directory dir t))))
+
 ;;; init-state-files-tests.el ends here

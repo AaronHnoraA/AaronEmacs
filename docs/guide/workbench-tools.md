@@ -36,6 +36,9 @@
   `image-crop` 提供，文件菜单不再重复列出。
 - 新文件缺少父目录时默认询问是否创建；可把
   `+files-create-parent-directories` 改成 `always` 或 `never`。
+- 以 `fundamental-mode` 打开的文件（没有扩展名、内容也认不出）保存后会重新判断
+  major mode，例如刚写上 `#!/bin/sh` 的脚本保存后进入 shell 模式；只对当前窗口
+  显示的 buffer 生效，后台保存的 buffer 不会被换模式。
 - Proced buffer 自动刷新；`SPC o p` 打开 Proced。
 
 路径和外部进程都沿用现有 Remote contract。远程文件会转换为 target-native 参数，

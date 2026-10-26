@@ -36,6 +36,20 @@
 
 (add-hook 'find-file-not-found-functions #'+files-create-parent-directories-h)
 
+;; From Doom: a file first saved without a recognizable name or content may
+;; have gained a shebang or a mode line since it was opened.  Only a buffer
+;; shown in the selected window is re-guessed, so programs saving buffers in
+;; the background never change a mode under them.
+(defun +files-guess-mode-h ()
+  "Choose a major mode for a `fundamental-mode' file buffer after saving it."
+  (when (eq major-mode 'fundamental-mode)
+    (let ((buffer (or (buffer-base-buffer) (current-buffer))))
+      (when (and (buffer-file-name buffer)
+                 (eq buffer (window-buffer (selected-window))))
+        (set-auto-mode)))))
+
+(add-hook 'after-save-hook #'+files-guess-mode-h)
+
 (defun +dired--paths-in-region (beg end)
   "Return Dired paths represented by lines between BEG and END."
   (let (paths)
