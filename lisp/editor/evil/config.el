@@ -155,6 +155,50 @@ Emacs state keep their local behavior."
     (with-current-buffer buffer
       (+evil-sync-shift-width))))
 
+;; Native Vim (Neovim's default `formatoptions' has `j') drops the comment
+;; leader of a joined line when both lines are comments: "// a" J "// b"
+;; gives "// a b", where Evil keeps "// a // b".  Doom patches the same.
+(defun +evil--drop-joined-comment-leader ()
+  "Delete the next line's comment leader when this line ends in a comment."
+  (when (and comment-start
+             (save-excursion (nth 4 (syntax-ppss (line-end-position)))))
+    (save-excursion
+      (forward-line 1)
+      (skip-chars-forward " \t")
+      (let ((leader-start (point)))
+        (cond
+         ((and comment-start-skip
+               (eq (save-excursion
+                     (comment-search-forward (line-end-position) t))
+                   leader-start))
+          (comment-search-forward (line-end-position) t)
+          (delete-region leader-start (point)))
+         ;; A middle line of a block comment: the mode's `comment-continue',
+         ;; or the conventional "*" of C-like comments (not a closing "*/").
+         ((and (nth 4 (syntax-ppss leader-start))
+               (not (looking-at "\\*/"))
+               (looking-at
+                (concat (if (and comment-continue
+                                 (not (string-blank-p comment-continue)))
+                            (regexp-quote (string-trim comment-continue))
+                          "\\*+")
+                        "[ \t]*")))
+          (delete-region leader-start (match-end 0))))))))
+
+(defun +evil-join-comments-a (fn &rest args)
+  "Run the `evil-join' FN with ARGS, dropping comment leaders as Vim does."
+  (letf! (defadvice join-line (:before (&rest _) +evil--comment-leader)
+           (+evil--drop-joined-comment-leader))
+    (apply fn args)))
+
+;; Vim's gq and gw keep the spacing inside a line; `fill-region' squeezes it.
+(defun +evil-fill-no-squeeze-a (fn &rest args)
+  "Run the Evil fill FN with ARGS without squeezing spaces."
+  (letf! (defadvice fill-region (:around (fill from to &optional justify _nosqueeze to-eop)
+                                         +evil--no-squeeze)
+           (funcall fill from to justify t to-eop))
+    (apply fn args)))
+
 (defun +evil/avy-goto-char-in-line (char)
   "Jump to a character on the current line using `avy'."
   (interactive (list (read-char "char: " t)))
@@ -279,6 +323,9 @@ Emacs state keep their local behavior."
     (add-hook hook #'+evil-disable-local-mode-h))
   ;; Silence line out of range error.
   (shut-up! #'evil-indent)
+  (advice-add #'evil-join :around #'+evil-join-comments-a)
+  (advice-add #'evil-fill :around #'+evil-fill-no-squeeze-a)
+  (advice-add #'evil-fill-and-move :around #'+evil-fill-no-squeeze-a)
   ;; Remove the former split handlers as well, so reloading this module fixes
   ;; an already-running Emacs instead of leaving their short-circuit order.
   (remove-hook 'aaron-escape-hook #'+evil-force-normal-state-h)

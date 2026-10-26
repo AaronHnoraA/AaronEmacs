@@ -157,3 +157,14 @@ Doom 的做法：
 | `bidi-display-reordering 'left-to-right`、`gnutls-*`、`tls-program` | `t`；NSM `medium` | **不收**：前者文档里只有 `nil` 特殊，`'left-to-right` 与 `t` 等价；TLS 由 NSM 交互确认，Doom 只在 batch 下报错 |
 | `minibuffer-prompt-properties` 加 `cursor-intangible`，minibuffer 里开 `cursor-intangible-mode` | 只读提示符，光标能进去 | **吸收**（第 2 节的候选）：光标进了提示符只会得到 “Text is read-only”，没有用途；放在 `completion/minibuffer` |
 | `echo-keystrokes`、`blink-matching-paren`、`display-line-numbers-widen`、`split-*-threshold`、`window-divider` | 各有本配置的值 | **不收**：属于手感和外观，第 2 节已列为候选，保持现状 |
+
+### `editor/evil` 的补丁
+
+| Doom | 处理 |
+| --- | --- |
+| `+evil-join-a`：`J` 去掉注释符 | **吸收并简化**：只在 `evil-join` 期间给 `join-line` 加前置动作，用 `comment-search-forward` 和语法状态判断；C 块注释中间行的 `*` 也去掉。对齐 Neovim 默认的 `formatoptions` `j` |
+| `gq`/`gw` 不压缩空格 | **吸收**：Vim 本来不压缩 |
+| `evil-ex-search` 后 `isearch-clean-overlays` | **不收**：修的是 org-fold 的折叠状态，本配置不用 Org |
+| `evil-visual-update-x-selection-p nil` | **不收**：macOS 上 PRIMARY 是 Emacs 内部模拟的，不起进程，也不碰系统剪贴板 |
+| `=` 后光标不动、2–9 号 mark 全局、`o`/`O` 续写注释、分屏后居中 | **不收**：都偏离原生 Vim 的行为 |
+| Ex 文件名修饰符 `%:p:h` | **不收**：Doom 用 `:override` 换掉 `evil-ex-replace-special-filenames`，丢了 Evil 对远程文件取 localname 的处理（`/fs:` buffer 里的 `:!` 会拿到错误路径）；找同目录文件本配置走 Consult 和 Dirvish |
