@@ -3,14 +3,14 @@
 ;;; Code:
 
 (require 'ert)
-(require 'init-lsp)
-(require 'init-snippets)
-(require 'init-python)
-(require 'init-js2)
-(require 'init-java)
+(require 'tools/lsp/config)
+(require 'editor/snippets/config)
+(require 'lang/python/config)
+(require 'lang/javascript/config)
+(require 'lang/java/config)
 (require 'lsp-mode)
 
-(defun my/lsp-test-registration (method)
+(defun +lsp-test-registration (method)
   "Return an lsp-mode registration object for METHOD."
   (if lsp-use-plists
       (list :method method)
@@ -18,7 +18,7 @@
       (puthash "method" method registration)
       registration)))
 
-(defun my/lsp-test-object (&rest pairs)
+(defun +lsp-test-object (&rest pairs)
   "Return an LSP hash object initialized from keyword/value PAIRS."
   (let ((object (make-hash-table :test #'equal)))
     (while pairs
@@ -29,33 +29,33 @@
   "A stalled remote CAPF does not block every subsequent completion."
   (with-temp-buffer
     (setq-local lsp-managed-mode t
-                my/lsp-remote-change--eligible t)
-    (let ((my/lsp-remote-completion-timeout 1.5)
-          (my/lsp-remote-completion-retry-delay 3)
+                +lsp-remote-change--eligible t)
+    (let ((+lsp-remote-completion-timeout 1.5)
+          (+lsp-remote-completion-retry-delay 3)
           (lsp-response-timeout 10)
           seen (calls 0))
       (should
        (null
-        (my/lsp-remote-completion--candidates-a
+        (+lsp-remote-completion--candidates-a
          (lambda (&rest _)
            (setq seen lsp-response-timeout)
            (cl-incf calls)
            (error "Timeout while waiting for response.  Method: textDocument/completion")))))
       (should (= seen 1.5))
       (should (= calls 1))
-      (should (numberp my/lsp-remote-completion--retry-at))
-      (should (null (my/lsp-remote-completion--candidates-a
+      (should (numberp +lsp-remote-completion--retry-at))
+      (should (null (+lsp-remote-completion--candidates-a
                      (lambda (&rest _) (cl-incf calls)))))
       (should (= calls 1))
-      (setq my/lsp-remote-completion--retry-at (- (float-time) 1))
+      (setq +lsp-remote-completion--retry-at (- (float-time) 1))
       (should (equal
-               (my/lsp-remote-completion--candidates-a
+               (+lsp-remote-completion--candidates-a
                 (lambda (&rest _) (cl-incf calls) '("print")))
                '("print")))
-      (should-not my/lsp-remote-completion--retry-at)
-      (setq-local my/lsp-remote-change--eligible nil)
+      (should-not +lsp-remote-completion--retry-at)
+      (setq-local +lsp-remote-change--eligible nil)
       (should (equal
-               (my/lsp-remote-completion--candidates-a
+               (+lsp-remote-completion--candidates-a
                 (lambda (&rest _)
                   (setq seen lsp-response-timeout)
                   '("local")))
@@ -69,12 +69,12 @@
     (setq-local lsp-managed-mode t)
     (cl-letf (((symbol-function 'remote-process-write-cost)
                (lambda (_file) 'queued)))
-      (my/lsp-remote-change--managed-h)
-      (should my/lsp-remote-change--eligible))
+      (+lsp-remote-change--managed-h)
+      (should +lsp-remote-change--eligible))
     (cl-letf (((symbol-function 'remote-process-write-cost)
                (lambda (_file) 'direct)))
-      (my/lsp-remote-change--managed-h)
-      (should-not my/lsp-remote-change--eligible))
+      (+lsp-remote-change--managed-h)
+      (should-not +lsp-remote-change--eligible))
     (setq buffer-file-name nil)
     (set-buffer-modified-p nil)))
 
@@ -82,17 +82,17 @@
   "A slow CAPF is bounded even if a newer LSP release changes its error."
   (with-temp-buffer
     (setq-local lsp-managed-mode t
-                my/lsp-remote-change--eligible t)
-    (let ((my/lsp-remote-completion-timeout 0.15)
+                +lsp-remote-change--eligible t)
+    (let ((+lsp-remote-completion-timeout 0.15)
           (lsp-response-timeout 10)
           (started (float-time)))
       (should-not
-       (my/lsp-remote-completion--candidates-a
+       (+lsp-remote-completion--candidates-a
         (lambda (&rest _)
           (sit-for 1)
           '("late"))))
       (should (< (- (float-time) started) 0.8))
-      (should (numberp my/lsp-remote-completion--retry-at)))))
+      (should (numberp +lsp-remote-completion--retry-at)))))
 
 (ert-deftest lsp-remote-company-recovery-retries-only-unchanged-input ()
   "A restored server may retry once only for the original visible edit."
@@ -110,19 +110,19 @@
                                  num-nonmacro-input-events)))
               (cl-letf (((symbol-function 'company-idle-begin)
                          (lambda (&rest _) (cl-incf calls))))
-                (my/lsp-remote-completion--retry-if-unchanged buffer context)
+                (+lsp-remote-completion--retry-if-unchanged buffer context)
                 (should (= calls 1))
                 (let ((num-nonmacro-input-events
                        (1+ (nth 3 context))))
-                  (my/lsp-remote-completion--retry-if-unchanged
+                  (+lsp-remote-completion--retry-if-unchanged
                    buffer context))
                 (should (= calls 1))
                 (goto-char (point-min))
-                (my/lsp-remote-completion--retry-if-unchanged buffer context)
+                (+lsp-remote-completion--retry-if-unchanged buffer context)
                 (should (= calls 1))
                 (goto-char (point-max))
                 (insert "t")
-                (my/lsp-remote-completion--retry-if-unchanged buffer context)
+                (+lsp-remote-completion--retry-if-unchanged buffer context)
                 (should (= calls 1))))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
@@ -132,14 +132,14 @@
          (process (make-pipe-process
                    :name "lsp-completion-health-test" :noquery t))
          (buffer (generate-new-buffer " *lsp-completion-health-test*"))
-         (my/lsp-remote-completion--restart-history
+         (+lsp-remote-completion--restart-history
           (make-hash-table :test #'equal))
          callback token (restarts 0) canceled restart-source restart-reason)
     (unwind-protect
         (progn
           (with-current-buffer buffer
             (setq-local lsp-managed-mode t
-                        my/lsp-remote-change--eligible t))
+                        +lsp-remote-change--eligible t))
           (cl-letf (((symbol-function 'lsp-workspaces)
                      (lambda () (list workspace)))
                     ((symbol-function 'lsp--workspace-cmd-proc)
@@ -153,47 +153,47 @@
                        (setq callback fn)))
                     ((symbol-function 'lsp-cancel-request-by-token)
                      (lambda (value) (push value canceled)))
-                    ((symbol-function 'my/lsp-mode--workspace-key)
+                    ((symbol-function '+lsp-mode--workspace-key)
                      (lambda (_workspace)
                        '(my-python "/fs:test:/project/")))
                     ((symbol-function
-                      'my/language-server--restart-workspace-from-source)
+                      '+language-server--restart-workspace-from-source)
                      (lambda (_workspace source reason)
                        (setq restart-source source
                              restart-reason reason)
                        (cl-incf restarts))))
             (with-current-buffer buffer
-              (my/lsp-remote-completion--record-timeout)
-              (setq token (plist-get my/lsp-remote-completion--probe :token))
+              (+lsp-remote-completion--record-timeout)
+              (setq token (plist-get +lsp-remote-completion--probe :token))
               (cancel-timer
-               (plist-get my/lsp-remote-completion--probe :start-timer))
-              (my/lsp-remote-completion--probe-start
+               (plist-get +lsp-remote-completion--probe :start-timer))
+              (+lsp-remote-completion--probe-start
                buffer workspace process token)
               (should callback)
-              (should my/lsp-remote-completion--probe)
+              (should +lsp-remote-completion--probe)
               (should-not
-               (my/lsp-remote-completion--candidates-a
+               (+lsp-remote-completion--candidates-a
                 (lambda (&rest _) (error "Blocking request escaped probe"))))
               (funcall callback nil)
-              (should-not my/lsp-remote-completion--probe)
-              (should-not my/lsp-remote-completion--retry-at)
-              (setq-local my/lsp-remote-completion--probe
+              (should-not +lsp-remote-completion--probe)
+              (should-not +lsp-remote-completion--retry-at)
+              (setq-local +lsp-remote-completion--probe
                           (list :workspace workspace :process process
                                 :token (setq token (make-symbol "expired"))))
-              (my/lsp-remote-completion--probe-finish
+              (+lsp-remote-completion--probe-finish
                buffer workspace process token 'expired)
               (should (= restarts 1))
               (should (eq restart-source buffer))
               (should (eq restart-reason 'completion-health-timeout))
               (should (= (length canceled) 1))
-              (setq-local my/lsp-remote-completion--probe
+              (setq-local +lsp-remote-completion--probe
                           (list :workspace workspace :process process
                                 :token (setq token (make-symbol "again"))))
-              (my/lsp-remote-completion--probe-finish
+              (+lsp-remote-completion--probe-finish
                buffer workspace process token 'expired)
               (should (= restarts 1))
-              (my/lsp-remote-completion--managed-h)
-              (should-not my/lsp-remote-completion--retry-at))))
+              (+lsp-remote-completion--managed-h)
+              (should-not +lsp-remote-completion--retry-at))))
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (delete-process process))))
 
@@ -205,7 +205,7 @@
          (process (make-pipe-process
                    :name "lsp-completion-owner-test" :noquery t))
          (remote-workspaces (make-hash-table :test #'equal))
-         (my/lsp-remote-completion--restart-history
+         (+lsp-remote-completion--restart-history
           (make-hash-table :test #'equal))
          restarted)
     (unwind-protect
@@ -215,7 +215,7 @@
                      (lambda (_workspace) process))
                     ((symbol-function 'lsp--workspace-status)
                      (lambda (_workspace) 'initialized))
-                    ((symbol-function 'my/lsp-mode--workspace-key)
+                    ((symbol-function '+lsp-mode--workspace-key)
                      (lambda (_workspace)
                        '(my-python "/fs:test:/project/")))
                     ((symbol-function 'remote-workspace-resources)
@@ -226,12 +226,12 @@
                      (lambda (_resource) workspace))
                     ((symbol-function 'remote-workspace-state)
                      (lambda (_owner) 'reconnecting))
-                    ((symbol-function 'my/language-server--recover-lsp-resource)
+                    ((symbol-function '+language-server--recover-lsp-resource)
                      (lambda (_resource) (setq restarted t)))
                     ((symbol-function
-                      'my/language-server--restart-workspace-from-source)
+                      '+language-server--restart-workspace-from-source)
                      (lambda (&rest _) (setq restarted t))))
-            (my/lsp-remote-completion--maybe-restart workspace process)
+            (+lsp-remote-completion--maybe-restart workspace process)
             (should-not restarted)))
       (delete-process process))))
 
@@ -242,13 +242,13 @@
          (current process)
          new-process
          (sync-kind 2)
-         (my/lsp-remote-change--queues (make-hash-table :test #'eq))
-         (my/lsp-remote-change-batch-delay 60)
+         (+lsp-remote-change--queues (make-hash-table :test #'eq))
+         (+lsp-remote-change-batch-delay 60)
          fail-uri
          sent)
     (unwind-protect
         (with-temp-buffer
-          (setq-local my/lsp-remote-change--eligible t)
+          (setq-local +lsp-remote-change--eligible t)
           (cl-letf (((symbol-function 'lsp--workspace-proc)
                      (lambda (_workspace) current))
                     ((symbol-function 'lsp--workspace-sync-method)
@@ -264,20 +264,20 @@
                   (fallback (lambda (method params)
                               (setq sent
                                     (append sent (list (cons method params)))))))
-              (my/lsp-remote-change--notify-a
+              (+lsp-remote-change--notify-a
                fallback "textDocument/didChange"
                '(:textDocument (:uri "file:///a.py" :version 1)
                  :contentChanges [(:text "a")]))
-              (my/lsp-remote-change--notify-a
+              (+lsp-remote-change--notify-a
                fallback "textDocument/didChange"
                '(:textDocument (:uri "file:///a.py" :version 2)
                  :contentChanges [(:text "b")]))
               (should-not sent)
               (should (= (plist-get
-                          (gethash workspace my/lsp-remote-change--queues)
+                          (gethash workspace +lsp-remote-change--queues)
                           :count)
                          2))
-              (my/lsp-remote-change--send-a
+              (+lsp-remote-change--send-a
                (lambda (_message _process)
                  (setq sent (append sent '(request))))
                '(:method "textDocument/completion") process)
@@ -288,24 +288,24 @@
               (should (equal (plist-get (cdar sent) :contentChanges)
                              [(:text "a") (:text "b")]))
               (should (eq (cadr sent) 'request))
-              (should-not (gethash workspace my/lsp-remote-change--queues))
+              (should-not (gethash workspace +lsp-remote-change--queues))
               (setq sent nil)
-              (my/lsp-remote-change--notify-a
+              (+lsp-remote-change--notify-a
                fallback "textDocument/didChange"
                '(:textDocument (:uri "file:///a.py" :version 3)
                  :contentChanges [(:text "c")]))
-              (my/lsp-remote-change--notify-a
+              (+lsp-remote-change--notify-a
                fallback "textDocument/didSave"
                '(:textDocument (:uri "file:///a.py")))
               (should (equal (mapcar #'car sent)
                              '("textDocument/didChange"
                                "textDocument/didSave")))
               (setq sent nil)
-              (my/lsp-remote-change--notify-a
+              (+lsp-remote-change--notify-a
                fallback "textDocument/didChange"
                '(:textDocument (:uri "file:///a.py" :version 4)
                  :contentChanges [(:text "d")]))
-              (my/lsp-remote-change--request-a
+              (+lsp-remote-change--request-a
                (lambda (&rest _arguments)
                  (setq sent (append sent '(request))))
                "textDocument/completion" nil)
@@ -317,13 +317,13 @@
               (dolist (entry '(("file:///a.py" 3 "c")
                               ("file:///b.py" 1 "x")
                               ("file:///a.py" 4 "d")))
-                (my/lsp-remote-change--notify-a
+                (+lsp-remote-change--notify-a
                  fallback "textDocument/didChange"
                  (list :textDocument
                        (list :uri (nth 0 entry) :version (nth 1 entry))
                        :contentChanges
                        (vector (list :text (nth 2 entry))))))
-              (my/lsp-remote-change--flush workspace)
+              (+lsp-remote-change--flush workspace)
               (should (equal (mapcar
                               (lambda (item)
                                 (plist-get
@@ -332,23 +332,23 @@
                              '("file:///a.py" "file:///b.py"
                                "file:///a.py")))
               (setq sent nil)
-              (my/lsp-remote-change--notify-a
+              (+lsp-remote-change--notify-a
                fallback "textDocument/didChange"
                '(:textDocument (:uri "file:///a.py" :version 5)
                  :contentChanges [(:text "e")]))
               (setq new-process (make-pipe-process
                                  :name "lsp-change-batch-new" :noquery t)
                     current new-process)
-              (my/lsp-remote-change--flush workspace)
+              (+lsp-remote-change--flush workspace)
               (should-not sent)
-              (should-not (gethash workspace my/lsp-remote-change--queues))
+              (should-not (gethash workspace +lsp-remote-change--queues))
               (setq current process)
-              (let ((my/lsp-remote-change-batch-max-events 2))
-                (my/lsp-remote-change--notify-a
+              (let ((+lsp-remote-change-batch-max-events 2))
+                (+lsp-remote-change--notify-a
                  fallback "textDocument/didChange"
                  '(:textDocument (:uri "file:///a.py" :version 6)
                    :contentChanges [(:text "f")]))
-                (my/lsp-remote-change--notify-a
+                (+lsp-remote-change--notify-a
                  fallback "textDocument/didChange"
                  '(:textDocument (:uri "file:///a.py" :version 7)
                    :contentChanges [(:text "g")]))
@@ -356,38 +356,38 @@
                 (should (equal (plist-get (cdar sent) :contentChanges)
                                [(:text "f") (:text "g")]))
                 (should-not
-                 (gethash workspace my/lsp-remote-change--queues)))
+                 (gethash workspace +lsp-remote-change--queues)))
               (setq sent nil sync-kind 1)
-              (my/lsp-remote-change--notify-a
+              (+lsp-remote-change--notify-a
                fallback "textDocument/didChange"
                '(:textDocument (:uri "file:///a.py" :version 8)
                  :contentChanges [(:text "h")]))
               (should (= (length sent) 1))
               (should-not
-               (gethash workspace my/lsp-remote-change--queues))
+               (gethash workspace +lsp-remote-change--queues))
               (setq sent nil sync-kind 2)
               (dolist (entry '(("file:///a.py" 9 "i")
                               ("file:///b.py" 1 "j")
                               ("file:///a.py" 10 "k")))
-                (my/lsp-remote-change--notify-a
+                (+lsp-remote-change--notify-a
                  fallback "textDocument/didChange"
                  (list :textDocument
                        (list :uri (nth 0 entry) :version (nth 1 entry))
                        :contentChanges (vector (list :text (nth 2 entry))))))
               (setq fail-uri "file:///b.py")
               (should-error
-               (my/lsp-remote-change--send-a
+               (+lsp-remote-change--send-a
                 (lambda (_message _process)
                   (setq sent (append sent '(request))))
                 '(:method "textDocument/completion") process))
               (should (equal (mapcar #'car sent)
                              '("textDocument/didChange")))
               (should (= (plist-get
-                          (gethash workspace my/lsp-remote-change--queues)
+                          (gethash workspace +lsp-remote-change--queues)
                           :count)
                          2))
               (setq fail-uri nil)
-              (my/lsp-remote-change--send-a
+              (+lsp-remote-change--send-a
                (lambda (_message _process)
                  (setq sent (append sent '(request))))
                '(:method "textDocument/completion") process)
@@ -405,8 +405,8 @@
                              '("file:///a.py" "file:///b.py"
                                "file:///a.py")))
               (should-not
-               (gethash workspace my/lsp-remote-change--queues)))))
-      (my/lsp-remote-change--clear workspace)
+               (gethash workspace +lsp-remote-change--queues)))))
+      (+lsp-remote-change--clear workspace)
       (when (processp new-process)
         (delete-process new-process))
       (delete-process process))))
@@ -414,7 +414,7 @@
 (ert-deftest lsp-remote-completion-prewarm-is-async-and-generation-scoped ()
   "One remote workspace warms once per process without editing its buffer."
   (let* ((workspace (list 'prewarm-workspace))
-         (my/lsp-completion--prewarm-state
+         (+lsp-completion--prewarm-state
           (make-hash-table :test #'eq))
          (first (make-pipe-process :name "lsp-prewarm-first" :noquery t))
          (second (make-pipe-process :name "lsp-prewarm-second" :noquery t))
@@ -429,9 +429,9 @@
                         buffer-file-name
                         (expand-file-name "prewarm.py" temporary-file-directory)
                         lsp-managed-mode t
-                        my/lsp-remote-change--eligible t)
+                        +lsp-remote-change--eligible t)
             (goto-char (point-min)))
-          (cl-letf (((symbol-function 'my/language-server--lsp-workspace-id)
+          (cl-letf (((symbol-function '+language-server--lsp-workspace-id)
                      (lambda (_workspace) 'my-python))
                     ((symbol-function 'lsp--workspace-cmd-proc)
                      (lambda (_workspace) current))
@@ -446,22 +446,22 @@
                      (lambda (method params callback &rest _keys)
                        (push (list method params) requests)
                        (funcall callback nil))))
-            (my/lsp-completion--prewarm-schedule workspace)
+            (+lsp-completion--prewarm-schedule workspace)
             (let ((timer
                    (plist-get
                     (gethash workspace
-                             my/lsp-completion--prewarm-state)
+                             +lsp-completion--prewarm-state)
                     :timer)))
-              (my/lsp-completion--prewarm-schedule workspace)
+              (+lsp-completion--prewarm-schedule workspace)
               (should (eq timer
                           (plist-get
                            (gethash workspace
-                                    my/lsp-completion--prewarm-state)
+                                    +lsp-completion--prewarm-state)
                            :timer))))
             (with-current-buffer buffer
               (let ((old-point (point))
                     (old-tick (buffer-chars-modified-tick)))
-                (my/lsp-completion--prewarm-dispatch
+                (+lsp-completion--prewarm-dispatch
                  workspace first 0)
                 (should (= old-point (point)))
                 (should (= old-tick (buffer-chars-modified-tick)))))
@@ -469,24 +469,24 @@
             (should (= (length requests) 1))
             (should (eq (plist-get
                          (gethash workspace
-                                  my/lsp-completion--prewarm-state)
+                                  +lsp-completion--prewarm-state)
                          :state)
                         'ready))
             (setq current second)
-            (my/lsp-completion--prewarm-schedule workspace)
-            (my/lsp-completion--prewarm-finish
+            (+lsp-completion--prewarm-schedule workspace)
+            (+lsp-completion--prewarm-finish
              workspace first 'ready)
             (should (eq (plist-get
                          (gethash workspace
-                                  my/lsp-completion--prewarm-state)
+                                  +lsp-completion--prewarm-state)
                          :process)
                         second))
             (should (eq (plist-get
                          (gethash workspace
-                                  my/lsp-completion--prewarm-state)
+                                  +lsp-completion--prewarm-state)
                          :state)
                         'scheduled))))
-      (my/lsp-completion--prewarm-clear workspace)
+      (+lsp-completion--prewarm-clear workspace)
       (delete-process first)
       (delete-process second)
       (kill-buffer buffer))))
@@ -495,7 +495,7 @@
   "Automatic Company avoids a cold remote request and resumes safely."
   (let* ((workspace (list 'company-prewarm-workspace))
          (process (list 'company-prewarm-process))
-         (my/lsp-completion--prewarm-state
+         (+lsp-completion--prewarm-state
           (make-hash-table :test #'eq))
          (buffer (generate-new-buffer " *python-company-prewarm*"))
          scheduled resumed)
@@ -506,7 +506,7 @@
             (insert "prin")
             (setq-local major-mode 'python-mode
                         lsp-managed-mode t
-                        my/lsp-remote-change--eligible t
+                        +lsp-remote-change--eligible t
                         company-mode t
                         company-idle-delay 0.28)
             (goto-char (point-max)))
@@ -518,7 +518,7 @@
                      (lambda (_workspace) process))
                     ((symbol-function 'lsp--workspace-status)
                      (lambda (_workspace) 'initialized))
-                    ((symbol-function 'my/language-server--lsp-workspace-id)
+                    ((symbol-function '+language-server--lsp-workspace-id)
                      (lambda (_workspace) 'my-python))
                     ((symbol-function 'company--should-begin)
                      (lambda () t))
@@ -528,90 +528,90 @@
                      (lambda (_delay _repeat callback &rest args)
                        (push (cons callback args) scheduled))))
             (with-current-buffer buffer
-              (my/lsp-completion--company-install-h))
+              (+lsp-completion--company-install-h))
             (puthash workspace (list :process process :state 'sent)
-                     my/lsp-completion--prewarm-state)
+                     +lsp-completion--prewarm-state)
             (with-current-buffer buffer
               (should-not
-               (my/lsp-completion--company-idle-delay))
-              (should my/lsp-completion--pending-company))
-            (my/lsp-completion--prewarm-finish
+               (+lsp-completion--company-idle-delay))
+              (should +lsp-completion--pending-company))
+            (+lsp-completion--prewarm-finish
              workspace process 'ready)
             (should (= (length scheduled) 1))
             (with-current-buffer buffer
-              (should (= (my/lsp-completion--company-idle-delay)
-                         my/lsp-completion-ready-idle-delay)))
+              (should (= (+lsp-completion--company-idle-delay)
+                         +lsp-completion-ready-idle-delay)))
             (let ((timer (pop scheduled)))
               (funcall (car timer) (nth 0 (cdr timer))
                        (nth 1 (cdr timer)) (nth 2 (cdr timer))
                        (nth 3 (cdr timer))))
             (should (= (length resumed) 1))
             (puthash workspace (list :process process :state 'sent)
-                     my/lsp-completion--prewarm-state)
+                     +lsp-completion--prewarm-state)
             (with-current-buffer buffer
               (should-not
-               (my/lsp-completion--company-idle-delay))
+               (+lsp-completion--company-idle-delay))
               (goto-char (point-min)))
-            (my/lsp-completion--prewarm-finish
+            (+lsp-completion--prewarm-finish
              workspace process 'ready)
             (should-not scheduled)
             (with-current-buffer buffer
               (goto-char (point-max)))
             (puthash workspace (list :process process :state 'sent)
-                     my/lsp-completion--prewarm-state)
+                     +lsp-completion--prewarm-state)
             (with-current-buffer buffer
               (should-not
-               (my/lsp-completion--company-idle-delay)))
-            (my/lsp-completion--prewarm-finish
+               (+lsp-completion--company-idle-delay)))
+            (+lsp-completion--prewarm-finish
              workspace process 'failed)
             (should-not scheduled)
             (with-current-buffer buffer
-              (should-not my/lsp-completion--pending-company)
-              (should (= (my/lsp-completion--company-idle-delay)
+              (should-not +lsp-completion--pending-company)
+              (should (= (+lsp-completion--company-idle-delay)
                          0.28)))
             (puthash workspace (list :process process :state 'sent)
-                     my/lsp-completion--prewarm-state)
+                     +lsp-completion--prewarm-state)
             (with-current-buffer buffer
               (should-not
-               (my/lsp-completion--company-idle-delay)))
-            (my/lsp-completion--prewarm-clear workspace)
+               (+lsp-completion--company-idle-delay)))
+            (+lsp-completion--prewarm-clear workspace)
             (with-current-buffer buffer
-              (should-not my/lsp-completion--pending-company))))
+              (should-not +lsp-completion--pending-company))))
       (kill-buffer buffer))))
 
 (ert-deftest lsp-remote-company-fast-idle-requires-current-ready-server ()
   "A fast timer must not follow a failed or replaced remote server."
   (let* ((workspace (list 'current-python-workspace))
          (process (list 'current-python-process))
-         (my/lsp-completion--prewarm-state
+         (+lsp-completion--prewarm-state
           (make-hash-table :test #'eq))
-         (my/lsp-completion-ready-idle-delay 0.12))
+         (+lsp-completion-ready-idle-delay 0.12))
     (with-temp-buffer
       (setq-local lsp-managed-mode t
-                  my/lsp-remote-change--eligible t
-                  my/lsp-completion--normal-idle-delay 0.28)
+                  +lsp-remote-change--eligible t
+                  +lsp-completion--normal-idle-delay 0.28)
       (cl-letf (((symbol-function 'lsp-workspaces)
                  (lambda () (list workspace)))
                 ((symbol-function 'lsp--workspace-cmd-proc)
                  (lambda (_workspace) process))
                 ((symbol-function 'lsp--workspace-status)
                  (lambda (_workspace) 'initialized))
-                ((symbol-function 'my/language-server--lsp-workspace-id)
+                ((symbol-function '+language-server--lsp-workspace-id)
                  (lambda (_workspace) 'my-python)))
         (puthash workspace (list :process process :state 'ready)
-                 my/lsp-completion--prewarm-state)
-        (should (= (my/lsp-completion--company-idle-delay) 0.12))
-        (let ((my/lsp-completion-ready-idle-delay nil))
-          (should (= (my/lsp-completion--company-idle-delay) 0.28)))
-        (setq-local my/lsp-completion--normal-idle-delay 0.08)
-        (should (= (my/lsp-completion--company-idle-delay) 0.08))
-        (setq-local my/lsp-completion--normal-idle-delay 0.28)
+                 +lsp-completion--prewarm-state)
+        (should (= (+lsp-completion--company-idle-delay) 0.12))
+        (let ((+lsp-completion-ready-idle-delay nil))
+          (should (= (+lsp-completion--company-idle-delay) 0.28)))
+        (setq-local +lsp-completion--normal-idle-delay 0.08)
+        (should (= (+lsp-completion--company-idle-delay) 0.08))
+        (setq-local +lsp-completion--normal-idle-delay 0.28)
         (puthash workspace (list :process (list 'old-process) :state 'ready)
-                 my/lsp-completion--prewarm-state)
-        (should (= (my/lsp-completion--company-idle-delay) 0.28))
+                 +lsp-completion--prewarm-state)
+        (should (= (+lsp-completion--company-idle-delay) 0.28))
         (puthash workspace (list :process process :state 'failed)
-                 my/lsp-completion--prewarm-state)
-        (should (= (my/lsp-completion--company-idle-delay) 0.28))))))
+                 +lsp-completion--prewarm-state)
+        (should (= (+lsp-completion--company-idle-delay) 0.28))))))
 
 (ert-deftest lsp-mode-local-logical-path-does-not-leak-fs-syntax ()
   (let ((default-directory "/fs:local:/tmp/"))
@@ -648,7 +648,7 @@
                    (funcall native-exists-p path)))))
       (should
        (equal
-        (my/lsp-mode--find-session-folder-remote-a
+        (+lsp-mode--find-session-folder-remote-a
          (lambda (&rest _) (ert-fail "Unexpected upstream search"))
          session "/ssh:box:/work/src/main.c")
         folder))
@@ -672,7 +672,7 @@
                                exec-path remote-current-adapter-id
                                remote-current-route remote-current-workspace)))
                  t)))
-      (should (my/language-server--require-on-client
+      (should (+language-server--require-on-client
                'test-client-package)))
     (should
      (equal observed
@@ -684,7 +684,7 @@
   (with-temp-buffer
     (setq major-mode 'java-mode
           default-directory "/fs:box:/work/")
-    (let ((my/lsp-mode-required-features
+    (let ((+lsp-mode-required-features
            '((java-mode . test-external-lsp-feature)))
           seen)
       (cl-letf (((symbol-function 'require)
@@ -692,14 +692,14 @@
                    (when (eq feature 'test-external-lsp-feature)
                      (setq seen default-directory))
                    t)))
-        (should (my/lsp-mode-supported-p)))
+        (should (+lsp-mode-supported-p)))
       (should (equal seen temporary-file-directory)))))
 
 (ert-deftest lsp-mode-remote-uri-returns-to-current-logical-target ()
   (let ((default-directory "/fs:box:/work/"))
     (should
      (equal
-      (my/lsp-mode--uri-to-logical-a
+      (+lsp-mode--uri-to-logical-a
        (lambda (_uri) "/work/src/Main.java")
        "file:///work/src/Main.java")
       "/fs:box:/work/src/Main.java"))))
@@ -711,7 +711,7 @@
          (make-lsp--workspace :root "/fs:box:/work/")))
     (should
      (equal
-      (my/lsp-mode--uri-to-logical-a
+      (+lsp-mode--uri-to-logical-a
        (lambda (_uri) "/work/src/Main.java")
        "file:///work/src/Main.java")
       "/fs:box:/work/src/Main.java"))))
@@ -722,7 +722,7 @@
          (make-lsp--workspace :root "/fs:local:/tmp/project/")))
     (should
      (equal
-      (my/lsp-mode--uri-to-logical-a
+      (+lsp-mode--uri-to-logical-a
        (lambda (_uri) "/tmp/project/Main.java")
        "file:///tmp/project/Main.java")
       "/fs:local:/tmp/project/Main.java"))))
@@ -735,7 +735,7 @@
                  "/target/bin/server")))
       (should
        (equal
-        (my/language-server-executable-find "server")
+        (+language-server-executable-find "server")
         "/target/bin/server")))
     (should (equal adapter "language-server"))))
 
@@ -755,7 +755,7 @@
                  (lambda () '("CLIENT=1")))
                 ((symbol-function 'remote-client-exec-path)
                  (lambda () '("/client/bin")))
-                ((symbol-function 'my/yas--load-local-libraries)
+                ((symbol-function '+yas--load-local-libraries)
                  (lambda ()
                    (setq loaded
                          (list default-directory process-environment
@@ -764,7 +764,7 @@
                 ((symbol-function 'yas-minor-mode)
                  (lambda (arg)
                    (setq enabled (list arg default-directory)))))
-        (my/yas--enable-now))
+        (+yas--enable-now))
       (should (equal (nth 0 loaded) temporary-file-directory))
       (should (equal (nth 1 loaded) '("CLIENT=1")))
       (should (equal (nth 2 loaded) '("/client/bin")))
@@ -776,13 +776,13 @@
   "The initial source visit should avoid snippet loading until idle or use."
   (with-temp-buffer
     (setq major-mode 'c-mode)
-    (let ((my/yas-enable-idle-delay 0.15)
+    (let ((+yas-enable-idle-delay 0.15)
           (features
            (delq 'yasnippet
                  (delq 'yasnippet-snippets (copy-sequence features))))
           timer
           calls)
-      (cl-letf (((symbol-function 'my/yas--load-local-libraries)
+      (cl-letf (((symbol-function '+yas--load-local-libraries)
                  (lambda () (push 'load calls)))
                 ((symbol-function 'yas-minor-mode)
                  (lambda (_arg) (push 'enable calls)))
@@ -790,15 +790,15 @@
                  (lambda () (interactive) (push 'insert calls))))
         (unwind-protect
             (progn
-              (my/yas-enable-for-source-buffer)
-              (setq timer my/yas--pending-enable)
+              (+yas-enable-for-source-buffer)
+              (setq timer +yas--pending-enable)
               (should (timerp timer))
               (should-not calls)
-              (my/yas-enable-for-source-buffer)
-              (should (eq timer my/yas--pending-enable))
-              (my/snippet-insert)
+              (+yas-enable-for-source-buffer)
+              (should (eq timer +yas--pending-enable))
+              (+snippet/insert)
               (should (equal (reverse calls) '(load enable insert)))
-              (should-not my/yas--pending-enable))
+              (should-not +yas--pending-enable))
           (when (timerp timer)
             (cancel-timer timer)))))))
 
@@ -807,12 +807,12 @@
   (with-temp-buffer
     (setq major-mode 'c-mode)
     (let (enabled)
-      (cl-letf (((symbol-function 'my/yas--enable-now)
+      (cl-letf (((symbol-function '+yas--enable-now)
                  (lambda () (setq enabled t))))
         (setq major-mode 'python-mode)
-        (my/yas--enable-after-idle (current-buffer) 'c-mode)
+        (+yas--enable-after-idle (current-buffer) 'c-mode)
         (should-not enabled)
-        (my/yas--enable-after-idle (current-buffer) 'python-mode)
+        (+yas--enable-after-idle (current-buffer) 'python-mode)
         (should enabled)))))
 
 (ert-deftest language-server-auto-selector-is-target-neutral ()
@@ -823,50 +823,50 @@
           selected)
       (cl-letf
           (((symbol-function 'remote-routes) (lambda (&rest _) '(route)))
-           ((symbol-function 'my/language-server-preferred-backend)
+           ((symbol-function '+language-server-preferred-backend)
             (lambda () 'lsp-mode))
-           ((symbol-function 'my/lsp-mode-ensure)
+           ((symbol-function '+lsp/mode-ensure)
             (lambda () (setq selected 'lsp-mode))))
-        (my/language-server--ensure-after-runtime))
+        (+language-server--ensure-after-runtime))
       (should (eq selected 'lsp-mode)))))
 
 (ert-deftest language-server-file-only-target-skips-process-discovery ()
   (let ((default-directory "/fs:files:/folder/"))
     (cl-letf (((symbol-function 'remote-routes) (lambda (&rest _) nil))
-              ((symbol-function 'my/language-server-preferred-backend)
+              ((symbol-function '+language-server-preferred-backend)
                (lambda () (ert-fail "File-only targets cannot discover processes"))))
-      (my/language-server--ensure-after-runtime))))
+      (+language-server--ensure-after-runtime))))
 
 (ert-deftest language-server-direnv-failure-does-not-disable-client ()
   (let ((started nil))
-    (setq my/lsp-mode--waiting-for-direnv t)
+    (setq +lsp-mode--waiting-for-direnv t)
     (cl-letf
-        (((symbol-function 'my/language-server-preferred-backend)
+        (((symbol-function '+language-server-preferred-backend)
           (lambda () 'lsp-mode))
-         ((symbol-function 'my/lsp-mode-start-now)
+         ((symbol-function '+lsp-mode-start-now)
           (lambda () (setq started t)))
          ((symbol-function 'message) #'ignore))
-      (my/lsp-mode--direnv-ready nil '(error "broken envrc")))
-    (should-not my/lsp-mode--waiting-for-direnv)
+      (+lsp-mode--direnv-ready nil '(error "broken envrc")))
+    (should-not +lsp-mode--waiting-for-direnv)
     (should started)))
 
 (ert-deftest language-server-ready-runtime-skips-second-direnv-export ()
   "A kernel runtime's environment is already authoritative for LSP startup."
   (with-temp-buffer
-    (setq-local my/language-server-runtime-required t
-                my/language-server-runtime-state 'ready
-                my/language-server-runtime-current
-                (my/language-server-runtime-create :id "kernel-python"))
+    (setq-local +language-server-runtime-required t
+                +language-server-runtime-state 'ready
+                +language-server-runtime-current
+                (+language-server-runtime-create :id "kernel-python"))
     (let (started)
-      (cl-letf (((symbol-function 'my/language-server-preferred-backend)
+      (cl-letf (((symbol-function '+language-server-preferred-backend)
                  (lambda () 'lsp-mode))
-                ((symbol-function 'my/direnv-update-environment-maybe)
+                ((symbol-function '+direnv-update-environment-maybe)
                  (lambda (&rest _) (ert-fail "Required runtime exported direnv twice")))
-                ((symbol-function 'my/lsp-mode-start-now)
+                ((symbol-function '+lsp-mode-start-now)
                  (lambda () (setq started t))))
-        (my/lsp-mode-ensure)
+        (+lsp/mode-ensure)
         (should started)
-        (should-not my/lsp-mode--waiting-for-direnv)))))
+        (should-not +lsp-mode--waiting-for-direnv)))))
 
 (ert-deftest language-server-network-contact-routes-on-local-and-remote ()
   (dolist (directory
@@ -883,7 +883,7 @@
               'routed-process)))
         (should
          (eq
-          (my/language-server--open-network-stream-a
+          (+language-server--open-network-stream-a
            (lambda (&rest _) (error "native path was used"))
            "server" nil "127.0.0.1" 2087 :type 'plain)
           'routed-process)))
@@ -898,11 +898,11 @@
         "language-server")))))
 
 (ert-deftest language-server-shell-boundary-is-target-neutral ()
-  ;; `my/language-server-apply-lsp-local-settings' also resolves any
+  ;; `+language-server-apply-lsp-local-settings' also resolves any
   ;; project-local `:lsp-workspace' override; stub that lookup rather than
   ;; exercising real project/file-truename plumbing for a target this test
   ;; never links a route for.
-  (cl-letf (((symbol-function 'my/language-server-project-workspace-configuration)
+  (cl-letf (((symbol-function '+language-server-project-workspace-configuration)
              (lambda () nil)))
     (dolist (directory
              '("/fs:local:/tmp/project/"
@@ -912,8 +912,8 @@
               (shell-file-name "/client/bin/zsh")
               (explicit-shell-file-name "/client/bin/zsh")
               (shell-command-switch "-c")
-              (my/language-server-lsp-local-settings-hook nil))
-          (my/language-server-apply-lsp-local-settings)
+              (+language-server-lsp-local-settings-hook nil))
+          (+language-server-apply-lsp-local-settings)
           ;; Shell placement belongs to the selected process backend.  Neither
           ;; a local nor a remote logical root may mutate client shell
           ;; globals.
@@ -923,10 +923,10 @@
 
 (ert-deftest python-language-server-command-is-selected-by-target-capability-only ()
   (cl-letf
-      (((symbol-function 'my/language-server-executable-find)
+      (((symbol-function '+language-server-executable-find)
         (lambda (program)
           (and (equal program "pylsp") "/target/bin/pylsp")))
-       ((symbol-function 'my/lsp-python--provisioned-command)
+       ((symbol-function '+lsp-python--provisioned-command)
         (lambda () nil)))
     (dolist (directory
              '("/fs:local:/tmp/project/"
@@ -934,7 +934,7 @@
       (let ((default-directory directory))
         (should
          (equal
-          (my/python-language-server-command)
+          (+python-language-server-command)
           '("/target/bin/pylsp")))))))
 
 (ert-deftest js-project-bin-uses-the-environment-capsule-for-every-target ()
@@ -956,7 +956,7 @@
                  "/fs:box:/tmp/project/"))
         (with-temp-buffer
           (setq default-directory directory)
-          (my/js-setup-project-node-bin))))
+          (+js-setup-project-node-bin))))
     (should
      (equal
       prepends
@@ -967,33 +967,33 @@
   "A client-local JDTLS bundle must not start without target-side Java."
   (with-temp-buffer
     (setq major-mode 'java-mode)
-    (let ((my/language-server-toolchain--applied-profile nil))
-      (cl-letf (((symbol-function 'my/language-server--require-on-client)
+    (let ((+language-server-toolchain--applied-profile nil))
+      (cl-letf (((symbol-function '+language-server--require-on-client)
                  (lambda (_feature) t))
                 ((symbol-function 'lsp--filter-clients)
                  (lambda (&rest _arguments)
                    (ert-fail "JDTLS client selection ran without Java"))))
-        (should-not (my/language-server--external-feature-ready-p))
-        (should-not (my/language-server-contact-available-p))))
-    (let ((my/language-server-toolchain--applied-profile
+        (should-not (+language-server--external-feature-ready-p))
+        (should-not (+language-server-contact-available-p))))
+    (let ((+language-server-toolchain--applied-profile
            '(:executable "/opt/jdk/bin/java"))
           seen)
-      (cl-letf (((symbol-function 'my/language-server-executable-find)
+      (cl-letf (((symbol-function '+language-server-executable-find)
                  (lambda (program)
                    (setq seen program)
                    program)))
-        (should (my/language-server--external-feature-ready-p))
+        (should (+language-server--external-feature-ready-p))
         (should (equal seen "/opt/jdk/bin/java"))))))
 
 (ert-deftest java-command-and-debug-channel-use-one-target-projection ()
   (should
    (equal
-    (my/lsp-java--target-command-a
+    (+lsp-java--target-command-a
      (lambda ()
        '("/fs:box:/opt/jdtls/bin/jdtls"
          "-data" "/fs:box:/work/.cache/")))
     '("/opt/jdtls/bin/jdtls" "-data" "/work/.cache/")))
-  (let ((my/java-debug--forwards (make-hash-table :test #'equal))
+  (let ((+java-debug--forwards (make-hash-table :test #'equal))
         calls)
     (cl-letf
         (((symbol-function 'remote-port-forward)
@@ -1007,7 +1007,7 @@
       (dolist (root
                '("/fs:local:/tmp/project/"
                  "/fs:box:/work/project/"))
-        (should (= (my/java-debug--access-port root 5005) 41000))))
+        (should (= (+java-debug--access-port root 5005) 41000))))
     (should (= (length calls) 2))))
 
 (ert-deftest java-native-command-adds-per-root-workspace-and-config ()
@@ -1022,7 +1022,7 @@ possibly half-imported JDTLS workspace."
         (lsp-java-server-config-dir "/fs:box:/opt/jdtls/config_linux/"))
     (should
      (equal
-      (my/lsp-java--target-command-a
+      (+lsp-java--target-command-a
        (lambda ()
          '("/fs:box:/opt/jdtls/bin/jdtls" "--jvm-arg=-Dlog.level=ALL")))
       '("/opt/jdtls/bin/jdtls" "--jvm-arg=-Dlog.level=ALL"
@@ -1040,7 +1040,7 @@ possibly half-imported JDTLS workspace."
                  t)))
       (should
        (equal
-        (my/lsp-java--locate-server-command-a
+        (+lsp-java--locate-server-command-a
          (lambda () (ert-fail "locate-file lost a valid target launcher")))
         "/fs:box:/opt/jdtls/bin/jdtls"))
       (should (equal checked "/fs:box:/opt/jdtls/bin/jdtls")))))
@@ -1053,7 +1053,7 @@ this advice must not duplicate them when native mode is off."
         (lsp-java-workspace-dir "/fs:box:/work/.cache/jdtls-workspace/"))
     (should
      (equal
-      (my/lsp-java--target-command-a
+      (+lsp-java--target-command-a
        (lambda ()
          '("/fs:box:/opt/jdtls/bin/jdtls" "-data" "/fs:box:/work/.cache/")))
       '("/opt/jdtls/bin/jdtls" "-data" "/work/.cache/")))))
@@ -1082,7 +1082,7 @@ must cover it without a `-tramp' counterpart."
             (((symbol-function 'lsp-session) (lambda () session))
              ((symbol-function 'lsp--persist-session)
               (lambda (_session) (setq persisted t))))
-          (my/lsp-java--enforce-single-root))
+          (+lsp-java--enforce-single-root))
         (should (equal lsp-enabled-clients '(jdtls)))))
     (should-not (lsp--client-multi-root client))
     (should-not (gethash 'jdtls folders))
@@ -1096,11 +1096,11 @@ must cover it without a `-tramp' counterpart."
     (cl-letf
         (((symbol-function 'remote-workspace-track-route)
           (lambda (workspace &rest _arguments) workspace))
-         ((symbol-function 'my/language-server--lsp-workspace-id)
+         ((symbol-function '+language-server--lsp-workspace-id)
           (lambda (_workspace) 'test-server)))
       (let ((lsp--cur-workspace lsp-workspace))
-        (my/language-server-register-lsp-resource)
-        (my/language-server-register-lsp-resource))
+        (+language-server-register-lsp-resource)
+        (+language-server-register-lsp-resource))
       (let* ((owner (car (hash-table-values remote-workspaces)))
              (resource
               (remote-workspace-find-resource
@@ -1128,7 +1128,7 @@ must cover it without a `-tramp' counterpart."
           (cl-letf
             (((symbol-function 'remote-workspace-track-route)
               (lambda (workspace &rest _arguments) workspace))
-             ((symbol-function 'my/language-server--lsp-workspace-id)
+             ((symbol-function '+language-server--lsp-workspace-id)
               (lambda (_workspace) 'test-server))
              ((symbol-function 'lsp--workspace-buffers)
               (lambda (_workspace) (list buffer other)))
@@ -1140,12 +1140,12 @@ must cover it without a `-tramp' counterpart."
              ((symbol-function 'lsp-workspaces)
               (lambda () (list replacement))))
           (let ((lsp--cur-workspace old))
-            (my/language-server-register-lsp-resource))
+            (+language-server-register-lsp-resource))
           (let* ((owner (car (hash-table-values remote-workspaces)))
                  (resource (remote-workspace-find-resource owner 'lsp)))
             (should resource)
             (setf (remote-workspace-state owner) 'reconnecting)
-            (my/language-server--forget-resource-value old)
+            (+language-server--forget-resource-value old)
             (should (eq (remote-workspace-find-resource owner 'lsp)
                         resource))
             (remote-workspace-recover-resource owner resource)
@@ -1153,7 +1153,7 @@ must cover it without a `-tramp' counterpart."
             (should (eq (remote-workspace-resource-value resource)
                         replacement))
             (setf (remote-workspace-state owner) 'open)
-            (my/language-server--forget-resource-value replacement)
+            (+language-server--forget-resource-value replacement)
             (should-not (remote-workspace-find-resource owner 'lsp)))))
       (kill-buffer buffer)
       (kill-buffer other))))
@@ -1161,33 +1161,33 @@ must cover it without a `-tramp' counterpart."
 (ert-deftest lsp-crash-restart-defers-to-remote-transport-recovery ()
   "A transport reset must not start a competing LSP process."
   (let* ((owner (remote-workspace-create :state 'disconnected))
-         (my/lsp-mode--restart-history (make-hash-table :test #'equal))
+         (+lsp-mode--restart-history (make-hash-table :test #'equal))
          (key '(test-server "/fs:local:/tmp/project/"))
          (calls 0))
     (setf (remote-workspace-resources owner)
           (list (remote-workspace-resource-create
                  :kind 'lsp :value 'old-workspace)))
-    (cl-letf (((symbol-function 'my/lsp-mode--workspace-key)
+    (cl-letf (((symbol-function '+lsp-mode--workspace-key)
                (lambda (_workspace) key))
               ((symbol-function 'remote-get-workspace)
                (lambda (_root) owner)))
-      (my/lsp-mode--restart-with-circuit-breaker-a
+      (+lsp-mode--restart-with-circuit-breaker-a
        (lambda (_workspace) (cl-incf calls)) 'old-workspace)
       (should (= calls 0))
-      (should-not (gethash key my/lsp-mode--restart-history))
+      (should-not (gethash key +lsp-mode--restart-history))
       (setf (remote-workspace-state owner) 'reconnecting)
-      (my/lsp-mode--restart-with-circuit-breaker-a
+      (+lsp-mode--restart-with-circuit-breaker-a
        (lambda (_workspace) (cl-incf calls)) 'old-workspace)
       (should (= calls 0))
       (setf (remote-workspace-state owner) 'failed)
-      (my/lsp-mode--restart-with-circuit-breaker-a
+      (+lsp-mode--restart-with-circuit-breaker-a
        (lambda (_workspace) (cl-incf calls)) 'old-workspace)
       (should (= calls 0))
       (setf (remote-workspace-state owner) 'open)
-      (my/lsp-mode--restart-with-circuit-breaker-a
+      (+lsp-mode--restart-with-circuit-breaker-a
        (lambda (_workspace) (cl-incf calls)) 'old-workspace)
       (should (= calls 1))
-      (should (= (length (gethash key my/lsp-mode--restart-history)) 1)))))
+      (should (= (length (gethash key +lsp-mode--restart-history)) 1)))))
 
 (ert-deftest lsp-exit-reports-dead-pooled-transport-before-unregister ()
   "A dead transport keeps the LSP resource for Remote's own recovery."
@@ -1215,7 +1215,7 @@ must cover it without a `-tramp' counterpart."
                  (should (eq (car error) 'remote-transport-error))
                  (cl-incf reports)
                  (setf (remote-workspace-state owner) 'disconnected))))
-      (my/language-server-unregister-lsp-resource value))
+      (+language-server-unregister-lsp-resource value))
     (should (= reports 1))
     (should (memq resource (remote-workspace-resources owner)))))
 
@@ -1240,7 +1240,7 @@ must cover it without a `-tramp' counterpart."
                (lambda (&rest _) t))
               ((symbol-function 'remote-report-route-failure)
                (lambda (&rest _) (ert-fail "Healthy transport reported dead"))))
-      (my/language-server-unregister-lsp-resource value))
+      (+language-server-unregister-lsp-resource value))
     (should (eq (remote-workspace-state owner) 'open))
     (should-not (remote-workspace-resources owner))))
 
@@ -1251,19 +1251,19 @@ must cover it without a `-tramp' counterpart."
          (root "/fs:local:/tmp/project/")
          (first (make-lsp--workspace :root root))
          (second (make-lsp--workspace :root root)))
-    (puthash my/language-server-runtime--workspace-metadata-key "kernel-one"
+    (puthash +language-server-runtime--workspace-metadata-key "kernel-one"
              (lsp--workspace-metadata first))
-    (puthash my/language-server-runtime--workspace-metadata-key "kernel-two"
+    (puthash +language-server-runtime--workspace-metadata-key "kernel-two"
              (lsp--workspace-metadata second))
     (cl-letf
         (((symbol-function 'remote-workspace-track-route)
           (lambda (workspace &rest _arguments) workspace))
-         ((symbol-function 'my/language-server--lsp-workspace-id)
+         ((symbol-function '+language-server--lsp-workspace-id)
           (lambda (_workspace) 'my-python)))
       (let ((lsp--cur-workspace first))
-        (my/language-server-register-lsp-resource))
+        (+language-server-register-lsp-resource))
       (let ((lsp--cur-workspace second))
-        (my/language-server-register-lsp-resource)))
+        (+language-server-register-lsp-resource)))
     (let ((owner (car (hash-table-values remote-workspaces))))
       (should owner)
       (should (= (length (remote-workspace-resources owner)) 2))
@@ -1278,7 +1278,7 @@ must cover it without a `-tramp' counterpart."
 
 (ert-deftest lsp-mode-target-only-root-uses-remote-watch-capability ()
   "Target-only roots keep watcher parity when Remote can own the watches."
-  (let ((my/language-server-file-watch-policy 'auto)
+  (let ((+language-server-file-watch-policy 'auto)
         (lsp-enable-file-watchers t)
         (lsp--cur-workspace
          (make-lsp--workspace :root "/fs:box:/work/project/"))
@@ -1292,30 +1292,30 @@ must cover it without a `-tramp' counterpart."
             '(remote-watch-route))))
       (should
        (eq
-        (my/lsp-mode--register-capability-via-remote-a
+        (+lsp-mode--register-capability-via-remote-a
          (lambda (_registration)
            (setq called t
                  watcher-value lsp-enable-file-watchers)
            'registered)
-         (my/lsp-test-registration
+         (+lsp-test-registration
           "workspace/didChangeWatchedFiles"))
         'registered)))
     (should called)
     (should watcher-value)))
 
 (ert-deftest lsp-mode-target-only-root-declines-watch-without-route ()
-  (let ((my/language-server-file-watch-policy 'auto))
+  (let ((+language-server-file-watch-policy 'auto))
     (cl-letf
         (((symbol-function 'remote-client-file-name)
           (lambda (&rest _) nil))
          ((symbol-function 'remote-routes)
           (lambda (&rest _) nil)))
       (should
-       (my/language-server--skip-file-watch-p
+       (+language-server--skip-file-watch-p
         "/fs:box:/work/project/")))))
 
 (ert-deftest lsp-mode-client-accessible-root-keeps-native-watchers ()
-  (let ((my/language-server-file-watch-policy 'auto)
+  (let ((+language-server-file-watch-policy 'auto)
         (lsp-enable-file-watchers t)
         (lsp--cur-workspace
          (make-lsp--workspace :root "/fs:local:/tmp/project/"))
@@ -1323,10 +1323,10 @@ must cover it without a `-tramp' counterpart."
     (cl-letf
         (((symbol-function 'remote-client-file-name)
           (lambda (&rest _) "/tmp/project/")))
-      (my/lsp-mode--register-capability-via-remote-a
+      (+lsp-mode--register-capability-via-remote-a
        (lambda (_registration)
          (setq watcher-value lsp-enable-file-watchers))
-       (my/lsp-test-registration
+       (+lsp-test-registration
         "workspace/didChangeWatchedFiles")))
     (should watcher-value)))
 
@@ -1340,7 +1340,7 @@ must cover it without a `-tramp' counterpart."
                (lambda () '("HOME=/client")))
               ((symbol-function 'remote-client-exec-path)
                (lambda () '("/client/bin"))))
-      (my/lsp-mode--require-client-packages-on-client-a
+      (+lsp-mode--require-client-packages-on-client-a
        (lambda ()
          (setq seen-directory default-directory
                seen-environment process-environment
@@ -1354,30 +1354,30 @@ must cover it without a `-tramp' counterpart."
   (let ((lsp-enabled-clients '(my-clangd))
         (lsp-clients (make-hash-table :test #'eq))
         (lsp--client-packages-required nil)
-        (my/lsp-mode--starting-client-selection t)
+        (+lsp-mode--starting-client-selection t)
         (loads 0))
     (puthash 'my-clangd 'registered lsp-clients)
-    (my/lsp-mode--require-client-packages-on-client-a
+    (+lsp-mode--require-client-packages-on-client-a
      (lambda () (cl-incf loads)))
     (should (= loads 0))
     (should-not lsp--client-packages-required)
-    (let ((my/lsp-mode--starting-client-selection nil))
-      (my/lsp-mode--require-client-packages-on-client-a
+    (let ((+lsp-mode--starting-client-selection nil))
+      (+lsp-mode--require-client-packages-on-client-a
        (lambda () (cl-incf loads))))
     (should (= loads 1))
     (remhash 'my-clangd lsp-clients)
-    (my/lsp-mode--require-client-packages-on-client-a
+    (+lsp-mode--require-client-packages-on-client-a
      (lambda () (cl-incf loads)))
     (should (= loads 2))))
 
 (ert-deftest lsp-diagnostic-identity-keeps-local-path-out-of-remote-buffer ()
   (let ((default-directory "/fs:box:/work/"))
-    (should (equal (my/language-server--canonical-root "/Users/test/project")
+    (should (equal (+language-server--canonical-root "/Users/test/project")
                    "/fs:local:/Users/test/project/"))
-    (should (equal (my/lsp-mode--fix-path-casing-a
+    (should (equal (+lsp-mode--fix-path-casing-a
                     #'identity "/Users/test/project/main.el")
                    "/fs:local:/Users/test/project/main.el"))
-    (should (equal (my/language-server--canonical-root
+    (should (equal (+language-server--canonical-root
                     "/fs:other:/work/project")
                    "/fs:other:/work/project/"))))
 
@@ -1385,11 +1385,11 @@ must cover it without a `-tramp' counterpart."
   (let (seen-directory seen-owner seen-adapter seen-metadata
         seen-flags seen-callback delivered)
     (cl-letf
-        (((symbol-function 'my/language-server--canonical-root)
+        (((symbol-function '+language-server--canonical-root)
           (lambda (_directory) "/fs:box:/work/project/"))
          ((symbol-function 'remote-file-name-target)
           (lambda (_directory) "box"))
-         ((symbol-function 'my/language-server--connect-workspace)
+         ((symbol-function '+language-server--connect-workspace)
           (lambda (_root) 'owner))
          ((symbol-function 'remote-watch-tree)
           (lambda (directory flags callback)
@@ -1401,7 +1401,7 @@ must cover it without a `-tramp' counterpart."
                   seen-metadata remote-file-watch-metadata)
             'descriptor)))
       (let ((watch
-             (my/lsp-mode--watch-root-via-remote-a
+             (+lsp-mode--watch-root-via-remote-a
               (lambda (&rest _arguments)
                 (ert-fail "A recursive watch must avoid the directory scan"))
               "/ssh:box:/work/project/"
@@ -1438,17 +1438,17 @@ must cover it without a `-tramp' counterpart."
 (ert-deftest lsp-mode-recursive-watch-unsupported-falls-back ()
   (let (fallback-directory)
     (cl-letf
-        (((symbol-function 'my/language-server--canonical-root)
+        (((symbol-function '+language-server--canonical-root)
           (lambda (_directory) "/fs:box:/work/project/"))
          ((symbol-function 'remote-file-name-target)
           (lambda (_directory) "box"))
-         ((symbol-function 'my/language-server--connect-workspace)
+         ((symbol-function '+language-server--connect-workspace)
           (lambda (_root) 'owner))
          ((symbol-function 'remote-watch-tree)
           (lambda (&rest _)
             (signal 'remote-backend-unsupported '("No recursive watcher")))))
       (should
-       (eq (my/lsp-mode--watch-root-via-remote-a
+       (eq (+lsp-mode--watch-root-via-remote-a
             (lambda (directory &rest _)
               (setq fallback-directory directory)
               'fallback)
@@ -1479,10 +1479,10 @@ must cover it without a `-tramp' counterpart."
               (lambda (process)
                 (push process killed-processes))))
           (should
-           (my/lsp-mode-shutdown-workspace workspace 'test-shutdown))
+           (+lsp-mode-shutdown-workspace workspace 'test-shutdown))
           (should (buffer-live-p source))
           (should
-           (my/lsp-mode-shutdown-workspace workspace 'repeated-shutdown))
+           (+lsp-mode-shutdown-workspace workspace 'repeated-shutdown))
           (should (buffer-live-p source))
           (should (= shutdown-count 1))
           (should-not killed-processes))
@@ -1493,9 +1493,9 @@ must cover it without a `-tramp' counterpart."
   (let ((lsp--cur-workspace
          (make-lsp--workspace :root "/fs:box:/work/project/"))
         (lsp-response-timeout 0.5)
-        (my/lsp-mode-remote-shutdown-response-timeout 2)
+        (+lsp-mode-remote-shutdown-response-timeout 2)
         seen)
-    (my/lsp-mode--remote-shutdown-timeout-a
+    (+lsp-mode--remote-shutdown-timeout-a
      (lambda (_method _params &rest _keys)
        (setq seen lsp-response-timeout))
      "shutdown" nil)
@@ -1510,19 +1510,19 @@ required and missing."
   (dolist (case '(("/fs:local:/tmp/project/" . "/local/bin/emacs-lsp-booster")
                   ("/fs:box:/work/project/" . "/box/bin/emacs-lsp-booster")))
     (let ((default-directory (car case))
-          (my/language-server-booster-required t)
+          (+language-server-booster-required t)
           seen-context)
       (cl-letf
           (((symbol-function 'lsp-resolve-final-command)
             (lambda (command _test) command))
            ((symbol-function 'remote-fs-file-name-p) (lambda (_path) t))
-           ((symbol-function 'my/language-server-executable-find)
+           ((symbol-function '+language-server-executable-find)
             (lambda (program)
               (setq seen-context default-directory)
               (and (equal program "emacs-lsp-booster") (cdr case)))))
         (should
          (equal
-          (my/lsp-mode--resolve-logical-command-a
+          (+lsp-mode--resolve-logical-command-a
            #'lsp-resolve-final-command
            '("clangd" "--foo"))
           (list (cdr case) "--json-false-value" ":json-false" "--"
@@ -1530,26 +1530,26 @@ required and missing."
       (should (equal seen-context default-directory)))))
 
 (ert-deftest language-server-booster-errors-when-required-and-missing ()
-  (let ((my/language-server-booster-required t))
+  (let ((+language-server-booster-required t))
     (cl-letf
         (((symbol-function 'lsp-resolve-final-command)
           (lambda (command _test) command))
-         ((symbol-function 'my/language-server-executable-find)
+         ((symbol-function '+language-server-executable-find)
           (lambda (_program) nil)))
       (should-error
-       (my/lsp-mode--resolve-logical-command-a
+       (+lsp-mode--resolve-logical-command-a
         #'lsp-resolve-final-command '("clangd"))))))
 
 (ert-deftest language-server-booster-optional-falls-back-silently ()
-  (let ((my/language-server-booster-required nil))
+  (let ((+language-server-booster-required nil))
     (cl-letf
         (((symbol-function 'lsp-resolve-final-command)
           (lambda (command _test) command))
-         ((symbol-function 'my/language-server-executable-find)
+         ((symbol-function '+language-server-executable-find)
           (lambda (_program) nil)))
       (should
        (equal
-        (my/lsp-mode--resolve-logical-command-a
+        (+lsp-mode--resolve-logical-command-a
          #'lsp-resolve-final-command '("clangd"))
         '("clangd"))))))
 
@@ -1564,13 +1564,13 @@ target; outside it, ordinary client-side lookups must be untouched."
     (let ((remote-current-adapter-id "language-server"))
       (should
        (equal
-        (my/language-server--executable-find-a
+        (+language-server--executable-find-a
          (lambda (_program &optional _remote) nil)
          "clangd" nil)
         "/target/bin/clangd")))
     (let ((remote-current-adapter-id "exec"))
       (should-not
-       (my/language-server--executable-find-a
+       (+language-server--executable-find-a
         (lambda (_program &optional _remote) nil)
         "clangd" nil)))))
 
@@ -1583,11 +1583,11 @@ target; outside it, ordinary client-side lookups must be untouched."
                   "/native/bin/clangd"))
       (cl-letf (((symbol-function 'remote-executable-find)
                  (lambda (command &optional _context)
-                   (my/language-server--executable-find-a
+                   (+language-server--executable-find-a
                     #'native-find command))))
         (should
          (equal
-          (my/language-server--executable-find-a
+          (+language-server--executable-find-a
            #'native-find "clangd")
           "/native/bin/clangd"))))
     (should (= native-calls 1))))
@@ -1599,86 +1599,86 @@ target; outside it, ordinary client-side lookups must be untouched."
           (remote-current-adapter-id "language-server")
           (remote-current-workspace 'workspace-one)
           (remote-buffer-environment 'environment-one)
-          (my/language-server-runtime-current nil)
-          (my/language-server--lookup-cache-active t)
-          (my/language-server--start-executable-cache
+          (+language-server-runtime-current nil)
+          (+language-server--lookup-cache-active t)
+          (+language-server--start-executable-cache
            (make-hash-table :test #'equal))
           (lookups 0))
       (cl-letf (((symbol-function 'remote-executable-find)
                  (lambda (program &optional _context)
                    (cl-incf lookups)
                    (and (equal program "clangd") "/target/bin/clangd"))))
-        (should (equal (my/language-server-executable-find "clangd")
+        (should (equal (+language-server-executable-find "clangd")
                        "/target/bin/clangd"))
-        (should (equal (my/language-server--executable-find-a
+        (should (equal (+language-server--executable-find-a
                         #'ignore "clangd")
                        "/target/bin/clangd"))
-        (should-not (my/language-server-executable-find "missing"))
-        (should-not (my/language-server-executable-find "missing"))
+        (should-not (+language-server-executable-find "missing"))
+        (should-not (+language-server-executable-find "missing"))
         (should (= lookups 2))
         (setq remote-buffer-environment 'environment-two)
-        (should (my/language-server-executable-find "clangd"))
+        (should (+language-server-executable-find "clangd"))
         (should (= lookups 3))
         (setq remote-current-workspace 'workspace-two)
-        (should (my/language-server-executable-find "clangd"))
+        (should (+language-server-executable-find "clangd"))
         (should (= lookups 4))
-        (let ((my/language-server--lookup-cache-active nil))
-          (should (my/language-server-executable-find "clangd")))
+        (let ((+language-server--lookup-cache-active nil))
+          (should (+language-server-executable-find "clangd")))
         (should (= lookups 5))))))
 
 (ert-deftest language-server-connection-clears-start-executable-cache ()
   "A failed connection must not leave executable results for a retry."
   (with-temp-buffer
-    (let ((my/language-server--start-executable-cache
+    (let ((+language-server--start-executable-cache
            (make-hash-table :test #'equal)))
-      (cl-letf (((symbol-function 'my/language-server--project-root-for-buffer)
+      (cl-letf (((symbol-function '+language-server--project-root-for-buffer)
                  (lambda () "/fs:box:/work/"))
-                ((symbol-function 'my/language-server--connect-workspace)
+                ((symbol-function '+language-server--connect-workspace)
                  (lambda (_root) 'workspace))
                 ((symbol-function 'remote-workspace-context)
                  (lambda (_workspace) 'context))
                 ((symbol-function 'remote-environment-ensure)
                  #'ignore))
         (should-error
-         (my/lsp-mode--connect-via-remote-a
+         (+lsp-mode--connect-via-remote-a
           (lambda () (error "connection failed"))))
-        (should-not my/language-server--start-executable-cache)))))
+        (should-not +language-server--start-executable-cache)))))
 
 (ert-deftest language-server-deep-configuration-merge-preserves-explicit-false ()
   (let* ((analysis
-          (my/lsp-test-object
+          (+lsp-test-object
            :autoSearchPaths t
            :diagnosticMode "workspace"
-           :nested (my/lsp-test-object :enabled t :level "strict")))
-         (base (my/lsp-test-object :analysis analysis))
+           :nested (+lsp-test-object :enabled t :level "strict")))
+         (base (+lsp-test-object :analysis analysis))
          (override
           '(:analysis
             (:diagnosticMode nil
              :nested (:enabled :json-false))))
-         (merged (my/language-server--merge-values base override))
+         (merged (+language-server--merge-values base override))
          (merged-analysis
-          (my/language-server--mapping-ref merged :analysis 'missing))
+          (+language-server--mapping-ref merged :analysis 'missing))
          (nested
-          (my/language-server--mapping-ref merged-analysis :nested 'missing)))
-    (should (eq (my/language-server--mapping-ref
+          (+language-server--mapping-ref merged-analysis :nested 'missing)))
+    (should (eq (+language-server--mapping-ref
                  merged-analysis :autoSearchPaths 'missing)
                 t))
-    (should-not (my/language-server--mapping-ref
+    (should-not (+language-server--mapping-ref
                  merged-analysis :diagnosticMode 'missing))
-    (should (eq (my/language-server--mapping-ref nested :enabled 'missing)
+    (should (eq (+language-server--mapping-ref nested :enabled 'missing)
                 :json-false))
-    (should (equal (my/language-server--mapping-ref nested :level 'missing)
+    (should (equal (+language-server--mapping-ref nested :level 'missing)
                    "strict"))))
 
 (ert-deftest language-server-workspace-configuration-is-section-and-owner-scoped ()
   (let* ((params
-          (my/lsp-test-object
+          (+lsp-test-object
            :items
            (vector
-            (my/lsp-test-object :section "python.analysis")
-            (my/lsp-test-object :section "pylsp.plugins"))))
+            (+lsp-test-object :section "python.analysis")
+            (+lsp-test-object :section "pylsp.plugins"))))
          (first
-          (my/lsp-test-object
+          (+lsp-test-object
            :autoSearchPaths t :diagnosticMode "workspace"))
          (second '(:jedi (:enabled t :fuzzy nil)))
          (response (vector first second))
@@ -1688,37 +1688,37 @@ target; outside it, ordinary client-side lookups must be untouched."
     (let ((lsp--cur-workspace 'owning-workspace))
       (cl-letf
           (((symbol-function
-             'my/language-server--workspace-configuration-override)
+             '+language-server--workspace-configuration-override)
             (lambda (workspace)
               (should (eq workspace 'owning-workspace))
               override)))
         (let* ((merged
-                (my/language-server--workspace-configuration-response-a
+                (+language-server--workspace-configuration-response-a
                  (lambda (_params) response) params))
                (analysis (aref merged 0))
                (plugins (aref merged 1))
-               (jedi (my/language-server--mapping-ref
+               (jedi (+language-server--mapping-ref
                       plugins :jedi 'missing)))
-          (should (eq (my/language-server--mapping-ref
+          (should (eq (+language-server--mapping-ref
                        analysis :autoSearchPaths 'missing)
                       t))
-          (should-not (my/language-server--mapping-ref
+          (should-not (+language-server--mapping-ref
                        analysis :diagnosticMode 'missing))
-          (should (eq (my/language-server--mapping-ref
+          (should (eq (+language-server--mapping-ref
                        jedi :enabled 'missing)
                       :json-false))
-          (should-not (my/language-server--mapping-ref
+          (should-not (+language-server--mapping-ref
                        jedi :fuzzy 'missing)))))))
 
 (ert-deftest language-server-reconfigure-does-not-flood-lsp-notifications ()
-  (should-not (memq #'my/language-server--push-workspace-configuration-h
+  (should-not (memq #'+language-server--push-workspace-configuration-h
                     lsp-configure-hook))
-  (let ((my/language-server--pushed-workspace-configurations
+  (let ((+language-server--pushed-workspace-configurations
          (make-hash-table :test #'eq))
         (workspace 'first-generation)
         notifications)
     (with-temp-buffer
-      (setq-local my/language-server--workspace-configuration
+      (setq-local +language-server--workspace-configuration
                   '(:python (:analysis (:diagnosticMode "openFilesOnly"))))
       (cl-letf (((symbol-function 'lsp-workspaces)
                  (lambda () (list workspace)))
@@ -1727,17 +1727,17 @@ target; outside it, ordinary client-side lookups must be untouched."
                    (push configuration notifications)
                    ;; A server registration can synchronously reconfigure the
                    ;; buffer while the notification is still being sent.
-                   (my/language-server--push-workspace-configuration-h))))
-        (my/language-server--push-workspace-configuration-h)
+                   (+language-server--push-workspace-configuration-h))))
+        (+language-server--push-workspace-configuration-h)
         (dotimes (_ 20)
-          (my/language-server--push-workspace-configuration-h))
+          (+language-server--push-workspace-configuration-h))
         (should (= (length notifications) 1))
-        (setq-local my/language-server--workspace-configuration
+        (setq-local +language-server--workspace-configuration
                     '(:python (:analysis (:diagnosticMode "workspace"))))
-        (my/language-server--push-workspace-configuration-h)
+        (+language-server--push-workspace-configuration-h)
         (should (= (length notifications) 2))
         (setq workspace 'restarted-generation)
-        (my/language-server--push-workspace-configuration-h)
+        (+language-server--push-workspace-configuration-h)
         (should (= (length notifications) 3))))))
 
 (ert-deftest language-server-custom-activation-cannot-leak-across-modes ()
@@ -1746,7 +1746,7 @@ target; outside it, ordinary client-side lookups must be untouched."
               ((symbol-function 'make-lsp-client) (lambda (&rest args) args))
               ((symbol-function 'lsp-register-client)
                (lambda (value) (setq client value))))
-      (my/register-language-server
+      (+register-language-server
        '(latex-mode) '("texlab")
        :server-id 'test-latex
        :activation-fn (lambda (&rest _) t)))
@@ -1771,14 +1771,14 @@ analyzes anything without this notification."
                (lambda (settings)
                  (push (list lsp--cur-workspace settings) sent)
                  (push 'announce order))))
-      (my/register-language-server
+      (+register-language-server
        '(python-mode) '("pyright-langserver" "--stdio")
        :server-id 'test-announce
        :initialized-fn (lambda (_workspace) (push 'custom order)))
       (let ((initialized (plist-get client :initialized-fn)))
         ;; Without an override the server still gets an (empty) object.
         (cl-letf (((symbol-function
-                    'my/language-server--workspace-configuration-override)
+                    '+language-server--workspace-configuration-override)
                    (lambda (_) nil)))
           (funcall initialized 'workspace-a))
         (should (equal (caar sent) 'workspace-a))
@@ -1789,13 +1789,13 @@ analyzes anything without this notification."
         ;; With an override the workspace's own settings are sent and recorded,
         ;; so the dedupe in the push path does not resend them.
         (cl-letf (((symbol-function
-                    'my/language-server--workspace-configuration-override)
+                    '+language-server--workspace-configuration-override)
                    (lambda (_) '(:python (:pythonPath "/venv/bin/python")))))
           (funcall initialized 'workspace-b))
         (should (equal (car sent)
                        '(workspace-b (:python (:pythonPath "/venv/bin/python")))))
         (should (equal (gethash 'workspace-b
-                                my/language-server--pushed-workspace-configurations)
+                                +language-server--pushed-workspace-configurations)
                        '(:python (:pythonPath "/venv/bin/python"))))))))
 
 (ert-deftest language-server-logical-support-check-restores-client-slot ()
@@ -1807,14 +1807,14 @@ analyzes anything without this notification."
       (with-temp-buffer
         (setq buffer-file-name "/fs:box:/work/project/source")
         (should
-         (my/lsp-mode--supports-logical-buffer-a
+         (+lsp-mode--supports-logical-buffer-a
           (lambda (candidate)
             (lsp--client-remote? candidate))
           client)))
       (with-temp-buffer
         (setq buffer-file-name "/ssh:box:/work/project/source")
         (should
-         (my/lsp-mode--supports-logical-buffer-a
+         (+lsp-mode--supports-logical-buffer-a
           (lambda (candidate)
             (lsp--client-remote? candidate))
           client)))
@@ -1828,7 +1828,7 @@ analyzes anything without this notification."
            :id "box/work" :target-id "box"
            :root "/fs:box:/work/project/" :context 'remote-context))
          (connection
-          (my/lsp-mode--stdio-connect-via-remote-a
+          (+lsp-mode--stdio-connect-via-remote-a
            (list
             :connect
             (lambda (_filter _sentinel _name _environment-fn _workspace)
@@ -1838,7 +1838,7 @@ analyzes anything without this notification."
                remote-current-adapter-id
                remote-current-workspace)))))
          applied-context)
-    (cl-letf (((symbol-function 'my/language-server--connect-workspace)
+    (cl-letf (((symbol-function '+language-server--connect-workspace)
                (lambda (root)
                  (should (equal root "/fs:box:/work/project/"))
                  owner))
@@ -1855,35 +1855,35 @@ analyzes anything without this notification."
 (ert-deftest language-server-core-languages-select-one-authoritative-client ()
   (with-temp-buffer
     (setq major-mode 'c-mode)
-    (my/cpp-language-server-setup-h)
+    (+cpp-language-server-setup-h)
     (should (equal lsp-enabled-clients '(my-clangd))))
   (with-temp-buffer
     (setq major-mode 'python-mode)
     (cl-letf (((symbol-function
-                'my/language-server-set-workspace-configuration)
+                '+language-server-set-workspace-configuration)
                #'ignore))
-      (my/python-language-server-setup-h))
+      (+python-language-server-setup-h))
     (should (equal lsp-enabled-clients '(my-python))))
   (should-not lsp-auto-register-remote-clients)
-  (should (memq #'my/language-server-ensure-deferred prog-mode-hook)))
+  (should (memq #'+language-server-ensure-deferred prog-mode-hook)))
 
 (ert-deftest language-server-explicit-disconnect-blocks-deferred-startup ()
   "A retained unsaved buffer must not let queued startup reopen its target."
   (with-temp-buffer
     (setq-local remote-buffer-disconnected-p t)
-    (cl-letf (((symbol-function 'my/language-server-runtime-prepare)
+    (cl-letf (((symbol-function '+language-server-runtime-prepare)
                (lambda (&rest _) (ert-fail "Deferred ensure prepared runtime")))
-              ((symbol-function 'my/language-server--project-root-for-buffer)
+              ((symbol-function '+language-server--project-root-for-buffer)
                (lambda () (ert-fail "Deferred LSP queried target"))))
-      (my/language-server-ensure)
-      (my/lsp-mode-ensure)
-      (my/lsp-mode-start-now)
-      (my/lsp-mode--connect-via-remote-a
+      (+language-server/ensure)
+      (+lsp/mode-ensure)
+      (+lsp-mode-start-now)
+      (+lsp-mode--connect-via-remote-a
        (lambda (&rest _) (ert-fail "Deferred LSP connected"))))
     (let (started)
-      (cl-letf (((symbol-function 'my/language-server-runtime-prepare)
+      (cl-letf (((symbol-function '+language-server-runtime-prepare)
                  (lambda (&rest _) (setq started t))))
-        (call-interactively #'my/language-server-ensure))
+        (call-interactively #'+language-server/ensure))
       (should started)
       (should-not remote-buffer-disconnected-p))))
 
@@ -1903,22 +1903,22 @@ analyzes anything without this notification."
                  (lambda (name &optional _directory)
                    (if (equal name "~/") "/fs:lab:/home/me/" name))))
         (cl-flet ((ask (&rest _) (cl-incf asked) "/fs:lab:/asked/"))
-          (setq-local my/lsp-mode--start-interactive nil)
+          (setq-local +lsp-mode--start-interactive nil)
           ;; No markers around the file, e.g. a system header: no server.
-          (should-not (my/lsp-mode--quiet-root-prompt-a #'ask 'session))
+          (should-not (+lsp-mode--quiet-root-prompt-a #'ask 'session))
           ;; A marked project is adopted without a question.
           (setq suggested "/fs:lab:/srv/project")
-          (should (equal (my/lsp-mode--quiet-root-prompt-a #'ask 'session)
+          (should (equal (+lsp-mode--quiet-root-prompt-a #'ask 'session)
                          "/fs:lab:/srv/project/"))
           ;; A filesystem root or a home directory is never adopted silently.
           (setq suggested "/fs:lab:/")
-          (should-not (my/lsp-mode--quiet-root-prompt-a #'ask 'session))
+          (should-not (+lsp-mode--quiet-root-prompt-a #'ask 'session))
           (setq suggested "/fs:lab:/home/me")
-          (should-not (my/lsp-mode--quiet-root-prompt-a #'ask 'session))
+          (should-not (+lsp-mode--quiet-root-prompt-a #'ask 'session))
           (should (zerop asked))
           ;; A start the user asked for may ask back.
-          (setq-local my/lsp-mode--start-interactive t)
-          (should (equal (my/lsp-mode--quiet-root-prompt-a #'ask 'session)
+          (setq-local +lsp-mode--start-interactive t)
+          (should (equal (+lsp-mode--quiet-root-prompt-a #'ask 'session)
                          "/fs:lab:/asked/"))
           (should (= asked 1)))))))
 
@@ -1926,122 +1926,122 @@ analyzes anything without this notification."
   (with-temp-buffer
     (setq major-mode 'python-mode)
     (let (messages started)
-      (cl-letf (((symbol-function 'my/lsp-mode-supported-p) (lambda () t))
-                ((symbol-function 'my/language-server-apply-process-environment)
+      (cl-letf (((symbol-function '+lsp-mode-supported-p) (lambda () t))
+                ((symbol-function '+language-server-apply-process-environment)
                  #'ignore)
-                ((symbol-function 'my/language-server-apply-lsp-local-settings)
+                ((symbol-function '+language-server-apply-lsp-local-settings)
                  #'ignore)
                 ((symbol-function
-                  'my/language-server-runtime-register-lsp-configuration)
+                  '+language-server-runtime-register-lsp-configuration)
                  #'ignore)
-                ((symbol-function 'my/language-server-contact-available-p)
+                ((symbol-function '+language-server-contact-available-p)
                  (lambda () nil))
                 ((symbol-function 'lsp-deferred)
                  (lambda () (setq started t)))
                 ((symbol-function 'message)
                  (lambda (format-string &rest arguments)
                    (push (apply #'format format-string arguments) messages))))
-        (setq my/language-server--manual-start nil)
-        (my/lsp-mode-start-now)
+        (setq +language-server--manual-start nil)
+        (+lsp-mode-start-now)
         (should-not messages)
-        (setq my/language-server--manual-start t)
-        (my/lsp-mode-start-now)
+        (setq +language-server--manual-start t)
+        (+lsp-mode-start-now)
         (should (= (length messages) 1))
         (should-not started)))))
 
 (ert-deftest language-server-coalesces-duplicate-deferred-starts ()
   "Repeated ensure hooks must not reapply a remote environment during startup."
   (with-temp-buffer
-    (let ((my/lsp-mode--start-request nil)
-          (my/language-server--manual-start nil)
+    (let ((+lsp-mode--start-request nil)
+          (+language-server--manual-start nil)
           (remote-buffer-environment 'first-environment)
-          (my/language-server-runtime-current 'first-runtime)
+          (+language-server-runtime-current 'first-runtime)
           (lsp-managed-mode nil)
           (applied 0)
           (started 0))
-      (cl-letf (((symbol-function 'my/language-server-preferred-backend)
+      (cl-letf (((symbol-function '+language-server-preferred-backend)
                  (lambda () 'lsp-mode))
-                ((symbol-function 'my/direnv-update-environment-maybe)
+                ((symbol-function '+direnv-update-environment-maybe)
                  (lambda (&rest _) nil))
-                ((symbol-function 'my/lsp-mode-supported-p)
+                ((symbol-function '+lsp-mode-supported-p)
                  (lambda () t))
-                ((symbol-function 'my/language-server-apply-process-environment)
+                ((symbol-function '+language-server-apply-process-environment)
                  (lambda () (cl-incf applied)))
-                ((symbol-function 'my/language-server-apply-lsp-local-settings)
+                ((symbol-function '+language-server-apply-lsp-local-settings)
                  #'ignore)
                 ((symbol-function
-                  'my/language-server-runtime-register-lsp-configuration)
+                  '+language-server-runtime-register-lsp-configuration)
                  #'ignore)
-                ((symbol-function 'my/language-server-contact-available-p)
+                ((symbol-function '+language-server-contact-available-p)
                  (lambda () t))
-                ((symbol-function 'my/language-server--load-client-ui)
+                ((symbol-function '+language-server--load-client-ui)
                  #'ignore)
                 ((symbol-function 'lsp-deferred)
                  (lambda () (cl-incf started))))
-        (my/lsp-mode-ensure)
-        (my/lsp-mode-ensure)
+        (+lsp/mode-ensure)
+        (+lsp/mode-ensure)
         (should (= applied 1))
         (should (= started 1))
-        (setq my/language-server--manual-start t)
-        (my/lsp-mode-ensure)
+        (setq +language-server--manual-start t)
+        (+lsp/mode-ensure)
         (should (= applied 2))
         (setq remote-buffer-environment 'second-environment)
-        (my/lsp-mode-ensure)
+        (+lsp/mode-ensure)
         (should (= applied 3))
-        (my/lsp-mode--clear-start-request-on-detach)
-        (my/lsp-mode-ensure)
+        (+lsp-mode--clear-start-request-on-detach)
+        (+lsp/mode-ensure)
         (should (= applied 4))
         (should (= started 4))
-        (setcar my/lsp-mode--start-request
+        (setcar +lsp-mode--start-request
                 (- (float-time)
-                   (1+ my/lsp-mode-start-request-coalesce-seconds)))
-        (should-not (my/lsp-mode--start-request-active-p))))))
+                   (1+ +lsp-mode-start-request-coalesce-seconds)))
+        (should-not (+lsp-mode--start-request-active-p))))))
 
 (ert-deftest language-server-failed-deferred-start-allows-retry ()
   (with-temp-buffer
-    (let ((my/lsp-mode--start-request nil)
-          (my/language-server--manual-start nil))
-      (cl-letf (((symbol-function 'my/lsp-mode-supported-p)
+    (let ((+lsp-mode--start-request nil)
+          (+language-server--manual-start nil))
+      (cl-letf (((symbol-function '+lsp-mode-supported-p)
                  (lambda () t))
-                ((symbol-function 'my/language-server-apply-process-environment)
+                ((symbol-function '+language-server-apply-process-environment)
                  #'ignore)
-                ((symbol-function 'my/language-server-apply-lsp-local-settings)
+                ((symbol-function '+language-server-apply-lsp-local-settings)
                  #'ignore)
                 ((symbol-function
-                  'my/language-server-runtime-register-lsp-configuration)
+                  '+language-server-runtime-register-lsp-configuration)
                  #'ignore)
-                ((symbol-function 'my/language-server-contact-available-p)
+                ((symbol-function '+language-server-contact-available-p)
                  (lambda () t))
-                ((symbol-function 'my/language-server--load-client-ui)
+                ((symbol-function '+language-server--load-client-ui)
                  #'ignore)
                 ((symbol-function 'lsp-deferred)
                  (lambda () (error "start failed"))))
-        (should-error (my/lsp-mode-start-now))
-        (should-not my/lsp-mode--start-request)))))
+        (should-error (+lsp-mode-start-now))
+        (should-not +lsp-mode--start-request)))))
 
 (ert-deftest language-server-active-request-skips-runtime-reprepare ()
   (with-temp-buffer
-    (let ((my/language-server-runtime-state 'unsupported)
-          (my/language-server-runtime-current 'runtime)
+    (let ((+language-server-runtime-state 'unsupported)
+          (+language-server-runtime-current 'runtime)
           (remote-buffer-environment 'environment)
-          (my/language-server--manual-start nil)
-          (my/language-server--waiting-for-runtime nil)
+          (+language-server--manual-start nil)
+          (+language-server--waiting-for-runtime nil)
           (prepared 0))
-      (setq my/lsp-mode--start-request
+      (setq +lsp-mode--start-request
             (list (float-time) 'runtime 'environment))
-      (cl-letf (((symbol-function 'my/language-server-runtime-prepare)
+      (cl-letf (((symbol-function '+language-server-runtime-prepare)
                  (lambda (&rest _) (cl-incf prepared))))
-        (my/language-server-ensure)
+        (+language-server/ensure)
         (should (= prepared 0))
         (setq remote-buffer-environment 'changed-environment)
-        (my/language-server-ensure)
+        (+language-server/ensure)
         (should (= prepared 1))))))
 
 (ert-deftest language-server-managed-folder-prewarm-is-idle-and-coalesced ()
   "Browsing an SSH workspace preloads the client only after one idle timer."
-  (let ((my/language-server-folder-prewarm-idle-seconds 0.5)
-        (my/language-server--folder-prewarm-timer nil)
-        (my/language-server--folder-prewarmed nil)
+  (let ((+language-server-folder-prewarm-idle-seconds 0.5)
+        (+language-server--folder-prewarm-timer nil)
+        (+language-server--folder-prewarmed nil)
         (owner (remote-workspace-create :target-id "test" :state 'open))
         (scheduled 0)
         (loaded nil)
@@ -2053,32 +2053,32 @@ analyzes anything without this notification."
                  (cl-incf scheduled)
                  (setq callback function)
                  'prewarm-timer))
-              ((symbol-function 'my/language-server--require-on-client)
+              ((symbol-function '+language-server--require-on-client)
                (lambda (feature)
                  (push feature loaded)
                  t))
-              ((symbol-function 'my/language-server--load-client-ui)
+              ((symbol-function '+language-server--load-client-ui)
                (lambda () (push 'ui loaded))))
       (with-temp-buffer
         (setq default-directory "/tmp/")
-        (my/language-server--folder-prewarm-schedule)
+        (+language-server--folder-prewarm-schedule)
         (should (= scheduled 0))
         (setq default-directory "/fs:test:/tmp/")
-        (my/language-server--folder-prewarm-schedule)
-        (my/language-server--folder-prewarm-schedule)
+        (+language-server--folder-prewarm-schedule)
+        (+language-server--folder-prewarm-schedule)
         (should (= scheduled 1))
         (should-not loaded)
         (funcall callback)
         (should (equal loaded '(ui lsp-mode)))
-        (should my/language-server--folder-prewarmed)
-        (my/language-server--folder-prewarm-schedule)
+        (should +language-server--folder-prewarmed)
+        (+language-server--folder-prewarm-schedule)
         (should (= scheduled 1))))))
 
 (ert-deftest language-server-local-folder-does-not-prewarm-client ()
   "A logical local Dired buffer keeps the native local resource policy."
-  (let ((my/language-server-folder-prewarm-idle-seconds 0.5)
-        (my/language-server--folder-prewarm-timer nil)
-        (my/language-server--folder-prewarmed nil)
+  (let ((+language-server-folder-prewarm-idle-seconds 0.5)
+        (+language-server--folder-prewarm-timer nil)
+        (+language-server--folder-prewarmed nil)
         (owner (remote-workspace-create :target-id "local" :state 'open))
         (scheduled 0))
     (cl-letf (((symbol-function 'remote-workspace-for-path)
@@ -2087,28 +2087,28 @@ analyzes anything without this notification."
                (lambda (&rest _) (cl-incf scheduled))))
       (with-temp-buffer
         (setq default-directory "/fs:local:/tmp/")
-        (my/language-server--folder-prewarm-schedule)
+        (+language-server--folder-prewarm-schedule)
         (should (= scheduled 0))))))
 
 (ert-deftest language-server-folder-prewarm-failure-stays-retryable ()
   "A failed idle package load must not disable the later normal startup."
-  (let ((my/language-server--folder-prewarm-timer 'pending)
-        (my/language-server--folder-prewarmed nil)
+  (let ((+language-server--folder-prewarm-timer 'pending)
+        (+language-server--folder-prewarmed nil)
         (failed t)
         (loaded 0))
-    (cl-letf (((symbol-function 'my/language-server--require-on-client)
+    (cl-letf (((symbol-function '+language-server--require-on-client)
                (lambda (_feature)
                  (when failed (error "injected package load failure"))
                  t))
-              ((symbol-function 'my/language-server--load-client-ui)
+              ((symbol-function '+language-server--load-client-ui)
                (lambda () (cl-incf loaded)))
               ((symbol-function 'remote-log) #'ignore))
-      (my/language-server--folder-prewarm-run)
-      (should-not my/language-server--folder-prewarm-timer)
-      (should-not my/language-server--folder-prewarmed)
+      (+language-server--folder-prewarm-run)
+      (should-not +language-server--folder-prewarm-timer)
+      (should-not +language-server--folder-prewarmed)
       (setq failed nil)
-      (my/language-server--folder-prewarm-run)
-      (should my/language-server--folder-prewarmed)
+      (+language-server--folder-prewarm-run)
+      (should +language-server--folder-prewarmed)
       (should (= loaded 1)))))
 
 (provide 'init-lsp-remote-tests)

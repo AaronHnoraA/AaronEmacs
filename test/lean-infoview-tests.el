@@ -4,8 +4,8 @@
 
 (require 'ert)
 (require 'json)
-(require 'init-lean)
-(require 'init-lean-infoview)
+(require 'lang/lean/config)
+(require 'lang/lean/infoview)
 
 (ert-deftest lean-infoview-gateway-bindings-are-instance-isolated ()
   (let ((lean--proxy-gateway-bindings (make-hash-table :test #'equal))
@@ -152,9 +152,9 @@
       (unwind-protect
           (cl-letf (((symbol-function 'eglot-managed-p)
                      (lambda () nil))
-                    ((symbol-function 'my/direnv-update-environment-maybe)
+                    ((symbol-function '+direnv-update-environment-maybe)
                      (lambda (&optional _path _callback) nil))
-                    ((symbol-function 'my/eglot-start-now)
+                    ((symbol-function '+eglot-start-now)
                      (lambda (&optional _interactive)
                        (cl-incf starts))))
             (lean--ensure-eglot)
@@ -171,9 +171,9 @@
           (lean--eglot-waiting-for-environment t)
           (starts 0))
       (cl-letf (((symbol-function 'eglot-managed-p) (lambda () nil))
-                ((symbol-function 'my/direnv-update-environment-maybe)
+                ((symbol-function '+direnv-update-environment-maybe)
                  (lambda (&optional _path _callback) 'ready))
-                ((symbol-function 'my/eglot-start-now)
+                ((symbol-function '+eglot-start-now)
                  (lambda (&optional _interactive) (cl-incf starts))))
         (lean--ensure-eglot)
         (should-not lean--eglot-waiting-for-environment)
@@ -183,7 +183,7 @@
   (with-temp-buffer
     (let ((lean--eglot-waiting-for-environment t)
           seen)
-      (cl-letf (((symbol-function 'my/eglot-start-now)
+      (cl-letf (((symbol-function '+eglot-start-now)
                  (lambda (&optional interactive)
                    (setq seen interactive)))
                 ((symbol-function 'message) #'ignore))

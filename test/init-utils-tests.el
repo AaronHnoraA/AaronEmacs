@@ -2,21 +2,21 @@
 
 (require 'ert)
 (require 'cl-lib)
-(require 'init-utils)
+(require 'aaron-utils)
 
-(ert-deftest my/portal-wrap-validates-command ()
+(ert-deftest +portal-wrap-validates-command ()
   (dolist (command '(nil () "" "  " ("") ("tool" 1)))
-    (should-error (my/portal-wrap command) :type 'user-error)))
+    (should-error (aaron/portal-wrap command) :type 'user-error)))
 
-(ert-deftest my/portal-wrap-passes-argv-and-directory-to-portal ()
+(ert-deftest +portal-wrap-passes-argv-and-directory-to-portal ()
   (let ((buffer (generate-new-buffer " *portal-wrap-test*"))
         called)
     (unwind-protect
-        (cl-letf (((symbol-function 'my/portal-create)
+        (cl-letf (((symbol-function '+portal-create)
                    (lambda (&rest args)
                      (setq called args)
                      buffer)))
-          (should (eq (my/portal-wrap '("tool" "two words")
+          (should (eq (aaron/portal-wrap '("tool" "two words")
                                       :directory temporary-file-directory
                                       :display nil)
                       buffer))

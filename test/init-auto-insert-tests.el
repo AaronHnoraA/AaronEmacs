@@ -3,14 +3,14 @@
 ;;; Code:
 
 (require 'ert)
-(require 'init-auto-insert)
+(require 'editor/file-templates/config)
 (require 'remote-framework)
 
 (defun init-auto-insert-test--expand (file-name)
   "Expand the Python default template in a buffer visiting FILE-NAME."
   (with-temp-buffer
     (setq buffer-file-name file-name)
-    (my/auto-insert--insert-template-file
+    (+auto-insert--insert-template-file
      (expand-file-name "templates/python/default.py" user-emacs-directory))
     (prog1 (buffer-string)
       (setq buffer-file-name nil))))
@@ -32,7 +32,7 @@
 (ert-deftest init-auto-insert-places-point-at-the-cursor-token ()
   (with-temp-buffer
     (setq buffer-file-name "/tmp/project/a.py")
-    (my/auto-insert--insert-template-file
+    (+auto-insert--insert-template-file
      (expand-file-name "templates/python/default.py" user-emacs-directory))
     (should-not (search-forward "{{cursor}}" nil t))
     ;; The Python template puts the cursor inside `main'.

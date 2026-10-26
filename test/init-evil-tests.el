@@ -3,7 +3,7 @@
 ;;; Code:
 
 (require 'ert)
-(require 'init-evil)
+(require 'editor/evil/config)
 (require 'avy)
 
 (ert-deftest evil-avy-goto-char-in-line-reads-and-forwards-a-character ()
@@ -13,15 +13,15 @@
               ((symbol-function 'avy-goto-char-in-line)
                (lambda (char)
                  (setq received char))))
-      (call-interactively #'my/evil-avy-goto-char-in-line))
+      (call-interactively #'+evil/avy-goto-char-in-line))
     (should (eq received ?x))))
 
 (ert-deftest evil-escape-has-a-global-non-evil-fallback ()
   (should (eq (lookup-key (current-global-map) (kbd "<escape>"))
-              #'my/escape))
+              #'aaron/escape))
   (with-temp-buffer
     (evil-local-mode -1)
-    (should (eq (key-binding (kbd "<escape>")) #'my/escape))))
+    (should (eq (key-binding (kbd "<escape>")) #'aaron/escape))))
 
 (ert-deftest evil-escape-global-fallback-preserves-local-behavior ()
   (with-temp-buffer
@@ -33,11 +33,11 @@
 
 (ert-deftest evil-escape-handles-state-and-highlight-in-one-pass ()
   (let (state-changed highlight-cleared)
-    (cl-letf (((symbol-function 'my/evil-normal-state-maybe)
+    (cl-letf (((symbol-function '+evil-normal-state-maybe)
                (lambda () (setq state-changed t)))
-              ((symbol-function 'my/evil-clear-ex-highlights-h)
+              ((symbol-function '+evil-clear-ex-highlights-h)
                (lambda () (setq highlight-cleared t))))
-      (should (my/evil-escape-state-h)))
+      (should (+evil-escape-state-h)))
     (should state-changed)
     (should highlight-cleared)))
 

@@ -1,7 +1,7 @@
 ;;; init-open-place-tests.el --- Placed visits for bin/emacsopen -*- lexical-binding: t; -*-
 
 (require 'ert)
-(require 'init-open)
+(require 'aaron-open)
 
 (defmacro init-open-place-tests--with-file (var &rest body)
   "Bind VAR to a fresh three-line file, run BODY in one window, clean up."
@@ -18,7 +18,7 @@
   (dolist (case '((left . left) (right . right) (above . above) (below . below)))
     (init-open-place-tests--with-file file
       (let* ((origin (selected-window))
-             (result (my/open-place file (car case)))
+             (result (aaron-open-place file (car case)))
              (window (selected-window)))
         (should (equal (alist-get 'placement result) (symbol-name (car case))))
         (should-not (eq window origin))
@@ -31,10 +31,10 @@
 
 (ert-deftest open-place-reuses-a-window-that-shows-the-file ()
   (init-open-place-tests--with-file file
-    (my/open-place file 'right)
+    (aaron-open-place file 'right)
     (let ((shown (selected-window)))
       (select-window (window-in-direction 'left shown))
-      (let ((result (my/open-place file 'here)))
+      (let ((result (aaron-open-place file 'here)))
         (should (eq (alist-get 'reused result) t))
         (should (eq (selected-window) shown))
         (should (= (length (window-list)) 2))))))
@@ -42,7 +42,7 @@
 (ert-deftest open-place-positions-and-keeps-focus-on-request ()
   (init-open-place-tests--with-file file
     (let* ((origin (selected-window))
-           (result (my/open-place file 'below 2 5 t))
+           (result (aaron-open-place file 'below 2 5 t))
            (window (get-buffer-window (find-buffer-visiting file))))
       (should (eq (selected-window) origin))
       (should (eq (alist-get 'positioned result) t))
@@ -53,14 +53,14 @@
 
 (ert-deftest open-place-other-splits-only-when-alone ()
   (init-open-place-tests--with-file file
-    (my/open-place file 'other)
+    (aaron-open-place file 'other)
     (should (= (length (window-list)) 2))
     (kill-buffer (find-buffer-visiting file))
-    (my/open-place file 'other)
+    (aaron-open-place file 'other)
     (should (= (length (window-list)) 2))))
 
 (ert-deftest open-place-client-reports-errors-as-json ()
-  (let* ((reply (my/open-place-from-client
+  (let* ((reply (aaron-open-place-from-client
                  (base64-encode-string "/tmp/x") "sideways" nil nil t))
          (json (json-parse-string (base64-decode-string reply)
                                   :object-type 'alist)))

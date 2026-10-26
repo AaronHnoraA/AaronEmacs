@@ -2,7 +2,7 @@
 
 (require 'ert)
 (require 'cl-lib)
-(require 'init-session)
+(require 'ui/session/config)
 
 (ert-deftest workspace-session-save-preserves-old-file-on-serializer-error ()
   "A partial Perspective write must not destroy the previous session."
@@ -18,7 +18,7 @@
                      (lambda (file &optional _interactive)
                        (with-temp-file file (insert "partial session"))
                        (error "serializer interrupted"))))
-            (should-error (my/session-save)))
+            (should-error (+session/save)))
           (should (equal (with-temp-buffer
                            (insert-file-contents target)
                            (buffer-string))
@@ -44,8 +44,8 @@
                     ((symbol-function 'persp-state-load)
                      (lambda (file)
                        (setq loaded-path file))))
-            (my/session-save)
-            (my/session-load))
+            (+session/save)
+            (+session/load))
           (should (equal loaded-path persp-state-default-file))
           (should (string-prefix-p root saved-path))
           (should-not (file-remote-p saved-path))
@@ -58,7 +58,7 @@
          (persp-state-default-file (expand-file-name "session/state.el" root)))
     (unwind-protect
         (progn
-          (should-error (my/session-load) :type 'user-error)
+          (should-error (+session/load) :type 'user-error)
           (should-not (file-exists-p (file-name-directory
                                       persp-state-default-file))))
       (delete-directory root t))))

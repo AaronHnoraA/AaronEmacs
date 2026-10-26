@@ -107,11 +107,11 @@
                        remote-fs--call-routed-1
                        remote-context remote-connection-ensure
                        remote-environment-ensure remote-path-probe
-                       my/copilot-auto-enable-h my/copilot-available-p
-                       my/yas-enable-for-source-buffer
-                       my/language-server-ensure-deferred
-                       my/language-server-runtime-prepare
-                       my/direnv-update-environment-maybe))
+                       +copilot-auto-enable-h +copilot-available-p
+                       +yas-enable-for-source-buffer
+                       +language-server-ensure-deferred
+                       +language-server-runtime-prepare
+                       +direnv-update-environment-maybe))
               (when (fboundp function)
                 (elp-instrument-function function))))
           ;; Load major-mode and project hooks before timed visits.  Report

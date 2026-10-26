@@ -4,7 +4,7 @@
 
 (require 'ert)
 (require 'cl-lib)
-(require 'init-snippets)
+(require 'editor/snippets/config)
 (require 'yasnippet)
 
 (ert-deftest init-snippets-stale-compiled-cache-is-ignored ()
@@ -18,17 +18,17 @@
           (set-file-times compiled (time-subtract (current-time) 3600))
           (with-temp-file snippet
             (insert "# -*- mode: snippet -*-\n# key: fresh\n# --\nfresh body"))
-          (should (my/yas--compiled-snippets-stale-p directory))
+          (should (+yas--compiled-snippets-stale-p directory))
           (let (sources)
             (cl-letf (((symbol-function 'yas--load-directory-2)
                        (lambda (dir _mode) (push dir sources))))
-              (my/yas--skip-stale-compiled-a
+              (+yas--skip-stale-compiled-a
                (lambda (&rest _) (ert-fail "Loaded the stale compiled cache"))
                directory 'probe-mode))
             (should (equal sources (list directory))))
           ;; A cache newer than every source is used as before.
           (set-file-times compiled (time-add (current-time) 3600))
-          (should-not (my/yas--compiled-snippets-stale-p directory)))
+          (should-not (+yas--compiled-snippets-stale-p directory)))
       (delete-directory directory t))))
 
 (ert-deftest init-snippets-jutext-uses-the-shared-research-catalog ()
@@ -86,8 +86,8 @@
   "LSP completion expands snippets before the idle activation has run."
   (with-temp-buffer
     (prog-mode)
-    (when (timerp my/yas--pending-enable)
-      (cancel-timer my/yas--pending-enable))
+    (when (timerp +yas--pending-enable)
+      (cancel-timer +yas--pending-enable))
     (yas-minor-mode -1)
     (yas-expand-snippet "printf(${1:format})$0")
     (should yas-minor-mode)
@@ -116,12 +116,12 @@
     (setq-local lsp-completion-mode t
                 company-backends
                 (cons 'company-capf (default-value 'company-backends)))
-    (my/company-drop-shadowing-capf-h)
+    (+company-drop-shadowing-capf-h)
     (should (equal company-backends (default-value 'company-backends))))
   (with-temp-buffer
     (setq-local lsp-completion-mode t
                 company-backends '(company-capf company-dabbrev))
-    (my/company-drop-shadowing-capf-h)
+    (+company-drop-shadowing-capf-h)
     (should (equal company-backends '(company-capf company-dabbrev)))))
 
 (ert-deftest init-snippets-empty-prefix-offers-only-typed-keys ()
@@ -129,18 +129,18 @@
   (with-temp-buffer
     (insert "p ..")
     (should
-     (equal (my/company--typed-key-at-empty-prefix-a
+     (equal (+company--typed-key-at-empty-prefix-a
              (lambda (&rest _) (list ".." "." "cpy" "for"))
              'candidates "")
             '("..")))
     (should
-     (equal (my/company--typed-key-at-empty-prefix-a
+     (equal (+company--typed-key-at-empty-prefix-a
              (lambda (&rest _) (list "for" "fori"))
              'candidates "fo")
             '("for" "fori"))))
   (with-temp-buffer
     (insert ":")
-    (should (equal (my/company--typed-key-at-empty-prefix-a
+    (should (equal (+company--typed-key-at-empty-prefix-a
                     (lambda (&rest _) '(":" ";" "." ".."))
                     'candidates "")
                    '(":")))))
@@ -149,7 +149,7 @@
   "LaTeX offers the injected math shortcuts immediately after typing them."
   (with-temp-buffer
     (LaTeX-mode)
-    (my/yas--enable-now)
+    (+yas--enable-now)
     (require 'company-yasnippet)
     (dolist (key '(";" ":"))
       (erase-buffer)
@@ -169,8 +169,8 @@
   "A shared raw cell works in Python, JS, SQL and Lisp projections."
   (dolist (prefix '("#" "//" "--" ";"))
     (with-temp-buffer
-      (setq-local my/noema-jupyter-cell-mode t
-                  my/noema-jupyter-notebook--comment-prefix prefix)
+      (setq-local +noema-jupyter-cell-mode t
+                  +noema-jupyter-notebook--comment-prefix prefix)
       (yas-minor-mode 1)
       (should (memq 'jupyter-notebook-mode yas--extra-modes))
       (let ((template
@@ -185,6 +185,6 @@
                  (concat "\\`" (regexp-quote prefix)
                          " %% \\[raw\\] id=[A-Za-z0-9_-]+\n"
                          (regexp-quote prefix) " ") (buffer-string))))
-      (setq-local my/noema-jupyter-cell-mode nil)
-      (my/yas-jupyter-setup)
+      (setq-local +noema-jupyter-cell-mode nil)
+      (+yas-jupyter-setup)
       (should-not (memq 'jupyter-notebook-mode yas--extra-modes)))))

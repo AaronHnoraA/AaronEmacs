@@ -2,9 +2,9 @@
 
 (require 'ert)
 (require 'cl-lib)
-(require 'init-portal-popup)
+(require 'term/portal/popup)
 (require 'noema-agent-acp)
-(require 'init-ai-ide)
+(require 'tools/agent/config)
 
 (ert-deftest agent-shell-stall-warning-clears-on-progress ()
   (with-temp-buffer
@@ -13,7 +13,7 @@
            (state `((:active-requests . (((:method . "session/prompt"))))
                     (:client . ((:process . ,process)))))
            (agent-shell--state state)
-           (my/agent-shell--last-activity (float-time))
+           (+agent-shell--last-activity (float-time))
            warning deleted scheduled)
       (unwind-protect
           (cl-letf (((symbol-function 'agent-shell--update-fragment)
@@ -23,18 +23,18 @@
                     ((symbol-function 'run-at-time)
                      (lambda (&rest args) (setq scheduled args) nil))
                     ((symbol-function 'message) #'ignore))
-            (my/agent-shell--stall-tick (current-buffer) state)
-            (should-not my/agent-shell--stall-shown)
+            (+agent-shell--stall-tick (current-buffer) state)
+            (should-not +agent-shell--stall-shown)
             (should-not warning)
-            (setq my/agent-shell--last-activity
-                  (- (float-time) my/agent-shell-stall-warning-seconds 5))
-            (my/agent-shell--stall-tick (current-buffer) state)
-            (should my/agent-shell--stall-shown)
+            (setq +agent-shell--last-activity
+                  (- (float-time) +agent-shell-stall-warning-seconds 5))
+            (+agent-shell--stall-tick (current-buffer) state)
+            (should +agent-shell--stall-shown)
             (should (equal (plist-get warning :block-id) "acp-stalled"))
             (should (string-match-p "process is running" (plist-get warning :body)))
             (should scheduled)
-            (my/agent-shell--note-activity '((:event . tool-call-update)))
-            (should-not my/agent-shell--stall-shown)
+            (+agent-shell--note-activity '((:event . tool-call-update)))
+            (should-not +agent-shell--stall-shown)
             (should (equal (plist-get deleted :block-id) "acp-stalled")))
         (delete-process process)))))
 
@@ -44,7 +44,7 @@
                   (:client . ((:process . ,process)))))
          sent failure)
     (delete-process process)
-    (my/agent-shell--reject-dead-client-a
+    (+agent-shell--reject-dead-client-a
      (lambda (&rest _) (setq sent t))
      :state state
      :on-failure (lambda (error-object _raw) (setq failure error-object)))
@@ -57,7 +57,7 @@
          (state `((:client . ((:process . ,process)))))
          sent)
     (delete-process process)
-    (my/agent-shell--reject-dead-client-a
+    (+agent-shell--reject-dead-client-a
      (lambda (&rest _) (setq sent t))
      :state state :request '((:method . "initialize")))
     (should sent)))
@@ -67,11 +67,11 @@
     (setq major-mode 'agent-shell-mode
           agent-shell--state '((:client . nil)))
     (let (reconnected sent)
-      (cl-letf (((symbol-function 'my/agent-shell--dead-client-p)
+      (cl-letf (((symbol-function '+agent-shell--dead-client-p)
                  (lambda (_) t))
-                ((symbol-function 'my/agent-shell-reconnect)
+                ((symbol-function '+agent-shell/reconnect)
                  (lambda () (setq reconnected t))))
-        (my/agent-shell--submit-a (lambda (&rest _) (setq sent t)))
+        (+agent-shell--submit-a (lambda (&rest _) (setq sent t)))
         (should reconnected)
         (should-not sent)))))
 
@@ -89,7 +89,7 @@
                       noema-agent-acp-session-name "manual/claude"
                       noema-agent-acp-session-agent "claude"
                       noema-agent-acp-session-root "/tmp/project/")
-          (cl-letf (((symbol-function 'my/agent-shell--dead-client-p)
+          (cl-letf (((symbol-function '+agent-shell--dead-client-p)
                      (lambda (_) t))
                     ((symbol-function 'agent-shell--prompt-input)
                      (lambda () "unsent draft"))
@@ -104,7 +104,7 @@
                     ((symbol-function 'agent-shell-insert)
                      (lambda (&rest args) (setq inserted args)))
                     ((symbol-function 'message) #'ignore))
-            (my/agent-shell-reconnect)
+            (+agent-shell/reconnect)
             (should (equal restarted '(:session-id "saved-session")))
             (should (eq (car adopted) new))
             (should (equal (plist-get (cdr adopted) :name) "manual/claude"))
@@ -115,36 +115,36 @@
 
 (ert-deftest agent-shell-refresh-skips-windows-in-hidden-frames ()
   (let ((buffer (generate-new-buffer " *hidden-frame-refresh*"))
-        (my/auto-revert-recent-buffer-limit 0))
+        (+auto-revert-recent-buffer-limit 0))
     (unwind-protect
         (save-window-excursion
           (set-window-buffer (selected-window) buffer)
-          (should (memq buffer (my/auto-revert--candidate-buffers)))
+          (should (memq buffer (+auto-revert--candidate-buffers)))
           (cl-letf (((symbol-function 'frame-visible-p)
                      (lambda (_frame) nil)))
-            (should-not (memq buffer (my/auto-revert--candidate-buffers)))))
+            (should-not (memq buffer (+auto-revert--candidate-buffers)))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest agent-shell-turn-complete-dispatches-buffer-refresh-policy ()
   "ACP completion uses a buffer's registered refresh policy regardless of mode."
   (let* ((buffer (generate-new-buffer " *agent-refresh-policy*"))
-         (my/auto-revert--agent-turn-check-timer nil)
+         (+auto-revert--agent-turn-check-timer nil)
          callback called provider-called
-         (my/auto-revert-agent-refresh-functions
+         (+auto-revert-agent-refresh-functions
           (list (lambda () (setq provider-called t)))))
     (unwind-protect
         (progn
           (with-current-buffer buffer
-            (setq-local my/auto-revert-agent-refresh-function
+            (setq-local +auto-revert-agent-refresh-function
                         (lambda (target) (setq called target))))
-          (cl-letf (((symbol-function 'my/auto-revert--candidate-buffers)
+          (cl-letf (((symbol-function '+auto-revert--candidate-buffers)
                      (lambda () (list buffer)))
-                    ((symbol-function 'my/auto-revert--refresh-buffer-if-safe)
+                    ((symbol-function '+auto-revert--refresh-buffer-if-safe)
                      (lambda (&rest _) (ert-fail "Ignored registered policy")))
                     ((symbol-function 'run-at-time)
                      (lambda (_secs _repeat fn &rest _args)
                        (setq callback fn) 'scheduled)))
-            (my/auto-revert-agent-turn-complete-h nil nil)
+            (+auto-revert-agent-turn-complete-h nil nil)
             (should callback)
             (funcall callback)
             (should (eq called buffer))
@@ -152,7 +152,7 @@
             (setq called nil)
             (with-current-buffer buffer
               (setq-local remote-buffer-disconnected-p t))
-            (my/auto-revert-agent-refresh-buffer buffer)
+            (+auto-revert-agent-refresh-buffer buffer)
             (should-not called)))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
@@ -171,25 +171,25 @@
                  (lambda (&rest _) (cl-incf verify-checks) unchanged))
                 ((symbol-function 'revert-buffer)
                  (lambda (&rest _) (setq refreshed t))))
-        (should-not (my/auto-revert--unmodified-stale-file-buffer-p (current-buffer)))
+        (should-not (+auto-revert--unmodified-stale-file-buffer-p (current-buffer)))
         (should (= exists-checks 0))
         (should (= verify-checks 0))
         (setq unchanged t)
-        (my/auto-revert-agent-refresh-buffer (current-buffer))
+        (+auto-revert-agent-refresh-buffer (current-buffer))
         (should-not refreshed)
         (should (= verify-checks 1))
         (should (= exists-checks 0))
         (setq unchanged nil)
-        (my/auto-revert-agent-refresh-buffer (current-buffer))
+        (+auto-revert-agent-refresh-buffer (current-buffer))
         (should refreshed)
         (should (= verify-checks 2))
         (should (= exists-checks 1))
         (setq operation-cost 'batched)
-        (should (my/auto-revert--unmodified-stale-file-buffer-p (current-buffer)))
+        (should (+auto-revert--unmodified-stale-file-buffer-p (current-buffer)))
         (should (= exists-checks 2))
         (setq-local remote-buffer-disconnected-p t)
         (setq refreshed nil)
-        (my/auto-revert-agent-refresh-buffer (current-buffer))
+        (+auto-revert-agent-refresh-buffer (current-buffer))
         (should-not refreshed)
         (should (= exists-checks 2))))))
 
@@ -198,7 +198,7 @@
   (with-temp-buffer
     (setq-local buffer-file-name "/fs:box:/work/main.py")
     (insert "Unsaved work")
-    (let ((my/auto-revert--warned-modified-files (make-hash-table :test #'equal))
+    (let ((+auto-revert--warned-modified-files (make-hash-table :test #'equal))
           notice)
       (cl-letf (((symbol-function 'remote-file-operation-cost)
                  (lambda (_file &optional _adapter) 'round-trip))
@@ -210,12 +210,12 @@
                 ((symbol-function 'message)
                  (lambda (format-string &rest args)
                    (setq notice (apply #'format format-string args)))))
-        (should-not (my/auto-revert--modified-stale-file-buffer-p (current-buffer)))
-        (my/auto-revert-agent-refresh-buffer (current-buffer))
+        (should-not (+auto-revert--modified-stale-file-buffer-p (current-buffer)))
+        (+auto-revert-agent-refresh-buffer (current-buffer))
         (should (buffer-modified-p))
         (should (equal (buffer-string) "Unsaved work"))
         (should (string-match-p "File changed on disk" notice))
-        (should (my/auto-revert--modified-stale-file-buffer-p (current-buffer) t))))))
+        (should (+auto-revert--modified-stale-file-buffer-p (current-buffer) t))))))
 
 (ert-deftest agent-shell-file-refresh-keeps-cheap-local-focus-path ()
   (with-temp-buffer
@@ -227,11 +227,11 @@
                 ((symbol-function 'file-exists-p) (lambda (_file) t))
                 ((symbol-function 'verify-visited-file-modtime)
                  (lambda (&rest _) nil))
-                ((symbol-function 'my/auto-revert--candidate-buffers)
+                ((symbol-function '+auto-revert--candidate-buffers)
                  (lambda () (list buffer)))
                 ((symbol-function 'revert-buffer)
                  (lambda (&rest _) (setq refreshed t))))
-        (my/auto-revert-refresh-visible-stale-buffers-h)
+        (+auto-revert-refresh-visible-stale-buffers-h)
         (should refreshed)))))
 
 (ert-deftest agent-shell-old-remote-buffer-refreshes-when-shown ()
@@ -256,16 +256,16 @@
                          (cl-incf schedules)
                          (setq callback fn)
                          timer))
-                      ((symbol-function 'my/auto-revert-agent-refresh-buffer)
+                      ((symbol-function '+auto-revert-agent-refresh-buffer)
                        (lambda (_buffer) (cl-incf refreshes))))
-              (my/auto-revert-check-shown-round-trip-file-h window)
-              (my/auto-revert-check-shown-round-trip-file-h window)
+              (+auto-revert-check-shown-round-trip-file-h window)
+              (+auto-revert-check-shown-round-trip-file-h window)
               (should (= schedules 1))
               (funcall callback)
               (should (= refreshes 1))
               (with-current-buffer buffer
                 (setq-local remote-buffer-disconnected-p t))
-              (my/auto-revert-check-shown-round-trip-file-h window)
+              (+auto-revert-check-shown-round-trip-file-h window)
               (should (= schedules 1))))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
@@ -283,7 +283,7 @@
                               (lambda () (cl-incf queries) t)))
             (insert "Agent output and an unsent prompt")
             (run-hooks 'agent-shell-mode-hook)
-            (when popup (my/portal-popup-apply-ui buffer))
+            (when popup (+portal-popup-apply-ui buffer))
             (should (buffer-modified-p))
             (should (local-variable-p 'shell-maker-prompt-before-killing-buffer))
             (should-not shell-maker-prompt-before-killing-buffer)
@@ -301,7 +301,7 @@
     (setq major-mode 'agent-shell-mode)
     ;; Existing sessions retain their old path until the policy is applied.
     (setq-local agent-shell--transcript-file "/unused/transcript.md")
-    (my/agent-shell-disable-transcripts)
+    (+agent-shell-disable-transcripts)
     (cl-letf (((symbol-function 'write-region)
                (lambda (&rest _) (ert-fail "Wrote a transcript")))
               ((symbol-function 'make-directory)
@@ -314,7 +314,7 @@
   "Busy Enter steers only when the active adapter advertised support."
   (should agent-shell-persistent-prompt-enabled)
   (should (eq agent-shell-busy-submit-default-function
-              #'my/agent-shell-busy-submit-steer-or-queue))
+              #'+agent-shell-busy-submit-steer-or-queue))
   (should (eq agent-shell-busy-submit-override-function
               #'agent-shell-busy-submit-queue))
   (with-temp-buffer
@@ -333,7 +333,7 @@
                          (queue "Next turn")
                          (queue "Explicit queue"))))))))
 
-(defun my/agent-shell-test--execution (session-id directory &optional agent)
+(defun +agent-shell-test--execution (session-id directory &optional agent)
   "Make a fake live ACP frontend for SESSION-ID in DIRECTORY."
   (let ((buffer (generate-new-buffer " *agent-session-test*"))
         (process (make-pipe-process :name "agent-session-test" :noquery t)))
@@ -355,7 +355,7 @@
                   (:pending-requests . nil))))
     buffer))
 
-(defun my/agent-shell-test--close (buffer)
+(defun +agent-shell-test--close (buffer)
   "Release fake ACP process and BUFFER."
   (when (buffer-live-p buffer)
     (let ((process (noema-agent-acp-state-value buffer '(:client :process))))
@@ -369,54 +369,54 @@
         (launches 0) buffers)
     (unwind-protect
         (cl-letf (((symbol-function 'agent-shell-cwd) (lambda () default-directory)))
-          (let ((first (my/agent-shell--reuse-session-a
+          (let ((first (+agent-shell--reuse-session-a
                         (lambda (&rest _) (cl-incf launches)
-                          (let ((buffer (my/agent-shell-test--execution "task-a" "/tmp/")))
+                          (let ((buffer (+agent-shell-test--execution "task-a" "/tmp/")))
                             (push buffer buffers) buffer))
                         :config config :session-id "task-a" :no-focus t)))
             (should (eq first
-                        (my/agent-shell--reuse-session-a
+                        (+agent-shell--reuse-session-a
                          (lambda (&rest _) (ert-fail "Started a duplicate process"))
                          :config config :session-id "task-a" :no-focus t)))
             (should (= launches 1))))
-      (mapc #'my/agent-shell-test--close buffers))))
+      (mapc #'+agent-shell-test--close buffers))))
 
 (ert-deftest agent-shell-resume-reuses-explicit-upstream-cwd ()
   "The new :cwd argument selects the matching execution even from elsewhere."
   (let* ((config '((:identifier . codex)))
-         (buffer (my/agent-shell-test--execution "task-a" "/tmp/")))
+         (buffer (+agent-shell-test--execution "task-a" "/tmp/")))
     (unwind-protect
         (cl-letf (((symbol-function 'agent-shell-cwd)
                    (lambda () (ert-fail "Ignored explicit :cwd"))))
           (should (eq buffer
-                      (my/agent-shell--reuse-session-a
+                      (+agent-shell--reuse-session-a
                        (lambda (&rest _) (ert-fail "Started a duplicate process"))
                        :config config :session-id "task-a"
                        :cwd "/tmp/" :no-focus t))))
-      (my/agent-shell-test--close buffer))))
+      (+agent-shell-test--close buffer))))
 
 (ert-deftest agent-shell-codex-reuse-leaves-other-adapters-unchanged ()
   (let* ((default-directory "/tmp/")
          (config '((:identifier . claude)))
-         (first (my/agent-shell-test--execution "task-a" "/tmp/" 'claude))
+         (first (+agent-shell-test--execution "task-a" "/tmp/" 'claude))
          (started nil)
          (second nil))
     (unwind-protect
         (cl-letf (((symbol-function 'agent-shell-cwd) (lambda () default-directory)))
           (setq second
-                (my/agent-shell--reuse-session-a
+                (+agent-shell--reuse-session-a
                  (lambda (&rest _)
                    (setq started t)
-                   (my/agent-shell-test--execution "task-a" "/tmp/" 'claude))
+                   (+agent-shell-test--execution "task-a" "/tmp/" 'claude))
                  :config config :session-id "task-a" :no-focus t))
           (should started)
           (should-not (eq first second)))
-      (my/agent-shell-test--close first)
-      (my/agent-shell-test--close second))))
+      (+agent-shell-test--close first)
+      (+agent-shell-test--close second))))
 
 (ert-deftest noema-resume-reuses-codex-without-reinitializing-it ()
   (let* ((config '((:identifier . codex)))
-         (buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+         (buffer (+agent-shell-test--execution "task-a" "/tmp/"))
          (starts 0)
          (subscriptions 0))
     (unwind-protect
@@ -430,12 +430,12 @@
                               :session-id "task-a")))
           (should (zerop starts))
           (should (zerop subscriptions)))
-      (my/agent-shell-test--close buffer))))
+      (+agent-shell-test--close buffer))))
 
 (ert-deftest agent-shell-resume-keeps-tasks-and-hosts-separate ()
   (let ((config '((:identifier . codex)))
-        (buffers (list (my/agent-shell-test--execution "task-a" "/tmp/")
-                       (my/agent-shell-test--execution
+        (buffers (list (+agent-shell-test--execution "task-a" "/tmp/")
+                       (+agent-shell-test--execution
                         "task-a" "/fs:server-a:/work/")))
         (launches 0))
     (unwind-protect
@@ -443,42 +443,42 @@
           (dolist (case '(("task-b" "/tmp/")
                           ("task-a" "/fs:server-b:/work/")))
             (let ((default-directory (cadr case)))
-              (my/agent-shell--reuse-session-a
+              (+agent-shell--reuse-session-a
                (lambda (&rest _)
                  (cl-incf launches)
-                 (let ((buffer (my/agent-shell-test--execution
+                 (let ((buffer (+agent-shell-test--execution
                                 (car case) (cadr case))))
                    (push buffer buffers) buffer))
                :config config :session-id (car case) :no-focus t)))
           (should (= launches 2))
-          (should (eq (my/agent-shell--find-execution
+          (should (eq (+agent-shell--find-execution
                        "task-a" config "/fs:server-a:/work/")
                       (cadr (last buffers 2)))))
-      (mapc #'my/agent-shell-test--close buffers))))
+      (mapc #'+agent-shell-test--close buffers))))
 
 (ert-deftest agent-shell-resume-ignores-dead-process-and-cleans-on-kill ()
   (let* ((config '((:identifier . codex)))
-         (buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+         (buffer (+agent-shell-test--execution "task-a" "/tmp/"))
          (process (noema-agent-acp-state-value buffer '(:client :process))))
     (unwind-protect
         (progn
-          (should (eq buffer (my/agent-shell--find-execution "task-a" config "/tmp/")))
+          (should (eq buffer (+agent-shell--find-execution "task-a" config "/tmp/")))
           (delete-process process)
-          (should-not (my/agent-shell--find-execution "task-a" config "/tmp/"))
+          (should-not (+agent-shell--find-execution "task-a" config "/tmp/"))
           (with-current-buffer buffer
-            (setq-local my/agent-shell--requested-session-id "task-a")
-            (my/agent-shell--forget-session)
-            (should-not my/agent-shell--requested-session-id)))
-      (my/agent-shell-test--close buffer))))
+            (setq-local +agent-shell--requested-session-id "task-a")
+            (+agent-shell--forget-session)
+            (should-not +agent-shell--requested-session-id)))
+      (+agent-shell-test--close buffer))))
 
 (ert-deftest agent-shell-task-busy-suppresses-resume-fallback ()
   (let ((state '((:agent-config . ((:identifier . codex)))))
         (request '((:method . "session/load")
                    (:params . ((sessionId . "task-a")))))
         (fallback nil) wire handled)
-    (cl-letf (((symbol-function 'my/agent-shell--handle-task-busy)
+    (cl-letf (((symbol-function '+agent-shell--handle-task-busy)
                (lambda (&rest _) (setq handled t))))
-      (my/agent-shell--busy-request-a
+      (+agent-shell--busy-request-a
        (lambda (&rest args) (setq wire args))
        :state state :request request :buffer (current-buffer)
        :on-failure (lambda (&rest _) (setq fallback t)))
@@ -486,13 +486,13 @@
                '((code . -32000) (data . ((code . "TASK_BUSY")))) nil)
       (should handled)
       (should-not fallback)
-      (should (my/agent-shell--task-busy-p
+      (should (+agent-shell--task-busy-p
                '((message . "Another Codex session is using this task."))))
-      (should-not (my/agent-shell--task-busy-p
+      (should-not (+agent-shell--task-busy-p
                    '((message . "Session not found")))))))
 
 (ert-deftest agent-shell-task-busy-shows-retry-state-and-releases-client ()
-  (let* ((buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+  (let* ((buffer (+agent-shell-test--execution "task-a" "/tmp/"))
          (request '((:method . "session/load")
                     (:params . ((sessionId . "task-a")))))
          fragment)
@@ -503,16 +503,16 @@
                     ((symbol-function 'agent-shell--emit-event) #'ignore)
                     ((symbol-function 'shell-maker-busy) (lambda () nil))
                     ((symbol-function 'agent-shell-heartbeat-stop) #'ignore))
-            (my/agent-shell--handle-task-busy buffer request))
-          (should (eq my/agent-shell--task-busy 'external))
-          (should (equal my/agent-shell--requested-session-id "task-a"))
+            (+agent-shell--handle-task-busy buffer request))
+          (should (eq +agent-shell--task-busy 'external))
+          (should (equal +agent-shell--requested-session-id "task-a"))
           (should (equal (plist-get fragment :label-left)
                          "Task already active"))
-          (should-not (my/agent-shell-execution-live-p buffer)))
-      (my/agent-shell-test--close buffer))))
+          (should-not (+agent-shell-execution-live-p buffer)))
+      (+agent-shell-test--close buffer))))
 
 (ert-deftest agent-shell-explicit-shutdown-still-terminates-execution ()
-  (let* ((buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+  (let* ((buffer (+agent-shell-test--execution "task-a" "/tmp/"))
          (process (noema-agent-acp-state-value buffer '(:client :process))))
     (unwind-protect
         (with-current-buffer buffer
@@ -520,39 +520,39 @@
             (agent-shell--shutdown))
           (should-not (process-live-p process))
           (should-not (noema-agent-acp-state-value buffer '(:client))))
-      (my/agent-shell-test--close buffer))))
+      (+agent-shell-test--close buffer))))
 
-(defun my/noema-agent-bridge-test--request (request)
+(defun +noema-agent-bridge-test--request (request)
   "Send REQUEST through the same JSON boundary as emacsclient."
   (json-parse-string
-   (my/noema-agent-bridge-request
+   (+noema-agent-bridge-request
     (base64-encode-string
      (encode-coding-string (json-serialize request) 'utf-8) t))
    :object-type 'alist :array-type 'list))
 
 (ert-deftest noema-agent-bridge-lists-only-live-target-scoped-sessions ()
-  (let* ((my/noema-agent-bridge-enabled t)
-         (live (my/agent-shell-test--execution "task-a" "/tmp/"))
-         (dead (my/agent-shell-test--execution "task-b" "/tmp/")))
+  (let* ((+noema-agent-bridge-enabled t)
+         (live (+agent-shell-test--execution "task-a" "/tmp/"))
+         (dead (+agent-shell-test--execution "task-b" "/tmp/")))
     (unwind-protect
         (progn
           (delete-process (noema-agent-acp-state-value dead '(:client :process)))
-          (let* ((response (my/noema-agent-bridge-test--request
+          (let* ((response (+noema-agent-bridge-test--request
                             '((action . "list"))))
                  (sessions (alist-get 'sessions response)))
             (should (= (length sessions) 1))
             (should (equal (alist-get 'sessionId (car sessions)) "task-a"))
             (should (equal (alist-get 'workspace (car sessions))
-                           (my/agent-shell--session-context "/tmp/")))))
-      (my/agent-shell-test--close live)
-      (my/agent-shell-test--close dead))))
+                           (+agent-shell--session-context "/tmp/")))))
+      (+agent-shell-test--close live)
+      (+agent-shell-test--close dead))))
 
 (ert-deftest noema-agent-bridge-sends-to-exact-session-and-queues-when-busy ()
-  (let* ((my/noema-agent-bridge-enabled t)
-         (buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+  (let* ((+noema-agent-bridge-enabled t)
+         (buffer (+agent-shell-test--execution "task-a" "/tmp/"))
          (request `((action . "send") (sessionId . "task-a")
                     (agent . "codex")
-                    (workspace . ,(my/agent-shell--session-context "/tmp/"))
+                    (workspace . ,(+agent-shell--session-context "/tmp/"))
                     (message . "Mobile update")))
          queued submitted first queued-response)
     (unwind-protect
@@ -562,96 +562,96 @@
                    (lambda (&rest args) (setq submitted args)))
                   ((symbol-function 'agent-shell--start)
                    (lambda (&rest _) (ert-fail "Started a second process"))))
-          (setq first (my/noema-agent-bridge-test--request request))
+          (setq first (+noema-agent-bridge-test--request request))
           (should (equal (alist-get 'state first) "submitted"))
           (should (equal (map-elt (car (plist-get submitted :content)) 'text)
                          "Mobile update"))
           (with-current-buffer buffer
-            (my/noema-agent-bridge--event
+            (+noema-agent-bridge--event
              '((:event . agent-message-chunk)
                (:data . ((:text-chunk . "Received"))))))
           (should (equal (alist-get 'text
-                                   (my/noema-agent-bridge-test--request
+                                   (+noema-agent-bridge-test--request
                                     `((action . "read") (sessionId . "task-a")
                                       (agent . "codex")
-                                      (workspace . ,(my/agent-shell--session-context "/tmp/"))
+                                      (workspace . ,(+agent-shell--session-context "/tmp/"))
                                       (requestId . ,(alist-get 'requestId first)))))
                          "Received"))
           (funcall (plist-get submitted :on-success) '((stopReason . "end_turn")))
           (should (equal (alist-get 'state
-                                   (my/noema-agent-bridge-test--request
+                                   (+noema-agent-bridge-test--request
                                     `((action . "read") (sessionId . "task-a")
                                       (agent . "codex")
-                                      (workspace . ,(my/agent-shell--session-context "/tmp/"))
+                                      (workspace . ,(+agent-shell--session-context "/tmp/"))
                                       (requestId . ,(alist-get 'requestId first)))))
                          "completed"))
           (with-current-buffer buffer (setq-local shell-maker--busy t))
-          (setq queued-response (my/noema-agent-bridge-test--request request))
+          (setq queued-response (+noema-agent-bridge-test--request request))
           (should (equal (alist-get 'state queued-response) "queued"))
           (should (equal queued "Mobile update"))
           (with-current-buffer buffer
-            (my/noema-agent-bridge--event
+            (+noema-agent-bridge--event
              '((:event . input-submitted)
                (:data . ((:prompt . "Mobile update")))))
-            (my/noema-agent-bridge--event
+            (+noema-agent-bridge--event
              '((:event . agent-message-chunk)
                (:data . ((:text-chunk . "Queued reply")))))
-            (my/noema-agent-bridge--event '((:event . turn-complete))))
-          (let ((reply (my/noema-agent-bridge-test--request
+            (+noema-agent-bridge--event '((:event . turn-complete))))
+          (let ((reply (+noema-agent-bridge-test--request
                         `((action . "read") (sessionId . "task-a")
                           (agent . "codex")
-                          (workspace . ,(my/agent-shell--session-context "/tmp/"))
+                          (workspace . ,(+agent-shell--session-context "/tmp/"))
                           (requestId . ,(alist-get 'requestId queued-response))))))
             (should (equal (alist-get 'state reply) "completed"))
             (should (equal (alist-get 'text reply) "Queued reply")))
           (should (eq (alist-get 'ok
-                                 (my/noema-agent-bridge-test--request
+                                 (+noema-agent-bridge-test--request
                                   `((action . "send") (sessionId . "task-a")
                                     (agent . "codex")
                                     (workspace . "/fs:other:/tmp")
                                     (message . "wrong host"))))
                       :false)))
-      (my/agent-shell-test--close buffer))))
+      (+agent-shell-test--close buffer))))
 
 (ert-deftest noema-agent-bridge-requires-enabling-and-explicit-interrupt ()
-  (let* ((buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+  (let* ((buffer (+agent-shell-test--execution "task-a" "/tmp/"))
          (request `((action . "interrupt") (sessionId . "task-a")
                     (agent . "codex")
-                    (workspace . ,(my/agent-shell--session-context "/tmp/"))))
+                    (workspace . ,(+agent-shell--session-context "/tmp/"))))
          stopped)
     (unwind-protect
         (progn
           (should (eq (alist-get 'ok
-                                 (my/noema-agent-bridge-test--request
+                                 (+noema-agent-bridge-test--request
                                   '((action . "list"))))
                       :false))
-          (let ((my/noema-agent-bridge-enabled t))
+          (let ((+noema-agent-bridge-enabled t))
             (with-current-buffer buffer (setq-local shell-maker--busy t))
             (cl-letf (((symbol-function 'noema-agent-acp-stop)
                        (lambda (target) (setq stopped target))))
               (should (equal (alist-get 'state
-                                       (my/noema-agent-bridge-test--request request))
+                                       (+noema-agent-bridge-test--request request))
                              "interrupt-requested"))
               (should (eq stopped buffer)))))
-      (my/agent-shell-test--close buffer))))
+      (+agent-shell-test--close buffer))))
 
 (ert-deftest noema-agent-bridge-does-not-queue-behind-structured-run ()
-  (let* ((my/noema-agent-bridge-enabled t)
-         (buffer (my/agent-shell-test--execution "task-a" "/tmp/"))
+  (let* ((+noema-agent-bridge-enabled t)
+         (buffer (+agent-shell-test--execution "task-a" "/tmp/"))
          (request `((action . "send") (sessionId . "task-a")
                     (agent . "codex")
-                    (workspace . ,(my/agent-shell--session-context "/tmp/"))
+                    (workspace . ,(+agent-shell--session-context "/tmp/"))
                     (message . "Wait for the Run")))
          enqueued)
     (unwind-protect
         (cl-letf (((symbol-function 'noema-agent-acp-busy-p) (lambda (_) t))
                   ((symbol-function 'noema-agent-acp-enqueue)
                    (lambda (&rest _) (setq enqueued t))))
-          (let ((response (my/noema-agent-bridge-test--request request)))
+          (let ((response (+noema-agent-bridge-test--request request)))
             (should (eq (alist-get 'ok response) :false))
             (should (string-match-p "Run is active" (alist-get 'error response)))
             (should-not enqueued)))
-      (my/agent-shell-test--close buffer))))
+      (+agent-shell-test--close buffer))))
 
 (ert-deftest agent-shell-command-menu-adds-local-resume-to-advertised-commands ()
   (with-temp-buffer
@@ -669,7 +669,7 @@
                  (lambda () (setq opened t)))
                 ((symbol-function 'agent-shell--trigger-completion-at-point)
                  (lambda () (ert-fail "Used fallback completion"))))
-        (my/agent-shell--show-completion-after-insert)
+        (+agent-shell--show-completion-after-insert)
         (should opened)))))
 
 (ert-deftest agent-shell-local-resume-completes-without-advertised-commands ()
@@ -687,9 +687,9 @@
     (let (resumed submitted)
       (cl-letf (((symbol-function 'agent-shell--prompt-input)
                  (lambda () "/resume"))
-                ((symbol-function 'my/agent-shell-resume)
+                ((symbol-function '+agent-shell/resume)
                  (lambda () (setq resumed t))))
-        (my/agent-shell--submit-a (lambda (&rest _) (setq submitted t)))
+        (+agent-shell--submit-a (lambda (&rest _) (setq submitted t)))
         (should resumed)
         (should-not submitted)))))
 
@@ -720,7 +720,7 @@
                                    (updatedAt . "2026-09-30T00:00:00Z"))))))
                     ((symbol-function 'completing-read)
                      (lambda (_prompt choices &rest _) (caar choices)))
-                    ((symbol-function 'my/agent-shell--find-execution)
+                    ((symbol-function '+agent-shell--find-execution)
                      (lambda (&rest _) nil))
                     ((symbol-function 'noema-sessions-native-binding)
                      (lambda (&rest _) '(:name "research" :session-id "logical-id")))
@@ -739,7 +739,7 @@
                            (rename-buffer name t)))))
                     ((symbol-function 'agent-shell--display-buffer)
                      (lambda (&rest _) (ert-fail "Opened another buffer"))))
-            (my/agent-shell-resume)
+            (+agent-shell/resume)
             (should (equal listed-cwd "/tmp/"))
             (should (equal resumed-id "saved-native-id"))
             (should (equal binding-name "research"))
@@ -765,7 +765,7 @@
                      (lambda (_) "today"))
                     ((symbol-function 'completing-read)
                      (lambda (_prompt choices &rest _) (caar choices)))
-                    ((symbol-function 'my/agent-shell--find-execution)
+                    ((symbol-function '+agent-shell--find-execution)
                      (lambda (&rest _) target))
                     ((symbol-function 'agent-shell--prompt-input)
                      (lambda () nil))
@@ -773,7 +773,7 @@
                      (lambda (&rest _) (ert-fail "Restarted an already live session")))
                     ((symbol-function 'agent-shell--display-buffer)
                      (lambda (buffer) (setq shown buffer))))
-            (my/agent-shell--resume-from-list
+            (+agent-shell--resume-from-list
              source '(((sessionId . "saved-native-id")
                        (updatedAt . "2026-09-30T00:00:00Z"))))
             (should (eq shown target))
@@ -784,20 +784,20 @@
   (save-window-excursion
     (let ((source (generate-new-buffer " *resume-popup-source*"))
           (target (generate-new-buffer " *resume-popup-target*"))
-          (my/portal-popup-buffers nil)
-          (my/portal-popup-current-buffer nil)
-          (my/portal-popup--displaying t)
+          (+portal-popup-buffers nil)
+          (+portal-popup-current-buffer nil)
+          (+portal-popup--displaying t)
           resumed-id)
       (unwind-protect
           (progn
             (with-current-buffer source
               (setq major-mode 'agent-shell-mode
                     default-directory "/tmp/")
-              (setq-local my/portal-popup-workspace-id "local-work"
+              (setq-local +portal-popup-workspace-id "local-work"
                           agent-shell--state
                           '((:agent-config . ((:identifier . claude)))
                             (:session . ((:id . "current"))))))
-            (my/portal-popup-display-buffer source)
+            (+portal-popup-display-buffer source)
             (cl-letf (((symbol-function 'agent-shell--sort-sessions-by-recency) #'identity)
                       ((symbol-function 'agent-shell--session-title)
                        (lambda (_) "Saved conversation"))
@@ -805,7 +805,7 @@
                        (lambda (_) "today"))
                       ((symbol-function 'completing-read)
                        (lambda (_prompt choices &rest _) (caar choices)))
-                      ((symbol-function 'my/agent-shell--find-execution)
+                      ((symbol-function '+agent-shell--find-execution)
                        (lambda (&rest _) nil))
                       ((symbol-function 'agent-shell--prompt-input) (lambda () nil))
                       ((symbol-function 'noema-sessions-native-binding)
@@ -819,16 +819,16 @@
                          target))
                       ((symbol-function 'noema-agent-acp-adopt) #'ignore)
                       ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore))
-              (my/agent-shell--resume-from-list
+              (+agent-shell--resume-from-list
                source '(((sessionId . "saved-native-id")
                          (updatedAt . "2026-09-30T00:00:00Z")))))
             (should (equal resumed-id "saved-native-id"))
             (should-not (buffer-live-p source))
-            (should (eq (window-buffer (my/portal-popup--window)) target))
-            (should (equal (my/portal-popup--live-buffers) (list target)))
-            (should (equal (buffer-local-value 'my/portal-popup-workspace-id target)
+            (should (eq (window-buffer (+portal-popup--window)) target))
+            (should (equal (+portal-popup--live-buffers) (list target)))
+            (should (equal (buffer-local-value '+portal-popup-workspace-id target)
                            "local-work")))
-        (my/portal-hide-popup)
+        (+portal/hide-popup)
         (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
               (list source target))))))
 
@@ -855,7 +855,7 @@
                        (lambda (_) "today"))
                       ((symbol-function 'completing-read)
                        (lambda (_prompt choices &rest _) (caar choices)))
-                      ((symbol-function 'my/agent-shell--find-execution)
+                      ((symbol-function '+agent-shell--find-execution)
                        (lambda (&rest _) nil))
                       ((symbol-function 'agent-shell--prompt-input) (lambda () nil))
                       ((symbol-function 'noema-sessions-native-binding)
@@ -872,7 +872,7 @@
                       ((symbol-function 'noema-agent-acp-adopt) #'ignore)
                       ((symbol-function 'agent-shell-restart)
                        (lambda (&rest _) (ert-fail "Lost manual window"))))
-              (my/agent-shell--resume-from-list
+              (+agent-shell--resume-from-list
                source '(((sessionId . "saved-native-id")
                          (updatedAt . "2026-09-30T00:00:00Z")))))
             (should (equal (plist-get started :session-id) "saved-native-id"))
@@ -892,10 +892,10 @@
           (term-a (generate-new-buffer " *popup-term-a*"))
           (term-b (generate-new-buffer " *popup-term-b*"))
           (term-new (generate-new-buffer " *popup-term-new*"))
-          (my/portal-popup-buffers nil)
-          (my/portal-popup-current-buffer nil)
-          (my/portal-popup-origin-buffer nil)
-          (my/portal-popup--displaying t)
+          (+portal-popup-buffers nil)
+          (+portal-popup-current-buffer nil)
+          (+portal-popup-origin-buffer nil)
+          (+portal-popup--displaying t)
           created-in)
       (unwind-protect
           (let ((work-window (selected-window)))
@@ -903,39 +903,39 @@
             (with-current-buffer work-b (setq default-directory "/fs:box:/work/project-b/"))
             (with-current-buffer term-a
               (setq-local default-directory "/tmp/project-a/"
-                          my/portal-popup-workspace-id "local-a"))
+                          +portal-popup-workspace-id "local-a"))
             (with-current-buffer term-b
               (setq-local default-directory "/fs:box:/work/project-b/"
-                          my/portal-popup-workspace-id "box@remote-b"))
+                          +portal-popup-workspace-id "box@remote-b"))
             (set-window-buffer work-window work-a)
-            (my/portal-popup-display-buffer term-a)
+            (+portal-popup-display-buffer term-a)
             (select-window work-window)
             (set-window-buffer work-window work-b)
-            (my/portal-popup-display-buffer term-b)
-            (should (equal (my/portal-popup--live-buffers)
+            (+portal-popup-display-buffer term-b)
+            (should (equal (+portal-popup--live-buffers)
                            (list term-a term-b)))
             (should (string-match-p "popup-term-a"
                                     (substring-no-properties
-                                     (nth 1 (my/portal-popup--tab-line)))))
+                                     (nth 1 (+portal-popup--tab-line)))))
             (should (string-match-p "popup-term-b"
                                     (substring-no-properties
-                                     (nth 2 (my/portal-popup--tab-line)))))
+                                     (nth 2 (+portal-popup--tab-line)))))
             (should (string-match-p "project-b@box"
                                     (substring-no-properties
-                                     (nth 2 (my/portal-popup--tab-line)))))
-            (my/portal-popup-cycle nil)
-            (should (eq (window-buffer (my/portal-popup--window)) term-a))
-            (my/portal-popup-select-index 2)
-            (should (eq (window-buffer (my/portal-popup--window)) term-b))
-            (cl-letf (((symbol-function 'my/portal-popup--create-buffer)
+                                     (nth 2 (+portal-popup--tab-line)))))
+            (+portal-popup/cycle nil)
+            (should (eq (window-buffer (+portal-popup--window)) term-a))
+            (+portal-popup/select-index 2)
+            (should (eq (window-buffer (+portal-popup--window)) term-b))
+            (cl-letf (((symbol-function '+portal-popup--create-buffer)
                        (lambda (directory &rest _)
                          (setq created-in directory)
                          (with-current-buffer term-new
-                           (setq-local my/portal-popup-instance-p t))
+                           (setq-local +portal-popup-instance-p t))
                          term-new)))
-              (my/portal-popup-new))
+              (+portal-popup/new))
             (should (equal created-in "/fs:box:/work/project-b/")))
-        (my/portal-hide-popup)
+        (+portal/hide-popup)
         (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
               (list work-a work-b term-a term-b term-new))))))
 
@@ -943,42 +943,42 @@
   (save-window-excursion
     (let ((work (generate-new-buffer " *popup-move-work*"))
           (term (generate-new-buffer " *popup-move-term*"))
-          (my/portal-popup-buffers nil)
-          (my/portal-popup-current-buffer nil))
+          (+portal-popup-buffers nil)
+          (+portal-popup-current-buffer nil))
       (unwind-protect
           (let ((work-window (selected-window)))
             (with-current-buffer work
               (setq-local header-line-format "Work header"
                           tab-line-format "Work tabs"))
             (with-current-buffer term
-              (setq-local my/portal-popup-fixed t))
+              (setq-local +portal-popup-fixed t))
             (set-window-buffer work-window work)
-            (my/portal-popup-display-buffer term)
-            (let ((my/portal-popup--displaying t))
+            (+portal-popup-display-buffer term)
+            (let ((+portal-popup--displaying t))
               (select-window work-window))
-            (my/portal-popup-move-buffer-in)
-            (should (eq (window-buffer (my/portal-popup--window)) work))
-            (should (memq work (my/portal-popup--live-buffers)))
+            (+portal-popup/move-buffer-in)
+            (should (eq (window-buffer (+portal-popup--window)) work))
+            (should (memq work (+portal-popup--live-buffers)))
             (with-current-buffer work
               (should (equal header-line-format "Work header"))
               (should-not (equal tab-line-format "Work tabs")))
-            (my/portal-popup-move-buffer-out)
+            (+portal-popup/move-buffer-out)
             (should (eq (window-buffer work-window) work))
-            (should (eq (window-buffer (my/portal-popup--window)) term))
-            (should (equal (my/portal-popup--live-buffers) (list term)))
+            (should (eq (window-buffer (+portal-popup--window)) term))
+            (should (equal (+portal-popup--live-buffers) (list term)))
             (with-current-buffer work
-              (should-not my/portal-popup-instance-p)
+              (should-not +portal-popup-instance-p)
               (should (equal header-line-format "Work header"))
               (should (equal tab-line-format "Work tabs"))))
-        (my/portal-hide-popup)
+        (+portal/hide-popup)
         (dolist (buffer (list work term))
           (when (buffer-live-p buffer) (kill-buffer buffer)))))))
 
 (ert-deftest popup-agent-move-updates-its-session-display-route ()
   (save-window-excursion
     (let ((agent (generate-new-buffer " *popup-move-agent*"))
-          (my/portal-popup-buffers nil)
-          (my/portal-popup-current-buffer nil))
+          (+portal-popup-buffers nil)
+          (+portal-popup-current-buffer nil))
       (unwind-protect
           (let ((work-window (selected-window)))
             (with-current-buffer agent
@@ -989,35 +989,35 @@
                           (lambda (buffer)
                             (set-window-buffer work-window buffer))))
             (set-window-buffer work-window agent)
-            (my/portal-popup-move-buffer-in)
-            (should (eq (window-buffer (my/portal-popup--window)) agent))
+            (+portal-popup/move-buffer-in)
+            (should (eq (window-buffer (+portal-popup--window)) agent))
             (with-current-buffer agent
               (should (eq noema-agent-acp-display-buffer-function
-                          #'my/portal-popup-display-buffer))
-              (should (eq my/portal-popup-kind 'ai-codex))
+                          #'+portal-popup-display-buffer))
+              (should (eq +portal-popup-kind 'ai-codex))
               (should (equal header-line-format "Native agent header")))
-            (my/portal-popup-move-buffer-out)
+            (+portal-popup/move-buffer-out)
             (should (eq (window-buffer work-window) agent))
             (with-current-buffer agent
-              (should-not my/portal-popup-instance-p)
-              (should-not my/portal-popup-agent-keys-mode)
+              (should-not +portal-popup-instance-p)
+              (should-not +portal-popup-agent-keys-mode)
               (should (equal header-line-format "Native agent header"))
               (should (functionp noema-agent-acp-display-buffer-function))
               (should-not (eq noema-agent-acp-display-buffer-function
-                              #'my/portal-popup-display-buffer))))
-        (my/portal-hide-popup)
+                              #'+portal-popup-display-buffer))))
+        (+portal/hide-popup)
         (when (buffer-live-p agent) (kill-buffer agent))))))
 
 (ert-deftest popup-buffer-window-picker-excludes-the-popup ()
   (save-window-excursion
     (let ((popup-buffer (generate-new-buffer " *popup-window-picker*"))
-          (my/portal-popup-buffers nil)
-          (my/portal-popup-current-buffer nil)
+          (+portal-popup-buffers nil)
+          (+portal-popup-current-buffer nil)
           offered)
       (unwind-protect
           (let* ((first (selected-window))
                  (second (split-window-right)))
-            (my/portal-popup-display-buffer popup-buffer)
+            (+portal-popup-display-buffer popup-buffer)
             (require 'ace-window)
             (cl-letf (((symbol-function 'aw-window-list)
                        (lambda () (window-list)))
@@ -1025,19 +1025,19 @@
                        (lambda (&rest _)
                          (setq offered (aw-window-list))
                          second)))
-              (should (eq (my/portal-popup--choose-normal-window "Move")
+              (should (eq (+portal-popup--choose-normal-window "Move")
                           second)))
             (should (memq first offered))
             (should (memq second offered))
-            (should-not (memq (my/portal-popup--window) offered)))
-        (my/portal-hide-popup)
+            (should-not (memq (+portal-popup--window) offered)))
+        (+portal/hide-popup)
         (when (buffer-live-p popup-buffer)
           (kill-buffer popup-buffer))))))
 
 (ert-deftest popup-agent-transcript-policy-does-not-affect-other-buffers ()
   (let ((shell-maker-prompt-before-killing-buffer t))
     (with-temp-buffer
-      (my/portal-popup-apply-ui (current-buffer))
+      (+portal-popup-apply-ui (current-buffer))
       (should shell-maker-prompt-before-killing-buffer)
       (should-not (local-variable-p 'shell-maker-prompt-before-killing-buffer)))
     (should shell-maker-prompt-before-killing-buffer)))
@@ -1060,12 +1060,12 @@
 
 (ert-deftest agent-shell-opencode-prefers-verified-binary-for-client-agents ()
   (let ((agent-shell-opencode-acp-command '("opencode" "acp"))
-        (my/agent-shell-opencode-executable "/test/official/opencode")
+        (+agent-shell-opencode-executable "/test/official/opencode")
         (default-directory "/Users/test/project/"))
     (popup-agent-test-with-placement t
       (cl-letf (((symbol-function 'file-executable-p)
                  (lambda (path) (equal path "/test/official/opencode"))))
-        (should (equal (my/agent-shell-use-official-opencode
+        (should (equal (+agent-shell-use-official-opencode
                         '(:command "opencode" :command-params ("acp") :context-buffer nil))
                        '(:command "/test/official/opencode" :command-params ("acp")
                                   :context-buffer nil)))
@@ -1074,11 +1074,11 @@
 
 (ert-deftest agent-shell-opencode-remote-agent-uses-target-path ()
   (let ((agent-shell-opencode-acp-command '("opencode" "acp"))
-        (my/agent-shell-opencode-executable "/test/official/opencode")
+        (+agent-shell-opencode-executable "/test/official/opencode")
         (default-directory "/fs:server:/home/test/project/"))
     (popup-agent-test-with-placement t
       (cl-letf (((symbol-function 'file-executable-p) (lambda (_) t)))
-        (should (equal (my/agent-shell-use-official-opencode
+        (should (equal (+agent-shell-use-official-opencode
                         '(:command "opencode" :command-params ("acp")))
                        '(:command "opencode" :command-params ("acp"))))))))
 
@@ -1088,25 +1088,25 @@
       (let ((agent-shell-opencode-acp-command '("/custom/opencode" "acp" "--pure")))
         (cl-letf (((symbol-function 'file-executable-p)
                    (lambda (_) (ert-fail "Custom launcher was inspected"))))
-          (should (equal (my/agent-shell-use-official-opencode
+          (should (equal (+agent-shell-use-official-opencode
                           '(:command "/custom/opencode" :command-params ("acp" "--pure")))
                          '(:command "/custom/opencode" :command-params ("acp" "--pure"))))))
       (let ((agent-shell-opencode-acp-command '("opencode" "acp")))
         (cl-letf (((symbol-function 'file-executable-p) (lambda (_) nil)))
-          (should (equal (my/agent-shell-use-official-opencode
+          (should (equal (+agent-shell-use-official-opencode
                           '(:command "opencode" :command-params ("acp")))
                          '(:command "opencode" :command-params ("acp")))))))))
 
 (ert-deftest agent-shell-opencode-expands-config-store-abbreviated-paths ()
   (let ((agent-shell-opencode-acp-command '("opencode" "acp"))
-        (my/agent-shell-opencode-executable "~/.config/emacs/var/opencode")
+        (+agent-shell-opencode-executable "~/.config/emacs/var/opencode")
         (default-directory "/Users/test/project/"))
     (popup-agent-test-with-placement t
       (cl-letf (((symbol-function 'file-executable-p) (lambda (_) t)))
-        (should (equal (plist-get (my/agent-shell-use-official-opencode
+        (should (equal (plist-get (+agent-shell-use-official-opencode
                                    '(:command "opencode" :command-params ("acp")))
                                   :command)
-                       (expand-file-name my/agent-shell-opencode-executable)))))))
+                       (expand-file-name +agent-shell-opencode-executable)))))))
 
 (ert-deftest agent-shell-native-entrypoint-projects-logical-cwd ()
   ;; Call upstream's public CWD directly, without the Noema start wrapper.
@@ -1116,65 +1116,65 @@
 
 (ert-deftest agent-shell-process-directory-is-native-for-local-target ()
   (popup-agent-test-with-placement t
-    (should (equal (my/agent-shell-process-directory "/Users/test/project")
+    (should (equal (+agent-shell-process-directory "/Users/test/project")
                    "/Users/test/project/"))
-    (should (equal (my/agent-shell-process-directory "/fs:local:/Users/test/project/")
+    (should (equal (+agent-shell-process-directory "/fs:local:/Users/test/project/")
                    "/Users/test/project/"))))
 
 (ert-deftest agent-shell-process-directory-routes-remote-target ()
   ;; A target that shares nothing with the client keeps its logical identity,
   ;; so acp.el's `make-process' enters the /fs: handler and runs it there.
   (popup-agent-test-with-placement t
-    (should (equal (my/agent-shell-process-directory "/fs:server:/home/test/project")
+    (should (equal (+agent-shell-process-directory "/fs:server:/home/test/project")
                    "/fs:server:/home/test/project/"))))
 
 (ert-deftest agent-shell-explicit-local-workspace-stays-local-from-remote-buffer ()
   "Agent placement and session keys must not borrow the source target."
   (let ((default-directory "/fs:server:/home/test/project/"))
     (popup-agent-test-with-placement t
-      (should (equal (my/agent-shell-process-directory "/Users/test/project")
+      (should (equal (+agent-shell-process-directory "/Users/test/project")
                      "/Users/test/project/"))
-      (should (equal (my/agent-shell--session-context "/Users/test/project")
+      (should (equal (+agent-shell--session-context "/Users/test/project")
                      "/fs:local:/Users/test/project"))
-      (should-not (my/agent-shell-agent-file-name
+      (should-not (+agent-shell-agent-file-name
                    "/Users/test/project/a.el"
                    (current-buffer))))))
 
 (ert-deftest terminal-explicit-local-directory-stays-local-from-remote-buffer ()
   "Terminal and Portal identities use the requested directory's machine."
   (let ((default-directory "/fs:server:/home/test/project/"))
-    (should (equal (my/terminal-normalize-directory "/Users/test/project")
+    (should (equal (aaron-terminal-normalize-directory "/Users/test/project")
                    "/Users/test/project/"))
-    (should (equal (my/terminal-context-key "/Users/test/project")
+    (should (equal (+terminal-context-key "/Users/test/project")
                    "local"))
-    (should (equal (my/terminal-context-key
+    (should (equal (+terminal-context-key
                     "/fs:local:/Users/test/project")
                    "local"))
-    (should (equal (my/terminal-home-directory
+    (should (equal (aaron-terminal-home-directory
                     "/fs:local:/Users/test/project")
                    (file-name-as-directory
                     (expand-file-name "~" temporary-file-directory))))
     (should (equal (remote-context-target-id
-                    (my/portal-workspace-context "/Users/test/project"))
+                    (+portal-workspace-context "/Users/test/project"))
                    "local"))))
 
 (ert-deftest agent-shell-path-resolver-is-identity-on-local-target ()
   (popup-agent-test-with-placement t
     (let ((default-directory "/Users/test/project/"))
-      (should (equal (my/agent-shell-resolve-path "/Users/test/project/a.el")
+      (should (equal (+agent-shell-resolve-path "/Users/test/project/a.el")
                      "/Users/test/project/a.el"))
-      (should (equal (my/agent-shell-resolve-path "/fs:local:/Users/test/project/a.el")
+      (should (equal (+agent-shell-resolve-path "/fs:local:/Users/test/project/a.el")
                      "/Users/test/project/a.el"))
-      (should (equal (my/agent-shell-resolve-path "relative.el") "relative.el")))))
+      (should (equal (+agent-shell-resolve-path "relative.el") "relative.el")))))
 
 (ert-deftest agent-shell-path-resolver-maps-remote-session-both-ways ()
   (popup-agent-test-with-placement t
     (let ((default-directory "/fs:server:/home/test/project/"))
       ;; Emacs -> agent: session/new cwd, mentions, diffs.
-      (should (equal (my/agent-shell-resolve-path "/fs:server:/home/test/project/")
+      (should (equal (+agent-shell-resolve-path "/fs:server:/home/test/project/")
                      "/home/test/project/"))
       ;; Agent -> Emacs: fs/read_text_file and fs/write_text_file.
-      (should (equal (my/agent-shell-resolve-path "/home/test/project/a.py")
+      (should (equal (+agent-shell-resolve-path "/home/test/project/a.py")
                      "/fs:server:/home/test/project/a.py")))))
 
 (ert-deftest agent-shell-requests-resolve-in-their-own-session ()
@@ -1185,7 +1185,7 @@
           (with-current-buffer session
             (setq default-directory "/fs:server:/home/test/"))
           (with-temp-buffer
-            (my/agent-shell-in-session-buffer-a
+            (+agent-shell-in-session-buffer-a
              (lambda (&rest _) (setq seen default-directory))
              :state (list (cons :buffer session)) :acp-request nil))
           (should (equal seen "/fs:server:/home/test/")))
@@ -1202,19 +1202,19 @@
             (with-current-buffer local
               (setq default-directory "/Users/test/project/"))
             ;; Same machine: the agent gets that machine's native path.
-            (should (equal (my/agent-shell-agent-file-name
+            (should (equal (+agent-shell-agent-file-name
                             "/fs:server:/home/test/project/a.py" remote)
                            "/home/test/project/a.py"))
-            (should (equal (my/agent-shell-agent-file-name
+            (should (equal (+agent-shell-agent-file-name
                             "/Users/test/project/a.py" local)
                            "/Users/test/project/a.py"))
-            (should (equal (my/agent-shell-agent-file-name
+            (should (equal (+agent-shell-agent-file-name
                             "/Users/test/project/a.py" nil)
                            "/Users/test/project/a.py"))
             ;; Different machine: unreachable, never a wrong path.
-            (should-not (my/agent-shell-agent-file-name
+            (should-not (+agent-shell-agent-file-name
                          "/Users/test/project/a.py" remote))
-            (should-not (my/agent-shell-agent-file-name
+            (should-not (+agent-shell-agent-file-name
                          "/fs:server:/home/test/project/a.py" local)))
         (kill-buffer remote)
         (kill-buffer local)))))
@@ -1233,12 +1233,12 @@
                  (generate-new-buffer " *popup-remote-agent*")))
               ((symbol-function 'noema-agent-acp-adopt) #'ignore)
               ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore)
-              ((symbol-function 'my/portal-popup-display-buffer) #'ignore)
-              ((symbol-function 'my/portal-popup--requested-workspace-id) #'ignore)
-              ((symbol-function 'my/project-current-root)
+              ((symbol-function '+portal-popup-display-buffer) #'ignore)
+              ((symbol-function '+portal-popup--requested-workspace-id) #'ignore)
+              ((symbol-function '+project-current-root)
                (lambda () "/fs:server:/home/test/project/")))
       ;; From a file below the project, the agent starts at the project root.
-      (my/portal-popup-agent 'codex)
+      (+portal-popup/agent 'codex)
       (should (equal started "/fs:server:/home/test/project/"))
       (dolist (buffer (buffer-list))
         (when (string-prefix-p " *popup-remote-agent*" (buffer-name buffer))
@@ -1250,24 +1250,24 @@
     (let ((work (generate-new-buffer " *popup-focused-work*"))
           (term (generate-new-buffer " *popup-focused-term*"))
           (agent (generate-new-buffer " *popup-focused-agent*"))
-          (my/portal-popup-buffers nil)
-          (my/portal-popup-current-buffer nil)
-          (my/portal-popup-origin-buffer nil)
-          (my/portal-popup--displaying t)
+          (+portal-popup-buffers nil)
+          (+portal-popup-current-buffer nil)
+          (+portal-popup-origin-buffer nil)
+          (+portal-popup--displaying t)
           started)
       (unwind-protect
           (progn
             (with-current-buffer work
               (setq default-directory "/fs:box:/work/project/src/"))
             (with-current-buffer term
-              (setq-local my/portal-popup-workspace-id "box-work"))
+              (setq-local +portal-popup-workspace-id "box-work"))
             (set-window-buffer (selected-window) work)
-            (my/portal-popup-display-buffer term)
-            (cl-letf (((symbol-function 'my/project-current-root)
+            (+portal-popup-display-buffer term)
+            (cl-letf (((symbol-function '+project-current-root)
                        (lambda ()
                          (should (eq (current-buffer) work))
                          "/fs:box:/work/project/"))
-                      ((symbol-function 'my/portal-popup--requested-workspace-id)
+                      ((symbol-function '+portal-popup--requested-workspace-id)
                        (lambda (&rest _) "box-work"))
                       ((symbol-function 'noema-agent-acp-config-for)
                        (lambda (_) 'config))
@@ -1277,10 +1277,10 @@
                          agent))
                       ((symbol-function 'noema-agent-acp-adopt) #'ignore)
                       ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore))
-              (my/portal-popup-agent 'claude))
+              (+portal-popup/agent 'claude))
             (should (equal started "/fs:box:/work/project/"))
-            (should (eq (window-buffer (my/portal-popup--window)) agent)))
-        (my/portal-hide-popup)
+            (should (eq (window-buffer (+portal-popup--window)) agent)))
+        (+portal/hide-popup)
         (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
               (list work term agent))))))
 
@@ -1302,9 +1302,9 @@
                        (lambda (root)
                          (should (equal root "/tmp/noema-project/"))
                          "/tmp/code-workspace/"))
-                      ((symbol-function 'my/project-current-root)
+                      ((symbol-function '+project-current-root)
                        (lambda () (ert-fail "Ignored Noema workspace")))
-                      ((symbol-function 'my/portal-popup--requested-workspace-id)
+                      ((symbol-function '+portal-popup--requested-workspace-id)
                        (lambda (&rest _) "local-code"))
                       ((symbol-function 'noema-agent-acp-config-for)
                        (lambda (_) 'config))
@@ -1316,8 +1316,8 @@
                        (lambda (_buffer &rest args)
                          (setq adopted-root (plist-get args :root))))
                       ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore)
-                      ((symbol-function 'my/portal-popup-display-buffer) #'ignore))
-              (my/portal-popup-agent 'claude))
+                      ((symbol-function '+portal-popup-display-buffer) #'ignore))
+              (+portal-popup/agent 'claude))
             (should (equal started "/tmp/code-workspace/"))
             (should (equal adopted-root "/tmp/noema-project/")))
         (mapc (lambda (buffer) (when (buffer-live-p buffer) (kill-buffer buffer)))
@@ -1326,14 +1326,14 @@
 (ert-deftest agent-shell-process-directory-refuses-an-unreachable-workspace ()
   ;; shell-maker would silently fall back to the local home directory.
   (popup-agent-test-with-placement t
-    (should-error (my/agent-shell-process-directory "/fs:unreachable:/srv/")
+    (should-error (+agent-shell-process-directory "/fs:unreachable:/srv/")
                   :type 'user-error)))
 
 (ert-deftest agent-shell-client-gets-its-workspace-environment ()
   "A natively spawned agent gets its workspace capsule in its buffer.
 A routed agent gets it from the process route instead: its buffer keeps this
 machine's HOME, because agent-shell's caches expand `~' there."
-  (let (ensured my/agent-shell--lookup-target)
+  (let (ensured +agent-shell--lookup-target)
     (popup-agent-test-with-placement t
       (cl-letf (((symbol-function 'remote-environment-ensure)
                  (lambda (context &rest _) (setq ensured context)))
@@ -1344,23 +1344,23 @@ machine's HOME, because agent-shell's caches expand `~' there."
                     :localname dir))))
         (with-temp-buffer
           (setq default-directory "/Users/test/project/")
-          (my/agent-shell-apply-workspace-environment)
+          (+agent-shell-apply-workspace-environment)
           (should (equal (remote-context-localname ensured) "/Users/test/project/"))
-          (should (equal my/agent-shell--lookup-target "local"))
+          (should (equal +agent-shell--lookup-target "local"))
           ;; Already projected: not resolved again.
           (setq ensured nil)
           (setq-local remote-buffer-environment 'capsule)
-          (my/agent-shell-apply-workspace-environment)
+          (+agent-shell-apply-workspace-environment)
           (should-not ensured))
         (with-temp-buffer
           (setq default-directory "/fs:server:/home/test/project/")
-          (my/agent-shell-apply-workspace-environment)
+          (+agent-shell-apply-workspace-environment)
           (should-not ensured)
-          (should (equal my/agent-shell--lookup-target "server")))))
+          (should (equal +agent-shell--lookup-target "server")))))
       ;; The missing-executable report names that target even after
       ;; agent-shell has killed the shell buffer.
       (should (string-match-p "target `server'"
-                              (my/agent-shell-missing-executable-a "not found")))))
+                              (+agent-shell-missing-executable-a "not found")))))
 
 (ert-deftest popup-agent-outside-a-project-starts-here ()
   (let ((work (generate-new-buffer " *popup-scratch-work*")) started)
@@ -1375,10 +1375,10 @@ machine's HOME, because agent-shell's caches expand `~' there."
                  (generate-new-buffer " *popup-remote-agent*")))
               ((symbol-function 'noema-agent-acp-adopt) #'ignore)
               ((symbol-function 'noema-agent-acp-tabs-mode) #'ignore)
-              ((symbol-function 'my/portal-popup-display-buffer) #'ignore)
-              ((symbol-function 'my/portal-popup--requested-workspace-id) #'ignore)
-              ((symbol-function 'my/project-current-root) #'ignore))
-      (my/portal-popup-agent 'codex)
+              ((symbol-function '+portal-popup-display-buffer) #'ignore)
+              ((symbol-function '+portal-popup--requested-workspace-id) #'ignore)
+              ((symbol-function '+project-current-root) #'ignore))
+      (+portal-popup/agent 'codex)
       (should (equal started "/fs:server:/home/test/scratch/"))
       (dolist (buffer (buffer-list))
         (when (string-prefix-p " *popup-remote-agent*" (buffer-name buffer))
@@ -1388,31 +1388,31 @@ machine's HOME, because agent-shell's caches expand `~' there."
 (ert-deftest popup-agent-launchers-are-memory-only ()
   (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) (ert-fail "Header checked executables")))
             ((symbol-function 'noema-agent-acp-start) (lambda (&rest _) (ert-fail "Header started agent"))))
-    (let* ((term (my/portal-popup--new-tab-segment))
-           (agent (my/portal-popup--agent-tab-segment))
+    (let* ((term (+portal-popup--new-tab-segment))
+           (agent (+portal-popup--agent-tab-segment))
            (term-map (get-text-property 0 'local-map term))
            (agent-map (get-text-property 0 'local-map agent)))
-      (should (eq (lookup-key term-map [header-line mouse-3]) #'my/portal-popup-menu))
-      (should (eq (lookup-key agent-map [tab-line mouse-1]) #'my/portal-popup-agent-menu))
-      (should (equal (mapcar (lambda (item) (aref item 0)) (my/portal-popup--agent-menu-items))
+      (should (eq (lookup-key term-map [header-line mouse-3]) #'+portal-popup/menu))
+      (should (eq (lookup-key agent-map [tab-line mouse-1]) #'+portal-popup/agent-menu))
+      (should (equal (mapcar (lambda (item) (aref item 0)) (+portal-popup--agent-menu-items))
                      '("Claude" "Codex" "OpenCode"))))))
 
 (ert-deftest popup-agent-menu-includes-configured-apps-and-agent-submenu ()
-  (let ((my/project-popup-portal-apps '(("yazi" . "yazi") ("btop" . "btop"))) items)
+  (let ((+project-popup-portal-apps '(("yazi" . "yazi") ("btop" . "btop"))) items)
     (cl-letf (((symbol-function 'easy-menu-create-menu) (lambda (_title entries) (setq items entries)))
               ((symbol-function 'popup-menu) #'ignore))
-      (my/portal-popup-menu nil))
+      (+portal-popup/menu nil))
     (should (equal (mapcar (lambda (item) (aref item 0)) (cdr (assoc "Applications" items))) '("yazi" "btop")))
     (should (= (length (cdr (assoc "Agent" items))) 3))))
 
 (ert-deftest popup-agent-starts-acp-not-portal-and-shares-the-real-popup ()
   (save-window-excursion
-    (let ((my/portal-popup-buffers nil) (my/portal-popup-current-buffer nil)
-          (my/portal-popup--displaying t) (my/portal-popup-window-height 0.3)
+    (let ((+portal-popup-buffers nil) (+portal-popup-current-buffer nil)
+          (+portal-popup--displaying t) (+portal-popup-window-height 0.3)
           (agent (generate-new-buffer " *popup-test-agent*"))
           (term (generate-new-buffer " *popup-test-terminal*")) started)
       (unwind-protect
-          (cl-letf (((symbol-function 'my/portal-workspace-id) (lambda (&rest _) "local"))
+          (cl-letf (((symbol-function '+portal-workspace-id) (lambda (&rest _) "local"))
                     ((symbol-function 'noema-agent-acp-config-for) (lambda (id) (list id)))
                     ((symbol-function 'noema-agent-acp-start)
                      (lambda (&rest args)
@@ -1422,52 +1422,52 @@ machine's HOME, because agent-shell's caches expand `~' there."
                          (setq-local header-line-format "native ACP header")
                          (noema-agent-acp-tabs-mode 1))
                        agent))
-                    ((symbol-function 'my/portal-popup--create-buffer) (lambda (&rest _) (ert-fail "Agent used portal")))
+                    ((symbol-function '+portal-popup--create-buffer) (lambda (&rest _) (ert-fail "Agent used portal")))
                     ((symbol-function 'noema-agent-render-flush) #'ignore))
-            (my/portal-popup-display-buffer term)
-            (let ((window (my/portal-popup--window)))
-              (should (eq (my/portal-popup-agent 'codex) agent))
+            (+portal-popup-display-buffer term)
+            (let ((window (+portal-popup--window)))
+              (should (eq (+portal-popup/agent 'codex) agent))
               (should (equal (plist-get started :config) '(codex)))
               (should-not (plist-get started :focus))
-              (should (eq (my/portal-popup--window) window))
+              (should (eq (+portal-popup--window) window))
               (should (eq (window-buffer window) agent))
               (with-current-buffer agent
                 (should (eq major-mode 'agent-shell-mode))
-                (should my/portal-popup-instance-p)
+                (should +portal-popup-instance-p)
                 (should-not noema-agent-acp-tabs-mode)
                 (should (equal header-line-format "native ACP header"))
-                (should (eq (key-binding (kbd "C-c C-e")) #'my/portal-popup-toggle))
-                (should (eq (key-binding (kbd "C-c E")) #'my/portal-popup-cycle))
-                (should (eq (key-binding (kbd "C-c M-e")) #'my/portal-toggle-fixed)))
+                (should (eq (key-binding (kbd "C-c C-e")) #'+portal-popup/toggle))
+                (should (eq (key-binding (kbd "C-c E")) #'+portal-popup/cycle))
+                (should (eq (key-binding (kbd "C-c M-e")) #'+portal/toggle-fixed)))
               ;; ACP redisplay must not move the popup session to the project window.
               (noema-agent-acp-show-buffer agent)
-              (should (eq (my/portal-popup--window) window))
-              (my/portal-popup-cycle nil)
+              (should (eq (+portal-popup--window) window))
+              (+portal-popup/cycle nil)
               (should (eq (window-buffer window) term))
-              (my/portal-popup-cycle nil)
+              (+portal-popup/cycle nil)
               (should (eq (window-buffer window) agent))
-              (my/portal-popup-toggle)
-              (should-not (my/portal-popup--window))
+              (+portal-popup/toggle)
+              (should-not (+portal-popup--window))
               (should (buffer-live-p agent))
-              (my/portal-popup-toggle)
-              (should (eq (window-buffer (my/portal-popup--window)) agent))
-              (my/portal-toggle-fixed)
-              (should (buffer-local-value 'my/portal-popup-fixed agent))))
-        (my/portal-hide-popup)
+              (+portal-popup/toggle)
+              (should (eq (window-buffer (+portal-popup--window)) agent))
+              (+portal/toggle-fixed)
+              (should (buffer-local-value '+portal-popup-fixed agent))))
+        (+portal/hide-popup)
         (kill-buffer agent)
         (kill-buffer term)))))
 
 (ert-deftest popup-agent-entrypoints-select-the-corresponding-adapter ()
   (let (started)
-    (cl-letf (((symbol-function 'my/portal-popup-agent) (lambda (id) (push id started))))
-      (my/portal-popup-agent-claude)
-      (my/portal-popup-agent-codex)
-      (my/portal-popup-agent-opencode))
+    (cl-letf (((symbol-function '+portal-popup/agent) (lambda (id) (push id started))))
+      (+portal-popup/agent-claude)
+      (+portal-popup/agent-codex)
+      (+portal-popup/agent-opencode))
     (should (equal (nreverse started) '(claude codex opencode)))))
 
 (ert-deftest agent-shell-interactive-entry-uses-managed-window ()
   (let (managed original)
-    (cl-letf (((symbol-function 'my/agent-shell-here)
+    (cl-letf (((symbol-function '+agent-shell/here)
                (lambda () (interactive) (setq managed t)))
               ((symbol-function 'agent-shell--dwim)
                (lambda (&rest _) (setq original t))))
@@ -1492,7 +1492,7 @@ machine's HOME, because agent-shell's caches expand `~' there."
           (progn
             (set-window-buffer (selected-window) source)
             (let ((window (selected-window)))
-              (cl-letf (((symbol-function 'my/agent-shell-launch-context)
+              (cl-letf (((symbol-function '+agent-shell-launch-context)
                          (lambda () (cons "/tmp/project/" "/tmp/project/code/")))
                         ((symbol-function 'noema-agent-acp-config-for)
                          (lambda (agent) (list :identifier agent)))
@@ -1501,7 +1501,7 @@ machine's HOME, because agent-shell's caches expand `~' there."
                         ((symbol-function 'noema-agent-acp-adopt)
                          (lambda (buffer &rest args)
                            (setq adopted args) buffer)))
-                (should (eq (my/agent-shell-here 'codex) agent-buffer))
+                (should (eq (+agent-shell/here 'codex) agent-buffer))
                 (should (eq (selected-window) window))
                 (should (eq (window-buffer window) agent-buffer))
                 (should (equal (plist-get started :directory)
@@ -1515,18 +1515,18 @@ machine's HOME, because agent-shell's caches expand `~' there."
 
 (ert-deftest agent-shell-adapters-run-the-workspace-cli-without-fallback ()
   "Claude/Codex adapters get the CLI from the workspace PATH, or fail."
-  (let ((my/agent-shell--lookup-target "local"))
+  (let ((+agent-shell--lookup-target "local"))
     (cl-letf (((symbol-function 'executable-find)
                (lambda (program &optional _remote)
                  (and (equal program "claude") "/home/me/.local/bin/claude"))))
-      (should (equal (plist-get (my/agent-shell-use-workspace-cli
+      (should (equal (plist-get (+agent-shell-use-workspace-cli
                                  '(:command "claude-agent-acp"
                                    :environment-variables ("A=1")))
                                 :environment-variables)
                      '("CLAUDE_CODE_EXECUTABLE=/home/me/.local/bin/claude" "A=1")))
-      (should-error (my/agent-shell-use-workspace-cli '(:command "codex-acp"))
+      (should-error (+agent-shell-use-workspace-cli '(:command "codex-acp"))
                     :type 'user-error)
-      (should (equal (my/agent-shell-use-workspace-cli '(:command "pi-acp"))
+      (should (equal (+agent-shell-use-workspace-cli '(:command "pi-acp"))
                      '(:command "pi-acp"))))))
 
 ;;; popup-agent-tests.el ends here

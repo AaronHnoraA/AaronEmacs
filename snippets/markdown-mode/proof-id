@@ -3,7 +3,7 @@
 # key: prooff
 # group: Noema local
 # --
-#+begin proof {#`(my/noema-new-id "block")`}
+#+begin proof {#`(noema-new-id "block")`}
 ${1:Proof.}
 #+end proof
 $0

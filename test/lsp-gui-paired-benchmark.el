@@ -5,7 +5,7 @@
 (require 'remote-config)
 (require 'remote-framework)
 
-(defun my/lsp-gui-paired-benchmark-run ()
+(defun +lsp-gui-paired-benchmark-run ()
   "Run Python LSP checks for native and SSH in the same GUI frame."
   (unless (display-graphic-p)
     (error "A GUI frame is required"))
@@ -21,7 +21,7 @@
                         (error "Set REMOTE_LSP_E2E_TARGET")))
          (local-target (remote-get-target "local"))
          (remote-target (remote-get-target remote-id))
-         (spec (assoc 'python my/lsp-remote-live-smoke-specs))
+         (spec (assoc 'python +lsp-remote-live-smoke-specs))
          results)
     (unless (and local-target remote-target spec)
       (error "Python or configured local/SSH target is unavailable"))
@@ -33,7 +33,7 @@
         (setenv "REMOTE_LSP_E2E_VISIT"
                 (if (eq (car entry) 'native) "native" "logical"))
         (push (cons (car entry)
-                    (my/lsp-remote-live-smoke--run-one
+                    (+lsp-remote-live-smoke--run-one
                      (cdr entry) spec))
               results)))
     (setq results (nreverse results))

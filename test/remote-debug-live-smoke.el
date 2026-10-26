@@ -9,7 +9,7 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'init-debug)
+(require 'tools/debugger/config)
 (require 'remote-config)
 (require 'remote-framework)
 (require 'dape)
@@ -90,7 +90,7 @@
                      (lambda () (remote-debug-live-smoke--listener-p root port))
                      8)
               (error "Target debuggee never listened on %d" port))
-            (setq config (my/debug-python-attach-config port)))
+            (setq config (+debug-python-attach-config port)))
           (with-current-buffer buffer
             (switch-to-buffer buffer)
             (when module-p

@@ -35,7 +35,7 @@
   `dired-selection` 可直接搜索到这些动作。图片裁剪统一由编辑工作台的原生
   `image-crop` 提供，文件菜单不再重复列出。
 - 新文件缺少父目录时默认询问是否创建；可把
-  `my/files-create-parent-directories` 改成 `always` 或 `never`。
+  `+files-create-parent-directories` 改成 `always` 或 `never`。
 - Proced buffer 自动刷新；`SPC o p` 打开 Proced。
 
 路径和外部进程都沿用现有 Remote contract。远程文件会转换为 target-native 参数，

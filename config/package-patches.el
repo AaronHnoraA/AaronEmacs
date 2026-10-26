@@ -2,7 +2,7 @@
 
 ;; Paths are relative to `user-emacs-directory'.  Keep package-vc recipes in
 ;; package-lock.el; only source differences belong here.
-(setq my/package-vc-patches
+(setq aaron-package-vc-patches
       '((portal . "config/portal-local.patch")))
 
 ;;; package-patches.el ends here

@@ -149,18 +149,18 @@ Emacs 实例，完整初始化：
 
 | 位置 | 性质 |
 |---|---|
-| `init-jupyter-board.el`、`init-jupyter-management.el` 中的 `(remote-get-target "local")`、默认 owner、显示文字 | 身份与默认值，不是行为分支 |
-| `init-ai-ide.el`、`init-base.el` 的报错与分类文字 | 显示用 |
-| `init-noema.el` 的原始主机路径默认归属、`init-noema-jupyter-server.el` 的默认 owner | 客户端边界上的默认身份 |
-| `init-shell.el` 的终端 buffer 命名 | 仅影响名称 |
-| `init-noema-jupyter-server.el`：本机 server 不建转发 | 明文规定的策略（非本机 target 必须经 channel） |
-| `init-lsp.el`：非本机 target 的 watch 归 workspace 所有、shutdown 超时放宽 | 由测试固定的 target 身份契约；换成放置查询会改变契约 |
-| `init-jupyter-board.el` 的路由说明文字（“Direct from this machine”） | 显示用 |
+| `tools/jupyter/config.el`、`tools/jupyter/management.el` 中的 `(remote-get-target "local")`、默认 owner、显示文字 | 身份与默认值，不是行为分支 |
+| `tools/agent/config.el`、`core/aaron-base.el` 的报错与分类文字 | 显示用 |
+| `noema/bridge/config.el` 的原始主机路径默认归属、`noema/jupyter/server.el` 的默认 owner | 客户端边界上的默认身份 |
+| `term/shell/config.el` 的终端 buffer 命名 | 仅影响名称 |
+| `noema/jupyter/server.el`：本机 server 不建转发 | 明文规定的策略（非本机 target 必须经 channel） |
+| `tools/lsp/config.el`：非本机 target 的 watch 归 workspace 所有、shutdown 超时放宽 | 由测试固定的 target 身份契约；换成放置查询会改变契约 |
+| `tools/jupyter/config.el` 的路由说明文字（“Direct from this machine”） | 显示用 |
 
-已改为放置查询（`remote-client-file-name`）的：系统打开器（`init-open.el`、
-`init-macos.el`）、Noema 给本机 web host 的路径（`my/noema--host-file`）、kernelspec
+已改为放置查询（`remote-client-file-name`）的：系统打开器（`core/aaron-open.el`、
+`os/macos/config.el`）、Noema 给本机 web host 的路径（`+noema--host-file`）、kernelspec
 REPL 的可达性判断、客户端 kernelspec 配置读取、Ghostel 的启动流程。Jupyter 管理
-的 `my/jupyter-management-local-target-p` 也是同一个放置查询。LSP 增量变更
+的 `+jupyter-management-local-target-p` 也是同一个放置查询。LSP 增量变更
 合批改问 `remote-process-write-cost`（backend 声明的 `:process-write-cost`：
 `direct` 或 `queued`），不再看 target 名。
 

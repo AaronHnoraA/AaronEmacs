@@ -3,7 +3,7 @@
 # key: propp
 # group: Noema local
 # --
-#+begin proposition ${1:name} {#`(my/noema-new-id "block")`}
+#+begin proposition ${1:name} {#`(noema-new-id "block")`}
 ${2:Statement.}
 #+end proposition
 $0

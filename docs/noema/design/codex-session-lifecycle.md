@@ -19,7 +19,7 @@ lookup, so an Emacs crash leaves no registry file or stale ownership claim.
 On `TASK_BUSY`, Codex's structured error code is used if supplied. ACP has no
 standard busy code, so the exact provider message is the fallback. The failed
 ACP client is shut down; the buffer shows the target, workspace, session ID,
-and `M-x my/agent-shell-retry-task`. A failed resume does not silently fall
+and `M-x +agent-shell/retry-task`. A failed resume does not silently fall
 through to `session/new`. The retry command starts a new ACP connection only
 after the user invokes it. No other client's process is terminated.
 
@@ -46,9 +46,9 @@ task, close the owning session before retrying there.
 
 ## Separate mobile task as a messenger
 
-For the existing Emacs task, run `M-x my/noema-agent-bridge-start` once in the
+For the existing Emacs task, run `M-x +noema/agent-bridge-start` once in the
 running Emacs. This opens Emacs's local Unix server socket and enables a small
-request handler. `M-x my/noema-agent-bridge-stop` disables the handler without
+request handler. `M-x +noema/agent-bridge-stop` disables the handler without
 stopping any other use of the Emacs server. It is off after an Emacs restart
 until started again.
 

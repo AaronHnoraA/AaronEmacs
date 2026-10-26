@@ -201,7 +201,7 @@ the last week. A page without a `date` matches no `created:` filter.
 Linking is the same search asked a different way: the endpoint's mode
 `references` lists what a note can refer to and, for each item, the text that
 refers to it. Command-R in the editor opens a popup at the caret with it;
-`M-x my/noema-insert-reference` asks the same lookup from any Emacs buffer.
+`M-x +noema/insert-reference` asks the same lookup from any Emacs buffer.
 Neither matches anything or knows a link syntax. The prefixes are roam's own:
 
 | Typed | Lists |

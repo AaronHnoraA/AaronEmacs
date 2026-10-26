@@ -3,7 +3,7 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'bookmark)
-(require 'init-windows)
+(require 'ui/windows/config)
 
 (ert-deftest bookmark-actions-menu-searches-and-delegates-ordinary-actions ()
   (should (member "bookmark-actions-menu"
@@ -44,8 +44,8 @@
                  (lambda () nil))
                 ((symbol-function 'find-file-noselect)
                  (lambda (&rest _) (ert-fail "Line lookup reopened the file"))))
-        (should (eq (my/bookmark--current-line-bookmark) entry))
-        (should (equal (my/bookmark--line-bookmarks-in-current-file)
+        (should (eq (+bookmark--current-line-bookmark) entry))
+        (should (equal (+bookmark--line-bookmarks-in-current-file)
                        (list entry)))))))
 
 (ert-deftest bookmark-save-keeps-native-file-on-client-from-remote-context ()
@@ -78,7 +78,7 @@
                     "bookmarks"))
       (should
        (equal
-        (my/bookmark-write-file-on-client-a
+        (+bookmark-write-file-on-client-a
          (lambda (_file) default-directory) file)
         default-directory)))))
 

@@ -247,9 +247,9 @@ generation 变化会精确清空 10 分钟有界 LRU。Node 只转发窄 mention
 ## Emacs
 
 ```text
-lisp/roam/init-noema.el
+lisp/noema/bridge/config.el
   进程、buffer/session、公开命令和 UI 装配
-lisp/roam/noema-portal.el
+lisp/noema/bridge/portal.el
   Portal Web 页面、client 复用、焦点与宿主消息
 site-lisp/noema/lisp/noema-md-bridge.el
   Portal / xwidget 共用的页面选区、保存回执、Emacs 源 buffer 与 agent / gptel 动作
@@ -270,7 +270,7 @@ AI 发送都经页面 client 的宿主命令路由，不依赖 xwidget 的脚本
 
 按键桥迁移时保留了原命令名和调用协议。Cmd+方向键不经 Emacs/windmove
 转发，由 CodeMirror/WebKit 保持原生编辑行为。
-Portal 页面的 Emacs 顶栏圆形箭头调用 `my/noema-refresh`，先尝试保存草稿，再从磁盘
+Portal 页面的 Emacs 顶栏圆形箭头调用 `+noema/refresh`，先尝试保存草稿，再从磁盘
 重读当前笔记并保留光标；它不是浏览器整页重载。xwidget 顶栏的对应按钮才
 调用网页重载，提示文字须区分这两种动作。
 

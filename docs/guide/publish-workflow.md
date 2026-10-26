@@ -8,7 +8,7 @@
 |---|---|
 | `~/.emacs.d/publish`(→ `~/HC/Homepage`) | **站点本身**。手写的 HTML/CSS/JS,仓库根就是网站根 |
 | `publish/CV/main.tex` | CV 的 LaTeX 源(在 publish 仓库里,与站点同仓) |
-| `lisp/roam/init-noema-publish.el` | 编译 CV、检查完整性、部署 |
+| `lisp/noema/bridge/publish.el` | 编译 CV、检查完整性、部署 |
 
 站点没有构建步骤。页面是什么样,提交进去的就是什么样;唯一被生成的产物是 CV 的 PDF。
 要改主页,直接编辑 publish 仓库里的文件。
@@ -23,9 +23,9 @@ make publish-clean    # 清掉 CV 编译中间产物
 ```
 
 这些目标走的是一个精简的 batch Emacs(`PUBLISH_BATCH`),只加载
-`init-noema-publish.el`,不加载 `init.el`,所以发布不受配置状态影响。
-对应的交互命令是 `my/noema-publish`、`my/noema-publish-build`、
-`my/noema-publish-deploy`、`my/noema-publish-clean`。
+`noema/bridge/publish.el`,不加载 `init.el`,所以发布不受配置状态影响。
+对应的交互命令是 `+noema/publish`、`+noema/publish-build`、
+`+noema/publish-deploy`、`+noema/publish-clean`。
 
 ## 站点结构:一份文档,两种布局
 
@@ -59,7 +59,7 @@ section 变成站在世界里的 CSS3D 面板 —— 仍是真 HTML,可选中、
 
 ## 完整性检查
 
-部署前 `my/noema-publish--check-site` 会确认这些文件存在,缺一个就报错退出:
+部署前 `+noema-publish--check-site` 会确认这些文件存在,缺一个就报错退出:
 
 - 页面与样式:`index.html`、`assets/css/site.css`、`assets/js/site.js`
 - 世界模块:`assets/js/world/` 下的 `index`、`curve`、`circuit`、`flight`、`rig`、
@@ -83,11 +83,11 @@ section 变成站在世界里的 CSS3D 面板 —— 仍是真 HTML,可选中、
 
 | 变量 | 含义 |
 |---|---|
-| `my/noema-publish-root` | publish 仓库根 |
-| `my/noema-publish-cv-dir` | CV LaTeX 源目录(`publish/CV`) |
-| `my/noema-publish-state-dir` | CV 编译中间产物 |
-| `my/noema-publish-nas-enable` | 是否在 push 后 rsync 到 NAS |
-| `my/noema-publish-nas-target` | rsync 目标 |
+| `+noema-publish-root` | publish 仓库根 |
+| `+noema-publish-cv-dir` | CV LaTeX 源目录(`publish/CV`) |
+| `+noema-publish-state-dir` | CV 编译中间产物 |
+| `+noema-publish-nas-enable` | 是否在 push 后 rsync 到 NAS |
+| `+noema-publish-nas-target` | rsync 目标 |
 
 改这些用 `M-x config-board`,不要在代码里 `setq`。
 
@@ -107,7 +107,7 @@ section 变成站在世界里的 CSS3D 面板 —— 仍是真 HTML,可选中、
 - `vendor/` 下的第三方代码:各自原许可证,原样分发,不得删改许可证头或许可证文件。
 
 新增任何第三方依赖时,三件事一起做:vendored 文件 + 原始许可证文件 + README 中的依赖说明,
-并把许可证路径加进 `my/noema-publish--required-licences`。许可证与实现说明留在仓库,不再作为
+并把许可证路径加进 `+noema-publish--required-licences`。许可证与实现说明留在仓库,不再作为
 个人学术主页卡片展示。
 
 ## 本地预览

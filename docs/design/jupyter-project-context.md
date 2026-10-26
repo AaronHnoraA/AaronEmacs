@@ -26,7 +26,7 @@ introduced.
   There is no built-in general-purpose `remote.el` here: this configuration's
   `lisp/remote/` library sits above Emacs/TRAMP.
 - Existing Jupyter LSP code duplicated remote-profile interpretation. That now
-  delegates to `init-noema-jupyter-project.el`. Launch argv takes precedence
+  delegates to `noema/jupyter/project.el`. Launch argv takes precedence
   over old descriptive `remote_kernel.config`; optional project metadata adds
   project settings without copying SSH options into each consumer.
 - The LSP runtime resolver formerly started an unrelated local language server,
@@ -74,7 +74,7 @@ installed kernelspec directory requires updating its `--project-file` path.
 The launcher on the machine that stores the profile must be this updated fork.
 
 Notebook and Board kernelspec discovery share the target-owned command
-resolver in `lisp/init-jupyter-command.el`. It checks project `.venv`/`.conda`
+resolver in `lisp/tools/jupyter/command.el`. It checks project `.venv`/`.conda`
 environments, target PATH and Conda's `~/.conda/environments.txt` registry via
 ordinary remote file APIs. A Python module invocation is supported when the
 modules are installed without a Jupyter console command. This selects the

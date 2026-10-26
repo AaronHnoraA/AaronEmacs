@@ -9,7 +9,7 @@
 
 (require 'config)
 (require 'config-custom)
-(require 'init-open)
+(require 'aaron-open)
 (require 'transient)
 
 (defun config-filter-group ()
@@ -41,7 +41,7 @@
 (defun config-open-store ()
   "Open the primary config store on the Emacs client."
   (interactive)
-  (my/open-client-file config-store-file))
+  (aaron-open-client-file config-store-file))
 
 (transient-define-prefix config-dispatch ()
   "Configuration management workflow."

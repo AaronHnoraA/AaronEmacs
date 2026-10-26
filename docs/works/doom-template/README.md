@@ -187,7 +187,12 @@ Doom 的做法：
   - 验证：启动状态快照（特性、全部 hook 顺序、advice、所有 keymap 绑定、全部 custom 变量，23197 行）与迁移前逐行比较，只多出新特性和四个阶段 hook；账本开关对启动耗时的影响在测量误差内；`make core-test` 46 项、Health 测试 13 项通过。
   - 去掉了 `my/require-module-safely` 等旧入口和兼容别名，Health 与其测试直接改用新接口（用户要求：不留 fallback，直接融合）。
   - 发现（只报告，未改用户行为）：5 个由加载顺序决定的键冲突（`C-c w P/s/p`、`` M-` ``、`M-o`）；`init-auctex` 因 `tex-site`/`pdf-tools` 启动即加载而在启动时耗时约 0.9s；95 处策略命中（41 `file-remote-p`、47 `global-set-key`、7 `"local"` 比较）；按分类重排声明会改变 166 行启动状态，说明存在隐式顺序依赖，重排随目录迁移逐个做。
-- [ ] P1b-2 目录迁移与改名：模块逐个迁入 `lisp/CATEGORY/NAME/`，`my/` 改 `+模块-`，同时按分类重排，每步快照对比
-- [ ] P1c 注册 API
-- [ ] P1d 默认行为与键位比对
-- [ ] P1e 模块目录比对
+- [x] P1b-2 目录迁移与改名（2026-10-26，一次完成，用户要求不留 fallback）：
+  - **目录**：190 个文件迁入 `lisp/分类/模块/`，每个文件的 feature 就是它在 `lisp/` 下的路径（`tools/lsp/config`）；核心是平铺的 `lisp/core/aaron-*.el`；Remote 框架库原位保留，`remote/framework/.aaronmodule` 把它归入 framework 模块。
+  - **改名**：5799 个 `my/` 符号全部改名，对照表见 `docs/records/migrations/naming-migration-2026-10.md`。同一改动里迁移了所有调用方：Noema 仓库的 Elisp/TS、`bin/emacs-app`、Raycast、`etc/config-store.el` 等私有配置，以及 M-x 历史、transient 历史等状态文件。
+  - **声明**：`aaron!` 改用新的模块键，原先由 `tools/lsp` 连带加载的 lang 模块、`noema/jupyter`、`checkers/grammar` 和 `config/compile` 在它们实际加载的位置补上声明。
+  - **删除**：`init-mail`、`init-stock`、`init-ignored`（空模块），`lisp/roam/` 下一个无主的编辑器备份文件。
+  - **验证**：迁移前的启动状态快照按改名表换算后，与迁移后的快照逐行比较，剩下的差异只有比较脚本的编码误差和主机名变化（`Mac` → `AaronMac.local`）。全部 Makefile 测试目标通过；`agenda-apple-test` 卡在 Node 版本，与本改动无关。`remote-transfer-test` 原本就跑不起来，修好 Makefile 后有 4 项失败，迁移前同样失败。Noema 测试 3360 项通过。另外把每个测试文件在新旧两棵树上各跑一遍，逐项比对结果。
+- [ ] P1c 注册 API（见 [comparison.md](comparison.md) 第 5 节）
+- [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。只列候选，不改用户习惯，等用户决定。
+- [x] P1e 模块目录比对：[comparison.md](comparison.md) 第 1 节。

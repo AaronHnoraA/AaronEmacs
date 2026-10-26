@@ -62,7 +62,7 @@ phase1 = r'''(progn
  (remote-fs-install)
  (let* ((root (getenv "NOEMA_PROBE_REMOTE_DIR"))
         (id (getenv "NOEMA_PROBE_ID"))
-        (my/noema-jupyter-pending-directory
+        (+noema-jupyter-pending-directory
          (expand-file-name "pending/" (getenv "NOEMA_PROBE_LOCAL_DIR")))
         (placement (remote-make-file-name (getenv "JUPYTER_PENDING_LIVE_TARGET") (expand-file-name "note.ipynb" root)))
         (connection (remote-make-file-name (getenv "JUPYTER_PENDING_LIVE_TARGET") (expand-file-name (concat id ".json") root)))
@@ -73,43 +73,43 @@ phase1 = r'''(progn
    (let* ((python (getenv "NOEMA_PROBE_PYTHON"))
           (argv (vector python "-c" "import time; time.sleep(120)" (remote-file-local-name connection)))
           (pid (string-to-number
-                (my/noema-jupyter--output context python "-c"
-                 my/noema-jupyter--launch-helper
+                (+noema-jupyter--output context python "-c"
+                 +noema-jupyter--launch-helper
                  (json-serialize argv) "{}" root (remote-file-local-name log))))
-          (runtime (my/noema-jupyter-runtime-create
+          (runtime (+noema-jupyter-runtime-create
                     :id id :context context :placement-file placement :pid pid
                     :connection-file connection :log-file log :state 'shutdown-pending)))
      (unless (> pid 0) (error "invalid target pid"))
-     (my/noema-jupyter--record-pending-shutdown runtime)
+     (+noema-jupyter--record-pending-shutdown runtime)
      (princ (format "REMOTE_PID=%s\n" pid)))))'''
 
 phase2 = r'''(progn
  (remote-config-load)
- (let* ((my/noema-jupyter-pending-directory
+ (let* ((+noema-jupyter-pending-directory
           (expand-file-name "pending/" (getenv "NOEMA_PROBE_LOCAL_DIR")))
         (id (getenv "NOEMA_PROBE_ID"))
-        (entry (my/noema-jupyter--pending-shutdown-for id)))
+        (entry (+noema-jupyter--pending-shutdown-for id)))
    (unless entry (error "missing journal"))
    (let ((failed nil))
-     (cl-letf (((symbol-function 'my/noema-jupyter--alive-p)
+     (cl-letf (((symbol-function '+noema-jupyter--alive-p)
                 (lambda (_runtime) 'unknown)))
        (condition-case nil
-           (my/noema-jupyter--retry-pending-shutdown entry)
+           (+noema-jupyter--retry-pending-shutdown entry)
          (error (setq failed t))))
      (unless failed (error "offline retry unexpectedly succeeded")))
-   (unless (file-exists-p (my/noema-jupyter--pending-file id))
+   (unless (file-exists-p (+noema-jupyter--pending-file id))
      (error "offline attempt lost journal"))
    (princ "OFFLINE_RETAINED\n")))'''
 
 phase3 = r'''(progn
  (remote-config-load)
- (let* ((my/noema-jupyter-pending-directory
+ (let* ((+noema-jupyter-pending-directory
           (expand-file-name "pending/" (getenv "NOEMA_PROBE_LOCAL_DIR")))
         (id (getenv "NOEMA_PROBE_ID"))
-        (entry (my/noema-jupyter--pending-shutdown-for id)))
+        (entry (+noema-jupyter--pending-shutdown-for id)))
    (unless entry (error "missing journal"))
-   (my/noema-jupyter--retry-pending-shutdown entry)
-   (when (file-exists-p (my/noema-jupyter--pending-file id))
+   (+noema-jupyter--retry-pending-shutdown entry)
+   (when (file-exists-p (+noema-jupyter--pending-file id))
      (error "journal remains"))
    (princ "REMOTE_RECOVERED\n")))'''
 

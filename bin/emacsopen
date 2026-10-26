@@ -1,7 +1,7 @@
 #!/bin/sh
 # Open files in the running graphical Emacs at a chosen place, for agents,
 # scripts and terminals.  Prints one JSON object per file, as returned by
-# `my/open-place-from-client' (lisp/init-open.el), and exits non-zero when
+# `aaron-open-place-from-client' (lisp/core/aaron-open.el), and exits non-zero when
 # any file could not be opened.
 
 usage() {
@@ -66,7 +66,7 @@ open_one() {
     esac
     encoded=$(printf '%s' "$file" | base64 | tr -d '\n')
     reply=$("$CLIENT" --timeout=6 --eval \
-        "(my/open-place-from-client \"$encoded\" \"$placement\" $line $column $focus)" 2>&1)
+        "(aaron-open-place-from-client \"$encoded\" \"$placement\" $line $column $focus)" 2>&1)
     if [ $? -ne 0 ]; then
         printf '{"error":"emacsclient failed","detail":"%s"}\n' \
             "$(printf '%s' "$reply" | tr -d '"\\' | tr '\n' ' ')"

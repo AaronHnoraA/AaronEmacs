@@ -37,7 +37,7 @@
 (require 'cl-lib)
 (require 'lisp-mode)
 
-(declare-function my/open-client-file "init-open"
+(declare-function aaron-open-client-file "aaron-open"
                   (file &optional view allow-missing))
 
 (defgroup config nil
@@ -313,7 +313,7 @@ immediately applies any pre-loaded store override."
               (config-set name (cdr cell) 'no-persist 'quiet)
             ;; During startup write only the value; the `:on-change' callback
             ;; is deferred to the single `config-apply-store' pass so a callback
-            ;; shared by many keys (e.g. `my/font-reset-all') runs once per
+            ;; shared by many keys (e.g. `aaron/font-reset-all') runs once per
             ;; startup instead of once per registration.
             (config--set-value entry name (cdr cell)))
         (error nil)))
@@ -549,12 +549,12 @@ Unless NO-PERSIST, records the toggle in the store."
     (unless path (user-error "config-file-open: %s has no :path" name))
     (config--call-on-client
      (lambda ()
-       (unless (fboundp 'my/open-client-file)
-         (require 'init-open))
+       (unless (fboundp 'aaron-open-client-file)
+         (require 'aaron-open))
        (when (and (not (file-exists-p path)) example (file-exists-p example)
                   (y-or-n-p (format "%s does not exist; seed from example? " name)))
          (copy-file example path))
-       (my/open-client-file path nil t)))))
+       (aaron-open-client-file path nil t)))))
 
 (defun config-file-reset (name)
   "Overwrite file item NAME from its example, then reload."
@@ -899,7 +899,7 @@ With STRICT, signal read and parse failures."
   "Load config store files and apply every override live.
 Each override is applied independently so one failure cannot abort the rest.
 Value writes happen first; then each `:on-change' callback runs once: a
-zero-argument callback shared by several keys (e.g. `my/font-reset-all') is
+zero-argument callback shared by several keys (e.g. `aaron/font-reset-all') is
 invoked a single time, while callbacks taking arguments run per entry."
   (config--load-configured-store-files)
   (let ((shared nil))

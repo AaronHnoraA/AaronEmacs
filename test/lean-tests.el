@@ -11,7 +11,7 @@
  (expand-file-name "../lisp/lang/lean/init-lean-eglot.el"
                    (file-name-directory (or load-file-name buffer-file-name))))
 (load-file
- (expand-file-name "../lisp/init-diagnostics-extra.el"
+ (expand-file-name "../lisp/checkers/diagnostics-extra/config.el"
                    (file-name-directory (or load-file-name buffer-file-name))))
 
 (defconst lean-test--range
@@ -105,7 +105,7 @@
            (list (flymake-make-diagnostic (current-buffer) 1 2 'eglot-error "e")
                  (flymake-make-diagnostic (current-buffer) 1 2 'eglot-warning "w")
                  (flymake-make-diagnostic (current-buffer) 1 2 'eglot-note "n"))))
-      (should (equal (my/diagnostics--counts diags)
+      (should (equal (+diagnostics--counts diags)
                      '(:error 1 :warning 1 :note 1))))))
 
 ;;; lean-tests.el ends here

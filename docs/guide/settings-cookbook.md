@@ -36,7 +36,7 @@ contact”，优先补齐 Remote/LSP adapter，而不是把分支写进语言模
 
 文件：
 
-- [lisp/init-ui.el](../../lisp/init-ui.el)
+- [lisp/ui/theme/config.el](../../lisp/ui/theme/config.el)
 
 现在默认：
 
@@ -51,30 +51,30 @@ contact”，优先补齐 Remote/LSP adapter，而不是把分支写进语言模
 
 文件：
 
-- [lisp/init-base.el](../../lisp/init-base.el)
-- [lisp/init-text.el](../../lisp/init-text.el)
-- [lisp/lang/tex/init-auctex.el](../../lisp/lang/tex/init-auctex.el)
+- [lisp/core/aaron-base.el](../../lisp/core/aaron-base.el)
+- [lisp/editor/text/config.el](../../lisp/editor/text/config.el)
+- [lisp/lang/auctex/config.el](../../lisp/lang/auctex/config.el)
 
 重点变量：
 
-- `my/font-body`
-- `my/font-code`
-- `my/font-title`
-- `my/font-cn`
-- `my/font-body-width`
-- `my/h-body`
-- `my/h-code`
-- `my/h-title`
-- `my/scale-cn`
-- `my/prose-line-spacing`
+- `aaron-font-body`
+- `aaron-font-code`
+- `aaron-font-title`
+- `aaron-font-cn`
+- `aaron-font-body-width`
+- `aaron-h-body`
+- `aaron-h-code`
+- `aaron-h-title`
+- `aaron-scale-cn`
+- `aaron-prose-line-spacing`
 
 职责：
 
-- `lisp/init-base.el`
+- `lisp/core/aaron-base.el`
   基础字体族、字号、中文 fontset 绑定、共享排版 helper。
-- `lisp/init-text.el`
+- `lisp/editor/text/config.el`
   Markdown 里什么时候启用 prose 排版。
-- `lisp/lang/tex/init-auctex.el`
+- `lisp/lang/auctex/config.el`
   LaTeX 里什么时候启用 prose 排版。
 
 改完后可以执行：
@@ -83,20 +83,20 @@ contact”，优先补齐 Remote/LSP adapter，而不是把分支写进语言模
 
 ## 3. 我要改 LaTeX 构建/预览
 
-文件：[lisp/lang/tex/init-auctex.el](../../lisp/lang/tex/init-auctex.el)（AUCTeX、latexmk 命令、
-PDF Tools/SyncTeX 预览）、[lisp/lang/tex/init-latex.el](../../lisp/lang/tex/init-latex.el)（texlab/
+文件：[lisp/lang/auctex/config.el](../../lisp/lang/auctex/config.el)（AUCTeX、latexmk 命令、
+PDF Tools/SyncTeX 预览）、[lisp/lang/latex/config.el](../../lisp/lang/latex/config.el)（texlab/
 digestif、BibTeX、Zotero）。
 
 `latexmk` 可执行文件通过 `remote-executable-find`（AUCTeX 侧）/
-`my/language-server-executable-find`（texlab 侧）按当前 buffer 的 Remote target 解析，不写死
-本机路径；两个 latexmk 命令（`XeLaTeXMk`/`PdfLaTeXMk`）在 `my/auctex-setup-build-workflow` 里按
+`+language-server-executable-find`（texlab 侧）按当前 buffer 的 Remote target 解析，不写死
+本机路径；两个 latexmk 命令（`XeLaTeXMk`/`PdfLaTeXMk`）在 `+auctex-setup-build-workflow` 里按
 buffer 注册，而不是启动时算好一份全局命令。远程 target 上的构建命令会被
-`my/auctex-guard-remote-master` 拒绝——AUCTeX 自己的 `TeX-run-command` 用 `start-process`，遇到远程
+`+auctex-guard-remote-master` 拒绝——AUCTeX 自己的 `TeX-run-command` 用 `start-process`，遇到远程
 `default-directory` 会静默回退到本机 `~` 编译，而不是报错，所以选择在框架层面显式拒绝。texlab 的
 诊断/补全走 lsp-mode 共享的 `language-server` remote adapter，本身已经是 target-aware 的。
 
 **buffer 内的公式预览是另一条链路**：RaTeX（vendored 在 `site-lisp/ratex.el/`），
-在 [lisp/lang/tex/init-latex.el](../../lisp/lang/tex/init-latex.el) 配置，表现为光标上方的
+在 [lisp/lang/latex/config.el](../../lisp/lang/latex/config.el) 配置，表现为光标上方的
 posframe 弹窗而不是 inline overlay。支持 `$…$`、`$$…$$`、`\(…\)`、`\[…\]` 和
 白名单内的 `\begin{…}` 环境。数学宏与 TeX 兼容规则以
 `site-lisp/noema/resources/` 为唯一来源，Emacs 与 Noema 读同一批文件——
@@ -107,7 +107,7 @@ posframe 弹窗而不是 inline overlay。支持 `$…$`、`$$…$$`、`\(…\)`
 
 文件：
 
-- [lisp/init-ai-ide.el](../../lisp/init-ai-ide.el)
+- [lisp/tools/agent/config.el](../../lisp/tools/agent/config.el)
 
 当前 AI 相关源码完整内化在 `site-lisp/noema/upstream/`；Noema 公共入口和领域适配位于
 `site-lisp/noema/lisp/`。不要重新添加 gptel、agent-shell、acp.el、shell-maker 或 Magent
@@ -133,14 +133,14 @@ posframe 弹窗而不是 inline overlay。支持 `$…$`、`$$…$$`、`\(…\)`
 
 ### Noema LaTeX 导出（CMD+P）
 
-变量（`config-defvar`，组 `my/noema`，落盘 `etc/config-store.el`）：
+变量（`config-defvar`，组 `+noema`，落盘 `etc/config-store.el`）：
 
-- `my/noema-latex-export-engine`      — `"codex"`（先验证 Pandoc 稿，再做至多一次 gated polish；编译失败时才允许多轮 repair）或 `"mechanical"`（从不启动 agent）
-- `my/noema-latex-export-agent`       — polish/repair 后端 `"codex"`（默认）/ `"claude"` / `"opencode"`；配置里选定
-- `my/noema-latex-export-max-attempts` — 有具体编译反馈时的 repair 上限（默认 3；保真 gate 失败会立即回退，不消耗重复尝试）
-- `my/noema-latex-export-model`        — 传给当前后端的模型 id（空 = 默认）
-- `my/noema-codex-model`               — 仅 codex 的模型 id（空 = 默认）
-- CLI 路径复用：codex → `codex-cli-executable`，claude → `claude-code-ide-cli-path`，opencode → `my/noema-opencode-executable`
+- `+noema-latex-export-engine`      — `"codex"`（先验证 Pandoc 稿，再做至多一次 gated polish；编译失败时才允许多轮 repair）或 `"mechanical"`（从不启动 agent）
+- `+noema-latex-export-agent`       — polish/repair 后端 `"codex"`（默认）/ `"claude"` / `"opencode"`；配置里选定
+- `+noema-latex-export-max-attempts` — 有具体编译反馈时的 repair 上限（默认 3；保真 gate 失败会立即回退，不消耗重复尝试）
+- `+noema-latex-export-model`        — 传给当前后端的模型 id（空 = 默认）
+- `+noema-codex-model`               — 仅 codex 的模型 id（空 = 默认）
+- CLI 路径复用：codex → `codex-cli-executable`，claude → `claude-code-ide-cli-path`，opencode → `+noema-opencode-executable`
 
 模板：`templates/latex/*.tex`（`noema-article` / `noema-report` /
 `noema-assignment`），每个文件首行 `% noema-template: {json}` 可声明显示名、
@@ -152,7 +152,7 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 文件：
 
-- [lisp/init-windows.el](../../lisp/init-windows.el)
+- [lisp/ui/windows/config.el](../../lisp/ui/windows/config.el)
 
 现有快捷键：
 
@@ -169,14 +169,14 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 文件：
 
-- [lisp/init-open.el](../../lisp/init-open.el)
+- [lisp/core/aaron-open.el](../../lisp/core/aaron-open.el)
 - [site-lisp/general.el/general.el](../../site-lisp/general.el/general.el)
 
-改默认 URL / 搜索 / 文件 / PDF 打开方式时，优先改 `lisp/init-open.el`
-里的 `my/open-routes`。
+改默认 URL / 搜索 / 文件 / PDF 打开方式时，优先改 `lisp/core/aaron-open.el`
+里的 `aaron-open-routes`。
 
-`my/open-routes` 使用 `general.el` 提供的 `general-route-*` DSL helpers：
-具体策略留在 `init-open.el`，通用的 route 读取、别名归一和菜单选择逻辑在
+`aaron-open-routes` 使用 `general.el` 提供的 `general-route-*` DSL helpers：
+具体策略留在 `core/aaron-open.el`，通用的 route 读取、别名归一和菜单选择逻辑在
 `site-lisp/general.el/general.el`。
 
 常用值：
@@ -190,8 +190,8 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 文件：
 
-- [lisp/init-evil.el](../../lisp/init-evil.el)
-- [lisp/init-funcs.el](../../lisp/init-funcs.el)
+- [lisp/editor/evil/config.el](../../lisp/editor/evil/config.el)
+- [lisp/core/aaron-funcs.el](../../lisp/core/aaron-funcs.el)
 - [site-lisp/general.el/general.el](../../site-lisp/general.el/general.el)
 
 你会看到：
@@ -202,8 +202,8 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 当前按键绑定链路：
 
-- `define-leader-key` 是配置里的 leader 入口，定义在 `lisp/init-evil.el`
-- `my/evil-define-key` 是底层封装，定义在 `lisp/init-funcs.el`
+- `define-leader-key` 是配置里的 leader 入口，定义在 `lisp/editor/evil/config.el`
+- `aaron-evil-define-key` 是底层封装，定义在 `lisp/core/aaron-funcs.el`
 - `general.el` 是 vendored 的按键绑定 DSL，放在 `site-lisp/general.el/`
 
 `general.el` 的职责很窄：声明式定义快捷键。它不是 UI、补全、LSP 或包管理框架。这里引入它，主要是为了统一处理 Evil state、keymap、leader key 和批量绑定，尤其是符号 keymap，例如 `'global`。
@@ -242,12 +242,12 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 用：
 
 ```elisp
-(my/package-ensure-vc 'some-package "https://github.com/owner/repo.git")
+(aaron-package-ensure-vc 'some-package "https://github.com/owner/repo.git")
 ```
 
 文件：
 
-- [lisp/init-package-utils.el](../../lisp/init-package-utils.el)
+- [lisp/core/aaron-packages.el](../../lisp/core/aaron-packages.el)
 
 改完后执行：
 
@@ -267,13 +267,13 @@ emacs --debug-init -q -l ./bootstrap.el
 
 文件：
 
-- [lisp/init-clutch.el](../../lisp/init-clutch.el)
+- [lisp/tools/clutch/config.el](../../lisp/tools/clutch/config.el)
 - `etc/clutch-config.el`（本地私有配置，默认不进 Git）
 - [etc/clutch-config.el.example](../../etc/clutch-config.el.example)
 
 职责：
 
-- `lisp/init-clutch.el`
+- `lisp/tools/clutch/config.el`
   负责 `clutch` 的 VC 包声明、懒安装、懒加载和入口命令。
 - `etc/clutch-config.el`
   放你自己的 `clutch-connection-alist`、超时设置和连接别名。
@@ -295,7 +295,7 @@ emacs --debug-init -q -l ./bootstrap.el
 文件：
 
 - [snippets/](../../snippets)
-- [lisp/init-snippets.el](../../lisp/init-snippets.el)
+- [lisp/editor/snippets/config.el](../../lisp/editor/snippets/config.el)
 
 入口：
 
@@ -309,7 +309,7 @@ emacs --debug-init -q -l ./bootstrap.el
 - `snippets/` 也是 Noema 的共享 catalog（`site-lisp/noema/resources/snippets`
   是指向它的链接），Noema server 会扫描整个目录。研究笔记 snippet 放
   `markdown-mode/`，数学放 `tex-mode/`。
-- `;`、`:` 这类仅供 Emacs 使用的数学快捷片段由 `lisp/init-snippets.el`
+- `;`、`:` 这类仅供 Emacs 使用的数学快捷片段由 `lisp/editor/snippets/config.el`
   在 Yasnippet reload 后注入对应 mode，不放进共享目录；Markdown/JuText
   使用 Noema 的 `\(…\)` / `\[…\]` 分隔符，Noema 自己维护浏览器端的快捷片段。
   Company 在输入 `;`、`:` 后也会显示这两个候选。
@@ -328,24 +328,24 @@ emacs --debug-init -q -l ./bootstrap.el
 
 看这些文件：
 
-- [lisp/init-minibuffer.el](../../lisp/init-minibuffer.el)
-- [lisp/init-search.el](../../lisp/init-search.el)
-- [lisp/init-lsp.el](../../lisp/init-lsp.el)
-- [lisp/init-lsp-ops.el](../../lisp/init-lsp-ops.el)
-- [lisp/init-lsp-tools.el](../../lisp/init-lsp-tools.el)
+- [lisp/completion/minibuffer/config.el](../../lisp/completion/minibuffer/config.el)
+- [lisp/completion/search/config.el](../../lisp/completion/search/config.el)
+- [lisp/tools/lsp/config.el](../../lisp/tools/lsp/config.el)
+- [lisp/tools/lsp-ops/config.el](../../lisp/tools/lsp-ops/config.el)
+- [lisp/tools/lsp-hub/config.el](../../lisp/tools/lsp-hub/config.el)
 - [lsp-workflow.md](../design/lsp-workflow.md)
 
 职责划分：
 
-- `init-minibuffer.el`
+- `completion/minibuffer/config.el`
   `vertico/orderless/consult/embark`
-- `init-search.el`
+- `completion/search/config.el`
   `ivy/counsel/swiper`
-- `init-lsp.el`
+- `tools/lsp/config.el`
   `company/company-box/eglot/lsp-mode` 核心路由
-- `init-lsp-ops.el`
+- `tools/lsp-ops/config.el`
   organize imports / restart / shutdown / log / session 这类 backend-agnostic 操作
-- `init-lsp-tools.el`
+- `tools/lsp-hub/config.el`
   Hub / Doctor / dispatch / runtime 调参
 
 通用 breadcrumb 与 LSP breadcrumb 都显示在 buffer tab line 左侧；LSP ready 时只
@@ -357,8 +357,8 @@ breadcrumb 不继承 tab 的切换/关闭行为；
 
 如果你是新增某个语言服务器映射：
 
-- `lsp-mode` 例外路由，优先用 `my/register-lsp-mode-preference`
-- 自定义 Eglot server，优先用 `my/register-eglot-server-program`
+- `lsp-mode` 例外路由，优先用 `+register-lsp-mode-preference`
+- 自定义 Eglot server，优先用 `+register-eglot-server-program`
 - server 默认放在 workspace target；不要用 `file-remote-p` 注册另一套 contact
 - executable、环境和 URI 必须从 server 所属 logical root 推导，不能依赖当前
   buffer 恰好位于本地还是远端
@@ -373,7 +373,7 @@ breadcrumb 不继承 tab 的切换/关闭行为；
 
 - [lisp/remote/](../../lisp/remote)
 - [etc/remote.json](../../etc/remote.json)
-- [lisp/init-shell.el](../../lisp/init-shell.el)
+- [lisp/term/shell/config.el](../../lisp/term/shell/config.el)
 
 重点：
 
@@ -383,7 +383,7 @@ breadcrumb 不继承 tab 的切换/关闭行为；
 - `remote-make-network-process` / `remote-open-network-stream` / `remote-port-forward`
 - `remote-environment-ensure` / `remote-environment-derive`
 - `remote-client-ssh-program`（`config-board` 中选择本机 SSH；nil 使用客户端 PATH）
-- `my/portal-ssh`
+- `+portal/ssh`
 
 target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境层的完整
 设计见 [remote-framework.md](../design/remote-framework.md)。`lisp/remote/` 只放通用框架；
@@ -393,59 +393,59 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 
 文件：
 
-- [lisp/init-project.el](../../lisp/init-project.el)
-- [lisp/init-evil.el](../../lisp/init-evil.el)
+- [lisp/tools/project/config.el](../../lisp/tools/project/config.el)
+- [lisp/editor/evil/config.el](../../lisp/editor/evil/config.el)
 
 重点：
 
-- `my/project-search-paths`
+- `+project-search-paths`
 - `project-menu`
-- `my/project-open-workbench`
-- `my/project-switch`
+- `+project/open-workbench`
+- `+project/switch`
 - `show-imenu`
 
 职责：
 
-- `init-project.el`
+- `tools/project/config.el`
   项目工作流本体：Projectile / Perspective / Treemacs / transient / `show-imenu`
-- `init-evil.el`
+- `editor/evil/config.el`
   `SPC p` 这一组项目快捷键，以及 `SPC c i`
 
 如果你想改“项目切换后自动做什么”，优先看：
 
-- `my/project-switch`
-- `my/project-open-workbench`
+- `+project/switch`
+- `+project/open-workbench`
 
 如果你想改“自动发现项目从哪里找”，改：
 
-- `my/project-search-paths`
+- `+project-search-paths`
 
 ## 13. 我要调整 Dired / Dirvish
 
 文件：
 
-- [lisp/init-dired.el](../../lisp/init-dired.el)
-- [lisp/init-windows.el](../../lisp/init-windows.el)
+- [lisp/emacs/dired/config.el](../../lisp/emacs/dired/config.el)
+- [lisp/ui/windows/config.el](../../lisp/ui/windows/config.el)
 
 职责：
 
-- `init-dired.el`
+- `emacs/dired/config.el`
   基础 dired 行为
-- `init-windows.el`
+- `ui/windows/config.el`
   `dirvish` 的 UI 和键位
 
 ## 14. 我要改运行时状态目录
 
 文件：
 
-- [lisp/init-base.el](../../lisp/init-base.el)
+- [lisp/core/aaron-base.el](../../lisp/core/aaron-base.el)
 
 重点变量：
 
-- `my/state-dir`
-- `my/backup-dir`
-- `my/auto-save-dir`
-- `my/lockfile-dir`
+- `aaron-state-dir`
+- `aaron-backup-dir`
+- `aaron-auto-save-dir`
+- `aaron-lockfile-dir`
 
 现在所有这些都写到 [var/](../../var)。
 
@@ -453,7 +453,7 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 
 文件：
 
-- [lisp/init-auto-insert.el](../../lisp/init-auto-insert.el)
+- [lisp/editor/file-templates/config.el](../../lisp/editor/file-templates/config.el)
 - [templates/](../../templates)
 
 入口：
@@ -465,7 +465,7 @@ target、pipeline、TRAMP/tramp-rpc backend、逻辑 `/fs` 路径和 PATH 环境
 
 默认策略：
 
-- `auto-insert-mode` 全局开，但只对 `my/template-auto-insert-enabled-kinds` 里的 kind 生效
+- `auto-insert-mode` 全局开，但只对 `+template-auto-insert-enabled-kinds` 里的 kind 生效
 - `org` 默认不在 allowlist 里（避免干扰 `org-capture` 和 note 模板）
 - 模板存放在 `templates/<kind>/`；模板里的占位符支持 `{{date}}` / `{{title}}` / `{{file}}` / `{{author}}` / `{{cursor}}` 等；`{{file}}` 写入文件在其所在机器上的路径（远端文件不会写出 `/fs:` 名字）
 
@@ -482,26 +482,26 @@ Roam 与普通 Markdown 的开关。
 项目内按目录开关（`.dir-locals.el`）：
 
 ```elisp
-((nil . ((my/template-auto-insert-enabled . t)
-         (my/template-auto-insert-enabled-kinds . (c cc sh python js ts tex))
-         (my/template-current-override . ((python . "module.py")
+((nil . ((+template-auto-insert-enabled . t)
+         (+template-auto-insert-enabled-kinds . (c cc sh python js ts tex))
+         (+template-current-override . ((python . "module.py")
                                           (tex . "ctex-article.tex"))))))
 ```
 
 说明：
 
-- `my/template-current-override` 只接受”文件名”（不能带路径分隔符），指向 `templates/<kind>/` 下的模板文件
+- `+template-current-override` 只接受”文件名”（不能带路径分隔符），指向 `templates/<kind>/` 下的模板文件
 - 新建文件模板只保留这一套内置 `auto-insert`（已移除 Doom 那套 Yasnippet file-templates 的遗留实现，避免重复/分叉维护）
 
 ## 16. 我要配置 Jupyter
 
 ### 远程 Jupyter server（HTTP/HTTPS）
 
-服务器清单是注册过的 config 项 `my/noema-jupyter-servers`，值放在
+服务器清单是注册过的 config 项 `+noema-jupyter-servers`，值放在
 `etc/config-store.el`（或 config board 里改），**不要用 `setq`**：
 
 ```elisp
-(my/noema-jupyter-servers
+(+noema-jupyter-servers
  ((:id "hpc" :name "Cluster Lab"
    :url "http://127.0.0.1:8888/"   ; 也可以整条粘贴 jupyter 打印的 ?token=... URL
    :kind server                    ; server（默认）或 gateway
@@ -528,7 +528,7 @@ loopback，本机同端口很可能是另一个进程。
 按项目设置，写在项目的 `.dir-locals.el` 里：
 
 ```elisp
-((nil . ((eval . (setq-local my/project-local-settings
+((nil . ((eval . (setq-local +project-local-settings
                              '(:noema-jupyter (:language python
                                                    :kernel sagemath
                                                    :session research))))))))
@@ -554,7 +554,7 @@ kernelspec 本身用 `M-x jupyter-board`（Hyper `j`）管理。
 
 文件：
 
-- [lisp/init-dir-locals.el](../../lisp/init-dir-locals.el)
+- [lisp/emacs/dir-locals/config.el](../../lisp/emacs/dir-locals/config.el)
 - [templates/emacs/](../../templates/emacs)
 
 入口（`SPC p e`）：
@@ -590,8 +590,8 @@ kernelspec 本身用 `M-x jupyter-board`（Hyper `j`）管理。
 **合并策略**：按 mode key（`nil` / `python-ts-mode` 等）合并，每个 mode 内按变量名合并，模板值覆盖旧值，新 mode 追加到末尾。
 
 **env 刷新**：`SPC p e r` 在 dir-locals 重载后会调用
-`my/direnv-update-environment-maybe`。仓库内置的
-[lisp/direnv.el](../../lisp/direnv.el) 把 direnv 注册为 Remote 框架的 workspace
+`+direnv-update-environment-maybe`。仓库内置的
+[lisp/tools/direnv/direnv.el](../../lisp/tools/direnv/direnv.el) 把 direnv 注册为 Remote 框架的 workspace
 environment maintainer；本地与远端都生成隔离的 `target@workspace` 环境实例，
 远端执行优先 tramp-rpc、回退 TRAMP。PATH、编译器路径等变量只投影到所属 buffer
 和它启动的进程，不需要重启，也不会污染别的 target。
@@ -602,14 +602,14 @@ environment maintainer；本地与远端都生成隔离的 `target@workspace` �
 
 ## 我在 Neomacs 上跑，快捷键 / 鼠标 / 打开文件不对
 
-不要去改 `init-macos.el` 的绑定，也不要在各模块里加构建判断。所有 GNU Emacs 与
-Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
+不要去改 `os/macos/config.el` 的绑定，也不要在各模块里加构建判断。所有 GNU Emacs 与
+Neomacs 的差异都收在 `lisp/os/neomacs/config.el` 一个边界里：
 
 - 修饰键错位（`H-` 层失效、`M-c` / `M-v` 剪贴板失效、`H-C-M-` 鼠标层失效）：
-  `my/neomacs-modifier-remap`。
+  `+neomacs-modifier-remap`。
 - 打开文件报 `number-or-marker-p nil`：fringe frame 参数修复，见同一个模块。
-- 启动后窗口没有反应：`early-init.el` 的预隐藏开关和 `my/neomacs-reveal-frames`。
-- 打开 `.el` 文件时机器被压满：`my/elisp-elsa-worker-limit`。
+- 启动后窗口没有反应：`early-init.el` 的预隐藏开关和 `+neomacs/reveal-frames`。
+- 打开 `.el` 文件时机器被压满：`+elisp-elsa-worker-limit`。
 
 两个可调项都在 `config` registry 里，用 `M-x config-board` 改。完整背景、原因和
 仍然存在的上游差异见 [neomacs-compat.md](../design/neomacs-compat.md)。
@@ -620,9 +620,9 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 
 文件：
 
-- [lisp/init-activity.el](../../lisp/init-activity.el) —— 指示器、分类、注册表、板面数据与动作
+- [lisp/ui/activity/config.el](../../lisp/ui/activity/config.el) —— 指示器、分类、注册表、板面数据与动作
 - [site-lisp/aaron-ui/aaron-ui-activity.el](../../site-lisp/aaron-ui/aaron-ui-activity.el) —— Activity 的 ETAF 整页布局；继续取 Aaron UI 色板和原有图标
-- [lisp/roam/init-activity-noema.el](../../lisp/roam/init-activity-noema.el) —— Noema Core task / agent 工作快照与原生取消
+- [lisp/noema/activity/config.el](../../lisp/noema/activity/config.el) —— Noema Core task / agent 工作快照与原生取消
 - [assets/activity/](../../assets/activity) —— 皮卡丘的 XPM 帧和画它的脚本
 
 出现机理（`(process-list)` 做枚举根、只数 `task` 一类）见
@@ -632,26 +632,26 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 | --- | --- |
 | 改皮卡丘的像素 | 直接编辑 `assets/activity/*.xpm`（纯文本，一个字符一个像素，颜色表在文件开头），然后 `M-x activity-reload-sprites` |
 | 重画 / 加帧 | 改 `assets/activity/pikachu.py` 里的字符网格，`python3 pikachu.py -p /tmp/p.png` 会同时写回 XPM 并导出放大预览，**改像素画一定要看预览** |
-| 换成别的动画 | `M-x config-set RET my/activity-indicator-style`；值是 `my/activity-frame-sets` 的 key，找不到就回落到 `spinner` 包的 `spinner-types` |
-| 改跑动快慢 | `M-x config-set RET my/activity-indicator-fps` |
-| 改多久发现一个新任务 | `M-x config-set RET my/activity-poll-interval`（秒；这不是帧率） |
-| 给别的慢操作也加上 | 用 `my/with-activity "标签"` 包住那段代码 |
-| 让某种新后台工作被**计数** | 在 `my/activity--owned-task-processes` 里加一行它的 owner 注册表。只想出现在板面上则**不需要改任何代码** |
-| 接入没有 Emacs 子进程的异步工作 | `my/activity-provider-functions` 返回缓存的 `my/activity` 列表,`my/activity-poll-functions` 异步更新快照;Noema 适配器是现成例子 |
+| 换成别的动画 | `M-x config-set RET +activity-indicator-style`；值是 `+activity-frame-sets` 的 key，找不到就回落到 `spinner` 包的 `spinner-types` |
+| 改跑动快慢 | `M-x config-set RET +activity-indicator-fps` |
+| 改多久发现一个新任务 | `M-x config-set RET +activity-poll-interval`（秒；这不是帧率） |
+| 给别的慢操作也加上 | 用 `+with-activity "标签"` 包住那段代码 |
+| 让某种新后台工作被**计数** | 在 `+activity--owned-task-processes` 里加一行它的 owner 注册表。只想出现在板面上则**不需要改任何代码** |
+| 接入没有 Emacs 子进程的异步工作 | `+activity-provider-functions` 返回缓存的 `+activity` 列表,`+activity-poll-functions` 异步更新快照;Noema 适配器是现成例子 |
 
-| 改自动刷新快慢 | `M-x config-set RET my/activity-board-refresh-interval`（板面里 `a` 开关，默认关） |
-| 给板面加一个跳转按钮 | 往 `my/activity-board-native-links`（原生）或 `my/activity-board-config-links`（本配置）加一条 plist；命令不存在时按钮自动不显示 |
+| 改自动刷新快慢 | `M-x config-set RET +activity-board-refresh-interval`（板面里 `a` 开关，默认关） |
+| 给板面加一个跳转按钮 | 往 `+activity-board-native-links`（原生）或 `+activity-board-config-links`（本配置）加一条 plist；命令不存在时按钮自动不显示 |
 
 两条不要踩的线：
 
-- **不要在 `my/activity-mode-line-text` 里做任何扫描。** 它在每个窗口每次 redisplay
-  都会跑，只能读 `my/activity--count` 和 `my/activity--frame-index` 两个缓存值。
+- **不要在 `+activity-mode-line-text` 里做任何扫描。** 它在每个窗口每次 redisplay
+  都会跑，只能读 `+activity--count` 和 `+activity--frame-index` 两个缓存值。
 - **不要靠进程名或命令行判断是不是任务。** 任务身份一律由已有的 owner 注册表认领，
   否则每加一个工具就要多一条正则。
 - **不要把 `process-attributes` 放进渲染路径。** 它是每进程一次系统调用。现在只有两处
   调用它：`d` 的详情页，和某进程首次出现时取真实启动时间（之后缓存在弱键表里）。
 - **Activity 的 ETAF 页继续用 `j/n` 下移、`k/p` 上移、`RET` 打开。**
-  这些键在 `my/activity-board-keys-mode-map` 中路由到 ETAF 焦点；停止类操作
+  这些键在 `+activity-board-keys-mode-map` 中路由到 ETAF 焦点；停止类操作
   仍放在 `x`/`i`/`X`，不要占用导航键。其他 Aaron UI board 的映射不变。
 - **不要在板面里重写原生管理器。** `list-processes` / `list-timers` / `list-threads` /
   `proced` / `memory-report` 各自更称职，板面只负责分组、动作和跳转。
@@ -660,7 +660,7 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 - **provider 只读缓存,轮询走异步 API。** Noema 的 agent 状态由 ACP boundary 提供,
   Core task 由已有 `tasks:list` / `tasks:cancel` 接口提供,不要猜子进程命令行。
 
-终端下没有图形界面，指示器自动降级为颜文字；`my/activity-frame-sets` 里一个帧集的
+终端下没有图形界面，指示器自动降级为颜文字；`+activity-frame-sets` 里一个帧集的
 `:frames` 字符串必须等宽，否则 mode line 每帧都会抖。
 
 改动后运行 `make activity-test` 验证任务生命周期、Noema 快照、动画和 ETAF 键盘操作;
@@ -668,9 +668,9 @@ Neomacs 的差异都收在 `lisp/init-neomacs.el` 一个边界里：
 
 ## 改启动 Dashboard 的内容或顺序
 
-启动画面的条目顺序在 `lisp/init-ui.el` 的 `dashboard-startupify-list` 里；Agenda 卡片
-（`my/dashboard-insert-agenda`）排在最后，Roam 热力图（`my/dashboard-insert-roam-heatmap`）
-在 items 之前。每个条目都是普通的 insert 函数，居中交给 `my/dashboard--center-lines`。
+启动画面的条目顺序在 `lisp/ui/theme/config.el` 的 `dashboard-startupify-list` 里；Agenda 卡片
+（`+dashboard-insert-agenda`）排在最后，Roam 热力图（`+dashboard-insert-roam-heatmap`）
+在 items 之前。每个条目都是普通的 insert 函数，居中交给 `+dashboard--center-lines`。
 
 Agenda 卡片在插入阶段只读本机最近一次完整快照；Dashboard 可见时再异步请求 Noema
 host。请求共用一次 15 秒超时，失败显示可点击的 `[retry]`，隐藏的 Dashboard 只标记
@@ -683,9 +683,9 @@ host。请求共用一次 15 秒超时，失败显示可点击的 `[retry]`，�
 ```elisp
 (require 'aaron-ui-board)
 
-(define-derived-mode my/foo-mode aaron-ui-board-mode "Foo")
+(define-derived-mode +foo-mode aaron-ui-board-mode "Foo")
 
-(defun my/foo-refresh ()
+(defun +foo-refresh ()
   (interactive)
   (let ((inhibit-read-only t))
     (aaron-ui-board-render
@@ -695,13 +695,13 @@ host。请求共用一次 15 秒超时，失败显示可点击的 `[retry]`，�
        (aaron-ui-board-insert-field "Key" "Value")
        (aaron-ui-board-insert-key-hints "Keys: g refresh  q quit")))))
 
-(defun my/foo ()
+(defun +foo ()
   (interactive)
   (with-current-buffer (get-buffer-create "*Foo*")
-    (my/foo-mode)
+    (+foo-mode)
     (aaron-ui-board-set-header "Foo" 'gear)
-    (setq-local aaron-ui-board-refresh-function #'my/foo-refresh)
-    (my/foo-refresh))
+    (setq-local aaron-ui-board-refresh-function #'+foo-refresh)
+    (+foo-refresh))
   (pop-to-buffer "*Foo*"))
 ```
 

@@ -14,7 +14,7 @@ SSH config 里没有、也不值得写进去的机器：新开的 VPS、同学�
 
 | 入口 | 作用 |
 |---|---|
-| 任何选 target 的提示里选 `临时机器`（`SPC o r`、`M-x my/remote-connectboard`、`SPC o f` 等） | 输入一台机器，记住并直接用它继续 |
+| 任何选 target 的提示里选 `临时机器`（`SPC o r`、`M-x +connectboard/remote-connectboard`、`SPC o f` 等） | 输入一台机器，记住并直接用它继续 |
 | Remote 面板 `m`，或 `M-x remote-machines-add` | 记住一台机器 |
 | Remote 面板 `M`，`SPC o M`，或 `M-x remote-machines` | 管理列表 |
 
@@ -217,9 +217,9 @@ buffer 里（`*deleting` 开头的是要删除的），按 `C-c C-c` 才执行�
 | `lisp/remote/remote-machines.el` | 临时机器的存储、管理列表，以及作为 target 来源的注册 |
 | `lisp/remote/remote-transfer.el` | rsync 任务、目标端文件操作、进度解析、共同的任务队列 |
 | `lisp/remote/remote-files.el` | Dired 里的传输菜单和弹出式选择 |
-| `lisp/init-activity.el` | 把传输任务认领为 task（标签、取消、查看输出） |
-| `lisp/init-windows.el` | Dirvish 状态栏段 `remote-files` |
-| `lisp/init-dirvish-keys.el` | Dirvish 的 `M` 键，以及 `y` / `p p` 按路径可见性选择原生操作或传输队列 |
+| `lisp/ui/activity/config.el` | 把传输任务认领为 task（标签、取消、查看输出） |
+| `lisp/ui/windows/config.el` | Dirvish 状态栏段 `remote-files` |
+| `lisp/emacs/dirvish/config.el` | Dirvish 的 `M` 键，以及 `y` / `p p` 按路径可见性选择原生操作或传输队列 |
 
 框架为此增加的两个契约见 [remote-framework.md](remote-framework.md) 的
 “target 来源”和“客户端批量工具”两节。测试：`make remote-transfer-test`；真机

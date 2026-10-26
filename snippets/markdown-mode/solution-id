@@ -3,7 +3,7 @@
 # key: solutionn
 # group: Noema blocks
 # --
-#+begin solution ${1:title} {#`(my/noema-new-id "block")`}
+#+begin solution ${1:title} {#`(noema-new-id "block")`}
 ${2:Solution.}
 #+end solution
 $0

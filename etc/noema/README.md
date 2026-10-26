@@ -2,7 +2,7 @@
 
 主配置（启停、patch、Skill 包、MCP）是本目录的 `capabilities.json`。**全局 Skill 库不在这里**：
 自 2026-09-21 起 `NOEMA_GLOBAL_SKILLS` 指向 vault 的
-`~/Documents/Noema/public/README/Skills/skills/`（`my/noema-skills-directory`），和笔记同一个
+`~/Documents/Noema/public/README/Skills/skills/`（`+noema-skills-directory`），和笔记同一个
 git 版本化；上游 lock `skills.lock.json` 与 helper checkout `vendor/` 也在那个 `Skills/` 目录下。
 本目录原来的 `skills/`、`vendor/`、`skills.lock.json` 已于 2026-09-29 迁过去——此前它们对 host
 不可见。外部客户端
@@ -191,6 +191,6 @@ Skill patch 仅在解析时按注册路径读取，不扫描补丁树；输入/�
 ```
 
 本次增加了独立的全局 API，旧 Node host 不会自动加载新代码。待没有正在运行
-的 Noema 任务时，执行 `M-x my/noema-stop`，再打开管理器，host 会自动重启。
+的 Noema 任务时，执行 `M-x +noema/stop`，再打开管理器，host 会自动重启。
 停止 host 会断开 Noema 页面和进行中的请求，不要在工作运行中执行。
 全局 API 使用独立 channel，旧 host 会报不支持，不会误写默认项目配置。

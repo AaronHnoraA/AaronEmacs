@@ -1,13 +1,13 @@
 ;;; init-writing-tests.el --- prose and LaTeX integration tests -*- lexical-binding: t; -*-
 
 (require 'ert)
-(require 'init-languagetool)
-(require 'init-latex)
+(require 'checkers/grammar/config)
+(require 'lang/latex/config)
 
-(ert-deftest my/noema-jutext-registers-ratex-preview ()
+(ert-deftest +noema-jutext-registers-ratex-preview ()
   (should (memq #'ratex-turn-on noema-research-mode-hook)))
 
-(defun my/test-languagetool-response ()
+(defun +test-languagetool-response ()
   "Return a small LanguageTool response used by diagnostics tests."
   '((matches . [((message . "Possible spelling mistake")
                  (shortMessage . "Spelling")
@@ -18,16 +18,16 @@
                           (issueType . "misspelling")
                           (category . ((id . "TYPOS"))))))])))
 
-(ert-deftest my/languagetool-maps-utf16-offsets ()
-  (should (= (my/languagetool--utf16-position "a😀bc" 3 10) 12))
-  (should (= (my/languagetool--utf16-position "a😀bc" 4 10) 13)))
+(ert-deftest +languagetool-maps-utf16-offsets ()
+  (should (= (+languagetool--utf16-position "a😀bc" 3 10) 12))
+  (should (= (+languagetool--utf16-position "a😀bc" 4 10) 13)))
 
-(ert-deftest my/languagetool-builds-actionable-flymake-diagnostics ()
+(ert-deftest +languagetool-builds-actionable-flymake-diagnostics ()
   (with-temp-buffer
     (insert "Ths sentence.")
     (let* ((diagnostics
-            (my/languagetool--flymake-diagnostics
-             (my/test-languagetool-response) (current-buffer)
+            (+languagetool--flymake-diagnostics
+             (+test-languagetool-response) (current-buffer)
              (point-min) (buffer-string)))
            (diagnostic (car diagnostics))
            (data (flymake-diagnostic-data diagnostic)))
@@ -35,104 +35,104 @@
       (should (eq (plist-get data :source) 'languagetool))
       (should (equal (plist-get data :suggestions) '("This")))
       (should (equal (plist-get data :original) "Ths "))
-      (my/languagetool--replace diagnostic "This ")
+      (+languagetool--replace diagnostic "This ")
       (should (equal (buffer-string) "This sentence.")))))
 
-(ert-deftest my/languagetool-skips-markup-faced-matches ()
+(ert-deftest +languagetool-skips-markup-faced-matches ()
   (with-temp-buffer
     (insert (propertize "Ths " 'face 'markdown-code-face) "sentence.")
     (should-not
-     (my/languagetool--flymake-diagnostics
-      (my/test-languagetool-response) (current-buffer)
+     (+languagetool--flymake-diagnostics
+      (+test-languagetool-response) (current-buffer)
       (point-min) (buffer-string)))))
 
-(ert-deftest my/languagetool-diagnostics-use-only-a-quiet-context-menu ()
+(ert-deftest +languagetool-diagnostics-use-only-a-quiet-context-menu ()
   (with-temp-buffer
     (insert "Ths sentence.")
     (let* ((diagnostic
-            (car (my/languagetool--flymake-diagnostics
-                  (my/test-languagetool-response) (current-buffer)
+            (car (+languagetool--flymake-diagnostics
+                  (+test-languagetool-response) (current-buffer)
                   (point-min) (buffer-string))))
            (properties (flymake--diag-overlay-properties diagnostic)))
-      (should-not (lookup-key my/languagetool-diagnostic-map [mouse-1]))
-      (should (eq (lookup-key my/languagetool-diagnostic-map [mouse-3])
-                  #'my/languagetool-menu-mouse))
+      (should-not (lookup-key +languagetool-diagnostic-map [mouse-1]))
+      (should (eq (lookup-key +languagetool-diagnostic-map [mouse-3])
+                  #'+languagetool/menu-mouse))
       (should-not (assq 'mouse-face properties))
       (should (equal (alist-get 'help-echo properties)
                      "Spelling: Possible spelling mistake → This"))
       (should (eq (flymake-diagnostic-type diagnostic)
-                  'my/languagetool-spelling)))))
+                  '+languagetool-spelling)))))
 
-(ert-deftest my/languagetool-classifies-like-noema ()
-  (should (eq (my/languagetool--category
+(ert-deftest +languagetool-classifies-like-noema ()
+  (should (eq (+languagetool--category
                '((rule . ((issueType . "misspelling"))))) 'spelling))
-  (should (eq (my/languagetool--category
+  (should (eq (+languagetool--category
                '((rule . ((category . ((id . "REDUNDANCY"))))))) 'style))
-  (should (eq (my/languagetool--category
+  (should (eq (+languagetool--category
                '((rule . ((category . ((id . "PUNCTUATION"))))))) 'punctuation))
-  (should (eq (my/languagetool--category
+  (should (eq (+languagetool--category
                '((rule . ((category . ((id . "CONFUSED_WORDS"))))))) 'word))
-  (should (eq (my/languagetool--category
+  (should (eq (+languagetool--category
                '((rule . ((issueType . "whitespace"))))) 'typography))
-  (should (eq (my/languagetool--category
+  (should (eq (+languagetool--category
                '((rule . ((issueType . "grammar"))))) 'grammar))
-  (should (eq (get 'my/languagetool-style 'flymake-category) 'flymake-note)))
+  (should (eq (get '+languagetool-style 'flymake-category) 'flymake-note)))
 
-(ert-deftest my/languagetool-caches-paragraphs ()
+(ert-deftest +languagetool-caches-paragraphs ()
   "A second check sends only the paragraph that changed."
-  (let ((my/languagetool--paragraph-cache (make-hash-table :test #'equal))
-        (my/languagetool-words-file "/nonexistent/words")
-        (my/languagetool-builtin-words-file "/nonexistent/builtin")
-        (my/languagetool-disabled-rules-file "/nonexistent/rules"))
+  (let ((+languagetool--paragraph-cache (make-hash-table :test #'equal))
+        (+languagetool-words-file "/nonexistent/words")
+        (+languagetool-builtin-words-file "/nonexistent/builtin")
+        (+languagetool-disabled-rules-file "/nonexistent/rules"))
     (with-temp-buffer
       (insert "Ths one.\n\nSecond 😀 paragraph.")
-      (let ((plan (my/languagetool--plan (point-min) (point-max))))
+      (let ((plan (+languagetool--plan (point-min) (point-max))))
         (should (equal (plist-get plan :text) (buffer-string)))
-        (my/languagetool--remember-plan plan (my/test-languagetool-response))
-        (should (= (length (my/languagetool--plan-diagnostics
+        (+languagetool--remember-plan plan (+test-languagetool-response))
+        (should (= (length (+languagetool--plan-diagnostics
                             plan (current-buffer)))
                    1)))
       (goto-char (point-max))
       (insert " More.")
-      (let ((plan (my/languagetool--plan (point-min) (point-max))))
+      (let ((plan (+languagetool--plan (point-min) (point-max))))
         (should (equal (plist-get plan :text) "Second 😀 paragraph. More."))
-        (my/languagetool--remember-plan plan '((matches . [])))
-        (let ((diagnostic (car (my/languagetool--plan-diagnostics
+        (+languagetool--remember-plan plan '((matches . [])))
+        (let ((diagnostic (car (+languagetool--plan-diagnostics
                                 plan (current-buffer)))))
           (should (= (flymake-diagnostic-beg diagnostic) 1)))))))
 
-(ert-deftest my/languagetool-ignore-survives-other-edits ()
-  (let ((my/languagetool-words-file "/nonexistent/words")
-        (my/languagetool-builtin-words-file "/nonexistent/builtin")
-        (my/languagetool-disabled-rules-file "/nonexistent/rules"))
+(ert-deftest +languagetool-ignore-survives-other-edits ()
+  (let ((+languagetool-words-file "/nonexistent/words")
+        (+languagetool-builtin-words-file "/nonexistent/builtin")
+        (+languagetool-disabled-rules-file "/nonexistent/rules"))
     (with-temp-buffer
       (insert "Ths sentence.")
-      (let ((diagnostic (car (my/languagetool--flymake-diagnostics
-                              (my/test-languagetool-response) (current-buffer)
+      (let ((diagnostic (car (+languagetool--flymake-diagnostics
+                              (+test-languagetool-response) (current-buffer)
                               (point-min) (buffer-string)))))
         (cl-letf (((symbol-function 'flymake-start) #'ignore))
-          (my/languagetool--ignore-once diagnostic)))
+          (+languagetool--ignore-once diagnostic)))
       (goto-char (point-max))
       (insert "\n\nLater text.")
-      (my/languagetool--flymake-after-change)
-      (should-not (my/languagetool--flymake-diagnostics
-                   (my/test-languagetool-response) (current-buffer)
+      (+languagetool--flymake-after-change)
+      (should-not (+languagetool--flymake-diagnostics
+                   (+test-languagetool-response) (current-buffer)
                    (point-min) "Ths sentence.")))))
 
-(ert-deftest my/languagetool-text-context-menu-has-corrections ()
+(ert-deftest +languagetool-text-context-menu-has-corrections ()
   "Text buffers expose a right-click menu and LanguageTool actions."
   (with-temp-buffer
     (insert "Ths sentence.")
     (let* ((diagnostic
-            (car (my/languagetool--flymake-diagnostics
-                  (my/test-languagetool-response) (current-buffer)
+            (car (+languagetool--flymake-diagnostics
+                  (+test-languagetool-response) (current-buffer)
                   (point-min) (buffer-string))))
            (flymake-mode t)
            (menu (make-sparse-keymap)))
-      (should (eq (lookup-key text-mode-map [mouse-3]) #'my/mouse-text-menu))
-      (cl-letf (((symbol-function 'my/languagetool--diagnostic-at-point)
+      (should (eq (lookup-key text-mode-map [mouse-3]) #'+mouse/text-menu))
+      (cl-letf (((symbol-function '+languagetool--diagnostic-at-point)
                  (lambda () diagnostic)))
-        (my/languagetool--context-menu-function menu nil))
+        (+languagetool--context-menu-function menu nil))
       (let ((language-menu (cdr (lookup-key menu [languagetool]))))
         (should (lookup-key language-menu [check]))
         (let ((replacement (lookup-key language-menu [action-0])))
@@ -140,21 +140,21 @@
           (funcall replacement)
           (should (equal (buffer-string) "Thissentence.")))))))
 
-(ert-deftest my/latex-buffer-has-writing-context-menu ()
+(ert-deftest +latex-buffer-has-writing-context-menu ()
   "A cold AUCTeX buffer starts with LanguageTool and a text right-click menu."
   (with-temp-buffer
     (LaTeX-mode)
-    (should (eq (key-binding [mouse-3]) #'my/mouse-text-menu))
-    (should my/languagetool-auto-mode)
-    (should (memq #'my/languagetool--context-menu-function
+    (should (eq (key-binding [mouse-3]) #'+mouse/text-menu))
+    (should +languagetool-auto-mode)
+    (should (memq #'+languagetool--context-menu-function
                   context-menu-functions))
-    (my/yas--enable-now)
+    (+yas--enable-now)
     (should (memq 'tex-mode yas--extra-modes))))
 
-(ert-deftest my/languagetool-report-suppresses-only-its-eol-summary ()
+(ert-deftest +languagetool-report-suppresses-only-its-eol-summary ()
   (let ((flymake-show-diagnostics-at-end-of-line 'short)
         observed)
-    (my/languagetool--report
+    (+languagetool--report
      (lambda (&rest args)
        (setq observed
              (list flymake-show-diagnostics-at-end-of-line args)))
@@ -164,35 +164,35 @@
                    '((diagnostic) :region (1 . 2))))
     (should (eq flymake-show-diagnostics-at-end-of-line 'short))))
 
-(ert-deftest my/latex-server-selection-prefers-texlab ()
-  (cl-letf (((symbol-function 'my/language-server-executable-find)
+(ert-deftest +latex-server-selection-prefers-texlab ()
+  (cl-letf (((symbol-function '+language-server-executable-find)
              (lambda (program)
                (pcase program
                  ("texlab" "/target/bin/texlab")
                  ("digestif" "/target/bin/digestif")))))
-    (should (equal (my/latex-language-server-selection)
+    (should (equal (+latex-language-server-selection)
                    '(texlab . "/target/bin/texlab")))
-    (should (equal (my/latex-language-server-command)
+    (should (equal (+latex-language-server-command)
                    '("/target/bin/texlab")))))
 
-(ert-deftest my/latex-server-selection-falls-back-to-digestif ()
-  (cl-letf (((symbol-function 'my/language-server-executable-find)
+(ert-deftest +latex-server-selection-falls-back-to-digestif ()
+  (cl-letf (((symbol-function '+language-server-executable-find)
              (lambda (program)
                (and (string= program "digestif") "/target/bin/digestif"))))
-    (should (equal (my/latex-language-server-selection)
+    (should (equal (+latex-language-server-selection)
                    '(digestif . "/target/bin/digestif")))
     (should-not
-     (my/latex-language-server-workspace-configuration
+     (+latex-language-server-workspace-configuration
       '(digestif . "/target/bin/digestif")))))
 
-(ert-deftest my/latex-texlab-settings-use-supported-placeholders ()
-  (cl-letf (((symbol-function 'my/language-server-executable-find)
+(ert-deftest +latex-texlab-settings-use-supported-placeholders ()
+  (cl-letf (((symbol-function '+language-server-executable-find)
              (lambda (program)
                (pcase program
                  ("latexmk" "/target/bin/latexmk")
                  ("chktex" "/target/bin/chktex")))))
     (let* ((configuration
-            (my/latex-language-server-workspace-configuration
+            (+latex-language-server-workspace-configuration
              '(texlab . "/target/bin/texlab")))
            (texlab (plist-get configuration :texlab))
            (build (plist-get texlab :build)))
@@ -216,36 +216,36 @@
 ;; Elisp parser to the same contract instead of letting it drift into a third
 ;; implementation that merely looks similar.
 
-(defconst my/test-katex-macro-fixtures-file
+(defconst +test-katex-macro-fixtures-file
   (expand-file-name "site-lisp/noema/shared/katex-macro-fixtures.json"
                     user-emacs-directory))
 
-(defun my/test-katex-macro-fixtures ()
+(defun +test-katex-macro-fixtures ()
   "Return the shared macro parser fixtures, or nil when Noema is absent."
-  (when (file-readable-p my/test-katex-macro-fixtures-file)
+  (when (file-readable-p +test-katex-macro-fixtures-file)
     (with-temp-buffer
-      (insert-file-contents my/test-katex-macro-fixtures-file)
+      (insert-file-contents +test-katex-macro-fixtures-file)
       (json-parse-buffer :object-type 'alist :array-type 'list
                          :false-object nil :null-object nil))))
 
-(ert-deftest my/latex-macro-parser-matches-shared-fixtures ()
+(ert-deftest +latex-macro-parser-matches-shared-fixtures ()
   "The Elisp macro parser must agree with the JS and Go implementations."
-  (let ((fixtures (my/test-katex-macro-fixtures)))
+  (let ((fixtures (+test-katex-macro-fixtures)))
     (skip-unless fixtures)
     (dolist (case fixtures)
       (let* ((text (mapconcat (lambda (file) (alist-get 'text file))
                               (alist-get 'files case)
                               "\n"))
              (expected (alist-get 'macros case))
-             (parsed (my/latex-parse-macro-definitions text)))
+             (parsed (+latex-parse-macro-definitions text)))
         (should (= (length parsed) (length expected)))
         (dolist (pair expected)
           (let ((entry (assoc (format "%s" (car pair)) parsed)))
             (should entry)
             (should (equal (nth 2 entry) (cdr pair)))))))))
 
-(ert-deftest my/latex-macro-parser-handles-every-supported-form ()
-  (let ((parsed (my/latex-parse-macro-definitions
+(ert-deftest +latex-macro-parser-handles-every-supported-form ()
+  (let ((parsed (+latex-parse-macro-definitions
                  (concat "% comment with \\newcommand{\\ignored}{x}\n"
                          "\\newcommand{\\R}{\\mathbb{R}}\n"
                          "\\newcommand{\\abs}[1]{\\left|#1\\right|}\n"
@@ -260,31 +260,31 @@
     (should (equal (nth 1 (assoc "\\pair" parsed)) 2))
     (should-not (assoc "\\ignored" parsed))))
 
-(ert-deftest my/latex-macro-preamble-emits-def-forms ()
+(ert-deftest +latex-macro-preamble-emits-def-forms ()
   "Definitions must be emitted as `\\def': several shared names collide with
 engine builtins, and `\\newcommand' errors on redefinition, which would fail
 the whole preamble and with it every preview."
-  (should (equal (my/latex-compile-macro-preamble
+  (should (equal (+latex-compile-macro-preamble
                   '(("\\R" 0 "\\mathbb{R}") ("\\abs" 1 "\\left|#1\\right|")))
                  "\\def\\R{\\mathbb{R}}\\def\\abs#1{\\left|#1\\right|}")))
 
-(ert-deftest my/latex-shared-macro-directory-resolves ()
+(ert-deftest +latex-shared-macro-directory-resolves ()
   "The shared macro directory must not be a dangling link."
-  (let ((directory (or (and (boundp 'my/noema--katex-macros-dir)
-                            my/noema--katex-macros-dir)
-                       my/latex-katex-macros-directory)))
+  (let ((directory (or (and (boundp '+noema--katex-macros-dir)
+                            +noema--katex-macros-dir)
+                       +latex-katex-macros-directory)))
     (should (file-directory-p directory))
-    (should (my/latex--macro-files directory))))
+    (should (+latex--macro-files directory))))
 
-(ert-deftest my/latex-tex-compat-rewrite-uses-shared-rules ()
-  (skip-unless (file-readable-p my/latex-tex-compat-rules-file))
-  (should (equal (my/latex-tex-compat-rewrite
+(ert-deftest +latex-tex-compat-rewrite-uses-shared-rules ()
+  (skip-unless (file-readable-p +latex-tex-compat-rules-file))
+  (should (equal (+latex-tex-compat-rewrite
                   "\\begin{multline} a \\\\ b \\end{multline}")
                  "\\begin{gathered} a \\\\ b \\end{gathered}"))
-  (should (equal (my/latex-tex-compat-rewrite "\\begin{align} a \\end{align}")
+  (should (equal (+latex-tex-compat-rewrite "\\begin{align} a \\end{align}")
                  "\\begin{align} a \\end{align}")))
 
-(ert-deftest my/latex-noema-asset-links-resolve ()
+(ert-deftest +latex-noema-asset-links-resolve ()
   "Every Noema asset link must resolve; a dangling one silently disables
 global macros and export templates on the Emacs side."
   (dolist (relative '("etc/katex-macros"

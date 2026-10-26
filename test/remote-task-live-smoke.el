@@ -10,7 +10,7 @@
 
 (require 'remote-config)
 (require 'remote-framework)
-(require 'init-output)
+(require 'tools/output/config)
 
 (defun remote-task-live-smoke--wait (task timeout)
   "Wait up to TIMEOUT seconds for TASK to stop running."
@@ -107,7 +107,7 @@
               (kill-buffer visited)))
           (let* ((default-directory logical)
                  (output
-                  (my/output-compile
+                  (+output-compile
                    "printf 'workflow=%s\\n' \"$REMOTE_TASK_TOKEN\""
                    "test" '(("REMOTE_TASK_TOKEN" . "workflow")))))
             (setq workflow (buffer-local-value 'remote-task-instance output))
@@ -123,7 +123,7 @@
               (error "Project output did not use the target task route"))
             (setq workflow-rerun (with-current-buffer output
                                    (buffer-local-value
-                                    'remote-task-instance (my/output-rerun))))
+                                    'remote-task-instance (+output/rerun))))
             (unless (and (remote-task-live-smoke--wait workflow-rerun 25)
                          (eq (remote-task-state workflow-rerun) 'succeeded)
                          (equal (remote-task-environment workflow-rerun)

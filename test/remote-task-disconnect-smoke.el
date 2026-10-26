@@ -10,7 +10,7 @@
 
 (require 'remote-config)
 (require 'remote-framework)
-(require 'init-output)
+(require 'tools/output/config)
 (require 'tramp)
 (require 'tramp-rpc)
 
@@ -44,7 +44,7 @@
             (setq task
                   (buffer-local-value
                    'remote-task-instance
-                   (my/output-compile
+                   (+output-compile
                     "printf 'task_host=%s\\n' \"$(hostname)\"; printf 'task_pid=%s\\n' \"$$\"; exec sleep 30"
                     "test"))))
           (unless
@@ -89,7 +89,7 @@
             (setq rerun
                   (with-current-buffer (remote-task-buffer task)
                     (buffer-local-value 'remote-task-instance
-                                        (my/output-rerun))))
+                                        (+output/rerun))))
             (unless
                 (remote-task-disconnect-smoke--wait
                  (lambda () (remote-task-target-pid rerun)) 8)

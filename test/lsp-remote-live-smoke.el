@@ -21,7 +21,7 @@
 
 (require 'cl-lib)
 (require 'imenu)
-(require 'init-lsp)
+(require 'tools/lsp/config)
 (require 'remote-board)
 (require 'remote-config)
 (require 'remote-framework)
@@ -29,10 +29,10 @@
 (load (expand-file-name "test/lsp-live-smoke.el" user-emacs-directory)
       nil 'nomessage)
 
-(defvar my/lsp-remote-live-smoke--blackhole-relay nil
+(defvar +lsp-remote-live-smoke--blackhole-relay nil
   "Private TCP relay state for the opt-in SSH blackhole smoke.")
 
-(defun my/lsp-remote-live-smoke--ssh-config-value (pipeline name)
+(defun +lsp-remote-live-smoke--ssh-config-value (pipeline name)
   "Return OpenSSH's effective NAME for PIPELINE without connecting."
   (let* ((host (plist-get (remote-pipeline-config pipeline) :host))
          (file (remote-transport-ssh-config-file pipeline))
@@ -50,25 +50,25 @@
              nil t)
         (match-string-no-properties 1)))))
 
-(defun my/lsp-remote-live-smoke--prepare-blackhole (target)
+(defun +lsp-remote-live-smoke--prepare-blackhole (target)
   "Route TARGET's batch SSH traffic through a private loopback relay."
   (let* ((pipelines (remote-pipelines-for-target (remote-target-id target)))
          (pipeline (car pipelines))
          (python (executable-find "python3"))
          (netcat (executable-find "nc"))
          (host (and pipeline
-                    (my/lsp-remote-live-smoke--ssh-config-value
+                    (+lsp-remote-live-smoke--ssh-config-value
                      pipeline "hostname")))
          (port (and pipeline
-                    (my/lsp-remote-live-smoke--ssh-config-value
+                    (+lsp-remote-live-smoke--ssh-config-value
                      pipeline "port")))
          (proxy-command
           (and pipeline
-               (my/lsp-remote-live-smoke--ssh-config-value
+               (+lsp-remote-live-smoke--ssh-config-value
                 pipeline "proxycommand")))
          (proxy-jump
           (and pipeline
-               (my/lsp-remote-live-smoke--ssh-config-value
+               (+lsp-remote-live-smoke--ssh-config-value
                 pipeline "proxyjump")))
          (marker (make-temp-name
                   (expand-file-name "remote-ssh-blackhole-"
@@ -122,18 +122,18 @@
                    current)))
             (setf (remote-pipeline-config pipeline)
                   (plist-put config :ssh-options options)))
-          (setq my/lsp-remote-live-smoke--blackhole-relay
+          (setq +lsp-remote-live-smoke--blackhole-relay
                 (list :process process :buffer buffer :marker marker
                       :pipeline pipeline :original-config saved))
-          my/lsp-remote-live-smoke--blackhole-relay)
-      (unless my/lsp-remote-live-smoke--blackhole-relay
+          +lsp-remote-live-smoke--blackhole-relay)
+      (unless +lsp-remote-live-smoke--blackhole-relay
         (when (process-live-p process) (delete-process process))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
-(defun my/lsp-remote-live-smoke--stop-blackhole ()
+(defun +lsp-remote-live-smoke--stop-blackhole ()
   "Stop and clean up this batch's private SSH relay."
-  (when-let* ((state my/lsp-remote-live-smoke--blackhole-relay))
-    (setq my/lsp-remote-live-smoke--blackhole-relay nil)
+  (when-let* ((state +lsp-remote-live-smoke--blackhole-relay))
+    (setq +lsp-remote-live-smoke--blackhole-relay nil)
     (when (file-exists-p (plist-get state :marker))
       (delete-file (plist-get state :marker)))
     (setf (remote-pipeline-config (plist-get state :pipeline))
@@ -143,7 +143,7 @@
     (when (buffer-live-p (plist-get state :buffer))
       (kill-buffer (plist-get state :buffer)))))
 
-(defun my/lsp-remote-live-smoke--target ()
+(defun +lsp-remote-live-smoke--target ()
   "Return the explicitly requested real Remote target."
   (remote-config-load)
   (let ((requested
@@ -158,13 +158,13 @@
          (hash-table-values remote-targets))
         (error "Unknown Remote target: %s" requested))))
 
-(defun my/lsp-remote-live-smoke--write (file content)
+(defun +lsp-remote-live-smoke--write (file content)
   "Write CONTENT to logical remote FILE."
   (make-directory (file-name-directory file) t)
   (let ((coding-system-for-write 'utf-8-unix))
     (write-region content nil file nil 'silent)))
 
-(defun my/lsp-remote-live-smoke--drain (seconds test)
+(defun +lsp-remote-live-smoke--drain (seconds test)
   "Wait up to SECONDS for TEST, keeping batch Emacs' event sources running.
 A watch backend may deliver its events through the command loop's
 special-event queue (`insert-special-event').  Batch Emacs runs no command
@@ -176,7 +176,7 @@ even though the event has already arrived."
       (ignore-errors (read-event nil nil 0.1)))
     (funcall test)))
 
-(defun my/lsp-remote-live-smoke--wait-for-diagnostic (seconds)
+(defun +lsp-remote-live-smoke--wait-for-diagnostic (seconds)
   "Wait up to SECONDS for a Flymake diagnostic in the current buffer."
   (let ((deadline (+ (float-time) seconds)))
     (while (and (null (flymake-diagnostics))
@@ -184,7 +184,7 @@ even though the event has already arrived."
       (sit-for 0.1))
     (flymake-diagnostics)))
 
-(defconst my/lsp-remote-live-smoke-core-methods
+(defconst +lsp-remote-live-smoke-core-methods
   '("textDocument/completion"
     "textDocument/hover"
     "textDocument/definition"
@@ -195,15 +195,15 @@ even though the event has already arrived."
     "textDocument/codeAction")
   "LSP methods whose advertised state is reported by the parity smoke.")
 
-(defun my/lsp-remote-live-smoke--capabilities ()
+(defun +lsp-remote-live-smoke--capabilities ()
   "Return advertised core and viewport-sensitive LSP capabilities."
   (mapcar
    (lambda (method)
      (cons method (and (ignore-errors (lsp-feature? method)) t)))
-   (append my/lsp-remote-live-smoke-core-methods
+   (append +lsp-remote-live-smoke-core-methods
            '("textDocument/codeLens" "textDocument/inlayHint"))))
 
-(defun my/lsp-remote-live-smoke--watches-below (root)
+(defun +lsp-remote-live-smoke--watches-below (root)
   "Return Remote watcher summaries belonging below logical ROOT."
   (seq-filter
    (lambda (summary)
@@ -213,7 +213,7 @@ even though the event has already arrived."
                 (string-prefix-p root file)))))
    (remote-file-watch-list)))
 
-(defun my/lsp-remote-live-smoke--watch-probe (root)
+(defun +lsp-remote-live-smoke--watch-probe (root)
   "Create one Remote watch below ROOT and prove that an event is delivered."
   (let* ((probe (expand-file-name ".emacs-remote-watch-probe" root))
          (events nil)
@@ -239,7 +239,7 @@ even though the event has already arrived."
               (sit-for 0.1)))
           (setq valid-before (and (file-notify-valid-p descriptor) t))
           (write-region "watch" nil probe nil 'silent)
-          (my/lsp-remote-live-smoke--drain 10 (lambda () events))
+          (+lsp-remote-live-smoke--drain 10 (lambda () events))
           (list :valid valid-before
                 :registered (and (gethash descriptor file-notify-descriptors) t)
                 :handler-valid
@@ -258,7 +258,7 @@ even though the event has already arrived."
       (when (file-exists-p probe)
         (delete-file probe)))))
 
-(defconst my/lsp-remote-live-smoke-specs
+(defconst +lsp-remote-live-smoke-specs
   '((c
      :file "main.c"
      :mode c-mode
@@ -298,7 +298,7 @@ even though the event has already arrived."
      :timeout 180))
   "Real target projects used by the Remote lsp-mode parity smoke.")
 
-(defun my/lsp-remote-live-smoke--python-completion-probe ()
+(defun +lsp-remote-live-smoke--python-completion-probe ()
   "Request real Python CAPF candidates and report latency or failure."
   (save-excursion
     (goto-char (point-min))
@@ -318,7 +318,7 @@ even though the event has already arrived."
                :elapsed (- (float-time) started)
                :error (error-message-string error)))))))
 
-(defun my/lsp-remote-live-smoke--typing-probe (rounds)
+(defun +lsp-remote-live-smoke--typing-probe (rounds)
   "Measure synchronous edit hooks for ROUNDS simulated keypresses.
 The buffer is restored afterward.  Process output is serviced between keys,
 so language-server notifications and idle completion may run.  Opt-in
@@ -378,7 +378,7 @@ redisplay timing requires an interactive frame; keyboard delivery is excluded."
              (list :ok nil :error (error-message-string error-data))))
         (delete-region begin (point-max))))))
 
-(defun my/lsp-remote-live-smoke--change-batch-probe ()
+(defun +lsp-remote-live-smoke--change-batch-probe ()
   "Verify a real Python server sees queued edits before symbol requests."
   (let* ((workspace (car (lsp-workspaces)))
          (name "remote_batch_probe_unique_7281")
@@ -407,7 +407,7 @@ redisplay timing requires an interactive frame; keyboard delivery is excluded."
               (progn
                 (insert (format "\n\ndef %s():\n    return 1\n" name))
                 (setq queued
-                      (and (gethash workspace my/lsp-remote-change--queues)
+                      (and (gethash workspace +lsp-remote-change--queues)
                            t))
                 (let ((request-at (float-time)))
                   (setq present (has-symbol-p)
@@ -415,7 +415,7 @@ redisplay timing requires an interactive frame; keyboard delivery is excluded."
             (delete-region begin (point-max)))))
       (accept-process-output nil 0.1)
       (setq idle-drained
-            (not (gethash workspace my/lsp-remote-change--queues))
+            (not (gethash workspace +lsp-remote-change--queues))
             removed (not (has-symbol-p))))
     (list :ok (and queued present idle-drained removed t)
           :queued-before-request queued
@@ -425,7 +425,7 @@ redisplay timing requires an interactive frame; keyboard delivery is excluded."
           :first-request-ms first-ms
           :elapsed-ms (* 1000 (- (float-time) started)))))
 
-(defun my/lsp-remote-live-smoke--python-company-probe ()
+(defun +lsp-remote-live-smoke--python-company-probe ()
   "Ask the configured Company CAPF backend for `prin' candidates."
   (require 'company-capf)
   (save-excursion
@@ -457,7 +457,7 @@ redisplay timing requires an interactive frame; keyboard delivery is excluded."
              (list :ok nil :error (error-message-string error-data))))
         (delete-region begin (+ begin (length snippet)))))))
 
-(defun my/lsp-remote-live-smoke--reconnect-probe
+(defun +lsp-remote-live-smoke--reconnect-probe
     (owner-root watch-root previous-process timeout)
   "Reconnect OWNER-ROOT and verify a new LSP process and watch event.
 WATCH-ROOT is the source spelling used for the event probe.  Run from the
@@ -529,7 +529,7 @@ source buffer after the initial parity checks."
                   (ignore-errors
                     (set-process-filter transport filter))))))
            ("blackhole"
-            (let* ((state my/lsp-remote-live-smoke--blackhole-relay)
+            (let* ((state +lsp-remote-live-smoke--blackhole-relay)
                    (marker (plist-get state :marker))
                    (started (float-time))
                    (expiry (+ started 5))
@@ -604,10 +604,10 @@ source buffer after the initial parity checks."
             (when restarted (setq lsp-ready-at (float-time))))
            (diagnostics
             (and restarted
-                 (my/lsp-remote-live-smoke--wait-for-diagnostic 10)))
+                 (+lsp-remote-live-smoke--wait-for-diagnostic 10)))
            (watch
             (and restarted
-                 (my/lsp-remote-live-smoke--watch-probe watch-root))))
+                 (+lsp-remote-live-smoke--watch-probe watch-root))))
       (list :ok (and restarted diagnostics
                      (plist-get watch :valid)
                      (plist-get watch :event)
@@ -644,7 +644,7 @@ source buffer after the initial parity checks."
                  t)
             :watch watch))))
 
-(defun my/lsp-remote-live-smoke--reconnect-with-sibling
+(defun +lsp-remote-live-smoke--reconnect-with-sibling
     (owner-root watch-root previous-process timeout)
   "Probe reconnect with a second source buffer in the same LSP workspace."
   (let* ((mode major-mode)
@@ -661,14 +661,14 @@ source buffer after the initial parity checks."
             (setq-local lsp-auto-guess-root t
                         lsp-guess-root-without-session t)
             (lsp)
-            (unless (my/lsp-live-smoke--wait 10)
+            (unless (+lsp-live-smoke--wait 10)
               (error "Second source buffer did not join LSP"))
             (unless (eq (lsp--workspace-cmd-proc
                          (car (lsp-workspaces)))
                         previous-process)
               (error "Second source buffer started a separate LSP process")))
           (let* ((result
-                  (my/lsp-remote-live-smoke--reconnect-probe
+                  (+lsp-remote-live-smoke--reconnect-probe
                    owner-root watch-root previous-process timeout))
                  (new-workspace (car (ignore-errors (lsp-workspaces))))
                  (sibling-ok
@@ -683,7 +683,7 @@ source buffer after the initial parity checks."
       (when (buffer-live-p sibling)
         (kill-buffer sibling)))))
 
-(defun my/lsp-remote-live-smoke--run-one (target spec)
+(defun +lsp-remote-live-smoke--run-one (target spec)
   "Run language-server SPEC through a physical TRAMP buffer on TARGET."
   (let* ((language (car spec))
          (properties (cdr spec))
@@ -720,13 +720,13 @@ source buffer after the initial parity checks."
          visited-at requested-at initialized-at)
     (unwind-protect
         (progn
-          (my/lsp-remote-live-smoke--write
+          (+lsp-remote-live-smoke--write
            logical-file (plist-get properties :content))
-          (my/lsp-remote-live-smoke--write
+          (+lsp-remote-live-smoke--write
            (expand-file-name
             (plist-get properties :marker) logical-directory)
            (plist-get properties :marker-content))
-          (my/lsp-remote-live-smoke--write
+          (+lsp-remote-live-smoke--write
            (expand-file-name ".projectile" logical-directory) "")
           (setq written-at (float-time))
           (when (equal (getenv "REMOTE_LSP_E2E_OPEN_FOLDER") "1")
@@ -737,15 +737,15 @@ source buffer after the initial parity checks."
               (error "Opening the folder did not establish a workspace")))
           (setq folder-opened-at (float-time))
           (when (equal (getenv "REMOTE_LSP_E2E_PREWARM") "1")
-            (unless (timerp my/language-server--folder-prewarm-timer)
+            (unless (timerp +language-server--folder-prewarm-timer)
               (error "Managed folder did not schedule client LSP prewarm"))
-            (cancel-timer my/language-server--folder-prewarm-timer)
+            (cancel-timer +language-server--folder-prewarm-timer)
             (let ((started (float-time)))
               ;; Batch Emacs has no interactive idle command loop.  Run the
               ;; actual scheduled callback to simulate a pause in Dired.
-              (my/language-server--folder-prewarm-run)
+              (+language-server--folder-prewarm-run)
               (setq client-prewarm-seconds (- (float-time) started)))
-            (unless my/language-server--folder-prewarmed
+            (unless +language-server--folder-prewarmed
               (error "Managed folder did not preload the LSP client")))
           (setq source-visit-started-at (float-time))
           (setq buffer (find-file-noselect visited-file))
@@ -755,15 +755,15 @@ source buffer after the initial parity checks."
             (funcall (plist-get properties :mode))
             (setq-local lsp-auto-guess-root t
                         lsp-guess-root-without-session t
-                        my/language-server--manual-start t)
+                        +language-server--manual-start t)
             (set-buffer-modified-p t)
-            (my/language-server-ensure)
+            (+language-server/ensure)
             (setq requested-at (float-time))
             (when (and (bound-and-true-p lsp--buffer-deferred)
                        (fboundp 'lsp--init-if-visible))
               (lsp--init-if-visible))
             (let* ((ok
-                    (my/lsp-live-smoke--wait
+                    (+lsp-live-smoke--wait
                      (plist-get properties :timeout)))
                    (_initialization-clock
                     (setq initialized-at (float-time)))
@@ -775,21 +775,21 @@ source buffer after the initial parity checks."
                    (route (and process (process-get process 'remote-route)))
                    (diagnostics
                     (and ok
-                         (my/lsp-remote-live-smoke--wait-for-diagnostic 10)))
+                         (+lsp-remote-live-smoke--wait-for-diagnostic 10)))
                    (symbols
                     (and ok
-                         (my/lsp-live-smoke--typed-imenu
+                         (+lsp-live-smoke--typed-imenu
                           (imenu--make-index-alist t))))
                    (capabilities
                     (and ok
-                         (my/lsp-remote-live-smoke--capabilities)))
+                         (+lsp-remote-live-smoke--capabilities)))
                    (watches
                     (and ok
-                         (my/lsp-remote-live-smoke--watches-below
+                         (+lsp-remote-live-smoke--watches-below
                           logical-directory)))
                    (watch-probe
                     (and ok
-                         (my/lsp-remote-live-smoke--watch-probe
+                         (+lsp-remote-live-smoke--watch-probe
                           logical-directory)))
                    (completion-p
                     (and (memq #'lsp-completion-at-point
@@ -797,23 +797,23 @@ source buffer after the initial parity checks."
                          t))
                    (completion-probe
                     (when (and ok completion-p (eq language 'python))
-                      (my/lsp-remote-live-smoke--python-completion-probe)))
+                      (+lsp-remote-live-smoke--python-completion-probe)))
                    (typing-rounds
                     (min 200 (max 0 (string-to-number
                                      (or (getenv "REMOTE_LSP_E2E_TYPING_ROUNDS")
                                          "0")))))
                    (typing-probe
                     (when (and ok (> typing-rounds 0))
-                      (my/lsp-remote-live-smoke--typing-probe
+                      (+lsp-remote-live-smoke--typing-probe
                        typing-rounds)))
                    (change-batch-probe
                     (when (and ok (eq language 'python)
                                (equal (getenv "REMOTE_LSP_E2E_CHANGE_BATCH")
                                       "1"))
-                      (my/lsp-remote-live-smoke--change-batch-probe)))
+                      (+lsp-remote-live-smoke--change-batch-probe)))
                    (company-probe
                     (when (and ok (eq language 'python))
-                      (my/lsp-remote-live-smoke--python-company-probe)))
+                      (+lsp-remote-live-smoke--python-company-probe)))
                    (remote-process-p
                     (and process
                          (remote-context-p
@@ -822,10 +822,10 @@ source buffer after the initial parity checks."
                    ;; interactive TTY frame cannot enter the idle command
                    ;; loop.  Run the pending snippet callback explicitly.
                    (_snippet-idle-callback
-                    (when (and (boundp 'my/yas--pending-enable)
-                               (timerp my/yas--pending-enable))
-                      (cancel-timer my/yas--pending-enable)
-                      (my/yas--enable-after-idle
+                    (when (and (boundp '+yas--pending-enable)
+                               (timerp +yas--pending-enable))
+                      (cancel-timer +yas--pending-enable)
+                      (+yas--enable-after-idle
                        (current-buffer) major-mode)))
                    (snippets-enabled (and (bound-and-true-p yas-minor-mode) t))
                    (core-capabilities-p
@@ -835,7 +835,7 @@ source buffer after the initial parity checks."
                       (lambda (method)
                         (cdr (assoc method capabilities)))
                       (or (plist-get properties :required-methods)
-                          my/lsp-remote-live-smoke-core-methods))))
+                          +lsp-remote-live-smoke-core-methods))))
                    (watches-valid-p
                     (or
                      (null watches)
@@ -860,7 +860,7 @@ source buffer after the initial parity checks."
                      (plist-get watch-probe :valid)
                      (plist-get watch-probe :event)
                      (eq
-                      (my/language-server--lsp-workspace-id workspace)
+                      (+language-server--lsp-workspace-id workspace)
                       (plist-get properties :server))))
                    (reconnect-requested
                     (member (getenv "REMOTE_LSP_E2E_RECONNECT")
@@ -869,8 +869,8 @@ source buffer after the initial parity checks."
                    (reconnect
                     (when (and parity-ok reconnect-requested)
                       (condition-case error
-                          (my/lsp-remote-live-smoke--reconnect-with-sibling
-                           (my/language-server--lsp-workspace-root workspace)
+                          (+lsp-remote-live-smoke--reconnect-with-sibling
+                           (+language-server--lsp-workspace-root workspace)
                            logical-directory process
                            (min (if (equal (getenv "REMOTE_LSP_E2E_RECONNECT")
                                            "blackhole")
@@ -900,7 +900,7 @@ source buffer after the initial parity checks."
                      :logical-root logical-directory
                      :server
                      (and workspace
-                          (my/language-server--lsp-workspace-id workspace))
+                          (+language-server--lsp-workspace-id workspace))
                      :workspace-state
                      (and workspace (lsp--workspace-status workspace))
                      :route
@@ -926,7 +926,7 @@ source buffer after the initial parity checks."
                           (plist-get
                            (gethash
                             workspace
-                            my/lsp-completion--prewarm-state)
+                            +lsp-completion--prewarm-state)
                            :state))
                      :snippets-enabled snippets-enabled
                      :capabilities capabilities
@@ -968,7 +968,7 @@ source buffer after the initial parity checks."
           (set-buffer-modified-p nil)
           (dolist (workspace (copy-sequence (ignore-errors (lsp-workspaces))))
             (ignore-errors
-              (my/lsp-mode-shutdown-workspace
+              (+lsp-mode-shutdown-workspace
                workspace 'remote-live-smoke))))
         (kill-buffer buffer))
       (when-let* ((folder-workspace
@@ -987,7 +987,7 @@ source buffer after the initial parity checks."
     result))
 
 ;;;###autoload
-(defun my/lsp-remote-live-smoke-batch ()
+(defun +lsp-remote-live-smoke-batch ()
   "Run real TRAMP/Remote LSP checks and exit with their status."
   (unless (equal (getenv "REMOTE_LSP_E2E") "1")
     (error "Set REMOTE_LSP_E2E=1 to run real target-side LSP checks"))
@@ -999,7 +999,7 @@ source buffer after the initial parity checks."
      (max 40 (string-to-number (getenv "REMOTE_LSP_E2E_FRAME_COLUMNS")))
      (max 20 (string-to-number (getenv "REMOTE_LSP_E2E_FRAME_ROWS"))))
     (redisplay t))
-  (let* ((target (my/lsp-remote-live-smoke--target))
+  (let* ((target (+lsp-remote-live-smoke--target))
          (requested
           (and-let* ((value (getenv "REMOTE_LSP_E2E_LANGUAGES")))
             (mapcar #'intern (split-string value "," t "[[:space:]]+"))))
@@ -1007,23 +1007,23 @@ source buffer after the initial parity checks."
           (if requested
               (seq-filter
                (lambda (spec) (memq (car spec) requested))
-               my/lsp-remote-live-smoke-specs)
-            my/lsp-remote-live-smoke-specs))
+               +lsp-remote-live-smoke-specs)
+            +lsp-remote-live-smoke-specs))
          (repeat (max 1 (string-to-number
                          (or (getenv "REMOTE_LSP_E2E_REPEAT") "1"))))
          results)
     (unwind-protect
         (progn
           (when (equal (getenv "REMOTE_LSP_E2E_RECONNECT") "blackhole")
-            (my/lsp-remote-live-smoke--prepare-blackhole target))
+            (+lsp-remote-live-smoke--prepare-blackhole target))
           (setq results
                 (cl-loop repeat repeat
                          append (mapcar
                                  (lambda (spec)
-                                   (my/lsp-remote-live-smoke--run-one
+                                   (+lsp-remote-live-smoke--run-one
                                     target spec))
                                  specs))))
-      (my/lsp-remote-live-smoke--stop-blackhole))
+      (+lsp-remote-live-smoke--stop-blackhole))
     (when-let* ((result-file (getenv "REMOTE_LSP_E2E_RESULT_FILE")))
       (with-temp-file result-file
         (dolist (result results)

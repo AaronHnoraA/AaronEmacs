@@ -10,57 +10,57 @@
 
 (require 'ert)
 (require 'cl-lib)
-(require 'init-open)
+(require 'aaron-open)
 (require 'config-tools)
-(require 'init-smartparens)
-(require 'init-navigation-extra)
+(require 'editor/smartparens/config)
+(require 'editor/navigation-extra/config)
 
-(ert-deftest my/pairs-cycle-delimiters-forward-and-backward ()
+(ert-deftest +pairs-cycle-delimiters-forward-and-backward ()
   (with-temp-buffer
     (emacs-lisp-mode)
     (insert "(alpha [beta])")
     (goto-char (+ (point-min) 3))
-    (my/pairs-cycle-delimiters)
+    (+pairs/cycle-delimiters)
     (should (equal (buffer-string) "[alpha [beta]]"))
-    (my/pairs-cycle-delimiters)
+    (+pairs/cycle-delimiters)
     (should (equal (buffer-string) "{alpha [beta]}"))
-    (my/pairs-cycle-delimiters -1)
+    (+pairs/cycle-delimiters -1)
     (should (equal (buffer-string) "[alpha [beta]]"))))
 
-(ert-deftest my/pairs-cycle-delimiters-works-at-closing-edge ()
+(ert-deftest +pairs-cycle-delimiters-works-at-closing-edge ()
   (with-temp-buffer
     (emacs-lisp-mode)
     (insert "(value)")
     (goto-char (point-max))
-    (my/pairs-cycle-delimiters)
+    (+pairs/cycle-delimiters)
     (should (equal (buffer-string) "[value]"))))
 
-(ert-deftest my/pairs-cycle-delimiters-rejects-string-content ()
+(ert-deftest +pairs-cycle-delimiters-rejects-string-content ()
   (with-temp-buffer
     (emacs-lisp-mode)
     (insert "\"(text)\"")
     (goto-char (+ (point-min) 2))
-    (should-error (my/pairs-cycle-delimiters) :type 'user-error)))
+    (should-error (+pairs/cycle-delimiters) :type 'user-error)))
 
-(ert-deftest my/navigation-parse-location-formats ()
+(ert-deftest +navigation-parse-location-formats ()
   (should
-   (equal (my/navigation-parse-location "src/main.el:12:3")
+   (equal (+navigation-parse-location "src/main.el:12:3")
           '(:file "src/main.el" :line 12 :column 3)))
   (should
-   (equal (my/navigation-parse-location "/ssh:user@host:/tmp/main.el:8:2")
+   (equal (+navigation-parse-location "/ssh:user@host:/tmp/main.el:8:2")
           '(:file "/ssh:user@host:/tmp/main.el" :line 8 :column 2)))
   (should
-   (equal (my/navigation-parse-location "file:///tmp/main.el#L7C4")
+   (equal (+navigation-parse-location "file:///tmp/main.el#L7C4")
           '(:file "/tmp/main.el" :line 7 :column 4)))
   (should
-   (equal (my/navigation-parse-location "plain.el")
+   (equal (+navigation-parse-location "plain.el")
           '(:file "plain.el" :line nil :column nil))))
 
-(ert-deftest my/navigation-parse-location-rejects-zero-position ()
-  (should-error (my/navigation-parse-location "main.el:0") :type 'user-error)
-  (should-error (my/navigation-parse-location "main.el:2:0") :type 'user-error))
+(ert-deftest +navigation-parse-location-rejects-zero-position ()
+  (should-error (+navigation-parse-location "main.el:0") :type 'user-error)
+  (should-error (+navigation-parse-location "main.el:2:0") :type 'user-error))
 
-(ert-deftest my/navigation-open-location-visits-position ()
+(ert-deftest +navigation-open-location-visits-position ()
   (let* ((directory (make-temp-file "emacs-location-test-" t))
          (file (expand-file-name "sample.el" directory))
          buffer)
@@ -69,7 +69,7 @@
           (with-temp-file file
             (insert "first\nsecond line\nthird\n"))
           (let ((default-directory directory))
-            (setq buffer (my/navigation-open-location "sample.el:2:4")))
+            (setq buffer (+navigation/open-location "sample.el:2:4")))
           (with-current-buffer buffer
             (should (= (line-number-at-pos) 2))
             (should (= (current-column) 3))))
@@ -77,18 +77,18 @@
         (kill-buffer buffer))
       (delete-directory directory t))))
 
-(ert-deftest my/navigation-open-location-distinguishes-local-and-source-target ()
+(ert-deftest +navigation-open-location-distinguishes-local-and-source-target ()
   (with-temp-buffer
     (setq-local default-directory "/fs:location-audit:/work/")
     (cl-letf (((symbol-function 'project-current) (lambda (&rest _) nil))
               ((symbol-function 'file-exists-p) (lambda (_path) t))
               ((symbol-function 'file-directory-p) (lambda (_path) nil)))
-      (should (equal (my/navigation--resolve-location-file "/tmp/example.el")
+      (should (equal (+navigation--resolve-location-file "/tmp/example.el")
                      "/tmp/example.el"))
-      (should (equal (my/navigation--resolve-location-file "src/example.el")
+      (should (equal (+navigation--resolve-location-file "src/example.el")
                      "/fs:location-audit:/work/src/example.el")))))
 
-(ert-deftest my/navigation-open-location-visits-a-local-file-from-remote ()
+(ert-deftest +navigation-open-location-visits-a-local-file-from-remote ()
   (let* ((directory (make-temp-file "emacs-logical-location-" t))
          (file (expand-file-name "sample.el" directory))
          (source-directory "/fs:location-audit:/work/")
@@ -113,16 +113,16 @@
         (kill-buffer buffer))
       (delete-directory directory t))))
 
-(ert-deftest my/symbols-preview-keeps-local-file-out-of-remote-context ()
+(ert-deftest +symbols-preview-keeps-local-file-out-of-remote-context ()
   "A project-symbol preview must open a native file on the client."
-  (require 'init-symbols)
+  (require 'tools/symbols/config)
   (let ((default-directory "/fs:box:/work/")
-        (candidate (my/symbols-make-file-line-candidate
+        (candidate (+symbols-make-file-line-candidate
                     nil "/Users/test/project/main.lean" 3 "main"))
         opened visit-directory)
     (cl-letf (((symbol-function 'consult--marker-from-line-column)
                (lambda (buffer _line _column) buffer)))
-      (my/symbols--file-line-marker
+      (+symbols--file-line-marker
        candidate
        (lambda (file)
          (setq opened file visit-directory default-directory)
@@ -131,54 +131,54 @@
     (should (equal visit-directory temporary-file-directory))
     (should (equal default-directory "/fs:box:/work/"))))
 
-(ert-deftest my/open-routes-keep-native-local-target-from-remote-buffer ()
+(ert-deftest +open-routes-keep-native-local-target-from-remote-buffer ()
   "Central Emacs and system openers must use the chosen file's machine."
   (let ((default-directory "/fs:box:/work/")
         opened visit-directory)
     (cl-letf (((symbol-function 'find-file)
                (lambda (file &rest _)
                  (setq opened file visit-directory default-directory))))
-      (my/open-file-with-backend "/Users/test/project/note.md" 'emacs))
+      (aaron-open-file-with-backend "/Users/test/project/note.md" 'emacs))
     (should (equal opened "/Users/test/project/note.md"))
     (should (equal visit-directory temporary-file-directory))
-    (should (equal (my/open-normalize-target opened) opened))))
+    (should (equal (aaron-open-normalize-target opened) opened))))
 
-(ert-deftest my/harpoon-separates-machine-keys-and-opens-local-slot ()
-  (require 'init-harpoon)
-  (let ((my/harpoon-state
+(ert-deftest +harpoon-separates-machine-keys-and-opens-local-slot ()
+  (require 'editor/harpoon/config)
+  (let ((+harpoon-state
          '(("/fs:box:/work/" "/fs:local:/Users/test/project/main.el")))
         (default-directory "/fs:box:/work/")
         opened visit-directory)
-    (should (equal (my/harpoon--root-key "/Users/test/project")
+    (should (equal (+harpoon--root-key "/Users/test/project")
                    "/fs:local:/Users/test/project/"))
-    (should (equal (my/harpoon--root-key "/fs:box:/Users/test/project")
+    (should (equal (+harpoon--root-key "/fs:box:/Users/test/project")
                    "/fs:box:/Users/test/project/"))
-    (cl-letf (((symbol-function 'my/harpoon-project-root)
+    (cl-letf (((symbol-function '+harpoon-project-root)
                (lambda () "/fs:box:/work/"))
               ((symbol-function 'find-file)
                (lambda (file &rest _)
                  (setq opened file visit-directory default-directory))))
-      (my/harpoon-jump 1))
+      (+harpoon/jump 1))
     (should (equal opened "/Users/test/project/main.el"))
     (should (equal visit-directory temporary-file-directory))))
 
-(ert-deftest my/macos-open-keeps-native-local-path-from-remote-buffer ()
-  (require 'init-macos)
+(ert-deftest +macos-open-keeps-native-local-path-from-remote-buffer ()
+  (require 'os/macos/config)
   (let ((default-directory "/fs:box:/work/"))
-    (should (equal (my/macos-open--normalize-target
+    (should (equal (+macos-open--normalize-target
                     "/Users/test/project/document.pdf")
                    "/Users/test/project/document.pdf"))))
 
 (ert-deftest recentf-native-local-history-stays-local-from-remote-buffer ()
   (let ((default-directory "/fs:box:/work/"))
-    (should (equal (my/recentf-logical-file-name
+    (should (equal (+recentf-logical-file-name
                     "/Users/test/project/document.pdf")
                    "/Users/test/project/document.pdf"))
-    (should (equal (my/recentf-logical-file-name
+    (should (equal (+recentf-logical-file-name
                     "/fs:lab:/work/document.pdf")
                    "/fs:lab:/work/document.pdf"))))
 
-(ert-deftest my/navigation-open-location-invalid-line-keeps-the-current-window ()
+(ert-deftest +navigation-open-location-invalid-line-keeps-the-current-window ()
   (let* ((file (make-temp-file "emacs-invalid-location-" nil ".txt"
                                "first line\n"))
          (source (generate-new-buffer " *invalid location source*")))
@@ -199,7 +199,7 @@
         (kill-buffer target))
       (delete-file file))))
 
-(ert-deftest my/navigation-open-location-invalid-line-preserves-existing-buffer ()
+(ert-deftest +navigation-open-location-invalid-line-preserves-existing-buffer ()
   (let* ((file (make-temp-file "emacs-existing-location-" nil ".txt"
                                "first line\nsecond line\n"))
          (target (find-file-noselect file)))
@@ -220,21 +220,21 @@
         (kill-buffer target))
       (delete-file file))))
 
-(ert-deftest my/open-keybinding-guide-inhibits-markdown-redirect ()
+(ert-deftest +open-keybinding-guide-inhibits-markdown-redirect ()
   (let (redirect-inhibited buffer)
     (unwind-protect
         (cl-letf (((symbol-function 'find-file)
                    (lambda (_file)
-                     (setq redirect-inhibited my/noema--inhibit-redirect
+                     (setq redirect-inhibited +noema--inhibit-redirect
                            buffer (generate-new-buffer " *keybinding-guide-test*"))
                      buffer)))
-          (should (eq (my/open-keybinding-guide) buffer))
+          (should (eq (aaron/open-keybinding-guide) buffer))
           (should redirect-inhibited)
           (should (buffer-local-value 'view-mode buffer)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(ert-deftest my/open-keybinding-guide-uses-client-context ()
+(ert-deftest +open-keybinding-guide-uses-client-context ()
   "The guide resolves on the client even from a Remote source buffer."
   (let (checked buffer)
     (unwind-protect
@@ -251,12 +251,12 @@
                                          (default-value 'process-environment))
                                   (equal exec-path (default-value 'exec-path))))
                        (setq buffer (generate-new-buffer " *guide-client-test*")))))
-            (should (eq (my/open-keybinding-guide) buffer))
+            (should (eq (aaron/open-keybinding-guide) buffer))
             (should checked)))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(ert-deftest my/elisp-local-leader-has-one-visible-eval-route ()
+(ert-deftest +elisp-local-leader-has-one-visible-eval-route ()
   "The Emacs Lisp leader exposes the editing workbench's eval commands."
   (with-temp-buffer
     (emacs-lisp-mode)
@@ -264,9 +264,9 @@
     (should (eq (key-binding (kbd "SPC m e d")) 'eros-eval-defun))
     (should (eq (key-binding (kbd "SPC m e e")) 'eros-eval-last-sexp))
     (should (eq (key-binding (kbd "SPC m g f")) 'find-function))
-    (should (eq (key-binding (kbd "SPC h m")) 'my/mode-keybindings))))
+    (should (eq (key-binding (kbd "SPC h m")) '+menus/mode-keybindings))))
 
-(ert-deftest my/workflow-docs-open-on-client-from-remote-buffer ()
+(ert-deftest +workflow-docs-open-on-client-from-remote-buffer ()
   "Compile and LSP docs use client paths and remain editable."
   (let (buffers)
     (unwind-protect
@@ -282,8 +282,8 @@
                        (let ((buffer (generate-new-buffer " *workflow-doc-test*")))
                          (push buffer buffers)
                          buffer))))
-            (dolist (command '(my/compile-open-docs
-                               my/language-server-manager-open-docs))
+            (dolist (command '(+compile/open-docs
+                               +language-server/manager-open-docs))
               (let ((buffer (funcall command)))
                 (should (buffer-live-p buffer))
                 (should-not (buffer-local-value 'view-mode buffer))))))
@@ -308,7 +308,7 @@
                                   (equal process-environment
                                          (default-value 'process-environment))
                                   (equal exec-path (default-value 'exec-path))
-                                  my/noema--inhibit-redirect))
+                                  +noema--inhibit-redirect))
                        (setq buffer (generate-new-buffer " *config-store-test*")))))
             (should (eq (config-open-store) buffer))
             (should checked)))

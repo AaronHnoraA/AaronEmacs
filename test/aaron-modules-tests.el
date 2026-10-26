@@ -51,7 +51,10 @@
       (let ((path (expand-file-name file dir)))
         (make-directory (file-name-directory path) t)
         (with-temp-file path
-          (insert ";;; -*- lexical-binding: t; -*-\n" text))))
+          (insert ";;; -*- lexical-binding: t; -*-\n" text)
+          (when (equal file "config.el")
+            (insert (format "\n(provide '%s/%s/config)\n"
+                            (substring (symbol-name group) 1) name))))))
     dir))
 
 ;;; Declaration
@@ -175,6 +178,18 @@
     (should (file-exists-p aaron-module-autoloads-file))
     (should (autoloadp (symbol-function 'aaron-mt-auto-cmd)))
     (fmakunbound 'aaron-mt-auto-cmd)))
+
+;;; Manifest
+
+(ert-deftest aaron-modules-manifest-files-add-sources-outside-the-directory ()
+  (aaron-modules-tests--with-registry
+    (let ((dir (aaron-modules-tests--dir-module root :t1 'withlib '(("config.el" . "")))))
+      (with-temp-file (expand-file-name "../lib-a.el" dir) (insert ";; lib\n"))
+      (with-temp-file (expand-file-name ".aaronmodule" dir)
+        (insert "((files \"../lib-*.el\"))"))
+      (aaron! :t1 withlib)
+      (should (member (expand-file-name "lib-a.el" (file-name-directory (directory-file-name dir)))
+                      (aaron-module-source-files (aaron-module-get '(:t1 . withlib))))))))
 
 ;;; Ledger
 

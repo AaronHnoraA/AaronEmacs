@@ -10,16 +10,16 @@
 (require 'cl-lib)
 (require 'copy-as-format)
 (require 'ert)
-(require 'init-bazel)
-(require 'init-calendar-tools)
-(require 'init-editing-workbench)
-(require 'init-file-workbench)
-(require 'init-github)
-(require 'init-macos-tools)
-(require 'init-navigation)
-(require 'init-org-tools)
+(require 'lang/bazel/config)
+(require 'app/calendar/config)
+(require 'editor/editing/config)
+(require 'emacs/files/config)
+(require 'tools/git/github)
+(require 'os/macos-tools/config)
+(require 'editor/navigation/config)
+(require 'lang/org/config)
 
-(defmacro my/workbench-test-with-region (beg end &rest body)
+(defmacro +workbench-test-with-region (beg end &rest body)
   "Activate BEG through END while evaluating BODY."
   (declare (indent 2))
   `(let ((transient-mark-mode t))
@@ -27,72 +27,72 @@
      (push-mark ,end t t)
      ,@body))
 
-(ert-deftest my/transpose-regions-dwim-swaps-disjoint-regions ()
+(ert-deftest +transpose-regions-dwim-swaps-disjoint-regions ()
   (with-temp-buffer
     (insert "one middle two")
-    (my/workbench-test-with-region 1 4
-      (my/transpose-regions-dwim nil))
-    (my/workbench-test-with-region 12 15
-      (my/transpose-regions-dwim nil))
+    (+workbench-test-with-region 1 4
+      (+editing/transpose-regions-dwim nil))
+    (+workbench-test-with-region 12 15
+      (+editing/transpose-regions-dwim nil))
     (should (equal (buffer-string) "two middle one"))
-    (should-not my/transpose-regions--buffer)))
+    (should-not +transpose-regions--buffer)))
 
-(ert-deftest my/transpose-regions-reset-releases-markers-and-overlay ()
+(ert-deftest +transpose-regions-reset-releases-markers-and-overlay ()
   (with-temp-buffer
     (insert "alpha beta")
-    (my/workbench-test-with-region 1 6
-      (my/transpose-regions-dwim nil))
-    (should (overlayp my/transpose-regions--overlay))
-    (my/transpose-regions-reset)
-    (should-not my/transpose-regions--buffer)
-    (should-not my/transpose-regions--overlay)))
+    (+workbench-test-with-region 1 6
+      (+editing/transpose-regions-dwim nil))
+    (should (overlayp +transpose-regions--overlay))
+    (+editing/transpose-regions-reset)
+    (should-not +transpose-regions--buffer)
+    (should-not +transpose-regions--overlay)))
 
-(ert-deftest my/hash-dwim-hashes-the-requested-bounds ()
+(ert-deftest +hash-dwim-hashes-the-requested-bounds ()
   (with-temp-buffer
     (insert "abc")
     (should
-     (equal (my/hash-dwim 'sha256 (point-min) (point-max))
+     (equal (+editing/hash-dwim 'sha256 (point-min) (point-max))
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"))
     (should (equal (current-kill 0)
                    "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"))))
 
-(ert-deftest my/copy-as-format-uses-the-whole-buffer-without-a-region ()
+(ert-deftest +copy-as-format-uses-the-whole-buffer-without-a-region ()
   (let ((copy-as-format-default "slack"))
     (with-temp-buffer
       (insert "alpha\nbeta\n")
       (goto-char (point-min))
-      (my/copy-as-format-markdown)
+      (+copy-as/format-markdown)
       (should (string-match-p "alpha" (current-kill 0)))
       (should (string-match-p "beta" (current-kill 0)))
       (should (= (point) (point-min)))
       (should (equal (buffer-string) "alpha\nbeta\n"))
       (should (equal copy-as-format-default "slack")))))
 
-(ert-deftest my/copy-as-format-preserves-an-active-region-and-default ()
+(ert-deftest +copy-as-format-preserves-an-active-region-and-default ()
   (let ((copy-as-format-default "slack"))
     (with-temp-buffer
       (insert "alpha beta")
       (let ((transient-mark-mode t))
         (goto-char (point-min))
         (push-mark 6 t t)
-        (my/copy-as-format-html)
+        (+copy-as/format-html)
         (should (equal (current-kill 0) "<pre><code>\nalpha\n</code></pre>\n"))
         (should (= (point) (point-min)))
         (should (= (mark) 6))
         (should mark-active)
         (should (equal copy-as-format-default "slack"))))))
 
-(ert-deftest my/narrow-or-widen-dwim-prefers-the-active-region ()
+(ert-deftest +narrow-or-widen-dwim-prefers-the-active-region ()
   (with-temp-buffer
     (insert "before middle after")
-    (my/workbench-test-with-region 8 14
-      (my/narrow-or-widen-dwim nil))
+    (+workbench-test-with-region 8 14
+      (+editing/narrow-or-widen-dwim nil))
     (should (buffer-narrowed-p))
     (should (equal (buffer-string) "middle"))
-    (my/narrow-or-widen-dwim nil)
+    (+editing/narrow-or-widen-dwim nil)
     (should-not (buffer-narrowed-p))))
 
-(ert-deftest my/narrow-or-widen-stays-in-org-for-source-and-quote-blocks ()
+(ert-deftest +narrow-or-widen-stays-in-org-for-source-and-quote-blocks ()
   (require 'org)
   (with-temp-buffer
     (org-mode)
@@ -123,7 +123,7 @@
       (should (buffer-narrowed-p))
       (should (string-match-p "quoted words" (buffer-string))))))
 
-(ert-deftest my/navigation-back-and-forward-use-the-recorded-jump ()
+(ert-deftest +navigation-back-and-forward-use-the-recorded-jump ()
   (require 'better-jumper)
   (let ((file (make-temp-file "navigation-history-" nil ".txt"
                               "first line\nsecond line\n")))
@@ -133,18 +133,18 @@
             (switch-to-buffer buffer)
             (better-jumper-clear-jumps)
             (goto-char (point-min))
-            (my/navigation--push-jump)
+            (+navigation--push-jump)
             (goto-char (point-max))
-            (my/navigation-back)
+            (+navigation/back)
             (should (= (point) (point-min)))
-            (my/navigation-forward)
+            (+navigation/forward)
             (should (= (point) (point-max)))
             (better-jumper-clear-jumps)))
       (when-let* ((buffer (get-file-buffer file)))
         (kill-buffer buffer))
       (delete-file file))))
 
-(ert-deftest my/navigation-history-uses-native-xref-when-jump-list-is-empty ()
+(ert-deftest +navigation-history-uses-native-xref-when-jump-list-is-empty ()
   (require 'better-jumper)
   (require 'xref)
   (let ((buffer (generate-new-buffer " *navigation xref fallback*")))
@@ -162,14 +162,14 @@
                   (goto-char (point-min))
                   (xref-push-marker-stack)
                   (goto-char (point-max))
-                  (my/navigation-back)
+                  (+navigation/back)
                   (should (= (point) (point-min)))
-                  (my/navigation-forward)
+                  (+navigation/forward)
                   (should (= (point) (point-max))))
               (set-window-parameter window 'xref--history old-history))))
       (kill-buffer buffer))))
 
-(ert-deftest my/structure-up-falls-back-to-native-list-navigation ()
+(ert-deftest +structure-up-falls-back-to-native-list-navigation ()
   (with-temp-buffer
     (emacs-lisp-mode)
     (insert "(outer (inner value))")
@@ -184,7 +184,7 @@
     (should-error (structure-up) :type 'user-error)
     (should (= (point) (point-min)))))
 
-(ert-deftest my/structure-up-uses-the-nearest-c-tree-sitter-statement ()
+(ert-deftest +structure-up-uses-the-nearest-c-tree-sitter-statement ()
   (skip-unless (and (fboundp 'treesit-language-available-p)
                     (treesit-language-available-p 'c)))
   (with-temp-buffer
@@ -198,24 +198,24 @@
       (structure-up)
       (should (= (point) inner-block)))))
 
-(ert-deftest my/last-change-mode-records-and-releases-its-marker ()
+(ert-deftest +last-change-mode-records-and-releases-its-marker ()
   (let ((buffer (generate-new-buffer " *last-change-test*"))
-        (was-enabled my/last-change-mode))
+        (was-enabled +last-change-mode))
     (unwind-protect
         (save-window-excursion
           (switch-to-buffer buffer)
           (text-mode)
-          (my/last-change-mode 1)
+          (+last-change-mode 1)
           (insert "changed")
-          (should (eq (marker-buffer my/last-change-marker) buffer))
-          (my/last-change-mode -1)
-          (should-not my/last-change-marker))
+          (should (eq (marker-buffer +last-change-marker) buffer))
+          (+last-change-mode -1)
+          (should-not +last-change-marker))
       (when (buffer-live-p buffer)
         (kill-buffer buffer))
       (when was-enabled
-        (my/last-change-mode 1)))))
+        (+last-change-mode 1)))))
 
-(ert-deftest my/ediff-last-two-yanks-owns-its-own-cleanup ()
+(ert-deftest +ediff-last-two-yanks-owns-its-own-cleanup ()
   "Another Ediff session must not clean up the yank comparison."
   (require 'ediff)
   (let ((kill-ring '("new text" "old text"))
@@ -229,7 +229,7 @@
                      (with-current-buffer control
                        (mapc #'funcall startup-hooks))
                      control)))
-          (my/ediff-last-two-yanks)
+          (+ediff/last-two-yanks)
           (should (buffer-live-p a))
           (should (buffer-live-p b))
           (should-not ediff-cleanup-hook)
@@ -246,7 +246,7 @@
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 
-(ert-deftest my/ediff-dwim-compares-the-visible-buffers ()
+(ert-deftest +ediff-dwim-compares-the-visible-buffers ()
   "Two visible file buffers should be compared without rereading disk."
   (require 'ediff)
   (let ((first (generate-new-buffer "*Ediff visible A*"))
@@ -269,7 +269,7 @@
                     ((symbol-function 'ediff-files)
                      (lambda (&rest _)
                        (error "Ediff reread files instead of visible buffers"))))
-            (my/ediff-dwim))
+            (+ediff/dwim))
           (should (equal (sort compared
                                (lambda (a b)
                                  (string-lessp (buffer-name a) (buffer-name b))))
@@ -278,28 +278,28 @@
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 
-(ert-deftest my/ediff-window-layout-restores-after-last-session ()
+(ert-deftest +ediff-window-layout-restores-after-last-session ()
   "Overlapping Ediff sessions on one frame share one original layout."
   (require 'ediff)
   (let* ((frame (selected-frame))
-         (previous (frame-parameter frame 'my/ediff-window-state))
+         (previous (frame-parameter frame '+ediff-window-state))
          first second restored baseline)
     (unwind-protect
         (progn
-          (should (advice-member-p #'my/ediff--setup-windows-a 'ediff-setup))
+          (should (advice-member-p #'+ediff--setup-windows-a 'ediff-setup))
           (setq first
-                (my/ediff--setup-windows-a
+                (+ediff--setup-windows-a
                  (lambda (&rest _)
                    (generate-new-buffer "*Ediff layout first*"))))
           (setq baseline
-                (plist-get (frame-parameter frame 'my/ediff-window-state)
+                (plist-get (frame-parameter frame '+ediff-window-state)
                            :layout))
           (setq second
-                (my/ediff--setup-windows-a
+                (+ediff--setup-windows-a
                  (lambda (&rest _)
                    (generate-new-buffer "*Ediff layout second*"))))
           (should (eq (plist-get
-                       (frame-parameter frame 'my/ediff-window-state)
+                       (frame-parameter frame '+ediff-window-state)
                        :layout)
                       baseline))
           (cl-letf (((symbol-function 'set-window-configuration)
@@ -311,68 +311,68 @@
             (with-current-buffer second
               (run-hooks 'ediff-after-quit-hook-internal))
             (should (equal restored (list baseline))))
-          (should-not (frame-parameter frame 'my/ediff-window-state)))
-      (set-frame-parameter frame 'my/ediff-window-state previous)
+          (should-not (frame-parameter frame '+ediff-window-state)))
+      (set-frame-parameter frame '+ediff-window-state previous)
       (dolist (buffer (list first second))
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 
-(ert-deftest my/ediff-window-layout-rolls-back-failed-setup ()
+(ert-deftest +ediff-window-layout-rolls-back-failed-setup ()
   "A failed Ediff setup restores the frame without leaving session state."
   (save-window-excursion
     (delete-other-windows)
     (let* ((frame (selected-frame))
-           (previous (frame-parameter frame 'my/ediff-window-state)))
+           (previous (frame-parameter frame '+ediff-window-state)))
       (unwind-protect
           (progn
             (should-error
-             (my/ediff--setup-windows-a
+             (+ediff--setup-windows-a
               (lambda (&rest _)
                 (split-window-right)
                 (error "Ediff setup failed"))))
             (should (= (length (window-list)) 1))
-            (should (eq (frame-parameter frame 'my/ediff-window-state)
+            (should (eq (frame-parameter frame '+ediff-window-state)
                         previous)))
-        (set-frame-parameter frame 'my/ediff-window-state previous)))))
+        (set-frame-parameter frame '+ediff-window-state previous)))))
 
-(ert-deftest my/ediff-window-layout-cleans-when-control-is-killed ()
+(ert-deftest +ediff-window-layout-cleans-when-control-is-killed ()
   "Closing an Ediff control buffer directly releases its frame state."
   (let* ((frame (selected-frame))
-         (previous (frame-parameter frame 'my/ediff-window-state))
+         (previous (frame-parameter frame '+ediff-window-state))
          control)
     (unwind-protect
         (progn
           (setq control
-                (my/ediff--setup-windows-a
+                (+ediff--setup-windows-a
                  (lambda (&rest _)
                    (generate-new-buffer "*Ediff killed control*"))))
-          (should (frame-parameter frame 'my/ediff-window-state))
+          (should (frame-parameter frame '+ediff-window-state))
           (kill-buffer control)
           (sleep-for 0.01)
-          (should-not (frame-parameter frame 'my/ediff-window-state)))
-      (set-frame-parameter frame 'my/ediff-window-state previous)
+          (should-not (frame-parameter frame '+ediff-window-state)))
+      (set-frame-parameter frame '+ediff-window-state previous)
       (when (buffer-live-p control)
         (kill-buffer control)))))
 
-(ert-deftest my/files-create-parent-directories-honors-always-policy ()
+(ert-deftest +files-create-parent-directories-honors-always-policy ()
   (let* ((root (make-temp-file "file-workbench-" t))
          (parent (expand-file-name "nested/deeper/" root))
          (file (expand-file-name "file.txt" parent)))
     (unwind-protect
         (with-temp-buffer
           (setq buffer-file-name file)
-          (let ((my/files-create-parent-directories 'always))
-            (my/files-create-parent-directories-h))
+          (let ((+files-create-parent-directories 'always))
+            (+files-create-parent-directories-h))
           (should (file-directory-p parent)))
       (delete-directory root t))))
 
-(ert-deftest my/files-copy-paths-joins-one-kill-ring-entry ()
+(ert-deftest +files-copy-paths-joins-one-kill-ring-entry ()
   (with-temp-buffer
     (setq buffer-file-name "/tmp/example.txt")
-    (should (equal (my/files-copy-paths nil) "/tmp/example.txt"))
+    (should (equal (+files/copy-paths nil) "/tmp/example.txt"))
     (should (equal (current-kill 0) "/tmp/example.txt"))))
 
-(ert-deftest my/file-menu-uses-searchable-actions-and-native-image-crop ()
+(ert-deftest +file-menu-uses-searchable-actions-and-native-image-crop ()
   "File actions have M-x names; crop remains Emacs's editing action."
   (should (member "file-menu"
                   (all-completions "file-menu" obarray #'commandp)))
@@ -403,7 +403,7 @@
                               'editing-menu "p")) :command)
               #'image-crop)))
 
-(ert-deftest my/dired-selection-keeps-source-directory-list ()
+(ert-deftest +dired-selection-keeps-source-directory-list ()
   "A selected-file view should use a real Dired directory and keep its source."
   (let* ((root (make-temp-file "dired-selection-" t))
          (first (expand-file-name "first.txt" root))
@@ -420,9 +420,9 @@
             (dired-goto-file first)
             (dired-mark 1)
             (goto-char (point-min))
-            (should (= (length (my/files-selected-paths)) 1))
-            (should (file-equal-p (car (my/files-selected-paths)) first))
-            (setq selection (my/dired-selection))
+            (should (= (length (+files-selected-paths)) 1))
+            (should (file-equal-p (car (+files-selected-paths)) first))
+            (setq selection (+files/dired-selection))
             (should (eq (window-buffer) selection))
             (should-not (eq source selection))
             (with-current-buffer selection
@@ -442,10 +442,10 @@
           (kill-buffer buffer)))
       (delete-directory root t))))
 
-(ert-deftest my/dired-parse-du-kib-sums-each-entry ()
-  (should (= (my/dired--parse-du-kib "4\t/tmp/a\n12\t/tmp/b\n") 16)))
+(ert-deftest +dired-parse-du-kib-sums-each-entry ()
+  (should (= (+dired--parse-du-kib "4\t/tmp/a\n12\t/tmp/b\n") 16)))
 
-(ert-deftest my/bazel-workspace-root-recognizes-bzlmod ()
+(ert-deftest +bazel-workspace-root-recognizes-bzlmod ()
   (let* ((root (make-temp-file "bazel-workbench-" t))
          (child (expand-file-name "pkg/nested/" root)))
     (unwind-protect
@@ -453,19 +453,19 @@
           (make-directory child t)
           (with-temp-file (expand-file-name "MODULE.bazel" root))
           (should (equal (file-name-as-directory root)
-                         (my/bazel-workspace-root child))))
+                         (+bazel-workspace-root child))))
       (delete-directory root t))))
 
-(ert-deftest my/bazel-parse-targets-sorts-and-deduplicates ()
-  (should (equal (my/bazel--parse-targets "//z:t\n//a:t\n//z:t\n")
+(ert-deftest +bazel-parse-targets-sorts-and-deduplicates ()
+  (should (equal (+bazel--parse-targets "//z:t\n//a:t\n//z:t\n")
                  '("//a:t" "//z:t"))))
 
-(ert-deftest my/bazel-workbench-commands-are-top-level-definitions ()
+(ert-deftest +bazel-workbench-commands-are-top-level-definitions ()
   (dolist (command '(bazel-target-build bazel-target-test bazel-target-run
                      bazel-target-insert bazel-target-jump))
     (should (fboundp command))))
 
-(ert-deftest my/bazel-target-query-uses-the-logical-target ()
+(ert-deftest +bazel-target-query-uses-the-logical-target ()
   (let ((cache-root (make-temp-file "bazel-cache-" t))
         (context (remote-context-create
                   :target-id "test-target"
@@ -475,12 +475,12 @@
         captured
         callback-value)
     (unwind-protect
-        (let ((my/bazel-cache-directory cache-root))
-          (cl-letf (((symbol-function 'my/bazel-workspace-root)
+        (let ((+bazel-cache-directory cache-root))
+          (cl-letf (((symbol-function '+bazel-workspace-root)
                      (lambda (&optional _directory) "/workspace/"))
-                    ((symbol-function 'my/bazel--context)
+                    ((symbol-function '+bazel--context)
                      (lambda (&optional _root) context))
-                    ((symbol-function 'my/bazel-executable)
+                    ((symbol-function '+bazel-executable)
                      (lambda (&optional _context) "/usr/bin/bazelisk"))
                     ((symbol-function 'remote-exec-async)
                      (lambda (program &rest options)
@@ -489,7 +489,7 @@
                         (plist-get options :callback)
                         (remote-exec-result-create
                          :status 0 :stdout "//b:t\n//a:t\n" :stderr "")))))
-            (my/bazel-with-targets
+            (+bazel-with-targets
              (lambda (root context executable targets)
                (setq callback-value (list root context executable targets)))
              t)
@@ -502,15 +502,15 @@
                                  '("//a:t" "//b:t"))))))
       (delete-directory cache-root t))))
 
-(ert-deftest my/github-parses-and-labels-topic-json ()
-  (let* ((items (my/github--parse-topics
+(ert-deftest +github-parses-and-labels-topic-json ()
+  (let* ((items (+github--parse-topics
                  "[{\"number\":7,\"title\":\"Fix\",\"author\":{\"login\":\"sam\"},\"isPullRequest\":true,\"url\":\"https://example.test/7\"}]"))
          (item (car items)))
     (should (= (alist-get 'number item) 7))
     (should (string-match-p "PR.*#7.*Fix.*sam"
-                            (my/github--topic-candidate item)))))
+                            (+github--topic-candidate item)))))
 
-(ert-deftest my/github-repository-resolution-runs-on-the-logical-target ()
+(ert-deftest +github-repository-resolution-runs-on-the-logical-target ()
   (let (captured)
     (cl-letf (((symbol-function 'magit-toplevel)
                (lambda () "/workspace/"))
@@ -526,7 +526,7 @@
                  (setq captured (cons program options))
                  (remote-exec-result-create
                   :status 0 :stdout "owner/repo" :stderr ""))))
-      (should (equal (my/github--repo-info)
+      (should (equal (+github--repo-info)
                      '("/workspace/" test-context "/usr/bin/gh" "owner/repo")))
       (should (equal (car captured) "/usr/bin/gh"))
       (should (equal (plist-get (cdr captured) :args)
@@ -534,12 +534,12 @@
                        "--jq" ".nameWithOwner")))
       (should (eq (plist-get (cdr captured) :context) 'test-context)))))
 
-(ert-deftest my/dired-marked-size-routes-du-and-target-native-paths ()
+(ert-deftest +dired-marked-size-routes-du-and-target-native-paths ()
   (with-temp-buffer
     (setq major-mode 'dired-mode
           default-directory "/ssh:test:/workspace/")
     (let (captured)
-      (cl-letf (((symbol-function 'my/files-selected-paths)
+      (cl-letf (((symbol-function '+files-selected-paths)
                  (lambda () '("/ssh:test:/workspace/a"
                               "/ssh:test:/workspace/b")))
                 ((symbol-function 'remote-context)
@@ -551,14 +551,14 @@
                    (setq captured (cons program options))
                    (remote-exec-result-create
                     :status 0 :stdout "4\ta\n12\tb\n" :stderr ""))))
-        (should (= (my/dired-marked-size) (* 16 1024)))
+        (should (= (+files/dired-marked-size) (* 16 1024)))
         (should (equal (car captured) "/usr/bin/du"))
         (should (equal (plist-get (cdr captured) :args)
                        '("-sk" "/workspace/a" "/workspace/b")))
         (should (eq (plist-get (cdr captured) :context) 'test-context))))))
 
-(ert-deftest my/macos-ns-color-conversion-uses-eight-bit-components ()
-  (should (equal (my/macos--ns-color-to-hex "65535,32768,0") "#ff8000")))
+(ert-deftest +macos-ns-color-conversion-uses-eight-bit-components ()
+  (should (equal (+macos--ns-color-to-hex "65535,32768,0") "#ff8000")))
 
 (ert-deftest macos-tools-menu-has-searchable-actions ()
   (skip-unless (eq system-type 'darwin))
@@ -597,24 +597,24 @@
         (should-error (macos-pick-color t) :type 'buffer-read-only)
         (should (equal (current-kill 0) "#ff8000"))))))
 
-(ert-deftest my/org-link-dwim-wraps-a-region-with-the-clipboard-url ()
+(ert-deftest +org-link-dwim-wraps-a-region-with-the-clipboard-url ()
   (with-temp-buffer
     (org-mode)
     (insert "Link title")
     (kill-new "https://example.test/page")
-    (my/workbench-test-with-region (point-min) (point-max)
-      (my/org-insert-link-dwim))
+    (+workbench-test-with-region (point-min) (point-max)
+      (+org/insert-link-dwim))
     (should (equal (buffer-string)
                    "[[https://example.test/page][Link title]]"))))
 
-(ert-deftest my/year-calendar-renders-first-and-last-month ()
+(ert-deftest +year-calendar-renders-first-and-last-month ()
   (save-window-excursion
-    (let ((buffer (my/calendar-year 2026)))
+    (let ((buffer (+calendar/calendar-year 2026)))
       (unwind-protect
           (with-current-buffer buffer
             (should (string-match-p "2026 January" (buffer-string)))
             (should (string-match-p "2026 December" (buffer-string)))
-            (should my/year-calendar-mode))
+            (should +year-calendar-mode))
         (when (buffer-live-p buffer)
           (kill-buffer buffer))))))
 

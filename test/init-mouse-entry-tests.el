@@ -9,7 +9,7 @@
 
 (require 'cl-lib)
 (require 'ert)
-(require 'init-mouse)
+(require 'config/mouse/config)
 
 (ert-deftest mouse-actions-menu-is-searchable-and-routed ()
   (should (commandp 'mouse-actions-menu))
@@ -22,9 +22,9 @@
 
 (ert-deftest mouse-git-mode-line-clicks-do-not-share-a-timeout ()
   (let ((calls 0))
-    (cl-letf (((symbol-function 'my/mouse--select-event-window)
+    (cl-letf (((symbol-function '+mouse--select-event-window)
                (lambda (&rest _) (selected-window)))
-              ((symbol-function 'my/mouse--git-menu-items)
+              ((symbol-function '+mouse--git-menu-items)
                (lambda () nil))
               ((symbol-function 'easy-menu-create-menu)
                (lambda (&rest _) 'git-popup))
@@ -32,19 +32,19 @@
                (lambda (menu &rest _)
                  (should (eq menu 'git-popup))
                  (cl-incf calls))))
-      (my/mouse-git-mode-line-menu nil)
-      (my/mouse-git-mode-line-menu nil))
+      (+mouse/git-mode-line-menu nil)
+      (+mouse/git-mode-line-menu nil))
     (should (= calls 2))
-    (should (eq (lookup-key my/mouse-git-mode-line-map
+    (should (eq (lookup-key +mouse-git-mode-line-map
                             [mode-line down-mouse-1])
-                'my/mouse-git-mode-line-menu))
-    (should (eq (lookup-key my/mouse-git-mode-line-map
+                '+mouse/git-mode-line-menu))
+    (should (eq (lookup-key +mouse-git-mode-line-map
                             [mode-line mouse-1])
                 'ignore))
-    (should (eq (lookup-key my/mouse-git-mode-line-map
+    (should (eq (lookup-key +mouse-git-mode-line-map
                             [mode-line down-mouse-3])
-                'my/mouse-git-mode-line-menu))
-    (should (eq (lookup-key my/mouse-git-mode-line-map
+                '+mouse/git-mode-line-menu))
+    (should (eq (lookup-key +mouse-git-mode-line-map
                             [mode-line mouse-3])
                 'ignore))))
 

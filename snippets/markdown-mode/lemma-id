@@ -3,7 +3,7 @@
 # key: lemm
 # group: Noema local
 # --
-#+begin lemma ${1:name} {#`(my/noema-new-id "block")`}
+#+begin lemma ${1:name} {#`(noema-new-id "block")`}
 ${2:Statement.}
 #+end lemma
 $0

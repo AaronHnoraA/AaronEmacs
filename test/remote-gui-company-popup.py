@@ -36,7 +36,7 @@ def client(server, expression, timeout=120):
 
 def gui_result(server, file, rounds=0, stall=False, automatic=False, idle_delay=None):
     expression = (
-        "(json-encode (my/remote-gui-company-popup-run "
+        "(json-encode (+remote-gui-company-popup-run "
         + json.dumps(str(file))
         + f" {rounds} {'t' if stall else 'nil'} {'t' if automatic else 'nil'}"
         + f" {idle_delay if idle_delay is not None else 'nil'}))"

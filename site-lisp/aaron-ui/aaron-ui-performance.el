@@ -11,11 +11,11 @@
 (require 'aaron-ui-board)
 (require 'seq)
 
-(declare-function my/performance-watch-refresh "init-performance" ())
-(declare-function my/performance-watch-toggle-auto-refresh "init-performance" ())
-(declare-function my/performance-toggle-recording "init-performance" ())
-(declare-function my/performance-save-record "init-performance" (&optional sample))
-(declare-function my/performance-profiler-start-cpu "init-performance" ())
+(declare-function +performance/watch-refresh "config/performance/config" ())
+(declare-function +performance/watch-toggle-auto-refresh "config/performance/config" ())
+(declare-function +performance/toggle-recording "config/performance/config" ())
+(declare-function +performance/save-record "config/performance/config" (&optional sample))
+(declare-function +performance/profiler-start-cpu "config/performance/config" ())
 
 (defun aaron-ui-performance--color (token fallback)
   "Resolve Aaron UI TOKEN, falling back to FALLBACK."
@@ -97,19 +97,19 @@
     (flex :flex-flow '(row wrap) :gap '((lh 0) (ch 1))
           :padding '((lh 1) (ch 2))
       (aaron-ui-performance-action
-       :label "Refresh" :command #'my/performance-watch-refresh :owner owner)
+       :label "Refresh" :command #'+performance/watch-refresh :owner owner)
       (aaron-ui-performance-action
        :label (if (plist-get (etaf-value state) :auto)
                   "Auto: on" "Auto: off")
-       :command #'my/performance-watch-toggle-auto-refresh :owner owner)
+       :command #'+performance/watch-toggle-auto-refresh :owner owner)
       (aaron-ui-performance-action
        :label (if (plist-get (etaf-value state) :recording)
                   "Recording: on" "Recording: off")
-       :command #'my/performance-toggle-recording :owner owner)
+       :command #'+performance/toggle-recording :owner owner)
       (aaron-ui-performance-action
-       :label "Save record" :command #'my/performance-save-record :owner owner)
+       :label "Save record" :command #'+performance/save-record :owner owner)
       (aaron-ui-performance-action
-       :label "Profiler" :command #'my/performance-profiler-start-cpu :owner owner))
+       :label "Profiler" :command #'+performance/profiler-start-cpu :owner owner))
     (aaron-ui-performance-section
      :for (section (seq-filter
                     (lambda (item)

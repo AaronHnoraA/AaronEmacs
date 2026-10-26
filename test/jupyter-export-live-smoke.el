@@ -1,5 +1,5 @@
 ;;; jupyter-export-live-smoke.el --- Actual nbconvert and Remote file writes -*- lexical-binding: t; -*-
-(require 'init-noema-jupyter-files)
+(require 'noema/jupyter/files)
 (require 'remote-config)
 (remote-config-load)
 (remote-fs-install)
@@ -13,7 +13,7 @@
   (unwind-protect
       (with-temp-buffer
         (make-directory directory t)
-        (my/noema-jupyter-notebook--write-raw file document)
+        (+noema-jupyter-notebook--write-raw file document)
         (make-directory (concat directory "images/") t)
         (with-temp-buffer
           (set-buffer-multibyte nil)
@@ -22,12 +22,12 @@
             (write-region (point-min) (point-max) (concat directory "images/dot.png") nil 'silent)))
         (puthash "source" "# Export audit\n![dot](images/dot.png)\nStored notebook output below."
                  (aref (gethash "cells" document) 0))
-        (my/noema-jupyter-notebook--write-raw file document)
+        (+noema-jupyter-notebook--write-raw file document)
         (setq buffer-file-name file default-directory directory)
-        (my/noema-jupyter-notebook--install-projection document)
+        (+noema-jupyter-notebook--install-projection document)
         (dolist (format '("script" "html" "pdf"))
           (let ((output (concat directory "result." format)) done failure)
-            (my/noema-jupyter-export format output (lambda (error) (setq failure error done t)))
+            (+noema-jupyter/export format output (lambda (error) (setq failure error done t)))
             (let ((deadline (+ (float-time) 120)))
               (while (and (not done) (< (float-time) deadline)) (accept-process-output nil .05)))
             (unless done (error "Export timed out: %s" format))

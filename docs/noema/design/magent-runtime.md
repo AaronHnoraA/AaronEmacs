@@ -16,7 +16,7 @@ durable Project, WorkNode, Run, Permission and Artifact association.
 Runtime constraints from the migrated implementation remain active: bounded
 JSON lines/prompts/answers/diagnostics, bounded transcript buffers,
 incremental streaming, cancellable request handles and project-scoped session
-identity. Configurable values are registered in `lisp/init-ai-ide.el` and
+identity. Configurable values are registered in `lisp/tools/agent/config.el` and
 persisted through `etc/config-store.el`; state lives below `var/noema/`.
 
 All research-worker calls into agent-shell/acp go through

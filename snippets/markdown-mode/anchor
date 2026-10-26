@@ -3,4 +3,4 @@
 # key: anchor
 # group: Noema syntax
 # --
-{#`(my/noema-new-id "block")`}$0
+{#`(noema-new-id "block")`}$0

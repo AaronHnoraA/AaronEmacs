@@ -22,7 +22,7 @@ This configuration is designed to solve a concrete set of problems:
 - Org and research writing
   Agenda, capture, AUCTeX, Jupyter, citations, and PDF Tools workflows are treated as long-term maintained parts of the system.
 - Remote work and terminals
-  Logical `/fs` targets keep file identity stable while capability routing selects native, TRAMP, or tramp-rpc links. PATH/environment state is isolated per target and workspace; `my/portal-ssh` remains the interactive terminal entry point.
+  Logical `/fs` targets keep file identity stable while capability routing selects native, TRAMP, or tramp-rpc links. PATH/environment state is isolated per target and workspace; `+portal/ssh` remains the interactive terminal entry point.
 - Browser and system integration
   Portal Web is the default in-Emacs browser and Noema host. `xwidget-webkit` loads only when selected explicitly; `eww` and macOS `open` remain available.
 - AI integration
@@ -99,7 +99,7 @@ Detailed operational documentation lives in [`docs/`](docs). The documents thems
 - The primary target is macOS GUI Emacs, currently maintained around Emacs 31.
 - [Neomacs](docs/design/neomacs-compat.md) was evaluated as an alternative runtime and the migration is
   paused at 0.0.18: xwidgets render at half size on HiDPI displays, which no configuration change can
-  fix. `lisp/init-neomacs.el` stays as the single build boundary - it renames Neomacs' physical
+  fix. `lisp/os/neomacs/config.el` stays as the single build boundary - it renames Neomacs' physical
   modifiers back to this configuration's Option-as-Hyper / Command-as-Meta layout and repairs the
   runtime differences that break opening files and the first startup frame - and is inert on GNU Emacs.
 - Some local paths and workflow conventions are intentionally opinionated, such as `~/Documents/Noema` and `~/.ssh/config`.

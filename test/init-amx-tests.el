@@ -4,7 +4,7 @@
 (require 'amx)
 
 (ert-deftest amx-prunes-retired-commands-before-cache-rebuild ()
-  (let* ((retired 'my/noema-roam-new-note)
+  (let* ((retired '+noema-roam-new-note)
          (old-data amx-data)
          (old-history amx-history)
          (old-cache amx-cache))
@@ -14,7 +14,7 @@
                 amx-history (list retired 'find-file)
                 amx-cache nil)
           (should-not (commandp retired))
-          (my/amx-prune-stale-commands)
+          (aaron-amx-prune-stale-commands)
           (should (equal amx-data '((find-file . 2))))
           (should (equal amx-history '(find-file)))
           (amx-rebuild-cache)

@@ -2,17 +2,17 @@
 ;; Opt-in: JUPYTER_SSH_TARGET=aaron-pc JUPYTER_SSH_ROOT=/home/.../COMP9444
 ;; The probe creates one temporary notebook in ROOT and removes it on exit.
 
-(require 'init-noema)
-(require 'init-noema-jupyter-notebook)
-(require 'init-noema-jupyter-runtime)
-(require 'init-noema-jupyter-lsp)
-(require 'init-lsp)
-(require 'init-project)
+(require 'noema/bridge/config)
+(require 'noema/jupyter/notebook)
+(require 'noema/jupyter/runtime)
+(require 'noema/jupyter/lsp)
+(require 'tools/lsp/config)
+(require 'tools/project/config)
 (load (expand-file-name "test/lsp-live-smoke.el" user-emacs-directory) nil t)
 (require 'remote-config)
 (require 'remote-framework)
 
-(defun my/jupyter-ssh-live--client (connection code)
+(defun +jupyter-ssh-live--client (connection code)
   "Execute CODE through CONNECTION using the existing real-kernel client."
   (let* ((buffer (generate-new-buffer " *jupyter-ssh-live-client*"))
          (default-directory user-emacs-directory)
@@ -44,7 +44,7 @@
       (when (process-live-p process) (delete-process process))
       (kill-buffer buffer))))
 
-(defun my/jupyter-ssh-project-live-run ()
+(defun +jupyter-ssh-project-live-run ()
   "Exercise remote notebook editing and a project-owned raw kernel."
   (let* ((ssh (or (getenv "JUPYTER_SSH_SSH") "/usr/bin/ssh"))
          (exec-path (cons (file-name-directory ssh) exec-path))
@@ -52,9 +52,9 @@
          (process-environment (copy-sequence process-environment))
          (remote--client-process-environment process-environment)
          (host-sandbox (make-temp-file "noema-ssh-host-" t))
-         (my/noema--state-root (expand-file-name "state" host-sandbox))
-         (my/noema--tmp-root (expand-file-name "tmp" host-sandbox))
-         (my/noema-web-port 0))
+         (+noema--state-root (expand-file-name "state" host-sandbox))
+         (+noema--tmp-root (expand-file-name "tmp" host-sandbox))
+         (+noema-web-port 0))
     (setenv "PATH" (concat (file-name-directory ssh) ":" (getenv "PATH")))
     (setenv "NOEMA_ROOT" (expand-file-name "notes" host-sandbox))
     (remote-config-load)
@@ -77,11 +77,11 @@
       (unless (file-directory-p root) (error "SSH project is unavailable: %s" root))
       (unwind-protect
           (progn
-            (cl-letf (((symbol-function 'my/project-switch)
+            (cl-letf (((symbol-function '+project/switch)
                        (lambda (selected &optional _arg)
                          (unless (equal selected root)
                            (error "SSH entry switched to another project: %s" selected)))))
-              (my/jupyter-ssh-open-project
+              (+jupyter/ssh-open-project
                (list :name "COMP9444" :target target :root native-root)))
             (setq workspace (remote-workspace-for-path root))
             (unless (and workspace (remote-workspace-environment workspace))
@@ -97,7 +97,7 @@
                "\"nbformat\":4,\"nbformat_minor\":5}\n"))
             (setq notebook (find-file-noselect file))
             (with-current-buffer notebook
-              (unless (bound-and-true-p my/noema-jupyter-notebook--projection-p)
+              (unless (bound-and-true-p +noema-jupyter-notebook--projection-p)
                 (error "Remote ipynb did not open as a notebook projection"))
               (goto-char (point-min))
               (search-forward "SSH_SOURCE_BEFORE")
@@ -120,18 +120,18 @@
             (delete-file moved)
             (princ "PASS SSH project Dired, create, list, rename and delete\n")
             (let ((deadline (+ (float-time) 30)))
-              (while (and (not my/noema--ready) (< (float-time) deadline))
+              (while (and (not +noema--ready) (< (float-time) deadline))
                 (accept-process-output nil 0.1))
-              (unless my/noema--ready
+              (unless +noema--ready
                 (error "Isolated Noema web-host did not start: %s"
-                       (my/noema--web-host-log-tail 16))))
+                       (+noema--web-host-log-tail 16))))
             (princ "PASS isolated Noema web-host serves the SSH notebook\n")
             (with-current-buffer notebook
-              (my/noema-jupyter-cell-select-kernel nil "python3")
+              (+noema-jupyter/cell-select-kernel nil "python3")
               (princ "PASS Noema selected the target kernelspec\n")
-              (unless (my/noema-jupyter-cell--api-sync
+              (unless (+noema-jupyter-cell--api-sync
                        "noema:api:jupyter:script-action"
-                       (append (my/noema-jupyter-cell--document-detail)
+                       (append (+noema-jupyter-cell--document-detail)
                                '((action . "run-all"))) 60)
                 (error "Noema did not execute the SSH notebook")))
             (with-temp-buffer
@@ -148,20 +148,20 @@
             (princ "PASS Noema executes PyTorch in the project kernel\n")
             (switch-to-buffer notebook)
             (with-current-buffer notebook
-              (setq-local my/language-server--manual-start t
+              (setq-local +language-server--manual-start t
                           lsp-auto-guess-root t
                           lsp-guess-root-without-session t)
-              (my/noema-jupyter-project-lsp)
+              (+noema-jupyter/project-lsp)
               (when (and (bound-and-true-p lsp--buffer-deferred)
                          (fboundp 'lsp--init-if-visible))
                 (lsp--init-if-visible))
-              (unless (my/lsp-live-smoke--wait 45)
+              (unless (+lsp-live-smoke--wait 45)
                 (error "Remote notebook source LSP did not connect: env-wait=%S root=%S"
-                       my/lsp-mode--waiting-for-direnv
-                       (my/language-server--project-root-for-buffer)))
-              (unless (equal (my/language-server--project-root-for-buffer) root)
+                       +lsp-mode--waiting-for-direnv
+                       (+language-server--project-root-for-buffer)))
+              (unless (equal (+language-server--project-root-for-buffer) root)
                 (error "LSP selected another project root"))
-              (let ((profile (my/language-server-current-toolchain-profile)))
+              (let ((profile (+language-server-current-toolchain-profile)))
                 (unless (and profile
                              (string-prefix-p (concat native-root ".conda/bin/")
                                               (plist-get profile :executable)))
@@ -175,15 +175,15 @@
                                                  (lsp--text-document-position-params))))
                 (error "Remote notebook LSP did not resolve numpy hover")))
             (princ "PASS target Pyright analyzes the file-owned remote environment\n")
-            (let* ((context (my/noema-jupyter--context file))
-                   (command (my/jupyter-target-command context))
+            (let* ((context (+noema-jupyter--context file))
+                   (command (+jupyter-target-command context))
                    (spec (seq-find
                           (lambda (item)
-                            (equal (my/noema-jupyter--get 'name item) "python3"))
-                          (my/noema-jupyter--kernelspecs file)))
+                            (equal (+noema-jupyter--get 'name item) "python3"))
+                          (+noema-jupyter--kernelspecs file)))
                    (argv (and spec
-                              (append (my/noema-jupyter--get
-                                       'argv (my/noema-jupyter--get 'spec spec)) nil))))
+                              (append (+noema-jupyter--get
+                                       'argv (+noema-jupyter--get 'spec spec)) nil))))
               (unless (equal (remote-context-workspace-root context) root)
                 (error "Notebook lost project root: %s"
                        (remote-context-workspace-root context)))
@@ -193,25 +193,25 @@
                 (error "Wrong kernel interpreter: %S" argv)))
             (princ "PASS nested Remote context and project Python discovery\n")
             (setq runtime
-                  (my/noema-jupyter--launch-runtime
+                  (+noema-jupyter--launch-runtime
                    `((kernelId . "ssh-project-smoke")
                      (sourceFile . ,file) (kernelName . "python3"))))
-            (my/jupyter-ssh-live--client
-             (my/noema-jupyter-runtime-client-connection runtime)
+            (+jupyter-ssh-live--client
+             (+noema-jupyter-runtime-client-connection runtime)
              (format
               "import os,sys,torch; assert os.getcwd() == %S; assert sys.executable == %S; noema_audit_state = 41; print(noema_audit_state + 1)"
               (directory-file-name native-root) python))
             (princ "PASS target kernel executes in the same project and Python\n"))
-        (when runtime (ignore-errors (my/noema-jupyter--shutdown-runtime runtime)))
-        (when (and my/noema--ready (buffer-live-p notebook))
+        (when runtime (ignore-errors (+noema-jupyter--shutdown-runtime runtime)))
+        (when (and +noema--ready (buffer-live-p notebook))
           (ignore-errors
-            (my/noema--api-call-sync
+            (+noema--api-call-sync
              "noema:api:jupyter:script-action"
              (vector `((scriptFile . ,file) (action . "shutdown"))) 20)))
         (when (buffer-live-p notebook)
           (with-current-buffer notebook
             (dolist (lsp-workspace (ignore-errors (lsp-workspaces)))
-              (ignore-errors (my/lsp-mode-shutdown-workspace lsp-workspace 'live-smoke))))
+              (ignore-errors (+lsp-mode-shutdown-workspace lsp-workspace 'live-smoke))))
           (with-current-buffer notebook (set-buffer-modified-p nil))
           (kill-buffer notebook))
         (when (buffer-live-p directory-buffer)
@@ -220,8 +220,8 @@
         (when (file-exists-p moved) (delete-file moved))
         (when (file-exists-p file) (delete-file file))
         (when workspace (ignore-errors (remote-workspace-close workspace 'test-cleanup)))
-        (let ((host-process my/noema--process))
-          (ignore-errors (my/noema-stop))
+        (let ((host-process +noema--process))
+          (ignore-errors (+noema/stop))
           (let ((deadline (+ (float-time) 4)))
             (while (and host-process (process-live-p host-process)
                         (< (float-time) deadline))
@@ -235,4 +235,4 @@
             (error "Isolated Noema host state was not removed: %s"
                    host-sandbox)))))))
 
-(my/jupyter-ssh-project-live-run)
+(+jupyter-ssh-project-live-run)

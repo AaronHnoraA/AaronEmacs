@@ -2,5 +2,5 @@
 # name: Notebook code cell
 # key: jcode
 # --
-`(my/snippet-jupyter-prefix)` %% id=`(my/snippet-jupyter-cell-id)`
+`(+snippet-jupyter-prefix)` %% id=`(+snippet-jupyter-cell-id)`
 $0

@@ -18,6 +18,6 @@ PORTAL_CONFIG_ROOT="$root" "$emacs_bin" --batch -Q \
     --eval '(setq user-emacs-directory (file-name-as-directory (getenv "PORTAL_CONFIG_ROOT")) package-user-dir (expand-file-name "elpa" user-emacs-directory))' \
     --eval '(require (quote package))' \
     --eval '(package-initialize)' \
-    -L "$root/lisp" -l "$root/lisp/init-package-utils.el" \
-    --eval '(my/package-apply-vc-patch (quote portal))'
+    -L "$root/lisp" -l "$root/lisp/core/aaron-packages.el" \
+    --eval '(aaron-package-apply-vc-patch (quote portal))'
 ./build.sh "$@"

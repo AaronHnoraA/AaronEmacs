@@ -690,14 +690,14 @@ BODY may refer to the JuText buffer as `source'."
            (work-node-id (noema-research-test--work-id document "c-w"))
            (inspector (get-buffer-create "*Noema Inspector*"))
            (seen nil)
-           (my/noema--ready t))
+           (+noema--ready t))
       (unwind-protect
           (with-temp-buffer
             (setq-local buffer-file-name (expand-file-name "research.noema" root))
             (setq-local noema-research--document document)
             (noema-research--render document)
             (noema-research-goto-cell "c-w")
-            (cl-letf (((symbol-function 'my/noema-api-call)
+            (cl-letf (((symbol-function '+noema-api-call)
                        (lambda (channel args callback &optional _timeout)
                          (setq seen (list channel args))
                          (funcall callback
@@ -730,7 +730,7 @@ BODY may refer to the JuText buffer as `source'."
            (cell (noema-research-find-cell document "c-w"))
            (inspector (get-buffer-create "*Noema Inspector*"))
            (requested nil)
-           (my/noema--ready t))
+           (+noema--ready t))
       (puthash "outputs"
                (vector (noema-research--table
                         "data" (noema-research--table
@@ -743,7 +743,7 @@ BODY may refer to the JuText buffer as `source'."
             (setq-local noema-research--document document)
             (noema-research--render document)
             (noema-research-goto-cell "c-w")
-            (cl-letf (((symbol-function 'my/noema-api-call)
+            (cl-letf (((symbol-function '+noema-api-call)
                        (lambda (channel args callback &optional _timeout)
                          (when (equal channel "noema:api:research:run:context-receipt")
                            (setq requested (gethash "runId" (aref args 0))))
@@ -853,7 +853,7 @@ so saving never reports it as a malformed Agent directive."
         (noema-research-goto-cell "c-w")
         (let ((context (noema-research--output-context t)))
           (should (equal (plist-get context :project-root) root))
-          (cl-letf (((symbol-function 'my/noema--host-file) #'identity))
+          (cl-letf (((symbol-function '+noema--host-file) #'identity))
             (should (equal (alist-get 'projectRoot
                                       (noema-research--output-payload context))
                            root))))))))
@@ -1247,7 +1247,7 @@ so saving never reports it as a malformed Agent directive."
           (kill-buffer buffer))))))
 
 (ert-deftest noema-research-ipynb-dispatch-selects-the-research-mode ()
-  (require 'init-noema-jupyter-notebook)
+  (require 'noema/jupyter/notebook)
   (noema-research-test--with-directory directory
     (let ((file (expand-file-name "bound.noema" directory))
           (noema-research-sync-host nil))
@@ -1260,7 +1260,7 @@ so saving never reports it as a malformed Agent directive."
           (kill-buffer buffer))))))
 
 (ert-deftest noema-research-visiting-a-projectless-noema-never-creates-a-project ()
-  (require 'init-noema-jupyter-notebook)
+  (require 'noema/jupyter/notebook)
   (noema-research-test--with-directory directory
     (let ((file (expand-file-name "bound.noema" directory))
           (noema-research-sync-host nil))
@@ -1275,7 +1275,7 @@ so saving never reports it as a malformed Agent directive."
             (kill-buffer buffer)))))))
 
 (ert-deftest noema-research-new-noema-visit-settles-the-project-first ()
-  (require 'init-noema-jupyter-notebook)
+  (require 'noema/jupyter/notebook)
   (noema-research-test--with-directory directory
     (let ((file (expand-file-name "notes/new.noema" directory))
           (project-find-functions (list (lambda (_) (cons 'transient directory))))
@@ -1314,7 +1314,7 @@ so saving never reports it as a malformed Agent directive."
             (with-current-buffer buffer
               (noema-research-mode)
               (noema-research-goto-cell "c-w")
-              (cl-letf (((symbol-function 'my/noema-jupyter-output-open-document)
+              (cl-letf (((symbol-function '+noema-jupyter-output-open-document)
                          (lambda (payload &optional focus)
                            (setq opened (list payload focus)))))
                 (noema-research-open-outputs))
@@ -1412,7 +1412,7 @@ so saving never reports it as a malformed Agent directive."
                        (lambda (&rest modes) (memq 'noema-research-mode modes)))
                       ((symbol-function 'noema-research-goto-cell)
                        (lambda (cell-id) (setq navigated cell-id))))
-              (my/noema-jupyter-cell-select-source
+              (+noema-jupyter-cell-select-source
                `((scriptFile . ,file) (cellId . "cell-analysis"))))
             (should (eq (selected-window) source-window))
             (should (eq (window-buffer source-window) source))
@@ -1434,11 +1434,11 @@ so saving never reports it as a malformed Agent directive."
         (progn
           (with-current-buffer source
             (setq buffer-file-name logical))
-          (cl-letf (((symbol-function 'my/noema--host-file)
+          (cl-letf (((symbol-function '+noema--host-file)
                      (lambda (file) (if (equal file logical) host file)))
                     ((symbol-function 'find-file-noselect)
                      (lambda (&rest _) (ert-fail "Opened duplicate remote buffer"))))
-            (should (eq (my/noema-jupyter-cell--source-buffer host) source))))
+            (should (eq (+noema-jupyter-cell--source-buffer host) source))))
       (kill-buffer source))))
 
 (ert-deftest noema-research-jupyter-source-opens-local-host-file-from-remote-buffer ()
@@ -1447,7 +1447,7 @@ so saving never reports it as a malformed Agent directive."
     (cl-letf (((symbol-function 'find-file-noselect)
                (lambda (file &rest _)
                  (setq visited file context default-directory))))
-      (my/noema-jupyter-cell--source-buffer
+      (+noema-jupyter-cell--source-buffer
        "/Users/test/notes/source.noema"))
     (should (equal visited "/Users/test/notes/source.noema"))
     (should-not (file-remote-p context))))
@@ -1463,7 +1463,7 @@ so saving never reports it as a malformed Agent directive."
           (cl-letf (((symbol-function 'derived-mode-p)
                      (lambda (&rest modes) (memq 'noema-research-mode modes)))
                     ((symbol-function 'noema-research-goto-cell) #'ignore))
-            (my/noema-jupyter-cell-select-source
+            (+noema-jupyter-cell-select-source
              `((scriptFile . ,file) (cellId . "cell-analysis"))))
           (should (eq (window-buffer (selected-window)) source))
           (should (get-buffer-window output 'visible)))
@@ -1751,7 +1751,7 @@ so saving never reports it as a malformed Agent directive."
             (with-current-buffer graph
               (noema-research-graph-mode)
               (setq noema-research-graph--source source)
-              (cl-letf (((symbol-function 'my/noema-api-call)
+              (cl-letf (((symbol-function '+noema-api-call)
                          (lambda (_channel args callback &optional _timeout)
                            (setq requested-args args)
                            (funcall callback
@@ -1872,14 +1872,14 @@ so saving never reports it as a malformed Agent directive."
           (let ((source-window (selected-window))
                 graph-window)
             (cl-letf (((symbol-function 'noema-research-graph-refresh) #'ignore)
-                      ((symbol-function 'my/noema--ensure-server) #'ignore))
+                      ((symbol-function '+noema--ensure-server) #'ignore))
               (setq graph-window (noema-research-graph-dock source))
               ;; Docking again reuses the same window and board.
               (should (eq (noema-research-graph-dock source) graph-window)))
             (should (eq (selected-window) source-window))
             (should (eq (window-in-direction 'below source-window) graph-window))
-            (when (require 'init-noema nil t)
-              (let ((output (my/noema-jupyter--output-split source-window)))
+            (when (require 'noema/bridge/config nil t)
+              (let ((output (+noema-jupyter--output-split source-window)))
                 (should (eq (window-in-direction 'right source-window) output))
                 (should (eq (window-in-direction 'right graph-window) output))))))
       (when (get-buffer noema-research-graph-buffer-name)
@@ -2701,12 +2701,12 @@ so saving never reports it as a malformed Agent directive."
     (setq-local agent-shell--state
                 '((:agent-config . ((:identifier . codex)))
                   (:session . ((:id . "native-codex-1")))))
-    (let ((old-ready (and (boundp 'my/noema--ready) my/noema--ready))
+    (let ((old-ready (and (boundp '+noema--ready) +noema--ready))
           requested-channel requested-args)
       (unwind-protect
           (progn
-            (setq my/noema--ready t)
-            (cl-letf (((symbol-function 'my/noema-api-call)
+            (setq +noema--ready t)
+            (cl-letf (((symbol-function '+noema-api-call)
                        (lambda (channel args callback &optional _timeout)
                          (setq requested-channel channel
                                requested-args args)
@@ -2716,7 +2716,7 @@ so saving never reports it as a malformed Agent directive."
                              "noema:api:research:session:promote"))
               (should (equal (alist-get 'goal (aref requested-args 0)) "Improve it"))
               (should (equal noema-agent-promote--session-id "ses_noema"))))
-        (setq my/noema--ready old-ready)))))
+        (setq +noema--ready old-ready)))))
 
 (ert-deftest noema-agent-worker-normalizes-actions-without-trusting-raw-input ()
   (let ((action (noema-agent-worker--action
@@ -2815,13 +2815,13 @@ so saving never reports it as a malformed Agent directive."
 		  "intervention" (noema-research--table "id" "manual_1" "version" 1))))
     (unwind-protect
 	(progn
-	  (require 'init-portal)
+	  (require 'term/portal/config)
 	  (with-current-buffer origin
 	    (setq-local agent-shell--state '(:agent-config (:identifier codex))))
 	  (cl-letf (((symbol-function 'executable-find) (lambda (_name) "/bin/codex"))
 		    ((symbol-function 'noema-agent-acp-shutdown)
                      (lambda (_buffer) (setq shutdown t)))
-		    ((symbol-function 'my/portal-create)
+		    ((symbol-function '+portal-create)
 		     (lambda (&rest args)
 		       (setq launched-command (plist-get args :command))
 		       terminal))
@@ -2831,7 +2831,7 @@ so saving never reports it as a malformed Agent directive."
 	  (should (equal launched-command '("codex" "resume" "native-1")))
 	  (with-current-buffer terminal
 	    (should (equal noema-agent-takeover--intervention-id "manual_1"))
-	    (cl-letf (((symbol-function 'my/noema-api-call)
+	    (cl-letf (((symbol-function '+noema-api-call)
 		       (lambda (_channel args callback &optional _timeout)
 			 (setq handback-body (aref args 0))
 			 (funcall callback (noema-research--table "ok" t) nil)))
@@ -3026,7 +3026,7 @@ so saving never reports it as a malformed Agent directive."
         (magent-runtime-queue--arbiter-ticket-adapters (make-hash-table :test #'eq))
         (noema-agent-worker--submissions (make-hash-table :test #'equal))
         calls callbacks)
-    (cl-letf (((symbol-function 'my/noema--ensure-server)
+    (cl-letf (((symbol-function '+noema--ensure-server)
                (lambda (callback) (funcall callback)))
               ((symbol-function 'noema-agent-worker--api)
                (lambda (channel body callback &optional _timeout)
@@ -3065,7 +3065,7 @@ BODY sees `calls' (newest first) and `callbacks' for prepare responses."
          (noema-agent-worker--busy-waiting nil)
          (noema-agent-worker-max-concurrent-runs ,limit)
          calls callbacks)
-     (cl-letf (((symbol-function 'my/noema--ensure-server) (lambda (callback) (funcall callback)))
+     (cl-letf (((symbol-function '+noema--ensure-server) (lambda (callback) (funcall callback)))
                ((symbol-function 'run-at-time)
                 (lambda (_time _repeat function &rest args) (apply function args) nil))
                ((symbol-function 'noema-agent-worker--ledger-init) #'ignore)
@@ -3122,7 +3122,7 @@ BODY sees `calls' (newest first) and `callbacks' for prepare responses."
         (magent-runtime-queue--arbiter-ticket-adapters (make-hash-table :test #'eq))
         (noema-agent-worker--submissions (make-hash-table :test #'equal))
         ready calls)
-    (cl-letf (((symbol-function 'my/noema--ensure-server)
+    (cl-letf (((symbol-function '+noema--ensure-server)
                (lambda (callback) (setq ready callback)))
               ((symbol-function 'noema-agent-worker--api)
                (lambda (channel _body _callback &optional _timeout)
@@ -3391,7 +3391,7 @@ board must draw the whole plan, not its first cell."
                                   (magent-llm-completed-event
                                    "{\"kind\":\"work\",\"title\":\"Proposed route\",\"source\":\"Check it.\"}"))
                          'mock-handle))
-                      ((symbol-function 'my/noema-api-call)
+                      ((symbol-function '+noema-api-call)
                        (lambda (channel args callback &optional _timeout)
                          (setq api-channel channel api-body (aref args 0))
                          (funcall callback
@@ -3488,8 +3488,8 @@ board must draw the whole plan, not its first cell."
       (let ((buffer (generate-new-buffer " *noema-pi-fake*"))
             started client-environment)
         (unwind-protect
-            (cl-letf (((symbol-function 'my/noema--ensure-server) (lambda (callback) (funcall callback)))
-                      ((symbol-function 'my/noema-api-call)
+            (cl-letf (((symbol-function '+noema--ensure-server) (lambda (callback) (funcall callback)))
+                      ((symbol-function '+noema-api-call)
                        (lambda (channel _args callback &optional _timeout)
                          (pcase channel
                            ("noema:api:research:coordinator:endpoint"
@@ -3656,7 +3656,7 @@ board must draw the whole plan, not its first cell."
       (unwind-protect
           (cl-letf (((symbol-function 'noema-pi-router--document-root)
                      (lambda (buffer) (alist-get buffer roots)))
-                    ((symbol-function 'my/noema--ensure-server)
+                    ((symbol-function '+noema--ensure-server)
                      (lambda (_callback) (setq launches (1+ launches)))))
             (let ((noema-pi-auto-start nil))
               (noema-pi-router-note-visit first))
@@ -3850,8 +3850,8 @@ Idle time counts from the buffer's last change, not from its last display."
       (make-directory state t)
       (write-region "{\"nativeSessionId\": \"native-7\"}" nil legacy nil 'silent)
       (unwind-protect
-          (cl-letf (((symbol-function 'my/noema--ensure-server) (lambda (callback) (funcall callback)))
-                    ((symbol-function 'my/noema-api-call)
+          (cl-letf (((symbol-function '+noema--ensure-server) (lambda (callback) (funcall callback)))
+                    ((symbol-function '+noema-api-call)
                      (lambda (channel args callback &optional _timeout)
                        (pcase channel
                          ("noema:api:research:coordinator:endpoint"
@@ -4136,15 +4136,15 @@ Idle time counts from the buffer's last change, not from its last display."
                 (puthash "source" "Agent rewrote this question."
                          (noema-research-find-cell disk "c-q"))
                 (noema-research-write-file file disk before)
-                (let ((my/auto-revert--agent-turn-check-timer nil))
+                (let ((+auto-revert--agent-turn-check-timer nil))
                   (cl-letf (((symbol-function 'run-at-time)
                              (lambda (_secs _repeat fn &rest _args)
                                (setq callback fn) 'scheduled))
-                            ((symbol-function 'my/auto-revert--candidate-buffers)
+                            ((symbol-function '+auto-revert--candidate-buffers)
                              (lambda () (list buffer)))
-                            ((symbol-function 'my/auto-revert-check-stale-buffers-h)
+                            ((symbol-function '+auto-revert-check-stale-buffers-h)
                              #'ignore))
-                    (my/auto-revert-agent-turn-complete-h nil nil)
+                    (+auto-revert-agent-turn-complete-h nil nil)
                     (should callback)
                     (funcall callback)))
                 (should (string-match-p "Agent rewrote this question" (buffer-string)))

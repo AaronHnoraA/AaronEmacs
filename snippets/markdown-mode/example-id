@@ -3,7 +3,7 @@
 # key: exx
 # group: Noema blocks
 # --
-#+begin example ${1:name} {#`(my/noema-new-id "block")`}
+#+begin example ${1:name} {#`(noema-new-id "block")`}
 ${2:Example.}
 #+end example
 $0

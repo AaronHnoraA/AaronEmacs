@@ -10,25 +10,25 @@
 ;; The source buffer is restored and never saved.  The server may write its
 ;; normal language-service cache on the target.
 
-(require 'init-lsp)
+(require 'tools/lsp/config)
 (require 'remote-config)
 (require 'remote-framework)
 (require 'company-capf)
 
-(defun my/lsp-existing-file-live-probe--ready-p ()
+(defun +lsp-existing-file-live-probe--ready-p ()
   "Return the current buffer's initialized Python workspace, if any."
   (seq-find
    (lambda (workspace)
      (and (eq (lsp--workspace-status workspace) 'initialized)
-          (eq (my/language-server--lsp-workspace-id workspace)
+          (eq (+language-server--lsp-workspace-id workspace)
               'my-python)))
    (lsp-workspaces)))
 
-(defun my/lsp-existing-file-live-probe--restart-test
+(defun +lsp-existing-file-live-probe--restart-test
     (old-workspace &optional unowned)
   "Verify missing completion replies restart OLD-WORKSPACE once.
 With UNOWNED, simulate an LSP workspace without its Remote resource record."
-  (unless (bound-and-true-p my/lsp-remote-change--eligible)
+  (unless (bound-and-true-p +lsp-remote-change--eligible)
     (error "Remote completion guard is not active"))
   (when unowned
     (unless
@@ -46,14 +46,14 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
          (hash-table-values remote-workspaces))
       (error "No Remote LSP resource could be removed for fallback test")))
   (let* ((original-async (symbol-function 'lsp-request-async))
-         (my/lsp-remote-completion-timeout 0.2)
-         (my/lsp-remote-completion-health-timeout 0.45)
-         (my/lsp-remote-completion--restart-history
+         (+lsp-remote-completion-timeout 0.2)
+         (+lsp-remote-completion-health-timeout 0.45)
+         (+lsp-remote-completion--restart-history
           (make-hash-table :test #'equal))
          (company--capf-cache nil)
          (lsp-completion--cache nil)
          (started (float-time))
-         (key (my/lsp-mode--workspace-key old-workspace))
+         (key (+lsp-mode--workspace-key old-workspace))
          new-workspace)
     (cl-letf (((symbol-function 'lsp-request-async)
                (lambda (method params callback &rest keys)
@@ -64,14 +64,14 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
       (let ((deadline (+ (float-time) 8)))
         (while (and (< (float-time) deadline)
                     (not (gethash key
-                                  my/lsp-remote-completion--restart-history)))
+                                  +lsp-remote-completion--restart-history)))
           (accept-process-output nil 0.05)))
-      (unless (gethash key my/lsp-remote-completion--restart-history)
+      (unless (gethash key +lsp-remote-completion--restart-history)
         (error "Unresponsive Python LSP was not restarted")))
     (let ((deadline (+ (float-time) 15)))
       (while (and (< (float-time) deadline)
                   (not (and (setq new-workspace
-                                  (my/lsp-existing-file-live-probe--ready-p))
+                                  (+lsp-existing-file-live-probe--ready-p))
                             (not (eq new-workspace old-workspace)))))
         (accept-process-output nil 0.05)))
     (unless (and new-workspace (not (eq new-workspace old-workspace)))
@@ -82,7 +82,7 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
                            (plist-get
                             (gethash
                              new-workspace
-                             my/lsp-completion--prewarm-state)
+                             +lsp-completion--prewarm-state)
                             :state))))
         (accept-process-output nil 0.05)))
     (setq company--capf-cache nil
@@ -93,7 +93,7 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
           :unowned-recovery (and unowned t)
           :restart-recovered-ms (* 1000 (- (float-time) started)))))
 
-(defun my/lsp-existing-file-live-probe-run ()
+(defun +lsp-existing-file-live-probe-run ()
   "Probe actual Company completion on an existing Python source file."
   (remote-config-load)
   (remote-fs-install)
@@ -101,7 +101,7 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
                    (error "Set REMOTE_LSP_EXISTING_FILE")))
          (prewarm (not (equal (getenv "REMOTE_LSP_EXISTING_PREWARM") "0")))
          (early (equal (getenv "REMOTE_LSP_EXISTING_EARLY") "1"))
-         (my/lsp-completion-prewarm prewarm)
+         (+lsp-completion-prewarm prewarm)
          (started (float-time))
          (_readable (unless (file-readable-p file)
                       (error "Source is not readable: %s" file)))
@@ -119,8 +119,8 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
                   (workspace nil))
               (setq-local lsp-auto-guess-root t
                           lsp-guess-root-without-session t
-                          my/language-server--manual-start t)
-              (my/language-server-ensure)
+                          +language-server--manual-start t)
+              (+language-server/ensure)
               (when (and (boundp 'lsp--buffer-deferred)
                          lsp--buffer-deferred
                          (fboundp 'lsp--init-if-visible))
@@ -128,7 +128,7 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
               (let ((deadline (+ (float-time) 45)))
                 (while (and (< (float-time) deadline)
                             (not (setq workspace
-                                       (my/lsp-existing-file-live-probe--ready-p))))
+                                       (+lsp-existing-file-live-probe--ready-p))))
                   (accept-process-output nil 0.05)))
               (unless workspace
                 (error "Python LSP did not initialize for %s" file))
@@ -186,7 +186,7 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
                                     (plist-get
                                      (gethash
                                       workspace
-                                      my/lsp-completion--prewarm-state)
+                                      +lsp-completion--prewarm-state)
                                      :state)
                                     '(ready failed unsupported no-buffer))))
                     (accept-process-output nil 0.05)))
@@ -194,7 +194,7 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
                        (plist-get
                         (gethash
                          workspace
-                         my/lsp-completion--prewarm-state)
+                         +lsp-completion--prewarm-state)
                         :state)))
                   (setq result
                         (append result
@@ -231,11 +231,11 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
                                         company-capf--current-completion-data))))))
                         (when (equal (getenv "REMOTE_LSP_EXISTING_STALL") "1")
                           (unless (bound-and-true-p
-                                   my/lsp-remote-change--eligible)
+                                   +lsp-remote-change--eligible)
                             (error "Remote completion guard is not active"))
                           (let* ((original-async
                                   (symbol-function 'lsp-request-async))
-                                 (my/lsp-remote-completion-timeout 0.25)
+                                 (+lsp-remote-completion-timeout 0.25)
                                  (company--capf-cache nil)
                                  (lsp-completion--cache nil)
                                  (intercepted nil)
@@ -256,7 +256,7 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
                             (unless (and intercepted
                                          (< timed-out-ms 800)
                                          (numberp
-                                          my/lsp-remote-completion--retry-at))
+                                          +lsp-remote-completion--retry-at))
                               (error "Completion did not fall back promptly: %S ms"
                                      timed-out-ms))
                             (setq began (float-time))
@@ -265,11 +265,11 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
                             (setq backoff-ms (* 1000 (- (float-time) began)))
                             (let ((deadline (+ (float-time) 5)))
                               (while (and (< (float-time) deadline)
-                                          (or my/lsp-remote-completion--probe
-                                              my/lsp-remote-completion--retry-at))
+                                          (or +lsp-remote-completion--probe
+                                              +lsp-remote-completion--retry-at))
                                 (accept-process-output nil 0.05)))
-                            (when (or my/lsp-remote-completion--probe
-                                      my/lsp-remote-completion--retry-at)
+                            (when (or +lsp-remote-completion--probe
+                                      +lsp-remote-completion--retry-at)
                               (error "Asynchronous completion health check did not recover"))
                             (setq company--capf-cache nil
                                   lsp-completion--cache nil)
@@ -288,7 +288,7 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
                           (setq result
                                 (append
                                  result
-                                 (my/lsp-existing-file-live-probe--restart-test
+                                 (+lsp-existing-file-live-probe--restart-test
                                   workspace
                                   (equal (getenv "REMOTE_LSP_EXISTING_STALL")
                                          "unowned")))))
@@ -300,7 +300,7 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
           (set-buffer-modified-p nil)
           (dolist (workspace (ignore-errors (lsp-workspaces)))
             (ignore-errors
-              (my/lsp-mode-shutdown-workspace
+              (+lsp-mode-shutdown-workspace
                workspace 'existing-file-live-probe))))
         (kill-buffer buffer)))
     (princ (format "Existing Python LSP: %S\n" result))
@@ -311,7 +311,7 @@ With UNOWNED, simulate an LSP workspace without its Remote resource record."
     result))
 
 (when noninteractive
-  (my/lsp-existing-file-live-probe-run))
+  (+lsp-existing-file-live-probe-run))
 
 (provide 'lsp-existing-file-live-probe)
 ;;; lsp-existing-file-live-probe.el ends here

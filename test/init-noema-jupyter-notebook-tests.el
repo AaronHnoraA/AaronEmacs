@@ -8,14 +8,14 @@
              (expand-file-name "../lisp/roam"
                                (file-name-directory (or load-file-name
                                                         buffer-file-name))))
-(require 'init-noema-jupyter-notebook)
-(unless (fboundp 'my/noema-command)
-  (defun my/noema-command (&rest _args)
+(require 'noema/jupyter/notebook)
+(unless (fboundp '+noema/command)
+  (defun +noema/command (&rest _args)
     "Test stub for the Noema event bridge."
     nil))
-(require 'init-noema-jupyter-cell)
+(require 'noema/jupyter/cell)
 
-(defun my/noema-jupyter-notebook-test--document ()
+(defun +noema-jupyter-notebook-test--document ()
   "Return a representative notebook JSON object."
   (let* ((document (make-hash-table :test #'equal))
          (metadata (make-hash-table :test #'equal))
@@ -54,28 +54,28 @@
     (puthash "nbformat_minor" 5 document)
     document))
 
-(ert-deftest my/noema-jupyter-notebook-kernel-language-wins-over-stale-info ()
+(ert-deftest +noema-jupyter-notebook-kernel-language-wins-over-stale-info ()
   "A kernel switch must not retain an old `language_info' value."
-  (let ((document (my/noema-jupyter-notebook-test--document)))
+  (let ((document (+noema-jupyter-notebook-test--document)))
     (puthash "language" "bash"
              (gethash "kernelspec" (gethash "metadata" document)))
     (puthash "name" "python"
              (gethash "language_info" (gethash "metadata" document)))
-    (should (equal (my/noema-jupyter-notebook--language document) "bash"))
-    (should (equal (my/noema-jupyter-notebook--language-for-kernel
+    (should (equal (+noema-jupyter-notebook--language document) "bash"))
+    (should (equal (+noema-jupyter-notebook--language-for-kernel
                     "rik_ssh_aaron_pc_remote_python313pytorch")
                    "python"))))
 
-(ert-deftest my/noema-jupyter-notebook-visits-source-and-preserves-results ()
+(ert-deftest +noema-jupyter-notebook-visits-source-and-preserves-results ()
   (let ((file (make-temp-file "noema-ipynb-" nil ".ipynb"))
         buffer)
     (unwind-protect
         (progn
-          (my/noema-jupyter-notebook--write-raw
-           file (my/noema-jupyter-notebook-test--document))
+          (+noema-jupyter-notebook--write-raw
+           file (+noema-jupyter-notebook-test--document))
           (setq buffer (find-file-noselect file))
           (with-current-buffer buffer
-            (should my/noema-jupyter-notebook--projection-p)
+            (should +noema-jupyter-notebook--projection-p)
             (should (derived-mode-p 'python-mode))
             (should (equal (buffer-string)
                            "# %% id=cell-a\nanswer = 41\n\n"))
@@ -83,7 +83,7 @@
             (search-forward "answer = 41")
             (replace-match "answer = 42")
             (save-buffer))
-          (let* ((saved (my/noema-jupyter-notebook--read-raw file))
+          (let* ((saved (+noema-jupyter-notebook--read-raw file))
                  (cell (aref (gethash "cells" saved) 0)))
             (should (equal (gethash "id" cell) "cell-a"))
             (should (equal (gethash "source" cell) "answer = 42"))
@@ -96,7 +96,7 @@
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (ignore-errors (delete-file file)))))
 
-(ert-deftest my/noema-jupyter-notebook-seeds-a-new-empty-file ()
+(ert-deftest +noema-jupyter-notebook-seeds-a-new-empty-file ()
   "A new `.ipynb' must open as a notebook, not as unparsable empty text."
   (let* ((directory (make-temp-file "noema-new-ipynb-" t))
          (file (expand-file-name "scratch.ipynb" directory))
@@ -105,12 +105,12 @@
         (progn
           (setq buffer (find-file-noselect file))
           (with-current-buffer buffer
-            (should my/noema-jupyter-notebook--projection-p)
+            (should +noema-jupyter-notebook--projection-p)
             (should (derived-mode-p 'python-mode))
             (should-not (buffer-modified-p))
             (should (string-match-p "\\`# %% id=" (buffer-string))))
           (should (file-exists-p file))
-          (let ((document (my/noema-jupyter-notebook--read-raw file)))
+          (let ((document (+noema-jupyter-notebook--read-raw file)))
             (should (= (gethash "nbformat" document) 4))
             (should (= (gethash "nbformat_minor" document) 5))
             (should (= (length (gethash "cells" document)) 1))
@@ -128,7 +128,7 @@
         (kill-buffer buffer))
       (ignore-errors (delete-directory directory t)))))
 
-(ert-deftest my/noema-jupyter-notebook-seeds-an-existing-blank-file ()
+(ert-deftest +noema-jupyter-notebook-seeds-an-existing-blank-file ()
   "A zero-length `.ipynb' left behind by another tool must also recover."
   (let* ((file (make-temp-file "noema-blank-ipynb-" nil ".ipynb"))
          buffer)
@@ -136,18 +136,18 @@
         (progn
           (setq buffer (find-file-noselect file))
           (with-current-buffer buffer
-            (should my/noema-jupyter-notebook--projection-p)
+            (should +noema-jupyter-notebook--projection-p)
             (should-not (buffer-modified-p)))
-          (should (my/noema-jupyter-notebook--read-raw file)))
+          (should (+noema-jupyter-notebook--read-raw file)))
       (when (buffer-live-p buffer)
         (with-current-buffer buffer (set-buffer-modified-p nil))
         (kill-buffer buffer))
       (ignore-errors (delete-file file)))))
 
-(ert-deftest my/noema-jupyter-notebook-output-mirror-uses-standard-fields ()
-  (let* ((document (my/noema-jupyter-notebook-test--document))
+(ert-deftest +noema-jupyter-notebook-output-mirror-uses-standard-fields ()
+  (let* ((document (+noema-jupyter-notebook-test--document))
          (cell (aref (gethash "cells" document) 0))
-         (mirror (my/noema-jupyter-notebook-output-mirror document))
+         (mirror (+noema-jupyter-notebook-output-mirror document))
          (saved (cdr (assq 'cell-a (alist-get 'cells mirror)))))
     (should (= (gethash "executionCount" saved) 3))
     (should (= (length (gethash "outputs" saved)) 1))
@@ -155,7 +155,7 @@
       (puthash "status" "ok" private)
       (puthash "executionCount" 9 private)
       (puthash "outputs" nil private)
-      (my/noema-jupyter-notebook-apply-output-mirror
+      (+noema-jupyter-notebook-apply-output-mirror
        document `((cells . ((cell-a . ,private)))))
       (should (= (gethash "execution_count" cell) 9))
       (should (equal (gethash "status"
@@ -164,13 +164,13 @@
       (should-not (gethash "executionCount"
                            (gethash "noema" (gethash "metadata" cell)))))))
 
-(ert-deftest my/noema-jupyter-notebook-save-merges-noema-results-from-disk ()
+(ert-deftest +noema-jupyter-notebook-save-merges-noema-results-from-disk ()
   (let ((file (make-temp-file "noema-ipynb-merge-" nil ".ipynb"))
         buffer)
     (unwind-protect
         (progn
-          (my/noema-jupyter-notebook--write-raw
-           file (my/noema-jupyter-notebook-test--document))
+          (+noema-jupyter-notebook--write-raw
+           file (+noema-jupyter-notebook-test--document))
           (setq buffer (find-file-noselect file))
           (with-current-buffer buffer
             (goto-char (point-min))
@@ -178,15 +178,15 @@
             (replace-match "answer = 43"))
           ;; Simulate Noema completing an execution while Emacs still holds
           ;; an edited source projection.
-          (let* ((runtime-copy (my/noema-jupyter-notebook--read-raw file))
+          (let* ((runtime-copy (+noema-jupyter-notebook--read-raw file))
                  (cell (aref (gethash "cells" runtime-copy) 0))
                  (output (aref (gethash "outputs" cell) 0)))
             (puthash "execution_count" 8 cell)
             (puthash "text" "runtime output\n" output)
-            (my/noema-jupyter-notebook--write-raw file runtime-copy))
+            (+noema-jupyter-notebook--write-raw file runtime-copy))
           (with-current-buffer buffer
-            (my/noema-jupyter-notebook--write-contents))
-          (let* ((saved (my/noema-jupyter-notebook--read-raw file))
+            (+noema-jupyter-notebook--write-contents))
+          (let* ((saved (+noema-jupyter-notebook--read-raw file))
                  (cell (aref (gethash "cells" saved) 0)))
             (should (equal (gethash "source" cell) "answer = 43"))
             (should (= (gethash "execution_count" cell) 8))
@@ -195,8 +195,8 @@
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (ignore-errors (delete-file file)))))
 
-(ert-deftest my/noema-jupyter-notebook-projects-markdown-with-stable-id ()
-  (let* ((document (my/noema-jupyter-notebook-test--document))
+(ert-deftest +noema-jupyter-notebook-projects-markdown-with-stable-id ()
+  (let* ((document (+noema-jupyter-notebook-test--document))
          (cell (make-hash-table :test #'equal)))
     (puthash "cell_type" "markdown" cell)
     (puthash "id" "intro-cell" cell)
@@ -204,20 +204,20 @@
     (puthash "source" "# Heading\ntext" cell)
     (puthash "cells" (vector cell) document)
     (with-temp-buffer
-      (setq-local my/noema-jupyter-notebook--document document)
-      (my/noema-jupyter-notebook--render document)
+      (setq-local +noema-jupyter-notebook--document document)
+      (+noema-jupyter-notebook--render document)
       (should (equal (buffer-string)
                      "# %% [markdown] id=intro-cell\n# # Heading\n# text\n\n"))
-      (let ((projected (car (my/noema-jupyter-notebook-projection-cells
+      (let ((projected (car (+noema-jupyter-notebook-projection-cells
                              document))))
         (should (equal (plist-get projected :id) "intro-cell"))
         (should (equal (plist-get projected :source) "# Heading\ntext"))))))
 
-(ert-deftest my/noema-jupyter-notebook-projects-markdown-blank-lines ()
+(ert-deftest +noema-jupyter-notebook-projects-markdown-blank-lines ()
   "A blank markdown line renders as a bare comment prefix and round-trips.
 Rendering it used to insert nil, which aborted the projection and left the
 notebook in Fundamental mode without the Jupyter UI or LSP."
-  (let* ((document (my/noema-jupyter-notebook-test--document))
+  (let* ((document (+noema-jupyter-notebook-test--document))
          (cell (make-hash-table :test #'equal)))
     (puthash "cell_type" "markdown" cell)
     (puthash "id" "notes" cell)
@@ -225,16 +225,16 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
     (puthash "source" "# s\n\ntext" cell)
     (puthash "cells" (vector cell) document)
     (with-temp-buffer
-      (setq-local my/noema-jupyter-notebook--document document)
-      (my/noema-jupyter-notebook--render document)
+      (setq-local +noema-jupyter-notebook--document document)
+      (+noema-jupyter-notebook--render document)
       (should (equal (buffer-string)
                      "# %% [markdown] id=notes\n# # s\n#\n# text\n\n"))
-      (should (equal (plist-get (car (my/noema-jupyter-notebook-projection-cells
+      (should (equal (plist-get (car (+noema-jupyter-notebook-projection-cells
                                       document))
                                 :source)
                      "# s\n\ntext")))))
 
-(ert-deftest my/noema-jupyter-notebook-preserves-missing-ids-in-ordinary-file ()
+(ert-deftest +noema-jupyter-notebook-preserves-missing-ids-in-ordinary-file ()
   (let ((file (make-temp-file "ordinary-notebook-" nil ".ipynb")) buffer)
     (unwind-protect
         (progn
@@ -253,11 +253,11 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
              "\n"))
           (setq buffer (find-file-noselect file))
           (with-current-buffer buffer
-            (should my/noema-jupyter-notebook--projection-p)
+            (should +noema-jupyter-notebook--projection-p)
             (goto-char (point-min))
             (should (looking-at "# %%$"))
             (should (equal (get-text-property
-                            (point) 'my/noema-jupyter-cell-id)
+                            (point) '+noema-jupyter-cell-id)
                            "cell-1"))
             (forward-line 1)
             (search-forward "value = 1")
@@ -275,102 +275,102 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
       (when (buffer-live-p buffer) (kill-buffer buffer))
       (ignore-errors (delete-file file)))))
 
-(ert-deftest my/noema-jupyter-notebook-upgrades-managed-missing-id ()
-  (let* ((document (my/noema-jupyter-notebook-test--document))
+(ert-deftest +noema-jupyter-notebook-upgrades-managed-missing-id ()
+  (let* ((document (+noema-jupyter-notebook-test--document))
          (cell (aref (gethash "cells" document) 0)))
     (remhash "id" cell)
     (puthash "nbformat_minor" 4 document)
-    (my/noema-jupyter-notebook--normalize document)
+    (+noema-jupyter-notebook--normalize document)
     (should (equal (gethash "id" cell) "cell-1"))
     (should (= (gethash "nbformat_minor" document) 5))
-    (should (eq (my/noema-jupyter-notebook--transient-id cell)
-                my/noema-jupyter-notebook--transient-id-not-found))))
+    (should (eq (+noema-jupyter-notebook--transient-id cell)
+                +noema-jupyter-notebook--transient-id-not-found))))
 
-(ert-deftest my/noema-jupyter-notebook-promotes-bare-managed-marker-before-run ()
+(ert-deftest +noema-jupyter-notebook-promotes-bare-managed-marker-before-run ()
   (with-temp-buffer
-    (let ((document (my/noema-jupyter-notebook-test--document)))
-      (my/noema-jupyter-notebook--install-projection document)
+    (let ((document (+noema-jupyter-notebook-test--document)))
+      (+noema-jupyter-notebook--install-projection document)
       (goto-char (point-max))
       (insert "# %%\nprint(answer)\n")
-      (my/noema-jupyter-notebook--canonicalize-managed-markers)
+      (+noema-jupyter-notebook--canonicalize-managed-markers)
       (goto-char (point-min))
       (re-search-forward "^# %% id=\\([A-Za-z0-9_-]+\\)$" nil t 2)
       (let ((new-id (match-string-no-properties 1)))
         (should new-id)
-        (my/noema-jupyter-notebook--sync-document document)
+        (+noema-jupyter-notebook--sync-document document)
         (let* ((cells (gethash "cells" document))
                (new-cell (aref cells 1)))
           (should (= (length cells) 2))
           (should (equal (gethash "id" new-cell) new-id))
           (should (equal (gethash "source" new-cell) "print(answer)\n")))))))
 
-(ert-deftest my/noema-jupyter-notebook-keeps-standalone-noema-ui-id-transient ()
-  (let* ((document (my/noema-jupyter-notebook-test--document))
+(ert-deftest +noema-jupyter-notebook-keeps-standalone-noema-ui-id-transient ()
+  (let* ((document (+noema-jupyter-notebook-test--document))
          (metadata (gethash "metadata" document))
          (noema (gethash "noema" metadata))
          (cell (aref (gethash "cells" document) 0)))
     (puthash "source_file" "/tmp/standalone.ipynb" noema)
     (remhash "id" cell)
     (puthash "nbformat_minor" 4 document)
-    (my/noema-jupyter-notebook--normalize document)
+    (+noema-jupyter-notebook--normalize document)
     (should (equal (gethash "id" cell) "cell-1"))
     (should (= (gethash "nbformat_minor" document) 4))
-    (should (eq (my/noema-jupyter-notebook--transient-id cell)
-                my/noema-jupyter-notebook--transient-id-missing))))
+    (should (eq (+noema-jupyter-notebook--transient-id cell)
+                +noema-jupyter-notebook--transient-id-missing))))
 
-(ert-deftest my/noema-jupyter-notebook-mode-switch-preserves-projection ()
+(ert-deftest +noema-jupyter-notebook-mode-switch-preserves-projection ()
   (with-temp-buffer
-    (let ((document (my/noema-jupyter-notebook-test--document)))
-      (my/noema-jupyter-notebook--install-projection document)
+    (let ((document (+noema-jupyter-notebook-test--document)))
+      (+noema-jupyter-notebook--install-projection document)
       (goto-char (point-max))
       (insert "# unsaved")
-      (my/noema-jupyter-notebook-switch-editor-mode 'text-mode)
+      (+noema-jupyter-notebook-switch-editor-mode 'text-mode)
       (should (eq major-mode 'text-mode))
-      (should (eq my/noema-jupyter-notebook--editor-mode 'text-mode))
-      (should my/noema-jupyter-notebook--projection-p)
-      (should (eq my/noema-jupyter-notebook--document document))
-      (should (memq #'my/noema-jupyter-notebook--write-contents
+      (should (eq +noema-jupyter-notebook--editor-mode 'text-mode))
+      (should +noema-jupyter-notebook--projection-p)
+      (should (eq +noema-jupyter-notebook--document document))
+      (should (memq #'+noema-jupyter-notebook--write-contents
                     write-contents-functions))
       (should (buffer-modified-p))
       (should (string-suffix-p "# unsaved" (buffer-string))))))
 
-(ert-deftest my/noema-jupyter-cell-ui-keeps-editor-mode-out-of-kernel-header ()
+(ert-deftest +noema-jupyter-cell-ui-keeps-editor-mode-out-of-kernel-header ()
   (with-temp-buffer
-    (let ((document (my/noema-jupyter-notebook--normalize
+    (let ((document (+noema-jupyter-notebook--normalize
                      (json-parse-string
                       "{\"cells\":[{\"cell_type\":\"code\",\"metadata\":{},\"outputs\":[],\"source\":\"x = 1\"}],\"metadata\":{},\"nbformat\":4,\"nbformat_minor\":4}"
                       :object-type 'hash-table :array-type 'array))))
-      (setq-local my/noema-jupyter-notebook--document document)
-      (my/noema-jupyter-notebook--render document)
+      (setq-local +noema-jupyter-notebook--document document)
+      (+noema-jupyter-notebook--render document)
       (goto-char (point-min))
-      (should (equal (plist-get (my/noema-jupyter-cell--bounds-at-point) :id)
+      (should (equal (plist-get (+noema-jupyter-cell--bounds-at-point) :id)
                      "cell-1"))
-      (setq-local my/noema-jupyter-notebook--editor-mode 'python-mode)
+      (setq-local +noema-jupyter-notebook--editor-mode 'python-mode)
       (let ((header (substring-no-properties
-                     (apply #'concat (my/noema-jupyter-cell--header-line)))))
+                     (apply #'concat (+noema-jupyter-cell--header-line)))))
         (should (string-match-p "Kernel:" header))
         (should-not (string-match-p "Editor/LSP:" header)))
       ;; Editor/LSP remains available as an explicit advanced command, but it
       ;; is no longer presented as a peer of the Noema kernel selector.
-      (should (eq (lookup-key my/noema-jupyter-cell-mode-map (kbd "C-c i l"))
-                  #'my/noema-jupyter-cell-select-editor-mode)))))
+      (should (eq (lookup-key +noema-jupyter-cell-mode-map (kbd "C-c i l"))
+                  #'+noema-jupyter-cell-select-editor-mode)))))
 
-(ert-deftest my/noema-jupyter-cell-header-distinguishes-cell-error-from-kernel ()
+(ert-deftest +noema-jupyter-cell-header-distinguishes-cell-error-from-kernel ()
   (with-temp-buffer
-    (setq-local my/noema-jupyter-cell-kernel "python3"
-                my/noema-jupyter-cell--kernel-status "error")
+    (setq-local +noema-jupyter-cell-kernel "python3"
+                +noema-jupyter-cell--kernel-status "error")
     (let ((header (substring-no-properties
-                   (apply #'concat (my/noema-jupyter-cell--header-line)))))
+                   (apply #'concat (+noema-jupyter-cell--header-line)))))
       (should (string-match-p "Kernel:python3 · last run error" header)))))
 
-(ert-deftest my/noema-jupyter-cell-kernel-catalog-is-not-language-filtered ()
+(ert-deftest +noema-jupyter-cell-kernel-catalog-is-not-language-filtered ()
   (with-temp-buffer
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
     (let* ((catalog
             (json-parse-string
              "{\"selections\":[{\"kind\":\"none\",\"value\":\"\",\"label\":\"No Kernel\"},{\"kind\":\"start\",\"value\":\"python3\",\"name\":\"python3\",\"label\":\"Start · Kernel Specs · Python  [python3]\"},{\"kind\":\"start\",\"value\":\"bash\",\"name\":\"bash\",\"label\":\"Start · Kernel Specs · Bash  [bash]\"},{\"kind\":\"start\",\"value\":\"maple\",\"name\":\"maple\",\"label\":\"Start · Kernel Specs · Maple  [maple]\"},{\"kind\":\"connect\",\"value\":\"kernel-here\",\"name\":\"python3\",\"label\":\"Connect · Running Kernel · python3 · idle  [kernel-here]\"}]}"
              :object-type 'hash-table :array-type 'array))
-           (choices (my/noema-jupyter-cell--kernel-choices catalog))
+           (choices (+noema-jupyter-cell--kernel-choices catalog))
            (labels (mapcar #'car choices)))
       (should (= (length choices) 5))
       (should (equal (car labels) "No Kernel"))
@@ -379,46 +379,46 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
       (should (seq-some (lambda (label) (string-match-p "kernel-here" label)) labels))
       (should-not (seq-some (lambda (label) (string-match-p "kernel-other" label)) labels)))))
 
-(ert-deftest my/noema-jupyter-cell-selects-exact-kernelspec-from-board ()
+(ert-deftest +noema-jupyter-cell-selects-exact-kernelspec-from-board ()
   (with-temp-buffer
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
     (let ((catalog (json-parse-string
                     "{\"selections\":[{\"kind\":\"start\",\"value\":\"python3\",\"label\":\"Python 3\"},{\"kind\":\"connect\",\"value\":\"live\",\"label\":\"Running Python\"}]}"
                     :object-type 'hash-table :array-type 'array))
           selected)
-      (cl-letf (((symbol-function 'my/noema-jupyter-cell--document-detail)
+      (cl-letf (((symbol-function '+noema-jupyter-cell--document-detail)
                  (lambda () nil))
-                ((symbol-function 'my/noema-jupyter-cell--api-sync)
+                ((symbol-function '+noema-jupyter-cell--api-sync)
                  (lambda (channel body _timeout)
                    (if (equal channel "noema:api:jupyter-cell:kernels")
                        catalog
                      (setq selected body)
                      '((session . "ready")))))
-                ((symbol-function 'my/noema-jupyter-cell--apply-session-snapshot)
+                ((symbol-function '+noema-jupyter-cell--apply-session-snapshot)
                  (lambda (_reply) nil))
                 ((symbol-function 'completing-read)
                  (lambda (&rest _) (ert-fail "Direct kernel choice prompted"))))
-        (my/noema-jupyter-cell-select-kernel nil "python3")
+        (+noema-jupyter/cell-select-kernel nil "python3")
         (should (equal (alist-get 'kernelSpecName selected) "python3"))
         (should (equal (alist-get 'kind selected) "start"))
-        (should-error (my/noema-jupyter-cell-select-kernel nil "missing")
+        (should-error (+noema-jupyter/cell-select-kernel nil "missing")
                       :type 'user-error)))))
 
-(ert-deftest my/noema-jupyter-gateway-stages-notebook-beside-destination ()
-  (require 'init-noema-jupyter-runtime)
+(ert-deftest +noema-jupyter-gateway-stages-notebook-beside-destination ()
+  (require 'noema/jupyter/runtime)
   (let* ((directory (make-temp-file "noema-notebook-write-" t))
          (native (expand-file-name "demo.ipynb" directory))
          (logical (remote-make-file-name "local" native))
          (original-make-temp-file (symbol-function 'make-temp-file))
          staged)
     (unwind-protect
-        (cl-letf (((symbol-function 'my/noema-jupyter--defer)
+        (cl-letf (((symbol-function '+noema-jupyter--defer)
                    (lambda (function) (funcall function)))
                   ((symbol-function 'make-temp-file)
                    (lambda (prefix &rest args)
                      (setq staged prefix)
                      (apply original-make-temp-file prefix args))))
-          (my/noema-jupyter--file-write
+          (+noema-jupyter--file-write
            `((file . ,logical) (content . "{\"nbformat\":4}")) nil)
           (should (equal (file-name-directory staged)
                          (file-name-directory logical)))
@@ -428,93 +428,93 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
                          "{\"nbformat\":4}")))
       (delete-directory directory t))))
 
-(ert-deftest my/noema-jupyter-cell-mode-has-no-session-polling-timer ()
-  (should-not (boundp 'my/noema-jupyter-cell-session-refresh-interval))
-  (should-not (fboundp 'my/noema-jupyter-cell--start-session-refresh-timer))
-  (should-not (fboundp 'my/noema-jupyter-cell--stop-session-refresh-timer)))
+(ert-deftest +noema-jupyter-cell-mode-has-no-session-polling-timer ()
+  (should-not (boundp '+noema-jupyter-cell-session-refresh-interval))
+  (should-not (fboundp '+noema-jupyter-cell--start-session-refresh-timer))
+  (should-not (fboundp '+noema-jupyter-cell--stop-session-refresh-timer)))
 
-(ert-deftest my/noema-jupyter-cell-explicit-inspect-allows-server-timeout ()
+(ert-deftest +noema-jupyter-cell-explicit-inspect-allows-server-timeout ()
   (with-temp-buffer
     (insert "# %% id=cell-a\nanswer\n")
     (goto-char (point-min))
     (search-forward "answer")
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-kernel "python3")
-    (setq-local my/noema-jupyter-cell-session "default")
-    (setq-local my/noema-jupyter-cell-language "python")
-    (let ((my/noema--ready t)
+    (setq-local +noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
+    (setq-local +noema-jupyter-cell-kernel "python3")
+    (setq-local +noema-jupyter-cell-session "default")
+    (setq-local +noema-jupyter-cell-language "python")
+    (let ((+noema--ready t)
           seen-timeout)
-      (cl-letf (((symbol-function 'my/noema-jupyter-cell--api-sync)
+      (cl-letf (((symbol-function '+noema-jupyter-cell--api-sync)
                  (lambda (_channel _body timeout)
                    (setq seen-timeout timeout)
                    '((ok . t) (supported . :json-false) (found . :json-false)))))
-        (should (my/noema-jupyter-cell--introspect "inspect" nil t))
-        (should (= seen-timeout my/noema-jupyter-cell-inspect-timeout))))))
+        (should (+noema-jupyter-cell--introspect "inspect" nil t))
+        (should (= seen-timeout +noema-jupyter-cell-inspect-timeout))))))
 
-(ert-deftest my/noema-jupyter-cell-explicit-inspect-surfaces-transport-error ()
+(ert-deftest +noema-jupyter-cell-explicit-inspect-surfaces-transport-error ()
   (with-temp-buffer
     (insert "# %% id=cell-a\nanswer\n")
     (goto-char (point-min))
     (search-forward "answer")
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-kernel "python3")
-    (setq-local my/noema-jupyter-cell-session "default")
-    (setq-local my/noema-jupyter-cell-language "python")
-    (let ((my/noema--ready t))
-      (cl-letf (((symbol-function 'my/noema-jupyter-cell--api-sync)
+    (setq-local +noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
+    (setq-local +noema-jupyter-cell-kernel "python3")
+    (setq-local +noema-jupyter-cell-session "default")
+    (setq-local +noema-jupyter-cell-language "python")
+    (let ((+noema--ready t))
+      (cl-letf (((symbol-function '+noema-jupyter-cell--api-sync)
                  (lambda (&rest _) (error "gateway timed out"))))
         (should-error
-         (my/noema-jupyter-cell--introspect "inspect" nil t)
+         (+noema-jupyter-cell--introspect "inspect" nil t)
          :type 'user-error)))))
 
-(ert-deftest my/noema-jupyter-cell-explicit-inspect-uses-dotted-expression ()
+(ert-deftest +noema-jupyter-cell-explicit-inspect-uses-dotted-expression ()
   (with-temp-buffer
     (insert "# %% id=cell-a\nvalue = np.array([1])\n")
     (goto-char (point-min))
     (search-forward "np.arr")
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-kernel "python3")
-    (setq-local my/noema-jupyter-cell-session "default")
-    (setq-local my/noema-jupyter-cell-language "python")
-    (let ((my/noema--ready t)
+    (setq-local +noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
+    (setq-local +noema-jupyter-cell-kernel "python3")
+    (setq-local +noema-jupyter-cell-session "default")
+    (setq-local +noema-jupyter-cell-language "python")
+    (let ((+noema--ready t)
           requests)
-      (cl-letf (((symbol-function 'my/noema-jupyter-cell--api-sync)
+      (cl-letf (((symbol-function '+noema-jupyter-cell--api-sync)
                  (lambda (_channel body _timeout)
                    (push body requests)
                    '((ok . t) (supported . t) (found . t)))))
-        (should (my/noema-jupyter-cell--json-true-p
-                 (my/noema-jupyter-cell--introspect "inspect" nil t)
+        (should (+noema-jupyter-cell--json-true-p
+                 (+noema-jupyter-cell--introspect "inspect" nil t)
                  'found)))
       (should (= (length requests) 1))
       (let ((request (car requests)))
         (should (equal (alist-get 'code request) "np.array"))
         (should (= (alist-get 'cursorPos request) (length "np.array")))))))
 
-(ert-deftest my/noema-jupyter-cell-explicit-inspect-uses-enclosing-call-in-string ()
+(ert-deftest +noema-jupyter-cell-explicit-inspect-uses-enclosing-call-in-string ()
   (with-temp-buffer
     (python-mode)
     (insert "# %% id=cell-a\nprint(\"sadsad\")\n")
     (goto-char (point-min))
     (search-forward "sad")
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-language "python")
-    (let ((my/noema--ready t)
+    (setq-local +noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
+    (setq-local +noema-jupyter-cell-language "python")
+    (let ((+noema--ready t)
           request)
-      (cl-letf (((symbol-function 'my/noema-jupyter-cell--api-sync)
+      (cl-letf (((symbol-function '+noema-jupyter-cell--api-sync)
                  (lambda (_channel body _timeout)
                    (setq request body)
                    '((ok . t) (supported . t) (found . t)))))
-        (should (my/noema-jupyter-cell--json-true-p
-                 (my/noema-jupyter-cell--introspect "inspect" nil t)
+        (should (+noema-jupyter-cell--json-true-p
+                 (+noema-jupyter-cell--introspect "inspect" nil t)
                  'found)))
       (should (equal (alist-get 'code request) "print"))
       (should (= (alist-get 'cursorPos request) (length "print"))))))
 
-(ert-deftest my/noema-jupyter-cell-explicit-inspect-uses-call-after-closing-paren ()
+(ert-deftest +noema-jupyter-cell-explicit-inspect-uses-call-after-closing-paren ()
   (with-temp-buffer
     (python-mode)
     (insert "# %% id=cell-a\nprint(\"sadsad\")\n")
@@ -522,49 +522,49 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
     (forward-line -1)
     (end-of-line)
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-language "python")
-    (let ((my/noema--ready t)
+    (setq-local +noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
+    (setq-local +noema-jupyter-cell-language "python")
+    (let ((+noema--ready t)
           request)
-      (cl-letf (((symbol-function 'my/noema-jupyter-cell--api-sync)
+      (cl-letf (((symbol-function '+noema-jupyter-cell--api-sync)
                  (lambda (_channel body _timeout)
                    (setq request body)
                    '((ok . t) (supported . t) (found . t)))))
-        (my/noema-jupyter-cell--introspect "inspect" nil t))
+        (+noema-jupyter-cell--introspect "inspect" nil t))
       (should (equal (alist-get 'code request) "print"))
       (should (= (alist-get 'cursorPos request) (length "print"))))))
 
-(ert-deftest my/noema-jupyter-cell-explicit-inspect-maps-python-number-to-type ()
+(ert-deftest +noema-jupyter-cell-explicit-inspect-maps-python-number-to-type ()
   (with-temp-buffer
     (python-mode)
     (insert "# %% id=cell-a\na = 3\n")
     (goto-char (point-min))
     (search-forward "3")
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-language "python")
-    (let ((my/noema--ready t)
+    (setq-local +noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
+    (setq-local +noema-jupyter-cell-language "python")
+    (let ((+noema--ready t)
           request)
-      (cl-letf (((symbol-function 'my/noema-jupyter-cell--api-sync)
+      (cl-letf (((symbol-function '+noema-jupyter-cell--api-sync)
                  (lambda (_channel body _timeout)
                    (setq request body)
                    '((ok . t) (supported . t) (found . t)))))
-        (my/noema-jupyter-cell--introspect "inspect" nil t))
+        (+noema-jupyter-cell--introspect "inspect" nil t))
       (should (equal (alist-get 'code request) "int"))
       (should (= (alist-get 'cursorPos request) (length "int"))))))
 
-(ert-deftest my/noema-jupyter-cell-successful-inspect-replaces-stale-error-message ()
+(ert-deftest +noema-jupyter-cell-successful-inspect-replaces-stale-error-message ()
   (with-temp-buffer
     (python-mode)
     (insert "# %% id=cell-a\na = 3\n")
     (goto-char (point-min))
     (search-forward "3")
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-language "python")
-    (let ((my/noema--ready t)
+    (setq-local +noema-jupyter-cell-source-file "/tmp/notebook.ipynb")
+    (setq-local +noema-jupyter-cell-language "python")
+    (let ((+noema--ready t)
           shown-message)
-      (cl-letf (((symbol-function 'my/noema-jupyter-cell--api-sync)
+      (cl-letf (((symbol-function '+noema-jupyter-cell--api-sync)
                  (lambda (&rest _)
                    '((ok . t)
                      (supported . t)
@@ -574,7 +574,7 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
                 ((symbol-function 'message)
                  (lambda (format-string &rest args)
                    (setq shown-message (apply #'format format-string args)))))
-        (my/noema-jupyter-cell-inspect))
+        (+noema-jupyter/cell-inspect))
       (should (equal shown-message
                      "Noema Jupyter: showing kernel documentation for `int'")))))
 
@@ -582,7 +582,7 @@ notebook in Fundamental mode without the Jupyter UI or LSP."
 
 ;;; init-noema-jupyter-notebook-tests.el ends here
 
-(ert-deftest my/noema-jupyter-notebook-refuses-to-save-over-an-unreadable-file ()
+(ert-deftest +noema-jupyter-notebook-refuses-to-save-over-an-unreadable-file ()
   "Saving must not fall back to the opened-at document.
 
 Noema writes execution results straight into the .ipynb while the projection
@@ -593,11 +593,11 @@ back out as if they had never happened."
         (progn
           (with-temp-file file
             (insert (json-serialize
-                     (my/noema-jupyter-notebook-test--document))))
+                     (+noema-jupyter-notebook-test--document))))
           (with-current-buffer (find-file-noselect file)
             (unwind-protect
                 (progn
-                  (should my/noema-jupyter-notebook--projection-p)
+                  (should +noema-jupyter-notebook--projection-p)
                   (goto-char (point-max))
                   (insert "\n# %% id=extra\nprint(1)\n")
                   ;; The file is still there, but no longer parseable.  Adopt
@@ -615,7 +615,7 @@ back out as if they had never happened."
               (kill-buffer))))
       (delete-file file))))
 
-(ert-deftest my/noema-jupyter-cell-reactivation-keeps-the-original-header-line ()
+(ert-deftest +noema-jupyter-cell-reactivation-keeps-the-original-header-line ()
   "Every reload re-enters the enable branch; only the first may save the header.
 
 Recording the header line again would store this mode's own :eval form as the
@@ -623,20 +623,20 @@ Recording the header line again would store this mode's own :eval form as the
   (with-temp-buffer
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
     (setq-local header-line-format "original")
-    (cl-letf (((symbol-function 'my/noema-jupyter-cell--ensure-noema-host)
+    (cl-letf (((symbol-function '+noema-jupyter-cell--ensure-noema-host)
                #'ignore))
-      (my/noema-jupyter-cell-mode 1)
-      (should (equal my/noema-jupyter-cell--saved-header-line-format
+      (+noema-jupyter-cell-mode 1)
+      (should (equal +noema-jupyter-cell--saved-header-line-format
                      "original"))
       ;; A structural mutation reloads the projection and activates again.
-      (my/noema-jupyter-cell-mode 1)
-      (my/noema-jupyter-cell-mode 1)
-      (should (equal my/noema-jupyter-cell--saved-header-line-format
+      (+noema-jupyter-cell-mode 1)
+      (+noema-jupyter-cell-mode 1)
+      (should (equal +noema-jupyter-cell--saved-header-line-format
                      "original"))
-      (my/noema-jupyter-cell-mode -1)
+      (+noema-jupyter-cell-mode -1)
       (should (equal header-line-format "original")))))
 
-(ert-deftest my/noema-jupyter-notebook-edits-a-malformed-file-as-text ()
+(ert-deftest +noema-jupyter-notebook-edits-a-malformed-file-as-text ()
   "A parse error here would abort `find-file' itself.
 
 The mode is reached from `auto-mode-alist', so an unhandled `json-parse-error'
@@ -648,74 +648,74 @@ leaves the buffer in an unrelated mode showing raw JSON with no explanation."
           (with-current-buffer (find-file-noselect file)
             (unwind-protect
                 (progn
-                  (should-not my/noema-jupyter-notebook--projection-p)
-                  (should-not (bound-and-true-p my/noema-jupyter-cell-mode))
+                  (should-not +noema-jupyter-notebook--projection-p)
+                  (should-not (bound-and-true-p +noema-jupyter-cell-mode))
                   ;; The text is left exactly as it is on disk.
                   (should (equal (buffer-string) "{ not a notebook")))
               (set-buffer-modified-p nil)
               (kill-buffer))))
       (delete-file file))))
 
-(ert-deftest my/noema-jupyter-cell-implicit-introspection-backs-off ()
+(ert-deftest +noema-jupyter-cell-implicit-introspection-backs-off ()
   "A kernel that misses the deadline must not be asked again per keystroke."
   (with-temp-buffer
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
-    (should-not (my/noema-jupyter-cell--introspect-backoff-p))
-    (my/noema-jupyter-cell--introspect-failed)
-    (should (my/noema-jupyter-cell--introspect-backoff-p))
+    (should-not (+noema-jupyter-cell--introspect-backoff-p))
+    (+noema-jupyter-cell--introspect-failed)
+    (should (+noema-jupyter-cell--introspect-backoff-p))
     ;; Answering again clears it immediately; the backoff is not a fixed
     ;; penalty window the user has to wait out.
-    (my/noema-jupyter-cell--introspect-succeeded)
-    (should-not (my/noema-jupyter-cell--introspect-backoff-p))))
+    (+noema-jupyter-cell--introspect-succeeded)
+    (should-not (+noema-jupyter-cell--introspect-backoff-p))))
 
-(ert-deftest my/noema-jupyter-cell-project-root-authorizes-outside-notebooks ()
+(ert-deftest +noema-jupyter-cell-project-root-authorizes-outside-notebooks ()
   "Outside the notes root, commands ask for a project; passive calls never do."
   ;; Load before mocking so the lazy require cannot replace the mock.
   (require 'noema-research)
   (let* ((notes (make-temp-file "noema-notes-" t))
          (outside (make-temp-file "noema-outside-" t))
-         (my/noema--notes-root notes)
+         (+noema--notes-root notes)
          (asked nil))
     (unwind-protect
         (with-temp-buffer
           (setq-local buffer-file-name (expand-file-name "a.ipynb" outside))
           (cl-letf (((symbol-function 'noema-project-ensure)
                      (lambda (_file) (setq asked t) outside)))
-            (should (equal (my/noema-jupyter-cell--with-project-root
+            (should (equal (+noema-jupyter-cell--with-project-root
                             '((scriptFile . "x")))
                            '((scriptFile . "x"))))
             (should-not asked)
             (should (equal (alist-get
                             'projectRoot
-                            (my/noema-jupyter-cell--with-project-root
+                            (+noema-jupyter-cell--with-project-root
                              '((scriptFile . "x")) t))
                            outside))
             (should asked))
-          (setq-local my/noema-jupyter-cell--project-root-cache nil
+          (setq-local +noema-jupyter-cell--project-root-cache nil
                       buffer-file-name (expand-file-name "b.ipynb" notes))
           (setq asked nil)
           (cl-letf (((symbol-function 'noema-project-ensure)
                      (lambda (_file) (setq asked t) notes)))
             (should-not (assq 'projectRoot
-                              (my/noema-jupyter-cell--with-project-root
+                              (+noema-jupyter-cell--with-project-root
                                '((scriptFile . "x")) t)))
             (should-not asked)))
       (delete-directory notes t)
       (delete-directory outside t))))
 
-(ert-deftest my/noema-jupyter-cell-explicit-inspect-ignores-backoff ()
+(ert-deftest +noema-jupyter-cell-explicit-inspect-ignores-backoff ()
   "Backoff throttles typing-triggered completion, never an explicit request."
   (with-temp-buffer
     (insert "# %% id=cell-a\nanswer\n")
     (goto-char (point-max))
     (setq-local buffer-file-name "/tmp/notebook.ipynb")
-    (setq-local my/noema-jupyter-cell-mode t)
-    (my/noema-jupyter-cell--introspect-failed)
+    (setq-local +noema-jupyter-cell-mode t)
+    (+noema-jupyter-cell--introspect-failed)
     (let ((asked nil))
-      (cl-letf (((symbol-function 'my/noema--api-call-sync)
+      (cl-letf (((symbol-function '+noema--api-call-sync)
                  (lambda (&rest _) (setq asked t) nil))
-                ((symbol-function 'my/noema-jupyter-cell--api-sync)
+                ((symbol-function '+noema-jupyter-cell--api-sync)
                  (lambda (&rest _) (setq asked t) '((found . t)))))
-        (let ((my/noema--ready t))
-          (my/noema-jupyter-cell--introspect "inspect" nil t))
+        (let ((+noema--ready t))
+          (+noema-jupyter-cell--introspect "inspect" nil t))
         (should asked)))))

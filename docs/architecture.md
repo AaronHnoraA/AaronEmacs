@@ -33,37 +33,34 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 `:autoload`（只注册命令）、`:doctor`（模块自己的诊断）。加载器、加载账本、诊断与
 模块面板见 [module-system.md](design/module-system.md)。
 
-按依赖方向，自下而上：
+模块按 Doom 的分类放在 `lisp/分类/模块/`，加载顺序由 `aaron!` 声明决定。下表按依赖方向自下而上排列：
 
-| 层 | 位置 | 内容 |
+| 分类 | 模块 | 内容 |
 | --- | --- | --- |
-| 0 基础 | `lisp/core/`（`aaron-lib` 宏与 hook 运行器、`aaron-emacs` 生命周期 hook 与增量加载，最先加载）、`init-utils`、`init-base`、`init-open`、`patches/`、`init-macos`、`init-neomacs` | 工具函数、基础设置、打开路由、上游补丁、平台与构建兼容层（只有 `init-neomacs` 知道当前是哪个构建） |
-| 1 Remote 框架 | `lisp/remote/`（`init-remote` 入口；`:remote` 分类，深度 -100，永远紧跟核心与系统层） | `/fs:TARGET:/path` 身份、target/pipeline/backend/session、进程、通道、环境胶囊、workspace 资源。核心基础设施，见 [remote-framework.md](design/remote-framework.md) |
-| 2 外壳 | `init-emacs-gateway`、`init-ui`、`init-activity*`、`init-tabbar`、`init-display-rules`、`init-tools`、`init-evil` | 外部网关、主题与 mode-line、活动指示、标签栏、窗口显示规则、leader 键（`general.el`） |
-| 3 开发 | `init-lsp*`、`init-format`、`telescope/`、`init-symbols`、`init-code-actions`、`lisp/git/`、`init-dev`、`init-debug*`、`init-test`、`init-task`、`init-project-run` | LSP 路由与工具（分层见 [lsp-workflow.md](design/lsp-workflow.md)）、诊断面板、Git、调试/测试/任务 |
-| 4 工作台 | `init-navigation*`、`init-dired`、`init-dirvish-keys`、`init-*-workbench`、`init-minibuffer`、`init-consult-project`、`init-windows`、`init-project*`、`init-workspaces`、`init-treemacs-bridge`、`init-session` | 导航、文件管理、补全、窗口、项目（Projectile + Perspective + Transient），见 [project-guide.md](guide/project-guide.md) |
-| 5 运维 | `init-maintenance`、`config-tools`、`init-performance`、`init-diagnostics-*`、`init-health`、`init-server`、`init-background` | 包锁/状态维护、配置注册表 UI、性能观测、健康检查、server 与后台应用（`bin/emacs-app`） |
-| 6 Noema 桥 | `lang/init-md`、`lisp/roam/` | Markdown → Noema 页面、xwidget 桥、知识搜索、roam 导航、Jupyter 桥、发布 |
-| 7 应用与输入 | `init-portal`、`init-text`、`init-shell`、`init-remote-connectboard`、`init-jupyter-board`、`init-search*`、`init-direnv`、编辑小件、`init-auctex`/`init-latex`、`init-browser`、`init-function-keys`、`init-hyper`、`init-mouse` | 终端（Portal/Ghostel）、搜索、浏览器、LaTeX、按键层 |
-
-语言模块在 `lisp/lang/`（`lean/`、`tex/`、`beancount/` 为多文件子目录），由各自的
-主模块或 `auto-mode-alist` 引入。
+| `:core` | `lisp/core/aaron-*.el`：`aaron-lib`、`aaron-emacs`、`aaron-modules`、`aaron-doctor`、`aaron-modules-board`，以及 `aaron-utils`、`aaron-base`、`aaron-open`、`aaron-patches`、`aaron-funcs`、`aaron-packages` | 宏、生命周期 hook、模块系统、工具函数、基础设置、打开路由、上游补丁、包工具 |
+| `:os` | `macos`、`macos-tools`、`neomacs` | 平台与构建兼容层（只有 `os/neomacs` 知道当前是哪个构建） |
+| `:remote` | `lisp/remote/remote-*.el`（框架库），`framework`（入口与 TRAMP 配置）、`gateway` | `/fs:TARGET:/path` 身份、target/pipeline/backend/session、进程、通道、环境胶囊、workspace 资源；深度 -100，永远紧跟核心与系统层。见 [remote-framework.md](design/remote-framework.md) |
+| `:ui` | `theme`、`activity`、`tabbar`、`popup`、`windows`、`treemacs`、`workspaces`、`scrollview`、`session`、`rainbow-delimiters` | 主题与 mode-line、活动指示、标签栏、窗口显示规则、窗口与工作区 |
+| `:completion` | `minibuffer`、`consult-project`、`search`、`search-extra`、`telescope`、`fzf` | 补全、搜索、选择器 |
+| `:editor` | `evil`、`format`、`fold`、`navigation`、`navigation-extra`、`editing`、`snippets`、`file-templates`、`expand-region`、`harpoon`、`text`、`smartparens`、`avy`、`multiple-cursors` | 编辑、导航、折叠、格式化、模板 |
+| `:emacs` | `dired`、`dirvish`、`files`、`smerge`、`scratch`、`dir-locals`、`rename` | 内置功能的配置与工作台 |
+| `:checkers` | `problems`、`diagnostics`、`diagnostics-extra`、`spell`、`grammar` | 诊断面板、拼写、LanguageTool |
+| `:tools` | `lsp`、`lsp-ops`、`lsp-hub`、`symbols`、`workspace-symbol`、`code-actions`、`git`、`project`、`project-local`、`run`、`task`、`test`、`output`、`debugger`、`debug-profile`、`jupyter`、`tree-sitter`、`direnv`、`agent`、`copilot`、`clutch`、`zoxide`、`connectboard`、`menus` | LSP（分层见 [lsp-workflow.md](design/lsp-workflow.md)）、Git、项目（Projectile + Perspective + Transient，见 [project-guide.md](guide/project-guide.md)）、运行/测试/调试、Jupyter 管理、AI |
+| `:lang` | `filetypes`、`org`、`markdown`、`auctex`、`latex`、`python`、`java`、`lean`、`beancount`、`cpp`、`rust`、`elisp` 等 | 各语言；多数由 `tools/lsp` 在加载末尾 `require` |
+| `:term` | `portal`、`shell` | 终端（Portal/Ghostel） |
+| `:noema` | `bridge`（含 publish、agenda、note-code、portal、agent-bridge）、`roam`、`search`、`jupyter`、`activity` | Markdown → Noema 页面、xwidget 桥、知识搜索、roam 导航、Jupyter 桥、发布 |
+| `:app` | `browser`、`calendar`、`joplin`（未声明） | 浏览器、日历 |
+| `:config` | `default`（Doom 风格默认值）、`maintenance`、`config-tools`、`performance`、`health`、`server`、`background`、`compile`、`function-keys`、`hyper`、`mouse` | 运维、配置注册表 UI、性能观测、健康检查、后台应用（`bin/emacs-app`）、按键层 |
 
 ### 目录职责
 
 ```text
-lisp/                 init-*.el 本地模块与本仓库自写的单文件包（如 direnv.el）
-lisp/core/            核心库与模块系统，以 Doom 的 doom-lib/doom-emacs/doom-modules 为模板：
-                      aaron-lib（after!/add-hook!/defadvice!/cmd! 等宏）、aaron-emacs（生命周期
-                      hook、增量加载）、aaron-modules（aaron!、modulep!、加载器、加载账本）、
-                      aaron-doctor（诊断与策略）、aaron-modules-board（module-board）
-lisp/CATEGORY/NAME/   目录模块（迁移目标）：config.el、init.el、autoload/、doctor.el、README.md
-lisp/remote/          Remote 框架，只放框架代码；消费者留在各自模块
-lisp/roam/            Noema 的 Emacs 侧桥接（init-noema*.el，含 Jupyter 桥 init-noema-jupyter-*）
-lisp/lang/            语言模块
-lisp/git/             Git/GitHub 工作台
-lisp/telescope/       Telescope 风格选择器（含诊断选择器 init-problems）
-lisp/patches/         对上游包的窄补丁
+lisp/init-modules.el  aaron! 声明：全部模块、分类与加载顺序
+lisp/core/            核心，以 Doom 的 doom-lib/doom-emacs/doom-modules 为模板，平铺的 aaron-*.el
+lisp/CATEGORY/NAME/   模块：config.el（provide CATEGORY/NAME/config）与同目录的其他文件
+                      （provide CATEGORY/NAME/FILE），按需 init.el、autoload/、doctor.el、README.md
+lisp/remote/          Remote 框架库（remote-*.el，public 命名）与 framework/、gateway/ 两个模块；
+                      消费者留在各自模块
 site-lisp/            自维护或 vendored 的 Elisp 包：
   general.el/           键位层（启动依赖）
   config/               配置注册表（config-register / config-board）
@@ -82,10 +79,10 @@ var/                  运行时状态与缓存（eln-cache、remote/、noema/hos
 templates/            auto-insert 模板；templates/noema 链到 Noema 模板目录
 bin/                  emacs-app（后台应用唯一入口）及辅助脚本
 tools/                raycast-emacs（唯一外部控制面）、macos-background 原生源码等
-test/                 ERT 测试（*-tests.el），按模块命名
+test/                 ERT 测试（*-tests.el）
 docs/                 两个仓库的全部文档，入口 docs/README.md：guide/ 用法、design/ 现行机制、
-                      acceptance/ 验收、ops/ 运维、records/ 审计与历史（带日期，不更新）；
-                      noema/ 下是 Noema 的文档，分类相同
+                      acceptance/ 验收、ops/ 运维、records/ 审计与历史（带日期，不更新）、
+                      works/ 进行中的项目；noema/ 下是 Noema 的文档，分类相同
 ```
 
 ### 横切机制
@@ -96,16 +93,16 @@ docs/                 两个仓库的全部文档，入口 docs/README.md：guid
   `file-remote-p` 或 target ID 分支。
 - 配置值：`site-lisp/config` 注册表 + `etc/config-store.el`，见
   [config-management.md](design/config-management.md)。
-- 键位：`general.el`；leader 前缀在 `init-evil.el`，域内后缀在所属模块，见
+- 键位：`general.el`；leader 前缀在 `editor/evil/config.el`，域内后缀在所属模块，见
   [daily-usage.md](guide/daily-usage.md)。
 - 运行时资源：timer/进程/overlay 的生命周期规则见 `AGENT.md` “Resource Lifecycle Rules”。
-- 观测：`my/performance-*`、`config-health`、Remote Doctor、LSP Doctor、
-  `my/latex-preview-doctor`。
+- 观测：`+performance-*`、`config-health`、Remote Doctor、LSP Doctor、
+  `+latex/preview-doctor`。
 
 ## Emacs ↔ Noema 边界
 
 ```text
-Emacs (lisp/roam/init-noema.el)
+Emacs (lisp/noema/bridge/config.el)
   │ 启动并监督
   ▼
 Node host  site-lisp/noema/web-host.mjs    HTTP/SSE、静态资源、server/Features/*
@@ -118,19 +115,19 @@ Raycast ──(var/noema/host.json → loopback /api)──▶ Node host
 
 | 通路 | Emacs 侧 | Noema 侧 |
 | --- | --- | --- |
-| Markdown 页面 | `lang/init-md`（重定向）、`roam/init-noema`（xwidget 桥） | `pages/`（页面）、`src/cm6/`（编辑器） |
-| 按键 | `noema-xwidget-keys`、`my/noema-keys-mode-map` | `pages/host-keyboard.ts`、`xwidget-key-guard.ts` |
+| Markdown 页面 | `lang/markdown`（重定向）、`noema/bridge`（xwidget 桥） | `pages/`（页面）、`src/cm6/`（编辑器） |
+| 按键 | `noema-xwidget-keys`、`+noema-keys-mode-map` | `pages/host-keyboard.ts`、`xwidget-key-guard.ts` |
 | 页面文本给 Emacs 工具 | `noema-md-bridge` | 页面保存的选区 |
-| 搜索与引用 | `roam/init-noema-search` | `kernel/noema/wikisearch`、`references.go` |
-| Agenda | `noema-agenda`、`roam/init-noema-agenda-*` | `server/lib/agenda-*`、`kernel/noema/agenda` |
+| 搜索与引用 | `noema/search` | `kernel/noema/wikisearch`、`references.go` |
+| Agenda | `noema-agenda`、`noema/bridge/agenda-*` | `server/lib/agenda-*`、`kernel/noema/agenda` |
 | `.noema` 工作文档 | `noema-research*`（JuText、Graph Board） | `kernel/noema/research`、`server/Features/Research` |
-| Agent | `noema-agent-*`、`init-ai-ide` | ACP 边界、`kernel/agent`、`kernel/mcp` |
-| Jupyter（`.ipynb`） | `roam/init-noema-jupyter-*`、`init-jupyter-board` | `server/Features/Jupyter`、`server/jupyter/`、`jupyter/` |
-| 数学宏 | `lang/tex/init-latex`（RaTeX） | `resources/katex-macros`、`shared/katex-macros.mjs` |
+| Agent | `noema-agent-*`、`tools/agent` | ACP 边界、`kernel/agent`、`kernel/mcp` |
+| Jupyter（`.ipynb`） | `noema/jupyter/*`、`tools/jupyter` | `server/Features/Jupyter`、`server/jupyter/`、`jupyter/` |
+| 数学宏 | `lang/latex`（RaTeX） | `resources/katex-macros`、`shared/katex-macros.mjs` |
 
-Noema 的 Elisp 由 `init-ai-ide` 把 `site-lisp/noema/lisp` 加入 `load-path`。约定：
+Noema 的 Elisp 由 `tools/agent` 把 `site-lisp/noema/lisp` 加入 `load-path`。约定：
 产品语义（数据模型、Agent、Proposal、能力）放在 Noema 的 `lisp/noema-*.el`；
-只与本配置的窗口、键位、Remote、Portal 相关的胶水放在本仓库 `lisp/roam/`。
+只与本配置的窗口、键位、Remote、Portal 相关的胶水放在本仓库 `lisp/noema/`。
 
 ## 命令行入口
 
@@ -139,7 +136,7 @@ Noema 的 Elisp 由 `init-ai-ide` 把 `site-lisp/noema/lisp` 加入 `load-path`�
 | 命令 | 作用 | 规格 |
 | --- | --- | --- |
 | `bin/emacs-app` | 后台 Emacs 的唯一入口：start/restart/kill/show/hide/status、白名单动作 `act`、`frame`、`terminal`、登录项 | `AGENT.md` “Background application”，[daily-usage.md](guide/daily-usage.md) “Emacs 作为后台应用” |
-| `bin/emacsopen` | 在运行中的 Emacs 打开文件，供 agent、脚本与终端调用：位置 `-o`/`-l`/`-r`/`-a`/`-b`/`-f`（其他窗口、四向分割、新 frame；默认选中窗口，`here`/`-o` 复用已显示该文件的窗口），`+行[:列]` 或 `文件:行[:列]`，`-n` 不抢焦点；每个文件输出一行 JSON（buffer、窗口、frame、是否复用与定位），失败退出非零；不依赖 Ghostty。实现 `my/open-place`（`lisp/init-open.el`）；`~/.local/bin/emacsopen` 链到这里 | `emacsopen --help` |
+| `bin/emacsopen` | 在运行中的 Emacs 打开文件，供 agent、脚本与终端调用：位置 `-o`/`-l`/`-r`/`-a`/`-b`/`-f`（其他窗口、四向分割、新 frame；默认选中窗口，`here`/`-o` 复用已显示该文件的窗口），`+行[:列]` 或 `文件:行[:列]`，`-n` 不抢焦点；每个文件输出一行 JSON（buffer、窗口、frame、是否复用与定位），失败退出非零；不依赖 Ghostty。实现 `aaron-open-place`（`lisp/core/aaron-open.el`）；`~/.local/bin/emacsopen` 链到这里 | `emacsopen --help` |
 | `bin/install-remote-ikernel` | 安装 `site-lisp/remote_ikernel` | [jupyter-workflow.md](design/jupyter-workflow.md) |
 | `bin/sage-jupyter-kernel` | SageMath kernel 启动包装，日志写 `var/log/`；由 Noema 的 sagemath kernelspec 模板调用 | — |
 | `make <target>` | 编译、测试、锁文件、健康检查；`make help` 列出全部 | [maintenance.md](ops/maintenance.md) |
@@ -153,7 +150,7 @@ Raycast 扩展只调用 `bin/emacs-app`；新增外部入口放进 `bin/`，并�
 | 新本地模块 | 所属目录 + `init-modules.el` 中按依赖插入 |
 | 可调设置 | `config-register` + `etc/config-store.el` |
 | 文件/进程/网络/环境 | `remote-*` API；缺能力就扩展框架并实现 native 与远程 backend |
-| 语言服务器 | `my/register-language-server`，语言模块不维护本地/远程两套 |
+| 语言服务器 | `+register-language-server`，语言模块不维护本地/远程两套 |
 | Noema 页面行为 | Noema 仓库 `pages/` 或 `src/cm6/`，不在 placeholder buffer 上实现 |
 | Noema 数据、搜索、引用 | Go kernel；Node/Emacs 只转发与显示 |
 | `.noema` 语义 | Noema `lisp/noema-research*.el` 与 kernel `noema/research` |
@@ -163,18 +160,19 @@ Raycast 扩展只调用 `bin/emacs-app`；新增外部入口放进 `bin/`，并�
 ## 命名
 
 符号命名照 Doom：核心 `lisp/core/` 用 `aaron-`（私有 `aaron--`，命令 `aaron/`），对应 Doom
-的 `doom-`；模块用 `+模块-`（私有 `+模块--`，命令 `+模块/`）；hook 函数以 `-h` 结尾，advice
-以 `-a` 结尾；宏沿用 Doom 的 `!` 名字。`remote-*`、`config-*`、`noema-*`、`aaron-ui-*` 等公开
-子系统保留自己的命名空间。现有的 `my/` 是旧命名，随模块迁入分类目录逐个改名，同一改动里
-更新所有调用方，不留兼容别名；规则见 `AGENT.md`，进度见
-[doom-template](works/doom-template/README.md)。`aaron-` 与下面的旧名 Aaronnote 无关。
+的 `doom-`；模块的普通符号是 `+领域词-…`（如 `+noema-roam-root`，私有 `+…--…`），命令是
+`+领域/动作`（如 `+git/board`、`+language-server/doctor`）；hook 函数以 `-h` 结尾，advice 以
+`-a` 结尾；宏沿用 Doom 的 `!` 名字。`remote-*`、`config-*`、`noema-*`、`aaron-ui-*` 等公开
+子系统保留自己的命名空间。旧的 `my/` 命名已全部迁移（对照表见
+[records/migrations/naming-migration-2026-10.md](records/migrations/naming-migration-2026-10.md)），不留兼容别名。
+`aaron-` 与下面的旧名 Aaronnote 无关。
 
 Noema 早先叫 Aaronnote。两个仓库里的文件、模块、通道（`noema:api:*`）、环境变量
 （`NOEMA_*`）、CSS 类与状态目录都已改为 `noema`；Noema 的页面源码目录是 `pages/`，
 构建到 `dist/pages`。旧名只保留在读取既有数据的地方：`@aaronnote` 代码标记、配置里
-保存的 `aaronnote` 主题 id、`init-base.el` 清理旧 `my/aaronnote-*` 命令历史，以及
+保存的 `aaronnote` 主题 id、`core/aaron-base.el` 清理旧 `my/aaronnote-*` 命令历史，以及
 `init.el` 启动时把 `var/aaronnote/` 一次性并入 `var/noema/`。不要新增 `aaronnote` 名字。
 
-Jupyter 在 Emacs 侧分两部分：`lisp/init-jupyter-*`（kernelspec 管理、Jupyter Board）与
-`lisp/roam/init-noema-jupyter-*`（Noema 的 notebook/cell 桥）；Noema 的 `jupyter/`
+Jupyter 在 Emacs 侧分两部分：`lisp/tools/jupyter/`（kernelspec 管理、Jupyter Board）与
+`lisp/noema/jupyter/`（Noema 的 notebook/cell 桥）；Noema 的 `jupyter/`
 放 kernelspec 模板与安装脚本。

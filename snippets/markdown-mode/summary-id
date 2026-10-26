@@ -3,7 +3,7 @@
 # key: summ
 # group: Noema local
 # --
-#+begin summary ${1:title} {#`(my/noema-new-id "block")`}
+#+begin summary ${1:title} {#`(noema-new-id "block")`}
 ${2:Summary.}
 #+end summary
 $0

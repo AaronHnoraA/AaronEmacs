@@ -3,7 +3,7 @@
 
 (config-store-set
  '((eww-search-prefix . "https://duckduckgo.com/?q=")
-   (browse-url-browser-function . my/browse-url)
+   (browse-url-browser-function . +browser/browse-url)
    (xwidget-webkit-buffer-name-format . "*xwidget*")
    (xwidget-webkit-enable-developer-extras . t)
    (xwidget-webkit-user-agent

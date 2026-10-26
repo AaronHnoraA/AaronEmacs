@@ -3,7 +3,7 @@
 # key: tikz
 # group: Noema blocks
 # --
-#+begin tikz `(my/noema-new-id "block")`
+#+begin tikz `(noema-new-id "block")`
 \begin{tikzpicture} [
     vertex/.style={circle, draw, fill=white, minimum size=7mm, inner sep=0pt}
 ]

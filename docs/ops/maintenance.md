@@ -36,7 +36,7 @@ Portal 由 `package-vc` 锁定版本管理。`elpa/portal` 是加载入口，包
 
 其他 VC 包需要本地补丁时，把 `git diff` 导出到 `config/`，再在
 `config/package-patches.el` 登记 `(包名 . "config/补丁.patch")`。
-`make install` 会给新安装的包应用补丁；`M-x my/package-upgrade-all` 会在升级前
+`make install` 会给新安装的包应用补丁；`M-x aaron/package-upgrade-all` 会在升级前
 撤销、升级后重放。补丁冲突会停止升级并保留具体 Git 错误，修好补丁再继续。
 
 构建后重启 Emacs 才能载入新的原生模块。Portal 终端与 Noema Portal 页面共用
@@ -85,7 +85,7 @@ make audit-ui-tokens
 ### 第三方兼容补丁
 
 针对 Emacs/ELPA 版本错配的临时修复统一放在
-[`lisp/patches/init-patches.el`](../../lisp/patches/init-patches.el)，并由
+[`lisp/core/aaron-patches.el`](../../lisp/core/aaron-patches.el)，并由
 `init-modules.el` 的早期加载阶段统一启用。不要把这类 workaround 散落到业务模块
 或 `init.el`。包更新后重新运行启动检查；如果上游已经修复，应删除对应补丁和注释，
 而不是继续保留无效兼容代码。
@@ -124,13 +124,13 @@ make audit-ui-tokens
 
 `site-lisp/` 里放的是不走 package-lock 的本地 Elisp。
 
-单文件第三方包集中在 `site-lisp/vendored/`（`init.el` 加入 `load-path`，`init-base.el` require）。更新时整文件替换并保留上游头注释，不在其中写本地改动。
+单文件第三方包集中在 `site-lisp/vendored/`（`init.el` 加入 `load-path`，`core/aaron-base.el` require）。更新时整文件替换并保留上游头注释，不在其中写本地改动。
 
 当前启动链里有一个重要项：
 
 - [site-lisp/general.el/general.el](../../site-lisp/general.el/general.el)
 
-`general.el` 是按键绑定 DSL，主要服务 `lisp/init-funcs.el` 里的 `my/evil-define-key`。它让 leader 绑定可以统一处理 Evil state、符号 keymap、真实 keymap object 和批量绑定。
+`general.el` 是按键绑定 DSL，主要服务 `lisp/core/aaron-funcs.el` 里的 `aaron-evil-define-key`。它让 leader 绑定可以统一处理 Evil state、符号 keymap、真实 keymap object 和批量绑定。
 
 维护边界：
 
@@ -162,7 +162,7 @@ make audit-ui-tokens
 - `test/ratex-tests.el`：新增上述行为的测试；其中断言"`$$` 不被识别"的那条旧用例
   已按新契约改写。
 
-`ratex-auto-download-backend` 在 `init-latex.el` 里被设为 `nil`：默认值 `t` 会在
+`ratex-auto-download-backend` 在 `lang/latex/config.el` 里被设为 `nil`：默认值 `t` 会在
 启动失败时删掉本地编译的二进制，换成上游 release，版本可能与 vendored
 `ratex-core` 不匹配。
 
@@ -232,7 +232,7 @@ make bootstrap-health
 
 文件：
 
-- [lisp/init-compile.el](../../lisp/init-compile.el)
+- [lisp/config/compile/config.el](../../lisp/config/compile/config.el)
 
 常用入口：
 
@@ -245,18 +245,18 @@ make bootstrap-health
   面板内 `s` / `c` / `N` 才运行 startup / byte / native 检查，结果保存在当前会话并显示在面板里。
   `M-x config-health-menu` 打开检查菜单。
 - `M-x config-compile` / `M-x config-compile-menu`
-  容易从 `M-x` 搜到的编译板 / 菜单入口；下面的 `my/` 名称继续兼容现有绑定和调用。
-- `M-x my/compile-board`
+  容易从 `M-x` 搜到的编译板 / 菜单入口；下面是它们背后的 `+compile/…` 命令。
+- `M-x +compile/board`
   统一 board。看状态、做编译、做清理、跑 smoke check。
 - `M-x config-compile-menu`
   transient 菜单版入口。
-- `M-x my/byte-compile-config`
+- `M-x +compile/byte-compile-config`
   编译整套本地配置。
-- `M-x my/native-compile-config`
+- `M-x +compile/native-compile-config`
   对整套本地配置排队 native compile。
-- `M-x my/byte-compile-current-file`
-- `M-x my/native-compile-current-file`
-- `M-x my/native-comp-open-log`
+- `M-x +compile/byte-compile-current-file`
+- `M-x +compile/native-compile-current-file`
+- `M-x +native-comp/open-log`
 
 编译板及整套配置的编译、清理总在这台 Emacs 所在机器的配置目录和进程环境中执行；
 即使从 Remote buffer 打开菜单，也不会把本机配置文件当作目标机文件。编译“当前文件”
@@ -300,14 +300,14 @@ leader 入口：
 - async warning 策略走 `silent`
 - `custom.el` 不纳入统一编译目标
 - 不自动做 byte compile
-- 编译目标目录为 `lisp/` 与 `site-lisp/config/`（config 注册表是每次启动都要加载的基础设施，纳入 `my/byte-compile-config` / `my/native-compile-config`）
+- 编译目标目录为 `lisp/` 与 `site-lisp/config/`（config 注册表是每次启动都要加载的基础设施，纳入 `+compile/byte-compile-config` / `+compile/native-compile-config`）
 - 启动时会删除本配置自有的 `lisp/` 和 `site-lisp/` 下 `.elc`，避免坏字节码或较新的错误 `.elc` 压过源码；`elpa/` 包字节码不受影响
 - 因为 `.elc` 每次启动都会被删，config 的启动加速来自 **native compile** 的 `.eln`（持久缓存在 `var/eln-cache/`，加载源码时自动采用）；byte compile 仅用于诊断 warning
 - 可选自动 native compile on save，由 board / dispatch 统一开关
 
 编译策略：
 
-- 日常入口用 `make compile`、`make compile-byte`、`M-x my/byte-compile-config` 或 compile board 的 `[byte config]`
+- 日常入口用 `make compile`、`make compile-byte`、`M-x +compile/byte-compile-config` 或 compile board 的 `[byte config]`
 - 这些入口主要用于诊断 byte-compile warning/error；生成的本地 `.elc` 是可丢弃产物，下一次正常启动会自动删除
 - 在同一个 Emacs 会话内重复运行时，这些入口仍是增量编译，只会处理缺失或源码比 `.elc` 更新的文件
 - 只有明确需要重建字节码时才用 `make compile-byte-force`、compile board 的 `[force byte]` 或 dispatch 里的 `force byte config`
@@ -317,12 +317,12 @@ leader 入口：
 
 文件：
 
-- [lisp/init-performance.el](../../lisp/init-performance.el)
+- [lisp/config/performance/config.el](../../lisp/config/performance/config.el)
 - [site-lisp/aaron-ui/aaron-ui-performance.el](../../site-lisp/aaron-ui/aaron-ui-performance.el)
 
 常用入口：
 
-- `M-x my/performance-watch`
+- `M-x +performance/watch`
   打开运行时观察 board。
 - `SPC h p`
   同上。
@@ -338,7 +338,7 @@ Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` �
 - **Toolchain Memory**：Emacs 整个后代进程树（递归，不止直接子进程）的 RSS
   汇总——包含 Noema web-host 自己再 spawn 出来的 Copilot LSP、Jupyter
   kernel 这类"孙进程"，用缩进树 + 合计展示，不用再手动拼 `ps`/`pgrep` 审计
-  工具链内存。结构化数据对应 `(my/performance-snapshot)` 里的
+  工具链内存。结构化数据对应 `(+performance-snapshot)` 里的
   `:children-rss-kb`/`:children-count`（只加进结构化 sample，没有写入 TSV
   记录，避免改动已有时序数据的列结构）。
 - Emacs runtime：buffer/process/timer/GC/read-process-output-max/memory-use-counts。
@@ -349,25 +349,25 @@ Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` �
 
 给 agent 或批处理用的只读 API：
 
-- `(my/performance-report-string &optional inspected-buffer)`
+- `(+performance-report-string &optional inspected-buffer)`
   返回完整纯文本报告，不打开 board，也不启动刷新 timer。
-- `(my/performance-snapshot &optional inspected-buffer)`
+- `(+performance-snapshot &optional inspected-buffer)`
   返回结构化 plist，包含当前采样、hook、Org buffer、最大 buffer、timer 和 idle timer 摘要。
-- `(my/performance-hook-snapshot &optional buffer hooks)`
+- `(+performance-hook-snapshot &optional buffer hooks)`
   返回指定 buffer 的 hook 计数和本地条目。
-- `(my/performance-org-buffer-snapshot)`
+- `(+performance-org-buffer-snapshot)`
   返回 Org buffer 的可见性、局部 hook 数量、LaTeX queue/overlay/pending 等状态。
 
 默认低功耗取向：
 
 - macOS 默认使用普通滚轮/触控板滚动，不常驻 `pixel-scroll-precision-mode`；
-  需要更顺滑手感时可以运行 `M-x my/macos-toggle-pixel-scroll-precision` 临时打开。
+  需要更顺滑手感时可以运行 `M-x +macos/toggle-pixel-scroll-precision` 临时打开。
 - 原生 GUI scrollbar 保持关闭；`scrollview` 只在编辑/阅读 buffer 绘制右 fringe
   全文概览。大 buffer 自动停用标记收集，但保留低成本滚动块。
 - macOS 的显式 idle GC 只在焦点离开后作为补充清理，默认不再每次退出 minibuffer 后排一个 GC；
   普通活跃/空闲 GC 交给 `gcmh`。
 - 行号不再全局绘制，只在代码/配置类 buffer 自动打开；普通文本、帮助、终端、侧边栏可手动用
-  `SPC w l` / `M-x my/toggle-line-numbers` 打开。
+  `SPC w l` / `M-x aaron/toggle-line-numbers` 打开。
 - ligature 不再全局启用，只在代码/文本/配置/Org/Markdown 等编辑 buffer 本地启用。
 - TODO 高亮不再全局启用，只在编辑 buffer 本地启用。
 - `whitespace-mode` 默认只检查本地的代码/配置文件，跳过文本、大文件、远程文件和 `so-long` buffer。
@@ -471,7 +471,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 ### 清编译产物
 
-优先直接在 `my/compile-board` 里做：
+优先直接在 `+compile/board` 里做：
 
 - clean `.elc`
 - clean config `.eln`
@@ -482,7 +482,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 入口：
 
-- `M-x my/org-maintenance-board`
+- `M-x +org-maintenance-board`
 - macOS GUI 下 `H-o b`
 
 这个 board 只在打开或手动刷新时扫描。扫描范围和 agenda 一致：
@@ -497,7 +497,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - clean images：删除未引用图片；图片只用同目录/子目录里的 Org 链接判断引用，不做全库交叉引用
 - clean attachments：删除 `attachments/`、`attach/`、`files/` 下未引用附件；附件会看整个当前项目/scope 的 Org 链接
 - prune latex：每个 `ltximg/` 目录只保留最新
-  `my/org-maintenance-latex-cache-max-files-per-dir` 个 preview cache 文件
+  `+org-maintenance-latex-cache-max-files-per-dir` 个 preview cache 文件
 - clear latex：删除当前 scope 下所有 `ltximg/` preview cache 文件
 - empty dirs：删除清理后留下的空 `img/`、`images/`、attachment、`ltximg/` 目录
 - clean all：清未引用媒体、按阈值裁剪 LaTeX cache，再删空目录
@@ -556,29 +556,29 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
 ## 5. 升级 package 的基本原则
 
 - 普通包：优先 `use-package :ensure t`
-- VC 包：优先 `my/package-ensure-vc`
+- VC 包：优先 `aaron-package-ensure-vc`
 - 不要到处手写零散的 `package-vc-install`
 - 包职责尽量放回对应模块，不要堆到 `init.el`
 
 ## 6. 当前需要记住的结构边界
 
-- [lisp/init-base.el](../../lisp/init-base.el)
+- [lisp/core/aaron-base.el](../../lisp/core/aaron-base.el)
   基础行为、字体、系统交互、状态目录
-- [lisp/init-ui.el](../../lisp/init-ui.el)
+- [lisp/ui/theme/config.el](../../lisp/ui/theme/config.el)
   主题、dashboard、help、window behavior
-- [lisp/init-minibuffer.el](../../lisp/init-minibuffer.el)
+- [lisp/completion/minibuffer/config.el](../../lisp/completion/minibuffer/config.el)
   vertico/orderless/consult/embark
-- [lisp/init-search.el](../../lisp/init-search.el)
+- [lisp/completion/search/config.el](../../lisp/completion/search/config.el)
   ivy/counsel/swiper
-- [lisp/telescope/](../../lisp/telescope)
+- [lisp/completion/telescope/](../../lisp/completion/telescope)
   `telescope` 统一入口，以及 diagnostics picker 这类 Telescope 风格的选择器
-- [lisp/init-lsp.el](../../lisp/init-lsp.el)
+- [lisp/tools/lsp/config.el](../../lisp/tools/lsp/config.el)
   company/eglot/lsp-mode/flymake/dape
-- [lisp/init-lsp-tools.el](../../lisp/init-lsp-tools.el)
+- [lisp/tools/lsp-hub/config.el](../../lisp/tools/lsp-hub/config.el)
   language server hub / doctor / dispatch / runtime knobs
-- [lisp/init-org-tools.el](../../lisp/init-org-tools.el)
+- [lisp/lang/org/config.el](../../lisp/lang/org/config.el)
   Org 编辑小工具（Org 主体沿用内置默认）
-- [lisp/init-shell.el](../../lisp/init-shell.el)
+- [lisp/term/shell/config.el](../../lisp/term/shell/config.el)
   shell/eshell/portal/ssh
 
 ## 7. 常见故障排查
@@ -598,17 +598,17 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
 需要手动查看时：
 
 1. `SPC h w`
-2. 或者 `M-x my/show-warnings-buffer`
-3. native compile 相关问题先看 `M-x my/native-comp-open-log`
+2. 或者 `M-x aaron/show-warnings-buffer`
+3. native compile 相关问题先看 `M-x +native-comp/open-log`
 
 ### LSP 挂了
 
 看：
 
-1. `M-x my/language-server-doctor`
+1. `M-x +language-server/doctor`
 2. 当前 buffer 的 route policy / active backend 对不对
 3. 语言服务器 executable 或 feature 是否存在
-4. `M-x my/language-server-manager` 里能不能直接开 log / session
+4. `M-x +language-server/manager` 里能不能直接开 log / session
 5. 当前 major mode 是否真的命中了你以为的那条路由
 
 ### 远端变慢，或 tramp-rpc route 一直回退 TRAMP
@@ -641,7 +641,7 @@ emacs --batch -Q --init-directory="$PWD" -l ./early-init.el \
 2. `dvisvgm`
 3. [tools/org-xdvisvgm-hires](../../tools/org-xdvisvgm-hires)
 
-### `my/portal-ssh` 没读到主机
+### `+portal/ssh` 没读到主机
 
 看：
 
@@ -664,11 +664,11 @@ Lean 4 LSP 是 watchdog 架构：eglot 管理的是 `lean --server`/`lake serve`
 如果 watchdog 被硬杀（Emacs 崩溃、`kill -9`），worker 会被 reparent 到 PID 1
 并常驻。
 
-- 正常路径：`kill-emacs-hook` 里的 `my/eglot-shutdown-all-on-exit-h`
-  （`lisp/init-lsp.el`）会在退出时干净关闭所有 eglot 服务器；
+- 正常路径：`kill-emacs-hook` 里的 `+eglot-shutdown-all-on-exit-h`
+  （`lisp/tools/lsp/config.el`）会在退出时干净关闭所有 eglot 服务器；
   `lean-proxy.mjs` 收到 SIGTERM/SIGINT 时会用 `killDownstream()` 杀整个下游
   进程组，而不只是直接子进程。
-- 自愈路径：`my/lean-sweep-orphan-workers`（`lisp/lang/lean/init-lean.el`，
+- 自愈路径：`+lean/lean-sweep-orphan-workers`（`lisp/lang/lean/config.el`，
   模块加载时空闲 5 秒后自动跑一次，也可以手动 `M-x` 调用）只会杀
   **ppid=1 且命令行匹配 `.cell/` 路径**的 `lean --worker`，不会碰任何还有活
   watchdog 父进程的 worker。
@@ -694,9 +694,9 @@ Emacs broker 放置的 kernel 走的是**另一条**路径，上面那个 sweep 
 是 `start_new_session=True` 启动的，即使 Emacs 还活着它的 ppid 也是 1，放宽正则
 会让 web-host 启动时把用户正在用的 kernel 杀掉。
 
-正确的归属是：谁放置谁回收。`my/noema-jupyter-shutdown-all-on-exit-h`
-（`lisp/roam/init-noema-jupyter-runtime.el`，挂在 `kill-emacs-hook`）在 Emacs
-退出时逐个关闭 `my/noema-jupyter-runtimes` 里的 runtime，并且对单个 target 不可达
+正确的归属是：谁放置谁回收。`+noema-jupyter-shutdown-all-on-exit-h`
+（`lisp/noema/jupyter/runtime.el`，挂在 `kill-emacs-hook`）在 Emacs
+退出时逐个关闭 `+noema-jupyter-runtimes` 里的 runtime，并且对单个 target 不可达
 的情况只报错继续，不会因为一个连不上就漏掉其余的。每次关闭前还会把 runtime ID、
 target、PID 和专属连接文件路径写入本机
 `var/noema/jupyter/pending-shutdown/`，不写 HMAC key；确认关闭后删掉记录。
@@ -721,11 +721,11 @@ registry(`etc/config-store.el`，改值用 `config-set` 或直接编辑该文件
 
 | 键 | 位置 | 默认 | 作用 |
 |---|---|---|---|
-| `my/gcmh-high-cons-threshold` | `lisp/init-tools.el` (gcmh) | 128 MB | Emacs 空闲 GC 前允许堆积的垃圾上限；LSP 活跃时会被 `lisp/init-lsp.el` 的 `my/language-server-performance-gcmh-factor`(默认 2) 临时翻倍。之前是 512 MB(LSP 活跃时 1 GB),下调后 GC 更勤但单次更短,交互延迟影响很小。 |
-| `my/copilot-server-max-heap-mb` | `lisp/init-copilot.el` | 1024 | Emacs 自己 spawn 的 Copilot language server 的 V8 堆上限,通过 `NODE_OPTIONS` 注入(该 LS 不是走命令行参数,`copilot-server-args` 只能传给二进制本身,包不去掉支持自定义 env,所以用 `copilot--make-connection` 的 advice)。同一个键的值会通过 `NOEMA_COPILOT_MAX_HEAP_MB` 环境变量传给 Noema 侧自己 spawn 的第二份 Copilot LSP 实例(`server/lib/runtime.mjs` 的 `CopilotLspClient`),两边共享一个上限。**实测 384/512 MB 都会让该 LS 在启动几秒内以 `SIGABRT`(V8 `Ineffective mark-compacts near heap limit` OOM)崩溃退出——它自身(sharp 原生模块 + tf-idf/diff worker 的宿主进程)启动期就需要 ~700 MB old-space,768 MB 是实测最低可用值;1024 MB 留出安全余量,仍比不设上限时的 4 GB 默认值收紧很多。改这个键前先用 `node --max-old-space-size=<N> dist/language-server.js --stdio` 走一遍 initialize 握手再空闲等 20s 确认不 OOM,不要凭感觉调小。** |
-| `my/noema-web-host-max-heap-mb` | `lisp/roam/init-noema.el` | 512 | Noema `web-host.mjs` 自身的 V8 堆上限,**必须用 `--max-old-space-size` 命令行 flag 而不是 `NODE_OPTIONS` 环境变量**——web-host 的 `process.env` 会原样传给它 shell 出去的 codex/claude/opencode CLI(LaTeX export 用),用环境变量会把堆上限错误地传染给这些 node 程序。 |
-| `my/noema-latex-export-agent-idle-timeout` | `lisp/roam/init-noema.el` | 180 | LaTeX export agent 无输出多久后做一次存活检查；活着就继续等，不会 kill。 |
-| `my/noema-latex-export-agent-hard-timeout` | `lisp/roam/init-noema.el` | 900 | 单次 agent attempt 的绝对上限；先 SIGTERM，默认留十秒收尾后才 SIGKILL。 |
+| `+gcmh-high-cons-threshold` | `lisp/tools/menus/config.el` (gcmh) | 128 MB | Emacs 空闲 GC 前允许堆积的垃圾上限；LSP 活跃时会被 `lisp/tools/lsp/config.el` 的 `+language-server-performance-gcmh-factor`(默认 2) 临时翻倍。之前是 512 MB(LSP 活跃时 1 GB),下调后 GC 更勤但单次更短,交互延迟影响很小。 |
+| `+copilot-server-max-heap-mb` | `lisp/tools/copilot/config.el` | 1024 | Emacs 自己 spawn 的 Copilot language server 的 V8 堆上限,通过 `NODE_OPTIONS` 注入(该 LS 不是走命令行参数,`copilot-server-args` 只能传给二进制本身,包不去掉支持自定义 env,所以用 `copilot--make-connection` 的 advice)。同一个键的值会通过 `NOEMA_COPILOT_MAX_HEAP_MB` 环境变量传给 Noema 侧自己 spawn 的第二份 Copilot LSP 实例(`server/lib/runtime.mjs` 的 `CopilotLspClient`),两边共享一个上限。**实测 384/512 MB 都会让该 LS 在启动几秒内以 `SIGABRT`(V8 `Ineffective mark-compacts near heap limit` OOM)崩溃退出——它自身(sharp 原生模块 + tf-idf/diff worker 的宿主进程)启动期就需要 ~700 MB old-space,768 MB 是实测最低可用值;1024 MB 留出安全余量,仍比不设上限时的 4 GB 默认值收紧很多。改这个键前先用 `node --max-old-space-size=<N> dist/language-server.js --stdio` 走一遍 initialize 握手再空闲等 20s 确认不 OOM,不要凭感觉调小。** |
+| `+noema-web-host-max-heap-mb` | `lisp/noema/bridge/config.el` | 512 | Noema `web-host.mjs` 自身的 V8 堆上限,**必须用 `--max-old-space-size` 命令行 flag 而不是 `NODE_OPTIONS` 环境变量**——web-host 的 `process.env` 会原样传给它 shell 出去的 codex/claude/opencode CLI(LaTeX export 用),用环境变量会把堆上限错误地传染给这些 node 程序。 |
+| `+noema-latex-export-agent-idle-timeout` | `lisp/noema/bridge/config.el` | 180 | LaTeX export agent 无输出多久后做一次存活检查；活着就继续等，不会 kill。 |
+| `+noema-latex-export-agent-hard-timeout` | `lisp/noema/bridge/config.el` | 900 | 单次 agent attempt 的绝对上限；先 SIGTERM，默认留十秒收尾后才 SIGKILL。 |
 
 Noema 侧的 Copilot LSP 实例(`CopilotLspClient`)另外做了**空闲 TTL 自动
 停止**:`NOEMA_COPILOT_IDLE_TTL_MS`(默认 15 分钟,0 关闭)内如果没有
@@ -733,7 +733,7 @@ Noema 侧的 Copilot LSP 实例(`CopilotLspClient`)另外做了**空闲 TTL 自�
 pending 请求,就会自动 `stop()`;下次任何请求经 `ensureReady()` 自动重启。
 用一次 web 端 copilot 不会永久多驻留一个 ~400 MB 的进程。
 
-排查:`(my/performance-report-string)` 的 Toolchain Memory 区块能直接看到
+排查:`(+performance-report-string)` 的 Toolchain Memory 区块能直接看到
 两份 Copilot LSP(如果都在跑)和它们各自的 RSS。
 
 ## 8. 推荐维护节奏

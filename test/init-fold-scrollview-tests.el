@@ -12,7 +12,7 @@
 (require 'hideshow)
 (require 'scrollview)
 
-(ert-deftest my/scrollview-layout-and-groups ()
+(ert-deftest +scrollview-layout-and-groups ()
   (should (equal fringe-mode '(nil)))
   (should-not scroll-bar-mode)
   (should (eq scrollview-area 'fringe))
@@ -21,19 +21,19 @@
   (should (equal scrollview-signs-on-startup
                  '(search diagnostics vc bookmarks symbol-overlay))))
 
-(ert-deftest my/scrollview-auto-enable-scope ()
+(ert-deftest +scrollview-auto-enable-scope ()
   (with-temp-buffer
     (rename-buffer (generate-new-buffer-name "scrollview-test"))
     (emacs-lisp-mode)
-    (my/scrollview-turn-on)
+    (+scrollview-turn-on)
     (should scrollview-mode))
   (with-temp-buffer
     (rename-buffer (generate-new-buffer-name "scrollview-special-test"))
     (special-mode)
-    (my/scrollview-turn-on)
+    (+scrollview-turn-on)
     (should-not scrollview-mode)))
 
-(ert-deftest my/hideshow-keeps-c-closing-line-visible ()
+(ert-deftest +hideshow-keeps-c-closing-line-visible ()
   (with-temp-buffer
     (c-mode)
     (insert "if (condition) {\n  work();\n} else {\n  fallback();\n}\n")
@@ -53,20 +53,20 @@
            (display (and overlay (overlay-get overlay 'display))))
       (should overlay)
       (should (<= (overlay-end overlay) closing-line))
-      (should (= (my/hs-hidden-line-count overlay) 1))
+      (should (= (+hs-hidden-line-count overlay) 1))
       (should (string-match-p "1 line" display))
       (should (eq (lookup-key (get-text-property 0 'keymap display)
                               [mouse-1])
-                  #'my/fold-hs-mouse-toggle)))))
+                  #'+fold/hs-mouse-toggle)))))
 
-(ert-deftest my/fold-hideshow-backend-is-exclusive ()
+(ert-deftest +fold-hideshow-backend-is-exclusive ()
   (with-temp-buffer
     (emacs-lisp-mode)
-    (my/fold--ensure-backend)
+    (+fold--ensure-backend)
     (should hs-minor-mode)
     (should-not (bound-and-true-p treesit-fold-mode))))
 
-(ert-deftest my/fold-treesit-backend-is-exclusive ()
+(ert-deftest +fold-treesit-backend-is-exclusive ()
   (skip-unless (and (fboundp 'python-ts-mode)
                     (fboundp 'treesit-ready-p)
                     (treesit-ready-p 'python t)))
@@ -74,7 +74,7 @@
     (python-ts-mode)
     (insert "def example():\n    return 1\n")
     (goto-char (point-min))
-    (my/fold--ensure-backend)
+    (+fold--ensure-backend)
     (should (bound-and-true-p treesit-fold-mode))
     (should-not (bound-and-true-p hs-minor-mode))))
 

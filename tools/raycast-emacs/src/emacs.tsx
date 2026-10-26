@@ -16,7 +16,7 @@ import { emacs, emacsAction, emacsDetached, reportCommandFailure, reportFailure,
 import FindNote from "./find-note";
 import Noema from "./noema";
 
-// The list of actions is Emacs's own whitelist (`my/background-actions`);
+// The list of actions is Emacs's own whitelist (`+background-actions`);
 // this file names none of them.
 type EmacsAction = { id: string; title: string; prompt: string };
 type Frame = { id: string; title: string; buffers: string; visible: boolean };

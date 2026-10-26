@@ -21,7 +21,7 @@ Treemacs 不再直接挂在项目工作台里，而是交给 `show-imenu` 和手
 原生 `project.el` 仍可独立记住项目，不必先经 Projectile 添加。配置使用
 Emacs 31 的 `project-list-exclude` 排除明确隐藏的根；只有显式添加到本工作台的项目
 才自动进入 Projectile 列表。需要反向导入时可设置
-`my/project-import-project-el-entries`。
+`+project-import-project-el-entries`。
 
 ### 项目身份与 target
 
@@ -31,10 +31,10 @@ SCM 与后续 debug/task 集成都应从这个同一 identity 派生，不能各
 `file-remote-p` 再判断一次。本地普通 buffer 在框架外仍保留原生文件名，因此不会
 牺牲 Emacs package 兼容性。
 
-**已知项目列表里的远程项目**：`my/project-normalize-root` 让每个根只有一种写法——
+**已知项目列表里的远程项目**：`+project-normalize-root` 让每个根只有一种写法——
 本机能直接访问的是原生路径，其余一律是 `/fs:TARGET:/root/`；`/ssh:` 或 `/fs:local:`
 写法在入口处就归一，不会产生重复条目。`project-add-to-workbench`（输入
-`/fs:aaron-pc:/…` 或 `/ssh:…` 均可）和 `my/jupyter-ssh-open-project` 先打开该 root
+`/fs:aaron-pc:/…` 或 `/ssh:…` 均可）和 `+jupyter/ssh-open-project` 先打开该 root
 的 Remote workspace 再登记。列出项目（切换、dashboard）时远程根不探测、不连线：
 主机暂时不可达也照常列出，打开时才连接并报告目录缺失。
 远端登记失败时，只关闭本次登记新开的 workspace；已由其他功能打开的 workspace
@@ -50,13 +50,13 @@ target 的物理 TRAMP 写法；从不探测已记录的远程文件，dashboard
 （`?*.sln`、`?*.xcodeproj` 等）。上游用一次 `directory-files` 回答所有普通
 marker，但每个通配符仍要自己展开一次，也就是每层目录多出八次列目录。往上走四层
 就是 32 次额外往返，在 target 上这是打开一个文件最大的单项开销。
-`my/project--directory-marker` 用同一份列表回答通配符 marker，带路径分隔符的
+`+project--directory-marker` 用同一份列表回答通配符 marker，带路径分隔符的
 marker 仍然直接探测。这个改写对本地同样有效，因此不按 target 分支。
 
 同类问题还有 Citre：`citre-auto-enable-citre-mode` 会在每个 `prog-mode` buffer
 里找 ctags/readtags/global，target 上没装就是每次打开文件约 30 次往返，而答案在
-连接存续期间不会变。`my/citre-executable-find-a` 只缓存 target 侧的查找；装好工具
-后用 `M-x my/citre-forget-executables` 清掉。
+连接存续期间不会变。`+citre-executable-find-a` 只缓存 target 侧的查找；装好工具
+后用 `M-x +fold/citre-forget-executables` 清掉。
 
 ## 2. 最常用入口
 
@@ -83,8 +83,8 @@ marker 仍然直接探测。这个改写对本地同样有效，因此不按 tar
   打开 `show-imenu`
   左侧 Treemacs smart toggle，并跟随当前文件和光标所在符号
   （Noema Markdown 页面也一样：大纲跟随页面的笔记，点击标题由
-  `my/treemacs-tag-visit-functions` 让页面跳过去；Treemacs 读取文件建索引时绑定
-  `my/programmatic-file-visit`，不会触发 Markdown→Noema 跳转）
+  `+treemacs-tag-visit-functions` 让页面跳过去；Treemacs 读取文件建索引时绑定
+  `+programmatic-file-visit`，不会触发 Markdown→Noema 跳转）
 
 ## 3. 项目工作台菜单
 
@@ -109,7 +109,7 @@ Perspective 记住明确进入过的项目，用户切换回来时恢复该项�
 Perspective 时退出当前项目。包内部临时切换 Perspective 不触发 Agenda 扫描。
 关闭对应 Remote workspace 也释放当前项目的消费者。
 
-`M-x my/project-leave`，或项目菜单的 `l`，退出当前项目的后台消费者并解除当前
+`M-x +project/leave`，或项目菜单的 `l`，退出当前项目的后台消费者并解除当前
 Perspective 的项目关联，保留文件缓冲区。Noema Agenda 随之释放项目 scope 的
 监听和缓存，知识库继续常驻；再次明确进入项目即可恢复。
 
@@ -122,7 +122,7 @@ Perspective 的项目关联，保留文件缓冲区。Noema Agenda 随之释放�
 
 两个菜单共用 `package.json` 脚本与 Makefile、justfile 目标识别；只有脚本或目标
 确实存在时才列出。运行 profile 取 `dev`、`run`、`serve`、`start`、`preview`
-等常用目标，并可用 `my/project-run-profile-alist` 配置。相同名称按项目本地
+等常用目标，并可用 `+project-run-profile-alist` 配置。相同名称按项目本地
 `:run` 覆盖、手工 profile、Node、just、Make、语言默认命令依次选择；任务菜单
 在混合仓库里给重名项加 `cargo:`、`go:`、`node:` 等前缀，让每个命令都能选到。
 两边都从打开菜单的源 buffer 取项目上下文，使用项目环境与按 frame 管理的
@@ -196,16 +196,16 @@ workspace 或输出 buffer 会取消仍在运行的任务，输出窗口的 `K` 
 
 如果你有固定项目根目录，去改：
 
-- [lisp/init-project.el](../../lisp/init-project.el)
+- [lisp/tools/project/config.el](../../lisp/tools/project/config.el)
 
 变量是：
 
-- `my/project-search-paths`
+- `+project-search-paths`
 
 示例：
 
 ```elisp
-(setq my/project-search-paths
+(setq +project-search-paths
       '(("~/code" . 2)
         ("~/work" . 3)
         "~/dotfiles"))
@@ -283,5 +283,5 @@ breadcrumb 不继承 buffer tab 的切换、关闭、菜单或滚轮行为。
 
 1. 该目录是不是真的项目根
 2. Projectile 是否已经认识这个项目
-3. `my/project-search-paths` 是否配置正确
+3. `+project-search-paths` 是否配置正确
 4. 当前 buffer 是否真的处在你想要的项目里

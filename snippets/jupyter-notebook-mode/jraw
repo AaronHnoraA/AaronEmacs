@@ -2,5 +2,5 @@
 # name: Notebook raw cell
 # key: jraw
 # --
-`(my/snippet-jupyter-prefix)` %% [raw] id=`(my/snippet-jupyter-cell-id)`
-`(my/snippet-jupyter-prefix)` $0
+`(+snippet-jupyter-prefix)` %% [raw] id=`(+snippet-jupyter-cell-id)`
+`(+snippet-jupyter-prefix)` $0

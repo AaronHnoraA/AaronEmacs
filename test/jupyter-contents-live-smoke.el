@@ -1,13 +1,13 @@
 ;;; jupyter-contents-live-smoke.el --- Real URL filesystem notebook workflow -*- lexical-binding: t; -*-
-(require 'init-noema)
-(require 'init-noema-jupyter-server)
+(require 'noema/bridge/config)
+(require 'noema/jupyter/server)
 (require 'remote-config)
 (require 'remote-framework)
 (require 'cl-lib)
-(defvar my/jupyter-contents-live-extra nil
+(defvar +jupyter-contents-live-extra nil
   "Optional live workflow to run in the opened notebook before shutdown.")
 
-(defun my/jupyter-contents-live--filter (proc chunk)
+(defun +jupyter-contents-live--filter (proc chunk)
   "Decode the real service's replies from PROC CHUNK."
   (let* ((text (concat (or (process-get proc 'partial) "") chunk))
          (lines (split-string text "\n")))
@@ -17,12 +17,12 @@
         (let ((reply (json-parse-string (substring line 14) :object-type 'alist :array-type 'list)))
           (pcase (alist-get 'event reply)
             ("jupyter-session"
-             (run-at-time 0 nil #'my/noema-jupyter-cell-handle-session-event (alist-get 'payload reply)))
+             (run-at-time 0 nil #'+noema-jupyter-cell-handle-session-event (alist-get 'payload reply)))
             ("jupyter-debug-ended"
-             (run-at-time 0 nil #'my/noema-jupyter-debug-handle-ended (alist-get 'payload reply)))
+             (run-at-time 0 nil #'+noema-jupyter-debug-handle-ended (alist-get 'payload reply)))
             (_ (puthash (alist-get 'id reply) reply (process-get proc 'replies)))))))))
 
-(defun my/jupyter-contents-live--call (proc channel body)
+(defun +jupyter-contents-live--call (proc channel body)
   "Call real service CHANNEL with BODY while pumping Remote channels."
   (let* ((id (1+ (or (process-get proc 'sequence) 0)))
          (deadline (+ (float-time) 75)) reply)
@@ -38,7 +38,7 @@
     (when (alist-get 'error reply) (error "%s" (alist-get 'error reply)))
     (alist-get 'result reply)))
 
-(defun my/jupyter-contents-live-run ()
+(defun +jupyter-contents-live-run ()
   "Verify Dired, source projection, save, execution and server-relative cwd."
   (remote-config-load)
   (remote-fs-install)
@@ -49,35 +49,35 @@
          (remote--client-exec-path exec-path)
          (process-environment (copy-sequence process-environment))
          (remote--client-process-environment process-environment)
-         (my/noema-jupyter-server--credentials (make-hash-table :test #'equal))
+         (+noema-jupyter-server--credentials (make-hash-table :test #'equal))
          (info-file (car (directory-files (remote-make-file-name target (concat root "/runtime/")) t "\\`jpserver-.*\\.json\\'")))
          (info (json-parse-string (with-temp-buffer (insert-file-contents info-file) (buffer-string)) :object-type 'alist))
          (entry `(:id "live-contents" :url ,(alist-get 'url info) :target ,target :auth token))
-         (my/noema-jupyter-servers (list entry))
-         (my/noema--ready t)
+         (+noema-jupyter-servers (list entry))
+         (+noema--ready t)
          (api-buffer (generate-new-buffer " *contents-live-service*"))
          (proc (make-process :name "contents-live-service" :buffer api-buffer :stderr api-buffer
                              :command (list (or (getenv "JUPYTER_LIVE_NODE") (executable-find "node"))
                                             (expand-file-name "test/jupyter-contents-live-service.mjs" user-emacs-directory))
-                             :connection-type 'pipe :noquery t :filter #'my/jupyter-contents-live--filter))
+                             :connection-type 'pipe :noquery t :filter #'+jupyter-contents-live--filter))
          notebook dired-buffer closed)
     (process-put proc 'replies (make-hash-table :test #'eql))
     (when ssh (setenv "PATH" (concat (file-name-directory ssh) ":" (getenv "PATH"))))
-    (puthash (my/noema-jupyter-server--credential-key entry) (alist-get 'token info)
-             my/noema-jupyter-server--credentials)
+    (puthash (+noema-jupyter-server--credential-key entry) (alist-get 'token info)
+             +noema-jupyter-server--credentials)
     (unwind-protect
         (progn
-          (my/jupyter-contents-live--call proc "init" (my/noema-jupyter-server--resolve-entry entry))
-          (cl-letf (((symbol-function 'my/noema--api-call-sync)
+          (+jupyter-contents-live--call proc "init" (+noema-jupyter-server--resolve-entry entry))
+          (cl-letf (((symbol-function '+noema--api-call-sync)
                      (lambda (channel args &optional _timeout)
-                       (my/noema--gateway-hash-value
-                        (my/jupyter-contents-live--call proc channel (aref args 0)))))
-                    ((symbol-function 'my/noema-api-call)
+                       (+noema--gateway-hash-value
+                        (+jupyter-contents-live--call proc channel (aref args 0)))))
+                    ((symbol-function '+noema-api-call)
                      (lambda (channel args callback &optional _timeout)
-                       (funcall callback (my/jupyter-contents-live--call proc channel (aref args 0)) nil)))
-                    ((symbol-function 'my/noema--ensure-server) (lambda (&optional callback) (when callback (funcall callback))))
+                       (funcall callback (+jupyter-contents-live--call proc channel (aref args 0)) nil)))
+                    ((symbol-function '+noema--ensure-server) (lambda (&optional callback) (when callback (funcall callback))))
                     ((symbol-function 'noema-project-ensure) (lambda (&rest _) (error "Contents must not create a local project"))))
-            (let* ((directory (my/noema-jupyter-server-file-name "live-contents" "sub/"))
+            (let* ((directory (+noema-jupyter-server-file-name "live-contents" "sub/"))
                    (file (concat directory "live.ipynb")))
               (make-directory directory t)
               (with-temp-file file
@@ -87,8 +87,8 @@
                 (error "Dired did not list the server notebook"))
               (setq notebook (find-file-noselect file))
               (with-current-buffer notebook
-                (unless my/noema-jupyter-cell-mode (error "Notebook source projection was not activated"))
-                (let* ((catalog (my/noema-jupyter-cell--api-sync
+                (unless +noema-jupyter-cell-mode (error "Notebook source projection was not activated"))
+                (let* ((catalog (+noema-jupyter-cell--api-sync
                                  "noema:api:jupyter-cell:kernels" `((file . ,file))))
                        (names (mapcar (lambda (entry) (gethash "name" entry))
                                       (append (gethash "kernels" catalog) nil))))
@@ -98,18 +98,18 @@
                 (search-forward "audit_value = 41")
                 (replace-match "audit_value = 42")
                 (save-buffer)
-                (my/noema-jupyter-cell--api-sync "noema:api:jupyter:document-execute"
+                (+noema-jupyter-cell--api-sync "noema:api:jupyter:document-execute"
                                                 `((scriptFile . ,file) (cellId . "audit-cell")) 60)
-                (let* ((raw (my/noema-jupyter-notebook--read-raw file))
+                (let* ((raw (+noema-jupyter-notebook--read-raw file))
                        (cell (aref (gethash "cells" raw) 0))
                        (outputs (gethash "outputs" cell)))
                   (unless (string-match-p "43" (prin1-to-string outputs))
                     (error "Execution output was not saved to server: %S" outputs)))
                 (set-buffer-modified-p nil))
-              (when (functionp my/jupyter-contents-live-extra)
-                (with-current-buffer notebook (funcall my/jupyter-contents-live-extra file)))
+              (when (functionp +jupyter-contents-live-extra)
+                (with-current-buffer notebook (funcall +jupyter-contents-live-extra file)))
               (princ "PASS URL-only Dired, ipynb projection, save, nested cwd, execution, persisted output\n")
-              (my/jupyter-contents-live--call proc "close" (make-hash-table))
+              (+jupyter-contents-live--call proc "close" (make-hash-table))
               (setq closed t))))
       ;; The test service is already closed. Do not run production gateway
       ;; buffer teardown hooks after restoring the gateway functions.
@@ -120,11 +120,11 @@
       (when (buffer-live-p dired-buffer) (kill-buffer dired-buffer))
       (when (process-live-p proc)
         (unless closed
-          (ignore-errors (my/jupyter-contents-live--call proc "close" (make-hash-table))))
+          (ignore-errors (+jupyter-contents-live--call proc "close" (make-hash-table))))
         (process-send-eof proc)
         (let ((deadline (+ (float-time) 5)))
           (while (and (process-live-p proc) (< (float-time) deadline)) (accept-process-output nil .05)))
         (when (process-live-p proc) (delete-process proc)))
-      (my/noema-jupyter-server--close-resource entry "live-contents" 'test-cleanup)
+      (+noema-jupyter-server--close-resource entry "live-contents" 'test-cleanup)
       (kill-buffer api-buffer))))
-(my/jupyter-contents-live-run)
+(+jupyter-contents-live-run)

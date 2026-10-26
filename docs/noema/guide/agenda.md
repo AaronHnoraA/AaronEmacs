@@ -202,15 +202,15 @@ Chunlian is attached after the complete render.
 
 The knowledge vault remains indexed. Explicit project navigation activates
 one project; switching away, closing its Remote workspace, or running
-`my/project-leave` releases it. Inactive projects are not scanned. Persisted
+`+project/leave` releases it. Inactive projects are not scanned. Persisted
 clock references survive exit and host restart; pending source writes wait for
 re-entry. File notifications invalidate the index; there is no polling.
 
 Hidden paths such as `.lake/` and standard dependency/build directories are
 excluded before traversal. Additional relative glob exclusions use
-`my/noema-agenda-exclude-patterns`, available through `M-x config-board` or
+`+noema-agenda-exclude-patterns`, available through `M-x config-board` or
 `config-set`; restart the host after changing them. For example,
-`(config-set 'my/noema-agenda-exclude-patterns '("archive/**" "scratch.md"))`
+`(config-set '+noema-agenda-exclude-patterns '("archive/**" "scratch.md"))`
 excludes an archive directory and a specific file relative to each active root.
 
 ### Shared capture templates
@@ -223,12 +223,12 @@ storage remains native Markdown. Failed native captures retain their draft in
 the Agenda buffer; press `c` again to review and retry. Drafts are not saved to
 disk and do not survive closing the Agenda buffer.
 
-Customize `my/noema-agenda-capture-templates` through `config-board` or
+Customize `+noema-agenda-capture-templates` through `config-board` or
 `config-set`, then restart the Noema host. Nil restores the built-ins; a custom
 list replaces them. For example:
 
 ```elisp
-(config-set 'my/noema-agenda-capture-templates
+(config-set '+noema-agenda-capture-templates
  '(((id . "review") (key . "r") (name . "Review")
     (file . "daily/%Y-%m-%d.md") (scope . "selected")
     (fields . ["text" "ddl" "prio"])
@@ -263,11 +263,11 @@ live SSH parity still needs verification.
 
 EventKit helper 已提供 macOS 14+ 的原生协议与 Emacs 客户端进程生命周期。
 `make agenda-apple-test` 构建并验证辅助进程、日期和资源释放；测试不请求权限，
-不读写个人提醒或日历。开发时可运行 `my/noema-agenda-apple-enable` 显式申请
-Reminders 或 Calendar 权限，`my/noema-agenda-apple-disable` 释放辅助进程。
+不读写个人提醒或日历。开发时可运行 `+noema/agenda-apple-enable` 显式申请
+Reminders 或 Calendar 权限，`+noema/agenda-apple-disable` 释放辅助进程。
 
 原生 Agenda 的 `P` 显式选择 Reminders 或 Calendar 及目标列表，`v a` 或
-`M-x my/noema-agenda-attention` 打开全局关注；Web 提供 Promote 和 Global
+`M-x +noema/agenda-attention` 打开全局关注；Web 提供 Promote 和 Global
 attention。只有显式提升才创建 Apple 条目。Calendar 需要 `s` 开始、`E` 结束，
 deadline 不自动变成日历占用。启用 helper 不会提升现有任务。
 
@@ -291,14 +291,14 @@ buffer 并回写。冲突保留双方；连接不可用时标明正在展示已�
 - `M-x noema-agenda-clocktable` — clocktable view.
 - `M-x noema-agenda-lints` — lint view.
 - `M-x noema-agenda-search` — hosted agenda with a search query.
-- `M-x my/noema-roam-jump-file-todo` — jump to a todo in the current file
+- `M-x +noema-roam/jump-file-todo` — jump to a todo in the current file
   (dispatch key `F`); this one stays local to Emacs (a `completing-read` over
   the current buffer's todos), not a web redirect.
 - Full Roam DB rebuild is dispatch key `Z`; `F` is reserved for current-file
   todos across the roam dispatchers.
 
 `after:`/`blocks:`/`task:` values also complete locally, via
-`my/noema-roam-capf` (a `completion-at-point-functions` entry, so it
+`+noema-roam-capf` (a `completion-at-point-functions` entry, so it
 works through `company`/the built-in completion UI) calling the same
 `todo-refs` backend service the Web editor uses.
 
@@ -315,13 +315,13 @@ inside a task title is preserved verbatim.
 
 ### Roam task entry points
 
-`my/noema-roam-todos` retains the Roam task list and reads native records from
+`+noema-roam/todos` retains the Roam task list and reads native records from
 Knowledge plus explicitly active projects. Empty results do not launch a CLI
 or trigger a regex scan. Completion, metadata and dependency edits use the
 same scope, revision and modified-buffer checks as Noema Agenda; source errors
 cannot fall through to a second local writer.
 
-`my/noema-roam-jump-file-todo` (`F`) asynchronously parses the current Markdown
+`+noema-roam/jump-file-todo` (`F`) asynchronously parses the current Markdown
 buffer, including unsaved edits. This read-only snapshot does not scan other
 files, enter a project or publish unsaved tasks to the index. Requests superseded
 by another invocation, buffer edits or buffer closure are discarded. Switching

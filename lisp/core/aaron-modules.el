@@ -195,13 +195,19 @@ A `-flag' in WANTED requires `+flag' to be absent."
 
 (defun aaron-module-source-files (module)
   "Return the Emacs Lisp source files that make up MODULE.
-A directory module's files, or a feature module's file, plus every file
-under `aaron-module-load-path' that first loaded while MODULE loaded."
+A directory module's files and the globs its manifest lists under
+`files', or a feature module's file, plus every file under
+`aaron-module-load-path' that first loaded while MODULE loaded."
   (let ((file-name-handler-alist nil))
     (delete-dups
      (append
       (if (aaron-module-directory-p module)
-          (directory-files-recursively (aaron-module-path module) "\\.el\\'")
+          (append
+           (directory-files-recursively (aaron-module-path module) "\\.el\\'")
+           (cl-loop for pattern in (alist-get 'files (aaron-module--read-manifest
+                                                     (aaron-module-path module)))
+                    append (file-expand-wildcards
+                            (expand-file-name pattern (aaron-module-path module)) t)))
         (when-let* ((lib (locate-library (symbol-name (aaron-module-feature module))))
                     (src (concat (file-name-sans-extension lib) ".el")))
           (and (file-exists-p src) (list src))))
@@ -264,6 +270,12 @@ under `aaron-module-load-path' that first loaded while MODULE loaded."
                    0)))
     (if (consp depth) depth (cons depth depth))))
 
+(defun aaron-module--path-feature (key file)
+  "Return the feature of FILE in directory module KEY: its path under lisp/.
+A module file provides CATEGORY/NAME/FILE, e.g. `tools/lsp/config', so
+`require' finds it through lisp/ on `load-path'."
+  (intern (format "%s/%s/%s" (substring (symbol-name (car key)) 1) (cdr key) file)))
+
 (defun aaron-module--put (key flags plist)
   "Declare module KEY with FLAGS and properties PLIST.
 Declaring a key again folds the new flags into its existing ones."
@@ -277,7 +289,12 @@ Declaring a key again folds the new flags into its existing ones."
              :index (hash-table-count aaron-modules)
              :group (car key) :name (cdr key)
              :path path
-             :feature (unless path (or (plist-get plist :feature) (cdr key)))
+             :feature (cond ((plist-get plist :feature))
+                            ((and path (file-exists-p
+                                        (expand-file-name aaron-module-config-file path)))
+                             (aaron-module--path-feature key "config"))
+                            (path nil)
+                            (t (cdr key)))
              :flags (aaron-module--fold-flags flags)
              :depth (aaron-module--depth (car key) plist manifest)
              :optional (or (plist-get plist :optional) (plist-get plist :after))
@@ -618,13 +635,15 @@ module's error is raised after recording."
          nil)))))
 
 (defun aaron-module--config-thunk (module)
-  "Return a function that loads MODULE's config."
-  (if (aaron-module-directory-p module)
-      (lambda ()
-        (when-let* ((file (aaron-module-expand-path module aaron-module-config-file)))
-          (aaron-module--load-file module file)))
-    (let ((feature (aaron-module-feature module)))
-      (lambda () (aaron-module--require feature)))))
+  "Return a function that loads MODULE's config.
+A directory module's config.el and a feature module are both loaded with
+`require', so a module another module already required is not loaded
+again."
+  (let ((feature (aaron-module-feature module)))
+    (lambda ()
+      (when feature
+        (let ((aaron-module-context module))
+          (aaron-module--require feature))))))
 
 (defun aaron-module--load-deferred (module)
   "Load deferred MODULE, unless it already has."
@@ -685,7 +704,17 @@ module's error is raised after recording."
     (make-directory (file-name-directory out) t)
     (when (file-exists-p out) (delete-file out))
     (loaddefs-generate dirs out nil
-                       (format ";; aaron-module-sources: %S\n" dirs))))
+                       (format ";; aaron-module-sources: %S\n" dirs))
+    ;; `loaddefs-generate' names files relative to OUT; make them relative to
+    ;; their module root, which is on `load-path', so `autoload' finds them.
+    (with-temp-file out
+      (insert-file-contents out)
+      (dolist (root aaron-module-load-path)
+        (let ((rel (file-relative-name (file-name-as-directory root)
+                                       (file-name-directory out))))
+          (goto-char (point-min))
+          (while (search-forward (concat "\"" rel) nil t)
+            (replace-match "\"" t t)))))))
 
 (defun aaron-modules-load ()
   "Load every declared module: init phase, then config phase."

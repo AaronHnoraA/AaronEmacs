@@ -3,7 +3,7 @@
 # key: warnn
 # group: Noema blocks
 # --
-#+begin warning ${1:title} {#`(my/noema-new-id "block")`}
+#+begin warning ${1:title} {#`(noema-new-id "block")`}
 ${2:Warning.}
 #+end warning
 $0

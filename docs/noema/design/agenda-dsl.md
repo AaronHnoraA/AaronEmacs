@@ -2,7 +2,7 @@
 
 ## Native Noema Agenda
 
-`M-x my/noema-agenda` (also `my/noema-roam-agenda`) opens the native Emacs
+`M-x +noema/agenda` (also `+noema-roam/agenda`) opens the native Emacs
 Agenda. It formats native task records with Org Agenda's presentation code;
 it never creates Org source text or files. Markdown remains Markdown.
 
@@ -71,7 +71,7 @@ are leased only while active; nested scopes share a watcher and deduplicate
 files. Only notifications and explicit actions cause invalidation. Hidden native
 Agenda buffers wait until displayed to refresh.
 
-Use `my/noema-roam-agenda-web` for the Emacs-hosted Web Agenda and its
+Use `+noema-roam/agenda-web` for the Emacs-hosted Web Agenda and its
 calendar/Gantt/DAG/clock views. Emacs opens it with explicit source scopes: the
 resident knowledge vault plus the single project currently entered through the
 project lifecycle. A direct page load defaults to knowledge only; neither path
@@ -461,7 +461,7 @@ Browsing candidates never mints an id (see [Stable ids](#stable-ids)).
   `matchingTodoRefCompletions` slot into the same completion-popup waterfall
   as tag/roam/path completion (`updateSnippetPopup`), triggered by the
   cursor sitting inside an `after=`/`blocks=`/`task=` attr value.
-- **Emacs**: `my/noema-roam-capf` gets a matching `cond` branch that
+- **Emacs**: `+noema-roam-capf` gets a matching `cond` branch that
   calls the `todo-refs` action through the same `/api` bridge other roam
   actions use.
 - **API**: `noema:api:completions:todo-refs` (web-host.mjs), bridged as
@@ -532,7 +532,7 @@ In Emacs, explicit project switch/workbench, file/recent-file/buffer navigation,
 root directory, Magit and project terminal commands activate the selected
 project after opening succeeds. Recorded Perspective switches restore the
 associated project; temporary package switches do not activate sources.
-`M-x my/project-leave` (project menu `l`) releases the current project and its
+`M-x +project/leave` (project menu `l`) releases the current project and its
 Perspective association while retaining buffers. Closing its Remote workspace
 also releases the project. Knowledge stays resident; clock references persist.
 
@@ -577,13 +577,13 @@ The filter is relative to each active root: a project explicitly entered under
 Additional exclusions are Emacs settings, shared by native and Web Agenda:
 
 ```elisp
-(config-set 'my/noema-agenda-exclude-patterns
+(config-set '+noema-agenda-exclude-patterns
             '("archive/**" "**/*.generated.md" "scratch.md"))
 ```
 
 The setting is also available in `M-x config-board` and persists in the Emacs
 config store. Patterns match paths relative to each scope root. `archive/**` also prevents
-walking that directory. Restart the Noema host (`M-x my/noema-stop`, then
+walking that directory. Restart the Noema host (`M-x +noema/stop`, then
 reopen Agenda) after changing this setting. Headless host integrations can set
 `NOEMA_AGENDA_EXCLUDE` to the equivalent JSON array. Excluded files are not
 capture destinations. Source errors in eligible notes remain visible.

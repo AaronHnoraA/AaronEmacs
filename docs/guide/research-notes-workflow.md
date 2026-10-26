@@ -250,7 +250,7 @@ org <-> jupytext <-> ipynb
 这正好避免了重复造转换链。
 
 注意：本文里提到的 `jupytext` 指的是那个命令行工具本身。这套配置**不再**内置
-`jupytext-mode` 配对同步（`my/jupytext-*` 那一层已经移除）；要配对就直接用
+`jupytext-mode` 配对同步（`+jupytext-*` 那一层已经移除）；要配对就直接用
 `jupytext` CLI。
 
 ## 8. 一个简单判断法

@@ -147,9 +147,9 @@ local/remote 特判属于待迁移债务，不是新增接入可复制的模式�
 
 现在语言服务器栈补了一层可视化维护面：
 
-- `M-x my/language-server-manager`
+- `M-x +language-server/manager`
   打开 `*Language Server Hub*`
-- `M-x my/language-server-doctor`
+- `M-x +language-server/doctor`
   打开 `*Language Server Doctor*`
 
 Hub 里可以直接看：
@@ -172,10 +172,10 @@ Lean 4 走自定义 `lean-mode`，并统一使用 lsp-mode。模块分层如下�
 
 | 模块 | 职责 |
 |------|------|
-| `lisp/lang/lean/init-lean.el` | 主 mode、lsp-mode client 注册、project 定位、ripgrep 符号搜索、UI 总入口 |
-| `lisp/lang/lean/init-lean-lsp.el` | `textDocument/publishDiagnostics`、`$/lean/fileProgress`、`lean/restartFile` 通知处理，fringe/sideline 进度与 Flymake 后端 |
-| `lisp/lang/lean/init-lean-jump.el` | 基于 `$/lean/plainGoal` 的 goal 变化跳转 |
-| `lisp/lang/lean/init-lean-infoview.el` | 官方 xwidget infoview 桥接（`C-c C-i`）|
+| `lisp/lang/lean/config.el` | 主 mode、lsp-mode client 注册、project 定位、ripgrep 符号搜索、UI 总入口 |
+| `lisp/lang/lean/lsp.el` | `textDocument/publishDiagnostics`、`$/lean/fileProgress`、`lean/restartFile` 通知处理，fringe/sideline 进度与 Flymake 后端 |
+| `lisp/lang/lean/jump.el` | 基于 `$/lean/plainGoal` 的 goal 变化跳转 |
+| `lisp/lang/lean/infoview.el` | 官方 xwidget infoview 桥接（`C-c C-i`）|
 | `lisp/lang/lean/lean4-infoview-bridge/` | `lean-proxy.mjs`：既是 lsp-mode 的 transport，也用 HTTP+SSE 服务官方 React infoview |
 
 Lean 的通知/请求 payload 一律用 `lsp-get` 读取：lsp-mode 只有在以
@@ -253,7 +253,7 @@ Dape 原生 `dape-restart` 重启。
 - Go: `dlv` / test binary
 - Shell、.NET、PHP、Ruby、OCaml: 对应 adapter
 
-`M-x my/debug-adapter-doctor` 可以查看 adapter 可用性和缺失安装项。
+`M-x +debug/adapter-doctor` 可以查看 adapter 可用性和缺失安装项。
 
 ## 4. 编译与测试
 
@@ -321,7 +321,7 @@ Dape 原生 `dape-restart` 重启。
 - `SPC p D`
   按目录批量扫描项目
 
-如果你有固定项目根，去看 [project-guide.md](project-guide.md) 里的 `my/project-search-paths`。
+如果你有固定项目根，去看 [project-guide.md](project-guide.md) 里的 `+project-search-paths`。
 
 ### Treemacs
 
@@ -358,7 +358,7 @@ Dape 原生 `dape-restart` 重启。
 ### Portal
 
 - `M-\``
-  `my/portal-popup-toggle`
+  `+portal-popup/toggle`
 - `C-c e`
   弹出/收起全局 popup；新建终端时按最近聚焦的项目和 target 启动
 - `C-c C-e`
@@ -370,25 +370,25 @@ Dape 原生 `dape-restart` 重启。
 - `C-c M-e`
   切换当前 popup `portal` 的固定状态
 - `SPC o e`
-  `my/portal-popup-toggle`
+  `+portal-popup/toggle`
 - `SPC o E`
   切换到下一个 popup `portal`
 - `SPC o F`
   切换当前 popup `portal` 的固定状态
 - `SPC o t`
-  `my/portal-popup-toggle`
+  `+portal-popup/toggle`
 - `SPC o v`
   新建 `portal`
 - `SPC o V`
   创建命名 `portal`
 - `SPC o S`
-  `my/portal-ssh`
-- `M-x my/project-popup-portal-app`
+  `+portal/ssh`
+- `M-x +project/popup-portal-app`
   在当前 project 根目录的新 popup `portal` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
 
 ### Portal
 
-- `SPC o P` / `M-x my/portal-terminal`
+- `SPC o P` / `M-x +portal/terminal`
   在当前 Emacs 窗口打开 GhosttyKit 原生终端。需要 macOS GUI Emacs 31.1+。
   本地目录使用 Portal；远端 workspace 继续使用 Portal。
 - 普通 Portal 终端顶部使用独立标签组；全局工作区栏不占用顶行。
@@ -409,7 +409,7 @@ Dape 原生 `dape-restart` 重启。
 
 这套配置把数据库客户端接到了 `clutch`，但保持懒加载：
 
-- 包声明在 [lisp/init-clutch.el](../../lisp/init-clutch.el)
+- 包声明在 [lisp/tools/clutch/config.el](../../lisp/tools/clutch/config.el)
 - 第一次打开控制台时，才会安装/加载 `clutch`
 - 连接配置单独放在本地 `etc/clutch-config.el`
 
@@ -443,8 +443,8 @@ Dape 原生 `dape-restart` 重启。
 - `M-x remote-board`：按 target 查看 route、连接状态、配置/当前/最近文件夹和活动转发端口；可见时随连接、workspace 和 channel 生命周期刷新。`RET`/`o` 打开文件夹并建立受管理的 workspace（端口行复制本地地址），`f` 在目标文件系统中补全目录，`c` 关闭选中文件夹的 workspace 与所属资源，`C` 断开整个 target 的 workspace、连接和 buffer（保留未保存编辑及拒绝关闭的 buffer，并停止自动启动），`p` 转发目标端口（`C-u p` 指定目标侧 host，`C-u C-u p` 还可指定本地端口），`n` 命名选中转发，`P` 更换其本地端口，`k` 关闭转发并移除恢复资源，`r` 后台重连 workspace（已连接时用 `C-u r`），`w` 复制行的 URI 或本地端口地址，`s` 刷新本机缓存状态，`g` 重读 target 配置
 - 编辑远程文件：使用 `fs://target/path` 或 `/fs:target:/path`
 - 旧的 `/ssh:host:/path` 仍可打开，进入 buffer 后会 canonicalize 为 `/fs`
-- 在当前本地/远端 workspace 打开终端：`C-c e`（`my/portal-popup-toggle`）
-- 按主机名直接开终端：`M-x my/portal-ssh`
+- 在当前本地/远端 workspace 打开终端：`C-c e`（`+portal-popup/toggle`）
+- 按主机名直接开终端：`M-x +portal/ssh`
 
 `/fs:` 远程 buffer 的模式栏显示当前 target，点击可打开 Remote 面板。普通本地
 buffer 不显示这一项。面板中的最近文件夹由显式的 Remote 打开操作记忆，并由
@@ -456,7 +456,7 @@ remote process adapter 启动 portal，并把 terminal 生命周期登记给 wor
 新建 terminal 或 agent 时读取最近聚焦的工作 buffer，在该项目和 target 启动进程。
 切换旧 tab 只显示原有 buffer，不改变其进程所属的 workspace。
 
-`my/portal-ssh` 会优先读：
+`+portal/ssh` 会优先读：
 
 - `~/.ssh/config`
 
@@ -484,9 +484,9 @@ channel lifecycle 必须委托给 Remote 框架。若必须写 local/remote 条�
 ### 常用命令
 
 - `C-c w e`
-  `my/open-eww-url`
+  `aaron/open-eww-url`
 - `C-c w x`
-  `my/open-xwidget-url`
+  `aaron-open-xwidget-url`
 - `C-c w s`
   交互选择当前页面的目标后端
 - `C-c w E` / `C-c w X` / `C-c w O`
@@ -498,7 +498,7 @@ channel lifecycle 必须委托给 Remote 框架。若必须写 local/remote 条�
 
 ### 当前逻辑
 
-默认打开方式集中在 `lisp/init-open.el` 的 `my/open-routes`，通用 DSL helper
+默认打开方式集中在 `lisp/core/aaron-open.el` 的 `aaron-open-routes`，通用 DSL helper
 在 vendored `site-lisp/general.el/general.el` 的 `general-route-*`。`browse-url`
 默认走 `menu`，菜单默认项是 `xwidget`，不做 URL 复杂度自动分流。分流保持手动：
 
@@ -507,8 +507,8 @@ browser pipeline 额外提供：
 - EWW <-> Xwidget
 - EWW/Xwidget 默认打开到独立浏览 buffer，连续多开不覆盖已显示的浏览 buffer
 - 当前页面 -> macOS `open`
-- 统一搜索入口：`my/browser-open-search`
-- 当前页面后端切换：`my/browser-switch-to`
+- 统一搜索入口：`+browser/open-search`
+- 当前页面后端切换：`+browser/switch-to`
 
 因此当前建议是：
 
@@ -517,10 +517,10 @@ browser pipeline 额外提供：
 - 文件、URL 需要系统应用接管时走 `system` / macOS `open`
 
 **xwidget 焦点**：页面加载完成（`load-finished`）时自动开启 `xwidget-webkit-edit-mode`、
-注入一次 `<right>` 唤醒 native WebKit first-responder、并运行 buffer-local `my/xwidget-focus-script`
+注入一次 `<right>` 唤醒 native WebKit first-responder、并运行 buffer-local `+xwidget-focus-script`
 （如 Noema 的 CodeMirror 聚焦 JS）。打开后无需手动先按键即可直接输入。
-相关开关：`my/xwidget-auto-focus-on-load`、`my/xwidget-prime-native-focus`、`my/xwidget-prime-key`。
-手动恢复焦点：`M-x my/xwidget-focus`（xwidget buffer 内绑定到 `i`）。
+相关开关：`+xwidget-auto-focus-on-load`、`+xwidget-prime-native-focus`、`+xwidget-prime-key`。
+手动恢复焦点：`M-x +xwidget/focus`（xwidget buffer 内绑定到 `i`）。
 Noema 页面在暂停状态下收到真实点击时，会向 Emacs 报告页面已取得输入焦点。
 Emacs 只用这个事件更新该 pane 的前台活动状态，不重新选择窗口，以免 macOS
 把 WebKit 刚取得的 first-responder 夺走。下一次 Emacs 命令或窗口切换会清除
@@ -534,7 +534,7 @@ Markdown 笔记现在由 Noema Web 自己编辑和渲染，Emacs 只负责启动
 打开、粗粒度命令和文件定位：
 
 ```
-Emacs (init-noema.el)
+Emacs (noema/bridge/config.el)
   └─ spawn node site-lisp/noema/web-host.mjs
        ├─ 静态服务 site-lisp/noema/dist/pages/
        ├─ 运行时 site-lisp/noema/server/ + shared/
@@ -561,7 +561,7 @@ Noema 与 Emacs 共用：
 
 | 文件 | 用途 |
 |------|------|
-| `lisp/roam/init-noema.el` | Emacs 入口：进程管理、xwidget 打开、控制命令 |
+| `lisp/noema/bridge/config.el` | Emacs 入口：进程管理、xwidget 打开、控制命令 |
 | `site-lisp/noema/` | 完整 Noema 独立 git 项目；安装位置固定，但由根仓库忽略，不是 submodule 或符号链接 |
 | `site-lisp/noema/web-host.mjs` | Node HTTP+SSE 桥接服务器和 preload adapter |
 | `site-lisp/noema/dist/pages/` | Noema static build |
@@ -578,7 +578,7 @@ Noema 与 Emacs 共用：
 ### stdout 事件协议
 
 web-host 向 Emacs 进程 stdout 发送换行分隔的文本事件，由
-`my/noema--handle-process-line` 解析：
+`+noema--handle-process-line` 解析：
 
 | 前缀 | 格式 | 用途 |
 |------|------|------|
@@ -589,27 +589,27 @@ web-host 向 Emacs 进程 stdout 发送换行分隔的文本事件，由
 | `aaronote-event:saved:` | JSON `{file}` | 笔记保存成功后触发 roam index 刷新 |
 
 `saved` 事件是 Emacs roam 缓存自动更新的驱动源。收到后 Emacs 调用
-`my/noema-roam--runtime-sync`，sentinel 清空 in-process 缓存。这保证补全/
+`+noema-roam--runtime-sync`，sentinel 清空 in-process 缓存。这保证补全/
 反向链接/xref 在每次 web 保存后自动更新，无需手动 sync。vault 外部改动
 （Emacs 保存、dired、git pull）由 Node 侧 `fs.watch` 检测，经 SSE
 `notes-index-changed` 事件驱动 web 端增量刷新，无需 Emacs 轮询。
 
-手动 "y sync DB"（`my/noema-roam-sync`）走 `/api` 路径，成功回调同样清空
+手动 "y sync DB"（`+noema-roam/sync`）走 `/api` 路径，成功回调同样清空
 in-process 缓存，与自动刷新保持一致。
 
 ### 页面搜索
 
 搜索只有一个实现：Noema 的 Go 内核（`site-lisp/noema/kernel/noema/wikisearch`）。
-Emacs 不保存页面列表，也不自己做匹配。`lisp/roam/init-noema-search.el` 把输入原样发到
+Emacs 不保存页面列表，也不自己做匹配。`lisp/noema/search/config.el` 把输入原样发到
 host 的 `noema:api:knowledge:search` 通道，内核返回已经排好序的结果，以及每条结果
 是怎么找到的（`matchKind`）、标题里命中的区间（`titleRanges`）、摘要、纠正过的词
 （`corrected`）和“可以创建的页面”（`create`）。
 
-- `my/noema-roam-find-note`（`H-o` hub 的 `j`）在 minibuffer 里边输入边查询。候选按
+- `+noema-roam/find-note`（`H-o` hub 的 `j`）在 minibuffer 里边输入边查询。候选按
   “标题 / 相近标题 / 正文 / 纠正后的正文”分组，旁边显示文件路径和摘要。
-- minibuffer 用专门的补全样式 `my/noema-search`，它不过滤也不重排。内核把 `maintian`
+- minibuffer 用专门的补全样式 `+noema-search`，它不过滤也不重排。内核把 `maintian`
   匹配到 `maintain`；任何再比较一次“输入与候选”的样式（orderless、flex）都会把这条
-  结果丢掉。新增一个向内核查询的读取函数时，沿用 `my/noema-search-read-page`，不要
+  结果丢掉。新增一个向内核查询的读取函数时，沿用 `+noema-search-read-page`，不要
   回到对本地快照做 `completing-read`。
 - 语法与网页端搜索框相同：`Namespace:` 前缀、`tag:` `path:` `file:` `content:`
   `line:(a b)`、`"短语"`、`-词`、`OR`、`/正则/`。完整说明在
@@ -644,8 +644,8 @@ host 的 `noema:api:knowledge:search` 通道，内核返回已经排好序的结
   （`[x](./文件.md#标签)`）、行内 `@@tag[`、文献、任务依赖等补全没有别的入口，保持原样。
 - `Cmd+Shift+R`（Emacs 持有键盘时是 `M-R`）给光标处打标签并复制引用，即工具面板里的
   “Tag / copy reference”。
-- Emacs 持有键盘时，Noema 窗格里的 `M-r` 调用 `my/noema-insert-reference`，它让页面
-  打开同一个弹层。在其他缓冲区里 `M-x my/noema-insert-reference` 用 minibuffer 做同样
+- Emacs 持有键盘时，Noema 窗格里的 `M-r` 调用 `+noema/insert-reference`，它让页面
+  打开同一个弹层。在其他缓冲区里 `M-x +noema/insert-reference` 用 minibuffer 做同样
   的查询，问一次显示文字（默认是内核给的），再把链接插入到光标处。
 - `M-r` 在普通 xwidget 浏览器缓冲区里仍是“刷新内容”；只有 Noema 窗格里改成了插入引用。
 - Vim 的普通/可视模式下，输入法送来的按键（合成中、键码 229、全角字符）被整个吞掉：
@@ -673,9 +673,9 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 ### 诊断
 
 - 服务日志：buffer ` *noema-web-host*`
-- 手动停止：`M-x my/noema-stop`
-- 重新打开当前 note：`M-x my/noema-refresh`（localleader `r`）
-- 健康状态：`M-x my/health-report` → Noema 栏（process、ready、runtime、last-sync）
+- 手动停止：`M-x +noema/stop`
+- 重新打开当前 note：`M-x +noema/refresh`（localleader `r`）
+- 健康状态：`M-x +health/report` → Noema 栏（process、ready、runtime、last-sync）
 
 ## 9. Noema AI/agent
 
@@ -684,9 +684,9 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 - agent-shell 原生 `turn-complete` 事件由 `noema-agent-acp.el` 转发给本配置，裸启动的
   Claude 等 agent-shell 会话也在创建 buffer 时订阅：每轮结束后只检查可见及最近的普通
   文件、JuText，以及打开的 Noema Markdown 页面。底层按 buffer-local
-  `my/auto-revert-agent-refresh-function` 分发：普通文件走安全 auto-revert，拥有磁盘合并规则
+  `+auto-revert-agent-refresh-function` 分发：普通文件走安全 auto-revert，拥有磁盘合并规则
   的模式可注册自己的函数；无普通文件 buffer 的页面可注册
-  `my/auto-revert-agent-refresh-functions`，Markdown 页面就在这条路径上。普通远程文件
+  `+auto-revert-agent-refresh-functions`，Markdown 页面就在这条路径上。普通远程文件
   也参与：`batched` 路由可在焦点事件检查，`round-trip` 路由只在 ACP 完成或用户显式
   解决冲突、或旧 buffer 再次显示时检查；断开的目标一律跳过。JuText 在无草稿时接收外部正文编辑，
   有草稿时保留本地内容并合并运行输出；页面先比较时间戳，确有变化
@@ -716,7 +716,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 - Noema Markdown 页面里没有 Emacs 文本：`C-c A v/B/@/./c/s/r` 和 `C-c A e` 经
   `noema-md-bridge` 让页面先保存并报告选区的准确位置，再在笔记的 Emacs 源 buffer
   上运行 gptel / agent UI；常用文本命令（`H-i`、`H-s`、复制粘贴、`C-x C-s` 等）在
-  `my/noema-keys-mode-map` 里重定向到页面操作，见 daily-usage“Noema 页面里的
+  `+noema-keys-mode-map` 里重定向到页面操作，见 daily-usage“Noema 页面里的
   Emacs 按键”
 - 每个 agent session 仍是真正可交互的 agent-shell buffer，但不进入全局
   tab-line/tab-bar。同一项目的所有 agent/session 作为 tab 显示在右下角同一个
@@ -760,7 +760,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   装 `after-change-functions` 记录活动时间；`noema-agent-worker-stop-buffer` 在
   `noema-agent-acp-busy-p`（含 shell-maker 的交互回答）时拒绝停止。
 - 放置：进程目录由 `noema-agent-acp-process-directory-function` 决定，本配置设为
-  `my/agent-shell-process-directory`，与裸 `agent-shell` 的 `agent-shell-cwd` advice
+  `+agent-shell-process-directory`，与裸 `agent-shell` 的 `agent-shell-cwd` advice
   是同一函数；远端 agent 的契约见 `docs/design/remote-framework.md` 第 7 节。
 - 并行：RunSpec 冻结仍经 Magent 全局队列逐个进行，Run 派发后立即释放队列票据；
   同时执行的 Run 数由 `noema-agent-worker-max-concurrent-runs` 限制，超出的按顺序
@@ -791,7 +791,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
   扩大 research 面。能力 id 相应拆成 `noema-knowledge` / `noema-research`，配置里写旧的
   `noema` 会被展开成两者（否则「禁用 noema」只会关掉一半）。
 - 技能库：`resources/skills/` 只放描述 Noema 自身机制的技能（随代码版本走）；其余住在
-  `<NOEMA_ROOT>/public/README/Skills/skills/`，由 `NOEMA_GLOBAL_SKILLS` 指向（`my/noema-skills-directory`
+  `<NOEMA_ROOT>/public/README/Skills/skills/`，由 `NOEMA_GLOBAL_SKILLS` 指向（`+noema-skills-directory`
   给默认值），和笔记同一个 git、同一套 search。约定是可移植的那套
   `<kebab-id>/SKILL.md`，深度放 `references/<topic>.md` 按需读——解析结果带
   `directory` 和 `references` 列表，SKILL.md 超过约 8 KiB 会给一条提示。
@@ -809,7 +809,7 @@ Raycast 的 “Emacs” 入口里有一个 Noema 分区，其中两项不经过 
 - profile 与模板在 `etc/noema/`，运行状态在 `var/noema/`
 
 源码边界：Noema 代码在 `site-lisp/noema/lisp/`；agent-shell、acp.el、shell-maker
-由 package-vc 管理，固定 revision 在 `init-ai-ide.el` / `package-lock.el`。
+由 package-vc 管理，固定 revision 在 `tools/agent/config.el` / `package-lock.el`。
 `noema-agent-render.el` 保留隐藏输出性能策略，不修改上游包文件。
 gptel、Magent、Claude/Codex 兼容源码仍在 `site-lisp/noema/upstream/`。
 任何一层都不能用自研简化实现替代成熟工具链。
@@ -817,7 +817,7 @@ gptel、Magent、Claude/Codex 兼容源码仍在 `site-lisp/noema/upstream/`。
 ### Claude Code
 
 - 独立的 claude-code-ide 菜单不再全局绑定；需要 Claude 时从 Noema agent 入口选择。
-- CLI 路径在 `lisp/init-ai-ide.el` 的 `claude-code-ide-cli-path` 中配置。
+- CLI 路径在 `lisp/tools/agent/config.el` 的 `claude-code-ide-cli-path` 中配置。
 - 兼容源码保留在 `site-lisp/noema/upstream/claude-code-ide/`。
 
 ### Codex CLI
@@ -840,12 +840,12 @@ gptel、Magent、Claude/Codex 兼容源码仍在 `site-lisp/noema/upstream/`。
 
 优先检查：
 
-1. 先开 `M-x my/language-server-doctor`
+1. 先开 `M-x +language-server/doctor`
 2. 看当前 buffer 的 route policy / active backend / executable
 3. 远端 PATH 里是否真的有这些 server
 4. `lsp-mode` 是否已经 attach
 5. TRAMP 主机是否能正常登录
-6. *Messages* 出现 `Error processing message ...` 时，`M-x my/language-server-message-errors`
+6. *Messages* 出现 `Error processing message ...` 时，`M-x +language-server/message-errors`
    （language server 菜单 `x`）给出对应的调用栈；lsp-mode 本身只打印错误对象
 
 更详细的维护和排查见 [lsp-workflow.md](../design/lsp-workflow.md) 和 [maintenance.md](../ops/maintenance.md)。
@@ -891,12 +891,12 @@ label-badge 字段行、hl-line 行高亮、styled header-line。
 
 **已迁移的 dashboards**
 
-- Noema Roam views（`init-md-roam-ui.el` → shim）
-- Config Health（`init-health.el`）
-- Language Server Hub + Doctor（`init-lsp-tools.el`）
-- Performance Watch（`init-performance.el`）
-- Compile Board（`init-compile.el`）
-- 当前 buffer 的 Diagnostics UI（`init-diagnostics-ui.el`）：每个 frame 共用一个面板，
+- Noema Roam views（`noema/roam/ui.el` → shim）
+- Config Health（`config/health/config.el`）
+- Language Server Hub + Doctor（`tools/lsp-hub/config.el`）
+- Performance Watch（`config/performance/config.el`）
+- Compile Board（`config/compile/config.el`）
+- 当前 buffer 的 Diagnostics UI（`checkers/diagnostics/config.el`）：每个 frame 共用一个面板，
   三种严重程度只改变筛选；项目列表使用 Emacs 原生 Flymake
 
 ## 11. Transient 菜单 + which-key 主题（`aaron-ui-transient`）
@@ -908,5 +908,5 @@ lsp、project 等）和 which-key popup 通过 `site-lisp/aaron-ui/aaron-ui-tran
 - heading = accent-cyan bold；key = accent-cyan；stay = accent-green；
   exit = accent-mauve；return = accent-yellow；noop/inactive = fg-faint
 - 新增 dispatch 自动继承，不需要任何额外设置
-- 配置入口：`lisp/init-tools.el` → `(require 'aaron-ui-transient)`
+- 配置入口：`lisp/tools/menus/config.el` → `(require 'aaron-ui-transient)`
 - 主题切换后自动重新应用（`after-load-theme-hook` + signature guard）

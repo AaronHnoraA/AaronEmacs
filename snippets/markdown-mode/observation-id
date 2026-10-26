@@ -3,7 +3,7 @@
 # key: obss
 # group: Noema blocks
 # --
-#+begin observation ${1:title} {#`(my/noema-new-id "block")`}
+#+begin observation ${1:title} {#`(noema-new-id "block")`}
 ${2:Observation.}
 #+end observation
 $0

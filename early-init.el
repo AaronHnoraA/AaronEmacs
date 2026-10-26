@@ -6,7 +6,7 @@
 ;; Prefer fresh source over stale bytecode throughout the startup chain.
 (setq load-prefer-newer t)
 
-(defun my/native-comp-refresh-gcc-library-path ()
+(defun aaron-native-comp-refresh-gcc-library-path ()
   "Find Homebrew's current GCC runtime library before native compilation.
 Emacs.app can retain a versioned `LIBRARY_PATH' from its build.  After a GCC
 upgrade that path no longer contains libemutls_w, which subr trampolines need."
@@ -30,13 +30,13 @@ upgrade that path no longer contains libemutls_w, which subr trampolines need."
                     (concat directory path-separator existing)
                   directory))))))
 
-(my/native-comp-refresh-gcc-library-path)
+(aaron-native-comp-refresh-gcc-library-path)
 
-(defconst my/startup-byte-compiled-files
+(defconst aaron-startup-byte-compiled-files
   '("early-init.el" "init.el" "bootstrap.el")
   "Top-level startup files whose bytecode can break bootstrap.")
 
-(defvar my/delete-local-bytecode-on-startup t
+(defvar aaron-delete-local-bytecode-on-startup t
   "Whether startup deletes config-owned `.elc' files before loading modules.
 
 Byte compilation remains useful as a health check, but this personal config
@@ -44,17 +44,17 @@ changes frequently enough that stale or badly compiled local bytecode is more
 expensive than the small startup win it provides.  This only touches files under
 the config's own Elisp trees, not installed packages under `elpa/'.")
 
-(defconst my/local-bytecode-directories
+(defconst aaron-local-bytecode-directories
   '("lisp" "site-lisp")
   "Config-owned directories whose `.elc' files are disposable.")
 
-(defun my/delete-stale-startup-bytecode ()
+(defun aaron-delete-stale-startup-bytecode ()
   "Delete top-level startup `.elc' files before normal init loading continues.
 
 The startup entry points are small and order-sensitive.  Loading an older or
 badly compiled `init.elc' can bypass source fixes before `load-prefer-newer' has
 a chance to affect the rest of the module graph."
-  (dolist (file my/startup-byte-compiled-files)
+  (dolist (file aaron-startup-byte-compiled-files)
     (let* ((source (expand-file-name file user-emacs-directory))
            (bytecode (concat source "c")))
       (when (and (file-exists-p source)
@@ -69,10 +69,10 @@ a chance to affect the rest of the module graph."
                     (error-message-string err))
             :error)))))))
 
-(defun my/delete-local-bytecode-files ()
+(defun aaron-delete-local-bytecode-files ()
   "Delete config-owned `.elc' files before loading local modules."
-  (when my/delete-local-bytecode-on-startup
-    (dolist (directory my/local-bytecode-directories)
+  (when aaron-delete-local-bytecode-on-startup
+    (dolist (directory aaron-local-bytecode-directories)
       (let ((root (expand-file-name directory user-emacs-directory)))
         (when (file-directory-p root)
           (dolist (file (directory-files-recursively root "\\.elc\\'"))
@@ -86,8 +86,8 @@ a chance to affect the rest of the module graph."
                         (error-message-string err))
                 :error)))))))))
 
-(my/delete-stale-startup-bytecode)
-(my/delete-local-bytecode-files)
+(aaron-delete-stale-startup-bytecode)
+(aaron-delete-local-bytecode-files)
 
 ;; Keep native compilation cache local to this config so cleanup stays simple.
 (when (and (fboundp 'startup-redirect-eln-cache)
@@ -96,9 +96,9 @@ a chance to affect the rest of the module graph."
    (expand-file-name "var/eln-cache/" user-emacs-directory)))
 
 ;;; 启动性能优化：暂时放宽 GC、禁用 file-name-handler
-(defvar my/original-gc-cons-threshold gc-cons-threshold)
-(defvar my/original-gc-cons-percentage gc-cons-percentage)
-(defvar my/original-file-name-handler-alist file-name-handler-alist)
+(defvar aaron-original-gc-cons-threshold gc-cons-threshold)
+(defvar aaron-original-gc-cons-percentage gc-cons-percentage)
+(defvar aaron-original-file-name-handler-alist file-name-handler-alist)
 
 (setq gc-cons-threshold most-positive-fixnum
       gc-cons-percentage 0.6
@@ -108,19 +108,19 @@ a chance to affect the rest of the module graph."
 
 ;; Silence non-critical warning popups as early as possible so startup noise
 ;; stays in `*Warnings*` instead of stealing focus.
-(defvar my/warning-popup-minimum-level :error
+(defvar aaron-warning-popup-minimum-level :error
   "Minimum warning severity that may auto-display the warnings buffer.")
 
-(defvar my/warning-suppress-elpa-noise t
+(defvar aaron-warning-suppress-elpa-noise t
   "Whether to suppress low-severity startup noise from third-party ELPA packages.")
 
-(defconst my/suppressed-warnings-buffer "*Suppressed Warnings*"
+(defconst aaron-suppressed-warnings-buffer "*Suppressed Warnings*"
   "Buffer that collects low-severity warnings redirected away from *Messages*.
-Browse with `my/show-suppressed-warnings'.")
+Browse with `aaron/show-suppressed-warnings'.")
 
-(defun my/log-to-suppressed-warnings (type message level)
-  "Append a suppressed warning to `my/suppressed-warnings-buffer'."
-  (with-current-buffer (get-buffer-create my/suppressed-warnings-buffer)
+(defun aaron-log-to-suppressed-warnings (type message level)
+  "Append a suppressed warning to `aaron-suppressed-warnings-buffer'."
+  (with-current-buffer (get-buffer-create aaron-suppressed-warnings-buffer)
     (let ((inhibit-read-only t))
       (goto-char (point-max))
       (insert (format "[%s] (%s) %s: %s\n"
@@ -131,14 +131,14 @@ Browse with `my/show-suppressed-warnings'.")
                       (upcase (substring (symbol-name level) 1))
                       message)))))
 
-(defun my/show-suppressed-warnings ()
+(defun aaron/show-suppressed-warnings ()
   "Pop up the buffer of warnings that were silenced during startup."
   (interactive)
-  (if-let* ((buf (get-buffer my/suppressed-warnings-buffer)))
+  (if-let* ((buf (get-buffer aaron-suppressed-warnings-buffer)))
       (pop-to-buffer buf)
     (message "No suppressed warnings recorded.")))
 
-(defun my/warning-level-rank (level)
+(defun aaron-warning-level-rank (level)
   "Return a comparable numeric rank for warning LEVEL."
   (pcase level
     (:debug 0)
@@ -147,21 +147,21 @@ Browse with `my/show-suppressed-warnings'.")
     (:emergency 3)
     (_ 1)))
 
-(defun my/warning-level-at-least-p (level threshold)
+(defun aaron-warning-level-at-least-p (level threshold)
   "Return non-nil when warning LEVEL is at least THRESHOLD."
-  (>= (my/warning-level-rank level)
-      (my/warning-level-rank threshold)))
+  (>= (aaron-warning-level-rank level)
+      (aaron-warning-level-rank threshold)))
 
-(defun my/warning-type-list (type)
+(defun aaron-warning-type-list (type)
   "Normalize warning TYPE into the list form used by `warning-suppress-types'."
   (if (consp type) type (list type)))
 
-(defun my/warning-should-suppress-p (type message level)
+(defun aaron-warning-should-suppress-p (type message level)
   "Return non-nil when TYPE/MESSAGE/LEVEL should be redirected to the warning log."
   (let ((level (or level :warning))
-        (type-list (my/warning-type-list type)))
-    (and my/warning-suppress-elpa-noise
-         (not (my/warning-level-at-least-p level :error))
+        (type-list (aaron-warning-type-list type)))
+    (and aaron-warning-suppress-elpa-noise
+         (not (aaron-warning-level-at-least-p level :error))
          (or
           ;; Byte-compiler and native-compiler noise from ELPA packages.
           (member 'bytecomp     type-list)
@@ -178,22 +178,22 @@ Browse with `my/show-suppressed-warnings'.")
                    (and (member 'package type-list)
                         (string-match-p "deprecated" message))))))))
 
-(defun my/suppress-warning-popups-a (orig-fn type message &optional level buffer-name)
-  "Redirect low-severity warnings to `my/suppressed-warnings-buffer'."
+(defun aaron-suppress-warning-popups-a (orig-fn type message &optional level buffer-name)
+  "Redirect low-severity warnings to `aaron-suppressed-warnings-buffer'."
   (let ((level (or level :warning)))
     (cond
-     ((my/warning-should-suppress-p type message level)
+     ((aaron-warning-should-suppress-p type message level)
       ;; Log to the dedicated buffer instead of discarding or showing in *Messages*.
-      (my/log-to-suppressed-warnings type message level))
-     ((my/warning-level-at-least-p level my/warning-popup-minimum-level)
+      (aaron-log-to-suppressed-warnings type message level))
+     ((aaron-warning-level-at-least-p level aaron-warning-popup-minimum-level)
       (funcall orig-fn type message level buffer-name))
      (t
       (let ((warning-suppress-types
-             (cons (my/warning-type-list type) warning-suppress-types)))
+             (cons (aaron-warning-type-list type) warning-suppress-types)))
         (funcall orig-fn type message level buffer-name))))))
 
-(unless (advice-member-p #'my/suppress-warning-popups-a 'display-warning)
-  (advice-add 'display-warning :around #'my/suppress-warning-popups-a))
+(unless (advice-member-p #'aaron-suppress-warning-popups-a 'display-warning)
+  (advice-add 'display-warning :around #'aaron-suppress-warning-popups-a))
 
 ;; Native compilation warnings can surface before the main init loads.
 (setq native-comp-async-report-warnings-errors 'silent
@@ -212,15 +212,15 @@ Browse with `my/show-suppressed-warnings'.")
 (setq byte-compile-warnings '(not obsolete))
 
 
-(defvar my/gui-undecorated t
+(defvar aaron-gui-undecorated t
   "Whether GUI frames should start without native window decorations.
 Keep this disabled by default because some Emacs/macOS builds handle
 undecorated frames poorly.")
 
-(defvar my/gui-internal-border-width 0
+(defvar aaron-gui-internal-border-width 0
   "Internal border width applied to GUI frames.")
 
-(defvar my/gui-startup-fullscreen nil
+(defvar aaron-gui-startup-fullscreen nil
   "Startup fullscreen state for GUI frames.
 Use nil for a normal window, `maximized' for a maximized window, or
 `fullboth' for a fullscreen window.")
@@ -232,21 +232,21 @@ Use nil for a normal window, `maximized' for a maximized window, or
 ;; by assignment is also unsafe because packages may have registered additional
 ;; handlers while init was loading.  Merge the saved entries instead, preserving
 ;; both the original TRAMP dispatcher and handlers installed during init.
-(defun my/restore-startup-runtime-settings ()
+(defun aaron-restore-startup-runtime-settings ()
   "Restore file-name handlers and the normal post-init GC policy.
 This function is idempotent so `after-init-hook' and the startup fallback may
 both call it."
-  (dolist (handler my/original-file-name-handler-alist)
+  (dolist (handler aaron-original-file-name-handler-alist)
     (add-to-list 'file-name-handler-alist handler t))
   ;; Once `gcmh' starts, let it own GC policy. Otherwise, restore to a saner
   ;; interactive threshold than Emacs' tiny default.
   (unless (bound-and-true-p gcmh-mode)
-    (setq gc-cons-threshold (max my/original-gc-cons-threshold
+    (setq gc-cons-threshold (max aaron-original-gc-cons-threshold
                                  (* 16 1024 1024))
-          gc-cons-percentage my/original-gc-cons-percentage)))
+          gc-cons-percentage aaron-original-gc-cons-percentage)))
 
-(add-hook 'after-init-hook #'my/restore-startup-runtime-settings)
-(add-hook 'emacs-startup-hook #'my/restore-startup-runtime-settings)
+(add-hook 'after-init-hook #'aaron-restore-startup-runtime-settings)
+(add-hook 'emacs-startup-hook #'aaron-restore-startup-runtime-settings)
 
 
 (let ((frame-params
@@ -255,12 +255,12 @@ both call it."
          (vertical-scroll-bars . nil)
          (horizontal-scroll-bars . nil)
          (alpha . 96)
-         ,@(when my/gui-undecorated
+         ,@(when aaron-gui-undecorated
              '((undecorated . t)))
-         ,@(when (integerp my/gui-internal-border-width)
-             `((internal-border-width . ,my/gui-internal-border-width)))
-         ,@(when my/gui-startup-fullscreen
-             `((fullscreen . ,my/gui-startup-fullscreen))))))
+         ,@(when (integerp aaron-gui-internal-border-width)
+             `((internal-border-width . ,aaron-gui-internal-border-width)))
+         ,@(when aaron-gui-startup-fullscreen
+             `((fullscreen . ,aaron-gui-startup-fullscreen))))))
   (setq default-frame-alist
         (append frame-params default-frame-alist)))
 
@@ -271,10 +271,10 @@ both call it."
 
 ;; The initial GUI frame otherwise exposes *scratch* and partially initialized
 ;; tab/modelines while Dashboard is still being built.
-(defvar my/gui-hide-initial-frame-during-startup t
+(defvar aaron-gui-hide-initial-frame-during-startup t
   "Whether to reveal the first GUI frame only after startup content is ready.")
 
-(defun my/reveal-startup-frames ()
+(defun aaron-reveal-startup-frames ()
   "Reveal GUI frames hidden by the early startup boundary.
 This is idempotent and deliberately ignores daemon/emacsclient frames."
   (dolist (frame (frame-list))
@@ -283,7 +283,7 @@ This is idempotent and deliberately ignores daemon/emacsclient frames."
       (make-frame-visible frame)
       (redraw-frame frame))))
 
-(defun my/gui-graphic-frame-exists-p ()
+(defun aaron-gui-graphic-frame-exists-p ()
   "Return non-nil when a graphic frame already exists."
   (catch 'found
     (dolist (frame (frame-list))
@@ -295,10 +295,10 @@ This is idempotent and deliberately ignores daemon/emacsclient frames."
 ;; point, where hiding through `initial-frame-alist' unmaps the real window and
 ;; the reveal in `emacs-startup-hook' races the render thread, leaving a window
 ;; that accepts no input.  Only pre-hide a frame that does not exist yet.
-(when (and my/gui-hide-initial-frame-during-startup
+(when (and aaron-gui-hide-initial-frame-during-startup
            (not (daemonp))
            (display-graphic-p)
-           (not (my/gui-graphic-frame-exists-p)))
+           (not (aaron-gui-graphic-frame-exists-p)))
   (setq initial-frame-alist
         (cons '(visibility . nil)
               (cons '(my-startup-hidden . t)
@@ -307,7 +307,7 @@ This is idempotent and deliberately ignores daemon/emacsclient frames."
                      (assq-delete-all
                       'my-startup-hidden initial-frame-alist))))))
 
-(add-hook 'emacs-startup-hook #'my/reveal-startup-frames 100)
+(add-hook 'emacs-startup-hook #'aaron-reveal-startup-frames 100)
 
 ;;; 额外的 UI 模式关闭（确保 TTY/GUI 都统一）
 (menu-bar-mode -1)

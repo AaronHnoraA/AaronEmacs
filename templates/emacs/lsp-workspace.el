@@ -1,6 +1,6 @@
 ;; Custom LSP/Eglot workspace configuration
 ;; This generic profile works for modes without an automatic provider.
-((nil . ((my/project-local-settings
+((nil . ((+project-local-settings
           . (:language-server eglot
              :toolchain ((example . project-sdk))
              :toolchain-profiles

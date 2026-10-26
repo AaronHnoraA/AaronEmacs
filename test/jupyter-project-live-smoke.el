@@ -1,7 +1,7 @@
 ;;; jupyter-project-live-smoke.el --- Real remote project acceptance -*- lexical-binding: t; -*-
 ;; Opt-in, isolated files and shell/LSP processes; existing kernels stay alive.
-(require 'init-noema-jupyter-lsp)
-(require 'init-lsp)
+(require 'noema/jupyter/lsp)
+(require 'tools/lsp/config)
 (load (expand-file-name "test/lsp-live-smoke.el" user-emacs-directory) nil t)
 (let* ((target (or (getenv "JUPYTER_PROJECT_TARGET") "aaron-pc"))
        (python (or (getenv "JUPYTER_PROJECT_PYTHON")
@@ -16,7 +16,7 @@
                                   "--kernel_cmd" ,(concat python " -m ipykernel -f {host_connection_file}")])
                          (metadata . ((aaron . ((project . ((direnv . t)
                                                            (lsp . ((server . [,server "--stdio"])))))))))))))
-       (my/noema-jupyter-project--bindings (make-hash-table :test #'equal))
+       (+noema-jupyter-project--bindings (make-hash-table :test #'equal))
        shell-buffer source-buffer directory-buffer)
   (princ (format "Remote fixture: %s\n" root))
   (unwind-protect
@@ -33,9 +33,9 @@
         (with-temp-file (expand-file-name "pyproject.toml" root) (insert "[project]\nname = \"noema-audit\"\nversion = \"0.0.0\"\n"))
         (with-temp-buffer
           (setq buffer-file-name "/tmp/local-audit.ipynb"
-                my/noema-jupyter-cell-kernel "project-live-test"
-                my/noema-jupyter-cell-kernel-spec entry)
-          (my/noema-jupyter-open-project-directory)
+                +noema-jupyter-cell-kernel "project-live-test"
+                +noema-jupyter-cell-kernel-spec entry)
+          (+noema-jupyter/open-project-directory)
           (setq directory-buffer (current-buffer))
           (unless (derived-mode-p 'dired-mode) (error "Files did not open Dired")))
         (setq source-buffer (find-file-noselect source))
@@ -48,13 +48,13 @@
         (princ "PASS Dired, remote visit/read/save\n")
         (with-temp-buffer
           (setq buffer-file-name "/tmp/local-audit.ipynb"
-                my/noema-jupyter-cell-kernel "project-live-test"
-                my/noema-jupyter-cell-kernel-spec entry)
-          (my/noema-jupyter-open-project-shell)
+                +noema-jupyter-cell-kernel "project-live-test"
+                +noema-jupyter-cell-kernel-spec entry)
+          (+noema-jupyter/open-project-shell)
           (setq shell-buffer (current-buffer)))
         (with-current-buffer shell-buffer
           (let ((deadline (+ (float-time) 30)))
-            (while (and my/noema-jupyter-project--shell-pending (< (float-time) deadline))
+            (while (and +noema-jupyter-project--shell-pending (< (float-time) deadline))
               (accept-process-output nil 0.1)))
           (let ((process (get-buffer-process shell-buffer)))
             (unless (process-live-p process) (error "Remote shell did not start"))
@@ -70,18 +70,18 @@
         (princ "PASS shell starts on target at project root\n")
         (switch-to-buffer source-buffer)
         (setq-local lsp-auto-guess-root t lsp-guess-root-without-session t
-                    my/language-server--manual-start t)
+                    +language-server--manual-start t)
         (set-buffer-modified-p t)
-        (my/language-server-ensure)
+        (+language-server/ensure)
         (when (and (bound-and-true-p lsp--buffer-deferred) (fboundp 'lsp--init-if-visible)) (lsp--init-if-visible))
         (when (and (bound-and-true-p lsp--buffer-deferred) (fboundp 'lsp--init-if-visible))
           (lsp--init-if-visible))
-        (unless (my/lsp-live-smoke--wait 45)
-          (error "LSP failed in the source environment: %S" my/lsp-mode--waiting-for-direnv))
-        (unless (equal (plist-get (my/language-server-current-toolchain-profile)
+        (unless (+lsp-live-smoke--wait 45)
+          (error "LSP failed in the source environment: %S" +lsp-mode--waiting-for-direnv))
+        (unless (equal (plist-get (+language-server-current-toolchain-profile)
                                   :executable) python)
           (error "LSP analyzed the wrong Python: %S"
-                 (my/language-server-current-toolchain-profile)))
+                 (+language-server-current-toolchain-profile)))
         (goto-char (point-min)) (search-forward "np.array") (backward-char 2)
         (let ((hover (lsp-request "textDocument/hover" (lsp--text-document-position-params))))
           (unless (string-match-p "array" (format "%S" hover)) (error "Remote numpy hover missing: %S" hover))
@@ -90,14 +90,14 @@
           (error "LSP lost the source direnv environment"))
         (let ((default-directory user-emacs-directory))
           (with-temp-buffer
-            (let ((status (process-file my/jupyter-board-python-command nil t nil
+            (let ((status (process-file +jupyter-board-python-command nil t nil
                                         (expand-file-name "test/jupyter-project-kernel-live.py" user-emacs-directory)
                                         (remote-target-label (remote-get-target target)) native python)))
               (princ (buffer-string))
               (unless (zerop status) (error "Real remote kernel failed"))))))
     (when (buffer-live-p source-buffer)
       (with-current-buffer source-buffer
-        (dolist (workspace (lsp-workspaces)) (ignore-errors (my/lsp-mode-shutdown-workspace workspace 'live-smoke)))
+        (dolist (workspace (lsp-workspaces)) (ignore-errors (+lsp-mode-shutdown-workspace workspace 'live-smoke)))
         (set-buffer-modified-p nil))
       (kill-buffer source-buffer))
     (when (buffer-live-p shell-buffer)

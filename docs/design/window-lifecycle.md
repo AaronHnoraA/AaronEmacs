@@ -35,13 +35,13 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 | 种类 | 例子 | 能否同时在多个窗口 | 判定 |
 | --- | --- | --- | --- |
 | 普通 | 文件、Dired、帮助、输出 | 能 | 默认 |
-| 单实例 | Portal 终端、Portal Web、Excalidraw、Noema 页面、xwidget 网页 | 不能：原生视图只能在一个窗口里，显示到别处会把它移走 | `my/buffer-single-instance-p` |
-| popup | popper 弹窗、Portal popup 终端 | 由 popup 管理器决定 | `popper`、`my/portal-popup-instance-p` |
+| 单实例 | Portal 终端、Portal Web、Excalidraw、Noema 页面、xwidget 网页 | 不能：原生视图只能在一个窗口里，显示到别处会把它移走 | `+buffer-single-instance-p` |
+| popup | popper 弹窗、Portal popup 终端 | 由 popup 管理器决定 | `popper`、`+portal-popup-instance-p` |
 | 占位 | `*scratch*`、Dashboard、主目录 Dired | 能 | 名字或 mode |
 
-`my/buffer-single-instance-p` 是唯一的判定：mode 在 `my/single-instance-modes`
+`+buffer-single-instance-p` 是唯一的判定：mode 在 `+single-instance-modes`
 中、buffer 带有 Portal 视图（`portal-view--target`），或 buffer 自己把
-`my/buffer-single-instance` 设为 t。窗口规则只问它，不再列举 mode 或包变量。
+`+buffer-single-instance` 设为 t。窗口规则只问它，不再列举 mode 或包变量。
 
 ### 关闭动作
 
@@ -49,10 +49,10 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 
 | 动词 | 键 / 命令 | buffer | 窗口 |
 | --- | --- | --- | --- |
-| 关视图 | `SPC b z`；最后一个 frame 上的 `H-w`；唯一窗格上的 `Cmd-W`（`my/close-view`） | 当前窗口撤下 buffer；若无别的窗口显示它则变为未显示 | 回退（见下）；popup 由原生 quit 精确返回来源 |
-| 结束 | `H-q` `my/kill-buffer-dwim`；`C-c w d`（浏览后端） | → 已结束；终端程序运行中先确认（Portal 的 kill 询问）。只读或 `*…*` 的普通 buffer 只关视图 | 回退 |
-| 关窗口 | `Cmd-W`（`M-w`）`my/close-window`；`H-0` `delete-window` | 它的最后一个窗口消失时：显示中 → 未显示 | `Cmd-W` 有多个窗格时删当前窗格；唯一窗格时关视图，frame 保留 |
-| 关 frame | `H-w` `my/delete-frame-dwim`（多于一个 frame 时） | frame 中各 buffer 若无别的窗口显示则变为未显示；终端 buffer 保留 | 多于一个 frame 时 frame 消失；只有一个 frame 时只关当前视图 |
+| 关视图 | `SPC b z`；最后一个 frame 上的 `H-w`；唯一窗格上的 `Cmd-W`（`+windows/close-view`） | 当前窗口撤下 buffer；若无别的窗口显示它则变为未显示 | 回退（见下）；popup 由原生 quit 精确返回来源 |
+| 结束 | `H-q` `+windows/kill-buffer-dwim`；`C-c w d`（浏览后端） | → 已结束；终端程序运行中先确认（Portal 的 kill 询问）。只读或 `*…*` 的普通 buffer 只关视图 | 回退 |
+| 关窗口 | `Cmd-W`（`M-w`）`+windows/close-window`；`H-0` `delete-window` | 它的最后一个窗口消失时：显示中 → 未显示 | `Cmd-W` 有多个窗格时删当前窗格；唯一窗格时关视图，frame 保留 |
+| 关 frame | `H-w` `aaron/delete-frame-dwim`（多于一个 frame 时） | frame 中各 buffer 若无别的窗口显示则变为未显示；终端 buffer 保留 | 多于一个 frame 时 frame 消失；只有一个 frame 时只关当前视图 |
 
 `Cmd-W` 在普通 buffer、终端、Noema 页面和浏览视图上执行相同的窗格动作；不调用
 `kill-buffer`。唯一窗格时用既有回退规则，popup 按原生 `quit-window` 返回来源。
@@ -66,7 +66,7 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
    `M-w` / `M-W` 转交给 Emacs，页面输入框中的 `Cmd-W` 也交给 Emacs。
    Shift 只决定两个不同命令，不改变关闭深度。
 2. `Cmd-W` 若正处于 minibuffer，先退出提示；否则，有多个窗格时执行
-   `delete-window`，只有一个窗格时执行 `my/close-view`。后一分支保留 frame，
+   `delete-window`，只有一个窗格时执行 `+windows/close-view`。后一分支保留 frame，
    按同窗格历史回退；popup 用 `quit-window` 返回来源。没有合格历史候选时显示
    项目目录，主目录或无项目时显示 Dashboard。两个分支都不 kill buffer。
 3. `Cmd-Shift-W` 打开当前 Perspective 的 buffer 选择器；取消不改布局，选择
@@ -75,20 +75,20 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 
 ### 回退：窗口失去 buffer 后显示什么
 
-触发点有三个：`quit-window`（advice `my/window-quit-return-a`）、kill
-（`kill-buffer-hook` 中的 `my/window-kill-buffer-h`；Portal 终端由 Portal 侧自行
-收尾）、bury（`my/window-bury-current-buffer`，关视图走这里）。关窗口不回退。
+触发点有三个：`quit-window`（advice `+window-quit-return-a`）、kill
+（`kill-buffer-hook` 中的 `+window-kill-buffer-h`；Portal 终端由 Portal 侧自行
+收尾）、bury（`+windows/window-bury-current-buffer`，关视图走这里）。关窗口不回退。
 
-1. **选候选**（`my/window--return-buffer`）：按该窗口的 `window-prev-buffers`
+1. **选候选**（`+window--return-buffer`）：按该窗口的 `window-prev-buffers`
    从新到旧，取第一个活着、不是正在关闭的、通过 frame 的 `buffer-predicate`、
    不被跳过规则排除、不是 `*scratch*`、不是隐藏 buffer 的 buffer。
 2. **跳过规则**（`switch-to-prev-buffer-skip` =
-   `my/window-skip-dashboard-and-xwidget-p`，Emacs 原生回退也用它）：
+   `+window-skip-dashboard-and-xwidget-p`，Emacs 原生回退也用它）：
    - 已在别的窗口显示的单实例 buffer：任何路径都跳过；
    - 关视图 / 结束 / quit 时还跳过：已在别的窗口显示的任何 buffer、Dashboard、
      xwidget 页面（即使未显示：Markdown 重定向结束临时 buffer 时，窗口不能落回旧页面；
      页面只由显式切换带回）。
-3. **修复**（`my/window--repair-after-close`）：窗口最终显示的是重复可见的 buffer、
+3. **修复**（`+window--repair-after-close`）：窗口最终显示的是重复可见的 buffer、
    `*scratch*`、Dashboard 或主目录 Dired 时，改为第 1 步的候选；没有候选时删掉这个
    多余窗口；最后一个窗口打开项目目录（主目录或无项目时打开 Dashboard）。
 
@@ -102,25 +102,25 @@ Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buff
 
 ### 未显示的 Noema 页面
 
-未显示的页面最多保留 `my/noema-detached-page-limit` 个（config 注册表，默认 8，nil
+未显示的页面最多保留 `+noema-detached-page-limit` 个（config 注册表，默认 8，nil
 不限）；超过时最久未显示的页面被结束。页面编辑时自动保存（约 650 ms），结束不丢
 文字；共享的 app buffer 不计入。检查在 Noema 活动快照的去抖转换里进行
-（`my/noema--trim-detached-pages`）。
+（`+noema--trim-detached-pages`）。
 
 ## 契约
 
 编号稳定；测试名以编号开头或在此列出。
 
 - **C1** 回退不会选中正在关闭的 buffer、`*scratch*` 或隐藏 buffer。
-  测试：`my/window-repair-candidate-respects-native-frame-predicate`、
-  `my/window-repair-candidate-skips-xwidget-history`。
+  测试：`+window-repair-candidate-respects-native-frame-predicate`、
+  `+window-repair-candidate-skips-xwidget-history`。
 - **C2** 已并入 C8。
 - **C3** 关视图 / 结束 / quit 之后，窗口不会停在已在别处显示的 buffer、Dashboard
-  或 xwidget 页面上。测试：`my/window-fallback-skips-xwidget-after-kill`、
-  `my/window-fallback-skips-dashboard-on-quit`、`…-on-kill`。
+  或 xwidget 页面上。测试：`+window-fallback-skips-xwidget-after-kill`、
+  `+window-fallback-skips-dashboard-on-quit`、`…-on-kill`。
 - **C4** 关掉唯一可见的 frame 只隐藏 Emacs。测试：缺（G6）。
 - **C5** 关 frame 不结束其中的 buffer，终端 frame 也一样。测试：
-  `my/portal-deleting-frame-keeps-terminal-session`。
+  `+portal-deleting-frame-keeps-terminal-session`。
 - **C6** 同一个动词在所有种类的 buffer 上做同一个状态转移。测试：
   `c6-close-view-is-one-transition-for-every-kind`、
   `c6-close-view-closes-a-spare-window-without-history`。
@@ -132,15 +132,15 @@ Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buff
   `c8-fallback-never-takes-a-single-instance-buffer-shown-elsewhere`、
   `c8-an-undisplayed-terminal-may-come-back`、
   `c8-a-buffer-can-declare-itself-single-instance`、
-  `my/window-fallback-never-duplicates-visible-portal-view`。
+  `+window-fallback-never-duplicates-visible-portal-view`。
 - **C9** 在一个窗口显示已在别处显示的单实例 buffer，会把它从旧窗口移来，旧窗口
-  按回退规则补位。测试（Portal）：`my/portal-moving-buffer-vacates-its-old-window`、
-  `my/portal-native-sync-vacates-duplicate-before-placement`。
+  按回退规则补位。测试（Portal）：`+portal-moving-buffer-vacates-its-old-window`、
+  `+portal-native-sync-vacates-duplicate-before-placement`。
 - **C10** 回退没有合格候选时：多余窗口被删除；最后一个窗口打开当前项目目录，主目录
   或无项目时打开 Dashboard。测试：`c10-last-window-without-candidates-stays-open`、
-  `my/window-close-last-page-opens-project-directory`、
-  `my/window-quit-home-fallback-opens-dashboard`。
-- **C11** 未显示的 Noema 页面不超过 `my/noema-detached-page-limit` 个，超出时先结束
+  `+window-close-last-page-opens-project-directory`、
+  `+window-quit-home-fallback-opens-dashboard`。
+- **C11** 未显示的 Noema 页面不超过 `+noema-detached-page-limit` 个，超出时先结束
   最久未显示的。测试：`q3-detached-pages-beyond-the-limit-are-ended`。
 
 - **C12** 视图交给 Emacs 的命令若读 minibuffer（`M-x`、提示输入），结束后 Emacs
@@ -154,7 +154,7 @@ Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buff
   buffer 结束动作。测试：`c14-cmd-w-closes-pane-and-keeps-buffer`、
   `c14-cmd-w-keeps-frame-for-sole-pane`、
   `c14-cmd-w-dismisses-minibuffer-before-changing-layout`、
-  `my/window-close-select-key-keeps-picker-and-window-history`。
+  `+window-close-select-key-keeps-picker-and-window-history`。
 
 测试文件：`test/init-window-lifecycle-tests.el`、`test/init-windows-tests.el`，
 均由 `make ui-test` 运行。
@@ -163,14 +163,14 @@ Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buff
 
 | 部分 | 位置 |
 | --- | --- |
-| 单实例判定、跳过规则、回退候选、修复 | `lisp/init-windows.el` “Buffer management helpers” |
-| 关视图 `my/close-view`、关窗格 `my/close-window`、结束 `my/kill-buffer-dwim`、全局 `M-w` | `lisp/init-windows.el` |
-| `H-w` | `lisp/init-base.el` `my/delete-frame-dwim` |
-| 浏览后端的 `M-w` 与 `C-c w d` | `lisp/init-browser.el` |
-| 终端原生键表的 `s-w`、终端移动与 frame 关闭 | `lisp/init-portal.el`、`lisp/init-portal-popup.el` |
-| 原生视图键盘归属 | `lisp/init-portal.el` `my/portal--focus-selected-window` |
-| 未显示页面上限 | `lisp/roam/init-noema.el` |
-| 后台 frame | `lisp/init-background.el` |
+| 单实例判定、跳过规则、回退候选、修复 | `lisp/ui/windows/config.el` “Buffer management helpers” |
+| 关视图 `+windows/close-view`、关窗格 `+windows/close-window`、结束 `+windows/kill-buffer-dwim`、全局 `M-w` | `lisp/ui/windows/config.el` |
+| `H-w` | `lisp/core/aaron-base.el` `aaron/delete-frame-dwim` |
+| 浏览后端的 `M-w` 与 `C-c w d` | `lisp/app/browser/config.el` |
+| 终端原生键表的 `s-w`、终端移动与 frame 关闭 | `lisp/term/portal/config.el`、`lisp/term/portal/popup.el` |
+| 原生视图键盘归属 | `lisp/term/portal/config.el` `+portal--focus-selected-window` |
+| 未显示页面上限 | `lisp/noema/bridge/config.el` |
+| 后台 frame | `lisp/config/background/config.el` |
 
 ## 已知差距
 

@@ -1,5 +1,5 @@
 ;; Emacs Lisp package project (single or multi-file library)
-((nil . ((my/project-local-settings
+((nil . ((+project-local-settings
           . (:test "emacs --batch -Q -L . -f ert-run-tests-batch-and-exit"
              :task (("byte-compile" . "emacs --batch -Q -L . --eval '(byte-recompile-directory \".\" 0)'")
                    ("lint"         . "emacs --batch -Q -L . -f package-lint-batch-and-exit")

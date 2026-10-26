@@ -1,5 +1,5 @@
 ;; Python project managed by uv
-((nil . ((my/project-local-settings
+((nil . ((+project-local-settings
           . (:env (("PYTHONPATH" . "src"))
              :test "uv run pytest -x"
              :task (("sync" . "uv sync")

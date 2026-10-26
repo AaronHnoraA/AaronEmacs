@@ -47,7 +47,7 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
 | `site-lisp/config/config-tools.el` | 兼容入口 `config-board` + transient `config-dispatch` |
 | `etc/config-store.el` | **随仓库提交的配置值**，既是初始值也是用户自定义值 |
 | `etc/config-*.el` | 自动发现的专题 store；已存在的 key 会写回原文件 |
-| `lisp/init-base.el`（尾部） | Emacs 原生变量的注册声明（不含 setq，值在 store 里） |
+| `lisp/core/aaron-base.el`（尾部） | Emacs 原生变量的注册声明（不含 setq，值在 store 里） |
 
 加载顺序：
 
@@ -57,10 +57,10 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
 2. 每个模块的 `(config-register ...)` 调用时，如果 store 里有该项的值，
    **立即写入变量**（不再等 after-init-hook），保证模块加载期读到正确的值；
    但此时**不跑 `:on-change` 回调**——回调统一推迟到第 3 步，避免被多个 key
-   共用的回调（如 20 个字体项共用 `my/font-reset-all`）在注册期反复触发
+   共用的回调（如 20 个字体项共用 `aaron/font-reset-all`）在注册期反复触发
 3. `config-apply-store` 挂在 `after-init-hook` 做最后一遍：先写入所有值，
    再跑 `:on-change`，且**每个回调每次启动只跑一次**——无参回调（如
-   `my/font-reset-all`）按函数去重只调用一次，带参回调仍按 (NAME VALUE)
+   `aaron/font-reset-all`）按函数去重只调用一次，带参回调仍按 (NAME VALUE)
    逐项调用。这样一次启动只重建一次字体/face，而不是几十次
 
 > 注意：注册期推迟 `:on-change` 只针对**启动窗口**（`after-init-time` 为 nil）。
@@ -105,9 +105,9 @@ transient `config-dispatch`：打开 `config` group、按注册表 group 打开�
 ### Lisp API
 
 ```elisp
-(config-get 'my/font-code)            ; => 当前值
-(config-set 'my/font-code "Iosevka")  ; 即时生效 + 写入 store + 跑 :on-change
-(config-reset 'my/font-code)          ; 从 store 里删除该项（变量值保持当前）
+(config-get 'aaron-font-code)            ; => 当前值
+(config-set 'aaron-font-code "Iosevka")  ; 即时生效 + 写入 store + 跑 :on-change
+(config-reset 'aaron-font-code)          ; 从 store 里删除该项（变量值保持当前）
 (config-list 'font)                   ; 内省：按组列出注册项
 ```
 
@@ -115,9 +115,9 @@ transient `config-dispatch`：打开 `config` group、按注册表 group 打开�
 
 ```elisp
 ;; 1) 普通变量，带即时更新脚本
-(config-register 'my/font-code
+(config-register 'aaron-font-code
   :group 'font :type 'string :doc "代码字体族"
-  :on-change #'my/font-reset-all)        ; :var 默认就是 'my/font-code
+  :on-change #'aaron/font-reset-all)        ; :var 默认就是 'aaron-font-code
 
 ;; 2) buffer-local 全局默认值：用 :get/:set 操作 default-value
 (config-register 'tab-width
@@ -141,7 +141,7 @@ transient `config-dispatch`：打开 `config` group、按注册表 group 打开�
   :group 'database
   :path    (expand-file-name "etc/clutch-config.el" user-emacs-directory)
   :example (expand-file-name "etc/clutch-config.el.example" user-emacs-directory)
-  :loader  (lambda () (my/clutch--load-config)))
+  :loader  (lambda () (+clutch--load-config)))
 ```
 
 `config-register` 关键字：`:type`（`boolean`/`integer`/`number`/`string`/
@@ -184,4 +184,4 @@ transient `config-dispatch`：打开 `config` group、按注册表 group 打开�
 
 没迁移的项保持原样，正常工作。
 
-种子注册见 `lisp/init-base.el` 尾部「Config registry」一节。
+种子注册见 `lisp/core/aaron-base.el` 尾部「Config registry」一节。

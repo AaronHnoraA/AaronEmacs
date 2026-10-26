@@ -43,7 +43,7 @@ Visiting an `*.ipynb` path that does not exist yet, or one that some other
 tool left empty, seeds a valid nbformat 4.5 notebook with one empty code cell
 and writes it before the source projection opens. An empty file is not JSON,
 so without that step neither the projection nor a kernel could read it. The
-kernelspec recorded there is `my/noema-jupyter-notebook-new-kernelspec` (a
+kernelspec recorded there is `+noema-jupyter-notebook-new-kernelspec` (a
 registered setting, Python 3 by default); its `language` entry also selects the
 major mode the new notebook opens in. A new `.noema` work document keeps its
 own initialization and still asks for its Noema project first.
@@ -58,7 +58,7 @@ does not identify a language, the source projection defaults to Python.
 Closing that Emacs source buffer does not stop the Noema kernel.
 
 Noema's web-host only serves native notebooks inside its notes root
-(`my/noema--notes-root`) or inside a validated Noema project, i.e. an
+(`+noema--notes-root`) or inside a validated Noema project, i.e. an
 ancestor directory whose `noema.toml` has a `[project]` table (a Wiki
 repository manifest alone does not count). Every Jupyter request from the
 source buffer carries `projectRoot` when such a project exists. For a native
@@ -131,14 +131,14 @@ started, interrupted, restarted, and shut down over REST.
 
 # SSH 项目入口
 
-项目开发推荐 `M-x my/jupyter-ssh-open-project`，或在项目菜单 `project-menu`
+项目开发推荐 `M-x +jupyter/ssh-open-project`，或在项目菜单 `project-menu`
 选择 `Jupyter SSH project`。`Jupyter Board` 顶部和 `SSH Notebook Projects`
 区域也有 `Open SSH Project`；Board 原有的 Remote Kernels / Open REPL
 入口继续保留。已配置的 SSH 项目还会显示独立行，可直接按 `Open Project`
 进入项目，或按 `Files` 打开远端 Dired。
 现有 `COMP9444` 快捷入口指向 `aaron-pc` 的
 `/home/aaron/Desktop/UNSW/COMP9444/`；其他项目可选 `Choose SSH folder…`。
-配置入口是 `my/jupyter-ssh-projects`，每项只有 `:name`、已有 Remote `:target`
+配置入口是 `+jupyter-ssh-projects`，每项只有 `:name`、已有 Remote `:target`
 和该机器的绝对 `:root`。
 
 打开后用普通 Dired / `find-file` 进入 `.ipynb`，按 `C-c i K` 选目标机上的
@@ -226,12 +226,12 @@ Noema 输出页的页头读取同一内核注册表的只读状态：`disconnect
 
 对应地，Emacs 侧发起执行的 gateway 请求也不能用普通请求的截止时间：Noema 要等
 run-all 里每个 cell 都跑完才应答，用 10 秒的默认值会把一次正常运行报成失败。
-执行与 kernel 控制走 `my/noema-jupyter-cell-execute-timeout`（默认 24 小时），
+执行与 kernel 控制走 `+noema-jupyter-cell-execute-timeout`（默认 24 小时），
 它是"一个 notebook 最长允许算多久"的上界，不是健康检查。
 
 补全（capf）走的是同步桥，所以它包在 `while-no-input` 里：你继续打字就立刻放弃
 这次请求，不会为了等一个忙碌的 kernel 冻住编辑器。kernel 连续答不上来时，
-`my/noema-jupyter-cell-introspect-backoff`（默认 20 秒）内不再隐式打扰它；
+`+noema-jupyter-cell-introspect-backoff`（默认 20 秒）内不再隐式打扰它；
 它一旦重新应答就立即清除。**显式** `C-c C-i` 不受 backoff 影响。
 
 LSP 由文件所在的 Remote workspace 和目录环境决定，不再查询 kernelspec 的
@@ -321,7 +321,7 @@ vendored `remote_ikernel` 的五端口 tunnel 使用单一 OpenSSH session：`-N
 
 ## 配置
 
-服务器清单是注册过的 config 项 `my/noema-jupyter-servers`（用 config board 或
+服务器清单是注册过的 config 项 `+noema-jupyter-servers`（用 config board 或
 `etc/config-store.el` 设置，不要 `setq`）。每项是一个 plist：
 
 ``` commonlisp
@@ -382,9 +382,9 @@ interrupt/restart 只有在用户显式执行对应操作时才发给 adopted ke
 
 `:kind server` 的服务器现在通过 Remote 的 `jupyter-contents` 文件后端挂载。
 在 Jupyter Board 的服务器条目点击 `Browse Files`，或运行
-`M-x my/noema-jupyter-server-browse`，即可在 Dired 浏览服务器目录、打开
+`M-x +noema-jupyter/server-browse`，即可在 Dired 浏览服务器目录、打开
 `.ipynb`、编辑并保存。文件与执行输出都留在服务器，不要求本地 Noema project。
-也可以用 `(my/noema-jupyter-server-file-name "lab" "folder/demo.ipynb")`
+也可以用 `(+noema-jupyter-server-file-name "lab" "folder/demo.ipynb")`
 取得文件名，再交给 `find-file`。
 
 这个命名空间使用 `/fs:jupyter.<server-id 的 UTF-8 十六进制>:/路径`，路径相对于
@@ -421,12 +421,12 @@ chmod、符号链接或跨客户端原子冲突检测。隐藏文件是否可访
 
 ## Emacs 里的补全与文档
 
-所有 ipynb 源码投影（`my/noema-jupyter-cell-mode`）上挂了
-`my/noema-jupyter-cell-capf`，直接问 kernel。它看得见静态分析看不见的东西：
+所有 ipynb 源码投影（`+noema-jupyter-cell-mode`）上挂了
+`+noema-jupyter-cell-capf`，直接问 kernel。它看得见静态分析看不见的东西：
 前面 cell 定义的名字、DataFrame 列名、IPython magic、Sage 注入的 builtin。
 它声明 `:exclusive no`，并固定排在 `lsp-completion-at-point` 前面；所以优先保留
 live kernel 的手感，而 kernel 空闲、不可达或没有结果时仍会透传给 lsp-mode。
-`C-c C-i` 或 `S-TAB` 是 `my/noema-jupyter-cell-inspect`（Jupyter 的
+`C-c C-i` 或 `S-TAB` 是 `+noema-jupyter/cell-inspect`（Jupyter 的
 `inspect_request`，前缀参数取源码，相当于 `??obj`）。
 
 打字不会顺带启动 kernel：没有正在运行的 kernel 时这些请求直接返回

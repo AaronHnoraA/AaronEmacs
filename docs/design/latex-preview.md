@@ -58,9 +58,9 @@ templates/noema              -> ../site-lisp/noema/resources/templates/noema
 这些链接**必须是相对路径**。历史上它们指向一个后来搬走的绝对路径,
 断链之后 Emacs 会把死路径通过 `NOEMA_KATEX_MACROS_DIR` 交给 Noema,
 于是两边都加载不到任何宏,而且没有任何报错。
-`my/health-critical-check`(`make doctor`)现在会检查这五条链接。
+`+health/critical-check`(`make doctor`)现在会检查这五条链接。
 
-`lisp/lang/tex/init-latex.el` 读同一批 `.tex`,编译成前言注入每次渲染:
+`lisp/lang/latex/config.el` 读同一批 `.tex`,编译成前言注入每次渲染:
 
 - 解析的语法子集与 `shared/katex-macros.mjs`(JS)和 `kernel/noema/katexmacros`
   (Go)一致,并由同一份 `shared/katex-macro-fixtures.json` 约束 ——
@@ -80,7 +80,7 @@ templates/noema              -> ../site-lisp/noema/resources/templates/noema
 | 全局 | `~/.config/noema/katex-macros.tex`(`NOEMA_CONFIG_DIR`) | 公式工具板的「宏」分类 | 全部 |
 | 本笔记 | 笔记 meta 的 `#+begin macros … #+end macros` | 公式工具板或直接编辑 | Noema 页面、LaTeX 导出 |
 
-全局层是 Noema 自己的用户配置,不在任一 git 仓库里;`my/latex--macro-files` 把它排在共享
+全局层是 Noema 自己的用户配置,不在任一 git 仓库里;`+latex--macro-files` 把它排在共享
 文件之后读入,所以 RaTeX 与 Noema 对同名宏的取舍一致。项目层与本笔记层属于某篇 Markdown,
 由 `shared/note-macros.mjs` 解析(只扫 meta 块),Emacs 的 TeX/JuText 预览不涉及。
 `physics.tex` 按 CTAN physics 宏包的命令名移植了参数个数固定的部分;需要扫描定界符的形式
@@ -115,7 +115,7 @@ TeX 兼容改写(目前 `multline → gathered`、`\displaylines`)的规则表�
 - **想看日志** —— `ratex-debug` 置 t 后 `M-x ratex-debug-open-buffer`。
   日志已做截断和缓冲区上限;在此之前打开它本身就会让 Emacs 更卡。
 
-运行时开销看 `M-x my/performance-watch` 的 "Math preview" 与
+运行时开销看 `M-x +performance/watch` 的 "Math preview" 与
 "Pending renders" 两行。
 
 ## 本地 fork 说明

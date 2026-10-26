@@ -161,10 +161,10 @@ a forward to the target has to name the target-side one."
   "A target without Java must decline JDTLS before its command is built."
   (unless (remote-e2e--enabled-p)
     (ert-skip "Set REMOTE_E2E=1 or run make remote-e2e"))
-  (unless (and (locate-library "init-lsp") (locate-library "lsp-java"))
+  (unless (and (locate-library "tools/lsp/config") (locate-library "lsp-java"))
     (ert-skip "JDTLS preflight requires the full Emacs init"))
-  (require 'init-lsp)
-  (require 'init-java)
+  (require 'tools/lsp/config)
+  (require 'lang/java/config)
   (let* ((target (or (remote-e2e--target)
                      (ert-fail "No reachable Remote target")))
          (target-id (remote-target-id target))
@@ -175,11 +175,11 @@ a forward to the target has to name the target-side one."
       (setq default-directory logical
             buffer-file-name (expand-file-name "RemotePreflight.java" logical)
             major-mode 'java-mode)
-      (let ((my/language-server--manual-start t))
+      (let ((+language-server--manual-start t))
         (cl-letf (((symbol-function 'lsp-deferred)
                    (lambda (&rest _arguments)
                      (ert-fail "JDTLS started without target Java"))))
-          (should-not (my/lsp-mode-start-now)))))))
+          (should-not (+lsp-mode-start-now)))))))
 
 (ert-deftest remote-e2e-service-validator-repairs-ready-cache ()
   "A corrupt but executable SSH cache leaf must be replaced after validation."
@@ -253,8 +253,8 @@ a forward to the target has to name the target-side one."
   ;; runs this integration check under the actual init with Consult and Magit.
   (unless (and (locate-library "consult") (locate-library "magit"))
     (ert-skip "Consult and Magit require the full Emacs init"))
-  (require 'init-project)
-  (require 'init-git-core)
+  (require 'tools/project/config)
+  (require 'tools/git/core)
   (require 'consult)
   (require 'magit)
   (remote-fs-install)
@@ -287,7 +287,7 @@ a forward to the target has to name the target-side one."
                     ((symbol-function 'consult-grep)
                      (lambda (root &optional _initial)
                        (setq selected (list 'grep root)))))
-            (my/project-ripgrep logical-root))
+            (+project/ripgrep logical-root))
           (setq rg-path (remote-search-ripgrep logical-root)
                 initial-rg-path rg-path)
           (should

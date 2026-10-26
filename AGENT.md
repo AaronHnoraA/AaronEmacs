@@ -51,8 +51,12 @@ authoritative module order; the module system that reads it is in
 `lisp/core/` (`aaron-lib` macros and hook runners, `aaron-emacs` lifecycle
 hooks and incremental loading, `aaron-modules` registry, loader and load
 ledger, `aaron-doctor`, `aaron-modules-board`), described in
-`docs/design/module-system.md`. Most local modules live under `lisp/`; language-specific modules live under `lisp/lang/`; the
-Noema/Jupyter bridge lives under `lisp/roam/`.
+`docs/design/module-system.md`. Every module is a directory
+`lisp/CATEGORY/NAME/` whose files are addressed by their path
+(`(require 'tools/lsp/config)`): language modules under `lisp/lang/`, the
+Noema/Jupyter bridge under `lisp/noema/`, the Remote library and its modules
+under `lisp/remote/`.  Only the core is flat (`lisp/core/aaron-*.el`), as
+Doom's is.
 
 `.noema` files are D-023 AI prompt/workflow documents, not Jupyter notebooks.
 Their work blocks run through the ACP agent boundary and persist the latest
@@ -87,10 +91,11 @@ notebook.
 
 When adding a module:
 
-- Put it in the owning directory: a directory module `lisp/CATEGORY/NAME/`
-  (`config.el`, optional `init.el`, `autoload/`, `doctor.el`, `README.md`)
-  for new work; a single `init-foo.el` ending in `(provide 'init-foo)` only
-  while an existing module has not moved yet.
+- Make it a directory module `lisp/CATEGORY/NAME/`: `config.el` ending in
+  `(provide 'CATEGORY/NAME/config)`, further files `FILE.el` providing
+  `CATEGORY/NAME/FILE`, and as needed `init.el`, `autoload/`, `doctor.el` and
+  `README.md`.  Other modules `require` a module file by that path feature
+  and name it as the file argument of `declare-function`.
 - Declare it in the `aaron!` form in `lisp/init-modules.el` under its Doom
   category (`:core :os :remote :ui :completion :editor :emacs :term
   :checkers :tools :lang :noema :app :config`), with `:optional`, `:after`,
@@ -103,7 +108,7 @@ When adding a module:
   binding one key) before adding a binding.
 - Keep `M-x module-doctor` clean for the module you touch: a policy hit
   (`file-remote-p` branching, `"local"` comparisons, `global-set-key`, raw
-  `package-vc-install`, `my/` names in directory modules) is either fixed
+  `package-vc-install`, legacy `my/` names) is either fixed
   or, when the rule itself allows it, marked on its line with
   `aaron-allow: ID`.
 - Use `declare-function` for cross-module calls when byte compilation needs it.
@@ -119,12 +124,14 @@ When adding a module:
   or `aaron-first-buffer-hook`, buffer and window changes to
   `aaron-switch-buffer-hook` / `aaron-switch-window-hook`, settings that must
   see file and directory locals to `MODE-local-vars-hook`, and idle
-  preloading to `aaron-load-packages-incrementally`.  Existing `my/` names
-  are legacy: they are renamed module by module as each module moves into
-  its category directory, updating every caller (including
-  `etc/config-store.el` keys and Noema/Raycast) in the same change, with no
-  compatibility alias.  Public subsystems keep their own namespaces
-  (`remote-*`, `config-*`, `noema-*`).
+  preloading to `aaron-load-packages-incrementally`.  There are no `my/`
+  names any more: a non-command `+X` keeps the domain word its name starts
+  with (`+noema-roam-root`), a command is `+DOMAIN/ACTION`
+  (`+git/board`, `+language-server/doctor`), and the core is `aaron-` /
+  `aaron/`.  Renaming a symbol updates every caller in the same change,
+  including `etc/config-store.el`, `bin/emacs-app`, the Raycast extension
+  and Noema, with no compatibility alias.  Public subsystems keep their own
+  namespaces (`remote-*`, `config-*`, `noema-*`).
 - For stable user-facing `M-x` entry points other than Transient menus, add a
   short purpose-first alias in the owning module (for example `config-health`
   or `jupyter-board`) while retaining the implementation name for
@@ -250,9 +257,9 @@ tracks the GNU Emacs 31.1 Lisp layer but not its C/Objective-C runtime.  The
 Neomacs migration is paused at 0.0.18 and Neomacs is not installed; keep the
 rules below when touching the boundary so the work stays reusable.
 
-- `lisp/init-neomacs.el` is the only module allowed to know which build is
-  running.  It exposes `my/neomacs-p` and is loaded right after
-  `init-macos`.  Consumers must not test `my/neomacs-p`, `window-system`,
+- `lisp/os/neomacs/config.el` is the only module allowed to know which build is
+  running.  It exposes `+neomacs-p` and is loaded right after
+  `os/macos`.  Consumers must not test `+neomacs-p`, `window-system`,
   `(featurep 'ns)`, or `native-comp-available-p` to pick behaviour; extend the
   compatibility layer instead.  The one accepted exception is a genuinely
   build-specific command such as `+mac-swap-option-and-command`.
@@ -263,7 +270,7 @@ rules below when touching the boundary so the work stays reusable.
   Command as Meta).
 - Neomacs has no native compilation.  Anything that fans out over
   `num-processors` needs a cap that is automatic on interpreted builds and
-  inert on natively compiled ones; `my/elisp-elsa-worker-limit` is the pattern.
+  inert on natively compiled ones; `+elisp-elsa-worker-limit` is the pattern.
 - Changes must stay a no-op on GNU Emacs.  Verify both builds before claiming
   a fix, and record new differences in `docs/design/neomacs-compat.md`.
 
@@ -271,30 +278,30 @@ rules below when touching the boundary so the work stays reusable.
 
 This config already has maintenance and workflow entry points. Reuse them:
 
-- LSP: `my/register-language-server`,
-  `my/register-language-server-feature`, `my/language-server-manager`, and
-  `my/language-server-doctor`.
-- Jupyter: the Noema bridge under `lisp/roam/init-noema-jupyter-*.el` —
+- LSP: `+register-language-server`,
+  `+register-language-server-feature`, `+language-server/manager`, and
+  `+language-server/doctor`.
+- Jupyter: the Noema bridge under `lisp/noema/jupyter/` —
   `runtime` (kernelspec discovery, target process, connection file, the
   five-channel forward group), `server` (remote Jupyter servers over HTTP(S),
-  `my/noema-jupyter-servers`), `cell` (the `.cell/` script mode, kernel
+  `+noema-jupyter-servers`), `cell` (the `.cell/` script mode, kernel
   completion and inspection), and `lsp` (kernel-following lsp-mode); plus
-  `my/jupyter-board` for kernelspec management and Remote Doctor for
+  `+jupyter/board` for kernelspec management and Remote Doctor for
   diagnostics.
-- Projects: `project-menu`, `my/project-switch`,
-  `my/project-open-workbench`, `my/project-search-paths`, Projectile,
+- Projects: `project-menu`, `+project/switch`,
+  `+project/open-workbench`, `+project-search-paths`, Projectile,
   Perspective, Transient, and `show-imenu`.
 - Remote files: `remote-files` is a Dired/Dirvish menu over `remote-transfer`,
   not a screen: the other side is picked in a pop-up Dired, and jobs are
-  claimed as tasks by `my/activity-board` (queue detail in
+  claimed as tasks by `+activity/board` (queue detail in
   `remote-transfer-list`).  `remote-machines` holds hand-entered targets.  Do
   not add another uploader, sync command, host list or progress indicator.  See
   `docs/design/remote-files.md`.
-- Compile/maintenance: `my/compile-board`, `config-compile-menu`, `make`
+- Compile/maintenance: `+compile/board`, `config-compile-menu`, `make`
   targets documented in `docs/ops/maintenance.md`.
-- Performance diagnostics: `my/performance-watch`,
-  `my/performance-report-string`, `my/performance-snapshot`,
-  `my/performance-hook-snapshot`, and `my/performance-org-buffer-snapshot`.
+- Performance diagnostics: `+performance/watch`,
+  `+performance-report-string`, `+performance-snapshot`,
+  `+performance-hook-snapshot`, and `+performance-org-buffer-snapshot`.
   Prefer these APIs over asking for screenshots when investigating runtime or
   Org performance.  In the watch buffer, `y` copies the full current report.
 - Background application: `bin/emacs-app` is the single entry point for
@@ -304,7 +311,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   The Raycast extension (`tools/raycast-emacs`) is the only control surface
   and only calls it; nothing else speaks `emacsclient`, and every call is
   bounded by a timeout.  Its main command names no Emacs action itself: it
-  shows `my/background-actions`, the whitelist in `lisp/init-background.el`.
+  shows `+background-actions`, the whitelist in `lisp/config/background/config.el`.
   The separate `New Terminal` command calls `bin/emacs-app terminal` so it can
   have a global hotkey and launch Emacs when needed.  M-x stays
   inside Emacs; do not bring back an external M-x or an Emacs popup frame.
@@ -313,7 +320,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   the same Emacs eval before queueing, so a newer Raycast cannot enqueue an
   unqueryable action in an older Emacs.  Raycast waits only a bounded time, then
   leaves Emacs responsible for prompts and later errors.
-  `lisp/init-background.el` owns visibility, the Dock policy, frame drag
+  `lisp/config/background/config.el` owns visibility, the Dock policy, frame drag
   strips and the action result table; native sources live in
   `tools/macos-background/` and build into `var/macos-background/`.
   Background means invisible frames, not a hidden application.  Only a
@@ -325,7 +332,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   `handle-delete-frame`).  This Emacs is expected to run for weeks and to be
   started, restarted and quit from Raycast.  The server answers before the
   initial frame exists, so anything a launcher asks for at startup must wait
-  for `window-setup-hook` (`my/background-start-hidden`).  Closing a view,
+  for `window-setup-hook` (`+background-start-hidden`).  Closing a view,
   a window or a frame never ends a buffer; only ending actions do
   (`docs/design/window-lifecycle.md`).  A long-lived helper that would
   survive a crashed Emacs must watch its owner's pid, as the Noema web host
@@ -334,7 +341,7 @@ This config already has maintenance and workflow entry points. Reuse them:
 - Noema from outside Emacs: the Raycast entry has a Noema section, `Find Note`
   and `Noema Maintenance` (also installed as commands of their own, for a
   hotkey), and they do not go through Emacs at all.  Finding a page is
-  therefore not in `my/background-actions`: an entry there would bring Emacs
+  therefore not in `+background-actions`: an entry there would bring Emacs
   forward to do what Raycast already shows.  They read
   `var/noema/host.json`, written by the running Noema host, and call its
   loopback `/api` (`tools/raycast-emacs/src/backend.ts`): search is answered
@@ -346,14 +353,14 @@ This config already has maintenance and workflow entry points. Reuse them:
   `bin/emacs-app`, Noema data and maintenance go to the Noema backend, and
   neither is reimplemented in the extension.
 - Page search and references: one implementation, the Noema kernel's
-  (`site-lisp/noema/kernel/noema/wikisearch`).  `lisp/roam/init-noema-search.el`
+  (`site-lisp/noema/kernel/noema/wikisearch`).  `lisp/noema/search/config.el`
   sends the typed text and shows the answer through the completion style
-  `my/noema-search`, which neither filters nor sorts; do not complete over a
+  `+noema-search`, which neither filters nor sorts; do not complete over a
   local page list, and do not put the answer through orderless or flex, which
   drop what the kernel matched fuzzily.  Link text comes from the kernel too
-  (`my/noema-insert-reference`, `M-r` in a Noema pane).
+  (`+noema/insert-reference`, `M-r` in a Noema pane).
 - Templates: the built-in `auto-insert` template layer in
-  `lisp/init-auto-insert.el`; do not revive the old Doom/Yasnippet file-template
+  `lisp/editor/file-templates/config.el`; do not revive the old Doom/Yasnippet file-template
   path.
 - Noema note templates are a separate catalogue in
   `site-lisp/noema/resources/templates/noema/`, exposed to Emacs through
@@ -361,8 +368,8 @@ This config already has maintenance and workflow entry points. Reuse them:
   Emacs Roam workbench reads that catalogue instead of keeping a second list.
   Use `# type: roam` or `# type: regular` to scope a template to graph nodes
   or Markdown documents excluded from the graph; keep the two results distinct.
-- LaTeX math preview: RaTeX, configured in `lisp/lang/tex/init-latex.el`, with
-  `my/latex-preview-doctor` as the diagnostic entry point.  Math macros and TeX
+- LaTeX math preview: RaTeX, configured in `lisp/lang/latex/config.el`, with
+  `+latex/preview-doctor` as the diagnostic entry point.  Math macros and TeX
   compatibility rules have one source, `site-lisp/noema/resources/`, which the
   Emacs preview and Noema's KaTeX renderer both read through the relative links
   in `etc/` and `templates/`.  Do not add a second macro table, a second
@@ -376,7 +383,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   `docs/design/latex-preview.md`.
 - Agent Skills: the Noema capability resolver and its manager
   (`noema-skill-manager`).  Global Skills live flat in the vault library
-  `my/noema-skills-directory` (`NOEMA_GLOBAL_SKILLS`), not in `etc/`;
+  `+noema-skills-directory` (`NOEMA_GLOBAL_SKILLS`), not in `etc/`;
   Skill packs (`packs` in `etc/noema/capabilities.json`, `@@pack(id)`) are
   link lists over them, patched per project by membership deltas only; and
   `skills.lock.json` beside that library is the single upstream record, maintained by
@@ -410,9 +417,9 @@ document the workflow in `docs/`.
 For runtime or Org performance work, start from the existing performance
 surface:
 
-- Interactive: `M-x my/performance-watch` or `SPC h p`.
-- Agent/batch: evaluate `(my/performance-report-string)` for a full text page,
-  or `(my/performance-snapshot)` for structured data.
+- Interactive: `M-x +performance/watch` or `SPC h p`.
+- Agent/batch: evaluate `(+performance-report-string)` for a full text page,
+  or `(+performance-snapshot)` for structured data.
 - Keep auto refresh off unless a time series is needed; each refresh samples
   `ps` and can perturb the measurement.
 - For Org issues, check LaTeX running/queued/pending, local
@@ -429,7 +436,7 @@ dependency, not an optional experiment.
 
 - Do not add new `global-set-key` calls for normal configuration shortcuts.
 - For leader bindings, edit the existing leader definitions in
-  `lisp/init-evil.el` for shared prefixes, or the owning module for a domain
+  `lisp/editor/evil/config.el` for shared prefixes, or the owning module for a domain
   suffix.  Do not bind a suffix already owned by another module: load order
   silently replaces the earlier binding.  Verify the resolved key after full
   startup and update `docs/guide/daily-usage.md` with the same command.
@@ -438,12 +445,12 @@ dependency, not an optional experiment.
 - For concrete mode keymap objects that only exist after a package loads, bind
   inside `with-eval-after-load`; `evil-define-key*` is acceptable there.
 - Dirvish single keys mirror `~/.config/yazi/keymap.toml` and have one
-  source, the table in `lisp/init-dirvish-keys.el`.  Add or move a Dirvish key
-  there, not in `init-windows.el`, and keep `my/dirvish-key-hints` (the `?`
+  source, the table in `lisp/emacs/dirvish/config.el`.  Add or move a Dirvish key
+  there, not in `ui/windows/config.el`, and keep `+dirvish-key-hints` (the `?`
   sheet) and the table in `docs/guide/daily-usage.md` in step.
 - Domain-neutral route-table helpers live in vendored `general.el` as
   `general-route-*`; concrete policy still belongs in the owning init module
-  such as `lisp/init-open.el`.
+  such as `lisp/core/aaron-open.el`.
 
 When changing user-facing shortcuts, update the relevant docs, usually
 `docs/guide/daily-usage.md`, `README.md`, and sometimes `docs/guide/dev-guide.md` or
@@ -453,8 +460,8 @@ When changing user-facing shortcuts, update the relevant docs, usually
 
 - Ordinary packages belong in the responsible module with `use-package` and
   `:ensure t`.
-- VC packages must go through `my/package-ensure-vc` or
-  `my/package-register-vc`; do not scatter raw `package-vc-install` calls.
+- VC packages must go through `aaron-package-ensure-vc` or
+  `aaron-package-register-vc`; do not scatter raw `package-vc-install` calls.
 - Package recovery and lock audit must keep working without loading the whole
   `init.el`; bootstrap logic belongs in `bootstrap.el` and `package-lock.el`.
 - System dependencies such as `rg`, `git`, `latexmk`, `dvisvgm`, `hunspell`,
@@ -511,9 +518,9 @@ LSP:
 - File-backed programming buffers auto-start only when a registered client and
   target-side executable are available.  Manual ensure reports missing tools;
   automatic startup stays quiet.
-- Custom clients go through `my/register-language-server`; package-owned
+- Custom clients go through `+register-language-server`; package-owned
   clients such as JDTLS are declared through
-  `my/register-language-server-feature`.
+  `+register-language-server-feature`.
 - LSP is the strictest consumer of the Remote-first rule.  One logical
   workspace root and target context must determine document URIs, server
   process placement, executable lookup, environment/toolchain, file watchers,
@@ -542,11 +549,11 @@ LSP:
 - Give each language-helper process instance its own owned discovery/port file;
   never let concurrent reconnects overwrite a project-global endpoint file.
   Validate local owners and clean up only files owned by the exiting process.
-- Keep the layer split: `init-lsp.el` for routing/core setup,
-  `init-lsp-ops.el` for backend-agnostic commands, `init-lsp-tools.el` for
-  Hub/Doctor/dispatch/session knobs, `init-lsp-runtime.el` for the runtime
+- Keep the layer split: `tools/lsp/config.el` for routing/core setup,
+  `tools/lsp-ops/config.el` for backend-agnostic commands, `tools/lsp-hub/config.el` for
+  Hub/Doctor/dispatch/session knobs, `tools/lsp/runtime.el` for the runtime
   provider layer (kernel-following analyzers etc.), and
-  `init-lsp-toolchain.el` for project-level toolchain profiles.
+  `tools/lsp/toolchain.el` for project-level toolchain profiles.
 - LSP document/protocol identity (workspace root, URI, server placement,
   diagnostic keys) is always canonicalized to `/fs:TARGET:/path`. Ordinary
   buffer identity is not: ordinary local buffers keep their native
@@ -555,13 +562,13 @@ LSP:
   registers as a handler operation), not by rewriting `buffer-file-name`.
   Where lsp-mode's raw diagnostics lookup bypasses that alias, add a narrow
   advice that closes the gap instead of normalizing buffer identity into
-  `/fs:` globally — see `my/lsp-mode--fix-path-casing-a` in `init-lsp.el`.
+  `/fs:` globally — see `+lsp-mode--fix-path-casing-a` in `tools/lsp/config.el`.
 - Keep display work bounded: CodeLens, inlay hints, document colors, document
   links, and ranged semantic-token prefetch use visible windows plus
-  `my/language-server-visible-render-margin`; protocol state and server caches
+  `+language-server-visible-render-margin`; protocol state and server caches
   may remain workspace-wide.  Do not turn a server refresh notification into
   buffer-global decoration creation.
-- When LSP behaves strangely, use `my/language-server-doctor` before changing
+- When LSP behaves strangely, use `+language-server/doctor` before changing
   code.
 
 Org/Jupyter/research:
@@ -569,7 +576,7 @@ Org/Jupyter/research:
 - Noema Agenda task lists use the host's active-scope source service.
   `noema-agenda` is the searchable native entry; `noema-agenda-web` and the
   named hosted views are distinct entries.  Keep keys and menus on these
-  names while `my/` functions own their implementations. Current Markdown
+  names while `+noema-…` functions own their implementations. Current Markdown
   file navigation uses a read-only snapshot of the editor buffer;
   it must not scan the vault or enter another project. Task writes use the
   versioned scoped owner, including protected-buffer and repeat semantics.
@@ -598,7 +605,7 @@ Noema Markdown panes:
 
 - A Noema Markdown xwidget buffer is an inert placeholder; the CM6 page owns
   the document, selection and history.  An Emacs command that reads or edits
-  "the buffer" must either be remapped in `my/noema-keys-mode-map` onto a page
+  "the buffer" must either be remapped in `+noema-keys-mode-map` onto a page
   command, or ask the page for its saved range through `noema-md-bridge`
   (`noema-md-bridge-request` → `noema-md-bridge-handle-selection`) and run on
   the note's ordinary source buffer.  Do not implement text features against
@@ -612,12 +619,12 @@ Noema Markdown panes:
   a page skips it.  Never special-case one page or one buffer kind.
 - A key forwarded from a page follows its command's result: the window the
   command opened or changed gets the keyboard
-  (`my/noema--follow-forwarded-command`), including a window shown by a
-  process within `my/noema-forwarded-command-grace` while the pane is still
+  (`noema--follow-forwarded-command`), including a window shown by a
+  process within `noema-forwarded-command-grace` while the pane is still
   selected.  Only when nothing changed does the pane get its keyboard back.
   Bridged actions that show a buffer select it.
 - Keys follow the native keyboard focus, never a list of keys.  Whenever
-  Emacs takes the keyboard from a pane (`my/noema--release-xwidget-input-buffer`)
+  Emacs takes the keyboard from a pane (`noema--release-xwidget-input-buffer`)
   the page is told (`host-owns-keyboard`) and hands macOS first responder
   back to the Emacs view through Emacs' own `messageHandlers.keyDown` "C-g"
   (`handOffNativeKeyboard`), so later keys reach Emacs natively and in order.
@@ -637,7 +644,7 @@ Noema Markdown panes:
   background.  The page refuses a `pause` while it holds the native keyboard
   and Emacs has not announced taking it (`holdsInputAgainstHostPause`), and
   reports `input-focus` instead.  Take the keyboard from a pane only through
-  `my/noema--release-xwidget-input-buffer`, which makes that announcement.
+  `noema--release-xwidget-input-buffer`, which makes that announcement.
 - The page's Vim layer (`site-lisp/noema/pages/vim-lite.ts`) takes native
   Vim as its reference, checked against results recorded from Neovim
   (`tests/vim-native-parity.test.ts`); `docs/noema/guide/vim.md` lists the
@@ -647,22 +654,22 @@ Noema Markdown panes:
 - Commands bound to keyboard keys use `(interactive (list last-command-event))`,
   never `(interactive "e")`, which rejects keyboard events.
 - Code that visits a file only to read, index or reference it (Treemacs tags,
-  `noema-md-bridge`, agents) binds `my/programmatic-file-visit` to t.  An
+  `noema-md-bridge`, agents) binds `+programmatic-file-visit` to t.  An
   interactive command otherwise triggers the Markdown→Noema redirect, which
   blanks the visited buffer and reopens the page.
-- A Treemacs heading jump runs `my/treemacs-tag-visit-functions`; a surface
+- A Treemacs heading jump runs `+treemacs-tag-visit-functions`; a surface
   that shows the file elsewhere (a Noema pane) moves there instead of letting
   the raw buffer take over the window.
 
 Browser and Portal:
 
-- Closing follows `docs/design/window-lifecycle.md`: `Cmd-W` (`my/close-window`)
+- Closing follows `docs/design/window-lifecycle.md`: `Cmd-W` (`+windows/close-window`)
   closes the current pane, or only its view when it is the sole pane, without
   killing the buffer or frame. `Cmd-Shift-W` keeps Perspective's interactive
   buffer-kill picker; `H-q` ends the current buffer. Fallback never shows a
   single-instance buffer that is on screen elsewhere.  Window rules ask
-  `my/buffer-single-instance-p`, never a mode or a package variable; a new
-  native-view or xwidget mode joins `my/single-instance-modes`.
+  `+buffer-single-instance-p`, never a mode or a package variable; a new
+  native-view or xwidget mode joins `+single-instance-modes`.
 - `browse-url` defaults to a backend menu whose default choice is xwidget.
 - EWW is for text/reading.
 - EWW and `xwidget-webkit` route opens should create/show separate browser
@@ -681,8 +688,8 @@ Projects/remote/terminal:
 - Treemacs outlines keep semantic button depth but render from a shallow fixed
   visual depth, include an `OUTLINE · FILE` owner row, and use LSP SymbolKind
   icons.  Preserve this separation from filesystem indentation.
-- Project behavior belongs mostly in `lisp/init-project.el`; project shortcuts
-  live in `lisp/init-evil.el`.
+- Project behavior belongs mostly in `lisp/tools/project/config.el`; project shortcuts
+  live in `lisp/editor/evil/config.el`.
 - Treat local files as target `local` and keep framework-owned project/workspace
   identity in canonical `/fs:TARGET:/path` form.  Ordinary local buffers remain
   native until they cross that boundary.  `/ssh:` and `/rpc:` are compatibility

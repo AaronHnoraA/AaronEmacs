@@ -8,7 +8,7 @@
 ;;; Code:
 
 (require 'ert)
-(require 'init-lsp)
+(require 'tools/lsp/config)
 (require 'lsp-mode)
 (load (expand-file-name "test/remote-e2e-tests.el" user-emacs-directory) nil t)
 
@@ -42,8 +42,8 @@ test resources and deferred source startup instead of global quiescence."
          (events (concat root "events.log"))
          (source (concat root "clean.c"))
          (edited (concat root "edited.c"))
-         (my/language-server-booster-required nil)
-         (my/enable-direnv nil)
+         (+language-server-booster-required nil)
+         (+enable-direnv nil)
          buffers source-buffer edited-buffer dired-buffer workspace lsp-workspace
          task watch reconnect-trace queued-idle
          (trace-advice
@@ -62,7 +62,7 @@ test resources and deferred source startup instead of global quiescence."
                   (buffer-string)))
           (remote-cleanup-live--write source "int clean(void) { return 1; }\n")
           (remote-cleanup-live--write edited "int edited(void) { return 2; }\n")
-          (my/register-language-server
+          (+register-language-server
            'c-mode (list "python3" "-u" (remote-file-local-name peer)
                          (remote-file-local-name events))
            :server-id 'remote-cleanup-probe :executables '("python3"))
@@ -88,7 +88,7 @@ test resources and deferred source startup instead of global quiescence."
           (with-current-buffer source-buffer
             (setq lsp-workspace (car (lsp-workspaces))
                   workspace (remote-get-workspace
-                             (my/language-server--lsp-workspace-root
+                             (+language-server--lsp-workspace-root
                               lsp-workspace)))
             (should workspace)
             (should (seq-some
@@ -129,8 +129,8 @@ test resources and deferred source startup instead of global quiescence."
             (should remote-buffer-disconnected-p)
             (should-not (lsp-workspaces))
             ;; Exercise deferred consumer entry points with the retained file.
-            (my/language-server-ensure)
-            (my/lsp-mode--connect-via-remote-a
+            (+language-server/ensure)
+            (+lsp-mode--connect-via-remote-a
              (lambda (&rest _) (ert-fail "Deferred LSP reopened target"))))
           (should-not (process-live-p (remote-task-process task)))
           (should-not (file-notify-valid-p watch))

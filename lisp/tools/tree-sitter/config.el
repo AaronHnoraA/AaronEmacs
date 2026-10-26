@@ -1,0 +1,129 @@
+;;; editor/snippets/config.el --- The necessary settings -*- lexical-binding: t -*-
+
+;;; Commentary:
+;;
+
+;;; Code:
+
+(require 'config)
+(require 'seq)
+
+;; ========== Tree-sitter grammars sources ==========
+(config-defvar treesit-language-source-alist nil
+  "Tree-sitter grammar source repositories."
+  :type 'sexp
+  :group 'treesit)
+
+;; 建议显式指定 Emacs 放 grammar 动态库的位置（与你报错里一致）
+(config-defvar treesit-extra-load-path nil
+  "Directories searched for tree-sitter grammar dynamic libraries."
+  :type 'sexp
+  :group 'treesit)
+
+
+(aaron-package-ensure-vc 'treesit-fold "https://github.com/emacs-tree-sitter/treesit-fold.git")
+
+(use-package treesit-fold
+  :commands (treesit-fold-mode
+             treesit-fold-toggle
+             treesit-fold-indicators-mode)
+  :custom
+  (treesit-fold-indicators-fringe 'left-fringe))
+
+
+
+
+
+;; treesit-auto, solve treesit issues
+(use-package treesit-auto
+  :ensure t
+  :custom
+  (treesit-auto-install nil)              ;; 关键：不要在打开文件时提示/安装
+  :config
+  (treesit-auto-add-to-auto-mode-alist 'all)
+  ;; `js-ts-mode' can require the companion `jsdoc' grammar on newer Emacs
+  ;; builds.  Route JS through `+js-auto-mode' so missing grammars fall back
+  ;; to `js2-mode' instead of prompting while opening files.
+  (setq auto-mode-alist
+        (cl-remove-if
+         (lambda (entry)
+           (and (member (car-safe entry) '("\\.js\\'" "\\.mjs\\'" "\\.cjs\\'"))
+                (eq (cdr-safe entry) 'js-ts-mode)))
+         auto-mode-alist))
+  (when (fboundp '+js-auto-mode)
+    (add-to-list 'auto-mode-alist '("\\.cjs\\'" . +js-auto-mode))
+    (add-to-list 'auto-mode-alist '("\\.mjs\\'" . +js-auto-mode))
+    (add-to-list 'auto-mode-alist '("\\.js\\'" . +js-auto-mode)))
+  (global-treesit-auto-mode -1))      ;; 打开时不接管
+
+(defconst +treesit-major-mode-remap-candidates
+  '((sh-mode . (bash-ts-mode . bash))
+    (c-mode . (c-ts-mode . c))
+    (c++-mode . (c++-ts-mode . cpp))
+    (css-mode . (css-ts-mode . css))
+    (go-mode . (go-ts-mode . go))
+    (html-mode . (html-ts-mode . html))
+    (java-mode . (java-ts-mode . java))
+    (js-mode . (js-ts-mode . javascript))
+    (js2-mode . (js-ts-mode . javascript))
+    (json-mode . (json-ts-mode . json))
+    (python-mode . (python-ts-mode . python))
+    (rust-mode . (rust-ts-mode . rust))
+    (typescript-mode . (typescript-ts-mode . typescript))
+    (conf-toml-mode . (toml-ts-mode . toml))
+    (yaml-mode . (yaml-ts-mode . yaml)))
+  "Major modes to remap to tree-sitter variants when the grammar is ready.")
+
+(defun +treesit-ready-mode-p (ts-mode language)
+  "Return non-nil when TS-MODE and LANGUAGE are ready for use."
+  (and (fboundp ts-mode)
+       (fboundp 'treesit-ready-p)
+       (ignore-errors
+         (treesit-ready-p language t))))
+
+(defun +treesit-supported-major-mode-remaps ()
+  "Return supported entries for `major-mode-remap-alist'."
+  (let (result)
+    (dolist (entry +treesit-major-mode-remap-candidates (nreverse result))
+      (let* ((base (car entry))
+             (spec (cdr entry))
+             (ts-mode (car spec))
+             (language (cdr spec)))
+        (when (+treesit-ready-mode-p ts-mode language)
+          (push (cons base ts-mode) result))))))
+
+;; 优先使用已经安装 grammar 的 ts-mode，没装好就留在原 mode。
+(setq major-mode-remap-alist
+      (+treesit-supported-major-mode-remaps))
+
+(jit-lock-mode 1)
+(font-lock-mode 1)
+
+(config-defvar idle-update-delay nil
+  "Idle seconds before delayed font-lock/refontification work runs."
+  :type 'number
+  :group 'treesit)
+;; Disable background stealth fontification — only fontify visible text on
+;; demand.  Profiler showed jit-lock-deferred-fontify at 8% of timer cost;
+;; stealth was the main contributor running on idle even without scrolling.
+(config-defvar jit-lock-stealth-time nil
+  "Idle time before stealth fontification, or nil to disable it."
+  :type 'sexp
+  :group 'treesit)
+;; Larger chunks mean fewer timer firings per scroll burst.
+(config-defvar jit-lock-chunk-size nil
+  "Chunk size used by jit-lock deferred fontification."
+  :type 'integer
+  :group 'treesit)
+
+(config-defvar jit-lock-context-time nil
+  "Seconds spent fontifying context around the visible region."
+  :type 'number
+  :group 'treesit)
+
+
+(provide 'tools/tree-sitter/config)
+
+
+
+;;; core/aaron-base.el ends here

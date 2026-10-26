@@ -10,9 +10,9 @@
 (require 'remote-fs)
 (require 'remote-pipeline)
 
-(declare-function my/noema--api-call-sync "init-noema" (channel args &optional timeout))
+(declare-function +noema--api-call-sync "noema/bridge/config" (channel args &optional timeout))
 (declare-function ls-lisp-insert-directory "ls-lisp" (file switches time-index wildcard full))
-(defvar my/noema-jupyter-servers nil)
+(defvar +noema-jupyter-servers nil)
 
 (defun remote-jupyter-file-name-p (file)
   "Return non-nil when FILE belongs to a Jupyter Contents namespace."
@@ -45,7 +45,7 @@
                  (operation . ,operation)
                  (path . ,(remote-jupyter--path file route))
                  ,@fields))
-         (reply (my/noema--api-call-sync "noema:api:jupyter-cell:server-file"
+         (reply (+noema--api-call-sync "noema:api:jupyter-cell:server-file"
                                          (vector body) 60)))
     (unless reply (signal 'file-error (list "Noema host is offline" file)))
     (unless (eq t (remote-jupyter--get 'ok reply))
@@ -227,7 +227,7 @@ Never fall through to the client's filesystem for unsupported operations."
   (let ((configured
          (mapcar (lambda (entry) (remote-jupyter-target-id (plist-get entry :id)))
                  (seq-remove (lambda (entry) (eq (plist-get entry :kind) 'gateway))
-                             my/noema-jupyter-servers)))
+                             +noema-jupyter-servers)))
         stale)
     (maphash (lambda (id target)
                (when (and (eq (remote-target-source target) 'jupyter-contents)
@@ -249,7 +249,7 @@ Never fall through to the client's filesystem for unsupported operations."
                          (let ((default-directory temporary-file-directory))
                            (expand-file-name name (or directory "/"))))
      :describe (lambda () '(:kind jupyter-contents :file-operation-cost remote :processes nil))))
-  (dolist (entry my/noema-jupyter-servers)
+  (dolist (entry +noema-jupyter-servers)
     (unless (eq (plist-get entry :kind) 'gateway)
       (let* ((server (plist-get entry :id)) (target (remote-jupyter-target-id server)))
         (unless (remote-get-target target)

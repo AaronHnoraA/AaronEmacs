@@ -13,7 +13,7 @@ Run `python3 ~/.config/emacs/.agents/skills/noema-agent-bridge/scripts/bridge.py
 Choose the exact `sessionId`, `agent`, and `workspace` from the result. If no
 matching session is listed, report that it is unavailable; do not resume it or
 start another process. The Emacs owner must first run
-`M-x my/noema-agent-bridge-start` in that Emacs instance. The bridge uses only
+`M-x +noema/agent-bridge-start` in that Emacs instance. The bridge uses only
 the local Emacs server socket on the same Mac.
 
 To pass the user's message, run the script's `send` command with those three

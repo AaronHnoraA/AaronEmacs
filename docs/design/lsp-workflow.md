@@ -3,7 +3,7 @@
 > 自动启动不会在 minibuffer 里提问。文件所在目录 lsp-mode 还没见过时，它原本会询问是否导入
 > 项目根；自动启动时改为直接采用项目标记（Projectile / project.el 能认出的根，例如 `.git`）
 > 指向的目录，但从不自动采用文件系统根或家目录。周围没有任何项目标记的文件（例如跳转定义
-> 进入的系统头文件）不启动服务器。需要时用 `M-x my/language-server-ensure` 手动启动，此时才会询问。
+> 进入的系统头文件）不启动服务器。需要时用 `M-x +language-server/ensure` 手动启动，此时才会询问。
 
 # Scope
 
@@ -19,12 +19,12 @@
 
 相关入口文件：
 
-- `lisp/init-lsp.el`：路由核心、Remote adapter 绑定、URI/workspace 身份、
+- `lisp/tools/lsp/config.el`：路由核心、Remote adapter 绑定、URI/workspace 身份、
   flymake/company/lsp-mode 装配，以及可见区域渲染边界
-- `lisp/init-lsp-ops.el`：backend 无关的通用命令（restart/shutdown/log/session）
-- `lisp/init-lsp-tools.el`：Hub、Doctor、dispatch、session 调参
-- `lisp/init-lsp-runtime.el`：runtime provider 层，见下方 **Runtime Contexts**
-- `lisp/init-lsp-toolchain.el`：project 级 toolchain profile（buffer-local
+- `lisp/tools/lsp-ops/config.el`：backend 无关的通用命令（restart/shutdown/log/session）
+- `lisp/tools/lsp-hub/config.el`：Hub、Doctor、dispatch、session 调参
+- `lisp/tools/lsp/runtime.el`：runtime provider 层，见下方 **Runtime Contexts**
+- `lisp/tools/lsp/toolchain.el`：project 级 toolchain profile（buffer-local
   环境变量/PATH 应用与复原）
 - `lisp/lang/`：逐语言路由声明与 server 特有配置
 
@@ -40,9 +40,9 @@
 - client 所需 feature 可加载；
 - language server executable 在当前 workspace target 的环境中存在。
 
-自动启动找不到 server 时保持安静；手动执行 `my/language-server-ensure` 才显示
-缺失提示。自定义 client 用 `my/register-language-server`，`lsp-java` 这类由包
-自身注册的 client 用 `my/register-language-server-feature` 声明给 Hub/Doctor。
+自动启动找不到 server 时保持安静；手动执行 `+language-server/ensure` 才显示
+缺失提示。自定义 client 用 `+register-language-server`，`lsp-java` 这类由包
+自身注册的 client 用 `+register-language-server-feature` 声明给 Hub/Doctor。
 
 进程启动统一绑定到 Remote 框架的 `language-server` adapter。默认 placement 是
 target：本地 buffer 使用 `local` target，远程 buffer 使用自己的 target/workspace
@@ -65,7 +65,7 @@ Pyright launcher/JDTLS 执行位等服务器特有准备。server 仍在 target 
 
 CodeLens 默认开启，`SPC c L` 切换。CodeLens、inlay hints、文档颜色、文档链接和
 semantic-token 预取统一限制在当前可见窗口加
-`my/language-server-visible-render-margin` 行缓冲内；服务器响应、诊断状态与协议缓存
+`+language-server-visible-render-margin` 行缓冲内；服务器响应、诊断状态与协议缓存
 仍按整个 workspace 保存。Flymake 的行尾短诊断由 redisplay 覆盖可见诊断行，不需要
 buffer-global sideline overlays。统一 idle 为 350ms。
 
@@ -88,7 +88,7 @@ header-line 继续留给 Noema 这类 buffer-local 应用控件。
 
 # Runtime Contexts
 
-`init-lsp-runtime.el` 在普通 project/toolchain 之上提供可复用的 runtime provider
+`tools/lsp/runtime.el` 在普通 project/toolchain 之上提供可复用的 runtime provider
 层。它用于“源码属于项目 A，但真实解释器由另一个运行时决定”的 buffer；Noema
 Jupyter cell 是第一个 consumer，后续 REPL/run/debug 可以复用同一份 runtime
 对象，但目前没有迁移这些子系统。
@@ -135,7 +135,7 @@ process、URI 和 resource-lifecycle 流程。
     file-name-handler 派发的，`/fs:` 已注册它，所以 `/fs:local:/path` 与其原生
     拼写互相解析，不需要改写任何 buffer 的 `buffer-file-name`。
     lsp-mode 的 raw diagnostics lookup 有一处绕开了这层别名，因此本仓库在
-    `lsp--fix-path-casing` 上用 `my/lsp-mode--fix-path-casing-a` 收口 key 域。
+    `lsp--fix-path-casing` 上用 `+lsp-mode--fix-path-casing-a` 收口 key 域。
 2.  server cwd、executable、PATH/toolchain、workspace settings、watcher、helper
     service 与 network channel 都从同一个 root 的 target context 派生。
 3.  URI 回调必须查询 lsp-mode workspace 所拥有的 root；不能用回调
@@ -157,9 +157,9 @@ process、URI 和 resource-lifecycle 流程。
 债务，不能作为新语言的模板。框架缺少表达能力时，先补通用 `remote-*` API 及
 native/remote backend，再接语言业务。
 
-配置握手也是注册层的统一行为：每个经 `my/register-language-server` 注册的
+配置握手也是注册层的统一行为：每个经 `+register-language-server` 注册的
 server 在 `initialized` 之后立即收到 `workspace/didChangeConfiguration`，与
-VS Code languageclient、Eglot 一致（`my/language-server--announce-configuration`）。
+VS Code languageclient、Eglot 一致（`+language-server--announce-configuration`）。
 有的 server 依赖它：Pyright 1.1.408 在客户端声明 workspace folders 时不会主动
 拉取 `workspace/configuration`，缺了这条通知就永远不分析文件，所有请求超时。
 通知内容是该 workspace 自己的 override，没有则为 `{}`；完整设置仍经
@@ -171,8 +171,8 @@ VS Code languageclient、Eglot 一致（`my/language-server--announce-configurat
 
 - `SPC c L`: 切换当前 buffer 的 CodeLens（默认开启）
 - `SPC c s`: 打开语言服务器 dispatch
-- `M-x my/language-server-manager`: 打开 `*Language Server Hub*`
-- `M-x my/language-server-doctor`: 打开 `*Language Server Doctor*`
+- `M-x +language-server/manager`: 打开 `*Language Server Hub*`
+- `M-x +language-server/doctor`: 打开 `*Language Server Doctor*`
 - `SPC c o`: organize imports
 - `SPC c R`: restart language server
 - `SPC c a`: code actions
@@ -190,7 +190,7 @@ dispatch 里现在有四组内容：
 
 命令：
 
-- `M-x my/language-server-manager`
+- `M-x +language-server/manager`
 - 或 `SPC c s` 然后按 `h`
 
 它展示：
@@ -224,7 +224,7 @@ Hub 里的重点不是“列个状态页面”，而是：
 - `P`: project problems
 - `d`: buffer diagnostics UI
 - `m`: diagnostics menu
-- `x`: 服务端消息处理失败的调用栈（`M-x my/language-server-message-errors`）
+- `x`: 服务端消息处理失败的调用栈（`M-x +language-server/message-errors`）
 - `A`: cycle lsp-mode restart policy
 - `S`: toggle workspace keep-alive
 - `L`: toggle `lsp-log-io`
@@ -239,7 +239,7 @@ Hub 里的重点不是“列个状态页面”，而是：
 
 命令：
 
-- `M-x my/language-server-doctor`
+- `M-x +language-server/doctor`
 - 或 dispatch 里的 `D`
 
 Doctor 主要做静态和半静态排查：
@@ -265,25 +265,25 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 
 如果某个值验证有效，再把它真正改回：
 
-- `lisp/init-lsp.el`
+- `lisp/tools/lsp/config.el`
 - 或对应语言模块
 
 # Maintenance Model
 
 现在语言服务器相关逻辑分成五层：
 
-1.  `lisp/init-lsp.el`
+1.  `lisp/tools/lsp/config.el`
     路由核心、统一 Remote/LSP adapter、URI/workspace identity、全局
     LSP/Flymake/company 配置。这里只允许出现 lsp-mode 的兼容边界，不在这里
     建第二套本地/远程产品策略。
-2.  `lisp/init-lsp-ops.el`
+2.  `lisp/tools/lsp-ops/config.el`
     backend-agnostic 操作命令，例如 restart / shutdown / organize imports。
-3.  `lisp/init-lsp-tools.el`
+3.  `lisp/tools/lsp-hub/config.el`
     Hub、Doctor、dispatch、runtime knobs、可视化维护入口。
-4.  `lisp/init-lsp-runtime.el`
+4.  `lisp/tools/lsp/runtime.el`
     Runtime provider 层，供“源码属于项目 A，真实解释器由另一个运行时决定”的
     buffer 使用（目前的唯一 consumer 是 Noema Jupyter cell）。
-5.  `lisp/init-lsp-toolchain.el`
+5.  `lisp/tools/lsp/toolchain.el`
     Project 级 toolchain profile：语言中立的 discover/apply/restore 契约，
     供所有 lsp-mode client 共用，避免每个语言重复实现 buffer-local
     环境变量/PATH/workspace-configuration 的应用与复原。
@@ -295,7 +295,7 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 自定义 stdio client 用：
 
 ```
-(my/register-language-server
+(+register-language-server
  '(some-mode another-mode)
  '("some-language-server" "--stdio")
  :server-id 'my-some-language-server
@@ -307,7 +307,7 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 如果 package 自己调用 `lsp-register-client`，只声明 feature 与维护 metadata：
 
 ```
-(my/register-language-server-feature
+(+register-language-server-feature
  '(some-mode) 'lsp-some-language
  :executables '("some-language-server")
  :placement 'target
@@ -366,7 +366,7 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 2.  看当前 buffer 的 `route policy` 和 `active backend`
 3.  看当前 mode 是否有已注册且可执行的 lsp-mode client
 4.  看对应 feature / executable 是否缺失
-5.  看当前 buffer 的 `my/language-server--workspace-configuration`
+5.  看当前 buffer 的 `+language-server--workspace-configuration`
 6.  需要时临时打开 `lsp-log-io` 或调大 language-server log size
 7.  再去开 log / session / problems / diagnostics UI
 

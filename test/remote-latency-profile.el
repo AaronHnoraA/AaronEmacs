@@ -87,34 +87,34 @@
                (- (float-time) remote-latency-profile--started) name))))
 
 (dolist (function
-         '(my/language-server-runtime-prepare
-           my/language-server-runtime--finish
-           my/lsp-mode-ensure
-           my/lsp-mode--workspace-initialized-h
-           my/lsp-managed-mode-setup
-           my/language-server-performance-sync-h
-           my/lsp-tab-line-sync-h
-           my/direnv-update-environment-maybe
-           my/lsp-mode--direnv-ready
-           my/lsp-mode-start-now
-           my/language-server-apply-process-environment
-           my/language-server-project-environment
-           my/language-server-process-environment
-           my/project-local-root
-           my/project-local-entry
-           my/project-local-env
-           my/language-server-toolchain-apply-environment
-           my/language-server-current-toolchain-profile
-           my/language-server-toolchain--canonical-root
-           my/python-toolchain-discover
-           my/python-toolchain--project-venvs
-           my/python-toolchain--conda-profiles
-           my/python-toolchain--sage-profile
-           my/python-toolchain--path-profiles
-           my/python-toolchain--command-json
-           my/language-server-apply-lsp-local-settings
-           my/language-server-runtime-register-lsp-configuration
-           my/language-server-contact-available-p
+         '(+language-server-runtime-prepare
+           +language-server-runtime--finish
+           +lsp/mode-ensure
+           +lsp-mode--workspace-initialized-h
+           +lsp-managed-mode-setup
+           +language-server-performance-sync-h
+           +lsp-tab-line-sync-h
+           +direnv-update-environment-maybe
+           +lsp-mode--direnv-ready
+           +lsp-mode-start-now
+           +language-server-apply-process-environment
+           +language-server-project-environment
+           +language-server-process-environment
+           +project-local-root
+           +project-local-entry
+           +project-local-env
+           +language-server-toolchain-apply-environment
+           +language-server-current-toolchain-profile
+           +language-server-toolchain--canonical-root
+           +python-toolchain-discover
+           +python-toolchain--project-venvs
+           +python-toolchain--conda-profiles
+           +python-toolchain--sage-profile
+           +python-toolchain--path-profiles
+           +python-toolchain--command-json
+           +language-server-apply-lsp-local-settings
+           +language-server-runtime-register-lsp-configuration
+           +language-server-contact-available-p
            remote-environment-ensure
            remote-environment-resolve
            remote-path--probe-sync
@@ -143,7 +143,7 @@
              lsp-modeline-code-actions-mode
              lsp-modeline-diagnostics-mode
              lsp-modeline-workspace-status-mode
-             my/language-server--push-workspace-configuration-h
+             +language-server--push-workspace-configuration-h
              lsp-inline-completion-mode
              dap-auto-configure-mode
              lsp-completion--enable
@@ -169,7 +169,7 @@
            remote-exec-output
            remote-executable-find
            remote-make-process
-           my/language-server--connect-workspace
+           +language-server--connect-workspace
            tramp-rpc--call
            tramp-rpc--call-with-timeout
            tramp-rpc--start-async-read
@@ -181,12 +181,12 @@
 (when (fboundp 'remote-executable-find)
   (advice-add 'remote-executable-find :around
               #'remote-latency-profile--executable-a))
-(when (fboundp 'my/language-server--require-on-client)
-  (advice-add 'my/language-server--require-on-client :around
+(when (fboundp '+language-server--require-on-client)
+  (advice-add '+language-server--require-on-client :around
               #'remote-latency-profile--client-require-a))
-(when (fboundp 'my/language-server-runtime-current-profile)
+(when (fboundp '+language-server-runtime-current-profile)
   (advice-add
-   'my/language-server-runtime-current-profile :filter-return
+   '+language-server-runtime-current-profile :filter-return
    (lambda (profile)
      (message "[remote-latency] runtime profile %S"
               (and profile (plist-get profile :id)))

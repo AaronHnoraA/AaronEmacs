@@ -1,18 +1,18 @@
 ;;; remote-gui-company-popup.el --- Real GUI Python Company popup probe -*- lexical-binding: t; -*-
 
 ;; Load in a graphical Emacs frame after init.el, then evaluate
-;; (my/remote-gui-company-popup-run "/rpc:host:/path/to/a.py").
+;; (+remote-gui-company-popup-run "/rpc:host:/path/to/a.py").
 ;; The source file is visited and edited only in memory; it is never saved.
 
-(require 'init-lsp)
+(require 'tools/lsp/config)
 (require 'remote-config)
 (require 'remote-framework)
 (require 'company)
 
 (when (equal (getenv "REMOTE_GUI_COMPANY_FAST_IDLE") "0")
-  (setq my/lsp-completion-ready-idle-delay nil))
+  (setq +lsp-completion-ready-idle-delay nil))
 
-(defun my/remote-gui-company-popup-run
+(defun +remote-gui-company-popup-run
     (file &optional request-rounds stall-first-completion automatic-input
           idle-delay)
   "Verify Company's `print' child frame while visiting Python FILE.
@@ -36,8 +36,8 @@ IDLE-DELAY overrides the captured Python Company delay for this probe only."
               (error "Expected Python mode for %s" file))
             (setq-local lsp-auto-guess-root t
                         lsp-guess-root-without-session t
-                        my/language-server--manual-start t)
-            (my/language-server-ensure)
+                        +language-server--manual-start t)
+            (+language-server/ensure)
             (when (and (boundp 'lsp--buffer-deferred)
                        lsp--buffer-deferred
                        (fboundp 'lsp--init-if-visible))
@@ -51,7 +51,7 @@ IDLE-DELAY overrides the captured Python Company delay for this probe only."
                                            (lambda (candidate)
                                              (and (eq (lsp--workspace-status candidate)
                                                       'initialized)
-                                                  (eq (my/language-server--lsp-workspace-id
+                                                  (eq (+language-server--lsp-workspace-id
                                                        candidate)
                                                       'my-python)))
                                            (lsp-workspaces))))))
@@ -64,18 +64,18 @@ IDLE-DELAY overrides the captured Python Company delay for this probe only."
                                      (plist-get
                                       (gethash
                                        workspace
-                                       my/lsp-completion--prewarm-state)
+                                       +lsp-completion--prewarm-state)
                                       :state))))
                   (accept-process-output nil 0.05)))
               (unless (eq 'ready
                           (plist-get
                            (gethash
                             workspace
-                            my/lsp-completion--prewarm-state)
+                            +lsp-completion--prewarm-state)
                            :state))
                 (error "Python completion prewarm did not become ready")))
             (when (and (numberp idle-delay) (> idle-delay 0))
-              (setq-local my/lsp-completion--normal-idle-delay
+              (setq-local +lsp-completion--normal-idle-delay
                           idle-delay))
             (unless (and (bound-and-true-p company-mode)
                          (bound-and-true-p company-box-mode))
@@ -201,7 +201,7 @@ IDLE-DELAY overrides the captured Python Company delay for this probe only."
                             (* 1000 (- ready-at started))
                             :automatic-input (and automatic-input t)
                             :configured-idle-delay
-                            my/lsp-completion--normal-idle-delay
+                            +lsp-completion--normal-idle-delay
                             :effective-idle-delay
                             (if (functionp company-idle-delay)
                                 (funcall company-idle-delay)
@@ -240,7 +240,7 @@ IDLE-DELAY overrides the captured Python Company delay for this probe only."
                           (plist-get
                            (gethash
                             (car (lsp-workspaces))
-                            my/lsp-completion--prewarm-state)
+                            +lsp-completion--prewarm-state)
                            :state)
                           :lsp-managed lsp-managed-mode
                           :should-begin
@@ -248,7 +248,7 @@ IDLE-DELAY overrides the captured Python Company delay for this probe only."
                                (company--should-begin))
                           :company-idle-delay company-idle-delay
                           :normal-idle-delay
-                          my/lsp-completion--normal-idle-delay)))
+                          +lsp-completion--normal-idle-delay)))
                   (error "GUI Company popup did not show `print': %S" result))
                 (when (and (integerp request-rounds)
                            (> request-rounds 0))

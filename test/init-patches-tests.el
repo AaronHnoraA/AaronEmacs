@@ -9,16 +9,16 @@
 ;;; Code:
 
 (require 'ert)
-(require 'patches/init-patches)
+(require 'aaron-patches)
 
-(ert-deftest my/patch-derived-type-registers-legacy-properties ()
+(ert-deftest +patch-derived-type-registers-legacy-properties ()
   (let* ((name (make-symbol "my-test-derived-type"))
          (expander (lambda () '(satisfies integerp))))
     (cl--define-derived-type name expander #'integerp '(integer))
     (should (eq (get name 'cl-deftype-handler) expander))
     (should (eq (get name 'cl-deftype-satisfies) #'integerp))))
 
-(ert-deftest my/patch-globalized-mode-buffer-lists-are-bound ()
+(ert-deftest +patch-globalized-mode-buffer-lists-are-bound ()
   (dolist (variable '(global-atomic-chrome-edit-mode-buffers
                       better-jumper-mode-buffers
                       better-jumper-local-mode-set-explicitly

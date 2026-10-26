@@ -14,35 +14,46 @@
 
 ## 模块
 
-一个模块用 `(分类 . 名字)` 作为键，例如 `(:ui . init-ui)`。
+一个模块用 `(分类 . 名字)` 作为键，例如 `(:ui . theme)`。
 
 分类沿用 Doom：`:core :os :ui :completion :editor :emacs :term :checkers :tools :lang :app :config`。另外加两个本配置特有的分类：
 
 - `:remote`：Remote 框架。
 - `:noema`：Noema 桥。
 
-模块有两种形式：
+每个模块是一个目录 `lisp/分类/名字/`，按需放这些文件：
 
-- **目录模块**：`lisp/分类/名字/`，目录里按需放这些文件：
-  - `init.el`：init 阶段加载。
-  - `config.el`：config 阶段加载。
-  - `autoload/*.el`：其中的 `;;;###autoload` 会生成到 `var/aaron/module-autoloads.el`，源文件变化时在启动时重新生成。
-  - `doctor.el`：自检。
-  - `.aaronmodule`：元数据，alist 形式，目前读 `depth`。
-  - `README.md`：模块说明。
+- `config.el`：config 阶段加载，结尾 `(provide '分类/名字/config)`。
+- 同目录的其他文件 `FILE.el`：结尾 `(provide '分类/名字/FILE)`，由 `config.el` 或别的模块 `require`。
+- `init.el`：init 阶段加载。
+- `autoload/*.el`：其中的 `;;;###autoload` 会生成到 `var/aaron/module-autoloads.el`，源文件变化时在启动时重新生成。
+- `doctor.el`：自检。
+- `.aaronmodule`：元数据，alist 形式，读 `depth` 和 `files`（目录外也属于本模块的源文件，相对模块目录的 glob，例如 Remote 框架库）。
+- `README.md`：模块说明。
 
-  这是目标形态。
-- **feature 模块**：现有的单文件 `init-foo.el`，用 `require` 加载。模块逐个迁入目录形态时同时改名（见 `AGENT.md` 的命名规则），不保留兼容别名。
+例外：
+
+- `:core` 是平铺的 `lisp/core/aaron-*.el`，和 Doom 的 `doom-*.el` 一样，声明为 `(base :feature aaron-base)`。
+- `config-tools` 来自 `site-lisp/config`，也用 `:feature` 声明。
+- Remote 框架库 `lisp/remote/remote-*.el` 保留 `remote-*` 的公开 feature 名。
+
+**与 Doom 的差异**：Doom 按路径加载 `config.el`，模块之间通过 `autoload/` 共享函数。本配置让每个模块文件都是一个 feature，名字就是它在 `lisp/` 下的路径，所以只要 `lisp/` 在 `load-path` 上就能 `require`。这样做有三个原因：
+
+- 模块之间有约 180 处 `require`；
+- `with-eval-after-load` 用到模块 feature；
+- 异步 native 编译要在独立子进程里找到宏的来源。
+
+这些都依赖 feature。由此带来两个好处：加载顺序完全保持迁移前的样子；一个模块被别的模块提前 `require` 过，就不会再加载第二次。
 
 ## 声明
 
 ```elisp
 (aaron!
- :core   init-base
- :os     (:when (eq system-type 'darwin) (init-macos :optional t))
- :remote (init-remote :doctor remote-doctor)
- :lang   (init-org-tools :after org)
-         (init-latex :autoload (my/latex-preview-doctor) :doctor my/latex-preview-doctor))
+ :core   (base :feature aaron-base)
+ :os     (:when (eq system-type 'darwin) (macos :optional t))
+ :remote (framework :doctor remote-doctor)
+ :lang   (org :after org)
+         (latex :autoload (+latex/preview-doctor) :doctor +latex/preview-doctor))
 ```
 
 条目可以是 `NAME`，也可以是 `(NAME FLAGS... PROPERTIES...)`。FLAGS 是 `+x` / `-x`，重复声明同一个模块时按顺序合并。PROPERTIES 有：
@@ -52,7 +63,7 @@
 | `:optional t` | 加载失败只记录并警告，启动继续；否则失败会中断启动 |
 | `:after FEATURES` | 任一 FEATURE 加载后才加载，之前处于 `waiting` |
 | `:autoload CMDS` | 只为这些命令注册 autoload，不加载模块 |
-| `:feature SYM` | 实际 `require` 的 feature，默认就是 NAME |
+| `:feature SYM` | 实际 `require` 的 feature；目录模块默认是 `分类/名字/config` |
 | `:doctor CMD` | 模块自己的交互式 doctor，由模块面板提供入口 |
 | `:depth N` | 加载位置，也可以写成 `(INIT . CONFIG)` |
 
@@ -60,7 +71,7 @@
 
 `modulep!` 查询某个模块（以及它的 flag）是否已声明：
 
-- `(modulep! :tools init-lsp)`
+- `(modulep! :tools lsp)`
 - `(modulep! :t m +flag)`
 - 在模块自己的文件里可以省略分类和名字：`(modulep! +flag)`。
 
@@ -127,7 +138,7 @@
   - `file-remote-p` 分支、与 `"local"` 比较、经 `default-directory` 查询进程：`:remote` 分类除外；
   - `global-set-key`；
   - 直接调用 `package-vc-install`；
-  - 目录模块里定义 `my/` 名字。
+  - 定义旧的 `my/` 名字。
 - **模块的 `doctor.el`**：用 Doom 的 `assert!`、`warn!`、`error!`、`explain!` 写。
 
 例外：某一行确实是规则允许的例外（例如 TRAMP 兼容边界上的 `file-remote-p`）时，在同一行加注释 `aaron-allow: 规则ID`。
@@ -159,7 +170,7 @@
 
 ## 已知缺口
 
-- **分类顺序**：声明目前保持迁移前的加载顺序，所以分类关键字会重复出现。按分类重排后有 166 行启动状态不同（hook 顺序、evil-collection 的键、`config-custom` 同步数量），说明模块之间还有隐式的顺序依赖。重排要随模块迁入目录逐个进行，每一步都用启动状态快照对比验证。
-- **加载顺序决定的键冲突**：`global-map` 里的 `C-c w P/s/p`（`init-shell` 与 `init-browser`）、`` M-` ``（`init-base` 的 popper 与 `init-shell`）、`M-o`（`init-doom-extra` 与 `init-windows`）。现在由后加载的模块生效，改动需要决定由哪个模块持有这些键。
-- **启动后才懒加载的源文件**：例如 `init-compile`、`remote-files`、`init-noema-publish`，这些文件还没有归属；迁入目录后由目录决定归属。
-- **`:after` 被启动期间触发**：`init-auctex` 声明在 `tex`/`pdf-tools` 之后加载，但这两个在启动期间就被加载了，结果它在启动时耗时约 0.9s。
+- **分类顺序**：声明保持迁移前的加载顺序，所以分类关键字会重复出现。按分类重排会使 166 行启动状态不同（hook 顺序、evil-collection 的键、`config-custom` 同步数量），说明模块之间还有隐式的顺序依赖。重排会改变行为，需要逐组决定，每一步都用启动状态快照对比验证。
+- **加载顺序决定的键冲突**：`global-map` 里的 `C-c w P/s/p`（`term/shell` 与 `app/browser`）、`` M-` ``（`aaron-base` 的 popper 与 `term/shell`）、`M-o`（`config/default` 与 `ui/windows`）。现在由后加载的模块生效，改动需要决定由哪个模块持有这些键。
+- **账本只覆盖加载期间**：启动后才懒加载的文件（如 `config/compile`、`noema/bridge/publish`）按所在目录归属；它们在之后运行时装的 hook、advice、timer 和键不进账本。
+- **`:after` 被启动期间触发**：`lang/auctex` 声明在 `tex`/`pdf-tools` 之后加载，但这两个在启动期间就被加载了，结果它在启动时耗时约 0.9s。

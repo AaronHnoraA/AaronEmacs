@@ -119,7 +119,7 @@
 - `C-x g`
   Magit
 - `M-\``
-  `my/portal-popup-toggle`
+  `+portal-popup/toggle`
 - `C-c e`
   切换全局 popup 的当前 tab；首次打开或新建终端时，从最近聚焦的项目和 target 启动
 - `C-c C-e`
@@ -244,12 +244,12 @@ Noema 任务使用 `@@todo(state) [text] {key: value}`，例如
 打开原生 Agenda；`M-x noema-agenda-web` 打开含 Gantt 等视图的 Web Agenda。
 原生 `c` 和 Web New todo 共用 Task / Deadline / Appointment 模板；`C-u c`
 可改目标 Markdown 文件。保存失败保留输入，原生再按 `c` 继续修改。
-`my/noema-agenda-capture-templates` 可配置字段、默认值和按日期命名的文件，
+`+noema-agenda-capture-templates` 可配置字段、默认值和按日期命名的文件，
 修改后重启 Noema host；配置示例见 [Agenda 文档](../noema/guide/agenda.md#shared-capture-templates)。
 项目明确进入后才扫描；切到无项目关联的 Perspective，或使用项目菜单 `l` /
-`M-x my/project-leave`，释放项目监听和缓存，知识库继续常驻。
+`M-x +project/leave`，释放项目监听和缓存，知识库继续常驻。
 原生 `I/O` 开始/停止计时，`v k` 查看报表和待回写记录，`R/K` 处理待回写冲突。
-Apple 集成先用 `my/noema-agenda-apple-enable` 启用相应类型，再用原生 `P`
+Apple 集成先用 `+noema/agenda-apple-enable` 启用相应类型，再用原生 `P`
 或 Web 的 Promote 显式提升任务；Calendar 需要开始/结束时间（原生 `s/E`）。
 `v a` / Web Global attention 查看全局关注，刷新不会激活未进入的项目；
 `RET` 才进入源项目。个人 Apple 数据和跨设备同步尚未完成实机验证。
@@ -294,7 +294,7 @@ Emacs 接管键盘时（页面里触发的命令打开了 portal、agent、minib
 正常移动和编辑；这时用不了输入法，要输入中文先在页面里点一下，页面即取回原生键盘。
 
 xwidget buffer 本身没有正文，所以作用于“当前 buffer 文本”的常用命令会被重定向到
-页面上的等价操作（`my/noema-keys-mode-map`）：
+页面上的等价操作（`+noema-keys-mode-map`）：
 
 | 键 / 命令 | 在 Noema 页面里 |
 |-----------|-----------------|
@@ -305,10 +305,10 @@ xwidget buffer 本身没有正文，所以作用于“当前 buffer 文本”的
 | `C-x h` | 全选笔记 |
 | `C-x C-s` | 保存笔记 |
 | `C-x u`、`undo-redo` | 页面 undo / redo |
-| `refresh-file`、`revert-buffer`、`H-o !f` | `my/noema-refresh-file`：从磁盘重载 |
+| `refresh-file`、`revert-buffer`、`H-o !f` | `noema-refresh-file`：从磁盘重载 |
 
 `M-x refresh-file` 在任何能 revert 的 buffer 里都是“从磁盘重载”：Noema 页面走
-`my/noema-refresh-file`，`.noema` 笔记本重新投影 JuText，`*Noema DAG*` 重载源笔记本
+`noema-refresh-file`，`.noema` 笔记本重新投影 JuText，`*Noema DAG*` 重载源笔记本
 并重绘；Lisp/C/shell/SCSS 仍是原来的格式化并保存。
 Emacs 内的 Claude、Codex 等 ACP agent 完成一轮时，会检查已打开的 Noema Markdown
 页面及可见、最近的 JuText 文件；JuText 的未修改 buffer 会接收已有区块的外部正文编辑，
@@ -316,14 +316,14 @@ Emacs 内的 Claude、Codex 等 ACP agent 完成一轮时，会检查已打开�
 Markdown 页面先检查文件时间戳；
 笔记库另有共享目录 watch 接收文件变更。没有未保存修改且文件确实更新的页面会自动
 从磁盘重载；有草稿时保留页面内容并提示冲突。Emacs 保存同一个 Markdown
-文件（例如接受 gptel rewrite）也会通知页面。`my/noema-refresh-file` 可在漏掉文件事件时
+文件（例如接受 gptel rewrite）也会通知页面。`noema-refresh-file` 可在漏掉文件事件时
 手动重载；它不会先把页面草稿写回磁盘，有未保存修改时会拒绝，`C-u` 则丢弃草稿后重载。
 
 普通本地文件及远程文件 buffer 在 agent 写回磁盘后会自动刷新：支持推送通知的路由
 即时接收文件事件，其余远程路由在 ACP 回合结束时对可见及最近的文件检查一次，
 更早的隐藏 buffer 再次显示时补查一次；
 已主动断开的远程目标不会被自动重连。若你同时有未保存编辑，
-Emacs 会保留它们并提示冲突；运行 `M-x my/auto-revert-resolve-current-buffer` 可选择
+Emacs 会保留它们并提示冲突；运行 `M-x +auto-revert/resolve-current-buffer` 可选择
 Ediff 合并、接受磁盘版本或保留本地版本并覆盖磁盘。
 
 Jupyter 输出（`@@cell` 的 Output 区域和右侧 Jupyter Output 页面）可以直接拖选文字，
@@ -335,7 +335,7 @@ Page、Agenda、Graph、Tools、Source、Save，点击后仍调用原 Web 面板
 Vim mode、只读和全文/选区/本节字数显示在 Web 编辑区右上角的小浮窗，
 Emacs mode-line 保持原样。Opening/Saved/Edited 等日常状态静默；LaTeX 进度、明确操作
 结果和错误等关键反馈经过去重与短间隔合并后进入 Emacs echo，error 立即显示；
-`my/noema-echo-severity` 可配置为仅 error、warning + error 或完全关闭。这个布局只应用于
+`+noema-echo-severity` 可配置为仅 error、warning + error 或完全关闭。这个布局只应用于
 Noema 自己的 xwidget buffer，不改变普通网页的 xwidget 控制栏。
 
 编辑区输入 `/`（或中文输入法的 `、`）打开快速插入菜单；`/` 紧跟中日韩文字时也会触发，
@@ -382,7 +382,7 @@ Tags 在面板中显示为 `#tag`，创建前按 runtime 规则去掉显示用 `
 
 Noema 页面顶栏的窗口菜单(布局图标)第一级里,`Noema: Split right` / `Split below` 下面有
 `Noema: Split to new frame`:和分屏一样为当前笔记开一个独立的可编辑 pane,只是放进一个新
-frame 里,原页面留在原处(`my/noema-open-current-note-split-frame`)。
+frame 里,原页面留在原处(`+noema/open-current-note-split-frame`)。
 
 ### Noema Slides
 
@@ -506,12 +506,12 @@ metadata 同时支持 Noema meta block 与 YAML front matter；BibTeX value 支�
 带行列位置的诊断。quoted `bib:` 路径可包含逗号，链接 URL 中的 `@@cite` 保持字面量，而可见链接
 label 中的 citation 正常解析。
 
-后端可用 `my/noema-latex-export-agent` 选择：`codex`（默认）/ `claude` / `opencode`，都以
-非交互、免确认方式运行，且在配置里选定、不会每次询问。引擎开关 `my/noema-latex-export-engine`
+后端可用 `+noema-latex-export-agent` 选择：`codex`（默认）/ `claude` / `opencode`，都以
+非交互、免确认方式运行，且在配置里选定、不会每次询问。引擎开关 `+noema-latex-export-engine`
 （`codex` = verified-first + 单次 gated polish / 必要时 repair；`mechanical` = 从不启动 agent）。中间校验用 draft
 模式加速；编译会按日志重跑，最多三遍，直到引用稳定。见 Noema 的 `docs/latex-export-style.md`。
-空闲存活检查和硬上限分别由 `my/noema-latex-export-agent-idle-timeout`（默认 180 秒）与
-`my/noema-latex-export-agent-hard-timeout`（默认 900 秒）控制。
+空闲存活检查和硬上限分别由 `+noema-latex-export-agent-idle-timeout`（默认 180 秒）与
+`+noema-latex-export-agent-hard-timeout`（默认 900 秒）控制。
 
 标题、章节名和 theorem/proof 标签中的 `\(...\)` 会保留为 LaTeX 数学，而不是被转义成
 `\textbackslash`。输出路径按 note 记忆，写入是原子的，并强制使用 `.tex` 后缀。未闭合的
@@ -664,7 +664,7 @@ Remote 面板和路由、连接历史页按 `q` 返回上一页；历史页退�
 未保存的编辑和拒绝关闭的 buffer 会保留，echo 区列出名称，后台停止自动启动。
 保留文件中的 direnv、Copilot 和 LSP 延迟回调也会停止，避免清理后再次连接。
 保存后可再次清理；保留文件中需要恢复 LSP 时，显式运行
-`M-x my/language-server-ensure`。正常网络掉线仍会恢复连接并保留编辑 buffer。
+`M-x +language-server/ensure`。正常网络掉线仍会恢复连接并保留编辑 buffer。
 
 ### Git `SPC g`
 
@@ -791,7 +791,7 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   hover 子窗口贴在光标所在行的上方或下方，不会盖住那一行；服务器返回跨多行的 hover
   range 时（Lean 就是）也一样
 - `SPC m d`（TeX/LaTeX buffer 内）
-  `my/latex-preview-doctor`：公式预览体检——后端是否存活、在途请求、宏目录与
+  `+latex/preview-doctor`：公式预览体检——后端是否存活、在途请求、宏目录与
   宏条数、最近一次错误、光标处检测到的公式。预览不出来或卡顿先看这个，
   见 [latex-preview.md](../design/latex-preview.md)
 - `SPC m p`（TeX/LaTeX buffer 内）
@@ -821,7 +821,7 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC c x`
   `quickrun`
 - `SPC c y`
-  `my/note-code-copy-reference` — 从代码 buffer 生成 `@@note-code(path)[tag]` 到剪贴板。
+  `+note-code/copy-reference` — 从代码 buffer 生成 `@@note-code(path)[tag]` 到剪贴板。
   选中区域：提示输入 tag，在区域首行前自动插入 `@noema TAG` 注释标记，然后复制引用。
   未选中：查找光标上方最近的 `@noema`/`@note-code` 标记，复制对应引用。
   Path 规则：`/...` 表示从当前 content root 开始；roam vault 内是 roam-root，其他项目文件是 project.el 根目录。裸相对路径保留为从当前 note 目录开始。
@@ -839,16 +839,16 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC o q`
   `clutch-query-console`
 - `SPC o e`
-  `my/portal-popup-toggle`
+  `+portal-popup/toggle`
 - `SPC o E`
   切换到下一个 popup `portal`
 - `SPC o F`
   切换当前 popup `portal` 的固定状态
 - `SPC o t`
-  `my/portal-popup-toggle`
+  `+portal-popup/toggle`
 - `SPC o v`
   直接打开新 `portal`
-- `M-x my/project-popup-portal-app`
+- `M-x +project/popup-portal-app`
   在当前项目根目录的新 popup `portal` 里运行 `lazygit` / `btop` / `yazi` / `tmux`
 
 顶部 `+term` 右键可打开启动菜单，`Applications` 列出上述已配置程序。
@@ -881,15 +881,15 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
 - `SPC o M`
   临时机器列表：手动输入地址和密码/密钥、记在 `var/` 里的 target
 - `SPC o S`
-  `my/portal-ssh`
+  `+portal/ssh`
 - `SPC o s`
   `shell-toggle`
 - `SPC o w`
-  `my/open-eww-url`
+  `aaron/open-eww-url`
 - `SPC o x`
-  `my/open-xwidget-url`
+  `aaron-open-xwidget-url`
 - `SPC o P`
-  `my/portal-terminal`，在当前窗口打开原生 Ghostty 终端（本地 macOS GUI）
+  `+portal/terminal`，在当前窗口打开原生 Ghostty 终端（本地 macOS GUI）
 
 普通 Portal 终端在窗口顶部有独立的终端标签组；全局工作区栏不占用顶行。
 终端标签不混入普通文件标签或 popup 标签。
@@ -936,8 +936,8 @@ Yazi 按 `Enter` 打开光标下的文本或目录时也使用它；PDF、图片
 - `C-c w d`
   结束当前浏览后端：kill browser buffer 并删除对应窗口。Portal / `eww` / `xwidget-webkit`
   buffer 里的 `M-w` 与其他 buffer 一样关当前窗格，唯一窗格时只关视图
-当前策略是手动分流：默认打开方式统一在 `lisp/init-open.el` 的
-`my/open-routes` 里维护，route DSL helper 来自 vendored `general.el` 的
+当前策略是手动分流：默认打开方式统一在 `lisp/core/aaron-open.el` 的
+`aaron-open-routes` 里维护，route DSL helper 来自 vendored `general.el` 的
 `general-route-*`。`browse-url` 默认走 Portal；
 `eww` 适合阅读，`system` 用系统应用处理文件或链接。
 
@@ -971,7 +971,7 @@ frame；`s F` 可按当前 frame 优先排序。后台基础设施 buffer 不显
 `persp-state-default-file` 设置，原生 `persp-state-save` / `persp-state-load` 也使用它。
 工作台保存入口原子替换状态文件，失败时保留上一次文件；加载会按 Perspective 的
 原生行为恢复 frame，重复加载可能再创建 frame。退出自动保存默认关闭，可通过
-`my/session-auto-save` 启用。未关联文件的 buffer 不在 Perspective 状态文件中，
+`+session-auto-save` 启用。未关联文件的 buffer 不在 Perspective 状态文件中，
 持久 scratch 的正文由其独立状态文件保存。
 
 ibuffer 仍是全局总览；日常 `C-x b`、`H-b`、`SPC b b` 的 Buffer 候选则从本
@@ -1020,7 +1020,7 @@ ibuffer、帮助页和其他用 `quit-window` 退出的临时页面，优先返�
 - `SPC p .` 后按 `x`
   彻底移除一个项目及其相关状态（包含 Projectile、`project.el`、Treemacs、perspective、项目 buffer/portal）；`SPC p x` 打开项目 scratch
 - `SPC p l`
-  查看当前项目 project-local overrides（来自 `my/project-local-overrides` 全局配置）
+  查看当前项目 project-local overrides（来自 `+project-local-overrides` 全局配置）
 - `SPC p L`
   快捷打开 `.dir-locals.el`（同 `SPC p e e`）
 
@@ -1183,7 +1183,7 @@ GUI frame 的两侧 fringe 分工如下：
   才打开一层
 - 在 `#+title:` 或第一个 heading 前按 `za` / `H-<tab>` 时，会切换整个 Org
   buffer 的 compact / open 状态
-- 代码 buffer 若没有保存过手动折叠状态，会按 `my/fold-prog-startup` 应用默认折叠；
+- 代码 buffer 若没有保存过手动折叠状态，会按 `+fold-prog-startup` 应用默认折叠；
   Org / Typst 不恢复保存的折叠状态
 - 自动默认折叠不会写入 `var/fold-state.el`；只有通过 `za` / `zo` / `zc` /
   `zM` 或 `SPC z ...` 改过的代码折叠状态才持久化；`zR` 展开全部会清掉当前
@@ -1261,7 +1261,7 @@ GUI frame 的两侧 fringe 分工如下：
 切换只改变当前 Dirvish 会话的布局。
 
 Dirvish 里的单键跟 `~/.config/yazi/keymap.toml` 一致（也就是 ranger 那一套），
-定义在 [lisp/init-dirvish-keys.el](../../lisp/init-dirvish-keys.el)。不经 Dirvish 的
+定义在 [lisp/emacs/dirvish/config.el](../../lisp/emacs/dirvish/config.el)。不经 Dirvish 的
 纯 Dired 仍是 Emacs 原生键位。
 
 | 键 | 作用 |
@@ -1329,7 +1329,7 @@ Dirvish 的复制、移动和链接在客户端可直接访问时沿用原生独
 - `, b` 按创建时间排序依赖 GNU `ls`（`gls`），`, r` 随机排序没有做；
 - `v` 视觉选择、`R b` 回收站管理、`M p` 挂载硬盘没有对应；
 - `?` 是按键提示而不是向前搜索（用 `N`）；提示内容在
-  `my/dirvish-key-hints`，改键时一并改；
+  `+dirvish-key-hints`，改键时一并改；
 - `TAB` 保留 Dirvish 的子目录展开，yazi 的 `TAB`（文件信息）放在 `S-TAB`；
 - `-` / `=` 按你的 yazi 配置是切换标签页，所以创建链接放在 `p l` / `p L` / `p h`。
 
@@ -1351,13 +1351,13 @@ Dirvish 的复制、移动和链接在客户端可直接访问时沿用原生独
 ## 6. 窗口和弹出层
 
 - `C-x 1`
-  `my/toggle-delete-other-windows` — 最大化当前窗口，再次执行恢复先前布局（依赖 winner-mode）
+  `+windows/toggle-delete-other-windows` — 最大化当前窗口，再次执行恢复先前布局（依赖 winner-mode）
 - `M-o`
   `ace-window`；Noema xwidget 里的目标编号会显示在页面左上角
 - `M-O`
   交换当前窗口与目标窗口
 - `M-\``
-  `my/portal-popup-toggle`
+  `+portal-popup/toggle`
 - `H-\`` / `C-\``
   `popper-toggle`
 - `C-M-\``
@@ -1385,17 +1385,17 @@ Show or Start Emacs 叫出已有窗口或重新启动，并可继续使用独立
 
 动作和 frame 操作先取得 Emacs 的排队编号，再在限定时间内查询最终结果。
 若 Raycast 已更新而运行中的 Emacs 仍是旧协议，排队前会报错并提示重载
-`init-background.el`，不会执行一个无法查询结果的动作。
+`config/background/config.el`，不会执行一个无法查询结果的动作。
 无效编号、过期 frame、已确认的执行错误或接收前没有应答时，Raycast 提示并保留列表，
 方便修正后重试。确认成功后按原交互关闭 Raycast 或刷新 frame 列表；接收后若动作
 仍在等待 Emacs 输入，Raycast 提示结果尚未确认，并沿用该入口的退出或停留方式。
 后续由 Emacs 接管，避免重复执行。
 启动和重启继续在后台进行。隐藏和关闭 frame 会留在列表里，方便连续整理。
 
-在 Emacs 里,`SPC F h`(`my/frame-hide`)只隐藏当前 frame,不删除它,其他 frame 不受影响;
+在 Emacs 里,`SPC F h`(`+background/frame-hide`)只隐藏当前 frame,不删除它,其他 frame 不受影响;
 白名单里的 Hide Frame 是同一个命令。隐藏的是最后一个可见 frame 时,Emacs 整个退到后台。
 
-白名单是 `lisp/init-background.el` 里的 `my/background-actions`,每项是
+白名单是 `lisp/config/background/config.el` 里的 `+background-actions`,每项是
 `(标题 命令)` 或 `(标题 命令 参数提示)`。改它不需要重新构建扩展,下次打开列表就生效;
 列表之外的命令从 Raycast 里执行不了。M-x 本身只在 Emacs 里用。
 命令行传入无效动作编号、frame 编号或操作名会直接报错，不会当成有效操作执行。
@@ -1412,7 +1412,7 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
 
 - `bin/emacs-app start --background`
   启动并留在后台;Emacs 已经在运行时什么都不做。隐藏在启动完成后才执行
-  (`my/background-start-hidden`),不会出现"刚藏起来又弹出来"
+  (`+background-start-hidden`),不会出现"刚藏起来又弹出来"
 - `bin/emacs-app restart` / `kill`
   退出再启动,保持原来的可见或后台状态;Emacs 在等你回答提问时会报错而不是一直等。
   `kill` 给没应答的 Emacs 用:先 SIGTERM(仍会跑退出钩子),20 秒后才 SIGKILL
@@ -1420,7 +1420,7 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
   一次返回状态、运行时长、内存、白名单动作和 frame 列表的 JSON;Emacs 没应答或没运行时
   也返回 `{"status":"busy"}` / `{"status":"stopped"}`
 - `bin/emacs-app show` / `hide` / `toggle`
-  叫到前台 / 送回后台(`my/background-show`、`my/background-hide`)
+  叫到前台 / 送回后台(`+background/show`、`+background/hide`)
 - `bin/emacs-app actions` / `act ID [ARGUMENT]`
   列出白名单动作，或按编号排队执行；`act` 返回含请求编号的 JSON
 - `bin/emacs-app result ID`
@@ -1428,7 +1428,7 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
   会话中短期保留，重启后不能继续查
 - `bin/emacs-app terminal`
   新开一个 Portal 终端,每次都是新实例,单独占一个居中的浮动 frame;在 M-x 里是
-  `my/portal-open-new`。Emacs 未运行时会先启动，待图形窗口初始化完成后再开终端。
+  `+portal/open-new`。Emacs 未运行时会先启动，待图形窗口初始化完成后再开终端。
 - `bin/emacs-app status`
   `visible` / `background` / `busy`(在运行但没应答,比如正在启动或等你回答提问)/ `stopped`
 - `bin/emacs-app quit`
@@ -1444,8 +1444,8 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
 退回 C locale,把中文粘贴成一串 `?`。
 
 新 frame(启动时的第一个、Raycast 的 New Frame、`SPC F n`)默认占鼠标所在显示器工作区的
-66% × 86% 并居中,由 `my/frame-default-size` 控制(设为 nil 则用 Emacs 自己的默认大小);
-浮动终端仍用 `my/portal-floating-frame-size`。
+66% × 86% 并居中,由 `+frame-default-size` 控制(设为 nil 则用 Emacs 自己的默认大小);
+浮动终端仍用 `+portal-floating-frame-size`。
 
 后台是 frame 不可见,不是应用隐藏,所以新开一个 frame(比如终端)时不会把其他 frame 一起带出来。
 
@@ -1454,18 +1454,18 @@ Emacs 常驻运行,平时没有可见 frame,需要时再叫到前台。入口是
 
 Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复为普通应用,Dock
 图标、Cmd-Tab 和顶部主菜单都回来(macOS 把这三样绑在一起,不能只去掉 Dock 图标)。
-由 `my/background-hide-dock-icon` 控制,靠 `tools/macos-background/window.m`
+由 `+background-hide-dock-icon` 控制,靠 `tools/macos-background/window.m`
 编译出的动态模块实现;没有编译时 Dock 图标始终显示。
 
 同一个模块让每个顶层 frame 的顶部边框可拖动（默认 6 点，
-`my/frame-drag-handle-height`）。它不覆盖下面的标签，也不绘制拖动条；
+`+frame-drag-handle-height`）。它不覆盖下面的标签，也不绘制拖动条；
 按住原来向上调整窗口大小的边框即可移动无标题栏的 frame。
 
 长期运行时不留孤儿:Noema web host 启动时拿到 Emacs 的 pid(`NOEMA_HOST_OWNER_PID`),
 Emacs 崩溃或被强制退出后几秒内自己收尾退出,连同它的 kernel;正常退出时的 SIGHUP 也走
 同一套收尾。
 
-`my/portal-open-new` 开的浮动终端在关闭 frame（关闭按钮、`delete-frame`、
+`+portal/open-new` 开的浮动终端在关闭 frame（关闭按钮、`delete-frame`、
 Raycast 的 Close Frame）后仍保留 shell 和 buffer，可从 Ibuffer 或终端选择器重新打开。
 shell 退出时会关闭 buffer；若该 frame 当时只显示这个终端，frame 也会关闭或退回后台。
 若 frame 还有其他分屏，或这个终端此前已被隐藏，其他内容会保留。
@@ -1479,7 +1479,7 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 28×20 XPM 像素�
 **鼠标左键点它打开 `M-x activity-board`。** 终端(无图形界面)里自动降级成颜文字
 `ᕕ( ᴗ )ᕗ` / `ᕕ( ᐛ )ᗴ`,不会变成空白。
 
-机理只有一条链路,在 [lisp/init-activity.el](../../lisp/init-activity.el):
+机理只有一条链路,在 [lisp/ui/activity/config.el](../../lisp/ui/activity/config.el):
 
 1. **枚举的根是 `(process-list)`** —— Emacs 自己的异步子进程注册表,也就是
    `M-x list-processes` 看到的那张表。以这个为根是为了**不用维护**:以后接任何新的
@@ -1497,22 +1497,22 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 28×20 XPM 像素�
 3. **谁是 task 不靠猜。** 不看进程名也不看命令行,而是问**已经拥有这些工作的注册表**:
    `compilation-in-progress`、`remote-tasks`、`comp-async-compilations`、
    `remote-transfer-jobs`。某个进程是
-   task,当且仅当有 owner 认领它。进程任务在 `my/activity--owned-task-processes`
-   接入 owner;没有 Emacs 子进程的异步工作通过 `my/activity-provider-functions`
+   task,当且仅当有 owner 认领它。进程任务在 `+activity--owned-task-processes`
+   接入 owner;没有 Emacs 子进程的异步工作通过 `+activity-provider-functions`
    提供缓存快照。出现在进程板面上不需要另行登记。
 4. **两类活动没有进程,单独登记**:native 编译**排队中**(还没 spawn worker)和同步
-   阻塞的工作。后者用宏 `my/with-activity` 包住,`unwind-protect` 保证正常返回、报错、
+   阻塞的工作。后者用宏 `+with-activity` 包住,`unwind-protect` 保证正常返回、报错、
    `C-g` 都会注销。目前唯一的内置触发点是**打开一个每次文件操作都要单独走一趟 shell
    往返的远程文件**(判据是 Remote 后端声明的 `remote-file-operation-cost`,不是
    `file-remote-p`,所以 tramp-rpc 那批快后端不会触发)。
 5. **性能约束**:`mode-line-misc-info` 里的 `:eval` 在**每个窗口每次 redisplay** 都跑,
    所以那段只读两个缓存值,从不扫描。扫描在一个**自我重排的单 timer** 里:空闲时按
-   `my/activity-poll-interval`(2 秒)慢轮询,一有任务立刻改按
-   `my/activity-indicator-fps` 重排。显式登记和 agent 状态通知会立即重新武装;
+   `+activity-poll-interval`(2 秒)慢轮询,一有任务立刻改按
+   `+activity-indicator-fps` 重排。显式登记和 agent 状态通知会立即重新武装;
    普通进程与 Noema Core task 的变化最多等一次 2 秒轮询。
 
 **Noema 也接入了同一计数**,适配器在
-[lisp/roam/init-activity-noema.el](../../lisp/roam/init-activity-noema.el):
+[lisp/noema/activity/config.el](../../lisp/noema/activity/config.el):
 
 - LaTeX 导出读取 Noema Core task pool,从排队、转换、agent 润色到编译 PDF 都属于
   一个任务。完成、失败或取消后移出计数。按 `x` 走 Core 的取消接口,`RET` 打开源笔记。
@@ -1567,8 +1567,8 @@ ETAF 只在第一次打开这个整页时加载，常驻 mode line 和 Dashboard
 | `M` | `memory-report` —— 内置内存报告 |
 
 板面底部还有两排按钮:「Built-in managers」(上面五个 + `*Messages*`)和
-「This configuration」(`my/performance-watch`、`remote-board`、`my/compile-board`、
-`my/language-server-manager`、`config-board`)。按钮只在对应命令存在时出现。
+「This configuration」(`+performance/watch`、`remote-board`、`+compile/board`、
+`+language-server/manager`、`config-board`)。按钮只在对应命令存在时出现。
 
 **性能**(这一页的硬约束,改之前先读):
 
@@ -1577,7 +1577,7 @@ ETAF 只在第一次打开这个整页时加载，常驻 mode line 和 Dashboard
   弱键表里)。实测:首次渲染每个活进程 1 次调用,之后 10 次渲染 0 次。
 - 页面刷新只读取现有进程、provider 快照和可选的定时器列表，不在 ETAF 的
   响应式排版里执行网络请求；详细 OS 属性仍只在按 `d` 时按需读取。
-- **自动刷新默认关**。打开后是一个受 `my/activity-board-refresh-interval` 约束的
+- **自动刷新默认关**。打开后是一个受 `+activity-board-refresh-interval` 约束的
   timer,只在所属 frame 的板面**可见**时重绘；板面隐藏后下一次计时即停止，
   buffer 被 kill 或 frame 关闭时立即取消。
 
@@ -1815,7 +1815,7 @@ Noema 已登记的原生 session ID 会沿用原会话名。Codex 与 Claude 的
 历史由各自的官方后端保存，Noema 只登记名字与原生 ID，不复制 transcript。
 
 `M-x agent-shell` 从当前工作 buffer 启动 Noema 管理的 agent，并显示在当前窗口；
-顶部 `+Agent` 和 `M-x my/agent-shell` 才在全局 popup 中打开。两条入口使用同一套
+顶部 `+Agent` 和 `M-x +portal/agent-shell` 才在全局 popup 中打开。两条入口使用同一套
 项目目录、target、环境和会话登记。
 `C-u C-u M-x agent-shell` 保留上游的已有会话选择器。
 
@@ -1923,14 +1923,14 @@ OutputArea 并保存到该块 outputs；它没有 kernel 选择、重启、Run A
 运行逻辑由 Noema 管理**：在 cell 上点 Edit，Noema 会打开笔记旁 `.cell/` 下的
 标准 `NOTE.LANGUAGE.SESSION.ipynb`；普通 ipynb 也走同一套 UI。磁盘上始终是
 nbformat 4.5；Emacs 只提供可编辑的 percent-style 源码投影和
-`my/noema-jupyter-cell-mode` 控件，通过 Noema API 操作 notebook。
+`+noema-jupyter-cell-mode` 控件，通过 Noema API 操作 notebook。
 
 `LANGUAGE` 是语言而不是 kernel 名：SageMath kernel 归在 Python 语言下，文件名为
 `NOTE.python.SESSION.ipynb`，而 `sagemath` 保存在 notebook kernelspec 中。
 
 新建 `.ipynb` 不会留下空文件：`find-file` 一个还不存在（或被别的工具建成空的）
 `.ipynb` 时，会先写入一份合法的 nbformat 4.5 模板（一个空 code cell），再打开
-percent-style 源码投影。模板里的 kernelspec 由 `my/noema-jupyter-notebook-new-kernelspec`
+percent-style 源码投影。模板里的 kernelspec 由 `+noema-jupyter-notebook-new-kernelspec`
 决定（默认 Python 3），其中的 `language` 同时决定新 notebook 用哪个 major mode 打开。
 
 Kernel 是全局资源，不属于 note 或单个 buffer。每个 notebook session 显式选择
@@ -1950,14 +1950,14 @@ Kernel 是全局资源，不属于 note 或单个 buffer。每个 notebook sessi
 
 | 键 | 命令 | 说明 |
 |----|------|------|
-| `C-c C-c` | `my/noema-jupyter-cell-run-current` | 运行光标所在 cell |
-| `C-c C-r` | `my/noema-jupyter-cell-restart-run-all` | 重启 kernel 并跑全部 cell |
-| `C-c C-k` | `my/noema-jupyter-cell-interrupt` | 中断 kernel |
-| `C-c C-s` | `my/noema-jupyter-cell-sync-buffer` | 把整个 buffer 同步回 Noema |
-| `C-c C-o` / `M-RET` / `Cmd-RET` | `my/noema-jupyter-cell-jump-output` | 跳到统一页面中当前 cell 的 output |
-| `C-c C-i` / `S-TAB` | `my/noema-jupyter-cell-inspect` | 查看符号文档（前缀参数看源码） |
-| `C-c i K` | `my/noema-jupyter-cell-select-kernel` | 启动 spec、连接 running kernel 或设为 No Kernel |
-| `C-c C-p` | `my/noema-jupyter-output-page` | 在当前 buffer 下方打开单例 Jupyter workspace |
+| `C-c C-c` | `+noema-jupyter/cell-run-current` | 运行光标所在 cell |
+| `C-c C-r` | `+noema-jupyter/cell-restart-run-all` | 重启 kernel 并跑全部 cell |
+| `C-c C-k` | `+noema-jupyter/cell-interrupt` | 中断 kernel |
+| `C-c C-s` | `+noema-jupyter/cell-sync-buffer` | 把整个 buffer 同步回 Noema |
+| `C-c C-o` / `M-RET` / `Cmd-RET` | `+noema-jupyter/cell-jump-output` | 跳到统一页面中当前 cell 的 output |
+| `C-c C-i` / `S-TAB` | `+noema-jupyter/cell-inspect` | 查看符号文档（前缀参数看源码） |
+| `C-c i K` | `+noema-jupyter/cell-select-kernel` | 启动 spec、连接 running kernel 或设为 No Kernel |
+| `C-c C-p` | `+noema-jupyter/output-page` | 在当前 buffer 下方打开单例 Jupyter workspace |
 | `C-c i v` / `C-c i t` | Variables / Manage | 跳到统一 workspace 的变量或全局管理面板 |
 
 buffer 顶部还有一行可点击控制：kernel/status、Run、All、Stop、Restart、Cell、
@@ -1985,7 +1985,7 @@ Yasnippet。`jcode` / `jmd` 在下方新建 code / Markdown cell，ID 由 Noema 
 **输出是实时的**：长任务的 stdout 边跑边显示，不用等 cell 结束。
 
 **连远程 Jupyter server**：集群上的 lab、JupyterHub 或 kernel gateway 通过
-`my/noema-jupyter-servers` 配置（config board 或 `etc/config-store.el`），
+`+noema-jupyter-servers` 配置（config board 或 `etc/config-store.el`），
 token/密码从 `auth-source` 读取，不写进仓库。配好之后 kernel 选择器里会多出
 `server:<id>:<kernelspec>` 和已经在跑的 `server:<id>:kernel:<id>`。
 服务器属于某个 Remote target 时，Emacs 会先开通道再把本地 URL 交给 Noema。

@@ -8,10 +8,10 @@
 (require 'remote-framework)
 (require 'seq)
 
-(defconst my/remote-gui-file-redraw--source
+(defconst +remote-gui-file-redraw--source
   "name = 42\n\ndef main():\n    return name\n\nif __name__ == '__main__':\n    print(main())\n")
 
-(defun my/remote-gui-file-redraw--median (values)
+(defun +remote-gui-file-redraw--median (values)
   "Return the median of numeric VALUES."
   (let* ((sorted (sort (copy-sequence values) #'<))
          (length (length sorted)))
@@ -21,7 +21,7 @@
             (nth (/ length 2) sorted))
          2.0))))
 
-(defun my/remote-gui-file-redraw--measure (buffer label rounds)
+(defun +remote-gui-file-redraw--measure (buffer label rounds)
   "Measure GUI redraw in BUFFER for ROUNDS simulated keys under LABEL."
   (switch-to-buffer buffer)
   (with-current-buffer buffer
@@ -30,7 +30,7 @@
     (when (bound-and-true-p lsp-managed-mode)
       (error "LSP unexpectedly managed %s" label))
     (erase-buffer)
-    (insert my/remote-gui-file-redraw--source)
+    (insert +remote-gui-file-redraw--source)
     (set-buffer-modified-p nil)
     (font-lock-ensure)
     (redisplay t)
@@ -54,14 +54,14 @@
             (list :label label :rounds rounds
                   :frame-size (cons (frame-width) (frame-height))
                   :window-system window-system
-                  :edit-median-ms (my/remote-gui-file-redraw--median edits)
+                  :edit-median-ms (+remote-gui-file-redraw--median edits)
                   :redraw-median-ms
-                  (my/remote-gui-file-redraw--median redraws)
+                  (+remote-gui-file-redraw--median redraws)
                   :redraw-max-ms (apply #'max redraws)))
         (delete-region begin (point-max))
         (set-buffer-modified-p nil)))))
 
-(defun my/remote-gui-file-redraw-run ()
+(defun +remote-gui-file-redraw-run ()
   "Compare native and target-only Python buffers in one GUI process."
   (remote-config-load)
   (remote-fs-install)
@@ -77,13 +77,13 @@
                            (or (getenv "REMOTE_GUI_FRAME_COLUMNS") "180"))))
          (rows (max 20 (string-to-number
                         (or (getenv "REMOTE_GUI_FRAME_ROWS") "55"))))
-         (my/language-server-disabled-modes '(python-mode python-ts-mode))
+         (+language-server-disabled-modes '(python-mode python-ts-mode))
          local-buffer remote-buffer results)
     (unwind-protect
         (progn
           (make-directory (expand-file-name ".git" local-directory))
           (with-temp-file local-file
-            (insert my/remote-gui-file-redraw--source))
+            (insert +remote-gui-file-redraw--source))
           (unless (file-readable-p remote-file)
             (error "Remote file is not readable: %s" remote-file))
           (set-frame-size (selected-frame) columns rows)
@@ -93,7 +93,7 @@
                            (,remote-buffer . remote)
                            (,remote-buffer . remote)
                            (,local-buffer . native)))
-            (push (my/remote-gui-file-redraw--measure
+            (push (+remote-gui-file-redraw--measure
                    (car entry) (cdr entry) rounds)
                   results))
           (setq results (nreverse results))

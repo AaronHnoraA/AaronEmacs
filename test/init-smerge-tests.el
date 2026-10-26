@@ -1,7 +1,7 @@
 ;;; init-smerge-tests.el --- Merge-conflict entry and key lifecycle -*- lexical-binding: t; -*-
 
 (require 'ert)
-(require 'init-smerge)
+(require 'emacs/smerge/config)
 
 (ert-deftest merge-conflict-menu-is-searchable-and-uses-native-smerge ()
   (should (member "merge-conflict-menu"
@@ -20,7 +20,7 @@
 (ert-deftest smerge-quick-keys-exist-only-in-evil-normal-with-mode-active ()
   (with-temp-buffer
     (insert "<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n")
-    (my/smerge-auto-enable)
+    (+smerge-auto-enable)
     (should smerge-mode)
     (should-not (local-key-binding (kbd "q")))
     (should (eq (key-binding (kbd "C-c ^ n")) #'smerge-next))
@@ -29,7 +29,7 @@
       (evil-normal-state)
       (should (eq (key-binding (kbd "q")) #'merge-conflict-menu))
       (should (eq (key-binding (kbd "o"))
-                  #'my/smerge-keep-upper-and-advance))
+                  #'+smerge/keep-upper-and-advance))
       (evil-insert-state)
       (should-not (eq (key-binding (kbd "q")) #'merge-conflict-menu))
       (evil-normal-state))

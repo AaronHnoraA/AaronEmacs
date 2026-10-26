@@ -46,53 +46,53 @@ phase1 = r'''(progn
         (placement (remote-make-file-name target (expand-file-name "note.ipynb" root)))
         (workspace (remote-workspace-create
                     :root (remote-make-file-name target root)))
-        (my/noema-jupyter-pending-directory
+        (+noema-jupyter-pending-directory
          (expand-file-name "pending/" (getenv "NOEMA_PROBE_LOCAL_DIR")))
-        (my/noema-jupyter-runtimes (make-hash-table :test 'equal)))
-   (cl-letf (((symbol-function 'my/noema-jupyter--context)
+        (+noema-jupyter-runtimes (make-hash-table :test 'equal)))
+   (cl-letf (((symbol-function '+noema-jupyter--context)
               (lambda (_file) (remote-context placement)))
              ((symbol-function 'remote-workspace-open)
               (lambda (&rest _) workspace))
-             ((symbol-function 'my/noema-jupyter--kernelspecs)
+             ((symbol-function '+noema-jupyter--kernelspecs)
               (lambda (_file)
                 `(((name . "probe")
                    (spec . ((argv . ,(vector python "-c"
                                              "import time; time.sleep(120)"
                                              "{connection_file}"))))))))
-             ((symbol-function 'my/noema-jupyter--runtime-directory)
+             ((symbol-function '+noema-jupyter--runtime-directory)
               (lambda (_workspace) (remote-make-file-name target root)))
-             ((symbol-function 'my/noema-jupyter--json-output)
+             ((symbol-function '+noema-jupyter--json-output)
               (lambda (&rest _) '(41001 41002 41003 41004 41005)))
-             ((symbol-function 'my/noema-jupyter--signing-key)
+             ((symbol-function '+noema-jupyter--signing-key)
               (lambda () "probe-only-key"))
              ((symbol-function 'remote-channel-group-open)
               (lambda (&rest _) 'probe-group))
-             ((symbol-function 'my/noema-jupyter--client-connection)
+             ((symbol-function '+noema-jupyter--client-connection)
               (lambda (connection _group) connection))
              ((symbol-function 'remote-workspace-ensure-recoverable-resource)
               (lambda (&rest _) t)))
-     (let ((runtime (my/noema-jupyter--launch-runtime
+     (let ((runtime (+noema-jupyter--launch-runtime
                      `((kernelId . "abrupt-exit-probe")
                        (sourceFile . ,placement)
                        (kernelName . "probe")))))
        (with-temp-file (expand-file-name "launched" (getenv "NOEMA_PROBE_LOCAL_DIR"))
-         (insert (format "%s %s\n" (my/noema-jupyter-runtime-id runtime)
-                         (my/noema-jupyter-runtime-pid runtime))))
+         (insert (format "%s %s\n" (+noema-jupyter-runtime-id runtime)
+                         (+noema-jupyter-runtime-pid runtime))))
        (sleep-for 120)))))'''
 
 phase2 = r'''(progn
  (remote-config-load)
- (let* ((my/noema-jupyter-pending-directory
+ (let* ((+noema-jupyter-pending-directory
          (expand-file-name "pending/" (getenv "NOEMA_PROBE_LOCAL_DIR")))
         (id (getenv "NOEMA_PROBE_ID"))
-        (entry (my/noema-jupyter--pending-shutdown-for id)))
+        (entry (+noema-jupyter--pending-shutdown-for id)))
    (unless entry (error "abrupt exit left no broker record"))
-   (unless (plist-get (car (my/noema-jupyter-runtime-snapshot
+   (unless (plist-get (car (+noema-jupyter-runtime-snapshot
                            (getenv "JUPYTER_PENDING_LIVE_TARGET")))
                       :journal-pending)
      (error "Board snapshot did not recover broker"))
-   (my/noema-jupyter--retry-pending-shutdown entry)
-   (when (file-exists-p (my/noema-jupyter--pending-file id))
+   (+noema-jupyter--retry-pending-shutdown entry)
+   (when (file-exists-p (+noema-jupyter--pending-file id))
      (error "broker record remains after recovery"))
    (princ "ABRUPT_EXIT_RECOVERED\n")))'''
 

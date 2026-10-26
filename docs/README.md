@@ -117,6 +117,10 @@ Dated and append-only. Read them for why something is the way it is, never for h
 - [jupyter-parity-audit-2026-09.md](records/audits/jupyter-parity-audit-2026-09.md) VS Code alignment register, filesystem placement distinctions, Aaron-PC live evidence, and remaining acceptance work.
 - [remote-io-review-2026-07.md](records/audits/remote-io-review-2026-07.md) `emacs-io` audit, adopted resource ideas, rejected ownership/POSIX shortcuts, and Remote performance criteria.
 
+### records/migrations/
+
+- [naming-migration-2026-10.md](records/migrations/naming-migration-2026-10.md) Lookup table from the old `init-*.el` files and `my/` symbols to the Doom-templated `lisp/CATEGORY/NAME/` modules and `+DOMAIN-` / `+DOMAIN/COMMAND` / `aaron-` names.
+
 ### records/measurements/
 
 - [remote-performance-2026-09.md](records/measurements/remote-performance-2026-09.md) Reproducible local/SSH latency measurements, implemented optimizations, version boundary, and remaining gaps.

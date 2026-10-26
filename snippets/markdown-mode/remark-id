@@ -3,7 +3,7 @@
 # key: remarkk
 # group: Noema blocks
 # --
-#+begin remark ${1:title} {#`(my/noema-new-id "block")`}
+#+begin remark ${1:title} {#`(noema-new-id "block")`}
 ${2:Remark.}
 #+end remark
 $0

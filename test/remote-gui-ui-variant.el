@@ -3,7 +3,7 @@
 ;; Opt in with REMOTE_LSP_E2E_UI_VARIANT=none|tab|mode|all.
 ;; This changes only the synthetic typing interval in the smoke process.
 
-(defun my/remote-gui-ui-variant--around (function rounds)
+(defun +remote-gui-ui-variant--around (function rounds)
   "Time FUNCTION for ROUNDS with one requested UI segment suppressed."
   (let* ((variant (getenv "REMOTE_LSP_E2E_UI_VARIANT"))
          (hide-tab (member variant '("tab" "all")))
@@ -15,8 +15,8 @@
     (redisplay t)
     (funcall function rounds)))
 
-(advice-add 'my/lsp-remote-live-smoke--typing-probe :around
-            #'my/remote-gui-ui-variant--around)
+(advice-add '+lsp-remote-live-smoke--typing-probe :around
+            #'+remote-gui-ui-variant--around)
 
 (provide 'remote-gui-ui-variant)
 ;;; remote-gui-ui-variant.el ends here

@@ -1,5 +1,5 @@
 ;; Node.js project (npm/yarn/pnpm)
-((nil . ((my/project-local-settings
+((nil . ((+project-local-settings
           . (:env (("NODE_ENV" . "development"))
              :test "npm test"
              :task (("build" . "npm run build")

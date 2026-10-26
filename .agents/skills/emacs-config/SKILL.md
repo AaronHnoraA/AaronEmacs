@@ -24,7 +24,7 @@ names, and that file wins over anything remembered.
 | --- | --- |
 | Files, processes, environment, channels, workspaces, terminals (`remote-*`) | `docs/design/remote-framework.md` §3, §7, §8; rules in `AGENT.md` “Remote-First Core Architecture” |
 | Temporary machines, rsync transfers | `docs/design/remote-files.md` |
-| Language servers (`my/register-language-server`, Hub, Doctor) | `docs/design/lsp-workflow.md`; `AGENT.md` “Domain Policies” → LSP |
+| Language servers (`+register-language-server`, Hub, Doctor) | `docs/design/lsp-workflow.md`; `AGENT.md` “Domain Policies” → LSP |
 | Jupyter kernels and the Noema bridge | `docs/design/jupyter-workflow.md` |
 | User settings (`config-register`, `config-get/set`, `etc/config-store.el`) | `docs/design/config-management.md` “注册语法” |
 | Keybindings (general.el, leader, localleader, Dirvish keys) | `AGENT.md` “Keybinding Rules”; keys listed in `docs/guide/daily-usage.md` |

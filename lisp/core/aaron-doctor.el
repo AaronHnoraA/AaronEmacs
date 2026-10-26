@@ -67,12 +67,11 @@
      :message "binds with `global-set-key'; use `general-define-key'")
     (:id package-vc-install
      :regexp "(package-vc-install\\_>"
-     :message "installs a VC package directly; use `my/package-ensure-vc' or `my/package-register-vc'"
-     :exempt-files ("init-package-utils.el" "bootstrap.el" "package-lock.el"))
+     :message "installs a VC package directly; use `aaron-package-ensure-vc' or `aaron-package-register-vc'"
+     :exempt-files ("core/aaron-packages.el" "bootstrap.el" "package-lock.el"))
     (:id legacy-name
      :regexp "^(def\\(?:un\\|var\\|custom\\|macro\\|alias\\|const\\) my/"
-     :message "defines a `my/' name; directory modules use `+MODULE-'"
-     :kinds (directory)))
+     :message "defines a legacy `my/' name; modules use `+DOMAIN-' and `+DOMAIN/COMMAND'"))
   "Rules checked against module sources.
 Each is a plist: :id, :regexp, :message, and optionally :exempt-groups
 \(categories), :exempt-files (file names) and :kinds (`directory' or

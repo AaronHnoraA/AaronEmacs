@@ -19,7 +19,7 @@
 (require 'remote-path)
 (require 'remote-backend-tramp-rpc)
 (require 'remote-framework)
-(require 'direnv)
+(require 'tools/direnv/direnv)
 
 (defvar tramp-rpc-ssh-args)
 (defvar tramp-rpc-ssh-options)

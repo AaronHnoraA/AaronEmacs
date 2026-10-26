@@ -4,46 +4,46 @@
 (require 'compile)
 (require 'comp-run)
 (require 'aaron-ui-activity)
-(require 'init-activity-noema)
+(require 'noema/activity/config)
 (require 'remote-task)
 (require 'remote-transfer)
 (require 'remote-board)
 
-(defvar my/noema--ready nil)
-(defvar my/noema--process nil)
+(defvar +noema--ready nil)
+(defvar +noema--process nil)
 (defvar remote-tasks nil)
 (defvar remote-transfer-jobs nil)
 (defvar features nil)
 
-(defmacro my/activity-test-isolated (&rest body)
+(defmacro +activity-test-isolated (&rest body)
   "Run BODY without starting Noema or retaining indicator timers."
   (declare (indent 0))
-  `(let ((my/activity-indicator-mode nil)
-         (my/activity--registered nil)
-         (my/activity--timer nil)
-         (my/activity--count 0)
-         (my/activity--frame-index 0)
-         (my/activity--last-poll 0)
-         (my/activity--provider-errors (make-hash-table :test #'equal))
-         (my/activity-poll-functions nil)
-         (my/activity-noema--agents (make-hash-table :test #'eq))
-         (my/activity-noema--tasks nil)
-         (my/activity-noema--pending nil)
+  `(let ((+activity-indicator-mode nil)
+         (+activity--registered nil)
+         (+activity--timer nil)
+         (+activity--count 0)
+         (+activity--frame-index 0)
+         (+activity--last-poll 0)
+         (+activity--provider-errors (make-hash-table :test #'equal))
+         (+activity-poll-functions nil)
+         (+activity-noema--agents (make-hash-table :test #'eq))
+         (+activity-noema--tasks nil)
+         (+activity-noema--pending nil)
          (compilation-in-progress nil)
          (comp-async-compilations nil)
          (comp-files-queue nil)
          (remote-tasks nil)
          (remote-transfer-jobs nil)
-         (my/noema--ready nil)
-         (my/noema--process nil))
+         (+noema--ready nil)
+         (+noema--process nil))
      (unwind-protect (progn ,@body)
-       (when (timerp my/activity--timer)
-         (cancel-timer my/activity--timer)))))
+       (when (timerp +activity--timer)
+         (cancel-timer +activity--timer)))))
 
-(ert-deftest my/activity-row-keys-work-including-unbound-help ()
-  (my/activity-test-isolated
+(ert-deftest +activity-row-keys-work-including-unbound-help ()
+  (+activity-test-isolated
     (with-temp-buffer
-      (my/activity-board-mode)
+      (+activity-board-mode)
       (let ((inhibit-read-only t))
         (aaron-ui-board-insert-row :id "process" :title "Process"
                                    :detail "Command" :action #'ignore))
@@ -51,25 +51,25 @@
       (should buffer-read-only)
       (should (eq (key-binding "j") #'next-line))
       (should (eq (key-binding "k") #'previous-line))
-      (should (eq (key-binding "x") #'my/activity-board-stop))
-      (should (eq (key-binding "z") #'my/activity-board-help))
+      (should (eq (key-binding "x") #'+activity-board/stop))
+      (should (eq (key-binding "z") #'+activity-board/help))
       (let ((inhibit-read-only nil))
         (call-interactively (key-binding "j"))
         (call-interactively (key-binding "z")))
       (should (= (line-number-at-pos) 2)))))
 
-(ert-deftest my/activity-dead-board-cancels-its-own-refresh-timer ()
+(ert-deftest +activity-dead-board-cancels-its-own-refresh-timer ()
   "A queued callback releases its timer even after the buffer is gone."
   (let ((buffer (generate-new-buffer " *activity timer test*"))
         timer)
     (unwind-protect
         (progn
           (with-current-buffer buffer
-            (my/activity-board-mode)
-            (my/activity-board-toggle-auto-refresh)
-            (setq timer my/activity-board--auto-timer)
+            (+activity-board-mode)
+            (+activity-board/toggle-auto-refresh)
+            (setq timer +activity-board--auto-timer)
             ;; Simulate teardown that bypassed the normal kill hook.
-            (remove-hook 'kill-buffer-hook #'my/activity-board--cleanup t))
+            (remove-hook 'kill-buffer-hook #'+activity-board--cleanup t))
           (kill-buffer buffer)
           (should (memq timer timer-list))
           (funcall (timer--function timer))
@@ -79,19 +79,19 @@
       (when (timerp timer)
         (cancel-timer timer)))))
 
-(ert-deftest my/activity-hidden-board-stops-auto-refresh ()
+(ert-deftest +activity-hidden-board-stops-auto-refresh ()
   "A board hidden with native `quit-window' stops waking up on a timer."
-  (my/activity-test-isolated
+  (+activity-test-isolated
     (with-temp-buffer
-      (my/activity-board-mode)
-      (my/activity-board-toggle-auto-refresh)
-      (let ((timer my/activity-board--auto-timer))
+      (+activity-board-mode)
+      (+activity-board/toggle-auto-refresh)
+      (let ((timer +activity-board--auto-timer))
         (should (memq timer timer-list))
         (funcall (timer--function timer))
-        (should-not my/activity-board--auto-timer)
+        (should-not +activity-board--auto-timer)
         (should-not (memq timer timer-list))))))
 
-(ert-deftest my/activity-board-view-state-is-frame-owned ()
+(ert-deftest +activity-board-view-state-is-frame-owned ()
   "Each frame owns one panel, and closing it releases only that panel."
   (let ((parameters (make-hash-table :test #'equal))
         first second)
@@ -103,85 +103,85 @@
                  (puthash (cons frame key) value parameters))))
       (unwind-protect
           (progn
-            (setq first (my/activity-board--buffer 'first-frame)
-                  second (my/activity-board--buffer 'second-frame))
+            (setq first (+activity-board--buffer 'first-frame)
+                  second (+activity-board--buffer 'second-frame))
             (should (buffer-live-p first))
             (should (buffer-live-p second))
             (should-not (eq first second))
-            (should (eq first (my/activity-board--buffer 'first-frame)))
-            (my/activity-board--frame-deleted 'first-frame)
+            (should (eq first (+activity-board--buffer 'first-frame)))
+            (+activity-board--frame-deleted 'first-frame)
             (should-not (buffer-live-p first))
             (should (buffer-live-p second))
-            (should (eq second (my/activity-board--buffer 'second-frame))))
+            (should (eq second (+activity-board--buffer 'second-frame))))
         (when (buffer-live-p first) (kill-buffer first))
         (when (buffer-live-p second) (kill-buffer second))))))
 
-(ert-deftest my/activity-board-quit-returns-and-reopen-keeps-this-frame-filter ()
+(ert-deftest +activity-board-quit-returns-and-reopen-keeps-this-frame-filter ()
   "The board uses native window return and retains only this frame's view."
-  (my/activity-test-isolated
+  (+activity-test-isolated
     (let ((source (generate-new-buffer " *activity source*"))
           (frame (selected-frame))
           board)
       (unwind-protect
           (save-window-excursion
             (switch-to-buffer source)
-            (my/activity-board)
+            (+activity/board)
             (setq board (current-buffer))
-            (should (eq board (frame-parameter frame 'my/activity-board-buffer)))
+            (should (eq board (frame-parameter frame '+activity-board-buffer)))
             (should (etaf-runtime-for-buffer board))
             (should (eq (key-binding "j") #'etaf-focus-next))
             (should (string-match-p "Built-in managers" (buffer-string)))
-            (setq-local my/activity-board--filter "process")
+            (setq-local +activity-board--filter "process")
             (call-interactively (key-binding "q"))
             (should (eq (window-buffer (selected-window)) source))
-            (my/activity-board)
+            (+activity/board)
             (should (eq (current-buffer) board))
-            (should (equal my/activity-board--filter "process")))
+            (should (equal +activity-board--filter "process")))
         (when (buffer-live-p board) (kill-buffer board))
         (when (buffer-live-p source) (kill-buffer source))
-        (should-not (frame-parameter frame 'my/activity-board-buffer))))))
+        (should-not (frame-parameter frame '+activity-board-buffer))))))
 
-(ert-deftest my/activity-board-first-render-failure-releases-new-buffer ()
+(ert-deftest +activity-board-first-render-failure-releases-new-buffer ()
   "A failed first open must not leave a stale frame-owned panel."
-  (my/activity-test-isolated
+  (+activity-test-isolated
     (let* ((frame (selected-frame))
-           (previous (frame-parameter frame 'my/activity-board-buffer))
+           (previous (frame-parameter frame '+activity-board-buffer))
            created)
       (unwind-protect
           (progn
-            (set-frame-parameter frame 'my/activity-board-buffer nil)
+            (set-frame-parameter frame '+activity-board-buffer nil)
             (cl-letf (((symbol-function 'etaf-mount)
                        (lambda (&rest _)
                          (setq created
-                               (frame-parameter frame 'my/activity-board-buffer))
+                               (frame-parameter frame '+activity-board-buffer))
                          (error "render failed"))))
-              (should-error (my/activity-board)))
+              (should-error (+activity/board)))
             (should created)
             (should-not (buffer-live-p created))
-            (should-not (frame-parameter frame 'my/activity-board-buffer)))
-        (set-frame-parameter frame 'my/activity-board-buffer previous)))))
+            (should-not (frame-parameter frame '+activity-board-buffer)))
+        (set-frame-parameter frame '+activity-board-buffer previous)))))
 
-(ert-deftest my/activity-process-details-quit-returns-to-board-and-kills-page ()
+(ert-deftest +activity-process-details-quit-returns-to-board-and-kills-page ()
   "The custom details page follows native `quit-window' without leaking."
-  (my/activity-test-isolated
+  (+activity-test-isolated
     (let ((source (generate-new-buffer " *activity detail source*"))
           (process (make-pipe-process :name "activity-detail-probe" :noquery t))
           board detail)
       (unwind-protect
           (save-window-excursion
             (switch-to-buffer source)
-            (my/activity-board)
+            (+activity/board)
             (setq board (current-buffer))
             (let ((ref (intern (format "activity-process-%s"
                                        (process-name process)))))
-              (should (eq (gethash ref my/activity-board--entries) process))
+              (should (eq (gethash ref +activity-board--entries) process))
               (etaf-focus nil ref)
-              (should (eq (key-binding "x") #'my/activity-board-stop))
+              (should (eq (key-binding "x") #'+activity-board/stop))
               (should (eq (key-binding "j") #'etaf-focus-next))
-              (my/activity-board-describe))
+              (+activity-board/describe))
             (setq detail (current-buffer))
             (should (eq detail
-                        (buffer-local-value 'my/activity-board--detail-buffer board)))
+                        (buffer-local-value '+activity-board--detail-buffer board)))
             (should (buffer-local-value 'quit-window-kill-buffer detail))
             (should-not (buffer-modified-p detail))
             (should (eq (key-binding "q") #'quit-window))
@@ -193,7 +193,7 @@
         (when (buffer-live-p source) (kill-buffer source))
         (delete-process process)))))
 
-(ert-deftest my/activity-process-details-are-owned-by-their-board ()
+(ert-deftest +activity-process-details-are-owned-by-their-board ()
   "Two Activity views cannot overwrite one another's details page."
   (let ((first (generate-new-buffer " *activity details first*"))
         (second (generate-new-buffer " *activity details second*"))
@@ -201,11 +201,11 @@
     (unwind-protect
         (progn
           (with-current-buffer first
-            (my/activity-board-mode)
-            (setq first-detail (my/activity-board--ensure-detail-buffer)))
+            (+activity-board-mode)
+            (setq first-detail (+activity-board--ensure-detail-buffer)))
           (with-current-buffer second
-            (my/activity-board-mode)
-            (setq second-detail (my/activity-board--ensure-detail-buffer)))
+            (+activity-board-mode)
+            (setq second-detail (+activity-board--ensure-detail-buffer)))
           (should-not (eq first-detail second-detail))
           (kill-buffer first)
           (should-not (buffer-live-p first-detail))
@@ -215,7 +215,7 @@
       (when (buffer-live-p first-detail) (kill-buffer first-detail))
       (when (buffer-live-p second-detail) (kill-buffer second-detail)))))
 
-(ert-deftest my/activity-transfer-pages-keep-queue-keys-under-evil ()
+(ert-deftest +activity-transfer-pages-keep-queue-keys-under-evil ()
   "The transfer queue and log must resolve native exit and job actions."
   (with-temp-buffer
     (remote-transfer-list-mode)
@@ -226,7 +226,7 @@
     (remote-transfer-log-mode)
     (should (eq (key-binding "q") #'quit-window))))
 
-(ert-deftest my/activity-transfer-queue-and-log-quit-return-under-evil ()
+(ert-deftest +activity-transfer-queue-and-log-quit-return-under-evil ()
   "The actual q key returns through queue and log in the full config."
   (let ((source (generate-new-buffer " *transfer full-init source*"))
         queue log)
@@ -248,7 +248,7 @@
       (when (buffer-live-p queue) (kill-buffer queue))
       (when (buffer-live-p source) (kill-buffer source)))))
 
-(ert-deftest my/activity-remote-board-keys-and-reopen-under-evil ()
+(ert-deftest +activity-remote-board-keys-and-reopen-under-evil ()
   "Remote board actions resolve in Emacs state and q returns to the source."
   (let ((source (generate-new-buffer " *remote board source*"))
         board)
@@ -269,7 +269,7 @@
       (when (buffer-live-p board) (kill-buffer board))
       (when (buffer-live-p source) (kill-buffer source)))))
 
-(ert-deftest my/activity-remote-logs-quit-under-evil ()
+(ert-deftest +activity-remote-logs-quit-under-evil ()
   "Remote history logs return to their caller and release temporary views."
   (let ((source (generate-new-buffer " *remote log source*"))
         (routes nil)
@@ -297,7 +297,7 @@
       (when (buffer-live-p connection) (kill-buffer connection))
       (when (buffer-live-p source) (kill-buffer source)))))
 
-(ert-deftest my/activity-remote-machines-keys-and-reopen-under-evil ()
+(ert-deftest +activity-remote-machines-keys-and-reopen-under-evil ()
   "The temporary-machine list uses its own keys and preserves frame sort."
   (let ((source (generate-new-buffer " *remote machines source*"))
         machines)
@@ -322,7 +322,7 @@
       (when (buffer-live-p machines) (kill-buffer machines))
       (when (buffer-live-p source) (kill-buffer source)))))
 
-(ert-deftest my/activity-remote-doctor-refresh-and-quit-under-evil ()
+(ert-deftest +activity-remote-doctor-refresh-and-quit-under-evil ()
   "Doctor opens at the top, refreshes in place and q returns to its source."
   (let ((source (generate-new-buffer " *remote doctor source*"))
         doctor)
@@ -345,27 +345,27 @@
       (when (buffer-live-p doctor) (kill-buffer doctor))
       (when (buffer-live-p source) (kill-buffer source)))))
 
-(ert-deftest my/activity-board-stop-waits-for-async-owner-cleanup ()
+(ert-deftest +activity-board-stop-waits-for-async-owner-cleanup ()
   "Requesting cancellation must not hide work before its owner finishes."
-  (my/activity-test-isolated
+  (+activity-test-isolated
     (let (cancelled)
       (let ((activity
-             (my/activity-register
+             (+activity-register
               "Export" :cancel (lambda () (setq cancelled t)))))
         (with-temp-buffer
-          (insert (propertize "Export" 'my/activity-handle activity))
+          (insert (propertize "Export" '+activity-handle activity))
           (goto-char (point-min))
-          (cl-letf (((symbol-function 'my/activity-board-refresh) #'ignore))
-            (my/activity-board-stop)))
+          (cl-letf (((symbol-function '+activity-board/refresh) #'ignore))
+            (+activity-board/stop)))
         (should cancelled)
-        (should (= 1 (my/activity-count)))
-        (should (memq activity my/activity--registered))
-        (my/activity-unregister activity)
-        (should (zerop (my/activity-count)))))))
+        (should (= 1 (+activity-count)))
+        (should (memq activity +activity--registered))
+        (+activity-unregister activity)
+        (should (zerop (+activity-count)))))))
 
-(ert-deftest my/activity-claims-bulk-transfers-as-tasks ()
+(ert-deftest +activity-claims-bulk-transfers-as-tasks ()
   "A transfer's task row uses its owner for logging and cancellation."
-  (my/activity-test-isolated
+  (+activity-test-isolated
     (let* ((temporary (generate-new-buffer " *activity temp stdout*"))
            (process (make-process :name "transfer" :buffer temporary
                                   :command '("sleep" "30") :noquery t))
@@ -383,30 +383,30 @@
                     ((symbol-function 'signal-process)
                      (lambda (&rest _) (ert-fail "Owner process was killed directly"))))
             ;; Unclaimed, the process is only a service.
-            (should (eq (my/activity-process-kind process) 'service))
+            (should (eq (+activity-process-kind process) 'service))
             (setq remote-transfer-jobs (list job))
-            (should (eq (my/activity-process-kind process) 'task))
-            (should (equal (my/activity--process-label process)
+            (should (eq (+activity-process-kind process) 'task))
+            (should (equal (+activity--process-label process)
                            "42% Upload a.bin"))
             (with-temp-buffer
-              (insert (propertize "row" 'my/activity-process process))
+              (insert (propertize "row" '+activity-process process))
               (goto-char (point-min))
-              (cl-letf (((symbol-function 'my/activity-board-refresh)
+              (cl-letf (((symbol-function '+activity-board/refresh)
                          #'ignore))
-                (my/activity-board-stop)
-                (my/activity-board-interrupt)
-                (my/activity-board-kill))
+                (+activity-board/stop)
+                (+activity-board/interrupt)
+                (+activity-board/kill))
               (should (= cancelled 3))
               (save-window-excursion
-                (my/activity-board-visit)
+                (+activity-board/visit)
                 (should (eq (current-buffer) log)))))
         (delete-process process)
         (kill-buffer temporary)
         (kill-buffer log)))))
 
-(ert-deftest my/activity-remote-task-interrupt-uses-owner ()
+(ert-deftest +activity-remote-task-interrupt-uses-owner ()
   "The remote task owner must cancel target work, not only its relay."
-  (my/activity-test-isolated
+  (+activity-test-isolated
     (let* ((process (make-process :name "remote-task" :buffer nil
                                   :command '("sleep" "30") :noquery t))
            (task (remote-task-create :process process :name "Build"))
@@ -416,64 +416,64 @@
           (progn
             (puthash "build" task remote-tasks)
             (with-temp-buffer
-              (insert (propertize "row" 'my/activity-process process))
+              (insert (propertize "row" '+activity-process process))
               (goto-char (point-min))
               (cl-letf (((symbol-function 'remote-task-cancel)
                          (lambda (owner &optional _)
                            (should (eq owner task))
                            (cl-incf cancelled)))
-                        ((symbol-function 'my/activity-board-refresh) #'ignore)
+                        ((symbol-function '+activity-board/refresh) #'ignore)
                         ((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
                         ((symbol-function 'signal-process)
                          (lambda (&rest _)
                            (ert-fail "Remote relay was killed directly"))))
-                (my/activity-board-interrupt)
-                (my/activity-board-kill)))
+                (+activity-board/interrupt)
+                (+activity-board/kill)))
             (should (= cancelled 2)))
         (delete-process process)))))
 
-(ert-deftest my/activity-registration-cleans-up-on-return-and-error ()
-  (my/activity-test-isolated
-    (should (= 42 (my/with-activity "work"
-                    (should (= 1 (my/activity-count))) 42)))
-    (should (= 0 (my/activity-count)))
-    (should-error (my/with-activity "failed work" (error "failed")))
-    (should-not my/activity--registered)
-    (should (= 0 my/activity--count))))
+(ert-deftest +activity-registration-cleans-up-on-return-and-error ()
+  (+activity-test-isolated
+    (should (= 42 (+with-activity "work"
+                    (should (= 1 (+activity-count))) 42)))
+    (should (= 0 (+activity-count)))
+    (should-error (+with-activity "failed work" (error "failed")))
+    (should-not +activity--registered)
+    (should (= 0 +activity--count))))
 
-(ert-deftest my/activity-animation-advances-and-returns-to-rest ()
-  (my/activity-test-isolated
-    (let ((my/activity-indicator-mode t)
-          (my/activity-indicator-fps 20))
-      (let* ((handle (my/activity-register "animation probe"))
-             (initial my/activity--frame-index))
-        (should (timerp my/activity--timer))
+(ert-deftest +activity-animation-advances-and-returns-to-rest ()
+  (+activity-test-isolated
+    (let ((+activity-indicator-mode t)
+          (+activity-indicator-fps 20))
+      (let* ((handle (+activity-register "animation probe"))
+             (initial +activity--frame-index))
+        (should (timerp +activity--timer))
         (sleep-for 0.18)
-        (should (> my/activity--frame-index initial))
-        (should (= 1 my/activity--count))
-        (my/activity-unregister handle)
+        (should (> +activity--frame-index initial))
+        (should (= 1 +activity--count))
+        (+activity-unregister handle)
         (sleep-for 0.18)
-        (should (= 0 my/activity--count))
+        (should (= 0 +activity--count))
         ;; A rest glyph ignores the former frame number immediately.
-        (should (equal (substring-no-properties (my/activity-mode-line-text))
+        (should (equal (substring-no-properties (+activity-mode-line-text))
                        " ᕕ( ᴗ )ᕗ"))))))
 
-(ert-deftest my/activity-empty-task-snapshot-does-not-rescan-per-process ()
-  (my/activity-test-isolated
+(ert-deftest +activity-empty-task-snapshot-does-not-rescan-per-process ()
+  (+activity-test-isolated
     (let ((process (make-pipe-process :name "activity-service" :noquery t))
           (scans 0))
       (unwind-protect
-          (cl-letf (((symbol-function 'my/activity--owned-task-processes)
+          (cl-letf (((symbol-function '+activity--owned-task-processes)
                      (lambda () (cl-incf scans) nil)))
             (dotimes (_ 10)
-              (should (eq (my/activity-process-kind process nil) 'service)))
+              (should (eq (+activity-process-kind process nil) 'service)))
             (should (= scans 0))
-            (should (eq (my/activity-process-kind process) 'service))
+            (should (eq (+activity-process-kind process) 'service))
             (should (= scans 1)))
         (delete-process process)))))
 
-(ert-deftest my/activity-noema-counts-busy-agents-without-idle-or-export-duplicates ()
-  (my/activity-test-isolated
+(ert-deftest +activity-noema-counts-busy-agents-without-idle-or-export-duplicates ()
+  (+activity-test-isolated
     (let ((features (cons 'noema-agent-acp features))
           (worker (generate-new-buffer " *activity-worker*"))
           (export (generate-new-buffer " *activity-export*"))
@@ -488,31 +488,31 @@
                              (list :buffer idle :busy nil))))
                     ((symbol-function 'noema-agent-acp-stop)
                      (lambda (buffer) (push buffer stops))))
-            (my/activity-noema--update-agents)
-            (should (= 1 (my/activity-count)))
-            (let* ((activity (gethash worker my/activity-noema--agents))
-                   (since (my/activity-started-at activity)))
-              (funcall (my/activity-cancel activity))
+            (+activity-noema--update-agents)
+            (should (= 1 (+activity-count)))
+            (let* ((activity (gethash worker +activity-noema--agents))
+                   (since (+activity-started-at activity)))
+              (funcall (+activity-cancel activity))
               (should (equal stops (list worker)))
-              (my/activity-noema--update-agents)
-              (should (= since (my/activity-started-at
-                                (gethash worker my/activity-noema--agents)))))
+              (+activity-noema--update-agents)
+              (should (= since (+activity-started-at
+                                (gethash worker +activity-noema--agents)))))
             (setq busy nil)
-            (my/activity-noema--update-agents)
-            (should (= 0 (my/activity-count))))
+            (+activity-noema--update-agents)
+            (should (= 0 (+activity-count))))
         (mapc #'kill-buffer (list worker export idle))))))
 
-(ert-deftest my/activity-noema-polls-asynchronously-and-filters-terminal-tasks ()
-  (my/activity-test-isolated
-    (let ((my/noema--ready t)
-          (my/noema--process 'host)
+(ert-deftest +activity-noema-polls-asynchronously-and-filters-terminal-tasks ()
+  (+activity-test-isolated
+    (let ((+noema--ready t)
+          (+noema--process 'host)
           (calls 0) callback channel arguments)
-      (cl-letf (((symbol-function 'my/noema-api-call)
+      (cl-letf (((symbol-function '+noema-api-call)
                  (lambda (method args cb &optional _timeout)
                    (cl-incf calls)
                    (setq channel method arguments args callback cb))))
-        (my/activity-noema--poll)
-        (my/activity-noema--poll)
+        (+activity-noema--poll)
+        (+activity-noema--poll)
         (should (= calls 1))
         (should (equal channel "noema:api:tasks:list"))
         (should (equal arguments [((activeOnly . t))]))
@@ -521,47 +521,47 @@
                                (kind . "latex-export") (status . "running")
                                (phase . "Compiling") (cancellable . t))
                               ((id . "done") (status . "completed"))])) nil)
-        (should-not my/activity-noema--pending)
-        (should (= 1 (my/activity-count)))
+        (should-not +activity-noema--pending)
+        (should (= 1 (+activity-count)))
         (should (string-match-p "Compiling"
-                                (my/activity-detail (car my/activity-noema--tasks))))
-        (funcall (my/activity-cancel (car my/activity-noema--tasks)))
+                                (+activity-detail (car +activity-noema--tasks))))
+        (funcall (+activity-cancel (car +activity-noema--tasks)))
         (should (equal channel "noema:api:tasks:cancel"))
         (should (equal arguments [((id . "latex"))]))
         (funcall callback '((ok . t)) nil)
         (should (equal channel "noema:api:tasks:list"))
         (funcall callback '((tasks . [])) nil)
-        (should (= 0 (my/activity-count)))))))
+        (should (= 0 (+activity-count)))))))
 
-(ert-deftest my/activity-noema-host-stop-and-disable-ignore-stale-replies ()
-  (my/activity-test-isolated
-    (let ((my/noema--ready t)
-          (my/noema--process 'old-host)
+(ert-deftest +activity-noema-host-stop-and-disable-ignore-stale-replies ()
+  (+activity-test-isolated
+    (let ((+noema--ready t)
+          (+noema--process 'old-host)
           callback)
-      (cl-letf (((symbol-function 'my/noema-api-call)
+      (cl-letf (((symbol-function '+noema-api-call)
                  (lambda (_method _args cb &optional _timeout) (setq callback cb))))
-        (my/activity-noema--poll)
+        (+activity-noema--poll)
         (let ((old callback))
-          (setq my/noema--ready nil)
-          (my/activity-noema--host-stopped)
-          (setq my/noema--ready t my/noema--process 'new-host)
-          (my/activity-noema--poll)
+          (setq +noema--ready nil)
+          (+activity-noema--host-stopped)
+          (setq +noema--ready t +noema--process 'new-host)
+          (+activity-noema--poll)
           (funcall old '((tasks . [((id . "stale") (status . "running"))])) nil)
-          (should my/activity-noema--pending)
-          (should-not my/activity-noema--tasks))
-        (my/activity-noema--mode-changed)
+          (should +activity-noema--pending)
+          (should-not +activity-noema--tasks))
+        (+activity-noema--mode-changed)
         (funcall callback '((tasks . [((id . "disabled") (status . "running"))])) nil)
-        (should-not my/activity-noema--tasks)))))
+        (should-not +activity-noema--tasks)))))
 
-(ert-deftest my/activity-noema-offline-poll-does-not-call-or-start-host ()
-  (my/activity-test-isolated
-    (cl-letf (((symbol-function 'my/noema-api-call)
+(ert-deftest +activity-noema-offline-poll-does-not-call-or-start-host ()
+  (+activity-test-isolated
+    (cl-letf (((symbol-function '+noema-api-call)
                (lambda (&rest _) (ert-fail "Offline poll called the host"))))
-      (my/activity-noema--poll)
-      (should (= 0 (my/activity-count))))))
+      (+activity-noema--poll)
+      (should (= 0 (+activity-count))))))
 
-(ert-deftest my/activity-noema-unchanged-agent-snapshot-does-not-redraw-board ()
-  (my/activity-test-isolated
+(ert-deftest +activity-noema-unchanged-agent-snapshot-does-not-redraw-board ()
+  (+activity-test-isolated
     (let ((features (cons 'noema-agent-acp features))
           (worker (generate-new-buffer " *activity-stable-worker*"))
           (changes 0))
@@ -569,82 +569,82 @@
           (cl-letf (((symbol-function 'noema-agent-acp-sessions)
                      (lambda (&optional _)
                        (list (list :buffer worker :name "work" :busy t))))
-                    ((symbol-function 'my/activity-noema--changed)
+                    ((symbol-function '+activity-noema--changed)
                      (lambda () (cl-incf changes))))
-            (my/activity-noema--update-agents)
-            (dotimes (_ 5) (my/activity-noema--update-agents))
+            (+activity-noema--update-agents)
+            (dotimes (_ 5) (+activity-noema--update-agents))
             (should (= 1 changes)))
         (kill-buffer worker)))))
 
-(ert-deftest my/activity-noema-failed-request-releases-pending-and-can-recover ()
-  (my/activity-test-isolated
-    (let ((my/noema--ready t)
-          (my/noema--process 'host)
+(ert-deftest +activity-noema-failed-request-releases-pending-and-can-recover ()
+  (+activity-test-isolated
+    (let ((+noema--ready t)
+          (+noema--process 'host)
           (calls 0) callback)
-      (cl-letf (((symbol-function 'my/noema-api-call)
+      (cl-letf (((symbol-function '+noema-api-call)
                  (lambda (_method _args cb &optional _timeout)
                    (cl-incf calls) (setq callback cb))))
-        (my/activity-noema--poll)
+        (+activity-noema--poll)
         (funcall callback nil '((message . "timeout")))
-        (should-not my/activity-noema--pending)
-        (my/activity-noema--poll)
+        (should-not +activity-noema--pending)
+        (+activity-noema--poll)
         (should (= 2 calls))
         (funcall callback '((tasks . [((id . "recovered") (status . "running"))])) nil)
-        (should (= 1 (my/activity-count)))))))
+        (should (= 1 (+activity-count)))))))
 
-(ert-deftest my/activity-providers-poll-at-idle-rate-during-animation ()
-  (my/activity-test-isolated
+(ert-deftest +activity-providers-poll-at-idle-rate-during-animation ()
+  (+activity-test-isolated
     (let* ((calls 0)
-          (my/activity-poll-functions (list (lambda () (cl-incf calls))))
-          (my/activity--last-poll (float-time))
-          (my/activity-poll-interval 2))
-      (dotimes (_ 8) (my/activity--poll))
+          (+activity-poll-functions (list (lambda () (cl-incf calls))))
+          (+activity--last-poll (float-time))
+          (+activity-poll-interval 2))
+      (dotimes (_ 8) (+activity--poll))
       (should (= calls 0))
       ;; Move the recorded poll time back rather than replacing `float-time',
       ;; a C primitive whose mock triggers native trampoline compilation.
-      (setq my/activity--last-poll (- (float-time) 2.5))
-      (my/activity--poll)
+      (setq +activity--last-poll (- (float-time) 2.5))
+      (+activity--poll)
       (should (= calls 1))
-      (dotimes (_ 8) (my/activity--poll))
+      (dotimes (_ 8) (+activity--poll))
       (should (= calls 1)))))
 
-(ert-deftest my/activity-provider-failure-is-visible-and-does-not-stop-peers ()
+(ert-deftest +activity-provider-failure-is-visible-and-does-not-stop-peers ()
   "One bad provider cannot hide other work or silently poison the board."
-  (my/activity-test-isolated
+  (+activity-test-isolated
     (let* ((broken t)
            (polled 0)
            (poll (lambda () (when broken (error "poll offline"))))
            (snapshot (lambda () (when broken (error "snapshot offline")) nil))
-           (my/activity-poll-functions
+           (+activity-poll-functions
             (list poll (lambda () (cl-incf polled))))
-           (my/activity-provider-functions
+           (+activity-provider-functions
             (list snapshot (lambda ()
-                             (list (my/activity--create
+                             (list (+activity--create
                                     :label "Other task" :kind 'task))))))
-      (my/activity--poll t)
+      (+activity--poll t)
       (should (= polled 1))
-      (should (= 1 (my/activity-count)))
-      (should (= 2 (hash-table-count my/activity--provider-errors)))
+      (should (= 1 (+activity-count)))
+      (should (= 2 (hash-table-count +activity--provider-errors)))
       (with-temp-buffer
-        (my/activity-board-mode)
-        (my/activity-board-refresh)
+        (+activity-board-mode)
+        (+activity-board/refresh)
         (should (string-match-p "Provider problems" (buffer-string)))
         (should (string-match-p "snapshot offline" (buffer-string))))
       (setq broken nil)
-      (my/activity--poll t)
-      (my/activity-count)
-      (should (zerop (hash-table-count my/activity--provider-errors))))))
+      (+activity--poll t)
+      (+activity-count)
+      (should (zerop (hash-table-count +activity--provider-errors))))))
 
-(ert-deftest my/activity-tick-rearms-after-an-unexpected-scan-error ()
+(ert-deftest +activity-tick-rearms-after-an-unexpected-scan-error ()
   "An unexpected scan exception must not permanently stop the indicator."
-  (my/activity-test-isolated
-    (let ((my/activity-indicator-mode t)
+  (+activity-test-isolated
+    (let ((+activity-indicator-mode t)
           (scheduled 0))
-      (cl-letf (((symbol-function 'my/activity-count)
+      (cl-letf (((symbol-function '+activity-count)
                  (lambda () (error "scan failed")))
-                ((symbol-function 'my/activity--schedule)
+                ((symbol-function '+activity--schedule)
                  (lambda () (cl-incf scheduled))))
-        (should-error (my/activity--tick))
+        (should-error (+activity--tick))
         (should (= scheduled 1))))))
 
 (provide 'init-activity-tests)

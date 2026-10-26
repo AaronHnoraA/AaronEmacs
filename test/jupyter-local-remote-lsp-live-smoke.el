@@ -1,7 +1,7 @@
 ;;; jupyter-local-remote-lsp-live-smoke.el --- Local file, SSH kernel, local LSP -*- lexical-binding: t; -*-
 ;; Opt-in live check.  The SSH kernelspec is metadata only; no SSH is needed.
-(require 'init-noema-jupyter-lsp)
-(require 'init-lsp)
+(require 'noema/jupyter/lsp)
+(require 'tools/lsp/config)
 (load (expand-file-name "test/lsp-live-smoke.el" user-emacs-directory) nil t)
 
 (let* ((directory (file-truename (make-temp-file "noema-local-kernel-" t)))
@@ -23,37 +23,37 @@
            "\"metadata\":{\"kernelspec\":{\"display_name\":\"SSH kernel\","
            "\"language\":\"python\",\"name\":\"ssh-kernel\"}},"
            "\"nbformat\":4,\"nbformat_minor\":5}\n"))
-        (setq notebook (cl-letf (((symbol-function 'my/noema--ensure-server) #'ignore))
+        (setq notebook (cl-letf (((symbol-function '+noema--ensure-server) #'ignore))
                          (find-file-noselect file)))
         (switch-to-buffer notebook)
-        (setq-local my/noema-jupyter-cell-kernel "ssh-kernel"
-                    my/noema-jupyter-cell-kernel-spec entry
-                    my/language-server--manual-start t
+        (setq-local +noema-jupyter-cell-kernel "ssh-kernel"
+                    +noema-jupyter-cell-kernel-spec entry
+                    +language-server--manual-start t
                     lsp-auto-guess-root t
                     lsp-guess-root-without-session t)
-        (my/noema-jupyter-project-lsp)
+        (+noema-jupyter/project-lsp)
         (when (and (bound-and-true-p lsp--buffer-deferred)
                    (fboundp 'lsp--init-if-visible))
           (lsp--init-if-visible))
-        (unless (my/lsp-live-smoke--wait 35)
+        (unless (+lsp-live-smoke--wait 35)
           (error "Local notebook LSP did not connect"))
         (unless (equal (remote-context-target-id
                         (remote-context
-                         (my/language-server--project-root-for-buffer)))
+                         (+language-server--project-root-for-buffer)))
                        "local")
           (error "SSH kernel redirected the file's LSP target"))
         (unless (and (equal buffer-file-name file)
                      (equal lsp-buffer-uri (lsp--path-to-uri file)))
           (error "SSH kernel changed notebook file or LSP document identity: file=%S expected=%S uri=%S"
                  buffer-file-name (lsp--path-to-uri file) lsp-buffer-uri))
-        (when (my/language-server-runtime-p my/language-server-runtime-current)
+        (when (+language-server-runtime-p +language-server-runtime-current)
           (error "SSH kernel created a kernel-owned LSP runtime"))
         (princ "PASS local notebook with SSH kernel uses its local Python LSP\n"))
     (when (buffer-live-p notebook)
       (with-current-buffer notebook
         (dolist (workspace (ignore-errors (lsp-workspaces)))
           (ignore-errors
-            (my/lsp-mode-shutdown-workspace workspace 'live-smoke)))
+            (+lsp-mode-shutdown-workspace workspace 'live-smoke)))
         (set-buffer-modified-p nil))
       (kill-buffer notebook))
     (delete-directory directory t)))

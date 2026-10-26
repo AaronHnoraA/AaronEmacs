@@ -21,7 +21,7 @@ def request(action, session_id=None, agent=None, workspace=None, message=None,
     command = ["emacsclient"]
     if socket:
         command += ["--socket-name", socket]
-    command += ["--eval", f'(my/noema-agent-bridge-request "{encoded}")']
+    command += ["--eval", f'(+noema-agent-bridge-request "{encoded}")']
     result = subprocess.run(command, capture_output=True, text=True, timeout=15, check=False)
     if result.returncode:
         raise RuntimeError(result.stderr.strip() or "emacsclient failed")

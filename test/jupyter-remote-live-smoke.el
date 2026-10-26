@@ -3,12 +3,12 @@
 ;; ROOT must contain an isolated venv with ipykernel/Jupyter Server, runtime/
 ;; and work/. A running test server's jpserver-*.json must be in runtime/.
 ;; This probe never persists target environment/profile changes.
-(require 'init-noema)
-(require 'init-noema-jupyter-server)
+(require 'noema/bridge/config)
+(require 'noema/jupyter/server)
 (require 'remote-config)
 (require 'remote-framework)
 
-(defun my/jupyter-live--client (payload)
+(defun +jupyter-live--client (payload)
   "Run the Node client with secret PAYLOAD on stdin, servicing Emacs channels."
   (let* ((buffer (generate-new-buffer " *jupyter-live-client*"))
          (default-directory user-emacs-directory)
@@ -31,7 +31,7 @@
       (when (process-live-p proc) (delete-process proc))
       (kill-buffer buffer))))
 
-(defun my/jupyter-live-run ()
+(defun +jupyter-live-run ()
   "Exercise broker launch, channel recovery, attach and HTTP server ownership."
   (remote-config-load)
   (remote-fs-install)
@@ -46,7 +46,7 @@
          (remote--client-process-environment process-environment)
          (old-environment (remote-target-environment target))
          (old-workspaces (remote-target-workspaces target))
-         (my/noema-jupyter-server--credentials (make-hash-table :test #'equal))
+         (+noema-jupyter-server--credentials (make-hash-table :test #'equal))
          (file (remote-make-file-name target-id (concat root "/work/audit.ipynb")))
          runtime attachment workspace)
     (when ssh (setenv "PATH" (concat (file-name-directory ssh) ":" (getenv "PATH"))))
@@ -59,36 +59,36 @@
           `(((id . "jupyter-audit") (path . ,(concat root "/work/")))))
     (unwind-protect
         (progn
-          (setq runtime (my/noema-jupyter--launch-runtime
+          (setq runtime (+noema-jupyter--launch-runtime
                          `((kernelId . "live-audit") (sourceFile . ,file) (kernelName . "python3")))
-                workspace (my/noema-jupyter-runtime-workspace runtime))
-          (my/jupyter-live--client
+                workspace (+noema-jupyter-runtime-workspace runtime))
+          (+jupyter-live--client
            `((mode . "raw") (label . "broker launch + completion")
-             (connectionInfo . ,(my/noema-jupyter-runtime-client-connection runtime))
+             (connectionInfo . ,(+noema-jupyter-runtime-client-connection runtime))
              (code . "noema_audit_state = 41; print(noema_audit_state + 1)") (expected . "42")))
-          (let* ((old (my/noema-jupyter-runtime-channel-group runtime))
+          (let* ((old (+noema-jupyter-runtime-channel-group runtime))
                  (ports (remote-channel-group-endpoints old 'local))
                  (replacement (remote-channel-group-recover old)))
-            (my/noema-jupyter--update-group runtime old replacement)
+            (+noema-jupyter--update-group runtime old replacement)
             (unless (equal ports (remote-channel-group-endpoints replacement 'local))
               (error "Recovery changed client endpoints")))
-          (my/jupyter-live--client
+          (+jupyter-live--client
            `((mode . "raw") (label . "five-port recovery preserves state")
-             (connectionInfo . ,(my/noema-jupyter-runtime-client-connection runtime))
+             (connectionInfo . ,(+noema-jupyter-runtime-client-connection runtime))
              (code . "print(noema_audit_state + 1)") (expected . "42")))
           ;; Discovery expects connection files in Jupyter's runtime directory.
           (let ((copy (remote-make-file-name target-id (concat root "/runtime/kernel-audit.json"))))
-            (copy-file (my/noema-jupyter-runtime-connection-file runtime) copy t)
+            (copy-file (+noema-jupyter-runtime-connection-file runtime) copy t)
             (unwind-protect
                 (progn
-                  (setq attachment (my/noema-jupyter--attach-runtime
+                  (setq attachment (+noema-jupyter--attach-runtime
                                     `((sourceFile . ,file) (token . "kernel-audit.json"))))
-                  (my/jupyter-live--client
+                  (+jupyter-live--client
                    `((mode . "raw") (label . "remote connection-file attach")
-                     (connectionInfo . ,(my/noema-jupyter-attachment-client-connection attachment))
+                     (connectionInfo . ,(+noema-jupyter-attachment-client-connection attachment))
                      (code . "print(noema_audit_state + 1)") (expected . "42")))
-                  (my/noema-jupyter--close-attachment attachment)
-                  (unless (eq t (my/noema-jupyter--alive-p runtime))
+                  (+noema-jupyter--close-attachment attachment)
+                  (unless (eq t (+noema-jupyter--alive-p runtime))
                     (error "Detaching killed the owning kernel")))
               (delete-file copy)))
           (let* ((runtime-dir (remote-make-file-name target-id (concat root "/runtime/")))
@@ -96,18 +96,18 @@
                  (info (json-parse-string (with-temp-buffer (insert-file-contents info-file) (buffer-string))
                                           :object-type 'alist))
                  (entry `(:id "live-audit" :url ,(alist-get 'url info) :target ,target-id :auth token)))
-            (puthash (my/noema-jupyter-server--credential-key entry) (alist-get 'token info)
-                     my/noema-jupyter-server--credentials)
+            (puthash (+noema-jupyter-server--credential-key entry) (alist-get 'token info)
+                     +noema-jupyter-server--credentials)
             (unwind-protect
-                (my/jupyter-live--client
+                (+jupyter-live--client
                  `((mode . "server") (label . "server auth, contents, execution, adopt, restart, shutdown")
-                   (server . ,(my/noema-jupyter-server--resolve-entry entry))))
-              (my/noema-jupyter-server--close-resource entry "live-audit" 'test-cleanup)))
+                   (server . ,(+noema-jupyter-server--resolve-entry entry))))
+              (+noema-jupyter-server--close-resource entry "live-audit" 'test-cleanup)))
           (princ "PASS real Remote / Jupyter integration\n"))
-      (when attachment (ignore-errors (my/noema-jupyter--close-attachment attachment)))
-      (when runtime (ignore-errors (my/noema-jupyter--shutdown-runtime runtime)))
+      (when attachment (ignore-errors (+noema-jupyter--close-attachment attachment)))
+      (when runtime (ignore-errors (+noema-jupyter--shutdown-runtime runtime)))
       (when workspace (ignore-errors (remote-workspace-close workspace 'test-cleanup)))
       (setf (remote-target-environment target) old-environment
             (remote-target-workspaces target) old-workspaces))))
 
-(my/jupyter-live-run)
+(+jupyter-live-run)

@@ -11,11 +11,11 @@
 (require 'aaron-ui)
 (require 'aaron-ui-board)
 
-(declare-function my/activity-board-refresh "init-activity" ())
-(declare-function my/activity-board-toggle-auto-refresh "init-activity" ())
-(declare-function my/activity-board-toggle-timers "init-activity" ())
-(declare-function my/activity-board-filter "init-activity" (pattern))
-(declare-function my/activity-board--activate-row "init-activity" (row))
+(declare-function +activity-board/refresh "ui/activity/config" ())
+(declare-function +activity-board/toggle-auto-refresh "ui/activity/config" ())
+(declare-function +activity-board/toggle-timers "ui/activity/config" ())
+(declare-function +activity-board/filter "ui/activity/config" (pattern))
+(declare-function +activity-board--activate-row "ui/activity/config" (row))
 
 (defun aaron-ui-activity--color (token fallback)
   "Return Aaron UI TOKEN or FALLBACK for the current theme."
@@ -64,7 +64,7 @@
        :on-press
        (lambda ()
          (with-current-buffer owner
-           (my/activity-board--activate-row row)))
+           (+activity-board--activate-row row)))
     (column :width 'stretch
       (flex :flex-flow '(row nowrap) :gap '((lh 0) (ch 2))
         (box :width '(ch 2)
@@ -132,16 +132,16 @@
     (flex :flex-flow '(row wrap) :gap '((lh 0) (ch 1))
           :padding '((lh 1) (ch 2))
       (aaron-ui-activity-button
-       :label "Refresh" :command #'my/activity-board-refresh
+       :label "Refresh" :command #'+activity-board/refresh
        :owner owner :primary t)
       (aaron-ui-activity-button
        :label (if (plist-get (etaf-value state) :auto) "Auto: on" "Auto: off")
-       :command #'my/activity-board-toggle-auto-refresh :owner owner)
+       :command #'+activity-board/toggle-auto-refresh :owner owner)
       (aaron-ui-activity-button
        :label (if (plist-get (etaf-value state) :timers) "Timers: shown" "Timers: hidden")
-       :command #'my/activity-board-toggle-timers :owner owner)
+       :command #'+activity-board/toggle-timers :owner owner)
       (aaron-ui-activity-button
-       :label "Filter" :command #'my/activity-board-filter :owner owner))
+       :label "Filter" :command #'+activity-board/filter :owner owner))
     (box :if (plist-get (etaf-value state) :filter)
          :padding '((lh 0) (ch 2))
          :color (aaron-ui-activity--color 'accent-yellow "#F9E2AF")

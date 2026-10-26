@@ -5,7 +5,7 @@
 (require 'cl-lib)
 
 (defmacro remote-jupyter-tests--with-store (&rest body)
-  `(let* ((my/noema-jupyter-servers '((:id "test-lab" :url "http://invalid.example/")))
+  `(let* ((+noema-jupyter-servers '((:id "test-lab" :url "http://invalid.example/")))
           (store (make-hash-table :test #'equal))
           (root (remote-make-file-name (remote-jupyter-target-id "test-lab") "/")))
      (remote-jupyter-register)
@@ -16,7 +16,7 @@
                      (type . ,(if (eq (gethash path store) :directory) "directory" "file"))
                      (size . 42) (writable . t)
                      (created . "2026-09-26T00:00:00Z") (lastModified . "2026-09-26T00:00:01Z"))))
-       (cl-letf (((symbol-function 'my/noema--api-call-sync)
+       (cl-letf (((symbol-function '+noema--api-call-sync)
                   (lambda (_channel args &optional _timeout)
                     (let* ((body (aref args 0)) (path (alist-get 'path body))
                            (operation (alist-get 'operation body)) (value (gethash path store)))
@@ -65,7 +65,7 @@
      (let ((failure (should-error (process-file "ls" nil nil nil "--version")
                                   :type 'file-error)))
        (should (string-match-p "process-sync" (error-message-string failure)))))
-   (cl-letf (((symbol-function 'my/noema--api-call-sync)
+   (cl-letf (((symbol-function '+noema--api-call-sync)
               (lambda (&rest _) '((ok . :json-false) (error . ((code . "EACCES") (message . "denied")))))))
      (should-error (file-exists-p (concat root "exists.txt")) :type 'file-error))))
 
@@ -91,6 +91,6 @@
   (remote-jupyter-tests--with-store
    (let ((id (remote-jupyter-target-id "test-lab")))
      (should (remote-get-target id))
-     (let (my/noema-jupyter-servers) (remote-jupyter-register))
+     (let (+noema-jupyter-servers) (remote-jupyter-register))
      (should-not (remote-get-target id))
      (should-not (remote-links-for-target id)))))

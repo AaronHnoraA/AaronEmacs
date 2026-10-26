@@ -3,7 +3,7 @@
          (tab-width . 4)
          (fill-column . 100)
          (compile-command . "cargo build")
-         (my/project-local-settings
+         (+project-local-settings
           . (:env (("RUST_BACKTRACE" . "1"))
              :test (("test"       . "cargo test")
                     ("test-fast"  . "cargo test --lib")

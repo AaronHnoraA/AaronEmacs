@@ -117,7 +117,7 @@
           (setq folder-buffer (remote-open-folder target directory))
           ;; A deferred LSP start may run while Emacs waits on target I/O;
           ;; the language-server smoke measures that separate path.
-          (remove-hook 'prog-mode-hook #'my/language-server-ensure-deferred)
+          (remove-hook 'prog-mode-hook #'+language-server-ensure-deferred)
           (unwind-protect
               (progn
                 (cl-loop for spelling in warmup-order
@@ -155,7 +155,7 @@
                              (* 1000 (/ (apply #'+ values) count))))))
                 (remote-ssh-visit-benchmark--check-ratio results))
             (add-hook 'prog-mode-hook
-                      #'my/language-server-ensure-deferred)))
+                      #'+language-server-ensure-deferred)))
       (when-let* ((workspace (remote-get-workspace logical-directory)))
         (remote-workspace-close workspace 'benchmark-cleanup))
       (when (buffer-live-p folder-buffer)

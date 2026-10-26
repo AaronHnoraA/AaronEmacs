@@ -2,6 +2,6 @@
 ;; Auto-generated.  Do not edit by hand; use `config-set' or the board.
 
 (config-store-set
- '((my/output-interesting-buffer-regexp
+ '((+output-interesting-buffer-regexp
     . "\\*\\(?:compilation\\|test\\|task\\|run\\)\\*"))
 )

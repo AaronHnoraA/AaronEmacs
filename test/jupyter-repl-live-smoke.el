@@ -1,11 +1,11 @@
 ;;; jupyter-repl-live-smoke.el --- Exercise the Board's actual REPL launcher -*- lexical-binding: t; -*-
-(require 'init-jupyter-management)
+(require 'tools/jupyter/management)
 (require 'jupyter-repl)
 (let ((result-file (make-temp-file "jupyter-repl-live-")) client)
   (unwind-protect
       (with-temp-buffer
         (python-mode)
-        (setq client (my/jupyter-management-run-repl
+        (setq client (+jupyter-management-run-repl
                       (list :kind 'kernelspec :target-id "local"
                             :name (or (getenv "JUPYTER_REPL_LIVE_KERNEL") "python3"))
                       (current-buffer)))

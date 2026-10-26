@@ -1,4 +1,4 @@
-;;; init-modules.el --- Load init modules in order -*- lexical-binding: t; -*-
+;;; init-modules.el --- The configuration's module declaration -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 ;;
@@ -20,90 +20,96 @@
 (autoload 'module-doctor "aaron-modules-board" nil t)
 
 (aaron!
- :core   init-utils init-base init-open patches/init-patches
- :os     (:when (eq system-type 'darwin) (init-macos :optional t))
-         ;; Must follow `init-macos': it restores the Option/Command layout
+ :core   (utils :feature aaron-utils) (base :feature aaron-base)
+         (open :feature aaron-open) (patches :feature aaron-patches)
+ :os     (:when (eq system-type 'darwin) (macos :optional t))
+         ;; Must follow `os/macos': it restores the Option/Command layout
          ;; that the `H-' bindings assume when the host build is Neomacs.
-         (init-neomacs :optional t)
- :remote (init-remote :doctor remote-doctor) init-emacs-gateway
- :ui     init-ui
-         ;; Must follow `init-ui': the activity indicator appends itself to
-         ;; the `mode-line-misc-info' that init-ui has finished setting up.
-         init-activity
- :noema  init-activity-noema
- :ui     init-tabbar init-display-rules
- :tools  init-tools
- :editor init-evil
- :tools  init-lsp
- :editor init-format
- :checkers init-problems
- :tools  init-symbols init-workspace-symbol init-lsp-ops
-         (init-lsp-tools :doctor my/language-server-doctor)
-         init-code-actions init-git
- :emacs  init-smerge
- :tools  init-dev init-clutch
- :lang   init-filetypes
- :editor init-navigation init-navigation-extra
- :emacs  init-dired
- :editor init-editing-workbench
- :emacs  init-file-workbench
- :app    (init-calendar-tools :autoload my/calendar-year)
- :os     (:when (eq system-type 'darwin)
-           (init-macos-tools :autoload macos-tools-menu))
- :lang   (init-org-tools :after org)
- :tools  (init-zoxide :optional t) (init-ai-ide :optional t) init-copilot
- :completion init-minibuffer init-consult-project
- :editor init-snippets init-auto-insert
- :config init-doom-extra
- :tools  init-treesit
- :ui     init-windows
- :emacs  init-dirvish-keys
- :editor init-expand-region
- :ui     init-treemacs-bridge
- :tools  init-project
- :ui     init-workspaces
- :emacs  init-scratch
- :tools  init-project-local
- :emacs  init-dir-locals init-rename
- :editor init-harpoon
- :ui     init-scrollview
- :tools  init-output init-test init-task init-project-run (init-debug :doctor my/debug-adapter-doctor)
-         init-debug-profile
- :ui     init-session
- :config init-maintenance config-tools init-performance
- :checkers init-diagnostics-ui init-diagnostics-extra
- :config (init-health :doctor config-health) init-server init-background
- :lang   init-md
- :noema  init-noema init-noema-search init-md-roam
- :term   (:when (eq system-type 'darwin) (init-portal :optional t))
- :editor init-text
- :term   init-shell
- :tools  init-remote-connectboard
-         (init-jupyter-board :doctor my/jupyter-board-doctor)
- :checkers (init-spell :optional t)
- :completion init-search init-search-extra init-telescope
- :tools  init-direnv
- :editor init-smartparens
- :ui     init-rainbow-delimiters
- :editor init-avy init-multiple-cursors
- :lang   (init-auctex :after (tex tex-site pdf-tools pdf-view)
-                      :autoload (latex-preview-menu
-                                 my/latex-preview-open-pdf
-                                 my/latex-sync-forward
-                                 my/latex-sync-forward-mouse
-                                 my/latex-preview-compile-and-view
-                                 my/latex-preview-view-pdf))
-         ;; Math-fragment preview is RaTeX, configured in init-latex.el; its
+         (neomacs :optional t)
+ :remote (framework :doctor remote-doctor) gateway
+ :ui     theme
+         ;; Must follow `ui/theme': the activity indicator appends itself to
+         ;; the `mode-line-misc-info' that the theme has finished setting up.
+         activity
+ :noema  activity
+ :ui     tabbar popup
+ :tools  menus
+ :editor evil
+ :tools  lsp
+         ;; tools/lsp requires these at the end of its body; declared here,
+         ;; where they actually load, they are registered without moving.
+ :lang   cpp rust ocaml bazel haskell python elisp
+ :checkers grammar
+ :lang   beancount sh java lean
+ :noema  jupyter
+ :lang   markdown nix web javascript
+         ;; Math-fragment preview is RaTeX, configured in lang/latex; its
          ;; doctor is the entry point when a preview misbehaves.
-         (init-latex :autoload (my/latex-preview-doctor latex-preview-doctor)
-                     :doctor my/latex-preview-doctor)
- :app    (init-browser :optional t)
- :completion (init-fzfs :optional t)
- :config init-function-keys init-hyper init-mouse init-ignored)
+         (latex :autoload (+latex/preview-doctor latex-preview-doctor)
+                :doctor +latex/preview-doctor)
+ :editor format
+ :checkers problems
+ :tools  symbols workspace-symbol lsp-ops
+         (lsp-hub :doctor +language-server/doctor) code-actions git
+ :emacs  smerge
+ :editor fold
+ :tools  clutch
+ :lang   filetypes
+ :editor navigation navigation-extra
+ :emacs  dired
+ :editor editing
+ :emacs  files
+ :app    (calendar :autoload +calendar/calendar-year)
+ :os     (:when (eq system-type 'darwin)
+           (macos-tools :autoload macos-tools-menu))
+ :lang   (org :after org)
+ :tools  (zoxide :optional t) (agent :optional t) copilot
+ :completion minibuffer consult-project
+ :editor snippets file-templates
+ :config default
+ :tools  tree-sitter
+ :ui     windows
+ :emacs  dirvish
+ :editor expand-region
+ :ui     treemacs
+ :tools  project
+ :ui     workspaces
+ :emacs  scratch
+ :tools  project-local
+ :emacs  dir-locals rename
+ :editor harpoon
+ :ui     scrollview
+ :tools  output test task run (debugger :doctor +debug/adapter-doctor)
+         debug-profile
+ :ui     session
+ :config maintenance (config-tools :feature config-tools) performance
+ :checkers diagnostics diagnostics-extra
+ :config (health :doctor config-health) server background
+ :noema  bridge search roam
+ :term   (:when (eq system-type 'darwin) (portal :optional t))
+ :editor text
+ :term   shell
+ :tools  connectboard (jupyter :doctor +jupyter-board/doctor)
+ :checkers (spell :optional t)
+ :completion search search-extra telescope
+ :tools  direnv
+ :editor smartparens
+ :ui     rainbow-delimiters
+ :editor avy multiple-cursors
+ :lang   (auctex :after (tex tex-site pdf-tools pdf-view)
+                 :autoload (latex-preview-menu
+                            +latex/preview-open-pdf
+                            +latex/sync-forward
+                            +latex/sync-forward-mouse
+                            +latex/preview-compile-and-view
+                            +latex/preview-view-pdf))
+ :app    (browser :optional t)
+ :completion (fzf :optional t)
+ :config function-keys hyper mouse compile)
 
 (aaron-modules-load)
 
-(my/package-register-vc 'joplin-mode
+(aaron-package-register-vc 'joplin-mode
                         '(:url "https://github.com/cinsk/joplin-mode.git"
                           :rev :last-release))
 

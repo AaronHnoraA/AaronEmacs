@@ -2,7 +2,7 @@
 
 (require 'ert)
 (require 'cl-lib)
-(require 'init-test)
+(require 'tools/test/config)
 
 (ert-deftest test-commands-are-searchable-without-my-prefix ()
   (dolist (command '(test-nearest test-file test-project test-rerun))
@@ -16,13 +16,13 @@
           (dolist (name '("Cargo.toml" "go.mod" "pyproject.toml"
                           "package.json"))
             (with-temp-file (expand-file-name name root)))
-          (cl-letf (((symbol-function 'my/test-project-root)
+          (cl-letf (((symbol-function '+test-project-root)
                      (lambda () root))
-                    ((symbol-function 'my/project-local-test-command)
+                    ((symbol-function '+project-local-test-command)
                      (lambda (&rest _) nil))
-                    ((symbol-function 'my/project-local-env)
+                    ((symbol-function '+project-local-env)
                      (lambda (&rest _) nil))
-                    ((symbol-function 'my/test--current-defun)
+                    ((symbol-function '+test--current-defun)
                      (lambda () "TestThing")))
             (dolist (case '(("main.go" project "go test ./...")
                             ("main.go" file "go test .")
@@ -33,7 +33,7 @@
               (with-temp-buffer
                 (setq buffer-file-name (expand-file-name (car case) root)
                       default-directory (file-name-as-directory root))
-                (should (equal (cadr (my/test--command (cadr case)))
+                (should (equal (cadr (+test--command (cadr case)))
                                (nth 2 case)))))))
       (delete-directory root t))))
 
@@ -43,18 +43,18 @@
     (unwind-protect
         (progn
           (with-temp-file (expand-file-name "go.mod" root))
-          (cl-letf (((symbol-function 'my/test-project-root)
+          (cl-letf (((symbol-function '+test-project-root)
                      (lambda () root))
-                    ((symbol-function 'my/project-local-test-command)
+                    ((symbol-function '+project-local-test-command)
                      (lambda (&rest _) nil))
-                    ((symbol-function 'my/project-local-env)
+                    ((symbol-function '+project-local-env)
                      (lambda (&rest _) nil))
-                    ((symbol-function 'my/test--current-defun)
+                    ((symbol-function '+test--current-defun)
                      (lambda () "TestThing.Sub")))
             (with-temp-buffer
               (setq buffer-file-name (expand-file-name "main_test.go" root)
                     default-directory (file-name-as-directory root))
-              (let ((command (cadr (my/test--command 'nearest))))
+              (let ((command (cadr (+test--command 'nearest))))
                 (should (string-prefix-p "go test . -run " command))
                 (should (equal
                          (shell-command-to-string
@@ -64,34 +64,34 @@
 
 (ert-deftest test-rerun-state-survives-compile-start-failure ()
   "A failed launch must leave the previous rerun target intact."
-  (let ((previous (frame-parameter nil 'my/output-last-runs)))
+  (let ((previous (frame-parameter nil '+output-last-runs)))
     (unwind-protect
         (progn
-          (my/output-record-run 'test "previous command" "/tmp/"
+          (+output-record-run 'test "previous command" "/tmp/"
                                 '(("OLD" . "1")))
           (cl-letf (((symbol-function 'compile)
                      (lambda (&rest _) (error "Compile could not start"))))
-            (should-error (my/test--run "new command" "/tmp/" nil)))
-          (should (equal (my/output-last-run 'test)
+            (should-error (+test--run "new command" "/tmp/" nil)))
+          (should (equal (+output-last-run 'test)
                          '("previous command" "/tmp/" (("OLD" . "1"))))))
-      (set-frame-parameter nil 'my/output-last-runs previous))))
+      (set-frame-parameter nil '+output-last-runs previous))))
 
 (ert-deftest test-project-local-command-bypasses-runner-detection ()
   "An explicit project command should not probe unrelated runner markers."
   (let ((root (make-temp-file "test-override-" t)))
     (unwind-protect
-        (cl-letf (((symbol-function 'my/test-project-root)
+        (cl-letf (((symbol-function '+test-project-root)
                    (lambda () root))
-                  ((symbol-function 'my/project-local-test-command)
+                  ((symbol-function '+project-local-test-command)
                    (lambda (&rest _) "custom test command"))
-                  ((symbol-function 'my/project-local-env)
+                  ((symbol-function '+project-local-env)
                    (lambda (&rest _) nil))
-                  ((symbol-function 'my/test--runner)
+                  ((symbol-function '+test--runner)
                    (lambda (&rest _) (error "Runner should not be probed"))))
           (with-temp-buffer
             (setq buffer-file-name (expand-file-name "some.rs" root)
                   default-directory (file-name-as-directory root))
-            (should (equal (cadr (my/test--command 'nearest))
+            (should (equal (cadr (+test--command 'nearest))
                            "custom test command"))))
       (delete-directory root t))))
 
@@ -100,16 +100,16 @@
     (unwind-protect
         (progn
           (with-temp-file (expand-file-name "go.mod" root))
-          (cl-letf (((symbol-function 'my/test-project-root)
+          (cl-letf (((symbol-function '+test-project-root)
                      (lambda () root))
-                    ((symbol-function 'my/project-local-test-command)
+                    ((symbol-function '+project-local-test-command)
                      (lambda (&rest _) nil))
-                    ((symbol-function 'my/project-local-env)
+                    ((symbol-function '+project-local-env)
                      (lambda (&rest _) nil)))
             (with-temp-buffer
               (setq buffer-file-name (expand-file-name "main.rs" root)
                     default-directory (file-name-as-directory root))
-              (should-error (my/test--command 'file) :type 'user-error))))
+              (should-error (+test--command 'file) :type 'user-error))))
       (delete-directory root t))))
 
 (provide 'init-test-entry-tests)

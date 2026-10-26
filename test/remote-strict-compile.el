@@ -17,7 +17,7 @@
   "Byte compile remote libraries with warnings promoted to errors."
   (let* ((root (expand-file-name "lisp/remote" user-emacs-directory))
          (destination (make-temp-file "remote-byte-compile-" t))
-         ;; `init-remote.el' is a user-config entry point whose `config!'
+         ;; `remote/framework/config.el' is a user-config entry point whose `config!'
          ;; macro intentionally executes package bootstrap at compile time.
          ;; The compatibility boundary is the reusable framework beneath it.
          (files

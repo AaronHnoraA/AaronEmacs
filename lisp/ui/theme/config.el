@@ -1,0 +1,1366 @@
+;; ui/theme/config.el --- Theme, modeline and window behavior -*- lexical-binding: t -*-
+
+;;; Commentary:
+;;
+
+;;; Code:
+
+(require 'config)
+(require 'cl-lib)
+(require 'seq)
+
+(require 'aaron-packages)
+
+(require 'aaron-ui)
+
+(declare-function on-screen-mode "on-screen" (&optional arg))
+(defvar kanagawa-themes-custom-colors)
+(defvar +theme-unspecified 'unspecified
+  "Literal face attribute value used by some themes during runtime expansion.")
+(defvar +dashboard-ui--theme-signature nil
+  "Last theme signature applied by `+dashboard-apply-ui'.")
+(defvar +chunlian--visibility-timer nil
+  "Idle timer used to coalesce dashboard visibility checks.")
+(defvar +dashboard--entry-refresh-timer nil
+  "Pending one-shot refresh after entering the Dashboard.")
+(defvar +dashboard--last-current-buffer nil
+  "Dashboard buffer most recently observed as current.")
+(defvar +dashboard--agenda-snapshot nil
+  "Last complete native Agenda snapshot rendered by the Dashboard.")
+(defvar +dashboard--agenda-error nil
+  "Last error returned while refreshing `+dashboard--agenda-snapshot'.")
+(defvar +dashboard--agenda-request-pending nil
+  "Non-nil while the shared Agenda cache is being refreshed.")
+(defvar +dashboard--agenda-waiters nil
+  "Callbacks waiting for the current Agenda cache refresh.")
+(defvar +dashboard--agenda-request-timer nil
+  "One-shot deadline timer for the shared Agenda cache request.")
+(defvar +dashboard--agenda-request-generation 0
+  "Generation used to reject late Agenda cache replies.")
+(defvar +dashboard--agenda-dirty t
+  "Non-nil when an event says the Dashboard Agenda cache is stale.")
+(defvar +dashboard--rendered-agenda 'unrendered
+  "Agenda state (SNAPSHOT . ERROR) the Dashboard was last rendered with.
+Entering the Dashboard or receiving a cache refresh rebuilds it only when
+this differs from the current cache, so an unchanged Dashboard is never
+rendered twice.")
+(defvar +dashboard-agenda-cache-file
+  (locate-user-emacs-file "var/noema/dashboard-agenda.eld")
+  "Last good Agenda snapshot, so a new session renders it at once.
+It is display state only: the host still answers every refresh, and a
+different answer rebuilds the Dashboard.")
+(defvar +dashboard--agenda-cache-loaded nil
+  "Non-nil once `+dashboard-agenda-cache-file' has been read.")
+(defvar chunlian-mode)
+(declare-function chunlian-mode "ui/theme/config" (&optional arg))
+(declare-function chunlian--clear-display "ui/theme/config" ())
+(defvar +file-icon-image-cache (make-hash-table :test #'equal)
+  "Cached image descriptors for custom file icons.")
+
+(defconst +image-slice-vc-revision
+  "5713b618e0fde3407081aef49b4932e9ae05942b"
+  "Tested image-slice revision used by this configuration.")
+
+(aaron-package-register-vc
+ 'image-slice
+ `(:url "https://github.com/LuciusChen/image-slice.git"
+   :rev ,+image-slice-vc-revision))
+
+(use-package image-slice
+  :ensure nil
+  :defer t)
+
+(defvar +dashboard-items-content-width 100
+  "Maximum display width for the centered dashboard item block.")
+
+(config-defvar +noema-icon-file nil
+  "SVG icon used for Markdown files."
+  :type 'file
+  :group 'appearance)
+
+(defconst +noema-work-icon-file
+  (expand-file-name "assets/icons/NoemaWork.svg" user-emacs-directory)
+  "Blue-violet document and linked-node icon for .noema work files.")
+
+(declare-function nerd-icons-mdicon "nerd-icons" (icon-name &rest args))
+(defvar material-icon-file-icon-table)
+(defvar nerd-icons-extension-icon-alist)
+(defvar nerd-icons-mode-icon-alist)
+
+;; Use the providers' own extension tables and caches.  This covers Dired,
+;; Dirvish, Ibuffer and font-icon consumers without per-file advice or scans.
+(with-eval-after-load 'material-icon-utils
+  (puthash "noema" +noema-work-icon-file material-icon-file-icon-table))
+
+(with-eval-after-load 'nerd-icons
+  (setf (alist-get "noema" nerd-icons-extension-icon-alist nil nil #'equal)
+        '(nerd-icons-mdicon "nf-md-graph_outline" :face nerd-icons-purple))
+  (setf (alist-get 'noema-research-mode nerd-icons-mode-icon-alist)
+        '(nerd-icons-mdicon "nf-md-graph_outline" :face nerd-icons-purple)))
+
+(declare-function material-icon-create-icon-image "material-icon-utils" (icon-path))
+(declare-function material-icon-get-icon-for-file "material-icon-utils" (filename &optional dir-p))
+(declare-function dashboard-icon-for-file "dashboard-widgets" (file &rest args))
+(declare-function dashboard-refresh-buffer "dashboard" ())
+(declare-function config-board "config-tools" ())
+(declare-function +noema-roam-dashboard-insert-heatmap "noema/roam/config" (&optional days))
+(declare-function noema-agenda-dashboard-query "noema-agenda" (callback))
+(defvar +noema-host-ready-functions)
+(declare-function noema-agenda-open "noema-agenda" (&optional query))
+(declare-function +noema/wiki-home "noema/bridge/config" ())
+(declare-function +performance/watch "config/performance/config" ())
+(defvar dashboard-mode-map)
+
+(defun +file-icon-for-file (file &rest args)
+  "Return a custom icon for FILE, or nil.
+ARGS are passed to font icons.  The optional `:image-height' controls SVG
+height in pixels."
+  (let* ((extension (and file (downcase (or (file-name-extension file) ""))))
+         (image-height (or (plist-get args :image-height) 20))
+         (font-args
+          (let ((rest args)
+                result)
+            (while rest
+              (unless (eq (car rest) :image-height)
+                (setq result (append result (list (car rest) (cadr rest)))))
+              (setq rest (cddr rest)))
+            result)))
+    (pcase extension
+      ("noema"
+       (or (when (and (display-graphic-p) (image-type-available-p 'svg))
+             (let ((key (cons 'noema image-height)))
+               (when-let* ((image
+                            (or (gethash key +file-icon-image-cache)
+                                (and (file-readable-p +noema-work-icon-file)
+                                     (condition-case nil
+                                         (puthash key
+                                                  (create-image +noema-work-icon-file 'svg nil
+                                                                :height image-height :ascent 'center)
+                                                  +file-icon-image-cache)
+                                       (error nil))))))
+                 (propertize " " 'display image))))
+           (if (and (display-graphic-p) (fboundp 'nerd-icons-mdicon))
+               (apply #'nerd-icons-mdicon "nf-md-graph_outline"
+                      (append font-args '(:face nerd-icons-purple)))
+             (propertize "◇" 'face 'font-lock-type-face))))
+      ("lean"
+       (ignore font-args)
+       (when (and (display-graphic-p)
+                  (image-type-available-p 'svg)
+                  (require 'material-icon-utils nil t))
+         (let ((material-icon-size image-height))
+           (when-let* ((image
+                        (condition-case nil
+                            (material-icon-create-icon-image
+                             (material-icon-get-icon-for-file file))
+                          (error nil))))
+             (propertize " " 'display image)))))
+      ("md"
+       (when (and (display-graphic-p)
+                  (image-type-available-p 'svg)
+                  (file-readable-p +noema-icon-file))
+         (propertize
+          " "
+          'display
+          (or (gethash image-height +file-icon-image-cache)
+              (puthash image-height
+                       (create-image +noema-icon-file 'svg nil
+                                     :height image-height :ascent 'center)
+                       +file-icon-image-cache)))))
+      (_ nil))))
+
+(defun +dashboard-icon-for-file-a (orig-fn file &rest args)
+  "Use custom icons before calling Dashboard's ORIG-FN for FILE."
+  (or (apply #'+file-icon-for-file file args)
+      (apply orig-fn file args)))
+
+;; Emacs 31 rejects nil as a face attribute value; themes written for earlier
+;; Emacs versions may still pass nil.  Convert nil → 'unspecified at the call
+;; site so the "nil value is invalid" warning is never emitted.
+(when (>= emacs-major-version 31)
+  (define-advice set-face-attribute (:filter-args (args) fix-nil-to-unspecified)
+    "Convert nil face attribute values to \\='unspecified (Emacs 31 compatibility)."
+    (let ((face  (nth 0 args))
+          (frame (nth 1 args))
+          (rest  (nthcdr 2 args))
+          fixed)
+      (while rest
+        (push (car rest) fixed)
+        (push (if (null (cadr rest)) 'unspecified (cadr rest)) fixed)
+        (setq rest (cddr rest)))
+      (cons face (cons frame (nreverse fixed))))))
+
+
+(defgroup +chunlian nil
+  "Decorative Chunlian UI for dashboard."
+  :group 'faces)
+
+;; Use Iosvkem in terminals
+(add-to-list 'load-path (locate-user-emacs-file "site-lisp/aaron-ui"))
+
+(use-package aaron-ui
+  :demand t
+  :config
+  (aaron-ui-load-theme))
+
+(defun +theme-normalize-faces ()
+  "Normalize theme face attributes that Emacs 31 rejects when set to nil."
+  (when (and (facep 'font-lock-variable-name-face)
+             (null (face-attribute 'font-lock-variable-name-face :foreground nil 'default)))
+    (set-face-attribute 'font-lock-variable-name-face nil :foreground 'unspecified)))
+
+(add-hook 'after-load-theme-hook #'+theme-normalize-faces)
+
+(defun +theme-apply-prompt-faces (&rest _)
+  "Draw shell prompts as colored text instead of a filled chip.
+Kanagawa gives `comint-highlight-prompt' a solid background.  Every comint
+prompt then shows a block, and agent-shell's chat labels, whose unfaced
+display newlines take the face of the prompt text they cover, stretch it
+into a full-width bar.  `agent-shell-prompt' inherits this face."
+  (aaron-ui-set-face 'comint-highlight-prompt
+                     :background 'unspecified
+                     :foreground 'accent-lavender
+                     :weight 'bold))
+
+(+theme-apply-prompt-faces)
+;; `enable-theme-functions' is the built-in hook that runs on every theme
+;; switch.
+(add-hook 'enable-theme-functions #'+theme-apply-prompt-faces)
+
+(use-package doom-modeline
+  :ensure t
+  :defer 1
+  :config
+  (doom-modeline-mode 1)
+  :custom
+  (doom-modeline-height 22)
+  (doom-modeline-bar-width 0)
+  (doom-modeline-buffer-encoding nil)
+  (doom-modeline-minor-modes nil)
+  (doom-modeline-modal nil)
+  (doom-modeline-vcs-max-length 20)
+  (doom-modeline-irc nil)
+  (doom-modeline-mu4e nil)
+  (doom-modeline-gnus nil)
+  (doom-modeline-github nil)
+  (doom-modeline-buffer-file-name-style 'truncate-except-project)
+  (doom-modeline-persp-name t)
+  (doom-modeline-unicode-fallback t)
+  (doom-modeline-enable-word-count nil)
+  ;; misc-info (time, battery, …) is expensive; render only in the active
+  ;; window instead of every visible mode line.
+  (doom-modeline-display-misc-in-all-mode-lines nil)
+  ;; Disable the clock segment — it re-evaluates display-time-string on every
+  ;; redisplay tick.
+  (doom-modeline-time nil))
+
+;; Customize popwin behavior
+(use-package shackle
+  :ensure t
+  :defer 1
+  :config
+  (shackle-mode 1)
+  :custom
+  (shackle-default-size 0.5)
+  (shackle-default-alignment 'below)
+  (shackle-rules '((vc-annotate-mode         :select t :inhibit-window-quit t :same t)
+                   ("*quickrun*"             :select t :inhibit-window-quit t :same t)
+                   (profiler-report-mode     :select t)
+                   (xwidget-webkit-mode      :select t :same t)
+                   (comint-mode              :select t :align t :size 0.4)
+                   (grep-mode                :select t :align t)
+                   (rg-mode                  :select t :align t)
+                   ;; See also `help-window-select'
+                   (apropos-mode             :select nil :align t :size 0.4)
+                   (help-mode                :select nil :align t :size 0.4)
+                   ("*Backtrace*"               :select t   :align t :size 15)
+                   ("*Shell Command Output*"    :select nil :align t :size 0.4)
+                   ("*Async Shell Command*"     :select nil :align t :size 0.4)
+                   ("*Org-Babel Error Output*"  :select nil :align t :size 0.3)
+                   ("*Process List*"            :select t   :align t :size 0.3)
+                   ("*Occur*"                   :select t   :align t)
+                   ("\\*eldoc\\( for \\)?.*\\*" :select t   :align t :size 15 :regexp t))))
+
+(use-package help
+  :ensure nil
+  :custom
+  (help-window-select t)
+  (help-window-keep-selected t)
+  (help-enable-variable-value-editing t))
+
+(use-package helpful
+  :ensure t
+  :after help
+  :bind (([remap describe-function] . helpful-callable)
+         ([remap describe-command]  . helpful-command)
+         ([remap describe-variable] . helpful-variable)
+         ([remap describe-key]      . helpful-key))
+  :custom
+  (helpful-switch-buffer-function #'pop-to-buffer))
+
+;; Windows layout recorder
+;;
+;; You can still use `winner-mode' on Emacs 26 or early. On Emacs 27, it's
+;; preferred over `winner-mode' for better compatibility with `tab-bar-mode'.
+(use-package tab-bar
+  :ensure nil
+  :hook (after-init . tab-bar-history-mode)
+  :custom
+  (tab-bar-history-buttons-show nil)
+  (tab-bar-show nil))
+
+
+
+(use-package nerd-icons
+  :ensure t
+  :when (display-graphic-p)
+  :demand t
+  :config
+  (when (fboundp 'aaron-font--apply-icon-faces)
+    (aaron-font--apply-icon-faces)))
+
+(defun +dashboard/upgrade-packages (&rest _)
+  "Upgrade installed packages from the dashboard button."
+  (interactive)
+  (aaron/package-upgrade-all-noninteractive))
+
+(defun +dashboard/open-config-board (&rest _)
+  "Open the local config Customize group from the dashboard button."
+  (interactive)
+  (unless (fboundp 'config-board)
+    (require 'config-tools))
+  (config-board))
+
+(defun +dashboard/open-roam (&rest _)
+  "Open the canonical Noema Wiki from the dashboard button."
+  (interactive)
+  (unless (fboundp '+noema/wiki-home)
+    (require 'noema/bridge/config))
+  (+noema/wiki-home))
+
+(defun +dashboard/open-monitor (&rest _)
+  "Open the runtime performance monitor from the dashboard button."
+  (interactive)
+  (unless (fboundp '+performance/watch)
+    (require 'config/performance/config))
+  (+performance/watch))
+
+(defun +dashboard-initialize-full-frame-a (orig-fn &rest args)
+  "Run dashboard initialization in the frame's only ordinary window."
+  (delete-other-windows)
+  (unwind-protect
+      (apply orig-fn args)
+    (when (fboundp 'aaron-reveal-startup-frames)
+      (aaron-reveal-startup-frames))))
+
+(defun +dashboard-insert-roam-heatmap ()
+  "Insert the optional Markdown roam activity heatmap on the dashboard."
+  (when (or (featurep 'noema/roam/config)
+            (require 'noema/roam/config nil t))
+    (when (fboundp '+noema-roam-dashboard-insert-heatmap)
+      (+noema-roam-dashboard-insert-heatmap))))
+
+(defun +dashboard--agenda-get (object key &optional default)
+  "Read KEY from JSON OBJECT, returning DEFAULT when absent."
+  (cond ((hash-table-p object) (gethash (symbol-name key) object default))
+        ((listp object) (alist-get key object default))
+        (t default)))
+
+(defun +dashboard--agenda-list (value)
+  "Return JSON array VALUE as a list."
+  (if (vectorp value) (append value nil) (or value nil)))
+
+(defun +dashboard--agenda-todo-map (snapshot)
+  "Return Agenda uid map for SNAPSHOT."
+  (let ((result (make-hash-table :test #'equal)))
+    (dolist (todo (+dashboard--agenda-list
+                   (+dashboard--agenda-get snapshot 'todos)))
+      (puthash (or (+dashboard--agenda-get todo 'uid)
+                   (+dashboard--agenda-get todo 'id)) todo result))
+    result))
+
+(defun +dashboard--insert-agenda-card-content (snapshot error-object)
+  "Insert a compact Agenda card from SNAPSHOT or ERROR-OBJECT."
+  (let ((heading-face (if (facep 'dashboard-heading) 'dashboard-heading 'bold))
+        (item-face (if (facep 'dashboard-items-face) 'dashboard-items-face 'default)))
+    (insert-text-button
+     "Agenda · next 7 days"
+     'face heading-face 'follow-link t
+     'help-echo "Open Noema Agenda"
+     'action (lambda (_) (require 'noema-agenda) (noema-agenda-open)))
+    (insert "\n\n")
+    (cond
+     (error-object
+      (insert (propertize
+               (format "Agenda unavailable · %s"
+                       (or (+dashboard--agenda-get error-object 'message)
+                           "host error")) 'face 'shadow))
+      (insert "  ")
+      (insert-text-button
+       "[retry]"
+       'face item-face 'follow-link t
+       'help-echo "Query the Noema Agenda host again"
+       'action (lambda (_) (+dashboard-agenda-handle-change)))
+      (insert "\n"))
+     ((null snapshot)
+      (insert (propertize "Agenda cache is not ready" 'face 'shadow) "\n"))
+     (t
+      (let* ((stats (+dashboard--agenda-get snapshot 'stats))
+             (open (+dashboard--agenda-get stats 'open 0))
+             (doing (+dashboard--agenda-get stats 'doing 0))
+             (blocked (+dashboard--agenda-get stats 'blocked 0))
+             (overdue (+dashboard--agenda-get stats 'overdue 0))
+             (todo-map (+dashboard--agenda-todo-map snapshot))
+             (seen (make-hash-table :test #'equal))
+             rows)
+        (insert (propertize
+                 (format "%s open   %s doing   %s blocked   %s overdue"
+                         open doing blocked overdue)
+                 'face item-face) "\n\n")
+        (dolist (day (+dashboard--agenda-list
+                      (+dashboard--agenda-get snapshot 'days)))
+          (dolist (entry (+dashboard--agenda-list
+                          (+dashboard--agenda-get day 'entries)))
+            (let* ((uid (+dashboard--agenda-get entry 'todoId))
+                   (todo (gethash uid todo-map))
+                   (kind (+dashboard--agenda-get entry 'kind "")))
+              (when (and todo uid (not (gethash uid seen))
+                         (not (member kind '("log" "repeat"))))
+                (puthash uid t seen)
+                (push (list day entry todo) rows)))))
+        (setq rows (nreverse rows))
+        ;; The date buckets intentionally omit unscheduled work.  Complete the
+        ;; compact card from the same urgency-sorted todo projection so Roam
+        ;; tasks do not disappear merely because they have no date this week.
+        (let (undated)
+          (dolist (todo (+dashboard--agenda-list
+                         (+dashboard--agenda-get snapshot 'todos)))
+            (let ((uid (or (+dashboard--agenda-get todo 'uid)
+                           (+dashboard--agenda-get todo 'id)))
+                  (status (+dashboard--agenda-get todo 'effectiveStatus
+                                                    (+dashboard--agenda-get todo 'status "todo"))))
+              (when (and uid (not (gethash uid seen))
+                         (not (member status '("done" "cancelled"))))
+                (puthash uid t seen)
+                (push (list nil nil todo) undated))))
+          (setq rows (nconc rows (nreverse undated))))
+        (if (null rows)
+            (insert (propertize "No open or scheduled items" 'face 'shadow) "\n")
+          (dolist (row (seq-take rows 4))
+            (pcase-let* ((`(,day ,entry ,todo) row)
+                         (date (and day (+dashboard--agenda-get day 'date "")))
+                         (time (and entry (+dashboard--agenda-get entry 'time "")))
+                         (status (upcase (+dashboard--agenda-get todo 'effectiveStatus
+                                                                   (+dashboard--agenda-get todo 'status "todo"))))
+                         (title (+dashboard--agenda-get todo 'text "Untitled"))
+                         (label (truncate-string-to-width title 52 nil nil "…")))
+              (insert (propertize (format "%5s  %-7s  "
+                                          (cond
+                                           ((and time (not (string-empty-p time))) time)
+                                           ((and date (not (string-empty-p date)))
+                                            (substring date (min 5 (length date))))
+                                           (t "open"))
+                                          status)
+                                  'face 'shadow))
+              (insert-text-button
+               label 'face item-face 'follow-link t
+               'help-echo "Open this task in Noema Agenda"
+               'action (lambda (_) (require 'noema-agenda) (noema-agenda-open title)))
+              (insert "\n")))))))))
+
+(defun +dashboard--load-agenda-cache ()
+  "Seed the Agenda snapshot from the previous session, once.
+The cache stays dirty, so the host still revalidates it; an unchanged answer
+then needs no second render."
+  (unless +dashboard--agenda-cache-loaded
+    (setq +dashboard--agenda-cache-loaded t)
+    (unless +dashboard--agenda-snapshot
+      (when-let* ((snapshot
+                   (ignore-errors
+                     (with-temp-buffer
+                       (insert-file-contents +dashboard-agenda-cache-file)
+                       (let* ((read-eval nil)
+                              (value (read (current-buffer))))
+                         (skip-chars-forward " \t\n\r")
+                         (unless (eobp)
+                           (error "Trailing data in Dashboard Agenda cache"))
+                         value))))
+                  ((consp snapshot)))
+        (setq +dashboard--agenda-snapshot snapshot)))))
+
+(defun +dashboard--save-agenda-cache (snapshot)
+  "Atomically write SNAPSHOT as the next session's first Agenda render."
+  (ignore-errors
+    (make-directory (file-name-directory +dashboard-agenda-cache-file) t)
+    (let ((temporary
+           (make-temp-file (concat +dashboard-agenda-cache-file ".tmp-"))))
+      (unwind-protect
+          (progn
+            (let ((print-length nil)
+                  (print-level nil)
+                  (coding-system-for-write 'utf-8-unix))
+              (with-temp-file temporary
+                (prin1 snapshot (current-buffer))))
+            (rename-file temporary +dashboard-agenda-cache-file t))
+        (when (file-exists-p temporary)
+          (delete-file temporary))))))
+
+(defun +dashboard--rendered-current-p ()
+  "Return non-nil when the Dashboard already shows the cached Agenda state."
+  (and (consp +dashboard--rendered-agenda)
+       (eq (car +dashboard--rendered-agenda) +dashboard--agenda-snapshot)
+       (equal (cdr +dashboard--rendered-agenda) +dashboard--agenda-error)))
+
+(defun +dashboard-insert-agenda ()
+  "Synchronously insert the last complete native Agenda snapshot.
+Dashboard construction never starts a request and never edits the finished
+buffer from an asynchronous callback.  Cache refreshes rebuild the Dashboard
+through its normal insertion pipeline, before Chunlian is attached."
+  (+dashboard--load-agenda-cache)
+  (setq +dashboard--rendered-agenda
+        (cons +dashboard--agenda-snapshot +dashboard--agenda-error))
+  (let ((start (point)))
+    (+dashboard--insert-agenda-card-content
+     +dashboard--agenda-snapshot +dashboard--agenda-error)
+    (+dashboard--center-lines start (point))))
+
+(defun +dashboard--refresh-buffer-completely (buffer)
+  "Rebuild Dashboard BUFFER, then attach Chunlian to the finished contents.
+The rebuild runs in a window that already shows BUFFER, on any frame:
+`dashboard-refresh-buffer' switches the selected window to the Dashboard, so
+from elsewhere it would take over whatever the user is editing.  A Dashboard
+shown nowhere stays stale and is rebuilt when it is next entered."
+  (when-let* (((buffer-live-p buffer))
+              (window (get-buffer-window buffer t)))
+    (with-selected-window window
+      (when (derived-mode-p 'dashboard-mode)
+        ;; Do not let zero-width margin overlays collapse into `point-min'
+        ;; while `dashboard-refresh-buffer' erases and rebuilds the buffer.
+        (when chunlian-mode (chunlian--clear-display))
+        (dashboard-refresh-buffer)
+        (when (derived-mode-p 'dashboard-mode)
+          (chunlian-mode 1))))))
+
+(defun +dashboard--finish-agenda-refresh (snapshot error-object &optional generation)
+  "Publish SNAPSHOT or ERROR-OBJECT and notify cache refresh waiters."
+  (when (or (null generation)
+            (and +dashboard--agenda-request-pending
+                 (= generation +dashboard--agenda-request-generation)))
+    (when (timerp +dashboard--agenda-request-timer)
+      (cancel-timer +dashboard--agenda-request-timer))
+    (setq +dashboard--agenda-request-timer nil)
+    (let ((changed (or (not (equal error-object +dashboard--agenda-error))
+                       (and (not error-object)
+                            (not (equal snapshot +dashboard--agenda-snapshot)))))
+          (waiters (prog1 (nreverse +dashboard--agenda-waiters)
+                     (setq +dashboard--agenda-waiters nil
+                           +dashboard--agenda-request-pending nil))))
+      (if error-object
+          (setq +dashboard--agenda-error error-object
+                +dashboard--agenda-dirty t)
+        ;; An equal answer keeps the rendered object, so the Dashboard can
+        ;; tell by identity that it is already current.
+        (when changed
+          (+dashboard--save-agenda-cache snapshot)
+          (setq +dashboard--agenda-snapshot snapshot))
+        (setq +dashboard--agenda-error nil
+              +dashboard--agenda-dirty nil))
+      (dolist (waiter waiters)
+        (funcall waiter changed)))))
+
+(defun +dashboard--refresh-agenda-cache (&optional callback)
+  "Refresh the shared Agenda snapshot and call CALLBACK with CHANGED.
+Concurrent callers share one host request.  This function updates data only;
+it never edits a Dashboard buffer."
+  (if (and (not +dashboard--agenda-dirty)
+           +dashboard--agenda-snapshot
+           (not +dashboard--agenda-error))
+      (when callback (funcall callback nil))
+    (when callback (push callback +dashboard--agenda-waiters))
+    (unless +dashboard--agenda-request-pending
+      (setq +dashboard--agenda-request-pending t)
+      (let ((generation (cl-incf +dashboard--agenda-request-generation)))
+        (setq +dashboard--agenda-request-timer
+              (run-at-time
+               15 nil
+               (lambda ()
+                 (+dashboard--finish-agenda-refresh
+                  nil '((message . "Agenda cache refresh timed out"))
+                  generation))))
+        (condition-case err
+            (progn
+              (require 'noema-agenda)
+              (noema-agenda-dashboard-query
+               (lambda (snapshot error-object)
+                 (+dashboard--finish-agenda-refresh
+                  snapshot error-object generation))))
+          (error
+           (+dashboard--finish-agenda-refresh
+            nil `((message . ,(error-message-string err))) generation)))))))
+
+(defun +dashboard-agenda-host-stopped ()
+  "Release the pending Dashboard Agenda request after the host stops."
+  (cl-incf +dashboard--agenda-request-generation)
+  (when (timerp +dashboard--agenda-request-timer)
+    (cancel-timer +dashboard--agenda-request-timer))
+  (setq +dashboard--agenda-request-timer nil
+        +dashboard--agenda-request-pending nil
+        +dashboard--agenda-dirty t
+        +dashboard--agenda-waiters nil))
+
+(defun +dashboard--rebuild-if-stale (buffer)
+  "Rebuild Dashboard BUFFER unless it already shows the cached Agenda state.
+Every refresh path goes through here: several callers can wait on one host
+request, and only the first may render its answer."
+  (when (and (buffer-live-p buffer)
+             (not (+dashboard--rendered-current-p)))
+    (+dashboard--refresh-buffer-completely buffer)))
+
+(defun +dashboard-agenda-handle-change (&optional _payload)
+  "Refresh cached Agenda data after an event-driven source change."
+  (setq +dashboard--agenda-dirty t)
+  (when-let* ((buffer (get-buffer "*dashboard*")))
+    (when (get-buffer-window buffer t)
+      (+dashboard--refresh-agenda-cache
+       (lambda (_changed)
+         (when (get-buffer-window buffer t)
+           (+dashboard--rebuild-if-stale buffer)))))))
+
+(defun +dashboard-refresh-on-entry ()
+  "Refresh the persistent Dashboard once whenever it becomes current."
+  (let ((dashboard (and (derived-mode-p 'dashboard-mode) (current-buffer))))
+    (if (eq dashboard +dashboard--last-current-buffer)
+        nil
+      (setq +dashboard--last-current-buffer dashboard)
+      (when (timerp +dashboard--entry-refresh-timer)
+        (cancel-timer +dashboard--entry-refresh-timer))
+      (setq +dashboard--entry-refresh-timer nil)
+      (when dashboard
+        (setq +dashboard--entry-refresh-timer
+              (run-with-idle-timer
+               0 nil
+               (lambda (buffer)
+                 (setq +dashboard--entry-refresh-timer nil)
+                 (when (and (buffer-live-p buffer)
+                            (eq buffer (current-buffer))
+                            (derived-mode-p 'dashboard-mode))
+                   ;; Render only when the buffer does not already show the
+                   ;; cached state -- at startup Dashboard has just built it
+                   ;; -- then refresh the cache.  A changed snapshot causes
+                   ;; one complete render rather than an in-place asynchronous
+                   ;; card rewrite.
+                   (+dashboard--rebuild-if-stale buffer)
+                   (+dashboard--refresh-agenda-cache
+                    (lambda (_changed)
+                      (when (eq buffer (current-buffer))
+                        (+dashboard--rebuild-if-stale buffer))))))
+               dashboard))))))
+
+(defun +dashboard--item-block-width ()
+  "Return the content width used to center dashboard item sections."
+  (let* ((window-width (max 40 (window-body-width nil t)))
+         (margin 12))
+    (min +dashboard-items-content-width
+         (max 40 (- window-width (* 2 margin))))))
+
+(defun +dashboard--line-display-width (start end)
+  "Return display width of text between START and END."
+  (string-width (buffer-substring-no-properties start end)))
+
+(defun +dashboard--pixel-width-to-columns (pixels)
+  "Return the display-column width represented by PIXELS."
+  (ceiling (/ (float pixels) (max 1 (frame-char-width)))))
+
+(defun +dashboard--string-align-width (string)
+  "Return STRING width in units suitable for `space' `:align-to'."
+  (or (and (fboundp 'string-pixel-width)
+           (let ((pixel-width (string-pixel-width string)))
+             (and (> pixel-width 0)
+                  (+dashboard--pixel-width-to-columns pixel-width))))
+      (string-width string)))
+
+(defun +dashboard--center-line (start end width)
+  "Center line text from START to END using display WIDTH."
+  (let ((prefix (propertize
+                 " "
+                 'display
+                 `(space . (:align-to (- center ,(/ (float width) 2)))))))
+    (add-text-properties start end
+                         `(line-prefix ,prefix indent-prefix ,prefix))))
+
+(defun +dashboard--line-align-width (start end)
+  "Return rendered width from START to END in `:align-to' columns."
+  (+dashboard--string-align-width (buffer-substring start end)))
+
+(defun +dashboard--center-line-exact (start end)
+  "Center line text from START to END using rendered width when possible."
+  (let* ((width (+dashboard--line-align-width start end))
+         (prefix (propertize
+                  " "
+                  'display
+                  `(space . (:align-to (- center ,(/ (float width) 2)))))))
+    (add-text-properties start end
+                         `(line-prefix ,prefix indent-prefix ,prefix))))
+
+(defun +dashboard--center-lines (start end)
+  "Center each non-empty line between START and END by its own display width."
+  (let ((inhibit-read-only t))
+    (save-excursion
+      (goto-char start)
+      (while (< (point) end)
+        (let* ((line-start (line-beginning-position))
+               (line-end (line-end-position))
+               (width (+dashboard--line-display-width line-start line-end)))
+          (when (> width 0)
+            (+dashboard--center-line-exact line-start line-end)))
+        (forward-line 1)))))
+
+(defun +dashboard--center-item-region (start end)
+  "Center and constrain dashboard item lines between START and END."
+  (let ((width (+dashboard--item-block-width))
+        (inhibit-read-only t))
+    (save-excursion
+      (goto-char start)
+      (while (< (point) end)
+        (let ((line-start (line-beginning-position))
+              (line-end (line-end-position)))
+          (if (looking-at-p "[ \t]")
+              (+dashboard--center-line line-start line-end width)
+            (let ((line-width (+dashboard--line-display-width line-start line-end)))
+              (when (> line-width 0)
+                (+dashboard--center-line-exact line-start line-end)))))
+        (forward-line 1)))))
+
+(defun +dashboard-insert-items-centered-a (orig-fn &rest args)
+  "Run ORIG-FN, then center the Dashboard item block as a fixed-width panel."
+  (let ((start (point)))
+    (prog1 (apply orig-fn args)
+      (+dashboard--center-item-region start (point)))))
+
+(defun +dashboard-center-inserted-lines-a (orig-fn &rest args)
+  "Run ORIG-FN, then center inserted lines one by one."
+  (let ((start (point)))
+    (prog1 (apply orig-fn args)
+      (+dashboard--center-lines start (point)))))
+
+(defun +dashboard/ignore-horizontal-wheel (_event)
+  "Ignore horizontal wheel EVENT in dashboard buffers."
+  (interactive "e"))
+
+(defun +dashboard-bind-horizontal-wheel ()
+  "Keep dashboard wheel input vertical-only."
+  (dolist (event '([wheel-left]
+                   [wheel-right]
+                   [double-wheel-left]
+                   [double-wheel-right]
+                   [triple-wheel-left]
+                   [triple-wheel-right]))
+    (define-key dashboard-mode-map event #'+dashboard/ignore-horizontal-wheel)))
+
+(use-package dashboard
+  :ensure t
+  :init
+  (setq dashboard-navigator-buttons
+        `(((,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-gear") "⚙")
+            "config" "Open native config Customize group"
+            ,#'+dashboard/open-config-board)
+           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-repo") "R")
+            "roam" "Open Noema Wiki"
+            ,#'+dashboard/open-roam)
+           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-pulse") "M")
+            "monitor" "Open runtime performance monitor"
+            ,#'+dashboard/open-monitor)
+           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-download") "♺")
+            "upgrade" "Upgrade archive and VC packages, then refresh the lock file"
+            ,#'+dashboard/upgrade-packages success))))
+  
+  (dashboard-setup-startup-hook)
+
+  :config
+  (defconst homepage-url "https://git.pwo101.top/")
+  (defconst stars-url (concat "https://github.com/AaronHnoraA/AaronEmacs" "/stargazers"))
+  (defconst issue-url (concat "https://github.com/AaronHnoraA/AaronEmacs" "/issues/new"))
+  (advice-remove 'dashboard-initialize #'+dashboard-initialize-full-frame-a)
+  (advice-add 'dashboard-initialize :around #'+dashboard-initialize-full-frame-a)
+  (advice-remove 'dashboard-icon-for-file #'+dashboard-icon-for-file-a)
+  (advice-add 'dashboard-icon-for-file :around #'+dashboard-icon-for-file-a)
+  (advice-remove 'dashboard-insert-items #'+dashboard-insert-items-centered-a)
+  (advice-add 'dashboard-insert-items :around #'+dashboard-insert-items-centered-a)
+  (advice-remove 'dashboard-insert-navigator #'+dashboard-center-inserted-lines-a)
+  (advice-add 'dashboard-insert-navigator :around #'+dashboard-center-inserted-lines-a)
+  (advice-remove 'dashboard-insert-init-info #'+dashboard-center-inserted-lines-a)
+  (advice-add 'dashboard-insert-init-info :around #'+dashboard-center-inserted-lines-a)
+  (+dashboard-bind-horizontal-wheel)
+
+  :custom
+  ;; Keep the dashboard banner in `etc/` with other local UI config.
+  (dashboard-banner-logo-title "Aaron's Emacs")
+  (dashboard-startup-banner
+   (expand-file-name "etc/dashboard.txt" user-emacs-directory))
+
+  (dashboard-center-content t)
+  (dashboard-set-heading-icons t)
+  (dashboard-set-file-icons t)
+  (dashboard-items '((recents  . 10)
+                     (projects . 7)))
+  (dashboard-startupify-list '(
+                               dashboard-insert-newline
+                               dashboard-insert-newline
+                               dashboard-insert-banner-title
+                               dashboard-insert-newline
+                               dashboard-insert-banner
+                               dashboard-insert-navigator
+                               dashboard-insert-newline
+                               dashboard-insert-init-info
+                               dashboard-insert-newline
+                               +dashboard-insert-roam-heatmap
+                               dashboard-insert-newline
+                               dashboard-insert-items
+                               dashboard-insert-newline
+                               +dashboard-insert-agenda
+                               dashboard-insert-newline
+                               dashboard-insert-footer)))
+
+;;; Menu Bar:
+
+(keymap-global-unset "<menu-bar> <file> <close-tab>")
+(keymap-global-unset "<menu-bar> <file> <delete-this-frame>")
+(keymap-global-unset "<menu-bar> <file> <kill-buffer>")
+(keymap-global-unset "<menu-bar> <file> <make-frame>")
+(keymap-global-unset "<menu-bar> <file> <make-tab>")
+(keymap-global-unset "<menu-bar> <file> <new-window-below>")
+(keymap-global-unset "<menu-bar> <file> <new-window-on-right>")
+(keymap-global-unset "<menu-bar> <file> <one-window>")
+(keymap-global-unset "<menu-bar> <file> <open-file>")
+(keymap-global-unset "<menu-bar> <file> <save-buffer>")
+
+(keymap-global-unset "<menu-bar> <edit> <copy>")
+(keymap-global-unset "<menu-bar> <edit> <cut>")
+(keymap-global-unset "<menu-bar> <edit> <mark-whole-buffer>")
+(keymap-global-unset "<menu-bar> <edit> <paste>")
+(keymap-global-unset "<menu-bar> <edit> <undo-redo>")
+(keymap-global-unset "<menu-bar> <edit> <undo>")
+
+(keymap-global-unset "<menu-bar> <options> <cua-mode>")
+(keymap-global-unset "<menu-bar> <options> <customize> <customize-saved>")
+(keymap-global-unset "<menu-bar> <options> <save>")
+(keymap-global-unset "<menu-bar> <options> <uniquify>")
+(keymap-global-unset "<menu-bar> <options> <save-place>")
+(keymap-global-unset "<menu-bar> <options> <transient-mark-mode>")
+(keymap-global-unset "<menu-bar> <options> <highlight-paren-mode>")
+
+(keymap-global-unset "<menu-bar> <buffer> <select-named-buffer>")
+
+(keymap-global-unset "<menu-bar> <tools> <browse-web>")
+(keymap-global-unset "<menu-bar> <tools> <gnus>")
+
+
+(keymap-global-unset "<menu-bar> <help-menu> <about-emacs>")
+(keymap-global-unset "<menu-bar> <help-menu> <about-gnu-project>")
+(keymap-global-unset "<menu-bar> <help-menu> <describe-copying>")
+(keymap-global-unset "<menu-bar> <help-menu> <describe-no-warranty>")
+(keymap-global-unset "<menu-bar> <help-menu> <emacs-manual>")
+(keymap-global-unset "<menu-bar> <help-menu> <emacs-tutorial>")
+(keymap-global-unset "<menu-bar> <help-menu> <external-packages>")
+(keymap-global-unset "<menu-bar> <help-menu> <getting-new-versions>")
+(keymap-global-unset "<menu-bar> <help-menu> <more-manuals> <order-emacs-manuals>")
+
+;;; Tab Line:
+
+(aaron-package-ensure-vc
+ 'material-icon
+ "https://github.com/zHaOdANiuu/material-icon.el.git"
+ "67e99128467075fa0087b7b49f1ae043344c903d")
+
+;;; Text Area:
+
+
+;; 渲染成对的单引号时, 尽可能使用 ‘curve’ 这种样式, 退而求此次地可以使用 `grave' 这种样式.
+(setopt text-quoting-style nil)
+;;; Fringe:
+
+(set-fringe-mode '(nil . nil)) ; Left: exact-line status; right: overview.
+
+;;; Scroll Bar:
+;; The native scrollbar stays disabled; `scrollview-mode' supplies the
+;; lightweight right-fringe document overview.
+
+;;; Mode Line:
+
+;; Face ‘mode-line-inactive’ for non-selected window’s mode line.
+(setopt mode-line-in-non-selected-windows t)
+
+(setopt mode-line-compact nil)  ; 不要设 t, 否则即使有多余的空间, 它也倾向于挤在一起.
+(setopt mode-line-right-align-edge 'window)  ; 与 window 的边缘对齐.
+
+
+(size-indication-mode)  ; 在 mode line 上显示 buffer 大小.
+(setq mode-line-column-line-number-mode-map ())  ; 使某些可点击文本不作出应答.
+
+;; 当 buffer 对应的文件名相同时, 在 buffer 名字之前补全文件的路径, 使 buffer 的名字互异.
+(setopt uniquify-buffer-name-style 'forward
+        ;; 当‘uniquify-buffer-name-style’的设置涉及补全文件路径时, 保留显示路径名之间相同的部分.
+        uniquify-strip-common-suffix t)
+
+(line-number-mode -1)  ; Mode line 上不要显示行号, 因为 window 左边缘已经显示行号了.
+
+(defun +theme/ui-apply-polish ()
+  "Apply non-color UI polish on top of the active theme."
+  (interactive)
+  (when (display-graphic-p)
+    (set-frame-parameter nil 'internal-border-width aaron-gui-internal-border-width)
+    (setq-default mode-line-format mode-line-format)
+    (setq-default tab-bar-separator "  ")
+    (setopt tab-bar-auto-width t)
+    (setopt tab-bar-close-button-show nil)
+    (setopt tab-bar-new-button-show nil)
+    (setopt tab-bar-tab-hints nil)
+    ;; Keep a forgiving native drag target while the faces below expose only
+    ;; the final pixel as the visible divider.
+    (setopt window-divider-default-right-width 7)
+    (setopt window-divider-default-bottom-width 1)
+    (window-divider-mode 1)))
+
+(defun +theme/ui-apply-elegant-divider-faces ()
+  "Keep window dividers easy to grab without changing the active palette."
+  (interactive)
+  (when (display-graphic-p)
+    (let ((surface (face-background 'default nil t))
+          (line (or (face-foreground 'vertical-border nil t)
+                    (aaron-ui-color 'border-subtle))))
+      ;; The first six pixels visually merge into the current theme.  Only the
+      ;; last pixel uses the theme's own separator color.
+      (set-face-attribute 'window-divider nil
+                          :foreground surface :background surface)
+      (set-face-attribute 'window-divider-first-pixel nil
+                          :foreground surface :background surface)
+      (set-face-attribute 'window-divider-last-pixel nil
+                          :foreground line :background surface))))
+
+(add-hook 'after-init-hook #'+theme/ui-apply-polish)
+(add-hook 'server-after-make-frame-hook #'+theme/ui-apply-polish)
+(add-hook 'after-load-theme-hook #'+theme/ui-apply-polish)
+(add-hook 'after-init-hook #'+theme/ui-apply-elegant-divider-faces)
+(add-hook 'server-after-make-frame-hook #'+theme/ui-apply-elegant-divider-faces)
+(add-hook 'after-load-theme-hook #'+theme/ui-apply-elegant-divider-faces)
+
+(defun +dashboard-apply-ui ()
+  "Apply local UI styling to the dashboard."
+  (when (derived-mode-p 'dashboard-mode)
+    (setq-local truncate-lines t)
+    (setq-local auto-hscroll-mode nil))
+  (when (display-graphic-p)
+    (let ((signature (list custom-enabled-themes
+                           (face-attribute 'default :background nil t)
+                           (face-attribute 'default :foreground nil t))))
+      (unless (equal signature +dashboard-ui--theme-signature)
+        (setq +dashboard-ui--theme-signature signature)
+        (when (facep 'dashboard-banner-logo-title)
+          (aaron-ui-set-face 'dashboard-banner-logo-title
+                             :foreground 'fg-strong
+                             :weight 'medium))
+        (when (facep 'dashboard-heading)
+          (aaron-ui-set-face 'dashboard-heading
+                             :foreground 'fg-dim
+                             :weight 'medium))
+        (when (facep 'dashboard-items-face)
+          (aaron-ui-set-face 'dashboard-items-face
+                             :foreground 'fg-soft))
+        (when (facep 'dashboard-footer-face)
+          (aaron-ui-set-face 'dashboard-footer-face
+                             :foreground 'fg-faint))
+        (when (facep 'dashboard-navigator)
+          (aaron-ui-set-face 'dashboard-navigator
+                             :foreground 'accent-cyan))
+        (when (facep 'dashboard-text-banner)
+          (aaron-ui-set-face 'dashboard-text-banner
+                             :foreground 'fg-muted))))))
+
+(add-hook 'dashboard-mode-hook #'+dashboard-apply-ui)
+(add-hook 'after-load-theme-hook #'+dashboard-apply-ui)
+
+;;; End of Line
+(setopt eol-mnemonic-unix " LF "
+        eol-mnemonic-mac  " CR "
+        eol-mnemonic-dos  " CRLF "
+        eol-mnemonic-undecided " ?EOL ")
+
+;;; Minibuffer & Echo Area:
+
+(setopt max-mini-window-height 0.3)
+
+;; 由 输入 的 字符串 的 行数 决定如何 resize.
+(setopt resize-mini-windows t)
+
+;; Trim 首尾的空行.
+(setopt resize-mini-frames #'fit-frame-to-buffer)
+;;; Mouse:
+
+(setq mouse-fine-grained-tracking nil)
+
+(setopt display-hourglass t  ; When Emacs is busy, 将鼠标指针显示为 漏斗.
+        ;; When Emacs is busy, 立刻将鼠标指针显示为漏斗.
+        hourglass-delay 0)
+
+;; 输入文本时不需要隐藏鼠标指针, 因为可以使用 ‘mouse-avoidance-mode’.
+(setopt make-pointer-invisible nil)
+(setopt mouse-avoidance-animation-delay 0.05)
+(setopt mouse-avoidance-threshold  2  ; >=2
+        mouse-avoidance-nudge-var  1  ; >=1
+        mouse-avoidance-nudge-dist 2)
+;;; Cursor:
+
+(setopt cursor-type '(bar . 2)
+        ;; Avoid a second, misleading cursor in inactive windows.
+        cursor-in-non-selected-windows nil
+        ;; don't highlight region/line in inactive windows either
+        highlight-nonselected-windows nil)
+(setopt x-stretch-cursor t)  ; 在 TAB 字符上拉长 cursor.
+
+(blink-cursor-mode -1)
+
+;; TUI 下, 尽可能地 使 cursor 外形或特征 更加显著.
+(setopt visible-cursor t)
+
+;;; Click:
+
+(setopt double-click-fuzz 3  ; 双击时, 两次 button-down 之间 允许 的 位移/像素.
+        double-click-time 400)
+
+;;; Scroll:
+
+(setq jit-lock-defer-time 0.3  ; Scroll 之后 延迟 fontify.
+      redisplay-skip-fontification-on-input t
+      ;; TUI 下, recenter 时不 redraw frame, 可能造成屏幕有少许显示错误.  所以 此处仅考虑 TTY.
+      recenter-redisplay 'tty)
+
+(setopt mouse-wheel-follow-mouse t)
+;; 匀速滚屏, 而不是滚轮越快, 滚屏速度越越越越快.
+(setopt mouse-wheel-progressive-speed nil)
+(setopt mouse-wheel-tilt-scroll t
+        mouse-wheel-scroll-amount-horizontal 1)
+(mouse-wheel-mode)
+
+;; 禁用鼠标/触控板缩放, 避免误触修改 text scale.
+(dolist (event '([pinch]
+                 [C-wheel-up]
+                 [C-wheel-down]
+                 [C-mouse-4]
+                 [C-mouse-5]))
+  (define-key global-map event nil))
+
+;; Scroll 以使 window 底端的 N 行呈现到顶端.
+(setopt next-screen-context-lines 5)
+
+;; 无法再 scroll 时 就 停住, 而不是继续移动至 buffer 首/尾.
+(setopt scroll-error-top-bottom nil)
+
+(setopt maximum-scroll-margin 0.5)
+
+;; Minibuffer 永远 一行一行地 automatically scroll.
+(setq scroll-minibuffer-conservatively t)
+
+;; Scroll 时 通过 高亮 即将 滚走/来 的 篇幅 以 提示 滚动方向.
+;; (仅在翻阅 ‘*Completions*’ buffer 的候选词时启用.)
+(setopt on-screen-inverse-flag t
+        on-screen-highlight-method 'shadow
+        on-screen-delay 0.4)
+(add-hook 'completion-list-mode-hook #'on-screen-mode)
+
+;;; Horizontal
+
+(tooltip-mode -1)
+;;; Dialo Box:
+
+;; 在 GTK+ 的 file-chooser-dialog 中显示隐藏文件.
+(setq x-gtk-show-hidden-files t)
+;;; Render:
+
+(setopt no-redraw-on-reenter t)
+
+
+
+;;; ============================================================
+;;; Indent Guide —— 稳定版配置（推荐）
+;;; ============================================================
+
+(use-package indent-guide
+  :ensure t
+  :hook (prog-mode . indent-guide-mode)
+  :custom
+  ;; 延迟一点点绘制，避免每个字符都重算（0.1~0.2 比较稳）
+  (indent-guide-delay 0.15)
+
+  ;; 不递归高亮 parent indent（递归会明显增加 redraw 负担）
+  (indent-guide-recursive nil)
+
+  ;; 字符宽度对齐（防止等宽/变宽字体下轻微抖动）
+  (indent-guide-char "|")
+
+  ;; 禁用在空行上画线（减少 overlay 数量）
+  (indent-guide-disable-on-empty-lines t)
+
+  ;; 不在注释/字符串里画（更干净，也更稳）
+  (indent-guide-ignore-comments t)
+  (indent-guide-ignore-strings t))
+
+(with-eval-after-load 'indent-guide
+  (defun +indent-guide-window-scroll-safe-a (fn &rest args)
+    "Ignore transient scroll-boundary errors from `indent-guide'."
+    (condition-case err
+        (apply fn args)
+      (args-out-of-range
+       (unless (and (consp err)
+                    (eq (car err) 'args-out-of-range))
+         (signal (car err) (cdr err))))
+      (error
+       (unless (string-match-p "\\`Args out of range"
+                               (error-message-string err))
+         (signal (car err) (cdr err))))))
+
+  (advice-add 'indent-guide--window-scroll-hook
+              :around #'+indent-guide-window-scroll-safe-a)
+  ;; 普通缩进线：淡灰蓝，不抢正文
+  (aaron-ui-set-face 'indent-guide-face :foreground 'guide-line))
+
+
+
+
+
+
+(defface chunlian-face
+  '((t :background "red" :foreground "yellow" :weight bold :height 2.0))
+  "春联样式。"
+  :group '+chunlian)
+;; 新增一个专门用来填充红底的 Face
+(defface chunlian-blank-face
+  '((t :background "red"))
+  "春联间隙的纯红背景。"
+  :group '+chunlian)
+
+(defvar chunlian-right "霜蹄千里辞寒岁")
+(defvar chunlian-left "锦辔乘风纳清祥")
+(defvar chunlian-top "乘影追风")
+
+(defvar chunlian-top-offset 14 "向下偏移的行数。避开顶部的 Logo/Banner 空白。")
+(defvar chunlian-margin-width 6 "左右 Margin 的宽度，确保放大的字能完整显示。")
+(defvar chunlian-line-step 2 "每隔几行挂一个字。")
+
+;; 【关键新增】：填充红条用的宽度。
+;; 因为汉字放大了 2.0 倍，宽度也是原来的两倍（相当于 4 个英文字母或 2 个全角空格的宽度）。
+;; 这里默认使用 2 个全角空格。如果不齐，可以改成 4 个半角空格 "    "
+(defvar chunlian-blank-string "　　" "间隙填充字符，用纯红底色填补上下字的空隙。")
+
+(defvar-local chunlian--overlays nil)
+(defvar-local chunlian--header-line-remap nil)
+
+(defun chunlian--apply-window-margins (win)
+  "Apply Chunlian margins to WIN while preserving previous margins."
+  (when (window-live-p win)
+    (unless (window-parameter win 'chunlian--saved-margins)
+      (set-window-parameter win 'chunlian--saved-margins (window-margins win)))
+    (set-window-parameter win 'chunlian--active t)
+    (set-window-margins win chunlian-margin-width chunlian-margin-width)))
+
+(defun chunlian--restore-window-margins (&optional win)
+  "Restore margins previously changed by Chunlian.
+When WIN is nil, restore every tracked window."
+  (dolist (target (if (window-live-p win)
+                      (list win)
+                    (window-list nil 'no-minibuffer)))
+    (when (and (window-live-p target)
+               (window-parameter target 'chunlian--active))
+      (let* ((saved (window-parameter target 'chunlian--saved-margins))
+             (left (car-safe saved))
+             (right (cdr-safe saved)))
+        (set-window-margins target left right)
+        (set-window-parameter target 'chunlian--active nil)
+        (set-window-parameter target 'chunlian--saved-margins nil)))))
+
+(defun chunlian--setup-overlays ()
+  "在 buffer 两侧设置静态的春联 overlays。"
+  ;; 确保只有在有窗口展示当前 buffer 时才进行渲染
+  (when-let* ((wins (get-buffer-window-list (current-buffer) nil t)))
+    (dolist (win wins)
+      (chunlian--apply-window-margins win))
+    (save-excursion
+      ;; 清除旧的 overlays
+      (mapc #'delete-overlay chunlian--overlays)
+      (setq chunlian--overlays nil)
+
+      (goto-char (point-min))
+      ;; 往下空几行，跳过 Dashboard 顶部
+      (forward-line chunlian-top-offset)
+
+      (let ((len (min (length chunlian-left) (length chunlian-right))))
+        (dotimes (i len)
+          (when (not (eobp))
+            ;; 1. 渲染带字的 Overlay
+            (let* ((start (line-beginning-position))
+                   (ov-l (make-overlay start start))
+                   (ov-r (make-overlay start start))
+                   (char-l (substring chunlian-left i (1+ i)))
+                   (char-r (substring chunlian-right i (1+ i))))
+
+              (overlay-put ov-l 'before-string
+                           (propertize " " 'display
+                                       `((margin left-margin)
+                                         ,(propertize char-l 'face 'chunlian-face))))
+              (overlay-put ov-r 'after-string
+                           (propertize " " 'display
+                                       `((margin right-margin)
+                                         ,(propertize char-r 'face 'chunlian-face))))
+
+              (push ov-l chunlian--overlays)
+              (push ov-r chunlian--overlays))
+
+            ;; 2. 【关键修复】如果不是最后一个字，填充红底的间隙
+            (when (< i (1- len))
+              (dotimes (step chunlian-line-step)
+                (when (= (forward-line 1) 0)
+                  ;; 仅在被作为“行距”跳过的行，塞入纯红空白块
+                  (when (< step (1- chunlian-line-step))
+                    (let* ((start (line-beginning-position))
+                           (ov-l (make-overlay start start))
+                           (ov-r (make-overlay start start))
+                           ;; 涂上纯红背景的空格
+                           (blank (propertize chunlian-blank-string 'face 'chunlian-blank-face)))
+
+                      (overlay-put ov-l 'before-string
+                                   (propertize " " 'display
+                                               `((margin left-margin) ,blank)))
+                      (overlay-put ov-r 'after-string
+                                   (propertize " " 'display
+                                               `((margin right-margin) ,blank)))
+
+                      (push ov-l chunlian--overlays)
+                      (push ov-r chunlian--overlays))))))))))))
+
+(defun chunlian--setup-display ()
+  "初始化春联显示。"
+  (unless chunlian--header-line-remap
+    (setq chunlian--header-line-remap
+          (face-remap-add-relative
+           'header-line
+           :inherit 'default
+           :background (face-background 'default nil t)
+           :foreground (face-foreground 'default nil t)
+           :box nil
+           :overline nil
+           :underline nil)))
+  (setq-local header-line-format
+        (list (propertize " " 'display `(space :align-to (- center ,(string-width chunlian-top))))
+              (propertize chunlian-top 'face 'chunlian-face)))
+  (chunlian--setup-overlays))
+
+(defun chunlian--clear-display ()
+  "清除春联显示。"
+  (setq-local header-line-format nil)
+  (when chunlian--header-line-remap
+    (face-remap-remove-relative chunlian--header-line-remap)
+    (setq chunlian--header-line-remap nil))
+  (chunlian--restore-window-margins)
+  (mapc #'delete-overlay chunlian--overlays)
+  (setq chunlian--overlays nil))
+
+(defun chunlian--maybe-disable ()
+  "Disable `chunlian-mode' when the dashboard buffer is no longer visible."
+  (when (and chunlian-mode
+             (derived-mode-p 'dashboard-mode)
+             (null (get-buffer-window (current-buffer) t)))
+    (chunlian-mode -1)))
+
+(defun +chunlian-schedule-visibility-check (&rest _)
+  "Coalesce repeated buffer-list changes before checking dashboard visibility."
+  (if-let* ((buffer (get-buffer "*dashboard*")))
+      (with-current-buffer buffer
+        (if chunlian-mode
+            (progn
+              (when (timerp +chunlian--visibility-timer)
+                (cancel-timer +chunlian--visibility-timer))
+              (setq +chunlian--visibility-timer
+                    (run-with-idle-timer
+                     0.1 nil
+                     (lambda ()
+                       (setq +chunlian--visibility-timer nil)
+                       (when (buffer-live-p buffer)
+                         (with-current-buffer buffer
+                           (when chunlian-mode
+                             (chunlian--maybe-disable))))))))
+          (when (timerp +chunlian--visibility-timer)
+            (cancel-timer +chunlian--visibility-timer))
+          (setq +chunlian--visibility-timer nil)))
+    (when (timerp +chunlian--visibility-timer)
+      (cancel-timer +chunlian--visibility-timer))
+    (setq +chunlian--visibility-timer nil)))
+
+(defun chunlian--cleanup-current-buffer ()
+  "Release Chunlian overlays, margins, and buffer-local hooks."
+  (remove-hook 'change-major-mode-hook #'chunlian--cleanup-current-buffer t)
+  (remove-hook 'kill-buffer-hook #'chunlian--cleanup-current-buffer t)
+  (chunlian--clear-display))
+
+;;;###autoload
+(define-minor-mode chunlian-mode
+  "一个简单的 Minor Mode，用于在 buffer 两侧固定显示春联。"
+  :lighter " 🧧"
+  (if chunlian-mode
+      (progn
+        (add-hook 'change-major-mode-hook #'chunlian--cleanup-current-buffer nil t)
+        (add-hook 'kill-buffer-hook #'chunlian--cleanup-current-buffer nil t)
+        (chunlian--setup-display))
+    (chunlian--cleanup-current-buffer)))
+
+
+;; 卸载旧的，挂载安全的 Hook
+(remove-hook 'dashboard-mode-hook #'chunlian-mode)
+(add-hook 'buffer-list-update-hook #'+chunlian-schedule-visibility-check)
+(add-hook 'buffer-list-update-hook #'+dashboard-refresh-on-entry)
+(add-hook 'dashboard-after-initialize-hook
+          (lambda ()
+            (chunlian-mode 1)
+            (let ((dashboard-buffer (current-buffer)))
+              (run-with-timer
+               0.1 nil
+               (lambda (buffer)
+                 (when (buffer-live-p buffer)
+                   (with-current-buffer buffer
+                     (when chunlian-mode
+                       (chunlian--setup-overlays)))))
+               dashboard-buffer))))
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+(provide 'ui/theme/config)
+
+;;; ui/theme/config.el ends here

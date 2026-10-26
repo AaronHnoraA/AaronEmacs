@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 ;; Run after init.el:
-;;   emacs ... -l test/lsp-live-smoke.el -f my/lsp-live-smoke-batch
+;;   emacs ... -l test/lsp-live-smoke.el -f +lsp-live-smoke-batch
 ;;
 ;; Unlike the isolated ERT suites, this check starts the installed clangd,
 ;; Python language server and JDTLS against disposable projects.  It is kept
@@ -11,11 +11,11 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'init-lsp)
+(require 'tools/lsp/config)
 (require 'imenu)
 (require 'seq)
 
-(defconst my/lsp-live-smoke-specs
+(defconst +lsp-live-smoke-specs
   '((c
      :file "main.c"
      :mode c-mode
@@ -37,15 +37,15 @@
      :marker "pom.xml"
      :marker-content "<project><modelVersion>4.0.0</modelVersion><groupId>test</groupId><artifactId>smoke</artifactId><version>1</version></project>\n"
      :server jdtls))
-  "Disposable projects used by `my/lsp-live-smoke-batch'.")
+  "Disposable projects used by `+lsp-live-smoke-batch'.")
 
-(defun my/lsp-live-smoke--write (file content)
+(defun +lsp-live-smoke--write (file content)
   "Write CONTENT to FILE, creating its parent directory."
   (make-directory (file-name-directory file) t)
   (with-temp-file file
     (insert content)))
 
-(defun my/lsp-live-smoke--initialized-p ()
+(defun +lsp-live-smoke--initialized-p ()
   "Return non-nil when the current buffer owns an initialized workspace."
   (and (bound-and-true-p lsp-managed-mode)
        (seq-some
@@ -56,10 +56,10 @@
 (defvar lsp--buffer-deferred)
 (declare-function lsp--init-if-visible "lsp-mode" ())
 
-(defun my/lsp-live-smoke--wait (seconds)
+(defun +lsp-live-smoke--wait (seconds)
   "Wait up to SECONDS for the current language server to initialize."
   (let ((deadline (+ (float-time) seconds)))
-    (while (and (not (my/lsp-live-smoke--initialized-p))
+    (while (and (not (+lsp-live-smoke--initialized-p))
                 (< (float-time) deadline))
       ;; `lsp-deferred' starts from an idle timer.  This loop runs inside the
       ;; startup evaluation, where a graphical Emacs never counts as idle, and
@@ -69,9 +69,9 @@
                  (fboundp 'lsp--init-if-visible))
         (lsp--init-if-visible))
       (sit-for 0.1))
-    (my/lsp-live-smoke--initialized-p)))
+    (+lsp-live-smoke--initialized-p)))
 
-(defun my/lsp-live-smoke--typed-imenu (index)
+(defun +lsp-live-smoke--typed-imenu (index)
   "Return flattened (LABEL . SYMBOL-KIND) pairs from Imenu INDEX."
   (let (result)
     (dolist (item index (nreverse result))
@@ -79,14 +79,14 @@
         (let ((label (car item)))
           (push (cons (substring-no-properties label)
                       (and (> (length label) 0)
-                           (get-text-property 0 'my/lsp-symbol-kind label)))
+                           (get-text-property 0 '+lsp-symbol-kind label)))
                 result)
           (when (imenu--subalist-p item)
             (setq result
-                  (nconc (nreverse (my/lsp-live-smoke--typed-imenu (cdr item)))
+                  (nconc (nreverse (+lsp-live-smoke--typed-imenu (cdr item)))
                          result))))))))
 
-(defun my/lsp-live-smoke--run-one (spec)
+(defun +lsp-live-smoke--run-one (spec)
   "Run one live language-server smoke SPEC and return its result plist."
   (let* ((language (car spec))
          (properties (cdr spec))
@@ -97,8 +97,8 @@
          result)
     (unwind-protect
         (progn
-          (my/lsp-live-smoke--write file (plist-get properties :content))
-          (my/lsp-live-smoke--write marker
+          (+lsp-live-smoke--write file (plist-get properties :content))
+          (+lsp-live-smoke--write marker
                                     (plist-get properties :marker-content))
           (setq buffer (find-file-noselect file))
           ;; `lsp-deferred' intentionally waits for a visible source buffer.
@@ -109,22 +109,22 @@
             (funcall (plist-get properties :mode))
             (setq-local lsp-auto-guess-root t
                         lsp-guess-root-without-session t
-                        my/language-server--manual-start t)
+                        +language-server--manual-start t)
             ;; Batch frames are not considered visible by every Emacs build;
             ;; the modified flag is the other supported `lsp-deferred'
             ;; visibility signal.
             (set-buffer-modified-p t)
-            (my/language-server-ensure)
+            (+language-server/ensure)
             (when (and (bound-and-true-p lsp--buffer-deferred)
                        (fboundp 'lsp--init-if-visible))
               (lsp--init-if-visible))
-            (let* ((ok (my/lsp-live-smoke--wait
+            (let* ((ok (+lsp-live-smoke--wait
                         (if (eq language 'java) 120 30)))
                    (imenu-result
                     (and ok
                          (condition-case error
                              (list :symbols
-                                   (my/lsp-live-smoke--typed-imenu
+                                   (+lsp-live-smoke--typed-imenu
                                     (imenu--make-index-alist t)))
                            (error
                             (list :error (error-message-string error)))))))
@@ -133,17 +133,17 @@
                      :language language
                      :ok ok
                      :managed (bound-and-true-p lsp-managed-mode)
-                     :runtime-state my/language-server-runtime-state
-                     :waiting-runtime my/language-server--waiting-for-runtime
-                     :waiting-direnv my/lsp-mode--waiting-for-direnv
+                     :runtime-state +language-server-runtime-state
+                     :waiting-runtime +language-server--waiting-for-runtime
+                     :waiting-direnv +lsp-mode--waiting-for-direnv
                      :imenu imenu-result
                      :contact (and (not ok)
-                                   (my/language-server-contact-available-p))
+                                   (+language-server-contact-available-p))
                      :workspaces
                      (mapcar
                       (lambda (workspace)
                         (list
-                         (my/language-server--lsp-workspace-id workspace)
+                         (+language-server--lsp-workspace-id workspace)
                          (ignore-errors (lsp--workspace-status workspace))))
                       (ignore-errors (lsp-workspaces)))
                      :messages
@@ -166,7 +166,7 @@
                          workspaces))))
             (dolist (workspace workspaces)
               (ignore-errors
-                (my/lsp-mode-shutdown-workspace workspace 'live-smoke)))
+                (+lsp-mode-shutdown-workspace workspace 'live-smoke)))
             (let ((deadline (+ (float-time) 3)))
               (while (and (seq-some #'process-live-p processes)
                           (< (float-time) deadline))
@@ -176,7 +176,7 @@
     result))
 
 ;;;###autoload
-(defun my/lsp-live-smoke-batch ()
+(defun +lsp-live-smoke-batch ()
   "Start real local servers for C, Python and Java, then exit for batch use."
   (let* ((requested
           (and-let* ((value (getenv "LSP_SMOKE_LANGUAGES")))
@@ -184,9 +184,9 @@
          (specs
           (if requested
               (seq-filter (lambda (spec) (memq (car spec) requested))
-                          my/lsp-live-smoke-specs)
-            my/lsp-live-smoke-specs))
-         (results (mapcar #'my/lsp-live-smoke--run-one specs)))
+                          +lsp-live-smoke-specs)
+            +lsp-live-smoke-specs))
+         (results (mapcar #'+lsp-live-smoke--run-one specs)))
     (dolist (result results)
       (princ (format "%S\n" result)))
     (kill-emacs (if (seq-every-p (lambda (result) (plist-get result :ok)) results)

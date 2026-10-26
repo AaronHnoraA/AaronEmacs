@@ -17,7 +17,7 @@
             (with-current-buffer graph (setq-local noema-research-graph--source source))
             (let* ((source-window (selected-window))
                    (initial (noema-research-graph-dock source))
-                   (right (my/noema-jupyter--output-split source-window)))
+                   (right (+noema-jupyter--output-split source-window)))
               (set-window-buffer right output)
               (should (eq (window-in-direction 'below source-window) initial))
               (delete-window initial)

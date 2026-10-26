@@ -24,29 +24,29 @@
 ;; =========================
 ;; 同步 shell PATH 到 Emacs（macOS 必备）
 ;; =========================
-(defun my/package-initialize-once ()
+(defun aaron-package-initialize-once ()
   "Initialize package.el if needed."
   (unless package--initialized
     (package-initialize)))
 
-(defun my/ensure-use-package-installed ()
+(defun aaron-ensure-use-package-installed ()
   "Install `use-package' when missing."
   (unless (package-installed-p 'use-package)
     (unless package-archive-contents
       (package-refresh-contents))
     (package-install 'use-package)))
 
-(my/package-initialize-once)
-(my/ensure-use-package-installed)
+(aaron-package-initialize-once)
+(aaron-ensure-use-package-installed)
 (require 'use-package)
 
-(defconst my/shell-environment-variables
+(defconst aaron-shell-environment-variables
   '("PATH" "MANPATH" "INFOPATH"
     "SSH_AUTH_SOCK" "SSH_AGENT_PID"
     "TEXINPUTS" "BIBINPUTS" "BSTINPUTS")
   "Environment variables copied from the login shell into Emacs.")
 
-(defun my/refresh-environment-from-shell ()
+(defun aaron/refresh-environment-from-shell ()
   "Refresh PATH-like environment variables from the user's login shell."
   (interactive)
   (when (eq system-type 'darwin)
@@ -56,7 +56,7 @@
       (pcase-dolist (`(,variable . ,value)
                      (ignore-errors
                        (exec-path-from-shell-getenvs
-                        my/shell-environment-variables)))
+                        aaron-shell-environment-variables)))
         (when (stringp value)
           (setenv variable value)))
       (setq exec-path
@@ -89,9 +89,9 @@
   (setq exec-path-from-shell-check-startup-files nil)
   (setq exec-path-from-shell-arguments '("-l"))
   :config
-  (my/refresh-environment-from-shell))
+  (aaron/refresh-environment-from-shell))
 
-(add-hook 'server-after-make-frame-hook #'my/refresh-environment-from-shell)
+(add-hook 'server-after-make-frame-hook #'aaron/refresh-environment-from-shell)
 ;; 关键：以后 use-package 默认都会自动安装缺失包
 ;(setq use-package-always-ensure t)
 
@@ -131,33 +131,22 @@
 ;; --debug-init implies `debug-on-error'.
 (setq debug-on-error init-file-debug)
 
+;; Modules are addressed by their path under lisp/ (`tools/lsp/config'), so
+;; only lisp/ itself, the core and the Remote library need to be on the path.
 (let* ((dir (locate-user-emacs-file "lisp"))
-       (remote-dir (expand-file-name "remote" dir))
-       (git-dir (expand-file-name "git" dir))
-       (roam-dir (expand-file-name "roam" dir))
-       (telescope-dir (expand-file-name "telescope" dir))
-       (tex-dir (expand-file-name "lang/tex" dir))
-       (beancount-dir (expand-file-name "lang/beancount" dir))
        (general-dir (locate-user-emacs-file "site-lisp/general.el"))
        (aaron-ui-dir (locate-user-emacs-file "site-lisp/aaron-ui"))
        (config-dir (locate-user-emacs-file "site-lisp/config"))
        (vendored-dir (locate-user-emacs-file "site-lisp/vendored")))
   (add-to-list 'load-path (file-name-as-directory dir))
   (add-to-list 'load-path (file-name-as-directory (expand-file-name "core" dir)))
-  (add-to-list 'load-path (file-name-as-directory remote-dir))
+  (add-to-list 'load-path (file-name-as-directory (expand-file-name "remote" dir)))
   (add-to-list 'load-path (file-name-as-directory config-dir))
-  (add-to-list 'load-path (file-name-as-directory git-dir))
-  (add-to-list 'load-path (file-name-as-directory roam-dir))
-  (add-to-list 'load-path (file-name-as-directory telescope-dir))
-  (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang" dir)))
-  (add-to-list 'load-path (file-name-as-directory tex-dir))
-  (add-to-list 'load-path (file-name-as-directory (expand-file-name "lang/lean" dir)))
-  (add-to-list 'load-path (file-name-as-directory beancount-dir))
   (add-to-list 'load-path (file-name-as-directory general-dir))
   (add-to-list 'load-path (file-name-as-directory aaron-ui-dir))
   (add-to-list 'load-path (file-name-as-directory vendored-dir)))
 
-(defun my/migrate-legacy-noema-state ()
+(defun aaron-migrate-legacy-noema-state ()
   "Move state from `var/aaronnote/', Noema's former name, into `var/noema/'.
 Entries already present under `var/noema/' are left in place.  Nothing
 moves while a Noema host started from the old layout is still running."
@@ -182,7 +171,7 @@ moves while a Noema host started from the old layout is still running."
         (delete-directory legacy)))))
 
 (condition-case err
-    (my/migrate-legacy-noema-state)
+    (aaron-migrate-legacy-noema-state)
   (error
    (display-warning 'init (format "Noema state migration failed: %s"
                                   (error-message-string err)))))
@@ -200,10 +189,10 @@ moves while a Noema host started from the old layout is still running."
               (error-message-string err))
       :error))))
 
-(require 'init-package-utils)
-(my/package-bootstrap-from-lock-if-needed)
+(require 'aaron-packages)
+(aaron-package-bootstrap-from-lock-if-needed)
 
-(defun my/reload-init ()
+(defun aaron/reload-init ()
   "Reload only the top-level Emacs init file.
 Already loaded modules are not re-evaluated; restart Emacs for module edits."
   (interactive)
@@ -221,7 +210,6 @@ Already loaded modules are not re-evaluated; restart Emacs for module edits."
 (require 'config)
 
 (require 'init-modules)
-(require 'init-compile)
 
 
 

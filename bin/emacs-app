@@ -46,7 +46,7 @@ running() { [ -n "$(/usr/bin/lsappinfo find bundleid=org.gnu.Emacs)" ]; }
 
 status() {
     local answer
-    if answer=$(client '(my/background-status)'); then
+    if answer=$(client '(+background-status)'); then
         echo "${answer//\"/}"
     elif running; then
         echo busy
@@ -68,7 +68,7 @@ wait_for_startup() {
     # The server can answer before the initial graphical frame is ready.
     local _
     for _ in $(seq 1 120); do
-        [ "$(client '(and (boundp (quote my/background--startup-done)) my/background--startup-done)' 2>/dev/null)" = t ] && return 0
+        [ "$(client '(and (boundp (quote +background--startup-done)) +background--startup-done)' 2>/dev/null)" = t ] && return 0
         sleep 0.5
     done
     return 1
@@ -79,9 +79,9 @@ start() {
         # An Emacs that is already running stays the way the user left it.
         running && return 0
         /usr/bin/open -g -j -a "$APP"
-        wait_for_server && client '(my/background-start-hidden)' >/dev/null
+        wait_for_server && client '(+background-start-hidden)' >/dev/null
     else
-        client '(my/background-show)' >/dev/null || /usr/bin/open -a "$APP"
+        client '(+background/show)' >/dev/null || /usr/bin/open -a "$APP"
     fi
 }
 
@@ -95,7 +95,7 @@ open_terminal() {
         echo 'Emacs did not complete startup in time' >&2
         return 1
     fi
-    "$CLIENT" --timeout=4 --eval '(progn (my/portal-open-new) nil)' >/dev/null
+    "$CLIENT" --timeout=4 --eval '(progn (+portal/open-new) nil)' >/dev/null
 }
 
 wait_for_exit() {
@@ -112,7 +112,7 @@ restart() {
     local was
     was=$(status)
     if [ "$was" != stopped ]; then
-        client '(my/background-quit)' >/dev/null
+        client '(+background/quit)' >/dev/null
         wait_for_exit || { echo "Emacs did not quit; it may be waiting for an answer" >&2; return 1; }
     fi
     if [ "$was" = background ]; then start --background; else start; fi
@@ -132,7 +132,7 @@ force_quit() {
 # Always JSON: an Emacs that does not answer still has a status.
 state() {
     local reply
-    if reply=$(client '(my/background-state)'); then
+    if reply=$(client '(+background-state)'); then
         printf '%s' "${reply//\"/}" | /usr/bin/base64 -D
     elif running; then
         echo '{"status":"busy"}'
@@ -164,15 +164,15 @@ queued_json() {
 }
 
 act() {
-    queued_json "(progn (unless (and (boundp 'my/background-action-protocol) (= my/background-action-protocol 1)) (user-error \"Emacs action protocol is outdated; reload init-background.el\")) (my/background-act \"$(encode "${1:?action id}")\" \"$(encode "${2:-}")\"))"
+    queued_json "(progn (unless (and (boundp '+background-action-protocol) (= +background-action-protocol 1)) (user-error \"Emacs action protocol is outdated; reload config/background/config.el\")) (+background-act \"$(encode "${1:?action id}")\" \"$(encode "${2:-}")\"))"
 }
 
 frame() {
-    queued_json "(progn (unless (and (boundp 'my/background-action-protocol) (= my/background-action-protocol 1)) (user-error \"Emacs action protocol is outdated; reload init-background.el\")) (my/background-frame-act \"$(encode "${1:?action}")\" \"$(encode "${2:-}")\"))"
+    queued_json "(progn (unless (and (boundp '+background-action-protocol) (= +background-action-protocol 1)) (user-error \"Emacs action protocol is outdated; reload config/background/config.el\")) (+background-frame-act \"$(encode "${1:?action}")\" \"$(encode "${2:-}")\"))"
 }
 
 result() {
-    queued_json "(my/background-result \"$(encode "${1:?request id}")\")"
+    queued_json "(+background-result \"$(encode "${1:?request id}")\")"
 }
 
 build() {
@@ -211,17 +211,17 @@ case "$command" in
     restart) restart ;;
     kill) force_quit ;;
     state) state ;;
-    show) client '(my/background-show)' >/dev/null || /usr/bin/open -a "$APP" ;;
-    hide) client '(my/background-hide)' >/dev/null ;;
-    toggle) client '(my/background-toggle)' >/dev/null || /usr/bin/open -a "$APP" ;;
-    frames) json '(my/background-frames)' ;;
+    show) client '(+background/show)' >/dev/null || /usr/bin/open -a "$APP" ;;
+    hide) client '(+background/hide)' >/dev/null ;;
+    toggle) client '(+background/toggle)' >/dev/null || /usr/bin/open -a "$APP" ;;
+    frames) json '(+background-frames)' ;;
     frame) frame "$@" ;;
-    actions) json '(my/background-actions)' ;;
+    actions) json '(+background-actions)' ;;
     act) act "$@" ;;
     result) result "$@" ;;
     terminal) open_terminal ;;
     status) status ;;
-    quit) client '(my/background-quit)' >/dev/null ;;
+    quit) client '(+background/quit)' >/dev/null ;;
     build) build ;;
     install) install ;;
     uninstall) uninstall ;;

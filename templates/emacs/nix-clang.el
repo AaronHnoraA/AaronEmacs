@@ -3,7 +3,7 @@
 ((nil . ((indent-tabs-mode . nil)
          (tab-width . 4)
          (fill-column . 100)
-         (my/project-local-settings
+         (+project-local-settings
           . (:env  (("CC"  . "clang")
                    ("CXX" . "clang++"))
              :task (("build"     . "nix-shell --run 'make CC=clang CXX=clang++'")

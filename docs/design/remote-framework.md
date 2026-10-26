@@ -43,7 +43,7 @@ workspace 时会按需创建；任务启动失败只回收此次新建的 worksp
 `REMOTE_TASK_E2E_TARGET=host make remote-task-live-smoke`；RPC 断线故障注入是
 `REMOTE_TASK_E2E_TARGET=host make remote-task-disconnect-smoke`。
 
-`init-remote.el` 只负责配置集成、UI 和启用 `remote-mode`。
+`remote/framework/config.el` 只负责配置集成、UI 和启用 `remote-mode`。
 
 外部 helper 与 Emacs 的统一控制面是 `remote-gateway`。它复用本框架的 channel、
 workspace ownership 与 reverse forwarding，使本地和 TRAMP/SSH target 使用同一套
@@ -193,7 +193,7 @@ HOME 猜测远端身份。
 `remote-canonicalize-emacs-file-name` 建立缓存身份，使用
 `remote-resolve-emacs-file-name` 得到可访问的文件名；需要 `find-file`、`dired`
 等访问时，调用 `remote-call-with-emacs-file-context`（配置层封装为
-`my/open-resolve-file-name` 和 `my/open-visit-file`）。这种来源的原生绝对路径
+`aaron-open-resolve-file-name` 和 `aaron-open-visit-file`）。这种来源的原生绝对路径
 始终属于客户端；显式 `/fs:` 或 TRAMP 路径保留指定机器；相对路径才继承给定
 目录的机器。缓存键与跳转记录应保存完整逻辑身份，不能只保存 target-native
 路径或工作目录字符串。
@@ -543,7 +543,7 @@ workspace 关闭和 framework reset 会取消仍在等待的任务。
 direnv 取消该 buffer 的刷新和 export waiter，已排队的 retry/completion 在发现 `.envrc`
 之前检查标志；否则保留的未保存文件会通过 `locate-dominating-file` 重新建立连接。
 Copilot 取消该 buffer 的延迟启动并关闭其 mode，不停止服务其它 buffer 的共享客户端。
-用户显式执行 `my/language-server-ensure`、`my/lsp-mode-ensure` 或
+用户显式执行 `+language-server/ensure`、`+lsp/mode-ensure` 或
 `direnv-update-environment` 可恢复该 buffer 的自动启动。
 返回值包含 `:workspaces`、`:sessions`、`:buffers` 计数和 `:kept-buffers` 名称列表。
 
@@ -795,7 +795,7 @@ handler 接管。
 自己必须在本机执行的辅助程序（SSH、stdio bridge、协议 proxy）。三条规则由框架
 保证，consumer 和 backend 不再各自防御：
 
-- adapter 可以合法地把 `executable-find` 重定向到目标（`init-lsp.el` 就这样让
+- adapter 可以合法地把 `executable-find` 重定向到目标（`tools/lsp/config.el` 就这样让
   上游 `lsp-clients-*` 的裸 `executable-find` 变成 target-correct）。
   `remote-client-executable-find` 在查询期间清空 `remote-current-adapter-id`，
   因此它永远回答本机；否则 backend 会拿到一个目标端路径再在本机 `vfork`，
@@ -845,7 +845,7 @@ lsp-mode 自带 client）会漏掉项目环境提供的全部工具。
 向 target 进程写一次的代价是同一类契约：`:process-write-cost` 为 `direct`（Emacs
 自己拥有的管道）或 `queued`（每次写都经 backend 的传输转发），未声明按 `queued`
 处理。按键级写入的 consumer 用 `(remote-process-write-cost FILE)` 决定是否合并相邻
-写入，例如 `init-lsp-change-batch.el` 的 didChange 合批。
+写入，例如 `tools/lsp/change-batch.el` 的 didChange 合批。
 
 这些查询（以及 `remote-file-watch-cost`、`remote-client-file-name`、mtime 容差）
 按 buffer、按命令被调用，所以它们与文件句柄共用带校验的路由复用
@@ -926,7 +926,7 @@ consumer 用 `remote-register-ancestor-markers` 登记自己要找的名字，�
 inotify 流）、`process`（每个 watch 一个目标进程，shell TRAMP 的 `inotifywait`）或
 `none`；`:mtime-compare` 为 `exact` 或 `window`。consumer 用
 `(remote-file-watch-cost FILE)` 决定是否给每个 buffer 挂通知，例如
-`init-doom-extra.el` 的 auto-revert 只在默认排除规则会跳过该 buffer、而路由为
+`config/default/config.el` 的 auto-revert 只在默认排除规则会跳过该 buffer、而路由为
 `push` 时才让它跟随外部修改（VS Code 的 watcher 模型：无轮询，远端
 `git checkout` 后已打开的 buffer 约 0.2s 内刷新）。逻辑单文件 watch 在 `push`
 路由上直接注册到 backend，不再先做一次 `inotifywait` 查找、也不为每个 buffer 起
@@ -960,7 +960,7 @@ Eglot 得到显式 process factory，因此不会因为 project root 是远端�
 
 ACP agent（agent-shell 的所有入口：Noema Run、popup、`C-c A a`、裸
 `M-x agent-shell`）是 target-placement consumer，且不自带任何 remote 分支。
-`init-ai-ide.el` 把 `agent-shell-cwd` 规范成 `/fs:TARGET:/path`，再经
+`tools/agent/config.el` 把 `agent-shell-cwd` 规范成 `/fs:TARGET:/path`，再经
 `remote-client-file-name` 取本机可直接访问的写法：`local` 得到原生目录，远端 target
 保持逻辑名。acp.el 以 `:file-handler` 调用官方 `make-process`，远端时进入 `/fs:` 句柄
 和 `remote-make-process`，agent 可执行文件、cwd、环境都由 target 投影；agent-shell 的

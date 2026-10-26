@@ -3,7 +3,7 @@
 # key: exercisee
 # group: Noema blocks
 # --
-#+begin exercise ${1:number} {#`(my/noema-new-id "block")`}
+#+begin exercise ${1:number} {#`(noema-new-id "block")`}
 ${2:Problem.}
 #+end exercise
 $0

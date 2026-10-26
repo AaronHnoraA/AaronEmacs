@@ -7,7 +7,7 @@
 ;; restyles all 23+ menus automatically.
 ;;
 ;; Load order: require after aaron-ui is on load-path.
-;; `init-tools.el' requires this module.
+;; `tools/menus/config.el' requires this module.
 
 ;;; Code:
 

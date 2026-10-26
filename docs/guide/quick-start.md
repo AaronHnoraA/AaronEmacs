@@ -173,7 +173,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - Python 语言服务器
   这套配置走 `eglot`，你需要自己装对应 server
 - `languagetool`（Homebrew）
-  文本 buffer 与 Noema 默认在输入停顿后仅检查带上下文的可视区域，并按段落缓存结果：编辑后只重发被改动的段落。问题按 LanguageTool 的类别着色——拼写红、语法橙、标点黄、用词紫、排版青、风格蓝——Emacs 与 Noema 一致。Emacs 中结果进入统一 Flymake 诊断面（不显示行尾文案），光标停留或悬停时 echo area 显示「类别: 说明 → 建议」，`M-n` / `M-p` 跳转，手动检查按类别汇总数量；右键菜单提供替换/忽略此处/加入词典/关闭规则。Noema 中单击下划线打开卡片：按类别着色的类别名、说明、建议按钮，以及忽略/加入词典/关闭规则。“忽略”按规则与所在行上下文记忆，别处编辑不会让它重现。加入的词写入共享的 `etc/prose-accepted-words.txt`，关闭的规则写入共享的 `etc/prose-disabled-rules.txt`，两端都读这两个文件；`M-x my/languagetool-enable-rule` 重新启用规则。`C-c i g` / `Cmd-Shift-C` 手动检查，NAS 失败时仅手动检查回退本地 CLI；`C-u C-c i g` 检查整个 Emacs buffer，`C-c i a` 修正当前位置，`C-c i A` 从当前问题中选择，`C-c i x` 清除到下一次编辑。Noema 的 `Tools > LanguageTool` 可管理 NAS、语言、检查级别、性能档位、超时、实时检测和手动 CLI fallback
+  文本 buffer 与 Noema 默认在输入停顿后仅检查带上下文的可视区域，并按段落缓存结果：编辑后只重发被改动的段落。问题按 LanguageTool 的类别着色——拼写红、语法橙、标点黄、用词紫、排版青、风格蓝——Emacs 与 Noema 一致。Emacs 中结果进入统一 Flymake 诊断面（不显示行尾文案），光标停留或悬停时 echo area 显示「类别: 说明 → 建议」，`M-n` / `M-p` 跳转，手动检查按类别汇总数量；右键菜单提供替换/忽略此处/加入词典/关闭规则。Noema 中单击下划线打开卡片：按类别着色的类别名、说明、建议按钮，以及忽略/加入词典/关闭规则。“忽略”按规则与所在行上下文记忆，别处编辑不会让它重现。加入的词写入共享的 `etc/prose-accepted-words.txt`，关闭的规则写入共享的 `etc/prose-disabled-rules.txt`，两端都读这两个文件；`M-x +languagetool/enable-rule` 重新启用规则。`C-c i g` / `Cmd-Shift-C` 手动检查，NAS 失败时仅手动检查回退本地 CLI；`C-u C-c i g` 检查整个 Emacs buffer，`C-c i a` 修正当前位置，`C-c i A` 从当前问题中选择，`C-c i x` 清除到下一次编辑。Noema 的 `Tools > LanguageTool` 可管理 NAS、语言、检查级别、性能档位、超时、实时检测和手动 CLI fallback
 - `vscode-html-language-server`
   用于 HTML / Vue HTML
 
@@ -189,7 +189,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - `zsh`
 - `ssh`
 - `~/.ssh/config`
-  `my/portal-ssh` 会优先读这里的 Host
+  `+portal/ssh` 会优先读这里的 Host
 
 ## 5. 字体依赖
 
@@ -207,7 +207,7 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 
 ### AI 助手
 
-[lisp/init-ai-ide.el](../../lisp/init-ai-ide.el) 提供 Noema 的统一 AI/agent 入口。
+[lisp/tools/agent/config.el](../../lisp/tools/agent/config.el) 提供 Noema 的统一 AI/agent 入口。
 gptel、agent-shell、acp.el、shell-maker、Magent 及现有 CLI 兼容代码均完整内化在
 `site-lisp/noema/upstream/`，不再从 `package.el`、VC package 或旧 workbench 目录加载。
 
@@ -251,7 +251,7 @@ Claude/Codex 的兼容源码仍在 Noema `upstream/`，但不再绑定全局快�
 
 编译和清理现在统一走：
 
-- `M-x my/compile-board`
+- `M-x +compile/board`
 - `SPC c b`
 
 ## 7. 启动后先确认什么
@@ -260,7 +260,7 @@ Claude/Codex 的兼容源码仍在 Noema `upstream/`，但不再绑定全局快�
 
 1. 主题和字体是否正常
 2. `C-x C-f` / `C-x b` / `C-s` 是否符合预期
-3. `M-x my/portal-ssh` 是否能读到 SSH 主机
+3. `M-x +portal/ssh` 是否能读到 SSH 主机
 4. `C-c C-'` 是否能打开 claude-code-ide 菜单（需要 claude CLI 已安装）
 5. `C-x g` 是否能打开 Magit
 
