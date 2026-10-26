@@ -108,6 +108,7 @@ the client."
      '(c-mode c++-mode c-ts-mode c++-ts-mode objc-mode)
      #'+cpp-clangd-command
      :server-id '+clangd
+     :upstream-id 'clangd
      :priority 1
      :label "clangd"
      :executables '("clangd")

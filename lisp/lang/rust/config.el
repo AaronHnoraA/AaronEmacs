@@ -39,6 +39,7 @@
        (list (or (+language-server-executable-find "rust-analyzer")
                  "rust-analyzer")))
      :server-id '+rust-analyzer
+     :upstream-id 'rust-analyzer
      :priority 1
      :label "rust-analyzer"
      :executables '("rust-analyzer")

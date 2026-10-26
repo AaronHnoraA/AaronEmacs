@@ -196,6 +196,7 @@ target 上一个来回可能有几百毫秒，每次选中补全、每按一次�
   （lsp-mode #3498），但它只认 server-id `ts-ls`；本配置的 TypeScript client 是
   `+typescript`，这个补丁不生效。是否会插入不完整的文本需要用真实
   typescript-language-server 验证；补丁本身是同步请求，验证后再决定是否接入。
+  接入时可以用同一个 `:upstream-id`（`ts-ls`）机制，而不是在语言模块里另写判断。
 - **G-L1** 关掉一个 workspace 的最后一个 buffer 时，`lsp-keep-workspace-alive`
   为 nil 的 server 立即关闭；紧接着打开同一项目的另一个文件（`H-q` 后再打开、
   批量关闭再打开）要重新启动 server，远程 target 和 Lean 一类重启很贵。Doom
@@ -371,6 +372,13 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 `.vue`）为 `+vue`（`vue-language-server`，`:tsdk` 取 target 上 `tsc` 所在的
 TypeScript 包），Shell、LaTeX、Rust 分别为 `+bash`、`+latex`、`+rust-analyzer`。
 `set-language-server!` 没给 `:server-id` 时用 `+MODE`。
+
+lsp-mode 对少数 server 有按自己 client 的 server id 分派的行为（目前是 hover
+提炼成 echo area 签名：`rust-analyzer` 去掉开头的内存布局注释，`clangd` 取声明）。
+本配置用自己的 id 注册这些 server，所以用 `:upstream-id` 声明 lsp-mode 对应的 id
+（`+rust-analyzer` → `rust-analyzer`，`+clangd` → `clangd`），共享 adapter 的
+`+language-server--upstream-signature-a` 在分派时换成 upstream id。新增 route 如果
+lsp-mode 本来有同一 server 的 client，也要带上 `:upstream-id`。
 
 新增 route 完成前检查：
 

@@ -589,5 +589,21 @@
         (kill-buffer buffer))
       (delete-file file))))
 
+(ert-deftest +language-server-upstream-id-reaches-lsp-mode-signature ()
+  "A server registered under its own id gets lsp-mode's upstream signature."
+  (require 'lsp-mode)
+  (require 'lsp-rust)
+  (require 'lang/rust/config)
+  (should (eq (alist-get '+rust-analyzer +language-server-upstream-ids)
+              'rust-analyzer))
+  (should (eq (alist-get '+clangd +language-server-upstream-ids) 'clangd))
+  (let ((contents (lsp-make-markup-content
+                   :kind "markdown"
+                   :value "```rust\n// size = 16 (0x10), align = 0x8\npub struct Point\n```")))
+    ;; rust-analyzer's own extractor skips the memory-layout comment.
+    (should (equal (substring-no-properties
+                    (lsp-clients-extract-signature-on-hover contents '+rust-analyzer))
+                   "pub struct Point"))))
+
 (provide 'init-lsp-ui-tests)
 ;;; init-lsp-ui-tests.el ends here

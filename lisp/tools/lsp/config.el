@@ -11,6 +11,7 @@
 ;;; Code:
 
 (require 'config)
+(require 'aaron-lib)
 
 (require 'aaron-ui)
 (require 'cl-lib)
@@ -1204,11 +1205,27 @@ directories do not schedule a preload.  Zero disables the folder preload."
 (add-hook 'kill-buffer-hook #'+language-server-performance--leave-buffer)
 (add-hook 'change-major-mode-hook #'+language-server-performance--leave-buffer)
 
+(defvar +language-server-upstream-ids nil
+  "Alist of (SERVER-ID . UPSTREAM-ID) from `set-language-server!'.
+lsp-mode keys some per-server behaviour on its own client's server id, such
+as how a hover is reduced to a signature for rust-analyzer and clangd.  This
+config registers those servers under its own ids, so that behaviour is
+looked up under the upstream id instead.")
+
+(defun +language-server--upstream-signature-a (fn contents server-id)
+  "Call FN on CONTENTS as lsp-mode's own client for SERVER-ID would."
+  (funcall fn contents
+           (or (alist-get server-id +language-server-upstream-ids) server-id)))
+
+(after! lsp-mode
+  (advice-add 'lsp-clients-extract-signature-on-hover :around
+              #'+language-server--upstream-signature-a))
+
 (cl-defun set-language-server!
     (modes program &key server-id feature executables placement label source
            note priority multi-root activation-fn initialization-options
            initialized-fn notification-handlers request-handlers
-           server-id-suffix)
+           server-id-suffix upstream-id)
   "Register a language server for MODES and record maintenance metadata.
 
 MODES is a major mode or list of major modes.  PROGRAM is the server
@@ -1222,7 +1239,10 @@ FEATURE, when non-nil, must be loadable before the server may start.
 EXECUTABLES, LABEL, SOURCE, and NOTE feed the Hub and Doctor.  Every
 server is sent its settings after `initialized'
 \(`+language-server--announce-configuration'); INITIALIZED-FN runs after
-that.  The remaining keys are passed through to `make-lsp-client\='.
+that.  UPSTREAM-ID names lsp-mode's own client for the same server
+\(`rust-analyzer\=', `clangd\='), so lsp-mode's per-server behaviour keyed
+by that id still applies (`+language-server-upstream-ids').  The remaining
+keys are passed through to `make-lsp-client\='.
 
 This is the only supported way to declare a server; never call
 `lsp-register-client\=' or push onto client lists directly."
@@ -1270,6 +1290,7 @@ This is the only supported way to declare a server; never call
           (list :notification-handlers notification-handlers))
         (when request-handlers (list :request-handlers request-handlers))))))
     (ignore server-id-suffix)
+    (setf (alist-get server-id +language-server-upstream-ids) upstream-id)
     (setq +language-server-program-metadata
           (cons (list :modes modes
                       :program program

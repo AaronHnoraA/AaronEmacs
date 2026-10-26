@@ -260,3 +260,4 @@ Doom 的做法：
 | `lang/cc` | `find-sibling-rules` 在源文件和头文件之间切换 | **吸收**：本配置的规则只连接源文件和 `_test`/`_benchmark`，`SPC f o` 从 `foo.cpp` 到不了 `foo.h`；补上同目录 `.c/.cc/.cpp/.cxx` ↔ `.h/.hh/.hpp/.hxx` |
 | `lang/cc` | `.h` 按内容判断 C/C++/ObjC、ffap 头文件路径、doom 缩进风格、cmake/glsl/cuda | **不收**：`.h` 走 Emacs 的 `c-or-c++-mode`；缩进风格不改；头文件跳转走 clangd |
 | `lang/python` | `python3` 作解释器、`Pipfile`/`.flake8` 为 conf、pytest 键、nose、pyvenv、pip-requirements | **已有或不收**：解释器由项目 toolchain profile 决定；`Pipfile`、`.flake8` 已是 `conf-mode`；测试走 `test-nearest` |
+| `lang/rust` | rust-analyzer 悬停签名的提炼方法、`rust-indent-method-chain`、rustic | **吸收并推广**：发现本配置用 `+rust-analyzer`、`+clangd` 注册，lsp-mode 按 `rust-analyzer`、`clangd` 分派的签名提炼从未生效（Rust 类型的 echo area 显示 `// size = …` 注释行）。`set-language-server!` 加 `:upstream-id`，共享 adapter 按它分派；Doom 自己那段 rust 签名解析依赖 rust-analyzer 输出格式，不收 |
