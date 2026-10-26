@@ -95,6 +95,29 @@ With PARENTS-ONLY, copy their de-duplicated parent directories."
              (if parents-only "directories" "paths"))
     text))
 
+(declare-function +project-current-root "tools/project/config" ())
+(declare-function +project-canonical-path "tools/project/config" (path))
+
+(defun +files/copy-project-paths ()
+  "Copy selected paths relative to the current project root.
+From Doom's `+default/yank-buffer-path-relative-to-project'.  Both sides are
+compared in the project's canonical spelling, so a native buffer name and a
+`/fs:' project root still give a relative path."
+  (interactive)
+  (let* ((root (or (and (fboundp '+project-current-root)
+                        (+project-current-root))
+                   (user-error "Not in a project")))
+         (base (file-name-as-directory (+project-canonical-path root)))
+         (paths (mapcar (lambda (path)
+                          (file-relative-name (+project-canonical-path path) base))
+                        (+files-selected-paths)))
+         (text (string-join paths "\n")))
+    (kill-new text)
+    (message "Copied %s" (if (cdr paths)
+                             (format "%d project paths" (length paths))
+                           text))
+    text))
+
 (defun +dired--parse-du-kib (output)
   "Return the total KiB reported by `du -sk' OUTPUT."
   (let ((total 0))
@@ -157,6 +180,8 @@ With PARENTS-ONLY, copy their de-duplicated parent directories."
 
 (defalias 'file-copy-paths #'+files/copy-paths
   "Copy selected file paths; with a prefix, copy their parent directories.")
+(defalias 'file-copy-project-paths #'+files/copy-project-paths
+  "Copy selected file paths relative to the current project root.")
 (defun file-copy-parent-paths ()
   "Copy the parent directories of the selected files."
   (interactive)
@@ -173,7 +198,8 @@ With PARENTS-ONLY, copy their de-duplicated parent directories."
     ("O" "open in new frame" file-open-new-frame)]
    ["Paths"
     ("y" "copy selected paths" file-copy-paths)
-    ("Y" "copy parent directories" file-copy-parent-paths)]
+    ("Y" "copy parent directories" file-copy-parent-paths)
+    ("r" "copy project-relative paths" file-copy-project-paths)]
    ["Dired"
     ("s" "selected size" dired-selected-size)
     ("v" "selection buffer" dired-selection)]])

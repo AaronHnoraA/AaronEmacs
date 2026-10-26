@@ -28,6 +28,8 @@
 
 - 复制 region 覆盖的 Dired 行、marked files、光标下文件或当前 buffer 文件路径。
 - 一次复制多个路径时用换行连接，也可只复制去重后的父目录。
+- 复制相对当前项目根的路径（`file-copy-project-paths`，菜单 `r`）；项目根是
+  `/fs:` 名字、buffer 是本机路径时也按同一写法比较。
 - 在本地或远程 target 上执行 `du -sk`，显示 Dired 选择项的总大小。
 - 从选择项建立一个独立的临时 Dired 列表，原目录视图保持完整；在临时列表按原生
   `q` 返回原目录并释放临时 buffer。

@@ -87,10 +87,11 @@
 - `M-x diagnostics-menu` / `code-actions-menu`
   诊断菜单汇集 Flymake 项目列表、当前 buffer 面板和筛选跳转；代码动作菜单汇集
   LSP 编辑、符号查看和构建。对应 `SPC c ?` / `SPC c .`、`H-d` / `H-e`。
-- `M-x file-copy-paths` / `file-copy-parent-paths` / `dired-selected-size` / `dired-selection`
+- `M-x file-copy-paths` / `file-copy-parent-paths` / `file-copy-project-paths` / `dired-selected-size` / `dired-selection`
   `file-menu` 的 `o` 打开文件、`O` 在新 frame 打开，均使用现有文件入口；
   菜单中还有路径和 Dired 动作。`SPC f .` 与主命令面板的“files”打开同一菜单。
-  选择项临时列表按 `q` 回到原目录并自动释放。
+  选择项临时列表按 `q` 回到原目录并自动释放。`file-copy-project-paths`（菜单 `r`）
+  复制相对当前项目根的路径。
   图片裁剪用 `M-x image-crop`，也在编辑菜单中。
 - `M-x telescope`
   `telescope` 统一搜索面板

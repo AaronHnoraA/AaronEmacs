@@ -172,4 +172,28 @@
         (kill-buffer buffer))
       (delete-directory root t))))
 
+(ert-deftest +files-copy-project-paths-relative-to-root ()
+  "Paths are copied relative to the project, whatever spelling the root has."
+  (require 'emacs/files/config)
+  (require 'tools/project/config)
+  (let* ((dir (file-name-as-directory (file-truename (make-temp-file "proj-" t))))
+         (file (expand-file-name "src/a.el" dir))
+         (kill-ring nil))
+    (unwind-protect
+        (progn
+          (make-directory (file-name-directory file) t)
+          (write-region "" nil file nil 'silent)
+          (dolist (root (list dir (concat "/fs:local:" dir)))
+            (cl-letf (((symbol-function '+project-current-root) (lambda () root)))
+              (with-temp-buffer
+                (setq buffer-file-name file)
+                (should (equal (+files/copy-project-paths) "src/a.el"))
+                (setq buffer-file-name nil))))
+          (cl-letf (((symbol-function '+project-current-root) #'ignore))
+            (with-temp-buffer
+              (setq buffer-file-name file)
+              (should-error (+files/copy-project-paths) :type 'user-error)
+              (setq buffer-file-name nil))))
+      (delete-directory dir t))))
+
 ;;; init-state-files-tests.el ends here
