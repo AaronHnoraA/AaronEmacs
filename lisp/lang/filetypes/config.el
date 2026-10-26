@@ -104,7 +104,7 @@
 
 ;; Structured data and configuration.
 (+filetypes--prefer-mode
- '("\\.json\\'" "\\.jsonc\\'" "\\.jsonl\\'")
+ '("\\.json\\'" "\\.jsonc\\'" "\\.jsonl\\'" "\\.js\\(?:hint\\|cs\\)rc\\'")
  (+filetypes--treesit-mode-or 'json-ts-mode 'json 'js-json-mode))
 (+filetypes--prefer-mode
  '("\\.ya?ml\\'")
@@ -127,7 +127,7 @@
  '("\\.html?\\'" "\\.xhtml\\'")
  (+filetypes--treesit-mode-or 'html-ts-mode 'html 'html-mode))
 (+filetypes--prefer-mode
- '("\\.xml\\'" "\\.xsd\\'" "\\.rss\\'" "\\.atom\\'" "\\.plist\\'"
+ '("\\.xml\\'" "\\.xsd\\'" "\\.xslt?\\'" "\\.rss\\'" "\\.atom\\'" "\\.plist\\'"
    "\\.svg\\'")
  #'nxml-mode)
 (+filetypes--prefer-mode

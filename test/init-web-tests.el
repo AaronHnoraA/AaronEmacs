@@ -88,7 +88,10 @@
       (dolist (file '("/p/flake.lock" "/p/composer.lock" "/p/Pipfile.lock"))
         (should (eq (mode file) json)))
       (should-not (eq toml json))
-      (should (eq (mode "/p/uv.lock") toml)))))
+      (should (eq (mode "/p/uv.lock") toml))
+      ;; From Doom's lang/json and lang/data.
+      (should (eq (mode "/p/.jshintrc") json))
+      (should (eq (mode "/p/style.xslt") (mode "/p/data.xml"))))))
 
 (provide 'init-web-tests)
 ;;; init-web-tests.el ends here

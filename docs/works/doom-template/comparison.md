@@ -288,3 +288,6 @@ Doom 的做法：
 | `tools/pdf` | HiDPI 缩放、关掉 imagemagick、Evil 光标、关闭时清理注释 buffer、`q` 杀 buffer、epdfinfo 缺失时退回、midnight 颜色热更新、saveplace-pdf-view | **已有或不收**：缩放已开；光标见前面；`q` 与关闭行为以窗口生命周期为准；其余没有使用者 |
 | `tools/editorconfig` | 有 `indent_*` 时不让 dtrt-indent 覆盖、trim 走 ws-butler、排除 Office 文件 | **已有**：`config/default` 里同样处理 |
 | `ui/popup`、`ui/tabs`、`ui/window-select` | Doom 自己的 popup 系统、centaur-tabs、ace-window 键与范围 | **不收**：第 6 节已记；ace-window 已有 |
+| `lang/json`、`lang/data` | `.jshintrc`/`.jscsrc` 为 JSON、`.xslt` 为 XML | **吸收**：之前这两类文件打开没有模式；`.plist`、`pom.xml`、`.xsd`、`.rss` 已是 `nxml-mode` |
+| `lang/json`、`lang/yaml`、`lang/data`、`lang/graphviz`、`lang/plantuml`、`lang/scala` | json-mode 的路径/布尔键、`Procfile` 当 YAML、nxml 自动补全与 xmllint、csv 键、graphviz 预览键、plantuml jar 下载、scala 缩进与 REPL | **不收**：tree-sitter 模式已覆盖；`Procfile` 不是 YAML；其余是键位与 Doom 自己的格式化/REPL 体系 |
+| `tools/debugger`、`editor/snippets`、`checkers/grammar`、`ui/nav-flash`、`app/calendar` | dape 断点目录、ESC 中止 snippet、选区包裹 snippet、LanguageTool 路径、writegood、跳转闪烁点、calfw 键 | **已有或不收**：dape 状态目录启动时建立；snippet 与闪烁是手感；语法检查已用 LanguageTool；日历键以本配置为准 |
