@@ -146,8 +146,8 @@ instead of `xref-item' values."
                   file))
          (cand (copy-sequence match)))
     (add-text-properties
-     0 1 `(my-symbol-file ,file
-                          my-symbol-line ,line
+     0 1 `(+symbols-file ,file
+                          +symbols-line ,line
                           consult--prefix-group ,group)
      cand)
     cand))
@@ -156,8 +156,8 @@ instead of `xref-item' values."
   "Return the marker stored by file-line candidate CAND.
 Use OPENER to open the file temporarily when provided."
   (when-let* ((file (and (stringp cand)
-                         (get-text-property 0 'my-symbol-file cand)))
-              (line (get-text-property 0 'my-symbol-line cand)))
+                         (get-text-property 0 '+symbols-file cand)))
+              (line (get-text-property 0 '+symbols-line cand)))
     (consult--marker-from-line-column
      (aaron-open-call-with-file-context
       file (or opener #'find-file-noselect))
@@ -186,7 +186,7 @@ Use OPENER to open the file temporarily when provided."
            (let ((completion-styles '(flex orderless basic))
                  (completion-category-defaults nil)
                  (completion-category-overrides
-                  `((,(or category 'my-symbol-file-line)
+                  `((,(or category '+symbols-file-line)
                      (styles . (flex orderless basic))))))
              (consult--read
               candidates
@@ -194,7 +194,7 @@ Use OPENER to open the file temporarily when provided."
               :history (or history '+symbols-file-line-history)
               :require-match t
               :sort nil
-              :category (or category 'my-symbol-file-line)
+              :category (or category '+symbols-file-line)
               :group #'consult--prefix-group
               :state (+symbols--file-line-preview-state)
               :preview-key '(:debounce 0.15 any)))))
@@ -217,7 +217,7 @@ Use OPENER to open the file temporarily when provided."
                      (or (xref-location-line loc) 0)
                      (or (xref-item-summary xref) ""))))
     (add-text-properties
-     0 1 `(my-symbol-xref ,xref
+     0 1 `(+symbols-xref ,xref
                           consult--prefix-group ,group)
      cand)
     cand))
@@ -308,12 +308,12 @@ Use OPENER to open the file temporarily when provided."
                   :add-history initial
                   :require-match t
                   :sort nil
-                  :category 'my-workspace-symbol
+                  :category '+workspace-symbol
                   :group #'consult--prefix-group
                   :state (+symbols--workspace-preview-state)
                   :preview-key +symbols-preview-key
                   :lookup (apply-partially #'consult--lookup-prop
-                                           'my-symbol-xref))))
+                                           '+symbols-xref))))
       (xref-pop-to-location xref))))
 
 (defun +symbols--workspace-capable-p ()

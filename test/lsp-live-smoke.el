@@ -22,14 +22,14 @@
      :content "int main(void) { return 0; }\n"
      :marker "compile_commands.json"
      :marker-content "[]\n"
-     :server my-clangd)
+     :server +clangd)
     (python
      :file "main.py"
      :mode python-mode
      :content "value: int = 1\n"
      :marker "pyproject.toml"
      :marker-content "[project]\nname = \"lsp-smoke\"\nversion = \"0.0.0\"\n"
-     :server my-python)
+     :server +python)
     (java
      :file "src/main/java/Smoke.java"
      :mode java-mode

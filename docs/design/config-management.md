@@ -18,16 +18,16 @@
 
 ```elisp
 ;; 1. 在对应模块里注册
-(config-register 'my-new-setting
+(config-register '+new-setting
   :group 'mymodule :type 'boolean
   :doc "什么时候启用这个功能")
 
 ;; 2. 把初始值写入 etc/config-store.el（通过 config-set 或直接编辑）
-M-x config-set RET my-new-setting RET t
+M-x config-set RET +new-setting RET t
 ;; 或者直接在 etc/config-store.el 里的 alist 里加一行：
-;;   (my-new-setting . t)
+;;   (+new-setting . t)
 
-;; 3. 不要再写 (setq my-new-setting t)
+;; 3. 不要再写 (setq +new-setting t)
 ```
 
 如果是复杂配置（非简单变量），用 `config-register-file` 注册专属的
@@ -77,8 +77,12 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
 
 ### 原生 Customize
 
+- Dashboard 顶部的 `[config]` 打开 ETAF Config 手册浮窗：左侧目录跳转，顶部
+  可打开注册项说明或原生 Customize。TTY 打开本 Markdown 原文件。
 - `M-x config-board` 打开 `config` 的原生 Customize group。
 - `M-x config-dispatch`，或 leader `SPC h c`，打开调度菜单。
+- `M-x config-documentation-panel` 查看单个注册项的说明；调度菜单按 `d`。
+- `M-x config-manual-panel` 打开本手册；调度菜单按 `m`。
 - `M-x customize-group RET config RET` 也会显示同一批注册项。
 
 Customize 里的 `Apply` 只做运行时生效，不写 `custom.el`；`Save` 通过

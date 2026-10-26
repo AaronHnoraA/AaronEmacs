@@ -70,8 +70,8 @@
      :message "installs a VC package directly; use `aaron-package-ensure-vc' or `aaron-package-register-vc'"
      :exempt-files ("core/aaron-packages.el" "bootstrap.el" "package-lock.el"))
     (:id legacy-name
-     :regexp "^(def\\(?:un\\|var\\|custom\\|macro\\|alias\\|const\\) my/"
-     :message "defines a legacy `my/' name; modules use `+DOMAIN-' and `+DOMAIN/COMMAND'")
+     :regexp "\\_<my[-/]\\(?:\\sw\\|\\s_\\)"
+     :message "uses a legacy `my/' or `my-' name; modules use `+DOMAIN-' and `+DOMAIN/COMMAND'")
     (:id config-setq
      :regexp aaron-doctor--config-setq-regexp
      :when aaron-doctor--load-time-p

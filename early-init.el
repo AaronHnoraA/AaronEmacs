@@ -278,8 +278,8 @@ both call it."
   "Reveal GUI frames hidden by the early startup boundary.
 This is idempotent and deliberately ignores daemon/emacsclient frames."
   (dolist (frame (frame-list))
-    (when (frame-parameter frame 'my-startup-hidden)
-      (set-frame-parameter frame 'my-startup-hidden nil)
+    (when (frame-parameter frame 'aaron-startup-hidden)
+      (set-frame-parameter frame 'aaron-startup-hidden nil)
       (make-frame-visible frame)
       (redraw-frame frame))))
 
@@ -301,11 +301,11 @@ This is idempotent and deliberately ignores daemon/emacsclient frames."
            (not (aaron-gui-graphic-frame-exists-p)))
   (setq initial-frame-alist
         (cons '(visibility . nil)
-              (cons '(my-startup-hidden . t)
+              (cons '(aaron-startup-hidden . t)
                     (assq-delete-all
                      'visibility
                      (assq-delete-all
-                      'my-startup-hidden initial-frame-alist))))))
+                      'aaron-startup-hidden initial-frame-alist))))))
 
 (add-hook 'emacs-startup-hook #'aaron-reveal-startup-frames 100)
 

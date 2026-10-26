@@ -212,7 +212,7 @@ may create that frame before the reveal runs, so re-assert it here."
     (when (and (frame-live-p frame)
                (display-graphic-p frame)
                (not (frame-parameter frame 'visibility)))
-      (set-frame-parameter frame 'my-startup-hidden nil)
+      (set-frame-parameter frame 'aaron-startup-hidden nil)
       (make-frame-visible frame)
       (redraw-frame frame))))
 

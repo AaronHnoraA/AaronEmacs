@@ -167,7 +167,7 @@ hidden again once startup has finished."
       (+background/hide t)
     ;; `aaron-reveal-startup-frames' shows only frames that carry this mark.
     (dolist (frame (frame-list))
-      (set-frame-parameter frame 'my-startup-hidden nil))
+      (set-frame-parameter frame 'aaron-startup-hidden nil))
     (add-hook 'window-setup-hook #'+background--hide-all-h 90))
   nil)
 

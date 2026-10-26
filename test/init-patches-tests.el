@@ -12,7 +12,7 @@
 (require 'aaron-patches)
 
 (ert-deftest +patch-derived-type-registers-legacy-properties ()
-  (let* ((name (make-symbol "my-test-derived-type"))
+  (let* ((name (make-symbol "aaron-test-derived-type"))
          (expander (lambda () '(satisfies integerp))))
     (cl--define-derived-type name expander #'integerp '(integer))
     (should (eq (get name 'cl-deftype-handler) expander))

@@ -53,7 +53,7 @@
        (list (or (+language-server-executable-find "bash-language-server")
                  "bash-language-server")
              "start"))
-     :server-id 'my-bash
+     :server-id '+bash
      :priority 1
      :label "bash-language-server"
      ;; Shell buffers are everywhere; only claim one when the server is

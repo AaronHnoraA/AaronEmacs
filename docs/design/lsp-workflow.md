@@ -298,7 +298,7 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 (set-language-server!
  '(some-mode another-mode)
  '("some-language-server" "--stdio")
- :server-id 'my-some-language-server
+ :server-id '+some-language-server
  :executables '("some-language-server")
  :placement 'target
  :label "Some language server")
@@ -321,8 +321,8 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 
 当前优先保证的三条 route：
 
-- C/C++：唯一 `my-clangd` client；
-- Python：唯一 `my-python` client，按 target 环境依次选择
+- C/C++：唯一 `+clangd` client；
+- Python：唯一 `+python` client，按 target 环境依次选择
   `pyright-langserver`、`basedpyright-langserver`，必要时 provision Pyright，再回退到
   `pylsp`、`jedi-language-server`；
 - Java：唯一 `jdtls` owner，每个 project 独立 `-data` 与 configuration，remote

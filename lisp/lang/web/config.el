@@ -22,7 +22,7 @@
                   "vscode-html-language-server")
                  "vscode-html-language-server")
              "--stdio"))
-     :server-id 'my-html
+     :server-id '+html
      :priority 1
      :label "vscode-html-language-server"
      :executables '("vscode-html-language-server")

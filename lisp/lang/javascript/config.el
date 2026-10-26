@@ -114,7 +114,7 @@
     (when (boundp target)
       (set (make-local-variable target) value))))
 
-(defun my-js-ts-indent-setup ()
+(defun +javascript-indent-setup-h ()
   "统一设置 JS/TS buffer 的缩进."
   (setq-local indent-tabs-mode nil)
   (setq-local tab-width +js-indent-offset)
@@ -126,16 +126,16 @@
   (+js-set-local-variable 'evil-shift-width +js-indent-offset))
 
 ;; 将上述设置挂载到各个 JS 模式的 Hook 上
-(add-hook 'js-mode-hook #'my-js-ts-indent-setup)
-(add-hook 'js2-mode-hook #'my-js-ts-indent-setup)
-(add-hook 'js-jsx-mode-hook #'my-js-ts-indent-setup)
-(add-hook 'js-ts-mode-hook #'my-js-ts-indent-setup)
-(add-hook 'js-base-mode-hook #'my-js-ts-indent-setup)
+(add-hook 'js-mode-hook #'+javascript-indent-setup-h)
+(add-hook 'js2-mode-hook #'+javascript-indent-setup-h)
+(add-hook 'js-jsx-mode-hook #'+javascript-indent-setup-h)
+(add-hook 'js-ts-mode-hook #'+javascript-indent-setup-h)
+(add-hook 'js-base-mode-hook #'+javascript-indent-setup-h)
 
 ;; 将上述设置挂载到各个 TS 模式的 Hook 上
-(add-hook 'typescript-mode-hook #'my-js-ts-indent-setup)
-(add-hook 'typescript-ts-mode-hook #'my-js-ts-indent-setup)
-(add-hook 'tsx-ts-mode-hook #'my-js-ts-indent-setup) ; 补充处理 TSX 文件的模式
+(add-hook 'typescript-mode-hook #'+javascript-indent-setup-h)
+(add-hook 'typescript-ts-mode-hook #'+javascript-indent-setup-h)
+(add-hook 'tsx-ts-mode-hook #'+javascript-indent-setup-h) ; 补充处理 TSX 文件的模式
 
 (dolist (hook '(js-mode-hook js2-mode-hook js-ts-mode-hook js-jsx-mode-hook
                 typescript-mode-hook typescript-ts-mode-hook tsx-ts-mode-hook))
@@ -151,7 +151,7 @@
                   "typescript-language-server")
                  "typescript-language-server")
              "--stdio"))
-     :server-id 'my-typescript
+     :server-id '+typescript
      :priority 1
      :label "typescript-language-server"
      :executables '("typescript-language-server")

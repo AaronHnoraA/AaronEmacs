@@ -122,7 +122,7 @@ Explicit Remote bookmark files and relative paths retain their own placement."
 
 (defun +bookmark--kind (bookmark)
   "Return BOOKMARK's kind."
-  (or (alist-get 'my-kind (cdr bookmark))
+  (or (alist-get '+bookmark-kind (cdr bookmark))
       'bookmark))
 
 (defun +bookmark--file (bookmark)
@@ -183,7 +183,7 @@ Explicit Remote bookmark files and relative paths retain their own placement."
     (beginning-of-line)
     (let* ((name (+bookmark--line-name))
            (record (bookmark-make-record-default nil nil (point))))
-      (setf (alist-get 'my-kind record) 'line)
+      (setf (alist-get '+bookmark-kind record) 'line)
       (bookmark-store name record nil)
       (bookmark-save)
       (message "Saved line bookmark: %s" name))))

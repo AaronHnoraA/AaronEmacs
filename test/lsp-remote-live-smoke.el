@@ -265,7 +265,7 @@ even though the event has already arrived."
      :content "int main(void) { return missing_symbol; }\n"
      :marker "compile_commands.json"
      :marker-content "[]\n"
-     :server my-clangd
+     :server +clangd
      :timeout 45)
     (python
      :file "main.py"
@@ -284,7 +284,7 @@ even though the event has already arrived."
       "textDocument/definition" "textDocument/references"
       "textDocument/documentSymbol" "textDocument/rename"
       "textDocument/codeAction")
-     :server my-python
+     :server +python
      :timeout 60)
     (java
      :file "src/main/java/Smoke.java"

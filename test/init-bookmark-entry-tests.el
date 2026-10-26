@@ -37,7 +37,7 @@
     (let* ((position (point))
            (record (list (cons 'filename buffer-file-name)
                          (cons 'position position)
-                         (cons 'my-kind 'line)))
+                         (cons '+bookmark-kind 'line)))
            (entry (cons "line second" record))
            (bookmark-alist (list entry)))
       (cl-letf (((symbol-function 'bookmark-maybe-load-default-file)

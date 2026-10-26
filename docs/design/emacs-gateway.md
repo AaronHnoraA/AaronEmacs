@@ -96,7 +96,7 @@ Lisp form，返回最后一个值的 JSON 表示与打印表示：
   "id": 2,
   "method": "emacs.eval",
   "params": {
-    "source": "(setq my-value 40) (+ my-value 2)"
+    "source": "(setq +value 40) (+ +value 2)"
   }
 }
 ```

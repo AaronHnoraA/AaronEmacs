@@ -418,7 +418,7 @@ Digestif has no TexLab configuration section, so return nil for it."
   (when-let* ((selection (+latex-language-server-selection)))
     ;; Keep lsp-mode's stock TexLab/Digestif clients from racing the target-
     ;; aware client registered below.
-    (setq-local lsp-enabled-clients '(my-latex))
+    (setq-local lsp-enabled-clients '(+latex))
     (when-let* ((configuration
                  (+latex-language-server-workspace-configuration selection))
                 ((fboundp '+language-server-set-workspace-configuration)))
@@ -440,7 +440,7 @@ texlab is preferred; digestif is the fallback."
     (set-language-server!
      +latex-language-server-modes
      #'+latex-language-server-command
-     :server-id 'my-latex
+     :server-id '+latex
      :priority 1
      :label "texlab/digestif"
      :activation-fn

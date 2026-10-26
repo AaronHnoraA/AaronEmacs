@@ -392,9 +392,9 @@ target PATH) rather than whatever happens to be installed on the client."
   "Install base Python workspace settings before the server starts."
   ;; Keep one target-aware Python route authoritative.  lsp-mode eagerly
   ;; requires every installed client package at first startup, so an installed
-  ;; lsp-pyright would otherwise outrank `my-python' and bypass the shared
+  ;; lsp-pyright would otherwise outrank `+python' and bypass the shared
   ;; Remote command, environment and workspace-configuration contracts.
-  (setq-local lsp-enabled-clients '(my-python))
+  (setq-local lsp-enabled-clients '(+python))
   (when (fboundp '+language-server-set-workspace-configuration)
     (+language-server-set-workspace-configuration
      (+python-language-server-workspace-configuration))))
@@ -407,7 +407,7 @@ target PATH) rather than whatever happens to be installed on the client."
     (set-language-server!
      '(python-mode python-ts-mode)
      #'+python-language-server-command
-     :server-id 'my-python
+     :server-id '+python
      :priority 1
      :label "Target Python language server"
      :executables '("pyright-langserver"

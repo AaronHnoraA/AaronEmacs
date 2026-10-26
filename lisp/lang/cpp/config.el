@@ -86,7 +86,7 @@ the client."
 
 (defun +cpp-language-server-setup-h ()
   "Keep the target-aware clangd client authoritative in C-family buffers."
-  (setq-local lsp-enabled-clients '(my-clangd)))
+  (setq-local lsp-enabled-clients '(+clangd)))
 
 (add-hook 'c-mode-common-hook #'+cpp-language-server-setup-h)
 (add-hook 'c-ts-mode-hook #'+cpp-language-server-setup-h)
@@ -99,7 +99,7 @@ the client."
     (set-language-server!
      '(c-mode c++-mode c-ts-mode c++-ts-mode objc-mode)
      #'+cpp-clangd-command
-     :server-id 'my-clangd
+     :server-id '+clangd
      :priority 1
      :label "clangd"
      :executables '("clangd")
@@ -216,15 +216,15 @@ the client."
 
 
 
-(defun my-c-unified-indent-setup ()
+(defun +cpp-indent-setup-h ()
   (setq-local c-basic-offset 2)
   (setq-local c-ts-mode-indent-offset 2)
   (setq-local indent-tabs-mode nil)
   (local-set-key (kbd "RET") #'newline-and-indent))
 
-(add-hook 'c-mode-common-hook #'my-c-unified-indent-setup)
-(add-hook 'c-ts-mode-hook #'my-c-unified-indent-setup)
-(add-hook 'c++-ts-mode-hook #'my-c-unified-indent-setup)
+(add-hook 'c-mode-common-hook #'+cpp-indent-setup-h)
+(add-hook 'c-ts-mode-hook #'+cpp-indent-setup-h)
+(add-hook 'c++-ts-mode-hook #'+cpp-indent-setup-h)
 
 
 

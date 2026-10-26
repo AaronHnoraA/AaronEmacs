@@ -38,7 +38,7 @@
      (lambda ()
        (list (or (+language-server-executable-find "rust-analyzer")
                  "rust-analyzer")))
-     :server-id 'my-rust-analyzer
+     :server-id '+rust-analyzer
      :priority 1
      :label "rust-analyzer"
      :executables '("rust-analyzer")

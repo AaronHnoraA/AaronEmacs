@@ -53,7 +53,7 @@ IDLE-DELAY overrides the captured Python Company delay for this probe only."
                                                       'initialized)
                                                   (eq (+language-server--lsp-workspace-id
                                                        candidate)
-                                                      'my-python)))
+                                                      '+python)))
                                            (lsp-workspaces))))))
                 (accept-process-output nil 0.05))
               (unless workspace

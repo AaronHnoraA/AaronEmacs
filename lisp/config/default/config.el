@@ -518,12 +518,12 @@ stat-ing every hidden remote file after each agent turn."
 (defconst +ibuffer-base-formats
   '((mark modified read-only locked
           " " (name 30 30 :left :elide)
-          " " (my-frame 9 9 :left :elide)
+          " " (+frame 9 9 :left :elide)
           " " (size 9 -1 :right)
           " " (mode 18 18 :left :elide)
           " " (vc-status 10 10 :left)
-          " " my-filename-and-process)
-    (mark " " (name 30 -1) " " (my-frame 9 9 :left :elide)
+          " " +filename-and-process)
+    (mark " " (name 30 -1) " " (+frame 9 9 :left :elide)
           " " filename))
   "Aaron's compact Ibuffer columns without graphical icons.")
 
@@ -531,13 +531,13 @@ stat-ing every hidden remote file after each agent turn."
   '((mark modified read-only locked
           " " (icon 2 2)
           (name 28 28 :left :elide)
-          " " (my-frame 9 9 :left :elide)
+          " " (+frame 9 9 :left :elide)
           " " (size 9 -1 :right)
           " " (mode 18 18 :left :elide)
           " " (vc-status 10 10 :left)
-          " " my-filename-and-process)
+          " " +filename-and-process)
     (mark " " (icon 2 2) (name 28 -1)
-          " " (my-frame 9 9 :left :elide) " " filename))
+          " " (+frame 9 9 :left :elide) " " filename))
   "Aaron's Ibuffer columns with Material SVG file icons.")
 
 (defun +ibuffer-buffer-frame-ids (buffer)
@@ -585,7 +585,7 @@ stat-ing every hidden remote file after each agent turn."
 (add-hook 'ibuffer-mode-hook #'+ibuffer-material-icons-setup)
 
 (with-eval-after-load 'ibuffer
-  (define-ibuffer-column my-frame
+  (define-ibuffer-column +frame
     (:name "Frame" :inline t)
     (+ibuffer-frame-tags buffer))
 
@@ -603,7 +603,7 @@ stat-ing every hidden remote file after each agent turn."
         (symbol-name backend)
       ""))
 
-  (define-ibuffer-column my-filename-and-process
+  (define-ibuffer-column +filename-and-process
     (:name "Filename/Process" :inline t)
     (cond
      ((and (fboundp 'aaron-ibuffer-noema-file-name)

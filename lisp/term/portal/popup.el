@@ -509,7 +509,7 @@ DIRECTORY is used only when creating a buffer."
 (defun +portal-popup--windows (&optional buffer)
   "Return popup windows, across frames for BUFFER or on the selected frame."
   (seq-filter
-   (lambda (window) (window-parameter window 'my-portal-popup))
+   (lambda (window) (window-parameter window '+portal-popup))
    (if buffer
        (get-buffer-window-list buffer nil t)
      (window-list (selected-frame) 'no-minibuf))))
@@ -548,9 +548,9 @@ DIRECTORY is used only when creating a buffer."
                          (slot . 1)
                          (window-height . ,(+portal-popup--effective-window-height)))))))
       (set-window-buffer window buffer)
-      (set-window-parameter window 'my-portal-popup t)
+      (set-window-parameter window '+portal-popup t)
       (set-window-parameter
-       window 'my-portal-fixed
+       window '+portal-fixed
        (buffer-local-value '+portal-popup-fixed buffer))
       (set-window-parameter window 'no-delete-other-windows t)
       (window-preserve-size window nil t)
@@ -605,7 +605,7 @@ DIRECTORY is used only when creating a buffer."
   "Return ordinary windows on the selected frame."
   (seq-remove (lambda (window)
                 (or (window-minibuffer-p window)
-                    (window-parameter window 'my-portal-popup)))
+                    (window-parameter window '+portal-popup)))
               (window-list (selected-frame) 'nomini)))
 
 (defun +portal-popup--choose-normal-window (prompt)
@@ -632,7 +632,7 @@ DIRECTORY is used only when creating a buffer."
 From a popup tab, use ace-window to choose the ordinary source window."
   (interactive)
   (let* ((+portal-popup--displaying t)
-         (source (if (window-parameter (selected-window) 'my-portal-popup)
+         (source (if (window-parameter (selected-window) '+portal-popup)
                      (+portal-popup--choose-normal-window
                       "Move buffer into popup")
                    (selected-window)))
@@ -679,7 +679,7 @@ From a popup tab, use ace-window to choose the ordinary source window."
           (progn
             (set-window-buffer popup next)
             (set-window-parameter
-             popup 'my-portal-fixed
+             popup '+portal-fixed
              (buffer-local-value '+portal-popup-fixed next)))
         (with-selected-frame (window-frame popup)
           (+portal/hide-popup))))
@@ -885,7 +885,7 @@ With prefix ARG, create a new popup portal and switch to it."
                   (setq-local +portal-popup-fixed (not +portal-popup-fixed))
                   +portal-popup-fixed))
          (window (+portal-popup--show-buffer buffer)))
-    (set-window-parameter window 'my-portal-fixed fixed)
+    (set-window-parameter window '+portal-fixed fixed)
     (select-window window)
     (message "Popup portal %s %s"
              (buffer-name buffer)

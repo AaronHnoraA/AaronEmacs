@@ -21,7 +21,7 @@
    (lambda (workspace)
      (and (eq (lsp--workspace-status workspace) 'initialized)
           (eq (+language-server--lsp-workspace-id workspace)
-              'my-python)))
+              '+python)))
    (lsp-workspaces)))
 
 (defun +lsp-existing-file-live-probe--restart-test

@@ -113,7 +113,7 @@ When adding a module:
   binding one key) before adding a binding.
 - Keep `M-x module-doctor` clean for the module you touch: a policy hit
   (`file-remote-p` branching, `"local"` comparisons, `global-set-key`, raw
-  `package-vc-install`, legacy `my/` names) is either fixed
+  `package-vc-install`, legacy `my/` or `my-` names) is either fixed
   or, when the rule itself allows it, marked on its line with
   `aaron-allow: ID`.
 - Use `declare-function` for cross-module calls when byte compilation needs it.
@@ -129,8 +129,8 @@ When adding a module:
   or `aaron-first-buffer-hook`, buffer and window changes to
   `aaron-switch-buffer-hook` / `aaron-switch-window-hook`, settings that must
   see file and directory locals to `MODE-local-vars-hook`, and idle
-  preloading to `aaron-load-packages-incrementally`.  There are no `my/`
-  names any more: a non-command `+X` keeps the domain word its name starts
+  preloading to `aaron-load-packages-incrementally`.  There are no `my/` or
+  `my-` names any more: a non-command `+X` keeps the domain word its name starts
   with (`+noema-roam-root`), a command is `+DOMAIN/ACTION`
   (`+git/board`, `+language-server/doctor`), and the core is `aaron-` /
   `aaron/`.  Renaming a symbol updates every caller in the same change,

@@ -168,7 +168,7 @@
   "Equal roots and client IDs must not merge distinct kernel runtimes."
   (+runtime-test-with-registry
     (let* ((root "/fs:local:/work/project/")
-           (client (make-lsp--client :server-id 'my-python))
+           (client (make-lsp--client :server-id '+python))
            (ordinary (make-lsp--workspace :root root :client client))
            (first (make-lsp--workspace :root root :client client))
            (second (make-lsp--workspace :root root :client client))

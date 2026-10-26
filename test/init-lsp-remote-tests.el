@@ -155,7 +155,7 @@
                      (lambda (value) (push value canceled)))
                     ((symbol-function '+lsp-mode--workspace-key)
                      (lambda (_workspace)
-                       '(my-python "/fs:test:/project/")))
+                       '(+python "/fs:test:/project/")))
                     ((symbol-function
                       '+language-server--restart-workspace-from-source)
                      (lambda (_workspace source reason)
@@ -217,7 +217,7 @@
                      (lambda (_workspace) 'initialized))
                     ((symbol-function '+lsp-mode--workspace-key)
                      (lambda (_workspace)
-                       '(my-python "/fs:test:/project/")))
+                       '(+python "/fs:test:/project/")))
                     ((symbol-function 'remote-workspace-resources)
                      (lambda (_owner) (list resource)))
                     ((symbol-function 'remote-workspace-resource-kind)
@@ -432,7 +432,7 @@
                         +lsp-remote-change--eligible t)
             (goto-char (point-min)))
           (cl-letf (((symbol-function '+language-server--lsp-workspace-id)
-                     (lambda (_workspace) 'my-python))
+                     (lambda (_workspace) '+python))
                     ((symbol-function 'lsp--workspace-cmd-proc)
                      (lambda (_workspace) current))
                     ((symbol-function 'lsp--workspace-status)
@@ -519,7 +519,7 @@
                     ((symbol-function 'lsp--workspace-status)
                      (lambda (_workspace) 'initialized))
                     ((symbol-function '+language-server--lsp-workspace-id)
-                     (lambda (_workspace) 'my-python))
+                     (lambda (_workspace) '+python))
                     ((symbol-function 'company--should-begin)
                      (lambda () t))
                     ((symbol-function 'company-idle-begin)
@@ -597,7 +597,7 @@
                 ((symbol-function 'lsp--workspace-status)
                  (lambda (_workspace) 'initialized))
                 ((symbol-function '+language-server--lsp-workspace-id)
-                 (lambda (_workspace) 'my-python)))
+                 (lambda (_workspace) '+python)))
         (puthash workspace (list :process process :state 'ready)
                  +lsp-completion--prewarm-state)
         (should (= (+lsp-completion--company-idle-delay) 0.12))
@@ -1259,7 +1259,7 @@ must cover it without a `-tramp' counterpart."
         (((symbol-function 'remote-workspace-track-route)
           (lambda (workspace &rest _arguments) workspace))
          ((symbol-function '+language-server--lsp-workspace-id)
-          (lambda (_workspace) 'my-python)))
+          (lambda (_workspace) '+python)))
       (let ((lsp--cur-workspace first))
         (+language-server-register-lsp-resource))
       (let ((lsp--cur-workspace second))
@@ -1270,11 +1270,11 @@ must cover it without a `-tramp' counterpart."
       (should
        (remote-workspace-find-resource
         owner 'lsp
-        '(lsp-mode my-python "/fs:local:/tmp/project/" "kernel-one")))
+        '(lsp-mode +python "/fs:local:/tmp/project/" "kernel-one")))
       (should
        (remote-workspace-find-resource
         owner 'lsp
-        '(lsp-mode my-python "/fs:local:/tmp/project/" "kernel-two"))))))
+        '(lsp-mode +python "/fs:local:/tmp/project/" "kernel-two"))))))
 
 (ert-deftest lsp-mode-target-only-root-uses-remote-watch-capability ()
   "Target-only roots keep watcher parity when Remote can own the watches."
@@ -1351,12 +1351,12 @@ must cover it without a `-tramp' counterpart."
 
 (ert-deftest lsp-mode-skips-unneeded-client-package-load-on-startup ()
   "An already registered whitelist must not initialize all stock clients."
-  (let ((lsp-enabled-clients '(my-clangd))
+  (let ((lsp-enabled-clients '(+clangd))
         (lsp-clients (make-hash-table :test #'eq))
         (lsp--client-packages-required nil)
         (+lsp-mode--starting-client-selection t)
         (loads 0))
-    (puthash 'my-clangd 'registered lsp-clients)
+    (puthash '+clangd 'registered lsp-clients)
     (+lsp-mode--require-client-packages-on-client-a
      (lambda () (cl-incf loads)))
     (should (= loads 0))
@@ -1365,7 +1365,7 @@ must cover it without a `-tramp' counterpart."
       (+lsp-mode--require-client-packages-on-client-a
        (lambda () (cl-incf loads))))
     (should (= loads 1))
-    (remhash 'my-clangd lsp-clients)
+    (remhash '+clangd lsp-clients)
     (+lsp-mode--require-client-packages-on-client-a
      (lambda () (cl-incf loads)))
     (should (= loads 2))))
@@ -1800,7 +1800,7 @@ analyzes anything without this notification."
 
 (ert-deftest language-server-logical-support-check-restores-client-slot ()
   (require 'lsp-java)
-  (dolist (server-id '(my-clangd my-python jdtls))
+  (dolist (server-id '(+clangd +python jdtls))
     (let* ((client (gethash server-id lsp-clients))
            (original (lsp--client-remote? client)))
       (should client)
@@ -1856,14 +1856,14 @@ analyzes anything without this notification."
   (with-temp-buffer
     (setq major-mode 'c-mode)
     (+cpp-language-server-setup-h)
-    (should (equal lsp-enabled-clients '(my-clangd))))
+    (should (equal lsp-enabled-clients '(+clangd))))
   (with-temp-buffer
     (setq major-mode 'python-mode)
     (cl-letf (((symbol-function
                 '+language-server-set-workspace-configuration)
                #'ignore))
       (+python-language-server-setup-h))
-    (should (equal lsp-enabled-clients '(my-python))))
+    (should (equal lsp-enabled-clients '(+python))))
   (should-not lsp-auto-register-remote-clients)
   (should (memq #'+language-server-ensure-deferred prog-mode-hook)))
 

@@ -277,7 +277,7 @@ accepts a new file name exactly.  Command+Shift+Return opens a new frame."
         '((buffer (styles . (orderless flex)))
           (file (styles . (basic partial-completion orderless)))
           (imenu (styles . (orderless substring)))
-          (my-workspace-symbol (styles . (orderless flex basic)))
+          (+workspace-symbol (styles . (orderless flex basic)))
           (lsp-capf (styles . (orderless basic partial-completion)))
           (kill-ring (styles . (orderless substring))))))
 

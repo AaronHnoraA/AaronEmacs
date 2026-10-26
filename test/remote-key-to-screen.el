@@ -203,7 +203,7 @@
                                                  'initialized)
                                              (eq (+language-server--lsp-workspace-id
                                                   candidate)
-                                                 'my-python)))
+                                                 '+python)))
                                       (lsp-workspaces)))))
                 (accept-process-output nil 0.05))
               (unless workspace (error "Python LSP initialization timed out"))

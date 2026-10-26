@@ -234,7 +234,8 @@
      '(("config.el" . "(defun +checked-f () (file-remote-p default-directory))
 (defun +checked-g () (file-remote-p x)) ; aaron-allow: file-remote-p
 ;; (file-remote-p in-a-comment)
-(defun my/legacy () nil)")
+(defun my/legacy () nil)
+(setq-local x 'my-property)")
        ("doctor.el" . "(warn! \"needs %s\" \"tool\")
 (assert! nil \"broken %d\" 1)")))
     (aaron! :t1 checked)
@@ -242,7 +243,7 @@
       (should (equal (plist-get r :warnings) '("needs tool")))
       (should (equal (plist-get r :errors) '("broken 1")))
       (should (equal (sort (mapcar #'car (plist-get r :violations)) #'string<)
-                     '(file-remote-p legacy-name))))))
+                     '(file-remote-p legacy-name legacy-name))))))
 
 (ert-deftest aaron-modules-doctor-exempts-categories ()
   (aaron-modules-tests--with-registry
