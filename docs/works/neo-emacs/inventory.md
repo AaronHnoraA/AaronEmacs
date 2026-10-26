@@ -310,3 +310,10 @@
 ### org（2026-10-26，已完成）
 
 - **不收**：用户不使用 Org，Org 相关的外观、工作流、导出、babel、roam 设置全部不吸收。
+
+### eglot、java、rime、translate、elfeed，以及他自己没启用的模块（2026-10-26，已完成）
+
+- **不收**：
+  - 用户不写 Java，不用鼠须管，不用翻译和 RSS。因此 eglot/java（JDT、Maven、lombok、栈帧跳转、MyBatis 跳转、XML 里执行 SQL）、rime、translate、elfeed 全部不收。
+  - 他自己没启用的 telega、eredis、alpha、addspace、windows（popwin）、modeline（awesome-tray）也不收。
+  - eglot 模块里与 Java 无关的部分同样不收：corfu/kind-icon（本配置用 Company），`vertico-map` 的 `C-j/C-k` 和那些 `;` 键（键位以本配置为准），`flymake-no-changes-timeout 30`（会把诊断推迟 30 秒）。
