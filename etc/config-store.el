@@ -15,37 +15,33 @@
    (lean-dev-log-enabled) (lean-info-window-width . 84)
    (+pdf-sync-parent-search-depth . 3) (+pdf-view-auto-refresh-interval . 1.2)
    (+flymake-diagnostic-at-point-delay . 0.45)
-   (+language-server-defer-shutdown . 3)
-   (+language-server-booster-required)
+   (+language-server-defer-shutdown . 3) (+language-server-booster-required)
    (+language-server-visible-render-margin . 8)
    (+language-server-performance-gcmh-factor . 2)
    (+language-server-performance-read-process-output-max . 1048576)
    (lsp-restart . auto-restart) (+noema-close-emacs-markdown-buffer . t)
    (+noema-markdown-default-surface . app) (+noema-roam-help-key . "?")
-   (+noema-agenda-exclude-patterns)
-   (+noema-agenda-capture-templates)
+   (+noema-agenda-exclude-patterns) (+noema-agenda-capture-templates)
    (+noema-icon-file . "/Users/hc/.emacs.d/assets/icons/Noema.svg")
    (+dir-locals-template-root . "/Users/hc/.emacs.d/templates/emacs")
    (+health-executables "rg" "git" "python3" "node" "cargo" "go" "just" "make"
-                          "latexmk" "gdb" "lldb-dap" "dlv" "gh" "bazelisk"
-                          "buildifier")
-   (+maintenance-state-paths "package-lock.el" "etc" "var/amx-save.el"
-                               "var/dape" "var/org" "var/prescient-save.el"
-                               "var/project" "var/project-list.el"
-                               "var/projectile" "var/recentf-save.el"
-                               "var/save-place.el" "var/savehist.el" "var/session"
-                               "var/transient" "var/tramp/persistency.el"
-                               "var/treemacs")
+                        "latexmk" "gdb" "lldb-dap" "dlv" "gh" "bazelisk"
+                        "buildifier")
+   (+maintenance-state-paths "package-lock.el" "etc" "var/amx-save.el" "var/dape"
+                             "var/org" "var/prescient-save.el" "var/project"
+                             "var/project-list.el" "var/projectile"
+                             "var/recentf-save.el" "var/save-place.el"
+                             "var/savehist.el" "var/session" "var/transient"
+                             "var/tramp/persistency.el" "var/treemacs")
    (+maintenance-state-backup-dir . "/Users/hc/.emacs.d/var/backup-snapshots")
    (+enable-direnv . t) (+tramp-memoize-cache-limit . 128)
-   (+find-file-feedback-threshold . 0.4)
-   (+tramp-lsp-pipe-mode-servers "lean4") (+tramp-use-ssh-controlmaster)
-   (+tramp-shell-methods "ssh" "scp" "sshx") (+tramp-use-login-shell)
-   (+compile-auto-native-on-save) (+native-comp-warning-on-missing-source)
-   (+native-comp-speed . 2) (+native-comp-verbose . 0)
-   (+native-comp-async-report-policy . silent) (+native-comp-pop-log)
-   (+native-comp-enable-deferred . t) (+native-comp-enable-jit . t)
-   (+package-enable-native-compile . t)
+   (+find-file-feedback-threshold . 0.4) (+tramp-lsp-pipe-mode-servers "lean4")
+   (+tramp-use-ssh-controlmaster) (+tramp-shell-methods "ssh" "scp" "sshx")
+   (+tramp-use-login-shell) (+compile-auto-native-on-save)
+   (+native-comp-warning-on-missing-source) (+native-comp-speed . 2)
+   (+native-comp-verbose . 0) (+native-comp-async-report-policy . silent)
+   (+native-comp-pop-log) (+native-comp-enable-deferred . t)
+   (+native-comp-enable-jit . t) (+package-enable-native-compile . t)
    (+compile-third-party-directories "site-lisp")
    (+compile-target-directories "lisp" "site-lisp/config")
    (+compile-target-files "early-init.el" "init.el" "bootstrap.el")
@@ -58,8 +54,7 @@
    (+noema-publish-state-dir . "/Users/hc/.emacs.d/var/noema/publish")
    (+noema-publish-root . "/Users/hc/.emacs.d/publish") (+session-auto-save)
    (+noema-web-port . 50815) (+noema-backend . portal)
-   (+noema-latex-export-engine . "codex")
-   (+noema-latex-export-agent . "codex")
+   (+noema-latex-export-engine . "codex") (+noema-latex-export-agent . "codex")
    (+noema-latex-export-max-attempts . 3) (+noema-codex-model . "")
    (+noema-latex-export-model . "") (+noema-opencode-executable . "opencode")
    (+project-local-overrides) (+note-code-root . "/Users/hc/Documents/Noema/")
@@ -94,54 +89,50 @@
    (+tab-line-wheel-throttle . 0.5) (+tab-line-min-label-width . 8)
    (+tab-line-max-label-width . 18) (+noema-jupyter-servers)
    (+jupyter-ssh-projects
-    . ((:name "COMP9444" :target "aaron-pc"
-        :root "/home/aaron/Desktop/UNSW/COMP9444/")))
-   (+jupyter-remote-ikernel-command
-    . "/opt/homebrew/anaconda3/bin/remote_ikernel")
+    (:name "COMP9444" :target "aaron-pc" :root
+           "/home/aaron/Desktop/UNSW/COMP9444/"))
+   (+jupyter-remote-ikernel-command . "/opt/homebrew/anaconda3/bin/remote_ikernel")
    (+jupyter-board-jupyter-command . "/opt/homebrew/bin/jupyter")
    (+jupyter-board-python-command . "/opt/homebrew/anaconda3/bin/python")
    (+jupyter-remote-ikernel-source-directory
     . "/Users/hc/.config/emacs/site-lisp/remote_ikernel")
    (+jupyter-remote-ikernel-install-script
     . "/Users/hc/.config/emacs/bin/install-remote-ikernel")
-   (+files-create-parent-directories . ask)
-   (+github-cache-ttl . 300)
-   (+bazel-command-candidates "bazelisk" "bazel")
-   (+bazel-cache-ttl . 300)
+   (+files-create-parent-directories . ask) (+github-cache-ttl . 300)
+   (+bazel-command-candidates "bazelisk" "bazel") (+bazel-cache-ttl . 300)
    (+expand-region-history-limit . 64) (+project-run-profile-alist)
    (+harpoon-slot-count . 4) (+template-auto-insert-enabled . t)
    (+template-auto-insert-enabled-kinds c cc sh python nix)
-   (+template-current (org . "default.org") (c . "default.c")
-                        (cc . "default.cc") (js . "default.js")
-                        (ts . "default.ts") (sh . "default.sh")
-                        (tex . "article.tex") (python . "default.py")
-                        (nix . "default.nix") (makefile . "default.mk")
-                        (cmake . "default.cmake"))
+   (+template-current (org . "default.org") (c . "default.c") (cc . "default.cc")
+                      (js . "default.js") (ts . "default.ts") (sh . "default.sh")
+                      (tex . "article.tex") (python . "default.py")
+                      (nix . "default.nix") (makefile . "default.mk")
+                      (cmake . "default.cmake"))
    (+template-root . "/Users/hc/.emacs.d/templates")
    (aaron-large-buffer-size . 1048576)
    (+treemacs-tag-follow-excluded-modes makefile-mode makefile-gmake-mode
-                                          makefile-bsdmake-mode
-                                          makefile-automake-mode)
-   (+treemacs-cursor-follow-delay . 0.35) (+treemacs-imenu-indent-width . 2) (+project-import-project-el-entries)
-   (+project-search-paths) (+scratch-initial-major-mode . t)
+                                        makefile-bsdmake-mode
+                                        makefile-automake-mode)
+   (+treemacs-cursor-follow-delay . 0.35) (+treemacs-imenu-indent-width . 2)
+   (+project-import-project-el-entries) (+project-search-paths)
+   (+scratch-initial-major-mode . t)
    (+scratch-directory . "/Users/hc/.emacs.d/var/scratch")
    (+telescope-grep-preview-key :debounce 0.35 any)
    (+telescope-file-preview-key :debounce 0.15 any)
    (+telescope-preview-key :debounce 0.2 any)
    (+filetypes-sqlite-extensions "db" "db3" "sqlite" "sqlite3" "sqlite2" "sdb")
    (+performance-watch-hooks post-command-hook pre-command-hook
-                               after-change-functions before-change-functions
-                               before-save-hook after-save-hook
-                               window-scroll-functions
-                               window-size-change-functions jit-lock-functions
-                               org-mode-hook org-cycle-hook
-                               org-babel-after-execute-hook kill-buffer-hook
-                               change-major-mode-hook)
+                             after-change-functions before-change-functions
+                             before-save-hook after-save-hook
+                             window-scroll-functions window-size-change-functions
+                             jit-lock-functions org-mode-hook org-cycle-hook
+                             org-babel-after-execute-hook kill-buffer-hook
+                             change-major-mode-hook)
    (+performance-record-directory . "/Users/hc/.emacs.d/var/performance/")
-   (+performance-refresh-interval . 2.0)
-   (aaron-open-browser-window-size . 0.38)
+   (+performance-refresh-interval . 2.0) (aaron-open-browser-window-size . 0.38)
    (aaron-open-routes
-    (url :default portal :menu-default portal :backends (portal xwidget eww system))
+    (url :default portal :menu-default portal :backends
+         (portal xwidget eww system))
     (search :default portal :menu-default portal :backends
             (portal xwidget eww system))
     (file :default emacs :menu-default emacs :backends (emacs system))
@@ -154,10 +145,9 @@
    (+fold-prog-startup . fold-all)
    (+fold-state-file . "/Users/hc/.emacs.d/var/fold-state.el")
    (+display-rules-roam-size . 0.36) (+display-rules-side-size . 0.33)
-   (+display-rules-bottom-size . 0.32)
-   (+symbols-preview-key :debounce 0.15 any)
+   (+display-rules-bottom-size . 0.32) (+symbols-preview-key :debounce 0.15 any)
    (+project-popup-portal-apps ("lazygit" . "lazygit") ("btop" . "btop")
-                                ("yazi" . "yazi") ("tmux" . "tmux"))
+                               ("yazi" . "yazi") ("tmux" . "tmux"))
    (+portal-popup-window-height . 0.2) (+copilot-deferred-idle-delay . 1.5)
    (+copilot-deferred-modes lean-mode) (+copilot-disable-on-remote)
    (+copilot-large-buffer-threshold . 524288) (+copilot-idle-delay . 0.85)
@@ -194,18 +184,19 @@
    (show-paren-when-point-in-periphery . t) (so-long-threshold . 10000)
    (so-long-action . so-long-minor-mode) (ibuffer-expert . t)
    (ibuffer-show-empty-filter-groups) (compilation-scroll-output . t)
-   (amx-history-length . 20) (aaron-font-body . "Merriweather") (aaron-h-body . 228)
-   (aaron-font-body-width . normal) (aaron-font-code . "Fira Code") (aaron-h-code . 172)
+   (amx-history-length . 20) (aaron-font-body . "Merriweather")
+   (aaron-h-body . 228) (aaron-font-body-width . normal)
+   (aaron-font-code . "Fira Code") (aaron-h-code . 172)
    (aaron-font-title . "Excalifont") (aaron-h-title . 236)
    (aaron-font-cn . "FZLiuGongQuanKaiShuJF")
    (aaron-font-math-symbols "Libertinus Math" "Garamond-Math" "STIXGeneral"
-                         "DejaVu Sans")
+                            "DejaVu Sans")
    (aaron-font-unicode-symbols "Apple Symbols" "Noto Sans Symbols 2"
-                            "Noto Sans Symbols" "Symbola" "DejaVu Sans")
+                               "Noto Sans Symbols" "Symbola" "DejaVu Sans")
    (aaron-font-emoji "Apple Color Emoji" "Noto Color Emoji" "Segoe UI Emoji")
    (aaron-font-nerd-symbols "Symbols Nerd Font Mono" "Symbols Nerd Font"
-                         "JetBrainsMono Nerd Font Mono" "FiraCode Nerd Font Mono"
-                         "Hack Nerd Font Mono")
+                            "JetBrainsMono Nerd Font Mono"
+                            "FiraCode Nerd Font Mono" "Hack Nerd Font Mono")
    (aaron-scale-cn . 1.3) (aaron-font-code-weight . regular)
    (aaron-font-ui-weight . regular) (aaron-font-body-weight . regular)
    (aaron-font-title-weight . medium) (aaron-font-strong-weight . medium)
@@ -214,8 +205,7 @@
    (garbage-collection-messages) (aaron-warning-popup-minimum-level . :error)
    (aaron-warning-suppress-elpa-noise . t) (+gcmh-high-cons-threshold . 134217728)
    (+gcmh-auto-idle-delay-factor . 20) (+gcmh-idle-delay . auto)
-   (magent-session-directory
-    . "/Users/hc/.emacs.d/var/noema/magent/sessions/")
+   (magent-session-directory . "/Users/hc/.emacs.d/var/noema/magent/sessions/")
    (magent-request-timeout . 180)
    (noema-interaction-magent-cli-max-json-line-bytes . 1048576)
    (noema-interaction-magent-cli-max-answer-bytes . 8388608)

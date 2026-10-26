@@ -568,6 +568,12 @@ kernelspec 本身用 `M-x jupyter-board`（Hyper `j`）管理。
 - `SPC p e s`  将文件里的非 `eval` 变量全部加入 `safe-local-variable-values` 并保存
 - `SPC p e d`  查看哪些 dir-locals 条目对当前 buffer 的 major-mode 生效
 
+首次遇到未知的目录变量时，Emacs 会给出确认提示：`+` 信任并记住这份
+`.dir-locals.el` 的来源目录（整个项目使用它时不再询问）；`!` 只记住当前列出的
+变量和值；`y` 只接受这一次。额外批准结果写在本机的 `etc/custom.el`。
+`~/Documents/Noema/` 与 Emacs 配置目录由基础配置默认完整信任，文件本地变量和目录变量
+都会应用。`SPC p e s` 仍只批准文件里当前的非 `eval` 值。
+
 可用模板（`templates/emacs/`）：
 
 | 模板名 | 用途 |

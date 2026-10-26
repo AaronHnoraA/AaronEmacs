@@ -101,25 +101,38 @@
 ;; Always load the newest file
 (setq load-prefer-newer t)
 
-;; Do not block visiting files on local variable confirmations.  Trusted files
-;; may use all file/dir-local variables, while untrusted content only gets safe
-;; values and never runs eval forms.
+;; Trusted files use all file/dir-local variables.  Other files use Emacs'
+;; confirmation prompt, whose + and ! choices persist directory or value trust.
 (setq enable-local-variables t
       enable-local-eval 'maybe)
 
+;; These two workspace roots are trusted by default.  Customize keeps any
+;; additional directory approvals made through Emacs' confirmation prompt.
+(defun aaron-trust-default-local-variable-directories ()
+  "Trust the Noema documents and Emacs configuration directories."
+  (dolist (directory (list (expand-file-name "~/Documents/Noema/")
+                           (file-truename user-emacs-directory)))
+    (let ((directory (file-name-as-directory directory)))
+      (when (boundp 'trusted-content)
+        (add-to-list 'trusted-content (abbreviate-file-name directory)))
+      (when (boundp 'safe-local-variable-directories)
+        (add-to-list 'safe-local-variable-directories directory)))))
+
+(aaron-trust-default-local-variable-directories)
+
 (defun aaron-trusted-content-p ()
   "Return non-nil when the current buffer should get full local variables."
-  (or (not (fboundp 'trusted-content-p))
-      (trusted-content-p)))
+  (and (fboundp 'trusted-content-p)
+       (trusted-content-p)))
 
 (defun aaron-hack-local-variables-trust-policy-a (orig-fn &rest args)
-  "Apply local variable policy based on `trusted-content-p'."
+  "Trust known content and let Emacs confirm unknown local variables."
   (let* ((trusted (aaron-trusted-content-p))
          (enable-local-variables
-          (and enable-local-variables
-               (if trusted :all :safe)))
+          (if (and trusted (eq enable-local-variables t))
+              :all enable-local-variables))
          (enable-local-eval
-          (and enable-local-eval trusted)))
+          (if (and trusted enable-local-eval) t enable-local-eval)))
     (apply orig-fn args)))
 
 (advice-add 'hack-local-variables :around
