@@ -266,3 +266,5 @@ Doom 的做法：
 | `lang/emacs-lisp` | 改写 `calculate-lisp-indent`（plist 对齐）、`;;;` outline、额外着色、highlight-quoted、非 package 文件压低编译警告、checkdoc 放宽、buttercup、working buffer、ielm 着色 | **不收**：缩进改写会重排现有代码；其余是外观或 Doom 自己的测试/求值约定；本配置的 checkdoc 警告保持原样 |
 | `lang/latex` | `fill-nobreak-predicate` 加 `texmathp` | **吸收**：`+auctex-keep-math-unbroken-h`，填充段落时不在行内公式中间换行 |
 | `lang/latex` | `.auctex-auto` 隐藏目录、`TeX-save-query nil`、`chktex` 参数、smartparens 的 `\\left(` 配对、条目续行缩进、viewer 列表、tex-fold、cdlatex/company | **已有或不收**：本配置把 AUCTeX 的解析缓存放到项目外（`+auctex-setup-auto-cache`），比 Doom 更干净；保存询问与缩进是习惯；预览走 RaTeX 与 PDF Tools |
+| `lang/nix` | `flake.lock` 用 JSON 模式、NixOS 的 `tramp-remote-path`、nix 补全与 REPL | **吸收并扩大**：本配置把所有 `.lock` 当 TOML，`flake.lock`、`composer.lock`、`Pipfile.lock` 其实是 JSON，现在改走 JSON 模式；远程 PATH 走 Remote 环境胶囊 |
+| `lang/haskell`、`lang/ocaml`、`lang/lean`、`lang/markdown` | stack/dune 项目根、`.hi` 忽略、cabal 构建键、utop/merlin、Lean 3/nael、Markdown 编译与插入键 | **不收**：项目根由本配置的根解析决定；Haskell/OCaml 走 LSP；Lean 4 用 lean4-mode 与本配置的 infoview；Markdown 由 Noema 接管 |

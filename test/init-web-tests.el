@@ -79,5 +79,16 @@
                          (match-string 3 "    at /srv/app/index.mjs:3:15"))
                    '("/srv/app/index.mjs" "3" "15")))))
 
+(ert-deftest +filetypes-json-lock-files-are-not-toml ()
+  "flake.lock, composer.lock and Pipfile.lock are JSON; Cargo.lock stays TOML."
+  (require 'lang/filetypes/config)
+  (cl-flet ((mode (file) (assoc-default file auto-mode-alist #'string-match)))
+    (let ((json (mode "/p/data.json"))
+          (toml (mode "/p/Cargo.lock")))
+      (dolist (file '("/p/flake.lock" "/p/composer.lock" "/p/Pipfile.lock"))
+        (should (eq (mode file) json)))
+      (should-not (eq toml json))
+      (should (eq (mode "/p/uv.lock") toml)))))
+
 (provide 'init-web-tests)
 ;;; init-web-tests.el ends here

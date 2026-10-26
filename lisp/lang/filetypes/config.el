@@ -112,6 +112,11 @@
 (+filetypes--prefer-mode
  '("\\.toml\\'" "\\.lock\\'")
  (+filetypes--treesit-mode-or 'toml-ts-mode 'toml 'conf-toml-mode))
+;; Lock files that are JSON, ahead of the TOML `.lock' rule above (Cargo,
+;; Poetry and uv write TOML).  From Doom's lang/nix for flake.lock.
+(+filetypes--prefer-mode
+ '("/\\(?:flake\\|composer\\|Pipfile\\)\\.lock\\'")
+ (+filetypes--treesit-mode-or 'json-ts-mode 'json 'js-json-mode))
 (+filetypes--prefer-mode
  '("\\.ini\\'" "\\.editorconfig\\'" "\\.env\\(?:\\..*\\)?\\'"
    "\\.properties\\'" "\\.service\\'" "\\.timer\\'" "\\.desktop\\'")
