@@ -15,7 +15,12 @@
 (use-package sh-script
   :ensure nil
   :mode (("\\.sh\\'"     . sh-mode)
-         ("/PKGBUILD\\'" . sh-mode))
+         ("/PKGBUILD\\'" . sh-mode)
+         ;; From Doom: Bats and ZUnit test files are shell scripts.
+         ("\\.\\(?:bats\\|zunit\\)\\'" . sh-mode))
+  ;; zsh completion functions (`_git' and the like) have no extension;
+  ;; their first line says what they are.
+  :magic ("#compdef " . sh-mode)
   :hook ((sh-mode . sh-mode-setup)
          (bash-ts-mode . sh-mode-setup))
   :config

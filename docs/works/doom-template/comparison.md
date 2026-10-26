@@ -247,3 +247,10 @@ Doom 的做法：
 | `doom-cli.el`、`doom-profiles.el` | `doom sync/doctor/upgrade`、多 profile | **已有对应**：`make` 目标与 `module-doctor`；单 profile |
 | `doom-docs.el` | Doom 文档的 Org 阅读模式 | **不需要**：文档是 Markdown，入口是文档中心 |
 | `doom.el`、`early-init.el` | 启动优化、目录变量、native-comp 临时目录 | **已有**：`early-init.el` 已在启动期间清空 `file-name-handler-alist`、关掉隐式 frame 调整；运行时文件在 `var/` |
+
+## 10. 语言模块逐个对照
+
+| Doom 模块 | 内容 | 处理 |
+| --- | --- | --- |
+| `lang/sh` | `.bats`、`.zunit`、`.env`、`#compdef` 开头的文件进 `sh-mode` | **吸收** `.bats`、`.zunit`、`#compdef`（`.env` 本配置归 `conf-mode`） |
+| `lang/sh` | 引号里变量着色、常用命令着色、函数名可带 `-` 的 imenu、`sh-set-shell` 静音、`sh-indent-after-continuation 'always`、反引号配对、company-shell | **不收**：着色和续行缩进是外观与缩进风格；补全走 bash-language-server |
