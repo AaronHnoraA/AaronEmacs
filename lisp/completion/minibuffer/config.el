@@ -215,6 +215,12 @@ accepts a new file name exactly.  Command+Shift+Return opens a new frame."
    (t
     (minibuffer-complete))))
 
+;; From Doom: the cursor cannot enter the read-only prompt, where every key
+;; would only answer "Text is read-only".
+(setq minibuffer-prompt-properties
+      '(read-only t cursor-intangible t face minibuffer-prompt))
+(add-hook 'minibuffer-setup-hook #'cursor-intangible-mode)
+
 (use-package vertico
   :ensure t
   :hook ((after-init . vertico-mode)

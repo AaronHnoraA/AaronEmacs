@@ -155,3 +155,5 @@ Doom 的做法：
 | `doom-guess-mode-h`：保存 `fundamental-mode` 文件后重新判断模式 | 没有 | **吸收**：`+files-guess-mode-h`（`emacs/files`），同样只作用于当前窗口的 buffer；Evil 状态由已有的 `set-auto-mode` advice 保持 |
 | `auto-save-include-big-deletions t` | Emacs 默认 `nil`：删掉一大段后关掉该 buffer 的自动保存 | **吸收**：登记为 config 设置，值 `t`；原文件仍在磁盘上，自动保存不该因为删除而停 |
 | `bidi-display-reordering 'left-to-right`、`gnutls-*`、`tls-program` | `t`；NSM `medium` | **不收**：前者文档里只有 `nil` 特殊，`'left-to-right` 与 `t` 等价；TLS 由 NSM 交互确认，Doom 只在 batch 下报错 |
+| `minibuffer-prompt-properties` 加 `cursor-intangible`，minibuffer 里开 `cursor-intangible-mode` | 只读提示符，光标能进去 | **吸收**（第 2 节的候选）：光标进了提示符只会得到 “Text is read-only”，没有用途；放在 `completion/minibuffer` |
+| `echo-keystrokes`、`blink-matching-paren`、`display-line-numbers-widen`、`split-*-threshold`、`window-divider` | 各有本配置的值 | **不收**：属于手感和外观，第 2 节已列为候选，保持现状 |
