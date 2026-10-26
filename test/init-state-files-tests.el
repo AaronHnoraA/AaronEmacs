@@ -148,4 +148,28 @@
       (kill-buffer buffer)
       (delete-directory dir t))))
 
+(ert-deftest aaron-auto-save-survives-a-large-deletion ()
+  "Deleting most of a buffer must not switch its auto-save off."
+  (let* ((root (make-temp-file "big-deletion-" t))
+         (auto-save-file-name-transforms
+          `((".*" ,(file-name-as-directory root) t)))
+         (file (expand-file-name "note.txt" root))
+         buffer)
+    (unwind-protect
+        (progn
+          (write-region (make-string 20000 ?x) nil file nil 'silent)
+          (setq buffer (find-file-noselect file))
+          (with-current-buffer buffer
+            (auto-save-mode 1)
+            (insert "y")
+            (do-auto-save t)
+            (delete-region (point-min) (- (point-max) 10))
+            (do-auto-save)
+            (should buffer-auto-save-file-name)
+            (should (> buffer-saved-size -1))))
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer (set-buffer-modified-p nil))
+        (kill-buffer buffer))
+      (delete-directory root t))))
+
 ;;; init-state-files-tests.el ends here

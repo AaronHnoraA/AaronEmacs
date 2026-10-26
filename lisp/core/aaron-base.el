@@ -2080,6 +2080,10 @@ interrupt the current window layout.")
   :group 'files :type 'integer
   :doc "Keystrokes between auto-saves (0 = disabled by keystroke count).")
 
+(config-register 'auto-save-include-big-deletions
+  :group 'files :type 'boolean
+  :doc "Keep auto-saving a buffer after a large deletion instead of turning it off.")
+
 (config-register 'create-lockfiles
   :group 'files :type 'boolean
   :doc "Create lockfiles to detect concurrent edits.")

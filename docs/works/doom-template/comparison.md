@@ -153,3 +153,5 @@ Doom 的做法：
 | `savehist-save-hook` 去掉历史变量的文本属性、去掉不能打印的寄存器 | 配了保存 `kill-ring`、`mark-ring`、`global-mark-ring`，实际一个都没存下 | **吸收并改良**：savehist 遇到一处不可打印的值就整个丢掉变量；mark ring 是 marker，永远存不下，删掉；kill ring 只在 savehist 的临时 buffer 里换成无属性副本（`aaron-savehist-plain-kill-ring-h`），不像 Doom 那样改动会话里的值。寄存器本配置不保存，不需要 |
 | daemon 下 `recentf-autosave-interval 1200` | 只在正常退出时保存最近文件 | **吸收**：本配置的 Emacs 作为后台 app 一次运行几周，改为每 600 秒保存，登记为 config 设置；registry 的 Customize 桥会替换 recentf 自带的 setter，所以在 `:set` 里自己重启 recentf 的计时器 |
 | `doom-guess-mode-h`：保存 `fundamental-mode` 文件后重新判断模式 | 没有 | **吸收**：`+files-guess-mode-h`（`emacs/files`），同样只作用于当前窗口的 buffer；Evil 状态由已有的 `set-auto-mode` advice 保持 |
+| `auto-save-include-big-deletions t` | Emacs 默认 `nil`：删掉一大段后关掉该 buffer 的自动保存 | **吸收**：登记为 config 设置，值 `t`；原文件仍在磁盘上，自动保存不该因为删除而停 |
+| `bidi-display-reordering 'left-to-right`、`gnutls-*`、`tls-program` | `t`；NSM `medium` | **不收**：前者文档里只有 `nil` 特殊，`'left-to-right` 与 `t` 等价；TLS 由 NSM 交互确认，Doom 只在 batch 下报错 |
