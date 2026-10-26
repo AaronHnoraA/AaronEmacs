@@ -328,6 +328,11 @@ Hub 和 dispatch 里的调参入口目前都是“当前 Emacs session 生效”
 - Java：唯一 `jdtls` owner，每个 project 独立 `-data` 与 configuration，remote
   target 通过 toolchain provisioning 获得同一 JDTLS bundle。
 
+其余语言各有一个 client：HTML 为 `+html`，JS/TS 为 `+typescript`，Vue 文件（web-mode 中的
+`.vue`）为 `+vue`（`vue-language-server`，`:tsdk` 取 target 上 `tsc` 所在的
+TypeScript 包），Shell、LaTeX、Rust 分别为 `+bash`、`+latex`、`+rust-analyzer`。
+`set-language-server!` 没给 `:server-id` 时用 `+MODE`。
+
 新增 route 完成前检查：
 
 - contact 中没有物理 `/ssh:` / `/rpc:` path，也没有 local/remote 两套 client；

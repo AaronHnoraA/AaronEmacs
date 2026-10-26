@@ -7,5 +7,6 @@
    (+languagetool-server-url . "http://10.243.90.222:8765")
    (+languagetool-server-timeout . 5.0) (+languagetool-auto-idle-delay . 1.6)
    (+languagetool-auto-padding . 4096) (+languagetool-auto-max-chars . 32768)
-   (+languagetool-auto-retry-delay . 30.0) (+js-indent-offset . 2))
+   (+languagetool-auto-retry-delay . 30.0) (+js-indent-offset . 2)
+   (+web-indent-offset . 2) (css-indent-offset . 2))
 )

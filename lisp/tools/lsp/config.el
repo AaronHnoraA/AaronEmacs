@@ -1228,7 +1228,7 @@ This is the only supported way to declare a server; never call
 `lsp-register-client\=' or push onto client lists directly."
   (let* ((modes (if (listp modes) modes (list modes)))
          (server-id (or server-id
-                        (intern (format "my-%s" (car modes)))))
+                        (intern (format "+%s" (car modes)))))
          (activation-fn
           (and activation-fn
                (lambda (&rest arguments)

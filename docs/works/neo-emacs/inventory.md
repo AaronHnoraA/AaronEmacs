@@ -275,3 +275,20 @@
   - 切到 eshell 窗口时独占布局；
   - 他的键；
   - 写死的 JDK、Maven、代理和 fish 路径。
+
+### frontend（2026-10-26，已完成）
+
+用户定下的原则：语言细节不逐项确认，LSP 和语言功能直接吸收。
+
+- **吸收**：
+  - Vue 文件改用 web-mode 打开（原来没有对应的模式，打开就是纯文本）。
+  - Vue 文件的 template、style、script 缩进都取 `+web-indent-offset`（2），不用 tab，关掉 electric-indent。
+  - Vue 的 language server：`+vue`，即 `vue-language-server`，`:tsdk` 取 target 上的 TypeScript。
+  - CSS 缩进：`css-indent-offset` 登记为设置，值为 2。
+- **已一致**：彩虹括号、行号、JS/TS 缩进 2、补全时不做额外编辑；你的 TS 服务器优先级更高，deno 不会被选中。
+- **不收**：
+  - `lsp-idle-delay` 0.5；
+  - 全局关掉文件监视；
+  - `(focus-mode nil)`，这样写实际是开启；
+  - web-mode 的 modeline 图标设置。
+- **同时完成**：横杠形式 `my-` 名字的改名，doctor 也扩展到能抓 `my-`；`set-language-server!` 默认 server-id 改为 `+MODE`。
