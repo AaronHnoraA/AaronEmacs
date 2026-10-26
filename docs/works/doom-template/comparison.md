@@ -257,3 +257,6 @@ Doom 的做法：
 | `lang/javascript` | `.mts`/`.cts` 走 TypeScript 模式；Node 栈帧 `at fn (file:行:列)` 作为编译错误可跳转 | **吸收**：之前 `.mts`/`.cts` 打开是 `fundamental-mode`；`+typescript-module-file-mode` 在访问时取 `.ts` 当前对应的模式；`node` 加进 `compilation-error-regexp-alist` |
 | `lang/javascript` | `.es6`/`.pac`、`js-chain-indent`、`package.json` 为项目根、忽略 `node_modules`、nodejs-repl、npm 项目模式 | **已有或不收**：Projectile 已忽略 `node_modules`、项目根由本配置的根解析决定；链式缩进是风格；REPL 与 npm 模式没有使用者 |
 | `lang/web` | emmet、Jekyll/Django/WordPress/Angular/React 项目模式、`+html`/`+css` | **不收**：用户不写这些框架的模板；Vue/CSS 缩进已在 neo 审计中处理 |
+| `lang/cc` | `find-sibling-rules` 在源文件和头文件之间切换 | **吸收**：本配置的规则只连接源文件和 `_test`/`_benchmark`，`SPC f o` 从 `foo.cpp` 到不了 `foo.h`；补上同目录 `.c/.cc/.cpp/.cxx` ↔ `.h/.hh/.hpp/.hxx` |
+| `lang/cc` | `.h` 按内容判断 C/C++/ObjC、ffap 头文件路径、doom 缩进风格、cmake/glsl/cuda | **不收**：`.h` 走 Emacs 的 `c-or-c++-mode`；缩进风格不改；头文件跳转走 clangd |
+| `lang/python` | `python3` 作解释器、`Pipfile`/`.flake8` 为 conf、pytest 键、nose、pyvenv、pip-requirements | **已有或不收**：解释器由项目 toolchain profile 决定；`Pipfile`、`.flake8` 已是 `conf-mode`；测试走 `test-nearest` |

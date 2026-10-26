@@ -33,7 +33,15 @@
 
   (add-to-list 'find-sibling-rules
                `(,(rx (group (+ (not "/"))) "_benchmark" (or ".cpp" ".cc") eos)
-                 "\\1.cpp" "\\1.cc" "\\1.hpp")))
+                 "\\1.cpp" "\\1.cc" "\\1.hpp"))
+
+  ;; From Doom: a source file and its header in the same directory.
+  (add-to-list 'find-sibling-rules
+               `(,(rx (group (+ (not "/"))) "." (or "c" "cc" "cpp" "cxx") eos)
+                 "\\1\\.\\(?:h\\|hh\\|hpp\\|hxx\\)\\'"))
+  (add-to-list 'find-sibling-rules
+               `(,(rx (group (+ (not "/"))) "." (or "h" "hh" "hpp" "hxx") eos)
+                 "\\1\\.\\(?:c\\|cc\\|cpp\\|cxx\\)\\'")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; C/C++ Mode
