@@ -280,3 +280,11 @@ Doom 的做法：
 | `emacs/undo` | undo-fu-session 不保存 `.gpg`、`COMMIT_EDITMSG`、`git-rebase-todo` 的历史 | **吸收**：本配置的 undo-tree 给每个文件都写历史，加密文件的明文会进 `var/undo-tree-history/`；现在加密文件（`.gpg`/`.age`/`epa-file-name-regexp`）和 Git 消息文件不保存也不读取历史。检查过现有历史目录，没有已泄漏的文件 |
 | `emacs/undo` | undo-fu、vundo、undo 上限、zstd 压缩 | **不收**：本配置用 undo-tree，上限已更大 |
 | `emacs/dired` | `-v` 自然排序、远程去掉 GNU ls 参数、virtual buffer 不自动刷新、ESC 退出 wdired | **已有或不收**：dwim、自动刷新、`gls`、目录创建询问已一致；排序是外观；远程 Dired 由 Remote 框架处理 |
+| `emacs/vc` | `vc-handled-backends '(SVN Git Hg)`、`node_modules` 不进 VC、冲突标记自动开 smerge、log-view/annotate/vc-dir 的 Evil 状态、git-timemachine | **已有且更细**：本配置只保留 Git，并按 target 的代价对远程 buffer 关掉 VC（`+disable-remote-vc-h`）；smerge 由 `emacs/smerge` 模块管；没有 git-timemachine |
+| `checkers/spell` | spell-fu、按模式跳过代码/链接/公式 face、aspell 参数、个人词典路径 | **不需要**：本配置只在 Git 提交信息里开 flyspell（hunspell），Noema 的文本由 Noema 自己检查 |
+| `tools/lookup` | `+lookup/definition` 等多级 handler、dumb-jump、在线搜索、词典/同义词 | **不收**：查找走 xref 后端链（第 5 节）；用户不用翻译和词典 |
+| `editor/format` | apheleia、按项目缩进的 clang-format/prettier 参数 | **不收**：格式化只走 LSP（第 5 节） |
+| `tools/pdf` | 打开大 PDF 不问“文件很大，确定打开？” | **吸收**：`+pdf--skip-large-file-prompt-a`，其他大文件照常询问 |
+| `tools/pdf` | HiDPI 缩放、关掉 imagemagick、Evil 光标、关闭时清理注释 buffer、`q` 杀 buffer、epdfinfo 缺失时退回、midnight 颜色热更新、saveplace-pdf-view | **已有或不收**：缩放已开；光标见前面；`q` 与关闭行为以窗口生命周期为准；其余没有使用者 |
+| `tools/editorconfig` | 有 `indent_*` 时不让 dtrt-indent 覆盖、trim 走 ws-butler、排除 Office 文件 | **已有**：`config/default` 里同样处理 |
+| `ui/popup`、`ui/tabs`、`ui/window-select` | Doom 自己的 popup 系统、centaur-tabs、ace-window 键与范围 | **不收**：第 6 节已记；ace-window 已有 |

@@ -64,5 +64,26 @@
     (should (string-match-p (regexp-quote "$a + b + c + d + e + f + g + h + i + j = k$")
                             (buffer-string)))))
 
+(ert-deftest +pdf-large-files-open-without-the-size-question ()
+  "Large PDFs skip the size question; other large files still ask."
+  (require 'lang/auctex/config)
+  (let* ((dir (file-name-as-directory (make-temp-file "large-" t)))
+         (pdf (expand-file-name "book.pdf" dir))
+         (csv (expand-file-name "data.csv" dir))
+         (large-file-warning-threshold 10)
+         asked)
+    (unwind-protect
+        (progn
+          ;; The question is only asked for a file that can be read.
+          (write-region "x" nil pdf nil 'silent)
+          (write-region "x" nil csv nil 'silent)
+          (cl-letf (((symbol-function 'files--ask-user-about-large-file)
+                     (lambda (&rest _) (setq asked t) nil)))
+            (abort-if-file-too-large 1000 "open" pdf)
+            (should-not asked)
+            (abort-if-file-too-large 1000 "open" csv)
+            (should asked)))
+      (delete-directory dir t))))
+
 (provide 'init-latex-preview-menu-tests)
 ;;; init-latex-preview-menu-tests.el ends here

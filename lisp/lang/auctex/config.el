@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'config)
+(require 'aaron-lib)
 
 (require 'cl-lib)
 (require 'aaron-open)
@@ -234,6 +235,14 @@ target rather than one path baked in at load time."
         (if link
             (pdf-links-action-perform link)
           (message "No PDF link at click position"))))))
+
+;; From Doom: PDF Tools renders a page at a time, so the "file is large,
+;; really open?" question only gets in the way of a long paper or a book.
+(defadvice! +pdf--skip-large-file-prompt-a (fn size op-type filename &rest args)
+  "Ask about large files as usual, except PDFs."
+  :around #'abort-if-file-too-large
+  (unless (string-match-p "\\.pdf\\'" filename)
+    (apply fn size op-type filename args)))
 
 (defun +pdf-view-setup-interaction ()
   "Configure local interaction keys for PDF buffers."
