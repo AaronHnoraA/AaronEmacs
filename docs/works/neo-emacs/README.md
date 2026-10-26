@@ -35,6 +35,8 @@ neo-emacs 不是独立框架，而是一套 **Doom Emacs 私有配置**：
 - [x] neo-emacs 各模块逐项去处：见 [inventory.md](inventory.md)。
 - [x] 文档组织：代码树保留分类 `README.md`，详细规范留在 `docs/`；不复制 Doom 的逐模块 readme。
 - [x] `lisp/` 分类、目录、开关、迁移和验证：见 [structure.md](structure.md) 与第一阶段的 [README.md](../doom-template/README.md)。
+- [x] 逐文件审计（2026-10-27 完成）：`config.el`、`keymap.el`、`packages.el` 和
+  20 个模块都有了去处，见 [inventory.md](inventory.md) 的审计记录。
 
 ## 决定
 
