@@ -441,6 +441,11 @@ backup、auto-save 和 lockfiles 的文件名把被访问文件的完整路径�
 255 个字符，深层目录、远程路径会超过），改为“SHA-1 + 原名末尾 40 个字符”，否则
 Emacs 会不报错地跳过这次自动保存和文件锁（`aaron-state-file-name-fit`）。
 
+`savehist` 除了 minibuffer 历史，还保存 kill ring 的前 50 条。写入时只在
+savehist 的临时 buffer 里去掉文本属性：带图片、overlay 之类属性的条目会让
+savehist 整个丢掉这个变量，而当前会话里的 kill ring 保留原来的属性。mark ring
+里是 marker，无法保存，所以不在保存列表里。
+
 这意味着：
 
 - 项目目录更干净

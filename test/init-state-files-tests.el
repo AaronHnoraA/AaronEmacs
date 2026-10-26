@@ -73,4 +73,31 @@
         (kill-buffer buffer))
       (delete-directory root t))))
 
+(ert-deftest aaron-savehist-keeps-kill-ring-with-unprintable-properties ()
+  "One killed string with an unprintable property must not lose the kill ring."
+  (require 'savehist)
+  (let* ((file (make-temp-file "savehist-" nil ".el"))
+         (savehist-file file)
+         (savehist-minibuffer-history-variables nil)
+         (savehist-additional-variables '((kill-ring . 50)))
+         (marker (with-temp-buffer (point-marker)))
+         (kill-ring (list (propertize "with marker" 'aaron-test marker)
+                          (propertize "plain" 'face 'bold))))
+    (unwind-protect
+        (progn
+          (savehist-save)
+          (let (saved)
+            (with-temp-buffer
+              (insert-file-contents file)
+              (goto-char (point-min))
+              (condition-case nil
+                  (while t
+                    (pcase (read (current-buffer))
+                      (`(setq kill-ring ',value) (setq saved value))))
+                (end-of-file nil)))
+            (should (equal saved '("with marker" "plain"))))
+          ;; The session's kill ring keeps its properties.
+          (should (eq (get-text-property 0 'aaron-test (car kill-ring)) marker)))
+      (delete-file file))))
+
 ;;; init-state-files-tests.el ends here

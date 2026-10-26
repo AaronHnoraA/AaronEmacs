@@ -1278,9 +1278,23 @@ selection and mark behavior."
   :ensure nil
   :hook (after-init . savehist-mode)
   :custom
-  (savehist-additional-variables '(mark-ring
-                                   global-mark-ring
-                                   (kill-ring . 50))))
+  ;; Mark rings hold markers, which savehist can never write.
+  (savehist-additional-variables '((kill-ring . 50))))
+
+;; savehist drops a variable whole when any part of it does not print
+;; readably, and one killed string carrying an image, overlay or closure in
+;; its properties is enough to lose the kill ring.  Strip the properties in
+;; the temporary buffer savehist writes from, as Doom does, but buffer-locally
+;; there so the session's own kill ring keeps them.
+(defun aaron-savehist-plain-kill-ring-h ()
+  "Give the buffer savehist writes from a property-free copy of `kill-ring'."
+  (setq-local kill-ring
+              (mapcar #'substring-no-properties
+                      (take (or (alist-get 'kill-ring savehist-additional-variables)
+                                kill-ring-max)
+                            kill-ring))))
+
+(add-hook 'savehist-save-hook #'aaron-savehist-plain-kill-ring-h)
 
 ;; Try out emacs package without installing
 (use-package try
