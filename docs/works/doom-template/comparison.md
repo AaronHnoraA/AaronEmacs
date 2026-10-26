@@ -328,3 +328,16 @@ Doom 的做法：
 | 生命周期 hook | **已移植**（`aaron-emacs`） |
 | `custom-theme-directory`、`custom-file` | **已有**：`custom-file` 在 `etc/custom.el` |
 | `en/disable-command` 写到 `custom-file` | **吸收**：Emacs 把“以后都启用这个命令”写进 `user-init-file`，即受版本控制的 `init.el`；改写到 `etc/custom.el`（`aaron--disabled-commands-to-custom-file-a`）。检查过 `init.el` 历史，还没被写过 |
+
+## 14. 框架文件（全文）
+
+| 文件 | 全文读后的处理 |
+| --- | --- |
+| `early-init.el`、`doom.el` | 启动优化逐条对照：GC、`file-name-handler-alist`、隐式 frame 调整、启动画面本配置已有；`auto-mode-case-fold nil` **不收**（`Photo.JPG`、`Paper.PDF` 这类大写扩展名会找不到模式）；启动期间隐藏 mode line 与 `inhibit-message` 对隐藏启动的后台 Emacs 没有意义；native-comp 临时目录重定向针对 Linux tmpfs；`doom-finalize` 的 GC 恢复、server、计时本配置已有 |
+| `doom-emacs.el` 字体与主题加载 | 符号/emoji 回退字体和 Nerd Font 私用区已在 `aaron-base`；按系统深浅色选主题是外观 |
+| `doom-lib.el` | 宏逐个对照，均已移植（`letf!` 的关键字 advice 分支本配置绑定的是 advice 本身，更正确）；向前兼容垫片只为旧 Emacs；context 栈、profile 路径、Doom 错误类型属于它的 CLI 与 profile |
+| `doom-modules.el` | 模块表、flag 合并与否定、`modulep!`、按深度排序已移植；模块改名的兼容重映射不收（本配置改名不留兼容，见 `AGENT.md`） |
+| `doom-packages.el`、`doom-straight.el`、`doom-elpaca.el` | straight 的安装、pin、native-comp 等待、clone 失败重试；本配置用 `package-vc`，克隆失败的包不会进 `package-alist`，下次 bootstrap 会重装，`make audit-lock` 会报出 |
+| `doom-profiles.el` | profile 的 init 文件与 loaddefs 生成；本配置的模块系统自己生成 autoload |
+| `doom-docs.el` | Doom 文档的 Org 阅读模式与 `kbd:`/`M-x:`/`module:` 链接；本配置文档是 Markdown，由文档中心呈现 |
+| `doom-cli.el` | `doom` 命令行框架（参数解析、帮助、日志、会话重启）；本配置的对应物是 `bin/emacs-app` 与 `make` |
