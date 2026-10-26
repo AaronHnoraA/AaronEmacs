@@ -607,6 +607,8 @@ Agenda 卡片在启动画面最下面（Recent Files / Projects 之后、footer 
   切换当前项目的持久 scratch；同名项目各有独立 buffer 和保存文件
 - `SPC b z`
   埋藏当前 buffer；无上一页时打开项目目录，临时分屏则关闭
+- `M-x kill-buried-buffers`
+  关掉所有 frame 里都没有显示的 buffer；带进程的 buffer 保留，修改过的文件照常先问
 - `SPC b j`
   用 Consult 查找书签；选中候选时按需预览
 - `SPC b J`

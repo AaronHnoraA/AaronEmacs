@@ -224,3 +224,5 @@ Doom 的做法：
 | `text.el` | `doom/set-indent-width`、`toggle-indent-style`、`retab` | **吸收**：`editing-menu` 的 Indentation 列（`+editing/set-indent-width` 借用 Emacs 自带 EditorConfig 的“模式 → 缩进变量”表，ts-mode 和 `evil-shift-width` 一并设置） |
 | `text.el` | `syntax-ppss` 记忆化、`point-in-comment/string-p`、region 辅助、`backward-to-bol-or-indent`、`forward-to-last-non-comment-or-eol` | **已有或不需要**：行首/行尾在注释与缩进之间切换由 `mwim` 提供；其余是 Doom 自己命令的辅助 |
 | `text.el` | `delete-backward-word`（不进 kill ring）、`backward-kill-to-bol-and-indent`、`delete-trailing-newlines`、`dos2unix`/`unix2dos` | **不收**：前两项改变删除手感；后两项分别是 `delete-blank-lines` 和 `C-x RET f` |
+| `buffers.el` | `doom/kill-buried-buffers` | **吸收**：`kill-buried-buffers`（`+windows/kill-buried-buffers`），后台 Emacs 一次运行几周，用来清掉没在任何窗口里显示的 buffer |
+| `buffers.el` | real/unreal buffer 判定、fallback buffer、`kill-other-buffers`、`kill-matching-buffers`、`kill-project-buffers`、`save-and-kill-buffer` | **已有**：`+buffer-single-instance-p` 与窗口生命周期规则、`SPC b K`、Emacs 的 `kill-matching-buffers` 和 `project-kill-buffers` |

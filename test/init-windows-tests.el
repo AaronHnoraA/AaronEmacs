@@ -895,4 +895,25 @@
 
 (provide 'init-windows-tests)
 
+(ert-deftest +windows-kill-buried-buffers-keeps-shown-and-process-buffers ()
+  "Only buffers no window shows are killed; process buffers stay."
+  (let ((shown (get-buffer-create "kill-buried-shown"))
+        (buried (get-buffer-create "kill-buried-hidden"))
+        (proc-buffer (get-buffer-create "kill-buried-process"))
+        process)
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer shown)
+          (setq process (start-process "kill-buried-sleep" proc-buffer "sleep" "30"))
+          (set-process-query-on-exit-flag process nil)
+          (cl-letf (((symbol-function 'buffer-list)
+                     (lambda (&rest _) (list shown buried proc-buffer))))
+            (+windows/kill-buried-buffers))
+          (should (buffer-live-p shown))
+          (should-not (buffer-live-p buried))
+          (should (buffer-live-p proc-buffer)))
+      (when (process-live-p process) (delete-process process))
+      (dolist (buffer (list shown buried proc-buffer))
+        (when (buffer-live-p buffer) (kill-buffer buffer))))))
+
 ;;; init-windows-tests.el ends here

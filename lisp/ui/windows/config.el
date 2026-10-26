@@ -581,6 +581,24 @@ buffer is only taken out of view, as with `+windows/close-view'."
         (cl-incf killed)))
     (message "Killed %d buffer(s)" killed)))
 
+(defun +windows/kill-buried-buffers ()
+  "Kill buffers shown in no window of any frame.
+From Doom's `doom/kill-buried-buffers', for clearing out a long-running
+session.  Process buffers and internal (space-named) buffers are kept, and a
+modified file buffer still asks before it goes."
+  (interactive)
+  (let ((killed 0))
+    (dolist (buf (buffer-list))
+      (unless (or (get-buffer-window buf t)
+                  (string-prefix-p " " (buffer-name buf))
+                  (get-buffer-process buf))
+        (when (kill-buffer buf)
+          (cl-incf killed))))
+    (message "Killed %d buried buffer(s)" killed)))
+
+(defalias 'kill-buried-buffers #'+windows/kill-buried-buffers
+  "Kill every buffer that no window shows.")
+
 (defun +windows/kill-workspace-other-buffers ()
   "Kill all buffers in the current workspace except the current buffer."
   (interactive)
