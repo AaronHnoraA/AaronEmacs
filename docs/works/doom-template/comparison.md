@@ -351,3 +351,16 @@ Doom 的做法：
 | `os/tty` | 终端 Emacs 的剪贴板、光标形状、kkp 键协议；本配置只用图形界面 |
 | `app/calendar` | calfw + org-gcal；本配置的日历是内置 `calendar` 的全年视图，用户不用 Org |
 | `app/emms`、`app/everywhere`、`app/irc`、`app/rss` | 用户不用音乐播放、emacs-everywhere、IRC、RSS（neo 审计也已记 RSS 不收） |
+
+## 16. 模块全文：`checkers`、`emacs`
+
+| 模块 | 处理 |
+| --- | --- |
+| `checkers/grammar`、`spell` 全部 autoload | LanguageTool 已有；flyspell 加词、纠错、spell-fu 不适用（flyspell 只在 Git 提交信息中） |
+| `checkers/syntax` | Flymake 只在项目里字节编译 Elisp（CVE-2024-53920）**已有**：本配置用 `trusted-content`；`next-error` 指向 Flymake、ESC 重查、flycheck 体系不收 |
+| `emacs/dired` | `dired-vc-rename-file` **已有**；远程去掉 GNU ls 参数不需要（TRAMP 逐主机检测 ls 支持的参数，远程主机是 GNU ls）；`dired-omit-files`、`dired-guess-shell-alist-user`、Dirvish 键与属性不收（隐藏文件由 Dirvish 按 yazi 键表控制） |
+| `emacs/electric` | `set-electric!`、续写注释、电子缩进词不收（手感） |
+| `emacs/eww` | 页内链接/标题跳转、复制 URL、字号；本配置 EWW 只作阅读，已有刷新、阅读模式与转 xwidget；按标题改名不收（第 10 节） |
+| `emacs/ibuffer` | 人类可读大小列、工作区过滤、图标；外观 |
+| `emacs/undo` | `+tree` 分支逐行看过：剥离撤销记录的文本属性，实测本机最大的历史文件 316 KB 里属性只占约 1.6 KB，不收；不保存加密文件与 Git 消息的历史已吸收；可视化 diff 窗口不收 |
+| `emacs/vc` | git-link（本配置有 browse-at-remote）、git-timemachine、smerge 键；已有或不用 |
