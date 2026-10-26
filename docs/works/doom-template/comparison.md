@@ -236,3 +236,14 @@ Doom 的做法：
 | `debug.el` | `doom-debug-mode`（批量打开调试变量）、`doom/info`、profiler 开关 | **已有或不需要**：`+performance/watch` 与 profiler 入口；`config-health` 输出环境信息 |
 | `projects.el`、`config.el` | 在其他项目找文件、浏览配置目录、`doom/reload` | **已有**：项目工作台、`+project/switch`；重新加载走模块系统 |
 | `store.el`、`system.el`、`process.el`、`plist.el`、`strings.el`、`git.el`、`packages.el`、`sandbox.el` | 持久化 KV、系统识别、进程辅助、plist/字符串工具、Doom 自己的 git 与包、沙盒 | **不需要**：对应本配置的 config 注册表、`os/*` 层、Remote 进程 API、`package-lock.el`；沙盒是 Doom CLI 的功能 |
+
+## 9. 框架文件对照
+
+| 文件 | 内容 | 处理 |
+| --- | --- | --- |
+| `doom-lib.el` | 宏与基础函数 | **已移植**（P1a）；`load!`、`add-load-path!`、`doom-lookup-key`、`versionp!`、关键字工具、context 栈、profile 路径没有消费者：本配置的模块按 feature 路径 `require`，没有 Doom 的私有目录和 profile |
+| `doom-modules.el` | 模块声明、flag、加载顺序 | **已移植**（P1b，`docs/design/module-system.md`）；补上 `doom-module-at-point`：`aaron-module-at-point` 让 `aaron/describe-module`、`aaron/load-module` 以光标处的模块为默认值 |
+| `doom-packages.el`、`doom-straight.el`、`doom-elpaca.el` | straight/elpaca 包管理 | **不收**：`AGENT.md` 规定只用 `package.el` + `package-lock.el` |
+| `doom-cli.el`、`doom-profiles.el` | `doom sync/doctor/upgrade`、多 profile | **已有对应**：`make` 目标与 `module-doctor`；单 profile |
+| `doom-docs.el` | Doom 文档的 Org 阅读模式 | **不需要**：文档是 Markdown，入口是文档中心 |
+| `doom.el`、`early-init.el` | 启动优化、目录变量、native-comp 临时目录 | **已有**：`early-init.el` 已在启动期间清空 `file-name-handler-alist`、关掉隐式 frame 调整；运行时文件在 `var/` |

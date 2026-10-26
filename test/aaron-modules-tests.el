@@ -287,5 +287,25 @@
     (should (equal (config-source-label "/tmp/cfg/etc/x.el") "etc/x.el"))
     (should (equal (config-source-label "/elsewhere/y.el") "y.el"))))
 
+(ert-deftest aaron-module-at-point-reads-declaration-and-module-files ()
+  "The module at point comes from the declaration or the module's directory."
+  (cl-letf (((symbol-function 'aaron-module-get)
+             (lambda (key) (member key '((:tools . lsp) (:emacs . dired))))))
+    (with-temp-buffer
+      (insert "(aaron!\n :tools  clutch\n         lsp other\n :emacs  dired)\n")
+      (goto-char (point-min))
+      (search-forward "lsp")
+      (backward-char 1)
+      (should (equal (aaron-module-at-point) '(:tools . lsp)))
+      (search-forward "dired")
+      (backward-char 1)
+      (should (equal (aaron-module-at-point) '(:emacs . dired)))
+      (search-backward "other")
+      (should-not (aaron-module-at-point)))
+    (with-temp-buffer
+      (setq buffer-file-name "/x/emacs/lisp/tools/lsp/config.el")
+      (should (equal (aaron-module-at-point) '(:tools . lsp)))
+      (setq buffer-file-name nil))))
+
 (provide 'aaron-modules-tests)
 ;;; aaron-modules-tests.el ends here

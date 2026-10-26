@@ -179,6 +179,11 @@
 - 仍在运行的 timer，可以取消；
 - 按键。
 
+直接 `M-x aaron/describe-module`（或 `aaron/load-module`）时，读模块的提示以光标处的
+模块为默认值（`aaron-module-at-point`）：在模块自己的 `lisp/CATEGORY/NAME/` 文件里是
+这个模块；在 `aaron!` 声明里是光标下的名字，类别取上方最近一个开头的类别关键字。
+只认已经声明的模块。
+
 另外三个入口：
 
 - **`M-x module-doctor`**（`aaron/doctor`）：诊断全部模块，然后打开面板。

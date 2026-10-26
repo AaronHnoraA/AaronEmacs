@@ -772,13 +772,34 @@ full startup's autoloads are not regenerated."
 
 ;;; Commands
 
+(defun aaron-module-at-point ()
+  "Return the key of the module at point, or nil.
+In a module's own file that module; on a name in the `aaron!' declaration
+the module it declares, its category being the nearest one opening a line
+above.  From Doom's `doom-module-at-point'; only declared keys count."
+  (let ((key
+         (or (when-let* ((file (or buffer-file-name default-directory))
+                         ((string-match "/lisp/\\([^/]+\\)/\\([^/]+\\)/" file)))
+               (cons (intern (concat ":" (match-string 1 file)))
+                     (intern (match-string 2 file))))
+             (when-let* ((name (symbol-at-point))
+                         ((not (keywordp name))))
+               (save-excursion
+                 (when (re-search-backward
+                        "^[ \t]*\\(:[[:alnum:]-]+\\)[ \t]" nil t)
+                   (cons (intern (match-string 1)) name)))))))
+    (and key (aaron-module-get key) key)))
+
 (defun aaron-module-read (prompt &optional predicate)
-  "Read a declared module key with PROMPT, limited by PREDICATE."
+  "Read a declared module key with PROMPT, limited by PREDICATE.
+The module at point, when there is one, is the default."
   (let* ((cands (cl-loop for key in (aaron-module-list)
                          for module = (aaron-module-get key)
                          if (or (null predicate) (funcall predicate module))
                          collect (cons (format "%s %s" (car key) (cdr key)) key)))
-         (choice (completing-read prompt cands nil t)))
+         (here (aaron-module-at-point))
+         (default (and here (car (rassoc here cands))))
+         (choice (completing-read prompt cands nil t nil nil default)))
     (cdr (assoc choice cands))))
 
 (defun aaron/load-module (key)
