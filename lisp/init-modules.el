@@ -36,7 +36,7 @@
          ;; the `mode-line-misc-info' that the theme has finished setting up.
          activity
  :noema  activity
- :ui     tabbar popup
+ :ui     tabbar popup modeline
  :tools  menus
  :editor evil
  :tools  lsp

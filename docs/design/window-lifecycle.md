@@ -97,6 +97,8 @@ popup 按原生 `quit-window` 返回来源。
 
 原生视图的 buffer 有两种键盘状态：视图持有（mode line `[app]`）与 Emacs 持有
 （`[emacs]`）。视图里按下它不用的组合键会交给 Emacs 执行一条命令（handoff）。
+Portal Web（含 Noema Markdown）和 Portal 终端的 mode line 只用这个标记说明
+键盘归属；即使 buffer 内的 Evil 状态仍是 `normal`，也不显示 Evil 状态色块。
 Emacs 持有分两种：handoff 期间的暂时持有，命令结束后视图取回键盘；以及明确持有
 （`Cmd-.` 退出视图，或 handoff 的命令打开了 minibuffer，如 `M-x`），之后的命令都在
 Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buffer 再回来。

@@ -97,6 +97,7 @@ channels.
 - [local-variable-trust.md](design/local-variable-trust.md) File and directory local variable trust: default roots, one-time approval, and persistent project decisions.
 - [latex-preview.md](design/latex-preview.md) In-buffer math preview: supported delimiters, the shared macro source Emacs and Noema both read, the doctor, and the troubleshooting order.
 - [elegant-ui.md](design/elegant-ui.md) Aaron UI, the design tokens Emacs and Noema share, and where each side keeps its own styling.
+- [modeline.md](design/modeline.md) Doom modeline state block, theme colors, and native input ownership.
 - [window-lifecycle.md](design/window-lifecycle.md) Windows, buffers and closing: the shown/undisplayed/ended state machine, close actions as verbs, single-instance buffers, and what a window falls back to.
 - [neomacs-compat.md](design/neomacs-compat.md) Running this configuration on Neomacs: the modifier-rename layer, fringe and startup-frame fixes, Elsa concurrency, and why the 0.0.18 migration was paused. Neomacs is not installed; the layer is inert on GNU Emacs.
 

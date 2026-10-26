@@ -929,7 +929,8 @@ Portal 终端聚焦时，`C-c e` 也会切换 popup。此时 `C-c` 是 Emacs 前
 原本的 `C-c` 发送给终端（例如中断程序），连按 `C-c C-c`。本地 Ghostty 和
 远端终端正常退出后都会按进程事件关闭 buffer；远端连接意外断开时保留可重连的
 buffer。popup 中的 buffer 关闭时，其窗口也随之收起。mode line 使用普通 Emacs
-buffer 的样式。
+buffer 的样式；Portal 原生视图（包括 Noema Markdown）用 `[app]` / `[emacs]`
+显示键盘归属，不显示 Evil 的 `NORMAL` 等状态色块。
 
 `emacsopen [-o|-l|-r|-a|-b|-f] [-n] [+行[:列]] 文件…` 在运行中的 Emacs 打开文件：默认选中窗口，`-o` 其他窗口，`-l/-r/-a/-b` 向左右上下分割，`-f` 新 frame，`-n` 不抢焦点；每个文件输出一行 JSON，供 agent 与脚本使用，`emacsopen --help` 列出全部选项。
 Yazi 按 `Enter` 打开光标下的文本或目录时也使用它；PDF、图片等仍交给 macOS 应用。

@@ -196,6 +196,7 @@ ui-test:
 	$(BATCH) -l test/init-open-place-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-windows-tests.el -l test/init-window-lifecycle-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-ui-dashboard-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/init-ui-modeline-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-auto-insert-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-snippets-tests.el -f ert-run-tests-batch-and-exit
 
