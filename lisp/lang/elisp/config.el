@@ -50,6 +50,13 @@
   ;; Multi-line eldoc in echo area
   (setq-local eldoc-echo-area-use-multiline-p t)
 
+  ;; From Doom: show a variable's current value beside its documentation.
+  ;; Emacs ships this as `elisp-eldoc-var-docstring-with-value'.
+  (when (memq #'elisp-eldoc-var-docstring eldoc-documentation-functions)
+    (remove-hook 'eldoc-documentation-functions #'elisp-eldoc-var-docstring t)
+    (add-hook 'eldoc-documentation-functions
+              #'elisp-eldoc-var-docstring-with-value nil t))
+
   ;; Better native completion experience
   (setq-local completion-cycle-threshold 3)
 

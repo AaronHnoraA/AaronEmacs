@@ -45,4 +45,19 @@ It used to stop at its first `require': the core feature was missing, or
                               texts))))
       (delete-directory dir t))))
 
+(ert-deftest +elisp-eldoc-shows-variable-values ()
+  "Elisp buffers document a variable together with its current value."
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (should (memq #'elisp-eldoc-var-docstring-with-value
+                  eldoc-documentation-functions))
+    (should-not (memq #'elisp-eldoc-var-docstring
+                      eldoc-documentation-functions))
+    (insert "fill-column")
+    (backward-char 3)
+    (let (doc)
+      (elisp-eldoc-var-docstring-with-value
+       (lambda (text &rest _) (setq doc text)))
+      (should (string-match-p (regexp-quote (format "%S" fill-column)) doc)))))
+
 ;;; init-elisp-flymake-tests.el ends here
