@@ -315,3 +315,5 @@ Doom 的做法：
 | `lib/packages.el` | straight.el 的 pin 升级命令；本配置的版本锁在 `package-lock.el`，用 `make lock`，不适用 |
 | `lib/config.el` | `doom/reload`、打开私有配置；本配置重载走模块系统，不收 |
 | `lib/projects.el` | `set-project-type!`、在其他项目找文件、把目录登记为项目；后两项已有（`+project/switch`、`project-add-to-workbench`），前者没有使用者 |
+| `lib/help.el`（全文） | `doom/help-package-config` | **吸收**：`elisp-find-package-config`，在本配置的 `lisp/` 里找设置某个包的位置 |
+| `lib/help.el`（全文） | `describe-option`（只列 defcustom）、`describe-package`（带 straight 信息与模块来源）、`describe-autodef`、`search-loaded-files`、主页与报 bug、旧别名 | **不收**：前两项是 Emacs 自带命令的变体，模块来源已在 `aaron/describe-module`；其余属于 Doom 自己 |

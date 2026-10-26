@@ -26,6 +26,8 @@
   `elisp-eldoc-var-docstring-with-value`）。
 - `M-x elisp-sandbox` 打开一个 Elisp 缓冲区，`C-c C-c` 在新的 `emacs -Q` 里运行它：
   已安装的包都能 `require`，但不加载本配置，用来分辨问题出在包还是配置。
+- `M-x elisp-find-package-config` 列出本配置里设置某个包的位置（`use-package`、
+  `after!`、`with-eval-after-load`、VC 包登记）并跳过去；默认取光标处的符号。
 - `M-x elisp-search-load-path` 用 ripgrep 搜索 `load-path` 上的所有目录（本配置的模块
   和已安装的包），以光标处的符号为初始输入。
 

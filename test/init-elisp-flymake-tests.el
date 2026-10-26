@@ -83,4 +83,15 @@ It used to stop at its first `require': the core feature was missing, or
                          '(t nil))))
       (delete-directory dir t))))
 
+(ert-deftest +elisp-find-package-config-matches-whole-package-names ()
+  "Package config search finds use-package, after! and eval-after-load forms."
+  (skip-unless (executable-find "rg"))
+  (require 'lang/elisp/config)
+  (let ((magit (+elisp--package-config-locations 'magit)))
+    (should (seq-find (lambda (l) (string-match-p "(use-package magit$" l)) magit))
+    (should (seq-find (lambda (l) (string-match-p "with-eval-after-load 'magit" l)) magit))
+    (should-not (seq-find (lambda (l) (string-match-p "magit-delta" l)) magit)))
+  (should (+elisp--package-config-locations 'magit-delta))
+  (should-not (+elisp--package-config-locations 'no-such-package-here)))
+
 ;;; init-elisp-flymake-tests.el ends here

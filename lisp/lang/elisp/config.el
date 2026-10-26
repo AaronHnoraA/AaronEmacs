@@ -237,6 +237,41 @@ INITIAL, the symbol at point when called interactively, seeds the input."
 (defalias 'elisp-search-load-path #'+elisp/search-load-path
   "Search the source of every directory Emacs loads from.")
 
+;; From Doom's `doom/help-package-config': find where this configuration sets
+;; up a package, among more than a hundred modules.
+(defun +elisp--package-config-locations (package)
+  "Return \"FILE:LINE:TEXT\" lines where this configuration sets up PACKAGE."
+  (let* ((name (regexp-quote (symbol-name package)))
+         (pattern (format "\\((?:(?:use-package|after!|aaron-package-ensure-vc|aaron-package-register-vc) +'?|with-eval-after-load +')%s(?:[) ]|$)"
+                          name))
+         (default-directory (file-name-as-directory user-emacs-directory)))
+    (condition-case nil
+        (process-lines "rg" "--no-heading" "--line-number" "--glob" "*.el"
+                       "-e" pattern "lisp")
+      (error nil))))
+
+(defun +elisp/find-package-config (package)
+  "Jump to a place where this configuration sets up PACKAGE."
+  (interactive
+   (let* ((guess (symbol-at-point))
+          (names (delete-dups (append (mapcar #'car package-alist)
+                                      (mapcar #'car package--builtins)))))
+     (list (intern (completing-read "Find package config: " names nil nil nil nil
+                                    (and (memq guess names) (symbol-name guess)))))))
+  (let* ((locations (or (+elisp--package-config-locations package)
+                        (user-error "This configuration does not set up %s" package)))
+         (choice (if (cdr locations)
+                     (completing-read "Jump to config: " locations nil t)
+                   (car locations))))
+    (when (string-match "\\`\\([^:]+\\):\\([0-9]+\\):" choice)
+      (find-file (expand-file-name (match-string 1 choice) user-emacs-directory))
+      (goto-char (point-min))
+      (forward-line (1- (string-to-number (match-string 2 choice))))
+      (recenter))))
+
+(defalias 'elisp-find-package-config #'+elisp/find-package-config
+  "Jump to where this configuration sets up a package.")
+
 ;; From Doom's `doom/sandbox': run a snippet in a fresh `emacs -Q' that still
 ;; sees every installed package, to tell a package's behaviour from this
 ;; configuration's.  Only the vanilla run is offered: a second instance loading
