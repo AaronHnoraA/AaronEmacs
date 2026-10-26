@@ -49,5 +49,35 @@
                (prin1-to-string
                 (symbol-function 'set-language-server!)))))
 
+(ert-deftest +javascript-module-typescript-files-open-like-ts ()
+  "TypeScript's .mts and .cts files take the mode .ts has."
+  (require 'lang/javascript/config)
+  (let ((ts (assoc-default "x.ts" auto-mode-alist #'string-match))
+        (dir (make-temp-file "mts-" t)))
+    (should ts)
+    (unwind-protect
+        (dolist (name '("a.mts" "b.cts"))
+          (let ((file (expand-file-name name dir)))
+            (write-region "export const a = 1;\n" nil file nil 'silent)
+            (with-current-buffer (find-file-noselect file)
+              (unwind-protect (should (derived-mode-p ts))
+                (kill-buffer)))))
+      (delete-directory dir t))))
+
+(ert-deftest +javascript-node-stack-frames-are-compilation-errors ()
+  "Node stack frames in compilation output point at their file and line."
+  (require 'compile)
+  (require 'lang/javascript/config)
+  (let ((regexp (cadr (assq 'node compilation-error-regexp-alist-alist))))
+    (should (memq 'node compilation-error-regexp-alist))
+    (should (string-match regexp "    at render (/srv/app/src/view.js:42:7)"))
+    (should (equal (match-string 1 "    at render (/srv/app/src/view.js:42:7)")
+                   "/srv/app/src/view.js"))
+    (should (string-match regexp "    at /srv/app/index.mjs:3:15"))
+    (should (equal (list (match-string 1 "    at /srv/app/index.mjs:3:15")
+                         (match-string 2 "    at /srv/app/index.mjs:3:15")
+                         (match-string 3 "    at /srv/app/index.mjs:3:15"))
+                   '("/srv/app/index.mjs" "3" "15")))))
+
 (provide 'init-web-tests)
 ;;; init-web-tests.el ends here

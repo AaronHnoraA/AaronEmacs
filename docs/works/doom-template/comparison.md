@@ -254,3 +254,6 @@ Doom 的做法：
 | --- | --- | --- |
 | `lang/sh` | `.bats`、`.zunit`、`.env`、`#compdef` 开头的文件进 `sh-mode` | **吸收** `.bats`、`.zunit`、`#compdef`（`.env` 本配置归 `conf-mode`） |
 | `lang/sh` | 引号里变量着色、常用命令着色、函数名可带 `-` 的 imenu、`sh-set-shell` 静音、`sh-indent-after-continuation 'always`、反引号配对、company-shell | **不收**：着色和续行缩进是外观与缩进风格；补全走 bash-language-server |
+| `lang/javascript` | `.mts`/`.cts` 走 TypeScript 模式；Node 栈帧 `at fn (file:行:列)` 作为编译错误可跳转 | **吸收**：之前 `.mts`/`.cts` 打开是 `fundamental-mode`；`+typescript-module-file-mode` 在访问时取 `.ts` 当前对应的模式；`node` 加进 `compilation-error-regexp-alist` |
+| `lang/javascript` | `.es6`/`.pac`、`js-chain-indent`、`package.json` 为项目根、忽略 `node_modules`、nodejs-repl、npm 项目模式 | **已有或不收**：Projectile 已忽略 `node_modules`、项目根由本配置的根解析决定；链式缩进是风格；REPL 与 npm 模式没有使用者 |
+| `lang/web` | emmet、Jekyll/Django/WordPress/Angular/React 项目模式、`+html`/`+css` | **不收**：用户不写这些框架的模板；Vue/CSS 缩进已在 neo 审计中处理 |

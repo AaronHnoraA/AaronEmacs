@@ -104,6 +104,23 @@
 (add-to-list 'auto-mode-alist '("\\.mjs\\'" . +js-auto-mode))
 (add-to-list 'auto-mode-alist '("\\.js\\'" . +js-auto-mode))
 
+;; From Doom: TypeScript's ES-module and CommonJS files (.mts, .cts) open like
+;; .ts does, whichever TypeScript mode Emacs has chosen for it by then.
+(defun +typescript-module-file-mode ()
+  "Enter the major mode that a .ts file gets."
+  (funcall (or (assoc-default "x.ts" auto-mode-alist #'string-match)
+               #'prog-mode)))
+
+(add-to-list 'auto-mode-alist '("\\.[cm]ts\\'" . +typescript-module-file-mode))
+
+;; From Doom: Node stack frames ("at fn (/path/file.js:10:5)") in compilation
+;; and test output jump to their source.
+(after! compile
+  (add-to-list 'compilation-error-regexp-alist-alist
+               '(node "^[[:blank:]]*at \\(?:.*(\\|\\)\\(.+?\\):\\([[:digit:]]+\\):\\([[:digit:]]+\\)"
+                      1 2 3))
+  (add-to-list 'compilation-error-regexp-alist 'node))
+
 ;; ---------------------------------------------------------
 ;; 3. 通过 Hook 确保所有 JS/TS/LSP 相关的 Buffer 都是 2 个空格
 ;; ---------------------------------------------------------
