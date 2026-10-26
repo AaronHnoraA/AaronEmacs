@@ -14,6 +14,7 @@ names, and that file wins over anything remembered.
 | Need | Read |
 | --- | --- |
 | Load order, layers, which directory owns what | `docs/architecture.md` “加载链与分层”, “目录职责” |
+| Modules: `aaron!`, categories, `lisp/CATEGORY/NAME/`, naming, `set-…!` interfaces, module board and doctor | `docs/design/module-system.md`; `AGENT.md` “Project Model” |
 | Where a given change belongs | `docs/architecture.md` “改动落点速查”, then `docs/guide/settings-cookbook.md` |
 | Which document covers a topic | `docs/README.md` |
 | Emacs ↔ Noema boundary | `docs/architecture.md` “Emacs ↔ Noema 边界” |

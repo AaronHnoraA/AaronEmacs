@@ -4,7 +4,7 @@
 
 逐条配置怎么吸收，记在 [inventory.md](inventory.md)（下一步）。
 
-> 第一阶段改为先以 Doom 为模板升级骨架（[doom-template](../doom-template/README.md)）。本文 §3 的目录和模块声明方案以那边定稿为准，§2、§3.3 的映射关系仍然有效。
+> 第一阶段已完成（[doom-template](../doom-template/README.md)），本配置现在的结构就是 Doom 式的：`lisp/分类/模块/`、`aaron!` 声明、`+领域-` / `+领域/命令` 命名、`set-…!` 注册接口、模块账本与 doctor，见 [module-system.md](../../design/module-system.md)。本文 §3 的结构方案由此取代。吸收 neo-emacs 时，他的每个模块直接落到对应的 `lisp/分类/模块/`；他的 `map!`、`after!`、`set-popup-rule!` 等写法基本可以照抄（宏同名），弹窗规则走 `set-popup-rule!`，evil 状态走 `set-evil-initial-state!`。§2、§3.3 的映射关系仍然有效。
 
 原则（用户定）：**全量吸收 neo-emacs 的配置和细节，骨架用本配置的。**
 
