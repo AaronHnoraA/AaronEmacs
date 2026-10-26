@@ -156,6 +156,7 @@ smooth without creating overlays throughout the buffer."
 (defvar lsp-enabled-clients)
 (defvar lsp--show-message)
 (defvar lsp--cur-workspace)
+(defvar lsp-keep-workspace-alive)
 (defvar lsp-enable-file-watchers)
 (defvar lsp-completion-provider)
 (defvar lsp-diagnostics-provider)
@@ -305,6 +306,7 @@ again without keeping a dead workspace alive.")
                   (region fontify-immediately))
 (declare-function lsp--update-inlay-hints "lsp-mode" ())
 (declare-function lsp--workspace-buffers "lsp-mode" (workspace))
+(declare-function lsp-buffer-live-p "lsp-mode" (buffer-id))
 (declare-function lsp--workspace-client "lsp-mode" (workspace))
 (declare-function lsp--workspace-cmd-proc "lsp-mode" (workspace))
 (declare-function lsp--workspace-proc "lsp-mode" (workspace))
@@ -2205,6 +2207,7 @@ while an explicit shutdown was still waiting for its response.  Repeated calls
 only enforce process termination; they never send a second shutdown RPC."
   (when workspace
     (+lsp-mode--cancel-startup-watchdog workspace)
+    (+lsp-mode--cancel-deferred-shutdown workspace)
     (let ((already-stopping
            (eq
             (ignore-errors (lsp--workspace-shutdown-action workspace))
@@ -2251,6 +2254,65 @@ only enforce process termination; they never send a second shutdown RPC."
              (ignore-errors
                (lsp--session-workspaces (lsp-session))))))
     (+lsp-mode-shutdown-workspace workspace 'emacs-exit)))
+
+;; G-L1: closing the last buffer of a workspace used to stop its server at
+;; once, so opening another file of the project straight after (`H-q' and
+;; reopen, closing a batch of buffers) paid a full restart, which is
+;; expensive on a remote target or for Lean.  The stop now waits
+;; `+language-server-defer-shutdown' seconds and is dropped when a buffer has
+;; joined the workspace by then (from Doom's `+lsp-defer-server-shutdown-a').
+;; Explicit stops stay immediate: `+language-server/shutdown', a closed
+;; workspace resource and Emacs exit go through `+lsp-mode-shutdown-workspace',
+;; which cancels a pending stop, and the buffers of a disconnected target
+;; (`remote-buffer-disconnected-p') are never deferred.
+(defvar +lsp-mode--deferred-shutdowns (make-hash-table :test #'eq :weakness 'key)
+  "Map from an lsp-mode workspace to the timer of its deferred stop.")
+
+(defun +lsp-mode--defer-shutdown-seconds ()
+  "Return the seconds to defer a last-buffer stop, or nil for none."
+  (and (numberp +language-server-defer-shutdown)
+       (> +language-server-defer-shutdown 0)
+       +language-server-defer-shutdown))
+
+(defun +lsp-mode--cancel-deferred-shutdown (workspace)
+  "Cancel the deferred stop of WORKSPACE, if one is pending."
+  (when-let* ((timer (gethash workspace +lsp-mode--deferred-shutdowns)))
+    (cancel-timer timer)
+    (remhash workspace +lsp-mode--deferred-shutdowns)))
+
+(defun +lsp-mode--workspace-has-buffers-p (workspace)
+  "Return non-nil when a live buffer still belongs to WORKSPACE."
+  (seq-some #'lsp-buffer-live-p
+            (ignore-errors (lsp--workspace-buffers workspace))))
+
+(defun +lsp-mode--deferred-shutdown (workspace)
+  "Stop WORKSPACE unless a buffer joined it, or it stopped, meanwhile."
+  (remhash workspace +lsp-mode--deferred-shutdowns)
+  (unless (or (+lsp-mode--workspace-has-buffers-p workspace)
+              (eq (ignore-errors (lsp--workspace-shutdown-action workspace))
+                  'shutdown)
+              (not (process-live-p
+                    (ignore-errors (lsp--workspace-proc workspace)))))
+    (+lsp-mode-shutdown-workspace workspace 'last-buffer-closed)))
+
+(defun +lsp-mode--defer-last-buffer-shutdown-a (fn &optional keep-workspace-alive)
+  "Run FN, `lsp--text-document-did-close', deferring the stop it would start.
+KEEP-WORKSPACE-ALIVE is passed on; lsp-mode then keeps the workspace itself."
+  (let ((seconds (+lsp-mode--defer-shutdown-seconds)))
+    (if (or keep-workspace-alive
+            lsp-keep-workspace-alive
+            (null seconds)
+            remote-buffer-disconnected-p)
+        (funcall fn keep-workspace-alive)
+      (let ((workspaces (ignore-errors (lsp-workspaces))))
+        (funcall fn t)
+        (dolist (workspace workspaces)
+          (unless (+lsp-mode--workspace-has-buffers-p workspace)
+            (+lsp-mode--cancel-deferred-shutdown workspace)
+            (puthash workspace
+                     (run-at-time seconds nil #'+lsp-mode--deferred-shutdown
+                                  workspace)
+                     +lsp-mode--deferred-shutdowns)))))))
 
 (defun +lsp-mode--effective-startup-timeout (workspace)
   "Return the startup timeout to apply to WORKSPACE."
@@ -3336,6 +3398,9 @@ lsp-mode's categorized index, whose category names provide the same fallback."
    #'+lsp-mode--workspace-initialized-h)
   (unless (advice-member-p #'+lsp-mode--connect-via-remote-a 'lsp)
     (advice-add 'lsp :around #'+lsp-mode--connect-via-remote-a))
+  (when (equal (func-arity 'lsp--text-document-did-close) '(0 . 1))
+    (advice-add 'lsp--text-document-did-close :around
+                #'+lsp-mode--defer-last-buffer-shutdown-a))
   (when (and (fboundp 'lsp--require-packages)
              (equal (func-arity 'lsp--require-packages) '(0 . 0))
              (not (advice-member-p

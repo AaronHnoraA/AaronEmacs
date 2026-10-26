@@ -229,7 +229,7 @@ Doom 的做法：
   savehist 保存 kill ring、recentf 定时保存、大段删除后继续自动保存、保存后重判
   major mode、minibuffer 提示符不可进入、`J` 去注释符与 `gq` 不压缩空格、跳转时
   打开折叠、Magit 关长行优化、PDF 页面隐藏光标、apropos 用 Helpful、复制项目相对
-  路径。延迟关闭 LSP server 记为 `lsp-workflow.md` 的缺口 G-L1。第 2、4 节的手感
+  路径。延迟关闭 LSP server 先记为缺口 G-L1，后已按契约实现（第 21 节）。第 2、4 节的手感
   与键位候选仍等用户决定。
 - [x] 逐文件补完（2026-10-27）：`core/lisp/lib/` 每个文件、框架文件和本配置用到的
   每个语言与工具模块，结果在 [comparison.md](comparison.md) 第 8–11 节。期间修了

@@ -214,7 +214,7 @@ Doom 的做法：
 | `+default--delete-backward-char-a`（智能退格）、`newline-above/below`、`yank-pop`、`man-or-woman` | **不收**：退格手感改变；其余已有对应（`SPC e o/O`、Consult、`man`） |
 | `+default/search-*`、`+default/browse-*` | **已有**：telescope 统一搜索面板与项目工作台 |
 | `completion/vertico` | CRM 提示前缀、`vertico-directory-tidy`、Consult 异步参数、Embark 导出、company 补全时改用 basic 优先的 styles | **已有或不收**：Emacs 31 的 `crm-prompt` 自带 `[%d] %p`；其余参数本配置已是相同值；company 的 styles 是本配置有意按类别设置的 |
-| `tools/lsp` | 最后一个 buffer 关掉后推迟 3 秒再关 server | **记为缺口** G-L1（`docs/design/lsp-workflow.md`）：LSP 生命周期属于 Remote/LSP 契约，显式断开和手动关闭必须立即生效，需要先定契约并补故障注入测试 |
+| `tools/lsp` | 最后一个 buffer 关掉后推迟 3 秒再关 server | 先记为缺口 G-L1，后已实现（第 21 节） |
 | `tools/lsp` | GC/IPC 优化模式、ESC 关签名、`lsp-ui-doc` 尺寸 | **已有或不收**：本配置 `read-process-output-max` 已是 4MB、GC 由 gcmh 管；ESC 已有 `+lsp-dismiss-popup-h`；doc 尺寸是外观 |
 
 ## 8. 内核库逐文件对照（`core/lisp/lib/`）
@@ -418,3 +418,16 @@ Doom 的做法：
 | `term/ghostel` | 本配置已用 Ghostel（远程工作区）与 Portal；去掉 `DIRENV_*` 变量的问题未在本配置复现（终端从 PTY 里执行目标 `$SHELL`），不收 |
 | `term/shell`、`term`、`vterm` | `+shell-idle-p` 用 `file-remote-p` 分支，与 Remote 规则相悖；本配置终端走 Portal/Ghostel，不收 |
 | `input/chinese`（`fcitx-evil-turn-on`） | **吸收为 macOS 版**：用户启用了 ABC 与系统拼音，Normal 状态下拼音会吞掉 `j`、`k` 等键。新增动态模块 `tools/macos-input/input.m`（Carbon TIS，`bin/emacs-app build` 编到 `var/macos-input/`，只在用户态运行），`os/macos/input` 在离开 Insert 时切到 `+macos-input-ascii-source`、进入 Insert 时切回原输入法；batch 下不切换。实测（交互 Emacs）：Insert 拼音 → Normal ABC → 再进 Insert 拼音 |
+
+## 21. 模块全文：`tools`
+
+| 模块 | 处理 |
+| --- | --- |
+| `tools/lsp`（`+lsp.el`） | **吸收** G-L1：最后一个 buffer 关闭后推迟 `+language-server-defer-shutdown` 秒再停 server。审计时发现这是回归：迁到 lsp-mode 前本配置在 Eglot 上已有同样的推迟（`my/language-server-defer-shutdown`，3 秒），迁移（`6d49b4b0`）丢了实现，设置项和值 3 一直留在 store 里却无人读取。按 `lsp-workflow.md` 的 D1–D4 实现：显式停止、资源关闭、断开的 target 立即生效并取消计时器，推迟期间 server 已死则不动。`make lsp-live-smoke` 的 C/Python 通过，Java 的 jdtls 在改动前后都以退出码 13 启动失败（与本改动无关） |
+| `tools/lsp`（其余） | `+lsp-signature-stop-maybe-h`（Esc 关签名）已有；`lsp-enable-folding` 等默认已按本配置的 Hub 管理；company 后端、eglot 部分不适用（Eglot 刻意隐藏） |
+| `tools/direnv` | 提前到 `change-major-mode-after-body-hook` 更新环境：本配置的 direnv 走 Remote 环境 capsule，在启动 LSP 前等环境就绪（`+lsp-mode--waiting-for-direnv`），已覆盖。direnv 成功后重启 LSP 不收：本配置 direnv 自动刷新，每次成功都重启会让远程 server 反复重启；环境真的变化时用 `SPC c R` |
+| `tools/editorconfig` | 压缩包与 Office 文件排除**已有**；`editorconfig` 设了缩进时不再猜缩进：本配置 dtrt-indent 已在 editorconfig 之后判断 |
+| `tools/eval` | `eval-expression-print-length/level` 不截断**已有**；eros 结果浮层**已有**（`editing`）；REPL 注册表、quickrun 弹窗收缩与 Evil 选区替换不收（本配置运行走 `compile`/`+output` 与 quickrun 原样） |
+| `tools/lookup` | 本配置的跳转是 `editor/navigation`（LSP → xref → 搜索的回退链已有）；在线搜索已有（`+browser/open-search` 与 `tools/menus` 的搜索引擎表）；Dash docset、字典、bug-reference 打开 issue 不收 |
+| `tools/ansible`、`biblio`、`collab`、`docker`、`ein`、`llm` | 用户不用 Ansible、Org 引用、CRDT 协作、Docker、EIN（Jupyter 走 Noema）；LLM 走 agent-shell/ACP |
+| `tools/debugger` | dape **已有**；断点跨会话保存（`dape-breakpoint-global-mode`，文件在已存在的 `var/dape/`）**已有**，Doom 的建目录补丁不需要 |

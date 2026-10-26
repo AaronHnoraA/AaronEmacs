@@ -197,13 +197,31 @@ target 上一个来回可能有几百毫秒，每次选中补全、每按一次�
   `+typescript`，这个补丁不生效。是否会插入不完整的文本需要用真实
   typescript-language-server 验证；补丁本身是同步请求，验证后再决定是否接入。
   接入时可以用同一个 `:upstream-id`（`ts-ls`）机制，而不是在语言模块里另写判断。
-- **G-L1** 关掉一个 workspace 的最后一个 buffer 时，`lsp-keep-workspace-alive`
-  为 nil 的 server 立即关闭；紧接着打开同一项目的另一个文件（`H-q` 后再打开、
-  批量关闭再打开）要重新启动 server，远程 target 和 Lean 一类重启很贵。Doom
-  把关闭推迟 3 秒（`+lsp-defer-server-shutdown-a`，期间有新 buffer 打开就不关）。
-  接入前要先定契约：显式断开 target（`remote-workspace-disconnect-target`）和
-  `+language-server/shutdown` 必须立即关闭、不经推迟；推迟中的计时器属于
-  workspace 资源，target 断开时取消；并补故障注入测试。
+
+## 最后一个 buffer 关闭后的 server
+
+`lsp-keep-workspace-alive` 为 nil：workspace 的最后一个 buffer 关闭后 server 才停。
+停止推迟 `+language-server-defer-shutdown` 秒（Config，默认 3；nil 或 0 不推迟），
+紧接着打开同一项目的文件（`H-q` 后再打开、批量关闭再打开）不必重启 server，远程
+target 和 Lean 一类重启很贵。实现是 `lsp--text-document-did-close` 上的
+`+lsp-mode--defer-last-buffer-shutdown-a`，到期由 `+lsp-mode--deferred-shutdown`
+经 `+lsp-mode-shutdown-workspace` 停止（来自 Doom 的 `+lsp-defer-server-shutdown-a`；
+本配置迁到 lsp-mode 之前在 Eglot 上已有同样的推迟，迁移时丢失，设置项一直留着）。
+
+- **D1 推迟**：关闭最后一个 buffer 只关文档、不停 server；到期时没有 buffer 加入、
+  server 仍在运行才停。测试：`+lsp-defer-closing-last-buffer-stops-the-server-later`、
+  `+lsp-defer-a-buffer-joining-in-time-keeps-the-server`。
+- **D2 显式停止立即生效**：`+language-server/shutdown`、workspace 资源关闭（target
+  断开、关闭 workspace）、Emacs 退出都走 `+lsp-mode-shutdown-workspace`，它先取消
+  该 workspace 推迟中的计时器；显式断开的 target 的 buffer
+  （`remote-buffer-disconnected-p`）关闭时不推迟。测试：
+  `+lsp-defer-explicit-stop-cancels-the-pending-one`、
+  `+lsp-defer-disconnected-buffers-stop-at-once`。
+- **D3 推迟期间 server 已死**（传输断开、崩溃）：到期什么也不做，恢复与重启交给
+  原有路径。测试：`+lsp-defer-a-server-that-died-meanwhile-is-left-alone`。
+- **D4 不改原有判断**：设置为 nil/0，或 buffer 局部 `lsp-keep-workspace-alive`
+  （runtime 预热的 server）时，行为与 lsp-mode 原样一致。测试：
+  `+lsp-defer-disabled-or-kept-alive-closes-as-before`。
 
 # Current Command Surface
 
