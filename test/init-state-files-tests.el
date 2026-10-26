@@ -196,4 +196,58 @@
               (setq buffer-file-name nil))))
       (delete-directory dir t))))
 
+(ert-deftest +delete-current-file-trashes-and-forgets-recent-entry ()
+  "Deleting the visited file trashes it and drops it from recent files."
+  (require 'recentf)
+  (let* ((dir (file-name-as-directory
+               (file-truename (make-temp-file "delete-file-" t))))
+         (file (expand-file-name "note.txt" dir))
+         (delete-by-moving-to-trash t)
+         trashed
+         (recentf-list nil)
+         (recentf-exclude nil)
+         (recentf-mode-was recentf-mode))
+    (unwind-protect
+        (progn
+          (recentf-mode 1)
+          (write-region "x" nil file nil 'silent)
+          (recentf-add-file file)
+          (with-current-buffer (find-file-noselect file)
+            ;; Never reach the real system trash from a test.
+            (cl-letf (((symbol-function 'y-or-n-p) #'always)
+                      ((symbol-function 'system-move-file-to-trash)
+                       (lambda (name) (push name trashed) (delete-file name))))
+              (+delete-current-file buffer-file-name)))
+          (should-not (file-exists-p file))
+          (should (equal trashed (list file)))
+          (should-not (member (abbreviate-file-name file) recentf-list)))
+      (unless recentf-mode-was (recentf-mode -1))
+      (delete-directory dir t))))
+
+(ert-deftest +rename-current-file-moves-the-recent-entry ()
+  "Renaming the visited file replaces its recent-file entry."
+  (require 'recentf)
+  (let* ((dir (file-name-as-directory
+               (file-truename (make-temp-file "rename-file-" t))))
+         (old (expand-file-name "old.txt" dir))
+         (new (expand-file-name "new.txt" dir))
+         (recentf-list nil)
+         (recentf-exclude nil)
+         (recentf-mode-was recentf-mode)
+         buffer)
+    (unwind-protect
+        (progn
+          (recentf-mode 1)
+          (write-region "x" nil old nil 'silent)
+          (recentf-add-file old)
+          (setq buffer (find-file-noselect old))
+          (with-current-buffer buffer
+            (+rename-current-file new))
+          (should (file-exists-p new))
+          (should-not (member (abbreviate-file-name old) recentf-list))
+          (should (member (abbreviate-file-name new) recentf-list)))
+      (when (buffer-live-p buffer) (kill-buffer buffer))
+      (unless recentf-mode-was (recentf-mode -1))
+      (delete-directory dir t))))
+
 ;;; init-state-files-tests.el ends here

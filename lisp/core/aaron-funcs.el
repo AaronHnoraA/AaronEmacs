@@ -109,18 +109,51 @@ If NEWNAME is a directory, move file to it."
   ;; NEWNAME is a directory
   (when (equal newname (file-name-as-directory newname))
     (setq newname (concat newname (file-name-nondirectory buffer-file-name))))
-  (rename-file buffer-file-name newname)
-  (set-visited-file-name newname)
-  (rename-buffer newname))
+  (let ((oldname buffer-file-name))
+    (rename-file oldname newname)
+    (set-visited-file-name newname)
+    (rename-buffer newname)
+    (+files--update-references oldname buffer-file-name)))
 
-(defun +delete-current-file (file)
-  "Delete current visiting FILE."
+(defvar recentf-list)
+(declare-function recentf-add-file "recentf" (filename))
+(declare-function vc-refresh-state "vc-hooks" ())
+
+(defun +files--update-references (oldname &optional newname)
+  "Forget OLDNAME in the recent-file list after a move or delete.
+NEWNAME, when the file moved, takes its place.  From Doom's
+`doom-files--update-refs'; the entry is matched by name, so nothing on
+the target is probed."
+  (when (bound-and-true-p recentf-mode)
+    (let ((old (abbreviate-file-name oldname)))
+      (setq recentf-list
+            (seq-remove (lambda (entry)
+                          (or (equal entry oldname) (equal entry old)))
+                        recentf-list)))
+    (when newname
+      (recentf-add-file newname)))
+  (when-let* ((buffer (and newname (get-file-buffer newname))))
+    (with-current-buffer buffer
+      (when (fboundp 'vc-refresh-state)
+        (vc-refresh-state)))))
+
+(defun +delete-current-file (file &optional permanently)
+  "Delete current visiting FILE.
+It goes to the trash when `delete-by-moving-to-trash' is set, as with
+`delete-file' and Dired; with PERMANENTLY (a prefix argument) it is removed."
   (interactive
    (list (or buffer-file-name
-             (user-error "No file is visiting"))))
-  (when (y-or-n-p (format "Really delete '%s'? " file))
+             (user-error "No file is visiting"))
+         current-prefix-arg))
+  (when (y-or-n-p (format "Really %s '%s'? "
+                          (if (and delete-by-moving-to-trash (not permanently))
+                              "move to trash"
+                            "delete")
+                          file))
+    (delete-file file (not permanently))
+    (set-buffer-modified-p nil)
     (kill-current-buffer)
-    (delete-file file)))
+    (+files--update-references file)))
 
 (defun +copy-current-file (new-path &optional overwrite-p)
   "Copy current buffer's file to `NEW-PATH'.

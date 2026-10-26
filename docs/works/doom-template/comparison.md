@@ -226,3 +226,6 @@ Doom 的做法：
 | `text.el` | `delete-backward-word`（不进 kill ring）、`backward-kill-to-bol-and-indent`、`delete-trailing-newlines`、`dos2unix`/`unix2dos` | **不收**：前两项改变删除手感；后两项分别是 `delete-blank-lines` 和 `C-x RET f` |
 | `buffers.el` | `doom/kill-buried-buffers` | **吸收**：`kill-buried-buffers`（`+windows/kill-buried-buffers`），后台 Emacs 一次运行几周，用来清掉没在任何窗口里显示的 buffer |
 | `buffers.el` | real/unreal buffer 判定、fallback buffer、`kill-other-buffers`、`kill-matching-buffers`、`kill-project-buffers`、`save-and-kill-buffer` | **已有**：`+buffer-single-instance-p` 与窗口生命周期规则、`SPC b K`、Emacs 的 `kill-matching-buffers` 和 `project-kill-buffers` |
+| `files.el` | `doom-files--update-refs`：删除、移动文件后更新 recentf、VC、Magit、Projectile 缓存 | **吸收并修正**：`SPC f D` / `SPC f R` 之后按名字从最近文件里去掉旧路径（换成新路径）并刷新 VC 状态。审计中发现 `+delete-current-file` 调 `delete-file` 时没传 TRASH，`delete-by-moving-to-trash` 开着也直接永久删除；改为和 `delete-file`、Dired 一样默认进废纸篓，前缀参数才永久删除 |
+| `files.el` | `doom/sudo-*`、`copy/move-this-file`、`file-size`、`glob`、`file-cookie` | **已有或不需要**：`+default/sudo-*`、`+copy-current-file`、`+rename-current-file`；其余是 Doom 自己的工具函数 |
+| `ui.el` | 最大化/放大窗口、间接 narrow、退出确认、`shut-up` advice | **已有或不收**：`SPC e 1`、`narrow-or-widen`、`clone-indirect-buffer`、`shut-up!`；退出确认会挡住 Raycast 退出后台 Emacs |
