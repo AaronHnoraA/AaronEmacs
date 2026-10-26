@@ -142,3 +142,11 @@ Doom 的做法：
 验证：工作区切换的 Visual 与普通选区各有一个 ERT 测试；工作区 8 项、frame/tab
 16 项、LSP UI 30 项通过。启动状态对比中，新增的有效切换前 hook 是预期行为；
 其余差异只是删除未由当前 Perspective 调用的旧挂钩。
+
+## 7. 内核行为逐行对照（`doom-emacs.el`）
+
+第 2 节只比了变量；这里逐个看 `doom-emacs.el` 里的函数、hook 和 advice。
+
+| Doom | 本配置 | 处理 |
+| --- | --- | --- |
+| `auto-save-file-name-transforms` 用 sha1 命名；`make-backup-file-name-1` 对长路径取哈希 | 用可读的 `!` 拼接全路径 | **吸收并改良**：只有超过 230 个字符的名字才哈希（`aaron-state-file-name-fit`，同时管 auto-save、lock、backup）。实测路径拼出的名字超过 APFS 的 255 字符上限时，Emacs 不报错地跳过自动保存和文件锁 |

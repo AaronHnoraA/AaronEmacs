@@ -12,6 +12,7 @@
 (require 'cl-lib)
 (require 'aaron-ui)
 (require 'config)
+(require 'aaron-lib)
 
 (declare-function tempo-expand-if-complete "tempo")
 (declare-function magit-toplevel "magit" (&optional directory))
@@ -97,6 +98,39 @@
 
 (when (boundp 'lock-file-name-transforms)
   (setq lock-file-name-transforms `((".*" ,aaron-lockfile-dir t))))
+
+;; The transforms above spell the whole visited path into one file name, which
+;; stays readable but passes APFS's 255-character name limit for deep paths.
+;; Emacs then skips the auto-save and the lock without a word, so such a name
+;; is hashed instead, as Doom does for every name.  The margin leaves room for
+;; backup version suffixes.
+(defconst aaron-state-file-name-max-length 230
+  "Longest non-directory part, in characters, kept readable in state file names.
+Auto-save, lock and backup names longer than this are hashed.")
+
+(defun aaron-state-file-name-fit (name)
+  "Return NAME, hashed when its non-directory part is too long to create.
+Leading `#' or `.#' and a trailing `#' are kept, so auto-save and lock
+predicates still recognize the result; the end of the old name follows
+the hash to keep the visited file recognizable."
+  (let ((base (and name (file-name-nondirectory name))))
+    (if (or (null base)
+            (<= (length base) aaron-state-file-name-max-length))
+        name
+      (string-match "\\`\\(\\.?#\\)?\\(.*?\\)\\(#\\)?\\'" base)
+      (let ((prefix (or (match-string 1 base) ""))
+            (body (match-string 2 base))
+            (suffix (or (match-string 3 base) "")))
+        (concat (file-name-directory name) prefix
+                (secure-hash 'sha1 body) "-"
+                (substring body (max 0 (- (length body) 40)))
+                suffix)))))
+
+(defadvice! aaron--state-file-name-fit-a (name)
+  "Keep the state file NAME within the filesystem's name length limit."
+  :filter-return '(make-auto-save-file-name make-lock-file-name
+                   make-backup-file-name-1)
+  (aaron-state-file-name-fit name))
 
 ;; Always load the newest file
 (setq load-prefer-newer t)
