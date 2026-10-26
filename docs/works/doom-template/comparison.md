@@ -275,3 +275,5 @@ Doom 的做法：
 | --- | --- | --- |
 | `os/macos` | `locate-command "mdfind"` | **吸收并修正**：本机没有 locate 数据库，`consult-locate-args` 的 `--ignore-case` 又是 GNU 参数，`M-x locate` 和 `consult-locate` 都查不到东西。改用 `mdfind -name`；`locate` 会把 stderr 当结果读，而 mdfind 总在 stderr 打日志，所以经 `/bin/sh` 丢掉 |
 | `os/macos` | Keychain 作 auth-source、`ns-auto-titlebar`、`ns-pop-up-frames nil`、`delete-by-moving-to-trash` | **不收或已有**：Keychain 查询可能弹出系统授权框；标题栏与 frame 由 `config/background` 管；废纸篓已开启 |
+| `term/eshell` | `eshell-hist-ignoredups` | **吸收**：连续重复的命令只记一次 |
+| `term/eshell` | 提示符、别名表、只读保护已执行的输入输出、执行中关 undo、切分窗口开新 shell、visual 命令、各种键 | **不收**：eshell 的行为由 `docs/design/command-shell.md` 定义（自动化 API、输出规整），键位以本配置为准 |

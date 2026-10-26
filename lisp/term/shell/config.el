@@ -305,7 +305,9 @@ current directory."
   :bind (:map eshell-hist-mode-map
          ("M-r" . consult-history))
   :custom
-  (eshell-history-size 10000))
+  (eshell-history-size 10000)
+  ;; From Doom: a command repeated back to back is recorded once.
+  (eshell-hist-ignoredups t))
 
 (use-package em-rebind
   :ensure nil
