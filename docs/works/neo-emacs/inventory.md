@@ -246,3 +246,17 @@
   - 被注释掉的 persp 代码；
   - magit 里的 `J/K` 键；
   - 退出时关闭远程 buffer 的 diff-hl，留到审计 Remote 相关项时再看。
+
+### find（2026-10-26，已完成）
+
+- **不收**：
+  - 按键：`SPC z`、`SPC v c`、insert 下 `C-i`，dired/magit 里的 `c`、`J/K`。
+  - `dired-auto-revert-buffer nil`：会停掉目录的自动刷新。
+  - `dired-recursive-copies never`：会拒绝复制目录。
+  - `(setq dired-hide-details-mode nil)`：这样写不会关掉这个模式。
+  - `TAB` 对文件不动作：会丢掉内联的文件预览。
+  - 书签路径。
+  - 加载时就固定下来的 ripgrep 目录。
+  - `git rev-parse` 找项目根。
+- **已一致**：dired 的 `h/l`。
+- **延后到 Java**：`jump-to-class-at-point`，即 Java 栈帧跳转和 Mapper→XML 跳转，需要另找空键。
