@@ -271,8 +271,8 @@ accepts a new file name exactly.  Command+Shift+Return opens a new frame."
 (use-package orderless
   :ensure t
   :init
-  (setq completion-styles '(orderless basic partial-completion)
-        completion-category-defaults nil
+  ;; `completion-styles' itself is a `config' setting (etc/config-store.el).
+  (setq completion-category-defaults nil
         completion-category-overrides
         '((buffer (styles . (orderless flex)))
           (file (styles . (basic partial-completion orderless)))

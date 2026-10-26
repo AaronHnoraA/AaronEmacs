@@ -316,9 +316,9 @@ Otherwise, use `ace-window' to choose the target window."
   (setq +noema--ace-hint-buffers nil))
 
 (use-package ace-window
+  ;; C-c w is the browser's prefix (app/browser).
   :bind (("M-o" . ace-window)
-         ("M-O" . +windows/swap-window-dwim)
-         ("C-c w s" . +windows/swap-window-dwim))
+         ("M-O" . +windows/swap-window-dwim))
   :config
   (setq aw--lead-overlay-fn #'+noema--ace-window-lead
         aw--remove-leading-chars-fn #'+noema--ace-window-remove))

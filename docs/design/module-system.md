@@ -188,6 +188,5 @@
 ## 已知缺口
 
 - **分类顺序**：声明保持迁移前的加载顺序，所以分类关键字会重复出现。按分类重排会使 166 行启动状态不同（hook 顺序、evil-collection 的键、`config-custom` 同步数量），说明模块之间还有隐式的顺序依赖。重排会改变行为，需要逐组决定，每一步都用启动状态快照对比验证。
-- **加载顺序决定的键冲突**：`global-map` 里的 `C-c w P/s/p`（`term/shell` 与 `app/browser`）、`` M-` ``（`aaron-base` 的 popper 与 `term/shell`）、`M-o`（`config/default` 与 `ui/windows`）。现在由后加载的模块生效，改动需要决定由哪个模块持有这些键。
 - **账本只覆盖加载期间**：启动后才懒加载的文件（如 `config/compile`、`noema/bridge/publish`）按所在目录归属；它们在之后运行时装的 hook、advice、timer 和键不进账本。
 - **`:after` 被启动期间触发**：`lang/auctex` 声明在 `tex`/`pdf-tools` 之后加载，但这两个在启动期间就被加载了，结果它在启动时耗时约 0.9s。

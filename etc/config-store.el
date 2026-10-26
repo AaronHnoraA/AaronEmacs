@@ -178,7 +178,7 @@
    (enable-recursive-minibuffers . t) (completion-ignore-case . t)
    (read-buffer-completion-ignore-case . t)
    (read-file-name-completion-ignore-case . t)
-   (completion-styles basic partial-completion substring flex)
+   (completion-styles orderless basic partial-completion)
    (completions-max-height . 13) (completions-detailed . t)
    (global-hl-line-sticky-flag) (show-paren-when-point-inside-paren . t)
    (show-paren-when-point-in-periphery . t) (so-long-threshold . 10000)

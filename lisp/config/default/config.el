@@ -498,7 +498,7 @@ stat-ing every hidden remote file after each agent turn."
 
 (use-package link-hint
   :ensure t
-  :bind (("M-o" . link-hint-open-link))
+  ;; M-o is ace-window (ui/windows); links open from SPC o o.
   :commands (link-hint-open-link
              link-hint-copy-link))
 

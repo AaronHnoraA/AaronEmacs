@@ -211,6 +211,12 @@ Doom 的做法：
   - **模块化**：`config`、`general`、`keybinds` 成为 `:core` 的前三个模块，面板上有账本；`init.el` 不再单独 `require 'config`。
   - **配置注册表**：`:source` 改记 `lisp/` 下的路径（迁移后所有模块文件都叫 `config.el`，原来的文件名归属已失效，面板上每个模块都会显示所有 `config.el` 的设置）。新增 doctor 策略 `config-setq`，并让策略支持函数正则和 `:when` 过滤。
   - **验证**：`state-check` 只多出 `FEATURE aaron-keybinds`；`test-check` 见提交说明。
-  - **发现（只报告，不改）**：`config-setq` 在加载期间命中 5 处：`completion-styles`（`completion/minibuffer` 的 `:init` 设为 `(orderless basic partial-completion)`，盖过 `etc/config-store.el` 里的 `(basic partial-completion substring flex)`，board 显示的存储值实际不生效）、`undo-tree-auto-save-history`（`aaron-base` 两处，与存储值相同）、`treesit-language-source-alist`（`editor/fold`，另有 `etc/config-treesit.el`）、`persp-state-default-file`（`ui/session`，登记前先给默认值）。
+  - **发现（已修，见下一项）**：`config-setq` 在加载期间命中 5 处：`completion-styles`（`completion/minibuffer` 的 `:init` 设为 `(orderless basic partial-completion)`，盖过 `etc/config-store.el` 里的 `(basic partial-completion substring flex)`，board 显示的存储值实际不生效）、`undo-tree-auto-save-history`（`aaron-base` 两处，与存储值相同）、`treesit-language-source-alist`（`editor/fold`，另有 `etc/config-treesit.el`）、`persp-state-default-file`（`ui/session`，登记前先给默认值）。
+- [x] P1h 修复 P1g 和账本发现的问题，行为保持当前实际生效的样子。
+  - `completion-styles`：存储值改成实际生效的 `(orderless basic partial-completion)`，去掉 `completion/minibuffer` 里的 `setq`。
+  - `treesit-language-source-alist`：去掉 `editor/fold` 里 3 项的 `setq`；它在 treesit 晚于存储加载时会把 16 项的存储值盖掉。
+  - `undo-tree-auto-save-history`：去掉 `aaron-base` 里两处与存储值相同的 `setq`。`persp-state-default-file` 是登记前给的计算默认值，标 `aaron-allow`。
+  - 键冲突 5 处：删除被后加载模块覆盖、从未生效的绑定（`aaron-base` 的 `` M-` `` popper-cycle、`ui/windows` 的 `C-c w s`、`config/default` 的 `M-o` link-hint、`term/portal` 的 `C-c w p/P`）。`daily-usage.md` 里写的 `C-c w p/P` 移入/移出 popup 本来就不生效，已改为右键菜单。`term/portal/popup.el` 的 `global-set-key` 改用 `general-define-key`。
+  - 验证：`config-setq` 0 处，键冲突 0 处；`state-check` 只剩 `hexl-mode-map`（加载时复制了当时的 `global-map`）里两条旧绑定消失；`test-check` 全部一致。
 - [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。只列候选，不改用户习惯，等用户决定。
 - [x] P1e 模块目录比对：[comparison.md](comparison.md) 第 1 节。

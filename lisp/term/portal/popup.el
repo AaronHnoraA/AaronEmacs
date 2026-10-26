@@ -12,6 +12,7 @@
 (require 'seq)
 (require 'subr-x)
 (require 'easymenu)
+(require 'general)
 
 (declare-function aaron-terminal-normalize-directory "aaron-funcs" (directory))
 (declare-function +portal-create "term/portal/config" (&rest args))
@@ -918,14 +919,15 @@ With prefix ARG, create a new popup portal and switch to it."
      (t
       (select-window (+portal-popup--show-buffer buffer))))))
 
-(global-set-key (kbd "M-`") #'+portal-popup/toggle)
-(global-set-key (kbd "C-c e") #'+portal-popup/toggle)
-(global-set-key (kbd "C-c C-e") #'+portal-popup/toggle)
-(global-set-key (kbd "C-c E") #'+portal-popup/cycle)
-(global-set-key (kbd "C-c M-E") #'+portal-popup/new)
-(global-set-key (kbd "C-c M-e") #'+portal/toggle-fixed)
-(global-set-key (kbd "C-c w p") #'+portal-popup/move-buffer-in)
-(global-set-key (kbd "C-c w P") #'+portal-popup/move-buffer-out)
+;; Moving buffers in and out of the popup is on the +term header menu; C-c w
+;; is the browser's prefix (app/browser).
+(general-define-key
+ "M-`" #'+portal-popup/toggle
+ "C-c e" #'+portal-popup/toggle
+ "C-c C-e" #'+portal-popup/toggle
+ "C-c E" #'+portal-popup/cycle
+ "C-c M-E" #'+portal-popup/new
+ "C-c M-e" #'+portal/toggle-fixed)
 
 (with-eval-after-load 'savehist
   (add-to-list 'savehist-additional-variables '+portal-popup-last-height))

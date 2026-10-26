@@ -26,7 +26,7 @@
 ;; Set the package's own default so its native M-x commands and our shortcuts
 ;; agree even before either shortcut has been used.  Keep user overrides.
 (unless persp-state-default-file
-  (setq persp-state-default-file
+  (setq persp-state-default-file ; aaron-allow: config-setq (computed default; the store has none)
         (expand-file-name "var/session/perspectives.el" user-emacs-directory)))
 (config-register 'persp-state-default-file
                  :group '+session

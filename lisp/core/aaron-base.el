@@ -1565,8 +1565,7 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
       (aaron-undo-tree-load-history-core nil 'noerror))
     (apply orig-fun args))
 
-  ;; 4) 让它在“本地文件”自动把历史写盘（崩溃也可恢复）
-  (setq undo-tree-auto-save-history t)
+  ;; 4) 本地文件自动把历史写盘：`undo-tree-auto-save-history' 是 config 设置。
 
   :after hydra
   :bind (("M-z" . undo-tree-undo)
@@ -1583,7 +1582,6 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
   ("u"   undo-tree-visualize "visualize" :color blue)
   ("q"   nil "quit" :color blue))
   :config
-  (setq undo-tree-auto-save-history t)
   (advice-add 'undo-tree-make-history-save-file-name
               :around #'aaron-undo-tree-make-history-save-file-name)
   (advice-add 'undo-tree-load-history :around #'aaron-undo-tree-load-history)
@@ -1808,8 +1806,8 @@ interrupt the current window layout.")
 
 (use-package popper
   :ensure t ; or :straight t
+  ;; M-` belongs to the Portal popup (term/portal).
   :bind (("C-`"   . popper-toggle)
-         ("M-`"   . popper-cycle)
          ("C-M-`" . popper-toggle-type))
   :init
   (setq popper-reference-buffers

@@ -130,9 +130,9 @@
   新建 popup `portal`
 - `C-c M-e`
   切换当前 popup `portal` 的固定状态
-- `C-c w p` / `C-c w P`
+- 顶部 `+term` 的右键菜单
   把当前普通 buffer 移进 popup / 把当前 popup buffer 移到普通窗口；需要选窗口时显示
-  `ace-window` 编号。顶部 `+term` 的右键菜单也有这两个动作
+  `ace-window` 编号（`C-c w` 是浏览器前缀，见下文）
 - `C-\``
   `popper-toggle`
 - `C-x w d` / `C-u C-x w d`

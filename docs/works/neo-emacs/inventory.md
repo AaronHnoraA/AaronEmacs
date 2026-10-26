@@ -35,12 +35,10 @@
 | leader | `SPC f w/n/g/j`、`SPC t n`、`SPC o t/e/w`、`SPC z`、`SPC v c/v`、`SPC r r`、`SPC c I`、`SPC e c/l`、`SPC d a/c` | ace-window、复制 文件:行、复制文件到剪贴板、Java 类跳转、新 workspace、终端、elfeed、eww、consult-find、ripgrep、项目终端、quickrun、实现跳转、SQL 连接、agent 会话 |
 | dired / magit | `h` `l` `c` `J` `K` `TAB` | 上级、进入、新建文件、切 workspace、subtree |
 
-处理：**待定**。需要一条总原则：
+处理：**已定：以本配置现有的键为准。** 他的键只在空位上考虑，各模块审计时逐个列出。
 
-- 以你现有的键为准，他的键只放在空位上；
-- 或者他的整组 `;` 前缀整体引入。
-
-`J/K`、`C-j/C-k`、`f`、`C-h` 会覆盖 Evil 原生键。dired 的 `h/l/c` 会和 Dirvish 那张跟 yazi 对齐的键表冲突。
+- `J/K`、`C-j/C-k`、`f`、`C-h` 会覆盖 Evil 原生键，因此不收。
+- dired 的 `h/l/c` 和 Dirvish 那张跟 yazi 对齐的键表冲突，因此不收。
 
 ## 2. `:ui`
 
