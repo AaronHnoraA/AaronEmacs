@@ -12,16 +12,16 @@ export LIBRARY_PATH := $(patsubst %/,%,$(GCCJIT_LIBRARY_DIR))$(if $(LIBRARY_PATH
 endif
 NOEMA_DIR = site-lisp/noema
 EMACS_BATCH_BASE = $(EMACS) --batch --no-site-file --no-site-lisp --no-splash --init-directory=$(CURDIR) -q
-PUBLISH_BATCH = $(EMACS_BATCH_BASE) -L site-lisp/config -L lisp -L lisp/core -l ./lisp/noema/bridge/publish.el
+PUBLISH_BATCH = $(EMACS_BATCH_BASE) -L lisp -L lisp/core -l ./lisp/noema/bridge/publish.el
 # Load early-init first so native-comp never writes into top-level eln-cache.
 BATCH = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./init.el
 BOOTSTRAP = $(EMACS_BATCH_BASE) -l ./early-init.el -l ./bootstrap.el
 BOOTSTRAP_INSTALL = BOOTSTRAP_MODE=install $(BOOTSTRAP)
 BOOTSTRAP_EXPORT = BOOTSTRAP_MODE=export $(BOOTSTRAP)
 BOOTSTRAP_AUDIT = BOOTSTRAP_MODE=audit $(BOOTSTRAP)
-REMOTE_TEST_BATCH = $(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L site-lisp/config -L lisp -L lisp/core -L lisp/remote -L lisp/remote/backend
+REMOTE_TEST_BATCH = $(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L lisp -L lisp/core -L lisp/remote -L lisp/remote/backend
 UI_TOKEN_FILE = site-lisp/noema/src/styles/aaron-ui-tokens.css
-UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui/aaron-ui.el
+UI_TOKEN_BATCH = $(EMACS) --batch -Q -L lisp/core/aaron-ui -l lisp/core/aaron-ui/aaron-ui.el
 
 .PHONY: default help up setup setup-full bootstrap-health install emacs-binary-install emacs-binary-update emacs-binary-verify portal-build remote-ikernel-install lock audit-lock doctor build build-force \
         noema-web-build \
@@ -182,10 +182,10 @@ core-test:
 	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' -L lisp/core -l test/aaron-lib-tests.el -l test/aaron-emacs-tests.el -l test/aaron-modules-tests.el -l test/aaron-registration-tests.el -f ert-run-tests-batch-and-exit
 
 activity-test:
-	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L site-lisp/config -L site-lisp/aaron-ui -L lisp -L lisp/core -L lisp/remote -l test/init-activity-tests.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L lisp -L lisp/core -L lisp/core/aaron-ui -L lisp/remote --eval '(progn (require (quote aaron-modules)) (aaron-modules-load-standalone-autoloads))' -l test/init-activity-tests.el -f ert-run-tests-batch-and-exit
 
 performance-test:
-	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L site-lisp/config -L site-lisp/aaron-ui -L site-lisp/general.el -L lisp -L lisp/core -l test/init-performance-tests.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L lisp -L lisp/core -L lisp/core/aaron-ui --eval '(progn (require (quote aaron-modules)) (aaron-modules-load-standalone-autoloads))' -l test/init-performance-tests.el -f ert-run-tests-batch-and-exit
 
 project-workflow-test:
 	$(BATCH) -l test/init-project-run-tests.el -l test/init-output-frame-tests.el -l test/init-project-local-tests.el -l test/init-amx-tests.el -f ert-run-tests-batch-and-exit

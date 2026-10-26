@@ -34,7 +34,7 @@
 例外：
 
 - `:core` 是平铺的 `lisp/core/aaron-*.el`，和 Doom 的 `doom-*.el` 一样，声明为 `(base :feature aaron-base)`。
-- `config-tools` 来自 `site-lisp/config`，也用 `:feature` 声明。
+- `config`、`config-tools`、`config-custom`（配置注册表）、`general`（键位 DSL）和 `aaron-ui/`（board 组件、主题 token、`vendor/` 主题、`ghostty.conf`）也在核心里，但保留各自的公开命名（`config-*`、`general-*`、`aaron-ui-*`），用 `:feature` 声明。`aaron-ui/` 是核心里唯一的子目录，因为它带着主题和非 Elisp 文件。
 - Remote 框架库 `lisp/remote/remote-*.el` 保留 `remote-*` 的公开 feature 名。
 
 **与 Doom 的差异**：Doom 按路径加载 `config.el`，模块之间通过 `autoload/` 共享函数。本配置让每个模块文件都是一个 feature，名字就是它在 `lisp/` 下的路径，所以只要 `lisp/` 在 `load-path` 上就能 `require`。这样做有三个原因：

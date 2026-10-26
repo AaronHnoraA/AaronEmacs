@@ -20,7 +20,7 @@ make emacs-binary-verify   # 检查 Emacs、emacsclient、NS、模块与 xwidget
 ## Portal 的 Ghostty 外观
 
 终端字体、20pt 字号、Catppuccin Mocha 背景 `#1E1E2E` 与 87% 不透明度
-由 `site-lisp/aaron-ui/ghostty.conf` 管理，并链接到 `~/.config/ghostty/config`。
+由 `lisp/core/aaron-ui/ghostty.conf` 管理，并链接到 `~/.config/ghostty/config`。
 原生桥接改动放在 `config/portal-local.patch`，并登记在
 `config/package-patches.el`。`package-vc` 安装时自动应用补丁；统一包升级先撤销补丁，
 升级后再应用。新版源码若与补丁冲突，升级会明确报错，需调整补丁后重试。
@@ -72,7 +72,7 @@ make ui-test
 make audit-ui-tokens
 ```
 
-修改 `site-lisp/aaron-ui/aaron-ui.el` 中的 token 后运行 `make ui-tokens`，
+修改 `lisp/core/aaron-ui/aaron-ui.el` 中的 token 后运行 `make ui-tokens`，
 把确定性 CSS 导出物一并提交。Noema 运行时只读取该 CSS，不依赖 Emacs。
 
 ### 什么时候该更新锁文件
@@ -126,19 +126,12 @@ make audit-ui-tokens
 
 单文件第三方包集中在 `site-lisp/vendored/`（`init.el` 加入 `load-path`，`core/aaron-base.el` require）。更新时整文件替换并保留上游头注释，不在其中写本地改动。
 
-当前启动链里有一个重要项：
-
-- [site-lisp/general.el/general.el](../../site-lisp/general.el/general.el)
-
-`general.el` 是按键绑定 DSL，主要服务 `lisp/core/aaron-funcs.el` 里的 `aaron-evil-define-key`。它让 leader 绑定可以统一处理 Evil state、符号 keymap、真实 keymap object 和批量绑定。
-
-维护边界：
-
-- 它现在是启动依赖，不是可随手删除的实验目录
-- `init.el` 会把 `site-lisp/general.el/` 加入 `load-path`
-- 如果换机器、新 clone 或清理 `site-lisp/` 时漏掉它，`require 'general` 会导致启动链失败
-- 如果继续 vendored 管理，需要把整个 `site-lisp/general.el/` 保留在仓库或迁移快照中
-- 如果改成 package / VC 包管理，需要同步更新 `init.el` 的 load-path 和 package 恢复流程
+本配置自己的基础设施不在 `site-lisp/`，而在核心 `lisp/core/`：`config` 注册表、
+`aaron-ui/`（含 `vendor/` 里的 Kanagawa 主题和 `ghostty.conf`），以及完全内化的
+按键 DSL [lisp/core/general.el](../../lisp/core/general.el)。`general.el` 源自
+noctuid/general.el（GPLv3，文件头保留许可声明），现在按本配置的代码维护：可以直接修改，
+`general-route-*` 就是在这里加的；上游测试移到 `test/general/`。它是启动依赖，
+`lisp/core` 在 `load-path` 上即可 `require`。
 
 #### site-lisp/ratex.el —— 带本地改动的 fork
 
@@ -304,7 +297,7 @@ leader 入口：
 - async warning 策略走 `silent`
 - `custom.el` 不纳入统一编译目标
 - 不自动做 byte compile
-- 编译目标目录为 `lisp/` 与 `site-lisp/config/`（config 注册表是每次启动都要加载的基础设施，纳入 `+compile/byte-compile-config` / `+compile/native-compile-config`）
+- 编译目标目录为 `lisp/`（含核心里的 config 注册表和 `general.el`，纳入 `+compile/byte-compile-config` / `+compile/native-compile-config`）
 - 启动时会删除本配置自有的 `lisp/` 和 `site-lisp/` 下 `.elc`，避免坏字节码或较新的错误 `.elc` 压过源码；`elpa/` 包字节码不受影响
 - 因为 `.elc` 每次启动都会被删，config 的启动加速来自 **native compile** 的 `.eln`（持久缓存在 `var/eln-cache/`，加载源码时自动采用）；byte compile 仅用于诊断 warning
 - 可选自动 native compile on save，由 board / dispatch 统一开关
@@ -322,7 +315,7 @@ leader 入口：
 文件：
 
 - [lisp/config/performance/config.el](../../lisp/config/performance/config.el)
-- [site-lisp/aaron-ui/aaron-ui-performance.el](../../site-lisp/aaron-ui/aaron-ui-performance.el)
+- [lisp/core/aaron-ui/aaron-ui-performance.el](../../lisp/core/aaron-ui/aaron-ui-performance.el)
 
 常用入口：
 

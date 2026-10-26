@@ -420,7 +420,7 @@ Return FALLBACK when TOKEN is unknown.  String TOKEN values are returned as-is."
     (apply #'set-face-attribute face nil (aaron-ui--resolve-face-attrs attrs))))
 
 (defun aaron-ui-load-theme (&optional variant)
-  "Load local Kanagawa VARIANT from `site-lisp/aaron-ui'."
+  "Load local Kanagawa VARIANT from `lisp/core/aaron-ui'."
   (interactive
    (list (intern (completing-read "Aaron theme: "
                                   '("wave" "dragon" "lotus")

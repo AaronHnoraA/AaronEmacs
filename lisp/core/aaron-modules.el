@@ -677,8 +677,28 @@ again."
   (let* ((dirs (cl-loop for key in (aaron-module-list)
                         for module = (aaron-module-get key)
                         for dir = (aaron-module-expand-path module aaron-module-autoload-dir)
-                        if (and dir (file-directory-p dir)) collect dir))
-         (out aaron-module-autoloads-file))
+                        if (and dir (file-directory-p dir)) collect dir)))
+    (aaron-modules--ensure-autoloads dirs)))
+
+(defun aaron-modules-load-standalone-autoloads ()
+  "Load the autoloads of every directory module found on disk.
+For batch runs that load single modules with -Q: the declaration is not
+read, so modules' `set-...!' interfaces are found by globbing
+`aaron-module-load-path'.  They are kept in a file of their own, so a
+full startup's autoloads are not regenerated."
+  (let ((aaron-module-autoloads-file
+         (expand-file-name "var/aaron/module-autoloads-standalone.el"
+                           user-emacs-directory)))
+    (aaron-modules--ensure-autoloads
+     (sort (cl-loop for root in aaron-module-load-path
+                    append (file-expand-wildcards
+                            (expand-file-name
+                             (concat "*/*/" aaron-module-autoload-dir) root)))
+           #'string<))))
+
+(defun aaron-modules--ensure-autoloads (dirs)
+  "Load the autoloads generated from DIRS, regenerating them if stale."
+  (let ((out aaron-module-autoloads-file))
     (when dirs
       (when (or (not (file-exists-p out))
                 (not (equal (mapcar #'file-truename dirs)

@@ -404,7 +404,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   maintenance Skill points to `AGENT.md` and the docs map instead of copying
   rules or path tables, and changes in the same commit as the code or docs it
   describes.
-- Config registry: the `config` package under `site-lisp/config/`
+- Config registry: the `config` package in the core (`lisp/core/config*.el`)
   (`config-register`, `config-register-hook`, `config-register-file`,
   `config-get`, `config-set`, `config-reset`, `config-board`). When a setting
   should be user-tunable: register it, put the value in `etc/config-store.el`
@@ -436,8 +436,9 @@ surface:
 
 ## Keybinding Rules
 
-The keybinding layer is the vendored `site-lisp/general.el`. It is a startup
-dependency, not an optional experiment.
+The keybinding layer is `general.el`, internalised into the core as
+`lisp/core/general.el`. It is a startup dependency, not an optional
+experiment.
 
 - Do not add new `global-set-key` calls for normal configuration shortcuts.
 - For leader bindings, edit the existing leader definitions in
@@ -768,7 +769,7 @@ git diff --check
 When the file requires local load paths, include them:
 
 ```sh
-emacs --batch -Q -L lisp -L site-lisp/general.el --eval '...'
+emacs --batch -Q -L lisp -L lisp/core --eval '...'
 ```
 
 For behavior wrappers, add a focused batch smoke test when practical. For

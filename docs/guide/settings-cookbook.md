@@ -170,14 +170,14 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 文件：
 
 - [lisp/core/aaron-open.el](../../lisp/core/aaron-open.el)
-- [site-lisp/general.el/general.el](../../site-lisp/general.el/general.el)
+- [lisp/core/general.el](../../lisp/core/general.el)
 
 改默认 URL / 搜索 / 文件 / PDF 打开方式时，优先改 `lisp/core/aaron-open.el`
 里的 `aaron-open-routes`。
 
 `aaron-open-routes` 使用 `general.el` 提供的 `general-route-*` DSL helpers：
 具体策略留在 `core/aaron-open.el`，通用的 route 读取、别名归一和菜单选择逻辑在
-`site-lisp/general.el/general.el`。
+`lisp/core/general.el`。
 
 常用值：
 
@@ -192,7 +192,7 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 - [lisp/editor/evil/config.el](../../lisp/editor/evil/config.el)
 - [lisp/core/aaron-funcs.el](../../lisp/core/aaron-funcs.el)
-- [site-lisp/general.el/general.el](../../site-lisp/general.el/general.el)
+- [lisp/core/general.el](../../lisp/core/general.el)
 
 你会看到：
 
@@ -204,7 +204,7 @@ placeholder、description、group、escape）。新增模板即放一个带该�
 
 - `define-leader-key` 是配置里的 leader 入口，定义在 `lisp/editor/evil/config.el`
 - `aaron-evil-define-key` 是底层封装，定义在 `lisp/core/aaron-funcs.el`
-- `general.el` 是 vendored 的按键绑定 DSL，放在 `site-lisp/general.el/`
+- `general.el` 是按键绑定 DSL，已收进核心：`lisp/core/general.el`
 
 `general.el` 的职责很窄：声明式定义快捷键。它不是 UI、补全、LSP 或包管理框架。这里引入它，主要是为了统一处理 Evil state、keymap、leader key 和批量绑定，尤其是符号 keymap，例如 `'global`。
 
@@ -629,7 +629,7 @@ Neomacs 的差异都收在 `lisp/os/neomacs/config.el` 一个边界里：
 文件：
 
 - [lisp/ui/activity/config.el](../../lisp/ui/activity/config.el) —— 指示器、分类、注册表、板面数据与动作
-- [site-lisp/aaron-ui/aaron-ui-activity.el](../../site-lisp/aaron-ui/aaron-ui-activity.el) —— Activity 的 ETAF 整页布局；继续取 Aaron UI 色板和原有图标
+- [lisp/core/aaron-ui/aaron-ui-activity.el](../../lisp/core/aaron-ui/aaron-ui-activity.el) —— Activity 的 ETAF 整页布局；继续取 Aaron UI 色板和原有图标
 - [lisp/noema/activity/config.el](../../lisp/noema/activity/config.el) —— Noema Core task / agent 工作快照与原生取消
 - [assets/activity/](../../assets/activity) —— 皮卡丘的 XPM 帧和画它的脚本
 
@@ -719,5 +719,5 @@ host。请求共用一次 15 秒超时，失败显示可点击的 `[retry]`，�
 
 直接用 `transient-define-prefix` 即可。`aaron-ui-transient` 在启动时自动将 Kanagawa
 palette 应用到所有 transient 共享 faces，**新菜单无需单独配色**。如需调整颜色，
-修改 `site-lisp/aaron-ui/aaron-ui-transient.el` 中的 `aaron-ui-transient-apply-faces`
+修改 `lisp/core/aaron-ui/aaron-ui-transient.el` 中的 `aaron-ui-transient-apply-faces`
 即可影响全部菜单。详见 [dev-guide.md](dev-guide.md) §11。

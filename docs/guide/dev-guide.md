@@ -499,7 +499,7 @@ channel lifecycle 必须委托给 Remote 框架。若必须写 local/remote 条�
 ### 当前逻辑
 
 默认打开方式集中在 `lisp/core/aaron-open.el` 的 `aaron-open-routes`，通用 DSL helper
-在 vendored `site-lisp/general.el/general.el` 的 `general-route-*`。`browse-url`
+在 vendored `lisp/core/general.el` 的 `general-route-*`。`browse-url`
 默认走 `menu`，菜单默认项是 `xwidget`，不做 URL 复杂度自动分流。分流保持手动：
 
 browser pipeline 额外提供：
@@ -856,7 +856,7 @@ backend list 中。
 
 ## 10. Board UI 工具库 (`aaron-ui-board`)
 
-所有只读 dashboard / hub / report buffer 都通过 `site-lisp/aaron-ui/aaron-ui-board.el`
+所有只读 dashboard / hub / report buffer 都通过 `lisp/core/aaron-ui/aaron-ui-board.el`
 渲染，该库建立在 `aaron-ui` 语义 palette 之上，提供统一的 Kanagawa Wave 风格：
 大标题 + icon、badge 标签/统计、action toolbar、section 分区 + count badge、
 label-badge 字段行、hl-line 行高亮、styled header-line。
@@ -902,7 +902,7 @@ label-badge 字段行、hl-line 行高亮、styled header-line。
 ## 11. Transient 菜单 + which-key 主题（`aaron-ui-transient`）
 
 所有 `transient-define-prefix` 菜单（23+个 dispatch，包括 health、compile、git、
-lsp、project 等）和 which-key popup 通过 `site-lisp/aaron-ui/aaron-ui-transient.el`
+lsp、project 等）和 which-key popup 通过 `lisp/core/aaron-ui/aaron-ui-transient.el`
 统一配色，**无需对每个 dispatch 单独修改**。
 
 - heading = accent-cyan bold；key = accent-cyan；stay = accent-green；

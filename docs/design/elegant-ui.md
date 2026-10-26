@@ -1,7 +1,7 @@
 # Aaron Elegant UI
 
 Aaron UI 是 Emacs 与 Noema 共用的设计系统。深色 Kanagawa Wave 是 Emacs
-的默认基调；`site-lisp/aaron-ui/aaron-ui.el` 提供语义角色、间距和形状 token。
+的默认基调；`lisp/core/aaron-ui/aaron-ui.el` 提供语义角色、间距和形状 token。
 Noema 继续由自己的 `pages/style.css` 独占现有配色和 Markdown 宽度，
 共享层不会覆盖这些变量或布局规则。
 

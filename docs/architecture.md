@@ -91,7 +91,7 @@ docs/                 两个仓库的全部文档，入口 docs/README.md：guid
 
 - 身份与执行：Remote 框架（`remote-*` API）。本机是 target `local`，消费者不按
   `file-remote-p` 或 target ID 分支。
-- 配置值：`site-lisp/config` 注册表 + `etc/config-store.el`，见
+- 配置值：核心里的 `config` 注册表（`lisp/core/config*.el`） + `etc/config-store.el`，见
   [config-management.md](design/config-management.md)。
 - 键位：`general.el`；leader 前缀在 `editor/evil/config.el`，域内后缀在所属模块，见
   [daily-usage.md](guide/daily-usage.md)。

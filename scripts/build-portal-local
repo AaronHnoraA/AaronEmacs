@@ -3,7 +3,7 @@
 set -eu
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 source_dir="$root/site-lisp/portal"
-ghostty_config="$root/site-lisp/aaron-ui/ghostty.conf"
+ghostty_config="$root/lisp/core/aaron-ui/ghostty.conf"
 ghostty_link="${XDG_CONFIG_HOME:-$HOME/.config}/ghostty/config"
 emacs_bin="${EMACS:-emacs}"
 [ -d "$source_dir/.git" ] || { echo "Portal checkout missing: $source_dir" >&2; exit 1; }

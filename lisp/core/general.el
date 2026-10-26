@@ -32,6 +32,12 @@
 ;; function to generate "nmap", "vmap", etc. keybinding functions for evil.
 
 ;; For more information see the README in the online repository.
+;;
+;; Internalised into this configuration's core (lisp/core/general.el) and
+;; maintained with it: local changes are made here directly (the
+;; `general-route-*' helpers are one), and the upstream tests live in
+;; test/general/.  The configuration binds keys through `map!' and the
+;; leader definers in aaron-keybinds.el, which sit on top of this file.
 
 ;;; Code:
 (require 'cl-lib)

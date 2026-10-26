@@ -43,7 +43,7 @@
    (+native-comp-pop-log) (+native-comp-enable-deferred . t)
    (+native-comp-enable-jit . t) (+package-enable-native-compile . t)
    (+compile-third-party-directories "site-lisp")
-   (+compile-target-directories "lisp" "site-lisp/config")
+   (+compile-target-directories "lisp")
    (+compile-target-files "early-init.el" "init.el" "bootstrap.el")
    (+noema-roam-runtime-cli . "/Users/hc/.emacs.d/site-lisp/noema/roam-cli.mjs")
    (+noema-roam-runtime-root . "/Users/hc/.emacs.d/site-lisp/noema")

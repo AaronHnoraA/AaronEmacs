@@ -196,7 +196,7 @@ height in pixels."
   :group 'faces)
 
 ;; Use Iosvkem in terminals
-(add-to-list 'load-path (locate-user-emacs-file "site-lisp/aaron-ui"))
+(add-to-list 'load-path (locate-user-emacs-file "lisp/core/aaron-ui"))
 
 (use-package aaron-ui
   :demand t

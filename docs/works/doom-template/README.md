@@ -201,10 +201,10 @@ Doom 的做法：
   - **autoloads**：目录模块的 autoloads 生成后，路径改为相对 `lisp/`。
   - **验证**：启动状态只多出 `module-autoloads` 这个 feature；`evil-emacs-state-modes` 成员不变；`shackle-rules` 仍是 23 条，`compilation-mode` 仍排第一，其余开发规则之间的谓词互不重叠。core 50 / lsp 131 / ui 96 项测试通过。
 - [x] 行为不变的验证固化为硬规范（`AGENT.md` “Verification”）：`make state-baseline` / `state-check`、`make test-baseline` / `test-check`，工具在 `scripts/state-snapshot.el`、`scripts/test-all`。
-- [ ] P1f 把 `site-lisp` 里本配置自己的基础设施收进核心（对应 Doom 的 `core/lisp/lib/`）。
-  - **收进核心**：`config`（配置注册表，每个模块都依赖它）平铺进 `lisp/core/`；`aaron-ui`（board 组件库、主题 token、`vendor/` 主题、`ghostty.conf`）整个目录进 `lisp/core/aaron-ui/`，并更新 `~/.config/ghostty/config` 链接和 `scripts/build-portal-local`。两者的 feature 和 `config-*` / `aaron-ui-*` 公开命名都不变。
-  - **留在 `site-lisp`**：`general.el` 是第三方包，Doom 也把它当作包依赖而不是内核代码，所以只作为核心的启动依赖写进文档；`dape-toolbar` 是独立发布的包（有 Eask、LICENSE、CHANGELOG）；`ratex.el`、`vendored/`、`noema`、`portal`、`remote_ikernel` 也都不动。
+- [x] P1f 把 `site-lisp` 里本配置自己的基础设施收进核心（对应 Doom 的 `core/lisp/lib/`）。
+  - **收进核心**：`config`（配置注册表）平铺进 `lisp/core/`；`general.el` 由用户完全内化，也平铺进 `lisp/core/`，上游测试移到 `test/general/`，Cask/Makefile/README 等上游构建文件删除；`aaron-ui`（board 组件库、主题 token、`vendor/` 主题、`ghostty.conf`）整个目录进 `lisp/core/aaron-ui/`，`~/.config/ghostty/config` 链接和 `scripts/build-portal-local` 已更新。feature 和 `config-*` / `general-*` / `aaron-ui-*` 公开命名不变。
+  - **留在 `site-lisp`**：`dape-toolbar` 是独立发布的包（有 Eask、LICENSE、CHANGELOG）；`ratex.el`、`vendored/`、`noema`、`portal`、`remote_ikernel` 不动。
   - **删除**：空的 `site-lisp/init.sh`。
-  - **验证**：用 `state-check` / `test-check`。要等工作区里别人的在途改动提交后再做，否则对比结果分不清是谁的改动。
+  - **验证**：`state-check` 只剩 `+compile-target-directories` 去掉 `site-lisp/config` 这一行；`test-check` 无变化。顺带修好 `make activity-test` / `performance-test`：这两个 `-Q` 套件单独加载模块，自 `set-…!` 接口改为 autoload 后就找不到它们，现在先调用 `aaron-modules-load-standalone-autoloads`。
 - [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。只列候选，不改用户习惯，等用户决定。
 - [x] P1e 模块目录比对：[comparison.md](comparison.md) 第 1 节。

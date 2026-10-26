@@ -1,6 +1,6 @@
 # 统一配置管理（`config` 包）
 
-`site-lisp/config/` 下的 `config` 包是本配置中**所有可配置项的统一入口**。
+核心里的 `config` 包（`lisp/core/config*.el`）是本配置中**所有可配置项的统一入口**。
 
 ## 核心原则：不在 Lisp 代码里硬编码值
 
@@ -42,9 +42,9 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
 
 | 文件 | 职责 |
 | --- | --- |
-| `site-lisp/config/config.el` | 注册表核心 API (`(provide 'config)`) |
-| `site-lisp/config/config-custom.el` | 原生 Customize 适配层：把注册表项映射成 Custom 变量/组 |
-| `site-lisp/config/config-tools.el` | 兼容入口 `config-board` + transient `config-dispatch` |
+| `lisp/core/config.el` | 注册表核心 API (`(provide 'config)`) |
+| `lisp/core/config-custom.el` | 原生 Customize 适配层：把注册表项映射成 Custom 变量/组 |
+| `lisp/core/config-tools.el` | 兼容入口 `config-board` + transient `config-dispatch` |
 | `etc/config-store.el` | **随仓库提交的配置值**，既是初始值也是用户自定义值 |
 | `etc/config-*.el` | 自动发现的专题 store；已存在的 key 会写回原文件 |
 | `lisp/core/aaron-base.el`（尾部） | Emacs 原生变量的注册声明（不含 setq，值在 store 里） |

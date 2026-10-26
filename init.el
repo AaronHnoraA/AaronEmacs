@@ -134,16 +134,11 @@
 ;; Modules are addressed by their path under lisp/ (`tools/lsp/config'), so
 ;; only lisp/ itself, the core and the Remote library need to be on the path.
 (let* ((dir (locate-user-emacs-file "lisp"))
-       (general-dir (locate-user-emacs-file "site-lisp/general.el"))
-       (aaron-ui-dir (locate-user-emacs-file "site-lisp/aaron-ui"))
-       (config-dir (locate-user-emacs-file "site-lisp/config"))
        (vendored-dir (locate-user-emacs-file "site-lisp/vendored")))
   (add-to-list 'load-path (file-name-as-directory dir))
   (add-to-list 'load-path (file-name-as-directory (expand-file-name "core" dir)))
   (add-to-list 'load-path (file-name-as-directory (expand-file-name "remote" dir)))
-  (add-to-list 'load-path (file-name-as-directory config-dir))
-  (add-to-list 'load-path (file-name-as-directory general-dir))
-  (add-to-list 'load-path (file-name-as-directory aaron-ui-dir))
+  (add-to-list 'load-path (file-name-as-directory (expand-file-name "core/aaron-ui" dir)))
   (add-to-list 'load-path (file-name-as-directory vendored-dir)))
 
 (defun aaron-migrate-legacy-noema-state ()

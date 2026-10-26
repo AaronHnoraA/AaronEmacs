@@ -28,7 +28,7 @@
          (byte-compile-warnings t)
          (load-prefer-newer t))
     (add-to-list 'load-path
-                 (expand-file-name "site-lisp/config" user-emacs-directory))
+                 (expand-file-name "lisp/core" user-emacs-directory))
     (setq package-user-dir
           (file-name-as-directory
            (expand-file-name "elpa" user-emacs-directory)))
