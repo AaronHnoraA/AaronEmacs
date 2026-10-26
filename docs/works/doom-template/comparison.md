@@ -115,3 +115,30 @@ Doom 的做法：
   - `set-formatter!`：格式化只走 LSP；
   - `set-file-template!`：模板本身就是按类型分的目录数据；
   - `set-company-backend!`：原有的同类宏 `set-company-backends-for!` 没有任何调用者，直接删掉，不改名。
+
+## 6. 启用模块的实现对照
+
+对照的是本配置实际使用的领域；Doom 的未启用语言、第二套补全前端及另外的
+终端运行时不进入本轮。保留现有按键、窗口入口和输入方式。
+
+| Doom 实现 | 本配置现状与处理 |
+| --- | --- |
+| `ui/popup` | Shackle/Popper、Portal 生命周期和 `set-popup-rule!` 已覆盖；Doom 的整套 popup 窗口管理会重叠，不移入。 |
+| `ui/workspaces` | Perspective 的切换前 hook 清掉离开 buffer 的 Evil Visual 和普通选区；现用 Perspective 包已经按工作区隔离 Winner，删掉移植自另一种 `persp-mode` 的无效 Winner 函数。自动保存、关 frame 时删工作区、过滤远程 buffer 与现有契约冲突。 |
+| `ui/tabs`、`ui/modeline` | 顶栏是原生 tab-bar/tab-line，Doom 的 Centaur Tabs 是另一套 UI；modeline 已有 doom-modeline 和 neo 的 Evil 状态箭头。保留现有布局与鼠标行为。 |
+| `ui/vc-gutter` | diff-hl 已异步更新，较高行的竖线修复已从 neo 吸收。Doom 的已暂存改动显示、实时刷新和左右 fringe 选择会改变现有显示；不改。 |
+| `ui/treemacs`、`ui/window-select`、`ui/nav-flash` | 现有 Treemacs 工作区桥、ace-window、pulse 已覆盖相应入口。`nav-flash` 使用的 `persp-activated-functions` 属于另一种包；本配置中同名挂钩不运行，连同 tab line 和 tab 同步里的两处无效挂钩删掉，不新增闪烁。 |
+| `editor/evil`、`multiple-cursors` | Evil/evil-collection 与多光标已有自己的键表和状态收尾；Doom 的按键、初始状态及逃逸策略会改变手感。 |
+| `editor/fold`、`format`、`word-wrap`、`whitespace` | 折叠已含 hideshow/treesit 与持久状态，格式化走 LSP，空白清理走 ws-butler。Doom 的 Apheleia、自动缩进猜测和换行策略会改变编辑结果。 |
+| `editor/snippets`、`file-templates` | Yasnippet 和模板入口已有；neo 的适用片段已经逐个处理。Doom 的全局 Yas 启动与模板规则不移入。 |
+| `completion/vertico`、`company`；`checkers/syntax`、`spell`、`grammar` | 现有 Vertico/Consult、Company、Flymake 和拼写/语法链保持单一前端。Doom 的 Corfu、Flycheck 和提示位置/延迟设置不叠加。 |
+| `tools/lookup`、`eval`、`lsp`、`direnv` | 查找用 xref 后端链，求值与 LSP/Remote 环境已有各自路由。Doom 的第二套 lookup/eval 分发和 envrc 会重复运行。 |
+| `tools/magit` | 已有同窗显示、Magit 与 diff-hl；当前 Projectile 为 `alien` 索引且缓存关闭，Doom 的状态刷新后清缓存逻辑没有收益。其自动回退和 buffer 重命名策略会改变现有行为。 |
+| `tools/debugger`、`tree-sitter`、`pdf`、`editorconfig` | Dape 状态目录启动时已建立；treesit、PDF、EditorConfig 均已有所有者。Doom 的断点目录补丁、grammar/字体/PDF 展示参数不照搬。 |
+| `emacs/dired`、`ibuffer`、`undo`、`vc`、`tramp`、`electric`、`eww` | Dirvish 20260725 已内建 Doom 的多 frame 重绘保护；Dired、ibuffer、undo-tree 和远程 VC/TRAMP 有现有路由。Doom 的 undo 数据剥去文本属性、目录操作默认值、RET/浏览器键位会改变结果。 |
+| 使用中的 `lang/*` | Python、C/C++、Rust、Shell、Web/JS、LaTeX 的 mode/LSP/缩进已有模块管理；Doom 的 REPL、格式化器、缩进、快捷键差异属于编辑行为，本轮不覆盖。Noema 接管 Markdown/笔记视图。 |
+| `term/ghostel`、`os/macos` | 终端走 Portal 原生 Ghostty；Doom 的 Ghostel buffer 模式补丁不适用。macOS 的回收站、frame 复用等设置已在本配置。 |
+
+验证：工作区切换的 Visual 与普通选区各有一个 ERT 测试；工作区 8 项、frame/tab
+16 项、LSP UI 30 项通过。启动状态对比中，新增的有效切换前 hook 是预期行为；
+其余差异只是删除未由当前 Perspective 调用的旧挂钩。

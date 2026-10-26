@@ -29,12 +29,12 @@ neo-emacs 不是独立框架，而是一套 **Doom Emacs 私有配置**：
 - 模块顺序目前以 `lisp/init-modules.el` 为准；任何“模块声明”方案都要保留单一权威顺序，并能在不加载整个 `init.el` 时做包恢复（`bootstrap.el` / `package-lock.el`）。
 - Remote-first、`/fs` 身份、config 注册表、general.el 键位层这些约束不因重组改变。
 
-## 待研究
+## 已完成的研究
 
-- [ ] Doom 模块系统的机制：`doom!` 如何解析、flag 怎么在 `config.el` 里用（`modulep!`）、加载顺序如何决定。
-- [ ] neo-emacs 各模块与本配置对应模块的对照表（谁更好、缺什么）。
-- [ ] 模块自带 readme 的做法 vs. 本配置集中在 `docs/` 的做法，取哪种。
-- [ ] 本配置 `lisp/` 的分组草案：分类、目录、开关声明格式、迁移步骤和验证方法。
+- [x] Doom 模块解析、flag 和加载顺序：见第一阶段的 [module-system.md](../../design/module-system.md)。
+- [x] neo-emacs 各模块逐项去处：见 [inventory.md](inventory.md)。
+- [x] 文档组织：代码树保留分类 `README.md`，详细规范留在 `docs/`；不复制 Doom 的逐模块 readme。
+- [x] `lisp/` 分类、目录、开关、迁移和验证：见 [structure.md](structure.md) 与第一阶段的 [README.md](../doom-template/README.md)。
 
 ## 决定
 

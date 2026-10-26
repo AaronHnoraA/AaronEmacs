@@ -220,3 +220,6 @@ Doom 的做法：
   - 验证：`config-setq` 0 处，键冲突 0 处；`state-check` 只剩 `hexl-mode-map`（加载时复制了当时的 `global-map`）里两条旧绑定消失；`test-check` 全部一致。
 - [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。只列候选，不改用户习惯，等用户决定。
 - [x] P1e 模块目录比对：[comparison.md](comparison.md) 第 1 节。
+- [x] 启用模块的实现对照：[comparison.md](comparison.md) 第 6 节。工作区切换前清理
+  Evil Visual/普通选区；删除 Winner、tab 同步、tab line 和导航里从另一种
+  `persp-mode` 移来的无效挂钩。其余差异按现有输入、窗口和 Remote 契约保留。

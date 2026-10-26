@@ -6,8 +6,9 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 
 ## 范围
 
-- 管：关视图、结束 buffer、关窗口、关 frame，以及之后窗口显示什么；原生视图
-  （Portal 终端、Portal Web 上的 Noema 页面）与 Emacs 之间谁拿键盘。
+- 管：关视图、结束 buffer、关窗口、关 frame，以及之后窗口显示什么；切换
+  Perspective 工作区时选区的生命周期；原生视图（Portal 终端、Portal Web 上的
+  Noema 页面）与 Emacs 之间谁拿键盘。
 - 不管：buffer 内容的保存与撤销；Remote 断开时 buffer 的处理（见
   [remote-framework.md](remote-framework.md)）；Emacs 作为后台应用时的隐藏（见
   `AGENT.md` “Background application”）。
@@ -103,6 +104,12 @@ Emacs 持有分两种：handoff 期间的暂时持有，命令结束后视图取
 （`Cmd-.` 退出视图，或 handoff 的命令打开了 minibuffer，如 `M-x`），之后的命令都在
 Emacs 里，直到回车 / 点击进入视图，或者移到别的窗口或 buffer 再回来。
 
+### 工作区切换时的选区
+
+切换 Perspective 工作区前，当前 Emacs buffer 退出 Evil Visual 状态并取消活动
+选区。切回原工作区不恢复旧选区；buffer 内容与 mark 位置不变。内部临时切换
+（`persp-switch` 的 `norecord` 路径）不触发这项清理。
+
 ### 共享 popup 顶栏
 
 Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab line。
@@ -171,10 +178,14 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
 - **C15** 共享 popup 标签只占一个 tab line；Portal 终端没有附加 header line，
   agent-shell 保留自身 header line；移出 popup 恢复原 UI。测试：
   `popup-terminal-and-agent-use-one-shared-tab-row`。
+- **C16** 切换 Perspective 工作区时，离开的 Emacs buffer 不保留活动选区或
+  Evil Visual 状态。测试：`c16-workspace-switch-clears-outgoing-visual-selection`、
+  `c16-workspace-switch-clears-outgoing-emacs-selection`。
 
 窗口测试文件：`test/init-window-lifecycle-tests.el`、`test/init-windows-tests.el`，
 由 `make ui-test` 运行。popup 顶栏测试在 `test/popup-agent-tests.el`；Noema 页面
-转交测试在 `site-lisp/noema/tests/xwidget-key-guard.test.ts`。
+转交测试在 `site-lisp/noema/tests/xwidget-key-guard.test.ts`；工作区选区测试在
+`test/init-workspaces-tests.el`。
 
 ## 实现位置
 
@@ -188,6 +199,7 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
 | 原生视图键盘归属 | `lisp/term/portal/config.el` `+portal--focus-selected-window` |
 | 未显示页面上限 | `lisp/noema/bridge/config.el` |
 | 后台 frame | `lisp/config/background/config.el` |
+| 工作区切换前的选区清理 | `lisp/ui/workspaces/config.el` |
 
 ## 已知差距
 

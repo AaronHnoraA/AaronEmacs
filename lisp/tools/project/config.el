@@ -24,11 +24,6 @@
 (defvar recentf-list)
 (defvar dashboard-projects-backend)
 (defvar dashboard-projects-switch-function)
-(defvar winner-mode)
-(defvar winner-currents)
-(defvar winner-pending-undo-ring)
-(defvar winner-ring-alist)
-(defvar winner-undo-frame)
 (defvar breadcrumb--ipath-plain-cache)
 (defvar breadcrumb--last-update-tick)
 (defvar breadcrumb-local-mode)
@@ -553,28 +548,6 @@ With a prefix argument, always prompt."
   "Switch to the perspective associated with PROJECT-ROOT."
   (when (fboundp 'persp-switch)
     (persp-switch (+project-perspective-name project-root))))
-
-(defun +project-save-winner-data-h (&rest _)
-  "Persist `winner-mode' state into the active perspective."
-  (when (and (bound-and-true-p winner-mode)
-             (fboundp 'get-current-persp)
-             (get-current-persp))
-    (set-persp-parameter
-     'winner-ring
-     (list winner-currents
-           winner-ring-alist
-           winner-pending-undo-ring))))
-
-(defun +project-load-winner-data-h (&rest _)
-  "Restore `winner-mode' state from the active perspective."
-  (when (bound-and-true-p winner-mode)
-    (pcase-let ((`(,currents ,alist ,pending)
-                 (or (persp-parameter 'winner-ring)
-                     (list nil nil nil))))
-      (setq winner-undo-frame nil
-            winner-currents currents
-            winner-ring-alist alist
-            winner-pending-undo-ring pending))))
 
 (defmacro +with-project-root-context (project-root &rest body)
   "Evaluate BODY with PROJECT-ROOT bound as the active Projectile root."
@@ -2494,8 +2467,6 @@ that extra stat is only paid for a marker that actually matched."
   (persp-mode 1)
   (add-hook 'persp-switch-hook #'+project-perspective-switched-h)
   (add-hook 'persp-killed-hook #'+project-perspective-killed-h)
-  (add-hook 'persp-before-deactivate-functions #'+project-save-winner-data-h)
-  (add-hook 'persp-activated-functions #'+project-load-winner-data-h)
   (with-eval-after-load 'treemacs
     (when (assoc 'Perspectives treemacs-scope-types)
       (treemacs-set-scope-type 'Perspectives))))

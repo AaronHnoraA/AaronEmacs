@@ -1162,7 +1162,6 @@ The tab segment wins both visually and for hit testing where the two meet."
   (add-hook 'after-change-major-mode-hook #'+tab-line-invalidate-cache)
   (global-tab-line-mode 1)
   (with-eval-after-load 'perspective
-    (add-hook 'persp-activated-functions #'+tab-line-refresh)
     (add-hook 'persp-killed-hook #'+tab-line-forget-persp-order))
   (+tab-line-apply-ui)
   (+tab-line-refresh))

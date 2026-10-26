@@ -93,18 +93,11 @@
                (not (apply #'derived-mode-p +navigation-pulse-excluded-modes)))
       (pulse-momentary-highlight-one-line (point))))
 
-  (defun +navigation-pulse-line-delayed-h (&rest _)
-    "Pulse the current line after a short delay."
-    (run-at-time 0.08 nil #'+navigation-pulse-line-h))
-
   (dolist (hook '(imenu-after-jump-hook
                   consult-after-jump-hook
                   better-jumper-post-jump-hook
                   org-follow-link-hook))
     (add-hook hook #'+navigation-pulse-line-h))
-
-  (with-eval-after-load 'perspective
-    (add-hook 'persp-activated-functions #'+navigation-pulse-line-delayed-h))
 
   (advice-add #'save-place-find-file-hook :after #'+navigation-pulse-line-h))
 

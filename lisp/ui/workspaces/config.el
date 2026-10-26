@@ -13,7 +13,9 @@
 
 (defvar persp-mode)
 (defvar persp-selected-face)
+(defvar evil-state)
 
+(declare-function evil-exit-visual-state "evil-states" (&optional later buffer))
 (declare-function persp-current-name "perspective")
 (declare-function persp-kill "perspective" (name))
 (declare-function persp-names "perspective")
@@ -46,6 +48,12 @@
   "Raise a user error when `persp-mode' is unavailable."
   (unless (bound-and-true-p persp-mode)
     (user-error "Perspective workspaces are not enabled")))
+
+(defun +workspace-clear-selection-before-switch-h ()
+  "Leave Visual state and clear the active selection before switching workspaces."
+  (when (and (boundp 'evil-state) (eq evil-state 'visual))
+    (evil-exit-visual-state))
+  (deactivate-mark))
 
 (defun +workspace-list-names ()
   "Return the current list of workspace names."
@@ -297,9 +305,10 @@ When NAME is nil, kill the current workspace.  Close tabs with that name."
 
 (with-eval-after-load 'tab-bar
   (add-hook 'tab-bar-tab-post-select-functions #'+tab-switch-to-matching-workspace)
-  (add-hook 'persp-activated-functions #'+tab-switch-to-current-workspace)
   (when (bound-and-true-p persp-mode)
     (+tab-switch-to-current-workspace)))
+
+(add-hook 'persp-before-switch-hook #'+workspace-clear-selection-before-switch-h)
 
 (with-eval-after-load 'evil
   (define-prefix-command '+workspace-prefix-map)
