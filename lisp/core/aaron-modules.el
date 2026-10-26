@@ -681,7 +681,9 @@ again."
          (out aaron-module-autoloads-file))
     (when dirs
       (when (or (not (file-exists-p out))
-                (not (equal dirs (aaron-modules--autoloads-sources out)))
+                (not (equal (mapcar #'file-truename dirs)
+                            (mapcar #'file-truename
+                                    (aaron-modules--autoloads-sources out))))
                 (cl-some (lambda (dir)
                            (cl-some (lambda (f) (file-newer-than-file-p f out))
                                     (directory-files dir t "\\.el\\'")))

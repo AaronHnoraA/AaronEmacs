@@ -52,6 +52,10 @@ window, frame, reuse and positioning result; check it for errors.
 
 ## Development rules
 
+A change meant to keep behaviour is proved with `make state-baseline` /
+`make state-check` (and `test-baseline` / `test-check` for wide changes):
+`AGENT.md` “Verification”.
+
 `AGENT.md` sections, read the ones your change touches: “Project Model”
 (adding a module, naming), “Package Rules”, “Runtime State”, “Resource
 Lifecycle Rules”, “Runtime Builds”, “Domain Policies”, “Verification”.

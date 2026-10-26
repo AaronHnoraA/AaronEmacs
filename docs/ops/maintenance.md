@@ -236,6 +236,10 @@ make bootstrap-health
 
 常用入口：
 
+- `make state-baseline` / `make state-check`
+  证明一次改动没有改变行为（`AGENT.md` “Verification” 的硬性要求）：改动前取启动状态基线，改动后再取一次并逐行比较。比较的内容包括全部 feature、每个 hook 的函数及顺序、advice、所有 keymap 绑定、所有 custom 变量、待运行的 timer。每次取快照前会先做一次预热启动，让生成的 autoloads 已经是最新的。主机名这类和机器相关的值不参与比较。有意的改名用 `STATE_RENAMES=文件`（`(OLD . NEW)` alist）先换算基线。文件放在 `var/state-check/`，工具是 `scripts/state-snapshot.el`。
+- `make test-baseline` / `make test-check`
+  在完整配置下逐个运行 `test/` 中的测试文件，与基线逐文件比较结果，live/smoke/e2e/benchmark 除外。`TEST_JOBS=4` 并行运行；脚本是 `scripts/test-all`。
 - `M-x module-board` / `M-x module-doctor`
   模块面板：每个模块的状态、加载耗时、装了哪些 hook/advice/timer/键、键冲突、策略命中；
   `module-doctor` 先诊断全部模块。`make doctor` 在批处理里输出同一份诊断，`make core-test`

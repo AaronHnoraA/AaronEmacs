@@ -1,0 +1,35 @@
+#!/bin/bash
+# test-all OUT [JOBS] -- run every ERT test file with the full config loaded
+# and write one summary line per file to OUT, sorted.  Live, smoke, e2e and
+# benchmark files are skipped: they need machines or a GUI.  Compare two
+# summaries to see which test files changed outcome (make test-check).
+set -u
+out=${1:?usage: test-all OUT [JOBS]}
+jobs=${2:-1}
+root=$(cd "$(dirname "$0")/.." && pwd)
+emacs=${EMACS:-emacs}
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+run_one() {
+  local f=$1 n
+  n=$(basename "$f" .el)
+  timeout 300 "$emacs" --batch --no-site-file --no-site-lisp --no-splash \
+    --init-directory="$root" -q -l "$root/early-init.el" -l "$root/init.el" \
+    -l "$f" -f ert-run-tests-batch-and-exit > "$work/$n.log" 2>&1
+  local status=$?
+  local ran
+  ran=$(grep -h '^Ran ' "$work/$n.log" | tail -1 |
+        grep -oE 'Ran [0-9]+ tests, [0-9]+ results as expected, [0-9]+ unexpected')
+  echo "$n exit=$status ${ran:-no result}" > "$work/$n.sum"
+}
+export -f run_one
+export root emacs work
+
+find "$root/test" -maxdepth 1 -name '*.el' \
+     ! -name '*live*' ! -name '*smoke*' ! -name '*e2e*' ! -name '*benchmark*' |
+  sort | xargs -P "$jobs" -I{} bash -c 'run_one "$@"' _ {}
+
+mkdir -p "$(dirname "$out")"
+cat "$work"/*.sum | sort > "$out"
+echo "test-all: $(wc -l < "$out") files -> $out"

@@ -26,7 +26,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L site-lisp/aaron-ui -l site-lisp/aaron-ui
 .PHONY: default help up setup setup-full bootstrap-health install emacs-binary-install emacs-binary-update emacs-binary-verify portal-build remote-ikernel-install lock audit-lock doctor build build-force \
         noema-web-build \
         compile compile-byte compile-byte-force compile-native compile-native-force \
-        clean clean-build clean-elc clean-eln clean-state state-backup state-restore \
+        clean clean-build clean-elc clean-eln clean-state state-backup state-restore state-baseline state-check test-baseline test-check \
         health health-startup health-byte health-native core-test ui-test activity-test performance-test ui-tokens audit-ui-tokens \
         remote-test remote-source-test remote-transfer-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
 		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke \
@@ -64,6 +64,10 @@ help:
 	  '  make jupyter-linux-disconnect-live-smoke  Cut five forwards during a real Linux kernel execution (opt-in)' \
 	  '  make doctor               Open/check the config health doctor report in batch' \
 	  '  make state-backup         Snapshot migration-worthy local state into var/backup-snapshots' \
+	  '  make state-baseline       Startup-state snapshot before a change (var/state-check)' \
+	  '  make state-check          Compare startup state with the baseline; must be empty' \
+	  '  make test-baseline        Run every test file and record outcomes (TEST_JOBS=4 for parallel)' \
+	  '  make test-check           Compare every test file outcome with the baseline' \
 	  '  make state-restore SNAPSHOT=/path/to/archive.tar.gz  Restore a saved state snapshot' \
 	  '  make build                Full Elisp compile plus Noema static build' \
 	  '  make build-force          Same as build, but reset ELN cache first' \
@@ -197,6 +201,29 @@ ui-test:
 
 doctor:
 	$(BATCH) --eval '(prin1 (+health/critical-check))' --eval '(progn (require (quote aaron-doctor)) (terpri) (princ (aaron-doctor-report-string)))'
+
+# Behaviour checks: a baseline before a change, a comparison after it.
+# STATE_RENAMES names an alist file of (OLD . NEW) symbols for intended renames.
+STATE_DIR = var/state-check
+TEST_JOBS ?= 1
+
+# A warm-up startup first, so generated autoloads are current and their
+# generator does not show up in the snapshot.
+state-baseline:
+	$(BATCH) --eval '(kill-emacs 0)' >/dev/null 2>&1
+	$(BATCH) -l scripts/state-snapshot.el --eval '(aaron-state-snapshot-write "$(STATE_DIR)/baseline.txt")'
+
+state-check:
+	$(BATCH) --eval '(kill-emacs 0)' >/dev/null 2>&1
+	$(BATCH) -l scripts/state-snapshot.el --eval '(aaron-state-snapshot-write "$(STATE_DIR)/current.txt")'
+	$(EMACS) --batch -Q -l scripts/state-snapshot.el --eval '(aaron-state-compare-and-exit "$(STATE_DIR)/baseline.txt" "$(STATE_DIR)/current.txt" $(if $(STATE_RENAMES),"$(STATE_RENAMES)",nil))'
+
+test-baseline:
+	scripts/test-all $(STATE_DIR)/tests-baseline.txt $(TEST_JOBS)
+
+test-check:
+	scripts/test-all $(STATE_DIR)/tests-current.txt $(TEST_JOBS)
+	diff -u $(STATE_DIR)/tests-baseline.txt $(STATE_DIR)/tests-current.txt && echo "test-check: same outcome for every test file"
 
 state-backup:
 	$(BATCH) --eval '(princ (+maintenance/state-snapshot))'

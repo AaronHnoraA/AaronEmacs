@@ -775,6 +775,27 @@ For behavior wrappers, add a focused batch smoke test when practical. For
 package/bootstrap/state work, use the `make` targets documented in
 `docs/ops/maintenance.md` and `docs/ops/migration.md`.
 
+**A change that is meant to keep behaviour must prove it.**  Moving,
+renaming, restructuring modules, changing load order, the module system,
+the core, or swapping one mechanism for an equivalent one: before the first
+edit run `make state-baseline` (and, for wide changes, `make
+test-baseline`); after the change run `make state-check` (and `make
+test-check`).
+
+- `state-check` compares everything a full startup leaves behind: features,
+  every hook's functions in order, advice, every keymap binding, every
+  customizable variable, pending timers.  It must report 0 lines, or every
+  remaining line must be explained in the commit message (for example an
+  order change between rules whose predicates cannot both match).  An
+  intended rename passes its alist of (OLD . NEW) names as
+  `STATE_RENAMES=file`.
+- `test-check` runs every test file and compares each file's outcome with
+  the baseline; any file whose outcome changed is a regression until shown
+  otherwise.  A failure that is already in the baseline is not this
+  change's, but say so instead of hiding it.
+- A change that is meant to alter behaviour states the intended difference
+  and shows `state-check` reports exactly that.
+
 
 如果开发中有对项目整体性有影响的设计,需要会过来维护这个文档,使得项目可以被长期,统一,持续的维护.
 
