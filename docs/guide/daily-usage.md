@@ -1075,6 +1075,11 @@ Treemacs 等侧边栏不算另一个主窗格；它们打开时，`Cmd-W` 仍可
 
 ## 3. 搜索与跳转
 
+minibuffer 里：`C-c C-c` 把候选导出到普通 buffer；`C-c C-e` 直接导出成可编辑的
+buffer（ripgrep 结果进 wgrep、文件进 wdired、`consult-line` 结果进 occur-edit、xref
+结果进 xref-edit），改完保存即写回源文件。输入里以 `$` 结尾的词表示“在行尾”，
+在 `consult-line`、`consult-buffer` 里也有效。
+
 - `SPC SPC`
   打开 `telescope`
 - `H-x` / `H-t` / `F2`

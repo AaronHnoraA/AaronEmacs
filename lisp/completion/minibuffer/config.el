@@ -274,8 +274,26 @@ accepts a new file name exactly.  Command+Shift+Return opens a new frame."
                (append +file-name-completion-ignored-extensions
                        completion-ignored-extensions)))
 
+(defvar consult--tofu-regexp)
+
+;; From Doom: Consult ends some candidates (`consult-line', `consult-buffer')
+;; with invisible "tofu" characters, so an orderless component anchored with
+;; "$" never matched there.  Let the anchor sit before them.
+(defun +minibuffer-orderless-end-anchor-dispatch (word _index _total)
+  "Match WORD ending in \"$\" at the end of the visible candidate text."
+  (when (and (> (length word) 1) (string-suffix-p "$" word))
+    `(orderless-regexp
+      . ,(concat (substring word 0 -1)
+                 (if (boundp 'consult--tofu-regexp)
+                     (concat consult--tofu-regexp "*\\'")
+                   "\\'")))))
+
 (use-package orderless
   :ensure t
+  :config
+  (setq orderless-style-dispatchers
+        (list #'+minibuffer-orderless-end-anchor-dispatch
+              #'orderless-affix-dispatch))
   :init
   ;; `completion-styles' itself is a `config' setting (etc/config-store.el).
   (setq completion-category-defaults nil
@@ -294,7 +312,31 @@ accepts a new file name exactly.  Command+Shift+Return opens a new frame."
   :bind (:map minibuffer-local-map
          ("M-o"     . embark-act)
          ("C-c C-c" . embark-export)
+         ("C-c C-e" . +minibuffer/embark-export-write)
          ("C-c C-o" . embark-collect)))
+
+;; From Doom: export the candidates straight into an editable buffer: grep
+;; results into wgrep, files into wdired, line matches into occur-edit and xref
+;; results into xref-edit-mode.
+(declare-function wgrep-change-to-wgrep-mode "wgrep" ())
+(declare-function xref-change-to-xref-edit-mode "xref" ())
+(defvar embark-after-export-hook)
+(defvar embark-candidate-collectors)
+
+(defun +minibuffer/embark-export-write ()
+  "Export the current candidates to a buffer that edits their sources."
+  (interactive)
+  (require 'embark)
+  (let* ((type (car (run-hook-with-args-until-success
+                     'embark-candidate-collectors)))
+         (edit (pcase type
+                 ('consult-grep (require 'wgrep) #'wgrep-change-to-wgrep-mode)
+                 ('file #'wdired-change-to-wdired-mode)
+                 ('consult-location #'occur-edit-mode)
+                 ('consult-xref #'xref-change-to-xref-edit-mode)
+                 (_ (user-error "No editable export for %s candidates" type)))))
+    (let ((embark-after-export-hook (append embark-after-export-hook (list edit))))
+      (embark-export))))
 
 (use-package consult
   :ensure t

@@ -364,3 +364,12 @@ Doom 的做法：
 | `emacs/ibuffer` | 人类可读大小列、工作区过滤、图标；外观 |
 | `emacs/undo` | `+tree` 分支逐行看过：剥离撤销记录的文本属性，实测本机最大的历史文件 316 KB 里属性只占约 1.6 KB，不收；不保存加密文件与 Git 消息的历史已吸收；可视化 diff 窗口不收 |
 | `emacs/vc` | git-link（本配置有 browse-at-remote）、git-timemachine、smerge 键；已有或不用 |
+
+## 17. 模块全文：`completion`
+
+| 模块 | 处理 |
+| --- | --- |
+| `completion/vertico`（autoload） | **吸收**两项：`+vertico-orderless-disambiguation-dispatch` 的 `$` 行尾锚点（实测本配置 `consult-line` 里 `foo$` 一个都匹配不到，因为 Consult 在候选末尾加了不可见的 tofu 字符），改为 `+minibuffer-orderless-end-anchor-dispatch`；`+vertico/embark-export-write`，minibuffer 里 `C-c C-e` 直接导出成可编辑 buffer |
+| `completion/vertico`（其余） | 项目搜索包装、Ex 搜索命令、跳转列表、which-key 风格的 embark 提示、fd 版本判断、远程用 basic 补全、工作区 buffer 源；已有对应（telescope、`consult-ripgrep`、better-jumper）或属于 Doom 的工作区实现 |
+| `completion/company` | 后端注册表、整行补全（Evil 的 `C-x C-l` 已有）、切换自动补全、在 minibuffer 里选候选；不收（第 5 节） |
+| `completion/corfu`、`helm`、`ido`、`ivy` | 另一套补全前端，本配置只用 Vertico + Company |
