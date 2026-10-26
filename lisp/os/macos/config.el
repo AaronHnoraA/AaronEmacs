@@ -551,5 +551,7 @@ its query parser there, so the shell drops it."
 (after! consult
   (setq consult-locate-args "mdfind -name"))
 
+(require 'os/macos/input)
+
 (provide 'os/macos/config)
 ;;; os/macos/config.el ends here

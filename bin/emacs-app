@@ -15,7 +15,7 @@
 #   terminal               a new Portal terminal in its own frame, every time
 #   status                 visible | background | busy | stopped
 #   quit                   quit Emacs, showing it first for its questions
-#   build                  build the window module
+#   build                  build the window and input-source modules
 #   install | uninstall    manage the login LaunchAgent
 
 set -u
@@ -176,10 +176,14 @@ result() {
 }
 
 build() {
-    mkdir -p "$BUILD" || return 1
+    mkdir -p "$BUILD" "$ROOT/var/macos-input" || return 1
     /usr/bin/clang -fobjc-arc -shared -O2 -I "$APP/Contents/Resources/include" \
                    -framework AppKit -o "$BUILD/macos-window.dylib" \
                    "$SOURCE/window.m" || return 1
+    /usr/bin/clang -fobjc-arc -shared -O2 -I "$APP/Contents/Resources/include" \
+                   -framework Carbon -framework Foundation \
+                   -o "$ROOT/var/macos-input/macos-input.dylib" \
+                   "$ROOT/tools/macos-input/input.m" || return 1
 }
 
 uninstall() {

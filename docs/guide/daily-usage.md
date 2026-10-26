@@ -684,6 +684,11 @@ Evil 缺少的 Neovim 0.10/0.11 默认键已补上（Doom 也有类似键位，�
 - wgrep 中 `dd`
   文件名前缀只读时，改为把该行标记为删除
 
+中文输入法不会吞掉 Normal 状态的键：离开 Insert 时切到英文输入源（`ABC`），再进入
+Insert 时切回离开时用的输入法（如拼音），同 Doom 的 `:input chinese`。由
+`+macos-input-switch` 开关、`+macos-input-ascii-source` 指定英文输入源；靠
+`tools/macos-input/input.m` 编译出的动态模块（`bin/emacs-app build`），没有编译时不切换。
+
 ### 临时机器与远程文件传输
 
 选 target 的提示（`SPC o r`、`SPC o f`）里有一项 `临时机器`：选它就输入地址和

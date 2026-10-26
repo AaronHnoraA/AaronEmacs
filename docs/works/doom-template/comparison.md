@@ -417,3 +417,4 @@ Doom 的做法：
 | `term/eshell` | **吸收**两项：以空格开头的命令不进历史（`eshell-input-filter` 组合默认过滤与 `eshell-input-filter-initial-space`）；`emacs FILE`/`e FILE` 在本 Emacs 打开文件（本配置已有 `vi`/`vim`/`nvim` 同类别名）。重复命令只记一次已在第 16 节吸收。不收：提示符、输出只读与命令期间停用撤销（本配置 eshell 在 Emacs 状态，且有自己的输出规范化与命令队列）、Evil 键、别名表、分屏与工作区跟踪、esh-help、did-you-mean、语法高亮 |
 | `term/ghostel` | 本配置已用 Ghostel（远程工作区）与 Portal；去掉 `DIRENV_*` 变量的问题未在本配置复现（终端从 PTY 里执行目标 `$SHELL`），不收 |
 | `term/shell`、`term`、`vterm` | `+shell-idle-p` 用 `file-remote-p` 分支，与 Remote 规则相悖；本配置终端走 Portal/Ghostel，不收 |
+| `input/chinese`（`fcitx-evil-turn-on`） | **吸收为 macOS 版**：用户启用了 ABC 与系统拼音，Normal 状态下拼音会吞掉 `j`、`k` 等键。新增动态模块 `tools/macos-input/input.m`（Carbon TIS，`bin/emacs-app build` 编到 `var/macos-input/`，只在用户态运行），`os/macos/input` 在离开 Insert 时切到 `+macos-input-ascii-source`、进入 Insert 时切回原输入法；batch 下不切换。实测（交互 Emacs）：Insert 拼音 → Normal ABC → 再进 Insert 拼音 |
