@@ -1209,6 +1209,8 @@ GUI frame 的两侧 fringe 分工如下：
   展开当前 buffer 的所有折叠
 - `zM`
   折叠当前 buffer 的所有折叠
+- `zj` / `zk`
+  跳到下一个 / 上一个已关闭的折叠的首行（代码、tree-sitter 与 Org 标题都适用，可带计数）
 - `H-<tab>`
   同 `za`；在 Org 标题上也走这套统一折叠入口
 - `H-S-<tab>` / `H-<backtab>`

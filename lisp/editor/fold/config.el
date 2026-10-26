@@ -1141,6 +1141,45 @@ hideshow 6.0.  This function deliberately never changes overlay bounds."
     (_
      (user-error "No fold backend for %s" major-mode))))
 
+;; zj and zk, from Doom.  Every backend (hideshow, treesit-fold, Org) hides a
+;; closed fold as an invisible stretch that begins on the fold's first line
+;; and spans whole lines; hidden link or emphasis markup never holds a newline.
+(defun +fold--closed-fold-lines ()
+  "Return the start positions of the visible lines that begin a closed fold."
+  (let ((pos (point-min))
+        lines)
+    (while (< pos (point-max))
+      (let ((next (next-single-char-property-change pos 'invisible)))
+        (when (and (invisible-p pos)
+                   (save-excursion
+                     (goto-char pos)
+                     (search-forward "\n" next t)))
+          (let ((line (save-excursion (goto-char pos) (line-beginning-position))))
+            (unless (or (invisible-p line) (eq line (car lines)))
+              (push line lines))))
+        (setq pos next)))
+    (nreverse lines)))
+
+(defun +fold/next (count)
+  "Move to the first line of the COUNTth next closed fold, as Vim's zj."
+  (interactive "p")
+  (let* ((here (line-beginning-position))
+         (lines (if (> count 0)
+                    (seq-filter (lambda (line) (> line here))
+                                (+fold--closed-fold-lines))
+                  (nreverse (seq-filter (lambda (line) (< line here))
+                                        (+fold--closed-fold-lines)))))
+         (target (nth (1- (abs count)) lines)))
+    (unless target
+      (user-error "No more closed folds %s point" (if (> count 0) "after" "before")))
+    (goto-char target)
+    (back-to-indentation)))
+
+(defun +fold/previous (count)
+  "Move to the first line of the COUNTth previous closed fold, as Vim's zk."
+  (interactive "p")
+  (+fold/next (- count)))
+
 (use-package hideshow
   :ensure nil
   :hook (prog-mode . +fold--ensure-backend)
@@ -1208,7 +1247,9 @@ hideshow 6.0.  This function deliberately never changes overlay bounds."
   (evil-define-key* 'normal 'global (kbd "zO") #'+fold/open-zone)
   (evil-define-key* 'normal 'global (kbd "zc") #'+fold/close)
   (evil-define-key* 'normal 'global (kbd "zR") #'+fold/open-all)
-  (evil-define-key* 'normal 'global (kbd "zM") #'+fold/close-all))
+  (evil-define-key* 'normal 'global (kbd "zM") #'+fold/close-all)
+  (evil-define-key* 'normal 'global (kbd "zj") #'+fold/next)
+  (evil-define-key* 'normal 'global (kbd "zk") #'+fold/previous))
 
 (general-define-key
  "H-<tab>" #'+fold/toggle

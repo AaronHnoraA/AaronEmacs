@@ -96,4 +96,42 @@
     (search-forward "(other")
     (should (invisible-p (point)))))
 
+;;; zj / zk
+
+(ert-deftest +fold-next-and-previous-walk-closed-folds ()
+  "zj and zk move between closed folds and skip open code and hidden markup."
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (insert "(defun a ()\n  1)\n\n(defun b ()\n  2)\n\n(defun c ()\n  3)\n")
+    (hs-minor-mode 1)
+    (goto-char (point-min))
+    (hs-hide-block)
+    (search-forward "(defun c")
+    (hs-hide-block)
+    ;; One-line invisible text, like a hidden link, is not a fold.
+    (goto-char (point-min))
+    (search-forward "(defun b")
+    (put-text-property (match-beginning 0) (point) 'invisible t)
+    (goto-char (point-min))
+    (+fold/next 1)
+    (should (looking-at "(defun c"))
+    (should-error (+fold/next 1) :type 'user-error)
+    (+fold/previous 1)
+    (should (looking-at "(defun a"))
+    (should (eq (lookup-key evil-normal-state-map "zj") #'+fold/next))
+    (should (eq (lookup-key evil-normal-state-map "zk") #'+fold/previous))))
+
+(ert-deftest +fold-next-finds-folded-org-headings ()
+  "zj stops at a folded Org heading, not an expanded one."
+  (with-temp-buffer
+    (org-mode)
+    (insert "* one\nbody\n* two\nbody\n* three\nbody\n")
+    (goto-char (point-min))
+    (search-forward "* two")
+    (org-fold-hide-subtree)
+    (goto-char (point-min))
+    (+fold/next 1)
+    (should (looking-at "\\* two"))
+    (should-error (+fold/next 1) :type 'user-error)))
+
 ;;; init-fold-scrollview-tests.el ends here
