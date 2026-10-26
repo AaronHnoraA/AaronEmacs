@@ -186,3 +186,20 @@ Doom 的做法：
 | `magit-status-mode` 里 `long-line-threshold nil`（magit#5320） | **吸收** |
 | `magit-uniquify-buffer-names nil`、`magit-save-repository-buffers nil`、`+magit-display-buffer-fn`、`q` 杀 buffer、fringe 加宽 | **不收**：改变 buffer 名、保存提示和窗口布局，属于现有习惯；Magit 按目录而不是名字找已有 buffer，同名项目不会互相覆盖 |
 | Magit 刷新后清 Projectile 缓存 | **不收**：第 6 节已记，Projectile 是 `alien` 索引且不缓存 |
+
+### 其余启用模块的补丁
+
+| Doom 模块 | 补丁 | 处理 |
+| --- | --- | --- |
+| `tools/pdf` | pdf-view 里 Evil normal 光标置空，避免页面闪烁（core#1107） | **吸收**：放在 `+pdf-view-setup-interaction` |
+| `completion/company` | company-box 检查子 frame 是否还活着、子 frame 不要 tab-bar、补全后触发 eldoc | **已在上游**：当前 company-box 的 `company-box--get-frame` 已检查 `frame-live-p`，`company-box-frame-parameters` 已有 `tab-bar-lines 0`，eldoc 命令表里已有补全命令 |
+| `emacs/tramp` | 编译时保留 SSH ControlMaster、Magit 的 `magit-tramp-pipe-stty-settings 'pty`、LSP 关掉 direct async | **已有**：`remote/framework/tramp.el` 已处理前两项；LSP 走 Remote 框架的进程路由 |
+| `emacs/dired` | Dirvish 多 frame 重绘去抖、切工作区前关 Dirvish 会话 | **已在上游**（Dirvish 20260725）/ 工作区审计已处理 |
+| `editor/snippets` | 补全文档预览时禁止 snippet 弹出询问 | **不需要**：只有 Org 片段会询问，本配置不用 Org；预览错误已由 `+guard-doc-buffer` 吞掉 |
+| `emacs/undo` | undo-fu 会话文件名哈希、undo-tree 可视化 diff 窗口 | **不需要**：本配置的 undo-tree 历史用“标签 + SHA-1”命名；diff 窗口默认不开 |
+| `emacs/vc` | `vc-ignore-dir-regexp` 加 `node_modules`、git-timemachine 着色 | **不收**：前者让 `node_modules` 下的文件失去 VC 信息；本配置没有 git-timemachine |
+| `tools/tree-sitter` | 30.x 的 ts-mode 改写 `auto-mode-alist`、grammar 目录 | **不需要**：31.1 已修；grammar 已在 `var/` |
+| `editor/whitespace` | 子 frame 不开 whitespace-mode | **不需要**：本配置只在访问文件的 buffer 里开 |
+| `tools/direnv`、`term/ghostel` | envrc 提前到 major mode body 之后、ghostel 清 `DIRENV_*` | **不适用**：环境走 Remote 环境胶囊；后台 Emacs 不从 direnv 环境启动 |
+| `editor/multiple-cursors`、`tools/eval`、`ui/treemacs` | evil-mc 初始化、quickrun 结果放 overlay、treemacs-nerd-icons 加载顺序 | **不适用**：本配置用 multiple-cursors、quickrun 弹窗和自己的 Treemacs 主题 |
+| `ui/hl-todo` | 增加 REVIEW、DEPRECATED、BUG 关键字 | **不收**：外观 |

@@ -29,6 +29,7 @@
 ;; --- XeLaTeX 与 pdflatex 的编译命令，注入 -synctex=1 ---
 
 (defvar TeX-source-correlate-map)
+(defvar evil-normal-state-cursor)
 (defvar TeX-auto-local)
 (defvar TeX-auto-save-aggregate)
 (defvar TeX-default-extension)
@@ -245,6 +246,10 @@ target rather than one path baked in at load time."
   (local-set-key (kbd "C-c C-o") #'pdf-outline)
   (local-set-key (kbd "C-c C-s") #'pdf-occur)
   (when (featurep 'evil)
+    ;; From Doom (doomemacs/core#1107): Evil's cursor drawn over the page
+    ;; image makes the PDF flicker; a page has no use for a cursor.  The
+    ;; list form works around emacs-evil/evil#2016.
+    (setq-local evil-normal-state-cursor (list nil))
     (dolist (state '(normal motion))
       (evil-local-set-key state (kbd "j") #'pdf-view-next-page-command)
       (evil-local-set-key state (kbd "k") #'pdf-view-previous-page-command)
