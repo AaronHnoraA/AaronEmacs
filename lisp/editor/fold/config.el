@@ -194,6 +194,22 @@ commands still save their state."
   (quickrun-focus-p nil)
   (quickrun-input-file-extension ".qr"))
 
+;; A jump can land inside a fold restored when the file was opened, where the
+;; cursor sits hidden.  Open those folds the way isearch opens a match; both
+;; hideshow and treesit-fold give their overlays `isearch-open-invisible'.
+;; Consult reveals its own jumps.  Doom does this for Magit's file visits.
+(defun +fold-reveal-point-h (&rest _)
+  "Open the folds that hide point."
+  (dolist (ov (overlays-at (point)))
+    (when-let* (((overlay-get ov 'invisible))
+                (open (overlay-get ov 'isearch-open-invisible)))
+      (funcall open ov))))
+
+(dolist (hook '(xref-after-jump-hook xref-after-return-hook
+                imenu-after-jump-hook better-jumper-post-jump-hook
+                magit-diff-visit-file-hook))
+  (add-hook hook #'+fold-reveal-point-h -50))
+
 ;; xref
 (use-package xref
   :ensure nil

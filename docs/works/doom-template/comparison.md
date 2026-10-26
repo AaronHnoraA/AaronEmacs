@@ -168,3 +168,21 @@ Doom 的做法：
 | `evil-visual-update-x-selection-p nil` | **不收**：macOS 上 PRIMARY 是 Emacs 内部模拟的，不起进程，也不碰系统剪贴板 |
 | `=` 后光标不动、2–9 号 mark 全局、`o`/`O` 续写注释、分屏后居中 | **不收**：都偏离原生 Vim 的行为 |
 | Ex 文件名修饰符 `%:p:h` | **不收**：Doom 用 `:override` 换掉 `evil-ex-replace-special-filenames`，丢了 Evil 对远程文件取 localname 的处理（`/fs:` buffer 里的 `:!` 会拿到错误路径）；找同目录文件本配置走 Consult 和 Dirvish |
+
+### `ui/vc-gutter` 的补丁
+
+| Doom | 处理 |
+| --- | --- |
+| diff-hl 在 TRAMP buffer 上生成临时文件时问 “unsafe temporary file” | **不需要**：本配置的 auto-save 规则把所有名字放进 `var/auto-save`，不落到 `temporary-file-directory` |
+| `diff-hl-make-temp-file-name` 在 auto-save 名后接 `.~提交号.~` | **发现**：可读名字上限因此从 230 降到 180（`aaron-state-file-name-max-length`） |
+| `diff-hl-revert-hunk` 后恢复光标、弹窗按内容缩小 | **不收**：本配置的回退弹窗走 popup 规则，光标跳动没有复现 |
+| `vc-git-diff-switches --histogram`、切窗口/ESC 时刷新、flydiff | **不收**：已是异步更新加 Magit 刷新 hook；flydiff Doom 在 macOS 上也关着 |
+
+### `tools/magit` 的补丁
+
+| Doom | 处理 |
+| --- | --- |
+| `magit-diff-visit-file-hook` 里 `reveal-post-command` | **吸收并推广**：跳转落进折叠时打开挡住光标的折叠（`+fold-reveal-point-h`，在 `editor/fold`），挂在 xref、imenu、better-jumper 和 Magit 访问文件上；hideshow 和 treesit-fold 的 overlay 都带 `isearch-open-invisible`，Consult 已自己处理 |
+| `magit-status-mode` 里 `long-line-threshold nil`（magit#5320） | **吸收** |
+| `magit-uniquify-buffer-names nil`、`magit-save-repository-buffers nil`、`+magit-display-buffer-fn`、`q` 杀 buffer、fringe 加宽 | **不收**：改变 buffer 名、保存提示和窗口布局，属于现有习惯；Magit 按目录而不是名字找已有 buffer，同名项目不会互相覆盖 |
+| Magit 刷新后清 Projectile 缓存 | **不收**：第 6 节已记，Projectile 是 `alien` 索引且不缓存 |

@@ -80,4 +80,20 @@
 
 (provide 'init-fold-scrollview-tests)
 
+(ert-deftest +fold-reveal-point-opens-the-hiding-fold ()
+  "A jump into a hidden block opens the block, and only that block."
+  (with-temp-buffer
+    (emacs-lisp-mode)
+    (hs-minor-mode 1)
+    (insert "(defun a ()\n  (target))\n\n(defun b ()\n  (other))\n")
+    (goto-char (point-min))
+    (hs-hide-all)
+    (search-forward "(target")
+    (should (invisible-p (point)))
+    (should (memq #'+fold-reveal-point-h xref-after-jump-hook))
+    (+fold-reveal-point-h)
+    (should-not (invisible-p (point)))
+    (search-forward "(other")
+    (should (invisible-p (point)))))
+
 ;;; init-fold-scrollview-tests.el ends here

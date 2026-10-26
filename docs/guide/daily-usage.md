@@ -1190,6 +1190,9 @@ GUI frame 的两侧 fringe 分工如下：
 - `SPC z M`
   同 `zM`
 
+跳转（xref 定义/引用、imenu、跳转历史、Magit 访问文件）落在折叠里时，自动打开
+挡住光标的那一层折叠；Consult 的跳转本来就会打开。
+
 后端规则：
 
 - `org-mode`：标题折叠走 Org 自己的 subtree folding
