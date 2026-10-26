@@ -37,6 +37,9 @@
 (declare-function evil-local-mode "evil")
 (declare-function evil-normal-state "evil")
 (declare-function evil-save-state "evil")
+(declare-function flymake-goto-next-error "flymake" (&optional n filter interactive))
+(declare-function flymake-goto-prev-error "flymake" (&optional n filter interactive))
+(declare-function wgrep-mark-deletion "wgrep" ())
 
 (defun +evil-clear-ex-highlights-h ()
   "Clear Evil ex highlights from `aaron/escape'."
@@ -358,6 +361,176 @@ Emacs state keep their local behavior."
   (evil-want-C-g-bindings t)
   (evil-want-abbrev-expand-on-insert-exit nil)
   (evil-symbol-word-search t))
+;;; Neovim's default mappings
+
+;; Neovim 0.10 and 0.11 ship mappings that Vim users otherwise copy from
+;; vim-unimpaired and vim-commentary; Evil has none of them.  Doom binds most
+;; of the same keys, but where Doom's choice differs from Neovim's (]f for the
+;; next file, gp to reselect a paste, ]c for comments) Neovim wins, because
+;; native Vim is this layer's reference.
+
+(defun +evil--blank-lines (count above)
+  "Add COUNT blank lines below the current line, or ABOVE it."
+  (let ((origin (point-marker)))
+    (set-marker-insertion-type origin (not above))
+    (unwind-protect
+        (progn
+          (if above (forward-line 0) (end-of-line))
+          (insert (make-string count ?\n))
+          (goto-char origin))
+      (set-marker origin nil))))
+
+(defun +evil/insert-blank-line-below (count)
+  "Add COUNT blank lines below the current line, as Neovim's ] SPC."
+  (interactive "p")
+  (+evil--blank-lines count nil))
+
+(defun +evil/insert-blank-line-above (count)
+  "Add COUNT blank lines above the current line, as Neovim's [ SPC."
+  (interactive "p")
+  (+evil--blank-lines count t))
+
+(defun +evil/next-buffer (count)
+  "Show the COUNTth next buffer, as Neovim's ]b."
+  (interactive "p")
+  (dotimes (_ count) (next-buffer)))
+
+(defun +evil/previous-buffer (count)
+  "Show the COUNTth previous buffer, as Neovim's [b."
+  (interactive "p")
+  (dotimes (_ count) (previous-buffer)))
+
+(defun +evil/next-error (count)
+  "Go to the COUNTth next error or match, as Neovim's ]q over quickfix."
+  (interactive "p")
+  (next-error count))
+
+(defun +evil/previous-error (count)
+  "Go to the COUNTth previous error or match, as Neovim's [q."
+  (interactive "p")
+  (previous-error count))
+
+(defun +evil/next-diagnostic (count)
+  "Go to the COUNTth next diagnostic, as Neovim's ]d."
+  (interactive "p")
+  (flymake-goto-next-error count nil t))
+
+(defun +evil/previous-diagnostic (count)
+  "Go to the COUNTth previous diagnostic, as Neovim's [d."
+  (interactive "p")
+  (flymake-goto-prev-error count nil t))
+
+(evil-define-operator +evil:comment (beg end)
+  "Comment or uncomment the lines from BEG to END, as Neovim's gc.
+Lines that are all comments are uncommented; otherwise all are commented."
+  :type line
+  :move-point nil
+  (interactive "<r>")
+  (comment-or-uncomment-region beg end))
+
+(defun +evil--visual-search (forward)
+  "Search for the Visual selection as literal text, FORWARD or backward."
+  (let ((beg (region-beginning))
+        (text (buffer-substring-no-properties (region-beginning) (region-end))))
+    (evil-exit-visual-state)
+    (goto-char beg)
+    (setq isearch-forward forward)
+    (evil-search (regexp-quote text) forward t)))
+
+(defun +evil/visual-search-forward ()
+  "Search forward for the selected text, as Neovim's Visual *."
+  (interactive)
+  (+evil--visual-search t))
+
+(defun +evil/visual-search-backward ()
+  "Search backward for the selected text, as Neovim's Visual #."
+  (interactive)
+  (+evil--visual-search nil))
+
+(defun +evil/visual-execute-macro ()
+  "Run a register on every selected line, as Neovim's linewise Visual @.
+In a charwise or block selection this is the ordinary `evil-execute-macro'."
+  (interactive)
+  (if (not (eq (evil-visual-type) 'line))
+      (call-interactively #'evil-execute-macro)
+    (let ((beg (region-beginning))
+          (end (region-end))
+          (register (evil-read-key)))
+      (evil-exit-visual-state)
+      (evil-ex-normal beg end (concat "@" (char-to-string register))))))
+
+(evil-define-text-object +evil:whole-buffer-txtobj (count &optional _beg _end type)
+  "Select the whole buffer (Doom's ig and ag)."
+  (evil-range (point-min) (point-max) type))
+
+;; Vim's file name modifiers after % and # (`:e %:h/other.el'); Evil
+;; expands the bare characters only.  Applied left to right, as in Vim.
+(defun +evil--file-name-modifiers (name modifiers)
+  "Return file NAME after applying the Vim MODIFIERS string, such as \":p:h\"."
+  (dolist (modifier (split-string modifiers ":" t) name)
+    (setq name
+          (pcase modifier
+            ("p" (expand-file-name name))
+            ("~" (abbreviate-file-name (expand-file-name name)))
+            ("." (file-relative-name name))
+            ("h" (if (file-name-directory name)
+                     (directory-file-name (file-name-directory name))
+                   "."))
+            ("t" (file-name-nondirectory name))
+            ("r" (file-name-sans-extension name))
+            ("e" (or (file-name-extension name) ""))))))
+
+(defun +evil-expand-file-name-modifiers-a (fn file-name)
+  "Expand %:MODS and #:MODS in FILE-NAME before FN expands bare % and #."
+  (let ((names `(("%" . ,(buffer-file-name))
+                 ("#" . ,(and (other-buffer) (buffer-file-name (other-buffer))))))
+        (start 0))
+    (while (string-match "\\(?:^\\|[^\\\\]\\)\\(\\([%#]\\)\\(\\(?::[p~.htre]\\)+\\)\\)"
+                         file-name start)
+      (let ((name (cdr (assoc (match-string 2 file-name) names))))
+        (if (not name)
+            (setq start (match-end 0))
+          (let* ((beg (match-beginning 1))
+                 (end (match-end 1))
+                 (expanded (+evil--file-name-modifiers
+                            name (match-string 3 file-name))))
+            (setq file-name (concat (substring file-name 0 beg) expanded
+                                    (substring file-name end))
+                  start (+ beg (length expanded)))))))
+    (funcall fn file-name)))
+
+;; In wgrep, `d' on a line whose file name prefix is read-only marks the
+;; line for deletion instead of signalling an error (from Doom).
+(evil-define-operator +evil:wgrep-delete (beg end type register yank-handler)
+  "Delete from BEG to END, or mark the lines for deletion in wgrep."
+  (interactive "<R><x><y>")
+  (condition-case nil
+      (evil-delete beg end type register yank-handler)
+    (text-read-only
+     (evil-apply-on-block
+      (lambda (beg _)
+        (goto-char beg)
+        (call-interactively #'wgrep-mark-deletion))
+      beg (1- end) nil))))
+
+(advice-add #'evil-ex-replace-special-filenames
+            :around #'+evil-expand-file-name-modifiers-a)
+(map! :n "] SPC" #'+evil/insert-blank-line-below
+      :n "[ SPC" #'+evil/insert-blank-line-above
+      :n "]b"    #'+evil/next-buffer
+      :n "[b"    #'+evil/previous-buffer
+      :m "]q"    #'+evil/next-error
+      :m "[q"    #'+evil/previous-error
+      :m "]d"    #'+evil/next-diagnostic
+      :m "[d"    #'+evil/previous-diagnostic
+      :nv "gc"   #'+evil:comment
+      :v "*"     #'+evil/visual-search-forward
+      :v "#"     #'+evil/visual-search-backward
+      :v "@"     #'+evil/visual-execute-macro
+      :textobj "g" #'+evil:whole-buffer-txtobj #'+evil:whole-buffer-txtobj)
+(after! wgrep
+  (define-key wgrep-mode-map [remap evil-delete] #'+evil:wgrep-delete))
+
 (use-package evil-surround
   :ensure t
   :hook (after-init . global-evil-surround-mode))

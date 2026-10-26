@@ -80,4 +80,108 @@
       (evil-normal-state)
       (should-not delete-selection-mode))))
 
+;;; Neovim's default mappings
+
+(defmacro init-evil-vim-parity-tests--with-keys (mode text &rest body)
+  "Run BODY in a selected MODE buffer holding TEXT, point at its start."
+  (declare (indent 2))
+  `(let ((buffer (generate-new-buffer "*evil-parity*")))
+     (unwind-protect
+         (save-window-excursion
+           (switch-to-buffer buffer)
+           (funcall ,mode)
+           (insert ,text)
+           (goto-char (point-min))
+           (evil-local-mode 1)
+           (evil-normal-state)
+           ,@body)
+       (kill-buffer buffer))))
+
+(defun init-evil-vim-parity-tests--type (keys)
+  "Type KEYS, a `kbd' string, in the current buffer."
+  (execute-kbd-macro (kbd keys)))
+
+(ert-deftest +evil-bracket-space-adds-blank-lines-and-keeps-point ()
+  "] SPC and [ SPC add COUNT blank lines without moving off the text."
+  (init-evil-vim-parity-tests--with-keys #'text-mode "one\ntwo\n"
+    (forward-line 1)
+    (forward-char 1)
+    (init-evil-vim-parity-tests--type "2] SPC")
+    (should (equal (buffer-string) "one\ntwo\n\n\n"))
+    (should (looking-at "wo"))
+    (init-evil-vim-parity-tests--type "[ SPC")
+    (should (equal (buffer-string) "one\n\ntwo\n\n\n"))
+    (should (looking-at "wo"))))
+
+(ert-deftest +evil-gc-toggles-comments-linewise ()
+  "gcc and gc{motion} toggle comments line by line, as Neovim's gc.
+Lines that are all comments lose one leader; otherwise every line gains one,
+already commented lines included."
+  (init-evil-vim-parity-tests--with-keys #'emacs-lisp-mode "(a)\n(b)\n(c)\n"
+    (init-evil-vim-parity-tests--type "gcc")
+    (should (equal (buffer-string) ";; (a)\n(b)\n(c)\n"))
+    (init-evil-vim-parity-tests--type "gcc")
+    (should (equal (buffer-string) "(a)\n(b)\n(c)\n"))
+    (init-evil-vim-parity-tests--type "gcj")
+    (should (equal (buffer-string) ";; (a)\n;; (b)\n(c)\n"))
+    (init-evil-vim-parity-tests--type "gcG")
+    (should (equal (buffer-string) ";; ;; (a)\n;; ;; (b)\n;; (c)\n"))))
+
+(ert-deftest +evil-visual-star-searches-the-selection-literally ()
+  "Visual * and # search for the selected text, not the word under point."
+  (init-evil-vim-parity-tests--with-keys #'text-mode "a.b x a.b y a.b z axb"
+    (init-evil-vim-parity-tests--type "vll*")
+    (should (evil-normal-state-p))
+    (should (= (point) 7))
+    (init-evil-vim-parity-tests--type "n")
+    (should (= (point) 13))
+    (init-evil-vim-parity-tests--type "vll#")
+    (should (= (point) 7))))
+
+(ert-deftest +evil-linewise-visual-at-runs-the-register-per-line ()
+  "In linewise Visual, @q runs register q on every selected line."
+  (init-evil-vim-parity-tests--with-keys #'text-mode "a\nb\nc\n"
+    (evil-set-register ?q (kbd "A; <escape>"))
+    (init-evil-vim-parity-tests--type "Vj@q")
+    (should (equal (buffer-string) "a;\nb;\nc\n"))))
+
+(ert-deftest +evil-ig-selects-the-whole-buffer ()
+  "yig yanks the whole buffer from anywhere in it."
+  (init-evil-vim-parity-tests--with-keys #'text-mode "one\ntwo\nthree"
+    (forward-line 1)
+    (kill-new "sentinel")
+    (init-evil-vim-parity-tests--type "yig")
+    (should (equal (current-kill 0) "one\ntwo\nthree"))))
+
+(ert-deftest +evil-ex-file-names-take-vim-modifiers ()
+  "%:h, %:t, %:r and %:e work as in Vim; an escaped \\% stays literal."
+  (with-temp-buffer
+    (setq buffer-file-name "/tmp/evil-parity/dir/name.el")
+    (should (equal (evil-ex-replace-special-filenames "%:h/other.el")
+                   "/tmp/evil-parity/dir/other.el"))
+    (should (equal (evil-ex-replace-special-filenames "%:t:r") "name"))
+    (should (equal (evil-ex-replace-special-filenames "%:e") "el"))
+    (should (equal (evil-ex-replace-special-filenames "%:p:h:h")
+                   "/tmp/evil-parity"))
+    (should (equal (evil-ex-replace-special-filenames "\\%:h") "%:h"))
+    (should (equal (evil-ex-replace-special-filenames "%")
+                   "/tmp/evil-parity/dir/name.el"))
+    (setq buffer-file-name nil)))
+
+(ert-deftest +evil-neovim-bracket-keys-are-bound ()
+  "]b [b ]q [q ]d [d are the buffer, error and diagnostic walks."
+  (init-evil-vim-parity-tests--with-keys #'text-mode ""
+    (should (eq (key-binding (kbd "]b")) #'+evil/next-buffer))
+    (should (eq (key-binding (kbd "[b")) #'+evil/previous-buffer))
+    (should (eq (key-binding (kbd "]q")) #'+evil/next-error))
+    (should (eq (key-binding (kbd "[q")) #'+evil/previous-error))
+    (should (eq (key-binding (kbd "]d")) #'+evil/next-diagnostic))
+    (should (eq (key-binding (kbd "[d")) #'+evil/previous-diagnostic))))
+
+(ert-deftest +evil-wgrep-delete-marks-read-only-lines ()
+  "d on a wgrep line with a read-only prefix marks it for deletion."
+  (should (eq (lookup-key (progn (require 'wgrep) wgrep-mode-map)
+                          [remap evil-delete])
+              #'+evil:wgrep-delete)))
+
 ;;; init-evil-vim-parity-tests.el ends here

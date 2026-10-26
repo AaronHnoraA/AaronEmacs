@@ -387,3 +387,13 @@ Doom 的做法：
 | `config/default/autoload/*.el` | 复制项目相对路径已吸收；`compile`/搜索/浏览/新 buffer/重启 server/诊断等包装与本配置已有命令重复 |
 | `config/default/+emacs-bindings.el`、`+evil-bindings.el` | 键位全文看过，归入第 4 节的候选：Doom 的 minibuffer `C-r` 取寄存器、`C-u` 删到缩进是 Vim 命令行的行为，可与 `SPC .` `SPC ,` 等空位一并由用户决定；其余命令本配置已有或属于不用的模块 |
 | `config/literate` | 本配置不是 Org literate 配置 |
+
+## 19. 模块全文：`editor`
+
+| 模块 / 文件 | 处理 |
+| --- | --- |
+| `editor/evil`（`config.el` 的 `map!` 与 autoload `unimpaired.el`、`evil.el`、`textobjects.el`） | **吸收**与 Neovim 0.10/0.11 默认键重合的部分：`]b`/`[b`、`] SPC`/`[ SPC`、`]q`/`[q`（`next-error`）、`]d`/`[d`（Flymake）、`gc`/`gcc` 注释、Visual `*`/`#` 按选中原文搜索、行选择 Visual `@q` 逐行执行，以及整个 buffer 文本对象 `ig`/`ag`。不收 Doom 与 Neovim 不同的键：`]f` 下一个文件（本配置是下一个函数）、`gp` 重选粘贴（Vim 是粘贴后移到其后）、`]c` 注释、`zx` 关 buffer、Visual `<`/`>` 保持选择 |
+| `editor/evil/autoload/advice.el` | **吸收**：`+evil-replace-filename-modifiers-a` 改写为 `+evil-expand-file-name-modifiers-a`，只在 `%`/`#` 后带修饰符时接手，裸 `%`/`#` 仍由 Evil 处理；`+evil-delete` 改写为 wgrep 里的 `+evil:wgrep-delete`。`+evil-join-a` 已有（第 12 节）。`o`/`O` 续写注释不收：Neovim 默认 `formatoptions` 没有 `o`。分屏更新窗口历史、minibuffer 里 hippie 的语法表不适用 |
+| `editor/evil/autoload/ex.el`、`+commands.el` | `:retab` Evil 已有；`:align`、`:rev`、`:mv`/`:cp`/`:rm`、工作区与会话 Ex 命令不收：本配置这些操作走 leader 键与菜单 |
+| `editor/evil/config.el`（`use-package` 部分） | 已有：`set-auto-mode` 保持状态、`evil-symbol-word-search`、`evil-ex-interactive-search-highlight`、escape 清高亮。不收：`evil-kbd-macro-suppress-motion-error`（Vim 里动作失败会结束宏，递归宏靠它停下）、`evil-ex-visual-char-range`（Vim 的 `:'<,'>` 总是整行）、`evil-indent` 不移动光标（Vim 的 `=` 移到首行）、2–9 号标记全局化、Vim 式保存消息、光标颜色；evil-easymotion/snipe/embrace/exchange/lion/numbers/traces 等包（本配置用 avy 与 evil-surround） |
+| **G-E1（待用户决定）** | 审计时发现 evil-collection **从未启用**：`use-package evil` 在 `:config` 里先开了 `evil-mode`，之后 evil-collection 的 `:hook (evil-mode . evil-collection-init)` 才加上，所以 `evil-collection-init` 不会运行（交互启动实测 `(featurep 'evil-collection)` 为 nil；只有 `SPC q E` 重开 `evil-mode` 才会触发）。`evil-collection-mode-list` 的过滤、unimpaired 的 repeat 选项因此都没有作用。Doom 默认（不加 `+everywhere`）也不装 evil-collection。启用它会改变 Magit、help、Info 等所有特殊模式的键，属于手感变化，留给用户决定：启用（修正顺序）或删除这段声明 |
