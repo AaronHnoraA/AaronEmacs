@@ -64,6 +64,12 @@ make lock
 make audit-lock
 ```
 
+LSP 协议对象以 plist 编译。升级 `lsp-mode` 或相关客户端后，退出 Emacs，运行
+`make lsp-protocol-rebuild`，再启动 Emacs。这个目标使用 `LSP_USE_PLISTS=1`
+重编 lsp-mode、lsp-ui、lsp-docker、lsp-java、lsp-treemacs、sideline-lsp、
+dap-mode、lean4-mode 和 elsa，并清理它们的旧 native cache；编译失败时恢复
+原字节码。日常启动时 `early-init.el` 会在包加载前设置同一环境变量。
+
 Aaron UI / Noema 设计 token 另有一条不依赖 Noema 构建的审计链：
 
 ```sh

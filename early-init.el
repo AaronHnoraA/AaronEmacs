@@ -3,6 +3,10 @@
 ;;; 提前关掉包系统自动初始化，用 use-package 等自己控制
 (setq package-enable-at-startup nil)
 
+;; lsp-protocol expands its object accessors while packages are compiled.
+;; Set this before package activation and inherited compilation processes.
+(setenv "LSP_USE_PLISTS" "1")
+
 ;; Prefer fresh source over stale bytecode throughout the startup chain.
 (setq load-prefer-newer t)
 

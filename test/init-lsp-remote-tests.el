@@ -19,11 +19,13 @@
       registration)))
 
 (defun +lsp-test-object (&rest pairs)
-  "Return an LSP hash object initialized from keyword/value PAIRS."
-  (let ((object (make-hash-table :test #'equal)))
-    (while pairs
-      (puthash (substring (symbol-name (pop pairs)) 1) (pop pairs) object))
-  object))
+  "Return an LSP object from keyword/value PAIRS in the active format."
+  (if lsp-use-plists
+      pairs
+    (let ((object (make-hash-table :test #'equal)))
+      (while pairs
+        (puthash (substring (symbol-name (pop pairs)) 1) (pop pairs) object))
+      object)))
 
 (ert-deftest lsp-remote-company-timeout-falls-back-and-retries ()
   "A stalled remote CAPF does not block every subsequent completion."

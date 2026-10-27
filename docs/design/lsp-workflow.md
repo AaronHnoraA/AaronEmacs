@@ -33,6 +33,13 @@
 当前只有一个受支持的客户端：`lsp-mode`。Eglot 作为 Emacs 内置库不能卸载，但
 命令会从 `M-x` 隐藏，防止误启动第二套不受 Remote workspace 管理的客户端。
 
+**G-L2（协议对象表示）**：`early-init.el` 在包加载前设置
+`LSP_USE_PLISTS=1`，Makefile 也将它传给批处理命令。lsp-mode 的协议对象使用
+plist；访问器在字节编译时展开，因此 lsp-mode 与引用它的客户端必须在相同模式下
+编译。升级相关包或发现旧字节码时，退出 Emacs，运行
+`make lsp-protocol-rebuild`，再重新启动。该命令重编相关客户端，并清理对应的旧
+native cache；编译失败会恢复原有产物。单改运行时环境变量不足以切换已有字节码。
+
 所有 file-backed `prog-mode` buffer 都会延迟尝试启动；只有同时满足以下条件才
 真正连接：
 

@@ -16,11 +16,13 @@
     (should-not (company-yasnippet 'doc-buffer ""))))
 
 (defun +lsp-ui-test-object (&rest pairs)
-  "Return an LSP hash object initialized from key/value PAIRS."
-  (let ((object (make-hash-table :test #'equal)))
-    (while pairs
-      (puthash (substring (symbol-name (pop pairs)) 1) (pop pairs) object))
-    object))
+  "Return an LSP object from key/value PAIRS in the active format."
+  (if lsp-use-plists
+      pairs
+    (let ((object (make-hash-table :test #'equal)))
+      (while pairs
+        (puthash (substring (symbol-name (pop pairs)) 1) (pop pairs) object))
+      object)))
 
 (ert-deftest +company-box-keeps-one-tooltip-frontend ()
   "Company 1.1's child frame must not overlap Company-box."
@@ -475,12 +477,12 @@
               ((symbol-function '+language-server--visible-region)
                (lambda (&optional _window) '(10 . 20)))
               ((symbol-function 'lsp--position-to-point)
-               (lambda (position) (gethash "point" position))))
+               (lambda (position) (lsp-get position :point))))
       (+lsp-lens--display-visible-a
        (lambda (lenses) (setq displayed lenses))
        (list before first inside after)))
     (should
-     (equal (mapcar (lambda (lens) (gethash "command" lens)) displayed)
+     (equal (mapcar (lambda (lens) (lsp-get lens :command)) displayed)
             '("first" "inside")))))
 
 (ert-deftest +lsp-inlay-hints-request-only-the-visible-warm-region ()

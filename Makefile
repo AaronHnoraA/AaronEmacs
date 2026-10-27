@@ -1,4 +1,6 @@
 EMACS ?= emacs
+# lsp-protocol expands its object accessors at package byte-compilation time.
+export LSP_USE_PLISTS := 1
 # Pinned, prebuilt emacs-plus cask asset for Apple Silicon macOS 26+.
 include config/emacs-binary.mk
 EMACS_BINARY_URL = https://github.com/d12frosted/homebrew-emacs-plus/releases/download/cask-stable-$(EMACS_BINARY_BUILD)/emacs-plus-$(EMACS_BINARY_VERSION)-arm64-26.zip
@@ -29,7 +31,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L lisp/core/aaron-ui -l lisp/core/aaron-ui
         clean clean-build clean-elc clean-eln clean-eln-stale clean-state state-backup state-restore state-baseline state-check test-baseline test-check \
         health health-startup health-byte health-native core-test ui-test activity-test performance-test ui-tokens audit-ui-tokens \
         remote-test remote-source-test remote-transfer-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
-		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke \
+		lsp-test lsp-protocol-rebuild writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke \
         jupyter-test research-test agenda-test agenda-apple-test project-workflow-test \
         jupyter-linux-disconnect-live-smoke \
         noema-help noema-setup noema-build noema-install noema-test noema-kernel-build noema-kernel-install \
@@ -96,6 +98,7 @@ help:
 	  '  make remote-check         Run all remote tests and compatibility checks' \
 	  '  make remote-cleanup-live-smoke  Check full-init target cleanup with initialized LSP' \
 	  '  make lsp-test            Run isolated LSP routing, toolchain, runtime, and UI tests' \
+	  '  make lsp-protocol-rebuild  Recompile installed LSP clients for plist objects' \
 	  '  make writing-test        Run LanguageTool/Flymake and LaTeX routing tests' \
 	  '  make latex-preview-test   Run the vendored RaTeX math-preview ERT suite' \
 	  '  make lsp-live-smoke      Start real clangd, Python LS, and JDTLS projects' \
@@ -330,6 +333,9 @@ lsp-test:
 	$(BATCH) -l test/init-lsp-toolchain-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-runtime-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-lsp-ui-tests.el -f ert-run-tests-batch-and-exit
+
+lsp-protocol-rebuild:
+	$(BATCH) -l scripts/lsp-protocol-rebuild.el -f aaron-lsp-protocol-rebuild
 
 writing-test:
 	$(BATCH) -l test/init-writing-tests.el -f ert-run-tests-batch-and-exit
