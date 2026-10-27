@@ -477,3 +477,13 @@ Doom 的做法：
 | `lang/rust` | rust-analyzer 悬停签名提取已在第 9 节以 `:upstream-id` 吸收；rustic 与 cargo 命令不收（本配置 Rust 走 lsp-mode 与 `tools/test`） |
 | `lang/web` | 已有 web-mode 与 Vue（第 10 节）；HTML 实体编解码、emmet、CSS 注释续行、框架项目模式不收 |
 | `lang/lean`、`ledger`、`lua`、`nim`、`nix`、`ocaml`、`odin`、`php`、`plantuml`、`purescript`、`qt`、`racket`、`raku`、`rest`、`rst`、`ruby`、`scad`、`scala`、`scheme`、`sml`、`solidity`、`swift`、`terra`、`zig` | Lean（本配置有自己的 lean4 模式与 infoview）、Nix、OCaml 已有各自模块；其余用户不用 |
+
+## 25. 模块全文：`lang/org`
+
+用户不用 Org（笔记、任务、导出都在 Noema），本配置的 `lang/org` 只有链接插入，所以 Doom 的 Org 工作流（capture 浮窗、refile 系列、agenda 时段与后台 buffer 优化、babel 惰性加载与 ob-async、导出到剪贴板、附件与 org-download、org-roam、journal、present、noter、`+org/dwim-at-point` 与 evil-org 键）都不收。
+
+| 项目 | 处理 |
+| --- | --- |
+| 运行时文件位置 | **已有**：实测 `org-id-locations-file`、`org-clock-persist-file`、`org-publish-timestamp-directory` 都在 `var/org/`，`org-persist` 在 `var/org/persist/`；相对的 `ltximg/` 只在 Org 自己的 LaTeX 预览里生成，本配置的公式预览是 RaTeX |
+| `org-id-new` 小写 UUID、`org-id-locations` 读写失败降级、`org-protocol` 惰性加载、导出时屏蔽 `write-file-functions`、`save-place` 落入折叠区时展开 | 都只在使用 org-id、org-protocol、导出或在 Org 里编辑时起作用，不收 |
+| `+org-cycle-only-current-subtree-h`、`zm`/`zr` 按可见层级开合 | 本配置的折叠由 `editor/fold` 按后端分派，`zj`/`zk` 已在第 19 节吸收 |
