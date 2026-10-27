@@ -1659,6 +1659,17 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
               :around #'aaron-undo-tree-make-history-save-file-name)
   (advice-add 'undo-tree-load-history :around #'aaron-undo-tree-load-history)
   (advice-add 'undo-tree-save-history :around #'aaron-undo-tree-save-history)
+  ;; From Doom's undo module: a deleted string keeps its text properties in
+  ;; the undo list (faces, LSP semantic tokens), so every history file carried
+  ;; them for each deleted character; one Lean file's history reached 2.3 MB.
+  (defun aaron-undo-tree--strip-text-properties-a (&rest _)
+    "Drop text properties from deleted strings before undo-tree takes them."
+    (dolist (item buffer-undo-list)
+      (and (consp item)
+           (stringp (car item))
+           (setcar item (substring-no-properties (car item))))))
+  (advice-add 'undo-list-transfer-to-tree :before
+              #'aaron-undo-tree--strip-text-properties-a)
   (advice-add 'after-find-file :around #'aaron-undo-tree-load-history-early-a)
   ;; Only persist history for on-disk file states. Saving on `kill-buffer-hook'
   ;; can poison the history file when the buffer has unsaved edits, causing the
