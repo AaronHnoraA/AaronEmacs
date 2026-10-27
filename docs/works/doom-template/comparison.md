@@ -533,12 +533,65 @@ Doom 的做法：
 | `lang/json` | json-mode、jsonc、路径复制与布尔切换键 | 本配置 `.json`/`.jsonc` 走 `json-ts-mode`（grammar 已装）；路径复制等键不收 |
 | `lang/lua` | lua-mode 缩进 2、REPL、love2d 项目、moonscript、fennel | **牵出修复**：`.lua` 原落入无 grammar 的 `lua-ts-mode`，既无高亮也不缩进；现退回 Emacs 31 自带的 `lua-mode`（用户的 Neovim、Yazi 配置是 Lua） |
 | `ui/ophints` | evil-goggles 显示操作作用的范围 | **吸收**为复制高亮：用户 Neovim 配置有 `vim.highlight.on_yank()`；`y`/`yy`/Visual `y` 后被复制的文字闪 150 毫秒（`isearch` face，宏内不闪，块选择逐行），设置 `+evil-yank-highlight-duration`。不装 evil-goggles，删除/修改不提示 |
-| `ui/deft`、`doom-quit`、`neotree`、`smooth-scroll`、`vi-tilde-fringe`、`window-select` | deft 笔记、退出语、neotree、ultra-scroll、`~` 边栏、ace-window/winum | 逐个看过：笔记在 Noema、目录树是 Treemacs、滚动有 `+macos-scroll-profile`、窗口切换有本配置的键位；退出语与 `~` 是外观 |
+| `ui/deft` | deft 笔记列表与新建/重命名键 | 笔记在 Noema，不收 |
+| `ui/doom-quit` | 随机退出提示语 | 外观，不收 |
+| `ui/neotree` | neotree 侧栏、项目根打开、hjkl 键 | 目录树是 Treemacs，不收 |
+| `ui/smooth-scroll` | ultra-scroll、good-scroll 插值 | 已有 `+macos-scroll-profile`，不收 |
+| `ui/vi-tilde-fringe` | 缓冲区末尾的 `~` | 外观，不收 |
+| `ui/window-select` | ace-window/switch-window/winum | 窗口切换有本配置的键位，不收 |
 | `tools/docker` | dockerfile-mode、dockfmt、LSP | 本配置 Dockerfile 走 `lang/filetypes`；`dockerfile-ts-mode` 缺 grammar 时与 Go 一样保留 ts-mode（没有可退的普通 mode） |
 | `term/vterm` | vterm 弹窗与 `0`/`dd` 发给 shell | 终端是 Portal/Ghostel，不收 |
-| `editor/god`、`objed` | 无修饰键命令、对象编辑 | 与 Evil 冲突，不收 |
-| `completion/helm`、`ido`、`ivy` | 三套补全前端；ivy 在 minibuffer 退出时记跳转点、rg 退出码 2 不丢结果 | 本配置用 Vertico/Consult；跳转点已由第 26 节的 `:jump` 处理；`wgrep-auto-save-buffer` 已是 t |
-| `email/mu4e`、`notmuch`、`wanderlust` | 邮件客户端 | 只有客户端专属设置，用户不在 Emacs 收邮件 |
+| `editor/god` | god-mode 与光标颜色 | 与 Evil 冲突，不收 |
+| `editor/objed` | 对象编辑状态 | 与 Evil 冲突，不收 |
+| `completion/helm` | helm 各命令重映射、helm-rg、mdfind 定位 | 本配置用 Vertico/Consult，不收 |
+| `completion/ido` | ido 忽略列表与 flx | 同上，不收 |
+| `completion/ivy` | 三套补全前端；ivy 在 minibuffer 退出时记跳转点、rg 退出码 2 不丢结果 | 本配置用 Vertico/Consult；跳转点已由第 26 节的 `:jump` 处理；`wgrep-auto-save-buffer` 已是 t |
+| `email/mu4e` | mu4e 账户、Gmail、org-msg | 用户不在 Emacs 收邮件，不收 |
+| `email/notmuch` | notmuch 搜索与发信 | 同上，不收 |
+| `email/wanderlust` | 用户邮件走 Gnus（`SPC a g`），不用这三个客户端；mu4e 的空主题检查 Gnus 的 `message-check` 已有 |
 | `lang/rest` | restclient、`.http` | 本配置未装 restclient，也没有 `.http` 文件（只残留两个片段），不收 |
-| `lang/graphviz`、`plantuml` | dot 预览与格式化、plantuml jar | 用户不用；Noema 的图走 mermaid |
-| `lang/ada`、`agda`、`clojure`、`common-lisp`、`coq`、`crystal`、`csharp`、`dart`、`dhall`、`elixir`、`elm`、`erlang`、`ess`、`factor`、`faust`、`fortran`、`fsharp`、`fstar`、`gdscript`、`graphql`、`hy`、`idris`、`janet`、`julia`、`kotlin`、`ledger`、`nim`、`odin`、`php`、`purescript`、`qt`、`racket`、`raku`、`rst`、`ruby`、`scad`、`scala`、`scheme`、`sml`、`solidity`、`swift`、`terra`、`zig` | 各自的 REPL、lookup、格式化器、项目根标记、测试与构建键 | 逐个读过，都是该语言专属；其中通用的一点是 `set-tree-sitter!` 只在 grammar 就绪时换 ts-mode，正是本配置漏掉的约定，已按此修正路由 |
+| `lang/graphviz` | dot 预览、格式化、flycheck 检查 | 用户不用，不收 |
+| `lang/plantuml` | dot 预览与格式化、plantuml jar | 用户不用；Noema 的图走 mermaid |
+| `lang/ada` | alr build/run/clean/test/prove 命令、RET 先重排缩进、ada-ts/gpr-ts | 用户不写该语言，均为该语言专属，不收 |
+| `lang/agda` | `agda-mode locate` 加载路径、agda2 目标/求解键 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/clojure` | 项目根 deps.edn/project.clj、CIDER 设置与键、clj-refactor、kondo、neil/jet | 用户不写该语言，均为该语言专属，不收 |
+| `lang/common-lisp` | sly 自动启动与清理、quicklisp 文件查找、hyperspec、stickers 键 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/coq` | Proof General、company-coq、去掉 splash | 用户不写该语言，均为该语言专属，不收 |
+| `lang/crystal` | `crystal tool format`、spec 键、ameba | 用户不写该语言，均为该语言专属，不收 |
+| `lang/csharp` | `<>` 智能配对、关闭 csharp-mode 的 string fences、Unity 项目模式、sharper、`.sln` | 用户不写该语言，均为该语言专属，不收 |
+| `lang/dart` | ligatures、lsp-dart 测试键、flutter/hover | 用户不写该语言，均为该语言专属，不收 |
+| `lang/dhall` | dhall REPL、lint/freeze 键 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/elixir` | `do…end` 配对、`_build` 不监视、elixir-ls 路径、exunit、heex 内嵌高亮 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/elm` | elm make 四个编译命令、company-elm | 用户不写该语言，均为该语言专属，不收 |
+| `lang/erlang` | rebar.config 等扩展名、erlfmt、erlang-flymake | 用户不写该语言，均为该语言专属，不收 |
+| `lang/ess` | R/Julia REPL、`DESCRIPTION` 项目根、comint 滚动、ESS 帮助键、stan、quarto | 用户不写该语言，均为该语言专属，不收 |
+| `lang/factor` | FUEL 求值/帮助/重构键 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/faust` | faustine 构建与图示、关键字补全 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/fortran` | fpm/gfortran/ifort 构建与运行、`.F90`/`.FOR`、fprettify | 用户不写该语言，均为该语言专属，不收 |
+| `lang/fsharp` | fantomas、`dotnet fsi`、fsharp-ac 回退 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/fstar` | F* 推进/回退与跳转键 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/gdscript` | `project.godot` 项目根、gdformat、Godot 运行与调试键 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/graphql` | `.graphqlconfig` 文档、ligatures | 用户不写该语言，均为该语言专属，不收 |
+| `lang/hy` | hy-shell REPL、lisp 缩进格式化 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/idris` | `.ibc` 忽略、idris 子句/引理/case 键 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/janet` | 一次性设置缩进规则、flymake-janet | 用户不写该语言，均为该语言专属，不收 |
+| `lang/julia` | julia-repl/snail、算符着色、LanguageServer.jl 环境探测 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/kotlin` | gradlew 构建/测试命令、ktlint | 用户不写该语言，均为该语言专属，不收 |
+| `lang/ledger` | 清账、outline、报表与对账键（本配置记账用 beancount） | 用户不写该语言，均为该语言专属，不收 |
+| `lang/nim` | nimsuggest 存在才启用、nimpretty | 用户不写该语言，均为该语言专属，不收 |
+| `lang/odin` | 可按目录覆盖的 build/test 命令、odinfmt | 用户不写该语言，均为该语言专属，不收 |
+| `lang/php` | composer、phpunit、Laravel 项目模式、php-ts 缩进风格修正 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/purescript` | psc-ide、purs-tidy | 用户不写该语言，均为该语言专属，不收 |
+| `lang/qt` | qmlls、`.pro`/`.pri` | 用户不写该语言，均为该语言专属，不收 |
+| `lang/racket` | racket-xp、hash-lang、raco fmt、宏展开键 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/raku` | perl6 别名、REPL | 用户不写该语言，均为该语言专属，不收 |
+| `lang/rst` | sphinx-mode、rstfmt、目录键 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/ruby` | Gemfile 项目根、不插编码注释、rake/bundler/rspec/minitest/rails（`.rb` 现退回 ruby-mode，见第 10 节） | 用户不写该语言，均为该语言专属，不收 |
+| `lang/scad` | openscad-lsp、预览旋转平移键 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/scala` | scaladoc 续行、sbt REPL、scalafmt | 用户不写该语言，均为该语言专属，不收 |
+| `lang/scheme` | `def*`/关键字 plist 缩进修正、geiser 按项目 REPL | 用户不写该语言，均为该语言专属，不收 |
+| `lang/sml` | SML REPL、电符号 `|`、去掉 `'` 配对 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/solidity` | 注释风格、solc/solium 检查 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/swift` | sourcekit-lsp 路径探测 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/terra` | terra REPL、`else`/`end` 电缩进 | 用户不写该语言，均为该语言专属，不收 |
+| `lang/zig` | `build.zig` 项目根、zig ast-check、编译/测试键 | 用户不写该语言，均为该语言专属，不收 |
