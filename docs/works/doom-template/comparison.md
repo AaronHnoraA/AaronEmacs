@@ -608,3 +608,4 @@ Doom 的做法：
 | `config/default/config.el` | `newline-and-indent` 续写注释只在关掉 `electric-indent-mode` 时生效 | 本配置开着 `electric-indent-mode`，Doom 在同样设置下也不续写，不收 |
 | `config/default/+evil-bindings.el`、`+emacs-bindings.el` | 逐键看过：`help-mode`/`Info` 的 `o` 开链接、`Man-mode` 的 `q` 杀 buffer、`view-mode` 的 `ESC` | 不收：开链接已有 `SPC o o`（任何 buffer）；evil-collection 给 Man 的 `q` 是 `quit-window`，按 `docs/design/window-lifecycle.md` 关闭视图不结束 buffer，Doom 的杀 buffer 与此相反 |
 | `config/literate` | config.org 异步 tangle | 不用 literate 配置，不收 |
+| `editor/evil/config.el`（evil-collection 部分） | `evil-collection-key-blacklist` 列入 leader 键，另有 `elisp-mode`、`ert`、`eglot` 等排除表与 `binding-overrides` | **吸收**黑名单：G-E1 启用 evil-collection 后，它在 help、Info、Man、Magit、debugger、进程列表的 Normal 键表里把 `SPC` 绑成翻页，比 leader 所在的全局 Normal 键表优先，`SPC` 在这些 buffer 里不是 leader。现把 `SPC` 列入黑名单（测试 `init-evil-collection-tests.el`，去掉后测试失败）。排除表里的模式本配置不用或已自有键位，不收 |

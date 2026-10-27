@@ -610,7 +610,11 @@ In a charwise or block selection this is the ordinary `evil-execute-macro'."
   (evil-collection-calendar-want-org-bindings nil)
   ;; The `[' / `]' pairs are Neovim's defaults, bound in this file; the
   ;; unimpaired keymap would shadow them.
-  (evil-collection-want-unimpaired-p nil))
+  (evil-collection-want-unimpaired-p nil)
+  ;; Its per-mode Normal-state maps outrank the global one the leader is
+  ;; bound in, so SPC would scroll in Help, Info, Man and Magit instead.
+  ;; From Doom, which keeps its leader keys out of evil-collection too.
+  (evil-collection-key-blacklist '("SPC")))
 
 ;; evil leader map
 (use-package evil
