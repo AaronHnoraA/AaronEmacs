@@ -683,6 +683,14 @@ Compiles first when no PDF exists yet."
 
 (use-package pdf-tools
   :ensure t
+  ;; Load on the first PDF, not with this module: activating PDF Tools starts
+  ;; the `epdfinfo' server, which has no work until a PDF is open.
+  :mode ("\\.[pP][dD][fF]\\'" . pdf-view-mode)
+  :magic ("%PDF" . pdf-view-mode)
+  :init
+  ;; `pdf-view-mode' alone loads pdf-view, not pdf-tools; bring the rest of
+  ;; the setup below along with it.
+  (with-eval-after-load 'pdf-view (require 'pdf-tools))
   :config
   (setq pdf-tools-enabled-modes +pdf-tools-enabled-modes)
   (setq pdf-outline-enable-imenu t)

@@ -80,7 +80,7 @@ Doom 不在启动时开启这些模式，而是挂到生命周期 hook 上（本
 
 模块账本还发现两处启动期间的重加载：
 
-- `lang/auctex` 本应在 TeX/PDF 之后才加载，但 `tex-site` 和 `pdf-tools` 在启动时就被加载，结果它约 0.9s 的初始化落在了启动期间。
+- `lang/auctex` 本应在 TeX/PDF 之后才加载，但 `tex-site` 和 `pdf-tools` 在启动时就被加载，结果它约 0.9s 的初始化落在了启动期间。**已修**：`tex-site` 由 AUCTeX 的 autoload 文件在启动时载入，模块因此照常在启动时加载（也要靠它登记 `.pdf` 的打开方式），但其中的 `use-package pdf-tools` 原先没有延迟，激活 PDF Tools 会启动 `epdfinfo` 服务进程。现改为 `:mode`/`:magic` 登记 `pdf-view-mode`，pdf-view 载入时再带上 pdf-tools；实测模块启动耗时从约 1.0s 降到 0.014s，启动后没有 `epdfinfo` 进程，打开 PDF 时才启动（测试 `init-pdf-lazy-tests.el`）。
 - `lang/org` 跟随 org 加载，而 org 在启动时就被加载了。
 
 Doom 的做法：
