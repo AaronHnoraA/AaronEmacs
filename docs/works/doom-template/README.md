@@ -88,7 +88,7 @@ Doom 在 `core/lisp/doom-emacs.el` 和 `doom.el` 里提供了这些 hook：
 - 一个语言模块因此基本就是一串声明。
 - Doom 有这些：`set-popup-rule(s)!`、`set-lookup-handlers!`、`set-formatter!`、`set-repl-handler!`、`set-eval-handler!`、`set-company-backend!`、`set-file-template(s)!`、`set-evil-initial-state!`、`set-electric!`、`set-ligatures!`、`set-docsets!`、`set-tree-sitter!`、`set-next-checker!`、`set-eglot-client!`、`set-lsp-priority!`、`set-yas-minor-mode!`、`set-eshell-alias!`、`set-modeline!`。
 
-本配置已经有同类做法，但只覆盖少数领域：
+迁移前，本配置已有同类做法，但只覆盖少数领域：
 
 - `my/register-language-server`、`my/register-language-server-feature`（LSP）
 - `config-register`（设置）
@@ -96,7 +96,7 @@ Doom 在 `core/lisp/doom-emacs.el` 和 `doom.el` 里提供了这些 hook：
 - `my/display-rules-shackle-rules`（常量表，只能在一个文件里改）
 - auto-insert 模板
 
-处理：**拿结构**，按领域补齐注册 API，实现落在拥有该子系统的模块里，再把 `lisp/lang/` 下的模块改成声明式。下表的“现状”需要逐项核实后再定稿：
+处理：**拿结构**，按领域核对是否需要注册 API，实现落在拥有该子系统的模块里。下表是迁移前的待核实盘点；最终采用的接口与不新增查找、格式化等注册表的理由，见 [module-system.md](../../design/module-system.md)“注册接口”和下方 P1c 进度。
 
 | API | 拥有它的模块 | 现状 |
 | --- | --- | --- |

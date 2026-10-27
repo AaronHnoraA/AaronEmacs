@@ -2,9 +2,9 @@
 
 本文只回答一个问题：neo-emacs 的框架和本配置的框架，在**文件结构**和**项目组织**上怎么合成一个。
 
-逐条配置怎么吸收，记在 [inventory.md](inventory.md)（下一步）。
+逐条配置的审计与最终去处见 [inventory.md](inventory.md)。
 
-> 第一阶段已完成（[doom-template](../doom-template/README.md)），本配置现在的结构就是 Doom 式的：`lisp/分类/模块/`、`aaron!` 声明、`+领域-` / `+领域/命令` 命名、`set-…!` 注册接口、模块账本与 doctor，见 [module-system.md](../../design/module-system.md)。本文 §3 的结构方案由此取代。吸收 neo-emacs 时，他的每个模块直接落到对应的 `lisp/分类/模块/`；他的 `map!`、`after!`、`set-popup-rule!` 等写法基本可以照抄（宏同名），弹窗规则走 `set-popup-rule!`，evil 状态走 `set-evil-initial-state!`。§2、§3.3 的映射关系仍然有效。
+> 第一阶段已完成（[doom-template](../doom-template/README.md)），本配置现在的结构是 `lisp/分类/模块/`、`aaron!` 声明、`+领域-` / `+领域/命令` 命名、`set-…!` 注册接口、模块账本与 doctor，见 [module-system.md](../../design/module-system.md)。下文 §1 的“本配置”和 §2–5 是迁移前的对照、方案与待定问题，所列旧路径、`my/` 接口和拟议的 `my/modules!` 不再是当前实现；领域归属的判断仍可参考，实际接口和逐项裁决以设计文档及 [inventory.md](inventory.md) 为准。吸收 neo-emacs 时，每个模块落到对应的 `lisp/分类/模块/`；弹窗规则走 `set-popup-rule!`，Evil 状态走 `set-evil-initial-state!`。
 
 原则（用户定）：**全量吸收 neo-emacs 的配置和细节，骨架用本配置的。**
 
