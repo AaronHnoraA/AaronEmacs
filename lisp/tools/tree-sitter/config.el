@@ -47,6 +47,23 @@
 (declare-function treesit-auto-recipe-remap "treesit-auto" (recipe))
 (defvar treesit-auto-recipe-list)
 
+(defun +treesit--installed-grammars ()
+  "Return the languages with a grammar library in this config's grammar dirs.
+Asking `treesit-language-available-p' about a missing grammar searches
+every library path (about 30 ms each), so only languages found here are
+asked; a grammar installed elsewhere counts as missing."
+  (let (langs)
+    (dolist (dir (cons (locate-user-emacs-file "tree-sitter")
+                       treesit-extra-load-path))
+      (when (file-directory-p dir)
+        (dolist (file (directory-files
+                       dir nil "\\`libtree-sitter-.+\\.\\(?:dylib\\|so\\|dll\\)\\'"))
+          (push (intern (replace-regexp-in-string
+                         "\\`libtree-sitter-\\|\\.[^.]+\\'" "" file))
+                langs))))
+    (append (mapcar #'car (bound-and-true-p treesit-load-name-override-list))
+            langs)))
+
 (defun +treesit-routed-languages ()
   "Return the languages whose files should open in their ts-mode.
 A ts-mode without its grammar has no highlighting and no structural
@@ -55,9 +72,11 @@ mode when one exists.  When none does (Go, TypeScript), the ts-mode is
 still the only mode language servers and tools know the file by.
 Decided at startup: a grammar installed later takes effect after a
 restart."
-  (cl-loop for recipe in treesit-auto-recipe-list
+  (cl-loop with installed = (+treesit--installed-grammars)
+           for recipe in treesit-auto-recipe-list
            for lang = (treesit-auto-recipe-lang recipe)
-           when (or (treesit-language-available-p lang)
+           when (or (and (memq lang installed)
+                         (treesit-language-available-p lang))
                     (not (seq-some #'fboundp
                                    (ensure-list
                                     (treesit-auto-recipe-remap recipe)))))
