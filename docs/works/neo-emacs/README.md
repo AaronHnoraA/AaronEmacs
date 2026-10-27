@@ -37,6 +37,8 @@ neo-emacs 不是独立框架，而是一套 **Doom Emacs 私有配置**：
 - [x] `lisp/` 分类、目录、开关、迁移和验证：见 [structure.md](structure.md) 与第一阶段的 [README.md](../doom-template/README.md)。
 - [x] 逐文件审计（2026-10-27 完成）：`config.el`、`keymap.el`、`packages.el` 和
   20 个模块都有了去处，见 [inventory.md](inventory.md) 的审计记录。
+- [x] 根目录 `README.org` 与 11 份模块说明补读：Git 路径解析已合并到本配置的
+  Git 工作台；其余安装说明与私人工作流见 [inventory.md](inventory.md)。
 
 ## 决定
 

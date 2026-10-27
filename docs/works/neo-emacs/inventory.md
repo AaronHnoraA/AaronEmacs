@@ -1,6 +1,7 @@
 # neo-emacs 清单：按模块和功能分类
 
 上游 `ad8d42b`。neo-emacs 的每一项功能都在这里有一个去处，按 Doom 分类排列，目标是本配置的 `lisp/分类/模块/`。
+第 0–13 节保留初筛时的候选位置和判断；后面的“审计记录”是逐项核实后的最终裁决。
 
 处理方式：
 
@@ -438,3 +439,4 @@
 - `shell/readme.org` 的 fish `ff` 命令让 vterm 打开文件。本配置已有终端和脚本入口 `emacsopen`，支持文件、行列、窗口位置与远程路由；不再加入依赖 vterm OSC 的第二个入口。
 - `eglot/readme.org` 详细说明 JDT 的 `jdt://` 类文件处理：发送 class-file 能力、请求 `java/classFileContents` 并缓存源码。这与前面 `eglot` / `java` 条目的裁决一致：本配置由 `lsp-java` 管 JDT，用户不写 Java，不加第二套 Eglot URI handler。`agentshell/readme.org` 主要是 Opencode、Cursor 的安装和私有 MCP 路径；当前 Agent 面板审计已覆盖可移植的图片策略。
 - `find/readme.org` 的项目 ripgrep 语法与输入法快捷键已由当前 Consult 搜索和 macOS 输入源策略覆盖；其余说明属于前面已裁决的 Java、Org、Rime、SQL、Cursor 和字体主题工作流，没有新的可合并配置。
+- 根目录 `README.org` 另列出启动时预开 IDE/SQL/HTTP/Org 工作区和固定文件、在 shell 与 Elisp 中分别写私有 HTTP 代理。前者依赖作者的私人文件和启动习惯，后者依赖私人网络环境；本配置保持用户显式打开工作区、环境由 Remote capsule 管理，不复制这两段示例。
