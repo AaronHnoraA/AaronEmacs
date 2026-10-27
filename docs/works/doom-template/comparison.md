@@ -523,3 +523,22 @@ Doom 的做法：
 | `docs/contributing.org` | **吸收**命名约定的一条：Evil operator/motion/text object 写作 `+MODULE:NAME`，补进 `AGENT.md`（已有 `+evil:comment` 等）；`-fn` 策略函数后缀本配置尚无用例，不加 |
 | `static/init.example.el` 末尾 | 记为候选：第一个 frame 在 GNU Emacs 上不被预先隐藏（early-init 时没有图形显示），深色主题加载前可能闪一下白底；Doom 建议在 `initial-frame-alist` 写死背景色。本配置平时由 `bin/emacs-app` 隐藏启动，很少看到，而写死颜色会和主题切换冲突，留给用户决定 |
 | `docs/getting_started.org`、`examples.org`、`appendix.org`、`index.org`、`static/*.example.el`、`QUICKSTART_INTRO`、`VANILLA_SANDBOX`、`.dir-locals.el`、`.gitmodules`、`sources/` | 安装、straight 包管理、profiles、doomscript 示例、术语表与模板；沙盒已在第 12 节吸收为 `elisp-sandbox`，模块文件约定见 `docs/design/module-system.md` |
+
+## 29. 只在合并行里出现过的 65 个模块（逐个重读）
+
+前面各节把用户不用的模块并在一行里处理。这里逐个重读这 65 个模块的源码，各给一行结论。重读发现了两处真问题：第 24 节 `lang/json`、`lang/lua` 牵出的 tree-sitter 路由（缺 grammar 的 ts-mode 无高亮，见第 10 节更正）与 `ui/ophints` 对应的复制高亮。
+
+| 模块 | 内容 | 处理 |
+| --- | --- | --- |
+| `lang/json` | json-mode、jsonc、路径复制与布尔切换键 | 本配置 `.json`/`.jsonc` 走 `json-ts-mode`（grammar 已装）；路径复制等键不收 |
+| `lang/lua` | lua-mode 缩进 2、REPL、love2d 项目、moonscript、fennel | **牵出修复**：`.lua` 原落入无 grammar 的 `lua-ts-mode`，既无高亮也不缩进；现退回 Emacs 31 自带的 `lua-mode`（用户的 Neovim、Yazi 配置是 Lua） |
+| `ui/ophints` | evil-goggles 显示操作作用的范围 | **吸收**为复制高亮：用户 Neovim 配置有 `vim.highlight.on_yank()`；`y`/`yy`/Visual `y` 后被复制的文字闪 150 毫秒（`isearch` face，宏内不闪，块选择逐行），设置 `+evil-yank-highlight-duration`。不装 evil-goggles，删除/修改不提示 |
+| `ui/deft`、`doom-quit`、`neotree`、`smooth-scroll`、`vi-tilde-fringe`、`window-select` | deft 笔记、退出语、neotree、ultra-scroll、`~` 边栏、ace-window/winum | 逐个看过：笔记在 Noema、目录树是 Treemacs、滚动有 `+macos-scroll-profile`、窗口切换有本配置的键位；退出语与 `~` 是外观 |
+| `tools/docker` | dockerfile-mode、dockfmt、LSP | 本配置 Dockerfile 走 `lang/filetypes`；`dockerfile-ts-mode` 缺 grammar 时与 Go 一样保留 ts-mode（没有可退的普通 mode） |
+| `term/vterm` | vterm 弹窗与 `0`/`dd` 发给 shell | 终端是 Portal/Ghostel，不收 |
+| `editor/god`、`objed` | 无修饰键命令、对象编辑 | 与 Evil 冲突，不收 |
+| `completion/helm`、`ido`、`ivy` | 三套补全前端；ivy 在 minibuffer 退出时记跳转点、rg 退出码 2 不丢结果 | 本配置用 Vertico/Consult；跳转点已由第 26 节的 `:jump` 处理；`wgrep-auto-save-buffer` 已是 t |
+| `email/mu4e`、`notmuch`、`wanderlust` | 邮件客户端 | 只有客户端专属设置，用户不在 Emacs 收邮件 |
+| `lang/rest` | restclient、`.http` | 本配置未装 restclient，也没有 `.http` 文件（只残留两个片段），不收 |
+| `lang/graphviz`、`plantuml` | dot 预览与格式化、plantuml jar | 用户不用；Noema 的图走 mermaid |
+| `lang/ada`、`agda`、`clojure`、`common-lisp`、`coq`、`crystal`、`csharp`、`dart`、`dhall`、`elixir`、`elm`、`erlang`、`ess`、`factor`、`faust`、`fortran`、`fsharp`、`fstar`、`gdscript`、`graphql`、`hy`、`idris`、`janet`、`julia`、`kotlin`、`ledger`、`nim`、`odin`、`php`、`purescript`、`qt`、`racket`、`raku`、`rst`、`ruby`、`scad`、`scala`、`scheme`、`sml`、`solidity`、`swift`、`terra`、`zig` | 各自的 REPL、lookup、格式化器、项目根标记、测试与构建键 | 逐个读过，都是该语言专属；其中通用的一点是 `set-tree-sitter!` 只在 grammar 就绪时换 ts-mode，正是本配置漏掉的约定，已按此修正路由 |
