@@ -451,7 +451,7 @@ Doom 的做法：
 | `ui/popup` | 本配置有自己的 popup 规则表（`ui/popup`）；Doom 对 help/helpful 链接回原窗口、Org 不删其他窗口等补丁与本配置的窗口生命周期（`window-lifecycle.md`）重叠或不适用 |
 | `ui/treemacs` | 已有且更深（Noema 图标、tag 轮廓）；`treemacs-is-never-other-window` 本配置有意设为 nil |
 | `ui/workspaces` | 本配置用 Perspective + tab-bar（`ui/workspaces`），persp-mode 的会话保存、每工作区 winner、项目即工作区不收 |
-| `ui/doom`、`doom-quit`、`emoji`、`minimap`、`neotree`、`ophints`、`smooth-scroll`、`tabs`、`unicode`、`vi-tilde-fringe`、`window-select`、`zen` | 主题、退出提示语、emoji、迷你地图、neotree、Evil 操作提示、平滑滚动（本配置有 `+macos-scroll-profile`）、centaur-tabs、unicode-fonts、`~` 边栏、ace-window/winum、writeroom：外观与手感，或已有等价物 |
+| `ui/deft`、`doom`、`doom-quit`、`emoji`、`minimap`、`neotree`、`ophints`、`smooth-scroll`、`tabs`、`unicode`、`vi-tilde-fringe`、`window-select`、`zen` | 主题、退出提示语、emoji、迷你地图、neotree、Evil 操作提示、平滑滚动（本配置有 `+macos-scroll-profile`）、centaur-tabs、unicode-fonts、`~` 边栏、ace-window/winum、writeroom：外观与手感，或已有等价物 |
 
 ## 23. 模块全文：`lang`（ada–kotlin）
 
@@ -499,3 +499,16 @@ Doom 的做法：
 | `bin/doom-env` | 环境变量快照文件：本配置的 PATH 由 Remote 环境胶囊按 target 计算（`remote-framework.md`），不读启动时快照 |
 | `bin/doom-sync` | Emacs 版本或系统改变后重建包：package.el 的 `.elc` 由 `load-prefer-newer` 与 native 缓存按版本目录隔离兜住；其余是 straight 同步，不适用 |
 | `bin/doom-upgrade`、`doom-install`、`doom-info`、`doom-make`、`doom.ps1`、`doom.sh`、`doomscript`、`org-capture`、`lisp/cli/autoloads.el`、`lisp/cli/make/completions.el` | 自升级、安装向导、报告信息、`.doom` make 规则、Windows/Android 启动器、脚本解释器、Org capture 浮窗、过时的 autoload 扫描、zsh 补全生成：本配置的对应物是 git、`bootstrap.el`、`bin/emacs-app` 与 `make` |
+
+## 27. 内核自带模块 `doom`、`doom/compat`、`doom/cli`（全文）
+
+| 文件 | 处理 |
+| --- | --- |
+| `modules/doom/init.el` | **吸收**：`LICENSE` 用 text-mode，其他 `*rc` 文件用 conf-mode（追加在末尾，`.bashrc`、`.npmrc`、`#!` 行仍优先；`lang/filetypes`）。gcmh 不收：本配置在 `early-init.el` 有自己的 GC 策略并注册为设置；nerd-icons、which-key 已有 |
+| `compat/+better-jumper.el` | **吸收**：imenu、`outline-up-heading` 与 consult 的 line/imenu/outline/mark 选位置后 `C-o` 跳回（改用 Evil 原生的 `:jump` 属性，同 Evil 对 xref 的处理）。实测原来 `SPC s i` 跳走后 `C-o` 回不来。杀 buffer 前记跳转点不收（关闭视图不结束 buffer，见 `window-lifecycle.md`） |
+| `compat/+smartparens.el` | **吸收**：本配置用内置 `electric-pair-mode`；Doom 规则里“紧挨单词前不补右半边”实测本配置缺（`(` 在 `foo` 前得到 `()foo`），改 `electric-pair-inhibit-predicate`，单词之后仍配对（Python `f"`）。花括号内回车展开已有（`electric-pair-open-newline-between-pairs`）；空格展开 `{ | }`、各语言的注释块配对不收（手感） |
+| `compat/+projectile.el` | 已有：本配置的 Projectile 用 fd 的 alien 索引、不写项目内缓存、状态在 `var/projectile/`、忽略 `~/`；编译 buffer 由 `+output` 管理 |
+| `compat/+keybinds.el` | 即本配置内化的 `map!`/`define-leader-key!`（`aaron-keybinds.el`）。**记录**：`compat/README.org` 写明 Doom v3 将移除 `general`、`map!` 与 `use-package!`，改用 `keymap-set`、`define-key!`、`evil-define-key` 与原生 `use-package`；本配置把 general 作为核心键位层，是否跟随由用户决定 |
+| `compat/+use-package.el`、`compat/init.el` | `:after-call`、`:defer-incrementally` 对应 `aaron-load-packages-incrementally` 与 `aaron-first-*-hook`；其余是 v2 别名 |
+| `cli/+commit-linter.el`、`cli/cli.el` | Conventional Commits 检查与 git hook；本仓库的提交说明不用这种格式，不收 |
+| `demos.org` | 宏的用法示例，对应第 7–8 节已对照的宏 |
