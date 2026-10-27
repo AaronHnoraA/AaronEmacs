@@ -257,6 +257,12 @@ buffer 当成临时访问并 kill 掉。
 该限制，使 Diff-HL 得到完整状态，同时不改变全局 VC 设置、Dired 的 `/fs:`
 身份或其他 Git/VC 调用。
 
+Git 工作台路径契约（C-GIT1）：`+git-board--entries` 在仓库的逻辑
+`default-directory` 执行 Git，使用 `status -z` 的 NUL 分隔记录读取文件名。
+列表行的 ID 是未经引号转义或空白裁剪的仓库相对路径；重命名和复制的第二条记录只用于
+展示来源，操作目标仍是新路径。这样中文、空格、换行文件名在本机和 `/fs:` 仓库里
+都沿同一条路径传给打开、diff 和 stage 操作，无需修改全局 `core.quotepath`。
+
 官方 `make-process` / `start-file-process` 的 cwd 是调用时的逻辑
 `default-directory`，不是 workspace root。workspace 只提供资源与环境作用域，
 不能改变原生进程 API 的目录语义。自定义调用可以用

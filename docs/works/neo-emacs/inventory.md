@@ -343,7 +343,7 @@
   - `vertico` 键；
   - `flymake` 30 秒；
   - eldoc 单行、高亮斜体和 modeline 提示，这三项是偏好，用户没有选。
-- **发现**：lsp-mode 对 TypeScript snippet 补全的 resolve 补丁只认 `ts-ls`，对本配置的 `+typescript` 不生效。已在 lsp-workflow.md 记为缺口 G-A1，待用真实 server 验证。
+- **发现**：lsp-mode 对 TypeScript snippet 补全的 resolve 补丁只认 `ts-ls`，对本配置的 `+typescript` 不生效。已用真实 typescript-language-server 验证：开启 `completions.completeFunctionCalls` 后，函数补全在 resolve 前没有插入文本；本配置默认没有开启该选项。缺口 G-A1 和不阻塞编辑的约束见 `lsp-workflow.md`。
 
 ### config.el：退出流程与 recentf（2026-10-26，已完成）
 
@@ -363,7 +363,8 @@
   - `sh-mode/run` 吸收他的两处修正：`grep -v grep`，`xargs -r`；
   - `.vue` 用 web-mode 打开后，通过 `snippets/web-mode/.yas-parents` 继续使用 vue-mode 片段；
   - 修好 5 个从他那里导入时头部损坏的片段文件（首行是 ` -*-`）。
-- **不收**：Java、Org、nxml（MyBatis）、Go 的片段，用户不使用这些语言；`run` 里的 `git pull` 和 JVM 参数。
+- **已有**：两个 Go 片段 `package`、`test` 与上游逐字相同。
+- **不收**：Java、Org、nxml（MyBatis）的新增片段，用户不使用这些语言；`run` 里的 `git pull` 和 JVM 参数。
 
 ### config.el：字体、主题与显示（2026-10-26，已完成）
 
@@ -428,3 +429,12 @@
 | modeline 的 Evil 状态块与按色差自动配色 | `ui/modeline`（`color-distance`）；每秒 `force-mode-line-update` 不收（资源规则） |
 | 毛玻璃（`lr-macos-glass.el`）与 C 补丁 | 依赖自编 emacs-plus，未改动 |
 | Java/eglot、org、ejc-sql、ob-dotsk/ds2、telega、eredis、elfeed、awesome-tray、popwin | 用户不用或已有替代，结论同上文各条 |
+
+### 模块说明补读（2026-10-27）
+
+11 份 `readme.org` 主要是安装和使用说明，额外核对了几条可能遗漏的行为：
+
+- `git/readme.org` 建议全局设 `core.quotepath=false`，以免中文文件名被转义。本机 Git 默认确实转义；Magit 的文件列表通过 `status -z --porcelain` 读取，实测未跟踪的 `中文文件.txt` 在 `magit-untracked-files` 中原样返回。另查出本配置的 `+git/board` 原先按行解析文本状态，遇到中文、空格或换行文件名会得到错误的行 ID；现改用 `status -z`，并在临时仓库验证重命名及特殊文件名。不改全局 Git 配置。
+- `shell/readme.org` 的 fish `ff` 命令让 vterm 打开文件。本配置已有终端和脚本入口 `emacsopen`，支持文件、行列、窗口位置与远程路由；不再加入依赖 vterm OSC 的第二个入口。
+- `eglot/readme.org` 详细说明 JDT 的 `jdt://` 类文件处理：发送 class-file 能力、请求 `java/classFileContents` 并缓存源码。这与前面 `eglot` / `java` 条目的裁决一致：本配置由 `lsp-java` 管 JDT，用户不写 Java，不加第二套 Eglot URI handler。`agentshell/readme.org` 主要是 Opencode、Cursor 的安装和私有 MCP 路径；当前 Agent 面板审计已覆盖可移植的图片策略。
+- `find/readme.org` 的项目 ripgrep 语法与输入法快捷键已由当前 Consult 搜索和 macOS 输入源策略覆盖；其余说明属于前面已裁决的 Java、Org、Rime、SQL、Cursor 和字体主题工作流，没有新的可合并配置。

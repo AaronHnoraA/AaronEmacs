@@ -59,43 +59,52 @@
     (_ 'shadow)))
 
 (defun +git-board--display-path (path)
-  "Return a human-readable display string for PATH."
-  (if (string-match-p " -> " path)
-      path
-    (abbreviate-file-name path)))
-
-(defun +git-board--entry-file (path)
-  "Return the best file path to operate on for status PATH."
-  (if (string-match "\\(.+\\) -> \\(.+\\)" path)
-      (match-string 2 path)
-    path))
+  "Show control characters in PATH without changing its row ID."
+  (string-replace "\n" "\\n"
+                  (string-replace "\r" "\\r"
+                                  (string-replace "\t" "\\t" path))))
 
 (defun +git-board--entries (repo-root)
   "Build tabulated list entries for REPO-ROOT."
-  (let ((default-directory repo-root)
-        (lines (process-lines "git" "status" "--short" "--branch" "--untracked-files=all"))
-        (branch-summary ""))
-    (when lines
-      (when (string-prefix-p "## " (car lines))
-        (setq branch-summary (substring (car lines) 3))
-        (setq lines (cdr lines))))
+  (let* ((records
+          (with-temp-buffer
+            (let ((default-directory repo-root)
+                  (coding-system-for-read 'utf-8-unix))
+              (unless (zerop (process-file "git" nil t nil "status" "--short"
+                                           "--branch" "-z" "--untracked-files=all"))
+                (error "Git status failed: %s" (buffer-string))))
+            (split-string (buffer-string) "\0" t)))
+         (branch-summary "")
+         entries)
+    (when (and records (string-prefix-p "## " (car records)))
+      (setq branch-summary (substring (pop records) 3)))
     (setq-local +git-board-branch-summary branch-summary)
-    (mapcar
-     (lambda (line)
-       (let* ((x (substring line 0 1))
-              (y (substring line 1 2))
-              (path (string-trim-left (substring line 3)))
-              (file (+git-board--entry-file path)))
-         (list
-          file
-          (vector
-           (propertize x 'face (+git-board--status-face x))
-           (propertize y 'face (+git-board--status-face y))
-           (propertize (+git-board--display-path path)
-                       'face (if (or (string= x "?") (string= y "?"))
-                                 'font-lock-warning-face
-                               'default))))))
-     lines)))
+    (while records
+      (let* ((record (pop records))
+             (_ (unless (and (>= (length record) 4)
+                             (eq (aref record 2) ?\s))
+                  (error "Malformed Git status record: %S" record)))
+             (x (substring record 0 1))
+             (y (substring record 1 2))
+             (path (substring record 3))
+             (old-path (when (or (member x '("R" "C"))
+                                 (member y '("R" "C")))
+                         (or (pop records)
+                             (error "Missing Git rename source: %S" record))))
+             (display-path (if old-path
+                               (format "%s -> %s" old-path path)
+                             path)))
+        (push
+         (list path
+               (vector
+                (propertize x 'face (+git-board--status-face x))
+                (propertize y 'face (+git-board--status-face y))
+                (propertize (+git-board--display-path display-path)
+                            'face (if (or (string= x "?") (string= y "?"))
+                                      'font-lock-warning-face
+                                    'default))))
+         entries)))
+    (nreverse entries)))
 
 (defun +git-board/refresh ()
   "Refresh the Git board."
