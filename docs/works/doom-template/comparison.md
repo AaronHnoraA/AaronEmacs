@@ -617,3 +617,4 @@ Doom 的做法：
 | `term/eshell` 其余部分 | 提示符、别名表、`eshell-up`/`eshell-z`/`esh-help`/`did-you-mean`/语法高亮、分屏开新 shell、输入输出只读保护、`scroll-to-bottom`、`kill-processes-on-exit`、`error-if-no-glob` | 不收：`eshell/emacs`、历史去重、空格开头不入历史已在第一轮吸收；eshell 以 Emacs 状态运行在浮窗里，分屏、只读保护与滚动设置针对 Doom 的 Evil 分屏用法；glob 报错改变命令语义；其余包用户未用 |
 | `input/chinese` | pyim、拼音匹配 orderless/搜索（`evil-pinyin`）、`ace-pinyin`、fcitx 切换输入法、`pangu-spacing` | 输入法切换已有（离开 Insert 切到 `ABC`）。拼音匹配记为候选 **G-I1**，需要新依赖并改变补全匹配，待用户决定；`pangu-spacing` 会改写中英文间空格，不收 |
 | `input/bidi`、`japanese`、`layout` | 双向文字字体、migemo、skk、bépo/azerty 键位 | 用户不用这些语言与键盘布局，不收 |
+| `term/shell`、`term`、`vterm`、`ghostel` | 弹窗开关、按工作区命名、`pgrep` 判断 shell 空闲、`term-line-mode` 前把旧输出设为只读、vterm 的 `0`/`dd`、去掉继承的 `DIRENV_*` 变量 | 不收：终端走 Portal（本机）与 Ghostel（远程）；`shell-toggle` 已按目录复用。实测 comint shell 不裁历史，撤销里只有插入位置，没有 eshell 那样的问题；编译 buffer 的撤销本来就关着。direnv 由 `tools/direnv` 每次从未加载 direnv 的环境重建，不会把 `DIRENV_DIFF` 带进子 shell |
