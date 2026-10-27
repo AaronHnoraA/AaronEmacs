@@ -162,3 +162,9 @@ make EMACS=$NEO health-startup doctor
 (let ((unread-command-events (listify-key-sequence (kbd "M-f"))))
   (key-binding (read-key-sequence-vector nil) t))
 ```
+
+因为 GNU 上这个隐藏不生效，第一个 frame 在主题加载前会露出默认的白底。
+`aaron-gui-startup-background`（默认是当前深色主题 kanagawa-wave 的背景
+`#171B28`）只写进 `initial-frame-alist`，给第一个 frame 一个深色底，主题加载后由
+主题的 `default` face 接管；之后新建的 frame 不带这个参数，不会盖过主题。换成浅色
+主题时把它设为 nil 或改成那套主题的背景色。

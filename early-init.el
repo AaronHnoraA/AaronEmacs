@@ -269,6 +269,16 @@ both call it."
 ;; 对第一个 frame 也应用同样设置（有些版本对 initial-frame-alist 特判）
 (setq initial-frame-alist default-frame-alist)
 
+(defvar aaron-gui-startup-background "#171B28"
+  "Background of the first GUI frame until the theme loads, or nil.
+The first frame is created before any theme, so it would otherwise flash
+the white default; this is the dark theme's background.  Only the first
+frame gets it: later frames take the theme's colours directly.")
+
+(when aaron-gui-startup-background
+  (push (cons 'background-color aaron-gui-startup-background)
+        initial-frame-alist))
+
 ;; The initial GUI frame otherwise exposes *scratch* and partially initialized
 ;; tab/modelines while Dashboard is still being built.
 (defvar aaron-gui-hide-initial-frame-during-startup t
