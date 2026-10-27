@@ -593,13 +593,14 @@ In a charwise or block selection this is the ordinary `evil-execute-macro'."
                    '(portal-terminal eshell ibuffer dired xwidget company)))
            evil-collection-mode-list)))
   ;; `evil-mode' is already on when this form runs, so a hook on it would
-  ;; never fire: initialise as soon as Evil is loaded instead.
+  ;; never fire.  Initialise at the first input instead of during startup;
+  ;; packages loaded before then still get their bindings, since
+  ;; `with-eval-after-load' runs at once for a feature already present.
   :after evil
-  :demand t
+  :hook (aaron-first-input . evil-collection-init)
   :bind (([remap evil-show-marks] . evil-collection-consult-mark)
          ([remap evil-show-jumps] . evil-collection-consult-jump-list))
   :config
-  (evil-collection-init)
   ;; Make `evil-collection-consult-mark' and `evil-collection-consult-jump-list'
   ;; immediately available.
   (evil-collection-require 'consult)
