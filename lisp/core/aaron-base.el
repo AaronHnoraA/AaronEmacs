@@ -872,10 +872,23 @@ glyph keeps its shape while point moves through composed text.")
   :hook (after-init . save-place-mode))
 
 ;; Highlight current line in GUI
+(defun aaron--hl-line-enable-on-graphic-frame-h (frame)
+  "Enable line highlighting when FRAME is graphical."
+  (when (display-graphic-p frame)
+    (global-hl-line-mode 1)
+    (remove-hook 'after-make-frame-functions
+                 #'aaron--hl-line-enable-on-graphic-frame-h)))
+
+(defun aaron--hl-line-enable-on-first-input-h ()
+  "Enable line highlighting now or when the first GUI frame appears."
+  (if (cl-some #'display-graphic-p (frame-list))
+      (global-hl-line-mode 1)
+    (add-hook 'after-make-frame-functions
+              #'aaron--hl-line-enable-on-graphic-frame-h)))
+
 (use-package hl-line
   :ensure nil
-  :when (display-graphic-p)
-  :hook (aaron-first-input . global-hl-line-mode))
+  :hook (aaron-first-input . aaron--hl-line-enable-on-first-input-h))
 
 ;; Enable `repeat-mode' to reduce key sequence length
 ;;

@@ -32,6 +32,7 @@
           (with-current-buffer visited
             (should save-place-mode)
             (should recentf-mode)
+            (should (member (buffer-file-name) recentf-list))
             (should global-so-long-mode)
             (should global-auto-revert-mode)
             (should auto-revert--global-mode)
@@ -73,5 +74,32 @@
       (when which-key-mode (which-key-mode -1))
       (when gcmh-mode (gcmh-mode -1))
       (delete-file savehist-file))))
+
+(ert-deftest first-use-hl-line-waits-for-a-graphical-frame ()
+  (let ((after-make-frame-functions nil)
+        (was-enabled global-hl-line-mode))
+    (unwind-protect
+        (progn
+          (when was-enabled (global-hl-line-mode -1))
+          (should (memq 'aaron--hl-line-enable-on-first-input-h
+                        aaron-first-input-hook))
+          (cl-letf (((symbol-function 'display-graphic-p)
+                     (lambda (&optional frame) (eq frame 'first-use-gui))))
+            (aaron--hl-line-enable-on-first-input-h)
+            (should-not global-hl-line-mode)
+            (should (memq 'aaron--hl-line-enable-on-graphic-frame-h
+                          after-make-frame-functions))
+            (run-hook-with-args 'after-make-frame-functions 'first-use-gui)
+            (should global-hl-line-mode)
+            (should-not (memq 'aaron--hl-line-enable-on-graphic-frame-h
+                              after-make-frame-functions))
+            (global-hl-line-mode -1)
+            (cl-letf (((symbol-function 'display-graphic-p)
+                       (lambda (&optional _frame) t)))
+              (aaron--hl-line-enable-on-first-input-h)
+              (should global-hl-line-mode)
+              (should-not (memq 'aaron--hl-line-enable-on-graphic-frame-h
+                                after-make-frame-functions)))))
+      (global-hl-line-mode (if was-enabled 1 -1)))))
 
 ;;; init-first-use-modes-tests.el ends here

@@ -73,7 +73,7 @@ Doom 将这些模式挂到生命周期 hook 上。本配置已按用户选择延
 | `savehist-mode` | `first-input` | `first-input` |
 | `save-place-mode` | `first-input` | 保留 `after-init`：首个 Dired 目录的定位钩子与 `first-file` 同时触发，延迟启用会错过该目录 |
 | `show-paren-mode` | `first-buffer` | Emacs 31 默认已开启，无需重复启用 |
-| `global-hl-line-mode` | `first-input` | 图形界面的 `first-input` |
+| `global-hl-line-mode` | `first-input` | 图形界面的 `first-input`；先在终端输入时等到首个图形帧 |
 | `global-so-long-mode` | `first-file` | `first-file` |
 | `which-key-mode` | `first-input` | `first-input` |
 | `global-auto-revert-mode` | `first-file` | 注册文件钩子仍在启动时，模式在 `first-file` 启用 |
