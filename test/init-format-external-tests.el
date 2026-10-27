@@ -83,7 +83,40 @@
     (cl-letf (((symbol-function 'remote-executable-find)
                (lambda (_program &optional _context) "/usr/bin/prettier")))
       (should (equal (+format--external-command)
-                     '("prettier" "--stdin-filepath" "/workspace/app.ts"))))))
+                     '("/usr/bin/prettier" "--stdin-filepath"
+                       "/workspace/app.ts"))))))
+
+(ert-deftest +format-external-prefers-project-prettier-without-lsp ()
+  (let* ((project (make-temp-file "format-prettier-project-" t))
+         (bin (expand-file-name "node_modules/.bin" project))
+         (prettier (expand-file-name "prettier" bin)))
+    (unwind-protect
+        (progn
+          (make-directory bin t)
+          (with-temp-file prettier
+            (insert "#!/bin/sh\ntr a-z A-Z\n"))
+          (set-file-modes prettier #o755)
+          (with-temp-buffer
+            (setq buffer-file-name
+                  (remote-make-file-name
+                   "local" (expand-file-name "app.ts" project))
+                  default-directory
+                  (remote-make-file-name
+                   "local" (file-name-as-directory project))
+                  major-mode 'typescript-ts-mode)
+            (cl-letf (((symbol-function 'remote-executable-find)
+                       (lambda (&rest _)
+                         (ert-fail "Project-local Prettier was ignored"))))
+              (should (equal (+format--external-command)
+                             (list prettier "--stdin-filepath"
+                                   (expand-file-name "app.ts" project))))
+              (insert "abc\n")
+              (+format/external-buffer)
+              (with-timeout (5 (ert-fail "Project formatter did not finish"))
+                (while +format--external-process
+                  (accept-process-output nil 0.05)))
+              (should (equal (buffer-string) "ABC\n")))))
+      (delete-directory project t))))
 
 (provide 'init-format-external-tests)
 ;;; init-format-external-tests.el ends here

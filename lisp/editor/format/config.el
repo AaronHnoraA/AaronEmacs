@@ -40,6 +40,17 @@
 (defvar-local +format--external-process nil
   "External formatter currently running for this buffer.")
 
+(defun +format--external-program (program)
+  "Find PROGRAM on the target, preferring a project-local Prettier."
+  (or (when (equal program "prettier")
+        (when-let* ((root (locate-dominating-file
+                           default-directory "node_modules/.bin/prettier"))
+                    (logical (expand-file-name
+                              "node_modules/.bin/prettier" root)))
+          (when (file-executable-p logical)
+            (remote-file-local-name logical))))
+      (remote-executable-find program)))
+
 (defun +format--external-command ()
   "Return the target-side formatter command for the current file."
   (unless buffer-file-name
@@ -47,17 +58,19 @@
   (let* ((rule (cl-find-if (lambda (entry) (derived-mode-p (car entry)))
                            +format-external-rules))
          (argv (cdr rule))
-         (file (remote-file-local-name buffer-file-name)))
+         (file (remote-file-local-name buffer-file-name))
+         (program (and argv (+format--external-program (car argv)))))
     (unless argv
       (user-error "No external formatter registered for %s" major-mode))
-    (unless (remote-executable-find (car argv))
+    (unless program
       (user-error "%s is unavailable on this target" (car argv)))
-    (mapcar (lambda (arg)
-              (pcase arg
-                (:file file)
-                (:assume-file (concat "--assume-filename=" file))
-                (_ arg)))
-            argv)))
+    (cons program
+          (mapcar (lambda (arg)
+                    (pcase arg
+                      (:file file)
+                      (:assume-file (concat "--assume-filename=" file))
+                      (_ arg)))
+                  (cdr argv)))))
 
 (defun +format--external-finished
     (process _event buffer tick file mode had-content stdout stderr)

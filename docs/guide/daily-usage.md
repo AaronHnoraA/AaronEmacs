@@ -832,7 +832,8 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
   code actions menu；`b` build，`B` rerun build，自动识别常见的 `make` / `cmake` / `ninja`
 - `SPC c f`
   有活动语言服务器时由它格式化；否则异步调用当前 target 上的 shfmt、Prettier 或
-  clang-format（须在目标端 PATH 上）。有选区时仍只走语言服务器的 range formatting
+  clang-format（Prettier 优先项目的 `node_modules/.bin`，其余从目标端 PATH 查找）。
+  有选区时仍只走语言服务器的 range formatting
 - `SPC c r`
   rename
 - `SPC c o`
