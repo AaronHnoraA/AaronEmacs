@@ -176,7 +176,7 @@
 | modelinexp 的 `hr.py`、`window.py`、`aboutface.org` | **不收**（全文读过）：前两者是蓝牙心率悬浮窗（个人设备）；`aboutface.org` 说明字体、powerline 与透明度配色，内容已由上面 modelinexp 一行覆盖 |
 | `emacs-user.ahk`、`question.org`、`mermaid-config.json` | 前两者**不收**（Windows/个人），mermaid 配置随 `lang/org` |
 
-## 13. 汇总
+## 13. 初筛汇总（最终裁决见下方审计记录）
 
 - **直接可做（吸收/合并，不改习惯）**：
   - diff-hl 竖线修复

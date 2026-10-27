@@ -28,7 +28,7 @@ Doom 的模块与本配置模块的对应关系，按 Doom 的分类排列。语
 | `:os macos` / `tty` | `os/macos`、`os/neomacs` | 一致 |
 | `:app calendar` / `rss` / `irc` / `emms` / `everywhere` | `app/calendar` | 其余未采用 |
 | `:email *` | 无 | — |
-| `:input chinese` / `japanese` / `layout` / `bidi` | 无 | 第二阶段 neo-emacs 的 rime 落在这里（`:input rime`） |
+| `:input chinese` / `japanese` / `layout` / `bidi` | 无独立 `:input` 模块；macOS 输入源切换在 `os/macos/input` | neo-emacs 的 Rime 已按用户决定不收；拼音匹配也不收 |
 | `:config default` / `literate` | `config/default`（Doom 风格默认值）、各 `config/*` | 一致；不采用 literate 配置 |
 
 本配置独有、Doom 没有的模块：
