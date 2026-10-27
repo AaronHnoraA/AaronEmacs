@@ -37,7 +37,7 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 
 | 分类 | 模块 | 内容 |
 | --- | --- | --- |
-| `:core` | `lisp/core/aaron-*.el`：`aaron-lib`、`aaron-emacs`、`aaron-modules`、`aaron-doctor`、`aaron-modules-board`，以及 `aaron-utils`、`aaron-base`、`aaron-open`、`aaron-patches`、`aaron-funcs`、`aaron-packages` | 宏、生命周期 hook、模块系统、工具函数、基础设置、打开路由、上游补丁、包工具 |
+| `:core` | `lisp/core/aaron-*.el`：`aaron-lib`、`aaron-emacs`、`aaron-modules`、`aaron-doctor`、`aaron-modules-board`，以及 `aaron-utils`、`aaron-base`、`aaron-open`、`aaron-patches`、`aaron-funcs`、`aaron-packages`；同层还有 `config*.el`、`general.el` 和 `aaron-ui/` | 宏、生命周期 hook、模块系统、配置注册表、键位层、board 组件、工具函数、基础设置、打开路由、上游补丁、包工具 |
 | `:os` | `macos`、`macos-tools`、`neomacs` | 平台与构建兼容层（只有 `os/neomacs` 知道当前是哪个构建） |
 | `:remote` | `lisp/remote/remote-*.el`（框架库），`framework`（入口与 TRAMP 配置）、`gateway` | `/fs:TARGET:/path` 身份、target/pipeline/backend/session、进程、通道、环境胶囊、workspace 资源；深度 -100，永远紧跟核心与系统层。见 [remote-framework.md](design/remote-framework.md) |
 | `:ui` | `theme`、`activity`、`tabbar`、`popup`、`windows`、`treemacs`、`workspaces`、`scrollview`、`session`、`rainbow-delimiters` | 主题与 mode-line、活动指示、标签栏、窗口显示规则、窗口与工作区 |
@@ -56,15 +56,13 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 
 ```text
 lisp/init-modules.el  aaron! 声明：全部模块、分类与加载顺序
-lisp/core/            核心，以 Doom 的 doom-lib/doom-emacs/doom-modules 为模板，平铺的 aaron-*.el
+lisp/core/            核心，以 Doom 的 doom-lib/doom-emacs/doom-modules 为模板；含 aaron-*.el、
+                      config*.el、general.el 与 aaron-ui/（board 组件库）
 lisp/CATEGORY/NAME/   模块：config.el（provide CATEGORY/NAME/config）与同目录的其他文件
                       （provide CATEGORY/NAME/FILE），按需 init.el、autoload/、doctor.el、README.md
 lisp/remote/          Remote 框架库（remote-*.el，public 命名）与 framework/、gateway/ 两个模块；
                       消费者留在各自模块
 site-lisp/            自维护或 vendored 的 Elisp 包：
-  general.el/           键位层（启动依赖）
-  config/               配置注册表（config-register / config-board）
-  aaron-ui/             board 组件库
   portal/               原生 Ghostty 终端窗格
   ratex.el/             数学预览
   dape-toolbar/, remote_ikernel/
