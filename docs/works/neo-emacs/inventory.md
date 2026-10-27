@@ -344,7 +344,7 @@
   - `vertico` 键；
   - `flymake` 30 秒；
   - eldoc 单行、高亮斜体和 modeline 提示，这三项是偏好，用户没有选。
-- **发现**：lsp-mode 对 TypeScript snippet 补全的 resolve 补丁只认 `ts-ls`，对本配置的 `+typescript` 不生效。已用真实 typescript-language-server 验证：开启 `completions.completeFunctionCalls` 后，函数补全在 resolve 前没有插入文本；本配置默认没有开启该选项。缺口 G-A1 和不阻塞编辑的约束见 `lsp-workflow.md`。
+- **吸收为异步版**：lsp-mode 对 TypeScript snippet 补全的同步 resolve 补丁只认 `ts-ls`，对本配置的 `+typescript` 不生效。当前接受函数补全后异步 resolve，只有原编辑位置仍安全才展开参数 snippet；真实 typescript-language-server 6.0.2 + TypeScript 6.0.3 已验证 `greet` → `greet(name)`。`completions.completeFunctionCalls` 仍由项目选择开启；契约见 `lsp-workflow.md` A4。
 
 ### config.el：退出流程与 recentf（2026-10-26，已完成）
 

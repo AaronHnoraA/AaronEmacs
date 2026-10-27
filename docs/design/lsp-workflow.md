@@ -189,18 +189,17 @@ target 上一个来回可能有几百毫秒，每次选中补全、每按一次�
 - **A3 主动操作保持同步**：用户显式触发并要看结果的命令（code action、`M-x`
   执行的 server 命令、文档弹窗 `doc-buffer`）不受 A1/A2 影响。测试：
   `lsp-async-a3-explicit-commands-stay-sync`。
-
-已知差距：
-
-- **G-A1** lsp-mode 对 TypeScript 的 snippet 补全有一个先 resolve 再插入的补丁
-  （lsp-mode #3498），但它只认实际 server-id `ts-ls`；本配置注册为 `+typescript`。
-  用 typescript-language-server 6.0.2 和完整 tsserver 实测：开启服务器的
-  `completions.completeFunctionCalls` 后，函数 `greet` 的未解析补全项带
-  `insertTextFormat=2`、没有 `insertText`，resolve 后才得到
-  `greet(${1:name})$0`；默认配置没有开启该选项，同一例子没有 snippet 项。
-  `:upstream-id` 目前只用于 hover 签名提炼，不能让上游补全补丁命中。
-  若项目开启函数调用补全，须设计不阻塞编辑的解析与插入顺序，再验证真实接受补全；
-  直接移植上游的同步 resolve 会违反本节的不等待原则。
+- **A4 TypeScript 函数调用补全异步解析**：项目启用
+  `completions.completeFunctionCalls` 后，typescript-language-server 对函数项可能
+  先给出 `insertTextFormat=2`、只有标签内容的 `textEdit`，在
+  `completionItem/resolve` 后才给出 `greet(${1:name})$0` 等参数 snippet。
+  接受时立即留下标签并异步 resolve；结果回来时，只有原 buffer、光标、文本和
+  所选窗口均未改变、且没有开始新一轮补全，才按 lsp-mode 的正常路径应用
+  `textEdit`、展开 snippet 及执行附带命令。继续输入或切走窗口后保留标签，
+  不在后台改写。默认不启用 `completeFunctionCalls`，项目可通过
+  `:lsp-workspace` 开启。测试：`lsp-async-a4-typescript-*`；真实
+  typescript-language-server 6.0.2 + TypeScript 6.0.3 验证接受补全由
+  `greet` 异步扩展为 `greet(name)`。
 
 ## 最后一个 buffer 关闭后的 server
 

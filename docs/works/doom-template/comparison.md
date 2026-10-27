@@ -426,7 +426,7 @@ Doom 的做法：
 | 模块 | 处理 |
 | --- | --- |
 | `tools/lsp`（`+lsp.el`） | **吸收** G-L1：最后一个 buffer 关闭后推迟 `+language-server-defer-shutdown` 秒再停 server。审计时发现这是回归：迁到 lsp-mode 前本配置在 Eglot 上已有同样的推迟（`my/language-server-defer-shutdown`，3 秒），迁移（`6d49b4b0`）丢了实现，设置项和值 3 一直留在 store 里却无人读取。按 `lsp-workflow.md` 的 D1–D4 实现：显式停止、资源关闭、断开的 target 立即生效并取消计时器，推迟期间 server 已死则不动。`make lsp-live-smoke` 的 C/Python 通过，Java 的 jdtls 在改动前后都以退出码 13 启动失败（与本改动无关） |
-| `tools/lsp`（TypeScript snippet 补全） | **G-A1 保留**：当前 JS/TS workspace 设置未开启 `completions.completeFunctionCalls`。用真实 typescript-language-server 6.0.2 测得开启后函数补全项起初只有 snippet 标记，resolve 后才有插入文本；lsp-mode 按 `ts-ls` server-id 同步 resolve 的补丁对本配置的 `+typescript` 不生效。直接同步 resolve 与本配置编辑不等待服务器的契约冲突，后续须设计异步解析与插入顺序，详见 `lsp-workflow.md` |
+| `tools/lsp`（TypeScript snippet 补全） | **吸收为异步版**：项目开启 `completions.completeFunctionCalls` 后，接受函数补全先插入标签，异步 resolve 到参数 snippet 时仅在编辑位置仍安全的条件下扩展；继续输入或切走窗口保留标签。默认仍不开启该选项。真实 typescript-language-server 6.0.2 + TypeScript 6.0.3 已验证 `greet` → `greet(name)`，详见 `lsp-workflow.md` A4 |
 | `tools/lsp`（其余） | `+lsp-signature-stop-maybe-h`（Esc 关签名）已有；`lsp-enable-folding` 等默认已按本配置的 Hub 管理；company 后端、eglot 部分不适用（Eglot 刻意隐藏） |
 | `tools/direnv` | 提前到 `change-major-mode-after-body-hook` 更新环境：本配置的 direnv 走 Remote 环境 capsule，在启动 LSP 前等环境就绪（`+lsp-mode--waiting-for-direnv`），已覆盖。direnv 成功后重启 LSP 不收：本配置 direnv 自动刷新，每次成功都重启会让远程 server 反复重启；环境真的变化时用 `SPC c R` |
 | `tools/editorconfig` | 压缩包与 Office 文件排除**已有**；`editorconfig` 设了缩进时不再猜缩进：本配置 dtrt-indent 已在 editorconfig 之后判断 |

@@ -2,7 +2,7 @@
 
 ;;; Commentary:
 ;;
-;; Contracts A1-A3 of docs/design/lsp-workflow.md ("Editing Never Waits On
+;; Contracts A1-A4 of docs/design/lsp-workflow.md ("Editing Never Waits On
 ;; The Server").  The server is mocked: a synchronous `lsp-request' records
 ;; that it was used, `lsp-request-async' that the call was sent without
 ;; waiting.  Run with the full configuration loaded.
@@ -93,6 +93,131 @@
     (lsp-send-execute-command "editor.organizeImports")
     (should (equal (caar lsp-async-tests--sync) "workspace/executeCommand"))
     (should-not lsp-async-tests--async)))
+
+(ert-deftest lsp-async-a4-typescript-snippet-resolves-after-acceptance ()
+  "An accepted TypeScript function inserts its resolved snippet later."
+  (with-temp-buffer
+    (insert "greet")
+    (let* ((item (lsp-make-completion-item
+                  :label "greet" :insertTextFormat lsp/insert-text-format-snippet))
+           (markers (list 1 (copy-marker (point) t)))
+           (candidate (propertize "greet"
+                                  'lsp-completion-item item
+                                  'lsp-completion-start-point 1
+                                  'lsp-completion-markers markers
+                                  'lsp-completion-prefix ""))
+           (lsp-enable-snippet t)
+           (lsp-completion-enable-additional-text-edit nil)
+           (lsp-signature-auto-activate nil)
+           callback snippet)
+      (setq-local lsp-inhibit-lsp-hooks t)
+      (setq-local lsp-completion--cache
+                  (list 1 (list candidate) :markers markers))
+      (cl-letf (((symbol-function 'lsp-completion--find-workspace)
+                 (lambda (id) (eq id '+typescript)))
+                ((symbol-function 'lsp-feature?)
+                 (lambda (method) (equal method "completionItem/resolve")))
+                ((symbol-function 'lsp-completion--resolve-async)
+                 (lambda (_item fn &optional _cleanup) (setq callback fn)))
+                ((symbol-function 'lsp-request)
+                 (lambda (&rest _) (error "Completion must not wait on LSP")))
+                ((symbol-function 'lsp--indent-lines) #'ignore)
+                ((symbol-function 'lsp--expand-snippet)
+                 (lambda (text &rest _) (setq snippet text))))
+        (should (+lsp-completion--typescript-snippet-needs-resolve-p candidate))
+        (lsp-completion--exit-fn candidate 'finished)
+        (should (equal (buffer-string) "greet"))
+        (should callback)
+        (should-not lsp-inhibit-lsp-hooks)
+        (should-not lsp-completion--cache)
+        (funcall callback
+                 (lsp-make-completion-item
+                  :label "greet" :insertTextFormat lsp/insert-text-format-snippet
+                  :insertText "greet(${1:name})$0"))
+        (should (equal (buffer-string) "greet(${1:name})$0"))
+        (should (equal snippet "greet(${1:name})$0"))))))
+
+(ert-deftest lsp-async-a4-typescript-late-response-keeps-user-edits ()
+  "A late snippet resolve cannot overwrite typing after completion."
+  (with-temp-buffer
+    (insert "greet")
+    (let* ((item (lsp-make-completion-item
+                  :label "greet" :insertTextFormat lsp/insert-text-format-snippet))
+           (candidate (propertize "greet"
+                                  'lsp-completion-item item
+                                  'lsp-completion-markers
+                                  (list 1 (copy-marker (point) t))))
+           (lsp-enable-snippet t)
+           callback applied)
+      (cl-letf (((symbol-function 'lsp-completion--find-workspace)
+                 (lambda (id) (eq id '+typescript)))
+                ((symbol-function 'lsp-feature?) (lambda (_) t))
+                ((symbol-function 'lsp-completion--resolve-async)
+                 (lambda (_item fn &optional _cleanup) (setq callback fn))))
+        (should (+lsp-completion--typescript-snippet-needs-resolve-p candidate))
+        (+lsp-completion--exit-a (lambda (&rest _) (setq applied t))
+                                 candidate 'finished)
+        (should callback)
+        (insert "!")
+        (funcall callback
+                 (lsp-make-completion-item
+                  :label "greet" :insertTextFormat lsp/insert-text-format-snippet
+                  :insertText "greet(${1:name})$0"))
+        (should (equal (buffer-string) "greet!"))
+        (should-not applied)))))
+
+(ert-deftest lsp-async-a4-typescript-provisional-text-edit-needs-resolve ()
+  "A plain-label edit needs resolve; an already-filled snippet does not."
+  (let* ((edit (lsp-make-text-edit :newText "greet"))
+         (item (lsp-make-completion-item
+                :label "greet" :insertTextFormat lsp/insert-text-format-snippet
+                :textEdit edit))
+         (candidate (propertize "greet" 'lsp-completion-item item))
+         (lsp-enable-snippet t))
+    (cl-letf (((symbol-function 'lsp-completion--find-workspace)
+               (lambda (id) (eq id '+typescript)))
+              ((symbol-function 'lsp-feature?) (lambda (_) t)))
+      (should (+lsp-completion--typescript-snippet-needs-resolve-p candidate))
+      (lsp-put edit :newText "greet(${1:name})$0")
+      (should-not (+lsp-completion--typescript-snippet-needs-resolve-p candidate)))))
+
+(ert-deftest lsp-async-a4-typescript-late-response-keeps-inactive-buffer ()
+  "Do not expand a snippet after the user switches away from its window."
+  (save-window-excursion
+    (let ((source (generate-new-buffer " *lsp-a4-source*"))
+          (other (generate-new-buffer " *lsp-a4-other*"))
+          (lsp-enable-snippet t)
+          callback applied)
+      (unwind-protect
+          (progn
+            (switch-to-buffer source)
+            (insert "greet")
+            (let ((candidate (propertize
+                              "greet" 'lsp-completion-item
+                              (lsp-make-completion-item
+                               :label "greet"
+                               :insertTextFormat lsp/insert-text-format-snippet)
+                              'lsp-completion-markers
+                              (list 1 (copy-marker (point) t)))))
+              (cl-letf (((symbol-function 'lsp-completion--find-workspace)
+                         (lambda (id) (eq id '+typescript)))
+                        ((symbol-function 'lsp-feature?) (lambda (_) t))
+                        ((symbol-function 'lsp-completion--resolve-async)
+                         (lambda (_item fn &optional _cleanup) (setq callback fn))))
+                (+lsp-completion--exit-a (lambda (&rest _) (setq applied t))
+                                         candidate 'finished)
+                (should callback)
+                (switch-to-buffer other)
+                (funcall callback
+                         (lsp-make-completion-item
+                          :label "greet"
+                          :insertTextFormat lsp/insert-text-format-snippet
+                          :insertText "greet(${1:name})$0"))
+                (with-current-buffer source
+                  (should (equal (buffer-string) "greet")))
+                (should-not applied))))
+        (kill-buffer source)
+        (kill-buffer other)))))
 
 (provide 'init-lsp-async-tests)
 ;;; init-lsp-async-tests.el ends here

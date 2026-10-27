@@ -88,6 +88,11 @@ local/remote 特判属于待迁移债务，不是新增接入可复制的模式�
 - `breadcrumb`
 - `Treemacs`
 
+TypeScript 项目若在 `:lsp-workspace` 中开启
+`(:completions (:completeFunctionCalls t))`，接受函数补全后会先看到函数名，
+服务器异步返回参数片段时再展开；如果已继续输入或切换窗口，就保留函数名。
+默认不开启该选项。细节见 [lsp-workflow.md](../design/lsp-workflow.md) A4。
+
 Go 工作区文件 `go.work` 使用 Emacs 31 的 `go-work-ts-mode`；对应的 `gowork`
 grammar 安装在 `var/tree-sitter/`。重建运行时目录时，可从配置的
 `treesit-language-source-alist` 重新编译。
