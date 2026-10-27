@@ -463,3 +463,17 @@ Doom 的做法：
 | `lang/emacs-lisp` | Flymake 加载路径与 eldoc 显示变量值已在第 8–11 节吸收。实测 Emacs 31 已正确缩进带引号的列表与关键字 plist，Doom 的 `calculate-lisp-indent` 覆盖不需要；`;;;` 大纲折叠与本配置的代码折叠后端重复；helpful 前后翻页、ielm 高亮、buttercup、额外着色不收 |
 | `lang/data` | `.plist`、`.xsd` 已是 nxml，`.csv` 已是 csv-mode |
 | `lang/ada`、`agda`、`clojure`、`common-lisp`、`coq`、`crystal`、`csharp`、`dart`、`dhall`、`elixir`、`elm`、`erlang`、`ess`、`factor`、`faust`、`fortran`、`fsharp`、`fstar`、`gdscript`、`graphql`、`graphviz`（见下一节） | 用户不用这些语言；其中通用做法（REPL、eval、lookup 处理器注册）本配置用 `set-language-server!` 与 `compile`/`+output` 代替 |
+
+## 24. 模块全文：`lang`（latex–zig）
+
+| 模块 | 处理 |
+| --- | --- |
+| `lang/yaml` | **吸收**：本配置的 `.yml` 由 `yaml-ts-mode` 打开，它没有自己的缩进规则，退回 `indent-relative`，实测 `key:` 后回车落在第 0 列；现在借用 `yaml-mode` 的 `yaml-indent-line`（`+yaml-ts-use-yaml-mode-indentation-h`，经 `remote-require-on-client` 加载，远程 buffer 也不把加载放到 target 上） |
+| `lang/python` | `PYTHON_BASIC_REPL=1`（Python 3.13 新 REPL 在 comint 里 C-c 失灵）：实测本机 3.11/3.13/3.14 在 `run-python` 里 C-c 都能中断且 REPL 存活，无证据，不收；pipenv/pyenv/conda/poetry 由本配置的 Python 工具链选择器处理；pytest 走 `tools/test` |
+| `lang/latex` | 隐藏的 AUCTeX 解析目录**已有**（`var/auctex/`）；数学区不折行已在第 12 节吸收；cleveref/biblatex 命令着色、item 续行缩进、reftex 引用格式、cdlatex、evil-tex 不收（外观或手感） |
+| `lang/markdown` | 代码块原生着色（会对每个代码块跑语言模式的全部 hook）本配置未开启，Doom 的 `delay-mode-hooks` 补丁随之不需要；YAML front matter 着色补丁、导出/预览、evil-markdown 键不收（Markdown 由 Noema 编辑） |
+| `lang/sh` | `.bats`/`.zunit`/`#compdef` 已在第 10 节吸收；实测 `.env` 为 conf-mode、带连字符的函数名 Imenu 能列出，不需要 Doom 的补丁 |
+| `lang/javascript` | 项目 `node_modules/.bin` **已有**（`lang/javascript` 的服务器查找） |
+| `lang/rust` | rust-analyzer 悬停签名提取已在第 9 节以 `:upstream-id` 吸收；rustic 与 cargo 命令不收（本配置 Rust 走 lsp-mode 与 `tools/test`） |
+| `lang/web` | 已有 web-mode 与 Vue（第 10 节）；HTML 实体编解码、emmet、CSS 注释续行、框架项目模式不收 |
+| `lang/lean`、`ledger`、`lua`、`nim`、`nix`、`ocaml`、`odin`、`php`、`plantuml`、`purescript`、`qt`、`racket`、`raku`、`rest`、`rst`、`ruby`、`scad`、`scala`、`scheme`、`sml`、`solidity`、`swift`、`terra`、`zig` | Lean（本配置有自己的 lean4 模式与 infoview）、Nix、OCaml 已有各自模块；其余用户不用 |

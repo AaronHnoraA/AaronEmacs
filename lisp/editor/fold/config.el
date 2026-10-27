@@ -12,6 +12,9 @@
 (require 'seq)
 (require 'subr-x)
 
+(declare-function remote-require-on-client "remote-core" (feature &optional filename noerror))
+(declare-function yaml-indent-line "yaml-mode" ())
+
 (declare-function consult-xref "consult" (fetcher &optional alist))
 (declare-function citre-executable-find "citre-common-util"
                   (command &optional remote))
@@ -1281,6 +1284,16 @@ hideshow 6.0.  This function deliberately never changes overlay bounds."
 (use-package yaml-mode
   :ensure t
   :mode ("\\.ya?ml\\'" . yaml-mode))
+
+;; From Doom: `yaml-ts-mode' (which visits YAML files here) has no indentation
+;; rules of its own and falls back to `indent-relative', so RET after "key:"
+;; lands in column 0.  Borrow `yaml-mode's indenter.
+(defun +yaml-ts-use-yaml-mode-indentation-h ()
+  "Indent `yaml-ts-mode' buffers with `yaml-indent-line'."
+  (when (remote-require-on-client 'yaml-mode nil t)
+    (setq-local indent-line-function #'yaml-indent-line)))
+
+(add-hook 'yaml-ts-mode-hook #'+yaml-ts-use-yaml-mode-indentation-h)
 
 ;; The dot-language
 (use-package graphviz-dot-mode

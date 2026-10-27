@@ -165,5 +165,20 @@
       (mapc #'kill-buffer buffers)
       (delete-directory dir t))))
 
+(ert-deftest +yaml-ts-mode-indents-under-a-key ()
+  "In YAML files (yaml-ts-mode), RET after \"key:\" indents the value."
+  (let* ((file (make-temp-file "indent" nil ".yml" "a:\n  b: 1\n"))
+         (buffer (find-file-noselect file)))
+    (unwind-protect
+        (with-current-buffer buffer
+          (should (derived-mode-p 'yaml-ts-mode))
+          (goto-char (point-max))
+          (insert "c:")
+          (newline-and-indent)
+          (should (= (current-column) 2)))
+      (with-current-buffer buffer (set-buffer-modified-p nil))
+      (kill-buffer buffer)
+      (delete-file file))))
+
 (provide 'init-web-tests)
 ;;; init-web-tests.el ends here
