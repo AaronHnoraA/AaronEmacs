@@ -621,6 +621,20 @@
       (should (string-suffix-p "abcdefghijklmnopqrst"
                                (string-trim (plist-get result :output)))))))
 
+(ert-deftest command-shell-c8-output-stays-out-of-undo ()
+  (command-shell-tests--with-dir dir
+    (let (result)
+      (let ((buffer (+eshell-run "seq 1 20000" :directory dir
+                                 :callback (lambda (r) (setq result r)))))
+        (should (command-shell-tests--wait (lambda () result) 10))
+        (with-current-buffer buffer
+          (should (listp buffer-undo-list))
+          (should-not (seq-some (lambda (entry)
+                                  (and (consp entry) (stringp (car entry))
+                                       (string-match-p "^19999$" (car entry))))
+                                buffer-undo-list))
+          (should (< (length buffer-undo-list) 50)))))))
+
 (ert-deftest command-shell-c6-sync-is-batch-only ()
   (let ((noninteractive nil))
     (should-error (+eshell-run-sync "echo forbidden"))))

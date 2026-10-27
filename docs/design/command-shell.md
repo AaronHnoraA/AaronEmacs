@@ -141,7 +141,9 @@ Makefile 项目的运行目标无法从构建命令可靠推断，需配置
 - **C7 输出规整**：`ESC[nG` 重画的进度行就地覆盖，颜色保留。测试：
   `command-shell-c7-redraw-sequences-overwrite`。
 - **C8 资源上限**：等待队列和单条输出均有上限，超出的输出标记 `:truncated`。
-  测试：`command-shell-c8-output-and-queue-are-bounded`。
+  命令运行期间不记录撤销：输出和被裁掉的历史行都不进 undo，命令结束后从空的
+  撤销历史开始记录下一次输入的编辑。测试：`command-shell-c8-output-and-queue-are-bounded`、
+  `command-shell-c8-output-stays-out-of-undo`。
 - **C9 显示不占分屏**：GUI 的直接 `M-x eshell` 和显式显示入口都使用可聚焦的
   Aaron UI child frame；标题栏可拖动，红黄绿按钮分别关闭、隐藏、切换大小。隐藏后保留
   buffer 和运行中的命令，关闭结束 buffer。Ibuffer 与普通 buffer 打开入口也走

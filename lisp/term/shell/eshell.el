@@ -492,14 +492,27 @@ Each dropped command's callback gets :reason `cancelled'."
         (set-marker start nil))
       (+eshell--result item :status nil :reason 'killed))))
 
+(defun +eshell--disable-undo-h ()
+  "Keep a command's output, and the scrollback it trims, out of undo.
+From Doom: otherwise every output chunk and every truncated line stays in
+the undo history of a buffer that lives for weeks."
+  (buffer-disable-undo))
+
+(defun +eshell--enable-undo-h ()
+  "Record undo again, from an empty history, for editing the next input."
+  (buffer-enable-undo))
+
 (defun +eshell-setup-h ()
   "Install the command-shell hooks in an eshell buffer."
   (add-hook 'eshell-pre-command-hook #'+eshell--reset-output-h nil t)
+  (add-hook 'eshell-pre-command-hook #'+eshell--disable-undo-h nil t)
   (setq-local eshell-buffer-maximum-lines 5000)
   (add-hook 'eshell-output-filter-functions #'+eshell--bound-output-h 90 t)
   (add-hook 'eshell-output-filter-functions #'+eshell--truncate-history-h 95 t)
   ;; Before the prompt is drawn, so the output ends where the prompt begins.
   (add-hook 'eshell-post-command-hook #'+eshell--finished-h -90 t)
+  ;; After the final trim above, which would otherwise be recorded.
+  (add-hook 'eshell-post-command-hook #'+eshell--enable-undo-h -80 t)
   (add-hook 'kill-buffer-hook #'+eshell--kill-buffer-h nil t)
   ;; Perspective protects a workspace's last buffer.  An Eshell float can be
   ;; that buffer, which silently makes `exit' and the red close button no-ops.
