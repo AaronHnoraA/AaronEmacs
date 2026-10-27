@@ -364,7 +364,7 @@ Doom 的做法：
 | `emacs/electric` | `set-electric!`、续写注释、电子缩进词不收（手感） |
 | `emacs/eww` | 页内链接/标题跳转、复制 URL、字号；本配置 EWW 只作阅读，已有刷新、阅读模式与转 xwidget；按标题改名不收（第 10 节） |
 | `emacs/ibuffer` | 人类可读大小列、工作区过滤、图标；外观 |
-| `emacs/undo` | `+tree` 分支逐行看过：剥离撤销记录的文本属性，实测本机最大的历史文件 316 KB 里属性只占约 1.6 KB，不收；不保存加密文件与 Git 消息的历史已吸收；可视化 diff 窗口不收 |
+| `emacs/undo` | `+tree` 分支逐行看过：**吸收**剥离撤销记录的文本属性（更正：先前实测“最大的历史文件 316 KB、属性约 1.6 KB”不准；重测 178 个历史文件中 90 个带属性，最大的一个 Lean 文件 2.3 MB，含 1765 段带 face 与语义 token 属性的删除文本），`aaron-undo-tree--strip-text-properties-a` 在 undo-tree 接管撤销记录前去掉属性；上限不收（undo-tree 0.8.2 自带 `undo-tree-limit` 等 80MB 以上的上限）；不保存加密文件与 Git 消息的历史已吸收；可视化 diff 窗口不收 |
 | `emacs/vc` | git-link（本配置有 browse-at-remote）、git-timemachine、smerge 键；已有或不用 |
 
 ## 17. 模块全文：`completion`
