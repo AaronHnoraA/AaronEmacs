@@ -89,7 +89,8 @@
 
 (use-package js2-mode
   :ensure t
-  )
+  ;; Its autoloads open the files; nothing here needs it before then.
+  :defer t)
 
 (setq auto-mode-alist
       (cl-remove-if

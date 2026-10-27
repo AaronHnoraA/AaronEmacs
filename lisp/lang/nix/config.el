@@ -7,7 +7,8 @@
 
 (use-package nix-mode
   :ensure t
-  )
+  ;; Its autoloads open the files; nothing here needs it before then.
+  :defer t)
 
 
 (provide 'lang/nix/config)
