@@ -357,6 +357,28 @@
           (should reloaded))
       (delete-directory directory t))))
 
+(ert-deftest +pairs-no-closer-before-a-word ()
+  "An opener typed before a word gets no partner; elsewhere it does."
+  (cl-flet ((type (mode text char)
+              (with-temp-buffer
+                (funcall mode)
+                (electric-pair-local-mode 1)
+                (insert text)
+                (goto-char (point-min))
+                (search-forward "|")
+                (delete-char -1)
+                (let ((last-command-event char))
+                  (call-interactively #'self-insert-command))
+                (insert "|")
+                (buffer-substring-no-properties (point-min) (point-max)))))
+    (should (equal (type #'emacs-lisp-mode "(list |foo)" ?\() "(list (|foo)"))
+    (should (equal (type #'emacs-lisp-mode "(list |_x)" ?\[) "(list [|_x)"))
+    (should (equal (type #'emacs-lisp-mode "|foo" ?\") "\"|foo"))
+    (should (equal (type #'emacs-lisp-mode "(list |)" ?\() "(list (|))"))
+    (should (equal (type #'emacs-lisp-mode "(list | foo)" ?\") "(list \"|\" foo)"))
+    ;; After a word still pairs, as in a Python f-string.
+    (should (equal (type #'python-mode "x = f|" ?\") "x = f\"|\""))))
+
 (provide 'init-interaction-utils-tests)
 
 ;;; init-interaction-utils-tests.el ends here

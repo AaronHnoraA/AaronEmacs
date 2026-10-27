@@ -155,6 +155,18 @@ many steps."
       (when (derived-mode-p 'prog-mode)
         (+pairs-newline-mode 1)))))
 
+(declare-function electric-pair-default-inhibit "elec-pair" (char))
+
+(defun +pairs-inhibit-p (char)
+  "Return non-nil when CHAR, just typed, should get no closing partner.
+Besides `electric-pair-default-inhibit', an opener typed right before a
+word or symbol is left alone, so typing ( before foo wraps it by hand
+instead of giving ()foo.  After a word pairing still happens: f\" opens
+a Python f-string."
+  (or (and (char-after)
+           (memq (char-syntax (char-after)) '(?w ?_)))
+      (electric-pair-default-inhibit char)))
+
 (use-package elec-pair
   :ensure nil
   :demand t
@@ -167,6 +179,7 @@ many steps."
   (electric-pair-delete-adjacent-pairs t)
   (electric-pair-open-newline-between-pairs t)
   (electric-pair-skip-whitespace t)
+  (electric-pair-inhibit-predicate #'+pairs-inhibit-p)
   :config
   (electric-pair-mode 1)
   (add-hook 'prog-mode-hook #'+pairs-newline-mode)
