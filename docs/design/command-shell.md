@@ -90,23 +90,35 @@ Emacs 里打开文件，不会在 shell 里再起一个 Emacs。
 ## 语言构建示例
 
 C、C++ 和 Go 源文件里的 `C-c C-c` 保存当前文件后启动异步构建，复用该构建目录的
-`*eshell:TARGET/build-项目名-摘要*`。构建会话浮动显示，重复按键在同一会话排队。
+`*eshell:TARGET/build-项目名-摘要*`。重复按键在同一会话排队，构建会话浮动显示。
 `C-u C-c C-c` 会在构建成功后再运行；也可分别设置
 `+cpp-eshell-run-after-build` / `+go-eshell-run-after-build` 使普通按键运行。
+LaTeX 保留 AUCTeX 的 `C-c C-c` 命令选择：选 `XeLaTeXMk` 或 `PdfLaTeXMk` 时，
+才把 master 的 latexmk 构建送进同一命名 Eshell；其他 AUCTeX 命令仍由 AUCTeX 执行。
+`C-u C-c C-c` 保留 AUCTeX 的命令确认语义。LaTeX 构建默认不显示会话，失败或超时
+才显示；`C-c C-p` 的编译并查看也走 Eshell 构建队列。
 
 | 语言 | 有项目构建文件 | 没有项目构建文件 |
 | --- | --- | --- |
 | C/C++ | 最近的 Makefile 目录执行 `make` | 在源文件目录用 `cc` / `c++` 编译当前文件，`-o 文件名.out` |
 | Go | 最近的 Makefile 执行 `make`；否则 `go.mod` 目录执行 `go build ./...` | 在源文件目录执行 `go build -o 文件名.out 当前文件` |
+| LaTeX | AUCTeX 解析 master，在 master 目录对主文件运行 `latexmk`；沿用 `TeX-engine`、`TeX-output-dir` 和 `TeX-command-extra-options` | 当前文件作为 master，同样用 `latexmk` |
 
 单文件构建请求运行时执行 `./文件名.out`；Go module 默认用 `go run .`。
-这个语言示例目前只接本地文件；Eshell 自动化 API 本身仍支持已配置的远端 target。
+这里的 C/C++/Go 示例目前只接本地文件；LaTeX 的 Eshell 命令按 master 所在 target
+运行，但远程构建尚未完成真机验收。AUCTeX 手动 `TeX-command` 仍拒绝远程 master，
+避免其 `start-process` 静默回退到本机。
 Makefile 项目的运行目标无法从构建命令可靠推断，需配置
 `+cpp-eshell-run-command` / `+go-eshell-run-command`；构建命令可分别用
 `+cpp-eshell-build-command` / `+go-eshell-build-command` 覆盖。命令设置位于各自的
 `lang/cpp/config.el` 和 `lang/go/config.el`，可在受信任的 `.dir-locals.el` 中按
 项目覆盖。任务通过现有 `+eshell-run` 取得退出码、超时与输出上限；需要交互式
 输入或终端画面的程序仍用 Portal。
+LaTeX 可在受信任的 `.dir-locals.el` 里设置 `+auctex-eshell-build-command` 覆盖自动
+latexmk 命令；构建前 AUCTeX 会保存文档中的已修改源文件。构建成功时刷新已打开的
+master PDF；失败时打开对应的 Eshell，会话也可手动从 `SPC o s` 找回。
+传给 latexmk 的 PATH 会去掉各目录末尾多余的 `/`，避免 TeX Live 将 Homebrew 的
+`xelatex` 等可执行文件解析成双斜杠路径而失败。
 
 此示例参考 [VS Code Makefile Tools 的构建目标与运行目标设置](https://github.com/microsoft/vscode-makefile-tools/blob/main/README.md)
 以及 [Code Runner 的语言命令、保存与工作目录设置](https://github.com/formulahendry/vscode-code-runner#configuration)。
@@ -150,6 +162,13 @@ Makefile 项目的运行目标无法从构建命令可靠推断，需配置
   浮窗。TTY 回退到底部窗口。测试：
   `command-shell-c9-direct-eshell-uses-display-surface`（显示入口）；GUI smoke 核对
   child frame、分屏几何不变、隐藏和焦点返回。
+- **C10 语言构建**：语言入口选择构建目录和命令，再交给同一个 `+eshell-run-build`。
+  LaTeX 保留 AUCTeX 的命令选择，只将 master 的两个 latexmk 命令送入 Eshell；
+  沿用 master、引擎和输出目录。提交时隐藏会话，仅失败时显示，显式要求预览时
+  成功后打开 master PDF。首次打开 PDF 时指定第一页触发渲染；PDF 预取在页面
+  渲染后才启用，避免无页码时的空值错误。测试：`latex-eshell-build-keeps-auctex-command-selection`、
+  `latex-eshell-build-uses-master-and-shows-only-failures`、`latex-eshell-build-produces-pdf-in-named-session`、
+  `latex-preview-open-renders-first-pdf-page`。
 
 ## 已知差距
 

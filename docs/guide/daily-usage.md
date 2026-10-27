@@ -526,20 +526,25 @@ display math、代码 fence 或 `#+begin` block 会在写文件前报出明确�
 
 ### LaTeX 预览（AUCTeX + PDF Tools）
 
-`.tex` 文件用 AUCTeX 做编辑、补全、RefTeX、master-file 识别和正式构建（latexmk，
-`XeLaTeXMk`/`PdfLaTeXMk`），预览走 PDF Tools + SyncTeX。latexmk 的可执行路径按当前 buffer 的
+`.tex` 文件用 AUCTeX 做编辑、补全、RefTeX 和 master-file 识别；`latexmk` 构建在命名
+Eshell 中排队，预览走 PDF Tools + SyncTeX。AUCTeX 自带的 `XeLaTeXMk`/`PdfLaTeXMk`
+命令仍可手动选用。latexmk 的可执行路径按当前 buffer 的
 Remote target 解析：本地 target 用本机 PATH 上的 latexmk，远程 target 会去该 target 上找。
 
-- `C-c C-p`：编译并查看（`TeX-command-run-all`）。
+- `C-c C-c`：保留 AUCTeX 的命令选择。选 `XeLaTeXMk` 或 `PdfLaTeXMk` 时在后台
+  编译 master，成功不弹出 Eshell，失败或超时才显示。`C-u C-c C-c` 仍用于确认命令。
+- `C-c C-p`：通过同一 Eshell 构建队列编译并查看。
 - `C-c C-g` / `M-RET`：正向跳转到当前源码位置对应的 PDF 位置；PDF 不存在时会先编译。
 - `M-x latex-preview-menu`：统一菜单，可正向同步、打开已构建的 PDF、编译并查看、或走
   AUCTeX 自带的 `TeX-view`。
 
-远程 target 上的 buffer 目前会在执行构建命令时直接报错拒绝：AUCTeX 自身的进程启动用的是
+手动执行 AUCTeX `TeX-command` 时，远程 target 上的 buffer 会直接报错拒绝：AUCTeX 自身的进程启动用的是
 `start-process`，遇到远程 `default-directory` 时会静默改到本机 `~` 下编译，而不是报错，所以
-配置选择显式拒绝而不是让它悄悄编译错文件。texlab 提供的诊断/补全在远程 target 上仍然可用。
+配置选择显式拒绝而不是让它悄悄编译错文件。两个 latexmk 命令走 Eshell，由 master 的 target 运行，
+远程构建尚未完成真机验收。texlab 提供的诊断/补全在远程 target 上仍然可用。
 PDF 的阅读、批注、搜索仍由 PDF Tools 提供。再次打开一个 PDF 时回到上次看到的页
-（页码随 `save-place-mode` 一起保存）。
+（页码随 `save-place-mode` 一起保存）。打开预览时会检查右侧窗口是否已有渲染页面；
+如果只显示 PDF 原始内容，会在该窗口重新初始化 PDFView。
 
 ### 启动 Dashboard 的 Agenda 卡片
 
@@ -979,6 +984,9 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
   否则 `go build ./...`，单文件则调用编译器。`C-u C-c C-c` 在成功后运行；
   项目运行命令和是否默认运行可在对应语言配置里设置。详见
   [command-shell.md](../design/command-shell.md#语言构建示例)
+- LaTeX 文件中 `C-c C-c`
+  照常选择 AUCTeX 命令；选 `XeLaTeXMk` 或 `PdfLaTeXMk` 时在 master 目录后台运行
+  `latexmk`，只有失败或超时才显示 Eshell。也可用 `SPC o s` 手动打开构建会话。
 - `SPC o w`
   `aaron/open-eww-url`
 - `SPC o x`

@@ -87,11 +87,19 @@ contact”，优先补齐 Remote/LSP adapter，而不是把分支写进语言模
 PDF Tools/SyncTeX 预览）、[lisp/lang/latex/config.el](../../lisp/lang/latex/config.el)（texlab/
 digestif、BibTeX、Zotero）。
 
+`C-c C-c` 保留 AUCTeX 原有的命令选择；选择 `XeLaTeXMk` 或 `PdfLaTeXMk` 后，
+在命名 Eshell 中运行，成功时保持会话隐藏，失败时显示。`C-u C-c C-c` 仍按 AUCTeX
+原有语义确认命令；`C-c C-p` 经同一队列编译并查看。
+自动命令沿用 `TeX-engine`、`TeX-output-dir`、`TeX-command-extra-options`；项目需要覆盖时，
+可在受信任的 `.dir-locals.el` 中设置 `+auctex-eshell-build-command`。
+Eshell 构建传给 latexmk 的 PATH 会去掉目录末尾多余的 `/`，避免 Homebrew TeX Live
+在解析 `xelatex` 时产生双斜杠路径。
+
 `latexmk` 可执行文件通过 `remote-executable-find`（AUCTeX 侧）/
 `+language-server-executable-find`（texlab 侧）按当前 buffer 的 Remote target 解析，不写死
 本机路径；两个 latexmk 命令（`XeLaTeXMk`/`PdfLaTeXMk`）在 `+auctex-setup-build-workflow` 里按
-buffer 注册，而不是启动时算好一份全局命令。远程 target 上的构建命令会被
-`+auctex-guard-remote-master` 拒绝——AUCTeX 自己的 `TeX-run-command` 用 `start-process`，遇到远程
+buffer 注册，而不是启动时算好一份全局命令。手动调用 AUCTeX `TeX-command` 时，
+远程 target 上的命令会被 `+auctex-guard-remote-master` 拒绝——AUCTeX 自己的 `TeX-run-command` 用 `start-process`，遇到远程
 `default-directory` 会静默回退到本机 `~` 编译，而不是报错，所以选择在框架层面显式拒绝。texlab 的
 诊断/补全走 lsp-mode 共享的 `language-server` remote adapter，本身已经是 target-aware 的。
 

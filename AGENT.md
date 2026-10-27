@@ -308,7 +308,7 @@ This config already has maintenance and workflow entry points. Reuse them:
   (`+eshell/toggle`); see `docs/design/command-shell.md`.  Code that needs to
   run a shell command and see it, or hand the user a shell, uses this rather
   than its own comint buffer or shell process.  The local C/C++/Go `C-c C-c`
-  demo in the language configs uses `+eshell-run-build` and a named Eshell;
+  demo and the LaTeX master build use `+eshell-run-build` and a named Eshell;
   other builds, runs and tests stay on `compile` / `+output`.  Full-screen
   programs go to Portal.
 - Compile/maintenance: `+compile/board`, `config-compile-menu`, `make`

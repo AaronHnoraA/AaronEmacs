@@ -101,7 +101,8 @@
  :ui     rainbow-delimiters
  :editor avy multiple-cursors
  :lang   (auctex :after (tex tex-site pdf-tools pdf-view)
-                 :autoload (latex-preview-menu
+                 :autoload (+auctex/eshell-build
+                            latex-preview-menu
                             +latex/preview-open-pdf
                             +latex/sync-forward
                             +latex/sync-forward-mouse

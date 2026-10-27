@@ -12,6 +12,8 @@
 (require 'aaron-open)
 (require 'subr-x)
 (require 'transient)
+(require 'image-mode)
+(eval-and-compile (require 'pdf-macs))
 
 (declare-function image-mode-window-get "image-mode" (prop &optional winprops))
 (declare-function pdf-view-goto-page "pdf-view" (page &optional window))
@@ -25,25 +27,32 @@
 (declare-function aaron-typography-setup-prose-buffer "aaron-base")
 (declare-function +mouse/code-actions "config/mouse/config" (event))
 (declare-function evil-local-set-key "evil-core" (state key def))
-(declare-function TeX-command-run-all "tex" (arg))
 (declare-function TeX-master-directory "tex" ())
 (declare-function TeX-master-file "tex" (&optional extension nondirectory ask))
 (declare-function TeX-master-output-file "tex" (extension))
+(declare-function TeX-command-master "tex" (&optional override-confirm))
+(declare-function TeX--master-output-dir "tex" (master-dir relative-to-master &optional ensure))
+(declare-function TeX-revert-document-buffer "tex" (file))
+(declare-function TeX-save-document "tex" (name-or-file-fn))
 (declare-function TeX-view "tex" ())
 (declare-function TeX-view-mouse "tex" (event))
 (declare-function completion-preview-mode "completion-preview" (&optional arg))
 (declare-function pdf-sync-backward-search-mouse "pdf-sync" (ev))
 (declare-function pdf-sync-locate-synctex-file "pdf-sync" (pdffile))
 (declare-function remote-executable-find "remote-process" (program &optional context))
+(declare-function +eshell-run-build "term/shell/eshell" (build-command &rest keys))
 
 ;; --- XeLaTeX 与 pdflatex 的编译命令，注入 -synctex=1 ---
 
 (defvar TeX-source-correlate-map)
+(defvar LaTeX-mode-map)
 (defvar evil-normal-state-cursor)
 (defvar TeX-auto-local)
 (defvar TeX-auto-save-aggregate)
 (defvar TeX-default-extension)
 (defvar TeX-engine)
+(defvar TeX-command-extra-options)
+(defvar TeX-output-dir)
 (defvar TeX-style-path)
 (defvar completion-preview-mode)
 (defvar lsp-mode-map)
@@ -60,18 +69,20 @@ target invokes that target's `latexmk', never the client's."
           " " engine-flag
           " -synctex=1 %(file-line-error) %(output-dir) %`%(extraopts) %S%(mode)%' %t"))
 
-(defun +auctex-guard-remote-master (&rest _)
-  "Refuse to run a TeX command when the master directory is a remote target.
+(defun +auctex-guard-remote-master (name &rest _)
+  "Refuse AUCTeX's own TeX process for a remote master.
+The latexmk commands run through Eshell and are exempt.
 AUCTeX runs TeX commands with `start-process', which per its docstring runs
 in the local home directory instead of the remote one when `default-directory'
 is remote-handled -- it never errors, it just silently builds the wrong copy
 on the client.  Fail loudly instead."
-  (when-let* ((directory (ignore-errors (+auctex--master-directory)))
-              (remote (file-remote-p directory)))
-    (user-error
-     "AUCTeX build commands do not support remote target %s yet (would \
+  (unless (member name '("XeLaTeXMk" "PdfLaTeXMk"))
+    (when-let* ((directory (ignore-errors (+auctex--master-directory)))
+                (remote (file-remote-p directory)))
+      (user-error
+       "AUCTeX build commands do not support remote target %s yet (would \
 silently compile on the client instead); use texlab diagnostics for now"
-     remote)))
+       remote))))
 
 (defun +pdf-tools-activate ()
   "Enable PDF Tools without forcing an unnecessary rebuild.
@@ -192,6 +203,102 @@ target rather than one path baked in at load time."
      TeX-run-TeX nil (LaTeX-mode docTeX-mode)
      :help "Run latexmk with pdfLaTeX")))
 
+(defgroup +auctex-eshell-build nil
+  "LaTeX builds sent to a named Eshell session."
+  :group 'TeX-command)
+
+(defcustom +auctex-eshell-build-command nil
+  "Build command for the AUCTeX master, or nil to use latexmk.
+The command runs in the master file's directory.  A trusted project can
+override it in .dir-locals.el."
+  :type '(choice (const :tag "Automatic latexmk" nil) string)
+  :group '+auctex-eshell-build)
+
+(defun +auctex--eshell-build-path ()
+  "Return the current PATH without trailing slashes in its entries.
+TeX Live's kpathsea fails to resolve Homebrew symlinks when latexmk finds
+an engine through a PATH entry ending in `/'."
+  (when-let* ((path (getenv "PATH")))
+    (string-join
+     (mapcar (lambda (entry)
+               (if (and (not (string-empty-p entry))
+                        (not (string-match-p "\\`/+\\'" entry)))
+                   (replace-regexp-in-string "/+\\'" "" entry)
+                 entry))
+             (split-string path ":" nil))
+     ":")))
+
+(defun +auctex--eshell-build-command (master directory &optional command-name)
+  "Return the latexmk command for MASTER in DIRECTORY.
+COMMAND-NAME is AUCTeX's selected XeLaTeXMk or PdfLaTeXMk entry."
+  (let ((path (+auctex--eshell-build-path)))
+    (concat
+     (when path (format "env PATH=%s " (shell-quote-argument path)))
+     (or +auctex-eshell-build-command
+         (string-join
+          (delq nil
+                (list (shell-quote-argument (+auctex-latexmk-executable))
+                      (if (or (equal command-name "XeLaTeXMk")
+                              (and (null command-name) (eq TeX-engine 'xetex)))
+                          "-xelatex" "-pdf")
+                      "-interaction=nonstopmode" "-file-line-error" "-synctex=1"
+                      (when TeX-output-dir
+                        (concat "-outdir="
+                                (shell-quote-argument
+                                 (TeX--master-output-dir directory t t))))
+                      (unless (string-empty-p TeX-command-extra-options)
+                        TeX-command-extra-options)
+                      (shell-quote-argument (file-name-nondirectory master))))
+          " ")))))
+
+(defun +auctex--eshell-build-finished (result pdf source view)
+  "Handle RESULT for SOURCE and PDF, opening PDF when VIEW is non-nil."
+  (cond
+   ((eql (plist-get result :status) 0)
+    (TeX-revert-document-buffer pdf)
+    (when (and view (buffer-live-p source))
+      (with-current-buffer source
+        (+latex/preview-open-pdf pdf))))
+   ((or (numberp (plist-get result :status))
+        (memq (plist-get result :reason) '(error timeout)))
+    (when-let* ((shell (plist-get result :buffer))
+                ((buffer-live-p shell)))
+      (display-buffer shell)))))
+
+;;;###autoload
+(defun +auctex/eshell-build (&optional view command-name override-confirm)
+  "Build the current LaTeX document with latexmk in its named Eshell.
+With prefix VIEW, open the master PDF after a successful build.  The Eshell
+stays hidden on success and opens when the build fails.  COMMAND-NAME and
+OVERRIDE-CONFIRM are passed by AUCTeX's command selection."
+  (interactive "P")
+  (+latex-preview--ensure-tex-buffer)
+  (require 'term/shell/eshell)
+  (save-buffer)
+  (let* ((master (+latex-preview--master-tex-file))
+         (directory (file-name-directory master))
+         (pdf (+latex-preview--output-pdf-file))
+         (source (current-buffer))
+         (build (+auctex--eshell-build-command master directory command-name)))
+    (TeX-save-document #'TeX-master-file)
+    (when (and override-confirm
+               (> (prefix-numeric-value override-confirm) 0))
+      (setq build (read-from-minibuffer
+                   (format "%s command: " (or command-name "latexmk")) build)))
+    (+eshell-run-build
+     build
+     :directory directory :display nil
+     :callback (lambda (result)
+                 (+auctex--eshell-build-finished result pdf source view)))))
+
+(defun +auctex-route-latexmk-a (original name file-fn &optional override-confirm)
+  "Send AUCTeX's selected latexmk NAME to Eshell; delegate other commands.
+ORIGINAL remains responsible for every other command and region build."
+  (if (and (eq file-fn #'TeX-master-file)
+           (member name '("XeLaTeXMk" "PdfLaTeXMk")))
+      (+auctex/eshell-build nil name override-confirm)
+    (funcall original name file-fn override-confirm)))
+
 (defun +pdf-view-enable-auto-refresh ()
   "Auto-refresh PDF buffers when the underlying file changes."
   (setq-local auto-revert-use-notify t
@@ -210,15 +317,43 @@ target rather than one path baked in at load time."
     pdf-annot-minor-mode
     pdf-sync-minor-mode
     pdf-misc-context-menu-minor-mode
-    pdf-cache-prefetch-minor-mode
     pdf-occur-global-minor-mode)
   "PDF Tools minor modes that should be active by default.")
 
+(defun +pdf-view-start-prefetch-h (&optional window)
+  "Start PDF prefetch after a page has actually rendered in WINDOW."
+  (when (and (fboundp 'pdf-cache-prefetch-minor-mode)
+             (numberp (pdf-view-current-page window)))
+    (pdf-cache-prefetch-minor-mode 1)))
+
+(defun +pdf-view-render-window (window)
+  "Initialize and render the PDF shown in WINDOW.
+Some already-open PDF buffers have PDFView mode but no page overlay.  Running
+`pdf-view-mode' with WINDOW selected recreates its window-local display state."
+  (when (and (window-live-p window)
+             (display-graphic-p (window-frame window)))
+    (with-selected-window window
+      (with-current-buffer (window-buffer window)
+        (when (derived-mode-p 'pdf-view-mode)
+          (let* ((page (or (pdf-view-current-page window) 1))
+                 (overlay (pdf-view-current-overlay window)))
+            (unless (and (overlayp overlay)
+                         (eq (overlay-get overlay 'window) window)
+                         (overlay-get overlay 'display))
+              (pdf-view-mode))
+            (pdf-view-goto-page page window)
+            (+pdf-view-start-prefetch-h window)))))))
+
 (defun +pdf-view-enable-capabilities ()
   "Enable the full PDF Tools interaction stack in the current PDF buffer."
+  ;; A previously opened PDF may still have the old prefetch timer running
+  ;; before its first page was rendered.  Restart it after a page exists.
+  (when (bound-and-true-p pdf-cache-prefetch-minor-mode)
+    (pdf-cache-prefetch-minor-mode -1))
   (dolist (mode +pdf-tools-enabled-modes)
     (when (fboundp mode)
-      (funcall mode 1))))
+      (funcall mode 1)))
+  (add-hook 'pdf-view-after-change-page-hook #'+pdf-view-start-prefetch-h nil t))
 
 (defun +auctex/pdf-view-mouse-follow-link (event)
   "Follow the PDF link at mouse EVENT, if one exists."
@@ -321,13 +456,15 @@ target rather than one path baked in at load time."
       (evil-local-set-key state (kbd "gs") #'pdf-occur))))
 
 (defun +pdf-view-configure-open-buffers ()
-  "Enable PDF Tools capabilities in already-open PDF buffers."
+  "Enable PDF Tools and render already-visible PDF buffers."
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer
       (when (derived-mode-p 'pdf-view-mode)
         (+pdf-view-enable-capabilities)
         (+pdf-view-enable-auto-refresh)
-        (+pdf-view-setup-interaction)))))
+        (+pdf-view-setup-interaction)
+        (dolist (window (get-buffer-window-list buffer nil t))
+          (+pdf-view-render-window window))))))
 
 (defun +pdf-sync--open-pdf-candidates ()
   "Return currently opened PDF buffer files."
@@ -527,13 +664,14 @@ recursive scan of the whole tree.  The result is memoized per buffer."
         (source-window (selected-window)))
     (unless (aaron-open-call-with-file-context pdf #'file-exists-p)
       (user-error "PDF does not exist yet: %s" pdf))
-    (let ((buffer (aaron-open-visit-file-noselect pdf)))
-      (display-buffer buffer '(+pdf-view-display-in-right-window))
+    (let* ((buffer (aaron-open-visit-file-noselect pdf))
+           (pdf-window (display-buffer buffer '(+pdf-view-display-in-right-window))))
       (with-current-buffer buffer
         (when (derived-mode-p 'pdf-view-mode)
           (+pdf-view-enable-capabilities)
           (+pdf-view-enable-auto-refresh)
-          (+pdf-view-setup-interaction)))
+          (+pdf-view-setup-interaction)
+          (+pdf-view-render-window pdf-window)))
       (when (window-live-p source-window)
         (select-window source-window))
       buffer)))
@@ -576,11 +714,10 @@ Compiles first when no PDF exists yet."
         (+mouse/code-actions event)
       (user-error "No code action command is available"))))
 
-(defun +latex/preview-compile-and-view (&optional arg)
-  "Run AUCTeX's compile-and-view command."
-  (interactive "P")
-  (+latex-preview--ensure-tex-buffer)
-  (TeX-command-run-all arg))
+(defun +latex/preview-compile-and-view ()
+  "Build the LaTeX master in Eshell, then view its PDF on success."
+  (interactive)
+  (+auctex/eshell-build t))
 
 (defun +latex/preview-view-pdf ()
   "View the current LaTeX document PDF via AUCTeX."
@@ -644,9 +781,13 @@ Compiles first when no PDF exists yet."
   (setq TeX-engine 'xetex)
   (setq TeX-source-correlate-method 'synctex)
   (setq TeX-source-correlate-start-server t)
+  (remove-hook 'LaTeX-mode-hook '+auctex-eshell-build-setup-h)
   (+auctex-install-preview-keys)
   (with-eval-after-load 'latex
-    (+auctex-install-preview-keys))
+    (+auctex-install-preview-keys)
+    ;; Undo the old direct-build binding in already-open LaTeX mode maps
+    ;; when this module is reloaded in a running Emacs.
+    (define-key LaTeX-mode-map (kbd "C-c C-c") #'TeX-command-master))
   (with-eval-after-load 'preview
     (+auctex-install-preview-keys))
   (define-key TeX-source-correlate-map [M-down-mouse-1]
@@ -669,6 +810,8 @@ Compiles first when no PDF exists yet."
   ;; it.  `latexmk' is resolved through `remote-executable-find' instead.
   (unless (advice-member-p #'+auctex-guard-remote-master 'TeX-command)
     (advice-add 'TeX-command :before #'+auctex-guard-remote-master))
+  (unless (advice-member-p #'+auctex-route-latexmk-a 'TeX-command)
+    (advice-add 'TeX-command :around #'+auctex-route-latexmk-a))
 
   (add-hook 'TeX-after-compilation-finished-functions
             #'TeX-revert-document-buffer)
