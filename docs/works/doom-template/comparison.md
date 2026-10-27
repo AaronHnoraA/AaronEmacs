@@ -399,7 +399,7 @@ Doom 的做法：
 | --- | --- |
 | `config/default/config.el` | **吸收**：Insert 状态下开 `delete-selection-mode`（输入覆盖鼠标或 Shift 选中的文字，离开 Insert 关掉）。不收：`man` 换 `woman`（实测 macOS 上 `man` 补全首次 1.3 秒、之后有缓存）；GPG 默认收件人（本机没有 `.gpg` 文件）；智能退格与 RET 续写注释（手感）；macOS `s-` 键与 help 键表（第 4 节）；avy、woman 路径 |
 | `config/default/autoload/*.el` | 复制项目相对路径已吸收；`compile`/搜索/浏览/新 buffer/重启 server/诊断等包装与本配置已有命令重复 |
-| `config/default/+emacs-bindings.el`、`+evil-bindings.el` | 键位全文看过；第 4 节的 leader 空位已吸收。Doom 的 minibuffer `C-r` 取寄存器、`C-u` 删到缩进会改变 Vim 命令行习惯，仍作为独立候选；其余命令本配置已有或属于不用的模块 |
+| `config/default/+emacs-bindings.el`、`+evil-bindings.el` | 键位全文看过；第 4 节的 leader 空位已吸收。**不收** Doom minibuffer 的 `C-r` 取寄存器、`C-u` 删到缩进：这两项只在 Doom 的 `evil +everywhere` 下绑定；本配置 `evil-want-minibuffer` 和 `evil-collection-setup-minibuffer` 均为 nil，minibuffer 键图没有覆盖这两个键，分别沿用全局的反向搜索和通用前缀。其余命令本配置已有或属于不用的模块 |
 | `config/literate` | 本配置不是 Org literate 配置 |
 
 ## 19. 模块全文：`editor`
