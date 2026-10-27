@@ -104,7 +104,8 @@ grammar 安装在 `var/tree-sitter/`。重建运行时目录时，可从配置�
 - `SPC c a`
   code action
 - `SPC c f`
-  format buffer；有选区时只格式化选区（语言服务器须支持 range formatting）
+  有活动语言服务器时由它格式化；否则异步调用当前 target 上的 shfmt、Prettier 或
+  clang-format（须在目标端 PATH 上）。有选区时仍只走语言服务器的 range formatting
 - `SPC c r`
   rename
 - `SPC c i`

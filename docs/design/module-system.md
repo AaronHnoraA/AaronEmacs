@@ -122,7 +122,7 @@
 | `set-language-server!`、`set-language-server-feature!` | `tools/lsp` | 注册自定义 lsp-mode client / 声明包自带的 client |
 | `set-language-server-toolchain-provider!`、`set-language-server-runtime-provider!` | `tools/lsp` | 注册项目工具链与运行时 provider |
 
-只有在已经存在、只是分散各处的注册代码需要收拢时，才加一个这样的接口。查找走 Emacs 自己的 `xref-backend-functions` 链，格式化只走 LSP，文件模板按目录组织，所以没有加 `set-lookup-handlers!`、`set-formatter!` 和 `set-file-template!`。
+只有在已经存在、只是分散各处的注册代码需要收拢时，才加一个这样的接口。查找走 Emacs 自己的 `xref-backend-functions` 链；格式化先走 LSP，没有活动服务器时由 `editor/format` 的规则在 target 上运行外部 CLI；文件模板按目录组织。这些规则目前由格式化模块统一拥有，所以没有加 `set-lookup-handlers!`、`set-formatter!` 和 `set-file-template!`。
 
 ## 加载账本
 
