@@ -249,7 +249,8 @@ target 和 Lean 一类重启很贵。实现是 `lsp--text-document-did-close` �
 
 外部格式化由 `editor/format` 用 `remote-make-process` 在当前文件的 target 上运行，
 按文件类型选 shfmt、Prettier 或 clang-format，并传入 target-native 文件路径以读取
-项目配置。格式化进程异步运行；若等待期间 buffer 内容或文件身份有变更，丢弃结果。它只处理整份
+项目配置。格式化进程异步运行；若等待期间 buffer 内容或文件身份有变更，或非空文件只收到
+空输出，就丢弃结果。它只处理整份
 文件；选区格式化与保存前格式化仍走原有 LSP 路径。
 
 dispatch 里现在有四组内容：

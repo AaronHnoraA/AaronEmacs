@@ -60,7 +60,7 @@
             argv)))
 
 (defun +format--external-finished
-    (process _event buffer tick file mode stdout stderr)
+    (process _event buffer tick file mode had-content stdout stderr)
   "Apply PROCESS output to BUFFER if its text and context are unchanged."
   (when (memq (process-status process) '(exit signal))
     (unwind-protect
@@ -74,6 +74,9 @@
                          (process-exit-status process)
                          (with-current-buffer stderr
                            (string-trim (buffer-string)))))
+               ((and had-content
+                     (with-current-buffer stdout (= (buffer-size) 0)))
+                (message "External formatting skipped: no output"))
                ((or (/= tick (buffer-chars-modified-tick))
                     (not (equal file buffer-file-name))
                     (not (eq mode major-mode))
@@ -101,6 +104,7 @@
          (source (save-restriction
                    (widen)
                    (buffer-substring-no-properties (point-min) (point-max))))
+         (had-content (not (string-empty-p source)))
          (stdout (generate-new-buffer " *external-format-stdout*"))
          (stderr (generate-new-buffer " *external-format-stderr*"))
          process)
@@ -119,7 +123,8 @@
                  :sentinel
                  (lambda (finished event)
                    (+format--external-finished
-                    finished event buffer tick file mode stdout stderr))))
+                    finished event buffer tick file mode had-content
+                    stdout stderr))))
           (setq +format--external-process process)
           (process-send-string process source)
           (process-send-eof process)

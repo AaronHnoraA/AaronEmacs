@@ -114,7 +114,7 @@ Doom 的做法：
 - **语言服务器注册改名为 `set-…!`**：`set-language-server!`、`set-language-server-feature!`、`set-language-server-runtime-provider!`、`set-language-server-toolchain-provider!`；从未定义、只有 `fboundp` 保护着调用的 `set-lsp-mode-preference!` 两处死调用删除。
 - **没有加的接口**：
   - `set-lookup-handlers!`：查找已经是 Emacs 自己的 `xref-backend-functions` 链，再加一层会和它重复；
-  - `set-formatter!`：格式化只走 LSP；
+  - `set-formatter!`：审计时格式化只走 LSP；G-F1 后外部格式化规则由 `editor/format` 集中维护，仍没有跨模块注册调用者；
   - `set-file-template!`：模板本身就是按类型分的目录数据；
   - `set-company-backend!`：原有的同类宏 `set-company-backends-for!` 没有任何调用者，直接删掉，不改名。
 
@@ -285,7 +285,7 @@ Doom 的做法：
 | `emacs/vc` | `vc-handled-backends '(SVN Git Hg)`、`node_modules` 不进 VC、冲突标记自动开 smerge、log-view/annotate/vc-dir 的 Evil 状态、git-timemachine | **已有且更细**：本配置只保留 Git，并按 target 的代价对远程 buffer 关掉 VC（`+disable-remote-vc-h`）；smerge 由 `emacs/smerge` 模块管；没有 git-timemachine |
 | `checkers/spell` | spell-fu、按模式跳过代码/链接/公式 face、aspell 参数、个人词典路径 | **不需要**：本配置只在 Git 提交信息里开 flyspell（hunspell），Noema 的文本由 Noema 自己检查 |
 | `tools/lookup` | `+lookup/definition` 等多级 handler、dumb-jump、在线搜索、词典/同义词 | **不收**：查找走 xref 后端链（第 5 节）；用户不用翻译和词典 |
-| `editor/format` | apheleia、按项目缩进的 clang-format/prettier 参数 | **不收**：格式化只走 LSP（第 5 节） |
+| `editor/format` | apheleia、按项目缩进的 clang-format/prettier 参数 | 当时只走 LSP；后续 **G-F1** 已吸收无 LSP 时的目标端外部格式化，CLI 通过文件名读取项目配置。未引入 apheleia，也未硬编码项目缩进参数 |
 | `tools/pdf` | 打开大 PDF 不问“文件很大，确定打开？” | **吸收**：`+pdf--skip-large-file-prompt-a`，其他大文件照常询问 |
 | `tools/pdf` | HiDPI 缩放、关掉 imagemagick、Evil 光标、关闭时清理注释 buffer、`q` 杀 buffer、epdfinfo 缺失时退回、midnight 颜色热更新、saveplace-pdf-view | **已有或不收**：缩放已开；光标见前面；`q` 与关闭行为以窗口生命周期为准；其余没有使用者 |
 | `tools/editorconfig` | 有 `indent_*` 时不让 dtrt-indent 覆盖、trim 走 ws-butler、排除 Office 文件 | **已有**：`config/default` 里同样处理 |

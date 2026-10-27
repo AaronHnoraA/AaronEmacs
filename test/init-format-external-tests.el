@@ -48,6 +48,34 @@
                        nil '("sh" "-c" "printf bad >&2; exit 7")))
                  "abc\n")))
 
+(ert-deftest +format-external-keeps-buffer-on-empty-cli-output ()
+  (should (equal (car (+format-test--run
+                       nil '("sh" "-c" "cat >/dev/null")))
+                 "abc\n")))
+
+(ert-deftest +format-external-new-request-cancels-old-process ()
+  (let ((file (make-temp-file "format-external-cancel-" nil ".sh")))
+    (unwind-protect
+        (with-temp-buffer
+          (setq buffer-file-name (remote-make-file-name "local" file)
+                default-directory
+                (remote-make-file-name "local" (file-name-directory file)))
+          (sh-mode)
+          (insert "abc\n")
+          (let* ((+format-external-rules
+                  '((sh-mode . ("sh" "-c" "sleep 3; tr a-z A-Z"))))
+                 (old (+format/external-buffer)))
+            (setq +format-external-rules
+                  '((sh-mode . ("tr" "a-z" "A-Z"))))
+            (+format/external-buffer)
+            (should-not (process-live-p old))
+            (with-timeout (5 (ert-fail "Replacement formatter did not finish"))
+              (while +format--external-process
+                (accept-process-output nil 0.05)))
+            (should (equal (buffer-string) "ABC\n"))
+            (should-not (buffer-live-p (process-buffer old)))))
+      (delete-file file))))
+
 (ert-deftest +format-external-passes-target-native-file-name ()
   (with-temp-buffer
     (setq buffer-file-name "/fs:lab:/workspace/app.ts"
