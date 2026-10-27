@@ -93,6 +93,26 @@
       (should (eq (mode "/p/.jshintrc") json))
       (should (eq (mode "/p/style.xslt") (mode "/p/data.xml"))))))
 
+(ert-deftest +filetypes-license-is-text-and-other-rc-files-are-conf ()
+  "LICENSE opens as text and an unknown *rc file as configuration, while
+specific rc entries and a #! line still win."
+  (require 'lang/filetypes/config)
+  (let ((dir (make-temp-file "rc-types-" t)))
+    (unwind-protect
+        (dolist (spec '(("LICENSE" "MIT License\n" text-mode)
+                        (".condarc" "channels:\n" conf-mode)
+                        (".yabairc" "#!/usr/bin/env sh\nyabai -m\n" sh-base-mode)
+                        (".bashrc" "alias l=ls\n" sh-base-mode)
+                        (".npmrc" "save=true\n" conf-npmrc-mode)
+                        (".jshintrc" "{}\n" (json-ts-mode js-json-mode))))
+          (let ((file (expand-file-name (nth 0 spec) dir)))
+            (write-region (nth 1 spec) nil file nil 'silent)
+            (with-current-buffer (find-file-noselect file)
+              (unwind-protect
+                  (should (apply #'derived-mode-p (ensure-list (nth 2 spec))))
+                (kill-buffer)))))
+      (delete-directory dir t))))
+
 (ert-deftest +tree-sitter-visiting-never-offers-to-install-a-grammar ()
   "Opening a file whose grammar is missing does not ask to build it."
   (require 'treesit)

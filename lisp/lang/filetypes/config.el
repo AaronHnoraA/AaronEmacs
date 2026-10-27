@@ -149,8 +149,11 @@
  #'+clutch-sql-mode)
 (+filetypes--prefer-mode '("\\.redis\\'") #'+clutch-redis-mode)
 (+filetypes--prefer-mode
- '("\\.log\\'" "\\.out\\'" "\\.err\\'")
+ '("\\.log\\'" "\\.out\\'" "\\.err\\'" "/LICENSE\\'")
  #'text-mode)
+;; Any other run-control file is configuration.  Appended, so the specific
+;; entries (.bashrc, .npmrc, .jshintrc) and a #! line still decide first.
+(add-to-list 'auto-mode-alist '("rc\\'" . conf-mode) 'append)
 
 ;; Binary and asset viewers.
 (+filetypes--prefer-mode
