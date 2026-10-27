@@ -72,11 +72,33 @@
 (declare-function consult-line "consult" (&optional initial start))
 (declare-function consult-line-multi "consult" (query &optional initial))
 (declare-function consult-recent-file "consult" ())
+(defvar evil-visual-beginning)
+(defvar evil-visual-end)
 
 (defun +search/line-forward ()
-  "Search the current buffer with `consult-line'."
+  "Search the current buffer with `consult-line'.
+From Doom's `+default/search-buffer': a selection within one line is the
+initial input, matched literally; a selection over several lines limits
+the search to those lines."
   (interactive)
-  (call-interactively #'consult-line))
+  (if (not (use-region-p))
+      (call-interactively #'consult-line)
+    ;; Evil's Visual selection includes the character under the cursor,
+    ;; which the Emacs region it maintains does not.
+    (let ((beg (if (bound-and-true-p evil-visual-state-minor-mode)
+                   evil-visual-beginning
+                 (region-beginning)))
+          (end (if (bound-and-true-p evil-visual-state-minor-mode)
+                   evil-visual-end
+                 (region-end))))
+      (deactivate-mark)
+      (if (= (line-number-at-pos beg) (line-number-at-pos end))
+          (consult-line (replace-regexp-in-string
+                         " " "\\\\ "
+                         (regexp-quote (buffer-substring-no-properties beg end))))
+        (save-restriction
+          (narrow-to-region beg end)
+          (consult-line))))))
 
 (defun +search/line-backward ()
   "Keep classic backward incremental search on `C-r'."

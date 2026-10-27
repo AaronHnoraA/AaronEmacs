@@ -574,6 +574,7 @@ In a charwise or block selection this is the ordinary `evil-execute-macro'."
 ;; Picking a place from a list is a jump, as `/' is: C-o comes back.
 (evil-add-command-properties #'imenu :jump t)
 (evil-add-command-properties #'outline-up-heading :jump t)
+(evil-add-command-properties #'+search/line-forward :jump t)
 (after! consult
   (dolist (command '(consult-line consult-line-multi consult-imenu
                      consult-imenu-multi consult-outline consult-mark))
@@ -777,7 +778,7 @@ In a charwise or block selection this is the ordinary `evil-execute-macro'."
     "sr" 'evil-show-registers
     "si" 'imenu
     "sp" '+project/ripgrep
-    "ss" 'consult-line
+    "ss" '+search/line-forward
 
     ;; project
     "p"  '(:ignore t :which-key "project")

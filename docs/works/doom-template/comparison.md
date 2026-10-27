@@ -596,3 +596,15 @@ Doom 的做法：
 | `lang/swift` | sourcekit-lsp 路径探测 | 用户不写该语言，均为该语言专属，不收 |
 | `lang/terra` | terra REPL、`else`/`end` 电缩进 | 用户不写该语言，均为该语言专属，不收 |
 | `lang/zig` | `build.zig` 项目根、zig ast-check、编译/测试键 | 用户不写该语言，均为该语言专属，不收 |
+
+## 30. 第二轮逐行复读（`config` 起）
+
+第 15–24 节按文件给出结论；这一轮把各类模块的源码再逐行读一遍，专找上一轮按"已有"或"与本配置命令重复"带过、实际有差别的细节。
+
+| 文件 | 细节 | 处理 |
+| --- | --- | --- |
+| `config/default/autoload/search.el` | `+default/search-buffer`：选中一行内的文字时以它（`regexp-quote`、空格转义给 orderless）为初始输入；选中多行时收窄到选区再搜 | **吸收**：上一轮记成"与已有命令重复"，实际本配置 `C-s`/`SPC s s` 不看选区。`+search/line-forward` 改为同样行为，Evil Visual 选区取 `evil-visual-beginning`/`-end`（Emacs region 不含光标下的字符）；`SPC s s` 改绑它并算一次跳转（测试 `init-search-buffer-tests.el`） |
+| `config/default/autoload/text.el` | 复制 buffer 路径（含 `list-buffers-directory`）、插入文件名、智能退格 `doom/backward-delete-whitespace-to-column` | 路径复制已有；退格改变手感，不收 |
+| `config/default/config.el` | `newline-and-indent` 续写注释只在关掉 `electric-indent-mode` 时生效 | 本配置开着 `electric-indent-mode`，Doom 在同样设置下也不续写，不收 |
+| `config/default/+evil-bindings.el`、`+emacs-bindings.el` | 逐键看过：`help-mode`/`Info` 的 `o` 开链接、`Man-mode` 的 `q` 杀 buffer、`view-mode` 的 `ESC` | 不收：开链接已有 `SPC o o`（任何 buffer）；evil-collection 给 Man 的 `q` 是 `quit-window`，按 `docs/design/window-lifecycle.md` 关闭视图不结束 buffer，Doom 的杀 buffer 与此相反 |
+| `config/literate` | config.org 异步 tangle | 不用 literate 配置，不收 |
