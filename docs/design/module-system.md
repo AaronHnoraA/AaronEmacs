@@ -107,11 +107,11 @@
 
 **首次使用钩子**：`aaron-emacs` 在首个文件读取前运行 `aaron-first-file-hook`，
 在首个交互命令前运行 `aaron-first-input-hook`，首次显示普通 buffer 时运行
-`aaron-first-buffer-hook`；每个钩子只运行一次。最近文件、位置恢复、so-long 和
+`aaron-first-buffer-hook`；每个钩子只运行一次。最近文件、so-long 和
 全局自动重载等到首个文件；savehist、which-key 和图形界面的 hl-line 等到
 首个输入；若首次输入时尚无图形帧，hl-line 等到首个图形帧创建。gcmh 等到首个
-普通 buffer。位置恢复仍在 `after-init` 启用：首个 Dired
-目录的定位钩子与 `first-file` 同时触发，届时才登记保存位置的钩子会错过这个目录。
+普通 buffer。位置恢复仍在 `after-init` 启用：首个 Dired 目录的定位钩子与
+`first-file` 同时触发，届时才登记保存位置的钩子会错过这个目录。
 Dashboard 的 Recent Files 区块会按需先启用 recentf，这是对首次使用的直接响应。
 自动重载的文件钩子与刷新函数仍在启动时登记，仅全局模式延迟开启。
 Emacs 31 默认开启括号高亮，本配置不重复启用。
