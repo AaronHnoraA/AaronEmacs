@@ -49,18 +49,21 @@ Doom 的模块与本配置模块的对应关系，按 Doom 的分类排列。语
 | --- | --- | --- | --- |
 | `find-file-suppress-same-file-warnings` | `t` | `nil` | 打开同一文件的不同路径（软链）时不再提示 |
 | `minibuffer-prompt-properties` | 加 `cursor-intangible` | 已吸收，提示符只读且光标不能进入 | 无待定差异 |
-| `split-width-threshold` / `split-height-threshold` | `160` / `nil` | `150` / `80` | `display-buffer` 偏向左右分屏、不再上下分 |
+| `split-width-threshold` / `split-height-threshold` | `160` / `nil` | `150` / `80` | 通用 `display-buffer` 更偏向左右分屏；单窗口等情形仍可上下分 |
 | `truncate-partial-width-windows` | `nil` | `50` | 窄窗口不再强制截断长行 |
-| `display-line-numbers-width` / `display-line-numbers-widen` | `3` / `t` | `nil` / `nil` | 行号列宽固定；narrow 后仍按全文编号 |
-| `blink-matching-paren` | `nil` | `t` | 输入闭括号时不再跳光标闪烁 |
+| `display-line-numbers-width` / `display-line-numbers-widen` | `3` / `t` | `nil` / `nil` | 行号列至少留 3 列（较大行号仍会扩宽）；narrow 后仍按全文编号 |
+| `blink-matching-paren` | `nil` | `t` | 输入闭括号时不再短暂提示匹配的开括号 |
 | `show-paren-delay` | `0.1` | `0.125` | 括号高亮略快 |
 | `comint-buffer-maximum-size` | `2048` | `1024` | REPL 保留更多行 |
 | `ediff-diff-options` | `"-w"` | `""` | ediff 忽略空白差异 |
-| `revert-without-query` | `'(".")` | `nil` | 外部改动的未修改文件直接重载、不询问 |
+| `revert-without-query` | `'(".")` | `nil` | 手动运行 `revert-buffer` 时，磁盘已改且 buffer 未修改的文件免确认；不控制自动刷新 |
 | `frame-title-format` | `"%b – Doom Emacs"` 风格 | `"%b"` | 外观差异，不必采用 |
 | `shift-select-mode` | `nil` | `t` | evil 下影响很小 |
 
 除已吸收的 minibuffer 提示符外，这些差异会被用户感觉到，所以仍作为候选。
+当前评估建议保留现值：弹窗主要由 Shackle 的规则定位，不受通用分窗阈值控制；
+行号有本配置自己的按 mode 启用策略；自动刷新和冲突处理走 `config/default` 的独立路径，
+`revert-without-query` 只改变手动重载的确认；Ediff 忽略空白会改变合并时看到的差异。
 
 ## 3. 延迟到首次使用（Doom 的启动优化）
 
