@@ -590,19 +590,25 @@ In a charwise or block selection this is the ordinary `evil-execute-macro'."
           (seq-remove
            (lambda (mode)
              (memq (if (consp mode) (car mode) mode)
-                   '(portal-terminal eshell ibuffer dired xwidget)))
+                   '(portal-terminal eshell ibuffer dired xwidget company)))
            evil-collection-mode-list)))
-  :hook (evil-mode . evil-collection-init)
+  ;; `evil-mode' is already on when this form runs, so a hook on it would
+  ;; never fire: initialise as soon as Evil is loaded instead.
+  :after evil
+  :demand t
   :bind (([remap evil-show-marks] . evil-collection-consult-mark)
          ([remap evil-show-jumps] . evil-collection-consult-jump-list))
   :config
+  (evil-collection-init)
   ;; Make `evil-collection-consult-mark' and `evil-collection-consult-jump-list'
   ;; immediately available.
   (evil-collection-require 'consult)
   :custom
   (evil-collection-setup-debugger-keys nil)
   (evil-collection-calendar-want-org-bindings nil)
-  (evil-collection-unimpaired-want-repeat-mode-integration t))
+  ;; The `[' / `]' pairs are Neovim's defaults, bound in this file; the
+  ;; unimpaired keymap would shadow them.
+  (evil-collection-want-unimpaired-p nil))
 
 ;; evil leader map
 (use-package evil

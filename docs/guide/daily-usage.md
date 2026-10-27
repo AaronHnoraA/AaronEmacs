@@ -658,6 +658,10 @@ Consult 也允许创建新书签。列表使用 Emacs 原生的 `list-bookmarks`
 - `SPC e 1`
   单窗口 / 恢复窗口布局切换
 
+特殊 buffer 用 evil-collection 的 Vim 键：Magit、help、Info、编译输出、occur、包列表等以 Normal
+状态打开，`j`/`k` 移动行，Magit 的操作键按 evil-collection 的约定（如 `x` 删除）。eshell、ibuffer、
+Dired、Portal 终端、xwidget 与 Company 不受影响；`[`/`]` 成对键仍是上面 Neovim 的默认键。
+
 括号和引号自动配对（`electric-pair-mode`）在紧挨单词前输入时不补右半边：在 `foo`
 前输入 `(` 得到 `(foo`，方便手动包住已有内容；其余位置照常配对，`f"` 这类紧跟
 单词之后的引号也照常配对。
