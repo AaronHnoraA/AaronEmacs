@@ -98,12 +98,12 @@ Doom 的做法：
 | `SPC SPC` | 项目内找文件 | `telescope` 统一搜索面板 |
 | `SPC TAB` / `SPC t` | 工作区 / toggle | 工作区 / 工作区（`t` 含义不同） |
 | `SPC b f p g s o q h c w n r` | buffer、file、project、git、search、open、quit、help、code、window、notes、remote | 同组含义基本一致（`n`、`N` 是 Noema） |
-| `SPC d` | debugger | 未绑定（调试在 `SPC c j`） |
+| `SPC d` | debugger | `debug-menu`（`SPC c j` 的同一菜单） |
 | `SPC i` | insert | 未绑定 |
-| `SPC : ; . , \` * / x X u RET ~` | M-x、eval、找文件、切 buffer、上个 buffer、项目搜索、scratch、capture、universal-arg、书签、popup 开关 | 只有 `;`（avy-resume）、`'`（vertico-repeat） |
+| `SPC : ; . , \` * / x X u RET ~` | M-x、eval、找文件、切 buffer、上个 buffer、项目搜索、scratch、capture、universal-arg、书签、popup 开关 | 新增 `. , \` * / x u RET ~`；保留原有 `;`（avy-resume）、`'`（vertico-repeat）及未选用的 `: X` |
 | — | — | 本配置独有：`a`（app）、`e`（edit）、`F`（frame）、`j`、`v` / `V`（选区）、`z`、`m`（localleader） |
 
-候选：只把 Doom 那些在本配置里没被占用的键（`d . , \` * / x u RET ~`）作为新增绑定，不改动任何已有键。是否采用由用户决定。
+用户决定吸收所有空位：`d . , \` * / x u RET ~`。`SPC .` 走本配置的 `file-open`；`,` 用当前工作区 buffer 列表；`/` 从当前项目根（项目外为当前目录）调用 Remote 感知搜索；`*` 复用现有符号搜索；`x` 切换持久 scratch；`RET` 走全局书签重映射后的 Consult 入口；`~` 切换 Popper 弹窗。已有键不变。
 
 ## 5. 注册接口（D）
 
@@ -299,7 +299,7 @@ Doom 的做法：
 | `lang/beancount` | electric 货币、`custom` 指令着色、nerd-icons、flymake-bean、补全增强 | **不收**：记账走本配置的 language server 与录入向导；着色与图标是外观 |
 | `checkers/syntax` | flycheck 体系、ESC 时重跑检查、flymake 右侧 fringe、不环绕 | **不收**：本配置用 Flymake，空闲时自动检查；位置和环绕是偏好 |
 | `emacs/ibuffer`、`ui/treemacs`、`ui/ligatures`、`ui/doom`、`ui/dashboard` | 列宽与图标、Treemacs 主题加载顺序、连字表、Doom 主题与 solaire、Doom 首页 | **不收**：外观，第 1、6 节已列 |
-| `config/default`（`config.el`） | avy 范围、GPG loopback、`RET` 续写注释、智能退格、tabulated-list 的 `q`、macOS `S-iso-lefttab`、woman manpath | **已有或不收**：GPG 已走 minibuffer；续写注释与退格改变手感；其余已有或不适用。`+evil-bindings.el`/`+emacs-bindings.el` 的键位见第 4 节，仍待用户决定 |
+| `config/default`（`config.el`） | avy 范围、GPG loopback、`RET` 续写注释、智能退格、tabulated-list 的 `q`、macOS `S-iso-lefttab`、woman manpath | **已有或不收**：GPG 已走 minibuffer；续写注释与退格改变手感；其余已有或不适用。`+evil-bindings.el`/`+emacs-bindings.el` 的空位已按第 4 节吸收，其他键位候选仍单独评估 |
 
 本节只列出当时逐个对照的模块；其余模块（包括本配置不用的领域与语言）随后在第 15–25 节逐文件全文读过，结论记在那里。
 
@@ -387,7 +387,7 @@ Doom 的做法：
 | --- | --- |
 | `config/default/config.el` | **吸收**：Insert 状态下开 `delete-selection-mode`（输入覆盖鼠标或 Shift 选中的文字，离开 Insert 关掉）。不收：`man` 换 `woman`（实测 macOS 上 `man` 补全首次 1.3 秒、之后有缓存）；GPG 默认收件人（本机没有 `.gpg` 文件）；智能退格与 RET 续写注释（手感）；macOS `s-` 键与 help 键表（第 4 节）；avy、woman 路径 |
 | `config/default/autoload/*.el` | 复制项目相对路径已吸收；`compile`/搜索/浏览/新 buffer/重启 server/诊断等包装与本配置已有命令重复 |
-| `config/default/+emacs-bindings.el`、`+evil-bindings.el` | 键位全文看过，归入第 4 节的候选：Doom 的 minibuffer `C-r` 取寄存器、`C-u` 删到缩进是 Vim 命令行的行为，可与 `SPC .` `SPC ,` 等空位一并由用户决定；其余命令本配置已有或属于不用的模块 |
+| `config/default/+emacs-bindings.el`、`+evil-bindings.el` | 键位全文看过；第 4 节的 leader 空位已吸收。Doom 的 minibuffer `C-r` 取寄存器、`C-u` 删到缩进会改变 Vim 命令行习惯，仍作为独立候选；其余命令本配置已有或属于不用的模块 |
 | `config/literate` | 本配置不是 Org literate 配置 |
 
 ## 19. 模块全文：`editor`

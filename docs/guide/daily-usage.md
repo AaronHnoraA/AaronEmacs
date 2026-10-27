@@ -554,6 +554,14 @@ Agenda 卡片在启动画面最下面（Recent Files / Projects 之后、footer 
 
 ## 2. Leader 键分组
 
+### Doom 常用单键入口
+
+- `SPC d` 调试菜单；`SPC .` 打开文件；`SPC ,` 切换当前工作区的 buffer；
+  `SPC` + 反引号返回当前窗口上一个 buffer。
+- `SPC *` 搜索光标下符号；`SPC /` 搜索当前项目（项目外搜索当前目录）。
+- `SPC x` 切换持久 scratch；`SPC u` 通用前缀参数；`SPC RET` 跳转书签；
+  `SPC ~` 切换最近的 Popper 弹窗。
+
 ### 文件 `SPC f`
 
 - `SPC f f`

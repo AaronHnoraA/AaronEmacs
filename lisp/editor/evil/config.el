@@ -642,6 +642,18 @@ In a charwise or block selection this is the ordinary `evil-execute-macro'."
     ;; Clear highlights
     "S-SPC" 'lazy-highlight-cleanup
 
+    ;; Doom's free top-level shortcuts, routed through this config's commands.
+    "d" '(:def debug-menu :which-key "debug")
+    "." '(:def file-open :which-key "find file")
+    "," '(:def +workspace/switch-buffer :which-key "workspace buffer")
+    "`" '(:def evil-switch-to-windows-last-buffer :which-key "last buffer")
+    "*" '(:def +search/symbol-at-point :which-key "search symbol")
+    "/" '(:def +project/search-current :which-key "search project")
+    "x" '(:def +scratch/toggle :which-key "scratch")
+    "u" '(:def universal-argument :which-key "universal argument")
+    "RET" '(:def consult-bookmark :which-key "jump to bookmark")
+    "~" '(:def popper-toggle :which-key "toggle popup")
+
     ;; Resume
     "'" 'vertico-repeat
     ";" 'avy-resume

@@ -771,6 +771,11 @@ RG-UNAVAILABLE records a previous probe by another search entry point."
      (t
       (user-error "Neither ripgrep nor grep is available on this target")))))
 
+(defun +project/search-current ()
+  "Search the current project, or `default-directory' outside a project."
+  (interactive)
+  (+project/ripgrep (or (+project-current-root) default-directory)))
+
 (defun +project/open-root (project-root)
   "Open PROJECT-ROOT in Dired/Dirvish."
   (interactive (list (+project-read-target-root "Open project root: ")))
