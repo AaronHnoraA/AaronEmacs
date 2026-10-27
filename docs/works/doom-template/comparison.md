@@ -48,7 +48,7 @@ Doom 的模块与本配置模块的对应关系，按 Doom 的分类排列。语
 | 变量 | Doom | 本配置现值 | 影响 |
 | --- | --- | --- | --- |
 | `find-file-suppress-same-file-warnings` | `t` | `nil` | 打开同一文件的不同路径（软链）时不再提示 |
-| `minibuffer-prompt-properties` | 加 `cursor-intangible` | 只读 | 光标不能进入 minibuffer 提示符 |
+| `minibuffer-prompt-properties` | 加 `cursor-intangible` | 已吸收，提示符只读且光标不能进入 | 无待定差异 |
 | `split-width-threshold` / `split-height-threshold` | `160` / `nil` | `150` / `80` | `display-buffer` 偏向左右分屏、不再上下分 |
 | `truncate-partial-width-windows` | `nil` | `50` | 窄窗口不再强制截断长行 |
 | `display-line-numbers-width` / `display-line-numbers-widen` | `3` / `t` | `nil` / `nil` | 行号列宽固定；narrow 后仍按全文编号 |
@@ -60,7 +60,7 @@ Doom 的模块与本配置模块的对应关系，按 Doom 的分类排列。语
 | `frame-title-format` | `"%b – Doom Emacs"` 风格 | `"%b"` | 外观差异，不必采用 |
 | `shift-select-mode` | `nil` | `t` | evil 下影响很小 |
 
-这些都会被用户感觉到，所以只列为候选。
+除已吸收的 minibuffer 提示符外，这些差异会被用户感觉到，所以仍作为候选。
 
 ## 3. 延迟到首次使用（Doom 的启动优化）
 
