@@ -81,7 +81,8 @@ Doom 不在启动时开启这些模式，而是挂到生命周期 hook 上（本
 模块账本还发现两处启动期间的重加载：
 
 - `lang/auctex` 本应在 TeX/PDF 之后才加载，但 `tex-site` 和 `pdf-tools` 在启动时就被加载，结果它约 0.9s 的初始化落在了启动期间。**已修**：`tex-site` 由 AUCTeX 的 autoload 文件在启动时载入，模块因此照常在启动时加载（也要靠它登记 `.pdf` 的打开方式），但其中的 `use-package pdf-tools` 原先没有延迟，激活 PDF Tools 会启动 `epdfinfo` 服务进程。现改为 `:mode`/`:magic` 登记 `pdf-view-mode`，pdf-view 载入时再带上 pdf-tools；实测模块启动耗时从约 1.0s 降到 0.014s，启动后没有 `epdfinfo` 进程，打开 PDF 时才启动（测试 `init-pdf-lazy-tests.el`）。
-- `lang/org` 跟随 org 加载，而 org 在启动时就被加载了。
+- `lang/org` 跟随 org 加载，而 org 在启动时就被加载了。（实测现在 org 不在启动时载入。）
+- 同一轮按模块耗时排查到的其他启动期加载，均已改为首次使用时：`tools/tree-sitter` 判断 grammar 时逐个探测缺失的库（每个约 30ms，共 1.45s，本次审计引入），改为列出 grammar 目录，1.6s→0.26s；`lang/javascript`、`lang/nix` 的 `use-package` 只有 `:ensure t`，js2-mode（连带 cc-mode）与 nix-mode 在启动时载入，加 `:defer t` 后 `tools/lsp`（载入这些语言配置）0.57s→0.25s；dape 原为 `:demand t`，改在第一个文件时载入并读断点，退出时未载入就不保存（避免用空表覆盖）；evil-collection 改在第一次输入时初始化（约 0.1s）。启动结束后没有任何子进程。
 
 Doom 的做法：
 
