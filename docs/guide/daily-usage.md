@@ -825,6 +825,9 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC h t`
   `tldr`
 
+Helpful 页里的源码位置链接会在发起帮助的窗口打开文件，Helpful 留在旁边；
+若原窗口已关闭，就在当前窗口打开。
+
 ### Code `SPC c`
 
 - `SPC c ?`
@@ -1142,6 +1145,8 @@ buffer（ripgrep 结果进 wgrep、文件进 wdired、`consult-line` 结果进 o
 结果进 xref-edit），改完保存即写回源文件。输入里以 `$` 结尾的词表示“在行尾”，
 在 `consult-line`、`consult-buffer` 里也有效。
 
+wgrep 中按 `C-c C-c` 会应用并保存修改，然后退出搜索结果窗；结果 buffer 仍可重新打开。
+
 - `SPC SPC`
   打开 `telescope`
 - `H-x` / `H-t` / `F2`
@@ -1455,6 +1460,8 @@ Dirvish 的复制、移动和链接在客户端可直接访问时沿用原生独
 | 刷新 | `g` | `g r` |
 | `wdired` | `C-c C-e` | 不变 |
 | 前缀参数 `C-u` | `C-u` | Dirvish 里是上翻半页，用 `M-数字` 代替 |
+
+wdired 中按 `C-c C-c` 完成文件名修改后，会退出目录列表窗；Dired buffer 仍保留。
 
 ## 6. 窗口和弹出层
 

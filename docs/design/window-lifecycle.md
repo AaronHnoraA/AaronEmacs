@@ -199,6 +199,14 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
 - **C16** 切换 Perspective 工作区时，离开的 Emacs buffer 不保留活动选区或
   Evil Visual 状态。测试：`c16-workspace-switch-clears-outgoing-visual-selection`、
   `c16-workspace-switch-clears-outgoing-emacs-selection`。
+- **C17** Helpful 的源码按钮在发起帮助的窗口打开源码，Help 窗口保持显示；
+  原窗口已不存在或 Helpful 没有独立窗口时，在当前窗口打开，不新建窗格。
+  测试：`c17-helpful-source-opens-in-origin-window`、
+  `c17-helpful-source-falls-back-when-origin-is-gone`。
+- **C18** wdired 和 wgrep 成功应用修改后退出结果视图，buffer 不结束；
+  操作失败、仍有未应用的 wgrep 修改，或完成命令并非从当前结果窗口发起时，
+  不关闭其他窗口。测试：`c18-wdired-finish-quits-result-view`、
+  `c18-wgrep-finish-quits-only-after-complete-apply`。
 
 窗口测试文件：`test/init-window-lifecycle-tests.el`、`test/init-windows-tests.el`，
 由 `make ui-test` 运行。popup 顶栏测试在 `test/popup-agent-tests.el`；Noema 页面
@@ -218,6 +226,8 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
 | 未显示页面上限 | `lisp/noema/bridge/config.el` |
 | 后台 frame | `lisp/config/background/config.el` |
 | 工作区切换前的选区清理 | `lisp/ui/workspaces/config.el` |
+| Helpful 源码跳转 | `lisp/ui/theme/config.el` |
+| wdired / wgrep 完成后的视图 | `lisp/emacs/dired/config.el`、`lisp/tools/menus/config.el` |
 
 ## 已知差距
 

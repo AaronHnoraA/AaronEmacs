@@ -274,6 +274,34 @@ into a full-width bar.  `agent-shell-prompt' inherits this face."
   (help-window-keep-selected t)
   (help-enable-variable-value-editing t))
 
+(defvar-local +helpful--origin-window nil
+  "Window that requested this Helpful buffer.")
+
+(defun +helpful--display-buffer (buffer)
+  "Display Helpful BUFFER and remember the window that requested it."
+  (let ((origin (if (derived-mode-p 'helpful-mode)
+                    +helpful--origin-window
+                  (selected-window))))
+    (with-current-buffer buffer
+      (setq +helpful--origin-window origin))
+    (pop-to-buffer buffer)))
+
+(defun +helpful--navigate-in-origin-a (orig button)
+  "Run Helpful navigation ORIG for BUTTON in its originating window."
+  (let ((origin +helpful--origin-window)
+        (help-window (selected-window)))
+    (if (and (window-live-p origin)
+             (not (eq origin help-window)))
+        (progn
+          (select-window origin)
+          (condition-case err
+              (funcall orig button)
+            (error
+             (when (window-live-p help-window)
+               (select-window help-window))
+             (signal (car err) (cdr err)))))
+      (funcall orig button))))
+
 (use-package helpful
   :ensure t
   :after help
@@ -282,7 +310,9 @@ into a full-width bar.  `agent-shell-prompt' inherits this face."
          ([remap describe-variable] . helpful-variable)
          ([remap describe-key]      . helpful-key))
   :custom
-  (helpful-switch-buffer-function #'pop-to-buffer))
+  (helpful-switch-buffer-function #'+helpful--display-buffer)
+  :config
+  (advice-add 'helpful--navigate :around #'+helpful--navigate-in-origin-a))
 
 ;; From Doom: `describe-function' and `describe-variable' are remapped to
 ;; Helpful as commands, but apropos buttons call them as functions and still

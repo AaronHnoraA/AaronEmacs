@@ -37,6 +37,15 @@ remote shell probes or previews."
   (advice-remove 'dirvish-dired-noselect-a #'+dirvish-file-only-remote-a)
   (advice-add 'dirvish-dired-noselect-a :around #'+dirvish-file-only-remote-a))
 
+(defun +dired--quit-after-wdired-finish-a (&rest _)
+  "Quit the selected Dired view after a successful wdired finish."
+  (when (and (eq major-mode 'dired-mode)
+             (eq (window-buffer (selected-window)) (current-buffer)))
+    (quit-window)))
+
+(with-eval-after-load 'wdired
+  (advice-add 'wdired-finish-edit :after #'+dired--quit-after-wdired-finish-a))
+
 ;; Use ( to toggle dired-hide-details-mode
 (use-package dired
   :ensure nil

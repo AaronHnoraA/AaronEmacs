@@ -20,6 +20,7 @@
 (declare-function remote-executable-find "remote-process"
                   (program &optional context))
 (declare-function rg-menu "rg-menu" ())
+(declare-function wgrep-edit-field-overlays "wgrep" ())
 (defvar remote-current-adapter-id)
 
 ;; Tips for next keystroke
@@ -135,9 +136,17 @@
   (lazy-highlight-cleanup nil))
 
 ;; Writable grep buffer
+(defun +menus--quit-after-wgrep-finish-a (&rest _)
+  "Quit the selected grep view once all edits were applied."
+  (when (and (eq (window-buffer (selected-window)) (current-buffer))
+             (null (wgrep-edit-field-overlays)))
+    (quit-window)))
+
 (use-package wgrep
   :ensure t
   :hook (grep-setup . wgrep-setup)
+  :config
+  (advice-add 'wgrep-finish-edit :after #'+menus--quit-after-wgrep-finish-a)
   :custom
   (wgrep-change-readonly-file t)
   ;; From Doom: applying wgrep edits (C-c C-c) also saves the files it
