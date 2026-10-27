@@ -226,5 +226,6 @@
    (lean-lsp-deferred-ui-delays (company . 0.15) (doc . 0.25) (inlay-hints . 0.45)
                                 (semantic-tokens . 0.8))
    (+macos-input-switch . t)
-   (+macos-input-ascii-source . "com.apple.keylayout.ABC"))
+   (+macos-input-ascii-source . "com.apple.keylayout.ABC")
+   (+evil-yank-highlight-duration . 0.15))
 )

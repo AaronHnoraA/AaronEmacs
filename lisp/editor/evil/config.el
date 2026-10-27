@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'config)
 (require 'aaron-funcs)
 
 (declare-function bookmark-actions-menu "ui/windows/config")
@@ -530,6 +531,45 @@ In a charwise or block selection this is the ordinary `evil-execute-macro'."
       :textobj "g" #'+evil:whole-buffer-txtobj #'+evil:whole-buffer-txtobj)
 (after! wgrep
   (define-key wgrep-mode-map [remap evil-delete] #'+evil:wgrep-delete))
+
+;; Neovim's `vim.hl.on_yank()': the yanked text flashes in the IncSearch
+;; face for 150 ms, not while a macro runs.
+(config-defvar +evil-yank-highlight-duration 0.15
+  "Seconds the yanked text stays highlighted; nil turns it off."
+  :type '(choice (const :tag "Off" nil) number)
+  :group 'evil)
+(defvar +evil--yank-highlight-overlays nil)
+(defvar +evil--yank-highlight-timer nil)
+
+(defun +evil--clear-yank-highlight ()
+  "Remove the yank highlight and its timer."
+  (when (timerp +evil--yank-highlight-timer)
+    (cancel-timer +evil--yank-highlight-timer))
+  (setq +evil--yank-highlight-timer nil)
+  (mapc #'delete-overlay +evil--yank-highlight-overlays)
+  (setq +evil--yank-highlight-overlays nil))
+
+(defadvice! +evil-highlight-yank-a (beg end &optional type &rest _)
+  "Flash the text `evil-yank' just copied, as Neovim's on_yank does."
+  :after #'evil-yank
+  (when (and +evil-yank-highlight-duration
+             (not executing-kbd-macro)
+             (< beg end))
+    (+evil--clear-yank-highlight)
+    (let ((ranges (if (eq type 'block)
+                      (let (acc)
+                        (evil-apply-on-block
+                         (lambda (b e) (push (cons b e) acc)) beg end nil)
+                        acc)
+                    (list (cons beg end)))))
+      (dolist (range ranges)
+        (let ((ov (make-overlay (car range) (cdr range))))
+          (overlay-put ov 'face 'isearch)
+          (overlay-put ov 'priority 1000)
+          (push ov +evil--yank-highlight-overlays))))
+    (setq +evil--yank-highlight-timer
+          (run-with-timer +evil-yank-highlight-duration nil
+                          #'+evil--clear-yank-highlight))))
 
 ;; Picking a place from a list is a jump, as `/' is: C-o comes back.
 (evil-add-command-properties #'imenu :jump t)

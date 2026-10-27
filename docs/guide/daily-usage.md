@@ -690,6 +690,8 @@ Evil 缺少的 Neovim 0.10/0.11 默认键已补上（Doom 也有类似键位，�
   文件名前缀只读时，改为把该行标记为删除
 - `SPC s i`（imenu）、`SPC s s`（`consult-line`）等从列表选位置后 `C-o`
   跳回原处，和 `/` 搜索一样算一次跳转（consult 的 imenu、outline、mark 同理）
+- 复制（`y`、`yy`、Visual `y`）后被复制的文字闪 150 毫秒，同 Neovim 的
+  `vim.hl.on_yank()`；宏里不闪。时长是设置 `+evil-yank-highlight-duration`（nil 关闭）
 
 中文输入法不会吞掉 Normal 状态的键：离开 Insert 时切到英文输入源（`ABC`），再进入
 Insert 时切回离开时用的输入法（如拼音），同 Doom 的 `:input chinese`。由

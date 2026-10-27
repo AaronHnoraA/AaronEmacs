@@ -219,4 +219,28 @@ already commented lines included."
             (kill-buffer))
         (delete-file file)))))
 
+(ert-deftest +evil-yank-flashes-the-yanked-text ()
+  "A yank highlights what it copied, then the highlight goes away; a yank
+inside a macro does not flash."
+  (with-temp-buffer
+    (insert "alpha beta\ngamma\n")
+    (evil-local-mode 1)
+    (goto-char (point-min))
+    (evil-yank (point) (+ (point) 5) 'exclusive)
+    (should (= (length +evil--yank-highlight-overlays) 1))
+    (let ((ov (car +evil--yank-highlight-overlays)))
+      (should (eq (overlay-get ov 'face) 'isearch))
+      (should (equal (buffer-substring (overlay-start ov) (overlay-end ov))
+                     "alpha")))
+    (should (timerp +evil--yank-highlight-timer))
+    (+evil--clear-yank-highlight)
+    (should-not +evil--yank-highlight-overlays)
+    ;; A block yank flashes each line's part.
+    (evil-yank (point-min) (+ (line-beginning-position 2) 3) 'block)
+    (should (= (length +evil--yank-highlight-overlays) 2))
+    (+evil--clear-yank-highlight)
+    (let ((executing-kbd-macro "y"))
+      (evil-yank (point-min) (+ (point-min) 5) 'exclusive))
+    (should-not +evil--yank-highlight-overlays)))
+
 ;;; init-evil-vim-parity-tests.el ends here
