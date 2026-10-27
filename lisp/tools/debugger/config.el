@@ -512,9 +512,23 @@ frames, so direct clicks there toggle breakpoints."
     ("a" "adapter dir" +debug/open-adapter-dir)
     ("g" "breakpoints file" +debug/open-breakpoints-file)]])
 
+(defun +debug-load-breakpoints-h ()
+  "Load dape and the saved breakpoints when the first file is visited.
+Breakpoints only matter in files, so dape waits for one instead of
+loading during startup."
+  (require 'dape)
+  (dape-breakpoint-load))
+
+(defun +debug-save-breakpoints-h ()
+  "Save the breakpoints, if dape was loaded in this session.
+Saving from a session that never loaded dape would write an empty list
+over the saved one."
+  (when (featurep 'dape)
+    (dape-breakpoint-save)))
+
 (use-package dape
   :ensure t
-  :demand t
+  :defer t
   :commands (dape
              dape-breakpoint-toggle
              dape-continue
@@ -525,8 +539,8 @@ frames, so direct clicks there toggle breakpoints."
              dape-restart
              dape-quit)
   :hook
-  (kill-emacs . dape-breakpoint-save)
-  (after-init . dape-breakpoint-load)
+  (kill-emacs . +debug-save-breakpoints-h)
+  (aaron-first-file . +debug-load-breakpoints-h)
   :custom
   (dape-default-breakpoints-file
    (expand-file-name "breakpoints.eld" aaron-dape-state-dir))
