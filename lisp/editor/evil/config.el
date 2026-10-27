@@ -531,6 +531,14 @@ In a charwise or block selection this is the ordinary `evil-execute-macro'."
 (after! wgrep
   (define-key wgrep-mode-map [remap evil-delete] #'+evil:wgrep-delete))
 
+;; Picking a place from a list is a jump, as `/' is: C-o comes back.
+(evil-add-command-properties #'imenu :jump t)
+(evil-add-command-properties #'outline-up-heading :jump t)
+(after! consult
+  (dolist (command '(consult-line consult-line-multi consult-imenu
+                     consult-imenu-multi consult-outline consult-mark))
+    (evil-add-command-properties command :jump t)))
+
 (use-package evil-surround
   :ensure t
   :hook (after-init . global-evil-surround-mode))

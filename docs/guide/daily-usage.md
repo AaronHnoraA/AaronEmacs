@@ -684,6 +684,8 @@ Evil 缺少的 Neovim 0.10/0.11 默认键已补上（Doom 也有类似键位，�
   Ex 文件名支持 Vim 修饰符 `:p :h :t :r :e :~ :.`（`%:t:r` 是去掉扩展名的文件名）
 - wgrep 中 `dd`
   文件名前缀只读时，改为把该行标记为删除
+- `SPC s i`（imenu）、`SPC s s`（`consult-line`）等从列表选位置后 `C-o`
+  跳回原处，和 `/` 搜索一样算一次跳转（consult 的 imenu、outline、mark 同理）
 
 中文输入法不会吞掉 Normal 状态的键：离开 Insert 时切到英文输入源（`ABC`），再进入
 Insert 时切回离开时用的输入法（如拼音），同 Doom 的 `:input chinese`。由

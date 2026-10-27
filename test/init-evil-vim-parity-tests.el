@@ -184,4 +184,39 @@ already commented lines included."
                           [remap evil-delete])
               #'+evil:wgrep-delete)))
 
+(ert-deftest +evil-picking-a-place-is-a-jump ()
+  "After imenu or a consult picker moves point, C-o comes back."
+  (require 'consult)
+  (dolist (command '(imenu consult-imenu))
+    (let ((file (make-temp-file "jump" nil ".el")))
+      (unwind-protect
+          (with-current-buffer (find-file-noselect file)
+            (insert "(defun alpha () 1)\n" (make-string 200 ?\n)
+                    "(defun beta () 2)\n")
+            (switch-to-buffer (current-buffer))
+            (evil-local-mode 1)
+            (goto-char (point-min))
+            (forward-line 5)
+            (let ((start (point)))
+              ;; The command loop's hooks around an interactive command.
+              (cl-letf (((symbol-function 'consult--read)
+                         (lambda (&rest _)
+                           (cons nil (save-excursion
+                                       (goto-char (point-max))
+                                       (forward-line -1)
+                                       (point-marker))))))
+                (setq this-command command)
+                (run-hooks 'pre-command-hook)
+                (if (eq command 'imenu) (imenu "beta") (consult-imenu))
+                (run-hooks 'post-command-hook))
+              (should (> (point) start))
+              (setq this-command 'evil-jump-backward)
+              (run-hooks 'pre-command-hook)
+              (evil-jump-backward)
+              (run-hooks 'post-command-hook)
+              (should (= (point) start)))
+            (set-buffer-modified-p nil)
+            (kill-buffer))
+        (delete-file file)))))
+
 ;;; init-evil-vim-parity-tests.el ends here
