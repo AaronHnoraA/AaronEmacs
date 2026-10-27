@@ -93,7 +93,10 @@ Doom 的做法：
 用户已选择评估并吸收这组首次使用延迟。首次打开文件、首次按键和首次显示普通 buffer
 分别承担对应的加载成本；Dashboard 显示 Recent Files 时也会启用 recentf。
 `save-place` 因首个 Dired 目录的行为而保留启动启用，
-`show-paren` 已由 Emacs 31 默认开启。首个文件的位置恢复和自动重载跟踪用定向测试验证。
+`show-paren` 已由 Emacs 31 默认开启。首个文件的位置恢复和自动重载跟踪用定向测试验证；
+另以交互式 `emacs -nw` 启动核对：无文件时 `save-place` 已启用，其余模式仍待首次使用；
+命令行打开首个带保存位置的文件后，光标回到第 4 个字符，recentf、so-long 和全局
+自动重载已启用，该文件也被自动重载跟踪。
 
 ## 4. leader 布局（F）
 
