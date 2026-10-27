@@ -117,8 +117,8 @@ When adding a module:
   or, when the rule itself allows it, marked on its line with
   `aaron-allow: ID`.
 - Use `declare-function` for cross-module calls when byte compilation needs it.
-- Name things the Doom way (the restructuring in `docs/works/doom-template/`
-  takes Doom Emacs as its template).  The core under `lisp/core/` uses
+- Name things the Doom way (the completed restructuring is recorded in
+  `docs/records/audits/doom-template-2026-10.md`).  The core under `lisp/core/` uses
   `aaron-` (`aaron--` private, `aaron/` commands), as Doom's uses `doom-`;
   a module uses `+MODULE-` (`+MODULE--` private, `+MODULE/` commands).  Hook
   functions end in `-h`, advice in `-a`; an Evil operator, motion or text

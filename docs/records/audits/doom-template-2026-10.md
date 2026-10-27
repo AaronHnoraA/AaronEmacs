@@ -1,10 +1,12 @@
 # 以 Doom 为模板升级配置（第一阶段）
 
-方向（用户定）：**不依赖 Doom，但把 Doom 里好、而本配置没有或没做到的东西直接拿过来，包括它的抽象结构。** 先做一轮配置一体化和抽象化升级，再在这个基础上吸收 neo-emacs（第二阶段，见 [../neo-emacs/](../neo-emacs/README.md)）。
+> 本文是已完成工作的历史工作台；当前结构以 [模块系统](../../design/module-system.md) 和 [结构总览](../../architecture.md) 为准。末尾两项可见行为保留现状，供日后单独选择。
 
-- 上游代码在 `upstream/`，由 `.gitignore` 忽略：
-  - `upstream/core`：[doomemacs/doomemacs](https://github.com/doomemacs/doomemacs)，`59cdaa3`（2026-10-02），是 Doom 的内核。
-  - `upstream/modules`：[doomemacs/modules](https://github.com/doomemacs/modules)，`42a0479`（2026-10-02）。v3 起模块从内核仓库拆了出来，共 154 个模块，约 4.2 万行。
+方向（用户定）：**不依赖 Doom，但把 Doom 里好、而本配置没有或没做到的东西直接拿过来，包括它的抽象结构。** 先做一轮配置一体化和抽象化升级，再在这个基础上吸收 neo-emacs（第二阶段，见 [../neo-emacs/](neo-emacs-2026-10.md)）。
+
+- 上游代码保留在 `docs/works/doom-template/upstream/`，由 `.gitignore` 忽略：
+  - `docs/works/doom-template/upstream/core`：[doomemacs/doomemacs](https://github.com/doomemacs/doomemacs)，`59cdaa3`（2026-10-02），是 Doom 的内核。
+  - `docs/works/doom-template/upstream/modules`：[doomemacs/modules](https://github.com/doomemacs/modules)，`42a0479`（2026-10-02）。v3 起模块从内核仓库拆了出来，共 154 个模块，约 4.2 万行。
   - 更新用 `git -C docs/works/doom-template/upstream/<core|modules> pull`。
 - 许可：两个仓库都是 MIT。拿过来的代码在文件或函数头注明出处，格式为 `Adapted from Doom Emacs (MIT, Henrik Lissner): <上游路径> @ <commit>`。
 - 骨架不变：`package.el` + `use-package`、`init-modules.el` 作为唯一顺序、Remote-first、config 注册表、`general.el`。命名改为照 Doom（见“决定”）。Doom 的 straight 包管理、profiles 和 `doom` CLI 框架不引入。
@@ -193,7 +195,7 @@ Doom 的做法：
   - **声明**：`aaron!` 改用新的模块键，原先由 `tools/lsp` 连带加载的 lang 模块、`noema/jupyter`、`checkers/grammar` 和 `config/compile` 在它们实际加载的位置补上声明。
   - **删除**：`init-mail`、`init-stock`、`init-ignored`（空模块），`lisp/roam/` 下一个无主的编辑器备份文件。
   - **验证**：迁移前的启动状态快照按改名表换算后，与迁移后的快照逐行比较，剩下的差异只有比较脚本的编码误差和主机名变化（`Mac` → `AaronMac.local`）。全部 Makefile 测试目标通过；`agenda-apple-test` 卡在 Node 版本，与本改动无关。`remote-transfer-test` 原本就跑不起来，修好 Makefile 后有 4 项失败，迁移前同样失败。Noema 测试 3360 项通过。另外把每个测试文件在新旧两棵树上各跑一遍，逐项比对结果。
-- [x] P1c 注册 API（[comparison.md](comparison.md) 第 5 节，[module-system.md](../../design/module-system.md) “注册接口”）：
+- [x] P1c 注册 API（[comparison.md](doom-template-comparison-2026-10.md) 第 5 节，[module-system.md](../../design/module-system.md) “注册接口”）：
   - **popup**：`set-popup-rule!` / `set-popup-rules!` 放在 `ui/popup/autoload/`，shackle 由 `ui/popup` 统一管理，7 条开发 buffer 规则分别归入它们所属的模块。
   - **evil 状态**：新增 `set-evil-initial-state!`，12 处改用它；本配置自己的 board mode 从 `editor/evil` 的集中列表搬回各自模块。
   - **LSP 注册**：5 个函数改名为 `set-…!`。
@@ -218,20 +220,20 @@ Doom 的做法：
   - `undo-tree-auto-save-history`：去掉 `aaron-base` 里两处与存储值相同的 `setq`。`persp-state-default-file` 是登记前给的计算默认值，标 `aaron-allow`。
   - 键冲突 5 处：删除被后加载模块覆盖、从未生效的绑定（`aaron-base` 的 `` M-` `` popper-cycle、`ui/windows` 的 `C-c w s`、`config/default` 的 `M-o` link-hint、`term/portal` 的 `C-c w p/P`）。`daily-usage.md` 里写的 `C-c w p/P` 移入/移出 popup 本来就不生效，已改为右键菜单。`term/portal/popup.el` 的 `global-set-key` 改用 `general-define-key`。
   - 验证：`config-setq` 0 处，键冲突 0 处；`state-check` 只剩 `hexl-mode-map`（加载时复制了当时的 `global-map`）里两条旧绑定消失；`test-check` 全部一致。
-- [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。leader 的 10 个空位已加入；首次使用延迟已按用户选择吸收，`save-place` 与 Emacs 默认开启的 `show-paren` 保留原时机。全局默认值经复核建议维持现值；占用中的键位、智能退格和注释续行按保留原有手感处理。
-- [x] P1e 模块目录比对：[comparison.md](comparison.md) 第 1 节。
-- [x] 启用模块的实现对照：[comparison.md](comparison.md) 第 6 节。工作区切换前清理
+- [x] P1d 默认行为与键位比对：[comparison.md](doom-template-comparison-2026-10.md) 第 2–4 节。leader 的 10 个空位已加入；首次使用延迟已按用户选择吸收，`save-place` 与 Emacs 默认开启的 `show-paren` 保留原时机。全局默认值经复核建议维持现值；占用中的键位、智能退格和注释续行按保留原有手感处理。
+- [x] P1e 模块目录比对：[comparison.md](doom-template-comparison-2026-10.md) 第 1 节。
+- [x] 启用模块的实现对照：[comparison.md](doom-template-comparison-2026-10.md) 第 6 节。工作区切换前清理
   Evil Visual/普通选区；删除 Winner、tab 同步、tab line 和导航里从另一种
   `persp-mode` 移来的无效挂钩。其余差异按现有输入、窗口和 Remote 契约保留。
 - [x] 逐行审计（2026-10-27）：`doom-emacs.el` 的函数、hook、advice，`lib/` 的命令，
   以及本配置启用领域对应模块里的每个 HACK/FIX/PERF 补丁，结果在
-  [comparison.md](comparison.md) 第 7 节。收进来的：长路径状态文件名哈希、
+  [comparison.md](doom-template-comparison-2026-10.md) 第 7 节。收进来的：长路径状态文件名哈希、
   savehist 保存 kill ring、recentf 定时保存、大段删除后继续自动保存、保存后重判
   major mode、minibuffer 提示符不可进入、`J` 去注释符与 `gq` 不压缩空格、跳转时
   打开折叠、Magit 关长行优化、PDF 页面隐藏光标、apropos 用 Helpful、复制项目相对
   路径。延迟关闭 LSP server 先记为缺口 G-L1，后已按契约实现（第 21 节）。
 - [x] 逐文件补完（2026-10-27）：`core/lisp/lib/` 每个文件、框架文件和本配置用到的
-  每个语言与工具模块，结果在 [comparison.md](comparison.md) 第 8–11 节。期间修了
+  每个语言与工具模块，结果在 [comparison.md](doom-template-comparison-2026-10.md) 第 8–11 节。期间修了
   本配置自己的缺陷：`SPC f D` 不进废纸篓、加密文件的 undo 历史写成明文、Elisp 的
   Flymake 编译检查在第一个 `require` 就失败、lsp-mode 按 server id 的签名提炼对
   `+rust-analyzer`/`+clangd` 不生效、`.lock` 全按 TOML、`.mts`/`.cts` 无模式、macOS
@@ -240,14 +242,17 @@ Doom 的做法：
 ## 尚可选择的可见行为
 
 技术合并和逐文件审计已完成。以下做法会改变现有操作或外观，当前建议保留现值；
-若用户选择其中一项，再按 [comparison.md](comparison.md) 的证据单独实施。
+若用户选择其中一项，再按 [comparison.md](doom-template-comparison-2026-10.md) 的证据单独实施。
 
 | 行为 | 本配置现状 | Doom 做法 |
 | --- | --- | --- |
 | Helpful 源码链接 | 在当前帮助窗格打开源码 | 回到发起帮助的窗口打开 |
 | wdired / wgrep 完成后 | Dired 或搜索结果窗继续显示 | 关闭对应弹窗 |
-| 首个图形 frame 的背景 | `bin/emacs-app` 隐藏启动，主题加载后显示 | 在 `initial-frame-alist` 写死背景色以减少白底闪烁 |
+
+首个图形 frame 的背景色已吸收：`early-init.el` 将当前深色主题的背景色
+`#171B28` 写入 `initial-frame-alist`，主题加载后由主题接管；见
+[neomacs-compat.md](../../design/neomacs-compat.md)。
 
 第 2 节的全局默认值差异已复核并建议保留；第 4 节的已占用键位不覆盖。
-neo-emacs 的初筛“待定”另以 [最终审计记录](../neo-emacs/inventory.md) 为准，
+neo-emacs 的初筛“待定”另以 [最终审计记录](neo-emacs-inventory-2026-10.md) 为准，
 其中各文件均已有吸收、合并或不收的去处。

@@ -1,11 +1,13 @@
 # neo-emacs 结构化升级
 
-> 第二阶段。先完成第一阶段 [以 Doom 为模板升级配置](../doom-template/README.md)，再在那个骨架上吸收本项目。
+> 本文是已完成工作的历史工作台；逐项最终裁决见 [清单](neo-emacs-inventory-2026-10.md)，当前结构以 [模块系统](../../design/module-system.md) 为准。
+
+> 第二阶段。先完成第一阶段 [以 Doom 为模板升级配置](doom-template-2026-10.md)，再在那个骨架上吸收本项目。
 
 研究 [sincebyte/neo-emacs](https://github.com/sincebyte/neo-emacs)，借它的模块框架把本配置的 `lisp/` 重新组织成可按模块开关、自带说明的结构。
 
-- 上游代码：`upstream/`（本地 clone，被 `.gitignore` 忽略，不进本仓库）。更新用 `git -C docs/works/neo-emacs/upstream pull`。
-- [structure.md](structure.md)：两边框架的对照，以及文件结构和项目组织怎么融合。
+- 上游代码：`docs/works/neo-emacs/upstream/`（本地 clone，被 `.gitignore` 忽略，不进本仓库）。更新用 `git -C docs/works/neo-emacs/upstream pull`。
+- [structure.md](neo-emacs-structure-2026-10.md)：两边框架的对照，以及文件结构和项目组织怎么融合。
 - 本文件是这个项目的工作台：目标、发现、决定和下一步都记在这里。结论定下来以后写进对应的 `design/` 文档和 `AGENT.md`，项目结束后本文件移到 `records/`。
 
 ## 目标
@@ -32,15 +34,15 @@ neo-emacs 不是独立框架，而是一套 **Doom Emacs 私有配置**：
 ## 已完成的研究
 
 - [x] Doom 模块解析、flag 和加载顺序：见第一阶段的 [module-system.md](../../design/module-system.md)。
-- [x] neo-emacs 各模块逐项去处：见 [inventory.md](inventory.md)。
+- [x] neo-emacs 各模块逐项去处：见 [inventory.md](neo-emacs-inventory-2026-10.md)。
 - [x] 文档组织：代码树保留分类 `README.md`，详细规范留在 `docs/`；不复制 Doom 的逐模块 readme。
-- [x] `lisp/` 分类、目录、开关、迁移和验证：见 [structure.md](structure.md) 与第一阶段的 [README.md](../doom-template/README.md)。
+- [x] `lisp/` 分类、目录、开关、迁移和验证：见 [structure.md](neo-emacs-structure-2026-10.md) 与第一阶段的 [README.md](doom-template-2026-10.md)。
 - [x] 逐文件审计（2026-10-27 完成）：`config.el`、`keymap.el`、`packages.el` 和
-  20 个模块都有了去处，见 [inventory.md](inventory.md) 的审计记录。
+  20 个模块都有了去处，见 [inventory.md](neo-emacs-inventory-2026-10.md) 的审计记录。
 - [x] 根目录 `README.org` 与 11 份模块说明补读：Git 路径解析已合并到本配置的
-  Git 工作台；其余安装说明与私人工作流见 [inventory.md](inventory.md)。
+  Git 工作台；其余安装说明与私人工作流见 [inventory.md](neo-emacs-inventory-2026-10.md)。
 
 ## 决定
 
 - **键位以本配置现有的为准**（2026-10-26）：他的键只在本配置的空位上考虑，不覆盖现有键和 Evil 原生键，冲突的逐个另找位置或不收。
-- **一个模块一个模块审计**：每次给出一个模块的条目和建议，由用户批准是否合并、如何合并，再动手；结果记在 [inventory.md](inventory.md)。
+- **一个模块一个模块审计**：每次给出一个模块的条目和建议，由用户批准是否合并、如何合并，再动手；结果记在 [inventory.md](neo-emacs-inventory-2026-10.md)。

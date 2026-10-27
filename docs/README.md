@@ -69,8 +69,7 @@ channels.
 
 ## works/ — projects in progress
 
-- [doom-template/](works/doom-template/README.md) Phase 1 of the restructuring: Doom Emacs as the template for this config's module system, lifecycle hooks, macro library, registration APIs and defaults, without depending on Doom; upstream clones in `works/doom-template/upstream/`.
-- [neo-emacs/](works/neo-emacs/README.md) Phase 2: absorbing every neo-emacs setting on top of the Doom-templated skeleton; upstream clone in `works/neo-emacs/upstream/`.
+No active workbenches. The ignored upstream clones remain under `works/doom-template/upstream/` and `works/neo-emacs/upstream/` for reference.
 
 ## guide/ — how to use it
 
@@ -117,8 +116,13 @@ Dated and append-only. Read them for why something is the way it is, never for h
 
 ### records/audits/
 
+- [doom-template-2026-10.md](records/audits/doom-template-2026-10.md) Completed Doom-template restructuring workbench.
+- [doom-template-comparison-2026-10.md](records/audits/doom-template-comparison-2026-10.md) Source-by-source Doom audit and optional behavior differences.
 - [entrypoint-audit-2026-10.md](records/audits/entrypoint-audit-2026-10.md) Current entry map, comparisons with Lunarymacs, Doom, Spacemacs and Prelude, and the ongoing command and lifecycle review.
 - [jupyter-parity-audit-2026-09.md](records/audits/jupyter-parity-audit-2026-09.md) VS Code alignment register, filesystem placement distinctions, Aaron-PC live evidence, and remaining acceptance work.
+- [neo-emacs-2026-10.md](records/audits/neo-emacs-2026-10.md) Completed neo-emacs workbench.
+- [neo-emacs-inventory-2026-10.md](records/audits/neo-emacs-inventory-2026-10.md) Each neo-emacs item’s final disposition.
+- [neo-emacs-structure-2026-10.md](records/audits/neo-emacs-structure-2026-10.md) Historical framework comparison and migration plan.
 - [remote-io-review-2026-07.md](records/audits/remote-io-review-2026-07.md) `emacs-io` audit, adopted resource ideas, rejected ownership/POSIX shortcuts, and Remote performance criteria.
 
 ### records/migrations/
