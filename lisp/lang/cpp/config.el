@@ -10,9 +10,13 @@
 ;;; Code:
 
 (require 'aaron-funcs)
+(require 'cl-lib)
 
 (declare-function set-language-server! "tools/lsp/config")
 (declare-function +language-server-executable-find "tools/lsp/config" (program))
+(declare-function +eshell-run-build "term/shell/eshell" (build-command &rest keys))
+(declare-function +eshell-build-root "term/shell/eshell" (source-directory markers))
+(declare-function +eshell-build-output-file "term/shell/eshell" (source))
 (defvar lsp-enabled-clients)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -61,6 +65,91 @@
   (c-basic-offset 2)
   (tab-width 2)
   (indent-tabs-mode nil))
+
+;; A small build/run path for ordinary C and C++ files.  It uses the shared
+;; Eshell task API; project-specific choices stay with the language config.
+(defgroup +cpp-eshell-build nil
+  "C and C++ builds sent to a named Eshell session."
+  :group 'languages)
+
+(defcustom +cpp-eshell-build-command nil
+  "Project build command, or nil to use make/compile the current source.
+Set this in a trusted .dir-locals.el when a project needs a specific target."
+  :type '(choice (const :tag "Automatic" nil) string)
+  :group '+cpp-eshell-build)
+
+(defcustom +cpp-eshell-run-command nil
+  "Project run command after a successful build, or nil for single-file output.
+A Makefile project's executable cannot be inferred safely; set this when
+enabling run-after-build for that project."
+  :type '(choice (const :tag "Automatic single file" nil) string)
+  :group '+cpp-eshell-build)
+
+(defcustom +cpp-eshell-run-after-build nil
+  "If non-nil, `C-c C-c' builds and then runs C/C++ programs.
+A prefix argument also requests a run for one invocation."
+  :type 'boolean
+  :group '+cpp-eshell-build)
+
+(defcustom +cpp-eshell-c-compiler "cc"
+  "Compiler for a standalone C source file."
+  :type 'string
+  :group '+cpp-eshell-build)
+
+(defcustom +cpp-eshell-cxx-compiler "c++"
+  "Compiler for a standalone C++ source file."
+  :type 'string
+  :group '+cpp-eshell-build)
+
+(defun +cpp-eshell--makefile-p (directory)
+  "Return non-nil if DIRECTORY contains a makefile."
+  (cl-some (lambda (name)
+             (file-regular-p (expand-file-name name directory)))
+           '("Makefile" "makefile" "GNUmakefile")))
+
+(defun +cpp/eshell-build (&optional run)
+  "Build this C/C++ file or Makefile project in its named Eshell.
+With prefix RUN, also execute the program after a successful build."
+  (interactive "P")
+  (unless buffer-file-name
+    (user-error "Visit a C or C++ source file before building"))
+  (when (file-remote-p buffer-file-name)
+    (user-error "This C/C++ build demo currently supports local files only"))
+  (require 'term/shell/eshell)
+  (save-buffer)
+  (let* ((source buffer-file-name)
+         (source-directory (file-name-directory source))
+         (root (+eshell-build-root source-directory
+                                  '("Makefile" "makefile" "GNUmakefile")))
+         (make-project (+cpp-eshell--makefile-p root))
+         (binary (+eshell-build-output-file source))
+         (compiler (if (memq major-mode '(c++-mode c++-ts-mode))
+                       +cpp-eshell-cxx-compiler
+                     +cpp-eshell-c-compiler))
+         (build (or +cpp-eshell-build-command
+                    (if make-project
+                        "make"
+                      (format "%s %s -o %s"
+                              compiler
+                              (shell-quote-argument
+                               (file-name-nondirectory source))
+                              (shell-quote-argument binary)))))
+         (run-command
+          (when (or run +cpp-eshell-run-after-build)
+            (or +cpp-eshell-run-command
+                (unless (or make-project +cpp-eshell-build-command)
+                  (shell-quote-argument (concat "./" binary)))))))
+    (when (and (or run +cpp-eshell-run-after-build)
+               (not run-command))
+      (user-error "Set +cpp-eshell-run-command for this project"))
+    (+eshell-run-build build :directory root :run run-command)))
+
+(defun +cpp-eshell-build-setup-h ()
+  "Make C-c C-c the direct C/C++ project build entry."
+  (local-set-key (kbd "C-c C-c") #'+cpp/eshell-build))
+
+(dolist (mode '(c-mode c++-mode c-ts-mode c++-ts-mode))
+  (add-hook (intern (format "%s-hook" mode)) #'+cpp-eshell-build-setup-h))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; Tree-sitter indentation

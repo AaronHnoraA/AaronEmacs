@@ -12,6 +12,7 @@ Modules are declared, in load order, in [`lisp/init-modules.el`](../init-modules
 | [`cpp`](cpp/) | no — loaded by another module | C/C++ config (lsp-mode + clangd) | `config.el` |
 | [`elisp`](elisp/) | no — loaded by another module | Emacs Lisp config | `config.el` |
 | [`filetypes`](filetypes/) | yes | Common file type routing | `config.el` |
+| [`go`](go/) | no — loaded by another module | Go build and run through project Eshell | `config.el` |
 | [`haskell`](haskell/) | no — loaded by another module | haskell | `config.el` |
 | [`java`](java/) | no — loaded by another module | Java config | `config.el` |
 | [`javascript`](javascript/) | no — loaded by another module | JavaScript mode integration | `config.el` |

@@ -189,6 +189,8 @@ agent sends must resolve against the session's target."
 (declare-function agent-shell-subscribe-to "agent-shell" (&rest args))
 (declare-function agent-shell-restart "agent-shell" (&rest args))
 (declare-function agent-shell-insert "agent-shell" (&rest args))
+(declare-function agent-shell-interrupt "agent-shell" (&optional force))
+(defvar agent-shell-permission-responder-function)
 (declare-function +portal/agent-shell "term/portal/popup" (&optional agent))
 (declare-function +agent-shell-launch-context "term/portal/popup" ())
 (declare-function +portal-popup--window "term/portal/popup" (&optional buffer))
@@ -930,36 +932,114 @@ target-native path.  A CLI that cannot be found is an error."
 (autoload 'noema-compose-add-context "noema-compose" nil t)
 (autoload 'noema-compose-rewrite "noema-compose" nil t)
 (autoload 'noema-agent-start "noema-agent-acp" nil t)
-(declare-function noema-agent-acp-draft "noema-agent-acp" (buffer text))
+(declare-function noema-agent-acp-config-for "noema-agent-acp" (agent))
+(declare-function noema-agent-acp-export-config "noema-agent-acp" (config model-id))
+(declare-function noema-agent-acp-start "noema-agent-acp" (&rest args))
+(declare-function noema-agent-acp-subscribe "noema-agent-acp" (&rest args))
+(declare-function noema-agent-acp-unsubscribe "noema-agent-acp" (&rest args))
+(declare-function noema-agent-acp-kill "noema-agent-acp" (buffer))
+
+(config-defvar +config-ask-model "gpt-6-luna"
+  "Codex ACP model used by the Docs Ask command.  It uses the current Codex login."
+  :type 'string :group 'ai)
+
+(defun +config--ask-permission (permission)
+  "Handle PERMISSION without opening agent-shell's full permission UI."
+  (let* ((read (equal (map-elt (map-elt permission :tool-call) :kind) "read"))
+         (kind (if read "allow_once" "reject_once"))
+         (choice (seq-find (lambda (option)
+                             (equal (map-elt option :kind) kind))
+                           (map-elt permission :options))))
+    (if choice
+        (funcall (map-elt permission :respond)
+                 (map-elt choice :option-id))
+      (agent-shell-interrupt t))
+    t))
+
+(defun +config--ask-finish (buffer subscription answer)
+  "Show ANSWER in the echo area and release hidden ACP BUFFER and SUBSCRIPTION."
+  (noema-agent-acp-unsubscribe :buffer buffer :subscription subscription)
+  ;; The callback runs inside agent-shell's event dispatch.  Release the
+  ;; physical client on the next event turn, then show the answer last so
+  ;; teardown messages cannot replace it in the echo area.
+  (run-at-time 0 nil (lambda ()
+                       (when (buffer-live-p buffer)
+                         (noema-agent-acp-kill buffer))
+                       (message "Ask · %s"
+                                (if (and (stringp answer)
+                                         (not (string-empty-p (string-trim answer))))
+                                    (+config--ask-final-answer answer)
+                                  "没有收到回答")))))
+
+(defun +config--ask-final-answer (answer)
+  "Extract the single final response from ACP ANSWER."
+  (if (string-match "<answer>\\(\\(?:.\\|\n\\)*?\\)</answer>" answer)
+      (string-trim (match-string 1 answer))
+    (string-trim answer)))
 
 ;;;###autoload
-(defun +config/ask-agent (question &optional agent)
-  "Draft QUESTION about this Emacs and Noema setup in AGENT's shell.
-The existing Noema agent-shell integration owns the session.  The draft is
-left for review; it is not submitted automatically.  With a prefix argument,
-choose Codex, Claude or OpenCode instead of the default Codex."
-  (interactive
-   (list (read-string "询问 Emacs/Noema 配置: ")
-         (if current-prefix-arg
-             (intern (completing-read "Agent: "
-                                      '("codex" "claude" "opencode")
-                                      nil t nil nil "codex"))
-           'codex)))
+(defun +config/ask-agent (question)
+  "Ask Codex ACP about QUESTION using only the minibuffer and echo area.
+The agent-shell backend runs in a hidden, temporary Noema session.  Its model
+is `+config-ask-model', registered with native Config Customize."
+  (interactive (list (read-string "Ask · Emacs/Noema 配置: ")))
   (unless (and (stringp question) (string-match-p "\\S-" question))
     (user-error "请输入配置问题"))
+  (require 'noema-agent-acp)
   (let* ((default-directory (file-name-as-directory
-                             (expand-file-name user-emacs-directory)))
-         (buffer (noema-agent-start (or agent 'codex)))
-         (draft
+                             (file-truename
+                              (expand-file-name user-emacs-directory))))
+         (config (or (noema-agent-acp-config-for 'codex)
+                     (user-error "Codex ACP backend is unavailable")))
+         (config (noema-agent-acp-export-config config +config-ask-model))
+         (prompt
           (format
-           (concat "请以当前 Emacs 配置仓库为工作区回答问题。先用 "
+           (concat "这是一次性配置问答。请以当前 Emacs 配置仓库为工作区回答问题。先用 "
                    "docs/guide/documentation-center.md 和 docs/README.md "
                    "找到相关文档；Emacs 结构见 docs/architecture.md，Noema 结构见 "
                    "docs/noema/architecture.md，设置后端见 "
-                   "docs/design/config-management.md。需要当前行为或设置值时，"
-                   "再检查实际代码与注册表。请给出所依据的文件路径。\n\n问题：%s")
-           question)))
-    (noema-agent-acp-draft buffer draft)
+                   "docs/design/config-management.md。Dashboard [config] 调用 "
+                   "config-board，[docs] 调用 aaron-ui-docs-home，文档 Ask 调用 "
+                   "+config/ask-agent。需要其他当前行为或设置值时，必须先实际读取"
+                   "相关文件或注册表；不要猜测命令名。只读，不修改文件。"
+                   "只输出最终答案，不要输出计划、查找过程或进度。"
+                   "用中文在 250 字内回答，给出依据文件路径。"
+                   "最终答案放在 <answer> 和 </answer> 之间；如果无法核实，"
+                   "在标签内说明具体阻碍。\n\n问题：%s")
+           question))
+         (buffer (noema-agent-acp-start
+                  :config config :directory default-directory
+                  :origin 'side :focus nil :render-policy 'never))
+         (answer "")
+         (finished nil)
+         subscription)
+    (with-current-buffer buffer
+      (setq-local agent-shell-permission-responder-function
+                  #'+config--ask-permission))
+    (setq subscription
+          (noema-agent-acp-subscribe
+           :buffer buffer
+           :callback
+           (lambda (event)
+             (pcase (map-elt event :event)
+               ('agent-message-chunk
+                (when-let* ((chunk (map-elt (map-elt event :data) :text-chunk)))
+                  (setq answer (concat answer chunk))))
+               ('turn-complete
+                (unless finished
+                  (setq finished t)
+                  (+config--ask-finish buffer subscription answer)))
+               ('error
+                (unless finished
+                  (setq finished t)
+                  (+config--ask-finish
+                   buffer subscription
+                   (format "ACP 出错：%s"
+                           (map-elt (map-elt event :data) :message)))))))))
+    (message "Ask · Codex %s 正在回答…" +config-ask-model)
+    (with-current-buffer buffer
+      (agent-shell-insert :text prompt :submit t :no-focus t
+                          :shell-buffer buffer))
     buffer))
 (with-eval-after-load 'agent-shell
   ;; The ACP boundary also owns the shared, invisible Hy Memory adapter.

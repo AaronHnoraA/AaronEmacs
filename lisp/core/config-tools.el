@@ -12,6 +12,9 @@
 (require 'aaron-open)
 (require 'transient)
 
+(autoload 'config-manual-panel "aaron-ui-docs" nil t)
+(autoload 'aaron-ui-docs-home "aaron-ui-docs" nil t)
+
 (defun config-filter-group ()
   "Open a generated native Customize group selected from the registry."
   (interactive)
@@ -48,6 +51,10 @@
   [["Customize"
     ("c" "open config group" config-board)
     ("g" "open generated group" config-filter-group)]
+   ["Documentation"
+    ("h" "Emacs and Noema docs" aaron-ui-docs-home)
+    ("m" "my Config documentation" config-manual-panel)
+    ("i" "official Emacs manual" info-emacs-manual)]
    ["Store"
     ("s" "save stores" config-save)
     ("R" "refresh stores" config-refresh-store-files)

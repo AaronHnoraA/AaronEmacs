@@ -8,6 +8,7 @@
 
 (require 'etaf)
 (require 'aaron-ui)
+(require 'aaron-ui-etaf)
 (require 'aaron-ui-board)
 (require 'seq)
 
@@ -72,6 +73,7 @@
 (etaf-define-component aaron-ui-performance-app
     (&key state selected owner)
   "Render retained Performance Watch STATE for OWNER."
+  :setup (aaron-ui-etaf-provide-theme)
   :view
   (column :width 'stretch
     (box :padding '((lh 1) (ch 2))

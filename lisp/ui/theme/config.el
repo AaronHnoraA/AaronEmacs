@@ -25,6 +25,12 @@
   "Idle timer used to coalesce dashboard visibility checks.")
 (defvar +dashboard--entry-refresh-timer nil
   "Pending one-shot refresh after entering the Dashboard.")
+(defvar-local +dashboard--navigator-region nil
+  "Markers surrounding the Dashboard navigator for visible-window centering.")
+(put '+dashboard--navigator-region 'permanent-local t)
+(defvar-local +dashboard--item-regions nil
+  "Dashboard item and Agenda regions to recenter in their visible window.")
+(put '+dashboard--item-regions 'permanent-local t)
 (defvar +dashboard--last-current-buffer nil
   "Dashboard buffer most recently observed as current.")
 (defvar +dashboard--agenda-snapshot nil
@@ -71,9 +77,6 @@ different answer rebuilds the Dashboard.")
 (use-package image-slice
   :ensure nil
   :defer t)
-
-(defvar +dashboard-items-content-width 100
-  "Maximum display width for the centered dashboard item block.")
 
 (config-defvar +noema-icon-file nil
   "SVG icon used for Markdown files."
@@ -205,6 +208,14 @@ height in pixels."
   :config
   (aaron-ui-load-theme))
 
+;; ETAF surfaces load only when a page or floating panel is opened.
+(use-package posframe :ensure t :defer t)
+(use-package etaf :ensure t :defer t)
+(use-package etaf-ui :ensure t :defer t)
+(autoload 'aaron-ui-etaf-preview "aaron-ui-etaf" nil t)
+(autoload 'aaron-ui-document-panel "aaron-ui-docs" nil t)
+(autoload 'aaron-ui-docs-home "aaron-ui-docs" nil t)
+
 (defun +theme-normalize-faces ()
   "Normalize theme face attributes that Emacs 31 rejects when set to nil."
   (when (and (facep 'font-lock-variable-name-face)
@@ -322,6 +333,11 @@ into a full-width bar.  `agent-shell-prompt' inherits this face."
   (unless (fboundp 'config-board)
     (require 'config-tools))
   (config-board))
+
+(defun +dashboard/open-docs (&rest _)
+  "Open this configuration's Emacs and Noema documentation."
+  (interactive)
+  (aaron-ui-docs-home))
 
 (defun +dashboard/open-roam (&rest _)
   "Open the canonical Noema Wiki from the dashboard button."
@@ -514,7 +530,9 @@ through its normal insertion pipeline, before Chunlian is attached."
   (let ((start (point)))
     (+dashboard--insert-agenda-card-content
      +dashboard--agenda-snapshot +dashboard--agenda-error)
-    (+dashboard--center-lines start (point))))
+    (+dashboard--center-item-region start (point))
+    (push (cons (copy-marker start) (copy-marker (point)))
+          +dashboard--item-regions)))
 
 (defun +dashboard--refresh-buffer-completely (buffer)
   "Rebuild Dashboard BUFFER, then attach Chunlian to the finished contents.
@@ -642,18 +660,13 @@ request, and only the first may render its answer."
                    ;; one complete render rather than an in-place asynchronous
                    ;; card rewrite.
                    (+dashboard--rebuild-if-stale buffer)
+                   (+dashboard--recenter-navigator-visible buffer)
+                   (+dashboard--recenter-items-visible buffer)
                    (+dashboard--refresh-agenda-cache
                     (lambda (_changed)
                       (when (eq buffer (current-buffer))
                         (+dashboard--rebuild-if-stale buffer))))))
                dashboard))))))
-
-(defun +dashboard--item-block-width ()
-  "Return the content width used to center dashboard item sections."
-  (let* ((window-width (max 40 (window-body-width nil t)))
-         (margin 12))
-    (min +dashboard-items-content-width
-         (max 40 (- window-width (* 2 margin))))))
 
 (defun +dashboard--line-display-width (start end)
   "Return display width of text between START and END."
@@ -707,33 +720,164 @@ request, and only the first may render its answer."
             (+dashboard--center-line-exact line-start line-end)))
         (forward-line 1)))))
 
-(defun +dashboard--center-item-region (start end)
-  "Center and constrain dashboard item lines between START and END."
-  (let ((width (+dashboard--item-block-width))
+(defun +dashboard--item-heading-p (start end)
+  "Return non-nil when the Dashboard line from START to END is a heading."
+  (or (text-property-any start end 'face 'dashboard-heading)
+      (save-excursion
+        (goto-char start)
+        (looking-at-p "Agenda · next 7 days"))))
+
+(defun +dashboard--item-line-align-width (start end)
+  "Measure a Dashboard entry from START to END in display columns."
+  (if-let* ((window (get-buffer-window (current-buffer) t))
+            ((eq (window-buffer window) (current-buffer)))
+            (pixels (car (window-text-pixel-size window start end t)))
+            ((> pixels 0)))
+      (/ (float pixels) (frame-char-width (window-frame window)))
+    (+dashboard--line-align-width start end)))
+
+(defun +dashboard--center-item-section (start end)
+  "Center one Dashboard section as a box with left-aligned entries."
+  (let ((width 0)
         (inhibit-read-only t))
+    ;; Use the widest rendered entry, not a fixed number of columns.  A file
+    ;; icon and a Chinese filename can both be wider than their text length.
     (save-excursion
       (goto-char start)
       (while (< (point) end)
         (let ((line-start (line-beginning-position))
               (line-end (line-end-position)))
-          (if (looking-at-p "[ \t]")
-              (+dashboard--center-line line-start line-end width)
-            (let ((line-width (+dashboard--line-display-width line-start line-end)))
-              (when (> line-width 0)
-                (+dashboard--center-line-exact line-start line-end)))))
-        (forward-line 1)))))
+          (unless (or (= line-start line-end)
+                      (+dashboard--item-heading-p line-start line-end))
+            (setq width (max width (+dashboard--item-line-align-width
+                                    line-start line-end)))))
+        (forward-line 1)))
+    (let ((prefix (propertize
+                   " " 'display
+                   `(space . (:align-to (- center ,(/ (float width) 2)))))))
+      (save-excursion
+        (goto-char start)
+        (while (< (point) end)
+          (let ((line-start (line-beginning-position))
+                (line-end (line-end-position)))
+            (when (> line-end line-start)
+              (let ((line-prefix
+                     (if (+dashboard--item-heading-p line-start line-end)
+                         (progn
+                           (+dashboard--center-line-exact line-start line-end)
+                           (get-text-property line-start 'line-prefix))
+                       prefix)))
+                (add-text-properties
+                 line-start (min (1+ line-end) end)
+                 `(line-prefix ,line-prefix indent-prefix ,line-prefix)))))
+          (forward-line 1))))))
+
+(defun +dashboard--center-item-region (start end)
+  "Center each Dashboard section box and keep its entries left-aligned."
+  (let ((inhibit-read-only t)
+        (section-start start))
+    ;; Dashboard may leave its own centering on text or a newline.
+    (remove-text-properties start end '(line-prefix nil indent-prefix nil))
+    (save-excursion
+      (goto-char start)
+      (while (< (point) end)
+        (let ((line-start (line-beginning-position))
+              (line-end (line-end-position)))
+          (when (and (> line-start section-start)
+                     (+dashboard--item-heading-p line-start line-end))
+            (+dashboard--center-item-section section-start line-start)
+            (setq section-start line-start)))
+        (forward-line 1))
+      (+dashboard--center-item-section section-start end))))
 
 (defun +dashboard-insert-items-centered-a (orig-fn &rest args)
-  "Run ORIG-FN, then center the Dashboard item block as a fixed-width panel."
+  "Run ORIG-FN, then align its lines inside a centered block."
   (let ((start (point)))
+    (setq +dashboard--item-regions nil)
     (prog1 (apply orig-fn args)
-      (+dashboard--center-item-region start (point)))))
+      (+dashboard--center-item-region start (point))
+      (push (cons (copy-marker start) (copy-marker (point)))
+            +dashboard--item-regions))))
+
+(defun +dashboard--recenter-items-visible (&optional buffer)
+  "Measure and recenter BUFFER's item boxes in their visible window."
+  (when-let* ((buffer (or buffer (current-buffer)))
+              ((buffer-live-p buffer))
+              ((get-buffer-window buffer t)))
+    (with-current-buffer buffer
+      (dolist (region +dashboard--item-regions)
+        (when (and (eq (marker-buffer (car region)) buffer)
+                   (eq (marker-buffer (cdr region)) buffer))
+          (+dashboard--center-item-region (car region) (cdr region)))))))
 
 (defun +dashboard-center-inserted-lines-a (orig-fn &rest args)
   "Run ORIG-FN, then center inserted lines one by one."
   (let ((start (point)))
     (prog1 (apply orig-fn args)
       (+dashboard--center-lines start (point)))))
+
+(defun +dashboard-center-navigator-a (orig-fn &rest args)
+  "Center the visible navigator by its rendered width after ORIG-FN."
+  (let ((start (point)))
+    (prog1 (apply orig-fn args)
+      (let ((end (point))
+            (window (get-buffer-window (current-buffer) t))
+            (inhibit-read-only t))
+        (setq +dashboard--navigator-region
+              ;; Keep the end before later sections inserted at this point.
+              (cons (copy-marker start) (copy-marker end)))
+        (save-excursion
+          (goto-char start)
+          (while (< (point) end)
+            (let ((line-start (line-beginning-position))
+                  (line-end (line-end-position)))
+              (when (> line-end line-start)
+                ;; Dashboard's first pass measures the widget as a string.
+                ;; Measure the painted buttons in their actual window instead.
+                (remove-text-properties line-start line-end
+                                        '(line-prefix nil indent-prefix nil))
+                (if (window-live-p window)
+                    (+dashboard--center-line
+                     line-start line-end
+                     (/ (float (car (window-text-pixel-size
+                                     window line-start line-end t)))
+                        (frame-char-width (window-frame window))))
+                  (+dashboard--center-line-exact line-start line-end))))
+            (forward-line 1)))))))
+
+(defun +dashboard--recenter-navigator-visible (&optional buffer)
+  "Center BUFFER's navigator after its real window and font are available."
+  (when-let* ((buffer (or buffer (current-buffer)))
+              ((buffer-live-p buffer))
+              (window (get-buffer-window buffer t)))
+    (with-current-buffer buffer
+      (when-let* ((region +dashboard--navigator-region)
+                  ((eq (marker-buffer (car region)) buffer))
+                  ((eq (marker-buffer (cdr region)) buffer)))
+        (let ((inhibit-read-only t)
+              (char-width (float (frame-char-width (window-frame window)))))
+          (save-excursion
+            (goto-char (car region))
+            (while (< (point) (cdr region))
+              (let ((start (line-beginning-position))
+                    (end (line-end-position)))
+                (when (> end start)
+                  (let* ((left (posn-at-point start window))
+                         (right (posn-at-point end window))
+                         (x-left (and left (car (posn-x-y left))))
+                         (x-right (and right (car (posn-x-y right))))
+                         (rendered-width (and x-left x-right
+                                              (> x-right x-left)
+                                              (- x-right x-left))))
+                    (remove-text-properties start end
+                                            '(line-prefix nil indent-prefix nil))
+                    (+dashboard--center-line
+                     start end
+                     (/ (float (or rendered-width
+                                   (car (window-text-pixel-size
+                                         window start end t))))
+                        char-width)))))
+              (forward-line 1))))))))
 
 (defun +dashboard/ignore-horizontal-wheel (_event)
   "Ignore horizontal wheel EVENT in dashboard buffers."
@@ -756,6 +900,9 @@ request, and only the first may render its answer."
         `(((,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-gear") "⚙")
             "config" "Open native config Customize group"
             ,#'+dashboard/open-config-board)
+           (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-book") "D")
+            "docs" "Read Emacs, Noema and Config documentation"
+            ,#'+dashboard/open-docs)
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-repo") "R")
             "roam" "Open Noema Wiki"
             ,#'+dashboard/open-roam)
@@ -779,7 +926,8 @@ request, and only the first may render its answer."
   (advice-remove 'dashboard-insert-items #'+dashboard-insert-items-centered-a)
   (advice-add 'dashboard-insert-items :around #'+dashboard-insert-items-centered-a)
   (advice-remove 'dashboard-insert-navigator #'+dashboard-center-inserted-lines-a)
-  (advice-add 'dashboard-insert-navigator :around #'+dashboard-center-inserted-lines-a)
+  (advice-remove 'dashboard-insert-navigator #'+dashboard-center-navigator-a)
+  (advice-add 'dashboard-insert-navigator :around #'+dashboard-center-navigator-a)
   (advice-remove 'dashboard-insert-init-info #'+dashboard-center-inserted-lines-a)
   (advice-add 'dashboard-insert-init-info :around #'+dashboard-center-inserted-lines-a)
   (+dashboard-bind-horizontal-wheel)
@@ -790,7 +938,11 @@ request, and only the first may render its answer."
   (dashboard-startup-banner
    (expand-file-name "etc/dashboard.txt" user-emacs-directory))
 
-  (dashboard-center-content t)
+  ;; This only controls item sections in dashboard.el.  The common block
+  ;; alignment is applied by `+dashboard-insert-items-centered-a' afterward.
+  (dashboard-center-content nil)
+  (dashboard-path-style 'truncate-middle)
+  (dashboard-path-max-length 72)
   (dashboard-set-heading-icons t)
   (dashboard-set-file-icons t)
   (dashboard-items '((recents  . 10)
@@ -1310,6 +1462,8 @@ When WIN is nil, restore every tracked window."
 (add-hook 'buffer-list-update-hook #'+dashboard-refresh-on-entry)
 (add-hook 'dashboard-after-initialize-hook
           (lambda ()
+            (+dashboard--recenter-navigator-visible)
+            (+dashboard--recenter-items-visible)
             (chunlian-mode 1)
             (let ((dashboard-buffer (current-buffer)))
               (run-with-timer

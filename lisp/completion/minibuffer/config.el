@@ -7,6 +7,7 @@
 
 (require 'aaron-ui)
 (require 'aaron-open)
+(require 'cl-lib)
 
 (defvar +file-open-new-frame-prompt nil
   "Non-nil while a file-open prompt accepts a new-frame exit key.")
@@ -33,22 +34,37 @@
 (declare-function +terminal-selector-exit "term/portal/config" (placement))
 (declare-function +buffer-display-new-frame "ui/windows/config"
                   (buffer &optional norecord))
-(declare-function consult--frame-buffer-list "consult" ())
-(declare-function +frame-workspace-buffers "ui/tabbar/config"
-                  (&optional frame-buffers))
 (defvar consult--buffer-display)
 (defvar consult-buffer-list-function)
+(defvar consult-buffer-filter)
+(defvar consult-buffer-sources)
+
+(defvar +consult-buffer-blacklist-modes
+  '(fundamental-mode minibuffer-inactive-mode
+    jsonrpc-events-mode emacs-lisp-compilation-mode)
+  "Major modes excluded from everyday buffer selection.")
+
+(defvar +consult-buffer-blacklist-name-regexps
+  '("\\` ")
+  "Buffer names excluded from everyday buffer selection.")
 
 (defun +consult-buffer-list ()
-  "List this frame's buffers in the active Perspective for Consult.
-Use Consult's frame history, including buried buffers.  Consult's hidden
-Other Buffer source still provides access to buffers outside this scope."
-  (+frame-workspace-buffers (consult--frame-buffer-list)))
+  "List live buffers for the ordinary Consult switcher, except blacklisted ones.
+Keep this global across frames and workspaces; exclude implementation buffers
+which have no useful destination for a person switching buffers."
+  (cl-remove-if
+   (lambda (buffer)
+     (or (minibufferp buffer)
+         (memq (buffer-local-value 'major-mode buffer)
+               +consult-buffer-blacklist-modes)
+         (cl-some (lambda (regexp)
+                    (string-match-p regexp (buffer-name buffer)))
+                  +consult-buffer-blacklist-name-regexps)))
+   (buffer-list)))
 
 (defun +consult-buffer-scoped-a (original &optional sources)
-  "Call ORIGINAL with frame/workspace buffers for the default SOURCES.
-Commands such as `consult-project-buffer' pass explicit sources and keep
-Consult's normal project-wide buffer list."
+  "Call ORIGINAL with global, blacklisted buffer candidates for default SOURCES.
+Explicit sources such as `consult-project-buffer' keep their own candidates."
   (let* ((+consult-buffer-active
           (eq consult--buffer-display #'switch-to-buffer))
          (+consult-buffer-placement 'current)
@@ -59,32 +75,38 @@ Consult's normal project-wide buffer list."
             consult--buffer-display)))
     (if sources
         (funcall original sources)
-      (let ((consult-buffer-list-function #'+consult-buffer-list))
+      (let ((consult-buffer-list-function #'+consult-buffer-list)
+            (consult-buffer-sources
+             (cl-remove-if
+              (lambda (source)
+                (memq source '(consult-source-hidden-buffer
+                               consult-source-other-buffer)))
+              consult-buffer-sources)))
         (funcall original)))))
 
 (defun +consult-buffer-display (buffer &optional norecord)
   "Display Consult BUFFER in the selected pane requested by the user."
   (when (window-live-p +consult-buffer-origin)
     (select-window +consult-buffer-origin))
-  (pcase +consult-buffer-placement
-    ((or 'right 'below)
-     (+open-entry-in-split
-      +consult-buffer-placement
-      (lambda () (switch-to-buffer buffer norecord))))
-    ('frame (+buffer-display-new-frame buffer norecord))
-    (_ (switch-to-buffer buffer norecord))))
+  (if (and (fboundp '+eshell--route-buffer-p)
+           (+eshell--route-buffer-p buffer))
+      (+eshell--display (get-buffer buffer))
+    (pcase +consult-buffer-placement
+      ((or 'right 'below)
+       (+open-entry-in-split
+        +consult-buffer-placement
+        (lambda () (switch-to-buffer buffer norecord))))
+      ('frame (+buffer-display-new-frame buffer norecord))
+      (_ (switch-to-buffer buffer norecord)))))
 
 (defun +minibuffer/buffer-open-new-frame ()
   "Choose a buffer with Consult and open it in a new Emacs frame.
-Only buffer sources are offered.  Narrow with `<o' for buffers outside
-the current frame or workspace."
+Only everyday buffer candidates are offered, from every frame and workspace."
   (interactive)
   (require 'consult)
   (let ((consult-buffer-list-function #'+consult-buffer-list)
         (consult--buffer-display #'+buffer-display-new-frame))
-    (consult-buffer '(consult-source-buffer
-                      consult-source-other-buffer
-                      consult-source-hidden-buffer))))
+    (consult-buffer '(consult-source-buffer))))
 
 (defalias 'buffer-open-new-frame #'+minibuffer/buffer-open-new-frame
   "Choose a buffer and open it in a newly created Emacs frame.")

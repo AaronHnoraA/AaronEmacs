@@ -3774,6 +3774,7 @@ jit-lock renderer continues to materialize faces only around visible text."
 
 ;; Load other language specific configurations
 (require 'lang/cpp/config)
+(require 'lang/go/config)
 (require 'lang/rust/config)
 (require 'lang/ocaml/config)
 (require 'lang/bazel/config)

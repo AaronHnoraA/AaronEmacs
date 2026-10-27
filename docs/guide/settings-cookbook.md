@@ -697,9 +697,29 @@ Agenda 卡片在插入阶段只读本机最近一次完整快照；Dashboard 可
 host。请求共用一次 15 秒超时，失败显示可点击的 `[retry]`，隐藏的 Dashboard 只标记
 缓存过期。缓存文件写入用同目录临时文件原子替换；读取时禁用 Lisp reader 的求值。
 
-## 新建只读 dashboard / report / hub buffer
+## 新建交互界面或浮窗
 
-需要新建只读面板（`special-mode` 风格）时，**请使用 `aaron-ui-board`**，不要手工构建 face 和 insert 样板：
+新的 Emacs 自建交互页优先使用 ETAF View 和 ETAF UI 公开组件；在顶层 Component
+的 `:setup` 中调用 `(aaron-ui-etaf-provide-theme)`，继承 Aaron 主题色，
+并让浮窗边框与顶栏使用同一色板。小型上下文界面通过 `aaron-ui-float-show-view`
+打开，在 GUI 中取得独立浮窗；
+TTY 入口要退回普通 buffer 或原生命令。用
+`M-x aaron-ui-etaf-preview` 查看主题下的控件实例。设计规则和生命周期见
+[elegant-ui.md](../design/elegant-ui.md)，实现范例见 [dev-guide.md](dev-guide.md) §10。
+
+Dashboard 的 `[config]` 或 `config-dispatch` 的 `c` 打开原生 Config
+Customize，编辑、校验和保存继续由官方 Custom 与 Config 后端承担。
+`[docs]` 或菜单 `h` 打开 Emacs、Noema 与配置文档地图。文档浮窗中的
+“Ask · 询问配置”通过现有 agent-shell → ACP 后端回答，输入和回复都在
+minibuffer；模型在 Config 的 `+config-ask-model` 项修改。
+`m` / `M-x config-manual-panel` 打开个人配置文档，`i` 打开 Emacs 官方
+Info 手册。
+`M-x aaron-ui-document-panel` 可阅读仓库中其他 Markdown 文档。
+
+## 新建简单只读 dashboard / report / hub buffer
+
+只需展示静态内容、使用 `special-mode` 风格的简单报告，可继续使用
+`aaron-ui-board`，不要手工构建 face 和 insert 样板：
 
 ```elisp
 (require 'aaron-ui-board)

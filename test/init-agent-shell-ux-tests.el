@@ -48,29 +48,70 @@
     (should (noema-agent-acp-config-for (car agent))))
   (should-error (+agent-shell--check-agent 'nonsense) :type 'user-error))
 
-(ert-deftest agent-shell-ux-config-question-is-a-reviewable-draft ()
-  "A Config question starts in this repo and remains unsent."
-  (let (started drafted)
-    (cl-letf (((symbol-function 'noema-agent-start)
-               (lambda (agent)
-                 (setq started (list agent default-directory))
+(ert-deftest agent-shell-ux-config-question-uses-hidden-acp-and-echo ()
+  "Docs Ask calls the existing ACP backend without displaying its shell."
+  (let ((+config-ask-model "gpt-6-luna")
+        started configured submitted callback finished)
+    (cl-letf (((symbol-function 'noema-agent-acp-config-for)
+               (lambda (_agent) '((:identifier . codex))))
+              ((symbol-function 'noema-agent-acp-export-config)
+               (lambda (config model)
+                 (setq configured model)
+                 config))
+              ((symbol-function 'noema-agent-acp-start)
+               (lambda (&rest args)
+                 (setq started args)
                  (get-buffer-create " *config-question-test*")))
-              ((symbol-function 'noema-agent-acp-draft)
-               (lambda (buffer text)
-                 (setq drafted (list buffer text)))))
+              ((symbol-function 'noema-agent-acp-subscribe)
+               (lambda (&rest args)
+                 (setq callback (plist-get args :callback))
+                 17))
+              ((symbol-function 'agent-shell-insert)
+               (lambda (&rest args) (setq submitted args)))
+              ((symbol-function '+config--ask-finish)
+               (lambda (_buffer _subscription answer)
+                 (setq finished answer))))
       (unwind-protect
           (progn
-            (+config/ask-agent "配置值从哪里读取？" 'codex)
-            (should (equal started
-                           (list 'codex
-                                 (file-name-as-directory
-                                  (expand-file-name user-emacs-directory)))))
-            (should (eq (car drafted) (get-buffer " *config-question-test*")))
+            (+config/ask-agent "配置值从哪里读取？")
+            (should (equal configured "gpt-6-luna"))
+            (should (eq (plist-get started :focus) nil))
+            (should (eq (plist-get started :render-policy) 'never))
+            (should (eq (plist-get started :origin) 'side))
+            (should (equal (plist-get started :directory)
+                           (file-name-as-directory
+                            (file-truename user-emacs-directory))))
+            (should (eq (plist-get submitted :submit) t))
+            (should (eq (plist-get submitted :no-focus) t))
             (should (string-match-p "docs/guide/documentation-center.md"
-                                    (cadr drafted)))
-            (should (string-match-p "配置值从哪里读取" (cadr drafted))))
+                                    (plist-get submitted :text)))
+            (funcall callback '((:event . agent-message-chunk)
+                                (:data . ((:text-chunk . "从 store 读取。")))))
+            (funcall callback '((:event . turn-complete)))
+            (should (equal finished "从 store 读取。")))
         (when-let* ((buffer (get-buffer " *config-question-test*")))
           (kill-buffer buffer))))))
+
+(ert-deftest agent-shell-ux-config-ask-shows-only-final-answer ()
+  "A one-call Ask reply omits any ACP preamble from the echo area."
+  (should (equal (+config--ask-final-answer
+                  "我会先检查。\n<answer>按 C-x C-f 打开文件。</answer>")
+                 "按 C-x C-f 打开文件。"))
+  (should (equal (+config--ask-final-answer "直接回复。") "直接回复。")))
+
+(ert-deftest agent-shell-ux-config-ask-permissions-stay-headless ()
+  "The quick answer only authorizes reads and never opens permission UI."
+  (let (selected)
+    (should (+config--ask-permission
+             `((:tool-call . ((:kind . "read")))
+               (:options . (((:kind . "allow_once") (:option-id . "read"))))
+               (:respond . ,(lambda (id) (setq selected id))))))
+    (should (equal selected "read"))
+    (should (+config--ask-permission
+             `((:tool-call . ((:kind . "edit")))
+               (:options . (((:kind . "reject_once") (:option-id . "deny"))))
+               (:respond . ,(lambda (id) (setq selected id))))))
+    (should (equal selected "deny"))))
 
 (provide 'init-agent-shell-ux-tests)
 ;;; init-agent-shell-ux-tests.el ends here

@@ -112,9 +112,8 @@
   另一台机器上的绝对路径，请输入 `/fs:目标ID:/路径`。`M-x find-file`
   仍保留 Emacs 原生命令的路径语义。
 - `C-x b`
-  `consult-buffer`：Buffer 候选先列当前 frame 与 workspace 中访问过的 buffer，
-  包括在该 frame 埋藏的 buffer；提示中按 `<` 再按 `o` 可查其他 frame/workspace 的
-  buffer。`Enter` 在当前窗口打开，`Shift+Enter` 在右侧分屏打开，`Cmd+Enter`
+  `consult-buffer`：Buffer 候选跨所有 frame/workspace，包含隐藏的 Eshell 会话和
+  `*Messages*`；不列 `Fundamental`、minibuffer 和内部临时 buffer。`Enter` 在当前窗口打开，`Shift+Enter` 在右侧分屏打开，`Cmd+Enter`
   在下方分屏打开，`Cmd+Shift+Enter` 在新 frame 打开；最近文件、bookmark 等
   Consult 来源同样适用。
   `H-b`、`SPC b b` 使用同一入口。
@@ -585,12 +584,13 @@ Agenda 卡片在启动画面最下面（Recent Files / Projects 之后、footer 
 ### Buffer / Bookmark `SPC b`
 
 - `SPC b b`
-  与 `C-x b` 相同的 Consult buffer 入口
+  与 `C-x b` 相同的 Consult buffer 入口；跨所有 frame/workspace 搜索，
+  包含 `*Messages*` 和 Eshell，略过不适合日常进入的黑名单 buffer
 - `SPC b B` / `H-B`
   使用相同候选，在其他 Emacs 窗口打开
 - `SPC b F` / `M-x buffer-open-new-frame`
-  从当前 frame/workspace 的 buffer 候选中选择，并在**新建的** Emacs frame 打开；
-  `<o` 可选择其他 frame/workspace 的 buffer。Noema Markdown 页面会创建独立 pane。
+  从相同的日常 buffer 候选中选择，并在**新建的** Emacs frame 打开；
+  Noema Markdown 页面会创建独立 pane，Eshell 仍走浮窗。
   原生 `C-x 5 b` 仍按 Emacs 的规则在其他 frame 打开，可能复用已有 frame。
 - `SPC b .`
   打开 `bookmark-actions-menu`；也可用 `M-x bookmark-actions-menu` 搜索
@@ -791,7 +791,8 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC h f`
   `helpful-callable`
 - `SPC h c`
-  设置菜单 `config-dispatch`；在菜单里按 `c` 打开 `config-board`
+  设置菜单 `config-dispatch`；按 `c` 打开原生 `config-board`，按 `h` 阅读
+  Emacs、Noema 与配置文档
 - `SPC h C`
   `helpful-command`
 - `SPC h v`
@@ -948,9 +949,18 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
 - `SPC o S`
   `+portal/ssh`
 - `SPC o s`
-  `+eshell/toggle`：弹出当前目录的命令 shell（eshell），再按一次关掉窗口；
+  `+eshell/toggle`：搜索已有 Eshell 会话或新建；在当前浮窗可选“隐藏当前”。
+  标题栏红黄绿可关闭、隐藏、切换大小；从 Ibuffer 打开 Eshell buffer 也会浮动。
+  在 Eshell 浮窗内按 `Cmd-W` 也会隐藏浮窗，保留会话、输入和任务；再次打开可继续。
+  输入 `exit` 或点红色按钮才结束会话。
+  TTY 下仍用底部窗口；
   `M-x command-shell-run` 在项目根里跑一条命令。原来的 comint shell 用
   `M-x shell-toggle`
+- C/C++/Go 文件中 `C-c C-c`
+  在按项目命名的 Eshell 浮窗中异步构建：有 Makefile 优先 `make`，Go module
+  否则 `go build ./...`，单文件则调用编译器。`C-u C-c C-c` 在成功后运行；
+  项目运行命令和是否默认运行可在对应语言配置里设置。详见
+  [command-shell.md](../design/command-shell.md#语言构建示例)
 - `SPC o w`
   `aaron/open-eww-url`
 - `SPC o x`
@@ -1042,9 +1052,9 @@ frame；`s F` 可按当前 frame 优先排序。后台基础设施 buffer 不显
 `+session-auto-save` 启用。未关联文件的 buffer 不在 Perspective 状态文件中，
 持久 scratch 的正文由其独立状态文件保存。
 
-ibuffer 仍是全局总览；日常 `C-x b`、`H-b`、`SPC b b` 的 Buffer 候选则从本
-frame/workspace 开始，通过 `<o` 临时跨越边界。埋藏 buffer 只从可见 tab 消失，
-仍能在本 frame 的切换候选与 ibuffer 的 `Frame` 标记中找到。
+ibuffer 仍是全局总览；日常 `C-x b`、`H-b`、`SPC b b` 的 Buffer 候选跨全部
+frame/workspace，只排除无需日常进入的黑名单 buffer。埋藏 buffer 只从可见 tab
+消失，仍能在切换候选与 ibuffer 的 `Frame` 标记中找到。
 在 ibuffer 中访问同一 Noema 笔记的重复条目时，会打开它的主页面。`RET`
 在当前窗口打开，`Shift+Enter` 在右侧分屏打开，`Cmd+Enter` 在下方分屏打开；
 `Cmd+Shift+Enter` 在新 frame 打开。列表保留在原窗口。单窗口前缀和不选中窗口
@@ -1559,7 +1569,9 @@ shell 退出时会关闭 buffer；若该 frame 当时只显示这个终端，fra
 
 Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 28×20 XPM 像素图)。它**一直在**,
 没事时站着,有后台任务时开始跑,多于一个任务时在后面跟上数字。
-**鼠标左键点它打开 `M-x activity-board`。** 终端(无图形界面)里自动降级成颜文字
+**鼠标左键点它打开浮动的 `*Activity*` 板面**，不改当前分屏；`M-x activity-board`
+也打开同一个板面。黄色按钮或 `Cmd-W` 隐藏，红色按钮或 `q` 关闭。
+终端(无图形界面)里自动降级成颜文字
 `ᕕ( ᴗ )ᕗ` / `ᕕ( ᐛ )ᗴ`,不会变成空白。
 
 机理只有一条链路,在 [lisp/ui/activity/config.el](../../lisp/ui/activity/config.el):
@@ -1613,7 +1625,8 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 28×20 XPM 像素�
 ETAF 只在第一次打开这个整页时加载，常驻 mode line 和 Dashboard 不会因此加载它。
 
 **移动和其它 board 完全一致**:`j`/`n` 下移,`k`/`p` 上移,`TAB` 下一个按钮,
-`RET` 打开当前行。停止类操作**刻意避开导航键**,放在 `x`/`i`/`X`。
+`RET` 打开当前行。内容超过浮窗高度时，滚轮或 `PageUp`/`PageDown` 可上下滚动。
+停止类操作**刻意避开导航键**,放在 `x`/`i`/`X`。
 按到没绑定的字母在 echo 区列出可用的键。ETAF 行焦点和鼠标点击都调用原来的
 进程／任务动作；`j/k` 与停止键由 Activity 页自己的快捷键层提供。
 

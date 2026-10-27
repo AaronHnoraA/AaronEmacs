@@ -31,18 +31,32 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
   不占窗口。终端程序继续运行；Noema 页面保留编辑状态，渲染由按客户端活动快照停掉。
 - **已结束**：buffer 被 kill，资源释放。只有“结束”动作进入这里。
 
+Ibuffer 保留全局 buffer 总览。日常 `C-x b`、`SPC b b` 的 Consult 候选也跨越
+所有 frame 和 Perspective，但使用黑名单排除不适合让用户进入或日常进入的
+buffer：目前包括 `Fundamental`、minibuffer、JSONRPC 事件和 Emacs Lisp 编译日志，
+以及名称以空格开头的临时内部 buffer；同时保留 Consult 默认排除的补全/日志类
+候选。隐藏的 Eshell 会话、`*Messages*`、
+代码和文档 buffer 仍可搜索；选择 Eshell 时由其浮窗承载。新增无需日常访问的
+内部 buffer 时，应加入这份黑名单。需要按 Perspective 操作 buffer 时，使用
+该工作区的专用入口。
+
 ### buffer 的种类
 
 | 种类 | 例子 | 能否同时在多个窗口 | 判定 |
 | --- | --- | --- | --- |
 | 普通 | 文件、Dired、帮助、输出 | 能 | 默认 |
 | 单实例 | Portal 终端、Portal Web、Excalidraw、Noema 页面、xwidget 网页 | 不能：原生视图只能在一个窗口里，显示到别处会把它移走 | `+buffer-single-instance-p` |
-| popup | popper 弹窗、Portal popup 终端 | 由 popup 管理器决定 | `popper`、`+portal-popup-instance-p` |
+| popup | popper 弹窗、Portal popup 终端、Eshell 与 Activity 浮窗 | 由 popup 管理器决定 | `popper`、`+portal-popup-instance-p`、posframe child frame |
 | 占位 | `*scratch*`、Dashboard、主目录 Dired | 能 | 名字或 mode |
 
 `+buffer-single-instance-p` 是唯一的判定：mode 在 `+single-instance-modes`
 中、buffer 带有 Portal 视图（`portal-view--target`），或 buffer 自己把
 `+buffer-single-instance` 设为 t。窗口规则只问它，不再列举 mode 或包变量。
+
+GUI 中的 Eshell 和皮卡丘打开的 Activity 板面通过可聚焦的 Aaron UI child frame 显示；
+标题栏可拖动、切换大小、隐藏或关闭。隐藏 Eshell 时保留运行中的命令和队列；
+隐藏 Activity 时保留筛选状态，停止不可见页面的自动刷新。关闭会结束对应 buffer。
+Ibuffer 与普通 buffer 打开入口选中 Eshell 时也走浮窗。TTY 使用普通窗口。
 
 ### 关闭动作
 
@@ -57,7 +71,9 @@ buffer 时显示什么。它覆盖普通 buffer、Portal 终端、Noema 页面�
 
 `Cmd-W` 在普通 buffer、终端、Noema 页面和浏览视图上执行相同的窗格动作；不调用
 `kill-buffer`。唯一主窗格时（即使 Treemacs 等 side window 仍在）用既有回退规则，
-popup 按原生 `quit-window` 返回来源。
+popup 按原生 `quit-window` 返回来源。Eshell 的 Aaron UI child frame 是例外：
+在该浮窗内按 `Cmd-W` 只隐藏 child frame，保留 buffer、输入与任务；在普通窗口
+显示的 Eshell 仍走窗格动作。
 `Cmd-Shift-W`（`M-W`）继续调用 Perspective 的 buffer 选择器，选定后才结束 buffer；
 它不参与 `Cmd-W` 的关闭动作。Noema 未显示页面的数量清理另见下文。
 

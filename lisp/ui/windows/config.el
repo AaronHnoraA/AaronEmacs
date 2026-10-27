@@ -664,6 +664,10 @@ NORECORD has the same meaning as in `switch-to-buffer'.  A Noema page gets
 its own editable pane because its xwidget cannot be shared between frames."
   (let ((existing (get-buffer buffer)))
     (cond
+     ((and existing (fboundp '+eshell--route-buffer-p)
+           (+eshell--route-buffer-p existing))
+      (+eshell--display existing)
+      existing)
      ((and existing
            (eq (buffer-local-value 'major-mode existing)
                'xwidget-webkit-mode)

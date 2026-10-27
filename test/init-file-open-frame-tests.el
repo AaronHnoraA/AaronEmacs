@@ -337,9 +337,7 @@
                        display consult--buffer-display)
                  (cons "unused" '(:match t)))))
       (buffer-open-new-frame))
-    (should (equal sources '(consult-source-buffer
-                             consult-source-other-buffer
-                             consult-source-hidden-buffer)))
+    (should (equal sources '(consult-source-buffer)))
     (should (eq scope #'+consult-buffer-list))
     (should (eq display #'+buffer-display-new-frame))
     (should (commandp 'buffer-open-new-frame))

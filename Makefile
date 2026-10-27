@@ -193,6 +193,7 @@ project-workflow-test:
 
 ui-test:
 	$(UI_TOKEN_BATCH) --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)"))' -l test/aaron-ui-tests.el -f ert-run-tests-batch-and-exit
+	$(EMACS) --batch -Q --eval '(setq user-emacs-directory (file-name-as-directory "$(CURDIR)") load-prefer-newer t native-comp-enable-subr-trampolines nil)' --eval '(require (quote package))' --eval '(package-initialize)' -L lisp/core -L lisp/core/aaron-ui -l test/aaron-ui-etaf-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/noema-icon-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-open-place-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/init-windows-tests.el -l test/init-window-lifecycle-tests.el -f ert-run-tests-batch-and-exit

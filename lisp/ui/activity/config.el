@@ -64,6 +64,10 @@
                   (&optional path))
 (declare-function remote-client-process-attributes "remote-core" (pid))
 (declare-function aaron-ui-activity-view "aaron-ui-activity" (state owner))
+(declare-function aaron-ui-float-show "aaron-ui-float" (buffer &rest options))
+(declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
+(declare-function aaron-ui-float-visible-p "aaron-ui-float" (panel))
+(declare-function posframe-workable-p "posframe" ())
 
 (defvar remote-tasks)
 (defvar remote-transfer-jobs)
@@ -761,8 +765,9 @@ board left open on a fast interval is a background cost of its own."
                      (with-current-buffer buffer
                        (if (and (or (null +activity-board--owner-frame)
                                     (frame-live-p +activity-board--owner-frame))
-                                (get-buffer-window
-                                 buffer (or +activity-board--owner-frame t)))
+                                (or (get-buffer-window
+                                     buffer (or +activity-board--owner-frame t))
+                                    (+activity-board--floating-visible-p buffer)))
                            (+activity-board/refresh)
                          ;; A hidden board has no reason to keep a repeating
                          ;; timer.  Reopening it starts with manual refresh.
@@ -1270,6 +1275,30 @@ Reads `timer-list' and `timer-idle-list' only, the same state
       (set-frame-parameter frame '+activity-board-buffer buffer))
     buffer))
 
+(defun +activity-board--floating-visible-p (buffer)
+  "Return non-nil when BUFFER is visible in its Aaron UI floating host."
+  (and (featurep 'aaron-ui-float)
+       (when-let* ((panel (aaron-ui-float-panel-for-buffer buffer)))
+         (aaron-ui-float-visible-p panel))))
+
+(defun +activity-board--display (buffer)
+  "Show BUFFER without changing the parent window layout in a GUI."
+  (if (and (display-graphic-p)
+           (require 'aaron-ui-float nil t)
+           (posframe-workable-p))
+      (aaron-ui-float-show buffer :key buffer :title "后台任务"
+                           :width '(fraction 0.76)
+                           :height '(fraction 0.72)
+                           :owned t)
+    (pop-to-buffer buffer)))
+
+(defun +activity-board--parent-frame ()
+  "Return the ordinary frame that owns the selected frame's Activity view."
+  (let ((frame (selected-frame)))
+    (while (frame-parent frame)
+      (setq frame (frame-parent frame)))
+    frame))
+
 ;;;###autoload
 (defun +activity/board ()
   "Show this frame's view of Emacs background activity."
@@ -1277,7 +1306,7 @@ Reads `timer-list' and `timer-idle-list' only, the same state
   (require 'aaron-ui-activity)
   (+activity--poll t)
   (+activity--refresh)
-  (let* ((frame (selected-frame))
+  (let* ((frame (+activity-board--parent-frame))
          (existing (frame-parameter frame '+activity-board-buffer)))
     (let ((buffer (+activity-board--buffer frame)))
       (condition-case error
@@ -1291,7 +1320,7 @@ Reads `timer-list' and `timer-idle-list' only, the same state
                   (add-hook 'kill-buffer-hook #'+activity-board--cleanup nil t)))
               (setq-local +activity-board--owner-frame frame)
               (+activity-board/refresh))
-            (pop-to-buffer buffer))
+            (+activity-board--display buffer))
         (error
          (unless (eq existing buffer)
            (when (buffer-live-p buffer)

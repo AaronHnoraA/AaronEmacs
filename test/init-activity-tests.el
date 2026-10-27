@@ -116,6 +116,54 @@
         (when (buffer-live-p first) (kill-buffer first))
         (when (buffer-live-p second) (kill-buffer second))))))
 
+(ert-deftest +activity-pikachu-opens-board-in-shared-float ()
+  "The mode-line click uses Aaron UI without replacing a parent window."
+  (require 'aaron-ui-float)
+  (let ((buffer (generate-new-buffer " *activity float test*"))
+        shown)
+    (unwind-protect
+        (cl-letf (((symbol-function 'display-graphic-p)
+                   (lambda (&rest _) t))
+                  ((symbol-function 'posframe-workable-p) (lambda () t))
+                  ((symbol-function 'aaron-ui-float-show)
+                   (lambda (item &rest options)
+                     (setq shown (cons item options))))
+                  ((symbol-function 'pop-to-buffer)
+                   (lambda (&rest _) (ert-fail "Activity replaced a window"))))
+          (should (eq (lookup-key +activity--mode-line-map
+                                  [mode-line mouse-1])
+                      #'+activity/board))
+          (+activity-board--display buffer)
+          (should (eq (car shown) buffer))
+          (should (plist-get (cdr shown) :owned)))
+      (kill-buffer buffer))))
+
+(ert-deftest +activity-visible-float-keeps-auto-refresh-until-hidden ()
+  "The refresh timer treats a visible child frame as an open Activity page."
+  (require 'aaron-ui-float)
+  (+activity-test-isolated
+    (with-temp-buffer
+      (+activity-board-mode)
+      (let ((visible t)
+            (refreshed 0))
+        (cl-letf (((symbol-function 'aaron-ui-float-panel-for-buffer)
+                   (lambda (_buffer) 'activity-panel))
+                  ((symbol-function 'aaron-ui-float-visible-p)
+                   (lambda (_panel) visible))
+                  ((symbol-function '+activity-board/refresh)
+                   (lambda () (cl-incf refreshed))))
+          (+activity-board/toggle-auto-refresh)
+          (let ((timer +activity-board--auto-timer))
+            (unwind-protect
+                (progn
+                  (funcall (timer--function timer))
+                  (should (= refreshed 1))
+                  (should (eq +activity-board--auto-timer timer))
+                  (setq visible nil)
+                  (funcall (timer--function timer))
+                  (should-not +activity-board--auto-timer))
+              (cancel-timer timer))))))))
+
 (ert-deftest +activity-board-quit-returns-and-reopen-keeps-this-frame-filter ()
   "The board uses native window return and retains only this frame's view."
   (+activity-test-isolated

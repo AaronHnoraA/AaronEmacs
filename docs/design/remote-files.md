@@ -160,7 +160,7 @@ buffer 里（`*deleting` 开头的是要删除的），按 `C-c C-c` 才执行�
 传输都是后台进程，Emacs 不等它们。它们进的是 Emacs 自己的后台任务管理，也就是
 模式栏那只皮卡丘：
 
-- 有传输时皮卡丘开始跑，点它（或 `M-x activity-board`）打开 `*Activity*`，
+- 有传输时皮卡丘开始跑，点它（或 `M-x activity-board`）在 GUI 浮窗打开 `*Activity*`，
   传输列在 task 一组，名字前带百分比。`RET` 看传输队列保存的日志；`x` / `i` / `X`
   都通过队列取消，避免目标端文件操作被误记为失败；
 - Dirvish 状态栏在该 target 有传输时显示 `Transfers:2 45%`；

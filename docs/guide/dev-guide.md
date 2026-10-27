@@ -352,19 +352,24 @@ Dape 原生 `dape-restart` 重启。
 
 ### 命令 shell（eshell）
 
-需要一个 shell 跑命令时默认用 eshell，每个 target 上下文一个 buffer。设计和契约见
+需要一个 shell 跑命令时默认用 eshell；未命名命令每个 target 上下文一个 buffer，
+带 `:name` 的自动化任务每个 target 和任务名一个 buffer。设计和契约见
 [command-shell.md](../design/command-shell.md)。
 
 - `SPC o s` / `M-x command-shell`
-  在底部弹出当前目录所在上下文的 eshell；已选中时关掉窗口，buffer 保留
+  搜索已有 Eshell 会话或新建；GUI 下在浮动 child frame 显示，不压缩分屏，
+  当前浮窗可选隐藏，buffer 和任务保留；TTY 下显示在底部。Ibuffer 和 `C-x b`
+  也能搜索并浮动打开 Eshell buffer；`Cmd-T` 仍只管理 Portal 终端
 - `M-x command-shell-run`
   读一条命令，在项目根的 eshell 里排队执行并显示
 - 程序调用：
-  - `(+eshell-run "make test" :directory dir :callback fn)` 立即返回，结束时
-    `fn` 收到 `:status`、`:output`；
-  - `(+eshell-run-sync "git status" :directory dir)` 等到结束，最多等
-    `+eshell-sync-timeout` 秒；
+  - `(+eshell-run "git status" :directory dir :name "repo-check" :callback fn)`
+    异步排队并立即返回，任务 buffer 名为 `*eshell:local/repo-check*`；
+    默认不弹窗；结束时 `fn` 收到 `:status`、`:output`。`:timeout` 可指定执行上限，
+    超时结果带 `:reason timeout`；
+  - `+eshell-run-sync` 只供批处理使用，交互 Emacs 中调用会报错，避免卡住窗口；
   - `+eshell-busy-p`、`+eshell-interrupt`、`+eshell-cancel` 查询、中断和取消。
+- 每个上下文的等待队列与单条输出都有上限；输出被截断时结果带 `:truncated t`
 - 进度条之类就地重画的输出（`ESC[1G`、`ESC[2K`）会就地覆盖，不会叠成多行
 - comint shell 仍可用 `M-x shell-toggle` 打开
 
@@ -871,10 +876,29 @@ Citre 的 definition/reference fallback 也复用 `lsp-mode` 的 `xref-lsp`
 backend，然后才尝试 tags/global；它内置的 Eglot adapter 不在本配置的
 backend list 中。
 
-## 10. Board UI 工具库 (`aaron-ui-board`)
+## 10. UI 开发：ETAF、ETAF UI 与只读 Board
 
-所有只读 dashboard / hub / report buffer 都通过 `lisp/core/aaron-ui/aaron-ui-board.el`
-渲染，该库建立在 `aaron-ui` 语义 palette 之上，提供统一的 Kanagawa Wave 风格：
+新的 Emacs 自建交互界面以 ETAF View、ref 和 Runtime 为默认结构，标准按钮、
+输入、状态、列表和浮层先查 ETAF UI 公开组件。Aaron UI 只提供统一的主题色：
+顶层 Component 的 `:setup` 使用 `(aaron-ui-etaf-provide-theme)`。主题桥在
+`lisp/core/aaron-ui/aaron-ui-etaf.el`，`M-x aaron-ui-etaf-preview` 可查看控件。
+小型上下文 View 可用 `aaron-ui-float-show-view` 放入独立浮窗；普通 buffer
+使用 `aaron-ui-float-show`，两者共用标题栏、隐藏和关闭；GUI 才支持子 frame，
+TTY 应有普通 buffer 或原生命令入口。Dashboard `[config]` 保留官方
+Customize 页面；`[docs]` 用 ETAF 文档浮窗读取本仓库的 Emacs、Noema 与
+配置文档地图，TTY 直接打开 Markdown。
+`config-manual-panel` 用 ETAF UI 的 Markdown 渲染器展示个人配置文档，
+官方 Emacs 手册由内置 Info 呈现。文档浮窗中的“Ask · 询问配置”调用已有
+Noema agent-shell → ACP 后端；问题在 minibuffer 输入，回复在回显区显示，
+不打开完整的 agent-shell 窗口。默认 Codex `gpt-6-luna` 模型可在 Config 的
+`+config-ask-model` 项修改。
+详细契约见 [elegant-ui.md](../design/elegant-ui.md)。
+
+### 简单只读 Board (`aaron-ui-board`)
+
+已有或新建的简单只读 dashboard / hub / report buffer 可通过
+`lisp/core/aaron-ui/aaron-ui-board.el` 渲染。该库建立在 `aaron-ui` 语义
+palette 之上，提供统一的 Kanagawa 风格：
 大标题 + icon、badge 标签/统计、action toolbar、section 分区 + count badge、
 label-badge 字段行、hl-line 行高亮、styled header-line。
 

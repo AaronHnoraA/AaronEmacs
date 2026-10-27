@@ -42,7 +42,7 @@
  :tools  lsp
          ;; tools/lsp requires these at the end of its body; declared here,
          ;; where they actually load, they are registered without moving.
- :lang   cpp rust ocaml bazel haskell python elisp
+ :lang   cpp go rust ocaml bazel haskell python elisp
  :checkers grammar
  :lang   beancount sh java lean
  :noema  jupyter

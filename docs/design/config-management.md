@@ -77,8 +77,15 @@ store 文件只解析受支持的 `(config-store-set '...)` 数据表单，不�
 
 ### 原生 Customize
 
+- Dashboard 顶部的 `[config]` 打开原生 Config Customize；Apply、Save、Reset
+  由 Emacs Custom 和 Config 后端处理。
 - `M-x config-board` 打开 `config` 的原生 Customize group。
 - `M-x config-dispatch`，或 leader `SPC h c`，打开调度菜单。
+- `M-x config-manual-panel` 打开个人配置文档；调度菜单按 `m`。按 `i`
+  打开 Emacs 官方 Info 手册。
+- Dashboard `[docs]` / 菜单 `h` 打开 Emacs、Noema 和配置文档地图；文档
+  浮窗的“Ask · 询问配置”通过 Codex ACP 回答，输入和输出都在 minibuffer。
+  默认模型可在 Config 的 `+config-ask-model` 项修改。
 - `M-x customize-group RET config RET` 也会显示同一批注册项。
 
 Customize 里的 `Apply` 只做运行时生效，不写 `custom.el`；`Save` 通过

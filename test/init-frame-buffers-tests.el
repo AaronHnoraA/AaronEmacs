@@ -306,43 +306,40 @@
                    (buffer-substring-no-properties (point-min) (point-max)))))
       (kill-buffer user-buffer))))
 
-(ert-deftest consult-buffer-default-scope-and-global-escape ()
+(ert-deftest consult-buffer-global-candidates-and-blacklist ()
   (let ((local (generate-new-buffer "consult-frame-local"))
         (other (generate-new-buffer "consult-frame-other")))
     (unwind-protect
         (save-window-excursion
+          (with-current-buffer local (text-mode))
+          (with-current-buffer other (text-mode))
           (switch-to-buffer local)
           (evil-normal-state)
           (should (eq consult-buffer-list-function #'buffer-list))
           (should (equal consult-narrow-key "<"))
           (should (memq local (+consult-buffer-list)))
-          (should-not (memq other (+consult-buffer-list)))
-          (let (scoped-source scoped-other project-source)
+          (should (memq other (+consult-buffer-list)))
+          (let (scoped-source default-sources project-source)
             (cl-letf (((symbol-function 'consult--multi)
-                       (lambda (_sources &rest _args)
+                       (lambda (sources &rest _args)
                          (if (eq consult-buffer-list-function
                                  #'+consult-buffer-list)
                              (setq scoped-source consult-buffer-list-function
-                                   scoped-other
-                                   (funcall (plist-get consult-source-other-buffer
-                                                       :enabled)))
+                                   default-sources sources)
                            (setq project-source consult-buffer-list-function))
                          (cons "unused" '(:match t)))))
               (consult-buffer)
               (consult-buffer '(consult-source-project-buffer)))
             (should (eq scoped-source #'+consult-buffer-list))
-            (should scoped-other)
+            (should-not (memq 'consult-source-other-buffer default-sources))
+            (should-not (memq 'consult-source-hidden-buffer default-sources))
             (should (eq project-source #'buffer-list)))
-          (let ((consult-buffer-list-function #'+consult-buffer-list))
-            (should (assoc (buffer-name other)
-                           (funcall (plist-get consult-source-other-buffer
-                                                :items)))))
           (should (eq (key-binding (kbd "C-x b")) #'consult-buffer))
           (should (eq (key-binding (kbd "SPC b b")) #'consult-buffer)))
       (kill-buffer local)
       (kill-buffer other))))
 
-(ert-deftest consult-buffer-respects-current-perspective ()
+(ert-deftest consult-buffer-crosses-perspectives ()
   (persp-mode 1)
   (let ((original (persp-current-name))
         (first (make-temp-name "consult-workspace-a-"))
@@ -351,17 +348,15 @@
         (second-buffer (generate-new-buffer "consult-second-workspace")))
     (unwind-protect
         (progn
+          (with-current-buffer first-buffer (text-mode))
+          (with-current-buffer second-buffer (text-mode))
           (persp-switch first)
           (switch-to-buffer first-buffer)
           (persp-switch second)
           (switch-to-buffer second-buffer)
           (persp-switch first)
           (should (memq first-buffer (+consult-buffer-list)))
-          (should-not (memq second-buffer (+consult-buffer-list)))
-          (let ((consult-buffer-list-function #'+consult-buffer-list))
-            (should (assoc (buffer-name second-buffer)
-                           (funcall (plist-get consult-source-other-buffer
-                                                :items))))))
+          (should (memq second-buffer (+consult-buffer-list))))
       (persp-switch original)
       (dolist (name (list first second))
         (when (member name (persp-names))
@@ -374,6 +369,7 @@
   (let ((buffer (generate-new-buffer "frame-buried-buffer")))
     (unwind-protect
         (save-window-excursion
+          (with-current-buffer buffer (text-mode))
           (switch-to-buffer buffer)
           (bury-buffer)
           (should-not (memq buffer (+frame-buffer-list)))

@@ -9,6 +9,7 @@
 
 (require 'etaf)
 (require 'aaron-ui)
+(require 'aaron-ui-etaf)
 (require 'aaron-ui-board)
 
 (declare-function +activity-board/refresh "ui/activity/config" ())
@@ -113,8 +114,10 @@
 
 (etaf-define-component aaron-ui-activity-app (&key state owner)
   "Render OWNER's retained Activity STATE."
+  :setup (aaron-ui-etaf-provide-theme)
   :view
-  (column :width 'stretch
+  (column :ref 'activity-scroll :width 'stretch :height '(vh 100)
+          :box-sizing 'border-box :overflow 'scroll
     (box :padding '((lh 1) (ch 2))
          :bgcolor (aaron-ui-activity--color 'bg-elevated "#2A3247")
       (column :width 'stretch

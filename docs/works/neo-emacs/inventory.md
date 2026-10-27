@@ -50,7 +50,7 @@
 | 主题 tokyonight-night；换主题后统一 org block/table 背景、去 help-key-binding 边框 | config.el | `ui/theme`（aaron-ui） | 主题**待定**；“换主题后修 face”的做法**吸收** |
 | window-divider 底边宽度 0（去 modeline 下横线） | config.el | `ui/windows` | **合并**比较 |
 | diff-hl 竖线位图加高（CJK/org 高行之间断裂），三色 foreground 可见 | config.el | `tools/git` | **吸收**：中文行高下同样会断 |
-| modelinexp（1057 行）：powerline 箭头段、按相邻段色差自动配色、modeline 透明度、去掉 modeline 鼠标行为、Java buffer 段、big-font 联动 | modelinexp | `ui/theme`（doom-modeline） | 配色算法、去鼠标**吸收**候选；powerline 外观**待定** |
+| modelinexp（1057 行）：powerline 箭头段、按相邻段色差自动配色、modeline 透明度、去掉 modeline 鼠标行为、Java buffer 段、big-font 联动 | modelinexp | `ui/modeline`（doom-modeline） | **吸收** Evil 状态箭头与主题自动配色；其余不收 |
 | modelinexp 里的微信未读数、护眼计时（AppleScript + launchd plist） | modelinexp | — | **不收**：每秒轮询外部脚本（`run-with-timer 0 1`），违反资源规则；要做的话换成事件源 |
 | awesome-tray（未启用） | modeline | — | **不收** |
 | ultra-scroll 平滑滚动、neoscroll、pulsing-cursor | config.el / packages | `ui/scrollview` | **合并**比较 |
@@ -198,14 +198,10 @@
   - flycheck 规则转到 flymake
   - corfu 外观转到 Company
 - **待你决定**：
-  1. 键位总原则（§1）
-  2. 主题和字体（§2）
-  3. 毛玻璃和自编 Emacs 补丁（§2、§12）
-  4. modeline 外观
-  5. Org 的范围（§9）
-  6. 新 `:app` 模块要哪些（翻译、RSS、Telegram）
-  7. `:input` 分类（Rime、emt、中英空格）
-  8. 他启用而本配置没有的 Doom 模块和语言
+  1. Org 的范围（§9）
+  2. 新 `:app` 模块要哪些（翻译、RSS、Telegram）
+  3. `:input` 分类（Rime、emt、中英空格）
+  4. 他启用而本配置没有的 Doom 模块和语言
 - **不收**：
   - AppleScript 轮询和抢焦点
   - ejc-sql 和 eredis
@@ -381,6 +377,15 @@
   - auto-revert 轮询间隔 2 秒：会增加远程开销；
   - ultra-scroll；
   - 毛玻璃：用户没有要，而且需要自编带补丁的 Emacs，本配置用的是官方二进制。
+
+### modelinexp：状态箭头与主题配色（2026-10-26）
+
+- **吸收**：用户选择 1 和 2。`ui/modeline` 在活动窗口的 Doom modeline 左端
+  显示 Evil 状态色块及 powerline 箭头；从当前主题的 face 前景色中按 CIEDE2000
+  色差选色，切换主题时重选并刷新箭头缓存。Portal 原生视图仍以
+  `[app]` / `[emacs]` 表示键盘归属，不显示 Evil 色块。
+- **不收**：去掉 modeline 鼠标行为（用户未选，原有点击菜单保留）、透明度、
+  Java 类名段、大字号联动、每秒强制刷新、AppleScript 轮询。
 
 ### config.el 其余部分、keymap.el、packages.el（2026-10-27，已完成）
 

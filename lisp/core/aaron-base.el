@@ -1133,20 +1133,30 @@ selection and mark behavior."
 (defun aaron/ibuffer-visit-right ()
   "Visit the Ibuffer row in a new pane on the right."
   (interactive)
-  (ibuffer-current-buffer t)
-  (+open-entry-in-split 'right #'ibuffer-visit-buffer))
+  (let ((buffer (ibuffer-current-buffer t)))
+    (if (and (fboundp '+eshell--route-buffer-p)
+             (+eshell--route-buffer-p buffer))
+        (+eshell--display buffer)
+      (+open-entry-in-split 'right #'ibuffer-visit-buffer))))
 
 (defun aaron/ibuffer-visit-below ()
   "Visit the Ibuffer row in a new pane below."
   (interactive)
-  (ibuffer-current-buffer t)
-  (+open-entry-in-split 'below #'ibuffer-visit-buffer))
+  (let ((buffer (ibuffer-current-buffer t)))
+    (if (and (fboundp '+eshell--route-buffer-p)
+             (+eshell--route-buffer-p buffer))
+        (+eshell--display buffer)
+      (+open-entry-in-split 'below #'ibuffer-visit-buffer))))
 
 (defun aaron/ibuffer-visit-new-frame ()
   "Visit the Ibuffer row in a new Emacs frame."
   (interactive)
-  (+buffer-display-new-frame
-   (aaron-ibuffer-noema-canonical-buffer (ibuffer-current-buffer t))))
+  (let ((buffer (aaron-ibuffer-noema-canonical-buffer
+                 (ibuffer-current-buffer t))))
+    (if (and (fboundp '+eshell--route-buffer-p)
+             (+eshell--route-buffer-p buffer))
+        (+eshell--display buffer)
+      (+buffer-display-new-frame buffer))))
 
 (use-package ibuffer
   :ensure nil

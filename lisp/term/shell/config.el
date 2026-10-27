@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'config)
+(require 'subr-x)
 
 (require 'aaron-ui)
 (require 'remote-core)
@@ -19,10 +20,13 @@
 (declare-function comint-simple-send "comint" (proc string))
 (declare-function ring-elements "ring")
 (declare-function eshell/cd "esh-mode")
+(declare-function eshell-mode "esh-mode" ())
 (declare-function eshell-reset "esh-mode")
 (declare-function eshell-grep "em-unix")
 (declare-function eshell-input-filter-default "em-hist" (input))
 (declare-function eshell-input-filter-initial-space "em-hist" (input))
+(declare-function +eshell-busy-p "term/shell/eshell" (&optional buffer))
+(declare-function +eshell--display "term/shell/eshell" (buffer))
 (declare-function evil-set-initial-state "evil-core")
 (declare-function project-current "project" (&optional maybe-prompt directory))
 (declare-function project-root "project" (project))
@@ -157,9 +161,8 @@
   "Ensure Eshell BUFFER is associated with DIRECTORY."
   (when-let* ((buffer (and (buffer-live-p buffer) buffer))
               (directory (aaron-terminal-normalize-directory directory)))
-    (with-current-buffer buffer
-      (setq default-directory directory))
-    (+eshell--sync-directory buffer directory)))
+    (unless (+eshell-busy-p buffer)
+      (+eshell--sync-directory buffer directory))))
 
 (defun +shell-context-buffer-name (&optional directory)
   "Return the standard shell buffer name for DIRECTORY."
@@ -169,9 +172,20 @@
   "Return the popup shell buffer name for DIRECTORY."
   (+terminal-context-buffer-name "*shell-popup*" directory))
 
-(defun +eshell-context-buffer-name (&optional directory)
-  "Return the standard Eshell buffer name for DIRECTORY."
-  (+terminal-context-buffer-name "*eshell*" directory))
+(defun +eshell-context-buffer-name (&optional directory task-name)
+  "Return the Eshell buffer name for DIRECTORY and optional TASK-NAME.
+Unnamed sessions keep the ordinary per-target name.  A named automation task
+has a separate queue and a readable target/task label in buffer lists."
+  (if (not task-name)
+      (+terminal-context-buffer-name "*eshell*" directory)
+    (unless (and (stringp task-name)
+                 (not (string-empty-p (string-trim task-name))))
+      (user-error "Eshell task name must be a nonempty string"))
+    (let ((label (replace-regexp-in-string
+                  "[^[:alnum:]_.-]+" "-" (string-trim task-name))))
+      (setq label (substring label 0 (min 48 (length label))))
+      (format "*eshell:%s/%s*"
+              (or (+terminal-context-key directory) "local") label))))
 
 (defun +shell-reuse-by-context-a (orig-fn &optional buffer file-name)
   "Reuse `shell' buffers per local-or-remote context."
@@ -186,21 +200,34 @@
       (+shell--ensure-directory buffer target-directory)
       buffer)))
 
-(defun +eshell-reuse-by-context-a (orig-fn &optional arg)
+(defun +eshell--make-buffer (name directory &optional force-new)
+  "Initialize an Eshell buffer named NAME in DIRECTORY without displaying it.
+FORCE-NEW uses a fresh numbered buffer even when NAME already exists."
+  (let ((buffer (if force-new
+                    (generate-new-buffer name)
+                  (get-buffer-create name))))
+    (with-current-buffer buffer
+      (unless (derived-mode-p 'eshell-mode)
+        (setq default-directory directory)
+        (eshell-mode)))
+    buffer))
+
+(defun +eshell-reuse-by-context-a (_orig-fn &optional arg)
   "Reuse `eshell' buffers per local-or-remote context.
 Keep the stock prefix-argument behaviour for explicitly creating or selecting
 numbered sessions."
-  (if arg
-      (funcall orig-fn arg)
-    (let* ((directories (+terminal--resolve-launch-directories default-directory))
-           (startup-directory (car directories))
-           (target-directory (cdr directories))
-           (buffer-name (+eshell-context-buffer-name target-directory))
-           (eshell-buffer-name buffer-name)
-           (buffer (let ((default-directory startup-directory))
-                     (funcall orig-fn nil))))
-      (+eshell--ensure-directory buffer target-directory)
-      buffer)))
+  (let* ((directory (aaron-terminal-normalize-directory default-directory))
+         (name (if arg
+                   (if (numberp arg)
+                       (format "%s<%d>" eshell-buffer-name arg)
+                     eshell-buffer-name)
+                 (+eshell-context-buffer-name directory)))
+         (buffer (+eshell--make-buffer name directory
+                                       (and arg (not (numberp arg))))))
+    (unless arg
+      (+eshell--ensure-directory buffer directory))
+    (+eshell--display buffer)
+    buffer))
 
 (defun +eshell-emacs-state-setup ()
   "Keep eshell out of Evil stateful editing."

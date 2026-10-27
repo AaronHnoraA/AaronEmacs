@@ -307,8 +307,10 @@ This config already has maintenance and workflow entry points. Reuse them:
   `+eshell-buffer` (queued, with status and output) and `SPC o s`
   (`+eshell/toggle`); see `docs/design/command-shell.md`.  Code that needs to
   run a shell command and see it, or hand the user a shell, uses this rather
-  than its own comint buffer or shell process.  Builds, runs and tests stay on
-  `compile` / `+output`; full-screen programs go to Portal.
+  than its own comint buffer or shell process.  The local C/C++/Go `C-c C-c`
+  demo in the language configs uses `+eshell-run-build` and a named Eshell;
+  other builds, runs and tests stay on `compile` / `+output`.  Full-screen
+  programs go to Portal.
 - Compile/maintenance: `+compile/board`, `config-compile-menu`, `make`
   targets documented in `docs/ops/maintenance.md`.
 - Performance diagnostics: `+performance/watch`,
@@ -425,6 +427,19 @@ Do not add a repo-wide "unified tool" just to make unrelated domains look
 consistent. Prefer the existing pattern: keep core behavior in the owning
 module, put operational UI in a small `*-tools.el` module when needed, and
 document the workflow in `docs/`.
+
+## UI Development
+
+For new Emacs-owned interactive surfaces, use ETAF Views and Runtime state,
+ETAF UI's public Components, and the Aaron palette through
+`aaron-ui-etaf-provide-theme`. Use `aaron-ui-float-show-view` for small contextual
+ETAF panels and `aaron-ui-float-show` for ordinary buffers;
+full-page boards remain ordinary buffers or frames unless their own design
+calls for a different presentation. Keep native Customize as the editor for
+registered Config settings. ETAF document panels may read repository Markdown;
+Transient remains the command-menu surface. Existing simple
+read-only reports may keep `aaron-ui-board`. The contracts and entry points are
+in `docs/design/elegant-ui.md` and `docs/guide/settings-cookbook.md`.
 
 ## Performance Diagnostics
 

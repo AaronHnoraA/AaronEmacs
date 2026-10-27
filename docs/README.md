@@ -76,6 +76,7 @@ channels.
 
 - [quick-start.md](guide/quick-start.md) First-time setup, system dependencies, fonts, path conventions, and bootstrap.
 - [daily-usage.md](guide/daily-usage.md) Daily entry points, high-frequency keybindings, and leader-group layout.
+- [documentation-center.md](guide/documentation-center.md) Reading map for this Emacs configuration, Noema, configuration settings, and the official Emacs manual.
 - [settings-cookbook.md](guide/settings-cookbook.md) “I want to change X” guidance that tells you where each kind of change belongs.
 - [dev-guide.md](guide/dev-guide.md) Programming, completion, LSP, debugging, terminals, remote work, browser integration, and AI.
 - [project-guide.md](guide/project-guide.md) Project switching, project workbench flow, and how Treemacs / Perspective fit together.
