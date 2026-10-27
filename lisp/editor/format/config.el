@@ -29,15 +29,15 @@
 From Doom's `+format/region-or-buffer'.  The selection goes to the
 language server's range formatting, which not every server offers."
   (interactive)
-  (if (not (aaron-region-active-p))
+  (if (not (use-region-p))
       (+format/buffer-dwim)
     (unless (and (fboundp '+current-language-server-backend)
                  (+current-language-server-backend))
       (user-error "No active language server in the current buffer"))
     (unless (lsp-feature? "textDocument/rangeFormatting")
       (user-error "The language server cannot format a selection"))
-    (let ((beg (aaron-region-beginning))
-          (end (aaron-region-end)))
+    (let ((beg (region-beginning))
+          (end (region-end)))
       (deactivate-mark)
       (lsp-format-region beg end))))
 

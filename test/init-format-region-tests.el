@@ -41,15 +41,24 @@ was formatted: `buffer', (BEG END), or the `user-error' message."
                  '(5 9))))
 
 (ert-deftest +format-evil-visual-line-selection-is-whole-lines ()
-  (should (equal (init-format-region-tests--run
-                  (lambda ()
-                    (evil-local-mode 1)
-                    (evil-normal-state)
-                    (forward-line 1)
-                    (evil-visual-line)
-                    (evil-visual-refresh))
-                  t)
-                 '(5 9))))
+  ;; Through the command loop: Evil widens the region before the command.
+  (let ((buffer (get-buffer-create " *format-region-test*"))
+        seen)
+    (unwind-protect
+        (with-current-buffer buffer
+          (switch-to-buffer buffer)
+          (insert "one\ntwo\nthree\n")
+          (goto-char (point-min))
+          (evil-local-mode 1)
+          (evil-normal-state)
+          (evil-local-set-key 'visual (kbd "<f9>") #'+format/region-or-buffer)
+          (cl-letf (((symbol-function '+current-language-server-backend) (lambda () 'lsp))
+                    ((symbol-function 'lsp-feature?) (lambda (_method) t))
+                    ((symbol-function 'lsp-format-region)
+                     (lambda (beg end) (setq seen (list beg end)))))
+            (execute-kbd-macro (kbd "j V <f9>"))))
+      (kill-buffer buffer))
+    (should (equal seen '(5 9)))))
 
 (ert-deftest +format-selection-needs-range-formatting ()
   (should (string-match-p

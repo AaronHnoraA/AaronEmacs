@@ -66,30 +66,33 @@
     (should (= beg 18))
     (should (= end 41))))
 
+;; Evil widens the region to the whole Visual selection before a
+;; non-motion command runs, so these go through the command loop.
+(defun init-search-buffer-tests--keys (keys)
+  "Type KEYS from Normal state, then run the search; return (INITIAL BEG END)."
+  (let ((buffer (get-buffer-create " *search-buffer-test*")))
+    (unwind-protect
+        (with-current-buffer buffer
+          (switch-to-buffer buffer)
+          (insert "alpha beta.gamma\nsecond line\nthird line\n")
+          (goto-char (point-min))
+          (evil-local-mode 1)
+          (evil-normal-state)
+          (evil-local-set-key 'visual (kbd "<f9>") #'+search/line-forward)
+          (let (seen)
+            (cl-letf (((symbol-function 'consult-line)
+                       (lambda (&optional initial _start)
+                         (interactive)
+                         (setq seen (list initial (point-min) (point-max))))))
+              (execute-kbd-macro (kbd (concat keys " <f9>"))))
+            seen))
+      (kill-buffer buffer))))
+
 (ert-deftest +search-buffer-evil-visual-word-is-the-input ()
-  (pcase-let ((`(,initial . ,_)
-               (init-search-buffer-tests--run
-                (lambda ()
-                  (evil-local-mode 1)
-                  (evil-normal-state)
-                  (evil-visual-char)
-                  (evil-forward-word-end)
-                  ;; What the command loop's `post-command-hook' does.
-                  (evil-visual-refresh)))))
-    (should (equal initial "alpha"))))
+  (should (equal (car (init-search-buffer-tests--keys "v e")) "alpha")))
 
 (ert-deftest +search-buffer-evil-visual-line-limits-the-search ()
-  (pcase-let ((`(,initial ,beg ,end ,_)
-               (init-search-buffer-tests--run
-                (lambda ()
-                  (evil-local-mode 1)
-                  (evil-normal-state)
-                  (forward-line 1)
-                  (evil-visual-line)
-                  (evil-visual-refresh)))))
-    (should-not initial)
-    (should (= beg 18))
-    (should (= end 30))))
+  (should (equal (init-search-buffer-tests--keys "j V") '(nil 18 30))))
 
 (provide 'init-search-buffer-tests)
 ;;; init-search-buffer-tests.el ends here

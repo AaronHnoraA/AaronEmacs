@@ -5,8 +5,6 @@
 
 ;;; Code:
 
-(require 'aaron-funcs)
-
 ;; =========================
 ;; Ivy
 ;; =========================
@@ -81,10 +79,10 @@ From Doom's `+default/search-buffer': a selection within one line is the
 initial input, matched literally; a selection over several lines limits
 the search to those lines."
   (interactive)
-  (if (not (aaron-region-active-p))
+  (if (not (use-region-p))
       (call-interactively #'consult-line)
-    (let ((beg (aaron-region-beginning))
-          (end (aaron-region-end)))
+    (let ((beg (region-beginning))
+          (end (region-end)))
       (deactivate-mark)
       (if (= (line-number-at-pos beg) (line-number-at-pos end))
           (consult-line (replace-regexp-in-string
