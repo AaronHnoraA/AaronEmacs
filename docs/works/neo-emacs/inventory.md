@@ -171,7 +171,8 @@
 | `tramp-rpc-binaries/` | 本配置已有部署机制 |
 | `ultra-scroll/`、`org-modern-indent/` | 改为包（VC 包注册） |
 | `dotsk.el`、`ds2.el`（ob 扩展）、`db-work.el` | 前两者**待定**（是否用 dot/ds2），后者**不收** |
-| `patches/emacs31`：cursor-animation、ns-alpha-background、ns-glass-effect、ns-opaque-background-faces | **待定**：需要自编 emacs-plus；不编时相关功能必须安静失效 |
+| `patches/emacs31`：cursor-animation、ns-alpha-background、ns-glass-effect、ns-opaque-background-faces | **待定**：需要自编 emacs-plus；不编时相关功能必须安静失效 全文读过：四个补丁只改 C/Objective-C（光标 CALayer 动画、按 `alpha-background` 给各类背景加透明度、`NSGlassEffectView`/`NSVisualEffectView` 毛玻璃与标题栏着色、`:ns-opaque-background` face 属性），没有可脱离自编 Emacs 单独吸收的 Lisp 部分；`patches/emacs30` 是前两个的旧版本，`build.yml` 只启用 glass 与 opaque-faces |
+| modelinexp 的 `hr.py`、`window.py`、`aboutface.org` | **不收**（全文读过）：前两者是蓝牙心率悬浮窗（个人设备）；`aboutface.org` 说明字体、powerline 与透明度配色，内容已由上面 modelinexp 一行覆盖 |
 | `emacs-user.ahk`、`question.org`、`mermaid-config.json` | 前两者**不收**（Windows/个人），mermaid 配置随 `lang/org` |
 
 ## 13. 汇总
