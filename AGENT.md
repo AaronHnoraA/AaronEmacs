@@ -121,7 +121,8 @@ When adding a module:
   takes Doom Emacs as its template).  The core under `lisp/core/` uses
   `aaron-` (`aaron--` private, `aaron/` commands), as Doom's uses `doom-`;
   a module uses `+MODULE-` (`+MODULE--` private, `+MODULE/` commands).  Hook
-  functions end in `-h`, advice in `-a`.  Macros keep Doom's `!` names
+  functions end in `-h`, advice in `-a`; an Evil operator, motion or text
+  object is `+MODULE:NAME` (`+evil:comment`).  Macros keep Doom's `!` names
   (`after!`, `add-hook!`, `setq-hook!`, `defadvice!`, `cmd!`, `letf!`; see
   `lisp/core/aaron-lib.el`); use them instead of a raw
   `with-eval-after-load`, an anonymous hook lambda or an unnamed advice.

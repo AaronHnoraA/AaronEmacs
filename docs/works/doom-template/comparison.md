@@ -512,3 +512,13 @@ Doom 的做法：
 | `compat/+use-package.el`、`compat/init.el` | `:after-call`、`:defer-incrementally` 对应 `aaron-load-packages-incrementally` 与 `aaron-first-*-hook`；其余是 v2 别名 |
 | `cli/+commit-linter.el`、`cli/cli.el` | Conventional Commits 检查与 git hook；本仓库的提交说明不用这种格式，不收 |
 | `demos.org` | 宏的用法示例，对应第 7–8 节已对照的宏 |
+
+## 28. 内核其余文件（全文）
+
+| 文件 | 处理 |
+| --- | --- |
+| `lisp/lib/scratch.el` | **已有**：`emacs/scratch` 有全局与按项目持久化的 scratch |
+| `lisp/cli/loaddefs.el`、`lisp/cli/print.el` | autoload 文件生成（`;;;###autodef` 对应本配置各模块 `autoload/` 里的 `set-…!`）与命令行输出格式；本配置无 Doom CLI |
+| `docs/faq.org` | “只回滚可见 buffer、不用文件监视”的 `doom-auto-revert-mode`：本配置有意用文件通知（`auto-revert-avoid-polling`），远程文件按后端声明的 `remote-file-watch-cost` 决定，不收；`dtrt-indent`、ws-butler 已有；`exec-path-from-shell` 与 `doom env` 的取舍对应本配置的 Remote 环境胶囊 |
+| `docs/contributing.org` | **吸收**命名约定的一条：Evil operator/motion/text object 写作 `+MODULE:NAME`，补进 `AGENT.md`（已有 `+evil:comment` 等）；`-fn` 策略函数后缀本配置尚无用例，不加 |
+| `docs/getting_started.org`、`examples.org`、`appendix.org`、`index.org`、`static/*.example.el`、`QUICKSTART_INTRO`、`VANILLA_SANDBOX`、`.dir-locals.el`、`.gitmodules`、`sources/` | 安装、straight 包管理、profiles、doomscript 示例、术语表与模板；沙盒已在第 12 节吸收为 `elisp-sandbox`，模块文件约定见 `docs/design/module-system.md` |
