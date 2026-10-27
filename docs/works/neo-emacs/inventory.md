@@ -407,3 +407,19 @@
     Java、Org、翻译、RSS、Telegram 相关包随对应模块不收。
 
 至此 neo-emacs 的每个文件都有了去处。
+
+### 复读（2026-10-27）
+
+逐文件重读全部 Lisp 源码（`config.el`、`init.el`、`keymap.el`、`packages.el`、20 个模块的 `config.el`、`lisp/lr-macos-glass.el`、`neoemacs/{dotsk,ds2,db-work}.el`，约 5600 行），对照本配置当前代码核实上面各条的“吸收”确已落地：
+
+| 条目 | 核实 |
+| --- | --- |
+| 复制 `文件:行`、复制文件本身到剪贴板 | `+copy-current-filename`、`+macos/copy-file-to-clipboard`（`SPC f g`） |
+| diff-hl 竖线位图加高与可见颜色 | `tools/git/core.el` 重定义 `diff-hl-bmp-middle` |
+| agent 回复的远程图片不下载 | `+agent-shell-fetch-remote-images`（默认 nil） |
+| eshell 把进度条的光标移动改成回车覆盖 | `+eshell-normalize-output` |
+| 不存重复 kill、先存系统剪贴板 | `kill-do-not-save-duplicates`、`save-interprogram-paste-before-kill` 均为 t |
+| TRAMP 直连异步进程、不加锁、scp 直传、不自动保存远程 | Remote 框架 `lisp/remote/framework/tramp.el` 已设 |
+| modeline 的 Evil 状态块与按色差自动配色 | `ui/modeline`（`color-distance`）；每秒 `force-mode-line-update` 不收（资源规则） |
+| 毛玻璃（`lr-macos-glass.el`）与 C 补丁 | 依赖自编 emacs-plus，未改动 |
+| Java/eglot、org、ejc-sql、ob-dotsk/ds2、telega、eredis、elfeed、awesome-tray、popwin | 用户不用或已有替代，结论同上文各条 |
