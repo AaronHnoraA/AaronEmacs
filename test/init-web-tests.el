@@ -113,6 +113,19 @@ specific rc entries and a #! line still win."
                 (kill-buffer)))))
       (delete-directory dir t))))
 
+(ert-deftest +tree-sitter-missing-grammar-falls-back-to-the-ordinary-mode ()
+  "A file whose grammar is missing opens in its ordinary mode when one
+exists; without one it keeps the ts-mode that language servers know."
+  (require 'tools/tree-sitter/config)
+  (cl-letf* ((available (symbol-function 'treesit-language-available-p))
+             ((symbol-function 'treesit-language-available-p)
+              (lambda (lang &rest args)
+                (and (not (memq lang '(lua go)))
+                     (apply available lang args)))))
+    (let ((routed (+treesit-routed-languages)))
+      (should-not (memq 'lua routed))   ; lua-mode is there
+      (should (memq 'go routed)))))     ; no go-mode installed
+
 (ert-deftest +tree-sitter-visiting-never-offers-to-install-a-grammar ()
   "Opening a file whose grammar is missing does not ask to build it."
   (require 'treesit)

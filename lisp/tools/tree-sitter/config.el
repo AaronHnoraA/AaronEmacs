@@ -6,6 +6,7 @@
 ;;; Code:
 
 (require 'config)
+(require 'cl-lib)
 (require 'seq)
 
 ;; ========== Tree-sitter grammars sources ==========
@@ -42,13 +43,33 @@
 
 
 
+(declare-function treesit-auto-recipe-lang "treesit-auto" (recipe))
+(declare-function treesit-auto-recipe-remap "treesit-auto" (recipe))
+(defvar treesit-auto-recipe-list)
+
+(defun +treesit-routed-languages ()
+  "Return the languages whose files should open in their ts-mode.
+A ts-mode without its grammar has no highlighting and no structural
+indentation, so a language whose grammar is missing keeps its ordinary
+mode when one exists.  When none does (Go, TypeScript), the ts-mode is
+still the only mode language servers and tools know the file by.
+Decided at startup: a grammar installed later takes effect after a
+restart."
+  (cl-loop for recipe in treesit-auto-recipe-list
+           for lang = (treesit-auto-recipe-lang recipe)
+           when (or (treesit-language-available-p lang)
+                    (not (seq-some #'fboundp
+                                   (ensure-list
+                                    (treesit-auto-recipe-remap recipe)))))
+           collect lang))
+
 ;; treesit-auto, solve treesit issues
 (use-package treesit-auto
   :ensure t
   :custom
   (treesit-auto-install nil)              ;; 关键：不要在打开文件时提示/安装
   :config
-  (treesit-auto-add-to-auto-mode-alist 'all)
+  (treesit-auto-add-to-auto-mode-alist (+treesit-routed-languages))
   ;; `js-ts-mode' can require the companion `jsdoc' grammar on newer Emacs
   ;; builds.  Route JS through `+js-auto-mode' so missing grammars fall back
   ;; to `js2-mode' instead of prompting while opening files.
