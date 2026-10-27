@@ -78,5 +78,18 @@
                   (evil-visual-refresh)))))
     (should (equal initial "alpha"))))
 
+(ert-deftest +search-buffer-evil-visual-line-limits-the-search ()
+  (pcase-let ((`(,initial ,beg ,end ,_)
+               (init-search-buffer-tests--run
+                (lambda ()
+                  (evil-local-mode 1)
+                  (evil-normal-state)
+                  (forward-line 1)
+                  (evil-visual-line)
+                  (evil-visual-refresh)))))
+    (should-not initial)
+    (should (= beg 18))
+    (should (= end 30))))
+
 (provide 'init-search-buffer-tests)
 ;;; init-search-buffer-tests.el ends here

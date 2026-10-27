@@ -87,6 +87,32 @@ BUFFER and THRESHOLD are accepted for compatibility."
   (with-current-buffer (or buffer (current-buffer))
     (display-graphic-p)))
 
+(defvar evil-visual-beginning)
+(defvar evil-visual-end)
+
+;; From Doom's `doom-region-active-p', `doom-region-beginning' and
+;; `doom-region-end'.
+(defun aaron-region-active-p ()
+  "Return non-nil when there is a selection, Evil's Visual selection included.
+In Visual Line state the Emacs region Evil keeps can be empty, which
+`use-region-p' does not count."
+  (or (use-region-p)
+      (bound-and-true-p evil-visual-state-minor-mode)))
+
+(defun aaron-region-beginning ()
+  "Return the start of the selection, Evil's Visual selection included."
+  (if (bound-and-true-p evil-visual-state-minor-mode)
+      (marker-position evil-visual-beginning)
+    (region-beginning)))
+
+(defun aaron-region-end ()
+  "Return the end of the selection, Evil's Visual selection included.
+The Emacs region Evil keeps in Visual state leaves out the character
+under the cursor, which the selection includes."
+  (if (bound-and-true-p evil-visual-state-minor-mode)
+      (marker-position evil-visual-end)
+    (region-end)))
+
 (defmacro shut-up! (func)
   "Silence FUNC."
   `(advice-add ,func :around

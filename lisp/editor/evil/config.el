@@ -728,7 +728,7 @@ In a charwise or block selection this is the ordinary `evil-execute-macro'."
     "cd" 'rmsbolt-compile
     "cc" 'compile
     "cC" 'recompile
-    "cf" '+language-server/format-buffer
+    "cf" '+format/region-or-buffer
     "ci" 'show-imenu
     "cI" 'lsp-ui-doc-glance
     "ck" 'kill-compilation

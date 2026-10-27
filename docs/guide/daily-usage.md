@@ -831,7 +831,7 @@ macOS GUI 下也可以直接用 `Option(H-)` 拉平这组编辑操作：
 - `SPC c .`
   code actions menu；`b` build，`B` rerun build，自动识别常见的 `make` / `cmake` / `ninja`
 - `SPC c f`
-  format buffer
+  format buffer；有选区时只格式化选区（语言服务器须支持 range formatting）
 - `SPC c r`
   rename
 - `SPC c o`

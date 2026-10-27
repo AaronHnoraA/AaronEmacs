@@ -21,6 +21,26 @@
     (user-error "No active language server in the current buffer"))
   (+language-server/format-buffer))
 
+(declare-function lsp-format-region "lsp-mode" (s e))
+(declare-function lsp-feature? "lsp-mode" (method))
+
+(defun +format/region-or-buffer ()
+  "Format the selection, or the whole buffer when nothing is selected.
+From Doom's `+format/region-or-buffer'.  The selection goes to the
+language server's range formatting, which not every server offers."
+  (interactive)
+  (if (not (aaron-region-active-p))
+      (+format/buffer-dwim)
+    (unless (and (fboundp '+current-language-server-backend)
+                 (+current-language-server-backend))
+      (user-error "No active language server in the current buffer"))
+    (unless (lsp-feature? "textDocument/rangeFormatting")
+      (user-error "The language server cannot format a selection"))
+    (let ((beg (aaron-region-beginning))
+          (end (aaron-region-end)))
+      (deactivate-mark)
+      (lsp-format-region beg end))))
+
 (defun +format-buffer-maybe ()
   "Format the current buffer when `+format-on-save-mode' is enabled."
   (when (and +format-on-save-mode

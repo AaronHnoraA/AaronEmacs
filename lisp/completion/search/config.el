@@ -5,6 +5,8 @@
 
 ;;; Code:
 
+(require 'aaron-funcs)
+
 ;; =========================
 ;; Ivy
 ;; =========================
@@ -72,8 +74,6 @@
 (declare-function consult-line "consult" (&optional initial start))
 (declare-function consult-line-multi "consult" (query &optional initial))
 (declare-function consult-recent-file "consult" ())
-(defvar evil-visual-beginning)
-(defvar evil-visual-end)
 
 (defun +search/line-forward ()
   "Search the current buffer with `consult-line'.
@@ -81,16 +81,10 @@ From Doom's `+default/search-buffer': a selection within one line is the
 initial input, matched literally; a selection over several lines limits
 the search to those lines."
   (interactive)
-  (if (not (use-region-p))
+  (if (not (aaron-region-active-p))
       (call-interactively #'consult-line)
-    ;; Evil's Visual selection includes the character under the cursor,
-    ;; which the Emacs region it maintains does not.
-    (let ((beg (if (bound-and-true-p evil-visual-state-minor-mode)
-                   evil-visual-beginning
-                 (region-beginning)))
-          (end (if (bound-and-true-p evil-visual-state-minor-mode)
-                   evil-visual-end
-                 (region-end))))
+    (let ((beg (aaron-region-beginning))
+          (end (aaron-region-end)))
       (deactivate-mark)
       (if (= (line-number-at-pos beg) (line-number-at-pos end))
           (consult-line (replace-regexp-in-string

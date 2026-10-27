@@ -95,7 +95,7 @@ local/remote 特判属于待迁移债务，不是新增接入可复制的模式�
 - `SPC c a`
   code action
 - `SPC c f`
-  format buffer
+  format buffer；有选区时只格式化选区（语言服务器须支持 range formatting）
 - `SPC c r`
   rename
 - `SPC c i`
