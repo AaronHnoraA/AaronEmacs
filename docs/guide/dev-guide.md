@@ -88,6 +88,10 @@ local/remote 特判属于待迁移债务，不是新增接入可复制的模式�
 - `breadcrumb`
 - `Treemacs`
 
+Go 工作区文件 `go.work` 使用 Emacs 31 的 `go-work-ts-mode`；对应的 `gowork`
+grammar 安装在 `var/tree-sitter/`。重建运行时目录时，可从配置的
+`treesit-language-source-alist` 重新编译。
+
 ### 常用命令
 
 - macOS GUI 下也可以直接用一层 `Option(H-)` 降深度：

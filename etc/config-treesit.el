@@ -24,6 +24,8 @@
                 "typescript/src")
     (toml "https://github.com/tree-sitter/tree-sitter-toml")
     (yaml "https://github.com/ikatyang/tree-sitter-yaml")
-    (gomod "https://github.com/camdencheek/tree-sitter-go-mod"))
+    (gomod "https://github.com/camdencheek/tree-sitter-go-mod")
+    (gowork "https://github.com/omertuc/tree-sitter-go-work" :commit
+            "949a8a470559543857a62102c84700d291fc984c"))
    (treesit-auto-install-grammar . never))
 )
