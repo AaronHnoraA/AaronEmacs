@@ -300,7 +300,7 @@ Doom 的做法：
 | `emacs/ibuffer`、`ui/treemacs`、`ui/ligatures`、`ui/doom`、`ui/dashboard` | 列宽与图标、Treemacs 主题加载顺序、连字表、Doom 主题与 solaire、Doom 首页 | **不收**：外观，第 1、6 节已列 |
 | `config/default`（`config.el`） | avy 范围、GPG loopback、`RET` 续写注释、智能退格、tabulated-list 的 `q`、macOS `S-iso-lefttab`、woman manpath | **已有或不收**：GPG 已走 minibuffer；续写注释与退格改变手感；其余已有或不适用。`+evil-bindings.el`/`+emacs-bindings.el` 的键位见第 4 节，仍待用户决定 |
 
-未逐个展开的 Doom 模块都是本配置不用的领域：`completion/corfu ivy helm ido`、`editor/god lispy objed parinfer rotate-text`、`email/*`、`input/*`、`app/emms everywhere irc rss`、`os/tty`、`term/shell term vterm`、`tools/ansible biblio collab docker ein llm pass terraform tmux upload make`、`ui/deft doom-quit emoji indent-guides minimap neotree ophints smooth-scroll unicode vi-tilde-fringe zen`，以及本配置不写的语言（`lang/` 下除上面各节以外的模块；`lang/java`、`lang/org` 用户不用）。
+本节只列出当时逐个对照的模块；其余模块（包括本配置不用的领域与语言）随后在第 15–25 节逐文件全文读过，结论记在那里。
 
 ## 12. 补读的内核库与框架文件（全文）
 
@@ -462,7 +462,7 @@ Doom 的做法：
 | `lang/cc` | clangd 限制并行（`-j=2`）**已有**；头文件判断 C/C++/ObjC、ffap 头文件路径、ccls、cmake/glsl/cuda 不收（用户无此需求；`.h` 由 clangd 按编译数据库处理） |
 | `lang/emacs-lisp` | Flymake 加载路径与 eldoc 显示变量值已在第 8–11 节吸收。实测 Emacs 31 已正确缩进带引号的列表与关键字 plist，Doom 的 `calculate-lisp-indent` 覆盖不需要；`;;;` 大纲折叠与本配置的代码折叠后端重复；helpful 前后翻页、ielm 高亮、buttercup、额外着色不收 |
 | `lang/data` | `.plist`、`.xsd` 已是 nxml，`.csv` 已是 csv-mode |
-| `lang/ada`、`agda`、`clojure`、`common-lisp`、`coq`、`crystal`、`csharp`、`dart`、`dhall`、`elixir`、`elm`、`erlang`、`ess`、`factor`、`faust`、`fortran`、`fsharp`、`fstar`、`gdscript`、`graphql`、`graphviz`（见下一节） | 用户不用这些语言；其中通用做法（REPL、eval、lookup 处理器注册）本配置用 `set-language-server!` 与 `compile`/`+output` 代替 |
+| `lang/ada`、`agda`、`clojure`、`common-lisp`、`coq`、`crystal`、`csharp`、`dart`、`dhall`、`elixir`、`elm`、`erlang`、`ess`、`factor`、`faust`、`fortran`、`fsharp`、`fstar`、`gdscript`、`graphql`、`graphviz`、`hy`、`idris`、`janet`、`julia`、`kotlin` | 用户不用这些语言；其中通用做法（REPL、eval、lookup 处理器注册）本配置用 `set-language-server!` 与 `compile`/`+output` 代替 |
 
 ## 24. 模块全文：`lang`（latex–zig）
 
@@ -487,3 +487,15 @@ Doom 的做法：
 | 运行时文件位置 | **已有**：实测 `org-id-locations-file`、`org-clock-persist-file`、`org-publish-timestamp-directory` 都在 `var/org/`，`org-persist` 在 `var/org/persist/`；相对的 `ltximg/` 只在 Org 自己的 LaTeX 预览里生成，本配置的公式预览是 RaTeX |
 | `org-id-new` 小写 UUID、`org-id-locations` 读写失败降级、`org-protocol` 惰性加载、导出时屏蔽 `write-file-functions`、`save-place` 落入折叠区时展开 | 都只在使用 org-id、org-protocol、导出或在 Org 里编辑时起作用，不收 |
 | `+org-cycle-only-current-subtree-h`、`zm`/`zr` 按可见层级开合 | 本配置的折叠由 `editor/fold` 按后端分派，`zj`/`zk` 已在第 19 节吸收 |
+
+## 26. 内核命令行（`bin/`、`lisp/cli/`，全文）
+
+第 14 节只按 `doom-cli.el` 框架记录了命令行；这里逐个记下各子命令脚本。
+
+| 文件 | 处理 |
+| --- | --- |
+| `bin/doom-gc` | **吸收** `--eln`：每个 Emacs 构建只读 `var/eln-cache/` 下自己的 `comp-native-version-dir`，升级后旧目录永远不再加载。本机留着预发布版 31.0.91 的 100M。新增 `+native-comp/purge-stale-versions`（Compile Board `P`、`config-compile-menu` `P`、`make clean-eln-stale`）只删其他构建的目录，当前构建的 native code 保留；board 的 “Other builds” 一行列出它们，“Cached .eln” 改为只数当前构建（原来把旧目录也算进去）。实测本机只装有 31.1 后执行，删掉 31.0.91 目录，缓存从 160M 降到 60M。straight 构建清理、ELPA 清空、仓库 regraft 不适用（本配置用 package.el 与 `package-lock.el`） |
+| `bin/doom-doctor` | 实测本配置不需要：`load-prefer-newer` 为 t，过期 `.elc` 不会被加载（且 `.elc` 每次启动都删）；`$HOME` 不被 Projectile 认作项目根；`var/savehist.el` 40k，远低于它警告的 1MB；Emacs 版本、git、字体、shell、模块缺包检查由 `module-doctor`、`+health` 与 `package-lock` 审计覆盖 |
+| `bin/doom-env` | 环境变量快照文件：本配置的 PATH 由 Remote 环境胶囊按 target 计算（`remote-framework.md`），不读启动时快照 |
+| `bin/doom-sync` | Emacs 版本或系统改变后重建包：package.el 的 `.elc` 由 `load-prefer-newer` 与 native 缓存按版本目录隔离兜住；其余是 straight 同步，不适用 |
+| `bin/doom-upgrade`、`doom-install`、`doom-info`、`doom-make`、`doom.ps1`、`doom.sh`、`doomscript`、`org-capture`、`lisp/cli/autoloads.el`、`lisp/cli/make/completions.el` | 自升级、安装向导、报告信息、`.doom` make 规则、Windows/Android 启动器、脚本解释器、Org capture 浮窗、过时的 autoload 扫描、zsh 补全生成：本配置的对应物是 git、`bootstrap.el`、`bin/emacs-app` 与 `make` |

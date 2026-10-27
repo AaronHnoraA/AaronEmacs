@@ -268,6 +268,7 @@ make bootstrap-health
 - `make compile-native-force`
 - `make clean-build`
 - `make clean-eln`
+- `make clean-eln-stale`
 - `make health`
 
 leader 入口：
@@ -493,7 +494,13 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - clean `.elc`
 - clean config `.eln`
 - reset eln cache
+- purge old ELN（`P`）：只删其他 Emacs 构建留下的版本目录
 - clean all managed artifacts
+
+每个 Emacs 构建只读 `var/eln-cache/` 下自己的 `comp-native-version-dir`，升级
+Emacs 后旧版本目录不再被加载，却一直占着空间。board 的 “Other builds” 一行列出
+它们；`P` 或 `make clean-eln-stale` 只删这些目录，当前构建的 native code 保留，
+不需要重新编译。reset eln cache 则清空整个缓存，之后所有包重新编译。
 
 ### 清 Org 图片、附件和 LaTeX preview cache
 

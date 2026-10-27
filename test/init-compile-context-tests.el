@@ -67,5 +67,29 @@
      (+compile--path-in-config-p
       (concat "/fs:compile-test:" +compile-config-root "lisp/init.el")))))
 
+(ert-deftest +native-comp-purge-keeps-only-the-running-build ()
+  "Purging deletes other builds' cache directories and keeps this build's."
+  (let* ((cache (make-temp-file "eln-cache" t))
+         (+native-comp-cache-dir (file-name-as-directory cache))
+         (comp-native-version-dir "31_1-current")
+         (current (expand-file-name "31_1-current" cache))
+         (old (expand-file-name "31_0_91-old" cache)))
+    (unwind-protect
+        (progn
+          (dolist (dir (list current old))
+            (make-directory dir t)
+            (write-region "" nil (expand-file-name "a.eln" dir)))
+          (write-region "" nil (expand-file-name "README" cache))
+          (should (equal (+native-comp--stale-version-dirs) (list old)))
+          (should (= (+compile--count-cache-eln-files) 1))
+          (cl-letf (((symbol-function '+compile--refresh-board-if-visible)
+                     #'ignore))
+            (should (= (+native-comp/purge-stale-versions) 1)))
+          (should (file-exists-p (expand-file-name "a.eln" current)))
+          (should-not (file-exists-p old))
+          (should (file-exists-p (expand-file-name "README" cache)))
+          (should-not (+native-comp--stale-version-dirs)))
+      (delete-directory cache t))))
+
 (provide 'init-compile-context-tests)
 ;;; init-compile-context-tests.el ends here

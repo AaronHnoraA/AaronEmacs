@@ -333,6 +333,34 @@ Skips test suites and example directories that ship with some packages."
                (abbreviate-file-name dir))
       (+compile--refresh-board-if-visible))))
 
+(defun +native-comp--stale-version-dirs ()
+  "Return cache subdirectories written by other Emacs builds.
+Each build reads only `comp-native-version-dir' under the cache, so
+the others stay behind after an upgrade and are never loaded again."
+  (when (and (boundp 'comp-native-version-dir)
+             (file-directory-p +native-comp-cache-dir))
+    (seq-remove
+     (lambda (dir)
+       (or (not (file-directory-p dir))
+           (equal (file-name-nondirectory dir) comp-native-version-dir)))
+     (directory-files +native-comp-cache-dir t "\\`[^.]"))))
+
+(defun +native-comp/purge-stale-versions ()
+  "Delete the native code other Emacs builds left in the cache.
+Unlike `+native-comp/reset-cache', the running build's code stays, so
+nothing has to be compiled again."
+  (interactive)
+  (+compile--on-client
+    (let ((dirs (+native-comp--stale-version-dirs)))
+      (dolist (dir dirs)
+        (delete-directory dir t))
+      (message (if dirs
+                   "Purged native code of other Emacs builds: %s"
+                 "No native code of other Emacs builds%s")
+               (mapconcat #'file-name-nondirectory dirs ", "))
+      (+compile--refresh-board-if-visible)
+      (length dirs))))
+
 (defun +compile--count-existing-elc-files ()
   "Return the number of managed byte-compiled files that currently exist."
   (cl-count-if #'file-exists-p
@@ -347,10 +375,13 @@ Skips test suites and example directories that ship with some packages."
                              (+compile--target-el-files)))))
 
 (defun +compile--count-cache-eln-files ()
-  "Return the number of `.eln' files in the dedicated native cache."
-  (if (file-directory-p +native-comp-cache-dir)
-      (length (directory-files-recursively +native-comp-cache-dir "\\.eln\\'"))
-    0))
+  "Return the number of the running build's `.eln' files in the native cache."
+  (let ((dir (if (boundp 'comp-native-version-dir)
+                 (expand-file-name comp-native-version-dir +native-comp-cache-dir)
+               +native-comp-cache-dir)))
+    (if (file-directory-p dir)
+        (length (directory-files-recursively dir "\\.eln\\'"))
+      0)))
 
 (defun +compile--maybe-byte-compile-file (file force)
   "Byte-compile FILE when needed.  FORCE recompiles unconditionally."
@@ -631,6 +662,14 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
        (aaron-ui-board-insert-field "Queue size" (number-to-string (+native-comp--queue-size)))
        (aaron-ui-board-insert-field
         "Cached .eln" (number-to-string (+compile--count-cache-eln-files)))
+       (let ((stale (+native-comp--stale-version-dirs)))
+         (aaron-ui-board-insert-field
+          "Other builds"
+          (if stale
+              (format "%s (P purges)"
+                      (mapconcat #'file-name-nondirectory stale ", "))
+            "none")
+          (if stale 'aaron-ui-board-warn 'aaron-ui-board-good)))
        (insert "\n")
 
        ;; Automation
@@ -654,6 +693,8 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
         '((:label "Clean .elc"     :command +compile/clean-byte-artifacts   :help "Delete .elc files")
           (:label "Clean .eln"     :command +compile/clean-native-artifacts :help "Delete .eln files")
           (:label "Reset ELN"      :command +native-comp/reset-cache        :help "Reset ELN cache")
+          (:label "Purge Old ELN"  :command +native-comp/purge-stale-versions
+                  :help "Delete native code of other Emacs builds")
           (:label "Native Log"     :command +native-comp/open-log           :help "Open native log")
           (:label "Auto Native"    :command +compile/toggle-auto-native-on-save
                   :help "Toggle auto native on save")))
@@ -662,7 +703,7 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
        ;; Health hint
        (aaron-ui-board-insert-section "Health")
        (aaron-ui-board-insert-key-hints
-        "Keys: g refresh  b byte  n native  f byte-file  F native-file  c clean .elc  C clean .eln  s smoke  ? dispatch  q quit")))))
+        "Keys: g refresh  b byte  n native  f byte-file  F native-file  c clean .elc  C clean .eln  P purge other builds  s smoke  ? dispatch  q quit")))))
 
 (defun +compile/board ()
   "Open the compile management board."
@@ -687,6 +728,7 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
         (local-set-key (kbd "c") #'+compile/clean-byte-artifacts)
         (local-set-key (kbd "C") #'+compile/clean-native-artifacts)
         (local-set-key (kbd "X") #'+native-comp/reset-cache)
+        (local-set-key (kbd "P") #'+native-comp/purge-stale-versions)
         (local-set-key (kbd "l") #'+native-comp/open-log)
         (local-set-key (kbd "o") #'+compile/open-docs)
         (local-set-key (kbd "t") #'+compile/toggle-auto-native-on-save)
@@ -728,6 +770,7 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
     ("c" "clean .elc" +compile/clean-byte-artifacts)
     ("C" "clean config .eln" +compile/clean-native-artifacts)
     ("X" "reset eln cache" +native-comp/reset-cache)
+    ("P" "purge other builds' eln" +native-comp/purge-stale-versions)
     ("a" "clean all managed artifacts" +compile/clean-all-artifacts)]
    ["Health"
     ("s" "startup smoke"

@@ -26,7 +26,7 @@ UI_TOKEN_BATCH = $(EMACS) --batch -Q -L lisp/core/aaron-ui -l lisp/core/aaron-ui
 .PHONY: default help up setup setup-full bootstrap-health install emacs-binary-install emacs-binary-update emacs-binary-verify portal-build remote-ikernel-install lock audit-lock doctor build build-force \
         noema-web-build \
         compile compile-byte compile-byte-force compile-native compile-native-force \
-        clean clean-build clean-elc clean-eln clean-state state-backup state-restore state-baseline state-check test-baseline test-check \
+        clean clean-build clean-elc clean-eln clean-eln-stale clean-state state-backup state-restore state-baseline state-check test-baseline test-check \
         health health-startup health-byte health-native core-test ui-test activity-test performance-test ui-tokens audit-ui-tokens \
         remote-test remote-source-test remote-transfer-test remote-contract-test remote-conformance-test remote-byte-check remote-check remote-e2e remote-cleanup-live-smoke remote-route-benchmark remote-local-visit-benchmark remote-ssh-visit-benchmark remote-ssh-write-benchmark remote-directory-benchmark \
 		lsp-test writing-test latex-preview-test lsp-live-smoke lsp-remote-live-smoke lsp-remote-tty-smoke lsp-remote-gui-smoke lsp-gui-company-popup lsp-key-to-screen lsp-existing-file-live-probe remote-task-live-smoke remote-task-disconnect-smoke remote-terminal-live-smoke \
@@ -81,6 +81,7 @@ help:
 	  '  make clean-build          Remove managed .elc and config-owned .eln' \
 	  '  make clean-elc            Remove managed .elc files' \
 	  '  make clean-eln            Remove config-owned .eln files and reset ELN cache' \
+	  '  make clean-eln-stale      Delete native code left by other Emacs builds' \
 	  '  make clean-state          Remove ./var runtime state' \
 	  '  make health               Run startup + byte + native smoke checks' \
 	  '  make health-startup       Run startup smoke check' \
@@ -275,6 +276,9 @@ clean-elc:
 clean-eln:
 	$(BATCH) --eval '(+compile/clean-native-artifacts)'
 	$(BATCH) --eval '(+native-comp/reset-cache)'
+
+clean-eln-stale:
+	$(BATCH) --eval '(+native-comp/purge-stale-versions)'
 
 clean-state:
 	rm -rf ./var
