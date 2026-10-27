@@ -218,7 +218,7 @@ Doom 的做法：
   - `undo-tree-auto-save-history`：去掉 `aaron-base` 里两处与存储值相同的 `setq`。`persp-state-default-file` 是登记前给的计算默认值，标 `aaron-allow`。
   - 键冲突 5 处：删除被后加载模块覆盖、从未生效的绑定（`aaron-base` 的 `` M-` `` popper-cycle、`ui/windows` 的 `C-c w s`、`config/default` 的 `M-o` link-hint、`term/portal` 的 `C-c w p/P`）。`daily-usage.md` 里写的 `C-c w p/P` 移入/移出 popup 本来就不生效，已改为右键菜单。`term/portal/popup.el` 的 `global-set-key` 改用 `general-define-key`。
   - 验证：`config-setq` 0 处，键冲突 0 处；`state-check` 只剩 `hexl-mode-map`（加载时复制了当时的 `global-map`）里两条旧绑定消失；`test-check` 全部一致。
-- [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。leader 的 10 个空位已加入；首次使用延迟已按用户选择吸收，`save-place` 与 Emacs 默认开启的 `show-paren` 保留原时机；其他手感候选仍待决定。
+- [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。leader 的 10 个空位已加入；首次使用延迟已按用户选择吸收，`save-place` 与 Emacs 默认开启的 `show-paren` 保留原时机。全局默认值经复核建议维持现值；占用中的键位、智能退格和注释续行按保留原有手感处理。
 - [x] P1e 模块目录比对：[comparison.md](comparison.md) 第 1 节。
 - [x] 启用模块的实现对照：[comparison.md](comparison.md) 第 6 节。工作区切换前清理
   Evil Visual/普通选区；删除 Winner、tab 同步、tab line 和导航里从另一种
@@ -229,11 +229,25 @@ Doom 的做法：
   savehist 保存 kill ring、recentf 定时保存、大段删除后继续自动保存、保存后重判
   major mode、minibuffer 提示符不可进入、`J` 去注释符与 `gq` 不压缩空格、跳转时
   打开折叠、Magit 关长行优化、PDF 页面隐藏光标、apropos 用 Helpful、复制项目相对
-  路径。延迟关闭 LSP server 先记为缺口 G-L1，后已按契约实现（第 21 节）。第 2 节的手感
-  与第 4 节未吸收的键位候选仍待用户决定。
+  路径。延迟关闭 LSP server 先记为缺口 G-L1，后已按契约实现（第 21 节）。
 - [x] 逐文件补完（2026-10-27）：`core/lisp/lib/` 每个文件、框架文件和本配置用到的
   每个语言与工具模块，结果在 [comparison.md](comparison.md) 第 8–11 节。期间修了
   本配置自己的缺陷：`SPC f D` 不进废纸篓、加密文件的 undo 历史写成明文、Elisp 的
   Flymake 编译检查在第一个 `require` 就失败、lsp-mode 按 server id 的签名提炼对
   `+rust-analyzer`/`+clangd` 不生效、`.lock` 全按 TOML、`.mts`/`.cts` 无模式、macOS
   上 `locate` 查不到、打开文件仍会提示安装 grammar。
+
+## 尚可选择的可见行为
+
+技术合并和逐文件审计已完成。以下做法会改变现有操作或外观，当前建议保留现值；
+若用户选择其中一项，再按 [comparison.md](comparison.md) 的证据单独实施。
+
+| 行为 | 本配置现状 | Doom 做法 |
+| --- | --- | --- |
+| Helpful 源码链接 | 在当前帮助窗格打开源码 | 回到发起帮助的窗口打开 |
+| wdired / wgrep 完成后 | Dired 或搜索结果窗继续显示 | 关闭对应弹窗 |
+| 首个图形 frame 的背景 | `bin/emacs-app` 隐藏启动，主题加载后显示 | 在 `initial-frame-alist` 写死背景色以减少白底闪烁 |
+
+第 2 节的全局默认值差异已复核并建议保留；第 4 节的已占用键位不覆盖。
+neo-emacs 的初筛“待定”另以 [最终审计记录](../neo-emacs/inventory.md) 为准，
+其中各文件均已有吸收、合并或不收的去处。
