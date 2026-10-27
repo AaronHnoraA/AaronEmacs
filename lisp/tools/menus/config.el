@@ -25,9 +25,8 @@
 ;; Tips for next keystroke
 (use-package which-key
   :ensure t
-  :defer 2
+  :hook (aaron-first-input . which-key-mode)
   :config
-  (which-key-mode 1)
   (which-key-add-key-based-replacements
     "C-c !" "buffer diagnostics"
     "C-c ?" "diagnostics hub"
@@ -163,7 +162,7 @@
 
 (use-package gcmh
   :ensure t
-  :hook (after-init . gcmh-mode)
+  :hook (aaron-first-buffer . gcmh-mode)
   :init
   ;; Follow Doom's strategy: wait longer while active, then collect more
   ;; aggressively after a real idle period.

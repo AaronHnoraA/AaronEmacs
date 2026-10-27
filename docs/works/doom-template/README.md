@@ -218,7 +218,7 @@ Doom 的做法：
   - `undo-tree-auto-save-history`：去掉 `aaron-base` 里两处与存储值相同的 `setq`。`persp-state-default-file` 是登记前给的计算默认值，标 `aaron-allow`。
   - 键冲突 5 处：删除被后加载模块覆盖、从未生效的绑定（`aaron-base` 的 `` M-` `` popper-cycle、`ui/windows` 的 `C-c w s`、`config/default` 的 `M-o` link-hint、`term/portal` 的 `C-c w p/P`）。`daily-usage.md` 里写的 `C-c w p/P` 移入/移出 popup 本来就不生效，已改为右键菜单。`term/portal/popup.el` 的 `global-set-key` 改用 `general-define-key`。
   - 验证：`config-setq` 0 处，键冲突 0 处；`state-check` 只剩 `hexl-mode-map`（加载时复制了当时的 `global-map`）里两条旧绑定消失；`test-check` 全部一致。
-- [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。leader 的 10 个空位已按用户决定加入；其他手感候选仍待决定。
+- [x] P1d 默认行为与键位比对：[comparison.md](comparison.md) 第 2–4 节。leader 的 10 个空位已加入；首次使用延迟已按用户选择吸收，`save-place` 与 Emacs 默认开启的 `show-paren` 保留原时机；其他手感候选仍待决定。
 - [x] P1e 模块目录比对：[comparison.md](comparison.md) 第 1 节。
 - [x] 启用模块的实现对照：[comparison.md](comparison.md) 第 6 节。工作区切换前清理
   Evil Visual/普通选区；删除 Winner、tab 同步、tab line 和导航里从另一种

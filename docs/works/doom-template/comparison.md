@@ -64,19 +64,20 @@ Doom 的模块与本配置模块的对应关系，按 Doom 的分类排列。语
 
 ## 3. 延迟到首次使用（Doom 的启动优化）
 
-Doom 不在启动时开启这些模式，而是挂到生命周期 hook 上（本配置
-已经有这些 hook，见 `aaron-emacs`）。本配置现在都在 `after-init` 开启：
+Doom 将这些模式挂到生命周期 hook 上。本配置已按用户选择延迟适合的模式；
+`aaron-emacs` 的 `first-file` 在首个文件读取前触发，`first-input` 在首个命令前触发：
 
-| 模式 | Doom 的时机 | 本配置 |
+| 模式 | Doom 的时机 | 本配置现状 |
 | --- | --- | --- |
-| `recentf-mode` | `first-file` | `after-init`（`aaron-base`） |
-| `savehist-mode`、`save-place-mode` | `first-input` | `after-init`（`aaron-base`） |
-| `show-paren-mode` | `first-buffer` | `after-init` |
-| `global-hl-line-mode` | `first-input` | `after-init` |
-| `global-so-long-mode` | `first-file` | `after-init` |
-| `which-key-mode` | `first-input` | 模块加载时（`tools/menus`） |
-| `global-auto-revert-mode` | `first-file` | 模块加载时（`config/default`） |
-| `gcmh-mode` | `first-buffer` | `after-init`（`tools/menus`） |
+| `recentf-mode` | `first-file` | `first-file`；启动 Dashboard 的 Recent Files 区块会按需先启用它 |
+| `savehist-mode` | `first-input` | `first-input` |
+| `save-place-mode` | `first-input` | 保留 `after-init`：首个 Dired 目录的定位钩子与 `first-file` 同时触发，延迟启用会错过该目录 |
+| `show-paren-mode` | `first-buffer` | Emacs 31 默认已开启，无需重复启用 |
+| `global-hl-line-mode` | `first-input` | 图形界面的 `first-input` |
+| `global-so-long-mode` | `first-file` | `first-file` |
+| `which-key-mode` | `first-input` | `first-input` |
+| `global-auto-revert-mode` | `first-file` | 注册文件钩子仍在启动时，模式在 `first-file` 启用 |
+| `gcmh-mode` | `first-buffer` | `first-buffer` |
 
 模块账本还发现两处启动期间的重加载：
 
@@ -89,7 +90,10 @@ Doom 的做法：
 - 把重包放进 `aaron-load-packages-incrementally`，空闲时分块加载；
 - 把模式挂到 `first-*` hook 上。
 
-这样做后，用户看到的功能不变，变化的只是“第一次用到时才就绪”的时机。改动需要用户确认，因为首次打开文件或首次按键那一刻会多付出这部分成本。
+用户已选择评估并吸收这组首次使用延迟。首次打开文件、首次按键和首次显示普通 buffer
+分别承担对应的加载成本；Dashboard 显示 Recent Files 时也会启用 recentf。
+`save-place` 因首个 Dired 目录的行为而保留启动启用，
+`show-paren` 已由 Emacs 31 默认开启。首个文件的位置恢复和自动重载跟踪用定向测试验证。
 
 ## 4. leader 布局（F）
 

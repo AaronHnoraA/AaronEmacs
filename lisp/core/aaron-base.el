@@ -826,10 +826,7 @@ glyph keeps its shape while point moves through composed text.")
 (when (fboundp 'set-scroll-bar-mode)
   (set-scroll-bar-mode nil))
 
-;; Highlight parenthesises
-(use-package paren
-  :ensure nil
-  :hook (after-init . show-paren-mode))
+;; Emacs 31 already enables `show-paren-mode' by default.
 
 ;; Show line/column number and more
 (use-package simple
@@ -870,13 +867,15 @@ glyph keeps its shape while point moves through composed text.")
 ;; Back to the previous position
 (use-package saveplace
   :ensure nil
+  ;; Dired's first-file trigger runs inside its position hook, so saveplace
+  ;; must register its own hook before that first Dired buffer is opened.
   :hook (after-init . save-place-mode))
 
 ;; Highlight current line in GUI
 (use-package hl-line
   :ensure nil
   :when (display-graphic-p)
-  :hook (after-init . global-hl-line-mode))
+  :hook (aaron-first-input . global-hl-line-mode))
 
 ;; Enable `repeat-mode' to reduce key sequence length
 ;;
@@ -892,7 +891,7 @@ glyph keeps its shape while point moves through composed text.")
 ;; Workaround with minified source files
 (use-package so-long
   :ensure nil
-  :hook (after-init . global-so-long-mode))
+  :hook (aaron-first-file . global-so-long-mode))
 
 ;; Completion engine
 (use-package minibuffer
@@ -1271,7 +1270,7 @@ selection and mark behavior."
 ;; Recently opened files
 (use-package recentf
   :ensure nil
-  :hook (after-init . recentf-mode)
+  :hook (aaron-first-file . recentf-mode)
   :custom
   (recentf-auto-cleanup 'never)
   (recentf-exclude '(;; Folders on MacOS start
@@ -1287,7 +1286,7 @@ selection and mark behavior."
 
 (use-package savehist
   :ensure nil
-  :hook (after-init . savehist-mode)
+  :hook (aaron-first-input . savehist-mode)
   :custom
   ;; Mark rings hold markers, which savehist can never write.
   (savehist-additional-variables '((kill-ring . 50))))

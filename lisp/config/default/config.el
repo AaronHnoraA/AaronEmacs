@@ -42,7 +42,9 @@
   (global-auto-revert-non-file-buffers t)
   (auto-revert-verbose nil)
   :config
-  (global-auto-revert-mode 1)
+  ;; Keep the per-file hooks below installed at startup; only the global
+  ;; scanning mode waits until the first file or Dired buffer is opened.
+  (add-hook! 'aaron-first-file-hook #'global-auto-revert-mode)
 
   (declare-function remote-file-watch-cost "remote-fs"
                     (file-name &optional adapter))
