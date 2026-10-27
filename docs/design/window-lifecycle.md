@@ -46,16 +46,18 @@ buffer：目前包括 `Fundamental`、minibuffer、JSONRPC 事件和 Emacs Lisp 
 | --- | --- | --- | --- |
 | 普通 | 文件、Dired、帮助、输出 | 能 | 默认 |
 | 单实例 | Portal 终端、Portal Web、Excalidraw、Noema 页面、xwidget 网页 | 不能：原生视图只能在一个窗口里，显示到别处会把它移走 | `+buffer-single-instance-p` |
-| popup | popper 弹窗、Portal popup 终端、Eshell 与 Activity 浮窗 | 由 popup 管理器决定 | `popper`、`+portal-popup-instance-p`、posframe child frame |
+| popup | popper 弹窗、Portal popup 终端、Eshell 与统一监控浮窗 | 由 popup 管理器决定 | `popper`、`+portal-popup-instance-p`、posframe child frame |
 | 占位 | `*scratch*`、Dashboard、主目录 Dired | 能 | 名字或 mode |
 
 `+buffer-single-instance-p` 是唯一的判定：mode 在 `+single-instance-modes`
 中、buffer 带有 Portal 视图（`portal-view--target`），或 buffer 自己把
 `+buffer-single-instance` 设为 t。窗口规则只问它，不再列举 mode 或包变量。
 
-GUI 中的 Eshell 和皮卡丘打开的 Activity 板面通过可聚焦的 Aaron UI child frame 显示；
+GUI 中的 Eshell 和统一监控板面通过可聚焦的 Aaron UI child frame 显示；
+Dashboard `[monitor]` 与皮卡丘打开同一个监控 buffer，分别选中性能总览和后台任务。
 标题栏可拖动、切换大小、隐藏或关闭。隐藏 Eshell 时保留运行中的命令和队列；
-隐藏 Activity 时保留筛选状态，停止不可见页面的自动刷新。关闭会结束对应 buffer。
+隐藏监控时保留页签与筛选状态，并停止性能采样及后台任务页的自动刷新。
+关闭会结束对应 buffer。
 Ibuffer 与普通 buffer 打开入口选中 Eshell 时也走浮窗。TTY 使用普通窗口。
 
 ### 关闭动作

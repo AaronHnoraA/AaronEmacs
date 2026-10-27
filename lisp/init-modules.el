@@ -67,7 +67,6 @@
  :os     (:when (eq system-type 'darwin)
            (macos-tools :autoload (macos-tools-menu macos-reveal-in-finder
                                    macos-reveal-project-in-finder)))
- :lang   (org :after org)
  :tools  (zoxide :optional t) (agent :optional t) copilot
  :completion minibuffer consult-project
  :editor snippets file-templates

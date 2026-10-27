@@ -1,42 +1,34 @@
 # Research Notes Workflow
 
-这份文档回答一个实际问题：
-
-- 科研笔记到底用 `org`
-- 还是用 `jupytext` / `ipynb`
-- 要不要让 `org` 再同步成 notebook
-
-这套配置里，编程语言的交互执行层统一到 Jupyter。`org` 里的 `python` / `sage` / `maple` 源块本身就会走 Jupyter 后端，`jupytext` 则是另一条脚本优先的 notebook 工作流。D-023 `.noema` 是另一类文件：它是 AI prompt 与工作流程文档，work 块走 agent，不启动 Jupyter kernel。
-
-所以这里不建议把它们再强行串成一条 `org -> jupytext -> ipynb` 的双向同步链。
+研究笔记写在 Noema Markdown 中；交互实验使用 Jupyter；稳定代码放进项目的
+`src/`。`.noema` 用于 Agent 工作流程，work 块不启动 Jupyter kernel。
 
 ## 1. 核心原则
 
-不要把 `org` 和 `ipynb` 维护成同一份内容的两个真源。
+不要把笔记和 notebook 维护成同一份内容的两个真源。
 
 更稳的做法是：
 
-- `org` 是知识库、研究日志、结构化笔记
+- Noema Markdown 是知识库、研究日志和结构化笔记
 - `jupytext` / `ipynb` 是实验工作台、交互运行环境、分享载体
 - 稳定代码放进 `src/`、脚本或包里，不长期埋在文档里
 
 一句话：
 
-- `org` 管“想法、问题、结论、结构”
+- Noema 笔记管“想法、问题、结论、结构”
 - `jupytext` 管“试验、输出、图、交互”
 - `src` 管“复用代码”
 
-## 2. 为什么不建议 `org -> jupytext -> ipynb`
+## 2. 为什么不做笔记与 notebook 的双向同步
 
-原因很简单：`org` 和 notebook 不是同一种文档模型。
+笔记和 notebook 有不同的文档模型。
 
-`org` 强在：
+Noema Markdown 强在：
 
-- heading 层级
-- TODO 和 agenda
-- property drawer
-- 跨主题组织
-- 导出和长文档写作
+- Wiki 链接、页面搜索和跨主题组织
+- Agenda 任务和研究日志
+- 叙述、推导和结论
+- `@@cell` 与 Agent 工作流的按需入口
 
 notebook 强在：
 
@@ -47,8 +39,8 @@ notebook 强在：
 
 如果你想让两边都当主格式，通常会出现几个问题：
 
-- 为了迁就 notebook，`org` 会越写越不像 `org`
-- 为了迁就 `org`，notebook 会失去自然的 cell 结构
+- 为了迁就 notebook，笔记会失去清晰的叙述结构
+- 为了迁就笔记，notebook 会失去自然的 cell 结构
 - 元数据、标题结构、输出、折叠语义并不天然一一对应
 - 最后你要处理的是同步问题，不是研究问题
 
@@ -56,9 +48,9 @@ notebook 强在：
 
 ## 3. 怎么分工
 
-### 3.1 什么时候用 `org`
+### 3.1 什么时候用 Noema 笔记
 
-下面这些内容，优先放 `org`：
+下面这些内容，优先放 Noema Markdown：
 
 - 研究问题定义
 - 文献摘录和批注
@@ -68,7 +60,7 @@ notebook 强在：
 - 对多个实验结果的对照总结
 - 最终结论和下一步行动
 
-如果一个文件的重点是“把事情讲清楚”，它就应该是 `org`。
+如果一个文件的重点是“把事情讲清楚”，它就应该是 Noema 笔记。
 
 ### 3.2 什么时候用 `jupytext` / `ipynb`
 
@@ -85,7 +77,7 @@ notebook 强在：
 
 ### 3.3 什么时候抽到 `src/`
 
-下面这些内容，不应该长期留在 `org` 或 notebook：
+下面这些内容，不应该长期留在笔记或 notebook：
 
 - 重复使用的函数
 - 数据清洗和特征工程逻辑
@@ -135,10 +127,10 @@ fresh Agent Run，`F` 直接 fork，`X` 分别处理“删 WorkNode”“解绑 
 ```text
 project/
   notes/
-    inbox.org
-    daily.org
-    topic-a.org
-    paper-reading.org
+    inbox.md
+    daily.md
+    topic-a.md
+    paper-reading.md
   experiments/
     exp-001-baseline.py
     exp-001-baseline.ipynb
@@ -167,7 +159,7 @@ project/
 
 ### 5.1 新想法阶段
 
-1. 在 `notes/inbox.org` 或当天的研究日志里写下问题。
+1. 在 `notes/inbox.md` 或当天的研究日志里写下问题。
 2. 明确这次实验要回答什么，不要一上来就开跑。
 3. 如果需要交互探索，在 `experiments/` 新建一个 `jupytext` 配对实验。
 
@@ -184,7 +176,7 @@ project/
 
 ### 5.3 沉淀阶段
 
-实验一旦回答了一个具体问题，就回到 `org`，把下面几项整理进去：
+实验一旦回答了一个具体问题，就回到 Noema 笔记，把下面几项整理进去：
 
 - 问题是什么
 - 数据或环境是什么
@@ -202,7 +194,7 @@ project/
 
 - 保留 `ipynb` 作为实验记录或分享件
 - 保留配对脚本作为可版本控制的主实验文本
-- 在 `org` 中保留解释、结论和索引
+- 在 Noema 笔记中保留解释、结论和索引
 
 这里推荐的主线是：
 
@@ -214,26 +206,25 @@ project/
 推荐的数据流向是：
 
 ```text
-问题/计划 -> org
+问题/计划 -> Noema Markdown
 探索/运行 -> jupytext or ipynb
 稳定逻辑 -> src
-结论/总结 -> org
+结论/总结 -> Noema Markdown
 分享/展示 -> ipynb or exported output
 ```
 
 不要追求：
 
 ```text
-org <-> jupytext <-> ipynb
+notes.md <-> jupytext <-> ipynb
 ```
 
 因为这会把系统变成“同步系统”，而不是“研究系统”。
 
 ## 7. 你的这套 Emacs 配置里怎么落地
 
-这套配置已经把两条路径都配好了：
+这套配置已经把各条路径配好了：
 
-- `org` 源块可以直接用 Jupyter 后端执行
 - 普通 Markdown 笔记里的 `@@cell(language, session)` 块由 Noema 自己的 Jupyter manager 执行；
   源码和输出保存在笔记旁 `.cell/` 的标准 ipynb sidecar 中，并在 Emacs 的源码投影里编辑。
   Emacs 的 notebook controls 只是 Noema API 的 UI client，不连接 kernel ZMQ
@@ -242,7 +233,7 @@ org <-> jupytext <-> ipynb
 
 所以你的选择不应该是“二选一”，而应该是：
 
-- 笔记层用 `org` 或普通 Markdown 笔记
+- 笔记层用 Noema Markdown
 - 工作结构与 agent prompt 用 `.noema`
 - 实验层用 notebook / 脚本
 - 只有编程实验路径使用 Jupyter；`.noema` 使用 agent
@@ -261,7 +252,7 @@ org <-> jupytext <-> ipynb
 
 如果答案是：
 
-- “讲清楚”，用 `org`
+- “讲清楚”，用 Noema Markdown
 - “跑出来”，用 `jupytext` / `ipynb`
 
 再补一句：
@@ -273,12 +264,12 @@ org <-> jupytext <-> ipynb
 如果你只想记住几条规则，就记这五条：
 
 1. 同一份核心内容只保留一个真源。
-2. `org` 写问题、过程、结论，不承担所有实验输出。
+2. Noema 笔记写问题、过程、结论，不承担所有实验输出。
 3. `jupytext` / notebook 写实验现场，不承担长期知识组织。
 4. 重复逻辑尽快抽到 `src/`。
 5. 从实验回流到笔记时，整理结论，不复制整份 notebook。
 
-## 11. Wiki 知识健康维护（MediaWiki Special: 类比）
+## 10. Wiki 知识健康维护（MediaWiki Special: 类比）
 
 Noema 的 Markdown vault 现在具备 MediaWiki 级别的 wiki 维护能力，所有操作通过 `H-o` 进入，完全 Emacs-native，不需要打开 Web 界面：
 
@@ -296,7 +287,7 @@ Noema 的 Markdown vault 现在具备 MediaWiki 级别的 wiki 维护能力，�
 
 **性能保证**：四个本地报告（Orphaned/Dead-end/Uncategorized/Most-linked）直接从已缓存的 index 派生，无文件 IO；Wanted pages 通过异步后端 API 获取（不阻塞 Emacs）；所有操作上限 200 行，不会因大型 vault 而无界输出。
 
-## 10. 推荐起步法
+## 11. 推荐起步法
 
 如果你现在还没完全定型，可以直接这样开始：
 
@@ -310,7 +301,7 @@ Noema 的 Markdown vault 现在具备 MediaWiki 级别的 wiki 维护能力，�
 
 后面你再决定要不要加：
 
-- `daily.org`
+- `daily.md`
 - 文献阅读模板
 - 实验编号规范
 - 结果索引页

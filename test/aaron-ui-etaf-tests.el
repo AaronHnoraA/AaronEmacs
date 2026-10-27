@@ -7,6 +7,7 @@
 (require 'aaron-ui-docs)
 (require 'aaron-ui-float)
 (require 'aaron-ui-activity)
+(require 'aaron-ui-performance)
 
 (etaf-define-component aaron-ui-etaf-test-host (&key surface)
   "Mount the preview under SURFACE as a floating host would."
@@ -75,7 +76,7 @@
       (kill-buffer buffer))))
 
 (ert-deftest aaron-ui-activity-long-page-scrolls-inside-viewport ()
-  "A long Activity page scrolls within a short floating viewport."
+  "A long Activity tab scrolls within the shared monitor viewport."
   (let* ((rows (cl-loop for index below 30
                         collect (list :ref (intern (format "activity-row-%d" index))
                                       :kind 'service :badge "run"
@@ -85,24 +86,27 @@
                                 :sections (list (list :key 'services
                                                       :title "Services"
                                                       :rows rows)))))
+         (performance-state (etaf-ref nil))
+         (selected (etaf-ref 'activity))
          (buffer (generate-new-buffer " *activity scroll test*")))
     (unwind-protect
         (progn
-          (etaf-mount buffer (aaron-ui-activity-view state buffer)
+          (etaf-mount buffer (aaron-ui-performance-view performance-state
+                                                     selected state buffer)
                       '(:viewport-width 700 :viewport-height 12))
           (with-current-buffer buffer
             (let ((runtime (etaf-runtime-for-buffer buffer)))
               (goto-char (point-min))
               (ebox-scroll-down 3)
-              (should (> (etaf-scroll-offset runtime 'activity-scroll) 0))
+              (should (> (etaf-scroll-offset runtime 'performance-scroll) 0))
               (ebox-scroll-up 3)
-              (should (= (etaf-scroll-offset runtime 'activity-scroll) 0))
+              (should (= (etaf-scroll-offset runtime 'performance-scroll) 0))
               (should (eq (key-binding (kbd "<next>"))
                           #'ebox-scroll-page-down))
               (should (eq (key-binding [wheel-down])
                           #'ebox-wheel-scroll-down))
-              (should (> (etaf-scroll-to runtime 'activity-scroll 'end) 0))
-              (should (= (etaf-scroll-to runtime 'activity-scroll 0) 0)))))
+              (should (> (etaf-scroll-to runtime 'performance-scroll 'end) 0))
+              (should (= (etaf-scroll-to runtime 'performance-scroll 0) 0)))))
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 

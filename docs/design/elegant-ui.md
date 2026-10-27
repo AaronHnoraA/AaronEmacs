@@ -27,9 +27,11 @@ ETAF UI 的内部 `lisp/` 文件或私有函数。现有简单只读报告可继
 `aaron-ui-float` 承载普通 Emacs buffer 或 ETAF View，不占用原有窗口布局。
 调用者用 `:kill-on-close` 决定普通 buffer 是否在关闭时结束；隐藏始终保留
 buffer 和会话。ETAF View 的 Runtime 由浮窗承载层挂载和释放。标题栏统一提供
-拖动、红黄绿的关闭／隐藏／大小操作，并可增加页面自己的动作。整页 Activity 和
-Performance Watch 保留当前展示方式。图形 frame 使用子 frame；TTY 入口
-退回普通 buffer 或原生命令。
+拖动、红黄绿的关闭／隐藏／大小操作，并可增加页面自己的动作。Dashboard 的
+`[monitor]` 和 mode line 的皮卡丘共用 Performance Watch：前者打开性能总览，
+后者选中“后台任务”页签。图形界面用一个 Aaron UI posframe 承载同一 ETAF View；
+TTY 入口退回普通 buffer。隐藏保留页签与筛选状态，并停止页面自动刷新；关闭
+结束共享 buffer。任务页签打开原生管理器时先隐藏浮窗，再在主 frame 显示管理器。
 
 ## 契约
 
@@ -67,6 +69,15 @@ Performance Watch 保留当前展示方式。图形 frame 使用子 frame；TTY 
 - **C10** 文档浮窗标题栏右侧不另放翻页文字；红色关闭、黄色隐藏，绿色左键
   上一页、右键下一页。`C-c C-=` 切换大小。同一 ETAF View 中切换文档，
   保留用户拖动后的位置。
+- **C11** `[monitor]`、`+performance/watch` 和皮卡丘的 `+activity/board`
+  共用一个 Performance Watch buffer 和一组红黄绿标题栏。任务数据、筛选、行操作
+  与原生管理器入口位于“后台任务”页签；Noema 页签显示现有宿主和任务缓存，
+  提供 Wiki、Agenda、任务和停止宿主入口。切离后台任务页签或隐藏浮窗时停止任务页自动刷新，
+  隐藏浮窗也停止性能采样。长页面在浮窗内部滚动，打开原生管理器不占用 child frame。
+  测试：`+activity-and-monitor-share-one-buffer`、
+  `+activity-pikachu-opens-monitor-in-shared-float`、
+  `+performance-hidden-monitor-stops-both-refresh-timers`、
+  `aaron-ui-activity-long-page-scrolls-inside-viewport`。
 
 ## 实现位置
 
@@ -80,8 +91,8 @@ Performance Watch 保留当前展示方式。图形 frame 使用子 frame；TTY 
 
 ## 已知差距
 
-现有 Activity 和 Performance Watch 仍有各自的手写基础控件；后续改动这些
-页面时可逐项换用 ETAF UI 组件，但需保留原有焦点与键盘动作。
+统一监控页仍有手写基础控件；后续可逐项换用 ETAF UI 组件，但需保留原有焦点与
+键盘动作。
 
 ## 待定设计
 

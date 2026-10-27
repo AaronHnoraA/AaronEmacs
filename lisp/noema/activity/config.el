@@ -16,6 +16,8 @@
 (declare-function noema-agent-acp-sessions "noema-agent-acp" (&optional root))
 (declare-function noema-agent-acp-show-buffer "noema-agent-acp" (buffer))
 (declare-function noema-agent-acp-stop "noema-agent-acp" (&optional buffer))
+(declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
+(declare-function aaron-ui-float-visible-p "aaron-ui-float" (panel))
 
 (defvar +noema--ready)
 (defvar +noema--process)
@@ -34,12 +36,20 @@
   (append +activity-noema--tasks (hash-table-values +activity-noema--agents)))
 
 (defun +activity-noema--changed ()
-  "Recount and update a visible activity board after a snapshot changes."
+  "Recount and update a visible monitor after a Noema snapshot changes."
   (+activity--refresh)
-  (when-let* ((buffer (get-buffer "*Activity*"))
-              ((get-buffer-window buffer t)))
-    (with-current-buffer buffer
-      (+activity-board/refresh))))
+  (when-let* ((buffer (get-buffer "*Performance Watch*")))
+    (let ((panel (and (featurep 'aaron-ui-float)
+                      (aaron-ui-float-panel-for-buffer buffer))))
+      (when (and (if panel
+                     (aaron-ui-float-visible-p panel)
+                   (get-buffer-window buffer t))
+                 (with-current-buffer buffer
+                   (and (bound-and-true-p +performance--tab-state)
+                        (memq (etaf-value +performance--tab-state)
+                              '(activity processes)))))
+        (with-current-buffer buffer
+          (+activity-board/refresh))))))
 
 (defun +activity-noema--update-agents (&optional _buffer)
   "Refresh busy sessions through Noema's ACP boundary.

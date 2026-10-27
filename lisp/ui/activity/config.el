@@ -63,11 +63,16 @@
 (declare-function +remote-per-file-subprocess-affordable-p "remote/framework/tramp"
                   (&optional path))
 (declare-function remote-client-process-attributes "remote-core" (pid))
-(declare-function aaron-ui-activity-view "aaron-ui-activity" (state owner))
-(declare-function aaron-ui-float-show "aaron-ui-float" (buffer &rest options))
 (declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
 (declare-function aaron-ui-float-visible-p "aaron-ui-float" (panel))
-(declare-function posframe-workable-p "posframe" ())
+(declare-function aaron-ui-float-hide "aaron-ui-float" (&optional panel))
+(declare-function +performance/watch "config/performance/config" (&optional tab))
+(declare-function +performance/watch-quit "config/performance/config" ())
+(declare-function +performance/open-file "config/performance/config" (buffer))
+(declare-function +performance/kill-buffer "config/performance/config" (buffer))
+(declare-function +performance/delete-file "config/performance/config" (buffer))
+(declare-function +performance/watch-context-menu "config/performance/config"
+                  (&optional event))
 
 (defvar remote-tasks)
 (defvar remote-transfer-jobs)
@@ -459,9 +464,6 @@ Emacs itself holds no start time for a process.")
 (defvar-local +activity-board--auto-timer nil
   "Repeating redraw timer for this board buffer, or nil.")
 
-(defvar-local +activity-board--owner-frame nil
-  "Frame whose Activity view state belongs to this buffer.")
-
 (defvar-local +activity-board--detail-buffer nil
   "Temporary process details buffer owned by this Activity board.")
 
@@ -618,18 +620,79 @@ Killing only a remote task's relay could leave its target-side work running."
         (signal-process process 'SIGKILL))
       (+activity-board/refresh))))
 
+(defun +activity-board--pausable-process-p (process)
+  "Return non-nil when PROCESS can be paused on this host."
+  (and (processp process)
+       (integerp (process-id process))
+       (memq (process-status process) '(run stop))
+       (not (+activity--remote-task-for process))
+       (not (+activity--transfer-job-for process))))
+
+(defun +activity-board/toggle-pause ()
+  "Pause or resume the selected local process with SIGSTOP or SIGCONT."
+  (interactive)
+  (let ((process (+activity-board--process-at-point)))
+    (unless (+activity-board--pausable-process-p process)
+      (user-error "%s cannot be paused from this monitor"
+                  (process-name process)))
+    (signal-process process
+                    (if (eq (process-status process) 'stop)
+                        'SIGCONT 'SIGSTOP))
+    (+activity-board/refresh)))
+
+(defun +activity-board--process-buffer (process)
+  "Return the durable output buffer for PROCESS, when available."
+  (and (processp process)
+       (or (when-let* ((job (+activity--transfer-job-for process)))
+             (remote-transfer-job-log-buffer job))
+           (process-buffer process))))
+
+(defun +activity-board--entry-buffer ()
+  "Return the selected task or process output buffer, or signal."
+  (let* ((entry (+activity-board--selected-entry))
+         (buffer (cond ((processp entry)
+                        (+activity-board--process-buffer entry))
+                       ((+activity-p entry)
+                        (+activity-buffer entry)))))
+    (unless (buffer-live-p buffer)
+      (user-error "Selected task has no live buffer"))
+    buffer))
+
+(defun +activity-board/open-file ()
+  "Open the selected task's associated file."
+  (interactive)
+  (+performance/open-file (+activity-board--entry-buffer)))
+
+(defun +activity-board/close-output-buffer ()
+  "Close the selected task's output buffer after confirmation."
+  (interactive)
+  (+performance/kill-buffer (+activity-board--entry-buffer)))
+
+(defun +activity-board/delete-file ()
+  "Delete the selected task buffer's file after confirmation."
+  (interactive)
+  (+performance/delete-file (+activity-board--entry-buffer)))
+
 (defun +activity-board--show-process (process)
   "Show PROCESS' buffer, or say that it has none."
-  (let ((buffer
-         (and (processp process)
-              (or (when-let* ((job (+activity--transfer-job-for process)))
-                    ;; Target-side operations use a temporary stdout buffer;
-                    ;; the queue's log is the durable output surface.
-                    (remote-transfer-job-log-buffer job))
-                  (process-buffer process)))))
+  (let ((buffer (+activity-board--process-buffer process)))
     (if (buffer-live-p buffer)
-        (pop-to-buffer buffer)
+        (progn
+          (+activity-board--return-to-parent)
+          (pop-to-buffer buffer))
       (user-error "%s has no buffer" (process-name process)))))
+
+(defun +activity-board--return-to-parent ()
+  "Hide the monitor before opening a manager in the parent frame."
+  (when (featurep 'aaron-ui-float)
+    (when-let* ((panel (aaron-ui-float-panel-for-buffer (current-buffer)))
+                ((aaron-ui-float-visible-p panel)))
+      (aaron-ui-float-hide panel))))
+
+(defun +activity-board--open-native-manager (command)
+  "Run native manager COMMAND from the parent frame."
+  (+activity-board--return-to-parent)
+  (call-interactively command))
 
 (defun +activity-board/visit ()
   "Show the buffer behind the current board row, if it has one."
@@ -637,8 +700,10 @@ Killing only a remote task's relay could leave its target-side work running."
   (if-let* ((entry (+activity-board--selected-entry))
             (activity (and (+activity-p entry) entry)))
       (cond ((+activity-visit activity)
+             (+activity-board--return-to-parent)
              (funcall (+activity-visit activity)))
             ((buffer-live-p (+activity-buffer activity))
+             (+activity-board--return-to-parent)
              (pop-to-buffer (+activity-buffer activity)))
             (t (user-error "%s has no buffer" (+activity-label activity))))
     (+activity-board--show-process
@@ -722,6 +787,7 @@ per process and must never run while rendering the list."
             (insert (format "%-10s %s\n" key value))))
         (goto-char (point-min))
         (set-buffer-modified-p nil)))
+    (+activity-board--return-to-parent)
     (pop-to-buffer detail)))
 
 ;;; -----------------------------------------------------------------------
@@ -763,11 +829,8 @@ board left open on a fast interval is a background cost of its own."
                  ;; buffer-local slot is no longer accessible after kill.
                  (if (buffer-live-p buffer)
                      (with-current-buffer buffer
-                       (if (and (or (null +activity-board--owner-frame)
-                                    (frame-live-p +activity-board--owner-frame))
-                                (or (get-buffer-window
-                                     buffer (or +activity-board--owner-frame t))
-                                    (+activity-board--floating-visible-p buffer)))
+                       (if (or (get-buffer-window buffer t)
+                               (+activity-board--floating-visible-p buffer))
                            (+activity-board/refresh)
                          ;; A hidden board has no reason to keep a repeating
                          ;; timer.  Reopening it starts with manual refresh.
@@ -781,44 +844,14 @@ board left open on a fast interval is a background cost of its own."
   (when +activity-board--state
     (+activity-board/refresh)))
 
-(defun +activity-board--theme-changed (&rest _)
-  "Repaint live ETAF Activity views after the Aaron UI palette changes."
-  (dolist (frame (frame-list))
-    (when-let* ((buffer (frame-parameter frame '+activity-board-buffer))
-                ((buffer-live-p buffer)))
-      (with-current-buffer buffer
-        (when +activity-board--state
-          (etaf-update-value
-           +activity-board--state
-           (lambda (snapshot)
-             (plist-put (copy-sequence snapshot) :theme-revision
-                        (1+ (or (plist-get snapshot :theme-revision) 0))))))))))
-
-(add-hook 'after-load-theme-hook #'+activity-board--theme-changed)
-
 (defun +activity-board--cleanup ()
-  "Release this board's timer and frame reference when it goes away."
+  "Release this board's timer and details buffer when it goes away."
   (when (timerp +activity-board--auto-timer)
     (cancel-timer +activity-board--auto-timer))
   (setq +activity-board--auto-timer nil)
   (when (buffer-live-p +activity-board--detail-buffer)
     (kill-buffer +activity-board--detail-buffer))
-  (setq +activity-board--detail-buffer nil)
-  (when (and (frame-live-p +activity-board--owner-frame)
-             (eq (frame-parameter +activity-board--owner-frame
-                                  '+activity-board-buffer)
-                 (current-buffer)))
-    (set-frame-parameter +activity-board--owner-frame
-                         '+activity-board-buffer nil)))
-
-(defun +activity-board--frame-deleted (frame)
-  "Release FRAME's Activity panel when the frame closes."
-  (when-let* ((buffer (frame-parameter frame '+activity-board-buffer)))
-    (set-frame-parameter frame '+activity-board-buffer nil)
-    (when (buffer-live-p buffer)
-      (kill-buffer buffer))))
-
-(add-hook 'delete-frame-functions #'+activity-board--frame-deleted)
+  (setq +activity-board--detail-buffer nil))
 
 ;;; -----------------------------------------------------------------------
 ;;; Board: native hand-offs
@@ -840,9 +873,7 @@ board left open on a fast interval is a background cost of its own."
 Each one is better at its own job than a reimplementation here would be.")
 
 (defconst +activity-board-config-links
-  '((:label "Performance" :command +performance/watch
-     :help "This configuration's performance watch")
-    (:label "Remote" :command remote-board
+  '((:label "Remote" :command remote-board
      :help "Remote targets, routes and forwards")
     (:label "Transfers" :command remote-transfer-list
      :help "Bulk file transfers: progress, output, retry")
@@ -875,14 +906,24 @@ Each one is better at its own job than a reimplementation here would be.")
   "v" #'+activity-board/visit
   "w" #'+activity-board/copy-command
   "d" #'+activity-board/describe
+  "s" #'+activity-board/toggle-pause
+  "f" #'+activity-board/open-file
+  "K" #'+activity-board/close-output-buffer
+  "D" #'+activity-board/delete-file
+  "m" #'+performance/watch-context-menu
   "/" #'+activity-board/filter
   "t" #'+activity-board/toggle-timers
   "a" #'+activity-board/toggle-auto-refresh
-  "P" #'list-processes
-  "T" #'list-timers
-  "H" #'list-threads
-  "O" #'proced
-  "M" #'memory-report
+  "P" (lambda () (interactive)
+        (+activity-board--open-native-manager #'list-processes))
+  "T" (lambda () (interactive)
+        (+activity-board--open-native-manager #'list-timers))
+  "H" (lambda () (interactive)
+        (+activity-board--open-native-manager #'list-threads))
+  "O" (lambda () (interactive)
+        (+activity-board--open-native-manager #'proced))
+  "M" (lambda () (interactive)
+        (+activity-board--open-native-manager #'memory-report))
   "<remap> <self-insert-command>" #'+activity-board/help)
 
 (define-derived-mode +activity-board-mode aaron-ui-board-mode "Activity"
@@ -1217,8 +1258,10 @@ Reads `timer-list' and `timer-idle-list' only, the same state
     (cond ((processp entry) (+activity-board--show-process entry))
           ((+activity-p entry)
            (cond ((+activity-visit entry)
+                  (+activity-board--return-to-parent)
                   (funcall (+activity-visit entry)))
                  ((buffer-live-p (+activity-buffer entry))
+                  (+activity-board--return-to-parent)
                   (pop-to-buffer (+activity-buffer entry)))
                  (t (user-error "%s has no buffer"
                                 (+activity-label entry)))))
@@ -1247,16 +1290,24 @@ Reads `timer-list' and `timer-idle-list' only, the same state
   "v" #'+activity-board/visit
   "w" #'+activity-board/copy-command
   "d" #'+activity-board/describe
+  "s" #'+activity-board/toggle-pause
+  "f" #'+activity-board/open-file
+  "K" #'+activity-board/close-output-buffer
+  "D" #'+activity-board/delete-file
+  "m" #'+performance/watch-context-menu
   "/" #'+activity-board/filter
   "t" #'+activity-board/toggle-timers
-  "a" #'+activity-board/toggle-auto-refresh
-  "g" #'+activity-board/refresh
-  "P" #'list-processes
-  "T" #'list-timers
-  "H" #'list-threads
-  "O" #'proced
-  "M" #'memory-report
-  "q" #'quit-window
+  "P" (lambda () (interactive)
+        (+activity-board--open-native-manager #'list-processes))
+  "T" (lambda () (interactive)
+        (+activity-board--open-native-manager #'list-timers))
+  "H" (lambda () (interactive)
+        (+activity-board--open-native-manager #'list-threads))
+  "O" (lambda () (interactive)
+        (+activity-board--open-native-manager #'proced))
+  "M" (lambda () (interactive)
+        (+activity-board--open-native-manager #'memory-report))
+  "q" #'+performance/watch-quit
   "<remap> <self-insert-command>" #'+activity-board/help)
 
 (define-minor-mode +activity-board-keys-mode
@@ -1266,31 +1317,11 @@ Reads `timer-list' and `timer-idle-list' only, the same state
   (when (and +activity-board-keys-mode (fboundp 'evil-local-mode))
     (evil-local-mode -1)))
 
-(defun +activity-board--buffer (&optional frame)
-  "Return FRAME's Activity buffer, creating it when needed."
-  (let* ((frame (or frame (selected-frame)))
-         (buffer (frame-parameter frame '+activity-board-buffer)))
-    (unless (buffer-live-p buffer)
-      (setq buffer (generate-new-buffer "*Activity*"))
-      (set-frame-parameter frame '+activity-board-buffer buffer))
-    buffer))
-
 (defun +activity-board--floating-visible-p (buffer)
   "Return non-nil when BUFFER is visible in its Aaron UI floating host."
   (and (featurep 'aaron-ui-float)
        (when-let* ((panel (aaron-ui-float-panel-for-buffer buffer)))
          (aaron-ui-float-visible-p panel))))
-
-(defun +activity-board--display (buffer)
-  "Show BUFFER without changing the parent window layout in a GUI."
-  (if (and (display-graphic-p)
-           (require 'aaron-ui-float nil t)
-           (posframe-workable-p))
-      (aaron-ui-float-show buffer :key buffer :title "后台任务"
-                           :width '(fraction 0.76)
-                           :height '(fraction 0.72)
-                           :owned t)
-    (pop-to-buffer buffer)))
 
 (defun +activity-board--parent-frame ()
   "Return the ordinary frame that owns the selected frame's Activity view."
@@ -1301,34 +1332,18 @@ Reads `timer-list' and `timer-idle-list' only, the same state
 
 ;;;###autoload
 (defun +activity/board ()
-  "Show this frame's view of Emacs background activity."
+  "Show background tasks in the shared performance monitor."
   (interactive)
-  (require 'aaron-ui-activity)
   (+activity--poll t)
-  (+activity--refresh)
+  (require 'config/performance/config)
   (let* ((frame (+activity-board--parent-frame))
-         (existing (frame-parameter frame '+activity-board-buffer)))
-    (let ((buffer (+activity-board--buffer frame)))
-      (condition-case error
-          (progn
-            (with-current-buffer buffer
-              (unless (etaf-runtime-for-buffer buffer)
-                (let ((state (etaf-ref nil)))
-                  (etaf-mount buffer (aaron-ui-activity-view state buffer))
-                  (setq-local +activity-board--state state)
-                  (+activity-board-keys-mode 1)
-                  (add-hook 'kill-buffer-hook #'+activity-board--cleanup nil t)))
-              (setq-local +activity-board--owner-frame frame)
-              (+activity-board/refresh))
-            (+activity-board--display buffer))
-        (error
-         (unless (eq existing buffer)
-           (when (buffer-live-p buffer)
-             (kill-buffer buffer))
-           (when (eq (frame-parameter frame '+activity-board-buffer)
-                     buffer)
-             (set-frame-parameter frame '+activity-board-buffer nil)))
-         (signal (car error) (cdr error)))))))
+         (old (frame-parameter frame '+activity-board-buffer))
+         (result (+performance/watch 'activity)))
+    (when (buffer-live-p old)
+      (kill-buffer old))
+    (when old
+      (set-frame-parameter frame '+activity-board-buffer nil))
+    result))
 
 (defalias 'activity-board #'+activity/board
   "Open the Emacs background activity board.")

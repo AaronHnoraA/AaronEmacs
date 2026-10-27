@@ -17,7 +17,6 @@
 (require 'tools/git/github)
 (require 'os/macos-tools/config)
 (require 'editor/navigation/config)
-(require 'lang/org/config)
 
 (defmacro +workbench-test-with-region (beg end &rest body)
   "Activate BEG through END while evaluating BODY."
@@ -596,16 +595,6 @@
         (setq buffer-read-only t)
         (should-error (macos-pick-color t) :type 'buffer-read-only)
         (should (equal (current-kill 0) "#ff8000"))))))
-
-(ert-deftest +org-link-dwim-wraps-a-region-with-the-clipboard-url ()
-  (with-temp-buffer
-    (org-mode)
-    (insert "Link title")
-    (kill-new "https://example.test/page")
-    (+workbench-test-with-region (point-min) (point-max)
-      (+org/insert-link-dwim))
-    (should (equal (buffer-string)
-                   "[[https://example.test/page][Link title]]"))))
 
 (ert-deftest +year-calendar-renders-first-and-last-month ()
   (save-window-excursion

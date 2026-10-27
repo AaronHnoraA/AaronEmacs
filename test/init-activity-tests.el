@@ -5,6 +5,7 @@
 (require 'comp-run)
 (require 'aaron-ui-activity)
 (require 'noema/activity/config)
+(require 'config/performance/config)
 (require 'remote-task)
 (require 'remote-transfer)
 (require 'remote-board)
@@ -91,36 +92,29 @@
         (should-not +activity-board--auto-timer)
         (should-not (memq timer timer-list))))))
 
-(ert-deftest +activity-board-view-state-is-frame-owned ()
-  "Each frame owns one panel, and closing it releases only that panel."
-  (let ((parameters (make-hash-table :test #'equal))
-        first second)
-    (cl-letf (((symbol-function 'frame-parameter)
-               (lambda (frame key)
-                 (gethash (cons frame key) parameters)))
-              ((symbol-function 'set-frame-parameter)
-               (lambda (frame key value)
-                 (puthash (cons frame key) value parameters))))
+(ert-deftest +activity-and-monitor-share-one-buffer ()
+  "The two entry points select pages in one live monitor buffer."
+  (+activity-test-isolated
+    (let ((source (generate-new-buffer " *shared monitor source*"))
+          board)
       (unwind-protect
-          (progn
-            (setq first (+activity-board--buffer 'first-frame)
-                  second (+activity-board--buffer 'second-frame))
-            (should (buffer-live-p first))
-            (should (buffer-live-p second))
-            (should-not (eq first second))
-            (should (eq first (+activity-board--buffer 'first-frame)))
-            (+activity-board--frame-deleted 'first-frame)
-            (should-not (buffer-live-p first))
-            (should (buffer-live-p second))
-            (should (eq second (+activity-board--buffer 'second-frame))))
-        (when (buffer-live-p first) (kill-buffer first))
-        (when (buffer-live-p second) (kill-buffer second))))))
+          (save-window-excursion
+            (switch-to-buffer source)
+            (+performance/watch)
+            (setq board (current-buffer))
+            (should (eq (etaf-value +performance--tab-state) 'overview))
+            (+activity/board)
+            (should (eq (current-buffer) board))
+            (should (eq (etaf-value +performance--tab-state) 'activity))
+            (should (string-match-p "Built-in managers" (buffer-string))))
+        (when (buffer-live-p board) (kill-buffer board))
+        (kill-buffer source)))))
 
-(ert-deftest +activity-pikachu-opens-board-in-shared-float ()
-  "The mode-line click uses Aaron UI without replacing a parent window."
+(ert-deftest +activity-pikachu-opens-monitor-in-shared-float ()
+  "The mode-line click selects Activity in the monitor's Aaron UI float."
   (require 'aaron-ui-float)
-  (let ((buffer (generate-new-buffer " *activity float test*"))
-        shown)
+  (let ((source (generate-new-buffer " *activity float source*"))
+        shown board)
     (unwind-protect
         (cl-letf (((symbol-function 'display-graphic-p)
                    (lambda (&rest _) t))
@@ -133,10 +127,13 @@
           (should (eq (lookup-key +activity--mode-line-map
                                   [mode-line mouse-1])
                       #'+activity/board))
-          (+activity-board--display buffer)
-          (should (eq (car shown) buffer))
+          (with-current-buffer source
+            (+activity/board))
+          (setq board (car shown))
+          (should (eq board (get-buffer +performance-buffer-name)))
           (should (plist-get (cdr shown) :owned)))
-      (kill-buffer buffer))))
+      (when (buffer-live-p board) (kill-buffer board))
+      (kill-buffer source))))
 
 (ert-deftest +activity-visible-float-keeps-auto-refresh-until-hidden ()
   "The refresh timer treats a visible child frame as an open Activity page."
@@ -164,19 +161,33 @@
                   (should-not +activity-board--auto-timer))
               (cancel-timer timer))))))))
 
-(ert-deftest +activity-board-quit-returns-and-reopen-keeps-this-frame-filter ()
-  "The board uses native window return and retains only this frame's view."
+(ert-deftest +activity-native-manager-opens-after-floating-monitor-hides ()
+  "A manager opened from Activity returns to the parent frame first."
+  (require 'aaron-ui-float)
+  (let (hidden)
+    (cl-letf (((symbol-function 'aaron-ui-float-panel-for-buffer)
+               (lambda (_buffer) 'shared-monitor))
+              ((symbol-function 'aaron-ui-float-visible-p)
+               (lambda (_panel) t))
+              ((symbol-function 'aaron-ui-float-hide)
+               (lambda (_panel) (setq hidden t))))
+      (with-temp-buffer
+        (+activity-board--open-native-manager
+         (lambda () (interactive) (should hidden)))))))
+
+(ert-deftest +activity-board-quit-returns-and-reopen-keeps-filter ()
+  "TTY window return keeps the shared monitor and its task filter."
   (+activity-test-isolated
     (let ((source (generate-new-buffer " *activity source*"))
-          (frame (selected-frame))
           board)
       (unwind-protect
           (save-window-excursion
             (switch-to-buffer source)
             (+activity/board)
             (setq board (current-buffer))
-            (should (eq board (frame-parameter frame '+activity-board-buffer)))
+            (should (equal (buffer-name board) +performance-buffer-name))
             (should (etaf-runtime-for-buffer board))
+            (should (eq (etaf-value +performance--tab-state) 'activity))
             (should (eq (key-binding "j") #'etaf-focus-next))
             (should (string-match-p "Built-in managers" (buffer-string)))
             (setq-local +activity-board--filter "process")
@@ -186,28 +197,21 @@
             (should (eq (current-buffer) board))
             (should (equal +activity-board--filter "process")))
         (when (buffer-live-p board) (kill-buffer board))
-        (when (buffer-live-p source) (kill-buffer source))
-        (should-not (frame-parameter frame '+activity-board-buffer))))))
+        (when (buffer-live-p source) (kill-buffer source))))))
 
 (ert-deftest +activity-board-first-render-failure-releases-new-buffer ()
-  "A failed first open must not leave a stale frame-owned panel."
+  "A failed first open must not leave a stale shared monitor buffer."
   (+activity-test-isolated
-    (let* ((frame (selected-frame))
-           (previous (frame-parameter frame '+activity-board-buffer))
-           created)
-      (unwind-protect
-          (progn
-            (set-frame-parameter frame '+activity-board-buffer nil)
-            (cl-letf (((symbol-function 'etaf-mount)
-                       (lambda (&rest _)
-                         (setq created
-                               (frame-parameter frame '+activity-board-buffer))
-                         (error "render failed"))))
-              (should-error (+activity/board)))
-            (should created)
-            (should-not (buffer-live-p created))
-            (should-not (frame-parameter frame '+activity-board-buffer)))
-        (set-frame-parameter frame '+activity-board-buffer previous)))))
+    (let ((+performance-buffer-name " *failed shared monitor*")
+          created)
+      (cl-letf (((symbol-function 'etaf-mount)
+                 (lambda (buffer &rest _)
+                   (setq created buffer)
+                   (error "render failed"))))
+        (should-error (+activity/board)))
+      (should created)
+      (should-not (buffer-live-p created))
+      (should-not (get-buffer +performance-buffer-name)))))
 
 (ert-deftest +activity-process-details-quit-returns-to-board-and-kills-page ()
   "The custom details page follows native `quit-window' without leaking."
@@ -623,6 +627,73 @@
             (dotimes (_ 5) (+activity-noema--update-agents))
             (should (= 1 changes)))
         (kill-buffer worker)))))
+
+(ert-deftest +activity-noema-updates-visible-shared-monitor ()
+  "Noema changes redraw Activity and Processes in the shared monitor."
+  (require 'config/performance/config)
+  (let ((buffer (get-buffer-create "*Performance Watch*"))
+        (refreshes 0))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (with-current-buffer buffer
+            (setq-local +performance--tab-state (etaf-ref 'activity)))
+          (cl-letf (((symbol-function '+activity--refresh) #'ignore)
+                    ((symbol-function '+activity-board/refresh)
+                     (lambda () (cl-incf refreshes))))
+            (+activity-noema--changed)
+            (with-current-buffer buffer
+              (etaf-set-value +performance--tab-state 'processes))
+            (+activity-noema--changed)
+            (should (= refreshes 2))))
+      (kill-buffer buffer))))
+
+(ert-deftest +activity-noema-hidden-float-does-not-redraw ()
+  "A hidden posframe window does not make Noema repaint the monitor."
+  (require 'config/performance/config)
+  (let ((buffer (get-buffer-create "*Performance Watch*"))
+        (features (cons 'aaron-ui-float features)))
+    (unwind-protect
+        (save-window-excursion
+          (switch-to-buffer buffer)
+          (with-current-buffer buffer
+            (setq-local +performance--tab-state (etaf-ref 'activity)))
+          (cl-letf (((symbol-function 'aaron-ui-float-panel-for-buffer)
+                     (lambda (&rest _) 'hidden-panel))
+                    ((symbol-function 'aaron-ui-float-visible-p)
+                     (lambda (&rest _) nil))
+                    ((symbol-function '+activity--refresh) #'ignore)
+                    ((symbol-function '+activity-board/refresh)
+                     (lambda () (ert-fail "Hidden monitor repainted"))))
+            (+activity-noema--changed)))
+      (kill-buffer buffer))))
+
+(ert-deftest +activity-pause-only-signals-local-owned-pid ()
+  "Pause and resume signal only a local process without a remote owner."
+  (let ((process (make-pipe-process :name "activity-pause-test" :noquery t))
+        (status 'run)
+        (owner nil)
+        signals)
+    (unwind-protect
+        (cl-letf (((symbol-function '+activity-board--process-at-point)
+                   (lambda () process))
+                  ((symbol-function 'process-id) (lambda (_) 4312))
+                  ((symbol-function 'process-status) (lambda (_) status))
+                  ((symbol-function '+activity--remote-task-for)
+                   (lambda (_) owner))
+                  ((symbol-function '+activity--transfer-job-for)
+                   (lambda (_) nil))
+                  ((symbol-function 'signal-process)
+                   (lambda (_ signal) (push signal signals)))
+                  ((symbol-function '+activity-board/refresh) #'ignore))
+          (+activity-board/toggle-pause)
+          (setq status 'stop)
+          (+activity-board/toggle-pause)
+          (should (equal signals '(SIGCONT SIGSTOP)))
+          (setq owner 'remote)
+          (should-error (+activity-board/toggle-pause) :type 'user-error)
+          (should (= (length signals) 2)))
+      (delete-process process))))
 
 (ert-deftest +activity-noema-failed-request-releases-pending-and-can-recover ()
   (+activity-test-isolated

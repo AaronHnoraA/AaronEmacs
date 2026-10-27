@@ -150,7 +150,7 @@ Doom 的做法：
 - `tools/lookup`、`tools/lsp`、`tools/eval`、`tools/magit`
 - `emacs/dired`、`emacs/undo`、`emacs/vc`、`emacs/tramp`
 - `term/ghostel`
-- `lang/org`、`lang/python`、`lang/java`、`lang/markdown`
+- `lang/python`、`lang/java`、`lang/markdown`
 - `os/macos`
 
 ## 推进顺序

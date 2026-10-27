@@ -53,7 +53,7 @@
  :core   (base :feature aaron-base)
  :os     (:when (eq system-type 'darwin) (macos :optional t))
  :remote (framework :doctor remote-doctor)
- :lang   (org :after org)
+ :lang   markdown
          (latex :autoload (+latex/preview-doctor) :doctor +latex/preview-doctor))
 ```
 

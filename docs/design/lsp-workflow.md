@@ -193,10 +193,14 @@ target 上一个来回可能有几百毫秒，每次选中补全、每按一次�
 已知差距：
 
 - **G-A1** lsp-mode 对 TypeScript 的 snippet 补全有一个先 resolve 再插入的补丁
-  （lsp-mode #3498），但它只认 server-id `ts-ls`；本配置的 TypeScript client 是
-  `+typescript`，这个补丁不生效。是否会插入不完整的文本需要用真实
-  typescript-language-server 验证；补丁本身是同步请求，验证后再决定是否接入。
-  接入时可以用同一个 `:upstream-id`（`ts-ls`）机制，而不是在语言模块里另写判断。
+  （lsp-mode #3498），但它只认实际 server-id `ts-ls`；本配置注册为 `+typescript`。
+  用 typescript-language-server 6.0.2 和完整 tsserver 实测：开启服务器的
+  `completions.completeFunctionCalls` 后，函数 `greet` 的未解析补全项带
+  `insertTextFormat=2`、没有 `insertText`，resolve 后才得到
+  `greet(${1:name})$0`；默认配置没有开启该选项，同一例子没有 snippet 项。
+  `:upstream-id` 目前只用于 hover 签名提炼，不能让上游补全补丁命中。
+  若项目开启函数调用补全，须设计不阻塞编辑的解析与插入顺序，再验证真实接受补全；
+  直接移植上游的同步 resolve 会违反本节的不等待原则。
 
 ## 最后一个 buffer 关闭后的 server
 

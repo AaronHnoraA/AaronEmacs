@@ -21,7 +21,6 @@ Modules are declared, in load order, in [`lisp/init-modules.el`](../init-modules
 | [`markdown`](markdown/) | yes | Open Markdown files in Noema | `config.el` |
 | [`nix`](nix/) | no — loaded by another module | Nix language support | `config.el` |
 | [`ocaml`](ocaml/) | no — loaded by another module | ocaml | `config.el` |
-| [`org`](org/) | yes | Small Org editing tools | `config.el` |
 | [`python`](python/) | no — loaded by another module | Python | `config.el` |
 | [`rust`](rust/) | no — loaded by another module | Rust configuration | `config.el` |
 | [`sh`](sh/) | no — loaded by another module | Shell scripts | `config.el` |

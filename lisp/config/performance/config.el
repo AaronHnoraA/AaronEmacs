@@ -10,6 +10,7 @@
 (require 'aaron-ui-board)
 (require 'cl-lib)
 (require 'aaron-funcs)
+(require 'easymenu)
 (require 'seq)
 (require 'subr-x)
 
@@ -20,7 +21,33 @@
                   (file &optional directory))
 (declare-function aaron-open-visit-file "aaron-open" (file &optional wildcards))
 (declare-function aaron-ui-performance-view "aaron-ui-performance"
-                  (state selected owner))
+                  (state selected activity-state owner))
+(declare-function aaron-ui-float-show "aaron-ui-float" (buffer &rest options))
+(declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
+(declare-function aaron-ui-float-close "aaron-ui-float" (&optional panel no-kill))
+(declare-function posframe-workable-p "posframe" ())
+(declare-function +activity-board/refresh "ui/activity/config" ())
+(declare-function +activity-board/toggle-auto-refresh "ui/activity/config" ())
+(declare-function +activity-board-keys-mode "ui/activity/config" (&optional arg))
+(declare-function +activity-board--cleanup "ui/activity/config" ())
+(declare-function +activity-board--return-to-parent "ui/activity/config" ())
+(declare-function +activity-board--process-buffer "ui/activity/config" (process))
+(declare-function +activity-board--pausable-process-p "ui/activity/config" (process))
+(declare-function +activity-board/stop "ui/activity/config" ())
+(declare-function +activity-board/interrupt "ui/activity/config" ())
+(declare-function +activity-board/kill "ui/activity/config" ())
+(declare-function +activity-board/toggle-pause "ui/activity/config" ())
+(declare-function +activity-board/visit "ui/activity/config" ())
+(declare-function +activity-board/describe "ui/activity/config" ())
+(declare-function +activity-buffer "ui/activity/config" (activity))
+(declare-function +activity-p "ui/activity/config" (object))
+(declare-function +noema/wiki-home "noema/bridge/config" ())
+(declare-function +noema/agenda "noema/bridge/config" (&optional query))
+(declare-function +noema/stop "noema/bridge/config" ())
+(defvar +activity-board--entries)
+(declare-function +activity--poll "ui/activity/config" (&optional force))
+(defvar +activity-board--state)
+(defvar +activity-board--auto-timer)
 
 (defgroup +performance nil
   "Runtime performance and power diagnostics."
@@ -44,9 +71,6 @@
 (defconst +performance-buffer-name "*Performance Watch*"
   "Buffer name used by `+performance/watch'.")
 
-(defvar +performance--frame nil
-  "Frame used by `+performance/watch', if it is still live.")
-
 (defvar-local +performance--auto-refresh-timer nil
   "Buffer-local automatic refresh timer for the performance board.")
 
@@ -61,6 +85,12 @@
 
 (defvar-local +performance--tab-state nil
   "ETAF ref holding the selected Performance Watch section.")
+
+(defvar-local +performance--activity-state nil
+  "ETAF ref holding the Activity tab snapshot in this watch buffer.")
+
+(defvar-local +performance--buffer-entries nil
+  "Host reference to live buffer mapping for monitor row actions.")
 
 (defvar-local +performance--recording nil
   "Whether each refresh should append a performance record.")
@@ -108,10 +138,10 @@
 
 (defvar-keymap +performance-watch-keys-mode-map
   :doc "Shortcuts layered over the ETAF Performance Watch page."
-  "g" #'+performance/watch-refresh
+  "g" #'+performance/watch-refresh-current
   "G" #'+performance/garbage-collect
   "y" #'+performance/copy-page
-  "a" #'+performance/watch-toggle-auto-refresh
+  "a" #'+performance/watch-toggle-auto-current
   "s" #'+performance/save-record
   "R" #'+performance/toggle-recording
   "o" #'+performance/open-record-directory
@@ -121,6 +151,13 @@
   "2" (lambda () (interactive) (+performance/watch-select-tab 'processes))
   "3" (lambda () (interactive) (+performance/watch-select-tab 'buffers))
   "4" (lambda () (interactive) (+performance/watch-select-tab 'hooks))
+  "5" (lambda () (interactive) (+performance/watch-select-tab 'activity))
+  "6" (lambda () (interactive) (+performance/watch-select-tab 'noema))
+  "m" #'+performance/watch-context-menu
+  "K" #'+performance/kill-buffer
+  "F" #'+performance/open-file
+  "D" #'+performance/delete-file
+  "<mouse-3>" #'+performance/watch-context-menu
   "q" #'+performance/watch-quit)
 
 (define-minor-mode +performance-watch-keys-mode
@@ -134,11 +171,75 @@
   "Select Performance Watch TAB."
   (interactive
    (list (intern (completing-read "Performance section: "
-                                  '("overview" "processes" "buffers" "hooks")
+                                  '("overview" "processes" "buffers" "hooks"
+                                    "activity" "noema")
                                   nil t))))
   (unless +performance--tab-state
     (user-error "Not in a Performance Watch page"))
-  (etaf-set-value +performance--tab-state tab))
+  (etaf-set-value +performance--tab-state tab)
+  (if (memq tab '(activity processes))
+      (progn
+        (require 'ui/activity/config)
+        (when (eq tab 'activity)
+          (+performance-watch-cleanup))
+        (when (and (eq tab 'processes)
+                   (timerp +activity-board--auto-timer))
+          (cancel-timer +activity-board--auto-timer)
+          (setq +activity-board--auto-timer nil))
+        (+activity--poll t)
+        (+activity-board-keys-mode 1)
+        (+activity-board/refresh)
+        (when (eq tab 'processes)
+          (+performance/watch-refresh)))
+    (when (timerp +activity-board--auto-timer)
+      (cancel-timer +activity-board--auto-timer)
+      (setq +activity-board--auto-timer nil))
+    (when (fboundp '+activity-board-keys-mode)
+      (+activity-board-keys-mode -1))
+    (+performance/watch-refresh)))
+
+(defun +performance/watch-refresh-current ()
+  "Refresh the currently selected monitor page."
+  (interactive)
+  (pcase (and +performance--tab-state
+              (etaf-value +performance--tab-state))
+    ('activity (+activity-board/refresh))
+    ('processes (+activity-board/refresh)
+                (+performance/watch-refresh))
+    (_ (+performance/watch-refresh))))
+
+(defun +performance/watch-toggle-auto-current ()
+  "Toggle automatic refresh for the selected monitor page."
+  (interactive)
+  (if (eq (and +performance--tab-state
+               (etaf-value +performance--tab-state)) 'activity)
+      (+activity-board/toggle-auto-refresh)
+    (+performance/watch-toggle-auto-refresh)))
+
+(defun +performance/noema-open-wiki ()
+  "Open Noema Wiki from the monitor."
+  (interactive)
+  (require 'noema/bridge/config)
+  (+activity-board--return-to-parent)
+  (+noema/wiki-home))
+
+(defun +performance/noema-open-agenda ()
+  "Open Noema Agenda from the monitor."
+  (interactive)
+  (require 'noema/bridge/config)
+  (+activity-board--return-to-parent)
+  (+noema/agenda))
+
+(defun +performance/noema-stop-host ()
+  "Stop the running Noema host after confirmation."
+  (interactive)
+  (unless (and (boundp '+noema--process)
+               (processp +noema--process)
+               (process-live-p +noema--process))
+    (user-error "Noema host is not running"))
+  (when (yes-or-no-p "Stop the Noema host and its current work? ")
+    (+noema/stop)
+    (+performance/watch-refresh)))
 
 (defun +performance--hook-count (value)
   "Return a display count for hook VALUE."
@@ -229,23 +330,39 @@
               (line (cadr lines)))
     (+performance--parse-ps-process-line line)))
 
-(defun +performance--org-summary-sample ()
-  "Return aggregate Org runtime metrics."
-  (let ((buffers 0)
-        (visible 0))
-    (dolist (buffer (+performance--org-buffers))
-      (setq buffers (1+ buffers))
-      (when (+performance--buffer-visible-p buffer)
-        (setq visible (1+ visible))))
-    (list :buffers buffers
-          :visible visible)))
+(defun +performance-noema-snapshot ()
+  "Return cached Noema runtime state without starting or querying its host."
+  (let* ((host (and (boundp '+noema--process) +noema--process))
+         (live (and (processp host) (process-live-p host)))
+         (pid (and live (process-id host)))
+         (ps (and (integerp pid)
+                  (when-let* ((lines (+performance--ps-lines
+                                      "-p" (number-to-string pid) "-o"
+                                      "pid,ppid,%cpu,%mem,rss,vsz,etime,command"))
+                              (line (cadr lines)))
+                    (+performance--parse-ps-process-line line)))))
+    (list :loaded (featurep 'noema/bridge/config)
+          :ready (and (boundp '+noema--ready) +noema--ready t)
+          :host-live live :pid pid
+          :cpu (plist-get ps :cpu) :rss-kb (plist-get ps :rss-kb)
+          :pages (+performance--hash-count
+                  (and (boundp '+noema--file-buffers) +noema--file-buffers))
+          :clients (+performance--hash-count
+                    (and (boundp '+noema--client-buffers) +noema--client-buffers))
+          :tasks (length (and (boundp '+activity-noema--tasks)
+                              +activity-noema--tasks))
+          :agents (+performance--hash-count
+                   (and (boundp '+activity-noema--agents)
+                        +activity-noema--agents))
+          :events (length (and (boundp '+noema--host-event-queue)
+                               +noema--host-event-queue))
+          :posts (length (and (boundp '+noema--post-queue)
+                              +noema--post-queue))
+          :log-bytes (or (and (boundp '+noema--process-log-bytes)
+                              +noema--process-log-bytes) 0))))
 
 (defun +performance--math-preview-sample ()
-  "Return aggregate math-preview (RaTeX) runtime metrics.
-
-Replaces telemetry for an Org LaTeX preview engine that no longer exists:
-the old fields probed `+org-latex--*' variables that nothing defines, so
-they reported zero unconditionally."
+  "Return aggregate RaTeX runtime metrics."
   (let ((buffers 0)
         (cached 0)
         (inflight 0))
@@ -274,7 +391,7 @@ they reported zero unconditionally."
 (defun +performance--sample ()
   "Return a structured performance sample."
   (let* ((process (+performance--self-process-sample))
-         (org (+performance--org-summary-sample))
+         (noema (+performance-noema-snapshot))
          (math (+performance--math-preview-sample))
          (descendants (+performance--descendant-tree-snapshot)))
     (list :timestamp (format-time-string "%Y-%m-%d %H:%M:%S")
@@ -293,8 +410,11 @@ they reported zero unconditionally."
           :idle-timers (length timer-idle-list)
           :gcs gcs-done
           :gc-elapsed gc-elapsed
-          :org-buffers (plist-get org :buffers)
-          :org-visible (plist-get org :visible)
+          :noema noema
+          :noema-host-live (plist-get noema :host-live)
+          :noema-ready (plist-get noema :ready)
+          :noema-pages (plist-get noema :pages)
+          :noema-tasks (plist-get noema :tasks)
           :math-preview-buffers (plist-get math :buffers)
           :math-preview-cached (plist-get math :cached)
           :math-preview-inflight (plist-get math :inflight)
@@ -304,13 +424,14 @@ they reported zero unconditionally."
 (defun +performance-record-file (&optional time)
   "Return the performance record file for TIME or now."
   (expand-file-name
-   (format "performance-%s.tsv"
+   (format "performance-%s-v2.tsv"
            (format-time-string "%Y%m%d" time))
    +performance-record-directory))
 
 (defconst +performance--record-fields
   '(:timestamp :pid :cpu :mem :rss-kb :vsz-kb :buffers :processes
-    :timers :idle-timers :gcs :gc-elapsed :org-buffers :org-visible
+    :timers :idle-timers :gcs :gc-elapsed
+    :noema-host-live :noema-ready :noema-pages :noema-tasks
     :math-preview-buffers :math-preview-cached :math-preview-inflight
     :math-preview-pending :math-preview-backend-live)
   "Fields saved to performance record files.")
@@ -521,14 +642,6 @@ place instead of requiring a manual audit."
                       (string-join (plist-get row :local-entries) ", "))))
     (insert "\n")))
 
-(defun +performance--buffer-visible-p (buffer)
-  "Return non-nil when BUFFER is visible in any live window."
-  (get-buffer-window buffer t))
-
-(defun +performance--list-length (value)
-  "Return list length for VALUE, or 0."
-  (if (listp value) (length value) 0))
-
 (defun +performance--hash-count (value)
   "Return hash table count for VALUE, or 0."
   (if (hash-table-p value) (hash-table-count value) 0))
@@ -562,49 +675,28 @@ The return value is a list of plists with `:hook', `:global-count',
                :local-entries local-entries)))
      hooks)))
 
-(defun +performance--org-buffers ()
-  "Return live Org buffers."
-  (cl-remove-if-not
-   (lambda (buffer)
-     (with-current-buffer buffer
-       (derived-mode-p 'org-mode)))
-   (buffer-list)))
-
-(defun +performance-org-buffer-snapshot ()
-  "Return structured Org buffer runtime state."
-  (mapcar
-   (lambda (buffer)
-     (with-current-buffer buffer
-       (list :buffer (buffer-name buffer)
-             :size (buffer-size)
-             :visible (and (+performance--buffer-visible-p buffer) t)
-             :modified (buffer-modified-p)
-             :major-mode major-mode
-             :post-command-count
-             (+performance--hook-count post-command-hook)
-             :after-change-count
-             (+performance--hook-count after-change-functions)
-             :jit-lock-count
-             (+performance--hook-count
-              (and (boundp 'jit-lock-functions) jit-lock-functions)))))
-   (+performance--org-buffers)))
-
-(defun +performance--insert-org-buffers ()
-  "Insert Org-specific runtime state."
-  (+performance--section "Org Buffers")
-  (insert (format "%-28s %8s %-7s %-6s %-5s %-5s %-5s\n"
-                  "Buffer" "Size" "Visible" "Mod" "Post" "AChg" "JIT"))
-  (dolist (row (+performance-org-buffer-snapshot))
-    (insert
-     (format "%-28s %8d %-7s %-6s %-5d %-5d %-5d\n"
-             (truncate-string-to-width (plist-get row :buffer) 28 nil nil t)
-             (plist-get row :size)
-             (if (plist-get row :visible) "yes" "no")
-             (if (plist-get row :modified) "yes" "no")
-             (plist-get row :post-command-count)
-             (plist-get row :after-change-count)
-             (plist-get row :jit-lock-count))))
-  (insert "\n"))
+(defun +performance--insert-noema (sample)
+  "Insert cached Noema runtime state from SAMPLE."
+  (let ((state (plist-get sample :noema)))
+    (+performance--section "Noema")
+    (insert (format "%-24s %s\n" "Host"
+                    (cond ((plist-get state :ready) "ready")
+                          ((plist-get state :host-live) "starting")
+                          (t "stopped"))))
+    (insert (format "%-24s %s\n" "PID" (or (plist-get state :pid) "-")))
+    (insert (format "%-24s %s\n" "CPU"
+                    (if-let* ((cpu (plist-get state :cpu)))
+                        (format "%.1f%%" cpu) "-")))
+    (insert (format "%-24s %s\n" "RSS"
+                    (+performance--format-kb (plist-get state :rss-kb))))
+    (dolist (field '((:pages . "Pages") (:clients . "Clients")
+                     (:tasks . "Active tasks") (:agents . "Busy agents")
+                     (:events . "Queued host events")
+                     (:posts . "Queued notifications")
+                     (:log-bytes . "Pending log bytes")))
+      (insert (format "%-24s %s\n" (cdr field)
+                      (or (plist-get state (car field)) 0))))
+    (insert "\n")))
 
 (defun +performance-buffer-hotspot-snapshot (&optional limit)
   "Return largest buffers with hook counts, capped at LIMIT entries."
@@ -627,6 +719,25 @@ The return value is a list of plists with `:hook', `:global-count',
           (lambda (left right)
             (> (buffer-size left) (buffer-size right))))
     (or limit 20))))
+
+(defun +performance--buffer-rows ()
+  "Return actionable rows for every ordinary live buffer."
+  (let ((entries (make-hash-table :test #'equal))
+        rows)
+    (dolist (buffer (sort (copy-sequence (buffer-list))
+                          (lambda (left right)
+                            (> (buffer-size left) (buffer-size right)))))
+      (when (and (not (eq buffer (current-buffer)))
+                 (not (string-prefix-p " " (buffer-name buffer))))
+        (with-current-buffer buffer
+          (let ((ref (intern (format "monitor-buffer:%s" (buffer-name buffer)))))
+            (puthash ref buffer entries)
+            (push (list :ref ref :buffer buffer :name (buffer-name buffer)
+                        :size (buffer-size) :mode major-mode
+                        :file buffer-file-name)
+                  rows)))))
+    (setq-local +performance--buffer-entries entries)
+    (nreverse rows)))
 
 (defun +performance--insert-buffer-hotspots ()
   "Insert largest buffers and local hook counts."
@@ -658,7 +769,7 @@ tools; it samples once and does not start any refresh timers."
           :inspected-buffer (and (buffer-live-p buffer) (buffer-name buffer))
           :hooks (and (buffer-live-p buffer)
                       (+performance-hook-snapshot buffer))
-          :org-buffers (+performance-org-buffer-snapshot)
+          :noema (+performance-noema-snapshot)
           :largest-buffers (+performance-buffer-hotspot-snapshot 20)
           :timers (+performance--timer-summary timer-list)
           :idle-timers (+performance--timer-summary timer-idle-list))))
@@ -670,7 +781,7 @@ tools; it samples once and does not start any refresh timers."
   (+performance--insert-os-processes)
   (+performance--insert-toolchain-memory)
   (+performance--insert-emacs-summary)
-  (+performance--insert-org-buffers)
+  (+performance--insert-noema sample)
   (+performance--insert-emacs-processes)
   (+performance--insert-hook-table inspected-buffer)
   (+performance--insert-buffer-hotspots)
@@ -706,7 +817,11 @@ This samples once and does not mutate or display the performance board."
          (+performance--ui-snapshot sample selected-buffer))
       (erase-buffer)
       (+performance--insert-report sample selected-buffer)
-      (goto-char (point-min)))))
+      (goto-char (point-min)))
+    (when (and +performance--tab-state
+               (eq (etaf-value +performance--tab-state) 'processes)
+               +activity-board--state)
+      (+activity-board/refresh))))
 
 (defun +performance--section-body (render)
   "Capture the body of a legacy section produced by RENDER."
@@ -732,8 +847,8 @@ This samples once and does not mutate or display the performance board."
                 #'+performance--insert-emacs-summary)
           (list 'emacs-processes 'processes "Emacs Process List"
                 #'+performance--insert-emacs-processes)
-          (list 'org 'buffers "Org Buffers"
-                #'+performance--insert-org-buffers)
+          (list 'noema 'noema "Noema"
+                (lambda () (+performance--insert-noema sample)))
           (list 'largest 'buffers "Largest Buffers"
                 #'+performance--insert-buffer-hotspots)
           (list 'hooks 'hooks "Hook Table"
@@ -754,6 +869,10 @@ This samples once and does not mutate or display the performance board."
                   (if +performance--recording "on" "off"))
           :auto (timerp +performance--auto-refresh-timer)
           :recording +performance--recording
+          :buffer-rows (when (and +performance--tab-state
+                                  (eq (etaf-value +performance--tab-state)
+                                      'buffers))
+                         (+performance--buffer-rows))
           :sections
           (mapcar
            (lambda (definition)
@@ -805,9 +924,11 @@ This samples once and does not mutate or display the performance board."
    (+performance--format-kb (plist-get sample :rss-kb))
    (/ (float (or (plist-get sample :rss-kb) 0)) (* 2 1024 1024.0)))
   (+performance--insert-metric
-   "Org buffers"
-   (number-to-string (plist-get sample :org-buffers))
-   (/ (float (plist-get sample :org-buffers)) 20.0))
+   "Noema"
+   (format "%s · %s tasks"
+           (if (plist-get (plist-get sample :noema) :ready) "ready" "stopped")
+           (plist-get (plist-get sample :noema) :tasks))
+   (/ (float (plist-get (plist-get sample :noema) :tasks)) 20.0))
   (+performance--insert-metric
    "Math preview"
    (format "%s buf, backend %s"
@@ -829,7 +950,7 @@ This samples once and does not mutate or display the performance board."
   (when (buffer-live-p buffer)
     (with-current-buffer buffer
       (when (timerp +performance--auto-refresh-timer)
-        (+performance/watch-refresh)))))
+        (+performance/watch-refresh-current)))))
 
 (defun +performance-watch-enable-auto-refresh ()
   "Enable automatic refresh for the current performance watch buffer."
@@ -851,10 +972,10 @@ This samples once and does not mutate or display the performance board."
       (progn
         (cancel-timer +performance--auto-refresh-timer)
         (setq +performance--auto-refresh-timer nil)
-        (+performance/watch-refresh)
+        (+performance/watch-refresh-current)
         (message "Performance watch auto refresh disabled"))
     (+performance-watch-enable-auto-refresh)
-    (+performance/watch-refresh)
+    (+performance/watch-refresh-current)
     (message "Performance watch auto refresh enabled")))
 
 (defun +performance-watch-cleanup ()
@@ -907,58 +1028,229 @@ This samples once and does not mutate or display the performance board."
     (kill-new text)
     (message "Copied performance report (%d chars)" (length text))))
 
+(defun +performance--selected-buffer ()
+  "Return the live buffer under monitor focus."
+  (let* ((ref (etaf-focused-host-ref))
+         (buffer (and +performance--buffer-entries
+                      (gethash ref +performance--buffer-entries))))
+    (unless (buffer-live-p buffer)
+      (user-error "No live buffer selected"))
+    buffer))
+
+(defun +performance/open-buffer (buffer)
+  "Open monitored BUFFER in the parent frame."
+  (interactive (list (+performance--selected-buffer)))
+  (unless (buffer-live-p buffer)
+    (user-error "Buffer has ended"))
+  (+activity-board--return-to-parent)
+  (pop-to-buffer buffer))
+
+(defun +performance/open-file (buffer)
+  "Open BUFFER's associated file in the parent frame."
+  (interactive (list (+performance--selected-buffer)))
+  (unless (buffer-live-p buffer)
+    (user-error "Buffer has ended"))
+  (let ((file (buffer-local-value 'buffer-file-name buffer)))
+    (unless file
+      (user-error "%s has no associated file" (buffer-name buffer)))
+    (+activity-board--return-to-parent)
+    (find-file file)))
+
+(defun +performance/kill-buffer (buffer)
+  "Close monitored BUFFER after confirmation."
+  (interactive (list (+performance--selected-buffer)))
+  (unless (buffer-live-p buffer)
+    (user-error "Buffer has ended"))
+  (when (yes-or-no-p (format "Close buffer %s? " (buffer-name buffer)))
+    (when (kill-buffer buffer)
+      (+performance/watch-refresh-current))))
+
+(defun +performance/delete-file (buffer)
+  "Delete BUFFER's associated file and close BUFFER after confirmation."
+  (interactive (list (+performance--selected-buffer)))
+  (unless (buffer-live-p buffer)
+    (user-error "Buffer has ended"))
+  (let ((file (buffer-local-value 'buffer-file-name buffer)))
+    (unless file
+      (user-error "%s has no associated file" (buffer-name buffer)))
+    (when (yes-or-no-p (format "Delete file %s and close its buffer? " file))
+      (when (and (buffer-modified-p buffer)
+                 (not (yes-or-no-p "Discard unsaved edits in this buffer? ")))
+        (user-error "File deletion cancelled"))
+      (delete-file file)
+      (with-current-buffer buffer
+        (set-buffer-modified-p nil))
+      (kill-buffer buffer)
+      (+performance/watch-refresh-current))))
+
+(defun +performance--context-item (label owner ref command &optional buffer)
+  "Create a menu item LABEL for COMMAND on OWNER's row REF or BUFFER."
+  (vector
+   label
+   (lambda ()
+     (interactive)
+     (unless (buffer-live-p owner)
+       (user-error "Monitor has closed"))
+     (with-current-buffer owner
+       (if buffer
+           (progn
+             (unless (buffer-live-p buffer)
+               (user-error "Buffer has ended"))
+             (funcall command buffer))
+         (unless (and (hash-table-p +activity-board--entries)
+                      (gethash ref +activity-board--entries))
+           (user-error "Task has ended"))
+         (etaf-focus (etaf-runtime-for-buffer owner) ref)
+         (call-interactively command))))
+   t))
+
+(defun +performance/watch-context-menu (&optional event)
+  "Show row actions at mouse EVENT or the focused monitor row."
+  (interactive
+   (list (and (consp last-input-event)
+              (eq (event-basic-type last-input-event) 'mouse-3)
+              last-input-event)))
+  (require 'ui/activity/config)
+  (let* ((runtime (etaf-runtime-for-buffer (current-buffer)))
+         (position (and event (posn-point (event-start event))))
+         (row-p (lambda (candidate)
+                  (or (and (hash-table-p +performance--buffer-entries)
+                           (gethash candidate +performance--buffer-entries))
+                      (and (hash-table-p +activity-board--entries)
+                           (gethash candidate +activity-board--entries)))))
+         (focused (and (not event) (etaf-focused-host-ref)))
+         (ref (and runtime
+                   (or (and focused (funcall row-p focused) focused)
+                       (etaf-host-ref-at
+                        runtime (if (integerp position) position (point))
+                        row-p))))
+         (buffer (and ref (hash-table-p +performance--buffer-entries)
+                      (gethash ref +performance--buffer-entries)))
+         (entry (and ref (hash-table-p +activity-board--entries)
+                     (gethash ref +activity-board--entries)))
+         (output (or buffer
+                     (and (processp entry)
+                          (+activity-board--process-buffer entry))
+                     (and (+activity-p entry) (+activity-buffer entry))))
+         (file (and (buffer-live-p output)
+                    (buffer-local-value 'buffer-file-name output)))
+         (owner (current-buffer))
+         items)
+    (unless (or (buffer-live-p buffer) entry)
+      (user-error "Right-click a process, task, or buffer row"))
+    (setq items
+          (delq nil
+                (if buffer
+                    (list
+                     (+performance--context-item "打开 buffer" owner ref
+                                                 #'+performance/open-buffer buffer)
+                     (when file
+                       (+performance--context-item "打开关联文件" owner ref
+                                                   #'+performance/open-file buffer))
+                     (+performance--context-item "关闭 buffer" owner ref
+                                                 #'+performance/kill-buffer buffer)
+                     (when file
+                       (+performance--context-item "删除关联文件" owner ref
+                                                   #'+performance/delete-file buffer)))
+                  (list
+                   (when (buffer-live-p output)
+                     (+performance--context-item "打开输出 buffer" owner ref
+                                                 #'+activity-board/visit))
+                   (when file
+                     (+performance--context-item "打开关联文件" owner ref
+                                                 #'+performance/open-file output))
+                   (when (processp entry)
+                     (+performance--context-item "进程详情" owner ref
+                                                 #'+activity-board/describe))
+                   (when (+activity-board--pausable-process-p entry)
+                     (+performance--context-item
+                      (if (eq (process-status entry) 'stop)
+                          "恢复进程" "暂停进程")
+                      owner ref #'+activity-board/toggle-pause))
+                   (when (processp entry)
+                     (+performance--context-item "中断进程" owner ref
+                                                 #'+activity-board/interrupt))
+                   (+performance--context-item "结束进程／取消任务" owner ref
+                                               #'+activity-board/stop)
+                   (when (processp entry)
+                     (+performance--context-item "强制结束进程" owner ref
+                                                 #'+activity-board/kill))
+                   (when (buffer-live-p output)
+                     (+performance--context-item "关闭输出 buffer" owner ref
+                                                 #'+performance/kill-buffer output))
+                   (when file
+                     (+performance--context-item "删除关联文件" owner ref
+                                                 #'+performance/delete-file output))))))
+    (popup-menu (easy-menu-create-menu "监控管理" items) event)))
+
 (defun +performance/watch-quit ()
-  "Quit the performance watch frame and stop its automatic refresh."
+  "Close the shared watch and Activity page."
   (interactive)
-  (+performance-watch-cleanup)
-  (let ((frame (selected-frame)))
-    (cond
-     ((and (frame-live-p frame)
-           (eq frame +performance--frame)
-           (> (length (frame-list)) 1))
-      (setq +performance--frame nil)
-      (delete-frame frame))
-     (t
-      (quit-window)))))
+  (if (and (featurep 'aaron-ui-float)
+           (aaron-ui-float-panel-for-buffer (current-buffer)))
+      (aaron-ui-float-close
+       (aaron-ui-float-panel-for-buffer (current-buffer)))
+    (+performance-watch-cleanup)
+    (quit-window)))
+
+(defun +performance--float-hidden (_panel)
+  "Stop sampling when the shared watch is hidden."
+  (when-let* ((buffer (get-buffer +performance-buffer-name)))
+    (with-current-buffer buffer
+      (+performance-watch-cleanup)
+      (when (timerp +activity-board--auto-timer)
+        (cancel-timer +activity-board--auto-timer)
+        (setq +activity-board--auto-timer nil)))))
 
 (defun +performance-watch-display-buffer (buffer)
-  "Display performance watch BUFFER in a dedicated frame."
-  (unless (and (framep +performance--frame)
-               (frame-live-p +performance--frame))
-    (setq +performance--frame
-          (make-frame `((name . "Performance Watch")
-                        (minibuffer . t)
-                        (width . 132)
-                        (height . 44)))))
-  (select-frame-set-input-focus +performance--frame)
-  (with-selected-frame +performance--frame
-    (delete-other-windows)
-    (switch-to-buffer buffer)
-    (when (and (fboundp 'etaf-runtime-for-buffer)
-               (etaf-runtime-for-buffer buffer))
-      (etaf-refit))
-    (set-window-dedicated-p (selected-window) t)
-    (selected-window)))
+  "Display shared watch BUFFER in the Aaron UI float or a TTY window."
+  (if (and (display-graphic-p)
+           (require 'aaron-ui-float nil t)
+           (posframe-workable-p))
+      (aaron-ui-float-show buffer :key 'performance-watch :title "监控"
+                           :width '(fraction 0.8) :height '(fraction 0.8)
+                           :owned t :on-hide #'+performance--float-hidden)
+    (pop-to-buffer buffer)))
 
-(defun +performance/watch ()
-  "Open a runtime performance and power diagnostics board."
+(defun +performance/watch (&optional tab)
+  "Open the shared monitor, optionally selecting TAB."
   (interactive)
+  (require 'ui/activity/config)
   (require 'aaron-ui-performance)
-  (let ((inspected-buffer (current-buffer))
-        (buffer (get-buffer-create +performance-buffer-name)))
-    (with-current-buffer buffer
-      (unless (etaf-runtime-for-buffer buffer)
-        (let ((view-state (etaf-ref nil))
-              (tab-state (etaf-ref 'overview)))
-          (etaf-mount
-           buffer (aaron-ui-performance-view view-state tab-state buffer))
-          (setq-local +performance--view-state view-state
-                      +performance--tab-state tab-state)
-          (+performance-watch-keys-mode 1)
-          (add-hook 'kill-buffer-hook #'+performance-watch-cleanup nil t)))
-      (setq-local +performance--inspected-buffer inspected-buffer)
-      (+performance/watch-refresh))
-    (+performance-watch-display-buffer buffer)))
+  (let* ((inspected-buffer (if (eq (current-buffer)
+                                   (get-buffer +performance-buffer-name))
+                               +performance--inspected-buffer
+                             (current-buffer)))
+         (existing (get-buffer +performance-buffer-name))
+         (buffer (or existing (get-buffer-create +performance-buffer-name))))
+    (condition-case error
+        (progn
+          (with-current-buffer buffer
+            (unless (and (etaf-runtime-for-buffer buffer)
+                         +performance--activity-state)
+              (when-let* ((runtime (etaf-runtime-for-buffer buffer)))
+                (etaf-unmount runtime))
+              (let ((view-state (etaf-ref nil))
+                    (tab-state (etaf-ref 'overview))
+                    (activity-state (etaf-ref nil)))
+                (etaf-mount
+                 buffer (aaron-ui-performance-view view-state tab-state
+                                                   activity-state buffer))
+                (setq-local +performance--view-state view-state
+                            +performance--tab-state tab-state
+                            +performance--activity-state activity-state
+                            +activity-board--state activity-state)
+                (+performance-watch-keys-mode 1)
+                (add-hook 'kill-buffer-hook #'+performance-watch-cleanup nil t)
+                (add-hook 'kill-buffer-hook #'+activity-board--cleanup nil t)))
+            (setq-local +performance--inspected-buffer inspected-buffer)
+            (+performance/watch-select-tab (or tab 'overview)))
+          (+performance-watch-display-buffer buffer))
+      (error
+       (unless existing
+         (when (buffer-live-p buffer)
+           (kill-buffer buffer)))
+       (signal (car error) (cdr error))))))
 
 (defun +performance--theme-changed (&rest _)
   "Repaint the ETAF Performance Watch after a theme change."

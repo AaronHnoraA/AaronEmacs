@@ -24,7 +24,7 @@ Doom 的模块与本配置模块的对应关系，按 Doom 的分类排列。语
 | `:checkers syntax` / `spell` / `grammar` | `checkers/diagnostics*`（flymake）、`checkers/spell`、`checkers/grammar`（LanguageTool） | 一致 |
 | `:tools lsp` / `lookup` / `eval` / `debugger` / `direnv` / `magit` / `tree-sitter` / `pdf` / `biblio` / `llm` / `editorconfig` / `make` | `tools/lsp*`、`editor/navigation`（xref）、`tools/run`、`tools/debugger`、`tools/direnv`、`tools/git`、`tools/tree-sitter`、`lang/auctex`（pdf-tools）、`lang/latex`（Zotero）、`tools/agent`、`config/default`（editorconfig）、`tools/task` | 查找走 xref 后端链，不另建 handler 表 |
 | `:tools docker` / `ansible` / `terraform` / `pass` / `upload` / `tmux` / `collab` / `ein` | 无，或由 Remote/Jupyter 覆盖 | ein 的位置由 Noema Jupyter 桥替代 |
-| `:lang org` / `markdown` / `latex` / `python` / `cc` / `rust` / `java` / `lean` / `nix` / `sh` / `web` / `javascript` / `haskell` / `ocaml` / `beancount` / `emacs-lisp` | `lang/*` 同名或对应模块 | Markdown 由 Noema 接管 |
+| `:lang markdown` / `latex` / `python` / `cc` / `rust` / `java` / `lean` / `nix` / `sh` / `web` / `javascript` / `haskell` / `ocaml` / `beancount` / `emacs-lisp` | `lang/*` 同名或对应模块 | Markdown 由 Noema 接管；Org 模块已移除 |
 | `:os macos` / `tty` | `os/macos`、`os/neomacs` | 一致 |
 | `:app calendar` / `rss` / `irc` / `emms` / `everywhere` | `app/calendar` | 其余未采用 |
 | `:email *` | 无 | — |
@@ -81,7 +81,7 @@ Doom 不在启动时开启这些模式，而是挂到生命周期 hook 上（本
 模块账本还发现两处启动期间的重加载：
 
 - `lang/auctex` 本应在 TeX/PDF 之后才加载，但 `tex-site` 和 `pdf-tools` 在启动时就被加载，结果它约 0.9s 的初始化落在了启动期间。**已修**：`tex-site` 由 AUCTeX 的 autoload 文件在启动时载入，模块因此照常在启动时加载（也要靠它登记 `.pdf` 的打开方式），但其中的 `use-package pdf-tools` 原先没有延迟，激活 PDF Tools 会启动 `epdfinfo` 服务进程。现改为 `:mode`/`:magic` 登记 `pdf-view-mode`，pdf-view 载入时再带上 pdf-tools；实测模块启动耗时从约 1.0s 降到 0.014s，启动后没有 `epdfinfo` 进程，打开 PDF 时才启动（测试 `init-pdf-lazy-tests.el`）。
-- `lang/org` 跟随 org 加载，而 org 在启动时就被加载了。（实测现在 org 不在启动时载入。）
+- `lang/org` 已移除；笔记和任务工作流集中在 Noema。
 - 同一轮按模块耗时排查到的其他启动期加载，均已改为首次使用时：`tools/tree-sitter` 判断 grammar 时逐个探测缺失的库（每个约 30ms，共 1.45s，本次审计引入），改为列出 grammar 目录，1.6s→0.26s；`lang/javascript`、`lang/nix` 的 `use-package` 只有 `:ensure t`，js2-mode（连带 cc-mode）与 nix-mode 在启动时载入，加 `:defer t` 后 `tools/lsp`（载入这些语言配置）0.57s→0.25s；dape 原为 `:demand t`，改在第一个文件时载入并读断点，退出时未载入就不保存（避免用空表覆盖）；evil-collection 改在第一次输入时初始化（约 0.1s）。启动结束后没有任何子进程。
 
 Doom 的做法：
@@ -426,6 +426,7 @@ Doom 的做法：
 | 模块 | 处理 |
 | --- | --- |
 | `tools/lsp`（`+lsp.el`） | **吸收** G-L1：最后一个 buffer 关闭后推迟 `+language-server-defer-shutdown` 秒再停 server。审计时发现这是回归：迁到 lsp-mode 前本配置在 Eglot 上已有同样的推迟（`my/language-server-defer-shutdown`，3 秒），迁移（`6d49b4b0`）丢了实现，设置项和值 3 一直留在 store 里却无人读取。按 `lsp-workflow.md` 的 D1–D4 实现：显式停止、资源关闭、断开的 target 立即生效并取消计时器，推迟期间 server 已死则不动。`make lsp-live-smoke` 的 C/Python 通过，Java 的 jdtls 在改动前后都以退出码 13 启动失败（与本改动无关） |
+| `tools/lsp`（TypeScript snippet 补全） | **G-A1 保留**：当前 JS/TS workspace 设置未开启 `completions.completeFunctionCalls`。用真实 typescript-language-server 6.0.2 测得开启后函数补全项起初只有 snippet 标记，resolve 后才有插入文本；lsp-mode 按 `ts-ls` server-id 同步 resolve 的补丁对本配置的 `+typescript` 不生效。直接同步 resolve 与本配置编辑不等待服务器的契约冲突，后续须设计异步解析与插入顺序，详见 `lsp-workflow.md` |
 | `tools/lsp`（其余） | `+lsp-signature-stop-maybe-h`（Esc 关签名）已有；`lsp-enable-folding` 等默认已按本配置的 Hub 管理；company 后端、eglot 部分不适用（Eglot 刻意隐藏） |
 | `tools/direnv` | 提前到 `change-major-mode-after-body-hook` 更新环境：本配置的 direnv 走 Remote 环境 capsule，在启动 LSP 前等环境就绪（`+lsp-mode--waiting-for-direnv`），已覆盖。direnv 成功后重启 LSP 不收：本配置 direnv 自动刷新，每次成功都重启会让远程 server 反复重启；环境真的变化时用 `SPC c R` |
 | `tools/editorconfig` | 压缩包与 Office 文件排除**已有**；`editorconfig` 设了缩进时不再猜缩进：本配置 dtrt-indent 已在 editorconfig 之后判断 |
@@ -481,7 +482,7 @@ Doom 的做法：
 
 ## 25. 模块全文：`lang/org`
 
-用户不用 Org（笔记、任务、导出都在 Noema），本配置的 `lang/org` 只有链接插入，所以 Doom 的 Org 工作流（capture 浮窗、refile 系列、agenda 时段与后台 buffer 优化、babel 惰性加载与 ob-async、导出到剪贴板、附件与 org-download、org-roam、journal、present、noter、`+org/dwim-at-point` 与 evil-org 键）都不收。
+用户不用 Org（笔记、任务、导出都在 Noema），`lang/org` 已移除，所以 Doom 的 Org 工作流（capture 浮窗、refile 系列、agenda 时段与后台 buffer 优化、babel 惰性加载与 ob-async、导出到剪贴板、附件与 org-download、org-roam、journal、present、noter、`+org/dwim-at-point` 与 evil-org 键）都不收。
 
 | 项目 | 处理 |
 | --- | --- |
@@ -617,20 +618,20 @@ Doom 的做法：
 | `term/eshell` 其余部分 | 提示符、别名表、`eshell-up`/`eshell-z`/`esh-help`/`did-you-mean`/语法高亮、分屏开新 shell、输入输出只读保护、`scroll-to-bottom`、`kill-processes-on-exit`、`error-if-no-glob` | 不收：`eshell/emacs`、历史去重、空格开头不入历史已在第一轮吸收；eshell 以 Emacs 状态运行在浮窗里，分屏、只读保护与滚动设置针对 Doom 的 Evil 分屏用法；glob 报错改变命令语义；其余包用户未用 |
 | `input/chinese` | pyim、拼音匹配 orderless/搜索（`evil-pinyin`）、`ace-pinyin`、fcitx 切换输入法、`pangu-spacing` | 输入法切换已有（离开 Insert 切到 `ABC`）。拼音匹配记为候选 **G-I1**，需要新依赖并改变补全匹配，待用户决定；`pangu-spacing` 会改写中英文间空格，不收 |
 | `input/bidi`、`japanese`、`layout` | 双向文字字体、migemo、skk、bépo/azerty 键位 | 用户不用这些语言与键盘布局，不收 |
-| `term/shell`、`term`、`vterm`、`ghostel` | 弹窗开关、按工作区命名、`pgrep` 判断 shell 空闲、`term-line-mode` 前把旧输出设为只读、vterm 的 `0`/`dd`、去掉继承的 `DIRENV_*` 变量 | 不收：终端走 Portal（本机）与 Ghostel（远程）；`shell-toggle` 已按目录复用。实测 comint shell 不裁历史，撤销里只有插入位置，没有 eshell 那样的问题；编译 buffer 的撤销本来就关着。`DIRENV_*` 一项**未核实**：`tools/direnv` 求值时从未加载 direnv 的环境重建，但终端从已加载 direnv 的 buffer 启动时是否继承 `DIRENV_DIFF`（子 shell 的 rc 改了 PATH 后 direnv 会以为已加载而不重新应用）需要在交互 Emacs 里用 Portal/Ghostel 实测，batch 下 direnv 不生效 |
-| `tools/lsp`（`+lsp.el`、`packages.el`） | 以 `LSP_USE_PLISTS` 编译 lsp-mode（`lsp-use-plists`）；最后一个 buffer 关闭后延迟 3 秒再关服务器；`lsp-ui-doc` 尺寸与延迟 | 实测本配置 `lsp-use-plists` 为 nil，服务器消息解码成哈希表。改用 plist 要带环境变量重编 lsp-mode 及各客户端包，并核对本配置自己的 LSP 代码有没有按哈希表取值，记为候选 **G-L1**，需先测量再由用户决定。延迟关闭不收：本配置关闭视图不结束 buffer（`window-lifecycle.md`），服务器只在显式结束 buffer 后才关 |
+| `term/shell`、`term`、`vterm`、`ghostel` | 弹窗开关、按工作区命名、`pgrep` 判断 shell 空闲、`term-line-mode` 前把旧输出设为只读、vterm 的 `0`/`dd`、去掉继承的 `DIRENV_*` 变量 | 不收：终端走 Portal（本机）与路由终端（远程）；`shell-toggle` 已按目录复用。实测 comint shell 不裁历史，撤销里只有插入位置，没有 eshell 那样的问题；编译 buffer 的撤销本来就关着。`DIRENV_*` 已核对启动路径：Portal 原生终端不导出 Lisp buffer 的 `process-environment`；SSH 在目标机启动登录 shell；非 SSH 的 `remote-terminal-open` 在新 buffer 中用 workspace 环境和 profile 启动 PTY，不继承原编辑 buffer 的 direnv 投影。Doom 给 Ghostel 清 `DIRENV_*` 的补丁在此没有对应路径 |
+| `tools/lsp`（`+lsp.el`、`packages.el`） | 以 `LSP_USE_PLISTS` 编译 lsp-mode（`lsp-use-plists`）；最后一个 buffer 关闭后延迟 3 秒再关服务器；`lsp-ui-doc` 尺寸与延迟 | 延迟关闭已作为 **G-L1** 实现（第 21 节），适用于真正结束最后一个 buffer；关闭视图不会结束 buffer。实测本配置 `lsp-use-plists` 为 nil。plist 优化另记 **G-L2**：Emacs 31 解析一份 77 KB、500 条诊断的模拟 LSP JSON 100 次，哈希表约 0.15 s/20 次 GC，plist 约 0.07 s/9 次 GC（三轮相近）；这只测解析，不代表端到端延迟。客户端读取服务端对象主要经 `lsp-get`，远程改动合并用客户端构造的 plist；正式切换还须统一重编已安装 lsp-mode 字节码并跑真实服务器回归，不能只设运行时环境变量。`lsp-ui-doc` 尺寸与延迟属外观偏好，不收 |
 | `tools/lookup` | `+lookup/definition` 的后备链：xref → dumb-jump → 项目搜索 → `evil-goto-definition`；字典、在线搜索、docsets | 已有对应：`SPC n d` 在 xref 失败时退到 citre（ctags）；在线搜索、devdocs、tldr 已有。dumb-jump 与 citre 重复，不收 |
 | `tools/direnv` | envrc 载入成功后重启该目录下的 LSP 服务器 | 不收：本配置 LSP 启动先等 direnv 异步导出完成（`+lsp-mode--waiting-for-direnv`），不会先用旧环境启动；`.envrc` 改动后需手动重启，记录为已知行为 |
 | `tools/magit` | 状态 buffer 外按方向开窗、Git 操作后回退可见 buffer 并标记其余为过期、`q` 杀掉同仓库所有 magit buffer、Evil 下的 TAB/ESC 修正、空提交信息进 Insert | 实测启用 evil-collection 后 Magit 的 TAB 是 `magit-section-toggle`、ESC 是 `aaron/escape`，无需修正。空提交信息进 Insert 不收：用户的 Neovim 打开提交信息在 Normal。回退 buffer 已由 `global-auto-revert-mode` 负责 |
 | `tools/pdf` | `fit-page`、`pdf-view-use-scaling`、大 PDF 不提示、注释 buffer 随文档关闭、saveplace | 实测 `pdf-view-use-scaling` 为 t；大文件提示与 saveplace 已在 `lang/auctex` 吸收；`fit-width` 是本配置的选择 |
 | `tools/eval`、`debugger`、`editorconfig`、`tree-sitter`、`biblio` 及其余 | REPL 管理、eros 结果覆盖层、dape 断点、editorconfig 与 dtrt-indent、grammar 源表、citar | 已有或不适用：`eval-expression-print-length/level` 为 nil 已有；quickrun 已有；dape 断点全局模式与目录已有；grammar 源表本配置只列用到的语言；文献在 LaTeX 里走 RefTeX。ansible、docker、ein、llm（AI 走 Noema）、pass、terraform、tmux、upload 用户不用 |
 | `ui/hl-todo`、`indent-guides`、`ligatures`、`nav-flash`、`unicode` | TODO 关键字带冒号高亮、`]t`/`[t`；indent-bars 在 macOS 用字符；连字表；跳转后闪行；`unicode-fonts` 按 Unicode 区块配字体 | 已有或不收：hl-todo（`C-c t` 系列）、连字（`aaron-base`）、跳转闪行（`editor/navigation` 的 `pulse`）已有；`]t`/`[t` 用户的 Neovim 配置里没有；中日韩与符号字体已在 `aaron-base` 按字符集设置，`unicode-fonts` 启动慢，不收 |
-| `ui/popup/+hacks.el` | `display-buffer-alist` 正则改为区分大小写、Help 里的源码链接在原窗口打开、编译跳转不新开窗口、eshell 可视命令共用弹窗、wdired/wgrep 结束后关弹窗等 | 多数针对 Doom 自己的 `+popup-mode`，本配置的窗口规则在 `ui/windows` 与 `window-lifecycle.md`，不能逐条移植；`display-buffer-alist` 区分大小写与 Help 链接落点**未逐条实测**，留待窗口规则的设计文档按需处理 |
+| `ui/popup/+hacks.el` | `display-buffer-alist` 正则改为区分大小写、Help 里的源码链接在原窗口打开、编译跳转不新开窗口、eshell 可视命令共用弹窗、wdired/wgrep 结束后关弹窗等 | 多数针对 Doom 自己的 `+popup-mode`，本配置的窗口规则在 `ui/windows` 与 `window-lifecycle.md`，不能逐条移植。已核对当前 `display-buffer-alist`：只有 Eshell 的函数谓词和 shell 临时的 `(category . comint)`，没有正则项；Shackle 的规则不走 `display-buffer-assq-regexp`，所以区分大小写 advice 不需要。Helpful 的源码按钮仍调用 `find-file`，会替换当前帮助窗格；Doom 的“回到原窗口”会改变窗口习惯，列为候选而不直接移植 |
 | `ui/vc-gutter`、`workspaces`、`treemacs`、`modeline`、`dashboard`、`zen`、`tabs`、`window-select`、`doom`、`emoji`、`minimap`、`neotree`、`vi-tilde-fringe`、`smooth-scroll`、`deft`、`doom-quit` | 逐行重读 | vc-gutter 与第 7 节结论一致；工作区（Perspective）、Treemacs、mode line、Dashboard 是本配置自己的实现，Doom 的 persp-mode 与 doom-modeline 代码不适用；其余为外观或用户不用的包 |
 | `emacs/dired/config.el` | `dired-dwim-target`、自动刷新、目标目录创建询问、GNU ls 排序与远程参数降级 | 本配置前三项已有；本机 `gls` 用 `--group-directories-first --time-style=long-iso`，远程 Dired 由 Remote/TRAMP 路由。本轮不改排序与删除的现有交互 |
 | `emacs/vc/config.el`、`emacs/undo/config.el` | VC 后端；undo-tree 的历史上限 | 本配置只开 Git，远程再按 target 代价决定是否探测 VC。全局 undo 变量仍是 Emacs 默认的 160000/240000/nil，但 `undo-tree-mode` 在每个 buffer 里改成 80000000/120000000/nil（实测）；比 Doom 的 undo-tree 分支 800000/12000000/128000000 宽得多，因此第 11 节“上限已更大”确实指启用后的本地值，不把 Doom 的设置覆盖进来 |
 | `checkers/syntax/config.el`、`emacs/electric/config.el` | Flymake 激活时把 `next-error` 指向诊断；RET 在注释里继续注释 | 本配置把 `]q`/`[q` 保留给编译错误与搜索结果，`]d`/`[d` 和 `M-n`/`M-p` 跳 Flymake，两个导航表面有意分开。Doom 的 RET advice 会改变已有的编辑手感，仍不收 |
-| `emacs/vc/config.el`（smerge） | 打开文件时扫描冲突标记，`so-long` 已检测到超长行时跳过 | 本配置已有同样的自动开启与菜单，但扫描前尚未检查 `so-long-detected-p`；记为 **G-S1**：大文件的冲突扫描可能拖慢打开文件，需先验证触发顺序与耗时再定是否加保护 |
+| `emacs/vc/config.el`（smerge） | 打开文件时扫描冲突标记，`so-long` 已检测到超长行时跳过 | 本配置已有自动开启与菜单。实测 2 MB 的超长行文件在 `find-file-hook` 前已有 `so-long-detected-p=t`，但本配置仍能自动开启 smerge；单独扫描 2 MB/20 MB 分别约 7/54 ms。加 Doom 的跳过条件会让这类冲突文件失去自动开启，当前耗时不足以支持改变行为，**G-S1 结案：不收** |
 | `lang/go/config.el`（`go.work`） | Emacs 31 的 `go-work-ts-mode-maybe` 在缺少 `gowork` grammar 时退到 `fundamental-mode`；Doom 声明了 `go-work-ts-mode` 路由 | **吸收**：本配置原来有 `go`、`gomod` grammar，却没有 `gowork`。按 Emacs 31 自带的已锁定源码版本登记 `gowork` 并编译到 `var/tree-sitter/`；实测打开 `go.work` 得到 `go-work-ts-mode` 与 `gowork` parser。`state-check` 只有预期的一行 `treesit-language-source-alist` 差异 |
 | `lang/go`、`haskell`、`ocaml`、`lean` 的 `config.el`（Go 另含 `autoload.el`） | Go 测试/生成与 `go.work`，Haskell/OCaml 的项目根、REPL 和缩进，Lean 3/4 模式 | Go 测试已在第 23 节处理，`go.work` 如上；Haskell 的 `.hi` 补全过滤只是文件选择偏好，现有 Haskell/OCaml 的 mode 与 LSP 路由不需要 Doom 的第二套 REPL；Lean 走本配置的 Lean 4 server 与 infoview，不叠加 Doom 的 Lean 3/nael |
 | `lang/python`、`rust`、`javascript` 的 `config.el`（JS 另含 `autoload.el`） | Python REPL 与环境、Rust rustic/LSP、JS/TS 模式和 Node/npm 项目 | 与第 10、24 节结论一致：Python 工具链由本配置选择；Rust hover 的 server ID 已修；`.mts`/`.cts`、Node 栈帧和项目 `.bin` 已吸收。nose、rustic、nodejs-repl 是另一套运行/测试入口，不加 |

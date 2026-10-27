@@ -9,7 +9,6 @@
 
 (require 'etaf)
 (require 'aaron-ui)
-(require 'aaron-ui-etaf)
 (require 'aaron-ui-board)
 
 (declare-function +activity-board/refresh "ui/activity/config" ())
@@ -17,12 +16,14 @@
 (declare-function +activity-board/toggle-timers "ui/activity/config" ())
 (declare-function +activity-board/filter "ui/activity/config" (pattern))
 (declare-function +activity-board--activate-row "ui/activity/config" (row))
+(declare-function +activity-board--return-to-parent "ui/activity/config" ())
 
 (defun aaron-ui-activity--color (token fallback)
   "Return Aaron UI TOKEN or FALLBACK for the current theme."
   (aaron-ui-color token fallback))
 
-(etaf-define-component aaron-ui-activity-button (&key label command owner primary)
+(etaf-define-component aaron-ui-activity-button
+    (&key label command owner primary handoff)
   "Render one Activity COMMAND named LABEL for OWNER."
   :view
   (box :role 'button :tab-index 0
@@ -35,6 +36,8 @@
                 (aaron-ui-activity--color 'fg-main "#E4ECFF"))
        :on-press (lambda ()
                    (with-current-buffer owner
+                     (when handoff
+                       (+activity-board--return-to-parent))
                      (call-interactively command)))
     (text (expr label))))
 
@@ -112,13 +115,11 @@
      :key (plist-get row :ref)
      :row row :owner owner)))
 
-(etaf-define-component aaron-ui-activity-app (&key state owner)
-  "Render OWNER's retained Activity STATE."
-  :setup (aaron-ui-etaf-provide-theme)
+(etaf-define-component aaron-ui-activity-content (&key state owner embedded)
+  "Render OWNER's Activity STATE inside a page or an EMBEDDED tab."
   :view
-  (column :ref 'activity-scroll :width 'stretch :height '(vh 100)
-          :box-sizing 'border-box :overflow 'scroll
-    (box :padding '((lh 1) (ch 2))
+  (column :width 'stretch
+    (box :if (not embedded) :padding '((lh 1) (ch 2))
          :bgcolor (aaron-ui-activity--color 'bg-elevated "#2A3247")
       (column :width 'stretch
         (text :font-weight 'bold
@@ -132,19 +133,6 @@
       (aaron-ui-activity-stat
        :for (stat (plist-get (etaf-value state) :stats))
        :key (car stat) :label (car stat) :tone (cdr stat)))
-    (flex :flex-flow '(row wrap) :gap '((lh 0) (ch 1))
-          :padding '((lh 1) (ch 2))
-      (aaron-ui-activity-button
-       :label "Refresh" :command #'+activity-board/refresh
-       :owner owner :primary t)
-      (aaron-ui-activity-button
-       :label (if (plist-get (etaf-value state) :auto) "Auto: on" "Auto: off")
-       :command #'+activity-board/toggle-auto-refresh :owner owner)
-      (aaron-ui-activity-button
-       :label (if (plist-get (etaf-value state) :timers) "Timers: shown" "Timers: hidden")
-       :command #'+activity-board/toggle-timers :owner owner)
-      (aaron-ui-activity-button
-       :label "Filter" :command #'+activity-board/filter :owner owner))
     (box :if (plist-get (etaf-value state) :filter)
          :padding '((lh 0) (ch 2))
          :color (aaron-ui-activity--color 'accent-yellow "#F9E2AF")
@@ -168,7 +156,7 @@
        :for (link (plist-get (etaf-value state) :native-links))
        :key (plist-get link :label)
        :label (plist-get link :label)
-       :command (plist-get link :command) :owner owner))
+       :command (plist-get link :command) :owner owner :handoff t))
     (box :padding '((lh 1) (ch 2))
          :color (aaron-ui-activity--color 'accent-cyan "#9DE7FF")
       (text "This configuration"))
@@ -178,11 +166,7 @@
        :for (link (plist-get (etaf-value state) :config-links))
        :key (plist-get link :label)
        :label (plist-get link :label)
-       :command (plist-get link :command) :owner owner))))
-
-(defun aaron-ui-activity-view (state owner)
-  "Return an ETAF Activity View for STATE and OWNER."
-  (etaf-view (aaron-ui-activity-app :state state :owner owner)))
+       :command (plist-get link :command) :owner owner :handoff t))))
 
 (provide 'aaron-ui-activity)
 ;;; aaron-ui-activity.el ends here

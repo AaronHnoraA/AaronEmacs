@@ -92,11 +92,9 @@ target 上完成 `gh auth login`。
 
 同一入口也放在 `SPC r k` 的任务工作台中。
 
-### 日历、Org 与 macOS
+### 日历与 macOS
 
 - `SPC a y` 打开全年日历；`<`/`>` 或 `[`/`]` 前后移动一年，`g` 回到今年。
-- Org localleader `l`：在 link 上编辑；region + 剪贴板 URL 时用 region 作为描述；只有
-  URL 时由 `org-cliplink` 获取网页标题。
 - `SPC a m` 打开 macOS 工具：系统取色器会把颜色复制成 `#RRGGBB`，prefix 调用时也
   插入当前位置；另保留当前配置已有的 macOS open-at-point。
 

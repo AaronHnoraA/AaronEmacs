@@ -325,10 +325,11 @@ leader 入口：
 - `SPC h p`
   同上。
 
-这个 buffer 默认打开到独立 frame，避免和 dashboard/Org 分屏共绘。页面用 ETAF
-排列数据，仍使用 Aaron UI 原有色板和图标；`1`～`4` 或顶部按钮切换
-Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` 时采样；
-如果按 `a` 临时开启自动刷新，`q` 退出时会停止刷新 timer 并关闭监管 frame。
+这个 buffer 在 GUI 中使用 Aaron UI 共用浮窗，不改变主窗口分屏。页面用 ETAF
+排列数据，仍使用 Aaron UI 原有色板和图标；`1`～`6` 或顶部按钮切换
+Overview、Processes、Buffers、Hooks & timers、后台任务、Noema。皮卡丘直接打开
+同一个监控面板的后台任务页。默认只在打开和按 `g` 时采样；
+如果按 `a` 临时开启自动刷新，隐藏或关闭面板时会停止刷新 timer。
 原来的纯文本完整报告可用 `y` 复制。ETAF 在第一次打开整页时才加载，
 启动和简单的 Transient dispatch 不加载它。里面可以看：
 
@@ -342,7 +343,9 @@ Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` �
 - Emacs runtime：buffer/process/timer/GC/read-process-output-max/memory-use-counts。
 - Emacs process 列表。
 - hook 表的全局和当前 buffer-local 激活数量。
-- Org buffer 列表、是否可见、局部 hook 数量、LaTeX 预览队列/overlay/pending 数。
+- Noema host 的 CPU/RSS、页面/客户端、活动任务、忙碌 agent、事件和通知队列；
+  Noema 页可进入 Wiki、Agenda、任务页，或经确认停止 host。采样不会启动 host。
+- RaTeX 公式预览的 buffer、缓存和排队数量。
 - 最大 buffer 列表和 timer/idle timer 分组。
 
 给 agent 或批处理用的只读 API：
@@ -350,11 +353,11 @@ Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` �
 - `(+performance-report-string &optional inspected-buffer)`
   返回完整纯文本报告，不打开 board，也不启动刷新 timer。
 - `(+performance-snapshot &optional inspected-buffer)`
-  返回结构化 plist，包含当前采样、hook、Org buffer、最大 buffer、timer 和 idle timer 摘要。
+  返回结构化 plist，包含当前采样、hook、Noema、最大 buffer、timer 和 idle timer 摘要。
 - `(+performance-hook-snapshot &optional buffer hooks)`
   返回指定 buffer 的 hook 计数和本地条目。
-- `(+performance-org-buffer-snapshot)`
-  返回 Org buffer 的可见性、局部 hook 数量、LaTeX queue/overlay/pending 等状态。
+- `(+performance-noema-snapshot)`
+  只读缓存及现有 host 进程的状态，不启动或请求 Noema。
 
 默认低功耗取向：
 
@@ -366,7 +369,7 @@ Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` �
   普通活跃/空闲 GC 交给 `gcmh`。
 - 行号不再全局绘制，只在代码/配置类 buffer 自动打开；普通文本、帮助、终端、侧边栏可手动用
   `SPC w l` / `M-x aaron/toggle-line-numbers` 打开。
-- ligature 不再全局启用，只在代码/文本/配置/Org/Markdown 等编辑 buffer 本地启用。
+- ligature 不再全局启用，只在代码/文本/配置/Markdown 等编辑 buffer 本地启用。
 - TODO 高亮不再全局启用，只在编辑 buffer 本地启用。
 - `whitespace-mode` 默认只检查本地的代码/配置文件，跳过文本、大文件、远程文件和 `so-long` buffer。
 - auto-revert 优先使用文件通知，普通 buffer 不做高频轮询；PDF buffer 单独保留较快刷新。
@@ -396,15 +399,13 @@ Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` �
 - Treemacs 文件/符号跟随只在 Treemacs 窗口可见时安装按键级 hook；隐藏后自动卸载并取消等待中的
   idle timer。
 - symbol-overlay 的编辑刷新 hook 只在当前 buffer 开启模式或存在高亮时安装，不再全局空跑。
-- Org 的 rich UI 保留完整能力，但 pretty block/LaTeX 这类重渲染只面向当前可见窗口；buffer 隐藏时取消
-  等待中的可视区 timer，不做退回全 buffer 的后台刷新。
-- LSP/Flymake/Copilot/company/Treemacs/Org Roam 的自动后台工作都做了短延迟合并，避免每次按键后立刻唤醒一串任务。
+- LSP/Flymake/Copilot/company/Treemacs 的自动后台工作都做了短延迟合并，避免每次按键后立刻唤醒一串任务。
   Copilot、Company、Flymake 默认等待更明确的输入停顿后再启动。
 - diagnostics mode line 使用缓存，只在 buffer 变化或 Flymake 发布新诊断后重新统计。
 
 记录保存在 [var/performance/](../../var/performance)：
 
-- `s` 会把当前采样追加到当天的 `performance-YYYYMMDD.tsv`。
+- `s` 会把当前采样追加到当天的 `performance-YYYYMMDD-v2.tsv`；新格式包含 Noema 指标。
 - `R` 会切换录制模式，录制开启后每次刷新都会追加一条。
 - `o` 打开记录目录。
 
@@ -435,7 +436,6 @@ Overview、Processes、Buffers、Hooks & timers。默认只在打开和按 `g` �
 - transient
 - dirvish
 - treemacs
-- org
 
 backup、auto-save 和 lockfiles 的文件名把被访问文件的完整路径拼成一个名字（`/`
 换成 `!`），一眼能认出是哪个文件。名字超过 180 个字符时（APFS 单个文件名上限是
@@ -477,7 +477,6 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 - `etc/`
 - project / projectile / transient 状态
 - session / recentf / savehist / save-place
-- org 持久化状态
 
 不会把 `eln-cache`、包目录、其他重建型缓存也打进去。
 
@@ -501,42 +500,6 @@ make state-restore SNAPSHOT=/path/to/emacs-state-YYYYMMDD-HHMMSS.tar.gz
 Emacs 后旧版本目录不再被加载，却一直占着空间。board 的 “Other builds” 一行列出
 它们；`P` 或 `make clean-eln-stale` 只删这些目录，当前构建的 native code 保留，
 不需要重新编译。reset eln cache 则清空整个缓存，之后所有包重新编译。
-
-### 清 Org 图片、附件和 LaTeX preview cache
-
-入口：
-
-- `M-x +org-maintenance-board`
-- macOS GUI 下 `H-o b`
-
-这个 board 只在打开或手动刷新时扫描。扫描范围和 agenda 一致：
-
-- 在 `~/HC/Org/` 里打开时扫整个 Org 库
-- 在其他项目里打开时扫当前项目
-- 没有项目时扫当前目录
-
-媒体清理规则：
-
-- clean media：删除未引用图片和未引用附件
-- clean images：删除未引用图片；图片只用同目录/子目录里的 Org 链接判断引用，不做全库交叉引用
-- clean attachments：删除 `attachments/`、`attach/`、`files/` 下未引用附件；附件会看整个当前项目/scope 的 Org 链接
-- prune latex：每个 `ltximg/` 目录只保留最新
-  `+org-maintenance-latex-cache-max-files-per-dir` 个 preview cache 文件
-- clear latex：删除当前 scope 下所有 `ltximg/` preview cache 文件
-- empty dirs：删除清理后留下的空 `img/`、`images/`、attachment、`ltximg/` 目录
-- clean all：清未引用媒体、按阈值裁剪 LaTeX cache，再删空目录
-
-防护规则：
-
-- `public/`、`publish/`、`dist/`、`build/`、`css/`、`js/`、`CV/` 不参与媒体清理
-- `ltximg/` 和 `org-latex-preview-cache/` 不参与图片/附件清理，只走 LaTeX cache 工具
-- 文件名带 `keep-` 前缀时豁免清理
-- `H-o k` 可以把当前 Org `file:` 链接指向的实际文件加上 `keep-` 前缀，并同步更新链接
-- `H-o m` 可以重命名当前 Org `file:` 链接指向的实际文件，并同步更新链接
-- `H-o O` 用系统 `open` 打开光标处的 Org link、图片链接或文件名
-
-board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文件签名没变化，后续按钮
-动作会复用解析结果，避免重复 parse 所有 Org 链接。
 
 ### 清 transient 历史
 
@@ -600,8 +563,6 @@ board 会缓存同一 scope 的扫描结果；只要 Org、媒体和 cache 文�
   company/eglot/lsp-mode/flymake/dape
 - [lisp/tools/lsp-hub/config.el](../../lisp/tools/lsp-hub/config.el)
   language server hub / doctor / dispatch / runtime knobs
-- [lisp/lang/org/config.el](../../lisp/lang/org/config.el)
-  Org 编辑小工具（Org 主体沿用内置默认）
 - [lisp/term/shell/config.el](../../lisp/term/shell/config.el)
   shell/eshell/portal/ssh
 
@@ -656,14 +617,6 @@ emacs --batch -Q --init-directory="$PWD" -l ./early-init.el \
 ```
 
 之后首次连接会自动下载并部署匹配的 server 二进制。
-
-### Org LaTeX 预览挂了
-
-看：
-
-1. `xelatex`
-2. `dvisvgm`
-3. [tools/org-xdvisvgm-hires](../../tools/org-xdvisvgm-hires)
 
 ### `+portal/ssh` 没读到主机
 

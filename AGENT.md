@@ -315,9 +315,9 @@ This config already has maintenance and workflow entry points. Reuse them:
   targets documented in `docs/ops/maintenance.md`.
 - Performance diagnostics: `+performance/watch`,
   `+performance-report-string`, `+performance-snapshot`,
-  `+performance-hook-snapshot`, and `+performance-org-buffer-snapshot`.
+  `+performance-hook-snapshot`, and `+performance-noema-snapshot`.
   Prefer these APIs over asking for screenshots when investigating runtime or
-  Org performance.  In the watch buffer, `y` copies the full current report.
+  Noema performance.  In the watch buffer, `y` copies the full current report.
 - Background application: `bin/emacs-app` is the single entry point for
   running Emacs as a long-lived background app on macOS (start, restart,
   kill, show, hide, status, state, quit, whitelisted actions, frame list and
@@ -443,7 +443,7 @@ in `docs/design/elegant-ui.md` and `docs/guide/settings-cookbook.md`.
 
 ## Performance Diagnostics
 
-For runtime or Org performance work, start from the existing performance
+For runtime or Noema performance work, start from the existing performance
 surface:
 
 - Interactive: `M-x +performance/watch` or `SPC h p`.
@@ -451,12 +451,9 @@ surface:
   or `(+performance-snapshot)` for structured data.
 - Keep auto refresh off unless a time series is needed; each refresh samples
   `ps` and can perturb the measurement.
-- For Org issues, check LaTeX running/queued/pending, local
-  `post-command-hook`, `after-change-functions`, `jit-lock-functions`, timers,
-  and visible Org buffers before removing hooks.
-- Do not slow the LaTeX preview overlay placement path to save unrelated Org UI
-  cost.  Prefer optimizing visual decoration, table alignment, diagnostics, or
-  side-buffer refresh paths first.
+- For Noema issues, check the host CPU/RSS, page and client counts, active
+  tasks, queued events/notifications, RaTeX renders, and timers before changing
+  hooks or restarting the host.  Sampling must never start the Noema host.
 
 ## Keybinding Rules
 
@@ -608,7 +605,7 @@ LSP:
 - When LSP behaves strangely, use `+language-server/doctor` before changing
   code.
 
-Org/Jupyter/research:
+Noema/Jupyter/research:
 
 - Noema Agenda task lists use the host's active-scope source service.
   `noema-agenda` is the searchable native entry; `noema-agenda-web` and the
@@ -620,10 +617,6 @@ Org/Jupyter/research:
   Do not reintroduce regex or one-shot CLI task scans, direct prefix edits,
   temporary Org sources, or fallback writers after an API failure. See
   `docs/noema/guide/agenda.md` for the source lifecycle and editor snapshot contracts.
-- Org is intentionally feature-rich; do not add remote/large-buffer downgrades
-  unless explicitly requested.
-- Org auto-insert is intentionally disabled by default to avoid capture/roam
-  template collisions.
 - Only route a language through Jupyter when it has a working Jupyter kernel or
   a valid existing-kernel connection workflow.
 - A kernel comes from one of three connectors, named by the cell's kernel
@@ -635,7 +628,7 @@ Org/Jupyter/research:
   `remote-channel` forwarding.  A target that cannot provide a channel is an
   error — never a client-side connection, which may silently reach a different
   server listening on that port here.
-- Keep `org`, Jupytext/notebooks, and reusable `src/` code as separate sources
+- Keep Noema notes, Jupytext/notebooks, and reusable `src/` code as separate sources
   of truth as described in `docs/guide/research-notes-workflow.md`.
 
 Noema Markdown panes:
