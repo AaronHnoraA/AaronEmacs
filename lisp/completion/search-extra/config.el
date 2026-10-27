@@ -8,8 +8,9 @@
 (require 'aaron-funcs)
 
 (declare-function +project-current-root "tools/project/config")
+(declare-function +project/ripgrep "tools/project/config"
+                  (project-root &optional initial rg-unavailable))
 (declare-function consult-line-multi "consult" (query &optional initial))
-(declare-function consult-ripgrep "consult" (&optional dir initial))
 
 (defconst +search-todo-regexp
   "TODO\\|FIXME\\|BUG\\|HACK\\|NOTE\\|WIP"
@@ -24,7 +25,7 @@
 (defun +search/todos ()
   "Search TODO-style markers in the current project."
   (interactive)
-  (consult-ripgrep (+search-project-root) +search-todo-regexp))
+  (+project/ripgrep (+search-project-root) +search-todo-regexp))
 
 (defun +search/symbol-at-point ()
   "Search the symbol at point in the current project."
@@ -32,7 +33,7 @@
   (let ((symbol (thing-at-point 'symbol t)))
     (unless symbol
       (user-error "No symbol at point"))
-    (consult-ripgrep (+search-project-root) symbol)))
+    (+project/ripgrep (+search-project-root) symbol)))
 
 (defun +search/project-lines ()
   "Search lines across project buffers."

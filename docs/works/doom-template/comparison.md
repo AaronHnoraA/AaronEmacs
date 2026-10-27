@@ -103,7 +103,7 @@ Doom 的做法：
 | `SPC : ; . , \` * / x X u RET ~` | M-x、eval、找文件、切 buffer、上个 buffer、项目搜索、scratch、capture、universal-arg、书签、popup 开关 | 新增 `. , \` * / x u RET ~`；保留原有 `;`（avy-resume）、`'`（vertico-repeat）及未选用的 `: X` |
 | — | — | 本配置独有：`a`（app）、`e`（edit）、`F`（frame）、`j`、`v` / `V`（选区）、`z`、`m`（localleader） |
 
-用户决定吸收所有空位：`d . , \` * / x u RET ~`。`SPC .` 走本配置的 `file-open`；`,` 用当前工作区 buffer 列表；`/` 从当前项目根（项目外为当前目录）调用 Remote 感知搜索；`*` 复用现有符号搜索；`x` 切换持久 scratch；`RET` 走全局书签重映射后的 Consult 入口；`~` 切换 Popper 弹窗。已有键不变。
+用户决定吸收所有空位：`d . , \` * / x u RET ~`。`SPC .` 走本配置的 `file-open`；`,` 用当前工作区 buffer 列表；`/` 从当前项目根（项目外为当前目录）调用 Remote 感知搜索；`*` 复用现有符号搜索，随后与 TODO 搜索一起改走同一目标端路由；`x` 切换持久 scratch；`RET` 走全局书签重映射后的 Consult 入口；`~` 切换 Popper 弹窗。已有键不变。
 
 ## 5. 注册接口（D）
 

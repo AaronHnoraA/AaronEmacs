@@ -719,6 +719,10 @@ callback 即使发生在其他 buffer，也不能读取环境中的 `default-dir
 文档身份。语言模块不能按 `file-remote-p` 选择另一套 contact、PATH 或 feature
 降级；当前残留的此类分支都是迁移债务。
 
+项目全文搜索统一从 `+project/ripgrep` 进入：它按当前项目的逻辑根选择 target 上的
+`rg`，不可用时回退 `grep`，同时把可由客户端直接访问的根投影为原生路径。
+普通项目搜索、光标下符号和 TODO 搜索都走这条入口，后两者只额外提供初始搜索词。
+
 `remote-copy-file-to-target` 是 provisioning 的批量传输边界。native backend 使用
 本地复制，TRAMP/tramp-rpc SSH backend 使用 SCP；consumer 只提交客户端绝对源文件、
 逻辑目标文件和 context，不能自行解析 host/method。普通编辑器文件读写仍走 `/fs:`
