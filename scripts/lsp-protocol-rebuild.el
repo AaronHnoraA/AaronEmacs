@@ -74,9 +74,24 @@ Run in a fresh batch Emacs before loading `lsp-protocol'."
             (unless (and lsp-use-plists
                          (listp (lsp-make-completion-item :label "probe")))
               (error "lsp-protocol did not load in plist mode"))
-            (dolist (directory directories)
-              (message "Recompiling LSP client %s" directory)
-              (byte-recompile-directory directory 0 t)))
+            ;; `byte-recompile-directory' only reports per-file failures in its
+            ;; log.  In particular, a newly added source can fail while this
+            ;; function still appears to succeed.
+            (require 'bytecomp)
+            (let ((recompile-file (symbol-function 'byte-recompile-file))
+                  (failures nil))
+              (cl-letf (((symbol-function 'byte-recompile-file)
+                         (lambda (source &rest args)
+                           (let ((result (apply recompile-file source args)))
+                             (unless (memq result '(t no-byte-compile))
+                               (push source failures))
+                             result))))
+                (dolist (directory directories)
+                  (message "Recompiling LSP client %s" directory)
+                  (byte-recompile-directory directory 0 t)))
+              (when failures
+                (error "LSP client byte compilation failed: %s"
+                       (mapconcat #'identity (nreverse failures) ", ")))))
           (dolist (source compiled-sources)
             (unless (file-exists-p (concat source "c"))
               (error "LSP client bytecode was not rebuilt: %s" source)))
