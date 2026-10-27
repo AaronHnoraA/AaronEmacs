@@ -80,6 +80,46 @@
         "."
       (concat "./" (directory-file-name rel)))))
 
+(defconst +test--go-test-regexp
+  (concat "^func[ \t]+\\(\\(?:Test\\|Benchmark\\|Example\\|Fuzz\\)"
+          "[[:alnum:]_]*\\)[ \t]*[[(]")
+  "Regexp matching a Go test, benchmark, example or fuzz function header.")
+
+;; From Doom's lang/go: the nearest Go test is the test function around point,
+;; not whatever function `which-function' reports (a helper is no test), and
+;; a file's tests are the functions it declares, not its whole package.
+(defun +test--go-test-at-point ()
+  "Return the name of the Go test function at or above point, or nil."
+  (save-excursion
+    (end-of-line)
+    (when (re-search-backward +test--go-test-regexp nil t)
+      (match-string-no-properties 1))))
+
+(defun +test--go-file-tests ()
+  "Return the names of the Go tests, examples and fuzz targets in this buffer."
+  (save-excursion
+    (goto-char (point-min))
+    (let (names)
+      (while (re-search-forward +test--go-test-regexp nil t)
+        (unless (string-prefix-p "Benchmark" (match-string 1))
+          (push (match-string-no-properties 1) names)))
+      (nreverse names))))
+
+(defun +test--go-command (package names)
+  "Return a `go test' command for PACKAGE limited to the functions NAMES."
+  (let ((benchmarks (seq-filter (lambda (name) (string-prefix-p "Benchmark" name))
+                                names))
+        (pattern (lambda (list) (concat "^(" (string-join list "|") ")$"))))
+    (cond
+     ((null names) (format "go test %s" (shell-quote-argument package)))
+     (benchmarks
+      (format "go test %s -run '^$' -bench %s"
+              (shell-quote-argument package)
+              (shell-quote-argument (funcall pattern benchmarks))))
+     (t (format "go test %s -run %s"
+                (shell-quote-argument package)
+                (shell-quote-argument (funcall pattern names)))))))
+
 (defun +test--command (scope)
   "Build a test command for SCOPE."
   (let* ((root (file-name-as-directory (expand-file-name (+test-project-root))))
@@ -114,18 +154,15 @@
               (format "pytest %s" (shell-quote-argument (or relfile "."))))
              (`(pytest ,_) "pytest")
              (`(go nearest)
-              (if (and defun-name file)
-                  (format "go test %s -run %s"
-                          (shell-quote-argument (+test--go-package root file))
-                          (shell-quote-argument
-                           (concat "^" (regexp-quote defun-name) "$")))
-                (format "go test %s"
-                        (shell-quote-argument
-                         (if file (+test--go-package root file) "./...")))))
+              (if file
+                  (+test--go-command (+test--go-package root file)
+                                     (ensure-list (+test--go-test-at-point)))
+                "go test ./..."))
              (`(go file)
-              (format "go test %s"
-                      (shell-quote-argument
-                       (if file (+test--go-package root file) "./..."))))
+              (if file
+                  (+test--go-command (+test--go-package root file)
+                                     (+test--go-file-tests))
+                "go test ./..."))
              (`(go ,_) "go test ./...")
              (`(node nearest)
               (format "%s test -- %s" pm (shell-quote-argument (or relfile "."))))

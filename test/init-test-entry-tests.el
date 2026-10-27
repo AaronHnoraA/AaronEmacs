@@ -37,30 +37,52 @@
                                (nth 2 case)))))))
       (delete-directory root t))))
 
-(ert-deftest test-go-nearest-quotes-its-name-as-a-regexp ()
-  "A Go test name should be one literal -run match in the current package."
-  (let ((root (make-temp-file "go-nearest-runner-" t)))
+(defun test-entry--go-command (scope source point-after)
+  "Return the Go test command for SCOPE in a buffer holding SOURCE.
+Point is placed after the text POINT-AFTER, or at the start when nil.  The
+`-run' or `-bench' pattern is returned as the shell would pass it."
+  (let ((root (make-temp-file "go-runner-" t)))
     (unwind-protect
         (progn
           (with-temp-file (expand-file-name "go.mod" root))
-          (cl-letf (((symbol-function '+test-project-root)
-                     (lambda () root))
+          (cl-letf (((symbol-function '+test-project-root) (lambda () root))
                     ((symbol-function '+project-local-test-command)
                      (lambda (&rest _) nil))
                     ((symbol-function '+project-local-env)
-                     (lambda (&rest _) nil))
-                    ((symbol-function '+test--current-defun)
-                     (lambda () "TestThing.Sub")))
+                     (lambda (&rest _) nil)))
             (with-temp-buffer
               (setq buffer-file-name (expand-file-name "main_test.go" root)
                     default-directory (file-name-as-directory root))
-              (let ((command (cadr (+test--command 'nearest))))
-                (should (string-prefix-p "go test . -run " command))
-                (should (equal
-                         (shell-command-to-string
-                          (format "set -- %s; printf '%%s' \"$5\"" command))
-                         "^TestThing\\.Sub$"))))))
+              (insert source)
+              (goto-char (point-min))
+              (when point-after (search-forward point-after))
+              (let ((command (cadr (+test--command scope))))
+                (string-trim
+                 (shell-command-to-string
+                  (format "set -- %s; shift 2; printf '%%s ' \"$@\"" command)))))))
       (delete-directory root t))))
+
+(defconst test-entry--go-source
+  "package main\n\nfunc helper() {}\n\nfunc TestOne(t *testing.T) {\n\thelper()\n}\n\nfunc TestTwo(t *testing.T) {}\n\nfunc BenchmarkFast(b *testing.B) {\n\tfor range b.N {}\n}\n")
+
+(ert-deftest test-go-nearest-runs-the-test-function-around-point ()
+  "Nearest is the Go test around point, even where point is in a call to a helper."
+  (should (equal (test-entry--go-command 'nearest test-entry--go-source "\thelp")
+                 ". -run ^(TestOne)$"))
+  (should (equal (test-entry--go-command 'nearest test-entry--go-source "TestTw")
+                 ". -run ^(TestTwo)$")))
+
+(ert-deftest test-go-nearest-benchmark-runs-only-that-benchmark ()
+  "A benchmark at point runs with -bench and no tests."
+  (should (equal (test-entry--go-command 'nearest test-entry--go-source "b.N")
+                 ". -run ^$ -bench ^(BenchmarkFast)$")))
+
+(ert-deftest test-go-file-runs-the-tests-this-file-declares ()
+  "File scope runs the file's own tests, not the rest of its package."
+  (should (equal (test-entry--go-command 'file test-entry--go-source nil)
+                 ". -run ^(TestOne|TestTwo)$"))
+  (should (equal (test-entry--go-command 'file "package main\n" nil)
+                 ".")))
 
 (ert-deftest test-rerun-state-survives-compile-start-failure ()
   "A failed launch must leave the previous rerun target intact."

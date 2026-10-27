@@ -64,7 +64,8 @@ Doom 的模块与本配置模块的对应关系，按 Doom 的分类排列。语
 
 ## 3. 延迟到首次使用（Doom 的启动优化）
 
-Doom 不在启动时开启这些模式，而是挂到生命周期 hook 上（本配置已经有这些 hook，见 `aaron-emacs`）。本配置现在都在 `after-init` 开启：
+Doom 不在启动时开启这些模式，而是挂到生命周期 hook 上（本配置
+已经有这些 hook，见 `aaron-emacs`）。本配置现在都在 `after-init` 开启：
 
 | 模式 | Doom 的时机 | 本配置 |
 | --- | --- | --- |
@@ -451,3 +452,14 @@ Doom 的做法：
 | `ui/treemacs` | 已有且更深（Noema 图标、tag 轮廓）；`treemacs-is-never-other-window` 本配置有意设为 nil |
 | `ui/workspaces` | 本配置用 Perspective + tab-bar（`ui/workspaces`），persp-mode 的会话保存、每工作区 winner、项目即工作区不收 |
 | `ui/doom`、`doom-quit`、`emoji`、`minimap`、`neotree`、`ophints`、`smooth-scroll`、`tabs`、`unicode`、`vi-tilde-fringe`、`window-select`、`zen` | 主题、退出提示语、emoji、迷你地图、neotree、Evil 操作提示、平滑滚动（本配置有 `+macos-scroll-profile`）、centaur-tabs、unicode-fonts、`~` 边栏、ace-window/winum、writeroom：外观与手感，或已有等价物 |
+
+## 23. 模块全文：`lang`（ada–kotlin）
+
+| 模块 | 处理 |
+| --- | --- |
+| `lang/go` | **吸收**：`SPC c n` 跑光标所在的 Go 测试函数（向上找 `func Test…`/`Benchmark…`/`Example…`/`Fuzz…`），原来用 `which-function`，光标在辅助函数里会生成 `-run ^helper$` 而一个测试也不跑；benchmark 用 `-run '^$' -bench`；`SPC c N` 只跑本文件声明的测试，原来跑整个包。在 Noema kernel 的真实测试文件上用 `go test -list` 核对模式与声明一致。`go generate`、gorepl、go-tag、playground 不收 |
+| `lang/beancount` | 本配置用 beancount-lsp-server 以 `main.bean` 为根做诊断与跨 include 补全，Doom 修 flymake/补全的补丁不需要；`outline-minor-mode`：用户账本几乎没有 `*` 标题，不收；排序、克隆交易、按账户过滤不收（录入走本配置的向导与 Fava） |
+| `lang/cc` | clangd 限制并行（`-j=2`）**已有**；头文件判断 C/C++/ObjC、ffap 头文件路径、ccls、cmake/glsl/cuda 不收（用户无此需求；`.h` 由 clangd 按编译数据库处理） |
+| `lang/emacs-lisp` | Flymake 加载路径与 eldoc 显示变量值已在第 8–11 节吸收。实测 Emacs 31 已正确缩进带引号的列表与关键字 plist，Doom 的 `calculate-lisp-indent` 覆盖不需要；`;;;` 大纲折叠与本配置的代码折叠后端重复；helpful 前后翻页、ielm 高亮、buttercup、额外着色不收 |
+| `lang/data` | `.plist`、`.xsd` 已是 nxml，`.csv` 已是 csv-mode |
+| `lang/ada`、`agda`、`clojure`、`common-lisp`、`coq`、`crystal`、`csharp`、`dart`、`dhall`、`elixir`、`elm`、`erlang`、`ess`、`factor`、`faust`、`fortran`、`fsharp`、`fstar`、`gdscript`、`graphql`、`graphviz`（见下一节） | 用户不用这些语言；其中通用做法（REPL、eval、lookup 处理器注册）本配置用 `set-language-server!` 与 `compile`/`+output` 代替 |

@@ -107,9 +107,9 @@ local/remote 特判属于待迁移债务，不是新增接入可复制的模式�
 - `SPC c t`
   测试菜单
 - `SPC c n`
-  当前附近测试
+  当前附近测试（Go：光标所在的 `Test`/`Benchmark` 函数，在辅助函数里也找外层测试；benchmark 用 `-bench`）
 - `SPC c N`
-  当前文件测试
+  当前文件测试（Go：只跑本文件声明的测试，不是整个包）
 - `SPC c p`
   当前项目测试
 - `SPC c T`
