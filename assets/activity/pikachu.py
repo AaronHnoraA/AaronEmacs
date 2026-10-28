@@ -13,47 +13,49 @@ import os, sys, zlib, struct
 
 PALETTE = {
     ' ': None,            # transparent
-    'o': (0x3a, 0x2c, 0x14),  # outline, dark brown
-    'k': (0x1a, 0x14, 0x0a),  # black: ear tips, eyes
-    'Y': (0xf8, 0xd0, 0x30),  # pikachu yellow
-    'D': (0xd4, 0xa0, 0x18),  # shaded yellow
-    'R': (0xe8, 0x40, 0x30),  # cheek red
+    'o': (0x77, 0x4b, 0x24),  # warm outline, legible on a dark mode line
+    'k': (0x28, 0x22, 0x29),  # charcoal ear tips and eyes
+    'Y': (0xff, 0xd5, 0x42),  # golden yellow
+    'L': (0xff, 0xe9, 0x85),  # forehead and belly light
+    'D': (0xe9, 0xa5, 0x29),  # amber shade
+    'R': (0xf2, 0x62, 0x4c),  # coral cheeks
     'W': (0xff, 0xff, 0xff),  # eye highlight
     'B': (0xa0, 0x5a, 0x20),  # tail base brown
 }
 
 W, H = 28, 20
 
-# A full silhouette at mode-line scale: long dark-tipped ears, a separate
-# head and body, cheek disks, back stripes, paws, and a zigzag tail.  Tail
-# pixels are drawn first so its brown base sits naturally behind the body.
+# Front-facing chibi silhouette: splayed ears, round cheeks, little paws.
+# Keep the last row empty so the running bob never clips the feet.
+# Stripes belong on the back, not across this front-facing belly.
 BODY = [
-    "     kkk        kk",
-    "     kkko      kkk",
-    "      kYo      oYk",
-    "      oYYo     oYo",
-    "      oYYo    oYYo",
-    "       oYYooooYYo",
-    "      oYYYYYYYYYYYo",
-    "     oYYYYYYYYYYYYYo",
-    "     oYkWYYYYYYkWYYo",
-    "     oYkkYYYYYYkkYYo",
-    "    oYRRYYYYYYYYRRYYo",
-    "    oYRRYYYYoYYYRRYYo",
-    "     oYYYYYYoooYYYYYo",
-    "      oYYYYYYYYYBBYYo",
-    "       oYYYYYYYYYYYYo",
-    "       oYYYYYYYDBBYYo",
-    "       oYYYYYYYYYYYYo",
-    "       oYYYooYYYYYYYo",
-    "      oYYYo  oo oYYYo",
-    "      oooo       oooo",
+    "    kk             kk",
+    "    kkk           kkk",
+    "     kYo         oYk",
+    "     oYYo       oYYo",
+    "      oYYoooooooYYo",
+    "      oYYLLLLLYYYYo",
+    "     oYLLLLYYYYYYYYo",
+    "     oYYkWYYYYYkWYYo",
+    "    oYYYkkYYYYYkkYYYo",
+    "    oYRYYYYYkYYYYYRYo",
+    "    oRRRYYYoYoYYYRRRo",
+    "     oRYYYYYoYYYYRo",
+    "      oYYYYYYYYYYo",
+    "       oDYYYYYYDo",
+    "      oYYoLLLLoYYo",
+    "      oYDoLLLLoDYo",
+    "       oYYLLLLYYo",
+    "      oYYDooooDYYo",
+    "      oooo    oooo",
+    "",
 ]
 
 TAIL = [
-    (4, 26, 27), (5, 24, 27), (6, 23, 26), (7, 24, 26),
-    (8, 22, 25), (9, 20, 24), (10, 21, 24), (11, 19, 23),
-    (12, 20, 23), (13, 18, 22), (14, 18, 21), (15, 17, 20),
+    (5, 24, 26), (6, 23, 26), (7, 22, 25),
+    (8, 23, 24), (9, 23, 25), (10, 22, 24),
+    (11, 21, 23), (12, 22, 23), (13, 21, 22),
+    (14, 19, 21), (15, 18, 20),
 ]
 
 
@@ -82,16 +84,14 @@ def sprite(body, tail_lift=0):
 
 STAND = sprite(BODY)
 RUN_A_BODY = BODY.copy()
-RUN_A_BODY[17:] = [
-    "      oYYYooYYYYYYYo",
-    "     oYYYo      oYYYo",
-    "     oooo        oooo",
+RUN_A_BODY[17:19] = [
+    "     oYYYDooooDYYo",
+    "     oooo     oooo",
 ]
 RUN_B_BODY = BODY.copy()
-RUN_B_BODY[17:] = [
-    "       oYYYooYYYYYYYo",
-    "         oYYoooYYYo",
-    "         ooo   oooo",
+RUN_B_BODY[17:19] = [
+    "       oYDooooDYYYo",
+    "       ooo    ooooo",
 ]
 RUN_A = sprite(RUN_A_BODY, 1)
 RUN_B = sprite(RUN_B_BODY)
@@ -159,8 +159,8 @@ def png(path, frames, scale=10, gap=2):
 
 FRAMES = [("stand", STAND),
           ("run-1", RUN_A),
-          ("run-2", bob(RUN_B, 1)),
-          ("run-3", RUN_A),
+          ("run-2", bob(RUN_A, 1)),
+          ("run-3", RUN_B),
           ("run-4", bob(RUN_B, 1))]
 
 if __name__ == "__main__":

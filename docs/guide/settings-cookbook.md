@@ -654,6 +654,9 @@ Neomacs 的差异都收在 `lisp/os/neomacs/config.el` 一个边界里：
 - [lisp/noema/activity/config.el](../../lisp/noema/activity/config.el) —— Noema Core task / agent 工作快照与原生取消
 - [assets/activity/](../../assets/activity) —— 皮卡丘的 XPM 帧和画它的脚本
 
+皮卡丘使用 28×20 的正面圆脸像素画，静止一帧、跑动四帧；基础帧底部
+留出一行透明像素，向下起伏时不会裁掉脚。`pikachu-preview.png` 是五帧的放大预览。
+
 出现机理（`(process-list)` 做枚举根、只数 `task` 一类）见
 [daily-usage.md](daily-usage.md#后台任务指示器)。
 
@@ -665,7 +668,7 @@ Neomacs 的差异都收在 `lisp/os/neomacs/config.el` 一个边界里：
 | 改跑动快慢 | `M-x config-set RET +activity-indicator-fps` |
 | 改多久发现一个新任务 | `M-x config-set RET +activity-poll-interval`（秒；这不是帧率） |
 | 给别的慢操作也加上 | 用 `+with-activity "标签"` 包住那段代码 |
-| 让某种新后台工作被**计数** | 在 `+activity--owned-task-processes` 里加一行它的 owner 注册表。只想出现在板面上则**不需要改任何代码** |
+| 让某种新后台工作被**计数** | 有进程 owner 时接入 `+activity--owned-task-processes`；像 Eshell 命令队列这样由 buffer 持有的工作，用 `+activity-provider-functions` 提供快照。只想出现在进程板面上则**不需要改任何代码** |
 | 接入没有 Emacs 子进程的异步工作 | `+activity-provider-functions` 返回缓存的 `+activity` 列表,`+activity-poll-functions` 异步更新快照;Noema 适配器是现成例子 |
 
 | 改自动刷新快慢 | `M-x config-set RET +activity-board-refresh-interval`（板面里 `a` 开关，默认关） |

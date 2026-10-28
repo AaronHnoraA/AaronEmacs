@@ -15,6 +15,7 @@
 (require 'subr-x)
 (require 'config)
 (require 'aaron-lib)
+(require 'ui/activity/config)
 
 ;; Eshell itself loads on first use: the entry points below require it.
 (defvar eshell-foreground-command)
@@ -76,6 +77,52 @@ Each is a plist with :command, :directory and :callback.")
   "The API command running in this buffer, as in `+eshell--queue'.
 It also holds :start, a marker at the start of its output, and :pending, the
 prompt input that was set aside for it.")
+
+(defvar-local +eshell--manual-started-at nil
+  "Start time of an interactive command outside the API queue.")
+
+(defun +eshell--activity-snapshot ()
+  "Describe queued and running Eshell work for the Activity indicator.
+Read only buffer-local state; never start a shell while polling."
+  (let (activities)
+    (dolist (buffer (buffer-list))
+      (with-current-buffer buffer
+        (when (derived-mode-p 'eshell-mode)
+          (dolist (item (append (when +eshell--current (list +eshell--current))
+                                +eshell--queue))
+            (let ((token (plist-get item :token)))
+              (push (+activity--create
+                     :label (format "Eshell: %s" (or (plist-get item :name)
+                                                    (plist-get item :command)))
+                     :kind 'task :started-at (plist-get item :added-at)
+                     :buffer buffer :detail (plist-get item :command)
+                     :visit (apply-partially #'+eshell--display buffer)
+                     :cancel (apply-partially #'+eshell--cancel-token
+                                              buffer token 'cancelled))
+                    activities)))
+          (when (and +eshell--manual-started-at
+                     (not +eshell--current))
+            (push (+activity--create
+                   :label (format "Eshell: %s" (buffer-name buffer))
+                   :kind 'task :started-at +eshell--manual-started-at
+                   :buffer buffer :visit (apply-partially #'+eshell--display buffer)
+                   :cancel (apply-partially #'+eshell-interrupt buffer))
+                  activities)))))
+    activities))
+
+(defun +eshell--activity-pre-command-h ()
+  "Count an interactive command from the moment Eshell accepts it."
+  (unless +eshell--current
+    (setq +eshell--manual-started-at (float-time))
+    (+activity--refresh)))
+
+(defun +eshell--activity-post-command-h ()
+  "Stop counting an interactive command after its result is delivered."
+  (when +eshell--manual-started-at
+    (setq +eshell--manual-started-at nil)
+    (+activity--refresh)))
+
+(add-hook '+activity-provider-functions #'+eshell--activity-snapshot)
 
 (defvar-local +eshell--dispatch-timer nil
   "Timer that starts the next queued command, or nil.")
@@ -255,7 +302,8 @@ TASK-NAME gives an automation task its own named buffer and queue."
              (setq +eshell--pending-restore nil)
              (+eshell--schedule-dispatch (and cleared pending))))
          (+eshell--result item :status nil :reason 'error
-                          :error (error-message-string err)))))))
+                          :error (error-message-string err))
+         (+activity--refresh))))))
 
 (defun +eshell--finished-h ()
   "Deliver the result of the API command that just finished, if any."
@@ -265,6 +313,7 @@ TASK-NAME gives an automation task its own named buffer and queue."
         (set-marker (plist-get item :start) nil)
         (setq +eshell--current nil)
         (+eshell--result item :status eshell-last-command-status :output output)
+        (+activity--refresh)
         (eshell-truncate-buffer)
         (+eshell--schedule-dispatch (plist-get item :pending)))
     (when (or +eshell--pending-restore +eshell--queue)
@@ -290,7 +339,8 @@ TASK-NAME gives an automation task its own named buffer and queue."
         (let ((pending +eshell--pending-restore))
           (setq +eshell--pending-restore nil)
           (+eshell--schedule-dispatch pending)))
-      (+eshell--result item :status nil :reason reason :output output))))
+      (+eshell--result item :status nil :reason reason :output output)))
+  (+activity--refresh))
 
 (defun +eshell--timeout (buffer item)
   "Time out ITEM in BUFFER if it is still the active command."
@@ -342,7 +392,8 @@ buffer queues the command.  This function returns before dispatching it."
          (buffer (+eshell-buffer directory task-name))
          (item (list :command command :directory directory :name task-name
                      :callback (plist-get keys :callback)
-                     :token (plist-get keys :token)
+                     :token (or (plist-get keys :token) (gensym "eshell-task"))
+                     :added-at (float-time)
                      :timeout timeout)))
     (with-current-buffer buffer
       (when +eshell--tearing-down
@@ -351,6 +402,7 @@ buffer queues the command.  This function returns before dispatching it."
                 (max 1 +eshell-max-queued-commands))
         (user-error "Eshell command queue is full"))
       (setq +eshell--queue (append +eshell--queue (list item)))
+      (+activity--refresh)
       (unless (or (+eshell--running-p) (timerp +eshell--dispatch-timer))
         (+eshell--schedule-dispatch)))
     (when (plist-get keys :display)
@@ -455,6 +507,7 @@ KEYS: :directory and :name as in `+eshell-run'; :timeout in seconds, default
             (+eshell--result item :status nil :reason reason)
           (push item remaining)))
       (setq +eshell--queue (nreverse remaining)))
+    (+activity--refresh)
     (when (and +eshell--current
                (eq (plist-get +eshell--current :token) token))
       (+eshell--abort-current reason))))
@@ -471,6 +524,7 @@ Each dropped command's callback gets :reason `cancelled'."
   (with-current-buffer (or buffer (current-buffer))
     (let ((queue +eshell--queue))
       (setq +eshell--queue nil)
+      (+activity--refresh)
       (dolist (item queue)
         (+eshell--result item :status nil :reason 'cancelled)))
     (+eshell--abort-current 'cancelled)))
@@ -486,7 +540,9 @@ Each dropped command's callback gets :reason `cancelled'."
                        +eshell--queue)))
     (setq +eshell--current nil
           +eshell--queue nil
-          +eshell--pending-restore nil)
+          +eshell--pending-restore nil
+          +eshell--manual-started-at nil)
+    (+activity--refresh)
     (dolist (item items)
       (when-let* ((start (plist-get item :start)))
         (set-marker start nil))
@@ -504,6 +560,8 @@ the undo history of a buffer that lives for weeks."
 
 (defun +eshell-setup-h ()
   "Install the command-shell hooks in an eshell buffer."
+  (add-hook 'eshell-pre-command-hook #'+eshell--activity-pre-command-h nil t)
+  (add-hook 'eshell-post-command-hook #'+eshell--activity-post-command-h 0 t)
   (add-hook 'eshell-pre-command-hook #'+eshell--reset-output-h nil t)
   (add-hook 'eshell-pre-command-hook #'+eshell--disable-undo-h nil t)
   (setq-local eshell-buffer-maximum-lines 5000)

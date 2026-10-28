@@ -1615,7 +1615,7 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 28×20 XPM 像素�
 
    | 分类 | 内容 |
    | --- | --- |
-   | `task` | 有限的工作:compilation、native-comp worker、remote task、文件传输(rsync) |
+   | `task` | 有限的工作:compilation、Eshell 命令、native-comp worker、remote task、文件传输(rsync) |
    | `service` | 常驻守护进程:语言服务器、epdfinfo、agent 会话 |
    | `connection` | network / serial 端点,TRAMP 在内 |
 
@@ -1625,7 +1625,8 @@ Mode line 上常驻一只皮卡丘(`assets/activity/` 里的 28×20 XPM 像素�
    `remote-transfer-jobs`。某个进程是
    task,当且仅当有 owner 认领它。进程任务在 `+activity--owned-task-processes`
    接入 owner;没有 Emacs 子进程的异步工作通过 `+activity-provider-functions`
-   提供缓存快照。出现在进程板面上不需要另行登记。
+   提供缓存快照。Eshell 由命令队列提供任务，排队和实际执行期间计数，空闲会话不计数。
+   出现在进程板面上不需要另行登记。
 4. **两类活动没有进程,单独登记**:native 编译**排队中**(还没 spawn worker)和同步
    阻塞的工作。后者用宏 `+with-activity` 包住,`unwind-protect` 保证正常返回、报错、
    `C-g` 都会注销。目前唯一的内置触发点是**打开一个每次文件操作都要单独走一趟 shell

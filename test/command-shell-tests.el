@@ -36,6 +36,31 @@
       (accept-process-output nil 0.05))
     (funcall predicate)))
 
+(ert-deftest command-shell-c11-activity-tracks-queue-and-manual-command ()
+  "Queued and running commands count as work; an idle shell does not."
+  (command-shell-tests--with-dir dir
+    (let* ((buffer (+eshell-buffer dir))
+           (task-count (lambda ()
+                         (cl-count buffer (+eshell--activity-snapshot)
+                                   :key #'+activity-buffer)))
+           results)
+      (should (zerop (funcall task-count)))
+      (+eshell-run "sleep 0.5" :directory dir
+                   :callback (lambda (value) (push value results)))
+      (+eshell-run "sleep 0.5" :directory dir
+                   :callback (lambda (value) (push value results)))
+      (should (= 2 (funcall task-count)))
+      (should (command-shell-tests--wait (lambda () (= 2 (length results)))))
+      (should (zerop (funcall task-count)))
+      (with-current-buffer buffer
+        (goto-char (point-max))
+        (insert "sleep 0.5")
+        (eshell-send-input))
+      (should (= 1 (funcall task-count)))
+      (should (command-shell-tests--wait
+               (lambda () (zerop (funcall task-count)))))
+      (should (zerop (funcall task-count))))))
+
 (ert-deftest command-shell-c1-buffer-is-per-context ()
   (command-shell-tests--with-dir dir
     (let ((sub (file-name-as-directory (expand-file-name "sub" dir))))

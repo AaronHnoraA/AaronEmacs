@@ -169,6 +169,10 @@ master PDF；失败时打开对应的 Eshell，会话也可手动从 `SPC o s` �
   渲染后才启用，避免无页码时的空值错误。测试：`latex-eshell-build-keeps-auctex-command-selection`、
   `latex-eshell-build-uses-master-and-shows-only-failures`、`latex-eshell-build-produces-pdf-in-named-session`、
   `latex-preview-open-renders-first-pdf-page`。
+- **C11 后台任务指示器**：每条排队或运行中的 API 命令，以及手动输入后正在运行的
+  Eshell 命令，各算一个 Activity task。运行结束、超时、取消或关闭 buffer 后移出；
+  空闲 Eshell 不算。皮卡丘在命令入队和状态结束时立即重算，任务页可打开或取消命令。
+  测试：`command-shell-c11-activity-tracks-queue-and-manual-command`。
 
 ## 已知差距
 
