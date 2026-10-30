@@ -246,18 +246,16 @@ delivered as the context item `pack:<id>`, ahead of the member Skills.
 The global `marginnote-digitize` pack contains only the OCR Skill, `pdf`,
 `noema-authoring-syntax` and `noema-tikz-figures`. Syntax comes from the current
 canonical `docs/noema/design/syntax.md`, loaded directly rather than copied
-into a Skill. The ordinary MarginNote menu includes the document text in its
-task prompt; other entries follow the syntax Skill's source-loading instruction.
-It is available without being globally
+into a Skill: the sync task names its path and the syntax Skill's
+source-loading instruction reads it. It is available without being globally
 enabled. Its default task is OCR only; organizing, expanding or merging notes
-requires an explicit user request. Use `@@pack(marginnote-digitize)` in a work block, or
-`M-x noema-marginnote` for ordinary agent tasks. The menu resolves the effective
-pack membership, dependencies, preamble and scoped Skill patches, then sends
-source references through the existing context/session delivery path. Unlike
-a research Run, an ordinary task asks the agent to read the source and apply
-the supplied patch deltas; it does not create a frozen RunSpec. Its manager
-action uses the existing Packs page (or the usual read-only lookup when
-invoked from agent input). See [MarginNote](marginnote-agent-bridge.md).
+requires an explicit user request. Use `@@pack(marginnote-digitize)` in a work
+block, or `M-x noema-marginnote-sync`, which resolves the effective pack
+membership, dependencies, preamble and scoped Skill patches and sends source
+references to a pinned session of its own. Unlike a research Run, that task
+asks the agent to read the source and apply the supplied patch deltas; it does
+not create a frozen RunSpec. The pack is managed on the Skill Manager's Packs
+page. See [MarginNote](marginnote-agent-bridge.md).
 
 ## Upstream versions
 

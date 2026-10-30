@@ -32,26 +32,26 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   当前安装版本为准。数据库修改由调用者使用原生 UndoManager 与刷新接口。
 - **MN-C7：** `marginnote-digitize` pack 只链接 OCR 主 skill、PDF、
   `noema-authoring-syntax` 和 `noema-tikz-figures`。语法由当前权威文档
-  `docs/noema/design/syntax.md` 提供，skill 不复制语法规则。普通菜单任务
-  在发送时直接载入该文档全文；其他入口由语法 skill 要求先读取同一文档。
+  `docs/noema/design/syntax.md` 提供，skill 不复制语法规则。同步任务只给出
+  该文档路径，由语法 skill 要求先读取同一文档。
   Skill Manager 管理其成员、前导语和作用域；不复制正文。
   默认按任务选用，不全局启用。`@@pack(marginnote-digitize)` 经现有 Run 路径解析。
-- **MN-C8：** `noema-marginnote` 是 Emacs 操作菜单，提供原生笔记本/文档的
-  OCR、继续资产目录中的 OCR、显式合并 Markdown、查询进度和管理 pack。
-  操作读取当前作用域的有效 pack、skill 引用及当前语法文档，经 `noema-context-send-prompt`
-  发送给已有 agent 会话；忙时沿用会话队列，前缀参数只起草。没有会话时可以
-  从菜单启动现有 agent 入口。它不新建 Project、另建模型客户端或自行运行 OCR。
+- **MN-C8：** Emacs 只有一个 MarginNote 命令 `noema-marginnote-sync`
+  （Noema AI 菜单 `H-o %` 的 `M`），没有任务菜单、别名，也不把 MarginNote
+  任务交给当前已有的会话。OCR、续接、合并、查询进度都写在它的 prompt 里，
+  由 skill 完成；运行中的同步会话从 `noema-sessions` 或 agent inbox 重新
+  打开，pack 在 Skill Manager 的 Packs 页管理。它不新建 Project、另建模型
+  客户端或自行运行 OCR。
 - **MN-C9：** 默认只对用户指定的原生范围做智能 OCR 并写入指定目标，保留
   笔记内容、顺序、结构与未完成推导，允许简单纠正明显笔误。正文不加入识别
   过程、符号辨认理由或未经请求的论文解释。截图与 TikZ 承载实际图示，主稿
   使用官方指定页压平 PDF；数据库和笔画只辅助增量、定位与区分背景。整理、扩写、内容合并须由用户明确要求；接续
   OCR 或存在旧稿不构成内容合并授权。
-- **MN-C10：** `noema-sync-marginnote`（`noema-marginnote-sync`）是正式入口，
+- **MN-C10：** `noema-marginnote-sync` 是正式入口，
   与 LaTeX 导出一样拥有自己的 agent 会话：读入目标 Markdown（可空）、写入方式
   和 prompt，解析当前作用域的有效 `marginnote-digitize` pack，以 `marginnote`
   来源启动会话，初始化完成后把 pack 引用、语法文档路径、目标、写入方式和
-  prompt 作为一轮发送，会话在独立 frame 中显示，`noema-marginnote-sync-open`
-  可重新打开。手写转 Markdown、转 Wiki 页并挂 wikilink 等用途都由 prompt
+  prompt 作为一轮发送，会话在独立 frame 中显示。手写转 Markdown、转 Wiki 页并挂 wikilink 等用途都由 prompt
   经 skill 激活，Emacs 不按用途分支。写入方式是 `new`（目标已存在则拒绝）、
   `update`（只换对应原稿范围）、`append`、`replace`、`merge`；后两者即为用户
   对覆盖或内容合并的明确授权。
@@ -90,13 +90,13 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 - `server/Features/MarginNote/`：任务中转、会话和 HTTP 控制器。
 - `scripts/build-marginnote-addon.mjs`：将本机连接配置打入 `.mnaddon`。
 - `tests/marginnote-*.test.ts`：原生宿主、传输与 agent 接口契约。
-- `lisp/noema-marginnote.el`：任务菜单（复用能力解析和已有上下文发送）与
-  `noema-marginnote-sync` 自有会话入口。
+- `lisp/noema-marginnote.el`：`noema-marginnote-sync` 自有会话入口及其 pack
+  解析。
 - `lisp/noema-agent-acp.el`：`noema-agent-acp-pinned-config`，LaTeX 导出与同步共用。
 - Emacs 的 `etc/noema/capabilities.json`：`marginnote-digitize` pack 定义；
   主 skill、引用和脚本仍在 README 技能库。
-- `tests/elisp/noema-marginnote-tests.el`：作用域、原生身份、任务引用、续接与同步会话
-  （MN-C10–C12）；`noema-agent-acp-tests.el` 覆盖模型双向隔离。
+- `tests/elisp/noema-marginnote-tests.el`：pack 解析、作用域与同步会话
+  （MN-C8、MN-C10–C12）；`noema-agent-acp-tests.el` 覆盖模型双向隔离。
 
 ## 已知差距
 

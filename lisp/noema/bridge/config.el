@@ -4236,7 +4236,7 @@ Selection commands ask the page to save and report its range;
      ("c" "compose with context" noema-compose)
      ("m" "gptel menu"           noema-compose-menu)]
     ["Context / sessions"
-     ("M" "MarginNote digitization" noema-marginnote)
+     ("M" "MarginNote sync"     noema-marginnote-sync)
      ("x" "send shared context"  noema-context-send)
      ("," "inspect context"      noema-context-inspect)
      ("e" "edit in Emacs source" noema-md-bridge-edit-source)
