@@ -212,7 +212,7 @@ MarginNote 手写笔记的正式入口是 `M-x noema-sync-marginnote`（菜单�
 会话。这个会话的模型是钉住的：不受普通会话记住的模型影响，在里面切换模型也不会
 改变普通会话的默认模型。导出 PDF、裁图、OCR 候选、分页草稿和 `workflow.json`
 等中间产物放在 `var/noema/marginnote/<来源>/`（`noema-marginnote-work-root`），
-目标旁只放最终 Markdown 和正文引用的图片。
+正文引用的图片按 Noema 约定放在目标旁的 `images/<笔记文件名>/`，不另建目录。
 
 其余菜单项把任务交给当前已有的会话。MarginNote 菜单是 `M-x noema-marginnote`，或 `H-o % M`：`d` 输入原生
 笔记本/文档的名称或 ID，开始或增量更新；`r` 选已有笔记的工作资产目录继续；

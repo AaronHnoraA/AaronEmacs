@@ -57,6 +57,26 @@ directory without `.git` is reported, never indexed.  Spec:
 | images, PDFs, `*.html` | attachments: only their metadata is indexed | wiki-workspace.md |
 | `~/.config/noema/katex-macros.tex` | the user's global math macros | [../../design/latex-preview.md](../../design/latex-preview.md) |
 
+### A note's own files
+
+A note owns two directories beside it, named by its file stem
+(`noteAssetFolderName` in `shared/tikz-source.mjs`: NFKC, path-unsafe
+characters and whitespace become `-`):
+
+```text
+notes/Tensor Basics.md
+notes/images/Tensor-Basics/        images the note shows (paste, drop, TikZ, screenshots)
+notes/attachments/Tensor-Basics/   every other file it links (PDF, data, HTML)
+```
+
+The note links them relatively, `![](./images/Tensor-Basics/fig-1.png)`.  A
+name already taken gets a numeric suffix, never overwrites.  Paste and import
+(`storeAsset`, `storeAssetFromPath` in `server/lib/runtime.mjs`) write here,
+Asset Maintenance checks these folders for orphans, and a page move carries
+them along; a file elsewhere is not the note's.  Working material that the
+note does not show (sources, candidates, logs, caches) belongs to the tool
+that made it, not in the vault.
+
 ### `noema.toml`
 
 ```toml

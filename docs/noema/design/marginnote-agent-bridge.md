@@ -62,8 +62,15 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   模型上运行。
 - **MN-C12：** 同步任务的中间产物（官方导出 PDF、页面渲染、裁图、OCR 候选、
   分页草稿、`workflow.json` 与回执）放在 `noema-marginnote-work-root`
-  （`var/noema/marginnote/`）下按原生来源身份分的子目录，重跑时复用；目标旁
-  只放最终 Markdown 和正文引用的图片。会话工作目录就是该根目录。
+  （`var/noema/marginnote/`）下按原生来源身份分的子目录，重跑时复用，不进
+  vault。正文显示的图片按 Noema 笔记文件约定放在目标旁的
+  `images/<笔记文件名>/`，其他被链接文件放 `attachments/<笔记文件名>/`
+  （[syntax.md](syntax.md) “A note's own files”），不另建目录。会话工作目录
+  就是该根目录。
+- **MN-C13：** 原生 PKDrawing 笔迹的公式与拉丁文字疑难，skill 可用
+  `render_drawing.swift --strokes` 导出区域笔画坐标，经 `mathpix_ocr.py
+  --strokes` 调 Mathpix `/v3/strokes` 取候选；与图像接口一样按需调用、缓存于
+  工作目录、不自动重试，中文仍由 agent 看图转写。
 
 ## 实现位置
 
