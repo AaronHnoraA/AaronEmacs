@@ -28,13 +28,14 @@ Go kernel  kernel/（二进制 noema）
 | `src/` | ~50k 行 TS | 可复用渲染与编辑核心。`src/cm6/` 是 CodeMirror 6 编辑器（composition root 在 `extensions/index.ts`，渲染构件统一在 `extensions/visual/constructs/`）；其余是 Markdown/数学/TikZ/HTML 导出/Jupyter rendermime 等纯模块 |
 | `pages/` | ~43k 行 TS | Emacs 宿主页面：笔记编辑页（`main.ts`）、Wiki、Agenda、Jupyter 输出、Config、Slides；宿主键盘与焦点契约（`host-keyboard.ts`、`xwidget-key-guard.ts`）；Vim 层（`vim-lite.ts`）。构建到 `dist/pages` |
 | `shared/` | ~5k 行 `.mjs` | 浏览器与 Node 共用的语法/身份/宏规则，配 `*-fixtures.json` 契约（Go 侧按同一 fixture 校验） |
-| `server/` | ~44k 行 `.mjs` | Node host。`Features/*/api.mjs` 是功能控制器（Assets、Emacs、Filesystem、Jupyter、Prose、Research、Session、Tasks）；`infrastructure/` 是 transport 无关的 router；`jupyter/` 是 Jupyter 协议客户端；`lib/` 是领域实现与旧 facade（仍在逐步拆入 Features） |
+| `server/` | ~44k 行 `.mjs` | Node host。`Features/*/api.mjs` 是功能控制器（Assets、Emacs、Filesystem、Jupyter、MarginNote、Prose、Research、Session、Tasks）；`infrastructure/` 是 transport 无关的 router；`jupyter/` 是 Jupyter 协议客户端；`lib/` 是领域实现与旧 facade（仍在逐步拆入 Features） |
 | `web-host.mjs` | | HTTP/SSE、静态资源、router 装配；写 `host.json` |
 | `kernel/` | Go | headless 内核，派生自 SiYuan（AGPL）。`noema/` 是 Noema 自有包：`research`（WorkNode DAG、Proposal、Finding）、`wikisearch`（唯一搜索实现）、`agenda`、`planning`、`latex`、`bibliography`、`vaultgit`、`markdown`、`metadata` 等；`mcp/` 是 MCP 服务与工具；`agent/` 是 Agent 运行记录；`model/`、`api/`、`sql/`、`av/`、`treenode/` 等大多继承自上游 |
 | `lisp/` | ~32k 行 Elisp | 随产品发布的 Emacs 包。`noema-research*` 是 `.noema`/JuText/Graph Board；`noema-agent-*` 是 ACP 边界、worker、worktree、会话面板；`noema-capability-*`、`noema-skill-upstream-ui` 是 Skill/MCP 管理；`noema-interaction-*` 是 CLI Agent 工作台；`noema-agenda*` 是原生 Agenda；`noema-xwidget-keys`、`noema-md-bridge` 是页面输入与文本桥 |
 | `resources/` | | 共享资源的唯一来源：`katex-macros/`、`templates/`、`skills/`、拼写白名单；Emacs 配置通过 `etc/`、`templates/` 中的链接读取 |
 | `jupyter/` | | kernelspec 模板与安装脚本（Emacs 的 Jupyter Board 调用） |
 | `plugins/noema-copilot/` | | Copilot Node 插件，单向调用 kernel |
+| `plugins/marginnote/` | | MarginNote 原生 API 执行插件、API 声明索引、stdio MCP 与 CLI；手写数字化业务维护在 README 技能库 |
 | `apple/` | | EventKit 辅助程序源码（`make agenda-apple-build`） |
 | `browser-extension/` | | 仅做网页 capture 的 Chrome 扩展 |
 | `js/`、`public/` | | 发布站点的静态脚本与资源 |

@@ -64,6 +64,12 @@ hold the site and SSH settings; initialize examples with
 
 ## Project MCP selection
 
+MarginNote 的原生执行接口是独立的 stdio MCP 能力 `noema-marginnote`，由全局
+能力配置声明，入口为 `plugins/marginnote/mcp.mjs`。它不属于知识库、研究 DAG 或
+发布 MCP 的工具集；通过 Noema host 中转到已连接的原生插件窗口。手写笔记的
+增量数字化流程由 README 技能库中的 `marginnote-digitize` 负责。接口与安装见
+[MarginNote agent 接口](marginnote-agent-bridge.md)。
+
 The supervised Noema endpoint is also the built-in `noema` capability. Projects
 may define additional stdio, HTTP or SSE MCP servers, enable/disable them and
 patch their configuration in `noema-capabilities.json`. Run preparation copies

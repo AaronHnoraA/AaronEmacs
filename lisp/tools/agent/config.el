@@ -1089,6 +1089,11 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload 'noema-mcp-manager "noema-capability-ui" nil t)
 (autoload 'noema-skill-upstream "noema-skill-upstream-ui" nil t)
 (autoload 'noema-capability-lookup "noema-capability-actions" nil t)
+(autoload 'noema-marginnote "noema-marginnote" nil t)
+(autoload 'noema-marginnote-digitize "noema-marginnote" nil t)
+(autoload 'noema-marginnote-resume "noema-marginnote" nil t)
+(autoload 'noema-marginnote-merge "noema-marginnote" nil t)
+(autoload 'noema-marginnote-status "noema-marginnote" nil t)
 
 ;; Standard compatibility infrastructure is also package-managed.
 (use-package compat :ensure t :defer t)

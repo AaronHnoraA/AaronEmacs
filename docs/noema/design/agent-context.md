@@ -19,6 +19,10 @@ Noema 的 64 KiB 限额只约束它附加到**研究 Run** 的上下文字节，
 
 **C1｜普通交互使用引用。** `noema-context.el` 复用 `gptel-context` 中的选区、buffer 与文件选择。可保存的文件以一行路径或 `path:START-END` 进入 prompt，每个不同文件附一个 ACP `resource_link`；此路径不内嵌文件正文。未保存或不可读的选择会报告并跳过。会话忙时，agent-shell 的队列保留文本路径引用，下一轮再送。
 
+`noema-context-send-prompt` 供产品操作发送明确的 prompt 和文件引用，复用同一
+会话选择、路径可达性检查、起草、排队和剪贴板路径。它不读取或清空共享 gptel
+选择；明确要求的文件不可读或有未保存编辑时拒绝发送，不能悄悄遗漏操作依据。
+
 **C2｜研究 Run 先冻结再派发。** `.noema` 工作块先保存，再只解析开头控制区的 `@@agent`、`@@session`、`@@ctx`、`@@skill` 与 `@@pack`。Node host 在 `run:prepare` 中决定会话、解析引用、选择能力并冻结 RunSpec 和 context items；Emacs worker 只消费这份冻结输入。控制区以后的 `@@...` 是 prompt 数据。`local_only` 的 cell 或 note 不得被注入 Run。
 
 **C3｜显式引用完整保留。** `@@ctx(cell:...)`、`result:...`、`file:...`、`note:...`、`artifact:...`、`git.diff`、`handoff.latest`、`lineage[:1-3]` 与 `depends` 按各自来源解析。相同内容去重。显式声明的内容不自动截短；显式项超过 64 KiB 就拒绝准备，并要求缩小引用。`@@ctx(none)` 关闭自动上下文，保留同一工作块的其他显式引用、项目说明和已选择的能力。

@@ -202,6 +202,14 @@
 
 `H-o` 打开 Noema 全功能 hub（单页 Transient）：
 
+MarginNote 手写笔记用 `M-x noema-marginnote`，或 `H-o % M`：`d` 输入原生
+笔记本/文档的名称或 ID，开始或增量更新；`r` 选已有笔记的工作资产目录继续；
+`m` 合并另一份手写稿产生的 Markdown；`s` 查询该目录的处理进度。任务交给选定
+的已有 agent，会话忙时排队；先按 `C-u` 再选任务则只填入会话输入框。没有
+会话时用 `a` 启动。`p` 打开现有 Skill Manager 的 Packs 页，可展开
+`marginnote-digitize`，管理成员和前导语；项目差异用管理器的 Project patches。
+工作块中也可直接用 `@@pack(marginnote-digitize)`。
+
 `SPC N` 是 Noema 的 leader 分组：`m` 菜单、`a` 日程、`d` 文件、`v` Git、
 `S` Wiki 索引状态、`e` 原始 Markdown、`o` 打开当前笔记。运行和调试继续使用
 `SPC r`：`r R` 重跑上个运行 profile，`r V` 恢复状态快照，`r d` 调试 profile，

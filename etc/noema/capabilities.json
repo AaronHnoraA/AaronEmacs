@@ -77,6 +77,16 @@
   "mcp": {
     "servers": [
       {
+        "id": "noema-marginnote",
+        "title": "MarginNote native API",
+        "description": "Execute JavaScript in the connected MarginNote native plugin and inspect its API and windows.",
+        "command": "/Users/hc/.nvm/versions/node/v26.5.0/bin/node",
+        "args": [
+          "/Users/hc/.config/emacs/site-lisp/noema/plugins/marginnote/mcp.mjs"
+        ],
+        "default_enabled": true
+      },
+      {
         "id": "lean-lsp",
         "title": "Lean LSP MCP",
         "description": "Optional Lean diagnostics and mathlib search; requires uvx and a prepared Lean project.",
@@ -90,6 +100,17 @@
   },
   "packs": {
     "definitions": {
+      "marginnote-digitize": {
+        "title": "MarginNote handwriting to Noema",
+        "description": "Native MarginNote smart OCR to Markdown with Noema authoring and diagrams; organize or merge only when requested",
+        "members": [
+          "marginnote-digitize",
+          "pdf",
+          "noema-authoring-syntax",
+          "noema-tikz-figures"
+        ],
+        "preamble": "Smart OCR only: preserve the user's notes, with minimal correction of obvious typos. Organize, expand or merge only when explicitly requested. Load the current Noema syntax document at ~/.config/emacs/docs/noema/design/syntax.md before writing; use that source directly rather than copying syntax rules into the Skill. Keep OCR explanations out of the note body."
+      },
       "math-writing": {
         "title": "Math writing",
         "description": "English mathematical prose, precise claims, introductions and pre-submission review",

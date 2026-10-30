@@ -28,6 +28,11 @@ The context handed to each surface and the frozen Run budget are specified in
 5. `noema-compose-rewrite` opens gptel rewrite/diff review.
 6. `noema-agent-start` opens a structured Magent/Codex/Claude/OpenCode/Pi
    session through agent-shell.
+7. `noema-marginnote` opens the native notebook digitization menu: update,
+   resume, merge Markdown, inspect progress, start an agent or manage the pack.
+   The Noema AI menu (`%`) exposes it under `M`. Task commands use an existing
+   session and the managed `marginnote-digitize` pack; `C-u` only drafts.
+   Recognition and workflow decisions remain in the member Skills.
 
 Editable Noema profiles and prompt templates remain under `etc/noema/`.
 Future improvements should compose these mature implementations rather than

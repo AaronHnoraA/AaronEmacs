@@ -4223,9 +4223,9 @@ RELOAD and WINDOW-MENU select the backend's implementations."
 
 (with-eval-after-load 'transient
   (transient-define-prefix noema-ai-menu ()
-    "AI and agent actions on the Noema pane's selection.
-Each asks the page to save and report its range; `noema-md-bridge' then runs
-the gptel or agent UI on the note's Emacs source buffer."
+    "AI, context and handwriting tasks for Noema.
+Selection commands ask the page to save and report its range;
+`noema-md-bridge' then runs the UI on the note's Emacs source buffer."
     ["Selection → agent session (last choice preselected)"
      ("a" "send selection"       noema-context-send-region)
      ("l" "send cursor line"     noema-context-send-at-point)
@@ -4236,6 +4236,7 @@ the gptel or agent UI on the note's Emacs source buffer."
      ("c" "compose with context" noema-compose)
      ("m" "gptel menu"           noema-compose-menu)]
     ["Context / sessions"
+     ("M" "MarginNote digitization" noema-marginnote)
      ("x" "send shared context"  noema-context-send)
      ("," "inspect context"      noema-context-inspect)
      ("e" "edit in Emacs source" noema-md-bridge-edit-source)

@@ -476,7 +476,7 @@ agenda-apple-test:
 research-test:
 	$(BATCH) -l test/noema-startup-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/tests/elisp -l noema-agent-acp-tests.el -l noema-agent-render-tests.el -l noema-context-tests.el -l noema-agent-worktree-tests.el -l noema-agent-worktree-board-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -L site-lisp/noema/tests/elisp -l noema-capability-workspace-tests.el -l test/noema-manager-layout-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -L site-lisp/noema/tests/elisp -l noema-capability-workspace-tests.el -l noema-marginnote-tests.el -l test/noema-manager-layout-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/noema-research-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/tests/elisp \
 	  -l noema-interaction-tests.el -l noema-interaction-magent-tests.el -l noema-api-tests.el -l noema-completion-tests.el \

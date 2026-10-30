@@ -165,6 +165,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 - [latex-export-style.md](noema/design/latex-export-style.md) Noema LaTeX Export — Style Contract
 - [magent-runtime.md](noema/design/magent-runtime.md) Noema + internalized Magent runtime
 - [mcp.md](noema/design/mcp.md) Noema MCP
+- [marginnote-agent-bridge.md](noema/design/marginnote-agent-bridge.md) MarginNote 原生插件 API 与 agent JavaScript 执行通道。
 - [rendered-constructs.md](noema/design/rendered-constructs.md) 渲染组件（Rendered Constructs）统一架构
 - [research-synthesis.md](noema/design/research-synthesis.md) Research synthesis and Proposals
 - [scroll-ownership.md](noema/design/scroll-ownership.md) 视口归属：滚动只有一个主人

@@ -34,6 +34,9 @@ These do not start external work:
 
 Capability queries are asynchronous because they cross the Emacs/host boundary.
 Their callback receives `(result error-object)`.
+`noema-capability-list` accepts `:requested-skills` and `:requested-packs` for
+transient task selections, including pack dependency resolution. These queries
+do not change persisted selection or the editor's capability cache.
 
 ## Semantic mutations
 
@@ -62,6 +65,13 @@ WorkNode and retains Noema's explicit local-execution confirmation.
 
 These functions can start or affect external processes. MCP connection state is
 not changed by a capability query.
+
+`(noema-context-send-prompt PROMPT :files FILES :draft DRAFT :pick PICK)`
+delivers a product task to an existing agent through the ordinary context
+path. Files remain references, must be saved/readable and reachable by that
+agent, and never consume the shared gptel selection. `:draft t` only fills
+the input; a busy session queues a normal send. Session selection retains the
+clipboard option. See [agent-context.md](agent-context.md).
 
 ## Script example
 
