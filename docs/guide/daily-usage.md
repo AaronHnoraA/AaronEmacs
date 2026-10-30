@@ -206,8 +206,9 @@ MarginNote 手写笔记的正式入口是 `M-x noema-sync-marginnote`（菜单�
 先选目标 Markdown（留空则由 prompt 决定，或写新笔记），目标已存在时再选写入方式
 `update` / `append` / `replace` / `merge`（不存在即 `new`），最后输入 prompt，例如
 “第三章转成 Wiki 页并挂 wikilink”。它不借用当前会话，而是开一个自己的 agent
-会话（默认 Codex `gpt-6.1-terra`、reasoning `xhigh`，由 `noema-marginnote-sync-agent`
-/ `-model` / `-effort` 设定），自动挂上 `marginnote-digitize` pack 和 prompt 后发送，
+会话（默认 Codex `gpt-6.1-terra`、reasoning `high`，由 `noema-marginnote-sync-agent`
+/ `-model` / `-effort` 设定；密集推导先按 `C-u` 再启动，会多问一次 reasoning，
+默认给 `xhigh`，即 `noema-marginnote-sync-dense-effort`），自动挂上 `marginnote-digitize` pack 和 prompt 后发送，
 在独立 frame 里打开；菜单 `o`（`noema-marginnote-sync-open`）重新打开仍在运行的
 会话。这个会话的模型是钉住的：不受普通会话记住的模型影响，在里面切换模型也不会
 改变普通会话的默认模型。导出 PDF、裁图、OCR 候选、分页草稿和 `workflow.json`

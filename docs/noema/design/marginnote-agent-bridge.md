@@ -56,7 +56,8 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   `update`（只换对应原稿范围）、`append`、`replace`、`merge`；后两者即为用户
   对覆盖或内容合并的明确授权。
 - **MN-C11：** 同步会话钉住 `noema-marginnote-sync-agent` / `-model` /
-  `-effort`（默认 Codex、`gpt-6.1-terra`、`xhigh`），经
+  `-effort`（默认 Codex、`gpt-6.1-terra`、`high`；前缀参数启动时选
+  reasoning，密集推导默认给 `noema-marginnote-sync-dense-effort` 即 `xhigh`），经
   `noema-agent-acp-pinned-config`：普通会话记住的模型不进入它，它里面的模型
   选择也不写回普通会话的记忆。钉住的模型不可用时任务只留作草稿，不在别的
   模型上运行。
