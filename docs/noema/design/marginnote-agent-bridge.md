@@ -78,6 +78,11 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   任务 prompt 可选 `economy`（不调外部）或 `strict`（不限预算、疑难双候选、
   逐页 Apple Vision 漏识检查）；无凭据或失败时降为 `economy`，不阻塞任务。
   中文始终由 agent 转写。
+- **MN-C14：** 挂 wikilink 或引用只用 Noema kernel 的引用查询（skill 的
+  `noema_refs.py`，即 `knowledge:search` 的 `references` 模式），原样使用返回的
+  `insert` 文本，不手写 `[[标题]]` 或 `roam://`。查询是模糊匹配，只链确指同一
+  概念的结果；kernel 提供的“链接到新页”被脚本丢弃，查不到的术语不链、不建页，
+  在结束报告中列为候选。Noema 未运行或 kernel 不应答时不挂链接。
 
 ## 实现位置
 
