@@ -202,7 +202,19 @@
 
 `H-o` 打开 Noema 全功能 hub（单页 Transient）：
 
-MarginNote 手写笔记用 `M-x noema-marginnote`，或 `H-o % M`：`d` 输入原生
+MarginNote 手写笔记的正式入口是 `M-x noema-sync-marginnote`（菜单里的 `S`）：
+先选目标 Markdown（留空则由 prompt 决定，或写新笔记），目标已存在时再选写入方式
+`update` / `append` / `replace` / `merge`（不存在即 `new`），最后输入 prompt，例如
+“第三章转成 Wiki 页并挂 wikilink”。它不借用当前会话，而是开一个自己的 agent
+会话（默认 Codex `gpt-6.1-terra`、reasoning `xhigh`，由 `noema-marginnote-sync-agent`
+/ `-model` / `-effort` 设定），自动挂上 `marginnote-digitize` pack 和 prompt 后发送，
+在独立 frame 里打开；菜单 `o`（`noema-marginnote-sync-open`）重新打开仍在运行的
+会话。这个会话的模型是钉住的：不受普通会话记住的模型影响，在里面切换模型也不会
+改变普通会话的默认模型。导出 PDF、裁图、OCR 候选、分页草稿和 `workflow.json`
+等中间产物放在 `var/noema/marginnote/<来源>/`（`noema-marginnote-work-root`），
+目标旁只放最终 Markdown 和正文引用的图片。
+
+其余菜单项把任务交给当前已有的会话。MarginNote 菜单是 `M-x noema-marginnote`，或 `H-o % M`：`d` 输入原生
 笔记本/文档的名称或 ID，开始或增量更新；`r` 选已有笔记的工作资产目录继续；
 `m` 合并另一份手写稿产生的 Markdown；`s` 查询该目录的处理进度。任务交给选定
 的已有 agent，会话忙时排队；先按 `C-u` 再选任务则只填入会话输入框。没有

@@ -1094,6 +1094,9 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload 'noema-marginnote-resume "noema-marginnote" nil t)
 (autoload 'noema-marginnote-merge "noema-marginnote" nil t)
 (autoload 'noema-marginnote-status "noema-marginnote" nil t)
+(autoload 'noema-marginnote-sync "noema-marginnote" nil t)
+(autoload 'noema-sync-marginnote "noema-marginnote" nil t)
+(autoload 'noema-marginnote-sync-open "noema-marginnote" nil t)
 
 ;; Standard compatibility infrastructure is also package-managed.
 (use-package compat :ensure t :defer t)

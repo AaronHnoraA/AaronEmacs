@@ -46,6 +46,24 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   过程、符号辨认理由或未经请求的论文解释。截图与 TikZ 承载实际图示，主稿
   使用官方指定页压平 PDF；数据库和笔画只辅助增量、定位与区分背景。整理、扩写、内容合并须由用户明确要求；接续
   OCR 或存在旧稿不构成内容合并授权。
+- **MN-C10：** `noema-sync-marginnote`（`noema-marginnote-sync`）是正式入口，
+  与 LaTeX 导出一样拥有自己的 agent 会话：读入目标 Markdown（可空）、写入方式
+  和 prompt，解析当前作用域的有效 `marginnote-digitize` pack，以 `marginnote`
+  来源启动会话，初始化完成后把 pack 引用、语法文档路径、目标、写入方式和
+  prompt 作为一轮发送，会话在独立 frame 中显示，`noema-marginnote-sync-open`
+  可重新打开。手写转 Markdown、转 Wiki 页并挂 wikilink 等用途都由 prompt
+  经 skill 激活，Emacs 不按用途分支。写入方式是 `new`（目标已存在则拒绝）、
+  `update`（只换对应原稿范围）、`append`、`replace`、`merge`；后两者即为用户
+  对覆盖或内容合并的明确授权。
+- **MN-C11：** 同步会话钉住 `noema-marginnote-sync-agent` / `-model` /
+  `-effort`（默认 Codex、`gpt-6.1-terra`、`xhigh`），经
+  `noema-agent-acp-pinned-config`：普通会话记住的模型不进入它，它里面的模型
+  选择也不写回普通会话的记忆。钉住的模型不可用时任务只留作草稿，不在别的
+  模型上运行。
+- **MN-C12：** 同步任务的中间产物（官方导出 PDF、页面渲染、裁图、OCR 候选、
+  分页草稿、`workflow.json` 与回执）放在 `noema-marginnote-work-root`
+  （`var/noema/marginnote/`）下按原生来源身份分的子目录，重跑时复用；目标旁
+  只放最终 Markdown 和正文引用的图片。会话工作目录就是该根目录。
 
 ## 实现位置
 
@@ -53,10 +71,13 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 - `server/Features/MarginNote/`：任务中转、会话和 HTTP 控制器。
 - `scripts/build-marginnote-addon.mjs`：将本机连接配置打入 `.mnaddon`。
 - `tests/marginnote-*.test.ts`：原生宿主、传输与 agent 接口契约。
-- `lisp/noema-marginnote.el`：任务菜单，复用能力解析和已有上下文发送。
+- `lisp/noema-marginnote.el`：任务菜单（复用能力解析和已有上下文发送）与
+  `noema-marginnote-sync` 自有会话入口。
+- `lisp/noema-agent-acp.el`：`noema-agent-acp-pinned-config`，LaTeX 导出与同步共用。
 - Emacs 的 `etc/noema/capabilities.json`：`marginnote-digitize` pack 定义；
   主 skill、引用和脚本仍在 README 技能库。
-- `tests/elisp/noema-marginnote-tests.el`：作用域、原生身份、任务引用与续接。
+- `tests/elisp/noema-marginnote-tests.el`：作用域、原生身份、任务引用、续接与同步会话
+  （MN-C10–C12）；`noema-agent-acp-tests.el` 覆盖模型双向隔离。
 
 ## 已知差距
 
