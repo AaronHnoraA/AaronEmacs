@@ -69,8 +69,9 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   就是该根目录。
 - **MN-C13：** 识别由 agent 读图定稿，读得清的块不调用工具，也不预先给每块
   分类。只有某块需要工具时才看来源取材：原生 PKDrawing 笔迹用
-  `render_drawing.swift --strokes` 导出区域笔画，位图裁图。本机 Apple Vision
-  先用；Mathpix 按次计费，只在具体符号疑难或高密度公式（矩阵、深层嵌套、
+  `render_drawing.swift --strokes` 导出区域笔画，位图裁图。两种工具分工不同、
+  不互为前置：本机 Apple Vision 用于文字疑难、位置框和漏识检查，公式不经过它；
+  Mathpix 按次计费，只在公式的具体符号疑难或高密度公式（矩阵、深层嵌套、
   挤在一起的多行推导）时调用，原生笔迹走 `/v3/strokes`、位图走 `/v3/text`，
   同一块只调一个，默认每页平均不超过 2 次，结束时报告调用和缓存命中次数。
   任务 prompt 可选 `economy`（不调外部）或 `strict`（不限预算、疑难双候选、
