@@ -1030,7 +1030,7 @@ Emacs 经 `exec-path-from-shell -l` 取得。Pi 与 OpenCode 没有内置 CLI，
 普通页面沿用原来的文件标签；Noema 页面若已在其他分屏打开，
 不会在当前分屏的标签里重复出现。
 左键切换，右键可新建、重命名、关闭或调整顺序。
-`M-t`（macOS `Cmd-t`）在任何 buffer 打开终端选择器；在终端里调用时，列表不显示当前终端。
+`M-t`（macOS `Cmd-t`）在任何 buffer 打开终端选择器；列表不显示已在可见窗口里打开的终端（所有 frame 都算，隐藏或最小化 frame 里的终端仍可选）。
 列表包括普通终端、弹窗终端，最后一项是新建终端。`Enter` 在当前窗口打开，
 `Shift-Enter` 在右侧分屏打开，`Cmd-Enter` 在下方分屏打开；
 `Cmd+Shift+Enter` 在新 frame 打开，已有终端会从旧窗口移出。选择弹窗终端并按普通

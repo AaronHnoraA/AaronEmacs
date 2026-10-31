@@ -760,7 +760,9 @@ Shown but not selected: select it.  Selected: hide its view; the buffer stays."
         (+eshell--display buffer))))))
 
 (defun +eshell--selector-candidates (&optional exclude)
-  "Return searchable Eshell choices, omitting EXCLUDE when given."
+  "Return searchable Eshell choices that are not open.
+A session in a window of any visible frame, its float included, is left out.
+EXCLUDE, the current float, adds the choice to hide it."
   (append
    (mapcar (lambda (buffer)
              (cons (format "Eshell · %s · %s"
@@ -770,6 +772,7 @@ Shown but not selected: select it.  Selected: hide its view; the buffer stays."
                    buffer))
            (seq-filter (lambda (buffer)
                          (and (not (eq buffer exclude))
+                              (not (get-buffer-window buffer 'visible))
                               (with-current-buffer buffer
                                 (derived-mode-p 'eshell-mode))))
                        (buffer-list)))

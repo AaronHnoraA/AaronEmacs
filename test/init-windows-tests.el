@@ -929,4 +929,32 @@
       (set-frame-parameter frame '+portal/terminal old-owner)
       (kill-buffer hidden))))
 
+;; Cmd-T offers only terminals that are not open in a visible window.
+(ert-deftest terminal-selector-omits-every-open-terminal ()
+  (let ((open (generate-new-buffer " *open-terminal*"))
+        (hidden (generate-new-buffer " *hidden-terminal*"))
+        (popup-open (generate-new-buffer " *open-popup*"))
+        (popup-hidden (generate-new-buffer " *hidden-popup*")))
+    (unwind-protect
+        (cl-letf (((symbol-function '+tab-line-all-terminal-buffers)
+                   (lambda () (list open hidden)))
+                  ((symbol-function '+portal-popup--live-buffers)
+                   (lambda () (list popup-open popup-hidden)))
+                  ((symbol-function 'get-buffer-window)
+                   (lambda (buffer &rest _)
+                     (and (memq buffer (list open popup-open))
+                          (selected-window)))))
+          (dolist (buffer (list popup-open popup-hidden))
+            (with-current-buffer buffer
+              (setq-local remote-terminal-instance t)))
+          (let ((choices (mapcar #'cdr (+terminal-selector-candidates))))
+            (should (memq hidden choices))
+            (should (memq popup-hidden choices))
+            (should (memq :new choices))
+            (should-not (memq open choices))
+            (should-not (memq popup-open choices)))
+          (should-not (memq hidden (mapcar #'cdr (+terminal-selector-candidates
+                                                  hidden)))))
+      (mapc #'kill-buffer (list open hidden popup-open popup-hidden)))))
+
 ;;; init-windows-tests.el ends here

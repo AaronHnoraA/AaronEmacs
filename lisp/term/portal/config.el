@@ -388,17 +388,22 @@ the native Portal view with SSH running inside it."
     (use-local-map map)))
 
 (defun +terminal-selector-candidates (&optional exclude)
-  "Return ordinary and popup terminal choices, omitting EXCLUDE."
+  "Return terminal choices that are not open, omitting EXCLUDE as well.
+A terminal in a window of any visible frame is already open and is left out;
+one on a hidden or iconified frame stays reachable from here."
   (append
    (mapcar (lambda (buffer)
              (cons (format "终端 · %s" (buffer-name buffer)) buffer))
-           (seq-remove (lambda (buffer) (eq buffer exclude))
+           (seq-remove (lambda (buffer)
+                         (or (eq buffer exclude)
+                             (get-buffer-window buffer 'visible)))
                        (+tab-line-all-terminal-buffers)))
    (mapcar (lambda (buffer)
              (cons (format "弹窗 · %s" (buffer-name buffer)) buffer))
            (seq-filter
             (lambda (buffer)
               (and (not (eq buffer exclude))
+                   (not (get-buffer-window buffer 'visible))
                    (with-current-buffer buffer
                      (or (derived-mode-p 'portal-terminal-mode)
                          (bound-and-true-p remote-terminal-instance)))))
@@ -541,8 +546,8 @@ the native Portal view with SSH running inside it."
 (defun +portal/terminal-selector ()
   "Switch to a terminal or create one, choosing the window with Return.
 Return uses this window, Shift-Return splits right, and Command-Return
-splits below.  Command-Shift-Return opens a new frame.  The active terminal
-is omitted from the choices."
+splits below.  Command-Shift-Return opens a new frame.  Terminals already open
+in a visible window are omitted from the choices."
   (interactive)
   (let* ((source (current-buffer))
          (source-directory default-directory)

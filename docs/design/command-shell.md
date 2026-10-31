@@ -76,8 +76,8 @@ buffer 和同一份实现，位于 `lisp/term/shell/eshell.el`。
 交互入口：
 
 - `SPC o s` / `M-x command-shell`（`+eshell/toggle`）搜索已有 Eshell 会话或
-  新建一个独立会话；在当前浮窗调用时还能选“隐藏当前”。`Cmd-T` 的 Portal 终端
-  选择器保持独立。GUI 中选择的 Eshell 以浮窗显示，TTY 使用底部窗口。
+  新建一个独立会话；在当前浮窗调用时还能选“隐藏当前”。已在可见窗口（含其他 frame 与浮窗）里打开的会话不列出，隐藏或最小化 frame 里的仍可选，
+  规则与 `Cmd-T` 的 Portal 终端选择器相同，但两个选择器保持独立。GUI 中选择的 Eshell 以浮窗显示，TTY 使用底部窗口。
 - `M-x +eshell/toggle-current` 快速显示或隐藏当前 target 的默认会话。
 - `M-x +eshell/new` 新建自动编号的会话；前缀参数可输入会话名。
 - `M-x command-shell-run`（`+eshell/run-command`）读一条命令，在项目根（没有项目

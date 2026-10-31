@@ -363,6 +363,22 @@
         (when (buffer-live-p shell) (kill-buffer shell))
         (when (file-exists-p binary) (delete-file binary))))))
 
+(ert-deftest command-shell-selector-omits-open-sessions ()
+  "A session shown in a visible window is not offered; a hidden one is."
+  (command-shell-tests--with-dir dir
+    (let* ((default-directory dir)
+           (open (+eshell-buffer dir "open-session"))
+           (hidden (+eshell-buffer dir "hidden-session")))
+      (unwind-protect
+          (cl-letf (((symbol-function 'get-buffer-window)
+                     (lambda (buffer &rest _)
+                       (and (eq buffer open) (selected-window)))))
+            (let ((choices (mapcar #'cdr (+eshell--selector-candidates))))
+              (should (memq hidden choices))
+              (should (memq :new choices))
+              (should-not (memq open choices))))
+        (mapc #'kill-buffer (list open hidden))))))
+
 (ert-deftest command-shell-c9-selector-searches-switches-and-creates ()
   "The Eshell picker exposes named sessions and a separate new action."
   (command-shell-tests--with-dir dir
