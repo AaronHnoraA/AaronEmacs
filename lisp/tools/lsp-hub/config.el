@@ -1097,7 +1097,7 @@ reporting on runs on that buffer's target, not on the client machine."
       (setq-local aaron-ui-board-refresh-function #'+language-server/doctor-refresh)
       (+language-server--watch-source-buffer source)
       (let ((inhibit-read-only t))
-        (use-local-map (copy-keymap special-mode-map))
+        (use-local-map (copy-keymap +language-server-doctor-mode-map))
         (local-set-key (kbd "g") #'+language-server/doctor-refresh)
         (local-set-key (kbd "h") #'+language-server/manager)
         (local-set-key (kbd "e") #'+language-server/manager-ensure)
@@ -1164,7 +1164,7 @@ reporting on runs on that buffer's target, not on the client machine."
       (setq-local aaron-ui-board-refresh-function #'+language-server/manager-refresh)
       (+language-server--watch-source-buffer source)
       (let ((inhibit-read-only t))
-        (use-local-map (copy-keymap special-mode-map))
+        (use-local-map (copy-keymap +language-server-manager-mode-map))
         (+language-server-manager-setup-keys)
         (run-hooks '+language-server-manager-setup-functions)
         (+language-server/manager-refresh)))
@@ -1205,7 +1205,7 @@ reporting on runs on that buffer's target, not on the client machine."
     ("d" "buffer diagnostics ui" +language-server/manager-diagnostics-buffer-ui)
     ("T" "Flymake project list" +language-server/manager-diagnostics-project-ui)
     ("m" "diagnostics menu" +language-server/manager-diagnostics-menu)
-    ("x" "message handler errors" +language-server/message-errors)]])
+    ("X" "message handler errors" +language-server/message-errors)]])
 
 ;;; Message handler failures
 

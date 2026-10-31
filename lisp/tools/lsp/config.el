@@ -218,8 +218,7 @@ include directory for a header that belongs to no project."
                    (when-let* ((project (ignore-errors (project-current))))
                      (project-root project))))
               (root (file-name-as-directory root))
-              (local (file-name-as-directory
-                      (or (file-remote-p root 'localname) root))))
+              (local (file-name-as-directory (remote-file-local-name root))))
     (unless (or (equal local "/")
                 (ignore-errors
                   (file-equal-p root (expand-file-name "~/" root))))
@@ -634,7 +633,8 @@ lsp-ui hover child frames, signature help, and lsp-ui peek overlays."
                          (let ((beg (flymake-diagnostic-beg it))
                                (end (flymake-diagnostic-end it)))
                            (<= beg (point) (max beg end))))
-                       (flymake-diagnostics))))
+                       (flymake-diagnostics (line-beginning-position)
+                                            (line-end-position)))))
       (flymake-diagnostic-text diag))))
 
 (defun +flymake-diagnostic-at-point-cancel ()
@@ -1000,11 +1000,6 @@ settings read the full values through `workspace/configuration'."
         (puthash workspace (+language-server--copy-value configuration)
                  +language-server--pushed-workspace-configurations))
       (lsp--set-configuration (or configuration (make-hash-table))))))
-
-;; Remove the historical configure hook in already-running Emacs sessions
-;; when this file is reloaded; startup never installs it again.
-(remove-hook 'lsp-configure-hook
-             #'+language-server--push-workspace-configuration-h)
 
 (defun +language-server--workspace-configuration-override (workspace)
   "Return the workspace-configuration override owned by WORKSPACE.
@@ -2181,11 +2176,11 @@ watch creation is disabled for target-only filesystems."
     (function method params &rest keys)
   "Allow target-owned shutdown METHOD enough time across the Remote route."
   (let* ((root
-          (and lsp--cur-workspace
+          (and (equal method "shutdown")
+               lsp--cur-workspace
                (+language-server--lsp-workspace-root lsp--cur-workspace)))
          (target (and root (remote-file-name-target root))))
-    (if (and (equal method "shutdown")
-             target
+    (if (and target
              (not (equal target "local")))
         (let ((lsp-response-timeout
                (max (or lsp-response-timeout 0)
@@ -3650,27 +3645,22 @@ lsp-mode's categorized index, whose category names provide the same fallback."
         (setq end (point)))
       (cons start end))))
 
-(defun +language-server--point-visible-with-margin-p (point)
-  "Return non-nil when POINT is near a visible window for this buffer."
-  (seq-some
-   (lambda (window)
-     (when-let* ((region (+language-server--visible-region window)))
-       (and (<= (car region) point) (<= point (cdr region)))))
-   (get-buffer-window-list (current-buffer) nil t)))
+(defun +language-server--visible-regions ()
+  "Return the warm region of every window showing this buffer.
+A filter computes this once: `window-end' with UPDATE lays the window out,
+which is not a cost to pay per decoration."
+  (delq nil (mapcar #'+language-server--visible-region
+                    (get-buffer-window-list (current-buffer) nil t))))
 
-(defun +language-server--range-visible-with-margin-p (range)
-  "Return non-nil when LSP RANGE overlaps a visible warm region.
+(defun +language-server--range-visible-with-margin-p (range regions)
+  "Return non-nil when LSP RANGE overlaps one of REGIONS.
 The server response may remain buffer-global as protocol/cache state; only
 the decoration objects that reach lsp-mode's renderer are filtered here."
   (when-let* ((region (ignore-errors (lsp--range-to-region range))))
-    (let ((beg (car region))
-          (end (cdr region)))
-      (seq-some
-       (lambda (window)
-         (when-let* ((visible (+language-server--visible-region window)))
-           (and (<= beg (cdr visible))
-                (<= (car visible) end))))
-       (get-buffer-window-list (current-buffer) nil t)))))
+    (seq-some (lambda (visible)
+                (and (<= (car region) (cdr visible))
+                     (<= (car visible) (cdr region))))
+              regions)))
 
 (defconst +lsp-visible-ranged-decoration-methods
   '("textDocument/documentColor" "textDocument/documentLink")
@@ -3689,13 +3679,15 @@ configured warm margin."
          (lambda (result)
            (when (buffer-live-p source-buffer)
              (with-current-buffer source-buffer
-               (funcall
-                callback
-                (seq-filter
-                 (lambda (item)
-                   (when-let* ((range (lsp-get item :range)))
-                     (+language-server--range-visible-with-margin-p range)))
-                 result)))))
+               (let ((regions (+language-server--visible-regions)))
+                 (funcall
+                  callback
+                  (seq-filter
+                   (lambda (item)
+                     (when-let* ((range (lsp-get item :range)))
+                       (+language-server--range-visible-with-margin-p
+                        range regions)))
+                   result))))))
          keys))
     (apply fn method params callback keys)))
 
@@ -3712,16 +3704,19 @@ lsp-lens already notices page changes from its idle hook.  Filtering at the
 display boundary keeps overlays bounded to the visible region while retaining
 the upstream cache and its 350ms scroll/typing debounce."
   (if (get-buffer-window (current-buffer) t)
-      (funcall
-       fn
-       (seq-filter
-        (lambda (lens)
-          (when-let* ((range (lsp-get lens :range))
-                      (position (lsp-get range :start))
-                      (point (ignore-errors
-                               (lsp--position-to-point position))))
-            (+language-server--point-visible-with-margin-p point)))
-        lenses))
+      (let ((regions (+language-server--visible-regions)))
+        (funcall
+         fn
+         (seq-filter
+          (lambda (lens)
+            (when-let* ((range (lsp-get lens :range))
+                        (position (lsp-get range :start))
+                        (point (ignore-errors
+                                 (lsp--position-to-point position))))
+              (seq-some (lambda (visible)
+                          (<= (car visible) point (cdr visible)))
+                        regions)))
+          lenses)))
     (funcall fn nil)))
 
 (defun +lsp-update-inlay-hints-visible-a (fn _start _end)

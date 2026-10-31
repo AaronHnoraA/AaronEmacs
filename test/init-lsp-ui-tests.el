@@ -500,7 +500,7 @@
          rendered)
     (cl-letf (((symbol-function
                 '+language-server--range-visible-with-margin-p)
-               (lambda (range) (eq range 'inside))))
+               (lambda (range _regions) (eq range 'inside))))
       (+lsp-request-async-visible-decorations-a
        (lambda (_method _params callback &rest _keys)
          (funcall callback (list outside inside)))
