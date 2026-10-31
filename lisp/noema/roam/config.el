@@ -3539,16 +3539,19 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
   (insert "\n\n"))
 
 (defun +noema-roam--dashboard-fill-heatmap (start end days)
-  "Replace the heatmap between markers START and END with DAYS of real counts."
+  "Replace the heatmap between markers START and END with DAYS of real counts.
+A redraw erases the dashboard, collapsing both markers to its top; that render
+has gone, and the new one fills its own heatmap."
   (when-let* ((buffer (marker-buffer start)))
     (with-current-buffer buffer
-      (let ((inhibit-read-only t))
-        (save-excursion
-          (goto-char start)
-          (delete-region start end)
-          (ignore-errors
-            (+noema-roam--dashboard-insert-heatmap-counts
-             (+noema-roam--activity-date-counts days))))))
+      (when (< start end)
+        (let ((inhibit-read-only t))
+          (save-excursion
+            (goto-char start)
+            (delete-region start end)
+            (ignore-errors
+              (+noema-roam--dashboard-insert-heatmap-counts
+               (+noema-roam--activity-date-counts days)))))))
     (set-marker start nil)
     (set-marker end nil)))
 

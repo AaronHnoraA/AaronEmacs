@@ -5,7 +5,9 @@
 
 ## 覆盖范围
 
-`lisp/` 下已跟踪的 230 个文件（约 11.7 万行，不含 `vendor/kanagawa-themes` 主题）和 5 个未提交的新文件、`early-init.el`、`init.el`、`bootstrap.el`、`scripts/*.el` 已全部逐行读完。`site-lisp/`（Noema、Magent、gptel 等）和 `test/` 不在范围内，`etc/*.el` 是数据，只做了孤儿键检查。
+`lisp/` 下已跟踪的 230 个文件（约 11.7 万行，不含 `vendor/kanagawa-themes` 主题）和 5 个未提交的新文件、`early-init.el`、`init.el`、`bootstrap.el`、`scripts/*.el` 已全部逐行读完。另读完 `site-lisp/ratex.el`、`site-lisp/vendored`、`site-lisp/dape-toolbar`。`etc/*.el` 是数据，只做了孤儿键检查。
+
+未读：`site-lisp/gptel` 和 `site-lisp/magent/lisp`（约 4.1 万行）、`test/`（约 6 万行）、`vendor/kanagawa-themes`。`site-lisp/noema` 是独立仓库，按用户要求不审（`.noema` 相关都不管）。
 
 第一阶段分三层：
 
@@ -82,6 +84,17 @@
 - 尝试看板在 ACP 事件内同步重绘，每成员解析两遍目录，现在合并到一次定时重绘。
 - `bootstrap.el` 安装失败仍以 0 退出，`make install` 报成功；现在全部尝试后以 1 退出。
 
+**RaTeX 与 vendored**
+
+- 编辑 `\\begin{align}` 时快速刷新丢掉 `:environment`，预览退化成行内公式，遇到嵌套闭合还会截断。
+- 停 backend 后旧 sentinel 迟到：一条命令内的 major mode 切换会清掉新进程并让它的请求失败，新进程成孤儿。
+- `find-file-root` 调 `tramp-cleanup-all-connections`，打开 root 文件顺带关掉全部远程 buffer。
+- `fingertip` 无人绑定却占启动 21 ms，改为 autoload。另修 `forward-indent`、`point-stack`、`prettyfy-string`、`open-newline-below` 和 fingertip 的 `}` 笔误。
+
+**本次审计引入后修复的回归**
+
+- `73dd800e` 把 Dashboard 热力图改成异步后，启动时的重绘（`dashboard-resize-on-hook`）清空 buffer，两个 marker 塌到顶部，异步结果插在最上面。现在 marker 塌缩时放弃填充，由新一轮渲染自己填。
+
 ## 未处理
 
 留给后续决定，均未改动：
@@ -105,6 +118,8 @@
 - `AGENT.md` 仍说 `lsp`（kernel-following），文件由另一会话持有。
 - Agent：`+agent-session-capability-p` 取一个字段却构建完整快照；`+agent-acp--retire-transcript-workspace`、`--right-pane-p` 是旧布局迁移残留，`manager.el` 的 `fork`/`model`/`queue` 分支无调用；`+agent-acp--tab-line` 每次重绘都建 keymap 和排序全部 buffer；`help` 里的 `\\[+agent-session-list]` 未绑定键。
 - `general.el` 大量上游代码（lispy/worf/lpy definer、key-chord）未使用，`general--delay` 每个未解析绑定一个 `after-load` 闭包。
+- `basic-toolkit` 用同名函数覆盖内置 `count-words`；`kill-unused-buffers` 无差别杀 `*x*` buffer（未绑定键）。
+- `winpoint-clean` 只看当前 frame 的窗口，但 `winpoint-mode` 从未开启，`thing-edit` 也无绑定。
 - 终端选择器排除已打开窗口后，无法再选中可见终端把它移到新 frame。
 
 ## 结束时的测试
