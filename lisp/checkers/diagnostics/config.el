@@ -168,12 +168,9 @@
                     (sb (+diagnostics--source-label b)))
                 (if (not (string= sa sb))
                     (string-lessp sa sb)
-                  (let ((la (+diagnostics--line-number a))
-                        (lb (+diagnostics--line-number b)))
-                    (if (/= la lb)
-                        (< la lb)
-                      (< (flymake-diagnostic-beg a)
-                         (flymake-diagnostic-beg b)))))))))))
+                  ;; One source: position already orders the lines.
+                  (< (flymake-diagnostic-beg a)
+                     (flymake-diagnostic-beg b))))))))))
 
 (defun +diagnostics--counts-string (diags)
   "Return a compact counts string for DIAGS."
@@ -418,7 +415,7 @@ Return non-nil when BUFFER was visible."
 
 ;; Popup rule for this module's buffers (see ui/popup).
 (defvar +display-rules-bottom-size)
-(set-popup-rule! "\\*Diagnostics:.*\\*" :select t :align 'below :size +display-rules-bottom-size :regexp t)
+(set-popup-rule! "\\`\\*Diagnostics F[0-9]+\\*\\'" :select t :align 'below :size +display-rules-bottom-size :regexp t)
 
 ;; Boards start in Emacs state.
 (set-evil-initial-state! '+diagnostics-mode 'emacs)

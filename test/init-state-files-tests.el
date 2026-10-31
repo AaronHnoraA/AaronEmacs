@@ -468,4 +468,27 @@
       (when (window-live-p other) (delete-window other))
       (when (buffer-live-p shell) (kill-buffer shell)))))
 
+(ert-deftest +diagnostics-panels-refresh-when-flymake-publishes ()
+  "Flymake runs no hook after a save; publication drives the open panels."
+  (should-not (boundp 'flymake-after-save-hook))
+  (should (advice-member-p #'+diagnostics--clear-modeline-cache-a
+                           'flymake--publish-diagnostics))
+  (let ((scheduled 0)
+        (+diagnostics-auto-refresh-mode t))
+    (cl-letf (((symbol-function '+diagnostics--schedule-refresh-open-buffers)
+               (lambda (&rest _) (setq scheduled (1+ scheduled)))))
+      (with-temp-buffer (+diagnostics--clear-modeline-cache-a))
+      (should (= scheduled 1))
+      (let ((+diagnostics-auto-refresh-mode nil))
+        (with-temp-buffer (+diagnostics--clear-modeline-cache-a)))
+      (should (= scheduled 1)))))
+
+(ert-deftest +diagnostics-panel-names-match-their-popup-rule ()
+  "The popup rule describes the buffer name `+diagnostics-open' creates."
+  (should (seq-some (lambda (rule)
+                      (and (stringp (car rule))
+                           (plist-get (cdr rule) :regexp)
+                           (string-match-p (car rule) "*Diagnostics F12*")))
+                    +popup-rules)))
+
 ;;; init-state-files-tests.el ends here

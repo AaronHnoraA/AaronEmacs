@@ -37,6 +37,7 @@
   "Source buffers awaiting a visible diagnostics panel refresh.")
 
 (defvar +diagnostics-modeline-mode)
+(defvar +diagnostics-auto-refresh-mode)
 
 (defvar-local +diagnostics--modeline-cache nil
   "Cached diagnostics mode line string for the current buffer.")
@@ -96,9 +97,12 @@
               +diagnostics--modeline-cache-size nil))
 
 (defun +diagnostics--clear-modeline-cache-a (&rest _)
-  "Clear diagnostics modeline cache after Flymake publishes diagnostics."
+  "Update the mode line and open panels after Flymake publishes diagnostics.
+Flymake has no hook for this: `flymake-after-save-hook' is a function."
   (+diagnostics--clear-modeline-cache)
-  (force-mode-line-update))
+  (force-mode-line-update)
+  (when +diagnostics-auto-refresh-mode
+    (+diagnostics--schedule-refresh-open-buffers)))
 
 (defun +diagnostics-modeline-string ()
   "Return a compact Flymake status string for the mode line."
@@ -173,7 +177,7 @@ When SOURCES is nil, refresh every visible diagnostics buffer."
    (buffer-list)))
 
 (defun +diagnostics--schedule-refresh-open-buffers (&rest _)
-  "Coalesce diagnostics buffer refreshes after Flymake saves."
+  "Coalesce refreshes of the panels showing the current buffer."
   (let ((source (current-buffer)))
     (when (+diagnostics--open-buffer-p source)
       (add-to-list '+diagnostics--pending-refresh-sources source)
@@ -188,13 +192,11 @@ When SOURCES is nil, refresh every visible diagnostics buffer."
                    (+diagnostics--refresh-open-buffers sources)))))))))
 
 (define-minor-mode +diagnostics-auto-refresh-mode
-  "Auto-refresh diagnostics buffers after Flymake saves."
+  "Auto-refresh diagnostics buffers when Flymake publishes diagnostics."
   :init-value t
   :global t
   :lighter nil
-  (if +diagnostics-auto-refresh-mode
-      (add-hook 'flymake-after-save-hook #'+diagnostics--schedule-refresh-open-buffers)
-    (remove-hook 'flymake-after-save-hook #'+diagnostics--schedule-refresh-open-buffers)
+  (unless +diagnostics-auto-refresh-mode
     (when (timerp +diagnostics--refresh-timer)
       (cancel-timer +diagnostics--refresh-timer)
       (setq +diagnostics--refresh-timer nil))
