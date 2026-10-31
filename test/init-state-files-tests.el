@@ -450,4 +450,22 @@
       (forward-line 1)
       (should-not (+dired--directory-line-p)))))
 
+(ert-deftest shell-sentinel-closes-the-shell-window-not-the-selected-one ()
+  "A shell that ends while another window is selected closes its own window."
+  (let* ((selected (selected-window))
+         (other (split-window selected))
+         (shell (generate-new-buffer " *shell-sentinel*"))
+         (process (start-process "shell-sentinel" shell "true")))
+    (unwind-protect
+        (progn
+          (set-window-buffer other shell)
+          (set-process-sentinel process #'ignore)
+          (while (process-live-p process) (accept-process-output process 0.05))
+          (shell-self-destroy-sentinel process "finished\n")
+          (should (window-live-p selected))
+          (should-not (window-live-p other))
+          (should-not (buffer-live-p shell)))
+      (when (window-live-p other) (delete-window other))
+      (when (buffer-live-p shell) (kill-buffer shell)))))
+
 ;;; init-state-files-tests.el ends here

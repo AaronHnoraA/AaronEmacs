@@ -243,12 +243,15 @@ numbered sessions."
    (current-buffer)))
 
 (defun shell-self-destroy-sentinel (proc _exit-msg)
-  "Make PROC self destroyable."
-  (when (memq (process-status proc) '(exit signal stop))
+  "Kill PROC's buffer and close the window showing it once PROC has ended.
+A sentinel runs at any time, so the selected window may be another one."
+  (when (memq (process-status proc) '(exit signal))
     (when-let* ((buffer (process-buffer proc))
                 ((buffer-live-p buffer)))
-      (kill-buffer buffer))
-    (ignore-errors (delete-window))))
+      (let ((window (get-buffer-window buffer t)))
+        (kill-buffer buffer)
+        (when (window-live-p window)
+          (ignore-errors (delete-window window)))))))
 
 (defun shell-delete-window (&optional win)
   "Delete WIN wrapper."
