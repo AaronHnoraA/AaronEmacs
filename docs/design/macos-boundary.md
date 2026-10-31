@@ -52,7 +52,7 @@
 | 其他 minibuffer | 在光标处插入转义路径 | 边界 |
 | Eshell、shell、term、Portal 终端 | 在提示符处插入转义路径，不执行 | `set-file-drop-handler!` |
 | Org | 原生询问：附件、链接或打开 | buffer 局部的 `dnd-protocol-alist` |
-| 普通 buffer、Dired | 打开：文件走打开路由，文件夹进 Dired | 边界 |
+| 普通 buffer、Dired | 在 Emacs 里打开，文件夹进 Dired | 边界 |
 | 侧边窗口、专用窗口 | 同上，但在主窗口打开 | 边界 |
 
 **动作**默认不询问。下列情况弹出单键菜单：按住 Option 拖入；落点在其他机器上；
@@ -92,8 +92,8 @@ aaron-notify ──→ 历史（总是）
 ### 窗口抓手
 
 指针一靠近顶层 frame 的顶边（内外两侧都算），frame 上方立刻弹出一个抓手，没有延迟
-也没有动画，拖它移动窗口。拖动优先交给窗口服务器，不经过 Emacs 主线程；窗口没跟上
-时才由抓手自己移动，`macos-window-last-drag` 报告上次走的是哪条路。抓手是独立的子窗口，不占 frame 内容。frame 上方没有空间时，抓手浮在顶边之上，同样不挤压内容。
+也没有动画，拖它移动窗口。拖动交给窗口服务器，不经过 Emacs 主线程；只有它拒绝时
+抓手才会收到拖动事件并跟随，`macos-window-last-drag` 报告上次走的是哪条路。抓手是独立的子窗口，不占 frame 内容。frame 上方没有空间时，抓手浮在顶边之上，同样不挤压内容。
 
 ## 契约
 
@@ -116,8 +116,9 @@ aaron-notify ──→ 历史（总是）
   影响；需要文件时只接受本机可直接访问的路径，其他 target 上的文件被拒绝。
 - **C8 不依赖额外安装。** 回退路径只用系统自带工具：通知走 `osascript`，不依赖
   `terminal-notifier`。`notify-send` 保持可用。
-- **C9 拖放默认是打开。** 普通 buffer 和 Dired 打开文件，文件夹进 Dired；绝不静默
-  复制或移动文件。侧边窗口和专用窗口保留原内容。
+- **C9 拖放默认是打开。** 普通 buffer 和 Dired 在 Emacs 里打开文件，文件夹进 Dired；
+  拖进 Emacs 就是选择了 Emacs，所以不看 `aaron-open-routes`（PDF 的系统默认只管链接
+  和命令）。绝不静默复制或移动文件。侧边窗口和专用窗口保留原内容。
 - **C10 询问只列可行动作。** 何时询问和列出什么见“拖放状态机”。复制、移动、符号链接
   只走 `+macos-drop-receive-function`。
 - **C11 minibuffer 优先。** 正在读 minibuffer 时拖入的内容都交给它，不打开文件，

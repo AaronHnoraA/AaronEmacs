@@ -33,6 +33,8 @@ static NSWindow *grip_window = nil;
 static id grip_local_monitor = nil;
 static id grip_global_monitor = nil;
 static const char *grip_last_drag = "none";
+static NSPoint grip_press;
+static NSPoint grip_origin;
 
 static BOOL
 top_level_emacs_window (NSWindow *window)
@@ -42,10 +44,8 @@ top_level_emacs_window (NSWindow *window)
 }
 
 /* Hand the drag to the window server, which moves the frame without Emacs's
-   main thread.  It may refuse a press that began in another window, so while
-   the button is down the frame is watched: one that stays behind the pointer
-   is moved from here.  The wait is bounded and the loop ends with the button,
-   so this cannot hold the main thread.  */
+   main thread and sends the grip nothing.  Should it refuse a press that began
+   in another window, the grip gets the drag events and follows them.  */
 @interface AaronFrameGrip : NSView
 @end
 
@@ -78,52 +78,27 @@ top_level_emacs_window (NSWindow *window)
   NSWindow *window = grip_window;
   if (!window)
     return;
-  NSPoint start = NSEvent.mouseLocation;
-  NSPoint origin = window.frame.origin;
-  NSEvent *press
-    = [NSEvent mouseEventWithType:event.type
-                         location:[window convertPointFromScreen:start]
-                    modifierFlags:event.modifierFlags
-                        timestamp:event.timestamp
-                     windowNumber:window.windowNumber
-                          context:nil
-                      eventNumber:event.eventNumber
-                       clickCount:event.clickCount
-                         pressure:event.pressure];
-  [window performWindowDragWithEvent:press];
-  grip_last_drag = "none";
+  grip_press = NSEvent.mouseLocation;
+  grip_origin = window.frame.origin;
+  grip_last_drag = "window-server";
+  [window performWindowDragWithEvent:
+            [NSEvent mouseEventWithType:event.type
+                               location:[window convertPointFromScreen:grip_press]
+                          modifierFlags:event.modifierFlags
+                              timestamp:event.timestamp
+                           windowNumber:window.windowNumber
+                                context:nil
+                            eventNumber:event.eventNumber
+                             clickCount:event.clickCount
+                               pressure:event.pressure]];
+}
 
-  BOOL manual = NO;
-  NSTimeInterval moved_at = 0;
-  while (NSEvent.pressedMouseButtons & 1)
-    {
-      [NSApp nextEventMatchingMask:(NSEventMaskLeftMouseDragged
-                                    | NSEventMaskLeftMouseUp)
-                         untilDate:[NSDate dateWithTimeIntervalSinceNow:0.016]
-                            inMode:NSEventTrackingRunLoopMode
-                           dequeue:YES];
-      NSPoint now = NSEvent.mouseLocation;
-      CGFloat dx = now.x - start.x, dy = now.y - start.y;
-      if (!manual)
-        {
-          NSPoint at = window.frame.origin;
-          if (at.x != origin.x || at.y != origin.y)
-            {
-              grip_last_drag = "window-server";
-              break;
-            }
-          if (dx == 0 && dy == 0)
-            continue;
-          NSTimeInterval time = NSDate.timeIntervalSinceReferenceDate;
-          if (moved_at == 0)
-            moved_at = time;
-          if (time - moved_at < 0.05)
-            continue;
-          manual = YES;
-          grip_last_drag = "manual";
-        }
-      [window setFrameOrigin:NSMakePoint (origin.x + dx, origin.y + dy)];
-    }
+- (void)mouseDragged:(NSEvent *)event
+{
+  NSPoint now = NSEvent.mouseLocation;
+  grip_last_drag = "manual";
+  [grip_window setFrameOrigin:NSMakePoint (grip_origin.x + now.x - grip_press.x,
+                                           grip_origin.y + now.y - grip_press.y)];
 }
 @end
 

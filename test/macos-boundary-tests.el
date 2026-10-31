@@ -90,9 +90,9 @@
         opened)
     (unwind-protect
         (macos-boundary-test--with-buffer fundamental-mode
-          (cl-letf (((symbol-function 'aaron/open-file)
-                     (lambda (name &rest _)
-                       (setq opened (list name default-directory))))
+          (cl-letf (((symbol-function 'aaron-open-file-with-backend)
+                     (lambda (name backend)
+                       (setq opened (list name backend default-directory))))
                     ((symbol-function 'read-multiple-choice)
                      (lambda (&rest _) (error "Asked")))
                     ((symbol-function 'remote-client-file-name) #'identity))
@@ -100,7 +100,8 @@
             (let ((+macos-file-drop-ask 'never))
               (dnd-handle-multiple-urls
                (selected-window) (list (concat "file:" file)) 'private)))
-          (should (equal opened (list file temporary-file-directory))))
+          ;; The pdf route says `system'; a drop on Emacs means Emacs.
+          (should (equal opened (list file 'emacs temporary-file-directory))))
       (delete-file file))))
 
 (ert-deftest macos-boundary-c9-folder-opens-in-dired ()

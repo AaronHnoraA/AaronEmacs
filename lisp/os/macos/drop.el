@@ -139,14 +139,15 @@ A side window or a dedicated one keeps what it shows."
       (select-window (get-mru-window nil nil t)))))
 
 (defun +macos--drop-open (files)
-  "Open FILES, a folder in Dired and a file through the open routes.
-They are paths of this machine, whatever the buffer dropped on is showing."
+  "Open FILES in Emacs, a folder in Dired.
+Dropping on Emacs chooses Emacs, so the open routes do not apply.  These are
+paths of this machine, whatever the buffer dropped on is showing."
   (+macos--drop-open-window)
   (let ((default-directory temporary-file-directory))
     (dolist (file files)
       (if (file-directory-p file)
           (dired file)
-        (aaron/open-file file)))))
+        (aaron-open-file-with-backend file 'emacs)))))
 
 (defun +macos--drop-receive (files method)
   "Hand FILES to the file manager to put here by METHOD."
