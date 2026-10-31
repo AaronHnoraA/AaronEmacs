@@ -916,4 +916,17 @@
       (dolist (buffer (list shown buried proc-buffer))
         (when (buffer-live-p buffer) (kill-buffer buffer))))))
 
+;; The global `window-buffer-change-functions' value receives a frame.
+(ert-deftest +portal-stale-owner-cleared-from-the-frame-hook-argument ()
+  (let* ((frame (selected-frame))
+         (old-owner (frame-parameter frame '+portal/terminal))
+         (hidden (generate-new-buffer " *hidden-owner*")))
+    (unwind-protect
+        (progn
+          (set-frame-parameter frame '+portal/terminal hidden)
+          (+portal-clear-stale-frame-owner-h frame)
+          (should-not (frame-parameter frame '+portal/terminal)))
+      (set-frame-parameter frame '+portal/terminal old-owner)
+      (kill-buffer hidden))))
+
 ;;; init-windows-tests.el ends here

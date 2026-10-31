@@ -677,11 +677,11 @@ is omitted from the choices."
           (when (fboundp 'portal-view-sync)
             (run-at-time 0 nil #'portal-view-sync)))))))
 
-(defun +portal-clear-stale-frame-owner-h (window &rest _)
-  "Clear a floating terminal owner when its FRAME no longer displays it."
-  (when (window-live-p window)
-    (let* ((frame (window-frame window))
-           (owner (frame-parameter frame '+portal/terminal)))
+(defun +portal-clear-stale-frame-owner-h (frame &rest _)
+  "Clear a floating terminal owner when FRAME no longer displays it.
+FRAME is what the global `window-buffer-change-functions' passes."
+  (when (frame-live-p frame)
+    (let ((owner (frame-parameter frame '+portal/terminal)))
       (when (and owner
                  (not (and (buffer-live-p owner)
                            (get-buffer-window owner frame))))
@@ -690,8 +690,7 @@ is omitted from the choices."
 (add-hook 'window-buffer-change-functions
           #'+portal-clear-stale-frame-owner-h)
 
-(dolist (frame (frame-list))
-  (+portal-clear-stale-frame-owner-h (frame-selected-window frame)))
+(mapc #'+portal-clear-stale-frame-owner-h (frame-list))
 
 ;; Portal already hides a native view when its frame is deleted.  Removing
 ;; this older hook also fixes a running Emacs after reloading the config:

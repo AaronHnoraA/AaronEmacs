@@ -277,7 +277,7 @@ An explicitly disconnected target must never be reopened by either path."
   (add-hook 'noema-agent-acp-turn-complete-functions
             #'+auto-revert-agent-turn-complete-h)
 
-  (defun +auto-revert-check-shown-round-trip-file-h (window)
+  (defun +auto-revert--check-shown-round-trip-file (window)
     "Check a costly file once when WINDOW displays it.
 This covers a remote buffer older than the recent-buffer limit without
 stat-ing every hidden remote file after each agent turn."
@@ -309,6 +309,14 @@ stat-ing every hidden remote file after each agent turn."
                                              (buffer-name buffer)
                                              (error-message-string err))
                                      :warning))))))))))))))
+
+  (defun +auto-revert-check-shown-round-trip-file-h (frame)
+    "Check costly files newly shown on FRAME.
+The global value of `window-buffer-change-functions' receives the frame; only
+a buffer-local entry is passed a window."
+    (dolist (window (window-list frame 'no-minibuf))
+      (unless (eq (window-old-buffer window) (window-buffer window))
+        (+auto-revert--check-shown-round-trip-file window))))
 
   (add-hook 'window-buffer-change-functions
             #'+auto-revert-check-shown-round-trip-file-h)

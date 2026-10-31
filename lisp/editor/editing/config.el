@@ -70,9 +70,9 @@
 (defun +last-change--record-h (&rest _ignored)
   "Record point after a visible text edit."
   (when (+last-change--eligible-buffer-p)
-    (when (markerp +last-change-marker)
-      (set-marker +last-change-marker nil))
-    (setq +last-change-marker (copy-marker (point) t))))
+    (if (markerp +last-change-marker)
+        (set-marker +last-change-marker (point) (current-buffer))
+      (setq +last-change-marker (copy-marker (point) t)))))
 
 (defun +last-change-clear ()
   "Release the recorded last-change marker."

@@ -208,6 +208,7 @@
    (debug-on-quit) (eval-expression-debug-on-error . t)
    (garbage-collection-messages) (aaron-warning-popup-minimum-level . :error)
    (aaron-warning-suppress-elpa-noise . t) (+gcmh-high-cons-threshold . 134217728)
+   (+gcmh-low-cons-threshold . 33554432)
    (+gcmh-auto-idle-delay-factor . 20) (+gcmh-idle-delay . auto)
    (magent-session-directory . "/Users/hc/.emacs.d/var/noema/magent/sessions/")
    (magent-request-timeout . 180)

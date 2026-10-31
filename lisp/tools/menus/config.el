@@ -169,6 +169,13 @@
   :type 'integer
   :group 'performance)
 
+(config-defvar +gcmh-low-cons-threshold nil
+  "GC threshold gcmh leaves in place after an idle collection.
+gcmh's own 800 KB makes process output and timers collect the whole heap, about
+70 ms here, every 40 seconds of an otherwise idle Emacs."
+  :type 'integer
+  :group 'performance)
+
 (use-package gcmh
   :ensure t
   :hook (aaron-first-buffer . gcmh-mode)
@@ -180,7 +187,9 @@
   (when +gcmh-auto-idle-delay-factor
     (setq gcmh-auto-idle-delay-factor +gcmh-auto-idle-delay-factor))
   (when +gcmh-high-cons-threshold
-    (setq gcmh-high-cons-threshold +gcmh-high-cons-threshold)))
+    (setq gcmh-high-cons-threshold +gcmh-high-cons-threshold))
+  (when +gcmh-low-cons-threshold
+    (setq gcmh-low-cons-threshold +gcmh-low-cons-threshold)))
 
 ;; Write documentation comment in an easy way
 (use-package separedit
