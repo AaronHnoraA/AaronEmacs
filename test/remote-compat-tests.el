@@ -2197,6 +2197,7 @@ server answers from `remote-tramp-rpc-metadata-test--server'."
   "An explicit TRAMP cleanup closes the framework target, not reconnects it."
   (let ((remote-connection-pool (make-hash-table :test #'equal))
         (remote-workspaces (make-hash-table :test #'equal))
+        (remote-links (make-hash-table :test #'equal))
         (remote-backend-tramp-explicit-cleanup nil)
         disconnected cleaned)
     (dolist (session (list (remote-compat-test--open-session

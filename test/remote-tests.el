@@ -571,6 +571,7 @@ refused build on every remote operation."
            (remote--buffer-base-process-environment
             '("HOME=/Users/client" "PATH=/client/bin"))
            (remote--buffer-base-exec-path '("/client/bin"))
+           (remote-client-ssh-program nil)
            (process-environment
             '("HOME=/home/target" "PATH=/home/target/bin"))
            (exec-path '("/home/target/bin"))
@@ -1959,7 +1960,8 @@ returns, so this covers a different ownership window from backend cancellation."
 
 (ert-deftest remote-local-visit-keeps-logical-buffer-identity ()
   (remote-test-with-registry
-    (let* ((native (make-temp-file "remote-visit-" nil ".txt" "hello"))
+    (let* ((native (file-truename
+                    (make-temp-file "remote-visit-" nil ".txt" "hello")))
            (logical (remote-canonicalize-file-name native))
            buffer)
       (unwind-protect
@@ -1978,7 +1980,7 @@ returns, so this covers a different ownership window from backend cancellation."
         (when (file-exists-p native) (delete-file native))))))
 
 (ert-deftest remote-ordinary-local-visit-keeps-native-buffer-identity ()
-  (let ((file (make-temp-file "remote-native-visit-" nil ".el"))
+  (let ((file (file-truename (make-temp-file "remote-native-visit-" nil ".el")))
         buffer)
     (unwind-protect
         (progn
@@ -2944,6 +2946,8 @@ names in tree consumers such as Treemacs."
                        (and (eq candidate process)
                             (equal property "locked")))))
             (should (direnv--transport-busy-p))))
+      ;; tramp-rpc's `process-status' advice would read this mock vector.
+      (process-put process 'tramp-vector nil)
       (when (process-live-p process)
         (delete-process process)))))
 

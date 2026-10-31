@@ -1590,6 +1590,22 @@ RETRY-SAFE controls route failover independently of capability."
   (remote-fs--register-operation-group
    '(file-group-gid file-user-uid)
    'metadata nil 'pass t)
+  ;; tramp-rpc adds these to TRAMP's operation list, so they reach this handler
+  ;; for any `/fs:' name.  The VC ones run a command on the target and act on
+  ;; its process; what a backend call changes depends on the call.
+  (remote-register-file-operation
+   'move-file-to-trash :capability 'file-write :mutating t
+   :path-arguments '(0) :retry-safe nil)
+  (remote-fs--register-operation-group
+   '(projectile-dir-files projectile-project-files)
+   'metadata '(0) 'pass t)
+  (remote-register-file-operation
+   'vc-call-backend :capability 'process-sync :mutating t
+   :path-arguments 'all :retry-safe nil :filesystem-effects 'unknown)
+  (dolist (operation '(vc-dir-refresh vc-exec-after))
+    (remote-register-file-operation
+     operation :capability 'process-async :mutating t :path-arguments nil
+     :placement 'default-directory :retry-safe nil))
   ;; Operations implemented lexically or from buffer state are still
   ;; registered so Doctor and extension code can inspect a complete contract.
   (remote-fs--register-operation-group

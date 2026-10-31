@@ -38,7 +38,7 @@
   "Tasks use the target cwd/env, parse errors, and stop on workspace close."
   (remote-config-load)
   (remote-fs-install)
-  (let* ((native (make-temp-file "emacs-remote-task-" t))
+  (let* ((native (file-truename (make-temp-file "emacs-remote-task-" t)))
          (logical (file-name-as-directory
                    (remote-make-file-name "local" native)))
          (default-directory logical)
