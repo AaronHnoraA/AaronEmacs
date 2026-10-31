@@ -108,11 +108,6 @@ FILE, or from the current `buffer-file-name'."
           (concat (file-name-sans-extension source) ".lean")))
     (expand-file-name lean-relative (+note-code--root))))
 
-(define-obsolete-function-alias
-  '+note-code-lean-mirror-path
-  #'+note-code-lean-path-for-note
-  "2026-07-05")
-
 (defun +note-code-lean-path (selector)
   "Resolve Lean SELECTOR to an absolute path under the note root.
 SELECTOR is a path relative to the note root, e.g. \"math/foo.lean\"."

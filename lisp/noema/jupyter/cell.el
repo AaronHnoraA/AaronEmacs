@@ -479,15 +479,18 @@ Editor/LSP command remains an escape hatch for mixed-language notebooks."
     (when script-file
       (dolist (buffer (buffer-list))
         (with-current-buffer buffer
-          (when (and buffer-file-name
-                     (+noema-jupyter-cell--same-script-p
-                      buffer-file-name script-file))
-            (cond
-             ((bound-and-true-p +noema-jupyter-cell-mode)
-              (+noema-jupyter-cell--apply-session-snapshot snapshot))
-             ((and (derived-mode-p 'noema-research-mode)
-                   (fboundp 'noema-research-accept-jupyter-runtime))
-              (noema-research-accept-jupyter-runtime snapshot)))))))))
+          ;; Only then compare names: an identity costs a truename, this runs
+          ;; on every kernel status change, and most buffers are not notebooks.
+          (let ((notebook (bound-and-true-p +noema-jupyter-cell-mode))
+                (research (and (derived-mode-p 'noema-research-mode)
+                               (fboundp 'noema-research-accept-jupyter-runtime))))
+            (when (and (or notebook research)
+                       buffer-file-name
+                       (+noema-jupyter-cell--same-script-p
+                        buffer-file-name script-file))
+              (if notebook
+                  (+noema-jupyter-cell--apply-session-snapshot snapshot)
+                (noema-research-accept-jupyter-runtime snapshot)))))))))
 
 (defun +noema-jupyter/cell-refresh-status ()
   "Refresh kernel/session state from Noema without creating a kernel."

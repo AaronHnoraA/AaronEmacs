@@ -11,13 +11,6 @@
 (require 'noema/jupyter/project)
 (require 'tools/lsp/runtime)
 
-;; A live Emacs may reload this module after the old kernel-owned provider was
-;; installed.  Retire it without affecting unrelated runtime providers.
-(setq +language-server-runtime-providers
-      (seq-remove (lambda (provider)
-                    (eq (plist-get provider :name) 'noema-jupyter))
-                  +language-server-runtime-providers))
-
 (defun +noema-jupyter-cell--lsp-capf-priority-h ()
   "Keep live-kernel completion ahead of static LSP completion."
   (when (bound-and-true-p +noema-jupyter-cell-mode)
@@ -36,8 +29,6 @@
     (force-mode-line-update t)))
 
 (with-eval-after-load 'lsp-mode
-  (advice-remove 'lsp--uri-to-path
-                 #'+noema-jupyter-cell--lsp-source-path)
   (add-hook 'lsp-managed-mode-hook #'+noema-jupyter-cell--lsp-ui-h))
 
 (with-eval-after-load 'lsp-completion

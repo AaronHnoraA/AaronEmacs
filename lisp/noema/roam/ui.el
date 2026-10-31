@@ -81,19 +81,12 @@
 
 ;;; --- function aliases ---
 
-(defalias '+noema-roam-ui-apply-faces       #'aaron-ui-board-apply-faces)
 (defalias '+noema-roam-ui-icon              #'aaron-ui-board-icon)
-(defalias '+noema-roam-ui--header-line      #'aaron-ui-board--header-line)
 (defalias '+noema-roam-ui-set-header        #'aaron-ui-board-set-header)
 (defalias '+noema-roam/ui-refresh           #'aaron-ui-board-refresh)
 (defalias '+noema-roam/ui-activate          #'aaron-ui-board-activate)
-(defalias '+noema-roam/ui-mouse-activate    #'aaron-ui-board-mouse-activate)
-(defalias '+noema-roam/ui-next-button       #'aaron-ui-board-next-button)
-(defalias '+noema-roam/ui-previous-button   #'aaron-ui-board-previous-button)
 (defalias '+noema-roam-ui--tone-face        #'aaron-ui-board--tone-face)
 (defalias '+noema-roam-ui-insert-badge      #'aaron-ui-board-insert-badge)
-(defalias '+noema-roam-ui-insert-action     #'aaron-ui-board-insert-action)
-(defalias '+noema-roam-ui-insert-actions    #'aaron-ui-board-insert-actions)
 (defalias '+noema-roam-ui-insert-page-header #'aaron-ui-board-insert-page-header)
 (defalias '+noema-roam-ui-insert-section    #'aaron-ui-board-insert-section)
 (defalias '+noema-roam-ui-insert-empty      #'aaron-ui-board-insert-empty)
@@ -114,7 +107,6 @@
       (setq args (plist-put args :title-face
                             '+noema-roam-ui-row-title)))
     (apply #'aaron-ui-board-insert-row args)))
-(defalias '+noema-roam-ui--goto-item-id     #'aaron-ui-board--goto-item-id)
 (defalias '+noema-roam-ui-goto-first-item   #'aaron-ui-board-goto-first-item)
 (defalias '+noema-roam-ui-render            #'aaron-ui-board-render)
 

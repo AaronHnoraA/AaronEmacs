@@ -140,7 +140,11 @@ string or nil after the asynchronous conversion and write have finished."
 (defun +noema-jupyter-diff--json (value)
   "Return stable pretty JSON for VALUE."
   (with-temp-buffer
-    (insert (json-serialize (+noema-jupyter-diff--canonical value) :null-object nil :false-object :json-false))
+    ;; `json-serialize' returns UTF-8 bytes, not characters.
+    (insert (decode-coding-string
+             (json-serialize (+noema-jupyter-diff--canonical value)
+                             :null-object nil :false-object :json-false)
+             'utf-8))
     (json-pretty-print-buffer)
     (buffer-string)))
 

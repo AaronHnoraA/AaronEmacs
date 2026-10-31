@@ -66,6 +66,16 @@
                     "rik_ssh_aaron_pc_remote_python313pytorch")
                    "python"))))
 
+(ert-deftest +noema-jupyter-notebook-infers-language-from-kernel-name ()
+  "A kernelspec that declares no language is read from its name."
+  (dolist (entry '(("bash" . "bash") ("zsh" . "bash") ("my-shell" . "bash")
+                   ("javascript" . "javascript") ("nodejs" . "javascript")
+                   ("typescript" . "typescript") ("julia-1.11" . "julia")
+                   ("ir" . "r") ("sagemath" . "python") ("python3" . "python")
+                   ("lean4" . "lean4") ("unknown" . "python")))
+    (should (equal (+noema-jupyter-notebook--language-for-kernel (car entry))
+                   (cdr entry)))))
+
 (ert-deftest +noema-jupyter-notebook-visits-source-and-preserves-results ()
   (let ((file (make-temp-file "noema-ipynb-" nil ".ipynb"))
         buffer)

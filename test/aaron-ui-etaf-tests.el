@@ -176,7 +176,7 @@
           :title aaron-ui-docs--panel-title
           :green-left #'ignore :green-right #'ignore)))
     (let ((bar (aaron-ui-float--header)))
-      (should-not (string-match-p "上一页\|下一页" bar))
+      (should-not (string-match-p "上一页\\|下一页" bar))
       (let ((start 0) positions)
         (while (string-match "●" bar start)
           (push (match-beginning 0) positions)

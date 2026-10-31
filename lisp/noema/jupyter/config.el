@@ -4,8 +4,9 @@
 ;;
 ;; The Jupyter bridge for ordinary `.ipynb' notebooks and Markdown `@@cell'
 ;; sidecars: kernelspec discovery and the five-channel connection (`runtime'),
-;; remote Jupyter servers (`server'), the `.cell/' script mode (`cell'),
-;; kernel-following lsp-mode (`lsp'), project context, debugging and files.
+;; remote Jupyter servers (`server'), the notebook source projection
+;; (`notebook', `cell'), lsp-mode's place in it (`lsp'), project context,
+;; debugging and files.
 ;; See docs/design/jupyter-workflow.md.  The parts load in this order.
 
 ;;; Code:
