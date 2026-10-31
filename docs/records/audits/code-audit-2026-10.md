@@ -113,8 +113,10 @@
 
 - 起点已有、仍在：`init-activity`（2）、`init-diagnostics-entry`（1）、`init-neo-common`（1）、`init-performance`（1）、`lean-infoview`（5），以及跑不起来的 `lean-tests`、`portal-focus-gui-tests`（后者要 GUI）。
 - 起点已有、已修：全部 `remote-*`、`init-noema`。
-- 新出现、不是本次改动：`noema-agent-worker-keeps-one-hidden-named-buffer-per-session`。另一会话在 `acp.el` 工作树里把 agent buffer 名去掉了前导空格，测试尚未跟上。
+- 新出现、不是本次改动：`noema-agent-worker-keeps-one-hidden-named-buffer-per-session`。另一会话在 `acp.el` 工作树里把 agent buffer 名去掉了前导空格，已在工作树同步改测试预期（随那边的 `acp.el` 一起提交），204 个全过。
 - 并行时偶发：`init-frame-buffers` 失败 1 次，单独连跑 4 次全过，未查明原因。
+
+启动状态：在两个干净 worktree 里对比 `3ab3d425` 和 `272d4fe4`，388 行差异。大部分是 worktree 路径不同的噪音；其余是 `f900bd58` 迁入的 agent 设置与 `C-c A` 键位，以及本次预期内的改动（Compile Board 恢复公共按键、`+gcmh-low-cons-threshold`、删除 `+tramp-lsp-pipe-mode-servers` 和退役 savehist 钩子、不再加载 `lisp-mnt`）。
 
 ## 量过之后决定不改
 
@@ -122,6 +124,8 @@
 - `font-family-list` 单次约 0.1 ms，不需要缓存。
 
 ## 流程教训
+
+- 这次 worktree 对比才发现 `fa205786` 手工拼的 blob 多一个 `)`，`main` 的干净 checkout 从那时起加载 `checkers/diagnostics` 失败，而工作树是对的，测试全跑在工作树上看不出来。部分提交必须在干净 checkout 上验证。已由 `272d4fe4` 修复。
 
 - `var/state-check/` 是共享目录。并发会话跑 `make state-baseline` 或 `make test-baseline` 会静默覆盖基线。本次用单独的 worktree 和自己的目录重建了比较。
 - 配置自己的 `display-warning` advice 会吞掉字节编译警告，批量编译得到空结果不代表没有问题。
