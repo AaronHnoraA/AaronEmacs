@@ -592,8 +592,8 @@ buffer is only taken out of view, as with `+windows/close-view'."
       (unless (or (eq buf current)
                   (string-prefix-p " " (buffer-name buf))
                   (get-buffer-process buf))
-        (kill-buffer buf)
-        (cl-incf killed)))
+        (when (kill-buffer buf)
+          (cl-incf killed))))
     (message "Killed %d buffer(s)" killed)))
 
 (defun +windows/kill-buried-buffers ()
@@ -624,8 +624,8 @@ modified file buffer still asks before it goes."
         (dolist (buf bufs)
           (unless (or (eq buf current)
                       (get-buffer-process buf))
-            (kill-buffer buf)
-            (cl-incf killed)))
+            (when (kill-buffer buf)
+              (cl-incf killed))))
         (message "Killed %d buffer(s) in workspace" killed))
     (+windows/kill-other-buffers)))
 
@@ -894,4 +894,4 @@ upstream call shapes delegate unchanged."
 
 
 (provide 'ui/windows/config)
-;;; core/aaron-base.el ends here
+;;; ui/windows/config.el ends here

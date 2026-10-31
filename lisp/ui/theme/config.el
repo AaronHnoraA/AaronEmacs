@@ -1093,7 +1093,6 @@ request, and only the first may render its answer."
   (interactive)
   (when (display-graphic-p)
     (set-frame-parameter nil 'internal-border-width aaron-gui-internal-border-width)
-    (setq-default mode-line-format mode-line-format)
     (setq-default tab-bar-separator "  ")
     (setopt tab-bar-auto-width t)
     (setopt tab-bar-close-button-show nil)

@@ -56,7 +56,9 @@
           (insert-file-contents file)
           (goto-char (point-min))
           (forward-comment (buffer-size))
-          (unless (eobp) (read (current-buffer))))
+          ;; A project's file: reading it must not run its `#.' forms.
+          (let ((read-eval nil))
+            (unless (eobp) (read (current-buffer)))))
       (error nil))))
 
 (defun +dir-locals--templates ()
@@ -82,20 +84,23 @@
 ;;; Merge helpers
 
 (defun +dir-locals--merge-vars (base overlay)
-  "Merge OVERLAY var alist into BASE; OVERLAY wins on duplicate keys."
+  "Merge OVERLAY var alist into BASE; OVERLAY wins on duplicate keys.
+`eval' may appear many times, so its entries accumulate."
   (let ((result (copy-tree base)))
     (dolist (entry overlay)
-      (setq result (assq-delete-all (car entry) result))
+      (unless (eq (car entry) 'eval)
+        (setq result (assq-delete-all (car entry) result)))
       (setq result (append result (list entry))))
     result))
 
 (defun +dir-locals--merge (base template)
-  "Merge TEMPLATE dir-locals alist into BASE."
+  "Merge TEMPLATE dir-locals alist into BASE.
+A key is a mode symbol, nil, or a subdirectory name, which is a string."
   (let ((result (copy-tree (or base nil))))
     (dolist (entry template)
       (let* ((mode (car entry))
              (vars (cdr entry))
-             (existing (assq mode result)))
+             (existing (assoc mode result)))
         (if existing
             (setcdr existing (+dir-locals--merge-vars (cdr existing) vars))
           (setq result (append result (list entry))))))

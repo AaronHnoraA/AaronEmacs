@@ -414,4 +414,40 @@
     (should-not (face-attribute face :box))
     (should (eq (face-attribute face :weight) 'unspecified))))
 
+(ert-deftest +dir-locals-merge-keeps-subdirectories-and-eval-forms ()
+  "Subdirectory keys are strings, and `eval' entries are not unique."
+  (require 'emacs/dir-locals/config)
+  (let ((merged (+dir-locals--merge
+                 '(("src" . ((a . 1))) (nil . ((eval . (one)) (b . 1))))
+                 '(("src" . ((a . 2))) (nil . ((eval . (two)) (b . 2)))))))
+    (should (= (length merged) 2))
+    (should (equal (cdr (assoc "src" merged)) '((a . 2))))
+    (should (equal (cdr (assq nil merged))
+                   '((eval . (one)) (eval . (two)) (b . 2))))))
+
+(ert-deftest +dir-locals-read-does-not-evaluate ()
+  "Reading a project's `.dir-locals.el' never runs its read-time forms."
+  (require 'emacs/dir-locals/config)
+  (let ((file (make-temp-file "dir-locals" nil ".el"
+                              "((nil . ((a . #.(setq +dir-locals-test-ran t)))))"))
+        (+dir-locals-test-ran nil))
+    (defvar +dir-locals-test-ran)
+    (unwind-protect
+        (progn (+dir-locals--read-file file)
+               (should-not (bound-and-true-p +dir-locals-test-ran)))
+      (delete-file file))))
+
+(ert-deftest +dired-directory-line-needs-no-stat-for-plain-rows ()
+  "The listing answers for directories and files without touching the disk."
+  (require 'emacs/dired/config)
+  (with-temp-buffer
+    (insert "  drwxr-xr-x  2 u g 4096 2026-01-01 00:00 dir\n"
+            "  -rw-r--r--  1 u g 1 2026-01-01 00:00 file\n")
+    (cl-letf (((symbol-function 'file-directory-p)
+               (lambda (&rest _) (error "Touched the disk"))))
+      (goto-char (point-min))
+      (should (+dired--directory-line-p))
+      (forward-line 1)
+      (should-not (+dired--directory-line-p)))))
+
 ;;; init-state-files-tests.el ends here

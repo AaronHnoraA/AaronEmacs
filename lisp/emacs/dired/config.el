@@ -104,6 +104,17 @@ remote shell probes or previews."
     (material-icon-set-icon-size (max 16 (frame-char-height)))
     (material-icon-dired-icons-mode 1)))
 
+(defun +dired--directory-line-p ()
+  "Return non-nil when the current Dired line lists a directory.
+The listing already says so.  Only a symbolic link has to be followed, because
+a stat per line is a round trip per line on a remote directory."
+  (save-excursion
+    (beginning-of-line)
+    (or (looking-at-p dired-re-dir)
+        (and (looking-at-p dired-re-sym)
+             (when-let* ((file (dired-get-filename nil 'noerror)))
+               (file-directory-p file))))))
+
 (defun +dired-material-icons-add-icons ()
   "Apply Material SVG icons to every visible Dired/Dirvish entry.
 Unlike the package default, directory entries named `.' and `..' receive
@@ -115,10 +126,9 @@ lines inserted later by `dirvish-subtree'."
       (while (not (eobp))
         (when (dired-move-to-filename nil)
           (when-let* ((file (dired-get-filename 'relative 'noerror)))
-            (let* ((absolute (dired-get-filename nil 'noerror))
-                   (dir-p (or (member file '("." ".."))
-                              (and absolute (file-directory-p absolute))
-                              (string-suffix-p "/" file)))
+            (let* ((dir-p (or (member file '("." ".."))
+                              (string-suffix-p "/" file)
+                              (+dired--directory-line-p)))
                    (icon-path
                     (if dir-p
                         (material-icon-get-icon-for-dir file)
