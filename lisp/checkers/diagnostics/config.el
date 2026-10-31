@@ -170,7 +170,7 @@
                     (string-lessp sa sb)
                   ;; One source: position already orders the lines.
                   (< (flymake-diagnostic-beg a)
-                     (flymake-diagnostic-beg b))))))))))
+                     (flymake-diagnostic-beg b)))))))))
 
 (defun +diagnostics--counts-string (diags)
   "Return a compact counts string for DIAGS."
