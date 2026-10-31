@@ -22,7 +22,9 @@
 (defun +fzf/fzf-at-current-dir ()
   (interactive)
   ;; 如果在项目里，就从项目根目录开始；否则从当前目录开始
-  (let ((path (or (project-root (project-current)) default-directory)))
+  (let ((path (if-let* ((project (project-current)))
+                  (project-root project)
+                default-directory)))
     (fzf path)))
 
 ;; 然后在 :bind 中使用

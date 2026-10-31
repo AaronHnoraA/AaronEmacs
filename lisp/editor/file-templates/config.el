@@ -225,7 +225,8 @@ first and then opening it."
   (let ((slug (downcase (string-trim (or value "")))))
     (setq slug (replace-regexp-in-string "[^[:alnum:]]+" "-" slug))
     (setq slug (replace-regexp-in-string "-+" "-" slug))
-    (or (string-trim slug "-+" "-+") "untitled")))
+    (setq slug (string-trim slug "-+" "-+"))
+    (if (string-empty-p slug) "untitled" slug)))
 
 (defun +auto-insert--insert-template-file (file)
   (unless (file-readable-p file)
@@ -298,10 +299,12 @@ template filename under templates/KIND/."
   "Auto-insert template for KIND when enabled.
 
 When TEMPLATE is non-nil, insert that exact template file under templates/KIND/."
-  (+template--bootstrap-remote-file-maybe)
-  (when (and (+template--auto-insert-allowed-p)
-             +template-auto-insert-enabled
-             (memq kind +template-auto-insert-enabled-kinds))
+  ;; Decided before the placeholder: creating it leaves a file on the target,
+  ;; which only a template about to fill it can justify.
+  (when (and +template-auto-insert-enabled
+             (memq kind +template-auto-insert-enabled-kinds)
+             (+template--auto-insert-allowed-p))
+    (+template--bootstrap-remote-file-maybe)
     (+template-apply kind nil template)))
 
 (defun +template/debug ()
