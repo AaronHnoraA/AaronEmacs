@@ -21,6 +21,13 @@
 (declare-function copilot--connection-alivep "copilot" ())
 (declare-function copilot--path-to-uri "copilot" (path))
 (declare-function copilot--start-server "copilot" ())
+(declare-function copilot--client-capabilities "copilot" ())
+(declare-function copilot--make-connection "copilot" ())
+(declare-function copilot--notify-settings "copilot" ())
+(declare-function copilot--path-to-uri "copilot" (path))
+(declare-function copilot--shutdown-server-at-exit "copilot" ())
+(declare-function copilot--workspace-root "copilot" ())
+(declare-function jsonrpc-async-request "jsonrpc" (connection method params &rest args))
 (declare-function copilot--overlay-visible "copilot" ())
 (declare-function copilot-current-completion "copilot" ())
 (declare-function copilot--get-overlay "copilot" ())
@@ -38,6 +45,8 @@
 (declare-function aaron/jump-forward-dwim "aaron-funcs" ())
 (declare-function aaron/backward-delimiter-or-snippet-dwim "aaron-funcs" ())
 (defvar copilot--connection nil)
+(defvar copilot--workspace-folders)
+(defvar copilot-network-proxy)
 (defvar copilot--overlay nil)
 (defvar copilot--quota nil)
 (defvar copilot--status nil)
@@ -966,6 +975,98 @@ Return a deferred reply, which settles when Copilot answers."
 
 (add-hook 'remote-buffer-disconnect-hook #'+copilot--disconnect-buffer-h)
 
+;; `copilot--start-server' waits for the server's reply to `initialize', about
+;; 800 ms of Node start, frozen.  Automatic startup does the same handshake in
+;; the background instead, and `copilot-mode' follows when it has finished.
+
+(defvar +copilot--starting nil
+  "Connection completing its handshake in the background, or nil.")
+
+(defvar +copilot--ready-buffers nil
+  "Buffers waiting for `+copilot--starting' to enable `copilot-mode'.")
+
+(defun +copilot--initialize-params ()
+  "Return the `initialize' parameters `copilot--start-server' would send."
+  (let* ((root (copilot--workspace-root))
+         (root-uri (when root (copilot--path-to-uri root)))
+         (folders
+          (when root-uri
+            (vector (list :uri root-uri
+                          :name (file-name-nondirectory
+                                 (directory-file-name root)))))))
+    (setq copilot--workspace-folders (and root-uri (list root-uri)))
+    `(:processId
+      ,(emacs-pid)
+      ,@(when root-uri `(:rootUri ,root-uri))
+      :capabilities ,(copilot--client-capabilities)
+      ,@(when folders `(:workspaceFolders ,folders))
+      :initializationOptions
+      (:editorInfo
+       (:name "Emacs" :version ,emacs-version)
+       :editorPluginInfo
+       ;; Not `package-get-version': outside compiled code it visits this file
+       ;; in `emacs-lisp-mode', whose hooks would start Copilot again.
+       (:name "copilot.el"
+        :version ,(if-let* ((description (cadr (assq 'copilot package-alist))))
+                      (package-version-join (package-desc-version description))
+                    "unknown"))
+       ,@(when copilot-network-proxy
+           `(:networkProxy ,copilot-network-proxy))))))
+
+(defun +copilot--enable-ready-buffers ()
+  "Enable `copilot-mode' in the buffers that waited for the server."
+  (let ((buffers (nreverse +copilot--ready-buffers)))
+    (setq +copilot--ready-buffers nil)
+    (dolist (buffer buffers)
+      (when (buffer-live-p buffer)
+        (with-current-buffer buffer
+          (when (and (not remote-buffer-disconnected-p)
+                     (+copilot-buffer-eligible-p))
+            (copilot-mode 1)))))))
+
+(defun +copilot--start-finished (connection failure)
+  "Finish the background start of CONNECTION; FAILURE says why it failed."
+  (when (eq connection +copilot--starting)
+    (setq +copilot--starting nil)
+    (cond
+     (failure
+      (setq +copilot--ready-buffers nil)
+      (ignore-errors (delete-process (jsonrpc--process connection)))
+      (message "Copilot server did not start: %s" failure))
+     ;; A synchronous start won the race; there is only one shared server.
+     ((copilot--connection-alivep)
+      (ignore-errors (delete-process (jsonrpc--process connection)))
+      (+copilot--enable-ready-buffers))
+     (t
+      (setq copilot--connection connection)
+      (jsonrpc-notify connection 'initialized (make-hash-table))
+      (copilot--notify-settings)
+      (add-hook 'kill-emacs-hook #'copilot--shutdown-server-at-exit)
+      (+copilot--enable-ready-buffers)))))
+
+(defun +copilot--start-in-background ()
+  "Start the shared server without waiting for its reply."
+  (unless +copilot--starting
+    (let* ((params (+copilot--initialize-params))
+           (connection (copilot--make-connection)))
+      (setq +copilot--starting connection)
+      (jsonrpc-async-request
+       connection 'initialize params
+       :success-fn (lambda (_result)
+                     (+copilot--start-finished connection nil))
+       :error-fn (lambda (failure)
+                   (+copilot--start-finished connection failure))
+       :timeout-fn (lambda ()
+                     (+copilot--start-finished connection "timed out"))
+       :timeout 30))))
+
+(defun +copilot--enable-when-ready ()
+  "Enable `copilot-mode' here, after a background start when one is needed."
+  (if (copilot--connection-alivep)
+      (copilot-mode 1)
+    (cl-pushnew (current-buffer) +copilot--ready-buffers)
+    (+copilot--start-in-background)))
+
 (defun +copilot--enable-buffer (buffer)
   "Enable Copilot in BUFFER when it is still eligible."
   (when (buffer-live-p buffer)
@@ -973,7 +1074,7 @@ Return a deferred reply, which settles when Copilot answers."
       (setq +copilot--auto-enable-timer nil)
       (when (and (not remote-buffer-disconnected-p)
                  (+copilot-available-p))
-        (copilot-mode 1)))))
+        (+copilot--enable-when-ready)))))
 
 (defun +copilot-auto-enable-h ()
   "Auto-enable `copilot-mode' in supported editing buffers.
@@ -1001,7 +1102,7 @@ Remote, configured modes, and a cold local library start after idle."
             (add-hook 'kill-buffer-hook #'+copilot--cancel-auto-enable nil t)
             (add-hook 'change-major-mode-hook #'+copilot--cancel-auto-enable nil t))
         (when (+copilot-available-p)
-          (copilot-mode 1))))))
+          (+copilot--enable-when-ready))))))
 
 (defun +copilot-completion-visible-p ()
   "Return non-nil when Copilot currently shows a completion overlay."
