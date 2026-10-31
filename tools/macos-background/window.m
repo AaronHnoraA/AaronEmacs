@@ -6,8 +6,8 @@
 
    `macos-window-install-drag-handles' routes a mouse-down on a top-level
    Emacs window's actual top border to the native window-drag operation, and
-   shows a grip above the window while the pointer rests on that border.  The
-   grip is a window of its own, so the frame's content never moves.  A window
+   shows a grip above the window as soon as the pointer comes near that border.
+   The grip is a window of its own, so the frame's content never moves.  A window
    with no room above it gets the grip over its top edge.
 
    Built by `bin/emacs-app build' into var/macos-background/.  */
@@ -22,14 +22,16 @@ void macos_system_init (emacs_env *env);
 static CGFloat drag_edge_height = 0;
 static id drag_edge_monitor = nil;
 
-enum { GRIP_WIDTH = 92, GRIP_HEIGHT = 12, GRIP_GAP = 3, GRIP_ZONE = 8 };
-static const NSTimeInterval GRIP_DELAY = 0.12;
+/* The pointer is near the top edge from GRIP_ZONE below it to GRIP_REACH above
+   it: a pointer coming from above stops short of the edge, and a fast one
+   leaves few samples.  */
+enum { GRIP_WIDTH = 92, GRIP_HEIGHT = 12, GRIP_GAP = 3, GRIP_ZONE = 10,
+       GRIP_REACH = 24 };
 
 static NSPanel *grip_panel = nil;
 static NSWindow *grip_window = nil;
 static id grip_local_monitor = nil;
 static id grip_global_monitor = nil;
-static NSUInteger grip_generation = 0;
 
 static BOOL
 top_level_emacs_window (NSWindow *window)
@@ -38,8 +40,7 @@ top_level_emacs_window (NSWindow *window)
           && [NSStringFromClass ([window class]) hasPrefix:@"Emacs"]);
 }
 
-/* The grip moves the window itself: the press belongs to the grip's own
-   window, which `performWindowDragWithEvent:' on the parent does not accept. */
+/* The press belongs to the grip's own window, so the grip moves the frame. */
 @interface AaronFrameGrip : NSView
 @end
 
@@ -130,7 +131,6 @@ grip_create (void)
 static void
 grip_hide (void)
 {
-  grip_generation++;
   if (!grip_window)
     return;
   [grip_window removeChildWindow:grip_panel];
@@ -142,30 +142,41 @@ static void
 grip_show (NSWindow *window, CGFloat pointer_x)
 {
   grip_create ();
-  NSRect frame = grip_frame (window, pointer_x);
   grip_window = window;
-  [grip_panel setFrame:NSOffsetRect (frame, 0, -GRIP_HEIGHT / 2.0) display:NO];
-  grip_panel.alphaValue = 0;
+  [grip_panel setFrame:grip_frame (window, pointer_x) display:YES];
   [window addChildWindow:grip_panel ordered:NSWindowAbove];
-  [NSAnimationContext runAnimationGroup:^(NSAnimationContext *context) {
-      context.duration = 0.12;
-      grip_panel.animator.alphaValue = 1;
-      [grip_panel.animator setFrame:frame display:YES];
-    }];
 }
 
-/* The top-level Emacs window whose top edge POINT rests on, or nil. */
+static NSRect
+grip_band (NSWindow *window)
+{
+  NSRect frame = window.frame;
+  return NSMakeRect (NSMinX (frame), NSMaxY (frame) - GRIP_ZONE,
+                     NSWidth (frame), GRIP_ZONE + GRIP_REACH);
+}
+
+/* The top-level Emacs window whose exposed top edge POINT is near, or nil.
+   A child frame on the edge is part of its window.  */
 static NSWindow *
 grip_edge_window (NSPoint point)
 {
-  NSInteger number = [NSWindow windowNumberAtPoint:point
-                       belowWindowWithWindowNumber:0];
-  NSWindow *window = [NSApp windowWithWindowNumber:number];
-  if (!top_level_emacs_window (window)
-      || (window.styleMask & NSWindowStyleMaskFullScreen)
-      || point.y < NSMaxY (window.frame) - GRIP_ZONE)
-    return nil;
-  return window;
+  for (NSWindow *window in NSApp.windows)
+    {
+      if (!top_level_emacs_window (window) || !window.visible
+          || (window.styleMask & NSWindowStyleMaskFullScreen)
+          || !NSPointInRect (point, grip_band (window)))
+        continue;
+      NSPoint edge = NSMakePoint (point.x, NSMaxY (window.frame) - 1);
+      NSWindow *above
+        = [NSApp windowWithWindowNumber:
+                   [NSWindow windowNumberAtPoint:edge
+                     belowWindowWithWindowNumber:0]];
+      while (above.parentWindow)
+        above = above.parentWindow;
+      if (above == window)
+        return window;
+    }
+  return nil;
 }
 
 static void
@@ -177,30 +188,14 @@ grip_pointer_moved (void)
   if (grip_window)
     {
       NSRect keep = NSUnionRect (NSInsetRect (grip_panel.frame, -10, -6),
-                                 NSMakeRect (NSMinX (grip_window.frame),
-                                             NSMaxY (grip_window.frame) - GRIP_ZONE,
-                                             NSWidth (grip_window.frame),
-                                             GRIP_ZONE));
+                                 grip_band (grip_window));
       if (!NSPointInRect (point, keep) || !grip_window.visible)
         grip_hide ();
       return;
     }
   NSWindow *window = grip_edge_window (point);
-  if (!window)
-    {
-      grip_generation++;
-      return;
-    }
-  /* Passing through on the way to another window shows nothing. */
-  NSUInteger generation = ++grip_generation;
-  dispatch_after (dispatch_time (DISPATCH_TIME_NOW,
-                                 (int64_t) (GRIP_DELAY * NSEC_PER_SEC)),
-                  dispatch_get_main_queue (), ^{
-      NSPoint now = NSEvent.mouseLocation;
-      if (generation == grip_generation && !grip_window
-          && grip_edge_window (now) == window)
-        grip_show (window, now.x);
-    });
+  if (window)
+    grip_show (window, point.x);
 }
 
 static void
@@ -317,7 +312,7 @@ emacs_module_init (struct emacs_runtime *runtime)
           "Hide the Dock icon when ACCESSORY is non-nil, else show it.");
   macos_define (env, "macos-window-install-drag-handles", 1, install_drag_handles,
           "Drag top-level Emacs windows from the top HEIGHT-point border.\n"
-          "Resting on that border shows a grip above the window, leaving the\n"
+          "Coming near that border shows a grip above the window, leaving the\n"
           "content and its tab line unobstructed.");
   macos_system_init (env);
   emacs_value feature = env->intern (env, "macos-window");
