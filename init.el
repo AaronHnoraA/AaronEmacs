@@ -46,6 +46,13 @@
     "TEXINPUTS" "BIBINPUTS" "BSTINPUTS")
   "Environment variables copied from the login shell into Emacs.")
 
+(defun aaron-path-prepend-tools ()
+  "Put this configuration's `tools' directory first on the search path."
+  (let ((tools (expand-file-name "tools" user-emacs-directory)))
+    (add-to-list 'exec-path tools)
+    (unless (member tools (parse-colon-path (or (getenv "PATH") "")))
+      (setenv "PATH" (concat tools path-separator (getenv "PATH"))))))
+
 (defun aaron/refresh-environment-from-shell ()
   "Refresh PATH-like environment variables from the user's login shell."
   (interactive)
@@ -75,7 +82,8 @@
           (setenv "PATH" path)
           (setq exec-path
                 (append (parse-colon-path path)
-                        (list exec-directory)))))))))
+                        (list exec-directory)))))))
+    (aaron-path-prepend-tools)))
 
 
 
@@ -97,12 +105,6 @@
 
 ;;; Commentary:
 ;;; Code:
-
-;; A big contributor to startup times is garbage collection. We up the gc
-;; threshold to temporarily prevent it from running, and then reset it by the
-;; `gcmh' package.
-(setq gc-cons-threshold most-positive-fixnum
-      gc-cons-percentage 0.6)
 
 (eval-and-compile
   (setq use-package-always-ensure nil)

@@ -251,17 +251,16 @@ When INCLUDE-BURIED is non-nil, include buffers explicitly buried here."
   (let ((order (+tab-line-get-order)))
     (if (null order)
         buffers
-      (let ((seen (make-hash-table :test #'equal))
+      (let ((by-name (make-hash-table :test #'equal))
             sorted)
-        (dolist (name order)
-          (when-let* ((buffer (seq-find
-                               (lambda (candidate)
-                                 (string= name (buffer-name candidate)))
-                               buffers)))
-            (push buffer sorted)
-            (puthash name t seen)))
         (dolist (buffer buffers)
-          (unless (gethash (buffer-name buffer) seen)
+          (puthash (buffer-name buffer) buffer by-name))
+        (dolist (name order)
+          (when-let* ((buffer (gethash name by-name)))
+            (push buffer sorted)
+            (remhash name by-name)))
+        (dolist (buffer buffers)
+          (when (gethash (buffer-name buffer) by-name)
             (push buffer sorted)))
         (nreverse sorted)))))
 
@@ -829,12 +828,24 @@ When MAX-WIDTH is non-nil, use it to shrink labels in narrow windows."
                 0))
    (t 0)))
 
+(defvar +tab-line--tab-string-memo nil
+  "Rendered tab labels by buffer while `+tab-line-fit-buffers' tries slices.")
+
+(defun +tab-line--memoized-tab-string (buffer max-width)
+  "Return BUFFER's label for MAX-WIDTH, rendering it once per fitting pass."
+  (if +tab-line--tab-string-memo
+      (or (gethash buffer +tab-line--tab-string-memo)
+          (puthash buffer (+tab-line-tab-string buffer max-width)
+                   +tab-line--tab-string-memo))
+    (+tab-line-tab-string buffer max-width)))
+
 (defun +tab-line-build-segments (buffers left right max-width)
   "Return rendered segments for BUFFERS between LEFT and RIGHT.
 LEFT and RIGHT are inclusive indexes.  MAX-WIDTH is the available
 window width used to keep labels compact."
   (let ((segments nil)
-        (last-index (1- (length buffers))))
+        (last-index (1- (length buffers)))
+        (tail (nthcdr left buffers)))
     (push (+tab-line-passive-string
            "("
            '+tab-line-separator-face)
@@ -845,9 +856,7 @@ window width used to keep labels compact."
     (dotimes (offset (1+ (- right left)))
       (when (> offset 0)
         (push (+tab-line-separator) segments))
-      (push (+tab-line-tab-string
-             (nth (+ left offset) buffers)
-             max-width)
+      (push (+tab-line--memoized-tab-string (pop tail) max-width)
             segments))
     (when (< right last-index)
       (push (+tab-line-separator) segments)
@@ -861,7 +870,8 @@ window width used to keep labels compact."
 (defun +tab-line-fit-buffers (buffers max-width)
   "Return the visible slice of BUFFERS that fits MAX-WIDTH.
 Keep the current buffer visible and expand around it while space allows."
-  (let* ((count (length buffers))
+  (let* ((+tab-line--tab-string-memo (make-hash-table :test #'eq))
+         (count (length buffers))
          (current (+tab-line-current-buffer))
          (current-index (or (cl-position current buffers :test #'eq) 0))
          (left current-index)

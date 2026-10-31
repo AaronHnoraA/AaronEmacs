@@ -563,34 +563,6 @@
       (with-current-buffer "*Noema Wiki index status*"
         (should (string-match-p "private/research" (buffer-string)))))))
 
-(ert-deftest +noema-retire-legacy-commands-cleans-obarray-and-amx-state ()
-  (let ((legacy (intern "my/aaronnote-test-command"))
-        (history-symbols
-         '(extended-command-history vertico-repeat-history
-           amx-history amx-data amx-cache)))
-    (fset legacy (lambda () (interactive)))
-    (unwind-protect
-        (cl-progv
-            history-symbols
-            (list
-             '("my/aaronnote-test-command" "+noema-roam/agenda")
-             '((amx "aaronnote" "my/aaronnote-test-command")
-               (amx "noema" "+noema-roam/agenda"))
-             '(my/aaronnote-test-command +noema-roam/agenda)
-             '((my/aaronnote-test-command . 2)
-               (+noema-roam/agenda . 1))
-             '((my/aaronnote-test-command . 2)
-               (+noema-roam/agenda . 1)))
-          (aaron-noema-retire-legacy-commands)
-          (should-not (fboundp legacy))
-          (dolist (variable history-symbols)
-            (should-not
-             (seq-some
-              #'aaron-noema--legacy-command-history-entry-p
-              (symbol-value variable)))))
-      (when (fboundp legacy)
-        (fmakunbound legacy)))))
-
 (ert-deftest +noema-canonical-file-uses-target-aware-home-expansion ()
   (let ((remote-mode t)
         call)

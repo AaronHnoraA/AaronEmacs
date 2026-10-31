@@ -244,6 +244,9 @@
           (with-current-buffer buffer
             (+rename-current-file new))
           (should (file-exists-p new))
+          (with-current-buffer buffer
+            (should (equal (buffer-name) "new.txt"))
+            (should-not (buffer-modified-p)))
           (should-not (member (abbreviate-file-name old) recentf-list))
           (should (member (abbreviate-file-name new) recentf-list)))
       (when (buffer-live-p buffer) (kill-buffer buffer))
@@ -309,5 +312,64 @@
         (when (member (buffer-file-name buffer) (list init custom-file))
           (kill-buffer buffer)))
       (delete-directory dir t))))
+
+
+;;; Startup and font bookkeeping
+
+(ert-deftest aaron-bytecode-sweep-skips-node-trees ()
+  "The startup `.elc' sweep descends Elisp trees and skips Node trees."
+  (should (aaron-bytecode-scan-directory-p "/x/site-lisp/noema/lisp"))
+  (dolist (name aaron-bytecode-scan-skipped-directories)
+    (should-not (aaron-bytecode-scan-directory-p
+                 (concat "/x/site-lisp/noema/" name)))))
+
+(ert-deftest aaron-startup-restore-keeps-configured-gc ()
+  "Restoring after init leaves GC settings the registry or gcmh have set."
+  (let ((gc-cons-threshold 1234567)
+        (gc-cons-percentage 0.3)
+        (file-name-handler-alist nil))
+    (aaron-restore-startup-runtime-settings)
+    (should (= gc-cons-threshold 1234567))
+    (should (= gc-cons-percentage 0.3)))
+  (let ((gc-cons-threshold most-positive-fixnum)
+        (gc-cons-percentage aaron-startup-gc-cons-percentage)
+        (aaron-original-gc-cons-percentage 0.1)
+        (file-name-handler-alist nil))
+    (aaron-restore-startup-runtime-settings)
+    (should (< gc-cons-threshold most-positive-fixnum))
+    (should (= gc-cons-percentage 0.1))))
+
+(ert-deftest aaron-suppressed-warnings-buffer-is-bounded ()
+  "The suppressed-warning log cannot grow for the life of the session."
+  (let ((aaron-suppressed-warnings-buffer " *suppressed-test*")
+        (aaron-suppressed-warnings-max-lines 5))
+    (unwind-protect
+        (progn
+          (dotimes (i 20)
+            (aaron-log-to-suppressed-warnings 'test (format "line %d" i) :warning))
+          (with-current-buffer aaron-suppressed-warnings-buffer
+            (should (<= (count-lines (point-min) (point-max)) 6))
+            (should (string-match-p "line 19" (buffer-string)))))
+      (when-let* ((buffer (get-buffer aaron-suppressed-warnings-buffer)))
+        (kill-buffer buffer)))))
+
+(ert-deftest aaron-font-fontset-addition-happens-once ()
+  "Re-applying fonts adds each family to one frame font's fontset once."
+  (let ((aaron-font--fontset-bindings (make-hash-table :test #'equal))
+        (calls 0))
+    (cl-letf (((symbol-function 'set-fontset-font)
+               (lambda (&rest _) (setq calls (1+ calls)))))
+      (dotimes (_ 3) (aaron-font--fontset-add 'han "Family" 'prepend))
+      (should (= calls 1))
+      (aaron-font--fontset-add 'han "Other" 'prepend)
+      (should (= calls 2)))))
+
+(ert-deftest aaron-font-rescale-replaces-its-entry ()
+  "Changing the Chinese scale replaces the string-keyed rescale entry."
+  (let ((aaron-font-cn "Family")
+        (face-font-rescale-alist nil))
+    (dolist (aaron-scale-cn '(1.0 1.1))
+      (aaron-font--apply-rescale))
+    (should (equal face-font-rescale-alist '(("Family" . 1.1))))))
 
 ;;; init-state-files-tests.el ends here

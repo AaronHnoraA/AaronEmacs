@@ -106,13 +106,14 @@ If NEWNAME is a directory, move file to it."
                     (file-truename buffer-file-name))
          (user-error "Can't rename file to itself"))
        (list name))))
-  ;; NEWNAME is a directory
-  (when (equal newname (file-name-as-directory newname))
-    (setq newname (concat newname (file-name-nondirectory buffer-file-name))))
+  (when (file-directory-p newname)
+    (setq newname (expand-file-name (file-name-nondirectory buffer-file-name)
+                                    newname)))
   (let ((oldname buffer-file-name))
     (rename-file oldname newname)
-    (set-visited-file-name newname)
-    (rename-buffer newname)
+    ;; NO-QUERY and ALONG-WITH-FILE: the text already sits in NEWNAME, so the
+    ;; buffer stays unmodified, and the buffer takes its name from the file.
+    (set-visited-file-name newname t t)
     (+files--update-references oldname buffer-file-name)))
 
 (defvar recentf-list)

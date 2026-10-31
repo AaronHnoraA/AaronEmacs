@@ -3,10 +3,7 @@
 ;;; Commentary:
 ;;
 
-(add-to-list 'exec-path (expand-file-name "tools" user-emacs-directory))
-(setenv "PATH"
-        (concat (expand-file-name "tools" user-emacs-directory)
-                ":" (getenv "PATH")))
+(aaron-path-prepend-tools)
 ;;; Code:
 
 (require 'cl-lib)
@@ -133,9 +130,6 @@ the hash to keep the visited file recognizable."
                    make-backup-file-name-1)
   (aaron-state-file-name-fit name))
 
-;; Always load the newest file
-(setq load-prefer-newer t)
-
 ;; Trusted files use all file/dir-local variables.  Other files use Emacs'
 ;; confirmation prompt, whose + and ! choices persist directory or value trust.
 (setq enable-local-variables t
@@ -214,9 +208,6 @@ Org, help, terminals and side buffers avoid the redisplay cost by default.")
   :group 'display :type 'sexp
   :doc "Max buffer size for automatic line numbers (nil = no limit).")
 
-;; 可选：关闭次刻度（避免干扰）
-(setq display-line-numbers-minor-tick 0)
-
 ;; ========= 行号显示策略 =========
 (require 'display-line-numbers)
 (setq display-line-numbers-minor-tick 0)
@@ -259,7 +250,6 @@ as a local one."
                  (<= (buffer-size)
                      aaron-display-line-numbers-large-buffer-threshold))
              (apply #'derived-mode-p aaron-display-line-numbers-auto-modes))
-    (setq-local display-line-numbers aaron-line-number-style)
     (display-line-numbers-mode 1)))
 
 ;; Line numbers are expensive during redisplay, so keep them opt-in by mode
@@ -571,49 +561,48 @@ glyph keeps its shape while point moves through composed text.")
                      :width aaron-font-body-width
                      :weight aaron-font-body-weight))
 
-(defun aaron-font--bind-chinese-to-fontset ()
-  "把中文相关字符集强制绑定到 aaron-font-cn。"
-  (when (member aaron-font-cn (font-family-list))
-    ;; t 表示当前 frame 的 fontset；也会影响后续 frame 的默认 fontset 选择
-    (dolist (charset '(han cjk-misc bopomofo kana hangul))
-      ;; 'prepend：把该字体放在 fallback 优先级前面，避免被系统中文字体截胡
-      (set-fontset-font t charset
-                        (font-spec :family aaron-font-cn
+(defvar aaron-font--fontset-bindings (make-hash-table :test #'equal)
+  "Fontset additions already made, keyed by (FONT TARGET FAMILY ADD).
+`set-fontset-font' never removes a duplicate: each prepend lengthens the
+fontset's font vector for good and drops its realized fontsets.  Fonts are
+re-applied on every theme load and new frame, so an addition happens once for
+each frame font, which is what selects the fontset `t' stands for.")
+
+(defun aaron-font--fontset-add (target family add)
+  "Add FAMILY for TARGET to the selected frame's fontset, once.
+ADD is `prepend' or `append', as for `set-fontset-font'."
+  (let ((key (list (frame-parameter nil 'font) target family add)))
+    (unless (gethash key aaron-font--fontset-bindings)
+      (puthash key t aaron-font--fontset-bindings)
+      (set-fontset-font t target
+                        (font-spec :family family
                                    :weight 'regular
                                    :slant 'normal)
                         nil
-                        'prepend))))
+                        add))))
+
+(defun aaron-font--bind-chinese-to-fontset ()
+  "把中文相关字符集强制绑定到 aaron-font-cn。"
+  (when (member aaron-font-cn (font-family-list))
+    ;; 'prepend：把该字体放在 fallback 优先级前面，避免被系统中文字体截胡
+    (dolist (charset '(han cjk-misc bopomofo kana hangul))
+      (aaron-font--fontset-add charset aaron-font-cn 'prepend))))
 
 (defun aaron-font--bind-math-symbols-to-fontset ()
   "Prefer math-oriented fonts for Unicode symbol glyphs."
   (dolist (family aaron-font-math-symbols)
     (when (member family (font-family-list))
-      (set-fontset-font t 'symbol
-                        (font-spec :family family
-                                   :weight 'regular
-                                   :slant 'normal)
-                        nil
-                        'prepend))))
+      (aaron-font--fontset-add 'symbol family 'prepend))))
 
 (defun aaron-font--bind-unicode-symbols-to-fontset ()
   "Bind broad Unicode symbol fallbacks without overriding math fonts."
   (when-let* ((family (aaron-font--available-family aaron-font-unicode-symbols)))
-    (set-fontset-font t 'symbol
-                      (font-spec :family family
-                                 :weight 'regular
-                                 :slant 'normal)
-                      nil
-                      'append)))
+    (aaron-font--fontset-add 'symbol family 'append)))
 
 (defun aaron-font--bind-emoji-to-fontset ()
   "Prefer an installed color emoji font for emoji glyphs."
   (when-let* ((family (aaron-font--available-family aaron-font-emoji)))
-    (set-fontset-font t 'emoji
-                      (font-spec :family family
-                                 :weight 'regular
-                                 :slant 'normal)
-                      nil
-                      'prepend)))
+    (aaron-font--fontset-add 'emoji family 'prepend)))
 
 (defun aaron-font--bind-nerd-symbols-to-fontset ()
   "Bind Nerd Font private-use glyph ranges to an installed Nerd Font."
@@ -621,12 +610,7 @@ glyph keeps its shape while point moves through composed text.")
     (dolist (range (list (cons #xe000 #xf8ff)
                          (cons #xf0000 #xffffd)
                          (cons #x100000 #x10fffd)))
-      (set-fontset-font t range
-                        (font-spec :family family
-                                   :weight 'regular
-                                   :slant 'normal)
-                        nil
-                        'prepend))))
+      (aaron-font--fontset-add range family 'prepend))))
 
 (defun aaron-font--apply-icon-faces ()
   "Keep icon package faces on an installed Nerd Font when available."
@@ -637,8 +621,9 @@ glyph keeps its shape while point moves through composed text.")
 
 (defun aaron-font--apply-rescale ()
   "设置中文缩放（只调大小，不负责选字体）。"
+  ;; The keys are font-name regexps: strings, which `assq' never matches.
   (setq face-font-rescale-alist
-        (assq-delete-all aaron-font-cn face-font-rescale-alist))
+        (assoc-delete-all aaron-font-cn face-font-rescale-alist))
   (add-to-list 'face-font-rescale-alist (cons aaron-font-cn aaron-scale-cn)))
 
 (defun aaron-font--apply-org-faces ()
@@ -727,8 +712,7 @@ glyph keeps its shape while point moves through composed text.")
   (when (and (display-graphic-p)
              (fboundp 'mixed-pitch-mode))
     (mixed-pitch-mode 1)
-    (setq-local line-spacing aaron-prose-line-spacing))
-  (aaron-font--bind-chinese-to-fontset))
+    (setq-local line-spacing aaron-prose-line-spacing)))
 
 (dolist (hook '(org-mode-hook markdown-mode-hook gfm-mode-hook))
   (add-hook hook #'aaron-typography-setup-prose-buffer))
@@ -754,11 +738,7 @@ glyph keeps its shape while point moves through composed text.")
   (aaron-font--bind-nerd-symbols-to-fontset)
   (aaron-font--apply-icon-faces)
   (aaron-font--apply-rescale)
-  (aaron-font--apply-document-faces)
-
-  ;; 保险：让 Emacs 重新评估字体缓存（可选但很稳）
-  (when (fboundp 'font-cache-reset)
-    (font-cache-reset)))
+  (aaron-font--apply-document-faces))
 
 ;; 启动立即生效
 (aaron/apply-font-config)
@@ -792,7 +772,7 @@ glyph keeps its shape while point moves through composed text.")
 (defun aaron/font-reset-all ()
   "清 Emacs 字体缓存并重应用配置。"
   (interactive)
-  (when (fboundp 'font-cache-reset) (font-cache-reset))
+  (clear-font-cache)
   (aaron/apply-font-config)
   (redraw-display))
 
@@ -962,8 +942,7 @@ glyph keeps its shape while point moves through composed text.")
                             (holiday-fixed 11 11 "Singles' Day")))
   (holiday-other-holidays '((holiday-fixed 4 22 "Earth Day")
                             (holiday-fixed 4 23 "World Book Day")
-                            (holiday-sexp '(if (or (zerop (% year 400))
-                                                   (and (% year 100) (zerop (% year 4))))
+                            (holiday-sexp '(if (date-leap-year-p year)
                                                (list 9 12 year)
                                              (list 9 13 year))
                                           "World Programmers' Day")
@@ -973,8 +952,6 @@ glyph keeps its shape while point moves through composed text.")
                        ,@holiday-christian-holidays
                        ,@holiday-other-holidays
                        ,@holiday-local-holidays))
-  (calendar-mark-holidays-flag t)
-  (calendar-mark-diary-entries-flag nil)
   ;; Prefer +0800 over CST
   (calendar-time-zone-style 'numeric)
   ;; year/month/day
@@ -1306,17 +1283,9 @@ selection and mark behavior."
 
 ;; 关闭无用 UI，打开有用能力
 (menu-bar-mode 1)
-(tool-bar-mode -1)
 
 ;; 像素级滚动（Emacs 29）
 ;(pixel-scroll-precision-mode 1)
-
-
-(setq redisplay-skip-fontification-on-input t)
-
-;; 高质量渲染
-(setq frame-resize-pixelwise t)
-(setq window-resize-pixelwise t)
 
 (autoload 'dired-async-mode "dired-async.el" nil t)
 (dired-async-mode 1)
@@ -1342,61 +1311,6 @@ escape from the process sentinel."
   (advice-remove 'async-when-done #'aaron-async-when-done-handle-empty-result-a)
   (advice-add 'async-when-done :around #'aaron-async-when-done-handle-empty-result-a))
 
-(defun aaron-noema--legacy-command-symbol-p (symbol)
-  "Return non-nil when SYMBOL belongs to the retired Aaronnote command API."
-  (let ((name (symbol-name symbol)))
-    (or (string-match-p "\\`my/.*aaronnote" name)
-        (string-prefix-p "ibuffer-filter-by-aaronnote" name))))
-
-(defun aaron-noema--legacy-command-history-entry-p (entry)
-  "Return non-nil when history ENTRY refers to a retired Aaronnote command."
-  (cond
-   ((symbolp entry)
-    (aaron-noema--legacy-command-symbol-p entry))
-   ((stringp entry)
-    (string-match-p
-     "\\(?:my/.*aaronnote\\|ibuffer-filter-by-aaronnote\\)"
-     (substring-no-properties entry)))
-   ((vectorp entry)
-    (seq-some #'aaron-noema--legacy-command-history-entry-p
-              (append entry nil)))
-   ((consp entry)
-    (or (aaron-noema--legacy-command-history-entry-p (car entry))
-        (aaron-noema--legacy-command-history-entry-p (cdr entry))))
-   (t nil)))
-
-(defun aaron-noema-retire-legacy-commands ()
-  "Remove retired Aaronnote commands from Emacs and completion histories."
-  (mapatoms
-   (lambda (symbol)
-     (when (aaron-noema--legacy-command-symbol-p symbol)
-       (when (fboundp symbol)
-         (fmakunbound symbol))
-       (put symbol 'function-documentation nil))))
-  (when (boundp 'extended-command-history)
-    (setq extended-command-history
-          (cl-remove-if #'aaron-noema--legacy-command-history-entry-p
-                        extended-command-history)))
-  (when (boundp 'vertico-repeat-history)
-    (setq vertico-repeat-history
-          (cl-remove-if #'aaron-noema--legacy-command-history-entry-p
-                        vertico-repeat-history)))
-  (when (boundp 'amx-history)
-    (setq amx-history
-          (cl-remove-if #'aaron-noema--legacy-command-history-entry-p
-                        amx-history)))
-  (when (boundp 'amx-data)
-    (setq amx-data
-          (cl-remove-if #'aaron-noema--legacy-command-history-entry-p
-                        amx-data)))
-  (when (boundp 'amx-cache)
-    (setq amx-cache
-          (cl-remove-if #'aaron-noema--legacy-command-history-entry-p
-                        amx-cache))))
-
-(add-hook 'after-init-hook #'aaron-noema-retire-legacy-commands 90)
-(add-hook 'savehist-save-hook #'aaron-noema-retire-legacy-commands 90)
-
 (defun aaron-amx-prune-stale-commands ()
   "Remove saved Amx rankings and history entries that are no longer commands."
   (setq amx-data (cl-remove-if-not
@@ -1408,16 +1322,10 @@ escape from the process sentinel."
   :defer 2
   :config
   (amx-mode 1)
-  (add-to-list 'amx-ignored-command-matchers
-               "\\`\\(?:my/.*aaronnote\\|ibuffer-filter-by-aaronnote\\)")
-  (aaron-noema-retire-legacy-commands)
   ;; Amx trusts saved ranking data even after a command has been removed.
   ;; Drop stale entries before rebuilding, or selecting one asserts in Amx.
   (aaron-amx-prune-stale-commands)
   (amx-rebuild-cache)
-  (advice-remove 'amx-save-to-file #'aaron-noema-retire-legacy-commands)
-  (advice-add 'amx-save-to-file
-              :before #'aaron-noema-retire-legacy-commands)
   ;; amx installs a 1-second repeating idle timer to re-check commands.
   ;; Let interactive `M-x' update on demand instead of waking Emacs forever.
   (when (timerp amx-short-idle-update-timer)
@@ -1505,13 +1413,11 @@ Encrypted files (see `aaron-undo-tree-history-excluded-regexp' and
                  (user (or (tramp-file-name-user vec) "nouser"))
                  (host (or (tramp-file-name-host vec) "nohost"))
                  (local (file-local-name file)))
-            (format "remote:%s:%s@%s:%s"
-                    method user host
-                    (aaron-undo-tree-normalize-file-name local))))
+            (format "remote:%s:%s@%s:%s" method user host local)))
       (format "local:%s" (aaron-undo-tree-normalize-file-name file))))
 
-  (defun aaron-undo-tree-history-file-name-v2 (file)
-    "Return the v2 local undo-tree history path for FILE."
+  (defun aaron-undo-tree-history-file-name (file)
+    "Return the local undo-tree history path for FILE."
     (let* ((key (aaron-undo-tree-history-key file))
            (remote-p (file-remote-p file))
            (category (if remote-p "remote" "local"))
@@ -1530,23 +1436,6 @@ Encrypted files (see `aaron-undo-tree-history-excluded-regexp' and
         (make-directory dir t))
       history-file))
 
-  (defun aaron-undo-tree-history-file-name (file &optional legacy)
-    "Return the undo-tree history path for FILE.
-When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
-    (if legacy
-        (let* ((backup-directory-alist undo-tree-history-directory-alist)
-               (target-file (aaron-undo-tree-normalize-file-name file))
-               (name (make-backup-file-name-1 target-file))
-               (history-file
-                (concat (file-name-directory name) "."
-                        (file-name-nondirectory name)
-                        ".~undo-tree~")))
-          (when-let* ((dir (file-name-directory history-file)))
-            (unless (file-directory-p dir)
-              (make-directory dir t)))
-          history-file)
-      (aaron-undo-tree-history-file-name-v2 file)))
-
   (defun aaron-undo-tree-make-history-save-file-name (_orig-fun file)
     "Use a stable history filename for FILE."
     (aaron-undo-tree-history-file-name file))
@@ -1554,16 +1443,10 @@ When LEGACY is non-nil, keep FILE unchanged instead of canonicalizing it."
   (defun aaron-undo-tree-load-history-core (&optional filename noerror)
     "Load undo-tree history for the current buffer from FILENAME.
 When FILENAME is nil, resolve the canonical local history path."
-    (let* ((canonical-file (and buffer-file-name
-                                (aaron-undo-tree-history-file-name buffer-file-name)))
-           (legacy-file (and buffer-file-name
-                             (aaron-undo-tree-history-file-name buffer-file-name 'legacy)))
-           (resolved-file
-            (cond
-             (filename filename)
-             ((and canonical-file (file-exists-p canonical-file)) canonical-file)
-             ((and legacy-file (file-exists-p legacy-file)) legacy-file)
-             (t canonical-file))))
+    (let ((resolved-file
+           (or filename
+               (and buffer-file-name
+                    (aaron-undo-tree-history-file-name buffer-file-name)))))
       (condition-case err
           (let ((inhibit-message t)
                 (message-log-max nil))
@@ -1614,7 +1497,7 @@ When FILENAME is nil, resolve the canonical local history path."
 This avoids hash mismatches when file-open hooks mutate the buffer."
     (when (and buffer-file-name
                undo-tree-auto-save-history
-               (not revert-buffer-in-progress-p)
+               (not revert-buffer-in-progress)
                (not (eq buffer-undo-list t))
                (aaron-undo-tree-history-enabled-p buffer-file-name)
                (not (buffer-modified-p)))
@@ -1681,7 +1564,6 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
 (keymap-global-unset "C-x m")
 (keymap-global-unset "C-x 4 m")
 (keymap-global-unset "C-x 5 m")
-(keymap-global-unset "C-x 5 m")
 
 
 (setq print-escape-newlines t  ; 字符串中的 换行 打印成‘\n’.  注意, 推荐用‘?\s’表示空格的字符常量.
@@ -1721,12 +1603,8 @@ This avoids hash mismatches when file-open hooks mutate the buffer."
 ;; 默认情况下, 点击 “echo area” 会打开 “*Messages*”, 在此关闭这个功能.
 (keymap-unset minibuffer-inactive-mode-map "<mouse-1>")  ; ‘view-echo-area-messages’
 
-(add-hook 'minibuffer-mode-hook
-          (lambda ()
-            (keymap-set minibuffer-local-completion-map "SPC"
-                        #'self-insert-command)
-            (keymap-set minibuffer-local-completion-map "?"
-                        #'self-insert-command)))
+(keymap-set minibuffer-local-completion-map "SPC" #'self-insert-command)
+(keymap-set minibuffer-local-completion-map "?" #'self-insert-command)
 
 ;;; Invoke Command
 (setq meta-prefix-char ?\e)
@@ -1811,51 +1689,8 @@ interrupt the current window layout.")
 
 (defconst aaron-warnings-buffer-name "*Warnings*")
 
-(defun aaron-warning-level-rank (level)
-  "Return a comparable numeric rank for warning LEVEL."
-  (pcase level
-    (:debug 0)
-    (:warning 1)
-    (:error 2)
-    (:emergency 3)
-    (_ 1)))
-
-(defun aaron-warning-level-at-least-p (level threshold)
-  "Return non-nil when warning LEVEL is at least THRESHOLD."
-  (>= (aaron-warning-level-rank level)
-      (aaron-warning-level-rank threshold)))
-
-(defun aaron-warning-type-list (type)
-  "Normalize warning TYPE into the list form used by `warning-suppress-types'."
-  (if (consp type) type (list type)))
-
-(defun aaron-warning-should-suppress-p (type message level)
-  "Return non-nil when TYPE/MESSAGE/LEVEL should be suppressed entirely."
-  (let ((level (or level :warning)))
-    (and aaron-warning-suppress-elpa-noise
-         (not (aaron-warning-level-at-least-p level :error))
-         (stringp message)
-         (or (string-match-p "/elpa/" message)
-             (string-match-p "\\`Package cl is deprecated\\'" message)
-             (string-match-p
-              "setting attribute .+:foreground.+'font-lock-variable-name-face'.+nil value is invalid"
-              message)
-             (let ((type-list (aaron-warning-type-list type)))
-               (and (member 'package type-list)
-                    (string-match-p "deprecated" message)))))))
-
-(defun aaron-suppress-warning-popups-a (orig-fn type message &optional level buffer-name)
-  "Keep lower-severity warnings in the log without auto-popping a window."
-  (let ((level (or level :warning)))
-    (cond
-     ((aaron-warning-should-suppress-p type message level)
-      nil)
-     ((aaron-warning-level-at-least-p level aaron-warning-popup-minimum-level)
-      (funcall orig-fn type message level buffer-name))
-     (t
-      (let ((warning-suppress-types
-             (cons (aaron-warning-type-list type) warning-suppress-types)))
-        (funcall orig-fn type message level buffer-name))))))
+;; The `display-warning' advice and its predicates live in early-init.el, where
+;; they have to catch warnings raised before this file loads.
 
 (defun aaron/show-warnings-buffer ()
   "Show the warning log buffer if it exists."
@@ -1863,10 +1698,6 @@ interrupt the current window layout.")
   (if-let* ((buffer (get-buffer aaron-warnings-buffer-name)))
       (pop-to-buffer buffer)
     (user-error "No warnings buffer yet")))
-
-(unless (advice-member-p #'aaron-suppress-warning-popups-a 'display-warning)
-  (advice-add 'display-warning :around #'aaron-suppress-warning-popups-a))
-
 
 ;; 不要在任何情况下自动显示 diary
 (setq calendar-mark-diary-entries-flag nil)  ;; 你已经设了

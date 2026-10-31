@@ -52,6 +52,17 @@ the config's own Elisp trees, not installed packages under `elpa/'.")
   '("lisp" "site-lisp")
   "Config-owned directories whose `.elc' files are disposable.")
 
+(defconst aaron-bytecode-scan-skipped-directories
+  '("node_modules" "dist" ".git")
+  "Directory names that hold no Elisp, skipped by the startup `.elc' sweep.
+`site-lisp' carries whole Node trees, and walking them costs most of a second
+on every startup with a warm disk cache.")
+
+(defun aaron-bytecode-scan-directory-p (directory)
+  "Return non-nil when the `.elc' sweep should descend into DIRECTORY."
+  (not (member (file-name-nondirectory directory)
+               aaron-bytecode-scan-skipped-directories)))
+
 (defun aaron-delete-stale-startup-bytecode ()
   "Delete top-level startup `.elc' files before normal init loading continues.
 
@@ -79,7 +90,9 @@ a chance to affect the rest of the module graph."
     (dolist (directory aaron-local-bytecode-directories)
       (let ((root (expand-file-name directory user-emacs-directory)))
         (when (file-directory-p root)
-          (dolist (file (directory-files-recursively root "\\.elc\\'"))
+          (dolist (file (directory-files-recursively
+                         root "\\.elc\\'" nil
+                         #'aaron-bytecode-scan-directory-p))
             (condition-case err
                 (delete-file file)
               (error
@@ -104,8 +117,11 @@ a chance to affect the rest of the module graph."
 (defvar aaron-original-gc-cons-percentage gc-cons-percentage)
 (defvar aaron-original-file-name-handler-alist file-name-handler-alist)
 
+(defconst aaron-startup-gc-cons-percentage 0.6
+  "`gc-cons-percentage' during startup, recognized when it is restored.")
+
 (setq gc-cons-threshold most-positive-fixnum
-      gc-cons-percentage 0.6
+      gc-cons-percentage aaron-startup-gc-cons-percentage
       garbage-collection-messages nil
       frame-inhibit-implied-resize t
       file-name-handler-alist nil)
@@ -122,11 +138,18 @@ a chance to affect the rest of the module graph."
   "Buffer that collects low-severity warnings redirected away from *Messages*.
 Browse with `aaron/show-suppressed-warnings'.")
 
+(defconst aaron-suppressed-warnings-max-lines 2000
+  "Longest `aaron-suppressed-warnings-buffer' kept in a long-lived session.")
+
 (defun aaron-log-to-suppressed-warnings (type message level)
-  "Append a suppressed warning to `aaron-suppressed-warnings-buffer'."
+  "Append a suppressed warning to `aaron-suppressed-warnings-buffer'.
+The buffer is cut back to `aaron-suppressed-warnings-max-lines'."
   (with-current-buffer (get-buffer-create aaron-suppressed-warnings-buffer)
     (let ((inhibit-read-only t))
       (goto-char (point-max))
+      (when (> (forward-line (- aaron-suppressed-warnings-max-lines)) -1)
+        (delete-region (point-min) (point))
+        (goto-char (point-max)))
       (insert (format "[%s] (%s) %s: %s\n"
                       (format-time-string "%T")
                       (if (consp type)
@@ -176,6 +199,7 @@ Browse with `aaron/show-suppressed-warnings'.")
           ;; Remaining message-content checks.
           (and (stringp message)
                (or (string-match-p "/elpa/" message)
+                   (string-match-p "\\`Package cl is deprecated\\'" message)
                    (string-match-p
                     "setting attribute .+:foreground.+'font-lock-variable-name-face'.+nil value is invalid"
                     message)
@@ -242,12 +266,14 @@ This function is idempotent so `after-init-hook' and the startup fallback may
 both call it."
   (dolist (handler aaron-original-file-name-handler-alist)
     (add-to-list 'file-name-handler-alist handler t))
-  ;; Once `gcmh' starts, let it own GC policy. Otherwise, restore to a saner
-  ;; interactive threshold than Emacs' tiny default.
-  (unless (bound-and-true-p gcmh-mode)
+  ;; Restore only what still holds its startup value: the config registry
+  ;; applies the store's GC settings during init and `gcmh' owns the threshold
+  ;; once it starts, and neither may be overwritten here.
+  (when (= gc-cons-threshold most-positive-fixnum)
     (setq gc-cons-threshold (max aaron-original-gc-cons-threshold
-                                 (* 16 1024 1024))
-          gc-cons-percentage aaron-original-gc-cons-percentage)))
+                                 (* 16 1024 1024))))
+  (when (= gc-cons-percentage aaron-startup-gc-cons-percentage)
+    (setq gc-cons-percentage aaron-original-gc-cons-percentage)))
 
 (add-hook 'after-init-hook #'aaron-restore-startup-runtime-settings)
 (add-hook 'emacs-startup-hook #'aaron-restore-startup-runtime-settings)
