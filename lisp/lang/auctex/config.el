@@ -90,27 +90,22 @@ silently compile on the client instead); use texlab diagnostics for now"
 If the bundled `epdfinfo' is already executable and healthy, reuse it.
 Return non-nil when the PDF Tools server is usable.  Missing or broken
 `epdfinfo' should not abort Emacs startup."
-  (let ((bundled-epdfinfo
-         (expand-file-name "elpa/pdf-tools-20260102.1101/epdfinfo"
-                           user-emacs-directory)))
-    (when (file-executable-p bundled-epdfinfo)
-      (setq pdf-info-epdfinfo-program bundled-epdfinfo))
-    (cond
-     ((ignore-errors (pdf-info-check-epdfinfo) t)
-      (pdf-tools-install)
+  (cond
+   ((ignore-errors (pdf-info-check-epdfinfo) t)
+    (pdf-tools-install)
+    t)
+   ((ignore-errors
+      (pdf-tools-install :no-query)
+      (pdf-info-check-epdfinfo)
       t)
-     ((ignore-errors
-        (pdf-tools-install :no-query)
-        (pdf-info-check-epdfinfo)
-        t)
-      t)
-     (t
-      (display-warning
-       'init-auctex
-       (format "PDF Tools disabled because epdfinfo is not executable: %s"
-               pdf-info-epdfinfo-program)
-       :warning)
-      nil))))
+    t)
+   (t
+    (display-warning
+     'init-auctex
+     (format "PDF Tools disabled because epdfinfo is not executable: %s"
+             pdf-info-epdfinfo-program)
+     :warning)
+    nil)))
 
 (config-defvar +pdf-view-auto-refresh-interval nil
   "Polling fallback interval for PDF buffers when file notifications are absent."
@@ -523,6 +518,11 @@ Some already-open PDF buffers have PDFView mode but no page overlay.  Running
            (or (and buffer-file-name (file-name-directory buffer-file-name))
                default-directory))))))
 
+(defun +pdf-sync--scan-directory-p (directory)
+  "Return non-nil unless DIRECTORY holds tooling rather than a document."
+  (not (member (file-name-nondirectory (directory-file-name directory))
+               '(".git" ".venv" "node_modules"))))
+
 (defun +pdf-sync--project-pdf-candidates ()
   "Return PDF candidates inferred from SyncTeX databases in the project."
   (let (pdfs)
@@ -530,7 +530,8 @@ Some already-open PDF buffers have PDFView mode but no page overlay.  Running
       (when (and root (file-directory-p root))
         (condition-case nil
             (dolist (synctex (directory-files-recursively
-                              root "\\.synctex\\(?:\\.gz\\)?\\'"))
+                              root "\\.synctex\\(?:\\.gz\\)?\\'" nil
+                              #'+pdf-sync--scan-directory-p))
               (let ((pdf (replace-regexp-in-string
                           "\\.synctex\\(?:\\.gz\\)?\\'" ".pdf" synctex)))
                 (when (file-exists-p pdf)
@@ -773,21 +774,16 @@ Compiles first when no PDF exists yet."
   (LaTeX-mode . LaTeX-math-mode)
   (LaTeX-mode . turn-on-reftex)
   (LaTeX-mode . TeX-source-correlate-mode)
-  (LaTeX-mode . +auctex-setup-build-workflow)
-  (LaTeX-mode . +auctex-setup-preview-workflow)
+  ;; `LaTeX-mode' derives from `TeX-mode', so its buffers run these too.
   (TeX-mode . +auctex-setup-build-workflow)
   (TeX-mode . +auctex-setup-preview-workflow)
   :config
   (setq TeX-engine 'xetex)
   (setq TeX-source-correlate-method 'synctex)
   (setq TeX-source-correlate-start-server t)
-  (remove-hook 'LaTeX-mode-hook '+auctex-eshell-build-setup-h)
   (+auctex-install-preview-keys)
   (with-eval-after-load 'latex
-    (+auctex-install-preview-keys)
-    ;; Undo the old direct-build binding in already-open LaTeX mode maps
-    ;; when this module is reloaded in a running Emacs.
-    (define-key LaTeX-mode-map (kbd "C-c C-c") #'TeX-command-master))
+    (+auctex-install-preview-keys))
   (with-eval-after-load 'preview
     (+auctex-install-preview-keys))
   (define-key TeX-source-correlate-map [M-down-mouse-1]

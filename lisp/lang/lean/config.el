@@ -68,7 +68,6 @@
 (declare-function lean--clear-fringe-overlays "lang/lean/lsp")
 (defvar lean-lsp-notification-handlers)
 (declare-function lean-iv-sync-cursor-h "lang/lean/infoview")
-(declare-function lean-iv-setup-buffer-sync "lang/lean/infoview")
 (declare-function lean-iv-teardown-h "lang/lean/infoview")
 (declare-function lean-iv-server-restarted-h "lang/lean/infoview")
 (declare-function lean-iv-toggle "lang/lean/infoview")
@@ -88,18 +87,15 @@
 (declare-function +problems/buffer "checkers/problems/config" ())
 (declare-function +direnv-update-environment-maybe
                   "tools/direnv/config" (&optional path callback))
-(declare-function remote-expand-file-name
-                  "remote-fs" (file-name &optional directory target))
 (declare-function remote-file-local-name "remote-fs" (file-name))
-(declare-function remote-file-name-target "remote-fs" (file-name))
+(declare-function remote-prefetch-ancestor-markers "remote-fs" (directory))
+(declare-function remote-register-ancestor-markers "remote-fs" (names))
 (declare-function remote-client-file-name "remote-fs"
                   (file-name &optional adapter))
 (declare-function remote-local-bridge-command
                   "remote-process" (program &rest keys))
 (declare-function remote-make-client-process
                   "remote-process" (&rest plist))
-(declare-function remote-get-target "remote-core" (id))
-(declare-function remote-target-trusted "remote-core" (target))
 (defvar remote--buffer-base-process-environment)
 (defvar remote--buffer-base-exec-path)
 
@@ -192,17 +188,25 @@ language server without user action."
 
 ;;; ── Project root helpers ─────────────────────────────────────────────────────
 
+(remote-register-ancestor-markers
+ '("lakefile.lean" "lakefile.toml" "lean-toolchain"))
+
 (defun lean-root-dir-p (dir)
   "Return non-nil when DIR looks like a Lean project root."
   (or (file-exists-p (expand-file-name "lakefile.lean" dir))
       (file-exists-p (expand-file-name "lakefile.toml" dir))
       (file-exists-p (expand-file-name "lean-toolchain" dir))))
 
+(defun lean--locate-root (file)
+  "Return the Lean project root above FILE, or nil."
+  (remote-prefetch-ancestor-markers (file-name-directory file))
+  (locate-dominating-file file #'lean-root-dir-p))
+
 (defun lean-project-root ()
   "Return the Lean project root for the current buffer."
   (let ((root
          (or (when-let* ((f (or buffer-file-name default-directory)))
-               (locate-dominating-file f #'lean-root-dir-p))
+               (lean--locate-root f))
              (and (fboundp '+project-current-root)
                   (+project-current-root))
              default-directory)))
@@ -216,7 +220,7 @@ Scoped to `lean--resolving-lsp-root\=' so `project-current\=', Projectile and
 ordinary navigation keep seeing the real project."
   (when (and lean--resolving-lsp-root
              (derived-mode-p 'lean-mode))
-    (when-let* ((root (locate-dominating-file dir #'lean-root-dir-p)))
+    (when-let* ((root (lean--locate-root (file-name-as-directory dir))))
       (cons 'lean-lsp-project
             (file-name-as-directory (expand-file-name root))))))
 
@@ -250,13 +254,6 @@ Set to nil for a direct, no-proxy lake serve connection."
   :type 'boolean
   :group 'lean)
 
-(config-defvar lean-infoview-remote-proxy-auto-deploy t
-  "Compatibility switch for the retired remote proxy deployment path.
-The active integration always runs the Node/HTTP infoview proxy on the Emacs
-client.  Only its stdio LSP peer runs on the selected target."
-  :type 'boolean
-  :group 'lean)
-
 (defvar lean--proxy-gateway-bindings (make-hash-table :test #'equal)
   "Current gateway registration data for each canonical Lean project root.")
 
@@ -273,73 +270,6 @@ client.  Only its stdio LSP peer runs on the selected target."
       (cons script
             (sort (directory-files-recursively dist ".")
                   #'string<)))))
-
-(defun lean--proxy-bundle-fingerprint ()
-  "Return a stable fingerprint for the bundled Lean proxy files."
-  (when-let* ((files (lean--proxy-bundle-files)))
-    (secure-hash
-     'sha256
-     (mapconcat
-      (lambda (file)
-        (let ((attributes (file-attributes file 'string)))
-          (format "%s:%s:%s"
-                  (file-relative-name file lean--iv--script-dir)
-                  (file-attribute-size attributes)
-                  (file-attribute-modification-time attributes))))
-      files "\n"))))
-
-(defun lean--remote-proxy-directory (root)
-  "Return the content-versioned target cache directory for ROOT."
-  (when-let* ((fingerprint (lean--proxy-bundle-fingerprint)))
-    (file-name-as-directory
-     ;; `expand-file-name' expands a leading tilde before consulting the file
-     ;; name handler.  In a `/fs:' buffer that substitutes the target's HOME
-     ;; (for example `/home/hc') but drops the logical target identity, after
-     ;; which `make-directory' tries to create that path on the client.  Home
-     ;; expansion is a routed metadata operation and must remain in `/fs:'.
-     (remote-expand-file-name
-      (format "~/.cache/emacs/lean-infoview/%s/"
-              (substring fingerprint 0 16))
-      nil
-      (remote-file-name-target root)))))
-
-(defun lean--remote-proxy-trusted-p (root)
-  "Return non-nil when ROOT belongs to a trusted remote target."
-  (when-let* ((target-id (remote-file-name-target root))
-              (target (remote-get-target target-id)))
-    (remote-target-trusted target)))
-
-(defun lean--copy-proxy-bundle-to-target (root)
-  "Ensure the Lean proxy bundle is staged on ROOT's target.
-Return the logical remote script name, or nil when provisioning is disabled."
-  (when (and lean-infoview-remote-proxy-auto-deploy
-             (lean--remote-proxy-trusted-p root))
-    (let* ((destination (lean--remote-proxy-directory root))
-           (marker (and destination
-                        (expand-file-name ".complete" destination)))
-           (fingerprint (lean--proxy-bundle-fingerprint))
-           (remote-script
-            (and destination
-                 (expand-file-name "lean-proxy.mjs" destination))))
-      (unless
-          (and marker
-               (file-readable-p marker)
-               (equal
-                (string-trim
-                 (with-temp-buffer
-                   (insert-file-contents marker)
-                   (buffer-string)))
-                fingerprint))
-        (make-directory (expand-file-name "dist" destination) t)
-        (dolist (source (lean--proxy-bundle-files))
-          (let* ((relative
-                  (file-relative-name source lean--iv--script-dir))
-                 (target (expand-file-name relative destination)))
-            (make-directory (file-name-directory target) t)
-            (copy-file source target t t nil)))
-        (with-temp-file marker
-          (insert fingerprint "\n")))
-      remote-script)))
 
 (defun lean--proxy-script-for-root (root)
   "Return the client-local proxy script for project ROOT."
@@ -411,8 +341,7 @@ Return the logical remote script name, or nil when provisioning is disabled."
 
 (defun lean--direct-server-command ()
   "Return the plain Lean server argv for the current buffer."
-  (if (locate-dominating-file
-       (or buffer-file-name default-directory ".") #'lean-root-dir-p)
+  (if (lean--locate-root (or buffer-file-name default-directory))
       '("lake" "serve")
     '("lean" "--server")))
 
@@ -502,12 +431,6 @@ server."
          (and (fboundp '+language-server-executable-find)
               (+language-server-executable-find
                (car (lean--direct-server-command))))))))
-
-;; Older revisions intercepted every `make-process' call and tried to recognize
-;; this command after the client had already wrapped it in a remote shell.  Remove
-;; that hot-reload residue; the explicit process factory above is deterministic.
-(when (fboundp 'lean--make-local-proxy-process-a)
-  (advice-remove 'make-process #'lean--make-local-proxy-process-a))
 
 ;;; ── Mode-line progress ───────────────────────────────────────────────────────
 
@@ -714,12 +637,19 @@ Completion uses the global corfu+capf surface — no company-mode override."
                       (executable-find "rg")))
               (root (file-name-as-directory (expand-file-name (lean-project-root)))))
     (cl-loop for hit in
-             (let ((default-directory root))
-               (condition-case nil
-                   (process-lines rg "--color" "never" "--line-number"
-                                  "--no-heading" "--glob" "*.lean"
-                                  "-e" lean--rg-regexp ".")
-                 (error nil)))
+             ;; `process-lines' never leaves the client; the project may.
+             (let ((default-directory root)
+                   (environment process-environment)
+                   (path exec-path))
+               (with-temp-buffer
+                 (let ((process-environment environment)
+                       (exec-path path))
+                   (when (eql 0 (process-file
+                                 rg nil t nil
+                                 "--color" "never" "--line-number"
+                                 "--no-heading" "--glob" "*.lean"
+                                 "-e" lean--rg-regexp "."))
+                     (split-string (buffer-string) "\n" t)))))
              when (string-match "\\`\\([^:]+\\):\\([0-9]+\\):\\(.*\\)\\'" hit)
              for file    = (match-string 1 hit)
              for line    = (string-to-number (match-string 2 hit))
@@ -758,23 +688,19 @@ Completion uses the global corfu+capf surface — no company-mode override."
   (local-set-key (kbd "TAB")       #'lean4-eri-indent)
   (local-set-key (kbd "<backtab>") #'lean4-eri-indent-reverse))
 
-;;; ── Remote tuning ────────────────────────────────────────────────────────────
-
-(defun lean--tune-remote ()
-  "Apply Lean editing tweaks for TRAMP buffers."
-  nil)
-
 (defun lean--apply-lsp-settings ()
   "Install Lean-specific language-server settings in the current buffer."
   ;; Lake can take minutes to warm Mathlib; the shared startup watchdog would
   ;; otherwise stop the workspace before it ever initializes.
   (when lean-lsp-connect-timeout
     (setq-local +lsp-mode-startup-timeout lean-lsp-connect-timeout))
-  (lean-dev-log "lean-mode setup: file=%s root=%s proxy-enabled=%S connect-timeout=%S"
-                (or buffer-file-name "<no file>")
-                (file-name-as-directory (expand-file-name (lean-project-root)))
-                lean-infoview-proxy-enabled
-                lean-lsp-connect-timeout))
+  ;; The root walks the file system; do not pay for it when nothing logs.
+  (when lean-dev-log-enabled
+    (lean-dev-log "lean-mode setup: file=%s root=%s proxy-enabled=%S connect-timeout=%S"
+                  (or buffer-file-name "<no file>")
+                  (file-name-as-directory (expand-file-name (lean-project-root)))
+                  lean-infoview-proxy-enabled
+                  lean-lsp-connect-timeout)))
 
 ;;; ── Post-command hook: infoview cursor sync ──────────────────────────────────
 
@@ -854,11 +780,6 @@ compete with the one this module declares."
   (when (and (fboundp 'flymake-start)
              (bound-and-true-p flymake-mode))
     (flymake-start nil t))
-  ;; Remote tuning
-  (lean--tune-remote)
-  ;; Keep the infoview bridge's shadow LSP document in sync while visible.
-  (when (fboundp 'lean-iv-setup-buffer-sync)
-    (lean-iv-setup-buffer-sync))
   ;; Post-command: goal refresh + infoview cursor sync
   (add-hook 'post-command-hook #'lean--post-command-h nil t)
   ;; Buffer teardown
@@ -942,25 +863,26 @@ compete with the one this module declares."
     (lean-dev-log "lsp deferred until direnv is ready: %s"
                   (buffer-name)))
    (t
-    (lean-dev-log "lsp starting: buffer-dir=%s lsp-root=%s proxy-enabled=%S timeout=%S project-finders=%S"
-                  default-directory
-                  (or (lean--lsp-project-root-candidate) "<none>")
-                  lean-infoview-proxy-enabled
-                  lean-lsp-connect-timeout
-                  project-find-functions)
-    (when (numberp lean-lsp-connect-timeout)
-      (let ((buf (current-buffer))
-            (timeout lean-lsp-connect-timeout))
-        (run-at-time
-         (1+ timeout) nil
-         (lambda ()
-           (when (buffer-live-p buf)
-             (with-current-buffer buf
-               (when (and (derived-mode-p 'lean-mode)
-                          (not (bound-and-true-p lsp-managed-mode)))
-                 (lean-dev-log
-                  "lsp not connected after %s seconds; check the server stderr and Messages buffers"
-                  timeout))))))))
+    (when lean-dev-log-enabled
+      (lean-dev-log "lsp starting: buffer-dir=%s lsp-root=%s proxy-enabled=%S timeout=%S project-finders=%S"
+                    default-directory
+                    (or (lean--lsp-project-root-candidate) "<none>")
+                    lean-infoview-proxy-enabled
+                    lean-lsp-connect-timeout
+                    project-find-functions)
+      (when (numberp lean-lsp-connect-timeout)
+        (let ((buf (current-buffer))
+              (timeout lean-lsp-connect-timeout))
+          (run-at-time
+           (1+ timeout) nil
+           (lambda ()
+             (when (buffer-live-p buf)
+               (with-current-buffer buf
+                 (when (and (derived-mode-p 'lean-mode)
+                            (not (bound-and-true-p lsp-managed-mode)))
+                   (lean-dev-log
+                    "lsp not connected after %s seconds; check the server stderr and Messages buffers"
+                    timeout)))))))))
     (condition-case err
         (lean--start-lsp-now)
       (error
@@ -988,12 +910,13 @@ compete with the one this module declares."
     (if (bound-and-true-p lsp-managed-mode)
         (progn
           (lean--setup-managed-ui)
-          (lean-dev-log "lsp managed mode active: buffer=%s lsp-root=%s flymake=%S eldoc=%S capf=%S"
-                        (buffer-name)
-                        (or (lean--lsp-project-root-candidate) "<none>")
-                        (bound-and-true-p flymake-mode)
-                        (bound-and-true-p eldoc-mode)
-                        completion-at-point-functions))
+          (when lean-dev-log-enabled
+            (lean-dev-log "lsp managed mode active: buffer=%s lsp-root=%s flymake=%S eldoc=%S capf=%S"
+                          (buffer-name)
+                          (or (lean--lsp-project-root-candidate) "<none>")
+                          (bound-and-true-p flymake-mode)
+                          (bound-and-true-p eldoc-mode)
+                          completion-at-point-functions)))
       (when (fboundp 'lean-notification-cleanup)
         (lean-notification-cleanup))
       (lean--cancel-lsp-ui-timers)

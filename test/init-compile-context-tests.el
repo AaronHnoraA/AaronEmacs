@@ -91,5 +91,22 @@
           (should-not (+native-comp--stale-version-dirs)))
       (delete-directory cache t))))
 
+(ert-deftest +compile-board-keeps-the-common-board-keys ()
+  "The board's own keys sit on top of the navigation every board shares."
+  (should (eq (keymap-parent +compile-board-mode-map) aaron-ui-board-mode-map))
+  (should (eq (keymap-lookup +compile-board-mode-map "j") #'next-line))
+  (should (eq (keymap-lookup +compile-board-mode-map "n")
+              #'+compile/native-compile-config)))
+
+(ert-deftest +compile-settings-reach-the-native-compiler ()
+  "Every setting names a variable of the running native compiler."
+  (skip-unless (and (fboundp 'native-comp-available-p)
+                    (native-comp-available-p)))
+  (require 'comp)
+  (let ((+native-comp-speed 1)
+        (native-comp-speed 2))
+    (+compile/apply-runtime-settings)
+    (should (= native-comp-speed 1))))
+
 (provide 'init-compile-context-tests)
 ;;; init-compile-context-tests.el ends here

@@ -44,12 +44,6 @@
 (declare-function lsp--cur-position "lsp-mode" ())
 (declare-function lsp-workspace-restart "lsp-mode" (workspace))
 (declare-function lsp-workspaces "lsp-mode" ())
-(declare-function remote-close-channel "remote-channel" (channel))
-(declare-function remote-port-forward "remote-channel" (remote-endpoint &rest keys))
-(declare-function remote-forward-handle "remote-backend-core" (forward))
-(declare-function remote-forward-local-endpoint "remote-backend-core" (forward))
-(declare-function remote-forward-remote-endpoint "remote-backend-core" (forward))
-(declare-function remote-forward-state "remote-backend-core" (forward))
 
 (defvar lean-info-window-width)
 
@@ -65,13 +59,13 @@
 (defvar lean--iv--xwidget-buffers (make-hash-table :test #'equal)
   "Hash table: project-root → live infoview xwidget buffer.")
 
-(defvar lean--iv--remote-forwards (make-hash-table :test #'equal)
-  "Hash table: remote project root → live proxy port forward.")
-
 (defvar lean--iv--xwidget-ports (make-hash-table :test #'equal)
   "Hash table: project-root → proxy port currently loaded in its xwidget.
 Each language-server start allocates a fresh proxy on a fresh port, so this
 records which one a page is actually showing.")
+
+(defvar-local lean--iv--root nil
+  "(FILE . ROOT) for this buffer; the root is asked for on every command.")
 
 (defvar-local lean--iv--xwidget-buf nil
   "The xwidget buffer associated with this lean-mode source buffer.")
@@ -199,7 +193,11 @@ records which one a page is actually showing.")
   ;; logical identity.  Recomputing the root here used to turn a local
   ;; `/fs:local:' root back into a native path, so the proxy wrote one
   ;; instance port file while `C-c C-i' waited on another pending file.
-  (file-name-as-directory (lean-project-root)))
+  (let ((file (or buffer-file-name default-directory)))
+    (unless (equal (car lean--iv--root) file)
+      (setq lean--iv--root
+            (cons file (file-name-as-directory (lean-project-root)))))
+    (cdr lean--iv--root)))
 
 (defun lean--iv-source-uri ()
   "Return the file URI for the current source buffer."
@@ -209,22 +207,6 @@ records which one a page is actually showing.")
       (concat "file://" (expand-file-name buffer-file-name)))))
 
 ;; ── Gateway endpoint discovery ───────────────────────────────────────────────
-
-(defun lean--iv-close-remote-forward (root)
-  "Close and forget ROOT's remote infoview forward."
-  (when-let* ((forward (gethash root lean--iv--remote-forwards)))
-    (remhash root lean--iv--remote-forwards)
-    (ignore-errors (remote-close-channel forward))))
-
-(defun lean--iv-remote-forward-live-p (forward remote-port)
-  "Return non-nil when FORWARD still reaches REMOTE-PORT."
-  (and forward
-       (eq (remote-forward-state forward) 'open)
-       (equal
-        (plist-get (remote-forward-remote-endpoint forward) :port)
-        remote-port)
-       (when-let* ((process (remote-forward-handle forward)))
-         (process-live-p process))))
 
 (defun lean--iv-proxy-port (root)
   "Return ROOT's live client-local infoview HTTP port."
@@ -441,7 +423,9 @@ records which one a page is actually showing.")
   "Push cursor position to the infoview xwidget (post-command hook).
 Uses a fast xwidget-webkit-execute-script path and an HTTP debounce fallback."
   (when (and (derived-mode-p 'lean-mode)
-             (buffer-file-name))
+             (buffer-file-name)
+             ;; Runs on every command: with no infoview there is no one to tell.
+             (lean--iv-active-p))
     (when-let* ((uri  (lean--iv-source-uri))
                 (lc   (lean--iv-current-lsp-position)))
       (let ((sig (list uri (car lc) (cdr lc))))
@@ -558,8 +542,7 @@ nothing answers on any more."
         (kill-buffer xbuf)
         (setq lean--iv--xwidget-buf nil)
         (remhash root lean--iv--xwidget-buffers)
-        (remhash root lean--iv--xwidget-ports)
-        (lean--iv-close-remote-forward root))
+        (remhash root lean--iv--xwidget-ports))
       (if (and (bound-and-true-p lsp-managed-mode)
                (or (not (lean--proxy-gateway-binding root))
                    (not proxy-port)))
@@ -590,17 +573,10 @@ the infoview xwidget page."
     (setq lean--iv--xwidget-buf nil)
     (remhash root lean--iv--xwidget-buffers)
     (remhash root lean--iv--xwidget-ports)
-    (lean--iv-close-remote-forward root)
     (lean--proxy-forget-gateway-binding root)
     (setq lean--iv--last-cursor nil)
     (lean--iv-reconnect-server)
     (lean--iv-open-current-buffer)))
-
-;; ── Buffer sync hook (no-op — lsp-mode owns doc sync through proxy) ──────────
-
-(defun lean-iv-setup-buffer-sync ()
-  "No-op: document sync is handled by lsp-mode through the proxy."
-  nil)
 
 ;; ── Teardown ──────────────────────────────────────────────────────────────────
 
@@ -624,7 +600,6 @@ the infoview xwidget page."
           (when (eq (gethash root lean--iv--xwidget-buffers) xbuf)
             (remhash root lean--iv--xwidget-buffers)
             (remhash root lean--iv--xwidget-ports))
-          (lean--iv-close-remote-forward root)
           (kill-buffer xbuf))))))
 
 (provide 'lang/lean/infoview)

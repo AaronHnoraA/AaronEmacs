@@ -79,9 +79,9 @@
   "Top-level startup files whose stale bytecode should fail health checks.")
 
 (defun +health--bundled-epdfinfo ()
-  "Return the configured bundled epdfinfo path."
-  (expand-file-name "elpa/pdf-tools-20260102.1101/epdfinfo"
-                    user-emacs-directory))
+  "Return the epdfinfo path of the installed PDF Tools, or nil."
+  (when-let* ((library (locate-library "pdf-info")))
+    (expand-file-name "epdfinfo" (file-name-directory library))))
 
 (defun +health--claude-cli-path ()
   "Return the configured Claude CLI path."
@@ -275,30 +275,26 @@ the dead path to the Noema server, which then loads no macros and no export
 templates at all.  Check them so that cannot happen quietly again.")
 
 (defun +health--noema-asset-link-report ()
-  "Return each shared Noema asset link and whether it still resolves."
+  "Return (LINK . PATH) for each shared Noema asset, PATH nil when dangling."
   (mapcar
    (lambda (relative)
      (let ((path (expand-file-name relative user-emacs-directory)))
-       (cons (intern relative)
-             (cond
-              ((file-exists-p path) t)
-              ((file-symlink-p path)
-               (format "dangling -> %s" (file-symlink-p path)))
-              (t "missing")))))
+       (cons (intern relative) (and (file-exists-p path) path))))
    +health-noema-asset-links))
 
 (defun +health--artifact-report ()
   "Return critical runtime artifact availability as an alist."
-  (list
-   (cons 'noema-asset-links (+health--noema-asset-link-report))
-   (cons 'epdfinfo
-         (let ((path (+health--bundled-epdfinfo)))
-           (and (file-executable-p path) path)))
-   (cons 'claude-cli
-         (let ((path (+health--claude-cli-path)))
-           (and path (file-executable-p path) path)))
-   (cons 'codex-cli
-         (+health--codex-executable))))
+  (append
+   (+health--noema-asset-link-report)
+   (list
+    (cons 'epdfinfo
+          (let ((path (+health--bundled-epdfinfo)))
+            (and path (file-executable-p path) path)))
+    (cons 'claude-cli
+          (let ((path (+health--claude-cli-path)))
+            (and path (file-executable-p path) path)))
+    (cons 'codex-cli
+          (+health--codex-executable)))))
 
 (defun +health--feature-report ()
   "Return lightweight feature/runtime checks for critical subsystems."
@@ -573,9 +569,7 @@ With NO-DISPLAY, refresh an already visible board without selecting it."
                    (insert "   "
                            (propertize (format "%-16s" (symbol-name (car entry)))
                                        'face 'aaron-ui-board-meta))
-                   (aaron-ui-board-insert-openable-path
-                    (if (stringp (cdr entry)) (cdr entry)
-                      (format "%s" (cdr entry))))
+                   (aaron-ui-board-insert-openable-path (cdr entry))
                    (insert "\n"))
                (aaron-ui-board-insert-field
                 (symbol-name (car entry)) "MISSING" 'aaron-ui-board-bad)))
@@ -713,8 +707,7 @@ With NO-DISPLAY, refresh an already visible board without selecting it."
 (define-key +health-mode-map (kbd "b") #'+compile/board)
 (define-key +health-mode-map (kbd "?") #'config-health-menu)
 
-;; Public M-x names are discoverable by purpose.  Keep `my/' names for
-;; internal callers and existing keybindings.
+;; Public M-x names are discoverable by purpose.
 (defalias 'config-health #'+health/report
   "Open the Emacs configuration health board.")
 (define-leader-key!

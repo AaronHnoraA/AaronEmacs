@@ -5,10 +5,10 @@
 ;; infoview content ($/lean/plainGoal) changes".
 ;;
 ;; Algorithm:
-;;  forward : exponential probe (1, 2, 4, …) within the current declaration's
-;;            syntactic bounds, then bisect to the exact boundary.
-;;  backward: find the start of the current same-goal run within bounds;
-;;            if already at the start, jump to the previous run's start.
+;;  forward : exponential probe (1, 2, 4, …), then bisect to the exact
+;;            boundary.
+;;  backward: find the start of the current same-goal run; if already at the
+;;            start, jump to the previous run's start.
 ;;
 ;; Syntactic fallback (lean-jump-syntactic-fallback):
 ;;  When goal info is nil at point (broken tactic, e.g. `rw [a, broken, b]'),
@@ -18,10 +18,8 @@
 ;;  intentionally NOT a separator: it would cause spurious jumps past the end
 ;;  of a complete proof into trailing blank lines.
 ;;
-;; Scoping: every search is capped to the current Lean declaration
-;; (theorem / lemma / def / example / …).  This prevents the exponential
-;; probing from escaping across declarations or into the file header when
-;; the server returns no info for error / incomplete positions.
+;; Scoping: a search runs to the end of the buffer, so M-] and M-[ cross
+;; declarations.
 ;;
 ;; Caching: probed positions → fingerprint, stored in a buffer-local hash
 ;; table keyed by buffer-chars-modified-tick.  Nil responses (server not
@@ -79,31 +77,6 @@ Keeps M-]/M-[ usable while debugging broken tactics."
       (setq lean-jump--cache-tick tick
             lean-jump--cache (make-hash-table :test #'eql)))
     lean-jump--cache))
-
-;;; ── Declaration bounds ───────────────────────────────────────────────────────
-
-(defconst lean-jump--decl-re
-  "^\\(?:theorem\\|lemma\\|def\\|abbrev\\|example\\|instance\\|class\\|structure\\|noncomputable\\|private\\|protected\\|end\\)"
-  "Regex matching the first word of a top-level Lean declaration or scope closer.")
-
-(defun lean-jump--decl-bounds ()
-  "Return (BEG . END) of the current Lean declaration, or buffer bounds.
-BEG is the start of the declaration keyword line.  END is the start of the
-next declaration, or point-max."
-  (save-excursion
-    (let* ((beg (progn
-                  ;; Move past the current line so we do not match a decl
-                  ;; keyword that the cursor itself sits on, then search back.
-                  (end-of-line)
-                  (if (re-search-backward lean-jump--decl-re nil t)
-                      (point)
-                    (point-min))))
-           (end (progn
-                  (goto-char (1+ beg))
-                  (if (re-search-forward lean-jump--decl-re nil t)
-                      (match-beginning 0)
-                    (point-max)))))
-      (cons beg end))))
 
 ;;; ── Fingerprint ──────────────────────────────────────────────────────────────
 

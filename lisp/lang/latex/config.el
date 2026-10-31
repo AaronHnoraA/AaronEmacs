@@ -221,13 +221,15 @@
 
 (defun +zotero-open-reference (payload)
   "Find citation PAYLOAD in Zotero and select it in the native application."
-  (let* ((explicit (string-trim (or (alist-get 'uri payload) "")))
+  (let* ((link (string-trim (or (alist-get 'uri payload) "")))
+         ;; Any other link says nothing Zotero can select; look the item up.
+         (explicit (if (string-prefix-p "zotero://" link) link ""))
          (cached (and (string-empty-p explicit)
                       (+zotero-reference-cache-get payload)))
          (result (and (string-empty-p explicit)
                       (not cached)
                       (+zotero-reference-result payload)))
-         (uri (or (and (string-match-p "\\`zotero://" explicit) explicit)
+         (uri (or (and (not (string-empty-p explicit)) explicit)
                   cached
                   (and result (+zotero-result-select-uri result)))))
     (unless uri
@@ -586,14 +588,14 @@ Point is left just past the closing brace.  Backslash escapes do not nest."
         (first t))
     (while (progn (skip-chars-forward " \t\n") (eq (char-after) ?\[))
       (let ((start (1+ (point))))
-        (when (search-forward "]" nil t)
+        ;; An unclosed group ends the scan; point must move for the loop to end.
+        (if (not (search-forward "]" nil 'move))
+            (goto-char (point-max))
           (when first
-            (setq arity (or (ignore-errors
-                              (string-to-number
-                               (string-trim
-                                (buffer-substring-no-properties
-                                 start (1- (point))))))
-                            0))
+            (setq arity (string-to-number
+                         (string-trim
+                          (buffer-substring-no-properties
+                           start (1- (point))))))
             (setq first nil)))))
     arity))
 
@@ -671,11 +673,11 @@ The shared files are sorted for stability; the user's global layer
                         (expand-file-name "~/.config/noema"))))
 
 (defun +latex--macro-signature (files)
-  "Return a value that changes when any file in FILES changes."
+  "Return a value that changes when FILES or the compatibility rules change."
   (mapcar (lambda (file)
             (cons file (file-attribute-modification-time
                         (file-attributes file))))
-          files))
+          (cons +latex-tex-compat-rules-file files)))
 
 (defun +latex-tex-compat-rules ()
   "Return the shared TeX compatibility rules as an alist, or nil."

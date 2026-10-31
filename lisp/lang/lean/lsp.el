@@ -350,12 +350,16 @@ Use `note' to show all Lean informational output, including `#check' results."
     (lean--schedule-progress-fringe-refresh)
     (lean--schedule-declaration-fringe-refresh)))
 
-(defun lean-sideline-window-size-h (_frame)
-  "Refresh Lean sideline overlays after window size changes."
-  (when (derived-mode-p 'lean-mode)
-    (lean-schedule-sideline-refresh)
-    (lean--schedule-progress-fringe-refresh)
-    (lean--schedule-declaration-fringe-refresh)))
+(defun lean-sideline-window-size-h (window)
+  "Refresh Lean sideline overlays after WINDOW changes size.
+A buffer-local entry of this hook gets the window, and runs in whatever
+buffer is current then, so the buffer has to come from WINDOW."
+  (when (window-live-p window)
+    (with-current-buffer (window-buffer window)
+      (when (derived-mode-p 'lean-mode)
+        (lean-schedule-sideline-refresh)
+        (lean--schedule-progress-fringe-refresh)
+        (lean--schedule-declaration-fringe-refresh)))))
 
 (defun lean-setup-sideline ()
   "Install Lean sideline rendering hooks in the current buffer."
@@ -380,10 +384,20 @@ Use `note' to show all Lean informational output, including `#check' results."
    ((listp diagnostics) (length diagnostics))
    (t 0)))
 
-(defun lean--diagnostics-buffer-for-uri (uri)
-  "Return the visited buffer for diagnostics URI, if any."
-  (when-let* ((path (ignore-errors (lsp--uri-to-path uri))))
-    (find-buffer-visiting path)))
+(defvar lean--uri-buffers (make-hash-table :test #'equal :weakness 'value)
+  "URI → buffer, since a server notification names its document by URI.")
+
+(defun lean--buffer-for-uri (uri)
+  "Return the buffer visiting URI, if any.
+Notifications arrive many times a second while Lean elaborates, and
+`find-buffer-visiting' asks the file's target for its true name."
+  (let ((buffer (gethash uri lean--uri-buffers)))
+    (if (buffer-live-p buffer)
+        buffer
+      (when-let* ((path (ignore-errors (lsp--uri-to-path uri)))
+                  (found (find-buffer-visiting path)))
+        (puthash uri found lean--uri-buffers)
+        found))))
 
 (defun lean--diagnostics-list (diagnostics)
   "Return DIAGNOSTICS as a list."
@@ -540,7 +554,7 @@ rather than by lsp-mode's generic diagnostics store."
          (diagnostics (lsp-get params :diagnostics))
          (version (lsp-get params :version))
          (incremental (eq (lsp-get params :isIncremental) t))
-         (buf (lean--diagnostics-buffer-for-uri uri)))
+         (buf (lean--buffer-for-uri uri)))
     (when (and (buffer-live-p buf)
                (with-current-buffer buf (derived-mode-p 'lean-mode)))
       (with-current-buffer buf
@@ -564,8 +578,7 @@ rather than by lsp-mode's generic diagnostics store."
 (defun lean-handle-file-progress (_workspace params)
   "Handle a `$/lean/fileProgress\=' PARAMS notification from the Lean server."
   (when-let* ((uri  (lsp-get (lsp-get params :textDocument) :uri))
-              (path (ignore-errors (lsp--uri-to-path uri)))
-              (buf  (find-buffer-visiting path)))
+              (buf  (lean--buffer-for-uri uri)))
     (with-current-buffer buf
       (let ((items (lean--file-progress-list (lsp-get params :processing))))
         (unless (equal items lean--file-progress)
@@ -573,7 +586,7 @@ rather than by lsp-mode's generic diagnostics store."
           (lean--schedule-notification-flush)
           (when (fboundp 'lean-dev-log)
             (lean-dev-log "fileProgress: file=%s items=%d"
-                          (file-name-nondirectory path)
+                          (buffer-name)
                           (length lean--file-progress))))))))
 
 ;; ── Fringe overlays ───────────────────────────────────────────────────────────

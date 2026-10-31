@@ -466,7 +466,7 @@
       (when new-file
         (insert (+performance--record-header) "\n"))
       (insert (+performance--record-line sample) "\n")
-      (append-to-file (point-min) (point-max) file))
+      (write-region (point-min) (point-max) file t 'silent))
     (when (called-interactively-p 'interactive)
       (message "Performance record saved to %s" file))
     file))
@@ -1013,8 +1013,11 @@ This samples once and does not mutate or display the performance board."
   (let ((text
          (cond
           (+performance--view-state
-           (let ((sample +performance--last-sample)
-                 (inspected +performance--inspected-buffer)
+           ;; The Activity tab shows without ever sampling this page.
+           (let ((sample (or +performance--last-sample
+                             (+performance--sample)))
+                 (inspected (and (buffer-live-p +performance--inspected-buffer)
+                                 +performance--inspected-buffer))
                  (auto +performance--auto-refresh-timer)
                  (recording +performance--recording))
              (with-temp-buffer

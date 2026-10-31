@@ -76,11 +76,6 @@
   :type 'boolean
   :group '+compile)
 
-(config-defvar +native-comp-enable-deferred nil
-  "If non-nil, allow deferred native compilation when Emacs supports it."
-  :type 'boolean
-  :group '+compile)
-
 (config-defvar +native-comp-pop-log nil
   "If non-nil, display the native compilation log buffer after queueing jobs."
   :type 'boolean
@@ -97,7 +92,7 @@
   :group '+compile)
 
 (config-defvar +native-comp-speed nil
-  "Optimization level used by native compilation when `comp-speed' exists."
+  "Value assigned to `native-comp-speed' when available."
   :type 'integer
   :group '+compile)
 
@@ -116,6 +111,33 @@
 
 (defvar +native-comp--progress-start-time nil
   "When native compilation progress reporting started.")
+
+(defun +compile--run-health-check (command)
+  "Run the health COMMAND, which lives in a module that may be missing."
+  (if (fboundp command)
+      (funcall command)
+    (user-error "Health helpers are not loaded yet")))
+
+(defvar-keymap +compile-board-mode-map
+  :parent aaron-ui-board-mode-map
+  :doc "Keymap for `+compile-board-mode', over the common board keys."
+  "b" #'+compile/byte-compile-config
+  "B" (cmd! (+compile/byte-compile-config t))
+  "n" #'+compile/native-compile-config
+  "N" (cmd! (+compile/native-compile-config t))
+  "f" #'+compile/byte-compile-current-file
+  "F" #'+compile/native-compile-current-file
+  "c" #'+compile/clean-byte-artifacts
+  "C" #'+compile/clean-native-artifacts
+  "X" #'+native-comp/reset-cache
+  "P" #'+native-comp/purge-stale-versions
+  "l" #'+native-comp/open-log
+  "o" #'+compile/open-docs
+  "t" #'+compile/toggle-auto-native-on-save
+  "?" #'config-compile-menu
+  "s" (cmd! (+compile--run-health-check '+health/startup-check))
+  "y" (cmd! (+compile--run-health-check '+health/byte-compile-check))
+  "Y" (cmd! (+compile--run-health-check '+health/native-compile-check)))
 
 (define-derived-mode +compile-board-mode aaron-ui-board-mode "Compile-Board"
   "Major mode for the compile management board.")
@@ -217,23 +239,22 @@ Skips test suites and example directories that ship with some packages."
   (interactive)
   (when (boundp 'package-native-compile)
     (setq package-native-compile +package-enable-native-compile))
-  (when (require 'comp nil t)
-    (when (boundp 'native-comp-jit-compilation)
-      (setq native-comp-jit-compilation +native-comp-enable-jit))
-    (when (boundp 'native-comp-deferred-compilation)
-      (setq native-comp-deferred-compilation +native-comp-enable-deferred))
-    (when (boundp 'native-comp-async-report-warnings-errors)
-      (setq native-comp-async-report-warnings-errors
-            +native-comp-async-report-policy))
-    (when (boundp 'native-comp-verbose)
-      (setq native-comp-verbose +native-comp-verbose))
-    (when (boundp 'native-comp-warning-on-missing-source)
-      (setq native-comp-warning-on-missing-source
-            +native-comp-warning-on-missing-source))
-    (when (boundp 'comp-speed)
-      (setq comp-speed +native-comp-speed))))
+  (when (boundp 'native-comp-jit-compilation)
+    (setq native-comp-jit-compilation +native-comp-enable-jit))
+  ;; These belong to `comp' and `comp-run', which load on first use.
+  (pcase-dolist (`(,variable . ,value)
+                 `((native-comp-async-report-warnings-errors
+                    . ,+native-comp-async-report-policy)
+                   (native-comp-verbose . ,+native-comp-verbose)
+                   (native-comp-warning-on-missing-source
+                    . ,+native-comp-warning-on-missing-source)
+                   (native-comp-speed . ,+native-comp-speed)))
+    (when (boundp variable)
+      (set variable value))))
 
 (+compile/apply-runtime-settings)
+(after! comp-run (+compile/apply-runtime-settings))
+(after! comp (+compile/apply-runtime-settings))
 
 (defun +native-comp-available-p ()
   "Return non-nil if this Emacs supports native compilation."
@@ -656,9 +677,8 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
           (format "%S" +native-comp-async-report-policy)))
        (aaron-ui-board-insert-field
         "comp-speed"
-        (if (boundp 'comp-speed)
-            (number-to-string comp-speed)
-          (number-to-string +native-comp-speed)))
+        (number-to-string
+         (if (boundp 'native-comp-speed) native-comp-speed +native-comp-speed)))
        (aaron-ui-board-insert-field "Queue size" (number-to-string (+native-comp--queue-size)))
        (aaron-ui-board-insert-field
         "Cached .eln" (number-to-string (+compile--count-cache-eln-files)))
@@ -716,41 +736,6 @@ With prefix arg FORCE, delete the dedicated ELN cache first."
                   exec-path (default-value 'exec-path))
       (aaron-ui-board-set-header "Compile Board" 'compile)
       (setq-local aaron-ui-board-refresh-function #'+compile-board/refresh)
-      (let ((map (copy-keymap special-mode-map)))
-        (use-local-map map)
-        (local-set-key (kbd "g") #'+compile-board/refresh)
-        (local-set-key (kbd "b") #'+compile/byte-compile-config)
-        (local-set-key (kbd "B") (lambda () (interactive) (+compile/byte-compile-config t)))
-        (local-set-key (kbd "n") #'+compile/native-compile-config)
-        (local-set-key (kbd "N") (lambda () (interactive) (+compile/native-compile-config t)))
-        (local-set-key (kbd "f") #'+compile/byte-compile-current-file)
-        (local-set-key (kbd "F") #'+compile/native-compile-current-file)
-        (local-set-key (kbd "c") #'+compile/clean-byte-artifacts)
-        (local-set-key (kbd "C") #'+compile/clean-native-artifacts)
-        (local-set-key (kbd "X") #'+native-comp/reset-cache)
-        (local-set-key (kbd "P") #'+native-comp/purge-stale-versions)
-        (local-set-key (kbd "l") #'+native-comp/open-log)
-        (local-set-key (kbd "o") #'+compile/open-docs)
-        (local-set-key (kbd "t") #'+compile/toggle-auto-native-on-save)
-        (local-set-key (kbd "?") #'config-compile-menu)
-        (local-set-key (kbd "s")
-                       (lambda ()
-                         (interactive)
-                         (if (fboundp '+health/startup-check)
-                             (+health/startup-check)
-                           (user-error "Health helpers are not loaded yet"))))
-        (local-set-key (kbd "y")
-                       (lambda ()
-                         (interactive)
-                         (if (fboundp '+health/byte-compile-check)
-                             (+health/byte-compile-check)
-                           (user-error "Health helpers are not loaded yet"))))
-        (local-set-key (kbd "Y")
-                       (lambda ()
-                         (interactive)
-                         (if (fboundp '+health/native-compile-check)
-                             (+health/native-compile-check)
-                           (user-error "Health helpers are not loaded yet")))))
       (+compile-board/refresh))
     (pop-to-buffer buffer)))
 

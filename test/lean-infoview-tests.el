@@ -42,28 +42,6 @@
                       binding)))))
       (delete-directory directory t))))
 
-(ert-deftest lean-infoview-remote-cache-keeps-logical-target-identity ()
-  "Target HOME expansion must not turn a remote cache into a client path."
-  (let (seen)
-    (cl-letf (((symbol-function 'lean--proxy-bundle-fingerprint)
-               (lambda () "0123456789abcdefdeadbeef"))
-              ((symbol-function 'remote-file-name-target)
-               (lambda (root)
-                 (should (equal root "/fs:box:/work/project/"))
-                 "box"))
-              ((symbol-function 'remote-expand-file-name)
-               (lambda (name directory target)
-                 (setq seen (list name directory target))
-                 "/fs:box:/home/me/.cache/emacs/lean-infoview/0123456789abcdef/")))
-      (should
-       (equal
-        (lean--remote-proxy-directory "/fs:box:/work/project/")
-        "/fs:box:/home/me/.cache/emacs/lean-infoview/0123456789abcdef/"))
-      (should
-       (equal seen
-              '("~/.cache/emacs/lean-infoview/0123456789abcdef/"
-                nil "box"))))))
-
 (ert-deftest lean-infoview-node-always-resolves-on-the-client ()
   (let ((remote--buffer-base-process-environment '("PATH=/client/bin"))
         (remote--buffer-base-exec-path '("/client/bin"))
@@ -250,6 +228,51 @@
                  (setq seen (list server interactive)))))
       (lean--iv-reconnect-eglot)
       (should (equal seen '(current-server t))))))
+
+(ert-deftest lean-sideline-size-change-reads-the-window-buffer ()
+  "The buffer-local hook runs in any buffer; the window names the Lean one."
+  (let ((lean-buffer (generate-new-buffer " *lean size*"))
+        refreshed)
+    (unwind-protect
+        (save-window-excursion
+          (with-current-buffer lean-buffer (lean-mode))
+          (set-window-buffer (selected-window) lean-buffer)
+          (cl-letf (((symbol-function 'lean-schedule-sideline-refresh)
+                     (lambda () (push (current-buffer) refreshed)))
+                    ((symbol-function 'lean--schedule-progress-fringe-refresh)
+                     #'ignore)
+                    ((symbol-function 'lean--schedule-declaration-fringe-refresh)
+                     #'ignore))
+            (with-temp-buffer
+              (lean-sideline-window-size-h (selected-window)))
+            (should (equal refreshed (list lean-buffer)))))
+      (kill-buffer lean-buffer))))
+
+(ert-deftest lean-infoview-root-is-walked-once-per-file ()
+  "The cursor hook asks for the root on every command."
+  (let ((walks 0))
+    (with-temp-buffer
+      (setq buffer-file-name "/tmp/lean-root-cache/A.lean")
+      (cl-letf (((symbol-function 'lean-project-root)
+                 (lambda () (cl-incf walks) "/tmp/lean-root-cache/")))
+        (should (equal (lean--iv-project-root) "/tmp/lean-root-cache/"))
+        (lean--iv-project-root)
+        (should (= walks 1))
+        (setq buffer-file-name "/tmp/other/B.lean")
+        (lean--iv-project-root)
+        (should (= walks 2)))
+      (setq buffer-file-name nil))))
+
+(ert-deftest lean-infoview-cursor-hook-is-silent-without-an-infoview ()
+  "With no infoview the hook converts no position and walks no directory."
+  (with-temp-buffer
+    (setq major-mode 'lean-mode
+          buffer-file-name "/tmp/lean-cursor/A.lean")
+    (cl-letf (((symbol-function 'lean--iv-active-p) #'ignore)
+              ((symbol-function 'lean--iv-source-uri)
+               (lambda () (ert-fail "converted a position for no one"))))
+      (lean-iv-sync-cursor-h))
+    (setq buffer-file-name nil)))
 
 (provide 'lean-infoview-tests)
 ;;; lean-infoview-tests.el ends here

@@ -41,7 +41,7 @@
    (+compile-auto-native-on-save) (+native-comp-warning-on-missing-source)
    (+native-comp-speed . 2) (+native-comp-verbose . 0)
    (+native-comp-async-report-policy . silent) (+native-comp-pop-log)
-   (+native-comp-enable-deferred . t) (+native-comp-enable-jit . t)
+   (+native-comp-enable-jit . t)
    (+package-enable-native-compile . t)
    (+compile-third-party-directories "site-lisp")
    (+compile-target-directories "lisp")

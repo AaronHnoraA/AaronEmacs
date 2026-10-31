@@ -308,5 +308,14 @@
           (should-error (aaron/reload-init) :type 'end-of-file))
       (delete-file user-init-file))))
 
+(ert-deftest health-reports-a-dangling-noema-asset-link-as-missing ()
+  "A dangling link shows as a missing artifact, not as an openable path."
+  (let ((+health-noema-asset-links '("etc/no-such-noema-asset")))
+    (should (equal (+health--noema-asset-link-report)
+                   '((etc/no-such-noema-asset))))
+    (should (assq 'etc/no-such-noema-asset (+health--artifact-report)))
+    (should-not (cdr (assq 'etc/no-such-noema-asset
+                           (+health--artifact-report))))))
+
 (provide 'init-health-tests)
 ;;; init-health-tests.el ends here

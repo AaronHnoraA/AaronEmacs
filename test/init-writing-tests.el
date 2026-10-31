@@ -284,6 +284,10 @@ the whole preamble and with it every preview."
   (should (equal (+latex-tex-compat-rewrite "\\begin{align} a \\end{align}")
                  "\\begin{align} a \\end{align}")))
 
+(ert-deftest +latex-unclosed-optional-argument-ends-the-parse ()
+  "A macro file cut short inside `[' must not hang the preview."
+  (should-not (+latex-parse-macro-definitions "\\newcommand{\\x}[1")))
+
 (ert-deftest +latex-noema-asset-links-resolve ()
   "Every Noema asset link must resolve; a dangling one silently disables
 global macros and export templates on the Emacs side."
