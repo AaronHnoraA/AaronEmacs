@@ -35,6 +35,8 @@ static id grip_global_monitor = nil;
 static const char *grip_last_drag = "none";
 static NSPoint grip_press;
 static NSPoint grip_origin;
+static NSTimer *grip_drag_timer = nil;
+static BOOL grip_shown = NO;
 
 static BOOL
 top_level_emacs_window (NSWindow *window)
@@ -43,9 +45,13 @@ top_level_emacs_window (NSWindow *window)
           && [NSStringFromClass ([window class]) hasPrefix:@"Emacs"]);
 }
 
-/* Hand the drag to the window server, which moves the frame without Emacs's
-   main thread and sends the grip nothing.  Should it refuse a press that began
-   in another window, the grip gets the drag events and follows them.  */
+static void grip_end_drag (void);
+
+/* Dragging the frame on Emacs's main thread falls behind whenever Lisp is busy,
+   and the window server refuses a press that landed in another window.  So it
+   drags the grip, the window really pressed, with the frame as the grip's child
+   for that drag: the two move as one group without Emacs.  Should it still
+   refuse, the grip gets the drag events and follows them.  */
 @interface AaronFrameGrip : NSView
 @end
 
@@ -79,26 +85,29 @@ top_level_emacs_window (NSWindow *window)
   if (!window)
     return;
   grip_press = NSEvent.mouseLocation;
-  grip_origin = window.frame.origin;
+  grip_origin = grip_panel.frame.origin;
   grip_last_drag = "window-server";
-  [window performWindowDragWithEvent:
-            [NSEvent mouseEventWithType:event.type
-                               location:[window convertPointFromScreen:grip_press]
-                          modifierFlags:event.modifierFlags
-                              timestamp:event.timestamp
-                           windowNumber:window.windowNumber
-                                context:nil
-                            eventNumber:event.eventNumber
-                             clickCount:event.clickCount
-                               pressure:event.pressure]];
+  [window removeChildWindow:grip_panel];
+  [grip_panel addChildWindow:window ordered:NSWindowBelow];
+  /* Depending on the system the drag returns at once or at the release, and
+     the release reaches neither the view nor a monitor, so ask for it.  */
+  grip_drag_timer
+    = [NSTimer timerWithTimeInterval:0.05 repeats:YES
+                               block:^(NSTimer *timer) {
+        if (NSEvent.pressedMouseButtons == 0)
+          grip_end_drag ();
+      }];
+  [NSRunLoop.mainRunLoop addTimer:grip_drag_timer
+                          forMode:NSRunLoopCommonModes];
+  [grip_panel performWindowDragWithEvent:event];
 }
 
 - (void)mouseDragged:(NSEvent *)event
 {
   NSPoint now = NSEvent.mouseLocation;
   grip_last_drag = "manual";
-  [grip_window setFrameOrigin:NSMakePoint (grip_origin.x + now.x - grip_press.x,
-                                           grip_origin.y + now.y - grip_press.y)];
+  [grip_panel setFrameOrigin:NSMakePoint (grip_origin.x + now.x - grip_press.x,
+                                          grip_origin.y + now.y - grip_press.y)];
 }
 @end
 
@@ -110,7 +119,7 @@ grip_frame (NSWindow *window)
   CGFloat y = NSMaxY (frame) + GRIP_GAP;
   if (y + GRIP_HEIGHT > top)
     y = NSMaxY (frame) - GRIP_HEIGHT - GRIP_GAP;
-  return NSMakeRect (NSMidX (frame) - GRIP_WIDTH / 2.0, y,
+  return NSMakeRect (round (NSMidX (frame) - GRIP_WIDTH / 2.0), y,
                      GRIP_WIDTH, GRIP_HEIGHT);
 }
 
@@ -130,16 +139,42 @@ grip_create (void)
   grip_panel.opaque = NO;
   grip_panel.backgroundColor = NSColor.clearColor;
   grip_panel.hasShadow = YES;
+  grip_panel.animationBehavior = NSWindowAnimationBehaviorNone;
+  grip_panel.alphaValue = 0;
+  grip_panel.ignoresMouseEvents = YES;
   grip_panel.contentView
     = [[AaronFrameGrip alloc]
         initWithFrame:NSMakeRect (0, 0, GRIP_WIDTH, GRIP_HEIGHT)];
 }
 
 static void
+grip_end_drag (void)
+{
+  [grip_drag_timer invalidate];
+  grip_drag_timer = nil;
+  if (grip_window.parentWindow != grip_panel)
+    return;
+  [grip_panel removeChildWindow:grip_window];
+  [grip_window addChildWindow:grip_panel ordered:NSWindowAbove];
+}
+
+/* The grip stays a child of its window, and showing it only changes its alpha:
+   ordering a window in and out on every approach is what flashes.  */
+static void
 grip_hide (void)
+{
+  grip_shown = NO;
+  grip_panel.alphaValue = 0;
+  grip_panel.ignoresMouseEvents = YES;
+}
+
+static void
+grip_detach (void)
 {
   if (!grip_window)
     return;
+  grip_end_drag ();
+  grip_hide ();
   [grip_window removeChildWindow:grip_panel];
   [grip_panel orderOut:nil];
   grip_window = nil;
@@ -149,9 +184,16 @@ static void
 grip_show (NSWindow *window)
 {
   grip_create ();
-  grip_window = window;
-  [grip_panel setFrame:grip_frame (window) display:YES];
-  [window addChildWindow:grip_panel ordered:NSWindowAbove];
+  if (grip_window != window)
+    {
+      grip_detach ();
+      grip_window = window;
+      [window addChildWindow:grip_panel ordered:NSWindowAbove];
+    }
+  [grip_panel setFrameOrigin:grip_frame (window).origin];
+  grip_panel.ignoresMouseEvents = NO;
+  grip_panel.alphaValue = 1;
+  grip_shown = YES;
 }
 
 static NSRect
@@ -169,9 +211,9 @@ grip_edge_window (NSPoint point)
 {
   for (NSWindow *window in NSApp.windows)
     {
-      if (!top_level_emacs_window (window) || !window.visible
-          || (window.styleMask & NSWindowStyleMaskFullScreen)
-          || !NSPointInRect (point, grip_band (window)))
+      if (!NSPointInRect (point, grip_band (window))
+          || !top_level_emacs_window (window) || !window.visible
+          || (window.styleMask & NSWindowStyleMaskFullScreen))
         continue;
       NSPoint edge = NSMakePoint (point.x, NSMaxY (window.frame) - 1);
       NSWindow *above
@@ -191,12 +233,19 @@ grip_pointer_moved (void)
 {
   if (NSEvent.pressedMouseButtons != 0)
     return;
+  grip_end_drag ();
   NSPoint point = NSEvent.mouseLocation;
-  if (grip_window)
+  if (grip_window
+      && (!grip_window.visible
+          || (grip_window.styleMask & NSWindowStyleMaskFullScreen)))
+    grip_detach ();
+  if (grip_shown)
     {
+      /* Wider than the band that shows the grip, or a pointer resting on the
+         band's edge would flip it on and off.  */
       NSRect keep = NSUnionRect (NSInsetRect (grip_panel.frame, -10, -6),
-                                 grip_band (grip_window));
-      if (!NSPointInRect (point, keep) || !grip_window.visible)
+                                 NSInsetRect (grip_band (grip_window), 0, -6));
+      if (!NSPointInRect (point, keep))
         grip_hide ();
       return;
     }
@@ -227,7 +276,7 @@ grip_install (BOOL enabled)
       [NSEvent removeMonitor:grip_local_monitor];
       [NSEvent removeMonitor:grip_global_monitor];
       grip_local_monitor = grip_global_monitor = nil;
-      grip_hide ();
+      grip_detach ();
     }
 }
 
