@@ -306,7 +306,7 @@ Earlier entries have higher precedence."
     evil-window-map)
   "Keymaps to print first for `general-describe-keybindings'."
   :group 'general
-  :type '(repeat sybmol))
+  :type '(repeat symbol))
 
 (defcustom general-describe-update-previous-definition 'on-change
   "Whether to update the previous definition when a key is bound.
@@ -361,7 +361,7 @@ local keybindings.")
 
 (defvar-local general--maps-alist-updated nil
   "Whether `general-maps-alist' has been set correctly for the current buffer.")
-(put 'general-maps-alist 'permanent-local t)
+(put 'general--maps-alist-updated 'permanent-local t)
 
 (declare-function evil-make-intercept-map "evil-core")
 (defun general-override-make-intercept-maps (_sym states)
@@ -511,6 +511,12 @@ non-nil."
           (if (and (numberp def) (= def 1))
               nil
             def))))))
+
+(defvar general-record-keybindings nil
+  "Whether to record bindings for `general-describe-keybindings'.
+Recording took 70% of `general-define-key' at startup, for one report nobody
+reads: `module-board' already shows who bound what.  Set it non-nil before the
+bindings of interest are made.")
 
 (defun general--record-keybindings (keymap state maps &optional minor-mode-p)
   "For KEYMAP and STATE, add MAPS to `general-keybindings'.
@@ -800,7 +806,7 @@ run on it)."
                                "\\'"))
            (prefix (plist-get kargs :prefix))
            (binding (or (when (and (plist-get edef :def)
-                                   (not (plist-get edef :keymp)))
+                                   (not (plist-get edef :keymap)))
                           (plist-get edef :def))
                         (when (and prefix
                                    (string= key prefix))
@@ -1140,9 +1146,10 @@ with by calling `general--define-key-dispatch'."
         (when maps
           (setq maps (general--parse-maps state keymap maps kargs))
           ;; NOTE: :definer 'minor-mode cannot be specified locally
-          (general--record-keybindings keymap state maps
-                                       (eq (cl-getf kargs :definer)
-                                           'minor-mode))
+          (when general-record-keybindings
+            (general--record-keybindings keymap state maps
+                                         (eq (cl-getf kargs :definer)
+                                             'minor-mode)))
           (general--define-key-dispatch state keymap maps kargs))))))
 
 ;; * Functions With Keyword Arguments
