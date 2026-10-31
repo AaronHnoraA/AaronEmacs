@@ -86,6 +86,10 @@
   `macos-open-at-point` 用系统应用打开光标处的链接或文件；`r` / `R`
   （`macos-reveal-in-finder` / `macos-reveal-project-in-finder`）在 Finder 中选中
   当前文件（Dired 里是光标处的条目）或项目根目录，其他 target 上的文件会被拒绝。
+- 把文件拖进 Emacs：普通窗口打开文件；Eshell、shell、term 和 Portal 终端在提示符处
+  插入转义后的路径，不执行；Dired 和 Org 按各自方式处理；拖入链接走 `aaron-open`
+  的路由。Emacs 在后台时，从 Finder 打开文件或系统要求退出都会先把 Emacs 显示出来。
+  规则见 [macos-boundary.md](../design/macos-boundary.md)。
 - `M-x mouse-actions-menu`（或外设映射的 `H-C-M-m`）
   打开可点击的常用动作板。代码和文字的右键菜单按所在位置提供动作；
   点击 mode line 的 Git 状态段打开 Git 菜单，快速切换窗口后也可立即再次打开。

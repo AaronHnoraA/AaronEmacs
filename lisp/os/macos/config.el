@@ -200,105 +200,6 @@ Use nil for a regular window, `maximized' for a maximized window, or
 
 (defvar pixel-scroll-precision-mode)
 
-(defun +macos-open--normalize-target (target)
-  "Return TARGET in a form suitable for the macOS open command."
-  (let* ((target (string-trim (substring-no-properties target)))
-         (target
-          (if (and (string-prefix-p "fs://" target)
-                   (fboundp 'remote-uri-to-file-name))
-              (remote-uri-to-file-name target)
-            target))
-         (expanded (and (not (string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" target))
-                        (aaron-open-resolve-file-name target)))
-         (expanded
-          (if (and expanded
-                   (fboundp 'remote-fs-file-name-p)
-                   (remote-fs-file-name-p expanded))
-              (or (remote-client-file-name expanded)
-                  (user-error
-                   "macOS open cannot directly access target %s"
-                   (remote-file-name-target expanded)))
-            expanded)))
-    (cond
-     ((string-empty-p target) nil)
-     ((string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" target) target)
-     ((and expanded (file-exists-p expanded)) expanded)
-     ((and expanded (file-name-absolute-p target)) expanded)
-     (t target))))
-
-(defun +macos/open-target (target)
-  "Open TARGET with macOS open."
-  (interactive "sOpen with macOS open: ")
-  (unless (eq system-type 'darwin)
-    (user-error "macOS open is only available on Darwin"))
-  (unless (executable-find "open")
-    (user-error "Cannot find macOS open command"))
-  (if-let* ((target (+macos-open--normalize-target target)))
-      (let ((process-connection-type nil))
-        (start-process "macos-open" nil "open" target)
-        (message "open: %s" target))
-    (user-error "No target to open")))
-
-(defun +macos/open-url (url)
-  "Open URL with macOS open."
-  (interactive (browse-url-interactive-arg "URL: "))
-  (+macos/open-target
-   (if (string-match-p "\\`[a-zA-Z][a-zA-Z0-9+.-]*:" url)
-       url
-     (concat "https://" url))))
-
-(defun +macos/open-file (file)
-  "Open FILE with macOS open."
-  (interactive "fOpen file with macOS open: ")
-  (+macos/open-target file))
-
-(defun +macos-open--region-target ()
-  "Return the active region as an open target, or nil."
-  (when (use-region-p)
-    (string-trim
-     (buffer-substring-no-properties (region-beginning) (region-end)))))
-
-(defun +macos-open--org-link-target ()
-  "Return the Org link at point as an open target, or nil."
-  (when (and (derived-mode-p 'org-mode)
-             (fboundp 'org-element-context))
-    (let ((context (ignore-errors (org-element-context))))
-      (when (eq (ignore-errors (org-element-type context)) 'link)
-        (let ((link-type (org-element-property :type context))
-              (path (org-element-property :path context)))
-          (cond
-           ((member link-type '("http" "https"))
-            (concat link-type ":" path))
-           ((equal link-type "file")
-            (aaron-open-resolve-file-name path))
-           ((and link-type path
-                 (not (member link-type '("custom-id" "fuzzy" "id"))))
-            (concat link-type ":" path))))))))
-
-(defun +macos-open--target-at-point ()
-  "Return a file or link target near point."
-  (or (+macos-open--region-target)
-      (+macos-open--org-link-target)
-      (thing-at-point 'url t)
-      (and (derived-mode-p 'dired-mode)
-           (ignore-errors (dired-get-file-for-visit)))
-      (let ((file (thing-at-point 'filename t)))
-        (and file
-             (file-exists-p (aaron-open-resolve-file-name file))
-             file))
-      (and (fboundp '+browser-current-url)
-           (ignore-errors (+browser-current-url)))
-      buffer-file-name))
-
-(defun macos-open-at-point ()
-  "Open the file or link at point with macOS open.
-When point has no obvious target, open the current browser URL or current
-buffer file."
-  (interactive)
-  (if-let* ((target (+macos-open--target-at-point)))
-      (+macos/open-target target)
-    (call-interactively #'+macos/open-target)))
-
 (defun +macos-schedule-idle-gc-after-focus-change ()
   "Queue idle GC when the selected frame loses focus."
   (unless (frame-focus-state)
@@ -513,28 +414,6 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
 (add-hook 'window-setup-hook #'+macos-apply-startup-window-state)
 
 
-(defun +macos/copy-file-to-clipboard ()
-  "Put the current file itself on the macOS clipboard.
-Pasting into another application (a chat, Mail, Finder) attaches the file
-rather than inserting its path.  Only a file this machine can read
-directly qualifies; a file on another target is refused."
-  (interactive)
-  (let* ((file (or buffer-file-name (user-error "Current buffer is not visiting a file")))
-         (path (or (remote-client-file-name file)
-                   (user-error "Not a file on this machine: %s" file)))
-         ;; osascript is a process of this machine, whatever the buffer's target.
-         (default-directory temporary-file-directory))
-    (unless (file-exists-p path)
-      (user-error "File does not exist: %s" path))
-    (unless (eql 0 (call-process "osascript" nil nil nil "-e"
-                                 (format "set the clipboard to (POSIX file %s)"
-                                         (prin1-to-string path))))
-      (user-error "Failed to copy file to clipboard: %s" path))
-    (message "Copied file to clipboard: %s" path)))
-
-(define-leader-key! "fg" '(:def +macos/copy-file-to-clipboard
-                           :which-key "copy file to clipboard"))
-
 ;; From Doom: macOS keeps no locate database (/var/db/locate.database is never
 ;; built) and its BSD locate rejects GNU's --ignore-case, so `locate' and
 ;; `consult-locate' found nothing.  Spotlight's file-name index answers instead.
@@ -552,6 +431,7 @@ its query parser there, so the shell drops it."
   (setq consult-locate-args "mdfind -name"))
 
 (require 'os/macos/input)
+(require 'os/macos/system)
 
 (provide 'os/macos/config)
 ;;; os/macos/config.el ends here

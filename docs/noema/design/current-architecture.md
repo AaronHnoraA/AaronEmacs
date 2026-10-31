@@ -183,6 +183,12 @@ EventSource 重连也会比较 generation。未保存的 remote note 或 scratch
 
 ## Node host
 
+Emacs 托管的 host 只服务本机自己的客户端，边界只有一条
+（`server/infrastructure/local-boundary.mjs`）：`Host` 必须是回环名，`Origin` 必须
+缺失或等于 host 自身；`/v1/` 路由自带 bearer token，额外接受浏览器扩展的 `Origin`。
+HTTP 和 Jupyter WebSocket 都走这一条。这里不再加 token，同机的其他进程本来就和
+host 同权限。`server` 模式面向外部，不适用这条规则。
+
 ```text
 server/
   Features/*/api.mjs            feature controller / channel registration

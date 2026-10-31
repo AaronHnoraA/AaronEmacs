@@ -318,6 +318,11 @@ This config already has maintenance and workflow entry points. Reuse them:
   `+performance-hook-snapshot`, and `+performance-noema-snapshot`.
   Prefer these APIs over asking for screenshots when investigating runtime or
   Noema performance.  In the watch buffer, `y` copies the full current report.
+- macOS boundary: `lisp/os/macos/system.el` is the one layer between Emacs and
+  the system (`docs/design/macos-boundary.md`).  Finder opens, quit requests,
+  drops, `open`, Finder reveal, file clipboard and notifications go through it.
+  Declare what a drop on a mode means with `set-file-drop-handler!`; do not
+  call `open` or `osascript` from a consumer.
 - Background application: `bin/emacs-app` is the single entry point for
   running Emacs as a long-lived background app on macOS (start, restart,
   kill, show, hide, status, state, quit, whitelisted actions, frame list and

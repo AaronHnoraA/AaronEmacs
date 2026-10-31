@@ -254,6 +254,13 @@ numbered sessions."
   "Delete WIN wrapper."
   (ignore-errors (delete-window win)))
 
+(defun +shell--send-dropped-paths (files)
+  "Send the dropped FILES to this terminal as typed text."
+  (term-send-raw-string (+macos-drop-text files)))
+
+(set-file-drop-handler! 'shell-mode #'+macos-drop-insert-paths)
+(set-file-drop-handler! 'term-mode #'+shell--send-dropped-paths)
+
 ;; General term mode
 ;;
 ;; If you use bash, directory track is supported natively.

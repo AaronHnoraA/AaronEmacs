@@ -43,7 +43,7 @@ macOS `open', Linux `xdg-open', Windows shell open, or `browse-url' fallback."
 
 (declare-function eww-browse-url "eww" (url &optional new-window))
 (declare-function eww "eww" (url &optional new-buffer))
-(declare-function +macos/open-target "os/macos/config" (target))
+(declare-function +macos/open-target "os/macos/system" (target))
 (declare-function +xwidget/open-url "app/browser/config" (url &rest args))
 (declare-function +portal--ensure "term/portal/config" ())
 (declare-function portal-open-url "portal-web" (url))

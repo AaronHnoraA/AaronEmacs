@@ -728,6 +728,12 @@ is omitted from the choices."
   "Send TEXT to the selected Portal terminal."
   (portal--terminal-paste (+portal--terminal-target) text))
 
+(defun +portal--send-dropped-paths (files)
+  "Paste the dropped FILES into the selected Portal terminal."
+  (+portal-send-text (+macos-drop-text files)))
+
+(set-file-drop-handler! 'portal-terminal-mode #'+portal--send-dropped-paths)
+
 (defun +portal/vim-write ()
   "Send Vim's write command to the selected Portal terminal."
   (interactive)

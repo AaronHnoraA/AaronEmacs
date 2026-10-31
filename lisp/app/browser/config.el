@@ -15,7 +15,7 @@
 (require 'easymenu)
 (require 'aaron-open)
 
-(declare-function +macos/open-url "os/macos/config" (url))
+(declare-function +macos/open-url "os/macos/system" (url))
 (declare-function +windows/close-window "ui/windows/config" ())
 (declare-function aaron-open-normalize-backend "aaron-open" (backend))
 (declare-function aaron/open-eww-url "aaron-open" (url &optional reuse-selected))

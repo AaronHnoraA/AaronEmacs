@@ -609,6 +609,12 @@ the undo history of a buffer that lives for weeks."
   (add-hook 'eshell-preoutput-filter-functions #'+eshell-normalize-output)
   (add-hook 'eshell-mode-hook #'+eshell-setup-h))
 
+(defun +eshell--insert-dropped-paths (files)
+  "Insert the dropped FILES at the prompt in Eshell's own quoting."
+  (+macos-drop-insert-paths files #'eshell-quote-argument))
+
+(set-file-drop-handler! 'eshell-mode #'+eshell--insert-dropped-paths)
+
 
 ;;; Interactive
 

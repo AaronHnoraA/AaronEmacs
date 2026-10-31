@@ -548,6 +548,22 @@ Return non-nil only for the first settlement."
 (defvar remote-gateway-client-disconnected-hook nil
   "Hook called with a disconnected client to release its consumer resources.")
 
+(defun remote-gateway--foreign-request-p (request)
+  "Return non-nil when REQUEST is not from a client on this side of the gateway.
+Every client is a helper process, none a browser.  A browser always names the
+page behind a cross-site request, and rebinding shows up as a foreign Host."
+  (let ((headers (ws-headers request)))
+    (or (assq :ORIGIN headers)
+        (not (string-match-p
+              "\\`\\(?:127\\.0\\.0\\.1\\|localhost\\|\\[::1\\]\\)\\(?::[0-9]+\\)?\\'"
+              (or (cdr (assq :HOST headers)) ""))))))
+
+(defun remote-gateway--refuse-handler (request)
+  "Refuse REQUEST, which `remote-gateway--foreign-request-p' matched."
+  (remote-gateway--http-json
+   (ws-process request) 403
+   (remote-gateway--failure nil -32600 "Not a local client")))
+
 (defun remote-gateway--websocket-handler (request)
   "Upgrade WebSocket REQUEST and adopt its process."
   (let ((process
@@ -645,7 +661,9 @@ Return non-nil only for the first settlement."
           (remote-gateway--random-id "emacs-"))
     (setq remote-gateway--server
           (ws-start
-           `(((:POST . "\\`/rpc\\'") .
+           `((,#'remote-gateway--foreign-request-p .
+              ,#'remote-gateway--refuse-handler)
+             ((:POST . "\\`/rpc\\'") .
               ,#'remote-gateway--rpc-handler)
              ((:GET . "\\`/ws\\'") .
               ,#'remote-gateway--websocket-handler)

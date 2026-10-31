@@ -99,6 +99,7 @@ No active workbenches. The ignored upstream clones remain under `works/doom-temp
 - [elegant-ui.md](design/elegant-ui.md) Aaron UI, the design tokens Emacs and Noema share, and where each side keeps its own styling.
 - [modeline.md](design/modeline.md) Doom modeline state block, theme colors, and native input ownership.
 - [window-lifecycle.md](design/window-lifecycle.md) Windows, buffers and closing: the shown/undisplayed/ended state machine, close actions as verbs, single-instance buffers, and what a window falls back to.
+- [macos-boundary.md](design/macos-boundary.md) The boundary between Emacs and macOS: what Finder, drops and quit requests hand to Emacs, what Emacs hands to the system, and the one layer both cross.
 - [neomacs-compat.md](design/neomacs-compat.md) Running this configuration on Neomacs: the modifier-rename layer, fringe and startup-frame fixes, Elsa concurrency, and why the 0.0.18 migration was paused. Neomacs is not installed; the layer is inert on GNU Emacs.
 
 ## acceptance/ — what done means

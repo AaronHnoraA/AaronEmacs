@@ -186,6 +186,13 @@ hidden again once startup has finished."
       (run-at-time 0.15 nil #'+background--focus (car frames))))
   nil)
 
+(defun +background--present-h ()
+  "Come forward for something macOS handed to a hidden Emacs."
+  (unless (equal (+background-status) "visible")
+    (+background/show)))
+
+(add-hook '+macos-present-hook #'+background--present-h)
+
 (defun +background--focus (frame)
   "Give FRAME the keyboard when it is still live."
   (when (frame-live-p frame)
