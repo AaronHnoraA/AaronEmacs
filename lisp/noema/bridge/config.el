@@ -49,7 +49,6 @@
 (declare-function +noema-roam--clear-runtime-cache "noema/roam/config" ())
 (declare-function +noema-roam--handle-moved-note "noema/roam/config" (event))
 (declare-function +noema-roam--handle-trashed-note "noema/roam/config" (event))
-(declare-function +noema-roam--cancel-sync-timer "noema/roam/config" ())
 (declare-function +noema--markdown-placeholder-set-state "lang/markdown/config" (state))
 (declare-function +noema--kill-redirected-markdown-buffer "lang/markdown/config" (buffer file))
 (declare-function xwidget-webkit-current-session "xwidget" ())
@@ -516,32 +515,6 @@ is dropped.  A raw buffer you are editing elsewhere keeps the jump."
   :lighter nil
   :keymap +noema-keys-mode-map)
 
-(defconst +noema--xwidget-focus-script
-  "(() => {
-  const focusEditor = () => {
-    try {
-      window.dispatchEvent(new CustomEvent('noema:command', {
-        detail: { command: 'focus' }
-      }));
-    } catch (_) {}
-    const target = document.querySelector(
-      '.cm-content, .cm-editor [contenteditable=\"true\"], [data-editor] [contenteditable=\"true\"]'
-    );
-    if (!target || typeof target.focus !== 'function') return false;
-    try {
-      target.focus({ preventScroll: true });
-    } catch (_) {
-      target.focus();
-    }
-    return true;
-  };
-  focusEditor();
-  requestAnimationFrame(focusEditor);
-  setTimeout(focusEditor, 50);
-  return true;
-})()"
-  "JavaScript used to move focus into the Noema editor inside xwidget.")
-
 (defun +noema--server-url (&optional path)
   "Return the local Noema URL for PATH."
   (format "http://127.0.0.1:%d%s" +noema--port (or path "/")))
@@ -923,7 +896,6 @@ reconnect without a reload and without losing their in-memory editor state."
             (format "NOEMA_GLOBAL_SKILLS=%s"
                     (or (getenv "NOEMA_GLOBAL_SKILLS")
                         (+noema-skills-directory)))
-            (format "NOEMA_ROOT=%s" (expand-file-name +noema--notes-root))
             (format "NOEMA_WORKSPACE_LAYOUT=%s" (+noema-workspace-layout))
             (format "NOEMA_WEB_DIR=%s" (expand-file-name +noema--web-dir))
             (format "NOEMA_RUNTIME_ROOT=%s" (expand-file-name +noema--runtime-root))
@@ -2721,12 +2693,6 @@ visible beside it, and reuse an already visible surface window."
   (+noema--schedule-post-drain)
   t)
 
-(defun +noema--open-file-in-web (file)
-  "Ask the already open Noema page to open FILE."
-  (+noema--sync-app-buffer-file file)
-  (+noema--post
-   `((type . "open") (file . ,(+noema--host-file file)))))
-
 (defun +noema--send-command (command &optional detail)
   "Dispatch Noema COMMAND with optional DETAIL."
   (let ((client (and (boundp '+noema--client-id)
@@ -2997,19 +2963,6 @@ carry optional initial anchor coordinates."
   "Open the current note in a fresh Noema pane in a new frame."
   (interactive)
   (+noema-open-file-split-frame (+noema--current-note-file)))
-
-;;;###autoload
-(defun +noema/preview ()
-  "Compatibility alias: open the current note in Noema."
-  (interactive)
-  (+noema/open-current-note))
-
-;;;###autoload
-(defun +noema/sync-cursor ()
-  "Open the current note in Noema.
-Cursor-level sync is intentionally no longer a per-keystroke preview channel."
-  (interactive)
-  (+noema/open-current-note))
 
 ;;;###autoload
 (defun +noema/refresh ()
@@ -3303,16 +3256,6 @@ unsaved CodeMirror state remain intact."
                 (setq all-paused nil)))))))
     (setq +noema--paused all-paused)))
 
-(defun +noema--apply-activity (active)
-  "Apply ACTIVE to the current Noema renderer client.
-This narrow wrapper is retained for interactive callers and tests; automatic
-activity always applies a complete per-client snapshot."
-  (let ((buffer (if (memq (current-buffer) (+noema--browser-buffers))
-                    (current-buffer)
-                  +noema--app-buffer)))
-    (when (buffer-live-p buffer)
-      (+noema--apply-activity-snapshot (list (cons buffer active))))))
-
 ;;;###autoload
 (defun +noema/pause ()
   "Pause shared Noema renderer work until explicitly resumed."
@@ -3508,8 +3451,6 @@ and every renderer uses the same `runHostCommand' pause implementation."
   (+noema--clear-post-queue)
   (+noema--clear-process-log-queue)
   (+noema--remove-activity-hooks)
-  (when (fboundp '+noema-roam--cancel-sync-timer)
-    (+noema-roam--cancel-sync-timer))
   (when +noema--ready-watchdog
     (cancel-timer +noema--ready-watchdog)
     (setq +noema--ready-watchdog nil))
@@ -3761,9 +3702,12 @@ failure while it is still going."
          (with-current-buffer (get-buffer-create "*Noema runtime status*")
            (let ((inhibit-read-only t))
              (erase-buffer)
-             (insert (json-serialize payload
-                                     :false-object :false
-                                     :null-object nil))
+             ;; `json-serialize' returns UTF-8 bytes, not characters.
+             (insert (decode-coding-string
+                      (json-serialize payload
+                                      :false-object :false
+                                      :null-object nil)
+                      'utf-8))
              (goto-char (point-min))
              (special-mode))
            (display-buffer (current-buffer))))))))

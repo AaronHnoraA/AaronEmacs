@@ -44,6 +44,10 @@
 (declare-function noema-agenda--write "noema-agenda" (operation body files &optional callback))
 (declare-function noema-agenda--locator "noema-agenda" (record))
 (declare-function noema-agenda-visit-record "noema-agenda" (record))
+(declare-function remote-canonicalize-emacs-file-name "remote-fs"
+                  (file-name &optional directory))
+(declare-function remote-client-file-name "remote-fs"
+                  (file-name &optional adapter))
 (defvar +noema--notes-root nil)
 (defvar +project-active-root nil)
 
@@ -108,6 +112,10 @@
   "Cached result of `+noema-roam--all-files'.")
 (defvar +noema-roam--all-note-summaries-cache nil
   "Cached result of `+noema-roam--all-note-summaries'.")
+(defvar +noema-roam--records-cache nil
+  "Cached note records, as (ROOT . RECORDS).")
+(defvar +noema-roam--record-table nil
+  "Note records by downcased search value, as (RECORDS . TABLE).")
 
 (defun +noema-roam-root ()
   "Return the canonical Noema workspace root."
@@ -125,7 +133,9 @@
         +noema-roam--runtime-index-cache-key nil
         +noema-roam--scan-cache nil
         +noema-roam--all-files-cache nil
-        +noema-roam--all-note-summaries-cache nil))
+        +noema-roam--all-note-summaries-cache nil
+        +noema-roam--records-cache nil
+        +noema-roam--record-table nil))
 
 (defun +noema-roam--workspace-layout ()
   "Return the Noema workspace layout name, defaulting to \"legacy\"."
@@ -200,6 +210,73 @@ TIMEOUT bounds the blocking wait; see `+noema--api-call-sync'."
 (defconst +noema-roam--interactive-timeout 0.3
   "Seconds an on-keystroke backend query may block the editor.")
 
+(defun +noema-roam--runtime-environment ()
+  "Return the process environment of the roam-cli.mjs fallback."
+  (append (list (format "NOEMA_ROOT=%s" (+noema-roam-root))
+                (format "NOEMA_RUNTIME_ROOT=%s"
+                        (expand-file-name +noema-roam-runtime-root))
+                (format "NOEMA_WORKSPACE_ROOT=%s" user-emacs-directory)
+                (format "NOEMA_STATE_DIR=%s" (+noema-roam--state-root))
+                (format "NOEMA_TMP_DIR=%s" (+noema-roam--tmp-root))
+                ;; Without this the CLI configures the runtime as "legacy" and
+                ;; drops every note under `public/', so the offline fallback
+                ;; would disagree with the running web-host about what the
+                ;; vault contains.
+                (format "NOEMA_WORKSPACE_LAYOUT=%s"
+                        (+noema-roam--workspace-layout)))
+          process-environment))
+
+(defun +noema-roam--runtime-arguments (action args)
+  "Return the node arguments running roam-cli.mjs ACTION with ARGS."
+  (append (list +noema-roam-runtime-cli action
+                "--root" (+noema-roam-root)
+                "--runtime" +noema-roam-runtime-root
+                "--workspace" user-emacs-directory
+                "--state" (+noema-roam--state-root)
+                "--tmp" (+noema-roam--tmp-root)
+                "--layout" (+noema-roam--workspace-layout))
+          args))
+
+(defun +noema-roam--runtime-index-async (callback)
+  "Fill the runtime index without waiting, then call CALLBACK with no arguments.
+The index costs a Node start, which nothing may wait for during startup.
+CALLBACK runs whether or not the index could be read."
+  (if (not (+noema-roam--runtime-available-p))
+      (run-at-time 0 nil callback)
+    (let* ((output (generate-new-buffer " *noema-roam-index*"))
+           (errors (generate-new-buffer " *noema-roam-index-errors*"))
+           (key (+noema-roam--runtime-index-key))
+           (default-directory +noema-roam--module-directory)
+           (process-environment (+noema-roam--runtime-environment)))
+      (condition-case failure
+          (make-process
+           :name "noema-roam-index" :buffer output :stderr errors
+           :connection-type 'pipe :noquery t
+           :command (cons "node" (+noema-roam--runtime-arguments "index" nil))
+           :sentinel
+           (lambda (process _event)
+             (unless (process-live-p process)
+               (unwind-protect
+                   (when (and (zerop (process-exit-status process))
+                              (eq (process-status process) 'exit)
+                              (buffer-live-p output))
+                     (setq +noema-roam--runtime-index-cache
+                           (ignore-errors
+                             (with-current-buffer output
+                               (goto-char (point-min))
+                               (json-parse-buffer :object-type 'hash-table
+                                                  :array-type 'list)))
+                           +noema-roam--runtime-index-cache-key key))
+                 (dolist (buffer (list output errors))
+                   (when (buffer-live-p buffer) (kill-buffer buffer)))
+                 (funcall callback)))))
+        (error
+         (kill-buffer output)
+         (kill-buffer errors)
+         (message "Noema roam index unavailable: %s"
+                  (error-message-string failure))
+         (run-at-time 0 nil callback))))))
+
 (defun +noema-roam--runtime-call-interactive (action &rest args)
   "Like `+noema-roam--runtime-call', but safe to run on a keystroke.
 
@@ -227,38 +304,12 @@ is down (offline / not yet started)."
    ;; Fallback: spawn roam-cli.mjs directly.
    (when (+noema-roam--runtime-available-p)
     (with-temp-buffer
-      (let* ((root (+noema-roam-root))
-             (default-directory +noema-roam--module-directory)
-             (process-environment
-              (append (list (format "NOEMA_ROOT=%s" root)
-                            (format "NOEMA_RUNTIME_ROOT=%s"
-                                    (expand-file-name
-                                     +noema-roam-runtime-root))
-                            (format "NOEMA_WORKSPACE_ROOT=%s"
-                                    user-emacs-directory)
-                            (format "NOEMA_STATE_DIR=%s"
-                                    (+noema-roam--state-root))
-                            (format "NOEMA_TMP_DIR=%s"
-                                    (+noema-roam--tmp-root))
-                            ;; Without this the CLI configures the runtime as
-                            ;; "legacy" and drops every note under `public/',
-                            ;; so the offline fallback would disagree with the
-                            ;; running web-host about what the vault contains.
-                            (format "NOEMA_WORKSPACE_LAYOUT=%s"
-                                    (+noema-roam--workspace-layout)))
-                      process-environment))
+      (let* ((default-directory +noema-roam--module-directory)
+             (process-environment (+noema-roam--runtime-environment))
              (stderr-file (make-temp-file "noema-runtime-"))
              (status (apply #'process-file
                             "node" nil (list (current-buffer) stderr-file) nil
-                            +noema-roam-runtime-cli
-                            action
-                            "--root" root
-                            "--runtime" +noema-roam-runtime-root
-                            "--workspace" user-emacs-directory
-                            "--state" (+noema-roam--state-root)
-                            "--tmp" (+noema-roam--tmp-root)
-                            "--layout" (+noema-roam--workspace-layout)
-                            args)))
+                            (+noema-roam--runtime-arguments action args))))
         (unwind-protect
             (if (zerop status)
                 (condition-case err
@@ -285,11 +336,14 @@ is down (offline / not yet started)."
                 nil))
           (ignore-errors (delete-file stderr-file))))))))
 
+(defun +noema-roam--runtime-index-key ()
+  "Return what identifies the current runtime index."
+  (list (file-truename (+noema-roam-root))
+        (file-truename (expand-file-name +noema-roam-runtime-root))))
+
 (defun +noema-roam--runtime-index ()
   "Return cached Noema runtime index payload, or nil."
-  (let ((key (list (file-truename (+noema-roam-root))
-                   (file-truename
-                    (expand-file-name +noema-roam-runtime-root)))))
+  (let ((key (+noema-roam--runtime-index-key)))
     (if (and +noema-roam--runtime-index-cache
              (equal key +noema-roam--runtime-index-cache-key))
         +noema-roam--runtime-index-cache
@@ -378,13 +432,6 @@ turned into `roam://roam%3A%2F%2Fid%23f%7CLabel', which resolved to nothing."
      ((string-match-p "\\`roam://" value) value)
      (t (concat "roam://wiki/" (+noema-roam--encode-ref value))))))
 
-(defun +noema-roam--wiki-link-at (line pos)
-  "Return (BEG END HREF) for the wiki link matched in LINE from POS, or nil."
-  (when (string-match +noema-roam--wiki-link-regexp line pos)
-    (list (match-beginning 0)
-          (match-end 0)
-          (+noema-roam--wiki-link-href (match-string 1 line)))))
-
 (defun +noema-roam--split-target (target)
   "Split Noema TARGET into note ref plus optional tag or DOM target.
 Canonical targets look like `roam://note-id', `roam://note-id#tag', and
@@ -441,11 +488,6 @@ plain-relative refs (./x, ../x); defaults to the current buffer's directory."
                     :file file
                     :key (plist-get resolved :key)
                     :note (plist-get resolved :note))))))
-
-(defun +noema-roam--slug-at-point ()
-  "Return the note-link slug at or near point, or nil."
-  (plist-get (+noema-roam--parse-target (+noema-roam--target-at-point))
-             :slug))
 
 (defconst +noema-roam--excluded-directories
   '("_typst" "var" ".git" ".lake" ".noema" ".direnv" ".venv"
@@ -620,8 +662,7 @@ defaults to the current buffer's directory."
                 (let (parts in-meta)
                   (goto-char (point-min))
                   (while (and (not (eobp))
-                              (< (length (string-join (nreverse parts) " "))
-                                 220))
+                              (< (length (string-join parts " ")) 220))
                     (let ((line (string-trim
                                  (buffer-substring-no-properties
                                   (line-beginning-position)
@@ -670,7 +711,7 @@ Builds the reverse-link index in one pass to avoid O(n²) per-note lookups."
   "Return note summary plists for all notes, memoised between syncs."
   (or +noema-roam--all-note-summaries-cache
       (setq +noema-roam--all-note-summaries-cache
-            (let* ((records (sort (+noema-roam--note-records)
+            (let* ((records (sort (copy-sequence (+noema-roam--note-records))
                                   (lambda (a b)
                                     (string< (plist-get a :id) (plist-get b :id)))))
                    ;; Build backlink map in one pass; fall back to DB field when present.
@@ -705,33 +746,6 @@ Builds the reverse-link index in one pass to avoid O(n²) per-note lookups."
                (string-join (seq-filter #'stringp (or (plist-get entry :aliases) nil)) " ")
                (string-join (seq-filter #'stringp (or (plist-get entry :tags) nil)) " ")))
    " "))
-
-(defun +noema-roam--read-note (prompt &optional entries)
-  "Read a note slug with PROMPT from ENTRIES or all summaries."
-  (let* ((items (or entries (+noema-roam--all-note-summaries)))
-         (table (mapcar (lambda (entry)
-                          (cons (plist-get entry :slug) entry))
-                        items))
-         (slug (completing-read
-                prompt
-                (lambda (string pred action)
-                  (if (eq action 'metadata)
-                      `(metadata
-                        (annotation-function
-                         . ,(lambda (candidate)
-                              (when-let* ((entry (cdr (assoc candidate table))))
-                                (let ((tags (plist-get entry :tags))
-                                      (backlinks (length (or (plist-get entry :backlinks) nil))))
-                                  (concat
-                                   "  "
-                                   (or (plist-get entry :title) "")
-                                   (when-let* ((strtags (seq-filter #'stringp tags)))
-                                     (concat "  #" (string-join strtags " #")))
-                                   (when (> backlinks 0)
-                                     (format " ←%d" backlinks))))))))
-                    (complete-with-action action table string pred)))
-                nil t)))
-    slug))
 
 (defun +noema-roam--read-note-id (prompt)
   "Read a Noema note id with PROMPT.
@@ -989,30 +1003,6 @@ Each entry is a plist with :id, :text, and :pos."
       (user-error "DOM target not found: %s" dom))
     (+noema-roam--goto-pos pos)
     (recenter-top-bottom)))
-
-(defun +noema-roam--read-dom-target (note-id)
-  "Read an Noema DOM/TOC target for NOTE-ID."
-  (let* ((record (+noema-roam--resolve-note note-id))
-         (file (plist-get record :file))
-         (targets (+noema-roam--dom-targets file note-id))
-         (table (mapcar (lambda (target)
-                          (cons (string-join (plist-get target :path) "@")
-                                target))
-                        targets))
-         (choice (completing-read
-                  "DOM/TOC target: "
-                  (lambda (string pred action)
-                    (if (eq action 'metadata)
-                        '(metadata
-                          (annotation-function
-                           . (lambda (candidate)
-                               (when-let* ((target (cdr (assoc candidate table))))
-                                 (concat "  "
-                                         (+noema-roam--dom-target-path-label
-                                          target))))))
-                      (complete-with-action action table string pred)))
-                  nil t)))
-    (cdr (assoc choice table))))
 
 (defun +noema-roam--ui-actions (&optional leading)
   "Return standard native roam view actions after optional LEADING actions."
@@ -1482,18 +1472,6 @@ create-node API.  DIRECTORY defaults to the current Roam Node base directory."
                           (format " (%s)" kind)))
                 key)))
       templates))))
-
-(defun +noema-roam-new--path-suggestions ()
-  "Return vault-relative directory suggestions for Roam Node."
-  (let ((root (file-name-as-directory (+noema-roam-root)))
-        (directories '("")))
-    (dolist (record (+noema-roam--note-records))
-      (when-let* ((file (plist-get record :file))
-                  ((file-name-absolute-p file))
-                  (relative (file-relative-name file root))
-                  (directory (file-name-directory relative)))
-        (push directory directories)))
-    (sort (delete-dups directories) #'string<)))
 
 (defun +noema-roam-new--tag-suggestions ()
   "Return known roam tags for Roam Node."
@@ -2353,9 +2331,31 @@ in Noema's `shared/meta-summary.mjs'."
            notes))))
 
 (defun +noema-roam--note-records ()
-  "Return note records with :key, :id, :note, :file, :title, and :values."
-  (or (+noema-roam--runtime-note-records)
-      (+noema-roam--scanned-note-records)))
+  "Return note records with :key, :id, :note, :file, :title, and :values.
+The list is shared: a caller that sorts or edits it works on a copy.  Records
+last until `+noema-roam--clear-runtime-cache' or a note change; building them
+costs a stat per note, and one command can ask once per link it follows."
+  (let ((root (+noema-roam-root)))
+    (unless (equal (car +noema-roam--records-cache) root)
+      (let ((records (or (+noema-roam--runtime-note-records)
+                         (+noema-roam--scanned-note-records))))
+        (setq +noema-roam--records-cache (and records (cons root records)))))
+    (cdr +noema-roam--records-cache)))
+
+(defun +noema-roam--record-table ()
+  "Return the current records by downcased search value.
+When a value belongs to several notes, the first record has it."
+  (let ((records (+noema-roam--note-records)))
+    (unless (and +noema-roam--record-table
+                 (eq (car +noema-roam--record-table) records))
+      (let ((table (make-hash-table :test #'equal)))
+        (dolist (record records)
+          (dolist (value (plist-get record :values))
+            (let ((key (downcase value)))
+              (unless (gethash key table)
+                (puthash key record table)))))
+        (setq +noema-roam--record-table (cons records table))))
+    (cdr +noema-roam--record-table)))
 
 (defun +noema-roam--target-note-ref (target)
   "Return the note ref portion of TARGET."
@@ -2377,11 +2377,7 @@ which is the honest answer for a dangling ref."
          (clean (string-trim (or clean "")))
          (query (downcase clean)))
     (unless (string-empty-p query)
-      (seq-find
-       (lambda (record)
-         (member query
-                 (mapcar #'downcase (plist-get record :values))))
-       (+noema-roam--note-records)))))
+      (gethash query (+noema-roam--record-table)))))
 
 (defun +noema-roam--db-note (slug)
   "Return the canonical runtime note for SLUG/id/path, or nil."
@@ -3379,9 +3375,11 @@ buffer, enters a project or publishes unsaved tasks to the persistent index."
 (defconst +noema-roam--activity-heatmap-days 70
   "Number of recent days shown in roam activity heatmaps.")
 
-(defun +noema-roam--activity-date-counts (&optional days)
-  "Return an ordered alist of recent note activity counts for DAYS."
+(defun +noema-roam--activity-date-counts (&optional days records)
+  "Return an ordered alist of note activity counts for the recent DAYS.
+RECORDS default to every note."
   (let* ((days (or days +noema-roam--activity-heatmap-days))
+         (records (or records (+noema-roam--note-records)))
          (start (time-subtract (current-time) (days-to-time (1- days))))
          (counts (make-hash-table :test 'equal))
          ordered)
@@ -3390,7 +3388,7 @@ buffer, enters a project or publishes unsaved tasks to the persistent index."
                   "%Y-%m-%d" (time-add start (days-to-time offset)))))
         (push (cons day 0) ordered)
         (puthash day 0 counts)))
-    (dolist (record (delete-dups (+noema-roam--note-records)))
+    (dolist (record records)
       (when-let* ((file (plist-get record :file))
                   ((file-exists-p file))
                   (attrs (file-attributes file 'integer))
@@ -3529,26 +3527,52 @@ Use FALLBACK-WIDTH when pixel measurement is unavailable."
      #'+noema-roam-ui--tone-face)
     (insert "\n")))
 
+(defun +noema-roam--dashboard-insert-heatmap-counts (counts)
+  "Insert the compact activity heatmap for COUNTS."
+  (+noema-roam--insert-centered-line
+   (format "Roam activity · last %d days · %d changes"
+           (length counts) (apply #'+ (mapcar #'cdr counts)))
+   (if (facep 'dashboard-heading) 'dashboard-heading 'bold))
+  (insert "\n")
+  (dolist (row (+noema-roam--activity-heatmap-rows counts))
+    (+noema-roam--insert-centered-heatmap-row row #'+noema-roam-ui--tone-face))
+  (insert "\n\n"))
+
+(defun +noema-roam--dashboard-fill-heatmap (start end days)
+  "Replace the heatmap between markers START and END with DAYS of real counts."
+  (when-let* ((buffer (marker-buffer start)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (save-excursion
+          (goto-char start)
+          (delete-region start end)
+          (ignore-errors
+            (+noema-roam--dashboard-insert-heatmap-counts
+             (+noema-roam--activity-date-counts days))))))
+    (set-marker start nil)
+    (set-marker end nil)))
+
 (defun +noema-roam-dashboard-insert-heatmap (&optional days)
-  "Insert a compact roam activity heatmap into the main dashboard."
-  (condition-case nil
-      (let* ((counts (+noema-roam--activity-date-counts
-                      (or days +noema-roam--activity-heatmap-days)))
-             (total (apply #'+ (mapcar #'cdr counts))))
-        (when counts
-          (+noema-roam--insert-centered-line
-           (format "Roam activity · last %d days · %d changes"
-                   (length counts) total)
-           (if (facep 'dashboard-heading)
-               'dashboard-heading
-             'bold))
-          (insert "\n")
-          (dolist (row (+noema-roam--activity-heatmap-rows counts))
-            (+noema-roam--insert-centered-heatmap-row
-             row
-             #'+noema-roam-ui--tone-face))
-          (insert "\n\n")))
-    (error nil)))
+  "Insert a compact roam activity heatmap into the main dashboard.
+Before the web host is up its index costs a Node start, which the dashboard
+of a starting Emacs must not wait for.  The empty heatmap takes the same room,
+so the real one replaces it in place when the index has arrived."
+  (let ((days (or days +noema-roam--activity-heatmap-days)))
+    (condition-case nil
+        (if (or +noema--ready
+                (equal (car +noema-roam--records-cache) (+noema-roam-root))
+                +noema-roam--runtime-index-cache)
+            (+noema-roam--dashboard-insert-heatmap-counts
+             (+noema-roam--activity-date-counts days))
+          (let ((start (point-marker))
+                (end (make-marker)))
+            (+noema-roam--dashboard-insert-heatmap-counts
+             (+noema-roam--activity-date-counts days '(nil)))
+            (set-marker end (point))
+            (+noema-roam--runtime-index-async
+             (lambda ()
+               (+noema-roam--dashboard-fill-heatmap start end days)))))
+      (error nil))))
 
 (defun +noema-roam/magit ()
   "Open magit-status in the roam notes root."
@@ -4280,19 +4304,6 @@ canonical `roam://note-id#tag' target."
       (kill-new link)
       (message "Copied %s" link))))
 
-;; Enhanced find-note with DB annotation
-(defun +noema-roam--note-annotator (slug)
-  "Return annotation for SLUG in completing-read."
-  (when-let* ((record (+noema-roam--resolve-note slug))
-              (note (plist-get record :note)))
-    (let ((tags (+noema-roam--note-list-field note "tags"))
-          (bls  (length (or (+noema-roam--db-backlinks-to
-                             (plist-get record :id))
-                            (gethash "backlinks" note)))))
-      (concat "  "
-              (if tags (string-join (seq-filter #'stringp tags) ",") "")
-              (when (> bls 0) (format " ←%d" bls))))))
-
 ;; ── Keymaps & menus ───────────────────────────────────────────────────────────
 
 (defvar +noema-roam-map
@@ -4711,10 +4722,7 @@ added separately by `+noema-roam--capf-setup')."
           :icon 'wanted
           :subtitle "Link targets that have no matching note"
           :stats (list (cons (format "%d targets" (length items)) 'danger))
-          :actions (+noema-roam--ui-actions
-                    (list (list :label "Create all wanted"
-                                :command #'+noema-roam/report-wanted
-                                :help "Refresh after creating notes"))))
+          :actions (+noema-roam--ui-actions))
          (+noema-roam-ui-insert-section "Wanted" (length items))
          (if (null items)
              (+noema-roam-ui-insert-empty "No wanted pages. All links resolve!")
@@ -4973,7 +4981,8 @@ Select a top-level category to drill down; select a note to open it."
                                                  (plist-get e :slug)))
                                          members))
                   (all-choices (append
-                                (when pfx (list (cons ".. (up)" :up)))
+                                (unless (string-empty-p pfx)
+                                  (list (cons ".. (up)" :up)))
                                 child-labels member-labels))
                   (prompt (if (string-empty-p pfx)
                               "Category: "
@@ -5000,10 +5009,13 @@ Select a top-level category to drill down; select a note to open it."
 ;;; The host owns note path changes; Emacs follows their buffer lifecycle.
 
 (defun +noema-roam--same-local-path-p (a b)
-  "Return whether local paths A and B name the same location after symlinks."
+  "Return whether local paths A and B name the same location after symlinks.
+A file this machine cannot read directly is never one: resolving it would ask
+its target, for each such buffer, whenever a note moves."
   (and (stringp a) (stringp b)
        (ignore-errors
-         (equal (file-truename a) (file-truename b)))))
+         (and (remote-client-file-name (remote-canonicalize-emacs-file-name a))
+              (equal (file-truename a) (file-truename b))))))
 
 (defun +noema-roam--handle-moved-note (event)
   "Retarget native buffers after the host moves a note described by EVENT."
@@ -5214,119 +5226,7 @@ before it asks the host to move the file."
            (with-current-buffer origin
              (+noema-roam--render-tag-overlap-buffer result))))))))
 
-;;; Upgrade management dashboard with wiki statistics.
-
-(defconst +noema-roam--dashboard-tools
-  '((:id find-note
-     :icon search
-     :badge "FIND"
-     :badge-tone info
-     :title "Find note"
-     :meta "findnode"
-     :detail "Jump by Noema id, path, or title."
-     :command +noema-roam/find-note
-     :help "Find and open a roam note")
-    (:id create-node
-     :icon new
-     :badge "CREATE"
-     :badge-tone success
-     :title "Create node"
-     :meta "Roam Node"
-     :detail "Open the single native node creation workbench."
-     :command +noema-roam/new-node
-     :help "Create a new roam node")
-    (:id search-notes
-     :icon search
-     :badge "QUERY"
-     :title "Search notes"
-     :meta "title/tag/linksto"
-     :detail "Filter notes with scoped search operators."
-     :command +noema-roam/search-notes
-     :help "Search Noema roam notes")
-    (:id daily-note
-     :icon note
-     :badge "TODAY"
-     :badge-tone warning
-     :title "Daily note"
-     :meta "daily/YYYY-MM-DD"
-     :detail "Open or create today's daily note."
-     :command +noema-roam/daily-note
-     :help "Open today's daily note")
-    (:id agenda
-     :icon agenda
-     :badge "TASKS"
-     :title "Agenda"
-     :meta "open tasks"
-     :detail "Review open todos grouped by due date and status."
-     :command noema-agenda
-     :help "Open the roam agenda")
-    (:id todos
-     :icon todo
-     :badge "TODO"
-     :title "Task list"
-     :meta "all todos"
-     :detail "List every indexed task across the vault."
-     :command +noema-roam/todos
-     :help "List all roam tasks")
-    (:id categories
-     :icon tag
-     :badge "TAGS"
-     :title "Categories"
-     :meta "nested tags"
-     :detail "Browse wiki-style categories from nested tags."
-     :command +noema-roam/categories
-     :help "Browse nested tag categories")
-    (:id tags
-     :icon tag
-     :badge "TAG"
-     :title "Flat tags"
-     :meta "tag picker"
-     :detail "Pick a tag, then open one of its notes."
-     :command +noema-roam/tags
-     :help "Browse notes by tag")
-    (:id recent-notes
-     :icon clock
-     :badge "RECENT"
-     :badge-tone muted
-     :title "Recent notes"
-     :meta "history"
-     :detail "Return to recently opened roam notes."
-     :command +noema-roam/recent-notes
-     :help "Show recently opened roam notes"))
-  "Command rows shown in the Roam management dashboard quick tools section.")
-
-(defun +noema-roam--dashboard-tool-action (command)
-  "Return a board row action that invokes COMMAND interactively."
-  (lambda (_button)
-    (if (commandp command)
-        (call-interactively command)
-      (funcall command))))
-
-(defun +noema-roam--dashboard-insert-tools ()
-  "Insert common command shortcuts into the Roam management dashboard."
-  (+noema-roam-ui-insert-section
-   "Quick tools" (length +noema-roam--dashboard-tools) 'info)
-  (dolist (tool +noema-roam--dashboard-tools)
-    (+noema-roam-ui-insert-row
-     :id (list 'dashboard-tool (plist-get tool :id))
-     :icon (plist-get tool :icon)
-     :badge (plist-get tool :badge)
-     :badge-tone (plist-get tool :badge-tone)
-     :title (plist-get tool :title)
-     :meta (plist-get tool :meta)
-     :detail (plist-get tool :detail)
-     :action (+noema-roam--dashboard-tool-action
-              (plist-get tool :command))
-     :help (plist-get tool :help)))
-  (insert "\n"))
-
-
-
 ;;; Public lifecycle API (called from noema/bridge/config.el).
-
-(defun +noema-roam--cancel-sync-timer ()
-  "Compatibility no-op; Wiki index maintenance is owned by the web host."
-  nil)
 
 (defun +noema-roam--vault-file (file)
   "Return FILE as an absolute vault path in scanner form, or nil.
@@ -5362,7 +5262,9 @@ Backlinks are computed across every record, so the summary cache still has to
 go; the runtime payload is owned by the web-host and is stale after any write."
   (setq +noema-roam--runtime-index-cache nil
         +noema-roam--runtime-index-cache-key nil
-        +noema-roam--all-note-summaries-cache nil)
+        +noema-roam--all-note-summaries-cache nil
+        +noema-roam--records-cache nil
+        +noema-roam--record-table nil)
   (let ((file (or (+noema-roam--vault-file file) (expand-file-name file))))
     (if (and +noema-roam--all-files-cache
              (member file +noema-roam--all-files-cache)
