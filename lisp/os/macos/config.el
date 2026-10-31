@@ -299,6 +299,7 @@ With positive ARG, enable it.  With zero or negative ARG, disable it."
                      ("H-X" . clipboard-kill-region)
                      ("H-c" . clipboard-kill-ring-save)
                      ("H-v" . clipboard-yank)
+                     ("H-V" . yank-media)
                      ("H-q" . +windows/kill-buffer-dwim)
                      ("H-Q" . save-buffers-kill-terminal)
                      ("H-w" . aaron/delete-frame-dwim)

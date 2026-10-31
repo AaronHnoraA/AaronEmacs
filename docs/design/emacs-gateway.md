@@ -10,9 +10,9 @@ loopback，在同一个动态端口上提供：
 接口没有 `/v1` 前缀。启动后，连接信息写入
 `var/emacs-gateway/<emacs-pid>.json`，Emacs 退出时自动清理。
 
-网关的客户端都是辅助进程，而 `emacs.eval` 能执行任意 Lisp，所以它的边界只有一条：
-带 `Origin` 的请求（来自浏览器）或 `Host` 不是回环名的请求（DNS rebinding）一律
-返回 403。这里不做 token，同机的其他进程本来就和 Emacs 同权限。
+网关的客户端都是辅助进程，从不带 `Origin`，而 `emacs.eval` 能执行任意 Lisp。所以
+边界只有一条：带 `Origin` 的请求来自网页，返回 403。这里不做 token，同机的其他进程
+本来就和 Emacs 同权限。
 
 ## Lisp 入口
 

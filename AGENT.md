@@ -320,9 +320,11 @@ This config already has maintenance and workflow entry points. Reuse them:
   Noema performance.  In the watch buffer, `y` copies the full current report.
 - macOS boundary: `lisp/os/macos/system.el` is the one layer between Emacs and
   the system (`docs/design/macos-boundary.md`).  Finder opens, quit requests,
-  drops, `open`, Finder reveal, file clipboard and notifications go through it.
+  drops, `open`, Finder reveal, Quick Look and the file clipboard go through it.
   Declare what a drop on a mode means with `set-file-drop-handler!`; do not
-  call `open` or `osascript` from a consumer.
+  call `open` or `osascript` from a consumer.  Tell the user something through
+  `aaron-notify` (`lisp/core/aaron-notify.el`): it lands in the echo area or as
+  a system notification, and always in the history.
 - Background application: `bin/emacs-app` is the single entry point for
   running Emacs as a long-lived background app on macOS (start, restart,
   kill, show, hide, status, state, quit, whitelisted actions, frame list and

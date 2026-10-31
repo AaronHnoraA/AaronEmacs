@@ -286,24 +286,21 @@ or preflight and queue a routed operation on the target."
           (user-error "Multiple selected sources are named %s" name))
         (puthash name t seen)))))
 
-(defun +dirvish/paste (&optional force)
-  "Copy or move the selected files into the directory at point.
+(declare-function +macos-clipboard-files "os/macos/system" ())
+(defvar +macos-drop-receive-function)
+
+(defun +dirvish--paste-into (here sources method force)
+  "Put logical SOURCES into the directory HERE by METHOD, `cut' or another.
 With FORCE, existing files are overwritten without a question.  Files that
 come from another machine are not copied by Emacs, which would block until
 done: they are queued as a bulk transfer."
-  (interactive)
-  (let* ((here (remote-canonicalize-file-name
-                (+dirvish--directory-at-point)))
-         (sources (+dirvish--marked-everywhere))
-         (target (remote-file-name-target here))
+  (let* ((target (remote-file-name-target here))
          (groups (+dirvish--group-sources sources))
          (same (cdr (assoc target groups)))
          (foreign (seq-remove (lambda (group) (equal (car group) target))
                               groups))
          same-plan)
-    (unless sources
-      (user-error "Nothing selected; mark files and press y or x first"))
-    (when (and foreign (eq +dirvish--paste-method 'cut))
+    (when (and foreign (eq method 'cut))
       (user-error
        "Moving between machines is not offered; copy, then delete the originals"))
     ;; Validate every route before starting any of the independent jobs.
@@ -319,20 +316,45 @@ done: they are queued as a bulk transfer."
         (remote-require-on-client 'remote-transfer)
         (setq same-plan
               (remote-transfer-plan-file-operation
-               (if (eq +dirvish--paste-method 'cut) 'move 'copy)
+               (if (eq method 'cut) 'move 'copy)
                same here :overwrite (if force t 'ask)))))
     (dolist (group foreign)
       (remote-files--queue (cdr group) here))
     (when same
       (+dirvish--client-yank
-       (if (eq +dirvish--paste-method 'cut)
-           #'dirvish-move #'dirvish-yank)
+       (if (eq method 'cut) #'dirvish-move #'dirvish-yank)
        here same force same-plan))
     (when foreign
-      (+dirvish--clear-marks)))
+      (+dirvish--clear-marks))))
+
+(defun +dirvish/paste (&optional force)
+  "Copy or move the selected files into the directory at point.
+With nothing selected, copy the files on the system clipboard, as a Finder
+copy leaves them.  With FORCE, existing files are overwritten without a
+question."
+  (interactive)
+  (let ((here (remote-canonicalize-file-name (+dirvish--directory-at-point)))
+        (sources (or (+dirvish--marked-everywhere)
+                     (mapcar (lambda (file) (remote-make-file-name "local" file))
+                             (+macos-clipboard-files)))))
+    (unless sources
+      (user-error "Nothing selected; mark files and press y or x first"))
+    (+dirvish--paste-into here sources +dirvish--paste-method force))
   (setq +dirvish--paste-method nil
         +dirvish--paste-sources nil
         +dirvish--paste-source-buffer nil))
+
+(defun +dirvish-receive-files (files method directory)
+  "Put the native paths FILES into DIRECTORY by METHOD.
+METHOD is `copy', `move' or `symlink'; a drop on Emacs ends here."
+  (let ((here (remote-canonicalize-file-name directory))
+        (sources (mapcar (lambda (file) (remote-make-file-name "local" file))
+                         files)))
+    (if (eq method 'symlink)
+        (+dirvish--client-yank #'dirvish-symlink here sources)
+      (+dirvish--paste-into here sources (if (eq method 'move) 'cut 'copy) nil))))
+
+(setq +macos-drop-receive-function #'+dirvish-receive-files)
 
 (defun +dirvish/paste-force ()
   "Paste, overwriting existing files."

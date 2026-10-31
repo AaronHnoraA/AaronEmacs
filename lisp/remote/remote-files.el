@@ -30,6 +30,7 @@
 (require 'remote-terminal)
 (require 'remote-transfer)
 
+(declare-function aaron-notify "aaron-notify" (title &rest keys))
 (declare-function remote-read-target "remote-board" (&optional prompt omit-local))
 (declare-function remote-open-target "remote-board" (&optional target))
 
@@ -116,6 +117,13 @@ A directory row chooses that directory; a file row chooses its parent."
               (revert-buffer)
             (error nil)))))))
 
+(defun remote-files--report (title job level)
+  "Tell the user TITLE about JOB, away from Emacs too when that is possible."
+  (let ((name (remote-transfer-job-name job)))
+    (if (fboundp 'aaron-notify)
+        (aaron-notify title :body name :level level :source 'remote-transfer)
+      (message "%s: %s" title name))))
+
 (defun remote-files--finished (job)
   "Report JOB and refresh the folder it wrote into."
   (let ((label (if (eq (remote-transfer-job-execution job) 'target)
@@ -123,14 +131,13 @@ A directory row chooses that directory; a file row chooses its parent."
     (pcase (remote-transfer-job-state job)
       ('done
        (remote-files--revert-directory (remote-transfer-job-destination job))
-       (message "%s finished: %s" label (remote-transfer-job-name job)))
+       (remote-files--report (format "%s finished" label) job 'success))
       ('failed
-       (message "%s failed (%s): %s; M-x remote-transfer-list shows why"
-                label (or (remote-transfer-job-exit-status job)
-                          "status unknown")
-                (remote-transfer-job-name job)))
-      (_ (message "%s cancelled: %s" label
-                  (remote-transfer-job-name job))))))
+       (remote-files--report
+        (format "%s failed (%s); M-x remote-transfer-list shows why" label
+                (or (remote-transfer-job-exit-status job) "status unknown"))
+        job 'error))
+      (_ (remote-files--report (format "%s cancelled" label) job 'warning)))))
 
 (defun remote-files--summary (files)
   "Return a short description of FILES."

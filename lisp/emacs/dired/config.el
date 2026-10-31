@@ -65,6 +65,8 @@ remote shell probes or previews."
   (dired-kill-when-opening-new-dired-buffer t)
   ;; Dont prompt about killing buffer visiting delete file
   (dired-clean-confirm-killing-deleted-buffers nil)
+  ;; Drag a file name out to another application.
+  (dired-mouse-drag-files t)
   (dired-auto-revert-buffer #'dired-directory-changed-p)
   (dired-hide-details-hide-symlink-targets nil)
   (dired-listing-switches "-AFhlv"))

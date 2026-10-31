@@ -86,21 +86,14 @@
       (when (buffer-live-p buffer)
         (kill-buffer buffer)))))
 
-(ert-deftest remote-gateway-refuses-requests-from-outside-its-clients ()
+(ert-deftest remote-gateway-refuses-requests-from-web-pages ()
   (should (remote-gateway--foreign-request-p
            (make-instance 'ws-request
                           :headers '((:HOST . "127.0.0.1:1")
                                      (:ORIGIN . "https://evil.example")))))
-  (should (remote-gateway--foreign-request-p
-           (make-instance 'ws-request :headers '((:HOST . "evil.example:1")))))
-  (should (remote-gateway--foreign-request-p
-           (make-instance 'ws-request :headers nil)))
   (should-not (remote-gateway--foreign-request-p
                (make-instance 'ws-request
-                              :headers '((:HOST . "127.0.0.1:1")))))
-  (should-not (remote-gateway--foreign-request-p
-               (make-instance 'ws-request
-                              :headers '((:HOST . "localhost:1"))))))
+                              :headers '((:HOST . "127.0.0.1:1"))))))
 
 (ert-deftest remote-gateway-websocket-registers-and-serves-bidirectional-rpc ()
   (let* ((binding

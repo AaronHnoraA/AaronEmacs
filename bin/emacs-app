@@ -175,15 +175,23 @@ result() {
     queued_json "(+background-result \"$(encode "${1:?request id}")\")"
 }
 
+# Written beside the target and moved over it: a running Emacs has the old
+# module mapped, and overwriting that file in place can crash it.
+build_module() {
+    local output=$1
+    shift
+    /usr/bin/clang -fobjc-arc -shared -O2 -I "$APP/Contents/Resources/include" \
+                   -o "$output.new" "$@" || return 1
+    mv -f "$output.new" "$output"
+}
+
 build() {
     mkdir -p "$BUILD" "$ROOT/var/macos-input" || return 1
-    /usr/bin/clang -fobjc-arc -shared -O2 -I "$APP/Contents/Resources/include" \
-                   -framework AppKit -o "$BUILD/macos-window.dylib" \
-                   "$SOURCE/window.m" || return 1
-    /usr/bin/clang -fobjc-arc -shared -O2 -I "$APP/Contents/Resources/include" \
-                   -framework Carbon -framework Foundation \
-                   -o "$ROOT/var/macos-input/macos-input.dylib" \
-                   "$ROOT/tools/macos-input/input.m" || return 1
+    build_module "$BUILD/macos-window.dylib" -framework AppKit \
+                 -framework UserNotifications \
+                 "$SOURCE/window.m" "$SOURCE/system.m" || return 1
+    build_module "$ROOT/var/macos-input/macos-input.dylib" -framework Carbon \
+                 -framework Foundation "$ROOT/tools/macos-input/input.m" || return 1
 }
 
 uninstall() {

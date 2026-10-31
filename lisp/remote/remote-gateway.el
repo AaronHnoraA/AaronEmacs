@@ -549,14 +549,10 @@ Return non-nil only for the first settlement."
   "Hook called with a disconnected client to release its consumer resources.")
 
 (defun remote-gateway--foreign-request-p (request)
-  "Return non-nil when REQUEST is not from a client on this side of the gateway.
-Every client is a helper process, none a browser.  A browser always names the
-page behind a cross-site request, and rebinding shows up as a foreign Host."
-  (let ((headers (ws-headers request)))
-    (or (assq :ORIGIN headers)
-        (not (string-match-p
-              "\\`\\(?:127\\.0\\.0\\.1\\|localhost\\|\\[::1\\]\\)\\(?::[0-9]+\\)?\\'"
-              (or (cdr (assq :HOST headers)) ""))))))
+  "Return non-nil when a web page sent REQUEST.
+Every client is a helper process, none a browser, and a browser always names
+the page behind a request that changes something."
+  (assq :ORIGIN (ws-headers request)))
 
 (defun remote-gateway--refuse-handler (request)
   "Refuse REQUEST, which `remote-gateway--foreign-request-p' matched."

@@ -9,9 +9,9 @@
 
 (require 'aaron-keybinds)
 (require 'aaron-lib)
+(require 'aaron-notify)
 (require 'aaron-open)
 (require 'browse-url)
-(require 'dnd)
 (require 'general)
 (require 'subr-x)
 
@@ -19,7 +19,13 @@
 (declare-function remote-file-name-target "remote-fs" (file-name))
 (declare-function remote-fs-file-name-p "remote-fs" (file-name))
 (declare-function remote-uri-to-file-name "remote-fs" (uri))
-(defvar +macos-file-drop-handlers)
+(declare-function macos-clipboard-files "ext:macos-window" ())
+(declare-function macos-clipboard-set-files "ext:macos-window" (files))
+(declare-function macos-dock-badge "ext:macos-window" (label))
+(declare-function macos-notify-post "ext:macos-window" (id title body thread))
+(declare-function macos-notify-ready-p "ext:macos-window" ())
+(declare-function macos-notify-start "ext:macos-window" (channel))
+(declare-function aaron-notify-activate "aaron-notify" (id))
 
 ;;; From macOS
 
@@ -40,53 +46,6 @@ A module that hides Emacs puts what brings it back here.")
 
 (general-define-key "<ns-power-off>" #'+macos/system-quit)
 
-(defun +macos--drop-handler ()
-  "Return the file drop handler declared for the current buffer, or nil."
-  (cdr (seq-find (lambda (entry) (derived-mode-p (car entry)))
-                 +macos-file-drop-handlers)))
-
-(defun +macos-drop-files (urls action)
-  "Give the files in URLS to the current buffer's handler, or visit them.
-ACTION is the drag action, passed on to the default visit."
-  (if-let* ((handler (+macos--drop-handler)))
-      (funcall handler (delq nil (mapcar (lambda (url)
-                                           (dnd-get-local-file-name url t))
-                                         urls)))
-    (dolist (url urls)
-      (dnd-open-local-file url action)))
-  'private)
-
-(put '+macos-drop-files 'dnd-multiple-handler t)
-
-(defun +macos-drop-url (url _action)
-  "Open the dropped URL through the open routes."
-  (aaron/open-url url)
-  'private)
-
-;; Dired and Org prepend their own handlers buffer-locally, so these two only
-;; decide for every other buffer.
-(add-to-list 'dnd-protocol-alist '("\\`file:" . +macos-drop-files))
-(add-to-list 'dnd-protocol-alist
-             '("\\`\\(?:https?\\|ftp\\|nfs\\)://" . +macos-drop-url))
-
-(defun +macos-quote-path (path)
-  "Return PATH quoted for a POSIX shell, unchanged when that is not needed."
-  (if (string-match-p "\\`[-[:alnum:]_./+,:@%=]+\\'" path)
-      path
-    (concat "'" (string-replace "'" "'\\''" path) "'")))
-
-(defun +macos-drop-text (files &optional quote)
-  "Return FILES as one line of shell words, each quoted by QUOTE."
-  (concat (mapconcat (or quote #'+macos-quote-path) files " ") " "))
-
-(defun +macos-drop-insert-paths (files &optional quote)
-  "Insert FILES at the end of this shell buffer, each quoted by QUOTE.
-The paths are this machine's, so a shell on another target refuses them."
-  (unless (remote-client-file-name default-directory)
-    (user-error "Dropped files are on this machine, this shell is not"))
-  (goto-char (point-max))
-  (insert (+macos-drop-text files quote)))
-
 ;;; To macOS
 
 (defun +macos-client-path (file)
@@ -106,15 +65,90 @@ The paths are this machine's, so a shell on another target refuses them."
       (user-error "Finder could not show %s" path))
     path))
 
-(defun notify-send (&rest params)
-  "Show a macOS notification with the :title and :body of PARAMS."
+(defun +macos/quick-look ()
+  "Show the Dired entry at point, or the current file, in Quick Look."
+  (interactive)
+  (let ((path (+macos-client-path
+               (or (and (derived-mode-p 'dired-mode)
+                        (dired-get-filename nil t))
+                   buffer-file-name
+                   (user-error "Nothing to look at here"))))
+        (default-directory temporary-file-directory))
+    (call-process "qlmanage" nil 0 nil "-p" path)))
+
+;;; Native services
+
+(defvar +macos-native-module
+  (expand-file-name "var/macos-background/macos-window.dylib"
+                    user-emacs-directory)
+  "The module built by `bin/emacs-app build'.")
+
+(defun +macos-native-p ()
+  "Return non-nil when the native module is loaded or loadable."
+  (and (display-graphic-p)
+       (file-exists-p +macos-native-module)
+       (or (featurep 'macos-window)
+           (ignore-errors (module-load +macos-native-module) t))))
+
+;;; Notifications
+
+(defvar +macos--notify-channel nil
+  "Pipe process on which the native module reports clicked notifications.")
+
+(defun +macos--notify-clicked (_process output)
+  "Act on the notification ids in OUTPUT, one per line."
+  (run-hooks '+macos-present-hook)
+  (mapc #'aaron-notify-activate (split-string output "\n" t)))
+
+(defun +macos--notify-native-p ()
+  "Return non-nil when notifications can go through the native center."
+  (and (+macos-native-p)
+       (progn
+         (unless (process-live-p +macos--notify-channel)
+           (setq +macos--notify-channel
+                 (make-pipe-process :name "macos-notify" :noquery t
+                                    :filter #'+macos--notify-clicked))
+           (macos-notify-start +macos--notify-channel))
+         (macos-notify-ready-p))))
+
+(defun +macos--notify-script (entry)
+  "Show ENTRY with `osascript', under the script icon; a click does nothing."
   (let ((default-directory temporary-file-directory))
-    (start-process "macos-notify" nil "osascript"
+    (start-process "macos-notify-script" nil "osascript"
                    "-e" "on run argv"
                    "-e" "display notification (item 2 of argv) with title (item 1 of argv)"
                    "-e" "end run"
-                   (or (plist-get params :title) "Emacs")
-                   (or (plist-get params :body) ""))))
+                   (aaron-notify-entry-title entry)
+                   (or (aaron-notify-entry-body entry) ""))))
+
+(defun +macos-notify (entry)
+  "Show the `aaron-notify-entry' ENTRY as a system notification."
+  (if (+macos--notify-native-p)
+      (macos-notify-post (aaron-notify-entry-id entry)
+                         (aaron-notify-entry-title entry)
+                         (or (aaron-notify-entry-body entry) "")
+                         (format "%s" (or (aaron-notify-entry-source entry)
+                                          "emacs")))
+    (+macos--notify-script entry)))
+
+(setq aaron-notify-system-function #'+macos-notify)
+
+;; Asked at startup so the first notification already carries Emacs's icon: the
+;; answer arrives after the request, and only the native center shows that icon.
+(add-hook 'window-setup-hook #'+macos--notify-native-p)
+
+(defun +macos--dock-badge-h (count)
+  "Show COUNT unread notifications on the Dock icon."
+  (when (+macos-native-p)
+    (macos-dock-badge (if (zerop count) "" (number-to-string count)))))
+
+(add-hook 'aaron-notify-unread-functions #'+macos--dock-badge-h)
+
+;;; Files on the clipboard
+
+(defun +macos-clipboard-files ()
+  "Return the files on the system clipboard, as a Finder copy leaves them."
+  (and (+macos-native-p) (macos-clipboard-files)))
 
 (defun +macos-open--normalize-target (target)
   "Return TARGET in a form suitable for the macOS open command."
@@ -216,23 +250,28 @@ buffer file."
     (call-interactively #'+macos/open-target)))
 
 (defun +macos/copy-file-to-clipboard ()
-  "Put the current file itself on the macOS clipboard.
-Pasting into another application (a chat, Mail, Finder) attaches the file
-rather than inserting its path.  Only a file this machine can read
+  "Put the current file, or Dired's marked files, on the macOS clipboard.
+Pasting into another application (a chat, Mail, Finder) attaches the files
+rather than inserting their paths.  Only a file this machine can read
 directly qualifies; a file on another target is refused."
   (interactive)
-  (let* ((file (or buffer-file-name (user-error "Current buffer is not visiting a file")))
-         (path (+macos-client-path file)))
-    (unless (file-exists-p path)
-      (user-error "File does not exist: %s" path))
-    (unless (+macos-call "osascript" "-e"
-                         (format "set the clipboard to (POSIX file %s)"
-                                 (prin1-to-string path)))
-      (user-error "Failed to copy file to clipboard: %s" path))
-    (message "Copied file to clipboard: %s" path)))
+  (let* ((files (or (and (derived-mode-p 'dired-mode)
+                         (dired-get-marked-files))
+                    (list (or buffer-file-name
+                              (user-error "Current buffer is not visiting a file")))))
+         (paths (mapcar #'+macos-client-path files)))
+    (dolist (path paths)
+      (unless (file-exists-p path)
+        (user-error "File does not exist: %s" path)))
+    (unless (and (+macos-native-p) (macos-clipboard-set-files paths))
+      (user-error "Failed to copy to the clipboard: %s" (car paths)))
+    (message "Copied to clipboard: %s"
+             (if (cdr paths) (format "%d files" (length paths)) (car paths)))))
 
 (define-leader-key! "fg" '(:def +macos/copy-file-to-clipboard
                            :which-key "copy file to clipboard"))
+
+(require 'os/macos/drop)
 
 (provide 'os/macos/system)
 ;;; os/macos/system.el ends here

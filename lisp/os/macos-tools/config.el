@@ -69,7 +69,8 @@ With INSERT-P, insert the value at point as well."
   "macOS utility commands."
   [["macOS"
     ("c" "pick color" macos-pick-color)
-    ("o" "open at point" macos-open-at-point)]
+    ("o" "open at point" macos-open-at-point)
+    ("q" "quick look" +macos/quick-look)]
    ["Finder"
     ("r" "reveal file" macos-reveal-in-finder)
     ("R" "reveal project" macos-reveal-project-in-finder)]])

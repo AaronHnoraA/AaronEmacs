@@ -25,6 +25,7 @@
          (config :feature config)
          (general :feature general) (keybinds :feature aaron-keybinds)
          (utils :feature aaron-utils) (base :feature aaron-base)
+         (notify :feature aaron-notify)
          (open :feature aaron-open) (patches :feature aaron-patches)
  :os     (:when (eq system-type 'darwin) (macos :optional t))
          ;; Must follow `os/macos': it restores the Option/Command layout

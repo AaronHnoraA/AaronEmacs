@@ -183,11 +183,18 @@ EventSource 重连也会比较 generation。未保存的 remote note 或 scratch
 
 ## Node host
 
-Emacs 托管的 host 只服务本机自己的客户端，边界只有一条
-（`server/infrastructure/local-boundary.mjs`）：`Host` 必须是回环名，`Origin` 必须
-缺失或等于 host 自身；`/v1/` 路由自带 bearer token，额外接受浏览器扩展的 `Origin`。
-HTTP 和 Jupyter WebSocket 都走这一条。这里不再加 token，同机的其他进程本来就和
-host 同权限。`server` 模式面向外部，不适用这条规则。
+Emacs 托管的 host 只监听回环地址，服务本机自己的客户端。性能优先，普通请求不做任何
+校验；只有会改东西的入口（`POST /api`、`/api/clipboard`、`/emacs/event`）和 Jupyter
+WebSocket 握手调用 `foreignPage`（`server/infrastructure/local-boundary.mjs`），拒绝
+`Origin` 不是 host 自身的请求，这同时挡住跨站请求和 DNS rebinding 的写操作。`/v1/`
+路由自带 bearer token。只读的 GET 不校验，这是有意的取舍。`server` 模式面向外部，
+不适用这条规则。
+
+系统文件拖到页面上时，WebKit 默认会把页面导航到那个文件，所以每个页面都装
+`pages/host-file-drop.ts`。编辑区把文件存为附件并在落点插入链接
+（`dropAttachmentFiles`），其他位置没有效果。WebKit 只给文件内容，不给路径，所以
+库内文件也会复制一份，文件夹被跳过。粘贴时表格优先于它旁边的图片，host 的剪贴板
+回退先取文本，因为电子表格和 Finder 复制都会附带图片。
 
 ```text
 server/

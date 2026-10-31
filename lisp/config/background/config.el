@@ -16,6 +16,7 @@
 
 ;;; Code:
 
+(declare-function +macos-native-p "os/macos/system" ())
 (declare-function macos-window-set-accessory "ext:macos-window" (accessory))
 (declare-function macos-window-install-drag-handles "ext:macos-window" (height))
 (declare-function ns-hide-emacs "nsfns.m" (on))
@@ -23,11 +24,6 @@
 
 (defvar +background-hide-dock-icon t
   "Whether a background Emacs leaves the Dock, given the window module.")
-
-(defvar +background-window-module
-  (expand-file-name "var/macos-background/macos-window.dylib"
-                    user-emacs-directory)
-  "The built `macos-window' module.")
 
 (defvar +frame-drag-handle-height 6
   "Height in points of the draggable top border of a frame.
@@ -241,20 +237,13 @@ hidden again once startup has finished."
   (run-at-time 0 nil #'save-buffers-kill-emacs)
   nil)
 
-(defun +background--window-module-p ()
-  "Return non-nil when the `macos-window' module is loaded or loadable."
-  (and (display-graphic-p)
-       (file-exists-p +background-window-module)
-       (or (featurep 'macos-window)
-           (ignore-errors (module-load +background-window-module) t))))
-
 (defun +background-apply-dock-policy (&optional state)
   "Keep Emacs out of the Dock while it is in the background.
 A foreground Emacs is a regular application again, with its Dock icon,
 Cmd-Tab entry and main menu; macOS ties those three together.  STATE asserts
 what Emacs is becoming, since frames report a change of visibility late: the
 symbol `background', or any other non-nil value for the foreground."
-  (when (+background--window-module-p)
+  (when (+macos-native-p)
     (macos-window-set-accessory
      (and +background-hide-dock-icon
           (or (eq state 'background)
@@ -263,7 +252,7 @@ symbol `background', or any other non-nil value for the foreground."
 
 (defun +frame-install-drag-handles ()
   "Let every top-level frame be dragged from its narrow top edge."
-  (when (and +frame-drag-handle-height (+background--window-module-p))
+  (when (and +frame-drag-handle-height (+macos-native-p))
     (macos-window-install-drag-handles +frame-drag-handle-height)))
 
 ;;; Actions from outside Emacs

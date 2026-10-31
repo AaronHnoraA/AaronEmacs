@@ -6,6 +6,6 @@ Modules are declared, in load order, in [`lisp/init-modules.el`](../init-modules
 
 | Module | Declared | Purpose | Files |
 | --- | --- | --- | --- |
-| [`macos`](macos/) | yes | Tweaks for MacOS, input sources, and the boundary to the system ([macos-boundary.md](../../docs/design/macos-boundary.md)) | `config.el`, `input.el`, `system.el`, `autoload/drop.el` |
+| [`macos`](macos/) | yes | Tweaks for MacOS, input sources, and the boundary to the system ([macos-boundary.md](../../docs/design/macos-boundary.md)) | `config.el`, `input.el`, `system.el`, `drop.el`, `autoload/drop.el` |
 | [`macos-tools`](macos-tools/) | yes | Lazy macOS utility commands | `config.el` |
 | [`neomacs`](neomacs/) | yes | Neomacs runtime compatibility | `config.el` |

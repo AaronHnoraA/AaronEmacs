@@ -52,7 +52,8 @@
   "Evaluate BODY with isolated registries, machines and transfer state."
   (declare (indent 0) (debug t))
   `(let* ((directory (file-name-as-directory
-                      (make-temp-file "remote-transfer-test-" t)))
+                      (file-truename
+                       (make-temp-file "remote-transfer-test-" t))))
           (remote-targets (make-hash-table :test #'equal))
           (remote-links (make-hash-table :test #'equal))
           (remote-adapters (make-hash-table :test #'equal))

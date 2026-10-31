@@ -1253,21 +1253,6 @@ selection and mark behavior."
 (add-hook 'ibuffer-mode-hook #'aaron-ibuffer-apply-ui)
 (add-hook 'after-load-theme-hook #'aaron-ibuffer-apply-ui)
 
-;; Notifications
-;;
-;; Actually, `notify-send' is not defined in notifications package, but the
-;; autoload cookie will make Emacs load `notifications' first, then our
-;; `defalias' will be evaluated.  On macOS `os/macos/system.el' replaces it.
-(pcase system-type
-  ('gnu/linux
-   (use-package notifications
-     :ensure nil
-     :commands notify-send
-     :config
-     (defalias 'notify-send 'notifications-notify)))
-  (_
-   (defalias 'notify-send 'ignore)))
-
 ;; Recently opened files
 (use-package recentf
   :ensure nil

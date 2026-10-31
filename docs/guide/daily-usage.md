@@ -83,13 +83,22 @@
   `r` 把缩进转成当前风格（带前缀参数转成另一种）。
 - `M-x macos-tools-menu`（或 `SPC a m`）
   打开 macOS 工具菜单；`macos-pick-color` 复制颜色，带前缀参数时插入；
-  `macos-open-at-point` 用系统应用打开光标处的链接或文件；`r` / `R`
+  `macos-open-at-point` 用系统应用打开光标处的链接或文件；`q` 用 Quick Look
+  预览；`r` / `R`
   （`macos-reveal-in-finder` / `macos-reveal-project-in-finder`）在 Finder 中选中
   当前文件（Dired 里是光标处的条目）或项目根目录，其他 target 上的文件会被拒绝。
-- 把文件拖进 Emacs：普通窗口打开文件；Eshell、shell、term 和 Portal 终端在提示符处
-  插入转义后的路径，不执行；Dired 和 Org 按各自方式处理；拖入链接走 `aaron-open`
-  的路由。Emacs 在后台时，从 Finder 打开文件或系统要求退出都会先把 Emacs 显示出来。
-  规则见 [macos-boundary.md](../design/macos-boundary.md)。
+- 把文件拖进 Emacs：普通窗口和 Dired 打开文件，文件夹进 Dired；终端（Eshell、shell、
+  term、Portal）在提示符处插入转义路径，不执行；`C-x C-f` 的提示里，文件夹就进入它，
+  文件就填入路径；Org 询问；链接走 `aaron-open` 的路由。按住 Option 拖入、落点在其他
+  机器上或文件很多时，弹出单键菜单：`o` 打开、`c` 复制到此目录、`m` 移动、`l` 符号
+  链接、`i` 插入路径、`r` 插入相对路径。`+macos-file-drop-ask` 控制何时询问（`auto`、
+  `always`、`never`）。规则见 [macos-boundary.md](../design/macos-boundary.md)。
+- 从 Dired 文件名上按住鼠标可以把文件拖到其他应用。
+- Dirvish 里没有待粘贴的文件时，`p p` 粘贴 Finder 复制的文件。`SPC f g` 在 Dired 里
+  复制所有标记文件。`H-V`（`yank-media`）粘贴图片等媒体，由当前模式决定如何处理。
+- `M-x notification-history` 查看 Emacs 发过的所有通知，点击标题运行它的动作。
+  Emacs 不在前台时通知走系统横幅，点击回到 Emacs，Dock 图标显示未读数。首次发通知时
+  macOS 会询问授权；拒绝也不丢通知，只是点击不能回到 Emacs。
 - `M-x mouse-actions-menu`（或外设映射的 `H-C-M-m`）
   打开可点击的常用动作板。代码和文字的右键菜单按所在位置提供动作；
   点击 mode line 的 Git 状态段打开 Git 菜单，快速切换窗口后也可立即再次打开。
@@ -1601,7 +1610,8 @@ Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复�
 编译出的动态模块实现;没有编译时 Dock 图标始终显示。
 
 同一个模块让每个顶层 frame 的顶部边框可拖动（默认 6 点，
-`+frame-drag-handle-height`）。它不覆盖下面的标签，也不绘制拖动条；
+`+frame-drag-handle-height`）。指针停在顶边时，frame 上方弹出一个抓手，拖它就能移动
+窗口，它不占内容空间，也不覆盖下面的标签；
 按住原来向上调整窗口大小的边框即可移动无标题栏的 frame。
 
 长期运行时不留孤儿:Noema web host 启动时拿到 Emacs 的 pid(`NOEMA_HOST_OWNER_PID`),
@@ -1792,7 +1802,7 @@ Visual 模式借鉴 LaTeX 的段落节奏：首个空行清楚分段，连续空
 - 格式是**切换**：`Cmd-B` / `Cmd-I` / `Cmd-Shift-X` 与选区工具栏在已有格式内再按即移除；选区首尾空白留在标记外；多光标逐个生效；中文标点旁的 `**（注）**` 也会渲染。`Mod-\` 或工具栏 `Tx` 清除选区内全部行内格式，工具栏按钮高亮显示已生效的格式。
 - 标题、引用、列表命令作用于选中的所有行，同类型再按即还原；快速插入里有“Promote / Demote heading”。
 - 回车：勾选过的任务续出未勾选的新任务；```` ```lang ```` 行尾回车自动补闭合围栏；单行 `| a | b |` 回车生成表格；代码块里 `{}` 之间回车展开缩进，`Tab` 在光标处缩进，`Mod-Enter` 跳出代码块。
-- 粘贴看落点：代码里粘纯文本，表格行里换行变 `<br>`，链接 `](…)` 里只取 URL，选中文字粘 URL 成为链接；表格网页/Excel 粘进来是 Markdown 表格。拖入图片或 PDF 会存入附件并在落点插入链接。
+- 粘贴看落点：代码里粘纯文本，表格行里换行变 `<br>`，链接 `](…)` 里只取 URL，选中文字粘 URL 成为链接；表格网页/Excel 粘进来是 Markdown 表格。拖入任何文件都会存入附件并在落点插入链接，不会把文本文件的内容灌进笔记；页面其他位置的文件拖放没有效果。
 - 撤销按词：连续输入在空白处、输入与删除切换处分段。
 - 页面查找栏默认智能大小写（查询含大写才区分），`Aa` / `W` / `.*` 切换区分大小写、全词、正则，`⇄` 打开替换（`Enter` 替换当前，`Alt-Enter` 全部替换）。
 - 范围选择不再把经过的标记、图片、图表展开成源码；只有光标所在处显示源码。
