@@ -41,18 +41,6 @@
       mode
     fallback))
 
-(defun +filetypes-sqlite-file-p (&optional file)
-  "Return non-nil when FILE or the current buffer looks like a SQLite DB."
-  (let ((file (or file buffer-file-name)))
-    (or (and file
-             (member (downcase (or (file-name-extension file) ""))
-                     +filetypes-sqlite-extensions))
-        (save-excursion
-          (save-restriction
-            (widen)
-            (goto-char (point-min))
-            (looking-at-p (regexp-quote +filetypes--sqlite-header)))))))
-
 ;;;###autoload
 (defun +filetypes/open-sqlite-database ()
   "Open the current file with the configured database client."
@@ -160,10 +148,12 @@
  '("\\.png\\'" "\\.jpe?g\\'" "\\.gif\\'" "\\.webp\\'" "\\.bmp\\'"
    "\\.tiff?\\'" "\\.ico\\'" "\\.heic\\'")
  #'image-mode)
+;; Only formats `archive-mode' reads, which signals on any other.  Tar files
+;; keep Emacs' `tar-mode', and `.gz' and the like stay with jka-compr, which
+;; decompresses and then picks the mode by the inner name.
 (+filetypes--prefer-mode
  '("\\.zip\\'" "\\.jar\\'" "\\.war\\'" "\\.ear\\'" "\\.apk\\'" "\\.epub\\'"
-   "\\.rar\\'" "\\.7z\\'" "\\.tar\\'" "\\.tgz\\'" "\\.tbz2\\'" "\\.txz\\'"
-   "\\.gz\\'" "\\.bz2\\'" "\\.xz\\'" "\\.zst\\'")
+   "\\.rar\\'" "\\.7z\\'")
  #'archive-mode)
 (+filetypes--prefer-mode
  '("\\.bin\\'" "\\.dat\\'" "\\.dump\\'")

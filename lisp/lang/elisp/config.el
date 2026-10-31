@@ -72,8 +72,9 @@
   (if (+elisp--flymake-safe-buffer-p)
       (progn
         (setq-local flymake-diagnostic-functions (+elisp-flymake-backends))
-        (flymake-mode 1)
-        (flymake-start))
+        ;; Enabling starts a check; a second start would only kill that
+        ;; child Emacs and spawn another.
+        (flymake-mode 1))
     (setq-local flymake-diagnostic-functions nil)
     (when (bound-and-true-p flymake-mode)
       (flymake-mode -1))))

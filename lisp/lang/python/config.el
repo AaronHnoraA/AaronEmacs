@@ -142,14 +142,19 @@ interpreter and environment as the remote buffer."
   (when (and program
              (file-executable-p
               (+python-toolchain--logical-executable program)))
-    (with-temp-buffer
-      (when (zerop (apply #'process-file program nil t nil arguments))
-        (goto-char (point-max))
-        (when (re-search-backward "^[[:space:]]*{" nil t)
-          (condition-case nil
-              (json-parse-buffer :object-type 'alist :array-type 'list
-                                 :null-object nil :false-object nil)
-            (error nil)))))))
+    ;; A projected capsule is buffer-local; carry it into the temp buffer.
+    (let ((environment process-environment)
+          (path exec-path))
+      (with-temp-buffer
+        (let ((process-environment environment)
+              (exec-path path))
+          (when (eql 0 (apply #'process-file program nil t nil arguments))
+            (goto-char (point-max))
+            (when (re-search-backward "^[[:space:]]*{" nil t)
+              (condition-case nil
+                  (json-parse-buffer :object-type 'alist :array-type 'list
+                                     :null-object nil :false-object nil)
+                (error nil)))))))))
 
 (defun +python-toolchain--logical-executable (path)
   "Project target-native executable PATH into the current logical target."

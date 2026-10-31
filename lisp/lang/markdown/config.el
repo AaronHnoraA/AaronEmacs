@@ -129,12 +129,6 @@ Either way `+noema/open-markdown-raw' forces Emacs and
 Bind this to t around programmatic find-file calls (e.g. in magit hooks,
 test helpers) where you want a raw Emacs buffer instead of the web editor.")
 
-(defconst +noema--redirect-commands
-  '(find-file find-file-other-window find-file-other-frame
-    find-file-literally find-alternate-file
-    dired-find-file dired-find-file-other-window dired-view-file)
-  "Interactive commands from which Markdown opens should redirect to Noema.")
-
 (defun +noema--should-redirect-p ()
   "Return non-nil when the current open warrants an Noema redirect."
   (and (not noninteractive)
@@ -154,12 +148,10 @@ test helpers) where you want a raw Emacs buffer instead of the web editor.")
 (defun +noema--markdown-auto-mode-entry-p (entry)
   "Return non-nil when ENTRY is a Markdown auto-mode entry."
   (and (consp entry)
-       (let ((pattern (car entry)))
-         (and (stringp pattern)
-              (or (member pattern +noema-markdown-auto-mode-patterns)
-                  (string-match-p
-                   "\\(?:markdown\\|md\\)"
-                   pattern))))))
+       (or (member (car entry) +noema-markdown-auto-mode-patterns)
+           (memq (cdr entry)
+                 '(markdown-mode gfm-mode markdown-ts-mode
+                   +noema-markdown-redirect-mode)))))
 
 (defun +noema--pin-markdown-redirect-mode ()
   "Keep Markdown file patterns routed to Noema ahead of other modes."
@@ -290,6 +282,11 @@ or editing when the web editor is unavailable."
   (+noema--pin-markdown-redirect-mode))
 
 (with-eval-after-load 'tools/tree-sitter/config
+  (+noema--pin-markdown-redirect-mode))
+
+;; Loading `markdown-mode' puts its own entry back at the front, and the first
+;; raw Markdown buffer loads it, so later opens would skip the routing.
+(with-eval-after-load 'markdown-mode
   (+noema--pin-markdown-redirect-mode))
 
 (add-hook 'after-init-hook #'+noema--pin-markdown-redirect-mode 90)

@@ -491,4 +491,16 @@
                            (string-match-p (car rule) "*Diagnostics F12*")))
                     +popup-rules)))
 
+(ert-deftest filetypes-send-archive-mode-only-what-it-reads ()
+  "Tar and compressed names keep their own handling; bat files keep theirs."
+  (dolist (name '("a.tar" "a.tgz" "a.txt.gz" "a.bz2" "a.xz" "a.zst"))
+    (should-not (eq (assoc-default name auto-mode-alist #'string-match)
+                    'archive-mode)))
+  (should (eq (assoc-default "a.zip" auto-mode-alist #'string-match)
+              'archive-mode))
+  (should (eq (assoc-default "a.cmd" auto-mode-alist #'string-match)
+              'bat-mode))
+  (should (eq (assoc-default "a.md" auto-mode-alist #'string-match)
+              '+noema-markdown-redirect-mode)))
+
 ;;; init-state-files-tests.el ends here

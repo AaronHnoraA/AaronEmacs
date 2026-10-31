@@ -155,15 +155,7 @@ With prefix RUN, also execute the program after a successful build."
 ;; Tree-sitter indentation
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defun +c-ts-indent-4 ()
-  "Use 2 space indentation in c-ts-mode."
-  (setq-local c-ts-mode-indent-offset 2)
-  (setq-local tab-width 2)
-  (setq-local indent-tabs-mode nil)
-  (local-set-key (kbd "RET") #'newline-and-indent))
-
-(add-hook 'c-ts-mode-hook #'+c-ts-indent-4)
-(add-hook 'c++-ts-mode-hook #'+c-ts-indent-4)
+;; See `+cpp-indent-setup-h' at the end of this file.
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; clangd
@@ -315,8 +307,10 @@ the client."
 
 
 (defun +cpp-indent-setup-h ()
+  "Use 2 space indentation in C-family buffers."
   (setq-local c-basic-offset 2)
   (setq-local c-ts-mode-indent-offset 2)
+  (setq-local tab-width 2)
   (setq-local indent-tabs-mode nil)
   (local-set-key (kbd "RET") #'newline-and-indent))
 

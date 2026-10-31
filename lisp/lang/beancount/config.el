@@ -39,14 +39,12 @@
   "Apply local defaults for Beancount buffers."
   (setq-local comment-start "; ")
   (setq-local comment-end "")
-  (setq-local compile-command
-              (mapconcat #'shell-quote-argument
-                         (delq nil
-                               (list +beancount-check-command
-                                     (+beancount-locate-root-file)))
-                         " "))
-  (setq-local lsp-beancount-journal-file
-              (+beancount-locate-root-file))
+  (let ((root-file (+beancount-locate-root-file)))
+    (setq-local compile-command
+                (mapconcat #'shell-quote-argument
+                           (delq nil (list +beancount-check-command root-file))
+                           " "))
+    (setq-local lsp-beancount-journal-file root-file))
   (setq-local lsp-auto-guess-root t)
   (+lsp/mode-ensure))
 

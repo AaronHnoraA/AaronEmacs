@@ -42,9 +42,12 @@
   '("MODULE.bazel" "WORKSPACE.bazel" "WORKSPACE")
   "Files which identify a Bazel workspace root.")
 
+(remote-register-ancestor-markers +bazel-workspace-markers)
+
 (defun +bazel-workspace-root (&optional directory)
   "Return the Bazel workspace containing DIRECTORY."
   (let ((directory (or directory default-directory)))
+    (remote-prefetch-ancestor-markers directory)
     (or (seq-some (lambda (marker)
                     (locate-dominating-file directory marker))
                   +bazel-workspace-markers)
@@ -265,10 +268,11 @@ With REFRESH, refresh target discovery first."
                     (if (and (zerop (remote-exec-result-status result))
                              (string-match
                               "\\`\\(.+\\):\\([0-9]+\\):\\([0-9]+\\):" output))
-                        (let ((file (remote-expand-file-name
-                                     (match-string 1 output) root context))
-                              (line (string-to-number (match-string 2 output)))
-                              (column (string-to-number (match-string 3 output))))
+                        ;; Numbers first: expanding the name uses match data.
+                        (let* ((line (string-to-number (match-string 2 output)))
+                               (column (string-to-number (match-string 3 output)))
+                               (file (remote-expand-file-name
+                                      (match-string 1 output) root context)))
                           (when (and (buffer-live-p origin)
                                      (frame-live-p origin-frame))
                             (with-selected-frame origin-frame

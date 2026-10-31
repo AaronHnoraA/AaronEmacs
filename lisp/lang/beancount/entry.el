@@ -30,8 +30,10 @@
 (defun +beancount--completions ()
   "Return the completions alist, fetching synchronously if the cache is cold."
   (or +beancount--completions-cache
-      (setq +beancount--completions-cache
-            (+beancount-run-tool-sync (list "completions")))))
+      (let ((data (+beancount-run-tool-sync (list "completions"))))
+        (unless (alist-get 'error data)
+          (setq +beancount--completions-cache data))
+        data)))
 
 (defun +beancount--read-template ()
   "Prompt for which `bean-tool add' template to use; return its name string."
