@@ -454,12 +454,20 @@ when choosing a fallback.  Exact popup restoration remains native."
         (project-root project)
       default-directory)))
 
-(defun +window--repair-after-close (window closing previous &optional directory)
+(defun +window--listed-directory (buffer)
+  "Return the directory Dired BUFFER lists, or nil for any other buffer."
+  (with-current-buffer buffer
+    (and (derived-mode-p 'dired-mode)
+         (file-name-as-directory (expand-file-name default-directory)))))
+
+(defun +window--repair-after-close
+    (window closing previous &optional directory listing)
   "Complete WINDOW's close transition after CLOSING, using PREVIOUS.
 Native quit owns exact popup restoration.  A duplicate visible buffer or
 scratch/dashboard/home fallback returns to PREVIOUS, closes a spare window,
 or opens DIRECTORY's project when this is the last window.  Home opens the
-Dashboard instead."
+Dashboard instead, and so does a project equal to LISTING, the directory
+CLOSING itself listed: reopening it would undo the close."
   (when (and (window-live-p window)
              (not (eq (window-buffer window) closing))
              (or (+window--shown-in-other-window-p window (window-buffer window))
@@ -475,7 +483,10 @@ Dashboard instead."
      (t
       (let ((project-directory (+window--project-directory directory)))
         (if (or (+window--home-dired-buffer-p previous)
-                (+window--home-directory-p project-directory))
+                (+window--home-directory-p project-directory)
+                (equal (file-name-as-directory
+                        (expand-file-name project-directory))
+                       listing))
             (set-window-buffer window (+window-dashboard-buffer))
           (with-selected-window window
             (dired project-directory))))))))
@@ -485,20 +496,23 @@ Dashboard instead."
   (let* ((window (or window (selected-window)))
          (closing (and (window-live-p window) (window-buffer window)))
          (previous (and closing (+window--return-buffer window closing)))
-         (directory (and closing (buffer-local-value 'default-directory closing))))
+         (directory (and closing (buffer-local-value 'default-directory closing)))
+         (listing (and closing (+window--listed-directory closing))))
     (prog1 (funcall orig-fn kill window)
       (when closing
-        (+window--repair-after-close window closing previous directory)))))
+        (+window--repair-after-close
+         window closing previous directory listing)))))
 
 (let ((native-comp-enable-subr-trampolines nil))
   (unless (advice-member-p #'+window-quit-return-a 'quit-window)
     (advice-add 'quit-window :around #'+window-quit-return-a)))
 
-(defun +window--repair-killed-buffer (closing windows directory)
-  "Settle WINDOWS after CLOSING is actually killed."
+(defun +window--repair-killed-buffer (closing windows directory &optional listing)
+  "Settle WINDOWS after CLOSING, which listed LISTING, is actually killed."
   (unless (buffer-live-p closing)
     (dolist (entry windows)
-      (+window--repair-after-close (car entry) closing (cdr entry) directory))))
+      (+window--repair-after-close
+       (car entry) closing (cdr entry) directory listing))))
 
 (defun +window-kill-buffer-h ()
   "Record visible windows before the current buffer is killed."
@@ -510,7 +524,8 @@ Dashboard instead."
                             (get-buffer-window-list closing nil t))))
       (when windows
         (run-at-time 0 nil #'+window--repair-killed-buffer
-                     closing windows default-directory)))))
+                     closing windows default-directory
+                     (+window--listed-directory closing))))))
 
 (add-hook 'kill-buffer-hook #'+window-kill-buffer-h)
 
@@ -840,6 +855,17 @@ upstream call shapes delegate unchanged."
   (advice-add
    'dirvish--dir-data-async
    :around #'+dirvish-dir-data-async-remote-a)
+
+  ;; `dirvish-winbuf-change-h' takes the selected frame for the frame the
+  ;; session moved to.  Window-change hooks run for every frame with another
+  ;; frame selected, so a Dired buffer changing in a frame that is not the
+  ;; selected one was killed and rebuilt, the kill's window repair opened it
+  ;; again, and the two fed each other forever.
+  (defadvice! +dirvish-winbuf-change-in-window-frame-a (fn window)
+    "Run FN, Dirvish's buffer-change hook, in WINDOW's own frame."
+    :around #'dirvish-winbuf-change-h
+    (with-selected-frame (window-frame window)
+      (funcall fn window)))
 
   ;; 4) 如果你希望 P 键在没有 peek 函数时也不报错，做一个安全绑定
   (unless (fboundp 'dirvish-peek-mode)

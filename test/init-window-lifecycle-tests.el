@@ -395,6 +395,72 @@ MODE is set as the buffer's `major-mode' symbol only; no mode body runs."
         (when (buffer-live-p buffer) (kill-buffer buffer)))
       (delete-directory dir t))))
 
+;;; C10: a Dired listing that is killed stays closed.
+
+(ert-deftest c10-killing-the-project-listing-does-not-reopen-it ()
+  "Killing the Dired of a project root in the last window shows the Dashboard.
+Reopening the directory undoes the kill, and with a hook that kills the buffer
+again (Dirvish moving a session between frames) never stops."
+  (let* ((directory (file-name-as-directory (make-temp-file "c10-listing" t)))
+         (scratch (get-buffer-create "*scratch*"))
+         (dashboard (generate-new-buffer "c10-dashboard"))
+         (listing (let ((default-directory directory))
+                    (generate-new-buffer "c10-listing"))))
+    (unwind-protect
+        (save-window-excursion
+          (delete-other-windows)
+          (with-current-buffer listing
+            (setq default-directory directory)
+            (dired-mode directory))
+          (switch-to-buffer scratch)
+          (switch-to-buffer listing)
+          (set-window-prev-buffers (selected-window) (list (list scratch 1 1)))
+          (cl-letf (((symbol-function '+window-dashboard-buffer)
+                     (lambda () dashboard))
+                    ((symbol-function '+window--project-directory)
+                     (lambda (_) directory))
+                    ((symbol-function 'dired) #'ignore))
+            (kill-buffer listing)
+            (sit-for 0.02)
+            (should (eq (window-buffer) dashboard))))
+      (dolist (buffer (list listing dashboard))
+        (when (buffer-live-p buffer) (kill-buffer buffer)))
+      (delete-directory directory t))))
+
+;;; Automatic focus: nothing to report to.
+
+(ert-deftest portal-focus-from-a-hook-tolerates-an-unplaced-view ()
+  "A view that cannot take the keyboard yet raises nothing from window hooks."
+  (cl-letf (((symbol-function 'portal-input-focus)
+             (lambda () (user-error "No visible Portal view to focus"))))
+    (should-not (+portal--try-focus))))
+
+;;; indent-guide's global idle timer.
+
+(ert-deftest indent-guide-show-skips-a-buffer-the-window-does-not-show ()
+  "A timer firing in another buffer neither errors nor draws there."
+  (require 'indent-guide)
+  (let ((shown nil))
+    (with-temp-buffer
+      (emacs-lisp-mode)
+      (indent-guide-mode 1)
+      (insert (make-string 2000 ?x))
+      (save-window-excursion
+        (switch-to-buffer (current-buffer))
+        (set-window-start nil 792)
+        (with-temp-buffer
+          (insert "short")
+          (indent-guide-mode 1)
+          (should-not (indent-guide-show)))
+        ;; Narrowing leaves `window-start' outside the accessible region.
+        (narrow-to-region 1 147)
+        (should-not (indent-guide-show))
+        (widen)
+        (cl-letf (((symbol-function 'line-number-at-pos)
+                   (lambda (&rest _) (setq shown t) 1)))
+          (indent-guide-show))
+        (should shown)))))
+
 (provide 'init-window-lifecycle-tests)
 
 ;;; init-window-lifecycle-tests.el ends here

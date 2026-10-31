@@ -171,10 +171,12 @@ Portal 终端与 agent-shell 使用同一行 popup 标签，放在 Emacs 的 tab
   按回退规则补位。测试（Portal）：`+portal-moving-buffer-vacates-its-old-window`、
   `+portal-native-sync-vacates-duplicate-before-placement`。
 - **C10** 回退没有合格候选时：多余窗口被删除；最后一个窗口打开当前项目目录，主目录
-  或无项目时打开 Dashboard。测试：`c10-last-window-without-candidates-stays-open`、
+  或无项目时打开 Dashboard；关闭的正是这个目录的 Dired 时也打开 Dashboard，不把它重新
+  打开。测试：`c10-last-window-without-candidates-stays-open`、
   `c10-sole-main-view-beside-side-window-has-no-history`、
   `+window-close-last-page-opens-project-directory`、
-  `+window-quit-home-fallback-opens-dashboard`。
+  `+window-quit-home-fallback-opens-dashboard`、
+  `c10-killing-the-project-listing-does-not-reopen-it`。
 - **C11** 未显示的 Noema 页面不超过 `+noema-detached-page-limit` 个，超出时先结束
   最久未显示的。测试：`q3-detached-pages-beyond-the-limit-are-ended`。
 

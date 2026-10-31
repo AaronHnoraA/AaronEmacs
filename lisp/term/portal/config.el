@@ -167,6 +167,14 @@ Emacs, so the view does not take the keyboard back when it finishes."
 
 (add-hook 'minibuffer-setup-hook #'+portal--keep-emacs-after-minibuffer-h)
 
+(defun +portal--try-focus ()
+  "Offer the keyboard to this buffer's view, which may not be placed yet.
+This runs from window hooks with no command to report to.  A view that
+cannot take focus now is focused when its placement changes."
+  (condition-case nil
+      (portal-input-focus)
+    (user-error nil)))
+
 (defun +portal--focus-selected-window (frame &optional selection-changed)
   "Match native keyboard focus to FRAME's selected Emacs window.
 SELECTION-CHANGED also handles a frame activation.  Leave a view's escape
@@ -206,7 +214,7 @@ and back gives it to the view again."
               (when (and target
                          (or selection-changed pane-changed
                              (not (portal-input--action "focused" target))))
-                (portal-input-focus)
+                (+portal--try-focus)
                 (when (portal-input--action "focused" target)
                   (setq-local +portal--explicitly-unfocused nil)
                   (run-hooks '+portal-focus-gained-hook))))))))))
