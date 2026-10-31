@@ -100,7 +100,7 @@
   (interactive "p")
   (end-of-line)
   (open-line arg)
-  (call-interactively 'next-line arg)
+  (call-interactively 'next-line)
   (if (not (member major-mode '(haskell-mode org-mode literate-haskell-mode)))
       (indent-according-to-mode)
     (beginning-of-line)))

@@ -1735,7 +1735,8 @@ interrupt the current window layout.")
 
 
 
-(require 'fingertip)
+;; Nothing binds fingertip: loading it took 21 ms of every start.
+(autoload 'fingertip-mode "fingertip" nil t)
 (require 'thing-edit)
 (require 'move-text)
 (require 'open-newline)

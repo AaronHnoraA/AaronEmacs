@@ -328,7 +328,7 @@ Optional argument REVERSE default is delete forward, if reverse is non-nil delet
   "Insert some char below at current line."
   (interactive "cType one char: ")
   (save-excursion
-    (let ((length (- (point-at-eol) (point-at-bol))))
+    (let ((length (- (line-end-position) (line-beginning-position))))
       (end-of-line)
       (insert "\n")
       (insert (make-string length char)))))
@@ -341,7 +341,7 @@ Argument STRING the string that need pretty."
                       (cons "^[ \t]*" "")
                       (cons "[ \t]*$" "")
                       (cons (concat "^\\(.\\{"
-                                    (or (number-to-string after) "10")
+                                    (if after (number-to-string after) "10")
                                     "\\}\\).*")
                             "\\1..."))))
     (dolist (replace replace-map)
@@ -402,6 +402,9 @@ Otherwise return nil."
     (set-register 8 tmp))
   (message "Have back to remember position"))
 
+(defvar point-stack nil
+  "Positions saved by `point-stack-push'.")
+
 (defun point-stack-push ()
   "Push current point in stack."
   (interactive)
@@ -458,7 +461,7 @@ signature, which many packages call with explicit region arguments."
 (defun forward-indent ()
   "Backward indent."
   (interactive)
-  (insert-string "    "))
+  (insert "    "))
 
 (defun backward-indent ()
   "Backward indent."
@@ -527,7 +530,6 @@ loaded).  Every other buffer that can revert is reloaded from disk."
   "Find file with root."
   (interactive "fFind file as sudo: ")
   (require 'tramp)
-  (tramp-cleanup-all-connections)
   (find-file (concat "/sudo:root@localhost:" file)))
 
 (defun find-file-smb(file)

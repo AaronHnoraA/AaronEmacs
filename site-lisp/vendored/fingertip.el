@@ -924,7 +924,7 @@ When in comment, kill to the beginning of the line."
 
 (defun fingertip-kill-line-in-string ()
   (cond ((save-excursion
-           (fingertip-skip-whitespace t (point-at-eol))
+           (fingertip-skip-whitespace t (line-end-position))
            (eolp))
          (kill-line))
         (t
@@ -940,11 +940,6 @@ When in comment, kill to the beginning of the line."
         (setq oddp (not oddp))
         (backward-char)))
     oddp))
-
-(defun fingertip-skip-whitespace (trailing-p &optional limit)
-  (funcall (if trailing-p 'skip-chars-forward 'skip-chars-backward)
-           " \t\n"
-           limit))
 
 (defun fingertip-kill-before-in-string ()
   (fingertip-delete-region (point) (1+ (treesit-node-start (treesit-node-at (point))))))
@@ -964,7 +959,7 @@ When in comment, kill to the beginning of the line."
                (eol (line-end-position))
                (end-of-list-p (fingertip-end-of-list-p begin-point eol)))
           (if (and (not end-of-list-p)
-                   (memq (char-before) '(?\) ?\) ?\]))
+                   (memq (char-before) '(?\) ?\} ?\]))
                    (save-excursion
                      (fingertip-match-paren nil)
                      (> (save-excursion
@@ -993,7 +988,7 @@ When in comment, kill to the beginning of the line."
               (backward-char 1))
             (fingertip-delete-region begin-point (point)))))
     ;; Delete rest content of line when kill sexp throw `scan-error' error.
-    (scan-error (fingertip-delete-region (point) (point-at-eol)))))
+    (scan-error (fingertip-delete-region (point) (line-end-position)))))
 
 (defun fingertip-end-of-list-p (beginning eol)
   (let ((end-of-list-p nil)
