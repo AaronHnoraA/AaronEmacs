@@ -16,6 +16,11 @@
 (defvar +git-tree-buffer-name "*Git Tree*"
   "Buffer name used by the Git tree view.")
 
+(defconst +git-tree-max-commits 5000
+  "Most commits one view draws.
+The log is read synchronously and colored in Lisp, so a large history would
+otherwise hold Emacs for as long as Git takes to print all of it.")
+
 (defvar-local +git-tree-origin-buffer nil
   "Origin buffer for the current Git tree view.")
 
@@ -132,7 +137,8 @@
     (let ((exit-code
            (process-file "git" nil t nil
                          "log" "--graph" "--decorate" "--oneline" "--all"
-                         "--color=always" "--date-order")))
+                         "--color=always" "--date-order"
+                         (format "--max-count=%d" +git-tree-max-commits))))
       (unless (zerop exit-code)
         (goto-char (point-max))
         (insert (format "\n[git log exited with code %s]\n" exit-code))))

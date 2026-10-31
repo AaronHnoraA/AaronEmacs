@@ -503,4 +503,17 @@
   (should (eq (assoc-default "a.md" auto-mode-alist #'string-match)
               '+noema-markdown-redirect-mode)))
 
+(ert-deftest git-diff-keys-stay-out-of-the-shared-diff-map ()
+  "A Git diff binds `q' for itself, not for every diff buffer."
+  (require 'diff-mode)
+  (require 'tools/git/diff)
+  (let ((before (keymap-lookup diff-mode-map "q")))
+    (with-temp-buffer
+      (diff-mode)
+      (cl-letf (((symbol-function '+git-tool-prepare-buffer) #'ignore)
+                ((symbol-function '+git-tool-register-cleanup) #'ignore))
+        (+git-diff--setup-buffer nil default-directory "/tmp/none"))
+      (should (eq (keymap-lookup (current-local-map) "q") #'+git-diff/quit)))
+    (should (eq (keymap-lookup diff-mode-map "q") before))))
+
 ;;; init-state-files-tests.el ends here

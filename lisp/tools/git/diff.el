@@ -45,6 +45,8 @@ killed."
   (setq-local +git-diff-origin-buffer origin-buffer)
   (+git-tool-prepare-buffer origin-buffer)
   (+git-diff--cleanup-temp-files-on-kill (list revision-file))
+  ;; `local-set-key' would write into the `diff-mode-map' every diff shares.
+  (use-local-map (copy-keymap (current-local-map)))
   (local-set-key (kbd "q") #'+git-diff/quit)
   (when (featurep 'evil)
     (dolist (state '(normal motion visual))

@@ -337,10 +337,9 @@ gcmh's own 800 KB makes process output and timers collect the whole heap, about
       (when (and (not (string= (rcirc-nick proc) sender))        ;; Skip my own message
                  (not (string= (rcirc-server-name proc) sender)) ;; Skip the response of server
                  (rcirc-channel-p target))
-        (when (string-match (rcirc-nick proc) text)
-          (notify-send :title (format "%s mention you" sender)
-                       :body text
-                       :urgency 'critical))))
+        (when (string-match-p (regexp-quote (rcirc-nick proc)) text)
+          (aaron-notify (format "%s mentioned you" sender)
+                        :body text :level 'warning :source "rcirc"))))
 
     (add-hook 'rcirc-print-functions #'rcirc-notify-me))
   :custom

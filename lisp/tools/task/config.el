@@ -92,7 +92,8 @@ client machine and returns a target-native path safe to embed in COMMAND."
       (let* ((json-object-type 'alist)
              (json-array-type 'list)
              (json-key-type 'symbol)
-             (scripts (alist-get 'scripts (json-read-file file))))
+             ;; A broken package.json must not take the other tasks with it.
+             (scripts (alist-get 'scripts (ignore-errors (json-read-file file)))))
         (mapcar (lambda (entry)
                   (cons (symbol-name (car entry))
                         (format "%s run %s"

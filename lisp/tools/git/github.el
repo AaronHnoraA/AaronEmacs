@@ -270,6 +270,8 @@ With REFRESH, bypass the topic cache."
                       (setq-local +github-patch-root root
                                   +github-patch-context context
                                   +github-patch-number number)
+                      ;; A copy: `diff-mode-map' is every diff's map.
+                      (use-local-map (copy-keymap (current-local-map)))
                       (local-set-key (kbd "a") #'+github/apply-previewed-patch)
                       (goto-char (point-min))))
                   (pop-to-buffer buffer)
