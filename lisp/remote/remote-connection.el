@@ -311,11 +311,11 @@ but only one of them can observe a non-nil owned reference."
     (opener route context pipeline-runtime)
   "Call OPENER for ROUTE within the framework connection deadline.
 CONTEXT and PIPELINE-RUNTIME are dynamically visible to the backend."
-  (let ((remote-current-pipeline-runtime pipeline-runtime))
-    (if (and (numberp remote-connection-open-timeout)
-             (> remote-connection-open-timeout 0))
+  (let ((remote-current-pipeline-runtime pipeline-runtime)
+        (timeout (remote-connection--open-timeout route)))
+    (if timeout
         (with-timeout
-            (remote-connection-open-timeout
+            (timeout
              (signal
               'remote-connection-timeout
               (list
@@ -324,7 +324,7 @@ CONTEXT and PIPELINE-RUNTIME are dynamically visible to the backend."
                 (remote-route-target-id route)
                 (remote-route-link-id route)
                 (remote-route-link-plugin-id route)
-                remote-connection-open-timeout))))
+                timeout))))
           (if opener
               (funcall opener route context)
             t))

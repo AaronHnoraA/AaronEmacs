@@ -98,7 +98,7 @@ so only the owner is remembered here.")
            (secure-hash
             'sha256
             (format "%s:%s:%s:%s"
-                    (emacs-pid) (float-time) (random) (garbage-collect)))
+                    (emacs-pid) (float-time) (random) (random)))
            0 24)))
 
 (defun remote-gateway--json-value (value &optional depth)

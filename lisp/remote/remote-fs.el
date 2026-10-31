@@ -1790,13 +1790,13 @@ their place after it."
          (capsule (and (stringp path) (split-string path ":" t))))
     (if (null capsule)
         backend
-      (let ((normalize (lambda (directory)
-                         (directory-file-name (expand-file-name directory "/")))))
+      (let* ((normalize (lambda (directory)
+                          (directory-file-name (expand-file-name directory "/"))))
+             (covered (mapcar normalize capsule)))
         (append capsule
                 (seq-remove
                  (lambda (directory)
-                   (member (funcall normalize directory)
-                           (mapcar normalize capsule)))
+                   (member (funcall normalize directory) covered))
                  backend)))))))
 
 (defun remote-fs-handle-make-process (&rest plist)

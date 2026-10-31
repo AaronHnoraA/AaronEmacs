@@ -204,9 +204,10 @@ augments the resolved target capsule instead of replacing it wholesale."
       (let ((name (format "%s" (car entry))))
         (setq result
               (cl-delete-if
+               ;; Exact, as the environment itself: http_proxy and HTTP_PROXY
+               ;; are two variables.
                (lambda (known)
-                 (string-equal-ignore-case
-                  name (format "%s" (car known))))
+                 (equal name (format "%s" (car known))))
                result))
         (setq result
               (append result (list (cons name (cdr entry)))))))

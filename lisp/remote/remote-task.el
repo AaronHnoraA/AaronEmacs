@@ -477,6 +477,8 @@ cancels the process.  DISPLAY shows the output buffer."
         (progn
           (with-current-buffer buffer
             (compilation-mode)
+            ;; `compilation-mode-map' is every compilation buffer's map.
+            (use-local-map (copy-keymap (current-local-map)))
             (local-set-key (kbd "g") #'remote-task-rerun)
             (setq default-directory directory
                   remote-task-instance task)
