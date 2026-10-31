@@ -16,7 +16,7 @@
 
 (declare-function evil-local-mode "evil-core" (&optional arg))
 (declare-function evil-set-initial-state "evil-core" (mode state))
-(declare-function profiler-report "profiler" ())
+(autoload 'profiler-report "profiler" nil t)
 (declare-function aaron-open-resolve-file-name "aaron-open"
                   (file &optional directory))
 (declare-function aaron-open-visit-file "aaron-open" (file &optional wildcards))

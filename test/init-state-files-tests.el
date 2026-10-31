@@ -372,4 +372,9 @@
       (aaron-font--apply-rescale))
     (should (equal face-font-rescale-alist '(("Family" . 1.1))))))
 
+(ert-deftest aaron-editorconfig-is-a-prefetched-ancestor-marker ()
+  "The per-visit `.editorconfig' walk is answered by the framework's scan."
+  (require 'remote-fs)
+  (should (member ".editorconfig" remote-ancestor-marker-names)))
+
 ;;; init-state-files-tests.el ends here

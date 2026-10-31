@@ -440,6 +440,11 @@ a buffer-local entry is passed a window."
                 (whitespace-mode -1)
                 (whitespace-mode 1)))))
 
+(declare-function remote-prefetch-ancestor-markers "remote-fs" (directory))
+(declare-function remote-register-ancestor-markers "remote-fs" (names))
+
+(remote-register-ancestor-markers '(".editorconfig"))
+
 (use-package dtrt-indent
   :ensure t
   :defer 2
@@ -452,7 +457,9 @@ a buffer-local entry is passed a window."
                 (and (boundp 'buffer-file-name) (not buffer-file-name))
                 (and (fboundp 'project-current)
                      (project-current nil default-directory)
-                     (locate-dominating-file default-directory ".editorconfig")))
+                     (progn
+                       (remote-prefetch-ancestor-markers default-directory)
+                       (locate-dominating-file default-directory ".editorconfig"))))
       (let ((inhibit-message t))
         (dtrt-indent-mode 1))))
 

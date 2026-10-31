@@ -1046,6 +1046,7 @@ is `+config-ask-model', registered with native Config Customize."
   ;; Defer one event turn: agent-shell may be loading inside noema-agent-acp.
   (run-at-time 0 nil (lambda () (require 'noema-agent-acp))))
 (autoload 'noema-agent-acp-conversation-tree "noema-agent-acp" nil t)
+(autoload 'noema-agent-acp-focus-input "noema-agent-acp" nil t)
 (autoload 'noema-agent-promote-current-session "noema-agent-promote" nil t)
 (autoload 'noema-research-history-index "noema-agent-promote" nil t)
 (autoload 'noema-agent-worker-run-work-cell "noema-agent-worker" nil t)

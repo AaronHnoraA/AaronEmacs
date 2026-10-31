@@ -2,8 +2,7 @@
 ;; Auto-generated.  Do not edit by hand; use `config-set' or the board.
 
 (config-store-set
- '((flymake-fringe-indicator-position . right-fringe)
-   (+languagetool-language . "en-US")
+ '((+languagetool-language . "en-US")
    (+languagetool-server-url . "http://10.243.90.222:8765")
    (+languagetool-server-timeout . 5.0) (+languagetool-auto-idle-delay . 1.6)
    (+languagetool-auto-padding . 4096) (+languagetool-auto-max-chars . 32768)

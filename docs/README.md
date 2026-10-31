@@ -117,6 +117,7 @@ Dated and append-only. Read them for why something is the way it is, never for h
 
 ### records/audits/
 
+- [code-audit-2026-10.md](records/audits/code-audit-2026-10.md) Line and contract audit of the Emacs configuration: what was read, what was fixed, what stays open.
 - [doom-template-2026-10.md](records/audits/doom-template-2026-10.md) Completed Doom-template restructuring workbench.
 - [doom-template-comparison-2026-10.md](records/audits/doom-template-comparison-2026-10.md) Source-by-source Doom audit and optional behavior differences.
 - [entrypoint-audit-2026-10.md](records/audits/entrypoint-audit-2026-10.md) Current entry map, comparisons with Lunarymacs, Doom, Spacemacs and Prelude, and the ongoing command and lifecycle review.
