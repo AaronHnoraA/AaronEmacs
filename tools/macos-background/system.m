@@ -48,7 +48,13 @@ static NSString *
 lisp_string (emacs_env *env, emacs_value value)
 {
   ptrdiff_t size = 0;
-  env->copy_string_contents (env, value, NULL, &size);
+  /* A non-string leaves the size unset; reading the buffer anyway would take
+     Emacs down, and a notification is not worth that.  */
+  if (!env->copy_string_contents (env, value, NULL, &size))
+    {
+      env->non_local_exit_clear (env);
+      return @"";
+    }
   char *buffer = malloc (size);
   env->copy_string_contents (env, value, buffer, &size);
   NSString *string = [NSString stringWithUTF8String:buffer];

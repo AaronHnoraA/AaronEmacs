@@ -90,7 +90,10 @@ static void grip_end_drag (void);
   [window removeChildWindow:grip_panel];
   [grip_panel addChildWindow:window ordered:NSWindowBelow];
   /* Depending on the system the drag returns at once or at the release, and
-     the release reaches neither the view nor a monitor, so ask for it.  */
+     the release reaches neither the view nor a monitor, so ask for it.  A
+     second press before the first release must not orphan the running timer,
+     which would then poll for as long as Emacs runs.  */
+  [grip_drag_timer invalidate];
   grip_drag_timer
     = [NSTimer timerWithTimeInterval:0.05 repeats:YES
                                block:^(NSTimer *timer) {

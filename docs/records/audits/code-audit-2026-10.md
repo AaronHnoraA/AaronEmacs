@@ -7,7 +7,9 @@
 
 `lisp/` 下已跟踪的 230 个文件（约 11.7 万行，不含 `vendor/kanagawa-themes` 主题）和 5 个未提交的新文件、`early-init.el`、`init.el`、`bootstrap.el`、`scripts/*.el` 已全部逐行读完。另读完 `site-lisp/ratex.el`、`site-lisp/vendored`、`site-lisp/dape-toolbar`。`etc/*.el` 是数据，只做了孤儿键检查。
 
-未读：`site-lisp/gptel` 和 `site-lisp/magent/lisp`（约 4.1 万行）、`test/`（约 6 万行）、`vendor/kanagawa-themes`。`site-lisp/noema` 是独立仓库，按用户要求不审（`.noema` 相关都不管）。
+未读：`site-lisp/gptel`（只读了 `gptel-request.el` 和 `gptel.el` 的一部分）、`site-lisp/magent/lisp` 和 `test/`。用户明确要求不读上游，这些不再属于本次范围；`site-lisp/noema` 也按要求不审。`vendor/kanagawa-themes` 是主题数据，只看了结构。
+
+之后范围改为当天新开发：`tools/macos-background/{window,system}.m` 逐行读完，未提交的 agent views、float 预览、Portal 弹窗和窗口路由读了 2026-10-31 23:07 时的版本。
 
 第一阶段分三层：
 
@@ -95,6 +97,17 @@
 
 - `73dd800e` 把 Dashboard 热力图改成异步后，启动时的重绘（`dashboard-resize-on-hook`）清空 buffer，两个 marker 塌到顶部，异步结果插在最上面。现在 marker 塌缩时放弃填充，由新一轮渲染自己填。
 
+**Copilot 与当天的原生代码**
+
+- `copilot--start-server` 同步等 `initialize`，阻塞约 800 ms。自动启动改为后台握手，阻塞 1.5 ms，774 ms 后可用。实测用的是 batch，GUI 启动时的卡顿没有直接抓取。
+- 抓手按钮连按时 `grip_drag_timer` 被覆盖，旧定时器以 20 Hz 永远运行。
+- `lisp_string` 收到非字符串时读未初始化内存，可能带崩 Emacs。
+
+**未提交工作里记录但未改动的问题**（另一会话仍在改）
+
+- `c21-project-tools-visible-agent-focuses-and-flushes-without-moving` 失败：`void-function +agent-acp-show-buffer`。
+- `+agent-acp--install-workspace-tabs` 还留着针对旧 transcript workspace 的两行 `remove-hook`。
+
 ## 未处理
 
 留给后续决定，均未改动：
@@ -124,7 +137,7 @@
 
 ## 结束时的测试
 
-`scripts/test-all` 跑 134 个文件、2314 个测试。失败与起点对比：
+最后一次在 `main` 的干净 checkout 上（`e12ac6d8`，带 tree-sitter grammar）跑了 132 个文件、2045 个测试，没有新的回归。下面是更早一次工作树上的结果，当时 134 个文件、2314 个测试。干净 checkout 上 `noema-research`、`noema-manager-layout` 没有结果，因为 Noema 仓库有未提交改动；开头一个 `aaron-*` 文件也没有结果，每次是不同文件，该文件在工作树单独跑能通过，疑似全新 worktree 首次启动的竞争，未验证。与起点对比：
 
 - 起点已有、仍在：`init-activity`（2）、`init-diagnostics-entry`（1）、`init-neo-common`（1）、`init-performance`（1）、`lean-infoview`（5），以及跑不起来的 `lean-tests`、`portal-focus-gui-tests`（后者要 GUI）。
 - 起点已有、已修：全部 `remote-*`、`init-noema`。
