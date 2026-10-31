@@ -103,16 +103,15 @@ top_level_emacs_window (NSWindow *window)
 @end
 
 static NSRect
-grip_frame (NSWindow *window, CGFloat pointer_x)
+grip_frame (NSWindow *window)
 {
   NSRect frame = window.frame;
   CGFloat top = NSMaxY (window.screen.visibleFrame);
   CGFloat y = NSMaxY (frame) + GRIP_GAP;
   if (y + GRIP_HEIGHT > top)
     y = NSMaxY (frame) - GRIP_HEIGHT - GRIP_GAP;
-  CGFloat x = MIN (MAX (pointer_x - GRIP_WIDTH / 2.0, NSMinX (frame)),
-                   NSMaxX (frame) - GRIP_WIDTH);
-  return NSMakeRect (x, y, GRIP_WIDTH, GRIP_HEIGHT);
+  return NSMakeRect (NSMidX (frame) - GRIP_WIDTH / 2.0, y,
+                     GRIP_WIDTH, GRIP_HEIGHT);
 }
 
 static void
@@ -147,11 +146,11 @@ grip_hide (void)
 }
 
 static void
-grip_show (NSWindow *window, CGFloat pointer_x)
+grip_show (NSWindow *window)
 {
   grip_create ();
   grip_window = window;
-  [grip_panel setFrame:grip_frame (window, pointer_x) display:YES];
+  [grip_panel setFrame:grip_frame (window) display:YES];
   [window addChildWindow:grip_panel ordered:NSWindowAbove];
 }
 
@@ -203,7 +202,7 @@ grip_pointer_moved (void)
     }
   NSWindow *window = grip_edge_window (point);
   if (window)
-    grip_show (window, point.x);
+    grip_show (window);
 }
 
 static void
