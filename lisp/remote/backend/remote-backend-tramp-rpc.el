@@ -271,23 +271,51 @@ variables, which is routine for direnv and Nix shells."
          (file-name-directory
           (directory-file-name (file-name-directory library)))))))
 
+(defvar remote-backend-tramp-rpc--git-cache nil
+  "Git answers about the client checkout, as (STAMP . ((KEY . VALUE)...)).
+The release contract is asked for by every install, of which a startup runs
+several, by every backend probe and by every `~USER' lookup.")
+
+(defun remote-backend-tramp-rpc--git-stamp (root)
+  "Return what changes in ROOT's checkout when a git answer can change."
+  (let ((default-directory temporary-file-directory))
+    (mapcar
+     (lambda (name)
+       (file-attribute-modification-time
+        (file-attributes (expand-file-name name root))))
+     '(".git/HEAD" ".git/index"))))
+
 (defun remote-backend-tramp-rpc--git-output (root &rest arguments)
   "Run git ARGUMENTS in ROOT and return trimmed stdout, or nil.
 ROOT is this package's own checkout on the client, so the call has to stay on
 the client.  It runs from the backend probe while the target connection is
 still opening: a `default-directory' inherited from the caller would route
 `process-file' back into that half-open connection, and the whole operation
-would fail with `remote-connection-busy' instead of reporting the contract."
+would fail with `remote-connection-busy' instead of reporting the contract.
+An answer is reused until ROOT's HEAD or index changes."
   (when-let* ((root root)
               (git (remote-client-executable-find "git")))
-    (with-temp-buffer
-      (let* ((default-directory temporary-file-directory)
-             (process-environment (remote-client-process-environment))
-             (exec-path (remote-client-exec-path))
-             (status
-              (apply #'process-file git nil t nil "-C" root arguments)))
-        (when (zerop status)
-          (string-trim (buffer-string)))))))
+    (let ((stamp (remote-backend-tramp-rpc--git-stamp root))
+          (key (cons root arguments)))
+      (unless (equal stamp (car remote-backend-tramp-rpc--git-cache))
+        (setq remote-backend-tramp-rpc--git-cache (list stamp)))
+      (if-let* ((known (assoc key (cdr remote-backend-tramp-rpc--git-cache))))
+          (cdr known)
+        (let ((value
+               (with-temp-buffer
+                 (let* ((default-directory temporary-file-directory)
+                        (process-environment
+                         (remote-client-process-environment))
+                        (exec-path (remote-client-exec-path))
+                        ;; Refreshing the index would change the stamp.
+                        (status
+                         (apply #'process-file git nil t nil
+                                "--no-optional-locks" "-C" root arguments)))
+                   (when (zerop status)
+                     (string-trim (buffer-string)))))))
+          (push (cons key value)
+                (cdr remote-backend-tramp-rpc--git-cache))
+          value)))))
 
 (defun remote-backend-tramp-rpc-release-contract ()
   "Describe whether the installed tramp-rpc client is a release checkout."
@@ -407,9 +435,7 @@ CONNECTION preserves the upstream captured connection generation."
          (timeout (or long-timeout read-timeout)))
     (if (and (numberp timeout) (> timeout 0)
              (fboundp 'tramp-rpc--call-with-timeout))
-        (let ((generation
-               (and timeout
-                    (or connection (tramp-rpc--get-connection vector)))))
+        (let ((generation (or connection (tramp-rpc--get-connection vector))))
           (condition-case err
               (tramp-rpc--call-with-timeout
                vector method params timeout 0.1 connection)

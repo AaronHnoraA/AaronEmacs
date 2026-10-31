@@ -2,11 +2,12 @@
 
 ;;; Commentary:
 ;; Centralises every TRAMP-related setting: core options, VC/diff-hl
-;; suppression, LSP stdio transport management (including the lean4 CRLF fix),
-;; memoization of expensive remote lookups, and Magit/compile integration.
+;; suppression, memoization of expensive remote lookups, and Magit/compile
+;; integration.  LSP processes do not pass through here: they are started by
+;; `remote-make-process', on a client SSH pipe or through tramp-rpc.
 ;;
 ;; Two TRAMP methods are supported:
-;;   /ssh:host:/path  — standard SSH, managed here (ControlMaster, pipe-mode LSP)
+;;   /ssh:host:/path  — standard SSH, managed here (ControlMaster)
 ;;   /rpc:host:/path  — tramp-rpc MessagePack-RPC backend
 ;;
 ;; Several subsystems (VC, memoization) are intentionally
@@ -396,82 +397,6 @@ backend are returned, because VC sees whichever one a caller passes in."
   (add-hook 'remote-config-after-load-hook
             #'+vc-refresh-ignore-dir-regexp))
 
-;;; ── LSP stdio: per-server direct-async management ──────────────────────────
-;;
-;; Two TRAMP paths exist for remote LSP processes:
-;;
-;; Traditional (ControlMaster shared)
-;;   Reuses the existing SSH connection.  Fast to start.  BUT applies
-;;   unix-EOL encoding to outgoing bytes, silently stripping every \r.
-;;   Fine for servers that accept bare \n in JSON-RPC headers.
-;;
-;; Pipe-mode direct-async (fresh SSH subprocess, no PTY)
-;;   Creates a new SSH process with :coding 'no-conversion → binary-clean
-;;   channel.  \r\n is preserved end-to-end.  Required for servers whose
-;;   parsers enforce CRLF headers (e.g. Lean 4: takeEnd 2 == "\r\n").
-;;   We suppress PTY allocation (-t -t) by returning nil from
-;;   tramp-get-method-parameter for the tramp-direct-async key, so
-;;   (consp nil) = nil → SSH omits -t -t → plain pipe.
-
-(config-defvar +tramp-lsp-pipe-mode-servers nil
-  "LSP server name patterns that require pipe-mode direct-async over TRAMP.
-Each element is a regexp matched against the server name string passed to
-the lsp-stdio-connection :connect lambda (e.g. \"lean4-lsp\",
-\"remote-lean4-lsp\").  Add a server here when it enforces strict CRLF
-headers or is otherwise corrupted by TRAMP's unix-EOL encoding.
-
-Note: this list only applies to /ssh: connections.  /rpc: connections use
-tramp-rpc's own binary-safe MessagePack relay and are never routed through
-the pipe-mode or ControlMaster paths below.
-
-Examples:
-  (\"lean4\")                   ; Lean 4 only (default)
-  (\"lean4\" \"some-server\")     ; Lean 4 + some-server"
-  :type '(repeat string)
-  :group 'my)
-
-(defun +tramp-lsp-pipe-mode-p (server-name)
-  "Return non-nil if SERVER-NAME should use pipe-mode direct-async over TRAMP."
-  (seq-some (lambda (pat) (string-match-p pat server-name))
-            +tramp-lsp-pipe-mode-servers))
-
-(defun +tramp-lsp--pipe-connect (connect-fn filter sentinel name env-fn workspace)
-  "Call CONNECT-FN through direct-async pipe mode (no PTY).
-Overrides tramp-direct-async-process-p → t and suppresses -t -t by
-returning nil for the tramp-direct-async method parameter."
-  (let ((orig-gmp (symbol-function 'tramp-get-method-parameter)))
-    (cl-letf (((symbol-function 'tramp-direct-async-process-p)
-               (lambda (&rest _) t))
-              ((symbol-function 'tramp-get-method-parameter)
-               (lambda (vec param &optional default)
-                 (if (eq param 'tramp-direct-async)
-                     nil                ; (consp nil)=nil → no -t -t → no PTY
-                   (funcall orig-gmp vec param default)))))
-      (funcall connect-fn filter sentinel name env-fn workspace))))
-
-(defun +tramp-lsp--controlmaster-connect (connect-fn filter sentinel name env-fn workspace)
-  "Call CONNECT-FN through the traditional ControlMaster path (no direct-async)."
-  (cl-letf (((symbol-function 'tramp-direct-async-process-p) #'ignore))
-    (funcall connect-fn filter sentinel name env-fn workspace)))
-
-(with-eval-after-load 'lsp-mode
-  (define-advice lsp-stdio-connection (:filter-return (plist) +tramp-lsp-transport)
-    "Route each LSP server through the appropriate TRAMP transport.
-
-Servers listed in `+tramp-lsp-pipe-mode-servers' use a binary pipe
-(direct-async, no PTY) so that \\r\\n headers are preserved.  All other
-servers use the shared ControlMaster path."
-    (if-let* ((connect-fn (plist-get plist :connect)))
-        (plist-put
-         plist :connect
-         (lambda (filter sentinel name environment-fn workspace)
-           (if (+tramp-lsp-pipe-mode-p name)
-               (+tramp-lsp--pipe-connect
-                connect-fn filter sentinel name environment-fn workspace)
-             (+tramp-lsp--controlmaster-connect
-              connect-fn filter sentinel name environment-fn workspace))))
-      plist)))
-
 ;;; ── Magit & compile integration ─────────────────────────────────────────────
 
 (with-eval-after-load 'magit
@@ -536,13 +461,15 @@ Set to nil to keep caches unbounded."
   "Return cached result for KEY from symbol CACHE, or call FN with ARGS.
 Caches only where one lookup costs its own round trip on the target; a batched
 backend already caches with filesystem-watch invalidation, and wrapping that
-would only serve results it has already invalidated."
+would only serve results it has already invalidated.  A miss is not cached:
+nothing here would ever notice the repository that appears later."
   (if (and key (not (+remote-per-file-subprocess-affordable-p key)))
       (if-let* ((cached (assoc key (symbol-value cache))))
           (cdr cached)
         (let ((value (apply fn args)))
-          (set cache (cons (cons key value) (symbol-value cache)))
-          (+tramp--trim-memoize-cache cache)
+          (when value
+            (set cache (cons (cons key value) (symbol-value cache)))
+            (+tramp--trim-memoize-cache cache))
           value))
     (apply fn args)))
 
@@ -565,23 +492,23 @@ would only serve results it has already invalidated."
 
 (with-eval-after-load 'project
   (define-advice project-current (:around (fn &optional maybe-prompt directory) +tramp-memoize)
-    "Memoize remote `project-current' lookups."
-    (+tramp-memoize (or directory
-                          (bound-and-true-p project-current-directory-override)
-                          default-directory)
-                      '+tramp--project-current-cache
-                      fn maybe-prompt directory)))
+    "Memoize remote `project-current' lookups.
+Only the lookup itself: the project a prompt returns is the one the user
+picked, not the one DIRECTORY belongs to, so it must not be remembered for
+DIRECTORY, and a lookup that finds nothing still has to prompt."
+    (or (+tramp-memoize (or directory
+                            (bound-and-true-p project-current-directory-override)
+                            default-directory)
+                        '+tramp--project-current-cache
+                        fn nil directory)
+        (and maybe-prompt (funcall fn maybe-prompt directory)))))
 
 (with-eval-after-load 'vc-git
   (define-advice vc-git-root (:around (fn file) +tramp-memoize)
-    "Memoize remote `vc-git-root' lookups; discard immediate misses."
-    (let ((value (+tramp-memoize (file-name-directory file)
-                                   '+tramp--vc-git-root-cache
-                                   fn file)))
-      ;; A nil result would cache a miss forever — drop it immediately.
-      (unless (cdar +tramp--vc-git-root-cache)
-        (setq +tramp--vc-git-root-cache (cdr +tramp--vc-git-root-cache)))
-      value)))
+    "Memoize remote `vc-git-root' lookups."
+    (+tramp-memoize (file-name-directory file)
+                    '+tramp--vc-git-root-cache
+                    fn file)))
 
 (with-eval-after-load 'tramp
   (advice-add 'tramp-cleanup-all-connections :after #'+tramp-clear-caches-h)

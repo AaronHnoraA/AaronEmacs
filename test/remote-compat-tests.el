@@ -269,6 +269,67 @@
           (set 'tramp-rpc-deploy-version old-value)
         (makunbound 'tramp-rpc-deploy-version)))))
 
+;; Startup alone installs the shims several times, and each install used to
+;; spawn the three git commands of the release contract again.
+(ert-deftest remote-tramp-rpc-git-answers-last-until-the-checkout-changes ()
+  (let* ((root (file-name-as-directory (make-temp-file "rpc-git" t)))
+         (remote-backend-tramp-rpc--git-cache nil)
+         (spawns 0))
+    (unwind-protect
+        (cl-letf (((symbol-function 'remote-client-executable-find)
+                   (lambda (&rest _) "git"))
+                  ((symbol-function 'process-file)
+                   (lambda (&rest _)
+                     (cl-incf spawns)
+                     (insert (format "answer %d\n" spawns))
+                     0)))
+          (make-directory (expand-file-name ".git" root))
+          (write-region "ref" nil (expand-file-name ".git/HEAD" root)
+                        nil 'silent)
+          (should (equal (remote-backend-tramp-rpc--git-output root "tag")
+                         "answer 1"))
+          (should (equal (remote-backend-tramp-rpc--git-output root "tag")
+                         "answer 1"))
+          (should (= spawns 1))
+          (should (equal (remote-backend-tramp-rpc--git-output root "rev")
+                         "answer 2"))
+          (set-file-times (expand-file-name ".git/HEAD" root) 0)
+          (should (equal (remote-backend-tramp-rpc--git-output root "tag")
+                         "answer 3")))
+      (delete-directory root t))))
+
+(ert-deftest remote-tramp-memoize-keeps-found-answers-only ()
+  (let ((+tramp--vc-git-root-cache nil)
+        (calls 0))
+    (cl-letf (((symbol-function '+remote-per-file-subprocess-affordable-p)
+               #'ignore))
+      (let ((lookup (lambda (value) (cl-incf calls) value)))
+        (should-not (+tramp-memoize "/d/" '+tramp--vc-git-root-cache lookup nil))
+        (should-not +tramp--vc-git-root-cache)
+        (should (equal (+tramp-memoize "/d/" '+tramp--vc-git-root-cache
+                                       lookup "root")
+                       "root"))
+        (should (equal (+tramp-memoize "/d/" '+tramp--vc-git-root-cache
+                                       lookup "other")
+                       "root"))
+        (should (= calls 2))))))
+
+(ert-deftest remote-project-memo-does-not-keep-a-prompted-project ()
+  "What a prompt returns is the user's pick, not the directory's project."
+  (let ((+tramp--project-current-cache nil))
+    (cl-letf (((symbol-function '+remote-per-file-subprocess-affordable-p)
+               #'ignore))
+      (let ((prompting (lambda (maybe-prompt _directory)
+                         (and maybe-prompt 'picked))))
+        (should (eq (project-current@+tramp-memoize prompting t "/d/")
+                    'picked))
+        (should-not +tramp--project-current-cache)
+        (should-not (project-current@+tramp-memoize prompting nil "/d/")))
+      (let ((found (lambda (&rest _) 'project)))
+        (should (eq (project-current@+tramp-memoize found nil "/d/") 'project))
+        (should (eq (project-current@+tramp-memoize #'ignore t "/d/")
+                    'project))))))
+
 (ert-deftest remote-tramp-rpc-upgrade-removes-unverified-private-shims ()
   "A newer client must not inherit advice written for the verified release."
   (should
