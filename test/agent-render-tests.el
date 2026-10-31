@@ -95,4 +95,19 @@
               ((symbol-function 'package-vc-install) (lambda (&rest _) (ert-fail "Unexpected startup network/install"))))
       (aaron-package-ensure-vc 'acp "https://github.com/xenodium/acp.el" "audited-revision"))))
 
+(ert-deftest +agent-render-window-change-flushes-buffers-shown-on-the-frame ()
+  "The global hook passes a frame, so a buffer shown any way at all renders."
+  (with-temp-buffer
+    (setq-local +agent-render-policy 'visible)
+    (let ((state `((:buffer . ,(current-buffer)))) seen)
+      (+agent-render--dispatch (lambda (&rest args) (push (plist-get args :text) seen))
+                               (list :state state :text "reply"))
+      (should +agent-render--pending)
+      (let ((buffer (current-buffer)))
+        (save-window-excursion
+          (set-window-buffer (selected-window) buffer)
+          (+agent-render--visible (selected-frame))))
+      (should (equal seen '("reply")))
+      (should-not +agent-render--pending))))
+
 (provide 'agent-render-tests)

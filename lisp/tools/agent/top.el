@@ -997,7 +997,7 @@ screen, so the last status word in the newest output is authoritative."
   "Return (SESSION . USAGE) for every live session in the board's scope."
   (delq nil
         (mapcar (lambda (session)
-                  (when-let* ((usage (+agent-acp-usage (plist-get session :buffer))))
+                  (when-let* ((usage (plist-get session :usage)))
                     (cons session usage)))
                 (+agent-acp-sessions +agent-top--root))))
 

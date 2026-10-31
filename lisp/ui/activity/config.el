@@ -60,6 +60,9 @@
 (declare-function remote-transfer-job-log-buffer "remote-transfer" (job))
 (declare-function remote-transfer-cancel "remote-transfer" (job))
 (declare-function evil-set-initial-state "evil-core" (mode state))
+(declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
+(declare-function aaron-ui-float-visible-p "aaron-ui-float" (panel))
+(declare-function etaf-value "etaf-reactive" (source))
 (declare-function +remote-per-file-subprocess-affordable-p "remote/framework/tramp"
                   (&optional path))
 (declare-function remote-client-process-attributes "remote-core" (pid))
@@ -386,6 +389,22 @@ values; the scan behind them happens in `+activity--tick'."
           (force-mode-line-update t)))
     (when +activity-indicator-mode
       (+activity--schedule))))
+
+(defun +activity-source-changed ()
+  "Recount and update a visible monitor after a provider's snapshot changed."
+  (+activity--refresh)
+  (when-let* ((buffer (get-buffer "*Performance Watch*")))
+    (let ((panel (and (featurep 'aaron-ui-float)
+                      (aaron-ui-float-panel-for-buffer buffer))))
+      (when (and (if panel
+                     (aaron-ui-float-visible-p panel)
+                   (get-buffer-window buffer t))
+                 (with-current-buffer buffer
+                   (and (bound-and-true-p +performance--tab-state)
+                        (memq (etaf-value +performance--tab-state)
+                              '(activity processes)))))
+        (with-current-buffer buffer
+          (+activity-board/refresh))))))
 
 (defun +activity--refresh ()
   "Recount now, without waiting for the next scan.

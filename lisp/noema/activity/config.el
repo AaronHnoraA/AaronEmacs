@@ -11,8 +11,6 @@
 (declare-function +noema-api-call "noema/bridge/config"
                   (channel args callback &optional timeout))
 (declare-function +noema/open-file "noema/bridge/config" (file))
-(declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
-(declare-function aaron-ui-float-visible-p "aaron-ui-float" (panel))
 
 (defvar +noema--ready)
 (defvar +noema--process)
@@ -29,19 +27,7 @@
 
 (defun +activity-noema--changed ()
   "Recount and update a visible monitor after a Noema snapshot changes."
-  (+activity--refresh)
-  (when-let* ((buffer (get-buffer "*Performance Watch*")))
-    (let ((panel (and (featurep 'aaron-ui-float)
-                      (aaron-ui-float-panel-for-buffer buffer))))
-      (when (and (if panel
-                     (aaron-ui-float-visible-p panel)
-                   (get-buffer-window buffer t))
-                 (with-current-buffer buffer
-                   (and (bound-and-true-p +performance--tab-state)
-                        (memq (etaf-value +performance--tab-state)
-                              '(activity processes)))))
-        (with-current-buffer buffer
-          (+activity-board/refresh))))))
+  (+activity-source-changed))
 
 (defun +activity-noema--cancel-task (id)
   "Cancel Core task ID through its owner, then refresh the snapshot."

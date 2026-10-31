@@ -134,7 +134,7 @@
           (mapcar
            (lambda (session)
              (let* ((buffer (plist-get session :buffer))
-                    (usage (+agent-acp-usage buffer))
+                    (usage (plist-get session :usage))
                     (root (plist-get session :root)))
                (list buffer
                      (vector (+agent-sessions--state session)
@@ -146,10 +146,10 @@
                              (abbreviate-file-name (or root ""))))))
            (if +agent-sessions--attention-only
                (seq-filter (lambda (session)
-                             (let ((buffer (plist-get session :buffer)))
-                               (or (plist-get (+agent-session-snapshot buffer) :attention-kind)
-                                   (plist-get session :unread-kind)
-                                   (member (+agent-sessions--state session) '("dead" "failed"))))) sessions)
+                             (or (plist-get session :attention-kind)
+                                 (plist-get session :unread-kind)
+                                 (member (+agent-sessions--state session) '("dead" "failed"))))
+                           sessions)
              sessions)))
     (tabulated-list-print t)
     (when selected

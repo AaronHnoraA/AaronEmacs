@@ -124,10 +124,13 @@ reported and the others go on.  Return the started attempt plists."
   "Return the state of a group of MEMBERS: `waiting', `working' or `settled'.
 One waiting member makes the group wait; otherwise one working member keeps
 it working.  An attempt that finished, or whose session closed, has settled."
-  (let ((states (mapcar #'+agent-worktree-member-state members)))
-    (cond ((memq 'waiting states) 'waiting)
-          ((memq 'working states) 'working)
-          (t 'settled))))
+  (+agent-worktree--group-state (mapcar #'+agent-worktree-member-state members)))
+
+(defun +agent-worktree--group-state (states)
+  "Return the state of a group whose members are in STATES."
+  (cond ((memq 'waiting states) 'waiting)
+        ((memq 'working states) 'working)
+        (t 'settled)))
 
 (defun +agent-worktree-member-stat (member)
   "Return what MEMBER changed since it branched, as a short string.
@@ -175,15 +178,18 @@ branch point, then new untracked files -- an agent's new file is a change."
   "Redraw the board from the members last read, with live session states."
   (let (entries)
     (dolist (group (+agent-worktree-board--groups))
-      (let ((state (+agent-worktree-group-state (cdr group))))
-        (dolist (member (cdr group))
-          (push (list (plist-get member :branch)
-                      (vector (format "%s (%s)" (car group) state)
-                              (plist-get member :branch)
-                              (or (plist-get member :agent) "")
-                              (symbol-name (+agent-worktree-member-state member))
-                              (or (plist-get member :stat) "")))
-                entries))))
+      (let* ((states (mapcar #'+agent-worktree-member-state (cdr group)))
+             (state (+agent-worktree--group-state states)))
+        (cl-mapc
+         (lambda (member member-state)
+           (push (list (plist-get member :branch)
+                       (vector (format "%s (%s)" (car group) state)
+                               (plist-get member :branch)
+                               (or (plist-get member :agent) "")
+                               (symbol-name member-state)
+                               (or (plist-get member :stat) "")))
+                 entries))
+         (cdr group) states)))
     (setq tabulated-list-entries (nreverse entries))
     (tabulated-list-print t)))
 
@@ -201,15 +207,32 @@ branch point, then new untracked files -- an agent's new file is a change."
                              +agent-worktree-board--directory))))
   (+agent-worktree-board--render))
 
-(defun +agent-worktree-board--session-changed (_buffer)
-  "Redraw a visible board when a session's state changed; Git is not asked."
+(defvar +agent-worktree-board--timer nil
+  "One-shot timer coalescing session changes into one redraw.")
+
+(defun +agent-worktree-board--redraw ()
+  "Redraw the board if it is still on screen."
+  (setq +agent-worktree-board--timer nil)
   (when-let* ((board (get-buffer +agent-worktree-board-buffer-name))
               ((get-buffer-window board 'visible)))
     (with-current-buffer board
       (+agent-worktree-board--render))))
 
+(defun +agent-worktree-board--session-changed (_buffer)
+  "Schedule one redraw of a visible board after a session changed.
+Git is not asked, but a redraw resolves every session's directory, which on a
+remote target costs round trips, and this runs inside the ACP event."
+  (when-let* ((board (get-buffer +agent-worktree-board-buffer-name))
+              ((get-buffer-window board 'visible)))
+    (unless (timerp +agent-worktree-board--timer)
+      (setq +agent-worktree-board--timer
+            (run-at-time 0.2 nil #'+agent-worktree-board--redraw)))))
+
 (defun +agent-worktree-board--teardown ()
   "Stop following sessions once the board is gone."
+  (when (timerp +agent-worktree-board--timer)
+    (cancel-timer +agent-worktree-board--timer))
+  (setq +agent-worktree-board--timer nil)
   (remove-hook '+agent-acp-changed-functions
                #'+agent-worktree-board--session-changed))
 

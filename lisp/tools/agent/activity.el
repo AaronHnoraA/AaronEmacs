@@ -12,19 +12,7 @@
 
 (defun +agent-activity--changed ()
   "Recount and update a visible monitor after the agent snapshot changes."
-  (+activity--refresh)
-  (when-let* ((buffer (get-buffer "*Performance Watch*")))
-    (let ((panel (and (featurep 'aaron-ui-float)
-                      (aaron-ui-float-panel-for-buffer buffer))))
-      (when (and (if panel
-                     (aaron-ui-float-visible-p panel)
-                   (get-buffer-window buffer t))
-                 (with-current-buffer buffer
-                   (and (bound-and-true-p +performance--tab-state)
-                        (memq (etaf-value +performance--tab-state)
-                              '(activity processes)))))
-        (with-current-buffer buffer
-          (+activity-board/refresh))))))
+  (+activity-source-changed))
 
 (defun +agent-activity--update (&optional _buffer)
   "Refresh busy sessions through the shared ACP boundary.

@@ -71,9 +71,11 @@ Managed sessions use a buffer-local `visible' policy."
             (apply (nth 1 operation) (nth 2 operation))
           (error (display-warning '+agent-render (error-message-string err) :warning)))))))
 
-(defun +agent-render--visible (window)
-  "Flush only the agent buffer newly displayed in WINDOW."
-  (when (window-live-p window)
+(defun +agent-render--visible (frame)
+  "Flush the agent buffers FRAME's windows now show.
+The global value of `window-buffer-change-functions' receives the frame; only
+a buffer-local entry is passed a window."
+  (dolist (window (window-list frame 'nomini))
     (with-current-buffer (window-buffer window)
       (when (and +agent-render--pending (eq +agent-render-policy 'visible))
         (+agent-render-flush)))))

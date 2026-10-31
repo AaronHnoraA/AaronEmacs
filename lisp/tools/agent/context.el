@@ -348,6 +348,7 @@ asked for.  DRAFT puts the turn in the session's input without submitting it."
          (resolved (if references
                        (cons (funcall references root (unless clipboard buffer)) nil)
                      (+agent-context--resolve nil root (unless clipboard buffer))))
+         (shared (null references))
          (references (car resolved))
          (prompt (or prompt
                      (read-string
@@ -369,7 +370,7 @@ asked for.  DRAFT puts the turn in the session's input without submitting it."
       (+agent-acp-show-buffer buffer))
      (t (+agent-context--deliver
          buffer (+agent-context-content-blocks prompt references))))
-    (when (and (not clipboard) +agent-context-clear-after-send (not references))
+    (when (and (not clipboard) +agent-context-clear-after-send shared)
       (require 'gptel-context)
       (gptel-context-remove-all))
     (unless clipboard buffer)))
@@ -447,11 +448,6 @@ selection is used.  PICK is as for `+agent-context-send'."
                        (current-buffer) (region-beginning) (region-end))))
       (deactivate-mark)
       (+agent-context--send :pick pick :references references))))
-
-;;;###autoload
-
-
-
 
 ;;;###autoload
 (defun +agent-context-send-buffer (&optional pick)

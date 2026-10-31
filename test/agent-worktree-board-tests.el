@@ -142,5 +142,26 @@
     (should-not (memq #'+agent-worktree-board--session-changed
                       +agent-acp-changed-functions))))
 
+(ert-deftest +agent-worktree-board-coalesces-session-changes ()
+  "Events inside an ACP handler schedule one redraw; none runs synchronously."
+  (let ((board (get-buffer-create +agent-worktree-board-buffer-name))
+        (+agent-worktree-board--timer nil)
+        (renders 0))
+    (unwind-protect
+        (with-current-buffer board
+          (cl-letf (((symbol-function '+agent-worktree-board--render)
+                     (lambda () (cl-incf renders)))
+                    ((symbol-function 'get-buffer-window) (lambda (&rest _) t)))
+            (+agent-worktree-board--session-changed nil)
+            (+agent-worktree-board--session-changed nil)
+            (should (= renders 0))
+            (should (timerp +agent-worktree-board--timer))
+            (+agent-worktree-board--redraw)
+            (should (= renders 1))
+            (should-not +agent-worktree-board--timer)))
+      (when (timerp +agent-worktree-board--timer)
+        (cancel-timer +agent-worktree-board--timer))
+      (kill-buffer board))))
+
 (provide 'agent-worktree-board-tests)
 ;;; +agent-worktree-board-tests.el ends here

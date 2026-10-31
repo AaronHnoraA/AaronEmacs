@@ -133,6 +133,8 @@ both live on the same target; the path is then FILE's native name there."
       (remote-file-local-name logical))))
 
 (declare-function remote-context "remote-fs" (&optional path))
+(declare-function remote-require-on-client "remote-core"
+                  (feature &optional filename noerror))
 (declare-function remote-environment-ensure "remote-environment"
                   (&optional context force callback))
 (declare-function remote-context-target-id "remote-core" (context))
@@ -1062,7 +1064,7 @@ is `+config-ask-model', registered with native Config Customize."
 (with-eval-after-load 'agent-shell
   ;; The ACP boundary also owns the shared, invisible Hy Memory adapter.
   ;; Defer one event turn: agent-shell may be loading inside +agent-acp.
-  (run-at-time 0 nil (lambda () (require 'tools/agent/acp))))
+  (run-at-time 0 nil #'remote-require-on-client 'tools/agent/acp))
 (autoload '+agent-acp-conversation-tree "tools/agent/acp" nil t)
 (autoload '+agent-acp-focus-input "tools/agent/acp" nil t)
 (autoload 'noema-agent-promote-current-session "noema-agent-promote" nil t)

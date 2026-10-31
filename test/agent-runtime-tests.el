@@ -160,4 +160,35 @@
       (should (eq (plist-get snapshot :unread-kind) 'permission))
       (should-not (plist-get snapshot :attention-kind)))))
 
+(ert-deftest +agent-runtime-trim-keeps-point-the-prompt-and-the-tail ()
+  (with-temp-buffer
+    (setq major-mode 'agent-shell-mode)
+    (dotimes (i 100) (insert (format "行 %d\n" i)))
+    (let ((prompt (copy-marker (point))))
+      (insert "Prompt> draft")
+      (setq-local comint-last-prompt (cons prompt (copy-marker (point))))
+      (+agent-acp-trim-buffer (current-buffer) 100)
+      (should (<= (- (position-bytes (point-max)) (position-bytes (point-min))) 100))
+      (should (= (point) (point-max)))
+      (should (string-suffix-p "Prompt> draft" (buffer-string)))
+      ;; A limit smaller than the prompt's tail keeps the prompt anyway.
+      (+agent-acp-trim-buffer (current-buffer) 3)
+      (should (equal (buffer-string) "Prompt> draft")))))
+
+(ert-deftest +agent-runtime-clear-after-send-clears-only-the-shared-selection ()
+  (require 'gptel-context)
+  (let ((+agent-context-clear-after-send t) (+agent-context-always-ask-session nil) cleared)
+    (cl-letf (((symbol-function '+agent-context--session) (lambda (_) 'buffer))
+              ((symbol-function 'buffer-local-value) (lambda (_ _) "/project/"))
+              ((symbol-function '+agent-context--resolve)
+               (lambda (&rest _) (cons '((:kind file :relative "a" :file "/a")) nil)))
+              ((symbol-function '+agent-context--deliver) #'ignore)
+              ((symbol-function 'gptel-context-remove-all)
+               (lambda (&rest _) (setq cleared t))))
+      ;; An explicit reference leaves what was gathered alone.
+      (+agent-context--send :prompt "q" :references (lambda (&rest _) nil))
+      (should-not cleared)
+      (+agent-context--send :prompt "q")
+      (should cleared))))
+
 (provide 'agent-runtime-tests)

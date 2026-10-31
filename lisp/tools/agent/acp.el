@@ -1319,28 +1319,24 @@ workspace shows a real agent buffer of the same project instead."
   "Trim durable old output in BUFFER to approximately MAX-BYTES.
 
 Call this only after the corresponding Run output is durable.  The current
-input prompt and its editable tail are retained."
+input prompt and its editable tail are retained, and point stays with its
+text, so a hidden session is not reopened at the top of what remains."
   (when (and (buffer-live-p buffer) (> max-bytes 0))
     (with-current-buffer buffer
-      (when (and (derived-mode-p 'agent-shell-mode)
-                 (> (string-bytes (buffer-substring-no-properties
-                                   (point-min) (point-max))) max-bytes))
-        (let ((low 0)
-              (high (buffer-size)))
-          (while (< low high)
-            (let ((middle (/ (+ low high 1) 2)))
-              (if (<= (string-bytes
-                       (buffer-substring-no-properties
-                        (- (point-max) middle) (point-max)))
-                      max-bytes)
-                  (setq low middle)
-                (setq high (1- middle)))))
-          (let ((cut (- (point-max) low)))
-          (goto-char cut)
-          (forward-line 1)
-          (let ((inhibit-read-only t)
-                (buffer-undo-list t))
-              (delete-region (point-min) (point)))))))))
+      (when (derived-mode-p 'agent-shell-mode)
+        (let ((excess (- (position-bytes (point-max)) (position-bytes (point-min))
+                         max-bytes)))
+          (when (> excess 0)
+            (save-excursion
+              (goto-char (byte-to-position (+ (position-bytes (point-min)) excess)))
+              (forward-line 1)
+              (let ((inhibit-read-only t)
+                    (buffer-undo-list t)
+                    (prompt (car-safe (bound-and-true-p comint-last-prompt))))
+                (delete-region (point-min)
+                               (if (markerp prompt)
+                                   (min (point) (marker-position prompt))
+                                 (point)))))))))))
 
 (defun +agent-acp-mark-session-buffer (buffer name agent directory)
   "Mark BUFFER as the private ACP transport for session NAME in DIRECTORY.
