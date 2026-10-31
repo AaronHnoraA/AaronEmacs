@@ -54,6 +54,11 @@
 - doctor 仍有 98 条 policy 命中，主要是 `global-set-key`（`config/mouse`、`ui/tabbar`）和 `file-remote-p`。
 - 18 处匿名钩子 lambda，违反命名规则但无运行时影响。
 
+## 量过之后决定不改
+
+- `lisp/` 全部解释执行：`early-init` 每次启动删除 `.elc`，运行中的 Emacs 里 `+tab-line-format`、`remote-fs-file-name-handler` 等都是解释函数。字节编译 222 个文件后，批量启动约 4.3 s 降到约 3.9 s，`+activity-mode-line-text` 3000 次 80 ms 降到 69 ms。时间主要在 C 原语上，收益不足以抵消陈旧字节码的风险，现有设计保留。
+- `font-family-list` 单次约 0.1 ms，不需要缓存。
+
 ## 流程教训
 
 - `var/state-check/` 是共享目录。并发会话跑 `make state-baseline` 或 `make test-baseline` 会静默覆盖基线。本次用单独的 worktree 和自己的目录重建了比较。

@@ -68,7 +68,7 @@
     (:id package-vc-install
      :regexp "(package-vc-install\\_>"
      :message "installs a VC package directly; use `aaron-package-ensure-vc' or `aaron-package-register-vc'"
-     :exempt-files ("core/aaron-packages.el" "bootstrap.el" "package-lock.el"))
+     :exempt-files ("aaron-packages.el" "bootstrap.el" "package-lock.el"))
     (:id legacy-name
      :regexp "\\_<my[-/]\\(?:\\sw\\|\\s_\\)"
      :message "uses a legacy `my/' or `my-' name; modules use `+DOMAIN-' and `+DOMAIN/COMMAND'")

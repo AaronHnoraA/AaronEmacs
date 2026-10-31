@@ -405,4 +405,13 @@
         (when-let* ((buffer (get-buffer tldr-buffer-name)))
           (kill-buffer buffer))))))
 
+(ert-deftest +theme-nil-stays-meaningful-on-box-and-underline ()
+  "A nil `:box' switches the box off; only invalid nils become `unspecified'."
+  (let ((face (make-symbol "theme-nil-test")))
+    (make-face face)
+    (set-face-attribute face nil :box t :weight nil)
+    (set-face-attribute face nil :box nil)
+    (should-not (face-attribute face :box))
+    (should (eq (face-attribute face :weight) 'unspecified))))
+
 ;;; init-state-files-tests.el ends here

@@ -179,19 +179,29 @@ height in pixels."
   (or (apply #'+file-icon-for-file file args)
       (apply orig-fn file args)))
 
-;; Emacs 31 rejects nil as a face attribute value; themes written for earlier
-;; Emacs versions may still pass nil.  Convert nil → 'unspecified at the call
-;; site so the "nil value is invalid" warning is never emitted.
+;; Emacs 31 rejects nil for these face attributes, and themes written for
+;; earlier versions still pass it.  On every other attribute nil means something
+;; of its own: `:box nil' or `:underline nil' switches off what `:inherit' would
+;; bring, so it must not become `unspecified', which restores the inheritance.
+(defconst +theme-nil-invalid-face-attributes
+  '(:foreground :background :distant-foreground
+    :width :weight :slant :height)
+  "Face attributes whose nil value has to be spelled `unspecified'.")
+
 (when (>= emacs-major-version 31)
   (define-advice set-face-attribute (:filter-args (args) fix-nil-to-unspecified)
-    "Convert nil face attribute values to \\='unspecified (Emacs 31 compatibility)."
+    "Spell nil as \\='unspecified on `+theme-nil-invalid-face-attributes'."
     (let ((face  (nth 0 args))
           (frame (nth 1 args))
           (rest  (nthcdr 2 args))
           fixed)
       (while rest
         (push (car rest) fixed)
-        (push (if (null (cadr rest)) 'unspecified (cadr rest)) fixed)
+        (push (if (and (null (cadr rest))
+                       (memq (car rest) +theme-nil-invalid-face-attributes))
+                  'unspecified
+                (cadr rest))
+              fixed)
         (setq rest (cddr rest)))
       (cons face (cons frame (nreverse fixed))))))
 
