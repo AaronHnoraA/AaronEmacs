@@ -101,7 +101,7 @@ make audit-ui-tokens
 就 Emacs 自身 package 依赖而言，现在已经可以：
 
 - `make install`
-  确定性恢复锁文件里的包
+  确定性恢复锁文件里的包；每个包都会尝试，有包失败时以非 0 退出
 - `make audit-lock`
   检查当前环境和锁文件是否漂移
 - `make up`

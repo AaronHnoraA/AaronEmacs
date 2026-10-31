@@ -70,6 +70,9 @@
 (defvar aaron-bootstrap--resolved-mode nil
   "Resolved bootstrap mode for the current run.")
 
+(defvar aaron-bootstrap--failures nil
+  "Packages this run failed to install.")
+
 (defconst aaron-bootstrap-export-trigger-features
   '(org)
   "Features to require before exporting the lock file.
@@ -287,6 +290,7 @@ This lets deferred package declarations register their VC recipes.")
                 (aaron-bootstrap--delete-installed-package pkg))
               (aaron-bootstrap-ensure-package-installed pkg))
           (error
+           (push pkg aaron-bootstrap--failures)
            (message "Failed to install archive package %s: %s"
                     pkg (error-message-string err))))))))
 
@@ -313,6 +317,7 @@ This lets deferred package declarations register their VC recipes.")
                  (t
                   (error "Unsupported VC package spec: %S" spec))))
             (error
+             (push pkg aaron-bootstrap--failures)
              (message "Failed to install VC package %s: %s"
                       pkg (error-message-string err)))))))
     (dolist (entry aaron-package-vc-patches)
@@ -387,6 +392,11 @@ Priority:
   ;; 恢复 GC 设置 + 退出
   (setq gc-cons-threshold (* 64 1024 1024)
         gc-cons-percentage 0.1)
+  ;; Every package is attempted, but a partial restore is not a success:
+  ;; `make' and the migration flow read the exit status.
+  (when aaron-bootstrap--failures
+    (message "Bootstrap failed to install: %S" (reverse aaron-bootstrap--failures))
+    (kill-emacs 1))
   (message "Bootstrap finished. You can now restart Emacs with your normal init.")
   (run-at-time
    "1 sec" nil

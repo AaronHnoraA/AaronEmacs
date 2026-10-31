@@ -5,7 +5,9 @@
 
 ## 覆盖范围
 
-没有逐行读完全部 11 万行。实际分三层：
+`lisp/` 下已跟踪的 230 个文件（约 11.7 万行，不含 `vendor/kanagawa-themes` 主题）和 5 个未提交的新文件、`early-init.el`、`init.el`、`bootstrap.el`、`scripts/*.el` 已全部逐行读完。`site-lisp/`（Noema、Magent、gptel 等）和 `test/` 不在范围内，`etc/*.el` 是数据，只做了孤儿键检查。
+
+第一阶段分三层：
 
 | 方式 | 范围 |
 |------|------|
@@ -15,7 +17,7 @@
 
 后续继续逐行阅读，已读完：`lisp/core/`（`general.el` 除外）、`ui/`、`emacs/`、`completion/`、`os/`、`app/`、`editor/`、`term/`、`checkers/`、`config/`、`lang/`，以及 `tools/` 的 `lsp`、`lsp-hub`、`lsp-ops`、`tree-sitter`、`project`。`tools/project` 读完但发现未处理。
 
-未逐行阅读（约 56201 行）：`core/general.el`、其余 `tools/`、`noema/`、`remote/`。
+之后读完其余 `tools/`、`noema/`、`remote/` 和 `core/general.el`。`tools/agent/` 读的是有另一会话未提交改动的工作树版本，其中 `manager.el`、`menu.el`、`tools/project/tools.el`、`ui/windows/actions.el`、`os/neomacs/trial.el` 尚未提交，读过但未改。
 
 ## 已修复
 
@@ -56,6 +58,30 @@
 - Compile Board、LSP Hub、Doctor 丢失看板公共按键；`language-server-menu` 的 `x` 绑定冲突，错误栈入口改为 `X`。
 - 其余：Flymake 双启动、Lens 与装饰过滤按项布局窗口、tldr、Dired 逐行 stat、dir-locals 合并、模板占位、shell 哨兵、诊断面板刷新。
 
+**Remote**
+
+- 网关每个随机 ID 触发一次完整 GC；pipeline 的 connect timeout 未按截止时间计算；环境合并做了前缀而非精确匹配。
+- `remote-backend-tramp-rpc` 的 git 探测在启动时跑 15 次，加备忘后 3 次（170 → 32 ms）。`+tramp-memoize` 不再缓存 nil，`project-current` 的备忘不再吞掉 prompt 参数。死代码 `+tramp-lsp-*` 删除。
+- `remote-transfer-list-clear` 留下隐藏日志 buffer；IPv6 主机名未加方括号。
+- tramp-rpc 加入 TRAMP 的几个操作没有路由契约，Doctor 在每个 target 报错。补上后，基线上 9 个 remote 测试失败全部修掉。
+
+**Noema / Jupyter**
+
+- Copilot 的 Noema 内联补全同步阻塞 Emacs，改为异步；UTF-16 换算 105 KB 文本从 27–89 ms 降到 1–2 ms。
+- Dashboard 热力图启动时等 Node（307 → 1.8 ms），改为异步；note 记录按根缓存，解析改哈希查找。
+- `notebook.el` 的正则在 Elisp 字符串里写成单反斜杠的 `\|`，实际是字面 `|`，bash/zsh/shell、javascript/node 的语言推断从未成立。
+- kernel 事件对每个非 notebook buffer 算 truename；`json-serialize` 的 unibyte 结果直接插入显示 buffer，非 ASCII 成八进制。
+- 删除一批未使用的 helper 和别名（`tools/jupyter`、`noema/bridge`、`noema/roam`）。
+
+**general.el 与 Agent 层**
+
+- `general--record-keybindings` 占 `general-define-key` 启动耗时的 68/97 ms，只服务 `general-describe-keybindings`，现在按需开启（97 → 33 ms）。同时修 `permanent-local` 写错变量、`:keymp`、`sybmol`。
+- `+agent-render--visible` 是全局 `window-buffer-change-functions` 的第三个错收 window 的函数：隐藏时延迟的输出只在经 `+agent-acp-show-buffer` 打开时才刷出。
+- `+agent-context--send` 的 `references` 被 `let*` 遮蔽，`+agent-context-clear-after-send` 对共享选区从不生效。
+- `+agent-acp-trim-buffer` 把隐藏会话的 point 留在顶部，且二分时复制整个 buffer 约 18 次；改用 `position-bytes`，提示符不再可能被裁掉。
+- 尝试看板在 ACP 事件内同步重绘，每成员解析两遍目录，现在合并到一次定时重绘。
+- `bootstrap.el` 安装失败仍以 0 退出，`make install` 报成功；现在全部尝试后以 1 退出。
+
 ## 未处理
 
 留给后续决定，均未改动：
@@ -63,7 +89,7 @@
 - `aaron-font-math-symbols` 文档称“有序回退”，但循环 `prepend` 让列表最后一个已安装字体优先。修正会改变数学符号的字形，需要本人决定。
 - `+sudo-file-path` 依据 `file-remote-p` 拼 TRAMP 路径，对 `/fs:` 名字不成立。
 - `lean-sideline-window-size-h` 依赖当前 buffer，而窗口变化钩子不保证它；调整非选中的 Lean 窗口时可能不刷新 sideline。`lean-tests` 在基线上就跑不起来，无法验证修改。
-- doctor 仍有 98 条 policy 命中，主要是 `global-set-key`（`config/mouse`、`ui/tabbar`）和 `file-remote-p`。
+- doctor 仍有 95 条 policy 命中，主要是 `global-set-key`（`config/mouse`、`ui/tabbar`）和 `file-remote-p`。
 - 18 处匿名钩子 lambda，违反命名规则但无运行时影响。
 - `aggressive-indent` 挂在不存在的 `elisp-mode-hook` 上，从未在 Elisp 启用；修正会改变编辑行为，需要本人决定。
 - `use-package cc-mode` 的 `:custom` 全局设置 `tab-width` 和 `indent-tabs-mode`。
@@ -71,6 +97,24 @@
 - Lean `M-[` 向后逐字符发同步请求，文件头较长时可能卡顿。
 - `lean-tests.el` 加载已不存在的文件，`lean-infoview-tests` 有 5 个 Eglot 时代的失败。
 - `comp` 在启动时仍被加载：模块账本 advice `define-key` 这个原语，需要 trampoline。
+- 网关 `target` placement 下 `emacs.eval` 在共享 target 上的可达性：调用方目前全在 client，无 token 设计需要决定。
+- `tools/project` 残留（`+treemacs-normalize-flat-imenu-index`、`+project--remember-dir-visible-only` 的 advice-remove、匿名 `treemacs--follow` advice）：该文件当时由另一会话修改，未动。
+- 进程退出后 `/tmp/.emacs-remote-ssh-UID-PID` 目录留存；`remote-backend-tramp-stream` 的 `cl-letf make-network-process` 会影响协商期间触发的定时器；`--attach-forward` 的 sentinel 包装在消费者替换 sentinel 后丢失。
+- `remote-source` 过滤器对巨型帧是平方复杂度；git board 临时 buffer 没带 capsule。
+- Jupyter：Contents 后端重命名到本地备份路径报错、null 日期；`+jupyter-target-command` 每次看板刷新同步探测两次；`jupyter/project.el` 用 comint `shell`，不合 eshell 约定；`runtime.el`、`project.el`、`server.el` 有 `(equal target "local")` 分支。
+- `AGENT.md` 仍说 `lsp`（kernel-following），文件由另一会话持有。
+- Agent：`+agent-session-capability-p` 取一个字段却构建完整快照；`+agent-acp--retire-transcript-workspace`、`--right-pane-p` 是旧布局迁移残留，`manager.el` 的 `fork`/`model`/`queue` 分支无调用；`+agent-acp--tab-line` 每次重绘都建 keymap 和排序全部 buffer；`help` 里的 `\\[+agent-session-list]` 未绑定键。
+- `general.el` 大量上游代码（lispy/worf/lpy definer、key-chord）未使用，`general--delay` 每个未解析绑定一个 `after-load` 闭包。
+- 终端选择器排除已打开窗口后，无法再选中可见终端把它移到新 frame。
+
+## 结束时的测试
+
+`scripts/test-all` 跑 134 个文件、2314 个测试。失败与起点对比：
+
+- 起点已有、仍在：`init-activity`（2）、`init-diagnostics-entry`（1）、`init-neo-common`（1）、`init-performance`（1）、`lean-infoview`（5），以及跑不起来的 `lean-tests`、`portal-focus-gui-tests`（后者要 GUI）。
+- 起点已有、已修：全部 `remote-*`、`init-noema`。
+- 新出现、不是本次改动：`noema-agent-worker-keeps-one-hidden-named-buffer-per-session`。另一会话在 `acp.el` 工作树里把 agent buffer 名去掉了前导空格，测试尚未跟上。
+- 并行时偶发：`init-frame-buffers` 失败 1 次，单独连跑 4 次全过，未查明原因。
 
 ## 量过之后决定不改
 
