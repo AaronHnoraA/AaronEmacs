@@ -377,4 +377,32 @@
   (require 'remote-fs)
   (should (member ".editorconfig" remote-ancestor-marker-names)))
 
+(ert-deftest tldr-treats-a-nil-status-as-success ()
+  "`url-retrieve' passes a nil status on success, and :error on failure."
+  (require 'aaron-utils)
+  (defvar url-http-end-of-headers)
+  (let ((requests nil)
+        (url-http-end-of-headers nil))
+    (cl-letf (((symbol-function 'pop-to-buffer) #'ignore)
+              ((symbol-function 'url-retrieve)
+               (lambda (url callback)
+                 (push url requests)
+                 (with-temp-buffer
+                   (let ((buffer (generate-new-buffer " *tldr-response*")))
+                     (with-current-buffer buffer
+                       (insert "{\"encoding\":\"base64\",\"content\":\""
+                               (base64-encode-string
+                                (encode-coding-string "# 标题" 'utf-8) t)
+                               "\"}")
+                       (setq url-http-end-of-headers (point-min))
+                       (funcall callback nil)))))))
+      (unwind-protect
+          (progn
+            (tldr "ls")
+            (should (= (length requests) 1))
+            (with-current-buffer tldr-buffer-name
+              (should (equal (buffer-string) "# 标题"))))
+        (when-let* ((buffer (get-buffer tldr-buffer-name)))
+          (kill-buffer buffer))))))
+
 ;;; init-state-files-tests.el ends here

@@ -89,7 +89,8 @@ name and search again. Typically OP is nil or \"common\"."
                   (lambda (status)
                     (let ((response-buffer (current-buffer)))
                       (unwind-protect
-                          (if (or (not status) (plist-member status :error))
+                          ;; STATUS is nil on success: only :error is a failure.
+                          (if (plist-member status :error)
                               (if (not op)
                                   (tldr cmd "common")
                                 (user-error "Something went wrong.\n\n%s"
@@ -103,7 +104,7 @@ name and search again. Typically OP is nil or \"common\"."
                                     (inhibit-read-only t))
                                 (with-current-buffer buf
                                   (erase-buffer)
-                                  (insert (base64-decode-string content))
+                                  (insert (decode-coding-string (base64-decode-string content) 'utf-8))
                                   (text-mode)
                                   (view-mode +1)
                                   (pop-to-buffer buf)))))
