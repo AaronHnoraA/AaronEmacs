@@ -13,8 +13,9 @@
 | 定点阅读 | 全部全局 `post-command` / `pre-command` / `after-change` / `buffer-list-update` / `window-*-change` 钩子函数；Noema 活动快照；Treemacs follow；Dashboard 缓存；`var` 清理定时器 |
 | 全量机械检查 | 217 个文件的字节编译警告；S 表达式分析（数字当布尔、字符串键用 `eq`/`assq`、破坏性调用丢弃返回值、格式串风险、匿名钩子、重复定时器）；完整启动后的契约检查（钩子参数、advice 签名、按键目标、transient 后缀、`:on-change`、`config-store` 孤儿键） |
 
-未逐行阅读：`lisp/remote/`（已有 `remote-io-review-2026-07.md` 和大量测试）、`tools/lsp/`、
-`noema/`、`lang/`、`core/general.el`（内化的第三方代码）。这些部分只经过机械检查和定点阅读。
+后续继续逐行阅读，已读完：`lisp/core/`（`general.el` 除外）、`ui/`、`emacs/`、`completion/`、`os/`、`app/`、`editor/`、`term/`、`checkers/`、`config/`、`lang/`，以及 `tools/` 的 `lsp`、`lsp-hub`、`lsp-ops`、`tree-sitter`、`project`。`tools/project` 读完但发现未处理。
+
+未逐行阅读（约 56201 行）：`core/general.el`、其余 `tools/`、`noema/`、`remote/`。
 
 ## 已修复
 
@@ -44,6 +45,17 @@
 - Performance Watch 的 `P` 在 `profiler` 未加载时指向未定义函数；Noema 前缀 `i` 同理。
 - `etc/config-languages.el` 的 `flymake-fringe-indicator-position` 是孤儿项，未注册，不生效。
 
+**第二批**
+
+- `archive-mode` 接管了 `.tar`、`.tgz` 和所有压缩后缀，打开时报 "Buffer format not recognized"。
+- Markdown 路由按子串 `md` 删除 `auto-mode-alist` 项，`.bat`、`.cmd` 失去 `bat-mode`；加载 `markdown-mode` 后路由也被顶掉。
+- Lean 光标钩子在每条命令上走两遍项目根，无 infoview 时也一样；符号搜索在远程项目上跑到 client；非选中窗口的 sideline 不随尺寸刷新。
+- `native-comp-speed` 用了旧变量名，从未生效；`native-comp-deferred-compilation` 是 JIT 开关的别名，已删除。
+- LaTeX 宏文件里未闭合的 `[` 让解析器死循环；AUCTeX 工作流钩子在 LaTeX buffer 跑两遍。
+- Bazel 跳转先展开文件名再读匹配数据，行列号被破坏。
+- Compile Board、LSP Hub、Doctor 丢失看板公共按键；`language-server-menu` 的 `x` 绑定冲突，错误栈入口改为 `X`。
+- 其余：Flymake 双启动、Lens 与装饰过滤按项布局窗口、tldr、Dired 逐行 stat、dir-locals 合并、模板占位、shell 哨兵、诊断面板刷新。
+
 ## 未处理
 
 留给后续决定，均未改动：
@@ -53,6 +65,12 @@
 - `lean-sideline-window-size-h` 依赖当前 buffer，而窗口变化钩子不保证它；调整非选中的 Lean 窗口时可能不刷新 sideline。`lean-tests` 在基线上就跑不起来，无法验证修改。
 - doctor 仍有 98 条 policy 命中，主要是 `global-set-key`（`config/mouse`、`ui/tabbar`）和 `file-remote-p`。
 - 18 处匿名钩子 lambda，违反命名规则但无运行时影响。
+- `aggressive-indent` 挂在不存在的 `elisp-mode-hook` 上，从未在 Elisp 启用；修正会改变编辑行为，需要本人决定。
+- `use-package cc-mode` 的 `:custom` 全局设置 `tab-width` 和 `indent-tabs-mode`。
+- `+pdf-view-auto-refresh-interval` 写入 buffer-local 的 `auto-revert-interval`，不生效。
+- Lean `M-[` 向后逐字符发同步请求，文件头较长时可能卡顿。
+- `lean-tests.el` 加载已不存在的文件，`lean-infoview-tests` 有 5 个 Eglot 时代的失败。
+- `comp` 在启动时仍被加载：模块账本 advice `define-key` 这个原语，需要 trampoline。
 
 ## 量过之后决定不改
 
