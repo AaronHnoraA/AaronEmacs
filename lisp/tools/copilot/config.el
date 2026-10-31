@@ -28,6 +28,8 @@
 (declare-function copilot-accept-completion "copilot" (&optional transform-fn))
 (declare-function copilot-accept-completion-by-word "copilot" (&optional n))
 (declare-function copilot-accept-completion-to-char "copilot" (char &optional count))
+(declare-function jsonrpc-async-request "jsonrpc"
+                  (connection method params &rest args))
 (declare-function jsonrpc-notify "jsonrpc" (connection method params))
 (declare-function jsonrpc-request "jsonrpc" (connection method params &rest args))
 (declare-function aaron-snippet-active-p "aaron-funcs" ())
@@ -425,13 +427,25 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
   "Return the UTF-16 code-unit width of CHAR."
   (if (> char #xffff) 2 1))
 
-(defun +copilot-noema-bridge--utf16-length (text)
-  "Return the UTF-16 code-unit length of TEXT."
-  (let ((units 0))
-    (dotimes (i (length text) units)
-      (setq units (+ units
-                     (+copilot-noema-bridge--utf16-units
-                      (aref text i)))))))
+(defconst +copilot-noema-bridge--astral-regexp "[\U00010000-\U0010FFFF]"
+  "Match one character that takes two UTF-16 code units.")
+
+(defun +copilot-noema-bridge--utf16-length (text &optional start end)
+  "Return the UTF-16 code-unit length of TEXT between START and END.
+A note can run to megabytes and this is asked several times per completion, so
+only the rare two-unit characters are visited."
+  (let* ((start (or start 0))
+         (end (or end (length text)))
+         (units (- end start))
+         (case-fold-search nil)
+         (position start))
+    (while (and (setq position (string-match
+                                +copilot-noema-bridge--astral-regexp
+                                text position))
+                (< position end))
+      (setq units (1+ units)
+            position (1+ position)))
+    units))
 
 (defun +copilot-noema-bridge--json-value (value)
   "Return VALUE with nested JSON arrays represented as vectors."
@@ -457,53 +471,65 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
     (vconcat (mapcar #'+copilot-noema-bridge--json-value value)))
    (t (vector (+copilot-noema-bridge--json-value value)))))
 
+(defun +copilot-noema-bridge--index-for-offset (text offset)
+  "Return the character index in TEXT reached by UTF-16 OFFSET.
+An offset inside a two-unit character reaches the end of that character."
+  (let ((index (max 0 offset))
+        (case-fold-search nil)
+        (position 0))
+    (while (and (setq position (string-match
+                                +copilot-noema-bridge--astral-regexp
+                                text position))
+                (< position index))
+      (setq index (max (1+ position) (1- index))
+            position (1+ position)))
+    (min index (length text))))
+
 (defun +copilot-noema-bridge--position-for-offset (text offset)
   "Return LSP position in TEXT for JavaScript UTF-16 OFFSET."
-  (let ((limit (max 0 (or offset 0)))
-        (units 0)
-        (line 0)
-        (character 0)
-        (i 0)
-        (len (length text)))
-    (while (and (< i len) (< units limit))
-      (let* ((char (aref text i))
-             (width (+copilot-noema-bridge--utf16-units char)))
-        (if (= char ?\n)
-            (setq line (1+ line)
-                  character 0)
-          (setq character (+ character width)))
-        (setq units (+ units width)
-              i (1+ i))))
-    (list :line line :character character)))
+  (let* ((index (+copilot-noema-bridge--index-for-offset text (or offset 0)))
+         (line 0)
+         (line-start 0)
+         newline)
+    (while (and (setq newline (string-search "\n" text line-start))
+                (< newline index))
+      (setq line (1+ line)
+            line-start (1+ newline)))
+    (list :line line
+          :character (+copilot-noema-bridge--utf16-length
+                      text line-start index))))
 
 (defun +copilot-noema-bridge--offset-for-position (text position)
   "Return JavaScript UTF-16 offset in TEXT for LSP POSITION."
   (let ((target-line (max 0 (or (plist-get position :line) 0)))
         (target-char (max 0 (or (plist-get position :character) 0)))
         (line 0)
-        (character 0)
-        (offset 0)
-        (i 0)
-        (len (length text)))
-    (catch 'done
-      (while (< i len)
-        (let* ((char (aref text i))
-               (width (+copilot-noema-bridge--utf16-units char)))
-          (cond
-           ((= line target-line)
-            (when (= char ?\n)
-              (throw 'done offset))
-            (if (>= (+ character width) target-char)
-                (throw 'done (+ offset (min width (max 0 (- target-char character)))))
+        (line-start 0)
+        (len (length text))
+        newline)
+    (while (and (< line target-line)
+                (setq newline (string-search "\n" text line-start)))
+      (setq line (1+ line)
+            line-start (1+ newline)))
+    (if (< line target-line)
+        (+copilot-noema-bridge--utf16-length text)
+      (let ((offset (+copilot-noema-bridge--utf16-length text 0 line-start))
+            (character 0)
+            (i line-start))
+        (catch 'done
+          (while (< i len)
+            (let* ((char (aref text i))
+                   (width (+copilot-noema-bridge--utf16-units char)))
+              (when (= char ?\n)
+                (throw 'done offset))
+              (when (>= (+ character width) target-char)
+                (throw 'done
+                       (+ offset
+                          (min width (max 0 (- target-char character))))))
               (setq character (+ character width)
-                    offset (+ offset width))))
-           (t
-            (setq offset (+ offset width))
-            (when (= char ?\n)
-              (setq line (1+ line)
-                    character 0)))))
-        (setq i (1+ i)))
-      offset)))
+                    offset (+ offset width)
+                    i (1+ i))))
+          offset)))))
 
 (defun +copilot-noema-bridge--full-range-end (text)
   "Return LSP position at the end of TEXT."
@@ -566,8 +592,70 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
       (list :version (plist-get current :version)
             :language-id (or (plist-get current :language-id) language-id))))))
 
+(defun +copilot-noema-bridge--inline-empty ()
+  "Return the inline reply that offers nothing."
+  (list :type "copilot-inline"
+        :items []
+        :status (+copilot-noema-bridge--status)))
+
+(defun +copilot-noema-bridge--inline-reply (result content offset file)
+  "Return the Noema reply for Copilot RESULT on CONTENT at OFFSET in FILE."
+  (let* ((items (plist-get result :items))
+         (item (cl-find-if (lambda (candidate)
+                             (stringp (plist-get candidate :insertText)))
+                           (append (or items []) nil))))
+    (+copilot-noema-bridge--log
+     "inline"
+     `((file . ,file)
+       (offset . ,offset)
+       (items . ,(length (append (or items []) nil)))))
+    (if (not item)
+        (+copilot-noema-bridge--inline-empty)
+      (let* ((range (plist-get item :range))
+             (start (plist-get range :start))
+             (end (plist-get range :end))
+             (from (if start
+                       (+copilot-noema-bridge--offset-for-position
+                        content start)
+                     offset))
+             (to (if end
+                     (+copilot-noema-bridge--offset-for-position
+                      content end)
+                   offset)))
+        (list :type "copilot-inline"
+              :items (vector
+                      (list :insertText (plist-get item :insertText)
+                            :range (list :from from :to to)
+                            :item (+copilot-noema-bridge--json-value
+                                   item)))
+              :status (+copilot-noema-bridge--status))))))
+
+(defconst +copilot-noema-bridge--inline-timeout 30
+  "Seconds Copilot gets to answer one inline completion.")
+
+(defun +copilot-noema-bridge--inline-request (params reply-fn fail-fn)
+  "Ask Copilot for PARAMS, then call REPLY-FN with a result or FAIL-FN.
+Noema asks while the person types in its page, and Emacs must not stop for
+each round trip to the language server.  Both functions run from the server's
+answer; a newer request superseding this one counts as an empty result."
+  (+copilot-noema-bridge--ensure-copilot)
+  (jsonrpc-async-request
+   copilot--connection 'textDocument/inlineCompletion params
+   :timeout +copilot-noema-bridge--inline-timeout
+   :success-fn reply-fn
+   :error-fn
+   (lambda (failure)
+     (if (or (eql (plist-get failure :code) -32802)
+             (+copilot-noema-bridge--superseded-error-p failure))
+         (funcall reply-fn (list :items []))
+       (funcall fail-fn (or (plist-get failure :message)
+                            (format "%S" failure)))))
+   :timeout-fn
+   (lambda () (funcall fail-fn "Copilot did not answer in time"))))
+
 (defun +copilot-noema-bridge--inline (body)
-  "Handle Noema Copilot inline completion BODY."
+  "Handle Noema Copilot inline completion BODY.
+Return a deferred reply, which settles when Copilot answers."
   (let* ((content (or (plist-get body :content) ""))
          (file (or (plist-get body :file) ""))
          (client-id (+copilot-noema-bridge--client-id body))
@@ -576,68 +664,31 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
          (uri (+copilot-noema-bridge--uri-for-file file))
          (doc (when (+copilot-noema-bridge--client-may-request-p body uri)
                 (+copilot-noema-bridge--sync-document
-                 uri file content client-id)))
-         (version (plist-get doc :version))
-         (result nil))
+                 uri file content client-id))))
     (if (not doc)
         (progn
           (+copilot-noema-bridge--log
            "inline-skipped"
            `((file . ,file) (uri . ,uri) (clientId . ,client-id)
              (reason . "inactive-client")))
-          (list :type "copilot-inline"
-                :items []
-                :status (+copilot-noema-bridge--status)))
+          (+copilot-noema-bridge--inline-empty))
       (+copilot-noema-bridge--focus-document uri client-id file t)
-      (setq result
-            (condition-case err
-                (+copilot-noema-bridge--request
-                 'textDocument/inlineCompletion
-                 (list :textDocument (list :uri uri :version version)
-                       :position (+copilot-noema-bridge--position-for-offset
-                                  content offset)
-                       :context (list :triggerKind 2)
-                       :formattingOptions (list :tabSize 2 :insertSpaces t))
-                 :timeout 30)
-              (error
-               (if (+copilot-noema-bridge--superseded-error-p err)
-                   (progn
-                     (+copilot-noema-bridge--log
-                      "inline-superseded"
-                      `((file . ,file) (uri . ,uri) (clientId . ,client-id)))
-                     (list :items []))
-                 (signal (car err) (cdr err))))))
-      (let* ((items (plist-get result :items))
-             (item (cl-find-if (lambda (candidate)
-                                 (stringp (plist-get candidate :insertText)))
-                               (append (or items []) nil))))
-        (+copilot-noema-bridge--log
-         "inline"
-         `((file . ,file)
-           (offset . ,offset)
-           (items . ,(length (append (or items []) nil)))))
-        (if (not item)
-            (list :type "copilot-inline"
-                  :items []
-                  :status (+copilot-noema-bridge--status))
-          (let* ((range (plist-get item :range))
-                 (start (plist-get range :start))
-                 (end (plist-get range :end))
-                 (from (if start
-                           (+copilot-noema-bridge--offset-for-position
-                            content start)
-                         offset))
-                 (to (if end
-                         (+copilot-noema-bridge--offset-for-position
-                          content end)
-                       offset)))
-            (list :type "copilot-inline"
-                  :items (vector
-                          (list :insertText (plist-get item :insertText)
-                                :range (list :from from :to to)
-                                :item (+copilot-noema-bridge--json-value
-                                       item)))
-                  :status (+copilot-noema-bridge--status))))))))
+      (let ((deferred (remote-gateway-defer
+                       (+ 5 +copilot-noema-bridge--inline-timeout))))
+        (+copilot-noema-bridge--inline-request
+         (list :textDocument (list :uri uri :version (plist-get doc :version))
+               :position (+copilot-noema-bridge--position-for-offset
+                          content offset)
+               :context (list :triggerKind 2)
+               :formattingOptions (list :tabSize 2 :insertSpaces t))
+         (lambda (result)
+           (remote-gateway-resolve
+            deferred
+            (+copilot-noema-bridge--inline-reply
+             result content offset file)))
+         (lambda (message)
+           (remote-gateway-reject deferred -32000 message)))
+        deferred))))
 
 (defun +copilot-noema-bridge--shown (body)
   "Notify Copilot that Noema showed a completion from BODY."
@@ -663,15 +714,23 @@ sync never collides with a normal Emacs buffer already opened in `copilot.el'."
        (list :item item :acceptedLength accepted-length))
       (list :ok t :partial t))
      (t
+      ;; Telemetry for the accepted text; nothing here waits for its answer.
       (when-let* ((command (plist-get item :command))
                   (command-name (plist-get command :command)))
-        (+copilot-noema-bridge--request
-         'workspace/executeCommand
+        (+copilot-noema-bridge--ensure-copilot)
+        (jsonrpc-async-request
+         copilot--connection 'workspace/executeCommand
          (list :command command-name
                :arguments (+copilot-noema-bridge--json-array
                            (or (plist-get command :arguments) nil)))
-         :timeout 30))
-	      (list :ok t)))))
+         :timeout 30
+         :success-fn #'ignore
+         :error-fn
+         (lambda (failure)
+           (+copilot-noema-bridge--log
+            "accept-command-failed" `((error . ,(format "%S" failure)))))
+         :timeout-fn #'ignore))
+      (list :ok t)))))
 
 (defun +copilot-noema-bridge--focus (body)
   "Record Noema Copilot focus from BODY without starting Copilot."
@@ -1172,16 +1231,6 @@ the completion routing used before the lsp-mode migration."
   :config
   (+copilot-setup-dwim-keys copilot-mode-map)
   (+copilot-setup-dwim-keys copilot-completion-map)
-  (when
-      (and
-       (fboundp
-        'copilot--make-connection@+copilot-cap-server-heap)
-       (advice-member-p
-        'copilot--make-connection@+copilot-cap-server-heap
-        'copilot--make-connection))
-    (advice-remove
-     'copilot--make-connection
-     'copilot--make-connection@+copilot-cap-server-heap))
   (unless
       (advice-member-p
        #'+copilot--client-server-executable-a
@@ -1226,15 +1275,9 @@ Compatibility wrapper for old `lsp-copilot-check-status' workflows."
     "Report quota or entitlement information from the Copilot server."
     (interactive)
     (message "Copilot quota: %S" (copilot--request 'checkQuota nil)))
-  (when (and (fboundp '+copilot--suppress-cancelled-errors)
-             (advice-member-p #'+copilot--suppress-cancelled-errors 'copilot--log))
-    (advice-remove 'copilot--log #'+copilot--suppress-cancelled-errors))
   (defalias 'lsp-copilot-check-status #'+copilot-check-status)
   (defalias 'lsp-copilot-login #'copilot-login)
   (defalias 'lsp-copilot-logout #'copilot-logout))
-
-
-
 
 
 (provide 'tools/copilot/config)

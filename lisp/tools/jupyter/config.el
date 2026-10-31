@@ -73,77 +73,6 @@ The default view keeps remote profiles and active sessions prominent."
   "Return KEY from JSON alist OBJECT."
   (+jupyter-management-get key object))
 
-(defun +jupyter-board--capture (program &rest args)
-  "Run PROGRAM with ARGS and return stdout, signaling on failure."
-  (unless (and program (file-executable-p program))
-    (error "Executable is unavailable: %s" (or program "<unset>")))
-  (let ((stderr-file (make-temp-file "jupyter-board-stderr-")))
-    (unwind-protect
-        (with-temp-buffer
-          (let ((status (apply #'process-file program nil
-                               (list (current-buffer) stderr-file) nil args)))
-            (if (zerop status)
-                (buffer-string)
-              (let ((stdout (buffer-string)))
-                (error "%s"
-                       (string-trim
-                        (concat
-                         stdout "\n"
-                         (with-temp-buffer
-                           (insert-file-contents stderr-file)
-                           (buffer-string)))))))))
-      (delete-file stderr-file))))
-
-(defun +jupyter-board--json-file (file)
-  "Read FILE as a JSON alist, returning nil when unreadable."
-  (when (file-readable-p file)
-    (condition-case nil
-        (json-parse-string
-         (with-temp-buffer
-           (insert-file-contents file)
-           (buffer-string))
-         :object-type 'alist :array-type 'list
-         :null-object nil :false-object nil)
-      (error nil))))
-
-(defun +jupyter-board--remote-p (name argv raw)
-  "Return non-nil when NAME, ARGV, or RAW identifies remote_ikernel."
-  (or (string-prefix-p "rik_" name)
-      (cl-some (lambda (arg)
-                 (string-match-p "remote_ikernel" (format "%s" arg)))
-               argv)
-      (+jupyter-board--alist-get 'remote_ikernel_argv raw)))
-
-(defun +jupyter-board--remote-metadata (spec)
-  "Return Aaron remote-kernel metadata from SPEC."
-  (let* ((metadata (+jupyter-board--alist-get 'metadata spec))
-         (aaron (+jupyter-board--alist-get 'aaron metadata)))
-    (+jupyter-board--alist-get 'remote_kernel aaron)))
-
-(defun +jupyter-board--argv-option (argv option)
-  "Return OPTION's value from ARGV, supporting split and equals forms."
-  (+jupyter-management-argv-option argv option))
-
-(defun +jupyter-board--entry (name object)
-  "Normalize kernelspec NAME and JSON OBJECT into a plist."
-  (+jupyter-management-normalize-spec
-   (or (and (boundp '+jupyter-board--target) +jupyter-board--target)
-       (remote-get-target "local"))
-   name object))
-
-(defun +jupyter-board--load-entries ()
-  "Return normalized entries from the configured Jupyter command."
-  (let* ((output (+jupyter-board--capture
-                  +jupyter-board-jupyter-command "kernelspec" "list" "--json"))
-         (data (json-parse-string output :object-type 'alist :array-type 'list
-                                  :null-object nil :false-object nil))
-         (kernelspecs (+jupyter-board--alist-get 'kernelspecs data)))
-    (sort
-     (mapcar (lambda (cell)
-               (+jupyter-board--entry (symbol-name (car cell)) (cdr cell)))
-             kernelspecs)
-     (lambda (a b) (string-lessp (plist-get a :name) (plist-get b :name))))))
-
 (defun +jupyter-board--current-entry ()
   "Return the kernel entry at point."
   (or (get-text-property (point) '+jupyter-board-entry)
@@ -158,24 +87,6 @@ The default view keeps remote profiles and active sessions prominent."
     (when (and remote-only (not (plist-get entry :remote)))
       (user-error "This action requires a remote kernel"))
     entry))
-
-(defun +jupyter-board--command-version (program &rest args)
-  "Return one-line PROGRAM version using ARGS."
-  (condition-case nil
-      (let ((output (string-trim (apply #'+jupyter-board--capture program args))))
-        (if (string-match "version[[:space:]]+\\([[:alnum:]+._-]+\\)" output)
-            (match-string 1 output)
-          (car (split-string output "\n" t))))
-    (error "unavailable")))
-
-(defun +jupyter-board--module-source ()
-  "Return the installed remote_ikernel module source path."
-  (condition-case nil
-      (string-trim
-       (+jupyter-board--capture
-        +jupyter-board-python-command "-c"
-        "import remote_ikernel; print(remote_ikernel.__file__)"))
-    (error "unavailable")))
 
 (defun +jupyter-board--insert-context ()
   "Insert selected-target and passive tool health information."
@@ -1231,7 +1142,8 @@ The default view keeps remote profiles and active sessions prominent."
       (puthash "argv" (vconcat argv (vector "--project-file"
                                            (file-local-name +jupyter-detail--file))) object)
       (setq text (with-temp-buffer
-                   (insert (json-serialize object))
+                   ;; `json-serialize' returns UTF-8 bytes, not characters.
+                   (insert (decode-coding-string (json-serialize object) 'utf-8))
                    (json-pretty-print-buffer)
                    (buffer-string))))
     (setq text (concat (string-trim-right text) "\n"))
@@ -1527,7 +1439,7 @@ The default view keeps remote profiles and active sessions prominent."
          (argv (plist-get entry :argv))
          (value (lambda (key option)
                   (or (+jupyter-board--alist-get key config)
-                      (+jupyter-board--argv-option argv option))))
+                      (+jupyter-management-argv-option argv option))))
          (interface (funcall value 'interface "--interface"))
          (host (funcall value 'host "--host"))
          (kernel-command (funcall value 'kernel_cmd "--kernel_cmd"))

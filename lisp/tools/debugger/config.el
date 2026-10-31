@@ -512,12 +512,16 @@ frames, so direct clicks there toggle breakpoints."
     ("a" "adapter dir" +debug/open-adapter-dir)
     ("g" "breakpoints file" +debug/open-breakpoints-file)]])
 
-(defun +debug-load-breakpoints-h ()
-  "Load dape and the saved breakpoints when the first file is visited.
-Breakpoints only matter in files, so dape waits for one instead of
-loading during startup."
+(defun +debug-load-breakpoints ()
+  "Load dape and restore the saved breakpoints."
   (require 'dape)
   (dape-breakpoint-load))
+
+(defun +debug-load-breakpoints-h ()
+  "Load dape once the first visited file has been shown.
+Breakpoints only matter in files, so dape waits for one instead of loading
+during startup, and for idle time instead of holding up that first file."
+  (run-with-idle-timer 2 nil #'+debug-load-breakpoints))
 
 (defun +debug-save-breakpoints-h ()
   "Save the breakpoints, if dape was loaded in this session.

@@ -4,6 +4,10 @@
 (require 'cl-lib)
 (require 'tools/jupyter/config)
 
+;; A kernelspec entry on the local target.
+(defun +jupyter-tests--entry (name object)
+  (+jupyter-management-normalize-spec (remote-get-target "local") name object))
+
 (ert-deftest +jupyter-board-ssh-project-row-opens-remote-files ()
   "Configured SSH projects have direct project and filesystem entries."
   (let* ((shortcut '(:name "COMP9444" :target "aaron-pc"
@@ -227,7 +231,7 @@
              (metadata . ,metadata)))))
 
 (ert-deftest +jupyter-board-legacy-remote-defaults-to-core ()
-  (let ((entry (+jupyter-board--entry
+  (let ((entry (+jupyter-tests--entry
                 "rik_ssh_example_python"
                 (+jupyter-board-test--object
                  '("python" "-m" "remote_ikernel"
@@ -241,7 +245,7 @@
 
 (ert-deftest +jupyter-board-reads-temporary-metadata ()
   (let* ((metadata '((aaron . ((remote_kernel . ((group . "temporary")))))))
-         (entry (+jupyter-board--entry
+         (entry (+jupyter-tests--entry
                  "rik_ssh_example_python"
                  (+jupyter-board-test--object
                   '("python" "-m" "remote_ikernel") metadata))))
@@ -254,13 +258,6 @@
      '("--interface=ssh" "--tunnel-hosts=jump-a, jump-b" "--verbose"))
     '("--interface=ssh" "--tunnel-hosts" "jump-a" "jump-b" "--verbose"))))
 
-(ert-deftest +jupyter-board-parses-local-version ()
-  (should
-   (equal
-    (+jupyter-board--command-version
-     "/usr/bin/printf" "Remote launcher (version 0.4.6+aaron.1).")
-    "0.4.6+aaron.1")))
-
 (ert-deftest +jupyter-board-edit-args-prefer-namespaced-config ()
   (let* ((metadata
           '((aaron .
@@ -272,7 +269,7 @@
                                                (host . "example")
                                                (language . "python")
                                                (tunnel_hosts . ("jump"))))))))))
-         (entry (+jupyter-board--entry
+         (entry (+jupyter-tests--entry
                  "rik_ssh_example_python"
                  (+jupyter-board-test--object
                   '("python" "-m" "remote_ikernel") metadata)))
@@ -469,7 +466,7 @@
   (should-error (+jupyter-board/add-course-pytorch :host "") :type 'user-error))
 
 (ert-deftest +jupyter-board-diagnoses-broken-absolute-launcher ()
-  (let* ((entry (+jupyter-board--entry
+  (let* ((entry (+jupyter-tests--entry
                  "broken"
                  (+jupyter-board-test--object
                   '("/definitely/missing/jupyter-python" "-f" "{connection_file}"))))

@@ -218,6 +218,63 @@
    (eq (lookup-key global-map (kbd "s-]"))
        #'+copilot/forward-delimiter-or-copilot-dwim)))
 
+;; The old walk over every character is the reference for these rewrites.
+(defun +copilot-tests--position-by-walking (text offset)
+  "Return the LSP position of UTF-16 OFFSET in TEXT, one character at a time."
+  (let ((units 0) (line 0) (character 0) (i 0))
+    (while (and (< i (length text)) (< units offset))
+      (let* ((char (aref text i))
+             (width (if (> char #xffff) 2 1)))
+        (if (= char ?\n)
+            (setq line (1+ line) character 0)
+          (setq character (+ character width)))
+        (setq units (+ units width) i (1+ i))))
+    (list :line line :character character)))
+
+(ert-deftest +copilot-noema-positions-count-utf-16-units ()
+  (let* ((text "a😀b\n\n中😀\nend😀")
+         (length (+copilot-noema-bridge--utf16-length text)))
+    (should (= length 15))
+    (should (= (+copilot-noema-bridge--utf16-length text 1 3) 3))
+    (dotimes (offset (+ length 3))
+      (should (equal (+copilot-noema-bridge--position-for-offset text offset)
+                     (+copilot-tests--position-by-walking text offset))))
+    (should (= (+copilot-noema-bridge--offset-for-position
+                text '(:line 0 :character 3))
+               3))
+    (should (= (+copilot-noema-bridge--offset-for-position
+                text '(:line 2 :character 1))
+               7))
+    (should (= (+copilot-noema-bridge--offset-for-position
+                text '(:line 2 :character 9))
+               9))
+    (should (= (+copilot-noema-bridge--offset-for-position
+                text '(:line 9 :character 0))
+               length))))
+
+(ert-deftest +copilot-noema-inline-settles-from-the-server-answer ()
+  "Emacs must not wait for Copilot while the person types in a Noema page."
+  (let (success failure resolved rejected)
+    (cl-letf (((symbol-function '+copilot-noema-bridge--ensure-copilot) #'ignore)
+              ((symbol-function 'jsonrpc-async-request)
+               (lambda (_connection method _params &rest options)
+                 (should (eq method 'textDocument/inlineCompletion))
+                 (setq success (plist-get options :success-fn)
+                       failure (plist-get options :error-fn))))
+              ((symbol-function 'jsonrpc-request)
+               (lambda (&rest _) (ert-fail "Waited on the server"))))
+      (+copilot-noema-bridge--inline-request
+       nil (lambda (result) (setq resolved result))
+       (lambda (message) (setq rejected message)))
+      (should-not resolved)
+      (funcall success '(:items [(:insertText "x")]))
+      (should (equal resolved '(:items [(:insertText "x")])))
+      (funcall failure '(:code -32802 :message "gone"))
+      (should (equal resolved '(:items [])))
+      (should-not rejected)
+      (funcall failure '(:code -1 :message "broken"))
+      (should (equal rejected "broken")))))
+
 (ert-deftest +copilot-jump-labels-are-prefix-free ()
   (let ((labels (+copilot--jump-labels 80)))
     (should (= (length labels) 80))

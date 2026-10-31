@@ -443,8 +443,9 @@ With MAINTAIN, prune abandoned files first; `force' bypasses the throttle."
   (condition-case nil (slot-value object slot) (error nil)))
 
 (defun +jupyter-management-emacs-clients ()
-  "Return a passive snapshot of live emacs-jupyter clients."
-  (when (and (require 'jupyter-repl nil t) (boundp 'jupyter--clients))
+  "Return a passive snapshot of live emacs-jupyter clients.
+No client can exist before the package is loaded, so asking does not load it."
+  (when (and (featurep 'jupyter-repl) (boundp 'jupyter--clients))
     (cl-loop
      for client in (ignore-errors (jupyter-all-objects 'jupyter--clients))
      for buffer = (+jupyter-management-object-slot client 'buffer)
