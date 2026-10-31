@@ -2,19 +2,22 @@
 
 ;;; Commentary:
 ;;
-;; Noema is the single Emacs-native AI/research entry layer:
+;; Emacs owns shared agent infrastructure; Noema Research consumes it:
 ;;
 ;;   gptel source      arbitrary-buffer compose/context/preset/rewrite UI
 ;;   agent-shell/acp   structured external-agent sessions and permissions
 ;;   Magent            queue, ledger, tools and optional gptel-backed agent
+;;
+;; Shared implementations live alongside this configuration, tracked
+;; in docs/design/agent-management.md. New generic policy lives in this module.
 ;;
 ;; agent-shell/acp/shell-maker are pristine package-vc dependencies, pinned as
 ;; one audited group. gptel and Magent remain embedded. C-c A is the prefix.
 ;;
 ;; Every agent session -- a `.noema' Run's, the popup pool's, one started here
 ;; and a bare `M-x agent-shell' -- is registered per project by
-;; `noema-agent-acp-adopt', so one list manages them and any of them can be
-;; given editor context by name.  `noema-context' hands the shared gptel
+;; `+agent-acp-adopt', so one list manages them and any of them can be
+;; given editor context by name.  `+agent-context' hands the shared gptel
 ;; selection to a chosen session as references, never as copied text.
 
 ;;; Code:
@@ -22,11 +25,26 @@
 (require 'config)
 (require 'aaron-packages)
 (require 'seq)
+(require 'tools/agent/notifications)
+(require 'noema/bridge/agent-notifications)
+
+(dolist (option '(+agent-notify-events +agent-notify-delay +agent-notify-cooldown))
+  (config-register option :group 'ai :type (get option 'custom-type)
+                   :doc (documentation-property option 'variable-documentation)))
+(+agent-notifications-mode 1)
 
 (add-to-list 'load-path
              (file-name-as-directory
               (locate-user-emacs-file "site-lisp/noema/lisp")))
-(require 'noema-upstream)
+(require 'tools/agent/upstream)
+(require 'tools/agent/activity)
+
+;; Optional domain integration never appears in the shared runtime itself.
+(after! tools/agent/acp
+  (when (locate-library "noema-agent-acp") (require 'noema-agent-acp)))
+
+(after! noema-md-bridge
+  (require 'noema-context))
 
 ;; Install missing dependencies only; normal startup does no network access.
 ;; Migration does not upgrade versions or touch currently running sessions.
@@ -66,8 +84,8 @@
 (declare-function remote-file-name-target "remote-fs" (file-name))
 (declare-function remote-make-file-name "remote-fs" (target-id localname))
 (defvar agent-shell-path-resolver-function)
-(defvar noema-agent-acp-process-directory-function)
-(defvar noema-agent-acp-agent-file-function)
+(defvar +agent-acp-process-directory-function)
+(defvar +agent-acp-agent-file-function)
 
 (defun +agent-shell-emacs-file-name (logical)
   "Return the Emacs spelling of LOGICAL: native when this machine shares it."
@@ -175,8 +193,8 @@ agent sends must resolve against the session's target."
 (defvar company-backends)
 (defvar company-idle-delay)
 (defvar company-minimum-prefix-length)
-(declare-function noema-agent-acp-start "noema-agent-acp" (&rest args))
-(declare-function noema-agent-acp-mark-session-buffer "noema-agent-acp" (buffer name agent directory))
+(declare-function +agent-acp-start "tools/agent/acp" (&rest args))
+(declare-function +agent-acp-mark-session-buffer "tools/agent/acp" (buffer name agent directory))
 (declare-function agent-shell-cwd "agent-shell" ())
 (declare-function agent-shell--display-buffer "agent-shell" (buffer))
 (declare-function agent-shell-markdown-replace-markup "agent-shell-markdown" (&rest args))
@@ -380,22 +398,22 @@ the process exited is never replayed, since its tool effects may have run."
   (let* ((old-name (buffer-name))
          (session-id (map-nested-elt agent-shell--state '(:session :id)))
          (draft (agent-shell--prompt-input))
-         (origin (and (boundp 'noema-agent-acp-session-origin)
-                      noema-agent-acp-session-origin))
-         (name (and (boundp 'noema-agent-acp-session-name)
-                    noema-agent-acp-session-name))
-         (agent (and (boundp 'noema-agent-acp-session-agent)
-                     noema-agent-acp-session-agent))
-         (root (and (boundp 'noema-agent-acp-session-root)
-                    noema-agent-acp-session-root)))
+         (origin (and (boundp '+agent-acp-session-origin)
+                      +agent-acp-session-origin))
+         (name (and (boundp '+agent-acp-session-name)
+                    +agent-acp-session-name))
+         (agent (and (boundp '+agent-acp-session-agent)
+                     +agent-acp-session-agent))
+         (root (and (boundp '+agent-acp-session-root)
+                    +agent-acp-session-root)))
     ;; The process is gone; any remaining active request was already lost.
     ;; Clear it so upstream does not ask whether to stop an exited process.
     (map-put! agent-shell--state :active-requests nil)
     (agent-shell-restart :session-id session-id)
     (when-let* ((new-buffer (get-buffer old-name))
                 ((buffer-live-p new-buffer)))
-      (when (and origin (fboundp 'noema-agent-acp-adopt))
-        (noema-agent-acp-adopt new-buffer :origin origin :name name
+      (when (and origin (fboundp '+agent-acp-adopt))
+        (+agent-acp-adopt new-buffer :origin origin :name name
                               :agent agent :root root))
       (when (and (stringp draft) (not (string-empty-p draft)))
         (agent-shell-insert :text draft :submit nil :no-focus t
@@ -537,9 +555,9 @@ when present; the exact Codex message is the isolated compatibility fallback."
                                (when (and (equal method "session/prompt")
                                           (buffer-live-p buffer)
                                           (with-current-buffer buffer
-                                            (and (boundp 'noema-agent-acp--prompt-receipt)
+                                            (and (boundp '+agent-acp--prompt-receipt)
                                                  (eq (plist-get
-                                                      noema-agent-acp--prompt-receipt
+                                                      +agent-acp--prompt-receipt
                                                       :status)
                                                      'pending))))
                                  (funcall on-failure
@@ -561,24 +579,24 @@ when present; the exact Codex message is the isolated compatibility fallback."
         (config (map-elt agent-shell--state :agent-config))
         (directory default-directory)
         (old (current-buffer))
-        (origin (and (boundp 'noema-agent-acp-session-origin)
-                     noema-agent-acp-session-origin))
-        (name (and (boundp 'noema-agent-acp-session-name)
-                   noema-agent-acp-session-name))
-        (root (and (boundp 'noema-agent-acp-session-root)
-                   noema-agent-acp-session-root))
+        (origin (and (boundp '+agent-acp-session-origin)
+                     +agent-acp-session-origin))
+        (name (and (boundp '+agent-acp-session-name)
+                   +agent-acp-session-name))
+        (root (and (boundp '+agent-acp-session-root)
+                   +agent-acp-session-root))
         (logical-id (and (boundp 'noema-agent-promote--session-id)
                          noema-agent-promote--session-id)))
     (let* ((default-directory directory)
-           (new (if (and origin (fboundp 'noema-agent-acp-start))
-                    (noema-agent-acp-start :config config :directory directory
+           (new (if (and origin (fboundp '+agent-acp-start))
+                    (+agent-acp-start :config config :directory directory
                                            :session-id session-id :focus t
                                            :origin origin)
                   (agent-shell--start :config config :session-id session-id
                                       :new-session t))))
       (when (and name root (buffer-live-p new)
-                 (fboundp 'noema-agent-acp-mark-session-buffer))
-        (noema-agent-acp-mark-session-buffer
+                 (fboundp '+agent-acp-mark-session-buffer))
+        (+agent-acp-mark-session-buffer
          new name (format "%s" (map-elt config :identifier)) root)
         (with-current-buffer new
           (setq-local noema-agent-promote--session-id logical-id)))
@@ -635,8 +653,8 @@ when present; the exact Codex message is the isolated compatibility fallback."
                                  sessions)))
            (config (map-elt state :agent-config))
            (directory (buffer-local-value 'default-directory source))
-           (root (or (and (boundp 'noema-agent-acp-session-root)
-                          (buffer-local-value 'noema-agent-acp-session-root source))
+           (root (or (and (boundp '+agent-acp-session-root)
+                          (buffer-local-value '+agent-acp-session-root source))
                      directory)))
       (unless choices
         (user-error "This agent has no other saved sessions in the current workspace"))
@@ -651,9 +669,9 @@ when present; the exact Codex message is the isolated compatibility fallback."
             (progn (agent-shell--display-buffer live) live)
           (let* ((popup (and (boundp '+portal-popup-instance-p)
                              (buffer-local-value '+portal-popup-instance-p source)))
-                 (display (and (boundp 'noema-agent-acp-display-buffer-function)
+                 (display (and (boundp '+agent-acp-display-buffer-function)
                                (buffer-local-value
-                                'noema-agent-acp-display-buffer-function source)))
+                                '+agent-acp-display-buffer-function source)))
                  (old-name (buffer-name source))
                  (binding (and (fboundp 'noema-sessions-native-binding)
                                (noema-sessions-native-binding id root)))
@@ -664,11 +682,11 @@ when present; the exact Codex message is the isolated compatibility fallback."
                       ;; execution.  Upstream restart loses its popup-local
                       ;; display function when it kills SOURCE.
                       (let ((buffer
-                             (noema-agent-acp-start
+                             (+agent-acp-start
                               :config config :directory directory :session-id id
                               :focus nil :origin 'popup
                               :display-function #'+portal-popup-display-buffer)))
-                        (noema-agent-acp-adopt
+                        (+agent-acp-adopt
                          buffer :agent (map-elt config :identifier)
                          :origin 'popup
                          :name (and binding (plist-get binding :name))
@@ -680,9 +698,9 @@ when present; the exact Codex message is the isolated compatibility fallback."
                                       (capitalize (format "%s" (map-elt config :identifier)))
                                       +portal-popup-workspace-id
                                       (buffer-local-value '+portal-popup-workspace-id source)
-                                      noema-agent-acp-display-buffer-function
+                                      +agent-acp-display-buffer-function
                                       #'+portal-popup-display-buffer)
-                          (noema-agent-acp-tabs-mode -1)
+                          (+agent-acp-tabs-mode -1)
                           (+portal-popup-agent-keys-mode 1))
                         (+portal-popup-display-buffer buffer)
                         (kill-buffer source)
@@ -691,11 +709,11 @@ when present; the exact Codex message is the isolated compatibility fallback."
                     ;; An agent opened with M-x agent-shell owns its invoking
                     ;; window.  Keep that display function across a resume.
                     (let ((buffer
-                           (noema-agent-acp-start
+                           (+agent-acp-start
                             :config config :directory directory :session-id id
                             :focus nil :origin 'manual
                             :display-function display)))
-                      (noema-agent-acp-adopt
+                      (+agent-acp-adopt
                        buffer :agent (map-elt config :identifier)
                        :origin 'manual
                        :name (and binding (plist-get binding :name))
@@ -709,8 +727,8 @@ when present; the exact Codex message is the isolated compatibility fallback."
                       (agent-shell-restart :session-id id))
                     (or (get-buffer old-name)
                         (user-error "Agent shell did not restart"))))))
-            (when (and binding (fboundp 'noema-agent-acp-mark-session-buffer))
-              (noema-agent-acp-mark-session-buffer
+            (when (and binding (fboundp '+agent-acp-mark-session-buffer))
+              (+agent-acp-mark-session-buffer
                target (plist-get binding :name)
                (format "%s" (map-elt config :identifier)) root)
               (with-current-buffer target
@@ -759,19 +777,19 @@ when present; the exact Codex message is the isolated compatibility fallback."
   (require 'term/portal/popup)
   (if (eq (selected-window) (+portal-popup--window))
       (+portal-popup/agent agent)
-    (require 'noema-agent-acp)
+    (require 'tools/agent/acp)
     (pcase-let* ((`(,noema-root . ,directory) (+agent-shell-launch-context))
                  (window (selected-window))
-                 (config (or (noema-agent-acp-config-for agent)
+                 (config (or (+agent-acp-config-for agent)
                              (user-error "No agent-shell configuration for %s" agent)))
                  (display (lambda (buffer)
                             (when (window-live-p window)
                               (select-window window))
                             (switch-to-buffer buffer)))
-                 (buffer (noema-agent-acp-start
+                 (buffer (+agent-acp-start
                           :config config :directory directory :focus nil
                           :origin 'manual :display-function display)))
-      (noema-agent-acp-adopt buffer :agent agent :origin 'manual
+      (+agent-acp-adopt buffer :agent agent :origin 'manual
                              :root noema-root)
       (funcall display buffer)
       buffer)))
@@ -848,10 +866,10 @@ Double prefix ARG keeps the upstream existing-session picker."
   (advice-add 'agent-shell--make-missing-executable-error :filter-return
               #'+agent-shell-missing-executable-a))
 
-(with-eval-after-load 'noema-agent-acp
-  (setq noema-agent-acp-process-directory-function
+(with-eval-after-load 'tools/agent/acp
+  (setq +agent-acp-process-directory-function
         #'+agent-shell-process-directory
-        noema-agent-acp-agent-file-function
+        +agent-acp-agent-file-function
         #'+agent-shell-agent-file-name))
 
 (defvar agent-shell-opencode-acp-command)
@@ -926,18 +944,18 @@ target-native path.  A CLI that cannot be found is an error."
               '((name . +agent-shell-use-workspace-cli) (depth . 100))))
 
 (autoload 'noema "noema" nil t)
-(autoload 'noema-compose "noema-compose" nil t)
-(autoload 'noema-compose-send "noema-compose" nil t)
-(autoload 'noema-compose-menu "noema-compose" nil t)
-(autoload 'noema-compose-add-context "noema-compose" nil t)
-(autoload 'noema-compose-rewrite "noema-compose" nil t)
-(autoload 'noema-agent-start "noema-agent-acp" nil t)
-(declare-function noema-agent-acp-config-for "noema-agent-acp" (agent))
-(declare-function noema-agent-acp-export-config "noema-agent-acp" (config model-id))
-(declare-function noema-agent-acp-start "noema-agent-acp" (&rest args))
-(declare-function noema-agent-acp-subscribe "noema-agent-acp" (&rest args))
-(declare-function noema-agent-acp-unsubscribe "noema-agent-acp" (&rest args))
-(declare-function noema-agent-acp-kill "noema-agent-acp" (buffer))
+(autoload '+agent/compose "tools/agent/compose" nil t)
+(autoload '+agent/compose-send "tools/agent/compose" nil t)
+(autoload '+agent/compose-menu "tools/agent/compose" nil t)
+(autoload '+agent/compose-add-context "tools/agent/compose" nil t)
+(autoload '+agent/compose-rewrite "tools/agent/compose" nil t)
+(autoload '+agent/start "tools/agent/acp" nil t)
+(declare-function +agent-acp-config-for "tools/agent/acp" (agent))
+(declare-function noema-agent-export-config "noema-agent-acp" (config model-id))
+(declare-function +agent-acp-start "tools/agent/acp" (&rest args))
+(declare-function +agent-acp-subscribe "tools/agent/acp" (&rest args))
+(declare-function +agent-acp-unsubscribe "tools/agent/acp" (&rest args))
+(declare-function +agent-acp-kill "tools/agent/acp" (buffer))
 
 (config-defvar +config-ask-model "gpt-6-luna"
   "Codex ACP model used by the Docs Ask command.  It uses the current Codex login."
@@ -958,13 +976,13 @@ target-native path.  A CLI that cannot be found is an error."
 
 (defun +config--ask-finish (buffer subscription answer)
   "Show ANSWER in the echo area and release hidden ACP BUFFER and SUBSCRIPTION."
-  (noema-agent-acp-unsubscribe :buffer buffer :subscription subscription)
+  (+agent-acp-unsubscribe :buffer buffer :subscription subscription)
   ;; The callback runs inside agent-shell's event dispatch.  Release the
   ;; physical client on the next event turn, then show the answer last so
   ;; teardown messages cannot replace it in the echo area.
   (run-at-time 0 nil (lambda ()
                        (when (buffer-live-p buffer)
-                         (noema-agent-acp-kill buffer))
+                         (+agent-acp-kill buffer))
                        (message "Ask · %s"
                                 (if (and (stringp answer)
                                          (not (string-empty-p (string-trim answer))))
@@ -985,13 +1003,13 @@ is `+config-ask-model', registered with native Config Customize."
   (interactive (list (read-string "Ask · Emacs/Noema 配置: ")))
   (unless (and (stringp question) (string-match-p "\\S-" question))
     (user-error "请输入配置问题"))
-  (require 'noema-agent-acp)
+  (require 'tools/agent/acp)
   (let* ((default-directory (file-name-as-directory
                              (file-truename
                               (expand-file-name user-emacs-directory))))
-         (config (or (noema-agent-acp-config-for 'codex)
+         (config (or (+agent-acp-config-for 'codex)
                      (user-error "Codex ACP backend is unavailable")))
-         (config (noema-agent-acp-export-config config +config-ask-model))
+         (config (noema-agent-export-config config +config-ask-model))
          (prompt
           (format
            (concat "这是一次性配置问答。请以当前 Emacs 配置仓库为工作区回答问题。先用 "
@@ -1007,7 +1025,7 @@ is `+config-ask-model', registered with native Config Customize."
                    "最终答案放在 <answer> 和 </answer> 之间；如果无法核实，"
                    "在标签内说明具体阻碍。\n\n问题：%s")
            question))
-         (buffer (noema-agent-acp-start
+         (buffer (+agent-acp-start
                   :config config :directory default-directory
                   :origin 'side :focus nil :render-policy 'never))
          (answer "")
@@ -1017,7 +1035,7 @@ is `+config-ask-model', registered with native Config Customize."
       (setq-local agent-shell-permission-responder-function
                   #'+config--ask-permission))
     (setq subscription
-          (noema-agent-acp-subscribe
+          (+agent-acp-subscribe
            :buffer buffer
            :callback
            (lambda (event)
@@ -1043,10 +1061,10 @@ is `+config-ask-model', registered with native Config Customize."
     buffer))
 (with-eval-after-load 'agent-shell
   ;; The ACP boundary also owns the shared, invisible Hy Memory adapter.
-  ;; Defer one event turn: agent-shell may be loading inside noema-agent-acp.
-  (run-at-time 0 nil (lambda () (require 'noema-agent-acp))))
-(autoload 'noema-agent-acp-conversation-tree "noema-agent-acp" nil t)
-(autoload 'noema-agent-acp-focus-input "noema-agent-acp" nil t)
+  ;; Defer one event turn: agent-shell may be loading inside +agent-acp.
+  (run-at-time 0 nil (lambda () (require 'tools/agent/acp))))
+(autoload '+agent-acp-conversation-tree "tools/agent/acp" nil t)
+(autoload '+agent-acp-focus-input "tools/agent/acp" nil t)
 (autoload 'noema-agent-promote-current-session "noema-agent-promote" nil t)
 (autoload 'noema-research-history-index "noema-agent-promote" nil t)
 (autoload 'noema-agent-worker-run-work-cell "noema-agent-worker" nil t)
@@ -1066,20 +1084,23 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload 'noema-sessions-read "noema-sessions")
 (autoload 'noema-sessions-native-binding "noema-sessions")
 (autoload 'noema-agent-inbox "noema-agent-inbox" nil t)
-(autoload 'noema-agent-worktree-start "noema-agent-worktree" nil t)
-(autoload 'noema-agent-worktree-remove "noema-agent-worktree" nil t)
-(autoload 'noema-agent-worktree-magit-status "noema-agent-worktree" nil t)
-(autoload 'noema-agent-worktree-magit-diff "noema-agent-worktree" nil t)
-(autoload 'noema-agent-worktree-parallel "noema-agent-worktree-board" nil t)
-(autoload 'noema-agent-worktree-board "noema-agent-worktree-board" nil t)
-(autoload 'noema-agent-abtop "noema-agent-abtop" nil t)
-(autoload 'noema-context-send "noema-context" nil t)
-(autoload 'noema-context-draft "noema-context" nil t)
-(autoload 'noema-context-send-region "noema-context" nil t)
-(autoload 'noema-context-send-buffer "noema-context" nil t)
-(autoload 'noema-context-send-file "noema-context" nil t)
-(autoload 'noema-context-send-at-point "noema-context" nil t)
-(autoload 'noema-context-inspect "noema-context" nil t)
+(autoload '+agent-worktree-start "tools/agent/worktree" nil t)
+(autoload '+agent-worktree-remove "tools/agent/worktree" nil t)
+(autoload '+agent-worktree-magit-status "tools/agent/worktree" nil t)
+(autoload '+agent-worktree-magit-diff "tools/agent/worktree" nil t)
+(autoload '+agent-worktree-parallel "tools/agent/worktree-board" nil t)
+(autoload '+agent-worktree-board "tools/agent/worktree-board" nil t)
+(autoload '+agent-top "tools/agent/top" nil t)
+(autoload '+agent/sessions "tools/agent/sessions" nil t)
+(autoload '+agent/inbox "tools/agent/sessions" nil t)
+(autoload '+agent/peek "tools/agent/sessions" nil t)
+(autoload '+agent-context-send "tools/agent/context" nil t)
+(autoload '+agent-context-draft "tools/agent/context" nil t)
+(autoload '+agent-context-send-region "tools/agent/context" nil t)
+(autoload '+agent-context-send-buffer "tools/agent/context" nil t)
+(autoload '+agent-context-send-file "tools/agent/context" nil t)
+(autoload '+agent-context-send-at-point "tools/agent/context" nil t)
+(autoload '+agent-context-inspect "tools/agent/context" nil t)
 (autoload 'noema-md-bridge-edit-source "noema-md-bridge" nil t)
 (autoload 'noema-md-bridge-rewrite "noema-md-bridge" nil t)
 (autoload 'noema-md-bridge-add-context "noema-md-bridge" nil t)
@@ -1129,42 +1150,42 @@ is `+config-ask-model', registered with native Config Customize."
 (declare-function noema-interaction-engine-cli-register
                   "noema-interaction-engine-cli" ())
 
-(defvar-keymap +noema-prefix-map
+(defvar-keymap +agent-prefix-map
   :doc "Prefix map for Noema research and agent commands."
-  "a" #'noema-agent-start
-  "w" #'noema-agent-worktree-start
-  "n" #'noema-agent-worktree-parallel
-  "A" #'noema-agent-worktree-board
+  "a" #'+agent/start
+  "w" #'+agent-worktree-start
+  "n" #'+agent-worktree-parallel
+  "A" #'+agent-worktree-board
   "W" #'noema
-  "c" #'noema-compose
-  "s" #'noema-compose-send
-  "m" #'noema-compose-menu
-  "." #'noema-compose-add-context
-  "r" #'noema-compose-rewrite
+  "c" #'+agent/compose
+  "s" #'+agent/compose-send
+  "m" #'+agent/compose-menu
+  "." #'+agent/compose-add-context
+  "r" #'+agent/compose-rewrite
   "p" #'noema-agent-promote-current-session
   "I" #'noema-research-attention
   "P" #'noema-pi-router-open
   "D" #'noema-pi-doctor
-  "S" #'noema-sessions
-  "T" #'noema-agent-acp-conversation-tree
-  "G" #'noema-agent-inbox
-  "U" #'noema-agent-abtop
+  "S" #'+agent/sessions
+  "T" #'+agent-acp-conversation-tree
+  "G" #'+agent/inbox
+  "U" #'+agent-top
   "O" #'noema-orchestration
-  "b" #'noema-sessions-switch
-  "i" #'noema-agent-acp-focus-input
+  "b" #'+agent/peek
+  "i" #'+agent-acp-focus-input
   ;; Editor context for a chosen session, sent as references.
-  "x" #'noema-context-send
-  "v" #'noema-context-send-region
-  "B" #'noema-context-send-buffer
-  "f" #'noema-context-send-file
-  "@" #'noema-context-send-at-point
-  "," #'noema-context-inspect
-  "d" #'noema-context-draft
+  "x" #'+agent-context-send
+  "v" #'+agent-context-send-region
+  "B" #'+agent-context-send-buffer
+  "f" #'+agent-context-send-file
+  "@" #'+agent-context-send-at-point
+  "," #'+agent-context-inspect
+  "d" #'+agent-context-draft
   ;; Noema Markdown pane: open its note in Emacs at the selection.
   "e" #'noema-md-bridge-edit-source)
 
-(global-set-key (kbd "C-c M-a") #'noema-compose-add-context)
-(global-set-key (kbd "C-c A") +noema-prefix-map)
+(map! "C-c M-a" #'+agent/compose-add-context
+      "C-c A" +agent-prefix-map)
 
 ;;; ── Noema settings in the config registry (D-035) ─────────────────────────
 ;;
@@ -1182,10 +1203,10 @@ is `+config-ask-model', registered with native Config Customize."
 
 (defconst +noema-config-groups
   '(noema-research noema-research-graph noema-agent-worker noema-pi-router
-    noema-agent-session noema-context noema-md-bridge noema-orchestration)
+    noema-md-bridge noema-orchestration)
   "Custom groups whose options Noema exposes through `config'.")
 
-(defun +noema-config--type-arguments (symbol)
+(defun +agent-config--type-arguments (symbol)
   "Return `config-register' type arguments for Custom option SYMBOL."
   (pcase (get symbol 'custom-type)
     ('boolean '(:type boolean))
@@ -1213,12 +1234,24 @@ is `+config-ask-model', registered with native Config Customize."
                                               symbol 'variable-documentation t)
                                              "")
                                          "\n"))
-                 (+noema-config--type-arguments symbol)))))))
+                 (+agent-config--type-arguments symbol)))))))
 
 (dolist (feature '(noema-research-mode noema-research-graph noema-research-settings
-                   noema-agent-worker noema-pi-router noema-agent-acp noema-context
+                   noema-agent-worker noema-pi-router
                    noema-md-bridge noema-orchestration))
   (eval-after-load feature #'+noema-config-register-groups))
+
+(defun +agent-register-config-options (&rest _)
+  "Register generic agent options in the Emacs AI settings store."
+  (dolist (group '(+agent-session +agent-context +agent-render +agent-top +agent-worktree))
+    (dolist (member (get group 'custom-group))
+      (pcase-let ((`(,symbol ,kind) member))
+        (when (and (eq kind 'custom-variable) (boundp symbol) (not (gethash symbol config--registry)))
+          (apply #'config-register symbol :group 'ai :store-file "etc/config-ai.el"
+                 :doc (or (documentation-property symbol 'variable-documentation t) "")
+                 (+agent-config--type-arguments symbol)))))))
+(dolist (feature '(tools/agent/acp tools/agent/context tools/agent/render tools/agent/top tools/agent/worktree))
+  (eval-after-load feature #'+agent-register-config-options))
 
 (defun +noema-close-projects-of-killed-perspective ()
   "Close Noema projects whose documents live only in the dying perspective.

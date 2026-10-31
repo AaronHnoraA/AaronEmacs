@@ -66,7 +66,7 @@ WorkNode and retains Noema's explicit local-execution confirmation.
 These functions can start or affect external processes. MCP connection state is
 not changed by a capability query.
 
-`(noema-context-send-prompt PROMPT :files FILES :draft DRAFT :pick PICK)`
+`(+agent-context-send-prompt PROMPT :files FILES :draft DRAFT :pick PICK)`
 delivers a product task to an existing agent through the ordinary context
 path. Files remain references, must be saved/readable and reachable by that
 agent, and never consume the shared gptel selection. `:draft t` only fills

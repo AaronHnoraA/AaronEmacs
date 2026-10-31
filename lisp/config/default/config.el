@@ -274,7 +274,7 @@ An explicitly disconnected target must never be reopened by either path."
                                      :warning))))
                (run-hooks '+auto-revert-agent-refresh-functions))))))
 
-  (add-hook 'noema-agent-acp-turn-complete-functions
+  (add-hook '+agent-acp-turn-complete-functions
             #'+auto-revert-agent-turn-complete-h)
 
   (defun +auto-revert--check-shown-round-trip-file (window)

@@ -12,7 +12,7 @@
 (defvar +noema--post-queue)
 (defvar +noema--process-log-bytes)
 (defvar +activity-noema--tasks)
-(defvar +activity-noema--agents)
+(defvar +agent-activity--agents)
 
 (ert-deftest +performance-etaf-sections-and-report-stay-available ()
   "The dedicated page uses ETAF tabs and keeps the full export."
@@ -77,7 +77,7 @@
         (+noema--post-queue '(one))
         (+noema--process-log-bytes 2048)
         (+activity-noema--tasks '(one))
-        (+activity-noema--agents (make-hash-table :test #'eq)))
+        (+agent-activity--agents (make-hash-table :test #'eq)))
     (puthash "note.md" t +noema--file-buffers)
     (cl-letf (((symbol-function '+performance--ps-lines)
                (lambda (&rest _) (ert-fail "Offline Noema invoked ps")))

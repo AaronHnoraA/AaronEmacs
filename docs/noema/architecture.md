@@ -42,7 +42,7 @@ Go kernel  kernel/（二进制 noema）
 | `kernel-resources/` | | kernel 运行所需的外观与 stage 资源 |
 | `vendor/` | | 以源码形式改造的第三方前端代码（`tikz-editor`、`adjustable-media-pure`） |
 | `upstream/` | | 参照与包装的上游 Elisp/CLI（gptel、agent-shell、acp、magent、org-mode…），规则见 `upstream/VENDORING.md` 与 `UPSTREAMS.md` |
-| `tests/` | ~300 个 | Vitest/Node 测试（TS 与 mjs），含架构守护测试；`tests/elisp/` 是全部 Elisp ERT 测试 |
+| `tests/` | ~300 个 | Vitest/Node 测试（TS 与 mjs），含架构守护测试；`tests/elisp/` 是 Noema 业务 Elisp ERT 测试 |
 | `scripts/` | | 构建、迁移、审计脚本 |
 | `poc/` | | 原型（cm6-perf、org-agenda），不参与构建 |
 | `examples/` | | 示例：Elisp API 用法、`kind: slides` 演示笔记、服务器部署/运行配置样例 |
@@ -60,11 +60,17 @@ Go kernel  kernel/（二进制 noema）
 | HTTP/SSE 端点 | `server/Features/<Feature>/api.mjs`，领域逻辑不再加进 `server/lib/runtime.mjs` |
 | 搜索、引用文本、索引、Markdown 保存 | `kernel/noema/` 下的 Go 包 |
 | `.noema` 结构与研究语义 | `kernel/noema/research` 与 `lisp/noema-research*.el`，两侧测试一起改 |
-| Agent/ACP 行为 | `lisp/noema-agent-acp.el` 边界之后，不重写 gptel/agent-shell；上下文契约见 [design/agent-context.md](design/agent-context.md) |
+| Agent/ACP 行为 | `lisp/tools/agent/acp.el` 边界之后，不重写 gptel/agent-shell；上下文契约见 [design/agent-context.md](design/agent-context.md) |
 | Skill/MCP 能力 | `noema-capabilities.mjs` 与 `lisp/noema-capability-*`，见 [design/capabilities.md](design/capabilities.md) |
 | 宏、模板、Skill 内容 | `resources/` |
 
 ## 已知结构问题
+
+通用 agent 的物理会话、渲染、配额、worktree、compose/context 和管理视图由
+Emacs `lisp/tools/agent/` 维护，通用测试在 Emacs `test/agent-*.el`。
+Noema 保留 Research worker、持久业务会话、promote/takeover 和知识库适配；
+`noema-agent-acp.el` 通过显式钩子附加身份和业务动作。完整 gptel/Magent 源码由
+Emacs `site-lisp/` 维护。职责契约见 [Agent 管理](../design/agent-management.md)。
 
 - `server/lib/` 仍承载大部分领域实现，`Features/` 迁移未完成（见
   [current-architecture.md](design/current-architecture.md) “Node host”）。

@@ -89,6 +89,19 @@ requests carry `projectRoot`, and only explicit commands (never visit,
 refresh, save, or completion) may call `noema-project-ensure` for such a
 notebook.
 
+Agent infrastructure belongs to Emacs, under `lisp/tools/agent/`: reusable
+provider/session operations, editor context, management views, worktrees,
+attention and notification policy. Noema primarily owns Markdown and knowledge
+components; Research owns its DAG, frozen RunSpec, results, Proposals and
+Findings, and calls/organizes the common agent layer. Read
+`docs/design/agent-management.md` before changing either side. Shared
+implementations and gptel/Magent sources are maintained by Emacs;
+`site-lisp/noema/lisp/noema-agent-acp.el` is the thin Research association
+adapter. ECA is a source study, not a
+runtime dependency. Preserve Remote, Aaron UI and window lifecycle contracts
+when adapting upstream interaction logic. Notifications go through
+`tools/agent/notifications` and `aaron-notify`; routine completion is quiet.
+
 When adding a module:
 
 - Make it a directory module `lisp/CATEGORY/NAME/`: `config.el` ending in

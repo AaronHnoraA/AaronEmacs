@@ -77,6 +77,8 @@ buffer 里会解析到对方机器。复制、移动和符号链接交给 Dirvis
 ### 通知
 
 `aaron-notify` 是唯一入口，不依赖平台；`notify-send` 是旧接口，转发到它。
+`:silent t` 只写入历史，不显示回显或系统通知，也不增加未读。Agent 的安静策略
+由 [Agent 管理](agent-management.md) 定义。
 
 ```text
 aaron-notify ──→ 历史（总是）
@@ -124,7 +126,7 @@ aaron-notify ──→ 历史（总是）
   键盘留在 minibuffer。
 - **C12 通知落在用户所在之处。** 每条通知都进入有界历史；Emacs 有键盘时只进回显区，
   否则发系统通知并增加未读。相同 `:id` 替换旧的一条，Emacs 拿回键盘后未读清零。
-  批处理的 Emacs 没有用户，绝不发系统通知。
+  `:silent t` 只记历史，不打断回显或增加未读。批处理的 Emacs 没有用户，绝不发系统通知。
 - **C13 点击回到 Emacs。** 点击先呈现，再运行 `:action`，没有动作时打开历史。
 - **C14 抓手不占内容。** 抓手是独立窗口，绝不改变 frame 布局；全屏时不出现；只在
   frame 顶边确实露在外面时出现，顶边上的 child frame 算 frame 的一部分。

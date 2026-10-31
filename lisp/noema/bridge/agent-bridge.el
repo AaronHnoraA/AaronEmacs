@@ -12,18 +12,18 @@
 (require 'subr-x)
 
 (defvar agent-shell--state)
-(defvar noema-agent-acp-session-name)
+(defvar +agent-acp-session-name)
 (defvar shell-maker--busy)
 
 (declare-function +agent-shell--session-context "tools/agent/config" (directory))
 (declare-function +agent-shell--find-execution "tools/agent/config"
                   (session-id config directory &optional exclude))
 (declare-function +agent-shell-execution-live-p "tools/agent/config" (buffer))
-(declare-function noema-agent-acp-busy-p "noema-agent-acp" (buffer))
-(declare-function noema-agent-acp-pending-prompt-count "noema-agent-acp" (buffer))
-(declare-function noema-agent-acp-enqueue "noema-agent-acp" (buffer text))
-(declare-function noema-agent-acp-prompt "noema-agent-acp" (&rest args))
-(declare-function noema-agent-acp-stop "noema-agent-acp" (&optional buffer))
+(declare-function +agent-acp-busy-p "tools/agent/acp" (buffer))
+(declare-function +agent-acp-pending-prompt-count "tools/agent/acp" (buffer))
+(declare-function +agent-acp-enqueue "tools/agent/acp" (buffer text))
+(declare-function +agent-acp-prompt "tools/agent/acp" (&rest args))
+(declare-function +agent-acp-stop "tools/agent/acp" (&optional buffer))
 (declare-function agent-shell-subscribe-to "agent-shell" (&rest args))
 
 (defvar +noema-agent-bridge-enabled nil
@@ -113,11 +113,11 @@
             `((sessionId . ,session-id)
               (agent . ,(symbol-name agent))
               (workspace . ,(+agent-shell--session-context default-directory))
-              (name . ,(or (and (boundp 'noema-agent-acp-session-name)
-                                noema-agent-acp-session-name)
+              (name . ,(or (and (boundp '+agent-acp-session-name)
+                                +agent-acp-session-name)
                            :null))
-              (busy . ,(if (noema-agent-acp-busy-p buffer) t :false))
-              (queued . ,(noema-agent-acp-pending-prompt-count buffer)))))))
+              (busy . ,(if (+agent-acp-busy-p buffer) t :false))
+              (queued . ,(+agent-acp-pending-prompt-count buffer)))))))
     (buffer-list))))
 
 (defun +noema-agent-bridge--target (request)
@@ -147,11 +147,11 @@
     (with-current-buffer buffer
       ;; Noema's structured Run prompts do not use shell-maker's turn-end
       ;; queue drain.  Do not promise automatic delivery behind one.
-      (when (and (noema-agent-acp-busy-p buffer)
+      (when (and (+agent-acp-busy-p buffer)
                  (not (bound-and-true-p shell-maker--busy)))
         (user-error "Noema Run is active; retry when it finishes"))
       (when (and (map-elt agent-shell--state :active-requests)
-                 (not (noema-agent-acp-busy-p buffer)))
+                 (not (+agent-acp-busy-p buffer)))
         (user-error "ACP control request in progress; retry after it settles"))
       (when (>= (length +noema-agent-bridge--records) 100)
         (if-let* ((oldest-finished
@@ -161,17 +161,17 @@
             (setq +noema-agent-bridge--records
                   (delq oldest-finished +noema-agent-bridge--records))
           (user-error "Bridge has 100 unfinished requests; wait for one to finish")))
-      (let* ((queued (or (noema-agent-acp-busy-p buffer)
-                         (> (noema-agent-acp-pending-prompt-count buffer) 0)))
+      (let* ((queued (or (+agent-acp-busy-p buffer)
+                         (> (+agent-acp-pending-prompt-count buffer) 0)))
              (record (list :id (format "bridge-%d" (cl-incf +noema-agent-bridge--serial))
                            :message message-text :status (if queued 'queued 'running)
                            :text "" :truncated nil)))
         (push record +noema-agent-bridge--records)
         (condition-case err
             (if queued
-                (noema-agent-acp-enqueue buffer message-text)
+                (+agent-acp-enqueue buffer message-text)
               (setq +noema-agent-bridge--current record)
-              (noema-agent-acp-prompt
+              (+agent-acp-prompt
                :buffer buffer
                :content (list `((type . "text") (text . ,message-text)))
                :on-success (lambda (_response)
@@ -210,9 +210,9 @@
 (defun +noema-agent-bridge--interrupt (request)
   "Explicitly interrupt REQUEST's active turn without terminating its client."
   (let ((buffer (+noema-agent-bridge--target request)))
-    (unless (noema-agent-acp-busy-p buffer)
+    (unless (+agent-acp-busy-p buffer)
       (user-error "The selected ACP session is idle"))
-    (noema-agent-acp-stop buffer)
+    (+agent-acp-stop buffer)
     '((ok . t) (state . "interrupt-requested"))))
 
 (defun +noema-agent-bridge-request (encoded-json)
@@ -222,7 +222,7 @@
       (progn
         (unless +noema-agent-bridge-enabled
           (user-error "Noema agent bridge is disabled; run M-x +noema/agent-bridge-start"))
-        (require 'noema-agent-acp)
+        (require 'tools/agent/acp)
         (let* ((request (json-parse-string
                          (decode-coding-string
                           (base64-decode-string encoded-json) 'utf-8)

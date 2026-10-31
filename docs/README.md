@@ -85,6 +85,7 @@ No active workbenches. The ignored upstream clones remain under `works/doom-temp
 
 ## design/ — how it works now
 
+- [agent-management.md](design/agent-management.md) Emacs agent ownership, provider boundaries, session state, quiet notifications and the shared runtime/Noema adapter boundary.
 - [module-system.md](design/module-system.md) The module system: `aaron!` declaration with Doom categories, load phases with Remote as the foundation layer, `modulep!`, the load ledger (hooks, advice, timers, keys, files per module), the doctor and policy checks, and the module board.
 - [remote-framework.md](design/remote-framework.md) Core `/fs` identity plus target/pipeline/backend/session routing, process and channel APIs, compatibility boundaries, and current implementation gaps.
 - [remote-files.md](design/remote-files.md) Temporary machines remembered under `var/`, and file transfer from inside Dired/Dirvish: rsync upload/download/sync through a pop-up chooser, with jobs in the activity board.
@@ -118,6 +119,7 @@ Dated and append-only. Read them for why something is the way it is, never for h
 ### records/audits/
 
 - [code-audit-2026-10.md](records/audits/code-audit-2026-10.md) Line and contract audit of the Emacs configuration: what was read, what was fixed, what stays open.
+- [eca-hq-agent-management-2026-10.md](records/audits/eca-hq-agent-management-2026-10.md) Source audit of ECA, eca-emacs and agent-shell-hq against Emacs agent ownership, management, interaction and notification contracts.
 - [doom-template-2026-10.md](records/audits/doom-template-2026-10.md) Completed Doom-template restructuring workbench.
 - [doom-template-comparison-2026-10.md](records/audits/doom-template-comparison-2026-10.md) Source-by-source Doom audit and optional behavior differences.
 - [entrypoint-audit-2026-10.md](records/audits/entrypoint-audit-2026-10.md) Current entry map, comparisons with Lunarymacs, Doom, Spacemacs and Prelude, and the ongoing command and lifecycle review.

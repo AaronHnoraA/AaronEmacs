@@ -32,6 +32,7 @@ names, and that file wins over anything remembered.
 | Windows, buffers, closing and fallback (Portal, Noema pages, popups, frames) | `docs/design/window-lifecycle.md` |
 | Existing entry points not to duplicate | `AGENT.md` “Do Not Reinvent Existing Surfaces” |
 | Performance diagnostics | `AGENT.md` “Performance Diagnostics” |
+| Shared agent sessions, Compose, context, worktrees and quiet notifications | `docs/design/agent-management.md`; `lisp/tools/agent/` |
 | Noema's Elisp API | `docs/noema/design/elisp-api.md` |
 
 ## Commands outside Emacs

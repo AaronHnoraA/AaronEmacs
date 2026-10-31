@@ -20,5 +20,6 @@ identity. Configurable values are registered in `lisp/tools/agent/config.el` and
 persisted through `etc/config-store.el`; state lives below `var/noema/`.
 
 All research-worker calls into agent-shell/acp go through
-`lisp/noema-agent-acp.el`. The full Magent source lives in
-`upstream/magent/`; provenance is recorded in `UPSTREAMS.md`.
+`lisp/tools/agent/acp.el`. The full Magent source lives in
+`site-lisp/magent/`; provenance is recorded in Emacs `site-lisp/AGENT-UPSTREAMS.md`.
+Noema retains its Research associations and consumes the shared runtime.

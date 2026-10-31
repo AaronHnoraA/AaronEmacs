@@ -1768,7 +1768,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                 (let ((frame (make-frame `((name . ,(or title "Noema LaTeX intervention"))
                                            (width . 110) (height . 36)))))
                   (set-frame-parameter frame 'noema-latex-intervention-buffer buffer)
-                  (set-frame-parameter frame 'noema-agent-standalone t)
+                  (set-frame-parameter frame 'agent-standalone t)
                   (frame-root-window frame))
               (display-buffer-pop-up-window buffer '((window-height . 0.4))))))
     (unless (window-live-p window)
@@ -1795,12 +1795,12 @@ This is a memory-only check; it never opens an inactive project or reads disk."
 
 (defun +noema--latex-intervention-open (params)
   "Open or focus an independent manual ACP session for failed export PARAMS."
-  (require 'noema-agent-acp)
+  (require 'tools/agent/acp)
   (let* ((task-id (alist-get 'taskId params))
          (file (alist-get 'file params))
          (output-path (alist-get 'outputPath params))
          (preferred-backend (or (alist-get 'backend params) "codex"))
-         (backend (seq-find #'noema-agent-acp-config-for
+         (backend (seq-find #'+agent-acp-config-for
                             (delete-dups
                              (append (list preferred-backend)
                                      '("codex" "claude" "opencode")))))
@@ -1815,13 +1815,13 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                            (file-name-directory (expand-file-name output-path)))
                           (t default-directory)))
          (existing (gethash task-id +noema--latex-intervention-buffers))
-         (config (and backend (noema-agent-acp-config-for backend)))
+         (config (and backend (+agent-acp-config-for backend)))
          (buffer (and (buffer-live-p existing) existing)))
     (unless (and (stringp task-id) (not (string-empty-p task-id)))
       (user-error "Missing failed LaTeX task id"))
     (unless buffer
       (unless config (user-error "No Emacs ACP agent is available for LaTeX intervention"))
-      (setq buffer (noema-agent-acp-start
+      (setq buffer (+agent-acp-start
                     :config config :directory directory :origin 'manual
                     :display-function #'+noema--latex-intervention-display))
       (puthash task-id buffer +noema--latex-intervention-buffers)
@@ -1836,18 +1836,18 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                                      (current-buffer)))
                         (delete-frame frame t)))) nil t))
       (let ((draft (+noema--latex-intervention-prompt params)))
-        (if (noema-agent-acp-state-value buffer '(:session :id))
-            (noema-agent-acp-draft buffer draft)
+        (if (+agent-acp-state-value buffer '(:session :id))
+            (+agent-acp-draft buffer draft)
           (let (subscription)
             (setq subscription
-                  (noema-agent-acp-subscribe
+                  (+agent-acp-subscribe
                    :buffer buffer :event 'init-finished
                    :callback (lambda (_event)
-                               (noema-agent-acp-unsubscribe
+                               (+agent-acp-unsubscribe
                                 :buffer buffer :subscription subscription)
                                (when (buffer-live-p buffer)
-                                 (noema-agent-acp-draft buffer draft)))))))))
-    (noema-agent-acp-show-buffer buffer)
+                                 (+agent-acp-draft buffer draft)))))))))
+    (+agent-acp-show-buffer buffer)
     (message "LaTeX intervention with %s: edit the draft prompt and send it when ready"
              backend)
     buffer))
@@ -1901,7 +1901,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
              (unless (buffer-live-p buffer)
                (user-error "This LaTeX export agent session is no longer active"))
              (with-current-buffer buffer
-               (setq-local noema-agent-acp-display-buffer-function
+               (setq-local +agent-acp-display-buffer-function
                            #'+noema--latex-export-display)
                (unless (bound-and-true-p +noema--latex-export-shown)
                  (setq-local +noema--latex-export-shown t)
@@ -1913,7 +1913,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
                                                                'noema-latex-intervention-buffer)
                                               (current-buffer)))
                                  (delete-frame frame t)))) nil t)))
-             (noema-agent-acp-show-buffer buffer)
+             (+agent-acp-show-buffer buffer)
              (remote-gateway-resolve deferred '((ok . t))))
          (error
           (remote-gateway-resolve
@@ -1924,11 +1924,11 @@ This is a memory-only check; it never opens an inactive project or reads disk."
 
 (defun +noema--latex-agent-status (_params _client)
   "Report the ACP agents configured in this Emacs for LaTeX export."
-  (require 'noema-agent-acp)
+  (require 'tools/agent/acp)
   `((agents . ,(vconcat
                 (mapcar (lambda (id)
                           `((id . ,id)
-                            (available . ,(if (noema-agent-acp-config-for id)
+                            (available . ,(if (+agent-acp-config-for id)
                                               t :json-false))))
                         '("codex" "claude" "opencode"))))))
 
@@ -1939,7 +1939,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
      0 nil
      (lambda (agent-buffer)
        (when (buffer-live-p agent-buffer)
-         (unless (ignore-errors (noema-agent-acp-kill agent-buffer))
+         (unless (ignore-errors (+agent-acp-kill agent-buffer))
            (let ((kill-buffer-query-functions nil))
              (kill-buffer agent-buffer)))))
      buffer)))
@@ -1947,10 +1947,10 @@ This is a memory-only check; it never opens an inactive project or reads disk."
 (defun +noema--latex-agent-retire-workdir (workdir)
   "Close export ACP sessions still attached to WORKDIR."
   (when (and (stringp workdir) (not (string-empty-p workdir)))
-    (require 'noema-agent-acp)
+    (require 'tools/agent/acp)
     (let ((directory (directory-file-name (expand-file-name workdir))))
-      (dolist (session (noema-agent-acp-sessions))
-        (when (and (noema-agent-acp-export-session-p session)
+      (dolist (session (+agent-acp-sessions))
+        (when (and (noema-agent-export-session-p session)
                    (equal (directory-file-name (or (plist-get session :root) ""))
                           directory))
           (+noema--latex-agent-retire-buffer (plist-get session :buffer)))))))
@@ -1967,10 +1967,10 @@ This is a memory-only check; it never opens an inactive project or reads disk."
       (when (timerp timer) (cancel-timer timer))
       (when (and buffer subscription)
         (ignore-errors
-          (noema-agent-acp-unsubscribe :buffer buffer :subscription subscription)))
+          (+agent-acp-unsubscribe :buffer buffer :subscription subscription)))
       (when (and buffer progress-subscription)
         (ignore-errors
-          (noema-agent-acp-unsubscribe :buffer buffer
+          (+agent-acp-unsubscribe :buffer buffer
                                        :subscription progress-subscription)))
       (unwind-protect
           (ignore-errors
@@ -1990,9 +1990,9 @@ This is a memory-only check; it never opens an inactive project or reads disk."
              +noema--latex-agent-requests)
     (dolist (request-id request-ids)
       (+noema--latex-agent-finish request-id nil "Noema host stopped"))
-    (when (featurep 'noema-agent-acp)
-      (dolist (session (noema-agent-acp-sessions))
-        (when (noema-agent-acp-export-session-p session)
+    (when (featurep 'tools/agent/acp)
+      (dolist (session (+agent-acp-sessions))
+        (when (noema-agent-export-session-p session)
           (+noema--latex-agent-retire-buffer (plist-get session :buffer)))))))
 
 (defun +noema--latex-agent-progress (request-id backend event)
@@ -2016,7 +2016,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
 
 (defun +noema--latex-agent-run (params _client)
   "Run a LaTeX polish turn through Noema's Emacs ACP boundary."
-  (require 'noema-agent-acp)
+  (require 'tools/agent/acp)
   (let* ((request-id (alist-get 'requestId params))
          (backend (alist-get 'backend params))
          (workdir (alist-get 'workdir params))
@@ -2024,9 +2024,9 @@ This is a memory-only check; it never opens an inactive project or reads disk."
          (context-items (alist-get 'contextItems params))
          (model (alist-get 'model params))
          (base-config (and (member backend '("codex" "claude" "opencode"))
-                           (noema-agent-acp-config-for backend)))
+                           (+agent-acp-config-for backend)))
          (config (and base-config
-                      (noema-agent-acp-export-config base-config model))))
+                      (noema-agent-export-config base-config model))))
     (unless (and (stringp request-id) (not (string-empty-p request-id))
                  (not (gethash request-id +noema--latex-agent-requests))
                  config (stringp workdir) (file-directory-p workdir)
@@ -2046,13 +2046,13 @@ This is a memory-only check; it never opens an inactive project or reads disk."
       (condition-case err
           (progn
             (setq buffer
-                  (noema-agent-acp-start :config config :directory workdir
+                  (+agent-acp-start :config config :directory workdir
                                          :origin 'latex-export
                                          :display-function
                                          #'+noema--latex-export-display))
             (+noema--latex-agent-request-set request-id :buffer buffer)
             (setq progress-subscription
-                  (noema-agent-acp-subscribe
+                  (+agent-acp-subscribe
                    :buffer buffer
                    :callback (lambda (event)
                                (+noema--latex-agent-progress
@@ -2060,24 +2060,24 @@ This is a memory-only check; it never opens an inactive project or reads disk."
             (+noema--latex-agent-request-set
              request-id :progress-subscription progress-subscription)
             (setq subscription
-                  (noema-agent-acp-subscribe
+                  (+agent-acp-subscribe
                    :buffer buffer :event 'init-finished
                    :callback
                    (lambda (_event)
-                     (noema-agent-acp-unsubscribe
+                     (+agent-acp-unsubscribe
                       :buffer buffer :subscription subscription)
                      (when (gethash request-id +noema--latex-agent-requests)
                        (condition-case prompt-error
                            (progn
                              (when (and (stringp model) (not (string-empty-p model)))
-                               (let ((selected (noema-agent-acp-export-model-id model buffer))
-                                     (current (noema-agent-acp-current-model-id buffer)))
+                               (let ((selected (+agent-acp-export-model-id model buffer))
+                                     (current (+agent-acp-current-model-id buffer)))
                                  (unless (and selected (equal current selected))
                                    (error "Export model %s unavailable or not selected (current: %s)"
                                           model (or current "unknown")))))
-                             (noema-agent-acp-prompt
+                             (+agent-acp-prompt
                             :buffer buffer
-                            :content (noema-agent-acp-context-blocks
+                            :content (+agent-acp-context-blocks
                                       buffer prompt context-items)
                             :on-success
                             (lambda (response)
@@ -2108,7 +2108,7 @@ This is a memory-only check; it never opens an inactive project or reads disk."
          (buffer (plist-get request :buffer)))
     (when request
       (when (buffer-live-p buffer)
-        (ignore-errors (noema-agent-acp-interrupt buffer t)))
+        (ignore-errors (+agent-acp-interrupt buffer t)))
       (+noema--latex-agent-finish request-id nil "aborted"))
     ;; Export sends this again on completion. It also catches a buffer whose
     ;; ACP callback finished but whose first retirement attempt did not.
@@ -4227,18 +4227,18 @@ RELOAD and WINDOW-MENU select the backend's implementations."
 Selection commands ask the page to save and report its range;
 `noema-md-bridge' then runs the UI on the note's Emacs source buffer."
     ["Selection → agent session (last choice preselected)"
-     ("a" "send selection"       noema-context-send-region)
-     ("l" "send cursor line"     noema-context-send-at-point)
-     ("n" "send whole note"      noema-context-send-buffer)]
+     ("a" "send selection"       +agent-context-send-region)
+     ("l" "send cursor line"     +agent-context-send-at-point)
+     ("n" "send whole note"      +agent-context-send-buffer)]
     ["gptel"
-     ("r" "rewrite (diff review)" noema-compose-rewrite)
-     ("." "add to context"       noema-compose-add-context)
-     ("c" "compose with context" noema-compose)
-     ("m" "gptel menu"           noema-compose-menu)]
+     ("r" "rewrite (diff review)" +agent/compose-rewrite)
+     ("." "add to context"       +agent/compose-add-context)
+     ("c" "compose with context" +agent/compose)
+     ("m" "gptel menu"           +agent/compose-menu)]
     ["Context / sessions"
      ("M" "MarginNote sync"     noema-marginnote-sync)
-     ("x" "send shared context"  noema-context-send)
-     ("," "inspect context"      noema-context-inspect)
+     ("x" "send shared context"  +agent-context-send)
+     ("," "inspect context"      +agent-context-inspect)
      ("e" "edit in Emacs source" noema-md-bridge-edit-source)
      ("S" "sessions"             noema-sessions)]))
 

@@ -245,6 +245,17 @@
       (aaron-notify "x"))
     (should (= (length aaron-notify-history) aaron-notify-history-limit))))
 
+(ert-deftest macos-boundary-c12-silent-only-records-history ()
+  (dolist (here '(nil t))
+    (macos-boundary-test--notify here
+      (let (echoed)
+        (cl-letf (((symbol-function 'message) (lambda (&rest _) (setq echoed t))))
+          (aaron-notify "Quiet" :silent t :id "quiet")
+          (should-not echoed)
+          (should-not sent)
+          (should (= 0 aaron-notify-unread))
+          (should (= 1 (length aaron-notify-history))))))))
+
 (ert-deftest macos-boundary-c13-click-runs-the-action ()
   (macos-boundary-test--notify nil
     (let* (ran

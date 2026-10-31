@@ -352,8 +352,8 @@
           :tasks (length (and (boundp '+activity-noema--tasks)
                               +activity-noema--tasks))
           :agents (+performance--hash-count
-                   (and (boundp '+activity-noema--agents)
-                        +activity-noema--agents))
+                   (and (boundp '+agent-activity--agents)
+                        +agent-activity--agents))
           :events (length (and (boundp '+noema--host-event-queue)
                                +noema--host-event-queue))
           :posts (length (and (boundp '+noema--post-queue)

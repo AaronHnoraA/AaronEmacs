@@ -104,7 +104,7 @@
                    (noema-menu "m" noema-move-note)
                    (noema-menu "!d" noema-trash-note)
                    (noema-menu "!n" noema-reports-menu)
-                   (noema-ai-menu "a" noema-context-send-region)
+                   (noema-ai-menu "a" +agent-context-send-region)
                    (noema-wiki-menu "h" +noema/wiki-home)
                    (noema-wiki-menu "D" noema-reports-menu)
                    (noema-reports-menu "v" +noema/wiki-reports)

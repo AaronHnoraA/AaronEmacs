@@ -58,7 +58,7 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 - **MN-C11：** 同步会话钉住 `noema-marginnote-sync-agent` / `-model` /
   `-effort`（默认 Codex、`gpt-6.1-terra`、`high`；前缀参数启动时选
   reasoning，密集推导默认给 `noema-marginnote-sync-dense-effort` 即 `xhigh`），经
-  `noema-agent-acp-pinned-config`：普通会话记住的模型不进入它，它里面的模型
+  `+agent-acp-pinned-config`：普通会话记住的模型不进入它，它里面的模型
   选择也不写回普通会话的记忆。钉住的模型不可用时任务只留作草稿，不在别的
   模型上运行。
 - **MN-C12：** 同步任务的中间产物（官方导出 PDF、页面渲染、裁图、OCR 候选、
@@ -92,11 +92,11 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 - `tests/marginnote-*.test.ts`：原生宿主、传输与 agent 接口契约。
 - `lisp/noema-marginnote.el`：`noema-marginnote-sync` 自有会话入口及其 pack
   解析。
-- `lisp/noema-agent-acp.el`：`noema-agent-acp-pinned-config`，LaTeX 导出与同步共用。
+- `lisp/tools/agent/acp.el`：`+agent-acp-pinned-config`，LaTeX 导出与同步共用。
 - Emacs 的 `etc/noema/capabilities.json`：`marginnote-digitize` pack 定义；
   主 skill、引用和脚本仍在 README 技能库。
 - `tests/elisp/noema-marginnote-tests.el`：pack 解析、作用域与同步会话
-  （MN-C8、MN-C10–C12）；`noema-agent-acp-tests.el` 覆盖模型双向隔离。
+  （MN-C8、MN-C10–C12）；`+agent-acp-tests.el` 覆盖模型双向隔离。
 
 ## 已知差距
 

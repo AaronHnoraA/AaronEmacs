@@ -12,9 +12,11 @@
                                  被本仓库 .gitignore 忽略，不是 submodule）
 ```
 
-- Emacs 配置拥有 UI 组合：窗口、buffer、键位、命令、Remote 框架、LSP、终端。
+- Emacs 配置拥有 UI 组合和通用 agent 管理：窗口、buffer、键位、命令、Remote 框架、
+  LSP、终端，以及可被多处调用的 agent 会话、组织、编辑器交互与通知。
 - Noema 拥有知识/研究的数据与服务：Markdown 编辑面（CM6）、Node host、Go kernel、
-  `.noema` 工作文档模型、Agent/Skill/MCP 能力，以及一组随产品发布的 Elisp（`lisp/noema-*.el`）。
+  `.noema` 工作文档模型、研究能力选择与冻结，以及一组随产品发布的领域 Elisp
+  （`lisp/noema-*.el`）。通用 agent 的既有代码位置不改变其职责归属。
 - Emacs 是 Noema 唯一的第一方 UI；Node host 与 Go kernel 是 headless 服务。
 - 文档只有一棵树：Noema 的文档也在本仓库 `docs/noema/`，Noema 仓库只保留贴着代码的
   `AGENTS.md`、`CLAUDE.md`、`README.md`、`UPSTREAMS.md`。
@@ -119,13 +121,17 @@ Raycast ──(var/noema/host.json → loopback /api)──▶ Node host
 | 搜索与引用 | `noema/search` | `kernel/noema/wikisearch`、`references.go` |
 | Agenda | `noema-agenda`、`noema/bridge/agenda-*` | `server/lib/agenda-*`、`kernel/noema/agenda` |
 | `.noema` 工作文档 | `noema-research*`（JuText、Graph Board） | `kernel/noema/research`、`server/Features/Research` |
-| Agent | `noema-agent-*`、`tools/agent` | ACP 边界、`kernel/agent`、`kernel/mcp` |
+| Agent | `tools/agent/*` 通用运行时与 UI；`noema-agent-*` Research 适配 | `kernel/agent`、`kernel/mcp` 与研究持久记录 |
 | Jupyter（`.ipynb`） | `noema/jupyter/*`、`tools/jupyter` | `server/Features/Jupyter`、`server/jupyter/`、`jupyter/` |
 | 数学宏 | `lang/latex`（RaTeX） | `resources/katex-macros`、`shared/katex-macros.mjs` |
 
 Noema 的 Elisp 由 `tools/agent` 把 `site-lisp/noema/lisp` 加入 `load-path`。约定：
-产品语义（数据模型、Agent、Proposal、能力）放在 Noema 的 `lisp/noema-*.el`；
-只与本配置的窗口、键位、Remote、Portal 相关的胶水放在本仓库 `lisp/noema/`。
+Noema 维护 Markdown、知识库、研究 DAG、冻结 Run、Proposal 和 Finding；通用 agent
+接入、会话、管理、组织、编辑器上下文及通知由 Emacs 的 `lisp/tools/agent/` 维护，
+供多处调用。Noema 调用这些能力的胶水放在本仓库 `lisp/noema/`。
+物理会话、用量、worktree、Compose/context 与管理视图均在通用层；Noema 的
+`noema-agent-acp.el` 和 `noema-context.el` 保留薄业务适配。接口和边界见
+[Agent 管理](design/agent-management.md)。
 
 ## 命令行入口
 

@@ -1,10 +1,8 @@
 ;;; noema/activity/config.el --- Noema activity snapshots -*- lexical-binding: t -*-
 
 ;;; Commentary:
-;; Read Noema's existing owners: active Core tasks over the asynchronous API,
-;; and busy agent sessions through the ACP boundary.  The Node host and idle
-;; ACP processes remain services.  An export's private ACP turn belongs to
-;; the export task and is never counted a second time.
+;; Read active Core tasks over the asynchronous API.  Shared agent activity
+;; is registered separately by tools/agent/activity; the Node host is a service.
 
 ;;; Code:
 
@@ -13,9 +11,6 @@
 (declare-function +noema-api-call "noema/bridge/config"
                   (channel args callback &optional timeout))
 (declare-function +noema/open-file "noema/bridge/config" (file))
-(declare-function noema-agent-acp-sessions "noema-agent-acp" (&optional root))
-(declare-function noema-agent-acp-show-buffer "noema-agent-acp" (buffer))
-(declare-function noema-agent-acp-stop "noema-agent-acp" (&optional buffer))
 (declare-function aaron-ui-float-panel-for-buffer "aaron-ui-float" (buffer))
 (declare-function aaron-ui-float-visible-p "aaron-ui-float" (panel))
 
@@ -25,15 +20,12 @@
 (defvar +activity-noema--tasks nil
   "Cached activities from Noema's active Core task pool.")
 
-(defvar +activity-noema--agents (make-hash-table :test #'eq :weakness 'key)
-  "Busy agent buffers mapped to their cached activity.")
-
 (defvar +activity-noema--pending nil
   "Identity of the outstanding task-list request, or nil.")
 
 (defun +activity-noema--snapshot ()
   "Return cached Noema work, without IO or session enumeration."
-  (append +activity-noema--tasks (hash-table-values +activity-noema--agents)))
+  +activity-noema--tasks)
 
 (defun +activity-noema--changed ()
   "Recount and update a visible monitor after a Noema snapshot changes."
@@ -50,35 +42,6 @@
                               '(activity processes)))))
         (with-current-buffer buffer
           (+activity-board/refresh))))))
-
-(defun +activity-noema--update-agents (&optional _buffer)
-  "Refresh busy sessions through Noema's ACP boundary.
-The abnormal changed hook passes _BUFFER; polling also catches buffer death
-and a Run acquiring a session before agent-shell updates its header."
-  (let ((previous +activity-noema--agents)
-        (current (make-hash-table :test #'eq :weakness 'key)))
-    (when (featurep 'noema-agent-acp)
-      (dolist (session (noema-agent-acp-sessions))
-        (let ((buffer (plist-get session :buffer)))
-          (when (and (buffer-live-p buffer) (plist-get session :busy)
-                     (not (eq (plist-get session :origin) 'latex-export)))
-            (puthash
-             buffer
-             (+activity--create
-              :label (format "Agent: %s" (or (plist-get session :name)
-                                            (plist-get session :agent) "agent"))
-              :kind 'task :buffer buffer
-              :started-at (if-let* ((activity (gethash buffer previous)))
-                              (+activity-started-at activity)
-                            (float-time))
-              :detail (format "%s · %s" (or (plist-get session :agent) "agent")
-                              (or (plist-get session :root) ""))
-              :visit (apply-partially #'noema-agent-acp-show-buffer buffer)
-              :cancel (apply-partially #'noema-agent-acp-stop buffer))
-             current)))))
-    (setq +activity-noema--agents current)
-    (unless (equal (hash-table-values previous) (hash-table-values current))
-      (+activity-noema--changed))))
 
 (defun +activity-noema--cancel-task (id)
   "Cancel Core task ID through its owner, then refresh the snapshot."
@@ -114,7 +77,6 @@ and a Run acquiring a session before agent-shell updates its header."
   "Refresh sessions and fetch Core tasks at most once per outstanding request.
 This never starts Noema and never waits on the gateway.  Responses from a
 previous host or a disabled indicator cannot resurrect old work."
-  (+activity-noema--update-agents)
   (cond
    ((not (and (bound-and-true-p +noema--ready)
               (fboundp '+noema-api-call)))
@@ -165,10 +127,6 @@ previous host or a disabled indicator cannot resurrect old work."
 (add-hook '+activity-provider-functions #'+activity-noema--snapshot)
 (add-hook '+activity-poll-functions #'+activity-noema--poll)
 (add-hook '+activity-indicator-mode-hook #'+activity-noema--mode-changed)
-
-(with-eval-after-load 'noema-agent-acp
-  (add-hook 'noema-agent-acp-changed-functions #'+activity-noema--update-agents)
-  (+activity-noema--update-agents))
 
 (with-eval-after-load 'noema/bridge/config
   (add-hook '+noema-host-ready-functions #'+activity-noema--poll)

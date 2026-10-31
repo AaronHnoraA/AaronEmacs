@@ -15,7 +15,7 @@
 (require 'noema-agent-takeover)
 (require 'noema-research-inspector)
 (require 'noema-research-synthesis)
-(require 'noema-compose)
+(require 'tools/agent/compose)
 (require 'noema-pi-router)
 (require 'noema-sessions)
 
@@ -2819,7 +2819,7 @@ so saving never reports it as a malformed Agent directive."
 	  (with-current-buffer origin
 	    (setq-local agent-shell--state '(:agent-config (:identifier codex))))
 	  (cl-letf (((symbol-function 'executable-find) (lambda (_name) "/bin/codex"))
-		    ((symbol-function 'noema-agent-acp-shutdown)
+		    ((symbol-function '+agent-acp-shutdown)
                      (lambda (_buffer) (setq shutdown t)))
 		    ((symbol-function '+portal-create)
 		     (lambda (&rest args)
@@ -2835,7 +2835,7 @@ so saving never reports it as a malformed Agent directive."
 		       (lambda (_channel args callback &optional _timeout)
 			 (setq handback-body (aref args 0))
 			 (funcall callback (noema-research--table "ok" t) nil)))
-		      ((symbol-function 'noema-agent-acp-start)
+		      ((symbol-function '+agent-acp-start)
 		       (lambda (&rest args)
 			 (setq resumed-native (plist-get args :session-id))
 			 resumed)))
@@ -2866,7 +2866,7 @@ so saving never reports it as a malformed Agent directive."
          (usage '(:total 0 :input 0 :output 0 :thought 0
                          :cached-read 0 :cached-write 0 :context-used 0 :context-size 0
                          :report-seq 0)))
-    (cl-letf (((symbol-function 'noema-agent-acp-usage) (lambda (_buffer) usage)))
+    (cl-letf (((symbol-function '+agent-acp-usage) (lambda (_buffer) usage)))
       (should-not (alist-get 'sessionUsage (noema-agent-worker--worker-body worker)))
       (setq usage (plist-put usage :context-size 1000))
       (should-not (alist-get 'sessionUsage (noema-agent-worker--worker-body worker)))
@@ -3418,12 +3418,12 @@ board must draw the whole plan, not its first cell."
                                    (ert-fail (format "Missing %s" library))))))
       (should (string-prefix-p
                (file-truename
-                (expand-file-name "site-lisp/noema/upstream/"
+                (expand-file-name "site-lisp/"
                                   user-emacs-directory))
                path))))
   (should-not (locate-library "ai-workbench")))
 
-(ert-deftest noema-compose-delegates-to-the-internalized-gptel-ui ()
+(ert-deftest +agent/compose-delegates-to-the-internalized-gptel-ui ()
   (require 'gptel-rewrite)
   (require 'gptel-transient)
   (require 'gptel-context)
@@ -3432,10 +3432,10 @@ board must draw the whole plan, not its first cell."
               ((symbol-function 'gptel-menu) (lambda () (setq menu t)))
               ((symbol-function 'gptel-rewrite) (lambda () (setq rewrite t)))
               ((symbol-function 'gptel-add) (lambda (&optional arg) (setq context arg))))
-      (noema-compose-send '(4))
-      (noema-compose-menu)
-      (noema-compose-rewrite)
-      (noema-compose-add-context '(4))
+      (+agent/compose-send '(4))
+      (+agent/compose-menu)
+      (+agent/compose-rewrite)
+      (+agent/compose-add-context '(4))
       (should (equal sent '(4)))
       (should menu)
       (should rewrite)
@@ -3456,9 +3456,9 @@ board must draw the whole plan, not its first cell."
           (progn
             (puthash (noema-pi-router--root root) buffer noema-pi-router--buffers)
             (with-current-buffer buffer (setq major-mode 'agent-shell-mode))
-            (cl-letf (((symbol-function 'noema-agent-acp-start)
+            (cl-letf (((symbol-function '+agent-acp-start)
                        (lambda (&rest _) (setq started t) buffer))
-                      ((symbol-function 'noema-agent-acp-show-buffer)
+                      ((symbol-function '+agent-acp-show-buffer)
                        (lambda (target &rest _) (setq popped target))))
               (noema-pi-router-open root))
             (should-not started)
@@ -3501,11 +3501,11 @@ board must draw the whole plan, not its first cell."
                             (funcall callback (noema-research--table
                                                "name" (noema-research--table "name" "pi" "nativeSessionId" "native-pi"))
                                      nil)))))
-                      ((symbol-function 'noema-agent-acp-config-for) (lambda (_) (list (cons :identifier 'pi))))
+                      ((symbol-function '+agent-acp-config-for) (lambda (_) (list (cons :identifier 'pi))))
                       ((symbol-function 'agent-shell-pi-make-client)
                        (lambda (&rest _) (setq client-environment agent-shell-pi-environment) 'client))
-                      ((symbol-function 'noema-agent-acp-start) (lambda (&rest args) (setq started args) buffer))
-                      ((symbol-function 'noema-agent-acp-subscribe) #'ignore))
+                      ((symbol-function '+agent-acp-start) (lambda (&rest args) (setq started args) buffer))
+                      ((symbol-function '+agent-acp-subscribe) #'ignore))
               (noema-pi-router-open root)
               (should (equal (plist-get started :session-id) "native-pi"))
               (should (plist-get started :focus))
@@ -3522,7 +3522,7 @@ board must draw the whole plan, not its first cell."
               (should (eq (noema-pi-router-buffer root) buffer))
               (with-current-buffer buffer
                 (should tab-line-exclude)
-                (should (equal noema-agent-acp-session-name "pi"))))
+                (should (equal +agent-acp-session-name "pi"))))
           (remhash (noema-pi-router--root root) noema-pi-router--buffers)
           (kill-buffer buffer))))))
 
@@ -3618,19 +3618,19 @@ board must draw the whole plan, not its first cell."
 
 (ert-deftest noema-pi-model-pool-switches-only-advertised-models ()
   (with-temp-buffer
-    (setq-local noema-agent-acp-session-agent "pi")
+    (setq-local +agent-acp-session-agent "pi")
     (noema-pi-router-model-mode 1)
     (let ((noema-pi-model-pool '("openai-codex/gpt-5.6-luna"
                                  "deepseek/deepseek-v4-flash"
                                  "openai-codex/gpt-5.6-sol"))
           (current "openai-codex/gpt-5.6-luna")
           selected)
-      (cl-letf (((symbol-function 'noema-agent-acp-available-model-ids)
+      (cl-letf (((symbol-function '+agent-acp-available-model-ids)
                  (lambda (&optional _) '("openai-codex/gpt-5.6-luna"
                                          "deepseek/deepseek-v4-flash")))
-                ((symbol-function 'noema-agent-acp-current-model-id)
+                ((symbol-function '+agent-acp-current-model-id)
                  (lambda (&optional _) current))
-                ((symbol-function 'noema-agent-acp-set-model)
+                ((symbol-function '+agent-acp-set-model)
                  (lambda (model &optional _) (setq selected model current model))))
         (noema-pi-cycle-model)
         (should (equal selected "deepseek/deepseek-v4-flash"))
@@ -3685,7 +3685,7 @@ board must draw the whole plan, not its first cell."
       (unwind-protect
           (cl-letf (((symbol-function 'noema-pi-router--document-root)
                      (lambda (buffer) (and (memq buffer documents) (buffer-live-p buffer) root)))
-                    ((symbol-function 'noema-agent-acp-agent-buffer-p)
+                    ((symbol-function '+agent-acp-agent-buffer-p)
                      (lambda (buffer) (and (memq buffer (list idle busy manual)) (buffer-live-p buffer))))
                     ((symbol-function 'noema-agent-worker-buffer-busy-p) (lambda (buffer) (eq buffer busy)))
                     ((symbol-function 'noema-agent-worker-stop-buffer)
@@ -3697,8 +3697,8 @@ board must draw the whole plan, not its first cell."
                        (if (eq function #'noema-pi-router--stop-if-unused) 'pending-stop (apply function args)))))
             (dolist (buffer (list idle busy manual))
               (with-current-buffer buffer
-                (setq-local noema-agent-acp-session-root root
-                            noema-agent-acp-session-origin
+                (setq-local +agent-acp-session-root root
+                            +agent-acp-session-origin
                             (if (eq buffer manual) 'manual 'run))))
             (mapc #'noema-pi-router-note-visit documents)
             (kill-buffer first)
@@ -3732,7 +3732,7 @@ Idle time counts from the buffer's last change, not from its last display."
          (noema-agent-worker-warm-idle-seconds 60)
          stopped)
     (unwind-protect
-        (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p)
+        (cl-letf (((symbol-function '+agent-acp-agent-buffer-p)
                    (lambda (buffer) (and (memq buffer buffers) (buffer-live-p buffer))))
                   ((symbol-function 'noema-agent-worker--resumable-buffer-p)
                    (lambda (buffer) (memq buffer buffers)))
@@ -3742,15 +3742,15 @@ Idle time counts from the buffer's last change, not from its last display."
                    (lambda (buffer &optional _all) (and (eq buffer visible) 'window))))
           (dolist (buffer buffers)
             (with-current-buffer buffer
-              (setq-local noema-agent-acp-session-root root
-                          noema-agent-acp-session-origin
+              (setq-local +agent-acp-session-root root
+                          +agent-acp-session-origin
                           (cond ((eq buffer manual) 'foreign)
                                 ((eq buffer pi) 'pi)
                                 (t 'run))
-                          noema-agent-acp-last-used-at (- (float-time) 3600))
-              (noema-agent-acp--track-activity-h)
+                          +agent-acp-last-used-at (- (float-time) 3600))
+              (+agent-acp--track-activity-h)
               ;; `--track-activity-h' keeps an existing timestamp.
-              (should (< noema-agent-acp-last-used-at (- (float-time) 3000)))))
+              (should (< +agent-acp-last-used-at (- (float-time) 3000)))))
           ;; Streaming output or typed input counts as use.
           (with-current-buffer active (insert "agent output"))
           (noema-agent-worker-sweep-warm-buffers)
@@ -3761,9 +3761,9 @@ Idle time counts from the buffer's last change, not from its last display."
   (let ((buffer (generate-new-buffer " *noema-agent-turn*"))
         shutdown)
     (unwind-protect
-        (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p)
+        (cl-letf (((symbol-function '+agent-acp-agent-buffer-p)
                    (lambda (candidate) (eq candidate buffer)))
-                  ((symbol-function 'noema-agent-acp-shutdown)
+                  ((symbol-function '+agent-acp-shutdown)
                    (lambda (_) (setq shutdown t))))
           (with-current-buffer buffer (setq-local shell-maker--busy t))
           (should-not (noema-agent-worker-stop-buffer buffer))
@@ -3771,16 +3771,16 @@ Idle time counts from the buffer's last change, not from its last display."
           (should (buffer-live-p buffer)))
       (kill-buffer buffer))))
 
-(ert-deftest noema-agent-acp-mark-session-buffer-retires-an-older-holder ()
+(ert-deftest +agent-acp-mark-session-buffer-retires-an-older-holder ()
   (let ((old (generate-new-buffer " *noema-agent-old*"))
         (new (generate-new-buffer " *noema-agent-new*")))
     (unwind-protect
-        (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p)
+        (cl-letf (((symbol-function '+agent-acp-agent-buffer-p)
                    (lambda (buffer) (and (memq buffer (list old new)) (buffer-live-p buffer)))))
-          (noema-agent-acp-mark-session-buffer old "baseline" "codex" "/tmp/noema-project/")
-          (noema-agent-acp-mark-session-buffer new "baseline" "codex" "/tmp/noema-project/")
-          (should (eq (noema-agent-acp-session-buffer "baseline" "/tmp/noema-project/") new))
-          (should-not (buffer-local-value 'noema-agent-acp-session-name old))
+          (+agent-acp-mark-session-buffer old "baseline" "codex" "/tmp/noema-project/")
+          (+agent-acp-mark-session-buffer new "baseline" "codex" "/tmp/noema-project/")
+          (should (eq (+agent-acp-session-buffer "baseline" "/tmp/noema-project/") new))
+          (should-not (buffer-local-value '+agent-acp-session-name old))
           (should (string-suffix-p " (retired)" (buffer-name old))))
       (kill-buffer old)
       (kill-buffer new))))
@@ -3807,7 +3807,7 @@ Idle time counts from the buffer's last change, not from its last display."
                                         "payload" (noema-research--table "name" "helper"))))
                               nil)))
                   ((symbol-function 'noema-agent-worker--cancel) (lambda (target) (push target cancelled)))
-                  ((symbol-function 'noema-agent-acp-session-buffer)
+                  ((symbol-function '+agent-acp-session-buffer)
                    (lambda (name _root) (and (equal name "helper") idle)))
                   ((symbol-function 'noema-agent-worker-stop-buffer)
                    (lambda (buffer) (push buffer stopped) t)))
@@ -3824,8 +3824,8 @@ Idle time counts from the buffer's last change, not from its last display."
          (worker (noema-agent-worker--create :run-id "run_in_use" :buffer buffer))
          shutdowns)
     (unwind-protect
-        (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p) (lambda (target) (eq target buffer)))
-                  ((symbol-function 'noema-agent-acp-shutdown) (lambda (target) (push target shutdowns))))
+        (cl-letf (((symbol-function '+agent-acp-agent-buffer-p) (lambda (target) (eq target buffer)))
+                  ((symbol-function '+agent-acp-shutdown) (lambda (target) (push target shutdowns))))
           (puthash "run_in_use" worker noema-agent-worker--runs)
           (should (noema-agent-worker-buffer-busy-p buffer))
           (should-not (noema-agent-worker-stop-buffer buffer))
@@ -3865,9 +3865,9 @@ Idle time counts from the buffer's last change, not from its last display."
                          ("noema:api:research:session:name:bind"
                           (setq bound (aref args 0))
                           (funcall callback (noema-research--table) nil)))))
-                    ((symbol-function 'noema-agent-acp-config-for) (lambda (_) (list (cons :identifier 'pi))))
-                    ((symbol-function 'noema-agent-acp-start) (lambda (&rest args) (setq started args) buffer))
-                    ((symbol-function 'noema-agent-acp-subscribe) #'ignore)
+                    ((symbol-function '+agent-acp-config-for) (lambda (_) (list (cons :identifier 'pi))))
+                    ((symbol-function '+agent-acp-start) (lambda (&rest args) (setq started args) buffer))
+                    ((symbol-function '+agent-acp-subscribe) #'ignore)
                     ((symbol-function 'noema-agent-promote--session-spec) (lambda (&rest _) `((cwd . ,root)))))
             (noema-pi-router-open root)
             (should (equal (plist-get started :session-id) "native-7"))
@@ -3893,7 +3893,7 @@ Idle time counts from the buffer's last change, not from its last display."
         (cl-letf (((symbol-function 'executable-find) (lambda (name &rest _) (concat "/bin/" name)))
                   ((symbol-function 'process-lines)
                    (lambda (program &rest _) (list (if (string-suffix-p "pi-acp" program) "0.8.0" "v26.7.0"))))
-                  ((symbol-function 'noema-agent-acp-config-for) (lambda (_) '((:identifier . pi)))))
+                  ((symbol-function '+agent-acp-config-for) (lambda (_) '((:identifier . pi)))))
           (let ((checks (noema-pi-router-checks)))
             (should (seq-every-p #'car (seq-take checks 3)))
             (should (equal (nth 1 (nth 1 checks)) "pi-acp >= 0.8.0"))
@@ -3908,19 +3908,19 @@ Idle time counts from the buffer's last change, not from its last display."
   (should-not (noema-pi-router--version-at-least-p "0.8.0" "0.7.9"))
   (should (noema-pi-router--version-at-least-p "22.19.0" "v26.7.0")))
 
-(ert-deftest noema-agent-acp-start-never-displays-unless-asked ()
+(ert-deftest +agent-acp-start-never-displays-unless-asked ()
   (let ((buffer (generate-new-buffer " *noema-focus-test*")) calls shown)
     (unwind-protect
         (cl-letf (((symbol-function 'agent-shell--start)
                    (lambda (&rest args) (push (plist-get args :no-focus) calls) buffer))
-                  ((symbol-function 'noema-agent-acp--install-workspace-tabs) #'ignore)
-                  ((symbol-function 'noema-agent-acp-hide-client-stderr) #'ignore)
-                  ((symbol-function 'noema-agent-acp-subscribe) #'ignore)
-                  ((symbol-function 'noema-agent-acp-show-buffer)
+                  ((symbol-function '+agent-acp--install-workspace-tabs) #'ignore)
+                  ((symbol-function '+agent-acp-hide-client-stderr) #'ignore)
+                  ((symbol-function '+agent-acp-subscribe) #'ignore)
+                  ((symbol-function '+agent-acp-show-buffer)
                    (lambda (target) (push target shown))))
-          (noema-agent-acp-start :config nil :directory temporary-file-directory)
+          (+agent-acp-start :config nil :directory temporary-file-directory)
           (should-not shown)
-          (noema-agent-acp-start :config nil :directory temporary-file-directory :focus t)
+          (+agent-acp-start :config nil :directory temporary-file-directory :focus t)
           ;; Upstream is always hidden; the adapter explicitly displays once.
           (should (equal calls '(t t)))
           (should (equal shown (list buffer))))
@@ -3935,17 +3935,17 @@ Idle time counts from the buffer's last change, not from its last display."
          args)
     (unwind-protect
         (cl-letf (((symbol-function 'noema-agent-worker--config) (lambda (_) nil))
-                  ((symbol-function 'noema-agent-acp-start) (lambda (&rest actual) (setq args actual) buffer))
-                  ((symbol-function 'noema-agent-acp-subscribe) #'ignore))
+                  ((symbol-function '+agent-acp-start) (lambda (&rest actual) (setq args actual) buffer))
+                  ((symbol-function '+agent-acp-subscribe) #'ignore))
           (noema-agent-worker--start-shell worker "native-existing-session")
           (should-not (plist-get args :focus))
           (with-current-buffer buffer
             (should tab-line-exclude)
-            (should (equal noema-agent-acp-session-name "baseline"))
-            (should (string-prefix-p " *Noema Agent · baseline · codex @ noema-project*" (buffer-name))))
-          (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p) (lambda (candidate) (eq candidate buffer))))
-            (should (eq (noema-agent-acp-session-buffer "baseline" "/tmp/noema-project/") buffer))
-            (should-not (noema-agent-acp-session-buffer "baseline" "/tmp/elsewhere/"))))
+            (should (equal +agent-acp-session-name "baseline"))
+            (should (string-prefix-p " *Agent · baseline · codex @ noema-project*" (buffer-name))))
+          (cl-letf (((symbol-function '+agent-acp-agent-buffer-p) (lambda (candidate) (eq candidate buffer))))
+            (should (eq (+agent-acp-session-buffer "baseline" "/tmp/noema-project/") buffer))
+            (should-not (+agent-acp-session-buffer "baseline" "/tmp/elsewhere/"))))
       (kill-buffer buffer))))
 
 (ert-deftest noema-agent-worker-lighter-counts-runs-and-pending-decisions ()
@@ -4255,11 +4255,11 @@ Idle time counts from the buffer's last change, not from its last display."
 (ert-deftest noema-sessions-running-status-shows-a-quiet-agent ()
   (with-temp-buffer
     (let ((noema-sessions-idle-threshold 30))
-      (setq-local noema-agent-acp-last-used-at (- (float-time) 5))
+      (setq-local +agent-acp-last-used-at (- (float-time) 5))
       (should (equal (noema-sessions--running-status (current-buffer)) "running"))
-      (setq-local noema-agent-acp-last-used-at (- (float-time) 45))
+      (setq-local +agent-acp-last-used-at (- (float-time) 45))
       (should (equal (noema-sessions--running-status (current-buffer)) "running, idle 45s"))
-      (setq-local noema-agent-acp-last-used-at (- (float-time) 600))
+      (setq-local +agent-acp-last-used-at (- (float-time) 600))
       (should (equal (noema-sessions--running-status (current-buffer)) "running, idle 10m"))
       (should (equal (noema-sessions--running-status nil) "running")))))
 
@@ -4286,21 +4286,21 @@ Idle time counts from the buffer's last change, not from its last display."
 
 (ert-deftest noema-sessions-side-chat-is-one-per-session-and-starts-empty ()
   (let (started shown)
-    (cl-letf (((symbol-function 'noema-agent-acp-config-for) (lambda (agent) (list :agent agent)))
-              ((symbol-function 'noema-agent-acp-start)
+    (cl-letf (((symbol-function '+agent-acp-config-for) (lambda (agent) (list :agent agent)))
+              ((symbol-function '+agent-acp-start)
                (cl-function
                 (lambda (&key config directory origin &allow-other-keys)
                   (let ((buffer (generate-new-buffer " *side*")))
                     (with-current-buffer buffer (setq-local major-mode 'agent-shell-mode))
                     (push (list config directory origin) started)
                     buffer))))
-              ((symbol-function 'noema-agent-acp-adopt)
+              ((symbol-function '+agent-acp-adopt)
                (cl-function
                 (lambda (buffer &key root &allow-other-keys)
                   (with-current-buffer buffer
-                    (setq-local noema-agent-acp-session-root root))
+                    (setq-local +agent-acp-session-root root))
                   buffer)))
-              ((symbol-function 'noema-agent-acp-show-buffer) (lambda (buffer) (push buffer shown))))
+              ((symbol-function '+agent-acp-show-buffer) (lambda (buffer) (push buffer shown))))
       (let ((first (noema-sessions--open-side-chat "/tmp/p/" "baseline" "codex" "/tmp/work/"))
             (again (noema-sessions--open-side-chat "/tmp/p/" "baseline" "codex" "/tmp/work/")))
         (unwind-protect
@@ -4308,7 +4308,7 @@ Idle time counts from the buffer's last change, not from its last display."
               (should (eq first again))
               ;; No session id, no fork: the parent's history is not copied.
               (should (equal started '(((:agent "codex") "/tmp/work/" side))))
-              (should (equal (buffer-local-value 'noema-agent-acp-side-parent first) "baseline"))
+              (should (equal (buffer-local-value '+agent-acp-side-parent first) "baseline"))
               (should (equal shown (list first first))))
           (kill-buffer first))))))
 
@@ -4316,13 +4316,13 @@ Idle time counts from the buffer's last change, not from its last display."
   (let ((named (generate-new-buffer " *noema-named*"))
         (orphan (generate-new-buffer " *noema-orphan*")))
     (unwind-protect
-        (cl-letf (((symbol-function 'noema-agent-acp-agent-buffer-p)
+        (cl-letf (((symbol-function '+agent-acp-agent-buffer-p)
                    (lambda (buffer) (memq buffer (list named orphan))))
                   ((symbol-function 'noema-sessions--execution-live-p)
                    (lambda (buffer) (eq buffer named))))
           (with-current-buffer named
-            (setq-local noema-agent-acp-session-name "baseline"
-                        noema-agent-acp-session-root "/tmp/p/"))
+            (setq-local +agent-acp-session-name "baseline"
+                        +agent-acp-session-root "/tmp/p/"))
           (let ((choices (noema-sessions--switch-candidates
                           (list (noema-research--table "name" "baseline" "agent" "codex"
                                                        "state" "active" "aliases" []))
@@ -4338,7 +4338,7 @@ Idle time counts from the buffer's last change, not from its last display."
     (let ((worker (noema-agent-worker--create :run-id "receipt-test" :session-id "s"
                     :epoch 1 :started t :root "/tmp/" :buffer (current-buffer)
                     :segments '("done") :result-parts '("done"))) events)
-      (cl-letf (((symbol-function 'noema-agent-acp-restore-prompt) (lambda (_) (error "renderer failed")))
+      (cl-letf (((symbol-function '+agent-acp-restore-prompt) (lambda (_) (error "renderer failed")))
                 ((symbol-function 'noema-agent-worker--cleanup-subscriptions) (lambda (_) (error "cleanup failed")))
                 ((symbol-function 'noema-agent-worker--resync-source-buffer) (lambda (_) (error "merge failed")))
                 ((symbol-function 'noema-agent-worker--api)
@@ -4394,10 +4394,10 @@ Idle time counts from the buffer's last change, not from its last display."
 
 (ert-deftest noema-agent-worker-cancel-preserves-already-completed-receipt ()
   (with-temp-buffer
-    (setq-local noema-agent-acp--prompt-receipt '(:run-id "r" :status completed :response ((stopReason . "end_turn"))))
+    (setq-local +agent-acp--prompt-receipt '(:run-id "r" :status completed :response ((stopReason . "end_turn"))))
     (let ((worker (noema-agent-worker--create :run-id "r" :session-id "s" :epoch 1 :started t :root "/tmp/" :buffer (current-buffer))))
-      (cl-letf (((symbol-function 'noema-agent-acp-restore-prompt) #'ignore)
-                ((symbol-function 'noema-agent-acp-interrupt) (lambda (&rest _) (ert-fail "Interrupted completed turn")))
+      (cl-letf (((symbol-function '+agent-acp-restore-prompt) #'ignore)
+                ((symbol-function '+agent-acp-interrupt) (lambda (&rest _) (ert-fail "Interrupted completed turn")))
                 ((symbol-function 'noema-agent-worker--api) (lambda (_channel _body callback &optional _) (funcall callback nil nil))))
         (noema-agent-worker--cancel worker)
         (should (equal (noema-agent-worker-terminal-status worker) "completed"))
@@ -4408,10 +4408,10 @@ Idle time counts from the buffer's last change, not from its last display."
     (let ((worker (noema-agent-worker--create :run-id "r" :agent "opencode" :root "/tmp/" :target "/tmp/"))
           subscribed callback ready)
       (cl-letf (((symbol-function 'noema-agent-worker--config) #'ignore)
-                ((symbol-function 'noema-agent-acp-start) (lambda (&rest _) (current-buffer)))
-                ((symbol-function 'noema-agent-acp-mark-session-buffer) #'ignore)
-                ((symbol-function 'noema-agent-acp-unsubscribe) #'ignore)
-                ((symbol-function 'noema-agent-acp-subscribe)
+                ((symbol-function '+agent-acp-start) (lambda (&rest _) (current-buffer)))
+                ((symbol-function '+agent-acp-mark-session-buffer) #'ignore)
+                ((symbol-function '+agent-acp-unsubscribe) #'ignore)
+                ((symbol-function '+agent-acp-subscribe)
                  (lambda (&rest args) (setq subscribed (plist-get args :event) callback (plist-get args :callback)) 'token))
                 ((symbol-function 'noema-agent-worker--on-session-ready) (lambda (&rest _) (setq ready t))))
         (noema-agent-worker--start-shell worker nil)

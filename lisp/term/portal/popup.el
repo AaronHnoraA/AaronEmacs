@@ -26,11 +26,11 @@
 (declare-function remote-terminal-workspace-id "remote-terminal" (terminal))
 (declare-function project-root "project" (project))
 (declare-function +project-current-root "tools/project/config")
-(declare-function noema-agent-acp-config-for "noema-agent-acp" (agent))
-(declare-function noema-agent-acp-start "noema-agent-acp" (&rest args))
-(declare-function noema-agent-acp-adopt "noema-agent-acp" (buffer &rest args))
-(declare-function noema-agent-acp-tabs-mode "noema-agent-acp" (&optional arg))
-(defvar noema-agent-acp-display-buffer-function)
+(declare-function +agent-acp-config-for "tools/agent/acp" (agent))
+(declare-function +agent-acp-start "tools/agent/acp" (&rest args))
+(declare-function +agent-acp-adopt "tools/agent/acp" (buffer &rest args))
+(declare-function +agent-acp-tabs-mode "tools/agent/acp" (&optional arg))
+(defvar +agent-acp-display-buffer-function)
 
 (defvar remote-terminal-instance)
 
@@ -310,24 +310,24 @@ CURRENT is the currently displayed popup buffer."
   "Start AGENT through the Noema agent-shell boundary, never through portal."
   (interactive (list (+agent-shell--read-agent "Popup agent: ")))
   (+agent-shell--check-agent agent)
-  (require 'noema-agent-acp)
+  (require 'tools/agent/acp)
   (pcase-let* ((`(,noema-root . ,directory) (+agent-shell-launch-context)))
     (let* ((workspace (+portal-popup--requested-workspace-id directory))
-           (config (or (noema-agent-acp-config-for agent)
+           (config (or (+agent-acp-config-for agent)
                        (user-error "No agent-shell configuration for %s" agent)))
            ;; Protect the existing temporary popup while ACP initializes.
            (+portal-popup--displaying t)
-           (buffer (noema-agent-acp-start :config config :directory directory
+           (buffer (+agent-acp-start :config config :directory directory
                                           :focus nil :origin 'popup)))
-      (noema-agent-acp-adopt buffer :agent agent :origin 'popup
+      (+agent-acp-adopt buffer :agent agent :origin 'popup
                              :root noema-root)
       (with-current-buffer buffer
         (setq-local +portal-popup-kind (intern (format "ai-%s" agent))
                     +portal-popup-title (capitalize (symbol-name agent))
                     +portal-popup-workspace-id workspace
-                    noema-agent-acp-display-buffer-function
+                    +agent-acp-display-buffer-function
                     #'+portal-popup-display-buffer)
-        (noema-agent-acp-tabs-mode -1)
+        (+agent-acp-tabs-mode -1)
         (+portal-popup-agent-keys-mode 1))
       (+portal-popup-display-buffer buffer))))
 
@@ -587,15 +587,15 @@ DIRECTORY is used only when creating a buffer."
        remote-terminal-instance :popup t))
     (when (derived-mode-p 'agent-shell-mode)
       (when (eq +portal-popup-kind 'terminal)
-        (let ((agent (and (boundp 'noema-agent-acp-session-agent)
-                          noema-agent-acp-session-agent)))
+        (let ((agent (and (boundp '+agent-acp-session-agent)
+                          +agent-acp-session-agent)))
           (setq-local +portal-popup-kind
                       (if agent (intern (format "ai-%s" agent)) 'agent)
                       +portal-popup-title
                       (and agent (capitalize (format "%s" agent))))))
-      (when (fboundp 'noema-agent-acp-tabs-mode)
-        (noema-agent-acp-tabs-mode -1))
-      (setq-local noema-agent-acp-display-buffer-function
+      (when (fboundp '+agent-acp-tabs-mode)
+        (+agent-acp-tabs-mode -1))
+      (setq-local +agent-acp-display-buffer-function
                   #'+portal-popup-display-buffer)
       (+portal-popup-agent-keys-mode 1))
     (+portal-popup-apply-ui buffer)
@@ -659,9 +659,9 @@ From a popup tab, use ace-window to choose the ordinary source window."
       (remote-terminal-put-metadata remote-terminal-instance :popup nil))
     (when (derived-mode-p 'agent-shell-mode)
       (+portal-popup-agent-keys-mode -1)
-      (when (equal tab-line-format '(:eval (noema-agent-acp--tab-line)))
+      (when (equal tab-line-format '(:eval (+agent-acp--tab-line)))
         (kill-local-variable 'tab-line-format))
-      (setq-local noema-agent-acp-display-buffer-function
+      (setq-local +agent-acp-display-buffer-function
                   (lambda (session)
                     (when (window-live-p target)
                       (select-window target))

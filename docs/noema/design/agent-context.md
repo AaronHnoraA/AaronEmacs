@@ -9,7 +9,7 @@
 | 层次 | 内容及权威 | 生命周期 |
 | --- | --- | --- |
 | 原生会话 | agent-shell/ACP 和 Agent 持有对话历史；Noema 记录项目内的逻辑 Session 名与原生 Session ID | 随原生会话恢复、分支或结束 |
-| 普通交互附加上下文 | gptel 的当前选择经 `noema-context.el` 变成路径、行号与 ACP `resource_link`；Agent 按引用读取文件 | 本次提问 |
+| 普通交互附加上下文 | gptel 的当前选择经 `+agent-context.el` 变成路径、行号与 ACP `resource_link`；Agent 按引用读取文件 | 本次提问 |
 | 研究 Run 输入 | Node host 将 prompt、上下文内容、能力与会话路由冻结；RunSpec 记录上下文清单、摘要及选择原因 | 随 Run 持久保存 |
 | 自动记忆 | 已审核 Finding 与未经核实的 Hy Memory 各自召回；两者都受项目边界限制 | 下次提问或 Run 准备时重新选择 |
 
@@ -17,9 +17,9 @@ Noema 的 64 KiB 限额只约束它附加到**研究 Run** 的上下文字节，
 
 ## 契约
 
-**C1｜普通交互使用引用。** `noema-context.el` 复用 `gptel-context` 中的选区、buffer 与文件选择。可保存的文件以一行路径或 `path:START-END` 进入 prompt，每个不同文件附一个 ACP `resource_link`；此路径不内嵌文件正文。未保存或不可读的选择会报告并跳过。会话忙时，agent-shell 的队列保留文本路径引用，下一轮再送。
+**C1｜普通交互使用引用。** `+agent-context.el` 复用 `gptel-context` 中的选区、buffer 与文件选择。可保存的文件以一行路径或 `path:START-END` 进入 prompt，每个不同文件附一个 ACP `resource_link`；此路径不内嵌文件正文。未保存或不可读的选择会报告并跳过。会话忙时，agent-shell 的队列保留文本路径引用，下一轮再送。
 
-`noema-context-send-prompt` 供产品操作发送明确的 prompt 和文件引用，复用同一
+`+agent-context-send-prompt` 供产品操作发送明确的 prompt 和文件引用，复用同一
 会话选择、路径可达性检查、起草、排队和剪贴板路径。它不读取或清空共享 gptel
 选择；明确要求的文件不可读或有未保存编辑时拒绝发送，不能悄悄遗漏操作依据。
 
@@ -51,16 +51,16 @@ Hy Memory 使用同一项目根隔离普通 ACP 对话与 Run，但召回项标�
 
 | 职责 | 实现 |
 | --- | --- |
-| 普通会话文件引用与选择 | `lisp/noema-context.el`、`lisp/noema-agent-acp.el` |
+| 普通会话文件引用与选择 | `lisp/tools/agent/context.el`、`lisp/tools/agent/acp.el` |
 | 普通会话的隐式记忆上下文 | `lisp/noema-hy-memory.el`、`server/lib/hy-memory-bridge.mjs` |
 | 工作块控制区与会话路由 | `server/lib/research-directives.mjs`、`server/lib/research-session-routing.mjs` |
 | 引用解析、预算、冻结、预览与换代 | `server/lib/research-runtime.mjs`、`server/lib/research-context-excerpt.mjs` |
 #+begin ediff 明确 Finding 与 ACP 职责
 @@ediff-comment "s s s"
 -| Finding 召回 | `server/lib/research-memory.mjs` |
--| ACP 派发、用量与终态 | `lisp/noema-agent-worker.el`、`lisp/noema-agent-acp.el` |
+-| ACP 派发、用量与终态 | `lisp/noema-agent-worker.el`、`lisp/tools/agent/acp.el` |
 +| 已审核 Finding 召回 | `server/lib/research-memory.mjs` |
-+| ACP 派发、用量报告与终态 | `lisp/noema-agent-worker.el`、`lisp/noema-agent-acp.el` |
++| ACP 派发、用量报告与终态 | `lisp/noema-agent-worker.el`、`lisp/tools/agent/acp.el` |
 #+end ediff
 | JuText 入口、预览与 Inspector | `lisp/noema-research-mode.el` |
 
@@ -68,7 +68,7 @@ Hy Memory 使用同一项目根隔离普通 ACP 对话与 Run，但召回项标�
 
 **G1｜跨独立 Run 的稳定前缀缺失。** 研究 Run 的 ACP 内容从会变化的工作 prompt 开始，再接项目说明、显式引用、DAG/Handoff、pack/Skill、Finding 和 Hy Memory。对于按完整前缀匹配的模型缓存，变化发生在前面时，后面未变的 Skill 或资料也无法作为同一个可复用前缀。原生会话续接可能复用此前未改变的对话历史；这与两个新 Run 共享静态内容是不同情况。改变上下文顺序或交付形式会影响 Agent 所见的语义，不能只凭字节顺序推断实际收益。
 
-**G2｜缺少 Run 级缓存效果回执。** ACP 若报告 cached read/write，`noema-agent-acp-usage` 可读这两个计数，Agent ABTOP 也可显示它们；kernel 保存的是累计 Session `cachedTokens` 合计。Run Inspector 目前只显示累计上下文窗口及 input/output，没有同一次 Run 的 cache read、write、延迟和总输入成本对照。ACP 适配器或 Agent 自行加入的上下文仍不在 Noema 的 RunSpec 可观测范围内。
+**G2｜缺少 Run 级缓存效果回执。** ACP 若报告 cached read/write，`+agent-acp-usage` 可读这两个计数，Agent ABTOP 也可显示它们；kernel 保存的是累计 Session `cachedTokens` 合计。Run Inspector 目前只显示累计上下文窗口及 input/output，没有同一次 Run 的 cache read、write、延迟和总输入成本对照。ACP 适配器或 Agent 自行加入的上下文仍不在 Noema 的 RunSpec 可观测范围内。
 
 ## 待定设计
 

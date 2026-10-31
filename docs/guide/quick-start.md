@@ -214,8 +214,8 @@ gptel、agent-shell、acp.el、shell-maker、Magent 及现有 CLI 兼容代码�
 **Noema AI/agent**
 
 - `M-x noema` / `C-c A W` — 打开 Noema（默认进入 Magent 的 agent-shell 会话）
-- `M-x noema-agent-start` / `C-c A a` — 选择并启动 Magent、Codex、Claude、OpenCode 或 Pi agent-shell 会话
-- `M-x noema-compose` / `C-c A c` — 使用完整 gptel UI 打开任意 buffer compose
+- `M-x +agent/start` / `C-c A a` — 选择并启动 Magent、Codex、Claude、OpenCode 或 Pi agent-shell 会话
+- `M-x +agent/compose` / `C-c A c` — 使用完整 gptel UI 打开任意 buffer compose
 - `C-c A s` — 从当前 buffer 发送；`C-c A m` — gptel transient；`C-c A .` / `C-c M-a` — 添加上下文
 - `C-c A r` — 使用 gptel rewrite/diff 预览；`C-c A p` — 把当前 agent-shell 会话纳入 Noema research
 - `C-c A x` / `v` / `B` / `@` — 把上下文、选区、buffer、光标位置交给某个 agent 会话；

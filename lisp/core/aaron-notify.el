@@ -4,7 +4,8 @@
 ;;
 ;; `aaron-notify' says something once.  It lands where the user is: in the echo
 ;; area while Emacs has the keyboard, otherwise as a system notification, and
-;; always in the history (`aaron/notifications').  Contracts:
+;; always in the history (`aaron/notifications').  :silent records history
+;; without drawing the user's attention.  Contracts:
 ;; docs/design/macos-boundary.md.
 
 ;;; Code:
@@ -53,21 +54,23 @@ A batch Emacs has no user to reach, whatever it is doing."
                                aaron-notify-history
                                :key #'aaron-notify-entry-id :test #'equal)))))
 
-(cl-defun aaron-notify (title &key body (level 'info) source id action)
+(cl-defun aaron-notify (title &key body (level 'info) source id action silent)
   "Tell the user TITLE, with optional BODY.
 LEVEL is `info', `success', `warning' or `error'.  SOURCE names who is
 speaking.  A later notification with the same ID replaces this one.  ACTION
 is called with no arguments when the user clicks it, in the history or on the
-system notification; without one a click opens the history.  Return the id."
+system notification; without one a click opens the history.  SILENT records
+history without changing the echo area or unread count.  Return the id."
   (let ((entry (aaron-notify-entry--create
                 :id (or id (format "emacs-%d" (cl-incf aaron-notify--next-id)))
                 :title title :body body :level level :source source
                 :action action :time (current-time))))
     (aaron-notify--record entry)
-    (if (or (aaron-notify--user-here-p) (not aaron-notify-system-function))
-        (message "%s%s" title (if body (concat ": " body) ""))
-      (funcall aaron-notify-system-function entry)
-      (aaron-notify--set-unread (1+ aaron-notify-unread)))
+    (unless silent
+      (if (or (aaron-notify--user-here-p) (not aaron-notify-system-function))
+          (message "%s%s" title (if body (concat ": " body) ""))
+        (funcall aaron-notify-system-function entry)
+        (aaron-notify--set-unread (1+ aaron-notify-unread))))
     (aaron-notify-entry-id entry)))
 
 (defun notify-send (&rest params)
