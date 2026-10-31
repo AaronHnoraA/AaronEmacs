@@ -597,7 +597,7 @@
     (remote-register-backend
      "api-only"
      :capabilities '(metadata file-read process-sync process-async)
-     :project (lambda (_file _link) nil))
+     :project (lambda (_file _link _route) nil))
     (remote-register-target "box" :label "Box")
     (remote-register-pipeline "box" "api" '("api-only"))
     ;; Never served from this machine's own disk instead.
@@ -952,7 +952,7 @@ rsync really speaks its protocol over the command the backend handed out."
       (remote-register-backend
        "shell-only"
        :capabilities '(metadata file-read process-sync process-async)
-       :project (lambda (_file _link) nil)
+       :project (lambda (_file _link _route) nil)
        :client-shell
        (lambda (_route)
          (list :command (list rsh) :destination "far-host"
@@ -1024,7 +1024,7 @@ rsync really speaks its protocol over the command the backend handed out."
       (remote-register-backend
        "shell-only"
        :capabilities '(metadata file-read directory process-sync process-async)
-       :project (lambda (file _link) (remote-file-local-name file))
+       :project (lambda (file _link _route) (remote-file-local-name file))
        :client-shell
        (lambda (_route) (list :command (list rsh) :destination "far-host")))
       (remote-register-target "box" :label "Box")
@@ -1181,7 +1181,7 @@ rsync really speaks its protocol over the command the backend handed out."
       (remote-register-backend
        "shell-only"
        :capabilities '(metadata file-read directory process-sync process-async)
-       :project (lambda (file _link) (remote-file-local-name file))
+       :project (lambda (file _link _route) (remote-file-local-name file))
        :client-shell
        (lambda (_route) (list :command (list rsh) :destination "fake-host")))
       (dolist (id '("box" "lab"))
@@ -1283,7 +1283,7 @@ rsync really speaks its protocol over the command the backend handed out."
       (remote-register-backend
        "shell-only"
        :capabilities '(metadata file-read directory process-sync process-async)
-       :project (lambda (file _link) (remote-file-local-name file))
+       :project (lambda (file _link _route) (remote-file-local-name file))
        :client-shell
        (lambda (_route) (list :command (list rsh) :destination "far-host")))
       (remote-register-target "box" :label "Box")

@@ -471,16 +471,19 @@
                    :start (+lsp-ui-test-object :point 21))
            :command "after"))
          displayed)
-    (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) 'window))
-              ((symbol-function 'get-buffer-window-list)
-               (lambda (&rest _) '(window)))
-              ((symbol-function '+language-server--visible-region)
-               (lambda (&optional _window) '(10 . 20)))
-              ((symbol-function 'lsp--position-to-point)
-               (lambda (position) (lsp-get position :point))))
-      (+lsp-lens--display-visible-a
-       (lambda (lenses) (setq displayed lenses))
-       (list before first inside after)))
+    ;; Emacs compiles a primitive's trampoline after installing the stub, so
+    ;; the compiler itself would call the stubbed `get-buffer-window'.
+    (let ((native-comp-enable-subr-trampolines nil))
+      (cl-letf (((symbol-function 'get-buffer-window) (lambda (&rest _) 'window))
+                ((symbol-function 'get-buffer-window-list)
+                 (lambda (&rest _) '(window)))
+                ((symbol-function '+language-server--visible-region)
+                 (lambda (&optional _window) '(10 . 20)))
+                ((symbol-function 'lsp--position-to-point)
+                 (lambda (position) (lsp-get position :point))))
+        (+lsp-lens--display-visible-a
+         (lambda (lenses) (setq displayed lenses))
+         (list before first inside after))))
     (should
      (equal (mapcar (lambda (lens) (lsp-get lens :command)) displayed)
             '("first" "inside")))))
