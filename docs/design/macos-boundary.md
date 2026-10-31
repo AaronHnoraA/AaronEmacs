@@ -161,6 +161,12 @@ Noema 页面内部的拖放和粘贴不经过这里：文件一律存为附件�
 - **G2 Noema 拿不到拖入文件的路径。** WebKit 只给页面文件内容，所以库内文件也会复制
   一份，文件夹被跳过。要做到 Obsidian 的 Option 拖入（只链接不复制），需要改 Portal
   的原生层。
+- **G3 通知中心拒绝当前的 Emacs.app。** `requestAuthorization` 不弹窗，直接返回
+  `UNErrorDomain Code=1`（“Notifications are not allowed for this application”），
+  状态是 denied，系统通知设置里也没有 Emacs 这一项。所以通知总走 `osascript`，归属和
+  图标都是 Script Editor，点击回不到 Emacs，C13 未满足。`NSUserNotification` 同样发不
+  出来（`deliveredNotifications` 为 0）。Emacs.app 是 ad-hoc 签名，这是最可能的原因，
+  但尚未验证。
 
 ## 待定设计
 
