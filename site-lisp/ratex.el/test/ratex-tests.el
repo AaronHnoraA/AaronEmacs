@@ -1018,6 +1018,50 @@
         (should (equal (sort seen #'string<)
                        (sort (list first-key second-key) #'string<)))))))
 
+(ert-deftest ratex-fast-refresh-keeps-an-environment-an-environment ()
+  (with-temp-buffer
+    (insert "\\begin{align}a &= b\\end{align}\n")
+    (goto-char 15)
+    (let* ((fragment (ratex-fragment-at-point))
+           (begin (plist-get fragment :begin)))
+      (should (equal (plist-get fragment :environment) "align"))
+      (insert "x")
+      (let ((fresh (ratex--refresh-active-fragment-fast fragment)))
+        (should (equal (plist-get fresh :environment) "align"))
+        (should (= (plist-get fresh :begin) begin))
+        (should (string-match-p "\\`\\\\begin{align}.*x.*\\\\end{align}\\'"
+                                (ratex--render-latex fresh)))))))
+
+(ert-deftest ratex-fast-refresh-follows-nested-environment-closers ()
+  (with-temp-buffer
+    (insert "\\begin{array}\\begin{array}a\\end{array}b\\end{array}\n")
+    (goto-char 10)
+    (let ((fragment (ratex--environment-fragment-at 1)))
+      (should fragment)
+      (should (= (plist-get (ratex--refresh-active-fragment-fast fragment) :end)
+                 (plist-get fragment :end))))))
+
+(ert-deftest ratex-stopping-leaves-a-replacement-backend-alone ()
+  "A mode change stops the backend and starts another in one command."
+  (let* ((old (make-process :name "ratex-old" :command '("cat") :noquery t
+                            :sentinel #'ratex--process-sentinel))
+         (new (make-process :name "ratex-new" :command '("cat") :noquery t))
+         (ratex--process old)
+         (ratex--pending (make-hash-table :test #'eql))
+         (ratex--pending-timers (make-hash-table :test #'eql))
+         seen)
+    (unwind-protect
+        (progn
+          (puthash 1 (lambda (response) (push response seen)) ratex--pending)
+          (ratex-stop-backend)
+          (should-not ratex--process)
+          (should (equal (ratex-response-error (car seen)) "backend stopped"))
+          (setq ratex--process new)
+          (ratex--process-sentinel old "finished\n")
+          (accept-process-output nil 0.05)
+          (should (eq ratex--process new)))
+      (delete-process new))))
+
 (provide 'ratex-tests)
 
 ;;; ratex-tests.el ends here

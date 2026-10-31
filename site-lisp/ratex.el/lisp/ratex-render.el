@@ -513,13 +513,31 @@ the same reason the full scanner skips it."
                 :open open
                 :close close))))))
 
+(defun ratex--refresh-active-structured-fragment (fragment)
+  "Refresh FRAGMENT, an environment or a block, keeping what marks it as one.
+A plain delimiter search would lose `:environment' or `:block', so `align' body
+text would be rendered as inline math, and would stop at a nested closer."
+  (let* ((begin (plist-get fragment :begin))
+         (name (plist-get fragment :environment))
+         (fresh (if name
+                    (let ((found (ratex--environment-fragment-at begin)))
+                      (and (equal (plist-get found :environment) name) found))
+                  (save-excursion
+                    (goto-char begin)
+                    (and (looking-at "[ \t]*#\\+begin_display_latex\\b")
+                         (ratex--org-display-latex-block-from begin))))))
+    (when (and fresh (<= begin (point)) (< (point) (plist-get fresh :end)))
+      fresh)))
+
 (defun ratex--refresh-active-fragment-fast (fragment)
   "Refresh active FRAGMENT without invoking the full point parser.
 This handles the dominant post-command case: point is still inside the same
 formula, so local delimiter search is enough to update bounds and content after
 ordinary edits."
   (when (ratex--point-in-fragment-p fragment)
-    (or (ratex--refresh-active-delimited-fragment fragment)
+    (or (if (or (plist-get fragment :environment) (plist-get fragment :block))
+            (ratex--refresh-active-structured-fragment fragment)
+          (ratex--refresh-active-delimited-fragment fragment))
         fragment)))
 
 (defun ratex--active-fragment-at-point ()
@@ -934,7 +952,10 @@ never goes fully stale during rapid continuous input."
                                    (ratex--cancel-force-preview)
                                    (ratex--refresh-preview-now)))))
                            (current-buffer))))
-          (ratex--hide-edit-preview))))))
+          (ratex--hide-edit-preview)
+          ;; Hiding clears these for the next session; keep the dedup above.
+          (setq-local ratex--last-point pt
+                      ratex--last-tick tick))))))
 
 (defun ratex--display-edit-preview (fragment &optional response image error-text)
   "Display edit preview for FRAGMENT using the configured style.

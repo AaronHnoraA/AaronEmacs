@@ -461,11 +461,15 @@ Called interactively, from `kill-emacs-hook', and when the last `ratex-mode'
 buffer goes away -- the backend holds a render cache of fully embedded SVGs,
 so an idle process is not free."
   (interactive)
-  (when (ratex-backend-live-p)
-    (ratex-debug-log "stop backend")
-    ;; The sentinel resolves pending requests and cancels their timers.
-    (delete-process ratex--process))
-  (setq ratex--process nil)
+  (let ((process ratex--process))
+    (setq ratex--process nil)
+    (when (and process (process-live-p process))
+      (ratex-debug-log "stop backend")
+      ;; The sentinel would run later, when a mode change in the same command
+      ;; may already have started a new backend.
+      (set-process-sentinel process #'ignore)
+      (delete-process process)
+      (ratex--fail-pending-requests "backend stopped")))
   (setq ratex--read-chunks nil
         ratex--read-buffer ""))
 
@@ -670,28 +674,32 @@ for large SVG payloads."
         (when (gethash id ratex--pending)
           (ratex--resolve-pending-request id data))))))
 
+(defun ratex--fail-pending-requests (reason)
+  "Resolve every pending request with failure REASON and cancel its timer."
+  (let ((error-response (ratex--error-response reason))
+        pending-ids
+        timer-ids)
+    (maphash
+     (lambda (id _callback)
+       (push id pending-ids))
+     ratex--pending)
+    (maphash
+     (lambda (id _timer)
+       (push id timer-ids))
+     ratex--pending-timers)
+    (dolist (id pending-ids)
+      (ratex--resolve-pending-request id error-response))
+    (dolist (id timer-ids)
+      (when-let* ((timer (gethash id ratex--pending-timers)))
+        (when (timerp timer)
+          (cancel-timer timer))
+        (remhash id ratex--pending-timers)))))
+
 (defun ratex--process-sentinel (proc event)
   "Handle backend PROC EVENT."
   (ratex-debug-log "process sentinel live=%s event=%s" (process-live-p proc) (string-trim event))
-  (unless (process-live-p proc)
-    (let ((error-response (ratex--error-response (string-trim event)))
-          pending-ids
-          timer-ids)
-      (maphash
-       (lambda (id _callback)
-         (push id pending-ids))
-       ratex--pending)
-      (maphash
-       (lambda (id _timer)
-         (push id timer-ids))
-       ratex--pending-timers)
-      (dolist (id pending-ids)
-        (ratex--resolve-pending-request id error-response))
-      (dolist (id timer-ids)
-        (when-let* ((timer (gethash id ratex--pending-timers)))
-          (when (timerp timer)
-            (cancel-timer timer))
-          (remhash id ratex--pending-timers))))
+  (when (and (not (process-live-p proc)) (eq proc ratex--process))
+    (ratex--fail-pending-requests (string-trim event))
     (setq ratex--read-chunks nil
           ratex--read-buffer ""
           ratex--process nil)))
