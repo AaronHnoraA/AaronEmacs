@@ -280,6 +280,13 @@ property the same way TRAMP marks static defaults, so it is not persisted."
                         (equal (aref entry 7) (plist-get config :port)))))
         (aref entry 8)))))
 
+(defun remote-backend-tramp--file-name-host (host)
+  "Return HOST as a TRAMP file name spells it.
+An IPv6 literal is bracketed: TRAMP reads a bare one as a malformed name."
+  (if (string-search ":" host)
+      (concat "[" host "]")
+    host))
+
 (defun remote-backend-tramp-file-name (localname link method)
   "Return a TRAMP file name for LOCALNAME through LINK using METHOD."
   (let* ((runtime (remote-pipeline-active-runtime link))
@@ -320,7 +327,7 @@ property the same way TRAMP marks static defaults, so it is not persisted."
                                  (not (string-empty-p hop-user)))
                             (concat hop-user "@")
                           "")
-                        hop-host
+                        (remote-backend-tramp--file-name-host hop-host)
                         (if hop-port (format "#%s" hop-port) ""))))
                     "|")
                    localname)
@@ -329,7 +336,7 @@ property the same way TRAMP marks static defaults, so it is not persisted."
                         (if (and user (not (string-empty-p user)))
                             (concat user "@")
                           "")
-                        host
+                        (remote-backend-tramp--file-name-host host)
                         (if port (format "#%s" port) "")
                         localname))))
         (when (and runtime endpoint (null hops)

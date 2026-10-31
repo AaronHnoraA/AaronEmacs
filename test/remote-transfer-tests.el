@@ -698,8 +698,12 @@
           (should (eq (remote-transfer-test--wait again) 'failed))
           (should (/= (remote-transfer-job-id again)
                       (remote-transfer-job-id failed)))))
-      (remote-transfer-list-clear)
-      (should-not remote-transfer-jobs))))
+      (let ((logs (mapcar #'remote-transfer-job-log-buffer
+                          remote-transfer-jobs)))
+        (remote-transfer-list-clear)
+        (should-not remote-transfer-jobs)
+        ;; No window shows these, which is not a reason to keep them.
+        (should-not (seq-some #'buffer-live-p logs))))))
 
 (ert-deftest remote-transfer-target-side-operations-use-one-routed-lifecycle ()
   "Copy, move and all link methods work through the same local target route."

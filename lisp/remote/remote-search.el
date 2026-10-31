@@ -72,7 +72,7 @@ The path is :pending or :failed while provisioning is incomplete.")
 (defun remote-search--archive-cache-directory ()
   "Return the client-local archive cache directory."
   (let* ((default-directory temporary-file-directory)
-         (process-environment (default-value 'process-environment))
+         (process-environment (remote-client-process-environment))
          (xdg (getenv "XDG_CACHE_HOME"))
          (base
           (if (and xdg (file-name-absolute-p xdg)
@@ -91,8 +91,8 @@ The path is :pending or :failed while provisioning is incomplete.")
 (defun remote-search--client-command (directory program &rest args)
   "Run client-local PROGRAM with ARGS in DIRECTORY, or signal an error."
   (let ((default-directory (file-name-as-directory directory))
-        (exec-path (default-value 'exec-path))
-        (process-environment (default-value 'process-environment)))
+        (exec-path (remote-client-exec-path))
+        (process-environment (remote-client-process-environment)))
     (unless (equal (apply #'call-process program nil nil nil args) 0)
       (error "Client-side %s failed while preparing ripgrep" program))))
 
@@ -360,12 +360,12 @@ path, so package and SSH diagnostic output cannot be mistaken for the result."
              (generation remote-config-generation)
              (version remote-search-ripgrep-version)
              (default-directory temporary-file-directory)
-             (exec-path (default-value 'exec-path))
+             (exec-path (remote-client-exec-path))
              (process-environment
               (cons (concat "REMOTE_SEARCH_TARGET=" target-id)
                     (cons (concat "REMOTE_SEARCH_CONFIG="
                                   remote-config-file)
-                          (default-value 'process-environment))))
+                          (remote-client-process-environment))))
              process)
         (condition-case error
             (progn

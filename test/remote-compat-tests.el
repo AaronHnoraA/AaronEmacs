@@ -269,6 +269,18 @@
           (set 'tramp-rpc-deploy-version old-value)
         (makunbound 'tramp-rpc-deploy-version)))))
 
+(ert-deftest remote-tramp-file-name-brackets-an-ipv6-host ()
+  "TRAMP has to be able to read the name back, port and all."
+  (let* ((link (remote-link-create
+                :id "v6/ssh" :target-id "v6"
+                :config '(:host "2001:db8::1" :user "u" :port 2222)))
+         (name (remote-backend-tramp-file-name "/tmp/x" link "ssh"))
+         (vec (tramp-dissect-file-name name)))
+    (should (equal name "/ssh:u@[2001:db8::1]#2222:/tmp/x"))
+    (should (equal (tramp-file-name-host vec) "2001:db8::1"))
+    (should (equal (tramp-file-name-port vec) "2222"))
+    (should (equal (tramp-file-name-localname vec) "/tmp/x"))))
+
 ;; Startup alone installs the shims several times, and each install used to
 ;; spawn the three git commands of the release contract again.
 (ert-deftest remote-tramp-rpc-git-answers-last-until-the-checkout-changes ()

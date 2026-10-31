@@ -773,8 +773,12 @@ Target-side operations are preflighted again against the current filesystem."
   (interactive)
   (dolist (job remote-transfer-jobs)
     (unless (eq (remote-transfer-job-state job) 'running)
-      (when (buffer-live-p (remote-transfer-job-log-buffer job))
-        (quit-windows-on (remote-transfer-job-log-buffer job) t))))
+      (when-let* ((log (remote-transfer-job-log-buffer job))
+                  ((buffer-live-p log)))
+        (quit-windows-on log t)
+        ;; That only kills a log some window shows.
+        (when (buffer-live-p log)
+          (kill-buffer log)))))
   (setq remote-transfer-jobs (remote-transfer--running))
   (remote-transfer--refresh))
 
