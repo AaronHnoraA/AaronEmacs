@@ -10,18 +10,24 @@
 ;; run nothing else.  M-x itself stays inside Emacs.
 ;;
 ;; A background Emacs also leaves the Dock and Cmd-Tab; it returns to both
-;; when shown.  That needs the `macos-window' module built by
-;; `bin/emacs-app build'; without it the Dock icon stays.
+;; when shown.  Undecorated frames drag from their narrow top edge.
+;; Both need the `macos-window' module built by `bin/emacs-app build';
+;; without it the Dock icon stays and frames have no drag edge.
 
 ;;; Code:
 
 (declare-function +macos-native-p "os/macos/system" ())
 (declare-function macos-window-set-accessory "ext:macos-window" (accessory))
+(declare-function macos-window-install-drag-handles "ext:macos-window" (height))
 (declare-function ns-hide-emacs "nsfns.m" (on))
 (declare-function +window-dashboard-buffer "ui/windows/config" ())
 
 (defvar +background-hide-dock-icon t
   "Whether a background Emacs leaves the Dock, given the window module.")
+
+(defvar +frame-drag-handle-height 6
+  "Height in points of the draggable top border of a frame.
+Nil leaves frames without an edge drag target.")
 
 (defvar +background--frames nil
   "Frames made invisible by `+background/hide', most recently used first.")
@@ -198,6 +204,11 @@ symbol `background', or any other non-nil value for the foreground."
           (or (eq state 'background)
               (and (not state)
                    (equal (+background-status) "background")))))))
+
+(defun +frame-install-drag-handles ()
+  "Let every top-level frame be dragged from its narrow top edge."
+  (when (and +frame-drag-handle-height (+macos-native-p))
+    (macos-window-install-drag-handles +frame-drag-handle-height)))
 
 ;;; Actions from outside Emacs
 
@@ -469,10 +480,11 @@ client returns at once."
 ;; `make-frame' puts Emacs back in the Dock, and a deleted frame may have been
 ;; the last visible one, so the window state is applied again on both.
 (defun +background--refresh-window-state-h (&rest _)
-  "Reapply the Dock policy after frame changes."
+  "Reapply the Dock policy and top-edge drag after frame changes."
   (setq +background--frames
         (seq-filter #'frame-live-p +background--frames))
-  (+background-apply-dock-policy))
+  (+background-apply-dock-policy)
+  (+frame-install-drag-handles))
 
 (defun +background--new-frame-dashboard (frame)
   "Show the Dashboard in a new top-level editing FRAME."

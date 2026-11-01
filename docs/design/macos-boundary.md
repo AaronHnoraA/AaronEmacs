@@ -7,7 +7,7 @@
 ## 范围
 
 - 管：Finder 与 Dock 打开文件、拖放、系统请求退出；打开、在 Finder 中显示、
-  Quick Look、文件进出剪贴板；通知与 Dock 角标。
+  Quick Look、文件进出剪贴板；通知与 Dock 角标；顶层 frame 的顶边拖动。
 - 不管：键位与修饰键、帧外观、性能调节（`os/macos/config.el`）；输入法
   （`os/macos/input.el`）；隐藏、Dock 策略与后台应用（`config/background/config.el`，
   见 `AGENT.md` “Background application”）；Noema 页面和 Portal Web 内部的拖放与
@@ -91,6 +91,11 @@ aaron-notify ──→ 历史（总是）
 点击能回到 Emacs。未授权时退回 `osascript`，通知照常出现，但图标是脚本图标，
 点击也没有效果。
 
+### 顶边拖动
+
+无标题栏的顶层 frame 从顶部窄边（`+frame-drag-handle-height`）拖动：`window.m` 在该边框
+上拦下鼠标按下，交给系统的窗口拖动，标签行和其他三条边不受影响，全屏时不生效。
+
 ## 契约
 
 - **C1 单一边界。** Finder 打开、退出请求、文件与 URL 拖放、系统打开、Finder 显示、
@@ -131,6 +136,7 @@ aaron-notify ──→ 历史（总是）
 | 内容 | 位置 |
 | --- | --- |
 | 呈现钩子、外发动作、通知后端、剪贴板 | `lisp/os/macos/system.el` |
+| 顶边拖动 | `tools/macos-background/window.m` |
 | 拖放状态机 | `lisp/os/macos/drop.el` |
 | `set-file-drop-handler!` | `lisp/os/macos/autoload/drop.el` |
 | 通用通知 `aaron-notify`、历史 `aaron/notifications` | `lisp/core/aaron-notify.el` |
