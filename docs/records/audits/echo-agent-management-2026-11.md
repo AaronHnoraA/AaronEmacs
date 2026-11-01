@@ -30,6 +30,7 @@
 | client 退出后仍显示待审批和忙碌，Review 跳到已失效的按钮，结束会话还问“有工作” | 快照直接读取残留的 `:tool-calls` | C38 |
 | 程序化回合不清除上次错误，运行中显示 failed | `+agent-acp-prompt` 没走 `input-submitted` | C37 |
 | 对空闲会话按停止仍发送 `session/cancel` | `+agent-acp-stop` 没有判断 | C38 |
+| Run 期间在输入区提交，会并发第二个 `session/prompt`；Run 结束也不发送队列，提示却说会发送 | shell-maker 不知道结构化回合在运行，fixture 收到第二个 prompt | C37 |
 | 退出 Emacs 只保护原生队列，运行中的回合和草稿直接丢失 | 上游查询只看 `:pending-prompts` | C43 |
 
 ## 采纳与不采纳

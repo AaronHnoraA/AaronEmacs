@@ -672,6 +672,13 @@ when present; the exact Codex message is the isolated compatibility fallback."
         ((and (derived-mode-p 'agent-shell-mode)
               (equal (agent-shell--prompt-input) "/resume"))
          (+agent-shell/resume))
+        ;; A Run's input is frozen, so what is typed during it waits its turn
+        ;; rather than steering the Run or racing it with a second prompt.
+        ((and (derived-mode-p 'agent-shell-mode)
+              (+agent-acp-structured-turn-p (current-buffer)))
+         (when-let* ((prompt (agent-shell--prompt-input)))
+           (agent-shell--prompt-queue-enqueue :prompt prompt)
+           (agent-shell--clear-prompt-input)))
         (t (apply original args))))
 
 (defun +agent-shell/here (agent)

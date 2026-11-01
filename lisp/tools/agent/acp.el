@@ -2695,6 +2695,13 @@ from transport and preserves any draft at the native input prompt."
               contexts "\n\n")
        :expanded nil :navigation 'never :above-last-prompt t))))
 
+(defun +agent-acp-structured-turn-p (buffer)
+  "Whether a structured prompt is running in BUFFER.
+shell-maker does not know about it, so the native input would otherwise send a
+second, concurrent prompt into the same session."
+  (eq (plist-get (buffer-local-value '+agent-acp--prompt-receipt buffer) :status)
+      'pending))
+
 (defun +agent-acp--finish-prompt (buffer receipt)
   "Restore native input for RECEIPT, unless BUFFER has begun another turn."
   (when (and (+agent-acp-agent-buffer-p buffer)
@@ -2714,7 +2721,11 @@ from transport and preserves any draft at the native input prompt."
                              (t "Completed"))
            :above-last-prompt (and (not +agent-render--pending)
                                    (+agent-acp--live-input-p)))
-        (+agent-acp-restore-prompt buffer)))))
+        (+agent-acp-restore-prompt buffer)
+        ;; A structured turn bypasses the native flow that sends the queue, and
+        ;; the Run's owner may start the next one: leave it for the person.
+        (+agent-acp--hold-queue)
+        (+agent-acp--changed)))))
 
 (cl-defun +agent-acp-prompt (&key buffer content run-id on-success on-failure process-queue)
   "Send CONTENT through BUFFER's initialized ACP session.

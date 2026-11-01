@@ -218,8 +218,10 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   同一 Agent 命令及前缀；普通 Emacs 的 Normal、Insert、Emacs 状态保留同一入口。
   不另增混合管理键。测试：`agent-entry-c29-*`。
 - **C37 停止和失败挂起队列。** 回合以 `end_turn` 结束才自动发送原生队列。取消、
-  异常结束（`refusal`、`max_tokens` 等）、错误、client 退出和重启把待发 prompt
-  移到 Emacs 持有的挂起区，事件回调不提问；此后的普通回合不带走它们，由人在队列
+  异常结束（`refusal`、`max_tokens` 等）、错误、client 退出、重启，
+  以及 Research 的结构化回合结束（它绕过原生发送，下一步归 Run owner）把待发
+  prompt 移到 Emacs 持有的挂起区，事件回调不提问。Run 期间在输入区提交的内容
+  只进队列，不 steering 也不并发第二个 prompt，以保持 Run 的冻结输入；此后的普通回合不带走它们，由人在队列
   面板恢复。计数同时包含挂起区，结束确认和恢复记录也保护它。异常结束不算完成：
   `:stop-reason` 记录事实，并按 failed 提醒。测试：`agent-queue-c37-*`。
 - **C38 client 退出是即时事实。** 进程结束的当下更新视图、挂起队列并按 failed
@@ -303,8 +305,6 @@ G4–G9 与 G11 的项目池、显示归属、返回、预览及物理替换问�
   结构化事件的提供商仍不能通过解析聊天正文推断等待回答。
 - **G2 外部执行附着。** 已在另一客户端执行的任务依旧只能显示真实的忙碌事实，
   不能把历史恢复伪装成附着或复制一份执行。
-- **G12 Research 回合后的队列。** `+agent-acp-prompt` 绕过原生输入流程，Run 结束
-  时不发送队列；人在 Run 期间排的 prompt 留在队列里，需要在面板恢复。
 - **G13 真实 SSH 实测。** C37–C44 已在客户端无法直接访问的 Remote target 上经 `/fs:`
   路由验证（`agent-remote-routed-*`），但没有真实网络与断线。
   `test/agent-lifecycle-remote-live.el` 覆盖真实目标，需要允许写入目标的 `/tmp`，尚未运行。

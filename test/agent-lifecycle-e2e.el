@@ -204,6 +204,22 @@
              (+agent-session-attention-rank (list :unread-kind 'done))))
   (should-not (+agent-session-attention-rank (list :process-state 'live))))
 
+(ert-deftest agent-queue-c37-a-run-leaves-the-queue-held ()
+  "A structured turn never sends the queue, so it must not claim it will."
+  (agent-lifecycle-e2e--with-session (buffer store directory)
+    (+agent-acp-prompt :buffer buffer :run-id "run-1"
+                       :content (list '((type . "text") (text . "hold"))))
+    (agent-flow-e2e--wait (lambda () (+agent-acp-busy-p buffer)))
+    (agent-flow-e2e--send buffer "later")
+    (should (= 1 (length (+agent-acp-state-value buffer '(:pending-prompts)))))
+    (+agent-acp-interrupt buffer t)
+    (agent-flow-e2e--idle buffer)
+    (should (= 1 (+agent-acp-held-prompt-count buffer)))
+    (should-not (+agent-acp-state-value buffer '(:pending-prompts)))
+    (should-not agent-lifecycle-e2e--asked)
+    (should-not (cl-some (lambda (line) (string-match-p "\"text\":\"later\"" line))
+                         (agent-lifecycle-e2e--events store)))))
+
 (ert-deftest agent-queue-c39-edits-the-held-and-native-queue-as-one-list ()
   (agent-lifecycle-e2e--with-session (buffer store directory)
     (agent-flow-e2e--send buffer "hold")
