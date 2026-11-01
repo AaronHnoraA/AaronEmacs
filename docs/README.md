@@ -125,6 +125,7 @@ Dated and append-only. Read them for why something is the way it is, never for h
 - [agent-manager-lifecycle-2026-10.md](records/audits/agent-manager-lifecycle-2026-10.md) Direct Agent Manager, Aaron UI workspace grouping and popup integration, with restart, cancellation, recycling and callback lifetime verification.
 - [agent-manager-workflow-2026-10.md](records/audits/agent-manager-workflow-2026-10.md) Unified management views and native chat preview, source groups including Noema/Pi, Emacs-owned retention, and real protocol/GUI workflow verification.
 - [agent-project-pool-display-2026-10.md](records/audits/agent-project-pool-display-2026-10.md) Project-wide agent pools, window-owned placement and return, restart/resume races, and real multi-frame navigation audit.
+- [echo-agent-management-2026-11.md](records/audits/echo-agent-management-2026-11.md) Source study of echo-agent with adopt/reject decisions; held queues, client exit, attention navigation, saved conversations and session changes.
 - [doom-template-2026-10.md](records/audits/doom-template-2026-10.md) Completed Doom-template restructuring workbench.
 - [doom-template-comparison-2026-10.md](records/audits/doom-template-comparison-2026-10.md) Source-by-source Doom audit and optional behavior differences.
 - [entrypoint-audit-2026-10.md](records/audits/entrypoint-audit-2026-10.md) Current entry map, comparisons with Lunarymacs, Doom, Spacemacs and Prelude, and the ongoing command and lifecycle review.

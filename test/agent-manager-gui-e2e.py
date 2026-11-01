@@ -15,6 +15,7 @@ SERVER = 'agent-manager-e2e-' + uuid.uuid4().hex[:12]
 SCENARIOS = {
     'manager': ('test/agent-manager-gui-e2e.el', 'agent-manager-gui-e2e-run'),
     'display': ('test/agent-display-audit-gui-e2e.el', 'agent-display-audit-gui-e2e-run'),
+    'queue': ('test/agent-queue-gui-e2e.el', 'agent-queue-gui-e2e-run'),
 }
 
 

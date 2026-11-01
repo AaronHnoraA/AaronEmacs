@@ -1715,6 +1715,11 @@ This is a memory-only check; it never opens an inactive project or reads disk."
    (require 'noema-pi-router)
    (noema-pi-api params)))
 (remote-gateway-register-method
+ "noema.agent"
+ (lambda (params _client)
+   (remote-require-on-client 'tools/agent/api)
+   (+agent/api params)))
+(remote-gateway-register-method
  "noema.file.read" #'+noema--external-file-read)
 (remote-gateway-register-method
  "noema.file.write" #'+noema--external-file-write)

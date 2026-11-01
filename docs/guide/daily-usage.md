@@ -1800,7 +1800,11 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 | `C-c A e` | 在 Emacs 源 buffer 里打开 Noema 页面的笔记，并选中页面选区 |
 | `C-c A p` | 把当前 agent-shell session 纳入 research |
 | `C-c A S` | Agent Manager 会话页；`C-u` 仅看当前项目 |
-| `C-c A G` | 同一管理器的 Inbox：待审批、待回答、失败或未读结果 |
+| `C-c A G` | 同一管理器的 Inbox：待审批、待回答、失败或未读结果，最急的在前 |
+| `C-c A j` | 下一个等待你的会话，跨项目循环，直接落在审批或问答控件上；`C-u` 只看当前项目 |
+| `C-c A q` | 排队的 prompt：`e` 编辑、`d` 删除、`J/K` 调序、`s` 立即发送、`r` 恢复、`h` 挂起 |
+| `C-c A h` | 选择并恢复提供方保存的对话，不需要活动会话；取消不留下 buffer |
+| `C-c A l` | 打开这个会话报告改过的文件 |
 | `C-c A b` | 在当前窗口预览真实会话，取消时恢复原窗口和位置 |
 | `C-c A U` | 同一管理器的 Usage 页；详细额度诊断用 `M-x +agent-top-report` |
 | `C-c A O` | 编排面板：Task / Job / Worker / Delegation / 事件 |
@@ -1881,7 +1885,7 @@ Noema worker 和 Pi 同池管理，执行 target 不同则隔离。共享管理�
 Noema 持久会话另见 `M-x noema-sessions`：保留 Last Run、失败类型、已读标记、
 Research fork 与上下文重建。它读取业务记录，和物理会话列表分工明确。
 Pi 的历史与活跃指针由 `M-x noema-pi-sessions` 独立管理，Dashboard 的 `pi`
-按钮也可进入；Pi 不建立 Research Session 关联。
+按钮召回主 Pi；Pi 不建立 Research Session 关联。
 
 多个 work 块可以同时执行（`noema-agent-worker-max-concurrent-runs`，默认 3，
 设为 1 即完全串行）；mode line 的 `Noema[▶2 ⋯1 !1]` 分别是执行中、等待执行
@@ -2064,8 +2068,15 @@ Run 声明新命名会话，与树里的原生 `f` 不同；WorkNode DAG 仍描�
 Markdown 语法审阅指导；维护实现使用 `emacs-noema-dev`。Skill 库位于
 `~/Documents/Noema/public/README/Skills/`，深度参考按需读取。
 
-Emacs 启动后有一个隐藏的主 Pi；明确进入本地项目后复用项目子 Pi，不抢焦点、
-不自动发送模型请求。`M-x noema-pi-emacs-open` 打开主 Pi，`C-c A P` 打开项目 Pi。
+Emacs 启动后在首次 idle 预热隐藏的主 Pi；明确进入本地项目后复用项目子 Pi，不抢焦点、
+不自动发送模型请求。`M-x pi`（`noema-pi-emacs-open`）、`C-c A P` 和 Dashboard
+的 `pi` 召回主 Pi；在其窗口再次调用会收起并返回编辑位置。
+`C-u C-c A P` 或 `M-x noema-pi-router-open` 打开来源项目 Pi。
+主 Pi 查询当前文件、项目和位置引用，通过共享 Agent 接口派发明确任务、查看进度
+与结果。后台发送不抢焦点，已受理或排队不表示任务完成；历史仍用 `noema-pi-sessions`。
+自动预热默认等待 0.5 秒 idle（`noema-pi-idle-delay`）；快速切换时只预热最后选择的
+项目，明确打开和发送立即执行。关闭 `noema-pi-assistant-mode` 会取消待预热工作，
+保留已有对话。Pi Sessions 只在可见时合并刷新，隐藏后释放 UI 订阅与刷新计时器。
 `C-c A c` 根据 `noema-prompt-document` Skill 申请普通 Markdown 文档；保存后
 `C-c A s` 才交给 Agent 执行。没有额外 Compose 界面。
 

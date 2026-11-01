@@ -214,7 +214,8 @@ agent-shell、acp.el、shell-maker 使用固定版本的 package-vc 依赖，可
 
 - 打开 Emacs 主程序进入 Dashboard，常驻 Pi 后台初始化；进入项目时复用项目 Pi。
 - `M-x noema` / `C-c A W` 打开项目 Pi；`M-x noema-pi-emacs-open` 打开主 Pi。
-- Dashboard 的 `pi` / `M-x noema-pi-sessions` 管理 Pi 历史；Ibuffer 的 Pi 组列出实际 buffer。
+- Dashboard 的 `pi`、`M-x pi` / `C-c A P` 召回主 Pi，再次调用收起；带前缀打开项目 Pi。
+  `M-x noema-pi-sessions` 管理历史；Ibuffer 的 Pi 组列出实际 buffer。
 - `C-c A a` 选择并启动普通 Agent；`C-c A S` 打开共享 Agent Manager。
 - `C-c A c` 通过项目 Pi Skill 创建并打开普通 Markdown prompt 文档，编辑保存后
   用 `C-c A s` 发给已有 Agent；`C-c A m` 打开会话菜单。

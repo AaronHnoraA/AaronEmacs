@@ -162,7 +162,7 @@
                        (lambda (&rest _) nil)))
               (+agent-acp--subscribe-attention buffer)
               (+agent-acp--subscribe-attention buffer)
-              (should (= (length subscriptions) 5))
+              (should (= (length subscriptions) 7))
               (let ((callback (plist-get (car subscriptions) :callback))
                     (event '((:event . turn-complete)
                              (:data . ((:stop-reason . "end_turn"))))))
@@ -188,7 +188,7 @@
             (should (memq 'permission-request subscriptions))
             (should (memq 'turn-complete subscriptions))
             (+agent-acp--watch-attention-h)
-            (should (= (length subscriptions) 5))))
+            (should (= (length subscriptions) 7))))
       (when (buffer-live-p buffer) (kill-buffer buffer)))))
 
 (ert-deftest +agent-acp-renamed-shell-restores-real-input-and-submits ()
@@ -603,8 +603,13 @@
               (should (eq stopped main))
               (should-not interrupted)
               (setq +agent-acp-stop-functions nil)
+              ;; Nothing is running, so nothing is cancelled.
+              (should-error (+agent-acp-stop main) :type 'user-error)
+              (should-not interrupted)
+              (with-current-buffer main (setq-local shell-maker--busy t))
               (+agent-acp-stop main)
               (should interrupted)
+              (with-current-buffer main (setq-local shell-maker--busy nil))
               ;; Name actions are unavailable for a retired buffer.
               (let ((active (lambda (buffer label)
                               (let ((item (seq-find (lambda (item)

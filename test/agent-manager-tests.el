@@ -145,7 +145,9 @@
             (should (equal (plist-get inserted :text) "unsent draft"))
             (should-not (plist-get inserted :submit))
             (should (eq (plist-get inserted :shell-buffer) new))
-            (should (equal (+agent-acp-state-value new '(:pending-prompts)) '("next" "later")))
+            ;; Retained, and not sent by the first turn after the restart (C37).
+            (should (equal (buffer-local-value '+agent-acp--held-prompts new) '("next" "later")))
+            (should-not (+agent-acp-state-value new '(:pending-prompts)))
             (should (eq (buffer-local-value '+agent-acp-session-origin new) 'intervention))
             (should (equal (buffer-local-value '+agent-acp-session-name new) "restart"))
             (should (eq displayed new)))

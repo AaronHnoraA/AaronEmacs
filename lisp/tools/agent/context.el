@@ -25,6 +25,46 @@
 (require 'tools/agent/selection)
 (declare-function which-function "which-func" ())
 
+(defun +agent-context-state (&optional window)
+  "Query WINDOW's editor source as references, without saving or copying text.
+Agent views use their own frame's origin.  Page-owned Markdown buffers expose
+only their known file identity, never the placeholder's point or contents."
+  (let* ((window (or window (selected-window)))
+         (origin (+agent-view-origin-window window))
+         (record (window-parameter window '+agent-view))
+         (previous (and (eq (window-buffer window) (plist-get record :buffer))
+                        (plist-get record :previous)))
+         (buffer (if origin (window-buffer origin)
+                   (if (buffer-live-p (car previous)) (car previous)
+                     (window-buffer window))))
+         (position (cond (origin (window-point origin))
+                         (previous (cadr previous))
+                         (t (window-point window)))))
+    (with-current-buffer buffer
+      (let* ((source-available (not (+agent-acp-agent-buffer-p buffer)))
+             (page (and (fboundp 'noema-md-bridge-pane-p)
+                        (noema-md-bridge-pane-p buffer)))
+             (file (and source-available
+                        (if page (bound-and-true-p +noema-buffer-file-name) buffer-file-name)))
+             (directory (and source-available default-directory))
+             (root (and directory (+agent-acp-project-root directory))))
+        (append
+         `((buffer . ,(buffer-name buffer)) (mode . ,(symbol-name major-mode))
+           (file . ,file) (directory . ,directory) (root . ,root)
+           (sourceAvailable . ,(if source-available t :false))
+           (target . ,(when (or file directory) (remote-file-name-target (or file directory))))
+           (logicalFile . ,(when file (remote-canonicalize-emacs-file-name file)))
+           (activeProject . ,(bound-and-true-p +project-active-root))
+           (pageOwned . ,(if page t :false)))
+         (when (and source-available (not page))
+           (save-restriction
+             (widen)
+             `((modified . ,(if (buffer-modified-p) t :false))
+               (line . ,(line-number-at-pos position t))
+               (selection . ,(when (and origin (use-region-p))
+                               `((startLine . ,(line-number-at-pos (region-beginning) t))
+                                 (endLine . ,(+agent-context--end-line buffer (region-end))))))))))))))
+
 (defgroup +agent-context nil
   "Handing editor context to an agent session by reference."
   :group '+agent-session)
@@ -288,8 +328,8 @@ is always last and does not replace the remembered session."
           (concat (cdr instructions) "\n\n" (map-elt (car copy) 'text)))
     copy))
 
-(defun +agent-context--deliver (buffer blocks &optional instructions)
-  "Send content BLOCKS to agent BUFFER as soon as its session can take a turn."
+(defun +agent-context--deliver (buffer blocks &optional instructions no-focus)
+  "Send BLOCKS when BUFFER can take a turn; NO-FOCUS preserves the editor."
   (cond
    ;; A session started for this send is still shaking hands with its agent.
    ((not (+agent-acp-state-value buffer '(:session :id)))
@@ -302,7 +342,7 @@ is always last and does not replace the remembered session."
                            (+agent-acp-unsubscribe
                             :buffer buffer :subscription subscription))
                          (when (buffer-live-p buffer)
-                           (+agent-context--deliver buffer blocks instructions))))))
+                           (+agent-context--deliver buffer blocks instructions no-focus))))))
     (message "Agent: the session is starting; your context follows"))
    ;; Mid-turn: agent-shell's own queue sends it when the turn finishes.  A
    ;; queued prompt is plain text, so the references travel as the same
@@ -314,12 +354,13 @@ is always last and does not replace the remembered session."
            (content (if first (+agent-context--with-instructions blocks instructions)
                       blocks))
            (accepted t))
-      (if (+agent-acp-busy-p buffer)
+      (if (or (+agent-acp-busy-p buffer)
+              (> (+agent-acp-pending-prompt-count buffer) 0))
           (progn
             (+agent-acp-enqueue buffer (map-elt (car content) 'text))
             (message "Agent: the session is busy; your context is queued"))
         (+agent-acp-prompt
-         :buffer buffer :content content
+         :buffer buffer :content content :process-queue t
          :on-failure (lambda (&rest _)
                        (setq accepted nil)
                        (when first (remhash key +agent-context--session-instructions)))))
@@ -328,7 +369,7 @@ is always last and does not replace the remembered session."
           (remhash (car (hash-table-keys +agent-context--session-instructions))
                    +agent-context--session-instructions))
         (puthash key t +agent-context--session-instructions)))))
-  (+agent-acp-show-buffer buffer))
+  (unless no-focus (+agent-acp-show-buffer buffer)))
 
 (defun +agent-context--report-skipped (skipped)
   "Say which entries in SKIPPED could not be turned into a reference."

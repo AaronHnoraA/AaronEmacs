@@ -12,6 +12,7 @@
 (require 'map)
 (require 'json)
 (require 'project)
+(require 'ring)
 (require 'seq)
 (require 'simple)
 (require 'tab-line)
@@ -52,6 +53,8 @@ query disk/network while the shared registry renders.")
 (autoload '+agent-session-archive "tools/agent/sessions")
 (autoload '+agent/pool-switch "tools/agent/sessions" nil t)
 (autoload '+agent-session-list "tools/agent/sessions")
+(autoload '+agent/queue "tools/agent/queue" nil t)
+(autoload '+agent-queue-resume "tools/agent/queue" nil t)
 
 
 (declare-function magent-start "magent-agent-shell" ())
@@ -111,16 +114,91 @@ query disk/network while the shared registry renders.")
 (advice-add 'agent-shell--initiate-session-resume-by-id :filter-args
             #'+agent-acp--strict-restore-arguments)
 
+(defvar-local +agent-acp--choose-saved nil
+  "Non-nil makes this starting client ask which saved conversation to restore.")
+
+(defun +agent-acp-saved-session-choices (sessions &optional exclude)
+  "Return (LABEL . ID) for provider-listed SESSIONS, newest first, except EXCLUDE."
+  (mapcar (lambda (session)
+            (let ((id (map-elt session 'sessionId)))
+              (cons (format "%s  %s · %s"
+                            (agent-shell--session-title session)
+                            (agent-shell--format-session-date
+                             (or (map-elt session 'updatedAt)
+                                 (map-elt session 'createdAt) ""))
+                            id)
+                    id)))
+          (seq-filter (lambda (session)
+                        (let ((id (map-elt session 'sessionId)))
+                          (and (stringp id) (not (equal id exclude)))))
+                      (agent-shell--sort-sessions-by-recency sessions))))
+
+(defun +agent-acp--abandon-saved (buffer reason)
+  "End client BUFFER, which never opened a conversation, reporting REASON."
+  (when (+agent-acp-agent-buffer-p buffer) (+agent-acp-kill buffer))
+  (message "%s" reason))
+
+(defun +agent-acp--live-session (id directory)
+  "Return the buffer already serving native session ID in DIRECTORY, or nil."
+  (seq-find (lambda (buffer)
+              (and (+agent-acp-agent-buffer-p buffer)
+                   (equal id (+agent-acp-state-value buffer '(:session :id)))
+                   (equal directory (buffer-local-value 'default-directory buffer))
+                   (not (+agent-acp-client-exited-p buffer))))
+            (buffer-list)))
+
+(defun +agent-acp--pick-saved (buffer sessions continue)
+  "Ask which of SESSIONS BUFFER restores, then call CONTINUE with its identity."
+  (when (+agent-acp-agent-buffer-p buffer)
+    (with-current-buffer buffer
+      (let* ((choices (+agent-acp-saved-session-choices sessions))
+             (id (condition-case nil
+                     (and choices
+                          (cdr (assoc (completing-read "Resume conversation: " choices nil t
+                                                       nil nil (caar choices))
+                                      choices)))
+                   (quit nil)))
+             (live (and id (+agent-acp--live-session id default-directory))))
+        (cond ((null choices)
+               (+agent-acp--abandon-saved buffer "This agent has no saved conversations here"))
+              ((null id) (+agent-acp--abandon-saved buffer "Resume cancelled"))
+              (live (+agent-acp--abandon-saved buffer "That conversation is already open")
+                    (+agent-acp-show-buffer live))
+              (t (map-put! agent-shell--state :resume-session-id id)
+                 (funcall continue)))))))
+
+(defun +agent-acp--choose-saved-session (buffer state continue)
+  "List BUFFER's saved conversations, leaving the choice to a clean command loop.
+The list arrives in a process callback, which must not read the minibuffer."
+  (with-current-buffer buffer (setq +agent-acp--choose-saved nil))
+  (if (not (and (map-elt state :supports-session-list)
+                (or (map-elt state :supports-session-load)
+                    (map-elt state :supports-session-resume))))
+      (+agent-acp--abandon-saved buffer "This agent does not list saved conversations")
+    (with-current-buffer buffer
+      (agent-shell--list-sessions
+       :state state :cwd (agent-shell--resolve-path default-directory) :buffer buffer
+       :on-success (lambda (sessions)
+                     (run-at-time 0 nil #'+agent-acp--pick-saved buffer sessions continue))
+       :on-failure (lambda (_error _raw)
+                     (run-at-time 0 nil #'+agent-acp--abandon-saved buffer
+                                  "Could not list saved conversations"))))))
+
 (defun +agent-acp--strict-initiate-session (original &rest arguments)
   "Reject an unsupported requested restore before upstream can create anew."
   (let* ((buffer (or (plist-get arguments :shell-buffer) (current-buffer)))
          (state (+agent-acp--state buffer))
          (id (map-elt state :resume-session-id)))
-    (if (and id (buffer-local-value '+agent-acp-strict-restore buffer)
-             (not (or (map-elt state :supports-session-load)
-                      (map-elt state :supports-session-resume))))
-        (+agent-acp--restore-failed buffer id)
-      (apply original arguments))))
+    (cond
+     ((buffer-local-value '+agent-acp--choose-saved buffer)
+      (+agent-acp--choose-saved-session
+       buffer state (lambda () (apply #'+agent-acp--strict-initiate-session
+                                      original arguments))))
+     ((and id (buffer-local-value '+agent-acp-strict-restore buffer)
+           (not (or (map-elt state :supports-session-load)
+                    (map-elt state :supports-session-resume))))
+      (+agent-acp--restore-failed buffer id))
+     (t (apply original arguments)))))
 (advice-add 'agent-shell--initiate-session :around #'+agent-acp--strict-initiate-session)
 
 (defun +agent-acp-list-native-sessions (buffer callback &optional page-limit)
@@ -374,6 +452,7 @@ New views store their return point on the window through tools/agent/views.")
 
 (autoload '+agent-session-menu "tools/agent/menu" nil t)
 
+(defvar +agent-prefix-map)
 (defvar +agent-acp-tabs-mode-map (make-sparse-keymap)
   "Keymap for managing sessions inside the Agent window.")
 
@@ -546,7 +625,10 @@ process through this buffer-local name, so it must follow every rename."
          (define-key map [tab-line mouse-3] #'ignore)
          (propertize (concat (if (+agent-acp-busy-p buffer) " ● " "  ")
                              (or (buffer-local-value '+agent-acp-session-name buffer)
-                                 (+agent-acp--tab-label buffer)) " ")
+                                 (+agent-acp--tab-label buffer))
+                             (let ((queued (+agent-acp-pending-prompt-count buffer)))
+                               (if (> queued 0) (format " +%d" queued) ""))
+                             " ")
                      'face (if selected 'tab-line-tab-current 'tab-line-tab-inactive)
                      'mouse-face 'tab-line-highlight
                      'help-echo (if selected
@@ -707,30 +789,88 @@ Noema's named Sessions list and WorkNode DAG retain their own meanings."
   (advice-add 'agent-shell-fork-tree--visit :around
               #'+agent-acp--conversation-tree-visit-a))
 
+(defun +agent-acp-client-exited-p (buffer)
+  "Whether BUFFER's ACP client process existed and has ended.
+Nothing that process owed can still arrive, so its requests are history."
+  (let ((process (+agent-acp-state-value buffer '(:client :process))))
+    (and (processp process) (not (process-live-p process)))))
+
+(defun +agent-acp--permission-request (state)
+  "Return the tool call in STATE awaiting a permission answer, or nil."
+  (cdr (seq-find (lambda (entry) (map-elt (cdr entry) :permission-request-id))
+                 (map-elt state :tool-calls))))
+
+(defun +agent-acp--pending-elicitation (state)
+  "Return the form in STATE awaiting an answer, or nil."
+  (cdr (seq-find (lambda (entry) (eq (map-elt (cdr entry) :status) 'pending))
+                 (map-elt state :elicitations))))
+
+(defun +agent-acp--working-requests-p (state)
+  "Whether STATE has work beyond a read-only native-history query.
+Unknown requests remain protected; pending RPCs still exclude auto-retention."
+  (cl-some (lambda (request)
+             (not (and (listp request) (equal (map-elt request :method) "session/list"))))
+           (map-elt state :active-requests)))
+
 (defun +agent-acp-request-active-p (buffer)
   "Whether protocol requests or a domain execution still own BUFFER."
   (when (+agent-acp-agent-buffer-p buffer)
-    (or (+agent-acp-state-value buffer '(:active-requests))
-        (seq-some (lambda (entry) (map-elt (cdr entry) :permission-request-id))
-                  (+agent-acp-state-value buffer '(:tool-calls)))
-        (seq-some (lambda (entry) (eq (map-elt (cdr entry) :status) 'pending))
-                  (+agent-acp-state-value buffer '(:elicitations)))
+    (or (and (not (+agent-acp-client-exited-p buffer))
+             (let ((state (+agent-acp--state buffer)))
+               (or (+agent-acp--working-requests-p state)
+                   (+agent-acp--permission-request state)
+                   (+agent-acp--pending-elicitation state))))
         (run-hook-with-args-until-success '+agent-acp-busy-functions buffer))))
 
 (defun +agent-acp-busy-p (buffer)
   "Return non-nil while agent BUFFER answers a prompt or serves a Noema Run."
   (and (+agent-acp-agent-buffer-p buffer)
-       (or (buffer-local-value 'shell-maker--busy buffer)
+       (or (and (buffer-local-value 'shell-maker--busy buffer)
+                (not (+agent-acp-client-exited-p buffer)))
            (+agent-acp-request-active-p buffer))))
 
-(defun +agent-acp-pending-prompt-count (buffer)
-  "Return how many prompts the person queued in agent BUFFER.
-agent-shell owns the queue (`agent-shell-prompt-queue', steering and
-removal); Noema only reads its length so lists can show queued intent."
+(defvar-local +agent-acp--held-prompts nil
+  "Queued prompts a stop or failure took out of automatic delivery.
+agent-shell sends `:pending-prompts' after any later turn that ends normally,
+so a queue the person stopped must not stay there.  See C37.")
+(put '+agent-acp--held-prompts 'permanent-local t)
+
+(defun +agent-acp-held-prompt-count (buffer)
+  "Return how many of BUFFER's queued prompts wait for an explicit resume."
   (if (buffer-live-p buffer)
-      (length (ignore-errors
-                (map-elt (buffer-local-value 'agent-shell--state buffer) :pending-prompts)))
+      (length (buffer-local-value '+agent-acp--held-prompts buffer))
     0))
+
+(defun +agent-acp-pending-prompt-count (buffer)
+  "Return how many prompts the person queued in agent BUFFER, held ones included.
+agent-shell owns delivery of its native queue; `tools/agent/queue' edits both
+parts, and lists read this count to show queued intent."
+  (if (buffer-live-p buffer)
+      (+ (+agent-acp-held-prompt-count buffer)
+         (length (ignore-errors
+                   (map-elt (buffer-local-value 'agent-shell--state buffer) :pending-prompts))))
+    0))
+
+(defun +agent-acp--hold-queue ()
+  "Move the current buffer's native queue out of automatic delivery.
+Upstream asks with `y-or-n-p' from the ACP response callback when a cancelled
+turn leaves prompts queued.  Emptying the queue from the turn event, which runs
+just before that question, keeps every prompt and asks nothing."
+  (when-let* ((pending (map-elt agent-shell--state :pending-prompts)))
+    (setq +agent-acp--held-prompts (append +agent-acp--held-prompts pending))
+    (map-put! agent-shell--state :pending-prompts nil)
+    (condition-case nil
+        (agent-shell--update-fragment
+         :state agent-shell--state
+         :block-id (format "%s-queue-held" (map-elt agent-shell--state :request-count))
+         :label-left "Queue held"
+         :body (format "%d queued prompt%s held. Review, edit or resume them with C-c A q."
+                       (length +agent-acp--held-prompts)
+                       (if (cdr +agent-acp--held-prompts) "s" ""))
+         :create-new t :navigation 'never
+         :above-last-prompt (not (shell-maker-busy)))
+      (error nil))
+    t))
 
 (declare-function agent-shell-get-model-name "agent-shell" (state))
 
@@ -851,6 +991,27 @@ is not on screen, and cleared when the buffer is shown.")
 (defvar +agent-acp-turn-complete-functions nil
   "Abnormal hook called with agent BUFFER and EVENT after an ACP turn ends.
 Consumers should defer filesystem work outside the event callback.")
+(defvar +agent-acp-client-ended-functions nil
+  "Functions called with BUFFER when its physical client ends, including shutdown.
+Release owned callbacks/timers here; native conversation and view identity remain.")
+(defvar-local +agent-acp--reported-turn nil)
+
+(defun +agent-acp--report-turn-complete (buffer event)
+  "Publish one terminal fact per exact physical native turn."
+  (when (buffer-live-p buffer)
+    (with-current-buffer buffer
+      (let ((key (list (+agent-acp-state-value buffer '(:client))
+                       (+agent-acp-state-value buffer '(:session :id))
+                       (+agent-acp-state-value buffer '(:request-count)))))
+        (unless (equal key +agent-acp--reported-turn)
+          (setq +agent-acp--reported-turn key)
+          (run-hook-wrapped
+           '+agent-acp-turn-complete-functions
+           (lambda (function source payload)
+             (condition-case err (funcall function source payload)
+               (error (display-warning '+agent-acp (error-message-string err) :warning)))
+             nil)
+           buffer event))))))
 
 (defvar +agent-acp-notification-functions nil
   "Functions called with BUFFER and attention REASON, even in the foreground.
@@ -918,6 +1079,62 @@ Emacs host uses this to apply shared notification policy outside Noema.")
   (unless (or +agent-acp-previewing (window-parameter window 'aaron-ui-preview))
     (+agent-acp-clear-attention (current-buffer))))
 
+(defcustom +agent-acp-changes-limit 200
+  "Most distinct files one session remembers having changed."
+  :type 'natnum :group '+agent-session)
+
+(defvar-local +agent-acp--changes nil
+  "Files this client reported changing, newest first, as (FILE . PLIST).
+PLIST holds :count and :at.  It is an event record of this client, not Git
+state, and it ends with the client.  See C44.")
+
+(defvar-local +agent-acp--counted-changes nil
+  "Tool call and file pairs already counted in the running turn.")
+
+(defun +agent-acp--note-change (file)
+  "Record that the current session changed FILE, as the agent named it."
+  (when (and (stringp file) (not (string-empty-p file)))
+    (let ((count (or (plist-get (cdr (assoc file +agent-acp--changes)) :count) 0)))
+      (setq +agent-acp--changes
+            (seq-take (cons (cons file (list :count (1+ count) :at (float-time)))
+                            (assoc-delete-all file +agent-acp--changes))
+                      +agent-acp-changes-limit)))))
+
+(defun +agent-acp--note-tool-change (id tool-call)
+  "Record the diffs of TOOL-CALL with ID once, when it has completed.
+A tool call is reported many times; only a finished one changed anything."
+  (when (equal (map-elt tool-call :status) "completed")
+    (dolist (diff (map-elt tool-call :diffs))
+      (let* ((file (map-elt diff :file)) (key (cons id file)))
+        (unless (member key +agent-acp--counted-changes)
+          (push key +agent-acp--counted-changes)
+          (+agent-acp--note-change file))))))
+
+(defvar-local +agent-acp--stop-reason nil
+  "How the last turn ended, as the agent reported it; nil while one runs.")
+
+(defvar-local +agent-acp--turn-started-at nil
+  "When the running turn began, or nil.")
+
+(defvar-local +agent-acp--exit-interrupted nil
+  "Non-nil when the client exited with a turn open, so its outcome is unknown.")
+
+(defun +agent-acp--turn-began ()
+  "Record that a turn is running in the current buffer."
+  (unless +agent-acp--turn-started-at
+    (setq +agent-acp--turn-started-at (float-time)))
+  (setq +agent-acp--stop-reason nil))
+
+(defun +agent-acp--turn-ended (reason)
+  "Record that the current buffer's turn ended with stop REASON."
+  (setq +agent-acp--turn-started-at nil
+        +agent-acp--stop-reason reason
+        +agent-acp--counted-changes nil)
+  (unless (member reason '("end_turn" ""))
+    (+agent-acp--hold-queue))
+  (unless (member reason '("end_turn" "cancelled" ""))
+    (setq-local +agent-acp-last-error (format "Turn ended: %s" reason))))
+
 (defun +agent-acp--subscribe-attention (buffer)
   "Watch BUFFER's permission requests and finished turns, once."
   (unless (buffer-local-value '+agent-acp--attention-watched buffer)
@@ -936,7 +1153,9 @@ Emacs host uses this to apply shared notification policy outside Noema.")
      :callback (lambda (event)
                  (when (buffer-live-p buffer)
                    (with-current-buffer buffer
-                     (setq +agent-acp-last-error (or (map-elt event :data) t)))
+                     (setq +agent-acp-last-error (or (map-elt event :data) t)
+                           +agent-acp--turn-started-at nil)
+                     (+agent-acp--hold-queue))
                    (+agent-acp--note-attention buffer 'failed))))
     (+agent-acp-subscribe
      :buffer buffer :event 'input-submitted
@@ -944,23 +1163,36 @@ Emacs host uses this to apply shared notification policy outside Noema.")
                  (when (buffer-live-p buffer)
                    (with-current-buffer buffer
                      (+agent-acp--clear-stop)
+                     (+agent-acp--turn-began)
                      (setq +agent-acp-last-error nil))
                    (+agent-acp-clear-attention buffer))))
     (+agent-acp-subscribe
+     :buffer buffer :event 'tool-call-update
+     :callback (lambda (event)
+                 (let ((data (map-elt event :data)))
+                   (+agent-acp--note-tool-change (map-elt data :tool-call-id)
+                                                 (map-elt data :tool-call)))))
+    (+agent-acp-subscribe
+     :buffer buffer :event 'file-write
+     :callback (lambda (event)
+                 (+agent-acp--note-change (map-elt (map-elt event :data) :path))))
+    (+agent-acp-subscribe
      :buffer buffer :event 'turn-complete
      :callback (lambda (event)
-                 (when (buffer-live-p buffer)
-                   (with-current-buffer buffer
-                     (+agent-acp--clear-stop)
-                     (+agent-acp--changed)))
-                 (run-hook-with-args
-                  '+agent-acp-turn-complete-functions buffer event)
-                 ;; An interrupt is the person's own act and is not news.
-                 (unless (equal (format "%s" (or (map-elt (map-elt event :data)
-                                                          :stop-reason)
-                                                 ""))
-                                "cancelled")
-                   (+agent-acp--note-attention buffer 'done))))))
+                 (let ((reason (format "%s" (or (map-elt (map-elt event :data)
+                                                         :stop-reason)
+                                                ""))))
+                   (when (buffer-live-p buffer)
+                     (with-current-buffer buffer
+                       (+agent-acp--clear-stop)
+                       (+agent-acp--turn-ended reason)
+                       (+agent-acp--changed)))
+                   (+agent-acp--report-turn-complete buffer event)
+                   (pcase reason
+                     ;; An interrupt is the person's own act and is not news.
+                     ("cancelled" nil)
+                     ((or "end_turn" "") (+agent-acp--note-attention buffer 'done))
+                     (_ (+agent-acp--note-attention buffer 'failed))))))))
 
 (defun +agent-acp--watch-attention (buffer)
   "Watch agent-shell BUFFER for attention; other buffers have no events."
@@ -1146,8 +1378,7 @@ It must be idle, hold no queued prompt, shown in no window of any frame, and
 started by an origin in
 `+agent-acp-auto-stop-origins'.  Every automatic stop path asks this."
   (and (+agent-acp-agent-buffer-p buffer)
-       (memq (buffer-local-value '+agent-acp-session-origin buffer)
-             +agent-acp-auto-stop-origins)
+       (+agent-acp--retention-origin-p buffer)
        ;; Handshake/RPC work can precede shell-maker's turn flag.
        (eq (+agent-acp-state-value buffer '(:init-finished)) t)
        (not (+agent-acp-state-value buffer '(:client :pending-requests)))
@@ -1161,8 +1392,9 @@ started by an origin in
   "Whether BUFFER contains a nonempty draft after its native input prompt."
   (when-let* ((start (+agent-acp--input-start buffer)))
     (with-current-buffer buffer
-      (not (string-empty-p
-            (string-trim (buffer-substring-no-properties start (point-max))))))))
+      (save-excursion
+        (goto-char start)
+        (re-search-forward "[^ \t\n\r]" nil t)))))
 
 (defun +agent-acp-confirm-stop (buffer action)
   "Return non-nil when ACTION may stop agent BUFFER, asking while it is busy."
@@ -1210,6 +1442,10 @@ A timeout never declares success, replays a request, or kills another turn."
   (interactive)
   (let ((buffer (+agent-acp-command-buffer buffer)))
     (unless (run-hook-with-args-until-success '+agent-acp-stop-functions buffer)
+      (when (+agent-acp-client-exited-p buffer)
+        (user-error "The agent process has ended; nothing is running to stop"))
+      (unless (+agent-acp-busy-p buffer)
+        (user-error "This session has no running turn"))
       (with-current-buffer buffer
         (unless +agent-acp--stop-token
           (let* ((state agent-shell--state)
@@ -1237,11 +1473,35 @@ A timeout never declares success, replays a request, or kills another turn."
 
 (defun +agent-acp--install-close-hooks-h ()
   "Keep native kill queries and cleanup consistent with the Agent menu."
-  ;; Our query also protects the native queue, plus active work and drafts.
+  ;; Our queries also protect the native queue, plus active work and drafts.
   (remove-hook 'kill-buffer-query-functions
                #'agent-shell--prompt-queue-confirm-kill-buffer t)
+  (remove-hook 'kill-emacs-query-functions
+               #'agent-shell--prompt-queue-confirm-kill-emacs)
+  (add-hook 'kill-emacs-query-functions #'+agent-acp--query-kill-emacs-h)
   (add-hook 'kill-buffer-query-functions #'+agent-acp--query-kill-h nil t)
   (add-hook 'kill-buffer-hook #'+agent-acp--before-kill-h -50 t))
+
+(defun +agent-acp--unfinished-sessions ()
+  "Return buffers of sessions that exiting Emacs would cost something.
+Temporary sessions keep no conversation worth a question."
+  (seq-filter
+   (lambda (buffer)
+     (and (+agent-acp-agent-buffer-p buffer)
+          (not (memq (buffer-local-value '+agent-acp-session-origin buffer)
+                     (cons 'probe +agent-acp-ephemeral-origins)))
+          (or (+agent-acp-busy-p buffer)
+              (> (+agent-acp-pending-prompt-count buffer) 0)
+              (+agent-acp--unsent-input-p buffer))))
+   (buffer-list)))
+
+(defun +agent-acp--query-kill-emacs-h ()
+  "Ask once before exiting Emacs ends sessions that still hold work."
+  (let ((sessions (and (not noninteractive) (+agent-acp--unfinished-sessions))))
+    (or (null sessions)
+        (y-or-n-p (format "%d agent session%s still working or holding unsent input (%s); quit anyway? "
+                          (length sessions) (if (cdr sessions) "s" "")
+                          (mapconcat #'+agent-acp--tab-label sessions ", "))))))
 
 (defun +agent-acp--before-kill-h ()
   "Notify owners and settle views after all queries accepted this kill.
@@ -1313,6 +1573,25 @@ The package's own cleanup still owns the physical client and protocol."
                 ((markerp (cdr prompt))))
       (marker-position (cdr prompt)))))
 
+(defun +agent-acp-read-transcript (buffer offset limit)
+  "Read at most LIMIT characters from BUFFER's output at OFFSET.
+Flush pending rendering, exclude the editable draft and leave focus and unread
+state alone.  Offsets address the currently available native transcript."
+  (unless (and (integerp offset) (>= offset 0)
+               (integerp limit) (<= 1 limit 32000))
+    (user-error "offset must be >= 0 and limit must be 1..32000"))
+  (+agent-render-flush buffer)
+  (with-current-buffer buffer
+    (save-restriction
+      (widen)
+      (let* ((end (or (+agent-acp--input-start buffer) (point-min)))
+             (total (- end (point-min)))
+             (start (+ (point-min) (min offset total)))
+             (finish (min end (+ start limit))))
+        `((text . ,(buffer-substring-no-properties start finish))
+          (total . ,total)
+          (nextOffset . ,(when (< finish end) (- finish (point-min)))))))))
+
 (defun +agent-acp--live-input-p ()
   "Return non-nil when the last native prompt still owns editable input.
 Plain agent-shell replies carry `agent-shell-ui-state' and `read-only',
@@ -1331,7 +1610,7 @@ Return non-nil when a prompt was written."
                ;; A hidden buffer defers its output (render policy `visible');
                ;; the prompt must follow that output, not precede it.
                (not +agent-render--pending)
-               (not (map-elt agent-shell--state :active-requests))
+               (not (+agent-acp--working-requests-p agent-shell--state))
                (bound-and-true-p shell-maker--config))
       (agent-shell-heartbeat-stop :heartbeat (map-elt agent-shell--state :heartbeat))
       (agent-shell--collapse-expanded-activity-group agent-shell--state)
@@ -1354,7 +1633,7 @@ because the buffer is hidden, the prompt is written right after that output
 renders.  Return non-nil when a prompt was written now."
   (when (+agent-acp-agent-buffer-p buffer)
     (with-current-buffer buffer
-      (unless (map-elt agent-shell--state :active-requests)
+      (unless (+agent-acp--working-requests-p agent-shell--state)
         (agent-shell-heartbeat-stop :heartbeat (map-elt agent-shell--state :heartbeat))
         (setq shell-maker--busy nil))
       (setq-local +agent-acp--prompt-owed t))
@@ -1441,7 +1720,7 @@ Mouse
   \\[+agent-acp-focus-input]\tjump to the input prompt
   \\[+agent-acp-switch-session]\tpick a session
   \\[+agent-acp-next-session] / \\[+agent-acp-previous-session]\tnext / previous tab
-  \\[+agent-acp-stop]\tstop the current Run or turn
+  \\[+agent-acp-stop]\tstop the current Run or turn; queued prompts are held
   \\[+agent-session-restart]\trestart the session and resume its conversation
   \\[+agent-acp-close]\tclose this tab (name and history remain)
   \\[+agent-acp-close-others]\tclose the other tabs
@@ -1454,6 +1733,12 @@ Mouse
   \\[+agent-session-list]\tsession list
   \\[+agent-acp-menu]\tsession menu
   ?\tthis help, outside the prompt input
+
+\\<+agent-prefix-map>Across sessions, after C-c A
+  \\[+agent/next-attention]\tnext session waiting on you, at its request
+  \\[+agent/queue]\treview, edit or resume queued prompts
+  \\[+agent/changes]\tfiles this session changed
+  \\[+agent/resume-saved]\tresume a saved conversation
 
 \\<agent-shell-mode-map>Agent shell
   \\[agent-shell-interrupt]\tinterrupt the current turn
@@ -1701,6 +1986,13 @@ origin labels never exclude a member.  This is a view of the one registry."
             (not (run-hook-with-args-until-success '+agent-session-private-functions session))))
      (+agent-acp-sessions))))
 
+(defun +agent-acp--last-prompt ()
+  "Return the first line of the current buffer's latest submitted prompt."
+  (when (and (bound-and-true-p comint-input-ring)
+             (not (ring-empty-p comint-input-ring)))
+    (car (split-string (substring-no-properties (ring-ref comint-input-ring 0))
+                       "\n" t "[ \t]+"))))
+
 (defun +agent-session-snapshot (buffer)
   "Describe one real agent BUFFER without a domain service or disk scan."
   (when (+agent-acp-agent-buffer-p buffer)
@@ -1708,11 +2000,12 @@ origin labels never exclude a member.  This is a view of the one registry."
       (let* ((state (+agent-acp--state buffer))
              (process (map-nested-elt state '(:client :process)))
              (directory default-directory)
+             (live (not (+agent-acp-client-exited-p buffer)))
+             (permission (+agent-acp--permission-request state))
+             (elicitation (+agent-acp--pending-elicitation state))
              (attention (or (run-hook-with-args-until-success '+agent-session-attention-functions buffer)
-                            (and (seq-some (lambda (entry) (map-elt (cdr entry) :permission-request-id))
-                                           (map-elt state :tool-calls)) 'permission)
-                            (and (seq-some (lambda (entry) (eq (map-elt (cdr entry) :status) 'pending))
-                                           (map-elt state :elicitations)) 'input)
+                            (and live permission 'permission)
+                            (and live elicitation 'input)
                             (and +agent-acp-last-error 'failed))))
         (list :buffer buffer :name +agent-acp-session-name :agent +agent-acp-session-agent
               :provider (map-nested-elt state '(:agent-config :identifier))
@@ -1727,13 +2020,23 @@ origin labels never exclude a member.  This is a view of the one registry."
                                    ((not process) 'starting)
                                    ((and (processp process) (process-live-p process)) 'live)
                                    (t 'dead))
-              :turn-state (cond (+agent-acp--stop-unconfirmed 'stop-unconfirmed)
+              :turn-state (cond ((not live) (if +agent-acp--exit-interrupted 'interrupted 'idle))
+                                (+agent-acp--stop-unconfirmed 'stop-unconfirmed)
                                 (+agent-acp--stop-token 'stopping)
                                 ((not (eq (map-elt state :init-finished) t)) 'starting)
                                 ((+agent-acp-busy-p buffer) 'running)
                                 (t 'idle))
               :busy (and (+agent-acp-busy-p buffer) t)
               :attention-kind attention :unread-kind +agent-acp-attention :last-error +agent-acp-last-error :usage (+agent-acp-usage buffer)
+              :title (map-nested-elt state '(:session :title))
+              :last-prompt (+agent-acp--last-prompt)
+              :request (and live (or (map-elt permission :title)
+                                     (map-elt elicitation :message)))
+              :turn-started-at +agent-acp--turn-started-at
+              :stop-reason +agent-acp--stop-reason
+              :queued (+agent-acp-pending-prompt-count buffer)
+              :queue-held (+agent-acp-held-prompt-count buffer)
+              :changes (length +agent-acp--changes)
               :capabilities (list :list (map-elt state :supports-session-list)
                                   :load (map-elt state :supports-session-load)
                                   :resume (map-elt state :supports-session-resume)
@@ -1817,8 +2120,16 @@ command, because upstream returns the buffer before its caller can name it."
   "Whether BUFFER has a native identity and positively reports restoration."
   (let ((id (+agent-acp-state-value buffer '(:session :id))))
     (and (stringp id) (not (string-empty-p id))
-         (or (+agent-session-capability-p buffer :load)
-             (+agent-session-capability-p buffer :resume)))))
+         (cl-some (lambda (path)
+                    (not (memq (+agent-acp-state-value buffer path) '(nil :null :false))))
+                  '((:supports-session-load) (:supports-session-resume))))))
+
+(defun +agent-acp--retention-origin-p (buffer)
+  "Whether BUFFER's origin permits automatic warm retention."
+  (and (buffer-live-p buffer)
+       (let ((origin (buffer-local-value '+agent-acp-session-origin buffer)))
+         (and (not (memq origin '(pi pi-emacs pi-project)))
+              (memq origin +agent-acp-auto-stop-origins)))))
 
 (defun +agent-acp-sweep-warm-buffers (&optional limit idle-seconds)
   "Hibernate unused recoverable background clients through their shared owner.
@@ -1850,20 +2161,26 @@ LIMIT and IDLE-SECONDS default to the shared settings.  No history is removed."
   (when (timerp +agent-acp--warm-sweep-timer) (cancel-timer +agent-acp--warm-sweep-timer))
   (setq +agent-acp--warm-sweep-timer nil))
 
-(defun +agent-acp--sync-warm-sweep (&optional _source exclude)
+(defun +agent-acp--sync-warm-sweep (&optional source exclude)
   "Schedule one sweep only while a background physical client exists."
-  (if (not (seq-some
+  (cond
+   ;; A Pi or personal-session update cannot create or remove an eligible
+   ;; client.  In particular, never scan all editor buffers for those events.
+   ((and source (not exclude) (not (+agent-acp--retention-origin-p source))) nil)
+   ((or (and source (not exclude)
+             (let ((process (+agent-acp-state-value source '(:client :process))))
+               (and (processp process) (process-live-p process))))
+        (seq-some
             (lambda (buffer)
-              (and (not (eq buffer exclude)) (+agent-acp-agent-buffer-p buffer)
-                   (memq (buffer-local-value '+agent-acp-session-origin buffer) +agent-acp-auto-stop-origins)
-                   (not (eq (buffer-local-value '+agent-acp-session-origin buffer) 'pi))
+              (and (not (eq buffer exclude)) (+agent-acp--retention-origin-p buffer)
+                   (+agent-acp-agent-buffer-p buffer)
                    (let ((process (+agent-acp-state-value buffer '(:client :process))))
                      (and (processp process) (process-live-p process)))))
             (buffer-list)))
-      (+agent-acp--cancel-warm-sweep)
     (unless (timerp +agent-acp--warm-sweep-timer)
       (setq +agent-acp--warm-sweep-timer
-            (run-at-time 300 nil #'+agent-acp--warm-sweep-tick)))))
+            (run-at-time 300 nil #'+agent-acp--warm-sweep-tick))))
+   (t (+agent-acp--cancel-warm-sweep))))
 
 (defun +agent-acp--warm-sweep-tick ()
   (setq +agent-acp--warm-sweep-timer nil)
@@ -2049,7 +2366,9 @@ replayed.  A failed start retains unsent text in an explicit recovery buffer."
          (process-environment (copy-sequence (buffer-local-value 'process-environment buffer)))
          (exec-path (copy-sequence (buffer-local-value 'exec-path buffer)))
          (draft (with-current-buffer buffer (ignore-errors (agent-shell--prompt-input))))
-         (pending (copy-tree (+agent-acp-state-value buffer '(:pending-prompts)))))
+         ;; A restart is not a go-ahead: everything queued waits for one (C37).
+         (pending (append (buffer-local-value '+agent-acp--held-prompts buffer)
+                          (copy-tree (+agent-acp-state-value buffer '(:pending-prompts))))))
     (condition-case err
         (progn
           (with-current-buffer buffer
@@ -2068,9 +2387,8 @@ replayed.  A failed start retains unsent text in an explicit recovery buffer."
                           +agent-acp--origin-window origin-window
                           +agent-render-policy policy
                           +agent-acp-strict-restore strict-restore)
-              ;; Initialization does not consume this native queue.  It stays
-              ;; available for explicit resume; no active request is copied.
-              (setf (map-elt agent-shell--state :pending-prompts) pending))
+              ;; No active request is copied; the queue resumes explicitly.
+              (setq +agent-acp--held-prompts pending))
             (when session-name
               (+agent-acp-adopt replacement :origin origin :name session-name :agent agent :root root))
             (when (and (stringp draft) (not (string-empty-p draft)))
@@ -2102,13 +2420,15 @@ replayed.  A failed start retains unsent text in an explicit recovery buffer."
 
 (cl-defun +agent-acp-start (&key config directory session-id fork-session-id focus
                                       (origin 'manual) (render-policy 'visible)
-                                      display-function strict-restore)
+                                      display-function strict-restore choose-saved)
   "Start CONFIG in DIRECTORY, optionally resuming or forking a native session.
 The buffer is displayed only when FOCUS is non-nil (D-033): a document Run
 never pops its agent buffer; the person opens it on purpose.
 
 ORIGIN records which entry point owns the session, so the project-wide
 registry can list it and `+agent-acp--adopt-foreign-h' leaves it alone.
+CHOOSE-SAVED asks which provider-listed conversation to restore instead of
+opening a new one; cancelling ends the client.
 
 Noema disables agent-shell's duplicate Markdown transcript and defaults to a
 visible-only render policy.  Neither setting affects ACP transport or events."
@@ -2142,7 +2462,8 @@ visible-only render policy.  Neither setting affects ACP transport or events."
                       ;; record and the conversation both survive it.
                       agent-shell-confirm-interrupt nil
                       +agent-render-policy render-policy
-                      +agent-acp-strict-restore strict-restore
+                      +agent-acp-strict-restore (or strict-restore choose-saved)
+                      +agent-acp--choose-saved choose-saved
                       +agent-acp-session-origin origin
                       +agent-acp-display-buffer-function display-function
                       +agent-acp-session-root
@@ -2174,6 +2495,74 @@ visible-only render policy.  Neither setting affects ACP transport or events."
       (when (derived-mode-p 'agent-shell-mode)
         (agent-shell-unsubscribe :subscription subscription)))))
 
+(defvar +agent-acp--shutting-down nil
+  "Non-nil while this Emacs itself shuts a client down; that is no failure.")
+
+(defun +agent-acp--shutdown-a (original &rest args)
+  "Mark ORIGINAL's process exit as deliberate.
+`delete-process' can run the sentinel before upstream forgets the client."
+  (let ((+agent-acp--shutting-down t) (buffer (current-buffer)))
+    (unwind-protect (apply original args)
+      (when (buffer-live-p buffer)
+        (run-hook-with-args '+agent-acp-client-ended-functions buffer)
+        (+agent-acp--sync-warm-sweep buffer)))))
+(advice-add 'agent-shell--shutdown :around #'+agent-acp--shutdown-a)
+
+(defun +agent-acp--client-exited (buffer state process event interrupted)
+  "Report that PROCESS, the client of STATE in BUFFER, ended with EVENT.
+Nothing else tells a person: a hidden, idle session otherwise stays listed as
+ready until the next prompt fails.  See C38."
+  (when (and (not +agent-acp--shutting-down)
+             (not (process-live-p process))
+             (+agent-acp-agent-buffer-p buffer)
+             (eq state (+agent-acp--state buffer))
+             (eq process (map-nested-elt state '(:client :process)))
+             (not (and (boundp 'remote-buffer-disconnected-p)
+                       (buffer-local-value 'remote-buffer-disconnected-p buffer))))
+    (with-current-buffer buffer
+      (setq-local +agent-acp-last-error
+                  (format "Agent process ended: %s" (string-trim (or event "")))
+                  +agent-acp--exit-interrupted interrupted
+                  +agent-acp--turn-started-at nil)
+      (+agent-acp--clear-stop)
+      (+agent-acp--hold-queue)
+      (run-hook-with-args '+agent-acp-client-ended-functions buffer)
+      (condition-case nil
+          (agent-shell--update-fragment
+           :state state :block-id "client-exited"
+           :label-left "Agent process ended"
+           :body (concat (if interrupted
+                             "A turn was running, so its result is unknown and it will not be replayed. "
+                           "")
+                         "Submit input or use C-c C-r to reconnect this conversation.")
+           :create-new t :navigation 'never
+           :above-last-prompt (not (shell-maker-busy)))
+        (error nil))
+      (+agent-acp--changed))
+    (+agent-acp--note-attention buffer 'failed)))
+
+(defvar-local +agent-acp--watched-process nil)
+
+(defun +agent-acp--watch-process ()
+  "Watch the current buffer's ACP client process for exit, once per process.
+acp.el starts it at the first request, so every session event checks."
+  (let ((process (map-nested-elt agent-shell--state '(:client :process))))
+    (when (and (processp process)
+               (not (eq process +agent-acp--watched-process))
+               (process-live-p process))
+      (setq +agent-acp--watched-process process)
+      (let ((buffer (current-buffer)) (state agent-shell--state))
+        (add-function
+         :around (process-sentinel process)
+         (lambda (original exited event)
+           ;; acp.el fails pending requests here; read what was open first.
+           (let ((interrupted (and (buffer-live-p buffer)
+                                   (or (map-elt state :active-requests)
+                                       (buffer-local-value 'shell-maker--busy buffer)))))
+             (funcall original exited event)
+             (+agent-acp--client-exited buffer state exited event
+                                        (and interrupted t)))))))))
+
 (defvar-local +agent-acp--lifecycle-state nil)
 (defvar-local +agent-acp--lifecycle-subscription nil)
 
@@ -2191,6 +2580,7 @@ visible-only render policy.  Neither setting affects ACP transport or events."
            :buffer (current-buffer)
            :callback
            (lambda (event)
+             (+agent-acp--watch-process)
              (when (memq (map-elt event :event) '(input-submitted turn-complete clean-up))
                (+agent-acp--clear-stop)
                (+agent-acp--changed)))))))
@@ -2319,15 +2709,21 @@ from transport and preserves any draft at the native input prompt."
            :label-left (cond ((eq (plist-get receipt :status) 'failed) "Failed")
                              ((equal (map-elt (plist-get receipt :response) 'stopReason) "cancelled")
                               "Stopped")
+                             ((not (member (map-elt (plist-get receipt :response) 'stopReason)
+                                           '(nil "" "end_turn"))) "Failed")
                              (t "Completed"))
            :above-last-prompt (and (not +agent-render--pending)
                                    (+agent-acp--live-input-p)))
         (+agent-acp-restore-prompt buffer)))))
 
-(cl-defun +agent-acp-prompt (&key buffer content run-id on-success on-failure)
-  "Send structured CONTENT through BUFFER's initialized ACP session."
+(cl-defun +agent-acp-prompt (&key buffer content run-id on-success on-failure process-queue)
+  "Send CONTENT through BUFFER's initialized ACP session.
+PROCESS-QUEUE continues native pending prompts after a normal completed turn.
+Research callers retain their explicit queue policy by leaving it nil."
   (with-current-buffer buffer
     (+agent-acp--clear-stop)
+    (+agent-acp--turn-began)
+    (setq-local +agent-acp-last-error nil)
     ;; A new turn is running; do not write a prompt into its output.
     (setq-local +agent-acp--prompt-owed nil)
     (let ((state agent-shell--state)
@@ -2355,15 +2751,47 @@ from transport and preserves any draft at the native input prompt."
                      ;; Record the protocol fact before any consumer/UI runs.
                      (setf (plist-get receipt :status) 'completed
                            (plist-get receipt :response) response)
+                     (when (and (buffer-live-p buffer)
+                                (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
+                       (with-current-buffer buffer
+                         (+agent-acp--clear-stop)
+                         (+agent-acp--turn-ended
+                          (format "%s" (or (map-elt response 'stopReason) "")))))
                      (unwind-protect
                          (when on-success (funcall on-success response))
-                       (+agent-acp--finish-prompt buffer receipt)))
+                       (+agent-acp--finish-prompt buffer receipt)
+                       (when (and (buffer-live-p buffer)
+                                  (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
+                         (+agent-acp--report-turn-complete
+                          buffer `((:event . turn-complete)
+                                   (:data . ((:stop-reason . ,(map-elt response 'stopReason)))))))
+                       (when (and process-queue (buffer-live-p buffer)
+                                  (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer))
+                                  (equal (map-elt response 'stopReason) "end_turn")
+                                  (zerop (+agent-acp-held-prompt-count buffer))
+                                  (> (+agent-acp-pending-prompt-count buffer) 0)
+                                  (not (+agent-acp-busy-p buffer)))
+                         ;; Submitting the next native turn needs an actual input
+                         ;; prompt, even when this buffer's output was deferred.
+                         (+agent-render-flush buffer)
+                         (with-current-buffer buffer (agent-shell--prompt-queue-process-next)))))
        :on-failure (lambda (error raw)
                      (setf (plist-get receipt :status) 'failed
                            (plist-get receipt :error) raw)
+                     (when (and (buffer-live-p buffer)
+                                (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
+                       (with-current-buffer buffer
+                         (+agent-acp--clear-stop)
+                         (setq +agent-acp--turn-started-at nil
+                               +agent-acp-last-error (or error "ACP request failed"))
+                         (+agent-acp--hold-queue)))
                      (unwind-protect
                          (when on-failure (funcall on-failure error raw))
-                       (+agent-acp--finish-prompt buffer receipt)))))))
+                       (+agent-acp--finish-prompt buffer receipt)
+                       (when (and (buffer-live-p buffer)
+                                  (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
+                         (+agent-acp--report-turn-complete
+                          buffer '((:event . turn-complete) (:data . ((:stop-reason . "error"))))))))))))
 
 (defun +agent-acp-file-uri (file &optional session)
   "Return FILE as the `file://' uri agent-shell would put in a content block.
@@ -2391,6 +2819,12 @@ the running turn finishes."
   (with-current-buffer buffer
     (agent-shell--prompt-queue-enqueue :prompt text)))
 
+(defun +agent-acp--queue-changed-a (&rest _)
+  "Report a queue length change, which agent-shell keeps to itself."
+  (when (derived-mode-p 'agent-shell-mode) (+agent-acp--changed)))
+(advice-add 'agent-shell--prompt-queue-enqueue :after #'+agent-acp--queue-changed-a)
+(advice-add 'agent-shell--prompt-queue-process-next :after #'+agent-acp--queue-changed-a)
+
 (defun +agent-acp-interrupt (buffer &optional force)
   "Interrupt the active request in BUFFER; FORCE skips confirmation."
   (when (+agent-acp-agent-buffer-p buffer)
@@ -2412,6 +2846,24 @@ the running turn finishes."
   (with-current-buffer buffer
     (agent-shell--config-option-set-mode-id
      :mode-id mode-id :on-success on-success :on-failure on-failure)))
+
+;;;###autoload
+(defun +agent/resume-saved (&optional agent)
+  "Choose a saved conversation of AGENT in this workspace and restore it.
+This needs no live session: a new client lists the provider's own record.
+Cancelling, or finding nothing to restore, ends that client."
+  (interactive
+   (list (intern (completing-read "Resume with agent: " '("codex" "claude" "opencode")
+                                  nil t nil nil "codex"))))
+  (let* ((agent (or agent 'codex))
+         (source (+agent-acp-agent-buffer-p (current-buffer)))
+         (root (or (and source +agent-acp-session-root) (+agent-acp-project-root)))
+         (config (or (+agent-acp-config-for agent)
+                     (user-error "No agent configuration for %s" agent)))
+         (buffer (+agent-acp-start :config config :focus t :origin 'manual :choose-saved t
+                                   :directory (if source default-directory (+agent-workspace root)))))
+    (+agent-acp-adopt buffer :agent agent :origin 'manual :root root)
+    buffer))
 
 ;;;###autoload
 (defun +agent/start (&optional agent)

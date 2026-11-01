@@ -6,8 +6,9 @@ Emacs 维护可供普通源码 buffer、Portal、知识库、文档工具和 Noe
 复用的 agent 接入、会话管理与交互。Noema 维护 Markdown、知识库及研究文档的
 业务语义，通过 Emacs 的公共接口调用和组织 agent。
 
-ECA 与 agent-shell-hq 是源码研究对象，不是新增的运行时依赖。研究结论见
-[源码审计](../records/audits/eca-hq-agent-management-2026-10.md)。
+ECA、agent-shell-hq 与 echo-agent 是源码研究对象，不是新增的运行时依赖。研究结论见
+[ECA 与 HQ 审计](../records/audits/eca-hq-agent-management-2026-10.md)和
+[echo-agent 审计](../records/audits/echo-agent-management-2026-11.md)。
 
 ## 模型
 
@@ -28,7 +29,10 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 ### 日常入口与视图
 
 `C-c a` 召回当前项目最近实际使用的会话，在聊天里再次执行返回编辑区；
-`C-u C-c a` 选择池成员，空池先选择新建，再选择 agent，取消不启动进程。
+`C-u C-c a` 选择池成员，或选择新建、恢复已保存对话，取消不启动进程。
+`C-c A j` 跳到下一个等待你的会话，待审批和问答直接落在原生控件上；`C-c A q`
+管理排队的 prompt；`C-c A l` 打开这个会话改过的文件；`C-c A h` 不需要活动
+会话也能恢复提供方保存的对话。
 `H-A`（macOS Option-Shift-A）、`SPC a a` 和 `M-x agent-manager` 打开项目池管理器，
 加前缀查看所有项目；从管理器里再次执行返回。`C-c A S/G/U` 分别选择同一浮窗的
 All、Inbox、Usage 页签。GUI 使用 Aaron ETAF，按 target/workspace 分组；
@@ -38,7 +42,8 @@ Interactive、Portal、Worktrees、Pi、Noema Research及 Previous generations
 或 j/k 导航时只预览，不清未读；Return 确认进入正常会话窗口，q 返回来源。
 浮窗不占用来源窗格；TTY 使用 `+agent/sessions-table` 后备。
 
-`i` 输入，`a` 定位待审批/问答，`n` 在选中会话的执行目录新建，`h` 原生历史，
+`i` 输入，`a` 定位待审批/问答，`n` 在选中会话的执行目录新建，`h` 原生历史
+（没有活动选择时恢复已保存对话），`Q` 队列，`l` 改动的文件，
 `/` 筛选，`p` 当前项目/全部，`z` 折叠组，`g` 刷新。`.` 或 `C-c C-z` 打开共享
 Transient：停止、重连、改名、结束、按能力提供 fork、模型与原生队列；支持时
 另有 Research 的工作导航、归档和上下文换代。`S` 停止同 target、workspace
@@ -72,11 +77,15 @@ popup / dock / embedded 类型返回，Portal 保留用户调整后的高度。
 | starting | 握手未结束，不能当作空闲或自动回收 | 展示真实初始化状态 |
 | 隐藏 / 关闭管理器 | 执行、会话、草稿和队列保留 | 返回来源，释放该 UI 的订阅和计时器 |
 | 隐藏聊天 | 执行保持，原生 buffer 保留 | 撤下该视图，不终止 client |
-| 停止回合 | 先交给业务 owner，否则发送一次原生取消 | stopping；5 秒没有确认则 stop-unconfirmed |
+| 排队 | 回合正常结束后由原生队列发送；面板可编辑、排序、立即发送 | 面板只拥有选择，关闭不影响队列 |
+| 停止回合 | 先交给业务 owner，否则发送一次原生取消；没有运行中的回合时拒绝 | stopping；5 秒没有确认则 stop-unconfirmed |
+| 回合异常结束 | `refusal`、`max_tokens` 等不算完成；队列挂起 | failed 提醒，`:stop-reason` 记录事实，下次输入清除 |
+| client 退出 | 活动回合结果未知，为 interrupted，不重放；队列挂起；提交输入或重连恢复 | 当下更新视图并按 failed 提醒；过期请求不再待处理 |
 | 停止未确认 | 仍可能运行，不伪造完成或自动重放 | 可检查、重启或明确结束；不自动杀其他回合 |
-| 重启 / 重连 | 同一原生 ID，保留草稿、原生待发队列和 workspace 环境；活动请求不重放 | 保留显示归属；启动异常的未发送输入进入 `*Agent recovery*` |
+| 重启 / 重连 | 同一原生 ID，保留草稿、workspace 环境，队列转入挂起；活动请求不重放 | 保留显示归属；启动异常的未发送输入进入 `*Agent recovery*` |
 | Research 重启 | 先停止 Run 并等待业务终态，再调用同一物理重启 | 原有 adoption hook 关联持久身份 |
-| 结束会话 | 经过忙碌、队列和草稿确认；native cleanup 结束 client | 释放 buffer 订阅和计时器，provider 历史保留 |
+| 结束会话 | 经过忙碌、队列和草稿确认；native cleanup 结束 client | 释放 buffer 订阅和计时器，provider 历史保留，可用 `C-c A h` 恢复 |
+| 退出 Emacs | 有运行、草稿或队列时询问一次；临时会话不算 | 确认后各会话走普通结束 |
 
 Agent buffer 以 `+buffer-end-function` 登记 `+agent-acp-close`，使通用的
 `H-q` 结束动作与会话菜单使用同一确认和清理；改名不影响动作。取消确认保留
@@ -105,7 +114,8 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
 | 用户取消、短暂且已解决的等待 | 取消待发提醒 | 无 |
 
 提醒不切换窗口、不聚焦 frame、不执行审批。正文只含会话标签和事件类型，
-不复制 prompt、回复或工具输出。点击才执行跳转。前台只记历史，保留用户正在
+不复制 prompt、回复或工具输出。点击才执行跳转：单条通知落在仍未解决的原生
+控件上，合并通知打开 Inbox。前台只记历史，保留用户正在
 阅读的回显区。多个会话在合并窗口内等待时只发一条汇总；持续事件不会重复发送。
 
 `aaron-notify` 的 `:silent t` 只记历史，不改未读数，不显示回显或系统通知。
@@ -207,6 +217,45 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
 - **C29 既有入口覆盖原生输入。** `C-c a` 和 `C-c A` 从 Portal 原生终端转交到
   同一 Agent 命令及前缀；普通 Emacs 的 Normal、Insert、Emacs 状态保留同一入口。
   不另增混合管理键。测试：`agent-entry-c29-*`。
+- **C37 停止和失败挂起队列。** 回合以 `end_turn` 结束才自动发送原生队列。取消、
+  异常结束（`refusal`、`max_tokens` 等）、错误、client 退出和重启把待发 prompt
+  移到 Emacs 持有的挂起区，事件回调不提问；此后的普通回合不带走它们，由人在队列
+  面板恢复。计数同时包含挂起区，结束确认和恢复记录也保护它。异常结束不算完成：
+  `:stop-reason` 记录事实，并按 failed 提醒。测试：`agent-queue-c37-*`。
+- **C38 client 退出是即时事实。** 进程结束的当下更新视图、挂起队列并按 failed
+  提醒，不等下一次提交或卡死检查。已退出 client 的请求不再是待处理或忙碌，
+  `:turn-state` 为 `interrupted` 表示结果未知，不重放；停止与审批入口明确拒绝。
+  自身 `shutdown`、结束会话和 Remote 的显式断开不是故障。测试：`agent-process-c38-*`。
+- **C39 队列可以管理。** `C-c A q`、会话菜单 `q`、管理器 `Q` 打开同一队列面板，
+  能查看、编辑、删除、排序、挂起、恢复和立即发送；面板只改变待发文本，关闭不
+  影响队列。立即发送在忙碌时走 steering，适配器不支持则拒绝，不擅自打断当前回合。
+  测试：`agent-queue-c39-*`。
+- **C40 注意导航直达请求。** `C-c A j` 按审批、问答、失败、断开、未读的顺序跨项目
+  循环，带前缀只看当前项目；Inbox 同序。待审批和问答直接落在原生控件上。点击
+  单条通知同样直达仍未解决的请求，点击合并通知打开 Inbox。测试：`agent-attention-c40-*`。
+- **C41 管理器说明会话在做什么。** 快照报告提供方标题、最近 prompt、待决请求的
+  标题、已运行时长、停止原因和队列数；行与详情直接显示，筛选也覆盖标题和 prompt。
+  这些只读内存状态，不解析正文、不调用模型。通知正文仍不含 prompt。
+  测试：`agent-manager-c41-*`。
+- **C42 找回已保存对话不需要活动会话。** 关闭最后一个会话或重启 Emacs 后，
+  `C-c A h`、池选择器的恢复项按提供方的原生列表选择并严格恢复，不另存一份会话
+  记录；取消不留下 buffer，恢复失败不改建新对话。测试：`agent-resume-c42-*`。
+- **C43 退出 Emacs 保护工作。** 有运行中回合、草稿或队列的会话时，
+  `save-buffers-kill-emacs` 只问一次，并列出会话；临时会话不算。批处理不询问。
+  测试：`agent-exit-c43-*`。
+- **C44 会话改动可查。** 每个会话按报告的工具 diff 和写文件事件累积有界的改动
+  清单，`C-c A l`、会话菜单 `l`、管理器 `l` 选择并打开文件。清单是这个 client 的
+  内存事实，不是 Git 状态，也不跨重启。测试：`agent-changes-c44-*`。
+- **C45 管家复用执行接口。** `tools/agent/api` 在现有注册表和 ACP 上提供有界的
+  list/status/create/send/read/stop/show；列表不返回 prompt、草稿或完整对话。
+  除 list/create 外，调用者必须给出 buffer 和匹配的 nativeSessionId；可额外限制
+  root/target。创建只初始化 client，发送复用原生队列且不自动清空挂起任务，读取
+  只分页返回 transcript 并排除输入草稿。后台操作不选择窗口，不代理权限决策。
+- **C46 空闲路径有界。** 不相关会话的状态变化不扫描暖会话候选；已调度的活跃
+  候选复用现有单次计时器。Pi 的所有管理来源始终排除自动回收。恢复能力查询
+  只读 ACP 能力字段，不为两个布尔值构造完整会话快照。API 和原生回合完成均
+  通知公共订阅者，按确切回合去重；草稿检查不复制整段输入。
+  原生历史查询不代表模型忙碌，不扣住新输入；自动回收仍保护所有在途 RPC。
 
 Agent 的真实聊天 buffer 是用户 buffer，名称不使用 Emacs 内部 buffer 的空格前缀。
 它们进入全局 Ibuffer 的 Agent 分组和日常 Consult buffer 选择器；不进入全局 tab
@@ -219,10 +268,12 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 | --- | --- |
 | 依赖、Remote 接入与配置登记 | `lisp/tools/agent/config.el` |
 | 物理会话、能力快照、项目池、队列与暖会话回收 | `lisp/tools/agent/acp.el` |
+| 管家调用公共会话的语义接口 | `lisp/tools/agent/api.el` |
 | 常规视图放置、来源返回、frame 边界与物理替换 | `lisp/tools/agent/views.el` |
 | 会话列表、Inbox、可取消预览与通用操作 | `lisp/tools/agent/sessions.el` |
 | ETAF Agent Manager、分组筛选和 UI 生命周期 | `lisp/tools/agent/manager.el` |
 | 按能力提供的原生会话与领域动作菜单 | `lisp/tools/agent/menu.el` |
+| 排队 prompt 的编辑、恢复与面板 | `lisp/tools/agent/queue.el` |
 | 渲染、用量、活动和工作树 | `lisp/tools/agent/{render,top,activity,worktree,worktree-board}.el` |
 | 原生引用式上下文与 Markdown prompt 文档入口 | `lisp/tools/agent/{compose,context}.el` |
 | 完整 gptel/Magent 源码与来源 | `site-lisp/{gptel,magent}/`、`site-lisp/AGENT-UPSTREAMS.md` |
@@ -233,7 +284,9 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 | Research 语义事件、持久会话与工作流 | `site-lisp/noema/lisp/{noema-agent-worker,noema-sessions}.el` |
 
 会话快照包含 provider/native session、target/workspace、真实进程状态、busy、
-attention、unread、错误事实、来源组、退役代际、usage 和原生 list/load/resume/fork/steer 能力。Noema 通过显式钩子补充业务 ID、
+attention、unread、错误事实、来源组、退役代际、usage、提供方标题、最近 prompt、
+待决请求标题、回合起始时间、停止原因、队列与挂起数、改动文件数，和原生
+list/load/resume/fork/steer 能力。Noema 通过显式钩子补充业务 ID、
 注意原因、动作和菜单；通用选择器不启动或恢复会话。原生 fork 需要正向能力报告。
 
 `H-A` / `SPC a a` 打开日常管理器；`C-c A S/G/U` 选择同一视图的页签，`C-c A b` 使用
@@ -250,6 +303,11 @@ G4–G9 与 G11 的项目池、显示归属、返回、预览及物理替换问�
   结构化事件的提供商仍不能通过解析聊天正文推断等待回答。
 - **G2 外部执行附着。** 已在另一客户端执行的任务依旧只能显示真实的忙碌事实，
   不能把历史恢复伪装成附着或复制一份执行。
+- **G12 Research 回合后的队列。** `+agent-acp-prompt` 绕过原生输入流程，Run 结束
+  时不发送队列；人在 Run 期间排的 prompt 留在队列里，需要在面板恢复。
+- **G13 真实 SSH 实测。** C37–C44 已在客户端无法直接访问的 Remote target 上经 `/fs:`
+  路由验证（`agent-remote-routed-*`），但没有真实网络与断线。
+  `test/agent-lifecycle-remote-live.el` 覆盖真实目标，需要允许写入目标的 `/tmp`，尚未运行。
 - **G3 状态迁移。** 模型和配额偏好从旧 Noema 路径复制到 `var/agent/`，保留原文件；
   现有 worktree 使用的 `noemaBase/noemaGroup/noemaAgent` Git 元数据保持可读写，
   避免改名使已存在的分支失去归属。它们不要求 Noema 运行。

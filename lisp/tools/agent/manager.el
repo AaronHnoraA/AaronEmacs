@@ -65,8 +65,7 @@
 
 (defun +agent-manager--needs-attention-p (session)
   "Whether SESSION has an unresolved request, error or unread result."
-  (or (plist-get session :attention-kind) (plist-get session :unread-kind)
-      (memq (plist-get session :process-state) '(dead disconnected))))
+  (+agent-session-attention-rank session))
 
 (defun +agent-manager--group (session)
   "Group SESSION by target and workspace, never by basename alone."
@@ -74,7 +73,8 @@
 
 (defun +agent-manager--sessions (sessions scope root query &optional target)
   "Filter and stably group SESSIONS using SCOPE, ROOT and literal QUERY."
-  (let ((needle (downcase query)))
+  (let ((needle (downcase query))
+        (inbox (eq scope 'attention)))
     (sort
      (seq-filter
       (lambda (session)
@@ -88,19 +88,24 @@
              (or (string-empty-p needle)
                  (string-match-p
                   (regexp-quote needle)
-                  (downcase (format "%s %s %s %s %s"
+                  (downcase (format "%s %s %s %s %s %s %s"
                                     (plist-get session :name)
                                     (plist-get session :agent)
                                     (plist-get session :root)
                                     (plist-get (plist-get session :group) :label)
-                                    (plist-get (plist-get session :usage) :model)))))))
+                                    (plist-get (plist-get session :usage) :model)
+                                    (or (plist-get session :title) "")
+                                    (or (plist-get session :last-prompt) "")))))))
       sessions)
      (lambda (a b)
-       (let ((ga (+agent-manager--group a)) (gb (+agent-manager--group b)))
-         (if (equal ga gb)
-             (string-lessp (or (plist-get a :name) "")
-                           (or (plist-get b :name) ""))
-           (string-lessp (format "%s" ga) (format "%s" gb))))))))
+       (let ((ga (+agent-manager--group a)) (gb (+agent-manager--group b))
+             (ra (and inbox (+agent-session-attention-rank a)))
+             (rb (and inbox (+agent-session-attention-rank b))))
+         (cond ((and ra rb (/= ra rb)) (< ra rb))
+               ((equal ga gb)
+                (string-lessp (or (plist-get a :name) "")
+                              (or (plist-get b :name) "")))
+               (t (string-lessp (format "%s" ga) (format "%s" gb)))))))))
 
 (defun +agent-manager--selected-session ()
   "Read the selected live entity again before executing an action."
@@ -263,12 +268,31 @@
       (let ((default-directory directory)) (call-interactively #'+agent/start)))))
 
 (defun +agent-manager-resume ()
-  "Open native history for a selected live provider, with no automatic replay."
+  "Open native history, with no automatic replay.
+Without a live selection a new client lists the provider's saved conversations."
+  (interactive)
+  (let ((buffer +agent-manager--selected)
+        (directory +agent-manager--directory))
+    (+agent-manager-hide)
+    (if (+agent-acp-agent-buffer-p buffer)
+        (progn (+agent-acp-show-buffer buffer)
+               (with-current-buffer buffer (call-interactively #'+agent-shell/resume)))
+      (let ((default-directory directory))
+        (call-interactively #'+agent/resume-saved)))))
+
+(defun +agent-manager-queue ()
+  "Manage the selected session's queued prompts."
   (interactive)
   (let ((buffer (+agent-manager--selected-session)))
     (+agent-manager-hide)
-    (+agent-acp-show-buffer buffer)
-    (with-current-buffer buffer (call-interactively #'+agent-shell/resume))))
+    (+agent/queue buffer)))
+
+(defun +agent-manager-changes ()
+  "Open a file the selected session changed."
+  (interactive)
+  (let ((buffer (+agent-manager--selected-session)))
+    (+agent-manager-hide)
+    (+agent-session-changes buffer)))
 
 (defun +agent-manager-peek ()
   (interactive)
@@ -294,7 +318,7 @@
       ('model (+agent-manager-hide) (+agent-acp-show-buffer buffer)
               (with-current-buffer buffer (call-interactively #'agent-shell-set-session-model)))
       ('queue (+agent-manager-hide) (+agent-acp-show-buffer buffer)
-              (with-current-buffer buffer (call-interactively #'agent-shell-prompt-queue-resume))))
+              (+agent-queue-resume buffer)))
     (when (eq (current-buffer) (get-buffer +agent-manager-buffer-name))
       (+agent-manager-refresh))))
 
@@ -320,6 +344,16 @@
      ((or "dead" "disconnected" "failed" "stop-unconfirmed") 'accent-red-strong)
      ("running" 'accent-cyan) (_ 'fg-muted))))
 
+(defun +agent-manager--activity (session)
+  "One line saying what SESSION is about, from its reported title or last prompt."
+  (or (plist-get session :title) (plist-get session :last-prompt)))
+
+(defun +agent-manager--status-line (session)
+  "SESSION's state with its elapsed time and queue."
+  (string-join (cons (+agent-manager--state-label session)
+                     (+agent-session-progress session))
+               " · "))
+
 (defun +agent-manager--usage-line (session)
   "Display only reported usage, without treating unknown values as zero."
   (let* ((usage (plist-get session :usage))
@@ -336,7 +370,8 @@
   :render
   (let* ((buffer (plist-get session :buffer))
          (active (eq selected buffer))
-         (usage (plist-get session :usage)))
+         (usage (plist-get session :usage))
+         (activity (+agent-manager--activity session)))
     (etaf-view
      (column :width 'stretch
              :on-focus-enter (lambda () (with-current-buffer owner
@@ -360,8 +395,12 @@
                       :variant 'strong :wrap-mode 'word))
         (etaf-label :text (format "  %s · %s"
                                  (or (plist-get session :agent) "agent")
-                                 (+agent-manager--state-label session))
+                                 (+agent-manager--status-line session))
                     :color (+agent-manager--state-color session) :wrap-mode 'word)
+        (expr (when activity
+                (etaf-view
+                 (etaf-label :text (concat "  " (truncate-string-to-width activity 40 nil nil "…"))
+                             :wrap-mode 'word))))
         (etaf-label :text (concat "  "
                                  (or (plist-get (plist-get session :group) :label) "Interactive") " · "
                                  (if usage-view (+agent-manager--usage-line session)
@@ -399,6 +438,8 @@
                      ("z" +agent-manager-toggle-group "Fold selected workspace")
                      ("g" +agent-manager-refresh "Refresh")
                      ("h" +agent-manager-resume "Native history")
+                     ("Q" +agent-manager-queue "Manage queued prompts")
+                     ("l" +agent-manager-changes "Open a changed file")
                      ("s" +agent-manager-stop "Stop turn")
                      ("r" +agent-manager-rename "Rename session")
                      ("R" +agent-manager-restart "Restart session")
@@ -465,10 +506,12 @@
           (etaf-view
            (column :width 'stretch :item-gap '(lh 0)
              (etaf-label :text (if (eq view 'usage) (+agent-manager--usage-line session)
-                                (format "%s%s" (+agent-manager--state-label session)
-                                        (let ((count (+agent-acp-pending-prompt-count selected)))
-                                          (if (> count 0) (format " · %d queued" count) ""))))
+                                (+agent-manager--status-line session))
                          :color (+agent-manager--state-color session) :wrap-mode 'word)
+             (expr
+              (when-let* ((detail (or (plist-get session :request)
+                                      (+agent-session-error-text session))))
+                (etaf-view (etaf-label :text detail :wrap-mode 'word))))
              (expr
               (when (memq (plist-get session :attention-kind) '(permission input))
                 (etaf-view

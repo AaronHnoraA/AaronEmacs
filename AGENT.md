@@ -107,7 +107,12 @@ Native restart/reconnect goes through `+agent-acp-restart-native`, retaining
 the native ID and unsent input without replaying an active request. Research
 must finish its owning Run before restart. Input/hide keys are `C-c C-e` /
 `C-c C-o` in both the dock and Portal popup. Lifecycle contracts C11-C16 and
-their regression tests live in the agent management design document.
+C37-C44 and their regression tests live in the agent management design document.
+Only a turn ending in `end_turn` sends the native queue: a stop, failure, client
+exit or restart moves it to the Emacs-held part, edited through
+`tools/agent/queue`, and an event callback never asks a question.  A client's
+exit is reported from its process sentinel; facts about an exited client's
+requests come from `+agent-acp-client-exited-p`, not from stale state.
 
 When adding a module:
 

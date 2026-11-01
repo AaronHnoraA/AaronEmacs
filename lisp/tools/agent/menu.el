@@ -52,9 +52,16 @@
   (when-let* ((buffer (ignore-errors (+agent-menu--buffer))))
     (and (+agent-menu--ready-p) (+agent-session-operation-supported-p 'fork buffer))))
 
-(defun +agent-menu--queue-p ()
+(defun +agent-menu--queued-p ()
   (when-let* ((buffer (ignore-errors (+agent-menu--buffer))))
-    (and (+agent-menu--ready-p) (> (+agent-acp-pending-prompt-count buffer) 0))))
+    (> (+agent-acp-pending-prompt-count buffer) 0)))
+
+(defun +agent-menu--queue-p ()
+  (and (+agent-menu--ready-p) (+agent-menu--queued-p)))
+
+(defun +agent-menu--changes-p ()
+  (when-let* ((buffer (ignore-errors (+agent-menu--buffer))))
+    (buffer-local-value '+agent-acp--changes buffer)))
 
 (defun +agent-menu--supported-p (operation)
   (when-let* ((buffer (ignore-errors (+agent-menu--buffer))))
@@ -79,6 +86,11 @@
       ('rename (+agent-session-rename buffer))
       ('close (+agent-acp-close buffer))
       ('copy (with-current-buffer buffer (agent-shell-copy-last-output)))
+      ('queue (+agent-queue-resume buffer))
+      ('queue-panel (when (bound-and-true-p +agent-manager--model) (+agent-manager-hide))
+                    (+agent/queue buffer))
+      ('changes (when (bound-and-true-p +agent-manager--model) (+agent-manager-hide))
+                (+agent-session-changes buffer))
       (_
        (+agent-menu--show buffer)
        (pcase operation
@@ -96,7 +108,6 @@
                  ('history #'+agent-shell/resume)
                  ('model #'agent-shell-set-session-model)
                  ('mode #'agent-shell-set-session-mode)
-                 ('queue #'agent-shell-prompt-queue-resume)
                  ('usage #'+agent-top-report)
                  ('fold #'agent-shell-ui-toggle-all-fragments)
                  ('previous #'agent-shell-previous-item)
@@ -105,7 +116,7 @@
 
 (autoload '+agent-top-report "tools/agent/top" nil t)
 
-(dolist (operation '(open input review stop stop-group rename close restart fork history model mode queue copy fold previous next help jump archive compact usage))
+(dolist (operation '(open input review stop stop-group rename close restart fork history model mode queue queue-panel changes copy fold previous next help jump archive compact usage))
   (let ((action operation))
     (defalias (intern (format "+agent-menu-%s" action))
       (lambda () (interactive) (+agent-menu--act action)))))
@@ -119,12 +130,14 @@
     ("i" "Write" +agent-menu-input)
     ("a" "Review request" +agent-menu-review :if +agent-menu--review-p)
     ("h" "History" +agent-menu-history :if +agent-menu--history-p)
+    ("j" "Next waiting session" +agent/next-attention)
     ("y" "Copy last reply" +agent-menu-copy)]
    ["Session"
     ("r" "Rename" +agent-menu-rename)
     ("m" "Model" +agent-menu-model :if +agent-menu--model-p)
     ("v" "Mode" +agent-menu-mode :if +agent-menu--mode-p)
     ("f" "Fork" +agent-menu-fork :if +agent-menu--fork-p)
+    ("q" "Queue…" +agent-menu-queue-panel :if +agent-menu--queued-p)
     ("Q" "Continue queue" +agent-menu-queue :if +agent-menu--queue-p)]
    ["Lifecycle"
     ("s" "Stop turn" +agent-menu-stop :if +agent-menu--busy-p)
@@ -135,6 +148,7 @@
     ("?" "Key help" +agent-menu-help)]
    ["Inspect"
     ("D" "Detailed usage" +agent-menu-usage)
+    ("l" "Changed files" +agent-menu-changes :if +agent-menu--changes-p)
     ("J" "Associated work" +agent-menu-jump :if (lambda () (+agent-menu--supported-p 'jump)))
     ("c" "Context rollover" +agent-menu-compact :if (lambda () (+agent-menu--supported-p 'compact)))
     ("A" "Archive Research…" +agent-menu-archive :if (lambda () (+agent-menu--supported-p 'archive)))]]

@@ -78,10 +78,17 @@ Research 的模型、存储、冻结上下文、记忆、Session、权限和证�
 
 Pi 的会话记录、历史、活跃指针与 Research 独立；物理运行时仍使用共享 ACP。
 主程序启动保留 Dashboard，后台初始化 Emacs Pi；项目激活复用项目 Pi。
-Ibuffer 有独立 Pi 组，Dashboard 的 `pi` 入口打开 Pi Sessions。
+Ibuffer 有独立 Pi 组，Dashboard 的 `pi`、`M-x pi` 和 `C-c A P` 打开同一个主 Pi；
+在主 Pi 窗口再次调用会收起并返回编辑位置，带前缀参数打开来源项目 Pi。
+`M-x noema-pi-sessions` 查看历史。
 `RET` 恢复、`n` 新建、`a` 归档、`i` 导入旧引用。结束 Pi 不终止项目执行 Agent。
 
-`emacs:pi` 按需提供 list、status、ensure、send、resume、new、archive。
+`emacs:pi` 按需提供 context、list、status、ensure、send、resume、new、archive。
+`context` 查询实际编辑来源，只有位置和文件引用，不包含正文；Noema 页面未知的
+行号与选区不从占位 buffer 推断。主 Pi 的工作目录不代表用户所在项目。
+`emacs:agent` 提供公共运行时的 list/status/create/send/read/stop/show；操作使用
+buffer 与 nativeSessionId 双重定位。create 不发送任务，send 默认不显示窗口，
+read 分页读取输出并排除草稿。权限与提案的人类决策入口保持原服务所有权。
 列表分页，历史与当前连接状态分别报告。原生身份、重启、权限和队列仍以实际
 运行时为准。框架与当前限制见 [Pi 会话与项目助手](../../design/pi-sessions.md)。
 

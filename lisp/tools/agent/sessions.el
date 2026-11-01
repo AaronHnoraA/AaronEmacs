@@ -36,11 +36,13 @@ agent until the user explicitly chooses creation."
                                                   (plist-get session :process-state))
                                           buffer)))
                                 sessions)
-                        '(("＋ New agent session" . :new))))
+                        '(("＋ New agent session" . :new)
+                          ("↺ Resume saved conversation" . :resume))))
                (choice (cdr (assoc (completing-read "Project agents: " choices nil t)
                                    choices))))
           (cond ((bufferp choice) (+agent-acp-show-buffer choice))
                 ((eq choice :new) (call-interactively #'+agent/start))
+                ((eq choice :resume) (call-interactively #'+agent/resume-saved))
                 (t (user-error "No agent session selected"))))))))
 
 (defun +agent/pool-switch ()
@@ -149,6 +151,100 @@ agent until the user explicitly chooses creation."
   "List the shared sessions of BUFFER's project."
   (interactive)
   (with-current-buffer (or buffer (current-buffer)) (+agent/sessions t)))
+
+(defun +agent-session-attention-rank (session)
+  "Return how urgently SESSION needs the person, lower first, or nil."
+  (let ((kind (plist-get session :attention-kind)))
+    (cond ((eq kind 'permission) 0)
+          ((eq kind 'input) 1)
+          ((eq kind 'failed) 2)
+          ;; A domain adapter may report a reason of its own.
+          (kind 3)
+          ((memq (plist-get session :process-state) '(dead disconnected)) 4)
+          ((plist-get session :unread-kind) 5))))
+
+(defun +agent-session-attention-queue (sessions)
+  "Return those of SESSIONS needing the person, most urgent first."
+  (sort (seq-filter #'+agent-session-attention-rank sessions)
+        (lambda (a b)
+          (let ((rank-a (+agent-session-attention-rank a))
+                (rank-b (+agent-session-attention-rank b)))
+            ;; Not by recency: visiting one must not reorder the rest.
+            (if (= rank-a rank-b)
+                (string-lessp (buffer-name (plist-get a :buffer))
+                              (buffer-name (plist-get b :buffer)))
+              (< rank-a rank-b))))))
+
+;;;###autoload
+(defun +agent/next-attention (&optional project)
+  "Go to the next session waiting on you, cycling across projects.
+With prefix PROJECT stay in this project's pool.  A pending approval or
+question lands on its native control; nothing is decided for you."
+  (interactive "P")
+  (let* ((root (and project (or +agent-acp-session-root (+agent-acp-project-root))))
+         (waiting (+agent-session-attention-queue (+agent-pool-sessions root)))
+         (buffers (mapcar (lambda (session) (plist-get session :buffer)) waiting))
+         (index (seq-position buffers (current-buffer)))
+         (session (and waiting (nth (mod (1+ (or index -1)) (length waiting)) waiting))))
+    (unless session (user-error "No agent session needs attention"))
+    (if (memq (plist-get session :attention-kind) '(permission input))
+        (+agent-acp-review-request (plist-get session :buffer))
+      (+agent-acp-show-buffer (plist-get session :buffer)))))
+
+(defun +agent-session-error-text (session)
+  "Return SESSION's last error as one line of text, or nil."
+  (let ((value (plist-get session :last-error)))
+    (cond ((stringp value) value)
+          ((and (consp value) (stringp (map-elt value :message))) (map-elt value :message))
+          (value "The session reported an error"))))
+
+(defun +agent-session-duration (seconds)
+  "Format SECONDS of running time compactly."
+  (let ((seconds (max 0 (floor seconds))))
+    (cond ((< seconds 60) (format "%ds" seconds))
+          ((< seconds 3600) (format "%dm" (/ seconds 60)))
+          (t (format "%dh%02dm" (/ seconds 3600) (/ (% seconds 3600) 60))))))
+
+(defun +agent-session-progress (session)
+  "Return SESSION's elapsed turn and queue as a list of short phrases."
+  (let ((started (plist-get session :turn-started-at))
+        (queued (or (plist-get session :queued) 0))
+        (held (or (plist-get session :queue-held) 0)))
+    (delq nil
+          (list (and started (plist-get session :busy)
+                     (+agent-session-duration (- (float-time) started)))
+                (and (> queued 0)
+                     (format "%d queued%s" queued
+                             (if (> held 0) (format " (%d held)" held) "")))))))
+
+(defun +agent-session-changes (&optional buffer)
+  "Choose a file BUFFER's agent reported changing and open it."
+  (interactive)
+  (let* ((buffer (+agent-acp-command-buffer buffer))
+         (changes (buffer-local-value '+agent-acp--changes buffer))
+         (now (float-time))
+         (choices (mapcar (lambda (change)
+                            (cons (format "%s  ×%d · %s ago"
+                                          (abbreviate-file-name (car change))
+                                          (plist-get (cdr change) :count)
+                                          (+agent-session-duration
+                                           (- now (plist-get (cdr change) :at))))
+                                  (car change)))
+                          changes)))
+    (unless choices (user-error "This session reported no file changes"))
+    (let* ((choice (let ((completion-extra-properties '(:display-sort-function identity)))
+                     (completing-read "Changed file: " choices nil t)))
+           (file (with-current-buffer buffer
+                   (agent-shell--resolve-path (cdr (assoc choice choices))))))
+      (if (+agent-acp-agent-buffer-p (window-buffer (selected-window)))
+          (find-file-other-window file)
+        (find-file file)))))
+
+;;;###autoload
+(defun +agent/changes (&optional buffer)
+  "Open a file changed by this agent session."
+  (interactive)
+  (+agent-session-changes buffer))
 
 (defun +agent-sessions--state (session)
   "Describe SESSION's live execution and attention separately."

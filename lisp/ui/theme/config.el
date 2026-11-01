@@ -941,11 +941,11 @@ request, and only the first may render its answer."
   (when (and (not noninteractive) (= (length command-line-args) 1))
     (setq initial-buffer-choice #'+dashboard-initial-buffer)))
 
-(defun +dashboard/open-pi-sessions (&rest _)
-  "Open Pi's independent conversation manager."
+(defun +dashboard/open-pi (&rest _)
+  "Recall the global Pi companion."
   (interactive)
-  (require 'noema-pi-sessions)
-  (noema-pi-sessions))
+  (require 'noema-pi-router)
+  (noema-pi-emacs-open))
 
 (use-package dashboard
   :ensure t
@@ -963,8 +963,8 @@ request, and only the first may render its answer."
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-pulse") "M")
             "monitor" "Open runtime performance monitor"
             ,#'+dashboard/open-monitor)
-           ("Pi" "pi" "Manage Pi conversations"
-            ,#'+dashboard/open-pi-sessions)
+           ("Pi" "pi" "Open the global Pi companion"
+            ,#'+dashboard/open-pi)
            (,(if (fboundp 'nerd-icons-octicon) (nerd-icons-octicon "nf-oct-download") "♺")
             "upgrade" "Upgrade archive and VC packages, then refresh the lock file"
             ,#'+dashboard/upgrade-packages success))))

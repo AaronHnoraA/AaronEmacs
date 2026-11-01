@@ -303,15 +303,13 @@ ARGS are those of `agent-shell-markdown-render-function'."
                                       (float-time)))))
                (process (map-nested-elt state '(:client :process)))
                (live (and (processp process) (process-live-p process))))
-          (when (and (not +agent-shell--stall-shown)
-                     (or (not live)
-                         (>= seconds +agent-shell-stall-warning-seconds)))
+          ;; An exited client is reported the moment it ends (C38).
+          (when (and live (not +agent-shell--stall-shown)
+                     (>= seconds +agent-shell-stall-warning-seconds))
             (setq +agent-shell--stall-shown t)
             (let ((report
-                   (if live
-                       (format "No ACP activity for %s seconds. The agent process is running; it may still be thinking or waiting on a tool. Use M-x +agent-shell/health to inspect the connection."
-                               seconds)
-                     "The ACP agent process exited while a request was pending. Use M-x +agent-shell/reconnect to restore the session.")))
+                   (format "No ACP activity for %s seconds. The agent process is running; it may still be thinking or waiting on a tool. Use M-x +agent-shell/health to inspect the connection."
+                           seconds)))
               (condition-case nil
                   (agent-shell--update-fragment
                    :state state :block-id "acp-stalled"
@@ -320,7 +318,7 @@ ARGS are those of `agent-shell-markdown-render-function'."
                 (error nil))
               (message "%s: %s" (buffer-name buffer) report)))
           (setq +agent-shell--stall-timer
-                (run-at-time 10 nil #'+agent-shell--stall-tick buffer state)))))))
+                (and live (run-at-time 10 nil #'+agent-shell--stall-tick buffer state))))))))
 
 (defun +agent-shell--watch-request-a (original &rest args)
   "Watch asynchronous ORIGINAL ACP requests for missing progress."
@@ -614,22 +612,7 @@ when present; the exact Codex message is the isolated compatibility fallback."
   (when (buffer-live-p source)
     (let* ((state (buffer-local-value 'agent-shell--state source))
            (current-id (map-nested-elt state '(:session :id)))
-           (sessions (agent-shell--sort-sessions-by-recency sessions))
-           (choices (mapcar
-                     (lambda (session)
-                       (let ((id (map-elt session 'sessionId)))
-                         (cons (format "%s  %s · %s"
-                                       (agent-shell--session-title session)
-                                       (agent-shell--format-session-date
-                                        (or (map-elt session 'updatedAt)
-                                            (map-elt session 'createdAt) ""))
-                                       id)
-                               id)))
-                     (seq-filter (lambda (session)
-                                   (let ((id (map-elt session 'sessionId)))
-                                     (and (stringp id)
-                                          (not (equal id current-id)))))
-                                 sessions)))
+           (choices (+agent-acp-saved-session-choices sessions current-id))
            (config (map-elt state :agent-config))
            (directory (buffer-local-value 'default-directory source))
            (root (or (and (boundp '+agent-acp-session-root)
@@ -997,12 +980,13 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload 'noema-project-enable "noema-research" nil t)
 (autoload 'noema-pi-router-open "noema-pi-router" nil t)
 (autoload 'noema-pi-emacs-open "noema-pi-router" nil t)
+(defalias 'pi #'noema-pi-emacs-open)
 (autoload 'noema-pi-assistant-mode "noema-pi-router" nil t)
 (autoload 'noema-pi-startup "noema-pi-router")
 (autoload 'noema-pi-sessions "noema-pi-sessions" nil t)
 (add-hook 'emacs-startup-hook #'noema-pi-startup)
 (when (and after-init-time (not noninteractive))
-  (run-at-time 0 nil #'noema-pi-startup))
+  (noema-pi-startup))
 (autoload 'noema-pi-doctor "noema-pi-router" nil t)
 (autoload 'noema-orchestration "noema-orchestration" nil t)
 (autoload 'noema-sessions "noema-sessions" nil t)
@@ -1021,6 +1005,10 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload 'agent-manager "tools/agent/manager" nil t)
 (autoload '+agent/sessions "tools/agent/sessions" nil t)
 (autoload '+agent/inbox "tools/agent/sessions" nil t)
+(autoload '+agent/next-attention "tools/agent/sessions" nil t)
+(autoload '+agent/changes "tools/agent/sessions" nil t)
+(autoload '+agent/queue "tools/agent/queue" nil t)
+(autoload '+agent/resume-saved "tools/agent/acp" nil t)
 (autoload '+agent/peek "tools/agent/sessions" nil t)
 (autoload '+agent/pool "tools/agent/sessions" nil t)
 (autoload '+agent/pool-switch "tools/agent/sessions" nil t)
@@ -1096,11 +1084,15 @@ is `+config-ask-model', registered with native Config Customize."
   "r" #'+agent/compose-rewrite
   "p" #'noema-agent-promote-current-session
   "I" #'noema-research-attention
-  "P" #'noema-pi-router-open
+  "P" #'noema-pi-emacs-open
   "D" #'noema-pi-doctor
   "S" #'+agent/sessions
   "T" #'+agent-acp-conversation-tree
   "G" #'+agent/inbox
+  "j" #'+agent/next-attention
+  "q" #'+agent/queue
+  "h" #'+agent/resume-saved
+  "l" #'+agent/changes
   "U" #'+agent/usage
   "O" #'noema-orchestration
   "b" #'+agent/peek

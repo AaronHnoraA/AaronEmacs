@@ -30,7 +30,7 @@ createInterface({input:process.stdin}).on('line', line => {
         if(!sessions[sid])throw new Error('Unknown session');
         for(const turn of sessions[sid].turns) {update(sid,{sessionUpdate:'user_message_chunk',content:{type:'text',text:turn}});text(sid,`Restored: ${turn}\n`);}
         reply(msg.id,session(sid));break;
-      case 'session/list':reply(msg.id,{sessions:Object.entries(sessions).map(([id,s])=>({sessionId:id,cwd:s.cwd,title:id,updatedAt:new Date().toISOString()}))});break;
+      case 'session/list':reply(msg.id,{sessions:Object.entries(sessions).map(([id,s])=>({sessionId:id,cwd:s.cwd,title:s.title??id,updatedAt:new Date().toISOString()}))});break;
       case 'session/fork': {const id=`fixture-${Object.keys(sessions).length+1}`;sessions[id]=structuredClone(sessions[sid]);persist();reply(msg.id,session(id));break;}
       case 'session/set_model':case 'session/set_mode':reply(msg.id);break;
       case 'session/cancel':text(sid,'Turn cancelled.\n');finish(sid,'cancelled');break;
@@ -40,6 +40,14 @@ createInterface({input:process.stdin}).on('line', line => {
         sessions[sid].turns.push(prompt);persist();
         if(prompt==='crash'){process.exit(23);break;}
         if(prompt==='hold'){text(sid,'Working; waiting for cancellation.\n');break;}
+        if(prompt==='refuse'){text(sid,'Refusing.\n');finish(sid,'refusal');break;}
+        if(prompt==='crash-later'){text(sid,'Working; the process will exit.\n');setTimeout(()=>process.exit(24),150);break;}
+        if(prompt==='titled'){sessions[sid].title='Fixture title';persist();update(sid,{sessionUpdate:'session_info_update',title:'Fixture title'});text(sid,'Titled.\n');finish(sid);break;}
+        if(prompt==='edit'){
+          update(sid,{sessionUpdate:'tool_call',toolCallId:'edit-fixture',title:'Edit changed.txt',kind:'edit',status:'in_progress',locations:[{path:`${sessions[sid].cwd}/changed.txt`}],content:[{type:"diff",path:`${sessions[sid].cwd}/changed.txt`,oldText:'one\n',newText:'one\ntwo\n'}]});
+          update(sid,{sessionUpdate:'tool_call_update',toolCallId:'edit-fixture',status:'completed'});
+          text(sid,'Edited.\n');finish(sid);break;
+        }
         if(prompt==='permission') {
           update(sid,{sessionUpdate:'tool_call',toolCallId:'read-fixture',title:'Read fixture.txt',kind:'read',status:'pending'});
           ask('session/request_permission',{sessionId:sid,toolCall:{toolCallId:'read-fixture',title:'Read fixture.txt',kind:'read',status:'pending'},options:[{optionId:'allow',name:'Allow once',kind:'allow_once'},{optionId:'deny',name:'Reject',kind:'reject_once'}]}, result=>{

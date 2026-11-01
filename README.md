@@ -28,7 +28,7 @@ This configuration is designed to solve a concrete set of problems:
   Portal Web is the default in-Emacs browser and Noema host. `xwidget-webkit` loads only when selected explicitly; `eww` and macOS `open` remain available.
 - AI integration
   `gptel`, Claude Code, Codex CLI, and Copilot are integrated into the editing environment rather than bolted on as separate tools.
-  `H-A` (Option-Shift-A), `SPC a a`, or `M-x agent-manager` opens a shared Agent Manager for workspace sessions, attention, native history and lifecycle actions.
+  `H-A` (Option-Shift-A), `SPC a a`, or `M-x agent-manager` opens a shared Agent Manager for workspace sessions, attention, native history and lifecycle actions; `C-c A j` jumps to the next session waiting on you, and `C-c A q` edits queued prompts.
 - Recoverable dependency management
   Bootstrap, lock export, state backup/restore, and health checks are part of the operational model, so new-machine setup and recovery are treated as normal workflows.
 

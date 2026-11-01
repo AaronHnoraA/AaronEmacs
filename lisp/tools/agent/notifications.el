@@ -57,6 +57,9 @@ The first non-nil plist wins.  These functions must only inspect state.")
 (declare-function agent-shell-subscribe-to "agent-shell" (&rest args))
 (declare-function agent-shell-unsubscribe "agent-shell" (&rest args))
 (declare-function agent-shell--display-buffer "agent-shell" (buffer))
+(declare-function +agent-session-snapshot "tools/agent/acp" (buffer))
+(declare-function +agent-acp-review-request "tools/agent/acp" (&optional buffer))
+(autoload '+agent/inbox "tools/agent/sessions" nil t)
 
 (defun +agent-notify--cancel-timer ()
   "Release the one pending delivery timer."
@@ -76,14 +79,26 @@ The first non-nil plist wins.  These functions must only inspect state.")
   (when (zerop (hash-table-count +agent-notify--pending))
     (+agent-notify--cancel-timer)))
 
+(defun +agent-notify--request-pending-p (buffer)
+  "Whether agent BUFFER still waits on an approval or an answer."
+  (and (fboundp '+agent-session-snapshot)
+       (memq (plist-get (+agent-session-snapshot buffer) :attention-kind)
+             '(permission input))))
+
 (defun +agent-notify--visit (buffer)
-  "Visit BUFFER only after a person activates a notification."
-  (if (buffer-live-p buffer)
-      (if (and (fboundp 'agent-shell--display-buffer)
-               (with-current-buffer buffer (derived-mode-p 'agent-shell-mode)))
-          (agent-shell--display-buffer buffer)
-        (pop-to-buffer buffer))
-    (aaron/notifications)))
+  "Visit BUFFER only after a person activates a notification.
+A request still pending lands on its native control; a resolved one just
+shows the session."
+  (cond ((not (buffer-live-p buffer)) (aaron/notifications))
+        ((+agent-notify--request-pending-p buffer) (+agent-acp-review-request buffer))
+        ((and (fboundp 'agent-shell--display-buffer)
+              (with-current-buffer buffer (derived-mode-p 'agent-shell-mode)))
+         (agent-shell--display-buffer buffer))
+        (t (pop-to-buffer buffer))))
+
+(defun +agent-notify--open-inbox ()
+  "Show every waiting session, for a notification that merged several."
+  (if (fboundp '+agent/inbox) (+agent/inbox) (aaron/notifications)))
 
 (defun +agent-notify--record (event &optional silent)
   "Send EVENT through the shared notification boundary, optionally SILENT."
@@ -128,7 +143,7 @@ The first non-nil plist wins.  These functions must only inspect state.")
                                       '(permission input failed completed))
                           " · ")
          :source "Agents" :level 'warning :id "agents-attention"
-         :action #'aaron/notifications)))))
+         :action #'+agent-notify--open-inbox)))))
 
 (defun +agent-notify--schedule ()
   "Schedule a single coalesced reminder, respecting the global cooldown."
