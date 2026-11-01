@@ -87,7 +87,8 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 - **MN-C15：** 能用 App 自带 MarginNote Bridge（`/bridge/v1`）解决的操作走官方
   接口，Noema 插件只做 Bridge 没有的事：原始 PKDrawing、笔画数和任意原生 JS。
   OCR 主稿由 skill 的 `official_export.mjs` 经 Bridge 的导出规划与导出取得，不操作
-  界面。Bridge 的页面图片分辨率不足，只用来判断有无内容，不作 OCR 来源。
+  界面。Bridge 的页面图片分辨率不足，只用来判断有无内容，不作 OCR 来源。官方 PDF
+  裁掉页面外的笔迹，无限画布上须比对原生笔迹范围；OCR 渲染默认 600 DPI。
 - **MN-C16：** Bridge 按设备使用：`~/.config/mn-bridge/mac/` 与 `ipad/` 各存一份
   凭据，调用时写明设备，结果标明设备。默认的 `token`、`base` 会被任何安装命令
   覆盖，不作依据。两台设备是两个资料库实例，不互相代表。设备能力与实测边界在
