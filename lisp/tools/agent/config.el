@@ -721,14 +721,13 @@ Emacs owns which frontend shows a conversation."
       buffer)))
 
 (defun +agent-shell--managed-entry-a (_original &optional arg)
-  "Give `agent-shell' its own DWIM over this project's pool.
-Recall the latest session, or return from one; \\[universal-argument] starts
-a new one here; a double prefix ARG picks among the pool, new and saved
-conversations.  This is `+agent/pool' under the name people type."
-  (if (equal arg '(4))
-      (progn (require 'term/portal/popup)
-             (call-interactively #'+agent-shell/here))
-    (+agent/pool (equal arg '(16)))))
+  "Make `agent-shell' open a new managed session in the invoking window.
+It is never a toggle: `+agent/pool' (\\[+agent/pool]) recalls and returns.  A
+double prefix ARG picks among the pool, new and saved conversations."
+  (if (equal arg '(16))
+      (+agent/pool t)
+    (require 'term/portal/popup)
+    (call-interactively #'+agent-shell/here)))
 
 (defun +agent-shell-enable-command-completion ()
   "Show ACP command suggestions in an agent-shell buffer after typing /."

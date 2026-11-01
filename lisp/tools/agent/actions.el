@@ -4,8 +4,8 @@
 ;; Every agent action is one row here, so a letter means the same thing wherever
 ;; it is pressed.  `C-c A', the session menu (`?', `C-c C-z', the manager's `.')
 ;; and the input's local slash commands are all generated from this table; add
-;; an action here, never to one of those surfaces.  The daily entry is the
-;; `agent-shell' command itself.  See C47-C49 in docs/design/agent-management.md.
+;; an action here, never to one of those surfaces.  `agent-shell' opens a session
+;; and `C-c a' recalls one.  See C47-C49 in docs/design/agent-management.md.
 ;;
 ;; This file loads at startup and requires nothing: `+agent-menu-*' commands
 ;; come from `tools/agent/menu', which loads agent-shell only when first used.

@@ -61,7 +61,7 @@
 
 | 来源 | 学到的做法 | 落地 |
 | --- | --- | --- |
-| HQ 依附 agent-shell 的公开语义，自己不定义入口 | `agent-shell` 本身就该是入口 | 发现我们的 advice 把上游 DWIM 换成了“每次新建”，绕开项目池；C49 恢复 DWIM 并作用到池上 |
+| HQ 依附 agent-shell 的公开语义，自己不定义入口 | 入口语义要清楚 | 曾把 `agent-shell` 改成召回开关，用户更正：它就是用来打开新会话的。C49 定为总是新建，`C-c a` 负责召回和返回 |
 | HQ 只用少量公开 API（`agent-shell-buffers`、`agent-shell-status`、`agent-shell-cwd`） | 不和上游的键和语义竞争 | C48 归还 `C-c C-t` 等原生键，`C-c C-c` 走统一停止 |
 | HQ Peek 与 Toggle 共用同一份状态和列表 | 一份数据，多个视图 | C47 一张动作表生成前缀、菜单、斜杠命令 |
 | ECA `eca-chat-mode-map` 让聊天内就能完成全部操作 | 动作要能在输入旁完成 | 沿用已有 `/resume`，本地斜杠命令从动作表生成，生成中也可用 |
@@ -95,7 +95,7 @@
 | Makefile 的窗口、Agent 回归组，含 `test/agent-lifecycle-e2e.el` | 335 项，0 失败，2 跳过 |
 | `make research-test` | 2 + 207 + 27 + 96 + 102，全部通过 |
 | `test/agent-manager-gui-e2e.py` 的 `queue`、`manager`、`display` | 全部通过：真实 child frame、按键、返回来源、双 frame、重启 |
-| `test/agent-manager-gui-e2e.py entry` | 通过：`agent-shell` 指令的日常路径，`C-u` 新建、再执行返回、召回不新建、回合中输入 `/queue`、`C-c C-c` 停止并挂起、`?`、`/agents`、`C-u C-u` 单一选择器 |
+| `test/agent-manager-gui-e2e.py entry` | 通过：`agent-shell` 总是新建，`C-c a` 召回和返回，回合中输入 `/queue`、`C-c C-c` 停止并挂起、`?`、`/agents`、`C-u C-u` 单一选择器 |
 | 全仓 `make test-check` | 140 个文件，所有 agent 文件通过；6 个未过见下 |
 | `make state-check` | 不是零差异，因为包含按键迁移和并行工作；非按键差异只有 `tools/agent/actions`、Portal 的 `C-c C-l` 和 Dashboard 按钮 |
 | Doctor | 0 errors，0 warnings，0 key conflicts；`tools/agent` 无 policy hit |

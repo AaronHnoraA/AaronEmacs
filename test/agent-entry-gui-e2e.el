@@ -25,7 +25,7 @@
          (agent-shell-confirm-interrupt nil)
          (+agent-acp-notify-function nil)
          (source (get-buffer-create "Entry GUI source"))
-         chat picks result)
+         chat extra picks result)
     (unwind-protect
         (cl-letf (((symbol-function '+agent-acp-config-for) (lambda (_agent) (copy-tree config)))
                   ((symbol-function '+agent-acp-project-root) (lambda (&rest _) directory))
@@ -40,20 +40,20 @@
           (switch-to-buffer source)
           (setq default-directory directory)
           (let ((origin (selected-window)))
-            ;; C-u: a new session here.
-            (let ((current-prefix-arg '(4))) (call-interactively #'agent-shell))
+            ;; `agent-shell' opens a new session here.
+            (call-interactively #'agent-shell)
             (setq chat (window-buffer (selected-window)))
             (set-buffer chat)
             (should (+agent-acp-agent-buffer-p chat))
             (agent-flow-e2e--wait (lambda () (+agent-acp-state-value chat '(:init-finished))))
-            ;; Inside a chat the same command returns.
-            (call-interactively #'agent-shell)
+            ;; C-c a returns from the chat and leaves it running.
+            (agent-entry-gui-e2e--key "C-c a")
             (should (eq (window-buffer (selected-window)) source))
             (set-buffer source)
             (should (+agent-session-live-p chat))
             ;; And from the editor it recalls that session, creating nothing.
             (let ((sessions (length (+agent-pool-sessions directory))))
-              (call-interactively #'agent-shell)
+              (agent-entry-gui-e2e--key "C-c a")
               (should (eq (window-buffer (selected-window)) chat))
               (set-buffer chat)
               (should (= sessions (length (+agent-pool-sessions directory)))))
@@ -109,14 +109,22 @@
               (should (eq (window-buffer (selected-window)) chat))
               (should (seq-find (lambda (c) (string-match-p "New agent" c)) choices))
               (should (seq-find (lambda (c) (string-match-p "Resume saved" c)) choices)))
+            ;; Inside a chat `agent-shell' still opens another, never a toggle.
+            (let ((before (length (+agent-pool-sessions directory))))
+              (call-interactively #'agent-shell)
+              (setq extra (window-buffer (selected-window)))
+              (should-not (eq extra chat))
+              (should (+agent-acp-agent-buffer-p extra))
+              (should (= (1+ before) (length (+agent-pool-sessions directory)))))
             (setq result (list :passed t :new-here t :return t :recall t :slash-during-turn t
                                :native-stop t :question-mark t :native-key t :manager t
                                :one-picker t))))
       (when-let* ((buffer (get-buffer +agent-manager-buffer-name))) (kill-buffer buffer))
       (when-let* ((buffer (get-buffer +agent-queue-buffer-name))) (kill-buffer buffer))
-      (when (buffer-live-p chat)
-        (with-current-buffer chat
-          (let ((kill-buffer-query-functions nil)) (kill-buffer chat))))
+      (dolist (buffer (list chat extra))
+        (when (buffer-live-p buffer)
+          (with-current-buffer buffer
+            (let ((kill-buffer-query-functions nil)) (kill-buffer buffer)))))
       (kill-buffer source)
       (delete-directory directory t))
     result))

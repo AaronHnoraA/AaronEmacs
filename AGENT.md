@@ -108,8 +108,8 @@ the native ID and unsent input without replaying an active request. Research
 must finish its owning Run before restart. Input/hide keys are `C-c C-e` /
 `C-c C-o` in both the dock and Portal popup. Lifecycle contracts C11-C16 and
 C37-C49 and their regression tests live in the agent management design document.
-The daily entry is the `agent-shell` command, whose DWIM acts on the project
-pool; `C-c a` is the same logic.  `tools/agent/actions` is the one table of agent
+The `agent-shell` command always opens a new session here and is never a toggle;
+`C-c a` recalls and returns.  `tools/agent/actions` is the one table of agent
 actions: `C-c A`, the session menu and the input's local slash commands are
 generated from it, so a new action is a row there, never a new key or menu.  The
 chat's own map keeps only view movement and does not take agent-shell's keys.

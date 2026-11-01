@@ -169,8 +169,10 @@
   Noema 日程 / popup `portal`
 - `H-A`（Option-Shift-A） / `SPC a a`
   当前项目的 Agent Manager，再按一次返回；加前缀查看全部项目，也可用 `M-x agent-manager`
-- `M-x agent-shell` / `C-c a`
-  同一入口：召回本项目最近的会话，在聊天里执行则返回；`C-u` 在当前窗口新建，`C-u C-u` 选择会话、新建或已保存对话
+- `M-x agent-shell`
+  在当前窗口打开新会话，不是开关；`C-u C-u` 选择会话、新建或已保存对话
+- `C-c a` / `C-u C-c a`
+  召回本项目最近的会话，在聊天里执行则返回 / 选择会话、新建或已保存对话
 
 ### macOS Option `H-`
 

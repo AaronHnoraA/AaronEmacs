@@ -700,19 +700,23 @@
   (should (eq (command-remapping 'agent-shell-interrupt nil +agent-acp-tabs-mode-map)
               #'+agent-acp-stop)))
 
-(ert-deftest agent-entry-c49-agent-shell-is-the-pool ()
-  "`agent-shell' recalls and returns; a prefix starts or picks."
+(ert-deftest agent-entry-c49-agent-shell-always-opens-a-new-session ()
+  "`agent-shell' is never a toggle; only a double prefix picks."
   (let (calls)
     (cl-letf (((symbol-function '+agent/pool) (lambda (choose) (push (list 'pool choose) calls)))
               ((symbol-function '+agent-shell/here)
                (lambda (&rest _) (interactive) (push 'here calls)))
               ((symbol-function 'require) (lambda (&rest _) t)))
       (agent-shell)
-      (should (equal (pop calls) '(pool nil)))
-      (agent-shell '(16))
-      (should (equal (pop calls) '(pool t)))
+      (should (eq (pop calls) 'here))
       (agent-shell '(4))
-      (should (eq (pop calls) 'here)))))
+      (should (eq (pop calls) 'here))
+      (with-temp-buffer
+        (setq major-mode 'agent-shell-mode)
+        (agent-shell)
+        (should (eq (pop calls) 'here)))
+      (agent-shell '(16))
+      (should (equal (pop calls) '(pool t))))))
 
 (ert-deftest agent-entry-c49-local-commands-run-at-the-input-even-during-a-turn ()
   (agent-lifecycle-e2e--with-session (buffer store directory)

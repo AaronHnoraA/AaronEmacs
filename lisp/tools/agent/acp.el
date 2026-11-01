@@ -1713,9 +1713,9 @@ renders.  Return non-nil when a prompt was written now."
 Each tab is one live agent session of this project.  The buffer is the real
 agent-shell: type at its prompt and press RET to send, also during a turn.
 
-M-x agent-shell\trecall this project's latest session, or return from it
-  with C-u\tstart a new one here
+M-x agent-shell\topen a new session in this window
   with C-u C-u\tpick a session, a new one or a saved conversation
+C-c a\trecall this project's latest session, or return from it
 
 \\<+agent-acp-tabs-mode-map>In the chat
   \\[+agent-acp-focus-input]\tjump to the input
