@@ -327,7 +327,8 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   所有创建先按 workspace 校验显式 target，再创建会话或 worktree。返回值沿用
   Emacs gateway 的 JSON 标记（nil 为 null、`:json-false` 为 false），经传输仍保持类型。
 - **C51 普通会话的项目入口。** 普通 ACP 会话位于本机可达的 Noema 项目时，首个请求附带
-  一个隐藏的 ACP 文本块，只含项目根、`noema-project-maintenance` 的路径和 API 命令。
+  一个隐藏的 ACP 文本块，只含项目根、`noema-project-maintenance` 的路径和 API 命令，
+  以及 Pi 的存在和本会话的身份（[Pi C22](pi-sessions.md)）。
   它是引用：不读取项目，不启动 host，不改变聊天中显示的提问。每个原生 Session
   只发一次。Run、probe、side、Pi、MarginNote 和 LaTeX 导出由各自的 owner 提供上下文，
   不收此块。实现在 `noema-agent-entry`，只在同步构建请求时绑定，晚于异步记忆召回。

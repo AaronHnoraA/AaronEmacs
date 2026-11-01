@@ -195,7 +195,8 @@
           "noema-elisp-api",
           "noema-editor-interaction",
           "noema-prompt-document",
-          "noema-agent-operations"
+          "noema-agent-operations",
+          "noema-pi"
         ],
         "preamble": "通过现有 Emacs 命令和受支持的语义 API 操作。Emacs 管理窗口、Agent 进程、Session、权限和用户交互。按任务读取文档；Markdown 语法与原位审阅另选 noema-md，项目协作方法另选 noema-project。"
       },

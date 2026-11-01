@@ -131,7 +131,7 @@ as zero."
           (+agent-api--create-in-worktree root agent body)
         (+agent-api--create-in-workspace root agent directory)))))
 
-(defun +agent-api--identified (body)
+(defun +agent-api-identified (body)
   "Return BODY's session row, proven by its buffer and native ID."
   (let* ((name (+agent-api--string body "buffer"))
          (native (+agent-api--string body "nativeSessionId"))
@@ -185,7 +185,7 @@ Sending is asynchronous; status and bounded read report actual progress."
       ("list" (+agent-api--list body offset limit))
       ("create" (+agent-api--create body))
       ((or "status" "send" "read" "stop" "show")
-       (let* ((snapshot (+agent-api--identified body))
+       (let* ((snapshot (+agent-api-identified body))
               (buffer (plist-get snapshot :buffer)))
          (pcase action
            ("read" (append `((ok . t) (session . ,(+agent-api--describe snapshot)))

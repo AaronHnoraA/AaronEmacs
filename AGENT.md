@@ -463,7 +463,10 @@ This config already has maintenance and workflow entry points. Reuse them:
   Project's `.agent/` cache and Hy Memory, and `emacs:agent` `status` reports
   ACP capabilities and usage (`docs/design/agent-management.md` C50–C52).
   Ordinary sessions in a Project receive one hidden pointer to the
-  `noema-project-maintenance` Skill.  Do not add another cache, memory index
+  `noema-project-maintenance` Skill, which also tells them that Pi exists and
+  who they are to it: an Agent talks to Pi directly through `emacs:pi` `send`
+  with `from`, and hears back as a message in its own session
+  (`docs/design/pi-sessions.md` C22, the `noema-pi` Skill).  Do not add another cache, memory index
   or status command; a new shared resource is added to that entry and Skill.
 - Project task graph: `agent:project:graph`, `scripts/project-graph.mjs` and the
   `noema-project-graph` pack keep a Project's tasks in `.agent/tasks/`, as a

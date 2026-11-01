@@ -134,6 +134,12 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   buffer、native Session 与历史属于项目，不把主 Pi 或别的项目 Pi 当作它。
   项目切换撤下前一项目的 Pi 视图；调用当前项目 Pi 才显示它，不替别的项目
   创建进程。各项目的会话继续保留，由同一显示 owner 管理各自返回位置。
+- **C22 Pi 是可直接沟通的 Agent。** 项目中的普通 ACP 会话从入口提示（C51）得知 Pi 存在、
+  自己的 `buffer` 与 `nativeSessionId`，方法在 `noema-pi` Skill。`emacs:pi` `send` 带 `from`
+  时，Emacs 先按身份核对这个会话，再把它的 Agent、buffer、native ID 和项目根写成消息头；
+  核对不过拒绝发送，头不由调用方拼写。Pi 用 `emacs:agent` `send` 回复到这个会话，忙时排队，
+  所以调用方可以结束回合等待，不轮询。主动查看用 `status` 取身份后 `emacs:agent` `read`。
+  消息头表明来自 Agent，不带人的批准；Pi 只回复一次，不回应确认，避免互相续杯。
 
 ## 工作流程
 
@@ -179,7 +185,7 @@ API 与 Markdown 审阅见 [Noema 交互](../noema/design/interaction-plan.md)�
 | --- | --- |
 | Emacs `config/pi/runtime/package*.json` | 进 Git 的固定 npm 依赖与 lock；`make pi-setup` 安装 |
 | Noema `resources/pi/profile.json`、`SYSTEM.md`、`extensions/` | 进 Git 的默认模型池、提示词与扩展；Skill/pack 归既有管理器 |
-| Noema `resources/skills/noema-{agent-operations,context-memory,project-docs,project-maintenance,workflow-audit}/` | 与实现一起维护的操作 Skill；其它知识库 Skill 仍在原库 |
+| Noema `resources/skills/noema-{agent-operations,context-memory,pi,project-docs,project-maintenance,workflow-audit}/` | 与实现一起维护的操作 Skill；其它知识库 Skill 仍在原库 |
 | Emacs `etc/noema/pi/config.el` | 私有 Config 面板覆盖，按需生成；默认值仍来自版本化 profile |
 | Emacs `etc/noema/pi/{settings,models,auth}.json` | 私有 Pi 配置和认证；原有 `var/` 文件首次部署时迁移，保持引用 |
 | Emacs `var/noema/pi/` | 原生会话、索引和缓存；配置、提示词与扩展使用符号链接，Skill 不另建目录 |
@@ -199,7 +205,7 @@ API 与 Markdown 审阅见 [Noema 交互](../noema/design/interaction-plan.md)�
 | `server/Features/Agent/api.mjs` | API 名字披露、单接口说明、调用和版本化文档提案 |
 | `noema-prompt-document` Skill | 创建／打开普通 Markdown 的操作指导 |
 
-`noema:api:emacs:pi` 支持 `context/list/status/ensure/send/resume/new/archive`。`context`
+`noema:api:emacs:pi` 支持 `context/list/status/ensure/send/resume/new/archive`，`send` 可带 `from`（C22）。`context`
 无需 root；其他作用域操作显式传 companion 或 root。后台发送不改变窗口焦点。`list`
 分页返回持久历史，并单独报告实际运行的主／项目 Pi；`resume/archive` 接受 Pi
 自己的记录 `sessionId`，与 `nativeSessionId` 区分。`send` 的受理不表示回合完成。
