@@ -410,6 +410,11 @@ This config already has maintenance and workflow entry points. Reuse them:
   takes a path.  Keep it that way round: Emacs control goes through
   `bin/emacs-app`, Noema data and maintenance go to the Noema backend, and
   neither is reimplemented in the extension.
+- MarginNote from an agent: the App's own Bridge first, the Noema addon only for
+  what it lacks (raw PKDrawing, arbitrary JS).  Devices are named (`mac`, `ipad`
+  under `~/.config/mn-bridge/`) and never read as each other; the `marginnote-agent`
+  Skill has the capability matrix, `docs/noema/design/marginnote-agent-bridge.md`
+  the contracts.
 - Page search and references: one implementation, the Noema kernel's
   (`site-lisp/noema/kernel/noema/wikisearch`).  `lisp/noema/search/config.el`
   sends the typed text and shows the answer through the completion style

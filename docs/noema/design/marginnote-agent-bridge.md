@@ -2,7 +2,8 @@
 
 ## 范围
 
-MarginNote 插件是 Codex 等 agent 操作原生应用的接口。它在应用自身的
+MarginNote 有两条 agent 通道：App 自带的 Bridge 是首选（MN-C15），下面的 Noema
+插件补充它没有的能力。插件在应用自身的
 JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；文件、学习集、
 笔记、脑图、阅读器及撤销仍由 MarginNote 管理。Noema host 只传递请求与结果。
 
@@ -83,9 +84,19 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   `insert` 文本，不手写 `[[标题]]` 或 `roam://`。查询是模糊匹配，只链确指同一
   概念的结果；kernel 提供的“链接到新页”被脚本丢弃，查不到的术语不链、不建页，
   在结束报告中列为候选。Noema 未运行或 kernel 不应答时不挂链接。
+- **MN-C15：** 能用 App 自带 MarginNote Bridge（`/bridge/v1`）解决的操作走官方
+  接口，Noema 插件只做 Bridge 没有的事：原始 PKDrawing、笔画数和任意原生 JS。
+  OCR 主稿由 skill 的 `official_export.mjs` 经 Bridge 的导出规划与导出取得，不操作
+  界面。Bridge 的页面图片分辨率不足，只用来判断有无内容，不作 OCR 来源。
+- **MN-C16：** Bridge 按设备使用：`~/.config/mn-bridge/mac/` 与 `ipad/` 各存一份
+  凭据，调用时写明设备，结果标明设备。默认的 `token`、`base` 会被任何安装命令
+  覆盖，不作依据。两台设备是两个资料库实例，不互相代表。设备能力与实测边界在
+  `marginnote-agent` skill，App 的 `/guide`、`/capabilities` 是运行时权威。
 
 ## 实现位置
 
+- App 自带 Bridge：`~/.config/mn-bridge/<设备>/`、`mn-bridge` skill；README 技能库的
+  `marginnote-agent` 记录双端通道选择、能力矩阵和 `scripts/mn.py`。
 - `plugins/marginnote/`：原生插件、API 声明索引、agent CLI 与 stdio MCP。
 - `server/Features/MarginNote/`：任务中转、会话和 HTTP 控制器。
 - `scripts/build-marginnote-addon.mjs`：将本机连接配置打入 `.mnaddon`。
@@ -100,13 +111,10 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
 
 ## 已知差距
 
-- **MN-G1：** 本机 1.0.3 的真实查询、二进制分块读取与结果回传已验证；iPad
-  连接及取材仍未验证。
-- **MN-G2：** 公开 API 声明未包含通用按页压平 PDF 函数，不能把笔记本备份
-  当作 PDF 导出。macOS 4.4.6（44602）的官方 `ExportDocPDF` 命令及后续选页、
-  PDF 格式选择、临时文件取回已验证；skill 的 `official_export.mjs` 按原生页号
-  回读校验范围，保存官方 PDF 与摘要回执，并收起保存窗口。该界面适配限定于
-  已核对版本；其他版本与 iPad 须重新核对，导出后仍需视觉检查图层完整性。
+- **MN-G1：** Noema 插件 1.0.3 在 macOS 5.0.1 上的查询与手写读取已验证；iPad
+  连接及取材仍未验证。插件通道固定在 `127.0.0.1`，iPad 只能走 Bridge。
+- **MN-G2：** Bridge 在 iPad 上的写入路由与 `official_export.mjs` 未验证。macOS
+  5.0.1 上带手写的插入留白已验证导出，图片贴附等其他图层仍需每次视觉核对。
 
 ## 安装与调用
 
