@@ -93,11 +93,15 @@ JavaScriptCore/JSB 环境执行代码，使用宿主已经提供的全部 API；
   凭据，调用时写明设备，结果标明设备。默认的 `token`、`base` 会被任何安装命令
   覆盖，不作依据。两台设备是两个资料库实例，不互相代表。设备能力与实测边界在
   `marginnote-agent` skill，App 的 `/guide`、`/capabilities` 是运行时权威。
+- **MN-C17：** 手写默认放文件页面。脑图的结构操作走 Bridge；脑图手写的合成图只用于看大意，
+  精读和大画布经插件取 PKDrawing，按全局坐标拼合分块，按媒体 hash 增量。
 
 ## 实现位置
 
 - App 自带 Bridge：`~/.config/mn-bridge/<设备>/`、`mn-bridge` skill；README 技能库的
   `marginnote-agent` 记录双端通道选择、能力矩阵和 `scripts/mn.py`。
+- `marginnote-agent` 的 `scripts/mn_map.py`、`mn_canvas.py` 与 `references/mindmap.md`：
+  脑图结构操作、原始笔迹拼合与增量（仅 Mac）。
 - `marginnote-agent` 的 `scripts/mn_flow.py`：送 PDF、找手写、读手写、回批注与留白写字
   的官方流程；页内文字只经留白写入。
 - `plugins/marginnote/`：原生插件、API 声明索引、agent CLI 与 stdio MCP。
