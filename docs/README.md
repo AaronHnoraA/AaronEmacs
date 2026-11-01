@@ -177,6 +177,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 - [mcp.md](noema/design/mcp.md) Noema MCP
 - [marginnote-agent-bridge.md](noema/design/marginnote-agent-bridge.md) MarginNote 官方 Bridge 优先的双端 agent 通道，与原生插件 JavaScript 执行接口。
 - [rendered-constructs.md](noema/design/rendered-constructs.md) 渲染组件（Rendered Constructs）统一架构
+- [project-graph.md](noema/design/project-graph.md) 项目任务图谱：`.agent/tasks/` 的数据、规则由代码执行的契约、Skill pack 与只读页面。
 - [research-synthesis.md](noema/design/research-synthesis.md) Research synthesis and Proposals
 - [scroll-ownership.md](noema/design/scroll-ownership.md) 视口归属：滚动只有一个主人
 - [snippet-catalog.md](noema/design/snippet-catalog.md) Snippet catalog and upstream synchronization
@@ -211,6 +212,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 - [noema-xwidget-audit-2026-06.md](noema/records/audits/noema-xwidget-audit-2026-06.md) Full-chain stability, HCI, and security audit of the Emacs ↔ xwidget ↔ noema bridge.
 - [org-roam-study-2026-08.md](noema/records/audits/org-roam-study-2026-08.md) org-roam and org-roam-ui architecture study
 - [overleaf-source-editor-study-2026-07.md](noema/records/audits/overleaf-source-editor-study-2026-07.md) Overleaf Source Editor 架构审读与 Noema 迁移矩阵
+- [planweave-trace-canvas-audit-2026-11.md](noema/records/audits/planweave-trace-canvas-audit-2026-11.md) PlanWeave and Trace Canvas against real Noema data: what the project task graph adopted, improved and rejected.
 - [pisper-agent-lifecycle-study-2026-09.md](noema/records/audits/pisper-agent-lifecycle-study-2026-09.md) Pisper study for Noema: agent management and interaction
 - [siyuan-merge-audit-2026-08.md](noema/records/audits/siyuan-merge-audit-2026-08.md) 思源 → Noema：全量代码研判（值得 merge 的功能 / 特性 / 优化）
 - [typora-syntax-survey-2026-07.md](noema/records/audits/typora-syntax-survey-2026-07.md) Typora 语法特性调研

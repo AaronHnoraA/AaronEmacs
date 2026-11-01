@@ -338,8 +338,10 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
   null，项目还没有存储时 `cache` 为 null；两者都不创建任何东西。
   `agent:project:maintain` 立即执行既有的保守维护，`agent:memory:search` 用自选问题
   在项目范围内召回，`state` 不是 `ok` 时表示未知而非空。这些接口不持有状态：
-  `.agent/` 归 Go kernel（`research:cache:*`），记忆归 Hy Memory。各类 Agent 的用法写在
-  `noema-project-maintenance`，属于 `noema-project` pack。
+  `.agent/` 的存储归 Go kernel（`research:cache:*`），`.agent/tasks/` 归 Agent 并经
+  `agent:project:graph` 读写（`status` 的 `graph` 是摘要，没有时为 null），记忆归 Hy Memory。
+  各类 Agent 的用法写在 `noema-project-maintenance`，属于 `noema-project` pack；任务图谱见
+  [项目任务图谱](../noema/design/project-graph.md)。
 - **C53 输入提示只负责显示。** 原生提示符前只有一个随插入移动的 overlay，按
   会话状态、初始化完成和 prompt-ready 事件更新；不逐帧扫描正文、不增加计时器。
   队列预览读取有界的文本片段，挂起项明确标记；忙碌提交按现有函数和 Run owner

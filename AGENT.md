@@ -465,6 +465,14 @@ This config already has maintenance and workflow entry points. Reuse them:
   Ordinary sessions in a Project receive one hidden pointer to the
   `noema-project-maintenance` Skill.  Do not add another cache, memory index
   or status command; a new shared resource is added to that entry and Skill.
+- Project task graph: `agent:project:graph`, `scripts/project-graph.mjs` and the
+  `noema-project-graph` pack keep a Project's tasks in `.agent/tasks/`, as a
+  development convention with no running service; `noema-project-graph` (`C-c A g`)
+  parses it on request.  One fact has one place: definitions in `<id>.md`, everything
+  that happened in the journal, state folded on read.  A rule goes in the engine with
+  its advice text, never into a Skill; a Skill keeps only judgement, under a size budget
+  a test holds (`docs/noema/design/project-graph.md`).  Do not add a task list, board or
+  index beside it, and do not build it on Research Task/Job, Agenda or `.noema`.
 - Agent Skills: the Noema capability resolver and its manager
   (`noema-skill-manager`).  Global Skills live flat in the vault library
   `+noema-skills-directory` (`NOEMA_GLOBAL_SKILLS`), not in `etc/`;

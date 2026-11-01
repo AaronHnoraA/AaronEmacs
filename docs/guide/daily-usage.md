@@ -1790,6 +1790,7 @@ Emacs 通用 agent 层统一管理轻量模型交互与结构化 coding-agent �
 |----|------|
 | `H-A` / `SPC a a` / `C-c A RET` | Agent Manager 浮窗；再次调用隐藏返回 |
 | `C-c A W` | 打开当前项目 Pi |
+| `C-c A g` | 当前项目的 Agent cache：缓存、任务图谱、问题和日志（`noema-project-graph`） |
 | `C-c A n` | 编辑区新建执行 Agent；Pi 中新建同作用域的对话 |
 | `C-c A w` | 在当前 Project 仓库的新 Git worktree 里启动 Codex/Claude/OpenCode 会话 |
 | `C-c A N` | 同一任务交给几个 agent 并行尝试，各自一个 worktree |

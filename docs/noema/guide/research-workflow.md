@@ -15,6 +15,15 @@ Session、Run、任务、Attention 与能力；`M-x noema-sessions` 管理项目
 检查整体目标和实际交付，子 Agent 获得必要资料、写入边界和完成条件。工具和
 宿主负责实际执行；Skill 不模拟后台能力或强制增加工作文档。
 
+## 任务图谱
+
+多步工作由 Agent 在 `.agent/tasks/` 维护任务、依赖、领取、评审和决定，这是开发规范，不需要
+你操作，也不需要 Noema 在运行。想看时 `M-x noema-project-graph`（`C-c A g`，或项目总览的
+Agent cache）：一页显示缓存与记忆、任务树、需要处理的问题和最近日志。`g` 重新解析，
+`RET` 打开任务文件，`m` 做保守维护。终端里用
+`node ~/.config/emacs/site-lisp/noema/scripts/project-graph.mjs graph --text`。
+契约见[项目任务图谱](../design/project-graph.md)。
+
 ## 围绕 Markdown 工作
 
 在 Noema Markdown 页面选中正文，发送给已有 Agent 会话。问答直接回复；请求
