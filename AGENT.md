@@ -394,8 +394,8 @@ This config already has maintenance and workflow entry points. Reuse them:
   a window or a frame never ends a buffer; only ending actions do
   (`docs/design/window-lifecycle.md`).  A long-lived helper that would
   survive a crashed Emacs must watch its owner's pid, as the Noema web host
-  does through `NOEMA_HOST_OWNER_PID`; exit hooks alone do not run then.  yabai does not manage Emacs at all (`manage=off`
-  for the application), so frames place and size themselves.
+  does through `NOEMA_HOST_OWNER_PID`; exit hooks alone do not run then.  yabai manages Emacs frames, so a frame never
+  sizes or places itself: `New Terminal` and `New Frame` only open one.
 - Noema from outside Emacs: the Raycast entry has a Noema section, `Find Note`
   and `Noema Maintenance` (also installed as commands of their own, for a
   hotkey), and they do not go through Emacs at all.  Finding a page is

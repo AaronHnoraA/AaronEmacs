@@ -190,23 +190,23 @@
                  "Emacs frame action focus failed: Frame closed-frame closed before the action ran"
                  nil t))))))
 
-(ert-deftest background-frame-factory-cleans-up-after-sizing-failure ()
+(ert-deftest background-frame-factory-starts-on-dashboard-and-leaves-geometry ()
+  "A new frame is made from the Dashboard; the window manager places it."
   (let ((source (generate-new-buffer "*frame-factory-source*"))
-        created-from deleted)
+        created-from)
     (unwind-protect
         (with-current-buffer source
           (cl-letf (((symbol-function 'make-frame)
                      (lambda (&rest _)
                        (setq created-from (current-buffer))
                        (selected-frame)))
-                    ((symbol-function '+frame-fit-default)
-                     (lambda (_frame) (error "Sizing failed")))
-                    ((symbol-function 'delete-frame)
-                     (lambda (frame &rest _) (setq deleted frame))))
-            (should-error (+background-make-frame))))
+                    ((symbol-function 'set-frame-size)
+                     (lambda (&rest _) (error "Resized a frame")))
+                    ((symbol-function 'set-frame-position)
+                     (lambda (&rest _) (error "Moved a frame"))))
+            (should (eq (+background-make-frame) (selected-frame)))))
       (kill-buffer source))
-    (should (eq created-from (+window-dashboard-buffer)))
-    (should (eq deleted (selected-frame)))))
+    (should (eq created-from (+window-dashboard-buffer)))))
 
 (ert-deftest background-raw-make-frame-starts-on-dashboard ()
   "The frame hook gives even a plain `make-frame' the Dashboard."
@@ -232,17 +232,6 @@
             (+background--new-frame-dashboard (selected-frame)))
           (should (eq (window-buffer) source)))
       (when (buffer-live-p source) (kill-buffer source)))))
-
-(ert-deftest background-frame-factory-keeps-successful-frame ()
-  (let (deleted)
-    (cl-letf (((symbol-function 'make-frame)
-               (lambda (&rest _) (selected-frame)))
-              ((symbol-function '+frame-fit-default)
-               (lambda (_frame) nil))
-              ((symbol-function 'delete-frame)
-               (lambda (frame &rest _) (setq deleted frame))))
-      (should (eq (+background-make-frame) (selected-frame))))
-    (should-not deleted)))
 
 (ert-deftest background-new-terminal-uses-one-frame-without-focus-timer ()
   "Opening a terminal must not schedule focus back to an older frame."
@@ -278,7 +267,7 @@
       (when (buffer-live-p terminal) (kill-buffer terminal)))))
 
 (ert-deftest background-raycast-terminal-focuses-only-latest-frame ()
-  "Rapid New Terminal actions must not activate an older terminal frame."
+  "New Terminal leaves geometry alone and focuses only the newest frame."
   (let* ((first 'first-raycast-frame)
          (second 'second-raycast-frame)
          (first-buffer (generate-new-buffer " *raycast-first*"))
@@ -292,13 +281,12 @@
                                   first-buffer second-buffer)))
                   ((symbol-function 'selected-frame)
                    (lambda () current))
-                  ((symbol-function 'delete-other-windows) #'ignore)
-                  ((symbol-function 'set-frame-size) #'ignore)
-                  ((symbol-function 'frame-monitor-workarea)
-                   (lambda (&rest _) '(0 0 1000 800)))
-                  ((symbol-function 'frame-outer-width) (lambda (&rest _) 400))
-                  ((symbol-function 'frame-outer-height) (lambda (&rest _) 300))
-                  ((symbol-function 'set-frame-position) #'ignore)
+                  ((symbol-function 'delete-other-windows)
+                   (lambda (&rest _) (error "Changed the layout")))
+                  ((symbol-function 'set-frame-size)
+                   (lambda (&rest _) (error "Resized a frame")))
+                  ((symbol-function 'set-frame-position)
+                   (lambda (&rest _) (error "Moved a frame")))
                   ((symbol-function 'run-at-time)
                    (lambda (_delay _repeat callback &rest args)
                      (push (cons callback args) timers)))

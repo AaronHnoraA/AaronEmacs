@@ -64,11 +64,8 @@
 (defvar-local +portal-target-directory nil
   "Remote directory reached by SSH inside a local Portal terminal.")
 
-(defvar +portal-floating-frame-size '(110 . 32)
-  "Columns and lines of a standalone Portal terminal frame.")
-
 (defvar +portal--last-raycast-frame nil
-  "Newest floating terminal frame launched by Raycast.")
+  "Newest terminal frame launched by Raycast.")
 
 (defvar +portal-wheel-scroll-lines 5
   "Lines scrolled per wheel event in a Portal terminal.")
@@ -691,7 +688,7 @@ in a visible window are omitted from the choices."
             (run-at-time 0 nil #'portal-view-sync)))))))
 
 (defun +portal-clear-stale-frame-owner-h (frame &rest _)
-  "Clear a floating terminal owner when FRAME no longer displays it.
+  "Clear a terminal frame's owner when FRAME no longer displays it.
 FRAME is what the global `window-buffer-change-functions' passes."
   (when (frame-live-p frame)
     (let ((owner (frame-parameter frame '+portal/terminal)))
@@ -711,17 +708,11 @@ FRAME is what the global `window-buffer-change-functions' passes."
 (remove-hook 'delete-frame-functions #'+portal--delete-frame-terminal)
 
 (defun +portal/open-new ()
-  "Open a fresh Portal terminal in a centered floating frame."
+  "Open a fresh Portal terminal in its own frame.
+The window manager places the frame; this only opens it."
   (interactive)
   (let* ((buffer (+portal-open-external))
          (frame (selected-frame)))
-    (delete-other-windows)
-    (set-frame-size frame (car +portal-floating-frame-size)
-                    (cdr +portal-floating-frame-size))
-    (pcase-let ((`(,x ,y ,w ,h) (frame-monitor-workarea frame)))
-      (set-frame-position frame
-                          (+ x (max 0 (/ (- w (frame-outer-width frame)) 2)))
-                          (+ y (max 0 (/ (- h (frame-outer-height frame)) 2)))))
     ;; Raycast closes its window after Emacs has returned.  Claim the new
     ;; frame once then, never an older frame from a rapid earlier invocation.
     (setq +portal--last-raycast-frame frame)
@@ -730,7 +721,6 @@ FRAME is what the global `window-buffer-change-functions' passes."
      (lambda (target expected-buffer)
        (when (and (frame-live-p target)
                   (eq target +portal--last-raycast-frame)
-                  (eq target (selected-frame))
                   (eq expected-buffer
                       (window-buffer (frame-selected-window target))))
          (select-frame-set-input-focus target)))

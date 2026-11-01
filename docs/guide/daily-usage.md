@@ -1608,7 +1608,7 @@ Raycast 或登录项。范围与限制见 [Neomacs 兼容层](../design/neomacs-
   查询请求的 `pending`、`ok`、`error` 或 `unknown` 结果；记录仅在当前 Emacs
   会话中短期保留，重启后不能继续查
 - `bin/emacs-app terminal`
-  新开一个 Portal 终端,每次都是新实例,单独占一个居中的浮动 frame;在 M-x 里是
+  新开一个 Portal 终端,每次都是新实例,单独占一个 frame;在 M-x 里是
   `+portal/open-new`。Emacs 未运行时会先启动，待图形窗口初始化完成后再开终端。
 - `bin/emacs-app status`
   `visible` / `background` / `busy`(在运行但没应答,比如正在启动或等你回答提问)/ `stopped`
@@ -1624,9 +1624,8 @@ Raycast 或登录项。范围与限制见 [Neomacs 兼容层](../design/neomacs-
 启动器的环境,而 Raycast 给的 `LC_ALL` 不是合法的 POSIX locale,会让 `pbpaste` 这类工具
 退回 C locale,把中文粘贴成一串 `?`。
 
-新 frame(启动时的第一个、Raycast 的 New Frame、`SPC F n`)默认占鼠标所在显示器工作区的
-66% × 86% 并居中,由 `+frame-default-size` 控制(设为 nil 则用 Emacs 自己的默认大小);
-浮动终端仍用 `+portal-floating-frame-size`。
+Emacs 不决定 frame 的位置和大小:新 frame(包括 Raycast 的 New Terminal、New Frame)只管
+打开,排布交给 yabai。
 
 后台是 frame 不可见,不是应用隐藏,所以新开一个 frame(比如终端)时不会把其他 frame 一起带出来。
 
@@ -1647,7 +1646,7 @@ Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复�
 Emacs 崩溃或被强制退出后几秒内自己收尾退出,连同它的 kernel;正常退出时的 SIGHUP 也走
 同一套收尾。
 
-`+portal/open-new` 开的浮动终端在关闭 frame（关闭按钮、`delete-frame`、
+`+portal/open-new` 开的终端在关闭 frame（关闭按钮、`delete-frame`、
 Raycast 的 Close Frame）后仍保留 shell 和 buffer，可从 Ibuffer 或终端选择器重新打开。
 shell 退出时会关闭 buffer；若该 frame 当时只显示这个终端，frame 也会关闭或退回后台。
 若 frame 还有其他分屏，或这个终端此前已被隐藏，其他内容会保留。

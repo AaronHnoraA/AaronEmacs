@@ -688,7 +688,7 @@ host 的 `noema:api:knowledge:search` 通道，内核返回已经排好序的结
 
 Raycast 的 Emacs 插件有独立的 **New Terminal** 命令；`skhd` 将全局
 `Option+Enter` 绑定到这个 Raycast 命令，在新 Emacs frame 中打开 Portal
-终端。Emacs 未运行时会先启动。
+终端。Emacs 未运行时会先启动。它只负责打开：frame 的位置和大小由 yabai 决定。
 
 ### 从 Raycast 使用 Noema
 

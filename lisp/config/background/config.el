@@ -39,59 +39,14 @@ Nil leaves frames without an edge drag target.")
                      (display-graphic-p frame)))
               (frame-list)))
 
-(defvar +frame-default-size '(0.66 . 0.86)
-  "Width and height of a new frame, as fractions of its monitor's workarea.
-Nil leaves the size to Emacs, which is 80 columns by about 36 lines.")
-
-(defun +frame-fit-default (frame)
-  "Give FRAME the default size, centred on the monitor under the pointer.
-Nothing manages Emacs frames from outside, so a frame has to pick a usable
-size and place itself.  The size is set on the live frame, in pixels: as a
-frame parameter it is converted to columns before the frame has its font,
-and the frame then grows past the screen."
-  (when (and +frame-default-size
-             (display-graphic-p frame)
-             (not (frame-parameter frame 'fullscreen)))
-    (pcase-let* ((`(,x ,y ,w ,h) (+frame-pointer-workarea))
-                 (width (round (* w (car +frame-default-size))))
-                 (height (round (* h (cdr +frame-default-size)))))
-      (set-frame-size frame width height t)
-      (set-frame-position frame
-                          (+ x (max 0 (/ (- w (frame-outer-width frame)) 2)))
-                          (+ y (max 0 (/ (- h (frame-outer-height frame)) 2)))))))
-
 (defun +background-make-frame (&optional parameters)
   "Create a frame with PARAMETERS that starts on the Dashboard.
 `make-frame' shows the current buffer in the new frame.  When that buffer is
 an xwidget page, the page is resized to the new frame's window and the frame
-it was in is left showing it at the wrong size.  Without a size in
-PARAMETERS the frame gets the default one."
-  (let (frame completed)
-    (unwind-protect
-        (progn
-          (setq frame
-                (with-current-buffer (+window-dashboard-buffer)
-                  (make-frame parameters)))
-          (unless (or (assq 'width parameters) (assq 'height parameters))
-            (+frame-fit-default frame))
-          (setq completed t)
-          frame)
-      (unless completed
-        (when (and frame (frame-live-p frame))
-          (delete-frame frame t))))))
-
-(defun +frame-pointer-workarea ()
-  "Return the workarea (X Y WIDTH HEIGHT) of the monitor under the pointer."
-  (let* ((pointer (mouse-absolute-pixel-position))
-         (px (car pointer))
-         (py (cdr pointer)))
-    (or (seq-some
-         (lambda (monitor)
-           (pcase-let ((`(,x ,y ,w ,h) (alist-get 'geometry monitor)))
-             (and (<= x px) (< px (+ x w)) (<= y py) (< py (+ y h))
-                  (alist-get 'workarea monitor))))
-         (display-monitor-attributes-list))
-        (frame-monitor-workarea))))
+it was in is left showing it at the wrong size.  Where the frame goes and how
+big it is belong to the window manager."
+  (with-current-buffer (+window-dashboard-buffer)
+    (make-frame parameters)))
 
 (defun +background-status ()
   "Return \"visible\" when an editing frame is shown, else \"background\"."
@@ -537,10 +492,6 @@ client returns at once."
     (unless (or (frame-parent frame)
                 (window-minibuffer-p window))
       (set-window-buffer window (+window-dashboard-buffer)))))
-
-;; The initial frame exists by now and already has its font.
-(unless after-init-time
-  (+frame-fit-default (selected-frame)))
 
 (add-hook 'emacs-startup-hook #'+background--refresh-window-state-h)
 (add-hook 'after-make-frame-functions #'+background--new-frame-dashboard)
