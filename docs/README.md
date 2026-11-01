@@ -177,6 +177,7 @@ Noema is developed in its own repository (`site-lisp/noema/`); its documentation
 - [mcp.md](noema/design/mcp.md) Noema MCP
 - [marginnote-agent-bridge.md](noema/design/marginnote-agent-bridge.md) MarginNote 官方 Bridge 优先的双端 agent 通道，与原生插件 JavaScript 执行接口。
 - [rendered-constructs.md](noema/design/rendered-constructs.md) 渲染组件（Rendered Constructs）统一架构
+- [pi-collaboration-2026-11.md](records/audits/pi-collaboration-2026-11.md) Pi 协作与观察项的设计收敛、实测问题和占用数字（记录）。
 - [project-graph.md](noema/design/project-graph.md) 项目任务图谱：`.agent/tasks/` 的数据、规则由代码执行的契约、Skill pack 与只读页面。
 - [research-synthesis.md](noema/design/research-synthesis.md) Research synthesis and Proposals
 - [scroll-ownership.md](noema/design/scroll-ownership.md) 视口归属：滚动只有一个主人

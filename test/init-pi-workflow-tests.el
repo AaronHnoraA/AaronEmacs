@@ -172,7 +172,8 @@
       (kill-buffer buffer))))
 
 (ert-deftest pi-workflow-c22-send-names-the-proven-agent-session ()
-  (let ((buffer (generate-new-buffer "*Codex fixture*")) sent)
+  (require 'tools/agent/api)
+  (let ((buffer (generate-new-buffer "*Agent · codex*")) sent)
     (unwind-protect
         (cl-letf (((symbol-function 'noema-pi-emacs-ensure) (lambda (&rest _) buffer))
                   ((symbol-function 'noema-pi-send)
@@ -181,12 +182,14 @@
                   ((symbol-function 'noema-pi-sessions--state) (lambda (_) "idle"))
                   ((symbol-function '+agent-api-identified)
                    (lambda (from)
-                     (should (equal (alist-get 'buffer from) "*Codex fixture*"))
+                     (should (equal (alist-get 'buffer from) "*Agent · codex*"))
                      (list :agent 'codex :buffer buffer :native-session-id "codex-native" :root "/tmp/p/"))))
           (noema-pi-api '((action . "send") (companion . t) (prompt . "Who owns this?")
-                          (from . ((buffer . "*Codex fixture*") (nativeSessionId . "codex-native")))))
-          (should (string-prefix-p "[From Agent session: agent=codex buffer=*Codex fixture* nativeSessionId=codex-native root=/tmp/p/."
+                          (from . ((buffer . "*Agent · codex*") (nativeSessionId . "codex-native")))))
+          (should (string-prefix-p "[From Agent session: agent=codex buffer=*Agent · codex* nativeSessionId=codex-native root=/tmp/p/."
                                    sent))
+          (should (multibyte-string-p sent))
+          (should (string-match-p "\"buffer\":\"\\*Agent · codex\\*\"" sent))
           (should (string-suffix-p "\n\nWho owns this?" sent))
           (setq sent nil)
           (noema-pi-api '((action . "send") (companion . t) (prompt . "Plain")))
