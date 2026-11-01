@@ -1562,4 +1562,78 @@ machine's HOME, because agent-shell's caches expand `~' there."
       (should (equal (+agent-shell-use-workspace-cli '(:command "pi-acp"))
                      '(:command "pi-acp"))))))
 
+;;; C55 --- conversations of the enclosing project
+
+(ert-deftest agent-c55-resume-lists-the-enclosing-project ()
+  (let* ((outer (file-name-as-directory (make-temp-file "agent-c55-" t)))
+         (inner (file-name-as-directory (expand-file-name "site-lisp/nested/" outer)))
+         listed got)
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name ".git" outer))
+          (make-directory (expand-file-name ".git" inner) t)
+          (cl-letf (((symbol-function 'agent-shell--resolve-path) #'identity)
+                    ((symbol-function 'agent-shell--list-sessions)
+                     (lambda (&rest args)
+                       (let ((cwd (plist-get args :cwd)))
+                         (push cwd listed)
+                         (funcall (plist-get args :on-success)
+                                  (if (equal cwd inner)
+                                      '(((sessionId . "shared")) ((sessionId . "own")))
+                                    '(((sessionId . "shared")) ((sessionId . "outer")))))))))
+            (+agent-acp-list-saved nil inner nil (lambda (rows) (setq got rows)) #'ignore)
+            (should (equal (reverse listed) (list inner outer)))
+            (should (equal (mapcar (lambda (row) (map-elt row 'sessionId)) got)
+                           '("shared" "own" "outer")))
+            (should-not (+agent-acp-saved-home got "own"))
+            (should (equal (+agent-acp-saved-home got "outer") outer))
+            (should (string-suffix-p (abbreviate-file-name outer)
+                                     (caar (+agent-acp-saved-session-choices (last got)))))
+            ;; A repository nobody encloses asks exactly once.
+            (setq listed nil)
+            (+agent-acp-list-saved nil outer nil (lambda (rows) (setq got rows)) #'ignore)
+            (should (equal listed (list outer)))
+            (should-not (+agent-acp-saved-home got "outer"))))
+      (delete-directory outer t))))
+
+(ert-deftest agent-c55-outer-failure-keeps-the-folder-s-own-list ()
+  (let* ((outer (file-name-as-directory (make-temp-file "agent-c55-" t)))
+         (inner (file-name-as-directory (expand-file-name "nested/" outer)))
+         got failed)
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name ".git" outer))
+          (make-directory (expand-file-name ".git" inner) t)
+          (cl-letf (((symbol-function 'agent-shell--resolve-path) #'identity)
+                    ((symbol-function 'agent-shell--list-sessions)
+                     (lambda (&rest args)
+                       (if (equal (plist-get args :cwd) inner)
+                           (funcall (plist-get args :on-success) '(((sessionId . "own"))))
+                         (funcall (plist-get args :on-failure) "down" nil)))))
+            (+agent-acp-list-saved nil inner nil (lambda (rows) (setq got rows))
+                                   (lambda (&rest _) (setq failed t)))
+            (should (equal got '(((sessionId . "own")))))
+            (should-not failed)))
+      (delete-directory outer t))))
+
+(ert-deftest agent-c55-resume-runs-in-the-conversation-s-home ()
+  (let ((buffer (generate-new-buffer " *c55*"))
+        (home (file-name-as-directory temporary-file-directory)))
+    (unwind-protect
+        (progn
+          (+agent-acp-move-to-saved-home buffer (directory-file-name home))
+          (should (equal (buffer-local-value 'default-directory buffer) home))
+          (should (equal (buffer-local-value '+agent-acp-session-root buffer) home)))
+      (kill-buffer buffer))))
+
+(ert-deftest agent-c55-picker-keeps-newest-first ()
+  (let (properties)
+    (cl-letf (((symbol-function 'completing-read)
+               (lambda (_prompt choices &rest _)
+                 (setq properties completion-extra-properties)
+                 (caar choices))))
+      (should (equal (+agent-acp-read-saved "p: " '(("newest long title" . "a") ("b" . "b")))
+                     "a"))
+      (should (eq (plist-get properties :display-sort-function) #'identity)))))
+
 ;;; popup-agent-tests.el ends here

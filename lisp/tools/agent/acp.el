@@ -60,6 +60,7 @@ query disk/network while the shared registry renders.")
 
 (declare-function magent-start "magent-agent-shell" ())
 (declare-function remote-client-file-name "remote" (file &optional context))
+(declare-function remote-prefetch-ancestor-markers "remote-fs" (directory))
 (declare-function agent-shell-insert "agent-shell" (&key text submit no-focus shell-buffer))
 (declare-function shell-maker-finish-output "shell-maker" (&key config success on-output))
 (declare-function evil-define-minor-mode-key "evil-core" (state mode key def &rest bindings))
@@ -127,12 +128,71 @@ query disk/network while the shared registry renders.")
                             (agent-shell--format-session-date
                              (or (map-elt session 'updatedAt)
                                  (map-elt session 'createdAt) ""))
-                            id)
+                            id
+                            (if-let* ((home (map-elt session '+agent-acp-home)))
+                                (format " · %s" (abbreviate-file-name home))
+                              ""))
                     id)))
           (seq-filter (lambda (session)
                         (let ((id (map-elt session 'sessionId)))
                           (and (stringp id) (not (equal id exclude)))))
                       (agent-shell--sort-sessions-by-recency sessions))))
+
+(defun +agent-acp--outer-project (directory)
+  "Return the project folder enclosing DIRECTORY's own repository, or nil.
+A repository nested in another shares that folder's conversations."
+  (remote-prefetch-ancestor-markers directory)
+  (when-let* ((own (locate-dominating-file directory ".git")))
+    (locate-dominating-file
+     (file-name-directory (directory-file-name (expand-file-name own))) ".git")))
+
+(defun +agent-acp-list-saved (state directory buffer on-success on-failure)
+  "List saved conversations of DIRECTORY and of the project enclosing it (C55).
+The provider's own session/list answers both.  One from the enclosing project
+carries `+agent-acp-home', where it must be resumed.  ON-SUCCESS gets the list;
+ON-FAILURE gets (ERROR RAW) when DIRECTORY's own listing fails.  A failed outer
+listing only omits those conversations."
+  (let ((outer (+agent-acp--outer-project directory)))
+    (agent-shell--list-sessions
+     :state state :cwd (agent-shell--resolve-path directory) :buffer buffer
+     :on-failure on-failure
+     :on-success
+     (lambda (own)
+       (if (null outer)
+           (funcall on-success own)
+         (agent-shell--list-sessions
+          :state state :cwd (agent-shell--resolve-path outer) :buffer buffer
+          :on-failure (lambda (_error _raw) (funcall on-success own))
+          :on-success
+          (lambda (sessions)
+            (funcall on-success (+agent-acp--merge-saved own sessions outer)))))))))
+
+(defun +agent-acp--merge-saved (own sessions outer)
+  "Return OWN followed by those of SESSIONS it lacks, marked as living in OUTER."
+  (let ((known (mapcar (lambda (session) (map-elt session 'sessionId)) own)))
+    (append own
+            (mapcar (lambda (session) (cons (cons '+agent-acp-home outer) session))
+                    (seq-remove (lambda (session)
+                                  (member (map-elt session 'sessionId) known))
+                                sessions)))))
+
+(defun +agent-acp-read-saved (prompt choices)
+  "Read one of CHOICES with PROMPT, keeping their newest-first order.
+Without this a completion UI sorts them by length and history."
+  (let ((completion-extra-properties '(:display-sort-function identity
+                                       :cycle-sort-function identity)))
+    (cdr (assoc (completing-read prompt choices nil t nil nil (caar choices)) choices))))
+
+(defun +agent-acp-saved-home (sessions id)
+  "Return the directory conversation ID of SESSIONS must resume in, or nil."
+  (when-let* ((session (seq-find (lambda (row) (equal (map-elt row 'sessionId) id)) sessions)))
+    (map-elt session '+agent-acp-home)))
+
+(defun +agent-acp-move-to-saved-home (buffer home)
+  "Make BUFFER resume in HOME, the folder its conversation belongs to."
+  (with-current-buffer buffer
+    (setq default-directory (file-name-as-directory home))
+    (setq-local +agent-acp-session-root default-directory)))
 
 (defun +agent-acp--abandon-saved (buffer reason)
   "End client BUFFER, which never opened a conversation, reporting REASON."
@@ -155,17 +215,17 @@ query disk/network while the shared registry renders.")
       (let* ((choices (+agent-acp-saved-session-choices sessions))
              (id (condition-case nil
                      (and choices
-                          (cdr (assoc (completing-read "Resume conversation: " choices nil t
-                                                       nil nil (caar choices))
-                                      choices)))
+                          (+agent-acp-read-saved "Resume conversation: " choices))
                    (quit nil)))
-             (live (and id (+agent-acp--live-session id default-directory))))
+             (home (and id (+agent-acp-saved-home sessions id)))
+             (live (and id (+agent-acp--live-session id (or home default-directory)))))
         (cond ((null choices)
                (+agent-acp--abandon-saved buffer "This agent has no saved conversations here"))
               ((null id) (+agent-acp--abandon-saved buffer "Resume cancelled"))
               (live (+agent-acp--abandon-saved buffer "That conversation is already open")
                     (+agent-acp-show-buffer live))
-              (t (map-put! agent-shell--state :resume-session-id id)
+              (t (when home (+agent-acp-move-to-saved-home buffer home))
+                 (map-put! agent-shell--state :resume-session-id id)
                  (funcall continue)))))))
 
 (defun +agent-acp--choose-saved-session (buffer state continue)
@@ -177,13 +237,13 @@ The list arrives in a process callback, which must not read the minibuffer."
                     (map-elt state :supports-session-resume))))
       (+agent-acp--abandon-saved buffer "This agent does not list saved conversations")
     (with-current-buffer buffer
-      (agent-shell--list-sessions
-       :state state :cwd (agent-shell--resolve-path default-directory) :buffer buffer
-       :on-success (lambda (sessions)
-                     (run-at-time 0 nil #'+agent-acp--pick-saved buffer sessions continue))
-       :on-failure (lambda (_error _raw)
-                     (run-at-time 0 nil #'+agent-acp--abandon-saved buffer
-                                  "Could not list saved conversations"))))))
+      (+agent-acp-list-saved
+       state default-directory buffer
+       (lambda (sessions)
+         (run-at-time 0 nil #'+agent-acp--pick-saved buffer sessions continue))
+       (lambda (_error _raw)
+         (run-at-time 0 nil #'+agent-acp--abandon-saved buffer
+                      "Could not list saved conversations"))))))
 
 (defun +agent-acp--strict-initiate-session (original &rest arguments)
   "Reject an unsupported requested restore before upstream can create anew."

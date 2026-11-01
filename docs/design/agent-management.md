@@ -55,7 +55,7 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 
 `/next`（`C-c A j`）跳到下一个等待你的会话，待审批和问答直接落在原生控件上，
 按其上的 `y`/`n` 决定；`/queue`（`q`）管理排队的 prompt；`/changes`（`l`）打开这个
-会话改过的文件；`/resume`（`h`）恢复已保存对话，没有活动会话时也可用。
+会话改过的文件；`/resume`（`h`）恢复已保存对话，没有活动会话时也可用，列表按时间从新到旧（C55）。
 `H-A`（macOS Option-Shift-A）、`SPC a a` 和 `M-x agent-manager` 打开项目池管理器，
 加前缀查看所有项目；从管理器里再次执行返回。`C-c A S/G/U` 分别选择同一浮窗的
 All、Inbox、Usage 页签。GUI 使用 Aaron ETAF，按 target/workspace 分组；
@@ -299,6 +299,13 @@ Agent 的真实聊天 buffer 是用户 buffer，名称不使用 Emacs 内部 buf
 它们进入全局 Ibuffer 的 Agent 分组和日常 Consult buffer 选择器；不进入全局 tab
 只由 `tab-line-exclude` 控制。加载会话层时会迁移已有的旧管理名称，并同步
 shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
+- **C55 恢复列表覆盖所属项目。** 保存的对话归 provider，Emacs 不读取其存储，也不
+  维护索引：`+agent-acp-list-saved` 用官方 `session/list` 列出当前目录，当前仓库
+  嵌套在另一个仓库里时再列出外层项目。外层项目的对话带上所在目录，恢复时切到该目录，
+  已在运行的对话按该目录识别；外层列表失败只少这部分，不影响当前目录。没有外层仓库时
+  只发一次请求。外层仓库不反向列出嵌套仓库的对话。选择器保持从新到旧，不交给补全
+  界面排序。Claude 终端自带的 `/resume` 不显示 ACP 启动的 SDK 会话，这由 CLI 决定，
+  按 ID 用 `claude --resume` 打开或在这里恢复。测试：`agent-c55-*`。
 
 ## 实现位置
 

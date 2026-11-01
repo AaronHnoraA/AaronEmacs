@@ -623,18 +623,20 @@ when present; the exact Codex message is the isolated compatibility fallback."
                      directory)))
       (unless choices
         (user-error "This agent has no other saved sessions in the current workspace"))
-      (let* ((selected (completing-read "Resume session: " choices nil t nil nil
-                                        (caar choices)))
-             (id (cdr (assoc selected choices)))
-             (live (+agent-shell--find-execution id config directory)))
+      (let* ((id (+agent-acp-read-saved "Resume session: " choices))
+             (home (+agent-acp-saved-home sessions id))
+             (live (+agent-shell--find-execution id config (or home directory))))
         (with-current-buffer source
           (when (equal (agent-shell--prompt-input) "/resume")
             (agent-shell--clear-prompt-input)))
         (if live
             (progn (agent-shell--display-buffer live) live)
-          (let* ((binding (and (fboundp 'noema-sessions-native-binding)
+          (let* ((root (or home root))
+                 (binding (and (fboundp 'noema-sessions-native-binding)
                                (noema-sessions-native-binding id root)))
-                 (target (+agent-acp-restart-native source id)))
+                 (target (progn
+                           (when home (+agent-acp-move-to-saved-home source home))
+                           (+agent-acp-restart-native source id))))
             (when (and binding (fboundp '+agent-acp-mark-session-buffer))
               (+agent-acp-mark-session-buffer
                target (plist-get binding :name)
@@ -655,17 +657,15 @@ when present; the exact Codex message is the isolated compatibility fallback."
               (map-elt agent-shell--state :supports-session-resume))
     (user-error "This agent does not support resuming saved sessions"))
   (let ((source (current-buffer)))
-    (agent-shell--list-sessions
-     :state agent-shell--state
-     :cwd (agent-shell--resolve-path (agent-shell-cwd))
-     :buffer source
-     :on-success (lambda (sessions)
-                   (+agent-shell--resume-from-list source sessions))
-     :on-failure (lambda (error-object _raw)
-                   (message "Could not list saved sessions: %s"
-                            (or (and (listp error-object)
-                                     (map-elt error-object 'message))
-                                error-object))))))
+    (+agent-acp-list-saved
+     agent-shell--state (agent-shell-cwd) source
+     (lambda (sessions)
+       (+agent-shell--resume-from-list source sessions))
+     (lambda (error-object _raw)
+       (message "Could not list saved sessions: %s"
+                (or (and (listp error-object)
+                         (map-elt error-object 'message))
+                    error-object))))))
 
 (defun +agent-shell--local-slash (input)
   "Return the local command INPUT names, or nil.
