@@ -95,6 +95,7 @@
 | Makefile 的窗口、Agent 回归组，含 `test/agent-lifecycle-e2e.el` | 335 项，0 失败，2 跳过 |
 | `make research-test` | 2 + 207 + 27 + 96 + 102，全部通过 |
 | `test/agent-manager-gui-e2e.py` 的 `queue`、`manager`、`display` | 全部通过：真实 child frame、按键、返回来源、双 frame、重启 |
+| `test/agent-manager-gui-e2e.py entry` | 通过：`agent-shell` 指令的日常路径，`C-u` 新建、再执行返回、召回不新建、回合中输入 `/queue`、`C-c C-c` 停止并挂起、`?`、`/agents`、`C-u C-u` 单一选择器 |
 | 全仓 `make test-check` | 140 个文件，所有 agent 文件通过；6 个未过见下 |
 | `make state-check` | 不是零差异，因为包含按键迁移和并行工作；非按键差异只有 `tools/agent/actions`、Portal 的 `C-c C-l` 和 Dashboard 按钮 |
 | Doctor | 0 errors，0 warnings，0 key conflicts；`tools/agent` 无 policy hit |
@@ -110,8 +111,10 @@ LaTeX 与 LSP 各有一项桩替换未缓存 trampoline 的原语，编译器调
 
 审查并行工作（C45、C46、Pi 项目标签）的管理入口时修复两处交界问题：池查询默认排除 Pi
 后，`/next` 会漏掉等待审批的 Pi；从管理器菜单新建没有收起管理器，也没有用选中会话的
-workspace。审查只覆盖这些管理入口与本轮代码的交界，不是对 `949bd443` 和 Noema 提交的
-逐行审查。
+workspace。另读过 `views.el`、`ui/windows/actions.el`、Portal 改动和 `+agent-acp-read-transcript`，未发现
+问题。对 `tools/agent` 和 Pi 的其余代码按本轮缺陷类型做针对性检查：回调里的同步提问、
+阻塞等待、无 owner 的计时器，未发现新问题。这不是对 `949bd443` 和 Noema 提交的逐行审查，
+删除的 Research 文件和 Jupyter 改动不在范围内。
 
 ## 验证边界
 

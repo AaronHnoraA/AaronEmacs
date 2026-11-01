@@ -16,6 +16,7 @@ SCENARIOS = {
     'manager': ('test/agent-manager-gui-e2e.el', 'agent-manager-gui-e2e-run'),
     'display': ('test/agent-display-audit-gui-e2e.el', 'agent-display-audit-gui-e2e-run'),
     'queue': ('test/agent-queue-gui-e2e.el', 'agent-queue-gui-e2e-run'),
+    'entry': ('test/agent-entry-gui-e2e.el', 'agent-entry-gui-e2e-run'),
 }
 
 
