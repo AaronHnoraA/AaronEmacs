@@ -54,7 +54,7 @@ changed.
 
 ## Core Architecture
 
-Pi 的会话所有权与工作流程见 [Pi 会话与项目助手](design/pi-sessions.md)。
+Pi 的会话所有权与工作流程见 [Pi 会话与项目助手](design/pi-sessions.md)，观察项（倒计时、hook、脚本）见 [Pi 的观察项](design/pi-watches.md)。
 
 The [Remote framework](design/remote-framework.md) is the repository's core execution
 model, not an SSH-only feature. Filesystem-, project-, process-, environment-,

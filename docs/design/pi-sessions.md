@@ -119,7 +119,7 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   标记遵守项目覆盖与 patch，显式禁用优先；`requestedPacks` 可替换默认目录包。
   这个标记只选择 Agent 的自动目录，不为研究 Run 全局启用 pack。项目 Skill、禁用、
   依赖和 patch 复用 Noema 能力解析器；只自动披露 pack 的成员与 preamble，以及 Skill 的
-  名称、用途和来源，正文按需读取一个有效 Skill。目录只含操作包成员及其依赖、项目
+  名称和用途，写成每回合都带的短文本，来源路径和正文按需读取一个有效 Skill。目录只含操作包成员及其依赖、项目
   选择（含项目 `extends`）和明确请求的 Skill；仅全局启用的领域 Skill、pack 及其
   独有依赖留给 Run，仍可按 ID 读取。诊断也只来自目录选择和依赖。
   没有原生 read 工具时也能通过 Noema API 使用它们。

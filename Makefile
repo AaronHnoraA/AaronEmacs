@@ -481,7 +481,7 @@ agenda-apple-test:
 
 research-test:
 	$(BATCH) -l test/noema-startup-tests.el -f ert-run-tests-batch-and-exit
-	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/tests/elisp -l test/agent-acp-tests.el -l test/agent-api-tests.el -l test/agent-render-tests.el -l noema-context-tests.el -l test/init-pi-workflow-tests.el -l test/pi-idle-tests.el -l test/pi-project-tabs-tests.el -l test/pi-owned-tests.el -l test/agent-worktree-tests.el -l test/agent-worktree-board-tests.el -f ert-run-tests-batch-and-exit
+	$(BATCH) -l test/popup-agent-tests.el -L site-lisp/noema/tests/elisp -l test/agent-acp-tests.el -l test/agent-api-tests.el -l test/agent-render-tests.el -l noema-context-tests.el -l noema-pi-watch-tests.el -l test/init-pi-workflow-tests.el -l test/pi-idle-tests.el -l test/pi-project-tabs-tests.el -l test/pi-owned-tests.el -l test/agent-worktree-tests.el -l test/agent-worktree-board-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/tests/elisp -l noema-capability-workspace-tests.el -l noema-marginnote-tests.el -l test/noema-manager-layout-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -l test/noema-research-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/tests/elisp \
