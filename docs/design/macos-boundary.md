@@ -7,7 +7,7 @@
 ## 范围
 
 - 管：Finder 与 Dock 打开文件、拖放、系统请求退出；打开、在 Finder 中显示、
-  Quick Look、文件进出剪贴板；通知与 Dock 角标；顶层 frame 的拖动抓手。
+  Quick Look、文件进出剪贴板；通知与 Dock 角标。
 - 不管：键位与修饰键、帧外观、性能调节（`os/macos/config.el`）；输入法
   （`os/macos/input.el`）；隐藏、Dock 策略与后台应用（`config/background/config.el`，
   见 `AGENT.md` “Background application”）；Noema 页面和 Portal Web 内部的拖放与
@@ -91,11 +91,6 @@ aaron-notify ──→ 历史（总是）
 点击能回到 Emacs。未授权时退回 `osascript`，通知照常出现，但图标是脚本图标，
 点击也没有效果。
 
-### 窗口抓手
-
-指针一靠近顶层 frame 的顶边（内外两侧都算），frame 上方正中立刻弹出一个抓手，没有延迟
-也没有动画，拖它移动窗口。按下的是抓手这个窗口，窗口服务器只肯拖真正被按下的窗口，所以拖动期间 frame 临时挂到抓手之下成为它的子窗口，两者作为一组移动，不经过 Emacs 主线程，松手后恢复原来的层级；Lisp 再忙也不影响跟手。只有窗口服务器拒绝时抓手才会收到拖动事件并跟随，`macos-window-last-drag` 报告上次走的是哪条路（`window-server` 或 `manual`）。抓手是独立的子窗口，不占 frame 内容；它一直挂在 frame 上，显示和隐藏只改透明度，不重新排序窗口，所以不闪。隐藏的边界比显示的宽一点，指针停在边界上时它不会反复开关。frame 上方没有空间时，抓手浮在顶边之上，同样不挤压内容。
-
 ## 契约
 
 - **C1 单一边界。** Finder 打开、退出请求、文件与 URL 拖放、系统打开、Finder 显示、
@@ -128,8 +123,6 @@ aaron-notify ──→ 历史（总是）
   否则发系统通知并增加未读。相同 `:id` 替换旧的一条，Emacs 拿回键盘后未读清零。
   `:silent t` 只记历史，不打断回显或增加未读。批处理的 Emacs 没有用户，绝不发系统通知。
 - **C13 点击回到 Emacs。** 点击先呈现，再运行 `:action`，没有动作时打开历史。
-- **C14 抓手不占内容。** 抓手是独立窗口，绝不改变 frame 布局；全屏时不出现；只在
-  frame 顶边确实露在外面时出现，顶边上的 child frame 算 frame 的一部分。
 - **C15 替换原生模块是原子的。** `bin/emacs-app build` 写到旁边再改名，因为运行中的
   Emacs 映射着旧文件，原地覆盖可能让它崩溃。
 
@@ -142,7 +135,6 @@ aaron-notify ──→ 历史（总是）
 | `set-file-drop-handler!` | `lisp/os/macos/autoload/drop.el` |
 | 通用通知 `aaron-notify`、历史 `aaron/notifications` | `lisp/core/aaron-notify.el` |
 | 通知中心、Dock 角标、文件剪贴板 | `tools/macos-background/system.m` |
-| 窗口抓手 | `tools/macos-background/window.m` |
 | 后台时重新显示 | `config/background/config.el` 的 `+background--present-h` |
 | 落点声明 | `term/shell/eshell.el`、`term/shell/config.el`、`term/portal/config.el` |
 | 接收文件 | `emacs/dirvish/config.el` 的 `+dirvish-receive-files` |
@@ -158,8 +150,8 @@ Noema 页面内部的拖放和粘贴不经过这里：文件一律存为附件�
 ## 已知差距
 
 - **G1 真实系统事件未实测。** 拖放分派、通知路由和剪贴板都有测试，但测试不产生真实
-  的 Finder 拖放。Portal 终端、Option 判定、Dirvish 里拖出文件、通知授权弹窗和窗口
-  抓手要在重启后的 Emacs 里手动验证一次。
+  的 Finder 拖放。Portal 终端、Option 判定、Dirvish 里拖出文件、通知授权弹窗要在重启后的
+  Emacs 里手动验证一次。
 - **G2 Noema 拿不到拖入文件的路径。** WebKit 只给页面文件内容，所以库内文件也会复制
   一份，文件夹被跳过。要做到 Obsidian 的 Option 拖入（只链接不复制），需要改 Portal
   的原生层。
@@ -170,7 +162,3 @@ Noema 页面内部的拖放和粘贴不经过这里：文件一律存为附件�
   出来（`deliveredNotifications` 为 0）。`osacompile` 生成、ad-hoc 签名的 applet 运行
   正常但不显示通知，所以这条不用证书的路也走不通。Emacs.app 是 ad-hoc 签名，这是最可能
   的原因，但尚未验证；要带图标和点击，得先用真实证书验证这一点。
-
-## 待定设计
-
-- 窗口抓手是否要支持双击缩放。

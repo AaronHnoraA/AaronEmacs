@@ -103,7 +103,7 @@ registry 中，可由 `M-x config-board` 修改。
   能力可用。
 - **G3** 缺少 `xwidget-webkit-set-cookie-storage-file` 时保留一次提示的 no-op 替身；
   cookie 文件持久化不能因此视为可用。
-- **G4** 后台 Dock 策略、抓手、Finder 打开、拖放、输入法和长期运行均未完成 Neomacs
+- **G4** 后台 Dock 策略、Finder 打开、拖放、输入法和长期运行均未完成 Neomacs
   图形验收；试验入口不代表这些原生交互已迁移。
 
 ## 待定设计

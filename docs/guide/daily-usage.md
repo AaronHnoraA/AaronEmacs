@@ -1637,11 +1637,6 @@ Emacs 在后台时不占 Dock,也不出现在 Cmd-Tab 里;叫到前台后恢复�
 由 `+background-hide-dock-icon` 控制,靠 `tools/macos-background/window.m`
 编译出的动态模块实现;没有编译时 Dock 图标始终显示。
 
-同一个模块让每个顶层 frame 的顶部边框可拖动（默认 6 点，
-`+frame-drag-handle-height`）。指针靠近顶边时，frame 上方立刻弹出一个抓手，拖它就能移动
-窗口，它不占内容空间，也不覆盖下面的标签；
-按住原来向上调整窗口大小的边框即可移动无标题栏的 frame。
-
 长期运行时不留孤儿:Noema web host 启动时拿到 Emacs 的 pid(`NOEMA_HOST_OWNER_PID`),
 Emacs 崩溃或被强制退出后几秒内自己收尾退出,连同它的 kernel;正常退出时的 SIGHUP 也走
 同一套收尾。
