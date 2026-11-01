@@ -59,6 +59,7 @@
      ("D" "Pi doctor" noema-pi-doctor)
      ("I" "Research attention" noema-research-attention)
      ("O" "Orchestration" noema-orchestration)
+     ("g" "Agent cache" noema-project-graph)
      ("p" "Promote to Research" noema-agent-promote-current-session :if +agent-menu--session-p)
      ("e" "Edit page source" noema-md-bridge-edit-source)
      ("J" "Associated work" +agent-menu-jump :if +agent-menu--jump-p)

@@ -1015,6 +1015,7 @@ is `+config-ask-model', registered with native Config Customize."
   (noema-pi-startup))
 (autoload 'noema-pi-doctor "noema-pi-router" nil t)
 (autoload 'noema-orchestration "noema-orchestration" nil t)
+(autoload 'noema-project-graph "noema-project-graph" nil t)
 (autoload 'noema-sessions "noema-sessions" nil t)
 (autoload 'noema-sessions-switch "noema-sessions" nil t)
 (autoload 'noema-sessions-read "noema-sessions")

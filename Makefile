@@ -486,7 +486,7 @@ research-test:
 	$(BATCH) -l test/noema-research-tests.el -f ert-run-tests-batch-and-exit
 	$(BATCH) -L site-lisp/noema/lisp -L site-lisp/noema/tests/elisp \
 	  -l noema-interaction-tests.el -l noema-interaction-magent-tests.el -l noema-api-tests.el -l noema-completion-tests.el \
-	  -l noema-project-overview-tests.el -l noema-agent-inbox-tests.el -l noema-agent-attention-tests.el -l noema-history-search-tests.el -l noema-findings-tests.el -l noema-pi-sessions-tests.el \
+	  -l noema-project-overview-tests.el -l noema-project-graph-tests.el -l noema-agent-inbox-tests.el -l noema-agent-attention-tests.el -l noema-history-search-tests.el -l noema-findings-tests.el -l noema-pi-sessions-tests.el \
 	  -f ert-run-tests-batch-and-exit
 
 pi-setup:
