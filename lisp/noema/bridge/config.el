@@ -834,11 +834,62 @@ failure is diagnosable without hunting for it."
       (setq +noema--ready-watchdog
             (run-at-time 10 nil #'+noema--watchdog-fire)))))
 
+(declare-function +agent-acp-sessions "tools/agent/acp" ())
+(declare-function remote-client-list-system-processes "remote" ())
+(declare-function remote-client-process-attributes "remote" (pid))
+(defvar +activity-noema--tasks)
+
+(defvar +noema--host-stamp nil
+  "Source stamp of the code the running host started from.")
+
+(defun +noema--source-stamp ()
+  "Return what changes when the host's code does: its last commit and kernel."
+  (mapcar (lambda (file) (file-attribute-modification-time (file-attributes file)))
+          (cons (expand-file-name ".git/logs/HEAD" +noema--runtime-root)
+                (file-expand-wildcards
+                 (expand-file-name "build/kernel/*/noema-kernel" +noema--runtime-root)))))
+
+(defun +noema--host-blocker ()
+  "Return why restarting the host now would cost something, or nil."
+  (cond ((> (hash-table-count +noema--client-buffers) 0) "open Noema pages")
+        ((> (hash-table-count +noema--file-buffers) 0) "open Noema pages")
+        ((bound-and-true-p +activity-noema--tasks) "running Noema tasks")
+        ((seq-some (lambda (session) (plist-get session :busy)) (+agent-acp-sessions)) "a busy Agent")
+        ((seq-some (lambda (pid)
+                     (string-match-p "noema-kernel-[^ ]*\\.json"
+                                     (or (alist-get 'args (remote-client-process-attributes pid)) "")))
+                   (remote-client-list-system-processes))
+         "a live Jupyter kernel")))
+
+(defun +noema--host-stale-p ()
+  "Non-nil when the running host started from older code."
+  (and +noema--ready (process-live-p +noema--process) +noema--host-stamp
+       (not (equal +noema--host-stamp (+noema--source-stamp)))))
+
+(defun +noema/refresh-host ()
+  "Restart a host whose code changed, unless that would interrupt something."
+  (interactive)
+  (cond ((not (+noema--host-stale-p))
+         (when (called-interactively-p 'interactive) (message "Noema host is current")))
+        ((+noema--host-blocker)
+         (when (called-interactively-p 'interactive)
+           (message "Noema host is stale; waiting for %s" (+noema--host-blocker))))
+        (t (+noema/stop)
+           ;; `+noema/stop' removes the old process within 1.5 seconds.
+           (run-at-time 2 nil #'+noema--ensure-server))))
+
+(defun +noema--refresh-host-after-turn-h (&rest _)
+  "Agents change the host's code, so a turn's end is when to look."
+  (run-at-time 1 nil #'+noema/refresh-host))
+
+(add-hook '+agent-acp-turn-complete-functions #'+noema--refresh-host-after-turn-h)
+
 (defun +noema--start-server (&optional reconnect-port)
   "Spawn the vendored Noema web-host.
 When RECONNECT-PORT is non-nil, reclaim that port so live browser pages can
 reconnect without a reload and without losing their in-memory editor state."
   (+noema--clear-process-log-queue)
+  (setq +noema--host-stamp (+noema--source-stamp))
   (setq +noema--notes-root (+noema-workspace-root))
   (make-directory +noema--notes-root t)
   ;; The host resolves Skills from here on every Run; a missing directory
