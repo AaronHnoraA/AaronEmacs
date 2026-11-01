@@ -519,11 +519,7 @@
 (ert-deftest +agent-acp-window-keys-and-help ()
   "Management keys are bound and `?' types in the prompt, helps elsewhere."
   (dolist (binding '(("C-c C-e" . +agent-acp-focus-input)
-                     ("C-c C-x" . +agent-acp-stop)
-                     ("C-c C-r" . +agent-session-restart)
-                     ("C-c C-k" . +agent-acp-close)
-                     ("C-c C-w" . +agent-session-rename)
-                     ("C-c C-d" . +agent-session-archive)
+                     ("C-c C-o" . +agent-acp-hide)
                      ("C-c C-z" . +agent-session-menu)
                      ("?" . +agent-acp-help-or-insert)))
     (should (eq (lookup-key +agent-acp-tabs-mode-map (kbd (car binding)))
@@ -610,14 +606,6 @@
               (+agent-acp-stop main)
               (should interrupted)
               (with-current-buffer main (setq-local shell-maker--busy nil))
-              ;; Name actions are unavailable for a retired buffer.
-              (let ((active (lambda (buffer label)
-                              (let ((item (seq-find (lambda (item)
-                                                      (and (vectorp item) (equal (aref item 0) label)))
-                                                    (+agent-acp--menu-items buffer))))
-                                (plist-get (append (seq-drop item 2) nil) :active)))))
-                (should (eq t (funcall active main "Restart session")))
-                (should-not (funcall active retired "Restart session")))
               ;; Closing a shown tab keeps the Agent window on the next session.
               (+agent-acp-close main)
               (should-not (buffer-live-p main))

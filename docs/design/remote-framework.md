@@ -969,7 +969,7 @@ Eglot 得到显式 process factory，因此不会因为 project root 是远端�
 客户端；xwidget 直接访问本机 loopback，不需要远端 Node、远端部署或 port forward。
 在远端 buffer 内校验 proxy PID 时也强制使用客户端 process namespace。
 
-ACP agent（agent-shell 的所有入口：Noema Run、popup、`C-c A a`、裸
+ACP agent（agent-shell 的所有入口：Noema Run、popup、`C-c A n`、裸
 `M-x agent-shell`）是 target-placement consumer，且不自带任何 remote 分支。
 `tools/agent/config.el` 把 `agent-shell-cwd` 规范成 `/fs:TARGET:/path`，再经
 `remote-client-file-name` 取本机可直接访问的写法：`local` 得到原生目录，远端 target

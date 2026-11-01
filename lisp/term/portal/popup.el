@@ -353,7 +353,7 @@ CURRENT is the currently displayed popup buffer."
 ;; Update existing popup buffers as well when this module is reloaded.
 (dolist (binding '(("C-c C-e" . +agent-acp-focus-input)
                    ("C-c C-o" . +agent-acp-hide)
-                   ("C-c C-l" . +agent/manager)
+                   ("C-c C-l" . +agent-acp-session-manager)
                    ("C-c E" . +portal-popup/cycle)
                    ("C-c M-e" . +portal/toggle-fixed)))
   (define-key +portal-popup-agent-keys-mode-map (kbd (car binding)) (cdr binding)))

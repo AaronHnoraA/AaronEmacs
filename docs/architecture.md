@@ -58,7 +58,8 @@ early-init.el → init.el → lisp/init-modules.el（唯一的模块顺序）
 
 Pi 的主／项目助手管理由 Noema 的 `noema-pi-router` 提供，独立 Session 记录由
 `noema-pi-sessions` 持有，物理连接复用 Emacs `tools/agent/acp`。Dashboard、
-Ibuffer 和 Agent Manager 只展示这些实际状态，见 [Pi 会话与项目助手](design/pi-sessions.md)。
+Ibuffer 分别列出 Pi 与执行会话；Pi Sessions 按全局／项目作用域管理 Pi，
+Agent Manager 管理执行会话，见 [Pi 会话与项目助手](design/pi-sessions.md)。
 
 ```text
 lisp/init-modules.el  aaron! 声明：全部模块、分类与加载顺序

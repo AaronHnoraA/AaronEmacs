@@ -78,7 +78,8 @@
     (sort
      (seq-filter
       (lambda (session)
-        (and (not (run-hook-with-args-until-success
+        (and (eq (+agent-session-kind session) 'agent)
+             (not (run-hook-with-args-until-success
                    '+agent-session-private-functions session))
              (pcase scope
                ('project (equal (+agent-pool-key (list :root root :target target))
@@ -293,11 +294,6 @@ Without a live selection a new client lists the provider's saved conversations."
   (let ((buffer (+agent-manager--selected-session)))
     (+agent-manager-hide)
     (+agent-session-changes buffer)))
-
-(defun +agent-manager-peek ()
-  (interactive)
-  (+agent-manager-hide)
-  (+agent/peek))
 
 (defun +agent-manager-review ()
   "Enter the selected session at its pending native request."

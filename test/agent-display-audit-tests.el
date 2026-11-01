@@ -235,7 +235,7 @@
     (let (started)
       (cl-letf (((symbol-function 'completing-read)
                  (lambda (_prompt choices &rest _) (car (rassq :new choices))))
-                ((symbol-function '+agent/start)
+                ((symbol-function '+agent-shell/here)
                  (lambda () (interactive) (setq started t))))
         (+agent/pool))
       (should started)
@@ -435,7 +435,7 @@
       (should (eq (key-binding (kbd "C-c a")) #'+agent/pool))))
   (dolist (map (list (car portal-terminal--native-maps) (cdr portal-terminal--native-maps)))
     (should (eq (lookup-key map (kbd "C-c a")) #'+agent/pool))
-    (should (eq (lookup-key map (kbd "C-c A a")) #'+agent/start))))
+    (should (eq (lookup-key map (kbd "C-c A n")) #'+agent-menu-new))))
 
 (ert-deftest agent-entry-c29-native-terminal-recalls-agent-and-returns-with-shell-alive ()
   (skip-unless (and (display-graphic-p)

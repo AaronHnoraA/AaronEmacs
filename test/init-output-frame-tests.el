@@ -198,7 +198,9 @@
         buffer)
     (unwind-protect
         (progn
-          (setq buffer (+output-compile "printf frame-output" "test"))
+          ;; The native path: tests that ran earlier may leave a workspace open.
+          (cl-letf (((symbol-function 'remote-workspace-for-path) #'ignore))
+            (setq buffer (+output-compile "printf frame-output" "test")))
           (should (equal (buffer-name buffer)
                          (format "*test F%d*" (+frame-short-id frame))))
           (should (eq (buffer-local-value '+output-owner-frame buffer)

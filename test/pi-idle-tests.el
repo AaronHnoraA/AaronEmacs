@@ -307,4 +307,13 @@
         (should-not noema-pi-router--emacs-buffer)
         (should (= removed 2))))))
 
+(ert-deftest pi-idle-c14-failed-observation-does-not-advertise-uncommitted-record-id ()
+  (pi-idle-tests--store
+    (with-temp-buffer
+      (cl-letf (((symbol-function '+agent-acp-state-value) (lambda (&rest _) "native"))
+                ((symbol-function 'rename-file) (lambda (&rest _) (error "Cannot commit"))))
+        (should-error (noema-pi-sessions-observe "emacs" (current-buffer)))
+        (should-not noema-pi-session-id)
+        (should-not (noema-pi-sessions-records))))))
+
 (provide 'pi-idle-tests)

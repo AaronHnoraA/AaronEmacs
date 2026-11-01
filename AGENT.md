@@ -107,7 +107,12 @@ Native restart/reconnect goes through `+agent-acp-restart-native`, retaining
 the native ID and unsent input without replaying an active request. Research
 must finish its owning Run before restart. Input/hide keys are `C-c C-e` /
 `C-c C-o` in both the dock and Portal popup. Lifecycle contracts C11-C16 and
-C37-C44 and their regression tests live in the agent management design document.
+C37-C49 and their regression tests live in the agent management design document.
+The daily entry is the `agent-shell` command, whose DWIM acts on the project
+pool; `C-c a` is the same logic.  `tools/agent/actions` is the one table of agent
+actions: `C-c A`, the session menu and the input's local slash commands are
+generated from it, so a new action is a row there, never a new key or menu.  The
+chat's own map keeps only view movement and does not take agent-shell's keys.
 Only a turn ending in `end_turn` sends the native queue: a stop, failure, client
 exit or restart moves it to the Emacs-held part, edited through
 `tools/agent/queue`, and an event callback never asks a question.  A client's

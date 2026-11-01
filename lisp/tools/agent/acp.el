@@ -19,6 +19,7 @@
 (require 'aaron-lib)
 (require 'agent-shell)
 (require 'acp)
+(require 'tools/agent/actions)
 (require 'tools/agent/render)
 (require 'tools/agent/views)
 (+agent-render-mode 1)
@@ -33,7 +34,6 @@
 Adapters use already available associations; they must not start a host or
 query disk/network while the shared registry renders.")
 (defvar +agent-session-close-functions nil "Called with BUFFER before its process and frontend are ended.")
-(defvar +agent-session-menu-functions nil "Functions receiving BUFFER and returning domain menu items.")
 (defvar +agent-session-operation-functions nil "Predicates receiving OPERATION and BUFFER; non-nil reports a domain capability.")
 (defvar +agent-session-action-functions nil "Functions receiving OPERATION, BUFFER and arguments; non-nil handles it.")
 (defvar +agent-session-attention-functions nil "Queries receiving BUFFER and returning its domain attention reason.")
@@ -53,6 +53,7 @@ query disk/network while the shared registry renders.")
 (autoload '+agent-session-archive "tools/agent/sessions")
 (autoload '+agent/pool-switch "tools/agent/sessions" nil t)
 (autoload '+agent-session-list "tools/agent/sessions")
+(autoload '+agent/changes "tools/agent/sessions" nil t)
 (autoload '+agent/queue "tools/agent/queue" nil t)
 (autoload '+agent-queue-resume "tools/agent/queue" nil t)
 
@@ -457,28 +458,24 @@ New views store their return point on the window through tools/agent/views.")
   "Keymap for managing sessions inside the Agent window.")
 
 ;; Bound at top level, not in the `defvar' initial value: reloading this file
-;; must update the keymap that live Agent buffers already use.
-(dolist (binding '(("C-c C-a" . +agent-acp-switch-session)
-                   ("C-c C-n" . +agent-acp-next-session)
+;; must update the keymap that live Agent buffers already use.  Only what moves
+;; between views lives here; agent-shell keeps its own keys, and every other
+;; action is in `+agent-actions' (`?', `C-c C-z', `C-c A', or a slash command).
+(dolist (binding '(("C-c C-n" . +agent-acp-next-session)
                    ("C-c C-p" . +agent-acp-previous-session)
                    ("C-c C-e" . +agent-acp-focus-input)
                    ("C-c C-o" . +agent-acp-hide)
-                   ("C-c C-v" . agent-shell-set-session-model)
-                   ("C-c C-x" . +agent-acp-stop)
-                   ("C-c C-r" . +agent-session-restart)
-                   ("C-c C-k" . +agent-acp-close)
-                   ("C-c M-k" . +agent-acp-close-others)
-                   ("C-c C-w" . +agent-session-rename)
-                   ("C-c C-f" . +agent-session-fork)
-                   ("C-c C-t" . +agent-acp-conversation-tree)
-                   ("C-c C-q" . +agent-session-side-chat)
-                   ("C-c C-d" . +agent-session-archive)
-                   ("C-c C-j" . +agent-session-jump)
-                   ("C-c C-l" . +agent/manager)
+                   ("C-c C-l" . +agent-acp-session-manager)
                    ("C-c C-z" . +agent-session-menu)
-                   ("C-c ?" . +agent-acp-help)
+                   ([remap agent-shell-interrupt] . +agent-acp-stop)
                    ("?" . +agent-acp-help-or-insert)))
-  (define-key +agent-acp-tabs-mode-map (kbd (car binding)) (cdr binding)))
+  (define-key +agent-acp-tabs-mode-map
+              (if (stringp (car binding)) (kbd (car binding)) (car binding))
+              (cdr binding)))
+;; A reload must also drop keys an older load bound.
+(dolist (key '("C-c C-a" "C-c C-v" "C-c C-x" "C-c C-r" "C-c C-k" "C-c M-k" "C-c C-w"
+               "C-c C-f" "C-c C-t" "C-c C-q" "C-c C-d" "C-c C-j" "C-c ?"))
+  (define-key +agent-acp-tabs-mode-map (kbd key) nil t))
 
 (define-minor-mode +agent-acp-tabs-mode
   "Show this agent-shell buffer as one tab of its project Agent window.
@@ -486,8 +483,8 @@ New views store their return point on the window through tools/agent/views.")
 The buffer remains the real, interactive agent-shell session.  Its tab line
 lists every live session of the same project; choosing a tab shows that
 session's own buffer in the Agent window instead of copying a transcript.
-Right-click a tab, or press \\[+agent-acp-menu], for session management;
-\\[+agent-acp-help] describes every key.
+Right-click a tab for its actions;
+`?' outside the input opens every action.
 
 \\{+agent-acp-tabs-mode-map}"
   :lighter nil
@@ -503,9 +500,7 @@ Right-click a tab, or press \\[+agent-acp-menu], for session management;
       (kbd "?") #'+agent-acp-help-or-insert)
     (dolist (state '(normal insert visual motion))
       (evil-define-minor-mode-key state '+agent-acp-tabs-mode
-        (kbd "C-c C-e") #'+agent-acp-focus-input
-        (kbd "C-c C-x") #'+agent-acp-stop
-        (kbd "C-c C-v") #'agent-shell-set-session-model))))
+        (kbd "C-c C-e") #'+agent-acp-focus-input))))
 
 (defun +agent-acp--sync-shell-buffer-name (buffer)
   "Keep shell-maker's native input/output target attached to BUFFER.
@@ -532,10 +527,33 @@ process through this buffer-local name, so it must follow every rename."
       root)))
 
 (defun +agent-acp--tab-key (buffer)
-  "Return agent BUFFER's stable tab key: coordinator, named, then retired."
+  "Return agent BUFFER's stable tab key: named, then retired."
   (let ((name (buffer-local-value '+agent-acp-session-name buffer)))
-    (cons (cond ((equal name "pi") 0) (name 1) (t 2))
+    (cons (if name 0 1)
           (or name (buffer-name buffer)))))
+
+(defun +agent-session-kind (session)
+  "Return the management kind of a SESSION snapshot or physical buffer.
+Pi's managed roles are independent of the provider used by ordinary agents."
+  (let ((origin (if (bufferp session)
+                    (and (buffer-live-p session) (buffer-local-value '+agent-acp-session-origin session))
+                  (or (plist-get session :origin)
+                      (when-let* ((buffer (plist-get session :buffer)) ((buffer-live-p buffer)))
+                        (buffer-local-value '+agent-acp-session-origin buffer))))))
+    (if (memq origin '(pi pi-emacs pi-project)) 'pi 'agent)))
+
+(defun +agent-acp--management-domain (buffer)
+  "Read BUFFER's logical management role, independently of its provider."
+  (if (eq (+agent-session-kind buffer) 'agent) 'agent
+    (if (eq (buffer-local-value '+agent-acp-session-origin buffer) 'pi-emacs) 'pi-emacs 'pi-project)))
+
+(defun +agent-acp-session-manager ()
+  "Open the current chat's management owner."
+  (interactive)
+  (unless (run-hook-with-args-until-success '+agent-session-action-functions 'manage (current-buffer))
+    (if (eq (+agent-session-kind (current-buffer)) 'pi)
+        (user-error "Pi's session owner is not attached")
+      (call-interactively #'+agent/manager))))
 
 (defun +agent-pool-key (session)
   "Stable project-pool identity of shared SESSION; no host discovery or I/O."
@@ -550,9 +568,17 @@ process through this buffer-local name, so it must follow every rename."
                            :target (and (fboundp 'remote-file-name-target)
                                         (remote-file-name-target default-directory))))))
 
+(defun +agent-acp--tab-sessions (&optional root)
+  "Query the current chat's management domain, including retired generations."
+  (let* ((kind (+agent-session-kind (current-buffer)))
+         (main (eq +agent-acp-session-origin 'pi-emacs))
+         (sessions (+agent-pool-sessions (or root +agent-acp-session-root) nil kind)))
+    (if (eq kind 'agent) sessions
+      (seq-filter (lambda (session) (eq main (eq (plist-get session :origin) 'pi-emacs))) sessions))))
+
 (defun +agent-acp--project-buffers (&optional root)
-  "Return all user-facing members of the current project pool in tab order."
-  (let ((sessions (+agent-pool-sessions (or root +agent-acp-session-root))))
+  "Return the current management domain's user-facing tabs in order."
+  (let ((sessions (+agent-acp--tab-sessions root)))
     (sort
      (mapcar (lambda (session) (plist-get session :buffer))
              (seq-filter (lambda (session)
@@ -602,11 +628,12 @@ process through this buffer-local name, so it must follow every rename."
     (define-key manager-map [tab-line mouse-1]
                 (lambda (event) (interactive "e")
                   (select-window (posn-window (event-start event)))
-                  (call-interactively #'+agent/manager)))
+                  (call-interactively #'+agent-acp-session-manager)))
     (concat
-     (propertize " Agents  " 'face 'tab-line-tab-inactive
+     (propertize (if (eq (+agent-session-kind current) 'pi) " Pi  " " Agents  ") 'face 'tab-line-tab-inactive
                  'keymap manager-map 'mouse-face 'tab-line-highlight
-                 'help-echo "Agent Manager · H-A / C-c C-l")
+                 'help-echo (if (eq (+agent-session-kind current) 'pi)
+                                "Pi Sessions · C-c C-l" "Agent Manager · H-A / C-c C-l"))
      (mapconcat
      (lambda (buffer)
        (let ((selected (eq buffer current))
@@ -621,7 +648,9 @@ process through this buffer-local name, so it must follow every rename."
          (define-key map [tab-line down-mouse-3]
                      (lambda (event)
                        (interactive "e")
-                       (+agent-acp-menu buffer event)))
+                       (select-window (posn-window (event-start event)))
+                       (+agent-acp-show-buffer buffer)
+                       (call-interactively #'+agent-session-menu)))
          (define-key map [tab-line mouse-3] #'ignore)
          (propertize (concat (if (+agent-acp-busy-p buffer) " ● " "  ")
                              (or (buffer-local-value '+agent-acp-session-name buffer)
@@ -680,7 +709,8 @@ the real agent-shell buffer, so it accepts input and interrupts directly."
 (defun +agent-acp-switch-session ()
   "Show another live agent session of this project in the Agent window."
   (interactive)
-  (call-interactively #'+agent/pool-switch))
+  (call-interactively (if (eq (+agent-session-kind (current-buffer)) 'pi)
+                         #'+agent-acp-session-manager #'+agent/pool-switch)))
 
 (defun +agent-acp-next-session (&optional count)
   "Show the COUNTth next session tab of this project in the Agent window."
@@ -958,7 +988,7 @@ Listeners should coalesce; several changes arrive together.")
 ;;
 ;; A Run's permission requests and results are recorded by the host, which
 ;; derives the Session's attention and the worker notifies.  A session the
-;; person started by hand -- `C-c A a', a worktree session, the popup pool, a
+;; person started by hand -- `C-c A n', a worktree session, the popup pool, a
 ;; resumed conversation -- has no Run, so it would finish or stop on a
 ;; permission request without telling anyone.  This is its Emacs-side
 ;; counterpart: it lives only in this Emacs and is cleared by looking.
@@ -1546,7 +1576,7 @@ The package's own cleanup still owns the physical client and protocol."
   "Close the tabs of BUFFER's project whose buffer satisfies PREDICATE."
   (dolist (other (with-current-buffer buffer
                   (mapcar (lambda (session) (plist-get session :buffer))
-                          (+agent-pool-sessions +agent-acp-session-root))))
+                          (+agent-acp--tab-sessions +agent-acp-session-root))))
     (when (and (funcall predicate other)
                (+agent-acp-confirm-stop other "close"))
       (+agent-acp-kill other))))
@@ -1671,80 +1701,37 @@ renders.  Return non-nil when a prompt was written now."
       (recenter -3))
     buffer))
 
-(defun +agent-acp--menu-items (buffer)
-  "Return generic actions plus explicitly supplied domain actions for BUFFER."
-  (let ((named (and (buffer-local-value '+agent-acp-session-name buffer) t)))
-   (append
-   `(["Show" (+agent-acp-show-buffer ,buffer)]
-     ["Focus input" (+agent-acp-focus-input ,buffer)]
-     ["Choose model..." (with-current-buffer ,buffer (call-interactively #'agent-shell-set-session-model))]
-     ["Stop current work" (+agent-acp-stop ,buffer)] "--"
-     ["Restart session" (+agent-session-restart ,buffer) :active ,named]
-     ["Rename session..." (+agent-session-rename ,buffer)]
-     ["Fork session..." (+agent-session-fork ,buffer)
-      (+agent-session-operation-supported-p 'fork ,buffer)]
-     ["Conversation tree" (+agent-acp-conversation-tree ,buffer)]
-     ["Side chat beside it" (+agent-session-side-chat ,buffer)])
-   (mapcan (lambda (fn) (funcall fn buffer)) +agent-session-menu-functions)
-   `("--" ["Close tab" (+agent-acp-close ,buffer)]
-     ["Close other tabs" (+agent-acp-close-others ,buffer)]
-     ["Close retired tabs" (+agent-acp-close-retired ,buffer)]
-     "--" ["Session list" (+agent-session-list ,buffer)] ["Help" +agent-acp-help]))))
-
-(defun +agent-acp-menu (&optional buffer event)
-  "Pop up the session management menu of agent BUFFER at EVENT or point."
-  (interactive (list nil last-nonmenu-event))
-  (let ((buffer (+agent-acp-command-buffer buffer)))
-    (popup-menu (easy-menu-create-menu (+agent-acp--tab-label buffer)
-                                       (+agent-acp--menu-items buffer))
-                (if (mouse-event-p event) event (posn-at-point)))))
-
 (defun +agent-acp-help ()
-  "Describe the Agent window, its session tabs and their keys."
+  "Describe how to work in the Agent window."
   (interactive)
   (with-help-window "*Agent Help*"
     (princ
      (substitute-command-keys
-      "Agent window
+      (concat
+       "Agent window
 
 Each tab is one live agent session of this project.  The buffer is the real
-agent-shell: type at its prompt and press RET to send.
-H-A / SPC a a opens Agent Manager. C-c C-o hides the view while the agent
-keeps running. C-c C-e focuses input, including during generation.
+agent-shell: type at its prompt and press RET to send, also during a turn.
 
-Mouse
-  mouse-1 on a tab\tshow that session
-  mouse-3 on a tab\tsession menu
+M-x agent-shell\trecall this project's latest session, or return from it
+  with C-u\tstart a new one here
+  with C-u C-u\tpick a session, a new one or a saved conversation
 
-\\<+agent-acp-tabs-mode-map>Sessions
-  \\[+agent-acp-focus-input]\tjump to the input prompt
-  \\[+agent-acp-switch-session]\tpick a session
+\\<+agent-acp-tabs-mode-map>In the chat
+  \\[+agent-acp-focus-input]\tjump to the input
+  \\[+agent-acp-hide]\thide this view; the agent keeps working
   \\[+agent-acp-next-session] / \\[+agent-acp-previous-session]\tnext / previous tab
-  \\[+agent-acp-stop]\tstop the current Run or turn; queued prompts are held
-  \\[+agent-session-restart]\trestart the session and resume its conversation
-  \\[+agent-acp-close]\tclose this tab (name and history remain)
-  \\[+agent-acp-close-others]\tclose the other tabs
-  \\[+agent-session-rename]\trename the session
-  \\[+agent-session-fork]\tfork the session
-  \\[+agent-acp-conversation-tree]\tbrowse this conversation's branches
-  \\[+agent-session-side-chat]\tside chat: ask beside it without interrupting
-  \\[+agent-session-archive]\tarchive the session and close its tab
-  \\[+agent-session-jump]\tjump to its latest work block
-  \\[+agent-session-list]\tsession list
-  \\[+agent-acp-menu]\tsession menu
-  ?\tthis help, outside the prompt input
+  \\[agent-shell-interrupt]\tstop the current turn or Run; queued prompts are held
+  \\[+agent/manager]\tAgent Manager
+  \\[+agent-session-menu], or ? outside the input\tevery action
 
-\\<+agent-prefix-map>Across sessions, after C-c A
-  \\[+agent/next-attention]\tnext session waiting on you, at its request
-  \\[+agent/queue]\treview, edit or resume queued prompts
-  \\[+agent/changes]\tfiles this session changed
-  \\[+agent/resume-saved]\tresume a saved conversation
-
-\\<agent-shell-mode-map>Agent shell
-  \\[agent-shell-interrupt]\tinterrupt the current turn
-  \\[agent-shell-set-session-mode]\tsession mode
-  \\[agent-shell-set-session-model]\tmodel
-"))))
+At the input, type
+"
+       (mapconcat (lambda (entry) (format "  /%s\t%s\n" (car entry) (cddr entry)))
+                  (+agent-actions-slash-commands) "")
+       "
+C-c A plus a letter runs the same action from anywhere; c leads to sending
+context.  Mouse: mouse-1 shows a tab, mouse-3 opens its actions.")))))
 
 (defun +agent-acp-help-or-insert ()
   "Insert `?' in the prompt input; elsewhere open session actions."
@@ -1837,6 +1824,7 @@ unambiguous; its work, draft and queued prompts retain their own lifetime."
           (dolist (other (buffer-list))
             (when (and (not (eq other buffer))
                        (+agent-acp-agent-buffer-p other)
+                       (eq (+agent-acp--management-domain buffer) (+agent-acp--management-domain other))
                        (equal (buffer-local-value '+agent-acp-session-name other) name)
                        (equal (+agent-acp--buffer-pool-key other) key))
               (with-current-buffer other
@@ -1861,11 +1849,13 @@ unambiguous; its work, draft and queued prompts retain their own lifetime."
     (+agent-acp--refresh-tabs)
     buffer))
 
-(defun +agent-acp-session-buffer (name root)
-  "Return the live agent buffer serving session NAME in project ROOT."
-  (let ((key (and root (+agent-acp--buffer-pool-key (current-buffer) root))))
+(defun +agent-acp-session-buffer (name root &optional context)
+  "Find execution session NAME in ROOT, or CONTEXT's explicit management domain."
+  (let ((key (and root (+agent-acp--buffer-pool-key (or context (current-buffer)) root))))
     (seq-find (lambda (buffer)
                 (and (+agent-acp-agent-buffer-p buffer)
+                     (eq (+agent-acp--management-domain buffer)
+                         (if context (+agent-acp--management-domain context) 'agent))
                      (equal (buffer-local-value '+agent-acp-session-name buffer) name)
                      (or (null key) (equal (+agent-acp--buffer-pool-key buffer) key))))
               (buffer-list))))
@@ -1910,13 +1900,13 @@ to nil to leave such buffers exactly as upstream created them."
                       (and (+agent-acp-agent-buffer-p buffer)
                            (equal (buffer-local-value '+agent-acp-session-root buffer)
                                   root)
+                           (eq (+agent-session-kind buffer) 'agent)
                            (buffer-local-value '+agent-acp-session-name buffer)))
                     (buffer-list))))
 
 (defun +agent-acp--unique-name (base root)
-  "Return BASE, or BASE plus a counter, unclaimed by a live session of ROOT.
-The coordinator name \"pi\" is reserved and is never generated here."
-  (let ((taken (cons "pi" (+agent-acp--claimed-names root)))
+  "Return BASE, or BASE plus a counter, unclaimed by an execution session."
+  (let ((taken (+agent-acp--claimed-names root))
         (candidate base)
         (index 1))
     (while (member candidate taken)
@@ -1973,16 +1963,17 @@ the runtime does not start a document host or create a business project."
                       (+agent-session-snapshot buffer)))
                   (buffer-list)))))
 
-(defun +agent-pool-sessions (&optional root target)
-  "Read the public sessions of ROOT's pool, or every pool when ROOT is nil.
-TARGET defaults to the invoking execution context.  Display callbacks and
-origin labels never exclude a member.  This is a view of the one registry."
+(defun +agent-pool-sessions (&optional root target kind)
+  "Read ROOT's public execution pool, or every execution pool when ROOT is nil.
+KIND defaults to agent; pi queries managed Pi roles, all includes both.
+TARGET defaults to the invoking execution context.  This queries one registry."
   (let* ((target (or target (and (fboundp 'remote-file-name-target)
                                 (remote-file-name-target default-directory))))
          (key (and root (+agent-pool-key (list :root root :target target)))))
     (seq-filter
      (lambda (session)
        (and (or (not key) (equal key (+agent-pool-key session)))
+            (or (eq kind 'all) (eq (or kind 'agent) (+agent-session-kind session)))
             (not (run-hook-with-args-until-success '+agent-session-private-functions session))))
      (+agent-acp-sessions))))
 
@@ -2702,7 +2693,7 @@ second, concurrent prompt into the same session."
   (eq (plist-get (buffer-local-value '+agent-acp--prompt-receipt buffer) :status)
       'pending))
 
-(defun +agent-acp--finish-prompt (buffer receipt)
+(defun +agent-acp--finish-prompt (buffer receipt &optional process-queue)
   "Restore native input for RECEIPT, unless BUFFER has begun another turn."
   (when (and (+agent-acp-agent-buffer-p buffer)
              (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
@@ -2724,7 +2715,7 @@ second, concurrent prompt into the same session."
         (+agent-acp-restore-prompt buffer)
         ;; A structured turn bypasses the native flow that sends the queue, and
         ;; the Run's owner may start the next one: leave it for the person.
-        (+agent-acp--hold-queue)
+        (unless process-queue (+agent-acp--hold-queue))
         (+agent-acp--changed)))))
 
 (cl-defun +agent-acp-prompt (&key buffer content run-id on-success on-failure process-queue)
@@ -2770,7 +2761,7 @@ Research callers retain their explicit queue policy by leaving it nil."
                           (format "%s" (or (map-elt response 'stopReason) "")))))
                      (unwind-protect
                          (when on-success (funcall on-success response))
-                       (+agent-acp--finish-prompt buffer receipt)
+                       (+agent-acp--finish-prompt buffer receipt process-queue)
                        (when (and (buffer-live-p buffer)
                                   (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
                          (+agent-acp--report-turn-complete
@@ -2798,7 +2789,7 @@ Research callers retain their explicit queue policy by leaving it nil."
                          (+agent-acp--hold-queue)))
                      (unwind-protect
                          (when on-failure (funcall on-failure error raw))
-                       (+agent-acp--finish-prompt buffer receipt)
+                       (+agent-acp--finish-prompt buffer receipt process-queue)
                        (when (and (buffer-live-p buffer)
                                   (eq receipt (buffer-local-value '+agent-acp--prompt-receipt buffer)))
                          (+agent-acp--report-turn-complete

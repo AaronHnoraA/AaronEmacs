@@ -590,21 +590,24 @@ when present; the exact Codex message is the isolated compatibility fallback."
     (agent-shell--trigger-completion-at-point)))
 
 (defun +agent-shell--resume-command-completion-a (original &rest args)
-  "Add the local /resume command to ORIGINAL's ACP slash completion."
+  "Add the local commands of `+agent-actions' to ORIGINAL's slash completion."
   (let* ((capf (apply original args))
          (bounds (and (derived-mode-p 'agent-shell-mode)
                       (agent-shell--completion-bounds "[:alnum:]_-" ?/)))
          (start (and bounds (map-elt bounds :start))))
     (if (and start (agent-shell-completion--command-start-p (1- start)))
-        (if capf
-            (append (list (nth 0 capf) (nth 1 capf)
-                          (cons "resume" (remove "resume" (nth 2 capf))))
-                    (nthcdr 3 capf))
-          (list start (map-elt bounds :end) '("resume")
-                :exclusive t
-                :annotation-function
-                (lambda (_) "  Resume a saved session")
-                :exit-function #'agent-shell--capf-exit-with-space))
+        (let* ((local (+agent-actions-slash-commands))
+               (names (seq-union (mapcar #'car local) (and capf (nth 2 capf))))
+               (annotate (and capf (plist-get (nthcdr 3 capf) :annotation-function))))
+          (append (list start (map-elt bounds :end) names)
+                  (list :annotation-function
+                        (lambda (name)
+                          (if-let* ((entry (assoc name local)))
+                              (concat "  " (cddr entry))
+                            (and annotate (funcall annotate name)))))
+                  (if capf (nthcdr 3 capf)
+                    (list :exclusive t
+                          :exit-function #'agent-shell--capf-exit-with-space))))
       capf)))
 
 (defun +agent-shell--resume-from-list (source sessions)
@@ -664,14 +667,29 @@ when present; the exact Codex message is the isolated compatibility fallback."
                                      (map-elt error-object 'message))
                                 error-object))))))
 
+(defun +agent-shell--local-slash (input)
+  "Return the local command INPUT names, or nil.
+The agent's own commands keep their names: only /resume overrides one, since
+Emacs owns which frontend shows a conversation."
+  (when-let* ((name (and (stringp input)
+                         (string-match "\\`/\\([[:alnum:]_-]+\\)[ \t\n]*\\'" input)
+                         (match-string 1 input)))
+              (entry (assoc name (+agent-actions-slash-commands))))
+    (when (or (equal name "resume")
+              (not (seq-find (lambda (command) (equal (map-elt command 'name) name))
+                             (map-elt agent-shell--state :available-commands))))
+      (cadr entry))))
+
 (defun +agent-shell--submit-a (original &rest args)
   "Reconnect exited clients or run local /resume before agent submission."
   (cond ((and (derived-mode-p 'agent-shell-mode)
               (+agent-shell--dead-client-p agent-shell--state))
          (+agent-shell/reconnect))
         ((and (derived-mode-p 'agent-shell-mode)
-              (equal (agent-shell--prompt-input) "/resume"))
-         (+agent-shell/resume))
+              (+agent-shell--local-slash (agent-shell--prompt-input)))
+         (let ((command (+agent-shell--local-slash (agent-shell--prompt-input))))
+           (agent-shell--clear-prompt-input)
+           (call-interactively command)))
         ;; A Run's input is frozen, so what is typed during it waits its turn
         ;; rather than steering the Run or racing it with a second prompt.
         ((and (derived-mode-p 'agent-shell-mode)
@@ -702,14 +720,15 @@ when present; the exact Codex message is the isolated compatibility fallback."
       (+agent-view-embed buffer window)
       buffer)))
 
-(defun +agent-shell--managed-entry-a (original &optional arg)
-  "Open `agent-shell' in the invoking window with Noema session handling.
-Double prefix ARG keeps the upstream existing-session picker."
-  (if (not (equal arg '(16)))
-      (progn
-        (require 'term/portal/popup)
-        (call-interactively #'+agent-shell/here))
-    (funcall original arg)))
+(defun +agent-shell--managed-entry-a (_original &optional arg)
+  "Give `agent-shell' its own DWIM over this project's pool.
+Recall the latest session, or return from one; \\[universal-argument] starts
+a new one here; a double prefix ARG picks among the pool, new and saved
+conversations.  This is `+agent/pool' under the name people type."
+  (if (equal arg '(4))
+      (progn (require 'term/portal/popup)
+             (call-interactively #'+agent-shell/here))
+    (+agent/pool (equal arg '(16)))))
 
 (defun +agent-shell-enable-command-completion ()
   "Show ACP command suggestions in an agent-shell buffer after typing /."
@@ -1016,7 +1035,6 @@ is `+config-ask-model', registered with native Config Customize."
 (autoload '+agent/changes "tools/agent/sessions" nil t)
 (autoload '+agent/queue "tools/agent/queue" nil t)
 (autoload '+agent/resume-saved "tools/agent/acp" nil t)
-(autoload '+agent/peek "tools/agent/sessions" nil t)
 (autoload '+agent/pool "tools/agent/sessions" nil t)
 (autoload '+agent/pool-switch "tools/agent/sessions" nil t)
 (autoload '+agent/usage "tools/agent/manager" nil t)
@@ -1076,44 +1094,10 @@ is `+config-ask-model', registered with native Config Customize."
 (declare-function noema-interaction-engine-cli-register
                   "noema-interaction-engine-cli" ())
 
-(defvar-keymap +agent-prefix-map
-  :doc "Prefix map for Noema research and agent commands."
-  "a" #'+agent/start
-  "RET" #'+agent/manager
-  "w" #'+agent-worktree-start
-  "n" #'+agent-worktree-parallel
-  "A" #'+agent-worktree-board
-  "W" #'noema
-  "c" #'+agent/compose
-  "s" #'+agent/compose-send
-  "m" #'+agent/compose-menu
-  "." #'+agent/compose-add-context
-  "r" #'+agent/compose-rewrite
-  "p" #'noema-agent-promote-current-session
-  "I" #'noema-research-attention
-  "P" #'noema-pi-emacs-open
-  "D" #'noema-pi-doctor
-  "S" #'+agent/sessions
-  "T" #'+agent-acp-conversation-tree
-  "G" #'+agent/inbox
-  "j" #'+agent/next-attention
-  "q" #'+agent/queue
-  "h" #'+agent/resume-saved
-  "l" #'+agent/changes
-  "U" #'+agent/usage
-  "O" #'noema-orchestration
-  "b" #'+agent/peek
-  "i" #'+agent-acp-focus-input
-  ;; Editor context for a chosen session, sent as references.
-  "x" #'+agent-context-send
-  "v" #'+agent-context-send-region
-  "B" #'+agent-context-send-buffer
-  "f" #'+agent-context-send-file
-  "@" #'+agent-context-send-at-point
-  "," #'+agent-context-inspect
-  "d" #'+agent-context-draft
-  ;; Noema Markdown pane: open its note in Emacs at the selection.
-  "e" #'noema-md-bridge-edit-source)
+(require 'tools/agent/actions)
+
+(defvar +agent-prefix-map (+agent-actions-keymap)
+  "The `C-c A' prefix, generated from `+agent-actions'.")
 
 (map! :desc "Project agent pool" "C-c a" #'+agent/pool
       "C-c M-a" #'+agent/compose-add-context

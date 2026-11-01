@@ -3,8 +3,7 @@
 ;;; Commentary:
 ;; A view of the runtime's real buffers, shared by every caller.  Domain
 ;; actions are optional extensions; listing or editing a local session never
-;; needs a Research host.  Preview follows the HQ interaction using Consult
-;; and the existing window, without a second workspace or transcript copy.
+;; needs a Research host.
 
 ;;; Code:
 
@@ -41,7 +40,7 @@ agent until the user explicitly chooses creation."
                (choice (cdr (assoc (completing-read "Project agents: " choices nil t)
                                    choices))))
           (cond ((bufferp choice) (+agent-acp-show-buffer choice))
-                ((eq choice :new) (call-interactively #'+agent/start))
+                ((eq choice :new) (call-interactively #'+agent-shell/here))
                 ((eq choice :resume) (call-interactively #'+agent/resume-saved))
                 (t (user-error "No agent session selected"))))))))
 
@@ -102,7 +101,9 @@ agent until the user explicitly chooses creation."
     (when (string-empty-p (string-trim name)) (user-error "Session name is empty"))
     (unless (+agent-session--dispatch 'rename buffer name)
       (let ((other (with-current-buffer buffer
-                     (+agent-acp-session-buffer name +agent-acp-session-root))))
+                     (if (eq (+agent-session-kind buffer) 'pi)
+                         (+agent-acp-session-buffer name +agent-acp-session-root buffer)
+                       (+agent-acp-session-buffer name +agent-acp-session-root)))))
         (when (and other (not (eq other buffer))) (user-error "Session name already exists: %s" name)))
       (+agent-acp-mark-session-buffer
        buffer name (buffer-local-value '+agent-acp-session-agent buffer)
@@ -368,40 +369,7 @@ question lands on its native control; nothing is decided for you."
   (require 'tools/agent/manager)
   (+agent-manager-show 'attention))
 
-;;;###autoload
-(defun +agent/peek ()
-  "Preview live agent buffers, restoring the original window before returning."
-  (interactive)
-  (let* ((sessions (+agent-pool-sessions))
-         (choices (mapcar (lambda (session)
-                            (cons (format "%s · %s · %s"
-                                          (or (plist-get session :name) (buffer-name (plist-get session :buffer)))
-                                          (plist-get session :agent) (plist-get session :root))
-                                  (plist-get session :buffer))) sessions))
-         (window (selected-window)) (original (window-buffer window))
-         (point (window-point window)) (start (window-start window))
-         (+agent-acp-previewing t) selected)
-    (unless choices (user-error "No live agent sessions"))
-    (unwind-protect
-        (setq selected
-              (if (require 'consult nil t)
-                  (consult--read
-                   (mapcar #'car choices) :prompt "Agent session: " :require-match t :sort nil
-                   :state (lambda (action candidate)
-                            (when (and (eq action 'preview) candidate (window-live-p window))
-                              (when-let* ((buffer (cdr (assoc candidate choices))) ((buffer-live-p buffer)))
-                                (set-window-buffer window buffer)
-                                (+agent-render-flush buffer)))))
-                (completing-read "Agent session: " choices nil t)))
-      (when (and (window-live-p window) (buffer-live-p original))
-        (set-window-buffer window original)
-        (set-window-point window point)
-        (set-window-start window start t)))
-    (when-let* ((buffer (cdr (assoc selected choices))))
-      (+agent-acp-show-buffer buffer))))
-
 (defalias 'agent-sessions #'+agent/sessions)
-(defalias 'agent-peek #'+agent/peek)
 (defalias 'agent-inbox #'+agent/inbox)
 
 (provide 'tools/agent/sessions)

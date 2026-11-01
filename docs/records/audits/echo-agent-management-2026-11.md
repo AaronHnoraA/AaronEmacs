@@ -51,8 +51,30 @@
 | echo SubagentPanel、PlanPanel | 不采纳 | 子执行需要提供方报告（C3）；计划已在预览的原生聊天中渲染 |
 | echo 重新生成三分法 | 不采纳 | 重放可能重复工具副作用；上方向键取回 prompt 由人决定 |
 | echo 崩溃 watchdog、`process_supervisor` | 不采纳 | Emacs 是常驻宿主；ACP 子进程靠 stdio 结束，已有 owner 看护规则 |
-| ECA `tool-call-accept-next` | 不采纳 | 与“决定由用户在原生控件提交”的 C19 冲突 |
+| ECA `tool-call-accept-next` | 不采纳 | 按键确认本身就是用户的决定，不违反 C19；不做的理由是 `/next` 已落在原生控件上，再按其 `y`/`n` 即可，无需另开入口 |
 | HQ `prompt` 启动策略（上游） | 不采纳 | 恢复失败会静默新建对话，违反严格恢复；改在 `+agent-acp--strict-initiate-session` 处选择 |
+
+## ECA 的交互逻辑与 HQ 的 Emacs 融合
+
+用户明确了两者的学习重点：ECA 学交互和逻辑，HQ 学与 Emacs 的融合及 API。随后又要求
+整理全部入口，不再开新口子，并指出日常只从 `agent-shell` 指令进入。
+
+| 来源 | 学到的做法 | 落地 |
+| --- | --- | --- |
+| HQ 依附 agent-shell 的公开语义，自己不定义入口 | `agent-shell` 本身就该是入口 | 发现我们的 advice 把上游 DWIM 换成了“每次新建”，绕开项目池；C49 恢复 DWIM 并作用到池上 |
+| HQ 只用少量公开 API（`agent-shell-buffers`、`agent-shell-status`、`agent-shell-cwd`） | 不和上游的键和语义竞争 | C48 归还 `C-c C-t` 等原生键，`C-c C-c` 走统一停止 |
+| HQ Peek 与 Toggle 共用同一份状态和列表 | 一份数据，多个视图 | C47 一张动作表生成前缀、菜单、斜杠命令 |
+| ECA `eca-chat-mode-map` 让聊天内就能完成全部操作 | 动作要能在输入旁完成 | 沿用已有 `/resume`，本地斜杠命令从动作表生成，生成中也可用 |
+| ECA `key-pressed-return` 按光标上下文决定 RET | 同一个键随场景做对的事 | 原生按钮和表单已是如此，不另加；`?` 在输入区外开菜单 |
+| ECA `go-to-next-attention` | 跨项目注意导航 | `/next`，同一张表 |
+
+整合后删除的重复入口：`+agent/peek`（管理器已是真实 buffer 预览）、鼠标的
+`+agent-acp-menu`（右键打开同一菜单）、`Q` 继续队列（面板 `r`）、聊天内
+`C-c C-a/x/r/k/w/f/t/q/d/j`、`C-c M-k`、`C-c ?`。
+
+`C-c A` 的迁移：`a`→`n`，`n`→`N`，发送类全部进 `c` 且保留原字母（`x`→`c x`，
+`s`→`c s`，`r`→`c r`），`.` 现在是菜单，`b` 删除。这些旧字母与管理器和菜单的含义冲突
+（`s` 停止与发送、`x` 结束与发送、`a` 审批与新建），是这次改动的原因。
 
 ## 实现要点
 
@@ -70,21 +92,21 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| `test/agent-lifecycle-e2e.el` | 新增 30 项，真实 ACP 进程覆盖 C37–C44 |
-| Makefile 的窗口、Agent 回归组（含新文件） | 329 项，327 通过，2 跳过，0 失败；去掉新文件时 298 项同样 0 失败 |
-| `make research-test` | 全部通过（2 + 165 + 27 + 96 + 102） |
-| `python3 test/agent-manager-gui-e2e.py queue` | 通过：真实 child frame、`C-c A q`、面板按键、返回来源、管理器入口、恢复只发送一次、`C-c A j` 落在审批按钮 |
-| `python3 test/agent-manager-gui-e2e.py manager` | 通过 |
-| `make state-check` | 20 行差异，全部是 4 个新键在各 keymap 的绑定 |
+| Makefile 的窗口、Agent 回归组，含 `test/agent-lifecycle-e2e.el` | 335 项，0 失败，2 跳过 |
+| `make research-test` | 2 + 207 + 27 + 96 + 102，全部通过 |
+| `test/agent-manager-gui-e2e.py` 的 `queue`、`manager`、`display` | 全部通过：真实 child frame、按键、返回来源、双 frame、重启 |
+| 全仓 `make test-check` | 140 个文件，所有 agent 文件通过；6 个未过见下 |
+| `make state-check` | 不是零差异，因为包含按键迁移和并行工作；非按键差异只有 `tools/agent/actions`、Portal 的 `C-c C-l` 和 Dashboard 按钮 |
 | Doctor | 0 errors，0 warnings，0 key conflicts；`tools/agent` 无 policy hit |
 | 相关文件字节编译 | 无警告 |
 
-全仓 `test-all` 共 137 个文件（不含名称带 e2e、live、smoke 的文件），所有 agent 文件
-通过。`init-activity`、`init-neo-common`、`init-performance`、`lean-infoview` 和 `lean-tests`
-在 10-31 基线中已失败；`portal-focus-gui` 需要 GUI。运行中另外发现 3 个文件失败，查明
-都是测试问题，已在 `a0b05b8a` 修复：`remote-transfer` 的假后端没有跟上 `2d600f4b` 的
-`:project` 签名；LaTeX 与 LSP 各有一项桩替换未缓存 trampoline 的原语，Emacs 在安装桩之后
-才编译 trampoline，编译器调用到了桩。
+未过的 6 个文件都不是 agent 文件：`init-activity`、`init-neo-common`、`init-performance`、
+`lean-infoview`、`lean-tests` 在 10-31 基线中已失败；`portal-focus-gui` 需要 GUI。
+
+过程中修复的测试问题：`remote-transfer` 的假后端没有跟上 `2d600f4b` 的 `:project` 签名；
+LaTeX 与 LSP 各有一项桩替换未缓存 trampoline 的原语，编译器调用到了桩；
+`output-workflow-compilation-is-owned-by-current-frame` 默认没有打开的 workspace，
+与 agent 测试同进程时走了 task 路径。
 
 ## 验证边界
 
@@ -96,5 +118,3 @@
   的韧性部分因此仍未验收。
 - 没有向真实提供方发送 prompt，停止原因等行为来自协议 fixture。
 - 没有像素级视觉验收，GUI 断言基于真实 frame、窗口和文本。
-- 在临时拼接的大组合里，`output-workflow-compilation-is-owned-by-current-frame` 失败，
-  单独运行与 Makefile 分组均通过，判定为测试之间的顺序干扰，未处理。

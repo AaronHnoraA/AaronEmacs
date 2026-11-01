@@ -393,7 +393,7 @@
   (dolist (map (list +agent-acp-tabs-mode-map +portal-popup-agent-keys-mode-map))
     (should (eq (lookup-key map (kbd "C-c C-e")) #'+agent-acp-focus-input))
     (should (eq (lookup-key map (kbd "C-c C-o")) #'+agent-acp-hide))
-    (should (eq (lookup-key map (kbd "C-c C-l")) #'+agent/manager))))
+    (should (eq (lookup-key map (kbd "C-c C-l")) #'+agent-acp-session-manager))))
 
 (provide 'agent-manager-tests)
 ;;; agent-manager-tests.el ends here

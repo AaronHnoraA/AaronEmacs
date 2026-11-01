@@ -626,12 +626,106 @@
       (agent-lifecycle-e2e--dispose buffer restored)
       (delete-directory native t))))
 
-(ert-deftest agent-keys-c39-c44-entries-are-bound ()
+(ert-deftest agent-keys-c47-one-table-generates-every-surface ()
+  "A letter means the same action in `C-c A' and the session menu."
+  (dolist (row (+agent-actions--rows +agent-actions))
+    (should (eq (lookup-key +agent-prefix-map (kbd (car row))) (nth 2 row)))
+    (should (transient-get-suffix '+agent-session-menu (car row))))
+  (dolist (row (+agent-actions--rows +agent-send-actions))
+    (should (eq (lookup-key +agent-prefix-map (kbd (concat "c " (car row)))) (nth 2 row))))
   (with-temp-buffer
-    (should (eq (key-binding (kbd "C-c A j")) #'+agent/next-attention))
-    (should (eq (key-binding (kbd "C-c A q")) #'+agent/queue))
-    (should (eq (key-binding (kbd "C-c A h")) #'+agent/resume-saved))
-    (should (eq (key-binding (kbd "C-c A l")) #'+agent/changes))))
+    (should (eq (key-binding (kbd "C-c A j")) #'+agent-menu-next))
+    (should (eq (key-binding (kbd "C-c A q")) #'+agent-menu-queue))
+    (should (eq (key-binding (kbd "C-c A n")) #'+agent-menu-new))
+    (should (eq (key-binding (kbd "C-c A .")) #'+agent-session-menu))))
+
+(ert-deftest agent-keys-c47-the-menu-acts-on-the-selected-session ()
+  "From the manager, an action means its selected session, not the current buffer."
+  (let ((agent (agent-lifecycle-e2e--synthetic "chosen")) seen)
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local +agent-manager--model t +agent-manager--selected agent)
+          (cl-letf (((symbol-function '+agent-manager-hide) #'ignore)
+                    ((symbol-function '+agent/queue) (lambda (buffer) (setq seen buffer))))
+            (+agent-menu-queue))
+          (should (eq seen agent)))
+      (agent-lifecycle-e2e--dispose agent))))
+
+(ert-deftest agent-keys-c47-the-next-key-goes-to-the-waiting-session ()
+  "No generated menu operation may shadow a table command."
+  (let ((approve (agent-lifecycle-e2e--synthetic "approve"))
+        (unread (agent-lifecycle-e2e--synthetic "a-unread" '+agent-acp-attention 'done))
+        reviewed)
+    (agent-lifecycle-e2e--await-permission approve "Run")
+    (unwind-protect
+        (cl-letf (((symbol-function '+agent-acp-review-request) (lambda (buffer) (setq reviewed buffer))))
+          (with-temp-buffer (+agent-menu-next))
+          (should (eq reviewed approve)))
+      (agent-lifecycle-e2e--dispose approve unread))))
+
+(ert-deftest agent-keys-c47-no-letter-is-used-twice ()
+  (dolist (table (list +agent-actions +agent-send-actions))
+    (let ((keys (mapcar #'car (+agent-actions--rows table))))
+      (should (equal keys (seq-uniq keys))))))
+
+(ert-deftest agent-keys-c47-manager-letters-match-the-table ()
+  "The manager's action keys are the same letters; j, k and q stay navigation."
+  (dolist (pair '(("n" . +agent-menu-new) ("a" . +agent-menu-review) ("h" . +agent-menu-history)
+                  ("l" . +agent-menu-changes) ("i" . +agent-menu-input) ("s" . +agent-menu-stop)
+                  ("r" . +agent-menu-rename) ("R" . +agent-menu-restart) ("x" . +agent-menu-close)))
+    (should (eq (nth 2 (assoc (car pair) (+agent-actions--rows +agent-actions))) (cdr pair)))))
+
+(ert-deftest agent-keys-c48-the-chat-keeps-agent-shell-keys ()
+  "The session map no longer takes agent-shell's own bindings."
+  (dolist (key '("C-c C-t" "C-c C-v" "C-c C-m" "C-c C-s" "C-c C-c"))
+    (should-not (lookup-key +agent-acp-tabs-mode-map (kbd key))))
+  (should (eq (command-remapping 'agent-shell-interrupt nil +agent-acp-tabs-mode-map)
+              #'+agent-acp-stop)))
+
+(ert-deftest agent-entry-c49-agent-shell-is-the-pool ()
+  "`agent-shell' recalls and returns; a prefix starts or picks."
+  (let (calls)
+    (cl-letf (((symbol-function '+agent/pool) (lambda (choose) (push (list 'pool choose) calls)))
+              ((symbol-function '+agent-shell/here)
+               (lambda (&rest _) (interactive) (push 'here calls)))
+              ((symbol-function 'require) (lambda (&rest _) t)))
+      (agent-shell)
+      (should (equal (pop calls) '(pool nil)))
+      (agent-shell '(16))
+      (should (equal (pop calls) '(pool t)))
+      (agent-shell '(4))
+      (should (eq (pop calls) 'here)))))
+
+(ert-deftest agent-entry-c49-local-commands-run-at-the-input-even-during-a-turn ()
+  (agent-lifecycle-e2e--with-session (buffer store directory)
+    (let (ran)
+      (agent-flow-e2e--send buffer "hold")
+      (agent-flow-e2e--wait (lambda () (+agent-acp-busy-p buffer)))
+      (agent-flow-e2e--send buffer "later")
+      (cl-letf (((symbol-function '+agent/queue) (lambda (&rest _) (setq ran t))))
+        (agent-flow-e2e--send buffer "/queue"))
+      (should ran)
+      (with-current-buffer buffer (should (string-empty-p (string-trim (or (agent-shell--prompt-input) "")))))
+      ;; It never reaches the agent or the queue.
+      (should (equal (+agent-queue-items buffer) '("later")))
+      (should-not (cl-some (lambda (line) (string-match-p "/queue" line))
+                           (agent-lifecycle-e2e--events store)))
+      (+agent-acp-stop buffer)
+      (agent-flow-e2e--idle buffer))))
+
+(ert-deftest agent-entry-c49-a-provider-command-keeps-its-name ()
+  (let ((agent (agent-lifecycle-e2e--synthetic "names")))
+    (unwind-protect
+        (with-current-buffer agent
+          (should (eq (+agent-shell--local-slash "/queue") '+agent-menu-queue))
+          (should (eq (+agent-shell--local-slash "/resume  ") '+agent-menu-history))
+          (should-not (+agent-shell--local-slash "/queue now please"))
+          (should-not (+agent-shell--local-slash "fix /queue"))
+          (setf (map-elt agent-shell--state :available-commands)
+                (vector '((name . "queue")) '((name . "resume"))))
+          (should-not (+agent-shell--local-slash "/queue"))
+          (should (+agent-shell--local-slash "/resume")))
+      (agent-lifecycle-e2e--dispose agent))))
 
 (provide 'agent-lifecycle-e2e)
 ;;; agent-lifecycle-e2e.el ends here

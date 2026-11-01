@@ -216,12 +216,12 @@ agent-shell、acp.el、shell-maker 使用固定版本的 package-vc 依赖，可
 - `M-x noema` / `C-c A W` 打开项目 Pi；`M-x noema-pi-emacs-open` 打开主 Pi。
 - Dashboard 的 `pi`、`M-x pi` / `C-c A P` 召回主 Pi，再次调用收起；带前缀打开项目 Pi。
   `M-x noema-pi-sessions` 管理历史；Ibuffer 的 Pi 组列出实际 buffer。
-- `C-c A a` 选择并启动普通 Agent；`C-c A S` 打开共享 Agent Manager。
-- `C-c A c` 通过项目 Pi Skill 创建并打开普通 Markdown prompt 文档，编辑保存后
-  用 `C-c A s` 发给已有 Agent；`C-c A m` 打开会话菜单。
-- `C-c A .` 添加上下文，`C-c A ,` 检视，`C-c A x/v/B/f/@` 发送上下文、选区、
+- `C-c A n` 选择并启动普通 Agent；`C-c A S` 打开共享 Agent Manager。
+- `C-c A c c` 通过项目 Pi Skill 创建并打开普通 Markdown prompt 文档，编辑保存后
+  用 `C-c A c s` 发给已有 Agent；`C-c A c m` 打开会话菜单。
+- `C-c A c .` 添加上下文，`C-c A c ,` 检视，`C-c A c x/v/B/f/@` 发送上下文、选区、
   buffer、文件或光标位置的引用。
-- `C-c A r` 请求改写；Noema 通过文档 API 生成审阅提案，用户接受或反馈。
+- `C-c A c r` 请求改写；Noema 通过文档 API 生成审阅提案，用户接受或反馈。
 - `C-c A p` 仅用于普通任务 Agent 的 Research 关联，Pi 会话单独管理。
 
 完整流程见 [Pi 会话与项目助手](../design/pi-sessions.md)、

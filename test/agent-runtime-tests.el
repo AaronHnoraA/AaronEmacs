@@ -15,7 +15,7 @@
                  agent-shell--state (agent-shell--make-state :buffer (current-buffer)
                                                              :agent-config '((:identifier . codex))))
      (let ((+agent-session-action-functions nil) (+agent-session-id-functions nil)
-           (+agent-session-menu-functions nil) (+agent-session-attention-functions nil))
+           (+agent-session-attention-functions nil))
        ,@body)))
 
 (ert-deftest agent-runtime-c1-rename-does-not-load-a-domain-service ()
@@ -76,48 +76,6 @@
     (cl-letf (((symbol-function '+agent-context-send-region) (lambda () (ert-fail "Domain editor handled the action"))))
       (+agent/compose-rewrite)
       (should (equal seen '(rewrite))))))
-
-(ert-deftest agent-runtime-c5-cancelled-peek-restores-buffer-and-point ()
-  (save-window-excursion
-    (let ((original (generate-new-buffer " *agent-peek-original*"))
-          (preview (generate-new-buffer " *agent-peek-preview*")) visited)
-      (unwind-protect
-          (progn
-            (set-window-buffer (selected-window) original)
-            (with-current-buffer original (insert "one\ntwo\nthree\n"))
-            (set-window-point (selected-window) 5)
-            (cl-letf (((symbol-function '+agent-acp-sessions)
-                       (lambda (&rest _) (list (list :buffer preview :name "review" :agent "codex" :root "/p/"))))
-                      ((symbol-function '+agent-render-flush) #'ignore)
-                      ((symbol-function '+agent-acp-show-buffer) (lambda (_) (setq visited t)))
-                      ((symbol-function 'consult--read)
-                       (lambda (choices &rest args)
-                         (funcall (plist-get args :state) 'preview (car choices))
-                         (should (eq (window-buffer) preview))
-                         (should +agent-acp-previewing)
-                         (signal 'quit nil))))
-              (condition-case nil (+agent/peek) (quit nil)))
-            (should (eq (window-buffer) original))
-            (should (= (window-point) 5))
-            (should-not visited))
-        (kill-buffer original) (kill-buffer preview)))))
-
-(ert-deftest agent-runtime-c5-confirmed-peek-restores-before-visiting ()
-  (save-window-excursion
-    (let ((original (window-buffer)) (preview (generate-new-buffer " *agent-peek-target*")) visited)
-      (unwind-protect
-          (cl-letf (((symbol-function '+agent-acp-sessions)
-                     (lambda (&rest _) (list (list :buffer preview :name "review" :agent "codex" :root "/p/"))))
-                    ((symbol-function '+agent-render-flush) #'ignore)
-                    ((symbol-function '+agent-acp-show-buffer)
-                     (lambda (buffer) (should (eq (window-buffer) original)) (setq visited buffer)))
-                    ((symbol-function 'consult--read)
-                     (lambda (choices &rest args)
-                       (funcall (plist-get args :state) 'preview (car choices)) (car choices))))
-            (+agent/peek)
-            (should (eq visited preview)))
-        (kill-buffer preview)))))
-
 
 (ert-deftest agent-runtime-c6-reading-does-not-resolve-approval ()
   (agent-runtime-tests--buffer

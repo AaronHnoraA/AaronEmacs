@@ -70,7 +70,7 @@ Sending is asynchronous; status and bounded read report actual progress."
       (unless (and (integerp offset) (>= offset 0) (integerp limit) (<= 1 limit 100))
         (user-error "offset must be >= 0 and limit must be 1..100"))
       (let* ((rows (seq-filter (lambda (row) (+agent-api--matches-p row body))
-                               (+agent-pool-sessions)))
+                               (+agent-pool-sessions nil nil 'all)))
              (total (length rows)))
         (cl-return-from +agent/api
           `((ok . t) (total . ,total)
@@ -101,7 +101,7 @@ Sending is asynchronous; status and bounded read report actual progress."
     (let* ((name (+agent-api--string body "buffer"))
            (native (+agent-api--string body "nativeSessionId"))
            (snapshot (seq-find (lambda (row) (equal name (buffer-name (plist-get row :buffer))))
-                               (+agent-pool-sessions)))
+                               (+agent-pool-sessions nil nil 'all)))
            (buffer (plist-get snapshot :buffer)))
       (unless (and snapshot native (equal native (plist-get snapshot :native-session-id))
                    (+agent-api--matches-p snapshot body))

@@ -586,7 +586,7 @@ PICK is as for `+agent-context-send-at-point'."
   "Inspect selected references without loading a model client."
   (interactive)
   (unless (+agent-selection-collect)
-    (user-error "No context selected; use C-c A . first"))
+    (user-error "No context selected; use C-c A c . first"))
   (let ((root default-directory))
     (with-current-buffer (get-buffer-create "*Agent Context*")
       (+agent-selection-review-mode)

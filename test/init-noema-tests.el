@@ -2018,7 +2018,7 @@ blocks with no defined order, so Noema reinstalls from the mode hook."
 
 (ert-deftest +noema-agent-selection-key-keeps-its-emacs-binding ()
   "The forwarded C-c A v sequence invokes the shared context command."
-  (should (eq (key-binding (kbd "C-c A v")) #'+agent-context-send-region)))
+  (should (eq (key-binding (kbd "C-c A c v")) #'+agent-context-send-region)))
 
 (ert-deftest +noema-input-focus-corrects-stale-pane-bookkeeping ()
   (let* ((buffer (generate-new-buffer " *Noema stale focus*"))

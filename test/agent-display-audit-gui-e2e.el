@@ -129,10 +129,10 @@
                 (should (eq (window-buffer sibling) b))
                 (should (eq (plist-get (window-parameter sibling '+agent-view) :buffer) b))
                 (should-not (+portal-popup--window))
-                (should (equal (+agent-acp-state-value b '(:pending-prompts)) '("queued gui intent")))
+                (should (equal (buffer-local-value '+agent-acp--held-prompts b) '("queued gui intent")))
                 (should (equal (with-current-buffer b (agent-shell--prompt-input)) "unsent gui draft"))
                 (with-current-buffer b
-                  (setf (map-elt agent-shell--state :pending-prompts) nil)
+                  (setq +agent-acp--held-prompts nil)
                   (agent-shell--clear-prompt-input))
                 (setq stage 'resume-in-current-dock)
                 (cl-letf (((symbol-function 'completing-read)

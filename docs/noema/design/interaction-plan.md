@@ -80,7 +80,9 @@ Pi 的会话记录、历史、活跃指针与 Research 独立；物理运行时�
 主程序启动保留 Dashboard，后台初始化 Emacs Pi；项目激活复用项目 Pi。
 Ibuffer 有独立 Pi 组，Dashboard 的 `pi`、`M-x pi` 和 `C-c A P` 打开同一个主 Pi；
 在主 Pi 窗口再次调用会收起并返回编辑位置，带前缀参数打开来源项目 Pi。
-`M-x noema-pi-sessions` 查看历史。
+`M-x noema-pi-sessions` 查看当前 Pi／项目的历史，带前缀查看所有作用域。
+Pi 使用独立 tab 和管理入口；项目列表跟随明确的项目切换，主 Pi 保持全局，
+执行 Agent 的 tab、管理器、名字替换与批量操作不接管 Pi。
 `RET` 恢复、`n` 新建、`a` 归档、`i` 导入旧引用。结束 Pi 不终止项目执行 Agent。
 
 `emacs:pi` 按需提供 context、list、status、ensure、send、resume、new、archive。

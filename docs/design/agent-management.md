@@ -26,17 +26,40 @@ Research 的逻辑 Session 和 Run ID 不可互换。关闭视图只改变显示
 通用实现位于 Emacs。Noema 通过薄适配关联 Research 身份和文档动作；普通会话
 操作不会启动 Noema host，也不会创建研究项目。
 
+### 工作流
+
+日常只有一个入口：`agent-shell` 指令。`C-c a` 是它的键，语义完全相同。
+
+| 动作 | `agent-shell` | 结果 |
+| --- | --- | --- |
+| 召回 | 直接执行 | 回到本项目最近的会话；空池时选择新建或恢复 |
+| 返回 | 在聊天里执行 | 收起聊天，回到来源窗口；agent 继续工作 |
+| 新建 | `C-u` | 在当前窗口新建 |
+| 选择 | `C-u C-u` | 选池成员、新建或已保存对话 |
+
+进入聊天之后，所有操作都在 agent-shell 自己的工作方式里：
+
+| 想做的事 | 方式 |
+| --- | --- |
+| 说话、排队、steering | 在输入区提交；生成中也可以，`M-RET` 走另一条路 |
+| 不离开输入区操作会话 | 本地斜杠命令 `/queue`、`/next`、`/changes`、`/resume`、`/fork`、`/rename`、`/restart`、`/new`、`/side`、`/agents`，在 `/` 补全里列出 |
+| 看所有动作 | 输入区外按 `?`，或任意位置 `C-c C-z`，打开同一菜单 |
+| 停止回合 | agent-shell 原生的 `C-c C-c`，走统一的停止路径 |
+| 模型、模式、思考级别 | agent-shell 原生的 `C-c C-v`、`C-c C-m`、`C-c C-t` |
+| 回到编辑区、切 tab、管理器 | `C-c C-o`、`C-c C-n`/`C-c C-p`、`C-c C-l` |
+
+需要跨会话时打开管理器（`H-A`、`SPC a a` 或 `/agents`）。不在聊天里时，
+`C-c A` 加同一字母直接执行菜单里的动作，`C-c A c` 进入发送上下文。
+
 ### 日常入口与视图
 
-`C-c a` 召回当前项目最近实际使用的会话，在聊天里再次执行返回编辑区；
-`C-u C-c a` 选择池成员，或选择新建、恢复已保存对话，取消不启动进程。
-`C-c A j` 跳到下一个等待你的会话，待审批和问答直接落在原生控件上；`C-c A q`
-管理排队的 prompt；`C-c A l` 打开这个会话改过的文件；`C-c A h` 不需要活动
-会话也能恢复提供方保存的对话。
+`/next`（`C-c A j`）跳到下一个等待你的会话，待审批和问答直接落在原生控件上，
+按其上的 `y`/`n` 决定；`/queue`（`q`）管理排队的 prompt；`/changes`（`l`）打开这个
+会话改过的文件；`/resume`（`h`）恢复已保存对话，没有活动会话时也可用。
 `H-A`（macOS Option-Shift-A）、`SPC a a` 和 `M-x agent-manager` 打开项目池管理器，
 加前缀查看所有项目；从管理器里再次执行返回。`C-c A S/G/U` 分别选择同一浮窗的
 All、Inbox、Usage 页签。GUI 使用 Aaron ETAF，按 target/workspace 分组；
-Interactive、Portal、Worktrees、Pi、Noema Research及 Previous generations
+Interactive、Portal、Worktrees、Noema Research 及 Previous generations
 是会话行上的来源标签。左侧是可折叠的会话
 导航，右侧直接显示原生聊天 buffer，保留其工具、审批、表单与输入。单击、Tab
 或 j/k 导航时只预览，不清未读；Return 确认进入正常会话窗口，q 返回来源。
@@ -45,8 +68,8 @@ Interactive、Portal、Worktrees、Pi、Noema Research及 Previous generations
 `i` 输入，`a` 定位待审批/问答，`n` 在选中会话的执行目录新建，`h` 原生历史
 （没有活动选择时恢复已保存对话），`Q` 队列，`l` 改动的文件，
 `/` 筛选，`p` 当前项目/全部，`z` 折叠组，`g` 刷新。`.` 或 `C-c C-z` 打开共享
-Transient：停止、重连、改名、结束、按能力提供 fork、模型与原生队列；支持时
-另有 Research 的工作导航、归档和上下文换代。`S` 停止同 target、workspace
+Transient：停止、重连、改名、结束、按能力提供 fork、模型与队列；支持时
+另有 Research 的工作导航、归档和上下文换代。`X` 停止同 target、workspace
 项目池中的当前工作，各会话仍经过自己的业务 owner。聊天正文 `?` 打开同一菜单，
 输入区保留问号；ETAF 的 `?` 显示原生快捷键帮助。
 
@@ -58,7 +81,8 @@ Usage 仅读取已上报数据；未知值不显示为零。`+agent-top` 的 GUI
 
 普通会话默认显示在当前 frame 的右侧 Agent dock。A 切到 B 复用当前聊天窗格，
 不改其他手工分屏；没有当前聊天时先复用本 frame 的已有视图，再分配空闲侧窗。
-所有来源共用项目标签；显式移入/移出 popup、here 和领域干预保留放置意图。
+执行会话共用项目标签；Pi 使用独立的作用域标签和 Pi Sessions 入口。
+显式移入/移出 popup、here 和领域干预保留放置意图。
 返回点属于实际窗口，隐藏 embedded 视图恢复原编辑内容，隐藏 dock 撤下窗格。
 各入口统一使用
 `C-c C-e` 聚焦输入，`C-c C-o` 隐藏并返回，`C-c C-l` 打开管理器。原生常驻
@@ -193,8 +217,9 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   不再维持第二个周期计时器；Noema 仍决定研究项目何时结束。
 - **C23 一个项目一个会话池。** 池以 Remote target 与规范化的已登记项目根为
   身份，成员来自同一物理会话注册表；普通、popup、here、worktree、Noema worker
-  和 Pi 不按来源分割成另一个池。来源是行上的标签。池切换不创建进程；池停止
-  逐个调用各执行 owner。私有导出会话不进入日常池。
+  共用执行会话池。Pi 按全局／项目作用域独立管理，不进入执行池的 tab、选择器、
+  管理器与批量停止。物理注册表仍包含全部会话；显式 API 可查询全部公共对象。
+  池切换不创建进程，停止逐个调用执行 owner；私有导出会话不进入日常池。
 - **C24 显示只改目标视图。** 从 agent A 切换 B 时复用当前聊天窗格，默认不由
   B 曾经的 popup/here 回调重新决定位置。其他手工分屏的会话和编辑窗格保持原样。
   编辑器发起显示时复用本 frame 的已有 agent 视图，未有时才增加右侧 dock。
@@ -258,6 +283,17 @@ agent 事件通过 `tools/agent/notifications` 交给 `aaron-notify`。默认策
   只读 ACP 能力字段，不为两个布尔值构造完整会话快照。API 和原生回合完成均
   通知公共订阅者，按确切回合去重；草稿检查不复制整段输入。
   原生历史查询不代表模型忙碌，不扣住新输入；自动回收仍保护所有在途 RPC。
+- **C47 动作只有一张表。** `tools/agent/actions` 是所有 agent 动作的唯一列表，
+  `C-c A`、会话菜单（`?`、`C-c C-z`、管理器 `.`、鼠标右键）和本地斜杠命令都由它生成；
+  同一字母处处是同一动作。管理器的 `j`、`k`、`q` 是导航，队列因此是 `Q`。新增动作
+  只改这张表，不另开键或菜单。测试：`agent-keys-c47-*`。
+- **C48 不抢占 agent-shell 的键。** 聊天里的会话键只保留视图移动（`C-c C-e/o/n/p/l/z`），
+  其余动作走菜单或斜杠命令。`C-c C-c` 重映射到统一的停止路径，Run 由其 owner 停止。
+  测试：`agent-keys-c48-*`。
+- **C49 `agent-shell` 就是项目池入口。** 它保持上游的 DWIM 语义，作用在 C23 的池上：
+  召回或返回，`C-u` 新建，`C-u C-u` 选择；`C-c a` 是同一逻辑。本地斜杠命令在提交前
+  截获，生成中也可用，不进入模型或队列；提供方报告的同名命令优先，只有 `/resume`
+  例外，因为显示哪个对话归 Emacs。测试：`agent-entry-c49-*`。
 
 Agent 的真实聊天 buffer 是用户 buffer，名称不使用 Emacs 内部 buffer 的空格前缀。
 它们进入全局 Ibuffer 的 Agent 分组和日常 Consult buffer 选择器；不进入全局 tab
@@ -276,6 +312,7 @@ shell-maker 的目标名，不更换 buffer、进程或原生 session ID。
 | ETAF Agent Manager、分组筛选和 UI 生命周期 | `lisp/tools/agent/manager.el` |
 | 按能力提供的原生会话与领域动作菜单 | `lisp/tools/agent/menu.el` |
 | 排队 prompt 的编辑、恢复与面板 | `lisp/tools/agent/queue.el` |
+| 所有动作的唯一列表，生成前缀、菜单和斜杠命令 | `lisp/tools/agent/actions.el` |
 | 渲染、用量、活动和工作树 | `lisp/tools/agent/{render,top,activity,worktree,worktree-board}.el` |
 | 原生引用式上下文与 Markdown prompt 文档入口 | `lisp/tools/agent/{compose,context}.el` |
 | 完整 gptel/Magent 源码与来源 | `site-lisp/{gptel,magent}/`、`site-lisp/AGENT-UPSTREAMS.md` |
@@ -291,9 +328,7 @@ attention、unread、错误事实、来源组、退役代际、usage、提供方
 list/load/resume/fork/steer 能力。Noema 通过显式钩子补充业务 ID、
 注意原因、动作和菜单；通用选择器不启动或恢复会话。原生 fork 需要正向能力报告。
 
-`H-A` / `SPC a a` 打开日常管理器；`C-c A S/G/U` 选择同一视图的页签，`C-c A b` 使用
-Consult 在原窗口预览真实 buffer。取消或确认时先恢复原窗口、位置和滚动，确认后
-才执行正常显示。列表只在可见时合并刷新。Noema 的持久记录仍由其业务视图管理。
+`H-A` / `SPC a a` 打开日常管理器；`C-c A S/G/U` 选择同一视图的页签。列表只在可见时合并刷新。Noema 的持久记录仍由其业务视图管理。
 
 ## 已知差距
 
