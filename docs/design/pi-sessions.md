@@ -139,7 +139,8 @@ Emacs Pi 负责编辑器操作、跨项目路由和找到项目 Pi。项目 Pi �
   时，Emacs 先按身份核对这个会话，再把它的 Agent、buffer、native ID、项目根和可直接使用的
   回复调用写成消息头；核对不过拒绝发送，头不由调用方拼写。Pi 照这个调用回复，不用查接口，
   忙时排队，所以调用方可以结束回合等待，不轮询。主动查看用 `status` 取身份后 `emacs:agent` `read`。
-  回复开头带 `[From Pi, not the person]`。消息头和回复都表明来自 Agent，不带人的批准；Pi 只回复
+  Pi 发给 Agent 的消息由 MCP 入口在代码里加 `[From Pi, not the person]`，模型省略不了；入口靠
+  Emacs 配给它的 `NOEMA_CALLER` 知道调用者。消息头和回复都表明来自 Agent，不带人的批准；Pi 只回复
   一次，不回应确认，避免互相续杯。
 
 ## 工作流程

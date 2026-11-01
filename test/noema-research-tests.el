@@ -1372,7 +1372,7 @@ BODY sees `calls' (newest first) and `callbacks' for prepare responses."
               (let ((servers (alist-get :mcp-servers (plist-get started :config))))
                 (should (equal (mapcar (lambda (server) (alist-get 'name server)) servers) '("noema-api")))
                 (should (stringp (alist-get 'command (car servers))))
-                (should (equal (alist-get 'env (car servers)) [])))
+                (should (equal (alist-get 'env (car servers)) [((name . "NOEMA_CALLER") (value . "pi"))])))
               (should (eq (buffer-local-value 'noema-pi-parent buffer) parent))
               (setq started nil)
               (should (eq (noema-pi-project-ensure root) buffer))

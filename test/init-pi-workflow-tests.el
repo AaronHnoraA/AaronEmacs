@@ -171,6 +171,12 @@
             (should sent)))
       (kill-buffer buffer))))
 
+(ert-deftest pi-workflow-w3-slash-watch-routes-to-the-local-command ()
+  (with-temp-buffer
+    (let ((agent-shell--state '((:available-commands . nil))))
+      (should (eq (+agent-shell--local-slash "/watch") 'noema-project-graph-add-watch))
+      (should-not (+agent-shell--local-slash "/watch 20m")))))
+
 (ert-deftest pi-workflow-c22-send-names-the-proven-agent-session ()
   (require 'tools/agent/api)
   (let ((buffer (generate-new-buffer "*Agent · codex*")) sent)

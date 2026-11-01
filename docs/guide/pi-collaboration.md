@@ -45,7 +45,8 @@ pack 是协议和契约，随 Skill 目录披露给 Agent，用到才读。
 
 发给 `noema:api:emacs:pi`。Emacs 核对身份后加上消息头，里面有 Pi 可以直接用的回复调用。Pi 的
 回复进入这个 Agent 的会话，开头是 `[From Pi, not the person]`，忙时排队，所以 Agent 发完可以
-结束回合。Agent 之间的话都不算你的批准。
+结束回合。这个开头由 MCP 入口加上，模型省略不了，但它只是文字，不是身份证明。Agent 之间的话
+都不算你的批准。这一切都在 Noema 和 Emacs 这边，不改 Codex、Claude 或 pi-acp 的官方代码。
 
 ## 把事情留到以后
 
@@ -81,7 +82,7 @@ Agent 把“回合结束后还要发生的事”写成观察项，调用 `noema:
 
 ## 花销
 
-项目 Pi 一个回合的上下文约 3900 token，其中提示词和 Skill 目录内容稳定，可以走提示词缓存。Skill
+项目 Pi 一个回合的上下文约 3900 token、约 0.001 到 0.002 美元，其中提示词和 Skill 目录内容稳定，可以走提示词缓存。Skill
 正文只有用到才读。任务图谱和观察项本身不花 token，只有发给 Agent 的消息才启动模型回合。详细数字
 见[这次审计](../records/audits/pi-collaboration-2026-11.md)。
 
