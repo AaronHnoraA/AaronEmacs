@@ -45,8 +45,8 @@
     ("Sessions"
      ("RET" "Manager" +agent/manager :slash "agents" :doc "Open the Agent Manager")
      ("S" "All sessions" +agent/sessions)
-     ("G" "Inbox" +agent/inbox)
-     ("U" "Usage" +agent/usage)
+     ("G" "Inbox" +agent/inbox :slash "inbox" :doc "Open sessions waiting on you")
+     ("U" "Usage" +agent/usage :slash "usage" :doc "Show what sessions cost")
      ("u" "Detailed usage" +agent-menu-usage :if +agent-menu--session-p)
      ("n" "New session…" +agent-menu-new :slash "new" :doc "Start another session in this management scope")
      ("w" "New in a worktree…" +agent-worktree-start)
@@ -55,11 +55,12 @@
      ("?" "Key help" +agent-acp-help))
     ("Noema"
      ("W" "Noema" noema)
-     ("P" "Pi" noema-pi-open)
-     ("D" "Pi doctor" noema-pi-doctor)
+     ("P" "Pi" noema-pi-open :slash "pi" :doc "Open this project's Pi")
+     ("D" "Pi doctor" noema-pi-doctor :slash "doctor" :doc "Check Pi's setup")
      ("I" "Research attention" noema-research-attention)
      ("O" "Orchestration" noema-orchestration)
-     ("g" "Agent cache" noema-project-graph)
+     ("g" "Agent cache" noema-project-graph :slash "cache"
+      :doc "Open the Project's cache, task graph and watches")
      ("p" "Promote to Research" noema-agent-promote-current-session :if +agent-menu--session-p)
      ("e" "Edit page source" noema-md-bridge-edit-source)
      ("J" "Associated work" +agent-menu-jump :if +agent-menu--jump-p)

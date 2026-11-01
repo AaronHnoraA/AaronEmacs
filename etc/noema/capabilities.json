@@ -195,8 +195,7 @@
           "noema-elisp-api",
           "noema-editor-interaction",
           "noema-prompt-document",
-          "noema-agent-operations",
-          "noema-pi"
+          "noema-agent-operations"
         ],
         "preamble": "通过现有 Emacs 命令和受支持的语义 API 操作。Emacs 管理窗口、Agent 进程、Session、权限和用户交互。按任务读取文档；Markdown 语法与原位审阅另选 noema-md，项目协作方法另选 noema-project。"
       },
@@ -233,9 +232,10 @@
           "noema-project-graph",
           "noema-project-plan",
           "noema-project-run",
-          "noema-project-review"
+          "noema-project-review",
+          "noema-pi"
         ],
-        "preamble": "这是项目开发规范，不是要启动的服务。多步工作先看 .agent/tasks/ 的图谱，接着上次停下的地方做，边做边记决定和提交；单步小改动不用它。"
+        "preamble": "这是项目协作的协议和契约，执行由工具负责：任务怎么落盘、谁做什么、Agent 之间怎么沟通、等待交给谁。多步工作先看 .agent/tasks/ 的图谱，接着上次停下的地方做，边做边记决定和提交；单步小改动不用它。"
       },
       "noema-md": {
         "agent_catalog": true,

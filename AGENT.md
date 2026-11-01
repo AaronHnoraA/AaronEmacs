@@ -470,10 +470,12 @@ This config already has maintenance and workflow entry points. Reuse them:
   or status command; a new shared resource is added to that entry and Skill.
 - Pi's watches: `agent:pi:watch` is the one way to leave work for later (a
   countdown, a repeat, a hook on a task graph or session fact, a Project
-  script), kept in `.agent/pi/` and fired by the watcher inside the Noema host
-  (`docs/design/pi-watches.md`).  A watch always ends, is never replayed after a
-  crash, and with none armed nothing runs.  Do not add another scheduler, a
-  provider-specific hook file or a shell tool for Pi.
+  script), kept in `.agent/pi/` and fired by the Pi plugin while the Project's Pi
+  runs; with Pi closed nothing runs (`docs/design/pi-watches.md`).  Infrastructure
+  (the Pi plugin, Emacs page and action table rows) executes; the Skill pack is
+  protocol and contract only.  A watch always ends and is never replayed after a
+  crash.  Do not add another scheduler, a provider-specific hook file or a shell
+  tool for Pi.
 - Project task graph: `agent:project:graph`, `scripts/project-graph.mjs` and the
   `noema-project-graph` pack keep a Project's tasks in `.agent/tasks/`, as a
   development convention with no running service; `noema-project-graph` (`C-c A g`)
